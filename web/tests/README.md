@@ -106,3 +106,11 @@ IndexedDB, as Safari's private browsing does (so `iphone` has a profile and
 `iphone-private` does not). CI runs it as the `web-e2e` job (Linux, every
 device WebKit) and the `web-e2e-macos` job (Apple's WebKit as the iPhone,
 Chromium as the Mac).
+
+`DINGBAT_E2E_DRIVE_MS=150 node e2e/sync-bench.mjs [games] [kind]` times
+syncs on the same rig (not a test, not in CI): a seeded library of 20 games,
+then Sync now with nothing changed, with one save changed, and a second
+device's first pull, each with its Drive requests counted by kind. At 150 ms
+a request on 2026-10-01: 0.64 s / 4 requests, 0.79 s, 2.8 s (were 1.46 s /
+7, 1.63 s, 13.6 s before requests ran in parallel and unchanged libraries
+went unwritten).

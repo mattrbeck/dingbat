@@ -361,5 +361,20 @@ a deleted generation of the game does not hold this one back" in
 web/tests/handoff.test.mjs. The model has no generations, so this one is
 guarded by the test alone.
 
+**Parallel sync (2026-10-01), re-checked against the model, not re-modelled:**
+the flush now sends up to `SYNC_PARALLEL` keys at once (`runPool`) and the
+pull starts its downloads ahead (`downloadAhead`), still checking and
+writing each file in listing order. Each key's flush segment touches only
+that key's queue entry, `sigs`, `rmt` and delete stamp, and the model
+already lets any event fall between a key's read, its upload and its
+landing, so two keys in flight together reach no state one key at a time
+could not. A prefetched download is read nearer its listing, which the
+abstraction ("a pull reads a file's bytes at the listing") already assumes.
+Two unit tests that pinned one-at-a-time order were restated as their end
+state: a key saved again or deleted while the flush sends others is on
+Drive with its newest bytes, or off it, after the next flush. The library
+is no longer written when the merge leaves its text unchanged
+(`libraryUnchanged`); `DriveLibrary`'s anchors were stale before this.
+
 **Abstractions:** listed in the file's header. Bytes are opaque (compression
 is invisible here), one game, both devices hold its ROM, loads are atomic.

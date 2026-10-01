@@ -391,7 +391,9 @@ test("a delete asked for while the key's upload is in flight is not outranked by
   eq(app.api.syncState.queueDel, []);
 });
 
-test("a key deleted before the flush reaches it is not uploaded at all", async () => {
+// Several keys go at once, so the deleted one may already be on the wire:
+// the delete still wins, and nothing of it is left on Drive.
+test("a key deleted while the flush sends others ends up off Drive", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
   const app = await device(drive, clock);
@@ -407,8 +409,8 @@ test("a key deleted before the flush reaches it is not uploaded at all", async (
   await app.api.flushSync();
   await settle();
   eq(drive.names(), ["save:G.gba"]);
-  assert.ok(!drive.log.some((e) => e.name === "state:G.gba"),
-    "no request ever carried the deleted key");
+  eq(app.api.syncState.queueDel, []);
+  eq(app.api.syncState.queueUp, []);
 });
 
 // ── A pull and a load of the same game ─────────────────────────────────────

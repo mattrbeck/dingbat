@@ -360,7 +360,7 @@
   },
   "WebState/Handoff": {
     "web/index.js#autoStateMatchesSave": "bc3c934af799b85b",
-    "web/index.js#flushSyncInner": "e1e3c5a1ab6bc3d1",
+    "web/index.js#flushSyncInner": "6a372c53db71d94d",
     "web/index.js#handoffNews": "d5150144636227a5",
     "web/index.js#heldGameIsSent": "a63b109a83858e3b",
     "web/index.js#launchRom": "146f86a54c5e0a22",
@@ -369,7 +369,7 @@
     "web/index.js#markUpload": "3f81ce3e35bc4113",
     "web/index.js#persistAutoState": "69199535a816db5a",
     "web/index.js#persistSave": "441b581567e927cf",
-    "web/index.js#pullSyncInner": "a4d8535a750f6d97",
+    "web/index.js#pullSyncInner": "86adb12060dbd255",
     "web/index.js#refreshHero": "fe2c36f7a353d09f",
     "web/index.js#renderClosedHero": "f843484a40c715bf",
     "web/index.js#resumeGame": "e719f1ee00597761",

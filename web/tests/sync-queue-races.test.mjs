@@ -51,9 +51,10 @@ test("a save made while its own upload is in flight still reaches Drive", async 
   eq(app.api.syncState.queueUp, []);
 });
 
-// A key still queued (not yet reached by the running flush) is re-read when
-// its turn comes, so a second save of it needs nothing extra.
-test("a save of a key still waiting its turn uploads its newest bytes once", async () => {
+// The flush sends several keys at once (SYNC_PARALLEL), so a key saved again
+// while another is on the wire may be on the wire itself by then: it stays
+// queued, and the next flush sends its newest bytes.
+test("a save of a key made while the flush sends others reaches Drive, newest bytes", async () => {
   const clock = makeClock();
   const drive = makeDrive({ clock });
   const app = await device(drive, clock);
@@ -66,8 +67,9 @@ test("a save of a key still waiting its turn uploads its newest bytes once", asy
   h.release();
   await flushing;
   await settle();
+  await app.api.flushSync();
+  await settle();
   eq(drive.get("state:G.gba").bytes, u8(6));
   eq(app.api.syncState.queueUp, [], "nothing left over");
-  eq(drive.log.filter((e) => e.name === "state:G.gba").length, 1);
 });
 

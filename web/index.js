@@ -2628,6 +2628,48 @@ const driveDownload = async (fileId, onBytes = null) => {
   return out;
 };
 
+// `fn` over `items`, at most `n` running at once, started in order. The
+// first failure starts nothing further and is thrown once the ones already
+// running have ended, so nothing is left writing after the caller moves on.
+const runPool = async (items, n, fn) => {
+  let next = 0;
+  /** @type {{ e: unknown } | null} */
+  let failure = null;
+  const worker = async () => {
+    while (!failure && next < items.length) {
+      const item = items[next++];
+      try { await fn(item); } catch (e) { failure ||= { e }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  if (failure) throw failure.e;
+};
+
+// Downloads started ahead of a loop that takes them one at a time, in order:
+// at most `n` on the wire, the earliest first. `take(f)` is the one for f
+// (started now if it was not yet); `stop()` starts no more. One the loop
+// never takes costs only its bytes, and a failure is the taker's to see.
+const downloadAhead = (files, n = SYNC_PARALLEL) => {
+  let started = new Map();
+  let waiting = files.slice();
+  let active = 0;
+  const start = (f) => {
+    let p = started.get(f.id);
+    if (p) return p;
+    active++;
+    p = driveDownload(f.id);
+    p.catch(() => {}).finally(() => { active--; pump(); });
+    started.set(f.id, p);
+    return p;
+  };
+  const pump = () => { while (active < n && waiting.length) start(waiting.shift()); };
+  pump();
+  return {
+    take: (f) => { waiting = waiting.filter((w) => w.id !== f.id); return start(f); },
+    stop: () => { waiting = []; },
+  };
+};
+
 // Drive file name -> { game, kind }; null for anything unknown. `kind` is
 // unique within a game: slot 0 keeps "state"/"statemeta", slots 1..8 append
 // ":slotN". Mirrors romsWithSaveData's ":slotN" and "-p2" folding.
@@ -2825,6 +2867,10 @@ const LIBRARY_FILE = "library";
 const SYNC_DEBOUNCE_MS = 2000;   // quiet period before a flush
 const SYNC_MAX_WAIT_MS = 10000;  // ...but never sit on changes longer than this
 const SYNC_POLL_MS = 3 * 60 * 1000;
+// Drive requests a sync keeps in flight at once. Each is a round trip of
+// 100-300 ms from a phone; one at a time, a second device's first pull of a
+// 20-game library took 13 s at 150 ms (web/e2e/sync-bench.mjs).
+const SYNC_PARALLEL = 6;
 
 // Persisted under "gdrive_sync". sigs = last agreed content signature per
 // Drive file; rmt = its last seen modifiedTime; queueRen = pending remote
@@ -2987,7 +3033,6 @@ const localFilesForGame = async (game) => {
   for (let [k, p] of await localSyncFiles()) if (p.game === game) names.push(k);
   return names;
 };
-const hasLocalRom = async (game) => !!(await dbGet(romKey(game)))?.data?.length;
 const hasLocalData = async (game) => (await localFilesForGame(game)).length > 0;
 // Over every per-game record, including the ones Drive never mirrors.
 const hasAnyLocalRecord = async (game) => {
@@ -3103,6 +3148,9 @@ const driveListMap = async () => {
 // The ids of the copies a read actually merged, per listing: only those may
 // be retired, since only their contents are in what gets written.
 const libraryRead = new WeakMap();
+// The text of the one copy a listing had, as read: a library merged to the
+// same text is already Drive's, and writing it again is a wasted round trip.
+const libraryText = new WeakMap();
 const readDriveLibrary = async (remote) => {
   let copies = libraryCopies.get(remote) ||
     (remote.get(LIBRARY_FILE) ? [remote.get(LIBRARY_FILE)] : []);
@@ -3113,8 +3161,10 @@ const readDriveLibrary = async (remote) => {
     // write a library that no longer holds what it says.
     let bytes = await driveDownload(f.id);
     let o;
+    let text = new TextDecoder().decode(bytes);
+    if (copies.length === 1) libraryText.set(remote, text);
     // Unreadable content has nothing in it to keep; the next write replaces it.
-    try { o = JSON.parse(new TextDecoder().decode(bytes)); } catch { o = {}; }
+    try { o = JSON.parse(text); } catch { o = {}; }
     libs.push({
       recents: Array.isArray(o?.recents) ? o.recents : [],
       tomb: Array.isArray(o?.tomb) ? o.tomb : [],
@@ -3127,6 +3177,9 @@ const readDriveLibrary = async (remote) => {
   // More than one: the union, by the same merge the devices use.
   return libs.slice(1).reduce((a, b) => mergeLibrary(a, b), libs[0]);
 };
+// Whether `lib` is, to the byte, the one copy read under `readFrom`.
+const libraryUnchanged = (lib, readFrom) =>
+  libraryText.has(readFrom) && libraryText.get(readFrom) === JSON.stringify(lib);
 // `readFrom` is the listing the library was read under (the flush lists
 // again before writing). The write goes to the oldest copy; the other
 // copies that read merged are then deleted, their contents being in it.
@@ -3660,10 +3713,12 @@ const flushSyncInner = async () => {
       delete delStamps()[name];
       syncState.queueDel = syncState.queueDel.filter((n) => n !== name);
     }
-    for (let name of syncState.queueUp.slice()) {
+    // Each file's checks and bookkeeping touch only its own keys, so several
+    // go at once (runPool); a failure still stops the flush, as before.
+    await runPool(syncState.queueUp.slice(), SYNC_PARALLEL, async (name) => {
       // Gone from the queue since this pass began: a delete asked for it
       // (markDelete unqueues), or a rename moved it to its new name.
-      if (!syncState.queueUp.includes(name)) continue;
+      if (!syncState.queueUp.includes(name)) return;
       // The library merged above has the last word on which games exist and
       // what they are called, and a device that has not pulled yet can hold
       // files it has overruled (a Sync tap queues every local file). A game
@@ -3676,9 +3731,9 @@ const flushSyncInner = async () => {
       let game = parsed?.game;
       if (game && deletedIn(lib, game)) {
         syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
-        continue;
+        return;
       }
-      if (game && lib.ren.some((r) => r.from === game)) continue;
+      if (game && lib.ren.some((r) => r.from === game)) return;
       // The generation this device holds the game at, read now: an import
       // made since the merge starts a new one.
       let gen = game
@@ -3688,10 +3743,18 @@ const flushSyncInner = async () => {
       // keeps its save aside and drops the rest (convertStaleGame).
       if (game && genBound(parsed.kind) && libGen(lib, game) > gen) {
         syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
-        continue;
+        return;
       }
       // A save of this key from here on is newer than the bytes read below.
       syncRemarked.delete(name);
+      // A ROM never changes: one Drive holds at this generation (or a newer
+      // one), already known here, is not read again - tens of MB a game on
+      // every Sync now.
+      let held0 = remote.get(name);
+      if (parsed?.kind === "rom" && held0 && fileGen(held0) >= gen && syncState.sigs[name]) {
+        syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
+        return;
+      }
       let bytes = live(await readSyncBytes(name));
       // A session another device wrote since this one last saw Drive's copy
       // is not written over unseen: it stays queued, and the pull after this
@@ -3704,7 +3767,7 @@ const flushSyncInner = async () => {
       if (bytes && parsed?.kind === "session" && r0 && fileGen(r0) >= gen &&
           syncState.rmt[name] !== r0.modifiedTime &&
           sigOfBytes(bytes) !== syncState.sigs[name] && !forced) {
-        continue;
+        return;
       }
       if (bytes) {
         let r = remote.get(name);
@@ -3743,8 +3806,11 @@ const flushSyncInner = async () => {
       if (!syncRemarked.has(name)) {
         syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
       }
+    });
+    // Unchanged, it is not written, and so needs no second listing either.
+    if (!libraryUnchanged(lib, remote)) {
+      await writeDriveLibrary(lib, live(await driveListMap()), remote);
     }
-    await writeDriveLibrary(lib, live(await driveListMap()), remote);
     live();
     // `lib` was merged before the awaits above. A delete, import or rename
     // made here since then is in this device's library now and not in
@@ -3992,6 +4058,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
   if (!silent) setSyncStatus("syncing");
   let gridDirty = false;
   let queuedMissing = false;
+  /** @type {ReturnType<typeof downloadAhead> | null} */
+  let ahead = null;
   try {
     let remote = live(await driveListMap());
     // Not the library's business: a setting riding the same pull.
@@ -4144,6 +4212,21 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     // game in the library: a Drive-only tile shows the screen another device
     // last saw (20 KB, and the whole point of the picture).
     let local = live(await localSyncFiles());
+    // Which games' ROMs are here, from the keys: every write of one carries
+    // its bytes, and reading each to ask cost its whole size per file.
+    let romsHere = new Set([...local].filter(([, p]) => p.kind === "rom").map(([, p]) => p.game));
+    // The files the loop below will fetch, started ahead (downloadAhead):
+    // the same tests it applies before a download, minus the ones it makes
+    // again after (a game loaded meanwhile). It still takes, checks and
+    // writes them one at a time, in this order.
+    ahead = downloadAhead([...remote].filter(([name, f]) => {
+      let p = name !== LIBRARY_FILE && parseDriveFileName(name);
+      if (!p || p.kind === "rom" || syncState.rmt[name] === f.modifiedTime) return false;
+      if (genBound(p.kind) && fileGen(f) < libGen(lib, p.game)) return false;
+      if (isRomLoaded(p.game) || loadingName === p.game) return false;
+      return p.kind === "frame" ? lib.recents.some((r) => r.name === p.game)
+        : romsHere.has(p.game) || (p.kind === "oldsave" && local.has(name));
+    }).map(([, f]) => f));
     for (let [name, f] of remote) {
       live(); // the downloads below await, and write the sync state after
       if (name === LIBRARY_FILE) continue;
@@ -4172,7 +4255,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       }
       if (p.kind === "frame") {
         if (!lib.recents.some((r) => r.name === p.game)) continue; // not a library game
-      } else if (!(await hasLocalRom(p.game)) &&
+      } else if (!romsHere.has(p.game) &&
                  // A kept save held here follows Drive's (a restore elsewhere).
                  !(p.kind === "oldsave" && local.has(name))) {
         continue;                                  // Drive-only: pull on demand
@@ -4203,7 +4286,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         else markDelete(name);
         continue;
       }
-      let bytes = live(await driveDownload(f.id));
+      let bytes = live(await ahead.take(f));
       // Again, in the run that writes: a tap during the download has booted
       // the game on the older save, and its first flush would write that
       // back over this one and upload it over the other device's.
@@ -4225,6 +4308,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       local.delete(name);
     }
 
+    ahead.stop();
     live();
     // Reconcile upward: queue anything held here that the listing lacks
     // (sigs only remember what was once uploaded). Tombstoned games stay deleted.
@@ -4293,11 +4377,12 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // could ask for again.
       return recents;
     });
-    await writeDriveLibrary(lib, remote);
+    if (!libraryUnchanged(lib, remote)) await writeDriveLibrary(lib, remote);
     live();
     await saveSyncState();
     gridDirty = true;
   } catch (e) {
+    ahead?.stop();
     syncBusy = false;
     if (e instanceof DriveSessionEnded) { refreshSyncStatus(); return; }
     console.warn("Drive pull failed:", e);
