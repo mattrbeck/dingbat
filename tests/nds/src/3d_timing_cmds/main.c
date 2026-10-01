@@ -103,6 +103,7 @@ static u32 prun(u32 port, u32 np, const u32 *vals, u32 k) {
 // must be a multiple of 8
 static u32 pcost(u32 cmd, u32 np, const u32 *vals) {
   u32 port = 0x04000400 + cmd * 4;
+  prun(port, np, vals, 24);   // warm the I-cache (24: whole triangles)
   u32 a = prun(port, np, vals, 48);
   u32 b = prun(port, np, vals, 144);
   return b - a;
@@ -117,6 +118,7 @@ static u32 run(u32 cmd, u32 np, const u32 *vals, u32 k) {
 }
 
 static u32 cost(u32 cmd, u32 np, const u32 *vals) {
+  run(cmd, np, vals, 6);   // warm the I-cache
   u32 a = run(cmd, np, vals, 48);
   u32 b = run(cmd, np, vals, 144);
   return b - a;
