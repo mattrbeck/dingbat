@@ -56,6 +56,9 @@ task test_ndsspu, "Run the DS ARM7 sound (SPU) tests":
 task test_ndssystem, "Run the DS system device tests (maths unit, RTC, save chip, IPC, card)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndssystem_test tests/nds_system_test.nim"
 
+task test_ndsslot2, "Run the DS GBA-slot (slot 2) tests (devices + the slot2_probe ROM)":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndsslot2_test tests/nds_slot2_test.nim"
+
 task test_nds3d, "Run the DS 3D engine tests (command scenes + the 3d_* test ROMs)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_nds3d_test tests/nds_3d_test.nim nds3d_out"
 
