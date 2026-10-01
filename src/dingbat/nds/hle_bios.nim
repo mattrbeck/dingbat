@@ -387,7 +387,7 @@ proc hle_soft_reset[B](cpu: ArmCpu[B]) =
     cpu.set_cpsr(uint32(m) or FLAG_I or FLAG_F)
     cpu.r[13] = sp
     cpu.r[14] = 0
-    cpu.spsr = 0
+    cpu.spsr = 0x10   # an MSR of 0: mode bit 4 is wired high on both cores
   cpu.set_cpsr(uint32(mSYS) or FLAG_F)
   cpu.r[13] = sp_sys
   for i in 0..12: cpu.r[i] = 0

@@ -384,6 +384,9 @@ proc start_timer0(n: NDS; arm9: bool) =
     n.w32_7(0x04000210'u32, 1'u32 shl 3)
     n.w32_7(0x04000100'u32, 0x00C3FFF0'u32)
 
+proc set_ime(n: NDS; arm9: bool; v: uint32) =
+  if arm9: n.w32(0x04000208'u32, v) else: n.w32_7(0x04000208'u32, v)
+
 proc irq_words(arm9: bool): proc (n: NDS): seq[uint32] =
   ## Check word, handler call count, IME, IF.
   result = proc (n: NDS): seq[uint32] =
@@ -746,6 +749,10 @@ proc misc_cases() =
     run(c)
 
 proc irq_cases() =
+  # IntrWait runs with IME=1 unless a case says otherwise, as a game's IRQ
+  # setup leaves it. The BIOS only forces IME=1 in its flag checks, and the
+  # ARM9 with r0 = 0 halts before the first one: with IME=0 that CP15 halt
+  # never ends (GBATEK "Halt": the opcode hangs if IME=0).
   for arm9 in vals([true, false]):
     let f = flags_addr(arm9)
     block:
@@ -754,6 +761,7 @@ proc irq_cases() =
       c.regs[1] = 1'u32 shl 3
       c.setup = proc (n: NDS) =
         install_irq_handler(n, arm9)
+        set_ime(n, arm9, 1)
         start_timer0(n, arm9)
       c.irqs_on = true
       c.ignore = {0, 1, 3}
@@ -768,6 +776,7 @@ proc irq_cases() =
       c.regs[1] = 1'u32 shl 3
       c.setup = proc (n: NDS) =
         install_irq_handler(n, arm9)
+        set_ime(n, arm9, 1)
         if arm9: n.w32(f, 1'u32 shl 3) else: n.w32_7(f, 1'u32 shl 3)
       c.irqs_on = true
       c.limit = 400_000
@@ -781,6 +790,7 @@ proc irq_cases() =
       c.regs[1] = 1'u32 shl 3
       c.setup = proc (n: NDS) =
         install_irq_handler(n, arm9)
+        set_ime(n, arm9, 1)
         if arm9: n.w32(f, 1'u32 shl 3) else: n.w32_7(f, 1'u32 shl 3)
         start_timer0(n, arm9)
       c.irqs_on = true
@@ -793,6 +803,7 @@ proc irq_cases() =
       c.regs[1] = 1'u32 shl 3
       c.setup = proc (n: NDS) =
         install_irq_handler(n, arm9)
+        set_ime(n, arm9, 1)
         if arm9: n.w32(f, 1'u32 shl 3) else: n.w32_7(f, 1'u32 shl 3)
         start_timer0(n, arm9)
       c.irqs_on = true
@@ -805,27 +816,34 @@ proc irq_cases() =
       c.regs[1] = 1'u32 shl 3
       c.setup = proc (n: NDS) =
         install_irq_handler(n, arm9)
+        set_ime(n, arm9, 1)
         if arm9: n.w32(f, 1'u32 shl 4) else: n.w32_7(f, 1'u32 shl 4)
         start_timer0(n, arm9)
       c.irqs_on = true
       c.ignore = {0, 1, 3}
       c.readback = irq_words(arm9)
       run(c)
-    # The check word's starting state against r0: which flags count, and
-    # (ARM9, r0 = 0) GBATEK's "doesn't work" path.
-    for pre in vals([0'u32, 0x10, 0x18, 0x08, 0x80000008'u32]):
-      for r0 in vals([0'u32, 1]):
-        var c = base_case("IntrWait(" & $r0 & ", timer 0), check word " & h(pre), arm9, 0x04)
-        c.regs[0] = r0
-        c.regs[1] = 1'u32 shl 3
-        c.setup = proc (n: NDS) =
-          install_irq_handler(n, arm9)
-          if arm9: n.w32(f, pre) else: n.w32_7(f, pre)
-          start_timer0(n, arm9)
-        c.irqs_on = true
-        c.ignore = {0, 1, 3}
-        c.readback = irq_words(arm9)
-        run(c)
+    # The check word's starting state against r0 and IME: which flags count,
+    # (ARM9, r0 = 0) GBATEK's "doesn't work" path, and (ARM9, r0 = 0,
+    # IME=0) the halt that never ends.
+    for ime in vals([1'u32, 0]):
+      for pre in vals([0'u32, 0x10, 0x18, 0x08, 0x80000008'u32]):
+        for r0 in vals([0'u32, 1]):
+          var c = base_case("IntrWait(" & $r0 & ", timer 0), IME=" & $ime &
+                            ", check word " & h(pre), arm9, 0x04)
+          c.regs[0] = r0
+          c.regs[1] = 1'u32 shl 3
+          c.setup = proc (n: NDS) =
+            install_irq_handler(n, arm9)
+            set_ime(n, arm9, ime)
+            if arm9: n.w32(f, pre) else: n.w32_7(f, pre)
+            start_timer0(n, arm9)
+          c.irqs_on = true
+          c.ignore = {0, 1, 3}
+          c.readback = irq_words(arm9)
+          c.expect_return = not (arm9 and r0 == 0 and ime == 0)
+          if not c.expect_return: c.limit = 400_000
+          run(c)
     block:
       var c = base_case("VBlankIntrWait", arm9, 0x05)
       c.setup = proc (n: NDS) =

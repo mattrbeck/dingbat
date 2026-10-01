@@ -157,11 +157,11 @@ wait_by_loop:
 @
 @ ARM7: discard (r0 != 0) clears the wanted bits, then check, halt, check,
 @ ... so with r0 = 0 a flag already set returns at once.
-@ ARM9 (GBATEK: "No Discard (r0=0) doesn't work"), as measured against the
-@ console's BIOS: with r0 != 0 it is discard, halt, check, halt, check...;
-@ with r0 = 0 it checks first, halts, and returns after that one IRQ if
-@ the first check found a flag (leaving whatever the IRQ set), otherwise
-@ checks once without stopping, then halt, check... as above.
+@ ARM9 (GBATEK: "No Discard (r0=0) doesn't work"): discard if r0 != 0, then
+@ halt, check, halt, check... so it always waits for at least one IRQ. IME
+@ is forced to 1 only by the checks: with r0 = 0 the first halt runs with
+@ the caller's IME, and as the CP15 halt only ends on the IRQ line it never
+@ ends if that is 0 (GBATEK "Halt": the opcode hangs if IME=0).
 
 vblank_intr_wait:
         mov     r0, #1
@@ -175,24 +175,18 @@ intr_wait:
         mov     r4, r4, lsl #12
         add     r4, r4, #0x3F00
         add     r4, r4, #0xF8           @ DTCM+0x3FF8
+        cmp     r0, #0
+        blne    intr_check              @ discard the old flags, IME = 1
+intr_wait_halt:
+        bl      intr_halt
+        bl      intr_check
+        beq     intr_wait_halt
         .else
         ldr     r4, =IRQ_CHECK
-        .endif
         mov     r3, #1
         str     r3, [r12, #0x208]       @ IME = 1
         cmp     r0, #0
-        .if ARM9
-        bne     intr_wait_discard
-        bl      intr_check
-        bl      intr_halt
-        cmp     r0, #0
-        bne     intr_wait_done
-        bl      intr_check
-        b       intr_wait_halt
-intr_wait_discard:
-        .else
         beq     intr_wait_check
-        .endif
         mov     r3, #0
         str     r3, [r12, #0x208]
         ldr     r3, [r4]
@@ -200,13 +194,6 @@ intr_wait_discard:
         str     r3, [r4]
         mov     r3, #1
         str     r3, [r12, #0x208]
-        .if ARM9
-intr_wait_halt:
-        bl      intr_halt
-intr_wait_check:
-        bl      intr_check
-        beq     intr_wait_halt
-        .else
 intr_wait_check:
         bl      intr_check
         bne     intr_wait_done

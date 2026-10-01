@@ -155,9 +155,14 @@ beyond GBATEK:
 - The decompressors finish the token they are in, so output overruns the
   header size by up to 17 (LZ77) or 129 (RL) bytes; the 16-bit-write
   callback forms never store an odd last byte.
-- ARM9 IntrWait with r0 = 0: checks first, halts, and returns after that
-  one IRQ if the check found a flag (leaving what the IRQ set); otherwise
-  needs two IRQs. r0 = 1 and every ARM7 case behave as documented.
+- ARM9 IntrWait sets IME=1 only inside its flag checks. With r0 = 0 it
+  halts before the first check, with the caller's IME, then halts and
+  checks until a wanted flag turns up: at least one IRQ even when the flag
+  was already set, and with IME=0 that first CP15 halt never ends. The
+  cases run with IME=1, as a game's IRQ setup leaves it, plus IME=0 ones
+  for the hang. r0 = 1 and every ARM7 case behave as documented.
+- SoftReset zeroes SPSR_svc/SPSR_irq with an MSR, so they read 0x10 (mode
+  bit 4 wired high).
 - GetSineTable = round(sin(i * pi/128) * 0x7FFF); GetPitchTable =
   round((2^(i/768) - 1) * 0x10000); GetVolumeTable = 0.1 dB steps from
   -72.3 dB, round(128 * 10^((i-723)/200) * m) with m the largest of 16/4/2
