@@ -152,13 +152,42 @@ proc shared_wram9(n: NDS; a: uint32; ok: var bool): int {.inline.} =
   of 2: int(a and 0x3FFF)
   else: ok = false; 0
 
-proc read9(n: NDS; a: uint32; width: static int): uint32 =
+proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
+  ## Charge a CPU data access outside the TCMs (timing.nim); DMA's own
+  ## accesses are not charged.
+  if n.dma9.dma_access: return
+  let seq = a == n.last_data9 + (when width == 32: 4'u32 else: 2'u32)
+  n.last_data9 = a
+  let top = a shr 24
+  if n.tm.dc_on and n.tm.data_cachable(a):
+    if write:
+      if not n.tm.dcache.lookup(a, false):
+        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq))
+    elif not n.tm.dcache.lookup(a, true):
+      n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
+    return
+  if write and top == 2 and n.tm.data_buffered(a):
+    n.wait9 += WBUF_WRITE
+    return
+  n.wait9 += data9(top, width, seq)
+
+template charge9_tcm(n: NDS; a: uint32; itcm: bool) =
+  ## DTCM data is free; ITCM data costs a cycle (GBATEK: no parallel access)
+  n.last_data9 = a
+  if itcm: n.wait9 += 1
+
+proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): uint32 =
   template rd(s: seq[uint8]; i: int): uint32 =
     when width == 32: rd32(s, i)
     elif width == 16: rd16(s, i)
     else: uint32(s[i])
-  if n.in_itcm(a, false): return rd(n.itcm, int(a and 0x7FFF))
-  if n.in_dtcm(a, false): return rd(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF))
+  if n.in_itcm(a, false):
+    when timed: n.charge9_tcm(a, true)
+    return rd(n.itcm, int(a and 0x7FFF))
+  if n.in_dtcm(a, false):
+    when timed: n.charge9_tcm(a, false)
+    return rd(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF))
+  when timed: n.charge9(a, width, false)
   case a shr 24
   of 0x02: rd(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
@@ -198,14 +227,19 @@ proc read9(n: NDS; a: uint32; width: static int): uint32 =
     n.note_unmapped("arm9", a, false)
     0'u32
 
-proc write9(n: NDS; a: uint32; v: uint32; width: static int) =
+proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool = false) =
   watch_write(n, "9", n.arm9, a, v)
   template wr(s: var seq[uint8]; i: int) =
     when width == 32: wr32(s, i, v)
     elif width == 16: wr16(s, i, v)
     else: s[i] = uint8(v)
-  if n.in_itcm(a, true): wr(n.itcm, int(a and 0x7FFF)); return
-  if n.in_dtcm(a, true): wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF)); return
+  if n.in_itcm(a, true):
+    when timed: n.charge9_tcm(a, true)
+    wr(n.itcm, int(a and 0x7FFF)); return
+  if n.in_dtcm(a, true):
+    when timed: n.charge9_tcm(a, false)
+    wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF)); return
+  when timed: n.charge9(a, width, true)
   case a shr 24
   of 0x02: wr(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
@@ -239,26 +273,6 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int) =
 
 # --- CPU mixins --------------------------------------------------------
 
-proc data_cost9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
-  ## Charge a CPU data access (timing.nim); DMA's own accesses are not.
-  if n.dma9.dma_access: return
-  let seq = a == n.last_data9 + (when width == 32: 4'u32 else: 2'u32)
-  n.last_data9 = a
-  if n.in_dtcm(a, write): return
-  if n.in_itcm(a, write): n.wait9 += 1; return
-  let top = a shr 24
-  if n.tm.dc_on and n.tm.data_cachable(a):
-    if write:
-      if not n.tm.dcache.lookup(a, false):
-        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq))
-    elif not n.tm.dcache.lookup(a, true):
-      n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
-    return
-  if write and top == 2 and n.tm.data_buffered(a):
-    n.wait9 += WBUF_WRITE
-    return
-  n.wait9 += data9(top, width, seq)
-
 proc fetch_cost9(n: NDS; a: uint32) {.inline.} =
   ## One opcode fetch: always a nonsequential 32-bit access; a Thumb pair
   ## shares it. ITCM and I-cache hits fit in the instruction's own cycle.
@@ -275,28 +289,19 @@ proc fetch_cost9(n: NDS; a: uint32) {.inline.} =
     c += code9_uncached(a shr 24)
   n.wait9 += c
 
-proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost9(a, 8, false)
-  b.nds.read9(a, 8)
-proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost9(a, 16, false)
-  b.nds.read9(a, 16)
-proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost9(a, 32, false)
-  b.nds.read9(a, 32)
+proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 8, true)
+proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 16, true)
+proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 32, true)
 
 proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.} =
-  b.nds.data_cost9(a, 8, true)
   b.nds.sync9()
-  b.nds.write9(a, uint32(v), 8)
+  b.nds.write9(a, uint32(v), 8, true)
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.} =
-  b.nds.data_cost9(a, 16, true)
   b.nds.sync9()
-  b.nds.write9(a, uint32(v), 16)
+  b.nds.write9(a, uint32(v), 16, true)
 proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
-  b.nds.data_cost9(a, 32, true)
   b.nds.sync9()
-  b.nds.write9(a, v, 32)
+  b.nds.write9(a, v, 32, true)
 
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds

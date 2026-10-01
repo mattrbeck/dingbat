@@ -83,10 +83,8 @@ proc invalidate_line*(c: var TagCache; a: uint32) =
     if c.tags[s + i] == line + 1: c.tags[s + i] = 0
   if c.last == line + 1: c.last = 0
 
-proc lookup*(c: var TagCache; a: uint32; allocate: bool): bool =
-  ## Hit? On a miss with `allocate`, the line is filled (round robin).
+proc lookup_slow(c: var TagCache; a: uint32; allocate: bool): bool {.noinline.} =
   let tag = (a shr 5) + 1
-  if tag == c.last: return true
   let set = int((a shr 5) and c.set_mask)
   let s = set * 4
   if c.tags[s] == tag or c.tags[s + 1] == tag or c.tags[s + 2] == tag or
@@ -98,6 +96,11 @@ proc lookup*(c: var TagCache; a: uint32; allocate: bool): bool =
     c.rr[set] = (c.rr[set] + 1) and 3
     c.last = tag
   false
+
+template lookup*(c: var TagCache; a: uint32; allocate: bool): bool =
+  ## Hit? On a miss with `allocate`, the line is filled (round robin). The
+  ## line used last is checked inline.
+  ((a shr 5) + 1 == c.last or c.lookup_slow(a, allocate))
 
 proc init_timing*(t: var MemTiming) =
   t.icache.init_cache(8 * 1024)

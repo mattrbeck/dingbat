@@ -28,6 +28,7 @@
 ## chip) and writes it back when the run changed it.
 ## --rtc YYYY-MM-DD[THH:MM:SS] starts the RTC at that time and clocks it from
 ## emulated time, so runs are reproducible (default: host local time).
+## --perf-from F times frames F..end (printed as fps; default the whole run).
 ## --pcs prints both CPUs' pc / halted state after each frame.
 ##
 ## Debug flags (build with -d:ndsdebug):
@@ -38,7 +39,7 @@
 ##                      block over frames F0..F1-1; print the costliest blocks
 ##   --spilog           log every card-SPI (save chip) byte: sent -> reply, pc
 
-import std/[os, strutils, parseopt, tables, sequtils]
+import std/[os, strutils, parseopt, tables, sequtils, monotimes, times]
 import zippy
 import dingbat/nds/nds
 import dingbat/nds/io/rtc
@@ -203,6 +204,8 @@ when isMainModule:
   var wav = ""
   var save = ""
   var rtc_at = ""
+  var perf_from = 0
+  var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog"])
   for kind, key, val in p.getopt():
@@ -219,6 +222,7 @@ when isMainModule:
       of "wav": wav = val
       of "save": save = val
       of "rtc": rtc_at = val
+      of "perf-from": perf_from = parseInt(val)
       of "press": presses.add parse_presses(val)
       of "peek9":
         for a in val.split(','): peek9.add uint32(parseHexInt(a))
@@ -256,6 +260,7 @@ when isMainModule:
     n.cart.backup.set_data(cast[seq[uint8]](readFile(save)))
   var audio: seq[float32]
   for f in 0 ..< frames:
+    if f == perf_from: perf_t0 = getMonoTime()
     if f == trace_at:
       n.arm9.trace = trace9
       n.arm7.trace = trace7
@@ -295,6 +300,10 @@ when isMainModule:
       let px = n.screens_rgba()
       write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)
       tops.add px[0 ..< 256 * 192]
+  if frames > perf_from:
+    let secs = (getMonoTime() - perf_t0).inNanoseconds.float / 1e9
+    echo "speed: frames ", perf_from, "-", frames, " in ", formatFloat(secs, ffDecimal, 2), " s = ",
+         formatFloat(float(frames - perf_from) / secs, ffDecimal, 1), " fps"
   if tops.len > 0:
     let cols = min(tops.len, 4)
     let rows = (tops.len + cols - 1) div cols
