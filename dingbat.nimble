@@ -62,6 +62,9 @@ task test_nds3d, "Run the DS 3D engine tests (command scenes + the 3d_* test ROM
 task test_ndshlebios,"Run the DS HLE BIOS SWIs against the real BIOS (or computed expectations)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndshlebios_test tests/nds_hle_bios_test.nim"
 
+task test_ndsboot, "Run the DS boot tests (card KEY1/KEY2 handshake, secure area, direct boot)":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndsboot_test tests/nds_boot_test.nim"
+
 task ndsref_build, "Build the DS reference tools (tools/ndsref: a headless libretro runner, and ndsrun beside it)":
   exec "sh tools/ndsref/build.sh"
   exec "nim c -d:test_harness -d:release --hints:off --path:src -o:tools/ndsref/ndsrun tools/ndsrun.nim"
