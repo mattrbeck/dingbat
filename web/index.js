@@ -8903,7 +8903,7 @@ const saveAudioSettings = () => {
   clearTimeout(audioSaveTimer);
   audioSaveTimer = setTimeout(
     () => dbPut("audio", { rev: AUDIO_REV, volume, muted, pitchCorrectFF, audioLowpass,
-                           mp2kHle, fifoInterp }), 250);
+                           mp2kHle, fifoInterp, audioMix }), 250);
 };
 
 const setVolume = (v) => {
@@ -8943,6 +8943,9 @@ const loadAudioSettings = async () => {
   if (s && typeof s.fifoInterp === "boolean") fifoInterp = s.fifoInterp;
   if (fifoInterpToggle) fifoInterpToggle.checked = fifoInterp;
   applyFifoInterp();
+  if (s && typeof s.audioMix === "boolean") audioMix = s.audioMix;
+  if (audioMixToggle) audioMixToggle.checked = audioMix;
+  applyAudioSession();
 };
 
 for (let s of volSliders) {
@@ -9060,6 +9063,49 @@ if (lowpassToggle) {
   lowpassToggle.addEventListener("change", () => {
     audioLowpass = lowpassToggle.checked;
     applyAudioLowpass();
+    saveAudioSettings();
+  });
+}
+
+// --- Mix with other audio (iOS/iPadOS) ---
+// Safari's "playback" audio session plays through the silent switch but
+// pauses other apps' audio (WebKit sets it without mix-with-others);
+// "ambient" mixes with them but obeys the switch. No type does both, so
+// the user picks; off keeps the game audible on silent. Paused, with no
+// game open, muted or at volume 0 there is nothing to play, so the page
+// never holds the exclusive session then. Only claimed once audio has
+// started (initAudio); the frame loop re-applies it every tick, which
+// catches every pause.
+var audioMix = false;
+var audioSessionLive = false;
+let audioSessionSet = "";   // the type last given, so most ticks are a compare
+const audioMixToggle = /** @type {HTMLInputElement} */ (document.getElementById("audio-mix-toggle"));
+
+const audioSessionType = () =>
+  (audioMix || paused || !(currentRomName || linkMode) || muted || volume === 0)
+    ? "ambient" : "playback";
+
+const applyAudioSession = () => {
+  const session = navigator.audioSession;
+  if (!session || !audioSessionLive) return;
+  const t = audioSessionType();
+  if (t === audioSessionSet) return;
+  audioSessionSet = t;
+  session.type = t;
+};
+
+// Only where there is a silent switch to choose about: iOS/iPadOS Safari.
+{
+  const row = document.getElementById("audio-mix-row");
+  const iosLike = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (row) row.hidden = !(navigator.audioSession && iosLike);
+}
+
+if (audioMixToggle) {
+  audioMixToggle.addEventListener("change", () => {
+    audioMix = audioMixToggle.checked;
+    applyAudioSession();
     saveAudioSettings();
   });
 }
@@ -10061,6 +10107,9 @@ const resetAllSettings = async () => {
   audioLowpass = true;
   if (lowpassToggle) lowpassToggle.checked = true;
   applyAudioLowpass();
+  audioMix = false;
+  if (audioMixToggle) audioMixToggle.checked = false;
+  applyAudioSession();
 
   colorCorrect = true;
   ccToggle.checked = colorCorrect;
@@ -14009,10 +14058,10 @@ var Module = {
 
     const initAudio = () => {
       if (audioCtx) return;
-      // "playback" audio session so iOS ignores the silent switch (Safari 17+).
-      if (navigator.audioSession) {
-        navigator.audioSession.type = "playback";
-      }
+      // "playback" audio session so iOS ignores the silent switch (Safari
+      // 17+), unless the user mixes with other audio or has it muted.
+      audioSessionLive = true;
+      applyAudioSession();
       try {
         audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       } catch (e) {
@@ -14029,6 +14078,7 @@ var Module = {
 
     window.updateGain = () => {
       if (gainNode) gainNode.gain.value = effectiveGain();
+      applyAudioSession();   // muted or 0 lets go at once, not next tick
     };
 
     // Resume on first user interaction (autoplay policy); on iOS also play a
@@ -14308,6 +14358,7 @@ var Module = {
       updateTilt(); // MBC7 carts: ease the tilt vector toward its target
       pollPrinter(); // GB carts: print-intent offer + finished-strip pickup
       syncWakeLock(); // acquire while stepping, release on pause/menu (idempotent)
+      applyAudioSession(); // other apps' audio plays while paused (idempotent)
       if (paused) {
         updateRumble(timestamp); // drops body.rumbling promptly on pause
         watchCanvasBacking();

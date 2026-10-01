@@ -306,11 +306,18 @@ var Module = {
     let gainNode = null;
     let playTime = 0;
 
+    // "playback" plays through the iOS silent switch but pauses other apps'
+    // audio; at volume 0 (the embed's default) "ambient" leaves it playing.
+    const claimAudioSession = () => {
+      const session = navigator.audioSession;
+      if (!session) return;
+      const t = volume === 0 ? "ambient" : "playback";
+      if (session.type !== t) session.type = t;
+    };
+
     const initAudio = () => {
       if (audioCtx) return;
-      if (navigator.audioSession) {
-        navigator.audioSession.type = "playback";
-      }
+      claimAudioSession();
       audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       gainNode = audioCtx.createGain();
       gainNode.gain.value = volume / 100;
@@ -320,6 +327,7 @@ var Module = {
 
     window.updateGain = () => {
       if (gainNode) gainNode.gain.value = volume / 100;
+      if (audioCtx) claimAudioSession();
     };
 
     let audioUnlocked = false;
