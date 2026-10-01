@@ -21,10 +21,15 @@ type
     srkCorrupt         ## hash/marker/range checks failed: the bytes are damaged
     ## APPEND new causes: the ordinals cross into JS (web/index.js's SRK table).
     srkNoFile          ## nothing there to load — an empty slot, a missing path
+    srkIncompatible    ## a state this build cannot restore although it is
+                       ## for this game: a DS state from a build whose DS
+                       ## state layout differs, or made with the other BIOS
+                       ## (a dump vs the HLE BIOS; nds/savestate.nim)
 
   CoreKind* = enum
     ckGBA = 0
     ckGB  = 1
+    ckNDS = 2
 
   Writer* = object
     buf*: string
@@ -75,6 +80,10 @@ const
   #        apu.power_on_at, and the shared PSG's per-channel latches
   GBA_PAYLOAD_VERSION* = 10'u32
   GB_PAYLOAD_VERSION*  = 6'u32
+  # NDS: 1 initial (docs/nds/savestate.md). The payload also carries a hash
+  #      of its field layout, checked on load, so a layout change that
+  #      forgets this bump is still refused rather than misread.
+  NDS_PAYLOAD_VERSION* = 1'u32
 
   # magic(8) version(4) core(1) payload_version(1) flags(2) rom_checksum(4)
   # rom_size(4) payload_len(4) payload_hash(4). Byte 13 was an always-zero
@@ -326,6 +335,7 @@ proc current_payload_version*(core: CoreKind): uint32 =
   case core
   of ckGBA: GBA_PAYLOAD_VERSION
   of ckGB:  GB_PAYLOAD_VERSION
+  of ckNDS: NDS_PAYLOAD_VERSION
 
 proc legacy_payload_version*(core: CoreKind; container: uint32): uint32 =
   ## Which payload revision a pre-v7 file holds, derived from the old global
@@ -352,6 +362,7 @@ proc legacy_payload_version*(core: CoreKind; container: uint32): uint32 =
     if container <= 3: 1'u32
     elif container <= 5: 2'u32
     else: 3'u32
+  of ckNDS: 1'u32   # no DS state predates container 8
 
 proc write_state_header(w: var Writer; core: CoreKind;
                         rom_checksum, rom_size: uint32;
@@ -553,7 +564,7 @@ proc parse_state_payload*(raw: string; core: CoreKind;
   let file_rev = r.read_u8()
   discard r.read_u16()  # flags (read by parse_state_thumbnail)
   if file_core != uint8(core):
-    raise state_error("save state was created by a different core (GBA/GB mismatch)",
+    raise state_error("save state was created by a different core (GBA/GB/DS mismatch)",
                       srkWrongCore)
   # Byte 13 was the always-zero `slot` field before v7; 0 means "derive".
   let rev = if file_rev == 0: legacy_payload_version(core, version)
