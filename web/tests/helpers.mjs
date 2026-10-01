@@ -569,6 +569,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     throw e;
   }
 
+  // A refused Drive request is tried again after 0.5-2 s (driveRetryWait).
+  // Here 1 ms: a wait past PIN_TIMER_MS does not hold the event loop, and a
+  // test waiting on one could see node exit under it.
+  vm.runInContext("driveRetryMs = 1", context);
+
   // Scripts run in the same context share the global lexical environment,
   // so index.js's const/let bindings are visible here.
   const api = vm.runInContext(`({
