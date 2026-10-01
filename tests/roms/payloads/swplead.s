@@ -13,7 +13,9 @@
 @ trigger check also tests the previous shadow); and the measured note is
 @ triggered about 131072 cycles (the next sweep clock) minus an offset after
 @ the calibration death: 4c + k cycles earlier for larger c (c = r0 bits
-@ 4..11, k = bits 0..3 through a sled).
+@ 4..11, k = bits 0..3 through a sled). The f = 0x080 note is stopped by its
+@ DAC at once unless r0 bit 12 is set (the first SP run left it running: a
+@ note surviving the stale-shadow check would be ticked by the next clock).
 @ answer: bits 0..15 polls (about 10 cycles each) from the measured trigger
 @ until ch1 stopped (cap 0xFFFF): small = it took the clock right after it,
 @ ~13000 = it missed that one and died at the next. Bits 16..31: polls the
@@ -52,6 +54,13 @@ _start:
     cmp r3, r7
     blt 1b
 2:  strh r6, [r4, #0x64]           @ shadow to 0x080
+    tst r9, #0x1000                @ bit 12: leave that note running
+    bne 7f
+    mov r0, #0x0080                @ NR12 = 0: its DAC off stops it, so no
+    strh r0, [r4, #0x62]           @ sweep clock ticks it; then DAC on
+    ldr r0, =0xF080
+    strh r0, [r4, #0x62]
+7:
     ldr r0, =32512                 @ 130048 cycles, then 4 (256 - c)
 3:  subs r0, r0, #1
     bne 3b

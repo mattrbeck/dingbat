@@ -10,7 +10,8 @@
 @
 @ Parked on a V-count match, trigger, then 4c + k cycles (c = r0 bits 4..11,
 @ k = bits 0..3 through a sled), then one read of SOUND3CNT_L.
-@ answer: SOUND3CNT_L's low byte (bit 6: the bank playing).
+@ answer: SOUND3CNT_L's low byte (bit 6: the bank playing); SOUNDCNT_X's
+@ low byte << 8 (bit 2: CH3 on), the control that it is playing at all.
     .include "probe.inc"
     .arm
     .text
@@ -40,6 +41,9 @@ _start:
     probe_sled
     ldrh r0, [r4, #0x70]
     and r0, r0, #0xFF
+    ldrh r1, [r4, #0x84]           @ control: CH3 still on (bit 2)?
+    and r1, r1, #0xFF
+    orr r0, r0, r1, lsl #8
     mov r1, #0
     strh r1, [r4, #0x70]
     strh r1, [r4, #0x84]           @ master off on the way out

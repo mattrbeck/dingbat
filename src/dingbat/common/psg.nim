@@ -153,7 +153,12 @@ type
     volume_code_shift*:      uint8   # GB: 4/0/1/2 by volume_code
     frequency*:              uint16
     wave_ram_dimension*:     bool    # GBA: SOUND3CNT_L bit 5, 64-step mode
-    wave_ram_bank*:          uint8   # GBA: SOUND3CNT_L bit 6, bank played
+    wave_ram_bank*:          uint8   # GBA: SOUND3CNT_L bit 6 as written
+    # GBA: the bank being played. Starts as wave_ram_bank and, in 64-sample
+    # mode, flips at each pointer wrap -- which SOUND3CNT_L does not show
+    # (AGB SP, payloads/wavedly.s: bit 6 reads back as written while CH3
+    # plays). In the rev-10 PSG section.
+    wave_play_bank*:         uint8
     volume_force*:           bool    # GBA: SOUND3CNT_H bit 15, force 75%
 
   PsgNoise* = ref object of PsgEnvChannel

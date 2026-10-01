@@ -250,6 +250,26 @@ stamped by its own write:
 * Of the burst's two hand-off cycles one precedes its first transfer and one
   follows its last.
 
+### 1.14 Wave RAM, SOUND3CNT_L's bank bit, and the sweep's trigger lead
+
+`tests/roms/payloads/wavebank.s`, `wavedly.s`, `swplead.s` (AGB SP, link rig
+2026-09-30, each page twice or more, every repeat identical):
+
+* GBATEK's SOUND3CNT_L text is right and worth keeping as it is: a CPU wave
+  RAM access addresses the bank NOT selected for playback, whether channel 3
+  plays or not. A read while bank 0 plays returns all sixteen bytes of bank 1,
+  in place -- the CGB's "a read while CH3 plays returns the byte being played"
+  does not carry over. (The two rules agree on every access made with CH3
+  stopped, which is why a stopped-channel readback cannot tell them apart.)
+* Worth adding: in 64-sample mode (bit 5) bit 6 reads back as written while
+  the channel plays; it does not follow the bank playback has wrapped to
+  (SOUNDCNT_X bit 2 high throughout, as the page's control). So the CPU has
+  no view of channel 3's position at all, and its trigger start-up (6
+  T-cycles on the CGB) cannot be measured on the GBA.
+* Worth adding: no trigger lead before a sweep clock. The CGB misses a sweep
+  clock for a trigger within 8 T-cycles before it (4 on DMG); on the AGB a
+  note triggered closer and closer to the clock goes on taking it.
+
 ## 2. Not settled — hardware needed first
 
 1. **BIOS-region Thumb open bus** (§1.1). No payload can execute from BIOS, so
@@ -260,6 +280,15 @@ stamped by its own write:
    bounds the console reaches two phases we do not, so something resolves the
    grant against a phase finer than an instruction boundary. Unmodelled here,
    and not yet characterised well enough to state as a correction.
+3. **A channel 1 trigger just before a sweep clock.** `swplead.s` (§1.14):
+   in a window one to four steps of the page's 4-cycle grid wide, right
+   before the trigger starts taking the clock, the note never stops at all
+   (a 0x400 note with shift 1 should die at its first clock): that clock's
+   calculation runs on the previous note's shadow (0x080) and the result
+   sticks. Present with the earlier note stopped by its DAC, so it is the
+   trigger's own shadow load landing after the clock. Unmodelled; its cycle
+   position against the clock is not pinned (the page finds the clock by
+   polling, about 10 cycles a poll).
 
 ## 3. A note on method, and one for the mGBA suite
 

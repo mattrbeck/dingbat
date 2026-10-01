@@ -530,16 +530,12 @@ proc gba_psg_read(gba: GBA; address: uint32): uint8 =
     result = result or (if ch3.volume_force: 0x80'u8 else: 0'u8)
 
 proc `[]`*(apu: APU; io_addr: uint32): uint8 =
-  # Only wave RAM and SOUND3CNT_L need a sync: wave RAM resolves against
-  # wave_ram_position while CH3 is enabled, and in 64-sample mode bit 6 reads
-  # back the bank being played, which flips at each pointer wrap. No
-  # catch-up ever writes `enabled`.
+  # Nothing a read returns depends on the channels' phase: wave RAM is the
+  # bank CH3 is not playing, and SOUND3CNT_L's bank bit reads back as
+  # written. No catch-up ever writes `enabled`.
   if io_addr >= WAVE_RAM_LOW and io_addr <= WAVE_RAM_HIGH:
-    ch3_catchup(apu.channel3, apu.gba)
     ch3_wave_read(apu.channel3, apu.gba, int(io_addr - WAVE_RAM_LOW))
-  elif psg_in_range(io_addr):
-    if io_addr == RANGE_CH3_LOW: ch3_catchup(apu.channel3, apu.gba)
-    gba_psg_read(apu.gba, io_addr)
+  elif psg_in_range(io_addr):    gba_psg_read(apu.gba, io_addr)
   elif dma_channels_in_range(io_addr): apu.dma_channels.dma_channels_read(io_addr)
   else:
     case io_addr

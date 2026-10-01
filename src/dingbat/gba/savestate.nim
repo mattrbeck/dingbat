@@ -954,7 +954,7 @@ proc default_inflight_state(gba: GBA) =
 # <= 9 carried in spare bits of channel 1's sweep fields, the master-on
 # stamp PSG_POWER_ON_WINDOW reads (not carried at all before), and the
 # channels' latched duty outputs, pending envelope ticks and the noise
-# channel's divisor stage.
+# channel's divisor stage, and the wave bank playing.
 
 proc write_deadline(w: var Writer; at, now: CycleCount) =
   ## An absolute deadline as its distance from the payload's clock, which may
@@ -989,6 +989,7 @@ proc save_psg_state(gba: GBA; w: var Writer) =
   w.write_bool(apu.channel4.env_extra_tick)
   w.write_u16(apu.channel4.div_counter)
   w.write_deadline(apu.channel4.div_next, now)
+  w.write_u8(apu.channel3.wave_play_bank)
 
 proc load_psg_state(gba: GBA; r: var Reader) =
   ## Rev >= 10.
@@ -1008,6 +1009,7 @@ proc load_psg_state(gba: GBA; r: var Reader) =
   apu.channel4.env_extra_tick = r.read_bool()
   apu.channel4.div_counter = r.read_u16()
   apu.channel4.div_next = r.read_deadline(now, "ch4.div_next")
+  apu.channel3.wave_play_bank = r.read_u8() and 1
   # Not in the payload: the frame rebase clears it, so it is GBA_NO_STEP at
   # every boundary a state is written on.
   ch1.last_step_at = GBA_NO_STEP
@@ -1029,6 +1031,8 @@ proc default_psg_state(gba: GBA) =
   # byte under the pointer is the one it fetched (wave RAM only changes
   # under a catch-up).
   let ch3 = apu.channel3
+  # Revs <= 9 flipped the register's bank bit itself at each wrap.
+  ch3.wave_play_bank = ch3.wave_ram_bank and 1
   ch3.wave_ram_sample_buffer =
     ch3.wave_ram[int(ch3.wave_ram_bank and 1) * PSG_WAVE_BANK +
                  int((ch3.wave_ram_position and 31) div 2)]

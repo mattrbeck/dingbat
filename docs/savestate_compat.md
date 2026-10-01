@@ -146,7 +146,9 @@ field for: channel 1's shift-0 check (`s0_slow`, `s0_anchor`, `sweep_armed`
 and a pending stop, which revs ≤ 9 packed into spare bits of the sweep fields
 and rev 10 writes clear), the master-on stamp `PSG_POWER_ON_WINDOW` reads
 (never carried before), and the channels' latched state -- the squares' duty
-output. A rev ≤ 9 load decodes the spare bits as before, leaves no master-on
+output, the envelopes' pending extra ticks, the noise divider's two stages and
+the wave bank playing (rev ≤ 9 flipped SOUND3CNT_L's own bank bit). A rev ≤ 9
+load decodes the spare bits as before, leaves no master-on
 window, and takes each square's latch from its position. Deadlines are
 distances from the payload's clock; the length is pinned in the compat test.
 
