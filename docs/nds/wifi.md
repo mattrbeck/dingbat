@@ -100,8 +100,10 @@ free.
 
 Not modelled: collisions, carrier sense and backoff (frames never
 collide; a station hears frames even while another is on the air, but not
-while it transmits itself); the CMD's own hardware retries inside
-W_CMD_COUNT and IRQ12 on expiry; WEP; the DS Lite's type-3 RF channel
+while it transmits itself); the CMD's hardware retries inside W_CMD_COUNT
+that GBATEK describes, and IRQ12 on its expiry (dswifi retries a 0005h
+round in software and the reference core ends the round at once, so a
+round here ends after one try); WEP; the DS Lite's type-3 RF channel
 table; NAV/duration, TIM updates, W_CONTENTFREE; W_POWERFORCE's delayed
 path; save states of the new state (rx queue, transmitter stage, Air).
 

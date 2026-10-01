@@ -300,6 +300,19 @@ else:
     check (client.res(13) and 0xFFFF) == 8 and (client.res(13) shr 16) == 0x801D,
           "client: 8 CMD ACKs, RXHDR 801Dh", hex(client.res(13))
     check link.air.late == 0, "no frame reached a receiver late"
+    # the same run with the machines stepped in the other order inside each
+    # quantum: identical results (docs/nds/wifi.md, Lockstep)
+    let host2 = machine(fw, true)
+    let client2 = machine(firmware_with_mac(fw, mac2), false)
+    let link2 = new_air_link(@[client2, host2])
+    for g in 0 ..< f:
+      link2.run_frames(1)
+      if g + 1 == 10: host2.set_button(nbA, false)
+    var same = link2.air.frames == link.air.frames
+    for i in 0 ..< 24:
+      if host2.res(i) != host.res(i) or client2.res(i) != client.res(i): same = false
+    check same and host2.main_ram == host.main_ram and client2.main_ram == client.main_ram,
+          "machine order inside a quantum does not change anything"
 
   block host_alone:
     echo "wifi_link: host alone"
