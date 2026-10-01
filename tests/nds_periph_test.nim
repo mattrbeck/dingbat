@@ -8,7 +8,7 @@
 ##
 ## Run with: nimble test_ndsperiph
 
-import std/math
+import std/[math, os]
 import dingbat/nds/[sched, nds]
 import dingbat/nds/io/[irq, rtc, spi, input, mic]
 import dingbat/gba/rtc_calendar
@@ -338,9 +338,9 @@ block touchscreen:
   let y = sp.tsc_read(s, 0x90)
   let z1 = sp.tsc_read(s, 0xB0)
   let z2 = sp.tsc_read(s, 0xC0)
-  check (x - 0x200) * 254 div (0xE00 - 0x200) == 128 and (y - 0x200) * 190 div (0xA00 - 0x200) == 96,
-        "X/Y convert back to the pixel (GBATEK formula)", $x & " " & $y
-  check ((x - 0x200) * 254 * 2 + 0xC00) div (2 * 0xC00) == 128, "and rounding", $x
+  # (adc - adc1) * (scr2 - scr1) / (adc2 - adc1) + scr1, as libnds converts
+  check (x - 0x200) * 254 div 0xC00 + 1 == 128 and (y - 0x200) * 190 div 0x800 + 1 == 96,
+        "X/Y convert back to the pixel", $x & " " & $y
   check z1 > 0 and z2 > z1 and z2 < 0xFFF, "pressed: 0 < Z1 < Z2 < FFFh", $z1 & " " & $z2
   # GBATEK formula 1 recovers R_TOUCH (1000 ohm) with Rx_plate = 400
   let rt = 400.0 * float(x) / 4096 * (float(z2) / float(z1) - 1)
@@ -428,6 +428,7 @@ block flash:
 block sleep_lid:
   echo "sleep and lid"
   let n = new_nds(newSeq[uint8](0x200), @[], @[], @[], force_hle = true)
+  n.unmapped_log = 32                               # no ROM: quiet the idle CPUs
   n.rtc.set_fixed_clock(n.sched, to_calendar_seconds(2024, 1, 1, 0, 0, 0))
   n.run_frame()
   n.irq7.ie = IRQ_LID
@@ -483,6 +484,63 @@ block sleep_lid:
   let t2 = n.sched.now
   n.run_frame()
   check n.sched.now == t2, "powered off: nothing runs"
+
+# ---------------------------------------------------------------------------
+# periph_suite.nds (tests/nds/src/periph_suite, built by
+# tests/nds/tools/build_periph.sh): the same checks from the ARM7's side
+
+block periph_rom:
+  echo "periph_suite ROM"
+  let path = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "periph_suite.nds"
+  if not fileExists(path):
+    echo "  [SKIP] ", path, " not built (tests/nds/tools/build_periph.sh)"
+  else:
+    # synthesized firmware (old-DS power manager), HLE BIOS: no dumps needed
+    let rom = cast[seq[uint8]](readFile(path))
+    let n = new_nds(rom, @[], @[], @[], force_hle = true)
+    n.rtc.set_fixed_clock(n.sched, to_calendar_seconds(2004, 1, 1, 0, 0, 0))
+    var wave: seq[int16]
+    for k in 0 ..< 32000 * 5: wave.add int16(round(20000 * sin(2 * PI * 1000 * float(k) / 32000)))
+    n.push_mic(wave, 32000)
+    for f in 0 ..< 720:
+      if f == 50: n.set_touch(128, 96, true)
+      if f == 80: n.set_touch(128, 96, false)
+      if f == 600: n.set_button(nbA, true)
+      if f == 604: n.set_button(nbA, false)
+      if f == 660: n.set_lid(true)
+      if f == 700: n.set_lid(false)
+      n.run_frame()
+    proc res(i: int): uint32 =
+      let a = 0x200000 + i * 4         # 0x02200000 in main RAM
+      uint32(n.main_ram[a]) or (uint32(n.main_ram[a + 1]) shl 8) or
+        (uint32(n.main_ram[a + 2]) shl 16) or (uint32(n.main_ram[a + 3]) shl 24)
+    check res(0) == 0x49524550'u32 and res(47) == 0x5344494C'u32, "every section ran"
+    # polling overhead is ~27 bus cycles on top of the transfer
+    for b in 0..3:
+      let want = [67, 134, 268, 511][b]
+      check int(res(1 + b)) - want in 20..35, "SPI baud " & $b & " busy", $res(1 + b)
+    check res(5) == res(3) and (res(6) and 0x80) == 0, "IF.23 when busy drops"
+    check res(7) == 0x0D, "SPIDATA keeps the last reply during a transfer"
+    check int(res(8)) - 2 * 268 in 20..35, "16-bit mode: 16 bits", $res(8)
+    check res(10) == 0x810F800F'u32 and res(11) == 0x80FF80F0'u32, "RCNT: inputs pulled up, outputs as driven"
+    check res(12) == 0x0D and res(13) == 0x0D and res(15) == 0x0F0D0301'u32,
+          "power manager registers (old DS)"
+    check res(16) == (881'u32 shl 16 or 738) and (res(17) and 0xFFFF) == 0 and res(18) == 0,
+          "TSC temperatures, battery, differential channels"
+    check res(19) == 0xFFF and res(20) == 0x0FFF0000'u32 and res(22) == 0x007F007F'u32,
+          "TSC released: Y FFFh, X 0, Z1 0, Z2 FFFh, no pen"
+    check res(25) == 0x007F003F'u32, "pen down only while PENIRQ is enabled"
+    check abs(int(res(26)) - 33513982) < 100 and abs(int(res(27)) - 2094624) < 100 and res(28) == 4,
+          "RTC 1 Hz / 16 Hz periods, 2+8 Hz falls", $res(26) & " " & $res(27)
+    check abs(int(res(29)) - 2 * 33513982) < 2000 and res(30) == 0x0212 and res(31) == 0x810F810B'u32,
+          "alarm 1 two seconds after 23:59:58, INT1 flag, SI low until INT1AE clears"
+    check res(33) == 0x124020 and res(34) == 2 and res(36) == 3 and
+          abs(int(res(35)) - 40217) < 200, "flash ID, WEL, page program 1.2 ms", $res(35)
+    check res(38) == 0 and res(39) == 0x1000 and res(40) == 0 and res(41) == 0x400000,
+          "sleep: no ARM9 frames pass; A wakes with IF.12, the lid with IF.22"
+    let mic = res(42)
+    check (mic and 0xFF) < 0x38 and ((mic shr 8) and 0xFF) > 0xC8 and (mic shr 16) == 16,
+          "mic: 1 kHz at 16 kHz sampling, +-78", "0x" & $mic
 
 if failures > 0:
   echo failures, " failure(s)"

@@ -122,12 +122,12 @@ proc touch_adc(s: Spi; channel: int): uint16 =
   let scr_x2 = int(s.firmware[u + 0x62])
   let scr_y2 = int(s.firmware[u + 0x63])
   proc lerp(p, s1, s2, a1, a2: int): int =
-    # The calibration points count pixels from 1 (GBATEK: scr = (adc - adc1)
-    # * (scr2 - scr1) / (adc2 - adc1) + (scr1 - 1)), so pixel p is p + 1 in
-    # their terms; aim a quarter into its span, where both that truncating
-    # conversion and a rounding one land on p.
+    # The centre of pixel p's ADC span, the calibration points' screen
+    # values taken as pixel numbers: libnds/calico's conversion lands on p
+    # (touch_test reads 128,96 for a touch at 128,96). GBATEK's formula,
+    # with its (scr1 - 1) term, lands half a pixel lower: p - 1 truncated.
     if s2 == s1: return a1
-    a1 + ((4 * (p + 1 - s1) + 1) * (a2 - a1)) div (4 * (s2 - s1))
+    a1 + ((2 * (p - s1) + 1) * (a2 - a1)) div (2 * (s2 - s1))
   let v = if channel == 5: lerp(s.input.touch_x, scr_x1, scr_x2, adc_x1, adc_x2)
           else: lerp(s.input.touch_y, scr_y1, scr_y2, adc_y1, adc_y2)
   uint16(clamp(v, 0, 0xFFF))
