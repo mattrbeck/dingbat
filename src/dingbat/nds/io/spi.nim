@@ -6,7 +6,7 @@
 import irq, input
 
 type
-  FlashState = enum fsIdle, fsAddr, fsRead, fsStatus, fsId, fsOther
+  FlashState = enum fsIdle, fsAddr, fsRead, fsWrite, fsStatus, fsId, fsOther
 
   Spi* = ref object
     cnt*: uint16
@@ -17,10 +17,12 @@ type
     faddr: uint32
     faddr_bytes: int
     fid_idx: int
+    fcmd: uint8               ## command whose address is being received
     write_enable: bool
     # touchscreen
     tsc_value: uint16        ## 12-bit result being shifted out
     tsc_byte: int
+    tsc_8bit: bool
     # power manager
     pm_regs*: array[8, uint8]
     pm_index: int            ## -1 = expecting index byte
@@ -68,29 +70,51 @@ proc touch_adc(s: Spi; channel: int): uint16 =
           else: lerp(s.input.touch_y, scr_y1, scr_y2, adc_y1, adc_y2)
   uint16(clamp(v, 0, 0xFFF))
 
+proc flash_erase(s: Spi; a: uint32; size: uint32) =
+  let base = int(a and not (size - 1) and 0x3FFFF)
+  for i in 0 ..< int(size): s.firmware[base + i] = 0xFF
+
 proc flash_byte(s: Spi; v: uint8): uint8 =
+  ## ST M45PE20 (GBATEK "DS Firmware Serial Flash Memory"): commands MSB
+  ## first, 3 address bytes, data streams while chip select is held. Writes
+  ## change the in-memory image only. TODO(spi): write/erase busy time (WIP).
   case s.fstate
   of fsIdle:
     case v
-    of 0x03, 0x0B:
-      s.fstate = fsAddr; s.faddr = 0; s.faddr_bytes = 0
+    of 0x03, 0x0B, 0x0A, 0x02, 0xDB, 0xD8:
+      s.fstate = fsAddr; s.faddr = 0; s.faddr_bytes = 0; s.fcmd = v
       s.fid_idx = if v == 0x0B: 1 else: 0   # fast read: one dummy byte
     of 0x05: s.fstate = fsStatus
     of 0x9F: s.fstate = fsId; s.fid_idx = 0
     of 0x06: s.write_enable = true
     of 0x04: s.write_enable = false
-    else: s.fstate = fsOther  # TODO(spi): page write/program/erase
+    else: s.fstate = fsOther  # deep power-down/release: no reply
   of fsAddr:
     s.faddr = (s.faddr shl 8) or v
     inc s.faddr_bytes
     if s.faddr_bytes == 3:
-      s.fstate = fsRead
+      case s.fcmd
+      of 0x03, 0x0B: s.fstate = fsRead
+      of 0x0A, 0x02: s.fstate = (if s.write_enable: fsWrite else: fsOther)
+      of 0xDB, 0xD8:
+        # page / sector erase, on the third address byte
+        if s.write_enable:
+          s.flash_erase(s.faddr, if s.fcmd == 0xDB: 0x100'u32 else: 0x10000'u32)
+          s.write_enable = false
+        s.fstate = fsOther
+      else: s.fstate = fsOther
   of fsRead:
     if s.fid_idx > 0:
       dec s.fid_idx
       return 0
     result = s.firmware[int(s.faddr and 0x3FFFF)]
     inc s.faddr
+  of fsWrite:
+    # page write (0A) replaces, page program (02) can only clear bits; both
+    # wrap inside the 256-byte page
+    let i = int(s.faddr and 0x3FFFF)
+    s.firmware[i] = if s.fcmd == 0x02: s.firmware[i] and v else: v
+    s.faddr = (s.faddr and not 0xFF'u32) or ((s.faddr + 1) and 0xFF)
   of fsStatus: result = if s.write_enable: 2'u8 else: 0'u8
   of fsId:
     const id = [0x20'u8, 0x40, 0x12]
@@ -99,19 +123,24 @@ proc flash_byte(s: Spi; v: uint8): uint8 =
   of fsOther: discard
 
 proc tsc_byte_in(s: Spi; v: uint8): uint8 =
-  # Reply: the 12-bit result left over from the last control byte, MSB
-  # first after one dummy bit, spread over two bytes.
+  # Reply: the result of the last control byte, MSB first after one dummy
+  # bit, spread over the next two bytes -- 12 bits, or 8 in 8-bit mode
+  # (control bit 3).
+  let bits = if s.tsc_8bit: 8 else: 12
   result = case s.tsc_byte
-    of 1: uint8((s.tsc_value shr 5) and 0xFF)
-    of 2: uint8((s.tsc_value shl 3) and 0xFF)
+    of 1: uint8((s.tsc_value shr (bits - 7)) and 0xFF)
+    of 2: uint8((s.tsc_value shl (15 - bits)) and 0xFF)
     else: 0'u8
   inc s.tsc_byte
   if (v and 0x80) != 0:
     let channel = int((v shr 4) and 7)
-    s.tsc_value = case channel
+    var r = case channel
       of 1, 5: s.touch_adc(channel)
       of 6: 0x800'u16   # microphone: silence
       else: 0'u16
+    s.tsc_8bit = (v and 8) != 0
+    if s.tsc_8bit: r = r shr 4
+    s.tsc_value = r
     s.tsc_byte = 1
 
 proc pm_byte(s: Spi; v: uint8): uint8 =
@@ -143,7 +172,10 @@ proc write_data*(s: Spi; v: uint8) =
     of 1: s.flash_byte(v)
     of 2: s.tsc_byte_in(v)
     else: 0
-  if (s.cnt and 0x800) == 0: s.selected = -1   # no hold: deselect
+  if (s.cnt and 0x800) == 0:
+    # no hold: deselect; a finished page write/program drops write enable
+    if dev == 1 and s.fstate == fsWrite: s.write_enable = false
+    s.selected = -1
   if (s.cnt and 0x4000) != 0: s.irq.raise_irq(irqSpi)
 
 proc read_reg*(s: Spi; offset: uint32): uint32 =

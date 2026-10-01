@@ -59,8 +59,12 @@ proc write_fifocnt*(p: Ipc; is9: bool; v, mask: uint32) =
   if (mask and 0xFF) != 0:
     let was = me.send_empty_irq
     me.send_empty_irq = (v and 4) != 0
+    let had = p.send_q(is9).len > 0
     if (v and 8) != 0: p.send_q(is9).clear()
-    if me.send_empty_irq and not was and p.send_q(is9).len == 0:
+    # IF.17 rises on the 0->1 edge of (enable and send-empty): enabling it
+    # over an empty FIFO, or clearing a non-empty FIFO while enabled
+    let empty = p.send_q(is9).len == 0
+    if me.send_empty_irq and empty and (not was or had):
       me.irq.raise_irq(irqIpcSendEmpty)
   if (mask and 0xFF00) != 0:
     let was = me.recv_irq
