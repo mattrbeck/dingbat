@@ -36,18 +36,19 @@ def relocate(d):
 
     def bump(off):
         v = struct.unpack_from("<I", out, off)[0]
-        if v >= 0x4000:
+        if 0x4000 <= v <= len(d):
             struct.pack_into("<I", out, off, v + SHIFT)
         return v
 
-    for off in (0x20, 0x30, 0x40, 0x50, 0x58, 0x68):
+    # ARM9, ARM7, FNT, FAT, overlay tables, icon/title
+    for off in (0x20, 0x30, 0x40, 0x48, 0x50, 0x58, 0x68):
         bump(off)
     fat = struct.unpack_from("<I", out, 0x48)[0]  # already bumped
     fat_size = struct.unpack_from("<I", out, 0x4C)[0]
     if fat >= 0x4000 and fat_size:
         for e in range(fat, fat + fat_size, 4):
             v = struct.unpack_from("<I", out, e)[0]
-            if v >= 0x4000:
+            if 0x4000 <= v <= len(d):
                 struct.pack_into("<I", out, e, v + SHIFT)
     used = struct.unpack_from("<I", out, 0x80)[0]
     if used >= 0x4000:
