@@ -1,7 +1,8 @@
 ## ARM946E-S system control coprocessor (CP15): control register, TCM
 ## regions, protection unit and cache registers. The TCM settings feed the
-## ARM9 bus's map (bus9.nim); caches and the protection unit are recorded but
-## not modelled (no cache timing, no aborts) -- see docs/nds/spec.md.
+## ARM9 bus's map (bus9.nim); the cache tags and the protection unit's
+## access rights live in timing.nim (cache timing, aborts) -- see
+## docs/nds/spec.md.
 
 type
   Cp15* = object

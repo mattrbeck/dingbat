@@ -82,6 +82,14 @@ the selected baud rate (the ARM7 bus delivers its reply and IRQ at the end:
 docs/nds/peripherals.md). With these, SoulSilver runs frame-locked with the
 reference core (docs/oracles.md, "NDS core").
 
+The ARM9's protection unit refuses accesses outside every region or
+against a region's AP bits with a data abort (lr = opcode + 8) or prefetch
+abort (lr = opcode + 4), as libnds's exception handler expects. For speed,
+fetches are checked on branches and page crossings and data accesses to
+main RAM and DTCM are not checked at all (`bus9.nim` pu_check9). Direct
+boot leaves the regions as the firmware does, with the unit off
+(`boot.nim`; docs/oracles.md).
+
 ## Layout
 
 ```
@@ -134,6 +142,7 @@ tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 tools/ndsair.nim                   the same for N machines on one Air
 web/nds.html, web/nds/             dev page (two canvases, keys, touch); ndsutil.js,
                                    ndsaudio.js for the main app (docs/nds/web.md)
+tools/ndssweep.nim                 compatibility sweep against tools/ndsref (docs/nds/compat.md)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs,
                                    command timing, the 3d_* ROM hashes
@@ -143,6 +152,7 @@ tests/nds_boot_test.nim            KEY1/KEY2, card handshake, secure area, direc
 tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machines
 tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
+tests/nds_compat_test.nim          checks for the homebrew sweep's fixes
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask

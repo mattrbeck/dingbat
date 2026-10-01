@@ -61,14 +61,18 @@ type
     rtc*: Rtc
     wifi*: Wifi
     tm*: MemTiming              ## ARM9 caches + cachability (timing.nim)
+    pu_ok*: array[3, uint32]    ## protection unit: last page allowed per
+                                ## fetch / read / write (bus9.nim)
     wait9*, wait7*: int64       ## bus cycles charged to the running instruction
     last_fetch9*, last_data9*: uint32  ## sequential-access tracking
+    last_pc9*: uint32           ## the ARM9's last opcode address (branch check)
     last_fetch7*, last_data7*: uint32
     mmem_armed*: array[4, bool] ## DMA mode 4 channels running this frame
     frame_done*: bool
     sleeping*: bool             ## ARM7 HALTCNT sleep: every clock but the RTC's stopped
     line_start*: int64          ## master cycle the current line began
     unmapped_log*: int          ## first few unmapped accesses are logged
+    unmapped_count*: int        ## all of them (tools/ndssweep.nim)
     # -d:ndsdebug only (tools/ndsrun.nim flags)
     iolog*: bool                ## log I/O accesses to stderr
     watch*: uint32              ## log writes to this word (0 = off)
@@ -80,8 +84,10 @@ const
   ARM9_CYCLES_PER_INSTR = 1     ## one ARM9 clock; memory adds the rest (timing.nim)
   ARM7_CYCLES_PER_INSTR = 0     ## all ARM7 time is its fetch + data + internal cycles
   SLICE = 64                    ## max master cycles one CPU runs ahead
+  NO_PAGE = 0xFFFF_FFFF'u32     ## pu_ok: nothing remembered
 
 proc note_unmapped(n: NDS; who: string; a: uint32; write: bool) =
+  inc n.unmapped_count
   if n.unmapped_log < 32:
     inc n.unmapped_log
     stderr.writeLine("nds " & who & ": unmapped " & (if write: "write " else: "read ") &
@@ -348,7 +354,8 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.cp15.reset()
   n.tm.init_timing()
   n.tm.update_regions(n.cp15)
-  n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR
+  n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
+  n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR; n.last_pc9 = NO_ADDR
   n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
   if boot == nbFirmware and not force_hle and can_firmware_boot(bios9, bios7, firmware):
     n.firmware_boot()

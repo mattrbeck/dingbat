@@ -125,6 +125,24 @@ proc direct_boot*(n: NDS) =
   n.cp15.reset()
   n.cp15.write(0, 9, 1, 0, 0x0080000A'u32)
   n.cp15.write(0, 1, 0, 0, 0x00012078'u32)
+  # The BIOS hand-off leaves the protection unit off but doesn't touch its
+  # regions, permissions or cache bits: they stay as the firmware set them,
+  # and old homebrew crt0s that enable the PU after adding only their own
+  # regions rely on that (the 4K intro sd4k defines just its ITCM region,
+  # then runs from main RAM under the firmware's region 1). Assumed: these
+  # values are a reference core's direct boot (docs/oracles.md, NDS core,
+  # tests/nds/src/boot_cp15); GBATEK lists none. ITCM size 32 MB likewise.
+  for (cm, v) in [(0'u32, 0x0400_0033'u32), (1, 0x0200_002B'u32), (2, 0'u32),
+                  (3, 0x0800_0035'u32), (4, 0x0300_001B'u32), (5, 0'u32),
+                  (6, 0xFFFF_001D'u32), (7, 0x027F_F017'u32)]:
+    n.cp15.write(0, 6, cm, 0, v)
+  n.cp15.write(0, 5, 0, 2, 0x1511_1011'u32)   # data permissions
+  n.cp15.write(0, 5, 0, 3, 0x0510_0011'u32)   # code permissions
+  n.cp15.write(0, 2, 0, 0, 0x42)              # data cachable: regions 1, 6
+  n.cp15.write(0, 2, 0, 1, 0x42)              # code cachable
+  n.cp15.write(0, 3, 0, 0, 0x02)              # write buffer: region 1
+  n.cp15.write(0, 9, 1, 1, 0x20)
+  n.tm.update_regions(n.cp15)
   n.arm9.vector_base = n.cp15.vector_base()
   n.arm9.set_cpsr(uint32(mSYS) or FLAG_F)
   n.arm9.set_mode_sp(mSYS, 0x00803EC0'u32)

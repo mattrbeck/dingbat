@@ -195,18 +195,49 @@ template charge9_tcm(n: NDS; a: uint32; itcm: bool) =
   n.last_data9 = a
   if itcm: n.wait9 += 1
 
+proc pu_refuse9(n: NDS; a: uint32; kind: int; key: uint32): bool {.noinline.} =
+  let priv = (key and 0x8000_0000'u32) == 0
+  let need = case kind
+             of 2: (if priv: PERM_PRIV_W else: PERM_USER_W)
+             else: (if priv: PERM_PRIV_R else: PERM_USER_R)
+  if n.tm.allowed(n.cp15, a, need, kind == 0):
+    n.pu_ok[kind] = key
+    return false
+  if n.dma9.dma_access: return false
+  n.arm9.abort = if kind == 0: ABORT_PREFETCH else: ABORT_DATA
+  true
+
+template pu_check9(n: NDS; a: uint32; kind: static int): bool =
+  ## The protection unit refuses the CPU's access (kind 0 fetch, 1 read,
+  ## 2 write): flag the abort (the CPU takes it after the opcode,
+  ## arm/cpu.nim). DMA is not checked. The last 4 KB page allowed per kind
+  ## and privilege is remembered (cleared by CP15 writes). For speed, data
+  ## accesses to main RAM and DTCM are not checked (read9/write9): what
+  ## the sweep needed is ITCM (null pointers land there under libnds,
+  ## which leaves 0-0x01FFFFFF outside every region) and the unmapped and
+  ## I/O space; a guard region inside main RAM (the SDK's 0x023E0000 one)
+  ## does not abort.
+  let user = (n.arm9.cpsr and 0x1F) == 0x10 and not n.arm9.bank_xfer
+  let key = (a shr 12) or (if user: 0x8000_0000'u32 else: 0'u32)
+  if likely(key == n.pu_ok[kind]): false
+  else: n.pu_refuse9(a, kind, key)
+
 proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): uint32 =
   template rd(s: seq[uint8]; i: int): uint32 =
     when width == 32: rd32(s, i)
     elif width == 16: rd16(s, i)
     else: uint32(s[i])
   if n.in_itcm(a, false):
-    when timed: n.charge9_tcm(a, true)
+    when timed:
+      if n.pu_check9(a, 1): return 0
+      n.charge9_tcm(a, true)
     return rd(n.itcm, int(a and 0x7FFF))
   if n.in_dtcm(a, false):
     when timed: n.charge9_tcm(a, false)
     return rd(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF))
-  when timed: n.charge9(a, width, false)
+  when timed:
+    if (a shr 24) != 0x02 and n.pu_check9(a, 1): return 0
+    n.charge9(a, width, false)
   case a shr 24
   of 0x02: rd(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
@@ -253,12 +284,16 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
     elif width == 16: wr16(s, i, v)
     else: s[i] = uint8(v)
   if n.in_itcm(a, true):
-    when timed: n.charge9_tcm(a, true)
+    when timed:
+      if n.pu_check9(a, 2): return
+      n.charge9_tcm(a, true)
     wr(n.itcm, int(a and 0x7FFF)); return
   if n.in_dtcm(a, true):
     when timed: n.charge9_tcm(a, false)
     wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF)); return
-  when timed: n.charge9(a, width, true)
+  when timed:
+    if (a shr 24) != 0x02 and n.pu_check9(a, 2): return
+    n.charge9(a, width, true)
   case a shr 24
   of 0x02: wr(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
@@ -292,13 +327,27 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
 
 # --- CPU mixins --------------------------------------------------------
 
-proc fetch_cost9(n: NDS; a: uint32) {.inline.} =
+proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
   ## One opcode fetch: always a nonsequential 32-bit access; a Thumb pair
   ## shares it. ITCM and I-cache hits fit in the instruction's own cycle.
+  ## Any jump pays the refill, also one back into the word just fetched (a
+  ## two-opcode Thumb loop, "B ." in ARM): GBATEK's WaitByLoop table, 4
+  ## ARM9 cycles per SUB/BGT pass with the BIOS cached, takes it.
+  ## True when the protection unit refuses the fetch: it sees a branch
+  ## target or the first word of a 4 KB page; a run of sequential fetches
+  ## inside a page (or a mode change without a branch, e.g. MSR to User) is
+  ## not re-checked.
   n.last_data9 = NO_ADDR
   let w = a and not 3'u32
-  if w == n.last_fetch9: return
-  var c = if w == n.last_fetch9 + 4: 0'i64 else: BRANCH9
+  let sequential = a == n.last_pc9 + size
+  n.last_pc9 = a
+  if sequential and w == n.last_fetch9: return false
+  var c = 0'i64
+  if not sequential or (w and 0xFFF'u32) == 0:
+    if not sequential: c = BRANCH9
+    if n.pu_check9(a, 0):
+      n.last_fetch9 = NO_ADDR
+      return true
   n.last_fetch9 = w
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: discard
   elif n.tm.ic_on and n.tm.code_cachable(a):
@@ -324,7 +373,7 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
 
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
-  n.fetch_cost9(a)
+  if n.fetch_cost9(a, 4): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd32(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
@@ -332,7 +381,7 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
-  n.fetch_cost9(a)
+  if n.fetch_cost9(a, 2): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd16(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
@@ -353,9 +402,22 @@ proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
 
 proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   let n {.cursor.} = b.nds
+  template tables(c: Cp15): untyped =
+    (c.dcache_cfg, c.icache_cfg, c.wbuf_cfg, c.data_perm, c.code_perm, c.prot_regions)
+  let ctl_before = n.cp15.control
+  let before = tables(n.cp15)
   n.cp15.write(op1, cn, cm, op2, v)
   case cn
-  of 1, 2, 3, 6: n.tm.update_regions(n.cp15)
+  of 1, 2, 3, 5, 6:
+    # rewriting a value changes nothing, and a control write only the
+    # enables (the BIOS toggles the PU thousands of times a frame in "The
+    # Strongest Demo"; timing.nim update_control)
+    if tables(n.cp15) != before:
+      n.tm.update_regions(n.cp15)
+      n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
+    elif n.cp15.control != ctl_before:
+      n.tm.update_control(n.cp15)
+      n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
   of 7:
     # cache maintenance (GBATEK "ARM CP15 Cache Control"): only the tags exist
     case cm

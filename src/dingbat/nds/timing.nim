@@ -58,12 +58,18 @@ type
   MemTiming* = object
     icache*, dcache*: TagCache
     ic_on*, dc_on*: bool
+    pu_on*: bool              ## protection unit enabled (control bit 0)
     icode: array[256, bool]   ## cachable for code, by address top byte
     idata: array[256, bool]   ## cachable for data
     ibuf: array[256, bool]    ## write-buffered
     mcode: array[4096, bool]  ## the same at 4 KB grain over 0x02000000-0x02FFFFFF
     mdata: array[4096, bool]
     mbuf: array[4096, bool]
+    # protection unit access rights (PERM_* bits) for data and code, by
+    # address top byte (PERM_MIXED: a region edge inside, ask perm_slow) and
+    # at 4 KB grain over main RAM
+    dperm, cperm: array[256, uint8]
+    mdperm, mcperm: array[4096, uint8]
 
 const
   NO_ADDR* = 0xFFFF_FFF0'u32  ## "no previous access"
@@ -141,11 +147,62 @@ proc region_of(cp: Cp15; a: uint32): int =
     if size == 0 or (uint64(a) >= uint64(base) and uint64(a) < uint64(base) + size):
       return i
 
+const
+  PERM_PRIV_R* = 1'u8
+  PERM_PRIV_W* = 2'u8
+  PERM_USER_R* = 4'u8
+  PERM_USER_W* = 8'u8
+  PERM_ALL = 15'u8
+  PERM_MIXED* = 0x80'u8
+
+proc ap_bits(ap: uint32): uint8 =
+  ## GBATEK "ARM CP15 Protection Unit": AP 1 = privileged R/W, 2 = + user R,
+  ## 3 = R/W for both, 5 = privileged R, 6 = R for both; 0 and the reserved
+  ## values grant nothing.
+  case ap
+  of 1: PERM_PRIV_R or PERM_PRIV_W
+  of 2: PERM_PRIV_R or PERM_PRIV_W or PERM_USER_R
+  of 3: PERM_ALL
+  of 5: PERM_PRIV_R
+  of 6: PERM_PRIV_R or PERM_USER_R
+  else: 0
+
+proc perm_slow*(cp: Cp15; a: uint32; code: bool): uint8 =
+  ## Access rights at `a` with the unit on: those of the highest enabled
+  ## region holding it; outside every region (the background region) none
+  ## (GBATEK).
+  let r = cp.region_of(a)
+  if r < 0: return 0
+  ap_bits(((if code: cp.code_perm else: cp.data_perm) shr (r * 4)) and 15)
+
+proc perm_span(cp: Cp15; lo, hi: uint64; code: bool): uint8 =
+  ## One PERM value if no enabled region starts or ends inside (lo, hi).
+  for i in 0..7:
+    let r = cp.prot_regions[i]
+    if (r and 1) == 0: continue
+    let bits = ((r shr 1) and 0x1F) + 1
+    if bits >= 32: continue
+    let base = uint64(r and 0xFFFF_F000'u32)
+    let stop = base + (1'u64 shl bits)
+    if (base > lo and base < hi) or (stop > lo and stop < hi): return PERM_MIXED
+  cp.perm_slow(uint32(lo), code)
+
+proc update_control*(t: var MemTiming; cp: Cp15) =
+  ## A control register (c1) write: only the enables. The ARM9 BIOS turns
+  ## the protection unit off and on around each pass of some of its loops
+  ## (thousands of times a frame in "The Strongest Demo"), so this must
+  ## not rebuild the tables.
+  t.pu_on = (cp.control and 1) != 0
+  t.ic_on = t.pu_on and (cp.control and (1'u32 shl 12)) != 0
+  t.dc_on = t.pu_on and (cp.control and (1'u32 shl 2)) != 0
+
 proc update_regions*(t: var MemTiming; cp: Cp15) =
-  ## Recompute cachability after a CP15 write (c1, c2, c3, c6).
-  let pu = (cp.control and 1) != 0
-  t.ic_on = pu and (cp.control and (1'u32 shl 12)) != 0
-  t.dc_on = pu and (cp.control and (1'u32 shl 2)) != 0
+  ## Recompute cachability and access rights after a CP15 write (c2, c3,
+  ## c5, c6; c1 too, through update_control). The tables hold the values
+  ## with the protection unit on; update_control switches it. Main RAM's
+  ## 4 KB pages are painted region by region, lowest priority first,
+  ## instead of asking region_of per page.
+  t.update_control(cp)
   template classify(a: uint32; code, data, buf: var bool) =
     let r = cp.region_of(a)
     code = r >= 0 and ((cp.icache_cfg shr r) and 1) != 0
@@ -154,8 +211,44 @@ proc update_regions*(t: var MemTiming; cp: Cp15) =
   for top in 0 ..< 256:
     let a = if top == 0xFF: 0xFFFF_0000'u32 else: uint32(top) shl 24
     classify(a, t.icode[top], t.idata[top], t.ibuf[top])
-  for i in 0 ..< 4096:
-    classify(0x0200_0000'u32 + (uint32(i) shl 12), t.mcode[i], t.mdata[i], t.mbuf[i])
+    let lo = uint64(top) shl 24
+    t.dperm[top] = cp.perm_span(lo, lo + 0x100_0000, false)
+    t.cperm[top] = cp.perm_span(lo, lo + 0x100_0000, true)
+  var page_region: array[4096, int8]
+  for p in page_region.mitems: p = -1
+  for i in 0..7:
+    let r = cp.prot_regions[i]
+    if (r and 1) == 0: continue
+    let bits = ((r shr 1) and 0x1F) + 1
+    let base = uint64(r and 0xFFFF_F000'u32)
+    let stop = if bits >= 32: 0x1_0000_0000'u64 else: base + (1'u64 shl bits)
+    let lo = max(base, 0x0200_0000'u64)
+    let hi = min(stop, 0x0300_0000'u64)
+    if lo >= hi: continue
+    for p in int((lo - 0x0200_0000'u64) shr 12) ..< int((hi - 0x0200_0000'u64) shr 12):
+      page_region[p] = int8(i)
+  var rd, rc: array[-1..7, uint8]          # rights per region (-1: background)
+  for i in -1..7:
+    if i < 0: rd[i] = 0; rc[i] = 0
+    else:
+      rd[i] = ap_bits((cp.data_perm shr (i * 4)) and 15)
+      rc[i] = ap_bits((cp.code_perm shr (i * 4)) and 15)
+  for p in 0 ..< 4096:
+    let r = int(page_region[p])
+    t.mcode[p] = r >= 0 and ((cp.icache_cfg shr r) and 1) != 0
+    t.mdata[p] = r >= 0 and ((cp.dcache_cfg shr r) and 1) != 0
+    t.mbuf[p] = r >= 0 and ((cp.wbuf_cfg shr r) and 1) != 0
+    t.mdperm[p] = rd[r]
+    t.mcperm[p] = rc[r]
+
+proc allowed*(t: MemTiming; cp: Cp15; a: uint32; need: uint8; code: bool): bool {.inline.} =
+  ## Does the protection unit let this access through? `need` is one PERM_*
+  ## bit (privileged/user, read/write; code fetches are reads).
+  if not t.pu_on: return true
+  var p = if (a shr 24) == 2: (if code: t.mcperm[(a shr 12) and 0xFFF] else: t.mdperm[(a shr 12) and 0xFFF])
+          elif code: t.cperm[a shr 24] else: t.dperm[a shr 24]
+  if p == PERM_MIXED: p = cp.perm_slow(a, code)
+  (p and need) != 0
 
 template code_cachable*(t: MemTiming; a: uint32): bool =
   (if (a shr 24) == 2: t.mcode[(a shr 12) and 0xFFF] else: t.icode[a shr 24])
