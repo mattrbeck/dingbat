@@ -277,6 +277,12 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.71 6.03L9.8 2.45L14.2 2.45L14.29 6.03A6.4 6.4 0 0 1 16.03 7.03L19.17 5.32L21.37 9.13L18.32 11A6.4 6.4 0 0 1 18.32 13L21.37 14.87L19.17 18.68L16.03 16.97A6.4 6.4 0 0 1 14.29 17.97L14.2 21.55L9.8 21.55L9.71 17.97A6.4 6.4 0 0 1 7.97 16.97L4.83 18.68L2.63 14.87L5.68 13A6.4 6.4 0 0 1 5.68 11L2.63 9.13L4.83 5.32L7.97 7.03A6.4 6.4 0 0 1 9.71 6.03Z"/><circle cx="12" cy="12" r="3.0"/></svg>
       </button>
 
+      <!-- DS games only (body.nds-mode): cycles the two screens' layout
+           (Automatic, Stacked, Side by side; Settings > Nintendo DS). -->
+      <button type="button" class="icon-btn" id="nds-layout-btn" title="Screens: Automatic" aria-label="Switch the DS screen layout">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="7.5" rx="1"/><rect x="7" y="13.5" width="10" height="7.5" rx="1"/></svg>
+      </button>
+
       <button type="button" class="icon-btn" id="fullscreen-btn" title="Fullscreen" aria-label="Fullscreen">
         <svg class="ico-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
         <svg class="ico-collapse" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
@@ -347,6 +353,11 @@
       <!-- tabindex="-1": returnFocusToGame parks focus here; never in the
            tab order. -->
       <canvas id="canvas" tabindex="-1" aria-label="Game screen" oncontextmenu="event.preventDefault()"></canvas>
+
+      <!-- A DS game: the gap between its two screens, painted the stage's
+           colour over the composite frame's black gap rows/columns, so the
+           screens read as two (index.js "Nintendo DS"). -->
+      <div id="nds-hinge" aria-hidden="true"></div>
 
       <!-- Input display overlay. A DOM overlay, not drawn on #canvas: clip
            capture is canvas.captureStream, so clips stay clean while a window
@@ -455,7 +466,7 @@
               <svg class="home-drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0 4 4m-4-4-4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
               <p class="home-drop-title">Drop a game file anywhere on the page</p>
               <button type="button" id="home-load" class="button button-primary">Add a game</button>
-              <p class="home-drop-hint">.gba, .gb, .gbc or a .zip</p>
+              <p class="home-drop-hint">.gba, .gb, .gbc, .nds or a .zip</p>
             </div>
             <!-- Signed out: Google's own button, per its branding rules.
                  Signed in with nothing here yet: a plain Sync. -->
@@ -856,6 +867,11 @@
                   <span class="settings-tab-desc">BIOS file, BIOS calls, intro</span>
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                 </button>
+                <button type="button" class="settings-tab" id="settings-tab-ds" data-tab="ds" data-name="Nintendo DS" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-ds">
+                  <span class="settings-tab-name">Nintendo DS</span>
+                  <span class="settings-tab-desc">Screen layout, BIOS and firmware</span>
+                  <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                </button>
                 <button type="button" class="settings-tab" id="settings-tab-video" data-tab="video" data-name="Video" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-video">
                   <span class="settings-tab-name">Video</span>
                   <span class="settings-tab-desc">Color, filters, scanlines, glow</span>
@@ -1092,6 +1108,39 @@
                   </label>
                 </div>
                 <p class="settings-note">Changes apply the next time a game is loaded.</p>
+              </div>
+
+              <div class="settings-pane" id="settings-pane-ds" role="tabpanel" aria-labelledby="settings-tab-ds" hidden>
+                <div class="modal-toggle-row row-flow">
+                  <span class="modal-row-label">Screens</span>
+                  <div id="nds-layout-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="DS screen layout">
+                    <button type="button" class="choice-chip selected" data-value="auto" role="radio" aria-checked="true">Automatic</button>
+                    <button type="button" class="choice-chip" data-value="stack" role="radio" aria-checked="false">Stacked</button>
+                    <button type="button" class="choice-chip" data-value="side" role="radio" aria-checked="false">Side by side</button>
+                  </div>
+                  <span class="modal-toggle-sub">Automatic shows the two screens whichever way they come out bigger. The screens button in the top bar switches too</span>
+                </div>
+                <div class="modal-subhead">BIOS and firmware</div>
+                <div class="modal-row">
+                  <span class="modal-row-label">ARM9 BIOS</span>
+                  <span id="nds-bios9-status" class="modal-row-status">HLE</span>
+                  <button type="button" class="button button-sm" id="pick-nds-bios9">Choose</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-nds-bios9">Remove</button>
+                </div>
+                <div class="modal-row">
+                  <span class="modal-row-label">ARM7 BIOS</span>
+                  <span id="nds-bios7-status" class="modal-row-status">HLE</span>
+                  <button type="button" class="button button-sm" id="pick-nds-bios7">Choose</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-nds-bios7">Remove</button>
+                </div>
+                <div class="modal-row">
+                  <span class="modal-row-label">Firmware</span>
+                  <span id="nds-firmware-status" class="modal-row-status">Built-in</span>
+                  <button type="button" class="button button-sm" id="pick-nds-firmware">Choose</button>
+                  <button type="button" class="button button-sm button-ghost" id="remove-nds-firmware">Remove</button>
+                </div>
+                <p class="modal-hint">None of these are needed: without them DS games run on dingbat's own BIOS and a built-in firmware. Dumps from your console (bios9.bin, bios7.bin, firmware.bin) apply the next time a DS game starts.</p>
+                <p class="settings-note">DS games stay on this device: Google Drive sync skips them, and save states, rewind, the link cable and cheats are not available for them yet.</p>
               </div>
 
               <div class="settings-pane" id="settings-pane-video" role="tabpanel" aria-labelledby="settings-tab-video" hidden>
@@ -1362,6 +1411,9 @@
         <div id="ab">
           <div id="a" class="pad-btn pad-face" data-inputs="4">A</div>
           <div id="b" class="pad-btn pad-face" data-inputs="5">B</div>
+          <!-- The DS's other two (body.nds-mode): the four make a diamond. -->
+          <div id="x" class="pad-btn pad-face" data-inputs="10">X</div>
+          <div id="y" class="pad-btn pad-face" data-inputs="11">Y</div>
         </div>
       </div>
 
@@ -1373,6 +1425,8 @@
 
     <script src="glpresent.js"></script>
     <script src="saveimport.js"></script>
+    <script src="nds/ndsutil.js"></script>
+    <script src="nds/ndsaudio.js"></script>
     <script src="index.js"></script>
     <script src="sdputil.js"></script>
     <script src="netplay.js"></script>

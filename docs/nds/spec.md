@@ -2,7 +2,7 @@
 
 Status: **prototype**. The DS core lives beside the GB and GBA cores
 (`src/dingbat/nds/`), boots homebrew by direct boot, and renders both screens
-on a dev page (`web/nds.html`). Hardware reference: `docs/nds/gbatek-notes.md`
+on a dev page (`web/nds.html`) and in the main web app (`docs/nds/web.md`). Hardware reference: `docs/nds/gbatek-notes.md`
 (GBATEK distilled into shared / changed / new against the GBA).
 
 ## What the DS is, against what dingbat already has
@@ -124,6 +124,10 @@ src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 tools/ndsair.nim                   the same for N machines on one Air
 web/nds.html, web/nds/             dev page (two canvases, keys, touch)
+  io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
+src/dingbat_nds_wasm.nim(+.nims)  wasm exports (createNdsCore) for the app and web/nds.html
+web/nds.html, web/nds/             dev page (two canvases, keys, touch); ndsutil.js,
+                                   ndsaudio.js for the main app (docs/nds/web.md)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs,
                                    command timing, the 3d_* ROM hashes
@@ -149,6 +153,9 @@ nim c -d:release -d:test_harness --path:src -o:ndsrun tools/ndsrun.nim
 nim c -d:emscripten src/dingbat_nds_wasm.nim      # -> web/nds/nds.{js,wasm}
 cp ~/.cache/dingbat-nds/roms/fb_both.nds web/nds/demos/   # demos are gitignored
 python3 -m http.server 8791 -d web                # open /nds.html?rom=nds/demos/fb_both.nds
+
+# the main app on the LAN over HTTPS (builds both cores; docs/nds/web.md)
+tools/serve_nds_dev.sh
 ```
 
 Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
@@ -168,7 +175,7 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | Card + backup | a commercial ROM's B7 reads + save detection; the KEY1/KEY2 boot handshake (docs/nds/boot.md) |
 | Wireless | two machines on one Air: wifi_link's beacon scan, data frames and multiplay rounds (tests/nds_wifi_test.nim); network play is a plan (docs/nds/wifi.md) |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
-| Frontend | desktop SDL target with both screens; main web UI integration |
+| Frontend | desktop SDL target with both screens; main web UI integration (first cut: docs/nds/web.md) |
 
 Milestone 1 (this skeleton): fb_hello / fb_both render on both screens in
 `ndsrun` and on `web/nds.html`.

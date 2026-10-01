@@ -298,7 +298,7 @@ proc can_firmware_boot*(bios9, bios7, firmware: seq[uint8]): bool =
   ## dumps are needed (the synthesized firmware has no boot code).
   bios9.len >= BIOS9_SIZE and bios7.len >= BIOS7_SIZE and firmware.len >= 256 * 1024
 
-proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
+proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
               force_hle = false; boot = nbDirect): NDS =
   ## A missing BIOS dump (or `force_hle`) gets the HLE BIOS for that CPU.
   ## `boot = nbFirmware` starts from power-on in the real BIOS + firmware

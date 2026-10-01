@@ -107,16 +107,18 @@ proc set_key1_table*(c: Cart; table: seq[uint8]) =
     c.key1 = init_key1(table, c.rom.gamecode, 2, 8)
   c.secure = card_secure_area(c.rom, table)
 
-proc new_cart*(rom: seq[uint8]; irq9, irq7: IrqCtl; sched: NdsScheduler): Cart =
+proc new_cart*(rom: sink seq[uint8]; irq9, irq7: IrqCtl; sched: NdsScheduler): Cart =
   ## A card as direct boot leaves it: reset released, main-data mode.
-  let ir = rom.len > 0x0C and rom[0x0C] == uint8('I')
-  result = Cart(rom: rom, chip_id: chip_id_for(rom.len, ir), irq9: irq9, irq7: irq7,
+  let size = rom.len
+  let ir = size > 0x0C and rom[0x0C] == uint8('I')
+  let sel = if size > 0x13: rom[0x13] else: 0'u8
+  # `rom` is moved in last: a sink parameter used afterwards would be copied
+  result = Cart(rom: rom, chip_id: chip_id_for(size, ir), irq9: irq9, irq7: irq7,
                 sched: sched, backup: new_backup(), mode: cmMain)
-  if rom.len == 0: result.chip_id = 0xFFFF_FFFF'u32   # no card (GBATEK)
+  if size == 0: result.chip_id = 0xFFFF_FFFF'u32   # no card (GBATEK)
   # Game code 'I...' = cart with an infrared port (GBATEK "NDS Gamecodes")
   result.backup.ir = ir
   result.set_key1_table(@[])
-  let sel = if rom.len > 0x13: rom[0x13] else: 0'u8
   result.sync_key2(card_seed0(0, sel))   # Assumed: any shared seed will do
 
 proc power_on*(c: Cart) =
