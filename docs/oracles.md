@@ -76,3 +76,29 @@ chose between readings the ROMs could not separate.
 | runner: jsmolka frame hashes | pinned hashes for ppu/hello, shades, stripes, nes | mGBA, NanoBoyAdvance | run — 4fe14a87 "each hash was confirmed byte-identical against BOTH mGBA and NanoBoyAdvance" | jsmolka's published reference PNGs |
 | runner: SameSuite APU default revision | CPU CGB E | SameBoy verdict grid | run — f0e64749 70 ROM × 6 revision `sameboy_ssdump` grid | SameSuite's stated capture machine; gbedge p12 on CGB-E |
 | `--screen-check` | asserts settled + multi-shade, not glyphs (blargg loses cells to mode-3 refusal at double speed) | SameBoy | run — de6d28c5 two builds over real ROMs, "SameBoy drops the same writes" (frame diff) | blargg's console bounded-polls VBlank (ROM source); serial output is the scored channel |
+
+## DS reference cores (tools/ndsref)
+
+Prebuilt libretro cores (macOS arm64 binaries, no sources) run as black boxes
+by `tools/ndsref` (2026-10-01). Their names and option files live in
+`~/.cache/dingbat-nds/cores` (`NAME_libretro.dylib` + `NAME_libretro.opts`),
+not in the repo; the settings that matter are recorded here so the setup can
+be rebuilt. No DS behaviour is pinned by these runs yet.
+
+| Core (as it reports itself) | Output | Settings for comparable runs | Findings |
+|---|---|---|---|
+| melonDS DS 1.4.0 | XRGB8888 (6-bit widened), 59.826098 fps, 32728.498 Hz | `melonds_boot_mode=direct`, `melonds_console_mode=ds`, `melonds_sysfile_mode=native` (BIOS/firmware from `--bios`, else built-in), `melonds_jit_enable=disabled`, `melonds_render_mode=software`, `melonds_threaded_renderer=disabled`, `melonds_start_time_mode=absolute` (RTC fixed at 2004-01-01, otherwise host clock), `melonds_number_of_screen_layouts=1` + `melonds_screen_layout1=top-bottom`, `melonds_screen_gap=0`, `melonds_show_cursor=disabled`, `melonds_touch_mode=touch`, `melonds_audio_interpolation=disabled` (also linear/cosine/cubic/gaussian), `melonds_homebrew_sdcard=disabled`, `melonds_dsi_sdcard=disabled`, `melonds_network_mode=disabled` | rejects ROMs with plain ARM9 code in the secure area (all white; `--relocate` fixes it); runs current libnds builds; libnds `hello_world` counter matches ndsrun frame for frame; armwrestler menu equal from frame 5, fb_both from 10 (ours draws faster: CPU timing) |
+| melonDS 0.9.3 | XRGB8888, 59.898308 fps, 32768 Hz | `melonds_boot_directly=enabled`, `melonds_console_mode=DS`, `melonds_threaded_renderer=disabled`, `melonds_screen_layout=Top/Bottom`, `melonds_screen_gap=0`, `melonds_touch_mode=Touch`, `melonds_audio_interpolation=None` (also Linear/Cosine/Cubic); BIOS = system dir files, else its free BIOS + generated firmware | one frame behind the 1.4.0 core under direct boot; tone output at half the amplitude of the other cores; secure-area and current-libnds failures (white frames) as the next row; no RTC option (host clock) |
+| DeSmuME 0.9.12 (git 95b4d79) | RGB565, 59.8261 fps, 44100 Hz | `desmume_use_external_bios` (disabled = HLE; enabled with `--bios`), `desmume_boot_into_bios=disabled`, `desmume_num_cores=1`, `desmume_advanced_timing=enabled`, `desmume_internal_resolution=256x192`, `desmume_screens_layout=top/bottom`, `desmume_screens_gap=0`, `desmume_pointer_mouse=enabled` + `desmume_pointer_type=touch` (touch is never polled otherwise); no audio interpolation option | runs secure-area ROMs as they are; current libnds builds (hello_world, Simple_Tri) stay white; fb_both and armwrestler equal to ndsrun from frame 2 / 1; RTC is the host clock (no option) |
+
+All three: two runs of the same ROM gave byte-identical PNGs (frames 30, 60,
+120) and WAVs for fb_both, gx_tri, snd_tone, Simple_Tri, hello_world and
+armwrestler. A firmware boot (`melonds_boot_mode=native` /
+`desmume_boot_into_bios=enabled` with real dumps) stops at the health-and-
+safety screen until touched, then shows a menu that lists no homebrew card,
+so only direct boot is comparable. Open differences seen on first use: the
+3D triangle's colour interpolation and one edge line (gx_tri, Simple_Tri:
+3.9-5.7 k pixels at tolerance 0, 1.1-1.9 k at tolerance 8, against every core); raw
+touch ADC values (firmware calibration) while the reported pixel matches;
+ndsrun writes 0.2% fewer samples per frame than 32728 Hz x frame time
+(snd_tone, 120 frames: 65499 vs 65646).

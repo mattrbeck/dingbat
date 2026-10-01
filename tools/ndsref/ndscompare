@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Run one ROM through tools/ndsrun.nim and through a libretro core (ndsref)
+at the same frames, and diff every shot.
+
+  ndscompare ROM --core CORE --shots 30,60 [--frames N] [--ref-offset K]
+             [--press KEY@F..] [--touch X:Y@F..] [--bios DIR] [--opt K=V]..
+             [--relocate] [--tol N] [--out DIR] [--ndsrun PATH]
+
+Writes DIR/ours_<F>.png, DIR/ref_<F+K>.png and DIR/diff_<F>.png (default DIR
+./ndscompare_out). --ref-offset K compares our frame F with the core's frame
+F+K (input frames shift with it). --relocate hands the core a copy of the ROM
+with the ARM9 binary moved out of the secure area (see ndsreloc). Exit status
+0 when every shot matches.
+"""
+import argparse
+import importlib.machinery
+import importlib.util
+import os
+import subprocess
+import sys
+
+sys.dont_write_bytecode = True
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+
+
+def load(name):
+    loader = importlib.machinery.SourceFileLoader(name, os.path.join(HERE, name))
+    spec = importlib.util.spec_from_loader(name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def shift_presses(spec, k):
+    """KEY@F[+D|-L] items with every frame number moved by k."""
+    out = []
+    for item in spec.split(","):
+        if not item:
+            continue
+        key, when = item.rsplit("@", 1)
+        if "+" in when:
+            f, d = when.split("+")
+            out.append(f"{key}@{int(f) + k}+{d}")
+        elif "-" in when:
+            f, last = when.split("-")
+            out.append(f"{key}@{int(f) + k}-{int(last) + k}")
+        else:
+            out.append(f"{key}@{int(when) + k}")
+    return ",".join(out)
+
+
+def run(cmd):
+    print("$ " + " ".join(cmd), flush=True)
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if r.returncode != 0:
+        sys.stdout.write(r.stdout)
+        sys.exit(f"ndscompare: {cmd[0]} failed ({r.returncode})")
+    return r.stdout
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("rom")
+    ap.add_argument("--core", required=True)
+    ap.add_argument("--shots", required=True, help="our frame numbers, comma separated")
+    ap.add_argument("--frames", type=int, help="our frames to run (default: the last shot)")
+    ap.add_argument("--ref-offset", type=int, default=0)
+    ap.add_argument("--press", action="append", default=[])
+    ap.add_argument("--touch", action="append", default=[])
+    ap.add_argument("--bios", help="BIOS/firmware dir for both runners")
+    ap.add_argument("--opt", action="append", default=[], help="core option KEY=VALUE")
+    ap.add_argument("--relocate", action="store_true")
+    ap.add_argument("--tol", type=int, default=0)
+    ap.add_argument("--out", default="ndscompare_out")
+    ap.add_argument("--ndsrun", default=os.environ.get("NDSRUN", os.path.join(HERE, "ndsrun")))
+    args = ap.parse_args()
+
+    shots = [int(s) for s in args.shots.split(",") if s]
+    frames = args.frames or max(shots)
+    k = args.ref_offset
+    os.makedirs(args.out, exist_ok=True)
+
+    ndsref = os.path.join(HERE, "ndsref")
+    if not os.path.exists(ndsref):
+        run(["sh", os.path.join(HERE, "build.sh")])
+    if not os.path.exists(args.ndsrun):
+        run(["nim", "c", "-d:release", "--hints:off", "--path:" + os.path.join(REPO, "src"),
+             "-o:" + args.ndsrun, os.path.join(REPO, "tools", "ndsrun.nim")])
+
+    presses = ",".join(p for p in args.press if p)
+    touches = ",".join(t for t in args.touch if t)
+    ours_press = ",".join(x for x in [presses] + [
+        "TOUCH:" + t for t in touches.split(",") if t] if x)
+
+    cmd = [args.ndsrun, args.rom, "--frames", str(frames), "--shots", ",".join(map(str, shots)),
+           "--out", os.path.join(args.out, "ours.png")]
+    if args.bios:
+        cmd += ["--bios", args.bios]
+    if ours_press:
+        cmd += ["--press", ours_press]
+    run(cmd)
+
+    rom = args.rom
+    if args.relocate:
+        rom = os.path.join(args.out, "relocated.nds")
+        data, _ = load("ndsreloc").relocate(open(args.rom, "rb").read())
+        with open(rom, "wb") as f:
+            f.write(data)
+    cmd = [ndsref, "--core", args.core, rom, "--frames", str(frames + k), "--depth5",
+           "--no-final", "--shots", ",".join(str(s + k) for s in shots),
+           "--out", os.path.join(args.out, "ref")]
+    if args.bios:
+        cmd += ["--bios", args.bios]
+    for o in args.opt:
+        cmd += ["--opt", o]
+    if presses:
+        cmd += ["--press", shift_presses(presses, k)]
+    if touches:
+        cmd += ["--touch", shift_presses(touches, k)]
+    run(cmd)
+
+    diff = load("ndsdiff")
+    worst = 0
+    for s in shots:
+        a = os.path.join(args.out, f"ours_{s}.png")
+        b = os.path.join(args.out, f"ref_{s + k}.png")
+        print(f"--- frame {s} (core frame {s + k})")
+        worst = max(worst, diff.compare(a, b, os.path.join(args.out, f"diff_{s}.png"), args.tol))
+    sys.exit(worst)
+
+
+if __name__ == "__main__":
+    main()

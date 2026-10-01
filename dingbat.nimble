@@ -59,6 +59,10 @@ task test_ndssystem, "Run the DS system device tests (maths unit, RTC, save chip
 task test_ndshlebios, "Run the DS HLE BIOS SWIs against the real BIOS (or computed expectations)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndshlebios_test tests/nds_hle_bios_test.nim"
 
+task ndsref_build, "Build the DS reference tools (tools/ndsref: a headless libretro runner, and ndsrun beside it)":
+  exec "sh tools/ndsref/build.sh"
+  exec "nim c -d:test_harness -d:release --hints:off --path:src -o:tools/ndsref/ndsrun tools/ndsrun.nim"
+
 task test_desktop, "Run the desktop frontend tests (input, settings, link, saves, game loading, modals)":
   # modal drives Dear ImGui headless, so it needs imguin (CI's test job
   # installs it: .github/scripts/install-test-deps.sh).
