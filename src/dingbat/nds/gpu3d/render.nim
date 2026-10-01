@@ -342,20 +342,28 @@ proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32
     # decal: the texel alpha mixes texel over vertex colour
     if not c.textured or ta == 0: return pack(vr, vg, vb, av)
     if ta == 31: return pack(tr, tg, tb, av)
-    let a6 = ta * 2 + 1
-    pack((tr * a6 + vr * (63 - a6)) shr 6, (tg * a6 + vg * (63 - a6)) shr 6,
-         (tb * a6 + vb * (63 - a6)) shr 6, av)
+    # 5-bit texel alpha over 32 (GBATEK writes (Rt*At + Rv*(63-At))/64;
+    # 3d_blendmodes on the reference core pins this form exactly)
+    pack((tr * ta + vr * (31 - ta)) shr 5, (tg * ta + vg * (31 - ta)) shr 5,
+         (tb * ta + vb * (31 - ta)) shr 5, av)
   of 2:
     # toon/highlight: the vertex red picks the shading colour
     let sc = rgb6(r.reg16(0x380 + int(vr shr 1) * 2))
     let sr = ch(sc, 0)
     let sg = ch(sc, 1)
     let sb = ch(sc, 2)
-    var rr = ((tr + 1) * (sr + 1) - 1) shr 6
-    var gg = ((tg + 1) * (sg + 1) - 1) shr 6
-    var bb = ((tb + 1) * (sb + 1) - 1) shr 6
+    var rr, gg, bb: int32
     if c.highlight:
-      rr = min(63, rr + sr); gg = min(63, gg + sg); bb = min(63, bb + sb)
+      # highlight: the texel modulated by the vertex red as a grey, plus
+      # the table colour (GBATEK modulates by the table colour; the
+      # reference core's 3d_highlight frame pins this form exactly)
+      rr = min(63, (((tr + 1) * (vr + 1) - 1) shr 6) + sr)
+      gg = min(63, (((tg + 1) * (vr + 1) - 1) shr 6) + sg)
+      bb = min(63, (((tb + 1) * (vr + 1) - 1) shr 6) + sb)
+    else:
+      rr = ((tr + 1) * (sr + 1) - 1) shr 6
+      gg = ((tg + 1) * (sg + 1) - 1) shr 6
+      bb = ((tb + 1) * (sb + 1) - 1) shr 6
     pack(rr, gg, bb, ((ta + 1) * (av + 1) - 1) shr 5)
   else:
     pack(((tr + 1) * (vr + 1) - 1) shr 6, ((tg + 1) * (vg + 1) - 1) shr 6,
