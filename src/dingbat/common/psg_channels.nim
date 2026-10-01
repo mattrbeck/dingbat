@@ -776,7 +776,7 @@ proc psg_noise_deadline(h: PsgHost; period: CycleCount; divisor_code: uint8;
       extra = (if divisor_code == 1: extra + tick else: extra - tick)
   edge + (if restarting: period else: period div 2) + extra
 
-proc ch4_catchup_slow(ch: PsgNoise; h: PsgHost; observer_period: uint32) =
+proc ch4_catchup_slow(ch: PsgNoise; h: PsgHost; observer_period: uint32) {.inline.} =
   let now    = psg_now(h)
   let ticks  = ch4_timer(ch)
   let period = psg_period(ticks, h)
