@@ -77,6 +77,9 @@ booking, and DMA mode 4 feeds the main-memory display FIFO 4 words per
 request as the display reads it. The renderer's line budget gives
 RDLINES_COUNT and the underflow flag. docs/nds/3d-timing.md has the model
 and its evidence.
+the selected baud rate (the ARM7 bus delivers its reply and IRQ at the end:
+docs/nds/peripherals.md). With these, SoulSilver runs frame-locked with the
+reference core (docs/oracles.md, "NDS core").
 
 ## Layout
 
@@ -107,8 +110,10 @@ src/dingbat/nds/
   io/dma.nim       4 channels per CPU (+ ARM9 fill regs)
   io/ipc.nim       IPCSYNC + FIFOs
   io/divsqrt.nim   ARM9 maths unit
-  io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid
+  io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid (IF.22)
   io/spi.nim       ARM7 SPI: power manager, firmware flash, touchscreen
+                   (docs/nds/peripherals.md)
+  io/mic.nim       microphone sample queue, read by the TSC's AUX channel
   io/cart.nim      card slot (ROMCTRL, raw/KEY1/KEY2 protocol, seeds, AUXSPI)
   io/cartcrypt.nim KEY1 (BIOS7 table at run time), KEY2, secure-area forms
   io/backup.nim    save chip: EEPROM/FRAM/FLASH, IR-cart front-end
@@ -116,16 +121,14 @@ src/dingbat/nds/
                    gba/storage_chip.nim, GPIO), Rumble Pak, Expansion Pak
                    (docs/nds/slot2.md)
   io/spu.nim       ARM7 sound: 16 channels, capture, stereo out at 32728.5 Hz
-  io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date)
+  io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date),
+                   INT1/INT2 interrupts to SIO SI, RCNT
   io/wifi.nim      wifi MAC/BB/RF, transmitter, receiver, the Air between
                    consoles (docs/nds/wifi.md)
   air.nim          several machines in lockstep on one Air (local wireless)
-src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
+src/dingbat_nds_wasm.nim(+.nims)  wasm exports (createNdsCore) for the app and web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 tools/ndsair.nim                   the same for N machines on one Air
-web/nds.html, web/nds/             dev page (two canvases, keys, touch)
-  io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
-src/dingbat_nds_wasm.nim(+.nims)  wasm exports (createNdsCore) for the app and web/nds.html
 web/nds.html, web/nds/             dev page (two canvases, keys, touch); ndsutil.js,
                                    ndsaudio.js for the main app (docs/nds/web.md)
 tests/nds/                         ROM sources, build tools, README
@@ -135,6 +138,7 @@ tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
 tests/nds_slot2_test.nim           GBA-slot devices + the slot2_probe ROM
 tests/nds_boot_test.nim            KEY1/KEY2, card handshake, secure area, direct boot
 tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machines
+tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
@@ -168,7 +172,7 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | Memory / boot / BIOS | libnds `hello_world` and `template_combined` boot through both CPUs' crt0 + IPC handshake; HLE BIOS so no dump is required |
 | 2D engines | libnds console (`hello_world`, `ansi_console`), `16bit_color_bmp`, `256_color_bmp`, `simple` sprites, window tests |
 | IRQ / timers / DMA / IPC / maths | gbeplus irq/math/dma, rockwrestler system tests, `pxi`, `timercallback` |
-| Input / touch / SPI / RTC | `touch_test` tracks the mouse |
+| Input / touch / SPI / RTC | `touch_test` tracks the mouse; periph_suite (RTC interrupts, SPI timing, power manager, TSC channels, mic, sleep/lid: docs/nds/peripherals.md) |
 | 3D | `Simple_Tri`, `Simple_Quad` |
 | Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
 | GBA slot | `slot2_probe` under each device; SoulSilver's MIGRATE FROM <GBA game> with a Generation 3 cart (docs/nds/slot2.md) |

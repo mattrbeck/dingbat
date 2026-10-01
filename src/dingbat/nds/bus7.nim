@@ -44,7 +44,7 @@ proc io7_read(n: NDS; a: uint32): uint32 =
   of 0x0B0 .. 0x0DC: n.dma7.read_reg(o)
   of 0x100 .. 0x10C: n.timers7.read_reg(o)
   of 0x130: uint32(n.input.keyinput()) or (uint32(n.input.keycnt7) shl 16)
-  of 0x134: 0x8000'u32 or (uint32(n.input.extkeyin()) shl 16)  # RCNT | EXTKEYIN
+  of 0x134: uint32(n.rtc.read_rcnt()) or (uint32(n.input.extkeyin()) shl 16)  # RCNT | EXTKEYIN
   of 0x138: uint32(n.rtc.read_reg())
   of 0x180: n.ipc.read_sync(false)
   of 0x184: n.ipc.read_fifocnt(false)
@@ -83,7 +83,7 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFFFF_0000'u32) != 0:
       n.input.keycnt7 = uint16(v shr 16)
       n.input.check_keypad_irq(n.input.keycnt7, n.irq7)
-  of 0x134: discard   # RCNT: TODO(sio)
+  of 0x134: (if (mask and 0xFFFF) != 0: n.rtc.write_rcnt(uint16(v), uint16(mask)))  # RCNT (io/rtc.nim)
   of 0x138: (if (mask and 0xFFFF) != 0: n.rtc.write_reg(uint16(v)))
   of 0x180: n.ipc.write_sync(false, v, mask)
   of 0x184: n.ipc.write_fifocnt(false, v, mask)
@@ -99,9 +99,11 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFF) != 0 and n.arm7.cur_pc < 0x4000:
       n.postflg7 = n.postflg7 or uint8(v and 1)
     if (mask and 0xFF00) != 0:
-      # HALTCNT: 2 = halt, 3 = sleep (TODO: sleep wakes on key/lid only)
+      # HALTCNT: 2 = halt, 3 = sleep (nds.nim `sleep_for`); 1 (GBA mode)
+      # is not supported and does nothing
       let mode = (v shr 14) and 3
       if mode >= 2: n.arm7.halted = true
+      if mode == 3: n.sleeping = true
   of 0x304: (if (mask and 0xFFFF) != 0: n.powcnt2 = uint16(v) and 3)
   of 0x308:
     # write-once (the BIOS sets 0x1205; bit 0 is ignored)
@@ -253,7 +255,10 @@ proc spu_read32*(b: Arm7Bus; a: uint32): uint32 = b.nds.read7(a, 32)
 proc spu_write32*(b: Arm7Bus; a: uint32; v: uint32) = b.nds.write7(a, v, 32)
 
 proc irq_line*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.line()
-proc irq_wake*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.wake()
+proc irq_wake*(b: Arm7Bus): bool {.inline.} =
+  ## Halt ends on (IE and IF) != 0 whatever IME says; sleep only through
+  ## `wake_from_sleep` (nds.nim).
+  not b.nds.sleeping and b.nds.irq7.wake()
 proc access_cycles*(b: Arm7Bus): int64 {.inline.} =
   result = b.nds.wait7
   b.nds.wait7 = 0

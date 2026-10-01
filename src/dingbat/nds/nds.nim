@@ -10,7 +10,7 @@ import sched, timing
 import mem/vram
 import gpu/[gpu, engine2d]
 import gpu3d/gpu3d
-import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi, slot2]
+import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi, slot2, mic]
 import hle_bios
 
 export cpu, sched, gpu, engine2d, input, vram, cart, spu, slot2
@@ -66,6 +66,7 @@ type
     last_fetch7*, last_data7*: uint32
     mmem_armed*: array[4, bool] ## DMA mode 4 channels running this frame
     frame_done*: bool
+    sleeping*: bool             ## ARM7 HALTCNT sleep: every clock but the RTC's stopped
     line_start*: int64          ## master cycle the current line began
     unmapped_log*: int          ## first few unmapped accesses are logged
     # -d:ndsdebug only (tools/ndsrun.nim flags)
@@ -283,6 +284,8 @@ proc dispatch(n: NDS; ev: NdsEvent) =
     n.sched.schedule(n.spu.next_tick, evSpuSample)
   of evGxFifo: n.gx_service()
   of evWifi: n.wifi.on_event()
+  of evSpi: n.spi.transfer_end()
+  of evRtc: n.rtc.on_event()
 
 # ---------------------------------------------------------------------------
 # Construction and the frame loop
@@ -331,11 +334,13 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.ipc = new_ipc(n.irq9, n.irq7)
   n.divsqrt = new_divsqrt(n.sched)
   n.spi = new_spi(if firmware.len > 0: firmware else: synth_firmware(), n.irq7, n.input)
-  n.spi.sched = n.sched
+  n.spi.set_sched(n.sched)
   n.cart = new_cart(rom, n.irq9, n.irq7, n.sched)
   n.cart.set_key1_table(key1_table_from_bios7(bios7))
   n.spu = new_spu()
   n.rtc = new_rtc()
+  n.rtc.sched = n.sched
+  n.rtc.irq = n.irq7
   n.wifi = new_wifi(n.sched, n.irq7)
   n.slot2 = new_slot2()
   n.arm9 = new_arm_cpu(Arm9Bus(nds: n), ARM9_CYCLES_PER_INSTR)
@@ -368,10 +373,42 @@ proc load_nds*(rom_path: string; bios_dir = ""; boot = nbDirect): NDS =
           read_file_bytes(dir / "firmware.bin"),
           force_hle = getEnv("DINGBAT_NDS_HLE") == "1", boot = boot)
 
+# ---------------------------------------------------------------------------
+# Sleep (GBATEK "DS Power Control", HALTCNT; "BIOS Halt Functions", Stop/Sleep)
+
+const SLEEP_WAKE = (1'u32 shl ord(irqSerial)) or (1'u32 shl ord(irqKeypad)) or
+                   (1'u32 shl ord(irqGbaSlot)) or (1'u32 shl ord(irqLid))
+  ## What ends sleep, as far as IE allows: the GBA's Stop list (keypad, game
+  ## pak, general-purpose SIO, which carries the RTC) plus the hinge.
+
+proc wake_pending(n: NDS): bool {.inline.} =
+  (n.irq7.ie and n.irq7.iff and SLEEP_WAKE) != 0
+
+proc asleep*(n: NDS): bool {.inline.} = n.sleeping or n.spi.power_off
+
+proc wake_from_sleep(n: NDS) =
+  if n.sleeping and n.wake_pending(): n.sleeping = false
+
+proc sleep_for(n: NDS; cycles: int64) =
+  ## Asleep, both CPUs, video, sound, timers and DMA stand still (Assumed
+  ## for the ARM9 and video: GBATEK says "most of the hardware ... paused"),
+  ## so the master clock does not move; the RTC's crystal runs on and an
+  ## alarm can end the sleep. Powered off (power manager), nothing ends it.
+  if n.spi.power_off: return
+  n.wake_from_sleep()
+  if not n.sleeping: return
+  n.rtc.sleep_advance(cycles, proc(): bool = n.wake_pending())
+  n.wake_from_sleep()
+
 proc run_until*(n: NDS; target: int64) =
+  ## Asleep, `target - now` is spent as sleep and the master clock stays.
   var ev: NdsEvent
   var at: int64
+  if n.asleep():
+    n.sleep_for(max(0'i64, target - n.sched.now))
+    return
   while n.sched.now < target:
+    if n.asleep(): return     # the ARM7 went to sleep in the last slice
     var slice_end = min(target, n.sched.next_at())
     let both_halted = n.arm9.halted and n.arm7.halted
     if not both_halted: slice_end = min(slice_end, n.sched.now + SLICE)
@@ -386,9 +423,14 @@ proc run_until*(n: NDS; target: int64) =
 proc run_frame*(n: NDS) =
   ## Run to the start of the next V-blank (line 192).
   n.frame_done = false
+  if n.asleep():
+    # a frame's worth of sleep; the screens show what they last showed
+    n.sleep_for(FRAME_CYCLES)
+    if n.asleep(): return
   let limit = n.sched.now + 2 * FRAME_CYCLES
   while not n.frame_done and n.sched.now < limit:
     n.run_until(min(limit, n.sched.now + LINE_CYCLES))
+    if n.asleep(): break
   n.slot2.end_frame()
 
 proc insert_slot2*(n: NDS; kind: Slot2Kind; rom: seq[uint8] = @[];
@@ -421,6 +463,22 @@ proc set_button*(n: NDS; b: NdsButton; pressed: bool) =
   if pressed: n.input.held.incl(b) else: n.input.held.excl(b)
   n.input.check_keypad_irq(n.input.keycnt9, n.irq9)
   n.input.check_keypad_irq(n.input.keycnt7, n.irq7)
+
+proc set_lid*(n: NDS; closed: bool) =
+  ## Close or open the hinge (EXTKEYIN bit 7; opening raises IF.22).
+  n.input.set_lid(closed, n.irq7)
+
+proc push_mic*(n: NDS; samples: openArray[int16]; rate: int) =
+  ## Queue microphone input (mono, `rate` Hz) behind what is queued; the
+  ## ARM7 reads it through the TSC's AUX channel (io/mic.nim).
+  n.spi.mic.push(samples, rate)
+
+proc set_battery_low*(n: NDS; low: bool) = n.spi.battery_low = low
+proc set_external_power*(n: NDS; on: bool) = n.spi.ext_power = on
+
+proc backlight*(n: NDS; top: bool): bool =
+  ## Whether the power manager has that screen's backlight on.
+  n.spi.backlight(top)
 
 proc set_touch*(n: NDS; x, y: int; down: bool) =
   n.input.touching = down

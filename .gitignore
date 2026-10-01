@@ -206,3 +206,4 @@ tests/nds/src/**/*.elf
 # DS reference tools (nimble ndsref_build)
 /tools/ndsref/ndsref
 /tools/ndsref/ndsrun
+/dingbat_ndsperiph_test

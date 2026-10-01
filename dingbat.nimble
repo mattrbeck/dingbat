@@ -62,6 +62,9 @@ task test_ndsslot2, "Run the DS GBA-slot (slot 2) tests (devices + the slot2_pro
 task test_ndswifi, "Run the DS wifi tests (the Air between consoles, the wifi_link ROM on two machines)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndswifi_test tests/nds_wifi_test.nim"
 
+task test_ndsperiph, "Run the DS peripheral tests (RTC interrupts, SPI timing, power manager, touchscreen, mic, flash, sleep/lid)":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndsperiph_test tests/nds_periph_test.nim"
+
 task test_nds3d, "Run the DS 3D engine tests (command scenes + the 3d_* test ROMs)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_nds3d_test tests/nds_3d_test.nim nds3d_out"
 
