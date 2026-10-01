@@ -441,6 +441,23 @@ proc scene_3d_capture() =
   a.reg32(0, 0x000E_0000)                          # display mode 2, bank D
   g.frame()
   g.expect_px(true, 10, 10, rgb(0, 0, 30), "VRAM display of the captured bank")
+  # capture blend: source A (composite, BG1 blue) 8/16 + source B (bank D,
+  # now holding blue too, via the VRAM display bank) 8/16, written to C
+  a.reg32(0, 0x000D_0300 or 0x0001_0000)           # mode 1 display, VRAM src B = D
+  for i in 0 ..< 256 * 192: g.bank_w16(vbD, i * 2, rgb(30, 0, 0) or 0x8000)
+  g.vram.write_cnt(vbC, 0x80)
+  a.reg32(0x64, 0x8000_0000'u32 or (2'u32 shl 29) or (2 shl 16) or (3 shl 20) or 8 or (8 shl 8))
+  g.frame()
+  let c = g.vram.bank_ptr(vbC)
+  let blended = uint16(c[(5 * 256 + 5) * 2]) or (uint16(c[(5 * 256 + 5) * 2 + 1]) shl 8)
+  check(blended == (rgb(15, 0, 15) or 0x8000), "capture blend A 8/16 + B 8/16", hex4(blended))
+  # main-memory display (mode 3): a frame of words pushed through 0x4000068
+  a.reg32(0, 0x0003_0000)
+  for i in 0 ..< 256 * 192 div 2:
+    let y = (i * 2) div 256
+    a.reg32(0x68, uint32(rgb(0, y div 8, 0)) * 0x10001'u32)
+  g.frame()
+  g.expect_px(true, 7, 100, rgb(0, 100 div 8, 0), "main-memory display FIFO stub")
 
 when isMainModule:
   scene_text()

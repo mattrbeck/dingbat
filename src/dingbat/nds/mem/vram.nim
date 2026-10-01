@@ -269,6 +269,15 @@ proc rd32*(w: RegionView; offset: int): uint32 {.inline.} =
   if likely(q != nil): cast[ptr uint32](addr q[o and (PAGE_SIZE - 4)])[]
   else: uint32(w.vram.read16(w.region, o)) or (uint32(w.vram.read16(w.region, o + 2)) shl 16)
 
+proc fetch8*(w: RegionView; offset: int; dst: var array[8, uint8]) {.inline.} =
+  ## Eight bytes from an 8-aligned offset (one 8bpp tile row).
+  let o = offset and w.mask
+  let q = w.pages[o shr PAGE_SHIFT]
+  if likely(q != nil):
+    copyMem(addr dst[0], addr q[o and (PAGE_SIZE - 8)], 8)
+  else:
+    for k in 0..7: dst[k] = w.vram.read8(w.region, o + k)
+
 proc lcdc_mapped*(v: Vram; b: VramBank): bool =
   ## Bank enabled with MST 0 (its LCDC window): display capture's target.
   (v.cnt[b] and 0x87) == 0x80

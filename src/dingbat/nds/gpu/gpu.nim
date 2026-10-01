@@ -96,7 +96,7 @@ proc capture_line(g: Gpu; y: int) =
         ca = e.gfx[x] or 0x8000
     if src != 0:
       if b_fifo:
-        cb = e.mmem[x]
+        cb = e.mmem_pixel(y, x)
       else:
         let i = (rbase + x * 2) and 0x1FFFF
         cb = uint16(rbank[i]) or (uint16(rbank[i + 1]) shl 8)

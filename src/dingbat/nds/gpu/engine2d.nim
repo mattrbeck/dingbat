@@ -50,10 +50,12 @@ type
     # line latches
     win_inside*: array[2, bool]
     mos_bgx, mos_bgy: array[2, int32]     ## affine refs latched on a mosaic block's first line
-    # main-memory display FIFO (DISP_MMEM_FIFO 0x4000068). STUB: 32-bit
-    # writes are two pixels into a 256-pixel ring the mode-3 display and
-    # capture source B read a line of; no DMA mode 4 pacing.
-    mmem*: array[256, uint16]
+    # main-memory display FIFO (DISP_MMEM_FIFO 0x4000068). STUB: each
+    # 32-bit write is two pixels into a whole-frame buffer (wrapping at
+    # 256x192) that display mode 3 and capture source B read line y of, so
+    # a frame pushed by an immediate DMA or CPU loop shows; the real
+    # 16-word FIFO and DMA mode 4's per-line pacing are not modelled.
+    mmem*: seq[uint16]
     mmem_wr*: int
     # per-line scratch
     bgpix: array[4, array[256, uint16]]   ## bit 15 = opaque
@@ -125,10 +127,16 @@ proc merge16(old: uint16; v, mask: uint32; shift: int): uint16 {.inline.} =
   let m = uint16((mask shr shift) and 0xFFFF)
   (old and not m) or (uint16((v shr shift) and 0xFFFF) and m)
 
+const MMEM_PIXELS = 256 * 192
+
 proc mmem_push(e: Engine2D; v: uint32) =
-  e.mmem[e.mmem_wr] = uint16(v)
-  e.mmem[(e.mmem_wr + 1) and 255] = uint16(v shr 16)
-  e.mmem_wr = (e.mmem_wr + 2) and 255
+  if e.mmem.len == 0: e.mmem = newSeq[uint16](MMEM_PIXELS)
+  e.mmem[e.mmem_wr] = uint16(v and 0xFFFF)
+  e.mmem[e.mmem_wr + 1] = uint16(v shr 16)
+  e.mmem_wr = (e.mmem_wr + 2) mod MMEM_PIXELS
+
+proc mmem_pixel*(e: Engine2D; y, x: int): uint16 {.inline.} =
+  if e.mmem.len == 0: 0'u16 else: e.mmem[y * 256 + x]
 
 proc write_reg*(e: Engine2D; offset: uint32; v, mask: uint32) =
   ## Aligned 32-bit write; `mask` selects the bytes actually written.
@@ -185,6 +193,10 @@ proc write_reg*(e: Engine2D; offset: uint32; v, mask: uint32) =
     if e.id == engA and mask == 0xFFFF_FFFF'u32: e.mmem_push(v)
   of 0x6C: e.master_bright = merge16(e.master_bright, v, mask, 0) and 0xC01F
   else: discard
+
+# The renderer below indexes its fixed 256-entry line buffers and VRAM
+# page views with in-range values only; runtime checks off as in the GBA bus.
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 # ---------------------------------------------------------------------------
 # Line latches (every line, V-blank included)
@@ -310,15 +322,16 @@ proc render_text(e: Engine2D; bg, y: int) =
     let x0 = xx and 7
     let span = min(8 - x0, 256 - x)
     if is8:
-      let base = char_base + tile * 64 + r * 8
+      var row8: array[8, uint8]
+      w.fetch8(char_base + tile * 64 + r * 8, row8)
       if ext:
         let pbase = ext_base + int(se shr 12) * 512
         for k in 0 ..< span:
-          let idx = int(w.rd8(base + ((x0 + k) xor fx)))
+          let idx = int(row8[(x0 + k) xor fx])
           dst[x + k] = if idx == 0: 0'u16 else: xw.rd16(pbase + idx * 2) or OPAQUE
       else:
         for k in 0 ..< span:
-          let idx = int(w.rd8(base + ((x0 + k) xor fx)))
+          let idx = int(row8[(x0 + k) xor fx])
           dst[x + k] = if idx == 0: 0'u16 else: pal[idx] or OPAQUE
     else:
       let bits = w.rd32(char_base + tile * 32 + r * 4)
@@ -592,11 +605,11 @@ proc fill_window(e: Engine2D; winh: uint16; bits: uint8) =
     for x in 0 ..< x2: e.winmask[x] = bits
     for x in x1 ..< 256: e.winmask[x] = bits
 
-proc compute_windows(e: Engine2D) =
+proc compute_windows(e: Engine2D): bool =
+  ## Fill winmask; false (mask untouched) when no window is enabled.
   let dc = e.dispcnt
-  if (dc and 0xE000) == 0:
-    for x in 0 ..< 256: e.winmask[x] = 0x3F
-    return
+  if (dc and 0xE000) == 0: return false
+  result = true
   let outside = uint8(e.winout and 0x3F)
   for x in 0 ..< 256: e.winmask[x] = outside
   if (dc and 0x8000) != 0 and e.line_objwin:
@@ -611,9 +624,11 @@ proc compute_windows(e: Engine2D) =
 # ---------------------------------------------------------------------------
 # Compositing
 
-proc composite(e: Engine2D; bgs: uint32) =
+proc composite(e: Engine2D; bgs: uint32; windows: bool) =
   ## Top two layers per pixel in priority order (OBJ before BGs of equal
-  ## priority, lower BG number first), then the colour effect.
+  ## priority, lower BG number first), then the colour effect. The loop is
+  ## instantiated for "windows on the line" x "an effect can apply", so the
+  ## common no-window, no-effect line is a plain top-layer search.
   var walk: array[4, int]
   var walk_prio: array[4, int]
   var n = 0
@@ -632,61 +647,63 @@ proc composite(e: Engine2D; bgs: uint32) =
   let is3d = e.bg0_is_3d and (bgs and 1) != 0
   let want2 = mode == 1 or e.line_semi or is3d
   let obj_on = (e.dispcnt and 0x1000) != 0
-  for x in 0 ..< 256:
-    let m = uint32(e.winmask[x])
-    let need2 = want2 and (m and 0x20) != 0
-    var found = 0
-    var layer: array[2, int]
-    var color: array[2, uint16]
-    let op = int(e.objprio[x])
-    var obj_pending = obj_on and op < 4 and (m and 0x10) != 0
-    block search:
-      for i in 0 ..< n:
-        if obj_pending and op <= walk_prio[i]:
-          obj_pending = false
-          layer[found] = LAYER_OBJ
-          color[found] = e.objpix[x]
-          inc found
-          if found == 2 or not need2: break search
-        let bg = walk[i]
-        if (m and (1'u32 shl bg)) != 0:
-          let c = e.bgpix[bg][x]
-          if (c and OPAQUE) != 0:
-            layer[found] = bg
-            color[found] = c and 0x7FFF
-            inc found
-            if found == 2 or not need2: break search
-      if obj_pending:
-        layer[found] = LAYER_OBJ
-        color[found] = e.objpix[x]
+  let effects = (mode != 0 and (bld and 0x3F) != 0) or e.line_semi or is3d
+
+  template pixel_loop(WIN, FX: static bool) {.dirty.} =
+    for x in 0 ..< 256:
+      let m = when WIN: uint32(e.winmask[x]) else: 0x3F'u32
+      let need2 = when FX: want2 and (m and 0x20) != 0 else: false
+      var found = 0
+      var l0, l1: int
+      var c0, c1: uint16
+      template take(layer: int; color: uint16) {.dirty.} =
+        if found == 0:
+          l0 = layer
+          c0 = color
+        else:
+          l1 = layer
+          c1 = color
         inc found
         if found == 2 or not need2: break search
-      layer[found] = LAYER_BD
-      color[found] = backdrop
-      inc found
-    var c = color[0]
-    if (m and 0x20) != 0:
-      let top = layer[0]
-      let bot_second = found == 2 and (bld and (0x100'u32 shl layer[1])) != 0
-      let top_first = (bld and (1'u32 shl top)) != 0
-      let attr = e.objattr[x]
-      if top == LAYER_OBJ and (attr and (OBJ_SEMI or OBJ_BITMAP)) != 0 and bot_second:
-        if (attr and OBJ_BITMAP) != 0:
-          let a = uint32(attr and 0xF)
-          c = blend_alpha(c, color[1], a + 1, 15 - a)
-        else:
-          c = blend_alpha(c, color[1], eva, evb)
-      elif top == 0 and is3d and bot_second:
-        let sx = (x + int(e.bghofs[0])) and 511
-        c = blend_3d(e.line3d[sx], color[1])
-      elif top_first:
-        case mode
-        of 1:
-          if bot_second: c = blend_alpha(c, color[1], eva, evb)
-        of 2: c = brighten(c, evy)
-        of 3: c = darken(c, evy)
-        else: discard
-    e.gfx[x] = c
+      let op = int(e.objprio[x])
+      var obj_pending = obj_on and op < 4 and (when WIN: (m and 0x10) != 0 else: true)
+      block search:
+        for i in 0 ..< n:
+          if obj_pending and op <= walk_prio[i]:
+            obj_pending = false
+            take(LAYER_OBJ, e.objpix[x])
+          let bg = walk[i]
+          if (when WIN: (m and (1'u32 shl bg)) != 0 else: true):
+            let c = e.bgpix[bg][x]
+            if (c and OPAQUE) != 0: take(bg, c and 0x7FFF)
+        if obj_pending: take(LAYER_OBJ, e.objpix[x])
+        take(LAYER_BD, backdrop)
+      var c = c0
+      when FX:
+        if (m and 0x20) != 0:
+          let bot_second = found == 2 and (bld and (0x100'u32 shl l1)) != 0
+          let attr = e.objattr[x]
+          if l0 == LAYER_OBJ and (attr and (OBJ_SEMI or OBJ_BITMAP)) != 0 and bot_second:
+            if (attr and OBJ_BITMAP) != 0:
+              let a = uint32(attr and 0xF)
+              c = blend_alpha(c, c1, a + 1, 15 - a)
+            else:
+              c = blend_alpha(c, c1, eva, evb)
+          elif l0 == 0 and is3d and bot_second:
+            c = blend_3d(e.line3d[(x + int(e.bghofs[0])) and 511], c1)
+          elif (bld and (1'u32 shl l0)) != 0:
+            case mode
+            of 1:
+              if bot_second: c = blend_alpha(c, c1, eva, evb)
+            of 2: c = brighten(c, evy)
+            of 3: c = darken(c, evy)
+            else: discard
+      e.gfx[x] = c
+
+  if windows:
+    if effects: pixel_loop(true, true) else: pixel_loop(true, false)
+  else:
+    if effects: pixel_loop(false, true) else: pixel_loop(false, false)
 
 proc render_gfx*(e: Engine2D; y: int) =
   ## The graphics pipeline into e.gfx (display mode 1, and capture source A).
@@ -701,7 +718,7 @@ proc render_gfx*(e: Engine2D; y: int) =
   if k2 == bkNone: bgs = bgs and not 4'u32
   if k3 == bkNone: bgs = bgs and not 8'u32
   e.render_objs(y)
-  e.compute_windows()
+  let windows = e.compute_windows()
   if (bgs and 1) != 0:
     if e.bg0_is_3d: e.render_3d() else: e.render_text(0, y)
   if (bgs and 2) != 0: e.render_text(1, y)
@@ -713,7 +730,7 @@ proc render_gfx*(e: Engine2D; y: int) =
     of bkExt: e.render_ext(bg, y)
     of bkLarge: e.render_large(y)
     else: discard
-  e.composite(bgs)
+  e.composite(bgs, windows)
 
 proc end_line*(e: Engine2D) =
   ## After a visible line: the affine reference points step by PB/PD.
@@ -770,6 +787,8 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
       let i = base + x * 2
       e.line[x] = (uint16(src[i]) or (uint16(src[i + 1]) shl 8)) and 0x7FFF
   else:
-    # main-memory display: the FIFO stub's ring
-    for x in 0 ..< 256: e.line[x] = e.mmem[x] and 0x7FFF
+    # main-memory display: the FIFO stub's frame buffer
+    for x in 0 ..< 256: e.line[x] = e.mmem_pixel(y, x) and 0x7FFF
   e.apply_master_brightness()
+
+{.pop.}
