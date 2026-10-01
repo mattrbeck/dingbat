@@ -239,22 +239,68 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int) =
 
 # --- CPU mixins --------------------------------------------------------
 
-proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 8)
-proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 16)
-proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 32)
+proc data_cost9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
+  ## Charge a CPU data access (timing.nim); DMA's own accesses are not.
+  if n.dma9.dma_access: return
+  let seq = a == n.last_data9 + (when width == 32: 4'u32 else: 2'u32)
+  n.last_data9 = a
+  if n.in_dtcm(a, write): return
+  if n.in_itcm(a, write): n.wait9 += 1; return
+  let top = a shr 24
+  if n.tm.dc_on and n.tm.data_cachable(a):
+    if write:
+      if not n.tm.dcache.lookup(a, false):
+        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq))
+    elif not n.tm.dcache.lookup(a, true):
+      n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
+    return
+  if write and top == 2 and n.tm.data_buffered(a):
+    n.wait9 += WBUF_WRITE
+    return
+  n.wait9 += data9(top, width, seq)
+
+proc fetch_cost9(n: NDS; a: uint32) {.inline.} =
+  ## One opcode fetch: always a nonsequential 32-bit access; a Thumb pair
+  ## shares it. ITCM and I-cache hits fit in the instruction's own cycle.
+  n.last_data9 = NO_ADDR
+  let w = a and not 3'u32
+  if w == n.last_fetch9: return
+  var c = if w == n.last_fetch9 + 4: 0'i64 else: BRANCH9
+  n.last_fetch9 = w
+  if n.cp15.itcm_enabled and a < n.cp15.itcm_size: discard
+  elif n.tm.ic_on and n.tm.code_cachable(a):
+    if not n.tm.icache.lookup(a, true):
+      c += (if (a shr 24) == 0xFF: FILL_BIOS else: FILL_MAIN)
+  else:
+    c += code9_uncached(a shr 24)
+  n.wait9 += c
+
+proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  b.nds.data_cost9(a, 8, false)
+  b.nds.read9(a, 8)
+proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  b.nds.data_cost9(a, 16, false)
+  b.nds.read9(a, 16)
+proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  b.nds.data_cost9(a, 32, false)
+  b.nds.read9(a, 32)
 
 proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.} =
+  b.nds.data_cost9(a, 8, true)
   b.nds.sync9()
   b.nds.write9(a, uint32(v), 8)
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.} =
+  b.nds.data_cost9(a, 16, true)
   b.nds.sync9()
   b.nds.write9(a, uint32(v), 16)
 proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
+  b.nds.data_cost9(a, 32, true)
   b.nds.sync9()
   b.nds.write9(a, v, 32)
 
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
+  n.fetch_cost9(a)
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd32(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
@@ -262,6 +308,7 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
+  n.fetch_cost9(a)
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd16(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
@@ -273,7 +320,9 @@ proc irq_wake*(b: Arm9Bus): bool {.inline.} =
   ## line ends: unlike the ARM7's HALTCNT it needs IME=1 (GBATEK "Halt": the
   ## opcode hangs if IME=0). The CPSR I bit doesn't matter.
   b.nds.irq9.line()
-proc access_cycles*(b: Arm9Bus): int64 {.inline.} = 0   # TODO(timing)
+proc access_cycles*(b: Arm9Bus): int64 {.inline.} =
+  result = b.nds.wait9
+  b.nds.wait9 = 0
 
 proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
   b.nds.cp15.read(op1, cn, cm, op2)
@@ -281,6 +330,16 @@ proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
 proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   let n {.cursor.} = b.nds
   n.cp15.write(op1, cn, cm, op2, v)
+  case cn
+  of 1, 2, 3, 6: n.tm.update_regions(n.cp15)
+  of 7:
+    # cache maintenance (GBATEK "ARM CP15 Cache Control"): only the tags exist
+    case cm
+    of 5: (if op2 == 0: n.tm.icache.invalidate() elif op2 == 1: n.tm.icache.invalidate_line(v))
+    of 6: (if op2 == 0: n.tm.dcache.invalidate() elif op2 == 1: n.tm.dcache.invalidate_line(v))
+    of 14: (if op2 == 1: n.tm.dcache.invalidate_line(v))
+    else: discard
+  else: discard
   n.arm9.vector_base = n.cp15.vector_base()
   n.arm9.no_load_interwork = (n.cp15.control and 0x8000) != 0
   if n.cp15.halt_request:

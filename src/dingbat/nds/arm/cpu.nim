@@ -13,9 +13,13 @@
 ##   access_cycles(bus): int   -- cycles the last instruction's bus accesses
 ##                                added (the bus accumulates them)
 ##
-## Timing is a placeholder: every instruction costs `base_cycles` master
-## cycles plus whatever the bus charged. The GBA core's cycle-exact
-## prefetch/wait-state model is deliberately not shared (docs/nds/spec.md).
+## Timing: every instruction costs `base_cycles` master cycles, plus what
+## the bus charged for its code fetch and data accesses (nds/timing.nim),
+## plus its internal cycles (GBATEK "ARM CPU Instruction Cycle Times": +1I
+## for a register-specified shift, LDR/LDM/SWP, m(+1/+2)I for multiplies;
+## the ARM9 counts loads and multiplies as one/two interlock cycles). An
+## ARM7 cycle is two master cycles, an ARM9 cycle one. The GBA core's
+## cycle-exact prefetch model is deliberately not shared (docs/nds/spec.md).
 
 import std/bitops
 from std/strutils import toHex
@@ -55,10 +59,13 @@ type
     no_load_interwork*: bool  ## CP15 control bit 15 ("pre-ARMv5 mode"): LDR,
                               ## LDM and POP to r15 keep the T bit (GBATEK)
     instr_count*: uint64
+    icycles*: int64         ## internal (I) cycles of the running instruction,
+                            ## in this CPU's clocks (step converts)
     trace*: int             ## instructions left to log to stderr (debug)
     when defined(ndsdebug):
       profiling*: bool      ## count executed instructions per 64-byte block
-      profile*: CountTable[uint32]
+      profile*: CountTable[uint32]   ## instructions per block
+      cprofile*: CountTable[uint32]  ## master cycles per block
 
 proc bank_of(mode: uint32): int {.inline.} =
   case mode and 0x1F
@@ -282,6 +289,7 @@ proc arm_data_processing[B](cpu: ArmCpu[B]; instr: uint32) =
     let rm = int(instr and 0xF)
     let kind = (instr shr 5) and 3
     if (instr and 0x10) != 0:
+      inc cpu.icycles
       let amount = cpu.reg_pc12(int((instr shr 8) and 0xF)) and 0xFF
       op2 = cpu.shift_value(kind, cpu.reg_pc12(rm), amount, true, carry)
       op1 = cpu.reg_pc12(rn)
@@ -350,12 +358,27 @@ proc arm_msr[B](cpu: ArmCpu[B]; instr: uint32) =
     mask = mask and not FLAG_T
     cpu.set_cpsr((cpu.cpsr and not mask) or (value and mask))
 
+proc mul_cycles[B](cpu: ArmCpu[B]; rs: uint32; extra: int64) {.inline.} =
+  ## ARM7: m cycles by the multiplier's significant bytes (+1 accumulate /
+  ## long). ARM9 (no early termination): 1, 2 for the long forms.
+  mixin armv5
+  when armv5(B):
+    cpu.icycles += 1 + min(extra, 1)
+  else:
+    let m = if (rs and 0xFFFF_FF00'u32) == 0 or (rs and 0xFFFF_FF00'u32) == 0xFFFF_FF00'u32: 1
+            elif (rs and 0xFFFF_0000'u32) == 0 or (rs and 0xFFFF_0000'u32) == 0xFFFF_0000'u32: 2
+            elif (rs and 0xFF00_0000'u32) == 0 or (rs and 0xFF00_0000'u32) == 0xFF00_0000'u32: 3
+            else: 4
+    cpu.icycles += m + extra
+
 proc arm_multiply[B](cpu: ArmCpu[B]; instr: uint32) =
   let rd = int((instr shr 16) and 0xF)
   let rn = int((instr shr 12) and 0xF)
   let rs = int((instr shr 8) and 0xF)
   let rm = int(instr and 0xF)
   let s = (instr and (1'u32 shl 20)) != 0
+  let acc = (instr shr 21) and 1
+  cpu.mul_cycles(cpu.r[rs], int64(acc) + int64((instr shr 23) and 1))
   case (instr shr 21) and 7
   of 0, 1: # MUL / MLA
     var res = cpu.r[rm] * cpu.r[rs]
@@ -384,6 +407,7 @@ proc arm_swap[B](cpu: ArmCpu[B]; instr: uint32) =
   let rm = int(instr and 0xF)
   let a = cpu.r[rn]
   let src = cpu.r[rm]
+  inc cpu.icycles
   if (instr and (1'u32 shl 22)) != 0:
     let v = read8(cpu.bus, a)
     write8(cpu.bus, a, uint8(src))
@@ -423,6 +447,7 @@ proc arm_single_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
   let offset_addr = if u: base + offset else: base - offset
   let a = if p: offset_addr else: base
   if load:
+    inc cpu.icycles
     let v = if byt: read8(cpu.bus, a) else: cpu.load_word_rotated(a)
     if (not p or w) and rn != rd: cpu.r[rn] = offset_addr
     cpu.write_reg_load(rd, v)
@@ -449,6 +474,7 @@ proc arm_halfword_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
   let a = if p: offset_addr else: base
   let wb = not p or w
   if load:
+    inc cpu.icycles
     var v: uint32
     case sh
     of 1:
@@ -523,6 +549,7 @@ proc arm_block_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
     cpu.switch_mode(uint32(mUSR))
   var a = start
   if load:
+    inc cpu.icycles
     # Rb in the list with writeback: ARMv4 keeps the loaded value; ARMv5
     # writes back if Rb is the only register or not the last one (GBATEK).
     var wb = w
@@ -781,6 +808,7 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
                    of 0x3: 1'u32
                    of 0x4: 2'u32
                    else: 3'u32
+        inc cpu.icycles
         let res = cpu.shift_value(kind, d, rs and 0xFF, true, carry)
         cpu.r[rd] = res
         cpu.set_nz(res)
@@ -792,7 +820,9 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
       of 0xA: discard cpu.sub_flags(d, rs, 1, true)
       of 0xB: discard cpu.add_flags(d, rs, 0, true)
       of 0xC: cpu.r[rd] = d or rs; cpu.set_nz(cpu.r[rd])
-      of 0xD: cpu.r[rd] = d * rs; cpu.set_nz(cpu.r[rd])
+      of 0xD:
+        cpu.mul_cycles(d, 0)
+        cpu.r[rd] = d * rs; cpu.set_nz(cpu.r[rd])
       of 0xE: cpu.r[rd] = d and not rs; cpu.set_nz(cpu.r[rd])
       else: cpu.r[rd] = not rs; cpu.set_nz(cpu.r[rd])
     else: # hi register ops / BX / BLX
@@ -815,11 +845,13 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
             cpu.undefined_instr(); return
         cpu.jump_interwork(sv)
   of 9: # LDR pc-relative
+    inc cpu.icycles
     let rd = int((instr shr 8) and 7)
     cpu.r[rd] = cpu.load_word_rotated((pc4 and not 3'u32) + (instr and 0xFF) * 4)
   of 10, 11: # load/store register offset
     let rd = int(instr and 7)
     let a = cpu.r[(instr shr 3) and 7] + cpu.r[(instr shr 6) and 7]
+    if ((instr shr 9) and 7) >= 3: inc cpu.icycles
     case (instr shr 9) and 7
     of 0: write32(cpu.bus, a and not 3'u32, cpu.r[rd])
     of 1: write16(cpu.bus, a and not 1'u32, uint16(cpu.r[rd]))
@@ -843,6 +875,7 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
     let byt = (instr and 0x1000) != 0
     let a = if byt: base + off else: base + off * 4
     if (instr and 0x800) != 0:
+      inc cpu.icycles
       cpu.r[rd] = if byt: read8(cpu.bus, a) else: cpu.load_word_rotated(a)
     else:
       if byt: write8(cpu.bus, a, uint8(cpu.r[rd]))
@@ -851,6 +884,7 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
     let rd = int(instr and 7)
     let a = cpu.r[(instr shr 3) and 7] + ((instr shr 6) and 0x1F) * 2
     if (instr and 0x800) != 0:
+      inc cpu.icycles
       when armv5(B): cpu.r[rd] = read16(cpu.bus, a and not 1'u32)
       else: cpu.r[rd] = rotateRightBits(read16(cpu.bus, a and not 1'u32), (a and 1) * 8)
     else:
@@ -858,7 +892,9 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
   of 18, 19: # SP-relative
     let rd = int((instr shr 8) and 7)
     let a = cpu.r[13] + (instr and 0xFF) * 4
-    if (instr and 0x800) != 0: cpu.r[rd] = cpu.load_word_rotated(a)
+    if (instr and 0x800) != 0:
+      inc cpu.icycles
+      cpu.r[rd] = cpu.load_word_rotated(a)
     else: write32(cpu.bus, a and not 3'u32, cpu.r[rd])
   of 20, 21: # ADD rd, pc/sp, imm
     let rd = int((instr shr 8) and 7)
@@ -873,6 +909,7 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
       let list = instr and 0xFF
       let r = (instr and 0x100) != 0
       if (instr and 0x800) != 0: # POP
+        inc cpu.icycles
         var a = cpu.r[13]
         for i in 0..7:
           if (list and (1'u32 shl i)) != 0:
@@ -908,6 +945,7 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
       return
     let n = uint32(countSetBits(list))
     if (instr and 0x800) != 0:
+      inc cpu.icycles
       for i in 0..7:
         if (list and (1'u32 shl i)) != 0:
           cpu.r[i] = read32(cpu.bus, a and not 3'u32); a += 4
@@ -961,7 +999,7 @@ proc trace_instr(cpu: ArmCpu; instr: uint32) {.noinline.} =
   stderr.writeLine(line)
 
 proc step*[B](cpu: ArmCpu[B]) {.inline.} =
-  mixin fetch16, fetch32, irq_line, access_cycles
+  mixin fetch16, fetch32, irq_line, access_cycles, armv5
   if irq_line(cpu.bus) and (cpu.cpsr and FLAG_I) == 0:
     cpu.exception(mIRQ, 0x18, cpu.next_pc + 4)
   let a = cpu.next_pc
@@ -981,7 +1019,13 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
     cpu.r[15] = a + 8
     cpu.execute_arm(instr)
   inc cpu.instr_count
-  cpu.cycles += cpu.base_cycles + access_cycles(cpu.bus)
+  # an ARM7 cycle is two master cycles, an ARM9 cycle one
+  let ic = when armv5(B): cpu.icycles else: cpu.icycles * 2
+  cpu.icycles = 0
+  let spent = cpu.base_cycles + access_cycles(cpu.bus) + ic
+  cpu.cycles += spent
+  when defined(ndsdebug):
+    if cpu.profiling: cpu.cprofile.inc(a and not 63'u32, int(spent))
 
 proc run*[B](cpu: ArmCpu[B]; until: int64) =
   ## Execute until the CPU's clock reaches `until` (master cycles).
