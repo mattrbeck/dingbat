@@ -73,16 +73,22 @@ proc alpha5*(p: uint32): uint32 {.inline.} = (p shr 24) and 31
 # ---------------------------------------------------------------------------
 # FIFO
 
-proc fifo_level(g: Gpu3d): int {.inline.} = min(256, g.fifo.len)
+const PIPE = 4   ## entries held in the PIPE ahead of the FIFO (GBATEK "DS 3D Geometry Commands")
 
-proc fifo_wants_dma*(g: Gpu3d): bool {.inline.} = g.fifo.len < 128
+proc fifo_level(g: Gpu3d): int {.inline.} =
+  ## FIFO entries as GXSTAT counts them: the first PIPE entries queued
+  ## behind a stalled command sit in the PIPE, not the FIFO (3d_status:
+  ## 40 queued behind SWAP_BUFFERS read as 36 on the reference core)
+  min(256, max(0, g.fifo.len - PIPE))
+
+proc fifo_wants_dma*(g: Gpu3d): bool {.inline.} = g.fifo_level < 128
 
 proc update_irq*(g: Gpu3d) =
   ## IF.21 is set as long as the selected condition holds.
   if g.irq == nil: return
   case g.irq_mode
-  of 1: (if g.fifo.len < 128: g.irq.raise_irq(irqGxFifo))
-  of 2: (if g.fifo.len == 0: g.irq.raise_irq(irqGxFifo))
+  of 1: (if g.fifo_level < 128: g.irq.raise_irq(irqGxFifo))
+  of 2: (if g.fifo_level == 0: g.irq.raise_irq(irqGxFifo))
   else: discard
 
 proc run_command(g: Gpu3d; cmd: uint8) =
@@ -150,8 +156,8 @@ proc gxstat(g: Gpu3d): uint32 =
            (uint32(geo.pos_sp and 31) shl 8) or (uint32(geo.proj_sp and 1) shl 13) or
            (if geo.stack_error: 0x8000'u32 else: 0) or
            (uint32(g.fifo_level()) shl 16) or
-           (if g.fifo.len < 128: 1'u32 shl 25 else: 0) or
-           (if g.fifo.len == 0: 1'u32 shl 26 else: 0) or
+           (if g.fifo_level < 128: 1'u32 shl 25 else: 0) or
+           (if g.fifo_level == 0: 1'u32 shl 26 else: 0) or
            (if busy: 1'u32 shl 27 else: 0) or (g.irq_mode shl 30)
 
 proc read_reg*(g: Gpu3d; offset: uint32): uint32 =
