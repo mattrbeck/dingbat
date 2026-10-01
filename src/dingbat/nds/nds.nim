@@ -10,10 +10,10 @@ import sched, timing
 import mem/vram
 import gpu/[gpu, engine2d]
 import gpu3d/gpu3d
-import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi]
+import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi, slot2]
 import hle_bios
 
-export cpu, sched, gpu, engine2d, input, vram, cart, spu
+export cpu, sched, gpu, engine2d, input, vram, cart, spu, slot2
 
 type
   Arm9Bus* = object
@@ -37,6 +37,8 @@ type
     wramcnt*: uint8
     exmemcnt*: uint16           ## ARM9 EXMEMCNT; bits 7-15 are shared
     exmem7_lo*: uint16          ## ARM7 EXMEMSTAT bits 0-6 (its own copy)
+    slot9_t*, slot7_t*: SlotTiming  ## GBA-slot access times from each CPU's bits 0-4
+    slot2*: Slot2               ## what is in the GBA slot (io/slot2.nim)
     vcount_write*: int          ## VCOUNT written in lines 202-212, else -1
     postflg9*, postflg7*: uint8
     powcnt2*: uint16
@@ -99,24 +101,48 @@ template watch_write(n: NDS; who: string; cpu: untyped; a, v: uint32) =
                        " pc=" & toHex(cpu.cur_pc, 8) & " line=" & $n.gpu.vcount)
 
 proc slot2_read(n: NDS; a: uint32; is9: bool; width: static int): uint32 =
-  ## GBA slot with no cartridge (GBATEK "GBA Slot"): the owning CPU
-  ## (EXMEMCNT.7) sees open bus -- ROM halfwords read addr/2, ORed with 0xFE08
-  ## at the 10-cycle setting and 0xFFFF at 18; SRAM reads 0xFF -- and the
-  ## other CPU reads zeros.
+  ## The GBA slot (io/slot2.nim) as one CPU sees it: the CPU that EXMEMCNT.7
+  ## gives it to reads the device or open bus, the other reads zeros
+  ## (GBATEK "GBA Slot"). The ROM region is a 16-bit bus (a word is two
+  ## halfword accesses), the SRAM region an 8-bit one, whose byte a 16/32-bit
+  ## load reads repeated (as on the GBA: Assumed for the DS).
   let owner9 = (n.exmemcnt and 0x80) == 0
   if owner9 != is9: return 0
+  let s {.cursor.} = n.slot2
   if a >= 0x0A00_0000'u32:
-    return when width == 32: 0xFFFF_FFFF'u32 elif width == 16: 0xFFFF'u32 else: 0xFF'u32
-  let lo = if is9: n.exmemcnt else: n.exmem7_lo
-  proc half(n: NDS; a: uint32; lo: uint16): uint32 =
-    case (lo shr 2) and 3
-    of 0: ((a shr 1) and 0xFFFF) or 0xFE08
-    of 3: 0xFFFF
-    else: (a shr 1) and 0xFFFF
-  when width == 32:
-    half(n, a, lo) or (half(n, a + 2, lo) shl 16)
-  elif width == 16: half(n, a, lo)
-  else: (half(n, a, lo) shr ((a and 1) * 8)) and 0xFF
+    let b = s.ram_read8(a)
+    result = when width == 32: b * 0x0101_0101'u32 elif width == 16: b * 0x0101'u32 else: b
+  else:
+    let rom_n = int(if is9: n.slot9_t.rom_n else: n.slot7_t.rom_n)
+    result =
+      when width == 32:
+        s.rom_read16(a and not 3'u32, rom_n) or (s.rom_read16((a and not 3'u32) + 2, rom_n) shl 16)
+      elif width == 16: s.rom_read16(a and not 1'u32, rom_n)
+      else: (s.rom_read16(a and not 1'u32, rom_n) shr ((a and 1) * 8)) and 0xFF
+  when defined(ndsdebug):
+    if n.iolog:
+      n.log_io(if is9: "9" else: "7", a, result, 0xFFFF_FFFF'u32, false,
+               if is9: n.arm9.cur_pc else: n.arm7.cur_pc)
+
+proc slot2_write(n: NDS; a: uint32; v: uint32; is9: bool; width: static int) =
+  ## Stores from the CPU that does not own the slot go nowhere (Assumed: its
+  ## reads see zeros, GBATEK). A store to the 8-bit SRAM bus keeps the byte
+  ## its address selects (GBA rule, Assumed for the DS).
+  let owner9 = (n.exmemcnt and 0x80) == 0
+  when defined(ndsdebug):
+    if n.iolog:
+      n.log_io(if is9: "9" else: "7", a, v, 0xFFFF_FFFF'u32, true,
+               if is9: n.arm9.cur_pc else: n.arm7.cur_pc)
+  if owner9 != is9: return
+  let s {.cursor.} = n.slot2
+  if a >= 0x0A00_0000'u32:
+    let b = when width == 8: uint8(v) else: uint8(v shr (8 * (a and (width div 8 - 1))))
+    s.ram_write8(a, b)
+  else:
+    when width == 32:
+      s.rom_write(a and not 3'u32, v and 0xFFFF, 16)
+      s.rom_write((a and not 3'u32) + 2, v shr 16, 16)
+    else: s.rom_write(a, v, width)
 
 template rd16(s: seq[uint8]; i: int): uint32 =
   uint32(s[i]) or (uint32(s[i + 1]) shl 8)
@@ -268,6 +294,7 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.spu = new_spu()
   n.rtc = new_rtc()
   n.wifi = new_wifi(n.sched, n.irq7)
+  n.slot2 = new_slot2()
   n.arm9 = new_arm_cpu(Arm9Bus(nds: n), ARM9_CYCLES_PER_INSTR)
   n.arm7 = new_arm_cpu(Arm7Bus(nds: n), ARM7_CYCLES_PER_INSTR)
   n.cp15.reset()
@@ -312,6 +339,33 @@ proc run_frame*(n: NDS) =
   let limit = n.sched.now + 2 * FRAME_CYCLES
   while not n.frame_done and n.sched.now < limit:
     n.run_until(min(limit, n.sched.now + LINE_CYCLES))
+  n.slot2.end_frame()
+
+proc insert_slot2*(n: NDS; kind: Slot2Kind; rom: seq[uint8] = @[];
+                   save: seq[uint8] = @[]) =
+  ## Put a device in the GBA slot (`rom`/`save` for s2GbaCart; s2Empty
+  ## ejects). Before the first instruction runs this is power-on insertion,
+  ## and the boot info the firmware leaves about the slot (0x027FFC30) is
+  ## rewritten to match.
+  case kind
+  of s2Empty: n.slot2.eject()
+  of s2GbaCart: n.slot2.insert_gba(rom, save)
+  of s2RumblePak: n.slot2.insert_rumble_pak()
+  of s2ExpansionPak: n.slot2.insert_expansion_pak()
+  if n.arm9.instr_count == 0:
+    let info = n.slot2.gba_header_info()
+    for i in 0 ..< 12: n.main_ram[0x3FFC30 + i] = info[i]
+
+proc slot2_save*(n: NDS): seq[uint8] =
+  ## The slot-2 GBA cart's backup chip contents (empty without one), in the
+  ## .sav layout GBA emulators use; clears the dirty flag.
+  n.slot2.dirty = false
+  n.slot2.save
+
+proc slot2_rumble*(n: NDS): int =
+  ## Rumble strength 0..255 for the frontend (Rumble Pak or a GBA cart's
+  ## GPIO motor); 0 with nothing rumbling.
+  n.slot2.rumble()
 
 proc set_button*(n: NDS; b: NdsButton; pressed: bool) =
   if pressed: n.input.held.incl(b) else: n.input.held.excl(b)

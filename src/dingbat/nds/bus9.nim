@@ -104,10 +104,13 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     if not n.cart.owner_arm7: n.cart.write_reg(o, v, mask, n.arm9.cur_pc)
   of 0x204:
     if (mask and 0xFFFF) != 0:
-      # bits 8-10 and 12 read zero, bit 13 reads set (GBATEK)
-      let m = uint16(mask) and 0xC8FF'u16
+      # bits 8-10 and 12 read zero, bit 13 reads set (GBATEK); writes to
+      # bit 14 are ignored (GBATEK "appear to be ignored?"; slot2_probe in
+      # the reference runs, docs/oracles.md) and it stays set from boot
+      let m = uint16(mask) and 0x88FF'u16
       n.exmemcnt = (n.exmemcnt and not m) or (uint16(v) and m) or 0x2000
       n.cart.owner_arm7 = (n.exmemcnt and 0x800) != 0
+      n.slot9_t = slot_timing(n.exmemcnt)
   of 0x208, 0x210, 0x214:
     n.irq9.write_reg(o, v, mask)
     if o == 0x214: n.gpu3d.update_irq()   # IF.21 is level-triggered
@@ -162,14 +165,14 @@ proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
   if n.tm.dc_on and n.tm.data_cachable(a):
     if write:
       if not n.tm.dcache.lookup(a, false):
-        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq))
+        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq, n.slot9_t))
     elif not n.tm.dcache.lookup(a, true):
       n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
     return
   if write and top == 2 and n.tm.data_buffered(a):
     n.wait9 += WBUF_WRITE
     return
-  n.wait9 += data9(top, width, seq)
+  n.wait9 += data9(top, width, seq, n.slot9_t)
 
 template charge9_tcm(n: NDS; a: uint32; itcm: bool) =
   ## DTCM data is free; ITCM data costs a cycle (GBATEK: no parallel access)
@@ -268,7 +271,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
       let r = arm9_region(a, off)
       when width == 32: n.gpu.vram.write32(r, off, v)
       else: n.gpu.vram.write16(r, off, uint16(v))
-  of 0x08, 0x09, 0x0A: discard
+  of 0x08, 0x09, 0x0A: n.slot2_write(a, v, true, width)
   else: n.note_unmapped("arm9", a, true)
 
 # --- CPU mixins --------------------------------------------------------
@@ -286,7 +289,7 @@ proc fetch_cost9(n: NDS; a: uint32) {.inline.} =
     if not n.tm.icache.lookup(a, true):
       c += (if (a shr 24) == 0xFF: FILL_BIOS else: FILL_MAIN)
   else:
-    c += code9_uncached(a shr 24)
+    c += code9_uncached(a shr 24, n.slot9_t)
   n.wait9 += c
 
 proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 8, true)

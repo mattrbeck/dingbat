@@ -59,8 +59,10 @@ the protection unit; instructions add their internal cycles. An ARM9 cycle is
 one master cycle, an ARM7 cycle two. The few unpublished values are marked
 Assumed in `timing.nim`. The card (`cart.nim`) times ROM words by its CLK,
 gap1 and gap2, and both SPI buses keep their busy flags for the byte's time at
-the selected baud rate. With these, SoulSilver runs frame-locked with the
-reference core (docs/oracles.md, "NDS core").
+the selected baud rate. GBA-slot accesses take their times from the
+accessing CPU's own EXMEMCNT bits 0-4 (the table's rows are the default
+setting). With these, SoulSilver runs frame-locked with the reference core
+(docs/oracles.md, "NDS core").
 
 ## Layout
 
@@ -93,6 +95,9 @@ src/dingbat/nds/
   io/spi.nim       ARM7 SPI: power manager, firmware flash, touchscreen
   io/cart.nim      card slot (ROMCTRL, B7 reads, AUXSPI)
   io/backup.nim    save chip: EEPROM/FRAM/FLASH, IR-cart front-end
+  io/slot2.nim     GBA slot: open bus, GBA cart (ROM, SRAM/FLASH/EEPROM via
+                   gba/storage_chip.nim, GPIO), Rumble Pak, Expansion Pak
+                   (docs/nds/slot2.md)
   io/spu.nim       ARM7 sound: 16 channels, capture, stereo out at 32728.5 Hz
   io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date)
   io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
@@ -102,6 +107,7 @@ web/nds.html, web/nds/             dev page (two canvases, keys, touch)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
+tests/nds_slot2_test.nim           GBA-slot devices + the slot2_probe ROM
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
@@ -136,6 +142,7 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | 3D | `Simple_Tri`, `Simple_Quad` |
 | Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
 | Card + backup | a commercial ROM's B7 reads + save detection |
+| GBA slot | `slot2_probe` under each device; SoulSilver's MIGRATE FROM <GBA game> with a Generation 3 cart (docs/nds/slot2.md) |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
 | Frontend | desktop SDL target with both screens; main web UI integration |
 

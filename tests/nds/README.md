@@ -30,6 +30,7 @@ the scripts under Building if the cache is lost.
 | `roms/rockwrestler.nds` | [RockPolish/rockwrestler](https://github.com/RockPolish/rockwrestler) (prebuilt upstream) | both CPUs, IPCSYNC/IPCFIFO, DIV/SQRT, WRAMCNT, VRAMCNT, TCM, CP15 | ARMv4/v5 extras + DS system tests, LCDC display |
 | `roms/gbeplus/arm9_{memory,thumb,irq,math,dma}.nds` | [shonumi/gbe-plus-nds-tests](https://github.com/shonumi/gbe-plus-nds-tests) (GPLv2), rebuilt with libnds 2 | libnds runtime (see below) | ARM9 memory/mirrors, Thumb, IRQ, DIV/SQRT, DMA. (Timer test does not assemble upstream: duplicate labels in `common.s`.) |
 | `roms/window/window-{basic,hblank,midframe}.nds` | [StrikerX3/nds-tests](https://github.com/StrikerX3/nds-tests), rebuilt with libnds 2 | libnds runtime, 2D windows | window registers, H-blank and mid-frame window changes |
+| `roms/slot2_probe.nds` | `src/slot2_probe` (ours, C on both CPUs, no library) | both CPUs, IPC through main RAM, timers, GBA slot | top screen: 82 hex words (the GBA slot under each EXMEMCNT setting from both CPUs, timing, Rumble/Expansion Pak and GBA-cart probes; list in docs/nds/slot2.md), also at 0x02200100; bottom turns white when done. `nimble test_ndsslot2` runs it under each slot-2 device |
 | `roms/built/cardread.nds` | `src/cardread` (ours, libnds) | libnds runtime, slot-1 card | bottom console: PASS/FAIL per card read check (CPU and slot-1 DMA reads, main-mode low-address redirect, chip ID) |
 | `roms/built/*.nds` | [devkitPro/nds-examples](https://github.com/devkitPro/nds-examples) | libnds runtime | `hello_world`, `ansi_console` (text console), `template_arm9`, `template_combined`, `16bit_color_bmp`, `256_color_bmp`, `Double_Buffer` (bitmap BGs), `simple` (sprites), `Simple_Tri`, `Simple_Quad` (3D), `pxi` (IPC), `timercallback`, `touch_test` |
 
@@ -64,6 +65,7 @@ zeroed; `--logo-from` copies one if a firmware boot is ever wanted).
 
     tests/nds/tools/build_2d.sh
     tests/nds/tools/build_snd.sh     # snd_suite
+    tests/nds/tools/build_slot2.sh   # slot2_probe
 
 needs an `arm-none-eabi-gcc` (devkitARM's in `/opt/devkitpro` is used when
 none is on PATH). `src/common2d/` holds the crt0, linker script and a register
