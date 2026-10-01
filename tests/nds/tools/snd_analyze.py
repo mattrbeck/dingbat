@@ -27,7 +27,7 @@ SECTIONS = [  # (name, steps), as arm7.c's main()
     ("levels", 3), ("adpcm", 4), ("duty", 8), ("psg_chans", 5), ("noise", 4),
     ("repeat", 4), ("hold", 3), ("div", 4), ("vol", 5), ("pan", 5),
     ("master", 5), ("select", 8), ("echo", 6), ("timer", 4), ("bias", 5),
-    ("sixteen", 4),
+    ("sixteen", 4), ("start_timing", 3),
 ]
 R32 = 16756991 / 524                  # T32K sample rate
 SINE_RMS = 0x6000 / 0x8000 / math.sqrt(2)   # full-pan PCM16 sine, 0.5303
@@ -299,8 +299,38 @@ def analyze(d, rate):
             r["levels_L"] = [round(rms_tone(w[:, 0], rate, 16756991 / (16756991 // (32 * 250 * (i + 1))) / 32) / scale, 4)
                              for i in range(16)]
             r["expect"] = "even ch: L %.4f, odd ch: L %.4f" % (SINE_RMS * 8 / 128 * 96 / 128, SINE_RMS * 8 / 128 * 32 / 128)
+        elif name == "start_timing":
+            P = 0x8000 / 16756991 * rate          # test channel sample period, in samples
+            r["P_samples"] = P
+            r["steps"] = []
+            for k, what in enumerate(("pcm16 staircase", "psg duty 7", "adpcm")):
+                w = step_win(sec_start, k, -0.5, 7.5) / scale
+                L, R = w[:, 0], w[:, 1]
+                on_r = first_edge(L, +1, 0.1)
+                off_r = last_edge(L, -1, 0.1)
+                on_t = first_edge(np.abs(R), +1, 0.015)
+                e = {"what": what}
+                if on_r is not None and on_t is not None:
+                    e["start_delay_P"] = (on_t - on_r) / P
+                if k != 1 and on_t is not None and off_r is not None:
+                    e["busy_clear_after_onset_P"] = (off_r - on_t) / P
+                r["steps"].append(e)
+            r["expect"] = ("GBATEK: start delay PCM 3, PSG 1, ADPCM 11 sample periods; busy clears at the "
+                           "begin of the last sample: 15 P (16 samples), 23 P (ADPCM 24 samples) after onset")
         sec_start += (steps + 1) * STEP * FRAME
     return res
+
+
+def first_edge(x, sign, thr, k=3):
+    d = (x[k:] - x[:-k]) * sign
+    i = np.nonzero(d > thr)[0]
+    return None if len(i) == 0 else int(i[0]) + k / 2
+
+
+def last_edge(x, sign, thr, k=3):
+    d = (x[k:] - x[:-k]) * sign
+    i = np.nonzero(d > thr)[0]
+    return None if len(i) == 0 else int(i[-1]) + k / 2
 
 
 def rms_tone(x, rate, f):

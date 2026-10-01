@@ -14,7 +14,9 @@
 // the fill hovers at `target`; the read step is still nudged (at most
 // +-0.2%, from a smoothed fill) to absorb what pacing leaves. An underrun
 // fades the last output to zero instead of cutting it (no click) and plays
-// silence until `target` is buffered again, then fades back in.
+// silence until `target` is buffered again, then fades back in. Each
+// underrun also raises the target by a video frame (up to 8 frames); 20 s
+// without one lowers it a frame again, down to the 4-frame base.
 class NdsAudioRing {
   constructor(inRate, outRate, targetFrames) {
     this.size = 16384;                     // frames, 0.5 s
@@ -45,6 +47,9 @@ class NdsAudioRing {
       }
       for (let k = 0; k < T; k++) this.kern[p * T + k] /= sum;
     }
+  }
+  setTarget(t) {
+    this.target = t;
   }
   reset() {
     this.r = this.w;
@@ -110,13 +115,25 @@ class NdsAudioRing {
 
 const NdsAudio = (() => {
   const IN_RATE = 33513982 / 1024;         // io/spu.nim SAMPLE_RATE
-  const TARGET = Math.round(IN_RATE * 0.065);  // 65 ms buffered (4 video frames)
-  let ctx = null, gainNode = null, send = null, reset = null, ring = null, muted = false;
+  const FRAME = IN_RATE / 59.8261;         // input frames per video frame
+  const BASE = Math.round(4 * FRAME), MAX = Math.round(8 * FRAME);   // 67 / 134 ms
+  let target = BASE, calmSince = 0;
+  let ctx = null, gainNode = null, send = null, reset = null, retarget = null, ring = null,
+      muted = false;
   let sent = 0;                            // frames handed to the ring
   let last = null;                         // latest ring stats + the time they were taken
   const totals = { underruns: 0, overruns: 0, minFill: Infinity };
 
   function onStats(s, t) {
+    if (s.underruns > totals.underruns) {
+      target = Math.min(MAX, target + Math.round(FRAME));
+      if (retarget) retarget(target);
+      calmSince = t;
+    } else if (t - calmSince > 20 && target > BASE) {
+      target = Math.max(BASE, target - Math.round(FRAME));
+      if (retarget) retarget(target);
+      calmSince = t;
+    }
     last = { ...s, t };
     totals.underruns = s.underruns;
     totals.overruns = s.overruns;
@@ -139,7 +156,9 @@ const NdsAudio = (() => {
               this.ring = new NdsAudioRing(p.inRate, sampleRate, p.target);
               this.n = 0;
               this.port.onmessage = e => {
-                if (e.data === 'reset') this.ring.reset(); else this.ring.push(e.data);
+                if (e.data === 'reset') this.ring.reset();
+                else if (typeof e.data === 'number') this.ring.setTarget(e.data);
+                else this.ring.push(e.data);
               };
             }
             process(_, outs) {
@@ -153,13 +172,14 @@ const NdsAudio = (() => {
         await ctx.audioWorklet.addModule(url);
         URL.revokeObjectURL(url);
         const node = new AudioWorkletNode(ctx, 'nds-audio', {
-          outputChannelCount: [2], processorOptions: { inRate: IN_RATE, target: TARGET } });
+          outputChannelCount: [2], processorOptions: { inRate: IN_RATE, target } });
         node.port.onmessage = e => onStats(e.data.s, e.data.t);
         node.connect(gainNode);
         send = d => node.port.postMessage(d, [d.buffer]);
         reset = () => node.port.postMessage('reset');
+        retarget = t => node.port.postMessage(t);
       } else {
-        ring = new NdsAudioRing(IN_RATE, ctx.sampleRate, TARGET);
+        ring = new NdsAudioRing(IN_RATE, ctx.sampleRate, target);
         const node = ctx.createScriptProcessor(1024, 0, 2);
         node.onaudioprocess = e => {
           ring.pull(e.outputBuffer.getChannelData(0), e.outputBuffer.getChannelData(1));
@@ -168,6 +188,7 @@ const NdsAudio = (() => {
         node.connect(gainNode);
         send = d => ring.push(d);
         reset = () => ring.reset();
+        retarget = t => ring.setTarget(t);
       }
       last = null;
       sent = 0;
@@ -180,7 +201,7 @@ const NdsAudio = (() => {
   return {
     start,
     IN_RATE,
-    TARGET,
+    target: () => target,
     // Input frames buffered ahead of the audio clock, or null when audio is
     // not running (pace by wall time then).
     fillFrames() {
@@ -217,7 +238,7 @@ const NdsAudio = (() => {
     stats() {
       return { state: ctx ? ctx.state : 'none', rate: ctx ? ctx.sampleRate : 0,
                baseLatency: ctx ? ctx.baseLatency : 0, outputLatency: ctx ? ctx.outputLatency || 0 : 0,
-               sent, fill: this.fillFrames(), underruns: totals.underruns,
+               sent, fill: this.fillFrames(), target, underruns: totals.underruns,
                overruns: totals.overruns,
                minFill: totals.minFill === Infinity ? null : totals.minFill };
     },
@@ -295,7 +316,8 @@ const NdsPage = (() => {
       let fill = NdsAudio.fillFrames();
       let n = 0;
       if (fill !== null) {
-        while (fill < NdsAudio.TARGET && n < 4) { frame(); fill += FRAME_FRAMES; n++; }
+        const want = NdsAudio.target();
+        while (fill < want && n < 4) { frame(); fill += FRAME_FRAMES; n++; }
         acc = 0;
       } else {
         acc += Math.min(100, now - last);

@@ -9,11 +9,15 @@
 //   jitter   each rAF callback delayed by a random 0-12 ms busy wait, plus a
 //            40 ms stall every ~2 s (GC-like)
 //   slow     every callback busy-waits 14 ms (a device near its limit)
+//   stall    a 90 ms stall every second (longer than the buffer: underruns
+//            expected, the target should grow until they stop)
 //   hidden   the tab "hidden" for 3 s (rAF stops, visibilitychange) and back,
 //            three times
-// Each phase reports audio-clock seconds, frames sent per audio second
-// (should be 32728.5), underruns, overruns and the fill range in ms.
-// Exit status 1 when a phase other than `slow` underran.
+// Each phase reports wall seconds, frames sent per second (32728.5 when
+// emulation keeps up), underruns, overruns, the fill range in ms (polled
+// every 50 ms), the lowest fill the ring saw so far and the audio target
+// at the end of the phase (it grows a frame per underrun).
+// Exit status 1 when steady, jitter, slow or hidden underran.
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 let pw;
@@ -38,6 +42,7 @@ await page.addInitScript(() => {
       spin(Math.random() * 12);
       if (t - lastStall > 2000) { lastStall = t; spin(40); }
     } else if (P.mode === 'slow') spin(14);
+    else if (P.mode === 'stall' && t - lastStall > 1000) { lastStall = t; spin(90); }
     cb(performance.now());
   });
   Object.defineProperty(document, 'hidden', { get: () => P.hidden });
@@ -71,13 +76,14 @@ async function phase(name, body) {
   const ms = f => (f / rate * 1000).toFixed(1);
   console.log(`${name.padEnd(7)} ${secs.toFixed(1)} s  frames/s ${((b.s.sent - a.s.sent) / secs).toFixed(1)}` +
     `  underruns ${under}  overruns ${over}  fill ${ms(Math.min(...fills))}..${ms(Math.max(...fills))} ms` +
-    `  ring min ${b.s.minFill === null ? '-' : ms(b.s.minFill)} ms  ctx ${b.s.rate} Hz`);
-  if (name !== 'slow' && under > 0) bad = true;
+    `  ring min ${b.s.minFill === null ? '-' : ms(b.s.minFill)} ms  target ${ms(b.s.target)} ms  ctx ${b.s.rate} Hz`);
+  if (name !== 'stall' && under > 0) bad = true;
 }
 const setMode = m => page.evaluate(m => { window.__probe.mode = m; }, m);
 await phase('steady', async () => { await setMode('steady'); await page.waitForTimeout(SECS * 1000); });
 await phase('jitter', async () => { await setMode('jitter'); await page.waitForTimeout(SECS * 1000); });
 await phase('slow', async () => { await setMode('slow'); await page.waitForTimeout(SECS * 1000); });
+await phase('stall', async () => { await setMode('stall'); await page.waitForTimeout(SECS * 1000); });
 await phase('hidden', async () => {
   await setMode('steady');
   for (let i = 0; i < 3; i++) {

@@ -68,10 +68,16 @@ proc write_reg*(t: Timers; offset: uint32; v, mask: uint32) =
   if (mask and 0xFFFF_0000'u32) != 0:
     let now_count = t.current(i)
     let was_running = t.running(i)
+    let old = t.control[i]
     t.control[i] = uint16((v shr 16) and 0xC7)
     if t.running(i) and not was_running:
       t.counter[i] = t.reload[i]
+      t.start_at[i] = t.sched.now
+    elif was_running and ((old xor t.control[i]) and 0x87) == 0:
+      # Still running, same prescaler and cascade (an IRQ-enable toggle):
+      # the count carries on, prescaler phase included.
+      discard
     else:
       t.counter[i] = now_count
-    t.start_at[i] = t.sched.now
+      t.start_at[i] = t.sched.now
     t.schedule_overflow(i)

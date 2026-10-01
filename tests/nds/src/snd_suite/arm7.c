@@ -45,6 +45,8 @@ enum { MANUAL = 0, LOOP = 1, ONESHOT = 2, PROHIBITED = 3 };
 #define TWOPART 0x02100400u  /* 512 x sine 6000h, 512 x sine 3000h, PCM16 */
 #define HOLD16 0x02101000u   /* 32 x sine, 32 x 4000h, PCM16 */
 #define DC 0x02101100u       /* DC(k): 16 x PCM16 constant, 32 bytes apart */
+#define STAIR 0x02101200u    /* 16 x PCM16, sample i = (i + 1) * 400h */
+#define ADPCMC 0x02101300u   /* ADPCM header 2000h / index 0, then zeros */
 #define CAPBUF 0x02110000u   /* 2048 words loop-back buffer */
 #define CAPSMALL 0x02120000u /* 4 words per readback capture */
 
@@ -138,9 +140,12 @@ static void make_tables(void) {
   }
   for (int i = 0; i < 1024; i++)
     w16(TWOPART + 2 * i, i < 512 ? sine[i & 31] : sine[i & 31] / 2);
-  static const s32 dc[] = {0x6000, -0x2000, -0x1000, 0x1000, 0x4000, -0x4080, 0};
-  for (int k = 0; k < 7; k++)
+  static const s32 dc[] = {0x6000, -0x2000, -0x1000, 0x1000, 0x4000, -0x4080, 0, 0x2000};
+  for (int k = 0; k < 8; k++)
     for (int i = 0; i < 16; i++) w16(DC + 32 * k + 2 * i, dc[k]);
+  for (int i = 0; i < 16; i++) w16(STAIR + 2 * i, (i + 1) * 0x400);
+  *(volatile u32 *)ADPCMC = 0x2000;
+  for (int i = 1; i < 8; i++) *(volatile u32 *)(ADPCMC + 4 * i) = 0;
   /* ADPCM: 128 samples easing from 0 to -3000h, then a 512-sample loop
      body ramping -3000h -> +3000h (a 62.5 Hz sawtooth at 32 kHz). Header
      PCM 0, index 0. Loop start PNT = 1 + 16 words. */
@@ -338,6 +343,38 @@ static void s_sixteen(void) {
   section_end(4);
 }
 
+static void s_start_timing(void) {
+  /* 17: start delay and busy-clear time, against a reference channel that
+     starts at once: ch2 = PCM16 DC 2000h at TMR FFF0h (1.05 MHz, delay
+     3 x 60 ns), panned left, started right after the channel under test
+     (panned right, TMR 8000h = 1.9555 ms per sample) and stopped by the CPU
+     as soon as the test channel's busy bit reads 0.
+       step 0: PCM16 one-shot staircase, 16 samples (i + 1) * 400h
+       step 1: PSG duty 7 (constant LOW), ch2 stopped after 4 frames
+       step 2: ADPCM one-shot, header 2000h, 24 samples of nibble 0 (stays
+               2000h) */
+  set(2, DC + 32 * 7, 0xFFF0, 0, 8);
+  set(0, STAIR, 0x8000, 0, 8);
+  SCNT(0) = CNT(127, 0, 0, 127, 0, ONESHOT, PCM16);
+  SCNT(2) = CNT(127, 0, 0, 0, 0, LOOP, PCM16);
+  while (SCNT(0) & 0x80000000u) {}
+  SCNT(2) = 0;
+  step(1);
+  set(8, 0, 0x8000, 0, 0);
+  SCNT(8) = CNT(127, 0, 0, 127, 7, 0, PSG);
+  SCNT(2) = CNT(127, 0, 0, 0, 0, LOOP, PCM16);
+  until(t0 + STEP + 4);
+  SCNT(2) = 0;
+  SCNT(8) = 0;
+  step(2);
+  set(0, ADPCMC, 0x8000, 0, 4);
+  SCNT(0) = CNT(127, 0, 0, 127, 0, ONESHOT, ADPCM);
+  SCNT(2) = CNT(127, 0, 0, 0, 0, LOOP, PCM16);
+  while (SCNT(0) & 0x80000000u) {}
+  SCNT(2) = 0;
+  section_end(3);
+}
+
 /* ---------------------------------------------------------------------- */
 /* Readbacks (master volume 0: nothing audible) */
 
@@ -468,6 +505,7 @@ int main(void) {
   s_timer();
   s_bias();
   s_sixteen();
+  s_start_timing();
   readbacks();
   RES[0] = RES_MAGIC;
   for (;;) wait_frame();
