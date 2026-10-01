@@ -1,13 +1,15 @@
 #!/bin/sh
 # build_3d.sh [name...]
 # Build the 3D test ROMs (tests/nds/src/3d_*/main.c + 3d_common, no
-# library) into tests/nds/roms/3d/. Needs an arm-none-eabi gcc (devkitARM's
+# library) into $DINGBAT_NDS_ROMS/3d (default ~/.cache/dingbat-nds/roms). Needs an arm-none-eabi gcc (devkitARM's
 # in /opt/devkitpro or ~/.cache/dingbat-dkp, or any bare-metal one; libgcc
 # provides the soft-float helpers) and python3. The ARM7 side is fb_both's
 # spin loop; the ARM9 code starts at 0x02000000 with common2d's crt0.
 # A variant directory's main.c may #include another ROM's main.c.
 set -e
 here=$(cd "$(dirname "$0")/.." && pwd)
+roms="${DINGBAT_NDS_ROMS:-$HOME/.cache/dingbat-nds/roms}"   # test ROMs stay out of the repo
+mkdir -p "$roms"
 if command -v arm-none-eabi-gcc >/dev/null 2>&1; then
   X=arm-none-eabi-
 elif [ -x /opt/devkitpro/devkitARM/bin/arm-none-eabi-gcc ]; then
@@ -15,7 +17,7 @@ elif [ -x /opt/devkitpro/devkitARM/bin/arm-none-eabi-gcc ]; then
 else
   X=$HOME/.cache/dingbat-dkp/devkitARM/bin/arm-none-eabi-
 fi
-out="$here/roms/3d"
+out="$roms/3d"
 mkdir -p "$out"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

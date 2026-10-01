@@ -4,12 +4,14 @@
 # or devkitARM) and python3.
 set -e
 here=$(cd "$(dirname "$0")/.." && pwd)
+roms="${DINGBAT_NDS_ROMS:-$HOME/.cache/dingbat-nds/roms}"   # test ROMs stay out of the repo
+mkdir -p "$roms"
 if command -v arm-none-eabi-as >/dev/null 2>&1; then
   X=arm-none-eabi-
 else
   X=/opt/devkitpro/devkitARM/bin/arm-none-eabi-
 fi
-out="$here/roms"
+out="$roms"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 

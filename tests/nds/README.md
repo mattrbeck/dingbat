@@ -5,11 +5,12 @@ Fixtures for the DS core, ordered roughly from "first thing that can work" to
 
 ## Where the ROMs live
 
-Only our own `fb_*.nds`, `2d_*.nds`, `3d/3d_*.nds`, `snd_tone.nds`, `snd_suite.nds` and `gx_tri.nds` are committed. The third-party
-ROMs below carry no licence (gbe-plus-nds-tests is GPLv2), so they are
-gitignored and kept in **`~/.cache/dingbat-nds/roms/`** (same layout as
-`roms/`), where every worktree can reach them. Rebuild them with the scripts
-under Building if the cache is lost.
+No ROM is committed, ours included: only their sources are. Every build
+script writes to **`~/.cache/dingbat-nds/roms/`** (override with
+`DINGBAT_NDS_ROMS`), where every worktree can reach them, and the tests read
+from there. The `roms/...` paths below are relative to that directory. The
+third-party ROMs carry no licence (gbe-plus-nds-tests is GPLv2). Rebuild with
+the scripts under Building if the cache is lost.
 
 ## ROMs
 

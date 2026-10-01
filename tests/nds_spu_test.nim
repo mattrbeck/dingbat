@@ -441,7 +441,7 @@ proc test_repeat_modes() =
 
 proc test_machine() =
   echo "Machine: evSpuSample runs once per 2048 master cycles"
-  let n = new_nds(cast[seq[uint8]](readFile(currentSourcePath.parentDir / "nds/roms/fb_both.nds")),
+  let n = new_nds(cast[seq[uint8]](readFile(getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "fb_both.nds")),
                   @[], @[], @[])
   n.run_frame()
   n.spu.clear_samples()

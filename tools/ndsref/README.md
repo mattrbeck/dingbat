@@ -103,7 +103,7 @@ K` compares our frame F with the core's F+K (input frames shift with it).
 
 `--relocate` gives the core an `ndsreloc` copy of the ROM. A cart's ROM
 4000h-7FFFh is the secure area (GBATEK, DS Cartridge Secure Area); the ROMs
-in `tests/nds/roms` (and some old homebrew) put plain ARM9 code there, which
+in `~/.cache/dingbat-nds/roms` (and some old homebrew) put plain ARM9 code there, which
 a core that checks the secure area on direct boot rejects as an all-white
 frame. Relocating changes no code, only where it sits in the file.
 

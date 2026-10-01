@@ -21,6 +21,8 @@
 # copy in arm7wrestler (same author's font) is used for both.
 set -e
 here=$(cd "$(dirname "$0")/.." && pwd)
+roms="${DINGBAT_NDS_ROMS:-$HOME/.cache/dingbat-nds/roms}"   # test ROMs stay out of the repo
+mkdir -p "$roms"
 if command -v arm-none-eabi-as >/dev/null 2>&1; then
   X=arm-none-eabi-
 else
@@ -56,7 +58,7 @@ asm -march=armv4t -o $a/awr7.o $a/armwrestler-arm7.asm
 ${X}ld -Ttext=0x03800000 -e arm7_main -o $a/arm7.elf $a/awr7.o
 ${X}objcopy -O binary $a/arm7.elf $a/arm7.bin
 python3 "$here/tools/mknds.py" -9 $a/arm9.bin -7 $a/arm7.bin --title ARMWRESTLER \
-  --arm9-addr 0x02004000 --arm7-addr 0x03800000 -o "$here/roms/armwrestler.nds"
+  --arm9-addr 0x02004000 --arm7-addr 0x03800000 -o "$roms/armwrestler.nds"
 
 # --- arm7wrestler: ARM7 runs the tests, ARM9 only displays -----------------
 b=arm7wrestler
@@ -119,4 +121,4 @@ asm -march=armv5te -mthumb -I "$font" -o $b/twr7.o $b/arm7/source/thumbwrestler-
 ${X}ld -Ttext=0x037F8000 -e _start -o $b/arm7.elf $b/crt7.o $b/awr7.o $b/twr7.o
 ${X}objcopy -O binary $b/arm7.elf $b/arm7.bin
 python3 "$here/tools/mknds.py" -9 $b/arm9.bin -7 $b/arm7.bin --title ARM7WRESTLER \
-  -o "$here/roms/arm7wrestler.nds"
+  -o "$roms/arm7wrestler.nds"

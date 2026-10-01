@@ -113,7 +113,7 @@ accesses share one path per register.
 ```
 # headless: both screens to one PNG
 nim c -d:release -d:test_harness --path:src -o:ndsrun tools/ndsrun.nim
-./ndsrun tests/nds/roms/fb_both.nds --frames 5 --out /tmp/fb.png \
+./ndsrun ~/.cache/dingbat-nds/roms/fb_both.nds --frames 5 --out /tmp/fb.png \
     --bios "$HOME/Documents/emu/nds/NDS Bios & Firmware"
 
 # web dev page

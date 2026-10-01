@@ -2,7 +2,7 @@
 ## PNG (top above bottom, 256x384). The iteration loop for DS bring-up.
 ##
 ##   nim c -d:release --path:src -o:ndsrun tools/ndsrun.nim
-##   ./ndsrun tests/nds/roms/fb_hello.nds --frames 10 --out /tmp/fb.png
+##   ./ndsrun ~/.cache/dingbat-nds/roms/fb_hello.nds --frames 10 --out /tmp/fb.png
 ##       [--bios DIR] [--trace9 N] [--trace7 N] [--press START@30,DOWN@40+3]
 ##       [--shots 60,120] [--wav OUT.wav]
 ##

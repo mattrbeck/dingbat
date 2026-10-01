@@ -614,7 +614,8 @@ const ROM_HASHES = [
 
 proc rom_scenes() =
   echo "3d_* ROMs (30 frames)"
-  let dir = currentSourcePath().parentDir / "nds" / "roms" / "3d"
+  # Test ROMs stay out of the repo (tests/nds/README.md).
+  let dir = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "3d"
   let update = getEnv("NDS3D_UPDATE") == "1"
   for (name, want) in ROM_HASHES:
     let path = dir / name & ".nds"
