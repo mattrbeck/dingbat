@@ -33,6 +33,14 @@ not a device list. `nbench.sh` is the native counterpart with noise rejection.
 `node_wasm.sh` builds the native harness (`tests/dingbat_bench.nim`) as wasm with the web
 build's flags for Node: the emulation core's web codegen, measured and profiled headless.
 
+## What each setting costs
+
+`settings.html` (same ROM/state convention, `?rom=` / `?state=` to pick another
+scene) measures every user-facing setting through the shipping per-frame path:
+`settingsCore()`, `settingsGpu()`, `settingsGlow()`, `settingsLowpass()`,
+`settingsBios()` (needs `bios.bin` here). `glowtrace.mjs` traces the GPU
+process for the ambient glow's compositor cost. Results: `docs/settings-cost.md`.
+
 ## Measure in a real window, not headless
 
 Headless (or fully occluded) Chrome gets background QoS from macOS and lands on

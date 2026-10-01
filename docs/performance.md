@@ -12,6 +12,10 @@
 * **Web:** `web/bench/bench.html` drives `_benchFrames` through the wasm
   exports; `web/bench/cdp.mjs` runs expressions over CDP. See
   `web/bench/README.md`.
+* **Per-setting cost (web):** `web/bench/settings.html` times every user
+  setting through `loop_tick` / `runahead_tick`, the presenter, the glow and
+  the analog filter; results and method in `docs/settings-cost.md`. Native
+  knobs for the same: `DINGBAT_BENCH_FIFO_INTERP=0`, `DINGBAT_BENCH_SGB=1`.
 * **Web core, headless:** `web/bench/node_wasm.sh build <out.js>` compiles
   the native harness with the web build's flags for Node (same V8 wasm
   engine as Chrome, a foreground process, every `DINGBAT_BENCH_*` variable

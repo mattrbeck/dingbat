@@ -1,0 +1,404 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>dingbat settings cost</title>
+  <style>
+    body { font: 13px/1.5 ui-monospace, monospace; background:#111; color:#ddd; padding:16px; }
+    #out { white-space: pre-wrap; border:1px solid #333; padding:8px; min-height:200px; }
+    #gl-canvas { width: 480px; height: 320px; image-rendering: pixelated; }
+  </style>
+</head>
+<body>
+<h3>dingbat settings cost</h3>
+<!-- SDL renders to its own hidden canvas; the presenter owns the visible one,
+     at the app's backing size (native x 4, or x 6 for RGB subpixels). -->
+<canvas id="sdl-canvas" width="960" height="640" hidden aria-hidden="true"></canvas>
+<canvas id="gl-canvas" width="960" height="640"></canvas>
+<pre id="out">booting…</pre>
+<script>
+// What each user-facing setting costs, measured through the shipping paths:
+//   settingsCore()  per-frame CPU of loop_tick / runahead_tick plus the app's
+//                   audio drain, one config per setting, interleaved
+//   settingsGpu()   presenter cost per draw for each filter x colour correction
+//   settingsGlow()  the ambient-glow sampler (main thread, every 6th frame)
+//   settingsLowpass() the analog filter's BiquadFilterNode, rendered offline
+// ?rom=<file>&state=<file> pick the scene (default FireRed); everything lives
+// next to this page, gitignored. See docs/settings-cost.md.
+if (navigator.serviceWorker) {
+  navigator.serviceWorker.getRegistrations?.().then((rs) => rs.forEach((r) => r.unregister()));
+}
+const sOut = document.getElementById("out");
+const sLog = (s) => { sOut.textContent += s + "\n"; console.log(s); };
+const Q = new URLSearchParams(location.search);
+const ROM_NAME = Q.get("rom") || "PokemonFireRed.gba";
+const STATE_NAME = Q.get("state") || ROM_NAME.replace(/\.\w+$/, ".state");
+const IS_GBA = /\.gba$/i.test(ROM_NAME);
+
+var Module = {
+  canvas: document.getElementById("sdl-canvas"),
+  onRuntimeInitialized: () => { window.benchRuntimeUp = true; },
+};
+const romP = fetch(ROM_NAME).then((r) => r.arrayBuffer());
+const stP = fetch(STATE_NAME).then((r) => r.arrayBuffer());
+let STATE = null;
+
+window.settingsInit = async () => {
+  while (!window.benchRuntimeUp) await new Promise((r) => setTimeout(r, 50));
+  const rom = new Uint8Array(await romP);
+  STATE = new Uint8Array(await stP);
+  Module.FS.writeFile(ROM_NAME, rom);
+  Module.ccall("initFromEmscripten", null, ["string"], [ROM_NAME]);
+  return { rom: ROM_NAME, romBytes: rom.length, stateBytes: STATE.length,
+           webdriver: navigator.webdriver, ua: navigator.userAgent };
+};
+
+const loadState = () => {
+  const p = Module._malloc(STATE.length);
+  new Uint8Array(Module.memory.buffer, p, STATE.length).set(STATE);
+  const ok = Module._wasm_load_state(p, STATE.length, 0);
+  Module._free(p);
+  if (ok !== 1) throw new Error("state rejected: " + Module.UTF8ToString(Module._wasm_state_error()));
+};
+
+// The app's pushAudio minus scheduling: copy the interleaved floats into a
+// fresh AudioBuffer's planes every frame, then clear the wasm buffer.
+const actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+const drainAudio = () => {
+  const len = Module._getAudioBufferLen();
+  if (len === 0) return;
+  const frames = len / 2;
+  const buf = actx.createBuffer(2, frames, 48000);
+  const l = buf.getChannelData(0), r = buf.getChannelData(1);
+  const heap = new Float32Array(Module.memory.buffer, Module._getAudioBufferPtr(), len);
+  for (let i = 0; i < frames; i++) { l[i] = heap[i * 2]; r[i] = heap[i * 2 + 1]; }
+  Module._clearAudioBuffer();
+};
+
+// Shipping defaults; every other config changes exactly one thing.
+const DEFAULTS = { rewind: 1, interp: 1, mp2k: 0, lcd: 0, cc: 1, ra: 0, turbo: 0, pcff: 0 };
+const CORE_CONFIGS = [
+  { name: "defaults" },
+  // A/A control: identical to defaults, so its "cost" is the noise floor.
+  { name: "defaults (A/A control)" },
+  { name: "rewind off", rewind: 0 },
+  { name: "interpolation off", interp: 0, gba: true },
+  { name: "enhanced music (MP2K HLE) on", mp2k: 1, gba: true },
+  { name: "LCD response on", lcd: 1 },
+  { name: "colour correction off", cc: 0 },
+  { name: "run-ahead 1", ra: 1 },
+  { name: "run-ahead 2", ra: 2 },
+  { name: "run-ahead 3", ra: 3 },
+  { name: "fast-forward", turbo: 1 },
+  { name: "fast-forward + pitch-correct", turbo: 1, pcff: 1 },
+];
+
+const applyCfg = (c) => {
+  Module._setRewindEnabled(c.rewind);
+  Module._wasm_set_fifo_interp(c.interp);
+  Module._wasm_set_mp2k_hle(c.mp2k);
+  Module._wasm_set_lcd_response(c.lcd);
+  Module._wasm_set_color_correction(c.cc);
+  Module._wasm_set_turbo(c.turbo);
+  Module._wasm_set_pitch_correct_ff(c.pcff);
+};
+
+// One timed run: fresh state, `warm` untimed frames (MP2K detection engages
+// from the driver's own writes), then `frames` timed. ms per emulated frame.
+const runCore = (c, frames, warm) => {
+  applyCfg(c);
+  loadState();
+  const tick = c.ra > 0 ? () => Module._runahead_tick(c.ra) : () => Module._loop_tick();
+  for (let i = 0; i < warm; i++) { tick(); drainAudio(); }
+  const t0 = performance.now();
+  for (let i = 0; i < frames; i++) { tick(); drainAudio(); }
+  const ms = performance.now() - t0;
+  return { msPerFrame: ms / frames, hle: Module._wasm_hle_audio_active() };
+};
+
+// Yield to the event loop without a timer: a hidden tab clamps chained
+// setTimeouts to once a second (later once a minute), messages are exempt.
+const yieldTask = () => new Promise((r) => {
+  const c = new MessageChannel();
+  c.port1.onmessage = () => r();
+  c.port2.postMessage(0);
+});
+const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[(s.length / 2) | 0]; };
+const pct = (x, base) => ((x / base - 1) * 100);
+
+// `only`: names to run (the references "defaults" and "fast-forward" are
+// always kept); omit for every config.
+window.settingsCore = async (frames = 600, rounds = 9, warm = 120, only = null) => {
+  const keep = (c) => !only || only.includes(c.name) || c.name === "defaults" || c.name === "fast-forward";
+  const cfgs = CORE_CONFIGS.filter((c) => (IS_GBA || !c.gba) && keep(c))
+    .map((c) => ({ ...DEFAULTS, ...c }));
+  const res = new Map(cfgs.map((c) => [c.name, []]));
+  const hle = new Map();
+  for (let r = 0; r < rounds; r++) {
+    // Rotate the order each round so no config always runs after the same one.
+    for (let i = 0; i < cfgs.length; i++) {
+      const c = cfgs[(i + r) % cfgs.length];
+      const o = runCore(c, frames, warm);
+      res.get(c.name).push(o.msPerFrame);
+      hle.set(c.name, o.hle);
+      await yieldTask(); // let the page breathe
+    }
+    sLog("round " + (r + 1) + "/" + rounds);
+  }
+  applyCfg(DEFAULTS);
+  // Three estimators: median of runs, min of runs (contention only ever adds
+  // time), and the median of per-round ratios against the reference, which
+  // cancels drift in machine load between rounds.
+  const refOf = (c) => (c.pcff ? "fast-forward" : "defaults");
+  const rows = cfgs.map((c) => {
+    const v = res.get(c.name), ref = res.get(refOf(c));
+    const m = median(v), mn = Math.min(...v);
+    const ratio = median(v.map((x, i) => x / ref[i]));
+    return {
+      name: c.name, vsRef: refOf(c),
+      msPerFrame: +m.toFixed(4), minMs: +mn.toFixed(4), fps: +(1000 / m).toFixed(1),
+      costPct: +((ratio - 1) * 100).toFixed(2),
+      costPctMin: +pct(mn, Math.min(...ref)).toFixed(2),
+      spreadPct: +((Math.max(...v) - mn) / m * 100).toFixed(2),
+      addedMsPerFrame: +(m - median(ref)).toFixed(4),
+      hleActive: hle.get(c.name),
+      runs: v.map((x) => +x.toFixed(4)),
+    };
+  });
+  for (const r of rows)
+    sLog(`${r.name.padEnd(32)} ${r.msPerFrame.toFixed(3)} ms  ${String(r.fps).padStart(7)} fps  ` +
+         `${(r.costPct >= 0 ? "+" : "") + r.costPct.toFixed(2)}% (min ${r.costPctMin}%) vs ${r.vsRef}  spread ${r.spreadPct}%`);
+  return rows;
+};
+
+// --- Presenter (GPU) ---
+// Each config draws `n` frames back to back, then a 1-px readPixels drains
+// the queue: (elapsed / n) is the per-present cost the page pays, upload
+// included. With EXT_disjoint_timer_query_webgl2 the GPU time is read too.
+const GPU_CONFIGS = [
+  { name: "none, cc off", filter: "none", cc: false },
+  { name: "none, cc on (default)", filter: "none", cc: true },
+  { name: "LCD grid", filter: "grid", cc: true },
+  { name: "RGB subpixels (6x backing)", filter: "rgb", cc: true },
+  { name: "hq4x", filter: "hq4x", cc: true },
+  { name: "xBR", filter: "xbr", cc: true },
+];
+
+window.settingsGpu = async (n = 400, rounds = 7) => {
+  const can = document.getElementById("gl-canvas");
+  const [nw, nh] = IS_GBA ? [240, 160] : [160, 144];
+  const renderer = createGlRenderer(can, () => [nw, nh], sLog);
+  loadState();
+  Module._loop_tick();
+  const sized = (scale) => {
+    if (can.width !== nw * scale) can.width = nw * scale;
+    if (can.height !== nh * scale) can.height = nh * scale;
+  };
+  sized(4);
+  renderer.draw({ colorCorrect: true, panelGbc: !IS_GBA, filter: "none" });
+  const gl = can.getContext("webgl2");
+  const tq = gl.getExtension("EXT_disjoint_timer_query_webgl2");
+  const px = new Uint8Array(4);
+  const one = (c) => {
+    sized(c.filter === "rgb" ? 6 : 4);
+    const opts = { colorCorrect: c.cc, panelGbc: !IS_GBA, grid: c.filter === "grid",
+                   subpixel: c.filter === "rgb", filter: c.filter };
+    renderer.draw(opts);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let q = null;
+    if (tq) { q = gl.createQuery(); gl.beginQuery(tq.TIME_ELAPSED_EXT, q); }
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) renderer.draw(opts);
+    if (tq) gl.endQuery(tq.TIME_ELAPSED_EXT);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const wall = (performance.now() - t0) / n;
+    return { wall, q };
+  };
+  const wall = new Map(GPU_CONFIGS.map((c) => [c.name, []]));
+  const gpu = new Map(GPU_CONFIGS.map((c) => [c.name, []]));
+  const queries = [];
+  for (let r = 0; r < rounds; r++) {
+    for (const c of GPU_CONFIGS) {
+      const o = one(c);
+      wall.get(c.name).push(o.wall);
+      if (o.q) queries.push([c.name, o.q]);
+      await new Promise((x) => requestAnimationFrame(x));
+    }
+  }
+  // Query results land a few frames later.
+  for (let k = 0; k < 30; k++) await new Promise((x) => requestAnimationFrame(x));
+  const disjoint = tq ? gl.getParameter(tq.GPU_DISJOINT_EXT) : null;
+  for (const [name, q] of queries) {
+    if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE))
+      gpu.get(name).push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6 / n);
+  }
+  sized(4);
+  const base = median(wall.get("none, cc off"));
+  const rows = GPU_CONFIGS.map((c) => {
+    const w = median(wall.get(c.name));
+    const g = gpu.get(c.name).length ? median(gpu.get(c.name)) : null;
+    return { name: c.name, msPerDraw: +w.toFixed(4), gpuMs: g === null ? null : +g.toFixed(4),
+             overNoneMs: +(w - base).toFixed(4) };
+  });
+  sLog(`timer query: ${!!tq}  disjoint: ${disjoint}`);
+  for (const r of rows)
+    sLog(`${r.name.padEnd(30)} ${r.msPerDraw.toFixed(4)} ms/draw  gpu ${r.gpuMs}  +${r.overNoneMs} ms over none/cc off`);
+  return { timerQuery: !!tq, rows };
+};
+
+// --- Ambient glow sampler: updateGlow's body, called every 6th frame ---
+window.settingsGlow = (calls = 3000) => {
+  loadState();
+  Module._loop_tick();
+  const gw = 24, gh = 16;
+  const glowCanvas = document.createElement("canvas");
+  glowCanvas.width = gw; glowCanvas.height = gh;
+  const glowCtx = glowCanvas.getContext("2d");
+  const glowBuf = document.createElement("canvas");
+  glowBuf.width = gw; glowBuf.height = gh;
+  const glowBufCtx = glowBuf.getContext("2d");
+  const img = glowBufCtx.createImageData(gw, gh);
+  const one = () => {
+    const ptr = Module._wasm_glow_sample(gw, gh, 0, 0, 0, 0, 0);
+    const heap = new Uint8Array(Module.memory.buffer, ptr, gw * gh * 4);
+    const d = img.data;
+    for (let i = 0; i < gw * gh * 4; i += 4) {
+      const r = heap[i], g = heap[i + 1], b = heap[i + 2];
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      d[i] = luma + (r - luma) * 1.5;
+      d[i + 1] = luma + (g - luma) * 1.5;
+      d[i + 2] = luma + (b - luma) * 1.5;
+      d[i + 3] = 255;
+    }
+    glowBufCtx.putImageData(img, 0, 0);
+    glowCtx.globalAlpha = 0.3;
+    glowCtx.drawImage(glowBuf, 0, 0);
+  };
+  for (let i = 0; i < 100; i++) one();
+  const t0 = performance.now();
+  for (let i = 0; i < calls; i++) one();
+  const ms = (performance.now() - t0) / calls;
+  const r = { msPerSample: +ms.toFixed(4), msPerFrame: +(ms / 6).toFixed(5) };
+  sLog(`glow sampler: ${r.msPerSample} ms per sample, ${r.msPerFrame} ms per frame (1 in 6)`);
+  return r;
+};
+
+// --- Ambient glow, compositor side: the app's live loop at 60 Hz (one
+// loop_tick + one present per rAF) with the glow canvas styled as in
+// styles.css behind the game canvas. Its blur runs in the GPU process, out of
+// reach of page timers: run it under a trace (glowtrace.mjs) with on and off.
+let sceneRaf = 0;
+window.settingsGlowScene = (on) => {
+  cancelAnimationFrame(sceneRaf);
+  const can = document.getElementById("gl-canvas");
+  const [nw, nh] = IS_GBA ? [240, 160] : [160, 144];
+  if (!window._sceneRenderer) window._sceneRenderer = createGlRenderer(can, () => [nw, nh], sLog);
+  let glow = document.getElementById("glow-canvas");
+  if (!glow) {
+    glow = document.createElement("canvas");
+    glow.id = "glow-canvas"; glow.width = 24; glow.height = 16;
+    Object.assign(glow.style, {
+      position: "absolute", zIndex: "0", pointerEvents: "none",
+      transform: "scale(1.45)", filter: "blur(32px)", opacity: "0.8",
+      borderRadius: "28px",
+      maskImage: "radial-gradient(ellipse at center, black 40%, transparent 78%)",
+      webkitMaskImage: "radial-gradient(ellipse at center, black 40%, transparent 78%)",
+    });
+    can.style.position = "relative"; can.style.zIndex = "1";
+    can.parentNode.insertBefore(glow, can);
+  }
+  // A desktop-sized stage (the app stretches the 960x640 backing to fit).
+  can.style.width = "960px"; can.style.height = "640px";
+  const r = can.getBoundingClientRect();
+  Object.assign(glow.style, { left: r.left + scrollX + "px", top: r.top + scrollY + "px",
+                              width: r.width + "px", height: r.height + "px" });
+  glow.hidden = !on;
+  const gctx = glow.getContext("2d");
+  const buf = document.createElement("canvas"); buf.width = 24; buf.height = 16;
+  const bctx = buf.getContext("2d");
+  const img = bctx.createImageData(24, 16);
+  loadState();
+  let n = 0;
+  const tick = () => {
+    Module._loop_tick(); drainAudio();
+    window._sceneRenderer.draw({ colorCorrect: true, panelGbc: !IS_GBA, filter: "none" });
+    if (on && n++ % 6 === 0) {
+      const ptr = Module._wasm_glow_sample(24, 16, 0, 0, 0, 0, 0);
+      img.data.set(new Uint8Array(Module.memory.buffer, ptr, 24 * 16 * 4));
+      bctx.putImageData(img, 0, 0);
+      gctx.globalAlpha = 0.3; gctx.drawImage(buf, 0, 0);
+    }
+    sceneRaf = requestAnimationFrame(tick);
+  };
+  sceneRaf = requestAnimationFrame(tick);
+  return { on, canvasCss: [r.width, r.height], dpr: devicePixelRatio };
+};
+window.settingsSceneStop = () => cancelAnimationFrame(sceneRaf);
+
+// --- Analog filter: one BiquadFilterNode, rendered offline ---
+// The node runs on the audio rendering thread, not the main thread; this is
+// its compute cost per second of audio.
+window.settingsLowpass = async (seconds = 60, reps = 7) => {
+  const render = async (filter) => {
+    const oc = new OfflineAudioContext(2, 48000 * seconds, 48000);
+    const src = oc.createBufferSource();
+    const b = oc.createBuffer(2, 48000, 48000);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = b.getChannelData(ch);
+      for (let i = 0; i < d.length; i++) d[i] = Math.sin(i * 0.05 * (ch + 1)) * 0.5;
+    }
+    src.buffer = b; src.loop = true;
+    const gain = oc.createGain();
+    src.connect(gain);
+    if (filter) {
+      const lp = oc.createBiquadFilter();
+      lp.type = "lowpass"; lp.frequency.value = 12000; lp.Q.value = 0.707;
+      gain.connect(lp); lp.connect(oc.destination);
+    } else {
+      gain.connect(oc.destination);
+    }
+    src.start();
+    const t0 = performance.now();
+    await oc.startRendering();
+    return performance.now() - t0;
+  };
+  const off = [], on = [];
+  for (let i = 0; i < reps; i++) { off.push(await render(false)); on.push(await render(true)); }
+  const mOff = median(off), mOn = median(on);
+  const r = { secondsRendered: seconds, offMs: +mOff.toFixed(2), onMs: +mOn.toFixed(2),
+              biquadMsPerAudioSecond: +((mOn - mOff) / seconds).toFixed(4),
+              biquadMsPerVideoFrame: +((mOn - mOff) / seconds / 59.7275).toFixed(5) };
+  sLog(`analog filter: ${JSON.stringify(r)}`);
+  return r;
+};
+
+// --- Real BIOS vs HLE: a core-construction setting, so it re-inits the core
+// with bios.bin in the FS (fetched from ./bios.bin, gitignored). ---
+window.settingsBios = async (frames = 600, rounds = 7, warm = 120) => {
+  const bios = await fetch("bios.bin").then((r) => r.ok ? r.arrayBuffer() : null);
+  if (!bios) return "no bios.bin next to the page";
+  Module.FS.writeFile("bios.bin", new Uint8Array(bios));
+  const init = (mode) => {
+    Module._wasm_set_gba_bios_mode(mode);
+    Module._wasm_set_gba_run_bios(0);
+    Module.ccall("initFromEmscripten", null, ["string"], [ROM_NAME]);
+  };
+  const res = { 0: [], 1: [] };
+  for (let r = 0; r < rounds; r++) {
+    for (const mode of [0, 1]) {
+      init(mode);
+      res[mode].push(runCore({ ...DEFAULTS }, frames, warm).msPerFrame);
+      await yieldTask();
+    }
+  }
+  init(0);
+  const h = median(res[0]), b = median(res[1]);
+  const r = { hleMs: +h.toFixed(4), realBiosMs: +b.toFixed(4), costPct: +pct(b, h).toFixed(2) };
+  sLog(`real BIOS vs HLE: ${JSON.stringify(r)}`);
+  return r;
+};
+</script>
+<script src="../glpresent.js"></script>
+<script async src="../em.js"></script>
+</body>
+</html>

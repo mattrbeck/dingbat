@@ -184,6 +184,10 @@ proc main() =
       emu.cpu.attempt_waitloop_detection = false
     if getEnv("DINGBAT_MP2K") == "1":
       emu.mp2k_hle = true
+    # DINGBAT_BENCH_FIFO_INTERP=0 turns off the cubic FIFO reconstruction
+    # (the web's "Audio interpolation", default on).
+    if getEnv("DINGBAT_BENCH_FIFO_INTERP") == "0":
+      emu.apu.set_fifo_interp(false)
     if getEnv("DINGBAT_MP2K_DUMP") == "1":
       # Exploratory: MP2K detection + SoundInfo dump. Passes are detected
       # from the driver's own writes (mp2k.nim "Runtime detection").
@@ -329,6 +333,9 @@ proc main() =
     let emu = new_gb("", rom_path, headless = true, run_bios = false,
                      force_dmg = getEnv("DINGBAT_BENCH_GB_DMG") == "1")
     emu.test_output = test_out
+    # DINGBAT_BENCH_SGB=1 plugs an SGB-flagged cart into the adapter (the
+    # web's "Super Game Boy mode"); the cart header still decides.
+    emu.sgb_requested = getEnv("DINGBAT_BENCH_SGB") == "1"
     emu.post_init()
     # As on the GBA path: load an in-game scene; a title screen exercises
     # almost none of the PPU or CPU that gameplay does.
