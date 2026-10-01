@@ -839,10 +839,14 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
   r.expect_tag(GB_SEC_MBC)
   if r.read_u8() != mbc_kind_tag(cart):
     raise newException(StateError, "save state MBC type mismatch")
-  let ram = r.read_seq_u8()
-  if ram.len != cart.ram.len:
+  # Into the live buffer (a failed load rolls back from its backup), not a
+  # fresh seq, and noted only if it changes: run-ahead restores every frame.
+  let n = r.read_seq_u8_len()
+  if n != cart.ram.len:
     raise newException(StateError, "save state cart RAM size mismatch")
-  cart.ram = ram
+  let ram_changed = n > 0 and
+    not equalMem(addr cart.ram[0], unsafeAddr r.buf[r.pos], n)
+  r.read_bytes(cart.ram)
   if cart of Mbc1:
     let c = Mbc1(cart)
     c.ram_enabled = r.read_bool()
@@ -966,8 +970,9 @@ proc load_mbc_state(cart: Mbc; r: var Reader) =
   # The banking registers were written directly, not through mbc_write, so
   # the flat-ROM cache is stale until now.
   mbc_sync_rom_map(cart)
-  # Persist the restored cart RAM to the .sav on the next flush
-  if cart.has_battery and cart.ram.len > 0:
+  # Persist the restored cart RAM to the .sav on the next flush, if the state
+  # changed it: marking it every time rewrote the save every run-ahead frame.
+  if cart.has_battery and ram_changed:
     cart.ram_dirty = true
 
 # ---- APU waveform deadlines <-> scheduler events ----
