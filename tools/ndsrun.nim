@@ -30,6 +30,7 @@
 ##   --iolog            log every I/O access (repeats folded), from frame
 ##                      --iolog-from F
 ##   --watch HEX        log every write to that word (pc, line)
+##   --spilog           log every card-SPI (save chip) byte: sent -> reply, pc
 
 import std/[os, strutils, parseopt]
 import zippy
@@ -180,7 +181,7 @@ when isMainModule:
   var bios = ""
   var trace9, trace7, trace_at = 0
   var iolog_from = 0
-  var iolog, pcs = false
+  var iolog, pcs, spilog = false
   var watch = 0'u32
   var text = ""
   var text_offset = 0
@@ -192,7 +193,7 @@ when isMainModule:
   var wav = ""
   var save = ""
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
-                        longNoVal = @["help", "iolog", "pcs"])
+                        longNoVal = @["help", "iolog", "pcs", "spilog"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -214,6 +215,7 @@ when isMainModule:
       of "shots":
         for f in val.split(','): shots.add parseInt(f)
       of "iolog": iolog = true
+      of "spilog": spilog = true
       of "iolog-from": iolog_from = parseInt(val)
       of "pcs": pcs = true
       of "watch": watch = uint32(parseHexInt(val))
@@ -225,6 +227,7 @@ when isMainModule:
   if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
   let n = load_nds(rom, bios)
   n.watch = watch
+  n.cart.spilog = spilog
   if save.len > 0 and fileExists(save):
     n.cart.backup.set_data(cast[seq[uint8]](readFile(save)))
   var audio: seq[float32]

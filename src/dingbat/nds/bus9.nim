@@ -169,7 +169,7 @@ proc read9(n: NDS; a: uint32; width: static int): uint32 =
     n.sync9()
     let w = n.io9_read(a and not 3'u32)
     when defined(ndsdebug):
-      if n.iolog: n.log_io("9", a, w, 0xFFFF_FFFF'u32, false)
+      if n.iolog: n.log_io("9", a, w, 0xFFFF_FFFF'u32, false, n.arm9.cur_pc)
     when width == 32: w
     elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
     else: (w shr ((a and 3) * 8)) and 0xFF
@@ -218,7 +218,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int) =
                elif width == 16: 0xFFFF'u32 shl sh
                else: 0xFF'u32 shl sh
     when defined(ndsdebug):
-      if n.iolog: n.log_io("9", a and not 3'u32, v shl sh, mask, true)
+      if n.iolog: n.log_io("9", a and not 3'u32, v shl sh, mask, true, n.arm9.cur_pc)
     n.io9_write(a and not 3'u32, v shl sh, mask)
   of 0x05, 0x07:
     when width != 8:

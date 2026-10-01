@@ -75,10 +75,11 @@ proc note_unmapped(n: NDS; who: string; a: uint32; write: bool) =
     stderr.writeLine("nds " & who & ": unmapped " & (if write: "write " else: "read ") &
                      "0x" & toHex(a, 8))
 
-proc log_io(n: NDS; who: string; a, v, mask: uint32; write: bool) =
+proc log_io(n: NDS; who: string; a, v, mask: uint32; write: bool; pc: uint32) =
   ## -d:ndsdebug: one line per I/O access, repeats folded into a count.
   let line = who & (if write: " W " else: " R ") & toHex(a, 8) & " = " & toHex(v, 8) &
-             (if write and mask != 0xFFFF_FFFF'u32: " mask " & toHex(mask, 8) else: "")
+             (if write and mask != 0xFFFF_FFFF'u32: " mask " & toHex(mask, 8) else: "") &
+             " pc=" & toHex(pc, 8)
   if line == n.io_last:
     inc n.io_repeat
     return

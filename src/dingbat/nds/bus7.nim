@@ -145,7 +145,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     n.sync7()
     let w = n.io7_read(a and not 3'u32)
     when defined(ndsdebug):
-      if n.iolog: n.log_io("7", a, w, 0xFFFF_FFFF'u32, false)
+      if n.iolog: n.log_io("7", a, w, 0xFFFF_FFFF'u32, false, n.arm7.cur_pc)
     when width == 32: w
     elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
     else: (w shr ((a and 3) * 8)) and 0xFF
@@ -177,7 +177,7 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
                elif width == 16: 0xFFFF'u32 shl sh
                else: 0xFF'u32 shl sh
     when defined(ndsdebug):
-      if n.iolog: n.log_io("7", a and not 3'u32, v shl sh, mask, true)
+      if n.iolog: n.log_io("7", a and not 3'u32, v shl sh, mask, true, n.arm7.cur_pc)
     n.io7_write(a and not 3'u32, v shl sh, mask)
   of 0x06:
     let off = int(a and 0x3FFFF)
