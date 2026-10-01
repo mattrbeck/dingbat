@@ -13,7 +13,7 @@ import gpu3d/gpu3d
 import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi]
 import hle_bios
 
-export cpu, sched, gpu, engine2d, input, vram, spu
+export cpu, sched, gpu, engine2d, input, vram, cart, spu
 
 type
   Arm9Bus* = object

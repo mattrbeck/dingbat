@@ -100,7 +100,8 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x180: n.ipc.write_sync(true, v, mask)
   of 0x184: n.ipc.write_fifocnt(true, v, mask)
   of 0x188: n.ipc.send(true, v)
-  of 0x1A0 .. 0x1AC: (if not n.cart.owner_arm7: n.cart.write_reg(o, v, mask))
+  of 0x1A0 .. 0x1AC:
+    if not n.cart.owner_arm7: n.cart.write_reg(o, v, mask, n.arm9.cur_pc)
   of 0x204:
     if (mask and 0xFFFF) != 0:
       # bits 8-10 and 12 read zero, bit 13 reads set (GBATEK)

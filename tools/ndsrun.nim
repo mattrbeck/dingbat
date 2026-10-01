@@ -22,6 +22,8 @@
 ## (no scroll/priority/blending).
 ## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
 ##
+## --save FILE loads the card's save chip from FILE (its size picks the
+## chip) and writes it back when the run changed it.
 ## --pcs prints both CPUs' pc / halted state after each frame.
 ##
 ## Debug flags (build with -d:ndsdebug):
@@ -188,6 +190,7 @@ when isMainModule:
   var tops: seq[seq[uint32]]
   var peek9, peek7: seq[uint32]
   var wav = ""
+  var save = ""
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs"])
   for kind, key, val in p.getopt():
@@ -202,6 +205,7 @@ when isMainModule:
       of "trace7": trace7 = parseInt(val)
       of "trace-at": trace_at = parseInt(val)
       of "wav": wav = val
+      of "save": save = val
       of "press": presses.add parse_presses(val)
       of "peek9":
         for a in val.split(','): peek9.add uint32(parseHexInt(a))
@@ -221,6 +225,8 @@ when isMainModule:
   if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
   let n = load_nds(rom, bios)
   n.watch = watch
+  if save.len > 0 and fileExists(save):
+    n.cart.backup.set_data(cast[seq[uint8]](readFile(save)))
   var audio: seq[float32]
   for f in 0 ..< frames:
     if f == trace_at:
@@ -255,6 +261,10 @@ when isMainModule:
   if wav.len > 0:
     writeFile(wav, wav_bytes(audio))
     echo "audio: ", audio.len div 2, " frames -> ", wav
+  if save.len > 0:
+    echo "save chip: ", n.cart.backup.kind, " ", n.cart.backup.data.len, " bytes",
+         (if n.cart.backup.dirty: " (written -> " & save & ")" else: "")
+    if n.cart.backup.dirty: writeFile(save, cast[string](n.cart.backup.data))
   if shot.len == 2:
     # --bgshot A0: that BG replaces the top half of the PNG
     let px = n.bg_shot(shot[0] == 'B', ord(shot[1]) - ord('0'))

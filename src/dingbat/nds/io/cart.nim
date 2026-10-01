@@ -12,10 +12,14 @@
 ## the owner's DMA on each DRQ), then the next one starts; the last read
 ## ends the transfer (busy off, IF.19 if AUXSPICNT.14).
 ##
-## TODO(cart): KEY1 (real-BIOS boot), backup EEPROM/flash/FRAM, writes.
+## The save chip on the slot's SPI side is backup.nim.
+##
+## TODO(cart): KEY1 (real-BIOS boot), NAND carts.
 
-import irq
+import irq, backup
 import ../sched
+
+export backup
 
 type
   Cart* = ref object
@@ -30,7 +34,7 @@ type
     irq9* {.cursor.}, irq7* {.cursor.}: IrqCtl
     sched* {.cursor.}: NdsScheduler
     owner_arm7*: bool         ## EXMEMCNT bit 11
-    backup*: seq[uint8]
+    backup*: Backup
     spi_out*: uint8
 
 proc chip_id_for(size: int): uint32 =
@@ -40,7 +44,8 @@ proc chip_id_for(size: int): uint32 =
   0xC2'u32 or (uint32(p - 1) shl 8)
 
 proc new_cart*(rom: seq[uint8]; irq9, irq7: IrqCtl; sched: NdsScheduler): Cart =
-  Cart(rom: rom, chip_id: chip_id_for(rom.len), irq9: irq9, irq7: irq7, sched: sched)
+  Cart(rom: rom, chip_id: chip_id_for(rom.len), irq9: irq9, irq7: irq7, sched: sched,
+       backup: new_backup())
 
 proc byte_cycles(c: Cart): int64 {.inline.} =
   ## Master cycles per card byte (bus/5 or bus/8 clock, 2 master per bus).
@@ -114,13 +119,23 @@ proc read_reg*(c: Cart; offset: uint32): uint32 =
   of 0x1A4: c.romctrl
   else: 0
 
-proc write_reg*(c: Cart; offset: uint32; v, mask: uint32) =
+proc spi_selected(c: Cart): bool {.inline.} =
+  ## AUXSPICNT: slot enabled (15) in backup-SPI mode (13).
+  (c.auxspicnt and 0xA000'u16) == 0xA000
+
+proc write_reg*(c: Cart; offset: uint32; v, mask: uint32; pc = 0'u32) =
+  ## `pc` is the writing CPU's program counter (save-chip type detection).
   case offset
   of 0x1A0:
     if (mask and 0xFFFF) != 0:
+      let was = c.spi_selected()
       c.auxspicnt = (c.auxspicnt and not uint16(mask)) or (uint16(v) and uint16(mask))
-    if (mask and 0x00FF_0000'u32) != 0:
-      c.spi_out = 0xFF   # TODO(cart): backup EEPROM/flash/FRAM protocol
+      if was and not c.spi_selected(): c.backup.deselect()
+    if (mask and 0x00FF_0000'u32) != 0 and c.spi_selected():
+      # AUXSPIDATA: one byte each way; without the hold bit (6) the chip is
+      # deselected after it
+      c.spi_out = c.backup.transfer(uint8(v shr 16), pc)
+      if (c.auxspicnt and 0x40) == 0: c.backup.deselect()
   of 0x1A4:
     let was_busy = (c.romctrl and 0x8000_0000'u32) != 0
     let ready = c.romctrl and 0x0080_0000'u32   # read-only
