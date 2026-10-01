@@ -677,6 +677,7 @@ static void usage(void) {
     "                     is read first unless --no-core-opts\n"
     "  --list-opts        print the core's options (key, default, values) and exit\n"
     "  --layout auto|tb|bt|lr|rl  how the core's frame holds the two screens\n"
+    "  --sram FILE        load the cart's save memory from FILE (not written back)\n"
     "  --workdir DIR      system/ and save/ dirs here (default: a temp dir, removed)\n"
     "  --no-final         don't write PREFIX.png\n"
     "  --depth5           reduce PNG colour to 5 bits per channel, widened as ndsrun does\n"
@@ -687,6 +688,7 @@ static void usage(void) {
 int main(int argc, char **argv) {
   const char *core_arg = NULL, *rom = NULL, *outp = "ndsref_out", *wav = NULL,
              *bios = NULL, *workdir_arg = NULL;
+  const char *sram = NULL;
   int frames = 60, list_opts = 0, no_final = 0, no_core_opts = 0;
   const char *cli_opts[128], *opt_files[16];
   int n_cli_opts = 0, n_opt_files = 0;
@@ -703,6 +705,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--frames")) frames = atoi(NEXT());
     else if (!strcmp(a, "--out")) outp = NEXT();
     else if (!strcmp(a, "--wav")) wav = NEXT();
+    else if (!strcmp(a, "--sram")) sram = NEXT();
     else if (!strcmp(a, "--bios")) bios = NEXT();
     else if (!strcmp(a, "--workdir")) workdir_arg = NEXT();
     else if (!strcmp(a, "--sysfile")) { if (n_sysfiles < 64) sysfiles[n_sysfiles++] = NEXT(); }
@@ -814,6 +817,8 @@ int main(int argc, char **argv) {
   SYM(retro_load_game);
   SYM(retro_unload_game);
   SYM(retro_run);
+  SYM(retro_get_memory_data);
+  SYM(retro_get_memory_size);
 
   struct retro_system_info si = {0};
   p_retro_get_system_info(&si);
@@ -836,6 +841,16 @@ int main(int argc, char **argv) {
     struct retro_game_info gi = {abs, data, len, NULL};
     if (!p_retro_load_game(&gi)) die("core refused to load %s", rom);
     p_retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    if (sram) {
+      /* --sram: the cart's save memory starts as this file (read only; the
+         run never writes it back) */
+      size_t slen, cap = p_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+      uint8_t *sd = read_file(sram, &slen), *dst = p_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+      if (!dst || cap == 0) die("core exposes no save memory for --sram");
+      memcpy(dst, sd, slen < cap ? slen : cap);
+      fprintf(errf, "sram: %zu of %zu bytes from %s\n", slen < cap ? slen : cap, cap, sram);
+      free(sd);
+    }
     struct retro_system_av_info av = {0};
     p_retro_get_system_av_info(&av);
     sample_rate = av.timing.sample_rate;
