@@ -265,13 +265,18 @@ proc apply_normal(g: Geometry; p: uint32) =
     g.s = wrap16(((int64(nx) * m[0] + int64(ny) * m[4] + int64(nz) * m[8]) shr TEXGEN_NORMAL_SHIFT) + g.s_in)
     g.t = wrap16(((int64(nx) * m[1] + int64(ny) * m[5] + int64(nz) * m[9]) shr TEXGEN_NORMAL_SHIFT) + g.t_in)
   let n = g.vec_mul3(nx shl 3, ny shl 3, nz shl 3)
-  var col = [int64(g.emission[0]), int64(g.emission[1]), int64(g.emission[2])]
+  # GBATEK's sum (emission + per light: specular, diffuse, ambient terms)
+  # is kept with 17 fraction bits and truncated once at the end
+  # (3d_probe_light_sum on melonDS DS; other cores truncate each term)
+  var col = [int64(g.emission[0]) shl 17, int64(g.emission[1]) shl 17, int64(g.emission[2]) shl 17]
   for i in 0..3:
     if (g.attr and (1'u32 shl i)) == 0: continue
     let l = g.light_vec[i]
     let h = g.half_vec[i]
-    let dif = clamp(-((int64(l[0]) * n[0] + int64(l[1]) * n[1] + int64(l[2]) * n[2]) shr 12),
-                    0'i64, int64(ONE))
+    # the diffuse level keeps 8 fraction bits (3d_probe_light: both melonDS
+    # reference cores; a 12-bit level is one step brighter on 22 of 192)
+    let dif = (clamp(-((int64(l[0]) * n[0] + int64(l[1]) * n[1] + int64(l[2]) * n[2]) shr 12),
+                     0'i64, int64(ONE)) shr 4) shl 4
     var shi = clamp(-((int64(h[0]) * n[0] + int64(h[1]) * n[1] + int64(h[2]) * n[2]) shr 12),
                     0'i64, int64(ONE))
     shi = max(0'i64, ((2 * shi * shi) shr 12) - ONE)
@@ -281,9 +286,10 @@ proc apply_normal(g: Geometry; p: uint32) =
     shi = (if g.shine_table_on: int64(g.shine[idx]) else: int64(idx) * 2) shl 4   # 0.8 -> 0.12
     for c in 0..2:
       let lc = int64(g.light_col[i][c])
-      col[c] += (int64(g.specular[c]) * lc * shi) shr 17
-      col[c] += (int64(g.diffuse[c]) * lc * dif) shr 17
-      col[c] += (int64(g.ambient[c]) * lc) shr 5
+      col[c] += int64(g.specular[c]) * lc * shi
+      col[c] += int64(g.diffuse[c]) * lc * dif
+      col[c] += (int64(g.ambient[c]) * lc) shl 12
+  for c in 0..2: col[c] = col[c] shr 17
   g.cr = int32(min(31'i64, col[0]))
   g.cg = int32(min(31'i64, col[1]))
   g.cb = int32(min(31'i64, col[2]))
