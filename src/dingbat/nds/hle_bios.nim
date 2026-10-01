@@ -398,12 +398,46 @@ proc hle_soft_reset[B](cpu: ArmCpu[B]) =
 # ---------------------------------------------------------------------------
 # Dispatch
 
+proc hle_overhead[B](cpu: ArmCpu[B]; comment, r2: uint32) =
+  ## The cycles the console's BIOS spends on top of the memory accesses the
+  ## Nim code makes (those go through the bus and are charged there): SWI
+  ## entry and return plus the loop's instructions. Measured by running the
+  ## BIOS dumps' own code in this core (timing.nim; ARM9 with protection
+  ## unit and caches on, as programs run) on 8/64/512-unit calls and fitted
+  ## as base + per unit; master cycles. Without it an HLE run drifted a
+  ## frame ahead of the real BIOS (nds-examples allocation_test, which
+  ## copies its sprites with CpuSet; docs/nds/compat.md).
+  mixin armv5
+  let units = int64(r2 and 0x1FFFFF)
+  let fill = (r2 and (1'u32 shl 24)) != 0
+  let word = (r2 and (1'u32 shl 26)) != 0
+  var c: int64
+  when armv5(B):
+    case comment
+    of 0x0B: c = 300 + units * (if fill: (if word: 6 else: 7) else: (if word: 8 else: 9))
+    of 0x0C: c = 300 + units * (if fill: 4 else: 5)
+    of 0x09: c = 620
+    of 0x0D: c = 1200
+    of 0x0E: c = 360 + int64(r2) * 54
+    else: c = 0
+    cpu.icycles += c
+  else:
+    case comment
+    of 0x0B: c = 150 + units * (if fill: (if word: 26 else: 28) else: (if word: 14 else: 16))
+    of 0x0C: c = 170 + units * (if fill: 19 else: 2)
+    of 0x09: c = 640
+    of 0x0D: c = 1600
+    of 0x0E: c = 120 + int64(r2) * 114
+    else: c = 0
+    cpu.icycles += c div 2   # ARM7 clocks: step doubles them
+
 proc hle_swi*[B](cpu: ArmCpu[B]; comment: uint32): bool =
   ## Run SWI `comment` in Nim (true), or leave it to the BIOS image's SWI
   ## vector (false: the guest-code SWIs in hle_bios.s). Unknown numbers,
   ## which the console sends to the debug handler, do nothing.
   mixin armv5, read32, write8, write16, write32, cp15_write
   result = true
+  cpu.hle_overhead(comment, cpu.r[2])
   case comment
   of 0x00: cpu.hle_soft_reset()
   of 0x03, 0x04, 0x05, 0x12, 0x13, 0x15: return false

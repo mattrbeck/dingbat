@@ -6,6 +6,7 @@
 ##
 ## Run with: nimble test_ndscompat
 
+import std/os
 import dingbat/nds/nds
 
 var failures = 0
@@ -200,6 +201,50 @@ block branch_refill:
     n.arm9.cycles
   let per = (loop_cycles(300) - loop_cycles(100)) div 200
   check per == 4, "Thumb SUB/BGT loop: 4 ARM9 cycles a pass", $per & " cycles"
+
+# ---------------------------------------------------------------------------
+# HLE BIOS SWIs cost what the BIOS's own code costs in this core (an HLE
+# run of nds-examples allocation_test ran a frame ahead of the real BIOS)
+
+block hle_swi_cost:
+  echo "HLE SWI cycles"
+  let dir = getEnv("DINGBAT_NDS_BIOS")
+  if dir.len == 0 or not fileExists(dir / "bios9.bin"):
+    echo "  (skipped: no BIOS dumps in $DINGBAT_NDS_BIOS)"
+  else:
+    let bios9 = cast[seq[uint8]](readFile(dir / "bios9.bin"))
+    let bios7 = cast[seq[uint8]](readFile(dir / "bios7.bin"))
+    proc cost(hle, arm9: bool; num: uint32; regs: openArray[uint32]): int64 =
+      let n = new_nds(tiny_rom(), bios9, bios7, @[], force_hle = hle)
+      let code = if arm9: 0x0200_0100'u32 else: 0x0380_0100'u32
+      if arm9:   # protection unit and caches on, as programs run
+        Arm9Bus(nds: n).cp15_write(0, 1, 0, 0, n.cp15.control or 0x1005)
+      template go(cpu: untyped; B: typedesc) =
+        let b = B(nds: n)
+        b.write32(code, 0xEF000000'u32 or (num shl 16))
+        cpu.set_mode_sp(mSVC, (if arm9: 0x0080_3F00'u32 else: 0x0380_FF00'u32))
+        cpu.set_mode_sp(mSYS, (if arm9: 0x0080_3D00'u32 else: 0x0380_F000'u32))
+        cpu.set_cpsr(uint32(mSYS) or FLAG_I or FLAG_F)
+        for i, v in regs: cpu.r[i] = v
+        cpu.next_pc = code
+        let t0 = cpu.cycles
+        var k = 0
+        while cpu.next_pc != code + 4 and k < 1_000_000:
+          cpu.step(); inc k
+        result = cpu.cycles - t0
+      if arm9: go(n.arm9, Arm9Bus) else: go(n.arm7, Arm7Bus)
+    for arm9 in [true, false]:
+      for (name, num, r2) in [("CpuSet copy 16", 0x0B'u32, 200'u32),
+                              ("CpuSet fill 32", 0x0B'u32, 200'u32 or (5'u32 shl 24)),
+                              ("CpuFastSet copy", 0x0C'u32, 200'u32),
+                              ("GetCRC16", 0x0E'u32, 300'u32)]:
+        let regs = if num == 0x0E: @[0xFFFF'u32, 0x0200_1000'u32, r2]
+                   else: @[0x0200_1000'u32, 0x0200_8000'u32, r2]
+        let real = cost(false, arm9, num, regs)
+        let hle = cost(true, arm9, num, regs)
+        check abs(hle - real) * 50 <= real,
+              (if arm9: "ARM9 " else: "ARM7 ") & name & ": HLE within 2% of the BIOS's cycles",
+              "real " & $real & " hle " & $hle
 
 if failures > 0:
   echo failures, " failed"
