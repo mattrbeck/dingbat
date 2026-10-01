@@ -267,7 +267,11 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   n.read9(a, 16)
 
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()
-proc irq_wake*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.wake()
+proc irq_wake*(b: Arm9Bus): bool {.inline.} =
+  ## The ARM9 halts through CP15 (wait for interrupt), which only the IRQ
+  ## line ends: unlike the ARM7's HALTCNT it needs IME=1 (GBATEK "Halt": the
+  ## opcode hangs if IME=0). The CPSR I bit doesn't matter.
+  b.nds.irq9.line()
 proc access_cycles*(b: Arm9Bus): int64 {.inline.} = 0   # TODO(timing)
 
 proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
