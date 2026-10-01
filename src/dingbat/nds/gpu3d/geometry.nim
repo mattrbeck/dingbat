@@ -65,6 +65,13 @@ type
     box_result*: bool
 
 const
+  # Texcoord transform modes 2 and 3: (N or V, 1.0) * texture matrix, the
+  # sum shifted right by these. GBATEK's parts table (N 1.9, V 4.12, matrix
+  # 20.12, S/T 12.4) would give 17 and 20; the 3d_texcoord ROM on the
+  # reference cores (all three agree) pins 21 and 24 exactly, i.e. the
+  # products keep no fraction bits at all (docs/oracles.md, NDS core).
+  TEXGEN_NORMAL_SHIFT {.intdefine.} = 21
+  TEXGEN_VERTEX_SHIFT {.intdefine.} = 24
   MAX_POLYS* = 2048
   MAX_VERTS* = 6144
   MAX_CLIP = 16                 ## a quad clipped by 6 planes has at most 10
@@ -242,12 +249,11 @@ proc apply_normal(g: Geometry; p: uint32) =
   let ny = sext10(p shr 10)
   let nz = sext10(p shr 20)
   if (g.teximage shr 30) == 2:
-    # texcoord from the normal: (N, 1.0) * texture matrix with S, T as row 3;
-    # N has 9 fraction bits and the matrix 12, S/T keep 4: shift 21 - 4 = 17
-    # (GBATEK "DS 3D Texture Coordinates", parts table)
+    # texcoord from the normal: (N, 1.0) * texture matrix with S, T as row 3
+    # (GBATEK "DS 3D Texture Coordinates"); the shift is TEXGEN_NORMAL_SHIFT
     let m = g.tex
-    g.s = wrap16(((int64(nx) * m[0] + int64(ny) * m[4] + int64(nz) * m[8]) shr 17) + g.s_in)
-    g.t = wrap16(((int64(nx) * m[1] + int64(ny) * m[5] + int64(nz) * m[9]) shr 17) + g.t_in)
+    g.s = wrap16(((int64(nx) * m[0] + int64(ny) * m[4] + int64(nz) * m[8]) shr TEXGEN_NORMAL_SHIFT) + g.s_in)
+    g.t = wrap16(((int64(nx) * m[1] + int64(ny) * m[5] + int64(nz) * m[9]) shr TEXGEN_NORMAL_SHIFT) + g.t_in)
   let n = g.vec_mul3(nx shl 3, ny shl 3, nz shl 3)
   var col = [int64(g.emission[0]), int64(g.emission[1]), int64(g.emission[2])]
   for i in 0..3:
@@ -430,10 +436,10 @@ proc transform(g: Geometry; x, y, z: int32): array[4, int32] =
 proc submit_vertex(g: Geometry) =
   if (g.teximage shr 30) == 3:
     # texcoord from the vertex: (V, 1.0) * texture matrix, S, T as row 3;
-    # V and the matrix have 12 fraction bits each, S/T keep 4: shift 20
+    # the shift is TEXGEN_VERTEX_SHIFT
     let m = g.tex
-    g.s = wrap16(((int64(g.vx) * m[0] + int64(g.vy) * m[4] + int64(g.vz) * m[8]) shr 20) + g.s_in)
-    g.t = wrap16(((int64(g.vx) * m[1] + int64(g.vy) * m[5] + int64(g.vz) * m[9]) shr 20) + g.t_in)
+    g.s = wrap16(((int64(g.vx) * m[0] + int64(g.vy) * m[4] + int64(g.vz) * m[8]) shr TEXGEN_VERTEX_SHIFT) + g.s_in)
+    g.t = wrap16(((int64(g.vx) * m[1] + int64(g.vy) * m[5] + int64(g.vz) * m[9]) shr TEXGEN_VERTEX_SHIFT) + g.t_in)
   let c = g.transform(g.vx, g.vy, g.vz)
   g.add_vertex(Vertex(x: c[0], y: c[1], z: c[2], w: c[3], r: g.cr, g: g.cg, b: g.cb,
                       s: g.s, t: g.t))

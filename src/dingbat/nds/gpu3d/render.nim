@@ -388,17 +388,19 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; edge: bool) {.inlin
   let old = r.depth[i]
   let pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
-  if c.mode == 3 and c.id == 0:
-    # shadow mask: flags the stencil where the volume's back side is in front
-    if pass: r.flags[i] = r.flags[i] or FLAG_STENCIL
-    return
-  if not pass: return
   if c.mode == 3:
-    # shadow: not where the mask was set (which it clears), nor on its own ID
-    if (r.flags[i] and FLAG_STENCIL) != 0:
-      r.flags[i] = r.flags[i] and not FLAG_STENCIL
+    # Shadow volumes (GBATEK "DS 3D Shadow Polygons"), as the reference
+    # cores agree on 3d_shadow: the mask (ID 0) flags the dots where its
+    # back side is hidden, i.e. where the scene lies inside the volume; the
+    # shadow (ID > 0) draws only on flagged dots, clearing the flag, and
+    # not on its own polygon ID. A shadow with no mask draws nothing.
+    if c.id == 0:
+      if not pass: r.flags[i] = r.flags[i] or FLAG_STENCIL
       return
-    if r.opaque_id[i] == c.id: return
+    if (r.flags[i] and FLAG_STENCIL) == 0: return
+    r.flags[i] = r.flags[i] and not FLAG_STENCIL
+    if not pass or r.opaque_id[i] == c.id: return
+  elif not pass: return
   let vr = int32(clamp(ashr(cr, 3), 0, 63))
   let vg = int32(clamp(ashr(cg, 3), 0, 63))
   let vb = int32(clamp(ashr(cb, 3), 0, 63))
