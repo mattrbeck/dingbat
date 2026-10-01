@@ -200,3 +200,7 @@ tests/nds/roms/*
 !tests/nds/roms/fb_both.nds
 !tests/nds/roms/2d_*.nds
 !tests/nds/roms/gx_tri.nds
+
+# DS reference tools (nimble ndsref_build)
+/tools/ndsref/ndsref
+/tools/ndsref/ndsrun

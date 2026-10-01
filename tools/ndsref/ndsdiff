@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Compare two same-size PNGs (stdlib only).
+
+  ndsdiff A.png B.png [--out DIFF.png] [--tol N] [--quiet]
+
+A 256x384 image is reported as two screens (top, bottom); any other size as
+one. A pixel mismatches when any channel differs by more than --tol (default
+0). The diff PNG shows matching pixels as a dim grey copy of A and mismatches
+in red (brighter = larger error). Exit status: 0 identical within --tol,
+1 different, 2 error.
+"""
+import argparse
+import struct
+import sys
+import zlib
+
+
+def read_png(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit(f"ndsdiff: {path} is not a PNG")
+    pos, idat, w = 8, b"", None
+    plte = None
+    while pos < len(data):
+        ln, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + ln]
+        pos += 12 + ln
+        if kind == b"IHDR":
+            w, h, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            if depth != 8 or interlace:
+                raise SystemExit(f"ndsdiff: {path}: only 8-bit non-interlaced PNGs")
+        elif kind == b"PLTE":
+            plte = body
+        elif kind == b"IDAT":
+            idat += body
+        elif kind == b"IEND":
+            break
+    bpp = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ctype]
+    raw = zlib.decompress(idat)
+    stride = w * bpp
+    out = bytearray(w * h * 3)
+    prev = bytearray(stride)
+    p = 0
+    for y in range(h):
+        ft = raw[p]
+        line = bytearray(raw[p + 1:p + 1 + stride])
+        p += 1 + stride
+        if ft == 1:
+            for i in range(bpp, stride):
+                line[i] = (line[i] + line[i - bpp]) & 255
+        elif ft == 2:
+            for i in range(stride):
+                line[i] = (line[i] + prev[i]) & 255
+        elif ft == 3:
+            for i in range(stride):
+                left = line[i - bpp] if i >= bpp else 0
+                line[i] = (line[i] + ((left + prev[i]) >> 1)) & 255
+        elif ft == 4:
+            for i in range(stride):
+                a = line[i - bpp] if i >= bpp else 0
+                b = prev[i]
+                c = prev[i - bpp] if i >= bpp else 0
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                pr = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+                line[i] = (line[i] + pr) & 255
+        prev = line
+        o = y * w * 3
+        if ctype == 2:
+            out[o:o + w * 3] = line
+        elif ctype == 6:
+            out[o:o + w * 3] = bytes(b for i in range(w) for b in line[i * 4:i * 4 + 3])
+        elif ctype == 3:
+            out[o:o + w * 3] = b"".join(plte[k * 3:k * 3 + 3] for k in line)
+        else:  # grey, grey+alpha
+            out[o:o + w * 3] = bytes(line[i * (bpp)] for i in range(w) for _ in range(3))
+    return w, h, out
+
+
+def write_png(path, w, h, rgb):
+    raw = b"".join(b"\x00" + bytes(rgb[y * w * 3:(y + 1) * w * 3]) for y in range(h))
+
+    def chunk(kind, body):
+        return (struct.pack(">I", len(body)) + kind + body +
+                struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF))
+
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)))
+        f.write(chunk(b"IDAT", zlib.compress(raw, 6)))
+        f.write(chunk(b"IEND", b""))
+
+
+def compare(a_path, b_path, out=None, tol=0, quiet=False):
+    wa, ha, a = read_png(a_path)
+    wb, hb, b = read_png(b_path)
+    if (wa, ha) != (wb, hb):
+        print(f"size mismatch: {a_path} {wa}x{ha} vs {b_path} {wb}x{hb}")
+        return 2
+    w, h = wa, ha
+    regions = [("top", 0, 192), ("bottom", 192, 384)] if (w, h) == (256, 384) else [("image", 0, h)]
+    diff = bytearray(w * h * 3) if out else None
+    total_bad = 0
+    for name, y0, y1 in regions:
+        bad, worst = 0, 0
+        first = None
+        for y in range(y0, y1):
+            for x in range(w):
+                i = (y * w + x) * 3
+                e = max(abs(a[i] - b[i]), abs(a[i + 1] - b[i + 1]), abs(a[i + 2] - b[i + 2]))
+                if e > worst:
+                    worst = e
+                if e > tol:
+                    bad += 1
+                    if first is None:
+                        first = (x, y - y0)
+                    if diff is not None:
+                        diff[i] = 128 + min(127, e)
+                        diff[i + 1] = diff[i + 2] = 0
+                elif diff is not None:
+                    g = (a[i] + a[i + 1] + a[i + 2]) // 12
+                    diff[i] = diff[i + 1] = diff[i + 2] = g
+        n = w * (y1 - y0)
+        total_bad += bad
+        if not quiet or bad:
+            where = f", first at ({first[0]},{first[1]})" if first else ""
+            print(f"{name:6s}: {bad:6d}/{n} mismatched ({100.0 * bad / n:.3f}%), "
+                  f"max channel error {worst}{where}")
+    if diff is not None:
+        write_png(out, w, h, diff)
+    return 1 if total_bad else 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Compare two same-size PNGs.")
+    ap.add_argument("a")
+    ap.add_argument("b")
+    ap.add_argument("--out", help="write a diff PNG (mismatches in red)")
+    ap.add_argument("--tol", type=int, default=0, help="per-channel tolerance (default 0)")
+    ap.add_argument("--quiet", action="store_true", help="print only mismatching screens")
+    args = ap.parse_args()
+    sys.exit(compare(args.a, args.b, args.out, args.tol, args.quiet))
+
+
+if __name__ == "__main__":
+    main()

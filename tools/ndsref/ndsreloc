@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Copy a DS ROM with its ARM9 binary moved out of the secure area.
+
+  ndsreloc IN.nds OUT.nds
+
+A cart's ROM 4000h-7FFFh is its secure area: loaded through the KEY1
+handshake and, on a direct boot, expected to decrypt to the "encryObj" ID
+(GBATEK, DS Cartridge Secure Area). A ROM that puts plain ARM9 code there
+(this repo's tests/nds/roms and some old homebrew) is not a valid cart image,
+and a reference core may refuse it (an all-white frame). This shifts
+everything from 4000h on by 4000h and adds 4000h to every header offset and
+FAT entry that points there, then fixes the header CRC. The program itself is
+unchanged. ROMs with no ARM9 in the secure area are copied as they are.
+"""
+import struct
+import sys
+
+SHIFT = 0x4000
+
+
+def crc16(data):
+    c = 0xFFFF
+    for x in data:
+        c ^= x
+        for _ in range(8):
+            c = (c >> 1) ^ 0xA001 if c & 1 else c >> 1
+    return c
+
+
+def relocate(d):
+    d = bytearray(d)
+    arm9 = struct.unpack_from("<I", d, 0x20)[0]
+    if not 0x4000 <= arm9 < 0x8000:
+        return d, False
+    out = bytearray(d[:0x4000]) + bytearray(SHIFT) + d[0x4000:]
+
+    def bump(off):
+        v = struct.unpack_from("<I", out, off)[0]
+        if v >= 0x4000:
+            struct.pack_into("<I", out, off, v + SHIFT)
+        return v
+
+    for off in (0x20, 0x30, 0x40, 0x50, 0x58, 0x68):
+        bump(off)
+    fat = struct.unpack_from("<I", out, 0x48)[0]  # already bumped
+    fat_size = struct.unpack_from("<I", out, 0x4C)[0]
+    if fat >= 0x4000 and fat_size:
+        for e in range(fat, fat + fat_size, 4):
+            v = struct.unpack_from("<I", out, e)[0]
+            if v >= 0x4000:
+                struct.pack_into("<I", out, e, v + SHIFT)
+    used = struct.unpack_from("<I", out, 0x80)[0]
+    if used >= 0x4000:
+        struct.pack_into("<I", out, 0x80, used + SHIFT)
+    struct.pack_into("<H", out, 0x15E, crc16(out[:0x15E]))
+    return out, True
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__.strip().splitlines()[2])
+    data, moved = relocate(open(sys.argv[1], "rb").read())
+    with open(sys.argv[2], "wb") as f:
+        f.write(data)
+    print(("relocated ARM9 out of the secure area" if moved else "copied unchanged") +
+          " -> " + sys.argv[2])
+
+
+if __name__ == "__main__":
+    main()
