@@ -1,0 +1,148 @@
+## ARM7 SPI hub: SPICNT 0x40001C0, SPIDATA 0x40001C2. Three devices behind
+## one chip select: power manager (0), firmware flash (1), touchscreen
+## controller (2). Transfers complete instantly in the skeleton (busy never
+## reads set); an IRQ (IF.23) is raised on completion if enabled.
+
+import irq, input
+
+type
+  FlashState = enum fsIdle, fsAddr, fsRead, fsStatus, fsId, fsOther
+
+  Spi* = ref object
+    cnt*: uint16
+    data_out*: uint8
+    firmware*: seq[uint8]     ## 256 KB image (real dump or synthesized)
+    # flash
+    fstate: FlashState
+    faddr: uint32
+    faddr_bytes: int
+    fid_idx: int
+    write_enable: bool
+    # touchscreen
+    tsc_value: uint16        ## 12-bit result being shifted out
+    tsc_byte: int
+    # power manager
+    pm_regs*: array[8, uint8]
+    pm_index: int            ## -1 = expecting index byte
+    irq* {.cursor.}: IrqCtl
+    input* {.cursor.}: Input
+    selected: int            ## device held by chip select, -1 = none
+
+proc new_spi*(firmware: seq[uint8]; irq: IrqCtl; input: Input): Spi =
+  result = Spi(firmware: firmware, irq: irq, input: input, selected: -1, pm_index: -1)
+  result.pm_regs[0] = 0x0D  # sound amp, both backlights
+  if result.firmware.len < 256 * 1024: result.firmware.setLen(256 * 1024)
+
+proc user_settings_offset*(s: Spi): int =
+  let o = (int(s.firmware[0x20]) or (int(s.firmware[0x21]) shl 8)) * 8
+  if o <= 0 or o + 0x200 > s.firmware.len: 0x3FE00 else: o
+
+proc user_settings*(s: Spi): int =
+  ## The newer of the two user-settings copies (update counter 0x70).
+  let a = s.user_settings_offset()
+  let b = a + 0x100
+  let ca = int(s.firmware[a + 0x70]) and 0x7F
+  let cb = int(s.firmware[b + 0x70]) and 0x7F
+  if ((ca + 1) and 0x7F) == cb: b else: a
+
+proc touch_adc(s: Spi; channel: int): uint16 =
+  ## Screen position -> ADC via the firmware's two calibration points.
+  if not s.input.touching:
+    return if channel == 1: 0xFFF'u16 else: 0
+  let u = s.user_settings()
+  template rd16(o: int): int = int(s.firmware[u + o]) or (int(s.firmware[u + o + 1]) shl 8)
+  let adc_x1 = rd16(0x58) and 0xFFF
+  let adc_y1 = rd16(0x5A) and 0xFFF
+  let scr_x1 = int(s.firmware[u + 0x5C])
+  let scr_y1 = int(s.firmware[u + 0x5D])
+  let adc_x2 = rd16(0x5E) and 0xFFF
+  let adc_y2 = rd16(0x60) and 0xFFF
+  let scr_x2 = int(s.firmware[u + 0x62])
+  let scr_y2 = int(s.firmware[u + 0x63])
+  proc lerp(p, s1, s2, a1, a2: int): int =
+    if s2 == s1: return a1
+    (p - s1 + 1) * (a2 - a1) div (s2 - s1) + a1
+  let v = if channel == 5: lerp(s.input.touch_x, scr_x1, scr_x2, adc_x1, adc_x2)
+          else: lerp(s.input.touch_y, scr_y1, scr_y2, adc_y1, adc_y2)
+  uint16(clamp(v, 0, 0xFFF))
+
+proc flash_byte(s: Spi; v: uint8): uint8 =
+  case s.fstate
+  of fsIdle:
+    case v
+    of 0x03, 0x0B:
+      s.fstate = fsAddr; s.faddr = 0; s.faddr_bytes = 0
+      s.fid_idx = if v == 0x0B: 1 else: 0   # fast read: one dummy byte
+    of 0x05: s.fstate = fsStatus
+    of 0x9F: s.fstate = fsId; s.fid_idx = 0
+    of 0x06: s.write_enable = true
+    of 0x04: s.write_enable = false
+    else: s.fstate = fsOther  # TODO(spi): page write/program/erase
+  of fsAddr:
+    s.faddr = (s.faddr shl 8) or v
+    inc s.faddr_bytes
+    if s.faddr_bytes == 3:
+      s.fstate = fsRead
+  of fsRead:
+    if s.fid_idx > 0:
+      dec s.fid_idx
+      return 0
+    result = s.firmware[int(s.faddr and 0x3FFFF)]
+    inc s.faddr
+  of fsStatus: result = if s.write_enable: 2'u8 else: 0'u8
+  of fsId:
+    const id = [0x20'u8, 0x40, 0x12]
+    result = if s.fid_idx < 3: id[s.fid_idx] else: 0
+    inc s.fid_idx
+  of fsOther: discard
+
+proc tsc_byte_in(s: Spi; v: uint8): uint8 =
+  # Reply: the 12-bit result left over from the last control byte, MSB
+  # first after one dummy bit, spread over two bytes.
+  result = case s.tsc_byte
+    of 1: uint8((s.tsc_value shr 5) and 0xFF)
+    of 2: uint8((s.tsc_value shl 3) and 0xFF)
+    else: 0'u8
+  inc s.tsc_byte
+  if (v and 0x80) != 0:
+    let channel = int((v shr 4) and 7)
+    s.tsc_value = case channel
+      of 1, 5: s.touch_adc(channel)
+      of 6: 0x800'u16   # microphone: silence
+      else: 0'u16
+    s.tsc_byte = 1
+
+proc pm_byte(s: Spi; v: uint8): uint8 =
+  if s.pm_index < 0:
+    s.pm_index = int(v)
+    return 0
+  let reg = s.pm_index and 7
+  let read = (s.pm_index and 0x80) != 0
+  if read: result = s.pm_regs[reg and 3]
+  else: s.pm_regs[reg and 3] = v
+  s.pm_index = -1
+
+proc write_cnt*(s: Spi; v, mask: uint32) =
+  let m = uint16(mask and 0xFFFF)
+  s.cnt = (s.cnt and not m) or (uint16(v) and m and 0xCF03)
+  if (s.cnt and 0x8000) == 0: s.selected = -1
+
+proc write_data*(s: Spi; v: uint8) =
+  if (s.cnt and 0x8000) == 0: return
+  let dev = int((s.cnt shr 8) and 3)
+  if s.selected != dev:
+    # chip select edge: reset the device's command state
+    s.selected = dev
+    s.fstate = fsIdle
+    s.pm_index = -1
+    s.tsc_byte = 0
+  s.data_out = case dev
+    of 0: s.pm_byte(v)
+    of 1: s.flash_byte(v)
+    of 2: s.tsc_byte_in(v)
+    else: 0
+  if (s.cnt and 0x800) == 0: s.selected = -1   # no hold: deselect
+  if (s.cnt and 0x4000) != 0: s.irq.raise_irq(irqSpi)
+
+proc read_reg*(s: Spi; offset: uint32): uint32 =
+  uint32(s.cnt) or (uint32(s.data_out) shl 16)
