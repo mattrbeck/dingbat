@@ -299,3 +299,65 @@ Each file lists its theorems. The headline ones:
 - **Service worker:** it never reloads without a click and shows the prompt at
   most once per page.
 - **Modals:** the tombstone prompt settles exactly once on every exit path.
+
+## Picking a game up on another device (2026-10-01, `WebState/Handoff`)
+
+Models the hand-off shipped in 43b30d1c (main 11025707): the session as a
+Drive file, the flush's hold-back of a session another device wrote unseen,
+the pull's hand-off of the game held in memory (taken at home when fully
+sent, else offered as Switch), `switchToHandoff`, and what the home screen
+shows. Two devices, one game, one Drive; every await that matters is an
+event boundary, and a Sync tapped while a job runs queues behind it.
+
+**Proved** (the file's header lists every theorem):
+- Matt's fourteen steps, for all four ways device 2 opens (never opened,
+  reopened, tab open on the library, tab paused on an older moment), saving
+  in game or not: device 2 shows and resumes device 1's moment on device
+  1's save, then device 1 shows and resumes device 2's. Also on the shipped
+  code: the story itself has no race.
+- Over every state: a tap never rolls the save back (a session is resumed
+  only where it was taken with the stored save); Drive's session changes only
+  when an upload lands, and an upload starts only from a read whose listing
+  showed nothing this device had not seen (or Switch waived it); a pull lets
+  the game in memory go only at home, unmoved, with nothing waiting to go up
+  (fixed code), and then always does, landing every file as downloaded; a
+  pull that lands a file redraws the closed hero from what is stored.
+- Convergence over 686 histories (three moves, alternating devices, out of:
+  sync stopped mid-pull, play, play and save, Close, Sync, page killed and
+  reopened, Switch): syncing each device in turn, both resume the same
+  moment on the same save as Drive's copy, each hero showing where a tap
+  goes.
+
+**Found and fixed.** Each trace is a `bug_*` theorem on the shipped code and
+a `regress_*` theorem on the fixed one, and each has a test in
+`web/tests/handoff.test.mjs` that fails on 11025707:
+
+| # | Severity | What happened | Fix |
+|---|---|---|---|
+| H1 | Medium | **Switch tapped while this device's own session was uploading** (the offer schedules that upload 2 s later; a GBA session is ~500 KB, so a tap a few seconds in lands mid-upload). The upload's completion took the key off the queue, so the chosen copy never went up: Drive kept the moment the player had just turned down, the other device picked *that* up, and the two diverged until a later Sync. | `switchToHandoff` marks what it re-queues as saved again (`syncRemarked`). |
+| H2 | Medium | **Close tapped while a Sync downloaded the other device's session.** The pull went on as if the game were still held: it offered Switch (a no-op by then) and marked the session seen, so the files pass skipped it. The closed device resumed its own older moment until the other device uploaded again. No conflict needed: one player, paused on device 1, played on device 2, came back, tapped Sync then Close. | The hand-off section acts only on a game still held by the player's leave (`stillHeld`); a game closed meanwhile is left to the files pass. |
+| H3 | Low | **Resume tapped during `heldGameIsSent`'s read** (an IndexedDB get, a few ms). The pull had decided "at home" before it, and unloaded the game the player had just gone back into. | `heldGameIsSent` asks after its read; the caller checks `running` and `loadGen` in the run that takes the hand-off. |
+
+**Open, by design** (two devices made progress without syncing in between;
+proved as traces so the behaviour is stated, not implied):
+- `edge_concurrent_play_held_wins`: the device that syncs last while holding
+  the game wins; the other's in-game save is gone everywhere.
+- `edge_closed_copy_yields`: a save made just before the page was killed
+  (queued, unsent) is overwritten by the boot pull when the other device
+  saved and synced meanwhile.
+- `edge_listing_race`: Drive has no compare-and-swap, so a flush can write
+  over a session uploaded after its listing (both devices flushing within
+  the same second).
+
+Keeping the overwritten save aside (the 30-day `oldsave:` mechanism) would
+make all three recoverable.
+
+**Found by reading, not fixed:** a session file on Drive written for an
+older generation of the game (a delete and re-import racing another
+device's upload) is never marked seen, so the flush holds this device's
+session back on every pass and the lamp stays on "Syncing…". The hold-back
+should not apply when `fileGen(r0) < gen`. Rare, and the model has no
+generations.
+
+**Abstractions:** listed in the file's header. Bytes are opaque (compression
+is invisible here), one game, both devices hold its ROM, loads are atomic.

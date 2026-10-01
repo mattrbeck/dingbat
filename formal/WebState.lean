@@ -1,6 +1,7 @@
 import WebState.DriveLibrary
 import WebState.DriveSession
 import WebState.GameLifecycle
+import WebState.Handoff
 import WebState.Modals
 import WebState.Netplay
 import WebState.RunPause
