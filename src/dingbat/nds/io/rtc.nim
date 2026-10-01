@@ -19,6 +19,7 @@
 
 import std/times
 import ../../gba/rtc_calendar
+import ../sched
 
 type
   RtcState = enum rsIdle, rsCommand, rsWrite, rsRead
@@ -38,6 +39,8 @@ type
     adjust*, free*: uint8
     offset*: int64            ## calendar seconds minus host local time
     weekday_offset*: int      ## register weekday minus calendar weekday
+    sched* {.cursor.}: NdsScheduler  ## set: clock follows emulated time
+    fixed_start*: int64
 
 const
   STAT1_RESET = 0x01'u8
@@ -54,7 +57,18 @@ proc new_rtc*(): Rtc =
   ## on the host's local time.
   Rtc(stat1: STAT1_24H)
 
-proc now_seconds(r: Rtc): int64 = host_seconds() + r.offset
+proc base_seconds(r: Rtc): int64 =
+  ## Host local time, or (`fixed_start` set) a fixed start plus emulated
+  ## time, for reproducible runs.
+  if r.sched != nil: r.fixed_start + r.sched.now div MASTER_HZ else: host_seconds()
+
+proc set_fixed_clock*(r: Rtc; sched: NdsScheduler; calendar_seconds: int64) =
+  ## Run the clock from emulated time, starting at `calendar_seconds`.
+  r.sched = sched
+  r.fixed_start = calendar_seconds - sched.now div MASTER_HZ
+  r.offset = 0
+
+proc now_seconds(r: Rtc): int64 = r.base_seconds() + r.offset
 
 proc param_bytes(cmd: int; stat2: uint8): int =
   case cmd
@@ -110,7 +124,7 @@ proc reset_chip(r: Rtc) =
   r.adjust = 0
   r.free = 0
   # 2000-01-01 00:00:00
-  r.offset = CAL_2000_01_01 - host_seconds()
+  r.offset = CAL_2000_01_01 - r.base_seconds()
   r.weekday_offset = 0
 
 proc set_datetime(r: Rtc; date: bool) =
@@ -130,7 +144,7 @@ proc set_datetime(r: Rtc; date: bool) =
   let mi = clamp(from_bcd(r.buf[t0 + 1] and 0x7F), 0, 59)
   let se = clamp(from_bcd(r.buf[t0 + 2] and 0x7F), 0, 59)
   let s = to_calendar_seconds(year, month, day, h, mi, se)
-  r.offset = s - host_seconds()
+  r.offset = s - r.base_seconds()
   if date:
     r.weekday_offset = int(r.buf[3] and 7) - calendar_weekday(s)
 

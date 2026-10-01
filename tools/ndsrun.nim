@@ -26,6 +26,8 @@
 ##
 ## --save FILE loads the card's save chip from FILE (its size picks the
 ## chip) and writes it back when the run changed it.
+## --rtc YYYY-MM-DD[THH:MM:SS] starts the RTC at that time and clocks it from
+## emulated time, so runs are reproducible (default: host local time).
 ## --pcs prints both CPUs' pc / halted state after each frame.
 ##
 ## Debug flags (build with -d:ndsdebug):
@@ -39,6 +41,8 @@
 import std/[os, strutils, parseopt, tables, sequtils]
 import zippy
 import dingbat/nds/nds
+import dingbat/nds/io/rtc
+import dingbat/gba/rtc_calendar
 
 proc crc32(data: openArray[uint8]): uint32 =
   var table {.global.}: array[256, uint32]
@@ -198,6 +202,7 @@ when isMainModule:
   var dumps: seq[(bool, uint32, int, string)]
   var wav = ""
   var save = ""
+  var rtc_at = ""
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog"])
   for kind, key, val in p.getopt():
@@ -213,6 +218,7 @@ when isMainModule:
       of "trace-at": trace_at = parseInt(val)
       of "wav": wav = val
       of "save": save = val
+      of "rtc": rtc_at = val
       of "press": presses.add parse_presses(val)
       of "peek9":
         for a in val.split(','): peek9.add uint32(parseHexInt(a))
@@ -240,6 +246,12 @@ when isMainModule:
   let n = load_nds(rom, bios)
   n.watch = watch
   n.cart.spilog = spilog
+  if rtc_at.len > 0:
+    # --rtc YYYY-MM-DD[THH:MM:SS]: the RTC starts there and follows emulated time
+    let d = rtc_at.replace('T', '-').replace(':', '-').split('-')
+    var f: array[6, int]
+    for i in 0 ..< min(6, d.len): f[i] = parseInt(d[i])
+    n.rtc.set_fixed_clock(n.sched, to_calendar_seconds(f[0], f[1], f[2], f[3], f[4], f[5]))
   if save.len > 0 and fileExists(save):
     n.cart.backup.set_data(cast[seq[uint8]](readFile(save)))
   var audio: seq[float32]
