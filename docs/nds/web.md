@@ -52,7 +52,7 @@ address moves) and runs `web/serve.py --dev --https` on port 8443 (`PORT=`).
 
 | Feature | Why |
 |---|---|
-| Save states: Quick save/load, slots, Save States, resume snapshots and the hand-off | The DS core has none yet. One hook: `ndsCaptureState`/`ndsApplyState` in index.js "Nintendo DS" call `nds_state_size`/`nds_state_data`/`nds_state_load` when the core exports them (another branch is adding them; add the names to `src/dingbat_nds_wasm.nims` and `web/types/nds.d.ts`). Then `captureStateBytes`/`applyStateBytes` work, `body.nds-states` brings back quick save/load and Save States, and the library offers the session. Rewind and run-ahead need more than that and stay off. |
+| Save states: Quick save/load, slots, Save States, resume snapshots and the hand-off | The core exports `nds_state_size`/`nds_state_data`/`nds_state_load` (+ `nds_state_error_kind`/`nds_state_error`; docs/nds/savestate.md). `ndsCaptureState`/`ndsApplyState` in index.js "Nintendo DS" call them, so `captureStateBytes`/`applyStateBytes` work, `body.nds-states` brings back quick save/load and Save States, the library offers the session, and a refused state's toast reads the DS core's reason. Rewind and run-ahead need more than that and stay off. |
 | Rewind, the rewind scrubber, Report a Bug's timeline | No rewind ring on the DS core (Report a Bug attaches the moment, when states exist). |
 | Clip that! and Record | Clip that! replays the GB/GBA core's history; Record is kept with it as in every other mode (it would likely work: canvas + audio tap). |
 | Link cable, 2P link | No DS wireless/link. |
@@ -122,6 +122,7 @@ it in step with the `.nims` export list), `styles.css` "Nintendo DS",
   left (side by side, ~375 x 140 on an iPhone 13 mini). A DS-only portrait
   arrangement (screens over a smaller strip, or controls over the top
   screen) is a decision for Matt.
-- Save states, rewind and the session hand-off once the core has states.
+- Rewind and run-ahead on the DS (`state_payload` / `load_state_payload`
+  are the core's hooks; docs/nds/savestate.md has the sizes and costs).
 - Lid close, microphone, the GBA slot, wireless.
 - Drive sync of DS saves once main plays DS games.

@@ -988,6 +988,9 @@ proc state_reject_sentence(): string =
   of srkNoFile:
     # The common one: Quick Load before any Quick Save. Not "damaged".
     "There's no save state in that slot yet."
+  of srkIncompatible:
+    "That save state was made by another version of dingbat's DS core, or " &
+    "with a different BIOS, and can't be loaded here."
   of srkNone:
     "That save state couldn't be loaded."
 

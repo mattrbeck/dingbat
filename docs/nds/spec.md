@@ -36,7 +36,8 @@ on a dev page (`web/nds.html`) and in the main web app (`docs/nds/web.md`). Hard
   through the VRAM bank page tables (`mem/vram.nim`). Port the algorithms
   into `gpu/engine2d.nim`.
 - **Shared as is:** `bitfield.nim`, `common/util.nim`, `common/resampler.nim`
-  (sound output, later), `common/serialize.nim` (save states, later), the
+  (sound output, later), `common/serialize.nim` (the state container,
+  docs/nds/savestate.md), the
   frontends' plumbing.
 - **BIOS:** real dumps are used when present (`--bios DIR` /
   `$DINGBAT_NDS_BIOS`: `bios9.bin`, `bios7.bin`, `firmware.bin`); firmware is
@@ -126,6 +127,8 @@ src/dingbat/nds/
   io/wifi.nim      wifi MAC/BB/RF, transmitter, receiver, the Air between
                    consoles (docs/nds/wifi.md)
   air.nim          several machines in lockstep on one Air (local wireless)
+  savestate.nim    save states: the machine walked field by field
+                   (docs/nds/savestate.md)
 src/dingbat_nds_wasm.nim(+.nims)  wasm exports (createNdsCore) for the app and web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 tools/ndsair.nim                   the same for N machines on one Air
@@ -139,6 +142,7 @@ tests/nds_slot2_test.nim           GBA-slot devices + the slot2_probe ROM
 tests/nds_boot_test.nim            KEY1/KEY2, card handshake, secure area, direct boot
 tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machines
 tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
+tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask

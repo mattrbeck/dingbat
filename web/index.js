@@ -7479,7 +7479,7 @@ const looksLikeStateFile = (bytes) =>
 // wasm_state_error_kind): one sentence per cause saying what to do.
 const SRK = {
   NONE: 0, NOT_A_STATE: 1, WRONG_CORE: 2, WRONG_ROM: 3,
-  TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6, NO_FILE: 7,
+  TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6, NO_FILE: 7, INCOMPATIBLE: 8,
 };
 const STATE_REJECT_COPY = {
   [SRK.NOT_A_STATE]: "That file isn't a dingbat save state.",
@@ -7495,10 +7495,17 @@ const STATE_REJECT_COPY = {
     "That save state is damaged and can't be loaded. The game is still running and nothing was changed.",
   // Native-only today; kept so the ordinals stay a complete contract.
   [SRK.NO_FILE]: "There's no save state in that slot yet.",
+  // DS only: another build's DS state layout, or the other BIOS (a dump vs
+  // the built-in one), or another GBA-slot cart (docs/nds/savestate.md).
+  [SRK.INCOMPATIBLE]:
+    "That save state was made by another version of dingbat's DS core, or with a different BIOS or GBA-slot cart, and can't be loaded here. The game is still running and nothing was changed.",
 };
 
 const stateRejectKind = () => {
   try {
+    if (ndsGameLoaded() && ndsCore) {
+      return ndsCore._nds_state_error_kind ? ndsCore._nds_state_error_kind() : SRK.NONE;
+    }
     if (typeof Module !== "undefined" && Module._wasm_state_error_kind) {
       return Module._wasm_state_error_kind();
     }
@@ -7509,6 +7516,9 @@ const stateRejectKind = () => {
 /** The one-line detail from the core, for the console. */
 const stateRejectDetail = () => {
   try {
+    if (ndsGameLoaded() && ndsCore) {
+      return ndsCore._nds_state_error ? ndsCore.UTF8ToString(ndsCore._nds_state_error()) || "" : "";
+    }
     if (typeof Module !== "undefined" && Module._wasm_state_error) {
       return Module.UTF8ToString(Module._wasm_state_error()) || "";
     }
@@ -14046,6 +14056,8 @@ const ndsSaveBytes = (clean = false) => {
 // applyStateBytes come through here and body.nds-states shows every state
 // feature that only needs those three (quick save/load, slots, the session
 // a library tile resumes). Rewind and run-ahead need more and stay off.
+// The bytes are packed .state images (docs/nds/savestate.md); a refusal's
+// reason comes from nds_state_error_kind / nds_state_error.
 const ndsHasStates = () => !!(ndsCore && ndsCore._nds_state_size &&
                               ndsCore._nds_state_data && ndsCore._nds_state_load);
 const ndsCaptureState = () => {
