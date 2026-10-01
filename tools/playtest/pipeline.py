@@ -31,6 +31,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SUBJECT_PREFIX = 'dingbat'
 last_outdir = None
 OK_LOAD = ('IDENTICAL', 'SLIP', 'MINOR')
+# what each pair isolates: the BIOS (with waitloop on and off), then waitloop
+# skipping (with each BIOS)
+VARIANT_PAIRS = [('dingbat', 'dingbat-bios'), ('dingbat-nowl', 'dingbat-bios-nowl'),
+                 ('dingbat', 'dingbat-nowl'), ('dingbat-bios', 'dingbat-bios-nowl')]
 
 
 def sha1_of(path):
@@ -41,14 +45,17 @@ def sha1_of(path):
     return h.hexdigest()
 
 
-def run_phase(name, rom, steps, workdir, rtc, save_in=None, log=print):
+def run_phase(name, rom, steps, workdir, rtc, save_in=None, log=print, audio=False):
     """One emulator, one section. Never raises: failures are data."""
     t0 = time.time()
     res = {'emu': name, 'ok': False, 'checkpoints': {}, 'error': None}
     reader = screen.ScreenReader()
     e = None
     try:
-        e = emulib.Emulator(name, rom, os.path.join(workdir, 'env'), rtc_epoch=rtc, save_in=save_in)
+        os.makedirs(workdir, exist_ok=True)
+        e = emulib.Emulator(name, rom, os.path.join(workdir, 'env'), rtc_epoch=rtc, save_in=save_in,
+                            audio=os.path.join(workdir, 'audio.raw') if audio else None)
+        res['audio'] = e.audio
         ex = runner.Executor(e, os.path.join(workdir, 'shots'), reader, log=log)
         try:
             for step in steps:
@@ -108,6 +115,13 @@ def compare_checkpoints(results, names, subject, cmpdir, tag):
             for r2 in refs[i + 1:]:
                 entry['pairs'][f'{r1}~{r2}'] = classify.classify(results[r1]['checkpoints'].get(cp),
                                                                  results[r2]['checkpoints'].get(cp))
+        # dingbat against itself: which configuration a difference follows
+        # (HLE BIOS vs official, waitloop skipping on vs off)
+        entry['variants'] = {}
+        for a, b in VARIANT_PAIRS:
+            if a in names and b in names:
+                entry['variants'][f'{a}~{b}'] = classify.classify(results[a]['checkpoints'].get(cp),
+                                                                  results[b]['checkpoints'].get(cp))
         # a subject passes a checkpoint by matching ANY reference: the
         # references themselves disagree on animation phase and lag frames
         entry['verdict'] = {s: min((entry['pairs'][f'{s}~{r}']['verdict'] for r in refs),
@@ -165,20 +179,28 @@ def run(args):
               'emulators': names, 'started': stamp}
 
     # ---------------------------------------------------------- [new]
+    want_audio = not getattr(args, 'no_audio', False)
     with cf.ThreadPoolExecutor(len(names)) as pool:
-        futs = {n: pool.submit(run_phase, n, rom, play['new'], os.path.join(outdir, 'new', n), rtc)
+        futs = {n: pool.submit(run_phase, n, rom, play['new'], os.path.join(outdir, 'new', n), rtc,
+                               audio=want_audio)
                 for n in names}
         new = {n: f.result() for n, f in futs.items()}
     report['new'] = {n: _strip(r) for n, r in new.items()}
     report['new_checkpoints'] = compare_checkpoints(new, names, SUBJECT_PREFIX, cmpdir, 'new')
+    if want_audio:
+        report['audio'] = compare_audio(new, names, outdir)
 
     # ---------------------------------------------------------- saves
     savedir = os.path.join(outdir, 'saves')
     os.makedirs(savedir)
     # `@save none`: the game has no battery save (passwords, or nothing);
-    # the check is then that dingbat writes no data, and there is no matrix
-    no_save = play['meta'].get('save', '').strip() == 'none'
+    # the check is then that dingbat writes no data, and there is no matrix.
+    # `@save skip`: the script stops before the game's first save (play and
+    # audio are still compared; the battery files are only described)
+    save_meta = play['meta'].get('save', '').strip().split(':')[0].strip()
+    no_save = save_meta in ('none', 'skip')
     report['no_save'] = no_save
+    report['save_skipped'] = save_meta == 'skip'
     copies, written = {}, {}
     for n in names:
         if new[n].get('save') and new[n]['ok']:
@@ -196,14 +218,22 @@ def run(args):
     # ---------------------------------------------------------- [load] matrix
     load = {}
     if play['load'] and not args.no_cross:
+        # writers whose battery files are byte-identical share one row of
+        # runs (the dingbat configurations usually do)
+        by_content = {}
+        for w, path in written.items():
+            by_content.setdefault(sha1_of(path), []).append(w)
+        report['save_groups'] = list(by_content.values())
         jobs = {}
-        with cf.ThreadPoolExecutor(min(8, len(names) * len(written) or 1)) as pool:
-            for w, path in written.items():
+        with cf.ThreadPoolExecutor(min(6, len(names) * len(by_content) or 1)) as pool:
+            for group in by_content.values():
+                w = group[0]
                 for r in names:
                     wd = os.path.join(outdir, 'load', f'{w}-in-{r}')
-                    jobs[(w, r)] = pool.submit(run_phase, r, rom, play['load'], wd, rtc, save_in=path)
-            for key, f in jobs.items():
-                load[key] = f.result()
+                    jobs[(w, r)] = pool.submit(run_phase, r, rom, play['load'], wd, rtc, save_in=written[w])
+            for (w, r), f in jobs.items():
+                for alias in next(g for g in by_content.values() if g[0] == w):
+                    load[(alias, r)] = f.result()
         report['load'] = {}
         for (w, r), res in load.items():
             cell = _strip(res)
@@ -274,6 +304,40 @@ def run(args):
     global last_outdir
     last_outdir = outdir
     return 0 if all(v['pass'] for v in report['verdicts'].values()) else 1
+
+
+def compare_audio(new, names, outdir):
+    """Features of every emulator's [new] audio, the comparison, WAV clips of
+    the longest differing span per subject; the raw dumps are then deleted."""
+    import audio
+    feats, raws = {}, {}
+    for n in names:
+        raw = new[n].get('audio')
+        frames = new[n].get('frame') or 0
+        if raw and os.path.exists(raw):
+            raws[n] = (raw, frames)
+            feats[n] = audio.features(raw, frames)
+            audio.save_features(feats[n], os.path.join(outdir, 'new', n, 'audio-features.npz'))
+        else:
+            feats[n] = None
+    subjects = [n for n in names if n.startswith(SUBJECT_PREFIX)]
+    refs = [n for n in names if not n.startswith(SUBJECT_PREFIX)]
+    out = audio.compare(feats, subjects, refs)
+    clipdir = os.path.join(outdir, 'audio')
+    for s, res in out['subjects'].items():
+        if res.get('status') != 'DIFFERENT' or not res.get('runs'):
+            continue
+        os.makedirs(clipdir, exist_ok=True)
+        span = res['runs'][0]
+        res['clips'] = {}
+        for n in [s] + refs:
+            if n in raws:
+                p = os.path.join(clipdir, f"{s}-f{span['start_frame']}-{n}.wav")
+                if audio.clip(raws[n][0], raws[n][1], span['start_frame'], span['end_frame'], p):
+                    res['clips'][n] = p
+    for raw, _ in raws.values():
+        os.remove(raw)
+    return out
 
 
 def cross_load_verdict(report, s, refs, problems):
@@ -428,9 +492,20 @@ def verdicts(report, names):
                 detail = ', '.join(f"{k.split('~')[1]}={p['verdict']}" + (f"({p['offset']:+d})" if 'offset' in p else '')
                                    for k, p in pairs.items() if k.startswith(s + '~'))
                 v['notes'].append(f'checkpoint {cp}: {detail}')
+        # audio: only where the references agree with each other
+        au = report.get('audio', {}).get('subjects', {}).get(s)
+        if au and au.get('status') in ('DIFFERENT', 'MINOR'):
+            first = au['runs'][0] if au.get('runs') else {}
+            msg = (f"audio differs from both references in {au['flagged_fraction'] * 100:.1f}% of the run, "
+                   f"longest {au['longest_seconds']}s from f{first.get('start_frame')} ({first.get('kind')})")
+            (v['problems'] if au['status'] == 'DIFFERENT' else v['notes']).append(msg)
+        elif au and au.get('status') == 'NO AUDIO':
+            v['notes'].append('no audio captured')
         # save format
         sv = report['saves'].get(s, {})
-        if report.get('no_save'):
+        if report.get('save_skipped'):
+            v['notes'].append('the script does not reach a save (@save skip)')
+        elif report.get('no_save'):
             if sv.get('exists') and not sv.get('blank'):
                 v['problems'].append(f"game has no battery save, but dingbat wrote {sv['size']} bytes of data")
             for r in refs:
@@ -490,6 +565,16 @@ def print_summary(report):
     for cp, e in report['new_checkpoints'].items():
         pairs = ', '.join(f"{k}={p['verdict']}" + (f"({p['offset']:+d})" if 'offset' in p else '') for k, p in e['pairs'].items())
         print(f'   checkpoint {cp:14} {pairs}')
+        odd = {k: p['verdict'] for k, p in e.get('variants', {}).items() if p['verdict'] != 'IDENTICAL'}
+        if odd:
+            print(f'   {"":25} configs: ' + ', '.join(f'{k}={v}' for k, v in odd.items()))
+    au = report.get('audio')
+    if au:
+        r = au.get('refs') or {}
+        print(f"   audio refs {r.get('pair')}: {r.get('differ')}/{r.get('windows')} windows differ")
+        for s, res in au['subjects'].items():
+            print(f"   audio {s:18} {res.get('status')} flagged={res.get('flagged_windows')}/{res.get('windows')}"
+                  + (f" longest={res['longest_seconds']}s {res['runs'][0]}" if res.get('runs') else ''))
     for n, s in report['saves'].items():
         if s.get('exists'):
             print(f"   save {n:13} {s['size']} bytes canonical={s['canonical']} sha1={s['sha1'][:10]}")

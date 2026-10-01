@@ -21,6 +21,8 @@ class Executor:
         self.log = log or (lambda msg: None)
         self.checkpoints = {}
         self.steps_done = 0
+        self.taps = 0           # presses the last `mash` made
+        self.spent = 0          # frames the last step ran
         os.makedirs(outdir, exist_ok=True)
         self._probe = os.path.join(outdir, '.probe.ppm')
 
@@ -89,9 +91,18 @@ class Executor:
                                f"{cond['kind']} {cond.get('arg', '')!r}".rstrip(), self.emu.frame)
 
     # --------------------------------------------------------------- steps
+    def tap(self, keys, hold, every):
+        e = self.emu
+        base = e.held
+        e.set_keys(base | _mask(keys))
+        e.run(hold)
+        e.set_keys(base)
+        e.run(max(0, every - hold))
+
     def do(self, step):
         e = self.emu
         op = step['op']
+        start = e.frame
         if op == 'wait':
             e.run(step['frames'])
         elif op == 'press':
@@ -104,18 +115,21 @@ class Executor:
             e.set_keys(_mask(step['keys']))
         elif op == 'until':
             self.run_until(step, step['cond'])
+        elif op == 'tap':
+            for _ in range(step['times']):
+                self.tap(step['keys'], step['hold'], step['every'])
         elif op == 'mash':
+            self.taps = 0
+
             def tap():
-                base = e.held
-                e.set_keys(base | _mask(step['keys']))
-                e.run(step['hold'])
-                e.set_keys(base)
-                e.run(max(0, step['every'] - step['hold']))
+                self.taps += 1
+                self.tap(step['keys'], step['hold'], step['every'])
             self.run_until(step, step['cond'], before_poll=tap)
         elif op == 'checkpoint':
             self.checkpoint(step['name'], step['window'], step.get('compare', 'pixels'))
         else:
             raise ValueError(op)
+        self.spent = e.frame - start
         self.steps_done += 1
 
     def checkpoint(self, name, window, compare='pixels'):

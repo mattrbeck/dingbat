@@ -17,13 +17,21 @@ DEFAULT_BIOS = os.path.expanduser(os.environ.get(
 
 KEYS = ['A', 'B', 'SELECT', 'START', 'RIGHT', 'LEFT', 'UP', 'DOWN', 'R', 'L']
 
-# name -> (driver binary, uses real BIOS)
+# name -> (driver binary, uses real BIOS, extra driver flags). The four
+# dingbat configurations separate what the HLE BIOS and idle-loop
+# fast-forwarding each change: `dingbat` is the shipped default (HLE BIOS,
+# waitloop skipping on). The references always run the official BIOS.
 EMULATORS = {
-    'dingbat':      ('dingbat_driver', False),   # HLE BIOS, the shipped default
-    'dingbat-bios': ('dingbat_driver', True),
-    'mgba':         ('mgba_driver', True),
-    'nba':          ('nba_driver', True),
+    'dingbat':           ('dingbat_driver', False, ()),
+    'dingbat-nowl':      ('dingbat_driver', False, ('--no-waitloop',)),
+    'dingbat-bios':      ('dingbat_driver', True, ()),
+    'dingbat-bios-nowl': ('dingbat_driver', True, ('--no-waitloop',)),
+    'mgba':              ('mgba_driver', True, ()),
+    'nba':               ('nba_driver', True, ()),
 }
+DINGBAT_CONFIGS = [n for n in EMULATORS if n.startswith('dingbat')]
+REFERENCES = ['mgba', 'nba']
+ALL = DINGBAT_CONFIGS + REFERENCES
 
 
 def key_mask(keys):
@@ -39,10 +47,11 @@ class DriverError(RuntimeError):
 
 class Emulator:
     def __init__(self, name, rom, envdir, bios=DEFAULT_BIOS, rtc_epoch=None,
-                 save_in=None, extra_args=()):
+                 save_in=None, extra_args=(), audio=None):
         """Start `name` on `rom` in a fresh `envdir`. `save_in` seeds the
-        emulator's battery file before boot (a copy, never a link)."""
-        binary, real_bios = EMULATORS[name]
+        emulator's battery file before boot (a copy, never a link). `audio`
+        names a file for the raw output (s16le stereo, 32768 Hz)."""
+        binary, real_bios, flags = EMULATORS[name]
         self.name = name
         self.envdir = os.path.abspath(envdir)
         if os.path.exists(self.envdir):
@@ -60,7 +69,10 @@ class Emulator:
         cmd = [path, self.rom, bios if real_bios else 'hle']
         if rtc_epoch is not None:
             cmd += ['--rtc', str(rtc_epoch)]
-        cmd += list(extra_args)
+        cmd += list(flags) + list(extra_args)
+        self.audio = os.path.abspath(audio) if audio else None
+        if audio:
+            cmd += ['--audio', self.audio]
         env = dict(os.environ, TZ='UTC')
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=open(os.path.join(self.envdir, 'stderr.log'), 'w'),

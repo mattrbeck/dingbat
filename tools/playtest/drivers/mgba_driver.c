@@ -1,7 +1,8 @@
 /* Persistent headless mGBA driver for tools/playtest (links libmgba as a
  * black-box reference). Speaks the line protocol in tools/playtest/README.md.
  *
- * Usage: mgba_driver <rom.gba> <bios.bin> [--run-bios] [--rtc EPOCH]
+ * Usage: mgba_driver <rom.gba> <bios.bin> [--run-bios] [--rtc EPOCH] [--audio PATH]
+ *   --audio writes the core's output, s16le stereo at 32768 Hz, every frame.
  *   The battery save is <rom minus extension>.sav, where mGBA's own frontend
  *   puts it by default. Run with TZ=UTC so a fixed RTC epoch reads the same
  *   wall-clock fields as the other drivers.
@@ -15,6 +16,7 @@
 #include <mgba/core/serialize.h>
 #include <mgba-util/vfs.h>
 #include <mgba/internal/gba/gba.h>
+#include <mgba/core/blip_buf.h>
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -60,6 +62,28 @@ static void null_log(struct mLogger* log, int cat, enum mLogLevel level,
 static struct mLogger g_logger = { .log = null_log };
 
 static void reply(const char* s) { printf("%s\n", s); fflush(stdout); }
+
+static FILE* g_audio = NULL;
+
+/* Drain both blip channels after a frame into the --audio file */
+static void drain_audio(struct mCore* core) {
+  struct blip_t* l = core->getAudioChannel(core, 0);
+  struct blip_t* r = core->getAudioChannel(core, 1);
+  int16_t buf[2048 * 2];
+  for (;;) {
+    int n = blip_samples_avail(l);
+    if (n > 2048) n = 2048;
+    if (n <= 0) break;
+    blip_read_samples(l, buf, n, 1);
+    blip_read_samples(r, buf + 1, n, 1);
+    if (g_audio) fwrite(buf, sizeof(int16_t) * 2, n, g_audio);
+  }
+}
+
+static void run_frame(struct mCore* core) {
+  core->runFrame(core);
+  drain_audio(core);
+}
 
 /* Cartridge RTC over the GPIO port through the core's bus, bit-banged exactly
  * as dingbat_driver's rtc_xfer does (commands MSB first, parameters LSB
@@ -109,6 +133,7 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--run-bios")) run_bios = 1;
     else if (!strcmp(argv[i], "--rtc") && i + 1 < argc) rtc_epoch = atoll(argv[++i]);
+    else if (!strcmp(argv[i], "--audio") && i + 1 < argc) g_audio = fopen(argv[++i], "wb");
     else if (npos < 2) pos[npos++] = argv[i];
   }
   if (npos != 2) {
@@ -123,6 +148,7 @@ int main(int argc, char** argv) {
   mCoreInitConfig(core, NULL);
   mCoreConfigSetValue(&core->config, "idleOptimization", "ignore");
   core->opts.skipBios = !run_bios;
+  core->opts.volume = 0x100;   /* zero-initialised opts would mute the mixer */
   core->loadConfig(core, &core->config);
   core->setVideoBuffer(core, (color_t*) vbuf, W);
 
@@ -143,6 +169,8 @@ int main(int argc, char** argv) {
     core->rtc.value = rtc_epoch * 1000;
   }
   core->reset(core);
+  blip_set_rates(core->getAudioChannel(core, 0), core->frequency(core), 32768);
+  blip_set_rates(core->getAudioChannel(core, 1), core->frequency(core), 32768);
 
   int frame = 0;
   char buf[512], out[64];
@@ -157,7 +185,7 @@ int main(int argc, char** argv) {
       core->setKeys(core, (uint32_t) atoi(arg));
       reply("ok");
     } else if (!strcmp(cmd, "run")) {
-      for (int k = atoi(arg); k > 0; --k) { core->runFrame(core); ++frame; }
+      for (int k = atoi(arg); k > 0; --k) { run_frame(core); ++frame; }
       snprintf(out, sizeof out, "ok %d", frame);
       reply(out);
     } else if (!strcmp(cmd, "runhash")) {
@@ -165,7 +193,7 @@ int main(int argc, char** argv) {
       if (count > 100000) count = 100000;
       char* p = hashes;
       for (int k = 0; k < count; ++k) {
-        core->runFrame(core); ++frame;
+        run_frame(core); ++frame;
         p += sprintf(p, " %016llX", (unsigned long long) fb_hash());
       }
       printf("ok%s\n", hashes);
@@ -261,6 +289,7 @@ int main(int argc, char** argv) {
       core->busWrite8(core, addr, (uint8_t) val);
       reply("ok");
     } else if (!strcmp(cmd, "quit")) {
+      if (g_audio) fclose(g_audio);
       core->deinit(core);
       reply("ok");
       return 0;

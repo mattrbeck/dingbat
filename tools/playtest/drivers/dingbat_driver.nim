@@ -2,7 +2,10 @@
 ## protocol documented in tools/playtest/README.md on stdin/stdout.
 ##
 ## Usage: dingbat_driver <rom.gba> <bios.bin|hle> [--run-bios] [--rtc EPOCH]
+##                       [--no-waitloop] [--audio PATH]
 ##   Without --rtc the cartridge RTC runs from the host clock.
+##   --no-waitloop turns off idle-loop fast-forwarding (the shipped default
+##   is on). --audio writes every mixed sample, s16le stereo at 32768 Hz.
 ##   The battery save is <rom minus extension>.sav, exactly as the desktop
 ##   app places it; run the driver on a ROM symlink inside a private
 ##   directory so saves never touch the library.
@@ -74,6 +77,7 @@ proc main() =
   var positional: seq[string]
   var run_bios = false
   var rtc_epoch = -1'i64
+  var waitloop = true
   let args = commandLineParams()
   var i = 0
   while i < args.len:
@@ -82,10 +86,15 @@ proc main() =
     of "--rtc":
       inc i
       rtc_epoch = parseBiggestInt(args[i])
+    of "--no-waitloop": waitloop = false
+    of "--audio":
+      # the APU's own dump (apu.nim), claimed when the core is created
+      inc i
+      putEnv("DINGBAT_GBA_AUDIO_DUMP", args[i])
     else: positional.add(args[i])
     inc i
   if positional.len != 2:
-    stderr.writeLine "Usage: dingbat_driver <rom> <bios|hle> [--run-bios] [--rtc EPOCH]"
+    stderr.writeLine "Usage: dingbat_driver <rom> <bios|hle> [--run-bios] [--rtc EPOCH] [--no-waitloop] [--audio PATH]"
     quit(2)
   let rom_path = positional[0]
   let use_hle = positional[1] == "hle"
@@ -93,6 +102,7 @@ proc main() =
                     run_bios = run_bios and not use_hle, use_hle = use_hle)
   emu.test_output = new_test_output()
   emu.post_init()
+  emu.cpu.attempt_waitloop_detection = waitloop
   if rtc_epoch >= 0:
     emu.enable_deterministic_rtc(rtc_epoch)
 

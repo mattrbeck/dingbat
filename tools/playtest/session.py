@@ -54,15 +54,26 @@ def _live(path):
         return False
 
 
+AUTHORING = ['dingbat-bios', 'mgba', 'nba']   # the official-BIOS emulators
+SLACK = 4      # frames past the slowest emulator before the next input
+
+
 class Session:
-    def __init__(self, name, rom, emus, outroot, save=None, rtc=None):
+    def __init__(self, name, rom, emus, outroot, save=None, rtc=None, lockstep=True):
+        """`save`: one battery file for every emulator, or {emu: file} so
+        each [load] boots the save that emulator wrote itself. With
+        `lockstep`, every `until` / `mash` ends with all emulators on the same
+        frame after the same inputs, and is recorded as a frozen `wait` /
+        `tap` (see script.py)."""
         self.name = name
         self.dir = os.path.join(outroot, 'sessions', name)
         os.makedirs(self.dir, exist_ok=True)
         self.reader = screen.ScreenReader()
         self.execs = {}
+        self.lockstep = lockstep
         for n in emus:
-            e = emulib.Emulator(n, rom, os.path.join(self.dir, 'env', n), rtc_epoch=rtc, save_in=save)
+            seed = save.get(n) if isinstance(save, dict) else save
+            e = emulib.Emulator(n, rom, os.path.join(self.dir, 'env', n), rtc_epoch=rtc, save_in=seed)
             self.execs[n] = runner.Executor(e, os.path.join(self.dir, 'shots', n), self.reader)
         self.section = 'load' if save else 'new'
         self.recorded = []            # (section, line)
@@ -95,8 +106,12 @@ class Session:
             info[n] = {'frame': ex.emu.frame, 'hash': h, 'selected': r['selected'],
                        'lines': [(l['text'], l['box']) for l in r['lines']]}
         png = os.path.join(self.dir, tag + '.png')
-        img.write_png(png, img.composite(frames, labels, scale=2))
         hashes = {v['hash'] for v in info.values()}
+        if len(hashes) == 1:
+            # every emulator shows the same frame: one copy is enough
+            img.write_png(png, img.composite(frames[:1], ['all identical ' + labels[0].split()[-1]], scale=2))
+        else:
+            img.write_png(png, img.composite(frames, labels, scale=2))
         return {'png': png, 'identical': len(hashes) == 1, 'emus': info}
 
     def command(self, line):
@@ -139,7 +154,14 @@ class Session:
                  'results': {n: (r[0], r[1] if r[0] == 'fail' else None, self.execs[n].emu.frame)
                              for n, r in res.items()}}
         if ok:
-            self.recorded.append((self.section, script.format_step(step)))
+            recorded = script.format_step(step)
+            if self.lockstep and step['op'] in ('until', 'mash'):
+                recorded, warn = self.freeze(step)
+                if warn:
+                    reply['warning'] = warn
+                reply['results'] = {n: ('ok', None, ex.emu.frame) for n, ex in self.execs.items()}
+            reply['frozen'] = recorded
+            self.recorded.append((self.section, recorded))
         else:
             # keep a look at the failure, then roll every emulator back
             reply['failed_look'] = self.look()['png']
@@ -153,6 +175,39 @@ class Session:
                 # an emulator that could not roll back is on another timeline now
                 reply['rollback_failed'] = bad
         return reply
+
+    def freeze(self, step):
+        """Brings every emulator to where the slowest one got, by giving the
+        faster ones the same inputs it had (more frames held, more taps), and
+        returns the step as a pure input timeline plus the condition as a
+        comment with each emulator's own count."""
+        execs = self.execs
+        cond = script.format_step(step)
+        if step['op'] == 'until':
+            spent = {n: ex.spent for n, ex in execs.items()}
+            target = max(spent.values()) + SLACK
+            self.each(lambda ex: ex.emu.run(target - ex.spent))
+            note = ' '.join(f'{n}+{f}' for n, f in spent.items())
+            return f'# {cond}  [reached {note}]\nwait {target}', None
+        taps = {n: ex.taps for n, ex in execs.items()}
+        most = max(taps.values())
+
+        def more(ex):
+            for _ in range(most - ex.taps):
+                ex.tap(step['keys'], step['hold'], step['every'])
+        self.each(more)
+        note = ' '.join(f'{n}:{t}' for n, t in taps.items())
+        line = f'# {cond}  [taps {note}]'
+        if most:
+            line += f"\ntap {'+'.join(step['keys'])} times={most} every={step['every']} hold={step['hold']}"
+        warn = None
+        if step['cond']['kind'] != 'stable':
+            # the extra taps may have carried a faster emulator past the screen
+            lost = [n for n, ex in execs.items() if taps[n] < most and not ex.check(step['cond'], {})]
+            if lost:
+                warn = (f'after the extra taps (to match the slowest emulator) {", ".join(lost)} no longer '
+                        f'satisfies the condition: tap less often (every=), or wait for a screen instead')
+        return line, warn
 
     def render(self):
         out = []
@@ -178,13 +233,13 @@ class Session:
         self.reader.close()
 
 
-def serve(name, rom, emus, outroot, save=None, rtc=None):
+def serve(name, rom, emus, outroot, save=None, rtc=None, lockstep=True):
     path = sock_path(outroot, name)
     if os.path.exists(path):
         if _live(path):
             raise SystemExit(f'session {name!r} is already running; pick another name or stop it')
         os.unlink(path)
-    sess = Session(name, rom, emus, outroot, save=save, rtc=rtc)
+    sess = Session(name, rom, emus, outroot, save=save, rtc=rtc, lockstep=lockstep)
     print(f'session {name} ready: {path}', flush=True)
     with Listener(path, family='AF_UNIX', authkey=AUTH) as listener:
         while True:
