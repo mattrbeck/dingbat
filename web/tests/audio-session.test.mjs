@@ -1,6 +1,6 @@
-// iOS audio session: "playback" plays through the silent switch but pauses
-// other apps' audio; "ambient" mixes with it. The game takes "playback" only
-// while it has something to play and the user has not chosen to mix.
+// iOS audio session: "playback" plays in Silent Mode but pauses other apps'
+// audio; "ambient" mixes with it. The game takes "playback" only while it
+// has something to play and Play in Silent Mode is on (the default).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -53,14 +53,20 @@ test("with no game open the page does not take the session", async () => {
   assert.equal(sessionType(app), "ambient");
 });
 
-test("Mix with other audio keeps the ambient session while playing, and is saved", async () => {
+test("Play in Silent Mode off keeps the ambient session while playing, and is saved", async () => {
   const app = await started();
-  app.runIn("audioMixToggle.checked = true");
-  await app.runIn(`audioMixToggle.dispatch("change")`);
+  await app.runIn("loadAudioSettings()");   // no record: the default, on
+  assert.equal(app.runIn("playInSilentToggle.checked"), true);
+  app.runIn("playInSilentToggle.checked = false");
+  await app.runIn(`playInSilentToggle.dispatch("change")`);
   assert.equal(sessionType(app), "ambient");
   await new Promise((r) => setTimeout(r, 300));   // the save is debounced 250 ms
   const rec = await app.runIn(`dbGet("audio")`);
-  assert.equal(rec.audioMix, true);
+  assert.equal(rec.playInSilent, false);
+  app.runIn("playInSilent = true");
+  await app.runIn("loadAudioSettings()");
+  assert.equal(app.runIn("playInSilent"), false);
+  assert.equal(app.runIn("playInSilentToggle.checked"), false);
 });
 
 test("before audio starts the page leaves the session alone", async () => {

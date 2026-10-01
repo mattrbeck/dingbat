@@ -8903,7 +8903,7 @@ const saveAudioSettings = () => {
   clearTimeout(audioSaveTimer);
   audioSaveTimer = setTimeout(
     () => dbPut("audio", { rev: AUDIO_REV, volume, muted, pitchCorrectFF, audioLowpass,
-                           mp2kHle, fifoInterp, audioMix }), 250);
+                           mp2kHle, fifoInterp, playInSilent }), 250);
 };
 
 const setVolume = (v) => {
@@ -8943,8 +8943,8 @@ const loadAudioSettings = async () => {
   if (s && typeof s.fifoInterp === "boolean") fifoInterp = s.fifoInterp;
   if (fifoInterpToggle) fifoInterpToggle.checked = fifoInterp;
   applyFifoInterp();
-  if (s && typeof s.audioMix === "boolean") audioMix = s.audioMix;
-  if (audioMixToggle) audioMixToggle.checked = audioMix;
+  if (s && typeof s.playInSilent === "boolean") playInSilent = s.playInSilent;
+  if (playInSilentToggle) playInSilentToggle.checked = playInSilent;
   applyAudioSession();
 };
 
@@ -9067,22 +9067,23 @@ if (lowpassToggle) {
   });
 }
 
-// --- Mix with other audio (iOS/iPadOS) ---
-// Safari's "playback" audio session plays through the silent switch but
-// pauses other apps' audio (WebKit sets it without mix-with-others);
-// "ambient" mixes with them but obeys the switch. No type does both, so
-// the user picks; off keeps the game audible on silent. Paused, with no
+// --- Play in Silent Mode (iOS/iPadOS) ---
+// Safari's "playback" audio session plays in Silent Mode but pauses other
+// apps' audio (WebKit sets it without mix-with-others); "ambient" mixes
+// with them but is silenced in Silent Mode (not on headphones). No type
+// does both, so the user picks; on by default, as the game sounding
+// broken on a muted phone is the worse surprise. Paused, with no
 // game open, muted or at volume 0 there is nothing to play, so the page
 // never holds the exclusive session then. Only claimed once audio has
 // started (initAudio); the frame loop re-applies it every tick, which
 // catches every pause.
-var audioMix = false;
+var playInSilent = true;
 var audioSessionLive = false;
 let audioSessionSet = "";   // the type last given, so most ticks are a compare
-const audioMixToggle = /** @type {HTMLInputElement} */ (document.getElementById("audio-mix-toggle"));
+const playInSilentToggle = /** @type {HTMLInputElement} */ (document.getElementById("play-in-silent-toggle"));
 
 const audioSessionType = () =>
-  (audioMix || paused || !(currentRomName || linkMode) || muted || volume === 0)
+  (!playInSilent || paused || !(currentRomName || linkMode) || muted || volume === 0)
     ? "ambient" : "playback";
 
 const applyAudioSession = () => {
@@ -9094,17 +9095,17 @@ const applyAudioSession = () => {
   session.type = t;
 };
 
-// Only where there is a silent switch to choose about: iOS/iPadOS Safari.
+// Only where Silent Mode exists to choose about: iOS/iPadOS (any browser).
 {
-  const row = document.getElementById("audio-mix-row");
+  const row = document.getElementById("play-in-silent-row");
   const iosLike = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   if (row) row.hidden = !(navigator.audioSession && iosLike);
 }
 
-if (audioMixToggle) {
-  audioMixToggle.addEventListener("change", () => {
-    audioMix = audioMixToggle.checked;
+if (playInSilentToggle) {
+  playInSilentToggle.addEventListener("change", () => {
+    playInSilent = playInSilentToggle.checked;
     applyAudioSession();
     saveAudioSettings();
   });
@@ -10107,8 +10108,8 @@ const resetAllSettings = async () => {
   audioLowpass = true;
   if (lowpassToggle) lowpassToggle.checked = true;
   applyAudioLowpass();
-  audioMix = false;
-  if (audioMixToggle) audioMixToggle.checked = false;
+  playInSilent = true;
+  if (playInSilentToggle) playInSilentToggle.checked = true;
   applyAudioSession();
 
   colorCorrect = true;
@@ -14058,8 +14059,8 @@ var Module = {
 
     const initAudio = () => {
       if (audioCtx) return;
-      // "playback" audio session so iOS ignores the silent switch (Safari
-      // 17+), unless the user mixes with other audio or has it muted.
+      // "playback" audio session so iOS plays in Silent Mode (Safari 17+),
+      // unless the user turned that off or the game is paused or muted.
       audioSessionLive = true;
       applyAudioSession();
       try {

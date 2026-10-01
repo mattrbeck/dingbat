@@ -4228,7 +4228,7 @@ body.debug-2p .home-tile-link {
 #thumbs-offer[hidden],
 #thumbs-drive-row[hidden],
 #kept-save-row[hidden],
-#audio-mix-row[hidden] {
+#play-in-silent-row[hidden] {
   display: none;
 }
 
