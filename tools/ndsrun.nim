@@ -4,9 +4,11 @@
 ##   nim c -d:release --path:src -o:ndsrun tools/ndsrun.nim
 ##   ./ndsrun tests/nds/roms/fb_hello.nds --frames 10 --out /tmp/fb.png
 ##       [--bios DIR] [--trace9 N] [--trace7 N] [--press A,START@frame]
+##       [--wav OUT.wav]
 ##
 ## --bios defaults to $DINGBAT_NDS_BIOS (bios9.bin, bios7.bin, firmware.bin).
 ## --traceN prints the first N instructions of that CPU (pc + regs).
+## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
 
 import std/[os, strutils, parseopt]
 import zippy
@@ -63,6 +65,7 @@ when isMainModule:
   var outp = "nds_out.png"
   var bios = ""
   var trace9, trace7 = 0
+  var wav = ""
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'}, longNoVal = @["help"])
   for kind, key, val in p.getopt():
     case kind
@@ -74,14 +77,20 @@ when isMainModule:
       of "bios": bios = val
       of "trace9": trace9 = parseInt(val)
       of "trace7": trace7 = parseInt(val)
+      of "wav": wav = val
       else: quit("unknown option --" & key)
     of cmdEnd: discard
   if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
   let n = load_nds(rom, bios)
   n.arm9.trace = trace9 > 0
   n.arm7.trace = trace7 > 0
+  var audio: seq[float32]
   for f in 0 ..< frames:
     n.run_frame()
+    if wav.len > 0: audio.add n.spu.take_samples()
+  if wav.len > 0:
+    writeFile(wav, wav_bytes(audio))
+    echo "audio: ", audio.len div 2, " frames -> ", wav
   write_png(outp, 256, 384, n.screens_rgba())
   echo "frames=", frames, " arm9 instrs=", n.arm9.instr_count, " pc=0x",
        toHex(n.arm9.next_pc, 8), " arm7 instrs=", n.arm7.instr_count, " pc=0x",

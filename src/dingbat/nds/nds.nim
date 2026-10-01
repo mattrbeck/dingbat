@@ -12,7 +12,7 @@ import gpu/[gpu, engine2d]
 import gpu3d/gpu3d
 import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi]
 
-export cpu, sched, gpu, engine2d, input, vram
+export cpu, sched, gpu, engine2d, input, vram, spu
 
 type
   Arm9Bus* = object
@@ -126,7 +126,11 @@ proc dispatch(n: NDS; ev: NdsEvent) =
   of evLineEnd: n.on_line_end()
   of evTimer9_0 .. evTimer9_3: n.timers9.on_event(ev)
   of evTimer7_0 .. evTimer7_3: n.timers7.on_event(ev)
-  of evCartDone, evGxFifo, evSpuSample: discard
+  of evSpuSample:
+    n.spu.tick(Arm7Bus(nds: n))
+    n.spu.next_tick += SPU_TICK_CYCLES
+    n.sched.schedule(n.spu.next_tick, evSpuSample)
+  of evCartDone, evGxFifo: discard
 
 # ---------------------------------------------------------------------------
 # Construction and the frame loop
@@ -170,6 +174,7 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8]): NDS =
   n.direct_boot()
   n.sched.schedule(HBLANK_CYCLES, evHBlank)
   n.sched.schedule(LINE_CYCLES, evLineEnd)
+  n.sched.schedule(n.spu.next_tick, evSpuSample)
   n
 
 proc load_nds*(rom_path: string; bios_dir = ""): NDS =
