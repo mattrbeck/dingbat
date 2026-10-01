@@ -132,7 +132,7 @@ proc mix5(c0, c1: uint32; k0, k1, sh: int): uint32 =
     let b = int((c1 shr (5 * i)) and 31)
     result = result or (uint32((a * k0 + b * k1) shr sh) shl (5 * i))
 
-proc texel(r: Renderer; tex, pltt: uint32; s, t: int64): uint32 =
+proc texel(r: Renderer; tex, pltt: uint32; s, t: int64): uint32 {.inline.} =
   ## The texel at (s, t) (12.4) in pixel format; alpha 0 = transparent.
   let sw = 8 shl int((tex shr 20) and 7)
   let th = 8 shl int((tex shr 23) and 7)
@@ -232,6 +232,10 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
 # ---------------------------------------------------------------------------
 # Rasterisation
 
+when defined(r3dprof):
+  import std/[monotimes, times]
+  var prof_ns, prof_frames, prof_polys, prof_dots, prof_pass, prof_setup, prof_draw: int64
+
 # Edges. Screen positions are whole dots. An edge runs from its top vertex
 # to its bottom one and covers rows y0 ..< y1; its x on row y is
 #   X(y) = x0 << 18 + slope * (y - y0)  (minus 1 when x decreases),
@@ -319,11 +323,19 @@ proc edge_end(e: Edge; va: openArray[VAttr]; y: int; x: int32): EndAttr {.inline
   let n = int64(y) - e.y0
   let d = int64(e.y1 - e.y0)
   result.x = x
-  result.z = lin(A.z, B.z, n, d)
+  # one division: a 38-bit factor, rounded per sign so that each value is
+  # exactly floor(a + (b - a) * n / d)
+  let nn = n shl 38
+  let fl = nn div d
+  let fc = fl + (if fl * d != nn: 1'i64 else: 0'i64)
+  template li(a, b: int64): int64 =
+    let dd = b - a
+    a + ashr(dd * (if dd >= 0: fc else: fl), 38)
+  result.z = li(A.z, B.z)
   if A.w == B.w:
-    for k in 0..2: result.c[k] = lin(A.c[k], B.c[k], n, d)
-    result.s = lin(A.s, B.s, n, d)
-    result.t = lin(A.t, B.t, n, d)
+    for k in 0..2: result.c[k] = li(A.c[k], B.c[k])
+    result.s = li(A.s, B.s)
+    result.t = li(A.t, B.t)
     result.w = A.w
   else:
     let f = pfac(n, d, A.w, B.w, 9)
@@ -373,35 +385,69 @@ proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32
     pack(((tr + 1) * (vr + 1) - 1) shr 6, ((tg + 1) * (vg + 1) - 1) shr 6,
          ((tb + 1) * (vb + 1) - 1) shr 6, ((ta + 1) * (av + 1) - 1) shr 5)
 
-proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; edge: bool;
+type
+  SpanStep = object
+    ## floor(n * 2^38 / d) and its remainder, stepped along a span so
+    ## that consecutive dots need no division
+    d, q, rr, n, f, acc: int64
+
+proc span_step(xl, xr: int32): SpanStep {.inline.} =
+  let d = max(1'i64, int64(xr - xl))
+  SpanStep(d: d, q: (1'i64 shl 38) div d, rr: (1'i64 shl 38) mod d, n: -2)
+
+proc step_to(sp: var SpanStep; n: int64) {.inline.} =
+  if n == sp.n + 1:
+    sp.f += sp.q
+    sp.acc += sp.rr
+    if sp.acc >= sp.d:
+      sp.acc -= sp.d
+      inc sp.f
+  elif n != sp.n:
+    let nn = n shl 38
+    sp.f = nn div sp.d
+    sp.acc = nn - sp.f * sp.d
+  sp.n = n
+
+proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; edge: bool;
           cov = 31'i32) {.inline.} =
   ## One dot of the span from L to R; `cov` is its anti-aliasing coverage
   ## (0..31, 31 = whole).
   let i = y * W + x
-  var cr, cg, cb, s, t, z, w: int64
+  # One division gives the dot's factor along the span; with equal w the
+  # factor (38 bits, rounded so that every attribute comes out as
+  # floor(a + (b - a) * n / d) exactly) is linear, else the 8-bit
+  # perspective one. Depth first, the rest only for dots that pass.
   let d = int64(R.x - L.x)
+  let n = int64(x - L.x)
+  let eqw = L.w == R.w
+  var fl, fc, f8, z, w: int64
   if d <= 0:
-    cr = L.c[0]; cg = L.c[1]; cb = L.c[2]; s = L.s; t = L.t; z = L.z; w = L.w
+    z = L.z; w = L.w
   else:
-    let n = int64(x - L.x)
-    z = lin(L.z, R.z, n, d)
-    if L.w == R.w:
-      cr = lin(L.c[0], R.c[0], n, d); cg = lin(L.c[1], R.c[1], n, d); cb = lin(L.c[2], R.c[2], n, d)
-      s = lin(L.s, R.s, n, d); t = lin(L.t, R.t, n, d)
+    sp.step_to(n)
+    fl = sp.f
+    fc = fl + (if sp.acc != 0: 1'i64 else: 0'i64)
+    let dz = R.z - L.z
+    z = L.z + ashr(dz * (if dz >= 0: fc else: fl), 38)
+    if eqw:
       w = L.w
     else:
-      let f = pfac(n, d, L.w, R.w, 8)
-      cr = L.c[0] + ashr((R.c[0] - L.c[0]) * f, 8)
-      cg = L.c[1] + ashr((R.c[1] - L.c[1]) * f, 8)
-      cb = L.c[2] + ashr((R.c[2] - L.c[2]) * f, 8)
-      s = L.s + ashr((R.s - L.s) * f, 8)
-      t = L.t + ashr((R.t - L.t) * f, 8)
-      w = L.w + ashr((R.w - L.w) * f, 8)
-  let dval = if c.wbuffer: uint32(clamp(w, 0'i64, 0xFF_FFFF'i64))
-             else: uint32(clamp(z, 0'i64, 0xFF_FFFF'i64))
+      f8 = pfac(n, d, L.w, R.w, 8)
+      w = L.w + ashr((R.w - L.w) * f8, 8)
+  template at(a, b: int64): int64 =
+    if d <= 0: a
+    elif eqw:
+      let dd = b - a
+      a + ashr(dd * (if dd >= 0: fc else: fl), 38)
+    else: a + ashr((b - a) * f8, 8)
+  let dv = if c.wbuffer: w else: z
+  let dval = uint32(max(0'i64, min(dv, 0xFF_FFFF'i64)))
   let old = r.depth[i]
   let pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
+  when defined(r3dprof):
+    inc prof_dots
+    if pass: inc prof_pass
   if c.mode == 3:
     # Shadow volumes (GBATEK "DS 3D Shadow Polygons"), as the reference
     # cores agree on 3d_shadow: the mask (ID 0) flags the dots where its
@@ -415,12 +461,12 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; edge: bool;
     r.flags[i] = r.flags[i] and not FLAG_STENCIL
     if not pass or r.opaque_id[i] == c.id: return
   elif not pass: return
-  let vr = int32(clamp(ashr(cr, 3), 0, 63))
-  let vg = int32(clamp(ashr(cg, 3), 0, 63))
-  let vb = int32(clamp(ashr(cb, 3), 0, 63))
+  let vr = int32(max(0'i64, min(ashr(at(L.c[0], R.c[0]), 3), 63'i64)))
+  let vg = int32(max(0'i64, min(ashr(at(L.c[1], R.c[1]), 3), 63'i64)))
+  let vb = int32(max(0'i64, min(ashr(at(L.c[2], R.c[2]), 3), 63'i64)))
   var tx = 0'u32
   if c.textured:
-    tx = r.texel(c.tex, c.pltt, s, t)
+    tx = r.texel(c.tex, c.pltt, at(L.s, R.s), at(L.t, R.t))
   let px = r.blend_texel(c, vr, vg, vb, tx)
   let a = int32(px shr 24)
   if a <= c.aref: return
@@ -527,8 +573,9 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       if sx[i] > sx[ri]: ri = i
     let L = EndAttr(x: sx[li], c: va[li].c, s: va[li].s, t: va[li].t, z: va[li].z, w: va[li].w)
     let R = EndAttr(x: sx[ri], c: va[ri].c, s: va[ri].s, t: va[ri].t, z: va[ri].z, w: va[ri].w)
+    var sp = span_step(L.x, R.x)
     for x in max(0, int(sx[li])) ..< min(W, max(int(sx[ri]), int(sx[li]) + 1)):
-      r.plot(c, x, int(ymin), L, R, true)
+      r.plot(c, x, int(ymin), L, R, sp, true)
     return
   var edges: array[16, Edge]
   var ne = 0
@@ -568,13 +615,14 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let yr = if re.amaj and not re.dec and not re.vert: y + 1 else: y
     let EL = le.edge_end(va, yl, L.s)
     let ER = re.edge_end(va, yr, R.e)
+    var sp = span_step(EL.x, ER.x)
     let rim = y == int(ymin) or y == int(ymax) - 1
     let last_flat = flat_bottom and y == int(ymax) - 1
     # wire-frames: the two runs only, except on the top row and the row
     # above a flat bottom, which are drawn whole
     if wire and y != int(ymin) and not last_flat:
-      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, true)
-      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, true)
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true)
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true)
       continue
     # which runs are drawn: all when full size; else the left run unless it
     # is a bottom x-major edge, the right run only when it is a top x-major
@@ -583,15 +631,15 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let ldraw = full or not (L.xmaj and L.inc) or last_flat
     let rdraw = full or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
     if aa:
-      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, true, le.aa_cov(y, x, false))
-      for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, rim)
-      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, true, re.aa_cov(y, x, true))
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false))
+      for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true))
       continue
     if ldraw:
-      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, true)
-    for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, rim)
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true)
+    for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
     if rdraw:
-      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, true)
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true)
 
 {.pop.}
 
@@ -679,12 +727,38 @@ proc fog(r: Renderer; disp3dcnt: uint32) =
       template mixc(k: int; fcc: int32): int32 = (fcc * dens + ch(o, k) * (128 - dens)) shr 7
       r.color[i] = pack(mixc(0, fr), mixc(1, fg), mixc(2, fb), na)
 
+
+proc render_frame_body(r: Renderer; vram: Vram; polys: openArray[Polygon];
+                       verts: openArray[Vertex]; disp3dcnt: uint32; swap_param: uint32)
+
 proc render_frame*(r: Renderer; vram: Vram; polys: openArray[Polygon];
                    verts: openArray[Vertex]; disp3dcnt: uint32; swap_param: uint32) =
   ## Draw the swapped buffer: opaque polygons first, then translucent ones
   ## (Y-sorted unless SWAP_BUFFERS bit 0 asked for manual order).
+  ## -d:r3dprof prints the mean render time every 600 frames.
+  when defined(r3dprof):
+    let t0 = getMonoTime()
+    r.render_frame_body(vram, polys, verts, disp3dcnt, swap_param)
+    prof_ns += (getMonoTime() - t0).inNanoseconds
+    prof_polys += polys.len
+    inc prof_frames
+    if prof_frames mod 600 == 0:
+      echo "r3dprof: ", prof_ns div prof_frames div 1000, " us/frame, ", prof_polys div prof_frames,
+           " polys/frame, ", prof_dots div prof_frames, " dots, ", prof_pass div prof_frames, " pass, setup ",
+           prof_setup div prof_frames div 1000, " us, draw ", prof_draw div prof_frames div 1000, " us"
+      prof_setup = 0; prof_draw = 0
+      prof_ns = 0; prof_frames = 0; prof_polys = 0; prof_dots = 0; prof_pass = 0
+  else:
+    r.render_frame_body(vram, polys, verts, disp3dcnt, swap_param)
+
+proc render_frame_body(r: Renderer; vram: Vram; polys: openArray[Polygon];
+                       verts: openArray[Vertex]; disp3dcnt: uint32; swap_param: uint32) =
+  when defined(r3dprof):
+    let ta = getMonoTime()
   r.build_pages(vram)
   r.clear(disp3dcnt)
+  when defined(r3dprof):
+    prof_setup += (getMonoTime() - ta).inNanoseconds
   let wbuffer = (swap_param and 2) != 0
   # key: bottom row, then top row, then submission order (a stable sort)
   template key(i: int): int64 =
@@ -698,8 +772,12 @@ proc render_frame*(r: Renderer; vram: Vram; polys: openArray[Polygon];
     if polys[i].translucent: r.order.add (if manual: int64(i) else: key(i))
   r.order.toOpenArray(0, n_opaque - 1).sort()
   if not manual: r.order.toOpenArray(n_opaque, r.order.len - 1).sort()
+  when defined(r3dprof):
+    let tb = getMonoTime()
   for k in r.order:
     r.draw_polygon(polys[int(k and 0xFFFFF)], verts, disp3dcnt, wbuffer)
+  when defined(r3dprof):
+    prof_draw += (getMonoTime() - tb).inNanoseconds
   if (disp3dcnt and 0x10) != 0: r.anti_alias()
   if (disp3dcnt and 0x20) != 0: r.edge_mark((disp3dcnt and 0x10) != 0)
   if (disp3dcnt and 0x80) != 0: r.fog(disp3dcnt)
