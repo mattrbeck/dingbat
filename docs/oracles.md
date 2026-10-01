@@ -144,3 +144,32 @@ Comparisons against the melonDS DS 1.4.0 core run through `tools/ndsref`
 | `io/wifi.nim` | enough of the MAC/BB/RF for the SDK's wireless manager to start: without it SoulSilver's Continue showed "A communication error has occurred" | melonDS DS 1.4.0 | run — both reach CONTINUE / NEW GAME / CONNECT TO POKéWALKER and continue into New Bark Town | GBATEK DS Wifi chapters (register widths, reset values, IRQ edge, power states, timers, BB/RF tables); Assumed: power-up applies at once, a frame to a station fails (no ACK), wifi RAM above 0x6000 reads FFFFh |
 | `io/rtc.nim` | `--rtc` clocks the RTC from emulated time | melonDS DS 1.4.0 | run — with both at 2004-01-01 00:00 the same input script gives identical frames 3000 and 5000 (the game seeds from the RTC) | none needed: a test-harness choice, the hardware clock is the host's |
 
+
+### NDS 3D engine
+
+From our test ROMs (`tests/nds/src/3d_*`, built by `tests/nds/tools/build_3d.sh`)
+run through `tools/ndsref` on melonDS DS 1.4.0, melonDS 0.9.3 (`--relocate`)
+and DeSmuME, compared with ndsrun at frame 30. The 3D buffer is compared at
+18-bit colour (the melonDS cores' undepthed output) where the top screen is
+BG0 = 3D unmodified, else at 15-bit. The `3d_probe_*` ROMs draw
+pseudo-random shapes from an LCG so a model can regenerate the exact vertex
+lists and be fitted rule by rule; nothing was taken from any emulator's
+source. "Exact" means 0 dots differ. Hardware evidence: the line captures
+in StrikerX3/nds-interp (`data/images/TL.7z`, a DS test program's display
+capture of a line from (0,0) to every (x, y)) — our edge rules reproduce
+4376 of 4510 sampled captures dot for dot; the rest are 1-2 dots on runs
+whose x(y+1) lands a few 2^-18 above a half dot (unresolved).
+
+| Where | Behaviour | Compared against | How | Independent evidence |
+|---|---|---|---|---|
+| `gpu3d/render.nim` Edge, edge_run, draw_polygon | edge x = x0 << 18 + dx * floor(2^18/dy) * (y - y0), -1 when x decreases, exactly +-1.0 at 45 degrees; x-major runs cover dots whose centres lie in [x(y), x(y+1)] (half up), y-major edges the dot holding x(y), a vertical right edge its left neighbour; opaque polygons drop bottom x-major runs and right y-major dots except on the row above a flat bottom; wire-frames draw the runs plus the top row and the row above a flat bottom; lines (two distinct dots) are full size | melonDS DS 1.4 exact; 0.9.3 agrees on full-size, lines and wire-frames, differs 18-46 dots on opaque | run — 3d_probe_tri, _tri_edge, _tri_xlu, _tri_s2(_edge), _tri_flat(_edge), _line, _wire: exact | the nds-interp line captures above (97 % exact); GBATEK "Polygon Size" for which edges drop |
+| `gpu3d/render.nim` edge_end, plot | 9-bit colours (6-bit * 8 + 7); span ends are the runs' outer ends with the edge attributes of the row that end belongs to; equal w: exact linear floor; else factor floor(n w0 2^P / (n w0 + (d - n) w1)), P = 9 on edges, 8 across spans | melonDS DS 1.4 exact; 0.9.3 differs (228-1044 dots) | run — 3d_probe_lerp, _tri_rgb, _persp, _persp_tex, _persp_w16/_w256: exact | none; GBATEK says only "perspective-correct" |
+| `gpu3d/render.nim` plot (shadow) | the mask (ID 0) flags dots where its back face is hidden; the shadow draws only on flagged dots, clearing them, never on its own ID; no mask, no shadow | all three cores | run — 3d_shadow exact on all three | GBATEK "Shadow Polygons" words it the other way round ("drawn only if the stencil bits are zero") |
+| `gpu3d/geometry.nim` TEXGEN_NORMAL_SHIFT / _VERTEX_SHIFT | 21 and 24 | all three cores | run — 3d_texcoord: 17/20 (GBATEK's parts table) off by 8.6k dots, 21/24 exact | GBATEK "Texture Coordinates" table gives the operand widths, not the shift |
+| `gpu3d/render.nim` blend_texel | decal: (Rt*At + Rv*(31-At)) >> 5 with 5-bit At; highlight: texel modulated by (Rv, Rv, Rv), plus the toon colour | melonDS DS 1.4 exact; 0.9.3 differs (267 / 447 dots) | run — 3d_blendmodes, 3d_highlight exact | GBATEK "Texture Blending" (decal with 63-At, highlight modulating by the table colour) |
+| `gpu3d/geometry.nim` to_screen | screen y = floor((w - y) * height / 2w) + 191 - y2 (top-down) | melonDS DS 1.4 | run — 3d_probe_clip: clipped vertices land a row low otherwise | GBATEK gives the bottom-up formula; it agrees on whole-dot vertices |
+| `gpu3d/geometry.nim` clip_polygon, intersect | planes near, far, y, x; the new vertex sits exactly on the plane; coordinates and texcoords round down, 5-bit colours round up | melonDS DS 1.4 exact | run — 3d_probe_clip, _clip_persp (17 dots), _clipq exact; 3d_vcolor 3 dots, 3d_clip 86 | GBATEK "Clipping" (which vertices are made, not their arithmetic) |
+| `gpu3d/geometry.nim` apply_normal | specular level 2 (N.H)^2 - 1 with H the unit half vector, through a 7-bit table index; the sum of all terms kept with 17 fraction bits, truncated once; diffuse level to 8 fraction bits | cores disagree: specular shape all three (1.4 closest, 31/192 quads off), sum precision melonDS DS only (0.9.3 and DeSmuME truncate per term), diffuse precision both melonDS (DeSmuME follows 12 bits) | run — 3d_probe_light, _light_spec, _light_tab, _light_sum | GBATEK "Polygon Light Parameters" gives (-H.N)^2 on the unnormalised H and real arithmetic; unclear |
+| `gpu3d/render.nim` aa_cov, anti_alias, edge_mark | coverage: y-major edges at the row's middle within the dot, x-major edges the edge height at the column centre; right edges floor(32 c), left 31 - floor(32 (1 - c)); mixed over the colour drawn on, where a 4-neighbour has another ID and lies further; no coverage leaves the colour beneath; with edge marking the edge colour goes on at 17/32 over it | melonDS DS 1.4 and 0.9.3 agree | run — 3d_probe_aa (110 dots), _aa_edge exact; the neighbour rule from SoulSilver's title Lugia and overworld (no seams inside one-ID meshes); 3d_probe_aa2 shows same-ID edges blending where we do not (634 dots) | GBATEK "Anti-Aliasing" (opaque edges only, edge-marked edges translucent) |
+| `gpu3d/gpu3d.nim` fifo_level | the first 4 entries queued behind a stalled command sit in the PIPE, uncounted | melonDS DS 1.4 | run — 3d_status: 40 queued behind SWAP_BUFFERS read as 36 | GBATEK "FIFO / PIPE Number of Entries" |
+| `gpu3d/render.nim` plot (blending off) | a translucent dot over an opaque one with DISP3DCNT.3 off takes the polygon's alpha | DeSmuME agrees; both melonDS cores keep alpha 31 | run — 3d_alpha_noblend | GBATEK "Alpha-Blending" (bypassed: overwritten by Poly[R,G,B,A]) decides |

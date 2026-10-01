@@ -267,13 +267,13 @@ proc apply_normal(g: Geometry; p: uint32) =
   let n = g.vec_mul3(nx shl 3, ny shl 3, nz shl 3)
   # GBATEK's sum (emission + per light: specular, diffuse, ambient terms)
   # is kept with 17 fraction bits and truncated once at the end
-  # (3d_probe_light_sum on melonDS DS; other cores truncate each term)
+  # (3d_probe_light_sum; docs/oracles.md: the reference cores disagree)
   var col = [int64(g.emission[0]) shl 17, int64(g.emission[1]) shl 17, int64(g.emission[2]) shl 17]
   for i in 0..3:
     if (g.attr and (1'u32 shl i)) == 0: continue
     let l = g.light_vec[i]
     let h = g.half_vec[i]
-    # the diffuse level keeps 8 fraction bits (3d_probe_light: both melonDS
+    # the diffuse level keeps 8 fraction bits (3d_probe_light; docs/oracles.md:
     # reference cores; a 12-bit level is one step brighter on 22 of 192)
     let dif = (clamp(-((int64(l[0]) * n[0] + int64(l[1]) * n[1] + int64(l[2]) * n[2]) shr 12),
                      0'i64, int64(ONE)) shr 4) shl 4
