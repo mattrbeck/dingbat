@@ -1,13 +1,14 @@
 ## WASM entry for the DS prototype (web/nds.html). Separate from
-## dingbat_wasm.nim while the DS core is a prototype: no saves, rewind or
-## link yet. Build: nim c -d:emscripten src/dingbat_nds_wasm.nim
+## dingbat_wasm.nim while the DS core is a prototype: no rewind or link yet.
+## Build: nim c -d:emscripten src/dingbat_nds_wasm.nim
 
-import dingbat/nds/nds
+import dingbat/nds/[nds, savestate]
 from std/strutils import toHex
 
 var core: NDS
 var fbTop, fbBottom: seq[uint32]
 var status: string
+var stateImage: string     # the last nds_state_size() result
 
 proc copy_in(p: pointer; len: cint): seq[uint8] =
   result = newSeq[uint8](int(len))
@@ -57,6 +58,35 @@ proc nds_status(): cstring {.exportc.} =
            toHex(core.arm9.next_pc, 8) & "  arm7 pc " & toHex(core.arm7.next_pc, 8)
   cstring(status)
 
+# Save states (nds/savestate.nim, docs/nds/savestate.md): the same packed
+# bytes a desktop .state file holds. JS calls nds_state_size() then copies
+# nds_state_size() bytes from nds_state_data() before the next call.
+
+proc nds_state_size(thumbnail: cint): cint {.exportc.} =
+  ## Serialize the machine (packed, with a 128x192 thumbnail of both
+  ## screens when `thumbnail` != 0) into a retained buffer; its length, 0
+  ## when no ROM runs.
+  stateImage = if core == nil: "" else: pack_state(core.state_bytes(thumbnail != 0))
+  cint(stateImage.len)
+
+proc nds_state_data(): pointer {.exportc.} =
+  if stateImage.len > 0: addr stateImage[0] else: nil
+
+proc nds_state_load(data: pointer; len: cint): cint {.exportc.} =
+  ## Apply a state (packed or plain). 1 on success; 0 on refusal with the
+  ## machine untouched (nds_state_error_kind / nds_state_error say why).
+  last_state_error = ""
+  if core == nil or data == nil or len <= 0: return 0
+  var image = newString(int(len))
+  copyMem(addr image[0], data, int(len))
+  if core.load_state_bytes(image): 1 else: 0
+
+proc nds_state_error_kind(): cint {.exportc.} =
+  ## The last refusal as a StateRejectKind ordinal (common/serialize.nim).
+  cint(ord(last_state_reject_kind))
+
+proc nds_state_error(): cstring {.exportc.} =
+  cstring(last_state_error)
 
 when isMainModule:
   discard

@@ -29,6 +29,12 @@
 ## --rtc YYYY-MM-DD[THH:MM:SS] starts the RTC at that time and clocks it from
 ## emulated time, so runs are reproducible (default: host local time).
 ## --perf-from F times frames F..end (printed as fps; default the whole run).
+## --state-save FILE@F[,FILE@F...] writes a save state (packed, with a
+## thumbnail) after frame F. --state-load FILE[@F] starts from a state: the
+## run goes on from frame F (default: the V-blanks the state has counted,
+## which is its frame number when it came from --state-save), so --frames,
+## --press and --shots keep their frame numbers. --state-layout prints the
+## state's field layout (docs/nds/savestate.md) and exits.
 ## --pcs prints both CPUs' pc / halted state after each frame.
 ##
 ## Debug flags (build with -d:ndsdebug):
@@ -41,7 +47,7 @@
 
 import std/[os, strutils, parseopt, tables, sequtils, monotimes, times]
 import zippy
-import dingbat/nds/nds
+import dingbat/nds/[nds, savestate]
 import dingbat/nds/io/rtc
 import dingbat/gba/rtc_calendar
 
@@ -205,9 +211,13 @@ when isMainModule:
   var save = ""
   var rtc_at = ""
   var perf_from = 0
+  var state_saves: seq[(string, int)]
+  var state_load = ""
+  var state_load_frame = -1
+  var state_layout = false
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
-                        longNoVal = @["help", "iolog", "pcs", "spilog"])
+                        longNoVal = @["help", "iolog", "pcs", "spilog", "state-layout"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -223,6 +233,18 @@ when isMainModule:
       of "save": save = val
       of "rtc": rtc_at = val
       of "perf-from": perf_from = parseInt(val)
+      of "state-save":
+        for item in val.split(','):
+          let at = item.rsplit('@', maxsplit = 1)
+          if at.len != 2: quit("--state-save wants FILE@FRAME")
+          state_saves.add (at[0], parseInt(at[1]))
+      of "state-load":
+        let at = val.rsplit('@', maxsplit = 1)
+        if at.len == 2 and at[1].allCharsInSet(Digits):
+          state_load = at[0]
+          state_load_frame = parseInt(at[1])
+        else: state_load = val
+      of "state-layout": state_layout = true
       of "press": presses.add parse_presses(val)
       of "peek9":
         for a in val.split(','): peek9.add uint32(parseHexInt(a))
@@ -258,8 +280,20 @@ when isMainModule:
     n.rtc.set_fixed_clock(n.sched, to_calendar_seconds(f[0], f[1], f[2], f[3], f[4], f[5]))
   if save.len > 0 and fileExists(save):
     n.cart.backup.set_data(cast[seq[uint8]](readFile(save)))
+  if state_layout:
+    stdout.write n.state_layout()
+    quit(0)
+  var first_frame = 0
+  if state_load.len > 0:
+    if not n.load_state_bytes(readFile(state_load)):
+      quit("--state-load " & state_load & ": " & $last_state_reject_kind & ": " &
+           last_state_error)
+    first_frame = if state_load_frame >= 0: state_load_frame else: n.gpu.frame_count
+    # keys and stylus held at the state's frame are in the state (input)
+    echo "state: ", state_load, " -> frame ", first_frame
+    perf_from = max(perf_from, first_frame)
   var audio: seq[float32]
-  for f in 0 ..< frames:
+  for f in first_frame ..< frames:
     if f == perf_from: perf_t0 = getMonoTime()
     if f == trace_at:
       n.arm9.trace = trace9
@@ -296,6 +330,12 @@ when isMainModule:
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
            (if n.arm7.halted: " H" else: "")
     if wav.len > 0: audio.add n.spu.take_samples()
+    for (file, at) in state_saves:
+      if f + 1 == at:
+        let image = n.state_bytes(thumbnail = true)
+        writeFile(file, pack_state(image))
+        echo "state: frame ", at, " -> ", file, " (", image.len, " bytes, ",
+             readFile(file).len, " packed)"
     if f + 1 in shots:
       let px = n.screens_rgba()
       write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)
