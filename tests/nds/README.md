@@ -5,7 +5,7 @@ Fixtures for the DS core, ordered roughly from "first thing that can work" to
 
 ## Where the ROMs live
 
-Only our own `fb_hello.nds` / `fb_both.nds` are committed. The third-party
+Only our own `fb_*.nds` / `2d_*.nds` are committed. The third-party
 ROMs below carry no licence (gbe-plus-nds-tests is GPLv2), so they are
 gitignored and kept in **`~/.cache/dingbat-nds/roms/`** (same layout as
 `roms/`), where every worktree can reach them. Rebuild them with the scripts
@@ -17,6 +17,9 @@ under Building if the cache is lost.
 |---|---|---|---|
 | `roms/fb_hello.nds` | `src/fb_hello` (ours) | ARM9 stores only | top screen gradient: TL blue, TR red, BL cyan, BR yellow (exact formula in `arm9.s`) |
 | `roms/fb_both.nds` | `src/fb_both` (ours) | + engine B backdrop | fb_hello on top, solid magenta (0x7C1F) bottom |
+| `roms/2d_text.nds` | `src/2d_text` (ours, C) | 2D engines | text BGs: 4bpp console with DISPCNT char/screen offsets, palette banks, flips, scroll, 8bpp ext palettes on both engines, a 512-wide map (comment in `arm9.c` lists every row) |
+| `roms/2d_bitmap.nds` | `src/2d_bitmap` (ours, C) | 2D engines | rotated direct-colour bitmap with alpha holes under a 256-colour bitmap frame; engine B 16-bit-entry affine tiled BG zoomed 2x |
+| `roms/2d_sprites.nds` | `src/2d_sprites` (ours, C) | 2D engines | tile/bitmap/affine/semi-transparent/OBJ-window sprites, WIN0, brightness, Y wrap; engine B OBJ ext palettes and priority order |
 | `roms/armwrestler.nds` | [mic-/armwrestler](https://github.com/mic-/armwrestler), built by `tools/build_wrestlers.sh` | ARM9 ARM/Thumb, LCDC VRAM display, KEYINPUT, DISPSTAT polling | menu of ARM9 instruction tests (ALU, LDR/STR, LDM/STM, Thumb), pass/fail per row |
 | `roms/arm7wrestler.nds` | [Arisotura/arm7wrestler](https://github.com/Arisotura/arm7wrestler), same script | both CPUs; ARM7 runs the tests, ARM9 copies its frame | same menu run on the ARM7, including v5 opcodes that must be undefined/no-op there |
 | `roms/rockwrestler.nds` | [RockPolish/rockwrestler](https://github.com/RockPolish/rockwrestler) (prebuilt upstream) | both CPUs, IPCSYNC/IPCFIFO, DIV/SQRT, WRAMCNT, VRAMCNT, TCM, CP15 | ARMv4/v5 extras + DS system tests, LCDC display |
@@ -50,6 +53,14 @@ devkitARM) and python3:
 
 `tools/mknds.py` writes the cartridge header (CRC16 included, boot logo left
 zeroed; `--logo-from` copies one if a firmware boot is ever wanted).
+
+### No library, C (2d_*)
+
+    tests/nds/tools/build_2d.sh
+
+needs an `arm-none-eabi-gcc` (devkitARM's in `/opt/devkitpro` is used when
+none is on PATH). `src/common2d/` holds the crt0, linker script and a register
+header with a small 3x5 font.
 
 ### libnds (nds-examples and the rebuilt third-party ROMs)
 

@@ -102,6 +102,7 @@ proc on_line_end(n: NDS) =
   inc g.vcount
   if g.vcount == LINES: g.vcount = 0
   n.line_start = n.sched.now
+  g.start_line()
   if g.vcount == VISIBLE_LINES:
     g.in_vblank = true
     inc g.frame_count
@@ -153,6 +154,7 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8]): NDS =
   n.input = Input()
   n.gpu = new_gpu()
   n.gpu3d = new_gpu3d()
+  n.gpu.gpu3d = n.gpu3d
   n.timers9 = Timers(sched: n.sched, irq: n.irq9, first_event: evTimer9_0)
   n.timers7 = Timers(sched: n.sched, irq: n.irq7, first_event: evTimer7_0)
   n.dma9 = new_dma(true, n.irq9)

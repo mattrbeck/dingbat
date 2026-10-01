@@ -195,3 +195,4 @@ web/nds/nds.wasm
 tests/nds/roms/*
 !tests/nds/roms/fb_hello.nds
 !tests/nds/roms/fb_both.nds
+!tests/nds/roms/2d_*.nds

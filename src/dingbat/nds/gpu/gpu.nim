@@ -1,9 +1,10 @@
 ## Display controller: line/frame timing shared by both CPUs (each has its
 ## own DISPSTAT with its own VCOUNT-match setting and IRQ enables), POWCNT1,
-## and the two output framebuffers. Owns both 2D engines and drives the 3D
-## engine's per-frame hooks.
+## and the two output framebuffers. Owns both 2D engines, pulls the 3D line
+## for engine A's BG0, and runs display capture (DISPCAPCNT 0x4000064).
 
 import ../mem/vram
+import ../gpu3d/gpu3d
 import engine2d
 
 type
@@ -16,6 +17,8 @@ type
     palette*: array[1024, uint16]     ## A BG/OBJ 0x05000000, B 0x05000400
     oam*: array[1024, uint16]         ## A 0x07000000, B 0x07000400
     engine_a*, engine_b*: Engine2D
+    gpu3d* {.cursor.}: Gpu3d          ## set by the machine; nil = no 3D layer
+    capturing*: bool                  ## a capture started at line 0 is running
     powcnt1*: uint16
     vcount*: int
     in_hblank*, in_vblank*: bool
@@ -50,21 +53,101 @@ proc write_powcnt1*(g: Gpu; v: uint16) =
   g.engine_a.enabled = (v and 2) != 0
   g.engine_b.enabled = (v and 0x200) != 0
 
+proc start_line*(g: Gpu) =
+  ## Line start (every line, V-blank included), after VCOUNT has advanced.
+  g.engine_a.start_line(g.vcount)
+  g.engine_b.start_line(g.vcount)
+  if g.vcount == 0:
+    g.capturing = (g.engine_a.dispcapcnt and 0x8000_0000'u32) != 0
+
+const CAPTURE_SIZE = [(128, 128), (256, 64), (256, 128), (256, 192)]
+
+proc capture_line(g: Gpu; y: int) =
+  ## DISPCAPCNT: source A (graphics composite or 3D alone) and source B (a
+  ## VRAM bank or the main-memory FIFO), one of them or their EVA/EVB blend,
+  ## written as 15-bit + alpha into an LCDC-mapped bank. Offsets wrap in
+  ## the bank's 128K. Busy (bit 31) clears after the last captured line.
+  let e = g.engine_a
+  let cap = e.dispcapcnt
+  let (w, h) = CAPTURE_SIZE[(cap shr 20) and 3]
+  if y >= h: return
+  let dst_bank = VramBank((cap shr 16) and 3)
+  let src = (cap shr 29) and 3
+  let eva = min(16'u32, cap and 0x1F)
+  let evb = min(16'u32, (cap shr 8) and 0x1F)
+  let a_3d = (cap and (1'u32 shl 24)) != 0
+  let b_fifo = (cap and (1'u32 shl 25)) != 0
+  let dst = g.vram.bank_ptr(dst_bank)
+  let write_ok = g.vram.lcdc_mapped(dst_bank)
+  let wbase = int((cap shr 18) and 3) * 0x8000 + y * w * 2
+  # source B: VRAM reads the DISPCNT bank; the read offset is ignored in
+  # VRAM display mode, where the display already reads that bank from 0
+  let rbank = g.vram.bank_ptr(VramBank((e.dispcnt shr 18) and 3))
+  let roff = if e.display_mode == 2: 0 else: int((cap shr 26) and 3) * 0x8000
+  let rbase = roff + y * w * 2
+  let l3 = if g.gpu3d != nil: addr g.gpu3d.line else: nil
+  for x in 0 ..< w:
+    var ca, cb: uint16
+    if src != 1:
+      if a_3d:
+        if l3 != nil and ((l3[x] shr 24) and 0x1F) != 0:
+          ca = px3d_to_555(l3[x]) or 0x8000
+      else:
+        ca = e.gfx[x] or 0x8000
+    if src != 0:
+      if b_fifo:
+        cb = e.mmem[x]
+      else:
+        let i = (rbase + x * 2) and 0x1FFFF
+        cb = uint16(rbank[i]) or (uint16(rbank[i + 1]) shl 8)
+    var c: uint16
+    case src
+    of 0: c = ca
+    of 1: c = cb
+    else:
+      let aa = if (ca and 0x8000) != 0: eva else: 0
+      let ab = if (cb and 0x8000) != 0: evb else: 0
+      template mix(sh: int): uint32 =
+        min(31'u32, ((uint32(ca shr sh) and 0x1F) * aa + (uint32(cb shr sh) and 0x1F) * ab) shr 4)
+      c = uint16(mix(0) or (mix(5) shl 5) or (mix(10) shl 10))
+      if (aa > 0) or (ab > 0): c = c or 0x8000
+    if write_ok:
+      let i = (wbase + x * 2) and 0x1FFFF
+      dst[i] = uint8(c)
+      dst[i + 1] = uint8(c shr 8)
+  if y == h - 1:
+    g.capturing = false
+    e.dispcapcnt = e.dispcapcnt and not 0x8000_0000'u32
+
 proc render_line*(g: Gpu; y: int) =
-  ## Called at H-blank of a visible line: both engines, then routed to the
-  ## screens. POWCNT1 bit 15: 1 = engine A on the top screen.
-  g.engine_a.render_line(y)
+  ## Called at H-blank of a visible line: both engines, display capture,
+  ## then routed to the screens. POWCNT1 bit 15: 1 = engine A on the top
+  ## screen.
+  let a = g.engine_a
+  let cap = g.capturing and a.enabled
+  # the 3D line is pulled when something shows or captures it
+  if g.gpu3d != nil and ((a.bg0_is_3d and (a.dispcnt and 0x100) != 0) or
+                         (cap and (a.dispcapcnt and (1'u32 shl 24)) != 0)):
+    g.gpu3d.render_line(y)
+    a.line3d = addr g.gpu3d.line
+  else:
+    a.line3d = nil
+  let need_gfx = cap and ((a.dispcapcnt shr 29) and 3) != 1 and
+                 (a.dispcapcnt and (1'u32 shl 24)) == 0
+  a.render_line(y, need_gfx)
   g.engine_b.render_line(y)
+  if cap: g.capture_line(y)
+  a.end_line()
+  g.engine_b.end_line()
   let a_top = (g.powcnt1 and 0x8000) != 0
   let lcd_on = (g.powcnt1 and 1) != 0
   let base = y * 256
   for x in 0 ..< 256:
-    let a = if lcd_on: g.engine_a.line[x] else: 0'u16
-    let b = if lcd_on: g.engine_b.line[x] else: 0'u16
+    let la = if lcd_on: a.line[x] else: 0'u16
+    let lb = if lcd_on: g.engine_b.line[x] else: 0'u16
     if a_top:
-      g.top[base + x] = a
-      g.bottom[base + x] = b
+      g.top[base + x] = la
+      g.bottom[base + x] = lb
     else:
-      g.top[base + x] = b
-      g.bottom[base + x] = a
-  # TODO(2d): display capture (DISPCAPCNT 0x4000064) taps engine A's line here
+      g.top[base + x] = lb
+      g.bottom[base + x] = la

@@ -2,8 +2,14 @@
 ## (0x4000240-0x4000249). Each mappable region is a table of 16 KB pages
 ## holding a bitmask of the banks mapped there: several banks on one page
 ## read OR'd together and a write lands in all of them (GBATEK, "DS Memory
-## Control - VRAM"). Engines read through the region accessors; the CPUs
-## through cpu_read*/cpu_write*.
+## Control - VRAM"). Engines read through `view` + rd8/rd16/rd32; the CPUs
+## through read*/write*.
+##
+## Fast path: next to each page's bank mask, `fast` holds a direct pointer
+## to the page's bytes when exactly one bank is mapped there (or a shared
+## zero page when none is), and nil when several banks overlap; only nil
+## pages take the bank-mask loop. `wfast` is the same for writes, nil for
+## unmapped pages too. Both are rebuilt with the masks on every VRAMCNT write.
 
 type
   VramBank* = enum vbA, vbB, vbC, vbD, vbE, vbF, vbG, vbH, vbI
@@ -22,10 +28,15 @@ type
     vrBBgExtPal   ## engine B BG extended palettes, 32 KB
     vrBObjExtPal  ## engine B OBJ extended palette, 8 KB
 
+  PagePtr* = ptr UncheckedArray[uint8]
+
   Vram* = ref object
     mem*: seq[uint8]                       ## all banks back to back
     cnt*: array[VramBank, uint8]
     pages: array[VramRegion, seq[uint16]]  ## bank bitmask per 16 KB page
+    fast: array[VramRegion, seq[PagePtr]]  ## read pointer per page (see above)
+    wfast: array[VramRegion, seq[PagePtr]] ## write pointer per page
+    zero: seq[uint8]                       ## one page of zeros: unmapped reads
     vramstat*: uint8                       ## 0x4000240 read on ARM7: C/D as WRAM
 
 const
@@ -50,10 +61,16 @@ const BANK_OFFSET*: array[VramBank, int] = bank_offsets()
 
 template bank_offset(b: VramBank): int = BANK_OFFSET[b]
 
+proc rebuild_fast(v: Vram)
+
 proc new_vram*(): Vram =
-  result = Vram(mem: newSeq[uint8](VRAM_TOTAL))
+  result = Vram(mem: newSeq[uint8](VRAM_TOTAL), zero: newSeq[uint8](PAGE_SIZE))
   for r in VramRegion:
-    result.pages[r] = newSeq[uint16](REGION_SIZE[r] shr PAGE_SHIFT)
+    let n = REGION_SIZE[r] shr PAGE_SHIFT
+    result.pages[r] = newSeq[uint16](n)
+    result.fast[r] = newSeq[PagePtr](n)
+    result.wfast[r] = newSeq[PagePtr](n)
+  result.rebuild_fast()
   # LCDC pages never change: bank b's LCDC window is fixed. (Present only
   # while the bank's MST is 0, so the mask is rebuilt in remap.)
 
@@ -121,6 +138,7 @@ proc remap*(v: Vram) =
       of 2: v.map_bank(vrBObj, 0, b)
       of 3: v.map_bank(vrBObjExtPal, 0, b)
       else: discard
+  v.rebuild_fast()
 
 proc write_cnt*(v: Vram; b: VramBank; value: uint8) =
   if v.cnt[b] == value: return
@@ -133,6 +151,24 @@ proc locate(v: Vram; r: VramRegion; offset: int; b: VramBank): int {.inline.} =
   ## its pages; the offset within the bank is offset mod bank size.
   bank_offset(b) + (offset and (BANK_SIZE[b] - 1))
 
+proc rebuild_fast(v: Vram) =
+  let zp = cast[PagePtr](addr v.zero[0])
+  for r in VramRegion:
+    for p in 0 ..< v.pages[r].len:
+      let m = v.pages[r][p]
+      if m == 0:
+        v.fast[r][p] = zp
+        v.wfast[r][p] = nil
+      elif (m and (m - 1)) == 0:
+        var b = vbA
+        while (m and (1'u16 shl ord(b))) == 0: inc b
+        let q = cast[PagePtr](addr v.mem[v.locate(r, p shl PAGE_SHIFT, b)])
+        v.fast[r][p] = q
+        v.wfast[r][p] = q
+      else:
+        v.fast[r][p] = nil
+        v.wfast[r][p] = nil
+
 proc read8*(v: Vram; r: VramRegion; offset: int): uint8 =
   let o = offset mod REGION_SIZE[r]
   let mask = v.pages[r][o shr PAGE_SHIFT]
@@ -143,6 +179,10 @@ proc read8*(v: Vram; r: VramRegion; offset: int): uint8 =
 
 proc read16*(v: Vram; r: VramRegion; offset: int): uint16 {.inline.} =
   let o = offset mod REGION_SIZE[r]
+  let q = v.fast[r][o shr PAGE_SHIFT]
+  if q != nil:
+    let i = o and (PAGE_SIZE - 2)
+    return uint16(q[i]) or (uint16(q[i + 1]) shl 8)
   let mask = v.pages[r][o shr PAGE_SHIFT]
   if mask == 0: return 0
   if (mask and (mask - 1)) == 0:
@@ -168,6 +208,12 @@ proc write8*(v: Vram; r: VramRegion; offset: int; value: uint8) =
       v.mem[v.locate(r, o, b)] = value
 
 proc write16*(v: Vram; r: VramRegion; offset: int; value: uint16) =
+  let o = offset mod REGION_SIZE[r]
+  let q = v.wfast[r][o shr PAGE_SHIFT]
+  if q != nil:
+    let i = o and (PAGE_SIZE - 2)
+    q[i] = uint8(value); q[i + 1] = uint8(value shr 8)
+    return
   v.write8(r, offset, uint8(value))
   v.write8(r, offset + 1, uint8(value shr 8))
 
@@ -187,3 +233,42 @@ proc arm9_region*(a: uint32; offset: var int): VramRegion =
 proc bank_ptr*(v: Vram; b: VramBank): ptr UncheckedArray[uint8] =
   ## Raw bank memory (display capture, VRAM display mode).
   cast[ptr UncheckedArray[uint8]](addr v.mem[bank_offset(b)])
+
+# ---------------------------------------------------------------------------
+# Renderer access: a view of one power-of-two region, read through the page
+# pointers (rd8/rd16/rd32 wrap the offset within the region, as the engines'
+# address counters do).
+
+type
+  RegionView* = object
+    pages*: ptr UncheckedArray[PagePtr]
+    mask*: int
+    region*: VramRegion
+    vram* {.cursor.}: Vram
+
+proc view*(v: Vram; r: VramRegion): RegionView {.inline.} =
+  RegionView(pages: cast[ptr UncheckedArray[PagePtr]](addr v.fast[r][0]),
+             mask: REGION_SIZE[r] - 1, region: r, vram: v)
+
+proc rd8*(w: RegionView; offset: int): uint8 {.inline.} =
+  let o = offset and w.mask
+  let q = w.pages[o shr PAGE_SHIFT]
+  if likely(q != nil): q[o and (PAGE_SIZE - 1)] else: w.vram.read8(w.region, o)
+
+proc rd16*(w: RegionView; offset: int): uint16 {.inline.} =
+  ## Halfword at an even offset.
+  let o = offset and w.mask
+  let q = w.pages[o shr PAGE_SHIFT]
+  if likely(q != nil): cast[ptr uint16](addr q[o and (PAGE_SIZE - 2)])[]
+  else: w.vram.read16(w.region, o)
+
+proc rd32*(w: RegionView; offset: int): uint32 {.inline.} =
+  ## Word at a 4-aligned offset.
+  let o = offset and w.mask
+  let q = w.pages[o shr PAGE_SHIFT]
+  if likely(q != nil): cast[ptr uint32](addr q[o and (PAGE_SIZE - 4)])[]
+  else: uint32(w.vram.read16(w.region, o)) or (uint32(w.vram.read16(w.region, o + 2)) shl 16)
+
+proc lcdc_mapped*(v: Vram; b: VramBank): bool =
+  ## Bank enabled with MST 0 (its LCDC window): display capture's target.
+  (v.cnt[b] and 0x87) == 0x80
