@@ -878,12 +878,9 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
       for i in 0..7:
         if (list and (1'u32 shl i)) != 0:
           cpu.r[i] = read32(cpu.bus, a and not 3'u32); a += 4
-      # writeback unless rb was loaded (ARMv5: also if rb is not the last)
+      # writeback unless rb was loaded -- on ARMv5 too: GBATEK THUMB.15, "no
+      # writeback (LDM/ARMv4/ARMv5; THUMB opcodes work different than ARM)"
       if (list and (1'u32 shl rb)) == 0: cpu.r[rb] = a
-      else:
-        when armv5(B):
-          if (list and not ((2'u32 shl rb) - 1)) != 0 and list != (1'u32 shl rb):
-            cpu.r[rb] = a
     else:
       var first = true
       for i in 0..7:
