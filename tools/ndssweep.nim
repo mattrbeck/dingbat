@@ -19,7 +19,7 @@
 ##   one 256-byte window and the screens did not change;
 ## - blank: a screen that is one colour at every shot;
 ## - frames_changed: how many frames differed from the one before;
-## - audio peak / RMS of the whole run; ms per frame (process CPU time, so
+## - audio peak / RMS of the whole run around its mean (DC removed); ms per frame (process CPU time, so
 ##   a loaded machine does not skew it).
 ## The reference run gives its shots and audio; the table compares the two:
 ##   ok              every shot identical
@@ -28,7 +28,9 @@
 ##   differs         runs in both, shots differ (largest diff % shown)
 ##   broken          ours stayed blank where the reference did not, or
 ##                   crashed / hung with shots >= BROKEN_DIFF % off
-##   broken-ref-too  the reference is blank too (or fails to load)
+##   broken-ref-too  the reference is blank too (or fails to load), and ours
+##                   is blank, crashed or hung
+##   ref-broken      the reference is blank (or fails to load), ours is not
 ##
 ## --press defaults to a generic "get past the title" script: START, A, a
 ## touch in the middle of the bottom screen, START, A, DOWN, A, B.
@@ -48,6 +50,7 @@ const
   DEFAULT_SHOTS = "30,115,240,360,600"
   HANG_WINDOW = 120
   PHASE = 2                    ## reference frames either side of each shot
+  SILENT = 2.0 / 32768         ## AC peak below this: silent
   BROKEN_DIFF = 25.0           ## % of a screen: a crash/hang this far off is ours
 
 # ---------------------------------------------------------------------------
@@ -147,23 +150,34 @@ proc read_png(path: string; w, h: var int): seq[uint32] =
                           (uint32(cur[x * bpp + 2]) shl 16)
     swap(prev, cur)
 
+proc ac_stats(s: openArray[float32]): (float, float) =
+  ## Peak and RMS around the mean: SOUNDBIAS puts a DC level on the output
+  ## (bias - 200h, docs/oracles.md) that some cores filter away, and a
+  ## program that only sets the bias is silent, not loud.
+  if s.len == 0: return (0.0, 0.0)
+  var mean = 0.0
+  for x in s: mean += float(x)
+  mean /= float(s.len)
+  var peak, sumsq = 0.0
+  for x in s:
+    let d = float(x) - mean
+    peak = max(peak, abs(d))
+    sumsq += d * d
+  (peak, sqrt(sumsq / float(s.len)))
+
 proc wav_stats(path: string): (float, float, int) =
-  ## (peak, RMS) of a 16-bit WAV as a fraction of full scale, and its
-  ## sample-frame count.
+  ## (peak, RMS) of a 16-bit WAV as a fraction of full scale, DC removed
+  ## (see ac_stats), and its sample-frame count.
   if not fileExists(path): return (-1.0, -1.0, 0)
   let d = readFile(path)
   if d.len < 44: return (-1.0, -1.0, 0)
-  var peak = 0
-  var sum = 0.0
-  var n = 0
+  var v: seq[float32]
   var i = 44
   while i + 1 < d.len:
-    let v = int(cast[int16](uint16(ord(d[i])) or (uint16(ord(d[i + 1])) shl 8)))
-    peak = max(peak, abs(v))
-    sum += float(v * v)
-    inc n
+    v.add float32(cast[int16](uint16(ord(d[i])) or (uint16(ord(d[i + 1])) shl 8))) / 32768
     i += 2
-  (peak / 32768, (if n > 0: sqrt(sum / float(n)) / 32768 else: 0.0), n div 2)
+  let (peak, rms) = ac_stats(v)
+  (peak, rms, v.len div 2)
 
 # ---------------------------------------------------------------------------
 # Our side: one ROM
@@ -268,12 +282,7 @@ proc run_one(rom, outdir, bios, press: string; frames: int; shots: seq[int]) =
       blank_bottom = blank_bottom and bb
       shot_info.add %*{"frame": f + 1, "blank_top": bt, "blank_bottom": bb}
   let secs = cpuTime() - t0
-  var peak = 0.0
-  var sumsq = 0.0
-  for s in audio:
-    peak = max(peak, abs(float(s)))
-    sumsq += float(s) * float(s)
-  let rms = if audio.len > 0: sqrt(sumsq / float(audio.len)) else: 0.0
+  let (peak, rms) = ac_stats(audio)
   var hang = false
   if halted9_at < frames - HANG_WINDOW and pcs.len > 0 and
      last_change < frames - HANG_WINDOW:
@@ -464,12 +473,12 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
       elif j["blank_top"].getBool: ours_flags.add "top-blank"
       elif j["blank_bottom"].getBool: ours_flags.add "bottom-blank"
       if j["frames_changed"].getInt == 0: ours_flags.add "static"
-      if j["audio_peak"].getFloat == 0: ours_flags.add "silent"
+      if j["audio_peak"].getFloat < SILENT: ours_flags.add "silent"
       if unm > 0: ours_flags.add "unmapped:" & $unm
     if core.len > 0:
       if not ref_loaded: ref_flags.add "no-result"
       elif ref_blank_all: ref_flags.add "blank"
-      if rpeak == 0: ref_flags.add "silent"
+      if rpeak < SILENT: ref_flags.add "silent"
     # a program that exits powers the DS off (PM register 0 bit 6, GBATEK
     # "DS Power Management"); our screens keep the last picture, so a
     # power-off is not counted as a hang
@@ -480,17 +489,18 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
     let stuck = exc > 0 or (j != nil and j["hang"].getBool and not off)
     let ours_broken = j == nil or (ours_blank_all and not ref_blank_all) or
                       (stuck and (core.len == 0 or amax >= BROKEN_DIFF))
-    let silent_only = j != nil and j["audio_peak"].getFloat == 0 and rpeak > 0.01
+    let silent_only = j != nil and j["audio_peak"].getFloat < SILENT and rpeak > 0.01
     if core.len == 0:
       status = if ours_broken: "broken" else: "ran"
     elif not ref_loaded or ref_blank_all:
-      status = if ours_broken: "broken-ref-too" else: "ref-broken"
+      status = if ours_broken or ours_blank_all or stuck: "broken-ref-too" else: "ref-broken"
     elif ours_broken: status = "broken"
     elif dmax == 0 and not silent_only: status = "ok"
     elif amax == 0 and not silent_only: status = "ok-phase"
     else:
       status = "differs"
       if silent_only: notes.add "silent in ours"
+    if off: notes.add "exits: our screens keep the last picture after the power-off"
     let ours_s = if ours_flags.len > 0: ours_flags.join(" ") else: "-"
     let ref_s = if ref_flags.len > 0: ref_flags.join(" ") else: "-"
     let offs = offsets.deduplicate.filterIt(it != 0)
