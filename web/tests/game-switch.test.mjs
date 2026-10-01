@@ -195,7 +195,8 @@ test("a snapshot of a paused core records the battery its state carries", async 
   const app = await boot();
   flushableCore(app);
   await playAThenHome(app);
-  app.runIn("core.ram = [0x0a, 9]; core.dirty = true;");
+  // A state loaded while paused (applyStateBytes says the game has moved).
+  app.runIn("core.ram = [0x0a, 9]; core.dirty = true; sessionMoved = true;");
   app.document.hidden = true;
   await app.dispatchDoc("visibilitychange");
   await drain();

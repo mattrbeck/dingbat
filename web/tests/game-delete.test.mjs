@@ -38,13 +38,14 @@ const perGameKeys = (n) => [
 // The keys Drive mirrors (what parseDriveFileName recognises).
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
-    !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("sessionpic:") &&
+    !k.startsWith("art:") && !k.startsWith("sessionpic:") &&
     !k.startsWith("cheats:"));
-// ...of which the save data: everything mirrored but the ROM, its picture
-// and a kept save (a way back, which a save reset leaves).
+// ...of which the save data: everything mirrored but the ROM, its picture,
+// a kept save (a way back, which a save reset leaves) and the session (its
+// own group, mirrored too).
 const saveKeys = (n) =>
   syncableKeys(n).filter((k) => !k.startsWith("rom:") && !k.startsWith("frame:") &&
-                                !k.startsWith("oldsave:"));
+                                !k.startsWith("oldsave:") && !k.startsWith("stateauto:"));
 
 // A plausible stored value per key shape (statemeta object, cheats text, bytes).
 const seedValue = (key, name) => {
@@ -215,7 +216,7 @@ test("Delete mirrors to Drive: every synced key queued, tombstone raised", async
   eq(sorted(app.api.syncState.queueDel), sorted(syncableKeys("A.gba")),
     "exactly the keys Drive holds are queued for remote deletion");
   // The local-only three must not be queued: Drive could never satisfy them.
-  for (const k of ["art:A.gba", "stateauto:A.gba", "cheats:A.gba"]) {
+  for (const k of ["art:A.gba", "sessionpic:A.gba", "cheats:A.gba"]) {
     assert.ok(!app.api.syncState.queueDel.includes(k), k + " is not a Drive file");
   }
   eq(app.api.syncState.tomb.map((t) => t.name), ["A.gba"],

@@ -43,10 +43,54 @@ hero in every state.
 | closed, no session | **Play** · ⋯ | Boots from the in-game save | — |
 
 A **session** is the `stateauto:<game>` snapshot, taken when the game is
-left (Main Menu, a switch, a close, the tab hidden or closed). It counts
-only while the stored save is the one it was taken with (`saveSig`,
-`resumeSessionFor`): a game that has saved since boots from that save, so a
-snapshot can never roll a save back. The page reloaded, the hero is closed.
+left (Main Menu, a switch, a close, the tab hidden or closed) and only when
+it has moved since the last one (`sessionMoved`). It counts only while the
+stored save is the one it was taken with (`saveSig`, `resumeSessionFor`): a
+game that has saved since boots from that save, so a snapshot can never
+roll a save back. The page reloaded, the hero is closed.
+
+The kicker over the name says where the game stands:
+
+| Hero | Kicker |
+|---|---|
+| paused, signed out | Paused |
+| paused, signed in | Paused · Syncing… → Paused · Synced (Not synced yet when Drive cannot be reached) |
+| closed | Last played |
+| closed, its session left on another device | On your iPhone · 5m ago (*your other Mac* when both are Macs) |
+
+It is one line; a long one is cut short, never wrapped.
+
+## Picking a game up on another device
+
+The session is a Drive file (`stateauto:<game>`, its picture inside it:
+`sessionBundle`), so it is the hand-off. **Main Menu** stores the session
+of that moment and the save it was taken with at once, not at the next 5 s
+autosave, and queues both; the kicker says *Synced* once they are up. On
+the other device a pull brings them down, and its hero (or tile) resumes at
+that moment. *Sync now* stores the loaded game's save and session before it
+sends anything.
+
+A game left paused on a device while another played on is a stale copy.
+When a pull finds another device's newer save or session for the game in
+memory (`handoffNews`):
+
+- **On the home screen, everything of it already sent** (`heldGameIsSent`:
+  no move since its session, its save stored and sent): the copy in memory
+  is let go, nothing of it written (`takeHandoff`), and the newer files
+  land. The hero turns closed, shows the other device's picture, says
+  where it was, and Resume goes there. A toast: *“Game” was played on your
+  iPhone since — Resume picks up there.*
+- **Being played, or with work here not yet sent:** nothing is yanked. A
+  toast offers *Switch* (*“Game” was played on your iPhone since you opened
+  it here*), once per newer copy. Switch drops the copy here and lands the
+  bytes the pull already downloaded (`handoffStash`), then sends them up
+  again so they are Drive's copy too.
+
+A session another device wrote since this one last saw Drive's copy is not
+written over unseen: the flush holds it back and the pull after it decides.
+Once the offer has been made the other session counts as seen, so a player
+who keeps the copy here sends theirs, the later moment, at the next flush.
+Saves keep the older rule: the last device to send one wins.
 
 ## Opening a game from a tile
 
@@ -94,8 +138,9 @@ Drive-only game its button says it instead: *Signing in…*, *Opening · 38%*,
   it may be another device's.
 - `sessionpic:<game>` = `{ ts, blob }` is the session's own picture, written
   after the snapshot and stamped with its `ts`. It counts only while its
-  `ts` is the snapshot's. Local only, in the session group of
-  `perGameKeys`, so it moves and goes with the snapshot.
+  `ts` is the snapshot's. In the session group of `perGameKeys`, so it
+  moves and goes with the snapshot, and it reaches Drive inside the
+  session's file rather than as one of its own.
 
 The closed hero shows the session's picture where there is one, else the
 library's, else the box art, else the game's cartridge (`buildCart`, two

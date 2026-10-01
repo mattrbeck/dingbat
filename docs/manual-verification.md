@@ -141,6 +141,29 @@ real clock skew between them.
       steal a fresh import. Check once both devices run the new build, and
       do not judge the rename cases until they do.
 
+## Drive sync: picking a game up on another device
+
+Gated: `web/tests/handoff.test.mjs` against a fake Drive, and
+`web/e2e/handoff.e2e.mjs` (CI job `web-e2e`): the real build in two
+browsers - WebKit as an iPhone, Chromium as a Mac, and an iPhone in private
+browsing - against one fake Drive, with a test ROM that writes its battery
+save while A is held. Not gated: a live account, Safari on a real iPhone, a
+phone's tab really being suspended.
+
+- [ ] **Pause, sync, pick up.** Play on the phone, save in game, Main Menu:
+      the kicker goes *Paused · Syncing…* then *Paused · Synced*. On the
+      Mac, Sync now: the hero (or the first tile) shows the phone's screen,
+      *On your iPhone · …*, and Resume lands exactly there with the save.
+- [ ] **Back again, left paused.** Pause on the Mac, then open the phone,
+      which still had the game paused from before: within a moment of the
+      tab coming back (or a Sync now) its hero turns to the Mac's screen
+      with *On your Mac · …* and the toast; Resume goes to the Mac's
+      moment, not the phone's old one.
+- [ ] **Resumed too soon.** On the phone tap Resume before that sync
+      lands: the toast offers Switch, and Switch brings the Mac's moment in.
+      Ignore it instead and keep playing: nothing is lost on the phone,
+      and its session is the one the Mac picks up next.
+
 ## State-machine fix round (formal/FINDINGS.md)
 
 Driven through the real UI in headless Chromium: the local scenarios, and

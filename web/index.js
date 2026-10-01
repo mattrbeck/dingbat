@@ -1544,8 +1544,8 @@ const isRomLoaded = (name) =>
 //            next time the game runs, and Remove from device keeps it)
 //   saves    battery saves (P1 + 2P partner) and the nine state slots with
 //            their meta; the only group Drive mirrors besides the ROM
-//   session  the auto-resume snapshot and its picture; regenerated, never
-//            synced
+//   session  the auto-resume snapshot and its picture; the snapshot is
+//            mirrored (its picture riding in it), the hand-off between devices
 //   prefs    the cheat list; never synced
 //   kept     a save from before the game was deleted and loaded again
 //            (keptSaveKey), mirrored; a save reset leaves it, being a way
@@ -1601,6 +1601,7 @@ const resetCurrentSaveFile = async () => {
   await deleteKeys(perGameKeys(name).session);
   markDelete("save:" + name);
   markDelete("save:" + name + "-p2");
+  markDelete(autoStateKey(name));
   loadRom(game.romName, name);
 };
 
@@ -2630,6 +2631,8 @@ const parseDriveFileName = (n) => {
   }
   // A save kept from before the game was deleted (keptSaveKey).
   if (n.startsWith("oldsave:")) return { game: n.slice(8), kind: "oldsave" };
+  // The session (autoStateKey), its picture riding inside it (sessionBundle).
+  if (n.startsWith("stateauto:")) return { game: n.slice(10), kind: "session" };
   return null;
 };
 
@@ -2991,6 +2994,7 @@ const readSyncBytes = async (key) => {
     return null;
   }
   if (key.startsWith("oldsave:")) return keptRecordBytes(v);
+  if (key.startsWith("stateauto:")) return sessionBundle(key.slice(10), v);
   if (v instanceof ArrayBuffer) v = new Uint8Array(v);
   return v instanceof Uint8Array && v.length ? v : null;
 };
@@ -3004,7 +3008,9 @@ const writeSyncBytes = async (name, bytes) => {
     return;
   }
   if (name.startsWith("frame:")) {
-    await dbPut(name, new Blob([bytes], { type: "image/jpeg" }));
+    // A picture this browser cannot keep (Safari's private browsing stores
+    // no Blob in IndexedDB) is left out, not the end of the pull.
+    await dbPut(name, new Blob([bytes], { type: "image/jpeg" })).catch(() => {});
     return;
   }
   if (name.startsWith("statemeta:")) {
@@ -3024,6 +3030,15 @@ const writeSyncBytes = async (name, bytes) => {
                 "back from another device. It is kept for 30 days — Restore it from the " +
                 "game's menu.");
     }
+    return;
+  }
+  if (name.startsWith("stateauto:")) {
+    let s = sessionFromBundle(bytes);
+    if (!s) return;
+    let game = name.slice(10);
+    if (!(await dbPutRoomy(name, s.rec, game))) throw new Error("this device is out of room");
+    // The picture after the session, as persistAutoState writes them.
+    if (s.pic) await dbPut(sessionPicKey(game), { ts: s.rec.ts, blob: s.pic }).catch(() => {});
     return;
   }
   // A save or a state: the person's own, and worth a ROM file to land. Left
@@ -3371,6 +3386,7 @@ const restoreKeptSave = async (game) => {
   await dbPut("save:" + game, new Uint8Array(rec.data));
   // The resume snapshot holds the save being replaced.
   await deleteKeys(perGameKeys(game).session);
+  markDelete(autoStateKey(game));
   markUpload("save:" + game);
   await dbPut(key, cur
     ? { data: cur, at, del: rec.del, kept: now, why: "replaced" }
@@ -3404,7 +3420,11 @@ const SYNC_DESCS = {
 let syncStatus = "idle"; // idle | syncing | done | offline | paused
 const syncIndicator = document.getElementById("sync-indicator");
 
+// The hero's kicker says how the paused game stands with Drive; set where
+// the hero is (it is declared further down).
+let onSyncRendered = () => {};
 const renderSyncIndicator = () => {
+  onSyncRendered();
   if (!syncIndicator) return;
   let s = syncStatus;
   let show = s !== "idle" && driveLinked();
@@ -3497,10 +3517,11 @@ const markGameUpload = (game) => {
     scheduleFlush();
   });
 };
-// Mirror a local save-data wipe to Drive ("saves" group only; the resume
-// snapshot was never uploaded).
+// Mirror a local save-data wipe to Drive: the saves, and the session, which
+// carries the wiped battery.
 const queueSaveDataDeletes = (name) => {
   for (let k of perGameKeys(name).saves) markDelete(k);
+  markDelete(autoStateKey(name));
 };
 
 // Drive operations run one at a time; a busy engine defers work, never
@@ -3652,6 +3673,16 @@ const flushSyncInner = async () => {
       // A save of this key from here on is newer than the bytes read below.
       syncRemarked.delete(name);
       let bytes = live(await readSyncBytes(name));
+      // A session another device wrote since this one last saw Drive's copy
+      // is not written over unseen: it stays queued, and the pull after this
+      // flush decides (a hand-off, or the offer to switch, which marks it
+      // seen - then this one, the newer, goes up).
+      let r0 = remote.get(name);
+      let forced = handoffForce.delete(name);
+      if (bytes && parsed?.kind === "session" && r0 && syncState.rmt[name] !== r0.modifiedTime &&
+          sigOfBytes(bytes) !== syncState.sigs[name] && !forced) {
+        continue;
+      }
       if (bytes) {
         let r = remote.get(name);
         let sig = sigOfBytes(bytes);
@@ -3814,6 +3845,100 @@ const applyRemoteRename = async (from, to) => {
   return { moved: res.moved.length, leftover };
 };
 
+// --- Hand-off: the game in memory, played on another device since ---------
+// A pull leaves the loaded game's files alone, its autosave being their
+// writer. But a game left paused here while another device played on is a
+// stale copy: Resume would carry on from the old moment, and its next
+// in-game save would write over the other device's. So when a pull finds
+// another device's newer save or session for the game in memory, it is
+// picked up there instead: the copy here is let go, nothing of it written,
+// and the newer files land - the hero shows the other device's picture and
+// Resume goes to its moment. On its own only while that is safe: the game
+// is on the home screen (not being played), and everything of it here has
+// gone up (the session is of this very moment, the save stored and sent).
+// Otherwise it is offered (Switch), once per newer copy.
+const HANDOFF_KEYS = (game) => ["save:" + game, autoStateKey(game)];
+let handoffOffered = "";
+
+// Another device's newer save or session for `game`, downloaded:
+// [{ key, f, bytes }], or [] when Drive holds nothing newer than here.
+const handoffNews = async (game, remote, lib, live) => {
+  let news = [];
+  for (let key of HANDOFF_KEYS(game)) {
+    let f = remote.get(key);
+    if (!f || syncState.rmt[key] === f.modifiedTime) continue;
+    if (fileGen(f) < libGen(lib, game) || syncState.queueDel.includes(key)) continue;
+    let bytes = live(await driveDownload(f.id));
+    let sig = sigOfBytes(bytes);
+    let here = live(await readSyncBytes(key));
+    if (here && sigOfBytes(here) === sig) {
+      // The same bytes (this device's own, or never recorded): nothing new.
+      syncState.sigs[key] = sig;
+      syncState.rmt[key] = f.modifiedTime;
+      continue;
+    }
+    news.push({ key, f, bytes });
+  }
+  return news;
+};
+
+// Nothing of the game in memory is waiting to go up: its session is of this
+// moment, and its battery is the stored save, sent.
+const heldGameIsSent = async (game) => {
+  if (sessionMoved || sessionSnapFor !== game) return false;
+  if (HANDOFF_KEYS(game).some((k) => syncState.queueUp.includes(k))) return false;
+  let stored = await dbGet("save:" + game).catch(() => null);
+  return liveSaveSig() === sigOfSave(stored);
+};
+
+// Where the newer copy came from, as the hero and the toasts say it.
+const fromWhere = (news) => {
+  let s = news.find((n) => n.key.startsWith("stateauto:"));
+  return deviceWords(s ? sessionFromBundle(s.bytes)?.rec.dev : "");
+};
+
+// Let the copy in memory go and land the newer files in its place.
+const takeHandoff = async (game, news) => {
+  if (!(await unloadGame({ flushSave: false, picture: false }))) return false;
+  for (let { key, f, bytes } of news) {
+    await writeSyncBytes(key, bytes);
+    syncState.sigs[key] = sigOfBytes(bytes);
+    syncState.rmt[key] = f.modifiedTime;
+  }
+  if (heroDrawnFor === game) heroDrawnFor = null;
+  return true;
+};
+
+// The Switch a pull offers: the copy here is dropped, unsent work and all
+// (the player chose the other device's), and the newer files the pull
+// downloaded land in its place. Kept here rather than fetched again: once
+// offered, the other device's session is marked seen, and this device's
+// own next session would go up over it.
+let handoffStash = null; // { game, news }
+const switchToHandoff = async (game) => {
+  if (currentOriginalName !== game || handoffStash?.game !== game) return;
+  const { news } = handoffStash;
+  handoffStash = null;
+  handoffOffered = "";
+  syncState.queueUp = syncState.queueUp.filter((k) => !HANDOFF_KEYS(game).includes(k));
+  await saveSyncState();
+  if (!(await takeHandoff(game, news))) return;
+  // Chosen, so it is the copy everywhere: sent up again, over whatever this
+  // device sent while the offer was up (handoffForce lets the session past
+  // the flush's unseen-write check).
+  for (let { key } of news) {
+    delete syncState.sigs[key];
+    handoffForce.add(key);
+    markUpload(key);
+  }
+  await saveSyncState();
+  refreshHomeRecent();
+  // Sent before the next pull, which would otherwise take whatever this
+  // device sent meanwhile for the newer copy and land it back.
+  flushSync().then(() => pullSync({ silent: false }));
+};
+const handoffForce = new Set();
+
 // --- Pull (down-sync): merged library, tombstones, saves for local games ---
 // Resolves when the session's first pull has ended, well or badly: the
 // boot-time library-pictures offer waits on it, since a pull may be
@@ -3940,6 +4065,42 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     // the listing pass).
     live(await expireKeptSaves());
 
+    // The game in memory, played on another device since (see Hand-off).
+    let held = currentOriginalName;
+    if (held && currentRomName && !linkMode && !rollbackMode && !netActive() &&
+        loadingName !== held && lib.recents.some((r) => r.name === held)) {
+      let news = live(await handoffNews(held, remote, lib, live));
+      if (news.length) {
+        let where = fromWhere(news);
+        let onHome = !document.body.classList.contains("running");
+        if (onHome && live(await heldGameIsSent(held)) && currentOriginalName === held &&
+            live(await takeHandoff(held, news))) {
+          gridDirty = true;
+          showToast("“" + displayName(held) + "” was played on " + where +
+                    " since — Resume picks up there");
+        } else {
+          // A later pull no longer lists what it marked seen below: kept.
+          let kept = handoffStash?.game === held
+            ? handoffStash.news.filter((o) => !news.some((n) => n.key === o.key)) : [];
+          handoffStash = { game: held, news: [...kept, ...news] };
+          // Seen: if the player keeps this copy, its next session is the
+          // newer one and goes up (the flush holds a session back only
+          // until it is seen).
+          for (let n of news) {
+            if (n.key === autoStateKey(held)) syncState.rmt[n.key] = n.f.modifiedTime;
+          }
+          if (syncState.queueUp.includes(autoStateKey(held))) queuedMissing = true;
+          let seen = held + "|" + news.map((n) => n.f.modifiedTime).join("|");
+          if (handoffOffered !== seen) {
+            handoffOffered = seen;
+            showActionToast("“" + displayName(held) + "” was played on " + where +
+                            " since you opened it here", "Switch",
+                            () => switchToHandoff(held), 12000);
+          }
+        }
+      }
+    }
+
     // Pull saves/states for games this device holds, and pictures for every
     // game in the library: a Drive-only tile shows the screen another device
     // last saw (20 KB, and the whole point of the picture).
@@ -4018,6 +4179,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       if (sig !== syncState.sigs[name]) {
         live(await writeSyncBytes(name, bytes));
         syncState.sigs[name] = sig;
+        // The closed hero redraws its picture: it may be this one now.
+        if (heroDrawnFor === p.game) heroDrawnFor = null;
       }
       syncState.rmt[name] = f.modifiedTime;
       local.delete(name);
@@ -4110,6 +4273,12 @@ const pullSyncInner = async ({ silent = true } = {}) => {
 
 const runFullSync = async ({ label } = /** @type {{label?: string}} */ ({})) => {
   if (!syncActive()) return;
+  // The game in memory as it is now, not as the 5 s autosave last left it:
+  // a save made a moment ago goes up with this sync.
+  if (currentRomName && currentOriginalName && !linkMode && !rollbackMode && !netActive()) {
+    await persistAutoState();
+    await persistSave(currentRomName, currentOriginalName);
+  }
   let names = [...(await localSyncFiles()).keys()];
   for (let n of names) if (!syncState.queueUp.includes(n)) syncState.queueUp.push(n);
   await saveSyncState();
@@ -4170,6 +4339,7 @@ const downloadGame = async (game, { onProgress = null } = {}) => {
       await bumpRecentIndex(game, { gen });
       await saveSyncState();
       requestPersistentStorage();
+      if (heroDrawnFor === game) heroDrawnFor = null; // its session's picture may be here now
       ok = true;
     }
   } catch (e) {
@@ -4992,7 +5162,10 @@ const resumeDriveOnBoot = async () => {
     if (live) {
       refreshSyncUI();
       refreshHomeRecent();
-      pullSync();
+      // Then what the last visit queued and never sent (a page closed within
+      // the flush's debounce): after the pull, so it is held to what Drive
+      // holds now, and not left until the next poll.
+      pullSync().then(() => { if (pendingCount()) flushSync(); });
       // A restored token can be minutes from expiry.
       if (driveTokenStale()) armDriveRenewOnGesture();
       return;
@@ -7326,6 +7499,7 @@ const applyStateBytes = (bytes, keepRewind = false) => {
   new Uint8Array(Module.memory.buffer, ptr, bytes.length).set(bytes);
   let ok = Module._wasm_load_state(ptr, bytes.length, keepRewind ? 1 : 0) === 1;
   Module._free(ptr);
+  if (ok) sessionMoved = true;
   return ok;
 };
 
@@ -7445,14 +7619,19 @@ const loadFromSlot = async (slot) => {
 };
 
 // --- Auto save-state (session resume) ---
-// Captured when the page is hidden or closed and when the game is left;
-// local-only (an upload every tab switch otherwise).
+// Captured when the game is left (Main Menu, a switch, a close) and when the
+// page is hidden or closed - but only when the game has moved since the
+// last one (sessionMoved), so a game sitting paused takes no new snapshot.
+// Mirrored on Drive, so the session is the hand-off between devices: pause
+// on one, and another's hero resumes at that moment.
 //
 // A snapshot carries the cart's battery RAM as it was, and restoring it
 // marks that RAM dirty, so the next flush writes it over the save. A
 // snapshot is therefore only offered while the stored save is still the one
 // it was taken with: saveSig is the .sav's signature at capture, and a save
-// written since (in game, or pulled from Drive) retires the snapshot.
+// written since (in game, or pulled from Drive) retires the snapshot. A
+// session from another device is held to the same rule against the save
+// that came with it.
 const autoStateKey = (name) => "stateauto:" + name;
 // The snapshot's own picture, { ts, blob }: the screen at the moment it
 // was taken, stamped with its ts. The library's picture (frameKey) is not
@@ -7463,25 +7642,112 @@ const sessionPicKey = (name) => "sessionpic:" + name;
 
 const sigOfSave = (data) => (data && data.length ? saveSignature(data) : null);
 
+// Which device took a session, for the hero to say so when it was another
+// one: a random id kept in this browser, and what kind of device it is.
+const DEVICE_ID_KEY = "dingbat_device";
+const deviceId = (() => {
+  let id = null;
+  try { id = localStorage.getItem(DEVICE_ID_KEY); } catch {}
+  if (!id) {
+    id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    try { localStorage.setItem(DEVICE_ID_KEY, id); } catch {}
+  }
+  return id;
+})();
+const deviceLabel = (() => {
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPod/.test(ua)) return "iPhone";
+  // iPadOS asks for the desktop site and says Macintosh; it has a touch screen.
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "iPad";
+  if (/Android/.test(ua)) return "Android";
+  if (/CrOS/.test(ua)) return "Chromebook";
+  if (/Macintosh|Mac OS X/.test(ua)) return "Mac";
+  if (/Windows|Linux/.test(ua)) return "PC";
+  return "";
+})();
+// Another device, as a sentence says it: "your iPhone", "your other Mac".
+const deviceWords = (dev) => !dev ? "another device"
+  : dev === deviceLabel ? "your other " + dev : "your " + dev;
+
+// Whether the game in memory has moved since its last snapshot: set by every
+// frame run, a state loaded and a boot; cleared by the snapshot. A session is
+// what another device resumes, so a snapshot of a game that has not moved is
+// not taken - it would stamp the same moment newer, and send it up over a
+// session another device took since.
+let sessionMoved = true;
+let sessionSnapFor = null;
+
 const persistAutoState = () => {
   if (!currentRomName || !currentOriginalName) return;
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
+  const name = currentOriginalName;
+  if (!sessionMoved && sessionSnapFor === name) return;
   const bytes = captureStateBytes();
   if (!bytes) return;
-  const name = currentOriginalName;
   const ts = Date.now();
   const fb = copyFramebuffer();
+  sessionMoved = false;
+  sessionSnapFor = name;
   // liveSaveSig flushes first: the signature is the battery this state carries.
   // The snapshot is written at once and its picture after the encode: a
   // closing page may cut the encode short, which leaves the older picture
-  // and its older ts, so it is not taken for this one.
-  const put = dbPut(autoStateKey(name), { bytes, ts, saveSig: liveSaveSig() }).catch(() => {});
+  // and its older ts, so it is not taken for this one. Each goes up when it
+  // lands (the picture rides in the session's Drive file).
+  const key = autoStateKey(name);
+  const put = dbPut(key, { bytes, ts, saveSig: liveSaveSig(), by: deviceId, dev: deviceLabel })
+    .then(() => markUpload(key)).catch(() => {});
   if (fb) {
     frameBlobFromFb(fb.heap, fb.w, fb.h)
-      .then((blob) => blob && dbPut(sessionPicKey(name), { ts, blob }))
+      .then((blob) => blob && dbPut(sessionPicKey(name), { ts, blob }).then(() => put)
+        .then(() => markUpload(key)))
       .catch(() => {});
   }
   return put;
+};
+
+// A session as one Drive file: "DGBSESS1", the header's length (u32 LE),
+// the header (JSON: ts, saveSig, by, dev and the two lengths), the state,
+// then the picture when it is this session's.
+const SESSION_MAGIC = "DGBSESS1";
+const sessionBundle = async (game, rec) => {
+  if (!rec?.bytes) return null;
+  let state = rec.bytes instanceof Uint8Array ? rec.bytes : new Uint8Array(rec.bytes);
+  if (!state.length) return null;
+  let pic = new Uint8Array(0);
+  let p = await dbGet(sessionPicKey(game)).catch(() => null);
+  if (p?.blob && p.ts === rec.ts) pic = new Uint8Array(await p.blob.arrayBuffer());
+  let head = new TextEncoder().encode(JSON.stringify({
+    // saveSig null is "taken with no save" (a game not yet saved in), and
+    // counts; absent is a snapshot from before saveSig, which does not.
+    ts: rec.ts, saveSig: rec.saveSig, by: rec.by ?? null, dev: rec.dev ?? null,
+    state: state.length, pic: pic.length,
+  }));
+  let out = new Uint8Array(12 + head.length + state.length + pic.length);
+  for (let i = 0; i < 8; i++) out[i] = SESSION_MAGIC.charCodeAt(i);
+  new DataView(out.buffer).setUint32(8, head.length, true);
+  out.set(head, 12);
+  out.set(state, 12 + head.length);
+  out.set(pic, 12 + head.length + state.length);
+  return out;
+};
+// -> { rec, pic: Blob | null }, or null for anything that is not one.
+const sessionFromBundle = (bytes) => {
+  if (!bytes || bytes.length < 12) return null;
+  for (let i = 0; i < 8; i++) if (bytes[i] !== SESSION_MAGIC.charCodeAt(i)) return null;
+  let hl = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true);
+  let h;
+  try { h = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + hl))); } catch { return null; }
+  let at = 12 + hl;
+  if (!h || !(h.state > 0) || at + h.state + (h.pic || 0) > bytes.length) return null;
+  let rec = { bytes: bytes.slice(at, at + h.state), ts: h.ts };
+  // Kept as written, null included: a snapshot from before saveSig has
+  // the key absent, and is not offered (autoStateMatchesSave).
+  if ("saveSig" in h) rec.saveSig = h.saveSig;
+  if (h.by) rec.by = h.by;
+  if (h.dev) rec.dev = h.dev;
+  let pic = h.pic > 0
+    ? new Blob([bytes.slice(at + h.state, at + h.state + h.pic)], { type: "image/jpeg" }) : null;
+  return { rec, pic };
 };
 
 // The loaded game's battery as it is now: its FS .sav, which the core writes
@@ -7509,7 +7775,10 @@ const resumeSessionFor = async (name) => {
   try { auto = await dbGet(autoStateKey(name)); } catch {}
   if (!auto?.bytes) return null;
   if (!(await autoStateMatchesSave(name, auto))) return null;
-  return { bytes: auto.bytes, saveSig: auto.saveSig, ts: auto.ts };
+  // `elsewhere`: the kind of device another one is ("" when unknown), for
+  // the hero to say where the session was left.
+  let elsewhere = auto.by && auto.by !== deviceId ? auto.dev || "" : null;
+  return { bytes: auto.bytes, saveSig: auto.saveSig, ts: auto.ts, elsewhere };
 };
 
 // The session's picture, decoded, if it is this session's (see
@@ -9840,6 +10109,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   currentOriginalName = name;
   applyAudioLowpass(); // the filter follows the machine: GBA in, GB out
   lastFrameSig = null; // a new game: the tick's skip must not carry over
+  sessionMoved = true; // and no snapshot of it yet
   // The session the home screen chose to go back into, put back in this same
   // synchronous run so no frame of the boot is ever drawn. Checked once more
   // against the battery just installed, as the offer's Resume checks it.
@@ -10350,6 +10620,7 @@ const frameAdvance = () => {
   if (typeof Module === "undefined" || !Module._loop_tick) return;
   if (!paused || !currentRomName || !speedControlsOk()) return;
   Module._loop_tick();
+  sessionMoved = true;
   if (Module._clearAudioBuffer) Module._clearAudioBuffer();
   drawGame();
 };
@@ -11385,6 +11656,13 @@ const showMainMenu = () => {
   // The tile behind this menu shows the picture the player just left: the
   // grid renders now and again once the picture is stored.
   storeLastFrame({ force: true }).then(() => refreshHomeRecent());
+  // What another device picks up: the session at this moment and the save it
+  // was taken with, stored now (not at the next 5 s autosave) and queued for
+  // Drive, so a Sync from this screen sends exactly this.
+  if (currentRomName && currentOriginalName && !linkMode && !rollbackMode && !netActive()) {
+    persistAutoState();
+    persistSave(currentRomName, currentOriginalName);
+  }
   document.body.classList.add("paused");
   document.body.classList.remove("running");
   drawPausedHero();
@@ -11679,6 +11957,32 @@ const heroSwapIn = (els) => {
   }
 };
 
+// The kicker over the hero's name. Paused and signed in, it says whether
+// this moment has reached Drive - what to know before picking the game up on
+// another device (Main Menu sends it; see showMainMenu). Closed, on a session
+// another device left, it says which kind of device and when.
+let heroFrom = null; // { dev, ts }: the closed hero's session, from elsewhere
+const heroSyncWord = (game) => {
+  const pending = ["save:" + game, autoStateKey(game), frameKey(game)]
+    .some((k) => syncState.queueUp.includes(k));
+  if (!pending) return "Synced";
+  return syncStatus === "offline" || syncStatus === "paused" ? "Not synced yet" : "Syncing…";
+};
+const heroStateText = (mode) => {
+  if (mode === "paused") {
+    return driveLinked() && currentOriginalName
+      ? "Paused · " + heroSyncWord(currentOriginalName) : "Paused";
+  }
+  if (!heroFrom) return "Last played";
+  // "On", not "Last played on": the kicker is one line on a phone.
+  const ago = Date.now() - heroFrom.ts < 60000 ? "just now" : fmtAgo(heroFrom.ts);
+  return "On " + deviceWords(heroFrom.dev) + " · " + ago;
+};
+onSyncRendered = () => {
+  if (heroCard.hidden || heroCard.dataset.mode !== "paused") return;
+  heroStateLabel.textContent = heroStateText("paused");
+};
+
 const setHeroMode = (mode, name) => {
   // The same game staying up: what changes is animated.
   const same = !heroCard.hidden && heroName === name;
@@ -11692,7 +11996,7 @@ const setHeroMode = (mode, name) => {
   heroCard.dataset.mode = mode;
   const paused = mode === "paused";
   const resumable = paused || heroSession;
-  heroStateLabel.textContent = paused ? "Paused" : "Last played";
+  heroStateLabel.textContent = heroStateText(mode);
   heroResumeLabel.textContent = resumable ? "Resume" : "Play";
   heroClose.hidden = !paused;
   heroPlay.hidden = paused || !heroSession;
@@ -11789,6 +12093,7 @@ const renderClosedHero = async (name, file, keys) => {
   // A game closed in place dims to the closed look by the canvas's own
   // filter transition.
   heroSession = !!session;
+  heroFrom = session && session.elsewhere !== null ? { dev: session.elsewhere, ts: session.ts } : null;
   heroFile = file;
   setHeroMode("closed", name);
 };
@@ -12035,7 +12340,7 @@ heroMore.addEventListener("click", () => {
 // A close takes the load token too (loadGen): a load in flight when the X is
 // tapped is dropped, and a tap after it drops the close (false), whose game
 // the load then persists as the outgoing one.
-const unloadGame = async ({ flushSave = true } = {}) => {
+const unloadGame = async ({ flushSave = true, picture = true } = {}) => {
   if (!currentRomName || linkMode || rollbackMode || netActive()) return false;
   const gen = nextLoadGen();
   const romName = currentRomName;
@@ -12043,7 +12348,9 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   // The closing picture and session, taken while the name is still attached.
   if (flushSave) await persistAutoState();
   if (gen !== loadGen) return false;
-  await storeLastFrame({ force: true });
+  // A hand-off writes nothing of the copy it lets go, not even its picture:
+  // the newer one is on its way.
+  if (picture) await storeLastFrame({ force: true });
   if (gen !== loadGen) return false;
   // Flush, detach and drop the FS .sav with no await between them. The flush
   // goes first, while the name still says the core is this game's (it
@@ -13676,7 +13983,10 @@ var Module = {
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
         persistAutoState();
-        storeLastFrame({ force: true }); // best-effort: the encode may not finish
+        // Best-effort (the encode may not finish), and only a screen not yet
+        // stored: a paused game's would re-queue a picture Drive may hold a
+        // newer one of, from the device that played on.
+        storeLastFrame();
       }
     });
 
@@ -13684,7 +13994,7 @@ var Module = {
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) return;
       persistAutoState();
-      storeLastFrame({ force: true });
+      storeLastFrame(); // as at beforeunload
     });
 
     // iOS Safari often skips beforeunload; pagehide is the reliable signal
@@ -13698,7 +14008,7 @@ var Module = {
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
         persistAutoState(); // one-tap resume next launch
-        storeLastFrame({ force: true }); // best-effort, as above
+        storeLastFrame(); // as at beforeunload
       }
       if (audioCtx && audioCtx.state === "running") {
         audioCtx.suspend().catch(() => {});
@@ -13799,6 +14109,7 @@ var Module = {
         requestAnimationFrame(tick);
         return;
       }
+      sessionMoved = true;
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       const rafIv = timestamp - lastFrameTime;
       if (!fastForward && rafIv > 4 && rafIv < 40) ffVsyncMs += (rafIv - ffVsyncMs) * 0.05;

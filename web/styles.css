@@ -2644,6 +2644,15 @@ body.lib-has-games #home-start {
   animation: none;
 }
 
+/* One line, the chip beside the words: a long kicker ("On your other Mac ·
+   moments ago") is cut short rather than wrapped. */
+#hero-state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #hero-kicker .sys-chip {
   width: 34px;
   height: 18px;
