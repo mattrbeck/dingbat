@@ -170,6 +170,10 @@ for (const [kindA, kindB] of PAIRS) {
       assert.ok(await isPlaying(a), "not yanked out of the game");
       await tapToast(a, "Switch");
       await idle(a);
+      // The home redraws after the switch's own awaits, which a quiet sync
+      // queue does not wait for.
+      await a.page.waitForFunction(() => document.getElementById("hero").dataset.mode === "closed",
+                                   null, { timeout: 15000 }).catch(() => {});
       const h = await hero(a);
       assert.equal(h.mode, "closed", await a.page.evaluate(() => JSON.stringify({
         loaded: currentOriginalName, stash: handoffStash?.game ?? null, paused,
