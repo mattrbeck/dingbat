@@ -26,6 +26,10 @@
 ##
 ## --save FILE loads the card's save chip from FILE (its size picks the
 ## chip) and writes it back when the run changed it.
+## --slot2 gba:FILE[,SAVE] puts a GBA cartridge in the GBA slot (its .sav
+## loaded from SAVE and written back when the run changed it); --slot2
+## rumble / --slot2 expansion insert the Rumble Pak / Memory Expansion Pak.
+## --rumble-log prints each frame where the slot-2 rumble strength changes.
 ## --rtc YYYY-MM-DD[THH:MM:SS] starts the RTC at that time and clocks it from
 ## emulated time, so runs are reproducible (default: host local time).
 ## --perf-from F times frames F..end (printed as fps; default the whole run).
@@ -203,11 +207,13 @@ when isMainModule:
   var dumps: seq[(bool, uint32, int, string)]
   var wav = ""
   var save = ""
+  var slot2 = ""
+  var rumble_log = false
   var rtc_at = ""
   var perf_from = 0
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
-                        longNoVal = @["help", "iolog", "pcs", "spilog"])
+                        longNoVal = @["help", "iolog", "pcs", "spilog", "rumble-log"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -221,6 +227,8 @@ when isMainModule:
       of "trace-at": trace_at = parseInt(val)
       of "wav": wav = val
       of "save": save = val
+      of "slot2": slot2 = val
+      of "rumble-log": rumble_log = true
       of "rtc": rtc_at = val
       of "perf-from": perf_from = parseInt(val)
       of "press": presses.add parse_presses(val)
@@ -258,6 +266,20 @@ when isMainModule:
     n.rtc.set_fixed_clock(n.sched, to_calendar_seconds(f[0], f[1], f[2], f[3], f[4], f[5]))
   if save.len > 0 and fileExists(save):
     n.cart.backup.set_data(cast[seq[uint8]](readFile(save)))
+  var slot2_save = ""
+  if slot2.len > 0:
+    if slot2 == "rumble": n.insert_slot2(s2RumblePak)
+    elif slot2 == "expansion": n.insert_slot2(s2ExpansionPak)
+    elif slot2.startsWith("gba:"):
+      let parts = slot2[4 .. ^1].split(',')
+      if parts.len > 1: slot2_save = parts[1]
+      let sav = if slot2_save.len > 0 and fileExists(slot2_save):
+                  cast[seq[uint8]](readFile(slot2_save)) else: @[]
+      n.insert_slot2(s2GbaCart, cast[seq[uint8]](readFile(parts[0])), sav)
+      echo "slot2: GBA cart ", parts[0].extractFilename, ", ", n.slot2.save_type,
+           (if n.slot2.has_rtc: " + RTC" else: "")
+    else: quit("--slot2 wants gba:FILE[,SAVE], rumble or expansion")
+  var last_rumble = 0
   var audio: seq[float32]
   for f in 0 ..< frames:
     if f == perf_from: perf_t0 = getMonoTime()
@@ -291,6 +313,9 @@ when isMainModule:
         if p.touch: n.set_touch(p.x, p.y, f == p.first)
         else: n.set_button(p.button, f == p.first)
     n.run_frame()
+    if rumble_log and n.slot2_rumble() != last_rumble:
+      last_rumble = n.slot2_rumble()
+      echo "rumble frame=", f, " strength=", last_rumble
     if pcs:
       echo "frame ", f, " arm9 pc=", toHex(n.arm9.next_pc, 8),
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
@@ -322,6 +347,9 @@ when isMainModule:
     echo "save chip: ", n.cart.backup.kind, " ", n.cart.backup.data.len, " bytes",
          (if n.cart.backup.dirty: " (written -> " & save & ")" else: "")
     if n.cart.backup.dirty: writeFile(save, cast[string](n.cart.backup.data))
+  if slot2_save.len > 0 and n.slot2.dirty:
+    writeFile(slot2_save, cast[string](n.slot2_save()))
+    echo "slot2 save: ", n.slot2.save.len, " bytes written -> ", slot2_save
   if shot.len == 2:
     # --bgshot A0: that BG replaces the top half of the PNG
     let px = n.bg_shot(shot[0] == 'B', ord(shot[1]) - ord('0'))

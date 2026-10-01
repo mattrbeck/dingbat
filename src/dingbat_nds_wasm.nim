@@ -51,6 +51,33 @@ proc nds_audio_ptr(): pointer {.exportc.} =
 proc nds_audio_clear() {.exportc.} =
   if core != nil: core.spu.clear_samples()
 
+# GBA slot (io/slot2.nim): kind 0 = empty, 1 = GBA cart (rom + its .sav),
+# 2 = Rumble Pak, 3 = Memory Expansion Pak. Insert right after nds_load
+# (power-on insertion). The cart's save is read from nds_slot2_save_ptr /
+# _len when nds_slot2_save_dirty() is 1 (reading clears it).
+
+proc nds_insert_slot2(kind: cint; rom: pointer; rom_len: cint; save: pointer;
+                      save_len: cint): cint {.exportc.} =
+  if core == nil or kind < 0 or kind > ord(high(Slot2Kind)): return 0
+  core.insert_slot2(Slot2Kind(kind), copy_in(rom, rom_len), copy_in(save, save_len))
+  1
+
+proc nds_slot2_save_len(): cint {.exportc.} =
+  if core == nil: 0 else: cint(core.slot2.save.len)
+
+proc nds_slot2_save_ptr(): pointer {.exportc.} =
+  if core == nil or core.slot2.save.len == 0: nil else: addr core.slot2.save[0]
+
+proc nds_slot2_save_dirty(): cint {.exportc.} =
+  if core == nil or not core.slot2.dirty: return 0
+  core.slot2.dirty = false
+  1
+
+proc nds_rumble(): cint {.exportc.} =
+  ## Slot-2 rumble strength 0..255 (Rumble Pak, or a GBA cart's GPIO motor),
+  ## for navigator.vibrate / gamepad rumble; polled once per frame.
+  if core == nil: 0 else: cint(core.slot2_rumble())
+
 proc nds_status(): cstring {.exportc.} =
   if core == nil: return "no ROM"
   status = "frame " & $core.gpu.frame_count & "  arm9 pc " &
