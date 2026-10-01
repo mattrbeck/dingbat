@@ -149,6 +149,27 @@ proc gx_dma(n: NDS) =
       n.dma9.transfer_units(bus, i, units)
       left -= units
 
+proc gx_service(n: NDS; appended = false) =
+  ## After anything that moves the geometry FIFO: run the engine up to now,
+  ## raise the level-triggered FIFO IRQ, let DMA mode 7 refill it, and book
+  ## evGxFifo for when the FIFO next drops below half (DMA, IRQ mode 1) or
+  ## empties (IRQ mode 2). With nothing listening the engine just runs
+  ## lazily. `appended`: only writes happened since the last booking, which
+  ## can only push the crossing later, so a booked wake-up stands.
+  let g = n.gpu3d
+  let mode = g.fifo_irq_mode
+  let want_dma = n.dma9.waiting(dtGxFifo)
+  if mode == 0 and not want_dma: return
+  if appended and n.sched.is_scheduled(evGxFifo): return
+  g.catch_up(n.sched.now)
+  g.update_irq()
+  if want_dma: n.gx_dma()
+  var at = high(int64)
+  if want_dma or mode == 1: at = g.wake_at(128)
+  if mode == 2: at = min(at, g.wake_at(1))
+  if at == high(int64): n.sched.cancel(evGxFifo)
+  else: n.sched.schedule(max(at, n.sched.now + 1), evGxFifo)
+
 proc mmem_dma(n: NDS) =
   ## ARM9 DMA mode 4: feed one line of main-memory display (engine A
   ## display mode 3) through the display FIFO, a channel block at a time.
@@ -190,6 +211,9 @@ proc on_line_end(n: NDS) =
     inc g.vcount
     if g.vcount == LINES: g.vcount = 0
   n.line_start = n.sched.now
+  # the next line 192, for a write stalled behind a pending swap
+  let to_vblank = (VISIBLE_LINES - g.vcount + LINES) mod LINES
+  n.gpu3d.next_vblank = n.line_start + int64(if to_vblank == 0: LINES else: to_vblank) * LINE_CYCLES
   g.start_line()
   if g.vcount == VISIBLE_LINES:
     g.in_vblank = true
@@ -200,7 +224,7 @@ proc on_line_end(n: NDS) =
     n.dma9.trigger(Arm9Bus(nds: n), dtVBlank)
     n.dma7.trigger(Arm7Bus(nds: n), dtVBlank)
     n.gpu3d.on_vblank()
-    n.gx_dma()             # the swap drained the FIFO
+    n.gx_service()         # the swap releases the FIFO
   elif g.vcount == LINES - 1:
     g.in_vblank = false
   elif g.vcount == 0:
@@ -225,7 +249,7 @@ proc dispatch(n: NDS; ev: NdsEvent) =
     n.spu.tick(Arm7Bus(nds: n))
     n.spu.next_tick += SPU_TICK_CYCLES
     n.sched.schedule(n.spu.next_tick, evSpuSample)
-  of evGxFifo: discard
+  of evGxFifo: n.gx_service()
   of evWifi: n.wifi.on_event()
 
 # ---------------------------------------------------------------------------
@@ -255,6 +279,8 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.input = Input()
   n.gpu = new_gpu()
   n.gpu3d = new_gpu3d(n.gpu.vram, n.irq9)
+  n.gpu3d.sched = n.sched
+  n.gpu3d.next_vblank = int64(VISIBLE_LINES) * LINE_CYCLES
   n.gpu.gpu3d = n.gpu3d
   n.timers9 = Timers(sched: n.sched, irq: n.irq9, first_event: evTimer9_0)
   n.timers7 = Timers(sched: n.sched, irq: n.irq7, first_event: evTimer7_0)
