@@ -15,6 +15,12 @@ proc write8*(b: Arm7Bus; a: uint32; v: uint8) {.inline.}
 proc write16*(b: Arm7Bus; a: uint32; v: uint16) {.inline.}
 proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.}
 
+proc dma_stall*(b: Arm7Bus; cycles: int64) =
+  ## A DMA held the bus: the CPU resumes `cycles` after the later of its own
+  ## clock and the transfer's start.
+  let n {.cursor.} = b.nds
+  n.arm7.cycles = max(n.arm7.cycles, n.sched.now) + cycles
+
 # --- I/O ---------------------------------------------------------------
 
 template sync7(n: NDS) =

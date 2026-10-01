@@ -19,7 +19,15 @@ proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.}
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.}
 proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.}
 
+proc dma_stall*(b: Arm9Bus; cycles: int64) =
+  ## A DMA held the bus: the CPU resumes `cycles` after the later of its own
+  ## clock and the transfer's start.
+  let n {.cursor.} = b.nds
+  n.arm9.cycles = max(n.arm9.cycles, n.sched.now) + cycles
+
 # --- I/O ---------------------------------------------------------------
+
+proc gx_dma(n: NDS)
 
 proc write_vcount(n: NDS; v: uint32) =
   ## VCOUNT is writable (GBATEK "DS Video", for syncing linked consoles):
@@ -81,7 +89,9 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     n.gpu.stat9.dispstat_write(uint16(v), uint16(mask))
     if (mask and 0xFFFF_0000'u32) != 0: n.write_vcount(v shr 16)
   of 0x060: n.gpu3d.write_reg(o, v, mask)
-  of 0x0B0 .. 0x0EC: n.dma9.write_reg(Arm9Bus(nds: n), o, v, mask)
+  of 0x0B0 .. 0x0EC:
+    n.dma9.write_reg(Arm9Bus(nds: n), o, v, mask)
+    n.gx_dma()
   of 0x100 .. 0x10C: n.timers9.write_reg(o, v, mask)
   of 0x130:
     if (mask and 0xFFFF_0000'u32) != 0:
@@ -97,7 +107,9 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
       let m = uint16(mask) and 0xC8FF'u16
       n.exmemcnt = (n.exmemcnt and not m) or (uint16(v) and m) or 0x2000
       n.cart.owner_arm7 = (n.exmemcnt and 0x800) != 0
-  of 0x208, 0x210, 0x214: n.irq9.write_reg(o, v, mask)
+  of 0x208, 0x210, 0x214:
+    n.irq9.write_reg(o, v, mask)
+    if o == 0x214: n.gpu3d.update_irq()   # IF.21 is level-triggered
   of 0x240, 0x244, 0x248:
     for i in 0..3:
       if ((mask shr (8 * i)) and 0xFF) != 0:
@@ -241,14 +253,14 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.write9(a, v, 32)
 
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
-  let n = b.nds
+  let n {.cursor.} = b.nds
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd32(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
   n.read9(a, 32)
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
-  let n = b.nds
+  let n {.cursor.} = b.nds
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd16(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
@@ -263,7 +275,7 @@ proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
   b.nds.cp15.read(op1, cn, cm, op2)
 
 proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
-  let n = b.nds
+  let n {.cursor.} = b.nds
   n.cp15.write(op1, cn, cm, op2, v)
   n.arm9.vector_base = n.cp15.vector_base()
   n.arm9.no_load_interwork = (n.cp15.control and 0x8000) != 0

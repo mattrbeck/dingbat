@@ -123,6 +123,38 @@ template wr32(s: var seq[uint8]; i: int; v: uint32) =
 include bus9, bus7, boot
 
 # ---------------------------------------------------------------------------
+# Burst-mode DMA
+
+const
+  GX_DMA_BURST = 112          ## words per geometry-FIFO request (GBATEK)
+  MMEM_LINE_WORDS = 128       ## one line of main-memory display, 256 px
+
+proc gx_dma(n: NDS) =
+  ## ARM9 DMA mode 7: bursts into the geometry FIFO while it is less than
+  ## half full; at most one block per channel per call (a repeating channel
+  ## goes on at the next request).
+  let bus = Arm9Bus(nds: n)
+  for i in 0..3:
+    var left = n.dma9.ch[i].cur_count
+    while left > 0 and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtGxFifo and
+          n.gpu3d.fifo_wants_dma():
+      let units = min(left, GX_DMA_BURST)
+      n.dma9.transfer_units(bus, i, units)
+      left -= units
+
+proc mmem_dma(n: NDS) =
+  ## ARM9 DMA mode 4: feed one line of main-memory display (engine A
+  ## display mode 3) through the display FIFO, a channel block at a time.
+  if n.gpu.engine_a.display_mode() != 3: return
+  let bus = Arm9Bus(nds: n)
+  for i in 0..3:
+    var left = uint32(MMEM_LINE_WORDS)
+    while left > 0 and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay:
+      let units = min(left, n.dma9.ch[i].cur_count)
+      n.dma9.transfer_units(bus, i, units)
+      left -= units
+
+# ---------------------------------------------------------------------------
 # Display timing events
 
 proc dispstat_irqs(n: NDS; s: DispStat; c: IrqCtl; src: IrqSource) =
@@ -160,10 +192,12 @@ proc on_line_end(n: NDS) =
     n.dma9.trigger(Arm9Bus(nds: n), dtVBlank)
     n.dma7.trigger(Arm7Bus(nds: n), dtVBlank)
     n.gpu3d.on_vblank()
+    n.gx_dma()             # the swap drained the FIFO
   elif g.vcount == LINES - 1:
     g.in_vblank = false
   elif g.vcount == 0:
     n.dma9.trigger(Arm9Bus(nds: n), dtDisplayStart)
+  if g.vcount < VISIBLE_LINES: n.mmem_dma()
   if g.vcount == int(g.stat9.vcount_setting): n.dispstat_irqs(g.stat9, n.irq9, irqVCount)
   if g.vcount == int(g.stat7.vcount_setting): n.dispstat_irqs(g.stat7, n.irq7, irqVCount)
   n.sched.schedule(n.line_start + HBLANK_CYCLES, evHBlank)
