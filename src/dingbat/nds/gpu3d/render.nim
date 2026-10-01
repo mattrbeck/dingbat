@@ -39,6 +39,8 @@ type
     opaque_id: array[NPIX, uint8] ## polygon ID of the last opaque pixel
     trans_id: array[NPIX, uint8]  ## ID of the last translucent pixel, or NO_ID
     flags: array[NPIX, uint8]
+    below: array[NPIX, uint32]    ## colour an opaque dot was drawn over (anti-aliasing)
+    aacov: array[NPIX, uint8]     ## anti-aliasing coverage of the opaque dot (31 = whole)
     regs*: array[40, uint32]      ## 0x4000320-0x40003BF as written (word index)
     tex_pages: array[32, ptr UncheckedArray[uint8]]   ## texture slots 0-3
     pal_pages: array[8, ptr UncheckedArray[uint8]]    ## palette slots (6 used)
@@ -212,6 +214,7 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
         r.depth[i] = d15 * 0x200 + ((d15 + 1) div 0x8000) * 0x1FF
         r.opaque_id[i] = id
         r.trans_id[i] = NO_ID
+        r.aacov[i] = 31
         r.flags[i] = if (d and 0x8000) != 0: FLAG_FOG else: 0
   else:
     let c = rgb6(cc) or (((cc shr 16) and 31) shl 24)
@@ -223,6 +226,7 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
       r.depth[i] = d
       r.opaque_id[i] = id
       r.trans_id[i] = NO_ID
+      r.aacov[i] = 31
       r.flags[i] = f
 
 # ---------------------------------------------------------------------------
@@ -369,8 +373,10 @@ proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32
     pack(((tr + 1) * (vr + 1) - 1) shr 6, ((tg + 1) * (vg + 1) - 1) shr 6,
          ((tb + 1) * (vb + 1) - 1) shr 6, ((ta + 1) * (av + 1) - 1) shr 5)
 
-proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; edge: bool) {.inline.} =
-  ## One dot of the span from L to R.
+proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; edge: bool;
+          cov = 31'i32) {.inline.} =
+  ## One dot of the span from L to R; `cov` is its anti-aliasing coverage
+  ## (0..31, 31 = whole).
   let i = y * W + x
   var cr, cg, cb, s, t, z, w: int64
   let d = int64(R.x - L.x)
@@ -419,6 +425,9 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; edge: bool) {.inlin
   let a = int32(px shr 24)
   if a <= c.aref: return
   if a == 31 and c.mode != 3:
+    # anti-aliased edge dots keep their coverage for the post pass
+    r.below[i] = r.color[i]
+    r.aacov[i] = uint8(cov)
     r.color[i] = px
     r.depth[i] = dval
     r.opaque_id[i] = c.id
@@ -437,6 +446,35 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; edge: bool) {.inlin
     if (c.attr and 0x800) != 0: r.depth[i] = dval
     r.trans_id[i] = c.id
     if not c.fog: r.flags[i] = r.flags[i] and not FLAG_FOG
+
+proc aa_cov(e: Edge; y, x: int; right: bool): int32 =
+  ## Anti-aliasing coverage (0..31) of dot x on row y by edge e
+  ## (3d_probe_aa on the reference cores): y-major edges measure where the
+  ## edge crosses the row's middle within the dot, x-major edges how high
+  ## the edge stands in the dot's column at its centre. Right edges keep
+  ## floor(32 * covered), left ones 31 - floor(32 * uncovered).
+  if e.vert: return 31
+  var num, den: int64   # the covered fraction num / den
+  if not e.xmaj:
+    # X at y + 1/2 relative to the dot, 18 fraction bits
+    let xm = (e.edge_x(y) + e.edge_x(y + 1)) div 2 - (int64(x) shl XSHIFT)
+    num = (if right: xm else: (1'i64 shl XSHIFT) - xm)
+    den = 1'i64 shl XSHIFT
+  else:
+    # edge height at the column centre, measured down from the row's top:
+    # (y_e - y) = ((2x + 1 - 2x0) * dy - 2 (y - y0) * dx) / (2 dx)
+    let dx = int64(e.x1 - e.x0)
+    let dy = int64(e.y1 - e.y0)
+    var h = (int64(2 * x + 1) - 2 * int64(e.x0)) * dy - 2 * (int64(y) - e.y0) * dx
+    var d = 2 * dx
+    if d < 0: (h = -h; d = -d)
+    # the polygon lies below a decreasing left / increasing right edge
+    let below = (e.dec and not right) or (not e.dec and right)
+    num = (if below: d - h else: h)
+    den = d
+  num = clamp(num, 0'i64, den)
+  if right: int32(min(31'i64, (32 * num) div den))
+  else: int32(clamp(31 - (32 * (den - num)) div den, 0'i64, 31'i64))
 
 proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcnt: uint32;
                   wbuffer: bool) =
@@ -477,6 +515,9 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
   # GBATEK "Polygon Size": only opaque polygons without edge marking or
   # anti-aliasing leave out their bottom/right edges
   let full = wire or distinct2 or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
+  # anti-aliasing (DISP3DCNT.4): edges of opaque polygons, not lines or
+  # wire-frames (Assumed for those) nor translucent polygons (GBATEK)
+  let aa = (disp3dcnt and 0x10) != 0 and not wire and not distinct2 and not poly.translucent
   if ymin == ymax:
     # all on one row: the dots from the leftmost vertex to the rightmost
     if ymin < 0 or ymin >= H: return
@@ -541,6 +582,11 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     # runs both (3d_probe_tri, 3d_probe_tri_flat)
     let ldraw = full or not (L.xmaj and L.inc) or last_flat
     let rdraw = full or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
+    if aa:
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, true, le.aa_cov(y, x, false))
+      for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, rim)
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, true, re.aa_cov(y, x, true))
+      continue
     if ldraw:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, true)
     for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, rim)
@@ -552,7 +598,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
 # ---------------------------------------------------------------------------
 # Post passes
 
-proc edge_mark(r: Renderer) =
+proc edge_mark(r: Renderer; aa: bool) =
   ## Edge-flagged opaque dots take EDGE_COLOR[id/8] when a 4-neighbour has a
   ## different polygon ID and is further away (screen borders compare
   ## against the rear plane's ID and depth).
@@ -574,7 +620,29 @@ proc edge_mark(r: Renderer) =
         marked.add int32(i)
   for i in marked:
     let ec = rgb6(r.reg16(0x330 + int(r.opaque_id[i] shr 3) * 2))
-    r.color[i] = ec or (r.color[i] and 0xFF00_0000'u32)
+    if aa:
+      # with anti-aliasing the edge colour goes over what the polygon
+      # covered at half strength (GBATEK; 3d_probe_aa_edge: alpha 16)
+      let o = r.below[i]
+      template mixe(k: int): int32 = (ch(ec, k) * 17 + ch(o, k) * 15) shr 5
+      r.color[i] = pack(mixe(0), mixe(1), mixe(2), 0) or (r.color[i] and 0xFF00_0000'u32)
+    else:
+      r.color[i] = ec or (r.color[i] and 0xFF00_0000'u32)
+
+proc anti_alias(r: Renderer) =
+  ## Opaque edge dots with partial coverage mix over the colour they were
+  ## drawn on (3d_probe_aa / _aa2 / _aa_edge on the reference cores: also
+  ## between polygons of one ID). Dots a translucent polygon covered since
+  ## are left alone (Assumed).
+  for i in 0 ..< NPIX:
+    if r.aacov[i] >= 31 or r.trans_id[i] != NO_ID: continue
+    let cov = int32(r.aacov[i])
+    let o = r.below[i]
+    let px = r.color[i]
+    template mixa(k: int): int32 = (ch(px, k) * (cov + 1) + ch(o, k) * (31 - cov)) shr 5
+    # no coverage at all leaves the colour beneath
+    r.color[i] = if cov == 0: o
+                 else: pack(mixa(0), mixa(1), mixa(2), (if (o shr 24) == 0: cov else: 31'i32))
 
 proc fog(r: Renderer; disp3dcnt: uint32) =
   let fc = r.regs[(0x358 - 0x320) shr 2]
@@ -632,5 +700,6 @@ proc render_frame*(r: Renderer; vram: Vram; polys: openArray[Polygon];
   if not manual: r.order.toOpenArray(n_opaque, r.order.len - 1).sort()
   for k in r.order:
     r.draw_polygon(polys[int(k and 0xFFFFF)], verts, disp3dcnt, wbuffer)
-  if (disp3dcnt and 0x20) != 0: r.edge_mark()
+  if (disp3dcnt and 0x10) != 0: r.anti_alias()
+  if (disp3dcnt and 0x20) != 0: r.edge_mark((disp3dcnt and 0x10) != 0)
   if (disp3dcnt and 0x80) != 0: r.fog(disp3dcnt)

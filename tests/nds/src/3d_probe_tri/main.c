@@ -10,6 +10,8 @@
 //           (edge colours equal to the polygon colour's group: all white)
 //   MODE 4 (3d_probe_line): line segments: the third vertex repeats the second
 //   MODE 5 (3d_probe_wire): wire-frame (alpha 0)
+//   MODE 6 (3d_probe_aa): white, opaque, anti-aliasing on, black rear plane
+//   MODE 7 (3d_probe_aa_edge): as 6 with edge marking too (edge colour red)
 // SEED picks another set; FLAT keeps each triangle's rows within 4.
 #include "t3d.h"
 
@@ -48,6 +50,7 @@ static void scene(void) {
     begin(TRIS);
     for (int i = 0; i < 3; i++) {
       if (MODE == 1) color(i == 0 ? RGB(31, 0, 0) : i == 1 ? RGB(0, 31, 0) : RGB(0, 0, 31));
+      else if (MODE >= 6) color(0x7FFF);
       else color(t3d_hue(k, 48));
       vtx16(PX(x[i]), PX(y[i]), 0);
     }
@@ -56,9 +59,10 @@ static void scene(void) {
 
 int main(void) {
   t3d_init("3d_probe_tri");
-  for (int i = 0; i < 8; i++) edge_color(i, 0x7FFF);
-  DISP3DCNT = MODE == 2 ? D3_BLEND : MODE == 3 ? D3_EDGE : 0;
-  clear_color(RGB(2, 2, 2), 31, 63, 0);
+  for (int i = 0; i < 8; i++) edge_color(i, MODE == 7 ? RGB(31, 0, 0) : 0x7FFF);
+  DISP3DCNT = MODE == 2 ? D3_BLEND : MODE == 3 ? D3_EDGE : MODE == 6 ? D3_AA :
+              MODE == 7 ? D3_AA | D3_EDGE : 0;
+  clear_color(MODE >= 6 ? 0 : RGB(2, 2, 2), 31, 63, 0);
   while (1) {
     scene();
     t3d_frame(0);
