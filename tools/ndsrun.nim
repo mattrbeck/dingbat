@@ -3,24 +3,31 @@
 ##
 ##   nim c -d:release --path:src -o:ndsrun tools/ndsrun.nim
 ##   ./ndsrun tests/nds/roms/fb_hello.nds --frames 10 --out /tmp/fb.png
-##       [--bios DIR] [--press A@10,DOWN@20-25,TOUCH:128:96@30-40]
-##       [--wav OUT.wav]
+##       [--bios DIR] [--trace9 N] [--trace7 N] [--press START@30,DOWN@40+3]
+##       [--shots 60,120] [--wav OUT.wav]
 ##
 ## --bios defaults to $DINGBAT_NDS_BIOS (bios9.bin, bios7.bin, firmware.bin).
+## --traceN prints the first N instructions of that CPU (pc, opcode, regs) to
+## stderr, starting at frame --trace-at F (default 0).
+## --press KEY@F[+D] holds KEY from frame F for D frames (default 2), or
+## KEY@F-L from frame F to L; keys are A B SELECT START RIGHT LEFT UP DOWN R L
+## X Y, and TOUCH:x:y holds the stylus at bottom-screen pixel (x, y).
+## --shots also writes <out>_<frame>.png after each listed frame, plus
+## <out>_shots.png: the top screens of every shot side by side.
+## --peek9 / --peek7 A,B,... print 32-bit words read through that CPU's bus
+## at the end (I/O reads may have side effects).
+## --text B0[,A0..] prints a text BG's tile map as characters (tile index =
+## ASCII, as the libnds console font; --text-offset N).
+## --bgshot A0 draws that text BG straight from VRAM into the PNG's top half
+## (no scroll/priority/blending).
 ## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
 ##
+## --pcs prints both CPUs' pc / halted state after each frame.
+##
 ## Debug flags (build with -d:ndsdebug):
-##   --trace9 N / --trace7 N   print N instructions of that CPU (pc + regs),
-##                             starting at frame --trace-from F (default 0)
-##   --iolog                   log every I/O access (repeats folded), from
-##                             frame --iolog-from F
-##   --pcs                     print both CPUs' pc / halted state each frame
-##   --watch HEX               log every write to that word (pc, line)
-## --text B0[,A0..]  print a text BG's tile map as characters (tile index =
-##                   ASCII, as the libnds console font; --text-offset N)
-## --bgshot A0       draw that text BG straight from VRAM into the PNG's top
-##                   half (no scroll/priority/blending): readable text before
-##                   the 2D engine renders BGs
+##   --iolog            log every I/O access (repeats folded), from frame
+##                      --iolog-from F
+##   --watch HEX        log every write to that word (pc, line)
 
 import std/[os, strutils, parseopt]
 import zippy
@@ -78,14 +85,20 @@ type Press = object
   first, last: int
 
 proc parse_presses(spec: string): seq[Press] =
-  ## "A@10,DOWN@20-25,TOUCH:128:96@30-40": held over frames first..last.
+  ## "A@10,DOWN@20+3,B@30-35,TOUCH:128:96@40-60": released at frame `last`.
   for item in spec.split(','):
     if item.len == 0: continue
     let at = item.split('@')
+    if at.len != 2: quit("--press wants KEY@FRAME[+DUR|-LAST]")
     var p = Press()
-    let frames = at[1].split('-')
-    p.first = parseInt(frames[0])
-    p.last = if frames.len > 1: parseInt(frames[1]) else: p.first + 1
+    if '+' in at[1]:
+      let fd = at[1].split('+')
+      p.first = parseInt(fd[0])
+      p.last = p.first + parseInt(fd[1])
+    else:
+      let fl = at[1].split('-')
+      p.first = parseInt(fl[0])
+      p.last = if fl.len > 1: parseInt(fl[1]) else: p.first + 2
     let what = at[0].toUpperAscii
     if what.startsWith("TOUCH:"):
       let xy = what.split(':')
@@ -163,14 +176,17 @@ when isMainModule:
   var frames = 60
   var outp = "nds_out.png"
   var bios = ""
-  var trace9, trace7 = 0
-  var trace_from, iolog_from = 0
+  var trace9, trace7, trace_at = 0
+  var iolog_from = 0
   var iolog, pcs = false
   var watch = 0'u32
   var text = ""
   var text_offset = 0
   var presses: seq[Press]
   var shot = ""
+  var shots: seq[int]
+  var tops: seq[seq[uint32]]
+  var peek9, peek7: seq[uint32]
   var wav = ""
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs"])
@@ -184,16 +200,22 @@ when isMainModule:
       of "bios": bios = val
       of "trace9": trace9 = parseInt(val)
       of "trace7": trace7 = parseInt(val)
-      of "trace-from": trace_from = parseInt(val)
+      of "trace-at": trace_at = parseInt(val)
+      of "wav": wav = val
+      of "press": presses.add parse_presses(val)
+      of "peek9":
+        for a in val.split(','): peek9.add uint32(parseHexInt(a))
+      of "peek7":
+        for a in val.split(','): peek7.add uint32(parseHexInt(a))
+      of "shots":
+        for f in val.split(','): shots.add parseInt(f)
       of "iolog": iolog = true
       of "iolog-from": iolog_from = parseInt(val)
       of "pcs": pcs = true
       of "watch": watch = uint32(parseHexInt(val))
       of "text": text = val
       of "text-offset": text_offset = parseInt(val)
-      of "press": presses.add parse_presses(val)
       of "bgshot": shot = val
-      of "wav": wav = val
       else: quit("unknown option --" & key)
     of cmdEnd: discard
   if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
@@ -201,9 +223,9 @@ when isMainModule:
   n.watch = watch
   var audio: seq[float32]
   for f in 0 ..< frames:
-    if f == trace_from:
-      n.trace9 = trace9
-      n.trace7 = trace7
+    if f == trace_at:
+      n.arm9.trace = trace9
+      n.arm7.trace = trace7
     if f == iolog_from: n.iolog = iolog
     for p in presses:
       if f == p.first or f == p.last:
@@ -215,6 +237,21 @@ when isMainModule:
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
            (if n.arm7.halted: " H" else: "")
     if wav.len > 0: audio.add n.spu.take_samples()
+    if f + 1 in shots:
+      let px = n.screens_rgba()
+      write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)
+      tops.add px[0 ..< 256 * 192]
+  if tops.len > 0:
+    let cols = min(tops.len, 4)
+    let rows = (tops.len + cols - 1) div cols
+    let w = cols * 258
+    var sheet = newSeq[uint32](w * rows * 194)
+    for i, t in tops:
+      let x0 = (i mod cols) * 258
+      let y0 = (i div cols) * 194
+      for y in 0 ..< 192:
+        for x in 0 ..< 256: sheet[(y0 + y) * w + x0 + x] = t[y * 256 + x]
+    write_png(outp.changeFileExt("") & "_shots.png", w, rows * 194, sheet)
   if wav.len > 0:
     writeFile(wav, wav_bytes(audio))
     echo "audio: ", audio.len div 2, " frames -> ", wav
@@ -233,3 +270,5 @@ when isMainModule:
       stdout.write(n.bg_text(spec[0] == 'B', ord(spec[1]) - ord('0'), text_offset))
   echo "arm9 ", n.arm9.reg_dump()
   echo "arm7 ", n.arm7.reg_dump()
+  for a in peek9: echo "arm9 [", toHex(a, 8), "] = ", toHex(read32(n.arm9.bus, a), 8)
+  for a in peek7: echo "arm7 [", toHex(a, 8), "] = ", toHex(read32(n.arm7.bus, a), 8)

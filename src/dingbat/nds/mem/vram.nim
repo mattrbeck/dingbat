@@ -184,6 +184,11 @@ proc arm9_region*(a: uint32; offset: var int): VramRegion =
   of 0x6: offset = int(a and 0x1FFFF); vrBObj
   else:   offset = int(a and 0xFFFFF) mod (656 * 1024); vrLcdc
 
+proc page_banks*(v: Vram; r: VramRegion; page: int): uint16 {.inline.} =
+  ## Bitmask of the banks mapped at 16 KB page `page` of region r (the 3D
+  ## renderer builds its texture/palette page tables from this per frame).
+  v.pages[r][page]
+
 proc bank_ptr*(v: Vram; b: VramBank): ptr UncheckedArray[uint8] =
   ## Raw bank memory (display capture, VRAM display mode).
   cast[ptr UncheckedArray[uint8]](addr v.mem[bank_offset(b)])

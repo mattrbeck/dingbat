@@ -240,15 +240,8 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.sync9()
   b.nds.write9(a, v, 32)
 
-template trace_fetch(n: NDS; cpu: untyped; left: untyped; tag: string; a: uint32) =
-  when defined(ndsdebug):
-    if left > 0:
-      dec left
-      stderr.writeLine(tag & " " & toHex(a, 8) & " " & cpu.reg_dump())
-
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n = b.nds
-  trace_fetch(n, n.arm9, n.trace9, "9", a)
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd32(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
@@ -256,7 +249,6 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n = b.nds
-  trace_fetch(n, n.arm9, n.trace9, "9t", a)
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd16(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
@@ -274,6 +266,7 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   let n = b.nds
   n.cp15.write(op1, cn, cm, op2, v)
   n.arm9.vector_base = n.cp15.vector_base()
+  n.arm9.no_load_interwork = (n.cp15.control and 0x8000) != 0
   if n.cp15.halt_request:
     n.cp15.halt_request = false
     n.arm9.halted = true

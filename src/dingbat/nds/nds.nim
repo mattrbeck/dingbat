@@ -57,7 +57,6 @@ type
     unmapped_log*: int          ## first few unmapped accesses are logged
     # -d:ndsdebug only (tools/ndsrun.nim flags)
     iolog*: bool                ## log I/O accesses to stderr
-    trace9*, trace7*: int       ## instructions left to trace per CPU
     watch*: uint32              ## log writes to this word (0 = off)
     io_last: string
     io_repeat: int
@@ -210,7 +209,7 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8]): NDS =
   n.irq7 = IrqCtl()
   n.input = Input()
   n.gpu = new_gpu()
-  n.gpu3d = new_gpu3d()
+  n.gpu3d = new_gpu3d(n.gpu.vram, n.irq9)
   n.timers9 = Timers(sched: n.sched, irq: n.irq9, first_event: evTimer9_0)
   n.timers7 = Timers(sched: n.sched, irq: n.irq7, first_event: evTimer7_0)
   n.dma9 = new_dma(true, n.irq9)

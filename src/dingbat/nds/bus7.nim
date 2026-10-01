@@ -196,12 +196,8 @@ proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.sync7()
   b.nds.write7(a, v, 32)
 
-proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  trace_fetch(b.nds, b.nds.arm7, b.nds.trace7, "7", a)
-  b.nds.read7(a, 32)
-proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  trace_fetch(b.nds, b.nds.arm7, b.nds.trace7, "7t", a)
-  b.nds.read7(a, 16)
+proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 32)
+proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 16)
 
 # Sound: channel sample fetch and capture stores (io/spu.nim). No CPU clock
 # sync -- they run inside the evSpuSample dispatch.

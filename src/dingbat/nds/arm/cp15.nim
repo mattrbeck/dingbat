@@ -15,10 +15,11 @@ type
     dtcm_load_mode*, itcm_load_mode*: bool  ## bits 17 / 19: writes only
     prot_regions*: array[8, uint32]      ## c6,c0..c7
     dcache_cfg*, icache_cfg*, wbuf_cfg*: uint32
-    data_perm*, code_perm*: uint32       ## c5,c0,2 / c5,c0,3
+    data_perm*, code_perm*: uint32       ## c5,c0,2 / c5,c0,3: 4 bits per region
     dcache_lock*, icache_lock*: uint32
+    trace_pid*: uint32        ## c13,c0,1 / c13,c1,1: plain R/W (libnds keeps
+                              ## its IRQ mask here across handlers)
     halt_request*: bool       ## c7,c0,4 / c7,c8,2: wait for interrupt
-    trace_pid*: uint32        ## c13,c0,1 / c13,c1,1: R/W, no effect (calico's IRQ scratch)
 
 const
   CP15_ID* = 0x41059461'u32
@@ -48,6 +49,16 @@ proc reset*(c: var Cp15) =
 proc vector_base*(c: Cp15): uint32 =
   if (c.control and (1'u32 shl 13)) != 0: 0xFFFF0000'u32 else: 0
 
+proc ap_compact(ext: uint32): uint32 =
+  ## c5,c0,0/1 view of the extended permissions: the low 2 bits of each
+  ## region's 4-bit field (GBATEK "CP15 Protection Unit").
+  for i in 0'u32 .. 7:
+    result = result or (((ext shr (i * 4)) and 3) shl (i * 2))
+
+proc ap_extend(compact: uint32): uint32 =
+  for i in 0'u32 .. 7:
+    result = result or (((compact shr (i * 2)) and 3) shl (i * 4))
+
 proc read*(c: Cp15; op1, cn, cm, op2: uint32): uint32 =
   case cn
   of 0:
@@ -60,13 +71,15 @@ proc read*(c: Cp15; op1, cn, cm, op2: uint32): uint32 =
   of 3: c.wbuf_cfg
   of 5:
     case op2
-    of 0, 2: c.data_perm
+    of 0: ap_compact(c.data_perm)
+    of 1: ap_compact(c.code_perm)
+    of 2: c.data_perm
     else: c.code_perm
   of 6: c.prot_regions[cm and 7]
   of 9:
     if cm == 1: (if op2 == 1: c.itcm_reg else: c.dtcm_reg)
     else: (if op2 == 1: c.icache_lock else: c.dcache_lock)
-  of 13: (if op2 == 1: c.trace_pid else: 0)   # c13,c0,0 FCSE PID reads 0
+  of 13: (if op2 == 1: c.trace_pid else: 0'u32)   # c13,c0,0 FCSE PID reads 0
   else: 0
 
 proc write*(c: var Cp15; op1, cn, cm, op2, v: uint32) =
@@ -79,7 +92,9 @@ proc write*(c: var Cp15; op1, cn, cm, op2, v: uint32) =
   of 3: c.wbuf_cfg = v
   of 5:
     case op2
-    of 0, 2: c.data_perm = v
+    of 0: c.data_perm = ap_extend(v)
+    of 1: c.code_perm = ap_extend(v)
+    of 2: c.data_perm = v
     else: c.code_perm = v
   of 6: c.prot_regions[cm and 7] = v
   of 7:
@@ -91,6 +106,7 @@ proc write*(c: var Cp15; op1, cn, cm, op2, v: uint32) =
       else: c.dtcm_reg = v and 0xFFFF_F03E'u32
     else:
       if op2 == 1: c.icache_lock = v else: c.dcache_lock = v
-  of 13: (if op2 == 1: c.trace_pid = v)
+  of 13:
+    if op2 == 1: c.trace_pid = v
   else: discard
   c.update_tcm()
