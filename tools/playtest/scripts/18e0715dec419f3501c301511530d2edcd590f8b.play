@@ -3,18 +3,21 @@
 @game ALFE
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
-@save skip: nothing is written to EEPROM through the Trunks prologue; the pause menu has no Save, the game saves only at Save Points and none is in the prologue area. After Gohan's training, "Stay here", the climb up the cleft in the north cliff to Gohan (talk to him from the side) and the rain scene at his body, Trunks is back in control on the same small plateau and no way out of it was found (the boulder on the west ledge does not break; the ledge and the north notch dead-end)
+@save skip: nothing is written to EEPROM through the Trunks prologue and the start of the present-day chapter; the pause menu has no Save, the game saves only at Save Points and none was found yet. Reached kid Gohan in Goku's Home, where Chi-Chi stops him at the front door until he finds his Mathbook ("I've already asked you N times") and puts him back by the door after every talk; the book was not found
 
 # New Game > the story > Gohan's training (melee boulder, energy-blast
 # boulder, the Super Saiyan cutscene) > "Stay here, I'll take care of them" >
-# walk up-right, up-left, up to the notch in the north cliff face; UP+LEFT
-# inside it climbs to the upper plateau where Gohan stands; A from his right
-# side starts "TRUNKS: What, are you crazy?..." > the rain scene.
+# up through the notch in the north cliff to Gohan (A from his right side) >
+# the rain scene > the Flight Circle on the plateau (stand on it, A) >
+# Pepper Town ruins (north edge, east into the plaza, north into the street,
+# west to the puddle) > Gohan's last stand > "Present day Earth..." > Goku's
+# Home: Gohan's room, down into the kitchen.
 # Finding: nba rolls different stats for Trunks (pause > Status at f9315 of
 # an earlier session: nba HP 148/148, EP 27/31, STR 11, POW 9, END 7;
 # dingbat-bios and mgba HP 145/145, EP 34/34, STR 12, POW 8, END 8), and its
-# HUD energy bar is visibly shorter from the end of the training on. nba also
-# needed more A taps to leave the second story page (16 against 10).
+# HUD energy bar is visibly shorter from the end of the training on; nba also
+# needed more A taps to leave the second story page (16 against 10) and runs
+# a few frames late in fades and text boxes. dingbat-bios matches mgba.
 
 [new]
 wait 660
@@ -101,4 +104,53 @@ tap A times=15 every=44 hold=4
 tap A times=15 every=44 hold=4
 tap A times=15 every=44 hold=4
 checkpoint rain window=0 compare=none
+press UP hold=20 after=5
+press LEFT hold=12 after=5
+press UP after=5
+press A after=40
+press A after=40
+press A after=40
+press A after=40
+press LEFT hold=10 after=5
+press UP hold=10 after=5
+press LEFT after=5
+press A after=60
+press UP hold=3 after=5
+press A after=90
+press UP hold=8 after=5
+press LEFT hold=5 after=5
+press A after=90
+wait 200
+checkpoint flight_pepper_town window=0
+wait 60
+press LEFT hold=20 after=5
+press DOWN hold=40 after=5
+press UP hold=150 after=10
+press RIGHT hold=250 after=10
+press RIGHT hold=25 after=5
+press UP hold=200 after=10
+press RIGHT hold=200 after=10
+press LEFT hold=50 after=5
+press LEFT hold=10 after=5
+press UP hold=40 after=30
+press A after=60
+press DOWN hold=10 after=5
+press LEFT hold=250 after=10
+press DOWN hold=20 after=5
+press LEFT hold=120 after=5
+wait 30
+tap A times=10 every=44 hold=4
+tap A times=15 every=44 hold=4
+tap A times=15 every=44 hold=4
+checkpoint present_day window=0
+tap A times=15 every=44 hold=4
+checkpoint goku_home window=0
+wait 60
+press DOWN hold=60 after=10
+tap A times=15 every=44 hold=4
+tap A times=15 every=44 hold=4
+checkpoint gohan_room window=0
+press LEFT hold=30 after=5
+press DOWN hold=150 after=30
+checkpoint kitchen window=0
 
