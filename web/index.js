@@ -581,6 +581,26 @@ const dbKeys = () => new Promise((resolve, reject) => {
   req.onerror = () => reject(req.error);
 });
 
+// Read a record and replace it in one readwrite transaction, so nothing
+// written between the read and the write is lost. `fn` runs synchronously on
+// the stored value and returns the new one, or undefined to leave it.
+// Resolves whether it wrote.
+const dbUpdate = (key, fn) => new Promise((resolve, reject) => {
+  let tx = db.transaction("blobs", "readwrite");
+  let store = tx.objectStore("blobs");
+  let wrote = false;
+  let req = store.get(key);
+  req.onsuccess = () => {
+    let next = fn(req.result ?? null);
+    if (next === undefined) return;
+    store.put(next, key);
+    wrote = true;
+  };
+  tx.oncomplete = () => resolve(wrote);
+  tx.onerror = () => reject(tx.error);
+  tx.onabort = () => reject(tx.error);
+});
+
 // Move keys and write unrelated records in one readwrite transaction (a
 // game rename: a half-finished one would orphan a save from its ROM).
 // `pairs` is [[from, to], ...]; an empty `from` is skipped. An occupied
@@ -7437,6 +7457,51 @@ const looksLikeStateFile = (bytes) =>
   !!bytes && bytes.length >= STATE_MAGIC.length &&
   [...STATE_MAGIC].every((c, i) => bytes[i] === c.charCodeAt(0));
 
+// Every state the core hands out is packed (pack_state in serialize.nim):
+// the header as it was, flagged in byte 15, the rest deflated - a GBA state
+// is ~550 KB plain and ~55 KB packed.
+const isPackedState = (bytes) =>
+  looksLikeStateFile(bytes) && bytes.length > 15 && (bytes[15] & 0x80) !== 0;
+
+const packStateBytes = (bytes) => {
+  if (typeof Module === "undefined" || !Module._wasm_pack_state) return null;
+  let ptr = Module._malloc(bytes.length);
+  if (!ptr) return null;
+  new Uint8Array(Module.memory.buffer, ptr, bytes.length).set(bytes);
+  let len = Module._wasm_pack_state(ptr, bytes.length);
+  Module._free(ptr);
+  if (len <= 0) return null;
+  return new Uint8Array(Module.memory.buffer, Module._wasm_state_data(), len).slice();
+};
+
+// Slots saved before states were packed are packed once, at boot, and sent
+// up again in their smaller form. Sessions are left: each is rewritten the
+// next time its game is left, and repacking one would hand the other device
+// new bytes for the same moment, which reads as news (handoffNews).
+const packStoredStates = async () => {
+  if (typeof Module === "undefined" || !Module._wasm_pack_state) return 0;
+  let keys = [];
+  try { keys = await dbKeys(); } catch { return 0; }
+  let packed = 0;
+  for (const key of keys) {
+    if (typeof key !== "string" || !key.startsWith("state:")) continue;
+    let wrote = false;
+    try {
+      wrote = await dbUpdate(key, (stored) => {
+        const bytes = stored instanceof ArrayBuffer ? new Uint8Array(stored) : stored;
+        if (!(bytes instanceof Uint8Array) || !looksLikeStateFile(bytes) ||
+            isPackedState(bytes)) return undefined;
+        const next = packStateBytes(bytes);
+        return next && isPackedState(next) ? next : undefined;
+      });
+    } catch {}
+    if (!wrote) continue;
+    packed++;
+    markUpload(key);
+  }
+  return packed;
+};
+
 // Toast copy per StateRejectKind (src/dingbat/common/serialize.nim, via
 // wasm_state_error_kind): one sentence per cause saying what to do.
 const SRK = {
@@ -13692,6 +13757,7 @@ var Module = {
     // session (resumeDriveOnBoot) have had a moment to settle, and the
     // first pull has had its say.
     setTimeout(() => { offerThumbnailsAfterBoot().catch(() => {}); }, 1500);
+    setTimeout(() => { packStoredStates().catch(() => {}); }, 4000);
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;

@@ -16,7 +16,8 @@
 ##
 ## Run with: nimble test_savestate_compat
 ## Regenerate the current-version corpus: <this binary> --write-corpus
-## (older entries can only come from an old checkout). A payload revision
+## (older entries can only come from an old checkout). Since container 8 the
+## corpus is written packed, as every stored state is. A payload revision
 ## inside container 7 gets its own entry beside the ones already there:
 ## `<this binary> --write-corpus gb gbrev6` writes <rom>.v7-gbrev6.state for
 ## the GB ROMs only.
@@ -202,14 +203,14 @@ proc write_corpus(only = ""; suffix = "") =
       let emu = new_gba_for(rom)
       for _ in 0 ..< frames: emu.step_frame()
       let path = CORPUS_DIR / name_of(rom)
-      writeFile(path, emu.state_bytes(thumbnail = true))
+      writeFile(path, pack_state(emu.state_bytes(thumbnail = true)))
       echo "wrote ", path
   if only in ["", "gb"]:
     for (rom, frames) in GB_ROMS:
       let emu = new_gb_for(rom)
       for _ in 0 ..< frames: emu.step_frame()
       let path = CORPUS_DIR / name_of(rom)
-      writeFile(path, emu.state_bytes(thumbnail = true))
+      writeFile(path, pack_state(emu.state_bytes(thumbnail = true)))
       echo "wrote ", path
 
 proc file_version(data: string): uint32 =
@@ -754,6 +755,55 @@ proc run_rejections() =
   check(not emu.load_state_bytes(good[0 ..< good.len div 2]), "truncated refused")
   check(not emu.load_state_bytes("not a state at all"), "garbage refused")
   check(emu.state_payload() == before, "emulator untouched after every refusal")
+
+proc run_packed() =
+  ## pack_state is how every stored state is written (.state files, the
+  ## web's IndexedDB and Drive, iOS): header readable as is, body deflated.
+  echo "packed: stored states are deflated, and read back the same"
+  let emu = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: emu.step_frame()
+  let plain = emu.state_bytes(thumbnail = true)
+  let packed = pack_state(plain)
+  check(is_packed_state(packed) and not is_packed_state(plain), "flag marks the packed image")
+  check(packed.len * 4 < plain.len,
+        "a GBA state packs to under a quarter", $plain.len & " -> " & $packed.len)
+  check(packed[0 ..< 14] == plain[0 ..< 14] and packed[16 ..< 32] == plain[16 ..< 32],
+        "magic, version, core, revision, ROM identity and payload length stay " &
+        "readable in the header")
+  check(unpack_state(packed) == plain, "unpack gives the plain image back")
+  check(pack_state(packed) == packed, "packing twice is packing once")
+  check(unpack_state(plain) == plain, "an older, plain state passes through")
+  let before = emu.state_payload()
+  check(emu.load_state_bytes(packed) and emu.state_payload() == before,
+        "a packed state loads")
+  check(emu.state_is_for(packed), "a packed state names its cart (whole-ROM trailer inside)")
+  check(parse_state_thumbnail(packed) == parse_state_thumbnail(plain) and
+        parse_state_thumbnail(packed).w > 0, "its thumbnail reads")
+  check(parse_state_whole_rom(packed) == parse_state_whole_rom(plain),
+        "its whole-ROM trailer reads")
+  var damaged = packed
+  damaged[STATE_HEADER_SIZE + 40] = char(uint8(damaged[STATE_HEADER_SIZE + 40]) xor 0x55'u8)
+  check(not emu.load_state_bytes(damaged) and last_state_reject_kind == srkCorrupt and
+        emu.state_payload() == before, "a damaged body is refused, emulator untouched")
+  check(not emu.load_state_bytes(packed[0 ..< packed.len div 2]) and
+        emu.state_payload() == before, "a cut-off packed state is refused")
+  var newer = packed
+  newer[8] = char(uint8(STATE_VERSION) + 1)
+  check(not emu.load_state_bytes(newer) and last_state_reject_kind == srkTooNew,
+        "a newer container is still refused as newer")
+  let g = new_gb_for(GB_ROMS[0][0])
+  for _ in 0 ..< 30: g.step_frame()
+  let gplain = g.state_bytes(thumbnail = true)
+  let gpacked = pack_state(gplain)
+  check(gpacked.len < gplain.len and g.load_state_bytes(gpacked) and
+        g.state_is_for(gpacked), "a GB state packs and loads",
+        $gplain.len & " -> " & $gpacked.len)
+  let dir = getTempDir() / "dingbat_packed_test"
+  createDir(dir)
+  let path = dir / "slot.state"
+  check(emu.save_state(path, thumbnail = true) and is_packed_state(readFile(path)) and
+        emu.load_state(path), "save_state writes a packed file, load_state reads it")
+  removeDir(dir)
 
 # 4. The GBA rev 3 -> 4 IntrWait migration, the only one that rewrites guest
 # memory. Shapes:
@@ -1424,6 +1474,7 @@ when isMainModule:
   run_whole_rom()
   run_cart_shapes()
   run_rejections()
+  run_packed()
   run_intr_wait_migration()
   run_gba_inflight()
   run_corpus()

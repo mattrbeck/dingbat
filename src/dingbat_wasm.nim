@@ -424,11 +424,12 @@ proc clearAudioBuffer() {.exportc.} =
 var stateImage: string = ""
 
 proc wasm_state_size(): cint {.exportc.} =
-  ## Serialize the full state (same bytes as desktop .state files) into a
-  ## retained buffer; returns its length, 0 when no core runs.
+  ## Serialize the full state (same bytes as desktop .state files: packed,
+  ## see pack_state) into a retained buffer; returns its length, 0 when no
+  ## core runs.
   case stateKind
-  of ekGBA: stateImage = stateGba.state_bytes()
-  of ekGB:  stateImage = stateGb.state_bytes()
+  of ekGBA: stateImage = pack_state(stateGba.state_bytes())
+  of ekGB:  stateImage = pack_state(stateGb.state_bytes())
   of ekNone: stateImage = ""
   cint(stateImage.len)
 
@@ -436,6 +437,16 @@ proc wasm_state_data(): pointer {.exportc.} =
   ## Buffer from the last wasm_state_size() call; JS copies it out before
   ## calling wasm_state_size() again.
   if stateImage.len > 0: addr stateImage[0] else: nil
+
+proc wasm_pack_state(data: pointer; len: cint): cint {.exportc.} =
+  ## Pack a plain state image (one stored before states were deflated) into
+  ## the retained buffer for wasm_state_data; returns its length. Needs no
+  ## core: the packing is the container's alone.
+  if data == nil or len <= 0: return 0
+  var image = newString(int(len))
+  copyMem(addr image[0], data, int(len))
+  stateImage = pack_state(image)
+  cint(stateImage.len)
 
 proc wasm_flush_save() {.exportc.} =
   ## The solo core's battery RAM into its file now, if it changed. Both cores
@@ -1195,8 +1206,8 @@ proc wasm_rewind_scrub_state_size(sample: cint): cint {.exportc.} =
   try:
     apply_payload(snap)
     stateImage = case stateKind
-      of ekGBA: stateGba.state_bytes(thumbnail = true)
-      of ekGB:  stateGb.state_bytes(thumbnail = true)
+      of ekGBA: pack_state(stateGba.state_bytes(thumbnail = true))
+      of ekGB:  pack_state(stateGb.state_bytes(thumbnail = true))
       of ekNone: ""
   except CatchableError:
     stateImage = ""

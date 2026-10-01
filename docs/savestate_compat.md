@@ -14,13 +14,35 @@ rom_checksum(4)  rom_size(4)  payload_len(4)  payload_hash(4)   = 32 bytes
 [flags bit 1: whole-ROM trailer: len(4)=8 fnv1a(whole ROM file)(4) file length(4)]
 ```
 
+**Packed (container 8, flags bit 15).** Every state that is stored or sent -
+a desktop `.state` file, a web slot or session in IndexedDB and on Drive, an
+export, the iOS shell's - is packed by `pack_state`: the 32-byte header as
+above with bit 15 set, then everything after it (payload and trailers) as
+one zlib stream at `BestSpeed`. `payload_len` and `payload_hash` describe the
+inflated payload, so the header stays readable without inflating
+(`state_names_rom` inflates only for the GBA whole-ROM trailer). Every reader
+(`parse_state_payload`, `parse_state_thumbnail`, `parse_state_whole_rom`,
+`state_names_rom`) unpacks first; a plain image passes through, so v1-v7
+files load as before. A body that does not inflate is refused as
+`srkCorrupt`. The in-memory images the cores trade (rollback, run-ahead,
+`state_bytes` in tests) stay plain.
+
+A GBA state (Golden Sun: The Lost Age, 3000 frames in) is 559 KB plain and
+54 KB packed, 0.6 ms to pack and 0.4 ms to unpack natively; a GBC one
+(Kirby Tilt 'n' Tumble) 122 KB to 12 KB. `DefaultCompression` saves 4% more
+on the GBA state for six times the time. The container moved to 8 so a v7
+reader refuses a packed file as "newer - update" instead of calling it
+truncated. The web app packs slots stored plain before this once at boot
+(`packStoredStates`) and sends them up again; a session is rewritten packed
+the next time its game is left.
+
 Trailers come in flag-bit order after the payload; a reader finds one by
 skipping those before it. Every v7 reader discards `flags` and accepts bytes
 past the payload, so a new trailer needs no container bump (verified
 against origin/main's reader for the whole-ROM one: it loads the new files
 and reads the same payload and thumbnail).
 
-`STATE_VERSION` (7) describes the **header**. Each core has its own payload
+`STATE_VERSION` (8; 7 before packing) describes the **header**. Each core has its own payload
 revision — `GBA_PAYLOAD_VERSION`, `GB_PAYLOAD_VERSION` — stored in byte 13
 (`slot` before v7; every pre-v7 writer put 0 there, and 0 means "derive it"
 from the table below). A payload change bumps one core's revision and leaves

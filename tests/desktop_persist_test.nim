@@ -199,7 +199,8 @@ when defined(posix):
     check(g.save_state(path, thumbnail = true), "a state saves")
     let before = readFile(path)
     g.storage.memory[0] = 0x77   # the next state differs
-    for cut in [1000, before.len - 16]:
+    # Relative cuts: a packed state of this blank cart is under 1 KB.
+    for cut in [before.len div 2, before.len - 16]:
       last_state_error = ""
       var ok = true
       cut_at(cut, proc() = ok = g.save_state(path, thumbnail = true))

@@ -15,6 +15,7 @@
 
 import std/[os, strutils, math]
 import dingbat/common/input
+import dingbat/common/serialize  # pack_state
 import dingbat/gba/gba
 import dingbat/gb/gb
 
@@ -210,8 +211,8 @@ proc dingbat_state_size(): cint {.exportc, cdecl.} =
   ## Serialize the full state (same bytes as desktop .state files) into a
   ## retained buffer; returns its length, 0 when no core runs.
   case stateKind
-  of ekGBA: stateImage = stateGba.state_bytes()
-  of ekGB:  stateImage = stateGb.state_bytes()
+  of ekGBA: stateImage = pack_state(stateGba.state_bytes())
+  of ekGB:  stateImage = pack_state(stateGb.state_bytes())
   of ekNone: stateImage = ""
   cint(stateImage.len)
 

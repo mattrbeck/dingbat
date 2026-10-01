@@ -3,6 +3,7 @@
 # refs, not stable across builds).
 
 import std/[os, strutils]
+import zippy
 import atomicfile
 
 type
@@ -47,7 +48,10 @@ const
   # payload revision (header byte 13) and adds a migration in its savestate.nim;
   # STATE_VERSION moves only if this 32-byte header changes shape, which also
   # stops older builds recognising the file.
-  STATE_VERSION* = 7'u32
+  # 8: STATE_FLAG_DEFLATED. A v7 reader would take a deflated body for a
+  # short payload and call a good file truncated; refusing v8 as "newer"
+  # tells its owner to update instead.
+  STATE_VERSION* = 8'u32
 
   # Per-core payload revisions. Bump ONE of these when that core's field
   # sequence changes, and add the matching `if rev >= N` in its loader.
@@ -92,6 +96,14 @@ const
   # differs only past 1 MB is told apart by this trailer alone.
   STATE_FLAG_WHOLE_ROM* = 0x0002'u16
   WHOLE_ROM_TRAILER_LEN* = 8
+  # Not a trailer: everything after the header (payload and trailers) is one
+  # zlib stream, and payload_len / payload_hash describe the inflated payload.
+  # Every state that is stored or sent is deflated (pack_state); the images
+  # the cores trade in memory (rollback, run-ahead, tests) are not.
+  STATE_FLAG_DEFLATED* = 0x8000'u16
+  # Speed over the last few percent: a GBA state deflates ~10x either way,
+  # and this runs on the main thread when the game is left.
+  STATE_DEFLATE_LEVEL = BestSpeed
 
 var last_state_reject_kind*: StateRejectKind = srkNone
   ## Set beside `last_state_error` by every refusal. Assigned only from procs
@@ -384,14 +396,16 @@ proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
   make_state_bytes(core, rom_checksum, rom_size, payload, [], 0'u16, 0'u16,
                    whole_rom)
 
+proc pack_state*(image: string): string
+
 proc write_state_file*(path: string; core: CoreKind;
                        rom_checksum, rom_size: uint32; payload: string;
                        whole_rom = WholeRom()) =
   let parent = path.parentDir
   if parent.len > 0:
     createDir(parent)
-  write_file_atomic(path, make_state_bytes(core, rom_checksum, rom_size, payload,
-                                           whole_rom))
+  write_file_atomic(path, pack_state(make_state_bytes(core, rom_checksum, rom_size,
+                                                      payload, whole_rom)))
 
 proc write_state_file*(path: string; core: CoreKind;
                        rom_checksum, rom_size: uint32; payload: string;
@@ -400,9 +414,9 @@ proc write_state_file*(path: string; core: CoreKind;
   let parent = path.parentDir
   if parent.len > 0:
     createDir(parent)
-  write_file_atomic(path, make_state_bytes(core, rom_checksum, rom_size, payload,
-                                           thumbnail, thumb_w, thumb_h,
-                                           whole_rom))
+  write_file_atomic(path, pack_state(make_state_bytes(core, rom_checksum, rom_size,
+                                                      payload, thumbnail, thumb_w,
+                                                      thumb_h, whole_rom)))
 
 proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int): seq[byte] =
   ## Nearest-neighbour downscale of a BGR555 framebuffer to little-endian
@@ -421,6 +435,54 @@ proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int):
 proc state_flags(data: string): uint16 =
   uint16(byte(data[14])) or (uint16(byte(data[15])) shl 8)
 
+proc is_packed_state*(data: string): bool =
+  data.len >= STATE_HEADER_SIZE and data[0 ..< STATE_MAGIC.len] == STATE_MAGIC and
+    (state_flags(data) and STATE_FLAG_DEFLATED) != 0
+
+proc pack_state*(image: string): string =
+  ## A state image as it is kept and sent (.state files, the web's
+  ## IndexedDB and Drive, exports): the header, flagged, then the rest of the
+  ## image deflated. Not an image (or already packed): returned as it is.
+  if image.len <= STATE_HEADER_SIZE or image[0 ..< STATE_MAGIC.len] != STATE_MAGIC or
+     is_packed_state(image):
+    return image
+  result = image[0 ..< STATE_HEADER_SIZE]
+  for i in 0 .. 3: result[8 + i] = char((STATE_VERSION shr (8 * i)) and 0xFF)
+  let flags = state_flags(image) or STATE_FLAG_DEFLATED
+  result[14] = char(flags and 0xFF)
+  result[15] = char(flags shr 8)
+  result.add(compress(unsafeAddr image[STATE_HEADER_SIZE],
+                      image.len - STATE_HEADER_SIZE, STATE_DEFLATE_LEVEL, dfZlib))
+
+proc unpack_state*(data: string): string =
+  ## The plain image of a packed state; anything else as it is. Raises a
+  ## StateError (srkCorrupt) when the deflated body does not inflate.
+  if not is_packed_state(data): return data
+  if data.len == STATE_HEADER_SIZE:
+    raise state_error("save state is truncated (nothing after its header)", srkTruncated)
+  var body: string
+  try:
+    body = uncompress(unsafeAddr data[STATE_HEADER_SIZE],
+                      data.len - STATE_HEADER_SIZE, dfZlib)
+  except ZippyError:
+    raise state_error("save state is truncated or corrupt (its compressed " &
+                      "body does not unpack)")
+  result = newStringOfCap(STATE_HEADER_SIZE + body.len)
+  result.add(data[0 ..< STATE_HEADER_SIZE])
+  let flags = state_flags(data) and not STATE_FLAG_DEFLATED
+  result[14] = char(flags and 0xFF)
+  result[15] = char(flags shr 8)
+  result.add(body)
+
+proc unpack_quietly(data: string): string =
+  ## unpack_state for the readers that never raise and leave
+  ## last_state_reject_kind alone: an unreadable body reads as no image.
+  if not is_packed_state(data): return data
+  let kind = last_state_reject_kind
+  try: result = unpack_state(data)
+  except StateError: result = ""
+  last_state_reject_kind = kind
+
 type
   WholeRomTrailer* = enum
     wrAbsent      ## not flagged: an older build's state, or a GB one
@@ -430,10 +492,11 @@ type
 proc le32(data: string; pos: int): uint32 =
   for i in 0 .. 3: result = result or (uint32(byte(data[pos + i])) shl (8 * i))
 
-proc parse_state_whole_rom*(data: string): tuple[kind: WholeRomTrailer;
-                                                 rom: WholeRom] =
+proc parse_state_whole_rom*(raw: string): tuple[kind: WholeRomTrailer;
+                                                rom: WholeRom] =
   ## The whole-ROM identity trailer of a state image. Never raises and
   ## leaves last_state_reject_kind alone (state_names_rom's contract).
+  let data = unpack_quietly(raw)
   result.kind = wrAbsent
   if data.len < STATE_HEADER_SIZE: return
   let flags = state_flags(data)
@@ -461,7 +524,7 @@ proc names_whole_rom(data: string; whole_rom: WholeRom): bool =
   t.kind != wrPresent or
     (t.rom.hash == whole_rom.hash and t.rom.size == whole_rom.size)
 
-proc parse_state_payload*(data: string; core: CoreKind;
+proc parse_state_payload*(raw: string; core: CoreKind;
                           rom_checksum, rom_size: uint32;
                           origin = "state data";
                           legacy_checksums: seq[uint32] = @[];
@@ -475,6 +538,8 @@ proc parse_state_payload*(data: string; core: CoreKind;
   ## gba_legacy_rom_checksums); a state from a different ROM is still refused.
   ## `whole_rom`, when known, must match the state's whole-ROM trailer if it
   ## has one; one without (an older build's) is judged by the header alone.
+  ## A packed state (pack_state) is unpacked first.
+  let data = unpack_state(raw)
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     raise state_error("not a dingbat save state: " & origin, srkNotAState)
   var r = Reader(buf: data, pos: STATE_MAGIC.len)
@@ -523,15 +588,17 @@ proc parse_state_payload*(data: string; core: CoreKind;
   if fnv1a(result.payload) != payload_hash:
     raise state_error("save state payload hash mismatch (corrupt file)")
 
-proc state_names_rom*(data: string; core: CoreKind; rom_checksum, rom_size: uint32;
+proc state_names_rom*(raw: string; core: CoreKind; rom_checksum, rom_size: uint32;
                       legacy_checksums: seq[uint32] = @[];
                       whole_rom = WholeRom()): bool =
   ## Whether a state image's header says it was made in this core for this
   ## cart, the identity test parse_state_payload applies, and nothing else:
   ## a damaged or too-new state for this cart still counts. Never raises and
   ## leaves last_state_reject_kind alone.
-  if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
+  if raw.len < STATE_HEADER_SIZE or raw[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     return false
+  # The header decides alone when a packed body does not unpack.
+  let data = if is_packed_state(raw) and whole_rom.known: unpack_quietly(raw) else: raw
   var r = Reader(buf: data, pos: 12)   # core byte
   if r.read_u8() != uint8(core): return false
   r.pos = 16                           # rom_checksum, rom_size
@@ -541,10 +608,11 @@ proc state_names_rom*(data: string; core: CoreKind; rom_checksum, rom_size: uint
     (file_checksum == rom_checksum or file_checksum in legacy_checksums) and
     names_whole_rom(data, whole_rom)
 
-proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
+proc parse_state_thumbnail*(raw: string): tuple[w, h: int; pixels: seq[byte]] =
   ## The optional thumbnail trailer (BGR555), (0,0,@[]) if absent. Never
   ## raises, so a malformed trailer cannot break state loading.
   result = (0, 0, @[])
+  let data = unpack_quietly(raw)
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     return
   if (state_flags(data) and STATE_FLAG_THUMBNAIL) == 0:
