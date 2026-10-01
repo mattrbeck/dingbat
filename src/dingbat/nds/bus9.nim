@@ -27,7 +27,18 @@ proc dma_stall*(b: Arm9Bus; cycles: int64) =
 
 # --- I/O ---------------------------------------------------------------
 
-proc gx_dma(n: NDS)
+proc gx_service(n: NDS; appended = false)
+
+proc gx_write(n: NDS; o, v, mask: uint32) =
+  ## A geometry engine write; a full FIFO holds the bus, so the writer and
+  ## the ARM7 wait (GBATEK "DS 3D Geometry Commands": "the bus cannot be
+  ## used even by DMA, interrupts, or by the NDS7 CPU").
+  n.gpu3d.write_reg(o, v, mask)
+  let t = n.gpu3d.stall_until
+  if t > n.arm9.cycles:
+    n.arm9.cycles = t
+    n.arm7.cycles = max(n.arm7.cycles, t)
+  if not n.dma9.dma_access and o >= 0x400: n.gx_service(appended = o < 0x600)
 
 proc write_vcount(n: NDS; v: uint32) =
   ## VCOUNT is writable (GBATEK "DS Video", for syncing linked consoles):
@@ -90,8 +101,13 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFFFF_0000'u32) != 0: n.write_vcount(v shr 16)
   of 0x060: n.gpu3d.write_reg(o, v, mask)
   of 0x0B0 .. 0x0EC:
+    var was: array[4, bool]
+    for i in 0..3: was[i] = n.dma9.ch[i].enabled
     n.dma9.write_reg(Arm9Bus(nds: n), o, v, mask)
-    n.gx_dma()
+    # a channel (re)started mid-frame waits for the next frame in mode 4
+    for i in 0..3:
+      if n.dma9.ch[i].enabled and not was[i]: n.mmem_armed[i] = false
+    n.gx_service()
   of 0x100 .. 0x10C: n.timers9.write_reg(o, v, mask)
   of 0x130:
     if (mask and 0xFFFF_0000'u32) != 0:
@@ -130,7 +146,7 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFF) != 0: n.postflg9 = (n.postflg9 and 1) or uint8(v and 3)
   of 0x304:
     if (mask and 0xFFFF) != 0: n.gpu.write_powcnt1(uint16(v))
-  of 0x320 .. 0x6A0: n.gpu3d.write_reg(o, v, mask)
+  of 0x320 .. 0x6A0: n.gx_write(o, v, mask)
   of 0x1000 .. 0x106C: n.gpu.engine_b.write_reg(o - 0x1000, v, mask)
   else: n.note_unmapped("arm9 io", a, true)
 

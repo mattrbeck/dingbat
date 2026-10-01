@@ -12,22 +12,35 @@
 ## are, on the first `render_line` after V-blank (the hardware starts at line
 ## 214 with a 48-line cache, so this sees the same V-blank writes).
 ##
-## Timing model (TODO(3d) timing): commands execute the moment they reach
-## the FIFO, so it is only ever occupied while SWAP_BUFFERS waits for
-## V-blank. Entries queued behind a pending swap are kept even past 256
-## (the hardware would stall the writing CPU instead); GXSTAT reports at
-## most 256.
+## Timing (docs/nds/3d-timing.md): each command takes GBATEK's cycles
+## ("DS 3D Geometry Commands", 33.51 MHz units) from the moment it starts,
+## which is when the engine is free and all its parameters are in; its
+## effect (matrices, polygons, test results, the stack level) is applied
+## at that start and GXSTAT shows it busy until the end (bit 0 for the
+## tests, bit 14 for MTX_PUSH/POP, bit 27 for anything). The engine runs
+## lazily: `catch_up(t)` starts every command whose start time has come,
+## called before anything observes the engine. SWAP_BUFFERS holds the
+## engine until V-blank (`on_vblank`), then 392 cycles. A write that finds
+## PIPE + FIFO full (260 entries) sets `stall_until`, the time the next
+## command leaves the FIFO; the bus holds the writer (and the ARM7) until
+## then. Without a scheduler (`sched` nil, the unit tests) every command
+## takes no time.
 ##
 ## For DMA mode 7 (GX FIFO, the system side): start a 112-word burst
 ## whenever `fifo_wants_dma` (FIFO less than half full) holds; write the
-## words to 0x4000400.
+## words to 0x4000400. `wake_at` says when the FIFO next drops below half
+## (or empties) so the machine can schedule that.
 ## For the FIFO IRQ (IF bit 21, level-triggered): `update_irq` re-raises it
 ## while the GXSTAT 30-31 condition holds; it runs on every FIFO change and
 ## should also run after an IF acknowledge.
+##
+## The renderer's per-line budget (RDLINES_COUNT, DISP3DCNT.12) comes from
+## render.nim's line costs at each frame's render, latched at V-blank.
 
 import std/deques
 import ../mem/vram
 import ../io/irq
+import ../sched
 import geometry, render
 
 export geometry.Vertex, geometry.Polygon, render.Renderer
@@ -36,21 +49,25 @@ type
   FifoEntry = object
     cmd: uint8
     param: uint32
+    at: int64                     ## master cycle it entered the PIPE/FIFO
 
   Gpu3d* = ref object
     geo*: Geometry
     ren*: Renderer
     vram {.cursor.}: Vram
     irq {.cursor.}: IrqCtl
+    sched* {.cursor.}: NdsScheduler   ## the clock; nil = untimed (unit tests)
     disp3dcnt*: uint32
     irq_mode: uint32              ## GXSTAT 30-31
-    fifo: Deque[FifoEntry]
+    fifo: Deque[FifoEntry]        ## PIPE (first 4) + FIFO, oldest first
     pk_cmds: uint32               ## packed command bytes still to issue
     pk_cmd: uint8                 ## packed command taking parameters
     pk_left: int                  ## its parameter words still to come
-    ex_cmd: uint8                 ## command being gathered from entries
-    ex_n: int
     ex_params: array[32, uint32]
+    cur_cmd: uint8                ## the command started last...
+    cur_end*: int64               ## ...and when the engine is free again
+    stall_until*: int64           ## a full FIFO holds its writer until then
+    next_vblank*: int64           ## start of the next line 192 (set by the machine)
     swap_pending*: bool           ## SWAP_BUFFERS waiting for V-blank
     swap_req: uint32              ## its parameter
     geo_param: uint32             ## swap parameter for the buffer being filled
@@ -58,11 +75,13 @@ type
     polys*: seq[Polygon]          ## the rendering side of Polygon/Vertex RAM
     verts*: seq[Vertex]
     rendered: bool
+    rdlines: uint32               ## RDLINES_COUNT of the last frame
+    underflow_next: bool          ## the frame being shown runs out of lines
     line*: array[256, uint32]     ## 0 alpha = transparent
 
 proc new_gpu3d*(vram: Vram; irq: IrqCtl): Gpu3d =
   Gpu3d(geo: new_geometry(), ren: new_renderer(), vram: vram, irq: irq,
-        fifo: initDeque[FifoEntry](512))
+        fifo: initDeque[FifoEntry](512), rdlines: 46)
 
 proc to_bgr555*(p: uint32): uint16 {.inline.} =
   ## A 3D pixel's colour as the 2D engines' 15-bit BGR.
@@ -71,55 +90,136 @@ proc to_bgr555*(p: uint32): uint16 {.inline.} =
 proc alpha5*(p: uint32): uint32 {.inline.} = (p shr 24) and 31
 
 # ---------------------------------------------------------------------------
-# FIFO
+# FIFO and command timing
 
-const PIPE = 4   ## entries held in the PIPE ahead of the FIFO (GBATEK "DS 3D Geometry Commands")
+const
+  PIPE = 4          ## entries held in the PIPE ahead of the FIFO (GBATEK "DS 3D Geometry Commands")
+  FIFO_SIZE = 256
+  NEVER = high(int64)
+
+  ## Bus cycles (33.51 MHz) per command, GBATEK "DS 3D Geometry Commands".
+  ## NORMAL's 9..12 and the mode-2 extra are added in `cmd_cycles`.
+  CMD_CYCLES: array[256, int16] = block:
+    var c: array[256, int16]
+    for (id, n) in [(0x10, 1), (0x11, 17), (0x12, 36), (0x13, 17), (0x14, 36), (0x15, 19),
+                    (0x16, 34), (0x17, 30), (0x18, 35), (0x19, 31), (0x1A, 28), (0x1B, 22),
+                    (0x1C, 22), (0x20, 1), (0x21, 9), (0x22, 1), (0x23, 9), (0x24, 8),
+                    (0x25, 8), (0x26, 8), (0x27, 8), (0x28, 8), (0x29, 1), (0x2A, 1),
+                    (0x2B, 1), (0x30, 4), (0x31, 4), (0x32, 6), (0x33, 1), (0x34, 32),
+                    (0x40, 1), (0x41, 1), (0x50, 392), (0x60, 1), (0x70, 103), (0x71, 9),
+                    (0x72, 5)]:
+      c[id] = int16(n)
+    c
+  SWAP_CYCLES = 392   ## SWAP_BUFFERS after the V-blank it waited for
+
+proc cmd_cycles(g: Gpu3d; cmd: uint8; mode: int; attr: uint32): int64 =
+  ## Master cycles (2 per bus cycle) `cmd` keeps the engine busy, given the
+  ## matrix mode and the polygon attributes latched by BEGIN_VTXS.
+  if g.sched == nil: return 0
+  var n = int64(CMD_CYCLES[cmd])
+  case cmd
+  of 0x18, 0x19, 0x1A, 0x1C:
+    # "In MTX_MODE=2 (Simultaneous Set), MTX_MULT/TRANS take additional 30
+    # cycles" (GBATEK; MTX_SCALE has no asterisk and the reference runs
+    # agree it pays none: 3d_timing_cmds SCAL)
+    if mode == 2: n += 30
+  of 0x21:
+    # NORMAL: 9..12 for 0..4 lights per GBATEK, which leaves open which
+    # counts share a value; the reference runs give 9, 9, 10, 11, 12
+    # (3d_timing_cmds NRM; docs/oracles.md)
+    var lights = 0
+    for i in 0..3:
+      if (attr and (1'u32 shl i)) != 0: inc lights
+    n += max(0, lights - 1)
+  else: discard
+  2 * n
+
+proc now(g: Gpu3d): int64 {.inline.} =
+  if g.sched == nil: 0'i64 else: g.sched.now
+
+proc write_time(g: Gpu3d): int64 {.inline.} =
+  ## When a write lands: now, or later while a burst of writes (a DMA block)
+  ## is held by a full FIFO.
+  max(g.now(), g.stall_until)
 
 proc fifo_level(g: Gpu3d): int {.inline.} =
   ## FIFO entries as GXSTAT counts them: the first PIPE entries queued
   ## behind a stalled command sit in the PIPE, not the FIFO (3d_status:
   ## 40 queued behind SWAP_BUFFERS read as 36 on the reference core)
-  min(256, max(0, g.fifo.len - PIPE))
+  min(FIFO_SIZE, max(0, g.fifo.len - PIPE))
 
 proc fifo_wants_dma*(g: Gpu3d): bool {.inline.} = g.fifo_level < 128
 
+proc fifo_irq_mode*(g: Gpu3d): uint32 {.inline.} = g.irq_mode   ## GXSTAT 30-31
+
+proc run_command(g: Gpu3d; cmd: uint8; start: int64) =
+  let geo = g.geo
+  g.cur_cmd = cmd
+  g.cur_end = start + g.cmd_cycles(cmd, geo.mode, geo.attr)
+  if cmd == 0x50:
+    # SWAP_BUFFERS: the engine halts until V-blank (its cycles count from there)
+    g.swap_pending = true
+    g.swap_req = g.ex_params[0] and 3
+    g.cur_end = start
+  else:
+    geo.execute(cmd, g.ex_params.toOpenArray(0, max(0, int(CMD_PARAMS[cmd]) - 1)))
+
+proc catch_up*(g: Gpu3d; t: int64) =
+  ## Start every command whose start time is at or before `t`: the engine
+  ## is free and its last parameter has arrived.
+  while not g.swap_pending and g.fifo.len > 0:
+    let cmd = g.fifo[0].cmd
+    let n = max(1, int(CMD_PARAMS[cmd]))
+    if g.fifo.len < n: return
+    let start = max(g.cur_end, g.fifo[n - 1].at)
+    if start > t: return
+    for i in 0 ..< n: g.ex_params[i] = g.fifo.popFirst().param
+    g.run_command(cmd, start)
+
+proc wake_at*(g: Gpu3d; below: int): int64 =
+  ## When the FIFO count next drops below `below`, assuming no more writes
+  ## (NEVER if it is below already, or waits on a swap or an incomplete
+  ## command first). Commands leave the FIFO as they start, so this walks
+  ## the queue's start times.
+  if g.fifo_level < below: return NEVER
+  if g.swap_pending: return NEVER
+  var t = g.cur_end
+  var i = 0
+  var left = g.fifo.len
+  while i < g.fifo.len:
+    let cmd = g.fifo[i].cmd
+    let n = max(1, int(CMD_PARAMS[cmd]))
+    if i + n > g.fifo.len: return NEVER
+    let start = max(t, g.fifo[i + n - 1].at)
+    left -= n
+    if min(FIFO_SIZE, max(0, left - PIPE)) < below: return start
+    if cmd == 0x50: return NEVER
+    t = start + g.cmd_cycles(cmd, g.geo.mode, g.geo.attr)
+    i += n
+  NEVER
+
 proc update_irq*(g: Gpu3d) =
   ## IF.21 is set as long as the selected condition holds.
-  if g.irq == nil: return
+  if g.irq == nil or g.irq_mode == 0: return
+  g.catch_up(g.now())
   case g.irq_mode
   of 1: (if g.fifo_level < 128: g.irq.raise_irq(irqGxFifo))
   of 2: (if g.fifo_level == 0: g.irq.raise_irq(irqGxFifo))
   else: discard
 
-proc run_command(g: Gpu3d; cmd: uint8) =
-  if cmd == 0x50:
-    # SWAP_BUFFERS: the engine halts until V-blank
-    g.swap_pending = true
-    g.swap_req = g.ex_params[0] and 3
-  else:
-    g.geo.execute(cmd, g.ex_params.toOpenArray(0, max(0, int(CMD_PARAMS[cmd]) - 1)))
-
-proc feed(g: Gpu3d; e: FifoEntry) =
-  ## One entry into the engine: a command runs once its parameters are in.
-  if g.ex_n == 0: g.ex_cmd = e.cmd
-  let n = int(CMD_PARAMS[g.ex_cmd])
-  if n <= 0:
-    g.run_command(g.ex_cmd)
-    return
-  g.ex_params[g.ex_n] = e.param
-  inc g.ex_n
-  if g.ex_n == n:
-    g.ex_n = 0
-    g.run_command(g.ex_cmd)
-
-proc drain(g: Gpu3d) =
-  while g.fifo.len > 0 and not g.swap_pending:
-    g.feed(g.fifo.popFirst())
-
 proc push(g: Gpu3d; cmd: uint8; param: uint32) =
-  let e = FifoEntry(cmd: cmd, param: param)
-  if g.fifo.len == 0 and not g.swap_pending: g.feed(e)
-  else: g.fifo.addLast(e)
+  var t = g.write_time()
+  g.catch_up(t)
+  if g.sched != nil and g.fifo.len >= FIFO_SIZE + PIPE:
+    # FIFO full: "the STR opcode gets freezed" until the next command
+    # leaves the FIFO (GBATEK "Sending Commands by Ports"); behind a pending
+    # swap that is V-blank + the swap's 392 cycles
+    t = if g.swap_pending: max(t, g.next_vblank + 2 * SWAP_CYCLES)
+        else: max(t, g.cur_end)
+    g.stall_until = t
+    g.catch_up(t)
+  g.fifo.addLast(FifoEntry(cmd: cmd, param: param, at: t))
+  g.catch_up(t)
   g.update_irq()
 
 proc next_packed(g: Gpu3d) =
@@ -151,9 +251,18 @@ proc write_gxfifo(g: Gpu3d; v: uint32) =
 
 proc gxstat(g: Gpu3d): uint32 =
   let geo = g.geo
-  let busy = g.fifo.len > 0 or g.swap_pending or g.ex_n > 0 or g.pk_left > 0
-  result = (if geo.box_result: 2'u32 else: 0) or
+  let t = g.now()
+  g.catch_up(t)
+  let running = t < g.cur_end
+  let busy = running or g.fifo.len > 0 or g.swap_pending or g.pk_left > 0
+  # bit 0 while a test runs, bit 14 while a push/pop does (GBATEK; the
+  # reference runs flag MTX_STORE/RESTORE as not stack-busy too:
+  # 3d_timing_cmds MID)
+  let testing = running and g.cur_cmd in 0x70'u8..0x72'u8
+  let stacking = running and g.cur_cmd in 0x11'u8..0x12'u8
+  result = (if testing: 1'u32 else: 0) or (if geo.box_result: 2'u32 else: 0) or
            (uint32(geo.pos_sp and 31) shl 8) or (uint32(geo.proj_sp and 1) shl 13) or
+           (if stacking: 0x4000'u32 else: 0) or
            (if geo.stack_error: 0x8000'u32 else: 0) or
            (uint32(g.fifo_level()) shl 16) or
            (if g.fifo_level < 128: 1'u32 shl 25 else: 0) or
@@ -162,9 +271,12 @@ proc gxstat(g: Gpu3d): uint32 =
 
 proc read_reg*(g: Gpu3d; offset: uint32): uint32 =
   let geo = g.geo
+  if offset >= 0x600: g.catch_up(g.now())
   case offset
-  of 0x060: g.disp3dcnt or (if geo.overflow: 0x2000'u32 else: 0)
-  of 0x320: 46            # RDLINES_COUNT: the renderer never falls behind
+  of 0x060:
+    g.catch_up(g.now())
+    g.disp3dcnt or (if geo.overflow: 0x2000'u32 else: 0)
+  of 0x320: g.rdlines
   of 0x600: g.gxstat()
   of 0x604: uint32(geo.polys.len) or (uint32(geo.vram_count) shl 16)
   of 0x620 .. 0x62C: cast[uint32](geo.pos_result[(offset - 0x620) shr 2])
@@ -181,8 +293,10 @@ proc write_reg*(g: Gpu3d; offset: uint32; v, mask: uint32) =
   case offset
   of 0x060:
     # bits 12/13 are acknowledged by writing 1
+    g.catch_up(g.now())
     let w = v and mask
     g.disp3dcnt = (g.disp3dcnt and not (mask and 0x4FFF'u32)) or (w and 0x4FFF'u32)
+    if (w and 0x1000) != 0: g.disp3dcnt = g.disp3dcnt and not 0x1000'u32
     if (w and 0x2000) != 0: g.geo.overflow = false
   of 0x320 .. 0x3BC:
     let i = int((offset - 0x320) shr 2)
@@ -192,11 +306,15 @@ proc write_reg*(g: Gpu3d; offset: uint32; v, mask: uint32) =
     let cmd = uint8((offset - 0x400) shr 2)
     if CMD_PARAMS[cmd] >= 0: g.push(cmd, v)
   of 0x600:
+    g.catch_up(g.now())
     let m = mask and 0xC000_0000'u32
     g.irq_mode = ((g.irq_mode shl 30) and not m or (v and m)) shr 30
     if (v and mask and 0x8000) != 0: g.geo.ack_stack_error()
     g.update_irq()
   of 0x610:
+    # not through the FIFO: applies to every polygon not yet assembled,
+    # queued ones included (GBATEK DISP_1DOT_DEPTH)
+    g.catch_up(g.now())
     if (mask and 0xFFFF) != 0: g.geo.one_dot_depth = v and 0x7FFF
   else: discard
 
@@ -205,8 +323,12 @@ proc write_reg*(g: Gpu3d; offset: uint32; v, mask: uint32) =
 
 proc on_vblank*(g: Gpu3d) =
   ## Line 192: a pending SWAP_BUFFERS hands the geometry buffer to the
-  ## renderer, the geometry engine resumes on what queued behind it, and
-  ## the next frame renders afresh (the same buffer again if nothing swapped).
+  ## renderer and the geometry engine resumes 392 cycles later on what
+  ## queued behind it; the next frame renders afresh (the same buffer again
+  ## if nothing swapped). The frame just shown latches its RDLINES_COUNT
+  ## and underflow flag.
+  let t = g.now()
+  g.catch_up(t)
   if g.swap_pending:
     swap(g.polys, g.geo.polys)
     swap(g.verts, g.geo.verts)
@@ -215,8 +337,12 @@ proc on_vblank*(g: Gpu3d) =
     g.ren_param = g.geo_param
     g.geo_param = g.swap_req
     g.swap_pending = false
-    g.drain()
+    g.cur_end = t + (if g.sched == nil: 0'i64 else: 2 * SWAP_CYCLES)
+    g.catch_up(t)
     g.update_irq()
+  if g.rendered:
+    g.rdlines = g.ren.rdlines
+    if g.ren.underflow: g.disp3dcnt = g.disp3dcnt or 0x1000
   g.rendered = false
 
 proc render_frame*(g: Gpu3d) =

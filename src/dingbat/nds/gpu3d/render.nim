@@ -16,8 +16,18 @@
 ## Z-buffer depth interpolates linearly in screen space, W-buffer depth
 ## as the other attributes (Assumed).
 ##
-## TODO(3d): anti-aliasing, the hardware's polygon-per-line limits and
-## RDLINES underflow, and rendering per line against mid-frame writes.
+## Line budget (GBATEK "DS 3D Overview", RDLINES_COUNT): the hardware
+## renders line by line into a 48-line cache from line 214 on, and the
+## display takes a line from it at each line start; a line not ready by
+## then is an underflow (DISP3DCNT.12). Each frame's line costs are
+## estimated while drawing (`line_cost`: RENDER_POLY_CYCLES per polygon on
+## the line plus its span at RENDER_DOTS_PER_CYCLE; both Assumed, GBATEK
+## gives no figures and the reference runs do not model it:
+## 3d_timing_rdlines) and `budget` replays them against the display to
+## give the frame's RDLINES_COUNT (the fewest lines ever buffered, minus 2)
+## and whether it underflowed. The picture itself is unaffected.
+##
+## TODO(3d): rendering per line against mid-frame writes.
 
 import std/[algorithm, math]
 import ../mem/vram
@@ -31,6 +41,12 @@ const
   FLAG_FOG = 1'u8
   FLAG_EDGE = 2'u8
   FLAG_STENCIL = 4'u8
+  # line budget (Assumed; docs/nds/3d-timing.md)
+  RENDER_POLY_CYCLES {.intdefine.} = 8      ## per polygon crossing a line
+  RENDER_DOTS_PER_CYCLE {.intdefine.} = 2   ## span dots filled per bus cycle
+  LINE_BUS_CYCLES = 2130                    ## a display line: 355 dots x 6
+  CACHE_LINES = 48
+  RENDER_LEAD = 49                          ## line 214 to line 0 of the next frame
 
 type
   Renderer* = ref object
@@ -47,6 +63,9 @@ type
     zero_page: seq[uint8]
     mixed: seq[seq[uint8]]        ## pages several banks overlap: OR'd copies
     order: seq[int64]             ## sort key << 20 | polygon index
+    line_cost: array[H, int32]    ## estimated bus cycles to render each line
+    rdlines*: uint32              ## RDLINES_COUNT this frame would leave
+    underflow*: bool              ## a line was not ready when displayed
 
   PolyCtx = object
     attr, tex, pltt: uint32
@@ -522,6 +541,11 @@ proc aa_cov(e: Edge; y, x: int; right: bool): int32 =
   if right: int32(min(31'i64, (32 * num) div den))
   else: int32(clamp(31 - (32 * (den - num)) div den, 0'i64, 31'i64))
 
+proc charge(r: Renderer; y, x0, x1: int) {.inline.} =
+  ## Line budget: one polygon's span on line y.
+  let w = max(0, min(W, x1) - max(0, x0))
+  r.line_cost[y] += int32(RENDER_POLY_CYCLES + w div RENDER_DOTS_PER_CYCLE)
+
 proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcnt: uint32;
                   wbuffer: bool) =
   let n = int(poly.count)
@@ -574,6 +598,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let L = EndAttr(x: sx[li], c: va[li].c, s: va[li].s, t: va[li].t, z: va[li].z, w: va[li].w)
     let R = EndAttr(x: sx[ri], c: va[ri].c, s: va[ri].s, t: va[ri].t, z: va[ri].z, w: va[ri].w)
     var sp = span_step(L.x, R.x)
+    r.charge(int(ymin), int(sx[li]), max(int(sx[ri]), int(sx[li]) + 1))
     for x in max(0, int(sx[li])) ..< min(W, max(int(sx[ri]), int(sx[li]) + 1)):
       r.plot(c, x, int(ymin), L, R, sp, true)
     return
@@ -609,6 +634,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let re = edges[ri]
     let L = le.edge_run(y, false)
     let R = re.edge_run(y, true)
+    r.charge(y, int(L.s), int(R.e))
     # span ends: the outer ends of the two runs, each with the edge's
     # attributes for the row that end belongs to
     let yl = if le.amaj and le.dec: y + 1 else: y
@@ -749,6 +775,31 @@ proc fog(r: Renderer; disp3dcnt: uint32) =
 proc render_frame_body(r: Renderer; vram: Vram; polys: openArray[Polygon];
                        verts: openArray[Vertex]; disp3dcnt: uint32; swap_param: uint32)
 
+proc budget(r: Renderer) =
+  ## Replay the frame's line costs against the display: line k renders once
+  ## line k-1 is done and line k-48 has left the cache; display line j takes
+  ## its line at (RENDER_LEAD + j) line times after rendering starts. The
+  ## fewest lines buffered at any display, minus 2, is RDLINES_COUNT (46 when
+  ## the cache stays full).
+  var done: array[H, int64]
+  var t = 0'i64
+  for k in 0 ..< H:
+    var start = t
+    if k >= CACHE_LINES: start = max(start, int64(RENDER_LEAD + k - CACHE_LINES) * LINE_BUS_CYCLES)
+    t = start + r.line_cost[k]
+    done[k] = t
+  var fewest = CACHE_LINES
+  var k = 0
+  r.underflow = false
+  for j in 0 ..< H:
+    let shown = int64(RENDER_LEAD + j) * LINE_BUS_CYCLES
+    while k < H and done[k] <= shown: inc k
+    if k <= j: r.underflow = true
+    # past line 191 there is nothing left to buffer: the cache counts as
+    # full once every remaining line is in
+    fewest = min(fewest, if k >= H: CACHE_LINES else: min(k - j, CACHE_LINES))
+  r.rdlines = uint32(clamp(fewest - 2, 0, 46))
+
 proc render_frame*(r: Renderer; vram: Vram; polys: openArray[Polygon];
                    verts: openArray[Vertex]; disp3dcnt: uint32; swap_param: uint32) =
   ## Draw the swapped buffer: opaque polygons first, then translucent ones
@@ -775,6 +826,7 @@ proc render_frame_body(r: Renderer; vram: Vram; polys: openArray[Polygon];
     let ta = getMonoTime()
   r.build_pages(vram)
   r.clear(disp3dcnt)
+  for y in 0 ..< H: r.line_cost[y] = 0
   when defined(r3dprof):
     prof_setup += (getMonoTime() - ta).inNanoseconds
   let wbuffer = (swap_param and 2) != 0
@@ -799,3 +851,4 @@ proc render_frame_body(r: Renderer; vram: Vram; polys: openArray[Polygon];
   if (disp3dcnt and 0x10) != 0: r.anti_alias()
   if (disp3dcnt and 0x20) != 0: r.edge_mark((disp3dcnt and 0x10) != 0)
   if (disp3dcnt and 0x80) != 0: r.fog(disp3dcnt)
+  r.budget()

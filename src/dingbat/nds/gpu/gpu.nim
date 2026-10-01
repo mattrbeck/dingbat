@@ -19,6 +19,9 @@ type
     engine_a*, engine_b*: Engine2D
     gpu3d* {.cursor.}: Gpu3d          ## set by the machine; nil = no 3D layer
     capturing*: bool                  ## a capture started at line 0 is running
+    mmem_req*: proc (ctx: pointer): bool {.nimcall.}  ## DMA mode 4: one request, false if none ran
+    mmem_ctx*: pointer                ## its machine (raw: no ref cycle)
+    mmem_need: int                    ## pixels still to request this frame
     powcnt1*: uint16
     vcount*: int
     in_hblank*, in_vblank*: bool
@@ -59,6 +62,12 @@ proc start_line*(g: Gpu) =
   g.engine_b.start_line(g.vcount)
   if g.vcount == 0:
     g.capturing = (g.engine_a.dispcapcnt and 0x8000_0000'u32) != 0
+    g.mmem_need = 256 * 192
+  elif g.vcount == 192 and g.capturing:
+    # "the capture enable/busy bit is then automatically cleared (in line
+    # 192, regardless of the capture size)" (GBATEK)
+    g.capturing = false
+    g.engine_a.dispcapcnt = g.engine_a.dispcapcnt and not 0x8000_0000'u32
 
 const CAPTURE_SIZE = [(128, 128), (256, 64), (256, 128), (256, 192)]
 
@@ -66,7 +75,7 @@ proc capture_line(g: Gpu; y: int) =
   ## DISPCAPCNT: source A (graphics composite or 3D alone) and source B (a
   ## VRAM bank or the main-memory FIFO), one of them or their EVA/EVB blend,
   ## written as 15-bit + alpha into an LCDC-mapped bank. Offsets wrap in
-  ## the bank's 128K. Busy (bit 31) clears after the last captured line.
+  ## the bank's 128K. Busy (bit 31) clears at line 192 (`start_line`).
   let e = g.engine_a
   let cap = e.dispcapcnt
   let (w, h) = CAPTURE_SIZE[(cap shr 20) and 3]
@@ -90,13 +99,17 @@ proc capture_line(g: Gpu; y: int) =
     var ca, cb: uint16
     if src != 1:
       if a_3d:
-        if l3 != nil and alpha5(l3[x]) != 0:
-          ca = to_bgr555(l3[x]) or 0x8000
+        # "Dest_Intensity = SrcA_Intensity; Dest_Alpha = SrcA_Alpha"
+        # (GBATEK): a transparent 3D dot keeps its colour, without bit 15
+        # (disp_capture SRC3: the rear plane's colour, as all three
+        # reference cores have it)
+        if l3 != nil:
+          ca = to_bgr555(l3[x]) or (if alpha5(l3[x]) != 0: 0x8000'u16 else: 0)
       else:
         ca = e.gfx[x] or 0x8000
     if src != 0:
       if b_fifo:
-        cb = e.mmem_pixel(y, x)
+        cb = e.mmem_line[x]
       else:
         let i = (rbase + x * 2) and 0x1FFFF
         cb = uint16(rbank[i]) or (uint16(rbank[i + 1]) shl 8)
@@ -115,9 +128,19 @@ proc capture_line(g: Gpu; y: int) =
       let i = (wbase + x * 2) and 0x1FFFF
       dst[i] = uint8(c)
       dst[i + 1] = uint8(c shr 8)
-  if y == h - 1:
-    g.capturing = false
-    e.dispcapcnt = e.dispcapcnt and not 0x8000_0000'u32
+
+proc mmem_fetch(g: Gpu) =
+  ## The main-memory display FIFO hands out a line, 8 pixels at a time;
+  ## before each 8 it asks DMA mode 4 for 4-word blocks while it has room
+  ## (GBATEK "DS Video Capture and Main Memory Display Mode"), but never
+  ## for more than the frame's 256x192 pixels, so a DMA restarted each
+  ## frame lines up with line 0 (Assumed).
+  let a = g.engine_a
+  for x0 in countup(0, 248, 8):
+    if g.mmem_req != nil:
+      while g.mmem_need > 0 and a.mmem_room() and g.mmem_req(g.mmem_ctx):
+        g.mmem_need -= 8
+    a.mmem_take(x0)
 
 proc render_line*(g: Gpu; y: int) =
   ## Called at H-blank of a visible line: both engines, display capture,
@@ -125,6 +148,10 @@ proc render_line*(g: Gpu; y: int) =
   ## screen.
   let a = g.engine_a
   let cap = g.capturing and a.enabled
+  # the main-memory FIFO runs when display mode 3 or capture source B reads it
+  if a.display_mode == 3 or
+     cap and (a.dispcapcnt and (1'u32 shl 25)) != 0 and ((a.dispcapcnt shr 29) and 3) != 0:
+    g.mmem_fetch()
   # the 3D line is pulled when something shows or captures it
   if g.gpu3d != nil and ((a.bg0_is_3d and (a.dispcnt and 0x100) != 0) or
                          (cap and (a.dispcapcnt and (1'u32 shl 24)) != 0)):
