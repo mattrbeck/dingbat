@@ -253,9 +253,11 @@ proc scene_texture() =
   check(g1 > r1, "16-colour stripes: green-heavy on the left")
   let (r2, g2, _) = rgb_of(g.px(185, 30))
   check(r2 > g2 - 30, "16-colour stripes: redder on the right")
-  let (dr, _, _) = rgb_of(g.px(20, 150))
-  let (br, _, _) = rgb_of(g.px(28, 150))
-  check(br > dr, "4x4 compressed: interpolated ramp brightens to the right")
+  # each block row is texels 0, 1, 2, 3 = black, white, 3/8, 5/8 (mode 3);
+  # texel 0 covers about x 6..13, texel 3 about x 28..35
+  let (dr, _, _) = rgb_of(g.px(9, 150))
+  let (br, _, _) = rgb_of(g.px(31, 150))
+  check(dr == 0 and br > 30 and br < 45, "4x4 compressed: mode 3 texel 0 black, texel 3 at 5/8")
   # over the alpha-0 rear plane a translucent dot is written, not blended
   check(g.px(200, 150) == 0x1000003F'u32, "translucent red over the rear plane: " & toHex(g.px(200, 150)))
   let t = g.px(200, 70)

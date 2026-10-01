@@ -7,19 +7,19 @@
 ## 16-21 blue (6-bit, the 3D engine's 18-bit colour), bits 24-28 alpha
 ## (0..31). Alpha 0 is transparent.
 ##
-## Per polygon: scanlines from the top vertex row down to (not including)
-## the bottom vertex row; each row's span runs between the two edges that
-## cross it, from round(left) to round(right) exclusive, at least one dot.
-## Attributes are perspective-correct: along edges and spans the linear
-## factor f becomes p = f*w0 / ((1-f)*w1 + f*w0), with the polygon's w
-## values normalised to 16 bits first. Z-buffer depth interpolates
-## linearly in screen space, W-buffer depth perspective-correctly.
+## Per polygon: rows from the top vertex row down to (not including) the
+## bottom one; on each row the two edges crossing it cover runs of dots and
+## the span runs between them (edge rules below, at Edge). Attributes are
+## interpolated along the edges, then across the span: linearly where the
+## two ends' w are equal, else perspective-correctly with 9-bit (edge) and
+## 8-bit (span) factors. Colours carry 9 bits through interpolation.
+## Z-buffer depth interpolates linearly in screen space, W-buffer depth
+## as the other attributes (Assumed).
 ##
-## TODO(3d): anti-aliasing, the exact DS edge rules (the "small polygon"
-## right/bottom edge exclusions), the hardware's polygon-per-line limits
-## and RDLINES underflow, and rendering per line against mid-frame writes.
+## TODO(3d): anti-aliasing, the hardware's polygon-per-line limits and
+## RDLINES underflow, and rendering per line against mid-frame writes.
 
-import std/algorithm
+import std/[algorithm, math]
 import ../mem/vram
 import geometry
 
@@ -45,13 +45,6 @@ type
     zero_page: seq[uint8]
     mixed: seq[seq[uint8]]        ## pages several banks overlap: OR'd copies
     order: seq[int64]             ## sort key << 20 | polygon index
-
-  EdgeSample = object
-    x, xn: int64                  ## 16.16, here and on the next row
-    lo, hi: int32                 ## the dots the edge covers on this row
-    z, w, wn: int64               ## depth (linear), true w, normalised w
-    r, g, b: int64                ## 6-bit colour << 8
-    s, t: int64                   ## 12.4 texcoord << 4
 
   PolyCtx = object
     attr, tex, pltt: uint32
@@ -235,41 +228,105 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
 # ---------------------------------------------------------------------------
 # Rasterisation
 
-proc persp(f, w0, w1: int64): int64 {.inline.} =
-  ## Linear factor f (0..1 as 0..0x10000) from end 0 to end 1, made
-  ## perspective-correct with the ends' normalised w.
-  if w0 == w1: return f
-  let den = (0x10000 - f) * w1 + f * w0
-  if den <= 0: f else: ((f * w0) shl 16) div den
+# Edges. Screen positions are whole dots. An edge runs from its top vertex
+# to its bottom one and covers rows y0 ..< y1; its x on row y is
+#   X(y) = x0 << 18 + slope * (y - y0)  (minus 1 when x decreases),
+# slope = dx * floor(2^18 / dy), or exactly +-1.0 when |dx| == dy.
+# On each row an edge covers a run of dots: x-major edges (|dx| > dy) the
+# dots whose centres lie between X(y) and X(y + 1) (rounded, half up),
+# other edges the one dot holding X(y); a vertical right edge covers the
+# dot left of it. These are the rules the 3d_probe_tri* ROMs pin (run
+# against the reference cores, docs/oracles.md).
 
-proc sample_edge(a, b: Vertex; wa, wb: int64; y: int): EdgeSample =
-  ## Edge a (top) -> b (bottom) at row y.
-  let dy = int64(b.sy - a.sy)
-  template x_at(yy: int): int64 =
-    (int64(a.sx) shl 16) + (int64(b.sx - a.sx) shl 16) * (int64(yy) - a.sy) div dy
-  let f = ((int64(y) - a.sy) shl 16) div dy
-  let p = persp(f, wa, wb)
-  result.x = x_at(y)
-  result.xn = x_at(min(y + 1, int(b.sy)))
-  # the dots the edge passes through on this row, owned as a left edge
-  # (right of the boundary); the right edge's are shifted one left later
-  let xa = (min(result.x, result.xn) + 0x8000) shr 16
-  let xb = (max(result.x, result.xn) + 0x8000) shr 16
-  result.lo = int32(xa)
-  result.hi = int32(max(xa, xb - 1))
-  result.z = int64(a.z24) + (int64(b.z24) - a.z24) * f div 0x10000
-  result.w = int64(a.w) + (int64(b.w) - a.w) * p div 0x10000
-  result.wn = wa + (wb - wa) * p div 0x10000
-  result.r = (int64(a.r) shl 8) + ((int64(b.r) - a.r) shl 8) * p div 0x10000
-  result.g = (int64(a.g) shl 8) + ((int64(b.g) - a.g) shl 8) * p div 0x10000
-  result.b = (int64(a.b) shl 8) + ((int64(b.b) - a.b) shl 8) * p div 0x10000
-  result.s = (int64(a.s) shl 4) + ((int64(b.s) - a.s) shl 4) * p div 0x10000
-  result.t = (int64(a.t) shl 4) + ((int64(b.t) - a.t) shl 4) * p div 0x10000
+const
+  XSHIFT = 18
+  XHALF = 1'i64 shl (XSHIFT - 1)
 
-proc vertex_sample(v: Vertex; wn: int64): EdgeSample =
-  EdgeSample(x: int64(v.sx) shl 16, xn: int64(v.sx) shl 16, lo: v.sx, hi: v.sx, z: v.z24, w: v.w, wn: wn,
-             r: int64(v.r) shl 8, g: int64(v.g) shl 8, b: int64(v.b) shl 8,
-             s: int64(v.s) shl 4, t: int64(v.t) shl 4)
+type
+  Edge = object
+    x0, y0, x1, y1: int32
+    a, b: int32                 ## vertex indices (top, bottom)
+    slope: int64
+    xmaj: bool                  ## |dx| > dy: runs of several dots
+    amaj: bool                  ## |dx| >= dy: endpoint attributes as x-major
+    dec, vert: bool
+
+  Run = object
+    s, e: int32                 ## dots s ..< e
+    xmaj, inc, vert: bool
+
+  VAttr = object                ## per-vertex attributes, interpolation units
+    c: array[3, int64]          ## 9-bit colour (6-bit * 8 + 7, 0 stays 0)
+    s, t: int64                 ## texcoord, 12.4
+    z: int64                    ## Z-buffer depth (24 bits)
+    w: int64                    ## clip w
+
+  EndAttr = object              ## attributes at one end of a row's span
+    x: int32
+    c: array[3, int64]
+    s, t, z, w: int64
+
+proc make_edge(sx, sy: openArray[int32]; a, b: int): Edge =
+  var a = a
+  var b = b
+  if sy[a] > sy[b]: swap(a, b)
+  result = Edge(x0: sx[a], y0: sy[a], x1: sx[b], y1: sy[b], a: int32(a), b: int32(b))
+  let dx = int64(sx[b] - sx[a])
+  let dy = int64(sy[b] - sy[a])
+  result.slope = if abs(dx) == dy: (if dx > 0: 1'i64 shl XSHIFT else: -(1'i64 shl XSHIFT))
+                 else: dx * ((1'i64 shl XSHIFT) div dy)
+  result.xmaj = abs(dx) > dy
+  result.amaj = abs(dx) >= dy
+  result.dec = dx < 0
+  result.vert = dx == 0
+
+template edge_x(e: Edge; y: int): int64 =
+  (int64(e.x0) shl XSHIFT) + e.slope * (int64(y) - e.y0) - (if e.dec: 1'i64 else: 0'i64)
+
+proc edge_run(e: Edge; y: int; right: bool): Run {.inline.} =
+  if e.vert:
+    return if right: Run(s: e.x0 - 1, e: e.x0, vert: true) else: Run(s: e.x0, e: e.x0 + 1, vert: true)
+  let xa = e.edge_x(y)
+  if e.xmaj:
+    let xb = e.edge_x(y + 1)
+    Run(s: int32((min(xa, xb) + XHALF) shr XSHIFT), e: int32((max(xa, xb) + XHALF) shr XSHIFT),
+        xmaj: true, inc: not e.dec)
+  else:
+    let p = int32(xa shr XSHIFT)
+    Run(s: p, e: p + 1, inc: not e.dec)
+
+# Interpolation (3d_probe_lerp / _persp / _persp_tex): colours carry 9 bits
+# (shown as c >> 3). Between two points with equal w the value moves
+# linearly, floor(a + (b - a) * n / d); with different w by a perspective
+# factor f = floor(n * w0 * 2^P / (n * w0 + (d - n) * w1)), P = 9 along
+# edges and 8 across spans, as a + ((b - a) * f >> P).
+
+proc lin(a, b, n, d: int64): int64 {.inline.} =
+  a + floorDiv((b - a) * n, d)
+
+template pfac(n, d, w0, w1: int64; P: int): int64 =
+  ((n * w0) shl P) div (n * w0 + (d - n) * w1)
+
+proc edge_end(e: Edge; va: openArray[VAttr]; y: int; x: int32): EndAttr {.inline.} =
+  ## The edge's attributes at row y (y + 1 for the far end of an x-major
+  ## run, see draw_polygon), placed at dot x.
+  let A = va[e.a]
+  let B = va[e.b]
+  let n = int64(y) - e.y0
+  let d = int64(e.y1 - e.y0)
+  result.x = x
+  result.z = lin(A.z, B.z, n, d)
+  if A.w == B.w:
+    for k in 0..2: result.c[k] = lin(A.c[k], B.c[k], n, d)
+    result.s = lin(A.s, B.s, n, d)
+    result.t = lin(A.t, B.t, n, d)
+    result.w = A.w
+  else:
+    let f = pfac(n, d, A.w, B.w, 9)
+    for k in 0..2: result.c[k] = A.c[k] + ashr((B.c[k] - A.c[k]) * f, 9)
+    result.s = A.s + ashr((B.s - A.s) * f, 9)
+    result.t = A.t + ashr((B.t - A.t) * f, 9)
+    result.w = A.w + ashr((B.w - A.w) * f, 9)
 
 proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32 {.inline.} =
   ## Vertex colour x texel by polygon mode (GBATEK "DS 3D Texture Blending");
@@ -304,14 +361,30 @@ proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32
     pack(((tr + 1) * (vr + 1) - 1) shr 6, ((tg + 1) * (vg + 1) - 1) shr 6,
          ((tb + 1) * (vb + 1) - 1) shr 6, ((ta + 1) * (av + 1) - 1) shr 5)
 
-proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EdgeSample; inv: int64; edge: bool) {.inline.} =
-  ## One dot; `inv` = 2^32 / span width (16.16), 0 for a zero-width span.
+proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; edge: bool) {.inline.} =
+  ## One dot of the span from L to R.
   let i = y * W + x
-  # position along the span, at the dot's centre
-  let f = clamp((((int64(x) shl 16) + 0x8000 - L.x) * inv) shr 16, 0'i64, 0x10000'i64)
-  let p = persp(f, L.wn, R.wn)
-  let dval = if c.wbuffer: uint32(clamp(L.w + (R.w - L.w) * p div 0x10000, 0'i64, 0xFF_FFFF'i64))
-             else: uint32(clamp(L.z + (R.z - L.z) * f div 0x10000, 0'i64, 0xFF_FFFF'i64))
+  var cr, cg, cb, s, t, z, w: int64
+  let d = int64(R.x - L.x)
+  if d <= 0:
+    cr = L.c[0]; cg = L.c[1]; cb = L.c[2]; s = L.s; t = L.t; z = L.z; w = L.w
+  else:
+    let n = int64(x - L.x)
+    z = lin(L.z, R.z, n, d)
+    if L.w == R.w:
+      cr = lin(L.c[0], R.c[0], n, d); cg = lin(L.c[1], R.c[1], n, d); cb = lin(L.c[2], R.c[2], n, d)
+      s = lin(L.s, R.s, n, d); t = lin(L.t, R.t, n, d)
+      w = L.w
+    else:
+      let f = pfac(n, d, L.w, R.w, 8)
+      cr = L.c[0] + ashr((R.c[0] - L.c[0]) * f, 8)
+      cg = L.c[1] + ashr((R.c[1] - L.c[1]) * f, 8)
+      cb = L.c[2] + ashr((R.c[2] - L.c[2]) * f, 8)
+      s = L.s + ashr((R.s - L.s) * f, 8)
+      t = L.t + ashr((R.t - L.t) * f, 8)
+      w = L.w + ashr((R.w - L.w) * f, 8)
+  let dval = if c.wbuffer: uint32(clamp(w, 0'i64, 0xFF_FFFF'i64))
+             else: uint32(clamp(z, 0'i64, 0xFF_FFFF'i64))
   let old = r.depth[i]
   let pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
@@ -326,15 +399,13 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EdgeSample; inv: int64; edge
       r.flags[i] = r.flags[i] and not FLAG_STENCIL
       return
     if r.opaque_id[i] == c.id: return
-  let vr = int32((L.r + (R.r - L.r) * p div 0x10000) shr 8)
-  let vg = int32((L.g + (R.g - L.g) * p div 0x10000) shr 8)
-  let vb = int32((L.b + (R.b - L.b) * p div 0x10000) shr 8)
+  let vr = int32(clamp(ashr(cr, 3), 0, 63))
+  let vg = int32(clamp(ashr(cg, 3), 0, 63))
+  let vb = int32(clamp(ashr(cb, 3), 0, 63))
   var tx = 0'u32
   if c.textured:
-    let s = L.s + (R.s - L.s) * p div 0x10000
-    let t = L.t + (R.t - L.t) * p div 0x10000
-    tx = r.texel(c.tex, c.pltt, s shr 4, t shr 4)
-  let px = r.blend_texel(c, clamp(vr, 0, 63), clamp(vg, 0, 63), clamp(vb, 0, 63), tx)
+    tx = r.texel(c.tex, c.pltt, s, t)
+  let px = r.blend_texel(c, vr, vg, vb, tx)
   let a = int32(px shr 24)
   if a <= c.aref: return
   if a == 31 and c.mode != 3:
@@ -360,17 +431,17 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EdgeSample; inv: int64; edge
 proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcnt: uint32;
                   wbuffer: bool) =
   let n = int(poly.count)
-  if n < 1: return
-  var v: array[16, Vertex]
-  var wn: array[16, int64]
-  var wmax = 1'i64
+  if n < 1 or n > 16: return
+  var sx, sy: array[16, int32]
+  var va: array[16, VAttr]
+  var ymin = high(int32)
+  var ymax = low(int32)
   for i in 0 ..< n:
-    v[i] = verts[int(poly.first) + i]
-    wmax = max(wmax, int64(v[i].w))
-  # normalise w to 16 bits for the perspective weights
-  var sh = 0
-  while (wmax shr sh) > 0xFFFF: inc sh
-  for i in 0 ..< n: wn[i] = max(1'i64, int64(v[i].w) shr sh)
+    let v = verts[int(poly.first) + i]
+    sx[i] = v.sx; sy[i] = v.sy
+    ymin = min(ymin, v.sy); ymax = max(ymax, v.sy)
+    template c9(c6: int32): int64 = (if c6 == 0: 0'i64 else: int64(c6) * 8 + 7)
+    va[i] = VAttr(c: [c9(v.r), c9(v.g), c9(v.b)], s: v.s, t: v.t, z: v.z24, w: v.w)
   let fmt = (poly.tex shr 26) and 7
   let alpha = int32((poly.attr shr 16) and 31)
   let wire = alpha == 0
@@ -382,68 +453,85 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   highlight: (disp3dcnt and 2) != 0, blend: (disp3dcnt and 8) != 0,
                   # alpha test: drawn only if alpha > ALPHA_TEST_REF (> 0 when off)
                   aref: (if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32))
-  var area = 0'i64
+  # a polygon whose vertices sit on at most two dots is a line segment:
+  # always drawn whole (GBATEK "Polygon Definitions by Vertices")
+  var distinct2 = true
+  block:
+    var o = -1
+    for i in 1 ..< n:
+      if sx[i] != sx[0] or sy[i] != sy[0]:
+        if o < 0: o = i
+        elif sx[i] != sx[o] or sy[i] != sy[o]: distinct2 = false
+  # GBATEK "Polygon Size": only opaque polygons without edge marking or
+  # anti-aliasing leave out their bottom/right edges
+  let full = wire or distinct2 or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
+  if ymin == ymax:
+    # all on one row: the dots from the leftmost vertex to the rightmost
+    if ymin < 0 or ymin >= H: return
+    var li, ri = 0
+    for i in 1 ..< n:
+      if sx[i] < sx[li]: li = i
+      if sx[i] > sx[ri]: ri = i
+    let L = EndAttr(x: sx[li], c: va[li].c, s: va[li].s, t: va[li].t, z: va[li].z, w: va[li].w)
+    let R = EndAttr(x: sx[ri], c: va[ri].c, s: va[ri].s, t: va[ri].t, z: va[ri].z, w: va[ri].w)
+    for x in max(0, int(sx[li])) ..< min(W, max(int(sx[ri]), int(sx[li]) + 1)):
+      r.plot(c, x, int(ymin), L, R, true)
+    return
+  var edges: array[16, Edge]
+  var ne = 0
   for i in 0 ..< n:
-    let a = v[i]
-    let b = v[(i + 1) mod n]
-    area += int64(a.sx) * b.sy - int64(b.sx) * a.sy
-  let line = area == 0
-  # GBATEK "Polygon Size": opaque polygons drop their right and bottom
-  # edges; wire-frames, translucent ones while blending is on, and every
-  # polygon while edge marking or anti-aliasing is on keep them (vertical
-  # right edges excepted)
-  let full = wire or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
-  let ytop = int(poly.ymin)
-  let ybot = if poly.ymax == poly.ymin or full: int(poly.ymax) + 1 else: int(poly.ymax)
-  for y in max(0, ytop) ..< min(H, ybot):
-    var L, R: EdgeSample
-    var found = 0
-    for i in 0 ..< n:
-      var a = v[i]
-      var b = v[(i + 1) mod n]
-      var wa = wn[i]
-      var wb = wn[(i + 1) mod n]
-      if a.sy == b.sy: continue
-      if a.sy > b.sy: (swap(a, b); swap(wa, wb))
-      if y < a.sy or y >= b.sy: continue
-      let e = sample_edge(a, b, wa, wb, y)
-      # leftmost / rightmost crossing; ties (a shared top vertex) by slope
-      if found == 0: (L = e; R = e)
-      elif e.x < L.x or e.x == L.x and e.xn < L.xn: L = e
-      elif e.x > R.x or e.x == R.x and e.xn >= R.xn: R = e
-      inc found
-    if found == 0:
-      # a flat polygon, or a full-size one's bottom row: the row runs
-      # between the outermost vertices on it
-      var li, ri = -1
-      for i in 0 ..< n:
-        if v[i].sy != y: continue
-        if li < 0 or v[i].sx < v[li].sx: li = i
-        if ri < 0 or v[i].sx > v[ri].sx: ri = i
-      if li < 0: continue
-      L = vertex_sample(v[li], wn[li])
-      R = vertex_sample(v[ri], wn[ri])
-    elif found >= 2 and not line and not full:
-      # the right edge owns the dots left of its boundary
-      dec R.lo
-      dec R.hi
-    let xs = int((L.x + 0x8000) shr 16)
-    var xe = int((R.x + 0x8000) shr 16)
-    if full and (found == 0 or R.xn != R.x): xe = max(xe, int(R.hi) + 1)
-    if xe <= xs: xe = xs + 1           # at least one dot wide
-    let rim = y == ytop or y == ybot - 1
-    let inv = if R.x > L.x: (1'i64 shl 32) div (R.x - L.x) else: 0'i64
-    if line and found > 0 or wire and not rim:
-      # only the edges: line segments, and wire-frames between their rims
-      for x in max(0, int(L.lo)) .. min(W - 1, int(L.hi)):
-        r.plot(c, x, y, L, R, inv, true)
-      for x in max(0, int(R.lo)) .. min(W - 1, int(R.hi)):
-        if x < int(L.lo) or x > int(L.hi): r.plot(c, x, y, L, R, inv, true)
-    else:
-      for x in max(0, xs) ..< min(W, xe):
-        let edge = rim or (x >= int(L.lo) and x <= int(L.hi)) or
-                   (x >= int(R.lo) and x <= int(R.hi))
-        r.plot(c, x, y, L, R, inv, edge)
+    let j = (i + 1) mod n
+    if sy[i] == sy[j]: continue
+    edges[ne] = make_edge(sx, sy, i, j)
+    inc ne
+  var nbottom = 0
+  for i in 0 ..< n:
+    if sy[i] == ymax: inc nbottom
+  let flat_bottom = nbottom >= 2
+  for y in max(0, int(ymin)) ..< min(H, int(ymax)):
+    # the two edges crossing this row, ordered by x at the row's centre
+    var li, ri = -1
+    for k in 0 ..< ne:
+      if edges[k].y0 > y or edges[k].y1 <= y: continue
+      if li < 0: li = k
+      elif ri < 0: ri = k
+    if li < 0 or ri < 0: continue
+    block:
+      let a = edges[li]
+      let b = edges[ri]
+      # x(y + 1/2) of each as a fraction over 2*dy, cross-multiplied
+      let na = int64(a.x0) * 2 * (a.y1 - a.y0) + int64(a.x1 - a.x0) * (2 * y + 1 - 2 * a.y0)
+      let nb = int64(b.x0) * 2 * (b.y1 - b.y0) + int64(b.x1 - b.x0) * (2 * y + 1 - 2 * b.y0)
+      let lhs = na * (b.y1 - b.y0)
+      let rhs = nb * (a.y1 - a.y0)
+      if lhs > rhs or lhs == rhs and a.edge_x(y) > b.edge_x(y): swap(li, ri)
+    let le = edges[li]
+    let re = edges[ri]
+    let L = le.edge_run(y, false)
+    let R = re.edge_run(y, true)
+    # span ends: the outer ends of the two runs, each with the edge's
+    # attributes for the row that end belongs to
+    let yl = if le.amaj and le.dec: y + 1 else: y
+    let yr = if re.amaj and not re.dec and not re.vert: y + 1 else: y
+    let EL = le.edge_end(va, yl, L.s)
+    let ER = re.edge_end(va, yr, R.e)
+    let rim = y == int(ymin) or y == int(ymax) - 1
+    if wire and y != int(ymin):
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, true)
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, true)
+      continue
+    # which runs are drawn: all when full size; else the left run unless it
+    # is a bottom x-major edge, the right run only when it is a top x-major
+    # edge (or vertical); on the last row above a flat bottom, the x-major
+    # runs both (3d_probe_tri, 3d_probe_tri_flat)
+    let last_flat = flat_bottom and y == int(ymax) - 1
+    let ldraw = full or not (L.xmaj and L.inc) or last_flat
+    let rdraw = full or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
+    if ldraw:
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, true)
+    for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, rim)
+    if rdraw:
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, true)
 
 {.pop.}
 
