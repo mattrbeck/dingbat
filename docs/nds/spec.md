@@ -62,6 +62,14 @@ gap1 and gap2, and both SPI buses keep their busy flags for the byte's time at
 the selected baud rate. With these, SoulSilver runs frame-locked with the
 reference core (docs/oracles.md, "NDS core").
 
+The ARM9's protection unit refuses accesses outside every region or
+against a region's AP bits with a data abort (lr = opcode + 8) or prefetch
+abort (lr = opcode + 4), as libnds's exception handler expects. For speed,
+fetches are checked on branches and page crossings and data accesses to
+main RAM and DTCM are not checked at all (`bus9.nim` pu_check9). Direct
+boot leaves the regions as the firmware does, with the unit off
+(`boot.nim`; docs/oracles.md).
+
 ## Layout
 
 ```
@@ -98,10 +106,12 @@ src/dingbat/nds/
   io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
 src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
+tools/ndssweep.nim                 compatibility sweep against tools/ndsref (docs/nds/compat.md)
 web/nds.html, web/nds/             dev page (two canvases, keys, touch)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
+tests/nds_compat_test.nim          checks for the homebrew sweep's fixes
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask

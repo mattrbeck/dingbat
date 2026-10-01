@@ -4,9 +4,11 @@
 ##
 ##   nim c -d:release -d:test_harness --path:src -o:ndssweep tools/ndssweep.nim
 ##   ./ndssweep ROM_OR_DIR.. [--out DIR] [--frames 600] [--shots 30,115,240,360,600]
-##       [--press SPEC] [--core melondsds | --no-ref] [--ndsref PATH]
+##       [--press SPEC] [--core NAME | --no-ref] [--ndsref PATH]
 ##       [--jobs N] [--timeout SECS] [--bios DIR] [--only NAME,..]
 ##
+## --core names the tools/ndsref core (or set $NDSSWEEP_CORE); docs/oracles.md
+## lists the cores and which one runs current libnds builds.
 ## Every ROM gets DIR/<name>/: ours_<F>.png, ref_<F>.png, ours.json (the
 ## metrics below), ours.err (our stderr: unmapped accesses, ...), ref.wav.
 ## DIR/results.tsv and DIR/table.md hold the summary, one row per ROM.
@@ -522,13 +524,14 @@ when isMainModule:
   var frames = 600
   var shots_s = DEFAULT_SHOTS
   var press = DEFAULT_PRESS
-  var core = "melondsds"
+  var core = getEnv("NDSSWEEP_CORE")   # the reference core (docs/oracles.md)
   var ndsref = ""
   var bios = ""
   var width = max(1, countProcessors() - 1)
   var timeout = 300.0
   var only: seq[string]
   var report_only = false
+  var no_ref = false
   var p = initOptParser(commandLineParams(), longNoVal = @["no-ref", "report"])
   for kind, key, val in p.getopt():
     case kind
@@ -541,7 +544,7 @@ when isMainModule:
       of "shots": shots_s = val
       of "press": press = val
       of "core": core = val
-      of "no-ref": core = ""
+      of "no-ref": no_ref = true
       of "ndsref": ndsref = val
       of "bios": bios = val
       of "jobs": width = parseInt(val)
@@ -560,9 +563,13 @@ when isMainModule:
       for f in walkDirRec(r):
         if f.toLowerAscii.endsWith(".nds"): files.add f
     else: files.add r
+  if no_ref: core = ""
   if only.len > 0: files = files.filterIt(it.splitFile.name in only)
   files.sort()
   if files.len == 0: quit("usage: ndssweep ROM_OR_DIR.. [--out DIR] (see the header)")
+  if core.len == 0 and not no_ref and one.len == 0:
+    quit("pass --core NAME (a tools/ndsref core; docs/oracles.md says which runs " &
+         "current libnds builds) or --no-ref")
   if core.len > 0 and ndsref.len == 0:
     ndsref = getAppFilename().parentDir / "ndsref"
     if not fileExists(ndsref): ndsref = currentSourcePath().parentDir / "ndsref" / "ndsref"
