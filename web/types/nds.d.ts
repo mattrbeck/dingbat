@@ -31,11 +31,15 @@ interface NdsCoreModule {
   _nds_save_ptr(): number;
   _nds_save_dirty(): number;
   _nds_save_clean(): void;
-  // Save states: built on another branch; absent from builds without them
-  // (index.js "Nintendo DS" checks before use).
-  _nds_state_size?: () => number;
+  // Save states (docs/nds/savestate.md); optional so index.js "Nintendo DS"
+  // still runs on a build without them. nds_state_size(thumbnail) packs the
+  // machine into a retained buffer (a 128x192 thumbnail trailer when
+  // thumbnail != 0) and returns its length; nds_state_load returns 1 or 0.
+  _nds_state_size?: (thumbnail?: number) => number;
   _nds_state_data?: () => number;
   _nds_state_load?: (ptr: number, len: number) => number;
+  _nds_state_error_kind?: () => number;
+  _nds_state_error?: () => number;
 }
 
 declare function createNdsCore(moduleArg?: {
