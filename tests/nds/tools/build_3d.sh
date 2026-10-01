@@ -1,6 +1,7 @@
 #!/bin/sh
 # build_3d.sh [name...]
-# Build the 3D test ROMs (tests/nds/src/3d_*/main.c + 3d_common, no
+# Build the 3D and display test ROMs (tests/nds/src/3d_*/main.c and
+# disp_*/main.c + 3d_common, no
 # library) into $DINGBAT_NDS_ROMS/3d (default ~/.cache/dingbat-nds/roms). Needs an arm-none-eabi gcc (devkitARM's
 # in /opt/devkitpro or ~/.cache/dingbat-dkp, or any bare-metal one; libgcc
 # provides the soft-float helpers) and python3. The ARM7 side is fb_both's
@@ -23,7 +24,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 if [ $# -gt 0 ]; then names="$*"; else
-  names=$(cd "$here/src" && ls 3d_*/main.c | sed 's|/main.c||')
+  names=$(cd "$here/src" && ls 3d_*/main.c disp_*/main.c | sed 's|/main.c||')
 fi
 
 ${X}as -march=armv4t -o "$tmp/arm7.o" "$here/src/fb_both/arm7.s"
