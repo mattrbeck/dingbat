@@ -179,6 +179,28 @@ block protection_unit:
     n.run9(STR_R1_R0)
     check (n.arm9.cpsr and 0x1F) == uint32(mSYS), "protection unit off: no abort"
 
+# ---------------------------------------------------------------------------
+# ARM9 branch refill also for a jump back into the word just fetched: a
+# two-opcode Thumb loop (SUB/BGT, WaitByLoop's) costs 4 cycles a pass with
+# the code cached (GBATEK "WaitByLoop": 20BAh*2 passes per ms at 67 MHz)
+
+block branch_refill:
+  echo "ARM9 branch refill"
+  proc loop_cycles(passes: uint32): int64 =
+    let n = machine()
+    Arm9Bus(nds: n).cp15_write(0, 1, 0, 0, n.cp15.control or 0x1005)  # PU + caches
+    for (a, v) in [(0x100, 0x3801'u16), (0x102, 0xDCFD'u16), (0x104, 0xE7FE'u16)]:
+      n.main_ram[a] = uint8(v); n.main_ram[a + 1] = uint8(v shr 8)
+    n.arm9.set_cpsr(uint32(mSYS) or FLAG_T)
+    n.arm9.r[0] = passes
+    n.arm9.next_pc = 0x0200_0100
+    var k = 0
+    while n.arm9.next_pc != 0x0200_0104'u32 and k < 100_000:
+      n.arm9.step(); inc k
+    n.arm9.cycles
+  let per = (loop_cycles(300) - loop_cycles(100)) div 200
+  check per == 4, "Thumb SUB/BGT loop: 4 ARM9 cycles a pass", $per & " cycles"
+
 if failures > 0:
   echo failures, " failed"
   quit(1)

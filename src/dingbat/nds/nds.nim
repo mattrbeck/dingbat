@@ -59,6 +59,7 @@ type
                                 ## fetch / read / write (bus9.nim)
     wait9*, wait7*: int64       ## bus cycles charged to the running instruction
     last_fetch9*, last_data9*: uint32  ## sequential-access tracking
+    last_pc9*: uint32           ## the ARM9's last opcode address (branch check)
     last_fetch7*, last_data7*: uint32
     frame_done*: bool
     line_start*: int64          ## master cycle the current line began
@@ -279,7 +280,7 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.tm.init_timing()
   n.tm.update_regions(n.cp15)
   n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
-  n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR
+  n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR; n.last_pc9 = NO_ADDR
   n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
   n.direct_boot()
   n.sched.schedule(HBLANK_CYCLES, evHBlank)

@@ -308,19 +308,24 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
 
 # --- CPU mixins --------------------------------------------------------
 
-proc fetch_cost9(n: NDS; a: uint32): bool {.inline.} =
+proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
   ## One opcode fetch: always a nonsequential 32-bit access; a Thumb pair
   ## shares it. ITCM and I-cache hits fit in the instruction's own cycle.
-  ## True when the protection unit refuses it: it sees a branch target or
-  ## the first word of a 4 KB page; a run of sequential fetches inside a
-  ## page (or a mode change without a branch, e.g. MSR to User) is not
-  ## re-checked.
+  ## Any jump pays the refill, also one back into the word just fetched (a
+  ## two-opcode Thumb loop, "B ." in ARM): GBATEK's WaitByLoop table, 4
+  ## ARM9 cycles per SUB/BGT pass with the BIOS cached, takes it.
+  ## True when the protection unit refuses the fetch: it sees a branch
+  ## target or the first word of a 4 KB page; a run of sequential fetches
+  ## inside a page (or a mode change without a branch, e.g. MSR to User) is
+  ## not re-checked.
   n.last_data9 = NO_ADDR
   let w = a and not 3'u32
-  if w == n.last_fetch9: return false
+  let sequential = a == n.last_pc9 + size
+  n.last_pc9 = a
+  if sequential and w == n.last_fetch9: return false
   var c = 0'i64
-  if w != n.last_fetch9 + 4 or (w and 0xFFF'u32) == 0:
-    if w != n.last_fetch9 + 4: c = BRANCH9
+  if not sequential or (w and 0xFFF'u32) == 0:
+    if not sequential: c = BRANCH9
     if n.pu_check9(a, 0):
       n.last_fetch9 = NO_ADDR
       return true
@@ -349,7 +354,7 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
 
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
-  if n.fetch_cost9(a): return 0
+  if n.fetch_cost9(a, 4): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd32(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
@@ -357,7 +362,7 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
-  if n.fetch_cost9(a): return 0
+  if n.fetch_cost9(a, 2): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02: return rd16(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
