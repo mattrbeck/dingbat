@@ -73,12 +73,18 @@ const KINDS = {
 // runners draw Chromium's WebGL in software at about three frames a second
 // (e2e/speed-probe.mjs), where WebKit runs at sixty.
 if (process.env.DINGBAT_E2E_NO_CHROMIUM) KINDS.mac = KINDS["mac-webkit"];
+// DINGBAT_E2E_CHROMIUM_CHANNEL=chromium: full Chromium rather than the
+// headless shell. On CI's macOS runners it draws at ~40 frames a second,
+// the shell at ~15 (speed-probe.mjs).
+const chromiumChannel = process.env.DINGBAT_E2E_CHROMIUM_CHANNEL;
+const launchOpts = (engine) =>
+  ({ headless: true, ...(engine === "chromium" && chromiumChannel ? { channel: chromiumChannel } : {}) });
 
 export const startRig = async () => {
   const web = await serveWeb();
   const browsers = new Map();
   const browser = async (engine) => {
-    if (!browsers.has(engine)) browsers.set(engine, await playwright[engine].launch({ headless: true }));
+    if (!browsers.has(engine)) browsers.set(engine, await playwright[engine].launch(launchOpts(engine)));
     return browsers.get(engine);
   };
   const contexts = [];
@@ -95,7 +101,7 @@ export const startRig = async () => {
       if (k.persistent) {
         const dir = await mkdtemp(join(tmpdir(), "dingbat-e2e-"));
         profiles.push(dir);
-        ctx = await playwright[k.engine].launchPersistentContext(dir, { headless: true, ...opts });
+        ctx = await playwright[k.engine].launchPersistentContext(dir, { ...launchOpts(k.engine), ...opts });
       } else {
         ctx = await (await browser(k.engine)).newContext(opts);
       }

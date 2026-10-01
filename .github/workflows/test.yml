@@ -274,7 +274,7 @@ jobs:
         # code link fallback over real RTCPeerConnections. Each in both
         # engines: WebKit is Safari's, so the iPhone's.
         if: runner.os == 'Linux'
-        timeout-minutes: 15
+        timeout-minutes: 30
         working-directory: web
         # npm ci and the browser downloads are idempotent network fetches.
         run: |
@@ -359,7 +359,8 @@ jobs:
 
   web-e2e-macos:
     # The same on a Mac, where Playwright's WebKit is Apple's - the engine an
-    # iPhone and Safari run; the Linux job's is the GTK port.
+    # iPhone and Safari run; the Linux job's is the GTK port - and Chromium
+    # draws fast enough to be the Mac, so this is the iPhone + Chrome pair.
     needs: wasm
     runs-on: macos-latest
     timeout-minutes: 45
@@ -377,7 +378,7 @@ jobs:
       - name: Two devices, one fake Drive
         working-directory: web
         env:
-          DINGBAT_E2E_NO_CHROMIUM: "1"
+          DINGBAT_E2E_CHROMIUM_CHANNEL: chromium
         run: |
           set -e
           ../.github/scripts/retry.sh 3 npm ci
