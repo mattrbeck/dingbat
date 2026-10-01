@@ -45,7 +45,7 @@ const
   INFO = 0x02300000'u32      ## BitUnPack info, callback table, temp buffer
   CB = 0x02310000'u32        ## callback code
   HANDLER = 0x02320000'u32   ## user IRQ handler
-  DTCM_BASE = 0x027C0000'u32 ## where direct boot puts the ARM9 DTCM
+  DTCM_BASE = 0x00800000'u32 ## where direct boot puts the ARM9 DTCM
 
 proc mini_rom(): seq[uint8] =
   ## A header plus `b .` for each CPU: ARM9 at 0x02000000, ARM7 at
