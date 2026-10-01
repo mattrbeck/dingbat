@@ -233,6 +233,40 @@ test("a battery save the game wrote is there after a reload", { skip }, async ()
   await ctx.close();
 });
 
+test("a save state taken in the app resumes the same frames and sound", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, rom("snd_tone.nds"));
+  await framesPast(page, 60);
+  const r = await page.evaluate(() => {
+    paused = true;
+    // 20 frames from here: the frame counter, both screens and the sound.
+    const run = () => {
+      ndsCore._nds_audio_clear();
+      for (let i = 0; i < 20; i++) ndsCore._nds_run_frame();
+      const a = ndsCore._nds_audio_ptr(), n = ndsCore._nds_audio_frames() * 2;
+      const t = ndsCore._nds_fb_top(), b = ndsCore._nds_fb_bottom();
+      return { frame: ndsCore._nds_frame_count(), n,
+               audio: Array.from(new Float32Array(ndsCore.HEAPU8.buffer, a, n)),
+               top: Array.from(ndsCore.HEAPU8.subarray(t, t + 256 * 192 * 4)).join(),
+               bottom: Array.from(ndsCore.HEAPU8.subarray(b, b + 256 * 192 * 4)).join() };
+    };
+    const state = captureStateBytes();
+    const first = run();
+    const ok = applyStateBytes(state);
+    const again = run();
+    return { size: state?.length ?? 0, ok, first, again };
+  });
+  assert.ok(r.size > 0, "the app captured a DS state");
+  assert.equal(r.ok, true, "the app applied it");
+  assert.ok(r.first.n > 0, "the tone produced sound");
+  assert.equal(r.again.frame, r.first.frame);
+  assert.deepEqual(r.again.audio, r.first.audio, "the same sound after the load");
+  assert.ok(r.again.top === r.first.top && r.again.bottom === r.first.bottom, "the same screens");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 const BENCH = process.env.DINGBAT_NDS_BENCH;
 test("unpaced frame time of DINGBAT_NDS_BENCH", { skip: skip || !BENCH || !existsSync(BENCH || "") },
   async () => {
