@@ -3903,11 +3903,13 @@ const handoffNews = async (game, remote, lib, live) => {
 };
 
 // Nothing of the game in memory is waiting to go up: its session is of this
-// moment, and its battery is the stored save, sent.
+// moment, and its battery is the stored save, sent. Asked after the read, so
+// the caller acts on it in the same run: a tap during the read (Resume, and
+// frames run) is seen.
 const heldGameIsSent = async (game) => {
+  let stored = await dbGet("save:" + game).catch(() => null);
   if (sessionMoved || sessionSnapFor !== game) return false;
   if (HANDOFF_KEYS(game).some((k) => syncState.queueUp.includes(k))) return false;
-  let stored = await dbGet("save:" + game).catch(() => null);
   return liveSaveSig() === sigOfSave(stored);
 };
 
@@ -3950,6 +3952,10 @@ const switchToHandoff = async (game) => {
     delete syncState.sigs[key];
     handoffForce.add(key);
     markUpload(key);
+    // As saved again: a flush may be sending this device's own copy right
+    // now (the offer schedules one), and its completion would otherwise
+    // take the key off the queue with the turned-down copy on Drive.
+    syncRemarked.add(key);
   }
   await saveSyncState();
   refreshHomeRecent();
@@ -4089,16 +4095,26 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     let held = currentOriginalName;
     if (held && currentRomName && !linkMode && !rollbackMode && !netActive() &&
         loadingName !== held && lib.recents.some((r) => r.name === held)) {
+      // The downloads below take seconds, and the player may close the game,
+      // go back into it or load another meanwhile (each moves loadGen).
+      const g0 = loadGen;
+      const running = () => document.body.classList.contains("running");
+      // Still the game in memory, by the player's leave: a game closed (or
+      // closing) since is no longer held - the files pass, or the next pull,
+      // lands what came, as for any closed game, where an offer would mark
+      // it seen and leave the closed copy resuming its older moment.
+      const stillHeld = () => currentOriginalName === held && (loadGen === g0 || running());
       let news = live(await handoffNews(held, remote, lib, live));
-      if (news.length) {
+      if (news.length && stillHeld()) {
         let where = fromWhere(news);
-        let onHome = !document.body.classList.contains("running");
-        if (onHome && live(await heldGameIsSent(held)) && currentOriginalName === held &&
+        // Decided in the run that acts: heldGameIsSent asks after its read.
+        if (!running() && live(await heldGameIsSent(held)) && loadGen === g0 &&
+            !running() && currentOriginalName === held &&
             live(await takeHandoff(held, news))) {
           gridDirty = true;
           showToast("“" + displayName(held) + "” was played on " + where +
                     " since — Resume picks up there");
-        } else {
+        } else if (stillHeld()) {
           // A later pull no longer lists what it marked seen below: kept.
           let kept = handoffStash?.game === held
             ? handoffStash.news.filter((o) => !news.some((n) => n.key === o.key)) : [];
