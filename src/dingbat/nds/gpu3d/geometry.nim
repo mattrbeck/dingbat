@@ -9,12 +9,14 @@
 ## Vectors are rows and matrices multiply on the right (v' = v * M), so
 ## MTX_MULT sets C = M * C and ClipMatrix = Position * Projection.
 
+import std/math
+
 type
   Mat* = array[16, int32]       ## m[0..15], row-major
 
   Vertex* = object
     x*, y*, z*, w*: int32       ## clip coordinates, 20.12
-    r*, g*, b*: int32           ## colour, 6 bits per channel
+    r*, g*, b*: int32           ## colour, 5 bits per channel
     s*, t*: int32               ## texcoord, 12.4
     sx*, sy*: int32             ## screen position in pixels, top-left origin
     z24*: int32                 ## Z-buffer depth (z/w scaled to 0..0xFFFFFF)
@@ -36,7 +38,7 @@ type
     stack_error*: bool          ## GXSTAT.15
     # vertex state
     vx, vy, vz: int32           ## last VTX coordinates (4.12)
-    cr, cg, cb: int32           ## current vertex colour (6-bit)
+    cr, cg, cb: int32           ## current vertex colour (5-bit)
     s_in, t_in: int32           ## TEXCOORD as issued
     s, t: int32                 ## texcoord after the transform mode
     attr_next, attr*: uint32    ## POLYGON_ATTR: written / latched at BEGIN
@@ -272,9 +274,9 @@ proc apply_normal(g: Geometry; p: uint32) =
       col[c] += (int64(g.specular[c]) * lc * shi) shr 17
       col[c] += (int64(g.diffuse[c]) * lc * dif) shr 17
       col[c] += (int64(g.ambient[c]) * lc) shr 5
-  g.cr = expand6(uint32(min(31'i64, col[0])))
-  g.cg = expand6(uint32(min(31'i64, col[1])))
-  g.cb = expand6(uint32(min(31'i64, col[2])))
+  g.cr = int32(min(31'i64, col[0]))
+  g.cg = int32(min(31'i64, col[1]))
+  g.cb = int32(min(31'i64, col[2]))
 
 # ---------------------------------------------------------------------------
 # Clipping and the viewport transform
@@ -290,21 +292,38 @@ template plane_dist(v: Vertex; plane: int): int64 =
   of 4: int64(v.w) + v.z
   else: int64(v.w) - v.z
 
-proc intersect(a, b: Vertex; da, db: int64): Vertex =
+proc intersect(a, b: Vertex; da, db: int64; plane: int): Vertex =
   ## The point on a->b where the plane distance crosses zero; always
   ## computed from the inside vertex `a` so shared edges clip identically.
   let den = da - db
+  # coordinates and texcoords round down, colours (5-bit) round up
+  # (3d_probe_clip / _clip_persp / _clipq, 3d_vcolor, 3d_clip on the
+  # reference core)
   template lerp(f: untyped): int32 =
-    lo32(int64(a.f) + (int64(b.f) - a.f) * da div den)
-  Vertex(x: lerp(x), y: lerp(y), z: lerp(z), w: lerp(w), r: lerp(r), g: lerp(g),
-         b: lerp(b), s: lerp(s), t: lerp(t))
+    lo32(int64(a.f) + floorDiv((int64(b.f) - a.f) * da, den))
+  template clerp(f: untyped): int32 =
+    int32(int64(a.f) - floorDiv(-(int64(b.f) - a.f) * da, den))
+  result = Vertex(x: lerp(x), y: lerp(y), z: lerp(z), w: lerp(w), r: clerp(r), g: clerp(g),
+                  b: clerp(b), s: lerp(s), t: lerp(t))
+  # the new vertex lies exactly on the plane (3d_probe_clip_persp: a lerped
+  # x one unit inside +w would land a dot short of the screen edge)
+  case plane
+  of 0: result.x = -result.w
+  of 1: result.x = result.w
+  of 2: result.y = -result.w
+  of 3: result.y = result.w
+  of 4: result.z = -result.w
+  else: result.z = result.w
 
 proc clip_polygon*(src: openArray[Vertex]; dst: var array[MAX_CLIP, Vertex]): int =
   ## Sutherland-Hodgman against the six sides of the view volume.
   var a, b: array[MAX_CLIP, Vertex]
   var n = src.len
   for i in 0 ..< n: a[i] = src[i]
-  for plane in 0..5:
+  # near/far first, then y, then x: vertices cut by two planes (a corner)
+  # come out as the reference core has them (3d_vcolor, 3d_clip)
+  const ORDER = [4, 5, 2, 3, 0, 1]
+  for plane in ORDER:
     var m = 0
     for i in 0 ..< n:
       let cur = a[i]
@@ -313,9 +332,9 @@ proc clip_polygon*(src: openArray[Vertex]; dst: var array[MAX_CLIP, Vertex]): in
       let dn = plane_dist(nxt, plane)
       if dc >= 0:
         b[m] = cur; inc m
-        if dn < 0: (b[m] = intersect(cur, nxt, dc, dn); inc m)
+        if dn < 0: (b[m] = intersect(cur, nxt, dc, dn, plane); inc m)
       elif dn >= 0:
-        b[m] = intersect(nxt, cur, dn, dc); inc m
+        b[m] = intersect(nxt, cur, dn, dc, plane); inc m
       if m >= MAX_CLIP - 1: break
     n = m
     a = b
@@ -330,7 +349,7 @@ proc to_screen(g: Geometry; v: var Vertex) =
   let vw = int64(g.vp_x2 - g.vp_x1 + 1)
   let vh = int64(g.vp_y2 - g.vp_y1 + 1)
   v.sx = lo32((int64(v.x) + w) * vw div (2 * w) + g.vp_x1)
-  v.sy = lo32(192 - ((int64(v.y) + w) * vh div (2 * w) + g.vp_y1))
+  v.sy = lo32((w - int64(v.y)) * vh div (2 * w) + (191 - g.vp_y2))
   v.z24 = lo32(clamp(((int64(v.z) shl 14) div w + 0x3FFF) * 0x200, 0'i64, 0xFF_FFFF'i64))
 
 # ---------------------------------------------------------------------------
@@ -481,7 +500,7 @@ proc execute*(g: Geometry; cmd: uint8; p: openArray[uint32]) =
   of 0x1B: g.set_current(load_param_mat(p, cmd), true, pos_only = true)
   of 0x20:
     let c = rgb5(p[0], 0)
-    g.cr = expand6(uint32(c[0])); g.cg = expand6(uint32(c[1])); g.cb = expand6(uint32(c[2]))
+    g.cr = c[0]; g.cg = c[1]; g.cb = c[2]
   of 0x21: g.apply_normal(p[0])
   of 0x22:
     g.s_in = sext16(p[0])
@@ -517,8 +536,7 @@ proc execute*(g: Geometry; cmd: uint8; p: openArray[uint32]) =
     g.diffuse = rgb5(p[0], 0)
     g.ambient = rgb5(p[0], 16)
     if (p[0] and 0x8000) != 0:
-      g.cr = expand6(uint32(g.diffuse[0])); g.cg = expand6(uint32(g.diffuse[1]))
-      g.cb = expand6(uint32(g.diffuse[2]))
+      g.cr = g.diffuse[0]; g.cg = g.diffuse[1]; g.cb = g.diffuse[2]
   of 0x31:
     g.specular = rgb5(p[0], 0)
     g.emission = rgb5(p[0], 16)

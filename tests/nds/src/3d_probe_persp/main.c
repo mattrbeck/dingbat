@@ -6,10 +6,14 @@
 // lands exactly on dot (sx, sy) with w = 384m / 4096.
 //   MODE 0: vertex colours   MODE 1 (3d_probe_persp_tex): a 32x32 direct
 //   texture with texcoords (0,0), (32,0), (0,32) per vertex, colour white
+// WSCALE 16 / 256 (3d_probe_persp_w16 / _w256): w 16 / 256 times larger.
 #include "t3d.h"
 
 #ifndef MODE
 #define MODE 0
+#endif
+#ifndef WSCALE
+#define WSCALE 1   // the projection scales x, y and w by this (same dots, bigger w)
 #endif
 
 static u32 seed;
@@ -22,9 +26,9 @@ static u16 tex[32 * 32];
 
 static void scene(void) {
   static const s32 proj[16] = {
-    4096, 0, 0, 0,
-    0, 4096, 0, 0,
-    0, 0, 0, 4096,
+    4096 * WSCALE, 0, 0, 0,
+    0, 4096 * WSCALE, 0, 0,
+    0, 0, 0, 4096 * WSCALE,
     0, 0, 0, 0,
   };
   mtx_mode(0);

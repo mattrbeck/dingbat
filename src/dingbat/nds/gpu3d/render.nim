@@ -450,7 +450,9 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let v = verts[int(poly.first) + i]
     sx[i] = v.sx; sy[i] = v.sy
     ymin = min(ymin, v.sy); ymax = max(ymax, v.sy)
-    template c9(c6: int32): int64 = (if c6 == 0: 0'i64 else: int64(c6) * 8 + 7)
+    # 5-bit vertex colours carry 9 bits through interpolation: the 6-bit
+    # expansion (GBATEK, COLOR) times 8 plus 7, zero staying zero
+    template c9(c5: int32): int64 = (if c5 == 0: 0'i64 else: int64(c5) * 16 + 15)
     va[i] = VAttr(c: [c9(v.r), c9(v.g), c9(v.b)], s: v.s, t: v.t, z: v.z24, w: v.w)
   let fmt = (poly.tex shr 26) and 7
   let alpha = int32((poly.attr shr 16) and 31)
@@ -526,7 +528,10 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let EL = le.edge_end(va, yl, L.s)
     let ER = re.edge_end(va, yr, R.e)
     let rim = y == int(ymin) or y == int(ymax) - 1
-    if wire and y != int(ymin):
+    let last_flat = flat_bottom and y == int(ymax) - 1
+    # wire-frames: the two runs only, except on the top row and the row
+    # above a flat bottom, which are drawn whole
+    if wire and y != int(ymin) and not last_flat:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, true)
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, true)
       continue
@@ -534,7 +539,6 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     # is a bottom x-major edge, the right run only when it is a top x-major
     # edge (or vertical); on the last row above a flat bottom, the x-major
     # runs both (3d_probe_tri, 3d_probe_tri_flat)
-    let last_flat = flat_bottom and y == int(ymax) - 1
     let ldraw = full or not (L.xmaj and L.inc) or last_flat
     let rdraw = full or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
     if ldraw:
