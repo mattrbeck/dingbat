@@ -544,6 +544,8 @@ proc render_objs(e: Engine2D; y: int) =
     let x0 = max(0, sx)
     let x1 = min(256, sx + bw)
     for col in x0 ..< x1:
+      # an earlier OBJ already holds this pixel at this priority or better
+      if mode != 2 and prio >= e.objprio[col]: continue
       var ix = col - sx
       if mosaic and mos_h > 1: ix = (col - col mod mos_h) - sx
       var tx, ty: int
