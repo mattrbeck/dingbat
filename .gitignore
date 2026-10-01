@@ -48,6 +48,7 @@ web/rom.gbc
 /dingbat_lcdresponse_test
 /dingbat_savefooter_test
 /dingbat_gbartc_test
+/dingbat_ndshlebios_test
 /dingbat_desktop_input_test
 /dingbat_printer_test
 /rewind_codec
@@ -192,9 +193,10 @@ formal/.lake/
 web/nds/nds.js
 web/nds/nds.wasm
 # Third-party DS test ROMs carry no licence; they live in ~/.cache/dingbat-nds/roms
-# (tests/nds/README.md). Only our own fb_*.nds, snd_tone.nds and gx_tri.nds are committed.
+# (tests/nds/README.md). Only our own fb_*, 2d_*, snd_tone and gx_tri .nds are committed.
 tests/nds/roms/*
 !tests/nds/roms/snd_tone.nds
 !tests/nds/roms/fb_hello.nds
 !tests/nds/roms/fb_both.nds
+!tests/nds/roms/2d_*.nds
 !tests/nds/roms/gx_tri.nds

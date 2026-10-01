@@ -40,7 +40,9 @@ on a dev page (`web/nds.html`). Hardware reference: `docs/nds/gbatek-notes.md`
   frontends' plumbing.
 - **BIOS:** real dumps are used when present (`--bios DIR` /
   `$DINGBAT_NDS_BIOS`: `bios9.bin`, `bios7.bin`, `firmware.bin`); firmware is
-  synthesized when missing. HLE BIOS is a subsystem below.
+  synthesized when missing, and a missing BIOS gets the HLE BIOS (below).
+  `DINGBAT_NDS_HLE=1` (or `new_nds(..., force_hle = true)`) forces the HLE
+  BIOS with dumps present, to compare the two on one ROM.
 
 ## Timeline and timing
 
@@ -62,6 +64,10 @@ src/dingbat/nds/
   bus9.nim         ARM9 map + I/O dispatch     (included by nds.nim)
   bus7.nim         ARM7 map + I/O dispatch     (included by nds.nim)
   boot.nim         direct boot, synthesized firmware, CRC16
+  hle_bios.nim     HLE BIOS: synthesized images + SWIs answered in Nim
+  hle_bios.s       its guest code (vectors, IRQ/SWI dispatch, IntrWait,
+                   callback decompressors); tools/nds_hle_bios.sh assembles
+                   it into hle_bios_image.nim
   sched.nim        event scheduler, timing constants
   arm/cpu.nim      ArmCpu[B]: ARM + Thumb, ARMv4T/v5TE
   arm/cp15.nim     CP15 registers, TCM regions
@@ -87,6 +93,7 @@ tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 web/nds.html, web/nds/             dev page (two canvases, keys, touch)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
+tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
@@ -125,3 +132,40 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 
 Milestone 1 (this skeleton): fb_hello / fb_both render on both screens in
 `ndsrun` and on `web/nds.html`.
+
+## HLE BIOS
+
+Without dumps each CPU gets a synthesized BIOS image (`hle_bios.nim`): real
+ARM code assembled from `hle_bios.s`, never bytes from Nintendo's BIOS. The
+CPU's `swi_hook` hands every SWI to `hle_swi` first; the pure ones (Div,
+Sqrt, CpuSet, CpuFastSet, GetCRC16, IsDebugger, BitUnPack, the ReadNormal
+decompressors, Diff filters, SoftReset, Halt/Sleep/CustomHalt/CustomPost,
+SoundBias, the ARM7 tables) run in Nim. WaitByLoop, IntrWait,
+VBlankIntrWait and the three ReadByCallback decompressors take the SWI
+vector into the image's dispatcher (SPSR/r11/r12/lr on the SVC stack,
+System mode with the caller's I bit), since they halt with IRQs taken
+between checks or call back into the game.
+
+`tests/nds_hle_bios_test.nim` runs each SWI on both BIOSes in the emulator
+with the same inputs and compares registers, written memory, IRQ handler
+calls and the IntrWait check word (`nimble test_ndshlebios`; without dumps
+it checks the HLE against expectations it computes). What it established
+beyond GBATEK:
+
+- The decompressors finish the token they are in, so output overruns the
+  header size by up to 17 (LZ77) or 129 (RL) bytes; the 16-bit-write
+  callback forms never store an odd last byte.
+- ARM9 IntrWait with r0 = 0: checks first, halts, and returns after that
+  one IRQ if the check found a flag (leaving what the IRQ set); otherwise
+  needs two IRQs. r0 = 1 and every ARM7 case behave as documented.
+- GetSineTable = round(sin(i * pi/128) * 0x7FFF); GetPitchTable =
+  round((2^(i/768) - 1) * 0x10000); GetVolumeTable = 0.1 dB steps from
+  -72.3 dB, round(128 * 10^((i-723)/200) * m) with m the largest of 16/4/2
+  keeping it below full scale, clamped to 127, except entries 602, 662 and
+  722, which read 126.
+- Register residues the HLE reproduces: CpuSet (word form) and CpuFastSet
+  advance r0/r1, CpuFastSet's r3 shows its "first N bytes" burst bug,
+  Sqrt leaves its Newton scratch in r1/r3, GetCRC16/BitUnPack/LZ77/RL/
+  Diff advance their pointers, the callback forms return the close pointer
+  in r1. BIOS-internal addresses left in r3 (and ARM7 RL's r0) are not
+  reproduced.

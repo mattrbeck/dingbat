@@ -213,6 +213,9 @@ proc spu_write32*(b: Arm7Bus; a: uint32; v: uint32) = b.nds.write7(a, v, 32)
 proc irq_line*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.line()
 proc irq_wake*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.wake()
 proc access_cycles*(b: Arm7Bus): int64 {.inline.} = 0   # TODO(timing)
-proc swi_hook*(b: Arm7Bus; comment: uint32): bool = false  # TODO(bios): HLE
 proc cp15_read*(b: Arm7Bus; op1, cn, cm, op2: uint32): uint32 = 0
 proc cp15_write*(b: Arm7Bus; op1, cn, cm, op2, v: uint32) = discard
+
+proc swi_hook*(b: Arm7Bus; comment: uint32): bool =
+  ## HLE BIOS: true = the SWI ran in Nim (hle_bios.nim), skip the vector.
+  b.nds.hle_bios7 and b.nds.arm7.hle_swi(comment)

@@ -11,6 +11,7 @@ import mem/vram
 import gpu/[gpu, engine2d]
 import gpu3d/gpu3d
 import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi]
+import hle_bios
 
 export cpu, sched, gpu, engine2d, input, vram, spu
 
@@ -32,6 +33,7 @@ type
     dtcm*: seq[uint8]           ## 16 KB
     bios9*: seq[uint8]          ## 4 KB at 0xFFFF0000
     bios7*: seq[uint8]          ## 16 KB at 0x00000000
+    hle_bios9*, hle_bios7*: bool  ## synthesized BIOS + HLE SWIs (hle_bios.nim)
     wramcnt*: uint8
     exmemcnt*: uint16           ## ARM9 EXMEMCNT; bits 7-15 are shared
     exmem7_lo*: uint16          ## ARM7 EXMEMSTAT bits 0-6 (its own copy)
@@ -183,6 +185,7 @@ proc on_line_end(n: NDS) =
     inc g.vcount
     if g.vcount == LINES: g.vcount = 0
   n.line_start = n.sched.now
+  g.start_line()
   if g.vcount == VISIBLE_LINES:
     g.in_vblank = true
     inc g.frame_count
@@ -228,22 +231,25 @@ proc read_file_bytes(path: string): seq[uint8] =
   result = newSeq[uint8](s.len)
   if s.len > 0: copyMem(addr result[0], unsafeAddr s[0], s.len)
 
-proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8]): NDS =
+proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
+              force_hle = false): NDS =
+  ## A missing BIOS dump (or `force_hle`) gets the HLE BIOS for that CPU.
   let n = NDS(sched: new_nds_scheduler(), vcount_write: -1)
   n.main_ram = newSeq[uint8](MAIN_RAM_SIZE)
   n.shared_wram = newSeq[uint8](32 * 1024)
   n.arm7_wram = newSeq[uint8](64 * 1024)
   n.itcm = newSeq[uint8](32 * 1024)
   n.dtcm = newSeq[uint8](16 * 1024)
-  n.bios9 = bios9
-  n.bios7 = bios7
-  if n.bios9.len < 4096: n.bios9.setLen(4096)
-  if n.bios7.len < 16384: n.bios7.setLen(16384)
+  n.hle_bios9 = force_hle or bios9.len < BIOS9_SIZE
+  n.hle_bios7 = force_hle or bios7.len < BIOS7_SIZE
+  n.bios9 = if n.hle_bios9: hle_bios9_image() else: bios9
+  n.bios7 = if n.hle_bios7: hle_bios7_image() else: bios7
   n.irq9 = IrqCtl()
   n.irq7 = IrqCtl()
   n.input = Input()
   n.gpu = new_gpu()
   n.gpu3d = new_gpu3d(n.gpu.vram, n.irq9)
+  n.gpu.gpu3d = n.gpu3d
   n.timers9 = Timers(sched: n.sched, irq: n.irq9, first_event: evTimer9_0)
   n.timers7 = Timers(sched: n.sched, irq: n.irq7, first_event: evTimer7_0)
   n.dma9 = new_dma(true, n.irq9)
@@ -266,12 +272,13 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8]): NDS =
 
 proc load_nds*(rom_path: string; bios_dir = ""): NDS =
   ## Load a ROM; BIOS/firmware come from `bios_dir` (bios9.bin, bios7.bin,
-  ## firmware.bin), else $DINGBAT_NDS_BIOS, else none (firmware synthesized;
-  ## without BIOS images, SWIs and IRQ vectors hit zeros -- TODO(bios): HLE).
+  ## firmware.bin), else $DINGBAT_NDS_BIOS, else none (firmware synthesized,
+  ## HLE BIOS). DINGBAT_NDS_HLE=1 forces the HLE BIOS even with dumps.
   let dir = if bios_dir.len > 0: bios_dir else: getEnv("DINGBAT_NDS_BIOS")
   new_nds(read_file_bytes(rom_path),
           read_file_bytes(dir / "bios9.bin"), read_file_bytes(dir / "bios7.bin"),
-          read_file_bytes(dir / "firmware.bin"))
+          read_file_bytes(dir / "firmware.bin"),
+          force_hle = getEnv("DINGBAT_NDS_HLE") == "1")
 
 proc run_until*(n: NDS; target: int64) =
   var ev: NdsEvent
