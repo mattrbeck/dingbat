@@ -44,26 +44,68 @@ def clicks(x, a, b):
     return float(np.sqrt(np.mean(d ** 2)))
 
 
+def ac_rms(x, a, b):
+    s = x[a:b]
+    return float(np.sqrt(np.mean((s - s.mean()) ** 2))) if len(s) else 0.0
+
+
+def runs(x, rate):
+    """Tonal runs (start, length in s): 50 ms windows where the 1000.5 Hz
+    projection dominates the window's RMS (a noise burst projects too, but is
+    mostly not that frequency)."""
+    win = rate // 20
+    floor = np.median([ac_rms(x, i, i + win) for i in range(0, len(x) - win, win)])
+    flags = []
+    for i in range(0, len(x) - win, win):
+        r = ac_rms(x, i, i + win) + 1e-9
+        flags.append(tone(x, rate, i, i + win) / r > 0.25 and r > 2 * floor + 1)
+    # one weak window does not split a tone
+    for k in range(1, len(flags) - 1):
+        if flags[k - 1] and flags[k + 1]: flags[k] = True
+    out, cur = [], None
+    for k, ok in enumerate(flags + [False]):
+        if ok and cur is None: cur = k
+        if not ok and cur is not None:
+            out.append((cur * win / rate, (k - cur) * win / rate)); cur = None
+    return out
+
+
 def analyse(path):
     x, rate = load(path)
-    win = rate // 100
-    lv = [tone(x, rate, i, i + win) for i in range(0, len(x) - win, win)]
-    on = next(i for i, v in enumerate(lv) if v > 0.3 * max(lv)) * win
-    T = lambda s: on + int(s * rate)
+    # Anchor on the Z tones (0.25, 0.25, 0.5, 0.25, 0.5, 0.25 s): the sync
+    # tone can be missed by a late recording start.
+    rs = [r for r in runs(x, rate) if r[1] >= 0.15]
+    want = [0.25, 0.25, 0.5, 0.25, 0.5, 0.25]
+    z1 = None
+    for k in range(len(rs) - 5):
+        if all(abs(rs[k + j][1] - want[j]) <= 0.12 for j in range(6)):
+            z1 = rs[k][0]
+    if z1 is None:
+        print(f'{os.path.basename(path)}: the Z tone pattern is not in this recording'); return
+    sync = z1 - 3.20
+    T = lambda s: int((sync + s) * rate)
     def mid(s, d):                          # the middle 60% of a segment
         return T(s + 0.2 * d), T(s + 0.8 * d)
-    print(f'{os.path.basename(path)}: sync onset at {on / rate:.2f} s')
-    quiet = np.mean([clicks(x, *mid(1.10, 0.3)), clicks(x, *mid(2.00, 0.3)), clicks(x, *mid(2.90, 0.3))])
-    quiet = max(quiet, 1.0)
-    n = [clicks(x, *mid(s, 0.6)) / quiet for s in (0.50, 1.40, 2.30)]
-    print(f'  noise click energy re the gaps: N1 shift 13 {n[0]:.2f}x, N2 shift 14 {n[1]:.2f}x, '
-          f'N3 shift 13 {n[2]:.2f}x')
-    ctl = min(n[0], n[2])
-    if ctl < 2:
-        print('  noise verdict: none -- the shift-13 controls are not above the gaps')
+    print(f'{os.path.basename(path)}: Z1 at {z1:.2f} s, so the sync tone at {sync:.2f} s')
+    # noise: a trigger loads the LFSR with 0x7FFF, so its output holds for
+    # the 15 steps until the first 0 reaches bit 0 -- 234 ms at shift 13 and,
+    # on the old GBA rule, 470 ms at shift 14 -- and then varies. Compare the
+    # loudest 50 ms of 0.30..0.58 s into each segment, past that start-up.
+    def onset(s):
+        a, b = T(s + 0.30), T(s + 0.58)       # past the LFSR start-up (below)
+        if a < 0: return None
+        w = rate // 20
+        return max(ac_rms(x, i, i + w) for i in range(a, b - w, w // 2))
+    gap = max(np.median([ac_rms(x, *mid(s, 0.3)) for s in (1.10, 2.00, 2.90) if T(s) >= 0]), 1.0)
+    n = {name: onset(s) for name, s in (('N1 shift 13', 0.50), ('N2 shift 14', 1.40), ('N3 shift 13', 2.30))}
+    print('  noise onset loudness re the gaps: ' +
+          ', '.join(f'{k} {"(before the recording)" if v is None else f"{v / gap:.1f}x"}' for k, v in n.items()))
+    ctl = [v for k, v in n.items() if v is not None and 'shift 13' in k]
+    if not ctl or n['N2 shift 14'] is None or min(ctl) / gap < 3:
+        print('  noise verdict: none -- no shift-13 control stands above the gaps')
     else:
-        print('  noise verdict: shift 14',
-              'frozen (GB rule)' if n[1] - 1 < 0.2 * (ctl - 1) else 'steps (old GBA rule)')
+        print('  noise verdict: shift 14', 'frozen (GB rule)' if n['N2 shift 14'] < 0.25 * min(ctl)
+              else 'steps (old GBA rule)')
     seg = {'Z1 ref 8': (3.20, .25), 'Z2 ref 12': (3.70, .25), 'Z3a 8': (4.20, .25),
            'Z3b 4x 0x80': (4.45, .25), 'Z4 ref 8': (4.95, .25), 'Z5a 8': (5.45, .25),
            'Z5b 0x88': (5.70, .25), 'Z6 ref 7': (6.20, .25)}
@@ -75,8 +117,11 @@ def analyse(path):
     z5 = amp['Z5b 0x88'] / amp['Z5a 8']
     lin = amp['Z2 ref 12'] / amp['Z1 ref 8']
     print(f'  check: Z2/Z1 = {lin:.3f} (want 1.500); control Z5b/Z5a = {z5:.3f} (want 0.875)')
-    print(f'  zombie verdict: Z3b/Z3a = {z3:.3f} ->',
-          'GB table (no change)' if abs(z3 - 1.0) < abs(z3 - 1.5) else 'old GBA rule (+1 a write)')
+    if abs(lin - 1.5) > 0.15 or abs(z5 - 0.875) > 0.1:
+        print('  zombie verdict: none -- the levels in this take are not linear (checks above)')
+    else:
+        print(f'  zombie verdict: Z3b/Z3a = {z3:.3f} ->',
+              'GB table (no change)' if abs(z3 - 1.0) < abs(z3 - 1.5) else 'old GBA rule (+1 a write)')
 
 
 def record(seconds):
@@ -84,6 +129,8 @@ def record(seconds):
     out = os.path.join(HERE, '.payloadcmp', 'zombie.wav')
     rec = subprocess.Popen(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'avfoundation',
                             '-i', ':0', '-t', str(seconds), '-ac', '1', '-ar', '48000', out])
+    import time
+    time.sleep(1.5)                         # the microphone takes a moment to open
     sys.path.insert(0, HERE)
     from monitor import Monitor, assemble
     code = assemble(os.path.join(HERE, '..', '..', 'tests', 'roms', 'payloads', 'zombie.s'), out_dir='/tmp')
@@ -96,7 +143,7 @@ def record(seconds):
 
 if __name__ == '__main__':
     if sys.argv[1] == 'record':
-        record(int(sys.argv[2]) if len(sys.argv) > 2 else 10)
+        record(int(sys.argv[2]) if len(sys.argv) > 2 else 12)
     else:
         for p in sys.argv[2:]:
             analyse(p)

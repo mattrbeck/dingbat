@@ -266,6 +266,13 @@ stamped by its own write:
   (SOUNDCNT_X bit 2 high throughout, as the page's control). So the CPU has
   no view of channel 3's position at all, and its trigger start-up (6
   T-cycles on the CGB) cannot be measured on the GBA.
+* Worth adding: an NRx2 write to a playing channel ("zombie mode") follows
+  the CGB's rule, not Pan Docs' shorter one: four writes of 0x80 (volume 8,
+  decrease, period 0) to a playing note leave it at volume 8, where the
+  "+1 if the old direction was decrease" rule gives 12. Heard, not read
+  (`tests/roms/payloads/zombie.s`, `tools/hwlink/zombie_listen.py`: the SP's
+  speaker recorded by a microphone, 1000.5 Hz amplitudes within one take):
+  volume 12 / 8 = 1.49, the written note 1.00 of its own volume-8 start.
 * Worth adding: no trigger lead before a sweep clock. The CGB misses a sweep
   clock for a trigger within 8 T-cycles before it (4 on DMG); on the AGB a
   note triggered closer and closer to the clock goes on taking it.
