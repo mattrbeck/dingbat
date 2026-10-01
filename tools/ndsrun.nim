@@ -32,11 +32,11 @@
 ##   --iolog            log every I/O access (repeats folded), from frame
 ##                      --iolog-from F
 ##   --watch HEX        log every write to that word (pc, line)
-##   --prof F0-F1       count instructions per 64-byte code block over frames
-##                      F0..F1-1 and print the busiest blocks per CPU
+##   --prof F0-F1       count instructions and master cycles per 64-byte code
+##                      block over frames F0..F1-1; print the costliest blocks
 ##   --spilog           log every card-SPI (save chip) byte: sent -> reply, pc
 
-import std/[os, strutils, parseopt, tables]
+import std/[os, strutils, parseopt, tables, sequtils]
 import zippy
 import dingbat/nds/nds
 
@@ -252,15 +252,21 @@ when isMainModule:
       if f == prof_from: n.arm9.profiling = true; n.arm7.profiling = true
       if f == prof_to:
         n.arm9.profiling = false; n.arm7.profiling = false
-        for (name, cpu_prof) in [("arm9", n.arm9.profile), ("arm7", n.arm7.profile)]:
-          var p = cpu_prof
+        for (name, ip, cp) in [("arm9", n.arm9.profile, n.arm9.cprofile),
+                               ("arm7", n.arm7.profile, n.arm7.cprofile)]:
+          var p = cp
           p.sort()
-          var total = 0
+          var total, itotal = 0
           for _, c in p: total += c
-          echo name, " profile: ", total, " instrs"
+          for _, c in ip: itotal += c
+          echo name, " profile: ", itotal, " instrs, ", total, " busy master cycles (",
+               formatFloat(total / ((prof_to - prof_from) * FRAME_CYCLES) * 100, ffDecimal, 1),
+               "% of the frames)"
           var k = 0
           for blk, c in p:
-            echo "  ", toHex(blk, 8), " ", c, " ", formatFloat(100 * c / max(total, 1), ffDecimal, 1), "%"
+            echo "  ", toHex(blk, 8), " ", formatFloat(100 * c / max(total, 1), ffDecimal, 1),
+                 "% cycles, ", ip.getOrDefault(blk), " instrs, ",
+                 formatFloat(c / max(ip.getOrDefault(blk), 1), ffDecimal, 2), " cyc/instr"
             inc k
             if k == 25: break
     for p in presses:
@@ -308,6 +314,11 @@ when isMainModule:
     if spec.len == 2:
       echo "--- engine ", spec[0], " BG", spec[1]
       stdout.write(n.bg_text(spec[0] == 'B', ord(spec[1]) - ord('0'), text_offset))
+  if pcs:
+    echo "cp15 control=", toHex(n.cp15.control, 8), " icache=", n.tm.ic_on, " dcache=", n.tm.dc_on,
+         " regions=", n.cp15.prot_regions.mapIt(toHex(it, 8)).join(","),
+         " ic=", toHex(n.cp15.icache_cfg, 2), " dc=", toHex(n.cp15.dcache_cfg, 2),
+         " wb=", toHex(n.cp15.wbuf_cfg, 2)
   echo "arm9 ", n.arm9.reg_dump()
   echo "arm7 ", n.arm7.reg_dump()
   for (is7, a, len, file) in dumps:
