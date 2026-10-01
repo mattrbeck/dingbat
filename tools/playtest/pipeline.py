@@ -115,6 +115,16 @@ def compare_checkpoints(results, names, subject, cmpdir, tag):
             for r2 in refs[i + 1:]:
                 entry['pairs'][f'{r1}~{r2}'] = classify.classify(results[r1]['checkpoints'].get(cp),
                                                                  results[r2]['checkpoints'].get(cp))
+        # every emulator against every other, grouped: who agrees with whom
+        have = [n for n in names if results[n]['checkpoints'].get(cp)]
+        same = {}
+        for i, a in enumerate(have):
+            for b in have[i + 1:]:
+                v = entry['pairs'].get(f'{a}~{b}') or entry['pairs'].get(f'{b}~{a}') or \
+                    classify.classify(results[a]['checkpoints'][cp], results[b]['checkpoints'][cp])
+                same[(a, b)] = v['verdict'] in ('IDENTICAL', 'SLIP', 'MINOR')
+        entry['clusters'] = _clusters(have, same)
+        entry['missing'] = [n for n in names if n not in have]
         # dingbat against itself: which configuration a difference follows
         # (HLE BIOS vs official, waitloop skipping on vs off)
         entry['variants'] = {}
@@ -153,6 +163,20 @@ def compare_checkpoints(results, names, subject, cmpdir, tag):
                           for s, v in entry['verdict'].items()}
         out[cp] = entry
     return out
+
+
+def _clusters(names, same):
+    """Groups of emulators that agree, by single linkage over `same`."""
+    groups = []
+    for n in names:
+        joined = [g for g in groups if any(same.get((m, n), same.get((n, m))) for m in g)]
+        merged = [n]
+        for g in joined:
+            merged = g + merged
+            groups.remove(g)
+        groups.append(merged)
+    order = {n: i for i, n in enumerate(names)}
+    return sorted((sorted(g, key=order.get) for g in groups), key=lambda g: (-len(g), order[g[0]]))
 
 
 def run(args):
@@ -333,6 +357,17 @@ def compare_audio(new, names, outdir):
         for n in [s] + refs:
             if n in raws:
                 p = os.path.join(clipdir, f"{s}-f{span['start_frame']}-{n}.wav")
+                if audio.clip(raws[n][0], raws[n][1], span['start_frame'], span['end_frame'], p):
+                    res['clips'][n] = p
+    for r, res in (out.get('refs') or {}).get('odd', {}).items():
+        if res.get('status') != 'DIFFERENT' or not res.get('runs'):
+            continue
+        os.makedirs(clipdir, exist_ok=True)
+        span = res['runs'][0]
+        res['clips'] = {}
+        for n in [r] + [x for x in refs if x != r] + subjects[:1]:
+            if n in raws:
+                p = os.path.join(clipdir, f"{r}-alone-f{span['start_frame']}-{n}.wav")
                 if audio.clip(raws[n][0], raws[n][1], span['start_frame'], span['end_frame'], p):
                     res['clips'][n] = p
     for raw, _ in raws.values():

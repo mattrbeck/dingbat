@@ -1,0 +1,110 @@
+@title Breath of Fire (USA)
+@file Breath of Fire (U) [!].gba
+@game ABFE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game in file 1, name "AA". The game writes the new file to SRAM when
+# the options screen is closed (back at GAME START/NEW GAME); then play the
+# burning-village opening: get up, follow Sara, watch her put out the fire,
+# go down to the refuge hall and talk to the villagers there. No later save
+# is reached: the hall's door stays blocked by villagers and no field menu
+# opened (START/SELECT/B do nothing in the opening), so the first
+# in-game save point was not found. [load] continues file 1, which restarts
+# the opening.
+[new]
+wait 900
+press START
+wait 500
+checkpoint title window=30 compare=text
+press START
+wait 120
+press A
+wait 300
+checkpoint file_select window=30 compare=text
+press A
+wait 300
+press A after=20
+press A after=20
+checkpoint naming window=30 compare=text
+press START after=30
+press A
+wait 300
+press LEFT
+wait 20
+press LEFT hold=8
+wait 20
+press DOWN hold=8
+wait 15
+press RIGHT hold=8
+wait 20
+tap DOWN times=2 every=15 hold=4
+wait 10
+checkpoint options window=30 compare=text
+press A
+wait 300
+press A
+wait 120
+press A
+wait 600
+tap A times=160 every=20 hold=4
+wait 600
+press RIGHT hold=40
+press UP hold=60
+wait 20
+press LEFT hold=60
+press A
+tap A times=40 every=20 hold=4
+wait 30
+press LEFT hold=130
+press A
+tap A times=60 every=20 hold=4
+wait 30
+press LEFT hold=40
+tap A times=10 every=20 hold=4
+wait 20
+press LEFT hold=80
+press DOWN hold=150
+wait 30
+press LEFT hold=20
+press DOWN hold=150
+wait 30
+press RIGHT hold=50
+wait 10
+press UP hold=8
+press A
+wait 120
+press LEFT hold=4
+press A
+wait 120
+tap B times=6 every=20 hold=4
+press DOWN hold=30
+press RIGHT hold=70
+wait 10
+press DOWN hold=4
+press A
+wait 150
+tap B times=6 every=20 hold=4
+press UP
+press A
+wait 150
+press A
+wait 60
+press A
+wait 60
+checkpoint downstairs window=30 compare=text
+
+[load]
+wait 900
+press START
+wait 500
+press START
+wait 120
+checkpoint continue_menu window=30 compare=text
+press A
+wait 120
+checkpoint file_list window=30 compare=text
+press A
+wait 600
+tap A times=20 every=20 hold=4
+checkpoint resumed window=30

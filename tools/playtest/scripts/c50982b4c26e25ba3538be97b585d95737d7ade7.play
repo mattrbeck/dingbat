@@ -1,0 +1,102 @@
+@title Donkey Kong Country 3 (USA)
+@file Donkey Kong Country 3 (U).gba
+@game BDQE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Slot 1, single player, name "AAA"; swim Dixie round the first island on the
+# overworld map to the cave, then Start > SAVE GAME > yes. [load] picks slot 1
+# and resumes on the map, then opens the pause menu.
+# Seen while authoring: from the intro on (f966) particles, bubbles and fish
+# differ between all three emulators every frame, and Dixie's overworld swim
+# position drifts by a few pixels (nba furthest right at f3136); menus agree.
+# Saves: dingbat-bios and nba wrote the same first 512 bytes, mgba differs at
+# bytes 1 and 11 (0x28 vs 0x26 and its checksum); nba writes an 8192-byte
+# file for this 4 Kbit EEPROM and on [load] shows all three slots empty
+# (f1632), so nba starts a new game instead of resuming.
+
+[new]
+wait 600
+checkpoint health window=30
+press A
+wait 300
+wait 600
+checkpoint title window=30
+press START
+wait 120
+checkpoint save_slots window=30
+press A
+wait 120
+press A
+wait 240
+checkpoint name_entry window=30
+press A after=20
+press A after=20
+press A after=40
+press START
+wait 180
+checkpoint overworld window=30
+press START
+wait 60
+press DOWN after=10
+press A
+wait 60
+press RIGHT hold=10
+wait 120
+press RIGHT hold=60
+wait 30
+press RIGHT hold=150
+wait 30
+press RIGHT+UP hold=90
+wait 30
+press RIGHT hold=40
+wait 30
+wait 60
+wait 120
+press A
+wait 120
+press RIGHT hold=60
+wait 20
+press START
+wait 40
+wait 120
+press DOWN after=10
+press A
+wait 60
+press DOWN+RIGHT hold=40
+wait 20
+press A
+wait 120
+press LEFT hold=60
+wait 10
+press DOWN hold=90
+press RIGHT hold=60
+wait 10
+press LEFT+DOWN hold=60
+wait 10
+press LEFT+DOWN hold=50
+wait 30
+checkpoint swimming window=30
+press START
+wait 60
+checkpoint pause_menu window=30
+press A
+wait 120
+checkpoint save_prompt window=10
+press A
+wait 180
+checkpoint saved window=0
+wait 60
+
+[load]
+wait 600
+press A
+wait 900
+press START
+wait 120
+checkpoint save_slots_loaded window=30
+press A
+wait 240
+checkpoint resumed window=30
+press START
+wait 60
+checkpoint resumed_pause window=30

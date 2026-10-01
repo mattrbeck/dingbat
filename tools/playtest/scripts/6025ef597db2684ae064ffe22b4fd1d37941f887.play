@@ -1,0 +1,90 @@
+@title Kuru Kuru Kururin (Europe)
+@file Kuru Kuru Kururin (E) [!].gba
+@game AKRP
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+# Slot 1, name "AA", Adventure > Easy, skip the story, fly Training stage 1
+# (centre the stick in each gap, no wall hits, 3"48 new record, rank in), back
+# on the Training map, where the game has saved. [load]: slot 1 shows
+# "AA Easy Training 2", Adventure resumes on the Training map; step back to
+# stage 1 to show the saved record.
+# Seen while authoring: title sparkles and menu highlight phases differ per
+# emulator; at the stage start (f2700) mgba's propeller is at a different
+# angle from dingbat-bios and nba, and nba's stage timer reads 0.02 s less
+# throughout (f2822, f3035) although its final time is the same 3"48.
+# All three saves byte-identical.
+
+[new]
+wait 600
+press START
+wait 120
+checkpoint title window=30 compare=text
+press START
+wait 120
+checkpoint slots window=30
+press A
+wait 120
+checkpoint name_entry window=30 compare=text
+press A after=15
+press A after=15
+wait 10
+press START
+wait 30
+press A
+wait 120
+checkpoint mode_select window=30 compare=text
+press A
+wait 180
+press RIGHT after=20
+press A
+wait 240
+checkpoint story window=30
+# mash A until changed timeout=1200 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=30 hold=4
+tap A times=10 every=30 hold=4
+wait 60
+tap A times=10 every=30 hold=4
+wait 60
+checkpoint level1 window=30
+press UP hold=12
+wait 2
+wait 16
+press RIGHT hold=24
+wait 1
+press DOWN hold=2
+press RIGHT hold=40
+wait 1
+press RIGHT hold=40
+wait 1
+press RIGHT+DOWN hold=30
+wait 1
+press UP+RIGHT hold=13
+press RIGHT hold=40
+wait 1
+press UP hold=5
+press RIGHT hold=45
+wait 1
+checkpoint goal window=10
+wait 240
+checkpoint cleared window=0 compare=text
+press A
+wait 240
+wait 60
+checkpoint training_map window=30
+
+[load]
+wait 600
+press START
+wait 120
+press START
+wait 120
+checkpoint slots_saved window=30 compare=text
+press A
+wait 120
+press A
+wait 240
+wait 60
+checkpoint training_map_resumed window=30
+press LEFT
+wait 90
+checkpoint stage1_record window=30

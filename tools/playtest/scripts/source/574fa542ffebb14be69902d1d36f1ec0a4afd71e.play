@@ -1,0 +1,67 @@
+@title Pokemon LeafGreen Version (USA)
+@file Pokemon - Leaf Green Version (U) (V1.0).gba
+@game BPGE
+@chip FLASH1M
+
+# New game as a boy; mashing A through Oak's speech types the player name
+# AAAAAAA on the keyboard; rival GREEN from the list; save in the bedroom.
+
+[new]
+wait 900
+press START
+until text "LEAFGREEN" timeout=1200 every=10
+checkpoint title window=0
+wait 60
+press START
+until text "CONTROLS" timeout=600 every=10
+wait 10
+checkpoint controls window=10
+mash A until text "GIRL" timeout=4000 every=20
+wait 20
+checkpoint gender window=10
+press A
+mash A until text "NEW NAME" timeout=1500 every=20
+wait 20
+checkpoint rival_name window=10
+press DOWN after=10
+press A
+until text "YES" timeout=300 every=5
+wait 10
+press A after=10
+mash A until blank timeout=3000 every=20
+until notblank timeout=1200 every=10
+wait 200
+checkpoint bedroom window=10
+press START
+until text "SAVE" timeout=120 every=5
+wait 10
+press DOWN after=10
+press DOWN after=10
+until selected "SAVE" timeout=60 every=5
+checkpoint start_menu window=10
+press A
+until text "save the game" timeout=300 every=5
+wait 60
+checkpoint save_prompt window=10
+press A
+until text "saved the game" timeout=900 every=5
+checkpoint saved window=0
+
+[load]
+wait 900
+press START
+until text "LEAFGREEN" timeout=1200 every=10
+wait 60
+press START
+until text "CONTINUE" timeout=600 every=10
+until text "PLAYER" timeout=120 every=5
+wait 30
+checkpoint continue_menu window=0
+press A
+until notblank timeout=600 every=10
+until stable 30 timeout=900
+checkpoint resumed
+press START
+until text "SAVE" timeout=120 every=5
+wait 10
+checkpoint resumed_menu

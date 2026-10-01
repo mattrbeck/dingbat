@@ -2,62 +2,75 @@
 @file Advance Wars 2 - Black Hole Rising (U) [!].gba
 @game AW2E
 @chip FLASH
+@frozen dingbat-bios,mgba,nba
 
 # Campaign > New, tap through the prologue and the Orange Star briefing into
 # the first map (Andy's mission). Mashing A through the opening dialogue ends
 # with the map menu open; Save from it. [load]: Campaign > Continue lands back
 # on that map.
-
 [new]
 wait 600
-mash START until text "PRESS START" timeout=1200 every=30
+# mash START until text 'PRESS START' timeout=1200 every=30  [taps dingbat-bios:6 mgba:6 nba:6]
+tap START times=6 every=30 hold=4
 checkpoint title window=30
-mash START until text "SELECT" timeout=900 every=30
+# mash START until text SELECT timeout=900 every=30  [taps dingbat-bios:3 mgba:3 nba:3]
+tap START times=3 every=30 hold=4
 wait 60
 checkpoint select_mode window=30 compare=text
-# CAMPAIGN opens CONTINUE / NEW with NEW lit while there is no save
 press A after=40
 checkpoint campaign_new window=0 compare=text
 press A
-until text "tightening" timeout=1500 every=10
+# until text tightening timeout=1500 every=10  [reached dingbat-bios+800 mgba+800 nba+800]
+wait 804
 wait 30
 checkpoint prologue window=0 compare=text
-mash A until text "CAMPAIGN" timeout=3000 every=30
-until text "needed to see" timeout=600 every=5
+# mash A until text CAMPAIGN timeout=3000 every=30  [taps dingbat-bios:56 mgba:56 nba:56]
+tap A times=56 every=30 hold=4
+# until text 'needed to see' timeout=600 every=5  [reached dingbat-bios+160 mgba+160 nba+160]
+wait 164
 wait 30
 checkpoint campaign_map window=0 compare=text
-mash A until blank timeout=9000 every=30
-until notblank timeout=900 every=4
-until text "forces here" timeout=900 every=5
+# mash A until blank timeout=9000 every=30  [taps dingbat-bios:134 mgba:134 nba:133]
+tap A times=134 every=30 hold=4
+# until notblank timeout=900 every=4  [reached dingbat-bios+28 mgba+28 nba+0]
+wait 32
+# until text 'forces here' timeout=900 every=5  [reached dingbat-bios+895 mgba+895 nba+865]
+wait 899
 wait 30
 checkpoint battle_intro window=30
-# the briefing ends on the map menu (CO / Intel / Options / Save / End)
-mash A until text "Options" timeout=6000 every=40
+# mash A until text Options timeout=6000 every=40  [taps dingbat-bios:60 mgba:60 nba:60]
+tap A times=60 every=40 hold=4
 wait 30
 checkpoint map_menu window=30
 press DOWN after=15
 press DOWN after=15
 press DOWN after=15
 press A
-until text "Save current" timeout=300 every=5
+# until text 'Save current' timeout=300 every=5  [reached dingbat-bios+25 mgba+25 nba+30]
+wait 34
 wait 30
 checkpoint save_prompt window=30
-mash A until notext "Save current" timeout=300 every=30
-until notext "Now saving" timeout=900 every=5
+# mash A until notext 'Save current' timeout=300 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=30 hold=4
+# until notext 'Now saving' timeout=900 every=5  [reached dingbat-bios+45 mgba+55 nba+45]
+wait 59
 wait 180
-checkpoint saved window=30 compare=none  # map units and cursor animate out of phase between emulators
+checkpoint saved window=30 compare=none
 
 [load]
 wait 600
-mash START until text "PRESS START" timeout=1200 every=30
-mash START until text "SELECT" timeout=900 every=30
+# mash START until text 'PRESS START' timeout=1200 every=30  [taps dingbat-bios:6 mgba:6 nba:6]
+tap START times=6 every=30 hold=4
+# mash START until text SELECT timeout=900 every=30  [taps dingbat-bios:4 mgba:4 nba:4]
+tap START times=4 every=30 hold=4
 wait 60
 checkpoint select_mode_loaded window=0 compare=text
-# CAMPAIGN opens with CONTINUE highlighted
 press A after=40
 checkpoint campaign_continue window=0 compare=text
 press A
-until blank timeout=600 every=4
-until notblank timeout=900 every=4
+# until blank timeout=600 every=4  [reached dingbat-bios+8 mgba+8 nba+8]
+wait 12
+# until notblank timeout=900 every=4  [reached dingbat-bios+56 mgba+56 nba+60]
+wait 64
 wait 240
 checkpoint resumed_map window=30

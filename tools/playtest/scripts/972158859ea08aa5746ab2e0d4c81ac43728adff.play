@@ -1,0 +1,337 @@
+@title Crash Bandicoot 2 - N-Tranced (USA)
+@file Crash Bandicoot 2 - N-Tranced (U).gba
+@game AC8E
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# New Game, skip the story, play the whole Island Intro tutorial level
+# (Aku Aku hints, TNT, double jumps, bounce crate, R-slide under steel,
+# crystal over a gap, double jump over a Nitro) into the exit portal;
+# the game offers "Continue and save" > slot 1, then the map.
+# [load]: title > Load Game shows 1% / 1 crystal, slot 1, resumed on the map.
+# Findings: save files differ in size: dingbat-bios 512 bytes, mgba and nba
+# 8192 bytes (same 16 data bytes in the first 512). Booted with its own file,
+# nba shows 0% and every slot EMPTY and stays on the load screen, so nba's
+# [load] checkpoints differ (dingbat-bios and mgba resume on the map).
+# In play nba's Crash is often one animation frame off the others (e.g.
+# f2738, f5211), positions agree.
+
+[new]
+wait 900
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press A
+wait 240
+checkpoint story window=30 compare=text
+press START
+wait 240
+checkpoint hub window=30
+press START
+wait 60
+press START
+wait 30
+hold RIGHT
+wait 120
+release
+checkpoint hint1 window=30
+press A
+wait 30
+hold RIGHT
+wait 120
+release
+press A
+wait 30
+press B
+wait 30
+hold RIGHT
+wait 60
+press RIGHT+B
+hold RIGHT
+wait 60
+release
+hold RIGHT
+wait 60
+release
+press A
+wait 30
+hold RIGHT
+wait 30
+press RIGHT+A hold=12
+hold RIGHT
+wait 80
+release
+press B
+wait 30
+hold RIGHT
+wait 90
+release
+hold RIGHT
+wait 30
+press RIGHT+B
+wait 30
+press B
+wait 30
+press B
+wait 30
+hold RIGHT
+wait 100
+release
+press B
+wait 30
+hold RIGHT
+wait 60
+press RIGHT+B
+hold RIGHT
+wait 60
+press RIGHT+B
+hold RIGHT
+wait 60
+release
+press A
+wait 30
+# mash A until notext THE timeout=600 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=30 hold=4
+wait 30
+hold RIGHT
+wait 12
+release
+press UP hold=10
+wait 120
+hold LEFT
+wait 15
+hold RIGHT
+wait 10
+press RIGHT+A hold=20
+hold RIGHT
+wait 120
+release
+# mash A until notext THE timeout=600 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=30 hold=4
+wait 30
+hold RIGHT
+wait 4
+press RIGHT+A hold=20
+hold RIGHT
+wait 60
+release
+checkpoint past_tnt window=30 compare=none
+hold RIGHT
+wait 90
+release
+hold RIGHT
+wait 60
+release
+wait 120
+checkpoint cutscene window=30
+press START
+wait 300
+hold RIGHT
+wait 30
+press RIGHT+B
+hold RIGHT
+wait 120
+release
+press A
+wait 30
+hold RIGHT
+wait 120
+release
+# mash A until notext HIT timeout=600 every=30  [taps dingbat-bios:0 mgba:0 nba:0]
+wait 30
+hold RIGHT
+wait 100
+release
+press A
+wait 40
+hold RIGHT
+wait 120
+release
+press A
+wait 30
+hold RIGHT
+wait 120
+release
+hold RIGHT
+press RIGHT+A hold=10
+hold RIGHT
+wait 6
+press RIGHT+A hold=12
+hold RIGHT
+wait 60
+wait 60
+release
+press A
+wait 30
+hold RIGHT
+wait 40
+release
+hold LEFT
+wait 20
+hold RIGHT
+wait 6
+press RIGHT+A hold=10
+hold RIGHT
+wait 6
+press RIGHT+A hold=12
+hold RIGHT
+wait 150
+release
+press A
+wait 30
+hold RIGHT
+wait 150
+release
+hold LEFT
+wait 20
+hold RIGHT
+wait 6
+press RIGHT+A hold=10
+hold RIGHT
+wait 6
+press RIGHT+A hold=12
+hold RIGHT
+wait 200
+release
+press RIGHT+A hold=14
+hold RIGHT
+wait 50
+hold RIGHT
+wait 10
+press RIGHT+A hold=10
+hold RIGHT
+wait 6
+press RIGHT+A hold=12
+hold RIGHT
+wait 30
+release
+wait 20
+hold RIGHT
+wait 150
+release
+press B
+wait 30
+hold RIGHT
+wait 60
+release
+hold DOWN+RIGHT
+wait 60
+release
+hold DOWN
+wait 4
+press DOWN+B
+hold DOWN+RIGHT
+wait 80
+release
+hold LEFT
+wait 50
+release
+wait 10
+hold LEFT
+wait 20
+release
+press A hold=12
+wait 30
+checkpoint slide_hint window=30
+press A
+wait 30
+hold RIGHT
+wait 40
+press RIGHT+R hold=10
+hold RIGHT
+wait 80
+release
+hold RIGHT
+wait 120
+release
+press A
+wait 30
+press A
+wait 40
+hold RIGHT
+wait 14
+press RIGHT+A hold=10
+hold RIGHT
+wait 6
+press RIGHT+A hold=14
+hold RIGHT
+wait 60
+release
+hold RIGHT
+wait 60
+release
+press A
+wait 30
+hold RIGHT
+wait 25
+press RIGHT+B
+wait 30
+hold RIGHT
+wait 40
+release
+hold RIGHT
+wait 4
+press RIGHT+A hold=14
+hold RIGHT
+wait 4
+press RIGHT+A hold=12
+hold RIGHT
+wait 30
+release
+wait 10
+hold RIGHT
+wait 22
+release
+press A
+wait 30
+hold RIGHT
+wait 6
+press RIGHT+A hold=14
+hold RIGHT
+wait 8
+press RIGHT+A hold=14
+hold RIGHT
+wait 6
+hold RIGHT
+wait 30
+release
+wait 20
+checkpoint past_nitro window=30 compare=none
+hold RIGHT
+wait 150
+release
+press A
+wait 30
+press A
+wait 30
+checkpoint portal window=30
+hold RIGHT
+wait 60
+release
+wait 240
+press START
+wait 300
+checkpoint save_prompt window=30
+press A
+wait 120
+checkpoint save_slots window=30 compare=text
+press A
+wait 150
+checkpoint saved window=0 compare=text
+
+[load]
+wait 900
+press START
+wait 120
+press DOWN
+wait 20
+press A
+wait 120
+checkpoint load_save_menu window=30 compare=text
+press A
+wait 120
+checkpoint load_slots window=30 compare=text
+press A
+wait 200
+checkpoint resumed window=30 compare=text

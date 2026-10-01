@@ -1,0 +1,56 @@
+@title Mega Man Battle Network 6 - Cybeast Gregar (USA)
+@file Megaman Battle Network 6 - Cybeast Gregar (U).gba
+@game BR5E
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game, A through the opening (moving day, new class, Ms. Mari) to Lan's
+# new room in Central Town, then PET > Save at 00:02 play time. [load]
+# CONTINUE (cursor starts on it) and the PET menu over Lan's room.
+# Seen while authoring: the save is XOR-masked with a random value and all
+# three emulators wrote a different save (different sha1 each), so their
+# random states had diverged by f10768 with identical screens throughout;
+# nba's frame differed (text one glyph behind) at f4760.
+
+[new]
+wait 600
+checkpoint title window=30
+press START hold=10
+wait 60
+checkpoint main_menu window=30
+press A hold=10
+wait 300
+checkpoint intro window=30
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=80 every=20 hold=4
+tap A times=80 every=20 hold=4
+checkpoint lans_room window=30
+press START hold=10
+wait 40
+checkpoint pet_menu window=30
+tap DOWN times=7 every=16 hold=8
+wait 10
+press A hold=8
+wait 40
+checkpoint save_prompt window=30
+press A hold=8
+wait 60
+checkpoint saved window=0
+wait 60
+
+[load]
+wait 600
+wait 60
+press START hold=10
+wait 60
+checkpoint continue_menu window=30
+press A hold=10
+wait 300
+checkpoint resumed window=30
+press START hold=10
+wait 40
+checkpoint resumed_menu window=30

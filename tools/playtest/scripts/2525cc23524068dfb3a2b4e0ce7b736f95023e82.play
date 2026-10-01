@@ -1,0 +1,104 @@
+@title Hamtaro - Ham-Ham Heartbreak (USA)
+@file Hamtaro - Ham-Ham Heartbreak (U).gba
+@game AH3E
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+@save skip: no save reached. START / SELECT / B open nothing in the opening, and the SRAM written by then (2180 bytes, identical on all three) is not a game: the title still offers only "New". The first save is past Boss's Ham-Chat tutorial on the clubhouse stage, not reached.
+
+# New game with the default names (Hamtaro / Bijou), A through the Spat
+# intro and the clubhouse wake-up, walk down to the main room (cutscene),
+# then the stage room where Boss teaches Ham-Chats: R opens the list,
+# Hamha / Tack-Q on the sunflower seed.
+# Small differences: the title and intro animations are a frame apart
+# between the emulators (title f600/f720: dingbat-bios differs from mgba ==
+# nba at f720); menus and gameplay screens are identical.
+[new]
+wait 600
+wait 120
+checkpoint title window=30 compare=text
+press START
+wait 120
+checkpoint new_menu window=30
+press A
+wait 180
+checkpoint names window=30
+press DOWN after=15
+press DOWN after=15
+press A
+wait 180
+press START after=20
+press A
+wait 120
+press DOWN after=20
+press A
+wait 180
+checkpoint names_ok window=30 compare=text
+press A
+wait 180
+wait 120
+press START
+wait 120
+tap A times=20 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+checkpoint clubhouse window=30 compare=none
+tap A times=40 every=30 hold=4
+press START
+wait 60
+press SELECT
+wait 60
+press B
+wait 60
+press RIGHT hold=40
+wait 10
+press DOWN hold=25
+press RIGHT hold=40
+wait 10
+press DOWN hold=80
+wait 10
+press DOWN hold=120
+wait 30
+press RIGHT hold=80
+wait 30
+press DOWN hold=40
+press LEFT hold=60
+wait 10
+press A
+wait 60
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+checkpoint stage_room window=30
+press START
+wait 60
+tap A times=4 every=30 hold=4
+press R
+wait 60
+checkpoint hamchat_menu window=30
+press A
+wait 60
+tap A times=30 every=30 hold=4
+wait 30
+tap A times=3 every=30 hold=4
+wait 30
+press LEFT hold=3
+wait 20
+press A
+wait 60
+press UP after=15
+press A
+wait 90
+tap A times=10 every=30 hold=4
+press B
+wait 60
+press B
+wait 60
+press DOWN after=15
+press A
+wait 120
+wait 60
+tap A times=5 every=40 hold=4
+tap A times=5 every=40 hold=4
+tap A times=4 every=40 hold=4
+tap A times=4 every=40 hold=4
+tap A times=4 every=40 hold=4

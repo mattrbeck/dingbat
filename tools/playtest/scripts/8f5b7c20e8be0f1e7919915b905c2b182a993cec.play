@@ -1,0 +1,124 @@
+@title Banjo-Kazooie - Grunty's Revenge (USA)
+@file Banjo-Kazooie - Grunty's Revenge (U) [!].gba
+@game BKZE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# New Game, A through the long intro and Bottles' tutorial talk in Spiral
+# Mountain, walk a few steps north, then pause > SAVE > slot 1 > Yes.
+# [load]: Continue shows slot 1 (2 notes, 00:03:42), load it, resumed in
+# Spiral Mountain, pause menu.
+# Findings: the title's animated background differs (nba MAJOR vs the
+# others, dingbat-bios~mgba MINOR) and so do menus over it. In the live
+# session the intro camera pan and dialogue ran at different speeds (f1818:
+# nba furthest on, then mgba, then dingbat-bios; nba a few dialogue lines
+# ahead until ~f14000); the session's per-step save states may play a part
+# (see Spider-Man/THPS2, where live drift vanished on replay). All three end
+# in the same place with byte-identical 8 KB saves and identical gameplay
+# checkpoints on replay.
+
+[new]
+wait 600
+wait 600
+checkpoint title window=30 compare=text
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+checkpoint intro window=30 compare=text
+press START
+wait 180
+press A
+wait 60
+tap A times=15 every=40 hold=4
+tap A times=15 every=40 hold=4
+tap A times=20 every=40 hold=4
+wait 200
+tap A times=20 every=40 hold=4
+tap A times=40 every=40 hold=4
+tap A times=20 every=40 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+wait 120
+press START
+wait 60
+tap A times=8 every=30 hold=4
+wait 60
+tap A times=4 every=30 hold=4
+wait 120
+press START
+wait 60
+press START
+wait 30
+hold LEFT
+wait 25
+hold UP
+wait 40
+release
+wait 30
+press DOWN
+wait 10
+press A
+wait 40
+hold LEFT
+wait 25
+hold UP
+wait 40
+release
+wait 30
+hold LEFT
+wait 15
+release
+wait 30
+checkpoint gameplay window=30 compare=none
+hold UP
+wait 60
+release
+wait 20
+hold UP
+wait 30
+release
+wait 30
+checkpoint walking window=30 compare=none
+press START
+wait 60
+checkpoint pause_menu window=30
+press UP
+wait 20
+press A
+wait 90
+checkpoint save_slots window=30
+press A
+wait 120
+checkpoint save_prompt window=30
+press A
+wait 180
+wait 120
+checkpoint saved window=0 compare=none
+
+[load]
+wait 1200
+press START
+wait 120
+press START
+wait 120
+press DOWN
+wait 20
+wait 30
+press DOWN hold=8
+wait 20
+checkpoint continue_menu window=30 compare=text
+press A
+wait 120
+checkpoint file_select window=30 compare=text
+press A
+wait 300
+checkpoint resumed window=30 compare=none
+press START
+wait 60
+checkpoint resumed_pause window=30

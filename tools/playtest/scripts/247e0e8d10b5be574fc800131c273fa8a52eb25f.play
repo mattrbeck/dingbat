@@ -1,0 +1,78 @@
+@title Mortal Kombat - Deadly Alliance (USA) (En,Fr,De,Es,It)
+@file Mortal Kombat - Deadly Alliance (U) (M5) [!].gba
+@game AXDE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# English, skip the intro, title, CREATE PROFILE named "AA" (the game saves the profile
+# and the language), load it, then Arcade as Kenshi vs Kano and fight for a few seconds.
+# With the save, [load] skips the language screen and goes from the title straight to
+# the main menu with profile AA loaded.
+# Notes: dingbat-bios and mgba keep a 512-byte EEPROM file, nba an 8192-byte one. In the
+# live [load] session nba booted its own save and showed the language select again
+# (dingbat-bios and mgba skipped it), so with the same input nba stays on the language
+# screen for the whole [load]. At f1000 of [new] the language screen differs on mgba
+# (dingbat-bios == nba), and the arena torches/poses differ a little in the fight.
+
+[new]
+wait 600
+wait 400
+checkpoint language window=30
+press A
+wait 300
+wait 300
+press START
+wait 120
+wait 60
+checkpoint title window=30
+press START
+wait 120
+checkpoint profile_menu window=30
+press A
+wait 90
+checkpoint name_entry window=30
+press A
+wait 20
+press A
+wait 20
+press START
+wait 90
+press UP
+wait 15
+press LEFT
+wait 15
+press DOWN
+wait 15
+press DOWN
+wait 15
+press A
+wait 120
+checkpoint view_profile window=30
+press A
+wait 150
+press B
+wait 120
+checkpoint main_menu window=30
+press A
+wait 120
+checkpoint char_select window=30
+press A
+wait 400
+checkpoint versus window=30
+wait 300
+checkpoint fight_start window=30
+press RIGHT hold=60
+tap A times=8 every=15 hold=4
+tap B times=8 every=15 hold=4
+press RIGHT hold=30
+tap A times=8 every=15 hold=4
+wait 30
+checkpoint fight window=30
+
+[load]
+wait 1000
+press START
+wait 180
+checkpoint title window=30
+press START
+wait 120
+checkpoint resumed_menu window=30

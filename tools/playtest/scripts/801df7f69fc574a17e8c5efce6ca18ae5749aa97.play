@@ -1,0 +1,96 @@
+@title Super Puzzle Fighter II Turbo (USA)
+@file Super Puzzle Fighter II Turbo (U).gba
+@game AZ8E
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Title, main menu > OPTION: difficulty 4 -> 2 stars, EXIT (the game saves its options),
+# then ARCADE MODE, EASY, Ryu, and drop the first few gem pairs of stage 1.
+# [load] opens OPTION again and shows the 2-star difficulty.
+# Notes: the arcade opponent is random. At f4055 mgba draws Ryu (a mirror match) while
+# dingbat-bios and nba draw Chun-Li, and by f4841 the gem pairs differ on all three, so
+# the stage-1 checkpoints are not expected to match. The title fade-in (f600, f2054) is at a
+# different step on each emulator. nba draws the OPTION screen brighter than the other two.
+# Saves: dingbat-bios and mgba keep a 512-byte EEPROM file, nba an 8192-byte one. In the
+# live [load] session nba booted its own save and showed the default 4-star difficulty
+# (dingbat-bios and mgba showed 2 stars).
+
+[new]
+wait 600
+wait 300
+# until text START timeout=1500 every=10  [reached dingbat-bios+1150 mgba+1150 nba+1140]
+wait 1154
+wait 60
+checkpoint title window=30
+press START
+wait 90
+wait 90
+press START hold=8
+wait 120
+checkpoint main_menu window=30
+tap DOWN times=5 every=15 hold=6
+wait 20
+press A
+wait 90
+press LEFT hold=10
+wait 20
+press LEFT hold=10
+wait 20
+checkpoint option_easy window=30
+tap DOWN times=7 every=15 hold=6
+wait 20
+press A
+wait 120
+checkpoint menu_after_save window=30
+tap UP times=5 every=15 hold=6
+wait 20
+press A
+wait 120
+press UP
+wait 20
+press LEFT
+wait 20
+checkpoint level_easy window=30
+press A
+wait 90
+wait 90
+checkpoint player_select window=30
+press A
+wait 300
+checkpoint stage1_vs window=30
+wait 200
+wait 200
+wait 60
+tap LEFT times=3 every=6 hold=3
+hold DOWN
+wait 50
+release
+tap RIGHT times=3 every=6 hold=3
+hold DOWN
+wait 50
+release
+tap LEFT times=2 every=6 hold=3
+press A
+hold DOWN
+wait 50
+release
+tap RIGHT times=2 every=6 hold=3
+hold DOWN
+wait 50
+release
+checkpoint puzzle_play window=30
+
+[load]
+wait 900
+# until text START timeout=1500 every=10  [reached dingbat-bios+1130 mgba+1130 nba+1140]
+wait 1144
+wait 60
+press START
+wait 180
+press START hold=8
+wait 120
+checkpoint main_menu window=30
+tap DOWN times=5 every=15 hold=6
+wait 20
+press A
+wait 120
+checkpoint option_loaded window=30

@@ -2,52 +2,66 @@
 @file Medabots AX - Metabee Version (U).gba
 @game AK8E
 @chip EEPROM (EEPROM_V + FLASH_V strings)
+@frozen dingbat-bios,mgba,nba
 
 # With no save, START on the title drops straight into the story on the
 # island map; a few lines of dialog later SELECT on the map saves.
 # With a save the title opens a CONTINUE menu; SELECT's save prompt shows
 # the loaded medal / parts counts.
-
 [new]
-until text "DREAM CREATOR" timeout=3000 every=10
-until notext "DREAM CREATOR" timeout=900 every=10
+# until text 'DREAM CREATOR' timeout=3000 every=10  [reached dingbat-bios+450 mgba+450 nba+450]
+wait 454
+# until notext 'DREAM CREATOR' timeout=900 every=10  [reached dingbat-bios+140 mgba+150 nba+150]
+wait 154
 wait 60
 press START
-until text "PRESS START" timeout=900 every=10
+# until text 'PRESS START' timeout=900 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
 wait 30
-checkpoint title
+checkpoint title window=30
 press START
-until text "Ikki, look" timeout=600 every=10
+# until text 'Ikki, look' timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 20
-checkpoint intro
-mash A until text "with S" timeout=900 every=40
+checkpoint intro window=30
+# mash A until text 'with S' timeout=900 every=40  [taps dingbat-bios:3 mgba:3 nba:3]
+tap A times=3 every=40 hold=4
 wait 60
-checkpoint island_map
+checkpoint island_map window=30
 press SELECT
-until text "Save the game" timeout=300 every=5
+# until text 'Save the game' timeout=300 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 10
-checkpoint save_prompt
+checkpoint save_prompt window=30
 press A
-until text "Save completed" timeout=600 every=5
+# until text 'Save completed' timeout=600 every=5  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
 checkpoint saved window=0
 
 [load]
-until text "DREAM CREATOR" timeout=3000 every=10
-until notext "DREAM CREATOR" timeout=900 every=10
+# until text 'DREAM CREATOR' timeout=3000 every=10  [reached dingbat-bios+440 mgba+440 nba+450]
+wait 454
+# until notext 'DREAM CREATOR' timeout=900 every=10  [reached dingbat-bios+140 mgba+140 nba+150]
+wait 154
 wait 60
 press START
-until text "PRESS START" timeout=900 every=10
+# until text 'PRESS START' timeout=900 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
 wait 30
-checkpoint title
+checkpoint title window=30
 press START
-until text "CONTINUE" timeout=600 every=10
+# nba could not follow from here: 'until text "CONTINUE" timeout=600 every=10': timed out after 600 frames waiting for text 'CONTINUE'
+# until text CONTINUE timeout=600 every=10  [reached dingbat-bios+10 mgba+10]
+wait 14
 wait 30
-checkpoint continue_menu
+checkpoint continue_menu window=30
 press A
-until text "ISLAND MAP" timeout=600 every=10
+# until text 'ISLAND MAP' timeout=600 every=10  [reached dingbat-bios+130 mgba+130]
+wait 134
 wait 60
-checkpoint resumed
+checkpoint resumed window=30
 press SELECT
-until text "Save the game" timeout=300 every=5
+# until text 'Save the game' timeout=300 every=5  [reached dingbat-bios+10 mgba+10]
+wait 14
 wait 10
-checkpoint resumed_save_prompt
+checkpoint resumed_save_prompt window=30

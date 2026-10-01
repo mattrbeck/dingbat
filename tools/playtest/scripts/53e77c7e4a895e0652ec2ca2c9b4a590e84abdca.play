@@ -1,0 +1,93 @@
+@title Spyro 2 - Season of Flame (USA)
+@file Spyro 2 - Season of Flame (U).gba
+@game A2SE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# New Game in slot 1, skip the intro, talk through the Elder, walk around
+# Sunny Plains (one gem), peek at the Atlas, then pause -> Save Game -> Yes.
+# Sparx's idle flight path and the title plasma differ between emulators
+# (random/animation phase), so gameplay checkpoints use compare=none.
+
+[new]
+wait 600
+wait 400
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+press A
+wait 120
+# until notblank timeout=1200 every=10  [reached dingbat-bios+40 mgba+40 nba+30]
+wait 44
+wait 120
+checkpoint intro window=30
+press START
+wait 200
+wait 100
+# mash A until notext Elder timeout=3000 every=30  [taps dingbat-bios:2 mgba:2 nba:2]
+tap A times=2 every=30 hold=4
+wait 60
+wait 60
+checkpoint elder_dialogue window=30 compare=none
+press START
+wait 30
+tap A times=60 every=30 hold=4
+checkpoint gameplay window=30 compare=none
+press RIGHT hold=90
+press DOWN hold=60
+press A
+press RIGHT hold=60
+wait 10
+press LEFT hold=40
+press UP hold=60
+wait 30
+checkpoint walked window=30 compare=none
+press START
+wait 40
+press DOWN after=20
+press DOWN after=20
+checkpoint pause_menu window=30 compare=text
+press A
+wait 60
+wait 120
+press B
+wait 60
+wait 60
+wait 30
+press START
+wait 60
+press DOWN after=20
+press DOWN after=20
+wait 20
+press A
+wait 60
+press DOWN after=20
+wait 10
+checkpoint save_prompt window=30 compare=text
+press A
+wait 90
+checkpoint saving window=10
+# until notext Saving timeout=1200 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 60
+checkpoint saved window=10
+wait 120
+
+[load]
+wait 1000
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+checkpoint save_slot window=30 compare=text
+press A
+# until notblank timeout=1200 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 200
+checkpoint resumed window=30 compare=none
+press START
+wait 60
+checkpoint resumed_menu window=30 compare=text

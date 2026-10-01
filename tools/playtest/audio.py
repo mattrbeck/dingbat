@@ -117,6 +117,28 @@ def compare(feats, subjects, refs):
         out['refs'] = {'pair': f'{rr[0]}~{rr[1]}', 'windows': int(len(d)), 'differ': int(d.sum()),
                        'gain_db': round(why.get('gain_db', 0), 1),
                        'audible': {r: float(audible(have[r]).mean()) if len(have[r]['rms']) else 0 for r in rr}}
+    # a reference that stands alone: it differs from the other reference
+    # where the default dingbat agrees with that other one
+    if len(rr) == 2 and subjects and subjects[0] in have:
+        s0 = subjects[0]
+        out['refs']['odd'] = {}
+        for r in rr:
+            o = rr[1 - rr.index(r)]
+            d_ro, why = window_diff(have[r], have[o])
+            d_so, _ = window_diff(have[s0], have[o])
+            n = min(len(d_ro), len(d_so))
+            alone = d_ro[:n] & ~d_so[:n]
+            runs = _runs(alone)
+            longest = max((b - a for a, b in runs), default=0)
+            vs = {o: {'_why': why}}
+            out['refs']['odd'][r] = {
+                'flagged_windows': int(alone.sum()), 'windows': n,
+                'flagged_fraction': round(float(alone.mean()) if n else 0.0, 4),
+                'longest_seconds': round(longest * WINDOW_FRAMES / 59.7275, 2),
+                'runs': [{'start_frame': a * WINDOW_FRAMES, 'end_frame': b * WINDOW_FRAMES,
+                          'kind': _kind(vs, a, b)} for a, b in runs[:8]],
+                'status': ('DIFFERENT' if longest * WINDOW_FRAMES >= 120 or (n and alone.mean() > 0.10)
+                           else 'MINOR' if alone.any() else 'SAME')}
     for s in subjects:
         if s not in have:
             out['subjects'][s] = {'status': 'NO AUDIO'}

@@ -1,0 +1,108 @@
+@title Crash Nitro Kart (USA)
+@file Crash Nitro Kart (U).gba
+@game BCNE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# Single Player > Adventure > slot 1, team Bandicoot, Crash, name "99";
+# the game writes the new adventure file to EEPROM. Skip the story, drive
+# into the Inferno Island portal, start the first race and drive a few
+# seconds, then pause > Quit, hub pause > Quit to the main menu and open
+# Adventure again: slot 1 now shows the team and 0%.
+# [load]: Adventure shows slot 1 filled, load it (Terra Hub welcome), hub.
+# Findings: nba writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios,
+# mgba: 512 bytes, same 134 data bytes); booted with it nba shows slot 1
+# EMPTY and starts a new file, so nba's [load] checkpoints differ.
+# In the race nba's on-screen race timer runs behind the others with the
+# same input (f4516: 0:03:30 vs 0:03:31; f4656: 0:05:63 vs 0:05:65 in a live
+# session); dingbat-bios agrees with mgba. Menus are animated, so most
+# checkpoints are compare=text.
+
+[new]
+wait 900
+wait 200
+checkpoint main_menu window=30 compare=text
+press A
+wait 90
+checkpoint mode_menu window=30 compare=text
+press A
+wait 120
+checkpoint slots window=30 compare=text
+press A
+wait 120
+checkpoint team window=30 compare=text
+press A
+wait 120
+checkpoint character window=30 compare=text
+press A
+wait 150
+checkpoint name_entry window=30 compare=text
+press DOWN
+wait 10
+press A
+wait 10
+press A
+wait 10
+press START
+wait 30
+tap DOWN times=3 every=12 hold=4
+wait 10
+press A
+wait 150
+checkpoint story window=30
+press START
+wait 200
+tap A times=6 every=40 hold=4
+wait 60
+tap A times=4 every=40 hold=4
+wait 60
+tap A times=3 every=40 hold=4
+wait 60
+checkpoint hub window=30 compare=none
+press START
+wait 60
+press A
+wait 30
+press A
+wait 200
+hold A
+wait 90
+release
+wait 120
+checkpoint race_character window=30 compare=text
+press A
+wait 200
+checkpoint race_start window=30 compare=none
+hold A
+wait 150
+release
+press START
+wait 30
+tap DOWN times=3 every=15 hold=4
+press A
+wait 200
+press START
+wait 30
+tap DOWN times=4 every=15 hold=4
+wait 10
+press A
+wait 120
+press A
+wait 90
+press A
+wait 120
+checkpoint saved_slot window=0 compare=none
+
+[load]
+wait 1100
+press A
+wait 90
+press A
+wait 120
+checkpoint load_slots window=30 compare=none
+press A
+wait 300
+checkpoint welcome window=30 compare=text
+tap A times=13 every=40 hold=4
+wait 60
+checkpoint resumed window=30 compare=none

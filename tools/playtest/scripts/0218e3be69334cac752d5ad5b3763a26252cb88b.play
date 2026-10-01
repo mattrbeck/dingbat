@@ -1,0 +1,146 @@
+@title Harry Potter and the Chamber of Secrets (USA, Europe)
+@file Harry Potter and The Chamber of Secrets (UE) (M12) [!].gba
+@game A7HE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# English UK, New Game, the Dursleys/Burrow/Floo story pages, Hagrid in
+# Knockturn Alley, a look round the pause menu (stats, tasks, options, Quit ->
+# No), then walk to the floating save book by Hagrid, press B (Action),
+# "Save Game?" -> Yes (UP first: No is the default) -> "Save Complete!".
+# [load]: Main Menu -> Load Game -> back at the save book.
+# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, nba 8192; when
+# authoring, nba's main menu had no Load Game on its own save (its [load]
+# ends up in Options instead).
+# Leaving the pause menu also rewrites the 11-byte options block.
+
+[new]
+wait 600
+checkpoint language window=30 compare=text
+press A
+wait 300
+wait 600
+wait 300
+checkpoint title window=30
+press START
+wait 150
+checkpoint main_menu window=30 compare=text
+press A
+wait 150
+checkpoint story window=30 compare=text
+press A after=90
+press A after=90
+press A after=90
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+wait 200
+wait 200
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+press A after=120
+checkpoint hagrid window=30 compare=text
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+checkpoint diagon_gameplay window=30 compare=none
+press START after=60
+checkpoint pause_stats window=30 compare=text
+press R after=60
+press R after=60
+checkpoint pause_menu window=30 compare=text
+press DOWN after=20
+press A after=60
+press B after=60
+press DOWN after=20
+press DOWN after=20
+press A after=60
+press B after=60
+press DOWN after=20
+press A after=60
+press A after=120
+press B after=60
+checkpoint pause_menu_again window=30 compare=text
+press START after=60
+press RIGHT hold=300
+press UP hold=120
+press LEFT hold=10
+press B after=60
+press LEFT hold=60
+press LEFT hold=60
+checkpoint save_book_tip window=30 compare=text
+press A after=60
+press B after=60
+press UP after=20
+checkpoint save_prompt window=30 compare=text
+press A after=30
+checkpoint saved window=30 compare=text
+press A after=60
+
+[load]
+wait 600
+press A
+wait 1200
+press START
+wait 150
+checkpoint main_menu window=30 compare=text
+press DOWN after=20
+press A after=150
+checkpoint resumed window=30 compare=none
+press START after=60
+checkpoint resumed_menu window=30 compare=text

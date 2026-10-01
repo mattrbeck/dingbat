@@ -1,0 +1,77 @@
+@title Pac-Man Collection (USA)
+@file Pac-Man Collection (U) [!].gba
+@game APCE
+@chip none
+@save none
+@frozen dingbat-bios,mgba,nba
+# No battery save (no save-type string, nothing written: dingbat-bios and mgba leave
+# no battery file, nba leaves 32 KiB of blank). The high score (560 here) is lost on reset.
+# Pick original Pac-Man (full screen) and play one game: eat dots, lose all three lives,
+# watch the attract mode after GAME OVER.
+# Notes: the collection's title screen (f600-f800) is a still image, yet each of the
+# three emulators hashes it differently, the same on every frame (a rendering
+# difference, not timing). The scrolling backgrounds on the game-select menus are at
+# different offsets on each emulator, and nba draws Pac-Man a frame ahead in the maze.
+
+[new]
+wait 600
+wait 200
+checkpoint title window=30
+press START
+wait 60
+press LEFT hold=8
+wait 60
+press RIGHT hold=10
+wait 90
+checkpoint game_select window=30
+press A
+wait 120
+checkpoint attract window=30
+press START
+wait 60
+checkpoint pause_menu window=30
+press A
+wait 30
+press A
+wait 60
+wait 150
+checkpoint ready window=30
+hold LEFT
+wait 90
+hold DOWN
+wait 60
+release
+hold LEFT
+wait 30
+hold DOWN
+wait 40
+hold RIGHT
+wait 150
+hold UP
+wait 60
+release
+checkpoint playing window=30
+hold UP
+wait 50
+hold LEFT
+wait 60
+hold UP
+wait 60
+release
+hold RIGHT
+wait 200
+hold UP
+wait 100
+hold LEFT
+wait 100
+release
+checkpoint second_life window=30
+hold LEFT
+wait 40
+hold DOWN
+wait 40
+hold RIGHT
+wait 120
+release
+wait 1200
+checkpoint after_game_over window=30

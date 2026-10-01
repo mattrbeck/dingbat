@@ -2,66 +2,83 @@
 @file Pokemon - Fire Red Version (U) (V1.0).gba
 @game BPRE
 @chip FLASH1M
+@frozen dingbat-bios,mgba,nba
 
 # New game as a boy; mashing A through Oak's speech types the player name
 # AAAAAAA on the keyboard; rival GREEN from the list; save in the bedroom.
-
 [new]
 wait 900
 press START
-until text "FIRERED" timeout=1200 every=10
+# until text FIRERED timeout=1200 every=10  [reached dingbat-bios+240 mgba+240 nba+240]
+wait 244
 checkpoint title window=0
 wait 60
 press START
-until text "CONTROLS" timeout=600 every=10
+# until text CONTROLS timeout=600 every=10  [reached dingbat-bios+160 mgba+160 nba+160]
+wait 164
 wait 10
 checkpoint controls window=10
-mash A until text "GIRL" timeout=4000 every=20
+# mash A until text GIRL timeout=4000 every=20  [taps dingbat-bios:105 mgba:105 nba:105]
+tap A times=105 every=20 hold=4
 wait 20
 checkpoint gender window=10
 press A
-mash A until text "NEW NAME" timeout=1500 every=20
+# mash A until text 'NEW NAME' timeout=1500 every=20  [taps dingbat-bios:54 mgba:54 nba:54]
+tap A times=54 every=20 hold=4
 wait 20
 checkpoint rival_name window=10
 press DOWN after=10
 press A
-until text "YES" timeout=300 every=5
+# until text YES timeout=300 every=5  [reached dingbat-bios+95 mgba+95 nba+100]
+wait 104
 wait 10
 press A after=10
-mash A until blank timeout=3000 every=20
-until notblank timeout=1200 every=10
+# mash A until blank timeout=3000 every=20  [taps dingbat-bios:42 mgba:42 nba:42]
+tap A times=42 every=20 hold=4
+# until notblank timeout=1200 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 200
 checkpoint bedroom window=10
 press START
-until text "SAVE" timeout=120 every=5
+# until text SAVE timeout=120 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 10
 press DOWN after=10
 press DOWN after=10
-until selected "SAVE" timeout=60 every=5
+# until selected SAVE timeout=60 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 checkpoint start_menu window=10
 press A
-until text "save the game" timeout=300 every=5
+# until text 'save the game' timeout=300 every=5  [reached dingbat-bios+125 mgba+125 nba+125]
+wait 129
 wait 60
 checkpoint save_prompt window=10
 press A
-until text "saved the game" timeout=900 every=5
+# until text 'saved the game' timeout=900 every=5  [reached dingbat-bios+405 mgba+485 nba+410]
+wait 489
 checkpoint saved window=0
 
 [load]
 wait 900
 press START
-until text "FIRERED" timeout=1200 every=10
+# until text FIRERED timeout=1200 every=10  [reached dingbat-bios+240 mgba+240 nba+240]
+wait 244
 wait 60
 press START
-until text "CONTINUE" timeout=600 every=10
-until text "PLAYER" timeout=120 every=5
+# until text CONTINUE timeout=600 every=10  [reached dingbat-bios+160 mgba+160 nba+160]
+wait 164
+# until text PLAYER timeout=120 every=5  [reached dingbat-bios+0 mgba+0 nba+5]
+wait 9
 wait 30
 checkpoint continue_menu window=0
 press A
-until notblank timeout=600 every=10
-until stable 30 timeout=900
-checkpoint resumed
+# until notblank timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+# until stable 30 timeout=900 every=4  [reached dingbat-bios+120 mgba+120 nba+120]
+wait 124
+checkpoint resumed window=30
 press START
-until text "SAVE" timeout=120 every=5
+# until text SAVE timeout=120 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 10
-checkpoint resumed_menu
+checkpoint resumed_menu window=30

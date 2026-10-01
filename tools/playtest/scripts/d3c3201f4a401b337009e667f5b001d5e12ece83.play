@@ -1,0 +1,85 @@
+@title Shrek 2 (USA)
+@file Shrek 2 (U) (M5).gba
+@game BSEE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Start Game -> slot 1 New Game -> initials "AAA" (START confirms): the game
+# writes the slot to EEPROM right there. Then the story, book 1 / chapter 1
+# (Far Far Away), and Shrek walks right past the rat to the "Beware Ogre" sign.
+# Dialogue is advanced one A press at a time with long gaps: mashing A every
+# 30 frames through the opening cutscene sent mgba onto a different dialogue
+# line than dingbat-bios and nba (its scene fade finished earlier), and from
+# there the whole scene diverged.
+# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, nba 8192; when
+# authoring, nba did not list its own save in the slot screen ([load] showed
+# New Game and went to initials entry on nba).
+
+[new]
+wait 600
+wait 400
+wait 600
+checkpoint title window=30
+press A
+wait 120
+checkpoint slot_select window=30 compare=text
+press A
+wait 120
+checkpoint initials window=30 compare=text
+press A after=20
+press A after=20
+press A after=20
+press START after=30
+press DOWN after=10
+press DOWN after=10
+press DOWN after=10
+press LEFT after=20
+checkpoint story window=30 compare=text
+press A
+wait 60
+tap A times=5 every=30 hold=4
+wait 150
+press A after=120
+press A after=150
+checkpoint choose_book window=30 compare=text
+press A after=150
+checkpoint chapters window=30 compare=text
+press A after=200
+checkpoint level_start window=30 compare=none
+press A after=60
+press A after=60
+press A after=60
+press A after=60
+press A after=60
+press A after=60
+press A after=60
+checkpoint gameplay window=30 compare=none
+press RIGHT hold=120
+press RIGHT hold=180
+hold RIGHT
+press RIGHT+A hold=20
+press RIGHT hold=30
+release
+press B after=20
+press B after=20
+press A after=60
+press A after=60
+press A after=60
+press A after=60
+hold RIGHT
+press RIGHT+A hold=25
+press RIGHT hold=100
+release
+wait 10
+checkpoint ogre_sign window=30 compare=none
+wait 30
+
+[load]
+wait 1600
+press A
+wait 120
+checkpoint slot_select window=30 compare=text
+press A
+wait 150
+checkpoint choose_book window=30 compare=text
+press A after=150
+checkpoint chapters window=30 compare=text

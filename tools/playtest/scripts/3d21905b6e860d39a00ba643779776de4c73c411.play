@@ -2,50 +2,58 @@
 @file Megaman Battle Network 3 - Blue Version (U) [!].gba
 @game A3XE
 @chip SRAM
+@frozen dingbat-bios,mgba,nba
 
 # New game: mash through the opening and the Virus Lab scene until Lan can
 # move, open the PET and save there. [load] continues into the Virus Lab and
 # opens the PET again.
-
 [new]
-until text "PRESS START" timeout=900 every=10
+# until text 'PRESS START' timeout=900 every=10  [reached dingbat-bios+270 mgba+260 nba+270]
+wait 274
 wait 30
 checkpoint title window=30
 press START
-until text "NEW GAME" timeout=300 every=5
+# until text 'NEW GAME' timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 press A
-until text "year is 200" timeout=600 every=5
+# until text 'year is 200' timeout=600 every=5  [reached dingbat-bios+185 mgba+185 nba+185]
+wait 189
 wait 30
 checkpoint intro window=30
-mash A until text "Lan" timeout=3000 every=20
-mash A until text "Look!" timeout=600 every=20
+# mash A until text Lan timeout=3000 every=20  [taps dingbat-bios:45 mgba:45 nba:45]
+tap A times=45 every=20 hold=4
+# mash A until text 'Look!' timeout=600 every=20  [taps dingbat-bios:8 mgba:8 nba:8]
+tap A times=8 every=20 hold=4
 press A after=30
-# START is ignored until Lan can move; the menu slides in slowly, so tap
-# slowly enough that a second START never closes it again
-mash START until text "Chipfol" timeout=1500 every=80
+# mash START until text Chipfol timeout=1500 every=80  [taps dingbat-bios:2 mgba:2 nba:2]
+tap START times=2 every=80 hold=4
 wait 30
 checkpoint pet_menu window=30
-# UP wraps from Chip Folder to Save
 press UP after=20
 press A
-until text "Save your" timeout=300 every=5
+# until text 'Save your' timeout=300 every=5  [reached dingbat-bios+35 mgba+35 nba+35]
+wait 39
 wait 20
 checkpoint save_prompt window=30
 press A
-until text "complete" timeout=600 every=5
+# until text complete timeout=600 every=5  [reached dingbat-bios+5 mgba+5 nba+10]
+wait 14
 wait 30
 checkpoint saved window=30
 
 [load]
-until text "PRESS START" timeout=900 every=10
+# until text 'PRESS START' timeout=900 every=10  [reached dingbat-bios+270 mgba+270 nba+270]
+wait 274
 wait 30
 press START
-until text "CONTINUE" timeout=300 every=5
+# until text CONTINUE timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 20
 checkpoint continue_menu window=30
 press A
 wait 200
 checkpoint resumed window=30
-mash START until text "Chipfol" timeout=900 every=80
+# mash START until text Chipfol timeout=900 every=80  [taps dingbat-bios:1 mgba:1 nba:1]
+tap START times=1 every=80 hold=4
 wait 30
 checkpoint pet_menu window=30

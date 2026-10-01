@@ -1,0 +1,80 @@
+@title Sonic Battle (USA)
+@file Sonic Battle (U) (M6).gba
+@game BSBE
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+
+# Name "AA", Story Mode > Sonic's episode, skip the opening dialogue; the
+# game writes its flash when the story drops Sonic on the Emerald Beach
+# street, then he walks the beach and into town. [load]: name entry is
+# skipped, Story Mode offers "Continue the Game" and resumes on that street.
+# Session notes: title and menus run with animated backgrounds whose phase
+# differs (mgba at the f600 title, all three at name entry/mode select),
+# story text types a frame later on nba (f2246); the field itself is
+# identical on all three. The three flash files differ in 10 bytes (two
+# 5-byte runs at 0x1005 and 0x2005), likely a timer value.
+# name_entry/mode_select are compare=none: their scrolling 3D-block
+# background made the OCR text judge flag dingbat-bios MAJOR on a run
+# whose screenshots match. The title runs 4 frames out of phase on mgba
+# (SLIP +4 against dingbat-bios and nba).
+
+[new]
+wait 600
+checkpoint title window=30
+press START
+wait 120
+checkpoint name_entry window=30 compare=none
+press DOWN after=10
+press A after=10
+press A after=10
+press START after=30
+# until notblank timeout=600 every=4  [reached dingbat-bios+16 mgba+20 nba+20]
+wait 24
+wait 60
+checkpoint mode_select window=30 compare=none
+press A
+wait 120
+press A
+wait 180
+checkpoint story_intro window=30
+tap A times=40 every=20 hold=4
+tap A times=100 every=20 hold=4
+checkpoint field window=30
+press SELECT
+wait 40
+press RIGHT hold=120
+wait 30
+wait 60
+press RIGHT hold=150
+wait 60
+press RIGHT hold=200
+wait 60
+press A
+wait 60
+press RIGHT+UP hold=90
+wait 60
+press RIGHT+UP hold=120
+wait 30
+press RIGHT+UP hold=120
+wait 30
+press UP hold=90
+wait 30
+press RIGHT hold=60
+wait 10
+press LEFT hold=60
+wait 10
+checkpoint town window=30
+
+[load]
+wait 600
+checkpoint title window=30
+press START
+wait 120
+wait 60
+checkpoint mode_select window=30 compare=none
+press A
+wait 120
+checkpoint continue_menu window=30
+press A
+wait 240
+checkpoint resumed window=30

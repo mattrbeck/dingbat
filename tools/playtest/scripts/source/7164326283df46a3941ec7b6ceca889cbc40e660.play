@@ -1,0 +1,64 @@
+@title Boktai - The Sun is in Your Hand (USA)
+@file Boktai - The Sun is in Your Hand (U) [!].gba
+@game U3IE
+@chip EEPROM + RTC + solar sensor
+
+# First boot: solar sensor calibration (A with the sensor covered), the
+# clock setting (START = END), then the title. GAME START on DATA.1, keep the
+# default name Django, region Washington D.C., difficulty NORMAL 2, confirm:
+# the game writes the new file ("SAVING"). [load] finds DATA.1 filled.
+
+[new]
+until text "SOLAR SENSOR SETTING" timeout=1500 every=10
+wait 30
+checkpoint solar_setting window=10
+mash A until text "TIME SETTING" timeout=900 every=60
+wait 30
+checkpoint time_setting compare=text
+press START
+until text "PUSH START" timeout=1500 every=10
+checkpoint title compare=none
+press START
+until text "GAME START" timeout=600 every=10
+wait 30
+press START
+until text "NO DATA" timeout=600 every=10
+wait 60
+checkpoint data_select window=10
+press A after=60
+press A
+until text "CREATE DATA" timeout=300 every=10
+wait 30
+press A
+until text "PLAYER NAME" timeout=300 every=10
+wait 60
+press START after=60
+checkpoint player_name window=10
+press A
+until text "REGION" timeout=300 every=10
+wait 60
+checkpoint region window=10
+press A
+until text "DIFFICULTY" timeout=300 every=10
+wait 60
+checkpoint difficulty window=10
+press A
+until text "CONFIRM" timeout=300 every=10
+wait 60
+checkpoint confirm window=10
+press A
+until text "SAVING" timeout=300 every=5
+checkpoint saving window=0 compare=text
+until notext "SAVING" timeout=1200 every=10
+wait 30
+
+[load]
+until text "PUSH START" timeout=3000 every=10
+checkpoint title compare=none
+press START
+until text "GAME START" timeout=600 every=10
+wait 30
+press START
+until text "DATA.1" timeout=600 every=10
+wait 60
+checkpoint data_select window=10

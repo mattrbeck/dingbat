@@ -50,6 +50,16 @@ def run_section(name, rom, lines, outroot, rtc, emus, save=None, log=print):
             r = sess.command(line)
             if not r.get('recorded', True):
                 fails = {n: v[1] for n, v in r['results'].items() if v[0] != 'ok'}
+                if len(fails) == 1 and len(sess.execs) > 2:
+                    # one emulator alone cannot follow: a finding, not a reason
+                    # to lose the script; the others carry on without it
+                    (n, why), = fails.items()
+                    log(f'   {n} dropped at {line!r}: {why} (screen: {r.get("failed_look")})')
+                    sess.drop(n, f'{line!r}: {why}')
+                    r = sess.command(line)
+                    if r.get('recorded', True):
+                        continue
+                    fails = {n: v[1] for n, v in r['results'].items() if v[0] != 'ok'}
                 raise FreezeFailed(f'{line!r} failed on {fails} (screen: {r.get("failed_look")})')
             if r.get('warning'):
                 log(f'   warning at {line!r}: {r["warning"]}')

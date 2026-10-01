@@ -1,0 +1,60 @@
+@title Spider-Man - Mysterio's Menace (USA)
+@file Spider-Man - Mysterio's Menace (U) [!].gba
+@game ASEE
+@save none
+@chip none (password game: no library ID string, title menu offers Password)
+@frozen dingbat-bios,mgba,nba
+
+# The cart has no battery save: progress is a password. New game on Normal,
+# skip the story, enter Downtown and punch the first street thugs. No [load].
+# Findings: nba's title/difficulty spider cursor is in a different animation
+# phase (MINOR at title, difficulty). In the live session nba also drifted in
+# the fight (f3021 thug a few pixels on, f3231 different outcome) right after
+# a `mark`; the frozen replay is IDENTICAL on all three for gameplay, thug
+# and street, so that drift came from the session's save states, not nba.
+
+[new]
+wait 600
+wait 300
+press START
+wait 120
+checkpoint title window=30 compare=text
+press A
+wait 180
+checkpoint difficulty window=30 compare=text
+press A
+wait 300
+checkpoint intro_story window=30
+# mash A until notext PETER timeout=1500 every=30  [taps dingbat-bios:3 mgba:3 nba:3]
+tap A times=3 every=30 hold=4
+wait 120
+press START
+wait 180
+checkpoint stage_select window=30
+press A
+wait 300
+checkpoint gameplay window=30
+hold RIGHT
+wait 90
+press A hold=15
+wait 60
+release
+press B
+wait 30
+hold RIGHT
+wait 120
+release
+tap B times=4 every=15 hold=4
+hold RIGHT
+wait 120
+release
+checkpoint thug window=30 compare=none
+tap B times=8 every=15 hold=4
+wait 30
+tap B times=10 every=12 hold=4
+hold RIGHT
+wait 100
+release
+tap B times=6 every=12 hold=4
+wait 30
+checkpoint street window=30 compare=none

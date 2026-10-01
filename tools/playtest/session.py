@@ -209,6 +209,13 @@ class Session:
                         f'satisfies the condition: tap less often (every=), or wait for a screen instead')
         return line, warn
 
+    def drop(self, name, why):
+        """Stop following one emulator (it cannot take the route); the
+        script records where and why."""
+        ex = self.execs.pop(name)
+        ex.emu.kill()
+        self.recorded.append((self.section, f'# {name} could not follow from here: {why}'))
+
     def render(self):
         out = []
         for sec in script.SECTIONS:

@@ -1,0 +1,53 @@
+@title Golden Sun (USA, Europe)
+@file Golden Sun (UE) [!].gba
+@game AGSE
+@chip FLASH
+
+# With no save the game goes straight to naming Isaac; keep the default name,
+# mash A through the storm intro until Isaac is free in Vale (the A mash ends
+# by opening the field menu), then save to the first slot from the START menu.
+
+[new]
+until text "DEL" timeout=1800 every=10
+wait 30
+checkpoint naming window=10
+press A
+until text "wake up" timeout=900 every=10
+checkpoint wake_up window=0
+mash A until text "Psynergy" timeout=9000 every=30
+wait 10
+checkpoint field_menu window=0
+press B after=40
+press START
+until text "Save your quest" timeout=120 every=5
+wait 20
+checkpoint pause_menu window=0
+press A
+until text "saved data" timeout=300 every=5
+wait 20
+checkpoint slots window=0
+press A
+until text "aving" timeout=120 every=2
+until notext "aving" timeout=900 every=5
+wait 10
+checkpoint saved window=0
+
+[load]
+until text "CAMELOT" timeout=1800 every=10
+wait 200
+press START
+until text "Continue" timeout=900 every=10
+wait 20
+checkpoint continue_menu window=0
+press A
+until text "Play Time" timeout=300 every=5
+wait 20
+checkpoint slot_select window=0
+press A
+until notblank timeout=600 every=10
+wait 300
+checkpoint resumed window=0
+press START
+until text "Save your quest" timeout=120 every=5
+wait 20
+checkpoint resumed_menu window=0

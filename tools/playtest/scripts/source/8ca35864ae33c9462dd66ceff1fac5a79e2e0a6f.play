@@ -1,0 +1,44 @@
+@title Classic NES Series - Super Mario Bros. (USA)
+@file Classic NES Series - Super Mario Bros. (U).gba
+@game FSME
+@chip EEPROM 4Kbit
+
+# Start 1-1, walk right and bump the first ? block (coin, 200 points), open
+# the L+R menu and SAVE HIGH SCORE. [load] proves the save by the title
+# screen's TOP- score reading 000200 instead of 000000.
+# The walk/jump is frame-exact from the START press; it matched on all three
+# emulators when recorded.
+
+[new]
+wait 300
+until text "PLAYER GAME" timeout=600 every=10
+checkpoint title
+press START after=240
+hold RIGHT
+wait 80
+press RIGHT+A hold=25
+release
+wait 60
+press RIGHT hold=12 after=4
+press A hold=20 after=40
+checkpoint coin window=0
+press L+R hold=10
+until text "SAVE HIGH" timeout=120 every=5
+wait 30
+checkpoint menu window=0
+mash DOWN until selected "SAVE HIGH" timeout=300 every=30
+press A
+until text "SCORE SAVED" timeout=300 every=5
+wait 30
+checkpoint saved window=0
+
+[load]
+wait 300
+until text "PLAYER GAME" timeout=600 every=10
+wait 30
+checkpoint title_loaded window=10
+press START after=240
+press L+R hold=10
+until text "SAVE HIGH" timeout=120 every=5
+wait 30
+checkpoint menu_loaded window=0

@@ -1,0 +1,163 @@
+@title Dragon Ball Z - Buu's Fury (USA)
+@file Dragon Ball Z - Buu's Fury (U).gba
+@game BG3E
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Single player, game 1, intro dialogue, walk Snake Way to King Yemma, past the
+# ogre at the NW door, green plane to Grand Kai's planet, save at the save circle.
+# Notes: nba draws dialogue text a character behind dingbat-bios/mgba at several
+# points, and the wandering souls at the docks sit in different places on nba.
+# After the save, the fade back in differs (f20266: nba nearly done, mgba darkest);
+# all three converge by f20566.
+
+[new]
+wait 600
+# until text START timeout=2000 every=10  [reached dingbat-bios+130 mgba+130 nba+130]
+wait 134
+checkpoint title window=30
+press START
+wait 120
+press A
+wait 120
+checkpoint select_game window=30
+press A
+wait 120
+tap A times=30 every=20 hold=4
+tap A times=20 every=20 hold=4
+tap A times=30 every=20 hold=4
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+checkpoint chapter1 window=30
+tap A times=20 every=20 hold=4
+# until notblank timeout=1200 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
+wait 60
+wait 240
+checkpoint snakeway window=30
+press START
+wait 60
+tap A times=15 every=20 hold=4
+tap A times=30 every=20 hold=4
+tap A times=60 every=20 hold=4
+press START
+wait 60
+checkpoint status_menu window=30
+press L
+wait 30
+press L
+wait 30
+press B
+wait 40
+press SELECT
+wait 40
+press LEFT hold=90
+press LEFT hold=180
+press RIGHT hold=90
+press RIGHT hold=400
+press RIGHT+DOWN hold=300
+tap A times=4 every=30 hold=4
+press RIGHT+UP hold=200
+press RIGHT hold=200
+press START
+wait 40
+press DOWN
+wait 40
+press DOWN
+wait 20
+press A
+wait 40
+press B
+wait 30
+press R
+wait 40
+press B
+wait 30
+press B
+wait 30
+press DOWN+RIGHT hold=150
+press UP hold=30
+press RIGHT hold=200
+press UP hold=200
+press RIGHT+UP hold=200
+press DOWN hold=60
+press RIGHT hold=150
+# until notblank timeout=600 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 60
+checkpoint snake_head window=30
+press RIGHT hold=120
+press RIGHT hold=200
+press LEFT hold=50
+press UP hold=200
+press UP hold=200
+wait 200
+checkpoint yemma_office window=30
+press UP hold=20
+press A
+wait 60
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+tap A times=2 every=30 hold=4
+wait 30
+wait 60
+press A
+press DOWN hold=40
+wait 20
+press LEFT hold=200
+press UP hold=120
+press LEFT hold=60
+press RIGHT hold=25
+press UP hold=120
+press RIGHT hold=4
+press A
+wait 60
+tap A times=10 every=30 hold=4
+press DOWN hold=60
+press RIGHT hold=400
+press DOWN hold=200
+press LEFT hold=400
+press UP hold=200
+press RIGHT hold=20
+press UP hold=150
+press UP hold=150
+press LEFT hold=8
+press UP hold=200
+press DOWN hold=60
+press RIGHT hold=200
+press DOWN hold=30
+press RIGHT hold=250
+press UP hold=25
+press RIGHT hold=250
+press LEFT hold=60
+press UP hold=250
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+checkpoint grand_kai_planet window=30
+press DOWN hold=80
+wait 30
+press A
+wait 60
+checkpoint save_menu window=30
+press A
+wait 60
+wait 120
+checkpoint saved window=30
+wait 120
+
+[load]
+wait 600
+# until text START timeout=2000 every=10  [reached dingbat-bios+130 mgba+130 nba+130]
+wait 134
+press START
+wait 120
+press A
+wait 120
+checkpoint continue_menu window=30
+press A
+wait 200
+wait 200
+checkpoint resumed window=30
+press START
+wait 60
+checkpoint resumed_status window=30

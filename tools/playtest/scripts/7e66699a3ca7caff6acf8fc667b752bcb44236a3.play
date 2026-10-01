@@ -1,0 +1,53 @@
+@title Finding Nemo (USA)
+@file Disney's Finding Nemo (U).gba
+@game AZIE
+@save none
+@chip none (password game: no save library string, main menu offers Password)
+@frozen dingbat-bios,mgba,nba
+# No battery save: progress is a password (the pause menu shows it).
+# New Game -> First Day, read Marlin's tips, swim right through the reef for
+# about half a minute, open the pause menu with its password, resume. No [load].
+
+[new]
+wait 600
+wait 400
+wait 400
+wait 300
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30 compare=text
+press A
+wait 150
+checkpoint select_level window=30 compare=text
+press A
+wait 200
+checkpoint first_day window=30 compare=text
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+checkpoint gameplay window=30 compare=none
+press RIGHT hold=240
+press A after=60
+press A after=60
+press RIGHT hold=200
+checkpoint marlin_tip window=30 compare=text
+press A after=60
+press A after=60
+press A after=60
+press RIGHT hold=300
+checkpoint reef window=30 compare=none
+press UP hold=40
+press RIGHT hold=300
+press UP hold=30
+press RIGHT hold=300
+checkpoint swim window=30 compare=none
+press START
+wait 60
+checkpoint pause_password window=30 compare=text
+press B
+wait 30

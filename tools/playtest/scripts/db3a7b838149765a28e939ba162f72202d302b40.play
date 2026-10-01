@@ -1,0 +1,82 @@
+@title SpongeBob SquarePants - Battle for Bikini Bottom (USA)
+@file SpongeBob SquarePants - Battle for Bikini Bottom (U) [!].gba
+@game BSQE
+@save none
+@chip none (password game: no save library string, Continue opens password entry)
+@frozen dingbat-bios,mgba,nba
+# No battery save: Continue is a password screen and the pause menu shows the
+# password. Peek at the password screen, back out, New Game, read the intro,
+# then the first level: jump the coral ledge, karate a robot, walk on to Sandy
+# and read her tip, open the pause menu (password). No [load].
+
+[new]
+wait 600
+wait 400
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press DOWN after=20
+press A
+wait 90
+checkpoint password_entry window=30 compare=text
+press B
+wait 90
+press A
+wait 150
+checkpoint intro window=30 compare=text
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+checkpoint gameplay window=30 compare=none
+press RIGHT hold=45
+hold RIGHT
+press RIGHT+A hold=15
+press RIGHT hold=15
+release
+press RIGHT hold=60
+wait 20
+press RIGHT hold=15
+press B after=20
+press B after=20
+press B after=20
+press RIGHT hold=120
+checkpoint past_wall window=30 compare=none
+hold RIGHT
+press RIGHT+A hold=15
+press RIGHT hold=100
+release
+press RIGHT hold=150
+checkpoint sandy window=30 compare=none
+press B after=90
+checkpoint sandy_talk window=30 compare=text
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press START after=60
+checkpoint pause_password window=30 compare=text
+press B
+wait 30

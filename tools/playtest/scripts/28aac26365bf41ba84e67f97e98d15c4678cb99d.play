@@ -1,0 +1,80 @@
+@title Classic NES Series - The Legend of Zelda (USA)
+@file Classic NES Series - The Legend of Zelda (U).gba
+@game FZLE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Register a file named "AA" (the game writes the battery save then: "SAVING...
+# WAIT A MOMENT"), start it, take the sword in the first cave and kill an
+# octorok on the next screen. In-game progress is only saved on game over, so
+# [load] shows file "AA" on the select screen and restarts at the first screen,
+# then walks into the cave again (the sword is still there).
+# Seen while authoring: nba runs a frame or so apart from the others on text
+# and Link's animation (f1681, f1961 "TAKE" vs "TAK", f2271); enemies match.
+# All three write 8192 bytes; dingbat-bios and nba are byte-identical, mgba
+# differs only in the never-written area (00 instead of FF from byte 512 on).
+
+[new]
+wait 600
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+tap DOWN times=3 every=10 hold=4
+press START
+wait 60
+press A after=15
+press A after=15
+wait 10
+checkpoint name_entry window=10
+tap SELECT times=3 every=15 hold=4
+wait 20
+press START
+wait 60
+wait 60
+wait 120
+checkpoint file_registered window=30
+press START
+wait 120
+checkpoint overworld_start window=30
+press LEFT hold=40
+press UP hold=60
+wait 10
+wait 120
+checkpoint cave window=30
+press UP hold=40
+wait 60
+wait 120
+press UP hold=70
+wait 120
+press RIGHT hold=8
+press DOWN
+wait 90
+press LEFT
+press UP hold=4
+wait 120
+checkpoint got_sword window=30
+press DOWN hold=90
+wait 60
+press DOWN hold=50
+press RIGHT hold=200
+wait 60
+press RIGHT hold=40
+tap A times=4 every=20 hold=4
+wait 30
+press RIGHT hold=30
+tap A times=10 every=15 hold=4
+wait 10
+checkpoint octoroks window=10
+
+[load]
+wait 600
+press START
+wait 120
+checkpoint file_select_saved window=30
+press START
+wait 120
+checkpoint resumed window=30
+press LEFT hold=40
+press UP hold=60
+wait 130
+checkpoint cave_again window=30

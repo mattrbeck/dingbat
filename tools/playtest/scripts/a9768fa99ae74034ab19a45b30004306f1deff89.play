@@ -1,0 +1,64 @@
+@title Spyro - Season of Ice (USA)
+@file Spyro - Season of Ice (U) [!].gba
+@game ASYE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# New Game, skip the beach intro, walk the Autumn Fairy Home hub (grab a gem),
+# then pause -> Options -> Save Game -> Yes ("Game save complete").
+# The game is a 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, nba writes
+# 8192 bytes. When authoring, nba did not offer Continue Game on its own save
+# (it started a new game in [load]); dingbat-bios and mgba resumed in the hub.
+
+[new]
+wait 600
+# until text 'PRESS START' timeout=2000 every=10  [reached dingbat-bios+470 mgba+470 nba+470]
+wait 474
+checkpoint title window=30 compare=text
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+checkpoint intro window=30
+press START
+wait 200
+checkpoint gameplay window=30 compare=none
+press UP hold=90
+press RIGHT hold=60
+wait 30
+checkpoint walked window=30 compare=none
+press START
+wait 70
+press DOWN after=20
+press DOWN after=20
+checkpoint pause_menu window=30 compare=text
+press A
+wait 90
+press DOWN after=20
+press DOWN after=20
+checkpoint options_menu window=30 compare=text
+press A
+wait 60
+press DOWN after=20
+wait 10
+checkpoint save_prompt window=30 compare=text
+press A
+wait 30
+wait 60
+checkpoint saved window=30 compare=text
+wait 120
+
+[load]
+wait 600
+# until text 'PRESS START' timeout=2000 every=10  [reached dingbat-bios+450 mgba+450 nba+470]
+wait 474
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 200
+wait 60
+checkpoint resumed window=30 compare=none
+press START
+wait 70
+checkpoint resumed_menu window=30 compare=text

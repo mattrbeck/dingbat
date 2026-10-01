@@ -1,0 +1,54 @@
+@title Metal Slug Advance (USA)
+@file Metal Slug Advance (U).gba
+@game BSME
+@chip EEPROM
+
+# File 001 > Normal > Walter; B skips the landing cutscene to the Base Camp
+# menu, whose SAVE writes the file ("Game data saved."). [load]: file 001
+# now holds the game and continues into Base Camp.
+# The menu font reads poorly under OCR, so the Base Camp steps are paced by
+# frames (all three emulators run them frame-identically).
+
+[new]
+wait 600
+press START
+until text "FILE" timeout=600 every=10
+wait 30
+checkpoint file_select_empty window=0
+press A
+wait 180
+checkpoint difficulty window=0
+press A
+wait 180
+checkpoint soldier_select window=0
+press A
+until text "LIFE" timeout=900 every=10
+wait 60
+checkpoint landing window=30
+mash B until text "CAMP" timeout=1200 every=30
+wait 60
+checkpoint base_camp window=0
+press DOWN after=20
+press DOWN after=20
+press DOWN after=20
+press A
+wait 120
+checkpoint save_prompt window=0
+press A
+wait 180
+checkpoint saved window=0
+
+[load]
+wait 600
+press START
+until text "FILE" timeout=600 every=10
+wait 30
+checkpoint file_select_saved window=0
+press A
+until text "CAMP" timeout=1200 every=10
+wait 60
+checkpoint resumed_base_camp window=0
+press DOWN after=20
+press DOWN after=20
+press DOWN after=20
+checkpoint resumed_menu window=0

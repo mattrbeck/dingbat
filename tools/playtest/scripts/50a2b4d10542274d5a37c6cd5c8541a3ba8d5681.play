@@ -1,48 +1,58 @@
 @title Rocky (USA)
 @file Rocky (U) (M5).gba
 @chip EEPROM (ROM also names SRAM)
+@frozen dingbat-bios,mgba,nba
 
 # English, Movie Mode, new player in slot 1 named "A". Confirming the name
 # writes the player record (EEPROM bytes 0x00-0x3F) and opens the
 # FIGHT / CUT SCENES menu.
-
 [new]
 wait 600
-mash START until text "LANGUAGE" timeout=1200 every=20
+# mash START until text LANGUAGE timeout=1200 every=20  [taps dingbat-bios:14 mgba:14 nba:14]
+tap START times=14 every=20 hold=4
 wait 60
-checkpoint language
+checkpoint language window=30
 press A hold=10
-until text "OPTIONS" timeout=600 every=10
+# until text OPTIONS timeout=600 every=10  [reached dingbat-bios+70 mgba+70 nba+70]
+wait 74
 wait 30
-checkpoint main_menu
+checkpoint main_menu window=30
 press A hold=10
-until text "DELETE PLAYER" timeout=600 every=10
+# until text 'DELETE PLAYER' timeout=600 every=10  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
 wait 30
 press A hold=10
-until text "GAME" timeout=600 every=10
+# until text GAME timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
-checkpoint player_slots
+checkpoint player_slots window=30
 press A hold=10
-until text "ENTER NAME" timeout=600 every=10
+# until text 'ENTER NAME' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
-checkpoint name_entry
+checkpoint name_entry window=30
 press A hold=10
-until text "FIGHT" timeout=600 every=10
+# until text FIGHT timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
 wait 180
 checkpoint saved window=10
 
 [load]
 wait 600
-mash START until text "LANGUAGE" timeout=1200 every=20
+# mash START until text LANGUAGE timeout=1200 every=20  [taps dingbat-bios:14 mgba:14 nba:14]
+tap START times=14 every=20 hold=4
 wait 60
 press A hold=10
-until text "OPTIONS" timeout=600 every=10
+# until text OPTIONS timeout=600 every=10  [reached dingbat-bios+70 mgba+70 nba+110]
+wait 114
 wait 30
 press A hold=10
-until text "DELETE PLAYER" timeout=600 every=10
+# until text 'DELETE PLAYER' timeout=600 every=10  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
 wait 30
 press A hold=10
-until notext "DELETE PLAYER" timeout=600 every=10
+# until notext 'DELETE PLAYER' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 90
 checkpoint player_slots_loaded window=10
 press A hold=10

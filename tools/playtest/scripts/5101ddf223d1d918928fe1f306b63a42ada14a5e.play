@@ -2,65 +2,78 @@
 @file Super Mario Advance 2 - Super Mario World (U) [!].gba
 @game AA2E
 @chip EEPROM
+@frozen dingbat-bios,mgba,nba
 
 # Super Mario World, File A. On the Yoshi's House map open the START menu
 # and Save & Quit; the attract demo and title then lead back to a file
 # select whose File A reads WORLD 1.
-
 [new]
-mash START until text "Single Player" timeout=2400 every=40
+# mash START until text 'Single Player' timeout=2400 every=40  [taps dingbat-bios:6 mgba:6 nba:6]
+tap START times=6 every=40 hold=4
 wait 60
 checkpoint game_select window=0
 press A hold=10
-until text "CHOOSE A" timeout=600 every=10
+# until text 'CHOOSE A' timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 60
 press A hold=10
 wait 120
-mash START until text "Choose a File" timeout=900 every=60
+# mash START until text 'Choose a File' timeout=900 every=60  [taps dingbat-bios:1 mgba:1 nba:1]
+tap START times=1 every=60 hold=4
 wait 60
 checkpoint file_select_empty window=0
 press A hold=10
-until text "Toadstool" timeout=900 every=10
+# until text Toadstool timeout=900 every=10  [reached dingbat-bios+80 mgba+80 nba+80]
+wait 84
 wait 30
 checkpoint intro_text window=0
-mash A until text "HOUSE" timeout=1800 every=20
-# the R-button hint pops up over the map before the menu opens
+# mash A until text HOUSE timeout=1800 every=20  [taps dingbat-bios:35 mgba:35 nba:35]
+tap A times=35 every=20 hold=4
 wait 300
 checkpoint yoshis_house_map window=0
 press START
-until text "Continue" timeout=200 every=5
+# until text Continue timeout=200 every=5  [reached dingbat-bios+5 mgba+5 nba+5]
+wait 9
 wait 20
 press DOWN after=20
 press DOWN after=20
 checkpoint map_menu window=0
 press A after=60
-mash START until text "Single Player" timeout=1800 every=40
+# mash START until text 'Single Player' timeout=1800 every=40  [taps dingbat-bios:2 mgba:2 nba:2]
+tap START times=2 every=40 hold=4
 wait 60
 press A hold=10
-until text "CHOOSE A" timeout=600 every=10
+# until text 'CHOOSE A' timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 60
 press A hold=10
 wait 120
-mash START until text "Choose a File" timeout=900 every=60
+# mash START until text 'Choose a File' timeout=900 every=60  [taps dingbat-bios:1 mgba:1 nba:1]
+tap START times=1 every=60 hold=4
 wait 60
 checkpoint saved window=0
 
 [load]
-mash START until text "Single Player" timeout=2400 every=40
+# mash START until text 'Single Player' timeout=2400 every=40  [taps dingbat-bios:4 mgba:4 nba:4]
+tap START times=4 every=40 hold=4
 wait 60
 press A hold=10
-until text "CHOOSE A" timeout=600 every=10
+# until text 'CHOOSE A' timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 60
 press A hold=10
 wait 120
-mash START until text "Choose a File" timeout=900 every=60
+# mash START until text 'Choose a File' timeout=900 every=60  [taps dingbat-bios:1 mgba:1 nba:1]
+tap START times=1 every=60 hold=4
 wait 60
 checkpoint file_select_saved window=0
 press A hold=10
-until text "HOUSE" timeout=900 every=10
+# until text HOUSE timeout=900 every=10  [reached dingbat-bios+20 mgba+30 nba+30]
+wait 34
 wait 120
 checkpoint resumed window=0
 press START
-until text "Continue" timeout=200 every=5
+# until text Continue timeout=200 every=5  [reached dingbat-bios+5 mgba+5 nba+5]
+wait 9
 wait 20
 checkpoint resumed_menu window=0

@@ -1,0 +1,77 @@
+@title Final Fantasy V Advance (USA)
+@file Final Fantasy V Advance (U).gba
+@game BZ5E
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game, A through the Tycoon/meteor intro to Bartz on the world map,
+# walk a little, Save to file 1 from the field menu.
+# Finding: the intro cutscenes run at different speeds per emulator (mgba
+# ahead of dingbat-bios and nba from ~f4844, all three apart at f6044 and
+# f16644); they meet again on the world map (~f19100), and the save file
+# records play time 0:03 on dingbat-bios/nba but 0:04 on mgba.
+[new]
+wait 600
+press A
+wait 300
+wait 900
+wait 600
+press START
+wait 200
+wait 120
+checkpoint title window=30
+press A
+wait 240
+press A
+wait 600
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=90 every=20 hold=4
+tap A times=150 every=20 hold=4
+tap A times=100 every=20 hold=4
+tap A times=100 every=20 hold=4
+tap A times=30 every=20 hold=4
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+wait 60
+press START
+wait 60
+press B
+wait 60
+checkpoint world_map window=30
+press RIGHT hold=40
+press DOWN hold=30
+wait 30
+press START
+wait 40
+tap DOWN times=6 every=10 hold=4
+wait 20
+checkpoint menu window=30
+press A
+wait 60
+press A
+wait 60
+checkpoint saved window=0
+
+[load]
+wait 600
+press A
+wait 1800
+press START
+wait 360
+press A
+wait 120
+checkpoint title_continue window=30
+press A
+wait 90
+checkpoint load_file window=30
+press A
+wait 30
+press A
+wait 180
+checkpoint resumed window=30
+press START
+wait 60
+checkpoint resumed_menu window=30

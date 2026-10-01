@@ -1,0 +1,102 @@
+@title Tony Hawk's Pro Skater 2 (USA)
+@file Tony Hawk's Pro Skater 2 (U) [!].gba
+@game ATHE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# New Career as Tony Hawk, skate the Hangar for a few seconds, pause > End
+# Run, then Save Career > Yes from the run menu ("SAVE SUCCESSFUL").
+# [load]: the career menu now opens on CONTINUE CAREER (proof the save was
+# read), continue into the Hangar.
+# Findings: nba's rotating skater model on skater select differs (MINOR). In
+# the live session all three drifted apart in the Hangar (f2546) after a
+# rolled-back step; the frozen replay is IDENTICAL on all three for gameplay
+# and skating, so that came from the session's save states. Gameplay
+# checkpoints stay compare=none to be safe.
+# nba writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios, mgba:
+# 512 bytes, same 220 data bytes); booted with it, nba truncates game.sav to
+# 0 bytes and the career menu opens on NEW CAREER (no save seen), so nba's
+# [load] checkpoints differ.
+
+[new]
+wait 600
+wait 300
+wait 200
+checkpoint main_menu window=30
+press A
+wait 120
+checkpoint career_menu window=30
+press A
+wait 120
+checkpoint select_skater window=30 compare=text
+press A
+wait 120
+press A
+wait 150
+checkpoint level_select window=30
+press A
+wait 300
+checkpoint checklist window=30
+press A
+wait 300
+checkpoint gameplay window=30 compare=none
+hold UP
+wait 60
+release
+press A
+wait 60
+hold RIGHT
+wait 40
+release
+press A
+press B hold=20
+wait 100
+hold UP
+wait 120
+release
+press A
+wait 300
+checkpoint skating window=30 compare=none
+press START
+wait 60
+checkpoint paused window=30 compare=text
+tap DOWN times=3 every=20 hold=4
+press A
+# until text CONTINUE timeout=600 every=10  [reached dingbat-bios+40 mgba+40 nba+50]
+wait 54
+wait 30
+checkpoint stats window=30
+press A
+# until text 'SAVE CAREER' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+10]
+wait 14
+wait 30
+checkpoint run_menu window=30
+tap DOWN times=5 every=20 hold=4
+wait 20
+press A
+wait 120
+press RIGHT
+wait 20
+checkpoint save_prompt window=30
+press A
+wait 180
+checkpoint saved window=0
+
+[load]
+wait 1100
+press A
+wait 120
+checkpoint career_menu window=30
+press A
+wait 150
+press A
+wait 120
+checkpoint skater_career window=30 compare=text
+press A
+wait 150
+checkpoint level_select window=30
+press A
+wait 300
+press A
+wait 300
+checkpoint resumed window=30 compare=none
