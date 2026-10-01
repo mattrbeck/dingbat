@@ -416,7 +416,7 @@ proc test_fifo() =
   for k in 1 ..< e.len:
     if e[k][0] != 0x200 and e[k - 1][0] == 0x200: bursts.add k
   # Capture stores sample j at tick j + 1, ch1 plays it at tick j + 3 one
-  # loop later: buffer + 2 samples (melonDS DS gives the same 4194 output
+  # loop later: buffer + 2 samples (the reference run in docs/oracles.md gives the same 4194 output
   # samples for snd_suite's 4096-sample loop).
   check bursts.len >= 3 and bursts[1] - bursts[0] == 66 and bursts[2] - bursts[1] == 66,
         "echoes repeat every buffer length + 2 samples", $bursts

@@ -75,7 +75,7 @@ header with a small 3x5 font.
 same toolchain as the 2d_* ROMs (libgcc for soft-float); writes
 `roms/3d/`. A variant directory's `main.c` may `#include` another's with a
 `#define` (e.g. `3d_highlight`). The ROMs put plain ARM9 code at ROM
-0x4000, so the melonDS-family reference cores need `--relocate`.
+0x4000, so some reference cores need `--relocate` (tools/ndsref/README.md).
 
 ### libnds (nds-examples and the rebuilt third-party ROMs)
 

@@ -29,7 +29,7 @@
 ## channel replaying the buffer a capture unit is filling (capture-based
 ## reverb) hears what was captured one loop earlier instead of feeding
 ## straight back. The depth (8 words) is Assumed; the loop-late delay was
-## compared by running snd_suite against melonDS DS (docs/oracles.md, NDS
+## compared by running snd_suite in a reference emulator (docs/oracles.md, NDS
 ## core). Capture stores each word when it is complete (its FIFO not
 ## modelled).
 ##
