@@ -3112,17 +3112,20 @@ const readDriveLibrary = async (remote) => {
 // `readFrom` is the listing the library was read under (the flush lists
 // again before writing). The write goes to the oldest copy; the other
 // copies that read merged are then deleted, their contents being in it.
-const writeDriveLibrary = async (lib, remote, readFrom = remote) => {
-  // DS games are this device's only (driveExcluded): not one of their
-  // entries, tombstones or rename markers goes up.
+// The library as Drive gets it. DS games are this device's only
+// (driveExcluded): not one of their entries, tombstones or rename markers
+// goes up.
+const driveLibraryOf = (lib) => {
   const ds = (n) => isNdsRomName(n);
-  lib = {
+  return {
     ...lib,
     recents: (lib.recents || []).filter((e) => !ds(e?.name)),
     tomb: (lib.tomb || []).filter((t) => !ds(t?.name)),
     ren: (lib.ren || []).filter((r) => !ds(r?.from) && !ds(r?.to)),
   };
-  let bytes = new TextEncoder().encode(JSON.stringify(lib));
+};
+const writeDriveLibrary = async (lib, remote, readFrom = remote) => {
+  let bytes = new TextEncoder().encode(JSON.stringify(driveLibraryOf(lib)));
   let keep = remote.get(LIBRARY_FILE);
   await driveUploadFile(LIBRARY_FILE, bytes, keep?.id);
   let merged = libraryRead.get(readFrom) || [];

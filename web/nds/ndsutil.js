@@ -26,7 +26,9 @@ const NdsUtil = (() => {
   const isNdsName = (name) => /\.nds$/i.test(String(name || ""));
 
   // CRC-16 as GBATEK "BIOS Misc Functions" GetCRC16 states it (the header's
-  // checksums use it with initial value FFFFh).
+  // checksums use it with initial value FFFFh). The shifted constants carry
+  // bits above 15 that later shifts bring down, so the sum stays 32-bit
+  // until the end (the result is the reflected A001h CRC, "CRC-16/MODBUS").
   const CRC_VAL = [0xC0C1, 0xC181, 0xC301, 0xC601, 0xCC01, 0xD801, 0xF001, 0xA001];
   const crc16 = (bytes, start, end, init = 0xFFFF) => {
     let crc = init;
@@ -35,10 +37,10 @@ const NdsUtil = (() => {
       for (let j = 0; j < 8; j++) {
         const carry = crc & 1;
         crc >>>= 1;
-        if (carry) crc = (crc ^ (CRC_VAL[j] << (7 - j))) & 0xFFFF;
+        if (carry) crc = (crc ^ (CRC_VAL[j] << (7 - j))) >>> 0;
       }
     }
-    return crc;
+    return crc & 0xFFFF;
   };
 
   // Any-signal-matches, like the GB/GBA check in index.js (homebrew is often
