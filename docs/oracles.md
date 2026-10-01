@@ -83,7 +83,7 @@ Prebuilt libretro cores (macOS arm64 binaries, no sources) run as black boxes
 by `tools/ndsref` (2026-10-01). Their names and option files live in
 `~/.cache/dingbat-nds/cores` (`NAME_libretro.dylib` + `NAME_libretro.opts`),
 not in the repo; the settings that matter are recorded here so the setup can
-be rebuilt. No DS behaviour is pinned by these runs yet.
+be rebuilt. Rows they pin are under "NDS core" below.
 
 | Core (as it reports itself) | Output | Settings for comparable runs | Findings |
 |---|---|---|---|
@@ -143,6 +143,27 @@ Comparisons against the melonDS DS 1.4.0 core run through `tools/ndsref`
 | `io/backup.nim` | IR-cart SPI front-end (00h pass-through, 01h receive length 0, 08h version AAh) | melonDS DS 1.4.0 | run — both show the Continue menu with CONNECT TO POKéWALKER from the same save | GBATEK "DS Cart Infrared Cartridge SPI Commands"; the reply byte during the IR command byte (FFh) is Assumed |
 | `io/wifi.nim` | enough of the MAC/BB/RF for the SDK's wireless manager to start: without it SoulSilver's Continue showed "A communication error has occurred" | melonDS DS 1.4.0 | run — both reach CONTINUE / NEW GAME / CONNECT TO POKéWALKER and continue into New Bark Town | GBATEK DS Wifi chapters (register widths, reset values, IRQ edge, power states, timers, BB/RF tables); Assumed: power-up applies at once, a frame to a station fails (no ACK), wifi RAM above 0x6000 reads FFFFh |
 | `io/rtc.nim` | `--rtc` clocks the RTC from emulated time | melonDS DS 1.4.0 | run — with both at 2004-01-01 00:00 the same input script gives identical frames 3000 and 5000 (the game seeds from the RTC) | none needed: a test-harness choice, the hardware clock is the host's |
+
+Peripheral rows: `tests/nds/src/periph_suite` (our ROM; result words read
+back with `tests/nds/tools/periph_rows.py`), `ndsref --bios` with the real
+dumps, `--relocate`, presses `TOUCH:128:96@50-80,A@600+4`, 800 frames;
+ndsrun the same plus `--mic`. melonDS 0.9.3 never finishes the RTC section
+(no RTC interrupt) and DeSmuME stops at the SPI IRQ wait (its SPI busy is a
+constant 0x34 cycles at every baud, no IF.23), so most rows compare
+melonDS DS 1.4.0 only.
+
+| Where | Behaviour | Compared against | How | Independent evidence |
+|---|---|---|---|---|
+| `io/spi.nim` write_data, transfer_end | busy for 8 bits at 4/2/1 MHz / 512 KHz; IF.23 at the end, when busy drops | melonDS DS 1.4.0 equal at 2 and 1 MHz, 6 bus cycles longer at 4 MHz and 512 KHz; melonDS 0.9.3 the same as 1.4.0 | run — periph_suite RES1-6 | GBATEK SPICNT ("Upon transfer completion, the Busy flag goes off (with optional IRQ)") |
+| `io/spi.nim` transfer_end | SPIDATA keeps the previous reply until the transfer ends | melonDS (both) show the new reply at once | run — RES7 | GBATEK ("Upon transfer completion ... the received value can be then read") kept; what a mid-transfer read gives is unpinned (a hardware run of periph_suite) |
+| `io/spi.nim` write_data | 16-bit mode (SPICNT.10) is busy for 16 bits | melonDS (both): 8 bits | run — RES8/9 | GBATEK "bugged 16-bit mode"; the second byte sent (0) is Assumed |
+| `io/rtc.nim` read_rcnt | general-purpose mode: input lines read 1, SI reads the RTC's /INT | melonDS (both) read RCNT back as written (8000h, 8100h), SI not visible | run — RES10/11/31 | GBATEK "SIO General-Purpose Mode" (internal pull-ups), "DS Real-Time Clock" (SI = /INT); the DS pull-ups are Assumed |
+| `io/spi.nim` power manager | after direct boot register 0 = 0Dh; DS-Lite register 4 = 40h + the firmware's backlight level, mirrored at 5-7; no mute bit on the Lite | melonDS DS: register 0 reads 00h, register 4 40h with 5-7 reading 00h, the mute bit R/W | run — RES12-15 (`--bios`: a DS-Lite firmware) | GBATEK "DS Power Management Device" (mirrors, bit 1 "DS-Lite: always zero"); 0Dh = what the firmware leaves (backlights on), Assumed |
+| `io/spi.nim` tsc_convert | TEMP0 738, TEMP1 881, battery 0, non-touch channels 0 in differential mode, released Z1 0 / Z2 FFFh, Y FFFh / X 0, /PENIRQ (EXTKEYIN.6) only after a power-down-0/2 command | melonDS DS: temperatures, battery, Z1/Z2 FFFh, differential = single-ended, released X/Y 000h, pen bit ungated; silent mic 80h (8-bit) in both | run — RES16-25 | TI TSC2046 datasheet (600 mV TEMP0, TEMP1 - TEMP0 = T/2.573 mV, PD bits), GBATEK (VREF 3.33 V, battery grounded, released X/Y, PENIRQ); room temperature and the differential readings Assumed |
+| `io/rtc.nim` int_low, schedule_next | selected-frequency waves low for their first half, aligned to the seconds counter, ANDed: 1 Hz / 16 Hz periods and four falls a second for 2 Hz + 8 Hz | melonDS DS 1.4.0 equal (periods within 30 bus cycles); melonDS 0.9.3 raises no RTC IRQ | run — RES26-28 | Seiko S-35190A datasheet Figures 19/20 |
+| `io/rtc.nim` set_datetime | a time write restarts the divider below one second: alarm 1 at 00:00 fires 2.000 s after writing 23:59:58 | melonDS DS: 1.87 s (the divider runs on) | run — RES29-31 | unpinned: the datasheet's Figure 32 does not settle it; Assumed (a hardware run of periph_suite) |
+| `io/spi.nim` flash_deselect | page program busy (WIP) 1.2 ms after chip select drops | melonDS (both): WIP never set | run — RES35/36 | GBATEK "DS Firmware Serial Flash Memory" (1.2 ms typ) |
+| `nds.nim` sleep_for | ARM7 sleep stops the timers and the ARM9 (no V-blank counted) until a KEYCNT IRQ wakes it with IF.12 | melonDS DS 1.4.0 equal (timer frozen, 0 ARM9 frames, IF = 1000h) | run — RES37-39 | GBATEK "most of the hardware including sound and video are paused", GBA Stop wake list; the ARM9 stopping is Assumed |
 
 
 ### NDS 3D engine

@@ -59,7 +59,8 @@ the protection unit; instructions add their internal cycles. An ARM9 cycle is
 one master cycle, an ARM7 cycle two. The few unpublished values are marked
 Assumed in `timing.nim`. The card (`cart.nim`) times ROM words by its CLK,
 gap1 and gap2, and both SPI buses keep their busy flags for the byte's time at
-the selected baud rate. With these, SoulSilver runs frame-locked with the
+the selected baud rate (the ARM7 bus delivers its reply and IRQ at the end:
+docs/nds/peripherals.md). With these, SoulSilver runs frame-locked with the
 reference core (docs/oracles.md, "NDS core").
 
 ## Layout
@@ -89,12 +90,15 @@ src/dingbat/nds/
   io/dma.nim       4 channels per CPU (+ ARM9 fill regs)
   io/ipc.nim       IPCSYNC + FIFOs
   io/divsqrt.nim   ARM9 maths unit
-  io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid
+  io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid (IF.22)
   io/spi.nim       ARM7 SPI: power manager, firmware flash, touchscreen
+                   (docs/nds/peripherals.md)
+  io/mic.nim       microphone sample queue, read by the TSC's AUX channel
   io/cart.nim      card slot (ROMCTRL, B7 reads, AUXSPI)
   io/backup.nim    save chip: EEPROM/FRAM/FLASH, IR-cart front-end
   io/spu.nim       ARM7 sound: 16 channels, capture, stereo out at 32728.5 Hz
-  io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date)
+  io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date),
+                   INT1/INT2 interrupts to SIO SI, RCNT
   io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
 src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
@@ -102,6 +106,7 @@ web/nds.html, web/nds/             dev page (two canvases, keys, touch)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
+tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
@@ -132,7 +137,7 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | Memory / boot / BIOS | libnds `hello_world` and `template_combined` boot through both CPUs' crt0 + IPC handshake; HLE BIOS so no dump is required |
 | 2D engines | libnds console (`hello_world`, `ansi_console`), `16bit_color_bmp`, `256_color_bmp`, `simple` sprites, window tests |
 | IRQ / timers / DMA / IPC / maths | gbeplus irq/math/dma, rockwrestler system tests, `pxi`, `timercallback` |
-| Input / touch / SPI / RTC | `touch_test` tracks the mouse |
+| Input / touch / SPI / RTC | `touch_test` tracks the mouse; periph_suite (RTC interrupts, SPI timing, power manager, TSC channels, mic, sleep/lid: docs/nds/peripherals.md) |
 | 3D | `Simple_Tri`, `Simple_Quad` |
 | Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
 | Card + backup | a commercial ROM's B7 reads + save detection |
