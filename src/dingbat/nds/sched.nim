@@ -16,6 +16,7 @@ type
     evCartDone      ## ROMCTRL transfer word ready / block done
     evGxFifo        ## geometry engine drain (gpu3d)
     evSpuSample     ## sound mixer tick (spu)
+    evWifi          ## wifi timers / transmit end (io/wifi)
 
   Pending = object
     at: int64

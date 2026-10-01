@@ -63,8 +63,9 @@ proc io7_read(n: NDS; a: uint32): uint32 =
 
 proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
   if (a and 0x00FF_0000'u32) >= 0x0080_0000'u32:
-    if (mask and 0xFFFF) != 0: n.wifi.write16(a, uint16(v))
-    if (mask and 0xFFFF_0000'u32) != 0: n.wifi.write16(a + 2, uint16(v shr 16))
+    # byte writes are ignored (GBATEK "DS Wifi I/O Map")
+    if (mask and 0xFFFF) == 0xFFFF: n.wifi.write16(a, uint16(v))
+    if (mask and 0xFFFF_0000'u32) == 0xFFFF_0000'u32: n.wifi.write16(a + 2, uint16(v shr 16))
     return
   let o = a and 0x00FF_FFFC'u32
   case o
@@ -143,6 +144,15 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
   of 0x04:
     n.sync7()
+    if (a and 0x00FF_0000'u32) >= 0x0080_0000'u32:
+      # wifi: 16-bit ports with read side effects, so only the halfwords
+      # actually accessed are read (a byte read reads its halfword)
+      when width == 32:
+        return uint32(n.wifi.read16(a)) or (uint32(n.wifi.read16(a + 2)) shl 16)
+      elif width == 16:
+        return uint32(n.wifi.read16(a))
+      else:
+        return (uint32(n.wifi.read16(a and not 1'u32)) shr ((a and 1) * 8)) and 0xFF
     let w = n.io7_read(a and not 3'u32)
     when defined(ndsdebug):
       if n.iolog: n.log_io("7", a, w, 0xFFFF_FFFF'u32, false, n.arm7.cur_pc)

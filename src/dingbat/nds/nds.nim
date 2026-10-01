@@ -222,6 +222,7 @@ proc dispatch(n: NDS; ev: NdsEvent) =
     n.spu.next_tick += SPU_TICK_CYCLES
     n.sched.schedule(n.spu.next_tick, evSpuSample)
   of evGxFifo: discard
+  of evWifi: n.wifi.on_event()
 
 # ---------------------------------------------------------------------------
 # Construction and the frame loop
@@ -261,7 +262,7 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.cart = new_cart(rom, n.irq9, n.irq7, n.sched)
   n.spu = new_spu()
   n.rtc = new_rtc()
-  n.wifi = Wifi()
+  n.wifi = new_wifi(n.sched, n.irq7)
   n.arm9 = new_arm_cpu(Arm9Bus(nds: n), ARM9_CYCLES_PER_INSTR)
   n.arm7 = new_arm_cpu(Arm7Bus(nds: n), ARM7_CYCLES_PER_INSTR)
   n.cp15.reset()
