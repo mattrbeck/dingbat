@@ -289,3 +289,46 @@ jobs:
             tests/results.md
             tests/results_mgba_suite.md
             tests/results_gambatte.md
+
+  web-e2e:
+    # The web app end to end: two browsers (an iPhone and a Mac) running the
+    # real build against one fake Google Drive -
+    # picking a game up on another device (web/e2e/). Its own job because it
+    # needs the wasm build, which the test job never makes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nim
+        # As in deploy-pages.yml: choosenim fetches a script, then the toolchain.
+        run: |
+          set -eo pipefail
+          .github/scripts/retry.sh 3 bash -c \
+            'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
+               https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
+          echo "$HOME/.nimble/bin" >> $GITHUB_PATH
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "4.0.23"
+      - name: Install nimble dependencies
+        run: .github/scripts/retry.sh 3 nimble install -y sdl2
+      - name: Build WASM
+        run: nim c -d:emscripten src/dingbat_wasm.nim
+      - name: Cache Playwright's browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-e2e-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Two devices, one fake Drive
+        working-directory: web
+        # Both devices in WebKit (the Mac with a Mac's user agent): these
+        # runners draw Chromium's WebGL in software at about three frames a
+        # second, the probe's first lines; Chromium runs locally by default.
+        env:
+          DINGBAT_E2E_NO_CHROMIUM: "1"
+        run: |
+          set -e
+          ../.github/scripts/retry.sh 3 npm ci
+          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium webkit
+          node e2e/speed-probe.mjs || true   # how fast each browser runs the game here
+          node --test e2e/*.e2e.mjs

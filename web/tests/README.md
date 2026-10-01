@@ -68,3 +68,37 @@ Two declaration files back it:
   cross-file global (a `window.<name> = ...` consumed by another file, a UMD
   export, an expando property on a DOM element) gets declared here;
   file-local symbols never do.
+
+## Several devices in real browsers (`web/e2e/`)
+
+The node:vm harness above cannot run the wasm core, lay out a page, or be
+two devices at once. `web/e2e/` can: each "device" is a Playwright browser
+context (its own IndexedDB and localStorage) running the real build, in
+Chromium or WebKit, and every device in a test shares one fake Google Drive
+(`e2e/fakedrive.mjs`, routed in by Playwright, so nothing leaves the
+machine). A generated test ROM (`e2e/synctest-rom.mjs`) writes its battery
+save while A is held and shows the saved value on screen, so a save and a
+picture can be checked across devices. Actions go through the visible UI;
+`e2e/devices.mjs` holds them and the observations.
+
+```
+cd web && npm ci && npx playwright install chromium webkit
+nim c -d:emscripten src/dingbat_wasm.nim       # from the repo root: em.js/em.wasm
+node --test e2e/*.e2e.mjs                      # from web/
+```
+
+Two files: `handoff.e2e.mjs` (the hand-off's cases one by one) and
+`fourteen-steps.e2e.mjs` (Matt's 14-step story, play on one device, pick up
+on the other and back, for every way the second device can be opened and
+with and without an in-game save; "the same place" is the whole
+framebuffer, exactly). `DINGBAT_E2E_PAIRS=iphone+mac` narrows the device pairs (kinds: `iphone`,
+`iphone-private`, `mac`, `mac-webkit`); `DINGBAT_E2E_NO_CHROMIUM=1` makes
+the Mac WebKit too (CI does: its runners draw Chromium's WebGL in software
+at about three frames a second - `node e2e/speed-probe.mjs` measures it);
+`DINGBAT_E2E_SLOW=4` slows the Chromium devices' CPU; `DINGBAT_WEB=<dir>` serves another
+copy of web/, e.g. one with an older index.js, to see a test fail on the
+code it guards. Two WebKit quirks the rig works around: it does not show
+Playwright a Blob request body (the rig reads bodies bound for Google into
+bytes first), and a context with no profile on disk keeps no Blob in
+IndexedDB, as Safari's private browsing does (so `iphone` has a profile and
+`iphone-private` does not). CI runs it as the `web-e2e` job.
