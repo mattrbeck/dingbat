@@ -25,6 +25,7 @@ type
   NdsScheduler* = ref object
     events: seq[Pending]      ## unsorted; there are ~a dozen at most
     now*: int64               ## master cycle the machine has reached
+    next: int64               ## earliest `at` in events (high(int64) when empty)
 
 const
   MASTER_HZ* = 67_027_964
@@ -37,33 +38,41 @@ const
   VISIBLE_LINES* = 192
   FRAME_CYCLES* = LINE_CYCLES * LINES    ## 1_120_380 -> 59.8261 Hz
 
-proc new_nds_scheduler*(): NdsScheduler = NdsScheduler()
+proc new_nds_scheduler*(): NdsScheduler = NdsScheduler(next: high(int64))
+
+proc refresh(s: NdsScheduler) {.inline.} =
+  s.next = high(int64)
+  for e in s.events:
+    if e.at < s.next: s.next = e.at
 
 proc schedule*(s: NdsScheduler; at: int64; kind: NdsEvent) =
   ## Book `kind` at absolute cycle `at`, replacing any pending booking.
   for e in s.events.mitems:
     if e.kind == kind:
+      let was_next = e.at == s.next
       e.at = at
+      if at < s.next: s.next = at
+      elif was_next: s.refresh()
       return
   s.events.add(Pending(at: at, kind: kind))
+  if at < s.next: s.next = at
 
 proc cancel*(s: NdsScheduler; kind: NdsEvent) =
   for i in 0 ..< s.events.len:
     if s.events[i].kind == kind:
       s.events.del(i)
+      s.refresh()
       return
 
 proc is_scheduled*(s: NdsScheduler; kind: NdsEvent): bool =
   for e in s.events:
     if e.kind == kind: return true
 
-proc next_at*(s: NdsScheduler): int64 =
-  result = high(int64)
-  for e in s.events:
-    if e.at < result: result = e.at
+proc next_at*(s: NdsScheduler): int64 {.inline.} = s.next
 
 proc pop_due*(s: NdsScheduler; kind: var NdsEvent; at: var int64): bool =
   ## The earliest event due at or before `now`, removed from the queue.
+  if s.next > s.now: return false
   var best = -1
   for i in 0 ..< s.events.len:
     if s.events[i].at <= s.now and (best < 0 or s.events[i].at < s.events[best].at):
@@ -72,4 +81,5 @@ proc pop_due*(s: NdsScheduler; kind: var NdsEvent; at: var int64): bool =
   kind = s.events[best].kind
   at = s.events[best].at
   s.events.del(best)
+  s.refresh()
   true

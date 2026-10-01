@@ -320,7 +320,10 @@ proc render_text(e: Engine2D; bg, y: int) =
     if is8:
       var row8: array[8, uint8]
       w.fetch8(char_base + tile * 64 + r * 8, row8)
-      if ext:
+      if cast[uint64](row8) == 0:
+        # a transparent tile row, common on UI layers
+        for k in 0 ..< span: dst[x + k] = 0
+      elif ext:
         let pbase = ext_base + int(se shr 12) * 512
         for k in 0 ..< span:
           let idx = int(row8[(x0 + k) xor fx])
@@ -332,9 +335,17 @@ proc render_text(e: Engine2D; bg, y: int) =
     else:
       let bits = w.rd32(char_base + tile * 32 + r * 4)
       let bank = int(se shr 12) * 16
-      for k in 0 ..< span:
-        let idx = int((bits shr (uint32((x0 + k) xor fx) * 4)) and 0xF)
-        dst[x + k] = if idx == 0: 0'u16 else: pal[bank + idx] or OPAQUE
+      if bits == 0:
+        for k in 0 ..< span: dst[x + k] = 0
+      elif fx == 0 and span == 8:
+        # whole unflipped tile row: no per-dot flip or span arithmetic
+        for k in 0 ..< 8:
+          let idx = int((bits shr (uint32(k) * 4)) and 0xF)
+          dst[x + k] = if idx == 0: 0'u16 else: pal[bank + idx] or OPAQUE
+      else:
+        for k in 0 ..< span:
+          let idx = int((bits shr (uint32((x0 + k) xor fx) * 4)) and 0xF)
+          dst[x + k] = if idx == 0: 0'u16 else: pal[bank + idx] or OPAQUE
     x += span
   e.apply_mosaic_h(bg)
 
