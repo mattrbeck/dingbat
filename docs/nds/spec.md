@@ -108,15 +108,19 @@ src/dingbat/nds/
                    (docs/nds/slot2.md)
   io/spu.nim       ARM7 sound: 16 channels, capture, stereo out at 32728.5 Hz
   io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date)
-  io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
+  io/wifi.nim      wifi MAC/BB/RF, transmitter, receiver, the Air between
+                   consoles (docs/nds/wifi.md)
+  air.nim          several machines in lockstep on one Air (local wireless)
 src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
+tools/ndsair.nim                   the same for N machines on one Air
 web/nds.html, web/nds/             dev page (two canvases, keys, touch)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
 tests/nds_slot2_test.nim           GBA-slot devices + the slot2_probe ROM
 tests/nds_boot_test.nim            KEY1/KEY2, card handshake, secure area, direct boot
+tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machines
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
@@ -152,6 +156,7 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
 | GBA slot | `slot2_probe` under each device; SoulSilver's MIGRATE FROM <GBA game> with a Generation 3 cart (docs/nds/slot2.md) |
 | Card + backup | a commercial ROM's B7 reads + save detection; the KEY1/KEY2 boot handshake (docs/nds/boot.md) |
+| Wireless | two machines on one Air: wifi_link's beacon scan, data frames and multiplay rounds (tests/nds_wifi_test.nim); network play is a plan (docs/nds/wifi.md) |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
 | Frontend | desktop SDL target with both screens; main web UI integration |
 
