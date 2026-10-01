@@ -90,8 +90,8 @@ proc capture_line(g: Gpu; y: int) =
     var ca, cb: uint16
     if src != 1:
       if a_3d:
-        if l3 != nil and ((l3[x] shr 24) and 0x1F) != 0:
-          ca = px3d_to_555(l3[x]) or 0x8000
+        if l3 != nil and alpha5(l3[x]) != 0:
+          ca = to_bgr555(l3[x]) or 0x8000
       else:
         ca = e.gfx[x] or 0x8000
     if src != 0:

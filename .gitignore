@@ -177,6 +177,7 @@ tools/gbgate/roms.txt
 /dingbat_cyclelaws_test
 /dingbat_gbapurebase_test
 /dingbat_psgagb_test
+/dingbat_ndscpu_test
 /dingbat_state_soak_test
 /dingbat_desktop_settings_test
 /dingbat_desktop_lifecycle_test
@@ -191,8 +192,10 @@ formal/.lake/
 web/nds/nds.js
 web/nds/nds.wasm
 # Third-party DS test ROMs carry no licence; they live in ~/.cache/dingbat-nds/roms
-# (tests/nds/README.md). Only our own fb_*.nds are committed.
+# (tests/nds/README.md). Only our own fb_*, 2d_*, snd_tone and gx_tri .nds are committed.
 tests/nds/roms/*
+!tests/nds/roms/snd_tone.nds
 !tests/nds/roms/fb_hello.nds
 !tests/nds/roms/fb_both.nds
 !tests/nds/roms/2d_*.nds
+!tests/nds/roms/gx_tri.nds

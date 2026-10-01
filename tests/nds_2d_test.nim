@@ -11,6 +11,7 @@ import dingbat/nds/mem/vram
 import dingbat/nds/gpu/[gpu, engine2d]
 import dingbat/nds/nds   # bgr555_to_rgba
 import dingbat/nds/gpu3d/gpu3d
+import dingbat/nds/io/irq
 import ../tools/ndsrun
 
 var failures = 0
@@ -400,7 +401,7 @@ proc scene_3d_capture() =
   echo "BG0 as 3D (alpha blend over 2nd target), display capture"
   let g = fresh()
   let a = g.engine_a
-  let g3 = new_gpu3d()
+  let g3 = new_gpu3d(g.vram, IrqCtl())
   g.gpu3d = g3
   g.vram.write_cnt(vbA, 0x81)
   # BG1 solid blue under the 3D layer

@@ -21,6 +21,7 @@
 ## vertically, X is 0..255 wide, and the 1D/bitmap OBJ mappings.
 
 import ../mem/vram
+import ../gpu3d/gpu3d
 
 type
   EngineId* = enum engA, engB
@@ -246,17 +247,12 @@ proc darken(a: uint16; evy: uint32): uint16 {.inline.} =
 
 # 3D layer pixels (gpu3d.line): one uint32 per pixel, red/green/blue in
 # bytes 0/1/2 as 6-bit values (0..63) and alpha in byte 3 as 0..31; alpha 0
-# is transparent.
-
-template px3d_alpha(p: uint32): uint32 = (p shr 24) and 0x1F
-proc px3d_to_555*(p: uint32): uint16 {.inline.} =
-  uint16(((p shr 1) and 0x1F) or (((p shr 9) and 0x1F) shl 5) or
-         (((p shr 17) and 0x1F) shl 10))
+# is transparent (gpu3d.to_bgr555 / alpha5).
 
 proc blend_3d(p: uint32; below: uint16): uint16 {.inline.} =
   ## 3D over a 2nd-target layer: the 3D pixel's own alpha weights it,
   ## (c3d*(a+1) + c2d*(31-a)) / 32 on 6-bit channels, 2D widened to 6 bits.
-  let a = px3d_alpha(p)
+  let a = alpha5(p)
   let b = uint32(below)
   template mix(c3, c2: uint32): uint32 =
     (((c3 * (a + 1) + (c2 * 2) * (31 - a)) shr 5) shr 1) and 0x1F
@@ -356,7 +352,7 @@ proc render_3d(e: Engine2D) =
       dst[x] = 0
       continue
     let p = e.line3d[sx]
-    dst[x] = if px3d_alpha(p) == 0: 0'u16 else: px3d_to_555(p) or OPAQUE
+    dst[x] = if alpha5(p) == 0: 0'u16 else: to_bgr555(p) or OPAQUE
 
 template affine_walk(e: Engine2D; bg, y, width, height: int; sample: untyped) =
   ## Step the internal reference point across the line (PA/PC per pixel)

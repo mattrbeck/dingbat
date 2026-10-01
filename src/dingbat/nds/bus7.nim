@@ -170,6 +170,11 @@ proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.} =
 proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 32)
 proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 16)
 
+# Sound: channel sample fetch and capture stores (io/spu.nim). No CPU clock
+# sync -- they run inside the evSpuSample dispatch.
+proc spu_read32*(b: Arm7Bus; a: uint32): uint32 = b.nds.read7(a, 32)
+proc spu_write32*(b: Arm7Bus; a: uint32; v: uint32) = b.nds.write7(a, v, 32)
+
 proc irq_line*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.line()
 proc irq_wake*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.wake()
 proc access_cycles*(b: Arm7Bus): int64 {.inline.} = 0   # TODO(timing)

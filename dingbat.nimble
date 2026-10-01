@@ -50,7 +50,10 @@ task test_savestate_compat, "Run the save-state format compatibility guards":
 task test_gbartc, "Run the GBA cartridge RTC + battery-save RTC trailer tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_gbartc_test tests/gba_rtc_test.nim"
 
-task test_desktop, "Run the desktop frontend tests (input, settings, link, saves, game loading, modals)":
+task test_ndsspu, "Run the DS ARM7 sound (SPU) tests":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndsspu_test tests/nds_spu_test.nim"
+
+task test_desktop,"Run the desktop frontend tests (input, settings, link, saves, game loading, modals)":
   # modal drives Dear ImGui headless, so it needs imguin (CI's test job
   # installs it: .github/scripts/install-test-deps.sh).
   for t in ["input", "settings", "netlink", "persist", "lifecycle", "modal"]:
@@ -73,6 +76,10 @@ task test_gbapurebase, "Run the GB APU deadline checks across the per-frame sche
 task test_psgagb, "Run the PSG's AGB-only checks (the SP's answers) on both cores":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_psgagb_test tests/psg_agb_test.nim"
+
+task test_ndscpu, "Run the DS CPU interpreter's one-instruction checks (ARM9 and ARM7)":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_ndscpu_test tests/nds_cpu_test.nim"
 
 task test_statesoak, "Run the range-checked serialize-while-running soak (both cores)":
   exec "nim c -r -d:test_harness -d:release --path:src " &

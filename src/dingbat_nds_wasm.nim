@@ -1,6 +1,6 @@
 ## WASM entry for the DS prototype (web/nds.html). Separate from
-## dingbat_wasm.nim while the DS core is a prototype: no saves, rewind,
-## link or audio yet. Build: nim c -d:emscripten src/dingbat_nds_wasm.nim
+## dingbat_wasm.nim while the DS core is a prototype: no saves, rewind or
+## link yet. Build: nim c -d:emscripten src/dingbat_nds_wasm.nim
 
 import dingbat/nds/nds
 from std/strutils import toHex
@@ -37,6 +37,19 @@ proc nds_set_button(id: cint; pressed: cint) {.exportc.} =
 
 proc nds_set_touch(x, y, down: cint) {.exportc.} =
   if core != nil: core.set_touch(int(x), int(y), down != 0)
+
+# Audio: interleaved stereo float32 at 33513982 / 1024 = 32728.5 Hz
+# (io/spu.nim). The page reads nds_audio_frames() frames from
+# nds_audio_ptr() after each run, then calls nds_audio_clear().
+
+proc nds_audio_frames(): cint {.exportc.} =
+  if core == nil: 0 else: cint(core.spu.sample_count)
+
+proc nds_audio_ptr(): pointer {.exportc.} =
+  if core == nil or core.spu.samples.len == 0: nil else: addr core.spu.samples[0]
+
+proc nds_audio_clear() {.exportc.} =
+  if core != nil: core.spu.clear_samples()
 
 proc nds_status(): cstring {.exportc.} =
   if core == nil: return "no ROM"
