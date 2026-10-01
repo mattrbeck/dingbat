@@ -133,6 +133,54 @@ Zero-code item: run the same gbaedge build on every other GBA-family console
 any probe differs across silicon; MODEL separates BIOS families (DS reads
 `18 80`).
 
+## GBA — the shared PSG (AGB SP, link rig and speaker, 2026-09-30)
+
+The PSG is one implementation for both machines (`common/psg_channels.nim`),
+so every place the GBA's answer differs from the CGB's is a `when PSG_AGB`
+arm. Full readings in `docs/gbatek-upstream.md` §1.14; the CPU-visible and
+modelled ones are pinned by `tests/psg_agb_test.nim`.
+
+Settled:
+
+- **Wave RAM, read while playing.** A CPU read returns the sixteen bytes
+  written under the same SOUND3CNT_L bit 6, in place, playing or not; the
+  CGB's read-returns-the-playing-byte rule is absent. `payloads/wavebank.s`,
+  two sessions, all 20 words identical.
+- **64-sample mode.** Bit 6 reads back as written while the channel plays
+  (`payloads/wavedly.s`: 0x84A0 at four delays, about 224 to 288 cycles after
+  a trigger at f = 0x7FF, spanning where playback crosses into the second
+  bank for any start-up under 32 cycles).
+- **No sweep trigger lead.** A channel 1 trigger closer and closer before a
+  sweep clock goes on taking it; the CGB's 8 T-cycle lead (4 on DMG) is not
+  there (`swplead.s`, apart from the window below).
+- **NRx2 rewrite, four writes of 0x80** to a playing volume-8 note leave it
+  at 8, the CGB's rule (`zombie.s`, two takes by microphone).
+- **NRx2 rewrite of a period-0 note to increase.** 0x88 over volume 8
+  decreasing leaves 6 and 0x68 over volume 6 increasing leaves 6, in all
+  three rounds (CGB: 7 and 7); 0x68 over volume 6 decreasing leaves 8 in two
+  rounds of three, the third between (7.1; CGB 9). `nrx2table.s`; readings in
+  `tests/roms/payloads/nrx2table-agb.txt`.
+- **Noise shift 14 freezes the LFSR**, as Pan Docs says for the GB: 1.2x the
+  silence around it, against 6.0x and 5.0x for the shift-13 controls
+  (`zombie.s` v2, one take).
+
+Open (dingbat assumes; the CPU cannot see it):
+
+- **Which physical bank channel 3 plays.** dingbat follows GBATEK (playback
+  the selected bank, the CPU the other), but the CPU reads back the same
+  either way. Two banks holding different waves, heard, would settle it.
+- **Channel 3's trigger start-up.** dingbat scales the CGB's 6 T-cycles to
+  24 GBA cycles; the CPU has no view of the playback position on the GBA
+  (wavedly.s), so this is unmeasurable over the link.
+- **The PSG grid phases after a master-on.** Where the 1 MHz edges
+  (`psg_edge`) and the noise's 512 kHz grid (`psg_noise_phase`) fall inside
+  the 16 / 32 cycles after `s0_anchor` is assumed, not measured.
+- **The sweep's "never dies" window.** In a window one to four steps of
+  `swplead.s`'s 4-cycle grid wide, just before a trigger starts taking the
+  clock, a 0x400 shift-1 note never stops: that clock's calculation runs on
+  the previous note's shadow. Unmodelled; its cycle position is not pinned
+  (the page finds the clock by polling, about 10 cycles a poll).
+
 ## Probe ROMs written, awaiting hardware
 
 Each closes a row that docs/oracles.md marks `Assumed`, or a disagreement

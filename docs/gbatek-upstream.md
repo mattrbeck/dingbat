@@ -255,15 +255,19 @@ stamped by its own write:
 `tests/roms/payloads/wavebank.s`, `wavedly.s`, `swplead.s` (AGB SP, link rig
 2026-09-30, each page twice or more, every repeat identical):
 
-* GBATEK's SOUND3CNT_L text is right and worth keeping as it is: a CPU wave
-  RAM access addresses the bank NOT selected for playback, whether channel 3
-  plays or not. A read while bank 0 plays returns all sixteen bytes of bank 1,
-  in place -- the CGB's "a read while CH3 plays returns the byte being played"
+* Consistent with GBATEK's SOUND3CNT_L text: a CPU read returns the sixteen
+  bytes written under the same bit 6, in place, whether channel 3 plays or
+  not -- the CGB's "a read while CH3 plays returns the byte being played"
   does not carry over. (The two rules agree on every access made with CH3
   stopped, which is why a stopped-channel readback cannot tell them apart.)
+  What these pages cannot show is which physical bank playback takes: CPU
+  accesses to "the other bank" and to "the selected bank" read back the same
+  way, so GBATEK's other-bank statement stands, untested here.
 * Worth adding: in 64-sample mode (bit 5) bit 6 reads back as written while
   the channel plays; it does not follow the bank playback has wrapped to
-  (SOUNDCNT_X bit 2 high throughout, as the page's control). So the CPU has
+  (four delays about 224 to 288 cycles after a trigger at f = 0x7FF, so past
+  the wrap for any start-up under 32 cycles; SOUNDCNT_X bit 2 high
+  throughout, as the page's control). So the CPU has
   no view of channel 3's position at all, and its trigger start-up (6
   T-cycles on the CGB) cannot be measured on the GBA.
 * Worth adding: an NRx2 write to a playing channel ("zombie mode") follows
