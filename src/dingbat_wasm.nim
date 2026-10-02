@@ -538,19 +538,9 @@ proc apply_audio_silent() =
   apply_channel_mutes()   # the same moments: every core build
 
 proc wasm_set_channel_mutes(bits: cint) {.exportc.} =
-  ## Settings › Audio › Channels. JS clears it when a game loads.
+  ## Settings › Audio › Channels: kept for every core built after it too.
   chanMutes = bits
   apply_channel_mutes()
-
-proc wasm_audio_channels(): cint {.exportc.} =
-  ## How many channels the heard core mixes: 6 (GBA), 4 (Game Boy), 0 (none).
-  if stateRollback != nil or stateLink != nil: 6
-  elif stateGbRollback != nil or stateGbLink != nil: 4
-  else:
-    case stateKind
-    of ekGBA: 6
-    of ekGB: 4
-    of ekNone: 0
 
 proc wasm_set_audio_silent(on: cint) {.exportc.} =
   ## 1 while the player cannot hear the game (muted, volume 0): the cores

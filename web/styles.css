@@ -5740,10 +5740,6 @@ body.debug-2p .home-tile-link {
   margin-bottom: 18px;
 }
 
-.channel-group[hidden] {
-  display: none;
-}
-
 .channel-group-head {
   display: flex;
   align-items: center;
