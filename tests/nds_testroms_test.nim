@@ -10,6 +10,7 @@
 
 import std/[os, strutils]
 import dingbat/nds/nds
+import dingbat/nds/io/input
 
 var failures = 0
 
@@ -232,6 +233,58 @@ block data_cache_ops_rom:
                 (17, "Ones:    256    0    0"), (18, "Twoes:   256    0    0")]
     for (row, w) in want:
       check rows[row].strip == w, "row " & $row & ": " & w, rows[row]
+
+proc libnds_console(n: NDS): string =
+  ## The libnds demo console: engine B BG0, tile = character.
+  let b = Arm9Bus(nds: n)
+  let base = 0x0620_0000'u32 + ((b.read16(0x0400_1008'u32) shr 8) and 0x1F) * 0x800
+  for i in 0 ..< 32 * 24:
+    let t = int(b.read16(base + uint32(i) * 2) and 0x3FF)
+    result.add(if t in 32 .. 126: char(t) else: ' ')
+
+proc number_after(s, key: string): int =
+  let k = s.find(key)
+  if k < 0: return -1
+  var j = k + key.len
+  while j < s.len and s[j] in Digits:
+    result = result * 10 + ord(s[j]) - ord('0')
+    inc j
+
+block polyrastertest_rom:
+  # 77 one-polygon scenes compared span by span (and some colour by
+  # colour) with data recorded on hardware (docs/nds/3d-edges.md). Manual
+  # mode (SELECT held at boot) stops at every scene; A moves on.
+  echo "polyrastertest v1.0.2-b (hardware-recorded spans)"
+  var ok: bool
+  let n = load_rom("polyrastertest/polyrastertest.nds", ok)
+  if ok:
+    n.set_button(nbSelect, true)
+    var seen, passed = 0
+    var fails: seq[int]
+    var press, release = 0
+    for f in 1 .. 3000:
+      n.run_frame()
+      if f == 20: n.set_button(nbSelect, false)
+      if f == press: n.set_button(nbA, true)
+      if f == release: n.set_button(nbA, false)
+      # a scene's result: the ROM shows VRAM_A (display mode 2)
+      if f < release + 2 or ((Arm9Bus(nds: n).read32(0x0400_0000'u32) shr 16) and 3) != 2: continue
+      let text = n.libnds_console()
+      let t = text.number_after("Viewing Test ")
+      if t <= seen: continue
+      let p = text.number_after("Tests Passed: ")
+      if p == passed: fails.add t
+      seen = t
+      passed = p
+      if seen == 77: break
+      press = f + 1
+      release = f + 4
+    check seen == 77, "all 77 scenes ran", $seen
+    # 50 before the edge rules of docs/nds/3d-edges.md ("Swapped rows");
+    # the hardware passes 77
+    check passed == 73, "73 of 77 pass", $passed
+    check fails == @[38, 39, 43, 56], "failing: 38, 39, 43 (edge marking), 56 (one AA dot)",
+          fails.join(",")
 
 echo failures, " failure(s)"
 if failures > 0: quit(1)
