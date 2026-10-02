@@ -15,6 +15,12 @@ proc write8*(b: Arm7Bus; a: uint32; v: uint8) {.inline.}
 proc write16*(b: Arm7Bus; a: uint32; v: uint16) {.inline.}
 proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.}
 
+# Idle-loop skipping (arm/cpu.nim loop_edge): the epoch, and the timing
+# state that decides what the next accesses cost.
+proc idle_epoch*(b: Arm7Bus): uint64 {.inline.} = b.nds.idle_epoch
+proc idle_sig*(b: Arm7Bus): IdleSig {.inline.} =
+  [b.nds.last_fetch7, b.nds.last_data7, 0, 0, 0, 0, 0, 0]
+
 proc dma_stall*(b: Arm7Bus; cycles: int64) =
   ## A DMA held the bus: the CPU resumes `cycles` after the later of its own
   ## clock and the transfer's start.
@@ -29,6 +35,15 @@ template sync7(n: NDS) =
   ## by an event keeps the event's time.
   if not n.dma7.dma_access: n.sched.now = n.arm7.cycles
 
+
+proc io7_steady(a: uint32): bool {.inline.} =
+  ## As bus9.nim io9_steady: registers only writes and events change, read
+  ## without a side effect (not wifi, timers, SPI/RTC, FIFOs).
+  if (a and 0x00F0_0000'u32) != 0: return false
+  case a and 0x00FF_FFFC'u32
+  of 0x004, 0x0B0 .. 0x0DC, 0x130, 0x180, 0x184, 0x1A4, 0x204, 0x208 .. 0x214, 0x240,
+     0x300 .. 0x308, 0x400 .. 0x51C: true
+  else: false
 
 proc io7_read(n: NDS; a: uint32): uint32 =
   if (a and 0x00F0_0000'u32) == 0x0010_0000'u32:
@@ -147,6 +162,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
   of 0x04:
     n.sync7()
+    if not io7_steady(a): inc n.idle_epoch
     if (a and 0x00FF_0000'u32) >= 0x0080_0000'u32:
       # wifi: 16-bit ports with read side effects, so only the halfwords
       # actually accessed are read (a byte read reads its halfword)
@@ -175,9 +191,17 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
 proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
   watch_write(n, "7", n.arm7, a, v)
   template wr(s: var seq[uint8]; i: int) =
-    when width == 32: wr32(s, i, v)
-    elif width == 16: wr16(s, i, v)
-    else: s[i] = uint8(v)
+    # RAM: only a store that changes memory can end a polling loop (one
+    # host load and store: `i` is aligned to the width, the host is
+    # little-endian like the DS)
+    let p = addr s[i]
+    when width == 32:
+      if cast[ptr uint32](p)[] != v: inc n.idle_epoch; cast[ptr uint32](p)[] = v
+    elif width == 16:
+      if cast[ptr uint16](p)[] != uint16(v): inc n.idle_epoch; cast[ptr uint16](p)[] = uint16(v)
+    else:
+      if p[] != uint8(v): inc n.idle_epoch; p[] = uint8(v)
+  if (a shr 24) - 2 >= 2: inc n.idle_epoch   # I/O, VRAM, slot 2
   case a shr 24
   of 0x02: wr(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
@@ -214,6 +238,10 @@ proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   ## A nonsequential fetch (a branch) also pays the refill's second fetch.
   n.last_data7 = NO_ADDR
   let seq = a == n.last_fetch7 + (when width == 32: 4'u32 else: 2'u32)
+  # a backward branch's target: a loop head (arm/cpu.nim loop_edge)
+  if not seq and a <= n.last_fetch7:
+    if n.arm7.wl_cold > 0: dec n.arm7.wl_cold
+    elif n.arm7.wl_on: n.arm7.loop_edge()
   n.last_fetch7 = a
   let top = a shr 24
   n.wait7 += code7(top, width, seq, n.slot7_t)

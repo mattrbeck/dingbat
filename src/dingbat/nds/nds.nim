@@ -73,6 +73,8 @@ type
     line_start*: int64          ## master cycle the current line began
     unmapped_log*: int          ## first few unmapped accesses are logged
     unmapped_count*: int        ## all of them (tools/ndssweep.nim)
+    idle_epoch*: uint64         ## bumped by anything a polling loop could see
+                                ## change (arm/cpu.nim loop_edge; not saved)
     # -d:ndsdebug only (tools/ndsrun.nim flags)
     iolog*: bool                ## log I/O accesses to stderr
     watch*: uint32              ## log writes to this word (0 = off)
@@ -88,6 +90,7 @@ const
 
 proc note_unmapped(n: NDS; who: string; a: uint32; write: bool) =
   inc n.unmapped_count
+  inc n.idle_epoch
   if n.unmapped_log < 32:
     inc n.unmapped_log
     stderr.writeLine("nds " & who & ": unmapped " & (if write: "write " else: "read ") &
@@ -120,6 +123,7 @@ proc slot2_read(n: NDS; a: uint32; is9: bool; width: static int): uint32 =
   ## load reads repeated (as on the GBA: Assumed for the DS).
   let owner9 = (n.exmemcnt and 0x80) == 0
   if owner9 != is9: return 0
+  inc n.idle_epoch            # GPIO, RTC: values that change on their own
   let s {.cursor.} = n.slot2
   if a >= 0x0A00_0000'u32:
     let b = s.ram_read8(a)
@@ -275,6 +279,7 @@ proc on_line_end(n: NDS) =
   n.sched.schedule(n.line_start + LINE_CYCLES, evLineEnd)
 
 proc dispatch(n: NDS; ev: NdsEvent) =
+  inc n.idle_epoch
   case ev
   of evHBlank: n.on_hblank()
   of evLineEnd: n.on_line_end()
@@ -351,6 +356,11 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.slot2 = new_slot2()
   n.arm9 = new_arm_cpu(Arm9Bus(nds: n), ARM9_CYCLES_PER_INSTR)
   n.arm7 = new_arm_cpu(Arm7Bus(nds: n), ARM7_CYCLES_PER_INSTR)
+  # DINGBAT_NDS_NO_SKIP=1: execute every idle loop pass, for checking
+  # that skipping changes nothing (docs/nds/perf.md)
+  let skip = getEnv("DINGBAT_NDS_NO_SKIP") != "1"
+  n.arm9.wl_on = skip
+  n.arm7.wl_on = skip
   n.cp15.reset()
   n.tm.init_timing()
   n.tm.update_regions(n.cp15)
@@ -407,10 +417,20 @@ proc sleep_for(n: NDS; cycles: int64) =
   n.rtc.sleep_advance(cycles, proc(): bool = n.wake_pending())
   n.wake_from_sleep()
 
+proc quiet(n: NDS): bool {.inline.} =
+  ## Neither CPU can change anything the other or the devices see before
+  ## the next event: each is halted with no interrupt to wake it, or spins
+  ## in a loop proven to be a no-op (arm/cpu.nim loop_edge) with nothing
+  ## touched since. Interleaving them in SLICE steps until then would give
+  ## the same result as running each straight to the event.
+  (n.arm9.idle_now() or (n.arm9.halted and not irq_wake(Arm9Bus(nds: n)))) and
+    (n.arm7.idle_now() or (n.arm7.halted and not irq_wake(Arm7Bus(nds: n))))
+
 proc run_until*(n: NDS; target: int64) =
   ## Asleep, `target - now` is spent as sleep and the master clock stays.
   var ev: NdsEvent
   var at: int64
+  inc n.idle_epoch            # the frontend may have changed keys, touch, ...
   if n.asleep():
     n.sleep_for(max(0'i64, target - n.sched.now))
     return
@@ -418,7 +438,7 @@ proc run_until*(n: NDS; target: int64) =
     if n.asleep(): return     # the ARM7 went to sleep in the last slice
     var slice_end = min(target, n.sched.next_at())
     let both_halted = n.arm9.halted and n.arm7.halted
-    if not both_halted: slice_end = min(slice_end, n.sched.now + SLICE)
+    if not both_halted and not n.quiet(): slice_end = min(slice_end, n.sched.now + SLICE)
     let start = n.sched.now
     if n.arm9.cycles < slice_end: n.arm9.run(slice_end)
     n.sched.now = start

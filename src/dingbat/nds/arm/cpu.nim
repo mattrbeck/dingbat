@@ -12,6 +12,10 @@
 ##   swi_hook(bus, comment): bool  -- true = handled by HLE, skip the vector
 ##   access_cycles(bus): int   -- cycles the last instruction's bus accesses
 ##                                added (the bus accumulates them)
+##   idle_epoch(bus): uint64   -- changes whenever anything a loop could read
+##                                may have changed (idle-loop skipping, below)
+##   idle_sig(bus): IdleSig    -- the bus's timing state that the next
+##                                access costs depend on
 ##
 ## Timing: every instruction costs `base_cycles` master cycles, plus what
 ## the bus charged for its code fetch and data accesses (nds/timing.nim),
@@ -45,6 +49,11 @@ const
   ABORT_PREFETCH* = 2'u8    ## an opcode fetch it refused
 
 type
+  IdleSig* = array[8, uint32]
+    ## The bus's per-CPU timing state at a loop head (sequential-access
+    ## tracking, cache fast paths, protection-unit pages): equal at two heads
+    ## means equal access costs in the pass that follows.
+
   ArmCpu*[B] = ref object
     r*: array[16, uint32]
     cpsr*: uint32
@@ -71,6 +80,25 @@ type
     bank_xfer*: bool        ## an LDM/STM^ is moving user-bank registers: the
                             ## mode reads USR but the accesses stay privileged
     exc_pc*: uint32         ## the instruction that raised the last one
+    # Idle-loop skipping (`loop_edge`); none of it is machine state: a fresh
+    # detector proves the same loops again (not saved: savestate.nim)
+    wl_on*: bool            ## skipping enabled (DINGBAT_NDS_NO_SKIP=1 clears it)
+    wl_until: int64         ## the running `run` call's end
+    wl_bump: uint64         ## CPU-side disturbances: exceptions, mode switches, SWIs
+    wl_head: uint32         ## the watched loop head (a backward branch's target)
+    wl_other: int32         ## arrivals at other heads since it was last visited
+    wl_epoch: uint64        ## idle_epoch + wl_bump at the last visit
+    wl_have: bool           ## wl_regs..wl_instrs hold the state at one visit
+    wl_tries: int32         ## visits compared with that snapshot since
+    wl_idle*: bool          ## the last visit matched it: repeating, nothing touched
+    wl_cycles: int64        ## clock and opcode count at the snapshot (or the
+    wl_instrs: uint64       ## last skip)
+    wl_fails: int32         ## visits in a row that found the loop doing work
+    wl_skipped*: int64      ## master cycles skipped so far (a statistic)
+    wl_cold*: int32         ## backward branches the bus lets pass unwatched
+    wl_regs: array[15, uint32]
+    wl_cpsr, wl_spsr: uint32
+    wl_sig: IdleSig
     when defined(ndsdebug):
       profiling*: bool      ## count executed instructions per 64-byte block
       profile*: CountTable[uint32]   ## instructions per block
@@ -99,6 +127,7 @@ proc switch_mode*[B](cpu: ArmCpu[B]; new_mode: uint32) =
   let old_mode = cpu.cpsr and 0x1F
   let nm = new_mode and 0x1F
   if old_mode == nm: return
+  inc cpu.wl_bump
   let ob = bank_of(old_mode)
   let nb = bank_of(nm)
   if old_mode == uint32(mFIQ) or nm == uint32(mFIQ):
@@ -153,6 +182,7 @@ proc jump_load[B](cpu: ArmCpu[B]; target: uint32) {.inline.} =
 
 proc exception*[B](cpu: ArmCpu[B]; mode: CpuMode; vector: uint32; lr: uint32) =
   let old = cpu.cpsr
+  inc cpu.wl_bump
   cpu.switch_mode(uint32(mode))
   cpu.spsr = old
   cpu.r[14] = lr
@@ -175,6 +205,7 @@ proc undefined_instr*[B](cpu: ArmCpu[B]) =
 
 proc software_interrupt*[B](cpu: ArmCpu[B]; comment: uint32) =
   mixin swi_hook
+  inc cpu.wl_bump
   if swi_hook(cpu.bus, comment): return
   cpu.exception(mSVC, 0x08, cpu.next_pc)
 
@@ -1063,9 +1094,119 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
   when defined(ndsdebug):
     if cpu.profiling: cpu.cprofile.inc(a and not 63'u32, int(spent))
 
+# ---------------------------------------------------------------------------
+# Idle-loop skipping
+#
+# A program that waits by spinning (polling VCOUNT, an IPC flag, a word the
+# other CPU writes, or `B .`) repeats the same passes of a loop, with
+# nothing changing until something outside the CPU does: an event, the other
+# CPU, a frontend call. The bus keeps `idle_epoch`, bumped by anything a
+# loop could see change: a store that changes memory, any I/O or VRAM store,
+# a read with a side effect or a time-dependent value, a cache line fill, an
+# event, a frontend call; the CPU adds its own count of exceptions, mode
+# switches and SWIs. Backward branches land on loop heads; one head at a
+# time is watched. When the CPU is back at it with the epoch untouched since
+# an earlier visit and registers, CPSR/SPSR and the bus's timing state
+# (idle_sig) as they were then, the stretch between the two visits read the
+# same values, cost the same cycles and ended where it began: it repeats
+# exactly until something outside changes. Inside one `run` nothing outside
+# runs, so the whole repeats that fit before `until` are counted instead of
+# executed: the clock and the opcode count advance by whole repeats, exactly
+# as executing them would. The GBA core's waitloop skipping follows the same
+# rule: output with skipping on must equal output with it off, byte for
+# byte (docs/nds/perf.md).
+#
+# The repeat may hold inner loops and calls (scanKeys in a keysDown wait):
+# other backward branches do not move the watched head unless it stops being
+# visited, and an arrival is compared with a snapshot kept for up to
+# WL_TRIES arrivals, not only with the previous one. `wl_idle` tells the
+# machine loop the CPU is in such a repeat (nds.nim `quiet`), so it need not
+# interleave the CPUs finely while nothing changes.
+
+const
+  WL_OTHER = 32     ## arrivals at other heads before the watched one is given up
+  WL_TRIES = 32     ## arrivals compared with one snapshot before a new one is taken
+  WL_FAILS = 16     ## visits in a row finding work before the CPU stops watching
+  WL_COLD = 256     ## for this many backward branches (a loop that works,
+                    ## not waits, then costs one call per WL_COLD of them)
+
+proc cool_down[B](cpu: ArmCpu[B]) {.inline.} =
+  inc cpu.wl_fails
+  if cpu.wl_fails >= WL_FAILS:
+    cpu.wl_fails = 0
+    cpu.wl_cold = WL_COLD
+    cpu.wl_have = false
+
+proc loop_edge*[B](cpu: ArmCpu[B]) {.noinline.} =
+  ## Called by the bus as it fetches the target of a backward branch (the
+  ## loop head), before the fetch changes its timing state. The opcode at
+  ## `cur_pc` has passed the run loop's clock check and the interrupt
+  ## check, so whole repeats are skipped only while it would still start
+  ## before `wl_until`.
+  mixin idle_epoch, idle_sig
+  let head = cpu.cur_pc
+  if head != cpu.wl_head:
+    inc cpu.wl_other
+    if cpu.wl_other < WL_OTHER and cpu.trace == 0: return
+    # the watched head is no longer visited: watch this one
+    cpu.wl_head = head
+    cpu.wl_other = 0
+    cpu.wl_epoch = idle_epoch(cpu.bus) + cpu.wl_bump
+    cpu.wl_have = false
+    cpu.wl_idle = false
+    return
+  cpu.wl_other = 0
+  let epoch = idle_epoch(cpu.bus) + cpu.wl_bump
+  if epoch != cpu.wl_epoch or cpu.trace > 0:
+    # something was touched since the last visit: start over from here
+    cpu.wl_epoch = epoch
+    cpu.wl_have = false
+    cpu.wl_idle = false
+    cpu.cool_down()
+    return
+  let sig = idle_sig(cpu.bus)
+  if cpu.wl_have and cpu.wl_tries < WL_TRIES:
+    var same = cpu.cpsr == cpu.wl_cpsr and cpu.spsr == cpu.wl_spsr and sig == cpu.wl_sig
+    if same:
+      for i in 0..14:
+        if cpu.r[i] != cpu.wl_regs[i]: same = false; break
+    if not same:
+      inc cpu.wl_tries
+      cpu.wl_idle = false
+      cpu.cool_down()
+      return
+    # back where the snapshot was taken, nothing touched: skip the whole
+    # repeats that fit
+    cpu.wl_idle = true
+    cpu.wl_fails = 0
+    let period = cpu.cycles - cpu.wl_cycles
+    if period > 0:
+      let k = (cpu.wl_until - 1 - cpu.cycles) div period
+      if k > 0:
+        cpu.instr_count += uint64(k) * (cpu.instr_count - cpu.wl_instrs)
+        cpu.cycles += k * period
+        cpu.wl_skipped += k * period
+  else:
+    # no snapshot since the last touch (or it never came round again): take one
+    for i in 0..14: cpu.wl_regs[i] = cpu.r[i]
+    cpu.wl_cpsr = cpu.cpsr
+    cpu.wl_spsr = cpu.spsr
+    cpu.wl_sig = sig
+    cpu.wl_have = true
+    cpu.wl_tries = 0
+    cpu.wl_idle = false
+  cpu.wl_cycles = cpu.cycles
+  cpu.wl_instrs = cpu.instr_count
+
+proc idle_now*[B](cpu: ArmCpu[B]): bool {.inline.} =
+  ## In a loop whose last pass was a no-op, with nothing touched since.
+  mixin idle_epoch
+  cpu.wl_idle and idle_epoch(cpu.bus) + cpu.wl_bump == cpu.wl_epoch
+
 proc run*[B](cpu: ArmCpu[B]; until: int64) =
   ## Execute until the CPU's clock reaches `until` (master cycles).
   mixin irq_wake
+  cpu.wl_until = until
   while cpu.cycles < until:
     if cpu.halted:
       if irq_wake(cpu.bus):

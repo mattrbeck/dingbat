@@ -51,8 +51,13 @@ const
     "slot2", "tm",                        # its own section, without the derived tables
     "bios9", "bios7",            # supplied on load
     "hle_bios9", "hle_bios7",    # checked against the loading machine (preamble)
-    "unmapped_log", "iolog", "watch", "io_last", "io_repeat"]   # debug logging
-  CPU_SKIP = ["bus", "trace", "profiling", "profile", "cprofile"]
+    "unmapped_log", "iolog", "watch", "io_last", "io_repeat",   # debug logging
+    "idle_epoch"]                # idle-loop skipping (arm/cpu.nim), re-proved after a load
+  CPU_SKIP = ["bus", "trace", "profiling", "profile", "cprofile",
+              # idle-loop skipping: a fresh detector proves the same loops again
+              "wl_on", "wl_until", "wl_bump", "wl_head", "wl_other", "wl_epoch", "wl_have",
+              "wl_tries", "wl_idle", "wl_cycles", "wl_instrs", "wl_fails", "wl_skipped",
+              "wl_cold", "wl_regs", "wl_cpsr", "wl_spsr", "wl_sig"]
   # cachability by address and the cache enables: update_regions(cp15)
   TIMING_SKIP = ["ic_on", "dc_on", "icode", "idata", "ibuf", "mcode", "mdata", "mbuf"]
   # mmem_req/mmem_ctx: the machine's DMA mode 4 hook, set at construction

@@ -19,6 +19,14 @@ proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.}
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.}
 proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.}
 
+# Idle-loop skipping (arm/cpu.nim loop_edge): the epoch, and the timing
+# state that decides what the next accesses cost.
+proc idle_epoch*(b: Arm9Bus): uint64 {.inline.} = b.nds.idle_epoch
+proc idle_sig*(b: Arm9Bus): IdleSig {.inline.} =
+  let n {.cursor.} = b.nds
+  [n.last_fetch9, n.last_data9, n.last_pc9, n.pu_ok[0], n.pu_ok[1], n.pu_ok[2],
+   n.tm.icache.last, n.tm.dcache.last]
+
 proc dma_stall*(b: Arm9Bus; cycles: int64) =
   ## A DMA held the bus: the CPU resumes `cycles` after the later of its own
   ## clock and the transfer's start.
@@ -53,6 +61,15 @@ template sync9(n: NDS) =
   ## by an event keeps the event's time.
   if not n.dma9.dma_access: n.sched.now = n.arm9.cycles
 
+
+proc io9_steady(o: uint32): bool {.inline.} =
+  ## Registers whose value only writes and events change, read without a
+  ## side effect: a loop polling them may be skipped (arm/cpu.nim
+  ## loop_edge). Timers, busy flags, GXSTAT, FIFOs and the rest are not.
+  case o
+  of 0x000 .. 0x05C, 0x064 .. 0x06C, 0x0B0 .. 0x0EC, 0x130, 0x180, 0x184, 0x1A4, 0x204,
+     0x208 .. 0x214, 0x240 .. 0x248, 0x300, 0x304, 0x1000 .. 0x106C: true
+  else: false
 
 proc io9_read(n: NDS; a: uint32): uint32 =
   let o = a and 0x00FF_FFFC'u32
@@ -184,6 +201,7 @@ proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
         n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq, n.slot9_t))
     elif not n.tm.dcache.lookup(a, true):
       n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
+      inc n.idle_epoch          # a line fill changes the tags
     return
   if write and top == 2 and n.tm.data_buffered(a):
     n.wait9 += WBUF_WRITE
@@ -247,6 +265,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
   of 0x04:
     n.sync9()
     let w = n.io9_read(a and not 3'u32)
+    if not io9_steady(a and 0x00FF_FFFC'u32): inc n.idle_epoch
     when defined(ndsdebug):
       if n.iolog: n.log_io("9", a, w, 0xFFFF_FFFF'u32, false, n.arm9.cur_pc)
     when width == 32: w
@@ -280,9 +299,16 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
 proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool = false) =
   watch_write(n, "9", n.arm9, a, v)
   template wr(s: var seq[uint8]; i: int) =
-    when width == 32: wr32(s, i, v)
-    elif width == 16: wr16(s, i, v)
-    else: s[i] = uint8(v)
+    # RAM: only a store that changes memory can end a polling loop (one
+    # host load and store: `i` is aligned to the width, the host is
+    # little-endian like the DS)
+    let p = addr s[i]
+    when width == 32:
+      if cast[ptr uint32](p)[] != v: inc n.idle_epoch; cast[ptr uint32](p)[] = v
+    elif width == 16:
+      if cast[ptr uint16](p)[] != uint16(v): inc n.idle_epoch; cast[ptr uint16](p)[] = uint16(v)
+    else:
+      if p[] != uint8(v): inc n.idle_epoch; p[] = uint8(v)
   if n.in_itcm(a, true):
     when timed:
       if n.pu_check9(a, 2): return
@@ -294,6 +320,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
   when timed:
     if (a shr 24) != 0x02 and n.pu_check9(a, 2): return
     n.charge9(a, width, true)
+  if (a shr 24) - 2 >= 2: inc n.idle_epoch   # I/O, VRAM, palette, OAM, slot 2
   case a shr 24
   of 0x02: wr(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
@@ -340,6 +367,10 @@ proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
   n.last_data9 = NO_ADDR
   let w = a and not 3'u32
   let sequential = a == n.last_pc9 + size
+  # a backward branch's target: a loop head (arm/cpu.nim loop_edge)
+  if not sequential and a <= n.last_pc9:
+    if n.arm9.wl_cold > 0: dec n.arm9.wl_cold
+    elif n.arm9.wl_on: n.arm9.loop_edge()
   n.last_pc9 = a
   if sequential and w == n.last_fetch9: return false
   var c = 0'i64
@@ -353,6 +384,7 @@ proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
   elif n.tm.ic_on and n.tm.code_cachable(a):
     if not n.tm.icache.lookup(a, true):
       c += (if (a shr 24) == 0xFF: FILL_BIOS else: FILL_MAIN)
+      inc n.idle_epoch          # a line fill changes the tags
   else:
     c += code9_uncached(a shr 24, n.slot9_t)
   n.wait9 += c
@@ -402,6 +434,7 @@ proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
 
 proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   let n {.cursor.} = b.nds
+  inc n.idle_epoch
   template tables(c: Cp15): untyped =
     (c.dcache_cfg, c.icache_cfg, c.wbuf_cfg, c.data_perm, c.code_perm, c.prot_regions)
   let ctl_before = n.cp15.control
