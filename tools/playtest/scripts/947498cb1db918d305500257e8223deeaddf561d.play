@@ -10,6 +10,16 @@
 # calibration to EEPROM (the stored readings are whatever each emulator's
 # idle sensor returns). With a save the game skips calibration and asks which
 # system you are using instead.
+# Idle readings: dingbat X 0x392 / Y 0x3A0 (GBATEK's level); mgba 0x3A0 on
+# both (the driver attaches a level rotation source; without one it read
+# 0xFFF); the second reference has no tilt sensor and reads 0xFFF. None of
+# that decides `confirm`: with right = left = the resting X the game's
+# direction state freezes at the frame parity it had, and dingbat reaches
+# the screen one frame after the references (console-measured VRAM
+# contention in the IWRAM decompressor at f723-727, which neither reference
+# models), so its ball stays still where theirs rolls right
+# (docs/playtest-bugs.md, "Yoshi Topsy-Turvy: the calibration ball is frame
+# parity, not the sensor").
 [new]
 wait 600
 checkpoint warning window=0

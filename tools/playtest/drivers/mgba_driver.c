@@ -80,6 +80,17 @@ static void drain_audio(struct mCore* core) {
   }
 }
 
+/* A console held level and still. With no rotation source attached, mGBA's
+ * tilt-sensor carts (Yoshi Topsy-Turvy, Koro Koro Puzzle) read 0xFFF on
+ * both axes -- a sensor pinned at full tilt -- and calibrate to that, where
+ * dingbat answers its level reading (bus.nim TILT_X/Y_CENTER). Zero tilt is
+ * the frontend's "level" through mGBA's public peripheral interface. */
+static void rot_sample(struct mRotationSource* r) { (void) r; }
+static int32_t rot_zero(struct mRotationSource* r) { (void) r; return 0; }
+static struct mRotationSource g_level = {
+  .sample = rot_sample, .readTiltX = rot_zero, .readTiltY = rot_zero, .readGyroZ = rot_zero,
+};
+
 static void run_frame(struct mCore* core) {
   core->runFrame(core);
   drain_audio(core);
@@ -151,6 +162,7 @@ int main(int argc, char** argv) {
   core->opts.volume = 0x100;   /* zero-initialised opts would mute the mixer */
   core->loadConfig(core, &core->config);
   core->setVideoBuffer(core, (color_t*) vbuf, W);
+  core->setPeripheral(core, mPERIPH_ROTATION, &g_level);
 
   if (!mCoreLoadFile(core, rom)) { fprintf(stderr, "failed to load %s\n", rom); return 3; }
   char save[1024];

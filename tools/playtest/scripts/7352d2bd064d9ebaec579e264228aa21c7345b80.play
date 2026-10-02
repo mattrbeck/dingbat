@@ -16,6 +16,14 @@
 # at f4900 that Shy Guy has hit Yoshi (Baby Mario in the bubble, timer)
 # while on mgba/nba both Shy Guys still walk the log bridge and Yoshi is fine.
 # (shy_guys checkpoint: f4790.)
+# Why (docs/playtest-bugs.md, "Super Mario Advance 3: the cart's EEPROM
+# decides 1-1"): the first boot formats the blank EEPROM with 196 block
+# writes polled to ready, so the EEPROM's programming time sets the frame
+# phase 1-1's bushes and Shy Guy are seeded from. dingbat uses GBATEK's
+# 108368 cycles, mgba ~115000, the second reference ~101000; the bush flips
+# every 1-3 % of that time, so stage_start onwards is not diagnostic on a
+# fresh cart (dingbat built with -d:EEPROM_SETTLE_CYCLES=115005 matches mgba
+# throughout).
 
 [new]
 tap START times=5 every=60 hold=4

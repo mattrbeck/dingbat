@@ -194,7 +194,17 @@ TABLE = {
     # writer first / reader first, the CPU in a NOP sled / halted, lines
     # 40..47 (Phantasy Star Collection; tests/roms/invariants/ predicts it)
     'hdmaobus': [v << 8 | k for v in range(4) for k in range(8)],
+    # the cartridge EEPROM's block-programming time (Super Mario Advance 3's
+    # first boot, 196 block writes): the block as read, the DMA's length,
+    # an unchanged write-back, a changed write. Needs a 64 Kbit EEPROM cart in
+    # the slot, the console booted holding SELECT+START (payloads/eesettle.s);
+    # without a cart every cell answers DEAD0001. A chip's analog time, not a
+    # console law: keep it out of the frozen cyclelaws ROMs.
+    'eesettle': [3, 2, 0, 1],
 }
+
+# rows that touch a cartridge: recorded only when named on the command line
+NEEDS_CART = {'eesettle'}
 
 
 def source(name):
@@ -221,7 +231,7 @@ def main(argv):
     table = json.load(open(TABLE_FILE)) if os.path.exists(TABLE_FILE) else {}
 
     if '--record' in flags:
-        for name in words or list(TABLE):
+        for name in words or [n for n in TABLE if n not in NEEDS_CART]:
             args = TABLE[name]
             table[name] = dict(zip((f'{a:#x}' for a in args), on_console(name, args, runs)))
             print(name, table[name], flush=True)

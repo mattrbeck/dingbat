@@ -3355,3 +3355,113 @@ real flash cart (time a byte program by polling DQ7 from IWRAM with a
 timer, per chip ID), not from a reference. Until then Advance Wars stays a
 frame out of phase; any game that writes flash on first boot or while
 saving and paces itself by the poll count can shift the same way.
+
+## 36. Super Mario Advance 3: the cart's EEPROM decides 1-1, 2026-10-02
+
+**Symptom.** On the frozen script every dingbat config reaches 1-1 with pink
+tulip buds on the first bush where both references show white puffs
+(stage_start, f4304), then a Shy Guy at the bush that hits Yoshi (shy_guys,
+column_top, below_white_block). The HLE configs fail at stage_start, the
+BIOS ones from shy_guys; the references agree with each other. Section 29's
+"a frame late" is not the mechanism here.
+
+**Where it starts.** Per-frame hashes plus EWRAM/IWRAM dumps every 50
+frames (`peek`) on dingbat-bios and mgba: EWRAM is identical up to the file
+menu, and from 1-1's load (f3950-4000) a block of map data at 0x020006C8
+holds different decoration tiles, as does a 32-bit word at 0x03006B5C
+written during the load. The cause is far earlier: from f89 the boot shows
+each screen **5 frames before mgba** (the second reference 5 before
+dingbat), and two IWRAM frame counters (0x030000DD, 0x03006B01) carry that
+offset for the rest of the run.
+
+**Mechanism.** On a blank cart the game formats its 64 Kbit EEPROM at first
+boot: **196 block writes**, each followed by the library's ready poll
+(`ldrh 0x0D000000; bit 0`, loop at 0x0812FA68, with a timer-IRQ timeout
+flag that never fires here). Instruction traces of the first 90 frames
+(`trace`) time every poll from its start to the ready read:
+
+| | cycles a block | x 196 |
+|---|---|---|
+| dingbat (`EEPROM_SETTLE_CYCLES` 108368 from the last data bit) | 108116 | 21.19M |
+| mgba | 114753 (as if 115000) | 22.49M |
+| the second reference | ~101000 (boot 5 frames ahead of dingbat) | ~19.8M |
+
+1.30M cycles is 4.6 frames: the frame on which the format ends, and with it
+the phase of the counters the game later seeds 1-1's decorations and enemy
+from, is the EEPROM's programming time. Built with
+`-d:EEPROM_SETTLE_CYCLES=115005` (mgba's figure seen from the poll),
+**all four dingbat configs PASS**, pixel-identical to mgba through
+below_white_block; nothing else in the run differs that matters.
+
+**Who is right: nobody, for a blank cart.** Sweeping the settle time from
+100000 to 118000 in steps of 1000 (stage_start's bush, dingbat-bios):
+
+    100k P  101k P  102k P  103k B  104k B  105k B  106k P  107k P  108k B
+    109k B  110k B  111k B  112k P  113k B  114k B  115k P  116k B  117k B  118k B
+
+(P white puffs as the references, B tulip buds as dingbat). The outcome
+flips every 1000-3000 cycles a block -- 1-3 % of the programming time, well
+inside what an EEPROM's erase/program time varies by between chips and with
+temperature and supply. On real carts 1-1's first bush on a fresh save is
+not a fixed fact, and the references agree only because 101k and 115k both
+happen to land on P. dingbat keeps GBATEK's "ca. 108368 clock cycles (ca.
+6.5ms)" (re-derived 2026-09-01, docs/oracles.md); a cart with a save skips
+the format and none of this applies.
+
+**Status: no change; a probe for the cart.** `EEPROM_SETTLE_CYCLES` is now
+an `{.intdefine.}`, so a measured value can be tried without an edit.
+`tests/roms/payloads/eesettle.s` (r0table row `eesettle`, recorded only
+when named) times one block write-back on the cart in the SP's slot: boot
+the SP holding SELECT+START with Super Mario Advance 3 inserted (multiboot
+with a cartridge), install the monitor, `python3 tools/hwlink/r0table.py
+--record eesettle`. dingbat predicts n = 0 and 1 108362, n = 2 (the DMA)
+848, n = 3 FFFFFFFF on a blank last block. A stable console value near one
+of the sweep's P or B bands says what this cart does; a spread across runs
+confirms the checkpoint can never be diagnostic. Either way the script
+needs a route that does not depend on it (a soft reset after the first
+boot's format, or a seeded formatted save), not an emulator change.
+
+## 37. Yoshi Topsy-Turvy: the calibration ball is frame parity, not the sensor, 2026-10-02
+
+**Symptom.** All four dingbat configs fail `confirm` (f1360, "Is the ball
+moving the way you want?"): the ball sits still in the middle on dingbat
+and has rolled to the right on both references. The tracker blamed the tilt
+sensor's resting value; the saves differ in the calibration words (dingbat
+0x3A0/0x392/0x392, the references 0xFFF three times).
+
+**The sensor values are not it.** dingbat answers GBATEK's level reading
+(X 0x392, Y 0x3A0, bus.nim). mgba with no rotation source reads 0xFFF on
+both axes (a sensor pinned at full tilt); the second reference has no tilt
+sensor at all and reads the 0xFF of an empty SRAM window, also 0xFFF. The
+mgba driver now attaches a level rotation source (mgba's public
+`mPERIPH_ROTATION`, zero tilt), so mgba calibrates at its level reading
+(0x3A0 on both axes); the second reference cannot be fed one. Neither that,
+nor dingbat with X centred at 0x3A0, nor a 0xFFF power-on latch changes the
+checkpoint. (Koro Koro Puzzle, the other tilt script, still passes with the
+level mgba.)
+
+**Mechanism.** The game's tilt-direction state (0x03001DE0, updated by
+0x08001E9C once a logic frame) compares the live X with the right and left
+calibrations +-10. Until they are written (zero) it flips 1 <-> 2 every
+frame; the drivers cannot tilt, so the calibration stores right = left =
+the resting X, the live X sits on both thresholds, and the state freezes at
+whatever it was: the references at 1 (the ball rolls), dingbat at 2. RAM
+dumps every 5 frames put the flip out of phase between f725 and f730. There
+the game unpacks the next screen with an LZ77 decompressor in IWRAM
+(0x030000D0-0x030001A6) writing VRAM halfwords and reading its back
+references from VRAM, mode 0 with the display on, over four frames:
+dingbat spends **12.9k cycles more** than mgba in that code (0.1-0.2 cycles
+on each VRAM `ldrb`/`strh`), finishes just after the V-blank where mgba
+finishes just before, and starts the next screen one frame later.
+
+**Who is right: dingbat.** The extra cycles are renderer contention, the
+console-measured map in contention.nim (contmap.s cells in r0-agb.json;
+gbaedge p41 CONTEND2: "+1 per CPU halfword read" in mode 0), which neither
+reference models. With `-d:CONTENTION=false` dingbat matches mgba at
+confirm and PASSES -- the same shape as section 29's Final Fight One.
+
+**Status: no emulator change; harness input fixed for mgba.** The confirm
+checkpoint stays a reference artifact (their missing contention); the tilt
+sensor's resting value is not involved. Open on hardware, not needed here:
+the ready bit's conversion time and the latch before the first conversion
+(dingbat 0, mgba 0xFFF) -- tests/roms/mbprobe payload_tilt.
