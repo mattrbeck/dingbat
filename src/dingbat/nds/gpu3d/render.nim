@@ -55,7 +55,8 @@ type
     opaque_id: array[NPIX, uint8] ## polygon ID of the last opaque pixel
     trans_id: array[NPIX, uint8]  ## ID of the last translucent pixel, or NO_ID
     flags: array[NPIX, uint8]
-    below: array[NPIX, uint32]    ## colour an opaque dot was drawn over (anti-aliasing)
+    below: array[NPIX, uint32]    ## the nearest opaque colour behind the top one (anti-aliasing)
+    below_depth: array[NPIX, uint32]
     aacov: array[NPIX, uint8]     ## anti-aliasing coverage of the opaque dot (31 = whole)
     regs*: array[40, uint32]      ## 0x4000320-0x40003BF as written (word index)
     tex_pages: array[32, ptr UncheckedArray[uint8]]   ## texture slots 0-3
@@ -78,6 +79,7 @@ type
     highlight: bool               ## DISP3DCNT.1
     blend: bool                   ## DISP3DCNT.3
     aref: int32                   ## dots need alpha > aref (ALPHA_TEST_REF or 0)
+    aa: bool                      ## DISP3DCNT.4: keep the layer behind edge dots
 
 proc new_renderer*(): Renderer =
   result = Renderer(zero_page: newSeq[uint8](0x4000))
@@ -234,6 +236,8 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
         r.opaque_id[i] = id
         r.trans_id[i] = NO_ID
         r.aacov[i] = 31
+        r.below[i] = r.color[i]
+        r.below_depth[i] = r.depth[i]
         r.flags[i] = if (d and 0x8000) != 0: FLAG_FOG else: 0
   else:
     let c = rgb6(cc) or (((cc shr 16) and 31) shl 24)
@@ -246,6 +250,8 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
       r.opaque_id[i] = id
       r.trans_id[i] = NO_ID
       r.aacov[i] = 31
+      r.below[i] = c
+      r.below_depth[i] = d
       r.flags[i] = f
 
 # ---------------------------------------------------------------------------
@@ -479,7 +485,16 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
     if (r.flags[i] and FLAG_STENCIL) == 0: return
     r.flags[i] = r.flags[i] and not FLAG_STENCIL
     if not pass or r.opaque_id[i] == c.id: return
-  elif not pass: return
+  elif not pass:
+    # With anti-aliasing each dot keeps two layers: the top one and the
+    # nearest one behind it, which a partly covered top dot mixes over at
+    # the end. A dot hidden by the top layer still lands in the one behind
+    # when it is nearer than that: opaque ones replace it, translucent ones
+    # blend into it, whatever the drawing order (3d_aa, 3d_probe_aa2,
+    # 3d_probe_aa3 on the reference cores). Only dots whose top is partly
+    # covered or an edge ever read it.
+    if not c.aa or (r.aacov[i] >= 31 and (r.flags[i] and FLAG_EDGE) == 0) or
+       dval >= r.below_depth[i]: return
   let vr = int32(max(0'i64, min(ashr(at(L.c[0], R.c[0]), 3), 63'i64)))
   let vg = int32(max(0'i64, min(ashr(at(L.c[1], R.c[1]), 3), 63'i64)))
   let vb = int32(max(0'i64, min(ashr(at(L.c[2], R.c[2]), 3), 63'i64)))
@@ -489,9 +504,27 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   let px = r.blend_texel(c, vr, vg, vb, tx)
   let a = int32(px shr 24)
   if a <= c.aref: return
+  template blend_into(dst: var uint32) =
+    let o = dst
+    let oa = int32(o shr 24)
+    if c.blend and oa != 0:
+      template mixc(k: int): int32 = (ch(px, k) * (a + 1) + ch(o, k) * (31 - a)) shr 5
+      dst = pack(mixc(0), mixc(1), mixc(2), max(a, oa))
+    else:
+      dst = px
+  if not pass:
+    if a == 31:
+      r.below[i] = px
+      r.below_depth[i] = dval
+    else:
+      blend_into(r.below[i])
+      if (c.attr and 0x800) != 0: r.below_depth[i] = dval
+    return
   if a == 31 and c.mode != 3:
-    # anti-aliased edge dots keep their coverage for the post pass
+    # anti-aliased edge dots keep their coverage for the post pass, and
+    # what they cover moves one layer down
     r.below[i] = r.color[i]
+    r.below_depth[i] = r.depth[i]
     r.aacov[i] = uint8(cov)
     r.color[i] = px
     r.depth[i] = dval
@@ -501,13 +534,10 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   else:
     # a translucent polygon does not blend twice over its own ID
     if r.trans_id[i] == c.id: return
-    let o = r.color[i]
-    let oa = int32(o shr 24)
-    if c.blend and oa != 0:
-      template mixc(k: int): int32 = (ch(px, k) * (a + 1) + ch(o, k) * (31 - a)) shr 5
-      r.color[i] = pack(mixc(0), mixc(1), mixc(2), max(a, oa))
-    else:
-      r.color[i] = px
+    blend_into(r.color[i])
+    # over a partly covered edge dot it tints the layer behind as well
+    # (3d_probe_aa3: anti-aliasing still applies under translucency)
+    if c.aa and (r.aacov[i] < 31 or (r.flags[i] and FLAG_EDGE) != 0): blend_into(r.below[i])
     if (c.attr and 0x800) != 0: r.depth[i] = dval
     r.trans_id[i] = c.id
     if not c.fog: r.flags[i] = r.flags[i] and not FLAG_FOG
@@ -572,7 +602,8 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   fog: (poly.attr and 0x8000) != 0, wbuffer: wbuffer,
                   highlight: (disp3dcnt and 2) != 0, blend: (disp3dcnt and 8) != 0,
                   # alpha test: drawn only if alpha > ALPHA_TEST_REF (> 0 when off)
-                  aref: (if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32))
+                  aref: (if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32),
+                  aa: (disp3dcnt and 0x10) != 0)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
   var distinct2 = true
@@ -585,9 +616,10 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
   # GBATEK "Polygon Size": only opaque polygons without edge marking or
   # anti-aliasing leave out their bottom/right edges
   let full = wire or distinct2 or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
-  # anti-aliasing (DISP3DCNT.4): edges of opaque polygons, not lines or
-  # wire-frames (Assumed for those) nor translucent polygons (GBATEK)
-  let aa = (disp3dcnt and 0x10) != 0 and not wire and not distinct2 and not poly.translucent
+  # anti-aliasing (DISP3DCNT.4): edges of opaque polygons, lines and
+  # wire-frames included ("accidentally", GBATEK: dirty lines with missing
+  # dots, as the reference runs of 3d_aa draw them), not translucent ones
+  let aa = (disp3dcnt and 0x10) != 0 and not poly.translucent
   if ymin == ymax:
     # all on one row: the dots from the leftmost vertex to the rightmost
     if ymin < 0 or ymin >= H: return
@@ -647,8 +679,10 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     # wire-frames: the two runs only, except on the top row and the row
     # above a flat bottom, which are drawn whole
     if wire and y != int(ymin) and not last_flat:
-      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true)
-      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true)
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)):
+        r.plot(c, x, y, EL, ER, sp, true, (if aa: le.aa_cov(y, x, false) else: 31'i32))
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
+        r.plot(c, x, y, EL, ER, sp, true, (if aa: re.aa_cov(y, x, true) else: 31'i32))
       continue
     # which runs are drawn: all when full size; else the left run unless it
     # is a bottom x-major edge, the right run only when it is a top x-major
@@ -695,8 +729,9 @@ proc edge_mark(r: Renderer; aa: bool) =
   for i in marked:
     let ec = rgb6(r.reg16(0x330 + int(r.opaque_id[i] shr 3) * 2))
     if aa:
-      # with anti-aliasing the edge colour goes over what the polygon
-      # covered at half strength (GBATEK; 3d_probe_aa_edge: alpha 16)
+      # with anti-aliasing the edge colour goes on at about half strength
+      # over the layer behind the dot (GBATEK; 3d_probe_aa_edge: alpha 16,
+      # 3d_probe_aa3_edge: the layer, not the polygon's own colour)
       let o = r.below[i]
       template mixe(k: int): int32 = (ch(ec, k) * 17 + ch(o, k) * 15) shr 5
       r.color[i] = pack(mixe(0), mixe(1), mixe(2), 0) or (r.color[i] and 0xFF00_0000'u32)
@@ -704,31 +739,14 @@ proc edge_mark(r: Renderer; aa: bool) =
       r.color[i] = ec or (r.color[i] and 0xFF00_0000'u32)
 
 proc anti_alias(r: Renderer) =
-  ## Opaque edge dots with partial coverage mix over the colour they were
-  ## drawn on, where a 4-neighbour has another polygon ID and lies further
-  ## away (the edge-marking test): a mesh of one ID shows no seams, as
-  ## the reference core draws Pokemon SoulSilver's title Lugia and
-  ## overworld (3d_probe_aa / _aa_edge pin the coverage itself). Dots a
-  ## translucent polygon covered since are left alone (Assumed).
-  let cc = r.regs[(0x350 - 0x320) shr 2]
-  let clear_id = uint8((cc shr 24) and 0x3F)
-  let d15 = r.reg16(0x354) and 0x7FFF
-  let clear_depth = d15 * 0x200 + ((d15 + 1) div 0x8000) * 0x1FF
-  var todo: seq[int32]
-  for y in 0 ..< H:
-    for x in 0 ..< W:
-      let i = y * W + x
-      if r.aacov[i] >= 31 or r.trans_id[i] != NO_ID: continue
-      let id = r.opaque_id[i]
-      let d = r.depth[i]
-      template differs(xx, yy: int): bool =
-        let (nid, nd) = if xx < 0 or xx >= W or yy < 0 or yy >= H: (clear_id, clear_depth)
-                        else: (r.opaque_id[yy * W + xx], r.depth[yy * W + xx])
-        id != nid and d < nd
-      if differs(x - 1, y) or differs(x + 1, y) or differs(x, y - 1) or differs(x, y + 1):
-        todo.add int32(i)
-  for i in todo:
+  ## Opaque edge dots with partial coverage mix over the nearest opaque
+  ## colour behind them (`below`), whatever their neighbours' IDs: a mesh
+  ## shows no seams because its neighbouring polygon is that colour
+  ## (3d_probe_aa / _aa_edge pin the coverage, 3d_probe_aa2 / _aa3 the
+  ## layer, translucent polygons included).
+  for i in 0 ..< NPIX:
     let cov = int32(r.aacov[i])
+    if cov >= 31: continue
     let o = r.below[i]
     let px = r.color[i]
     template mixa(k: int): int32 = (ch(px, k) * (cov + 1) + ch(o, k) * (31 - cov)) shr 5

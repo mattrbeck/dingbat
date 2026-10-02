@@ -63,10 +63,10 @@ const
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d"]
   GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched"]
   # Per-frame scratch: render_frame's clear() rewrites depth, IDs, flags and
-  # coverage before anything reads them, `below` is written with every
-  # coverage < 31 that reads it, the page pointers and `order` are rebuilt
+  # coverage and the layer behind (`below`, `below_depth`) before anything
+  # reads them, the page pointers and `order` are rebuilt
   # per frame. `color` (the frame being shown) and `regs` are saved.
-  RENDER_SKIP = ["depth", "opaque_id", "trans_id", "flags", "below", "aacov",
+  RENDER_SKIP = ["depth", "opaque_id", "trans_id", "flags", "below", "below_depth", "aacov",
                  "tex_pages", "pal_pages", "zero_page", "mixed", "order"]
   TIMERS_SKIP = ["sched", "irq"]
   DMA_SKIP = ["irq"]
