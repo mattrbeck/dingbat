@@ -111,7 +111,7 @@ rows") passed all but four; round 7 fitted those, and
 
 | # | Test | What was wrong | Fix (docs/nds/3d-edges.md) | Reference |
 |---|---|---|---|---|
-| 38, 39, 43 | the curse of edge marking: a second, further polygon (the same ID: the test never applies the second polygon's attributes) whose edge lies on the first one's | colours: the console shows the further polygon's x-major edge run over the nearer one's edge dots (62 / 62 / 31 dots) | "Overlapping edges with edge marking": with edge marking on, an x-major run replaces a same-ID polygon's edge dots whatever their depth; 40, 41, 44 pass because the Y-sort draws the nearer polygon second there | fails |
+| 38, 39, 43 | the curse of edge marking: a second, further polygon (the same ID: the test never applies the second polygon's attributes) whose edge lies on the first one's | colours: the console shows the further polygon's x-major edge run over the nearer one's edge dots (62 / 62 / 31 dots) | "Overlapping edges with edge marking", in the author's terms (HEAD's tests.h notes): with edge marking alone, a same-ID polygon's left/top edges win over right/bottom ones whatever their depth | fails |
 | 56 | AA swapped vertical edge glitch, the combined case | one dot: the top row's inner x-major dot is invisible on the console | the swapped x-major edge's inner dot takes its run's first dot's coverage (none on that row) | pass |
 
 To list them again: `ndsrun --press A@60,A@100,... --shots <same> --text B0
@@ -175,8 +175,9 @@ Each in its own commit, each with checks in `tests/nds_testroms_test.nim`
 ## Still open
 
 - ~~polyrastertest's 4 failures~~: fitted on `nds-polyraster2` (above);
-  how far the overlapping-edge rule reaches (other IDs, AA alone, large
-  depth differences) is open in docs/nds/3d-edges.md.
+  the overlapping-edge rule beyond the recorded 38-44 rests on the
+  author's notes (docs/nds/3d-edges.md, Open); HEAD's curse scenes need
+  their data recorded.
 - **The 3D layer with the rendering engine off.** The reference keeps the
   last frame in `disp_powcnt` (render off, then new lists swapped, then
   geometry off too) but shows no 3D in `gx_powcnt` (geometry off first,
