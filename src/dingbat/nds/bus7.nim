@@ -17,7 +17,7 @@ proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.}
 
 # Idle-loop skipping (arm/cpu.nim loop_edge): the epoch, and the timing
 # state that decides what the next accesses cost.
-proc idle_epoch*(b: Arm7Bus): uint64 {.inline.} = b.nds.idle_epoch
+proc idle_epoch*(b: Arm7Bus): uint64 {.inline.} = b.nds.idle_epoch + b.nds.idle_epoch7
 proc idle_sig*(b: Arm7Bus): IdleSig {.inline.} =
   [b.nds.last_fetch7, b.nds.last_data7, 0, 0, 0, 0, 0, 0]
 
@@ -162,7 +162,9 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
   of 0x04:
     n.sync7()
-    if not io7_steady(a): inc n.idle_epoch
+    if not io7_steady(a):
+      # the IPC FIFO pop is seen by the ARM9 too; the rest only by this CPU
+      if (a and 0x00FF_FFFC'u32) == 0x10_0000: inc n.idle_epoch else: inc n.idle_epoch7
     if (a and 0x00FF_0000'u32) >= 0x0080_0000'u32:
       # wifi: 16-bit ports with read side effects, so only the halfwords
       # actually accessed are read (a byte read reads its halfword)
@@ -190,24 +192,24 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
 
 proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
   watch_write(n, "7", n.arm7, a, v)
-  template wr(s: var seq[uint8]; i: int) =
+  template wr(s: var seq[uint8]; i: int; ep: untyped = n.idle_epoch) =
     # RAM: only a store that changes memory can end a polling loop (one
     # host load and store: `i` is aligned to the width, the host is
     # little-endian like the DS)
     let p = addr s[i]
     when width == 32:
-      if cast[ptr uint32](p)[] != v: inc n.idle_epoch; cast[ptr uint32](p)[] = v
+      if cast[ptr uint32](p)[] != v: inc ep; cast[ptr uint32](p)[] = v
     elif width == 16:
-      if cast[ptr uint16](p)[] != uint16(v): inc n.idle_epoch; cast[ptr uint16](p)[] = uint16(v)
+      if cast[ptr uint16](p)[] != uint16(v): inc ep; cast[ptr uint16](p)[] = uint16(v)
     else:
-      if p[] != uint8(v): inc n.idle_epoch; p[] = uint8(v)
+      if p[] != uint8(v): inc ep; p[] = uint8(v)
   if (a shr 24) - 2 >= 2: inc n.idle_epoch   # I/O, VRAM, slot 2
   case a shr 24
   of 0x02: wr(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
     var shared: bool
     let i = n.wram7(a, shared)
-    if shared: wr(n.shared_wram, i) else: wr(n.arm7_wram, i)
+    if shared: wr(n.shared_wram, i) else: wr(n.arm7_wram, i, n.idle_epoch7)
   of 0x04:
     let sh = (a and 3) * 8
     let mask = when width == 32: 0xFFFF_FFFF'u32

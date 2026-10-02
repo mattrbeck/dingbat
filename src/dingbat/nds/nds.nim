@@ -75,6 +75,8 @@ type
     unmapped_count*: int        ## all of them (tools/ndssweep.nim)
     idle_epoch*: uint64         ## bumped by anything a polling loop could see
                                 ## change (arm/cpu.nim loop_edge; not saved)
+    idle_epoch9*, idle_epoch7*: uint64  ## the same for what only that CPU
+                                ## sees: its TCMs or WRAM, its devices' reads
     # -d:ndsdebug only (tools/ndsrun.nim flags)
     iolog*: bool                ## log I/O accesses to stderr
     watch*: uint32              ## log writes to this word (0 = off)
@@ -90,7 +92,7 @@ const
 
 proc note_unmapped(n: NDS; who: string; a: uint32; write: bool) =
   inc n.unmapped_count
-  inc n.idle_epoch
+  inc n.idle_epoch9; inc n.idle_epoch7   # the count changes (rare: either CPU)
   if n.unmapped_log < 32:
     inc n.unmapped_log
     stderr.writeLine("nds " & who & ": unmapped " & (if write: "write " else: "read ") &
@@ -123,7 +125,8 @@ proc slot2_read(n: NDS; a: uint32; is9: bool; width: static int): uint32 =
   ## load reads repeated (as on the GBA: Assumed for the DS).
   let owner9 = (n.exmemcnt and 0x80) == 0
   if owner9 != is9: return 0
-  inc n.idle_epoch            # GPIO, RTC: values that change on their own
+  # GPIO, RTC: values that change on their own; the other CPU reads zeros
+  if is9: inc n.idle_epoch9 else: inc n.idle_epoch7
   let s {.cursor.} = n.slot2
   if a >= 0x0A00_0000'u32:
     let b = s.ram_read8(a)

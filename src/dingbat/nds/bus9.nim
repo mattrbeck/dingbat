@@ -21,7 +21,7 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.}
 
 # Idle-loop skipping (arm/cpu.nim loop_edge): the epoch, and the timing
 # state that decides what the next accesses cost.
-proc idle_epoch*(b: Arm9Bus): uint64 {.inline.} = b.nds.idle_epoch
+proc idle_epoch*(b: Arm9Bus): uint64 {.inline.} = b.nds.idle_epoch + b.nds.idle_epoch9
 proc idle_sig*(b: Arm9Bus): IdleSig {.inline.} =
   let n {.cursor.} = b.nds
   [n.last_fetch9, n.last_data9, n.last_pc9, n.pu_ok[0], n.pu_ok[1], n.pu_ok[2],
@@ -201,7 +201,7 @@ proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
         n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq, n.slot9_t))
     elif not n.tm.dcache.lookup(a, true):
       n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
-      inc n.idle_epoch          # a line fill changes the tags
+      inc n.idle_epoch9         # a line fill changes the tags
     return
   if write and top == 2 and n.tm.data_buffered(a):
     n.wait9 += WBUF_WRITE
@@ -265,7 +265,10 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
   of 0x04:
     n.sync9()
     let w = n.io9_read(a and not 3'u32)
-    if not io9_steady(a and 0x00FF_FFFC'u32): inc n.idle_epoch
+    let o = a and 0x00FF_FFFC'u32
+    if not io9_steady(o):
+      # the IPC FIFO pop is seen by the ARM7 too; the rest only by this CPU
+      if o == 0x10_0000: inc n.idle_epoch else: inc n.idle_epoch9
     when defined(ndsdebug):
       if n.iolog: n.log_io("9", a, w, 0xFFFF_FFFF'u32, false, n.arm9.cur_pc)
     when width == 32: w
@@ -298,25 +301,25 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
 
 proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool = false) =
   watch_write(n, "9", n.arm9, a, v)
-  template wr(s: var seq[uint8]; i: int) =
+  template wr(s: var seq[uint8]; i: int; ep: untyped = n.idle_epoch) =
     # RAM: only a store that changes memory can end a polling loop (one
     # host load and store: `i` is aligned to the width, the host is
     # little-endian like the DS)
     let p = addr s[i]
     when width == 32:
-      if cast[ptr uint32](p)[] != v: inc n.idle_epoch; cast[ptr uint32](p)[] = v
+      if cast[ptr uint32](p)[] != v: inc ep; cast[ptr uint32](p)[] = v
     elif width == 16:
-      if cast[ptr uint16](p)[] != uint16(v): inc n.idle_epoch; cast[ptr uint16](p)[] = uint16(v)
+      if cast[ptr uint16](p)[] != uint16(v): inc ep; cast[ptr uint16](p)[] = uint16(v)
     else:
-      if p[] != uint8(v): inc n.idle_epoch; p[] = uint8(v)
+      if p[] != uint8(v): inc ep; p[] = uint8(v)
   if n.in_itcm(a, true):
     when timed:
       if n.pu_check9(a, 2): return
       n.charge9_tcm(a, true)
-    wr(n.itcm, int(a and 0x7FFF)); return
+    wr(n.itcm, int(a and 0x7FFF), n.idle_epoch9); return
   if n.in_dtcm(a, true):
     when timed: n.charge9_tcm(a, false)
-    wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF)); return
+    wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF), n.idle_epoch9); return
   when timed:
     if (a shr 24) != 0x02 and n.pu_check9(a, 2): return
     n.charge9(a, width, true)
@@ -384,7 +387,7 @@ proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
   elif n.tm.ic_on and n.tm.code_cachable(a):
     if not n.tm.icache.lookup(a, true):
       c += (if (a shr 24) == 0xFF: FILL_BIOS else: FILL_MAIN)
-      inc n.idle_epoch          # a line fill changes the tags
+      inc n.idle_epoch9         # a line fill changes the tags
   else:
     c += code9_uncached(a shr 24, n.slot9_t)
   n.wait9 += c
@@ -434,7 +437,7 @@ proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
 
 proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   let n {.cursor.} = b.nds
-  inc n.idle_epoch
+  inc n.idle_epoch9
   template tables(c: Cp15): untyped =
     (c.dcache_cfg, c.icache_cfg, c.wbuf_cfg, c.data_perm, c.code_perm, c.prot_regions)
   let ctl_before = n.cp15.control
