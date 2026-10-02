@@ -297,7 +297,7 @@ proc run_one(rom, outdir, bios, press: string; frames: int; shots: seq[int]) =
     "pc9": toHex(n.arm9.next_pc, 8), "pc7": toHex(n.arm7.next_pc, 8),
     "instrs9": n.arm9.instr_count, "instrs7": n.arm7.instr_count,
     "unmapped": n.unmapped_count, "hang": hang,
-    "power_off": (n.spi.pm_regs[0] and 0x40) != 0,
+    "power_off": n.spi.power_off,
     "hang_pc": (if pcs.len > 0: toHex(pcs[^1], 8) else: ""),
     "frames_changed": changed, "last_change": last_change,
     "blank_top": blank_top, "blank_bottom": blank_bottom,
