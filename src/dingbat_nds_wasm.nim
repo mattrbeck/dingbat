@@ -50,11 +50,17 @@ proc nds_boot(b9: pointer; b9_len: cint; b7: pointer; b7_len: cint;
 
 proc nds_reboot(save: pointer; save_len: cint): cint {.exportc.} =
   ## Power-cycle the running game: a fresh core on the same ROM (moved out of
-  ## the old one) and BIOS/firmware, starting from `save`.
+  ## the old one) and BIOS, starting from `save`. The firmware is the flash
+  ## as the old core left it: a power cycle keeps what the game or the menu
+  ## wrote to it (GBATEK "DS Firmware Serial Flash Memory": flash, not RAM),
+  ## still dirty if the page has not stored it yet.
   if core == nil or core.cart.rom.len == 0: return 0
   var rom = move(core.cart.rom)
+  let fw_dirty = core.spi.firmware_dirty
+  lastFirmware = move(core.spi.firmware)
   core = nil
   boot_with(move(rom), save, save_len)
+  core.spi.firmware_dirty = fw_dirty
   1
 
 proc nds_unload() {.exportc.} =
@@ -185,6 +191,14 @@ proc nds_firmware_dirty(): cint {.exportc.} =
   if core != nil and core.spi.firmware_dirty: 1 else: 0
 proc nds_firmware_clean() {.exportc.} =
   if core != nil: core.spi.firmware_dirty = false
+
+var synthFw: seq[uint8]
+proc nds_synth_firmware(): pointer {.exportc.} =
+  ## The firmware a boot without one gets (boot.nim synth_firmware), 256 KB,
+  ## for the page to edit the user settings of before any DS game has run
+  ## (Settings > Nintendo DS). Needs no core.
+  synthFw = synth_firmware()
+  addr synthFw[0]
 
 proc nds_status(): cstring {.exportc.} =
   if core == nil: return "no ROM"

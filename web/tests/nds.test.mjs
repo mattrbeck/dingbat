@@ -237,6 +237,29 @@ test("push counts the frames it hands over even though the send transfers them",
 
 // --- index.js: a stand-in DS core -------------------------------------------
 
+// A 256 KB firmware with two valid user-settings copies at 3FE00h (copy 1
+// current), as GBATEK "DS Firmware User Settings" lays them out; `mark`
+// fills the header's wifi bytes (a stand-in for the parts that are not
+// user settings).
+const FW_SIZE = 0x40000, FW_PTR = 0x300000, SYNTH_PTR = 0x380000;
+const fwImage = (name = "dingbat", mark = 0x22) => {
+  const img = new Uint8Array(FW_SIZE).fill(0xFF);
+  img.fill(mark, 0x2A, 0x200);
+  img[0x20] = (0x3FE00 / 8) & 0xFF; img[0x21] = (0x3FE00 / 8) >> 8;
+  for (const copy of [0, 1]) {
+    const b = 0x3FE00 + copy * 0x100;
+    img.fill(0, b, b + 0x74);
+    img[b] = 5; img[b + 2] = 11; img[b + 3] = 1; img[b + 4] = 1;
+    for (let i = 0; i < name.length; i++) img[b + 6 + 2 * i] = name.charCodeAt(i);
+    img[b + 0x1A] = name.length;
+    img[b + 0x64] = 1; img[b + 0x65] = 0xFC; // English
+    img[b + 0x70] = copy;
+    const c = NdsUtil.crc16(img, b, b + 0x70);
+    img[b + 0x72] = c & 0xFF; img[b + 0x73] = c >> 8;
+  }
+  return img;
+};
+
 // The exports index.js uses, over a plain heap. Records what was booted.
 const fakeCore = () => {
   const heap = new Uint8Array(1 << 22);
@@ -250,16 +273,31 @@ const fakeCore = () => {
     _nds_boot(b9, b9n, b7, b7n, fw, fwn, sp, sn) {
       const rom = heap.slice(c.romPtr, c.romPtr + c.romLen);
       const save = sn ? heap.slice(sp, sp + sn) : null;
-      c.booted.push({ how: "boot", rom, save, bios: [b9n, b7n, fwn] });
+      const firmware = fwn ? heap.slice(fw, fw + fwn) : null;
+      c.booted.push({ how: "boot", rom, save, bios: [b9n, b7n, fwn], firmware });
       c.save = save ? new Uint8Array(save) : null;
+      // The flash: the firmware given, else the built-in one.
+      c.fwLen = fwn || FW_SIZE;
+      heap.set(firmware || c.synth, FW_PTR);
+      c.fwDirty = 0; c.off = 0;
       return 1;
     },
     _nds_reboot(sp, sn) {
       const save = sn ? heap.slice(sp, sp + sn) : null;
       c.booted.push({ how: "reboot", save });
       c.save = save ? new Uint8Array(save) : null;
+      c.off = 0; // the flash stays, as nds_reboot keeps it
       return 1;
     },
+    // Power and the firmware flash (living in the heap, as the core's does).
+    off: 0, fwDirty: 0, fwLen: 0, synth: fwImage("builtin", 0x11),
+    flash: () => heap.slice(FW_PTR, FW_PTR + c.fwLen),
+    _nds_powered_off: () => c.off,
+    _nds_firmware_len: () => c.fwLen,
+    _nds_firmware_ptr: () => (c.fwLen ? FW_PTR : 0),
+    _nds_firmware_dirty: () => c.fwDirty,
+    _nds_firmware_clean() { c.fwDirty = 0; },
+    _nds_synth_firmware() { heap.set(c.synth, SYNTH_PTR); return SYNTH_PTR; },
     _nds_unload() { c.booted.push({ how: "unload" }); },
     _nds_run_frame() { c.frames++; },
     _nds_frame_count: () => c.frames,
@@ -572,4 +610,209 @@ test("the lid starts open at every boot and a state load is told where it is", a
   assert.equal(app.runIn("ndsStart(ndsCoreGame, null, null, null)"), true); // a reset's reboot
   assert.equal(core.lid.at(-1), 0);
   assert.equal(app.document.body.classList.contains("nds-lid-closed"), false);
+});
+
+// --- Firmware user settings and the written flash ---------------------------
+
+test("user settings: the current copy is read, and an edit goes over the older one", () => {
+  const img = fwImage("dingbat");
+  eq(NdsUtil.fwReadUser(img), { name: "dingbat", month: 1, day: 1, colour: 11, lang: 1, ok: true });
+  assert.equal(NdsUtil.fwCurrentUser(img), 0x3FF00, "copy 1: its counter is one more");
+  const a = NdsUtil.fwWithUser(img, { name: "Matt", month: 7, day: 14, lang: 2 });
+  eq(NdsUtil.fwReadUser(a), { name: "Matt", month: 7, day: 14, colour: 11, lang: 2, ok: true });
+  assert.equal(NdsUtil.fwCurrentUser(a), 0x3FE00, "written over copy 0, now the newer");
+  eq([...a.slice(0x3FF00, 0x40000)], [...img.slice(0x3FF00, 0x40000)], "the old copy kept");
+  assert.equal(a[0x3FE70], 2);
+  eq([...a.slice(0, 0x3FE00)], [...img.slice(0, 0x3FE00)], "nothing else touched");
+  // Again: back over copy 1, counter 3; the counter wraps at 7Fh.
+  const b = NdsUtil.fwWithUser(a, { name: "Ann" });
+  assert.equal(NdsUtil.fwCurrentUser(b), 0x3FF00);
+  eq([NdsUtil.fwReadUser(b).name, b[0x3FF70], NdsUtil.fwReadUser(b).lang], ["Ann", 3, 2]);
+  const w = new Uint8Array(img);
+  w[0x3FF70] = 0x7F; w[0x3FE70] = 0x7E;
+  for (const o of [0x3FE00, 0x3FF00]) {
+    const c = NdsUtil.crc16(w, o, o + 0x70);
+    w[o + 0x72] = c & 0xFF; w[o + 0x73] = c >> 8;
+  }
+  const x = NdsUtil.fwWithUser(w, { day: 2 });
+  eq([x[0x3FE70], NdsUtil.fwCurrentUser(x), NdsUtil.fwReadUser(x).day], [0, 0x3FE00, 2]);
+  // A damaged copy loses to a valid one whatever its counter.
+  const d = new Uint8Array(img);
+  d[0x3FF06] ^= 1;
+  assert.equal(NdsUtil.fwCurrentUser(d), 0x3FE00);
+  // Ten UTF-16 units at most; nothing for an image without settings.
+  assert.equal(NdsUtil.fwReadUser(NdsUtil.fwWithUser(img, { name: "ABCDEFGHIJKL" })).name, "ABCDEFGHIJ");
+  assert.equal(NdsUtil.fwReadUser(new Uint8Array(0x100)), null);
+});
+
+test("extended settings follow the language only where their own CRC holds", () => {
+  const img = fwImage("ique");
+  for (const o of [0x3FE00, 0x3FF00]) {
+    img[o + 0x74] = 1; img[o + 0x75] = 1; img[o + 0x76] = 0x7E;
+    img.fill(0xFF, o + 0x78, o + 0xFE);
+    const e = NdsUtil.crc16(img, o + 0x74, o + 0xFE);
+    img[o + 0xFE] = e & 0xFF; img[o + 0xFF] = e >> 8;
+  }
+  const a = NdsUtil.fwWithUser(img, { lang: 3 });
+  const u = NdsUtil.fwCurrentUser(a);
+  eq([a[u + 0x64] & 7, a[u + 0x75]], [3, 3]);
+  assert.equal(NdsUtil.crc16(a, u + 0x74, u + 0xFE), a[u + 0xFE] | (a[u + 0xFF] << 8));
+  // Plain DS settings (FFh-filled from 74h): left as they are.
+  const b = NdsUtil.fwWithUser(fwImage(), { lang: 3 });
+  assert.equal(b[NdsUtil.fwCurrentUser(b) + 0x75], 0xFF);
+});
+
+test("the built-in firmware takes only the written user area", () => {
+  const base = fwImage("new", 0x33), written = NdsUtil.fwWithUser(fwImage("old", 0x44), { name: "Kept" });
+  written.fill(0x55, 0x3FA00, 0x3FB00); // a Wi-Fi connection the game set up
+  eq(NdsUtil.fwUserArea(base), [0x3FA00, 0x40000]);
+  const o = NdsUtil.fwOverlayUser(base, written);
+  assert.equal(NdsUtil.fwReadUser(o).name, "Kept");
+  assert.equal(o[0x3FA10], 0x55);
+  assert.equal(o[0x100], 0x33, "the header and wifi calibration are the base's");
+});
+
+const fwGame = async (opts = {}) => {
+  const { app, core } = await appWithCore(opts);
+  for (const [k, v] of opts.idb || []) app.idb.set(k, v);
+  await app.api.handleRomFile(fakeFile("Fw.nds", ROM));
+  for (let i = 0; i < 20 && !core.booted.length; i++) await settle();
+  return { app, core };
+};
+
+test("firmware a game wrote is stored once, never synced, and the next boot gets it", async () => {
+  const { app, core } = await fwGame();
+  eq(core.booted[0].bios, [0, 0, 0], "nothing written yet: the built-in firmware");
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+    sigs: {}, rmt: {}, delTs: {}, acct: "acct-1", parked: {}, connected: false };
+  // The game changes the user's name: the flash changes, dirty.
+  const changed = NdsUtil.fwWithUser(core.flash(), { name: "Player" });
+  core.HEAPU8.set(changed, FW_PTR);
+  core.fwDirty = 1;
+  await app.api.persistSave("rom.nds", "Fw.nds");
+  const rec = app.idb.get("bios:ndsflash");
+  assert.equal(rec.base, "built-in");
+  assert.equal(rec.by, "game");
+  eq([...rec.data.slice(0x3FE00)], [...changed.slice(0x3FE00)]);
+  assert.equal(core.fwDirty, 0, "marked stored");
+  eq(app.api.syncState.queueUp, [], "the firmware stays on this device");
+  // A reset reboots in place: the core keeps its flash, nothing to pass.
+  app.runIn("ndsStart(ndsCoreGame, null, null, null)");
+  assert.equal(core.booted.at(-1).how, "reboot");
+
+  // A fresh page: the written settings over this build's built-in firmware.
+  const { app: app2, core: core2 } = await appWithCore();
+  for (const [k, v] of app.idb) app2.idb.set(k, v);
+  core2.synth = fwImage("builtin", 0x66);
+  await app2.runIn("launchRom('Fw.nds')");
+  for (let i = 0; i < 20 && !core2.booted.length; i++) await settle();
+  const fw = core2.booted[0].firmware;
+  assert.ok(fw, "a firmware went in");
+  assert.equal(NdsUtil.fwReadUser(fw).name, "Player");
+  assert.equal(fw[0x100], 0x66, "the rest is this build's built-in firmware");
+});
+
+test("on the user's firmware.bin the written image is whole, and another dump starts afresh", async () => {
+  const dump = fwImage("Dumped", 0x77);
+  const { app, core } = await fwGame({ idb: [["bios:ndsfw", { name: "firmware.bin", data: dump }]] });
+  eq([...core.booted[0].firmware.slice(0x3FE00)], [...dump.slice(0x3FE00)], "the dump itself");
+  core.HEAPU8.set(NdsUtil.fwWithUser(dump, { lang: 4 }), FW_PTR);
+  core.HEAPU8[FW_PTR + 0x1000] = 0xAB; // anywhere in the flash
+  core.fwDirty = 1;
+  await app.api.persistSave("rom.nds", "Fw.nds");
+  eq([...app.idb.get("bios:ndsfw").data.slice(0, 16)], [...dump.slice(0, 16)], "the dump untouched");
+  const next = await app.runIn("ndsBiosFiles()");
+  assert.equal(NdsUtil.fwReadUser(next.firmware).lang, 4);
+  assert.equal(next.firmware[0x1000], 0xAB, "the whole written image");
+  // A different dump is a different console: its own settings.
+  app.idb.set("bios:ndsfw", { name: "other.bin", data: fwImage("Other", 0x78) });
+  const other = await app.runIn("ndsBiosFiles()");
+  eq([NdsUtil.fwReadUser(other.firmware).name, other.firmware[0x1000]], ["Other", 0xFF]);
+});
+
+test("Settings shows the next boot's console settings, edits them and resets", async () => {
+  const { app, core } = await fwGame();
+  await app.runIn("updateNdsFwSettings(true)");
+  const text = (id) => app.elements.get(id).textContent;
+  eq([text("nds-user-name"), text("nds-user-birthday"), text("nds-user-lang"), text("nds-user-colour")],
+     ["builtin", "1 January", "English", "11"]);
+  assert.equal(text("nds-user-source"), "Built-in firmware");
+  assert.equal(app.elements.get("nds-user-reset").hidden, true);
+  await app.elements.get("nds-user-edit").click();
+  assert.equal(app.elements.get("nds-user-form").hidden, false);
+  assert.equal(app.elements.get("nds-user-name-in").value, "builtin");
+  app.elements.get("nds-user-name-in").value = "Edited";
+  app.elements.get("nds-user-month").value = "12";
+  app.elements.get("nds-user-day").value = "25";
+  app.elements.get("nds-user-lang-in").value = "5";
+  await app.elements.get("nds-user-form").dispatch("submit", { preventDefault() {} });
+  for (let i = 0; i < 10; i++) await settle();
+  const rec = app.idb.get("bios:ndsflash");
+  eq([rec.base, rec.by], ["built-in", "settings"]);
+  eq(NdsUtil.fwReadUser(rec.data), { name: "Edited", month: 12, day: 25, colour: 11, lang: 5, ok: true });
+  assert.equal(NdsUtil.fwReadUser(core.flash()).name, "Edited", "the running game's flash follows");
+  eq([text("nds-user-name"), text("nds-user-birthday"), text("nds-user-lang")],
+     ["Edited", "25 December", "Spanish"]);
+  assert.match(text("nds-user-source"), /^Edited here, on the built-in firmware/);
+  assert.equal(app.elements.get("nds-user-reset").hidden, false);
+  await app.elements.get("nds-user-reset").click();
+  for (let i = 0; i < 10; i++) await settle();
+  assert.equal(app.idb.get("bios:ndsflash"), undefined);
+  assert.equal(text("nds-user-name"), "builtin");
+  assert.equal(NdsUtil.fwReadUser(core.flash()).name, "builtin");
+});
+
+// --- Power-off ----------------------------------------------------------------
+
+test("a DS the game switched off stops, keeps its save, ends its session and restarts", async () => {
+  const { app, core } = await fwGame();
+  core._nds_state_size = () => 3;
+  core._nds_state_data = () => { core.HEAPU8.set([7, 8, 9], 4096); return 4096; };
+  core._nds_state_load = () => 1;
+  app.idb.set("stateauto:Fw.nds", { bytes: u8(1), ts: 1 });
+  app.idb.set("sessionpic:Fw.nds", { ts: 1 });
+  // The frame in which the game writes its save and powers off.
+  const run = core._nds_run_frame;
+  core._nds_run_frame = () => {
+    run();
+    if (core.frames === 2) { core.save = u8(4, 4); core.dirty = 1; core.off = 1; }
+  };
+  app.runIn("ndsTick(1000); ndsTick(1100)");
+  assert.equal(core.frames, 2);
+  assert.equal(app.document.body.classList.contains("nds-off"), true);
+  assert.equal(app.elements.get("nds-off").hidden, false);
+  for (let i = 0; i < 10; i++) await settle();
+  eq([...app.idb.get("save:Fw.nds")], [4, 4], "the battery stored at once");
+  assert.equal(app.idb.get("stateauto:Fw.nds"), undefined, "no session to resume");
+  assert.equal(app.idb.get("sessionpic:Fw.nds"), undefined);
+  // Nothing runs, nothing is snapshotted or saved as a state.
+  app.runIn("ndsTick(1200); ndsTick(1300); ndsStepFrame()");
+  assert.equal(core.frames, 2);
+  await app.runIn("persistAutoState()");
+  assert.equal(app.idb.get("stateauto:Fw.nds"), undefined);
+  assert.equal(app.runIn("captureStateBytes()"), null);
+  assert.equal(await app.runIn("saveToSlot(1)"), false);
+  // Restart: a reboot on the stored save, running again.
+  await app.elements.get("nds-off-restart").click();
+  for (let i = 0; i < 20 && core.booted.at(-1).how !== "reboot"; i++) await settle();
+  eq([core.booted.at(-1).how, [...core.booted.at(-1).save]], ["reboot", [4, 4]]);
+  assert.equal(app.document.body.classList.contains("nds-off"), false);
+  assert.equal(app.elements.get("nds-off").hidden, true);
+  app.runIn("ndsTick(2000); ndsTick(2100)");
+  assert.ok(core.frames > 2, "frames run again");
+  assert.ok(app.runIn("captureStateBytes()"), "and a state can be taken");
+});
+
+test("a state taken switched off loads switched off; Library closes the game", async () => {
+  const { app, core } = await fwGame();
+  core._nds_state_size = () => 3;
+  core._nds_state_data = () => 4096;
+  core._nds_state_load = () => { core.off = 1; return 1; };
+  assert.equal(app.api.applyStateBytes(u8(1, 2, 3)), true);
+  assert.equal(app.document.body.classList.contains("nds-off"), true);
+  await app.elements.get("nds-off-library").click();
+  for (let i = 0; i < 20 && app.api.currentRomName; i++) await settle();
+  assert.equal(app.api.currentRomName, null);
+  assert.equal(core.booted.at(-1).how, "unload");
+  assert.equal(app.document.body.classList.contains("nds-off"), false);
 });

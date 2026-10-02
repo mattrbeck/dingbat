@@ -406,6 +406,14 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     URLSearchParams, Response,
     Uint8ClampedArray, ImageData: FakeImageData,
     atob, btoa, performance,
+    // `new Option(text, value)` fills the DS console-settings selects at
+    // module scope (index.js "Console settings").
+    Option: function Option(text = "", value = text) {
+      const el = new FakeElement("option");
+      el.textContent = String(text);
+      el.value = String(value);
+      return el;
+    },
     // The page's timers are unref'd so that the ones no test ever clears - a
     // toast fade, a sync debounce, a recorder's five-minute stop - cannot hold
     // the whole suite open at the end of a file. The cost is that an unref'd

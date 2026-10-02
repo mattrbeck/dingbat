@@ -905,6 +905,9 @@ const selectSettingsTab = (name) => {
   // Always top, never a restored per-section offset.
   settingsScroll.scrollTop = 0;
   try { localStorage.setItem(SETTINGS_LAST_KEY, name); } catch {}
+  // The DS console settings, read from the firmware (the DS core is fetched
+  // for the built-in one only when this section is shown).
+  if (name === "ds" && typeof updateNdsFwSettings === "function") updateNdsFwSettings(true);
 };
 
 // The off-stage sheet screen is still painted mid-slide; `inert` keeps it
@@ -6041,6 +6044,7 @@ const copyFramebuffer = () => {
 const storeLastFrame = ({ force = false } = {}) => {
   if (!currentRomName || !currentOriginalName) return Promise.resolve();
   if (linkMode || rollbackMode || netActive()) return Promise.resolve();
+  if (ndsOffFor()) return Promise.resolve(); // the picture stays the last one played
   const fb = copyFramebuffer();
   if (!fb) return Promise.resolve();
   const { heap, w, h } = fb;
@@ -7169,12 +7173,15 @@ const flushSoloSave = () => {
 
 const persistSave = async (romName, originalName) => {
   let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
+  let fwPut = null;
   try {
     let data;
     if (isNdsRomName(romName)) {
       // The DS core's cart backup, only while it holds this game; unchanged
-      // since the last store (the chip's dirty flag) costs nothing.
+      // since the last store (the chip's dirty flag) costs nothing. The
+      // console's firmware rides the same triggers, read here at once too.
       if (ndsCoreGame !== originalName) return;
+      fwPut = ndsStoreFirmware(ndsTakeFirmware());
       if (!ndsSaveDirty() && lastSaveSigKey === originalName && lastSaveSig !== null) return;
       data = ndsSaveBytes(true);
     } else {
@@ -7203,7 +7210,9 @@ const persistSave = async (romName, originalName) => {
       postSaveToHook(originalName, data);
 
     }
-  } catch {}
+  } catch {} finally {
+    if (fwPut) await fwPut;
+  }
 };
 
 // Put a game's stored battery save in its FS file, right before the core is
@@ -7615,6 +7624,10 @@ const saveToSlot = async (slot) => {
     showToast("Save states aren't available for DS games yet");
     return false;
   }
+  if (ndsOffFor()) {
+    showToast("The DS is switched off - restart it first");
+    return false;
+  }
   const bytes = captureStateBytes();
   if (!bytes) {
     showToast("Couldn't capture the emulator state");
@@ -7744,6 +7757,7 @@ let sessionSnapFor = null;
 const persistAutoState = () => {
   if (!currentRomName || !currentOriginalName) return;
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
+  if (ndsOffFor()) return; // a DS switched off: its session is over (ndsSyncPower)
   const name = currentOriginalName;
   if (!sessionMoved && sessionSnapFor === name) return;
   const bytes = captureStateBytes();
@@ -10089,7 +10103,7 @@ var tiltKind = 0;                       // 1 = accelerometer cart, 2 = gyro cart
 let wakeSentinel = null;
 let wakeRequesting = false;
 const emulationActive = () =>
-  (!!currentRomName || linkMode || rollbackMode || netActive()) && !paused;
+  (!!currentRomName || linkMode || rollbackMode || netActive()) && !paused && !ndsOffFor();
 const syncWakeLock = () => {
   if (!navigator.wakeLock) return; // unsupported: silent no-op
   const want = emulationActive() && document.visibilityState === "visible";
@@ -13851,11 +13865,15 @@ const loadNdsCore = () => {
 // boots on its HLE BIOS and a synthesized firmware.
 const NDS_BIOS_KEYS = { bios9: "bios:nds9", bios7: "bios:nds7", firmware: "bios:ndsfw" };
 const ndsBiosFiles = async () => {
-  const out = { bios9: null, bios7: null, firmware: null };
+  const out = { bios9: null, bios7: null, firmware: null, fwBase: NDS_FW_BUILTIN };
   for (const kind of NdsUtil.BIOS_KINDS) {
     const rec = await dbGet(NDS_BIOS_KEYS[kind]).catch(() => null);
     if (rec?.data?.length) out[kind] = new Uint8Array(rec.data);
   }
+  // What a game or the DS menu wrote to the flash comes back (ndsFirmwareFor).
+  const fw = await ndsFirmwareFor(out.firmware);
+  out.firmware = fw.image;
+  out.fwBase = fw.base;
   return out;
 };
 
@@ -13928,8 +13946,13 @@ const ndsRunFrame = (c, out, keepAudio, speed) => {
 // slow motion change how much audio each frame contributes (every other
 // sample, or each twice), so the same fill-based pacing runs them at speed.
 const ndsTick = (timestamp) => {
+  const n = ndsTickFrames(timestamp);
+  if (n > 0) ndsSyncPower(); // the frames may have switched it off
+  return n;
+};
+const ndsTickFrames = (timestamp) => {
   const c = ndsCore;
-  if (!c || ndsCoreGame === null) return 0;
+  if (!c || ndsCoreGame === null || ndsOff) return 0;
   const out = ndsAudioOut();
   const graph = typeof window.appAudioOut === "function" ? window.appAudioOut() : null;
   if (graph && graph.ctx.state === "running") out.attach(graph.ctx, graph.dest);
@@ -13976,8 +13999,9 @@ const ndsTick = (timestamp) => {
 
 // Frame advance while paused: one frame, its audio dropped.
 const ndsStepFrame = () => {
-  if (!ndsCore || ndsCoreGame === null) return;
+  if (!ndsCore || ndsCoreGame === null || ndsOff) return;
   ndsRunFrame(ndsCore, ndsAudioOut(), false, 1);
+  ndsSyncPower();
 };
 
 // Unpaced frames for the log and the bench: ms per frame.
@@ -14082,6 +14106,77 @@ const ndsSaveBytes = (clean = false) => {
   return out;
 };
 
+// --- Firmware: the console's own flash, which a game (a name entry, the
+// language, Nintendo WFC's connections) or the DS menu writes, kept like a
+// real DS keeps it: one per device, shared by every DS game, never synced
+// (DS games stay local). The user's firmware.bin dump (bios:ndsfw) stays as
+// they gave it; what was written is its own record, `base` saying which
+// firmware it was written on ("built-in", or the dump's signature), so a
+// different dump starts from its own settings and Reset goes back to the
+// dump's. On the built-in firmware only the user area (Wi-Fi connections,
+// user settings: NdsUtil.fwUserArea) is taken from the record and laid
+// over the current build's synthesized image, so a fix to the built-in
+// header or wifi calibration still reaches a device whose settings changed.
+const NDS_FW_WRITTEN_KEY = "bios:ndsflash";
+const NDS_FW_BUILTIN = "built-in";
+const ndsFwBaseOf = (dump) => (dump && dump.length ? saveSignature(dump) : NDS_FW_BUILTIN);
+let ndsFwBase = NDS_FW_BUILTIN; // the firmware the running core booted on
+let ndsFwUnstored = null;       // { data, base } taken from the core, not yet stored
+
+// The built-in firmware as this build makes it (needs the core, no game).
+const ndsSynthFirmware = () => {
+  const c = ndsCore;
+  if (!c || !c._nds_synth_firmware) return null;
+  const p = c._nds_synth_firmware();
+  return p ? c.HEAPU8.slice(p, p + 0x40000) : null;
+};
+
+// The firmware the next DS boot gets: the written record when it was
+// written on this base, else the dump, else null (the core synthesizes).
+// `dump`: the stored firmware.bin or null. -> { image, base, written }.
+const ndsFirmwareFor = async (dump) => {
+  const base = ndsFwBaseOf(dump);
+  const rec = await dbGet(NDS_FW_WRITTEN_KEY).catch(() => null);
+  const w = rec?.base === base && rec.data?.length ? new Uint8Array(rec.data) : null;
+  if (!w) return { image: dump, base, written: null };
+  if (dump) return { image: w, base, written: rec };
+  const synth = ndsSynthFirmware();
+  return { image: (synth && NdsUtil.fwOverlayUser(synth, w)) || w, base, written: rec };
+};
+
+// The core's flash when the game wrote it, taken synchronously (persistSave
+// reads it before its first await, as it reads the battery: the core may go
+// right after) and stored. A put that fails keeps it for the next flush.
+const ndsTakeFirmware = () => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null || !c._nds_firmware_dirty || c._nds_firmware_dirty() !== 1) {
+    return ndsFwUnstored;
+  }
+  const n = c._nds_firmware_len(), p = n > 0 ? c._nds_firmware_ptr() : 0;
+  c._nds_firmware_clean();
+  if (p) ndsFwUnstored = { data: c.HEAPU8.slice(p, p + n), base: ndsFwBase };
+  return ndsFwUnstored;
+};
+const ndsStoreFirmware = async (fw) => {
+  if (!fw) return;
+  try {
+    await dbPut(NDS_FW_WRITTEN_KEY, { data: fw.data, base: fw.base, ts: Date.now(), by: "game" });
+    if (ndsFwUnstored === fw) ndsFwUnstored = null;
+    if (typeof updateNdsFwSettings === "function") updateNdsFwSettings();
+  } catch {}
+};
+// Edited in Settings or reset there: the running core's flash follows, so
+// a later flush of it does not put the old settings back. The game read its
+// settings at boot: it sees the change at the next start.
+const ndsFirmwareToCore = (image) => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null || !image || !c._nds_firmware_ptr) return;
+  if (c._nds_firmware_len() !== image.length) return;
+  const p = c._nds_firmware_ptr();
+  if (p) c.HEAPU8.set(image, p);
+  ndsFwUnstored = null;
+};
+
 // --- Save states: the one place they plug in. When the core exports
 // nds_state_size / nds_state_data / nds_state_load, captureStateBytes and
 // applyStateBytes come through here and body.nds-states shows every state
@@ -14093,7 +14188,8 @@ const ndsHasStates = () => !!(ndsCore && ndsCore._nds_state_size &&
                               ndsCore._nds_state_data && ndsCore._nds_state_load);
 const ndsCaptureState = () => {
   const c = ndsCore;
-  if (!ndsHasStates() || ndsCoreGame === null) return null;
+  // Switched off: nothing to come back to (ndsSyncPower).
+  if (!ndsHasStates() || ndsCoreGame === null || ndsOff) return null;
   const n = c._nds_state_size();
   const p = n > 0 ? c._nds_state_data() : 0;
   return p ? c.HEAPU8.slice(p, p + n) : null;
@@ -14107,6 +14203,7 @@ const ndsApplyState = (bytes) => {
   const ok = c._nds_state_load(p, bytes.length) === 1;
   c._free(p);
   if (ok) ndsSetLid(ndsLidClosed); // the lid is where the page has it, not the state
+  ndsSyncPower(); // a state taken switched off is off, and one taken running is on
   return ok;
 };
 
@@ -14192,15 +14289,19 @@ const ndsAvail = ([w, h]) => {
 const ndsStart = (name, rom, save, bios) => {
   const c = ndsCore;
   if (!c || (!rom && ndsCoreGame !== name)) return false;
+  // A reboot keeps the flash the core holds (nds_reboot), so it keeps its base.
+  const fwBase = rom ? bios.fwBase || NDS_FW_BUILTIN : ndsFwBase;
   if (!ndsBoot(c, rom, bios, save)) {
     ndsCoreGame = null; // whatever it held went with the attempt
     return false;
   }
   ndsCoreGame = name;
+  ndsFwBase = fwBase;
   ndsTouchId = null;
   ndsAcc = 0;
   ndsAudioQuiet();
   ndsSetLid(false); // every boot starts with the lid open
+  ndsSyncPower();
   return true;
 };
 // The core and its ROM go (a GB/GBA game took over, or the game was closed).
@@ -14212,7 +14313,55 @@ const ndsUnload = () => {
   ndsMicStop();
   ndsBlowers.clear();
   ndsSetLid(false);
+  ndsSyncPower();
 };
+
+// --- Power-off: the program shut the DS down (power manager register 0
+// bit 6: a homebrew returning from main, a game's or the menu's power-off;
+// docs/nds/accuracy.md). The core stops and blanks the screens; the page
+// does what a switched-off console does: no frames, no sound, the battery
+// and firmware stored, and a layer over the black screens saying so, with
+// Restart (nds_reboot, as Reset does) and the way back to the library. The
+// session ends there: its resume snapshot goes (a tile starts the game
+// afresh, which is what switching on again is), no new one or picture of
+// the black screens is taken, and a state cannot be saved of it.
+let ndsOff = false;
+const ndsPoweredOff = () => !!ndsCore && ndsCoreGame !== null &&
+  !!ndsCore._nds_powered_off && ndsCore._nds_powered_off() === 1;
+// The page's view of the core's power, after anything that can change it:
+// frames run, a boot, a state loaded, an unload.
+const ndsSyncPower = () => {
+  const off = ndsPoweredOff();
+  if (off === ndsOff) return;
+  ndsOff = off;
+  document.body.classList.toggle("nds-off", off);
+  const layer = document.getElementById("nds-off");
+  if (layer) layer.hidden = !off;
+  if (!off) return;
+  ndsAudioQuiet();
+  ndsTouchEnd(null);
+  ndsBlowers.clear();
+  ndsSyncMicUI();
+  syncWakeLock();
+  const romName = currentRomName, name = currentOriginalName;
+  if (!romName || !name || !isNdsRomName(romName)) return;
+  log("DS: the game turned the DS off");
+  sessionMoved = false; // nothing to snapshot: the session is over
+  sessionSnapFor = name;
+  persistSave(romName, name);
+  Promise.all([dbDelete(autoStateKey(name)), dbDelete(sessionPicKey(name))])
+    .then(() => refreshHomeRecent()).catch(() => {});
+  document.getElementById("nds-off-restart")?.focus?.({ preventScroll: true });
+};
+const ndsOffFor = () => ndsOff && ndsGameLoaded();
+document.getElementById("nds-off-restart")?.addEventListener("click", () => {
+  if (!ndsOffFor()) return;
+  loadRom(currentRomName, currentOriginalName, { skipResumeOffer: true });
+});
+document.getElementById("nds-off-library")?.addEventListener("click", () => {
+  if (!ndsOffFor()) return;
+  unloadGame();
+});
 
 // The session's mode classes: what to show and hide (styles.css "DS mode").
 const ndsApplyModeClasses = () => {
@@ -14586,7 +14735,125 @@ const updateNdsBiosStatus = async () => {
     const rec = await dbGet(NDS_BIOS_KEYS[kind]).catch(() => null);
     el.textContent = rec ? rec.name || "Set" : kind === "firmware" ? "Built-in" : "HLE";
   }
+  updateNdsFwSettings(false); // a dump chosen or removed changes the settings shown
 };
+
+// --- Console settings (Settings > Nintendo DS): the firmware's user
+// settings as the next DS boot gets them (ndsFirmwareFor), read-only, with
+// Edit for name, birthday and language (NdsUtil.fwWithUser writes them as
+// the DS menu does) and Reset back to the firmware's own. Stored as the
+// written firmware (NDS_FW_WRITTEN_KEY), so they reach the game the same
+// way a game's own change does.
+const NDS_MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+                    "August", "September", "October", "November", "December"];
+let ndsFwShown = null; // { image, base, written, dump } the rows show
+let ndsFwShowSeq = 0;
+// The running core's unstored writes go first, so what is shown is current.
+const ndsFlushFirmware = () => ndsStoreFirmware(ndsTakeFirmware());
+const ndsNextFirmware = async (loadCore) => {
+  await ndsFlushFirmware();
+  const rec = await dbGet(NDS_BIOS_KEYS.firmware).catch(() => null);
+  const dump = rec?.data?.length ? new Uint8Array(rec.data) : null;
+  if (!dump && loadCore) await loadNdsCore().catch(() => null);
+  const fw = await ndsFirmwareFor(dump);
+  // No dump and nothing written: the built-in one (needs the core).
+  const image = fw.image || ndsSynthFirmware();
+  return { image, base: fw.base, written: fw.written, dump: !!dump };
+};
+const ndsFwSourceText = (fw) => {
+  const w = fw.written;
+  const on = fw.dump ? "your firmware.bin" : "the built-in firmware";
+  if (!w) return fw.dump ? "From your firmware.bin" : "Built-in firmware";
+  const when = w.ts ? " · " + new Date(w.ts).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+  return (w.by === "settings" ? "Edited here" : "Changed by a game") + ", on " + on + when;
+};
+const updateNdsFwSettings = async (loadCore = false) => {
+  if (!document.getElementById("nds-user")) return;
+  const seq = ++ndsFwShowSeq;
+  let fw = null;
+  try { fw = await ndsNextFirmware(loadCore); } catch {}
+  if (seq !== ndsFwShowSeq) return; // a later refresh owns the rows
+  const u = fw?.image ? NdsUtil.fwReadUser(fw.image) : null;
+  ndsFwShown = u ? fw : null;
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  set("nds-user-name", u ? u.name || "(none)" : "–");
+  set("nds-user-birthday", u && u.month >= 1 && u.month <= 12 ? u.day + " " + NDS_MONTHS[u.month - 1] : "–");
+  set("nds-user-lang", u ? NdsUtil.FW_LANGS[u.lang] || "Language " + u.lang : "–");
+  set("nds-user-colour", u ? String(u.colour) : "–");
+  set("nds-user-source", !fw ? "" : !u ? (fw.image ? "No settings in this firmware" : "Shown once the DS emulator has loaded")
+                                   : ndsFwSourceText(fw) + (u.ok ? "" : " (damaged: a DS would ask again)"));
+  const edit = /** @type {HTMLButtonElement | null} */ (document.getElementById("nds-user-edit"));
+  if (edit) edit.disabled = !u;
+  const reset = document.getElementById("nds-user-reset");
+  if (reset) reset.hidden = !fw?.written;
+};
+
+const ndsUserForm = /** @type {HTMLFormElement | null} */ (document.getElementById("nds-user-form"));
+const ndsUserEl = (id) => /** @type {HTMLInputElement & HTMLSelectElement} */ (document.getElementById(id));
+const ndsUserEditing = (on) => {
+  if (ndsUserForm) ndsUserForm.hidden = !on;
+  const view = document.getElementById("nds-user-view");
+  if (view) view.hidden = on;
+  const foot = document.getElementById("nds-user-foot");
+  if (foot) foot.hidden = on;
+};
+{
+  const month = ndsUserEl("nds-user-month"), day = ndsUserEl("nds-user-day");
+  const lang = ndsUserEl("nds-user-lang-in");
+  if (month && day && lang) {
+    NDS_MONTHS.forEach((m, i) => month.appendChild(new Option(m, String(i + 1))));
+    for (let d = 1; d <= 31; d++) day.appendChild(new Option(String(d), String(d)));
+    NdsUtil.FW_LANGS.forEach((l, i) => lang.appendChild(new Option(l, String(i))));
+  }
+}
+document.getElementById("nds-user-edit")?.addEventListener("click", () => {
+  const u = ndsFwShown && NdsUtil.fwReadUser(ndsFwShown.image);
+  if (!u) return;
+  ndsUserEl("nds-user-name-in").value = u.name;
+  ndsUserEl("nds-user-month").value = String(Math.min(12, Math.max(1, u.month)));
+  ndsUserEl("nds-user-day").value = String(Math.min(31, Math.max(1, u.day)));
+  ndsUserEl("nds-user-lang-in").value = String(Math.min(5, u.lang));
+  ndsUserEditing(true);
+  ndsUserEl("nds-user-name-in").focus();
+});
+document.getElementById("nds-user-cancel")?.addEventListener("click", () => ndsUserEditing(false));
+// The edited settings, written onto the firmware the rows show, become the
+// written firmware on that base; the running game's flash follows.
+const ndsSaveUserSettings = async (fields) => {
+  const shown = ndsFwShown;
+  if (!shown?.image) return false;
+  const image = NdsUtil.fwWithUser(shown.image, fields);
+  await dbPut(NDS_FW_WRITTEN_KEY, { data: image, base: shown.base, ts: Date.now(), by: "settings" });
+  if (ndsGameLoaded() && ndsFwBase === shown.base) ndsFirmwareToCore(image);
+  return true;
+};
+ndsUserForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = ndsUserEl("nds-user-name-in").value.trim().slice(0, 10);
+  if (!name) {
+    showToast("The DS needs a name");
+    return;
+  }
+  const ok = await ndsSaveUserSettings({
+    name, month: Number(ndsUserEl("nds-user-month").value),
+    day: Number(ndsUserEl("nds-user-day").value), lang: Number(ndsUserEl("nds-user-lang-in").value),
+  });
+  ndsUserEditing(false);
+  await updateNdsFwSettings(false);
+  if (ok) showToast(ndsGameLoaded() ? "Saved - the game sees it next time it starts" : "Saved");
+});
+// Back to the firmware's own settings (the dump's, or the built-in ones).
+document.getElementById("nds-user-reset")?.addEventListener("click", async () => {
+  await ndsFlushFirmware();
+  await dbDelete(NDS_FW_WRITTEN_KEY);
+  ndsFwUnstored = null;
+  if (ndsGameLoaded()) {
+    const fw = await ndsNextFirmware(false);
+    if (ndsFwBase === fw.base) ndsFirmwareToCore(fw.image);
+  }
+  await updateNdsFwSettings(false);
+  showToast("Console settings reset");
+});
 for (const kind of NdsUtil.BIOS_KINDS) {
   document.getElementById("pick-nds-" + kind)?.addEventListener("click", () => {
     pickFile(".bin", async (bytes, name) => {

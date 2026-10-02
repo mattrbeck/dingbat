@@ -36,6 +36,19 @@ interface NdsCoreModule {
   _nds_save_ptr(): number;
   _nds_save_dirty(): number;
   _nds_save_clean(): void;
+  // Power-off (power manager register 0 bit 6): 1 once the program shut the
+  // DS down; nds_reboot switches it on again. Optional, like the firmware
+  // calls below: index.js "Nintendo DS" runs on a build without them.
+  _nds_powered_off?: () => number;
+  // The firmware flash (io/spi.nim): its length, where it is, whether the
+  // program wrote it since nds_firmware_clean. nds_reboot keeps it.
+  _nds_firmware_len?: () => number;
+  _nds_firmware_ptr?: () => number;
+  _nds_firmware_dirty?: () => number;
+  _nds_firmware_clean?: () => void;
+  // The built-in (synthesized) firmware, 256 KB at the returned pointer;
+  // needs no core.
+  _nds_synth_firmware?: () => number;
   // Save states (docs/nds/savestate.md); optional so index.js "Nintendo DS"
   // still runs on a build without them. nds_state_size(thumbnail) packs the
   // machine into a retained buffer (a 128x192 thumbnail trailer when

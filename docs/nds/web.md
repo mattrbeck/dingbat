@@ -47,6 +47,8 @@ address moves) and runs `web/serve.py --dev --https` on port 8443 (`PORT=`).
 | Speed | Fast-forward (12 ms of frames a tick, sound only while the ring wants it), 2x (every other sample) and slow motion (each sample twice) through the same pacing; frame step; screenshot. |
 | Saves | The cart backup (`n.cart.backup`, exports `nds_save_size/ptr/dirty/clean`) is stored under the usual `save:<name>` key whenever the chip's dirty flag says the game wrote it, on the usual triggers (5 s interval, hide, page close, game switch, Main Menu, close). The stored save goes into the core at boot (docs/nds/saves.md: an EEPROM/FRAM size names the chip, other sizes are fitted to the chip the game addresses and stored back exact). Import `.sav`/`.dsv` (stored whole, no GBA container sniffing; the core strips a .dsv footer) and export as for GB/GBA; Manage Saves' reset works. |
 | BIOS / firmware | HLE BIOS and a synthesized firmware by default: nothing to supply. Settings > Nintendo DS takes `bios9.bin` (4 KB), `bios7.bin` (16 KB) and `firmware.bin` (128/256/512 KB), stored like the GBA BIOS (IndexedDB `bios:nds9`, `bios:nds7`, `bios:ndsfw`), used from the next DS game started from the library (a reset reboots on the BIOS the game started with). |
+| Firmware settings | What a game or the DS menu writes to the firmware flash (the user's name, birthday, language, Nintendo WFC connections) is kept, one per device like a real DS's flash, shared by every DS game. "Firmware settings" below. |
+| Power-off | A program that shuts the DS down (power manager register 0 bit 6) leaves a switched-off console: no frames, no sound, a "The game turned the DS off" layer with Restart and Library. "Power-off" below. |
 | Library | System "DS" (chip, filter chip, sort, a small grey card with a corner cut for unpictured games), the paused hero and the tile picture are the top screen. The per-game menu says "this device only" while signed in to Drive. |
 
 ## Gated off (body.nds-mode)
@@ -140,6 +142,48 @@ and a 1280x800 desktop are made by a Playwright script outside the repo
   microphone's own rate while it is on). For a device without a
   microphone, or a quiet room.
 
+## Firmware settings
+
+The core's flash (`spi.firmware`, wasm `nds_firmware_len/_ptr/_dirty/_clean`)
+changes when a game or the DS menu programs it (docs/nds/accuracy.md 6).
+
+| | |
+|---|---|
+| Where | IndexedDB `bios:ndsflash`, beside the dumps: `{ data, base, ts, by }`. One per device, shared by every DS game (one console's flash). Never synced: DS stays local, and the record is not a per-game key. |
+| When | On the battery's triggers (`persistSave`: the 5 s autosave, hide, close, game switch, Main Menu, power-off) while `nds_firmware_dirty`. The bytes are taken synchronously with the battery's (the core may be dropped right after); a put that fails is kept for the next flush. |
+| The user's firmware.bin | Stays as given (`bios:ndsfw`). The written image is its own record with `base` = the dump's signature; the next boot gets it whole. A different dump (or none) has another base, so it starts from its own settings; the record is ignored until a write on that base replaces it. (Decision: a real DS writes its own flash, but the dump is the user's file, so it stays untouched and Reset goes back to it.) |
+| The built-in firmware | `base` "built-in". Only the user area (the three Wi-Fi connection slots and both user-settings copies, `[020h]*8 - 400h` to `+ 200h`) is laid over this build's `synth_firmware` (`nds_synth_firmware`), so a later fix to the built-in header or wifi calibration (docs/nds/saves.md) still reaches a device whose settings changed. |
+| Reset in place | `nds_reboot` now keeps the running core's flash (and its dirty flag) instead of the image the game booted with: a power cycle keeps what was written. Restart after a power-off and the app's Reset therefore see the game's own writes. |
+| Settings > Nintendo DS, Console settings | Name, birthday, language and favourite colour (its number 0-15: GBATEK names only 0 grey and 1 brown) of the firmware the next boot gets, read with the core's rules (current copy: CRC-valid, update counter one more; `NdsUtil.fwReadUser`). Edit changes name (10 UTF-16 units), birthday and language as the menu does (`NdsUtil.fwWithUser`): the current copy edited, written over the older one with the counter + 1 (mod 80h) and its CRC16 (FFFFh, 000h..06Fh) at 072h; extended settings (074h, iQue/DSi) get the language too when their own CRC at 0FEh holds. A running game's flash takes the edit as well (it reads its settings at boot, so it sees it at the next start). Reset deletes the record. The built-in firmware's rows load the DS core (cached) when the section is shown. |
+
+Checked against the core: an image `fwWithUser` wrote boots with the
+edited name, birthday and language in RAM at 27FFC80h (ndsrun --peek9), and
+copies the core's flash code wrote read back CRC-valid in `fwReadUser`.
+
+## Power-off
+
+`nds_powered_off()` (the core stops both CPUs and blanks the screens:
+docs/nds/accuracy.md 1) is checked after every tick that ran frames, a
+frame step, a boot and a state load (`ndsSyncPower`). On the change to off:
+
+- No frames (`ndsTick` and frame step return), the audio ring dropped
+  silently, the stylus and Blow released, the wake lock let go.
+- The battery and firmware stored at once (`persistSave`).
+- The session ends: its resume snapshot and picture (`stateauto:`,
+  `sessionpic:`) are deleted, `persistAutoState` takes none of an off
+  console, the library picture stays the last one played (`storeLastFrame`
+  skips), and no state can be saved of it (`ndsCaptureState` is null; a
+  slot save says "restart it first"). A tile then starts the game afresh,
+  which is what switching on again is.
+- `#nds-off` over the black screens: "The game turned the DS off" with
+  **Restart** (focused; `loadRom` in place, as the Reset button: `nds_reboot`
+  on the stored save) and **Library** (closes the game, as the hero's Close).
+- A state taken while off loads off and shows the layer; loading a running
+  state over an off console switches it back on.
+
+Pause, fast-forward and the menu work as before; the layer stays until
+Restart, Library or another game.
+
 ## Google Drive: DS games stay local (decision)
 
 Nothing of a DS game goes to Drive: not its ROM, save, picture, session or
@@ -175,14 +219,28 @@ frame at a few frames a second: judge speed with a GPU.
   hook, the display choices stored and read back (and a damaged record
   falling back), tap-to-swap in Focus, the stylus through a turned picture,
   the V/B/O/N/H keys, the lid at boot and after a state load, mic int16 and
-  Blow's noise. `web/tests/helpers.mjs` prepends `nds/ndsutil.js` and
+  Blow's noise; firmware user settings (read, edit over the older copy,
+  counter wrap, a damaged copy, extended language, the built-in overlay),
+  a written flash stored once and never queued for Drive, the next boot on
+  it (built-in: overlaid; a dump: whole; another dump: its own), Console
+  settings shown / edited / reset (the running core's flash following),
+  and power-off (frames stop, battery stored, session deleted, no
+  snapshot or state, Restart reboots; a state loaded off; Library
+  closes). `web/tests/helpers.mjs` prepends `nds/ndsutil.js` and
   `nds/ndsaudio.js` as index.html loads them.
 - `web/e2e/nds.e2e.mjs` (Playwright, headless Chromium): both screens read
   back off the canvas in both layouts, the pointer's touch matching a direct
   touch at the same pixel (`built/touch_test`), `snd_tone`'s two channels,
   realtime pacing, a save the game wrote (`save_write`, our boot-counter
   ROM: `tests/nds/tools/build_save.sh`) surviving a reload, and a .dsv
-  imported through Manage Saves. Display modes
+  imported through Manage Saves. `fw_power` (our ROM:
+  `tests/nds/tools/build_fw_power.sh`): START switches it off, the layer
+  shows over black screens, no frames run, the resume snapshot goes,
+  Restart boots it again (with the flash its first boot wrote), Library
+  closes it; the firmware it wrote ("FWTEST1") boots after a reload (it
+  then writes "FWTEST2"), Settings shows it, an edit in Settings reaches
+  the game at Reset. `DINGBAT_E2E_SHOTS=<dir>` saves screenshots of the
+  layer and the Console settings. Display modes
   (27 of them: four arrangements x swap x three turns, plus gaps and
   Automatic): each shown screen's corners read off the canvas where and
   which way up the layout says (`fb_both`: blue top left, red top right,
@@ -223,4 +281,8 @@ it in step with the `.nims` export list), `styles.css` "Nintendo DS",
 - Rewind and run-ahead on the DS (`state_payload` / `load_state_payload`
   are the core's hooks; docs/nds/savestate.md has the sizes and costs).
 - The GBA slot, wireless.
-- Drive sync of DS saves once main plays DS games.
+- Drive sync of DS saves once main plays DS games (the firmware record
+  stays local even then: it is one device's console).
+- The favourite colour as a swatch (no colour table in GBATEK) and an
+  editor for it and the message; the DS menu itself in the app (firmware
+  boot from the web app: boot.md "Wasm").

@@ -8732,6 +8732,80 @@ body.nds-mode.nds-lid-closed #canvas {
   filter: brightness(0.35);
 }
 
+/* Settings > Nintendo DS, Console settings: the firmware's user settings. */
+.nds-user-val {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+.nds-user-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 220px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 16px; /* iOS does not zoom */
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.nds-user-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.nds-user-buttons {
+  justify-content: flex-end;
+}
+#nds-user [hidden] {
+  display: none;
+}
+
+/* Switched off by the game (body.nds-off): the screens are black already;
+   a card in the middle of the stage says so, with Restart and Library. */
+#nds-off {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+#nds-off[hidden],
+body:not(.nds-mode) #nds-off,
+body:not(.running) #nds-off {
+  display: none;
+}
+.nds-off-card {
+  max-width: 320px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: center;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+.nds-off-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 650;
+}
+.nds-off-sub {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.nds-off-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
 /* DS: the top bar. A phone held upright gives the bar's room to the
    screens (body.nds-bar-hide, the "Hide the top bar" choice): the bar
    slides off as it does on a phone held sideways, and the same handle at
