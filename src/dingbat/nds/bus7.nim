@@ -352,3 +352,6 @@ proc data_cached*(b: Arm7Bus; a: uint32): bool = false   ## no data cache on the
 proc swi_hook*(b: Arm7Bus; comment: uint32): bool =
   ## HLE BIOS: true = the SWI ran in Nim (hle_bios.nim), skip the vector.
   b.nds.hle_bios7 and b.nds.arm7.hle_swi(comment)
+
+# The dispatch tables (arm/cpu.nim): after every mixin their handlers use.
+dispatch_tables(Arm7Bus)

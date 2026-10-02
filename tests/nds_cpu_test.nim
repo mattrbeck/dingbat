@@ -44,6 +44,8 @@ template bus_procs(B: typedesc) =
 
 bus_procs(V5Bus)
 bus_procs(V4Bus)
+dispatch_tables(V5Bus)
+dispatch_tables(V4Bus)
 
 var failures = 0
 

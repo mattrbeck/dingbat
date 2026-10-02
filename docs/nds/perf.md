@@ -180,6 +180,24 @@ on fetches outside the line, or C7 commands.
 line mid-run, invalidates, dirties a data-cache line in the ARM7's code page
 and moves WRAMCNT under the ARM7; dropping any of the turn-offs fails it.
 
+## Dispatch tables (arm/cpu.nim `arm_lut`, `thumb_lut`)
+
+ARM opcodes are dispatched through a 4096-entry table indexed by bits
+27-20 and 7-4 (after the condition check), Thumb opcodes through a
+1024-entry one indexed by bits 15-6. An entry is the old decode tree and
+its main handlers (ALU, single transfer, branch) forced inline, given the
+opcode with the entry's index bits replaced by constants: `(instr and not
+M) or K`, which equals `instr` because the table was indexed by those very
+bits. The C compiler folds every test on them, so an entry is the one
+path through the decoder and an ALU op specialised by opcode, immediate or
+shift type and S bit. Exact by construction: the decoder's code is
+unchanged, only what the compiler knows about its input. Entries that
+differ only in bits nothing decodes there (a branch offset, an immediate,
+a Thumb register number: `arm_fixed`, `thumb_fixed`) share one proc,
+which reads those bits from the opcode: 1778 ARM and 100 Thumb procs per
+CPU. The binary grows by 0.8 MB (ndsrun 1.13 -> 1.94 MB). A bus module
+expands `dispatch_tables(B)` at its end, where every mixin is declared.
+
 ## Numbers
 
 Host instructions retired (`/usr/bin/time -l`), real BIOS unless noted,

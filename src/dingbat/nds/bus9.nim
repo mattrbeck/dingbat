@@ -797,3 +797,6 @@ proc data_cached*(b: Arm9Bus; a: uint32): bool =
 proc swi_hook*(b: Arm9Bus; comment: uint32): bool =
   ## HLE BIOS: true = the SWI ran in Nim (hle_bios.nim), skip the vector.
   b.nds.hle_bios9 and b.nds.arm9.hle_swi(comment)
+
+# The dispatch tables (arm/cpu.nim): after every mixin their handlers use.
+dispatch_tables(Arm9Bus)
