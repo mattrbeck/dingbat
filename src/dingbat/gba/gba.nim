@@ -522,6 +522,10 @@ type
     in_catch_up*: bool              # a dispatch from inside an access's sync (catch_up_slow)
     dma_end_at*: CycleCount         # when the last CPU-interrupting burst let go
     dma_held*: int                  # and how long it had held the bus
+    # Running total of the cycles DMA bursts stopped the CPU for: the HLE
+    # BIOS's routine-body cost models measure their own time net of it
+    # (hle_bios.nim hle_body_now). A difference counter only; not serialized.
+    dma_stall_total*: int64
     # Open-bus latch left by DMA: the last word a DMA moved stays on the data
     # bus until the CPU's next bus access replaces it, so an unmapped read
     # sees that word only if it is the first access after the burst
@@ -1551,6 +1555,7 @@ proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 
 proc clear_pipeline*(cpu: CPU)
 # Renderer contention's wait for one access (contention.nim)
 proc contend_wait(bus: Bus; address: uint32; is32: bool; cost: int): int
+proc contend_wait_ahead*(bus: Bus; address: uint32; is32: bool; ahead: int): int
 proc contend_slow(bus: Bus; address: uint32; is32: bool; cost: int): int {.noinline, raises: [].}
 proc hle_halt_return*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}

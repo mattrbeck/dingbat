@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-25 12:54:11 · commit f9404fb5 · game-boy-test-roms v7.0*
+*Generated: 2026-10-01 19:30:38 · commit e80d56be · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1443
-- **Pass:** 1432
-- **Fail:** 11
+- **Pass:** 1433
+- **Fail:** 10
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,7 +18,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 122 | 126 |
+| GBA - alyosha gba-tests | 123 | 126 |
 | GBA - PeterLemon BIOS | 25 | 25 |
 | GBA - Other test ROMs | 11 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
@@ -62,7 +62,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (122/126)
+## GBA - alyosha gba-tests (123/126)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -175,7 +175,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/timer/timer_disable | — | 👌 |
 | alyosha/timer/timer_reset | — | 👌 |
 | alyosha/timing/cpy_data_bios | — | 👌 |
-| alyosha/timing/dma_from_bios | — | 👀 Failed test 142 |
+| alyosha/timing/dma_from_bios | — | 👌 |
 | alyosha/timing/dma_long | — | 👌 |
 | alyosha/timing/prefetch_enable | — | 👌 |
 | alyosha/timing/prefetch_enable_2 | — | 👌 |

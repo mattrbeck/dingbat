@@ -61,13 +61,15 @@ it deliberately does not model:
   unit (CpuSet) or 8-word burst (CpuFastSet), so the IRQ is taken at the end
   of the unit the line rose in, not at the instruction inside it. The resume
   is timed as the real routine's (no second dispatch; tools/biosdrv/cpusi.c
-  exact from an IWRAM caller; from a Thumb caller in the cartridge each
-  preemption is ~2.4 cycles short) unless a state load falls inside the
+  exact from an IWRAM caller; from the cartridge each preemption of a CpuSet
+  is ~2.4 cycles short, Thumb caller, and of a CpuFastSet ~7 long, Boktai 2
+  - Solar Boy Django's H-blank interrupts) unless a state load falls inside the
   preemption, when it pays the dispatch once (the continuation marker is
   not serialized).
 * **Interrupted decompression sees finished output.** The decompressors,
   Diff filters, BitUnPack, the affine sets and GetBiosChecksum write their
-  output up front (uncharged) and then charge the whole cost model as
+  output (the math routines Div, DivArm, Sqrt, ArcTan and ArcTan2 their
+  result registers) up front and then charge the whole cost model as
   routine time that stops on the cycle an interrupt line rises; the
   remainder rides the halt-resume path. A handler inspecting the
   destination mid-call sees the completed output. The interrupt is taken on
@@ -79,6 +81,21 @@ it deliberately does not model:
   short of the real routine on small streams (tools/biosdrv/lz77t.c: 99-143
   cycles on a 64-byte one); from EWRAM it is exact, preempted or not
   (lz77i.c, Thumb caller in the cartridge too).
+* **Renderer contention in routine bodies is read ahead.** A routine that
+  writes (or, LZ77UnCompVram, reads back) palette RAM, VRAM or OAM pays the
+  renderer's waits for each access at the cycle its model places it,
+  computed when the call starts with the display registers as they stand.
+  The interrupt handlers and DMA bursts that will run inside the call shift
+  the real accesses against the renderer, and display writes made during
+  the call change its fetch pattern; neither is seen. Banjo-Kazooie -
+  Grunty's Revenge's two title LZ77UnCompVrams (7 and 8 IRQs, sound DMA
+  throughout) run 10 cycles short and 2053 long of the console's ~1M each,
+  where without contention they ran 9639 and 17136 short. Where in
+  each step the accesses fall is the official BIOS's own timing for
+  LZ77UnCompVram, CpuSet and CpuFastSet, assumed for the rest. Even where
+  it is the BIOS's own, a cartridge-to-VRAM CpuFastSet during the display
+  still lands up to ~100 cycles either side of the console's (Fire Emblem:
+  The Sacred Stones' 256-word copies; not pinned down).
 * **Interrupted RegisterRamReset** encodes its continuation in r0 (bit 31
   marker, remaining phase charge in bits 8–29, pending flags). A caller
   passing bit 31 set with garbage mid bits would be misread; compilers emit

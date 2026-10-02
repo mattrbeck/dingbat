@@ -263,18 +263,43 @@ proc cont_obj_free(ppu: PPU; want_oam: bool; line, t: int): int =
     base += 1232
   base + d
 
+proc contend_wait_at(bus: Bus; address: uint32; is32: bool; line, dot: int): int {.raises: [].}
+
 proc contend_wait(bus: Bus; address: uint32; is32: bool; cost: int): int =
   ## Cycles an access to palette RAM, VRAM or OAM that started `cost` cycles
   ## ago waits for the renderer.
   if address >= 0x10000000'u32: return 0
   let ppu {.cursor.} = bus.gba.ppu
-  let page = int(bits_range(address, 24, 27))
   var dot = int(int64(bus.sched.cycles) + int64(bus.cycles - cost) - ppu.line_start_cycle)
   var line = int(ppu.vcount)
   while dot >= 1232:
     dot -= 1232
     line = if line == 227: 0 else: line + 1
   if dot < 0: return 0
+  bus.contend_wait_at(address, is32, line, dot)
+
+proc contend_wait_ahead*(bus: Bus; address: uint32; is32: bool; ahead: int): int =
+  ## The renderer's wait for an access made `ahead` cycles from now, with
+  ## the display registers as they stand: for the HLE BIOS's routine
+  ## bodies, which make their accesses all at once and price them by when
+  ## the real routine makes them. Gated as Bus.contended is
+  ## (ppu.contend_mask_update), but by the line the access falls on.
+  if not CONTENTION or address >= 0x10000000'u32: return 0
+  let page = bits_range(address, 24, 27)
+  if page < 5 or page > 7: return 0
+  let ppu {.cursor.} = bus.gba.ppu
+  if ppu.dispcnt.forced_blank and not bit(uint16(ppu.dispcnt), 12): return 0
+  let d = int64(bus.sched.cycles) + int64(bus.cycles) + int64(ahead) - ppu.line_start_cycle
+  if d < 0: return 0
+  # the frame repeats every 228 lines
+  let line = int((int64(ppu.vcount) + d div 1232) mod 228)
+  if line >= 160 and line != 227: return 0
+  bus.contend_wait_at(address, is32, line, int(d mod 1232))
+
+proc contend_wait_at(bus: Bus; address: uint32; is32: bool; line, dot: int): int {.raises: [].} =
+  ## contend_wait for an access starting on `dot` of `line`.
+  let ppu {.cursor.} = bus.gba.ppu
+  let page = int(bits_range(address, 24, 27))
   var obj = page == 7
   if page == 6:
     var a = address and 0x1FFFF'u32

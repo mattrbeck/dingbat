@@ -4,6 +4,13 @@ proc mul32(a, b: int32): int32 {.inline.} =
   ## Wrapping 32-bit multiply matching ARM `mul` instruction (low 32 bits).
   cast[int32](cast[uint32](cast[int64](a) * cast[int64](b)))
 
+proc hle_busy(cpu: CPU; n: int) {.inline.} =
+  ## Routine time: BIOS instructions, every one a bus access (a 1-cycle
+  ## BIOS fetch at least). Not cpu.idle: internal cycles let a DMA burst
+  ## run under them for free (Bus.idle_window), which the routine's
+  ## fetches never do.
+  cpu.gba.bus.add_cycles(n)
+
 # The affine SWIs' sine table: 256 steps per turn in 1.14 fixed point,
 # truncated toward zero. Derived, not copied: trunc(sin(i * pi / 128) *
 # 0x4000) reproduces the real BIOS's pa/pb/pc/pd for all 256 angles at
@@ -83,13 +90,14 @@ proc div_body_cycles(n, d: uint32): int {.inline.} =
   result = 19 + t * 13
   if (d shl t) == (n shr 1): result += 8
 
-proc hle_div(cpu: CPU; numer_reg, denom_reg: int) =
+proc hle_div(cpu: CPU; numer_reg, denom_reg: int): int =
+  ## Sets the results; returns the body cost (div_body_cycles) on top of the
+  ## dispatch: mGBA suite "BIOS Division" timing rows plus the real-BIOS TM0
+  ## measurements noted there.
   let numer = int64(cast[int32](cpu.r[numer_reg]))
   let denom = int64(cast[int32](cpu.r[denom_reg]))
-  # Body cost (div_body_cycles) on top of the dispatch: mGBA suite "BIOS
-  # Division" timing rows plus the real-BIOS TM0 measurements noted there
-  cpu.idle(div_body_cycles(uint32(abs(numer) and 0xFFFFFFFF),
-                           uint32(abs(denom) and 0xFFFFFFFF)))
+  result = div_body_cycles(uint32(abs(numer) and 0xFFFFFFFF),
+                           uint32(abs(denom) and 0xFFFFFFFF))
   if denom == 0:
     # Div by zero. The real BIOS's alignment loop (0x3C8: r2 = |denom| = 0
     # doubles "while r2 < |numer| >> 1") exits at once when |numer| <= 1 and
@@ -265,6 +273,9 @@ proc check_intr_wait*(cpu: CPU) =
 # SWI entry/dispatch/return cost, excluding the caller-side pipeline refill
 # charged per region in hle_swi. mGBA suite BIOS timing rows (IWRAM column).
 const SWI_HLE_BASE = 48
+# The part of it after the routine: the return path from 0x170, refill
+# excluded (official BIOS in this core, as HALT_BIOS_RETURN)
+const SWI_HLE_EXIT = 16
 
 # The part of a Halt/Stop SWI the BIOS executes after the wake IRQ is
 # serviced (bx lr, pop {r2, lr}, mode restore, pop {fp, ip, lr}, movs pc, lr
@@ -299,11 +310,20 @@ proc rom_pf_seq16(bus: Bus; page: int): int {.inline.} =
 proc hle_body_start(cpu: CPU): int64 {.inline.} =
   int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
 
+proc hle_body_now(cpu: CPU): int64 {.inline.} =
+  ## The routine-body clock: hle_body_start net of the time DMA bursts
+  ## stopped the CPU. The real routine's instruction fetches and data
+  ## accesses all need the bus, so a burst inside it delays it by the
+  ## burst's full length; a model topped up against the plain clock let
+  ## the burst eat into the routine instead (Top Gun - Combat Zones'
+  ## LZ77UnCompWram returned ~58 cycles early when one landed in it).
+  cpu.hle_body_start() - cpu.gba.bus.dma_stall_total
+
 proc hle_charge_body(cpu: CPU; t0: int64; model: int) {.inline.} =
-  ## Top up what the body charged since `t0` to `model`.
-  let charged = int(cpu.hle_body_start() - t0)
+  ## Top up what the body charged since `t0` (an hle_body_now) to `model`.
+  let charged = int(cpu.hle_body_now() - t0)
   if model > charged:
-    cpu.idle(model - charged)
+    cpu.hle_busy(model - charged)
 
 proc bios_addr_check(address, length: uint32): bool {.inline.} =
   ## The BIOS source-region check (0xBA4) every copy/decompression SWI runs
@@ -375,7 +395,7 @@ proc hle_charge_units_interruptible(cpu: CPU; n: int): int =
   while remain > 0:
     let step = if first and cpu.hle_irq_now(): 1 else: cpu.hle_step(remain)
     first = false
-    cpu.idle(step)
+    cpu.hle_busy(step)
     remain -= step
     if remain > 0:
       cpu.gba.bus.catch_up()
@@ -405,13 +425,36 @@ proc hle_charge_body_interruptible(cpu: CPU; t0: int64; model: int) =
   ## LZ77UnCompVram, where the official BIOS takes them on time. Only the
   ## header/info reads ahead of the source check stay charged (the skip
   ## path's cost is BIOS_CHECK_SKIP_COST on top of them).
-  let remain = cpu.hle_charge_units_interruptible(model - int(cpu.hle_body_start() - t0))
+  let remain = cpu.hle_charge_units_interruptible(model - int(cpu.hle_body_now() - t0))
   if remain > 0:
     cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
     cpu.halt_resume_charge = int32(remain)
     cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
     # The System sp was not shifted for this park: pay the charge only
     cpu.halt_resume_pop = false
+
+type HleCont = object
+  ## Renderer contention for a routine body whose accesses are uncharged:
+  ## each access to palette RAM, VRAM or OAM is priced by contention.nim for
+  ## the cycle the real routine makes it at, which the body's model clock
+  ## `clk` tracks, read with the display registers as they stand. The copies
+  ## ask unit by unit as their time runs; the bodies that make all their
+  ## accesses at once (hle_charge_body_interruptible) ask at the call's
+  ## start, blind to the interrupts and DMA that will shift them.
+  on: bool     # the routine touches palette RAM, VRAM or OAM
+  t0: int64    # the body's start (hle_body_now), where `clk` counts from
+  extra: int   # renderer waits so far
+
+proc hle_cont_start(cpu: CPU; t0: int64; page_a, page_b: int): HleCont =
+  HleCont(on: (page_a >= 5 and page_a <= 7) or (page_b >= 5 and page_b <= 7), t0: t0)
+
+proc hle_cont_ahead(cpu: CPU; c: var HleCont; clk: int; address: uint32;
+                    is32: bool) {.inline.} =
+  ## An access the routine makes `clk` model cycles into its body (later by
+  ## the waits before it).
+  if c.on:
+    c.extra += cpu.gba.bus.contend_wait_ahead(address, is32,
+                                              int(c.t0 - cpu.hle_body_now()) + clk + c.extra)
 
 proc hle_div_body_cost(numer, denom: int32): int {.inline.} =
   ## The divide loop cost from hle_div, separate so ArcTan2 can price its
@@ -569,6 +612,13 @@ proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
 
 const COPY_CONT_ADJ {.intdefine.} = -13   # the resume over the loop it stands for (cpusi.c: -12 and -14 put every preempted call a cycle per IRQ long and short)
 const COPY_CONT_FIXED {.intdefine.} = 0
+# CpuSet: of the fixed cost, what comes after the loop (official BIOS in this
+# core, alyosha timing/dma_from_bios: a CpuSet storing a DMA control register
+# from a cartridge ARM caller starts that DMA on the console's cycle with 12)
+const CPUSET_TAIL = 12
+# CpuFastSet: likewise (official BIOS in this core: the last burst's exit
+# and the routine's epilogue, 14 cycles, Fire Emblem: The Sacred Stones' copies)
+const FASTSET_TAIL = 14
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS SWI dispatch; used when no BIOS image is provided.
@@ -606,7 +656,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   # the whole dispatch charge: they pay it themselves (hle_sound.nim sd_owed)
   elif swi_num in [0x1A'u32, 0x1B, 0x1D, 0x28] and cpu.gba.bus.stub_bios:
     sd_owed = SWI_HLE_BASE
-  else: cpu.idle(SWI_HLE_BASE)
+  else: cpu.hle_busy(SWI_HLE_BASE)
   # BIOS open-bus latch: the last opcode the BIOS fetches before returning
   # (GBATEK "Reading from BIOS memory"; mGBA suite checks it after VBlankIntrWait)
   cpu.gba.bus.bios_latch = 0xE3A02004'u32
@@ -625,8 +675,26 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     bus.rom_hot = false
     bus.rom_next_addr = 1  # never matches (halfword-aligned addresses)
     bus.rom_free_since = bus.gba.scheduler.cycles + CycleCount(bus.cycles)
+  # The BIOS's return path -- its code from 0x170 (SWI_HLE_EXIT) and the
+  # caller's refill above -- runs after the routine. For the routines whose
+  # body has effects timed inside the SWI (memory a DMA or an interrupt
+  # handler sees, an I/O write, renderer contention, interrupt preemption)
+  # it is taken back here and charged at their end (`exit_cost`); the rest
+  # keep it up front. Official BIOS in this core, a CpuSet from the
+  # cartridge: the routine starts 38 cycles after the swi and its return
+  # path runs 16 cycles before the refill; charged up front, a CpuSet
+  # writing a DMA's control register started the DMA 33 cycles late (alyosha
+  # timing/dma_from_bios).
+  let exit_cost = block:
+    let bus = cpu.gba.bus
+    let page = int(bits_range(cpu.r[15], 24, 27))
+    SWI_HLE_EXIT + int(bus.wait16_s[page]) - 1 +
+      (if cpu.cpsr.thumb: int(bus.wait16_n[page]) + int(bus.wait16_s[page])
+       else: int(bus.wait32_n[page]) + int(bus.wait32_s[page]))
+  if swi_num in 0x06'u32 .. 0x18'u32 and not copy_cont:
+    cpu.gba.bus.add_cycles(-exit_cost)
   # Anchor for the routine-body cost models
-  let body_t0 = cpu.hle_body_start()
+  let body_t0 = cpu.hle_body_now()
   # The BIOS dispatch (0x140) switches to System mode and pushes {r2, lr}
   # on the System stack before every routine; the words stay in memory below
   # sp as residue games read (Prince of Tennis 2004, see hle_intr_wait).
@@ -742,10 +810,17 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.stopped = true
     cpu.gba.ppu.render_dirty = true  # Stop blanks the LCD with no memory write
     cpu.gba.interrupts.schedule_interrupt_check()
-  of 0x06: hle_div(cpu, 0, 1)  # Div
+  # The math routines run with the caller's IRQ mask like the rest, so
+  # their bodies are preemptible too (hle_charge_body_interruptible): an
+  # interrupt landing in one is taken inside the routine, as the console
+  # takes it in BIOS code, not after the SWI's return in the caller's region
+  # (Boktai 2 - Solar Boy Django's Divs under H-blank interrupts each ran 7
+  # cycles long that way, the handler's return refilling from the cartridge).
+  of 0x06:  # Div
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + hle_div(cpu, 0, 1))
   of 0x07:  # DivArm: three `mov`s (0x3A8) swapping the inputs, then Div
-    cpu.idle(3)  # real BIOS: +3 cycles over Div on every input measured
-    hle_div(cpu, 1, 0)
+    # (real BIOS: +3 cycles over Div on every input measured)
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + 3 + hle_div(cpu, 1, 0))
   of 0x04:  # IntrWait(discard_flags, intr_flags)
     cpu.hle_intr_wait(cpu.r[0] != 0, uint16(cpu.r[1]))
   of 0x05:  # VBlankIntrWait = IntrWait(1, 1)
@@ -812,12 +887,12 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         estimate = (estimate + quotient) shr 1
         if estimate >= root: break
         cycles += 2
-      cpu.idle(cycles)
       cpu.r[0] = root
       cpu.r[1] = estimate
       cpu.r[3] = quotient
+      cpu.hle_charge_body_interruptible(body_t0, exit_cost + cycles)
   of 0x09:  # ArcTan
-    cpu.idle(bios_arctan(cpu))
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + bios_arctan(cpu))
   of 0x0A:  # ArcTan2(x, y) -> angle, 0x10000 = 2 pi
     cpu.swi_residue([cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7], 0x170'u32])
     # Behaviour taken from the real BIOS under LLE (77 inputs, values exact):
@@ -861,7 +936,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         else: (cpu.r[0] = 0xC000'u32 - t; model = if x > 0: 72 else: 68)
       model += hle_div_body_cost(num, den) + poly_cycles
     cpu.r[3] = 0x170'u32
-    cpu.hle_charge_body(body_t0, model)
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + model)
   of 0x0B:  # CpuSet
     # Routine frame (thumb 0xB4C): push {r4, r5, lr}; the exit pops lr into
     # r3, so r3 = 0x170 on every path (validation-skip too).
@@ -880,7 +955,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # Validation uses byte length count*4 even in halfword mode (the check
     # runs before the halving)
     if not bios_addr_check(src, count shl 2):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
     else:
       # Addresses are not aligned: the bus aligns normal memory, and SRAM
       # genuinely sees the unaligned byte address.
@@ -905,25 +980,55 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           else:    9 + int(bus.wait16_n[src_page]) + int(bus.wait16_n[dst_page])
       var done = 0'u32
       var interrupted = false
+      let bus = cpu.gba.bus
+      # The accesses go uncharged and the model prices them; a palette RAM /
+      # VRAM / OAM access adds the renderer's wait for the cycle the routine
+      # makes it on (HleCont), and an I/O one is made on that cycle (a DMA's
+      # control register written by CpuSet starts the DMA when the store
+      # lands). From the routine's instruction timing under the official BIOS
+      # in this core: the units start CPUSET_TAIL cycles short of the fixed
+      # cost into the body (the rest is the exit after the loop), a ldmia/
+      # ldrh's data is three cycles into the unit, the store two after the
+      # load's (a fill's three in).
+      var cont = cpu.hle_cont_start(body_t0, src_page, dst_page)
+      let n_src = int(if word_mode: bus.wait32_n[src_page] else: bus.wait16_n[src_page])
+      let lead = max(0, model_fixed - CPUSET_TAIL)
+      template charge_to(t: int) =
+        let charged = int(cpu.hle_body_now() - body_t0)
+        if t > charged: cpu.hle_busy(t - charged)
+      template unit_cont() =
+        let uclk = lead + model_unit * int(done)
+        if fill:
+          cpu.hle_cont_ahead(cont, uclk + 3, dst, word_mode)
+          if dst_page == 4: charge_to(uclk + 3 + cont.extra)
+        else:
+          cpu.hle_cont_ahead(cont, uclk + 3, src, word_mode)
+          if src_page == 4: charge_to(uclk + 3 + cont.extra)
+          cpu.hle_cont_ahead(cont, uclk + 5 + n_src, dst, word_mode)
+          if dst_page == 4: charge_to(uclk + 5 + n_src + cont.extra)
+      template chunk_end() =
+        if done < count:
+          charge_to(lead + model_unit * int(done) + cont.extra)
+          bus.catch_up()
+          if cpu.hle_irq_now():
+            interrupted = true
+            break
+      charge_to(lead)
       if word_mode:
         # ldmia r0!/stmia r1!: r0/r1 come back advanced (fill pops one word)
-        let fill_val = cpu.gba.bus.read_word(src)
+        let fill_val = bus.read_word(src)
         if fill: src += 4
         while done < count:
+          unit_cont()
           let val = if fill: fill_val
-                    else: cpu.gba.bus.read_word(src)
-          cpu.gba.bus.write_word(dst, val)
+                    elif src_page == 4: bus.read_word(src)
+                    else: bus.read_word_internal(src)
+          if dst_page == 4: bus.write_word(dst, val)
+          else: bus.write_word_internal(dst, val)
           if not fill: src += 4
           dst += 4
           inc done
-          if done < count:
-            let target = model_fixed + model_unit * int(done)
-            let charged = int(cpu.hle_body_start() - body_t0)
-            if target > charged: cpu.idle(target - charged)
-            cpu.gba.bus.catch_up()
-            if cpu.hle_irq_now():
-              interrupted = true
-              break
+          chunk_end()
         # The continuation re-reads its fill word from r0, so the fill's
         # source pop waits for the last leg
         cpu.r[0] = if interrupted and fill: src - 4 else: src
@@ -932,22 +1037,20 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         # ldrh from an odd source reads rotated, so the stored halfword is
         # the addressed byte. The halfword paths index with an offset
         # register and leave r0/r1 unmodified.
-        let fill_val = uint16(cpu.gba.bus.read_half_rotate(src))
+        template read_rot(a: uint32): uint16 =
+          (if src_page == 4: uint16(bus.read_half_rotate(a))
+           else: (let h = uint32(bus.read_half_internal(a)); let s = (a and 1) * 8;
+                  uint16((h shr s) or (h shl (32 - s)))))
+        let fill_val = uint16(bus.read_half_rotate(src))
         while done < count:
-          let val = if fill: fill_val
-                    else: uint16(cpu.gba.bus.read_half_rotate(src))
-          cpu.gba.bus.write_half(dst, val)
+          unit_cont()
+          let val = if fill: fill_val else: read_rot(src)
+          if dst_page == 4: bus.write_half(dst, val)
+          else: bus.write_half_internal(dst, val)
           if not fill: src += 2
           dst += 2
           inc done
-          if done < count:
-            let target = model_fixed + model_unit * int(done)
-            let charged = int(cpu.hle_body_start() - body_t0)
-            if target > charged: cpu.idle(target - charged)
-            cpu.gba.bus.catch_up()
-            if cpu.hle_irq_now():
-              interrupted = true
-              break
+          chunk_end()
         if interrupted:
           # Continuation state (deviation, see the note above hle_swi_rewind)
           cpu.r[0] = src
@@ -955,7 +1058,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       # Loop cost (routine 0xB4C) for the units performed: loop instructions
       # + N-cost of the src read + N-cost of the dst write; fills read src
       # once (in the fixed part).
-      cpu.hle_charge_body(body_t0, model_fixed + model_unit * int(done))
+      cpu.hle_charge_body(body_t0, (if interrupted: 0 else: exit_cost) + model_fixed + model_unit * int(done) + cont.extra)
       if interrupted:
         cpu.r[2] = (ctrl and not 0x1FFFFF'u32) or (count - done)
         cpu.copy_cont_pc = swi_addr
@@ -1017,7 +1120,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           # on a resume), then the phase time is charged. Re-acknowledging IF
           # on a resumed bit-7 phase cannot swallow the preempting IRQ:
           # IE/IME = 0 made the later phases non-preemptible.
-          let phase_t0 = cpu.hle_body_start()
+          let phase_t0 = cpu.hle_body_now()
           case bit_idx
           of 5:  # Reset SIO
             cpu.gba.serial.siocnt = 0
@@ -1054,8 +1157,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
             # BIOSRegisterRamReset's "other" row); the HLE's byte writes
             # above are quicker, so wait before the timer block.
             block:
-              let early = RRR_TIMER_STOP - int(cpu.hle_body_start() - phase_t0)
-              if early > 0 and not continuing: cpu.idle(early)
+              let early = RRR_TIMER_STOP - int(cpu.hle_body_now() - phase_t0)
+              if early > 0 and not continuing: cpu.hle_busy(early)
             for offset in countup(0x100'u32, 0x11C'u32, 4):
               cpu.gba.bus.write_word(0x04000000'u32 + offset, 0)
             for offset in 0x130'u32..0x133'u32:
@@ -1081,7 +1184,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
             cpu.gba.bus.write_half(0x04000036'u32, 0x0100'u16)  # BG3PD
           # Top up to the phase cost in preemptible chunks
           if not continuing:
-            charge = max(0, phase_cost - int(cpu.hle_body_start() - phase_t0))
+            charge = max(0, phase_cost - int(cpu.hle_body_now() - phase_t0))
           let remain = cpu.hle_charge_units_interruptible(charge)
           if remain > 0:
             park(flags and not (1'u32 shl bit_idx), remain)
@@ -1096,7 +1199,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
             let step = if first and cpu.hle_irq_now(): 1 else: cpu.hle_step(remain)
             first = false
             clear_ram(bit_idx, offset_at(remain), offset_at(remain - step))
-            cpu.idle(step)
+            cpu.hle_busy(step)
             remain -= step
             if remain > 0:
               cpu.gba.bus.catch_up()
@@ -1116,7 +1219,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let raw_count = bits_range(ctrl, 0, 20)
     # Validation uses the unrounded byte length; the 8-word rounding is later
     if not bios_addr_check(src, raw_count shl 2):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
     else:
       let count = (raw_count + 7) and not 7'u32  # round up to multiple of 8
       let fill = bit(ctrl, 24)
@@ -1138,19 +1241,38 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let model_fixed = if copy_cont: COPY_CONT_FIXED
                         elif fill: 52 + int(bus.wait32_n[sp]) else: 43
       let model_burst = if fill: 5 + burst_d else: 7 + burst_s + burst_d
-      # Cartridge-bus sources are read uncharged: the bus would price every
-      # word as the HLE interleaves them with the writes, not as the ldmia's
-      # sequential burst the model charges. Everywhere else N == S and the
-      # charged access is the model's own.
-      let rom_src = sp >= 0x8 and sp <= 0xD
+      # Accesses uncharged (the model prices them; an I/O address keeps its
+      # timed access), palette RAM / VRAM / OAM ones adding the renderer's
+      # wait for their cycle in the burst (HleCont). Official BIOS in this
+      # core (Fire Emblem: The Sacred Stones' 256-word cartridge-to-VRAM
+      # copies): the bursts start FASTSET_TAIL short of the fixed cost into
+      # the body, the ldmia's words from two cycles into a burst, the
+      # stmia's four after the ldmia's (a fill's from two in). Read from the
+      # body's start, each copy was 13 cycles off phase with the renderer
+      # and up to ~100 cycles off the console's.
       let fill_val = if fill: bus.read_word(src) else: 0'u32
+      var cont = cpu.hle_cont_start(body_t0, sp, dp)
+      let ns = int(bus.wait32_n[sp])
+      let ss = int(bus.wait32_s[sp])
+      let nd = int(bus.wait32_n[dp])
+      let sd = int(bus.wait32_s[dp])
+      let wbase = if fill: 2 else: 4 + burst_s
+      let lead = max(0, model_fixed - FASTSET_TAIL)
+      cpu.hle_charge_body(body_t0, lead)
       var done = 0'u32
       var interrupted = false
       while done < count:
+        if cont.on:
+          let k = int(done and 7)
+          let bclk = lead + model_burst * int(done div 8)
+          if not fill:
+            cpu.hle_cont_ahead(cont, bclk + 2 + (if k == 0: 0 else: ns + (k - 1) * ss), src, true)
+          cpu.hle_cont_ahead(cont, bclk + wbase + (if k == 0: 0 else: nd + (k - 1) * sd), dst, true)
         let val = if fill: fill_val
-                  elif rom_src: bus.read_word_internal(src)
-                  else: bus.read_word(src)
-        bus.write_word(dst, val)
+                  elif sp == 4: bus.read_word(src)
+                  else: bus.read_word_internal(src)
+        if dp == 4: bus.write_word(dst, val)
+        else: bus.write_word_internal(dst, val)
         if not fill: src += 4
         dst += 4
         inc done
@@ -1158,12 +1280,12 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         # remaining count stays one too; the routine time is topped up per
         # chunk so mid-copy events and IRQs land at faithful positions.
         if (done and 7) == 0 and done < count:
-          cpu.hle_charge_body(body_t0, model_fixed + model_burst * int(done div 8))
+          cpu.hle_charge_body(body_t0, lead + model_burst * int(done div 8) + cont.extra)
           bus.catch_up()
           if cpu.hle_irq_now():
             interrupted = true
             break
-      cpu.hle_charge_body(body_t0, model_fixed + model_burst * int(done div 8))
+      cpu.hle_charge_body(body_t0, (if interrupted: 0 else: exit_cost) + model_fixed + model_burst * int(done div 8) + cont.extra)
       cpu.r[0] = src
       cpu.r[1] = dst
       # The stm bursts go through r2-r9; r3 keeps the last word stored
@@ -1180,7 +1302,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # The routine sums the whole 16 KB image: a fixed 40960 cycles on the
     # real BIOS (TM0 around the swi, PeterLemon BIOSCHECKSUM's 0xA033), 10
     # per word. Charged preemptibly like the other long bodies.
-    cpu.hle_charge_body_interruptible(body_t0, 40960)
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + 40960)
   of 0x0E:  # BgAffineSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
@@ -1232,7 +1354,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       dst += 16
     # Interruptible: a per-scanline table (count=160) is ~12k cycles, which
     # atomically would starve per-frame IRQ work such as SIO rounds.
-    cpu.hle_charge_body_interruptible(body_t0, affine_model + mul_cycles)
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + affine_model + mul_cycles)
   of 0x0F:  # ObjAffineSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
@@ -1265,7 +1387,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.gba.bus.write_half_internal(dst, cast[uint16](pc)); dst += dst_stride
       cpu.gba.bus.write_half_internal(dst, cast[uint16](pd)); dst += dst_stride
       count -= 1
-    cpu.hle_charge_body_interruptible(body_t0, affine_model + mul_cycles)  # as BgAffineSet
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + affine_model + mul_cycles)  # as BgAffineSet
   of 0x11:  # LZ77UnCompWram (8-bit writes)
     cpu.swi_residue([cpu.r[4], cpu.r[5], cpu.r[6], 0x170'u32])
     var src = cpu.r[0]
@@ -1276,17 +1398,25 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     src += 4
     # Header read first, then the post-increment source is validated
     if not bios_addr_check(src, decomp_len):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
     var dst = cpu.r[1]
     var remaining = decomp_len
-    var n_flags, n_lit, n_tok, n_runb = 0
     # Uncharged accesses (hle_charge_body_interruptible): charged as they
     # went, a 64 KB output (Phantasy Star Collection's scene loads) held off
     # a V-count IRQ for 390k cycles where the real BIOS takes it on time.
+    # Loop cost (routine 0x10FC) per token kind; rn/db = nonsequential byte
+    # access at the src/dst pages. Run bytes: ldrb dst-offset + strb + loop.
+    # `clk` runs it through the stream for a VRAM destination's renderer
+    # waits (HleCont; where in a step the accesses fall is assumed here).
     let bus = cpu.gba.bus
+    let rn = int(bus.wait16_n[src_page])
+    let db = int(bus.wait16_n[dst_page])
+    var clk = 29 + int(bus.wait32_n[src_page])
+    var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
     while remaining > 0:
-      let flags = bus.read_byte_internal(src); src += 1; n_flags += 1
+      let flags = bus.read_byte_internal(src); src += 1
+      clk += 9 + rn
       for i in 0 ..< 8:
         if remaining == 0: break
         if bit(flags, 7 - i):
@@ -1295,24 +1425,23 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           let b2 = uint32(bus.read_byte_internal(src)); src += 1
           let length = (b1 shr 4) + 3
           let offset = ((b1 and 0xF) shl 8) or b2
-          n_tok += 1
+          clk += 22 + 3 * rn
           for j in 0'u32 ..< length:
             if remaining == 0: break
-            bus.write_byte_internal(dst, bus.read_byte_internal(dst - offset - 1))
-            dst += 1; remaining -= 1; n_runb += 1
+            let from_addr = dst - offset - 1
+            bus.write_byte_internal(dst, bus.read_byte_internal(from_addr))
+            if cont.on:
+              cpu.hle_cont_ahead(cont, clk + 2, from_addr, false)
+              cpu.hle_cont_ahead(cont, clk + 4 + db, dst, false)
+            dst += 1; remaining -= 1
+            clk += 7 + 2 * db
         else:
           # Uncompressed byte
           bus.write_byte_internal(dst, bus.read_byte_internal(src))
-          src += 1; dst += 1; remaining -= 1; n_lit += 1
-    # Loop cost (routine 0x10FC) per token kind; rn/db = nonsequential byte
-    # access at the src/dst pages. Run bytes: ldrb dst-offset + strb + loop.
-    block:
-      let bus = cpu.gba.bus
-      let rn = int(bus.wait16_n[src_page])
-      let db = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body_interruptible(body_t0, 29 + int(bus.wait32_n[src_page]) +
-        n_flags * (9 + rn) + n_lit * (16 + rn + db) +
-        n_tok * (22 + 3 * rn) + n_runb * (7 + 2 * db))
+          cpu.hle_cont_ahead(cont, clk + 8 + rn, dst, false)
+          src += 1; dst += 1; remaining -= 1
+          clk += 16 + rn + db
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + clk + cont.extra)
   of 0x12:  # LZ77UnCompVram (16-bit writes)
     cpu.swi_residue([cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7], cpu.r[8], cpu.r[9],
                      cpu.r[10], 0x170'u32])
@@ -1325,28 +1454,52 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let decomp_len = header shr 8
     src += 4
     if not bios_addr_check(src, decomp_len):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
+    # Loop cost (routine 0x1194): heavier than the Wram variant, it buffers
+    # bytes into halfwords and reads back-references with ldrh; each
+    # completed output halfword adds one strh (+dh). `clk` runs the model
+    # through the stream so each VRAM access is priced for the renderer by
+    # when the routine makes it (hle_cont_ahead).
+    let bus = cpu.gba.bus
+    let rn = int(bus.wait16_n[src_page])
+    let dh = int(bus.wait16_n[dst_page])
+    var clk = 39 + int(bus.wait32_n[src_page])
+    var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
+    let dst0 = cpu.r[1]
     var buf = newSeq[uint8](decomp_len)
     var buf_pos: uint32 = 0
-    var n_flags, n_lit, n_tok, n_runb = 0
     while buf_pos < decomp_len:
-      let flags = cpu.gba.bus.read_byte_internal(src); src += 1; n_flags += 1
+      let flags = bus.read_byte_internal(src); src += 1
+      clk += 9 + rn
       for i in 0 ..< 8:
         if buf_pos >= decomp_len: break
         if bit(flags, 7 - i):
-          let b1 = uint32(cpu.gba.bus.read_byte_internal(src)); src += 1
-          let b2 = uint32(cpu.gba.bus.read_byte_internal(src)); src += 1
+          let b1 = uint32(bus.read_byte_internal(src)); src += 1
+          let b2 = uint32(bus.read_byte_internal(src)); src += 1
           let length = (b1 shr 4) + 3
           let offset = ((b1 and 0xF) shl 8) or b2
-          n_tok += 1
+          # (where in each step the VRAM accesses fall: the routine's own
+          # instruction timing under the official BIOS in this core)
+          clk += 20 + 3 * rn
           for j in 0'u32 ..< length:
             if buf_pos >= decomp_len: break
-            buf[buf_pos] = buf[buf_pos - offset - 1]
-            buf_pos += 1; n_runb += 1
+            let from_pos = buf_pos - offset - 1
+            buf[buf_pos] = buf[from_pos]
+            cpu.hle_cont_ahead(cont, clk + 6, dst0 + (from_pos and not 1'u32), false)
+            buf_pos += 1
+            if (buf_pos and 1) == 0:
+              cpu.hle_cont_ahead(cont, clk + 16 + dh, dst0 + buf_pos - 2, false)
+              clk += dh
+            clk += 21 + dh
+          clk += 5
         else:
-          buf[buf_pos] = cpu.gba.bus.read_byte_internal(src)
-          src += 1; buf_pos += 1; n_lit += 1
+          buf[buf_pos] = bus.read_byte_internal(src)
+          src += 1; buf_pos += 1
+          if (buf_pos and 1) == 0:
+            cpu.hle_cont_ahead(cont, clk + 10 + rn, dst0 + buf_pos - 2, false)
+            clk += dh
+          clk += 20 + rn
     var dst = cpu.r[1]
     var idx: uint32 = 0
     while idx < decomp_len:
@@ -1356,16 +1509,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       else:
         cpu.gba.bus.write_half_internal(dst, uint16(buf[idx]))
         dst += 2; idx += 1
-    # Loop cost (routine 0x1194): heavier than the Wram variant, it buffers
-    # bytes into halfwords and reads back-references with ldrh; each
-    # completed output halfword adds one strh (+dh).
-    block:
-      let bus = cpu.gba.bus
-      let rn = int(bus.wait16_n[src_page])
-      let dh = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body_interruptible(body_t0, 39 + int(bus.wait32_n[src_page]) +
-        n_flags * (9 + rn) + n_lit * (20 + rn) + n_tok * (25 + 3 * rn) +
-        n_runb * (21 + dh) + dh * int(decomp_len div 2))
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + clk + cont.extra)
   of 0x10:  # BitUnPack
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
@@ -1376,7 +1520,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let src_len = uint32(cpu.gba.bus.read_half(info))
     # The source length comes from the info block, then the region check
     if not bios_addr_check(src, src_len):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
     let src_width = uint32(cpu.gba.bus.read_byte_internal(info + 2))
     let dest_width = uint32(cpu.gba.bus.read_byte_internal(info + 3))
@@ -1390,22 +1534,33 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let dest_mask = if dest_width >= 32: 0xFFFFFFFF'u32
                     else: (1'u32 shl dest_width) - 1
     var n_units, n_offset, n_words = 0
+    # The model's clock through the stream, for a VRAM destination's renderer
+    # waits (HleCont; each str taken one cycle into its step, assumed)
+    var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
+    let dn = int(cpu.gba.bus.wait32_n[dst_page])
+    var clk = 59 + 3 * int(cpu.gba.bus.wait16_n[info_page]) +
+              2 * int(cpu.gba.bus.wait32_n[info_page])
     for i in 0'u32 ..< src_len:
       let byte_val = uint32(cpu.gba.bus.read_byte_internal(src)); src += 1
+      clk += 12 + int(cpu.gba.bus.wait16_n[src_page])
       var bit_pos: uint32 = 0
       while bit_pos < 8:
         let val = (byte_val shr bit_pos) and src_mask
         var expanded: uint32
         inc n_units
+        clk += 22
         if val != 0 or zero_flag:
           expanded = val + offset_val
           inc n_offset
+          clk += 2
         else:
           expanded = 0
         out_word = out_word or ((expanded and dest_mask) shl out_bits)
         out_bits += dest_width
         if out_bits >= 32:
           cpu.gba.bus.write_word_internal(dst, out_word)
+          cpu.hle_cont_ahead(cont, clk + 1, dst, true)
+          clk += 1 + dn
           dst += 4
           out_word = 0
           out_bits = 0
@@ -1422,12 +1577,12 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # sequential from ROM with the prefetch buffer on): exact on all.
     block:
       let bus = cpu.gba.bus
-      cpu.hle_charge_body_interruptible(body_t0, 59 +
+      cpu.hle_charge_body_interruptible(body_t0, exit_cost + 59 +
         3 * int(bus.wait16_n[info_page]) + 2 * int(bus.wait32_n[info_page]) -
         bus.rom_pf_seq16(info_page) +
         int(src_len) * (12 + int(bus.wait16_n[src_page])) +
         n_units * 22 + n_offset * 2 +
-        n_words * (1 + int(bus.wait32_n[dst_page])))
+        n_words * (1 + int(bus.wait32_n[dst_page])) + cont.extra)
   of 0x13:  # HuffUnComp
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
@@ -1435,7 +1590,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # The routine (0x1014) validates the raw source with a constant
     # 0x02000000 "length", which adds no bits to the end-address test
     if not bios_addr_check(src, 0x02000000'u32):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
     let header = cpu.gba.bus.read_word(src)
     let data_size = header and 0xF  # 4 or 8 bits
@@ -1452,13 +1607,26 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var cur_node = tree_start
     var cur_word: uint32 = 0
     var bits_left: int = 0
-    var n_node, n_leaf, n_leaf_seq, n_words, n_outw = 0
+    var n_node, n_leaf, n_leaf_seq, n_node_seq, n_words, n_outw = 0
+    # The model's clock through the stream, for a VRAM destination's renderer
+    # waits (HleCont; each str taken one cycle into its step, assumed)
+    var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
+    let hb = int(cpu.gba.bus.wait16_n[src_page])
+    let hw = int(cpu.gba.bus.wait32_n[src_page])
+    var clk = 57 + 2 * hb + hw
+    var node_seq_next = false
     while written < decomp_len:
       if bits_left == 0:
         cur_word = cpu.gba.bus.read_word_internal(data_pos)
         data_pos += 4
         bits_left = 32
         n_words += 1
+        clk += 9 + hw
+        node_seq_next = false
+      if node_seq_next:
+        n_node_seq += 1
+        clk -= cpu.gba.bus.rom_pf_seq16(src_page)
+        node_seq_next = false
       let cur_bit = (cur_word shr 31) and 1
       cur_word = cur_word shl 1
       bits_left -= 1
@@ -1472,6 +1640,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let is_leaf = if is_right: right_is_leaf else: left_is_leaf
       if is_leaf:
         n_leaf += 1
+        clk += 39 + 3 * hb
         # The symbol read lands on the node's address + 2 (offset 0, the
         # child on the node's own parity): sequential from ROM with the
         # prefetch buffer on (rom_pf_seq16)
@@ -1485,6 +1654,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           out_bits += 8
         if out_bits >= 32:
           cpu.gba.bus.write_word_internal(dst, out_word)
+          cpu.hle_cont_ahead(cont, clk + 1, dst, true)
+          clk += int(cpu.gba.bus.wait32_n[dst_page])
           dst += 4
           written += 4
           out_word = 0
@@ -1493,6 +1664,16 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         cur_node = tree_start
       else:
         n_node += 1
+        clk += 25 + 2 * hb
+        # The next bit's first tree read, at the child, is sequential from
+        # ROM with the prefetch buffer on when it continues the re-read of
+        # this node (child at node + 2) and no bitstream refill comes
+        # between -- and this node is at an odd address: the loop's branches
+        # forget a gamepak load's halfword-aligned head (cpu.clear_pipeline,
+        # PF_RUNS_OFF_ROM). Official BIOS in this core, Dragon Ball Z - The
+        # Legacy of Goku's two 1.2M-cycle boot HuffUnComps from the cartridge:
+        # 6570 and 5013 cycles long without it, within 17 with it.
+        node_seq_next = child_addr == cur_node + 2 and (cur_node and 1) == 1
         cur_node = child_addr
     # Tree-walk cost (routine 0x1014): per input bit, a fixed budget plus two
     # ldrb tree reads (the node byte is re-read for the leaf flags); a leaf
@@ -1508,10 +1689,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let d = int(bus.wait32_n[dst_page])   # nonseq word write at dst
       # (the tree-size byte after the header word is the fixed part's
       # sequential read)
-      cpu.hle_charge_body_interruptible(body_t0, 57 + 2 * b + w +
+      cpu.hle_charge_body_interruptible(body_t0, exit_cost + 57 + 2 * b + w +
         n_node * (25 + 2 * b) + n_leaf * (39 + 3 * b) -
-        (1 + n_leaf_seq) * bus.rom_pf_seq16(src_page) +
-        n_outw * d + n_words * (9 + w))
+        (1 + n_leaf_seq + n_node_seq) * bus.rom_pf_seq16(src_page) +
+        n_outw * d + n_words * (9 + w) + cont.extra)
   of 0x14:  # RLUnCompWram (8-bit writes)
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
@@ -1520,42 +1701,47 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let decomp_len = header shr 8
     src += 4
     if not bios_addr_check(src, decomp_len):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
-    var dst = cpu.r[1]
-    var written: uint32 = 0
-    var n_flags, n_lit, n_rruns, n_runb = 0
-    while written < decomp_len:
-      let flag = uint32(cpu.gba.bus.read_byte_internal(src)); src += 1; n_flags += 1
-      if bit(flag, 7):
-        # Compressed run
-        let length = (flag and 0x7F) + 3
-        let val = cpu.gba.bus.read_byte_internal(src); src += 1
-        n_rruns += 1
-        for j in 0'u32 ..< length:
-          if written >= decomp_len: break
-          cpu.gba.bus.write_byte_internal(dst, val)
-          dst += 1; written += 1; n_runb += 1
-      else:
-        # Uncompressed run
-        let length = (flag and 0x7F) + 1
-        for j in 0'u32 ..< length:
-          if written >= decomp_len: break
-          cpu.gba.bus.write_byte_internal(dst, cpu.gba.bus.read_byte_internal(src))
-          src += 1; dst += 1; written += 1; n_lit += 1
     # Loop cost (Thumb routine 0x1278): flag decode, literal ldrb+strb,
     # run fill byte read once then strb per output byte. Fitted to
     # real-BIOS TM0 around the swi on 44 streams (1..8 random tokens and
     # single literals/runs of 1..128 bytes; IWRAM/EWRAM sources and
     # destinations): exact on all (the old 40/10/11/9/7 put PeterLemon
-    # BIOSRLE 5849 cycles slow, and the Vram form 4550 fast).
-    block:
-      let bus = cpu.gba.bus
-      let rn = int(bus.wait16_n[src_page])
-      let db = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body_interruptible(body_t0, 42 + int(bus.wait32_n[src_page]) +
-        n_flags * (12 + rn) + n_lit * (9 + rn + db) +
-        n_rruns * (5 + rn) + n_runb * (6 + db))
+    # BIOSRLE 5849 cycles slow, and the Vram form 4550 fast). `clk` runs it
+    # through the stream for a VRAM destination's renderer waits (HleCont;
+    # each strb taken at the end of its step, assumed).
+    let bus = cpu.gba.bus
+    let rn = int(bus.wait16_n[src_page])
+    let db = int(bus.wait16_n[dst_page])
+    var clk = 42 + int(bus.wait32_n[src_page])
+    var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
+    var dst = cpu.r[1]
+    var written: uint32 = 0
+    while written < decomp_len:
+      let flag = uint32(bus.read_byte_internal(src)); src += 1
+      clk += 12 + rn
+      if bit(flag, 7):
+        # Compressed run
+        let length = (flag and 0x7F) + 3
+        let val = bus.read_byte_internal(src); src += 1
+        clk += 5 + rn
+        for j in 0'u32 ..< length:
+          if written >= decomp_len: break
+          bus.write_byte_internal(dst, val)
+          cpu.hle_cont_ahead(cont, clk + 6, dst, false)
+          dst += 1; written += 1
+          clk += 6 + db
+      else:
+        # Uncompressed run
+        let length = (flag and 0x7F) + 1
+        for j in 0'u32 ..< length:
+          if written >= decomp_len: break
+          bus.write_byte_internal(dst, bus.read_byte_internal(src))
+          cpu.hle_cont_ahead(cont, clk + 9 + rn, dst, false)
+          src += 1; dst += 1; written += 1
+          clk += 9 + rn + db
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + clk + cont.extra)
   of 0x15:  # RLUnCompVram (16-bit writes)
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
@@ -1564,122 +1750,135 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let decomp_len = header shr 8
     src += 4
     if not bios_addr_check(src, decomp_len):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
+    # Loop cost (Thumb routine 0x12C0): the flag decode spills through the
+    # stack, literals buffer into halfwords, runs replay the spilled fill
+    # byte, each completed output halfword is one strh. Fitted as the Wram
+    # form above (58 streams, VRAM destinations too): exact on all. `clk`
+    # as there (each strh taken one cycle into its step, assumed).
+    let bus = cpu.gba.bus
+    let rn = int(bus.wait16_n[src_page])
+    let dh = int(bus.wait16_n[dst_page])
+    var clk = 46 + int(bus.wait32_n[src_page])
+    var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
     var dst = cpu.r[1]
     var written: uint32 = 0
     var out_buf: uint16 = 0
     var out_idx: uint32 = 0
-    var n_flags, n_lit, n_rruns, n_runb, n_halves = 0
+    template put(val: uint8) =
+      if (out_idx and 1) == 0:
+        out_buf = uint16(val)
+      else:
+        out_buf = out_buf or (uint16(val) shl 8)
+        bus.write_half_internal(dst and not 1'u32, out_buf)
+        cpu.hle_cont_ahead(cont, clk + 1, dst and not 1'u32, false)
+        clk += 1 + dh
+      dst += 1; written += 1; out_idx += 1
     while written < decomp_len:
-      let flag = uint32(cpu.gba.bus.read_byte_internal(src)); src += 1; n_flags += 1
+      let flag = uint32(bus.read_byte_internal(src)); src += 1
+      clk += 20 + rn
       if bit(flag, 7):
         # Compressed run
         let length = (flag and 0x7F) + 3
-        let val = cpu.gba.bus.read_byte_internal(src); src += 1
-        n_rruns += 1
+        let val = bus.read_byte_internal(src); src += 1
+        clk += 7 + rn
         for j in 0'u32 ..< length:
           if written >= decomp_len: break
-          if (out_idx and 1) == 0:
-            out_buf = uint16(val)
-          else:
-            out_buf = out_buf or (uint16(val) shl 8)
-            cpu.gba.bus.write_half_internal(dst and not 1'u32, out_buf)
-            n_halves += 1
-          dst += 1; written += 1; out_idx += 1; n_runb += 1
+          clk += 15
+          put(val)
       else:
         # Uncompressed run
         let length = (flag and 0x7F) + 1
         for j in 0'u32 ..< length:
           if written >= decomp_len: break
-          let val = cpu.gba.bus.read_byte_internal(src); src += 1
-          if (out_idx and 1) == 0:
-            out_buf = uint16(val)
-          else:
-            out_buf = out_buf or (uint16(val) shl 8)
-            cpu.gba.bus.write_half_internal(dst and not 1'u32, out_buf)
-            n_halves += 1
-          dst += 1; written += 1; out_idx += 1; n_lit += 1
-    # Loop cost (Thumb routine 0x12C0): the flag decode spills through the
-    # stack, literals buffer into halfwords, runs replay the spilled fill
-    # byte, each completed output halfword is one strh. Fitted as the Wram
-    # form above (58 streams, VRAM destinations too): exact on all.
-    block:
-      let bus = cpu.gba.bus
-      let rn = int(bus.wait16_n[src_page])
-      let dh = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body_interruptible(body_t0, 46 + int(bus.wait32_n[src_page]) +
-        n_flags * (20 + rn) + n_lit * (15 + rn) +
-        n_rruns * (7 + rn) + n_runb * 15 + n_halves * (1 + dh))
+          let val = bus.read_byte_internal(src); src += 1
+          clk += 15 + rn
+          put(val)
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + clk + cont.extra)
   of 0x16:  # Diff8bitUnFilterWram (8-bit writes)
     var src = cpu.r[0]
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
     if not bios_addr_check(src, decomp_len):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
-    var dst = cpu.r[1]
-    var written: uint32 = 0
-    var prev = cpu.gba.bus.read_byte_internal(src); src += 1
-    cpu.gba.bus.write_byte_internal(dst, prev)
-    dst += 1; written += 1
-    while written < decomp_len:
-      let diff = cpu.gba.bus.read_byte_internal(src); src += 1
-      prev = uint8((uint32(prev) + uint32(diff)) and 0xFF)
-      cpu.gba.bus.write_byte_internal(dst, prev)
-      dst += 1; written += 1
     # Loop cost: 29 + the header read, 11 + an ldrb and an strb per byte.
     # The three Diff filters are fitted to real-BIOS TM0 around the swi on
     # 36 calls each (2..200 bytes, IWRAM/EWRAM sources, IWRAM/EWRAM/VRAM
-    # destinations): exact on all (PeterLemon BIOSDIFF).
-    block:
-      let bus = cpu.gba.bus
-      let sp = int(bits_range(cpu.r[0], 24, 27))
-      let dp = int(bits_range(cpu.r[1], 24, 27))
-      cpu.hle_charge_body_interruptible(body_t0, 29 + int(bus.wait32_n[sp]) +
-        int(decomp_len) * (11 + int(bus.wait16_n[sp]) + int(bus.wait16_n[dp])))
+    # destinations): exact on all (PeterLemon BIOSDIFF). `clk` runs it for
+    # a VRAM destination's renderer waits (HleCont; each store taken at the
+    # end of its step, assumed).
+    let bus = cpu.gba.bus
+    let sp = int(bits_range(cpu.r[0], 24, 27))
+    let dp = int(bits_range(cpu.r[1], 24, 27))
+    let step = 11 + int(bus.wait16_n[sp]) + int(bus.wait16_n[dp])
+    var clk = 29 + int(bus.wait32_n[sp])
+    var cont = cpu.hle_cont_start(body_t0, dp, dp)
+    var dst = cpu.r[1]
+    var written: uint32 = 0
+    var prev = bus.read_byte_internal(src); src += 1
+    bus.write_byte_internal(dst, prev)
+    cpu.hle_cont_ahead(cont, clk + step - int(bus.wait16_n[dp]), dst, false)
+    clk += step
+    dst += 1; written += 1
+    while written < decomp_len:
+      let diff = bus.read_byte_internal(src); src += 1
+      prev = uint8((uint32(prev) + uint32(diff)) and 0xFF)
+      bus.write_byte_internal(dst, prev)
+      cpu.hle_cont_ahead(cont, clk + step - int(bus.wait16_n[dp]), dst, false)
+      clk += step
+      dst += 1; written += 1
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + clk + cont.extra)
   of 0x17:  # Diff8bitUnFilterVram (16-bit writes)
     var src = cpu.r[0]
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
     if not bios_addr_check(src, decomp_len):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
+    # Loop cost: 31 + the header read, 18 + an ldrb per byte, an strh per
+    # output halfword (fitted with 0x16); `clk` as there.
+    let bus = cpu.gba.bus
+    let sp = int(bits_range(cpu.r[0], 24, 27))
+    let dp = int(bits_range(cpu.r[1], 24, 27))
+    let dh = int(bus.wait16_n[dp])
+    var clk = 31 + int(bus.wait32_n[sp])
+    var cont = cpu.hle_cont_start(body_t0, dp, dp)
     var dst = cpu.r[1]
     var written: uint32 = 0
     var out_buf: uint16 = 0
     var out_idx: uint32 = 0
-    var prev = cpu.gba.bus.read_byte_internal(src); src += 1
+    var prev = bus.read_byte_internal(src); src += 1
     out_buf = uint16(prev)
     out_idx += 1
     dst += 1; written += 1
+    clk += 18 + int(bus.wait16_n[sp])
     while written < decomp_len:
-      let diff = cpu.gba.bus.read_byte_internal(src); src += 1
+      let diff = bus.read_byte_internal(src); src += 1
       prev = uint8((uint32(prev) + uint32(diff)) and 0xFF)
+      clk += 18 + int(bus.wait16_n[sp])
       if (out_idx and 1) == 0:
         out_buf = uint16(prev)
       else:
         out_buf = out_buf or (uint16(prev) shl 8)
-        cpu.gba.bus.write_half_internal(dst and not 1'u32, out_buf)
+        bus.write_half_internal(dst and not 1'u32, out_buf)
+        cpu.hle_cont_ahead(cont, clk, dst and not 1'u32, false)
+        clk += dh
       dst += 1; written += 1; out_idx += 1
-    # Loop cost: 31 + the header read, 18 + an ldrb per byte, an strh per
-    # output halfword (fitted with 0x16)
-    block:
-      let bus = cpu.gba.bus
-      let sp = int(bits_range(cpu.r[0], 24, 27))
-      let dp = int(bits_range(cpu.r[1], 24, 27))
-      cpu.hle_charge_body_interruptible(body_t0, 31 + int(bus.wait32_n[sp]) +
-        int(decomp_len) * (18 + int(bus.wait16_n[sp])) +
-        int(decomp_len div 2) * int(bus.wait16_n[dp]))
+    # (the model's halfword count is the length's half, written or not)
+    cpu.hle_charge_body_interruptible(body_t0, exit_cost + 31 + int(bus.wait32_n[sp]) +
+      int(decomp_len) * (18 + int(bus.wait16_n[sp])) + int(decomp_len div 2) * dh +
+      cont.extra)
   of 0x18:  # Diff16bitUnFilter
     var src = cpu.r[0]
     let header = cpu.gba.bus.read_word(src)
     let decomp_len = header shr 8
     src += 4
     if not bios_addr_check(src, decomp_len):
-      cpu.idle(BIOS_CHECK_SKIP_COST)
+      cpu.hle_busy(BIOS_CHECK_SKIP_COST + exit_cost)
       return
     var dst = cpu.r[1]
     var written: uint32 = 0
@@ -1700,7 +1899,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let bus = cpu.gba.bus
       let sp = int(bits_range(cpu.r[0], 24, 27))
       let dp = int(bits_range(cpu.r[1], 24, 27))
-      cpu.hle_charge_body_interruptible(body_t0, 29 + int(bus.wait32_n[sp]) -
+      cpu.hle_charge_body_interruptible(body_t0, exit_cost + 29 + int(bus.wait32_n[sp]) -
         bus.rom_pf_seq16(sp) +
         int(written div 2) * (11 + int(bus.wait16_n[sp]) + int(bus.wait16_n[dp])))
   of 0x19:  # SoundBias(r0): 0 -> SOUNDBIAS 0x000, else 0x200

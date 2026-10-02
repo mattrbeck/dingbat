@@ -541,6 +541,8 @@ proc run_pending*(dma: DMA) =
       if dma.irq_after_burst:
         dma.irq_after_burst = false
         dma.gba.interrupts.schedule_raise_check(dma.irq_was_set, IRQ_SYNC_DELAY)
+    if saved == 4:
+      bus.dma_stall_total += int64(bus.sched.cycles + CycleCount(bus.cycles) - granted_at)
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
     when defined(itrace):
