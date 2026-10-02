@@ -15,6 +15,10 @@ import hle_bios
 
 export cpu, sched, gpu, engine2d, input, vram, cart, spu, slot2
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   NdsBoot* = enum
     nbDirect      ## load the card's binaries and start them (boot.nim)
@@ -304,6 +308,8 @@ proc dispatch(n: NDS; ev: NdsEvent) =
 # ---------------------------------------------------------------------------
 # Construction and the frame loop
 
+{.pop.}   # file reading raises: the caller sees an IOError at once
+
 proc read_file_bytes(path: string): seq[uint8] =
   if path.len == 0 or not fileExists(path): return @[]
   let s = readFile(path)
@@ -395,6 +401,8 @@ proc load_nds*(rom_path: string; bios_dir = ""; boot = nbDirect): NDS =
           read_file_bytes(dir / "bios9.bin"), read_file_bytes(dir / "bios7.bin"),
           read_file_bytes(dir / "firmware.bin"),
           force_hle = getEnv("DINGBAT_NDS_HLE") == "1", boot = boot)
+
+{.push quirky: on.}
 
 # ---------------------------------------------------------------------------
 # Sleep (GBATEK "DS Power Control", HALTCNT; "BIOS Halt Functions", Stop/Sleep)
@@ -546,3 +554,5 @@ proc bgr555_to_rgba*(c: uint16): uint32 {.inline.} =
   let b = uint32((c shr 10) and 0x1F)
   ((r shl 3) or (r shr 2)) or (((g shl 3) or (g shr 2)) shl 8) or
     (((b shl 3) or (b shr 2)) shl 16) or 0xFF00_0000'u32
+
+{.pop.}

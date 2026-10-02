@@ -10,6 +10,10 @@
 ## KEY2 is a pair of 39-bit LFSRs whose low bytes XOR the card bus stream on
 ## both ends (the card encrypts, the console's card interface decrypts).
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   Key1* = object
     ## P-array (18 words) + 4 S-boxes (256 words each), as GBATEK's keybuf.
@@ -242,3 +246,5 @@ proc card_seed0*(mmmnnn: uint32; seed_select: uint8): uint64 =
   ## seed byte.
   (uint64(mmmnnn and 0xFFFFFF) shl 15) + 0x6000'u64 +
     uint64(KEY2_SEED_BYTES[seed_select and 7])
+
+{.pop.}

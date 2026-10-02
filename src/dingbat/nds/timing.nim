@@ -64,6 +64,10 @@
 
 import arm/cp15
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   SlotTiming* = object
     ## GBA-slot access times in bus cycles, from EXMEMCNT bits 0-4
@@ -357,3 +361,5 @@ proc data7*(top: uint32; width: int; seq: bool; st: SlotTiming): int64 {.inline.
   of 0x08, 0x09: 2 * (slot_rom(st, width, seq) - (if seq: 0 else: 1))
   of 0x0A: 2 * (st.ram - (if seq: 0 else: 1))
   else: 2
+
+{.pop.}

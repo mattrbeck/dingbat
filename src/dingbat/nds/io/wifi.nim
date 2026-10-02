@@ -22,6 +22,10 @@
 import std/bitops
 import ../sched
 import irq
+
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
 when defined(wifilog): import std/strutils
 
 const
@@ -1075,3 +1079,5 @@ proc write16*(w: Wifi; a: uint32; v: uint16) =
   else:
     let m = w.masks[o shr 1]
     w.reg(o) = (old and not m) or (v and m)
+
+{.pop.}

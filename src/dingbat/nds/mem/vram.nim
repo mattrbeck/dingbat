@@ -16,6 +16,10 @@
 ## of a bank mapped into one of its regions (BG, OBJ, extended palettes;
 ## `weng` is that engine mask per page), and every remap.
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   VramBank* = enum vbA, vbB, vbC, vbD, vbE, vbF, vbG, vbH, vbI
 
@@ -335,3 +339,5 @@ proc fetch8*(w: RegionView; offset: int; dst: var array[8, uint8]) {.inline.} =
 proc lcdc_mapped*(v: Vram; b: VramBank): bool =
   ## Bank enabled with MST 0 (its LCDC window): display capture's target.
   (v.cnt[b] and 0x87) == 0x80
+
+{.pop.}

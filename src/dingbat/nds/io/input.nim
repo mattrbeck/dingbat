@@ -7,6 +7,10 @@
 
 import irq
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   NdsButton* = enum
     nbA, nbB, nbSelect, nbStart, nbRight, nbLeft, nbUp, nbDown, nbR, nbL,
@@ -46,3 +50,5 @@ proc set_lid*(inp: Input; closed: bool; irq7: IrqCtl) =
   ## masks it.
   if inp.lid_closed and not closed: irq7.raise_irq(irqLid)
   inp.lid_closed = closed
+
+{.pop.}

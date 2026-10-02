@@ -7,6 +7,10 @@ import ../mem/vram
 import ../gpu3d/gpu3d
 import engine2d
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   DispStat* = object
     vcount_setting*: uint16   ## 9-bit LYC (bits 8-15 + bit 7 = bit 8)
@@ -178,3 +182,5 @@ proc render_line*(g: Gpu; y: int) =
     else:
       g.top[base + x] = lb
       g.bottom[base + x] = la
+
+{.pop.}

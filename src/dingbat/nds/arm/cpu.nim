@@ -27,6 +27,10 @@
 
 import std/bitops
 from std/strutils import toHex
+
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
 when defined(ndsdebug): import std/tables
 
 type
@@ -1222,3 +1226,4 @@ proc reg_dump*(cpu: ArmCpu): string =
     result.add("r" & $i & "=" & toHex(if i == 15: cpu.next_pc else: cpu.r[i], 8) & " ")
   result.add("cpsr=" & toHex(cpu.cpsr, 8))
 
+{.pop.}

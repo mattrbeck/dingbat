@@ -4,6 +4,10 @@
 ## access rights live in timing.nim (cache timing, aborts) -- see
 ## docs/nds/spec.md.
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   Cp15* = object
     control*: uint32          ## c1,c0,0
@@ -111,3 +115,5 @@ proc write*(c: var Cp15; op1, cn, cm, op2, v: uint32) =
     if op2 == 1: c.trace_pid = v
   else: discard
   c.update_tcm()
+
+{.pop.}

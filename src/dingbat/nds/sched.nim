@@ -9,6 +9,10 @@
 ## members are part of its layout hash, so adding one refuses older states
 ## rather than misreading them.
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   NdsEvent* = enum
     evHBlank        ## dot 256 of a line: H-blank flag, render, H-blank DMA
@@ -87,3 +91,5 @@ proc pop_due*(s: NdsScheduler; kind: var NdsEvent; at: var int64): bool =
   s.events.del(best)
   s.refresh()
   true
+
+{.pop.}

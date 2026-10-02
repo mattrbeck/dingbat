@@ -31,6 +31,10 @@ import ../../gba/rtc_calendar
 import ../sched
 import irq
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   RtcState = enum rsIdle, rsCommand, rsWrite, rsRead
 
@@ -477,3 +481,5 @@ proc sleep_advance*(r: Rtc; cycles: int64; stop: proc(): bool) =
   if not r.fixed: r.update()   # host clock: poll once
   # the booked event is in the frozen timeline's terms; move it by the sleep
   if r.next_due != high(int64): r.sched.schedule(r.next_due - r.slept, evRtc)
+
+{.pop.}

@@ -133,6 +133,24 @@ BG VRAM and the mapping behind reused lines through the bus, and loads a
 state over a running machine. Dropping the palette/OAM or the VRAM count
 fails it.
 
+## Error-flag checks (`quirky`)
+
+Nim's exceptions under ARC are "goto" exceptions: after every call to a
+proc that might raise, the caller loads a global error flag and branches
+(`ldrb; tbnz` on arm64; `if (*nimErr_) goto BeforeRet_` in the C). Defects
+count as raising, so the checks stay in -d:danger builds, and the
+interpreter makes several calls per emulated opcode (the bus, the
+execute dispatch): about 5000 such pairs in the binary, and 12 % of
+SoulSilver's host instructions. No proc in the DS core raises on purpose
+(the save-state loader and file reading excepted), so every emulation
+module pushes `quirky`, which drops the test after calls. A raise site
+still jumps out of its own proc; what changes is only that a caller in a
+quirky proc goes on after a callee that raised, and the exception reaches
+the first non-quirky frame (the frontend's call) later. With checks off
+(-d:danger, the web build) nothing in the core raises at all; in -d:release
+a bounds defect would surface a few instructions late. `savestate.nim`
+(state_error) and `read_file_bytes`/`load_nds` (IOError) stay outside.
+
 ## Numbers
 
 Host instructions retired (`/usr/bin/time -l`), real BIOS unless noted,

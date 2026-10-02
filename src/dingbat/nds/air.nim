@@ -12,6 +12,10 @@
 import nds
 import io/[wifi, spi]
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 const
   AIR_QUANTUM* = 4096'i64   ## master cycles per lockstep step: 61 us < 96 us
 
@@ -58,3 +62,5 @@ proc run_frames*(l: AirLink; frames: int) =
   for _ in 0 ..< frames:
     for m in l.machines: m.frame_done = false
     l.step(FRAME_CYCLES)
+
+{.pop.}

@@ -33,6 +33,10 @@
 ## a KEY1 reply's dummy period.
 
 import irq, backup, cartcrypt
+
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
 when defined(ndsdebug): import std/strutils
 import ../sched
 
@@ -393,3 +397,5 @@ proc write_reg*(c: Cart; offset: uint32; v, mask: uint32; pc = 0'u32; from7 = fa
     if (mask and 0x7F) != 0: c.seed_hi[cpu][0] = v and 0x7F
     if (mask and 0x7F_0000) != 0: c.seed_hi[cpu][1] = (v shr 16) and 0x7F
   else: discard
+
+{.pop.}
