@@ -65,15 +65,17 @@ const
   GPU_SKIP = ["vram", "engine_a", "engine_b", "gpu3d", "mmem_req", "mmem_ctx"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
-  # eng_gen/weng: the 2D engines' line reuse (engine2d.nim), rebuilt by remap()
-  VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat", "tex_gen", "eng_gen", "weng"]
+  # vgen/remap_gen/pbase: the 2D engines' line reuse (engine2d.nim); remap()
+  # in after_load bumps remap_gen, so no line is reused across a load
+  VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat", "tex_gen", "vgen", "remap_gen", "pbase"]
   # pointers into Gpu's palette/OAM (kept); line3d is set before each use;
   # the line buffers and per-line scratch are rewritten before they are read
-  # (line, gfx, bgpix ... line_objwin); lc_*/mem_gen: line reuse, which
-  # remap() in after_load restarts (vram.eng_gen)
+  # (line, gfx, bgpix ... line_objwin); touch, lc_*, mem_gen: line reuse,
+  # which remap() in after_load restarts (vram.remap_gen)
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d", "line", "gfx", "bgpix", "objpix",
                  "objprio", "objattr", "winmask", "line_semi", "line_objwin",
-                 "lc_on", "mem_gen", "lc_valid", "lc_key", "lc_line", "lc_3d", "lc_reused"]
+                 "lc_on", "mem_gen", "touch", "lc_valid", "lc_key", "lc_touch", "lc_vsum",
+                 "lc_line", "lc_3d", "lc_reused"]
   # reuse_*/last_*: what the last real render drew (render_frame); the
   # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh
   GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",

@@ -78,16 +78,20 @@ type
     lc_on*: bool                          ## reuse enabled (the machine sets it)
     mem_gen*: uint64                      ## bumped by the bus for every change to
                                           ## this engine's palette or OAM half
+    touch: Touch                          ## the VRAM blocks the line being drawn read
     lc_valid: array[192, bool]
     lc_key: array[192, LineKey]
+    lc_touch: array[192, Touch]           ## the VRAM blocks each line read...
+    lc_vsum: array[192, uint64]           ## ...and their change count then
     lc_line: array[192, array[256, uint16]]
     lc_3d: seq[array[256, uint32]]        ## engine A: the 3D line each was drawn with
     lc_reused*: int                       ## lines reused so far (a statistic)
 
   LineKey = object
-    ## Everything a visible line's pixels depend on besides VRAM, palette
-    ## and OAM contents (counted by `gen`) and the 3D line: the registers,
-    ## the window and affine latches as the line starts.
+    ## Everything a visible line's pixels depend on besides the VRAM it
+    ## reads (`lc_touch`) and the 3D line: palette and OAM contents and the
+    ## VRAM mapping (counted by `gen`), the registers, the window and affine
+    ## latches as the line starts.
     gen: uint64
     dispcnt: uint32
     bgcnt, bghofs, bgvofs: array[4, uint16]
@@ -326,7 +330,7 @@ proc ext_slot(e: Engine2D; bg: int): int {.inline.} =
 
 proc render_text(e: Engine2D; bg, y: int) =
   let cnt = e.bgcnt[bg]
-  let w = e.vram.view(e.bg_region)
+  let w = e.vram.view(e.bg_region, addr e.touch)
   var char_base = int((cnt shr 2) and 0xF) * 0x4000
   var screen_base = int((cnt shr 8) and 0x1F) * 0x800
   if e.id == engA:
@@ -346,7 +350,7 @@ proc render_text(e: Engine2D; bg, y: int) =
   if ty >= 32: row_base += (if size == 3: 0x1000 else: 0x800)
   let is8 = (cnt and 0x80) != 0
   let ext = is8 and (e.dispcnt and 0x4000_0000'u32) != 0
-  let xw = e.vram.view(e.bg_ext_region)
+  let xw = e.vram.view(e.bg_ext_region, addr e.touch)
   let ext_base = e.ext_slot(bg) * 0x2000
   let pal = e.palette
   let dst = cast[ptr UncheckedArray[uint16]](addr e.bgpix[bg][0])
@@ -447,7 +451,7 @@ template affine_walk(e: Engine2D; bg, y, width, height: int; sample: untyped) =
 proc render_affine(e: Engine2D; bg, y: int) =
   ## GBA-style affine BG: 8-bit map entries, 8bpp tiles, standard palette.
   let cnt = e.bgcnt[bg]
-  let w = e.vram.view(e.bg_region)
+  let w = e.vram.view(e.bg_region, addr e.touch)
   var char_base = int((cnt shr 2) and 0xF) * 0x4000
   var screen_base = int((cnt shr 8) and 0x1F) * 0x800
   if e.id == engA:
@@ -465,7 +469,7 @@ proc render_ext(e: Engine2D; bg, y: int) =
   ## Extended BG (BGxCNT.7 / .2): 16-bit-entry tiled affine, 256-colour
   ## bitmap or direct-colour bitmap.
   let cnt = e.bgcnt[bg]
-  let w = e.vram.view(e.bg_region)
+  let w = e.vram.view(e.bg_region, addr e.touch)
   let pal = e.palette
   if (cnt and 0x80) == 0:
     var char_base = int((cnt shr 2) and 0xF) * 0x4000
@@ -476,7 +480,7 @@ proc render_ext(e: Engine2D; bg, y: int) =
     let size = 128 shl (cnt shr 14)
     let tiles = size shr 3
     let ext = (e.dispcnt and 0x4000_0000'u32) != 0
-    let xw = e.vram.view(e.bg_ext_region)
+    let xw = e.vram.view(e.bg_ext_region, addr e.touch)
     let ext_base = bg * 0x2000
     affine_walk(e, bg, y, size, size):
       let se = w.rd16(screen_base + ((py shr 3) * tiles + (px shr 3)) * 2)
@@ -502,7 +506,7 @@ proc render_ext(e: Engine2D; bg, y: int) =
 proc render_large(e: Engine2D; y: int) =
   ## Mode 6 BG2: one 256-colour bitmap over all 512K of BG VRAM.
   let cnt = e.bgcnt[2]
-  let w = e.vram.view(e.bg_region)
+  let w = e.vram.view(e.bg_region, addr e.touch)
   let pal = e.palette
   let (bw, bh) = if (cnt and 0x4000) != 0: (1024, 512) else: (512, 1024)
   affine_walk(e, 2, y, bw, bh):
@@ -519,8 +523,8 @@ proc render_objs(e: Engine2D; y: int) =
   e.line_semi = false
   e.line_objwin = false
   if (e.dispcnt and 0x1000) == 0: return
-  let w = e.vram.view(e.obj_region)
-  let xw = e.vram.view(e.obj_ext_region)
+  let w = e.vram.view(e.obj_region, addr e.touch)
+  let xw = e.vram.view(e.obj_ext_region, addr e.touch)
   let oam = e.oam
   let pal = cast[ptr UncheckedArray[uint16]](addr e.palette[256])
   let dc = e.dispcnt
@@ -835,14 +839,16 @@ proc render_bg_line*(e: Engine2D; y: int) =
 # whose inputs all equal those it had when last drawn comes out the same,
 # and is copied instead of drawn. The bus counts every change to the
 # palette or OAM half (`mem_gen`, a store of an equal value is not a
-# change) and vram.nim every change to a bank an engine reads and every
-# remap (`eng_gen`); the registers and latches are compared as a key, the
-# 3D line by value. Display capture, VRAM and main-memory display draw
-# every line. Off without the machine (`lc_on`, the 2D unit tests poke
-# memory directly) and with DINGBAT_NDS_NO_SKIP=1 (docs/nds/perf.md).
+# change); vram.nim counts the changes to each 1 KB block of the banks
+# (`vgen`) and the remaps, and the views mark every block the line reads
+# (`touch`), so the line is redrawn only when one of those blocks changed
+# (`touched_sum`); the registers and latches are compared as a key, the 3D
+# line by value. Display capture, VRAM and main-memory display draw every
+# line. Off without the machine (`lc_on`, the 2D unit tests poke memory
+# directly) and with DINGBAT_NDS_NO_SKIP=1 (docs/nds/perf.md).
 
 proc line_key(e: Engine2D): LineKey =
-  LineKey(gen: e.mem_gen + e.vram.eng_gen[ord(e.id)], dispcnt: e.dispcnt,
+  LineKey(gen: e.mem_gen + e.vram.remap_gen, dispcnt: e.dispcnt,
           bgcnt: e.bgcnt, bghofs: e.bghofs, bgvofs: e.bgvofs,
           bgpa: e.bgpa, bgpb: e.bgpb, bgpc: e.bgpc, bgpd: e.bgpd,
           bgx: e.bgx, bgy: e.bgy, mos_bgx: e.mos_bgx, mos_bgy: e.mos_bgy,
@@ -876,11 +882,14 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
   if cache:
     key = e.line_key()
     if e.lc_valid[y] and e.lc_key[y] == key and
-       (e.line3d == nil or e.lc_3d[y] == e.line3d[]):
+       (e.line3d == nil or e.lc_3d[y] == e.line3d[]) and
+       e.vram.touched_sum(e.lc_touch[y]) == e.lc_vsum[y]:
       e.latch_mosaic(y)
       e.line = e.lc_line[y]
       inc e.lc_reused
       return
+  if cache:
+    for w in e.touch.mitems: w = 0
   if dm == 1 or need_gfx: e.render_gfx(y)
   case dm
   of 0:
@@ -899,15 +908,17 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
     # main-memory display: the line the FIFO delivered (bit 15 unused)
     for x in 0 ..< 256: e.line[x] = e.mmem_line[x] and 0x7FFF
   e.apply_master_brightness()
-  if cache:
+  if cache and (e.touch[TOUCH_ALL shr 6] and (1'u64 shl (TOUCH_ALL and 63))) == 0:
     e.lc_valid[y] = true
     e.lc_key[y] = key
+    e.lc_touch[y] = e.touch
+    e.lc_vsum[y] = e.vram.touched_sum(e.touch)
     e.lc_line[y] = e.line
     if e.line3d != nil:
       if e.lc_3d.len == 0: e.lc_3d.setLen(192)
       e.lc_3d[y] = e.line3d[]
   elif y < 192:
-    e.lc_valid[y] = false
+    e.lc_valid[y] = false   # overlapping banks, capture, other display modes
 
 {.pop.}
 

@@ -111,20 +111,26 @@ and, for engine A, the 3D line) instead of drawn.
 - **Palette and OAM**: the bus counts every change to each engine's half
   (`mem_gen`; a store of the value already there is not a change, so a
   game's per-frame OAM copy costs nothing).
-- **VRAM**: `vram.eng_gen[e]` counts every change to a byte of a bank
-  engine e reads (the per-page engine mask `weng` is rebuilt with the page
-  tables) and every remap. Display capture writes only LCDC banks, which no
-  engine reads; the ARM7's banks and the 3D slots are not engine regions.
+- **VRAM**: per 1 KB block of the banks, `vram.vgen` counts the stores that
+  changed a byte there. While a line is drawn, every VRAM read marks its
+  block (the views know each page's place in the banks); the line keeps
+  that set and the sum of the blocks' counts, and is reused only while the
+  sum is the same, so a store elsewhere in the engine's VRAM (a text box
+  being typed, a tile animating) leaves it alone. A read through
+  overlapping banks makes the line not reusable. A remap is in the key
+  (`remap_gen`). Display capture writes only LCDC banks, which no engine
+  reads.
 - **3D line**: compared by value (1 KB).
 - Not reused: display capture lines (they need `gfx`), VRAM and
   main-memory display, an engine switched off, the 2D unit tests (`lc_on`
   is set by the machine; they poke memory directly).
 
-A state load remaps VRAM, which bumps `eng_gen`: a loaded machine draws
-every line afresh. In SoulSilver 0-6000 (p12) 70 % of engine A's lines and
-90 % of engine B's are reused. Engine A's misses are mostly memory changes
-elsewhere in the engine's VRAM (65 %: a counter per engine, not per line),
-then register changes (15 %) and the 3D line (9 %); see "Left for later".
+A state load remaps VRAM, which bumps `remap_gen`: a loaded machine draws
+every line afresh. In SoulSilver 0-6000 (p12) 82 % of engine A's lines and
+90 % of engine B's are reused (with one change counter per engine instead
+of per block: 70 % and 90 %; per block it costs 2 % fewer host
+instructions overall). What is left is mostly register changes (scroll,
+fades) and the 3D line.
 
 `tests/nds_perf_test.nim` runs 15 2D ROMs (scrolling, affine and
 rotscale BGs, affine and extended-palette sprites, H-blank and mid-frame
