@@ -13,8 +13,9 @@
 ## interpolated along the edges, then across the span: linearly where the
 ## two ends' w are equal, else perspective-correctly with 9-bit (edge) and
 ## 8-bit (span) factors. Colours carry 9 bits through interpolation.
-## Z-buffer depth interpolates linearly in screen space, W-buffer depth
-## as the other attributes (Assumed).
+## Z-buffer depth interpolates linearly in screen space: exactly along
+## edges, by an 18-bit reciprocal of the span's length across it
+## (3d_probe_zinterp*); W-buffer depth as the other attributes (Assumed).
 ##
 ## Line budget (GBATEK "DS 3D Overview", RDLINES_COUNT): the hardware
 ## renders line by line into a 48-line cache from line 214 on, and the
@@ -462,7 +463,12 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
     fl = sp.f
     fc = fl + (if sp.acc != 0: 1'i64 else: 0'i64)
     let dz = R.z - L.z
-    z = L.z + ashr(dz * (if dz >= 0: fc else: fl), 38)
+    # depth steps across the span by an 18-bit reciprocal of its length,
+    # so it lands just short of the exact value at whole steps: a polygon
+    # drawn later wins the tie where its depth rises along the span
+    # (3d_probe_zinterp_x on the reference cores; any 16..30 bits fit,
+    # 18 Assumed like the edge slope's)
+    z = L.z + ashr(dz * n * ((1'i64 shl 18) div d), 18)
     if eqw:
       w = L.w
     else:

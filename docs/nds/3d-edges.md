@@ -16,9 +16,11 @@ post passes), `gpu3d/geometry.nim` (1-dot culling, clipping).
   lines/wire-frames and not on translucent polygons).
 - **Hardware captures**: StrikerX3/nds-interp's line captures (images and
   the capture program only): a white wire-frame "line" from each screen
-  corner to every (x, y), 4 x 49601 display captures. `capstool`-style
-  replay of all four sets through our engine (scratch tool, not in the
-  repo): 48281 of 49601 exact in each set (97.3 %), mirror-symmetric.
+  corner to every (x, y), 4 x 49601 display captures, replayed through
+  our engine (a scratch tool; the captures are not in the repo): all
+  198404 exact now (97.3 % at the start of this round, the rest single-dot
+  gaps the hardware leaves in shallow lines). Where the captures and the
+  reference cores disagree, the captures decide.
 - **Probe ROMs** (`tests/nds/src/3d_probe_*`, built by
   `tests/nds/tools/build_3d.sh`, hashed in `tests/nds_3d_test.nim`) run
   through `tools/ndsref` (melonDS DS 1.4, melonDS 0.9.3) and compared at
@@ -27,21 +29,27 @@ post passes), `gpu3d/geometry.nim` (1-dot culling, clipping).
   edges), `_degen` / `_degen_aa` / `_degen_edge` (zero-width polygons),
   `_edge2` (edge marking corner cases), `_dot` (1-dot polygons and
   DISP_1DOT_DEPTH), `_xlu_seam` / `_xlu_seam_nb` (translucent seams),
-  `_ztie` (depth ties at an apex).
+  `_ztie` (depth ties at an apex), `_hwline` (captured lines with gaps,
+  laid over the captures).
 - **Pokemon SoulSilver** (run only): the bedroom (frame 6600), the
   kitchen (8000), the title's 3D Lugia (bottom screen, frame ~860), with
   the p12 input script, against the reference core.
 
 ## Edge rules (which dots a polygon covers)
 
-Unchanged from the previous round except for zero-area polygons; recorded
+The previous round's rules, plus three new ones marked **new**; recorded
 here as the full rule set.
 
 - Edge x on row y: `X(y) = x0 << 18 + dx * floor(2^18 / dy) * (y - y0)`,
   minus one unit when x decreases; exactly +-1.0 per row at 45 degrees.
 - x-major edges (|dx| > dy) cover, per row, the dots whose centres lie in
-  [X(y), X(y+1)] (rounded half up); other edges the dot holding X(y); a
-  vertical right edge covers the dot left of it (its own column is out).
+  [X(y), X(y) + S] (rounded half up), where S is the slope with its low 9
+  bits cleared: a run stops one dot short when X(y+1) passes a dot centre
+  by less than (slope mod 512) / 2^18, leaving a gap between rows
+  (**new**: the hardware captures, all exact with it; the reference cores
+  end the run at X(y+1) and draw that dot: 3d_probe_hwline, 6 dots).
+  Other edges cover the dot holding X(y); a vertical right edge covers the
+  dot left of it (its own column is out).
 - Polygon size (GBATEK "Polygon Size"): opaque polygons without edge
   marking or anti-aliasing (and translucent ones with blending off) drop
   their bottom x-major runs and right y-major dots, except on the row
@@ -49,7 +57,8 @@ here as the full rule set.
   vertex row to the row above the bottom vertex row.
 - Wire-frames (alpha 0) draw the two runs per row, plus the whole top row
   and the row above a flat bottom; their dots are alpha 31 whatever the
-  texel alpha (a transparent direct-colour texel shows its colour).
+  texel alpha (**new**: a transparent direct-colour texel shows its
+  colour; 3d_lines, 46 -> 0 dots).
 - Line segments (vertices on at most two dots) are drawn full size.
 - **Zero-area polygons (new).** Games close the gaps where walls meet with
   polygons whose vertices all lie on one line (SoulSilver's bedroom has
@@ -83,7 +92,7 @@ are not anti-aliased; lines, wire-frames and 1-dot polygons are
 | | Before | Now (reference runs) |
 |---|---|---|
 | What an edge dot mixes with | the colour it was drawn over, only where a 4-neighbour had another ID and lay further | a second layer per dot: the nearest opaque colour behind the top one, whatever the drawing order; hidden dots still land there when nearer, translucent polygons blend into both layers; no ID condition (3d_probe_aa3 exact) |
-| Lines, wire-frames | no AA | AA'd like any edge: dotted, faded lines (3d_aa) |
+| Lines, wire-frames | no AA | AA'd like any edge: dotted, faded lines (3d_aa); a 1-dot polygon stays visible (the reference runs; GBATEK says it vanishes, not settled) |
 | Under translucent polygons | AA skipped | AA still applies (both layers tinted) |
 | x-major coverage | exact area at the dot centre | a 10-bit height h at the dot centre from the run's exact left end, stepping floor((2^28 - 1) dy / (\|dx\| 2^18)) per dot; left edges h, right edges 1023 - h (measured from the end of the left run where they overlap); c = h >> 5 (3d_probe_aa4 643 -> 6 dots) |
 | y-major coverage | where the edge crosses the row's middle within the dot: right floor(32 c), left 31 - floor(32 (1 - c)) | unchanged |
@@ -121,9 +130,9 @@ These are what the DS draws, and so what dingbat now draws:
   faint to see"). Lines drawn translucent avoid it.
 - **Seams between translucent polygons of different IDs**: shared edges
   blend twice (bright or dark lines across a mesh).
-- **Gaps in shallow lines**: the hardware leaves a dot out of an x-major
-  run when x(y+1) lands just above a half dot (the line captures; we draw
-  that dot, see Open).
+- **Gaps in shallow lines and x-major edges**: a dot is left out of an
+  x-major run when x(y+1) passes its centre by less than the slope's low
+  9 bits (the line captures; 1320 of 49601 lines per corner have one).
 - **Small polygons**: opaque polygons without AA/edge marking lose their
   bottom/right edges; lone polygons look a dot short.
 - **Edge marking at the screen border** when the polygon ID differs from
@@ -150,23 +159,28 @@ Dots of our 3D buffer differing from melonDS DS 1.4 at 18-bit colour
 | 3d_probe_degen / _aa / _edge (new) | 213 / 117 / 0 | 0 / 0 / 0 |
 | 3d_probe_edge2, _dot, _xlu_seam, _xlu_seam_nb (new) | 0 | 0 |
 | 3d_probe_ztie (new) | 6 | 6 |
+| 3d_probe_hwline (new; against the hardware captures) | 6 | 0 (the reference cores: 6) |
 | every other 3d_* ROM | unchanged (hashes kept) | |
 
-Pokemon SoulSilver against the reference core (whole top screen, p12):
+Pokemon SoulSilver against the reference core (whole top screen, p12;
+ndscompare, so both runners on the host clock):
 
 | Frame | before | now | what is left |
 |---|---|---|---|
 | 6600 (bedroom) | 1061 (2.16 %) | 44 (0.09 %) | the character's shadow (30, texture), 3 apex dots (depth ties), 11 single dots |
 | 8000 (kitchen + text box) | 1131 (2.30 %) | 328 (0.67 %) | text box (141, 2D timing), wallpaper texel seams (131, texcoords on a quad clipped at x = 256), shadow, single dots |
 | title, bottom screen (our 860 vs reference 858) | 2493 (5.07 %) | 672 (1.37 %) | bubbles (2D sprites), one-step shading inside Lugia (lighting), a few spine edge dots |
+| 3000, 5000 | 993, 11580 | the same (no anti-aliased 3D on screen; the 5000 differences are the name-entry screen a few frames behind, 2D only) | |
+
+With the regression script (`--rtc 2004-01-01`), frames 3000 and 5000
+are byte-identical to before; 8000 changes (808 dots), as intended.
 
 ## Open
 
-- **Shallow-line gaps** (hardware captures, 1320 of 49601 per corner): the
-  hardware leaves out the last dot of an x-major run when x(y+1) is at most
-  502 / 2^18 above a half dot, but includes it when x(y+1) is exactly a
-  half (dy a power of two); no bias or truncation of x(y+1) fits every
-  capture. We draw the dot. The reference cores draw it too.
+- The run-end rule is pinned only for lines (the captures); for polygon
+  edges it is the same rasteriser path, but no capture shows a filled
+  polygon, and the reference cores do not have it (none of our 3d_probe_*
+  triangles happens to hit it).
 - **Depth at an apex** (3d_probe_ztie, 6 dots; SoulSilver 3 dots): where a
   polygon's apex dot ties a flat neighbour's depth, the reference shows
   the later polygon when it gets nearer from the apex; sampling edge depth

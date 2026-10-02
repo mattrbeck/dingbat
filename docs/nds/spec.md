@@ -113,7 +113,7 @@ src/dingbat/nds/
   gpu3d/gpu3d.nim  3D engine: GXFIFO/ports, command timing, GXSTAT, registers, BG0 line output
   gpu3d/geometry.nim matrices, lighting, polygon assembly, clipping, tests
   gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges,
-                   line budget (RDLINES)
+                   anti-aliasing, line budget (RDLINES); docs/nds/3d-edges.md
   io/irq.nim       IME/IE/IF per CPU
   io/timers.nim    4 timers per CPU
   io/dma.nim       4 channels per CPU (+ ARM9 fill regs)
@@ -249,9 +249,10 @@ FLASH behind the IR controller) and continues from that save, with the real
 BIOS or the HLE BIOS (identical frames). Driven by `ndsrun --press` scripts
 (`TOUCH:x:y` for the touch-screen buttons) with `--rtc 2004-01-01`, the same
 script gives the same frames as the reference core at most checkpoints
-(`tools/ndsref`, docs/oracles.md). Open: 3D rasterisation differs from the
-reference by edge pixels (bedroom, overworld), the title screen's 3D Lugia
-differs, a 2D alpha fade is one step off in places. It also boots through
+(`tools/ndsref`, docs/oracles.md). Open: the 3D bedroom is 44 dots
+(0.09 %) off the reference and the title's 3D Lugia 1.4 % (one-step
+shading, 2D bubbles) since the edge/anti-aliasing work
+(docs/nds/3d-edges.md); a 2D alpha fade is one step off in places. It also boots through
 the real BIOS, firmware and DS menu (`--boot firmware --press A@300,A@460`)
 from any of its dump forms, frame for frame with the reference core's
 firmware boot after the menu (docs/nds/boot.md).
