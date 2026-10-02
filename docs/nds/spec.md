@@ -66,10 +66,14 @@ the protection unit; instructions add their internal cycles. An ARM9 cycle is
 one master cycle, an ARM7 cycle two. The few unpublished values are marked
 Assumed in `timing.nim`. The card (`cart.nim`) times ROM words by its CLK,
 gap1 and gap2, and both SPI buses keep their busy flags for the byte's time at
-the selected baud rate. GBA-slot accesses take their times from the
+the selected baud rate (the ARM7 bus delivers its reply and IRQ at the end:
+docs/nds/peripherals.md). GBA-slot accesses take their times from the
 accessing CPU's own EXMEMCNT bits 0-4 (the table's rows are the default
 setting). With these, SoulSilver runs frame-locked with the reference core
-(docs/oracles.md, "NDS core").
+(docs/oracles.md, "NDS core"). `arm7_timing` pins the ARM7's costs; the
+reference core is 3 cycles cheaper on ARM7 main-RAM data than GBATEK, and
+both charge an ARM7 SUB/BGT loop 3 cycles where GBATEK's WaitByLoop table
+gives 4 (docs/nds/accuracy.md).
 
 The geometry engine takes GBATEK's cycles per command, a full GX FIFO holds
 the writing CPU (and the ARM7), SWAP_BUFFERS waits for V-blank + 392, DMA
@@ -77,10 +81,13 @@ mode 7 and the GXFIFO IRQ follow the FIFO level through an `evGxFifo`
 booking, and DMA mode 4 feeds the main-memory display FIFO 4 words per
 request as the display reads it. The renderer's line budget gives
 RDLINES_COUNT and the underflow flag. docs/nds/3d-timing.md has the model
-and its evidence.
-the selected baud rate (the ARM7 bus delivers its reply and IRQ at the end:
-docs/nds/peripherals.md). With these, SoulSilver runs frame-locked with the
-reference core (docs/oracles.md, "NDS core").
+and its evidence. The renderer draws each frame from line 214, 48 lines
+ahead of the display, reading its registers line by line (GBATEK; the
+reference core reads them once at line 192: docs/nds/accuracy.md).
+
+Power manager register 0 bit 6 powers the machine off: both CPUs and the
+clock stop, both screens go black (`powered_off()`, wasm
+`nds_powered_off`).
 
 The ARM9's protection unit refuses accesses outside every region or
 against a region's AP bits with a data abort (lr = opcode + 8) or prefetch
@@ -110,7 +117,8 @@ src/dingbat/nds/
   mem/vram.nim     VRAM banks A-I, VRAMCNT page tables
   gpu/gpu.nim      display timing, DISPSTAT, POWCNT1, screen routing
   gpu/engine2d.nim 2D engine A/B registers + line renderer, main-memory display FIFO
-  gpu3d/gpu3d.nim  3D engine: GXFIFO/ports, command timing, GXSTAT, registers, BG0 line output
+  gpu3d/gpu3d.nim  3D engine: GXFIFO/ports, command timing, GXSTAT, registers, BG0 line
+                   output with render registers sampled per line (docs/nds/accuracy.md)
   gpu3d/geometry.nim matrices, lighting, polygon assembly, clipping, tests
   gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges,
                    line budget (RDLINES)
@@ -145,14 +153,14 @@ web/nds.html, web/nds/             dev page (two canvases, keys, touch); ndsutil
 tools/ndssweep.nim                 compatibility sweep against tools/ndsref (docs/nds/compat.md)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs,
-                                   command timing, the 3d_* ROM hashes
+                                   command timing, the 3d_* ROM hashes, 3d_render_timing
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
 tests/nds_slot2_test.nim           GBA-slot devices + the slot2_probe ROM
 tests/nds_boot_test.nim            KEY1/KEY2, card handshake, secure area, direct boot
 tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machines
 tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
-tests/nds_compat_test.nim          checks for the homebrew sweep's fixes
+tests/nds_compat_test.nim          checks for the homebrew sweep's fixes, power-off, arm7_timing
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
