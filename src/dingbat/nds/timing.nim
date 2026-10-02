@@ -77,6 +77,7 @@ type
     dline*: array[128, DcLine]  ## data cache contents for main RAM, by slot
     slot_of*: seq[uint8]        ## per main RAM line: its slot + 1, or 0
     shadows*: int               ## slots with `shadowed` set
+    page_apart*: array[1024, uint8]  ## those slots per 4 KB page of main RAM
     ic_on*, dc_on*: bool
     pu_on*: bool              ## protection unit enabled (control bit 0)
     icode: array[256, bool]   ## cachable for code, by address top byte

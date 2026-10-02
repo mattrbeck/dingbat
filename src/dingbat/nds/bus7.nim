@@ -142,7 +142,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
       when width == 32: 0xFFFF_FFFF'u32 elif width == 16: 0xFFFF'u32 else: 0xFF'u32
   of 0x02:
     # memory's side of anything the ARM9's data cache holds (bus9.nim dc_*)
-    if unlikely(n.tm.shadows > 0): n.dc_mem_read(int(a and 0x3FFFFF), width)
+    if unlikely(n.dc_apart(int(a and 0x3FFFFF))): n.dc_mem_read(int(a and 0x3FFFFF), width)
     else: rd(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
     var shared: bool

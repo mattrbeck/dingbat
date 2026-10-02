@@ -198,6 +198,11 @@ template dc_through(n: NDS; a: uint32): bool =
   ## fetches never do; uncached regions and a disabled cache neither).
   not n.dma9.dma_access and n.tm.dc_on and n.tm.data_cachable(a)
 
+template dc_apart(n: NDS; i: int): bool =
+  ## Main RAM byte `i`'s line has a memory side apart from the CPU's copy.
+  n.tm.page_apart[i shr 12] != 0 and n.tm.slot_of[i shr 5] != 0 and
+    n.tm.dline[int(n.tm.slot_of[i shr 5]) - 1].shadowed
+
 proc dc_shadow(n: NDS; slot: int) =
   ## Keep the memory side of a cached line apart from the CPU's copy.
   if not n.tm.dline[slot].shadowed:
@@ -205,6 +210,7 @@ proc dc_shadow(n: NDS; slot: int) =
             addr n.main_ram[int(n.tm.dline[slot].line1 - 1) * 32], 32)
     n.tm.dline[slot].shadowed = true
     inc n.tm.shadows
+    inc n.tm.page_apart[int(n.tm.dline[slot].line1 - 1) shr 7]
 
 proc dc_drop(n: NDS; slot: int; write_back: bool) =
   ## The line leaves the data cache. Written back (eviction, clean and
@@ -216,6 +222,7 @@ proc dc_drop(n: NDS; slot: int; write_back: bool) =
     if not (write_back and n.tm.dline[slot].dirty):
       copyMem(addr n.main_ram[int(line1 - 1) * 32], addr n.tm.dline[slot].ram[0], 32)
     dec n.tm.shadows
+    dec n.tm.page_apart[int(line1 - 1) shr 7]
   n.tm.slot_of[line1 - 1] = 0
   n.tm.dline[slot] = DcLine()
 
@@ -226,6 +233,7 @@ proc dc_clean(n: NDS; slot: int) =
     if n.tm.dline[slot].shadowed:
       n.tm.dline[slot].shadowed = false
       dec n.tm.shadows
+      dec n.tm.page_apart[int(n.tm.dline[slot].line1 - 1) shr 7]
 
 proc dc_fill(n: NDS; a: uint32) =
   ## A data-cache line fill replaced slot `dcache.victim` with `a`'s line.
@@ -359,7 +367,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
   case a shr 24
   of 0x02:
     let i = int(a and 0x3FFFFF)
-    if unlikely(n.tm.shadows > 0) and not n.dc_through(a): n.dc_mem_read(i, width)
+    if unlikely(n.dc_apart(i)) and not n.dc_through(a): n.dc_mem_read(i, width)
     else: rd(n.main_ram, i)
   of 0x03:
     var ok: bool
@@ -420,9 +428,10 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
   case a shr 24
   of 0x02:
     let i = int(a and 0x3FFFFF)
-    if unlikely(n.tm.slot_of[i shr 5] != 0):
-      n.dc_write(i, v, width, n.dc_through(a), n.tm.data_buffered(a))
-    else: wr(n.main_ram, i)
+    let slot = int(n.tm.slot_of[i shr 5])
+    if likely(slot == 0) or (n.tm.dline[slot - 1].dirty and n.dc_through(a)):
+      wr(n.main_ram, i)       # uncached, or a store into an already dirty line
+    else: n.dc_write(i, v, width, n.dc_through(a), n.tm.data_buffered(a))
   of 0x03:
     var ok: bool
     let i = n.shared_wram9(a, ok)
@@ -505,7 +514,7 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02:
     # code reads memory, not the data cache
-    if unlikely(n.tm.shadows > 0): return n.dc_mem_read(int(a and 0x3FFFFF), 32)
+    if unlikely(n.dc_apart(int(a and 0x3FFFFF))): return n.dc_mem_read(int(a and 0x3FFFFF), 32)
     return rd32(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
   n.read9(a, 32)
@@ -515,7 +524,7 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   if n.fetch_cost9(a, 2): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02:
-    if unlikely(n.tm.shadows > 0): return n.dc_mem_read(int(a and 0x3FFFFF), 16)
+    if unlikely(n.dc_apart(int(a and 0x3FFFFF))): return n.dc_mem_read(int(a and 0x3FFFFF), 16)
     return rd16(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
   n.read9(a, 16)
