@@ -1170,6 +1170,7 @@ const openSettingsModal = () => {
   renderKbBindings();
   // Fresh open starts with Advanced folded (guarded for the pre-parse window).
   if (typeof collapseAdvanced === "function") collapseAdvanced();
+  if (typeof collapseChannels === "function") collapseChannels();
   // The remembered section stays selected, but the sheet always opens on
   // the list rather than drilled into it.
   let last = null;
@@ -1220,6 +1221,109 @@ advancedToggle.addEventListener("click", () => {
   advancedSub.hidden = !advancedSub.hidden;
   advancedToggle.setAttribute("aria-expanded", advancedSub.hidden ? "false" : "true");
 });
+
+// --- Settings › Audio › Channels ---
+// Mute single channels of the loaded game to hear the rest on their own: a
+// listening aid, output only (APU.channel_mask), never saved, cleared when a
+// game loads. Bit i mutes channel i: Square 1, Square 2, Wave, Noise, and on
+// a GBA Sample A and Sample B. #channels-indicator shows while any is muted.
+let channelMutes = 0;
+const channelsToggle = document.getElementById("channels-toggle");
+const channelsSub = document.getElementById("channels-sub");
+const channelsNote = document.getElementById("channels-note");
+const channelsTone = document.getElementById("channels-tone");
+const channelsToneLabel = document.getElementById("channels-tone-label");
+const channelsToneSub = document.getElementById("channels-tone-sub");
+const channelsSample = document.getElementById("channels-sample");
+const channelsFoot = document.getElementById("channels-foot");
+const channelsSummary = document.getElementById("channels-summary");
+const channelsIndicator = document.getElementById("channels-indicator");
+const channelsIndicatorLabel = document.getElementById("channels-indicator-label");
+const channelChips = [0, 1, 2, 3, 4, 5].map((i) => document.getElementById("channel-chip-" + i));
+// Each group's Mute all / Turn on, with the bits it covers.
+const channelGroups = [
+  { btn: document.getElementById("channels-all-tone"), bits: 0b001111 },
+  { btn: document.getElementById("channels-all-sample"), bits: 0b110000 },
+];
+const CHANNELS_NOTE = channelsNote.textContent;
+
+const audioChannelCount = () =>
+  typeof Module !== "undefined" && Module._wasm_audio_channels ? Module._wasm_audio_channels() : 0;
+
+const mutedCount = (bits) => {
+  let n = 0;
+  for (let b = bits; b; b &= b - 1) n++;
+  return n;
+};
+
+const renderChannels = () => {
+  const n = audioChannelCount();
+  channelMutes &= (1 << n) - 1;   // nothing loaded: nothing muted
+  const gb = n === 4;
+  channelsNote.textContent = n ? CHANNELS_NOTE : "Load a game to choose its channels.";
+  channelsTone.hidden = n === 0;
+  channelsSample.hidden = n < 6;
+  channelsToneLabel.textContent = gb ? "Channels" : "Tone channels";
+  channelsToneSub.textContent = gb
+    ? "Everything a Game Boy plays comes from these four"
+    : "The Game Boy-style square, wave and noise voices (PSG)";
+  channelChips.forEach((chip, i) => {
+    chip.setAttribute("aria-pressed", (channelMutes >> i) & 1 ? "false" : "true");
+  });
+  for (const g of channelGroups) {
+    g.btn.textContent = (channelMutes & g.bits) === g.bits ? "Turn on" : "Mute all";
+  }
+  const count = mutedCount(channelMutes);
+  const what = count === 1 ? "1 channel muted" : count + " channels muted";
+  channelsFoot.hidden = count === 0;
+  channelsSummary.textContent = what;
+  channelsIndicator.hidden = count === 0;
+  channelsIndicatorLabel.textContent = String(count);
+  channelsIndicator.title = "Audio: " + what;
+  channelsIndicator.setAttribute("aria-label", "Audio: " + what + ". Open channels");
+};
+
+const setChannelMutes = (bits) => {
+  channelMutes = bits;
+  if (typeof Module !== "undefined" && Module._wasm_set_channel_mutes) {
+    Module._wasm_set_channel_mutes(bits);
+  }
+  renderChannels();
+};
+
+// A game loaded: every channel plays again.
+const resetChannelMutes = () => setChannelMutes(0);
+
+const setChannelsOpen = (open) => {
+  channelsSub.hidden = !open;
+  channelsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  renderChannels();
+};
+
+// Folded on every Settings open, unless something is muted.
+const collapseChannels = () => setChannelsOpen(channelMutes !== 0);
+
+channelsToggle.addEventListener("click", () => setChannelsOpen(channelsSub.hidden));
+channelChips.forEach((chip, i) => {
+  chip.addEventListener("click", () => setChannelMutes(channelMutes ^ (1 << i)));
+});
+for (const g of channelGroups) {
+  g.btn.addEventListener("click", () => {
+    setChannelMutes((channelMutes & g.bits) === g.bits
+      ? channelMutes & ~g.bits : channelMutes | g.bits);
+  });
+}
+document.getElementById("channels-reset").addEventListener("click", resetChannelMutes);
+
+channelsIndicator.addEventListener("click", () => {
+  openSettingsModal();
+  openSettingsSection("audio");
+  setChannelsOpen(true);
+  const top = channelsToggle.getBoundingClientRect().top - settingsScroll.getBoundingClientRect().top;
+  settingsScroll.scrollTop += top - 12;
+  channelsToggle.focus({ preventScroll: true });
+});
+renderChannels();
 
 settingsModal.addEventListener("click", (e) => {
   if (e.target === settingsModal) closeSettingsModal();
@@ -10657,6 +10761,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   if (gen !== loadGen) return; // the next load re-applies all of this to its core
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
   applyAudioSilent();
+  resetChannelMutes();    // channel mutes belong to the previous game
   mp2kHleSessionOff = false; // the note-icon A/B belongs to the previous game
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart

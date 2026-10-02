@@ -250,6 +250,13 @@
            a button in the bar's sense, but tapping it turns the HLE off and
            on for this game only — a debugging A/B against the hardware mix
            that is never saved and resets on the next load. -->
+      <!-- Shown while Settings › Audio › Channels has anything muted, so missing
+           sound always has a visible cause; opens that section. -->
+      <button type="button" id="channels-indicator" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>
+        <span id="channels-indicator-label"></span><span class="channels-indicator-word">&nbsp;off</span>
+      </button>
+
       <button type="button" id="hle-indicator" hidden
               title="Enhanced audio on — tap to hear the hardware mix"
               aria-label="Enhanced audio" aria-pressed="true">
@@ -1199,6 +1206,49 @@
                     <input type="checkbox" id="play-in-silent-toggle" checked />
                     <span class="switch-track"></span>
                   </label>
+                </div>
+                <!-- Per-channel mutes for the loaded game (APU.channel_mask): folded on
+                     every open unless something is muted, never saved, cleared
+                     when a game loads. aria-pressed = the channel is playing. -->
+                <button type="button" class="settings-disclosure" id="channels-toggle"
+                        aria-expanded="false" aria-controls="channels-sub">
+                  Channels
+                  <svg class="settings-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                </button>
+                <div id="channels-sub" hidden>
+                  <p class="channels-note" id="channels-note">Mute parts of this game's sound to hear the rest on its own. Only for this game, until you load another.</p>
+                  <div class="channel-group" id="channels-tone" role="group" aria-labelledby="channels-tone-label">
+                    <div class="channel-group-head">
+                      <div>
+                        <span class="modal-row-label" id="channels-tone-label">Tone channels</span>
+                        <span class="modal-toggle-sub" id="channels-tone-sub">The Game Boy-style square, wave and noise voices (PSG)</span>
+                      </div>
+                      <button type="button" class="channel-all" id="channels-all-tone">Mute all</button>
+                    </div>
+                    <div class="channel-grid channel-grid-4">
+                      <button type="button" class="channel-chip" id="channel-chip-0" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Square 1</span></button>
+                      <button type="button" class="channel-chip" id="channel-chip-1" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Square 2</span></button>
+                      <button type="button" class="channel-chip" id="channel-chip-2" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Wave</span></button>
+                      <button type="button" class="channel-chip" id="channel-chip-3" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Noise</span></button>
+                    </div>
+                  </div>
+                  <div class="channel-group" id="channels-sample" role="group" aria-labelledby="channels-sample-label">
+                    <div class="channel-group-head">
+                      <div>
+                        <span class="modal-row-label" id="channels-sample-label">Sample channels</span>
+                        <span class="modal-toggle-sub">Recorded sound and most GBA music (Direct Sound)</span>
+                      </div>
+                      <button type="button" class="channel-all" id="channels-all-sample">Mute all</button>
+                    </div>
+                    <div class="channel-grid channel-grid-2">
+                      <button type="button" class="channel-chip" id="channel-chip-4" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Sample A</span></button>
+                      <button type="button" class="channel-chip" id="channel-chip-5" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Sample B</span></button>
+                    </div>
+                  </div>
+                  <div class="channels-foot" id="channels-foot" hidden>
+                    <span id="channels-summary"></span>
+                    <button type="button" class="button button-sm" id="channels-reset">All channels on</button>
+                  </div>
                 </div>
               </div>
 

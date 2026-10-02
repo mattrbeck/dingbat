@@ -497,6 +497,24 @@ proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
     of ekNone: discard
 
 var optSilent = false  # the player hears nothing: muted or volume 0
+var chanMutes: cint = 0  # Settings › Audio › Channels: bit i mutes channel i of the heard core
+
+proc apply_channel_mutes() =
+  ## APU.channel_mask on the core the player hears (the others are silent):
+  ## GBA bits 0-5 = Square 1, Square 2, Wave, Noise, Sample A, Sample B; GB
+  ## bits 0-3 the same four. Output only, like the volume: emulation, states
+  ## and links are unaffected.
+  template mask(apu: untyped; n: int) =
+    for i in 0 ..< n: apu.channel_mask[i] = (chanMutes and (1.cint shl i)) == 0
+  if stateRollback != nil: mask(stateRollback.link.cores[rbLocal].apu, 6)
+  elif stateGbRollback != nil: mask(stateGbRollback.link.cores[rbLocal].apu, 4)
+  elif stateLink != nil: mask(stateLink.cores[0].apu, 6)
+  elif stateGbLink != nil: mask(stateGbLink.cores[0].apu, 4)
+  else:
+    case stateKind
+    of ekGBA: mask(stateGba.apu, 6)
+    of ekGB:  mask(stateGb.apu, 4)
+    of ekNone: discard
 
 proc apply_audio_silent() =
   ## APU.silent on every live core: the heard core follows optSilent; a 2P
@@ -517,6 +535,22 @@ proc apply_audio_silent() =
     of ekGBA: stateGba.set_audio_silent(optSilent)
     of ekGB:  stateGb.apu.silent = optSilent
     of ekNone: discard
+  apply_channel_mutes()   # the same moments: every core build
+
+proc wasm_set_channel_mutes(bits: cint) {.exportc.} =
+  ## Settings › Audio › Channels. JS clears it when a game loads.
+  chanMutes = bits
+  apply_channel_mutes()
+
+proc wasm_audio_channels(): cint {.exportc.} =
+  ## How many channels the heard core mixes: 6 (GBA), 4 (Game Boy), 0 (none).
+  if stateRollback != nil or stateLink != nil: 6
+  elif stateGbRollback != nil or stateGbLink != nil: 4
+  else:
+    case stateKind
+    of ekGBA: 6
+    of ekGB: 4
+    of ekNone: 0
 
 proc wasm_set_audio_silent(on: cint) {.exportc.} =
   ## 1 while the player cannot hear the game (muted, volume 0): the cores

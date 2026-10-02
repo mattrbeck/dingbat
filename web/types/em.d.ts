@@ -66,6 +66,8 @@ interface EmscriptenModule {
   _wasm_set_turbo?(on: number): void;
   _wasm_set_slowmo?(on: number): void;
   _wasm_set_pitch_correct_ff?(on: number): void;
+  _wasm_set_channel_mutes?(bits: number): void;
+  _wasm_audio_channels?(): number;
   _wasm_set_audio_silent?(on: number): void;
   _wasm_state_error?(): number;
   _wasm_state_error_kind?(): number;
