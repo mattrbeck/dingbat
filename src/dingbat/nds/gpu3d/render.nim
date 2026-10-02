@@ -752,22 +752,28 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
         # anti-aliasing: a vertical edge gets no coverage in a swapped row
         # (polyrastertest's AA swapped vertical edge glitch: the hardware
         # inverts swapped edges' coverage, which leaves sloped edges as
-        # they would be on their side and verticals at none)
-        template edge_dot(x: int32; e: Edge; right: bool) =
+        # they would be on their side and verticals at none). The x-major
+        # edge on the left keeps the coverage of its run's first dot, as if
+        # the run were never stepped to its inner dot: none on the top row
+        # of polyrastertest 56 (the run starts 0.07 dots before a dot
+        # centre), some on the rows below (3d_probe_swap_aa on the
+        # reference cores gives these exact values).
+        template edge_dot(x: int32; e: Edge; right: bool; cx: int32) =
           if x >= 0 and x < W:
             r.plot(c, int(x), y, EL, ER, sp, true,
-                   (if not aa: 31'i32 elif e.vert: 0'i32 else: e.aa_cov(y, int(x), right)))
+                   (if not aa: 31'i32 elif e.vert: 0'i32 else: e.aa_cov(y, int(cx), right)))
+        let lcx = if pl.xmaj: lr.s else: xs
         if xs > xe:
           # no span between: the filled edge dots alone
-          if lfill: edge_dot(xs, pl, false)
-          if rfill: edge_dot(xe, pr, true)
+          if lfill: edge_dot(xs, pl, false, lcx)
+          if rfill: edge_dot(xe, pr, true, xe)
         elif wire and y != int(ymin) and not last_flat:
-          if lfill: edge_dot(xs, pl, false)
-          if rfill and xe != xs: edge_dot(xe, pr, true)
+          if lfill: edge_dot(xs, pl, false, lcx)
+          if rfill and xe != xs: edge_dot(xe, pr, true, xe)
         else:
           for x in max(0'i32, xs) .. min(W - 1, xe):
-            if x == xs and lfill: edge_dot(x, pl, false)
-            elif x == xe and rfill: edge_dot(x, pr, true)
+            if x == xs and lfill: edge_dot(x, pl, false, lcx)
+            elif x == xe and rfill: edge_dot(x, pr, true, xe)
             else: r.plot(c, int(x), y, EL, ER, sp, rim)
         continue
     let le = le0

@@ -360,11 +360,11 @@ block polyrastertest_rom:
       press = f + 1
       release = f + 4
     check seen == 77, "all 77 scenes ran", $seen
-    # 50 before the edge rules of docs/nds/3d-edges.md ("Swapped rows");
-    # the hardware passes 77
-    check passed == 73, "73 of 77 pass", $passed
-    check fails == @[38, 39, 43, 56], "failing: 38, 39, 43 (edge marking), 56 (one AA dot)",
-          fails.join(",")
+    # 50 before the edge rules of docs/nds/3d-edges.md ("Chains, facing
+    # and swapped rows"), 73 before the swapped x-major coverage; the
+    # hardware passes 77
+    check passed == 74, "74 of 77 pass", $passed
+    check fails == @[38, 39, 43], "failing: 38, 39, 43 (edge marking)", fails.join(",")
 
 echo failures, " failure(s)"
 if failures > 0: quit(1)

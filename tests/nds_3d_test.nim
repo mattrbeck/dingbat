@@ -728,6 +728,7 @@ const ROM_HASHES = [
   ("3d_probe_persp_tex", 0xD826BD30'u32),
   ("3d_probe_persp_w16", 0x99540F9B'u32),
   ("3d_probe_persp_w256", 0x99540F9B'u32),
+  ("3d_probe_swap_aa", 0xF89B84FD'u32),
   ("3d_probe_tri", 0xD166D2B0'u32),
   ("3d_probe_tri_edge", 0x3EF4A7F0'u32),
   ("3d_probe_tri_flat", 0xFC1EEC8A'u32),
