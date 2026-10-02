@@ -222,10 +222,47 @@ template dc_hit(n: NDS; a: uint32; slot: int): bool =
   ## enabled"), so it misses and reaches memory.
   n.dc_through(a) and n.tm.dline[slot].tag1 == (a shr 5) + 1
 
+template dc_slot1(n: NDS; line: int): int =
+  ## The data-cache slot + 1 holding main RAM line `line`, or 0.
+  int(n.tm.slot_of[line] and 0xFF)
+
 template dc_apart(n: NDS; i: int): bool =
   ## Main RAM byte `i`'s line has a memory side apart from the CPU's copy.
-  n.tm.page_apart[i shr 12] != 0 and n.tm.slot_of[i shr 5] != 0 and
-    n.tm.dline[int(n.tm.slot_of[i shr 5]) - 1].shadowed
+  n.tm.page_apart[i shr 12] != 0 and n.dc_slot1(i shr 5) != 0 and
+    n.tm.dline[n.dc_slot1(i shr 5) - 1].shadowed
+
+# --- ARM9 instruction cache contents (timing.nim IcLine) ------------------
+
+proc ic_keep(n: NDS; line: int) {.noinline.} =
+  ## Memory under main RAM line `line` is about to change: every
+  ## instruction-cache slot holding it keeps the line as it was filled.
+  ## Exact: a line not kept yet still has in memory what its fill read,
+  ## since every change to memory's side comes here first (write9,
+  ## write7, a data-cache write-back), so copying it now copies the fill.
+  let s = n.tm.icache.set_slots(uint32(line))
+  for i in s ..< s + 4:
+    if n.tm.iline[i].line1 == uint32(line + 1) and not n.tm.iline[i].kept:
+      let slot = n.dc_slot1(line) - 1
+      if slot >= 0 and n.tm.dline[slot].shadowed:
+        n.tm.iline[i].code = n.tm.dline[slot].ram      # memory's side
+      else:
+        copyMem(addr n.tm.iline[i].code[0], addr n.main_ram[line * 32], 32)
+      n.tm.iline[i].kept = true
+      inc n.tm.page_apart[line shr 7]
+      inc n.idle_epoch
+
+proc ic_drop(n: NDS; slot: int) =
+  ## The line leaves the instruction cache (tags are the caller's).
+  let line1 = n.tm.iline[slot].line1
+  if line1 != 0:
+    n.tm.slot_of[line1 - 1] -= IC_ONE
+    if n.tm.iline[slot].kept: dec n.tm.page_apart[int(line1 - 1) shr 7]
+  n.tm.iline[slot].line1 = 0
+  n.tm.iline[slot].kept = false
+
+proc ic_invalidate_all(n: NDS) =
+  for slot in 0 ..< n.tm.iline.len: n.ic_drop(slot)
+  n.tm.icache.invalidate()
 
 proc dc_shadow(n: NDS; slot: int) =
   ## Keep the memory side of a cached line apart from the CPU's copy.
@@ -242,17 +279,21 @@ proc dc_drop(n: NDS; slot: int; write_back: bool) =
   ## side wins and the CPU's unwritten stores are lost (invalidate).
   let line1 = n.tm.dline[slot].line1
   if line1 == 0: return
+  if write_back and n.tm.dline[slot].dirty and n.tm.slot_of[line1 - 1] >= IC_ONE:
+    n.ic_keep(int(line1 - 1))   # the CPU's copy reaches memory
   if n.tm.dline[slot].shadowed:
     if not (write_back and n.tm.dline[slot].dirty):
       copyMem(addr n.main_ram[int(line1 - 1) * 32], addr n.tm.dline[slot].ram[0], 32)
     dec n.tm.shadows
     dec n.tm.page_apart[int(line1 - 1) shr 7]
-  n.tm.slot_of[line1 - 1] = 0
+  n.tm.slot_of[line1 - 1] = n.tm.slot_of[line1 - 1] and 0xFF00'u16
   n.tm.dline[slot] = DcLine()
 
 proc dc_clean(n: NDS; slot: int) =
   ## Write a dirty line back; it stays cached.
   if n.tm.dline[slot].dirty:
+    let line = int(n.tm.dline[slot].line1 - 1)
+    if n.tm.slot_of[line] >= IC_ONE: n.ic_keep(line)   # the CPU's copy reaches memory
     n.tm.dline[slot].dirty = false
     if n.tm.dline[slot].shadowed:
       n.tm.dline[slot].shadowed = false
@@ -265,18 +306,18 @@ proc dc_fill(n: NDS; a: uint32) =
   n.dc_drop(slot, true)
   if (a shr 24) == 2:
     let line = (a and 0x3FFFFF) shr 5
-    let other = int(n.tm.slot_of[line])
+    let other = n.dc_slot1(int(line))
     if other != 0:
       # the same RAM line cached under another mirror: one copy kept (Assumed)
       n.dc_drop(other - 1, true)
       n.tm.dcache.clear_slot(other - 1)
     n.tm.dline[slot].line1 = line + 1
     n.tm.dline[slot].tag1 = (a shr 5) + 1
-    n.tm.slot_of[line] = uint8(slot + 1)
+    n.tm.slot_of[line] = (n.tm.slot_of[line] and 0xFF00'u16) or uint16(slot + 1)
 
 proc dc_mem_read(n: NDS; i: int; width: static int): uint32 =
   ## Main RAM as memory holds it (other masters, uncached accesses, code).
-  let slot = int(n.tm.slot_of[i shr 5]) - 1
+  let slot = n.dc_slot1(i shr 5) - 1
   if slot >= 0 and n.tm.dline[slot].shadowed:
     let j = i and 31
     when width == 32:
@@ -296,7 +337,7 @@ proc dc_write(n: NDS; i: int; v: uint32; width: static int; through, write_back:
   ## write-through updates both sides. Past the cache (DMA, the ARM7, an
   ## uncached mirror, the cache off): memory's side only -- the CPU keeps
   ## reading its stale copy until the line is invalidated or evicted.
-  let slot = int(n.tm.slot_of[i shr 5]) - 1
+  let slot = n.dc_slot1(i shr 5) - 1
   template put(p: ptr UncheckedArray[uint8]) =
     p[0] = uint8(v)
     when width >= 16: p[1] = uint8(v shr 8)
@@ -393,7 +434,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
   case a shr 24
   of 0x02:
     let i = int(a and 0x3FFFFF)
-    if unlikely(n.dc_apart(i)) and not n.dc_hit(a, int(n.tm.slot_of[i shr 5]) - 1):
+    if unlikely(n.dc_apart(i)) and not n.dc_hit(a, n.dc_slot1(i shr 5) - 1):
       n.dc_mem_read(i, width)
     else: rd(n.main_ram, i)
   of 0x03:
@@ -467,11 +508,19 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
   case a shr 24
   of 0x02:
     let i = int(a and 0x3FFFFF)
-    let slot = int(n.tm.slot_of[i shr 5])
-    if likely(slot == 0) or (n.tm.dline[slot - 1].dirty and n.dc_hit(a, slot - 1)):
+    let held = n.tm.slot_of[i shr 5]
+    let slot = int(held and 0xFF)
+    if likely(held == 0) or (slot != 0 and n.tm.dline[slot - 1].dirty and n.dc_hit(a, slot - 1)):
       wr(n.main_ram, i)       # uncached, or a store into an already dirty line
+    elif slot == 0:
+      n.ic_keep(i shr 5)      # only the instruction cache holds the line
+      wr(n.main_ram, i)
     else:
-      n.dc_write(i, v, width, n.dc_hit(a, slot - 1), n.tm.data_buffered(a))
+      let through = n.dc_hit(a, slot - 1)
+      let write_back = n.tm.data_buffered(a)
+      # all but a store into the CPU's copy of a write-back line reach memory
+      if held >= IC_ONE and not (through and write_back): n.ic_keep(i shr 5)
+      n.dc_write(i, v, width, through, write_back)
       inc n.idle_epoch          # a cached store: either side may change (perf.md)
   of 0x03:
     var ok: bool
@@ -502,6 +551,42 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
       else: n.gpu.vram.write16(r, off, uint16(v))
   of 0x08, 0x09, 0x0A: n.slot2_write(a, v, true, width)
   else: n.note_unmapped("arm9", a, true)
+
+proc ic_fill(n: NDS; a: uint32) =
+  ## An instruction-cache line fill replaced slot `icache.victim` with
+  ## `a`'s line (fetch_cost9, C7,C13,1 prefetch).
+  let slot = n.tm.icache.victim
+  n.ic_drop(slot)
+  case a shr 24
+  of 0x02:
+    let line = (a and 0x3FFFFF) shr 5
+    n.tm.iline[slot].line1 = line + 1
+    n.tm.slot_of[line] += IC_ONE
+  of 0x03, 0x05, 0x06, 0x07:
+    # writable memory no store path watches: copy the line now, as a
+    # fetch would read it
+    let base = a and not 31'u32
+    for k in 0'u32 .. 7:
+      let w = n.read9(base + 4 * k, 32)
+      for j in 0'u32 .. 3: n.tm.iline[slot].code[4 * k + j] = uint8(w shr (8 * j))
+    n.tm.iline[slot].kept = true
+  else: discard               # BIOS (read-only), I/O and the GBA slot: read live
+
+proc ic_code(n: NDS; a: uint32; width: static int): uint32 {.noinline.} =
+  ## A fetch the instruction cache may answer from a kept line; else
+  ## memory's side (main RAM: what the data cache keeps apart).
+  if n.tm.ic_on and n.tm.code_cachable(a):
+    let slot = n.tm.icache.find_slot(a)
+    if slot >= 0 and n.tm.iline[slot].kept:
+      let j = int(a and 31)
+      template c: untyped = n.tm.iline[slot].code
+      when width == 32:
+        return uint32(c[j]) or (uint32(c[j + 1]) shl 8) or
+               (uint32(c[j + 2]) shl 16) or (uint32(c[j + 3]) shl 24)
+      else:
+        return uint32(c[j]) or (uint32(c[j + 1]) shl 8)
+  if (a shr 24) == 0x02: n.dc_mem_read(int(a and 0x3FFFFF), width)
+  else: n.read9(a, width)
 
 # --- CPU mixins --------------------------------------------------------
 
@@ -535,6 +620,7 @@ proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
   elif n.tm.ic_on and n.tm.code_cachable(a):
     if not n.tm.icache.lookup(a, true):
       c += (if (a shr 24) == 0xFF: FILL_BIOS else: FILL_MAIN)
+      n.ic_fill(a)
       inc n.idle_epoch9         # a line fill changes the tags
   else:
     c += code9_uncached(a shr 24, n.slot9_t)
@@ -559,21 +645,22 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   if n.fetch_cost9(a, 4): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02:
-    # code reads memory, not the data cache
-    if unlikely(n.dc_apart(int(a and 0x3FFFFF))): return n.dc_mem_read(int(a and 0x3FFFFF), 32)
+    # code reads memory, not the data cache, or a line the instruction
+    # cache kept (either makes the page `apart`)
+    if unlikely(n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0): return n.ic_code(a, 32)
     return rd32(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
-  n.read9(a, 32)
+  n.ic_code(a, 32)
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
   if n.fetch_cost9(a, 2): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02:
-    if unlikely(n.dc_apart(int(a and 0x3FFFFF))): return n.dc_mem_read(int(a and 0x3FFFFF), 16)
+    if unlikely(n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0): return n.ic_code(a, 16)
     return rd16(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
-  n.read9(a, 16)
+  n.ic_code(a, 16)
 
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()
 proc irq_wake*(b: Arm9Bus): bool {.inline.} =
@@ -608,13 +695,27 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
       n.tm.update_control(n.cp15)
       n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
   of 7:
-    # cache maintenance (GBATEK "ARM CP15 Cache Control"): the instruction
-    # cache is tags only; data-cache lines by address (op2 1) or set/index
-    # (op2 2): C6 invalidate, C10 clean, C14 clean and invalidate
+    # cache maintenance (GBATEK "ARM CP15 Cache Control"): C5 invalidate
+    # the instruction cache, whole (op2 0) or the line at an address
+    # (op2 1; by set/index, op2 2, is not an ARM9 command: ignored), C13,1
+    # prefetch an instruction line; data-cache lines by address (op2 1) or
+    # set/index (op2 2): C6 invalidate, C10 clean, C14 clean and invalidate
     template dslot(): int =
       (if op2 == 1: n.tm.dcache.find_slot(v) elif op2 == 2: n.tm.dcache.set_index_slot(v) else: -1)
     case cm
-    of 5: (if op2 == 0: n.tm.icache.invalidate() elif op2 == 1: n.tm.icache.invalidate_line(v))
+    of 5:
+      if op2 == 0: n.ic_invalidate_all()
+      elif op2 == 1:
+        let slot = n.tm.icache.find_slot(v)
+        if slot >= 0:
+          n.ic_drop(slot)
+          n.tm.icache.clear_slot(slot)
+    of 13:
+      # fills as a fetch would (Assumed: whatever control bit 12 says,
+      # for an address the protection unit makes cachable; no cycles)
+      if op2 == 1 and n.tm.pu_on and n.tm.code_cachable(v) and
+         not n.tm.icache.lookup(v, true):
+        n.ic_fill(v)
     of 6:
       if op2 == 0: n.dc_invalidate_all()
       elif op2 == 1:
