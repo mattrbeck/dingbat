@@ -246,6 +246,72 @@ block hle_swi_cost:
               (if arm9: "ARM9 " else: "ARM7 ") & name & ": HLE within 2% of the BIOS's cycles",
               "real " & $real & " hle " & $hle
 
+# ---------------------------------------------------------------------------
+# ARM7 memory timing (tests/nds/src/arm7_timing, built by
+# tests/nds/tools/build_arm7_timing.sh): 256 passes of each loop, in bus
+# cycles. Main-RAM data accesses follow GBATEK's "DS Memory Timings" NDS7/DATA
+# row (N16 9, N32 10, S32 2: the reference runs are 3 cycles cheaper per
+# nonsequential access, docs/oracles.md); branches cost 3 cycles where
+# GBATEK's WaitByLoop table implies 4 (docs/nds/accuracy.md, open).
+
+block arm7_timing:
+  echo "ARM7 timing (arm7_timing ROM)"
+  let path = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "arm7_timing.nds"
+  if not fileExists(path):
+    echo "  (skipped: build it with tests/nds/tools/build_arm7_timing.sh)"
+  else:
+    let n = load_nds(path)
+    for f in 0 ..< 10: n.run_frame()
+    let b = Arm9Bus(nds: n)
+    proc res(k: int): uint32 = b.read32(0x0220_0000'u32 + uint32(4 * k)) div 256
+    check b.read32(0x0220_0000'u32) == 0x4952_4550'u32, "the ARM7 finished"
+    check res(4) == 27, "8 LDRH from ARM7 WRAM + loop: 8 x 3 + 3", $res(4)
+    check res(5) == 91, "8 LDRH from main RAM: 1S + N16 (9) + 1I each", $res(5)
+    check res(6) == 99, "8 LDR from main RAM: 1S + N32 (10) + 1I each", $res(6)
+    check res(7) == 91, "8 STR to main RAM: 1N code + N32 (10) each", $res(7)
+    check res(8) == 29, "LDMIA 8 from main RAM: N32 + 7 S32 (2) + 1S + 1I", $res(8)
+    check res(9) == 19, "8 MUL (one I each) + loop", $res(9)
+    echo "  (info: Thumb SUB/BGT pass ", res(1), " cycles, BIOS WaitByLoop pass ", res(13),
+         "; GBATEK's table: 4)"
+
+# ---------------------------------------------------------------------------
+# Power-off (ColecoDS, StellaDS, ... exit through libnds's shutdown: the ARM7
+# writes power manager register 0 bit 6; GBATEK "DS Power Management
+# Device": "DS System Power (0=Normal, 1=Shut Down)")
+
+block power_off:
+  echo "power-off"
+  let n = machine()
+  for f in 0..2: n.run_frame()
+  for i in 0 ..< 256 * 192:
+    n.gpu.top[i] = 0x7FFF; n.gpu.bottom[i] = 0x001F   # something on screen
+  let b = Arm7Bus(nds: n)
+  proc spi(v: uint16; hold: bool) =
+    b.write16(0x0400_01C0'u32, 0x8002'u16 or (if hold: 0x800'u16 else: 0))  # PM, 1 MHz
+    b.write16(0x0400_01C2'u32, v)
+    n.run_until(n.sched.now + 2000)                  # the byte's time
+  spi(0x00, true)                                    # register 0, write
+  check not n.powered_off(), "the index byte alone doesn't power off"
+  spi(0x40 or 0x0C, false)                           # backlights + shut down
+  check n.powered_off(), "register 0 bit 6 powers the DS off"
+  let t0 = n.sched.now
+  let i9 = n.arm9.instr_count
+  let i7 = n.arm7.instr_count
+  let f0 = n.gpu.frame_count
+  discard n.spu.take_samples()
+  for f in 0..4: n.run_frame()
+  check n.sched.now == t0 and n.arm9.instr_count == i9 and n.arm7.instr_count == i7,
+        "both CPUs and the clock stop"
+  check n.gpu.frame_count == f0 and n.spu.sample_count == 0, "no frames, no sound"
+  var lit = 0
+  for i in 0 ..< 256 * 192:
+    if n.gpu.top[i] != 0 or n.gpu.bottom[i] != 0: inc lit
+  check lit == 0, "both screens black", $lit & " lit pixels"
+  n.set_button(nbA, true)
+  n.set_touch(100, 100, true)
+  n.run_frame()
+  check n.powered_off() and n.sched.now == t0, "input doesn't turn it back on"
+
 if failures > 0:
   echo failures, " failed"
   quit(1)

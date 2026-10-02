@@ -723,6 +723,58 @@ proc rom_scenes() =
     if update: echo "  (\"", name, "\", 0x", toHex(h), "'u32),"
     else: check(h == want, name & ": 3D buffer CRC " & toHex(h) & ", expected " & toHex(want))
 
+proc rom_render_timing() =
+  ## 3d_render_timing (tests/nds/src/3d_render_timing): the renderer reads
+  ## its registers line by line from line 214, 48 lines ahead of the
+  ## display (GBATEK "RDLINES_COUNT"); a SWAP_BUFFERS written inside
+  ## V-blank waits for the next line 192. Top screen = 3D only.
+  echo "3d_render_timing ROM (render registers per line, swap in V-blank)"
+  let path = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "3d" /
+             "3d_render_timing.nds"
+  if not fileExists(path):
+    check(false, "missing " & path)
+    return
+  const RED = 0x001F'u16
+  const GREEN = 0x03E0'u16
+  const BLUE = 0x7C00'u16
+  const YELLOW = 0x03FF'u16
+  let n = load_nds(path)
+  var f = 0
+  proc upto(n: NDS; frame: int) =
+    while f < frame:
+      n.run_frame()
+      inc f
+  proc row(n: NDS; y: int): uint16 = n.gpu.top[y * 256 + 128] and 0x7FFF
+  proc bands(n: NDS; spans: openArray[(int, int, uint16)]): bool =
+    for (a, b, c) in spans:
+      for y in a .. b:
+        if n.row(y) != c: return false
+    true
+  n.upto(18)
+  check(n.bands([(0, 47, RED), (48, 107, GREEN), (110, 191, BLUE)]),
+        "CLR: CLEAR_COLOR at 200 on lines 0-47, at 230 down to ~108, at 60 below")
+  n.upto(38)
+  check(n.bands([(0, 47, RED), (48, 107, GREEN), (110, 191, BLUE)]),
+        "TOON: the toon table read per line the same way")
+  n.upto(58)
+  check(n.bands([(0, 47, YELLOW), (48, 191, BLUE)]), "FOG: DISP3DCNT fog bit read per line")
+  n.upto(78)
+  let a = n.row(100) == (n.gpu.bottom[100 * 256 + 250] and 0x7FFF)
+  n.upto(79)
+  check(a and n.row(100) == (n.gpu.bottom[100 * 256 + 250] and 0x7FFF),
+        "SWPD: a swap written at line 100 shows from the next frame")
+  n.upto(98)
+  check(n.bands([(0, 147, RED), (150, 191, BLUE)]),
+        "L 150: a write at line 100 reaches lines from ~148 on")
+  n.upto(218)
+  check(n.bands([(0, 47, BLUE), (48, 147, RED), (150, 191, BLUE)]),
+        "L 214: lines 0-47 were drawn at line 214, before the write")
+  n.upto(358)
+  let b = n.row(100) != (n.gpu.bottom[100 * 256 + 250] and 0x7FFF)
+  n.upto(359)
+  check(b and n.row(100) != (n.gpu.bottom[100 * 256 + 250] and 0x7FFF),
+        "SWPV: a swap written at line 200 waits for the next line 192")
+
 when isMainModule:
   if paramCount() >= 1: outdir = paramStr(1)
   createDir(outdir)
@@ -740,6 +792,7 @@ when isMainModule:
   scene_timing()
   scene_budget()
   rom_scenes()
+  rom_render_timing()
   if failures > 0:
     echo failures, " check(s) failed"
     quit(1)

@@ -18,6 +18,8 @@ type
     cnt*: uint16
     data_out*: uint8
     firmware*: seq[uint8]     ## 256 KB image (real dump or synthesized)
+    firmware_dirty*: bool     ## a page write/program or erase changed it since the
+                              ## frontend last saved it (user settings, wifi setup)
     # transfer
     pending: uint8            ## reply shown in SPIDATA when the transfer ends
     busy_until: int64
@@ -274,10 +276,12 @@ proc flash_deselect(s: Spi) =
   of fsWrite:
     if s.fwrote:
       s.wip_until = s.now() + (if s.fcmd == 0x0A: FLASH_PW_CYCLES else: FLASH_PP_CYCLES)
+      s.firmware_dirty = true
     s.write_enable = false
   of fsErase:
     let sector = s.fcmd == 0xD8
     s.flash_erase(s.faddr, if sector: 0x10000'u32 else: 0x100'u32)
+    s.firmware_dirty = true
     s.wip_until = s.now() + (if sector: FLASH_SE_CYCLES else: FLASH_PE_CYCLES)
     s.write_enable = false
   else: discard

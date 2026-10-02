@@ -74,6 +74,12 @@ proc nds_run_frame() {.exportc.} =
 proc nds_frame_count(): cint {.exportc.} =
   if core == nil: 0 else: cint(core.gpu.frame_count)
 
+proc nds_powered_off(): cint {.exportc.} =
+  ## 1 once the program has shut the DS down (power manager register 0 bit
+  ## 6): both screens are black, nothing runs and no sound comes out; only
+  ## nds_reboot (or another nds_boot) turns it back on.
+  if core != nil and core.powered_off(): 1 else: 0
+
 # Video: each screen is 256x192 BGR555 (bit 15 unused), read in place by the
 # app's WebGL presenter (web/glpresent.js). nds_fb_top/nds_fb_bottom convert
 # to RGBA8888 on demand for 2D-canvas pages.
@@ -166,6 +172,19 @@ proc nds_save_dirty(): cint {.exportc.} =
   if core != nil and core.cart.backup.dirty: 1 else: 0
 proc nds_save_clean() {.exportc.} =
   if core != nil: core.cart.backup.dirty = false
+
+# The firmware flash (io/spi.nim): the DS menu's settings and a game's
+# Nintendo WFC setup write it. When nds_firmware_dirty() is 1 the page
+# stores nds_firmware_len() bytes from nds_firmware_ptr() and passes them as
+# the firmware on the next nds_boot, then calls nds_firmware_clean().
+proc nds_firmware_len(): cint {.exportc.} =
+  if core == nil: 0 else: cint(core.spi.firmware.len)
+proc nds_firmware_ptr(): pointer {.exportc.} =
+  if core == nil or core.spi.firmware.len == 0: nil else: addr core.spi.firmware[0]
+proc nds_firmware_dirty(): cint {.exportc.} =
+  if core != nil and core.spi.firmware_dirty: 1 else: 0
+proc nds_firmware_clean() {.exportc.} =
+  if core != nil: core.spi.firmware_dirty = false
 
 proc nds_status(): cstring {.exportc.} =
   if core == nil: return "no ROM"

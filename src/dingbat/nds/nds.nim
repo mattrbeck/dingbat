@@ -407,6 +407,21 @@ proc wake_pending(n: NDS): bool {.inline.} =
 
 proc asleep*(n: NDS): bool {.inline.} = n.sleeping or n.spi.power_off
 
+proc powered_off*(n: NDS): bool {.inline.} =
+  ## The power manager's register 0 bit 6 was written ("DS System Power:
+  ## Shut Down", GBATEK "DS Power Management Device"): the machine is off
+  ## and stays off (only a new machine turns it on again).
+  n.spi.power_off
+
+proc show_power_off(n: NDS) =
+  ## Powered off, the LCDs are unpowered: both screens black (the reference
+  ## runs go black when a program shuts down: docs/oracles.md). Cheap
+  ## enough to repeat on every call while off, which also covers a state
+  ## loaded in that condition.
+  for i in 0 ..< 256 * 192:
+    n.gpu.top[i] = 0
+    n.gpu.bottom[i] = 0
+
 proc wake_from_sleep(n: NDS) =
   if n.sleeping and n.wake_pending(): n.sleeping = false
 
@@ -437,9 +452,12 @@ proc run_until*(n: NDS; target: int64) =
   inc n.idle_epoch            # the frontend may have changed keys, touch, ...
   if n.asleep():
     n.sleep_for(max(0'i64, target - n.sched.now))
+    if n.spi.power_off: n.show_power_off()
     return
   while n.sched.now < target:
-    if n.asleep(): return     # the ARM7 went to sleep in the last slice
+    if n.asleep():            # the ARM7 went to sleep (or off) in the last slice
+      if n.spi.power_off: n.show_power_off()
+      return
     var slice_end = min(target, n.sched.next_at())
     let both_halted = n.arm9.halted and n.arm7.halted
     if not both_halted and not n.quiet(): slice_end = min(slice_end, n.sched.now + SLICE)
@@ -457,11 +475,14 @@ proc run_frame*(n: NDS) =
   if n.asleep():
     # a frame's worth of sleep; the screens show what they last showed
     n.sleep_for(FRAME_CYCLES)
+    if n.spi.power_off: n.show_power_off()
     if n.asleep(): return
   let limit = n.sched.now + 2 * FRAME_CYCLES
   while not n.frame_done and n.sched.now < limit:
     n.run_until(min(limit, n.sched.now + LINE_CYCLES))
-    if n.asleep(): break
+    if n.asleep():
+      if n.spi.power_off: n.show_power_off()
+      break
   n.slot2.end_frame()
 
 proc insert_slot2*(n: NDS; kind: Slot2Kind; rom: seq[uint8] = @[];

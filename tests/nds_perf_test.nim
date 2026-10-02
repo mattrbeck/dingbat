@@ -111,7 +111,12 @@ for (name, path, frames) in [
     ("armwrestler", "armwrestler.nds", 120),
     ("arm7wrestler", "arm7wrestler.nds", 120),
     ("periph_suite", "periph_suite.nds", 240),
-    ("snd_suite", "snd_suite.nds", 240)]:
+    ("snd_suite", "snd_suite.nds", 240),
+    # render registers changed mid-frame and inside V-blank: frame reuse
+    # must see the per-line re-renders (docs/nds/accuracy.md)
+    ("3d_render_timing", "3d/3d_render_timing.nds", 380),
+    # exits through the power manager: the machine stops, screens black
+    ("colecods power-off", "homebrew/colecods.nds", 30)]:
   discard compare_runs(name, rom_dir / path, frames)
 
 block:

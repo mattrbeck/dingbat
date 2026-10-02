@@ -7,10 +7,18 @@
 ## Output, for engine A's BG0 (and capture): call `render_line(y)` for each
 ## visible line; it fills `line` with 256 pixels, each
 ##   bits 0-5 red, 8-13 green, 16-21 blue (6-bit), bits 24-28 alpha (0..31),
-## alpha 0 = transparent (`to_bgr555` drops to 15-bit colour). The frame is
-## rendered whole, from the swapped buffers and the render registers as they
-## are, on the first `render_line` after V-blank (the hardware starts at line
-## 214 with a 48-line cache, so this sees the same V-blank writes).
+## alpha 0 = transparent (`to_bgr555` drops to 15-bit colour).
+##
+## Render timing (GBATEK "DS 3D Overview" / "RDLINES_COUNT"): rendering
+## starts at line 214 into a 48-line cache, 48 lines ahead of the display,
+## with the render registers live ("not swapped ... must be kept intact
+## during rendering"). So lines 0-47 are drawn at line 214 and line y >= 48
+## when the display takes line y - 48 (at its start). `due_lines` says how
+## many lines are drawn by a given time; a write that changes a render
+## register (DISP3DCNT, 0x4000330-0x40003BF) first finishes the lines due
+## with the old value. The rasteriser itself is whole-frame: the lines come
+## from a full render (`ren.color`), redone when a register has changed since
+## (docs/nds/accuracy.md).
 ##
 ## Timing (docs/nds/3d-timing.md): each command takes GBATEK's cycles
 ## ("DS 3D Geometry Commands", 33.51 MHz units) from the moment it starts,
@@ -86,10 +94,20 @@ type
     rdlines: uint32               ## RDLINES_COUNT of the last frame
     underflow_next: bool          ## the frame being shown runs out of lines
     line*: array[256, uint32]     ## 0 alpha = transparent
+    render_t0*: int64             ## master cycle of the line 214 this frame's rendering started at
+    done_lines*: int              ## lines 0 ..< done_lines of `frame` are drawn
+    scratch_ok: bool              ## ren.color is a full render with the current registers + lists
+    frame*: array[256 * 192, uint32]  ## the frame as drawn line by line (what BG0 shows)
+
+const
+  RENDER_START_LINE = 214   ## GBATEK "RDLINES_COUNT": rendering starts in scanline 214
+  CACHE_LINES = 48          ## ... into a 48-line cache; output begins after line 262
 
 proc new_gpu3d*(vram: Vram; irq: IrqCtl): Gpu3d =
+  # at power-on (line 0) the first frame counts as started 49 lines ago
   Gpu3d(geo: new_geometry(), ren: new_renderer(), vram: vram, irq: irq,
-        fifo: initDeque[FifoEntry](512), rdlines: 46)
+        fifo: initDeque[FifoEntry](512), rdlines: 46,
+        render_t0: -int64(LINES - RENDER_START_LINE) * LINE_CYCLES)
 
 proc to_bgr555*(p: uint32): uint16 {.inline.} =
   ## A 3D pixel's colour as the 2D engines' 15-bit BGR.
@@ -297,18 +315,52 @@ proc read_reg*(g: Gpu3d; offset: uint32): uint32 =
     cast[uint32](geo.vec[(k div 3) * 4 + k mod 3])
   else: 0
 
+proc render_frame*(g: Gpu3d)
+
+proc due_lines(g: Gpu3d; t: int64): int =
+  ## How many lines of the frame being rendered are drawn by master cycle
+  ## `t`: none before line 214, the cache's 48 from then on (Assumed: the
+  ## renderer fills it at once), then line y when the display takes line
+  ## y - 48. Untimed (no scheduler): all of them.
+  if g.sched == nil: return 192
+  if t < g.render_t0: return 0
+  let first_take = g.render_t0 + int64(LINES - RENDER_START_LINE) * LINE_CYCLES
+  if t < first_take: return CACHE_LINES
+  min(192, CACHE_LINES + 1 + int((t - first_take) div LINE_CYCLES))
+
+proc draw_lines(g: Gpu3d; n: int) =
+  ## Lines done_lines ..< n get their pixels, from a full render with the
+  ## registers as they are now (re-rendered when something changed since).
+  if n <= g.done_lines: return
+  if not g.scratch_ok:
+    g.render_frame()
+    g.scratch_ok = true
+  copyMem(addr g.frame[g.done_lines * 256], addr g.ren.color[g.done_lines * 256],
+          (n - g.done_lines) * 256 * sizeof(uint32))
+  g.done_lines = n
+
+proc render_reg_changing(g: Gpu3d) =
+  ## A render register is about to change: the lines already due keep the
+  ## old value; the rest render with the new one.
+  g.draw_lines(g.due_lines(g.now()))
+  g.scratch_ok = false
+
 proc write_reg*(g: Gpu3d; offset: uint32; v, mask: uint32) =
   case offset
   of 0x060:
     # bits 12/13 are acknowledged by writing 1
     g.catch_up(g.now())
     let w = v and mask
-    g.disp3dcnt = (g.disp3dcnt and not (mask and 0x4FFF'u32)) or (w and 0x4FFF'u32)
+    let nv = (g.disp3dcnt and not (mask and 0x4FFF'u32)) or (w and 0x4FFF'u32)
+    if ((nv xor g.disp3dcnt) and 0x4FFF'u32) != 0: g.render_reg_changing()
+    g.disp3dcnt = nv
     if (w and 0x1000) != 0: g.disp3dcnt = g.disp3dcnt and not 0x1000'u32
     if (w and 0x2000) != 0: g.geo.overflow = false
   of 0x320 .. 0x3BC:
     let i = int((offset - 0x320) shr 2)
-    g.ren.regs[i] = (g.ren.regs[i] and not mask) or (v and mask)
+    let nv = (g.ren.regs[i] and not mask) or (v and mask)
+    if nv != g.ren.regs[i]: g.render_reg_changing()
+    g.ren.regs[i] = nv
   of 0x400 .. 0x43C: g.write_gxfifo(v)
   of 0x440 .. 0x5FC:
     let cmd = uint8((offset - 0x400) shr 2)
@@ -352,6 +404,10 @@ proc on_vblank*(g: Gpu3d) =
     g.rdlines = g.ren.rdlines
     if g.ren.underflow: g.disp3dcnt = g.disp3dcnt or 0x1000
   g.rendered = false
+  # the next frame renders from line 214 on, from the lists just swapped in
+  g.render_t0 = t + int64(RENDER_START_LINE - 192) * LINE_CYCLES
+  g.done_lines = 0
+  g.scratch_ok = false
 
 proc render_frame*(g: Gpu3d) =
   ## The renderer reads nothing but the swapped Polygon/Vertex buffers,
@@ -380,5 +436,7 @@ proc render_frame*(g: Gpu3d) =
     g.last_verts = g.verts
 
 proc render_line*(g: Gpu3d; y: int) =
-  if not g.rendered: g.render_frame()
-  for x in 0 ..< 256: g.line[x] = g.ren.color[y * 256 + x]
+  ## Display line y (or capture) takes its 3D line: everything due by now
+  ## is drawn, line y at the latest.
+  g.draw_lines(max(y + 1, g.due_lines(g.now())))
+  copyMem(addr g.line[0], addr g.frame[y * 256], 256 * sizeof(uint32))

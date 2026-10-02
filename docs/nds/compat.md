@@ -150,34 +150,40 @@ real BIOS and with the HLE BIOS (e4b66d68.., 6cf51b7e.., d2ad8167..).
 ## Open items, by owner
 
 **System peripherals (power):**
-- Power-off isn't modelled: after PM register 0 bit 6 (every libnds program
-  that returns from main, every emulator port without an SD card, START in
-  most examples) the reference goes black and stops; ours keeps the last
-  picture and both CPUs keep running (a spinning ARM9 costs ~18 ms of CPU a
-  frame here: StellaDS, ColecoDS, NINTV-DS, SpeccySE, DSMA, Kekatsu, DLDI
-  benchmark, Emulator Examination).
+- Power-off (fixed on `nds-accuracy`, docs/nds/accuracy.md): after PM
+  register 0 bit 6 (every libnds program that returns from main, every
+  emulator port without an SD card, START in most examples) both CPUs stop
+  and both screens go black, as in the reference. Re-swept: ColecoDS,
+  NINTV-DS, SpeccySE, StellaDS (broken-ref-too/ref-broken -> ok), Kekatsu
+  (differs -> ok); DLDI benchmark, DSMA stress test and Emulator Examination
+  now match after their exit (their remaining differences are before it);
+  0.4-2.9 ms of CPU a frame instead of ~18.
 - Touchscreen Z1/Z2 (TSC channels 3/4) read 0, so libnds's pressure reads
   1.0 in `pxi`/`touch_test` (the reference reads about -1/4096); GBATEK
   gives the formula, not values; a pressed stylus needs Z1 > 0, Z2 > Z1.
 
 **3D / display timing:**
 - `rttexample` (render-to-texture): the two passes' clear colours come out
-  swapped. Our frame renders at its first line with the rendering registers
-  of that moment; GBATEK: rendering starts 48 lines ahead (in V-blank) with
-  the registers live, which the demo's per-pass CLEAR_COLOR writes depend
-  on.
-- Counter-Strike DS: dual-screen 3D (POWCNT1 swap + capture into C/D each
-  frame). The swapping stops at frame ~27; our last capture leaves the top
-  view in the bank the bottom screen shows, the reference keeps the gamepad
-  there. Capture start and 3D swap relative to the routine's writes.
+  swapped against the reference. Rendering now starts at line 214 with the
+  registers read per line (GBATEK; `nds-accuracy`), which gives the same
+  picture: the demo writes CLEAR_COLOR at line 192, before 214. The
+  reference reads the registers at line 192, before the write
+  (3d_render_timing, docs/nds/accuracy.md); a hardware run decides.
+- Counter-Strike DS: on the current base the screens are right after the
+  switch to one 3D screen (16.6 % left: texel rounding on walls); the
+  switch itself lands one frame later than in the reference (CPU timing).
+  nds-examples `dual_screen` is ok.
 - 3D rasteriser edges in nds-examples 3D and gl2d programs (0.01-5 %), and
   frame-phase differences in 3D animation.
 
 **Card / real boot:**
-- nds-examples `eeprom`: re-reading the header after boot gives "HOMEBREW"
-  in ours (raw header command answered in KEY2 mode) and nothing in the
-  reference; the save probe finds a 512 KB chip in ours, none in the
-  reference (the cart has no save; what a flashcart answers varies).
+- nds-examples `eeprom`: the raw header re-read in main mode is an invalid
+  KEY2 command; ours answers the KEY2 stream (GBATEK), so the two copies
+  differ and it asks to reinsert the card; the reference answers zeros
+  (docs/nds/accuracy.md).
+- Firmware boot: 2 frames behind the reference; 0.7 of them is the
+  reference's cheaper ARM7 main-RAM data (arm7_timing; ours follows
+  GBATEK), the rest is not found (docs/nds/accuracy.md, boot.md).
 
 **Hardware question (CPU):**
 - ARMv5 opcodes with cond = 1111 that aren't BLX/PLD/etc.: ours raises

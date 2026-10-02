@@ -173,8 +173,9 @@ agree with GBATEK and with dingbat. Changed here:
   V-blank (lines 191..213) is not modelled; SWAP_BUFFERS after an
   incomplete polygon does not lock up the engine.
 - The render budget's constants want a hardware run of 3d_timing_rdlines;
-  rendering is still whole-frame, so mid-frame register writes and the
-  underflow's visible effect are not modelled.
+  the underflow's visible effect is not modelled. Render-register writes
+  now land per line, 48 lines ahead of the display (docs/nds/accuracy.md,
+  3d_render_timing); the budget does not delay when a line samples them.
 - The DMA-mode-4 corner cases above (FIFO depth, overflow, a channel left
   running, mid-frame enable) want a hardware run of disp_mmem.
 - The ARM9's own I/O access timing makes our polls coarser than the
