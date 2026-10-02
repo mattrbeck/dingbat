@@ -9,7 +9,7 @@
 ## Run with: nimble test_ndstestroms
 
 import std/[os, strutils]
-import dingbat/nds/nds
+import dingbat/nds/[nds, savestate]
 
 var failures = 0
 
@@ -181,6 +181,86 @@ block data_cache_contents:
   discard c.read32(A)
   c.write32(A, 0x6666_6666'u32)
   check Arm7Bus(nds: n2).read32(A) == 0x6666_6666'u32, "write-through updates memory too"
+
+# ---------------------------------------------------------------------------
+# ARM9 instruction cache contents (GBATEK "ARM CP15 Cache Control": C7,C5,0 /
+# C7,C5,1 invalidate, C7,C13,1 prefetch; "DS Memory Control - Cache and
+# TCM": 4-way, 32-byte lines; tests/nds/src/icache_stale)
+
+block instruction_cache_contents:
+  echo "ARM9 instruction cache contents"
+  let n = machine()
+  n.arm9.wl_on = false                                    # fetches outside a run
+  let b = Arm9Bus(nds: n)
+  let b7 = Arm7Bus(nds: n)
+  n.cache_on(write_back = true)
+  b.cp15_write(0, 2, 0, 1, 0x02)                          # I-cachable: region 1
+  b.cp15_write(0, 1, 0, 0, n.cp15.control or (1'u32 shl 12))
+  const A = 0x0210_0000'u32
+  b7.write32(A, 0x1111_1111'u32)
+  check b.fetch32(A) == 0x1111_1111'u32, "a miss fills from memory"
+  b7.write32(A, 0x2222_2222'u32)
+  check b.fetch32(A) == 0x1111_1111'u32, "code the ARM7 changed behind the cache runs stale"
+  b.write32(A + 0x40_0000, 0x2323_2323'u32)               # the uncached mirror
+  check b.fetch32(A) == 0x1111_1111'u32, "so does code changed through the uncached mirror"
+  b.cp15_write(0, 7, 5, 1, A)
+  check b.fetch32(A) == 0x2323_2323'u32, "C7,C5,1 drops the line: the next fetch reads memory"
+  # through the write-back data cache: the I-cache fills from memory, not
+  # from the CPU's dirty copy
+  discard b.read32(A)                                     # D-cache line filled
+  b.write32(A, 0x3333_3333'u32)
+  b.cp15_write(0, 7, 5, 1, A)
+  check b.fetch32(A) == 0x2323_2323'u32, "a dirty data-cache line is not code until cleaned"
+  b.cp15_write(0, 7, 10, 1, A)                            # clean: memory 0x3333...
+  check b.fetch32(A) == 0x2323_2323'u32, "cleaning reaches memory, not the instruction line"
+  b.cp15_write(0, 7, 5, 0, 0)
+  check b.fetch32(A) == 0x3333_3333'u32, "C7,C5,0 drops every line"
+  # off and on again: the lines stay
+  b7.write32(A, 0x4444_4444'u32)
+  let ctl = n.cp15.control
+  b.cp15_write(0, 1, 0, 0, ctl and not (1'u32 shl 12))
+  check b.fetch32(A) == 0x4444_4444'u32, "with the cache off fetches read memory"
+  b.cp15_write(0, 1, 0, 0, ctl)
+  check b.fetch32(A) == 0x3333_3333'u32, "on again, the line still holds what it was filled with"
+  # eviction: four more lines of the set (2 KB apart) replace it
+  for k in 1'u32 .. 3: discard b.fetch32(A + k * 0x800)
+  check b.fetch32(A) == 0x3333_3333'u32, "three other lines of the set: still held"
+  discard b.fetch32(A + 4 * 0x800)
+  check b.fetch32(A) == 0x4444_4444'u32, "a fourth evicts it (4 ways, round robin)"
+  # Thumb halves of a kept word, and a save state holding a kept line
+  b7.write32(A + 0x20, 0x2001_2002'u32)
+  discard b.fetch16(A + 0x20)
+  b7.write32(A + 0x20, 0x2003_2004'u32)
+  check b.fetch16(A + 0x20) == 0x2002 and b.fetch16(A + 0x22) == 0x2001,
+        "Thumb fetches read the kept halves"
+  let n2 = machine()
+  n2.arm9.wl_on = false
+  check n2.load_state_bytes(n.state_bytes()), "state with a kept line loads"
+  let c = Arm9Bus(nds: n2)
+  check c.fetch16(A + 0x20) == 0x2002 and Arm7Bus(nds: n2).read32(A + 0x20) == 0x2003_2004'u32,
+        "the loaded state runs the kept line, memory holds the new code"
+  c.cp15_write(0, 7, 5, 1, A + 0x20)
+  check c.fetch16(A + 0x20) == 0x2004, "and invalidating it there reads memory"
+  # prefetch (C7,C13,1) fills without running
+  b7.write32(A + 0x40, 0x5555_5555'u32)
+  b.cp15_write(0, 7, 13, 1, A + 0x40)
+  b7.write32(A + 0x40, 0x6666_6666'u32)
+  check b.fetch32(A + 0x40) == 0x5555_5555'u32, "a prefetched line runs what it was filled with"
+
+block icache_stale_rom:
+  echo "icache_stale (tests/nds/src/icache_stale)"
+  var ok: bool
+  let n = load_rom("3d/icache_stale.nds", ok)
+  if ok:
+    for f in 0 ..< 20: n.run_frame()
+    let t = n.t3d_text()
+    # GBATEK's semantics (the file's header); the reference runs model no
+    # cache contents (docs/oracles.md)
+    let want = ["STR   1 1 2", "MIR   1 1 2", "DMA   1 1 2", "THM   1 1 2",
+                "OFF   1 2 1 2", "PRE   1 2", "WB    1 1 2", "EVI   1 2"]
+    for i, w in want:
+      check t[2 + i] == w, "row " & $(2 + i) & ": " & w, t[2 + i]
+    check t[11] == "DONE", "every row ran", t[11]
 
 proc blocksds_console(n: NDS): seq[string] =
   ## The BlocksDS console: engine B BG0, tile = character - 32.
