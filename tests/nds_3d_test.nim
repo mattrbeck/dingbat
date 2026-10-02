@@ -546,6 +546,46 @@ proc scene_line_gaps() =
           (if has: "drawn" else: "left out") & " as on hardware")
     check((g.px(gapx - 1, gapy) and 0x3F3F3F) != 0, "line to (" & $dx & "," & $dy & "): the dot before is drawn")
 
+proc scene_overlap_edges() =
+  # polyrastertest's "curse of edge marking" (docs/nds/3d-edges.md): a
+  # white triangle and a red one 16/4096 behind it share their diagonal;
+  # with edge marking alone and one polygon ID the red one's left edge
+  # wins over the white one's right edge ("right ymajor/vert (overriden by
+  # left ymajor/vert)"); not with different IDs, nor with AA too (the
+  # test program's notes; the scene's projection and vertices).
+  echo "overlapping edges with edge marking (polyrastertest notes)"
+  for (cnt, wid, want_red, what) in [(0x20'u32, 0'u32, true, "edge marking, one ID: red edge shows"),
+                                     (0x20'u32, 1'u32, false, "different IDs: white"),
+                                     (0x30'u32, 0'u32, false, "edge marking + AA: white")]:
+    let (g, _) = fresh()
+    g.reg(0x060, cnt, 0xFFFF)
+    g.reg(0x350, (31'u32 shl 16) or (63'u32 shl 24))
+    g.reg(0x354, 0x7FFF, 0xFFFF)
+    g.cmd(0x60, (191'u32 shl 24) or (255'u32 shl 16))
+    g.cmd(0x10, 0)
+    var m: array[16, uint32]
+    for i, v in [131586, 0, 0, 0, 0, -175677, 0, 0, 0, 0, -1024, 0, 16, 21, -4096, 4096]:
+      m[i] = cast[uint32](int32(v))
+    g.cmd(0x16, m)
+    g.cmd(0x10, 2); g.cmd(0x15)
+    proc v16(g: Gpu3d; x, y, z: int) =
+      g.cmd(0x23, uint32(cast[uint16](int16(x))) or (uint32(cast[uint16](int16(y))) shl 16),
+            uint32(cast[uint16](int16(z))))
+    g.cmd(0x29, (31'u32 shl 16) or 0xC0 or (wid shl 24))
+    g.cmd(0x40, 0)
+    g.cmd(0x20, 0x7FFF); g.v16(32, -32, 0); g.v16(-32, -32, 0); g.v16(-32, 32, 0)
+    g.cmd(0x29, (31'u32 shl 16) or 0xC0)
+    g.cmd(0x40, 0)
+    g.cmd(0x20, 0x001F); g.v16(32, -32, -16); g.v16(32, 32, -16); g.v16(-32, 32, -16)
+    g.cmd(0x41)
+    g.cmd(0x50, 0)
+    g.on_vblank()
+    g.render_frame()
+    # (127, 95): the shared diagonal's dot on row 95 (128 is red's own)
+    let p = g.px(127, 95)
+    let red = (p and 0x3F) > 40 and ((p shr 8) and 0x3F) < 20
+    check(red == want_red, what & " (dot 127,95: " & toHex(p and 0xFFFFFF, 6) & ")")
+
 proc scene_registers() =
   echo "registers"
   let (g, _) = fresh()
@@ -845,6 +885,7 @@ when isMainModule:
   scene_timing()
   scene_budget()
   scene_line_gaps()
+  scene_overlap_edges()
   rom_scenes()
   rom_render_timing()
   if failures > 0:
