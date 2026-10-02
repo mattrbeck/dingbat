@@ -185,6 +185,14 @@ command with `ok [...]` or `err ...`:
 | `rtc_get` | read the cartridge RTC over the GPIO port as a game does: DATE_TIME register bytes and the status byte, hex (dingbat, mGBA) |
 | `rtc_set YYMMDDWWHHMMSS` | DATE_TIME write of those register bytes (dingbat, mGBA — mGBA ignores clock writes) |
 | `poke8 ADDR VAL` | bus write, e.g. a flash command that dirties the save (mGBA) |
+| `trace N PATH` | N single instruction steps, one line each to PATH: `PC CYCLES VCOUNT T/A` (r15 before the step, master-clock cycles it took), `FRAME` at each frame end (dingbat, mGBA). dingbat's r15 leads the instruction by 4 (Thumb), mGBA's by 2 |
+| `runto PC` | step until r15 == PC; replies r0..r15 (dingbat) |
+| `pft PC N PATH` | run to r15 == PC, then N steps with the `-d:pftrace` prefetch log to PATH (dingbat built with `-d:pftrace`) |
+
+`peek` in dingbat is untimed (it used to charge wait states, so peeking every
+frame moved the game's own timing). Comparing two emulators' instruction
+traces of the same code is how docs/playtest-bugs.md section 29 found
+which loops cost what.
 | `quit` | flush the battery file and exit |
 
 `rtc_crosscheck.py [rom]` uses these to prove the battery-save RTC trailer

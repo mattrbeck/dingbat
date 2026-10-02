@@ -1295,6 +1295,11 @@ proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inlin
 
 # A branch into the gamepak refills N then S, in that order (cpu.clear_pipeline).
 const ROM_REFILL_ORDERED* {.booldefine.} = true
+const BRANCH_COMMIT_WAIT* {.booldefine.} = true
+  ## A branch out of a gamepak stream waits out a prefetch halfword in its
+  ## final cycle (cpu.clear_pipeline). A knob for docs/playtest-bugs.md
+  ## section 29 (Final Fight One): off, dingbat lands 9.7k cycles sooner there and
+  ## still a frame later than both reference emulators.
 const ROM_REFILL_ORDERED_PF* {.booldefine.} = true
 const DMA_KEEPS_PREFETCH* {.booldefine.} = true
   ## A DMA that never touches the gamepak leaves the prefetcher running: the

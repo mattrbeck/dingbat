@@ -158,11 +158,68 @@ proc main() =
         emu.ppu.debug_layer_mask = uint8(parseHexInt(parts[1]))
         reply "ok"
       of "peek":
+        # untimed: a timed bus read (`emu.bus[a]`) charges wait states to
+        # the CPU, so peeking every frame shifted the game's own timing
         let a = uint32(parseHexInt(parts[1]))
         var s = ""
         for k in 0'u32 ..< uint32(parseInt(parts[2])):
-          s.add(emu.bus[a + k].toHex(2))
+          s.add(emu.bus.read_byte_internal(a + k).toHex(2))
         reply "ok " & s
+      of "trace":
+        # trace N PATH: N instruction steps, "PC CYCLES VCOUNT" per step to
+        # PATH (PC as r15 before the step, cycles the step took) (debug)
+        var f = open(parts[2], fmWrite)
+        var prev = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+        for _ in 1 .. parseInt(parts[1]):
+          let pc = emu.cpu.r[15]
+          let th = emu.cpu.cpsr.thumb
+          emu.cpu.tick()
+          let now = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+          f.writeLine(pc.toHex(8) & " " & $(now - prev) & " " & $emu.ppu.vcount & (if th: " T" else: " A"))
+          prev = now
+          if emu.ppu.frame != 0:
+            emu.end_frame()
+            inc frame
+            prev = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+            emu.frame_start_cycles = emu.scheduler.cycles
+            f.writeLine("FRAME")
+        f.close()
+        reply "ok"
+      of "pft":
+        # pft PC N PATH: run to r15 == PC, then N steps with -d:pftrace on
+        when defined(pftrace):
+          let target = uint32(parseHexInt(parts[1]))
+          while emu.cpu.r[15] != target:
+            emu.cpu.tick()
+            if emu.ppu.frame != 0:
+              emu.end_frame()
+              inc frame
+              emu.frame_start_cycles = emu.scheduler.cycles
+          pft_on = true
+          pft_lines.setLen(0)
+          for _ in 1 .. parseInt(parts[2]):
+            emu.cpu.tick()
+            if emu.ppu.frame != 0:
+              emu.end_frame()
+              inc frame
+              emu.frame_start_cycles = emu.scheduler.cycles
+          pft_on = false
+          writeFile(parts[3], pft_lines.join("\n"))
+          reply "ok"
+        else:
+          reply "err build with -d:pftrace"
+      of "runto":
+        # runto PC: step until r15 == PC (debug), then print r0-r15
+        let target = uint32(parseHexInt(parts[1]))
+        while emu.cpu.r[15] != target:
+          emu.cpu.tick()
+          if emu.ppu.frame != 0:
+            emu.end_frame()
+            inc frame
+            emu.frame_start_cycles = emu.scheduler.cycles
+        var s: seq[string]
+        for k in 0 .. 15: s.add(emu.cpu.r[k].toHex(8))
+        reply "ok " & s.join(" ")
       of "rtc_get":
         # DATE_TIME register bytes (year month day weekday hour minute second)
         # and the status register, hex

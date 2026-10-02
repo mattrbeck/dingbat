@@ -261,6 +261,31 @@ int main(int argc, char** argv) {
              (unsigned long long) mTimingGlobalTime(&gba->timing),
              core->busRead16(core, 0x04000006), gba->cpu->gprs[15]);
       fflush(stdout);
+    } else if (!strcmp(cmd, "trace")) {
+      /* trace N PATH: N single steps, "PC CYCLES VCOUNT" per step to PATH
+       * (PC = r15 before the step, master-clock cycles the step took) */
+      long want = 0;
+      char path[400] = {0};
+      sscanf(arg, "%ld %399s", &want, path);
+      struct GBA* gba = core->board;
+      FILE* f = fopen(path, "w");
+      unsigned long long prev = mTimingGlobalTime(&gba->timing);
+      unsigned startframe = gba->video.frameCounter;
+      for (long k = 0; k < want && f; ++k) {
+        unsigned pc = gba->cpu->gprs[15];
+        int th = gba->cpu->cpsr.t;
+        core->step(core);
+        unsigned long long now = mTimingGlobalTime(&gba->timing);
+        fprintf(f, "%08X %llu %u %c\n", pc, now - prev, core->busRead16(core, 0x04000006), th ? 'T' : 'A');
+        prev = now;
+        if (gba->video.frameCounter != startframe) {
+          startframe = gba->video.frameCounter;
+          ++frame;
+          fprintf(f, "FRAME\n");
+        }
+      }
+      if (f) fclose(f);
+      reply(f ? "ok" : "err cannot write");
     } else if (!strcmp(cmd, "stepuntil")) {
       /* stepuntil ADDR MASK: single-step until (busRead16(ADDR) & MASK) != 0;
        * reports the master clock (cycles since reset), VCOUNT, PC */

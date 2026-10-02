@@ -2947,3 +2947,98 @@ Golden Sun, F-Zero - Maximum Velocity, Mario Kart Super Circuit, Castlevania
 6998/6998 (HLE and Nintendo's BIOS), dbsuite unchanged (dma 261/262, bus
 76/79, both BIOSes), cycle laws 1860/1860 and invariants 30/30 under both
 BIOSes.
+
+## 29. Final Fight One: a frame late after a load, and why that is the references, 2026-10-02
+
+The playtest evaluator flagged dingbat (every config) a frame behind mGBA,
+with the second reference agreeing with mGBA, in Final Fight One (fade-in
+after the black loading screen at f315), The Sims - Bustin' Out (first ~40
+frames), Harvest Moon - Friends of Mineral Town, Yu-Gi-Oh! The Eternal
+Duelist Soul, Lunar Legend and Yoshi's Island. **No emulator change: in the
+three traced, every cycle dingbat spends that the references do not is a
+cost silicon has already measured or a hardware-verified test requires.**
+
+### How it was found
+
+`tools/playtest/drivers`: dingbat's `peek` was a *timed* bus read (it
+charged wait states), so peeking RAM every frame moved the game; it is now
+untimed. New debug commands (README, "Driver protocol"): `trace N PATH` in
+dingbat and mGBA (PC and master-clock cycles per instruction, black-box
+from mGBA's public step and timing calls), `runto PC`, `pft PC N PATH`.
+With them: replay the frozen script, diff RAM per frame, then trace both
+emulators across the frames where RAM first diverges and compare the cost of
+the same loop.
+
+### Final Fight One
+
+* RAM diverges at **f280**, not f315: from there dingbat's EWRAM at frame
+  f+1 equals mGBA's at f (2 bytes differ) all the way to the fade-in.
+* f272-f280 is a loading thread: an LZ decompressor in Thumb ROM code
+  (0x08045CD0, WAITCNT 0x4314, prefetch on) unpacking straight into VRAM
+  with read-modify-write halfwords, then a pass at 0x0803DECC and an EWRAM
+  memset (0x0806B838). Both emulators give the thread the same ~279k cycles
+  a frame (the main thread and interrupts differ by ~80 cycles a frame).
+* mGBA reaches the idle loop **17.6k cycles before** the f280 V-blank;
+  dingbat **26.2k cycles after** it, so the game's next step slips a frame.
+  The 44k gap:
+
+| | cycles | evidence |
+|---|---|---|
+| renderer contention on the decompressor's VRAM reads/writes (mode 0, BG1-3 on, palette black) | 16.4k | console-measured (`contmap.s`, CONTEND2: +1 per CPU VRAM read in mode 0); neither reference models it |
+| a branch waits out a committed prefetch halfword (`clear_pipeline`) -- the decompressor's `ldrb` from VRAM then `b` pays it on every other byte | 9.7k | needed by alyosha prefetcher_full_arm, _branch_thumb, _thumb_3, _boundary_1/_3 (hardware-verified; WS0 4/2 like this game) |
+| everything else: mGBA prices data accesses under the prefetcher below the bus floor | ~18k | the memset loop (4 `stmia` of one word to EWRAM, `subs`, `cmp`, `bhi`) is 38 cycles in dingbat and **26 in mGBA**, though four EWRAM word stores alone are 24 bus cycles and the taken branch's nonsequential refill another 6; `slotexec.s` on the AGB SP: EWRAM load/store from gamepak code with the prefetcher on = dingbat, mGBA 4-5 short |
+
+  `-d:CONTENTION=false` lands 9.8k late, `-d:BRANCH_COMMIT_WAIT=false`
+  16.6k late, both off **still 2.5k late** -- f315 either way. Turning off
+  measured behaviour does not reach the references' frame.
+* The alyosha prefetcher ROMs, 120 frames each in the playtest drivers:
+  dingbat passes all nine tried; mGBA fails 8 (passes _branch_thumb_6);
+  the second reference fails 5 (_branch_thumb_2/_3/_4/_6, _full_arm). Both
+  references' prefetchers are fast in ways hardware is not.
+
+### The others traced
+
+* **The Sims - Bustin' Out**: boot clears 40 KB of EWRAM with
+  `stmia r0!,{r1}; adds; cmp; bcc` from ROM at WAITCNT 0x4314: **18 cycles
+  an iteration in dingbat, 14 in mGBA** (one EWRAM word store is 6 bus
+  cycles and the taken branch's refill 4 + 2). The references do not agree
+  either: the second reference shows the 30 Hz animation a frame *ahead* of
+  mGBA, dingbat a frame behind, three phases from f33.
+* **Harvest Moon - Friends of Mineral Town**: the boot Huffman decoder
+  (0x080D1186, WAITCNT 0x4017) loads its bit stream from the cartridge
+  with `ldmia r0!,{r2}`; dingbat charges the fetch after a gamepak data load
+  nonsequential and the load's I cycle no prefetch (alyosha
+  prefetcher_branch_thumb_2, failed by both references): 4 cycles a word
+  more than mGBA. mGBA's frame-10 work ends with 46k idle; dingbat's spills
+  just past the V-blank and loses frame 11 -- the farm layout seed follows.
+* Not traced (and `-d:CONTENTION=false` / `-d:BRANCH_COMMIT_WAIT=false`
+  change none of their first divergent frames, nor The Sims' or Harvest
+  Moon's): Yu-Gi-Oh! EDS (first difference f32, where the second reference
+  also leaves mGBA), Yoshi's Island (dingbat briefly *ahead* at f93, f191),
+  Lunar Legend (both dingbat configs match mGBA f2-f560; the second
+  reference already differs from mGBA every fourth frame from f33), MMBN2/4.
+
+### Hardware check
+
+`tests/roms/payloads/slotbranch.s` + `tools/hwlink/slotbranch.py` (empty
+slot, WAITCNT 0x4000 only): one load fetched from the slot, then the BL
+suffix branching either home (control) or to `bx r6` at 0x08008E60 in the
+slot. The rom-home difference per load is the gamepak branch target's cost:
+
+| load (d = data + I cycles) | dingbat home/rom/diff | mGBA home/rom/diff |
+|---|---|---|
+| `ands` (no data) | 18 / 29 / 11 | 18 / 29 / 11 |
+| `ldr` IWRAM, d=2 | 18 / 29 / 11 | 18 / 29 / 11 |
+| `ldmia` IWRAM 2 regs, d=3 | 19 / 30 / 11 | 18 / 29 / 11 |
+| `ldmia` IWRAM 3 regs, d=4 | 20 / 32 / **12** | 18 / 29 / 11 |
+| `ldrh` EWRAM, d=4 | 20 / 32 / **12** | 18 / 29 / 11 |
+| `ldmia` VRAM 2 regs, d=5 | 21 / 32 / 11 | 18 / 29 / 11 |
+| `ldmia` VRAM 3 regs, d=7 | 23 / 35 / **12** | 18 / 29 / 11 |
+| `ldr` EWRAM, d=7 | 23 / 35 / **12** | 18 / 29 / 11 |
+| `ldr` VRAM, d=3 | 19 / 30 / 11 | 18 / 29 / 11 |
+
+The commit wait shows as diff 12 at d = 4 and 7 (d mod 3 = 1 at S = 3);
+the home column re-asks section 22's question for more loads (mGBA charges
+none of them). A console that reads 11 everywhere refutes the commit wait at
+a branch and makes Final Fight 9.7k cycles faster -- still a frame behind
+the references.

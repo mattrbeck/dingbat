@@ -436,7 +436,7 @@ proc clear_pipeline*(cpu: CPU) =
             else:
               let sp = int(bus.wait16_s[page])
               elapsed < 8 * sp and elapsed mod sp == sp - 1
-          if commit: both += 1
+          if commit and BRANCH_COMMIT_WAIT: both += 1
       if not streamed:
         # The CPU's own fetches: the prefetcher starts behind them
         bus.pf_paused = false
