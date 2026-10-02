@@ -8,8 +8,9 @@
 ## (0..31). Alpha 0 is transparent.
 ##
 ## Per polygon: rows from the top vertex row down to (not including) the
-## bottom one; on each row the two edges crossing it cover runs of dots and
-## the span runs between them (edge rules below, at Edge). Attributes are
+## bottom one; on each row the edges two chains of vertices have reached
+## cover runs of dots and the span runs between them (edge rules below, at
+## Edge; chains and swapped rows at draw_polygon). Attributes are
 ## interpolated along the edges, then across the span: linearly where the
 ## two ends' w are equal, else perspective-correctly with 9-bit (edge) and
 ## 8-bit (span) factors. Colours carry 9 bits through interpolation.
@@ -319,6 +320,40 @@ proc make_edge(sx, sy: openArray[int32]; a, b: int): Edge =
   result.dec = dx < 0
   result.vert = dx == 0
 
+type
+  Chain = object                ## one side's walk down the polygon (draw_polygon)
+    cur, nxt, dir: int          ## current vertex, next one, step (1 or n - 1)
+    built: int                  ## cur * 16 + nxt of the edge in `e`
+    e: Edge
+
+proc advance(c: var Chain; sx, sy: openArray[int32]; n, y: int): bool =
+  ## Move on to the edge covering row y; false once the chain has none.
+  var guard = 0
+  while sy[c.nxt] <= y and guard < n:
+    c.cur = c.nxt
+    c.nxt = (c.nxt + c.dir) mod n
+    inc guard
+  if sy[c.nxt] <= y: return false
+  if c.built != c.cur * 16 + c.nxt:
+    c.e = make_edge(sx, sy, c.cur, c.nxt)
+    c.built = c.cur * 16 + c.nxt
+  true
+
+proc facing(verts: openArray[Vertex]; first, n: int): float64 =
+  ## The turn of the first three vertices in clip space, the determinant of
+  ## their (x, y, w): positive anticlockwise (Y up). Assumed: clip space
+  ## (polyrastertest's second-vertex tests turn on vertices that land on
+  ## one screen line, so it is not the screen position); the minors are
+  ## exact, the sum is a float (only its sign is used).
+  if n < 3: return 0
+  let a = verts[first]
+  let b = verts[first + 1]
+  let c = verts[first + 2]
+  let m0 = int64(b.y) * c.w - int64(c.y) * b.w
+  let m1 = int64(b.x) * c.w - int64(c.x) * b.w
+  let m2 = int64(b.x) * c.y - int64(c.x) * b.y
+  float64(a.x) * float64(m0) - float64(a.y) * float64(m1) + float64(a.w) * float64(m2)
+
 template edge_x(e: Edge; y: int): int64 =
   (int64(e.x0) shl XSHIFT) + e.slope * (int64(y) - e.y0) - (if e.dec: 1'i64 else: 0'i64)
 
@@ -626,16 +661,6 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       if sx[i] != sx[0] or sy[i] != sy[0]:
         if o < 0: o = i
         elif sx[i] != sx[o] or sy[i] != sy[o]: line = false
-  # zero area: every vertex on one line (games close gaps between walls
-  # with such polygons)
-  var zero_area = true
-  block:
-    var o = 0
-    for i in 1 ..< n:
-      if o == 0:
-        if sx[i] != sx[0] or sy[i] != sy[0]: o = i
-      elif int64(sx[o] - sx[0]) * (sy[i] - sy[0]) != int64(sy[o] - sy[0]) * (sx[i] - sx[0]):
-        zero_area = false
   # GBATEK "Polygon Size": only opaque polygons without edge marking or
   # anti-aliasing leave out their bottom/right edges
   let full = wire or line or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
@@ -644,10 +669,14 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
   # dots, as the reference runs of 3d_aa draw them), not translucent ones
   let aa = (disp3dcnt and 0x10) != 0 and not poly.translucent
   if ymin == ymax:
-    # all on one row: the dots from the leftmost vertex to the rightmost
+    # all on one row: the dots from the leftmost to the rightmost of the
+    # first vertex and its two neighbours, the right end left out (the
+    # chains step once each way from the top vertex: polyrastertest's
+    # horizontal line polygons "always render 1-4, 1-2 or 2-4, 3 is never
+    # rendered", also once clipped)
     if ymin < 0 or ymin >= H: return
     var li, ri = 0
-    for i in 1 ..< n:
+    for i in [1 mod n, n - 1]:
       if sx[i] < sx[li]: li = i
       if sx[i] > sx[ri]: ri = i
     let L = EndAttr(x: sx[li], c: va[li].c, s: va[li].s, t: va[li].t, z: va[li].z, w: va[li].w)
@@ -657,40 +686,92 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     for x in max(0, int(sx[li])) ..< min(W, max(int(sx[ri]), int(sx[li]) + 1)):
       r.plot(c, x, int(ymin), L, R, sp, true)
     return
-  var edges: array[16, Edge]
-  var ne = 0
-  for i in 0 ..< n:
-    let j = (i + 1) mod n
-    if sy[i] == sy[j]: continue
-    edges[ne] = make_edge(sx, sy, i, j)
-    inc ne
-  var nbottom = 0
-  for i in 0 ..< n:
-    if sy[i] == ymax: inc nbottom
-  let flat_bottom = nbottom >= 2
+  # The rasteriser walks two chains of edges down from the top vertex (the
+  # first one on the top row): one forward in vertex order, one backward,
+  # each moving on to the next vertex once the current edge ends, whichever
+  # way that edge runs (polyrastertest: cursed line polygons, "pointer
+  # never goes backwards"). Which chain is the left one comes from the
+  # polygon's facing, taken from its first three vertices: the forward
+  # chain when they turn anticlockwise or lie on one line (polyrastertest:
+  # second vertex tests, a concave second vertex "swaps" the polygon).
+  let fwd_left = facing(verts, int(poly.first), n) >= 0
+  var top = 0
+  for i in 1 ..< n:
+    if sy[i] < sy[top]: top = i
+  var chains = [Chain(cur: top, nxt: (top + 1) mod n, dir: 1, built: -1),
+                Chain(cur: top, nxt: (top + n - 1) mod n, dir: n - 1, built: -1)]
+  # the trapezoid rule's flat bottom: two bottom vertices apart
+  var flat_bottom = false
+  block:
+    var bx = -1'i32
+    for i in 0 ..< n:
+      if sy[i] == ymax:
+        if bx < 0: bx = sx[i]
+        elif sx[i] != bx: flat_bottom = true
   for y in max(0, int(ymin)) ..< min(H, int(ymax)):
-    # the two edges crossing this row, ordered by x at the row's centre
-    var li, ri = -1
-    for k in 0 ..< ne:
-      if edges[k].y0 > y or edges[k].y1 <= y: continue
-      if li < 0: li = k
-      elif ri < 0: ri = k
-    if li < 0 or ri < 0: continue
-    block:
-      let a = edges[li]
-      let b = edges[ri]
-      # x(y + 1/2) of each as a fraction over 2*dy, cross-multiplied
-      let na = int64(a.x0) * 2 * (a.y1 - a.y0) + int64(a.x1 - a.x0) * (2 * y + 1 - 2 * a.y0)
-      let nb = int64(b.x0) * 2 * (b.y1 - b.y0) + int64(b.x1 - b.x0) * (2 * y + 1 - 2 * b.y0)
-      let lhs = na * (b.y1 - b.y0)
-      let rhs = nb * (a.y1 - a.y0)
-      # on a tie (a zero-width polygon) the edge that runs forward in
-      # vertex order from the top is the left one (3d_probe_degen)
-      if lhs > rhs or lhs == rhs and (a.edge_x(y) > b.edge_x(y) or
-                                      a.edge_x(y) == b.edge_x(y) and b.fwd and not a.fwd):
-        swap(li, ri)
-    let le = edges[li]
-    let re = edges[ri]
+    var ok = true
+    for k in 0..1:
+      if not chains[k].advance(sx, sy, n, y): ok = false
+    if not ok: continue
+    let le0 = chains[if fwd_left: 0 else: 1].e
+    let re0 = chains[if fwd_left: 1 else: 0].e
+    # both chains on one segment: drawn whole (polyrastertest: line
+    # polygons, only the line part of the cursed ones)
+    let rfull = full or (le0.x0 == re0.x0 and le0.y0 == re0.y0 and le0.x1 == re0.x1 and le0.y1 == re0.y1)
+    let rim = y == int(ymin) or y == int(ymax) - 1
+    let last_flat = flat_bottom and y == int(ymax) - 1
+    # A row where the designated left edge lies right of the designated
+    # right one at the row's top (or level with it, moving right faster) is
+    # "swapped": the span runs from the right edge to the left one; filled
+    # x-major runs give only their inner dot, the left side follows the
+    # left fill rule, and the right side the right rule except that a
+    # non-x-major right edge is filled when the edge on the left is
+    # vertical (the hardware checks the wrong side: polyrastertest's
+    # "swapped vertical left glitch"); a vertical edge is moved left a dot
+    # by being the designated right edge, not by lying on the right.
+    # A swapped row whose ends cross over is drawn as an ordinary one.
+    let xl = le0.edge_x(y)
+    let xr = re0.edge_x(y)
+    if xl > xr or xl == xr and le0.slope > re0.slope:
+      let pl = re0
+      let pr = le0
+      # a shifted vertical stops at the screen's left edge (polyrastertest:
+      # with anti-aliasing its dot 0 shows the edge)
+      var lr = pl.edge_run(y, true)
+      if pl.vert and lr.s < 0: lr = Run(s: 0, e: 1, vert: true)
+      let rr = pr.edge_run(y, false)
+      let lfill = rfull or not (pl.xmaj and not pl.dec)
+      let rfill = if pr.xmaj: rfull or not pr.dec else: rfull or pl.vert
+      let xs = if lfill: (if pl.xmaj: lr.e - 1 else: lr.s) else: lr.e
+      let xe = if rfill: rr.s else: rr.s - 1
+      if xs <= xe + 1:
+        r.charge(y, int(xs), int(xe) + 1)
+        let EL = pl.edge_end(va, y, xs)
+        let ER = pr.edge_end(va, y, xe + 1)
+        var sp = span_step(EL.x, ER.x)
+        # anti-aliasing: a vertical edge gets no coverage in a swapped row
+        # (polyrastertest's AA swapped vertical edge glitch: the hardware
+        # inverts swapped edges' coverage, which leaves sloped edges as
+        # they would be on their side and verticals at none)
+        template edge_dot(x: int32; e: Edge; right: bool) =
+          if x >= 0 and x < W:
+            r.plot(c, int(x), y, EL, ER, sp, true,
+                   (if not aa: 31'i32 elif e.vert: 0'i32 else: e.aa_cov(y, int(x), right)))
+        if xs > xe:
+          # no span between: the filled edge dots alone
+          if lfill: edge_dot(xs, pl, false)
+          if rfill: edge_dot(xe, pr, true)
+        elif wire and y != int(ymin) and not last_flat:
+          if lfill: edge_dot(xs, pl, false)
+          if rfill and xe != xs: edge_dot(xe, pr, true)
+        else:
+          for x in max(0'i32, xs) .. min(W - 1, xe):
+            if x == xs and lfill: edge_dot(x, pl, false)
+            elif x == xe and rfill: edge_dot(x, pr, true)
+            else: r.plot(c, int(x), y, EL, ER, sp, rim)
+        continue
+    let le = le0
+    let re = re0
     let L = le.edge_run(y, false)
     let R = re.edge_run(y, true)
     r.charge(y, int(L.s), int(R.e))
@@ -701,8 +782,6 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let EL = le.edge_end(va, yl, L.s)
     let ER = re.edge_end(va, yr, R.e)
     var sp = span_step(EL.x, ER.x)
-    let rim = y == int(ymin) or y == int(ymax) - 1
-    let last_flat = flat_bottom and y == int(ymax) - 1
     # wire-frames: the two runs only, except on the top row and the row
     # above a flat bottom, which are drawn whole
     if wire and y != int(ymin) and not last_flat:
@@ -714,9 +793,10 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     # which runs are drawn: all when full size; else the left run unless it
     # is a bottom x-major edge, the right run only when it is a top x-major
     # edge (or vertical); on the last row above a flat bottom, the x-major
-    # runs both (3d_probe_tri, 3d_probe_tri_flat)
-    let ldraw = full or not (L.xmaj and L.inc) or last_flat
-    let rdraw = full or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
+    # runs both (3d_probe_tri, 3d_probe_tri_flat); the right run starts
+    # after the left one
+    let ldraw = rfull or not (L.xmaj and L.inc) or last_flat
+    let rdraw = rfull or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
     if aa:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false))
       for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
@@ -726,10 +806,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true)
     for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
     if rdraw:
-      # the right run starts after the left one, unless the polygon has no
-      # area and the left one is not drawn (a zero-width x-major polygon
-      # shows its right runs: 3d_probe_degen)
-      for x in max(0, int(max(R.s, if ldraw or not zero_area: L.e else: L.s))) ..< min(W, int(R.e)):
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
         r.plot(c, x, y, EL, ER, sp, true)
 
 {.pop.}
