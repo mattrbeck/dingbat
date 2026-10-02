@@ -103,6 +103,10 @@ TABLE = {
     # fifodma's k = 20 staircase after w = 0, 4, 6, 7, 8 words stored to the
     # FIFO: the eighth word leaves it reading empty (payloads/fifomap.s)
     'fifomap': [w << 26 | 20 << 8 | n for w in (0, 4, 6, 7, 8) for n in (17, 40)],
+    # a FIFO reset k = 0..8 samples into four words, by SOUNDCNT_H (v = 0)
+    # and by the master enable (v = 1): does the word being played survive?
+    # (payloads/fiforeset.s; Kingdom Hearts - Chain of Memories)
+    'fiforeset': [v << 8 | k for v in (0, 1) for k in range(9)],
     'hdmalag': ([c << 8 | w for c in list(range(0, 12)) + [15, 16, 17, 18, 19, 20, 31, 32, 33, 34]
                  for w in (1, 10, 11, 14)]
                 + [8 << 8 | 2, 22 << 8 | 1, 22 << 8 | 11]

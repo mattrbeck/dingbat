@@ -3042,3 +3042,66 @@ the home column re-asks section 22's question for more loads (mGBA charges
 none of them). A console that reads 11 everywhere refutes the commit wait at
 a branch and makes Final Fight 9.7k cycles faster -- still a frame behind
 the references.
+
+## 30. Kingdom Hearts - Chain of Memories: DirectSound near-mono after the movie, 2026-10-02
+
+**Symptom.** After the opening movie both references play FIFO B (left) 29
+output samples (14 FIFO samples at 15768 Hz) behind FIFO A (right) for the
+rest of the run; dingbat keeps them sample-aligned, so its wide passages are
+near-mono (L/R correlation from the first music on: dingbat 0.90, mgba 0.42,
+the second reference 0.44) and the audio check fails in all four configs
+(12.3 % of the run). The m4a mixer writes the same position into both
+buffers, so any constant offset is the FIFOs', not the music's.
+
+**The register sequence** (dingbat trace, cycle frames; the script's frames
+are the same within a frame). The game runs m4a stereo (SOUNDCNT_H 0xA90E:
+A right, B left, both TM0) from f3, then for the movie (f1566) switches to
+FIFO A alone to both sides (0x0B04: A reset, B unrouted, DMA1 only, TM0
+period 532). At f8009 it stops TM0 and DMA1 with FIFO A three bytes short
+of a word boundary (15 bytes queued), then m4a's SoundInit: DMA1/DMA2 CNT_H
+0x0400, SOUNDCNT_X 0x8F, SOUNDCNT_H 0xA90E (both FIFOs reset), DMA1/DMA2
+0xB600, TM0 1254 on V-count 159, SoundMode's TM0 stop / VSyncOff / TM0 1064.
+From then on the only writes are m4a's resync every sixth frame (DMA1CNT
+0x84400004, DMA2CNT likewise, both CNT_H 0x0400, both 0xB600), which
+reloads both sources together and so keeps whatever offset the FIFOs hold.
+The boot-time init (f3) is the same sequence from empty FIFOs, and there
+all three emulators stay aligned.
+
+**Mechanism.** Both references keep playing the rest of the word a FIFO is
+on through a reset; only the queued words go. FIFO A therefore comes out of
+the f8009 reset with three stale samples ahead of the new stream and FIFO B
+with none, and that difference survives every resync. Black-box evidence:
+`tests/roms/payloads/fiforeset.s` (four words, k samples played, reset,
+four more words, then the overflow at which each refill DMA first asks)
+reads 2 5 4 3 2 5 4 3 for k = 0..7 on both references and 2 everywhere on
+dingbat; a FIFO played audibly (pattern words, reset after k samples) shows
+the 4 - k mod 4 leftover samples before the new pattern on the second
+reference. Built with `-d:FIFO_RESET_KEEPS_WORD=true`, dingbat reads the
+references' 2 5 4 3 and its Kingdom Hearts left channel lands 29 samples
+behind the right, as on both (L/R correlation 0.44); the playtest goes from
+FAIL (12.3 %) to PASS (0.1 %, dingbat and dingbat-bios).
+
+**The master enable is already answered, by the console.** A first version
+of the knob kept the word through every reset, including SOUNDCNT_X going
+off (the second reference does; fiforeset.s v = 1; mgba clears nothing
+there at all). The recorded laws refuse it: two console cells of fifomap
+(`r0-agb.json`, 0x1428 and 0x20001428, run straight after a cell that
+stops TM0 part-way through a word and exits with the master off) read one
+refill burst more than that model gives (0x6A, model 0x4C), and dbsuite's
+three fifodma "spike" cells fail. With the word kept through the reset bit
+only, every cycle law holds (1860/1860) and the runner is unchanged, so
+the knob now covers SOUNDCNT_H's bits alone: whatever the bits do, powering
+the sound off empties the FIFO, word and all, as `FIFO_MASTER_RESET`
+already has it. Also seen: mgba does not drain a FIFO routed to neither
+side (the second reference does, as dingbat does).
+
+**Status: needs the console for the reset bits.** No measurement says what
+the AGB does there, so the knob ships off (`dma_channels.nim`
+FIFO_RESET_KEEPS_WORD). Run `python3 tools/hwlink/r0table.py --record
+fiforeset` with the SP on the link. dingbat predicts 2 for every cell as
+shipped and, with the knob, 2 5 4 3 2 5 4 3 2 for v = 0 and 2 throughout
+for v = 1; the references read 2 5 4 3 2 5 4 3 2 for v = 0. 2 5 4 3 in A
+and B for v = 0 means flip the knob to true (Kingdom Hearts then passes);
+2 throughout means the references are wrong and this game is right as it
+is. v = 1 should read 2 throughout on the console (fifomap says so); if it
+does not, the fifomap reading above needs another look.

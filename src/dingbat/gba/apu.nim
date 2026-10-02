@@ -592,8 +592,8 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
       apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0xFF00'u16) or (uint16(value) and 0x0F'u16))  # bits 4-7 unused
     of 0x83:
       # Bits 3,7 (= register bits 11,15) are write-only FIFO reset triggers
-      if bit(value, 3): apu.dma_channels.fifo_reset(0)  # FIFO A reset
-      if bit(value, 7): apu.dma_channels.fifo_reset(1)  # FIFO B reset
+      if bit(value, 3): apu.dma_channels.fifo_reset(0, by_bit = true)  # FIFO A reset
+      if bit(value, 7): apu.dma_channels.fifo_reset(1, by_bit = true)  # FIFO B reset
       apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8))
     of 0x84:
       if (value and 0x80) == 0 and apu.sound_enabled:

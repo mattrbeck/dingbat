@@ -57,6 +57,21 @@ const FIFO_DMA_WINDOW {.booldefine.} = true
   ## its grant, which may run under the burst.
 const FIFO_WINDOW_LEAD {.intdefine.} = 16
 
+const FIFO_RESET_KEEPS_WORD {.booldefine.} = false
+  ## A FIFO reset by SOUNDCNT_H's bit 11/15 drops the words queued in the
+  ## FIFO but not the rest of the word it is playing, whose remaining 1-3
+  ## samples still come out first. Unmeasured: both reference emulators
+  ## behave so (tests/roms/payloads/fiforeset.s v = 0 reads 2 5 4 3 2 5 4 3
+  ## on them, 2 throughout on dingbat as shipped), and with it Kingdom
+  ## Hearts - Chain of Memories' left channel (FIFO B) runs 29 output
+  ## samples behind the right after its sound restart, as on both (the
+  ## restart resets FIFO A three bytes short of a word boundary, and m4a's
+  ## resync keeps that offset). The master enable going off clears the word
+  ## as well either way: kept there too, the console's fifomap cells after a
+  ## part-played cell (r0-agb.json, 0x1428) read one refill burst short, and
+  ## dbsuite's fifodma "spike" cells fail. Off until the console answers
+  ## fiforeset.s (docs/playtest-bugs.md).
+
 proc dma_channels_in_range*(address: uint32): bool =
   address >= DMA_CHANNELS_RANGE_LOW and address <= DMA_CHANNELS_RANGE_HIGH
 
@@ -78,7 +93,21 @@ proc new_dma_channels*(gba: GBA): DMAChannels =
     if getEnv("DINGBAT_FIFO_INTERP") == "0":
       result.fifo_interp = false
 
-proc fifo_reset*(dc: DMAChannels; channel: int) =
+proc fifo_reset*(dc: DMAChannels; channel: int; by_bit = false) =
+  ## `by_bit`: SOUNDCNT_H's reset bit, not the master enable going off.
+  when FIFO_RESET_KEEPS_WORD:
+    # The word on its way out keeps its unplayed bytes; only the words queued
+    # behind it go. The FIFO is filled a word at a time from position 0, so
+    # the head word has played `positions mod 4` of its bytes; one not yet
+    # started goes with the rest. The bytes stay where they are and the next
+    # word is stored right after them.
+    let played = dc.positions[channel] mod 4
+    if by_bit and played != 0 and dc.sizes[channel] > 0:
+      dc.sizes[channel] = min(4 - played, dc.sizes[channel])
+      dc.latches[channel] = 0
+      dc.hist[channel] = [0'i16, 0, 0, 0]
+      dc.inv_period[channel] = 0.0'f32
+      return
   for i in 0..31: dc.fifos[channel][i] = 0
   dc.positions[channel] = 0
   dc.sizes[channel] = 0
