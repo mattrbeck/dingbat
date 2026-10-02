@@ -198,6 +198,25 @@ which reads those bits from the opcode: 1778 ARM and 100 Thumb procs per
 CPU. The binary grows by 0.8 MB (ndsrun 1.13 -> 1.94 MB). A bus module
 expands `dispatch_tables(B)` at its end, where every mixin is declared.
 
+## Interrupt checks only when something changed (arm/cpu.nim `run`, `attn`)
+
+Before each opcode the run loop tested HALT and the IRQ line (IME, IE and
+IF through two pointers, then CPSR.I): about a dozen host instructions per
+opcode. Inside one `run` call nothing but that CPU executes -- no event is
+dispatched, the other CPU waits -- so these can only change through what
+the CPU itself does: an I/O or GBA-slot access (register writes, reads
+with side effects, DMA started, the geometry FIFO, HALTCNT), a CPSR write
+(`set_cpsr`: MSR, a return from a mode), a SWI (HLE SWIs halt and write
+I/O) or a CP15 write (wait for interrupt). Each of those sets the CPU's
+`attn` flag; the loop tests halt and the IRQ line only when it is set, and
+`run` starts with it set (events, the other CPU and the frontend change IF
+between calls). Taking an exception only sets CPSR.I. The traced loop
+(`--trace9/7`) keeps the old per-opcode checks. `nds_testroms_test`
+("interrupts taken at the opcode after the write that allows them") runs
+an `STR` to IME and an `MSR` clearing CPSR.I on both CPUs and checks the
+IRQ comes before the next opcode; leaving out the I/O write's flag fails
+it (the IRQ comes one opcode late).
+
 ## Numbers
 
 Host instructions retired (`/usr/bin/time -l`), real BIOS unless noted,

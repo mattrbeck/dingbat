@@ -447,6 +447,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     if ok: rd(n.shared_wram, i) else: 0'u32
   of 0x04:
     n.sync9()
+    n.arm9.attn = true          # a read side effect may raise an IRQ (arm/cpu.nim run)
     let w = n.io9_read(a and not 3'u32)
     let o = a and 0x00FF_FFFC'u32
     if not io9_steady(o):
@@ -537,6 +538,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
                else: 0xFF'u32 shl sh
     when defined(ndsdebug):
       if n.iolog: n.log_io("9", a and not 3'u32, v shl sh, mask, true, n.arm9.cur_pc)
+    n.arm9.attn = true          # IE/IF/IME, HALTCNT, DMA, ... (arm/cpu.nim run)
     n.io9_write(a and not 3'u32, v shl sh, mask)
   of 0x05, 0x07:
     when width != 8:

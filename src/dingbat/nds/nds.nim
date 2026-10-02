@@ -140,6 +140,7 @@ proc slot2_read(n: NDS; a: uint32; is9: bool; width: static int): uint32 =
   if owner9 != is9: return 0
   # GPIO, RTC: values that change on their own; the other CPU reads zeros
   if is9: inc n.idle_epoch9 else: inc n.idle_epoch7
+  if is9: n.arm9.attn = true else: n.arm7.attn = true   # the slot's IRQ (arm/cpu.nim run)
   let s {.cursor.} = n.slot2
   if a >= 0x0A00_0000'u32:
     let b = s.ram_read8(a)
@@ -166,6 +167,7 @@ proc slot2_write(n: NDS; a: uint32; v: uint32; is9: bool; width: static int) =
       n.log_io(if is9: "9" else: "7", a, v, 0xFFFF_FFFF'u32, true,
                if is9: n.arm9.cur_pc else: n.arm7.cur_pc)
   if owner9 != is9: return
+  if is9: n.arm9.attn = true else: n.arm7.attn = true   # the slot's IRQ (arm/cpu.nim run)
   let s {.cursor.} = n.slot2
   if a >= 0x0A00_0000'u32:
     let b = when width == 8: uint8(v) else: uint8(v shr (8 * (a and (width div 8 - 1))))

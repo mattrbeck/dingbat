@@ -86,6 +86,9 @@ type
     bank_xfer*: bool        ## an LDM/STM^ is moving user-bank registers: the
                             ## mode reads USR but the accesses stay privileged
     exc_pc*: uint32         ## the instruction that raised the last one
+    attn*: bool             ## `run` re-checks halt and the IRQ line before the
+                            ## next opcode: set by everything that can change
+                            ## them while this CPU runs (not saved, see `run`)
     # Idle-loop skipping (`loop_edge`); none of it is machine state: a fresh
     # detector proves the same loops again (not saved: savestate.nim)
     wl_on*: bool            ## skipping enabled (DINGBAT_NDS_NO_SKIP=1 clears it)
@@ -157,6 +160,7 @@ proc switch_mode*[B](cpu: ArmCpu[B]; new_mode: uint32) =
 proc set_cpsr*[B](cpu: ArmCpu[B]; v: uint32) =
   cpu.switch_mode(v and 0x1F)
   cpu.cpsr = v
+  cpu.attn = true             # the I bit may have changed
 
 proc set_mode_sp*[B](cpu: ArmCpu[B]; mode: CpuMode; sp: uint32) =
   ## Boot helper: the banked r13 of `mode`, whatever mode the CPU is in.
@@ -212,6 +216,7 @@ proc undefined_instr*[B](cpu: ArmCpu[B]) =
 proc software_interrupt*[B](cpu: ArmCpu[B]; comment: uint32) =
   mixin swi_hook
   inc cpu.wl_bump
+  cpu.attn = true             # an HLE SWI may halt or write I/O
   if swi_hook(cpu.bus, comment): return
   cpu.exception(mSVC, 0x08, cpu.next_pc)
 
@@ -325,7 +330,7 @@ proc reg_pc12(cpu: ArmCpu; idx: int): uint32 {.inline.} =
 # ---------------------------------------------------------------------------
 # ARM instructions
 
-proc arm_data_processing[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "__attribute__((always_inline)) $# $#$#".} =
+proc arm_data_processing[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let opcode = (instr shr 21) and 0xF
   let s = (instr and (1'u32 shl 20)) != 0
   let rn = int((instr shr 16) and 0xF)
@@ -480,7 +485,7 @@ proc write_reg_load[B](cpu: ArmCpu[B]; rd: int; v: uint32) {.inline.} =
   else:
     cpu.r[rd] = v
 
-proc arm_single_transfer[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "__attribute__((always_inline)) $# $#$#".} =
+proc arm_single_transfer[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   mixin read8, write8, write32
   let p = (instr and (1'u32 shl 24)) != 0
   let u = (instr and (1'u32 shl 23)) != 0
@@ -639,7 +644,7 @@ proc arm_block_transfer[B](cpu: ArmCpu[B]; instr: uint32) {.inline.} =
     if user_bank: cpu.switch_mode(old_mode); cpu.bank_xfer = false
     if w: cpu.r[rn] = new_base
 
-proc arm_branch[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "__attribute__((always_inline)) $# $#$#".} =
+proc arm_branch[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let offset = uint32(cast[int32](instr shl 8) shr 6)
   if (instr and (1'u32 shl 24)) != 0: cpu.r[14] = cpu.cur_pc + 4
   cpu.jump(cpu.cur_pc + 8 + offset)
@@ -735,6 +740,7 @@ proc arm_coproc_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
       else:
         cp15_write(cpu.bus, op1, cn, cm, op2,
                    if rd == 15: cpu.cur_pc + 12 else: cpu.r[rd])
+        cpu.attn = true       # wait for interrupt (C7,C0,4) halts
       return
   else:
     # ARM7TDMI: CP14 is the EmbeddedICE debug comms channel; with no debugger
@@ -748,7 +754,7 @@ proc arm_coproc_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
       return
   cpu.undefined_instr()
 
-proc arm_dispatch[B](cpu: ArmCpu[B]; ki: uint32) {.inline, codegenDecl: "__attribute__((always_inline)) $# $#$#".} =
+proc arm_dispatch[B](cpu: ArmCpu[B]; ki: uint32) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## The ARM decode below the condition. The dispatch table's entries
   ## (`arm_lut`) pass the opcode with its index bits as constants, so the C
   ## compiler folds every test on them, here and in the handlers inlined.
@@ -842,7 +848,7 @@ macro arm_lut*(B: typedesc): untyped =
     let m = arm_fixed(i)
     result.add newTree(nnkBracketExpr, bindSym"exec_arm_k", B, newLit(k and m), newLit(m))
 
-proc execute_arm*[B](cpu: ArmCpu[B]; instr: uint32) =
+proc execute_arm*[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   mixin armv5, arm_table
   let cond = instr shr 28
   if cond != 0xE and not cpu.cond_passed(cond):
@@ -863,7 +869,7 @@ proc execute_arm*[B](cpu: ArmCpu[B]; instr: uint32) =
 # ---------------------------------------------------------------------------
 # Thumb instructions
 
-proc thumb_dispatch[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "__attribute__((always_inline)) $# $#$#".} =
+proc thumb_dispatch[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## Thumb decode and execute; the dispatch table's entries (`thumb_lut`)
   ## pass the opcode with bits 15-6 as constants (see arm_dispatch).
   mixin read8, read16, write8, write16, write32, armv5
@@ -1118,7 +1124,7 @@ template dispatch_tables*(B: typedesc) =
   template arm_table(_: typedesc[B]): untyped {.inject, used.} = armt
   template thumb_table(_: typedesc[B]): untyped {.inject, used.} = thumbt
 
-proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) {.inline.} =
+proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   mixin thumb_table
   thumb_table(B)[instr shr 6](cpu, instr)
 
@@ -1146,17 +1152,17 @@ proc take_abort[B](cpu: ArmCpu[B]; a: uint32) {.noinline.} =
   else: cpu.exception(mABT, 0x10, a + 8)
   cpu.abort = 0
 
-proc step*[B](cpu: ArmCpu[B]) {.inline.} =
-  mixin fetch16, fetch32, irq_line, access_cycles, armv5
-  if irq_line(cpu.bus) and (cpu.cpsr and FLAG_I) == 0:
-    cpu.exception(mIRQ, 0x18, cpu.next_pc + 4)
+proc exec_one[B](cpu: ArmCpu[B]; traced: static bool) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  ## Fetch, execute and time the opcode at next_pc.
+  mixin fetch16, fetch32, access_cycles, armv5
   let a = cpu.next_pc
   cpu.cur_pc = a
   when defined(ndsdebug):
     if cpu.profiling: cpu.profile.inc(a and not 63'u32)
   if cpu.thumb:
     let instr = fetch16(cpu.bus, a)
-    if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
+    when traced:
+      if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 2
     cpu.r[15] = a + 4
     when armv5(B):
@@ -1164,7 +1170,8 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
     else: cpu.execute_thumb(instr)
   else:
     let instr = fetch32(cpu.bus, a)
-    if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
+    when traced:
+      if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 4
     cpu.r[15] = a + 8
     when armv5(B):
@@ -1180,6 +1187,13 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
   cpu.cycles += spent
   when defined(ndsdebug):
     if cpu.profiling: cpu.cprofile.inc(a and not 63'u32, int(spent))
+
+proc step*[B](cpu: ArmCpu[B]) {.inline.} =
+  ## One opcode, the IRQ line checked first.
+  mixin irq_line
+  if irq_line(cpu.bus) and (cpu.cpsr and FLAG_I) == 0:
+    cpu.exception(mIRQ, 0x18, cpu.next_pc + 4)
+  cpu.exec_one(true)
 
 # ---------------------------------------------------------------------------
 # Idle-loop skipping
@@ -1293,16 +1307,41 @@ proc idle_now*[B](cpu: ArmCpu[B]): bool {.inline.} =
 
 proc run*[B](cpu: ArmCpu[B]; until: int64) =
   ## Execute until the CPU's clock reaches `until` (master cycles).
-  mixin irq_wake
+  ##
+  ## Halt and the IRQ line (IME, IE and IF, CPSR.I) are checked before an
+  ## opcode only when `attn` says one may have changed. Inside one `run`
+  ## nothing but this CPU executes (no event is dispatched, the other CPU
+  ## waits), so they change only through what this CPU does: an I/O or
+  ## GBA-slot access (every register write or read with a side effect,
+  ## DMA, the geometry FIFO, HALTCNT; the bus sets `attn`), a CPSR write
+  ## (`set_cpsr`: MSR, a mode return), a SWI (HLE SWIs halt and write I/O)
+  ## and a CP15 write (wait for interrupt). Taking an exception only sets
+  ## CPSR.I. Between calls anything may have changed: `attn` starts set.
+  mixin irq_wake, irq_line
   cpu.wl_until = until
+  if unlikely(cpu.trace > 0):
+    while cpu.cycles < until:
+      if cpu.halted:
+        if irq_wake(cpu.bus):
+          cpu.halted = false
+        else:
+          cpu.cycles = until
+          return
+      cpu.step()
+    return
+  cpu.attn = true
   while cpu.cycles < until:
-    if cpu.halted:
-      if irq_wake(cpu.bus):
-        cpu.halted = false
-      else:
-        cpu.cycles = until
-        return
-    cpu.step()
+    if unlikely(cpu.attn):
+      cpu.attn = false
+      if cpu.halted:
+        if irq_wake(cpu.bus):
+          cpu.halted = false
+        else:
+          cpu.cycles = until
+          return
+      if irq_line(cpu.bus) and (cpu.cpsr and FLAG_I) == 0:
+        cpu.exception(mIRQ, 0x18, cpu.next_pc + 4)
+    cpu.exec_one(false)
 
 proc reg_dump*(cpu: ArmCpu): string =
   for i in 0..15:

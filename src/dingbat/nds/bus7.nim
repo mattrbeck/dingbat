@@ -165,6 +165,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
   of 0x04:
     n.sync7()
+    n.arm7.attn = true          # a read side effect may raise an IRQ (arm/cpu.nim run)
     if not io7_steady(a):
       # the IPC FIFO pop is seen by the ARM9 too; the rest only by this CPU
       if (a and 0x00FF_FFFC'u32) == 0x10_0000: inc n.idle_epoch else: inc n.idle_epoch7
@@ -229,6 +230,7 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
                else: 0xFF'u32 shl sh
     when defined(ndsdebug):
       if n.iolog: n.log_io("7", a and not 3'u32, v shl sh, mask, true, n.arm7.cur_pc)
+    n.arm7.attn = true          # IE/IF/IME, HALTCNT, DMA, ... (arm/cpu.nim run)
     n.io7_write(a and not 3'u32, v shl sh, mask)
   of 0x06:
     let off = int(a and 0x3FFFF)

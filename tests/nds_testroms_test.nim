@@ -291,6 +291,61 @@ block fetch_fast_paths:
   b.write8(0x0400_0247'u32, 0)                            # all to the ARM9: the ARM7 sees its own WRAM
   check b7.fetch32(0x0300_0008'u32) == 0x7000_0002'u32, "ARM7: WRAMCNT moves the next sequential fetch"
 
+block irq_at_next_opcode:
+  # arm/cpu.nim run checks halt and the IRQ line only when `attn` says they
+  # may have changed: an IRQ made takeable by the CPU's own store (IME
+  # here; IE and IF alike) or CPSR write is taken before the next opcode.
+  # The HLE BIOS's IRQ vector calls the handler at [DTCM+3FFCh] /
+  # [0380FFFCh] with r3 untouched; the handler copies r3 (the opcodes run
+  # after the store) to r4.
+  echo "interrupts taken at the opcode after the write that allows them"
+  const BY_IME = [0xE3A0_44FF'u32,     # MOV r4, #0xFF000000
+                  0xE3A0_0301'u32,     # MOV r0, #0x04000000
+                  0xE280_0F82'u32,     # ADD r0, r0, #0x208 (IME)
+                  0xE3A0_1001'u32,     # MOV r1, #1
+                  0xE3A0_3000'u32,     # MOV r3, #0
+                  0xE580_1000'u32,     # STR r1, [r0]: IME = 1
+                  0xE283_3001'u32,     # ADD r3, r3, #1
+                  0xE283_3001'u32,     # ADD r3, r3, #1
+                  0xEAFF_FFFE'u32]     # B .
+  const BY_CPSR = [0xE3A0_44FF'u32,    # MOV r4, #0xFF000000
+                   0xE3A0_3000'u32,    # MOV r3, #0
+                   0xE321_F01F'u32,    # MSR CPSR_c, #0x1F: system mode, I clear
+                   0xE283_3001'u32,    # ADD r3, r3, #1
+                   0xE283_3001'u32,    # ADD r3, r3, #1
+                   0xEAFF_FFFE'u32]    # B .
+  const HANDLER = [0xE1A0_4003'u32,    # MOV r4, r3
+                   0xEAFF_FFFE'u32]    # B .
+  for arm9 in [true, false]:
+    for by_ime in [true, false]:
+      let n = machine()
+      n.arm9.wl_on = false
+      n.arm7.wl_on = false
+      let code = if arm9: 0x0210_0000'u32 else: 0x0380_1000'u32
+      let hand = code + 0x100
+      let main = if by_ime: @BY_IME else: @BY_CPSR
+      for i, w in main: Arm7Bus(nds: n).write32(code + uint32(4 * i), w)
+      for i, w in HANDLER: Arm7Bus(nds: n).write32(hand + uint32(4 * i), w)
+      let (me, other) = if arm9: (n.irq9, n.irq7) else: (n.irq7, n.irq9)
+      me.ie = 1; me.iff = 1                             # V-blank pending
+      me.ime = if by_ime: 0'u32 else: 1'u32
+      other.ie = 0
+      let cpsr = uint32(mSYS) or (if by_ime: 0'u32 else: FLAG_I)
+      if arm9:
+        Arm9Bus(nds: n).write32(0x0080_3FFC'u32, hand)  # DTCM + 3FFCh (direct boot's DTCM)
+        n.arm9.set_cpsr(cpsr)
+        n.arm9.next_pc = code
+        n.arm7.halted = true
+      else:
+        Arm7Bus(nds: n).write32(0x0380_FFFC'u32, hand)
+        n.arm7.set_cpsr(cpsr)
+        n.arm7.next_pc = code
+        n.arm9.halted = true
+      n.run_until(n.sched.now + 4000)
+      let r4 = if arm9: n.arm9.r[4] else: n.arm7.r[4]
+      check r4 == 0, (if arm9: "ARM9" else: "ARM7") & ": the IRQ comes before the opcode after " &
+            (if by_ime: "STR IME" else: "MSR clearing CPSR.I"), "r4 = " & toHex(r4)
+
 block icache_stale_rom:
   echo "icache_stale (tests/nds/src/icache_stale)"
   var ok: bool
