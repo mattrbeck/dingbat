@@ -188,8 +188,9 @@ nds-examples: 37 ok / ok-phase, the rest unchanged.
 The DS menu's settings and a game's Nintendo WFC setup program the firmware
 flash; the image changed in memory only. Now `spi.firmware_dirty` marks it,
 ndsrun `--firmware-out FILE` writes it, and wasm exports
-`nds_firmware_len/_ptr/_dirty/_clean` let the web app keep it (not wired
-in the app yet). Test: nds_periph_test firmware flash.
+`nds_firmware_len/_ptr/_dirty/_clean` let the web app keep it (docs/nds/web.md
+"Firmware settings"; `nds_reboot` keeps the written flash). Test:
+nds_periph_test firmware flash.
 
 Not done: the GBA-slot cart's RTC (S-3511 on GPIO) for dual-slot games --
 the GBA core's RTC is written against the GBA object, a port is ~400 lines,
@@ -203,5 +204,5 @@ and no DS game is known to read it (HGSS does not).
 - VRAM remapped during the render window, and the render budget delaying
   when a line samples its registers.
 - The card's "dead" state after an invalid KEY2 command.
-- The GBA-slot RTC; the web app storing the firmware image and showing a
-  powered-off console.
+- The GBA-slot RTC. (The web app now stores the firmware image and shows a
+  powered-off console: docs/nds/web.md.)

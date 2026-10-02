@@ -167,7 +167,8 @@ one.
 - Firmware writes (settings changed in the menu, a game's WFC setup) set
   `spi.firmware_dirty`; ndsrun `--firmware-out FILE` and the wasm exports
   `nds_firmware_dirty/_ptr/_len/_clean` hand the image to the frontend
-  (docs/nds/accuracy.md). The web app does not store it yet.
+  (docs/nds/accuracy.md). The web app stores it (docs/nds/web.md
+  "Firmware settings").
 - No autostart switch (user-settings bit 6) for skipping the menu.
 - Hardware checks that would settle the Assumed items: a test ROM reading
   the card with ROMCTRL.13 toggled mid-stream on a real DS.
