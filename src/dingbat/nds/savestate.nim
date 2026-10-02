@@ -51,17 +51,26 @@ const
     "slot2", "tm",                        # its own section, without the derived tables
     "bios9", "bios7",            # supplied on load
     "hle_bios9", "hle_bios7",    # checked against the loading machine (preamble)
-    "unmapped_log", "iolog", "watch", "io_last", "io_repeat"]   # debug logging
-  CPU_SKIP = ["bus", "trace", "profiling", "profile", "cprofile"]
+    "unmapped_log", "iolog", "watch", "io_last", "io_repeat",   # debug logging
+    "idle_epoch", "idle_epoch9", "idle_epoch7"]   # idle-loop skipping (arm/cpu.nim), re-proved after a load
+  CPU_SKIP = ["bus", "trace", "profiling", "profile", "cprofile",
+              # idle-loop skipping: a fresh detector proves the same loops again
+              "wl_on", "wl_until", "wl_bump", "wl_head", "wl_other", "wl_epoch", "wl_have",
+              "wl_tries", "wl_idle", "wl_cycles", "wl_instrs", "wl_fails", "wl_skipped",
+              "wl_cold", "wl_regs", "wl_cpsr", "wl_spsr", "wl_sig"]
   # cachability by address and the cache enables: update_regions(cp15)
   TIMING_SKIP = ["ic_on", "dc_on", "icode", "idata", "ibuf", "mcode", "mdata", "mbuf"]
   # mmem_req/mmem_ctx: the machine's DMA mode 4 hook, set at construction
   GPU_SKIP = ["vram", "engine_a", "engine_b", "gpu3d", "mmem_req", "mmem_ctx"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
-  VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat"]
+  # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
+  VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat", "tex_gen"]
   # pointers into Gpu's palette/OAM (kept); line3d is set before each use
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d"]
-  GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched"]
+  # reuse_*/last_*: what the last real render drew (render_frame); the
+  # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh
+  GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",
+                "last_disp3dcnt", "last_param", "last_regs", "last_polys", "last_verts"]
   # Per-frame scratch: render_frame's clear() rewrites depth, IDs, flags and
   # coverage before anything reads them, `below` is written with every
   # coverage < 31 that reads it, the page pointers and `order` are rebuilt

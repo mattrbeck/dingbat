@@ -38,6 +38,8 @@ type
     wfast: array[VramRegion, seq[PagePtr]] ## write pointer per page
     zero: seq[uint8]                       ## one page of zeros: unmapped reads
     vramstat*: uint8                       ## 0x4000240 read on ARM7: C/D as WRAM
+    tex_gen*: uint64                       ## bumped by every remap and every write
+                                           ## through the texture/palette slots (not saved)
 
 const
   PAGE_SHIFT = 14
@@ -87,6 +89,12 @@ proc remap*(v: Vram) =
   for r in VramRegion:
     for p in v.pages[r].mitems: p = 0
   v.vramstat = 0
+  # A bank in a texture or texture-palette slot has no CPU address (GBATEK
+  # "DS Memory Control - VRAM": MST 3; display capture writes only LCDC
+  # banks), so its contents change only after a remap, or through writes to
+  # the slot regions themselves (test harnesses): the 3D renderer reuses
+  # its last frame while tex_gen stands (gpu3d.nim render_frame).
+  inc v.tex_gen
   for b in VramBank:
     let c = v.cnt[b]
     if (c and 0x80) == 0: continue
@@ -200,6 +208,7 @@ proc read32*(v: Vram; r: VramRegion; offset: int): uint32 {.inline.} =
   uint32(v.read16(r, offset)) or (uint32(v.read16(r, offset + 2)) shl 16)
 
 proc write8*(v: Vram; r: VramRegion; offset: int; value: uint8) =
+  if r in {vrTexture, vrTexPal}: inc v.tex_gen
   let o = offset mod REGION_SIZE[r]
   let mask = v.pages[r][o shr PAGE_SHIFT]
   if mask == 0: return
@@ -208,6 +217,7 @@ proc write8*(v: Vram; r: VramRegion; offset: int; value: uint8) =
       v.mem[v.locate(r, o, b)] = value
 
 proc write16*(v: Vram; r: VramRegion; offset: int; value: uint16) =
+  if r in {vrTexture, vrTexPal}: inc v.tex_gen
   let o = offset mod REGION_SIZE[r]
   let q = v.wfast[r][o shr PAGE_SHIFT]
   if q != nil:
