@@ -44,7 +44,7 @@ address moves) and runs `web/serve.py --dev --https` on port 8443 (`PORT=`).
 | Buttons | The app's input ids grow X (10) and Y (11). Keys: default preset X = D, Y = C; home-row preset X = I, Y = U; rebindable in Settings > Controls as "X (DS)"/"Y (DS)". They count only while a DS game runs (`boundInput`), so elsewhere I stays the input-display shortcut. A saved 10-key profile gains the defaults (or none, where its keys already hold them). Gamepad (standard mapping), by label: 0 A, 1 B, 2 X, 3 Y; shoulders and triggers L/R; Back/Start; d-pad and left stick. Touch: A/B/X/Y become a diamond of the same buttons (X top, Y left, A right, B bottom, 0.75 of a button from the centre: clear of each other and narrow enough beside the d-pad at every control size); L/R stay. Phone held sideways: the screens fit between the d-pad and the face buttons (`ndsAvail`), and Select/Start (the small circles) move from the bottom middle, where the touch screen is, to just under R. |
 | Audio | `web/nds/ndsaudio.js` (shared with the dev page): ring + windowed-sinc resampler in an AudioWorklet (ScriptProcessor without one), attached to the app's AudioContext at the master gain, so volume, mute and the clip tap apply. Emulation is paced by the ring's fill, as on the dev page: frames run while less than the target is buffered, so the audio clock sets the speed; the adaptive target (4 to 8 frames) grows on underruns. Before audio is unlocked, wall-clock pacing. A pause or a hidden tab drops what is queued silently. |
 | Speed | Fast-forward (12 ms of frames a tick, sound only while the ring wants it), 2x (every other sample) and slow motion (each sample twice) through the same pacing; frame step; screenshot. |
-| Saves | The cart backup (`n.cart.backup`, exports `nds_save_size/ptr/dirty/clean`) is stored under the usual `save:<name>` key whenever the chip's dirty flag says the game wrote it, on the usual triggers (5 s interval, hide, page close, game switch, Main Menu, close). The stored save goes into the core at boot (its size picks the chip type). Import and export `.sav` as for GB/GBA; Manage Saves' reset works. |
+| Saves | The cart backup (`n.cart.backup`, exports `nds_save_size/ptr/dirty/clean`) is stored under the usual `save:<name>` key whenever the chip's dirty flag says the game wrote it, on the usual triggers (5 s interval, hide, page close, game switch, Main Menu, close). The stored save goes into the core at boot (docs/nds/saves.md: an EEPROM/FRAM size names the chip, other sizes are fitted to the chip the game addresses and stored back exact). Import `.sav`/`.dsv` (stored whole, no GBA container sniffing; the core strips a .dsv footer) and export as for GB/GBA; Manage Saves' reset works. |
 | BIOS / firmware | HLE BIOS and a synthesized firmware by default: nothing to supply. Settings > Nintendo DS takes `bios9.bin` (4 KB), `bios7.bin` (16 KB) and `firmware.bin` (128/256/512 KB), stored like the GBA BIOS (IndexedDB `bios:nds9`, `bios:nds7`, `bios:ndsfw`), used from the next DS game started from the library (a reset reboots on the BIOS the game started with). |
 | Library | System "DS" (chip, filter chip, sort, a small grey card with a corner cut for unpictured games), the paused hero and the tile picture are the top screen. The per-game menu says "this device only" while signed in to Drive. |
 
@@ -99,9 +99,12 @@ frame at a few frames a second: judge speed with a GPU.
 - `web/e2e/nds.e2e.mjs` (Playwright, headless Chromium): both screens read
   back off the canvas in both layouts, the pointer's touch matching a direct
   touch at the same pixel (`built/touch_test`), `snd_tone`'s two channels,
-  realtime pacing, and a save the game wrote (`save_write`, our boot-counter
-  ROM: `tests/nds/tools/build_save.sh`) surviving a reload. Skips without the
-  builds or ROMs.
+  realtime pacing, a save the game wrote (`save_write`, our boot-counter
+  ROM: `tests/nds/tools/build_save.sh`) surviving a reload, and a .dsv
+  imported through Manage Saves. Skips without the builds or ROMs.
+- `web/e2e/nds-soulsilver.e2e.mjs` (local only, needs the commercial ROM
+  and a save: env vars in its header): import, CONTINUE, save in game,
+  reload, CONTINUE (docs/nds/saves.md).
 
       NODE_PATH=../../web/node_modules node --test web/tests/*.test.mjs     # worktree: the main checkout's node_modules
       cd web && node --test e2e/nds.e2e.mjs
