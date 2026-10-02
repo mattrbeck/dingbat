@@ -49,7 +49,7 @@
 ## --pcs prints both CPUs' pc / halted state after each frame.
 ## --state-hash N prints a CRC-32 of the whole machine state (the save-state
 ## payload) every N frames, for comparing two runs that should be identical
-## (DINGBAT_NDS_NO_SKIP=1 turns idle-loop skipping off: docs/nds/perf.md).
+## (DINGBAT_NDS_NO_SKIP=1 turns idle-loop skipping and 3D frame reuse off: docs/nds/perf.md).
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame

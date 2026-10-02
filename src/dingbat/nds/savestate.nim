@@ -63,10 +63,14 @@ const
   # mmem_req/mmem_ctx: the machine's DMA mode 4 hook, set at construction
   GPU_SKIP = ["vram", "engine_a", "engine_b", "gpu3d", "mmem_req", "mmem_ctx"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
-  VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat"]
+  # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
+  VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat", "tex_gen"]
   # pointers into Gpu's palette/OAM (kept); line3d is set before each use
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d"]
-  GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched"]
+  # reuse_*/last_*: what the last real render drew (render_frame); the
+  # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh
+  GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",
+                "last_disp3dcnt", "last_param", "last_regs", "last_polys", "last_verts"]
   # Per-frame scratch: render_frame's clear() rewrites depth, IDs, flags and
   # coverage before anything reads them, `below` is written with every
   # coverage < 31 that reads it, the page pointers and `order` are rebuilt

@@ -356,11 +356,12 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.slot2 = new_slot2()
   n.arm9 = new_arm_cpu(Arm9Bus(nds: n), ARM9_CYCLES_PER_INSTR)
   n.arm7 = new_arm_cpu(Arm7Bus(nds: n), ARM7_CYCLES_PER_INSTR)
-  # DINGBAT_NDS_NO_SKIP=1: execute every idle loop pass, for checking
-  # that skipping changes nothing (docs/nds/perf.md)
+  # DINGBAT_NDS_NO_SKIP=1: execute every idle loop pass and draw every 3D
+  # frame, for checking that skipping changes nothing (docs/nds/perf.md)
   let skip = getEnv("DINGBAT_NDS_NO_SKIP") != "1"
   n.arm9.wl_on = skip
   n.arm7.wl_on = skip
+  n.gpu3d.reuse_on = skip
   n.cp15.reset()
   n.tm.init_timing()
   n.tm.update_regions(n.cp15)
