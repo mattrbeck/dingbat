@@ -3105,3 +3105,90 @@ and B for v = 0 means flip the knob to true (Kingdom Hearts then passes);
 2 throughout means the references are wrong and this game is right as it
 is. v = 1 should read 2 throughout on the console (fifomap says so); if it
 does not, the fifomap reading above needs another look.
+
+## §NEXT — Castlevania HoD: thunder at different frames is the lightning's randomness, not the APU, 2026-10-02
+
+**Symptom.** All four dingbat configs play IDENTICAL to both references at
+every checkpoint but fail audio: "differs from both references in 2.4 % of
+the run, longest 2.26 s from f6960 (silence/presence ...)". The references
+agree with each other. **No emulator change: the difference is which frames
+the game chooses for its lightning, and the thunder that comes with it.**
+
+**What the sound is.** On the bridge the game plays everything through FIFO
+A (SOUNDCNT_H 0x030E: A to both sides at 100 %, B unrouted; DMA1 on TM0)
+plus the noise channel, from its own software mixer; the MP2K HLE is off in
+the playtest driver (`gba.mp2k_hle` is set only by the frontends). Per-frame
+I/O snapshots (SOUNDCNT_L/H/X, NRxx, DMA1/2 CNT_H, TM0/1) from f6900 to
+f7300 show the same register traffic in all three emulators, and the last
+NR41/NR44 writes at f6906. What differs is the mix the game writes: the
+dialogue's ambience ends around f6978, and a thunder clap of ~160 frames
+plays at
+
+| | thunder from | lightning flashes (screen mean > 170) |
+|---|---|---|
+| dingbat (all four) | f6960, f7240, f7470, f7720, ... | f6968, f7248, f7307, f7482, f7738, f7994, ... |
+| mGBA | f7140, f7460, f7720, ... | f7149, f7206, f7465, f7721, f7977, f8072, ... |
+| second reference | f7150, f7480, f7740, ... | f7152, f7235, f7493, f7749, f8005, f8034, ... |
+
+Each flash repeats 256 game frames later (a new flash starts a new cycle),
+and new ones arrive at random. The references' first flash after the
+dialogue lands three frames apart by coincidence: every later flash differs
+between them (f7206 / f7235, f8072 / f8034, ...), as the script's notes
+already recorded for the screen (f7220/f7480 white in mGBA only). The
+audio check compares those first claps and flags dingbat, whose clap is
+180 frames earlier.
+
+**Why the randomness differs.** EWRAM 0x02000000 counts the game's frames
+(the main loop's passes) and 0x02000008 is its random seed, stepped every
+pass. Read every frame of the replay in all three (the second reference's
+driver now has `peek` for work RAM and I/O, below):
+
+| lag frames (V-blanks without a pass) | f1-f6264 | f6264-f6913 (dialogue) |
+|---|---|---|
+| mGBA | 74 | 18 |
+| second reference | 76 | 24 |
+| dingbat, all four configs | 78 | 25 |
+| dingbat `-d:CONTENTION=false` | 77 | 24 |
+| dingbat `-d:BRANCH_COMMIT_WAIT=false` | 77 | 25 |
+| dingbat, both off | 77 | 23 |
+
+Every second A press in the dialogue opens a new text box, and that pass
+overruns a frame in all three; in dingbat and the second reference it
+overruns by one more. So the seed (and the frame count the lightning cycle
+is keyed to) falls out of step in all three emulators, and the seeds at
+f6900 are three different values. dingbat is with the second reference
+here, not the outlier.
+
+**Where the cycles go** (dingbat-bios-nowl vs mGBA traces, the two frames
+of the text box at f6429-f6430): mGBA ends the second frame with 15.4k
+cycles idle, dingbat spills ~16k into the next. The largest items:
+
+| | dingbat | mGBA | evidence |
+|---|---|---|---|
+| a 0x800-halfword DMA3 to VRAM 0x0600D000 in active display (V-count 84-93) | 11752 | 8202 | 8204 with `-d:CONTENTION=false`: the renderer's VRAM contention, console-mapped (`contmap.s`, section 29); neither reference models it |
+| 0x080015BC -> 0x08001528 (a tile lookup, 1033 calls), per call | 198 | 190 | the difference is all in the returns: `pop {r4-r7}; pop {r1}; bx r1` with the stack in IWRAM (sp 0x03007DD4) is 18 cycles in dingbat, 12 in mGBA, though five IWRAM loads, two internal cycles and the 4 + 2 refill of the branch to ROM are 13 on the bus alone (WAITCNT 0x4017) |
+| other Thumb ROM code with data accesses (0x08013Bxx, 0x0802B6xx, 0x08000Axx) | ~+12k together | | the same class: section 29's "mGBA prices data accesses under the prefetcher below the bus floor" |
+
+**Who is right.** The audio itself is not in question: the register writes
+match and the difference follows the flash. On the lag, the console has
+answered the mechanisms dingbat charges more for: `slotexec.s` (section 22)
+with the prefetcher on, hardware = dingbat on all twenty single gamepak
+opcodes (loads and stores to IWRAM/EWRAM among them), mGBA misses nine; the
+VRAM contention is `contmap.s`'s map. The multi-register load case (the
+`pop` above) is the pending `slotbranch.s` question of section 29 (rows
+`ldmia IWRAM 2 regs` / `3 regs`: dingbat 19 / 20, mGBA 18 / 18); running
+`python3 tools/hwlink/slotbranch.py` with the SP on the link settles it, and
+no new probe is needed for this game. Even if it came out mGBA's way, the
+lightning would still not be reproducible: the second reference, which
+lags like dingbat, flashes at frames of its own.
+
+**How it was found.** Replay the frozen script with a per-frame `peek`
+(play the steps, hook every frame), diff RAM to find the frame counter and
+seed, compare lag per span, then `trace` both emulators across one text
+box and sum cycles per routine. The second reference's `peek` reads work
+RAM and IWRAM from the core's save-state copy and I/O through its peek
+calls; with a peek every frame its audio stays byte-identical to a run
+without. The knob variants (`CONTENTION`, `BRANCH_COMMIT_WAIT`, both) also
+show how chaotic the schedule is: their thunder lands at f7000, f7000 and
+f7140 (the last one matching the references by chance), from lag changes
+of one or two frames.

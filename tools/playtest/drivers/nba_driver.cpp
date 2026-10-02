@@ -175,7 +175,34 @@ int main(int argc, char** argv) {
       reply("ok " + std::to_string(frame));
     } else if (cmd == "shot") {
       reply(write_ppm(arg, video->frame) ? "ok" : "err cannot write");
-    } else if (cmd == "savedata" || cmd == "flush" || cmd == "peek") {
+    } else if (cmd == "peek") {
+      // work RAM through the core's save-state copy (no timed bus access,
+      // nothing moved), I/O through its peek calls; other regions unsupported
+      std::istringstream a(arg);
+      std::string hex;
+      unsigned long len = 0;
+      a >> hex >> len;
+      u32 addr = u32(strtoul(hex.c_str(), nullptr, 16));
+      static nba::SaveState state;
+      bool need_state = (addr >> 24) == 2 || (addr >> 24) == 3;
+      if (need_state) core->CopyState(state);
+      std::string out = "ok ";
+      bool ok = true;
+      for (unsigned long k = 0; k < len && ok; ++k) {
+        u32 x = addr + u32(k);
+        u8 v = 0;
+        switch (x >> 24) {
+          case 2: v = state.bus.memory.wram[x & 0x3FFFF]; break;
+          case 3: v = state.bus.memory.iram[x & 0x7FFF]; break;
+          case 4: v = core->PeekByteIO(x); break;
+          default: ok = false;
+        }
+        char b[3];
+        snprintf(b, sizeof b, "%02X", v);
+        out += b;
+      }
+      reply(ok ? out : "err unsupported region");
+    } else if (cmd == "savedata" || cmd == "flush") {
       reply("err unsupported");
     } else if (cmd == "state_save") {
       // The core's own writer leaves fields of absent hardware (the RTC on

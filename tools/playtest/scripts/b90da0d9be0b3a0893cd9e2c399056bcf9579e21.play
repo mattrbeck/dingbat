@@ -15,6 +15,10 @@
 # script's route the Shrine shows dingbat-bios 11, mgba 10, nba 15 hearts;
 # an earlier route with 300 more frames of walking gave 10/11/15); nba's
 # Juste shows the whip pose where the others are already walking.
+# The thunder follows the lightning, so the audio check's f6960-f7410
+# difference is the same randomness (docs/playtest-bugs.md, "Castlevania
+# HoD"): dingbat's first flash after the dialogue is f6968, the references'
+# f7149 and f7152 by coincidence (every later flash differs between them).
 
 [new]
 wait 600
