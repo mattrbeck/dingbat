@@ -8,13 +8,18 @@
 # the intro, Alis in Camineet, walk right, B opens the command menu, SAVE >
 # slot 1 (the first YES/NO answer lands on the default NO and backs out, so
 # the save is entered again), YES, name "A", END, "NOW SAVING".
-# Finding: dingbat-bios draws every SMS window garbled in the first-person
-# town view and on the save/continue screens: from ~f3800 (B opens the
-# command menu) the menu, status and message windows show repeated or
-# shifted scanlines, struck-through text and stray pixels; mgba and nba
-# draw them clean. The game itself carries on (the save is byte-identical
-# on all three). Also the intro starfield twinkle (f2318/f2325) is out of
-# phase on dingbat-bios compared with mgba/nba.
+# Finding (FIXED 2026-10-02, docs/playtest-bugs.md section 28): dingbat
+# drew every SMS window garbled in the first-person town view and on the
+# save/continue screens: from ~f3800 (B opens the command menu) the menu,
+# status and message windows showed repeated or shifted scanlines,
+# struck-through text and stray pixels; both references draw them clean. The
+# window layer (BG0) takes its scroll from a second H-blank DMA reading
+# write-only BG1VOFS, i.e. the word the first DMA just drove onto the bus,
+# and dingbat gave that read the CPU's opcode. The game itself carried on
+# (the save is byte-identical on all three). The intro starfield twinkle
+# (f2318/f2325) and ps1_title's rows 7k+2/7k+3 are the game's two-field
+# line-drop table one frame out of phase (dingbat's f1983 is the second
+# reference's f1982).
 [new]
 wait 1400
 checkpoint title window=30
