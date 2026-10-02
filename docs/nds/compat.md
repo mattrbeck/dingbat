@@ -164,22 +164,26 @@ real BIOS and with the HLE BIOS (e4b66d68.., 6cf51b7e.., d2ad8167..).
 
 **3D / display timing:**
 - `rttexample` (render-to-texture): the two passes' clear colours come out
-  swapped. Our frame renders at its first line with the rendering registers
-  of that moment; GBATEK: rendering starts 48 lines ahead (in V-blank) with
-  the registers live, which the demo's per-pass CLEAR_COLOR writes depend
-  on.
-- Counter-Strike DS: dual-screen 3D (POWCNT1 swap + capture into C/D each
-  frame). The swapping stops at frame ~27; our last capture leaves the top
-  view in the bank the bottom screen shows, the reference keeps the gamepad
-  there. Capture start and 3D swap relative to the routine's writes.
+  swapped against the reference. Rendering now starts at line 214 with the
+  registers read per line (GBATEK; `nds-accuracy`), which gives the same
+  picture: the demo writes CLEAR_COLOR at line 192, before 214. The
+  reference reads the registers at line 192, before the write
+  (3d_render_timing, docs/nds/accuracy.md); a hardware run decides.
+- Counter-Strike DS: on the current base the screens are right after the
+  switch to one 3D screen (16.6 % left: texel rounding on walls); the
+  switch itself lands one frame later than in the reference (CPU timing).
+  nds-examples `dual_screen` is ok.
 - 3D rasteriser edges in nds-examples 3D and gl2d programs (0.01-5 %), and
   frame-phase differences in 3D animation.
 
 **Card / real boot:**
-- nds-examples `eeprom`: re-reading the header after boot gives "HOMEBREW"
-  in ours (raw header command answered in KEY2 mode) and nothing in the
-  reference; the save probe finds a 512 KB chip in ours, none in the
-  reference (the cart has no save; what a flashcart answers varies).
+- nds-examples `eeprom`: the raw header re-read in main mode is an invalid
+  KEY2 command; ours answers the KEY2 stream (GBATEK), so the two copies
+  differ and it asks to reinsert the card; the reference answers zeros
+  (docs/nds/accuracy.md).
+- Firmware boot: 2 frames behind the reference; 0.7 of them is the
+  reference's cheaper ARM7 main-RAM data (arm7_timing; ours follows
+  GBATEK), the rest is not found (docs/nds/accuracy.md, boot.md).
 
 **Hardware question (CPU):**
 - ARMv5 opcodes with cond = 1111 that aren't BLX/PLD/etc.: ours raises

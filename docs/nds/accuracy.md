@@ -85,6 +85,12 @@ the program's screenshot is an emulator's. If hardware latches the render
 registers at V-blank start, GBATEK's description is wrong and both the
 model and the ROM's expectations change: that is the user's call.
 
+Frame reuse (docs/nds/perf.md) compares a full render's inputs, the render
+registers included, each time one is needed, so a mid-frame change forces a
+redraw and a frame whose registers return to the last drawn values reuses
+it; nds_perf_test runs 3d_render_timing with reuse and loop skipping on and
+off (state, screens and sound identical).
+
 Every 3d_* ROM hash and SoulSilver 3000/5000/8000 are unchanged.
 SoulSilver writes DISP3DCNT at lines 214-220 each frame, but only to
 acknowledge flags (the value stays 0039h), so nothing re-renders.
@@ -165,6 +171,17 @@ branch's region) gives 4 everywhere, leaves SoulSilver 3000/5000/8000
 unchanged, but moves the firmware-boot logo to frame 90, the periph_suite
 SPI busy rows off the reference (304 vs 298 at 1 MHz) and the HLE SWI cost
 fit (hle_bios.nim) off the BIOS. A decision for the user.
+
+## Sweep, before -> after
+
+Homebrew, 600 frames, default script, against the compat table: ColecoDS,
+NINTV-DS, SpeccySE, StellaDS (broken-ref-too/ref-broken) and Kekatsu
+(differs 100 %) -> **ok**; DLDI benchmark 12.45 -> 0.05 %, Emulator
+Examination 87.4 -> 0.85 %, DSMA stress test 100 -> 57 % (after-exit shots
+now match). Counter-Strike 99.7 -> 16.6 % and nds-examples dual_screen
+28.9 % -> ok come from the newer base (same with and without this branch).
+Everything else pixel-identical to the base build, rttexample included.
+nds-examples: 37 ok / ok-phase, the rest unchanged.
 
 ## 6. Firmware settings writes
 
