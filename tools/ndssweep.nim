@@ -261,7 +261,11 @@ proc run_one(rom, outdir, bios, press: string; frames: int; shots: seq[int]) =
     n.frame_done = false
     let limit = n.sched.now + 2 * FRAME_CYCLES
     var k = 0
-    while not n.frame_done and n.sched.now < limit:
+    if n.asleep():
+      # asleep or powered off the master clock stands still: a frame of
+      # sleep as run_frame spends it (slicing by lines would never end)
+      n.run_frame()
+    while not n.frame_done and n.sched.now < limit and not n.asleep():
       n.run_until(min(limit, n.sched.now + LINE_CYCLES))
       inc k
       if (k and 31) == 0:
