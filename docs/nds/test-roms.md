@@ -60,7 +60,7 @@ and `tests/nds/tools/build_testroms.sh` fetches and builds all of the above
 
 | Test | Expected (hardware) | Ours before | Ours now | Reference |
 |---|---|---|---|---|
-| polyrastertest v1.0.2-b | 77/77 | 50/77 | 50/77 (3D edges: left to the edge work, list below) | 70/77 |
+| polyrastertest v1.0.2-b | 77/77 | 50/77 | 73/77 after the edge work (`nds-polyraster`, docs/nds/3d-edges.md; list below) | 70/77 |
 | gx_clear | clear colour follows the register every frame | follows | follows | follows |
 | gx_powcnt | PAL/OAM read back 0 with engine A off (GBATEK) | kept counting | 0 | 0 |
 | gbe-plus Timer: count-up, stop, reload value | PASS x3 | PASS x3 | PASS x3 | PASS x3 |
@@ -99,22 +99,19 @@ after which our screens keep the last picture and the reference's go black
 ### polyrastertest, failing tests (ours)
 
 Numbered as the ROM numbers them (source 550c208e89, `main.h` order; the
-names are the source's comments); the
-reference fails 26, 38, 39, 43, 62, 63, 64. All are rasteriser edge rules,
-so they are listed for the 3D edge work rather than fixed here:
+names are the source's comments); the reference fails 26, 38, 39, 43, 62,
+63, 64. The hunt left 27 failures (13, 14, 16, 27-32, 36, 38, 39, 43, 49,
+50, 53, 56, 59-64, 66, 70, 73, 74; stepped scene by scene, as the test
+below does, 26 failed too: 49/77) to the edge work: swapped polygons,
+line polygons, the swapped vertical left glitch, trapezoids, the vertical
+right edge shift, horizontal line polygons, second-vertex quirks. The
+round-6 rules of docs/nds/3d-edges.md ("Chains, facing and swapped
+rows") pass all but four, checked in `tests/nds_testroms_test.nim`:
 
-| # | Test | Reference |
-|---|---|---|
-| 13, 14, 16 | fill rules, swapped polygons: left X-major (top filled, bottom not), left Y-major, right X-major | pass |
-| 27, 28, 29 | line-polygon exception: "cursed line polygons" 1-3 (only the line part filled) | pass |
-| 30, 31, 32 | swapped vertical left glitch (half-filled slopes; X-major never) | pass |
-| 36 | trapezoid rule does not apply when both slopes' bottoms share an x | pass |
-| 38, 39, 43 | the curse of edge marking (overlapping edges of the same polygon ID unfilled) | fail too |
-| 49, 50, 53 | vertical right edge shift: swapped polygon 1 (and reversed), a 0-wide span shifted left | pass |
-| 56 | AA swapped vertical edge glitch, the combined case | pass |
-| 59, 60, 61, 66, 70 | horizontal line polygons under clipping: which vertex pair (1-4, 1-2, 2-4) colours the line, "pointer never goes backwards" | pass |
-| 62, 63, 64 | the same once vertex 1 is clipped | fail too |
-| 73, 74 | edge-marking swapped vertical edge glitch (triangle); second vertex behaving as if swapped | pass |
+| # | Test | What is wrong | Reference |
+|---|---|---|---|
+| 38, 39, 43 | the curse of edge marking: a second, further polygon (ID 2 / the same ID) whose edge lies on the first one's edge | colours: the console shows the further polygon's x-major edge run over the nearer one's edge dots (38: its extra left run, drawn only because edge marking makes it full size; 43: its bottom row), we keep the nearer one (62 / 62 / 31 dots); not fitted, see 3d-edges.md "Open" | fails too |
+| 56 | AA swapped vertical edge glitch, the combined case | one dot: the top row's inner x-major dot is invisible on the console, ours has coverage | pass |
 
 To list them again: `ndsrun --press A@60,A@100,... --shots <same> --text B0
 --text-shots` steps the ROM from failure to failure (A moves on) and prints
@@ -176,8 +173,8 @@ Each in its own commit, each with checks in `tests/nds_testroms_test.nim`
 
 ## Still open
 
-- **polyrastertest's 27 failures** (above): rasteriser edge rules, for the
-  3D edge work.
+- **polyrastertest's 4 failures** (above): 38, 39, 43 (edge marking with
+  overlapping edges) and one AA dot in 56.
 - **The 3D layer with the rendering engine off.** The reference keeps the
   last frame in `disp_powcnt` (render off, then new lists swapped, then
   geometry off too) but shows no 3D in `gx_powcnt` (geometry off first,
