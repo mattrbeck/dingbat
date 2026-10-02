@@ -277,9 +277,13 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.71 6.03L9.8 2.45L14.2 2.45L14.29 6.03A6.4 6.4 0 0 1 16.03 7.03L19.17 5.32L21.37 9.13L18.32 11A6.4 6.4 0 0 1 18.32 13L21.37 14.87L19.17 18.68L16.03 16.97A6.4 6.4 0 0 1 14.29 17.97L14.2 21.55L9.8 21.55L9.71 17.97A6.4 6.4 0 0 1 7.97 16.97L4.83 18.68L2.63 14.87L5.68 13A6.4 6.4 0 0 1 5.68 11L2.63 9.13L4.83 5.32L7.97 7.03A6.4 6.4 0 0 1 9.71 6.03Z"/><circle cx="12" cy="12" r="3.0"/></svg>
       </button>
 
-      <!-- DS games only (body.nds-mode): cycles the two screens' layout
-           (Automatic, Stacked, Side by side; Settings > Nintendo DS). -->
-      <button type="button" class="icon-btn" id="nds-layout-btn" title="Screens: Automatic" aria-label="Switch the DS screen layout">
+      <!-- DS games only (body.nds-mode): swap the two screens, and the
+           Screens panel (#nds-panel: arrangement, gap, turn, lid, mic;
+           Settings > Nintendo DS keeps the same choices). -->
+      <button type="button" class="icon-btn" id="nds-swap-btn" title="Swap screens (B)" aria-label="Swap the DS screens">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v13M3.5 13.5 7 17l3.5-3.5M17 20V7M13.5 10.5 17 7l3.5 3.5"/></svg>
+      </button>
+      <button type="button" class="icon-btn" id="nds-layout-btn" title="Screens" aria-label="DS screens" aria-haspopup="dialog" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="7.5" rx="1"/><rect x="7" y="13.5" width="10" height="7.5" rx="1"/></svg>
       </button>
 
@@ -334,6 +338,49 @@
       </div>
     </div>
 
+    <!-- The DS Screens panel, from the bar's screens button (DS games only).
+         Out of the bar for the same reason as #account-pop. The chips and
+         toggles share their data-nds-* names with Settings > Nintendo DS,
+         and index.js "Nintendo DS" keeps both in step. -->
+    <div id="nds-panel" role="dialog" aria-label="DS screens" hidden>
+      <div class="nds-panel-group">
+        <span class="nds-panel-label">Screens</span>
+        <div class="chip-row" data-nds-chips="layout" role="radiogroup" aria-label="DS screen arrangement">
+          <button type="button" class="choice-chip" data-value="auto" role="radio" aria-checked="false">Automatic</button>
+          <button type="button" class="choice-chip" data-value="stack" role="radio" aria-checked="false">Stacked</button>
+          <button type="button" class="choice-chip" data-value="side" role="radio" aria-checked="false">Side by side</button>
+          <button type="button" class="choice-chip" data-value="focus" role="radio" aria-checked="false">Focus</button>
+          <button type="button" class="choice-chip" data-value="single" role="radio" aria-checked="false">One screen</button>
+        </div>
+      </div>
+      <div class="nds-panel-group">
+        <span class="nds-panel-label">Gap</span>
+        <div class="chip-row" data-nds-chips="gap" role="radiogroup" aria-label="Gap between the DS screens">
+          <button type="button" class="choice-chip" data-value="none" role="radio" aria-checked="false">None</button>
+          <button type="button" class="choice-chip" data-value="hinge" role="radio" aria-checked="false">Hinge</button>
+          <button type="button" class="choice-chip" data-value="console" role="radio" aria-checked="false">Like the console</button>
+        </div>
+      </div>
+      <div class="nds-panel-group">
+        <span class="nds-panel-label">Turn</span>
+        <div class="chip-row" data-nds-chips="rot" role="radiogroup" aria-label="Turn the DS screens">
+          <button type="button" class="choice-chip" data-value="0" role="radio" aria-checked="false">Upright</button>
+          <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false" title="Held like a book, the touch screen on the right">Book, left</button>
+          <button type="button" class="choice-chip" data-value="1" role="radio" aria-checked="false" title="Held like a book, the touch screen on the left">Book, right</button>
+        </div>
+      </div>
+      <div class="nds-panel-actions">
+        <button type="button" class="button button-sm" data-nds-action="swap">Swap screens</button>
+        <button type="button" class="button button-sm" data-nds-action="lid" aria-pressed="false">Close the lid</button>
+        <button type="button" class="button button-sm" data-nds-action="mic" aria-pressed="false">Microphone</button>
+        <button type="button" class="button button-sm" data-nds-action="blow" title="Hold: blows into the microphone (H on a keyboard)">Blow</button>
+      </div>
+      <label class="nds-panel-toggle nds-phone-only">
+        <span>Hide the top bar (phone held upright)</span>
+        <span class="switch"><input type="checkbox" data-nds-toggle="barHide" /><span class="switch-track"></span></span>
+      </label>
+    </div>
+
     <!-- Capture banner. A sibling of #topbar, not a child: mobile landscape
          transforms the bar, and a transformed ancestor is the containing block
          of its position:fixed descendants. -->
@@ -354,10 +401,9 @@
            tab order. -->
       <canvas id="canvas" tabindex="-1" aria-label="Game screen" oncontextmenu="event.preventDefault()"></canvas>
 
-      <!-- A DS game: the gap between its two screens, painted the stage's
-           colour over the composite frame's black gap rows/columns, so the
-           screens read as two (index.js "Nintendo DS"). -->
-      <div id="nds-hinge" aria-hidden="true"></div>
+      <!-- A DS game with its lid closed (the Screens panel, or N): the
+           screens dim under this, and a tap opens the lid again. -->
+      <button type="button" id="nds-lid-open" hidden>Lid closed &middot; tap to open</button>
 
       <!-- Input display overlay. A DOM overlay, not drawn on #canvas: clip
            capture is canvas.captureStream, so clips stay clean while a window
@@ -1014,6 +1060,11 @@
                     <div class="kb-shortcut"><span>Save state</span><kbd>F5</kbd></div>
                     <div class="kb-shortcut"><span>Load state</span><kbd>F8</kbd></div>
                     <div class="kb-shortcut"><span>Screenshot</span><kbd>F9</kbd></div>
+                    <div class="kb-shortcut"><span>DS: next screen arrangement</span><kbd>V</kbd></div>
+                    <div class="kb-shortcut"><span>DS: swap the screens</span><kbd>B</kbd></div>
+                    <div class="kb-shortcut"><span>DS: turn the screens (book)</span><kbd>O</kbd></div>
+                    <div class="kb-shortcut"><span>DS: close / open the lid</span><kbd>N</kbd></div>
+                    <div class="kb-shortcut"><span>DS: blow into the microphone (hold)</span><kbd>H</kbd></div>
                   </div>
                   <p class="modal-hint">If a game key and a shortcut share a key, the game wins.</p>
                 </div>
@@ -1113,12 +1164,52 @@
               <div class="settings-pane" id="settings-pane-ds" role="tabpanel" aria-labelledby="settings-tab-ds" hidden>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">Screens</span>
-                  <div id="nds-layout-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="DS screen layout">
+                  <div id="nds-layout-picker" class="chip-row row-flow-ctl" data-nds-chips="layout" role="radiogroup" aria-label="DS screen arrangement">
                     <button type="button" class="choice-chip selected" data-value="auto" role="radio" aria-checked="true">Automatic</button>
                     <button type="button" class="choice-chip" data-value="stack" role="radio" aria-checked="false">Stacked</button>
                     <button type="button" class="choice-chip" data-value="side" role="radio" aria-checked="false">Side by side</button>
+                    <button type="button" class="choice-chip" data-value="focus" role="radio" aria-checked="false">Focus</button>
+                    <button type="button" class="choice-chip" data-value="single" role="radio" aria-checked="false">One screen</button>
                   </div>
-                  <span class="modal-toggle-sub">Automatic shows the two screens whichever way they come out bigger. The screens button in the top bar switches too</span>
+                  <span class="modal-toggle-sub">Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard)</span>
+                </div>
+                <div class="modal-toggle-row row-flow">
+                  <span class="modal-row-label">Gap</span>
+                  <div class="chip-row row-flow-ctl" data-nds-chips="gap" role="radiogroup" aria-label="Gap between the DS screens">
+                    <button type="button" class="choice-chip" data-value="none" role="radio" aria-checked="false">None</button>
+                    <button type="button" class="choice-chip selected" data-value="hinge" role="radio" aria-checked="true">Hinge</button>
+                    <button type="button" class="choice-chip" data-value="console" role="radio" aria-checked="false">Like the console</button>
+                  </div>
+                  <span class="modal-toggle-sub">How far apart two screens shown together sit. Like the console is about the real distance, in pixels</span>
+                </div>
+                <div class="modal-toggle-row row-flow">
+                  <span class="modal-row-label">Turn</span>
+                  <div class="chip-row row-flow-ctl" data-nds-chips="rot" role="radiogroup" aria-label="Turn the DS screens">
+                    <button type="button" class="choice-chip selected" data-value="0" role="radio" aria-checked="true">Upright</button>
+                    <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false">Book, left</button>
+                    <button type="button" class="choice-chip" data-value="1" role="radio" aria-checked="false">Book, right</button>
+                  </div>
+                  <span class="modal-toggle-sub">For games played with the console held sideways like a book. Book, left puts the touch screen on the right (O on a keyboard)</span>
+                </div>
+                <div class="modal-toggle-row">
+                  <div>
+                    <span class="modal-row-label">Bottom screen first</span>
+                    <span class="modal-toggle-sub">Swap the screens: the touch screen on top, or the large one in Focus (B on a keyboard)</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" data-nds-toggle="swap" />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
+                <div class="modal-toggle-row nds-phone-only">
+                  <div>
+                    <span class="modal-row-label">Hide the top bar while playing</span>
+                    <span class="modal-toggle-sub">On a phone held upright, the screens take the bar's room. The handle at the top brings the bar back</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" data-nds-toggle="barHide" />
+                    <span class="switch-track"></span>
+                  </label>
                 </div>
                 <div class="modal-subhead">BIOS and firmware</div>
                 <div class="modal-row">

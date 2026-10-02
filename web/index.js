@@ -9022,8 +9022,11 @@ const updateCanvasScaling = () => {
   const running =
     document.body.classList.contains("running") && !!currentRomName;
   let [availW, availH] = stageAvail();
-  if (running && ndsGameLoaded()) [availW, availH] = ndsAvail([availW, availH]);
-  if (integerScale && running) {
+  if (running && ndsGameLoaded()) {
+    // A DS game: the arrangement's own fit (integer where 1x fits).
+    canvasEl.style.width = ndsLay.cssW + "px";
+    canvasEl.style.height = ndsLay.cssH + "px";
+  } else if (integerScale && running) {
     const [w, h] = nativeRes();
     const k = Math.max(1, Math.floor(Math.min(availW / w, availH / h)));
     canvasEl.style.width = k * w + "px";
@@ -9055,7 +9058,6 @@ const updateCanvasScaling = () => {
     }
   }
   glowCanvas.hidden = !(ambientGlow && singleCore);
-  if (running && ndsGameLoaded()) ndsPlaceHinge();
 };
 
 // Sample a coarse grid from the presented framebuffer at ~10 Hz; the
@@ -9943,7 +9945,7 @@ const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
-  "runahead", "gb-palette", "input-display", "library-open", "nds-layout",
+  "runahead", "gb-palette", "input-display", "library-open", "nds-layout", "nds-display",
 ];
 
 const resetAllSettings = async () => {
@@ -10000,6 +10002,7 @@ const resetAllSettings = async () => {
 
   applyRunahead(0);
   applyNdsLayout("auto");
+  applyNdsDisplay(null);
 
   gbPaletteMode = "default";
   gbPaletteCustom = GB_HW_SHADES.slice();
@@ -11482,6 +11485,11 @@ const shortcutKeyHandler = (e, down) => {
 
   // Releases skip the modal/typing guards so a hold cannot stick.
   if (!down) {
+    if (e.code === "KeyH" && ndsShortcut(e.code, false, false)) { // DS: Blow let go
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if ((e.code === "Tab" && kbFastForward) ||
         (e.code === "Backquote" && kbRewindHeld)) {
       if (e.code === "Tab") {
@@ -11597,6 +11605,11 @@ const shortcutKeyHandler = (e, down) => {
       if (e.shiftKey || !currentRomName || !gameShown || linkMode || rollbackMode) break;
       if (!e.repeat) takeScreenshot();
       handled = true;
+      break;
+    case "KeyV": case "KeyB": case "KeyO": case "KeyN": case "KeyH":
+      // A DS game's screens, lid and microphone (index.js "Nintendo DS").
+      if (e.shiftKey || !gameLoaded) break;
+      handled = ndsShortcut(e.code, true, e.repeat);
       break;
   }
   if (handled) {
@@ -13896,6 +13909,7 @@ const ndsAudioQuiet = () => {
 };
 
 const ndsRunFrame = (c, out, keepAudio, speed) => {
+  if (ndsBlowers.size) ndsBlowFrame();
   c._nds_run_frame();
   const n = c._nds_audio_frames();
   if (n > 0 && keepAudio && out.attached()) {
@@ -13973,17 +13987,35 @@ const ndsBench = (frames = 120) => {
 };
 window.ndsBench = ndsBench;
 
-// --- Video: the two screens as one composite frame (NdsUtil.layout), drawn
-// by the presenter from the core's BGR555 buffers in place.
-const NDS_LAYOUTS = ["auto", "stack", "side"];
+// --- Video: the screens arranged (NdsUtil.layout: stacked, side by side,
+// focus, one screen; gap, swap, turn) and drawn by the presenter view by
+// view from the core's BGR555 buffers in place: the texture holds both
+// screens (top over bottom), each view puts one where the arrangement says.
 let ndsLayoutPref = "auto";
-// The gap between the screens, in composite pixels (#nds-hinge paints it).
-const NDS_GAP = 8;
-let ndsLay = NdsUtil.layout(0, 0, "stack", { gap: NDS_GAP });
+// The other display choices (Settings > Nintendo DS and the Screens panel),
+// stored together as "nds-display". barHide: phones held upright give the
+// top bar's room to the screens (styles.css "DS: the top bar").
+/** @typedef {{ swap: boolean, gap: string, rot: number, barHide: boolean }} NdsDisplay */
+/** @type {Readonly<NdsDisplay>} */
+const NDS_DISPLAY_DEFAULTS = Object.freeze({ swap: false, gap: "hinge", rot: 0, barHide: true });
+/** @type {NdsDisplay} */
+let ndsDisplay = { ...NDS_DISPLAY_DEFAULTS };
+let ndsLay = NdsUtil.layout(0, 0, "stack", { gap: NdsUtil.GAPS.hinge });
+let ndsViews = [];
+// What the canvas shows between and around the screens: the stage's own
+// colour, so a gap reads as a gap and Focus's empty corner as stage.
+let ndsClearRgb = null;
 
 const ndsUpdateLayout = (availW, availH) => {
-  ndsLay = NdsUtil.layout(availW, availH, ndsLayoutPref,
-                          { gap: NDS_GAP, integer: integerScale });
+  ndsLay = NdsUtil.layout(availW, availH, ndsLayoutPref, {
+    gap: NdsUtil.GAPS[ndsDisplay.gap] ?? NdsUtil.GAPS.hinge, integer: integerScale,
+    swap: ndsDisplay.swap, rot: ndsDisplay.rot,
+  });
+  ndsViews = NdsUtil.views(ndsLay).map((v) => ({
+    src: { x: 0, y: v.screen === "top" ? 0 : NdsUtil.H, w: NdsUtil.W, h: NdsUtil.H },
+    dst: v.dst, rot: v.rot,
+  }));
+  ndsClearRgb = null; // the stage's colour, read again (a theme may have changed it)
   document.body.classList.toggle("nds-side", ndsLay.mode === "side");
 };
 
@@ -13997,19 +14029,14 @@ const ndsBackingScale = () => {
   return Math.min(full, Math.max(2, Math.ceil((ndsLay.scale || 1) * dpr)));
 };
 
-// #nds-hinge over the gap between the screens, in the stage's coordinates.
-const ndsPlaceHinge = () => {
-  const el = document.getElementById("nds-hinge");
-  if (!el || typeof canvasEl.getBoundingClientRect !== "function") return;
-  const c = canvasEl.getBoundingClientRect(), s = stageEl.getBoundingClientRect();
-  if (!c.width || !ndsLay.gap) { el.style.width = "0px"; return; }
-  const side = ndsLay.mode === "side";
-  const kx = c.width / ndsLay.w, ky = c.height / ndsLay.h;
-  const x = side ? NdsUtil.W * kx : 0, y = side ? 0 : NdsUtil.H * ky;
-  el.style.left = c.left - s.left + x + "px";
-  el.style.top = c.top - s.top + y + "px";
-  el.style.width = (side ? ndsLay.gap * kx : c.width) + "px";
-  el.style.height = (side ? c.height : ndsLay.gap * ky) + "px";
+const ndsStageRgb = () => {
+  if (ndsClearRgb) return ndsClearRgb;
+  let rgb = [0, 0, 0];
+  try {
+    const m = String(getComputedStyle(stageEl).backgroundColor).match(/[\d.]+/g);
+    if (m && m.length >= 3) rgb = m.slice(0, 3).map((v) => Number(v) / 255);
+  } catch {}
+  return (ndsClearRgb = rgb);
 };
 
 const ndsFrame = () => {
@@ -14017,12 +14044,11 @@ const ndsFrame = () => {
   if (!c || ndsCoreGame === null) return null;
   const t = c._nds_fb555_top(), b = c._nds_fb555_bottom();
   if (!t || !b) return null;
-  const r = NdsUtil.screenRects(ndsLay.mode, ndsLay.gap);
-  const buf = c.HEAPU8.buffer, n = NdsUtil.W * NdsUtil.H;
-  return { w: ndsLay.w, h: ndsLay.h, parts: [
-    { view: new Uint16Array(buf, t, n), x: r.top.x, y: r.top.y, w: NdsUtil.W, h: NdsUtil.H },
-    { view: new Uint16Array(buf, b, n), x: r.bottom.x, y: r.bottom.y, w: NdsUtil.W, h: NdsUtil.H },
-  ] };
+  const W = NdsUtil.W, H = NdsUtil.H, buf = c.HEAPU8.buffer, n = W * H;
+  return { w: W, h: 2 * H, parts: [
+    { view: new Uint16Array(buf, t, n), x: 0, y: 0, w: W, h: H },
+    { view: new Uint16Array(buf, b, n), x: 0, y: H, w: W, h: H },
+  ], out: { w: ndsLay.w, h: ndsLay.h, clear: ndsStageRgb(), views: ndsViews } };
 };
 
 // The top screen as RGBA: the library's picture, the paused hero and the
@@ -14075,6 +14101,7 @@ const ndsApplyState = (bytes) => {
   c.HEAPU8.set(bytes, p);
   const ok = c._nds_state_load(p, bytes.length) === 1;
   c._free(p);
+  if (ok) ndsSetLid(ndsLidClosed); // the lid is where the page has it, not the state
   return ok;
 };
 
@@ -14086,8 +14113,11 @@ const ndsSetInput = (appId, down) => {
 
 // The stylus: mouse, pen or finger on the bottom screen. A touch starts only
 // on the bottom screen and then follows the pointer (captured), clamped to
-// the screen's edge, until it lifts.
+// the screen's edge, until it lifts. In Focus and One screen a tap on the
+// top screen (nothing to touch there) swaps the screens: lifted within
+// 500 ms and 12 px of where it went down.
 let ndsTouchId = null;
+let ndsSwapTap = null;
 const ndsTouchAt = (e, down) => {
   const p = NdsUtil.touchPoint(e.clientX, e.clientY, canvasEl.getBoundingClientRect(), ndsLay);
   if (ndsCore && ndsCoreGame !== null) ndsCore._nds_set_touch(p.x, p.y, down ? 1 : 0);
@@ -14102,8 +14132,16 @@ const ndsTouchEnd = (e) => {
 canvasEl.addEventListener("pointerdown", (e) => {
   if (!ndsGameLoaded() || !document.body.classList.contains("running")) return;
   if (ndsTouchId !== null || (e.pointerType === "mouse" && e.button !== 0)) return;
-  const p = NdsUtil.touchPoint(e.clientX, e.clientY, canvasEl.getBoundingClientRect(), ndsLay);
-  if (!p.inside) return;
+  if (ndsLidClosed) return;
+  const rect = canvasEl.getBoundingClientRect();
+  const p = NdsUtil.touchPoint(e.clientX, e.clientY, rect, ndsLay);
+  if (!p.inside) {
+    const one = ndsLay.mode === "focus" || ndsLay.mode === "single";
+    if (one && NdsUtil.screenAt(e.clientX, e.clientY, rect, ndsLay) === "top") {
+      ndsSwapTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+    }
+    return;
+  }
   e.preventDefault();
   ndsTouchId = e.pointerId;
   try { canvasEl.setPointerCapture(e.pointerId); } catch {}
@@ -14112,7 +14150,16 @@ canvasEl.addEventListener("pointerdown", (e) => {
 canvasEl.addEventListener("pointermove", (e) => {
   if (e.pointerId === ndsTouchId) ndsTouchAt(e, true);
 });
-canvasEl.addEventListener("pointerup", ndsTouchEnd);
+canvasEl.addEventListener("pointerup", (e) => {
+  const tap = ndsSwapTap;
+  ndsSwapTap = null;
+  if (tap && tap.id === e.pointerId && performance.now() - tap.t < 500 &&
+      Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 12) {
+    ndsSwapScreens();
+    return;
+  }
+  ndsTouchEnd(e);
+});
 canvasEl.addEventListener("pointercancel", ndsTouchEnd);
 window.addEventListener("blur", () => ndsTouchEnd(null));
 
@@ -14148,6 +14195,7 @@ const ndsStart = (name, rom, save, bios) => {
   ndsTouchId = null;
   ndsAcc = 0;
   ndsAudioQuiet();
+  ndsSetLid(false); // every boot starts with the lid open
   return true;
 };
 // The core and its ROM go (a GB/GBA game took over, or the game was closed).
@@ -14156,6 +14204,9 @@ const ndsUnload = () => {
   ndsCoreGame = null;
   ndsTouchId = null;
   if (ndsOut) ndsOut.detach();
+  ndsMicStop();
+  ndsBlowers.clear();
+  ndsSetLid(false);
 };
 
 // The session's mode classes: what to show and hide (styles.css "DS mode").
@@ -14163,7 +14214,10 @@ const ndsApplyModeClasses = () => {
   const on = ndsGameLoaded();
   document.body.classList.toggle("nds-mode", on);
   document.body.classList.toggle("nds-states", on && ndsHasStates());
-  if (!on) document.body.classList.remove("nds-side");
+  if (!on) {
+    document.body.classList.remove("nds-side");
+    closeNdsPanel();
+  }
 };
 
 // Signed in to Drive: say once a session that DS games stay here.
@@ -14174,34 +14228,348 @@ const ndsNoteDriveSkip = () => {
   showToast("DS games stay on this device — Drive sync skips them for now");
 };
 
-// --- Layout preference: Settings > Nintendo DS and the bar's layout button.
-const ndsLayoutChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
-  document.querySelectorAll("#nds-layout-picker .choice-chip")));
+// --- Display choices: Settings > Nintendo DS and the Screens panel (the
+// bar's screens button) show the same chips and toggles, by their
+// data-nds-chips / data-nds-toggle names; every change goes through here.
+const NDS_LAYOUT_NAMES = { auto: "Automatic", stack: "Stacked", side: "Side by side",
+                           focus: "Focus", single: "One screen" };
+const NDS_ROT_NAMES = { 0: "Upright", 3: "Book, left", 1: "Book, right" };
+const ndsChips = (name) => Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll(`[data-nds-chips="${name}"] .choice-chip`)));
+const ndsToggles = (name) => Array.from(/** @type {NodeListOf<HTMLInputElement>} */ (
+  document.querySelectorAll(`input[data-nds-toggle="${name}"]`)));
 const ndsLayoutBtn = document.getElementById("nds-layout-btn");
-const NDS_LAYOUT_NAMES = { auto: "Automatic", stack: "Stacked", side: "Side by side" };
-const applyNdsLayout = (v) => {
-  ndsLayoutPref = NDS_LAYOUTS.includes(v) ? v : "auto";
-  syncChipGroup(ndsLayoutChips, ndsLayoutPref);
+const ndsSwapBtn = document.getElementById("nds-swap-btn");
+const ndsPanel = document.getElementById("nds-panel");
+const ndsLidOpenBtn = document.getElementById("nds-lid-open");
+
+const ndsSyncDisplayUI = () => {
+  syncChipGroup(ndsChips("layout"), ndsLayoutPref);
+  syncChipGroup(ndsChips("gap"), ndsDisplay.gap);
+  syncChipGroup(ndsChips("rot"), String(ndsDisplay.rot));
+  for (const t of ndsToggles("swap")) t.checked = ndsDisplay.swap;
+  for (const t of ndsToggles("barHide")) t.checked = ndsDisplay.barHide;
   if (ndsLayoutBtn) {
     ndsLayoutBtn.title = "Screens: " + NDS_LAYOUT_NAMES[ndsLayoutPref];
     ndsLayoutBtn.dataset.layout = ndsLayoutPref;
   }
+  ndsSwapBtn?.setAttribute("aria-pressed", ndsDisplay.swap ? "true" : "false");
+  document.body.classList.toggle("nds-bar-hide", ndsDisplay.barHide);
+};
+
+const applyNdsLayout = (v) => {
+  ndsLayoutPref = NdsUtil.ARRANGEMENTS.includes(v) ? v : "auto";
+  ndsTouchEnd(null); // a stylus held through a change would land elsewhere
+  ndsSyncDisplayUI();
   updateCanvasScaling();
 };
 const setNdsLayout = async (v) => {
   applyNdsLayout(v);
   if (db) await dbPut("nds-layout", ndsLayoutPref);
 };
-for (const chip of ndsLayoutChips) {
+
+// A stored (or reset) record: anything unknown falls back to the default.
+const applyNdsDisplay = (d) => {
+  const v = d && typeof d === "object" ? d : {};
+  ndsDisplay = {
+    swap: v.swap === true,
+    gap: Object.hasOwn(NdsUtil.GAPS, v.gap) ? v.gap : NDS_DISPLAY_DEFAULTS.gap,
+    rot: NdsUtil.ROTATIONS.includes(v.rot) ? v.rot : NDS_DISPLAY_DEFAULTS.rot,
+    barHide: typeof v.barHide === "boolean" ? v.barHide : NDS_DISPLAY_DEFAULTS.barHide,
+  };
+  ndsTouchEnd(null);
+  ndsSyncDisplayUI();
+  updateCanvasScaling();
+};
+const setNdsDisplay = async (patch) => {
+  applyNdsDisplay({ ...ndsDisplay, ...patch });
+  if (db) await dbPut("nds-display", { ...ndsDisplay });
+};
+const ndsSwapScreens = () => setNdsDisplay({ swap: !ndsDisplay.swap });
+
+for (const chip of ndsChips("layout")) {
   chip.addEventListener("click", () => setNdsLayout(chip.dataset.value));
 }
-ndsLayoutBtn?.addEventListener("click", () => {
-  const next = NDS_LAYOUTS[(NDS_LAYOUTS.indexOf(ndsLayoutPref) + 1) % NDS_LAYOUTS.length];
-  setNdsLayout(next);
-  showToast("Screens: " + NDS_LAYOUT_NAMES[next]);
-});
+for (const chip of ndsChips("gap")) {
+  chip.addEventListener("click", () => setNdsDisplay({ gap: chip.dataset.value }));
+}
+for (const chip of ndsChips("rot")) {
+  chip.addEventListener("click", () => setNdsDisplay({ rot: Number(chip.dataset.value) }));
+}
+for (const name of ["swap", "barHide"]) {
+  for (const t of ndsToggles(name)) {
+    t.addEventListener("change", () => setNdsDisplay({ [name]: t.checked }));
+  }
+}
+ndsSwapBtn?.addEventListener("click", () => ndsSwapScreens());
+
 const loadNdsLayoutFromStorage = async () => {
-  applyNdsLayout(await dbGet("nds-layout"));
+  const v = await dbGet("nds-layout");
+  ndsLayoutPref = NdsUtil.ARRANGEMENTS.includes(v) ? v : "auto";
+  applyNdsDisplay(await dbGet("nds-display"));
+};
+
+// --- The Screens panel: opened from the bar, closed by a tap elsewhere or
+// Escape (as the account menu is).
+let ndsPanelOpen = false;
+const closeNdsPanel = () => {
+  if (!ndsPanel || !ndsPanelOpen) return;
+  ndsPanelOpen = false;
+  ndsPanel.hidden = true;
+  ndsLayoutBtn?.setAttribute("aria-expanded", "false");
+};
+const openNdsPanel = () => {
+  if (!ndsPanel) return;
+  ndsSyncDisplayUI();
+  ndsPanelOpen = true;
+  ndsPanel.hidden = false;
+  ndsLayoutBtn?.setAttribute("aria-expanded", "true");
+};
+if (ndsPanel) {
+  ndsPanel.hidden = true;
+  ndsLayoutBtn?.addEventListener("click", (e) => {
+    e.stopPropagation?.();
+    if (ndsPanelOpen) closeNdsPanel();
+    else openNdsPanel();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!ndsPanelOpen) return;
+    const t = /** @type {Node} */ (e.target);
+    if (ndsPanel.contains?.(t) || ndsLayoutBtn?.contains?.(t)) return;
+    closeNdsPanel();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeNdsPanel();
+  });
+}
+
+// --- The lid: closed from the panel or N, opened the same way or by a tap
+// anywhere on the dimmed screens. The core starts every boot open, and a
+// state load is told the lid as it is here (nds_set_lid; opening raises the
+// lid IRQ, docs/nds/peripherals.md). Not closed when the page hides: the
+// page runs no frames then, so the game would never see it.
+let ndsLidClosed = false;
+const ndsSetLid = (closed) => {
+  ndsLidClosed = !!closed;
+  if (ndsLidClosed) ndsTouchEnd(null);
+  if (ndsCore && ndsCoreGame !== null && ndsCore._nds_set_lid) {
+    ndsCore._nds_set_lid(ndsLidClosed ? 1 : 0);
+  }
+  document.body.classList.toggle("nds-lid-closed", ndsLidClosed);
+  if (ndsLidOpenBtn) ndsLidOpenBtn.hidden = !ndsLidClosed;
+  for (const b of document.querySelectorAll('[data-nds-action="lid"]')) {
+    b.setAttribute("aria-pressed", ndsLidClosed ? "true" : "false");
+    b.textContent = ndsLidClosed ? "Open the lid" : "Close the lid";
+  }
+};
+ndsLidOpenBtn?.addEventListener("click", () => ndsSetLid(false));
+
+// --- Microphone. The device's microphone, asked for only when it is turned
+// on (the panel's Microphone button), goes into the core through
+// nds_push_mic in ~31 ms chunks at the audio context's rate; the core plays
+// the queue out against emulated time (io/mic.nim). Blow (held: the panel's
+// button or H) pushes loud noise instead, one emulated frame's worth before
+// each frame: for a device without a microphone, or a quieter room. Neither
+// is stored: a page must not open the microphone on its own next time.
+const NDS_BLOW_RATE = 16000;
+let ndsMic = null;           // { stream, ctx, src, node, sink, own } while on
+let ndsMicHeap = 0, ndsMicHeapLen = 0;
+const ndsBlowers = new Set(); // what holds Blow down: "key", or a pointer id
+const ndsMicWorkletCtxs = new WeakSet();
+
+const ndsPushMic = (i16, rate) => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null || !c._nds_push_mic || !i16.length) return;
+  if (ndsMicHeapLen < i16.length) {
+    if (ndsMicHeap) c._free(ndsMicHeap);
+    ndsMicHeap = c._malloc(i16.length * 2);
+    ndsMicHeapLen = ndsMicHeap ? i16.length : 0;
+  }
+  if (!ndsMicHeap) return;
+  new Int16Array(c.HEAPU8.buffer, ndsMicHeap, i16.length).set(i16);
+  c._nds_push_mic(ndsMicHeap, i16.length, rate);
+};
+
+// Before each frame while Blow is held (ndsRunFrame).
+const ndsBlowFrame = () => {
+  const rate = ndsMic ? ndsMic.ctx.sampleRate : NDS_BLOW_RATE;
+  ndsPushMic(NdsUtil.blowNoise(Math.ceil(rate / NdsUtil.FPS)), rate);
+};
+
+const ndsSyncMicUI = (level = 0) => {
+  for (const b of document.querySelectorAll('[data-nds-action="mic"]')) {
+    b.setAttribute("aria-pressed", ndsMic ? "true" : "false");
+    /** @type {HTMLElement} */ (b).style.setProperty("--mic-level", String(level));
+  }
+  for (const b of document.querySelectorAll('[data-nds-action="blow"]')) {
+    b.setAttribute("aria-pressed", ndsBlowers.size ? "true" : "false");
+  }
+  document.body.classList.toggle("nds-blowing", ndsBlowers.size > 0);
+};
+const ndsBlow = (who, on) => {
+  if (on) ndsBlowers.add(who); else ndsBlowers.delete(who);
+  ndsSyncMicUI();
+};
+
+// iOS routes a page's sound through a play-and-record session while it
+// records (Safari 17+ asks for it by name); playback again after.
+const ndsMicSession = (on) => {
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = on ? "play-and-record" : "playback";
+  } catch {}
+};
+
+const ndsMicStart = async () => {
+  if (ndsMic) return true;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showToast("No microphone here — hold Blow instead");
+    return false;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1,
+    } });
+  } catch (e) {
+    showToast(e?.name === "NotAllowedError"
+      ? "Microphone access was refused — hold Blow instead"
+      : "No microphone found — hold Blow instead");
+    return false;
+  }
+  const graph = typeof window.appAudioOut === "function" ? window.appAudioOut() : null;
+  const own = !graph;
+  const ctx = graph ? graph.ctx : new AudioContext();
+  try { if (ctx.state !== "running") await ctx.resume(); } catch {}
+  const src = ctx.createMediaStreamSource(stream);
+  // Pulled through a silent gain so the browser runs it; never into the
+  // app's master gain (no echo, nothing in a clip).
+  const sink = ctx.createGain();
+  sink.gain.value = 0;
+  sink.connect(ctx.destination);
+  const onChunk = (/** @type {Float32Array} */ f32) => {
+    if (!ndsMic) return;
+    let sum = 0;
+    for (let i = 0; i < f32.length; i++) sum += f32[i] * f32[i];
+    ndsSyncMicUI(Math.min(1, Math.sqrt(sum / (f32.length || 1)) * 4));
+    // Paused or blowing: the core gets nothing (Blow owns the queue's rate).
+    if (!paused && !ndsBlowers.size) ndsPushMic(NdsUtil.micInt16(f32), ctx.sampleRate);
+  };
+  let node;
+  try {
+    if (ctx.audioWorklet && typeof AudioWorkletNode !== "undefined") {
+      if (!ndsMicWorkletCtxs.has(ctx)) {
+        const code = `registerProcessor('nds-mic', class extends AudioWorkletProcessor {
+          constructor() { super(); this.buf = new Float32Array(1024); this.n = 0; }
+          process(ins) {
+            const ch = ins[0] && ins[0][0];
+            if (ch) for (let i = 0; i < ch.length; i++) {
+              this.buf[this.n++] = ch[i];
+              if (this.n === this.buf.length) {
+                this.port.postMessage(this.buf, [this.buf.buffer]);
+                this.buf = new Float32Array(1024); this.n = 0;
+              }
+            }
+            return true;
+          }
+        });`;
+        const url = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+        try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+        ndsMicWorkletCtxs.add(ctx);
+      }
+      const wn = new AudioWorkletNode(ctx, "nds-mic", {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+      wn.port.onmessage = (e) => onChunk(e.data);
+      node = wn;
+    } else {
+      const sp = ctx.createScriptProcessor(1024, 1, 1);
+      sp.onaudioprocess = (e) => onChunk(e.inputBuffer.getChannelData(0).slice());
+      node = sp;
+    }
+  } catch (e) {
+    for (const t of stream.getTracks()) t.stop();
+    sink.disconnect();
+    if (own) ctx.close().catch(() => {});
+    showToast("The microphone could not start — hold Blow instead");
+    return false;
+  }
+  src.connect(node);
+  node.connect(sink);
+  ndsMic = { stream, ctx, src, node, sink, own };
+  ndsMicSession(true);
+  ndsSyncMicUI();
+  return true;
+};
+
+const ndsMicStop = () => {
+  const m = ndsMic;
+  if (!m) return;
+  ndsMic = null;
+  try { m.src.disconnect(); m.node.disconnect(); m.sink.disconnect(); } catch {}
+  if (m.node.port) m.node.port.onmessage = null;
+  if ("onaudioprocess" in m.node) m.node.onaudioprocess = null;
+  for (const t of m.stream.getTracks()) t.stop();
+  if (m.own) m.ctx.close().catch(() => {});
+  ndsMicSession(false);
+  ndsSyncMicUI();
+};
+
+for (const b of document.querySelectorAll('[data-nds-action="swap"]')) {
+  b.addEventListener("click", () => ndsSwapScreens());
+}
+for (const b of document.querySelectorAll('[data-nds-action="lid"]')) {
+  b.addEventListener("click", () => ndsSetLid(!ndsLidClosed));
+}
+for (const b of document.querySelectorAll('[data-nds-action="mic"]')) {
+  b.addEventListener("click", () => { if (ndsMic) ndsMicStop(); else ndsMicStart(); });
+}
+for (const b of /** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll('[data-nds-action="blow"]'))) {
+  b.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    try { b.setPointerCapture(e.pointerId); } catch {}
+    ndsBlow(e.pointerId, true);
+  });
+  for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
+    b.addEventListener(t, (e) => ndsBlow(/** @type {PointerEvent} */ (e).pointerId, false));
+  }
+  b.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+window.addEventListener("blur", () => { if (ndsBlowers.size) { ndsBlowers.clear(); ndsSyncMicUI(); } });
+
+// --- Keyboard (shortcutKeyHandler): V the next arrangement, B swap, O the
+// next turn, N the lid, H held for Blow. True when the key was taken.
+const ndsShortcut = (code, down, repeat) => {
+  if (!ndsGameLoaded()) return false;
+  if (code === "KeyH") {
+    if (down !== ndsBlowers.has("key")) ndsBlow("key", down);
+    return true;
+  }
+  if (!down) return false;
+  if (repeat) return true;
+  switch (code) {
+    case "KeyV": {
+      const all = NdsUtil.ARRANGEMENTS;
+      const next = all[(all.indexOf(ndsLayoutPref) + 1) % all.length];
+      setNdsLayout(next);
+      showToast("Screens: " + NDS_LAYOUT_NAMES[next]);
+      return true;
+    }
+    case "KeyB":
+      ndsSwapScreens();
+      return true;
+    case "KeyO": {
+      const r = NdsUtil.ROTATIONS;
+      const next = r[(r.indexOf(ndsDisplay.rot) + 1) % r.length];
+      setNdsDisplay({ rot: next });
+      showToast("Screens: " + NDS_ROT_NAMES[next]);
+      return true;
+    }
+    case "KeyN":
+      ndsSetLid(!ndsLidClosed);
+      showToast(ndsLidClosed ? "Lid closed" : "Lid open");
+      return true;
+  }
+  return false;
 };
 
 // --- BIOS / firmware rows (Settings > Nintendo DS), stored like the GBA BIOS.

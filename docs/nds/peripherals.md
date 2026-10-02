@@ -173,8 +173,10 @@ during ARM7 sleep (periph_suite RES37-39; docs/oracles.md).
 ## Frontend API (nds.nim)
 
 `set_lid`, `push_mic`, `set_battery_low`, `set_external_power`,
-`backlight(top)`, `sleeping`, `asleep()` (sleeping or powered off). The web
-page and desktop frontends do not call them yet.
+`backlight(top)`, `sleeping`, `asleep()` (sleeping or powered off). The
+main web app calls `set_lid` and `push_mic` (wasm exports `nds_set_lid`,
+`nds_push_mic`; docs/nds/web.md "Lid and microphone"); the dev page and
+desktop frontends do not call any of them yet.
 
 ## Left
 
