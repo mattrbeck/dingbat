@@ -325,7 +325,11 @@ proc edge_run(e: Edge; y: int; right: bool): Run {.inline.} =
     return if right: Run(s: e.x0 - 1, e: e.x0, vert: true) else: Run(s: e.x0, e: e.x0 + 1, vert: true)
   let xa = e.edge_x(y)
   if e.xmaj:
-    let xb = e.edge_x(y + 1)
+    # the run's far end steps the slope without its low 9 bits: a dot
+    # whose centre x(y + 1) passes by less than (slope mod 512) / 2^18 is
+    # left out (the hardware line captures, all 4 x 49601 exact)
+    let st = abs(e.slope) and not 511'i64
+    let xb = if e.dec: xa - st else: xa + st
     Run(s: int32((min(xa, xb) + XHALF) shr XSHIFT), e: int32((max(xa, xb) + XHALF) shr XSHIFT),
         xmaj: true, inc: not e.dec)
   else:

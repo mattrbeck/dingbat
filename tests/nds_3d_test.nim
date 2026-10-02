@@ -511,6 +511,41 @@ proc scene_wbuffer() =
   g.finish("wbuffer")
   check(alpha5(g.px(128, 180)) == 31, "near floor drawn")
 
+proc scene_line_gaps() =
+  # Hardware display captures (StrikerX3/nds-interp, TL-<dx>x<dy>: a white
+  # wire-frame line from dot (0,0), drawn with w = 3.0): an x-major run's
+  # far end steps the slope without its low 9 bits, so a dot whose centre
+  # x(y+1) passes by less than that is left out (docs/nds/3d-edges.md).
+  echo "line gaps (hardware captures)"
+  for (dx, dy, gapx, gapy, has) in [(69, 49, 53, 37, false), (251, 69, 145, 39, false),
+                                    (97, 16, 48, 7, true)]:
+    let (g, _) = fresh()
+    g.reg(0x060, 0x0008, 0xFFFF)
+    g.reg(0x350, (31'u32 shl 16) or (63'u32 shl 24))
+    g.reg(0x354, 0x7FFF, 0xFFFF)
+    g.cmd(0x60, 0xBFFF0000'u32)
+    g.cmd(0x10, 0)
+    var m: array[16, float]
+    m[0] = 1; m[5] = 1; m[10] = 1; m[15] = 3
+    g.load4x4(m)
+    g.cmd(0x10, 2); g.cmd(0x15)
+    g.cmd(0x29, poly_attr(0, front = true, back = true))
+    g.cmd(0x40, 0)
+    g.color(31, 31, 31)
+    proc v16(g: Gpu3d; vx, vy: int) =
+      g.cmd(0x23, uint32(cast[uint16](int16(vx))) or (uint32(cast[uint16](int16(vy))) shl 16), 0)
+    g.v16(-12288, 12288); g.v16(-12288, 12288)
+    g.v16(-12288 + dx * 96, 12288 - dy * 128)
+    g.cmd(0x41)
+    g.cmd(0x50, 0)
+    g.on_vblank()
+    g.render_frame()
+    # the rear plane is black, the line white
+    let drawn = (g.px(gapx, gapy) and 0x3F3F3F) != 0
+    check(drawn == has, "line to (" & $dx & "," & $dy & "): dot (" & $gapx & "," & $gapy & ") " &
+          (if has: "drawn" else: "left out") & " as on hardware")
+    check((g.px(gapx - 1, gapy) and 0x3F3F3F) != 0, "line to (" & $dx & "," & $dy & "): the dot before is drawn")
+
 proc scene_registers() =
   echo "registers"
   let (g, _) = fresh()
@@ -682,6 +717,7 @@ const ROM_HASHES = [
   ("3d_probe_degen_edge", 0x466996FF'u32),
   ("3d_probe_dot", 0x8C4DCC1C'u32),
   ("3d_probe_edge2", 0xA1611174'u32),
+  ("3d_probe_hwline", 0x9D8E2EF2'u32),
   ("3d_probe_lerp", 0xB433E213'u32),
   ("3d_probe_light", 0x758ED3D5'u32),
   ("3d_probe_light_spec", 0x9CE83578'u32),
@@ -751,6 +787,7 @@ when isMainModule:
   scene_registers()
   scene_timing()
   scene_budget()
+  scene_line_gaps()
   rom_scenes()
   if failures > 0:
     echo failures, " check(s) failed"
