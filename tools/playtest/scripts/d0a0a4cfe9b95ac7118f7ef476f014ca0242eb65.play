@@ -7,6 +7,11 @@
 # Recorded by hand in the desktop app (2026-09-16): name the player, play into
 # Nell's Troop Orders map, save from the map menu; [load] continues onto that map.
 # converted from input.log: 222 keypad changes, 293 sync hashes checked in dingbat
+# 02_mark: dingbat's menu background is a scroll step ahead. First boot writes a
+# 4 KB flash sector byte by byte, polling after each; dingbat's flash has no
+# busy time, so boot ends 3 frames before mgba's and the game's frame counter
+# runs on the other parity. Needs the real chip's program time measured:
+# docs/playtest-bugs.md, "Advance Wars: first-boot flash writes".
 [new]
 wait 664
 press A hold=3

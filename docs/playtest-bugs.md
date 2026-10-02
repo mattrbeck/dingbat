@@ -3106,7 +3106,7 @@ and B for v = 0 means flip the knob to true (Kingdom Hearts then passes);
 is. v = 1 should read 2 throughout on the console (fifomap says so); if it
 does not, the fifomap reading above needs another look.
 
-## §NEXT — Castlevania HoD: thunder at different frames is the lightning's randomness, not the APU, 2026-10-02
+## 31. Castlevania HoD: thunder at different frames is the lightning's randomness, not the APU, 2026-10-02
 
 **Symptom.** All four dingbat configs play IDENTICAL to both references at
 every checkpoint but fail audio: "differs from both references in 2.4 % of
@@ -3192,3 +3192,166 @@ without. The knob variants (`CONTENTION`, `BRANCH_COMMIT_WAIT`, both) also
 show how chaotic the schedule is: their thunder lands at f7000, f7000 and
 f7140 (the last one matching the references by chance), from lag changes
 of one or two frames.
+
+## 32. Lunar Legend: the load screen reads differently, and it is not the save, 2026-10-02
+
+**Symptom.** All four dingbat configs fail the cross-load check: "mgba save
+in dingbat: checkpoint load_file differs from the references reading the
+same save (mgba=MAJOR, nba=MAJOR)", the same for the second reference's
+save. Play is IDENTICAL; dingbat's and mGBA's battery files are
+byte-identical (EEPROM 8 KB), the second reference's differs in 23 bytes.
+
+**Not the save.** Every reader shows every save the same way: at
+load_file the four dingbat configs hash 3FD1E88F for all three files,
+mGBA ABA41A9B for all, the second reference F4EADD89 for all. The
+difference is the [load] run, not the file. The checkpoint is
+`compare=text` over the rotating globe of the file menu, and OCR reads
+dingbat as "LOAD | Burg | 10:000 | DATA | 2:HO" and both references as
+"LOAD | 01:LV | Burg | 000:01 | 2:HO DATA" (similarity 0.66 = MAJOR). The
+pixels are the same menu with the same text (LV 1 Burg, 000:01, NO DATA);
+the globe and Nall's cursor are one animation step apart.
+
+**Why one step.** With a battery file present the game reads the whole
+EEPROM at boot (f6-f21: ~1030 calls of the read routine at 0x080567F0,
+each a 17-halfword address DMA and a 68-halfword read DMA, from Thumb ROM
+code at WAITCNT 0x4314, prefetch on). A call costs 4167 cycles in dingbat
+and 4096 in mGBA; the last one ends 170.5k cycles into f21 in dingbat and
+88.1k in mGBA, and from there the game is a frame behind: its post-load
+burst runs at f27 (mGBA f26), the title's 4-frame animation steps at f35,
+f39, ... (mGBA f34, f38, ...), the globe's 8-frame steps likewise. In
+[new] (no battery file, no EEPROM read) dingbat matches mGBA frame for
+frame to f560 and after that differs only by one 5-bit step on the fading
+globe (colour-effect rounding; the second reference rounds differently
+again: its background is 1,2,5 where both others have 0,2,5).
+
+**Where the 71 cycles go** (per call, dingbat minus mGBA, from `trace`;
+the interrupt path in between costs a few cycles less in dingbat):
+
+| | per call | rule |
+|---|---|---|
+| six PC-relative literal loads (`ldr rX,[pc,#n]`, e.g. 0x08056776, 0x08056780, 0x08056788, 0x08001292) in the DMA helper, run twice | ~+44 | the opcode fetch after a gamepak data load is nonsequential (N 4 vs S 2) and the load's I cycle fills nothing: alyosha prefetcher_branch_thumb_2, hardware-verified, failed by both references (the Harvest Moon rule of section 29) |
+| the address-bit loop 0x08056826-0x08056838, 14 iterations, an `ldrb` from a cartridge table each | ~+28 | the same rule, +2 an iteration |
+| the two EEPROM DMAs | +4 | 176 and 686 cycles in dingbat, 174 and 684 in mGBA |
+
+The 64-bit assembly loop (0x0805686C-0x08056880, IWRAM `ldrh`) costs the
+same in both. `-d:BRANCH_COMMIT_WAIT=false -d:CONTENTION=false` leaves the
+first divergence at f34.
+
+**Status: no change.** The references' prefetcher, as in section 29; a
+user importing an mGBA or second-reference save into dingbat gets the
+same file menu as from dingbat's own. The script's note says so.
+
+## 33. Yu-Gi-Oh! - The Eternal Duelist Soul: the title a frame late after the boot load, 2026-10-02
+
+**Symptom.** `title` ([new]) and `continue_title` ([load]) are DIFFERENT in
+all four configs; the references are pixel-identical there. The script's
+note had dingbat's green grid "offset by about one pixel and differing on
+every row". Section 29 left it untraced ("first difference f32").
+
+**f32 is not where play parts.** The fades from f32 (f32-43, f166-177,
+f215-229, f352-366, f400-414, f537-551) differ from mGBA by at most one
+5-bit step (452 px; blend rounding), and the second reference leaves mGBA
+there by 2-3 steps (1323 px) and a frame early. f552-f643 are identical
+again. Play parts at **f582**: from there dingbat's IWRAM at frame f+1 equals
+mGBA's at f (the RNG word at 0x03000040 and the frame counters at
+0x03004890, one step behind) with nothing different before. HLE and
+official BIOS are identical for 1000 frames.
+
+**The loop.** f575-582 is a boot load whose hot loop (0x0807517A-0x080751DA,
+Thumb ROM, WAITCNT 0x4014, prefetch on, 8192 iterations) stores a halfword
+to OBJ VRAM (DISPCNT 0: no contention) and then tests four bytes loaded
+from EWRAM, each `ldrb`, `cmp`, mostly-taken `beq`. **72.6 cycles an
+iteration in dingbat, 64.8 in mGBA**, 65.6k cycles over the loop: an EWRAM
+`ldrb` plus its `cmp` is 6-7 cycles against mGBA's 4, though the EWRAM
+byte read alone is 3 plus the load's I cycle -- the `slotexec.s` rule of
+section 29 (EWRAM data access from gamepak code with the prefetcher on,
+console = dingbat). mGBA reaches the idle loop (0x08075D8E) 55k cycles
+before the f582 V-blank; dingbat 21k cycles after it.
+
+**On the title** dingbat[f] = mGBA[f-1] except 304 px: the grid scrolls a
+pixel a frame (a one-frame lag is ~13k px), and the emblem's flame, which
+wobbles during the logo, comes to rest on another frame of its animation
+(2 px right; x centre 120.1 against 118.1 on both references), so no
+offset matches exactly. [load] boots the same way with any save (mGBA's
+included: f728-f918 differ, f919 on identical), so `continue_title` is the
+same lag, not the save. **Status: no change**; the references' cost of the
+loop is below the console's.
+
+## 34. Mario & Luigi - Superstar Saga: Bowser on another idle pose, five main-loop counts behind, 2026-10-02
+
+**Symptom.** `07_mark` (f20257, a battle with Bowser) is DIFFERENT in all
+four configs: the same battle on every emulator, with Bowser and Mario on
+other idle-animation poses (diff box 54..209 x 48..155, 1298 px against
+mGBA). The references themselves disagree at 06, 11 and 15-19; at 07 their
+difference happened to fall under MINOR.
+
+**The counter.** Counting only pixels more than one 5-bit step apart,
+dingbat matches mGBA to f17826; the poses part from the battle flash at
+f17828 (the second reference is a frame behind mGBA there and on its own
+pose phase). The battle animations run off the game's main-loop counter
+(IWRAM 0x03000368), not its V-blank count (0x0300036C). At f17600, screens
+still identical, the V-blank counts agree and the main-loop counter and
+the task timers tagged TIME/FLDM/BEVS/EVTS (0x03002150, 0x03002210,
+0x03002548, 0x0300257C) are all exactly **5** lower in dingbat. Loading
+mGBA's f17700 state and poking only 0x03000368 to dingbat's value makes mGBA
+draw the battle exactly as dingbat for the next 239 frames (0 of 239 frames
+more than a step apart; 163 of 239 without the poke).
+
+**Where the five went.** dingbat's main loop misses a V-blank that mGBA's
+makes at f3829, f3964, f5025, f5054 and f10335, all scene loads. At f3828
+(traced from both emulators' states; no input in the stretch) dingbat runs
+86,733 instructions, mGBA 88,451, and in f3829 mGBA finishes the iteration
+before the V-blank and dingbat does not: over f3827-3828 dingbat spends
+28.5k cycles more in gamepak code (net 14.6k behind once its 12.6k fewer
+halted cycles are counted). The gap is spread over many ROM functions, not
+one loop; e.g. the first 24 instructions of 0x0801E68C cost 78 cycles in
+dingbat and 60 in mGBA, which charges its register pushes to the IWRAM
+stack and `ldr`s below the bus floor -- section 29's pricing again.
+
+**Status: no change.** A checkpoint on a battle's idle animation judges the
+main-loop phase, which here follows the references' cheaper gamepak code;
+the script's note says so (a still screen would be a steadier checkpoint).
+
+## 35. Advance Wars: first-boot flash writes finish instantly, and the menu scroll is a frame out of phase, 2026-10-02
+
+**Symptom.** At `02_mark` (f3932, the Field Training menu) dingbat's
+scrolling emblem background is one scroll step ahead of both references
+(~4.4k px more than a step apart, all on the background; dingbat[f] =
+mGBA[f+1..f+2] there). The references differ from each other only at the
+cursor arrows (~250 px) plus blend rounding. All four configs alike;
+`-d:CONTENTION=false` / `-d:BRANCH_COMMIT_WAIT=false` change nothing. **Not
+section 29: dingbat is early, and the cause is the flash chip.**
+
+**Mechanism.** On first boot (no save) the game fills a 4 KB flash sector
+(0xF000) one byte at a time from f28, polling the chip after each byte
+through its status routine in IWRAM (0x03007A4C). dingbat's flash
+(`storage/flash.nim`, Panasonic 0x1B32) has no busy state: a program lands
+at once, so the first status read already returns the written byte --
+~885 cycles a byte, done at f41. mGBA keeps the chip busy for three more
+calls of the status routine: ~1119 cycles a byte, done at f45; the second
+reference finishes between the two. The game's frame counter (0x03004358,
++1 a frame) therefore starts at f53 on dingbat and f56 on mGBA (3748 on
+dingbat, 3745 on mGBA at f3800), and the menu background (scroll at 0x03001E44/0x03001E50)
+steps every second frame on that counter's parity: a frame after mGBA's
+until the screen change at f3727 zeroes the scroll, a frame before after it,
+which the diagonal wipe shows from f3736. The save and the play are
+otherwise the same.
+
+**Check.** A scratch build where status reads after each byte program
+report busy for T cycles (DQ7 inverted, DQ6 toggling, **DQ5 = 0**: the game
+reads DQ5 as "time limit exceeded", and a DQ7-only model hangs it on a white
+screen; first poll ~418 cycles after the write, then every 127): T = 500
+gives counter start f55, 560-650 f57 (still the opposite parity), **700
+gives f58 = mGBA's parity**, the scroll matches mGBA frame for frame
+(f3725-3734) and `02_mark` differs only at the cursor arrows, as the
+references do from each other. So mGBA behaves as if a byte program takes
+roughly 670-800 cycles (40-48 us).
+
+**Status: needs a measurement.** Byte-program and sector-erase times are
+unmeasured in dingbat; both references model a busy time and disagree on
+how long. A busy model (program, and probably erase and chip erase, with
+the DQ7/DQ6/DQ5 status above) belongs in `flash.nim` with the value from a
+real flash cart (time a byte program by polling DQ7 from IWRAM with a
+timer, per chip ID), not from a reference. Until then Advance Wars stays a
+frame out of phase; any game that writes flash on first boot or while
+saving and paces itself by the poll count can shift the same way.

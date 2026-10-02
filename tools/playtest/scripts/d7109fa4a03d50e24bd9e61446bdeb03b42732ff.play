@@ -10,6 +10,13 @@
 # recorded wait covers the slowest): nba +30, dingbat-bios +40, mgba +50
 # frames after f8429. The nba save differs from dingbat-bios/mgba (893 vs
 # 890 non-blank bytes; dingbat-bios and mgba are byte-identical).
+# [load] load_file (compare=text, over the rotating globe) reads differently
+# on dingbat for every save, its own included: each emulator shows all
+# three saves identically. With a save present the boot EEPROM read
+# (f6-f21) costs dingbat ~71 cycles a block more (gamepak-load prefetch
+# rule, hardware-verified; both references fail it), so [load] runs a frame
+# behind from f34 and OCR reads the globe one step apart. Not the save:
+# docs/playtest-bugs.md, "Lunar Legend: the load screen reads differently".
 [new]
 wait 600
 press START

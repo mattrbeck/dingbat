@@ -7,6 +7,11 @@
 # Recorded by hand in the desktop app (2026-09-16): new file, the opening in
 # Mario's house and Peach's Castle, to the first Save Album; [load] continues.
 # converted from input.log: 192 keypad changes, 839 sync hashes checked in dingbat
+# 07_mark (battle, Bowser's idle pose) follows the game's main-loop counter
+# (0x03000368), which dingbat's slower-priced gamepak code leaves 5 behind mgba
+# after scene loads at f3829-f10335; the references disagree on the poses too
+# (06, 11, 15-19). docs/playtest-bugs.md, "Mario & Luigi". A still screen
+# would be a steadier checkpoint.
 [new]
 wait 1102
 hold A
