@@ -32,8 +32,16 @@
 ## The ARM946E-S caches (GBATEK "DS Memory Control - Cache and TCM"): 8 KB
 ## instruction / 4 KB data, 4-way, 32-byte lines, read-allocate; whether a
 ## region is cached comes from the protection unit (CP15 c6 regions, c2
-## cachable bits, control bits 0/2/12). The instruction cache is tags only
-## (fetches read memory). The data cache also keeps what it holds for main
+## cachable bits, control bits 0/2/12). The instruction cache holds code
+## (`IcLine`, bus9.nim ic_*): a hit runs what the line was filled with,
+## so code changed in memory behind it (DMA, the ARM7, a data store, an
+## uncached mirror) runs stale until the line is invalidated (C7,C5,0 /
+## C7,C5,1) or evicted. For main RAM the line's bytes are copied only when
+## memory under it is about to change (`kept`); until then memory still
+## holds what the fill read, so a fetch reads memory. Lines from shared
+## WRAM, palette, VRAM and OAM are copied at the fill; the BIOS is
+## read-only, and I/O and the GBA slot are read live (Assumed: nothing
+## runs cached code from them). The data cache also keeps what it holds for main
 ## RAM (`DcLine`, used by bus9.nim): `main_ram` is what the ARM9 sees
 ## through the cache, and a cached line whose memory side differs -- a
 ## write-back line the CPU has written (dirty), or a line DMA, the ARM7 or
@@ -76,12 +84,23 @@ type
     shadowed*: bool         ## `ram` holds the memory side
     ram*: array[32, uint8]
 
+  IcLine* = object
+    ## An instruction-cache slot's contents (bus9.nim ic_*)
+    line1*: uint32          ## main RAM line index + 1 (0 = none, or another region)
+    kept*: bool             ## `code` holds the line as filled (memory has
+                            ## changed since, or it was copied at the fill)
+    code*: array[32, uint8]
+
   MemTiming* = object
     icache*, dcache*: TagCache
     dline*: array[128, DcLine]  ## data cache contents for main RAM, by slot
-    slot_of*: seq[uint8]        ## per main RAM line: its slot + 1, or 0
-    shadows*: int               ## slots with `shadowed` set
-    page_apart*: array[1024, uint8]  ## those slots per 4 KB page of main RAM
+    iline*: array[256, IcLine]  ## instruction cache contents, by slot
+    slot_of*: seq[uint16]       ## per main RAM line: bits 0-7 its data-cache
+                                ## slot + 1 (or 0), bits 8-15 how many
+                                ## instruction-cache slots hold it (IC_ONE each)
+    shadows*: int               ## data-cache slots with `shadowed` set
+    page_apart*: array[1024, uint16]  ## per 4 KB page of main RAM: those
+                                ## slots plus instruction-cache slots `kept`
     ic_on*, dc_on*: bool
     pu_on*: bool              ## protection unit enabled (control bit 0)
     icode: array[256, bool]   ## cachable for code, by address top byte
@@ -98,6 +117,7 @@ type
 
 const
   NO_ADDR* = 0xFFFF_FFF0'u32  ## "no previous access"
+  IC_ONE* = 0x100'u16         ## one instruction-cache holder in `slot_of`
 
   # ARM9 code fetch (N32 + its 3-cycle penalty, already in GBATEK's table),
   # master cycles by address top byte
@@ -148,12 +168,11 @@ proc set_index_slot*(c: TagCache; v: uint32): int =
   ## A set/index operand (C7 Cm,2): bits 31-30 the way, bits 5.. the set.
   int((v shr 5) and c.set_mask) * 4 + int(v shr 30)
 
-proc invalidate_line*(c: var TagCache; a: uint32) =
-  let line = a shr 5
-  let s = int(line and c.set_mask) * 4
-  for i in 0..3:
-    if c.tags[s + i] == line + 1: c.tags[s + i] = 0
-  if c.last == line + 1: c.last = 0
+proc set_slots*(c: TagCache; line: uint32): int {.inline.} =
+  ## The first of the four slots of address line `line`'s set. Every
+  ## mirror of a main RAM line falls in one set (mirrors are 4 MB apart,
+  ## the set index is address bits 5 and up below 8 KB / 4).
+  int(line and c.set_mask) * 4
 
 proc lookup_slow(c: var TagCache; a: uint32; allocate: bool): bool {.noinline.} =
   let tag = (a shr 5) + 1
@@ -178,7 +197,7 @@ template lookup*(c: var TagCache; a: uint32; allocate: bool): bool =
 proc init_timing*(t: var MemTiming) =
   t.icache.init_cache(8 * 1024)
   t.dcache.init_cache(4 * 1024)
-  t.slot_of = newSeq[uint8](4 * 1024 * 1024 div 32)
+  t.slot_of = newSeq[uint16](4 * 1024 * 1024 div 32)
 
 proc region_of(cp: Cp15; a: uint32): int =
   ## Highest-numbered enabled protection region containing `a`, or -1.

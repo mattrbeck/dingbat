@@ -210,9 +210,13 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
   case a shr 24
   of 0x02:
     let i = int(a and 0x3FFFFF)
-    if unlikely(n.tm.slot_of[i shr 5] != 0):
-      n.dc_write(i, v, width, false, false)
-      inc n.idle_epoch          # memory behind the ARM9's cache changed
+    let held = n.tm.slot_of[i shr 5]
+    if unlikely(held != 0):
+      # memory behind the ARM9's caches changes
+      if held >= IC_ONE: n.ic_keep(i shr 5)
+      if (held and 0xFF) != 0: n.dc_write(i, v, width, false, false)
+      else: wr(n.main_ram, i)
+      inc n.idle_epoch
     else: wr(n.main_ram, i)
   of 0x03:
     var shared: bool
