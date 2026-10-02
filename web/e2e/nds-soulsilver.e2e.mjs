@@ -90,11 +90,8 @@ const press = async (page, key, at, hold = 3) => {
 // The stylus on bottom-screen pixel (x, y), through the canvas.
 const touch = async (page, x, y, at, hold = 6) => {
   await framesPast(page, at);
-  const p = await page.evaluate(([x, y]) => {
-    const r = canvasEl.getBoundingClientRect();
-    const b = NdsUtil.screenRects(ndsLay.mode, ndsLay.gap).bottom;
-    return [r.left + (b.x + x + 0.5) * r.width / ndsLay.w, r.top + (b.y + y + 0.5) * r.height / ndsLay.h];
-  }, [x, y]);
+  const p = await page.evaluate(([x, y]) =>
+    NdsUtil.clientPoint("bottom", x, y, canvasEl.getBoundingClientRect(), ndsLay), [x, y]);
   await page.mouse.move(p[0], p[1]);
   await page.mouse.down();
   await framesPast(page, at + hold);
@@ -140,6 +137,9 @@ const continueGame = async (page) => {
 };
 
 const importSave = async (page, path) => {
+  // Far enough in that the reboot's frame counter is seen below f0 before it
+  // catches up again.
+  await framesPast(page, 300);
   const f0 = await frame(page);
   await page.locator("#menu-btn").click();
   await page.locator("#manage-saves").click();

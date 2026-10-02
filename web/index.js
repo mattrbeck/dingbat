@@ -7316,7 +7316,7 @@ const buildCart = (name, el = document.createElement("span")) => {
 // uses, then marks it for storing (docs/nds/saves.md).
 const applyImportedSave = async (bytes, fileName) => {
   const unwrapped = ndsGameLoaded()
-    ? { ok: true, format: null, bytes, title: null, warning: null }
+    ? { ok: true, format: null, bytes, title: null, warning: null, error: null }
     : SaveImport.unwrap(bytes, fileName);
   if (!unwrapped.ok) {
     alert(unwrapped.error);
