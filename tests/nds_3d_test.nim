@@ -653,7 +653,7 @@ proc scene_budget() =
 # NDS3D_UPDATE=1 prints the current table instead of checking it.
 
 const ROM_HASHES = [
-  ("3d_aa", 0x6BCD2F1A'u32),
+  ("3d_aa", 0x61F4ACC0'u32),
   ("3d_alpha", 0xF2349E45'u32),
   ("3d_alpha_noblend", 0xDD017278'u32),
   ("3d_blendmodes", 0xE339E209'u32),
@@ -667,11 +667,12 @@ const ROM_HASHES = [
   ("3d_highlight", 0x98B0EEB4'u32),
   ("3d_light", 0xC97F4195'u32),
   ("3d_lines", 0x39602BC0'u32),
-  ("3d_probe_aa", 0x56D6975B'u32),
-  ("3d_probe_aa2", 0xC5C88238'u32),
+  ("3d_probe_aa", 0xECD367B5'u32),
+  ("3d_probe_aa2", 0x7FE8EE94'u32),
   ("3d_probe_aa3", 0x7CA905F7'u32),
   ("3d_probe_aa3_edge", 0x0A099C75'u32),
   ("3d_probe_aa3_em", 0xC0E36B35'u32),
+  ("3d_probe_aa4", 0xCE98E0F8'u32),
   ("3d_probe_aa_edge", 0xE3239CE2'u32),
   ("3d_probe_clip", 0xA5425543'u32),
   ("3d_probe_clip_persp", 0xED82B05F'u32),

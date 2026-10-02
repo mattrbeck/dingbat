@@ -544,34 +544,29 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
     r.trans_id[i] = c.id
     if not c.fog: r.flags[i] = r.flags[i] and not FLAG_FOG
 
-proc aa_cov(e: Edge; y, x: int; right: bool): int32 =
+proc aa_cov(e: Edge; y, x: int; right: bool; lend = 0'i32): int32 =
   ## Anti-aliasing coverage (0..31) of dot x on row y by edge e
-  ## (3d_probe_aa on the reference cores): y-major edges measure where the
-  ## edge crosses the row's middle within the dot, x-major edges how high
-  ## the edge stands in the dot's column at its centre. Right edges keep
-  ## floor(32 * covered), left ones 31 - floor(32 * uncovered).
+  ## (3d_probe_aa, 3d_probe_aa4 on the reference cores). y-major edges
+  ## measure where the edge crosses the row's middle within the dot: right
+  ## edges keep floor(32 * covered), left ones 31 - floor(32 * uncovered).
+  ## x-major edges measure a 10-bit edge height h at the dot's centre from
+  ## the run's exact left end (18-bit X), at floor((2^28 - 1) dy / (|dx|
+  ## 2^18)) per dot; left edges are covered by h, right ones by 1023 - h
+  ## and measured from the end of the left run (`lend`) where the two
+  ## overlap; c = h >> 5.
   if e.vert: return 31
-  var num, den: int64   # the covered fraction num / den
   if not e.xmaj:
     # X at y + 1/2 relative to the dot, 18 fraction bits
     let xm = (e.edge_x(y) + e.edge_x(y + 1)) div 2 - (int64(x) shl XSHIFT)
-    num = (if right: xm else: (1'i64 shl XSHIFT) - xm)
-    den = 1'i64 shl XSHIFT
-  else:
-    # edge height at the column centre, measured down from the row's top:
-    # (y_e - y) = ((2x + 1 - 2x0) * dy - 2 (y - y0) * dx) / (2 dx)
-    let dx = int64(e.x1 - e.x0)
-    let dy = int64(e.y1 - e.y0)
-    var h = (int64(2 * x + 1) - 2 * int64(e.x0)) * dy - 2 * (int64(y) - e.y0) * dx
-    var d = 2 * dx
-    if d < 0: (h = -h; d = -d)
-    # the polygon lies below a decreasing left / increasing right edge
-    let below = (e.dec and not right) or (not e.dec and right)
-    num = (if below: d - h else: h)
-    den = d
-  num = clamp(num, 0'i64, den)
-  if right: int32(min(31'i64, (32 * num) div den))
-  else: int32(clamp(31 - (32 * (den - num)) div den, 0'i64, 31'i64))
+    let num = clamp(if right: xm else: (1'i64 shl XSHIFT) - xm, 0'i64, 1'i64 shl XSHIFT)
+    if right: return int32(min(31'i64, (32 * num) shr XSHIFT))
+    return int32(clamp(31 - ((32 * ((1'i64 shl XSHIFT) - num)) shr XSHIFT), 0'i64, 31'i64))
+  let inc = (((1'i64 shl 28) - 1) * int64(e.y1 - e.y0)) div (abs(int64(e.x1 - e.x0)) shl XSHIFT)
+  var start = min(e.edge_x(y), e.edge_x(y + 1))
+  if right: start = max(start, int64(lend) shl XSHIFT)
+  let h = (((int64(x) shl XSHIFT) + XHALF - start) * inc) shr XSHIFT
+  let v = if right: 1023 - h else: h
+  int32(clamp(v shr 5, 0'i64, 31'i64))
 
 proc charge(r: Renderer; y, x0, x1: int) {.inline.} =
   ## Line budget: one polygon's span on line y.
@@ -698,7 +693,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       for x in max(0, int(L.s)) ..< min(W, int(L.e)):
         r.plot(c, x, y, EL, ER, sp, true, (if aa: le.aa_cov(y, x, false) else: 31'i32))
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
-        r.plot(c, x, y, EL, ER, sp, true, (if aa: re.aa_cov(y, x, true) else: 31'i32))
+        r.plot(c, x, y, EL, ER, sp, true, (if aa: re.aa_cov(y, x, true, L.e) else: 31'i32))
       continue
     # which runs are drawn: all when full size; else the left run unless it
     # is a bottom x-major edge, the right run only when it is a top x-major
@@ -709,7 +704,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     if aa:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false))
       for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
-      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true))
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true, L.e))
       continue
     if ldraw:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true)
