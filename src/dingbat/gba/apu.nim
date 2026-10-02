@@ -313,16 +313,23 @@ proc get_sample*(apu: APU) =
   # PSG volume, GBATEK SOUNDCNT_H bits 0-1: "0=25%, 1=50%, 2=100%,
   # 3=Prohibited". Value 3 is modelled as silence: Assumed (prohibited value).
   let psg_muted = apu.soundcnt_h.sound_volume == 3
-  let psg_sound =
+  # Each side sums its own channels, GBATEK SOUNDCNT_L: "8-11 Sound 1-4
+  # Enable Flags (each Bit 8-11, 0=Disable, 1=Enable) Right" and "12-15 ...
+  # Left", then scales by its own master volume (bits 0-2 right, 4-6 left).
+  let l = apu.soundcnt_l
+  let psg_sound_left =
     if psg_muted: 0'i16
     else:
-      ch1 * int16(apu.soundcnt_l.channel_1_left) +
-      ch2 * int16(apu.soundcnt_l.channel_2_left) +
-      ch3 * int16(apu.soundcnt_l.channel_3_left) +
-      ch4 * int16(apu.soundcnt_l.channel_4_left)
+      ch1 * int16(l.channel_1_left) + ch2 * int16(l.channel_2_left) +
+      ch3 * int16(l.channel_3_left) + ch4 * int16(l.channel_4_left)
+  let psg_sound_right =
+    if psg_muted: 0'i16
+    else:
+      ch1 * int16(l.channel_1_right) + ch2 * int16(l.channel_2_right) +
+      ch3 * int16(l.channel_3_right) + ch4 * int16(l.channel_4_right)
   let shift = if psg_muted: 5 else: 5 - int(apu.soundcnt_h.sound_volume)
-  let psg_left  = int32(psg_sound) * int32(apu.soundcnt_l.left_volume) shr shift
-  let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
+  let psg_left  = int32(psg_sound_left)  * int32(l.left_volume)  shr shift
+  let psg_right = int32(psg_sound_right) * int32(l.right_volume) shr shift
   var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
   # MP2K HLE (mp2k.nim): substitute the shadow render for the FIFO A/B
   # latches (L->A, R->B) while the engine mixer is live and owns the stream;
