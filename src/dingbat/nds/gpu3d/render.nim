@@ -43,6 +43,11 @@ const
   FLAG_FOG = 1'u8
   FLAG_EDGE = 2'u8
   FLAG_STENCIL = 4'u8
+  # which edge an edge dot belongs to (the overlapping-edge rule, plot)
+  ROLE_LEFT = 8'u8                ## a left edge that is not x-major
+  ROLE_RIGHT = 16'u8              ## a right edge that is not x-major
+  ROLE_TOP = 32'u8                ## a top x-major run, or the top row
+  ROLE_BOTTOM = 64'u8             ## a bottom x-major run, or the bottom row
   # line budget (Assumed; docs/nds/3d-timing.md)
   RENDER_POLY_CYCLES {.intdefine.} = 8      ## per polygon crossing a line
   RENDER_DOTS_PER_CYCLE {.intdefine.} = 2   ## span dots filled per bus cycle
@@ -83,6 +88,7 @@ type
     aref: int32                   ## dots need alpha > aref (ALPHA_TEST_REF or 0)
     aa: bool                      ## DISP3DCNT.4: keep the layer behind edge dots
     wire: bool                    ## alpha 0: wire-frame
+    curse: bool                   ## edge marking without AA, polygon opaque (plot)
 
 proc new_renderer*(): Renderer =
   result = Renderer(zero_page: newSeq[uint8](0x4000))
@@ -479,9 +485,9 @@ proc step_to(sp: var SpanStep; n: int64) {.inline.} =
   sp.n = n
 
 proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; edge: bool;
-          cov = 31'i32) {.inline.} =
+          cov = 31'i32; role = 0'u8) {.inline.} =
   ## One dot of the span from L to R; `cov` is its anti-aliasing coverage
-  ## (0..31, 31 = whole).
+  ## (0..31, 31 = whole); `role`: which edge the dot belongs to (ROLE_*).
   let i = y * W + x
   # One division gives the dot's factor along the span; with equal w the
   # factor (38 bits, rounded so that every attribute comes out as
@@ -518,8 +524,23 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   let dv = if c.wbuffer: w else: z
   let dval = uint32(max(0'i64, min(dv, 0xFF_FFFF'i64)))
   let old = r.depth[i]
-  let pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
+  var pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
+  # With edge marking on and anti-aliasing off, where edges of two opaque
+  # polygons with the same ID overlap, a left edge wins over a right one
+  # (y-major, diagonal or vertical) and a top x-major run or top row over
+  # a bottom one, whichever is nearer and whichever comes first
+  # (polyrastertest's "curse of edge marking": the author's notes, "right
+  # ymajor/vert (overriden by left ymajor/vert), bottom xmajor/flat
+  # (overriden by top xmajor/flat)", and the recorded colours of 38, 39, 43:
+  # a further polygon's top run shows over the nearer one's bottom run or
+  # bottom row; 42: a right diagonal over a bottom run does nothing).
+  if c.curse and role != 0 and r.opaque_id[i] == c.id and r.trans_id[i] == NO_ID:
+    let was = r.flags[i]
+    if (role == ROLE_LEFT and (was and ROLE_RIGHT) != 0) or
+       (role == ROLE_TOP and (was and ROLE_BOTTOM) != 0): pass = true
+    elif (role == ROLE_RIGHT and (was and ROLE_LEFT) != 0) or
+         (role == ROLE_BOTTOM and (was and ROLE_TOP) != 0): pass = false
   when defined(r3dprof):
     inc prof_dots
     if pass: inc prof_pass
@@ -583,7 +604,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
     r.depth[i] = dval
     r.opaque_id[i] = c.id
     r.trans_id[i] = NO_ID
-    r.flags[i] = (if c.fog: FLAG_FOG else: 0'u8) or (if edge: FLAG_EDGE else: 0'u8)
+    r.flags[i] = (if c.fog: FLAG_FOG else: 0'u8) or (if edge: FLAG_EDGE or role else: 0'u8)
   else:
     # a translucent polygon does not blend twice over its own ID
     if r.trans_id[i] == c.id: return
@@ -651,7 +672,12 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   highlight: (disp3dcnt and 2) != 0, blend: (disp3dcnt and 8) != 0,
                   # alpha test: drawn only if alpha > ALPHA_TEST_REF (> 0 when off)
                   aref: (if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32),
-                  aa: (disp3dcnt and 0x10) != 0, wire: wire)
+                  aa: (disp3dcnt and 0x10) != 0, wire: wire,
+                  # the overlapping-edge rule: "Edgemarking (only)", not
+                  # translucent polygons, wire-frames too (polyrastertest's
+                  # notes)
+                  curse: (disp3dcnt and 0x30) == 0x20 and not poly.translucent and
+                         ((poly.attr shr 4) and 3) != 3)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
   var line = true
@@ -788,13 +814,20 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let EL = le.edge_end(va, yl, L.s)
     let ER = re.edge_end(va, yr, R.e)
     var sp = span_step(EL.x, ER.x)
+    # edge roles (the overlapping-edge rule in plot): x-major runs are top
+    # or bottom edges as the fill rules have them (a left run going right
+    # is a bottom one, a right run going right a top one), other edges left
+    # or right; the span's dots on the top and bottom rows are top/bottom
+    let lrole = if L.xmaj: (if L.inc: ROLE_BOTTOM else: ROLE_TOP) else: ROLE_LEFT
+    let rrole = if R.xmaj: (if R.inc: ROLE_TOP else: ROLE_BOTTOM) else: ROLE_RIGHT
+    let mrole = if y == int(ymin): ROLE_TOP elif y == int(ymax) - 1: ROLE_BOTTOM else: 0'u8
     # wire-frames: the two runs only, except on the top row and the row
     # above a flat bottom, which are drawn whole
     if wire and y != int(ymin) and not last_flat:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)):
-        r.plot(c, x, y, EL, ER, sp, true, (if aa: le.aa_cov(y, x, false) else: 31'i32))
+        r.plot(c, x, y, EL, ER, sp, true, (if aa: le.aa_cov(y, x, false) else: 31'i32), lrole)
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
-        r.plot(c, x, y, EL, ER, sp, true, (if aa: re.aa_cov(y, x, true, L.e) else: 31'i32))
+        r.plot(c, x, y, EL, ER, sp, true, (if aa: re.aa_cov(y, x, true, L.e) else: 31'i32), rrole)
       continue
     # which runs are drawn: all when full size; else the left run unless it
     # is a bottom x-major edge, the right run only when it is a top x-major
@@ -804,16 +837,16 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let ldraw = rfull or not (L.xmaj and L.inc) or last_flat
     let rdraw = rfull or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
     if aa:
-      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false))
-      for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
-      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true, L.e))
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false), lrole)
+      for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim, 31, mrole)
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true, L.e), rrole)
       continue
     if ldraw:
-      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true)
-    for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, 31, lrole)
+    for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim, 31, mrole)
     if rdraw:
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
-        r.plot(c, x, y, EL, ER, sp, true)
+        r.plot(c, x, y, EL, ER, sp, true, 31, rrole)
 
 {.pop.}
 

@@ -31,9 +31,10 @@ post passes), `gpu3d/geometry.nim` (1-dot culling, clipping).
   DISP_1DOT_DEPTH), `_xlu_seam` / `_xlu_seam_nb` (translucent seams),
   `_ztie` (depth ties at an apex), `_zinterp` / `_x` / `_s` / `_y2`
   (depth interpolation read off flat strips), `_hwline` (captured lines
-  with gaps, laid over the captures).
+  with gaps, laid over the captures). Round 7: `_swap_aa` (AA coverage of
+  x-major edges in swapped rows, polyrastertest 56's polygon among them).
 - **polyrastertest v1.0.2-b** (Jaklyy, MIT; docs/nds/test-roms.md, round
-  6): 77 one-polygon scenes whose spans (and, for edge marking, colours)
+  6): 77 one- and two-polygon scenes whose spans (and, for edge marking, colours)
   were recorded on a console and are built into the ROM; the test
   program's source gives each scene's vertices. The console was a New 3DS
   XL in DS mode: the DS 3D engine as the 3DS runs it; no difference from a
@@ -159,8 +160,17 @@ included. Code: `draw_polygon`, `Chain`, `facing` in render.nim.
   - anti-aliasing: a vertical edge in a swapped row gets coverage 0, so it
     vanishes into the layer behind (54-56: "they invert the AA alpha for
     swapped polygons ... even though vertical edges shouldn't be"); sloped
-    edges keep the coverage of the side they lie on (only visible/invisible
-    is recorded, so their exact coverage is Assumed).
+    edges keep the coverage of the side they lie on. The x-major edge on
+    the left (the designated right one) shows its inner dot with the
+    coverage its run's *first* dot would have (left-edge rule, h measured
+    at that dot's centre from the run's exact left end), as if the
+    coverage were set at the start of the run and never stepped to the
+    inner dot (round 7: polyrastertest 56's top row, where the run starts
+    0.07 dots before a dot centre and the console shows nothing, while the
+    rows below show their inner dots; 3d_probe_swap_aa, 11 such edges going
+    left and right, on the reference: every inner dot exact, 136 of
+    the 166 dots that differed). The swapped x-major edge on the right keeps the right-edge
+    coverage of its inner dot (not probed).
 - **Flat polygons** (59-67): all vertices on one row draw from the
   leftmost to the rightmost of vertex 1 and its two neighbours, right end
   out: a quad's vertex 3 is never used ("1-4, 1-2 or 2-4"), also after
@@ -168,6 +178,73 @@ included. Code: `draw_polygon`, `Chain`, `facing` in render.nim.
 - **Trapezoid rule** (33-37): the row above a flat bottom draws both
   x-major runs only when the bottom vertices are apart in x (36: two
   vertices on one dot are no flat bottom).
+
+## Overlapping edges with edge marking (round 7, polyrastertest 38-44)
+
+"The curse of edge marking". The test's author describes it in the
+program's newer source (`source/tests.h` at HEAD, a test-program comment;
+that source's 22 scenes of it have no recorded data, the data file is the
+release's), from runs on a console:
+
+> Edgemarking (only) + overlapping edges + same id = no fill????
+> right ymajor/vert (overriden by left ymajor/vert)
+> bottom xmajor/flat (overriden by top xmajor/flat)
+
+with per-scene notes: "Does not apply when poly ids are different", "Also
+doesn't apply with aa, ofc" (that scene commented out), "What about
+translucency? - no", "Wireframe? - yes, for some reason?", "How about when
+over the Rear Plane? - no", "also applies to verticals", "bottom xmajor",
+"bottom flat", "note that it's specifically the center of the polygon, and
+not the slopes that this applies to", "the rules dont seem to combine",
+"does not apply if the edge becomes properly edge marked".
+
+The rule (`plot`, ROLE_*): **with edge marking on and anti-aliasing off,
+where edges of two opaque polygons (wire-frames included) with the same ID
+overlap, a left edge wins over a right one when neither is x-major
+(y-major, diagonal, vertical), and a top x-major run or the top row's span
+over a bottom x-major run or the bottom row's span, whichever polygon is
+nearer and whichever is drawn first.** A later polygon's winning edge
+replaces the dot whatever its depth; a later polygon's losing edge leaves
+it alone whatever its depth. x-major runs are top or bottom as the fill
+rules name them (a left run going right is a bottom edge, a right run
+going right a top one); swapped rows and flat (one-row) polygons take no
+part (no evidence).
+
+The recorded evidence is the release's seven scenes 38-44 (a white polygon
+and a red one 16/4096 behind it, depth 7680 against 0, colours recorded).
+The release's test sets POLYGON_ATTR once, so both polygons of every pair
+share one ID (1 in 38, 0 in the rest) and edge marking never marks between
+them:
+
+| # | Overlap | Console | The rule |
+|---|---|---|---|
+| 38, 39 | red's top x-major run over white's bottom x-major run (white's left / right edge) | red over white's whole run | top over bottom |
+| 40, 41 | white's top x-major run over red's bottom run | white | top over bottom (white is nearer too) |
+| 42 | red's right diagonal over white's bottom x-major run | white | different kinds: no rule |
+| 43 | red's top x-major run over white's bottom row; over white's interior a row higher | red over the bottom row only | top over bottom; interiors take no part |
+| 44 | white's top row over red's bottom x-major run | white | top over bottom |
+
+Round 7 first fitted these with "a later polygon's x-major run replaces a
+same-ID polygon's edge dots"; it also passes 77/77 (with the Y-sort only:
+in submission order it fails 40 and 44), but the author's description is
+order-free, covers non-x-major edges, and excludes AA. Drawn through
+dingbat (a scratch replay of tests.h's scenes, no recorded data to compare)
+the author's rule gives the effect in every scene the notes call "yes"
+(the first, diagonal, scene, wire-frame, verticals, bottom x-major, bottom
+flat: 63-64 dots each; in "the center ... not the slopes" the bottom row's
+centre changes and its two slope dots do not) and none in every "no"
+(different IDs, AA, translucency, rear plane, properly edge marked), and
+the release's 77 pass whether opaque polygons are Y-sorted or not.
+Assumed: what "properly edge marked" means beyond that scene (it passes
+without a special case), the role of swapped rows and one-row polygons,
+and any depth limit (one difference recorded).
+
+What it does to a game: nothing in SoulSilver. Its overworld runs with
+DISP3DCNT = 0039h (textures, blending, AA and edge marking; edge colour 0
+black for IDs 0-7, 1084h for the rest, p12 frames 3000-8000), and with AA
+on the rule does not apply: frames 3000/5000/8000 are unchanged and the
+reference comparison is as before (15 / 283 dots at 6600 / 8000). The
+first fit, which ignored AA, changed 114 / 65 dots there.
 
 ## Anti-aliasing (DISP3DCNT.4)
 
@@ -205,7 +282,10 @@ ID and depth (a polygon with the rear plane's ID shows no border edge);
 the pass runs after translucent polygons, so the edge colour overwrites a
 translucent colour, and a translucent polygon that updates depth hides
 the edges under it ("malfunction", GBATEK); equal depth never marks
-(3d_edge, 3d_probe_edge2, exact).
+(3d_edge, 3d_probe_edge2, exact). While drawing, edge marking without AA
+also lets left/top edges win over a same-ID polygon's right/bottom edges
+whatever their depth (round 7, "Overlapping edges with edge marking"
+above).
 
 ## Known artifacts the hardware itself produces
 
@@ -228,6 +308,9 @@ These are what the DS draws, and so what dingbat now draws:
   with AA on (SoulSilver's objects).
 - **Zero-width filler polygons** show at a wall's corner column where the
   forward edge's depth wins.
+- **Edges of hidden same-ID polygons showing through** with edge marking
+  (AA off): a left or top edge wins over a same-ID polygon's right or
+  bottom edge even from behind (polyrastertest 38, 39, 43).
 
 ## Measurements
 
@@ -276,22 +359,35 @@ Round 6 (the chains and swapped rows; `nds-polyraster`):
 SoulSilver's regression frames 3000/5000/8000 are byte-identical
 (e4b66d68 / 6cf51b7e / ae4536a1).
 
+Round 7 (overlapping edges with edge marking, the swapped x-major
+coverage; `nds-polyraster2`):
+
+| What | before | now |
+|---|---|---|
+| polyrastertest (scenes passing, the ROM's own verdict) | 73 of 77 | 77 of 77 (the reference: 70) |
+| 3d_probe_swap_aa (new) against melonDS DS 1.4 | 166 | 30 (every swapped inner dot exact; left: 11 dots on the rows where the x-major edge passes the vertical one, and 19 of right-edge coverage residue in ordinary rows) |
+| every other 3d_* ROM (3d_edge, 3d_probe_edge2, _aa3_em, _degen_edge ...) | | unchanged (hashes kept) |
+| nds-interp line captures | 198404 / 198404 | 198404 / 198404 |
+| SoulSilver against the reference, top screen, frames 6600 / 8000 | 15 / 283 | 15 / 283 (AA is on there, so the overlapping-edge rule does not apply) |
+
+SoulSilver's regression frames 3000/5000/8000 are byte-identical
+(e4b66d68 / 6cf51b7e / ae4536a1).
+
 ## Open
 
-- **The curse of edge marking** (polyrastertest 38, 39, 43; the reference
-  fails them too). With edge marking on, a second polygon behind the
-  first (z -16/4096: depth 7680 against 0) whose x-major edge run lies on the first one's
-  edge dots shows that run over them on the console: over the first
-  polygon's extra left run (38, drawn only because edge marking makes it
-  full size) or extra right run (39), over its bottom row (43); a
-  diagonal edge (42) or an x-major run that is not filled (40, 44) does
-  not. The depth test alone cannot give that (the second polygon is
-  further); something lets a filled x-major run of a later polygon replace
-  edge dots. Not fitted: 155 dots in the three scenes.
-- **polyrastertest 56, one dot**: on the top row of the combined
-  AA/swapped/clipped scene the inner dot of the swapped x-major edge is
-  invisible on the console (coverage 0) and not in ours; the AA coverage
-  of sloped edges in swapped rows is only pinned as visible/invisible.
+- **The overlapping-edge rule's edges** (round 7): only 38-44 are
+  recorded (top/bottom x-major runs and rows, one depth difference); the
+  left/right part, wire-frames, the AA/translucent/different-ID
+  exclusions and "properly edge marked" rest on the author's notes, whose
+  scenes (polyrastertest HEAD, tests.h) have no recorded data. A console
+  run of HEAD's curse scenes with their data re-recorded would settle
+  them dot for dot; swapped rows and one-row polygons are untested.
+- **The row where a swapped edge passes the other one** (3d_probe_swap_aa,
+  11 dots): 6 are rows whose ends cross by one dot, which the reference
+  draws as ordinary rows and we as the filled edge dots alone; drawing
+  them as ordinary rows fails polyrastertest 13 (without AA), so the
+  recording sides with us there, but no recording has such a row with
+  AA. The other 5 are single dots at the vertical edge on that row.
 - **Facing**: the determinant of (x, y, w) and taking it after clipping
   are Assumed (every scene has w = 1.0 and keeps its first three vertices
   through clipping); culling still uses the whole polygon's screen area,
