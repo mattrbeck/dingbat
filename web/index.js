@@ -9620,8 +9620,8 @@ const onFrameZoomSurface = (/** @type {any} */ t, x, y) => {
     if (ptrs.size || !tapDown) { tapDown = null; return; }
     const now = performance.now();
     const tap = e.type === "pointerup" && now - tapDown.ts <= ZOOM_TAP_MAX_MS;
-    const near = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= 2 * ZOOM_TAP_SLOP;
-    if (tap && lastTap && now - lastTap.ts <= ZOOM_DBLTAP_MS && near(lastTap, tapDown)) {
+    if (tap && lastTap && now - lastTap.ts <= ZOOM_DBLTAP_MS &&
+        Math.hypot(lastTap.x - tapDown.x, lastTap.y - tapDown.y) <= 2 * ZOOM_TAP_SLOP) {
       lastTap = null;
       resetFrameZoom();
     } else {
@@ -9676,11 +9676,11 @@ const onFrameZoomSurface = (/** @type {any} */ t, x, y) => {
 // exact on-screen box (zoom included, clipped by the stage) minus anything
 // drawn over it: letterbox, bars, menus and toasts keep the pointer.
 const CURSOR_IDLE_MS = 3000;
-var cursorIdleTimer = null;
 {
   let x = 0, y = 0;
+  let timer = null;
   const idle = () => {
-    cursorIdleTimer = null;
+    timer = null;
     document.body.classList.toggle("cursor-idle",
       document.body.classList.contains("running") &&
       document.elementFromPoint(x, y) === canvasEl);
@@ -9689,8 +9689,8 @@ var cursorIdleTimer = null;
     if (e.pointerType !== "mouse") return;
     x = e.clientX; y = e.clientY;
     document.body.classList.remove("cursor-idle");
-    clearTimeout(cursorIdleTimer);
-    cursorIdleTimer = setTimeout(idle, CURSOR_IDLE_MS);
+    clearTimeout(timer);
+    timer = setTimeout(idle, CURSOR_IDLE_MS);
   };
   document.addEventListener("pointermove", active);
   document.addEventListener("pointerdown", active);
