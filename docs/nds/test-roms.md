@@ -60,7 +60,7 @@ and `tests/nds/tools/build_testroms.sh` fetches and builds all of the above
 
 | Test | Expected (hardware) | Ours before | Ours now | Reference |
 |---|---|---|---|---|
-| polyrastertest v1.0.2-b | 77/77 | 50/77 | 73/77 after the edge work (`nds-polyraster`, docs/nds/3d-edges.md; list below) | 70/77 |
+| polyrastertest v1.0.2-b | 77/77 | 50/77 | 77/77 after the edge work (`nds-polyraster`: 73, `nds-polyraster2`: 77; docs/nds/3d-edges.md; list below) | 70/77 |
 | gx_clear | clear colour follows the register every frame | follows | follows | follows |
 | gx_powcnt | PAL/OAM read back 0 with engine A off (GBATEK) | kept counting | 0 | 0 |
 | gbe-plus Timer: count-up, stop, reload value | PASS x3 | PASS x3 | PASS x3 | PASS x3 |
@@ -96,7 +96,7 @@ after which our screens keep the last picture and the reference's go black
   `two_pass_3d` (2 %), `simple_capture` (1 %) -- the capture/3D timing
   cases docs/nds/compat.md already lists for the capture and 3D work.
 
-### polyrastertest, failing tests (ours)
+### polyrastertest, failing tests (ours, until round 7)
 
 Numbered as the ROM numbers them (source 550c208e89, `main.h` order; the
 names are the source's comments); the reference fails 26, 38, 39, 43, 62,
@@ -106,12 +106,13 @@ below does, 26 failed too: 49/77) to the edge work: swapped polygons,
 line polygons, the swapped vertical left glitch, trapezoids, the vertical
 right edge shift, horizontal line polygons, second-vertex quirks. The
 round-6 rules of docs/nds/3d-edges.md ("Chains, facing and swapped
-rows") pass all but four, checked in `tests/nds_testroms_test.nim`:
+rows") passed all but four; round 7 fitted those, and
+`tests/nds_testroms_test.nim` now checks 77 of 77:
 
-| # | Test | What is wrong | Reference |
-|---|---|---|---|
-| 38, 39, 43 | the curse of edge marking: a second, further polygon (ID 2 / the same ID) whose edge lies on the first one's edge | colours: the console shows the further polygon's x-major edge run over the nearer one's edge dots (38: its extra left run, drawn only because edge marking makes it full size; 43: its bottom row), we keep the nearer one (62 / 62 / 31 dots); not fitted, see 3d-edges.md "Open" | fails too |
-| 56 | AA swapped vertical edge glitch, the combined case | one dot: the top row's inner x-major dot is invisible on the console, ours has coverage | pass |
+| # | Test | What was wrong | Fix (docs/nds/3d-edges.md) | Reference |
+|---|---|---|---|---|
+| 38, 39, 43 | the curse of edge marking: a second, further polygon (the same ID: the test never applies the second polygon's attributes) whose edge lies on the first one's | colours: the console shows the further polygon's x-major edge run over the nearer one's edge dots (62 / 62 / 31 dots) | "Overlapping edges with edge marking": with edge marking on, an x-major run replaces a same-ID polygon's edge dots whatever their depth; 40, 41, 44 pass because the Y-sort draws the nearer polygon second there | fails |
+| 56 | AA swapped vertical edge glitch, the combined case | one dot: the top row's inner x-major dot is invisible on the console | the swapped x-major edge's inner dot takes its run's first dot's coverage (none on that row) | pass |
 
 To list them again: `ndsrun --press A@60,A@100,... --shots <same> --text B0
 --text-shots` steps the ROM from failure to failure (A moves on) and prints
@@ -173,8 +174,9 @@ Each in its own commit, each with checks in `tests/nds_testroms_test.nim`
 
 ## Still open
 
-- **polyrastertest's 4 failures** (above): 38, 39, 43 (edge marking with
-  overlapping edges) and one AA dot in 56.
+- ~~polyrastertest's 4 failures~~: fitted on `nds-polyraster2` (above);
+  how far the overlapping-edge rule reaches (other IDs, AA alone, large
+  depth differences) is open in docs/nds/3d-edges.md.
 - **The 3D layer with the rendering engine off.** The reference keeps the
   last frame in `disp_powcnt` (render off, then new lists swapped, then
   geometry off too) but shows no 3D in `gx_powcnt` (geometry off first,
