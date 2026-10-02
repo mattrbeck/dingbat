@@ -453,7 +453,14 @@ Engine B registers sit at A+0x1000: `0x4001008–0x400105F` and `0x400106C`.
 | 15 | Display swap: 0 = engine A on lower screen, 1 = engine A on upper |
 
 While a block is powered off its ports are read-only and its palette reads as
-zero. Issue a SwapBuffers after enabling 3D.
+zero. Issue a SwapBuffers after enabling 3D. The reference runs of
+`disp_powcnt` add: the engine's OAM (0x7000000 / 0x7000400) is gated the
+same way, palette and OAM keep their contents (readable again once the engine
+is back on), and geometry commands sent while bit 3 is clear are dropped.
+What the 3D layer shows with bit 2 clear is not settled: the reference keeps
+the last frame in `disp_powcnt` but goes black in `gx_powcnt` (geometry
+switched off first), and the hardware renders through a 48-line cache, so it
+holds no frame to keep (docs/nds/test-roms.md).
 
 ### 4.3 DISPCNT `0x4000000` / `0x4001000`: CHANGED
 
@@ -1377,7 +1384,7 @@ in that DTCM.
 | POSTFLG (both) | 1 |
 | WRAMCNT | 3 (all shared WRAM to ARM7, needed for `0x37F8000` loads) |
 | EXMEMCNT | `0x6000` (sync RAM, ARM9 owns both slots, ARM9 RAM priority). Game crt0 may change it |
-| POWCNT1 | enable LCD + 2D A + 2D B (`0x0203`). Firmware-dependent; games set it themselves |
+| POWCNT1 | `0x820F`: LCDs, 2D A + B, 3D rendering + geometry, engine A on top (what the real firmware leaves at cart entry, and the reference's direct boot: docs/oracles.md) |
 | POWCNT2 | 1 |
 | SOUNDBIAS | 0x200 (the BIOS SoundBias ramp) |
 | IME / IE / IF | 0 |

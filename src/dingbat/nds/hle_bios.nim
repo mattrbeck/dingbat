@@ -435,7 +435,7 @@ proc hle_swi*[B](cpu: ArmCpu[B]; comment: uint32): bool =
   ## Run SWI `comment` in Nim (true), or leave it to the BIOS image's SWI
   ## vector (false: the guest-code SWIs in hle_bios.s). Unknown numbers,
   ## which the console sends to the debug handler, do nothing.
-  mixin armv5, read32, write8, write16, write32, cp15_write
+  mixin armv5, read32, write8, write16, write32, cp15_write, data_cached
   result = true
   cpu.hle_overhead(comment, cpu.r[2])
   case comment
@@ -453,9 +453,15 @@ proc hle_swi*[B](cpu: ArmCpu[B]; comment: uint32): bool =
   of 0x0D: cpu.hle_sqrt()
   of 0x0E: cpu.hle_crc16()
   of 0x0F:  # IsDebugger: a retail 4 MB console; the BIOS's probe scribbles
-            # a halfword it leaves zero
-    write16(cpu.bus, (when armv5(B): 0x027FFFF8'u32 else: 0x027FFFFA'u32), 0)
-    cpu.r[0] = 0
+            # a halfword it leaves zero. On the ARM9 with the data cache
+            # over the probe (the scratch halfword or its mirror 4 MB below)
+            # it reports 8 MB (GBATEK "IsDebugger": "Fails on ARM9 when
+            # cache is enabled (always returns 8MB state)"; the real BIOS
+            # does the same under bus9.nim's data cache)
+    let scratch = (when armv5(B): 0x027FFFF8'u32 else: 0x027FFFFA'u32)
+    write16(cpu.bus, scratch, 0)
+    cpu.r[0] = (if data_cached(cpu.bus, scratch) or data_cached(cpu.bus, scratch - 0x40_0000):
+                  1'u32 else: 0'u32)
     cpu.r[1] = 0
   of 0x10: cpu.hle_bit_unpack()
   of 0x11: cpu.hle_lz77_8bit()

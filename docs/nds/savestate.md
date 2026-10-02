@@ -68,7 +68,7 @@ delta stays mostly zeros. In payload order:
 |---|---|---|
 | 1 | machine (`NDS`) | CP15 (incl. TCM config), main RAM (4 MB), shared WRAM, ARM7 WRAM, ITCM, DTCM, WRAMCNT, EXMEMCNT/STAT and the GBA-slot timings, VCOUNT write, POSTFLGs, POWCNT2, BIOSPROT, bus wait and sequential-access trackers, DMA mode 4 armed channels, frame_done, sleeping, line start |
 | 3, 4 | ARM9, ARM7 | r0-r15, CPSR, SPSR, banked r13/r14, FIQ and user r8-r12, banked SPSRs, next_pc, cur_pc, halted, cycles, base_cycles, vector base, no_load_interwork, instr_count, icycles |
-| 5 | ARM9 memory timing | I/D cache tags, round-robin victims, set mask, last line |
+| 5 | ARM9 memory timing | I/D cache tags, round-robin victims, set mask, last line; the data cache's main RAM lines (memory side, dirty flags, per-line slots) |
 | 6 | display (`Gpu`) | palette, OAM, capturing, DMA mode 4 pixels owed, POWCNT1, VCOUNT, H/V-blank, DISPSTATs, both output screens, frame_count |
 | 7 | VRAM | all 656 KB, VRAMCNT A-I |
 | 12 | 3D renderer | the rendered frame (`color`), the render registers 0x4000320-3BF (edge colours, fog, toon table, clear values...), line costs, RDLINES, underflow |

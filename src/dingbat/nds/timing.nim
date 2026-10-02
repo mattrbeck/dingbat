@@ -32,9 +32,21 @@
 ## The ARM946E-S caches (GBATEK "DS Memory Control - Cache and TCM"): 8 KB
 ## instruction / 4 KB data, 4-way, 32-byte lines, read-allocate; whether a
 ## region is cached comes from the protection unit (CP15 c6 regions, c2
-## cachable bits, control bits 0/2/12). Only the tags are modelled -- the
-## data always comes from memory, so the model can only get timing wrong,
-## never contents.
+## cachable bits, control bits 0/2/12). The instruction cache is tags only
+## (fetches read memory). The data cache also keeps what it holds for main
+## RAM (`DcLine`, used by bus9.nim): `main_ram` is what the ARM9 sees
+## through the cache, and a cached line whose memory side differs -- a
+## write-back line the CPU has written (dirty), or a line DMA, the ARM7 or
+## an uncached access wrote behind the cache's back -- keeps the memory
+## side in `ram`. Other masters, uncached accesses and code fetches read
+## that, and so does an access through another mirror of the line (a
+## different cache line, which misses); a RAM line is cached under one
+## mirror at a time (filling another writes the first back: Assumed).
+## Cleaning a dirty line or evicting it writes the CPU's copy back
+## (the whole line: per-half dirty bits are not modelled, Assumed),
+## invalidating it discards the CPU's copy (GBATEK "ARM CP15 Protection
+## Unit" C3 write-back / write-through, "Cache Control" C7 clean and
+## invalidate; the BlocksDS SDK test cache/data_cache_ops).
 ##
 ## Assumed, with no GBATEK figure: a code-cache line fill costs what the
 ## data-cache one does; a write to cached/buffered main RAM costs one bus
@@ -54,9 +66,22 @@ type
     rr: seq[uint8]          ## round-robin victim per set
     set_mask: uint32
     last*: uint32           ## line known resident (fast path), or 0
+    victim*: int            ## slot (set * 4 + way) the last fill replaced
+
+  DcLine* = object
+    ## A data-cache slot holding a main RAM line (bus9.nim dc_*)
+    line1*: uint32          ## main RAM line index + 1 (0 = none)
+    tag1*: uint32           ## the address line it is cached under + 1 (a mirror)
+    dirty*: bool            ## written by the CPU in write-back mode
+    shadowed*: bool         ## `ram` holds the memory side
+    ram*: array[32, uint8]
 
   MemTiming* = object
     icache*, dcache*: TagCache
+    dline*: array[128, DcLine]  ## data cache contents for main RAM, by slot
+    slot_of*: seq[uint8]        ## per main RAM line: its slot + 1, or 0
+    shadows*: int               ## slots with `shadowed` set
+    page_apart*: array[1024, uint8]  ## those slots per 4 KB page of main RAM
     ic_on*, dc_on*: bool
     pu_on*: bool              ## protection unit enabled (control bit 0)
     icode: array[256, bool]   ## cachable for code, by address top byte
@@ -105,6 +130,24 @@ proc invalidate*(c: var TagCache) =
   for t in c.tags.mitems: t = 0
   c.last = 0
 
+proc slot_tag*(c: TagCache; i: int): uint32 {.inline.} = c.tags[i]   ## line + 1, 0 = empty
+
+proc clear_slot*(c: var TagCache; i: int) =
+  if c.last == c.tags[i]: c.last = 0
+  c.tags[i] = 0
+
+proc find_slot*(c: TagCache; a: uint32): int =
+  ## The slot holding address `a`'s line, or -1.
+  let tag = (a shr 5) + 1
+  let s = int((a shr 5) and c.set_mask) * 4
+  for i in 0..3:
+    if c.tags[s + i] == tag: return s + i
+  -1
+
+proc set_index_slot*(c: TagCache; v: uint32): int =
+  ## A set/index operand (C7 Cm,2): bits 31-30 the way, bits 5.. the set.
+  int((v shr 5) and c.set_mask) * 4 + int(v shr 30)
+
 proc invalidate_line*(c: var TagCache; a: uint32) =
   let line = a shr 5
   let s = int(line and c.set_mask) * 4
@@ -121,7 +164,8 @@ proc lookup_slow(c: var TagCache; a: uint32; allocate: bool): bool {.noinline.} 
     c.last = tag
     return true
   if allocate:
-    c.tags[s + int(c.rr[set])] = tag
+    c.victim = s + int(c.rr[set])
+    c.tags[c.victim] = tag
     c.rr[set] = (c.rr[set] + 1) and 3
     c.last = tag
   false
@@ -134,6 +178,7 @@ template lookup*(c: var TagCache; a: uint32; allocate: bool): bool =
 proc init_timing*(t: var MemTiming) =
   t.icache.init_cache(8 * 1024)
   t.dcache.init_cache(4 * 1024)
+  t.slot_of = newSeq[uint8](4 * 1024 * 1024 div 32)
 
 proc region_of(cp: Cp15; a: uint32): int =
   ## Highest-numbered enabled protection region containing `a`, or -1.

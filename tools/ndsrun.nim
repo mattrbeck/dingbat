@@ -20,7 +20,8 @@
 ## --peek9 / --peek7 A,B,... print 32-bit words read through that CPU's bus
 ## at the end (I/O reads may have side effects).
 ## --text B0[,A0..] prints a text BG's tile map as characters (tile index =
-## ASCII, as the libnds console font; --text-offset N).
+## ASCII, as the libnds console font; --text-offset N); --text-shots prints
+## it at every --shots frame too.
 ## --bgshot A0 draws that text BG straight from VRAM into the PNG's top half
 ## (no scroll/priority/blending).
 ## --dump9/--dump7 ADDR:LEN:FILE writes LEN bytes read through that CPU's bus at the
@@ -250,6 +251,7 @@ when isMainModule:
   var watch = 0'u32
   var text = ""
   var text_offset = 0
+  var text_shots = false
   var presses: seq[Press]
   var shot = ""
   var shots: seq[int]
@@ -273,7 +275,7 @@ when isMainModule:
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog", "rumble-log", "cartlog",
-                                     "state-layout"])
+                                     "state-layout", "text-shots"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -335,6 +337,7 @@ when isMainModule:
       of "watch": watch = uint32(parseHexInt(val))
       of "text": text = val
       of "text-offset": text_offset = parseInt(val)
+      of "text-shots": text_shots = true
       of "bgshot": shot = val
       else: quit("unknown option --" & key)
     of cmdEnd: discard
@@ -440,6 +443,11 @@ when isMainModule:
       let px = n.screens_rgba()
       write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)
       tops.add px[0 ..< 256 * 192]
+      if text_shots:
+        for spec in text.split(','):
+          if spec.len == 2:
+            echo "--- frame ", f + 1, " engine ", spec[0], " BG", spec[1]
+            stdout.write(n.bg_text(spec[0] == 'B', ord(spec[1]) - ord('0'), text_offset))
   if frames > perf_from:
     let secs = (getMonoTime() - perf_t0).inNanoseconds.float / 1e9
     echo "speed: frames ", perf_from, "-", frames, " in ", formatFloat(secs, ffDecimal, 2), " s = ",
@@ -486,7 +494,7 @@ when isMainModule:
     echo "cp15 control=", toHex(n.cp15.control, 8), " icache=", n.tm.ic_on, " dcache=", n.tm.dc_on,
          " regions=", n.cp15.prot_regions.mapIt(toHex(it, 8)).join(","),
          " ic=", toHex(n.cp15.icache_cfg, 2), " dc=", toHex(n.cp15.dcache_cfg, 2),
-         " wb=", toHex(n.cp15.wbuf_cfg, 2)
+         " wb=", toHex(n.cp15.wbuf_cfg, 2), " dc_lines_apart=", n.tm.shadows
   echo "arm9 ", n.arm9.reg_dump()
   echo "arm7 ", n.arm7.reg_dump()
   for (is7, a, len, file) in dumps:

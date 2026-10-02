@@ -32,9 +32,11 @@ the scripts under Building if the cache is lost.
 | `roms/armwrestler.nds` | [mic-/armwrestler](https://github.com/mic-/armwrestler), built by `tools/build_wrestlers.sh` | ARM9 ARM/Thumb, LCDC VRAM display, KEYINPUT, DISPSTAT polling | menu of ARM9 instruction tests (ALU, LDR/STR, LDM/STM, Thumb), pass/fail per row |
 | `roms/arm7wrestler.nds` | [Arisotura/arm7wrestler](https://github.com/Arisotura/arm7wrestler), same script | both CPUs; ARM7 runs the tests, ARM9 copies its frame | same menu run on the ARM7, including v5 opcodes that must be undefined/no-op there |
 | `roms/rockwrestler.nds` | [RockPolish/rockwrestler](https://github.com/RockPolish/rockwrestler) (prebuilt upstream) | both CPUs, IPCSYNC/IPCFIFO, DIV/SQRT, WRAMCNT, VRAMCNT, TCM, CP15 | ARMv4/v5 extras + DS system tests, LCDC display |
-| `roms/gbeplus/arm9_{memory,thumb,irq,math,dma}.nds` | [shonumi/gbe-plus-nds-tests](https://github.com/shonumi/gbe-plus-nds-tests) (GPLv2), rebuilt with libnds 2 | libnds runtime (see below) | ARM9 memory/mirrors, Thumb, IRQ, DIV/SQRT, DMA. (Timer test does not assemble upstream: duplicate labels in `common.s`.) |
+| `roms/gbeplus/arm9_{memory,thumb,irq,math,dma}.nds` | [shonumi/gbe-plus-nds-tests](https://github.com/shonumi/gbe-plus-nds-tests) (GPLv2), rebuilt with libnds 2 | libnds runtime (see below) | ARM9 memory/mirrors, Thumb, IRQ, DIV/SQRT, DMA. (The timer test does not assemble upstream -- duplicate labels in `common.s`; `build_testroms.sh` renames the unused copy.) |
 | `roms/window/window-{basic,hblank,midframe}.nds` | [StrikerX3/nds-tests](https://github.com/StrikerX3/nds-tests), rebuilt with libnds 2 | libnds runtime, 2D windows | window registers, H-blank and mid-frame window changes |
 | `roms/slot2_probe.nds` | `src/slot2_probe` (ours, C on both CPUs, no library) | both CPUs, IPC through main RAM, timers, GBA slot | top screen: 82 hex words (the GBA slot under each EXMEMCNT setting from both CPUs, timing, Rumble/Expansion Pak and GBA-cart probes; list in docs/nds/slot2.md), also at 0x02200100; bottom turns white when done. `nimble test_ndsslot2` runs it under each slot-2 device |
+| `roms/3d/disp_powcnt.nds` | `src/disp_powcnt` (ours, C, `build_3d.sh`) | 2D/3D engines, POWCNT1 | what POWCNT1 gates: palette/OAM/port readbacks with each unit off, CLIPMTX after a command sent with geometry off, POWCNT1 at entry (hex rows, `png_text.py`); the top screen shows the 3D layer with the rendering engine off (docs/nds/test-roms.md) |
+| `roms/polyrastertest/`, `roms/kuribo/`, `roms/gbeplus/arm9_timer.nds`, `roms/blocksds/`, `roms/misc/` | third-party, `tools/build_testroms.sh` (BlocksDS from `tools/setup_blocksds.sh`) | see docs/nds/test-roms.md | Jakly's polyrastertest (hardware-recorded 3D spans), the melonDS board's gx_powcnt/gx_clear, the gbe-plus timer test, the BlocksDS SDK's tests and examples, asie's cached-memory-performance; sources, licences, SHA-1s and results in docs/nds/test-roms.md |
 | `roms/built/cardread.nds` | `src/cardread` (ours, libnds) | libnds runtime, slot-1 card | bottom console: PASS/FAIL per card read check (CPU and slot-1 DMA reads, main-mode low-address redirect, chip ID) |
 | `roms/built/*.nds` | [devkitPro/nds-examples](https://github.com/devkitPro/nds-examples) | libnds runtime | `hello_world`, `ansi_console` (text console), `template_arm9`, `template_combined`, `16bit_color_bmp`, `256_color_bmp`, `Double_Buffer` (bitmap BGs), `simple` (sprites), `Simple_Tri`, `Simple_Quad` (3D), `pxi` (IPC), `timercallback`, `touch_test` |
 
@@ -87,6 +89,11 @@ same toolchain as the 2d_* ROMs (libgcc for soft-float); writes
 `roms/3d/`. A variant directory's `main.c` may `#include` another's with a
 `#define` (e.g. `3d_highlight`). The ROMs put plain ARM9 code at ROM
 0x4000, so some reference cores need `--relocate` (tools/ndsref/README.md).
+
+### Third-party test ROMs of docs/nds/test-roms.md
+
+    tests/nds/tools/setup_blocksds.sh [~/.cache/dingbat-wf]   # BlocksDS + its gcc, user prefix, no root
+    tests/nds/tools/build_testroms.sh [workdir]               # fetch (pinned) and build all of them
 
 ### libnds (nds-examples and the rebuilt third-party ROMs)
 
