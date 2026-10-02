@@ -150,12 +150,14 @@ real BIOS and with the HLE BIOS (e4b66d68.., 6cf51b7e.., d2ad8167..).
 ## Open items, by owner
 
 **System peripherals (power):**
-- Power-off isn't modelled: after PM register 0 bit 6 (every libnds program
-  that returns from main, every emulator port without an SD card, START in
-  most examples) the reference goes black and stops; ours keeps the last
-  picture and both CPUs keep running (a spinning ARM9 costs ~18 ms of CPU a
-  frame here: StellaDS, ColecoDS, NINTV-DS, SpeccySE, DSMA, Kekatsu, DLDI
-  benchmark, Emulator Examination).
+- Power-off (fixed on `nds-accuracy`, docs/nds/accuracy.md): after PM
+  register 0 bit 6 (every libnds program that returns from main, every
+  emulator port without an SD card, START in most examples) both CPUs stop
+  and both screens go black, as in the reference. Re-swept: ColecoDS,
+  NINTV-DS, SpeccySE, StellaDS (broken-ref-too/ref-broken -> ok), Kekatsu
+  (differs -> ok); DLDI benchmark, DSMA stress test and Emulator Examination
+  now match after their exit (their remaining differences are before it);
+  0.4-2.9 ms of CPU a frame instead of ~18.
 - Touchscreen Z1/Z2 (TSC channels 3/4) read 0, so libnds's pressure reads
   1.0 in `pxi`/`touch_test` (the reference reads about -1/4096); GBATEK
   gives the formula, not values; a pressed stylus needs Z1 > 0, Z2 > Z1.

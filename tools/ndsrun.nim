@@ -366,6 +366,7 @@ when isMainModule:
     echo "state: ", state_load, " -> frame ", first_frame
     perf_from = max(perf_from, first_frame)
   var last_rumble = 0
+  var was_off = false
   var audio: seq[float32]
   var mic_rate = 0
   let mic_samples = if mic_path.len > 0: read_wav_mono(mic_path, mic_rate) else: @[]
@@ -403,6 +404,9 @@ when isMainModule:
         elif p.lid: n.set_lid(f == p.first)
         else: n.set_button(p.button, f == p.first)
     n.run_frame()
+    if n.powered_off() and not was_off:
+      was_off = true
+      echo "powered off in frame ", f
     if rumble_log and n.slot2_rumble() != last_rumble:
       last_rumble = n.slot2_rumble()
       echo "rumble frame=", f, " strength=", last_rumble

@@ -246,6 +246,44 @@ block hle_swi_cost:
               (if arm9: "ARM9 " else: "ARM7 ") & name & ": HLE within 2% of the BIOS's cycles",
               "real " & $real & " hle " & $hle
 
+# ---------------------------------------------------------------------------
+# Power-off (ColecoDS, StellaDS, ... exit through libnds's shutdown: the ARM7
+# writes power manager register 0 bit 6; GBATEK "DS Power Management
+# Device": "DS System Power (0=Normal, 1=Shut Down)")
+
+block power_off:
+  echo "power-off"
+  let n = machine()
+  for f in 0..2: n.run_frame()
+  for i in 0 ..< 256 * 192:
+    n.gpu.top[i] = 0x7FFF; n.gpu.bottom[i] = 0x001F   # something on screen
+  let b = Arm7Bus(nds: n)
+  proc spi(v: uint16; hold: bool) =
+    b.write16(0x0400_01C0'u32, 0x8002'u16 or (if hold: 0x800'u16 else: 0))  # PM, 1 MHz
+    b.write16(0x0400_01C2'u32, v)
+    n.run_until(n.sched.now + 2000)                  # the byte's time
+  spi(0x00, true)                                    # register 0, write
+  check not n.powered_off(), "the index byte alone doesn't power off"
+  spi(0x40 or 0x0C, false)                           # backlights + shut down
+  check n.powered_off(), "register 0 bit 6 powers the DS off"
+  let t0 = n.sched.now
+  let i9 = n.arm9.instr_count
+  let i7 = n.arm7.instr_count
+  let f0 = n.gpu.frame_count
+  discard n.spu.take_samples()
+  for f in 0..4: n.run_frame()
+  check n.sched.now == t0 and n.arm9.instr_count == i9 and n.arm7.instr_count == i7,
+        "both CPUs and the clock stop"
+  check n.gpu.frame_count == f0 and n.spu.sample_count == 0, "no frames, no sound"
+  var lit = 0
+  for i in 0 ..< 256 * 192:
+    if n.gpu.top[i] != 0 or n.gpu.bottom[i] != 0: inc lit
+  check lit == 0, "both screens black", $lit & " lit pixels"
+  n.set_button(nbA, true)
+  n.set_touch(100, 100, true)
+  n.run_frame()
+  check n.powered_off() and n.sched.now == t0, "input doesn't turn it back on"
+
 if failures > 0:
   echo failures, " failed"
   quit(1)

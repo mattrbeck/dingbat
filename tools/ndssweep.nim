@@ -263,6 +263,7 @@ proc run_one(rom, outdir, bios, press: string; frames: int; shots: seq[int]) =
     var k = 0
     while not n.frame_done and n.sched.now < limit:
       n.run_until(min(limit, n.sched.now + LINE_CYCLES))
+      if n.asleep(): break      # powered off or asleep: the clock stands still
       inc k
       if (k and 31) == 0:
         if n.arm9.halted: halted9_at = f; inc halts
@@ -297,7 +298,7 @@ proc run_one(rom, outdir, bios, press: string; frames: int; shots: seq[int]) =
     "pc9": toHex(n.arm9.next_pc, 8), "pc7": toHex(n.arm7.next_pc, 8),
     "instrs9": n.arm9.instr_count, "instrs7": n.arm7.instr_count,
     "unmapped": n.unmapped_count, "hang": hang,
-    "power_off": (n.spi.pm_regs[0] and 0x40) != 0,
+    "power_off": n.powered_off(),
     "hang_pc": (if pcs.len > 0: toHex(pcs[^1], 8) else: ""),
     "frames_changed": changed, "last_change": last_change,
     "blank_top": blank_top, "blank_bottom": blank_bottom,
@@ -482,8 +483,9 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
       elif ref_blank_all: ref_flags.add "blank"
       if rpeak < SILENT: ref_flags.add "silent"
     # a program that exits powers the DS off (PM register 0 bit 6, GBATEK
-    # "DS Power Management"); our screens keep the last picture, so a
-    # power-off is not counted as a hang
+    # "DS Power Management"): both screens go black and the CPUs stop, so a
+    # power-off is not a hang, and black screens equal to the reference's
+    # are a match, not a blank failure
     # an exception or a hang is "broken" only when the picture is far from
     # the reference's too: a program that crashes the same way on both
     # (a libnds exception screen on each) is a difference, not our bug
@@ -494,6 +496,7 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
     let silent_only = j != nil and j["audio_peak"].getFloat < SILENT and rpeak > 0.01
     if core.len == 0:
       status = if ours_broken: "broken" else: "ran"
+    elif off and ref_loaded and dmax == 0 and not silent_only: status = "ok"
     elif not ref_loaded or ref_blank_all:
       status = if ours_broken or ours_blank_all or stuck: "broken-ref-too" else: "ref-broken"
     elif ours_broken: status = "broken"
@@ -502,7 +505,7 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
     else:
       status = "differs"
       if silent_only: notes.add "silent in ours"
-    if off: notes.add "exits: our screens keep the last picture after the power-off"
+    if off: notes.add "exits (power-off)"
     let ours_s = if ours_flags.len > 0: ours_flags.join(" ") else: "-"
     let ref_s = if ref_flags.len > 0: ref_flags.join(" ") else: "-"
     let offs = offsets.deduplicate.filterIt(it != 0)

@@ -98,7 +98,7 @@ console type 1Dh is 20h, 63h or 57h): 0-4, 5-7 mirror 4, 8-7Fh mirror 0-7.
 
 | reg | bits | dingbat |
 |---|---|---|
-| 0 | amp, mute (old DS only), lower/upper backlight, LED blink/speed, power off | R/W bits 0-6; writing bit 6 sets `power_off` (the machine stops, nothing wakes it). After direct boot 0Dh (amp, both backlights: what the firmware leaves, Assumed) |
+| 0 | amp, mute (old DS only), lower/upper backlight, LED blink/speed, power off | R/W bits 0-6; writing bit 6 sets `power_off`: both CPUs and the clock stop, both screens go black, no sound, nothing wakes it (`powered_off()`, wasm `nds_powered_off`; the reference runs go black too, docs/oracles.md). After direct boot 0Dh (amp, both backlights: what the firmware leaves, Assumed) |
 | 1 | battery low | read-only, `set_battery_low` |
 | 2 | mic amp enable | bit 0 |
 | 3 | mic gain 20/40/80/160 | bits 0-1 |
@@ -173,7 +173,7 @@ during ARM7 sleep (periph_suite RES37-39; docs/oracles.md).
 ## Frontend API (nds.nim)
 
 `set_lid`, `push_mic`, `set_battery_low`, `set_external_power`,
-`backlight(top)`, `sleeping`, `asleep()` (sleeping or powered off). The web
+`backlight(top)`, `sleeping`, `asleep()` (sleeping or powered off), `powered_off()`. The web
 page and desktop frontends do not call them yet.
 
 ## Left

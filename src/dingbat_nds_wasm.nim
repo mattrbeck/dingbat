@@ -72,6 +72,12 @@ proc nds_run_frame() {.exportc.} =
 proc nds_frame_count(): cint {.exportc.} =
   if core == nil: 0 else: cint(core.gpu.frame_count)
 
+proc nds_powered_off(): cint {.exportc.} =
+  ## 1 once the program has shut the DS down (power manager register 0 bit
+  ## 6): both screens are black, nothing runs and no sound comes out; only
+  ## nds_reboot (or another nds_boot) turns it back on.
+  if core != nil and core.powered_off(): 1 else: 0
+
 # Video: each screen is 256x192 BGR555 (bit 15 unused), read in place by the
 # app's WebGL presenter (web/glpresent.js). nds_fb_top/nds_fb_bottom convert
 # to RGBA8888 on demand for 2D-canvas pages.
