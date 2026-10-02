@@ -38,7 +38,9 @@ proc nds_boot(b9: pointer; b9_len: cint; b7: pointer; b7_len: cint;
               fw: pointer; fw_len: cint; save: pointer; save_len: cint): cint {.exportc.} =
   ## Build the core on the buffer nds_rom_alloc handed out. A BIOS/firmware
   ## left out (len 0) gets the HLE BIOS / synthesized firmware. `save` is the
-  ## cart backup to start from (its size picks the chip; 0 = detect).
+  ## cart backup to start from (io/backup.nim set_data: an EEPROM/FRAM size
+  ## names the chip, other sizes are fitted to the one the game addresses,
+  ## a .dsv footer is stripped; 0 = detect).
   if romBuf.len == 0: return 0
   lastBios9 = copy_in(b9, b9_len)
   lastBios7 = copy_in(b7, b7_len)

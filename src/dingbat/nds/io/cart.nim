@@ -118,6 +118,11 @@ proc new_cart*(rom: sink seq[uint8]; irq9, irq7: IrqCtl; sched: NdsScheduler): C
   if size == 0: result.chip_id = 0xFFFF_FFFF'u32   # no card (GBATEK)
   # Game code 'I...' = cart with an infrared port (GBATEK "NDS Gamecodes")
   result.backup.ir = ir
+  # GBATEK "DS Cartridge Backup": Rune Factory (ARFx) defeats detection,
+  # "force 64Kbyte EEPROM"
+  if size > 0x0E and rom[0x0C] == uint8('A') and rom[0x0D] == uint8('R') and
+     rom[0x0E] == uint8('F'):
+    result.backup.force_kind(bkEeprom)
   result.set_key1_table(@[])
   result.sync_key2(card_seed0(0, sel))   # Assumed: any shared seed will do
 

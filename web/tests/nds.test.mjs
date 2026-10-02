@@ -347,6 +347,25 @@ test("reset and an imported .sav reboot the DS core in place on the new save", a
   eq([...app.idb.get("save:Imp.nds")], [4, 3, 2, 1]);
 });
 
+test("a DS save import goes to the core whole: no GBA container sniffing, .dsv taken", async () => {
+  const { app, core } = await appWithCore({ confirmResult: true });
+  await app.api.handleRomFile(fakeFile("Big.nds", ROM));
+  for (let i = 0; i < 20 && !core.booted.length; i++) await settle();
+  // 512K whose bytes at 42Ch happen to read as a GameShark SP tag: for a GBA
+  // game that is a container (cut to 128K), for a DS game just save data.
+  const sav = new Uint8Array(512 * 1024).fill(0x11);
+  sav.set([0x78, 0x56, 0x34, 0x12], 0x42C);
+  await app.runIn("(b) => applyImportedSave(b, 'Big.sav')")(sav);
+  for (let i = 0; i < 20 && core.booted.length < 2; i++) await settle();
+  assert.equal(core.booted[1].save.length, 512 * 1024, "the whole file reached the core");
+  assert.equal(app.idb.get("save:Big.nds").length, 512 * 1024);
+  // A dropped .dsv is a save to import, not a ROM (the core strips its footer).
+  app.runIn("handleDroppedFile")(fakeFile("Big.dsv", u8(7, 7, 7, 7)));
+  for (let i = 0; i < 20 && core.booted.length < 3; i++) await settle();
+  assert.equal(core.booted[2].how, "reboot");
+  eq([...core.booted[2].save], [7, 7, 7, 7]);
+});
+
 test("a GB/GBA game after a DS one hands the DS core's memory back", async () => {
   const { app, core } = await appWithCore();
   await app.api.handleRomFile(fakeFile("First.nds", ROM));

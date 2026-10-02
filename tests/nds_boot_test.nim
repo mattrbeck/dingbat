@@ -11,7 +11,7 @@
 ##
 ## Run with: nimble test_ndsboot
 
-import std/[os, strutils]
+import std/[os, strutils, sequtils]
 import dingbat/nds/[sched, nds]
 import dingbat/nds/io/[irq, cart, cartcrypt, spi, input]
 
@@ -309,6 +309,106 @@ block firmware_settings_unit:
   let n = new_nds(fake_rom(0x20000, saDestroyed, fake_table()), @[], @[], @[])
   check n.main_ram[0x3FFC80 ..< 0x3FFCF0] == synth_firmware()[0x3FF00 ..< 0x3FF70],
         "direct boot copies the current copy to 0x27FFC80"
+
+proc crc16_0(data: openArray[uint8]): uint16 =
+  ## CRC16 with initial value 0 (the wifi and access-point sections).
+  var crc = 0'u16
+  for b in data:
+    crc = crc xor uint16(b)
+    for _ in 0..7:
+      crc = if (crc and 1) != 0: (crc shr 1) xor 0xA001'u16 else: crc shr 1
+  crc
+
+proc fw16(fw: seq[uint8]; o: int): int = int(fw[o]) or (int(fw[o + 1]) shl 8)
+proc fw24(fw: seq[uint8]; o: int): int = fw16(fw, o) or (int(fw[o + 2]) shl 16)
+
+block synth_firmware_structure:
+  # GBATEK "DS Firmware Header", "Wifi Calibration Data", "Wifi Internet
+  # Access Points", "User Settings": every field a game may validate.
+  # Without a valid wifi section SoulSilver's CONTINUE ends in "A
+  # communication error has occurred" (docs/nds/saves.md).
+  echo "synthesized firmware structure"
+  let fw = synth_firmware()
+  check fw.len == 256 * 1024, "256 KB, as the DS's flash"
+  check fw[0x08 .. 0x0A] == @[uint8('M'), uint8('A'), uint8('C')], "identifier \"MAC\""
+  check fw[0x1D] == 0xFF and fw[0x1E] == 0xFF and fw[0x1F] == 0xFF and
+        fw[0x28] == 0xFF and fw[0x29] == 0xFF, "console type DS, unused bytes FFh"
+  check fw16(fw, 0x20) * 8 == 0x3FE00, "user settings at 3FE00h"
+  let n = fw16(fw, 0x2C)
+  check n == 0x138, "wifi config length 0138h", toHex(n)
+  check crc16_0(fw.toOpenArray(0x2C, 0x2C + n - 1)) == uint16(fw16(fw, 0x2A)),
+        "wifi CRC16 (initial 0) over 2Ch..163h"
+  check fw[0x36 .. 0x38] == @[0x00'u8, 0x09, 0xBF], "MAC in the v1-v5 form 0009BFxxxxxx"
+  let mask = fw16(fw, 0x3C)
+  check (mask and 0x7FFE) == mask and (mask and 0x2082) == 0x2082,
+        "channel mask: bits 1..14 only, Nintendo's 1, 7, 13 enabled", toHex(mask)
+  check fw[0x40] == 2 and fw[0x41] == 0x18 and fw[0x42] == 12, "type-2 RF, 12 24-bit entries"
+  var idx: seq[int]
+  for i in 0 ..< 12: idx.add fw24(fw, 0xCE + i * 3) shr 18
+  check idx == @[0, 4, 5, 6, 7, 8, 9, 10, 11, 1, 2, 3], "RF init order 0,4..0Bh,1,2,3"
+  check fw24(fw, 0xF2) == 0x141728 and fw24(fw, 0xF5) == 0x1AE8BA,
+        "channel 1 = GBATEK's example RF[05h]/RF[06h]"
+  var ok = true
+  var last = 0
+  for ch in 1..14:
+    let a = fw24(fw, 0xF2 + (ch - 1) * 6)
+    let b = fw24(fw, 0xF5 + (ch - 1) * 6)
+    let lo = ((a and 0x3FFFF) shl 18) or (b and 0x3FFFF)   # N.frac in 1/2^24 steps
+    if a shr 18 != 5 or b shr 18 != 6 or lo <= last: ok = false
+    last = lo
+  check ok, "channels 1..14: RF[05h], RF[06h] pairs, LO rising"
+  check fw16(fw, 0x44) == 0x0002 and fw16(fw, 0x4C) == 0x0048 and fw16(fw, 0x62) == 0x0101,
+        "W_CONFIG initial values (GBATEK Configuration Ports)"
+  check fw[0x64 + 1] == 0x9E and fw[0x64 + 0x1E] == 0xBB and fw[0x64 + 0x35] == 0x1F,
+        "BB[01h], BB[1Eh], BB[35h] as GBATEK"
+  for ap in 0..2:
+    let b = 0x3FA00 + ap * 0x100
+    check fw[b + 0xE7] == 0xFF and crc16_0(fw.toOpenArray(b, b + 0xFD)) == uint16(fw16(fw, b + 0xFE)),
+          "access point " & $(ap + 1) & ": not configured, CRC valid"
+  var counts: seq[int]
+  for c in 0..1:
+    let b = 0x3FE00 + c * 0x100
+    counts.add fw16(fw, b + 0x70)
+    let flags = fw16(fw, b + 0x64)
+    check fw16(fw, b) == 5 and crc16(fw.toOpenArray(b, b + 0x6F)) == uint16(fw16(fw, b + 0x72)),
+          "user settings " & $c & ": version 5, CRC16 (initial FFFFh) valid"
+    check (flags and 7) < 6 and (flags and 0x200) == 0 and (flags and 0xEC00) == 0xEC00,
+          "user settings " & $c & ": a language, no settings-lost/prompt bits", toHex(flags)
+    check fw16(fw, b + 0x1A) in 1..10 and fw[b + 3] in 1'u8..12'u8 and fw[b + 4] in 1'u8..31'u8,
+          "user settings " & $c & ": nickname length, birthday in range"
+    check fw16(fw, b + 0x58) != fw16(fw, b + 0x5E) and fw[b + 0x5C] != fw[b + 0x62],
+          "user settings " & $c & ": two distinct touch calibration points"
+    check fw[b + 0x74 ..< b + 0x100].allIt(it == 0xFF), "user settings " & $c & ": 74h..FFh FFh"
+  check counts[1] == ((counts[0] + 1) and 0x7F), "copy 2 is the newer (counter + 1)"
+
+block real_firmware_structure:
+  # Local only: the user's dump read at run time to check the synthesized
+  # layout against a real one (never copied: synth_firmware's values come
+  # from GBATEK).
+  let dir = getEnv("DINGBAT_NDS_BIOS")
+  if dir.len == 0 or not fileExists(dir / "firmware.bin"):
+    echo "real firmware structure: skipped (set DINGBAT_NDS_BIOS)"
+  else:
+    echo "real firmware structure"
+    let s = readFile(dir / "firmware.bin")
+    var real = newSeq[uint8](s.len)
+    if s.len > 0: copyMem(addr real[0], unsafeAddr s[0], s.len)
+    let fw = synth_firmware()
+    let n = fw16(real, 0x2C)
+    check n == fw16(fw, 0x2C), "same wifi config length", toHex(n)
+    check crc16_0(real.toOpenArray(0x2C, 0x2C + n - 1)) == uint16(fw16(real, 0x2A)),
+          "the dump's wifi CRC uses initial value 0, as synthesized"
+    let us = fw16(real, 0x20) * 8
+    check crc16(real.toOpenArray(us, us + 0x6F)) == uint16(fw16(real, us + 0x72)),
+          "the dump's user-settings CRC uses initial value FFFFh, as synthesized"
+    if real[0x40] == 2:
+      var same = 0
+      for i in 0 ..< 14 * 6: (if real[0xF2 + i] == fw[0xF2 + i]: same.inc)
+      check same == 14 * 6, "the derived channel table equals the dump's"
+      var cfg = 0
+      for i in 0 ..< 16:
+        if i != 12 and fw16(real, 0x44 + i * 2) == fw16(fw, 0x44 + i * 2): cfg.inc
+      check cfg == 15, "GBATEK's W_CONFIG values equal the dump's"
 
 # ---------------------------------------------------------------------------
 # The real KEY1 table (local only: needs the user's dumps)

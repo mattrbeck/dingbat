@@ -5,7 +5,7 @@
 ##
 ## Run with: nimble test_ndssystem
 
-import std/times
+import std/[times, strutils]
 import dingbat/nds/sched
 import dingbat/nds/io/[irq, divsqrt, rtc, backup, ipc, cart]
 import dingbat/gba/rtc_calendar
@@ -188,6 +188,185 @@ block backup_unit:
   b.set_data(sv)
   check b.kind == bkEeprom and b.spi([0x03'u8, 0, 5, 0], [0x100'u32])[3] == 0x42,
         "an 8K save loads as a 16-bit EEPROM"
+
+# GBATEK "DS Cartridge Backup": every chip type, status/ID replies, page
+# wrap, write protect, and how save files of other sizes are fitted
+# (docs/nds/saves.md).
+
+const KB = 1024
+# address bytes from one pc, data from another, as the SDK sends them
+proc cmd_pcs(n: int): seq[uint32] =
+  result = @[0x100'u32]
+  for i in 0 ..< n: result.add 0x200
+  result.add 0x300
+
+proc filled(n: int; v: uint8): seq[uint8] =
+  result = newSeq[uint8](n)
+  for x in result.mitems: x = v
+
+block backup_chips:
+  echo "save chip types"
+  # RDSR and RDID by type (GBATEK detection table: 0.5K F0h, 16-bit 00h,
+  # EEPROM/FRAM RDID FFh; FLASH ids from the chip list)
+  for (size, st, id) in [(512, 0xF0'u8, [0xFF'u8, 0xFF, 0xFF]),
+                         (8 * KB, 0x00'u8, [0xFF'u8, 0xFF, 0xFF]),
+                         (32 * KB, 0x00'u8, [0xFF'u8, 0xFF, 0xFF]),
+                         (64 * KB, 0x00'u8, [0xFF'u8, 0xFF, 0xFF]),
+                         (128 * KB, 0x00'u8, [0xFF'u8, 0xFF, 0xFF]),
+                         (256 * KB, 0x00'u8, [0x20'u8, 0x40, 0x12]),
+                         (512 * KB, 0x00'u8, [0x20'u8, 0x40, 0x13]),
+                         (1024 * KB, 0x00'u8, [0x20'u8, 0x40, 0x14]),
+                         (8192 * KB, 0x00'u8, [0xC2'u8, 0x20, 0x17])]:
+    let b = new_backup()
+    b.set_data(filled(size, 0xFF))
+    let s = b.spi([0x05'u8, 0], [0x100'u32])
+    let r = b.spi([0x9F'u8, 0, 0, 0], [0x100'u32])
+    check s[1] == st and r[1 .. 3] == @id and b.data.len == size,
+          $(size div KB) & "K: RDSR " & toHex(st) & ", RDID " & toHex(id[0]) & toHex(id[1]) & toHex(id[2]),
+          toHex(s[1]) & " " & toHex(r[1]) & toHex(r[2]) & toHex(r[3])
+  # an unformatted chip reads FFh, whatever the game asks first
+  var b = new_backup()
+  let blank = b.spi([0x03'u8, 0x00, 0x10, 0, 0], cmd_pcs(2))
+  check blank[3] == 0xFF and blank[4] == 0xFF and not b.dirty, "an unformatted chip reads FFh"
+  # page wrap: 8K EEPROM 32 bytes, 64K 128, 0.5K 16; FRAM none
+  for (size, page) in [(8 * KB, 32), (64 * KB, 128)]:
+    b = new_backup()
+    b.set_data(filled(size, 0xFF))
+    var w = @[0x02'u8, 0x00, uint8(page - 2)]
+    for i in 0..3: w.add uint8(0xA0 + i)
+    discard b.spi([0x06'u8], [0x100'u32])
+    discard b.spi(w, [0x100'u32])
+    check b.data[page - 2] == 0xA0 and b.data[page - 1] == 0xA1 and b.data[0] == 0xA2 and
+          b.data[1] == 0xA3 and b.data[page] == 0xFF,
+          $(size div KB) & "K EEPROM: a write wraps in its " & $page & "-byte page"
+  b = new_backup()
+  b.set_data(filled(512, 0xFF))
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x0A'u8, 0x0F, 0x11, 0x22], [0x100'u32])
+  check b.data[0x10F] == 0x11 and b.data[0x100] == 0x22, "0.5K EEPROM: WRHI wraps in its 16-byte page"
+  b = new_backup()
+  b.set_data(filled(32 * KB, 0xFF))
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x02'u8, 0x00, 0xFF, 0x11, 0x22], [0x100'u32])
+  check b.kind == bkFram and b.data[0xFF] == 0x11 and b.data[0x100] == 0x22, "FRAM: no page limit"
+  # write protect (status bits 2-3), WRSR needs WREN and drops WEL
+  b = new_backup()
+  b.set_data(filled(64 * KB, 0xFF))
+  discard b.spi([0x01'u8, 0x04], [0x100'u32])
+  check b.spi([0x05'u8, 0], [0x100'u32])[1] == 0x00, "WRSR without WREN is ignored"
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x01'u8, 0x04], [0x100'u32])
+  check b.spi([0x05'u8, 0], [0x100'u32])[1] == 0x04, "WRSR sets WP = upper quarter, WEL drops"
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x02'u8, 0xC0, 0x00, 0x55], [0x100'u32])
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x02'u8, 0xBF, 0xFF, 0x66], [0x100'u32])
+  check b.data[0xC000] == 0xFF and b.data[0xBFFF] == 0x66, "WP: the upper quarter refuses writes"
+  b = new_backup()
+  b.set_data(filled(512 * KB, 0xFF))
+  discard b.spi([0x9F'u8, 0, 0, 0], [0x100'u32])
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x01'u8, 0x0C], [0x100'u32])
+  check (b.spi([0x05'u8, 0], [0x100'u32])[1] and 0x0C) == 0, "FLASH has no WRSR"
+  # FLASH page program wraps in its 256-byte page
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x0A'u8, 0x00, 0x01, 0xFF, 0x11, 0x22], [0x100'u32])
+  check b.data[0x1FF] == 0x11 and b.data[0x100] == 0x22, "FLASH page write wraps in its page"
+
+block backup_files:
+  echo "save files"
+  # sizes that name a chip
+  for (size, k) in [(512, bkEeprom512), (8 * KB, bkEeprom), (32 * KB, bkFram),
+                    (64 * KB, bkEeprom), (128 * KB, bkEeprom128k)]:
+    let b = new_backup()
+    b.set_data(filled(size, 0x5A))
+    check b.kind == k and b.data.len == size and not b.dirty, $size & " bytes: " & $k
+  # a FLASH-size file is a hint: the game's 3 address bytes confirm it
+  var b = new_backup()
+  var sv = filled(512 * KB, 0xFF)
+  sv[0x40000] = 0x77
+  b.set_data(sv)
+  let r = b.spi([0x03'u8, 0x04, 0x00, 0x00, 0], cmd_pcs(3))
+  check b.kind == bkFlash and b.data.len == 512 * KB and r[4] == 0x77 and not b.dirty,
+        "512K file + 24-bit reads: FLASH 512K as loaded"
+  # padded: a 512K file of an EEPROM game (16-bit reads) keeps its first 64K
+  b = new_backup()
+  sv = filled(512 * KB, 0xFF)
+  for i in 0 ..< 8 * KB: sv[i] = uint8(i and 0x7F)
+  b.set_data(sv)
+  let r2 = b.spi([0x03'u8, 0x00, 0x05, 0], cmd_pcs(2))
+  check b.kind == bkEeprom and b.data.len == 64 * KB and r2[3] == 5 and b.dirty and b.dropped == 0,
+        "512K FFh-padded file + 16-bit reads: 64K EEPROM, data kept, stored fitted"
+  # mirror padding: a 0.5K image repeated to 8K is also padding
+  b = new_backup()
+  sv = newSeq[uint8](3 * 512)
+  for i in 0 ..< sv.len: sv[i] = uint8((i mod 512) xor 0x33)
+  b.set_data(sv)
+  discard b.spi([0x03'u8, 0x07, 0], cmd_pcs(1))
+  check b.kind == bkEeprom512 and b.data.len == 512 and b.data[7] == (7 xor 0x33) and
+        b.dropped == 0, "a mirrored 0.5K image: 0.5K EEPROM"
+  # excess that is not padding is reported, and not stored until the game writes
+  b = new_backup()
+  sv = filled(300 * KB, 0x00)
+  sv[100 * KB] = 1
+  b.set_data(sv)
+  discard b.spi([0x03'u8, 0x00, 0x00, 0], cmd_pcs(2))
+  check b.kind == bkEeprom and b.dropped == 300 * KB - 64 * KB and not b.dirty,
+        "non-padding past the chip: counted in `dropped`, not stored"
+  # trimmed FLASH file: grows to the next FLASH size, erased
+  b = new_backup()
+  sv = filled(300 * KB, 0x12)
+  b.set_data(sv)
+  discard b.spi([0x03'u8, 0x00, 0x00, 0x00, 0], cmd_pcs(3))
+  check b.kind == bkFlash and b.data.len == 512 * KB and b.data[300 * KB - 1] == 0x12 and
+        b.data[300 * KB] == 0xFF and b.dirty, "a trimmed 300K file: FLASH 512K, FFh after"
+  # the .dsv text footer is stripped
+  b = new_backup()
+  sv = filled(8 * KB, 0x44)
+  let footer = "|<--Snip above here to create a raw sav by excluding this savedata footer:"
+  for ch in footer: sv.add uint8(ch)
+  for i in 0 ..< 32: sv.add uint8(i)
+  for ch in "SAVE-|": sv.add uint8(ch)
+  check image_len(sv) == 8 * KB, "image_len finds the footer"
+  b.set_data(sv)
+  check b.kind == bkEeprom and b.data.len == 8 * KB and b.dirty, "8K + footer: 8K EEPROM, stored raw"
+  # no file: a FLASH grows to what the game addresses (1M, 8M games)
+  b = new_backup()
+  discard b.spi([0x03'u8, 0x0F, 0x00, 0x00, 0], cmd_pcs(3))
+  check b.kind == bkFlash and b.data.len == 1024 * KB, "no file, a read at 0F0000h: FLASH 1M"
+  check b.spi([0x9F'u8, 0, 0, 0], [0x100'u32])[3] == 0x14, "... whose RDID says 1M"
+  # 24-bit EEPROM (128K) vs FLASH: a 02h write that sets bits is the EEPROM
+  b = new_backup()
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x02'u8, 0x00, 0x00, 0x10, 0x55], cmd_pcs(3))
+  check b.kind == bkFlash and b.data[0x10] == 0x55, "a first 24-bit write: FLASH so far"
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x02'u8, 0x00, 0x00, 0x10, 0xAA], cmd_pcs(3))
+  check b.kind == bkEeprom128k and b.data.len == 128 * KB and b.data[0x10] == 0xAA,
+        "rewriting it with set bits: 128K EEPROM"
+  b = new_backup()
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x0A'u8, 0x00, 0x00, 0x10, 0x55], cmd_pcs(3))
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x02'u8, 0x00, 0x00, 0x10, 0xAA], cmd_pcs(3))
+  check b.kind == bkFlash and b.data[0x10] == 0x00, "after a page write it stays FLASH (02h ANDs)"
+  # re-detection while unwritten (GBATEK: Over the Hedge, 8K then 0.5K)
+  b = new_backup()
+  discard b.spi([0x03'u8, 0x00, 0x00, 0], cmd_pcs(2))
+  check b.kind == bkEeprom, "16-bit reads: EEPROM"
+  discard b.spi([0x03'u8, 0x00, 0], cmd_pcs(1))
+  check b.kind == bkEeprom512 and b.data.len == 512, "then 8-bit reads: 0.5K EEPROM"
+  discard b.spi([0x06'u8], [0x100'u32])
+  discard b.spi([0x02'u8, 0x01, 0x99], cmd_pcs(1))
+  discard b.spi([0x03'u8, 0x00, 0x00, 0], cmd_pcs(2))
+  check b.kind == bkEeprom512 and b.data[1] == 0x99, "written: the kind stays"
+  # Rune Factory (ARFx): 64K EEPROM forced (GBATEK)
+  var rom = newSeq[uint8](0x1000)
+  for i, ch in "ARFE": rom[0x0C + i] = uint8(ch)
+  let c = new_cart(rom, IrqCtl(), IrqCtl(), new_nds_scheduler())
+  check c.backup.kind == bkEeprom and c.backup.data.len == 64 * KB, "ARFx: 64K EEPROM forced"
+  c.backup.set_data(filled(512 * KB, 0xFF))
+  check c.backup.kind == bkEeprom and c.backup.data.len == 64 * KB, "... whatever file it gets"
 
 # ---------------------------------------------------------------------------
 # IPC FIFO IRQ edges

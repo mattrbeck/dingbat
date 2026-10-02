@@ -455,6 +455,39 @@ test("a battery save the game wrote is there after a reload", { skip }, async ()
   await ctx.close();
 });
 
+test("an imported .dsv save loses its footer: the game reads it, the app stores the raw chip",
+     { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  page.on("dialog", (d) => d.accept()); // the import's "overwrite?" questions
+  await addGame(page, rom("save_write.nds"));
+  await framesPast(page, 10);
+  // save_write's chip with boot count 5, as a .dsv: the 512-byte image, then
+  // the text footer (docs/nds/saves.md).
+  const img = new Uint8Array(512).fill(0xFF);
+  img.set([0x44, 0x47, 0x42, 5]);
+  for (let i = 4; i < 8; i++) img[i] = ((5 ^ 0xA5) + i) & 0xFF;
+  const foot = new TextEncoder().encode(
+    "|<--Snip above here to create a raw sav by excluding this savedata footer:" +
+    "\0".repeat(24) + "|-SAVE-|");
+  const dsv = new Uint8Array(img.length + foot.length);
+  dsv.set(img); dsv.set(foot, img.length);
+  await page.locator("#menu-btn").click();
+  await page.locator("#manage-saves").click();
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"),
+                                       page.locator("#load-save").click()]);
+  await chooser.setFiles({ name: "save_write.dsv", mimeType: "application/octet-stream",
+                           buffer: Buffer.from(dsv) });
+  // The reboot: the game reads count 5 and writes 6; the app stores the chip.
+  await until(page, async () => (await dbGet("save:save_write.nds"))?.[3] === 6, null, 30000);
+  const saved = await page.evaluate(async () => (await dbGet("save:save_write.nds")).length);
+  assert.equal(saved, 512, "stored as the 512-byte chip, footer gone");
+  const [px] = await canvasAt(page, [[0.25, 0.25]]);
+  assert.deepEqual(px, [255, 255, 255], "the game read count 5 (white: a later boot): " + px);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test("a save state taken in the app resumes the same frames and sound", { skip }, async () => {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
   const { page, errors } = await newPage(ctx);

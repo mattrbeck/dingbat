@@ -41,7 +41,9 @@ on a dev page (`web/nds.html`) and in the main web app (`docs/nds/web.md`). Hard
   frontends' plumbing.
 - **BIOS:** real dumps are used when present (`--bios DIR` /
   `$DINGBAT_NDS_BIOS`: `bios9.bin`, `bios7.bin`, `firmware.bin`); firmware is
-  synthesized when missing, and a missing BIOS gets the HLE BIOS (below).
+  synthesized when missing (every GBATEK section but code, the wifi
+  calibration included: docs/nds/saves.md), and a missing BIOS gets the HLE
+  BIOS (below).
   `DINGBAT_NDS_HLE=1` (or `new_nds(..., force_hle = true)`) forces the HLE
   BIOS with dumps present, to compare the two on one ROM.
 - **Boot:** direct boot by default (the card's binaries loaded, the
@@ -125,7 +127,8 @@ src/dingbat/nds/
   io/mic.nim       microphone sample queue, read by the TSC's AUX channel
   io/cart.nim      card slot (ROMCTRL, raw/KEY1/KEY2 protocol, seeds, AUXSPI)
   io/cartcrypt.nim KEY1 (BIOS7 table at run time), KEY2, secure-area forms
-  io/backup.nim    save chip: EEPROM/FRAM/FLASH, IR-cart front-end
+  io/backup.nim    save chip: EEPROM/FRAM/FLASH, detection, .sav fitting,
+                   IR-cart front-end (docs/nds/saves.md)
   io/slot2.nim     GBA slot: open bus, GBA cart (ROM, SRAM/FLASH/EEPROM via
                    gba/storage_chip.nim, GPIO), Rumble Pak, Expansion Pak
                    (docs/nds/slot2.md)
