@@ -57,18 +57,28 @@ it deliberately does not model:
 * **Interrupted-copy register remnants.** An IRQ preempting CpuSet /
   CpuFastSet leaves the continuation in r0/r1/r2 (PC rewound onto the SWI).
   On that path only, the halfword forms advance r0/r1 (the real routine
-  leaves them) and r2's count counts down. The resume is timed as the real
-  routine's (no second dispatch; tools/biosdrv/cpusi.c exact from an IWRAM
-  caller, 3 cycles per call off from a cartridge one) unless a state load
-  falls inside the preemption, when it pays the dispatch once (the
-  continuation marker is not serialized).
-* **Interrupted decompression sees finished output.** LZ77/Huffman/RL are
-  preempted at faithful cycle positions (the uncharged remainder rides the
-  halt-resume path), but the destination is written up front, so a handler
-  inspecting it mid-call sees the completed output. Diff/BitUnPack are
-  atomic. An LZ77UnCompWram from the cartridge runs 5-7% short of the
-  real routine on small streams (tools/biosdrv/lz77t.c: 99-143 cycles on a
-  64-byte one); from EWRAM it is exact, preempted or not (lz77i.c).
+  leaves them) and r2's count counts down. The copy is checked after every
+  unit (CpuSet) or 8-word burst (CpuFastSet), so the IRQ is taken at the end
+  of the unit the line rose in, not at the instruction inside it. The resume
+  is timed as the real routine's (no second dispatch; tools/biosdrv/cpusi.c
+  exact from an IWRAM caller; from a Thumb caller in the cartridge each
+  preemption is ~2.4 cycles short) unless a state load falls inside the
+  preemption, when it pays the dispatch once (the continuation marker is
+  not serialized).
+* **Interrupted decompression sees finished output.** The decompressors,
+  Diff filters, BitUnPack, the affine sets and GetBiosChecksum write their
+  output up front (uncharged) and then charge the whole cost model as
+  routine time that stops on the cycle an interrupt line rises; the
+  remainder rides the halt-resume path. A handler inspecting the
+  destination mid-call sees the completed output. The interrupt is taken on
+  the cycle the line rises; the console takes it at the end of the BIOS
+  instruction in progress, 0-5 cycles later (Castlevania - Circle of the
+  Moon's timer IRQ inside a cartridge LZ77UnCompWram lands 2 cycles early,
+  which is enough to move its busy-wait loop's phase and, at frame 5319,
+  a timer-seeded particle). An LZ77UnCompWram from the cartridge runs 5-7%
+  short of the real routine on small streams (tools/biosdrv/lz77t.c: 99-143
+  cycles on a 64-byte one); from EWRAM it is exact, preempted or not
+  (lz77i.c, Thumb caller in the cartridge too).
 * **Interrupted RegisterRamReset** encodes its continuation in r0 (bit 31
   marker, remaining phase charge in bits 8–29, pending flags). A caller
   passing bit 31 set with garbage mid bits would be misread; compilers emit

@@ -160,7 +160,16 @@ proc irq_enter*(cpu: CPU) =
     # irqwait.s on an AGB SP, a NOP sled interrupted by TM0, identical from
     # IWRAM; IWRAM fetches in one cycle and pays nothing).
     var inflight = 0
-    if not cpu.halt_wake:
+    # An interrupt preempting an HLE BIOS routine whose remainder is parked
+    # (hle_charge_body_interruptible) is taken at the caller's next
+    # instruction, but the console takes it inside BIOS code, whose
+    # one-cycle fetch the entry overlaps: nothing in flight on the gamepak.
+    # tools/biosdrv/lz77i.c (Thumb caller in the cartridge, WAITCNT 0x4317,
+    # a Timer 1 IRQ every 1000/3000 cycles): 0.85 cycles long per IRQ with
+    # the gamepak's in-flight fetch, within 2 cycles a call without it.
+    let hle_body = cpu.halt_resume_charge != 0 and not cpu.halt_resume_pop and
+                   lr - 4 == cpu.halt_resume_addr
+    if not cpu.halt_wake and not hle_body:
       let page = int(bits_range(lr, 24, 27))
       if page in 8..13:
         let bus = cpu.gba.bus
@@ -982,6 +991,15 @@ proc tick*(cpu: CPU) =
         if hot: cpu.gba.bus.rom_hot = true
       cpu.halt_resume_charge = int32(remain)
       if remain != 0: return
+      if not cpu.halt_resume_pop:
+        # The routine's end is its return to the caller, which flushes the
+        # gamepak fetch stream as the uninterrupted SWI's does (hle_swi); the
+        # stream the preempting handler's return left must not carry on
+        # into the caller's code. tools/biosdrv/lz77i.c, Thumb caller in
+        # the cartridge: 2 cycles short a preempted call without this,
+        # exact with it.
+        cpu.gba.bus.rom_hot = false
+        cpu.gba.bus.rom_next_addr = 1
       # Dispatcher exit path: pop the caller's r12 from its SVC-stack slot.
       cpu.r[12] = cpu.gba.bus.read_word_internal(cpu.svc_sp() - 8)
       if cpu.halt_resume_pop:
