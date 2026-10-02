@@ -439,9 +439,13 @@ test("a battery save the game wrote is there after a reload", { skip }, async ()
   // The 5 s autosave picks the write up.
   await until(page, async () => (await dbGet("save:save_write.nds"))?.[3] === 1);
   // A new page: the game from its library tile, booting on the stored save.
+  // With DS save states the tile would resume the last session instead
+  // (stateauto:, as for GB/GBA), so that snapshot goes first: this is about
+  // a second boot reading the battery save.
   await page.reload();
   await page.waitForFunction(() => document.body.classList.contains("runtime-ready"),
                              null, { timeout: 30000 });
+  await page.evaluate(() => dbDelete(autoStateKey("save_write.nds")));
   await page.locator(".home-tile, #hero-shot").locator("visible=true").first().click();
   await running(page);
   await framesPast(page, 30);
