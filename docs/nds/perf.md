@@ -151,6 +151,35 @@ the first non-quirky frame (the frontend's call) later. With checks off
 a bounds defect would surface a few instructions late. `savestate.nim`
 (state_error) and `read_file_bytes`/`load_nds` (IOError) stay outside.
 
+## Sequential fetch fast paths (bus9.nim `fetch_line9`, bus7.nim `fetch_page7`)
+
+Most opcode fetches follow the one before. For those, the timing model's
+answer is known in advance:
+
+- **ARM9**, inside the 32-byte line of the last fetch, when that fetch was
+  an ITCM fetch or an instruction-cache hit or fill (the line is now
+  `icache.last`) and the bytes are memory's (ITCM, the BIOS, main RAM with
+  nothing apart in its page): no cost, no tag change, no protection check
+  (not a branch target, not a page's first word), no loop edge; only
+  `last_data9`, `last_pc9` and `last_fetch9` move.
+- **ARM7**, inside the 4 KB page of the last fetch, in the BIOS (fetches
+  pass BIOSPROT: pc = address), main RAM with nothing apart, or WRAM: the
+  fixed sequential cost of that region; `last_data7` and `last_fetch7`
+  move.
+
+`fetch32`/`fetch16` test one line or page number and the sequential
+address, then read the opcode through a host pointer; everything else goes
+the old way (`fetch_slow9`/`fetch_slow7`), which sets the shortcut up for
+the next fetch. It is turned off by everything that changes what it
+assumes: any CP15 write (TCMs, enables, C7 commands), WRAMCNT, a main RAM
+page getting a memory side apart from the CPU's view (a dirty data-cache
+line, a kept instruction-cache line: `page_apart_now`, before the change)
+and a state load (it is not saved). Line fills and tag changes happen only
+on fetches outside the line, or C7 commands.
+`nds_testroms_test` ("sequential fetch fast paths") changes memory under a
+line mid-run, invalidates, dirties a data-cache line in the ARM7's code page
+and moves WRAMCNT under the ARM7; dropping any of the turn-offs fails it.
+
 ## Numbers
 
 Host instructions retired (`/usr/bin/time -l`), real BIOS unless noted,

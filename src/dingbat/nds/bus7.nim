@@ -284,12 +284,53 @@ proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.sync7()
   b.nds.write7(a, v, 32)
 
+proc fetch_page7(n: NDS; a: uint32) =
+  ## After a fetch from `a`: in the BIOS, main RAM with nothing apart from
+  ## memory (bus9.nim dc_*) and WRAM, a sequential fetch reads memory at a
+  ## fixed cost and changes nothing but the trackers, so the rest of the
+  ## 4 KB page is read from `fptr7` (fetch32/fetch16). Fetches pass BIOSPROT
+  ## (pc = address). WRAMCNT, a page going apart (page_apart_now) or a
+  ## state load turns this off.
+  n.fpage7 = NO_PAGE
+  case a shr 24
+  of 0x00:
+    if a >= 0x4000: return
+    n.fptr7 = cast[ptr UncheckedArray[uint8]](addr n.bios7[int(a and 0x3000)])
+  of 0x02:
+    let p = int((a and 0x3FFFFF) shr 12)
+    if n.tm.page_apart[p] != 0: return
+    n.fptr7 = cast[ptr UncheckedArray[uint8]](addr n.main_ram[p shl 12])
+  of 0x03:
+    var shared: bool
+    let i = n.wram7(a and not 0xFFF'u32, shared)
+    n.fptr7 = cast[ptr UncheckedArray[uint8]](
+      if shared: addr n.shared_wram[i] else: addr n.arm7_wram[i])
+  else: return
+  n.fseq7 = [code7(a shr 24, 16, true, n.slot7_t), code7(a shr 24, 32, true, n.slot7_t)]
+  n.fpage7 = a shr 12
+
+proc fetch_slow7(n: NDS; a: uint32; width: static int): uint32 {.noinline.} =
+  n.fetch_cost7(a, width)
+  result = n.read7(a, width)
+  if (a shr 12) != n.fpage7: n.fetch_page7(a)
+
 proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.fetch_cost7(a, 32)
-  b.nds.read7(a, 32)
+  let n {.cursor.} = b.nds
+  if likely((a shr 12) == n.fpage7 and a == n.last_fetch7 + 4):
+    # fetch_cost7's sequential case, then read7
+    n.last_data7 = NO_ADDR
+    n.last_fetch7 = a
+    n.wait7 += n.fseq7[1]
+    return cast[ptr uint32](addr n.fptr7[a and 0xFFF])[]
+  n.fetch_slow7(a, 32)
 proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.fetch_cost7(a, 16)
-  b.nds.read7(a, 16)
+  let n {.cursor.} = b.nds
+  if likely((a shr 12) == n.fpage7 and a == n.last_fetch7 + 2):
+    n.last_data7 = NO_ADDR
+    n.last_fetch7 = a
+    n.wait7 += n.fseq7[0]
+    return uint32(cast[ptr uint16](addr n.fptr7[a and 0xFFF])[])
+  n.fetch_slow7(a, 16)
 
 # Sound: channel sample fetch and capture stores (io/spu.nim). No CPU clock
 # sync -- they run inside the evSpuSample dispatch.

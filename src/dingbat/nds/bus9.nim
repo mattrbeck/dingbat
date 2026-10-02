@@ -167,7 +167,9 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
         let idx = int(o - 0x240) + i
         case idx
         of 0..6: n.gpu.vram.write_cnt(VramBank(idx), b)
-        of 7: n.wramcnt = b and 3
+        of 7:
+          n.wramcnt = b and 3
+          n.fetch_paths_off()
         of 8: n.gpu.vram.write_cnt(vbH, b)
         of 9: n.gpu.vram.write_cnt(vbI, b)
         else: discard
@@ -248,6 +250,7 @@ proc ic_keep(n: NDS; line: int) {.noinline.} =
       else:
         copyMem(addr n.tm.iline[i].code[0], addr n.main_ram[line * 32], 32)
       n.tm.iline[i].kept = true
+      n.page_apart_now(line shr 7)
       inc n.tm.page_apart[line shr 7]
       inc n.idle_epoch
 
@@ -271,6 +274,7 @@ proc dc_shadow(n: NDS; slot: int) =
             addr n.main_ram[int(n.tm.dline[slot].line1 - 1) * 32], 32)
     n.tm.dline[slot].shadowed = true
     inc n.tm.shadows
+    n.page_apart_now(int(n.tm.dline[slot].line1 - 1) shr 7)
     inc n.tm.page_apart[int(n.tm.dline[slot].line1 - 1) shr 7]
 
 proc dc_drop(n: NDS; slot: int; write_back: bool) =
@@ -647,27 +651,66 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.sync9()
   b.nds.write9(a, v, 32, true)
 
-proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
-  let n {.cursor.} = b.nds
-  if n.fetch_cost9(a, 4): return 0
-  if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
+proc fetch_line9(n: NDS; a: uint32) =
+  ## After a fetch from `a` that did not abort: when it was an ITCM fetch
+  ## or an instruction-cache hit (the line is now `icache.last`) whose bytes
+  ## are memory's (ITCM, main RAM with nothing kept apart, the BIOS), the
+  ## rest of the line is sequential fetches that cost nothing and change
+  ## nothing but the trackers: `fetch32`/`fetch16` read them from `fptr9`.
+  ## A CP15 write, WRAMCNT, a page going apart (page_apart_now) or a state
+  ## load turns this off; line fills and tag changes only come from fetches
+  ## outside the line, and C7 commands, which are CP15 writes.
+  n.fline9 = NO_PAGE
+  if n.cp15.itcm_enabled and a < n.cp15.itcm_size:
+    n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.itcm[int(a and 0x7FE0)])
+  elif n.tm.ic_on and n.tm.code_cachable(a):
+    if (a shr 24) == 0x02:
+      if n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0: return
+      n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.main_ram[int(a and 0x3FFFE0)])
+    elif a >= 0xFFFF0000'u32:
+      n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.bios9[int(a and 0xFE0)])
+    else: return
+  else: return
+  n.fline9 = a shr 5
+
+proc fetch_slow9(n: NDS; a: uint32; size: static uint32): uint32 {.noinline.} =
+  n.fline9 = NO_PAGE
+  if n.fetch_cost9(a, size): return 0
+  n.fetch_line9(a)
+  template rd(s: seq[uint8]; i: int): uint32 =
+    when size == 4: rd32(s, i) else: rd16(s, i)
+  if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd(n.itcm, int(a and 0x7FFF))
   if (a shr 24) == 0x02:
     # code reads memory, not the data cache, or a line the instruction
     # cache kept (either makes the page `apart`)
-    if unlikely(n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0): return n.ic_code(a, 32)
-    return rd32(n.main_ram, int(a and 0x3FFFFF))
-  if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
-  n.ic_code(a, 32)
+    if unlikely(n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0): return n.ic_code(a, int(size) * 8)
+    return rd(n.main_ram, int(a and 0x3FFFFF))
+  if a >= 0xFFFF0000'u32: return rd(n.bios9, int(a and 0xFFF))
+  n.ic_code(a, int(size) * 8)
+
+template fetch_fast9(n: NDS; a: uint32; size: static uint32): bool =
+  ## A sequential fetch inside the line `fetch_line9` set up: what
+  ## fetch_cost9 would do there (no cost, no tag change, no protection
+  ## check: not a branch target nor a page's first word).
+  (a shr 5) == n.fline9 and a == n.last_pc9 + size
+
+proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  if likely(n.fetch_fast9(a, 4)):
+    n.last_data9 = NO_ADDR
+    n.last_pc9 = a
+    n.last_fetch9 = a
+    return cast[ptr uint32](addr n.fptr9[a and 31])[]
+  n.fetch_slow9(a, 4)
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
-  if n.fetch_cost9(a, 2): return 0
-  if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
-  if (a shr 24) == 0x02:
-    if unlikely(n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0): return n.ic_code(a, 16)
-    return rd16(n.main_ram, int(a and 0x3FFFFF))
-  if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
-  n.ic_code(a, 16)
+  if likely(n.fetch_fast9(a, 2)):
+    n.last_data9 = NO_ADDR
+    n.last_pc9 = a
+    n.last_fetch9 = a and not 3'u32
+    return uint32(cast[ptr uint16](addr n.fptr9[a and 31])[])
+  n.fetch_slow9(a, 2)
 
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()
 proc irq_wake*(b: Arm9Bus): bool {.inline.} =
@@ -685,6 +728,7 @@ proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
 proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   let n {.cursor.} = b.nds
   inc n.idle_epoch    # incl. cache clean/invalidate, which the ARM7 can see in memory
+  n.fline9 = NO_PAGE  # TCMs, cache enables and contents, instruction-cache tags
   template tables(c: Cp15): untyped =
     (c.dcache_cfg, c.icache_cfg, c.wbuf_cfg, c.data_perm, c.code_perm, c.prot_regions)
   let ctl_before = n.cp15.control
