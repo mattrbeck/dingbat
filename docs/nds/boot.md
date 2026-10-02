@@ -147,7 +147,16 @@ firmware dump**; dingbat cannot synthesize one.
 ## Left
 
 - The BIOS phase is 2 frames slower than the reference's (logo at frame 86
-  vs 84); unknown which timing (SPI flash, card gaps, BIOS code timing).
+  line 16 vs 84). The ARM7 BIOS computes for the whole 1.4 s (KEY1 setup,
+  the secure-area delays, firmware decryption, two ~100 ms CRC16 passes)
+  while the ARM9 waits, so ARM7 speed decides it. arm7_timing shows the
+  reference's ARM7 main-RAM data accesses 3 cycles cheaper than GBATEK's
+  table (ours follows GBATEK); with its costs our logo comes 0.7 frames
+  earlier. The other ~1.3 frames are not found: every other ARM7 access
+  kind measured (WRAM, BIOS-table CRC, branches, MUL, calls) matches the
+  reference. Both charge 3 cycles per ARM7 SUB/BGT pass where GBATEK's
+  WaitByLoop table says 4; following GBATEK there would put our logo at
+  frame 90 (docs/nds/accuracy.md).
 - Assumed, unverified: a KEY2 side only advances while it encrypts; a
   transfer's bytes are all clocked at its start; the card's HIGH-Z first
   dummy byte is not modelled; reset values above.
