@@ -161,7 +161,7 @@ test("SoulSilver: an imported save continues, saves in game, and continues after
   const { page, errors } = await newPage(ctx);
   // No dumps: HLE BIOS and the built-in firmware.
   const dumps = await page.evaluate(async () => (await ndsBiosFiles()));
-  assert.deepEqual(dumps, { bios9: null, bios7: null, firmware: null });
+  assert.deepEqual(dumps, { bios9: null, bios7: null, firmware: null, fwBase: "built-in" });
   await choose(page, "#home-load, #lib-add, #home-solo-add", ROM);
   await running(page);
   await page.evaluate(() => setNdsLayout("stack"));
@@ -178,18 +178,21 @@ test("SoulSilver: an imported save continues, saves in game, and continues after
   await press(page, "DOWN", 1560, 30);
   const f = (await frame(page)) + 60;
   await touch(page, 124, 76, f);
+  // Done when the chip no longer holds the imported image and the overworld
+  // is back: the overworld alone can show before the write has finished.
+  const importedSig = await page.evaluate((b) => saveSignature(new Uint8Array(b)), [...imported]);
+  const chipSig = () => page.evaluate(() => saveSignature(ndsSaveBytes()));
   let saved = null;
   for (let i = 0, at = f + 60; i < 60; i++, at += 60) {
     await press(page, "A", at);
     await framesPast(page, at + 40);
     saved = await shot(page, "ss-2-saved");
-    if (i >= 4 && saved.green > 0.25) break;
+    if (i >= 4 && saved.green > 0.25 && (await chipSig()) !== importedSig) break;
   }
   assert.ok(saved.green > 0.25, "the save finished, back in the overworld: " + saved.green);
   await page.evaluate(() => persistSave(currentRomName, currentOriginalName));
   const after = await stored(page);
   assert.ok(after && after.len === 512 * 1024, "a 512K FLASH image is stored: " + after?.len);
-  const importedSig = await page.evaluate((b) => saveSignature(new Uint8Array(b)), [...imported]);
   assert.notEqual(after.sig, importedSig, "the game wrote its save");
 
   // A new page: the game from its library tile, on the stored save.
