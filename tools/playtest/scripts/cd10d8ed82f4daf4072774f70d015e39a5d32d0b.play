@@ -2,19 +2,22 @@
 @file Boktai 2 - Solar Boy Django (U).gba
 @game U32E
 @chip EEPROM + RTC + solar sensor
-@frozen mgba,nba
+@frozen dingbat-bios,mgba,nba
 @save skip: no save in the pause menu (map / items / valuables / status / config / sleep); the first save is past the opening valley in town, not reached. The EEPROM written here holds only the sensor/time/region settings.
 
 # Solar sensor notice, sensor calibration, time setting (START = END),
 # region (Eastern 4, Washington D.C.), Konami logo, title, GAME START /
 # start from beginning, no Boktai password, name "DjangoA", A through the
 # opening with Otenko, the pause-menu tabs, walk up the Undead valley path.
-# Authored without dingbat-bios: dingbat-bios hangs on the REGION SETTING
-# screen. After START on the time setting (f1398) it draws the region list
-# (f1518) but never reacts to any key afterwards (DOWN, A, B at f1498..
-# f2706 all ignored, screen stays on the list), while mgba and nba take A
-# at f1764 and show the KONAMI logo by f2064. Same with --rtc set and with
-# the RTC unset; likely the solar-sensor/RTC GPIO the region screen polls.
+# Authored on mgba and nba while dingbat froze on the REGION SETTING screen
+# (no key taken from f1498 on) at some clock times, the default 00:00 among
+# them: a timer interrupt raised inside a DMA3 burst was delivered a second
+# time with no source, and the game's handler jumped to a null vector
+# (docs/playtest-bugs.md section 27). Since that fix dingbat and
+# dingbat-bios replay this timeline on the references' screens at every
+# checkpoint (title: 4 frames behind mgba, 7 ahead of nba), so with
+# dingbat-bios in the lockstep the slowest emulator, and the 604 resolved
+# for 'PUSH START', stay nba's.
 # nba's RTC is the host clock (time setting shows the real date, status
 # screen TIME differs from mgba), so screens with the clock differ.
 [new]
