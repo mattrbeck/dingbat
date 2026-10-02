@@ -505,6 +505,30 @@ when defined(biosdrvtrace):
   # ... and the address of every instruction about to execute
   var bdPcHook*: proc(pc: uint32) {.closure.}
 
+when defined(switrace):
+  # -d:switrace: each SWI's entry and return cycle, to SWTRACE (a file)
+  var swtStack: seq[(uint32, uint32, int64, uint32, uint32, uint32)]
+  var swtFile: File
+  var swtFrame* = 0
+  var swtBase* = 0'i64
+  proc swt_now(cpu: CPU): int64 =
+    swtBase + int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
+  proc swt_swi*(cpu: CPU; num: uint32) =
+    let ret = cpu.r[15] - (if cpu.cpsr.thumb: 2'u32 else: 4'u32)
+    if ret < 0x4000'u32: return  # the stub BIOS's own traps
+    if swtStack.len > 0 and swtStack[^1][0] == ret: return  # a continuation
+    swtStack.add (ret, num, cpu.swt_now(), cpu.r[0], cpu.r[1], cpu.r[2])
+  proc swt_pc*(cpu: CPU; pc: uint32) =
+    if swtStack.len == 0 or pc != swtStack[^1][0]: return
+    if cpu.halt_resume_charge != 0: return
+    let e = swtStack.pop()
+    if swtFile == nil:
+      discard swtFile.open(getEnv("SWTRACE", "/tmp/swtrace.txt"), fmWrite)
+    swtFile.writeLine("f" & $swtFrame & " swi " & toHex(e[1], 2) & " t0=" & $e[2] &
+      " dur=" & $(cpu.swt_now() - e[2]) & " r0=" & toHex(e[3], 8) & " r1=" &
+      toHex(e[4], 8) & " r2=" & toHex(e[5], 8) & " ret=" & toHex(e[0], 8))
+    swtFile.flushFile()
+
 proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
   ## With a real BIOS image mapped (hle_after_bios) the sound-driver SWIs run
   ## the image's own driver: their HLE continues through stub-BIOS code.

@@ -122,9 +122,11 @@ proc irq_enter*(cpu: CPU) =
       block:
         var f: File
         if f.open(getEnv("IRQLOG", "/tmp/irqlog.txt"), fmAppend):
-          f.writeLine("irq now=" & $(cpu.gba.bus.sched.cycles + CycleCount(cpu.gba.bus.cycles)) &
+          f.writeLine("irq now=" & $((when defined(switrace): swtBase else: 0'i64) +
+            int64(cpu.gba.bus.sched.cycles) + int64(cpu.gba.bus.cycles)) &
             " pc=" & toHex(cpu.r[15], 8) & " wake=" & $cpu.halt_wake &
-            " vcount=" & $cpu.gba.ppu.vcount & " if=" & toHex(uint16(cpu.gba.interrupts.reg_if), 4))
+            " vcount=" & $cpu.gba.ppu.vcount & " if=" & toHex(uint16(cpu.gba.interrupts.reg_if), 4) &
+            (when defined(switrace): " f=" & $swtFrame else: ""))
           f.close()
     # Taken between an LDM^ and its next instruction: the entry is that
     # instruction, and it reads none of the glitched registers.
@@ -1025,6 +1027,8 @@ proc tick*(cpu: CPU) =
         gsProbeIn = inIw
     when defined(pcprofile):
       let prof_region = bits_range(cpu.r[15], 24, 27)
+    when defined(switrace):
+      cpu.swt_pc(cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32))
     when defined(biosdrvtrace):
       if bdPcHook != nil:
         bdPcHook(cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32))
@@ -1035,7 +1039,9 @@ proc tick*(cpu: CPU) =
       it_init()
       block:
         let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
-        if not it_on and cur >= it_lo and cur <= it_hi: it_on = true
+        if not it_on and cur >= it_lo and cur <= it_hi:
+          if it_skip > 0: dec it_skip
+          else: it_on = true
         let now = int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
         itl("I " & toHex(cur, 8) & " t=" & $now & " vc=" & $cpu.gba.ppu.vcount &
             " dot=" & $(now - cpu.gba.ppu.line_start_cycle))

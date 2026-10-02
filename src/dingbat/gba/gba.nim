@@ -31,12 +31,14 @@ when defined(itrace):
   # and runs ITRACE_N lines; timer, interrupt and DMA events interleave.
   var it_lo*, it_hi*: uint32
   var it_left* = -1
+  var it_skip* = 0
   var it_on*: bool
   proc it_init*() =
     if it_left == -1:
       it_lo = uint32(parseHexInt(getEnv("ITRACE_LO", "0")))
       it_hi = uint32(parseHexInt(getEnv("ITRACE_HI", "0")))
       it_left = parseInt(getEnv("ITRACE_N", "400"))
+      it_skip = parseInt(getEnv("ITRACE_SKIP", "0"))
   proc itl*(s: string) =
     if it_on and it_left > 0:
       dec it_left
@@ -2035,6 +2037,7 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   # still stands (the GB's gb_rebase).
   ch4_advance_divisor(gba.apu.channel4, gba)
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
+  when defined(switrace): (swtBase += int64(base); inc swtFrame)
   gba.apu.apu_rebase(base)
   # FIFO transfer stamps and the MP2K HLE's pending slot hooks are absolute
   # cycles too (mp2k.nim measure_latency)
