@@ -191,6 +191,103 @@ proc shared_wram9(n: NDS; a: uint32; ok: var bool): int {.inline.} =
   of 2: int(a and 0x3FFF)
   else: ok = false; 0
 
+# --- ARM9 data cache contents (timing.nim DcLine) ------------------------
+
+template dc_through(n: NDS; a: uint32): bool =
+  ## This ARM9 data access goes through the data cache (DMA and code
+  ## fetches never do; uncached regions and a disabled cache neither).
+  not n.dma9.dma_access and n.tm.dc_on and n.tm.data_cachable(a)
+
+proc dc_shadow(n: NDS; slot: int) =
+  ## Keep the memory side of a cached line apart from the CPU's copy.
+  if not n.tm.dline[slot].shadowed:
+    copyMem(addr n.tm.dline[slot].ram[0],
+            addr n.main_ram[int(n.tm.dline[slot].line1 - 1) * 32], 32)
+    n.tm.dline[slot].shadowed = true
+    inc n.tm.shadows
+
+proc dc_drop(n: NDS; slot: int; write_back: bool) =
+  ## The line leaves the data cache. Written back (eviction, clean and
+  ## invalidate) a dirty line's CPU copy becomes memory; otherwise memory's
+  ## side wins and the CPU's unwritten stores are lost (invalidate).
+  let line1 = n.tm.dline[slot].line1
+  if line1 == 0: return
+  if n.tm.dline[slot].shadowed:
+    if not (write_back and n.tm.dline[slot].dirty):
+      copyMem(addr n.main_ram[int(line1 - 1) * 32], addr n.tm.dline[slot].ram[0], 32)
+    dec n.tm.shadows
+  n.tm.slot_of[line1 - 1] = 0
+  n.tm.dline[slot] = DcLine()
+
+proc dc_clean(n: NDS; slot: int) =
+  ## Write a dirty line back; it stays cached.
+  if n.tm.dline[slot].dirty:
+    n.tm.dline[slot].dirty = false
+    if n.tm.dline[slot].shadowed:
+      n.tm.dline[slot].shadowed = false
+      dec n.tm.shadows
+
+proc dc_fill(n: NDS; a: uint32) =
+  ## A data-cache line fill replaced slot `dcache.victim` with `a`'s line.
+  let slot = n.tm.dcache.victim
+  n.dc_drop(slot, true)
+  if (a shr 24) == 2:
+    let line = (a and 0x3FFFFF) shr 5
+    let other = int(n.tm.slot_of[line])
+    if other != 0:
+      # the same RAM line cached under another mirror: one copy kept (Assumed)
+      n.dc_drop(other - 1, true)
+      n.tm.dcache.clear_slot(other - 1)
+    n.tm.dline[slot].line1 = line + 1
+    n.tm.slot_of[line] = uint8(slot + 1)
+
+proc dc_mem_read(n: NDS; i: int; width: static int): uint32 =
+  ## Main RAM as memory holds it (other masters, uncached accesses, code).
+  let slot = int(n.tm.slot_of[i shr 5]) - 1
+  if slot >= 0 and n.tm.dline[slot].shadowed:
+    let j = i and 31
+    when width == 32:
+      uint32(n.tm.dline[slot].ram[j]) or (uint32(n.tm.dline[slot].ram[j + 1]) shl 8) or
+        (uint32(n.tm.dline[slot].ram[j + 2]) shl 16) or (uint32(n.tm.dline[slot].ram[j + 3]) shl 24)
+    elif width == 16:
+      uint32(n.tm.dline[slot].ram[j]) or (uint32(n.tm.dline[slot].ram[j + 1]) shl 8)
+    else: uint32(n.tm.dline[slot].ram[j])
+  else:
+    when width == 32: rd32(n.main_ram, i)
+    elif width == 16: rd16(n.main_ram, i)
+    else: uint32(n.main_ram[i])
+
+proc dc_write(n: NDS; i: int; v: uint32; width: static int; through, write_back: bool) =
+  ## A store to a main RAM line the data cache holds. Through the cache:
+  ## write-back marks the line dirty (memory keeps its old side),
+  ## write-through updates both sides. Past the cache (DMA, the ARM7, an
+  ## uncached mirror, the cache off): memory's side only -- the CPU keeps
+  ## reading its stale copy until the line is invalidated or evicted.
+  let slot = int(n.tm.slot_of[i shr 5]) - 1
+  template put(p: ptr UncheckedArray[uint8]) =
+    p[0] = uint8(v)
+    when width >= 16: p[1] = uint8(v shr 8)
+    when width == 32:
+      p[2] = uint8(v shr 16); p[3] = uint8(v shr 24)
+  let cpu = cast[ptr UncheckedArray[uint8]](addr n.main_ram[i])
+  if through:
+    if write_back or n.tm.dline[slot].dirty:
+      if not n.tm.dline[slot].dirty:
+        n.dc_shadow(slot)
+        n.tm.dline[slot].dirty = true
+      put(cpu)
+    else:
+      put(cpu)
+      if n.tm.dline[slot].shadowed:
+        put(cast[ptr UncheckedArray[uint8]](addr n.tm.dline[slot].ram[i and 31]))
+  else:
+    n.dc_shadow(slot)
+    put(cast[ptr UncheckedArray[uint8]](addr n.tm.dline[slot].ram[i and 31]))
+
+proc dc_invalidate_all(n: NDS) =
+  for slot in 0 ..< n.tm.dline.len: n.dc_drop(slot, false)
+  n.tm.dcache.invalidate()
+
 proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
   ## Charge a CPU data access outside the TCMs (timing.nim); DMA's own
   ## accesses are not charged.
@@ -204,6 +301,7 @@ proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
         n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq, n.slot9_t))
     elif not n.tm.dcache.lookup(a, true):
       n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
+      n.dc_fill(a)
     return
   if write and top == 2 and n.tm.data_buffered(a):
     n.wait9 += WBUF_WRITE
@@ -259,7 +357,10 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     if (a shr 24) != 0x02 and n.pu_check9(a, 1): return 0
     n.charge9(a, width, false)
   case a shr 24
-  of 0x02: rd(n.main_ram, int(a and 0x3FFFFF))
+  of 0x02:
+    let i = int(a and 0x3FFFFF)
+    if unlikely(n.tm.shadows > 0) and not n.dc_through(a): n.dc_mem_read(i, width)
+    else: rd(n.main_ram, i)
   of 0x03:
     var ok: bool
     let i = n.shared_wram9(a, ok)
@@ -317,7 +418,11 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
     if (a shr 24) != 0x02 and n.pu_check9(a, 2): return
     n.charge9(a, width, true)
   case a shr 24
-  of 0x02: wr(n.main_ram, int(a and 0x3FFFFF))
+  of 0x02:
+    let i = int(a and 0x3FFFFF)
+    if unlikely(n.tm.slot_of[i shr 5] != 0):
+      n.dc_write(i, v, width, n.dc_through(a), n.tm.data_buffered(a))
+    else: wr(n.main_ram, i)
   of 0x03:
     var ok: bool
     let i = n.shared_wram9(a, ok)
@@ -398,7 +503,10 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
   if n.fetch_cost9(a, 4): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd32(n.itcm, int(a and 0x7FFF))
-  if (a shr 24) == 0x02: return rd32(n.main_ram, int(a and 0x3FFFFF))
+  if (a shr 24) == 0x02:
+    # code reads memory, not the data cache
+    if unlikely(n.tm.shadows > 0): return n.dc_mem_read(int(a and 0x3FFFFF), 32)
+    return rd32(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd32(n.bios9, int(a and 0xFFF))
   n.read9(a, 32)
 
@@ -406,7 +514,9 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
   if n.fetch_cost9(a, 2): return 0
   if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd16(n.itcm, int(a and 0x7FFF))
-  if (a shr 24) == 0x02: return rd16(n.main_ram, int(a and 0x3FFFFF))
+  if (a shr 24) == 0x02:
+    if unlikely(n.tm.shadows > 0): return n.dc_mem_read(int(a and 0x3FFFFF), 16)
+    return rd16(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd16(n.bios9, int(a and 0xFFF))
   n.read9(a, 16)
 
@@ -442,11 +552,28 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
       n.tm.update_control(n.cp15)
       n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
   of 7:
-    # cache maintenance (GBATEK "ARM CP15 Cache Control"): only the tags exist
+    # cache maintenance (GBATEK "ARM CP15 Cache Control"): the instruction
+    # cache is tags only; data-cache lines by address (op2 1) or set/index
+    # (op2 2): C6 invalidate, C10 clean, C14 clean and invalidate
+    template dslot(): int =
+      (if op2 == 1: n.tm.dcache.find_slot(v) elif op2 == 2: n.tm.dcache.set_index_slot(v) else: -1)
     case cm
     of 5: (if op2 == 0: n.tm.icache.invalidate() elif op2 == 1: n.tm.icache.invalidate_line(v))
-    of 6: (if op2 == 0: n.tm.dcache.invalidate() elif op2 == 1: n.tm.dcache.invalidate_line(v))
-    of 14: (if op2 == 1: n.tm.dcache.invalidate_line(v))
+    of 6:
+      if op2 == 0: n.dc_invalidate_all()
+      elif op2 == 1:
+        let slot = dslot()
+        if slot >= 0:
+          n.dc_drop(slot, false)
+          n.tm.dcache.clear_slot(slot)
+    of 10:
+      let slot = dslot()
+      if slot >= 0: n.dc_clean(slot)
+    of 14:
+      let slot = dslot()
+      if slot >= 0:
+        n.dc_drop(slot, true)
+        n.tm.dcache.clear_slot(slot)
     else: discard
   else: discard
   n.arm9.vector_base = n.cp15.vector_base()

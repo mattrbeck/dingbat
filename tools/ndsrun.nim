@@ -471,7 +471,7 @@ when isMainModule:
     echo "cp15 control=", toHex(n.cp15.control, 8), " icache=", n.tm.ic_on, " dcache=", n.tm.dc_on,
          " regions=", n.cp15.prot_regions.mapIt(toHex(it, 8)).join(","),
          " ic=", toHex(n.cp15.icache_cfg, 2), " dc=", toHex(n.cp15.dcache_cfg, 2),
-         " wb=", toHex(n.cp15.wbuf_cfg, 2)
+         " wb=", toHex(n.cp15.wbuf_cfg, 2), " dc_lines_apart=", n.tm.shadows
   echo "arm9 ", n.arm9.reg_dump()
   echo "arm7 ", n.arm7.reg_dump()
   for (is7, a, len, file) in dumps:

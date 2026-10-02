@@ -140,7 +140,10 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
       rd(n.bios7, int(a))
     else:
       when width == 32: 0xFFFF_FFFF'u32 elif width == 16: 0xFFFF'u32 else: 0xFF'u32
-  of 0x02: rd(n.main_ram, int(a and 0x3FFFFF))
+  of 0x02:
+    # memory's side of anything the ARM9's data cache holds (bus9.nim dc_*)
+    if unlikely(n.tm.shadows > 0): n.dc_mem_read(int(a and 0x3FFFFF), width)
+    else: rd(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
     var shared: bool
     let i = n.wram7(a, shared)
@@ -179,7 +182,10 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
     elif width == 16: wr16(s, i, v)
     else: s[i] = uint8(v)
   case a shr 24
-  of 0x02: wr(n.main_ram, int(a and 0x3FFFFF))
+  of 0x02:
+    let i = int(a and 0x3FFFFF)
+    if unlikely(n.tm.slot_of[i shr 5] != 0): n.dc_write(i, v, width, false, false)
+    else: wr(n.main_ram, i)
   of 0x03:
     var shared: bool
     let i = n.wram7(a, shared)
