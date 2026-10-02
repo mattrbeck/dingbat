@@ -270,6 +270,7 @@ proc access_cycles*(b: Arm7Bus): int64 {.inline.} =
   b.nds.wait7 = 0
 proc cp15_read*(b: Arm7Bus; op1, cn, cm, op2: uint32): uint32 = 0
 proc cp15_write*(b: Arm7Bus; op1, cn, cm, op2, v: uint32) = discard
+proc data_cached*(b: Arm7Bus; a: uint32): bool = false   ## no data cache on the ARM7
 
 proc swi_hook*(b: Arm7Bus; comment: uint32): bool =
   ## HLE BIOS: true = the SWI ran in Nim (hle_bios.nim), skip the vector.

@@ -39,7 +39,10 @@
 ## write-back line the CPU has written (dirty), or a line DMA, the ARM7 or
 ## an uncached access wrote behind the cache's back -- keeps the memory
 ## side in `ram`. Other masters, uncached accesses and code fetches read
-## that; cleaning a dirty line or evicting it writes the CPU's copy back
+## that, and so does an access through another mirror of the line (a
+## different cache line, which misses); a RAM line is cached under one
+## mirror at a time (filling another writes the first back: Assumed).
+## Cleaning a dirty line or evicting it writes the CPU's copy back
 ## (the whole line: per-half dirty bits are not modelled, Assumed),
 ## invalidating it discards the CPU's copy (GBATEK "ARM CP15 Protection
 ## Unit" C3 write-back / write-through, "Cache Control" C7 clean and
@@ -68,6 +71,7 @@ type
   DcLine* = object
     ## A data-cache slot holding a main RAM line (bus9.nim dc_*)
     line1*: uint32          ## main RAM line index + 1 (0 = none)
+    tag1*: uint32           ## the address line it is cached under + 1 (a mirror)
     dirty*: bool            ## written by the CPU in write-back mode
     shadowed*: bool         ## `ram` holds the memory side
     ram*: array[32, uint8]

@@ -708,6 +708,37 @@ proc misc_cases() =
       c.windows = @[(scratch, 2)]
       c.expect_regs = @[(0, 0'u32)]
       run(c)
+    if arm9:
+      # with the data cache over the probe the BIOS reports 8 MB (GBATEK
+      # "IsDebugger": "Fails on ARM9 when cache is enabled")
+      var c = base_case("IsDebugger, data cache on", arm9, 0x0F)
+      c.ignore = {1, 3}     # scratch registers: the BIOS leaves r1 = 3 on this path
+      c.setup = proc (n: NDS) =
+        let b = Arm9Bus(nds: n)
+        b.cp15_write(0, 6, 0, 0, 0x0400_0033'u32)   # I/O
+        b.cp15_write(0, 6, 1, 0, 0x0200_002F'u32)   # main RAM and mirrors, 16 MB
+        b.cp15_write(0, 6, 2, 0, 0xFFFF_001D'u32)   # BIOS
+        for r in 3'u32 .. 7: b.cp15_write(0, 6, r, 0, 0)   # the firmware's others off
+        b.cp15_write(0, 2, 0, 0, 0x02)              # D-cachable: main RAM
+        b.cp15_write(0, 3, 0, 0, 0x02)              # write-back
+        b.cp15_write(0, 5, 0, 2, 0x333)
+        b.cp15_write(0, 5, 0, 3, 0x333)
+        b.cp15_write(0, 1, 0, 0, n.cp15.control or 1 or 4)
+      c.expect_regs = @[(0, 1'u32)]
+      run(c)
+      # only the mirror below cached (BlocksDS's regions: 4 MB cached at
+      # 0x02000000, the 16 MB around it not)
+      var c2 = c
+      c2.name = "IsDebugger, data cache on the mirror only"
+      c2.setup = proc (n: NDS) =
+        c.setup(n)
+        let b = Arm9Bus(nds: n)
+        b.cp15_write(0, 6, 3, 0, 0x0200_002B'u32)   # region 3: 4 MB at 0x02000000
+        b.cp15_write(0, 2, 0, 0, 0x08)              # cached; region 1 (16 MB) not
+        b.cp15_write(0, 3, 0, 0, 0x08)
+        b.cp15_write(0, 5, 0, 2, 0x3333)
+        b.cp15_write(0, 5, 0, 3, 0x3333)
+      run(c2)
     for count in vals([1'u32, 100, 0x1000]):
       var c = base_case("WaitByLoop(" & $count & ")", arm9, 0x03)
       c.regs[0] = count

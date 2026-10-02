@@ -198,6 +198,13 @@ template dc_through(n: NDS; a: uint32): bool =
   ## fetches never do; uncached regions and a disabled cache neither).
   not n.dma9.dma_access and n.tm.dc_on and n.tm.data_cachable(a)
 
+template dc_hit(n: NDS; a: uint32; slot: int): bool =
+  ## The access goes through the cache and finds the line under this very
+  ## address: another mirror of the same RAM line is a different cache line
+  ## (GBATEK "IsDebugger": its mirror probe "fails on ARM9 when cache is
+  ## enabled"), so it misses and reaches memory.
+  n.dc_through(a) and n.tm.dline[slot].tag1 == (a shr 5) + 1
+
 template dc_apart(n: NDS; i: int): bool =
   ## Main RAM byte `i`'s line has a memory side apart from the CPU's copy.
   n.tm.page_apart[i shr 12] != 0 and n.tm.slot_of[i shr 5] != 0 and
@@ -247,6 +254,7 @@ proc dc_fill(n: NDS; a: uint32) =
       n.dc_drop(other - 1, true)
       n.tm.dcache.clear_slot(other - 1)
     n.tm.dline[slot].line1 = line + 1
+    n.tm.dline[slot].tag1 = (a shr 5) + 1
     n.tm.slot_of[line] = uint8(slot + 1)
 
 proc dc_mem_read(n: NDS; i: int; width: static int): uint32 =
@@ -367,7 +375,8 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
   case a shr 24
   of 0x02:
     let i = int(a and 0x3FFFFF)
-    if unlikely(n.dc_apart(i)) and not n.dc_through(a): n.dc_mem_read(i, width)
+    if unlikely(n.dc_apart(i)) and not n.dc_hit(a, int(n.tm.slot_of[i shr 5]) - 1):
+      n.dc_mem_read(i, width)
     else: rd(n.main_ram, i)
   of 0x03:
     var ok: bool
@@ -429,9 +438,9 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
   of 0x02:
     let i = int(a and 0x3FFFFF)
     let slot = int(n.tm.slot_of[i shr 5])
-    if likely(slot == 0) or (n.tm.dline[slot - 1].dirty and n.dc_through(a)):
+    if likely(slot == 0) or (n.tm.dline[slot - 1].dirty and n.dc_hit(a, slot - 1)):
       wr(n.main_ram, i)       # uncached, or a store into an already dirty line
-    else: n.dc_write(i, v, width, n.dc_through(a), n.tm.data_buffered(a))
+    else: n.dc_write(i, v, width, n.dc_hit(a, slot - 1), n.tm.data_buffered(a))
   of 0x03:
     var ok: bool
     let i = n.shared_wram9(a, ok)
@@ -590,6 +599,10 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   if n.cp15.halt_request:
     n.cp15.halt_request = false
     n.arm9.halted = true
+
+proc data_cached*(b: Arm9Bus; a: uint32): bool =
+  ## The data cache is on and covers `a` (HLE BIOS: IsDebugger).
+  b.nds.tm.dc_on and b.nds.tm.data_cachable(a)
 
 proc swi_hook*(b: Arm9Bus; comment: uint32): bool =
   ## HLE BIOS: true = the SWI ran in Nim (hle_bios.nim), skip the vector.

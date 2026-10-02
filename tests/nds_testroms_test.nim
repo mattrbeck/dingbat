@@ -136,6 +136,7 @@ proc cache_on(n: NDS; write_back: bool) =
   b.cp15_write(0, 6, 0, 0, 0x0400_0033'u32)
   b.cp15_write(0, 6, 1, 0, 0x0200_002B'u32)
   b.cp15_write(0, 6, 2, 0, 0x0240_002B'u32)
+  for r in 3'u32 .. 7: b.cp15_write(0, 6, r, 0, 0)        # the firmware's others off
   b.cp15_write(0, 2, 0, 0, 0x02)                          # D-cachable: region 1
   b.cp15_write(0, 3, 0, 0, (if write_back: 0x02'u32 else: 0'u32))
   b.cp15_write(0, 5, 0, 2, 0x333)                         # data AP 3, regions 0-2
@@ -181,22 +182,48 @@ block data_cache_contents:
   c.write32(A, 0x6666_6666'u32)
   check Arm7Bus(nds: n2).read32(A) == 0x6666_6666'u32, "write-through updates memory too"
 
+proc blocksds_console(n: NDS): seq[string] =
+  ## The BlocksDS console: engine B BG0, tile = character - 32.
+  let b = Arm9Bus(nds: n)
+  let base = 0x0620_0000'u32 + ((b.read16(0x0400_1008'u32) shr 8) and 0x1F) * 0x800
+  for y in 0 ..< 24:
+    var r = ""
+    for x in 0 ..< 32:
+      let t = int(b.read16(base + uint32(y * 32 + x) * 2) and 0x3FF) + 32
+      r.add(if t in 32 .. 126: char(t) else: ' ')
+    result.add r.strip(leading = false)
+
+block data_cache_mirrors:
+  echo "ARM9 data cache: mirrors are separate lines"
+  let n = machine()
+  let b = Arm9Bus(nds: n)
+  n.cache_on(write_back = true)
+  b.cp15_write(0, 6, 1, 0, 0x0200_002F'u32)              # main RAM and its mirrors, 16 MB
+  const A = 0x0210_0000'u32
+  b.write32(A, 0x1111_1111'u32)                          # write miss: memory
+  discard b.read32(A)                                    # line filled under A
+  b.write32(A + 0x40_0000, 0x7777_7777'u32)              # the mirror misses: memory
+  check b.read32(A) == 0x1111_1111'u32, "a store through a mirror leaves the line under A stale"
+  check Arm7Bus(nds: n).read32(A) == 0x7777_7777'u32, "memory holds the mirror's store"
+
+block swi_calls_rom:
+  echo "BlocksDS system/swi_calls (HLE BIOS)"
+  var ok: bool
+  let n = load_rom("blocksds/tests/system__swi_calls.nds", ok)
+  if ok:
+    for f in 0 ..< 60: n.run_frame()
+    let rows = n.blocksds_console()
+    check "swiIsDebugger(): 1" in rows,
+          "swiIsDebugger() with the data cache on: 1 (GBATEK: \"always returns 8MB state\")"
+    check "swiDivide(2000, 7): 285" in rows and "swiSqrt(3000): 54" in rows, "Divide, Sqrt"
+
 block data_cache_ops_rom:
   echo "BlocksDS cache/data_cache_ops"
   var ok: bool
   let n = load_rom("blocksds/tests/cache__data_cache_ops.nds", ok)
   if ok:
     for f in 0 ..< 120: n.run_frame()
-    # the BlocksDS console: engine B BG0, tile = character - 32
-    let b = Arm9Bus(nds: n)
-    let base = 0x0620_0000'u32 + ((b.read16(0x0400_100A'u32 - 2) shr 8) and 0x1F) * 0x800
-    var rows: seq[string]
-    for y in 0 ..< 24:
-      var r = ""
-      for x in 0 ..< 32:
-        let t = int(b.read16(base + uint32(y * 32 + x) * 2) and 0x3FF) + 32
-        r.add(if t in 32 .. 126: char(t) else: ' ')
-      rows.add r.strip(leading = false)
+    let rows = n.blocksds_console()
     # the source's comment: the hardware's results
     let want = [(1, "Ones:    256    0    0"), (2, "Twoes:   256    0    0"),
                 (5, "Ones:    128  128    0"), (6, "Twoes:   128    0  128"),
