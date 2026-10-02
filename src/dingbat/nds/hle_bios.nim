@@ -368,12 +368,17 @@ proc hle_soft_reset[B](cpu: ArmCpu[B]) =
   ## SoftReset (00h): clear the BIOS RAM area, reset the stacks and r0-r12,
   ## lr/spsr of SVC and IRQ, enter System mode (IRQs on, FIQs off, as on
   ## the console) and `bx [return address]`.
-  ## The ARM9 also resets CP15 control to 0x12078 (caches flushed: no
-  ## cache model). GBATEK "BIOS Reset Functions".
+  ## The ARM9 also sets CP15 control to 0x12078 and invalidates both
+  ## caches, the data cache without cleaning it (GBATEK "BIOS Reset
+  ## Functions": "flushes caches"; the ARM9 BIOS's routine at 0xFFFF0778,
+  ## called from its SoftReset, writes control then C7,C5,0 and C7,C6,0
+  ## and drains the write buffer).
   mixin armv5, read32, write32, cp15_read, cp15_write
   var sp_svc, sp_irq, sp_sys, clear_base, entry_ptr: uint32
   when armv5(B):
     cp15_write(cpu.bus, 0, 1, 0, 0, 0x00012078'u32)
+    cp15_write(cpu.bus, 0, 7, 5, 0, 0)
+    cp15_write(cpu.bus, 0, 7, 6, 0, 0)
     let dtcm = cp15_read(cpu.bus, 0, 9, 1, 0) and 0xFFFFF000'u32
     sp_svc = 0x00803FC0'u32; sp_irq = 0x00803FA0'u32; sp_sys = 0x00803EC0'u32
     clear_base = dtcm + 0x3E00
