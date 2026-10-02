@@ -153,6 +153,7 @@ tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machi
 tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
 tests/nds_compat_test.nim          checks for the homebrew sweep's fixes
+tests/nds_testroms_test.nim        checks for the test-ROM hunt's fixes (docs/nds/test-roms.md)
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
@@ -176,7 +177,8 @@ python3 -m http.server 8791 -d web                # open /nds.html?rom=nds/demos
 tools/serve_nds_dev.sh
 ```
 
-Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
+Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md;
+the later finds and their results: docs/nds/test-roms.md).
 
 ## Subsystems and milestones
 
