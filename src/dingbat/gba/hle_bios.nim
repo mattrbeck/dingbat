@@ -156,6 +156,63 @@ proc swi_residue(cpu: CPU; words: openArray[uint32]) =
   let base = cpu.sys_sp() - 8 - uint32(words.len * 4)
   for i, v in words: cpu.gba.bus.write_word_internal(base + uint32(i * 4), v)
 
+# --- System-stack wait states ---
+#
+# The routine-cost models below were fitted with the System stack in IWRAM,
+# where a stack word costs one cycle like any BIOS access. The real BIOS
+# pays the stack's region for every word: the dispatcher's push {r2, lr}
+# and its pop, each routine's own frame, and the few routines that spill to
+# the stack inside their loops. Games that run tasks on EWRAM stacks (Mario
+# Party Advance) pay 5 more cycles a word there; the HLE charged none of it,
+# so its copies ran 50-100 cycles short and the game's timer-seeded random
+# numbers came out different. tools/biosdrv/swisp.c and swisp2.c: every
+# timed SWI from both stacks, against the official BIOS in this core: the
+# BIOS's stack accesses (BD_MEMTRACE/BD_MEMREAD) times the EWRAM premium
+# account for every cycle of the difference, and the counts below are those
+# accesses.
+
+proc sys_stack_waits(cpu: CPU): (int, int) {.inline.} =
+  ## What a nonsequential and a sequential System-stack word cost beyond the
+  ## one cycle the fitted models already price (0 for IWRAM).
+  let bus = cpu.gba.bus
+  let page = int(bits_range(cpu.sys_sp(), 24, 27))
+  (max(0, int(bus.wait32_n[page]) - 1), max(0, int(bus.wait32_s[page]) - 1))
+
+proc stack_block(waits: (int, int); words: int): int {.inline.} =
+  ## The premium on one push/pop of `words` words (an stm/ldm: the first
+  ## access nonsequential, the rest sequential).
+  if words <= 0: 0 else: waits[0] + (words - 1) * waits[1]
+
+proc swi_frame(swi_num: uint32): (int, int, int) =
+  ## A routine's own System-stack frame below the dispatcher's {r2, lr}:
+  ## words pushed, then the pop as one or two ldm/pop blocks. The same on
+  ## the validation-skip path. Halt, Stop, Div, DivArm, ArcTan,
+  ## GetBiosChecksum and SoundBias push nothing of their own.
+  case swi_num
+  of 0x04, 0x05: (2, 2, 0)                  # IntrWait: push {r4, lr}
+  of 0x08: (1, 1, 0)                        # Sqrt: push {r4}
+  of 0x0A, 0x14, 0x15, 0x17, 0x1F: (5, 4, 1) # Thumb push {r4-r7, lr}; pop {r4-r7}; pop {r3}
+  of 0x0B: (3, 2, 1)                        # CpuSet: push {r4, r5, lr}
+  of 0x0C, 0x0E, 0x12: (8, 8, 0)            # push {r4-r10, lr}
+  of 0x0F, 0x11: (4, 4, 0)
+  of 0x10, 0x13: (9, 9, 0)                  # BitUnPack, HuffUnComp
+  of 0x16, 0x18: (2, 1, 1)
+  else: (0, 0, 0)
+
+proc swi_stack_entry(cpu: CPU; swi_num: uint32): int =
+  ## The stack premium before the routine body: the dispatcher's push and
+  ## the routine's.
+  let w = cpu.sys_stack_waits()
+  if w[0] == 0 and w[1] == 0: return 0
+  w.stack_block(2) + w.stack_block(swi_frame(swi_num)[0])
+
+proc swi_stack_exit(cpu: CPU; swi_num: uint32): int =
+  ## The stack premium after it: the routine's pop and the dispatcher's.
+  let w = cpu.sys_stack_waits()
+  if w[0] == 0 and w[1] == 0: return 0
+  let f = swi_frame(swi_num)
+  w.stack_block(f[1]) + w.stack_block(f[2]) + w.stack_block(2)
+
 proc set_sys_sp(cpu: CPU; v: uint32) {.inline.} =
   if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0: cpu.r[13] = v
   else: cpu.reg_banks[0][5] = v
@@ -190,8 +247,9 @@ proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
       # The no-halt path still runs the check subroutine, the acknowledge
       # and both frame pops: 192 cycles from the caller's swi to its next
       # instruction on the real BIOS (hardware: gbaedge IWCYCLE on AGB SP,
-      # docs/hwprobe-results-agb.md), 32 beyond the dispatch cost.
-      cpu.gba.bus.add_cycles(32)
+      # docs/hwprobe-results-agb.md), 32 beyond the dispatch cost; both
+      # frame pops pay the stack's region (swi_stack_exit).
+      cpu.gba.bus.add_cycles(32 + cpu.swi_stack_exit(0x04))
       return
   # The caller's r12 goes in the dispatcher's SVC-stack slot (push {fp, ip,
   # lr} at 0x140 puts ip at [sp_svc - 8]); it survives the wait and travels
@@ -251,7 +309,10 @@ proc check_intr_wait*(cpu: CPU) =
     # V-blank wait and a V-count wait alike, behind a minimal handler and a
     # table-walking one. A one-cycle miss that page first showed here was
     # HALT_RETURN_COST's (below), which moved the page's own clocks.
-    cpu.gba.bus.add_cycles(INTRWAIT_TUNE - (when HALT_WAKE_RUNS_ONE: HALT_WAKE_INSTR_COST else: 0))
+    # The two frame pops are System-stack loads: an EWRAM stack makes the
+    # return later (tools/biosdrv/swisp.c: 20 cycles, 4 words).
+    cpu.gba.bus.add_cycles(INTRWAIT_TUNE + cpu.swi_stack_exit(0x04) -
+                           (when HALT_WAKE_RUNS_ONE: HALT_WAKE_INSTR_COST else: 0))
   else:
     # Re-halt with the check subroutine's register state (see hle_intr_wait)
     cpu.r[0] = 0
@@ -541,12 +602,15 @@ proc hle_halt(cpu: CPU; t_entry: int64; rfs_entry: CycleCount) =
       # interrupt, the write and the halt all run architecturally.
       cpu.halt_from_dispatcher(ret, isa_step)
       return
-    bus.add_cycles(HALT_WRITE_AT - HALT_MSR_AT)
+    # (the dispatcher's push {r2, lr} at 0x164 comes between: its stack
+    # region's waits, swi_stack_entry)
+    bus.add_cycles(HALT_WRITE_AT - HALT_MSR_AT + cpu.sys_stack_waits().stack_block(2))
   else:
     # Part of the dispatch already reached the scheduler (an armed DMA's
     # access window): keep it, and land on the write as near as it allows
     let page = int(bits_range(ret, 24, 27))
-    let adj = HALT_COMMENT_READ_AT + int(bus.wait16_n[page]) + HALT_WRITE_AT - charged
+    let adj = HALT_COMMENT_READ_AT + int(bus.wait16_n[page]) + HALT_WRITE_AT +
+              cpu.sys_stack_waits().stack_block(2) - charged
     bus.add_cycles(max(adj, -bus.cycles))
   bus.catch_up()
   # The write (mmio.nim, HALTCNT): an interrupt already recognised is taken
@@ -685,14 +749,24 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   # path runs 16 cycles before the refill; charged up front, a CpuSet
   # writing a DMA's control register started the DMA 33 cycles late (alyosha
   # timing/dma_from_bios).
+  # The System stack's wait states (swi_stack_entry): the pushes before the
+  # routine, the pops with the return path. Halt prices its own (hle_halt,
+  # hle_halt_return), IntrWait its pops after the wake (check_intr_wait);
+  # the sound-driver routines' frames are not modeled.
+  let stk_on = swi_num in 0x03'u32 .. 0x19'u32 or swi_num == 0x1F
+  let stk_exit = if stk_on: cpu.swi_stack_exit(swi_num) else: 0
+  if stk_on and not copy_cont:
+    cpu.hle_busy(cpu.swi_stack_entry(swi_num))
   let exit_cost = block:
     let bus = cpu.gba.bus
     let page = int(bits_range(cpu.r[15], 24, 27))
-    SWI_HLE_EXIT + int(bus.wait16_s[page]) - 1 +
+    SWI_HLE_EXIT + int(bus.wait16_s[page]) - 1 + stk_exit +
       (if cpu.cpsr.thumb: int(bus.wait16_n[page]) + int(bus.wait16_s[page])
        else: int(bus.wait32_n[page]) + int(bus.wait32_s[page]))
   if swi_num in 0x06'u32 .. 0x18'u32 and not copy_cont:
-    cpu.gba.bus.add_cycles(-exit_cost)
+    cpu.gba.bus.add_cycles(stk_exit - exit_cost)  # (the pops were not charged)
+  elif swi_num == 0x19 or swi_num == 0x1F:
+    cpu.hle_busy(stk_exit)  # these keep the return path up front
   # Anchor for the routine-body cost models
   let body_t0 = cpu.hle_body_now()
   # The BIOS dispatch (0x140) switches to System mode and pushes {r2, lr}
@@ -797,7 +871,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # Peripherals keep running (hardware stops sound/video/timers); the wake
     # sources are only keypad/cartridge/SIO as on hardware
     cpu.gba.bus.add_cycles(-HALT_RETURN_COST)
-    cpu.halt_resume_charge = HALT_RETURN_COST
+    cpu.halt_resume_charge = HALT_RETURN_COST + int32(stk_exit)
     cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
     # As Halt (routine 0x1A8 shares 0x1AC); r2 holds the 0x80 it wrote to HALTCNT
     cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
@@ -1538,7 +1612,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # waits (HleCont; each str taken one cycle into its step, assumed)
     var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
     let dn = int(cpu.gba.bus.wait32_n[dst_page])
-    var clk = 59 + 3 * int(cpu.gba.bus.wait16_n[info_page]) +
+    # One word spilled to the System stack after the check, and reloaded for
+    # every unit the offset is added to: their region's waits (swisp2.c)
+    let stk = cpu.sys_stack_waits()[0]
+    var clk = 59 + stk + 3 * int(cpu.gba.bus.wait16_n[info_page]) +
               2 * int(cpu.gba.bus.wait32_n[info_page])
     for i in 0'u32 ..< src_len:
       let byte_val = uint32(cpu.gba.bus.read_byte_internal(src)); src += 1
@@ -1552,7 +1629,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         if val != 0 or zero_flag:
           expanded = val + offset_val
           inc n_offset
-          clk += 2
+          clk += 2 + stk
         else:
           expanded = 0
         out_word = out_word or ((expanded and dest_mask) shl out_bits)
@@ -1577,11 +1654,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # sequential from ROM with the prefetch buffer on): exact on all.
     block:
       let bus = cpu.gba.bus
-      cpu.hle_charge_body_interruptible(body_t0, exit_cost + 59 +
+      cpu.hle_charge_body_interruptible(body_t0, exit_cost + 59 + stk +
         3 * int(bus.wait16_n[info_page]) + 2 * int(bus.wait32_n[info_page]) -
         bus.rom_pf_seq16(info_page) +
         int(src_len) * (12 + int(bus.wait16_n[src_page])) +
-        n_units * 22 + n_offset * 2 +
+        n_units * 22 + n_offset * (2 + stk) +
         n_words * (1 + int(bus.wait32_n[dst_page])) + cont.extra)
   of 0x13:  # HuffUnComp
     var src = cpu.r[0]
@@ -1613,7 +1690,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
     let hb = int(cpu.gba.bus.wait16_n[src_page])
     let hw = int(cpu.gba.bus.wait32_n[src_page])
-    var clk = 57 + 2 * hb + hw
+    # One word spilled to the System stack after the check and reloaded at
+    # every leaf (the "stack reload" below): their region's waits (swisp2.c)
+    let stk = cpu.sys_stack_waits()[0]
+    var clk = 57 + stk + 2 * hb + hw
     var node_seq_next = false
     while written < decomp_len:
       if bits_left == 0:
@@ -1640,7 +1720,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let is_leaf = if is_right: right_is_leaf else: left_is_leaf
       if is_leaf:
         n_leaf += 1
-        clk += 39 + 3 * hb
+        clk += 39 + stk + 3 * hb
         # The symbol read lands on the node's address + 2 (offset 0, the
         # child on the node's own parity): sequential from ROM with the
         # prefetch buffer on (rom_pf_seq16)
@@ -1689,8 +1769,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let d = int(bus.wait32_n[dst_page])   # nonseq word write at dst
       # (the tree-size byte after the header word is the fixed part's
       # sequential read)
-      cpu.hle_charge_body_interruptible(body_t0, exit_cost + 57 + 2 * b + w +
-        n_node * (25 + 2 * b) + n_leaf * (39 + 3 * b) -
+      cpu.hle_charge_body_interruptible(body_t0, exit_cost + 57 + stk + 2 * b + w +
+        n_node * (25 + 2 * b) + n_leaf * (39 + stk + 3 * b) -
         (1 + n_leaf_seq + n_node_seq) * bus.rom_pf_seq16(src_page) +
         n_outw * d + n_words * (9 + w) + cont.extra)
   of 0x14:  # RLUnCompWram (8-bit writes)
@@ -1760,6 +1840,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let bus = cpu.gba.bus
     let rn = int(bus.wait16_n[src_page])
     let dh = int(bus.wait16_n[dst_page])
+    # The spills are System-stack words: a store and two loads per flag, a
+    # store per run and a load per run byte, at their region's waits
+    # (swisp2.c)
+    let stk = cpu.sys_stack_waits()[0]
     var clk = 46 + int(bus.wait32_n[src_page])
     var cont = cpu.hle_cont_start(body_t0, dst_page, dst_page)
     var dst = cpu.r[1]
@@ -1777,15 +1861,15 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       dst += 1; written += 1; out_idx += 1
     while written < decomp_len:
       let flag = uint32(bus.read_byte_internal(src)); src += 1
-      clk += 20 + rn
+      clk += 20 + 3 * stk + rn
       if bit(flag, 7):
         # Compressed run
         let length = (flag and 0x7F) + 3
         let val = bus.read_byte_internal(src); src += 1
-        clk += 7 + rn
+        clk += 7 + stk + rn
         for j in 0'u32 ..< length:
           if written >= decomp_len: break
-          clk += 15
+          clk += 15 + stk
           put(val)
       else:
         # Uncompressed run

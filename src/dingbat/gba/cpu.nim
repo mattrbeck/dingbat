@@ -890,7 +890,9 @@ proc hle_halt_return*(cpu: CPU) =
   ## which the trap's own fetch is one.
   let bus = cpu.gba.bus
   cpu.idle(HALT_BIOS_RETURN - 1)
-  # System stack: the dispatcher's {r2, lr}
+  # System stack: the dispatcher's {r2, lr}, a pop that pays the stack's
+  # region (hle_bios.nim swi_stack_exit; IWRAM is in HALT_BIOS_RETURN)
+  bus.add_cycles(cpu.sys_stack_waits().stack_block(2))
   cpu.r[2] = bus.read_word_internal(cpu.r[13])
   cpu.r[14] = bus.read_word_internal(cpu.r[13] + 4)
   cpu.r[13] += 8

@@ -3486,3 +3486,84 @@ checkpoint stays a reference artifact (their missing contention); the tilt
 sensor's resting value is not involved. Open on hardware, not needed here:
 the ready bit's conversion time and the latch before the first conversion
 (dingbat 0, mgba 0xFFF) -- tests/roms/mbprobe payload_tilt.
+
+## 38. Mario Party Advance: the HLE BIOS's copies ignored an EWRAM stack, 2026-10-02
+
+**FIXED** (hle_bios.nim, cpu.nim). Mario Party Advance (U) failed under the
+HLE BIOS (`dingbat`, `dingbat-nowl`: `checkpoint comment: MAJOR`) and passed
+under Nintendo's (`dingbat-bios`, `dingbat-bios-nowl`). All six emulators
+show the same menus at every checkpoint; what differs is the sparkles under
+the host's star, which drift across the text field the OCR compares.
+
+**A timer-seeded random number.** Replayed per frame, HLE and official BIOS
+hash identically until f938, when the star's sparkle particles come out in
+different places, and then for 7359 of the run's 8522 frames. The game's
+LCG (0x08072AD0: `x * 0x41C64E6D + 0x3039`, state at 0x0203A4B8) is seeded
+at f884 by 0x0800B7F8 from TM0's counter: 0xFEB9 under the official BIOS,
+0xFEAF under the HLE. TM0 is m4a's sample clock (prescaler 1, period 1254,
+which divides the frame), restarted at f871 by the music player's V-sync-on
+routine (0x0806FC4C), which polls VCOUNT until it reads 159 and then starts
+the timer. The poll loop samples VCOUNT once an iteration, so where it sees
+the edge depends on the loop's phase, and that phase was set by everything
+the main loop did earlier in the frame: under the HLE it reached the poll
+350 cycles early, a V-count interrupt later caught it 2 cycles out of
+phase, the edge fell one iteration later, and TM0 started 10 cycles late.
+
+**Where the 350 cycles went.** Instruction traces of f871 under both BIOSes
+(game code zipped, the time offset printed wherever it changes) move only
+across SWIs: one CpuFastSet to OAM costs the same, then each CpuSet comes
+back 50 cycles early and each CpuFastSet 100. The game runs its tasks on
+stacks in EWRAM (0x02036Exx), and the BIOS dispatcher switches to System
+mode and pushes {r2, lr} on that stack before every routine, the routines
+push their own frames there, and a few spill inside their loops. The HLE's
+routine models were fitted with the stack in IWRAM, one cycle a word; in
+EWRAM a word costs six. CpuSet's frame is push {r4, r5, lr} (with the
+dispatcher's pair, 10 words: 50 cycles), CpuFastSet's push {r4-r10, lr}
+(20 words: 100). The OAM copy runs on the IWRAM stack, which is why it
+matched.
+
+**The fix: price the stack's region.** `tools/biosdrv/swisp.c` and
+`swisp2.c` call every timed SWI from a cartridge Thumb caller with the
+System stack in IWRAM and then in EWRAM, at several sizes and stream shapes
+and through the validation-skip paths, on the HLE and on the official BIOS
+in this core. Counting the official BIOS's stack accesses in each call
+(`BD_MEMTRACE`/`BD_MEMREAD`, `tests/biosdrv_probe.nim`) and charging the
+EWRAM premium for each reproduces every EWRAM-minus-IWRAM difference to the
+cycle. The HLE now charges each stack word's region (`swi_frame`,
+`swi_stack_entry`/`swi_stack_exit`; nothing changes for an IWRAM stack):
+
+* the dispatcher's push and pop, 2 words each, for every SWI from Halt to
+  SoundBias and MidiKey2Freq (Halt's push in `hle_halt`, its pop at the
+  0x170 trap; IntrWait's and Stop's pops after the wake);
+* the routine frames, pushed / popped: Sqrt 1/1, ArcTan2, RLUnCompWram,
+  RLUnCompVram, Diff8bitUnFilterVram and MidiKey2Freq 5/4+1, CpuSet 3/2+1,
+  CpuFastSet, BgAffineSet and LZ77UnCompVram 8/8, ObjAffineSet and
+  LZ77UnCompWram 4/4, BitUnPack and HuffUnComp 9/9, Diff8bitUnFilterWram
+  and Diff16bitUnFilter 2/1+1, IntrWait 2/2; Div, DivArm, ArcTan,
+  GetBiosChecksum and SoundBias none;
+* the loop spills: BitUnPack and HuffUnComp spill one word after the check,
+  then reload it for every unit the offset is added to (BitUnPack) or every
+  leaf (HuffUnComp); RLUnCompVram stores one word and loads two per flag
+  byte, stores one per run and loads one per run byte.
+
+After it the HLE equals the official BIOS on all 80 EWRAM-stack calls of
+the two probes, as it already did on the IWRAM ones; it does not model the
+sound-driver SWIs' own frames (not measured). Mario Party Advance now
+hashes identically under both BIOSes on every frame but the first (the
+frame the boot skip hands over; Pokemon Mystery Dungeon's differs the same
+way), and all four configurations pass, the audio note gone too. Runner
+(1433/1443, no row changed) and cycle laws (HLE and official BIOS,
+1860/1860) unchanged; `dingbat` replays the Legacy of Goku I and II, Top
+Gun - Combat Zones, Pokemon Mystery Dungeon, Fire Emblem: The Sacred
+Stones, Circle of the Moon and Banjo-Kazooie scripts frame for frame as it
+did before (every frame hash equal; their stacks are in IWRAM), so their
+remaining HLE-vs-official differences (Circle of the Moon f5318, Banjo
+f1194) are something else.
+
+Also seen, not changed: the validation-skip paths (zero length, or a source
+below 0x02000000) run 4-17 cycles short of the official BIOS on every stack,
+by routine (CpuSet 6, CpuFastSet 8, BitUnPack 15, LZ77UnCompWram 4,
+LZ77UnCompVram 14, HuffUnComp 13, RLUnCompWram 14, RLUnCompVram 17,
+Diff8bitUnFilterWram 7, Diff8bitUnFilterVram 14, Diff16bitUnFilter 7): one
+`BIOS_CHECK_SKIP_COST` stands for all of them (swisp2.c cases 42-52). And
+SoundBias(0) with the level already at 0 is 2 cycles short (swisp.c).
