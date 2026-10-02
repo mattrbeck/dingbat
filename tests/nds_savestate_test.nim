@@ -79,6 +79,7 @@ proc gx_dma_setup(n: NDS) =
   ## SWAP_BUFFERS: the FIFO fills past half and the channel stops
   ## mid-block until the V-blank swap drains it.
   let bus = Arm9Bus(nds: n)
+  bus.write32(0x0400_0304'u32, 0x820F)                  # fb_both powers 2D only
   for i in 0'u32 ..< 1000: bus.write32(0x0220_0000'u32 + 4 * i, 0x1515_1515'u32)  # MTX_IDENTITY x4
   bus.write32(0x0400_0540'u32, 0)                       # SWAP_BUFFERS
   bus.write32(0x0400_00D4'u32, 0x0220_0000'u32)         # DMA3 source

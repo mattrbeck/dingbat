@@ -94,8 +94,21 @@ proc io9_read(n: NDS; a: uint32): uint32 =
 
 proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   let o = a and 0x00FF_FFFC'u32
+  # A unit switched off in POWCNT1 leaves its ports read-only (GBATEK "DS
+  # Power Control"; disp_powcnt in the reference runs, docs/oracles.md):
+  # 2D A 008h-05Fh (bit 1), 3D rendering 320h-3FFh (bit 2), geometry
+  # 400h-6FFh (bit 3, commands included), 2D B 1008h-105Fh (bit 9).
+  let pw = n.gpu.powcnt1
   case o
-  of 0x000, 0x008 .. 0x05C, 0x064 .. 0x06C: n.gpu.engine_a.write_reg(o, v, mask)
+  of 0x008 .. 0x05C:
+    if (pw and 2) != 0: n.gpu.engine_a.write_reg(o, v, mask)
+  of 0x320 .. 0x3FC:
+    if (pw and 4) != 0: n.gx_write(o, v, mask)
+  of 0x400 .. 0x6A0:
+    if (pw and 8) != 0: n.gx_write(o, v, mask)
+  of 0x1008 .. 0x105C:
+    if (pw and 0x200) != 0: n.gpu.engine_b.write_reg(o - 0x1000, v, mask)
+  of 0x000, 0x064 .. 0x06C: n.gpu.engine_a.write_reg(o, v, mask)
   of 0x004:
     n.gpu.stat9.dispstat_write(uint16(v), uint16(mask))
     if (mask and 0xFFFF_0000'u32) != 0: n.write_vcount(v shr 16)
@@ -146,11 +159,18 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFF) != 0: n.postflg9 = (n.postflg9 and 1) or uint8(v and 3)
   of 0x304:
     if (mask and 0xFFFF) != 0: n.gpu.write_powcnt1(uint16(v))
-  of 0x320 .. 0x6A0: n.gx_write(o, v, mask)
-  of 0x1000 .. 0x106C: n.gpu.engine_b.write_reg(o - 0x1000, v, mask)
+  of 0x1000 .. 0x1004, 0x1060 .. 0x106C: n.gpu.engine_b.write_reg(o - 0x1000, v, mask)
   else: n.note_unmapped("arm9 io", a, true)
 
 # --- Memory ------------------------------------------------------------
+
+proc pal_oam_on(n: NDS; a: uint32): bool {.inline.} =
+  ## An engine's palette (05000000h A, 05000400h B) and OAM (07000000h,
+  ## 07000400h) while POWCNT1 has it off read zero and ignore writes,
+  ## keeping their contents: GBATEK "DS Power Control" ("(palette-) memory
+  ## becomes read-only-zero-filled"), OAM and the kept contents from
+  ## disp_powcnt in the reference runs (docs/oracles.md).
+  (n.gpu.powcnt1 and (if (a and 0x400) == 0: 2'u16 else: 0x200'u16)) != 0
 
 proc in_itcm(n: NDS; a: uint32; write: bool): bool {.inline.} =
   ## Load mode (CP15 control bit 19) makes the TCM write-only for data:
@@ -253,6 +273,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
     else: (w shr ((a and 3) * 8)) and 0xFF
   of 0x05:
+    if not n.pal_oam_on(a): return 0
     let p = cast[ptr UncheckedArray[uint8]](addr n.gpu.palette[0])
     let i = int(a and 0x7FF)
     when width == 32: uint32(p[i]) or (uint32(p[i+1]) shl 8) or (uint32(p[i+2]) shl 16) or (uint32(p[i+3]) shl 24)
@@ -265,6 +286,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     elif width == 16: uint32(n.gpu.vram.read16(r, off))
     else: uint32(n.gpu.vram.read8(r, off))
   of 0x07:
+    if not n.pal_oam_on(a): return 0
     let p = cast[ptr UncheckedArray[uint8]](addr n.gpu.oam[0])
     let i = int(a and 0x7FF)
     when width == 32: uint32(p[i]) or (uint32(p[i+1]) shl 8) or (uint32(p[i+2]) shl 16) or (uint32(p[i+3]) shl 24)
@@ -310,6 +332,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
     n.io9_write(a and not 3'u32, v shl sh, mask)
   of 0x05, 0x07:
     when width != 8:
+      if not n.pal_oam_on(a): return
       let p = cast[ptr UncheckedArray[uint8]](
         if (a shr 24) == 5: addr n.gpu.palette[0] else: addr n.gpu.oam[0])
       let i = int(a and 0x7FF)

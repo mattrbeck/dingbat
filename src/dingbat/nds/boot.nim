@@ -112,7 +112,11 @@ proc direct_boot*(n: NDS) =
   n.exmem7_lo = 0
   n.slot9_t = slot_timing(n.exmemcnt)
   n.slot7_t = slot_timing(n.exmem7_lo)
-  n.gpu.write_powcnt1(0x0203)
+  # LCDs, both 2D engines, 3D rendering + geometry, engine A on top: what
+  # the real firmware leaves at the cart's entry (disp_powcnt booted
+  # through the dumps, --boot firmware) and the reference's direct boot
+  # (docs/oracles.md)
+  n.gpu.write_powcnt1(0x820F)
   n.powcnt2 = 1
   n.biosprot = 0x1204
   n.cart.romctrl = 0x2000_0000'u32  # reset released, KEY2 data mode

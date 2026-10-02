@@ -184,6 +184,20 @@ melonDS DS 1.4.0 only.
 | `nds.nim` sleep_for | ARM7 sleep stops the timers and the ARM9 (no V-blank counted) until a KEYCNT IRQ wakes it with IF.12 | melonDS DS 1.4.0 equal (timer frozen, 0 ARM9 frames, IF = 1000h) | run — RES37-39 | GBATEK "most of the hardware including sound and video are paused", GBA Stop wake list; the ARM9 stopping is Assumed |
 
 
+### NDS hardware test ROMs
+
+From the hunt for third-party DS test ROMs (docs/nds/test-roms.md) and the
+probes written to settle what they exposed, run through `tools/ndsref` on
+melonDS DS 1.4.0 (`--relocate` for our bare-metal ROMs, `--depth5`).
+
+| Where | Behaviour | Compared against | How | Independent evidence |
+|---|---|---|---|---|
+| `nds/bus9.nim` pal_oam_on | with POWCNT1 bit 1 (A) / bit 9 (B) clear that engine's palette and OAM read 0 and ignore writes, keeping their contents | melonDS DS 1.4.0 identical | run — `disp_powcnt` rows PALA/OAMA/PALB/OAMB/XB; `gx_powcnt` (kuribo64 board) PAL/OAM counters read 0 after R | GBATEK "DS Power Control" ("palette memory becomes read-only-zero-filled"); OAM and kept contents are the reference's |
+| `nds/bus9.nim` io9_write | a unit's ports are read-only while POWCNT1 has it off: 2D A 008h-05Fh, 3D render 320h-3FFh, geometry 400h-6FFh (commands dropped), 2D B 1008h-105Fh | melonDS DS 1.4.0 identical (BG1CNT A/B keep 1234h, MTX_SCALE leaves CLIPMTX_RESULT at identity) | run — `disp_powcnt` rows IOA/IOB/GEO | GBATEK "DS Power Control" |
+| `nds/boot.nim` direct boot | POWCNT1 = 820Fh at the cart's entry | melonDS DS 1.4.0 direct boot 820Fh | run — `disp_powcnt` row PWR | the real firmware (dumps, `ndsrun --boot firmware` of a logo'd relocated copy) also leaves 820Fh |
+| `nds/gpu3d` (unchanged) | with POWCNT1 bit 2 clear we keep rendering the swapped list | melonDS DS keeps the last rendered frame in `disp_powcnt` (render off, then swaps of a new list, then geometry off too) but shows no 3D in `gx_powcnt` (geometry off first, then render) | run — `disp_powcnt` frames 40/110/190, `gx_powcnt` frame 280 | none: GBATEK is silent and the hardware renders through a 48-line cache; open (docs/nds/test-roms.md) |
+
+
 ### NDS 3D engine
 
 From our test ROMs (`tests/nds/src/3d_*`, built by `tests/nds/tools/build_3d.sh`)
