@@ -145,7 +145,8 @@ plus DP/RDP. Page write/program and page/sector erase run when chip select
 drops: WIP (status bit 0) for GBATEK's typical 11 ms / 1.2 ms / 10 ms / 1 s,
 WEL reads set until it ends; while busy every command but RDSR is ignored;
 deep power-down ignores everything but release. The image is changed at
-once. periph_suite programs FFh into 3FD00h (a no-op on any flash) and
+once and `firmware_dirty` set for the frontend to save it (ndsrun
+`--firmware-out`, wasm `nds_firmware_dirty`). periph_suite programs FFh into 3FD00h (a no-op on any flash) and
 measures 1.2 ms.
 
 ## Sleep and the lid

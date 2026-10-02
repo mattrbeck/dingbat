@@ -33,6 +33,9 @@
 ##
 ## --save FILE loads the card's save chip from FILE (its size picks the
 ## chip) and writes it back when the run changed it.
+## --firmware-out FILE writes the firmware image there when the run wrote
+## the firmware flash (the DS menu's settings, a game's WFC setup); copied
+## as firmware.bin into a --bios directory it keeps those settings.
 ## --slot2 gba:FILE[,SAVE] puts a GBA cartridge in the GBA slot (its .sav
 ## loaded from SAVE and written back when the run changed it); --slot2
 ## rumble / --slot2 expansion insert the Rumble Pak / Memory Expansion Pak.
@@ -250,6 +253,7 @@ when isMainModule:
   var dumps: seq[(bool, uint32, int, string)]
   var wav = ""
   var save = ""
+  var fw_out = ""
   var slot2 = ""
   var rumble_log = false
   var rtc_at = ""
@@ -282,6 +286,7 @@ when isMainModule:
       of "trace-at": trace_at = parseInt(val)
       of "wav": wav = val
       of "save": save = val
+      of "firmware-out": fw_out = val
       of "slot2": slot2 = val
       of "rumble-log": rumble_log = true
       of "rtc": rtc_at = val
@@ -447,6 +452,9 @@ when isMainModule:
     echo "save chip: ", n.cart.backup.kind, " ", n.cart.backup.data.len, " bytes",
          (if n.cart.backup.dirty: " (written -> " & save & ")" else: "")
     if n.cart.backup.dirty: writeFile(save, cast[string](n.cart.backup.data))
+  if fw_out.len > 0 and n.spi.firmware_dirty:
+    writeFile(fw_out, cast[string](n.spi.firmware))
+    echo "firmware: written by the run -> ", fw_out
   if slot2_save.len > 0 and n.slot2.dirty:
     writeFile(slot2_save, cast[string](n.slot2_save()))
     echo "slot2 save: ", n.slot2.save.len, " bytes written -> ", slot2_save

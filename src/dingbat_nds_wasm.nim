@@ -159,6 +159,19 @@ proc nds_save_dirty(): cint {.exportc.} =
 proc nds_save_clean() {.exportc.} =
   if core != nil: core.cart.backup.dirty = false
 
+# The firmware flash (io/spi.nim): the DS menu's settings and a game's
+# Nintendo WFC setup write it. When nds_firmware_dirty() is 1 the page
+# stores nds_firmware_len() bytes from nds_firmware_ptr() and passes them as
+# the firmware on the next nds_boot, then calls nds_firmware_clean().
+proc nds_firmware_len(): cint {.exportc.} =
+  if core == nil: 0 else: cint(core.spi.firmware.len)
+proc nds_firmware_ptr(): pointer {.exportc.} =
+  if core == nil or core.spi.firmware.len == 0: nil else: addr core.spi.firmware[0]
+proc nds_firmware_dirty(): cint {.exportc.} =
+  if core != nil and core.spi.firmware_dirty: 1 else: 0
+proc nds_firmware_clean() {.exportc.} =
+  if core != nil: core.spi.firmware_dirty = false
+
 proc nds_status(): cstring {.exportc.} =
   if core == nil: return "no ROM"
   status = "frame " & $core.gpu.frame_count & "  arm9 pc " &

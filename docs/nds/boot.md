@@ -162,8 +162,10 @@ firmware dump**; dingbat cannot synthesize one.
   dummy byte is not modelled; reset values above.
 - NAND and DSi carts (command 3D), the "Optional KEY2 Disable" path via
   firmware "enPngOFF" (implemented card-side, never exercised).
-- Firmware writes (settings changed in the menu) change only the in-memory
-  image; nothing saves them back.
+- Firmware writes (settings changed in the menu, a game's WFC setup) set
+  `spi.firmware_dirty`; ndsrun `--firmware-out FILE` and the wasm exports
+  `nds_firmware_dirty/_ptr/_len/_clean` hand the image to the frontend
+  (docs/nds/accuracy.md). The web app does not store it yet.
 - No autostart switch (user-settings bit 6) for skipping the menu.
 - Hardware checks that would settle the Assumed items: a test ROM reading
   the card with ROMCTRL.13 toggled mid-stream on a real DS.

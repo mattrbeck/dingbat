@@ -395,8 +395,10 @@ block flash:
     sp.xfer(s, FL_LAST, 0)
   discard sp.xfer(s, FL_LAST, 0x06)                 # WREN
   check status() == 2, "WREN sets WEL"
+  check not sp.firmware_dirty, "nothing written yet"
   for b in [0x02'u8, 0x03, 0xFD, 0x00]: discard sp.xfer(s, FL, b)  # PP 3FD00
   discard sp.xfer(s, FL_LAST, 0x5A)
+  check sp.firmware_dirty, "a page program marks the image for the frontend to save"
   let t0 = s.now
   check status() == 3, "page program: WIP and WEL while it runs"
   var t = s.now
