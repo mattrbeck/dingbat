@@ -61,8 +61,11 @@ cycles = 4260 master cycles, H-blank at 3212, 263 lines, 59.8261 Hz.
 CPU timing (`timing.nim`, hooked in by bus9/bus7): every code fetch and
 data access is charged from GBATEK's "DS Memory Timings" tables (per region,
 N/S, 16/32-bit; ARM9 opcode fetches always N32, a Thumb pair sharing one);
-the ARM9's 8 KB I / 4 KB D caches are modelled as tags only, cachability from
-the protection unit; instructions add their internal cycles. An ARM9 cycle is
+the ARM9's 8 KB I / 4 KB D caches are modelled as tags for timing,
+cachability from the protection unit, and the data cache also keeps what it
+holds for main RAM (write-back lines, stale lines after DMA, clean and
+invalidate: `timing.nim` DcLine, docs/nds/test-roms.md); instructions add
+their internal cycles. An ARM9 cycle is
 one master cycle, an ARM7 cycle two. The few unpublished values are marked
 Assumed in `timing.nim`. The card (`cart.nim`) times ROM words by its CLK,
 gap1 and gap2, and both SPI buses keep their busy flags for the byte's time at
@@ -104,7 +107,7 @@ src/dingbat/nds/
                    callback decompressors); tools/nds_hle_bios.sh assembles
                    it into hle_bios_image.nim
   sched.nim        event scheduler, timing constants
-  timing.nim       CPU memory timing: access tables, ARM9 cache tags
+  timing.nim       CPU memory timing: access tables, ARM9 cache tags + data-cache contents
   arm/cpu.nim      ArmCpu[B]: ARM + Thumb, ARMv4T/v5TE
   arm/cp15.nim     CP15 registers, TCM regions
   mem/vram.nim     VRAM banks A-I, VRAMCNT page tables

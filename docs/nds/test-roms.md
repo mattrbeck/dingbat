@@ -141,7 +141,7 @@ Each in its own commit, each with checks in `tests/nds_testroms_test.nim`
    through the dumps with `ndsrun --boot firmware`) and what the
    reference's direct boot leaves; we had 0203h (3D off). SoulSilver
    unchanged.
-2. **The ARM9 data cache holds data** (`26284a23`, `5c0d6ed8`; `timing.nim` DcLine,
+2. **The ARM9 data cache holds data** (`26284a23`, `5c0d6ed8`, `dde3dd76`; `timing.nim` DcLine,
    `bus9.nim` dc_*, `bus7.nim`). Found by BlocksDS `cache/data_cache_ops`,
    whose source gives the hardware's screen; we (and the reference) showed
    every store reaching memory at once. Now a CPU store to a cached
