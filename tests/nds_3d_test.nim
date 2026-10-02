@@ -666,7 +666,7 @@ const ROM_HASHES = [
   ("3d_geom", 0x5DDB7367'u32),
   ("3d_highlight", 0x98B0EEB4'u32),
   ("3d_light", 0xC97F4195'u32),
-  ("3d_lines", 0x39602BC0'u32),
+  ("3d_lines", 0x0EBC535A'u32),
   ("3d_probe_aa", 0xECD367B5'u32),
   ("3d_probe_aa2", 0x7FE8EE94'u32),
   ("3d_probe_aa3", 0x7CA905F7'u32),

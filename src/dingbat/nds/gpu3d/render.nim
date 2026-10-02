@@ -80,6 +80,7 @@ type
     blend: bool                   ## DISP3DCNT.3
     aref: int32                   ## dots need alpha > aref (ALPHA_TEST_REF or 0)
     aa: bool                      ## DISP3DCNT.4: keep the layer behind edge dots
+    wire: bool                    ## alpha 0: wire-frame
 
 proc new_renderer*(): Renderer =
   result = Renderer(zero_page: newSeq[uint8](0x4000))
@@ -209,9 +210,10 @@ proc texel(r: Renderer; tex, pltt: uint32; s, t: int64): uint32 {.inline.} =
   of 6:   # A5I3
     let b = r.tex8(base + i)
     rgb6(r.pal16(pbase + int(b and 7) * 2)) or ((b shr 3) shl 24)
-  of 7:   # direct colour, bit 15 = alpha
+  of 7:   # direct colour, bit 15 = alpha (a transparent texel keeps its
+          # colour: wire-frames show it, 3d_lines on the reference cores)
     let c = r.tex16(base + i * 2)
-    if (c and 0x8000) == 0: 0'u32 else: rgb6(c) or (31'u32 shl 24)
+    rgb6(c) or (if (c and 0x8000) == 0: 0'u32 else: 31'u32 shl 24)
   else: 0'u32
 
 # ---------------------------------------------------------------------------
@@ -503,7 +505,10 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   var tx = 0'u32
   if c.textured:
     tx = r.texel(c.tex, c.pltt, at(L.s, R.s), at(L.t, R.t))
-  let px = r.blend_texel(c, vr, vg, vb, tx)
+  var px = r.blend_texel(c, vr, vg, vb, tx)
+  # wire-frame lines are drawn at alpha 31 (GBATEK), whatever the texel's
+  # alpha: transparent texels too (3d_lines on the reference cores)
+  if c.wire: px = px or (31'u32 shl 24)
   let a = int32(px shr 24)
   if a <= c.aref: return
   template blend_into(dst: var uint32) =
@@ -600,7 +605,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   highlight: (disp3dcnt and 2) != 0, blend: (disp3dcnt and 8) != 0,
                   # alpha test: drawn only if alpha > ALPHA_TEST_REF (> 0 when off)
                   aref: (if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32),
-                  aa: (disp3dcnt and 0x10) != 0)
+                  aa: (disp3dcnt and 0x10) != 0, wire: wire)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
   var line = true
