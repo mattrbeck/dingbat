@@ -9219,7 +9219,11 @@ const updateCanvasScaling = () => {
   // Keep the glow canvas pinned to the canvas rect.
   const singleCore = running && !linkMode && !rollbackMode;
   if (ambientGlow && singleCore) {
-    const c = canvasEl.getBoundingClientRect();
+    // The unzoomed box: the glow sits behind the frame's home, not its zoom.
+    const z = canvasEl.getBoundingClientRect();
+    const zw = z.width / zoomS, zh = z.height / zoomS;
+    const c = { left: z.left + (z.width - zw) / 2 - zoomX,
+                top: z.top + (z.height - zh) / 2 - zoomY, width: zw, height: zh };
     const s = stageEl.getBoundingClientRect();
     glowCanvas.style.left = c.left - s.left + "px";
     glowCanvas.style.top = c.top - s.top + "px";
@@ -9233,6 +9237,7 @@ const updateCanvasScaling = () => {
     }
   }
   glowCanvas.hidden = !(ambientGlow && singleCore);
+  refitFrameZoom();
 };
 
 // Sample a coarse grid from the presented framebuffer at ~10 Hz; the
@@ -9468,6 +9473,228 @@ const watchCanvasBacking = () => {
     updateCanvasScaling();
   }
 };
+
+// --- Frame zoom ---
+// Pinch the picture to zoom it: two fingers on a touch screen, a trackpad
+// pinch on desktop (Chromium and Firefox send that as ctrl+wheel, Safari as
+// gesture events). While zoomed, one finger or a two-finger scroll pans, and
+// a double tap (or double click) puts it back. CSS `scale` and `translate`
+// on #canvas, so nothing about the emulator changes; `transform` stays free
+// for the rumble shake, which composes on top. The stage clips: the picture
+// may spread over the letterbox but never leaves a gap it could fill. A zoom
+// belongs to the game on screen, so leaving or switching games drops it.
+const ZOOM_MAX = 6;
+var zoomS = 1, zoomX = 0, zoomY = 0;
+var zoomRom = null;
+
+// The picture's unzoomed centre and size, and the stage box it may fill,
+// in client px. offset* is the layout box, which no transform touches.
+function frameZoomBox() {
+  const s = stageEl.getBoundingClientRect();
+  return {
+    cx: s.left + stageEl.clientLeft + canvasEl.offsetLeft + canvasEl.offsetWidth / 2,
+    cy: s.top + stageEl.clientTop + canvasEl.offsetTop + canvasEl.offsetHeight / 2,
+    w: canvasEl.offsetWidth, h: canvasEl.offsetHeight,
+    l: s.left, t: s.top, r: s.right, b: s.bottom,
+  };
+}
+
+// One axis of the pan limit: a picture narrower than the stage stays inside
+// it, a wider one keeps covering it.
+const zoomClampAxis = (t, c, half, lo, hi) => {
+  const a = lo - c + half, b = hi - c - half;
+  return Math.min(Math.max(t, Math.min(a, b)), Math.max(a, b));
+};
+
+function setFrameZoom(s, x, y, box = null) {
+  s = Math.min(ZOOM_MAX, Math.max(1, s));
+  if (s < 1.01) {
+    s = 1; x = 0; y = 0;   // fully out is home, not a nudge off-centre
+  } else {
+    const b = box || frameZoomBox();
+    x = zoomClampAxis(x, b.cx, (b.w * s) / 2, b.l, b.r);
+    y = zoomClampAxis(y, b.cy, (b.h * s) / 2, b.t, b.b);
+  }
+  zoomS = s; zoomX = x; zoomY = y;
+  const on = s > 1;
+  canvasEl.style.scale = on ? String(s) : "";
+  canvasEl.style.translate = on ? `${x}px ${y}px` : "";
+  document.body.classList.toggle("frame-zoomed", on);
+}
+
+// Zoom to `s` keeping the picture point under client (px, py) where it is.
+const zoomFrameAt = (s, px, py) => {
+  const b = frameZoomBox();
+  const k = Math.min(ZOOM_MAX, Math.max(1, s)) / zoomS;
+  zoomRom = currentRomName;
+  setFrameZoom(zoomS * k, px - b.cx - k * (px - b.cx - zoomX),
+               py - b.cy - k * (py - b.cy - zoomY), b);
+};
+
+// Glide home (double tap): the one zoom change that is not under a finger.
+const resetFrameZoom = () => {
+  if (zoomS === 1) return;
+  canvasEl.classList.add("zoom-ease");
+  setTimeout(() => canvasEl.classList.remove("zoom-ease"), 250);
+  setFrameZoom(1, 0, 0);
+};
+
+// updateCanvasScaling's last word: the stage changed under the zoom, so
+// re-clamp it, or drop it once its game is no longer the one on screen.
+function refitFrameZoom() {
+  if (zoomS === 1) return;
+  const live = document.body.classList.contains("running") &&
+    !!currentRomName && currentRomName === zoomRom && !linkMode && !rollbackMode;
+  if (live) setFrameZoom(zoomS, zoomX, zoomY);
+  else setFrameZoom(1, 0, 0);
+}
+
+const frameZoomable = () =>
+  document.body.classList.contains("running") && !!currentRomName &&
+  !linkMode && !rollbackMode && !anyModalOpen();
+
+// The picture or the stage around it, never a control drawn over them. On
+// phones in landscape the touch overlay's layout boxes (#main-controls, #lr)
+// span the picture, so a press on one of those, between the buttons and
+// inside the stage, is a press on the picture.
+const ZOOM_NOT_SURFACE = "#dpad, #joystick, #ab, #select-start, .pad-btn, [data-inputs]";
+const onFrameZoomSurface = (/** @type {any} */ t, x, y) => {
+  if (t === canvasEl || t === stageEl) return true;
+  if (!t || typeof t.closest !== "function" || !t.closest("#controls") ||
+      t.closest(ZOOM_NOT_SURFACE)) return false;
+  const s = stageEl.getBoundingClientRect();
+  return x >= s.left && x < s.right && y >= s.top && y < s.bottom;
+};
+
+{
+  const ptrs = new Map();   // touch pointerId -> {x, y}
+  let from = null;          // the gesture so far, rebased on every finger change
+  const ZOOM_TAP_MAX_MS = 250, ZOOM_DBLTAP_MS = 300, ZOOM_TAP_SLOP = 12;
+  let tapDown = null;       // the lone finger that may yet be a tap
+  let lastTap = null;       // the previous tap's release, for the double
+
+  // Fingers come and go mid-gesture; each change starts afresh from the
+  // current zoom, so the picture never jumps.
+  const rebase = () => {
+    const p = [...ptrs.values()];
+    from = !p.length ? null : {
+      box: frameZoomBox(), s: zoomS, x: zoomX, y: zoomY,
+      mx: p.length > 1 ? (p[0].x + p[1].x) / 2 : p[0].x,
+      my: p.length > 1 ? (p[0].y + p[1].y) / 2 : p[0].y,
+      d: p.length > 1 ? Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1 : 0,
+    };
+  };
+
+  // On the document: the touch overlay sits over the stage, not inside it.
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch" || !frameZoomable() ||
+        !onFrameZoomSurface(e.target, e.clientX, e.clientY)) return;
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    zoomRom = currentRomName;
+    rebase();
+    tapDown = ptrs.size === 1 ? { ts: performance.now(), x: e.clientX, y: e.clientY } : null;
+  });
+
+  document.addEventListener("pointermove", (e) => {
+    const p = ptrs.get(e.pointerId);
+    if (!p || !from) return;
+    p.x = e.clientX; p.y = e.clientY;
+    if (tapDown && Math.hypot(p.x - tapDown.x, p.y - tapDown.y) > ZOOM_TAP_SLOP) tapDown = null;
+    const f = from;
+    const pts = [...ptrs.values()];
+    if (pts.length > 1) {
+      const mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
+      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const s = Math.min(ZOOM_MAX, Math.max(1, (f.s * d) / f.d));
+      const k = s / f.s;
+      setFrameZoom(s, mx - f.box.cx - k * (f.mx - f.box.cx - f.x),
+                   my - f.box.cy - k * (f.my - f.box.cy - f.y), f.box);
+    } else if (f.s > 1) {
+      setFrameZoom(f.s, f.x + p.x - f.mx, f.y + p.y - f.my, f.box);
+    }
+  });
+
+  const lift = (/** @type {PointerEvent} */ e) => {
+    if (!ptrs.delete(e.pointerId)) return;
+    rebase();
+    if (ptrs.size || !tapDown) { tapDown = null; return; }
+    const now = performance.now();
+    const tap = e.type === "pointerup" && now - tapDown.ts <= ZOOM_TAP_MAX_MS;
+    const near = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= 2 * ZOOM_TAP_SLOP;
+    if (tap && lastTap && now - lastTap.ts <= ZOOM_DBLTAP_MS && near(lastTap, tapDown)) {
+      lastTap = null;
+      resetFrameZoom();
+    } else {
+      lastTap = tap ? { ts: now, x: tapDown.x, y: tapDown.y } : null;
+    }
+    tapDown = null;
+  };
+  document.addEventListener("pointerup", lift);
+  document.addEventListener("pointercancel", lift);
+
+  canvasEl.addEventListener("dblclick", resetFrameZoom);
+
+  // Trackpad pinch arrives as ctrl+wheel; a plain scroll pans a zoomed picture.
+  stageEl.addEventListener("wheel", (e) => {
+    if (!frameZoomable() || !onFrameZoomSurface(e.target, e.clientX, e.clientY)) return;
+    const px = e.deltaMode === 1 ? 16 : 1;   // line-mode wheels count lines
+    if (e.ctrlKey) {
+      e.preventDefault();   // else the browser zooms the whole page
+      const dy = Math.max(-50, Math.min(50, e.deltaY * px));
+      zoomFrameAt(zoomS * Math.exp(-dy * 0.01), e.clientX, e.clientY);
+    } else if (zoomS > 1) {
+      e.preventDefault();
+      setFrameZoom(zoomS, zoomX - e.deltaX * px, zoomY - e.deltaY * px);
+    }
+  }, { passive: false });
+
+  // Safari's trackpad pinch. iOS sends these for a touch pinch too, where the
+  // pointer path above already has it: there they only cancel page zoom.
+  let gestureFrom = 0;
+  document.addEventListener("gesturestart", (e) => {
+    const g = /** @type {any} */ (e);
+    if (!frameZoomable() || !onFrameZoomSurface(e.target, g.clientX, g.clientY)) return;
+    e.preventDefault();
+    gestureFrom = ptrs.size ? 0 : zoomS;
+  });
+  document.addEventListener("gesturechange", (e) => {
+    if (!gestureFrom) return;
+    e.preventDefault();
+    const g = /** @type {any} */ (e);
+    zoomFrameAt(gestureFrom * g.scale, g.clientX, g.clientY);
+  });
+  document.addEventListener("gestureend", (e) => {
+    if (!gestureFrom) return;
+    e.preventDefault();
+    gestureFrom = 0;
+  });
+}
+
+// --- Idle cursor ---
+// A mouse left resting on the picture hides after 3 s and comes back on the
+// next move or press. "On the picture" is a hit test, so it is the frame's
+// exact on-screen box (zoom included, clipped by the stage) minus anything
+// drawn over it: letterbox, bars, menus and toasts keep the pointer.
+const CURSOR_IDLE_MS = 3000;
+var cursorIdleTimer = null;
+{
+  let x = 0, y = 0;
+  const idle = () => {
+    cursorIdleTimer = null;
+    document.body.classList.toggle("cursor-idle",
+      document.body.classList.contains("running") &&
+      document.elementFromPoint(x, y) === canvasEl);
+  };
+  const active = (/** @type {PointerEvent} */ e) => {
+    if (e.pointerType !== "mouse") return;
+    x = e.clientX; y = e.clientY;
+    document.body.classList.remove("cursor-idle");
+    clearTimeout(cursorIdleTimer);
+    cursorIdleTimer = setTimeout(idle, CURSOR_IDLE_MS);
+  };
+  document.addEventListener("pointermove", active);
+  document.addEventListener("pointerdown", active);
+}
 
 // --- Keyboard settings ---
 
@@ -11902,6 +12129,7 @@ const launchLinkRom = async (rom) => {
 const showMainMenu = () => {
   menuDropdown.hidden = true;
   if (!currentRomName && !linkMode) return;
+  setFrameZoom(1, 0, 0);   // the flight home starts from the whole picture
   // Where the screen is, before it goes: the picture flies from here.
   const from = !linkMode && document.body.classList.contains("running")
     ? canvasEl.getBoundingClientRect() : null;

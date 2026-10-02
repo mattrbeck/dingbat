@@ -1967,6 +1967,19 @@ body.running #canvas {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
 
+/* A mouse resting on the picture hides (index.js, "Idle cursor"). Set on
+   #canvas alone, so the hit test is the boundary: the letterbox and
+   anything drawn over the frame keep the pointer. */
+body.cursor-idle #canvas {
+  cursor: none;
+}
+
+/* Pinch zoom (index.js, "Frame zoom") is CSS scale + translate, set under
+   the fingers with no transition; only the double-tap reset glides. */
+#canvas.zoom-ease {
+  transition: scale 0.2s ease, translate 0.2s ease;
+}
+
 /* Ambient glow backdrop: a coarse sample of the frame, inflated past the
    canvas edges and heavily blurred. JS pins it to the canvas rect and feeds
    it ~10 samples/second with temporal smoothing. The blur and the elliptical
@@ -7012,8 +7025,8 @@ body.rewind-off #report-slider {
   left: 50%;
   transform: translateX(-50%);
   z-index: 41;
-  width: 46px;
-  height: 19px;
+  width: 52px;
+  height: 24px;
   align-items: center;
   justify-content: center;
   padding: 0;
@@ -7024,6 +7037,18 @@ body.rewind-off #report-slider {
   border-radius: 0 0 9px 9px;
   cursor: pointer;
   transition: top 0.2s ease;
+  overflow: visible;
+}
+
+/* iOS keeps the top strip of the screen for its own edge swipes
+   (Notification Centre in a home-screen app, the toolbar in Safari) and
+   delays or drops touches that begin there; a page cannot opt out. So the
+   tab stays small at the edge, but what it answers to hangs below that
+   strip: a thumb aimed at it lands in here. */
+#topbar-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0 -24px -32px;
 }
 
 #topbar-handle svg {
@@ -8256,6 +8281,7 @@ body.running.sync-shown #status {
   body.running #topbar,
   #topbar-handle,
   #topbar-handle svg,
+  #canvas.zoom-ease,
   #joystick-base.homing,
   #joystick-knob.homing {
     transition: none;
