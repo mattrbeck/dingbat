@@ -96,7 +96,6 @@ type
     wl_fails: int32         ## visits in a row that found the loop doing work
     wl_skipped*: int64      ## master cycles skipped so far (a statistic)
     wl_cold*: int32         ## backward branches the bus lets pass unwatched
-    wl_cold_len: int32      ## the next cool-down's length
     wl_regs: array[15, uint32]
     wl_cpsr, wl_spsr: uint32
     wl_sig: IdleSig
@@ -1128,16 +1127,15 @@ const
   WL_OTHER = 32     ## arrivals at other heads before the watched one is given up
   WL_TRIES = 32     ## arrivals compared with one snapshot before a new one is taken
   WL_FAILS = 16     ## visits in a row finding work before the CPU stops watching
-  WL_COLD = 256     ## for this many backward branches, doubling each time it
-  WL_COLD_MAX = 8192  ## stops again without having found a loop to skip (code
-                    ## that works, not waits, then rarely pays for a call)
+  WL_COLD = 256     ## for this many backward branches (a loop that works,
+                    ## not waits, then costs one call per WL_COLD of them;
+                    ## longer or growing pauses missed SoulSilver's waits)
 
 proc cool_down[B](cpu: ArmCpu[B]) {.inline.} =
   inc cpu.wl_fails
   if cpu.wl_fails >= WL_FAILS:
     cpu.wl_fails = 0
-    cpu.wl_cold_len = clamp(cpu.wl_cold_len * 2, WL_COLD, WL_COLD_MAX)
-    cpu.wl_cold = cpu.wl_cold_len
+    cpu.wl_cold = WL_COLD
     cpu.wl_have = false
 
 proc loop_edge*[B](cpu: ArmCpu[B]) {.noinline.} =
@@ -1157,7 +1155,6 @@ proc loop_edge*[B](cpu: ArmCpu[B]) {.noinline.} =
     cpu.wl_epoch = idle_epoch(cpu.bus) + cpu.wl_bump
     cpu.wl_have = false
     cpu.wl_idle = false
-    cpu.cool_down()
     return
   cpu.wl_other = 0
   let epoch = idle_epoch(cpu.bus) + cpu.wl_bump
@@ -1183,7 +1180,6 @@ proc loop_edge*[B](cpu: ArmCpu[B]) {.noinline.} =
     # repeats that fit
     cpu.wl_idle = true
     cpu.wl_fails = 0
-    cpu.wl_cold_len = 0
     let period = cpu.cycles - cpu.wl_cycles
     if period > 0:
       let k = (cpu.wl_until - 1 - cpu.cycles) div period
