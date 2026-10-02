@@ -31,8 +31,10 @@
 ## LID@F[+D|-L] in --press closes the hinge for those frames (opening it
 ## raises the ARM7's lid IRQ; a game may sleep while it is shut).
 ##
-## --save FILE loads the card's save chip from FILE (its size picks the
-## chip) and writes it back when the run changed it.
+## --save FILE loads the card's save chip from FILE (docs/nds/saves.md: an
+## EEPROM/FRAM size names the chip, other sizes are fitted to the chip the
+## game addresses, a text footer is stripped) and writes it back when the
+## run changed or fitted it.
 ## --slot2 gba:FILE[,SAVE] puts a GBA cartridge in the GBA slot (its .sav
 ## loaded from SAVE and written back when the run changed it); --slot2
 ## rumble / --slot2 expansion insert the Rumble Pak / Memory Expansion Pak.
@@ -441,6 +443,7 @@ when isMainModule:
     echo "audio: ", audio.len div 2, " frames -> ", wav
   if save.len > 0:
     echo "save chip: ", n.cart.backup.kind, " ", n.cart.backup.data.len, " bytes",
+         (if n.cart.backup.dropped > 0: " (" & $n.cart.backup.dropped & " file bytes not kept)" else: ""),
          (if n.cart.backup.dirty: " (written -> " & save & ")" else: "")
     if n.cart.backup.dirty: writeFile(save, cast[string](n.cart.backup.data))
   if slot2_save.len > 0 and n.slot2.dirty:
