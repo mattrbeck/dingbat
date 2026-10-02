@@ -121,3 +121,4 @@ page (12 cells, all dingbat's). Copy it.
 | record a law | `tools/hwlink/r0table.py --record <payload>` |
 | freeze the tables for CI | `tools/hwlink/lawrom.py` -> `tests/roms/cyclelaws/` |
 | hold the core to them | `nimble test_cyclelaws` |
+| a law that needs no console (two runs the console cannot tell apart) | `tests/roms/invariants/build.py`, held by the same test |

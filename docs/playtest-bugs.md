@@ -2791,3 +2791,64 @@ re-run on this tree.
 Method, again: a row that passes is evidence about a SUM. The timer rows
 had always passed on entry + stop, and each term was a cycle out.
 
+## 27. Boktai 2: the REGION SETTING screen ignores every key, at some clock times, 2026-10-01
+
+**FIXED** (dma.nim, interrupts.nim). Boktai 2 - Solar Boy Django (U) drew the
+region list after the time setting and then took no key, under the HLE and
+Nintendo's BIOS alike, with the cart clock frozen at 00:00, 00:01, 01:00 or
+06:00 but not at 00:30 or 12:00; the references went on to the KONAMI logo.
+
+**It was not the solar sensor.** The game had crashed. Its IRQ handler
+(IWRAM 0x03002D00) dispatches on IE & IF in a fixed order -- V-count,
+serial, timer 3, H-blank, V-blank, timers 0-2, DMA, keypad -- through a
+table at 0x03002CB0, with a game-pak entry that stops the sound and loops.
+Entered with IE & IF zero it falls through all of them to the fourteenth
+slot, which is null, and jumps to address 0. The timer interrupts kept
+running afterwards: timer 3 is the solar sensor's clock (each overflow
+writes one clock edge to the GPIO port at 0x08247F36 and reads the
+comparator), so the port kept being clocked with the main loop gone, which
+is why the sensor readback looked different from mgba's.
+
+**The interrupt with no source.** Timer 3 overflowed inside a 196-cycle
+DMA3 copy. The game has sound DMA armed, so DMA3's burst is preemptible and
+its transfer loop dispatches due events at transfer boundaries: the raise
+ran before the burst's stall span was known, got a plain 3-cycle
+synchroniser delay, and the burst's end then pushed it back by the whole
+burst (`pipe_due += held`). Meanwhile the CPU took a pending H-blank
+interrupt the moment it had the bus back; the handler served timer 3 first
+and acknowledged it, a nested entry acknowledged H-blank, and 180 cycles
+later the synchroniser delivered its stale IE & IF sample as a fresh
+interrupt. Which DMA3 copy a timer 3 overflow lands
+in depends on what the game does that frame, and the clock changes that,
+hence the clock times.
+
+**The law already in the core, applied to this path.** A timer interrupt
+raised while a burst holds the CPU off the bus counts from the burst's end
+(raise_synced: `stall_to + IRQ_SYNC_DELAY - UNDER_BURST_CREDIT`, measured
+with `irqstorm.s` on the AGB SP). A raise the burst's own loop dispatched now
+gets the same at the burst's end, and a check dispatched inside the burst no
+longer recognises what the stopped synchroniser holds. Arming an idle
+channel the console never sees fire can no longer move a timer interrupt.
+
+**Evidence.** `tests/roms/payloads/dmairqarm.s`: TM0's interrupt raised k
+cycles into a DMA3 burst, with an idle sound DMA armed (sound master off, so
+it never requests) or not. Before: armed, every raise inside the burst was
+taken 2 cycles early, and at k = 4 twice (`010200DC`); after: armed answers
+equal unarmed at all 30 pairs (`tests/roms/invariants/`, held by
+`cyclelaws_test`). The rig was not connected on 2026-10-01, so the absolute
+entry cycle is not yet the console's; mgba takes it 5 cycles earlier than
+dingbat throughout, armed or not.
+
+| clock (2006-01-01, UTC) | 00:00 | 00:01 | 00:30 | 01:00 | 06:00 | 12:00 | 23:59 | host |
+|---|---|---|---|---|---|---|---|---|
+| dingbat-bios before | stall | stall | ok | stall | stall | ok | ok | ok |
+| dingbat (HLE) before | ok | ok | ok | ok | ok | ok | stall | stall |
+| both, after | ok | ok | ok | ok | ok | ok | ok | ok |
+
+Every 37 minutes through the day (39 clock times, dingbat-bios): 17 stalled
+before, none after.
+
+The script (`cd10d8ed....play`) now replays on dingbat and dingbat-bios with
+the references' screens at all eleven checkpoints. Runner, both mGBA suite
+BIOS modes (6998 / 6998), cycle laws, RTC, save-state and soak tests:
+unchanged.

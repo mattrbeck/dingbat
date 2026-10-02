@@ -10,6 +10,9 @@
 ##
 ##   nimble test_cyclelaws
 ##
+## Also invariants that need no console (tests/roms/invariants/): runs that
+## differ only in something the console cannot see must answer alike.
+##
 ## Runs under the HLE BIOS always, and under Nintendo's as well when
 ## DINGBAT_GBA_BIOS (or tests/roms/gba_bios.bin) is there -- it never is in CI.
 
@@ -68,9 +71,39 @@ proc run(bios: string) =
   echo &"{label}: {total - bad}/{total} cells are the console's"
   failures += bad
 
+proc invariants(bios: string) =
+  ## Laws that need no console reading (tests/roms/invariants/build.py): runs
+  ## that differ only in something the console cannot see answer alike.
+  let label = if bios.len == 0: "HLE" else: "real BIOS"
+  # dmairqarm: (not armed, armed) pairs. An idle sound DMA armed beside a
+  # DMA3 burst lets the burst's transfer loop dispatch TM0's overflow while
+  # the burst runs; the interrupt must still be taken once, when it is taken
+  # with nothing armed.
+  const rom = "tests/roms/invariants/dmairqarm.gba"
+  const pairs = 30
+  let emu = new_gba(bios, rom, run_bios = false, use_hle = bios.len == 0)
+  emu.post_init()
+  for _ in 1 .. 30: emu.step_frame()
+  if emu.word(Marker) != 0x600D0000'u32:
+    echo &"  FAIL {label} {rom} never finished"
+    inc failures
+    return
+  var bad = 0
+  for p in 0'u32 ..< pairs:
+    let plain = emu.word(Results + 8 * p)
+    let armed = emu.word(Results + 8 * p + 4)
+    if plain != armed or ((armed shr 16) and 0xFF) != 1:
+      inc bad
+      echo &"  FAIL {label} dmairqarm pair {p}: {plain.toHex(8)} not armed, {armed.toHex(8)} armed"
+  echo &"{label}: {pairs - bad}/{pairs} invariant pairs agree"
+  failures += bad
+
 run("")
+invariants("")
 var bios = getEnv("DINGBAT_GBA_BIOS", "tests/roms/gba_bios.bin")
-if fileExists(bios): run(bios)
+if fileExists(bios):
+  run(bios)
+  invariants(bios)
 else: echo "real BIOS: not here, skipped"
 
 if failures == 0: echo "ALL CYCLE LAWS HOLD"

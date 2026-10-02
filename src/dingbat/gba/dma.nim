@@ -530,7 +530,24 @@ proc run_pending*(dma: DMA) =
         # last internal cycle, is taken after that multiply).
         let stall_start = if DMA_STALL_FROM_CPU_STOP: intr.stall_from else: granted_at
         intr.stall_pushed = bus.sched.delay_pending(etInterrupts, stall_start, held)
-        if intr.pipe_raised != 0 and intr.pipe_due > stall_start:
+        if intr.pipe_raised != 0 and intr.pipe_at >= stall_start:
+          # Raised under this burst: the burst's transfer loop drains due
+          # events at transfer boundaries, so the raise ran before this span
+          # was known and raise_synced booked a plain IRQ_SYNC_DELAY. Like a
+          # raise it does see under a burst, it counts from the burst's end.
+          # Pushing it back by the whole burst instead held a stale IE & IF
+          # sample in the synchroniser for as long as the burst had run
+          # before the raise. Any other interrupt the CPU took meanwhile
+          # acknowledged the bits, and the late sample then delivered an IRQ
+          # with IE & IF zero (Boktai 2 - Solar Boy Django: its solar-sensor
+          # timer overflowing inside a DMA3 copy, then an H-blank IRQ; its
+          # handler, finding no source, called a null vector).
+          let due = max(intr.pipe_at + CycleCount(IRQ_SYNC_DELAY),
+                        intr.stall_to + CycleCount(IRQ_SYNC_DELAY - UNDER_BURST_CREDIT))
+          intr.pipe_due = due
+          intr.schedule_interrupt_check(
+            if due > bus.sched.cycles: int(due - bus.sched.cycles) else: 0)
+        elif intr.pipe_raised != 0 and intr.pipe_due > stall_start:
           intr.pipe_due += held
         when DMA_IRQ_FROM_BUS_END:
           if dma.irq_after_burst:

@@ -203,7 +203,15 @@ proc gate_opened*(intr: Interrupts) =
 
 proc check_interrupts*(intr: Interrupts) =
   var pending = uint16(intr.reg_ie) and uint16(intr.reg_if)
-  if intr.pipe_raised != 0:
+  if DMA_STALLS_IRQ_SYNC and intr.pipe_raised != 0 and intr.gba.bus.dma_active and
+     not intr.gba.cpu.halted:
+    # A check dispatched inside a burst (its transfer loop drains due events
+    # when a higher-priority channel is armed): the synchroniser is stopped
+    # with the CPU, so what it carries waits, and the burst's end books its
+    # recognition (dma.nim run_pending). Arming an idle channel must not
+    # move a timer interrupt.
+    pending = pending and not intr.pipe_raised
+  elif intr.pipe_raised != 0:
     let now = intr.gba.scheduler.cycles
     intr.pipe_sample(now)
     if now >= intr.pipe_due:
