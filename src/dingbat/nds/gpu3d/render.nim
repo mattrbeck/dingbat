@@ -281,6 +281,7 @@ type
     a, b: int32                 ## vertex indices (top, bottom)
     slope: int64
     xmaj: bool                  ## |dx| > dy: runs of several dots
+    fwd: bool                   ## runs from vertex i down to vertex i + 1
     amaj: bool                  ## |dx| >= dy: endpoint attributes as x-major
     dec, vert: bool
 
@@ -302,8 +303,9 @@ type
 proc make_edge(sx, sy: openArray[int32]; a, b: int): Edge =
   var a = a
   var b = b
-  if sy[a] > sy[b]: swap(a, b)
-  result = Edge(x0: sx[a], y0: sy[a], x1: sx[b], y1: sy[b], a: int32(a), b: int32(b))
+  let fwd = sy[a] < sy[b]
+  if not fwd: swap(a, b)
+  result = Edge(x0: sx[a], y0: sy[a], x1: sx[b], y1: sy[b], a: int32(a), b: int32(b), fwd: fwd)
   let dx = int64(sx[b] - sx[a])
   let dy = int64(sy[b] - sy[a])
   result.slope = if abs(dx) == dy: (if dx > 0: 1'i64 shl XSHIFT else: -(1'i64 shl XSHIFT))
@@ -606,16 +608,26 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   aa: (disp3dcnt and 0x10) != 0)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
-  var distinct2 = true
+  var line = true
   block:
     var o = -1
     for i in 1 ..< n:
       if sx[i] != sx[0] or sy[i] != sy[0]:
         if o < 0: o = i
-        elif sx[i] != sx[o] or sy[i] != sy[o]: distinct2 = false
+        elif sx[i] != sx[o] or sy[i] != sy[o]: line = false
+  # zero area: every vertex on one line (games close gaps between walls
+  # with such polygons)
+  var zero_area = true
+  block:
+    var o = 0
+    for i in 1 ..< n:
+      if o == 0:
+        if sx[i] != sx[0] or sy[i] != sy[0]: o = i
+      elif int64(sx[o] - sx[0]) * (sy[i] - sy[0]) != int64(sy[o] - sy[0]) * (sx[i] - sx[0]):
+        zero_area = false
   # GBATEK "Polygon Size": only opaque polygons without edge marking or
   # anti-aliasing leave out their bottom/right edges
-  let full = wire or distinct2 or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
+  let full = wire or line or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
   # anti-aliasing (DISP3DCNT.4): edges of opaque polygons, lines and
   # wire-frames included ("accidentally", GBATEK: dirty lines with missing
   # dots, as the reference runs of 3d_aa draw them), not translucent ones
@@ -661,7 +673,11 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       let nb = int64(b.x0) * 2 * (b.y1 - b.y0) + int64(b.x1 - b.x0) * (2 * y + 1 - 2 * b.y0)
       let lhs = na * (b.y1 - b.y0)
       let rhs = nb * (a.y1 - a.y0)
-      if lhs > rhs or lhs == rhs and a.edge_x(y) > b.edge_x(y): swap(li, ri)
+      # on a tie (a zero-width polygon) the edge that runs forward in
+      # vertex order from the top is the left one (3d_probe_degen)
+      if lhs > rhs or lhs == rhs and (a.edge_x(y) > b.edge_x(y) or
+                                      a.edge_x(y) == b.edge_x(y) and b.fwd and not a.fwd):
+        swap(li, ri)
     let le = edges[li]
     let re = edges[ri]
     let L = le.edge_run(y, false)
@@ -699,7 +715,11 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true)
     for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
     if rdraw:
-      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true)
+      # the right run starts after the left one, unless the polygon has no
+      # area and the left one is not drawn (a zero-width x-major polygon
+      # shows its right runs: 3d_probe_degen)
+      for x in max(0, int(max(R.s, if ldraw or not zero_area: L.e else: L.s))) ..< min(W, int(R.e)):
+        r.plot(c, x, y, EL, ER, sp, true)
 
 {.pop.}
 
