@@ -228,6 +228,8 @@ proc check_interrupts*(intr: Interrupts) =
       intr.gba.cpu.halt_wake = true
     intr.gba.cpu.stopped = false
     intr.gba.cpu.halted = false
+    # the CPU's fetches take the bus back (DMA_BUS_WHILE_HALTED)
+    intr.gba.bus.dma_bus_left = false
     if intr.ime and intr.gba.scheduler.cycles >= intr.gate_open_at:
       intr.gba.cpu.irq_line = true
       intr.gba.cpu.irq_line_at = intr.gba.scheduler.cycles

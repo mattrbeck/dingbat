@@ -569,6 +569,15 @@ type
     # DMA_BUS_BACK_TO_BACK: the burst being granted follows another with no
     # CPU access between them (set by dma.run_pending per grant)
     dma_bus_kept*:       bool
+    # DMA_BUS_WHILE_HALTED: the last burst let go of the bus with the CPU
+    # halted, and the CPU has not run since (cleared by the wake)
+    dma_bus_left*:       bool
+    # DMA_READS_IO_LOAD: the value the CPU's last I/O register load read
+    load_io*:            uint32
+    load_io_ok*:         bool  # load_io is that load's (its read has happened)
+    # DMA_SEES_REFILL_FETCH: of the instruction the burst was granted in by
+    # its closing tick, the cycles still to run after the request
+    dma_bus_tail*:       int
     iwram_latch*:        uint32  # the last word a DMA moved to or from IWRAM
     dma_request_at*:     CycleCount
     dma_has_run*:        bool
@@ -1428,9 +1437,36 @@ const DMA_BUS_BACK_TO_BACK* {.booldefine.} = true
   ## table -> BG1VOFS) and DMA2 (H-blank, fixed write-only BG1VOFS ->
   ## BG0VOFS) keep its high-priority window layer scrolling with the
   ## picture; with the CPU's opcode instead every window was drawn with
-  ## shifted scanlines. Both reference emulators agree. The read itself is
-  ## predicted, awaiting tests/roms/payloads/hdmaobus.s on the AGB SP
-  ## (docs/playtest-bugs.md section 28).
+  ## shifted scanlines. Both reference emulators agree, and so does the
+  ## console: tests/roms/payloads/hdmaobus.s on an AGB SP, 2026-10-02, the
+  ## second channel reads the first's X_k on every line, CPU in a NOP sled
+  ## or halted (docs/playtest-bugs.md section 28).
+const DMA_BUS_WHILE_HALTED* {.booldefine.} = true
+  ## A halted CPU drives nothing, so the data bus keeps the last word a DMA
+  ## put on it until the CPU runs again: a burst granted while the CPU has
+  ## stayed halted since the previous one ended reads that word for its
+  ## first unmapped read, not the opcode the CPU fetched before halting.
+  ## tests/roms/payloads/hdmaobus.s on an AGB SP, 2026-10-02: an H-blank
+  ## DMA reading write-only BG1VOFS ahead of the channel that writes X_k
+  ## there each line reads X_(k-1) under a halt (cells 0x301-0x305), and the
+  ## BIOS's fetched literal (0x0300) only on the first line (0x300).
+const DMA_READS_IO_LOAD* {.booldefine.} = true
+  ## DMA_READS_CPU_BUS's data load includes an I/O register's: the value the
+  ## CPU read is what the burst finds on the bus. hdmaobus.s on an AGB SP,
+  ## 2026-10-02: an H-blank DMA reading write-only BG1VOFS while the CPU
+  ## polls VCOUNT with `ldrh` reads the polled line number (cell 0x306, line
+  ## 46: 002E), where the opcode fallback answered the loop's `bne` (1AFF).
+  ## The I/O bus is 32 bits wide: hdmaphase.s, an `ldrh` or `ldrb` of VCOUNT
+  ## leaves DISPSTAT on the word's other half too (Bus.dma_bus_word).
+const DMA_SEES_REFILL_FETCH* {.booldefine.} = true
+  ## A pipeline refill is two fetches, and a burst requested between them
+  ## finds the first on the bus. The core charges the refill as one block
+  ## and moves r15 past both, so a burst granted by the closing tick of a
+  ## branch with a refill fetch still to start reads one fetch further back.
+  ## hdmaphase.s on an AGB SP, an H-blank DMA reading write-only I/O against
+  ## a `bne` loop from IWRAM: the request one cycle before the loop's end
+  ## reads the branch target (the loop's first opcode), where r15 alone
+  ## answered the second (n = 1 rows, every load width and either half).
 const IMM_BOUNDARY_GRANT* {.booldefine.} = true
   ## An immediate DMA whose request (two cycles after the enable) falls
   ## exactly between two instructions is granted there, ahead of the next
@@ -1450,6 +1486,13 @@ const DMA_CHAIN* {.booldefine.} = true
   ## armed by the next store (its request lands in DMA1's burst); DMA0 reads
   ## the timer DMA1 enabled on the very next cycle (old count, new control),
   ## and the CPU is back two cycles sooner than for two separate bursts.
+const DMA_PENDING_CHAIN* {.booldefine.} = true
+  ## DMA_CHAIN for any request already latched when a burst ends: the next
+  ## grant follows with no hand-back and no lead between them. Two H-blank
+  ## channels granted on the same H-blank: hdmalag.s on an AGB SP has the
+  ## second's first read the cycle after the first's last write, and
+  ## hdmaphase.s has the CPU held 10 cycles by a one-halfword reader and a
+  ## one-halfword writer (6 by the reader alone), not 12.
 const IMM_ACCESS_WAIT* {.booldefine.} = true
   ## An immediate DMA whose request lands inside a CPU data access that
   ## began before it waits for that access to end, and the access sees

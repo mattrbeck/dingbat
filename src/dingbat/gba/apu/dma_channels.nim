@@ -58,10 +58,14 @@ const FIFO_DMA_WINDOW {.booldefine.} = true
 const FIFO_WINDOW_LEAD {.intdefine.} = 16
 
 const FIFO_RESET_KEEPS_WORD {.booldefine.} = false
-  ## A FIFO reset by SOUNDCNT_H's bit 11/15 drops the words queued in the
+  ## The reference emulators' FIFO reset, REFUTED by the console and kept
+  ## off only to reproduce them: tests/roms/payloads/fiforeset.s on an AGB
+  ## SP, 2026-10-02, reads 2 in all 18 cells -- a reset by SOUNDCNT_H's bit
+  ## 11/15 or by the master enable empties the FIFO, the word being played
+  ## included (frozen in tests/roms/cyclelaws/fiforeset.gba).
+  ## On: a FIFO reset by SOUNDCNT_H's bit 11/15 drops the words queued in the
   ## FIFO but not the rest of the word it is playing, whose remaining 1-3
-  ## samples still come out first. Unmeasured: both reference emulators
-  ## behave so (tests/roms/payloads/fiforeset.s v = 0 reads 2 5 4 3 2 5 4 3
+  ## samples still come out first. Both reference emulators behave so (tests/roms/payloads/fiforeset.s v = 0 reads 2 5 4 3 2 5 4 3
   ## on them, 2 throughout on dingbat as shipped), and with it Kingdom
   ## Hearts - Chain of Memories' left channel (FIFO B) runs 29 output
   ## samples behind the right after its sound restart, as on both (the
@@ -69,8 +73,7 @@ const FIFO_RESET_KEEPS_WORD {.booldefine.} = false
   ## resync keeps that offset). The master enable going off clears the word
   ## as well either way: kept there too, the console's fifomap cells after a
   ## part-played cell (r0-agb.json, 0x1428) read one refill burst short, and
-  ## dbsuite's fifodma "spike" cells fail. Off until the console answers
-  ## fiforeset.s (docs/playtest-bugs.md).
+  ## dbsuite's fifodma "spike" cells fail (docs/playtest-bugs.md section 30).
 
 proc dma_channels_in_range*(address: uint32): bool =
   address >= DMA_CHANNELS_RANGE_LOW and address <= DMA_CHANNELS_RANGE_HIGH

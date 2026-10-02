@@ -18,6 +18,10 @@ laws.json are committed (they are our own code, a few KB each).
 A cell the HLE cannot match by construction is listed in HLE_EXCEPTIONS with
 the reason and pinned to what the HLE does answer; under the real BIOS it is
 held to the console like any other.
+
+A cell the console answered more than one way (`A | B`, a race by design:
+hdmaobus's NOP-sled rows from line 42 on) is no law and is left out of the
+ROM; the table keeps it, and `r0table.py --check` still shows it.
 """
 import hashlib
 import json
@@ -43,10 +47,19 @@ def kind_of(row, arg):
     return 'edge' if arg >> 24 else 'stamp' if arg & 0x200 else 'loop'
 
 
+def settled(row):
+    """The row without the cells the console answered more than one way."""
+    keep = [i for i, w in enumerate(row.want) if ' | ' not in w]
+    return tables.Row(row.payload, row.name, [row.args[i] for i in keep],
+                      [row.labels[i] for i in keep], row.show,
+                      [row.want[i] for i in keep])
+
+
 def build():
     """[(payload, ROM bytes, its laws.json entry)]"""
     out = []
     for payload, group in tables.by_payload(tables.rows()).items():
+        group = [settled(r) for r in group]
         args = [a for r in group for a in r.args]
         data = bytearray(open(payloadcmp.build_wrapper(tables.source(payload), args), 'rb').read())
         # build_wrapper stamps the header logo so a console or another

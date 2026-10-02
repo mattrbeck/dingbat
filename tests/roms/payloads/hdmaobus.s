@@ -29,16 +29,23 @@
 @ answer: bits 0..15  the halfword the reader stored on line 40 + k
 @         bits 16..23 how many of the 16 buffer slots the reader wrote (8)
 @
-@ dingbat (DMA_BUS_BACK_TO_BACK), PREDICTED, awaiting the AGB SP:
+@ AGB SP, 2026-10-02 (tools/hwlink/r0-agb.json 'hdmaobus'):
 @   writer first, sled or halt:  X_k for every k (0008A500 0008A511 ...
-@     0008A577); mGBA the same
+@     0008A577) -- DMA_BUS_BACK_TO_BACK; mGBA the same
 @   reader first, sled, k = 0, 1:  0008 46C0, the CPU's opcode
-@     (DMA_READS_CPU_BUS); mGBA the same. k >= 2 race the VCOUNT poll.
-@   reader first, halt, k = 0..5:  open. The halted CPU drives nothing, so
-@     from k = 1 the bus may still hold the writer's word from the line
-@     before (X_(k-1)). dingbat answers what the CPU last fetched in the
-@     BIOS's Halt (00080000 HLE, 00080300 Nintendo's BIOS), mGBA 00087F00.
-@     Not held by any test.
+@     (DMA_READS_CPU_BUS); mGBA the same. From k = 2 the bursts race the
+@     VCOUNT poll (where the arming left the sled is not fixed): every cell
+@     answers several of the poll loop's bus words (its opcodes, or the line
+@     number it loaded) and is no law
+@   reader first, halt, k = 0:  00080300, the BIOS's last fetch (the stack
+@     literal after Halt's `bx lr`; the HLE's stub BIOS has the same word)
+@   reader first, halt, k = 1..5:  X_(k-1), the writer's word from the line
+@     before: the halted CPU drives nothing (DMA_BUS_WHILE_HALTED)
+@   reader first, halt, k = 6, 7 (woken on line 46, polling VCOUNT):
+@     0008002E, the line number the poll's `ldrh` read (DMA_READS_IO_LOAD),
+@     then 0008E150, the loop's `cmp` (the two channels hold the CPU 10
+@     cycles, DMA_PENDING_CHAIN). tests/roms/payloads/hdmaphase.s takes
+@     these two apart.
 @ Before DMA_BUS_BACK_TO_BACK, writer first read the CPU's word too: 46C0 in
 @ the sled, 1AFF / E1C6 from the VCOUNT poll after it, 0000 / 0300 under the
 @ halt. That is what garbled the game's windows.

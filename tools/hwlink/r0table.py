@@ -88,8 +88,10 @@ TABLE = {
     # bursts, last start and last unit from the first, burst 1's gap; one
     # channel of 0.5 to 3.5 lines, near the V-blank edge, about a line, and
     # with nothing else armed; the V-blank arming's first start; two
-    # channels' burst counts. Not the configurations 23-30, whose second
-    # channel starts two cycles late here (the payload's header)
+    # channels' burst counts; DMA3 behind DMA1 on each H-blank across the
+    # drop edge (23-28 and 30, recorded 2026-10-02 once DMA_PENDING_CHAIN
+    # started the second channel on the console's cycle). Not 29: the core
+    # runs 18 bursts there, the console 20
     # the first sound-FIFO bursts against a TM1 read, k = 20 and 33 cycles to
     # TM0's overflow, n NOPs, and an EWRAM load in flight (variant 1 << 16).
     # Recorded by tests/roms/dbsuite/record.py (sp-agb.json, same code), run
@@ -110,7 +112,8 @@ TABLE = {
     'hdmalag': ([c << 8 | w for c in list(range(0, 12)) + [15, 16, 17, 18, 19, 20, 31, 32, 33, 34]
                  for w in (1, 10, 11, 14)]
                 + [8 << 8 | 2, 22 << 8 | 1, 22 << 8 | 11]
-                + [c << 8 | w for c in (12, 13, 14) for w in (1, 6)]),
+                + [c << 8 | w for c in (12, 13, 14) for w in (1, 6)]
+                + [c << 8 | w for c in (23, 24, 25, 26, 27, 28, 30) for w in (1, 10, 11, 14)]),
     # renderer contention, one access at k (dot k + 37 of this core's line):
     # (scene, access, first k, count) -- text BGs, 8bpp, fine scroll 7 and
     # 5 at the line's end, mode 2's lock-out, mode 1, the bitmap, palette
@@ -192,11 +195,22 @@ TABLE = {
                 + [0x400 | w << 8 | k for w in range(4) for k in range(16)]),
     # two H-blank DMAs on one line, the second reading write-only BG1VOFS:
     # writer first / reader first, the CPU in a NOP sled / halted, lines
-    # 40..47 (Phantasy Star Collection; tests/roms/invariants/ predicts it)
+    # 40..47 (Phantasy Star Collection). The sled's rows from line 42 race
+    # the VCOUNT poll and answer several ways (not in the frozen laws)
     'hdmaobus': [v << 8 | k for v in range(4) for k in range(8)],
+    # hdmaobus's halted half taken apart (payloads/hdmaphase.s): the poll
+    # loop's phase on line 46 walked by n = 0..6 NOPs after the wake, read on
+    # lines 46, 47 and 48, with the writer behind the reader and without;
+    # then which lanes an ldrh / ldrb / ldr of VCOUNT leaves for a reader of
+    # a word's upper and lower half (line 46); then the reader alone under
+    # the halt, keeping its own word
+    'hdmaphase': ([w << 8 | n << 4 | k for w in (0, 1) for n in range(7) for k in (6, 7, 8)]
+                  + [kind << 12 | src << 9 | n << 4 | 6 for kind in (0, 1, 2)
+                     for src in (0, 1) for n in range(7) if kind or src]
+                  + [0x101, 0x103, 0x105]),
     # a timer interrupt raised k cycles into a DMA3 burst, an idle sound DMA
-    # armed or not, TM0 acknowledged after the burst or not (Boktai 2;
-    # tests/roms/invariants/build.py, (not armed, armed) pairs)
+    # armed or not, TM0 acknowledged after the burst or not (Boktai 2): the
+    # console answers each (not armed, armed) pair alike
     'dmairqarm': [(ack << 17) | (armed << 16) | (0x10000 - k) for ack in (0, 1)
                   for k in (4, 20, 40, 60, 80, 100, 120, 140, 160, 180, 190, 200, 210, 220, 240)
                   for armed in (0, 1)],

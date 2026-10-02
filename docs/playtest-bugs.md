@@ -2834,10 +2834,17 @@ channel the console never sees fire can no longer move a timer interrupt.
 cycles into a DMA3 burst, with an idle sound DMA armed (sound master off, so
 it never requests) or not. Before: armed, every raise inside the burst was
 taken 2 cycles early, and at k = 4 twice (`010200DC`); after: armed answers
-equal unarmed at all 30 pairs (`tests/roms/invariants/`, held by
-`cyclelaws_test`). The rig was not connected on 2026-10-01, so the absolute
-entry cycle is not yet the console's; mgba takes it 5 cycles earlier than
-dingbat throughout, armed or not.
+equal unarmed at all 30 pairs (then held by `cyclelaws_test` as
+console-free invariants). The rig was not connected on 2026-10-01, so the
+absolute entry cycle waited for the console (below); mgba takes it 5 cycles
+earlier than dingbat throughout, armed or not.
+
+**Console, 2026-10-02.** `r0table.py --record dmairqarm` on the AGB SP: the
+console answers every (not armed, armed) pair alike, and every cell's entry
+cycle is dingbat's -- dingbat and dingbat-bios 60/60, mgba 16/60. The 60
+cells are console laws now (`tests/roms/cyclelaws/dmairqarm.gba`, both
+BIOSes), which hold the pairs equal and the absolute cycle besides;
+`tests/roms/invariants/` is gone.
 
 | clock (2006-01-01, UTC) | 00:00 | 00:01 | 00:30 | 01:00 | 06:00 | 12:00 | 23:59 | host |
 |---|---|---|---|---|---|---|---|---|
@@ -2891,9 +2898,9 @@ on 2026-09-24: of two channels granted on the same H-blank, the second
 makes its first read the cycle after the first's last write. The bus goes
 from DMA1 to DMA2 with DMA1's last word still on it, as it does inside a
 burst and for a nested one, which the core already modelled. Both
-references draw the game accordingly. (dingbat still starts the second
-burst two cycles later than the console, hdmalag's known offset; the word
-on the bus does not depend on it.)
+references draw the game accordingly. (dingbat then still started the
+second burst two cycles later than the console, hdmalag's known offset; the
+word on the bus does not depend on it. Fixed the same day, below.)
 
 **The change.** `run_pending` notes when the grant it is making follows a
 burst it ran itself, with no CPU access between, and `run_channel` then
@@ -2903,7 +2910,8 @@ H-blank (or V-blank) and a chained immediate pair (`DMA_CHAIN`). A burst
 granted after the CPU had the bus still reads the CPU's word, so every
 dmaobus/alyosha Bus cell stands.
 
-**Probe: `tests/roms/payloads/hdmaobus.s`** (predicted, awaiting the AGB SP).
+**Probe: `tests/roms/payloads/hdmaobus.s`** (as predicted before the console
+answered; its answers follow the table).
 DMA1 writes X_k = `A500 | 11k` to BG1VOFS on line 40 + k; a second channel
 reads BG1VOFS (fixed) into EWRAM on the same H-blank, eight lines. Writer
 first (reader DMA2) or reader first (reader DMA0); the CPU in a Thumb NOP
@@ -2923,8 +2931,52 @@ nothing, so the reader granted first may find the writer's word from the
 line before (X_(k-1)) still on the bus. dingbat answers what the CPU last
 fetched in the BIOS's Halt; no test holds that row. The other 18 cells are
 held by `cyclelaws_test` from `tests/roms/invariants/hdmaobus.gba`, marked
-predicted; once `r0table.py --record hdmaobus` has the console's answers
-they belong in `tests/roms/cyclelaws/` (`lawrom.py`).
+predicted, until the console answered.
+
+**Console, 2026-10-02.** `r0table.py --record hdmaobus` on the AGB SP.
+Writer first: X_k in every cell, sled or halt -- `DMA_BUS_BACK_TO_BACK` is
+the console's, and so is the game's design. Reader first in the sled: `46C0`
+at k = 0, 1, and from k = 2 several answers a cell (the poll loop's opcodes
+or the line number it loaded): where the arming leaves the sled is not
+fixed, so the H-blank lands anywhere in a 7-cycle loop; ten runs of 0x102
+gave six different words. Those six cells are no law (`lawrom.py` leaves a
+cell with two answers out). Reader first under the halt, the open row:
+**X_(k-1)**, the writer's word from the line before, k = 1..5; the BIOS's
+last fetch (`0300`) at k = 0; after the wake on line 46, `002E`, the line
+number the CPU's VCOUNT `ldrh` had just loaded; on line 47, `E150`, the
+poll loop's `cmp`. dingbat answered the CPU's last fetch for all of these
+(`0300` / `0000`, `1AFF`, `E1C6`).
+
+`tests/roms/payloads/hdmaphase.s` took the halted half apart (80 cells,
+every one unanimous): the poll loop's phase on line 46 walked one cycle at a
+time by NOPs after the wake and read on lines 46-48, the reader alone and
+with the writer, and VCOUNT loaded as a byte, halfword and word read back
+through either half of the I/O word. Four rules came out of it, each a knob
+in gba.nim:
+
+| knob | what the console showed |
+|---|---|
+| `DMA_BUS_WHILE_HALTED` | a halted CPU drives nothing: a burst granted with the CPU halted since the last one ended reads that burst's last word (hdmaobus X_(k-1); the reader alone keeps its own `0300` every line) |
+| `DMA_READS_IO_LOAD` | the CPU's last data load counts when it was an I/O register too, and the I/O bus is 32 bits wide: an `ldrh` or `ldrb` of VCOUNT leaves DISPSTAT (`2E26`) on the lower half as well. The load's value stays through its internal cycle |
+| `DMA_SEES_REFILL_FETCH` | a request between a branch's two refill fetches finds the first (the loop's own first opcode); the core charges the refill as one block, so r15 alone answered the second |
+| `DMA_PENDING_CHAIN` | a request already latched when a burst ends follows it with no hand-back and no lead: the one-halfword reader holds the CPU 6 cycles, reader plus writer 10, not 12 -- hdmalag's "the second channel starts two cycles late here", from the CPU's side |
+
+The last one also brings hdmalag's configurations 23-28 and 30 (DMA3 behind
+DMA1 across the drop edge) onto the console: recorded the same day and
+frozen; 29 still differs (18 bursts here, 20 on the console). The HLE's stub
+BIOS gained the two stack literals after Halt's `bx lr` (the default user
+and IRQ stack tops), so the halted fetch reads the same word under either
+BIOS.
+
+| table | dingbat before | after | Nintendo's BIOS before | after | mGBA |
+|---|---|---|---|---|---|
+| hdmaobus (32; 6 racing) | 18 | 26 | 19 | 26 | 18 |
+| hdmaphase (80) | 38 | 80 | 41 | 80 | 9 |
+| hdmalag 23-28, 30 (28) | 21 | 28 | 21 | 28 | 6 |
+
+Every other recorded cell holds (`r0table.py --check`: 1893/1898 dingbat and
+Nintendo's BIOS, the five misses racing cells; cycle laws 2072/2072 under
+both BIOSes).
 
 **ps1_title's rows 7k+2/7k+3 are not a second DMA effect.** The evaluator
 also saw BG1 row pairs one table step early at checkpoint ps1_title
@@ -3043,6 +3095,18 @@ none of them). A console that reads 11 everywhere refutes the commit wait at
 a branch and makes Final Fight 9.7k cycles faster -- still a frame behind
 the references.
 
+**Console, 2026-10-02.** `slotbranch.py` on the AGB SP (empty slot): every
+single-load row is dingbat's, home, rom and diff, including the d = 4 and
+d = 7 cells' diff 12 -- the commit wait at a gamepak branch target
+(`BRANCH_COMMIT_WAIT`) is the console's, and the references' 11 is an
+under-charge (mGBA is wrong on rows 2-8). Rows 3 and 6, the 3-register
+`ldmia` from IWRAM and from VRAM, vary between runs; over six runs the
+console's home path read 22 and 25 where dingbat says 20 and 23 (rom 32 and
+35, as dingbat). So multi-register loads in slot code may cost more still on
+hardware than dingbat charges, which only widens the gap to the references;
+no rule yet fits those two rows and the slotexec/alyosha prefetcher data, so
+nothing changed. Final Fight One's frame stays the references' error.
+
 ## 30. Kingdom Hearts - Chain of Memories: DirectSound near-mono after the movie, 2026-10-02
 
 **Symptom.** After the opening movie both references play FIFO B (left) 29
@@ -3095,8 +3159,19 @@ the sound off empties the FIFO, word and all, as `FIFO_MASTER_RESET`
 already has it. Also seen: mgba does not drain a FIFO routed to neither
 side (the second reference does, as dingbat does).
 
-**Status: needs the console for the reset bits.** No measurement says what
-the AGB does there, so the knob ships off (`dma_channels.nim`
+**Console, 2026-10-02: the references are wrong.** `r0table.py --record
+fiforeset` on the AGB SP reads `00020202` in all 18 cells, by SOUNDCNT_H's
+reset bit and by the master enable alike: a FIFO reset drops the word being
+played with the rest, as dingbat does. dingbat 18/18, mgba 3/18. Kingdom
+Hearts - Chain of Memories' near-mono after the movie is the console's
+sound; the wide stereo both references play there comes from their FIFO
+reset. `FIFO_RESET_KEEPS_WORD` stays off, documented as the references'
+behaviour (kept to reproduce them), and the cells are console laws
+(`tests/roms/cyclelaws/fiforeset.gba`). The audio check's FAIL on this
+script is the references' spread, not a dingbat bug.
+
+**Status before the console (kept for the record).** No measurement said
+what the AGB does there, so the knob shipped off (`dma_channels.nim`
 FIFO_RESET_KEEPS_WORD). Run `python3 tools/hwlink/r0table.py --record
 fiforeset` with the SP on the link. dingbat predicts 2 for every cell as
 shipped and, with the knob, 2 5 4 3 2 5 4 3 2 for v = 0 and 2 throughout

@@ -513,6 +513,12 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x1A4, 0xEA000000'u32)  # b    0x1AC
     write_stub_u32(result.bios, 0x1AC, 0xE3A0C301'u32)  # mov  ip, #0x04000000
     write_stub_u32(result.bios, 0x1B0, 0xE5CC2301'u32)  # strb r2, [ip, #0x301]
+    # Never executed: the words after the `bx lr` the halt parks on, the
+    # default user and IRQ stack tops (GBATEK, BIOS RAM usage) as literals.
+    # A halted CPU's last fetch is the second, and a DMA granted under the
+    # halt reads its upper half (hdmaobus.s 0x300 on an AGB SP: 0300).
+    write_stub_u32(result.bios, 0x1B8, 0x03007F00'u32)
+    write_stub_u32(result.bios, 0x1BC, 0x03007FA0'u32)
     # Never executed: the two words after the IRQ return, so the two-ahead
     # pipeline latch reads the same values as the real BIOS leaves
     write_stub_u32(result.bios, 0x140, 0xE92D5800'u32)
@@ -1391,6 +1397,7 @@ template load_sync(bus: Bus; address: uint32; cost: int; size: int;
       bus.load_addr = address
       bus.load_size = size
       bus.load_pc = bus.gba.cpu.r[15]
+      when DMA_READS_IO_LOAD: bus.load_io_ok = false
       bus.load_end = bus.bus_now()
       bus.load_start = bus.load_end - CycleCount(cost)
     when IMM_ACCESS_WAIT:
@@ -1429,6 +1436,15 @@ template store_sync(bus: Bus; address: uint32; cost: int; access: untyped) =
 # test (SB_SWAP, swap_read_word) sits only where MEMCNT's swap can reach and
 # costs an MMIO access nothing.
 
+proc io_loaded[T: uint8 | uint16 | uint32](bus: Bus; address: uint32; v: T): T {.inline.} =
+  ## The value a CPU load read from an I/O register, in its byte lanes, kept
+  ## for a burst that finds it on the bus (DMA_READS_IO_LOAD,
+  ## Bus.dma_bus_word)
+  when DMA_READS_CPU_BUS and DMA_READS_IO_LOAD:
+    bus.load_io = uint32(v) shl ((address and uint32(4 - sizeof(T))) * 8)
+    bus.load_io_ok = true
+  v
+
 proc `[]`*(bus: Bus; address: uint32): uint8 =
   bdWatchRead(address, 1)
   bus.rom_cool()
@@ -1436,7 +1452,8 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.cycles += cost
   if bus_page(address) == 0x4:
     if not bus.dma_active:
-      bus.load_sync(address, cost, (if bus.ldrsh_odd: 2 else: 1), bus.read_byte_internal(address))
+      bus.load_sync(address, cost, (if bus.ldrsh_odd: 2 else: 1), bus.io_loaded(address, bus.read_byte_internal(address)))
+      return bus.io_loaded(address, bus.read_byte_internal(address))
   elif bus.sync_bits != 0:
     if not bus.dma_active:
       bus.load_sync(address, cost, (if bus.ldrsh_odd: 2 else: 1), bus.read_byte_mapped(address))
@@ -1451,7 +1468,8 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
   bus.cycles += cost
   if bus_page(address) == 0x4:
     if not bus.dma_active:
-      bus.load_sync(address, cost, 2, bus.read_half_internal(address))
+      bus.load_sync(address, cost, 2, bus.io_loaded(address, bus.read_half_internal(address)))
+      return bus.io_loaded(address, bus.read_half_internal(address))
   elif bus.sync_bits != 0:
     if not bus.dma_active:
       bus.load_sync(address, cost, 2, bus.read_half_mapped(address))
@@ -1517,7 +1535,8 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
   bus.cycles += cost
   if bus_page(address) == 0x4:
     if not bus.dma_active:
-      bus.load_sync(address, cost, 4, bus.read_word_internal(address))
+      bus.load_sync(address, cost, 4, bus.io_loaded(address, bus.read_word_internal(address)))
+      return bus.io_loaded(address, bus.read_word_internal(address))
   elif bus.sync_bits != 0:
     if not bus.dma_active:
       bus.load_sync(address, cost, 4, bus.read_word_mapped(address))
@@ -1981,6 +2000,31 @@ proc dma_bus_word(bus: Bus): uint32 =
     of 0x7:
       if bits_range(a, 28, 31) == 0:
         return bus.read_word_internal(a and not 3'u32)
+    of 0x4:
+      when DMA_READS_IO_LOAD:
+        # The I/O bus is 32 bits wide and a load of any width drives the
+        # whole word: hdmaphase.s on an AGB SP, an `ldrh` or `ldrb` of VCOUNT
+        # (04000006) leaves DISPSTAT (2E26) on the lower half as well. The
+        # loaded lanes are the value the CPU read; the others are read now,
+        # with the burst's own word for any that would read the bus back.
+        if bits_range(a, 28, 31) == 0:
+          # A burst granted as the load's access ends runs before the core
+          # performs the read: the load's lanes as they read now.
+          let lanes = if not bus.load_io_ok: 0'u32
+                      else:
+                        case bus.load_size
+                        of 4: 0xFFFFFFFF'u32
+                        of 2:
+                          if (a and 1) != 0: 0xFF'u32 shl ((a and 3) * 8)  # ldrsh_odd's byte
+                          else: 0xFFFF'u32 shl ((a and 2) * 8)
+                        else: 0xFF'u32 shl ((a and 3) * 8)
+          var w = bus.load_io and lanes
+          bus.dma_bus_fresh = false
+          for k in 0'u32 .. 3'u32:
+            if (lanes and (0xFF'u32 shl (8 * k))) == 0:
+              w = w or (uint32(bus.read_byte_internal((a and not 3'u32) + k)) shl (8 * k))
+          bus.dma_bus_fresh = true
+          return w
     of 0x3:
       if bits_range(a, 28, 31) == 0:
         let w = bus.read_word_internal(a and not 3'u32)
@@ -2003,7 +2047,16 @@ proc dma_bus_word(bus: Bus): uint32 =
   # next one, whose fetch has not happened.
   var pc = bus.gba.cpu.r[15]
   if bus.synced == 0 and not bus.gba.cpu.halted:
-    pc -= (if bus.gba.cpu.cpsr.thumb: 2'u32 else: 4'u32)
+    let step = if bus.gba.cpu.cpsr.thumb: 2'u32 else: 4'u32
+    pc -= step
+    when DMA_SEES_REFILL_FETCH:
+      # ... and when that instruction ended in a refill whose second fetch
+      # had not begun at the request, the first is the newest on the bus
+      if bus.gba.cpu.refill_pending and bus.dma_bus_tail > 0:
+        let page = bits_range(bus.gba.cpu.r[15], 24, 27)
+        let second = if bus.gba.cpu.cpsr.thumb: int(bus.wait16_s[page])
+                     else: int(bus.wait32_s[page])
+        if bus.dma_bus_tail >= second: pc -= step
   bus.fetch_bus_word(pc)
 
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
