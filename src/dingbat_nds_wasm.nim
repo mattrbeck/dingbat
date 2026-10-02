@@ -101,6 +101,18 @@ proc nds_set_button(id: cint; pressed: cint) {.exportc.} =
 proc nds_set_touch(x, y, down: cint) {.exportc.} =
   if core != nil: core.set_touch(int(x), int(y), down != 0)
 
+proc nds_set_lid(closed: cint) {.exportc.} =
+  ## Close (1) or open (0) the hinge: EXTKEYIN bit 7, and opening raises the
+  ## ARM7's lid IRQ (docs/nds/peripherals.md "Sleep and the lid").
+  if core != nil: core.set_lid(closed != 0)
+
+proc nds_push_mic(samples: ptr UncheckedArray[int16]; n: cint; rate: cint) {.exportc.} =
+  ## Queue `n` mono int16 microphone samples at `rate` Hz behind what is
+  ## queued (io/mic.nim plays them out against emulated time; at most
+  ## 250 ms stays queued).
+  if core != nil and samples != nil and n > 0 and rate > 0:
+    core.push_mic(toOpenArray(samples, 0, int(n) - 1), int(rate))
+
 # Audio: interleaved stereo float32 at 33513982 / 1024 = 32728.5 Hz
 # (io/spu.nim). The page reads nds_audio_frames() frames from
 # nds_audio_ptr() after each run, then calls nds_audio_clear().
