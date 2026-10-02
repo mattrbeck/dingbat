@@ -194,15 +194,21 @@ BG0 = 3D unmodified, else at 15-bit. The `3d_probe_*` ROMs draw
 pseudo-random shapes from an LCG so a model can regenerate the exact vertex
 lists and be fitted rule by rule; nothing was taken from any emulator's
 source. "Exact" means 0 dots differ. Hardware evidence: the line captures
-in StrikerX3/nds-interp (`data/images/TL.7z`, a DS test program's display
-capture of a line from (0,0) to every (x, y)) — our edge rules reproduce
-4376 of 4510 sampled captures dot for dot; the rest are 1-2 dots on runs
-whose x(y+1) lands a few 2^-18 above a half dot (unresolved).
+in StrikerX3/nds-interp (`data/images/{TL,TR,BL,BR}.7z`, a DS test
+program's display capture of a wire-frame line from each screen corner to
+every (x, y); only the images and the capture program were used) —
+replayed through dingbat's 3D engine, 48281 of the 49601 captures of each
+corner match dot for dot (97.3 %, mirror-symmetric across the four sets);
+every other one has 1-5 extra dots of ours on x-major runs whose x(y+1)
+lands at most 502 / 2^18 above a half dot, where the hardware leaves a
+gap (unresolved: no bias or truncation of x(y+1) fits all captures).
 
 | Where | Behaviour | Compared against | How | Independent evidence |
 |---|---|---|---|---|
 | `gpu3d/render.nim` Edge, edge_run, draw_polygon | edge x = x0 << 18 + dx * floor(2^18/dy) * (y - y0), -1 when x decreases, exactly +-1.0 at 45 degrees; x-major runs cover dots whose centres lie in [x(y), x(y+1)] (half up), y-major edges the dot holding x(y), a vertical right edge its left neighbour; opaque polygons drop bottom x-major runs and right y-major dots except on the row above a flat bottom; wire-frames draw the runs plus the top row and the row above a flat bottom; lines (two distinct dots) are full size | melonDS DS 1.4 exact; 0.9.3 agrees on full-size, lines and wire-frames, differs 18-46 dots on opaque | run — 3d_probe_tri, _tri_edge, _tri_xlu, _tri_s2(_edge), _tri_flat(_edge), _line, _wire: exact | the nds-interp line captures above (97 % exact); GBATEK "Polygon Size" for which edges drop |
 | `gpu3d/render.nim` draw_polygon (zero area) | a polygon whose vertices all lie on one line follows the opaque size rules (its right y-major dots dropped) but draws its right x-major runs whole when the left run is dropped; where its two edges coincide the one running forward in vertex order from the top vertex is the left one (its attributes, its depth) | melonDS DS 1.4 exact; 0.9.3 differs (479-1167 dots) | run — 3d_probe_degen, _degen_aa, _degen_edge exact (213 / 117 dots before); Pokemon SoulSilver's bedroom walls (zero-width quads at x = 40 and 200) | none; GBATEK only names line segments (two distinct vertices) |
+| `gpu3d/render.nim` edge_mark | marked: opaque edge dots (wire-frames included) with a 4-neighbour of another ID that lies further, after translucent polygons (their colour is overwritten; one that updates depth hides the edges it covers); a polygon with the rear plane's ID shows no edge on the screen border or against the rear plane; equal depth never marks | melonDS DS 1.4 and 0.9.3 | run — 3d_edge, 3d_probe_edge2 (top/bottom borders, the rear plane's ID, equal-depth neighbours, translucent polygons with and without the depth update, in front of and behind), 3d_probe_tri_edge, _aa3_em exact | GBATEK "Edge Marking" (neighbour ID and depth test, screen borders against the rear plane's ID, applied after translucent polygons) |
+| `gpu3d/render.nim` plot (depth ties) | the dot next to a polygon's apex, where it meets a flat neighbour at exactly the apex depth, shows the later polygon if it gets nearer from there | melonDS DS 1.4: 6 dots differ in 3d_probe_ztie (we keep the first polygon on the tie); Pokemon SoulSilver's bedroom wall corners (3 dots) | run — 3d_probe_ztie | none; depth interpolation along edges is not pinned (unresolved) |
 | `gpu3d/render.nim` edge_end, plot | 9-bit colours (6-bit * 8 + 7); span ends are the runs' outer ends with the edge attributes of the row that end belongs to; equal w: exact linear floor; else factor floor(n w0 2^P / (n w0 + (d - n) w1)), P = 9 on edges, 8 across spans | melonDS DS 1.4 exact; 0.9.3 differs (228-1044 dots) | run — 3d_probe_lerp, _tri_rgb, _persp, _persp_tex, _persp_w16/_w256: exact | none; GBATEK says only "perspective-correct" |
 | `gpu3d/render.nim` plot (shadow) | the mask (ID 0) flags dots where its back face is hidden; the shadow draws only on flagged dots, clearing them, never on its own ID; no mask, no shadow | all three cores | run — 3d_shadow exact on all three | GBATEK "Shadow Polygons" words it the other way round ("drawn only if the stencil bits are zero") |
 | `gpu3d/geometry.nim` TEXGEN_NORMAL_SHIFT / _VERTEX_SHIFT | 21 and 24 | all three cores | run — 3d_texcoord: 17/20 (GBATEK's parts table) off by 8.6k dots, 21/24 exact | GBATEK "Texture Coordinates" table gives the operand widths, not the shift |
