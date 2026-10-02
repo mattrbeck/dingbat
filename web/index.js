@@ -8878,6 +8878,14 @@ const menuVolume = document.getElementById("menu-volume");
 
 const effectiveGain = () => (muted ? 0 : volume / 100);
 
+// Nothing audible: the core skips mixing (emulation is unchanged) and
+// pushAudio gets no samples. The core remembers it for later games.
+const applyAudioSilent = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_audio_silent) {
+    Module._wasm_set_audio_silent(effectiveGain() === 0 ? 1 : 0);
+  }
+};
+
 const syncVolumeUI = () => {
   let off = muted || volume === 0;
   for (let s of volSliders) {
@@ -8910,6 +8918,7 @@ const setVolume = (v) => {
   volume = Math.max(0, Math.min(100, Math.round(v)));
   if (volume > 0) muted = false;
   syncVolumeUI();
+  applyAudioSilent();
   if (typeof updateGain === "function") updateGain();
   saveAudioSettings();
 };
@@ -8918,6 +8927,7 @@ const toggleMute = () => {
   muted = !muted;
   if (!muted && volume === 0) volume = 50;
   syncVolumeUI();
+  applyAudioSilent();
   if (typeof updateGain === "function") updateGain();
   saveAudioSettings();
 };
@@ -8928,6 +8938,7 @@ const loadAudioSettings = async () => {
     volume = Math.max(0, Math.min(100, s.volume));
     muted = !!s.muted;
     syncVolumeUI();
+    applyAudioSilent();
     if (typeof updateGain === "function") updateGain();
   }
   const current = !!s && s.rev === AUDIO_REV;
@@ -10322,6 +10333,7 @@ const resetAllSettings = async () => {
 
   volume = 100; muted = false;
   syncVolumeUI();
+  applyAudioSilent();
   if (typeof updateGain === "function") updateGain();
   pitchCorrectFF = true;
   if (pcffToggle) pcffToggle.checked = true;
@@ -10644,6 +10656,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   if (gen !== loadGen) return; // the next load re-applies all of this to its core
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
+  applyAudioSilent();
   mp2kHleSessionOff = false; // the note-icon A/B belongs to the previous game
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
@@ -14166,6 +14179,7 @@ var Module = {
     applySystemSettings();
     applyColorCorrect();
     applyPitchCorrectFF();
+    applyAudioSilent();
     applyMp2kHle();
     applyFifoInterp();
     applyLcdResponse();

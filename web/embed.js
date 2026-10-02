@@ -79,6 +79,7 @@ const loadRom = (romName, originalName) => {
   updatePauseIcon();
   fastForwardButton.classList.remove("active");
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  applyAudioSilent();
   // The core is up, so nativeRes() is right: size and present immediately.
   resizeCanvas();
   drawGame();
@@ -170,6 +171,14 @@ const volIconBtn = document.getElementById("vol-icon");
 const iconMuted = document.getElementById("icon-muted");
 const iconVol = document.getElementById("icon-vol");
 
+// At volume 0 the core skips mixing (emulation is unchanged); it remembers
+// the setting for later games.
+const applyAudioSilent = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_audio_silent) {
+    Module._wasm_set_audio_silent(volume === 0 ? 1 : 0);
+  }
+};
+
 const updateVolumeUI = () => {
   let pct = volume + "%";
   volFill.style.width = pct;
@@ -178,6 +187,7 @@ const updateVolumeUI = () => {
   iconVol.style.display = volume === 0 ? "none" : "";
   volTrack.setAttribute("aria-valuenow", String(volume));
   volIconBtn.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
+  applyAudioSilent();
   if (typeof updateGain === "function") updateGain();
 };
 

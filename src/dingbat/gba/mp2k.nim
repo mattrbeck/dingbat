@@ -962,7 +962,9 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     s.vol_r = vr
     s.vol_l_to = vl_to
     s.vol_r_to = vr_to
-  m.render_frame()
+  # Silent (APU.silent): nobody hears the render. The voices stop here and
+  # set_audio_silent re-latches them from the engine when sound comes back.
+  if not m.gba.apu.silent: m.render_frame()
 
 proc fifo_dma(m: Mp2kHle): int =
   ## The sound DMA channel feeding a FIFO (1 or 2), or -1.

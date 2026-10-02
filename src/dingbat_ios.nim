@@ -177,9 +177,14 @@ proc dingbat_flush_save() {.exportc, cdecl.} =
 
 proc dingbat_set_volume(volume: cint; mute: cint) {.exportc, cdecl.} =
   ## volume 0..100; at 100 unmuted samples pass through bit-identical.
+  let silent = mute != 0 or volume <= 0  # the cores skip mixing (APU.silent)
   case stateKind
-  of ekGBA: stateGba.apu.set_master_volume(int(volume), mute != 0)
-  of ekGB:  stateGb.apu.set_master_volume(int(volume), mute != 0)
+  of ekGBA:
+    stateGba.apu.set_master_volume(int(volume), mute != 0)
+    stateGba.set_audio_silent(silent)
+  of ekGB:
+    stateGb.apu.set_master_volume(int(volume), mute != 0)
+    stateGb.apu.silent = silent
   of ekNone: discard
 
 proc dingbat_set_fast_forward(enabled: cint) {.exportc, cdecl.} =

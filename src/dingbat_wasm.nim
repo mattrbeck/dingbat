@@ -61,6 +61,7 @@ var stateRollback: RollbackSession = nil           # input-rollback online play,
 var stateGbRollback: gbrb.GbRollbackSession = nil  # mutually exclusive
 var stateLink: Link = nil                          # 2P local link, mutually
 var stateGbLink: gblink.GbLink = nil               # exclusive
+var rbLocal = 0                                    # this peer's core in a rollback session
 var statePrinter: GbPrinter = nil                  # always attached on a solo GB core
 var rewindHistory: Rewind = nil
 # Speculative rollback is opt-in (?speculative=1), set before netlink_init/attach.
@@ -494,6 +495,35 @@ proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
     of ekGBA: stateGba.apu.set_pitch_correct_ff(t)
     of ekGB:  stateGb.apu.set_pitch_correct_ff(t)
     of ekNone: discard
+
+var optSilent = false  # the player hears nothing: muted or volume 0
+
+proc apply_audio_silent() =
+  ## APU.silent on every live core: the heard core follows optSilent; a 2P
+  ## player 2 and an online peer's core are never heard. Called after every
+  ## core construction and on each mute/volume change.
+  if stateRollback != nil:
+    for i, core in stateRollback.link.cores:
+      core.set_audio_silent(optSilent or i != rbLocal)
+  elif stateGbRollback != nil:
+    for i, core in stateGbRollback.link.cores:
+      core.apu.silent = optSilent or i != rbLocal
+  elif stateLink != nil:
+    for i, core in stateLink.cores: core.set_audio_silent(optSilent or i != 0)
+  elif stateGbLink != nil:
+    for i, core in stateGbLink.cores: core.apu.silent = optSilent or i != 0
+  else:
+    case stateKind
+    of ekGBA: stateGba.set_audio_silent(optSilent)
+    of ekGB:  stateGb.apu.silent = optSilent
+    of ekNone: discard
+
+proc wasm_set_audio_silent(on: cint) {.exportc.} =
+  ## 1 while the player cannot hear the game (muted, volume 0): the cores
+  ## skip mixing (APU.silent; emulation is unchanged). Remembered for later
+  ## cores.
+  optSilent = on != 0
+  apply_audio_silent()
 
 proc wasm_state_error(): cstring {.exportc.} =
   ## Why the last wasm_load_state returned 0, verbatim from the core; empty
@@ -1070,9 +1100,11 @@ proc runahead_tick(n: cint) {.exportc.} =
                          GBA_W * GBA_H)
       return
     let snap = stateGba.state_payload()
-    audioSuppressed = true  # lookahead audio is thrown away
+    # Lookahead audio is thrown away: don't mix it. The field is set
+    # directly: the restore below re-latches the sound HLEs anyway.
+    stateGba.apu.silent = true
     for _ in 0 ..< int(n): stateGba.step_frame()
-    audioSuppressed = false
+    stateGba.apu.silent = optSilent
     if runaheadFrame.len != GBA_W * GBA_H: runaheadFrame.setLen(GBA_W * GBA_H)
     copyMem(addr runaheadFrame[0], addr stateGba.ppu.framebuffer[0], GBA_W * GBA_H * 2)
     try:
@@ -1097,9 +1129,9 @@ proc runahead_tick(n: cint) {.exportc.} =
     # Lookahead frames feed the printer bytes the canonical timeline has not
     # sent yet; snapshot around them so no phantom print survives.
     let prnSnap = if statePrinter != nil: statePrinter.clone() else: nil
-    audioSuppressed = true
+    stateGb.apu.silent = true  # lookahead audio is thrown away
     for _ in 0 ..< int(n): stateGb.step_frame()
-    audioSuppressed = false
+    stateGb.apu.silent = optSilent
     if prnSnap != nil: copy_into(prnSnap, statePrinter)
     if runaheadFrame.len != GB_W * GB_H: runaheadFrame.setLen(GB_W * GB_H)
     copyMem(addr runaheadFrame[0], addr stateGb.ppu.framebuffer[0], GB_W * GB_H * 2)
@@ -1319,15 +1351,8 @@ proc gb_link_init(rom1_path, rom2_path: string): cint =
     let core = new_gb(bootrom, path, false, bootrom.len > 0)
     core.post_init()
     cores.add(core)
-  let orig_dispatch = cores[1].scheduler.dispatch
-  cores[1].scheduler.dispatch = proc(kind: scheduler.EventType) =
-    if kind == etAPUSample:
-      audioSuppressed = true
-      orig_dispatch(kind)
-      audioSuppressed = false
-    else:
-      orig_dispatch(kind)
   stateGbLink = new_gb_link(cores)
+  apply_audio_silent()
   for p in 0 .. 1:
     linkRgba[p] = newSeq[uint32](GB_W * GB_H)
   frameCount = 0
@@ -1358,17 +1383,10 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
     let core = make_gba(path)
     core.post_init()
     cores.add(core)
-  # Player 1's APU is the only audible one: core 2's sample events still run
-  # (emulation identical) while appendAudioSample drops the samples.
-  let orig_dispatch = cores[1].scheduler.dispatch
-  cores[1].scheduler.dispatch = proc(kind: scheduler.EventType) =
-    if kind == etAPUSample:
-      audioSuppressed = true
-      orig_dispatch(kind)
-      audioSuppressed = false
-    else:
-      orig_dispatch(kind)
+  # Player 1's APU is the only audible one: core 2 is silent (APU.silent,
+  # emulation identical).
   stateLink = new_link(cores)
+  apply_audio_silent()
   for p in 0 .. 1:
     linkRgba[p] = newSeq[uint32](GBA_W * GBA_H)
   frameCount = 0
@@ -1423,20 +1441,16 @@ proc link_input(player, inputId, pressed: cint) {.exportc.} =
 # drives rollback_tick per RAF, ships the returned frame's input to the peer
 # and feeds peer inputs via rollback_feed; the session predicts and rolls
 # back internally (gba/rollback.nim, gb/rollback.nim). Determinism needs an
-# identical build/ROM/save and a deterministic RTC. rbLocal is this peer's
-# core index.
-var rbLocal = 0
+# identical build/ROM/save and a deterministic RTC. rbLocal (declared with
+# the session globals) is this peer's core index.
 var rbEpoch: int64 = 0
 
-proc wrap_rollback_audio(core: GBA; alwaysMute: bool) =
-  ## Mute a core's samples: always for the remote core (`alwaysMute`), and
-  ## for the local core only while re-simulating rolled-back frames (already
-  ## heard). A proc, not an inline loop: a for-loop closure would alias the
-  ## last iteration's `orig`.
+proc wrap_rollback_audio(core: GBA) =
+  ## Mute the local core's samples while re-simulating rolled-back frames
+  ## (already heard); the remote core is silent (apply_audio_silent).
   let orig = core.scheduler.dispatch
   core.scheduler.dispatch = proc(kind: scheduler.EventType) =
-    if kind == etAPUSample and
-       (alwaysMute or (stateRollback != nil and stateRollback.replaying)):
+    if kind == etAPUSample and stateRollback != nil and stateRollback.replaying:
       audioSuppressed = true
       orig(kind)
       audioSuppressed = false
@@ -1452,12 +1466,11 @@ proc rollback_render() =
   for i in 0 ..< GBA_W * GBA_H:
     linkRgba[rbLocal][i] = colorLutGba[fb[i] and 0x7FFF]
 
-proc wrap_gb_rollback_audio(core: GB; alwaysMute: bool) =
+proc wrap_gb_rollback_audio(core: GB) =
   ## GB analog of wrap_rollback_audio.
   let orig = core.scheduler.dispatch
   core.scheduler.dispatch = proc(kind: scheduler.EventType) =
-    if kind == etAPUSample and
-       (alwaysMute or (stateGbRollback != nil and stateGbRollback.replaying)):
+    if kind == etAPUSample and stateGbRollback != nil and stateGbRollback.replaying:
       audioSuppressed = true
       orig(kind)
       audioSuppressed = false
@@ -1481,9 +1494,9 @@ proc gb_rollback_init(rom1_path, rom2_path: string; epoch: int64): cint =
     let core = new_gb(bootrom, path, false, bootrom.len > 0)
     core.post_init()
     cores.add(core)
-  wrap_gb_rollback_audio(cores[rbLocal], alwaysMute = false)
-  wrap_gb_rollback_audio(cores[1 - rbLocal], alwaysMute = true)
+  wrap_gb_rollback_audio(cores[rbLocal])
   stateGbRollback = gbrb.new_gb_rollback_session(new_gb_link(cores), rbLocal, 12)
+  apply_audio_silent()
   for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GB_W * GB_H)
   frameCount = 0
   1
@@ -1510,6 +1523,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
     audioSuppressed = false
     stateGb = gcore
     stateKind = ekGB
+    apply_audio_silent()
     # Back to solo play: plug the printer in (every solo GB core has one).
     printer_attach()
     if stateTexture != nil: destroyTexture(stateTexture)
@@ -1528,6 +1542,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
   audioSuppressed = false
   stateGba = core
   stateKind = ekGBA
+  apply_audio_silent()
   # Recreate the texture rollback_init destroyed: loop_tick bails without it.
   if stateTexture != nil: destroyTexture(stateTexture)
   stateTexture = stateRenderer.createTexture(
@@ -1565,9 +1580,9 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
     core.post_init()
     core.enable_deterministic_rtc(int64(epoch))
     cores.add(core)
-  wrap_rollback_audio(cores[rbLocal], alwaysMute = false)
-  wrap_rollback_audio(cores[1 - rbLocal], alwaysMute = true)
+  wrap_rollback_audio(cores[rbLocal])
   stateRollback = new_rollback_session(new_link(cores), rbLocal, 12)
+  apply_audio_silent()
   for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GBA_W * GBA_H)
   frameCount = 0
   1
@@ -1746,6 +1761,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     frameCount = 0
   lcdResp.reset()  # panel state is per-core (and per-resolution)
   rewindHistory = if rewindEnabled: new_rewind(rewindCapBytes) else: nil
+  apply_audio_silent()
 
 # --- Online link mode ---
 # One local GBA core linked to a remote peer over a byte transport JS

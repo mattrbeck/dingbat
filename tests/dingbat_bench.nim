@@ -188,6 +188,10 @@ proc main() =
     # (the web's "Audio interpolation", default on).
     if getEnv("DINGBAT_BENCH_FIFO_INTERP") == "0":
       emu.apu.set_fifo_interp(false)
+    # DINGBAT_BENCH_SILENT=1: nobody hears it (the web's mute / volume 0);
+    # =toggle flips it every 37 frames of a hash run (the HLE re-latch).
+    let silent_mode = getEnv("DINGBAT_BENCH_SILENT")
+    if silent_mode == "1": emu.set_audio_silent(true)
     if getEnv("DINGBAT_MP2K_DUMP") == "1":
       # Exploratory: MP2K detection + SoundInfo dump. Passes are detected
       # from the driver's own writes (mp2k.nim "Runtime detection").
@@ -223,6 +227,8 @@ proc main() =
       for f in 0 ..< warmup + frames:
         for ev in script:
           if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
+        if silent_mode == "toggle" and f mod 37 == 0:
+          emu.set_audio_silent(not emu.apu.silent)
         emu.step_frame()
         h = fnv(h, emu.ppu.framebuffer)
         echo f, " ", toHex(h)
@@ -337,6 +343,8 @@ proc main() =
     # web's "Super Game Boy mode"); the cart header still decides.
     emu.sgb_requested = getEnv("DINGBAT_BENCH_SGB") == "1"
     emu.post_init()
+    let silent_mode = getEnv("DINGBAT_BENCH_SILENT")  # as on the GBA path
+    if silent_mode == "1": emu.apu.silent = true
     # As on the GBA path: load an in-game scene; a title screen exercises
     # almost none of the PPU or CPU that gameplay does.
     let state_path = getEnv("DINGBAT_BENCH_STATE")
@@ -365,6 +373,8 @@ proc main() =
     if getEnv("DINGBAT_BENCH_HASH") == "1":
       var h = 0xCBF29CE484222325'u64
       for f in 0 ..< warmup + frames:
+        if silent_mode == "toggle" and f mod 37 == 0:
+          emu.apu.silent = not emu.apu.silent
         run_scripted(f)
         h = fnv(h, emu.ppu.framebuffer)
         echo f, " ", toHex(h)

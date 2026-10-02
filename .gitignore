@@ -178,6 +178,7 @@ tools/gbgate/roms.txt
 /dingbat_gbapurebase_test
 /dingbat_psgagb_test
 /dingbat_state_soak_test
+/dingbat_silent_audio_test
 /dingbat_desktop_settings_test
 /dingbat_desktop_lifecycle_test
 /dingbat_desktop_modal_test

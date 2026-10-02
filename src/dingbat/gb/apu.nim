@@ -272,7 +272,77 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
     return
   psg_seq_step(apu, gb)
 
+when not defined(test_harness) and not defined(emscripten):
+  proc queue_frame(apu: GbApu; sample_left, sample_right: float32) =
+    ## One stereo frame into the SDL buffer; a full buffer is volume-scaled,
+    ## reduced for 2x and queued. Silent frames still queue (as zeros).
+    apu.buffer[apu.buffer_pos]     = sample_left
+    apu.buffer[apu.buffer_pos + 1] = sample_right
+    apu.buffer_pos += 2
+    if apu.buffer_pos >= GB_APU_BUFFER_SIZE:
+      # Mute still queues zeroed samples because SDL queue depth paces
+      # emulation; volume 100 unmuted is a bit-identical passthrough.
+      if apu.master_muted:
+        for i in 0 ..< GB_APU_BUFFER_SIZE:
+          apu.buffer[i] = 0.0'f32
+      elif apu.master_volume_factor != 1.0'f32:
+        let vf = apu.master_volume_factor
+        for i in 0 ..< GB_APU_BUFFER_SIZE:
+          apu.buffer[i] = apu.buffer[i] * vf
+      # 2x speed: emit half the frames (WSOLA when pitch-correct, else decimate).
+      var queue_len = GB_APU_BUFFER_SIZE
+      if apu.turbo:
+        if apu.pitch_correct_ff and not apu.silent:
+          apu.ensure_stretch()
+          var i = 0
+          while i < GB_APU_BUFFER_SIZE:
+            apu.stretch.push(apu.buffer[i], apu.buffer[i + 1])
+            i += 2
+          var o = 0
+          for f in 0 ..< (GB_APU_BUFFER_SIZE div 4):   # half
+            let (l, r) = apu.stretch.pull()
+            apu.buffer[o]     = l
+            apu.buffer[o + 1] = r
+            o += 2
+          queue_len = o
+        else:
+          apu.stretch_engaged = false
+          var o = 0
+          var i = 0
+          while i < GB_APU_BUFFER_SIZE:
+            apu.buffer[o]     = apu.buffer[i]
+            apu.buffer[o + 1] = apu.buffer[i + 1]
+            o += 2
+            i += 4
+          queue_len = o
+      else:
+        apu.stretch_engaged = false
+      if apu.audio_dev != 0:
+        if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
+        while sdl_get_queued_audio_size_gb(apu.audio_dev) >
+              GB_SYNC_BACKSTOP_BYTES: sdl_delay_gb(1)
+        discard sdl_queue_audio_gb(apu.audio_dev,
+          addr apu.buffer[0], uint32(queue_len * 4))
+      apu.buffer_pos = 0
+
 proc get_sample*(apu: GbApu; gb: GB) =
+  if apu.silent and apu.probe_period == 0:
+    # Nobody hears it: skip the catch-up and the mix (unobservable; see the
+    # GBA get_sample). The mixer probe always mixes. Channel 1's catch-up
+    # applies a due sweep stop before it steps the duty (ch1_sweep_due), so
+    # the phase a stop freezes depends on when the channel was last observed:
+    # while the sweep has anything in flight, observe it as a mixing sample
+    # would.
+    let c1 = apu.channel1
+    if c1.enabled and (c1.sweep_stop_at != PSG_NO_STEP or
+                       c1.sweep_check_at != PSG_NO_STEP or
+                       c1.sweep_load_at != PSG_NO_STEP):
+      ch1_catchup_at(c1, gb, uint32(GB_SAMPLE_PERIOD))
+    apu.stretch_engaged = false
+    when not defined(test_harness) and not defined(emscripten):
+      apu.queue_frame(0.0'f32, 0.0'f32)
+    gb.scheduler.schedule_gb(GB_SAMPLE_PERIOD, etAPUSample)
+    return
   # Gated on `enabled` (a disabled channel's amplitude does not depend on its
   # phase; the steps replay exactly later), NOT on channel_mask (a debug mute;
   # skipping the catch-up would let CH4's shift loop fall a frame behind).
@@ -349,54 +419,7 @@ proc get_sample*(apu: GbApu; gb: GB) =
       if apu.turbo_parity:
         appendAudioSample(sample_left, sample_right)  # classic octave-up
   else:
-    apu.buffer[apu.buffer_pos]     = sample_left
-    apu.buffer[apu.buffer_pos + 1] = sample_right
-    apu.buffer_pos += 2
-    if apu.buffer_pos >= GB_APU_BUFFER_SIZE:
-      # Mute still queues zeroed samples because SDL queue depth paces
-      # emulation; volume 100 unmuted is a bit-identical passthrough.
-      if apu.master_muted:
-        for i in 0 ..< GB_APU_BUFFER_SIZE:
-          apu.buffer[i] = 0.0'f32
-      elif apu.master_volume_factor != 1.0'f32:
-        let vf = apu.master_volume_factor
-        for i in 0 ..< GB_APU_BUFFER_SIZE:
-          apu.buffer[i] = apu.buffer[i] * vf
-      # 2x speed: emit half the frames (WSOLA when pitch-correct, else decimate).
-      var queue_len = GB_APU_BUFFER_SIZE
-      if apu.turbo:
-        if apu.pitch_correct_ff:
-          apu.ensure_stretch()
-          var i = 0
-          while i < GB_APU_BUFFER_SIZE:
-            apu.stretch.push(apu.buffer[i], apu.buffer[i + 1])
-            i += 2
-          var o = 0
-          for f in 0 ..< (GB_APU_BUFFER_SIZE div 4):   # half
-            let (l, r) = apu.stretch.pull()
-            apu.buffer[o]     = l
-            apu.buffer[o + 1] = r
-            o += 2
-          queue_len = o
-        else:
-          apu.stretch_engaged = false
-          var o = 0
-          var i = 0
-          while i < GB_APU_BUFFER_SIZE:
-            apu.buffer[o]     = apu.buffer[i]
-            apu.buffer[o + 1] = apu.buffer[i + 1]
-            o += 2
-            i += 4
-          queue_len = o
-      else:
-        apu.stretch_engaged = false
-      if apu.audio_dev != 0:
-        if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
-        while sdl_get_queued_audio_size_gb(apu.audio_dev) >
-              GB_SYNC_BACKSTOP_BYTES: sdl_delay_gb(1)
-        discard sdl_queue_audio_gb(apu.audio_dev,
-          addr apu.buffer[0], uint32(queue_len * 4))
-      apu.buffer_pos = 0
+    apu.queue_frame(sample_left, sample_right)
   gb.scheduler.schedule_gb(
     (if apu.probe_period != 0: int(apu.probe_period) else: GB_SAMPLE_PERIOD),
     etAPUSample)

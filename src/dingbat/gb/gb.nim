@@ -2318,6 +2318,9 @@ type
     # buffer at the queue point
     master_volume_factor*: float32
     master_muted*:        bool
+    # Nobody hears this core: get_sample skips the catch-up and the mix
+    # (set_audio_silent; see the GBA APU). Not serialized.
+    silent*:              bool
     # 2x speed: drop every other stereo frame at the queue point so
     # audio-driven pacing runs emulation twice as fast
     turbo*:               bool

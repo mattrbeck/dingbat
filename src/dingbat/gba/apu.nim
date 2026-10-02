@@ -295,7 +295,87 @@ proc tick_frame_sequencer*(apu: APU) =
   psg_seq_step(apu, apu.gba)
   apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
+when not defined(test_harness) and not defined(emscripten):
+  proc queue_frame(apu: APU; out_l, out_r: int16) =
+    ## One stereo frame into the SDL buffer; a full buffer is volume-scaled,
+    ## reduced for 2x and queued. Silent frames still queue (as zeros): SDL's
+    ## queue depth paces emulation.
+    apu.buffer[apu.buffer_pos]     = out_l
+    apu.buffer[apu.buffer_pos + 1] = out_r
+    apu.buffer_pos += 2
+    if apu.buffer_pos >= APU_BUFFER_SIZE:
+      # Master volume at the queue point. Muting still queues zeroed samples:
+      # pacing is driven by the SDL queue depth
+      if apu.master_muted:
+        for i in 0 ..< APU_BUFFER_SIZE:
+          apu.buffer[i] = 0'i16
+      elif apu.master_volume_factor != 256:
+        let vf = apu.master_volume_factor
+        for i in 0 ..< APU_BUFFER_SIZE:
+          apu.buffer[i] = int16(int32(apu.buffer[i]) * vf shr 8)
+      # 2x speed: emit half the frames so audio-driven pacing runs emulation
+      # twice as fast — WSOLA (pitch_correct_ff) or every other frame; both
+      # emit exactly APU_BUFFER_SIZE/2 int16
+      var queue_len = APU_BUFFER_SIZE
+      if apu.turbo:
+        if apu.pitch_correct_ff and not apu.silent:
+          apu.ensure_stretch()
+          var i = 0
+          while i < APU_BUFFER_SIZE:
+            apu.stretch.push(float32(apu.buffer[i]), float32(apu.buffer[i + 1]))
+            i += 2
+          var o = 0
+          for f in 0 ..< (APU_BUFFER_SIZE div 4):   # 256 frames = half
+            let (l, r) = apu.stretch.pull()
+            apu.buffer[o]     = int16(clamp(l, -32768.0'f32, 32767.0'f32))
+            apu.buffer[o + 1] = int16(clamp(r, -32768.0'f32, 32767.0'f32))
+            o += 2
+          queue_len = o
+        else:
+          apu.stretch_engaged = false
+          var o = 0
+          var i = 0
+          while i < APU_BUFFER_SIZE:
+            apu.buffer[o]     = apu.buffer[i]
+            apu.buffer[o + 1] = apu.buffer[i + 1]
+            o += 2
+            i += 4
+          queue_len = o
+      else:
+        apu.stretch_engaged = false
+      let dump = audio_dump_dest()
+      if dump != nil:
+        discard dump.writeBuffer(addr apu.buffer[0],
+                                 queue_len * sizeof(int16))
+        dump.flushFile()
+      if apu.audio_dev != 0:
+        if not apu.sync:
+          sdl_clear_queued_audio(apu.audio_dev)
+        # Block until the queue drains below the backstop to stay in sync
+        while sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_BACKSTOP_BYTES:
+          sdl_delay(1)
+        discard sdl_queue_audio(apu.audio_dev,
+                                 cast[pointer](addr apu.buffer[0]),
+                                 uint32(queue_len * sizeof(int16)))
+      apu.buffer_pos = 0
+
 proc get_sample*(apu: APU) =
+  if apu.silent:
+    # Nobody hears it: skip the catch-up and the mix. Neither is observable
+    # (every reader of a channel catches it up first, and the FIFO latches
+    # move on the timers), so the machine runs exactly as it would with sound.
+    # Except while channel 1's shift-0 stop is in flight: ch1_settle switches
+    # the channel off without catching it up, freezing the duty phase wherever
+    # the last observer left it, so observe it here as a mixing sample would.
+    if apu.channel1.kill_at != GBA_NO_STEP:
+      ch1_settle(apu.channel1, apu.gba)
+      if apu.channel1.enabled:
+        ch1_catchup_at(apu.channel1, apu.gba, uint32(APU_SAMPLE_PERIOD))
+    apu.stretch_engaged = false
+    when not defined(test_harness) and not defined(emscripten):
+      apu.queue_frame(0, 0)
+    apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
+    return
   # Gated on `enabled`: a disabled channel's amplitude is 0 regardless of
   # phase and the closed form replays the skipped steps later. NOT gated on
   # channel_mask (a debug mute): CH4's shift loop relies on the once-a-frame
@@ -464,64 +544,7 @@ proc get_sample*(apu: APU) =
       apu.lp_right += AUDIO_LOWPASS_ALPHA * (float32(out_r) - apu.lp_right)
       out_l = int16(clamp(apu.lp_left,  -32768.0'f32, 32767.0'f32))
       out_r = int16(clamp(apu.lp_right, -32768.0'f32, 32767.0'f32))
-    apu.buffer[apu.buffer_pos]     = out_l
-    apu.buffer[apu.buffer_pos + 1] = out_r
-    apu.buffer_pos += 2
-    if apu.buffer_pos >= APU_BUFFER_SIZE:
-      # Master volume at the queue point. Muting still queues zeroed samples:
-      # pacing is driven by the SDL queue depth
-      if apu.master_muted:
-        for i in 0 ..< APU_BUFFER_SIZE:
-          apu.buffer[i] = 0'i16
-      elif apu.master_volume_factor != 256:
-        let vf = apu.master_volume_factor
-        for i in 0 ..< APU_BUFFER_SIZE:
-          apu.buffer[i] = int16(int32(apu.buffer[i]) * vf shr 8)
-      # 2x speed: emit half the frames so audio-driven pacing runs emulation
-      # twice as fast — WSOLA (pitch_correct_ff) or every other frame; both
-      # emit exactly APU_BUFFER_SIZE/2 int16
-      var queue_len = APU_BUFFER_SIZE
-      if apu.turbo:
-        if apu.pitch_correct_ff:
-          apu.ensure_stretch()
-          var i = 0
-          while i < APU_BUFFER_SIZE:
-            apu.stretch.push(float32(apu.buffer[i]), float32(apu.buffer[i + 1]))
-            i += 2
-          var o = 0
-          for f in 0 ..< (APU_BUFFER_SIZE div 4):   # 256 frames = half
-            let (l, r) = apu.stretch.pull()
-            apu.buffer[o]     = int16(clamp(l, -32768.0'f32, 32767.0'f32))
-            apu.buffer[o + 1] = int16(clamp(r, -32768.0'f32, 32767.0'f32))
-            o += 2
-          queue_len = o
-        else:
-          apu.stretch_engaged = false
-          var o = 0
-          var i = 0
-          while i < APU_BUFFER_SIZE:
-            apu.buffer[o]     = apu.buffer[i]
-            apu.buffer[o + 1] = apu.buffer[i + 1]
-            o += 2
-            i += 4
-          queue_len = o
-      else:
-        apu.stretch_engaged = false
-      let dump = audio_dump_dest()
-      if dump != nil:
-        discard dump.writeBuffer(addr apu.buffer[0],
-                                 queue_len * sizeof(int16))
-        dump.flushFile()
-      if apu.audio_dev != 0:
-        if not apu.sync:
-          sdl_clear_queued_audio(apu.audio_dev)
-        # Block until the queue drains below the backstop to stay in sync
-        while sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_BACKSTOP_BYTES:
-          sdl_delay(1)
-        discard sdl_queue_audio(apu.audio_dev,
-                                 cast[pointer](addr apu.buffer[0]),
-                                 uint32(queue_len * sizeof(int16)))
-      apu.buffer_pos = 0
+    apu.queue_frame(out_l, out_r)
   apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
 
 proc gba_psg_read(gba: GBA; address: uint32): uint8 =

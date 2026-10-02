@@ -98,6 +98,13 @@ jobs:
         # core issues print [KNOWN]; DINGBAT_SOAK_STRICT=1 fails on them.
         shell: bash
         run: ./dingbat_state_soak_test
+      - name: Muted cores run exactly as mixing ones (both cores)
+        # APU.silent skips the catch-up and the mix while nobody hears the
+        # core; a core toggling it must match a mixing twin's payload every
+        # frame. Committed ROMs, the soak's random programs, and channel-1
+        # stop storms (the one place the catch-up cadence shows).
+        shell: bash
+        run: ./dingbat_silent_audio_test
       - name: LCD panel-response model invariants
         # Self-comparing panel-model invariants: static frames bit-exact,
         # transitions reach their target, 30 Hz alternation settles. No ROMs.

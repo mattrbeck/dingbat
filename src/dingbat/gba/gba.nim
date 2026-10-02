@@ -937,6 +937,10 @@ type
     # Master volume as an 8.8 fixed-point factor (256 = unity)
     master_volume_factor*: int32
     master_muted*:      bool
+    # Nobody hears this core (muted, volume 0, a run-ahead lookahead, link
+    # player 2): get_sample skips the catch-up and the mix (set_audio_silent).
+    # Presentation-only, not serialised.
+    silent*:            bool
     # 2x speed: drop every other stereo frame at the queue point
     turbo*:             bool
     turbo_parity:       bool  # emscripten per-sample decimation state
@@ -1673,6 +1677,16 @@ include bus
 # Sound-driver HLE shadow mixers (runtime-detected; inert unless enabled)
 include mp2k
 include gs_bon
+
+proc set_audio_silent*(gba: GBA; on: bool) =
+  ## Whether anybody hears this core (APU.silent): muted, volume 0, link
+  ## player 2. Call between frames. The sound-driver HLEs render nothing while
+  ## silent, so turning sound back on re-latches their voices from the
+  ## engine's own state, as a state load does.
+  if gba.apu.silent and not on:
+    if gba.mp2k != nil: gba.mp2k.mp2k_state_loaded()
+    if gba.gs_bon != nil: gba.gs_bon.gs_state_loaded()
+  gba.apu.silent = on
 
 # Sprite accessor procs (needed by ppu)
 proc obj_shape*(s: Sprite): uint32 = bits_range(s.attr0, 14, 15)

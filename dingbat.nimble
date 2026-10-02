@@ -78,6 +78,10 @@ task test_statesoak, "Run the range-checked serialize-while-running soak (both c
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_state_soak_test tests/state_soak_test.nim"
 
+task test_silentaudio, "Check a core that skips mixing (muted) runs exactly as one that mixes":
+  exec "nim c -r -d:test_harness -d:release -d:soak_lib --path:src --path:tests " &
+       "-o:dingbat_silent_audio_test tests/silent_audio_test.nim"
+
 task test_cyclelaws,"Hold the core to the cycle laws recorded from an AGB SP":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_cyclelaws_test tests/cyclelaws_test.nim"
