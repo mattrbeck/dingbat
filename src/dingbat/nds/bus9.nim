@@ -540,9 +540,16 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
       let p = cast[ptr UncheckedArray[uint8]](
         if (a shr 24) == 5: addr n.gpu.palette[0] else: addr n.gpu.oam[0])
       let i = int(a and 0x7FF)
-      p[i] = uint8(v); p[i + 1] = uint8(v shr 8)
+      # a change is seen by the engine owning this half (line reuse, engine2d.nim)
+      let q = addr p[i]
       when width == 32:
-        p[i + 2] = uint8(v shr 16); p[i + 3] = uint8(v shr 24)
+        if cast[ptr uint32](q)[] != v:
+          cast[ptr uint32](q)[] = v
+          if (a and 0x400) == 0: inc n.gpu.engine_a.mem_gen else: inc n.gpu.engine_b.mem_gen
+      else:
+        if cast[ptr uint16](q)[] != uint16(v):
+          cast[ptr uint16](q)[] = uint16(v)
+          if (a and 0x400) == 0: inc n.gpu.engine_a.mem_gen else: inc n.gpu.engine_b.mem_gen
   of 0x06:
     when width != 8:
       var off: int

@@ -93,6 +93,46 @@ in SoulSilver's overworld (600 frames from frame 7100 of the p12 script)
 471 of 546 rendered frames had the same polygons and vertices as the frame
 before and 468 the same everything; those are now reused.
 
+## 2D line reuse (engine2d.nim `render_line`)
+
+A graphics line (display mode 1) reads the engine's registers and line
+latches (window Y, affine reference points, the mosaic latch), its half of
+palette and OAM, the VRAM banks mapped into its BG, OBJ and extended-palette
+regions, and for engine A the 3D line. What it leaves behind is `line` (and
+with affine mosaic, the reference-point latch); `bgpix`, `objpix`, the
+window mask and the other per-line buffers are rewritten before they are
+read, so they are scratch and no longer in the save state (`ENGINE_SKIP`).
+A line whose inputs all equal those it had when it was last drawn comes out
+the same, so it is copied from a per-line store (192 lines of output, key
+and, for engine A, the 3D line) instead of drawn.
+
+- **Registers and latches**: compared as a key (`LineKey`) built at the
+  line's start.
+- **Palette and OAM**: the bus counts every change to each engine's half
+  (`mem_gen`; a store of the value already there is not a change, so a
+  game's per-frame OAM copy costs nothing).
+- **VRAM**: `vram.eng_gen[e]` counts every change to a byte of a bank
+  engine e reads (the per-page engine mask `weng` is rebuilt with the page
+  tables) and every remap. Display capture writes only LCDC banks, which no
+  engine reads; the ARM7's banks and the 3D slots are not engine regions.
+- **3D line**: compared by value (1 KB).
+- Not reused: display capture lines (they need `gfx`), VRAM and
+  main-memory display, an engine switched off, the 2D unit tests (`lc_on`
+  is set by the machine; they poke memory directly).
+
+A state load remaps VRAM, which bumps `eng_gen`: a loaded machine draws
+every line afresh. In SoulSilver 0-6000 (p12) 70 % of engine A's lines and
+90 % of engine B's are reused. Engine A's misses are mostly memory changes
+elsewhere in the engine's VRAM (65 %: a counter per engine, not per line),
+then register changes (15 %) and the 3D line (9 %); see "Left for later".
+
+`tests/nds_perf_test.nim` runs 15 2D ROMs (scrolling, affine and
+rotscale BGs, affine and extended-palette sprites, H-blank and mid-frame
+windows, bitmaps, 3D under 2D) with reuse on and off, changes palette, OAM,
+BG VRAM and the mapping behind reused lines through the bus, and loads a
+state over a running machine. Dropping the palette/OAM or the VRAM count
+fails it.
+
 ## Numbers
 
 Host instructions retired (`/usr/bin/time -l`), real BIOS unless noted,

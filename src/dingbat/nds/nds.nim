@@ -365,6 +365,8 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.arm9.wl_on = skip
   n.arm7.wl_on = skip
   n.gpu3d.reuse_on = skip
+  n.gpu.engine_a.lc_on = skip
+  n.gpu.engine_b.lc_on = skip
   n.cp15.reset()
   n.tm.init_timing()
   n.tm.update_regions(n.cp15)

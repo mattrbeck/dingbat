@@ -10,6 +10,11 @@
 ## zero page when none is), and nil when several banks overlap; only nil
 ## pages take the bank-mask loop. `wfast` is the same for writes, nil for
 ## unmapped pages too. Both are rebuilt with the masks on every VRAMCNT write.
+##
+## Line reuse (gpu/engine2d.nim): `eng_gen[e]` counts every change to what
+## 2D engine e (0 = A, 1 = B) can read here -- a store that changes a byte
+## of a bank mapped into one of its regions (BG, OBJ, extended palettes;
+## `weng` is that engine mask per page), and every remap.
 
 type
   VramBank* = enum vbA, vbB, vbC, vbD, vbE, vbF, vbG, vbH, vbI
@@ -40,6 +45,10 @@ type
     vramstat*: uint8                       ## 0x4000240 read on ARM7: C/D as WRAM
     tex_gen*: uint64                       ## bumped by every remap and every write
                                            ## through the texture/palette slots (not saved)
+    eng_gen*: array[2, uint64]             ## per 2D engine: bumped by every remap and
+                                           ## every change to a bank it reads (not saved)
+    weng: array[VramRegion, seq[uint8]]    ## per page: the engines whose banks a write
+                                           ## there reaches (bit 0 A, bit 1 B)
 
 const
   PAGE_SHIFT = 14
@@ -72,6 +81,7 @@ proc new_vram*(): Vram =
     result.pages[r] = newSeq[uint16](n)
     result.fast[r] = newSeq[PagePtr](n)
     result.wfast[r] = newSeq[PagePtr](n)
+    result.weng[r] = newSeq[uint8](n)
   result.rebuild_fast()
   # LCDC pages never change: bank b's LCDC window is fixed. (Present only
   # while the bank's MST is 0, so the mask is rebuilt in remap.)
@@ -159,8 +169,25 @@ proc locate(v: Vram; r: VramRegion; offset: int; b: VramBank): int {.inline.} =
   ## its pages; the offset within the bank is offset mod bank size.
   bank_offset(b) + (offset and (BANK_SIZE[b] - 1))
 
+const ENGINE_REGIONS = [(vrABg, 1'u8), (vrAObj, 1'u8), (vrABgExtPal, 1'u8), (vrAObjExtPal, 1'u8),
+                        (vrBBg, 2'u8), (vrBObj, 2'u8), (vrBBgExtPal, 2'u8), (vrBObjExtPal, 2'u8)]
+
 proc rebuild_fast(v: Vram) =
   let zp = cast[PagePtr](addr v.zero[0])
+  # which engines read each bank (a bank has one mapping: its MST)
+  var bank_eng: array[VramBank, uint8]
+  for (r, e) in ENGINE_REGIONS:
+    for m in v.pages[r]:
+      for b in VramBank:
+        if (m and (1'u16 shl ord(b))) != 0: bank_eng[b] = bank_eng[b] or e
+  for r in VramRegion:
+    for p in 0 ..< v.pages[r].len:
+      var e = 0'u8
+      for b in VramBank:
+        if (v.pages[r][p] and (1'u16 shl ord(b))) != 0: e = e or bank_eng[b]
+      v.weng[r][p] = e
+  inc v.eng_gen[0]
+  inc v.eng_gen[1]
   for r in VramRegion:
     for p in 0 ..< v.pages[r].len:
       let m = v.pages[r][p]
@@ -207,6 +234,13 @@ proc read16*(v: Vram; r: VramRegion; offset: int): uint16 {.inline.} =
 proc read32*(v: Vram; r: VramRegion; offset: int): uint32 {.inline.} =
   uint32(v.read16(r, offset)) or (uint32(v.read16(r, offset + 2)) shl 16)
 
+template engines_see(v: Vram; r: VramRegion; page: int) =
+  ## A store changed a byte at `page` of region r.
+  let e = v.weng[r][page]
+  if e != 0:
+    if (e and 1) != 0: inc v.eng_gen[0]
+    if (e and 2) != 0: inc v.eng_gen[1]
+
 proc write8*(v: Vram; r: VramRegion; offset: int; value: uint8) =
   if r in {vrTexture, vrTexPal}: inc v.tex_gen
   let o = offset mod REGION_SIZE[r]
@@ -214,15 +248,20 @@ proc write8*(v: Vram; r: VramRegion; offset: int; value: uint8) =
   if mask == 0: return
   for b in VramBank:
     if (mask and (1'u16 shl ord(b))) != 0:
-      v.mem[v.locate(r, o, b)] = value
+      let i = v.locate(r, o, b)
+      if v.mem[i] != value:
+        v.engines_see(r, o shr PAGE_SHIFT)
+        v.mem[i] = value
 
 proc write16*(v: Vram; r: VramRegion; offset: int; value: uint16) =
   if r in {vrTexture, vrTexPal}: inc v.tex_gen
   let o = offset mod REGION_SIZE[r]
   let q = v.wfast[r][o shr PAGE_SHIFT]
   if q != nil:
-    let i = o and (PAGE_SIZE - 2)
-    q[i] = uint8(value); q[i + 1] = uint8(value shr 8)
+    let p = cast[ptr uint16](addr q[o and (PAGE_SIZE - 2)])
+    if p[] != value:
+      v.engines_see(r, o shr PAGE_SHIFT)
+      p[] = value
     return
   v.write8(r, offset, uint8(value))
   v.write8(r, offset + 1, uint8(value shr 8))

@@ -69,6 +69,30 @@ type
     winmask: array[256, uint8]            ## bits 0-3 BG, 4 OBJ, 5 effects
     line_semi: bool                       ## any blending OBJ pixel on this line
     line_objwin: bool
+    # line reuse (`render_line`): what each visible line was drawn from last
+    # time, and the line it gave; none of it is machine state (not saved)
+    lc_on*: bool                          ## reuse enabled (the machine sets it)
+    mem_gen*: uint64                      ## bumped by the bus for every change to
+                                          ## this engine's palette or OAM half
+    lc_valid: array[192, bool]
+    lc_key: array[192, LineKey]
+    lc_line: array[192, array[256, uint16]]
+    lc_3d: seq[array[256, uint32]]        ## engine A: the 3D line each was drawn with
+    lc_reused*: int                       ## lines reused so far (a statistic)
+
+  LineKey = object
+    ## Everything a visible line's pixels depend on besides VRAM, palette
+    ## and OAM contents (counted by `gen`) and the 3D line: the registers,
+    ## the window and affine latches as the line starts.
+    gen: uint64
+    dispcnt: uint32
+    bgcnt, bghofs, bgvofs: array[4, uint16]
+    bgpa, bgpb, bgpc, bgpd: array[2, int16]
+    bgx, bgy, mos_bgx, mos_bgy: array[2, int32]
+    winh: array[2, uint16]
+    winin, winout, mosaic, bldcnt, bldalpha, bldy, master_bright: uint16
+    win_inside: array[2, bool]
+    uses3d: bool
 
 const
   BG_LAYER_MASK = 0x1F00'u32
@@ -730,18 +754,24 @@ proc composite(e: Engine2D; bgs: uint32; windows: bool) =
   else:
     if effects: pixel_loop(false, true) else: pixel_loop(false, false)
 
+proc shown_bgs(e: Engine2D): uint32 =
+  ## The BGs this line draws: DISPCNT's enables, less those the mode lacks.
+  let mode = int(e.bg_mode)
+  result = (e.dispcnt and BG_LAYER_MASK) shr 8
+  let (k2, k3) = BG23_KIND[mode]
+  if mode == 7 or (mode == 6 and e.id == engB): result = 0
+  if mode == 6: result = result and 0x5         # BG0 (3D) and BG2 only
+  if k2 == bkNone: result = result and not 4'u32
+  if k3 == bkNone: result = result and not 8'u32
+
 proc render_gfx*(e: Engine2D; y: int) =
   ## The graphics pipeline into e.gfx (display mode 1, and capture source A).
   if (e.dispcnt and 0x80) != 0:            # forced blank
     for x in 0 ..< 256: e.gfx[x] = 0x7FFF
     return
   let mode = int(e.bg_mode)
-  var bgs = (e.dispcnt and BG_LAYER_MASK) shr 8
+  let bgs = e.shown_bgs()
   let (k2, k3) = BG23_KIND[mode]
-  if mode == 7 or (mode == 6 and e.id == engB): bgs = 0
-  if mode == 6: bgs = bgs and 0x5               # BG0 (3D) and BG2 only
-  if k2 == bkNone: bgs = bgs and not 4'u32
-  if k3 == bkNone: bgs = bgs and not 8'u32
   e.render_objs(y)
   let windows = e.compute_windows()
   if (bgs and 1) != 0:
@@ -789,6 +819,46 @@ proc render_bg_line*(e: Engine2D; y: int) =
   e.render_gfx(y)
   e.line = e.gfx
 
+# ---------------------------------------------------------------------------
+# Line reuse
+#
+# A graphics line (display mode 1) reads the engine's registers and line
+# latches, its palette and OAM halves, the VRAM banks mapped into its BG,
+# OBJ and extended-palette regions, and (engine A) the 3D line; what it
+# writes that outlives the line is e.line and, with affine mosaic, the
+# reference-point latch (everything else -- bgpix, objpix, the window mask
+# -- is scratch, rewritten before it is read, and not saved). So a line
+# whose inputs all equal those it had when last drawn comes out the same,
+# and is copied instead of drawn. The bus counts every change to the
+# palette or OAM half (`mem_gen`, a store of an equal value is not a
+# change) and vram.nim every change to a bank an engine reads and every
+# remap (`eng_gen`); the registers and latches are compared as a key, the
+# 3D line by value. Display capture, VRAM and main-memory display draw
+# every line. Off without the machine (`lc_on`, the 2D unit tests poke
+# memory directly) and with DINGBAT_NDS_NO_SKIP=1 (docs/nds/perf.md).
+
+proc line_key(e: Engine2D): LineKey =
+  LineKey(gen: e.mem_gen + e.vram.eng_gen[ord(e.id)], dispcnt: e.dispcnt,
+          bgcnt: e.bgcnt, bghofs: e.bghofs, bgvofs: e.bgvofs,
+          bgpa: e.bgpa, bgpb: e.bgpb, bgpc: e.bgpc, bgpd: e.bgpd,
+          bgx: e.bgx, bgy: e.bgy, mos_bgx: e.mos_bgx, mos_bgy: e.mos_bgy,
+          winh: e.winh, winin: e.winin, winout: e.winout, mosaic: e.mosaic,
+          bldcnt: e.bldcnt, bldalpha: e.bldalpha, bldy: e.bldy,
+          master_bright: e.master_bright, win_inside: e.win_inside,
+          uses3d: e.line3d != nil)
+
+proc latch_mosaic(e: Engine2D; y: int) =
+  ## What `affine_walk` leaves behind: an affine BG with mosaic latches its
+  ## reference point on a mosaic block's first line.
+  let bgs = e.shown_bgs()
+  let (k2, k3) = BG23_KIND[int(e.bg_mode)]
+  for bg in 2..3:
+    let k = if bg == 2: k2 else: k3
+    if (bgs and (1'u32 shl bg)) != 0 and k in [bkAffine, bkExt, bkLarge] and
+       (e.bgcnt[bg] and 0x40) != 0 and y mod e.mosaic_bg_v == 0:
+      e.mos_bgx[bg - 2] = e.bgx[bg - 2]
+      e.mos_bgy[bg - 2] = e.bgy[bg - 2]
+
 proc render_line*(e: Engine2D; y: int; need_gfx = false) =
   ## One visible line into e.line. Called at H-blank start of lines 0-191.
   ## `need_gfx` renders the graphics composite into e.gfx even when the
@@ -797,6 +867,16 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
     for x in 0 ..< 256: e.line[x] = 0
     return
   let dm = e.display_mode
+  let cache = e.lc_on and dm == 1 and not need_gfx and y < 192
+  var key: LineKey
+  if cache:
+    key = e.line_key()
+    if e.lc_valid[y] and e.lc_key[y] == key and
+       (e.line3d == nil or e.lc_3d[y] == e.line3d[]):
+      e.latch_mosaic(y)
+      e.line = e.lc_line[y]
+      inc e.lc_reused
+      return
   if dm == 1 or need_gfx: e.render_gfx(y)
   case dm
   of 0:
@@ -815,5 +895,14 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
     # main-memory display: the line the FIFO delivered (bit 15 unused)
     for x in 0 ..< 256: e.line[x] = e.mmem_line[x] and 0x7FFF
   e.apply_master_brightness()
+  if cache:
+    e.lc_valid[y] = true
+    e.lc_key[y] = key
+    e.lc_line[y] = e.line
+    if e.line3d != nil:
+      if e.lc_3d.len == 0: e.lc_3d.setLen(192)
+      e.lc_3d[y] = e.line3d[]
+  elif y < 192:
+    e.lc_valid[y] = false
 
 {.pop.}
