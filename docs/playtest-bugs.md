@@ -3356,6 +3356,27 @@ timer, per chip ID), not from a reference. Until then Advance Wars stays a
 frame out of phase; any game that writes flash on first boot or while
 saving and paces itself by the poll count can shift the same way.
 
+**Datasheet search (2026-10-02): no usable timing, core unchanged.** dingbat
+identifies as Panasonic MN63F805MNP (ID 1B32h, 64K; Advance Wars is a 64K
+cart) and Sanyo LE26FV10N1TS (ID 1362h, 128K). Neither part has a public
+datasheet: no hit on alldatasheet, datasheetarchive, onsemi (Sanyo's
+successor) or a general search; the only sources name the parts and IDs
+(<https://reinerziegler.de.mirrors.gg8.se/GBA/gba.htm>, gbhwdb cart
+entries). GBATEK's "GBA Cart Backup Flash ROM" table
+(<https://problemkaputt.de/gbatek.htm>, same in the mgba-emu/gbatek
+markdown) leaves the average timings "?,?,?" for both and gives only
+timeouts, 1B32h: write 10 ms, sector erase 500 ms, chip erase 500 ms; 1362h:
+all "?". Timeouts bound a busy model from above but do not set it. Public
+datasheets exist only for chips dingbat does not report: SST's SST39VF0x0
+family (DS20005023B,
+<https://ww1.microchip.com/downloads/en/DeviceDoc/20005023B.pdf>) gives
+byte program 14 us typical / 20 us max (~235 / 336 cycles), sector erase
+18 ms / 25 ms, chip erase 70 ms / 100 ms, with Data# polling (DQ7) and
+Toggle Bit (DQ6) only, no DQ5 -- while Advance Wars' poll reads DQ5 as a
+timeout, so the Panasonic part polls like an AMD-style chip, not an SST one.
+Borrowing another maker's timing would be a guess dressed as a spec, so the
+value still has to come from a real Panasonic (and Sanyo) cart, as above.
+
 ## 36. Super Mario Advance 3: the cart's EEPROM decides 1-1, 2026-10-02
 
 **Symptom.** On the frozen script every dingbat config reaches 1-1 with pink
