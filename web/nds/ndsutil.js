@@ -69,48 +69,129 @@ const NdsUtil = (() => {
   };
 
   // --- Two screens -------------------------------------------------------
-  // The picture is one composite frame: "stack" puts the top screen above
-  // the bottom one (256 x 384+gap), "side" puts them side by side (512+gap x
-  // 192). `pref` is "auto" | "stack" | "side"; auto takes whichever shows
-  // the screens bigger in the box (a tie stacks, the console's own shape).
-  const dims = (mode, gap = 0) =>
-    mode === "side" ? [2 * W + gap, H] : [W, 2 * H + gap];
+  // The picture is one composite in layout pixels (a screen's own pixel at
+  // 1x). The arrangement places the screens in it:
+  //   stack   top over bottom, `gap` apart (256 x 384+gap)
+  //   side    side by side (512+gap x 192)
+  //   focus   one screen whole, the other at SMALL of its size below it or
+  //           beside it, whichever shows the whole one bigger (a tie: below)
+  //   single  one screen only
+  //   auto    stack or side, whichever shows the screens bigger (a tie
+  //           stacks, the console's own shape)
+  // `swap` puts the bottom screen first: above / left in stack and side, the
+  // whole (or only) one in focus and single. `rot` turns the whole picture a
+  // quarter turn clockwise (1) or anticlockwise (3), for the games played
+  // with the console held sideways like a book; 0 is upright.
+  const ARRANGEMENTS = ["auto", "stack", "side", "focus", "single"];
+  const SMALL = 1 / 3;
+  // The gap between the screens, in layout pixels: none, a hinge line, or
+  // the console's own. Console: Assumed, an estimate from a DS Lite's
+  // published size (each half 73.9 mm deep closed) and its 62 x 46 mm
+  // screens (0.24 mm a pixel): about 14 mm from the top screen to the hinge
+  // and 8 mm on to the bottom screen, 22 mm or ~90 pixels. Worth a ruler on
+  // a real console.
+  const GAPS = { none: 0, hinge: 8, console: 90 };
+  const ROTATIONS = [0, 1, 3];
 
+  // The upright composite of one shape: its size and each screen's rect
+  // (null for a screen not shown). Focus keeps at most a hinge's gap.
+  const compose = (shape, gap = 0, swap = false) => {
+    const first = swap ? "bottom" : "top", second = swap ? "top" : "bottom";
+    const rects = { top: null, bottom: null };
+    const r = (x, y, w = W, h = H) => ({ x, y, w, h });
+    const g = Math.min(gap, GAPS.hinge), sw = W * SMALL, sh = H * SMALL;
+    switch (shape) {
+      case "side":
+        rects[first] = r(0, 0); rects[second] = r(W + gap, 0);
+        return { w: 2 * W + gap, h: H, rects };
+      case "single":
+        rects[first] = r(0, 0);
+        return { w: W, h: H, rects };
+      case "focus-below":
+        rects[first] = r(0, 0); rects[second] = r((W - sw) / 2, H + g, sw, sh);
+        return { w: W, h: H + g + sh, rects };
+      case "focus-beside":
+        rects[first] = r(0, 0); rects[second] = r(W + g, (H - sh) / 2, sw, sh);
+        return { w: W + g + sw, h: H, rects };
+      default: // stack
+        rects[first] = r(0, 0); rects[second] = r(0, H + gap);
+        return { w: W, h: 2 * H + gap, rects };
+    }
+  };
+
+  // Integer scaling where it fits: whole multiples from 1x up, and a box
+  // too small for 1x gets the plain fit (never a picture bigger than it).
   const fitScale = (availW, availH, w, h, integer) => {
     if (!(availW > 0 && availH > 0)) return 0;
     const s = Math.min(availW / w, availH / h);
-    return integer ? Math.max(1, Math.floor(s)) : s;
+    return integer && s >= 1 ? Math.floor(s) : s;
   };
 
-  const layout = (availW, availH, pref = "auto", { gap = 0, integer = false } = {}) => {
-    let mode = pref === "stack" || pref === "side" ? pref : null;
-    if (!mode) {
-      const [sw, sh] = dims("stack", gap), [ww, wh] = dims("side", gap);
-      // Compare unrounded fits even under integer scaling: a box that holds
-      // 1.9x one way and 1.2x the other wants the first.
-      mode = fitScale(availW, availH, ww, wh, false) > fitScale(availW, availH, sw, sh, false)
-        ? "side" : "stack";
-    }
-    const [w, h] = dims(mode, gap);
+  // The arrangement for a box of availW x availH: `mode` is the arrangement
+  // (auto resolved), `shape` the composite drawn, w x h the picture as shown
+  // (turned), uw x uh the upright composite, `rects` each screen's place in
+  // it, and the scale that fits it.
+  const layout = (availW, availH, pref = "auto",
+                  { gap = 0, integer = false, swap = false, rot = 0 } = {}) => {
+    rot = ROTATIONS.includes(rot) ? rot : 0;
+    const turned = (c) => (rot ? [c.h, c.w] : [c.w, c.h]);
+    // Compare unrounded fits even under integer scaling: a box that holds
+    // 1.9x one way and 1.2x the other wants the first.
+    const fit = (c) => fitScale(availW, availH, ...turned(c), false);
+    const pick = (a, b) => {
+      const ca = compose(a, gap, swap), cb = compose(b, gap, swap);
+      return fit(cb) > fit(ca) ? [b, cb] : [a, ca];
+    };
+    let mode = ARRANGEMENTS.includes(pref) ? pref : "auto";
+    let shape, c;
+    if (mode === "auto") { [shape, c] = pick("stack", "side"); mode = shape; }
+    else if (mode === "focus") [shape, c] = pick("focus-below", "focus-beside");
+    else { shape = mode; c = compose(shape, gap, swap); }
+    const [w, h] = turned(c);
     const scale = fitScale(availW, availH, w, h, integer);
-    return { mode, w, h, gap, scale, cssW: w * scale, cssH: h * scale };
+    return { mode, shape, rot, swap, gap, uw: c.w, uh: c.h, w, h, rects: c.rects,
+             scale, cssW: w * scale, cssH: h * scale };
   };
 
-  // Where each screen sits in the composite frame, in its pixels.
-  const screenRects = (mode, gap = 0) => mode === "side"
-    ? { top: { x: 0, y: 0 }, bottom: { x: W + gap, y: 0 } }
-    : { top: { x: 0, y: 0 }, bottom: { x: 0, y: H + gap } };
+  // An upright rect of `lay`'s composite where it shows, turned.
+  const turnRect = (r, lay) => lay.rot === 1 ? { x: lay.uh - r.y - r.h, y: r.x, w: r.h, h: r.w }
+    : lay.rot === 3 ? { x: r.y, y: lay.uw - r.x - r.w, w: r.h, h: r.w }
+    : { x: r.x, y: r.y, w: r.w, h: r.h };
 
-  // A client point on the canvas -> the bottom screen's pixel. `rect` is the
-  // canvas's getBoundingClientRect() (the picture fills it: the app sizes
-  // the box to the frame's aspect), `lay` is { mode, w, h, gap }. `inside`
-  // says whether the point is on the bottom screen at all; x/y are clamped
-  // to it either way, so a stylus dragged off the edge stays on the edge.
+  // What the presenter draws: each shown screen's place in the picture (in
+  // layout pixels of the turned picture) and the turn it is drawn with.
+  const views = (lay) => ["top", "bottom"].filter((s) => lay.rects[s])
+    .map((screen) => ({ screen, dst: turnRect(lay.rects[screen], lay), rot: lay.rot }));
+
+  // A client point on the canvas -> the upright composite's coordinates.
+  // `rect` is the canvas's getBoundingClientRect() (the picture fills it:
+  // the app sizes the box to the picture's aspect).
+  const toComposite = (clientX, clientY, rect, lay) => {
+    const dx = (clientX - rect.left) * lay.w / rect.width;
+    const dy = (clientY - rect.top) * lay.h / rect.height;
+    return lay.rot === 1 ? [dy, lay.uh - dx] : lay.rot === 3 ? [lay.uw - dy, dx] : [dx, dy];
+  };
+
+  // Which screen a client point is on: "top", "bottom" or null.
+  const screenAt = (clientX, clientY, rect, lay) => {
+    const [fx, fy] = toComposite(clientX, clientY, rect, lay);
+    for (const s of ["bottom", "top"]) {
+      const r = lay.rects[s];
+      if (r && fx >= r.x && fx < r.x + r.w && fy >= r.y && fy < r.y + r.h) return s;
+    }
+    return null;
+  };
+
+  // A client point -> the bottom screen's pixel, exact at any scale,
+  // arrangement and turn. `inside` says whether the point is on the bottom
+  // screen at all; x/y are clamped to it either way, so a stylus dragged off
+  // the edge stays on the edge. With the bottom screen not shown, nothing
+  // is inside.
   const touchPoint = (clientX, clientY, rect, lay) => {
-    const fx = (clientX - rect.left) * lay.w / rect.width;
-    const fy = (clientY - rect.top) * lay.h / rect.height;
-    const b = screenRects(lay.mode, lay.gap || 0).bottom;
-    const px = Math.floor(fx - b.x), py = Math.floor(fy - b.y);
+    const b = lay.rects && lay.rects.bottom;
+    if (!b) return { x: 0, y: 0, inside: false };
+    const [fx, fy] = toComposite(clientX, clientY, rect, lay);
+    const px = Math.floor((fx - b.x) * W / b.w), py = Math.floor((fy - b.y) * H / b.h);
     const inside = px >= 0 && px < W && py >= 0 && py < H &&
       Number.isFinite(px) && Number.isFinite(py);
     return {
@@ -118,6 +199,38 @@ const NdsUtil = (() => {
       y: Math.min(H - 1, Math.max(0, py || 0)),
       inside,
     };
+  };
+
+  // The inverse: the client point at the centre of a screen's pixel (px, py),
+  // or null when that screen is not shown. Tests aim the pointer with it.
+  const clientPoint = (screen, px, py, rect, lay) => {
+    const r = lay.rects[screen];
+    if (!r) return null;
+    const fx = r.x + (px + 0.5) * r.w / W, fy = r.y + (py + 0.5) * r.h / H;
+    const [dx, dy] = lay.rot === 1 ? [lay.uh - fy, fx] : lay.rot === 3 ? [fy, lay.uw - fx] : [fx, fy];
+    return [rect.left + dx * rect.width / lay.w, rect.top + dy * rect.height / lay.h];
+  };
+
+  // --- Microphone -----------------------------------------------------------
+  // Web Audio's float samples (-1..1) as the int16 the core queues
+  // (nds_push_mic), clamped.
+  const micInt16 = (f32) => {
+    const out = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) {
+      const v = Math.max(-1, Math.min(1, f32[i] || 0));
+      out[i] = Math.round(v * 32767);
+    }
+    return out;
+  };
+  // Blowing into the microphone, for a device without one: n samples of
+  // white noise at about 60% of full scale. Assumed: blowing reads as loud
+  // broadband noise, which is what a game's blow test listens for (a level
+  // over a threshold).
+  const BLOW_LEVEL = 20000;
+  const blowNoise = (n, rnd = Math.random) => {
+    const out = new Int16Array(n);
+    for (let i = 0; i < n; i++) out[i] = Math.round((rnd() * 2 - 1) * BLOW_LEVEL);
+    return out;
   };
 
   // Stereo float32 resampled by an integer-ish speed factor for 2x (every
@@ -164,7 +277,8 @@ const NdsUtil = (() => {
 
   return {
     W, H, FPS, AUDIO_RATE, BTN, FROM_APP, fromAppInput, isNdsName, crc16,
-    looksLikeNdsRom, headerInfo, dims, layout, screenRects, touchPoint,
-    speedAudio, BIOS_KINDS, biosKindOf, biosSizeOk,
+    looksLikeNdsRom, headerInfo, ARRANGEMENTS, SMALL, GAPS, ROTATIONS, compose, layout,
+    turnRect, views, screenAt, touchPoint, clientPoint,
+    micInt16, BLOW_LEVEL, blowNoise, speedAudio, BIOS_KINDS, biosKindOf, biosSizeOk,
   };
 })();

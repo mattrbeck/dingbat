@@ -41,6 +41,8 @@ before(async () => {
   // the DS's backing size); on a Mac it can have the GPU.
   browser = await playwright.chromium.launch({ headless: true, args: [
     "--mute-audio", "--autoplay-policy=no-user-gesture-required",
+    // A fake microphone (a beep), granted without asking: the mic test.
+    "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
     ...(process.platform === "darwin" ? ["--enable-gpu", "--use-angle=metal", "--ignore-gpu-blocklist"] : []),
   ] });
 });
@@ -123,12 +125,8 @@ test("the stylus lands on the bottom-screen pixel under the pointer", { skip }, 
   }), 8);
   const P = [100, 80];
   // The client point of bottom-screen pixel P's centre, from the layout.
-  const at = await page.evaluate(([x, y]) => {
-    const r = canvasEl.getBoundingClientRect();
-    const b = NdsUtil.screenRects(ndsLay.mode, ndsLay.gap).bottom;
-    return [r.left + (b.x + x + 0.5) * r.width / ndsLay.w,
-            r.top + (b.y + y + 0.5) * r.height / ndsLay.h];
-  }, P);
+  const at = await page.evaluate(([x, y]) =>
+    NdsUtil.clientPoint("bottom", x, y, canvasEl.getBoundingClientRect(), ndsLay), P);
   await page.mouse.move(at[0], at[1]);
   await page.mouse.down();
   await settle();
@@ -145,6 +143,230 @@ test("the stylus lands on the bottom-screen pixel under the pointer", { skip }, 
   await page.evaluate(() => ndsCore._nds_set_touch(0, 0, 0));
   assert.deepEqual(viaPointer, direct, "the pointer touched (100, 80)");
   assert.notDeepEqual(viaPointer, elsewhere, "and the readout tells points apart");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// --- Display modes (docs/nds/web.md "Screens") ---------------------------------
+
+// Every arrangement, swap, gap and turn the Screens panel offers.
+const MODES = [];
+for (const layout of ["stack", "side", "focus", "single"]) {
+  for (const swap of [false, true]) {
+    for (const rot of [0, 3, 1]) MODES.push({ layout, swap, rot, gap: "hinge" });
+  }
+}
+MODES.push({ layout: "stack", swap: false, rot: 0, gap: "none" },
+           { layout: "side", swap: false, rot: 0, gap: "console" },
+           { layout: "auto", swap: false, rot: 0, gap: "hinge" });
+const setMode = (page, m) => page.evaluate(async (m) => {
+  await setNdsDisplay({ swap: m.swap, rot: m.rot, gap: m.gap });
+  await setNdsLayout(m.layout);
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+}, m);
+const tag = (m) => `${m.layout} swap=${m.swap} rot=${m.rot} gap=${m.gap}`;
+
+test("every arrangement draws each screen where the layout says, the right way up", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, rom("fb_both.nds"));
+  await framesPast(page, 10);
+  for (const m of MODES) {
+    await setMode(page, m);
+    // Canvas fractions of screen pixels, through the same maths the stylus uses.
+    const at = await page.evaluate(() => {
+      const r = canvasEl.getBoundingClientRect();
+      const f = (s, x, y) => {
+        const p = NdsUtil.clientPoint(s, x, y, r, ndsLay);
+        return p && [(p[0] - r.left) / r.width, (p[1] - r.top) / r.height];
+      };
+      return { tl: f("top", 8, 8), tr: f("top", 247, 8), bottom: f("bottom", 128, 96),
+               shown: { top: !!ndsLay.rects.top, bottom: !!ndsLay.rects.bottom } };
+    });
+    const pts = [at.tl, at.tr, at.bottom].filter(Boolean);
+    const px = await canvasAt(page, pts);
+    let i = 0;
+    if (at.shown.top) {
+      const tl = px[i++], tr = px[i++];
+      // fb_both's top screen: blue at its top left, red at its top right.
+      assert.ok(tl[2] > 150 && tl[0] < 80, `${tag(m)}: top screen's top left is blue: ${tl}`);
+      assert.ok(tr[0] > 150 && tr[2] < 80, `${tag(m)}: top screen's top right is red: ${tr}`);
+    }
+    if (at.shown.bottom) {
+      assert.deepEqual(px[i++], [255, 0, 255], `${tag(m)}: the bottom screen is magenta`);
+    }
+  }
+  // The console's gap is the stage's colour, not black.
+  await setMode(page, { layout: "stack", swap: false, rot: 0, gap: "console" });
+  const [gap] = await canvasAt(page, [[0.5, (192 + 45) / 474]]);
+  const stage = await page.evaluate(() => ndsStageRgb().map((v) => Math.round(v * 255)));
+  assert.deepEqual(gap, stage, "the gap is painted the stage's colour");
+  // The filters still draw a turned screen (a flat colour stays flat).
+  await page.evaluate(() => { upscaleFilter = "xbr"; updateCanvasScaling(); });
+  await setMode(page, { layout: "focus", swap: true, rot: 3, gap: "hinge" });
+  const [mid] = await canvasAt(page, [await page.evaluate(() => {
+    const r = canvasEl.getBoundingClientRect(), p = NdsUtil.clientPoint("bottom", 128, 96, r, ndsLay);
+    return [(p[0] - r.left) / r.width, (p[1] - r.top) / r.height];
+  })]);
+  assert.deepEqual(mid, [255, 0, 255], "xBR, turned, in Focus");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("the pointer touches the bottom-screen pixel under it in every arrangement", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, rom("fb_both.nds"));
+  await framesPast(page, 5);
+  // What reaches the core (the stylus test above shows set_touch reaching the game).
+  await page.evaluate(() => {
+    window.__touches = [];
+    const real = ndsCore._nds_set_touch;
+    ndsCore._nds_set_touch = (x, y, d) => { window.__touches.push([x, y, d]); real(x, y, d); };
+  });
+  for (const m of MODES) {
+    await setMode(page, m);
+    for (const P of [[100, 80], [3, 188], [252, 4]]) {
+      const at = await page.evaluate((P) =>
+        NdsUtil.clientPoint("bottom", P[0], P[1], canvasEl.getBoundingClientRect(), ndsLay), P);
+      await page.evaluate(() => { window.__touches = []; });
+      if (!at) {
+        // One screen showing the top: a click there touches nothing.
+        const r = await page.evaluate(() => { const b = canvasEl.getBoundingClientRect();
+                                              return [b.left + b.width / 2, b.top + b.height / 2]; });
+        await page.mouse.click(r[0], r[1]);
+        assert.deepEqual(await page.evaluate(() => window.__touches), [], tag(m));
+        await page.evaluate(() => setNdsDisplay({ swap: false })); // the tap swapped
+        break;
+      }
+      await page.mouse.move(at[0], at[1]);
+      await page.mouse.down();
+      await page.mouse.up();
+      const got = await page.evaluate(() => window.__touches);
+      assert.deepEqual(got[0], [P[0], P[1], 1], `${tag(m)} at ${P}`);
+    }
+  }
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The rule for the touch controls: they never change size or place; only
+// the screens take or give room.
+const ctlRects = (page) => page.evaluate(async () => {
+  // Past the controls' entrance (they rise into place as a game opens).
+  await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {})));
+  return ["controls", "dpad", "ab", "lr", "select-start"].map((id) => {
+    const r = document.getElementById(id).getBoundingClientRect();
+    return [id, Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+  });
+});
+const boxes = (page) => page.evaluate(() => {
+  const g = (el) => { const r = el.getBoundingClientRect();
+                      return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
+  return { canvas: g(canvasEl), stage: g(stageEl), bar: g(document.getElementById("topbar")),
+           handle: g(document.getElementById("topbar-handle")),
+           controls: g(document.getElementById("controls")),
+           dpad: g(document.getElementById("dpad")), ab: g(document.getElementById("ab")) };
+});
+
+for (const vp of [{ width: 375, height: 812 }, { width: 390, height: 844 }]) {
+  test(`phone upright ${vp.width}x${vp.height}: the bar hides for the screens, the controls never move`,
+    { skip }, async () => {
+      const ctx = await browser.newContext({ viewport: vp, isMobile: true, hasTouch: true,
+                                             deviceScaleFactor: 2, serviceWorkers: "block" });
+      const { page, errors } = await newPage(ctx);
+      await addGame(page, rom("fb_both.nds"));
+      await framesPast(page, 5);
+      await setMode(page, { layout: "stack", swap: false, rot: 0, gap: "hinge" });
+      await page.evaluate(() => setNdsDisplay({ barHide: false }));
+      await sleep(300);
+      const ref = await ctlRects(page);
+      const shown = await boxes(page);
+      assert.ok(shown.bar.b > 40, "the bar is on screen");
+      await page.evaluate(() => setNdsDisplay({ barHide: true }));
+      await sleep(400);
+      const hidden = await boxes(page);
+      assert.ok(hidden.bar.b <= 0.5, "the bar went off the top: " + hidden.bar.b);
+      assert.ok(hidden.handle.h > 10 && hidden.handle.t >= 0, "the handle is there to bring it back");
+      assert.ok(hidden.canvas.h > shown.canvas.h + 20, `the screens grew: ${shown.canvas.h} -> ${hidden.canvas.h}`);
+      assert.ok(hidden.canvas.t >= hidden.handle.b - 0.5, "the handle covers no screen");
+      for (const m of MODES) {
+        await setMode(page, m);
+        assert.deepEqual(await ctlRects(page), ref, `${tag(m)}: the controls stay put`);
+        const b = await boxes(page);
+        assert.ok(b.canvas.b <= b.controls.t + 0.5 && b.canvas.t >= b.stage.t - 0.5 &&
+                  b.canvas.l >= -0.5 && b.canvas.r <= vp.width + 0.5, `${tag(m)}: the screens fit the stage`);
+      }
+      // The handle brings the bar back over the stage, and takes it away.
+      await page.locator("#topbar-handle").click();
+      await sleep(350);
+      assert.ok((await boxes(page)).bar.t >= -0.5, "pulled down");
+      assert.deepEqual(await ctlRects(page), ref);
+      await page.locator("#topbar-handle").click();
+      await sleep(350);
+      assert.ok((await boxes(page)).bar.b <= 0.5, "and away");
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    });
+}
+
+test("phone sideways: every arrangement stays clear of the control rails", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true,
+                                         hasTouch: true, deviceScaleFactor: 2, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, rom("fb_both.nds"));
+  await framesPast(page, 5);
+  const ref = await ctlRects(page);
+  for (const m of MODES) {
+    await setMode(page, m);
+    assert.deepEqual(await ctlRects(page), ref, `${tag(m)}: the controls stay put`);
+    const b = await boxes(page);
+    assert.ok(b.canvas.l >= b.dpad.r - 0.5 && b.canvas.r <= b.ab.l + 0.5,
+              `${tag(m)}: between the d-pad and the face buttons`);
+  }
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("the lid closes and opens, and the microphone and Blow reach the core", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, serviceWorkers: "block",
+                                         permissions: ["microphone"] });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, rom("fb_both.nds"));
+  await framesPast(page, 5);
+  assert.equal(await page.evaluate(() => typeof ndsCore._nds_set_lid + typeof ndsCore._nds_push_mic),
+               "functionfunction", "the core exports both");
+  await page.keyboard.press("KeyN");
+  assert.equal(await page.locator("#nds-lid-open").isVisible(), true, "closed: the screens dim");
+  await page.locator("#nds-lid-open").click();
+  assert.equal(await page.locator("#nds-lid-open").isVisible(), false, "a tap opened it");
+  await page.evaluate(() => {
+    window.__mic = [];
+    const real = ndsCore._nds_push_mic;
+    ndsCore._nds_push_mic = (p, n, rate) => { window.__mic.push([n, rate]); real(p, n, rate); };
+  });
+  // Blow, held from the keyboard: a frame's noise at 16 kHz before each frame.
+  await page.keyboard.down("KeyH");
+  await sleep(800);
+  await page.keyboard.up("KeyH");
+  const blown = await page.evaluate(() => window.__mic.splice(0));
+  assert.ok(blown.length >= 3 && blown.every(([n, r]) => r === 16000 && n === 268),
+            "blown: " + JSON.stringify(blown.slice(0, 3)) + " x" + blown.length);
+  await sleep(100);
+  assert.equal(await page.evaluate(() => window.__mic.length), 0, "and no more once let go");
+  // The microphone (Chromium's fake device), from the Screens panel.
+  await page.locator("#nds-layout-btn").click();
+  await page.locator('#nds-panel [data-nds-action="mic"]').click();
+  await until(page, () => window.__mic.length > 5).catch(async (e) => {
+    throw new Error(e.message + " " + JSON.stringify(await page.evaluate(() => [!!ndsMic,
+      ndsMic && ndsMic.ctx.state, paused, ndsBlowers.size, window.__mic.length, ndsPanelOpen])));
+  });
+  const heard = await page.evaluate(() => ({ calls: window.__mic.slice(0, 3), rate: ndsMic.ctx.sampleRate,
+    pressed: document.querySelector('#nds-panel [data-nds-action="mic"]').getAttribute("aria-pressed") }));
+  assert.ok(heard.calls.every(([n, r]) => n === 1024 && r === heard.rate), JSON.stringify(heard));
+  assert.equal(heard.pressed, "true");
+  await page.locator('#nds-panel [data-nds-action="mic"]').click();
+  assert.equal(await page.evaluate(() => ndsMic), null, "off again");
   assert.deepEqual(errors, []);
   await ctx.close();
 });
