@@ -56,7 +56,11 @@ on a dev page (`web/nds.html`) and in the main web app (`docs/nds/web.md`). Hard
 One master clock = ARM9 cycles (67.027964 MHz). A line is 355 dots x 6 bus
 cycles = 4260 master cycles, H-blank at 3212, 263 lines, 59.8261 Hz.
 `NDS.run_until` runs the ARM9 then the ARM7 up to the same slice end (at most
-64 master cycles, or the next event), then dispatches due events.
+64 master cycles, or the next event), then dispatches due events. While
+neither CPU can change anything (each halted with no interrupt pending, or
+spinning in a loop proven to do nothing) a slice runs straight to the next
+event, and a CPU skips the whole passes of such a loop instead of executing
+them (docs/nds/perf.md: same clock, opcode count and state as executing).
 
 CPU timing (`timing.nim`, hooked in by bus9/bus7): every code fetch and
 data access is charged from GBATEK's "DS Memory Timings" tables (per region,
@@ -153,6 +157,8 @@ tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machi
 tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
 tests/nds_compat_test.nim          checks for the homebrew sweep's fixes
+tests/nds_perf_test.nim            idle-loop skipping and 3D frame reuse change nothing
+                                   (docs/nds/perf.md)
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask

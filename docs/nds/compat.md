@@ -234,6 +234,11 @@ SoulSilver: run 40 %, read7 9 %, 2D composite 8 %, I-cache tag lookups
 5 %) that is 2-3x SoulSilver's per-frame cost. sd4k is the one 3D-bound
 case. Modelling power-off would remove the spinning ports' remaining cost;
 the rest needs a cheaper interpreter path, not a per-ROM fix.
+Since then (docs/nds/perf.md) idle-loop skipping removes most of a
+spinning program's cost when its loop provably changes nothing (`B .`
+endings, VCOUNT and IPC polls: 13x fewer host instructions on fb_both,
+-31 % on trans flag), and an unchanged 3D frame is reused; the figures
+above are from before.
 
 ## Tables
 
