@@ -268,10 +268,11 @@ when defined(r3dprof):
 #   X(y) = x0 << 18 + slope * (y - y0)  (minus 1 when x decreases),
 # slope = dx * floor(2^18 / dy), or exactly +-1.0 when |dx| == dy.
 # On each row an edge covers a run of dots: x-major edges (|dx| > dy) the
-# dots whose centres lie between X(y) and X(y + 1) (rounded, half up),
-# other edges the one dot holding X(y); a vertical right edge covers the
-# dot left of it. These are the rules the 3d_probe_tri* ROMs pin (run
-# against the reference cores, docs/oracles.md).
+# dots whose centres lie between X(y) and X(y) + the slope with its low 9
+# bits cleared (rounded, half up: the hardware line captures), other edges
+# the one dot holding X(y); a vertical right edge covers the dot left of
+# it. These are the rules the 3d_probe_tri* ROMs pin (run against the
+# reference cores, docs/oracles.md).
 
 const
   XSHIFT = 18
