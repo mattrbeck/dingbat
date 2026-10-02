@@ -29,8 +29,9 @@ post passes), `gpu3d/geometry.nim` (1-dot culling, clipping).
   edges), `_degen` / `_degen_aa` / `_degen_edge` (zero-width polygons),
   `_edge2` (edge marking corner cases), `_dot` (1-dot polygons and
   DISP_1DOT_DEPTH), `_xlu_seam` / `_xlu_seam_nb` (translucent seams),
-  `_ztie` (depth ties at an apex), `_hwline` (captured lines with gaps,
-  laid over the captures).
+  `_ztie` (depth ties at an apex), `_zinterp` / `_x` / `_s` / `_y2`
+  (depth interpolation read off flat strips), `_hwline` (captured lines
+  with gaps, laid over the captures).
 - **Pokemon SoulSilver** (run only): the bedroom (frame 6600), the
   kitchen (8000), the title's 3D Lugia (bottom screen, frame ~860), with
   the p12 input script, against the reference core.
@@ -76,7 +77,13 @@ here as the full rule set.
 Seams: adjacent opaque polygons sharing an edge neither overlap nor leave
 gaps under the small-polygon rule (the bottom/right runs of one are the
 top/left runs of the next); with edge marking or AA on, both draw the
-shared edge and the later one loses the depth tie. Translucent polygons
+shared edge and the depth test (strictly less) decides. Which one wins a
+tie depends on the depth's rounding (**new**, 3d_probe_zinterp*): Z depth
+is exact along edges, but across a span it steps by an 18-bit reciprocal
+of the span's length, `a + (dz * n * floor(2^18 / d)) >> 18`, landing just
+short of exact at whole steps, so a polygon drawn later wins the tie
+where its depth rises from left to right (152 -> 0 dots in
+3d_probe_zinterp_x). Translucent polygons
 with blending on are full size, so a shared edge is drawn twice and
 blends twice unless the dot already holds the polygon's ID (one ID per
 mesh hides the seam) or a depth-updating polygon made the second fail the
@@ -159,6 +166,7 @@ Dots of our 3D buffer differing from melonDS DS 1.4 at 18-bit colour
 | 3d_probe_degen / _aa / _edge (new) | 213 / 117 / 0 | 0 / 0 / 0 |
 | 3d_probe_edge2, _dot, _xlu_seam, _xlu_seam_nb (new) | 0 | 0 |
 | 3d_probe_ztie (new) | 6 | 6 |
+| 3d_probe_zinterp / _s / _y2 / _x (new) | 0 / 0 / 0 / 152 | 0 / 0 / 0 / 0 |
 | 3d_probe_hwline (new; against the hardware captures) | 6 | 0 (the reference cores: 6) |
 | every other 3d_* ROM | unchanged (hashes kept) | |
 
@@ -184,8 +192,9 @@ are byte-identical to before; 8000 changes (808 dots), as intended.
 - **Depth at an apex** (3d_probe_ztie, 6 dots; SoulSilver 3 dots): where a
   polygon's apex dot ties a flat neighbour's depth, the reference shows
   the later polygon when it gets nearer from the apex; sampling edge depth
-  at the row centre fixes those dots but breaks 3d_depth (58 dots), so the
-  depth interpolation along edges is not pinned.
+  at the row centre fixes those dots but breaks 3d_depth (58 dots), and
+  3d_probe_zinterp shows edge depth exact on whole rows, so the apex dot
+  must take its depth some other way (not found).
 - **Coverage residue**: 3d_probe_aa 22, _aa2 4, _aa4 6, 3d_aa 31 dots, all
   one coverage step (y-major rounding, rows where both edges' runs share
   dots near a vertex).
