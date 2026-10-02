@@ -511,6 +511,41 @@ proc scene_wbuffer() =
   g.finish("wbuffer")
   check(alpha5(g.px(128, 180)) == 31, "near floor drawn")
 
+proc scene_line_gaps() =
+  # Hardware display captures (StrikerX3/nds-interp, TL-<dx>x<dy>: a white
+  # wire-frame line from dot (0,0), drawn with w = 3.0): an x-major run's
+  # far end steps the slope without its low 9 bits, so a dot whose centre
+  # x(y+1) passes by less than that is left out (docs/nds/3d-edges.md).
+  echo "line gaps (hardware captures)"
+  for (dx, dy, gapx, gapy, has) in [(69, 49, 53, 37, false), (251, 69, 145, 39, false),
+                                    (97, 16, 48, 7, true)]:
+    let (g, _) = fresh()
+    g.reg(0x060, 0x0008, 0xFFFF)
+    g.reg(0x350, (31'u32 shl 16) or (63'u32 shl 24))
+    g.reg(0x354, 0x7FFF, 0xFFFF)
+    g.cmd(0x60, 0xBFFF0000'u32)
+    g.cmd(0x10, 0)
+    var m: array[16, float]
+    m[0] = 1; m[5] = 1; m[10] = 1; m[15] = 3
+    g.load4x4(m)
+    g.cmd(0x10, 2); g.cmd(0x15)
+    g.cmd(0x29, poly_attr(0, front = true, back = true))
+    g.cmd(0x40, 0)
+    g.color(31, 31, 31)
+    proc v16(g: Gpu3d; vx, vy: int) =
+      g.cmd(0x23, uint32(cast[uint16](int16(vx))) or (uint32(cast[uint16](int16(vy))) shl 16), 0)
+    g.v16(-12288, 12288); g.v16(-12288, 12288)
+    g.v16(-12288 + dx * 96, 12288 - dy * 128)
+    g.cmd(0x41)
+    g.cmd(0x50, 0)
+    g.on_vblank()
+    g.render_frame()
+    # the rear plane is black, the line white
+    let drawn = (g.px(gapx, gapy) and 0x3F3F3F) != 0
+    check(drawn == has, "line to (" & $dx & "," & $dy & "): dot (" & $gapx & "," & $gapy & ") " &
+          (if has: "drawn" else: "left out") & " as on hardware")
+    check((g.px(gapx - 1, gapy) and 0x3F3F3F) != 0, "line to (" & $dx & "," & $dy & "): the dot before is drawn")
+
 proc scene_registers() =
   echo "registers"
   let (g, _) = fresh()
@@ -653,7 +688,7 @@ proc scene_budget() =
 # NDS3D_UPDATE=1 prints the current table instead of checking it.
 
 const ROM_HASHES = [
-  ("3d_aa", 0xD975E35C'u32),
+  ("3d_aa", 0x61F4ACC0'u32),
   ("3d_alpha", 0xF2349E45'u32),
   ("3d_alpha_noblend", 0xDD017278'u32),
   ("3d_blendmodes", 0xE339E209'u32),
@@ -666,13 +701,23 @@ const ROM_HASHES = [
   ("3d_geom", 0x5DDB7367'u32),
   ("3d_highlight", 0x98B0EEB4'u32),
   ("3d_light", 0xC97F4195'u32),
-  ("3d_lines", 0x39602BC0'u32),
-  ("3d_probe_aa", 0x56D6975B'u32),
-  ("3d_probe_aa2", 0xE4B88D5F'u32),
+  ("3d_lines", 0x0EBC535A'u32),
+  ("3d_probe_aa", 0xECD367B5'u32),
+  ("3d_probe_aa2", 0x7FE8EE94'u32),
+  ("3d_probe_aa3", 0x7CA905F7'u32),
+  ("3d_probe_aa3_edge", 0x0A099C75'u32),
+  ("3d_probe_aa3_em", 0xC0E36B35'u32),
+  ("3d_probe_aa4", 0xCE98E0F8'u32),
   ("3d_probe_aa_edge", 0xE3239CE2'u32),
   ("3d_probe_clip", 0xA5425543'u32),
   ("3d_probe_clip_persp", 0xED82B05F'u32),
   ("3d_probe_clipq", 0x318D51CE'u32),
+  ("3d_probe_degen", 0x2A2E3368'u32),
+  ("3d_probe_degen_aa", 0xF0E22BB9'u32),
+  ("3d_probe_degen_edge", 0x466996FF'u32),
+  ("3d_probe_dot", 0x8C4DCC1C'u32),
+  ("3d_probe_edge2", 0xA1611174'u32),
+  ("3d_probe_hwline", 0x9D8E2EF2'u32),
   ("3d_probe_lerp", 0xB433E213'u32),
   ("3d_probe_light", 0x758ED3D5'u32),
   ("3d_probe_light_spec", 0x9CE83578'u32),
@@ -692,6 +737,13 @@ const ROM_HASHES = [
   ("3d_probe_tri_s2_edge", 0xC04E4977'u32),
   ("3d_probe_tri_xlu", 0x7CF56E69'u32),
   ("3d_probe_wire", 0xF9C3C7B7'u32),
+  ("3d_probe_xlu_seam", 0x934688EA'u32),
+  ("3d_probe_xlu_seam_nb", 0xBCFEA4DF'u32),
+  ("3d_probe_zinterp", 0xE7C9B56A'u32),
+  ("3d_probe_zinterp_s", 0xAB25A20D'u32),
+  ("3d_probe_zinterp_x", 0x3DD22C86'u32),
+  ("3d_probe_zinterp_y2", 0xF1DF10B7'u32),
+  ("3d_probe_ztie", 0xBA1273B1'u32),
   ("3d_rearbitmap", 0xE3EA2B86'u32),
   ("3d_shadow", 0x355DB884'u32),
   ("3d_small", 0xB917CCF7'u32),
@@ -791,6 +843,7 @@ when isMainModule:
   scene_registers()
   scene_timing()
   scene_budget()
+  scene_line_gaps()
   rom_scenes()
   rom_render_timing()
   if failures > 0:
