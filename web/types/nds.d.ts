@@ -23,6 +23,11 @@ interface NdsCoreModule {
   _nds_fb_bottom(): number;
   _nds_set_button(id: number, pressed: number): void;
   _nds_set_touch(x: number, y: number, down: number): void;
+  // The hinge (1 closed, 0 open) and the microphone: `n` mono int16 samples
+  // at `ptr`, `rate` Hz, queued behind what is queued (io/mic.nim). Optional:
+  // the page still runs a build without them (no lid, no microphone).
+  _nds_set_lid?: (closed: number) => void;
+  _nds_push_mic?: (ptr: number, n: number, rate: number) => void;
   _nds_status(): number;
   _nds_audio_frames(): number;
   _nds_audio_ptr(): number;

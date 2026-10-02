@@ -80,8 +80,8 @@ power, timers, BB/RF) and adds:
   air times. A frame is posted when its carrier starts; each other station
   on the channel books IRQ06 at the frame's data start and delivery at its
   end. The channel is matched from the RF writes against the firmware's
-  table (0 = unknown, hears everything: the synthesized firmware has no
-  table). W_RF_PINS: 0044h preamble, 0046h data, 0084h listening.
+  table (0 = unknown, hears everything; the synthesized firmware has a
+  table derived from GBATEK, docs/nds/saves.md). W_RF_PINS: 0044h preamble, 0046h data, 0084h listening.
 - **Lockstep** (`nds/air.nim`): `AirLink` runs every machine to the same
   master-cycle target in 4096-cycle (61 us) quanta. Every cross-console
   effect lands at least a preamble (96 us) after it is posted, so it is

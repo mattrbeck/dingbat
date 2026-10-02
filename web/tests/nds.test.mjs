@@ -60,11 +60,113 @@ test("automatic layout shows the screens whichever way they come out bigger", ()
   eq([l.mode, l.w, l.h], ["stack", 256, 392]);
   l = NdsUtil.layout(400, 900, "side", { gap: 8 });
   eq([l.mode, l.w, l.h], ["side", 520, 192]);
-  // Integer scaling floors (never below 1x); the mode is still chosen on the
-  // unrounded fit.
+  // Integer scaling floors where 1x fits; the mode is still chosen on the
+  // unrounded fit. A box too small for 1x gets the plain fit, never a
+  // picture bigger than the box.
   l = NdsUtil.layout(1000, 800, "auto", { integer: true });
   eq([l.mode, l.scale, l.cssW, l.cssH], ["stack", 2, 512, 768]);
-  assert.equal(NdsUtil.layout(100, 100, "stack", { integer: true }).scale, 1);
+  assert.equal(NdsUtil.layout(100, 100, "stack", { integer: true }).scale, 100 / 384);
+});
+
+test("focus shows one screen whole and the other a third, below or beside", () => {
+  // A phone held upright (375 x 330): the small one goes below.
+  let l = NdsUtil.layout(375, 330, "focus", { gap: 8 });
+  eq([l.mode, l.shape, l.w, l.h], ["focus", "focus-below", 256, 192 + 8 + 64]);
+  eq(l.rects.top, { x: 0, y: 0, w: 256, h: 192 });
+  eq(l.rects.bottom, { x: (256 - 256 / 3) / 2, y: 200, w: 256 / 3, h: 64 });
+  assert.equal(l.scale, 330 / 264);
+  // A wide box: beside, centred on the whole one's height.
+  l = NdsUtil.layout(1200, 400, "focus", { gap: 8 });
+  eq([l.shape, l.w, l.h], ["focus-beside", 256 + 8 + 256 / 3, 192]);
+  eq(l.rects.bottom, { x: 264, y: 64, w: 256 / 3, h: 64 });
+  // Swapped, the bottom (touch) screen is the whole one.
+  l = NdsUtil.layout(375, 330, "focus", { gap: 8, swap: true });
+  eq(l.rects.bottom, { x: 0, y: 0, w: 256, h: 192 });
+  assert.equal(l.rects.top.w, 256 / 3);
+  // Focus keeps at most a hinge's gap even with the console's.
+  assert.equal(NdsUtil.layout(375, 330, "focus", { gap: 90 }).h, 192 + 8 + 64);
+});
+
+test("one screen, swap and the gap choices", () => {
+  let l = NdsUtil.layout(800, 600, "single");
+  eq([l.w, l.h, l.rects.bottom], [256, 192, null]);
+  assert.equal(l.scale, 3.125);
+  l = NdsUtil.layout(800, 600, "single", { swap: true });
+  eq([l.rects.top, l.rects.bottom], [null, { x: 0, y: 0, w: 256, h: 192 }]);
+  // Swapped stacks put the bottom screen above, side by side on the left.
+  eq(NdsUtil.layout(800, 900, "stack", { gap: 8, swap: true }).rects.bottom, { x: 0, y: 0, w: 256, h: 192 });
+  eq(NdsUtil.layout(800, 900, "side", { gap: 8, swap: true }).rects.top, { x: 264, y: 0, w: 256, h: 192 });
+  eq(NdsUtil.GAPS, { none: 0, hinge: 8, console: 90 });
+  eq([NdsUtil.layout(800, 900, "stack", { gap: 90 }).h, NdsUtil.layout(800, 900, "stack").h],
+     [474, 384]);
+  // Unknown arrangements are automatic.
+  assert.equal(NdsUtil.layout(400, 900, "sideways").mode, "stack");
+});
+
+test("a turned picture swaps its sides, and automatic weighs the turned shapes", () => {
+  // Book, left (anticlockwise): a stack turned is 392 wide and 256 tall.
+  let l = NdsUtil.layout(1000, 600, "stack", { gap: 8, rot: 3 });
+  eq([l.w, l.h, l.uw, l.uh], [392, 256, 256, 392]);
+  // The top screen ends up on the left, the bottom on the right.
+  const v = Object.fromEntries(NdsUtil.views(l).map((x) => [x.screen, x.dst]));
+  eq(v.top, { x: 0, y: 0, w: 192, h: 256 });
+  eq(v.bottom, { x: 200, y: 0, w: 192, h: 256 });
+  // Book, right (clockwise): the other way round.
+  l = NdsUtil.layout(1000, 600, "stack", { gap: 8, rot: 1 });
+  const r = Object.fromEntries(NdsUtil.views(l).map((x) => [x.screen, x.dst]));
+  eq([r.top.x, r.bottom.x], [200, 0]);
+  // Turned, a stack is wide and side by side is tall: automatic picks by the
+  // turned shapes.
+  assert.equal(NdsUtil.layout(400, 1100, "auto", { gap: 8, rot: 1 }).mode, "side");
+  assert.equal(NdsUtil.layout(1100, 400, "auto", { gap: 8, rot: 1 }).mode, "stack");
+  // Anything but a quarter turn is upright.
+  assert.equal(NdsUtil.layout(800, 600, "stack", { rot: 2 }).rot, 0);
+});
+
+test("the stylus lands on the same pixel in every arrangement, swap, gap and turn", () => {
+  const pts = [[0, 0], [255, 0], [0, 191], [255, 191], [100, 80], [37, 150]];
+  let checked = 0;
+  for (const mode of NdsUtil.ARRANGEMENTS) {
+    for (const swap of [false, true]) {
+      for (const gap of Object.values(NdsUtil.GAPS)) {
+        for (const rot of NdsUtil.ROTATIONS) {
+          const lay = NdsUtil.layout(700, 500, mode, { gap, swap, rot });
+          const rect = { left: 13, top: 7, width: lay.cssW, height: lay.cssH };
+          if (!lay.rects.bottom) {
+            // One screen showing the top: no touch anywhere on it.
+            const c = NdsUtil.clientPoint("top", 10, 10, rect, lay);
+            assert.equal(NdsUtil.touchPoint(c[0], c[1], rect, lay).inside, false);
+            assert.equal(NdsUtil.screenAt(c[0], c[1], rect, lay), "top");
+            continue;
+          }
+          for (const [x, y] of pts) {
+            const c = NdsUtil.clientPoint("bottom", x, y, rect, lay);
+            const tag = `${mode} swap=${swap} gap=${gap} rot=${rot} (${x}, ${y})`;
+            eq(NdsUtil.touchPoint(c[0], c[1], rect, lay), { x, y, inside: true }, tag);
+            assert.equal(NdsUtil.screenAt(c[0], c[1], rect, lay), "bottom", tag);
+            checked++;
+          }
+          if (lay.rects.top) {
+            const c = NdsUtil.clientPoint("top", 128, 96, rect, lay);
+            assert.equal(NdsUtil.touchPoint(c[0], c[1], rect, lay).inside, false);
+            assert.equal(NdsUtil.screenAt(c[0], c[1], rect, lay), "top");
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 300, "every shape with a bottom screen was tried: " + checked);
+});
+
+test("microphone samples become clamped int16; Blow is loud noise", () => {
+  eq([...NdsUtil.micInt16(new Float32Array([0, 1, -1, 2, -3, 0.5]))],
+     [0, 32767, -32767, 32767, -32767, 16384]);
+  let i = 0;
+  const seq = [0, 1, 0.5, 0.25];
+  const n = NdsUtil.blowNoise(4, () => seq[i++]);
+  eq([...n], [-20000, 20000, 0, -10000]);
+  const rms = Math.sqrt([...NdsUtil.blowNoise(4000)].reduce((s, v) => s + v * v, 0) / 4000);
+  assert.ok(rms > 8000, "loud: " + rms);
 });
 
 test("the stylus maps client points to the bottom screen's pixels, scaled", () => {
@@ -164,6 +266,9 @@ const fakeCore = () => {
     _nds_audio_frames: () => 0, _nds_audio_ptr: () => 0, _nds_audio_clear() {},
     _nds_set_button(id, d) { c.buttons.push([id, d]); },
     _nds_set_touch(x, y, d) { c.touches.push([x, y, d]); },
+    lid: [], mic: [],
+    _nds_set_lid(closed) { c.lid.push(closed); },
+    _nds_push_mic(p, n, rate) { c.mic.push({ n, rate, first: new Int16Array(heap.buffer, p, n)[0] }); },
     _nds_fb555_top: () => 64, _nds_fb555_bottom: () => 64,
     _nds_fb_top: () => 64, _nds_fb_bottom: () => 64,
     // The chip, as the game left it: copied into the heap on request.
@@ -240,6 +345,25 @@ test("reset and an imported .sav reboot the DS core in place on the new save", a
   assert.equal(core.booted[1].how, "reboot", "no second copy of the ROM");
   eq([...core.booted[1].save], [4, 3, 2, 1]);
   eq([...app.idb.get("save:Imp.nds")], [4, 3, 2, 1]);
+});
+
+test("a DS save import goes to the core whole: no GBA container sniffing, .dsv taken", async () => {
+  const { app, core } = await appWithCore({ confirmResult: true });
+  await app.api.handleRomFile(fakeFile("Big.nds", ROM));
+  for (let i = 0; i < 20 && !core.booted.length; i++) await settle();
+  // 512K whose bytes at 42Ch happen to read as a GameShark SP tag: for a GBA
+  // game that is a container (cut to 128K), for a DS game just save data.
+  const sav = new Uint8Array(512 * 1024).fill(0x11);
+  sav.set([0x78, 0x56, 0x34, 0x12], 0x42C);
+  await app.runIn("(b) => applyImportedSave(b, 'Big.sav')")(sav);
+  for (let i = 0; i < 20 && core.booted.length < 2; i++) await settle();
+  assert.equal(core.booted[1].save.length, 512 * 1024, "the whole file reached the core");
+  assert.equal(app.idb.get("save:Big.nds").length, 512 * 1024);
+  // A dropped .dsv is a save to import, not a ROM (the core strips its footer).
+  app.runIn("handleDroppedFile")(fakeFile("Big.dsv", u8(7, 7, 7, 7)));
+  for (let i = 0; i < 20 && core.booted.length < 3; i++) await settle();
+  assert.equal(core.booted[2].how, "reboot");
+  eq([...core.booted[2].save], [7, 7, 7, 7]);
 });
 
 test("a GB/GBA game after a DS one hands the DS core's memory back", async () => {
@@ -334,4 +458,118 @@ test("save states stay off until the DS core exports them, then go through the h
   eq(core.loaded, [5, 6]);
   app.runIn("ndsApplyModeClasses()");
   assert.equal(app.document.body.classList.contains("nds-states"), true);
+});
+
+// --- index.js: display choices, lid, microphone -------------------------------
+
+const dsGame = async (name = "Disp.nds") => {
+  const { app, core } = await appWithCore();
+  await app.api.handleRomFile(fakeFile(name, ROM));
+  for (let i = 0; i < 20 && !core.booted.length; i++) await settle();
+  return { app, core };
+};
+const key = (app, type, code, extra = {}) =>
+  app.dispatchDoc(type, { code, target: app.document.body, repeat: false, ...extra });
+
+test("the display choices are stored, come back, and anything unknown falls back", async () => {
+  const { app } = await dsGame();
+  await app.runIn("setNdsLayout('focus')");
+  await app.runIn("setNdsDisplay({ gap: 'console', rot: 3, swap: true, barHide: false })");
+  assert.equal(app.idb.get("nds-layout"), "focus");
+  eq(app.idb.get("nds-display"), { swap: true, gap: "console", rot: 3, barHide: false });
+  assert.equal(app.document.body.classList.contains("nds-bar-hide"), false);
+  // A fresh page reads them back.
+  const app2 = await loadApp();
+  for (const [k, v] of app.idb) app2.idb.set(k, v);
+  await app2.runIn("loadNdsLayoutFromStorage()");
+  assert.equal(app2.runIn("ndsLayoutPref"), "focus");
+  eq(app2.runIn("({ ...ndsDisplay })"), { swap: true, gap: "console", rot: 3, barHide: false });
+  // A damaged record: every field its default (the bar hides on phones).
+  app2.idb.set("nds-display", { gap: "huge", rot: 2, swap: "yes" });
+  app2.idb.set("nds-layout", "sideways");
+  await app2.runIn("loadNdsLayoutFromStorage()");
+  assert.equal(app2.runIn("ndsLayoutPref"), "auto");
+  eq(app2.runIn("({ ...ndsDisplay })"), { swap: false, gap: "hinge", rot: 0, barHide: true });
+  assert.equal(app2.document.body.classList.contains("nds-bar-hide"), true);
+  // Reset all settings forgets them.
+  assert.ok(app2.runIn("SETTINGS_KEYS").includes("nds-display"));
+});
+
+test("a tap on the top screen swaps the screens in Focus; a touch never starts there", async () => {
+  const { app, core } = await dsGame();
+  await app.runIn("setNdsLayout('focus')");
+  // Focus, the small one below, at 1x on a canvas at (0, 0).
+  app.runIn("ndsLay = NdsUtil.layout(256, 264, 'focus', { gap: 8 })");
+  const canvas = app.elements.get("canvas");
+  canvas.setBox(0, 0, 256, 264);
+  const ev = (x, y, id = 3) => ({ clientX: x, clientY: y, pointerId: id, pointerType: "touch", button: 0 });
+  await canvas.dispatch("pointerdown", ev(100, 50));
+  await canvas.dispatch("pointerup", ev(103, 52));
+  assert.equal(app.runIn("ndsDisplay.swap"), true, "the tap swapped");
+  eq(core.touches, [], "and touched nothing");
+  // A drag across the top screen is not a tap.
+  app.runIn("ndsLay = NdsUtil.layout(256, 264, 'focus', { gap: 8 })"); // top whole again
+  await canvas.dispatch("pointerdown", ev(100, 50));
+  await canvas.dispatch("pointerup", ev(160, 50));
+  assert.equal(app.runIn("ndsDisplay.swap"), true, "unchanged");
+  // The small bottom screen still takes the stylus.
+  const at = app.runIn(
+    "NdsUtil.clientPoint('bottom', 30, 30, { left: 0, top: 0, width: 256, height: 264 }, ndsLay)");
+  await canvas.dispatch("pointerdown", ev(at[0], at[1], 4));
+  await canvas.dispatch("pointerup", ev(at[0], at[1], 4));
+  eq(core.touches, [[30, 30, 1], [30, 30, 0]]);
+});
+
+test("the stylus reaches the core through a turned picture", async () => {
+  const { app, core } = await dsGame();
+  app.runIn("ndsLay = NdsUtil.layout(392, 256, 'stack', { gap: 8, rot: 3 })");
+  const canvas = app.elements.get("canvas");
+  canvas.setBox(0, 0, 392, 256);
+  // Book, left: the bottom screen is the right-hand 192 x 256, turned
+  // anticlockwise: its pixel (x, y) is at (200 + y, 255 - x).
+  const ev = (x, y) => ({ clientX: x, clientY: y, pointerId: 9, pointerType: "touch", button: 0 });
+  await canvas.dispatch("pointerdown", ev(200 + 40 + 0.5, 255 - 10 + 0.5));
+  await canvas.dispatch("pointerup", ev(200 + 40 + 0.5, 255 - 10 + 0.5));
+  eq(core.touches, [[10, 40, 1], [10, 40, 0]]);
+});
+
+test("keys V, B, O and N change the arrangement, swap, turn and lid; H blows", async () => {
+  const { app, core } = await dsGame();
+  await key(app, "keydown", "KeyV");
+  assert.equal(app.runIn("ndsLayoutPref"), "stack");
+  await key(app, "keydown", "KeyV");
+  await key(app, "keydown", "KeyV");
+  assert.equal(app.runIn("ndsLayoutPref"), "focus");
+  await key(app, "keydown", "KeyB");
+  assert.equal(app.runIn("ndsDisplay.swap"), true);
+  await key(app, "keydown", "KeyO");
+  assert.equal(app.runIn("ndsDisplay.rot"), 1);
+  await key(app, "keydown", "KeyN");
+  assert.equal(core.lid.at(-1), 1, "lid closed");
+  assert.equal(app.document.body.classList.contains("nds-lid-closed"), true);
+  await key(app, "keydown", "KeyN");
+  assert.equal(core.lid.at(-1), 0, "and open");
+  // H held: a frame's worth of loud noise before each frame, at 16 kHz.
+  await key(app, "keydown", "KeyH");
+  app.runIn("ndsRunFrame(ndsCore, ndsAudioOut(), false, 1)");
+  assert.equal(core.mic.length, 1);
+  assert.equal(core.mic[0].rate, 16000);
+  assert.equal(core.mic[0].n, Math.ceil(16000 / 59.8261));
+  await key(app, "keyup", "KeyH");
+  app.runIn("ndsRunFrame(ndsCore, ndsAudioOut(), false, 1)");
+  assert.equal(core.mic.length, 1, "nothing once let go");
+});
+
+test("the lid starts open at every boot and a state load is told where it is", async () => {
+  const { app, core } = await dsGame();
+  eq(core.lid, [0], "the boot opened it");
+  app.runIn("ndsSetLid(true)");
+  core._nds_state_size = () => 3;
+  core._nds_state_data = () => 4096;
+  core._nds_state_load = () => 1;
+  assert.equal(app.api.applyStateBytes(u8(5, 6)), true);
+  eq(core.lid, [0, 1, 1], "closed, and closed again after the load");
+  assert.equal(app.runIn("ndsStart(ndsCoreGame, null, null, null)"), true); // a reset's reboot
+  assert.equal(core.lid.at(-1), 0);
+  assert.equal(app.document.body.classList.contains("nds-lid-closed"), false);
 });

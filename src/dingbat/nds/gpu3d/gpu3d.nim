@@ -83,6 +83,14 @@ type
     polys*: seq[Polygon]          ## the rendering side of Polygon/Vertex RAM
     verts*: seq[Vertex]
     rendered: bool
+    reuse_on*: bool               ## reuse an unchanged frame (DINGBAT_NDS_NO_SKIP=1 clears it)
+    reuse_ok: bool                ## the last_* fields describe what `ren` holds
+    reused*: int                  ## frames reused so far (a statistic)
+    last_gen: uint64              ## vram.tex_gen, DISP3DCNT, swap parameter,
+    last_disp3dcnt, last_param: uint32  ## render registers and buffers the
+    last_regs: array[40, uint32]  ## last real render drew
+    last_polys: seq[Polygon]
+    last_verts: seq[Vertex]
     rdlines: uint32               ## RDLINES_COUNT of the last frame
     underflow_next: bool          ## the frame being shown runs out of lines
     line*: array[256, uint32]     ## 0 alpha = transparent
@@ -402,8 +410,30 @@ proc on_vblank*(g: Gpu3d) =
   g.scratch_ok = false
 
 proc render_frame*(g: Gpu3d) =
+  ## The renderer reads nothing but the swapped Polygon/Vertex buffers,
+  ## DISP3DCNT, the swap parameter, the render registers and the texture
+  ## and palette slots, and writes its colour buffer, line costs, RDLINES
+  ## and underflow flag from them alone (render.nim; its other buffers are
+  ## scratch, rewritten before they are read). A frame whose inputs all
+  ## equal the last rendered frame's would come out the same, so it is
+  ## not drawn again: a game standing still re-submits the same scene every
+  ## frame (docs/nds/perf.md). Texture contents are covered by vram.tex_gen.
+  if g.reuse_ok and g.reuse_on and g.last_gen == g.vram.tex_gen and
+     g.last_disp3dcnt == g.disp3dcnt and g.last_param == g.ren_param and
+     g.last_regs == g.ren.regs and g.last_polys == g.polys and g.last_verts == g.verts:
+    g.rendered = true
+    inc g.reused
+    return
   g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
   g.rendered = true
+  if g.reuse_on:
+    g.reuse_ok = true
+    g.last_gen = g.vram.tex_gen
+    g.last_disp3dcnt = g.disp3dcnt
+    g.last_param = g.ren_param
+    g.last_regs = g.ren.regs
+    g.last_polys = g.polys
+    g.last_verts = g.verts
 
 proc render_line*(g: Gpu3d; y: int) =
   ## Display line y (or capture) takes its 3D line: everything due by now

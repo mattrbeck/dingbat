@@ -112,16 +112,18 @@ all three dumps; a dump-less page can only direct-boot.
 
 ## Synthesized firmware (no firmware.bin)
 
-`synth_firmware` is enough for the direct-boot path: header (console type,
-user-settings offset), MAC, two user-settings copies with valid CRCs (copy 1
-current), English, touch calibration. SoulSilver with the HLE BIOS and it
-reads flash 0x1D, 0x20, 0x36, 0x3C, the three access points at
-0x3FA00/0x3FB00/0x3FC00 and both settings copies, and gives the same frame
-3000 as with the user's dumps. Gaps: the wifi calibration area is zero
-(config length 0, so its CRC is trivially valid, but the channel mask at
-0x3C is 0 and there is no RF/BB init data), the access points are FFh, and
-there is no firmware code at all, so **a firmware boot needs a real
-firmware dump**; dingbat cannot synthesize one.
+`synth_firmware` builds every section GBATEK documents except firmware
+code: header (identifier, console type, user-settings offset, FFh unused
+bytes), a complete CRC-valid type-2 wifi calibration section (config length
+138h, channel mask 3FFEh, RF/BB/W_CONFIG init tables, per-channel RF[05h]/
+RF[06h] pairs derived from the RF9008's divider), three unconfigured
+CRC-valid access points, and two user-settings copies with valid CRCs (copy
+1 current), English, touch calibration. Each value's source is in
+docs/nds/saves.md ("The firmware fix"): before it, the wifi section had
+config length 0 and channel mask 0 and SoulSilver's CONTINUE ended in "A
+communication error has occurred". There is no firmware code at all, so
+**a firmware boot needs a real firmware dump**; dingbat cannot synthesize
+one.
 
 ## Evidence
 

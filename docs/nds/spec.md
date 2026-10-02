@@ -41,7 +41,9 @@ on a dev page (`web/nds.html`) and in the main web app (`docs/nds/web.md`). Hard
   frontends' plumbing.
 - **BIOS:** real dumps are used when present (`--bios DIR` /
   `$DINGBAT_NDS_BIOS`: `bios9.bin`, `bios7.bin`, `firmware.bin`); firmware is
-  synthesized when missing, and a missing BIOS gets the HLE BIOS (below).
+  synthesized when missing (every GBATEK section but code, the wifi
+  calibration included: docs/nds/saves.md), and a missing BIOS gets the HLE
+  BIOS (below).
   `DINGBAT_NDS_HLE=1` (or `new_nds(..., force_hle = true)`) forces the HLE
   BIOS with dumps present, to compare the two on one ROM.
 - **Boot:** direct boot by default (the card's binaries loaded, the
@@ -56,7 +58,11 @@ on a dev page (`web/nds.html`) and in the main web app (`docs/nds/web.md`). Hard
 One master clock = ARM9 cycles (67.027964 MHz). A line is 355 dots x 6 bus
 cycles = 4260 master cycles, H-blank at 3212, 263 lines, 59.8261 Hz.
 `NDS.run_until` runs the ARM9 then the ARM7 up to the same slice end (at most
-64 master cycles, or the next event), then dispatches due events.
+64 master cycles, or the next event), then dispatches due events. While
+neither CPU can change anything (each halted with no interrupt pending, or
+spinning in a loop proven to do nothing) a slice runs straight to the next
+event, and a CPU skips the whole passes of such a loop instead of executing
+them (docs/nds/perf.md: same clock, opcode count and state as executing).
 
 CPU timing (`timing.nim`, hooked in by bus9/bus7): every code fetch and
 data access is charged from GBATEK's "DS Memory Timings" tables (per region,
@@ -133,7 +139,8 @@ src/dingbat/nds/
   io/mic.nim       microphone sample queue, read by the TSC's AUX channel
   io/cart.nim      card slot (ROMCTRL, raw/KEY1/KEY2 protocol, seeds, AUXSPI)
   io/cartcrypt.nim KEY1 (BIOS7 table at run time), KEY2, secure-area forms
-  io/backup.nim    save chip: EEPROM/FRAM/FLASH, IR-cart front-end
+  io/backup.nim    save chip: EEPROM/FRAM/FLASH, detection, .sav fitting,
+                   IR-cart front-end (docs/nds/saves.md)
   io/slot2.nim     GBA slot: open bus, GBA cart (ROM, SRAM/FLASH/EEPROM via
                    gba/storage_chip.nim, GPIO), Rumble Pak, Expansion Pak
                    (docs/nds/slot2.md)
@@ -161,6 +168,8 @@ tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machi
 tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
 tests/nds_compat_test.nim          checks for the homebrew sweep's fixes, power-off, arm7_timing
+tests/nds_perf_test.nim            idle-loop skipping and 3D frame reuse change nothing
+                                   (docs/nds/perf.md)
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask

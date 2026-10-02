@@ -74,6 +74,9 @@ task test_ndssavestate, "Run the DS save-state tests (round trips at awkward mom
 task test_ndscompat, "Run the DS homebrew-sweep fix checks (docs/nds/compat.md)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndscompat_test tests/nds_compat_test.nim"
 
+task test_ndsperf, "Run the DS speed-up checks: idle-loop skipping and 3D frame reuse change nothing (docs/nds/perf.md)":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndsperf_test tests/nds_perf_test.nim"
+
 task test_ndshlebios,"Run the DS HLE BIOS SWIs against the real BIOS (or computed expectations)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndshlebios_test tests/nds_hle_bios_test.nim"
 

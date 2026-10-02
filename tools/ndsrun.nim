@@ -31,8 +31,10 @@
 ## LID@F[+D|-L] in --press closes the hinge for those frames (opening it
 ## raises the ARM7's lid IRQ; a game may sleep while it is shut).
 ##
-## --save FILE loads the card's save chip from FILE (its size picks the
-## chip) and writes it back when the run changed it.
+## --save FILE loads the card's save chip from FILE (docs/nds/saves.md: an
+## EEPROM/FRAM size names the chip, other sizes are fitted to the chip the
+## game addresses, a text footer is stripped) and writes it back when the
+## run changed or fitted it.
 ## --firmware-out FILE writes the firmware image there when the run wrote
 ## the firmware flash (the DS menu's settings, a game's WFC setup); copied
 ## as firmware.bin into a --bios directory it keeps those settings.
@@ -50,6 +52,9 @@
 ## --press and --shots keep their frame numbers. --state-layout prints the
 ## state's field layout (docs/nds/savestate.md) and exits.
 ## --pcs prints both CPUs' pc / halted state after each frame.
+## --state-hash N prints a CRC-32 of the whole machine state (the save-state
+## payload) every N frames, for comparing two runs that should be identical
+## (DINGBAT_NDS_NO_SKIP=1 turns idle-loop skipping and 3D frame reuse off: docs/nds/perf.md).
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
@@ -264,6 +269,7 @@ when isMainModule:
   var state_load = ""
   var state_load_frame = -1
   var state_layout = false
+  var state_hash = 0
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog", "rumble-log", "cartlog",
@@ -325,6 +331,7 @@ when isMainModule:
         prof_from = parseInt(r[0]); prof_to = parseInt(r[1])
       of "iolog-from": iolog_from = parseInt(val)
       of "pcs": pcs = true
+      of "state-hash": state_hash = parseInt(val)
       of "watch": watch = uint32(parseHexInt(val))
       of "text": text = val
       of "text-offset": text_offset = parseInt(val)
@@ -420,6 +427,9 @@ when isMainModule:
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
            (if n.sleeping: " S" elif n.arm7.halted: " H" else: "")
     if wav.len > 0: audio.add n.spu.take_samples()
+    if state_hash > 0 and (f + 1) mod state_hash == 0:
+      let st = n.state_payload()
+      echo "statehash ", f + 1, " ", toHex(crc32(st.toOpenArrayByte(0, st.high)), 8)
     for (file, at) in state_saves:
       if f + 1 == at:
         let image = n.state_bytes(thumbnail = true)
@@ -450,6 +460,7 @@ when isMainModule:
     echo "audio: ", audio.len div 2, " frames -> ", wav
   if save.len > 0:
     echo "save chip: ", n.cart.backup.kind, " ", n.cart.backup.data.len, " bytes",
+         (if n.cart.backup.dropped > 0: " (" & $n.cart.backup.dropped & " file bytes not kept)" else: ""),
          (if n.cart.backup.dirty: " (written -> " & save & ")" else: "")
     if n.cart.backup.dirty: writeFile(save, cast[string](n.cart.backup.data))
   if fw_out.len > 0 and n.spi.firmware_dirty:

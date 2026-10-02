@@ -8532,10 +8532,17 @@ body.clip-replaying #controls {
   background: var(--badge-ds-fg);
 }
 
-/* The screens button: a DS game in front of you only. */
+/* The screens and swap buttons: a DS game in front of you only. */
 body:not(.nds-mode) #nds-layout-btn,
-body:not(.running) #nds-layout-btn {
+body:not(.running) #nds-layout-btn,
+body:not(.nds-mode) #nds-swap-btn,
+body:not(.running) #nds-swap-btn,
+body:not(.nds-mode) #nds-panel,
+body:not(.running) #nds-panel {
   display: none !important;
+}
+#nds-swap-btn[aria-pressed="true"] svg {
+  transform: scaleY(-1);
 }
 body.nds-side #nds-layout-btn svg {
   transform: rotate(90deg);
@@ -8564,6 +8571,14 @@ body.nds-mode:not(.nds-states) #open-states {
 body.nds-mode #canvas {
   touch-action: none;
   -webkit-touch-callout: none;
+}
+/* The canvas holds the arrangement, not one screen: the presenter clears
+   around and between the screens in the stage's colour, so the box itself
+   draws no edge (Focus's empty corner would wear it). */
+body.nds-mode.running #canvas {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 /* X / Y: the DS's other two face buttons. The four make a diamond (X top,
@@ -8609,15 +8624,153 @@ body.nds-mode #b {
   bottom: auto;
 }
 
-#nds-hinge {
-  display: none;
-  position: absolute;
-  z-index: 1;
-  background: var(--stage);
-  pointer-events: none;
+/* The Screens panel (#nds-panel): under the bar's screens button, as the
+   account menu sits under its button. */
+#nds-panel {
+  position: fixed;
+  z-index: 400;
+  top: calc(var(--safe-t) + var(--bar-h) + 6px);
+  right: calc(10px + var(--safe-r));
+  box-sizing: border-box;
+  width: min(380px, calc(100vw - 20px - var(--safe-l) - var(--safe-r)));
+  max-height: calc(100dvh - var(--safe-t) - var(--bar-h) - 16px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  animation: acct-pop-in 0.16s ease-out;
 }
-body.nds-mode.running #nds-hinge {
-  display: block;
+#nds-panel[hidden] {
+  display: none;
+}
+.nds-panel-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Five arrangements do not fit a phone's row: they wrap, each on one line. */
+.chip-row[data-nds-chips] {
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.chip-row[data-nds-chips] .choice-chip {
+  min-width: 0;
+  white-space: nowrap;
+}
+.nds-panel-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.nds-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.nds-panel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+[data-nds-action][aria-pressed="true"] {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.55);
+}
+/* The microphone's level, live, as a fill from the button's left edge. */
+[data-nds-action="mic"][aria-pressed="true"] {
+  box-shadow: inset calc(var(--mic-level, 0) * 140px) 0 0 rgba(var(--accent-rgb), 0.2);
+}
+[data-nds-action="blow"] {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Only where the bar can hide for the screens: phones (a coarse pointer and
+   a side under 700 px wide or 501 px tall); hidden everywhere else. */
+@media (pointer: fine), (pointer: none), (min-width: 700px) and (min-height: 501px) {
+  .nds-phone-only {
+    display: none !important;
+  }
+}
+
+/* The lid closed: the screens dim, and a tap anywhere on the stage opens it
+   (a closed console has no touch screen to reach). */
+#nds-lid-open {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+#nds-lid-open[hidden],
+body:not(.nds-mode) #nds-lid-open,
+body:not(.running) #nds-lid-open {
+  display: none;
+}
+body.nds-mode.nds-lid-closed #canvas {
+  filter: brightness(0.35);
+}
+
+/* DS: the top bar. A phone held upright gives the bar's room to the
+   screens (body.nds-bar-hide, the "Hide the top bar" choice): the bar
+   slides off as it does on a phone held sideways, and the same handle at
+   the top brings it back. The stage keeps the handle's strip under the
+   status bar, so the handle never covers a screen; the touch controls do
+   not move. */
+@media (pointer: coarse) and (orientation: portrait) and (max-width: 699px) {
+  body.running.nds-mode.nds-bar-hide #topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    transform: translateY(-100%);
+    transition: transform 0.2s ease;
+  }
+  body.running.nds-mode.nds-bar-hide.topbar-open #topbar {
+    transform: translateY(0);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+  }
+  body.running.nds-mode.nds-bar-hide #topbar-handle {
+    display: flex;
+    top: var(--safe-t);
+  }
+  body.running.nds-mode.nds-bar-hide.topbar-open #topbar-handle {
+    top: calc(var(--bar-h) + var(--safe-t));
+  }
+  body.running.nds-mode.nds-bar-hide.topbar-open #topbar-handle svg {
+    transform: rotate(180deg);
+  }
+  body.running.nds-mode.nds-bar-hide #stage {
+    padding-top: calc(var(--safe-t) + 20px);
+  }
+  body.running.nds-mode.nds-bar-hide #clip-banner {
+    top: calc(var(--safe-t) + 26px);
+  }
+  body.running.nds-mode.nds-bar-hide.topbar-open #clip-banner {
+    top: calc(var(--bar-h) + var(--safe-t) + 10px);
+  }
 }
 
 /* Phone held sideways: Select/Start leave the bottom middle, where the

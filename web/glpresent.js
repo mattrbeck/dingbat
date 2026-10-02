@@ -10,7 +10,7 @@
 function createGlRenderer(canvasEl, nativeRes, log) {
   let gl = null, prog = null, tex = null, btex = null, lost = false;
   let uColorCorrect, uPanelGbc, uGrid, uScanHeight, uTexSize, uFilter;
-  let uScanWidth, uSubpixel;
+  let uScanWidth, uSubpixel, uView, uRot, uSrc;
   let uDmgRemap, uDmgPal, uBorderTex, uSgbBorder, uSgbBackdrop;
   let lastW = 0, lastH = 0;
   // Last SGB border generation uploaded. The image changes a handful of times
@@ -53,6 +53,15 @@ uniform float u_scan_width;
 uniform bool u_subpixel;
 uniform vec2 u_tex_size;        // game texel dimensions (w, h)
 uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR
+// --- Views (the DS's screens) ----------------------------------------------
+// With u_view, this draw is one view: the viewport is where a screen goes on
+// the canvas, u_src the screen's texels in the texture (x, y, w, h), and
+// u_rot turns it a quarter clockwise (1) or anticlockwise (3). Filters,
+// the grid and the subpixel look all work in the screen's own pixels, so a
+// turned screen turns its subpixel stripes with it, as the console's would.
+uniform bool u_view;
+uniform int u_rot;
+uniform vec4 u_src;
 // --- Super Game Boy border ---------------------------------------------
 // A 256x224 second layer in the same BGR555 packing as the game framebuffer,
 // with bit 15 = opaque (SNES colour 0 is transparent). The Game Boy window is
@@ -89,9 +98,10 @@ const vec3 DMG_SHADE[4] = vec3[4](vec3(31.0, 30.0, 26.0),   // 0x6BDF
                                   vec3(29.0, 13.0, 13.0),   // 0x35BD
                                   vec3(15.0,  7.0, 11.0));  // 0x2CEF
 
+ivec2 g_min;   // the texels a filter may read: the whole texture, or a view's
 ivec2 g_max;
 vec3 fetchRGB(ivec2 p) {
-  uint packed = texelFetch(u_tex, clamp(p, ivec2(0), g_max), 0).r & 0x7FFFu;
+  uint packed = texelFetch(u_tex, clamp(p, g_min, g_max), 0).r & 0x7FFFu;
   vec3 c = vec3(float(packed & 31u),
                 float((packed >> 5) & 31u),
                 float((packed >> 10) & 31u));
@@ -130,7 +140,6 @@ vec3 unpack555(uint packed) {
 }
 
 vec3 upscale(vec2 uv) {
-  g_max = ivec2(u_tex_size) - ivec2(1);
   vec2 pos  = uv * u_tex_size;
   ivec2 base = ivec2(floor(pos));
   vec3 E = fetchRGB(base);
@@ -201,7 +210,19 @@ vec3 shade(vec3 c) {
 
 void main() {
   vec3 rgb;
-  if (u_sgb_border) {
+  g_min = ivec2(0);
+  g_max = ivec2(u_tex_size) - ivec2(1);
+  // lp: where this fragment is in the picture's own pixels (the grid and the
+  // subpixel look key off it).
+  vec2 lp = v_uv * vec2(u_scan_width, u_scan_height);
+  if (u_view) {
+    vec2 s = u_rot == 1 ? vec2(v_uv.y, 1.0 - v_uv.x)
+           : u_rot == 3 ? vec2(1.0 - v_uv.y, v_uv.x) : v_uv;
+    g_min = ivec2(u_src.xy);
+    g_max = ivec2(u_src.xy + u_src.zw) - ivec2(1);
+    lp = s * u_src.zw;
+    rgb = shade(upscale((u_src.xy + lp) / u_tex_size));
+  } else if (u_sgb_border) {
     ivec2 bp = clamp(ivec2(v_uv * vec2(256.0, 224.0)), ivec2(0), ivec2(255, 223));
     uint bw = texelFetch(u_border, bp, 0).r;
     if ((bw & 0x8000u) != 0u) {
@@ -222,8 +243,8 @@ void main() {
   // each cell, one whole backing pixel at the web's 4x store, and it darkens
   // gently so the grid reads as texture rather than as bars.
   if (u_grid &&
-      (fract(v_uv.x * u_scan_width) > 0.75 ||
-       fract(v_uv.y * u_scan_height) > 0.75)) {
+      (fract(lp.x) > 0.75 ||
+       fract(lp.y) > 0.75)) {
     rgb *= 0.85;
   }
   // "RGB subpixels": draw the display's own structure — each emulated pixel
@@ -233,12 +254,12 @@ void main() {
   // off-stripes keep half and a 1.35 gain rebalances overall brightness;
   // min() stops the gain pushing whites into hue shifts.
   if (u_subpixel) {
-    int stripe = int(fract(v_uv.x * u_scan_width) * 3.0);
+    int stripe = int(fract(lp.x) * 3.0);
     vec3 m = stripe == 0 ? vec3(1.0, 0.5, 0.5)
            : stripe == 1 ? vec3(0.5, 1.0, 0.5)
            :               vec3(0.5, 0.5, 1.0);
     rgb = min(rgb * m * 1.35, vec3(1.0));
-    if (fract(v_uv.y * u_scan_height) > 0.85) rgb *= 0.7;
+    if (fract(lp.y) > 0.85) rgb *= 0.7;
   }
   frag_color = vec4(rgb, 1.0);
 }`;
@@ -275,6 +296,9 @@ void main() {
     uSubpixel = gl.getUniformLocation(prog, "u_subpixel");
     uTexSize = gl.getUniformLocation(prog, "u_tex_size");
     uFilter = gl.getUniformLocation(prog, "u_filter");
+    uView = gl.getUniformLocation(prog, "u_view");
+    uRot = gl.getUniformLocation(prog, "u_rot");
+    uSrc = gl.getUniformLocation(prog, "u_src");
     uDmgRemap = gl.getUniformLocation(prog, "u_dmg_remap");
     // Array uniforms are addressed by their first element.
     uDmgPal = gl.getUniformLocation(prog, "u_dmg_pal[0]");
@@ -334,7 +358,10 @@ void main() {
     // opts.frame, when given, is the picture instead of the em.js core's: a
     // w x h frame assembled from BGR555 parts ({ view: Uint16Array, x, y, w,
     // h }), texels no part covers left black. The DS's two screens come in
-    // this way (index.js "Nintendo DS"); there is no SGB border then.
+    // this way (index.js "Nintendo DS"); there is no SGB border then. With
+    // frame.out ({ w, h, clear, views: [{ src, dst, rot }] }) the texture is
+    // not drawn whole but view by view: each screen to its own place, size
+    // and turn (the DS arrangements, docs/nds/web.md).
     draw(opts) {
       if (!ensure()) return;
       const frame = opts.frame || null;
@@ -422,7 +449,29 @@ void main() {
         }
         gl.uniform3fv(uDmgPal, dmgPalBuf);
       }
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      const out = frame && frame.out;
+      if (!out) {
+        gl.uniform1i(uView, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        return;
+      }
+      // Views: the canvas cleared to out.clear ([r, g, b], 0..1), then each
+      // view's texels (src) into its rect of the out.w x out.h picture (dst),
+      // turned by its rot. Rects land on whole backing pixels.
+      const cw = canvasEl.width, ch = canvasEl.height;
+      const c = out.clear || [0, 0, 0];
+      gl.clearColor(c[0], c[1], c[2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform1i(uView, 1);
+      for (const v of out.views) {
+        const x0 = Math.round(v.dst.x * cw / out.w), x1 = Math.round((v.dst.x + v.dst.w) * cw / out.w);
+        const y0 = Math.round(v.dst.y * ch / out.h), y1 = Math.round((v.dst.y + v.dst.h) * ch / out.h);
+        if (x1 <= x0 || y1 <= y0) continue;
+        gl.viewport(x0, ch - y1, x1 - x0, y1 - y0);   // GL's origin is bottom-left
+        gl.uniform1i(uRot, v.rot || 0);
+        gl.uniform4f(uSrc, v.src.x, v.src.y, v.src.w, v.src.h);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
     },
   };
 }

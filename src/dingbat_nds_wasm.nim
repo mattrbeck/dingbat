@@ -38,7 +38,9 @@ proc nds_boot(b9: pointer; b9_len: cint; b7: pointer; b7_len: cint;
               fw: pointer; fw_len: cint; save: pointer; save_len: cint): cint {.exportc.} =
   ## Build the core on the buffer nds_rom_alloc handed out. A BIOS/firmware
   ## left out (len 0) gets the HLE BIOS / synthesized firmware. `save` is the
-  ## cart backup to start from (its size picks the chip; 0 = detect).
+  ## cart backup to start from (io/backup.nim set_data: an EEPROM/FRAM size
+  ## names the chip, other sizes are fitted to the one the game addresses,
+  ## a .dsv footer is stripped; 0 = detect).
   if romBuf.len == 0: return 0
   lastBios9 = copy_in(b9, b9_len)
   lastBios7 = copy_in(b7, b7_len)
@@ -106,6 +108,18 @@ proc nds_set_button(id: cint; pressed: cint) {.exportc.} =
 
 proc nds_set_touch(x, y, down: cint) {.exportc.} =
   if core != nil: core.set_touch(int(x), int(y), down != 0)
+
+proc nds_set_lid(closed: cint) {.exportc.} =
+  ## Close (1) or open (0) the hinge: EXTKEYIN bit 7, and opening raises the
+  ## ARM7's lid IRQ (docs/nds/peripherals.md "Sleep and the lid").
+  if core != nil: core.set_lid(closed != 0)
+
+proc nds_push_mic(samples: ptr UncheckedArray[int16]; n: cint; rate: cint) {.exportc.} =
+  ## Queue `n` mono int16 microphone samples at `rate` Hz behind what is
+  ## queued (io/mic.nim plays them out against emulated time; at most
+  ## 250 ms stays queued).
+  if core != nil and samples != nil and n > 0 and rate > 0:
+    core.push_mic(toOpenArray(samples, 0, int(n) - 1), int(rate))
 
 # Audio: interleaved stereo float32 at 33513982 / 1024 = 32728.5 Hz
 # (io/spu.nim). The page reads nds_audio_frames() frames from
