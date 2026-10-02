@@ -194,6 +194,12 @@ TABLE = {
     # writer first / reader first, the CPU in a NOP sled / halted, lines
     # 40..47 (Phantasy Star Collection; tests/roms/invariants/ predicts it)
     'hdmaobus': [v << 8 | k for v in range(4) for k in range(8)],
+    # a timer interrupt raised k cycles into a DMA3 burst, an idle sound DMA
+    # armed or not, TM0 acknowledged after the burst or not (Boktai 2;
+    # tests/roms/invariants/build.py, (not armed, armed) pairs)
+    'dmairqarm': [(ack << 17) | (armed << 16) | (0x10000 - k) for ack in (0, 1)
+                  for k in (4, 20, 40, 60, 80, 100, 120, 140, 160, 180, 190, 200, 210, 220, 240)
+                  for armed in (0, 1)],
     # the cartridge EEPROM's block-programming time (Super Mario Advance 3's
     # first boot, 196 block writes): the block as read, the DMA's length,
     # an unchanged write-back, a changed write. Needs a 64 Kbit EEPROM cart in
