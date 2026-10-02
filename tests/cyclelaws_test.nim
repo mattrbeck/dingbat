@@ -98,12 +98,49 @@ proc invariants(bios: string) =
   echo &"{label}: {pairs - bad}/{pairs} invariant pairs agree"
   failures += bad
 
+proc predicted(bios: string) =
+  ## Laws predicted for the console and not yet measured on it. When the rig
+  ## has answered, record them (tools/hwlink/r0table.py --record) and they
+  ## move into tests/roms/cyclelaws/ with the console's own numbers.
+  let label = if bios.len == 0: "HLE" else: "real BIOS"
+  # hdmaobus (DMA_BUS_BACK_TO_BACK; Phantasy Star Collection): DMA1 writes
+  # X_k = 0xA500 | 0x11k to BG1VOFS on line 40 + k, a second channel reads
+  # write-only BG1VOFS on the same H-blank. Granted after the writer (DMA2),
+  # it reads the writer's word, with the CPU in a NOP sled or halted;
+  # granted first (DMA0), it reads the CPU's Thumb NOP (0x46C0) while the CPU
+  # is in the sled (k = 0, 1). Reader first under a halt is open (not held).
+  # Bits 16..23: eight reader bursts. Predicted, awaiting the AGB SP.
+  const rom = "tests/roms/invariants/hdmaobus.gba"
+  let emu = new_gba(bios, rom, run_bios = false, use_hle = bios.len == 0)
+  emu.post_init()
+  for _ in 1 .. 80: emu.step_frame()
+  if emu.word(Marker) != 0x600D0000'u32:
+    echo &"  FAIL {label} {rom} never finished"
+    inc failures
+    return
+  var total, bad = 0
+  for v in 0'u32 .. 3:
+    for k in 0'u32 .. 7:
+      let want =
+        if v == 0 or v == 2: 0x80000'u32 or 0xA500'u32 or (0x11'u32 * k)
+        elif v == 1 and k <= 1: 0x846C0'u32
+        else: continue
+      let got = emu.word(Results + 4 * (v * 8 + k))
+      inc total
+      if got != want:
+        inc bad
+        echo &"  FAIL {label} hdmaobus {(v shl 8 or k).toHex(3)}: {got.toHex(8)}, predicted {want.toHex(8)}"
+  echo &"{label}: {total - bad}/{total} predicted cells (awaiting the AGB SP)"
+  failures += bad
+
 run("")
 invariants("")
+predicted("")
 var bios = getEnv("DINGBAT_GBA_BIOS", "tests/roms/gba_bios.bin")
 if fileExists(bios):
   run(bios)
   invariants(bios)
+  predicted(bios)
 else: echo "real BIOS: not here, skipped"
 
 if failures == 0: echo "ALL CYCLE LAWS HOLD"

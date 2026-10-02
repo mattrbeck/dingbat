@@ -2852,3 +2852,98 @@ The script (`cd10d8ed....play`) now replays on dingbat and dingbat-bios with
 the references' screens at all eleven checkpoints. Runner, both mGBA suite
 BIOS modes (6998 / 6998), cycle laws, RTC, save-state and soak tests:
 unchanged.
+
+## 28. Phantasy Star Collection: every Master System window drawn with shifted scanlines, 2026-10-02
+
+**FIXED** (dma.nim, `DMA_BUS_BACK_TO_BACK` in gba.nim). In Phantasy Star
+(the first game of Phantasy Star Collection (U)), from about frame 3800 --
+B opens the command menu in Camineet -- every window the game draws (the
+command menu, the status box, messages, the save slot and continue screens)
+showed repeated or shifted scanlines and struck-through text, in all four
+dingbat configurations. mgba and the second reference draw them clean and
+agree pixel for pixel. The game itself went on; its save was byte-identical
+on all six.
+
+**How the collection draws a Master System screen.** Its player puts the
+picture on BG1 and a high-priority copy of the window rows on BG0, and
+scrolls both per line from one table: DMA1 (H-blank, repeat, 16-bit, CNT_H
+0xA240) moves a halfword a line from a ROM table at 0x08770E5B/0x08770E5F
+to BG1VOFS; DMA2 (H-blank, repeat, source FIXED at 0x04000016) moves
+BG1VOFS to BG0VOFS. BG1VOFS is write-only, so DMA2's read is open bus: it
+gets whatever is on the data bus, and the design works only if that is the
+word DMA1 drove there a moment earlier. Then BG0 scrolls with BG1 and the
+window rows sit over the picture rows they belong to.
+
+**What dingbat gave it.** `DMA_READS_CPU_BUS` (gba.nim; dmaobus.s on the
+AGB SP, 2026-09-24) says a burst's first unmapped read gets
+the CPU's last bus transaction -- its data load if it came after its last
+fetch, else the fetched opcode -- and every non-nested burst marked itself
+`dma_bus_fresh` to take that path. DMA2 is not nested (both channels are
+requested on the same H-blank and `run_pending` grants them one after the
+other), so each line's BG0VOFS was a halfword of whatever the SMS
+emulator's code had last fetched or loaded (`0C03`, `19A1`, ... where DMA1
+had written `0000`, `0001`, ...). BG0's rows landed at arbitrary heights:
+the shifted lines and the strike-throughs.
+
+**Why the CPU's word is wrong there.** The CPU never had the bus between
+the two bursts. `tests/roms/payloads/hdmalag.s` measured that on the AGB SP
+on 2026-09-24: of two channels granted on the same H-blank, the second
+makes its first read the cycle after the first's last write. The bus goes
+from DMA1 to DMA2 with DMA1's last word still on it, as it does inside a
+burst and for a nested one, which the core already modelled. Both
+references draw the game accordingly. (dingbat still starts the second
+burst two cycles later than the console, hdmalag's known offset; the word
+on the bus does not depend on it.)
+
+**The change.** `run_pending` notes when the grant it is making follows a
+burst it ran itself, with no CPU access between, and `run_channel` then
+leaves `dma_bus_fresh` clear: the burst's first unmapped read returns the
+last word the bus carried (`dma_open_bus`). That covers two channels on one
+H-blank (or V-blank) and a chained immediate pair (`DMA_CHAIN`). A burst
+granted after the CPU had the bus still reads the CPU's word, so every
+dmaobus/alyosha Bus cell stands.
+
+**Probe: `tests/roms/payloads/hdmaobus.s`** (predicted, awaiting the AGB SP).
+DMA1 writes X_k = `A500 | 11k` to BG1VOFS on line 40 + k; a second channel
+reads BG1VOFS (fixed) into EWRAM on the same H-blank, eight lines. Writer
+first (reader DMA2) or reader first (reader DMA0); the CPU in a Thumb NOP
+sled (`46C0`) or halted through SWI 2. Answer: the halfword read on line
+40 + k, with the number of reader bursts (8) in bits 16-23.
+
+| cells | dingbat before | dingbat after | mGBA | predicted for the SP |
+|---|---|---|---|---|
+| writer first, sled, k = 0, 1 | `46C0` (the CPU's NOP) | X_k | X_k | X_k |
+| writer first, sled, k = 2..7 | `1AFF` / `E1C6` (the VCOUNT poll) | X_k | X_k | X_k |
+| writer first, halted, k = 0..5 | `0000` HLE / `0300` BIOS | X_k | X_k | X_k |
+| reader first, sled, k = 0, 1 | `46C0` | `46C0` | `46C0` | `46C0` |
+| reader first, halted, k = 1..5 | `0000` / `0300` | `0000` / `0300` | `7F00` | open |
+
+The last row is the open question the probe adds: a halted CPU drives
+nothing, so the reader granted first may find the writer's word from the
+line before (X_(k-1)) still on the bus. dingbat answers what the CPU last
+fetched in the BIOS's Halt; no test holds that row. The other 18 cells are
+held by `cyclelaws_test` from `tests/roms/invariants/hdmaobus.gba`, marked
+predicted; once `r0table.py --record hdmaobus` has the console's answers
+they belong in `tests/roms/cyclelaws/` (`lawrom.py`).
+
+**ps1_title's rows 7k+2/7k+3 are not a second DMA effect.** The evaluator
+also saw BG1 row pairs one table step early at checkpoint ps1_title
+(f1982). The game alternates DMA1's table start between 0x08770E5B and
+0x08770E5F (two entries apart) every frame: a two-field line-drop pattern
+for squeezing the Master System picture. dingbat's frame 1983 is pixel-
+identical to the second reference's frame 1982 (mgba differs from both only
+by the blinking cursor), so dingbat is one field out of phase at that frame
+-- the same thing as the starfield twinkle the script notes -- and the
+harness already rates that checkpoint as the references' own spread.
+
+**Evidence.** The script (`9f2dc591....play`): FAIL (field_menu, save_slot,
+saved MAJOR) before on all four dingbat configs, PASS after on all four,
+every checkpoint on the references' screens. A build that logs every burst
+whose first read takes the new path ran all 135 scripted games (dingbat,
+HLE): Phantasy Star Collection is the only one that ever reaches it, so
+every other script's emulation is unchanged; the six-emulator scripts of
+Golden Sun, F-Zero - Maximum Velocity, Mario Kart Super Circuit, Castlevania
+- Aria of Sorrow, Pokemon Emerald and Iridion II still PASS. Runner 1433/1443, mGBA suite
+6998/6998 (HLE and Nintendo's BIOS), dbsuite unchanged (dma 261/262, bus
+76/79, both BIOSes), cycle laws 1860/1860 and invariants 30/30 under both
+BIOSes.

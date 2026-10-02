@@ -332,8 +332,11 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   dma.gba.bus.dma_active = true
   dma.busy_until[channel] = high(CycleCount)
   when DMA_READS_CPU_BUS:
-    # A nested burst finds the outer one's word on the bus
-    if not nested: dma.gba.bus.dma_bus_fresh = true
+    # A nested burst finds the outer one's word on the bus, and so does one
+    # that follows another with the CPU kept off the bus between them
+    # (DMA_BUS_BACK_TO_BACK)
+    if not nested:
+      dma.gba.bus.dma_bus_fresh = not (DMA_BUS_BACK_TO_BACK and dma.gba.bus.dma_bus_kept)
   dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold
   dma.gba.bus.rom_next_addr2 = 1
 
@@ -449,6 +452,9 @@ proc run_pending*(dma: DMA) =
   ## event dispatch (no burst running) or from a burst's transfer loop after
   ## its drain (nested preemption). A request for a channel >= the burst in
   ## progress waits for the level that granted that burst.
+  # DMA_BUS_BACK_TO_BACK: a burst this loop has already run kept the CPU
+  # off the bus until the next grant here
+  var bus_driven = false
   while dma.pending != 0:
     let ch = countTrailingZeroBits(dma.pending)
     if ch >= dma.current_priority:
@@ -477,6 +483,9 @@ proc run_pending*(dma: DMA) =
       if saved == 4: bus.rom_cool()
       let cpu_stream = bus.rom_next_addr
       let cpu_free = bus.rom_free_since
+    when DMA_BUS_BACK_TO_BACK:
+      bus.dma_bus_kept = bus_driven
+      bus_driven = true
     dma.run_channel(ch, nested = saved < 4)
     dma.current_priority = saved
     when DMA_STALLS_IRQ_SYNC:

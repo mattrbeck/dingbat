@@ -566,6 +566,9 @@ type
     dma_bus_req*:        CycleCount  # when the burst in progress asked for the bus
     ldrsh_odd*:          bool
     dma_bus_fresh*:      bool  # no transfer of this burst has driven the bus yet
+    # DMA_BUS_BACK_TO_BACK: the burst being granted follows another with no
+    # CPU access between them (set by dma.run_pending per grant)
+    dma_bus_kept*:       bool
     iwram_latch*:        uint32  # the last word a DMA moved to or from IWRAM
     dma_request_at*:     CycleCount
     dma_has_run*:        bool
@@ -1404,6 +1407,21 @@ const DMA_READS_CPU_BUS* {.booldefine.} = true
   ## word the burst itself moved, or, for its first transfer, the CPU's last
   ## bus transaction -- its data load if that came after its last opcode
   ## fetch, else the fetched opcode (Bus.dma_bus_word).
+const DMA_BUS_BACK_TO_BACK* {.booldefine.} = true
+  ## DMA_READS_CPU_BUS's "the CPU's last bus transaction" only holds when the
+  ## CPU had the bus last. Bursts granted one after another with no CPU
+  ## access between them (two channels on the same H-blank, a chained
+  ## immediate pair) hand the bus over with the earlier burst's last word
+  ## still on it, and the later burst's first unmapped read gets that word
+  ## (tests/roms/payloads/hdmalag.s on an AGB SP: the second channel on an
+  ## H-blank reads the cycle after the first's last write). Phantasy Star
+  ## Collection's Master System player depends on it: DMA1 (H-blank, ROM
+  ## table -> BG1VOFS) and DMA2 (H-blank, fixed write-only BG1VOFS ->
+  ## BG0VOFS) keep its high-priority window layer scrolling with the
+  ## picture; with the CPU's opcode instead every window was drawn with
+  ## shifted scanlines. Both reference emulators agree. The read itself is
+  ## predicted, awaiting tests/roms/payloads/hdmaobus.s on the AGB SP
+  ## (docs/playtest-bugs.md section 28).
 const IMM_BOUNDARY_GRANT* {.booldefine.} = true
   ## An immediate DMA whose request (two cycles after the enable) falls
   ## exactly between two instructions is granted there, ahead of the next

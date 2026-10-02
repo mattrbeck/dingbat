@@ -186,6 +186,10 @@ TABLE = {
     's0write': ([w << 8 | k for w in range(4) for k in range(16)]
                 + [0x400 | 1 << 4 | w << 8 | k for w in range(4) for k in range(16)]
                 + [0x400 | w << 8 | k for w in range(4) for k in range(16)]),
+    # two H-blank DMAs on one line, the second reading write-only BG1VOFS:
+    # writer first / reader first, the CPU in a NOP sled / halted, lines
+    # 40..47 (Phantasy Star Collection; tests/roms/invariants/ predicts it)
+    'hdmaobus': [v << 8 | k for v in range(4) for k in range(8)],
 }
 
 
