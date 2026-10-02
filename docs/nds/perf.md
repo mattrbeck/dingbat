@@ -25,6 +25,7 @@ could see change:
 | an IPC receive-FIFO pop | a GBA-slot read by the slot's owner (GPIO, RTC) |
 | every event dispatch | an ARM9 cache line fill, any CP15 write |
 | every `run_until` call (the frontend may have changed keys, touch, the lid) | an unmapped access (both CPUs: the count is state) |
+| an instruction-cache line kept before memory under it changes (docs/nds/cache.md) | |
 
 and each CPU counts its exceptions, mode switches and SWIs (HLE SWIs write
 memory directly). *Steady* registers are the ones only writes and events

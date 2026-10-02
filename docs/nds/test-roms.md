@@ -193,10 +193,10 @@ Each in its own commit, each with checks in `tests/nds_testroms_test.nim`
   at 4 KB; uncached writes agree within 3 %). Neither side has a hardware
   figure; write-backs are free in ours. A console run of the ROM would pin
   both.
-- **The instruction cache holds no instructions**: code fetches read
-  memory, so code changed behind the instruction cache (DMA'd or written
-  overlays without IC_InvalidateRange) runs new where the hardware would
-  run stale code.
+- ~~The instruction cache holds no instructions~~: done on `nds-icache`
+  (docs/nds/cache.md, `tests/nds/src/icache_stale`): code changed behind
+  the instruction cache runs stale until the line is invalidated or
+  evicted.
 - **gbe-plus prescaler 0 count**: 0xBCF7 ours, 0xBD2D reference after "5
   frames" of the test's own wait loop (54 cycles of 33 MHz apart, the loop's
   timing, not the timer's); no hardware value.
