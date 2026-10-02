@@ -526,6 +526,128 @@ test("a save state taken in the app resumes the same frames and sound", { skip }
   await ctx.close();
 });
 
+// --- Power-off and the firmware (fw_power: tests/nds/tools/build_fw_power.sh).
+// Each boot the ROM writes the firmware's nickname "FWTEST<n>" (n one more
+// than the one it finds) and paints the top screen green (n = 1), blue
+// (n = 2) or white; the bottom is yellow while it runs. START powers it off.
+const FW_ROM = rom("fw_power.nds");
+const fwSkip = skip || (existsSync(FW_ROM) ? false : "missing: fw_power.nds");
+const SHOTS = process.env.DINGBAT_E2E_SHOTS; // a directory: screenshots of the new states
+const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, name) }); };
+const GREEN = [0, 255, 0], BLUE = [0, 0, 255], YELLOW = [255, 255, 0], BLACK = [0, 0, 0];
+const screensAre = (page, top, bottom) => until(page, async ([top, bottom]) => {
+  drawGame();
+  const c = document.createElement("canvas");
+  c.width = canvasEl.width; c.height = canvasEl.height;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(canvasEl, 0, 0);
+  const at = (fy) => [...ctx.getImageData(Math.floor(0.5 * c.width), Math.floor(fy * c.height), 1, 1).data].slice(0, 3);
+  return JSON.stringify([at(0.25), at(0.75)]) === JSON.stringify([top, bottom]);
+}, [top, bottom], 20000);
+const fwName = (page) => page.evaluate(async () => {
+  const rec = await dbGet("bios:ndsflash");
+  return rec ? NdsUtil.fwReadUser(new Uint8Array(rec.data)).name : null;
+});
+
+test("a game that switches the DS off is shown off, and Restart switches it on", { skip: fwSkip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, FW_ROM);
+  await page.evaluate(() => setNdsLayout("stack"));
+  await screensAre(page, GREEN, YELLOW);
+  // START: the ROM writes power manager register 0 bit 6.
+  await page.keyboard.down("Enter");
+  await page.waitForFunction(() => document.body.classList.contains("nds-off"), null, { timeout: 10000 });
+  await page.keyboard.up("Enter");
+  assert.equal(await page.locator("#nds-off").isVisible(), true);
+  assert.match(await page.locator("#nds-off").innerText(), /The game turned the DS off/);
+  await screensAre(page, BLACK, BLACK);
+  await shot(page, "nds-off.png");
+  // Nothing runs; the session to resume is gone; no state can be saved.
+  const f0 = await page.evaluate(() => ndsCore._nds_frame_count());
+  await sleep(400);
+  assert.equal(await page.evaluate(() => ndsCore._nds_frame_count()), f0, "no frames while off");
+  assert.equal(await page.evaluate(() => captureStateBytes()), null);
+  await until(page, async () => !(await dbGet(autoStateKey("fw_power.nds"))));
+  // Restart: on again. The flash kept what the first boot wrote (count 2).
+  await page.locator("#nds-off-restart").click();
+  await page.waitForFunction(() => !document.body.classList.contains("nds-off") &&
+                                   ndsCore._nds_frame_count() > 5, null, { timeout: 10000 });
+  assert.equal(await page.locator("#nds-off").isVisible(), false);
+  await screensAre(page, BLUE, YELLOW);
+  // Off again, then back to the library: the game closes.
+  await page.keyboard.down("Enter");
+  await page.waitForFunction(() => document.body.classList.contains("nds-off"), null, { timeout: 10000 });
+  await page.keyboard.up("Enter");
+  await page.locator("#nds-off-library").click();
+  await page.waitForFunction(() => !document.body.classList.contains("running") && ndsCoreGame === null,
+                             null, { timeout: 10000 });
+  assert.equal(await page.evaluate(() => currentRomName), null);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("firmware settings a game wrote come back after a reload, and Settings edits them",
+     { skip: fwSkip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, FW_ROM);
+  await page.evaluate(() => setNdsLayout("stack"));
+  await screensAre(page, GREEN, YELLOW); // the first boot found no FWTEST name
+  // The 5 s autosave stores the flash the game wrote.
+  await until(page, async () => {
+    const rec = await dbGet("bios:ndsflash");
+    return rec && NdsUtil.fwReadUser(new Uint8Array(rec.data)).name === "FWTEST1";
+  });
+  // A new page, the game from its tile (its resume snapshot dropped: this is
+  // about a boot reading the firmware): it finds FWTEST1 and writes FWTEST2.
+  await page.reload();
+  await page.waitForFunction(() => document.body.classList.contains("runtime-ready"),
+                             null, { timeout: 30000 });
+  await page.evaluate(() => dbDelete(autoStateKey("fw_power.nds")));
+  await page.locator(".home-tile, #hero-shot").locator("visible=true").first().click();
+  await running(page);
+  await page.evaluate(() => setNdsLayout("stack"));
+  await screensAre(page, BLUE, YELLOW);
+  await until(page, async () => {
+    const rec = await dbGet("bios:ndsflash");
+    return rec && NdsUtil.fwReadUser(new Uint8Array(rec.data)).name === "FWTEST2";
+  });
+  // Settings > Nintendo DS shows it, and an edit reaches the game's next boot.
+  await page.locator("#menu-btn").click();
+  await page.locator("#open-settings").click();
+  await page.evaluate(() => selectSettingsTab("ds"));
+  await page.waitForFunction(() => document.getElementById("nds-user-name").textContent === "FWTEST2",
+                             null, { timeout: 10000 });
+  assert.match(await page.locator("#nds-user-source").innerText(), /Changed by a game/);
+  await page.locator("#nds-user").scrollIntoViewIfNeeded();
+  await shot(page, "nds-settings-console.png");
+  await page.locator("#nds-user-edit").click();
+  await page.locator("#nds-user-name-in").fill("Matt");
+  await page.locator("#nds-user-month").selectOption("7");
+  await page.locator("#nds-user-day").selectOption("14");
+  await page.locator("#nds-user-lang-in").selectOption("2");
+  await shot(page, "nds-settings-edit.png");
+  await page.locator("#nds-user-save").click();
+  await page.waitForFunction(() => document.getElementById("nds-user-name").textContent === "Matt",
+                             null, { timeout: 10000 });
+  assert.equal(await page.locator("#nds-user-birthday").innerText(), "14 July");
+  assert.equal(await page.locator("#nds-user-lang").innerText(), "French");
+  assert.equal(await fwName(page), "Matt");
+  await shot(page, "nds-settings-edited.png");
+  // Reset in place (the game's flash took the edit): no FWTEST name, count 1.
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => document.getElementById("reset").click());
+  await screensAre(page, GREEN, YELLOW);
+  await until(page, async () => {
+    const rec = await dbGet("bios:ndsflash");
+    const u = rec && NdsUtil.fwReadUser(new Uint8Array(rec.data));
+    return u && u.name === "FWTEST1" && u.month === 7 && u.lang === 2;
+  });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 const BENCH = process.env.DINGBAT_NDS_BENCH;
 test("unpaced frame time of DINGBAT_NDS_BENCH", { skip: skip || !BENCH || !existsSync(BENCH || "") },
   async () => {

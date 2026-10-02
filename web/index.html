@@ -405,6 +405,19 @@
            screens dim under this, and a tap opens the lid again. -->
       <button type="button" id="nds-lid-open" hidden>Lid closed &middot; tap to open</button>
 
+      <!-- A DS the game switched off (index.js "Power-off"): over the black
+           screens, Restart switches it on again; Library closes the game. -->
+      <div id="nds-off" role="group" aria-labelledby="nds-off-title" hidden>
+        <div class="nds-off-card">
+          <p id="nds-off-title" class="nds-off-title">The game turned the DS off</p>
+          <p class="nds-off-sub">Its save is kept. Restart to switch it on again.</p>
+          <div class="nds-off-actions">
+            <button type="button" class="button button-primary" id="nds-off-restart">Restart</button>
+            <button type="button" class="button" id="nds-off-library">Library</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Input display overlay. A DOM overlay, not drawn on #canvas: clip
            capture is canvas.captureStream, so clips stay clean while a window
            capture picks it up. aria-hidden + pointer-events:none (a mirror of
@@ -1231,6 +1244,32 @@
                   <button type="button" class="button button-sm button-ghost" id="remove-nds-firmware">Remove</button>
                 </div>
                 <p class="modal-hint">None of these are needed: without them DS games run on dingbat's own BIOS and a built-in firmware. Dumps from your console (bios9.bin, bios7.bin, firmware.bin) apply the next time a DS game starts.</p>
+                <!-- The firmware's user settings (index.js "Console settings"):
+                     what the next DS boot gets, read-only until Edit. -->
+                <div class="modal-subhead">Console settings</div>
+                <div id="nds-user">
+                  <div id="nds-user-view">
+                    <div class="modal-row"><span class="modal-row-label">Name</span><span id="nds-user-name" class="nds-user-val">&ndash;</span></div>
+                    <div class="modal-row"><span class="modal-row-label">Birthday</span><span id="nds-user-birthday" class="nds-user-val">&ndash;</span></div>
+                    <div class="modal-row"><span class="modal-row-label">Language</span><span id="nds-user-lang" class="nds-user-val">&ndash;</span></div>
+                    <div class="modal-row"><span class="modal-row-label">Colour</span><span id="nds-user-colour" class="nds-user-val">&ndash;</span></div>
+                  </div>
+                  <form id="nds-user-form" hidden>
+                    <div class="modal-row"><label class="modal-row-label" for="nds-user-name-in">Name</label><input type="text" id="nds-user-name-in" class="nds-user-input" maxlength="10" autocomplete="off" autocorrect="off" spellcheck="false" /></div>
+                    <div class="modal-row"><label class="modal-row-label" for="nds-user-month">Birthday</label><select id="nds-user-month" class="kb-select" aria-label="Birthday month"></select><select id="nds-user-day" class="kb-select" aria-label="Birthday day"></select></div>
+                    <div class="modal-row"><label class="modal-row-label" for="nds-user-lang-in">Language</label><select id="nds-user-lang-in" class="kb-select"></select></div>
+                    <div class="modal-row nds-user-buttons">
+                      <button type="submit" class="button button-sm button-primary" id="nds-user-save">Save</button>
+                      <button type="button" class="button button-sm button-ghost" id="nds-user-cancel">Cancel</button>
+                    </div>
+                  </form>
+                  <div class="modal-row" id="nds-user-foot">
+                    <span id="nds-user-source" class="modal-row-status">Built-in firmware</span>
+                    <button type="button" class="button button-sm" id="nds-user-edit">Edit</button>
+                    <button type="button" class="button button-sm button-ghost" id="nds-user-reset" hidden>Reset</button>
+                  </div>
+                </div>
+                <p class="modal-hint">The console's own settings, which games read for your name, birthday and language. A game (or the DS menu) that changes them keeps the change, on this device only; your firmware.bin stays as it is, and Reset goes back to its settings. Changes apply the next time a DS game starts.</p>
                 <p class="settings-note">DS games stay on this device: Google Drive sync skips them, and save states, rewind, the link cable and cheats are not available for them yet.</p>
               </div>
 

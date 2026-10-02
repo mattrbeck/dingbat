@@ -275,10 +275,103 @@ const NdsUtil = (() => {
   const BIOS_SIZES = { bios9: [4096], bios7: [16384], firmware: [131072, 262144, 524288] };
   const biosSizeOk = (kind, size) => (BIOS_SIZES[kind] || []).includes(size);
 
+  // --- Firmware user settings (GBATEK "DS Firmware User Settings"): two
+  // 100h copies at [header 020h] * 8 (3FE00h on a DS), the current one the
+  // CRC-valid copy whose update counter (070h, 0..7Fh) is one more than the
+  // other's. The rules are io/spi.nim's (user_settings_offset,
+  // user_settings), which decides what the game sees.
+  const FW_LANGS = ["Japanese", "English", "French", "German", "Italian", "Spanish"];
+  const fwRd16 = (img, o) => img[o] | (img[o + 1] << 8);
+  const fwUserOffset = (img) => {
+    const o = fwRd16(img, 0x20) * 8;
+    return o <= 0 || o + 0x200 > img.length ? 0x3FE00 : o;
+  };
+  const fwCopyOk = (img, a) => crc16(img, a, a + 0x70) === fwRd16(img, a + 0x72);
+  const fwCurrentUser = (img) => {
+    const a = fwUserOffset(img), b = a + 0x100;
+    const oka = fwCopyOk(img, a), okb = fwCopyOk(img, b);
+    if (oka !== okb) return okb ? b : a;
+    return (((img[a + 0x70] & 0x7F) + 1) & 0x7F) === (img[b + 0x70] & 0x7F) ? b : a;
+  };
+  // The settings a person recognises, from the current copy; null for an
+  // image too small to hold them. `ok` is false when neither copy's CRC
+  // holds (a console that would ask for its settings again).
+  const fwReadUser = (img) => {
+    if (!img || img.length < 0x200 || fwUserOffset(img) + 0x200 > img.length) return null;
+    const u = fwCurrentUser(img);
+    const len = Math.min(10, fwRd16(img, u + 0x1A));
+    let name = "";
+    for (let i = 0; i < len; i++) name += String.fromCharCode(fwRd16(img, u + 0x06 + 2 * i));
+    return { name, month: img[u + 0x03], day: img[u + 0x04], colour: img[u + 0x02] & 0x0F,
+             lang: img[u + 0x64] & 7, ok: fwCopyOk(img, u) };
+  };
+  // A copy of `img` with the settings changed as the firmware's own menu
+  // changes them: the current copy, edited, written over the older one with
+  // the update counter one more and its CRC (initial FFFFh over 000h..06Fh)
+  // at 072h. `fields`: name (up to 10 UTF-16 units), month, day, lang (0..5).
+  // Extended settings (074h..0FFh, iQue/DSi: GBATEK) keep their language
+  // in step when they are there and their own CRC (0FEh) holds.
+  const fwWithUser = (img, fields) => {
+    // A 128 KB part's settings sit past its end: the core pads the image to
+    // 256 KB (io/spi.nim new_spi), and so does this.
+    if (fwUserOffset(img) + 0x200 > img.length) {
+      const big = new Uint8Array(0x40000);
+      big.set(img);
+      img = big;
+    }
+    const out = new Uint8Array(img);
+    const cur = fwCurrentUser(img), a = fwUserOffset(img);
+    const dst = cur === a ? a + 0x100 : a;
+    const s = out.slice(cur, cur + 0x100);
+    if (fields.name !== undefined) {
+      const name = String(fields.name).slice(0, 10);
+      s.fill(0, 0x06, 0x1A);
+      for (let i = 0; i < name.length; i++) {
+        const c = name.charCodeAt(i);
+        s[0x06 + 2 * i] = c & 0xFF; s[0x07 + 2 * i] = c >> 8;
+      }
+      s[0x1A] = name.length; s[0x1B] = 0;
+    }
+    if (fields.month !== undefined) s[0x03] = fields.month;
+    if (fields.day !== undefined) s[0x04] = fields.day;
+    if (fields.lang !== undefined) {
+      const extOk = s[0x74] === 0x01 && crc16(s, 0x74, 0xFE) === fwRd16(s, 0xFE);
+      s[0x64] = (s[0x64] & ~7) | (fields.lang & 7);
+      if (extOk) {
+        s[0x75] = fields.lang & 7;
+        const e = crc16(s, 0x74, 0xFE);
+        s[0xFE] = e & 0xFF; s[0xFF] = e >> 8;
+      }
+    }
+    s[0x70] = ((img[cur + 0x70] & 0x7F) + 1) & 0x7F; s[0x71] = 0;
+    const c = crc16(s, 0, 0x70);
+    s[0x72] = c & 0xFF; s[0x73] = c >> 8;
+    out.set(s, dst);
+    return out;
+  };
+  // What a game or the firmware's menu writes: the three Wi-Fi connection
+  // slots (the 300h below the user settings; boot.nim synth_firmware lays
+  // them out there) and the two user-settings copies.
+  const fwUserArea = (img) => {
+    const u = fwUserOffset(img);
+    return [Math.max(0, u - 0x400), u + 0x200];
+  };
+  // `base` with `written`'s user area: the built-in firmware's own parts
+  // (header, wifi calibration) stay the current build's, the settings stay
+  // what was written. Null when the two place it differently.
+  const fwOverlayUser = (base, written) => {
+    const [s, e] = fwUserArea(base), [ws, we] = fwUserArea(written);
+    if (s !== ws || e !== we || written.length < e) return null;
+    const out = new Uint8Array(base);
+    out.set(written.subarray(s, e), s);
+    return out;
+  };
+
   return {
     W, H, FPS, AUDIO_RATE, BTN, FROM_APP, fromAppInput, isNdsName, crc16,
     looksLikeNdsRom, headerInfo, ARRANGEMENTS, SMALL, GAPS, ROTATIONS, compose, layout,
     turnRect, views, screenAt, touchPoint, clientPoint,
     micInt16, BLOW_LEVEL, blowNoise, speedAudio, BIOS_KINDS, biosKindOf, biosSizeOk,
+    FW_LANGS, fwUserOffset, fwCurrentUser, fwReadUser, fwWithUser, fwUserArea, fwOverlayUser,
   };
 })();
