@@ -83,6 +83,7 @@ type
     aref: int32                   ## dots need alpha > aref (ALPHA_TEST_REF or 0)
     aa: bool                      ## DISP3DCNT.4: keep the layer behind edge dots
     wire: bool                    ## alpha 0: wire-frame
+    emark: bool                   ## DISP3DCNT.5 on and the polygon opaque
 
 proc new_renderer*(): Renderer =
   result = Renderer(zero_page: newSeq[uint8](0x4000))
@@ -479,9 +480,9 @@ proc step_to(sp: var SpanStep; n: int64) {.inline.} =
   sp.n = n
 
 proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; edge: bool;
-          cov = 31'i32) {.inline.} =
+          cov = 31'i32; xrun = false) {.inline.} =
   ## One dot of the span from L to R; `cov` is its anti-aliasing coverage
-  ## (0..31, 31 = whole).
+  ## (0..31, 31 = whole); `xrun`: the dot is in an x-major edge's run.
   let i = y * W + x
   # One division gives the dot's factor along the span; with equal w the
   # factor (38 bits, rounded so that every attribute comes out as
@@ -518,8 +519,18 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   let dv = if c.wbuffer: w else: z
   let dval = uint32(max(0'i64, min(dv, 0xFF_FFFF'i64)))
   let old = r.depth[i]
-  let pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
+  var pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
+  # With edge marking on, an opaque polygon's x-major edge runs replace the
+  # edge dots of an earlier opaque polygon with the same ID whatever their
+  # depth (polyrastertest's "curse of edge marking", recorded on hardware:
+  # a further polygon's run shows over the nearer one's edge run, 38, 39,
+  # or its bottom row, 43; not its interior, 43; a diagonal edge does not,
+  # 42). Assumed: only with the same ID (every recorded pair shares one) and
+  # only with edge marking (every recorded pair has it on).
+  if not pass and xrun and c.emark and (r.flags[i] and FLAG_EDGE) != 0 and
+     r.opaque_id[i] == c.id and r.trans_id[i] == NO_ID:
+    pass = true
   when defined(r3dprof):
     inc prof_dots
     if pass: inc prof_pass
@@ -651,7 +662,8 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   highlight: (disp3dcnt and 2) != 0, blend: (disp3dcnt and 8) != 0,
                   # alpha test: drawn only if alpha > ALPHA_TEST_REF (> 0 when off)
                   aref: (if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32),
-                  aa: (disp3dcnt and 0x10) != 0, wire: wire)
+                  aa: (disp3dcnt and 0x10) != 0, wire: wire,
+                  emark: (disp3dcnt and 0x20) != 0 and not poly.translucent)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
   var line = true
@@ -761,7 +773,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
         template edge_dot(x: int32; e: Edge; right: bool; cx: int32) =
           if x >= 0 and x < W:
             r.plot(c, int(x), y, EL, ER, sp, true,
-                   (if not aa: 31'i32 elif e.vert: 0'i32 else: e.aa_cov(y, int(cx), right)))
+                   (if not aa: 31'i32 elif e.vert: 0'i32 else: e.aa_cov(y, int(cx), right)), e.xmaj)
         let lcx = if pl.xmaj: lr.s else: xs
         if xs > xe:
           # no span between: the filled edge dots alone
@@ -792,9 +804,9 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     # above a flat bottom, which are drawn whole
     if wire and y != int(ymin) and not last_flat:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)):
-        r.plot(c, x, y, EL, ER, sp, true, (if aa: le.aa_cov(y, x, false) else: 31'i32))
+        r.plot(c, x, y, EL, ER, sp, true, (if aa: le.aa_cov(y, x, false) else: 31'i32), L.xmaj)
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
-        r.plot(c, x, y, EL, ER, sp, true, (if aa: re.aa_cov(y, x, true, L.e) else: 31'i32))
+        r.plot(c, x, y, EL, ER, sp, true, (if aa: re.aa_cov(y, x, true, L.e) else: 31'i32), R.xmaj)
       continue
     # which runs are drawn: all when full size; else the left run unless it
     # is a bottom x-major edge, the right run only when it is a top x-major
@@ -804,16 +816,16 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let ldraw = rfull or not (L.xmaj and L.inc) or last_flat
     let rdraw = rfull or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
     if aa:
-      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false))
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false), L.xmaj)
       for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
-      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true, L.e))
+      for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true, L.e), R.xmaj)
       continue
     if ldraw:
-      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true)
+      for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, 31, L.xmaj)
     for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim)
     if rdraw:
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
-        r.plot(c, x, y, EL, ER, sp, true)
+        r.plot(c, x, y, EL, ER, sp, true, 31, R.xmaj)
 
 {.pop.}
 
