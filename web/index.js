@@ -7310,9 +7310,14 @@ const buildCart = (name, el = document.createElement("span")) => {
 };
 
 // Overwrite the loaded game's battery save with imported bytes and reboot.
-// GameShark-family containers are unwrapped first (saveimport.js).
+// GameShark-family containers are unwrapped first (saveimport.js). A DS
+// game's file goes in as it is: those containers are GBA-only, and the DS
+// core itself strips a .dsv footer and fits the image to the chip the game
+// uses, then marks it for storing (docs/nds/saves.md).
 const applyImportedSave = async (bytes, fileName) => {
-  const unwrapped = SaveImport.unwrap(bytes, fileName);
+  const unwrapped = ndsGameLoaded()
+    ? { ok: true, format: null, bytes, title: null, warning: null }
+    : SaveImport.unwrap(bytes, fileName);
   if (!unwrapped.ok) {
     alert(unwrapped.error);
     return;
@@ -7348,7 +7353,7 @@ document.getElementById("load-save").addEventListener("click", () => {
   }
   // pickFile() must run synchronously in the tap: on iOS Safari a preceding
   // confirm() consumes the activation and input.click() no longer opens.
-  pickFile(".sav,.srm,.sps,.xps,.gsv", (bytes, fileName) => applyImportedSave(bytes, fileName));
+  pickFile(".sav,.srm,.sps,.xps,.gsv,.dsv", (bytes, fileName) => applyImportedSave(bytes, fileName));
 });
 
 // --- Save states ---
@@ -10560,9 +10565,9 @@ let handleRomFile = (file) => {
   reader.readAsArrayBuffer(file);
 };
 
-// A dropped save (.sav/.srm or a GameShark container) or .state is imported
+// A dropped save (.sav/.srm/.dsv or a GameShark container) or .state is imported
 // into the running single-player game; anything else is a ROM/zip to load.
-const SAVE_IMPORT_EXTS = new Set([".sav", ".srm", ".sps", ".xps", ".gsv"]);
+const SAVE_IMPORT_EXTS = new Set([".sav", ".srm", ".sps", ".xps", ".gsv", ".dsv"]);
 const handleDroppedFile = (file) => {
   let ext = extOf(file.name);
   if (SAVE_IMPORT_EXTS.has(ext) || ext === ".state") {
