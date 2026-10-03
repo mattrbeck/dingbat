@@ -79,13 +79,16 @@ const
   # reuse_*/last_*: what the last real render drew (render_frame); the
   # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh
   GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",
-                "last_disp3dcnt", "last_param", "last_regs", "last_polys", "last_verts"]
-  # Per-frame scratch: render_frame's clear() rewrites depth, IDs, flags and
-  # coverage and the layer behind (`below`, `below_depth`) before anything
+                "last_disp3dcnt", "last_param", "last_regs", "last_polys", "last_verts",
+                "last_is_cur"]
+  # Per-frame scratch: render_frame's clear() rewrites each dot's `px`
+  # (depth, IDs, flags, coverage and the layer behind) before anything
   # reads them, the page pointers and `order` are rebuilt
   # per frame. `color` (the frame being shown) and `regs` are saved.
-  RENDER_SKIP = ["depth", "opaque_id", "trans_id", "flags", "below", "below_depth", "aacov",
-                 "tex_pages", "pal_pages", "zero_page", "mixed", "order"]
+  # tc_*: decoded texels, a cache keyed by vram.tex_gen (remap() in
+  # after_load bumps it, so a loaded machine decodes afresh)
+  RENDER_SKIP = ["px", "tex_pages", "pal_pages", "zero_page", "mixed", "order",
+                 "tc_gen", "tc_pool", "tc_used", "tc_index"]
   TIMERS_SKIP = ["sched", "irq"]
   DMA_SKIP = ["irq"]
   IPC_SKIP = ["arm9", "arm7"]

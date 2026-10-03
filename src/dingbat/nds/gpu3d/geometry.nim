@@ -337,6 +337,15 @@ proc intersect(a, b: Vertex; da, db: int64; plane: int): Vertex =
 
 proc clip_polygon*(src: openArray[Vertex]; dst: var array[MAX_CLIP, Vertex]): int =
   ## Sutherland-Hodgman against the six sides of the view volume.
+  # A polygon inside all six planes passes each pass unchanged (every
+  # vertex kept, none added), so it comes out as it went in.
+  if src.len < MAX_CLIP - 1:
+    block inside:
+      for v in src:
+        for plane in 0..5:
+          if plane_dist(v, plane) < 0: break inside
+      for i in 0 ..< src.len: dst[i] = src[i]
+      return src.len
   var a, b: array[MAX_CLIP, Vertex]
   var n = src.len
   for i in 0 ..< n: a[i] = src[i]

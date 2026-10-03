@@ -31,7 +31,7 @@
 ##
 ## TODO(3d): rendering per line against mid-frame writes.
 
-import std/[algorithm, math]
+import std/[algorithm, math, tables]
 import ../mem/vram
 import geometry
 
@@ -60,15 +60,18 @@ const
   RENDER_LEAD = 49                          ## line 214 to line 0 of the next frame
 
 type
+  Px = object                     ## a dot's state besides its colour, kept together
+    depth: uint32                 ## 24-bit Z or W
+    below: uint32                 ## the nearest opaque colour behind the top one (anti-aliasing)
+    below_depth: uint32
+    opaque_id: uint8              ## polygon ID of the last opaque pixel
+    trans_id: uint8               ## ID of the last translucent pixel, or NO_ID
+    flags: uint8
+    aacov: uint8                  ## anti-aliasing coverage of the opaque dot (31 = whole)
+
   Renderer* = ref object
     color*: array[NPIX, uint32]   ## the frame, pixel format above
-    depth: array[NPIX, uint32]    ## 24-bit Z or W
-    opaque_id: array[NPIX, uint8] ## polygon ID of the last opaque pixel
-    trans_id: array[NPIX, uint8]  ## ID of the last translucent pixel, or NO_ID
-    flags: array[NPIX, uint8]
-    below: array[NPIX, uint32]    ## the nearest opaque colour behind the top one (anti-aliasing)
-    below_depth: array[NPIX, uint32]
-    aacov: array[NPIX, uint8]     ## anti-aliasing coverage of the opaque dot (31 = whole)
+    px: array[NPIX, Px]           ## the rest of each dot's state
     regs*: array[40, uint32]      ## 0x4000320-0x40003BF as written (word index)
     tex_pages: array[32, ptr UncheckedArray[uint8]]   ## texture slots 0-3
     pal_pages: array[8, ptr UncheckedArray[uint8]]    ## palette slots (6 used)
@@ -76,11 +79,21 @@ type
     mixed: seq[seq[uint8]]        ## pages several banks overlap: OR'd copies
     order: seq[int64]             ## sort key << 20 | polygon index
     line_cost: array[H, int32]    ## estimated bus cycles to render each line
+    # decoded texels (`tex_cached`): texels in pixel format, filled as the
+    # dots read them, valid while vram.tex_gen stands
+    tc_gen: uint64                ## vram.tex_gen the cache holds texels of
+    tc_pool: seq[uint32]          ## every cached texture's texels, NOT_DECODED until read
+    tc_used: int                  ## texels of tc_pool handed out
+    tc_index: Table[uint64, int]  ## texture key -> its first texel in tc_pool
     rdlines*: uint32              ## RDLINES_COUNT this frame would leave
     underflow*: bool              ## a line was not ready when displayed
 
   PolyCtx = object
     attr, tex, pltt: uint32
+    tc: ptr UncheckedArray[uint32]  ## the texture's decoded texels, or nil (tex_at)
+    sw, th: int                   ## texture size
+    rep_s, rep_t: bool
+    fmask_s, fmask_t: int         ## size - 1 where that coordinate flips, else 0 (wrap_coord)
     id: uint8
     alpha: int32                  ## 1..31 (wire-frame edges use 31)
     mode: uint32                  ## 0 modulate, 1 decal, 2 toon/highlight, 3 shadow
@@ -154,10 +167,13 @@ template pal16(r: Renderer; a: int): uint32 =
   uint32(r.pal_pages[(a shr 14) and 7][a and 0x3FFF]) or
     (uint32(r.pal_pages[((a + 1) shr 14) and 7][(a + 1) and 0x3FFF]) shl 8)
 
-proc wrap_coord(c, size: int; repeat, flip: bool): int {.inline.} =
-  if not repeat: return clamp(c, 0, size - 1)
+proc wrap_coord(c, size: int; repeat: bool; fmask: int): int {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  ## c clamped, or repeated and, with fmask = size - 1, flipped every other
+  ## time (size - 1 - m = m xor (size - 1) for m < size, a power of two)
+  # clamp, spelt out: system.clamp is not inlined
+  if not repeat: return (if c < 0: 0 elif c > size - 1: size - 1 else: c)
   let m = c and (size - 1)
-  if flip and (c and size) != 0: size - 1 - m else: m
+  if (c and size) != 0: m xor fmask else: m
 
 proc mix5(c0, c1: uint32; k0, k1, sh: int): uint32 =
   ## per-channel (c0*k0 + c1*k1) >> sh on BGR555 colours
@@ -166,12 +182,10 @@ proc mix5(c0, c1: uint32; k0, k1, sh: int): uint32 =
     let b = int((c1 shr (5 * i)) and 31)
     result = result or (uint32((a * k0 + b * k1) shr sh) shl (5 * i))
 
-proc texel(r: Renderer; tex, pltt: uint32; s, t: int64): uint32 {.inline.} =
-  ## The texel at (s, t) (12.4) in pixel format; alpha 0 = transparent.
+proc texel_uv(r: Renderer; tex, pltt: uint32; u, v: int): uint32 =
+  ## Texel (u, v) of the texture in pixel format; alpha 0 = transparent.
+  ## Never NOT_DECODED: bit 31 is always clear.
   let sw = 8 shl int((tex shr 20) and 7)
-  let th = 8 shl int((tex shr 23) and 7)
-  let u = wrap_coord(int(s shr 4), sw, (tex and 0x10000) != 0, (tex and 0x40000) != 0)
-  let v = wrap_coord(int(t shr 4), th, (tex and 0x20000) != 0, (tex and 0x80000) != 0)
   let base = int(tex and 0xFFFF) * 8
   let pbase = int(pltt) * 16
   let zero_clear = (tex and 0x2000_0000'u32) != 0
@@ -228,6 +242,53 @@ proc texel(r: Renderer; tex, pltt: uint32; s, t: int64): uint32 {.inline.} =
     rgb6(c) or (if (c and 0x8000) == 0: 0'u32 else: 31'u32 shl 24)
   else: 0'u32
 
+# Decoded texels. A texel is a function of the texture parameters that
+# address it (TEXIMAGE_PARAM's address, size, format and colour-0 bit and,
+# for the paletted formats, PLTT_BASE), its (u, v) and the texture and
+# palette slots' contents, which change only with vram.tex_gen (a bank in a
+# slot has no CPU address: gpu3d.nim render_frame, docs/nds/perf.md "3D
+# frame reuse"). So each texture keeps a buffer of its texels, decoded by
+# texel_uv the first time a dot reads one, for as long as tex_gen stands.
+
+const
+  NOT_DECODED = 0xFFFF_FFFF'u32
+  TC_POOL = 1 shl 20              ## texels cached at most (4 MB); then the cache starts over
+  TC_MAX_TEX = 1 shl 18           ## larger textures (1024 x 512 and up) are decoded per dot
+
+proc tex_cached(r: Renderer; vram: Vram; tex, pltt: uint32): ptr UncheckedArray[uint32] =
+  ## The texel buffer for this texture (nil: too large to cache).
+  if r.tc_gen != vram.tex_gen:
+    r.tc_gen = vram.tex_gen
+    r.tc_index.clear()
+    r.tc_used = 0
+  let n = (8 shl int((tex shr 20) and 7)) * (8 shl int((tex shr 23) and 7))
+  if n > TC_MAX_TEX: return nil
+  let fmt = (tex shr 26) and 7
+  let key = (uint64(tex and 0x3FF0_FFFF'u32) shl 16) or uint64(if fmt == 7: 0'u32 else: pltt and 0x1FFF)
+  var at = r.tc_index.getOrDefault(key, -1)
+  if at < 0:
+    if r.tc_pool.len == 0: r.tc_pool = newSeq[uint32](TC_POOL)
+    if r.tc_used + n > TC_POOL:
+      r.tc_index.clear()
+      r.tc_used = 0
+    at = r.tc_used
+    r.tc_used += n
+    for i in at ..< at + n: r.tc_pool[i] = NOT_DECODED
+    r.tc_index[key] = at
+  cast[ptr UncheckedArray[uint32]](addr r.tc_pool[at])
+
+proc tex_at(r: Renderer; c: PolyCtx; s, t: int64): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  ## The texel at (s, t) (12.4): wrapped, clamped or flipped into the
+  ## texture, then decoded (or read from the cache).
+  let u = wrap_coord(int(s shr 4), c.sw, c.rep_s, c.fmask_s)
+  let v = wrap_coord(int(t shr 4), c.th, c.rep_t, c.fmask_t)
+  if c.tc == nil: return r.texel_uv(c.tex, c.pltt, u, v)
+  let i = v * c.sw + u
+  result = c.tc[i]
+  if result == NOT_DECODED:
+    result = r.texel_uv(c.tex, c.pltt, u, v)
+    c.tc[i] = result
+
 # ---------------------------------------------------------------------------
 # Rear plane
 
@@ -246,13 +307,13 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
         let i = y * W + x
         r.color[i] = rgb6(c) or (if (c and 0x8000) != 0: 31'u32 shl 24 else: 0)
         let d15 = d and 0x7FFF
-        r.depth[i] = d15 * 0x200 + ((d15 + 1) div 0x8000) * 0x1FF
-        r.opaque_id[i] = id
-        r.trans_id[i] = NO_ID
-        r.aacov[i] = 31
-        r.below[i] = r.color[i]
-        r.below_depth[i] = r.depth[i]
-        r.flags[i] = if (d and 0x8000) != 0: FLAG_FOG else: 0
+        r.px[i].depth = d15 * 0x200 + ((d15 + 1) div 0x8000) * 0x1FF
+        r.px[i].opaque_id = id
+        r.px[i].trans_id = NO_ID
+        r.px[i].aacov = 31
+        r.px[i].below = r.color[i]
+        r.px[i].below_depth = r.px[i].depth
+        r.px[i].flags = if (d and 0x8000) != 0: FLAG_FOG else: 0
   else:
     let c = rgb6(cc) or (((cc shr 16) and 31) shl 24)
     let d15 = r.reg16(0x354) and 0x7FFF
@@ -260,13 +321,13 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
     let f = if (cc and 0x8000) != 0: FLAG_FOG else: 0'u8
     for i in 0 ..< NPIX:
       r.color[i] = c
-      r.depth[i] = d
-      r.opaque_id[i] = id
-      r.trans_id[i] = NO_ID
-      r.aacov[i] = 31
-      r.below[i] = c
-      r.below_depth[i] = d
-      r.flags[i] = f
+      r.px[i].depth = d
+      r.px[i].opaque_id = id
+      r.px[i].trans_id = NO_ID
+      r.px[i].aacov = 31
+      r.px[i].below = c
+      r.px[i].below_depth = d
+      r.px[i].flags = f
 
 # ---------------------------------------------------------------------------
 # Rasterisation
@@ -424,19 +485,21 @@ proc edge_end(e: Edge; va: openArray[VAttr]; y: int; x: int32): EndAttr {.inline
     result.t = A.t + ashr((B.t - A.t) * f, 9)
     result.w = A.w + ashr((B.w - A.w) * f, 9)
 
-proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32 {.inline.} =
+proc blend_texel(r: Renderer; c: PolyCtx; textured: bool; mode: uint32; vr, vg, vb: int32;
+                 tx: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## Vertex colour x texel by polygon mode (GBATEK "DS 3D Texture Blending");
-  ## 6-bit colour, 5-bit alpha.
+  ## 6-bit colour, 5-bit alpha. `textured` and `mode` are the context's
+  ## (passed apart so that the span loops can give them as constants).
   let av = c.alpha
   var tr, tg, tb, ta: int32
-  if c.textured:
+  if textured:
     tr = ch(tx, 0); tg = ch(tx, 1); tb = ch(tx, 2); ta = int32(tx shr 24)
   else:
     tr = 63; tg = 63; tb = 63; ta = 31
-  case c.mode
+  case mode
   of 1:
     # decal: the texel alpha mixes texel over vertex colour
-    if not c.textured or ta == 0: return pack(vr, vg, vb, av)
+    if not textured or ta == 0: return pack(vr, vg, vb, av)
     if ta == 31: return pack(tr, tg, tb, av)
     # 5-bit texel alpha over 32 (GBATEK writes (Rt*At + Rv*(63-At))/64;
     # 3d_blendmodes on the reference core pins this form exactly)
@@ -468,14 +531,25 @@ proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32
 type
   SpanStep = object
     ## floor(n * 2^38 / d) and its remainder, stepped along a span so
-    ## that consecutive dots need no division
+    ## that consecutive dots need no division; and what every dot of the
+    ## span shares: its length, whether its ends' w are equal, and the
+    ## depth step's reciprocal
     d, q, rr, n, f, acc: int64
+    len: int64                  ## R.x - L.x (may be <= 0)
+    zk: int64                   ## 2^18 div len (len > 0)
+    eqw: bool
+    inr: bool                   ## both ends' colours (9-bit), Z and w in range (`fill`)
 
-proc span_step(xl, xr: int32): SpanStep {.inline.} =
-  let d = max(1'i64, int64(xr - xl))
-  SpanStep(d: d, q: (1'i64 shl 38) div d, rr: (1'i64 shl 38) mod d, n: -2)
+proc span_step(L, R: EndAttr): SpanStep {.inline.} =
+  let len = int64(R.x - L.x)
+  let d = max(1'i64, len)
+  template c9(e: EndAttr): bool =
+    e.c[0] in 0'i64..511'i64 and e.c[1] in 0'i64..511'i64 and e.c[2] in 0'i64..511'i64
+  template zw(e: EndAttr): bool = e.z in 0'i64..0xFF_FFFF'i64 and e.w in 1'i64..0xFF_FFFF'i64
+  SpanStep(d: d, q: (1'i64 shl 38) div d, rr: (1'i64 shl 38) mod d, n: -2, len: len,
+           zk: (1'i64 shl 18) div d, eqw: L.w == R.w, inr: c9(L) and c9(R) and zw(L) and zw(R))
 
-proc step_to(sp: var SpanStep; n: int64) {.inline.} =
+proc step_to(sp: var SpanStep; n: int64) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   if n == sp.n + 1:
     sp.f += sp.q
     sp.acc += sp.rr
@@ -488,32 +562,62 @@ proc step_to(sp: var SpanStep; n: int64) {.inline.} =
     sp.acc = nn - sp.f * sp.d
   sp.n = n
 
-proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; edge: bool;
-          cov = 31'i32; role = 0'u8) {.inline.} =
+# Dot kinds. `plot_k` is instantiated once with nothing known (K = 0:
+# every flag read from the context, as each edge dot is drawn) and, for the
+# runs between the edges (`fill`), once per combination of these facts,
+# which `fill` checks before choosing one; a known flag is a constant the C
+# compiler folds, so each instance is the same code with fewer tests.
+const
+  K_SIMPLE = 1      ## not wire-frame, no edge-marking rule, modulation, depth test "less"
+  K_TEX = 2         ## textured
+  K_UNTEX = 4       ## not textured
+  K_EQW = 8         ## the span's ends have equal w
+  K_PERSP = 16      ## ... unequal w
+  K_AA = 32         ## anti-aliasing
+  K_NOAA = 64       ## no anti-aliasing
+  K_WBUF = 128      ## W-buffer depth
+  K_ZBUF = 256      ## Z-buffer depth
+  K_INR = 512       ## the span is in range (SpanStep.inr) and the dot lies on it (0 <= n < len)
+
+template kf(K: static int; yes, no: static int; dyn: untyped): untyped =
+  when (K and yes) != 0: true
+  elif (K and no) != 0: false
+  else: dyn
+
+proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep;
+                           edge: bool; cov: int32; role: uint8)
+    {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## One dot of the span from L to R; `cov` is its anti-aliasing coverage
   ## (0..31, 31 = whole); `role`: which edge the dot belongs to (ROLE_*).
+  const simple = (K and K_SIMPLE) != 0
+  let textured = kf(K, K_TEX, K_UNTEX, c.textured)
+  let aa = kf(K, K_AA, K_NOAA, c.aa)
+  let mode = (when simple: 0'u32 else: c.mode)
   let i = y * W + x
   # One division gives the dot's factor along the span; with equal w the
   # factor (38 bits, rounded so that every attribute comes out as
   # floor(a + (b - a) * n / d) exactly) is linear, else the 8-bit
   # perspective one. Depth first, the rest only for dots that pass.
-  let d = int64(R.x - L.x)
+  let d = sp.len
   let n = int64(x - L.x)
-  let eqw = L.w == R.w
+  let eqw = kf(K, K_EQW, K_PERSP, sp.eqw)
   var fl, fc, f8, z, w: int64
   if d <= 0:
     z = L.z; w = L.w
   else:
-    sp.step_to(n)
-    fl = sp.f
-    fc = fl + (if sp.acc != 0: 1'i64 else: 0'i64)
+    # (the linear factor serves equal-w spans only; the stepper's state is
+    # exact whenever it is read, so a run that skips it changes nothing)
+    when (K and K_PERSP) == 0:
+      sp.step_to(n)
+      fl = sp.f
+      fc = fl + (if sp.acc != 0: 1'i64 else: 0'i64)
     let dz = R.z - L.z
     # depth steps across the span by an 18-bit reciprocal of its length,
     # so it lands just short of the exact value at whole steps: a polygon
     # drawn later wins the tie where its depth rises along the span
     # (3d_probe_zinterp_x on the reference cores; any 16..30 bits fit,
     # 18 Assumed like the edge slope's)
-    z = L.z + ashr(dz * n * ((1'i64 shl 18) div d), 18)
+    z = L.z + ashr(dz * n * sp.zk, 18)
     if eqw:
       w = L.w
     else:
@@ -525,10 +629,13 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
       let dd = b - a
       a + ashr(dd * (if dd >= 0: fc else: fl), 38)
     else: a + ashr((b - a) * f8, 8)
-  let dv = if c.wbuffer: w else: z
-  let dval = uint32(max(0'i64, min(dv, 0xFF_FFFF'i64)))
-  let old = r.depth[i]
-  var pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
+  let dv = if kf(K, K_WBUF, K_ZBUF, c.wbuffer): w else: z
+  # On a span in range (K_INR) every value lies between its two ends'
+  # (dots 0 <= n < len: the factors are in [0, 1)), so the clamps here and
+  # on the colours below change nothing
+  let dval = (when (K and K_INR) != 0: uint32(dv) else: uint32(max(0'i64, min(dv, 0xFF_FFFF'i64))))
+  let old = r.px[i].depth
+  var pass = if not simple and (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
   # With edge marking on and anti-aliasing off, where edges of two opaque
   # polygons with the same ID overlap, a left edge wins over a right one
@@ -539,8 +646,8 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   # (overriden by top xmajor/flat)", and the recorded colours of 38, 39, 43:
   # a further polygon's top run shows over the nearer one's bottom run or
   # bottom row; 42: a right diagonal over a bottom run does nothing).
-  if c.curse and role != 0 and r.opaque_id[i] == c.id and r.trans_id[i] == NO_ID:
-    let was = r.flags[i]
+  if not simple and c.curse and role != 0 and r.px[i].opaque_id == c.id and r.px[i].trans_id == NO_ID:
+    let was = r.px[i].flags
     if (role == ROLE_LEFT and (was and ROLE_RIGHT) != 0) or
        (role == ROLE_TOP and (was and ROLE_BOTTOM) != 0): pass = true
     elif (role == ROLE_RIGHT and (was and ROLE_LEFT) != 0) or
@@ -548,18 +655,18 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   when defined(r3dprof):
     inc prof_dots
     if pass: inc prof_pass
-  if c.mode == 3:
+  if mode == 3:
     # Shadow volumes (GBATEK "DS 3D Shadow Polygons"), as the reference
     # cores agree on 3d_shadow: the mask (ID 0) flags the dots where its
     # back side is hidden, i.e. where the scene lies inside the volume; the
     # shadow (ID > 0) draws only on flagged dots, clearing the flag, and
     # not on its own polygon ID. A shadow with no mask draws nothing.
     if c.id == 0:
-      if not pass: r.flags[i] = r.flags[i] or FLAG_STENCIL
+      if not pass: r.px[i].flags = r.px[i].flags or FLAG_STENCIL
       return
-    if (r.flags[i] and FLAG_STENCIL) == 0: return
-    r.flags[i] = r.flags[i] and not FLAG_STENCIL
-    if not pass or r.opaque_id[i] == c.id: return
+    if (r.px[i].flags and FLAG_STENCIL) == 0: return
+    r.px[i].flags = r.px[i].flags and not FLAG_STENCIL
+    if not pass or r.px[i].opaque_id == c.id: return
   elif not pass:
     # With anti-aliasing each dot keeps two layers: the top one and the
     # nearest one behind it, which a partly covered top dot mixes over at
@@ -568,18 +675,21 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
     # blend into it, whatever the drawing order (3d_aa, 3d_probe_aa2,
     # 3d_probe_aa3 on the reference cores). Only dots whose top is partly
     # covered or an edge ever read it.
-    if not c.aa or (r.aacov[i] >= 31 and (r.flags[i] and FLAG_EDGE) == 0) or
-       dval >= r.below_depth[i]: return
-  let vr = int32(max(0'i64, min(ashr(at(L.c[0], R.c[0]), 3), 63'i64)))
-  let vg = int32(max(0'i64, min(ashr(at(L.c[1], R.c[1]), 3), 63'i64)))
-  let vb = int32(max(0'i64, min(ashr(at(L.c[2], R.c[2]), 3), 63'i64)))
+    if not aa or (r.px[i].aacov >= 31 and (r.px[i].flags and FLAG_EDGE) == 0) or
+       dval >= r.px[i].below_depth: return
+  template c6(a, b: int64): int32 =
+    when (K and K_INR) != 0: int32(ashr(at(a, b), 3))
+    else: int32(max(0'i64, min(ashr(at(a, b), 3), 63'i64)))
+  let vr = c6(L.c[0], R.c[0])
+  let vg = c6(L.c[1], R.c[1])
+  let vb = c6(L.c[2], R.c[2])
   var tx = 0'u32
-  if c.textured:
-    tx = r.texel(c.tex, c.pltt, at(L.s, R.s), at(L.t, R.t))
-  var px = r.blend_texel(c, vr, vg, vb, tx)
+  if textured:
+    tx = r.tex_at(c, at(L.s, R.s), at(L.t, R.t))
+  var px = r.blend_texel(c, textured, mode, vr, vg, vb, tx)
   # wire-frame lines are drawn at alpha 31 (GBATEK), whatever the texel's
   # alpha: transparent texels too (3d_lines on the reference cores)
-  if c.wire: px = px or (31'u32 shl 24)
+  if not simple and c.wire: px = px or (31'u32 shl 24)
   let a = int32(px shr 24)
   if a <= c.aref: return
   template blend_into(dst: var uint32) =
@@ -592,33 +702,77 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
       dst = px
   if not pass:
     if a == 31:
-      r.below[i] = px
-      r.below_depth[i] = dval
+      r.px[i].below = px
+      r.px[i].below_depth = dval
     else:
-      blend_into(r.below[i])
-      if (c.attr and 0x800) != 0: r.below_depth[i] = dval
+      blend_into(r.px[i].below)
+      if (c.attr and 0x800) != 0: r.px[i].below_depth = dval
     return
-  if a == 31 and c.mode != 3:
+  if a == 31 and mode != 3:
     # anti-aliased edge dots keep their coverage for the post pass, and
     # what they cover moves one layer down
-    r.below[i] = r.color[i]
-    r.below_depth[i] = r.depth[i]
-    r.aacov[i] = uint8(cov)
+    r.px[i].below = r.color[i]
+    r.px[i].below_depth = r.px[i].depth
+    r.px[i].aacov = uint8(cov)
     r.color[i] = px
-    r.depth[i] = dval
-    r.opaque_id[i] = c.id
-    r.trans_id[i] = NO_ID
-    r.flags[i] = (if c.fog: FLAG_FOG else: 0'u8) or (if edge: FLAG_EDGE or role else: 0'u8)
+    r.px[i].depth = dval
+    r.px[i].opaque_id = c.id
+    r.px[i].trans_id = NO_ID
+    r.px[i].flags = (if c.fog: FLAG_FOG else: 0'u8) or (if edge: FLAG_EDGE or role else: 0'u8)
   else:
     # a translucent polygon does not blend twice over its own ID
-    if r.trans_id[i] == c.id: return
+    if r.px[i].trans_id == c.id: return
     blend_into(r.color[i])
     # over a partly covered edge dot it tints the layer behind as well
     # (3d_probe_aa3: anti-aliasing still applies under translucency)
-    if c.aa and (r.aacov[i] < 31 or (r.flags[i] and FLAG_EDGE) != 0): blend_into(r.below[i])
-    if (c.attr and 0x800) != 0: r.depth[i] = dval
-    r.trans_id[i] = c.id
-    if not c.fog: r.flags[i] = r.flags[i] and not FLAG_FOG
+    if aa and (r.px[i].aacov < 31 or (r.px[i].flags and FLAG_EDGE) != 0): blend_into(r.px[i].below)
+    if (c.attr and 0x800) != 0: r.px[i].depth = dval
+    r.px[i].trans_id = c.id
+    if not c.fog: r.px[i].flags = r.px[i].flags and not FLAG_FOG
+
+template by_kind(c: PolyCtx; sp: SpanStep; kin: static int; generic, go: untyped) =
+  ## `go(K)` with K the facts that hold for this polygon and span
+  ## (`generic` when the polygon is not K_SIMPLE, or with `kin` = K_INR
+  ## when the span is not in range).
+  if c.wire or c.curse or c.mode != 0 or (c.attr and 0x4000) != 0 or (kin != 0 and not sp.inr):
+    generic
+  else:
+    template by_depth(t, e, a: static int) =
+      if c.wbuffer: go(K_SIMPLE or kin or t or e or a or K_WBUF)
+      else: go(K_SIMPLE or kin or t or e or a or K_ZBUF)
+    template by_aa(t, e: static int) =
+      if c.aa: by_depth(t, e, K_AA) else: by_depth(t, e, K_NOAA)
+    template by_w(t: static int) =
+      if sp.eqw: by_aa(t, K_EQW) else: by_aa(t, K_PERSP)
+    if c.textured: by_w(K_TEX) else: by_w(K_UNTEX)
+
+proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; edge: bool;
+          cov = 31'i32; role = 0'u8) =
+  ## One dot (an edge's), by the instance of plot_k that knows the
+  ## polygon's and the span's flags.
+  template go(K: static int) = plot_k[K](r, c, x, y, L, R, sp, edge, cov, role)
+  by_kind(c, sp, 0, go(0), go)
+
+proc fill_k[K: static int](r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr;
+                           sp: var SpanStep; edge: bool; role: uint8) =
+  # local copies: the C compiler keeps them in registers, where the
+  # parameters (pointers it cannot tell from the buffers being written)
+  # would be loaded again for every dot
+  let cl = c
+  let ll = L
+  let rl = R
+  var st = sp
+  for x in x0 ..< x1: plot_k[K](r, cl, x, y, ll, rl, st, edge, 31, role)
+  sp = st
+
+proc fill(r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr; sp: var SpanStep;
+          edge: bool; role = 0'u8) =
+  ## Dots x0 ..< x1 of row y, whole (coverage 31): `plot` for each, by the
+  ## instance of plot_k that knows the polygon's and the span's flags.
+  if x0 >= x1: return
+  # (its dots lie on the span: 0 <= x - L.x < len, or len <= 0)
+  template go(K: static int) = fill_k[K](r, c, y, x0, x1, L, R, sp, edge, role)
+  by_kind(c, sp, K_INR, go(0), go)
 
 proc aa_cov(e: Edge; y, x: int; right: bool; lend = 0'i32): int32 =
   ## Anti-aliasing coverage (0..31) of dot x on row y by edge e
@@ -649,7 +803,7 @@ proc charge(r: Renderer; y, x0, x1: int) {.inline.} =
   let w = max(0, min(W, x1) - max(0, x0))
   r.line_cost[y] += int32(RENDER_POLY_CYCLES + w div RENDER_DOTS_PER_CYCLE)
 
-proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcnt: uint32;
+proc draw_polygon(r: Renderer; vram: Vram; poly: Polygon; verts: openArray[Vertex]; disp3dcnt: uint32;
                   wbuffer: bool) =
   let n = int(poly.count)
   if n < 1 or n > 16: return
@@ -682,6 +836,14 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   # notes)
                   curse: (disp3dcnt and 0x30) == 0x20 and not poly.translucent and
                          ((poly.attr shr 4) and 3) != 3)
+  if c.textured:
+    c.sw = 8 shl int((poly.tex shr 20) and 7)
+    c.th = 8 shl int((poly.tex shr 23) and 7)
+    c.rep_s = (poly.tex and 0x10000) != 0
+    c.rep_t = (poly.tex and 0x20000) != 0
+    c.fmask_s = (if (poly.tex and 0x40000) != 0: c.sw - 1 else: 0)
+    c.fmask_t = (if (poly.tex and 0x80000) != 0: c.th - 1 else: 0)
+    c.tc = r.tex_cached(vram, poly.tex, poly.pltt)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
   var line = true
@@ -711,10 +873,9 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       if sx[i] > sx[ri]: ri = i
     let L = EndAttr(x: sx[li], c: va[li].c, s: va[li].s, t: va[li].t, z: va[li].z, w: va[li].w)
     let R = EndAttr(x: sx[ri], c: va[ri].c, s: va[ri].s, t: va[ri].t, z: va[ri].z, w: va[ri].w)
-    var sp = span_step(L.x, R.x)
+    var sp = span_step(L, R)
     r.charge(int(ymin), int(sx[li]), max(int(sx[ri]), int(sx[li]) + 1))
-    for x in max(0, int(sx[li])) ..< min(W, max(int(sx[ri]), int(sx[li]) + 1)):
-      r.plot(c, x, int(ymin), L, R, sp, true)
+    r.fill(c, int(ymin), max(0, int(sx[li])), min(W, max(int(sx[ri]), int(sx[li]) + 1)), L, R, sp, true)
     return
   # The rasteriser walks two chains of edges down from the top vertex (the
   # first one on the top row): one forward in vertex order, one backward,
@@ -778,7 +939,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
         r.charge(y, int(xs), int(xe) + 1)
         let EL = pl.edge_end(va, y, xs)
         let ER = pr.edge_end(va, y, xe + 1)
-        var sp = span_step(EL.x, ER.x)
+        var sp = span_step(EL, ER)
         # anti-aliasing: a vertical edge gets no coverage in a swapped row
         # (polyrastertest's AA swapped vertical edge glitch: the hardware
         # inverts swapped edges' coverage, which leaves sloped edges as
@@ -801,10 +962,13 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
           if lfill: edge_dot(xs, pl, false, lcx)
           if rfill and xe != xs: edge_dot(xe, pr, true, xe)
         else:
-          for x in max(0'i32, xs) .. min(W - 1, xe):
-            if x == xs and lfill: edge_dot(x, pl, false, lcx)
-            elif x == xe and rfill: edge_dot(x, pr, true, xe)
-            else: r.plot(c, int(x), y, EL, ER, sp, rim)
+          # x == xs and x == xe as edge dots when filled (xs first), the
+          # rest whole (edge_dot tests the screen bounds itself)
+          if lfill: edge_dot(xs, pl, false, lcx)
+          let a = if lfill: xs + 1 else: xs
+          let b = if rfill and not (lfill and xe == xs): xe - 1 else: xe
+          r.fill(c, y, max(0, int(a)), min(W - 1, int(b)) + 1, EL, ER, sp, rim)
+          if rfill and not (lfill and xe == xs): edge_dot(xe, pr, true, xe)
         continue
     let le = le0
     let re = re0
@@ -817,7 +981,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let yr = if re.amaj and not re.dec and not re.vert: y + 1 else: y
     let EL = le.edge_end(va, yl, L.s)
     let ER = re.edge_end(va, yr, R.e)
-    var sp = span_step(EL.x, ER.x)
+    var sp = span_step(EL, ER)
     # edge roles (the overlapping-edge rule in plot): x-major runs are top
     # or bottom edges as the fill rules have them (a left run going right
     # is a bottom one, a right run going right a top one), other edges left
@@ -842,12 +1006,12 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let rdraw = rfull or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
     if aa:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false), lrole)
-      for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim, 31, mrole)
+      r.fill(c, y, max(0, int(L.e)), min(W, int(R.s)), EL, ER, sp, rim, mrole)
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true, L.e), rrole)
       continue
     if ldraw:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, 31, lrole)
-    for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim, 31, mrole)
+    r.fill(c, y, max(0, int(L.e)), min(W, int(R.s)), EL, ER, sp, rim, mrole)
     if rdraw:
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
         r.plot(c, x, y, EL, ER, sp, true, 31, rrole)
@@ -869,21 +1033,21 @@ proc edge_mark(r: Renderer; aa: bool) =
   for y in 0 ..< H:
     for x in 0 ..< W:
       let i = y * W + x
-      if (r.flags[i] and FLAG_EDGE) == 0: continue
-      let id = r.opaque_id[i]
-      let d = r.depth[i]
+      if (r.px[i].flags and FLAG_EDGE) == 0: continue
+      let id = r.px[i].opaque_id
+      let d = r.px[i].depth
       template differs(xx, yy: int): bool =
         if xx < 0 or xx >= W or yy < 0 or yy >= H: id != clear_id and d < clear_depth
-        else: id != r.opaque_id[yy * W + xx] and d < r.depth[yy * W + xx]
+        else: id != r.px[yy * W + xx].opaque_id and d < r.px[yy * W + xx].depth
       if differs(x - 1, y) or differs(x + 1, y) or differs(x, y - 1) or differs(x, y + 1):
         marked.add int32(i)
   for i in marked:
-    let ec = rgb6(r.reg16(0x330 + int(r.opaque_id[i] shr 3) * 2))
+    let ec = rgb6(r.reg16(0x330 + int(r.px[i].opaque_id shr 3) * 2))
     if aa:
       # with anti-aliasing the edge colour goes on at about half strength
       # over the layer behind the dot (GBATEK; 3d_probe_aa_edge: alpha 16,
       # 3d_probe_aa3_edge: the layer, not the polygon's own colour)
-      let o = r.below[i]
+      let o = r.px[i].below
       template mixe(k: int): int32 = (ch(ec, k) * 17 + ch(o, k) * 15) shr 5
       r.color[i] = pack(mixe(0), mixe(1), mixe(2), 0) or (r.color[i] and 0xFF00_0000'u32)
     else:
@@ -896,9 +1060,9 @@ proc anti_alias(r: Renderer) =
   ## (3d_probe_aa / _aa_edge pin the coverage, 3d_probe_aa2 / _aa3 the
   ## layer, translucent polygons included).
   for i in 0 ..< NPIX:
-    let cov = int32(r.aacov[i])
+    let cov = int32(r.px[i].aacov)
     if cov >= 31: continue
-    let o = r.below[i]
+    let o = r.px[i].below
     let px = r.color[i]
     template mixa(k: int): int32 = (ch(px, k) * (cov + 1) + ch(o, k) * (31 - cov)) shr 5
     # no coverage at all leaves the colour beneath
@@ -918,9 +1082,9 @@ proc fog(r: Renderer; disp3dcnt: uint32) =
   var table: array[32, int32]
   for k in 0..31: table[k] = int32(r.reg8(0x360 + k) and 0x7F)
   for i in 0 ..< NPIX:
-    if (r.flags[i] and FLAG_FOG) == 0: continue
+    if (r.px[i].flags and FLAG_FOG) == 0: continue
     # FogDepthBoundary[n] = FOG_OFFSET + FOG_STEP*(n+1), on 15-bit depth
-    let d = int(r.depth[i] shr 9)
+    let d = int(r.px[i].depth shr 9)
     var dens: int32
     if step == 0: dens = (if d < offset + step: table[0] else: table[31])
     else:
@@ -1014,7 +1178,7 @@ proc render_frame_body(r: Renderer; vram: Vram; polys: openArray[Polygon];
   when defined(r3dprof):
     let tb = getMonoTime()
   for k in r.order:
-    r.draw_polygon(polys[int(k and 0xFFFFF)], verts, disp3dcnt, wbuffer)
+    r.draw_polygon(vram, polys[int(k and 0xFFFFF)], verts, disp3dcnt, wbuffer)
   when defined(r3dprof):
     prof_draw += (getMonoTime() - tb).inNanoseconds
   if (disp3dcnt and 0x10) != 0: r.anti_alias()

@@ -95,6 +95,8 @@ type
     last_regs: array[40, uint32]  ## last real render drew
     last_polys: seq[Polygon]
     last_verts: seq[Vertex]
+    last_is_cur: bool             ## polys/verts are the very lists the last render drew
+                                  ## (last_polys/verts hold them only from the next swap)
     rdlines: uint32               ## RDLINES_COUNT of the last frame
     underflow_next: bool          ## the frame being shown runs out of lines
     line*: array[256, uint32]     ## 0 alpha = transparent
@@ -228,14 +230,19 @@ proc wake_at*(g: Gpu3d; below: int): int64 =
     i += n
   NEVER
 
-proc update_irq*(g: Gpu3d) =
-  ## IF.21 is set as long as the selected condition holds.
-  if g.irq == nil or g.irq_mode == 0: return
-  g.catch_up(g.now())
+proc raise_level_irq(g: Gpu3d) {.inline.} =
+  ## IF.21 if the selected condition holds now (the engine caught up).
+  if g.irq == nil: return
   case g.irq_mode
   of 1: (if g.fifo_level < 128: g.irq.raise_irq(irqGxFifo))
   of 2: (if g.fifo_level == 0: g.irq.raise_irq(irqGxFifo))
   else: discard
+
+proc update_irq*(g: Gpu3d) =
+  ## IF.21 is set as long as the selected condition holds.
+  if g.irq == nil or g.irq_mode == 0: return
+  g.catch_up(g.now())
+  g.raise_level_irq()
 
 proc push(g: Gpu3d; cmd: uint8; param: uint32) =
   var t = g.write_time()
@@ -250,7 +257,8 @@ proc push(g: Gpu3d; cmd: uint8; param: uint32) =
     g.catch_up(t)
   g.fifo.addLast(FifoEntry(cmd: cmd, param: param, at: t))
   g.catch_up(t)
-  g.update_irq()
+  # update_irq, whose catch_up to now (<= t) would find nothing to start
+  g.raise_level_irq()
 
 proc next_packed(g: Gpu3d) =
   ## Issue the packed word's parameterless commands up to the next one that
@@ -394,6 +402,12 @@ proc on_vblank*(g: Gpu3d) =
   let t = g.now()
   g.catch_up(t)
   if g.swap_pending:
+    if g.last_is_cur:
+      # the lists the last render drew become last_polys/verts (by moving
+      # buffers, not copying), and their old buffers go to the geometry side
+      swap(g.last_polys, g.polys)
+      swap(g.last_verts, g.verts)
+      g.last_is_cur = false
     swap(g.polys, g.geo.polys)
     swap(g.verts, g.geo.verts)
     g.geo.reset_ram()
@@ -424,7 +438,8 @@ proc render_frame*(g: Gpu3d) =
   ## frame (docs/nds/perf.md). Texture contents are covered by vram.tex_gen.
   if g.reuse_ok and g.reuse_on and g.last_gen == g.vram.tex_gen and
      g.last_disp3dcnt == g.disp3dcnt and g.last_param == g.ren_param and
-     g.last_regs == g.ren.regs and g.last_polys == g.polys and g.last_verts == g.verts:
+     g.last_regs == g.ren.regs and
+     (g.last_is_cur or g.last_polys == g.polys and g.last_verts == g.verts):
     g.rendered = true
     inc g.reused
     return
@@ -436,8 +451,9 @@ proc render_frame*(g: Gpu3d) =
     g.last_disp3dcnt = g.disp3dcnt
     g.last_param = g.ren_param
     g.last_regs = g.ren.regs
-    g.last_polys = g.polys
-    g.last_verts = g.verts
+    # the lists drawn stay in polys/verts until the next swap moves them
+    # to last_polys/verts (on_vblank): no copy
+    g.last_is_cur = true
 
 proc render_line*(g: Gpu3d; y: int) =
   ## Display line y (or capture) takes its 3D line: everything due by now
