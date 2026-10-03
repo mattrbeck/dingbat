@@ -71,6 +71,8 @@ def run_phase(name, rom, steps, workdir, rtc, save_in=None, log=print, audio=Fal
         res['frame'] = e.frame
         e.quit()
         res['save'] = e.save_path if os.path.exists(e.save_path) else None
+        if e.audio and os.path.exists(e.audio):
+            res['audio_sha1'] = sha1_of(e.audio)
     except Exception as exc:  # driver crash, bad ROM, ...
         res['error'] = f'{type(exc).__name__}: {exc}'
         res['trace'] = traceback.format_exc()[-1500:]
@@ -80,7 +82,95 @@ def run_phase(name, rom, steps, workdir, rtc, save_in=None, log=print, audio=Fal
         reader.close()
     res['seconds'] = round(time.time() - t0, 1)
     log(f"{name}: {'ok' if res['ok'] else 'FAILED'} in {res['seconds']}s" + (f" ({res['error']})" if res['error'] else ''))
+    # the whole result (checkpoint hash windows included) beside the phase:
+    # what a later run replays instead of running this emulator again
+    # (--refs-from), and what train.py compares hash by hash
+    res['workdir'] = os.path.abspath(workdir)
+    if save_in:
+        res['save_in_sha1'] = sha1_of(save_in)
+    try:
+        with open(os.path.join(workdir, 'result.json'), 'w') as f:
+            json.dump(res, f, indent=1, default=str)
+    except OSError:
+        pass
     return res
+
+
+def replay_phase(src_workdir, dst_workdir, log=print):
+    """A reference emulator's phase from an earlier run of the same script,
+    copied into this run (shots, battery file, audio features) with its paths
+    moved: the reference's output does not depend on dingbat's code, so a
+    run that only tests dingbat need not play it again. None when the
+    earlier run kept no whole result."""
+    side = os.path.join(src_workdir, 'result.json')
+    if not os.path.exists(side):
+        return None
+    with open(side) as f:
+        res = json.load(f)
+    if res.get('trace'):    # a crash is not worth replaying
+        return None
+    src = res.get('workdir') or os.path.abspath(src_workdir)
+    dst = os.path.abspath(dst_workdir)
+    if os.path.exists(dst):
+        shutil.rmtree(dst)
+    shutil.copytree(src_workdir, dst, symlinks=True)
+
+    def move(v):
+        if isinstance(v, str) and v.startswith(src):
+            return dst + v[len(src):]
+        if isinstance(v, dict):
+            return {k: move(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [move(x) for x in v]
+        return v
+    res = move(res)
+    res['replayed_from'] = src
+    with open(os.path.join(dst, 'result.json'), 'w') as f:
+        json.dump(res, f, indent=1, default=str)
+    log(f"{res['emu']}: replayed from {src}")
+    return res
+
+
+def refs_source(refs_from, script_text, log=print):
+    """The earlier run directory to replay references from, if it played
+    exactly this script."""
+    if not refs_from:
+        return None
+    old = os.path.join(refs_from, 'script.play')
+    try:
+        with open(old) as f:
+            same = f.read() == script_text
+    except OSError:
+        same = False
+    if not same:
+        log(f'refs-from {refs_from}: not the same script; references run live')
+        return None
+    return refs_from
+
+
+def _load_cell_for(src, content_sha1, reader):
+    """The earlier run's [load] cell where `reader` booted a save with these
+    bytes, or None."""
+    base = os.path.join(src, 'load')
+    if not os.path.isdir(base):
+        return None
+    for cell in sorted(os.listdir(base)):
+        if not cell.endswith(f'-in-{reader}'):
+            continue
+        side = os.path.join(base, cell, 'result.json')
+        try:
+            with open(side) as f:
+                if json.load(f).get('save_in_sha1') == content_sha1:
+                    return os.path.join(base, cell)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _done(value):
+    f = cf.Future()
+    f.set_result(value)
+    return f
 
 
 def compare_checkpoints(results, names, subject, cmpdir, tag):
@@ -204,9 +294,22 @@ def run(args):
 
     # ---------------------------------------------------------- [new]
     want_audio = not getattr(args, 'no_audio', False)
+    # --refs-from: an earlier run of this script whose reference phases are
+    # replayed instead of played (only the subjects run)
+    src = refs_source(getattr(args, 'refs_from', None), open(script_path).read())
+    report['refs_from'] = src
+    replayed = {}
+    if src:
+        for n in names:
+            if n.startswith(SUBJECT_PREFIX):
+                continue
+            r = replay_phase(os.path.join(src, 'new', n), os.path.join(outdir, 'new', n))
+            if r is not None and (r.get('audio_sha1') or not want_audio):
+                replayed[n] = r
     with cf.ThreadPoolExecutor(len(names)) as pool:
-        futs = {n: pool.submit(run_phase, n, rom, play['new'], os.path.join(outdir, 'new', n), rtc,
-                               audio=want_audio)
+        futs = {n: _done(replayed[n]) if n in replayed else
+                pool.submit(run_phase, n, rom, play['new'], os.path.join(outdir, 'new', n), rtc,
+                            audio=want_audio)
                 for n in names}
         new = {n: f.result() for n, f in futs.items()}
     report['new'] = {n: _strip(r) for n, r in new.items()}
@@ -250,11 +353,17 @@ def run(args):
         report['save_groups'] = list(by_content.values())
         jobs = {}
         with cf.ThreadPoolExecutor(min(6, len(names) * len(by_content) or 1)) as pool:
-            for group in by_content.values():
+            for content, group in by_content.items():
                 w = group[0]
                 for r in names:
                     wd = os.path.join(outdir, 'load', f'{w}-in-{r}')
-                    jobs[(w, r)] = pool.submit(run_phase, r, rom, play['load'], wd, rtc, save_in=written[w])
+                    # a reference reading the same bytes it read in the
+                    # earlier run (its own save; dingbat's when unchanged)
+                    old = (src and not r.startswith(SUBJECT_PREFIX)
+                           and _load_cell_for(src, content, r))
+                    cell = old and replay_phase(old, wd)
+                    jobs[(w, r)] = _done(cell) if cell else \
+                        pool.submit(run_phase, r, rom, play['load'], wd, rtc, save_in=written[w])
             for (w, r), f in jobs.items():
                 for alias in next(g for g in by_content.values() if g[0] == w):
                     load[(alias, r)] = f.result()
@@ -338,10 +447,14 @@ def compare_audio(new, names, outdir):
     for n in names:
         raw = new[n].get('audio')
         frames = new[n].get('frame') or 0
+        kept = os.path.join(outdir, 'new', n, 'audio-features.npz')
         if raw and os.path.exists(raw):
             raws[n] = (raw, frames)
             feats[n] = audio.features(raw, frames)
-            audio.save_features(feats[n], os.path.join(outdir, 'new', n, 'audio-features.npz'))
+            audio.save_features(feats[n], kept)
+        elif new[n].get('replayed_from') and os.path.exists(kept):
+            # a replayed reference: its features, no clips (the raw dump is gone)
+            feats[n] = audio.load_features(kept)
         else:
             feats[n] = None
     subjects = [n for n in names if n.startswith(SUBJECT_PREFIX)]

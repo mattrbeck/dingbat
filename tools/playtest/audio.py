@@ -232,3 +232,13 @@ def save_features(f, path):
     np.savez_compressed(path, rms=f['rms'], width=f['width'], shape=f['shape'],
                         meta=np.array(json.dumps({'peak': f['peak'], 'per_frame': f['per_frame'],
                                                   'frames': f['frames']})))
+
+
+def load_features(path):
+    """save_features' file back as features (what a replayed run compares)."""
+    if not path or not os.path.exists(path):
+        return None
+    z = np.load(path)
+    meta = json.loads(str(z['meta']))
+    return {'rms': z['rms'], 'width': z['width'], 'shape': z['shape'], 'peak': meta['peak'],
+            'per_frame': meta['per_frame'], 'frames': meta['frames']}
