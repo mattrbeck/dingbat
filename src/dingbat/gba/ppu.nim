@@ -1004,7 +1004,7 @@ type SpanWalk = object
   prio:   array[4, int32]
   layer:  array[4, int32]
   direct: array[4, bool]                        # bitmap direct-colour BG2
-  sel1:   array[4, bool]                        # BLDCNT 1st-target
+  sel1:   array[4, bool]                        # BLDCNT 1st-target; false if effects are off
   sel2:   array[4, bool]                        # BLDCNT 2nd-target
   row:    array[4, ptr UncheckedArray[uint8]]   # layer_palettes[bg] for this line
 
@@ -1145,7 +1145,7 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       w.prio[k]   = int32(ppu.walk_prios[i])
       w.layer[k]  = int32(bg)
       w.direct[k] = ppu.bitmap_direct and bg == 2
-      w.sel1[k]   = bit(uint16(ppu.bldcnt), bg)
+      w.sel1[k]   = effects and bit(uint16(ppu.bldcnt), bg)
       w.sel2[k]   = bit(uint16(ppu.bldcnt), bg + 8)
       w.row[k]    = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
       appear = appear or (1'u16 shl bg)
@@ -1153,17 +1153,29 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
 
   # Colour math needs the top layer to be a BLDCNT 1st target, or a
   # semi-transparent OBJ pixel (which forces alpha regardless of mode); if
-  # neither is reachable the effects apparatus is dead for this span
-  let can_blend = effects and
-    ((obj_enable and ppu.line_sprite_blend) or
-     (ppu.bldcnt.blend_mode != 0 and
-      (uint16(ppu.bldcnt) and 0x3F'u16 and appear) != 0))
+  # neither is reachable the effects apparatus is dead for this span. A
+  # semi-transparent OBJ pixel alpha-blends with a 2nd-target layer below it
+  # even where the window's colour-effect bit is clear; everything else (1st
+  # targets, brighten/darken, the semi-transparent fallback to them) needs
+  # the bit. So an effects-off span keeps only that blend: its 1st-target
+  # selections are cleared (w.sel1 above, sel1_obj/sel1_bd below) and the
+  # blend loop then reaches the bottom search only from a semi-transparent
+  # top. docs/playtest-bugs.md, "Semi-transparent OBJ under an effects-off
+  # window".
+  let semi_obj = obj_enable and ppu.line_sprite_blend
+  let can_blend =
+    if effects:
+      semi_obj or
+        (ppu.bldcnt.blend_mode != 0 and
+         (uint16(ppu.bldcnt) and 0x3F'u16 and appear) != 0)
+    else:
+      semi_obj and (uint16(ppu.bldcnt) and 0x3F00'u16) != 0
   if not can_blend:
     ppu.composite_span_opaque(w, row_base, lo, hi, obj_enable)
     return
   # Brighten/darken with no semi-transparent OBJ pixel never needs the layer
   # below the top one
-  if ppu.bldcnt.blend_mode != 1 and not (obj_enable and ppu.line_sprite_blend):
+  if ppu.bldcnt.blend_mode != 1 and not semi_obj:
     ppu.composite_span_shade(w, row_base, lo, hi, obj_enable)
     return
 
@@ -1198,8 +1210,8 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
     elif blend_mode == 3: bgr16_pack(((s * (16'u64 - evy)) shr 4) and BGR_LANE_MASK)
     else:                 top_u16
 
-  let sel1_obj = bit(bld, 4)
-  let sel1_bd  = bit(bld, 5)
+  let sel1_obj = effects and bit(bld, 4)
+  let sel1_bd  = effects and bit(bld, 5)
   let sel2_obj = bit(bld, 4 + 8)
   let sel2_bd  = bit(bld, 5 + 8)
 

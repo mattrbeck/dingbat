@@ -4146,3 +4146,85 @@ sysmovs.gba).
 
 All three games now play on with both BIOSes, matching mGBA at every
 screenshot of the sweep's 3000 frames.
+
+## 47. Semi-transparent OBJ under an effects-off window
+
+**FIXED** (ppu.nim `composite_span`). Reported on Pokémon MurfGreen, a
+minimal hack of the FireRed decomp: the overworld fog was fully opaque,
+where on hardware it is see-through and the ground shows. At that point
+DISPCNT = 7F60 (mode 0, BG0-3 and OBJ, WIN0 and WIN1 on), WININ = 1F1F (all
+layers, colour-effect bit clear in both windows), WINOUT = 0101, BLDCNT =
+1E40 (alpha, no 1st targets, 2nd targets BG1-3 and OBJ), BLDALPHA = 080C.
+The fog is OAM sprites in OBJ mode 1 (semi-transparent), priority 2.
+
+**What was wrong.** A semi-transparent OBJ pixel alpha-blends with a
+2nd-target layer below it even where the window's colour-special-effect bit
+is clear. Everything else still needs the bit: BLDCNT 1st-target alpha,
+brighten and darken, and the semi-transparent OBJ's own fallback to
+brighten/darken when the layer below is not a 2nd target. The span
+compositor sent every span whose window had the bit clear to the opaque
+loop (`can_blend = effects and ...`), so a semi-transparent OBJ there never
+blended. Now an effects-off span clears its 1st-target selections and, when
+the line has a semi-transparent OBJ pixel and BLDCNT names any 2nd target,
+runs the blend loop, which then searches for a bottom layer only under a
+semi-transparent top. Spans with no semi-transparent OBJ pixel (nearly all)
+still take the opaque loop.
+
+`tests/roms/semiobjwin.gba` (source `semiobjwin.s`) asks the question
+directly: one BG as the 2nd target, striped with the backdrop (not a
+target); WIN0 over the middle third with the effect bit clear, effects on
+outside; in each of three bands (BLDCNT alpha, darken, none) a
+semi-transparent OBJ straddles WIN0's left edge and a normal OBJ, with OBJ
+as a 1st target, its right edge. Both reference emulators draw the same
+frame, pixel for pixel in 5-bit colour:
+
+| cell | alpha band | darken band | none band |
+|---|---|---|---|
+| semi OBJ, effect bit clear, over the 2nd target | **alpha** | **alpha** | **alpha** |
+| semi OBJ, effect bit clear, over the backdrop | plain | plain | plain |
+| semi OBJ, effect bit set, over the 2nd target | alpha | alpha | alpha |
+| semi OBJ, effect bit set, over the backdrop | plain | darkened | plain |
+| normal OBJ (1st target), effect bit clear | plain | plain | plain |
+| normal OBJ (1st target), effect bit set, over the 2nd target | alpha | darkened | plain |
+| normal OBJ (1st target), effect bit set, over the backdrop | plain | darkened | plain |
+
+dingbat drew plain in the three bold cells (1536 pixels) and matched
+everywhere else; it now matches the references on every pixel.
+
+In the 135-game suite one checkpoint moved, in all four dingbat
+configurations: Castlevania - Aria of Sorrow's `castle_corridor`, where nine
+pixels of a semi-transparent sprite went from (11,9,17) to within one step
+of both references' (28,22,27) (the one-step differences left are alpha
+rounding, where dingbat follows the SP-measured blendprobe values). Every other dingbat checkpoint hash
+is unchanged; pass counts are unchanged.
+
+**Lineage.** The rule was known and fixed once: Crab, dingbat's
+predecessor, gained it on 2021-02-03 (805e860, "sprite blending overrides
+effects being disabled, fixes emerald cave/fog/underwater"). Crab's
+2022-08-11 blending rewrite (a353dce) dropped it; that rewrite was matched
+against tonc's `bld_demo`, which uses no windows, so nothing it was checked
+against could notice. The Nim port (bf71c126, 2026-02-24) inherited the
+rewrite's rule, and the span compositor (cfa15a42, 2026-07-27) kept it,
+faithfully specialising the wrong behaviour.
+
+**Why nothing caught it.** No test ROM or suite case dingbat runs combines
+a window with its effect bit clear and a semi-transparent OBJ (no runner
+row changed with the fix). `tests/ppucomposite_test.nim` compared
+the compositor with itself under configurations that must agree (fast path
+against general path, one loop against another), so a rule wrong in every
+path passed all of it. And the 135-game playtest has no fog, cave or
+underwater scene among its checkpoints; the references only cross-check
+dingbat where the scripts go.
+
+**Prevention.**
+- `dingbat/semiobjwin` in the test runner ("GBA - Other test ROMs") scores
+  the probe's frame against `tests/roms/semiobjwin_expected.png`, the frame
+  both references draw.
+- `tests/ppucomposite_test.nim` test 10 checks every pixel of 96 fuzzed
+  frames (BG modes 0-5, random windows, effect bits, BLDCNT, coefficients,
+  OBJ modes, debug masks; half of them with every effect bit clear and
+  semi-transparent sprites over 2nd targets) against a plain per-pixel model
+  of the colour-effect rules with none of the span machinery, and requires
+  the semi-transparent-under-a-clear-bit path to be hit. Against the old
+  compositor it fails (65613 pixels differ); against the fixed one it
+  passes.
