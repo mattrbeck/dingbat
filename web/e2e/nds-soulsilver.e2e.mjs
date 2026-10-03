@@ -80,11 +80,13 @@ const choose = async (page, clickSel, path) => {
 };
 
 // Keys: the default bindings (A = Z, Start = Return; Settings > Controls).
+// A hold counts from the frame the key went down: the page can run several
+// frames between two polls, so by then the count may be past at + hold.
 const KEY = { A: "KeyZ", B: "KeyX", START: "Enter", DOWN: "ArrowDown", UP: "ArrowUp" };
 const press = async (page, key, at, hold = 3) => {
   await framesPast(page, at);
   await page.keyboard.down(KEY[key]);
-  await framesPast(page, at + hold);
+  await framesPast(page, (await frame(page)) + hold);
   await page.keyboard.up(KEY[key]);
 };
 // The stylus on bottom-screen pixel (x, y), through the canvas.
@@ -94,7 +96,7 @@ const touch = async (page, x, y, at, hold = 6) => {
     NdsUtil.clientPoint("bottom", x, y, canvasEl.getBoundingClientRect(), ndsLay), [x, y]);
   await page.mouse.move(p[0], p[1]);
   await page.mouse.down();
-  await framesPast(page, at + hold);
+  await framesPast(page, (await frame(page)) + hold);
   await page.mouse.up();
 };
 
