@@ -4067,7 +4067,7 @@ Legacy of Goku I and II, Top Gun - Combat Zones, Pokemon Mystery Dungeon,
 Fire Emblem: The Sacred Stones, Mario Party Advance, Golden Sun and The Lost
 Age, Pokemon Emerald and FireRed.
 
-## §NEXT — Gradius Galaxies: black at the first stage, an interrupt return two bytes early, 2026-10-02
+## 45. Gradius Galaxies: black at the first stage, an interrupt return two bytes early, 2026-10-02
 
 **FIXED** (cpu.nim `refill_from_head`). Found by `tools/playtest/inputsweep.py`
 (START/A on a fixed beat, ~1600 library titles, dingbat against mGBA): in
@@ -4105,7 +4105,7 @@ Also seen, not changed: the interrupt was taken with r15 still odd
 LR_irq was odd; the console's LR is always the halfword address plus 4. Only
 a handler that inspects LR could tell.
 
-## §NEXT — Colin McRae Rally 2.0, TOCA, Starsky & Hutch: `movs pc, lr` in System mode restored a stale SPSR, 2026-10-02
+## 46. Colin McRae Rally 2.0, TOCA, Starsky & Hutch: `movs pc, lr` in System mode restored a stale SPSR, 2026-10-02
 
 **FIXED** (arm.nim `exception_return_restore`). Found by the same input sweep.
 Colin McRae Rally 2.0 (U): after the difficulty menu the HLE configuration
@@ -4131,12 +4131,18 @@ reset.
 copied there: a snapshot of some earlier CPSR, here a Thumb one. MRS already
 reads the CPSR in place of the SPSR in User and System mode (alyosha psr);
 the restore now does the same, so the S bit changes nothing there and the
-write is a plain branch (with the ALU's own flags, for movs/subs). The new
-payload `tests/roms/payloads/sysmovs.s` (r0table `sysmovs`, six cells: the
-three forms, with and without a Thumb SPSR left in IRQ mode) answers the
-same on dingbat (both BIOSes) and mGBA after the change -- movs/subs
-0x2000029F, ldm^ 0x6000029F -- where dingbat answered 0x0000021F before;
-the console has not run it (the ARM ARM calls the form unpredictable).
+write is a plain branch. The payload `tests/roms/payloads/sysmovs.s`
+(r0table `sysmovs`, six cells: `movs pc, lr`, `subs pc, lr, #0` and
+`ldmfd sp!, {pc}^` in System mode with Z and C set, with and without a
+Thumb SPSR left in IRQ mode) asked the AGB SP, which answers 0x6000029F in
+every cell: ARM state, System mode, and the flags as they were before the
+instruction -- a movs or subs result's own flags do not stick either. So a
+data-processing S-bit write to r15 in User or System mode now puts back the
+pre-instruction CPSR before the restore (`arm_data_processing`). dingbat
+(both BIOSes) matches all six cells; mGBA keeps the ALU's flags on the
+movs/subs cells (0x2000029F); dingbat answered 0x0000021F in every cell
+before the fix. The row is frozen as a cycle law (tests/roms/cyclelaws/
+sysmovs.gba).
 
 All three games now play on with both BIOSes, matching mGBA at every
 screenshot of the sweep's 3000 frames.

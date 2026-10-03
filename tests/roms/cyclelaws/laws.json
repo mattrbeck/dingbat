@@ -10705,5 +10705,43 @@
     "want": "00000000"
    }
   ]
+ },
+ {
+  "payload": "sysmovs",
+  "rom": "sysmovs.gba",
+  "sha1": "630ccaa7eae871b5f48643f04c93e3feeebb922f",
+  "frames": 108,
+  "cells": [
+   {
+    "id": "sysmovs 0x0",
+    "kind": "hex",
+    "want": "6000029F"
+   },
+   {
+    "id": "sysmovs 0x1",
+    "kind": "hex",
+    "want": "6000029F"
+   },
+   {
+    "id": "sysmovs 0x2",
+    "kind": "hex",
+    "want": "6000029F"
+   },
+   {
+    "id": "sysmovs 0x10",
+    "kind": "hex",
+    "want": "6000029F"
+   },
+   {
+    "id": "sysmovs 0x11",
+    "kind": "hex",
+    "want": "6000029F"
+   },
+   {
+    "id": "sysmovs 0x12",
+    "kind": "hex",
+    "want": "6000029F"
+   }
+  ]
  }
 ]

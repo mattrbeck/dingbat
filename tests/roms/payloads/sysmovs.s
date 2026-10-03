@@ -23,11 +23,13 @@
 @ answer: bits 0..7 the CPSR's low byte after the write, bits 24..31 its
 @ flags byte, bit 9 set if execution went on as ARM.
 @
-@ PROVENANCE: dingbat (both BIOSes) and mgba agree on every cell: movs and
-@ subs 0x2000029F (System, I set, ARM, and the flags the ALU result sets --
-@ Z clear, C kept -- with nothing restored over them), ldm^ 0x6000029F (the
-@ flags as they were). dingbat before the fix: 0x0000021F on every cell (a
-@ stale SPSR with I clear restored). Console: not yet run.
+@ PROVENANCE: the AGB SP answers 0x6000029F in every cell (2026-10-03):
+@ System mode, I set, ARM, and Z and C as they were -- the flags a movs or
+@ subs result would set do not stick, as if CPSR were restored from a SPSR
+@ that reads as the CPSR before the instruction. dingbat (both BIOSes)
+@ agrees on all six. mgba: 0x2000029F for movs/subs (keeps the ALU's
+@ flags), 0x6000029F for ldm^. dingbat before the Colin McRae fix:
+@ 0x0000021F in every cell (a stale SPSR with I clear restored).
     .arm
     .text
     .global _start
