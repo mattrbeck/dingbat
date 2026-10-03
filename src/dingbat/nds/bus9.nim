@@ -34,16 +34,23 @@ proc idle_sig*(b: Arm9Bus): IdleSig {.inline.} =
   [n.last_fetch9, n.last_data9, n.last_pc9, n.pu_ok[0], n.pu_ok[1], n.pu_ok[2],
    n.tm.icache.last, n.tm.dcache.last]
 
+when defined(ndsdebug):
+  var dbg_dma_stall*: int64     ## master cycles DMA held the ARM9 (debug)
+
 proc dma_stall*(b: Dma9Bus; cycles: int64) =
   ## A DMA held the bus: the CPU resumes `cycles` after the later of its own
   ## clock and the transfer's start.
   let n {.cursor.} = b.nds
+  when defined(ndsdebug): dbg_dma_stall += cycles
   n.arm9.cycles = max(n.arm9.cycles, n.sched.now) + cycles
   inc n.idle_epoch            # the CPU's clock moved (arm/cpu.nim loop_edge)
 
 # --- I/O ---------------------------------------------------------------
 
 proc gx_service(n: NDS; appended = false)
+
+when defined(ndsdebug):
+  var dbg_gx_stall*: int64      ## master cycles the ARM9 waited on a full GX FIFO (debug)
 
 proc gx_write(n: NDS; o, v, mask: uint32) =
   ## A geometry engine write; a full FIFO holds the bus, so the writer and
@@ -52,6 +59,7 @@ proc gx_write(n: NDS; o, v, mask: uint32) =
   n.gpu3d.write_reg(o, v, mask)
   let t = n.gpu3d.stall_until
   if t > n.arm9.cycles:
+    when defined(ndsdebug): dbg_gx_stall += t - n.arm9.cycles
     n.arm9.cycles = t
     n.arm7.cycles = max(n.arm7.cycles, t)
   if not n.dma9.dma_access and o >= 0x400: n.gx_service(appended = o < 0x600)

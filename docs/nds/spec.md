@@ -145,7 +145,8 @@ src/dingbat/nds/
                    anti-aliasing, line budget (RDLINES); docs/nds/3d-edges.md
   io/irq.nim       IME/IE/IF per CPU
   io/timers.nim    4 timers per CPU
-  io/dma.nim       4 channels per CPU (+ ARM9 fill regs)
+  io/dma.nim       4 channels per CPU (+ ARM9 fill regs); ARM9 bus time per
+                   unit from disp_dmatime (docs/nds/commercial.md)
   io/ipc.nim       IPCSYNC + FIFOs
   io/divsqrt.nim   ARM9 maths unit
   io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid (IF.22)
@@ -276,8 +277,11 @@ beyond GBATEK:
 
 ## Commercial game status
 
-Pokemon SoulSilver (IPGE, the one commercial ROM used in development; never
-in the repo) plays from boot through the intro, title, the professor's
+Three commercial games are driven by scripts and compared with the
+reference core in docs/nds/commercial.md (never in the repo): Golden Sun:
+Dark Dawn to its first field, Pokemon Mystery Dungeon: Explorers of
+Darkness to a fight in its first dungeon (identical under both BIOSes),
+and Pokemon SoulSilver. Pokemon SoulSilver (IPGE) plays from boot through the intro, title, the professor's
 introduction, name entry and the 3D bedroom to New Bark Town, saves (512 KB
 FLASH behind the IR controller) and continues from that save, with the real
 BIOS or the HLE BIOS (identical frames). Driven by `ndsrun --press` scripts
@@ -286,7 +290,8 @@ script gives the same frames as the reference core at most checkpoints
 (`tools/ndsref`, docs/oracles.md). Open: the 3D bedroom is 44 dots
 (0.09 %) off the reference and the title's 3D Lugia 1.4 % (one-step
 shading, 2D bubbles) since the edge/anti-aliasing work
-(docs/nds/3d-edges.md); a 2D alpha fade is one step off in places. It also boots through
+(docs/nds/3d-edges.md); fades are exact since the colour effects work on
+6-bit channels (docs/nds/commercial.md). It also boots through
 the real BIOS, firmware and DS menu (`--boot firmware --press A@300,A@460`)
 from any of its dump forms, frame for frame with the reference core's
 firmware boot after the menu (docs/nds/boot.md).

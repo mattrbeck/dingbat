@@ -374,8 +374,12 @@ proc scene_windows_blend() =
   b.reg(0x6C, (2 shl 14) or 8)
   g.frame()
   g.save("brightness")
-  g.expect_px(true, 4, 4, rgb(20 + ((31 - 20) * 8) shr 4, 15, 15), "brightness up")
-  g.expect_px(false, 4, 4, rgb(16, 16, 16), "master brightness down 8/16")
+  # 6-bit channels (2D colours enter as 2c): I + ((63-I)*8 + 8)>>4, then the
+  # top five bits; master brightness truncates: 62*(16-8)/16 = 31 -> 15
+  # (disp_bright against the reference runs, docs/oracles.md)
+  g.expect_px(true, 4, 4, rgb((40 + ((63 - 40) * 8 + 8) shr 4) shr 1, (((63 * 8) + 8) shr 4) shr 1,
+                              (((63 * 8) + 8) shr 4) shr 1), "brightness up")
+  g.expect_px(false, 4, 4, rgb(15, 15, 15), "master brightness down 8/16")
 
 proc scene_window_wrap() =
   echo "window edges: X1>X2 wraps, X2=0 runs to 256, Y1 in 0..6 is open at line 0"

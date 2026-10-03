@@ -6,7 +6,7 @@
 ##
 ## Run with: nimble test_ndscompat
 
-import std/os
+import std/[os, strutils]
 import dingbat/nds/nds
 
 var failures = 0
@@ -311,6 +311,87 @@ block power_off:
   n.set_touch(100, 100, true)
   n.run_frame()
   check n.powered_off() and n.sched.now == t0, "input doesn't turn it back on"
+
+# ---------------------------------------------------------------------------
+# ARM9 DMA timing (tests/nds/src/disp_dmatime, build_3d.sh): page 2 lists,
+# for 1..20 units, the bus cycles an immediate DMA holds the CPU. The cost
+# per unit (the step from n to n+1, averaged over n = 2..20) is the
+# reference runs' (docs/oracles.md): main RAM -> main RAM 18, -> VRAM 3,
+# -> shared WRAM 2, -> I/O 2, VRAM -> main RAM 4, 16-bit units 2. Golden
+# Sun: Dark Dawn's title ran at 40 fps with the earlier estimate
+# (docs/nds/commercial.md).
+
+proc text_hex(n: NDS; col, row, digits: int): int =
+  ## A hex number t3d_print drew on the bottom screen (3x5 glyphs drawn 2x
+  ## wide in rows 1-5 of an 8x8 cell); -1 where a cell holds no hex digit.
+  const DIGITS = ["####.##.##.####", ".#.##..#..#.###", "###..#####..###", "###..####..####",
+                  "#.##.####..#..#", "####..###..####", "####..####.####", "###..#..#..#..#",
+                  "####.#####.####", "####.####..####", "####.#####.##.#", "##.#.###.#.###.",
+                  "####..#..#..###", "##.#.##.##.###.", "####..####..###", "####..####..#.."]
+  result = 0
+  for d in 0 ..< digits:
+    var bits = ""
+    for gy in 1..5:
+      for gx in 0..2:
+        let x = (col + d) * 8 + gx * 2 + 1
+        bits.add(if (n.gpu.bottom[(row * 8 + gy) * 256 + x] and 0x7FFF) != 0: '#' else: '.')
+    let k = DIGITS.find(bits)
+    if k < 0: return -1
+    result = result * 16 + k
+
+block dma_timing:
+  echo "ARM9 DMA timing (disp_dmatime ROM)"
+  let path = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") /
+             "3d" / "disp_dmatime.nds"
+  if not fileExists(path):
+    echo "  (skipped: build it with tests/nds/tools/build_3d.sh disp_dmatime)"
+  else:
+    let n = load_nds(path)
+    for f in 0 ..< 70: n.run_frame()
+    const COLS = [("main -> main, 32-bit", 18.0), ("main -> VRAM, 32-bit", 3.0),
+                  ("main -> WRAM, 32-bit", 2.0), ("main -> I/O, 32-bit", 2.0),
+                  ("VRAM -> main, 32-bit", 4.0), ("main -> VRAM, 16-bit", 2.0)]
+    for k, (name, want) in COLS:
+      let t2 = n.text_hex(3 + k * 5, 3, 4)
+      let t20 = n.text_hex(3 + k * 5, 21, 4)
+      let per = (t20 - t2) / 18
+      check t2 > 0 and t20 > 0 and abs(per - want) < 0.2,
+            name & ": " & $want & " cycles a unit", $per
+
+# ---------------------------------------------------------------------------
+# The HLE BIOS9 holds the card's logo at 0xFFFF0020, where the real BIOS
+# keeps its own copy (Pokemon Mystery Dungeon reads it from 0xFFFF0024 and
+# its quiz background moved with it: docs/nds/commercial.md)
+
+block hle_logo:
+  echo "HLE BIOS9 logo"
+  var rom = tiny_rom()
+  for i in 0 ..< 0x9C: rom[0xC0 + i] = uint8(i * 7 + 3)
+  let n = new_nds(rom, @[], @[], @[])
+  let b = Arm9Bus(nds: n)
+  var same = true
+  for i in 0 ..< 0x9C:
+    if b.read8(0xFFFF_0020'u32 + uint32(i)) != uint32(rom[0xC0 + i]): same = false
+  check n.hle_bios9 and same, "0xFFFF0020-0xFFFF00BB = header 0C0h-15Bh"
+
+# ---------------------------------------------------------------------------
+# Boot info a direct boot leaves as the real firmware does (the user's dumps
+# booted with --boot firmware; GBATEK "BIOS RAM Usage"): the firmware part-5
+# CRC16, the ARM7 RAM address, the boot flags, the GBA-slot flags byte
+
+block boot_info:
+  echo "direct boot info"
+  let n = machine()
+  proc m32(a: uint32): uint32 =
+    let i = int(a and 0x3FFFFF)
+    uint32(n.main_ram[i]) or (uint32(n.main_ram[i+1]) shl 8) or
+      (uint32(n.main_ram[i+2]) shl 16) or (uint32(n.main_ram[i+3]) shl 24)
+  let fw26 = uint32(n.spi.firmware[0x26]) or (uint32(n.spi.firmware[0x27]) shl 8)
+  check m32(0x027FF874'u32) == fw26, "27FF874h = firmware[026h], 27FF876h = 0",
+        toHex(m32(0x027FF874'u32))
+  check m32(0x027FF860'u32) == 0x037F_8000'u32, "27FF860h = cart[038h]"
+  check m32(0x027FF890'u32) == 0xB000_2A22'u32, "27FF890h = B0002A22h"
+  check n.main_ram[0x3FFC35] == 0, "27FFC35h (GBA-slot flags) = 00h, empty slot"
 
 if failures > 0:
   echo failures, " failed"

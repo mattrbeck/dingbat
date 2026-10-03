@@ -170,7 +170,9 @@ template watch_write(n: NDS; who: string; cpu: untyped; a, v: uint32) =
   when defined(ndsdebug):
     if n.watch != 0 and (a and not 3'u32) == n.watch:
       stderr.writeLine(who & " watch W " & toHex(a, 8) & " = " & toHex(v, 8) &
-                       " pc=" & toHex(cpu.cur_pc, 8) & " line=" & $n.gpu.vcount)
+                       " pc=" & toHex(cpu.cur_pc, 8) & " line=" & $n.gpu.vcount &
+                       " frame=" & $n.gpu.frame_count & " r0=" & toHex(cpu.r[0], 8) &
+                       " lr=" & toHex(cpu.r[14], 8))
 
 proc slot2_read(n: NDS; a: uint32; is9: bool; width: static int): uint32 =
   ## The GBA slot (io/slot2.nim) as one CPU sees it: the CPU that EXMEMCNT.7

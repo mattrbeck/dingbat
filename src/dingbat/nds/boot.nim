@@ -166,6 +166,10 @@ proc direct_boot*(n: NDS) =
     elif n.cart.key1_table.len == 0 and area.anyIt(it != 0):
       stderr.writeLine("nds: the secure area looks encrypted and there is no BIOS7 " &
                        "dump to decrypt it (--bios); the game will likely crash")
+  # The HLE BIOS9 image keeps 0x20-0xBB for the logo the real one holds
+  # there (hle_bios.s); it is the card's own header logo, 0C0h-15Bh
+  if n.hle_bios9 and rom.len >= 0x15C:
+    for i in 0 ..< 0x9C: n.bios9[0x20 + i] = rom[0xC0 + i]
   # Header to 0x27FFE00
   for i in 0 ..< 0x170: n.main_ram[0x3FFE00 + i] = rom[i]
   # Boot info (GBATEK 12.2)
@@ -180,6 +184,13 @@ proc direct_boot*(n: NDS) =
   m16(0x027FF850'u32, 0x5835); m16(0x027FFC10'u32, 0x5835)
   m32(0x027FF880'u32, 7); m32(0x027FF884'u32, 6)
   m32(0x027FF868'u32, uint32(n.spi.user_settings_offset()))
+  # as the real firmware leaves them (GBATEK "BIOS RAM Usage"; the user's
+  # dumps booted with --boot firmware): the firmware's part-5 CRC16
+  # (fmw[026h]; 27FF876h reads 0 there), the ARM7 RAM address (cart[038h])
+  # and the boot flags
+  m16(0x027FF874'u32, uint32(n.spi.firmware[0x26]) or (uint32(n.spi.firmware[0x27]) shl 8))
+  m32(0x027FF860'u32, rd32(rom, 0x38))
+  m32(0x027FF890'u32, 0xB0002A22'u32)
   let gba = n.slot2.gba_header_info()                   # 0xFF: no GBA cart
   for i in 0 ..< 12: n.main_ram[0x3FFC30 + i] = gba[i]
   m16(0x027FFC40'u32, 1)                                 # boot indicator

@@ -704,6 +704,11 @@ static void usage(void) {
     "  --list-opts        print the core's options (key, default, values) and exit\n"
     "  --layout auto|tb|bt|lr|rl  how the core's frame holds the two screens\n"
     "  --sram FILE        load the cart's save memory from FILE (not written back)\n"
+    "  --sram-out FILE    write the cart's save memory to FILE after the run\n"
+    "  --ram-peek A1,..   print these 32-bit words of system RAM (0x02xxxxxx) after\n"
+    "                     every frame: 'peek F A=V ..'\n"
+    "  --ram-shots F1,..  write the core's system RAM (RETRO_MEMORY_SYSTEM_RAM)\n"
+    "                     to PREFIX_ram_<F>.bin after frame F\n"
     "  --slot2 FILE[,SAVE] load ROM plus a GBA ROM (and its save) through the\n"
     "                     core's two-cart subsystem (-v lists the subsystems)\n"
     "  --rumble-log       print every rumble strength change with its frame\n"
@@ -717,7 +722,9 @@ static void usage(void) {
 int main(int argc, char **argv) {
   const char *core_arg = NULL, *rom = NULL, *outp = "ndsref_out", *wav = NULL,
              *bios = NULL, *workdir_arg = NULL;
-  const char *sram = NULL, *slot2 = NULL;
+  const char *sram = NULL, *slot2 = NULL, *sram_out = NULL;
+  int ram_shots[256], n_ram_shots = 0;
+  unsigned ram_peek[64]; int n_ram_peek = 0;
   int frames = 60, list_opts = 0, no_final = 0, no_core_opts = 0;
   const char *cli_opts[128], *opt_files[16];
   int n_cli_opts = 0, n_opt_files = 0;
@@ -735,6 +742,19 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--out")) outp = NEXT();
     else if (!strcmp(a, "--wav")) wav = NEXT();
     else if (!strcmp(a, "--sram")) sram = NEXT();
+    else if (!strcmp(a, "--sram-out")) sram_out = NEXT();
+    else if (!strcmp(a, "--ram-peek")) {
+      char *s = strdup(NEXT()), *save = NULL;
+      for (char *t = strtok_r(s, ",", &save); t && n_ram_peek < 64; t = strtok_r(NULL, ",", &save))
+        ram_peek[n_ram_peek++] = (unsigned)strtoul(t, NULL, 16);
+      free(s);
+    }
+    else if (!strcmp(a, "--ram-shots")) {
+      char *s = strdup(NEXT()), *save = NULL;
+      for (char *t = strtok_r(s, ",", &save); t && n_ram_shots < 256; t = strtok_r(NULL, ",", &save))
+        ram_shots[n_ram_shots++] = atoi(t);
+      free(s);
+    }
     else if (!strcmp(a, "--slot2")) slot2 = NEXT();
     else if (!strcmp(a, "--rumble-log")) rumble_log = 1;
     else if (!strcmp(a, "--bios")) bios = NEXT();
@@ -968,11 +988,40 @@ int main(int argc, char **argv) {
         snprintf(path, sizeof path, "%s_%d.png", prefix, f + 1);
         if (!dump_frame(path)) rc = 1;
       }
+    if (n_ram_peek) {
+      size_t sz = p_retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM);
+      const uint8_t *d = p_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+      fprintf(outf, "peek %d", f + 1);
+      for (int k = 0; k < n_ram_peek; k++) {
+        size_t o = (ram_peek[k] & 0x3FFFFC) % (sz ? sz : 1);
+        unsigned v = d && o + 3 < sz ? d[o] | d[o + 1] << 8 | d[o + 2] << 16 | (unsigned)d[o + 3] << 24 : 0;
+        fprintf(outf, " %08X=%08X", ram_peek[k], v);
+      }
+      fprintf(outf, "\n");
+    }
+    for (int k = 0; k < n_ram_shots; k++)
+      if (ram_shots[k] == f + 1) {
+        char path[2100];
+        snprintf(path, sizeof path, "%s_ram_%d.bin", prefix, f + 1);
+        size_t sz = p_retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM);
+        void *d = p_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+        FILE *o = d && sz ? fopen(path, "wb") : NULL;
+        if (!o) { fprintf(errf, "ndsref: no system RAM to write to %s\n", path); rc = 1; continue; }
+        fwrite(d, 1, sz, o);
+        fclose(o);
+      }
   }
   if (!no_final) {
     char path[2100];
     snprintf(path, sizeof path, "%s.png", prefix);
     if (!dump_frame(path)) rc = 1;
+  }
+  if (sram_out) {
+    size_t sz = p_retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+    void *d = p_retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
+    FILE *o = d && sz ? fopen(sram_out, "wb") : NULL;
+    if (o) { fwrite(d, 1, sz, o); fclose(o); fprintf(outf, "sram: %zu bytes -> %s\n", sz, sram_out); }
+    else { fprintf(errf, "ndsref: core exposes no save memory for --sram-out\n"); rc = 1; }
   }
   if (wav) {
     write_wav(wav);

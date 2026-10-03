@@ -3,7 +3,7 @@
 # Fetch and build the third-party DS test ROMs of docs/nds/test-roms.md into
 # ${DINGBAT_NDS_ROMS:-~/.cache/dingbat-nds/roms} (never into git):
 #   polyrastertest/polyrastertest.nds   Jakly's polyrastertest v1.0.2-b (MIT, prebuilt release)
-#   kuribo/gx_powcnt.nds, gx_clear.nds  melonDS board "Hardware test ROMs" thread (no licence given)
+#   kuribo/gx_powcnt.nds, gx_clear.nds  a forum's "Hardware test ROMs" thread (docs/oracles.md; no licence given)
 #   gbeplus/arm9_*.nds                  shonumi/gbe-plus-nds-tests (GPLv2), all six with libnds;
 #                                       the timer test's duplicate PRINT_VALUE block renamed
 #   blocksds/{tests,examples}/*.nds     BlocksDS SDK's tests and examples (CC0 / per example)
@@ -31,7 +31,7 @@ curl -sfL -o poly.zip "$POLY_URL"
 python3 -c "import zipfile,sys; z=zipfile.ZipFile('poly.zip'); n=[x for x in z.namelist() if x.endswith('.nds')][0]; open(sys.argv[1],'wb').write(z.read(n))" \
   "$roms/polyrastertest/polyrastertest.nds"
 
-# melonDS board test ROMs (binaries only)
+# The forum thread's test ROMs (binaries only; docs/oracles.md)
 mkdir -p "$roms/kuribo"
 curl -sfL -o "$roms/kuribo/gx_powcnt.nds" 'https://kuribo64.net/get.php?id=rTyl4Zf1Vx9zYuuB'
 curl -sfL -o "$roms/kuribo/gx_clear.nds" 'https://kuribo64.net/get.php?id=XDLS990mUUC0zdHA'

@@ -39,6 +39,16 @@ _start:
         b       irq_entry           @ 0x18 IRQ
         b       exception           @ 0x1C FIQ
 
+        .if ARM9
+@ 0x20: the cartridge logo. The ARM9 BIOS holds the 156-byte logo here
+@ (Pokemon Mystery Dungeon copies FFFF0024h onwards and its picture
+@ depends on the bytes; docs/nds/commercial.md); the image leaves room and
+@ boot.nim copies the loaded card's header 0C0h-15Bh in, so no logo byte
+@ is in the repository.
+logo:
+        .space  0x9C
+        .endif
+
 @ ---------------------------------------------------------------------------
 @ IRQ: save the caller-saved registers on the IRQ stack, call the user
 @ handler with lr pointing back here, return to the interrupted code.

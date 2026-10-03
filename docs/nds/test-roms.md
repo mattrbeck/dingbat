@@ -6,7 +6,7 @@ a console -- that the ROMs already in use (armwrestler, arm7wrestler,
 rockwrestler, gbe-plus-nds-tests, StrikerX3's window tests, devkitPro's
 nds-examples, our own `tests/nds/src`, the homebrew sweep of
 docs/nds/compat.md) do not cover; each run in `ndsrun` and in the reference
-core (`tools/ndsref`, black box, melonDS DS 1.4.0), and the failures in our
+core (`tools/ndsref`, black box; the core is named in docs/oracles.md), and the failures in our
 core fixed where they fall outside 3D edges.
 
 **Where the answer comes from.** Where a test checks itself (polyrastertest's
@@ -19,7 +19,7 @@ changes.
 ## What was found
 
 DS hardware tests are scarce: almost everything public was already in use.
-Searched: GitHub (repos and code), Codeberg, the melonDS board on
+Searched: GitHub (repos and code), Codeberg, an emulator project's forum (named in docs/oracles.md) on
 kuribo64.net, GBAtemp, emudev.org's resource list, the BlocksDS SDK, and the
 repositories of DS test and emulator authors (only their test directories
 and READMEs were opened; no emulator source was read). New finds:
@@ -27,7 +27,7 @@ and READMEs were opened; no emulator source was read). New finds:
 | Suite | Source, licence | What it checks | Answer |
 |---|---|---|---|
 | polyrastertest v1.0.2-b | [Jaklyy/polyrastertest](https://github.com/Jaklyy/polyrastertest), MIT; release zip (source at 550c208e89) | 77 single-polygon scenes: fill rules (normal, swapped, overrides), line polygons, the "swapped vertical left" glitch, trapezoids, edge marking's overlapping-edge rule, vertical right edge shift, AA/edge-mark swapped edges, horizontal line polygons under clipping, second-vertex quirks; each scene captured (DISPCAPCNT, 3D only) and compared span by span and colour by colour | spans and colours recorded on a New 3DS XL in DS mode (TWiLight Menu++), built into the ROM; prints "Tests Passed: n/77" |
-| gx_powcnt, gx_clear | melonDS board, "Hardware test ROMs" thread (binaries only, no licence) | POWCNT1 toggles of the geometry/rendering engines and 2D engine A with PAL/OAM write-read counters; 3D clear colour latched per frame | described in the thread (the change "should reflect even though 3D graphics aren't being refreshed") |
+| gx_powcnt, gx_clear | an emulator project's forum (docs/oracles.md), "Hardware test ROMs" thread (binaries only, no licence) | POWCNT1 toggles of the geometry/rendering engines and 2D engine A with PAL/OAM write-read counters; 3D clear colour latched per frame | described in the thread (the change "should reflect even though 3D graphics aren't being refreshed") |
 | gbe-plus `ARM9/Timer` | [shonumi/gbe-plus-nds-tests](https://github.com/shonumi/gbe-plus-nds-tests) a0df034a, GPLv2 | prescaler counts after 5 frames; count-up, stop, reload-value PASS/FAIL | PASS rows; counts have no recorded answer |
 | BlocksDS SDK tests | [blocksds/sdk](https://codeberg.org/blocksds/sdk) 01df02b5 `tests/` (42 built), CC0 | library self-tests on the hardware: cache ops, MPU regions, TCM placement, vector base, IRQ handling, SWI results, IPC FIFO full, hardware sqrt, cothreads waiting on IRQs, ... | each prints its own result; `cache/data_cache_ops`' source lists the hardware's screen |
 | BlocksDS SDK examples | same, `examples/` (136 built) | feature demos (2D, 3D, capture, effects, audio, BIOS); 52 hardware-feature ones swept | reference comparison only |
@@ -70,7 +70,7 @@ and `tests/nds/tools/build_testroms.sh` fetches and builds all of the above
 | cached-memory-performance | (none recorded) | flush-all 500..1674 t, flush range 51..1771 t, uncached 61..3428 t | flush-all 504..1842 t (DC_FlushAll now empties the tags), the rest unchanged | 698..1784, 51..1582, 58..3431 |
 | BlocksDS `system/swi_calls` | swiIsDebugger() = 1 with the data cache on (GBATEK) | 0 | 1 (real and HLE BIOS) | 0 |
 | BlocksDS SDK tests, the other 40 | their own prints | -- | 34 print what the reference prints (MPU regions, TCM placement, vector base, IRQ handling, IPC FIFO full, hardware sqrt results, argv, atexit, sbrk, heap bounds, C++ exceptions, filesystem, textures, ...); 6 differ only in timing printouts or the date | -- |
-| BlocksDS examples, 52 hardware-feature ones | (reference comparison) | -- | 2D (21 graphics_2d, 8 video_effects, 2 console), BIOS, compression, interrupts, IPC, maths and timers identical to the reference before the input script's START (exit) except `video_effects/blending` (1-step blend rounding) and counters; `video_capture/*` differ (below) | -- |
+| BlocksDS examples, 52 hardware-feature ones | (reference comparison) | -- | 2D (21 graphics_2d, 8 video_effects, 2 console), BIOS, compression, interrupts, IPC, maths and timers identical to the reference before the input script's START (exit) except counters (`video_effects/blending`'s 1-step blend rounding closed by `disp_bright`); `video_capture/*` differ (below) | -- |
 
 How the BlocksDS ROMs were compared: every test 150 frames with no input
 (shots 60 and 148, best of the reference's frames within +-2); the
@@ -86,11 +86,11 @@ after which our screens keep the last picture and the reference's go black
   and `time/timers` (counters), `audio/capture_audio` (its waveform plot).
 - **The RTC**: `ipc/transfer_region` prints the date (ours ran on the host
   clock).
-- **`video_effects/blending`**: semi-transparent and bitmap OBJs blended one
-  5-bit step apart from the reference in some pixels. Ours follows GBATEK's
-  `min(31, (I1*EVA + I2*EVB) / 16)` for semi-transparent OBJs; the weights
-  of a bitmap OBJ's alpha (EVA = alpha + 1, EVB = 15 - alpha) are Assumed,
-  GBATEK gives none. Open: needs a console.
+- **`video_effects/blending`**: was one 5-bit step apart from the
+  reference in some blended pixels; identical since the colour effects
+  work on 6-bit channels with the reference's rounding (`disp_bright`,
+  docs/oracles.md and docs/nds/commercial.md). The weights of a bitmap
+  OBJ's alpha (EVA = alpha + 1, EVB = 15 - alpha) are still Assumed.
 - **`video_capture/*`**: `render_to_texture` (95 % of the top screen),
   `dual_screen_3d` (84 % of both), `motion_blur` (29-46 %), `bloom` (5 %),
   `two_pass_3d` (2 %), `simple_capture` (1 %) -- the capture/3D timing
@@ -184,9 +184,9 @@ Each in its own commit, each with checks in `tests/nds_testroms_test.nim`
   then render, with swaps throughout). We keep rendering the swapped list.
   The hardware renders through a 48-line cache (GBATEK) and so holds no
   frame to keep; what it shows needs a console.
-- **Blend rounding of semi-transparent and bitmap OBJs**
-  (`video_effects/blending`, above): one 5-bit step from the reference in
-  some pixels; the bitmap-OBJ alpha weights are Assumed. Needs a console.
+- **Colour-effect rounding** (`video_effects/blending`, above, and
+  `disp_bright`): ours now follows the reference's 6-bit forms, which
+  GBATEK does not give exactly; a console would confirm them.
 - **Cache maintenance and write-back timing.** cached-memory-performance
   measures DC flush-all at 504-1842 timer ticks in ours against
   698-1784 in the reference (flush range 899 vs 814 at 2 KB, 1771 vs 1582

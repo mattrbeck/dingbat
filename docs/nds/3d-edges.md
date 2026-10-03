@@ -23,7 +23,7 @@ post passes), `gpu3d/geometry.nim` (1-dot culling, clipping).
   reference cores disagree, the captures decide.
 - **Probe ROMs** (`tests/nds/src/3d_probe_*`, built by
   `tests/nds/tools/build_3d.sh`, hashed in `tests/nds_3d_test.nim`) run
-  through `tools/ndsref` (melonDS DS 1.4, melonDS 0.9.3) and compared at
+  through `tools/ndsref` (the two reference cores, docs/oracles.md) and compared at
   18-bit colour with our 3D buffer. New this round: `_aa3` / `_aa3_edge` /
   `_aa3_em` (what an AA edge mixes with), `_aa4` (long shallow x-major
   edges), `_degen` / `_degen_aa` / `_degen_edge` (zero-width polygons),
@@ -314,7 +314,7 @@ These are what the DS draws, and so what dingbat now draws:
 
 ## Measurements
 
-Dots of our 3D buffer differing from melonDS DS 1.4 at 18-bit colour
+Dots of our 3D buffer differing from the reference at 18-bit colour
 (frame 30); "before" is the start of this round (0f2beeea).
 
 | ROM | before | now |
@@ -350,8 +350,8 @@ Round 6 (the chains and swapped rows; `nds-polyraster`):
 | What | before | now |
 |---|---|---|
 | polyrastertest (scenes passing, the ROM's own verdict) | 49 stepped (50 in the hunt's run) | 73 of 77 (the reference: 70) |
-| 3d_probe_degen against melonDS DS 1.4 | 0 | 96 (column 5, a slanted zero-area triangle: the console draws none of it, polyrastertest 26) |
-| 3d_light against melonDS DS 1.4 | 4648 | 4619 (30 dots changed, 29 of them now as the reference: swapped rows at the bottom of its spheres) |
+| 3d_probe_degen against the reference | 0 | 96 (column 5, a slanted zero-area triangle: the console draws none of it, polyrastertest 26) |
+| 3d_light against the reference | 4648 | 4619 (30 dots changed, 29 of them now as the reference: swapped rows at the bottom of its spheres) |
 | every other 3d_* ROM | | unchanged (hashes kept) |
 | nds-interp line captures | 198404 / 198404 | 198404 / 198404 |
 | SoulSilver against the reference, top screen, frames 6600 / 8000 | 16 / 283 | 15 / 283 |
@@ -365,7 +365,7 @@ coverage; `nds-polyraster2`):
 | What | before | now |
 |---|---|---|
 | polyrastertest (scenes passing, the ROM's own verdict) | 73 of 77 | 77 of 77 (the reference: 70) |
-| 3d_probe_swap_aa (new) against melonDS DS 1.4 | 166 | 30 (every swapped inner dot exact; left: 11 dots on the rows where the x-major edge passes the vertical one, and 19 of right-edge coverage residue in ordinary rows) |
+| 3d_probe_swap_aa (new) against the reference | 166 | 30 (every swapped inner dot exact; left: 11 dots on the rows where the x-major edge passes the vertical one, and 19 of right-edge coverage residue in ordinary rows) |
 | every other 3d_* ROM (3d_edge, 3d_probe_edge2, _aa3_em, _degen_edge ...) | | unchanged (hashes kept) |
 | nds-interp line captures | 198404 / 198404 | 198404 / 198404 |
 | SoulSilver against the reference, top screen, frames 6600 / 8000 | 15 / 283 | 15 / 283 (AA is on there, so the overlapping-edge rule does not apply) |

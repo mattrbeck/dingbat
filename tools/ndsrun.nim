@@ -24,6 +24,13 @@
 ## it at every --shots frame too.
 ## --bgshot A0 draws that text BG straight from VRAM into the PNG's top half
 ## (no scroll/priority/blending).
+## --ram-peek A1,.. prints those 32-bit main RAM words (the CPU's view, untimed)
+## after every frame: "peek F A=V ..", as ndsref --ram-peek does.
+## --ram-poke A=V@F,.. writes the 32-bit word V to main RAM at A (the CPU's
+## view) before frame F runs, e.g. to give a game the random-number state
+## another run had there (docs/nds/commercial.md).
+## --ram-shots F1,.. writes main RAM (4 MB, the CPU's view, untimed) to
+## <out>_ram_<F>.bin after frame F (to compare with ndsref --ram-shots).
 ## --dump9/--dump7 ADDR:LEN:FILE writes LEN bytes read through that CPU's bus at the
 ## end of the run to FILE (hex ADDR/LEN), for disassembly.
 ## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
@@ -272,6 +279,9 @@ when isMainModule:
   var presses: seq[Press]
   var shot = ""
   var shots: seq[int]
+  var ram_shots: seq[int]
+  var ram_peek: seq[uint32]
+  var ram_pokes: seq[(uint32, uint32, int)]
   var tops: seq[seq[uint32]]
   var peek9, peek7: seq[uint32]
   var dumps: seq[(bool, uint32, int, string)]
@@ -344,6 +354,15 @@ when isMainModule:
         for a in val.split(','): peek7.add uint32(parseHexInt(a))
       of "shots":
         for f in val.split(','): shots.add parseInt(f)
+      of "ram-poke":
+        for item in val.split(','):
+          let at = item.split('@')
+          let av = at[0].split('=')
+          ram_pokes.add (uint32(parseHexInt(av[0])), uint32(parseHexInt(av[1])), parseInt(at[1]))
+      of "ram-peek":
+        for a in val.split(','): ram_peek.add uint32(parseHexInt(a))
+      of "ram-shots":
+        for f in val.split(','): ram_shots.add parseInt(f)
       of "iolog": iolog = true
       of "spilog": spilog = true
       of "cartlog": cartlog = true
@@ -435,6 +454,10 @@ when isMainModule:
                  formatFloat(c / max(ip.getOrDefault(blk), 1), ffDecimal, 2), " cyc/instr"
             inc k
             if k == 25: break
+    for (a, v, at) in ram_pokes:
+      if f == at:
+        let i = int(a and 0x3FFFFC'u32)
+        for k in 0 ..< 4: n.main_ram[i + k] = uint8(v shr (8 * k))
     for p in presses:
       if f == p.first or f == p.last:
         if p.touch: n.set_touch(p.x, p.y, f == p.first)
@@ -448,6 +471,11 @@ when isMainModule:
       last_rumble = n.slot2_rumble()
       echo "rumble frame=", f, " strength=", last_rumble
     if pcs:
+      when defined(ndsdebug):
+        echo "frame ", f, " gx stall ", dbg_gx_stall, " dma ", dbg_dma_stall,
+             " arm9 busy ", n.arm9.cycles
+        dbg_gx_stall = 0
+        dbg_dma_stall = 0
       echo "frame ", f, " arm9 pc=", toHex(n.arm9.next_pc, 8),
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
            (if n.sleeping: " S" elif n.arm7.halted: " H" else: "")
@@ -466,6 +494,18 @@ when isMainModule:
         writeFile(file, pack_state(image))
         echo "state: frame ", at, " -> ", file, " (", image.len, " bytes, ",
              readFile(file).len, " packed)"
+    if ram_peek.len > 0:
+      var line = "peek " & $(f + 1)
+      for a in ram_peek:
+        let i = int(a and 0x3FFFFC'u32)
+        let v = uint32(n.main_ram[i]) or (uint32(n.main_ram[i+1]) shl 8) or
+                (uint32(n.main_ram[i+2]) shl 16) or (uint32(n.main_ram[i+3]) shl 24)
+        line.add " " & toHex(a, 8) & "=" & toHex(v, 8)
+      echo line
+    if f + 1 in ram_shots:
+      var bytes = newString(0x400000)
+      for i in 0 ..< 0x400000: bytes[i] = char(n.main_ram[i])   # untimed: the CPU's view
+      writeFile(outp.changeFileExt("") & "_ram_" & $(f + 1) & ".bin", bytes)
     if f + 1 in shots:
       let px = n.screens_rgba()
       write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)

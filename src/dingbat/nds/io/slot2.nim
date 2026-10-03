@@ -290,8 +290,10 @@ proc rumble*(s: Slot2): int =
 proc gba_header_info*(s: Slot2): array[12, uint8] =
   ## What the firmware leaves at 0x027FFC30 about the GBA slot (GBATEK "DS
   ## Firmware ... boot"): header bytes BEh-BFh, B5h-B7h, a flags byte,
-  ## B0h-B1h (maker), ACh-AFh (game code). An empty slot leaves FFh.
+  ## B0h-B1h (maker), ACh-AFh (game code). An empty slot leaves FFh, the
+  ## flags byte 00h (the real firmware, --boot firmware with the dumps).
   for b in result.mitems: b = 0xFF
+  result[5] = 0
   if s.kind != s2GbaCart or s.rom.len < 0xC0: return
   let r = s.rom
   result[0] = r[0xBE]; result[1] = r[0xBF]
