@@ -284,6 +284,11 @@ proc main() =
             reply &"ok {wild_count} {wild_first.toHex(8)} {wild_frame}"
         else:
           reply "err build with -d:biosdrvtrace"
+      of "cpu":
+        # cpu -> "HALTED STOPPED PC": whether the CPU sits in Halt or Stop
+        # (SWI 2/3, HALTCNT) and r15 -- a game asleep in Stop mode waits
+        # for its wake keys (L+R+SELECT, as a rule), not a hang
+        reply &"ok {int(emu.cpu.halted)} {int(emu.cpu.stopped)} {emu.cpu.r[15].toHex(8)}"
       of "layers":
         # debug visibility: bits 0-3 BG0-3, bit 4 OBJ
         emu.ppu.debug_layer_mask = uint8(parseHexInt(parts[1]))

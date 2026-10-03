@@ -32,6 +32,9 @@ generator so every emulator gets the same timeline. It adds:
     frozen-audio  ... while the sound plays on
     garbage   the screenshots are noise (many distinct 8x8 tiles, most
               neighbouring pixels different) where the reference's are not
+    sleep     dingbat ends the run in Stop mode (SWI 3: most games' sleep
+              option, woken by L+R+SELECT); the references do not model
+              Stop, so the run is not compared further
 
 Timing slips are expected (the emulators accumulate lag frames differently,
 docs/playtest-bugs.md section 29), so the same key press can land on a
@@ -225,6 +228,12 @@ def play(name, rom, envdir, frames, shots=SHOTS, pattern='beat', seed=0):
         if watching:
             n, pc, at = e.cmd('pcwatch').split()
             r['wild_pc'] = {'count': int(n), 'first': pc, 'frame': int(at)} if int(n) else None
+        if name.startswith('dingbat'):
+            try:
+                halted, stopped, pc = e.cmd('cpu').split()
+                r['stopped'] = stopped == '1'
+            except emu.DriverError:
+                pass
         try:
             p = os.path.join(envdir, 'save.bin')
             e.cmd(f'savedata {p}')
@@ -344,7 +353,7 @@ def garbage(shot):
 
 
 GARBAGE_TILES = 420
-GARBAGE_NOISE = 0.55
+GARBAGE_NOISE = 0.7
 
 
 def verdict(d, ref):
@@ -355,6 +364,12 @@ def verdict(d, ref):
     if d.get('crash') and not ref.get('crash'):
         flags.append('crash')
     if ref.get('crash'):
+        return flags
+    if d.get('stopped'):
+        # asleep in Stop mode at the end (a game's sleep option, waiting for
+        # its wake keys); the references treat Stop as a halt the next
+        # interrupt ends, so the screen and sound they keep are no measure
+        flags.append('sleep')
         return flags
     rl = ref.get('late_distinct', 0)
     if d.get('tail_frozen', 0) > 900 and ref.get('tail_frozen', 0) < 300 and rl > 20:

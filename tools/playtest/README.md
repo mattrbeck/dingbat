@@ -247,6 +247,7 @@ command with `ok [...]` or `err ...`:
 | `rundigest N` | run N frames; per frame `FBHASH:COUNT:PCHASH:TIMEHASH` over the instructions run outside the BIOS (how many, which PCs, which PCs on which cycle of the frame): two configurations agree on all four while their game code runs identically (dingbat built with `-d:biosdrvtrace`) |
 | `runto PC` | step until r15 == PC; replies r0..r15 (dingbat) |
 | `runwild F` / `runpc F LO HI` / `runpct F LO HI` / `watchw F ADDR` | step for up to F frames until the CPU executes where no code lives / the PC is in [LO, HI) (`runpct`: in Thumb state) / the word at ADDR changes; replies `hit` or `none`, the frame, the last 48 jumps as `FROM>TO` with T/A and r13, then r0..r15 (dingbat) |
+| `cpu` | `HALTED STOPPED PC`: whether the CPU sits in Halt or Stop (SWI 2/3) and r15; a game asleep in Stop mode waits for its wake keys (dingbat) |
 | `pcwatch on` / `pcwatch` | count instructions executed where no code lives (above the BIOS, I/O, the save chip, above the address space); replies `COUNT FIRST_PC FIRST_FRAME` (dingbat trace build) |
 | `pft PC N PATH` | run to r15 == PC, then N steps with the `-d:pftrace` prefetch log to PATH (dingbat built with `-d:pftrace`) |
 | `quit` | flush the battery file and exit |

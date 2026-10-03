@@ -241,6 +241,12 @@ TABLE = {
     # SELECT+START; without a cart every cell answers DEAD0001.
     'sramfloat': ([w | a << 4 for a in range(5) for w in range(3)]
                   + [0x100 | 2 | a << 4 for a in range(5)]),
+    # the keypad interrupt with nothing held: KEYCNT stores that match
+    # (vacuous AND, a rewrite of a matching value, the enable bit), and IF
+    # re-read after an acknowledge 0 / 16 / 4096 loop turns later (a level?)
+    # (payloads/keyirq.s; Ghost Rider and Catwoman never wake from their
+    # second Stop in dingbat). Its Stop cell (arg bit 31) is ad hoc only.
+    'keyirq': [0, 16, 4096],
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
