@@ -76,6 +76,7 @@ type
     fline9*: uint32             ## ARM9: the 32-byte line (address shr 5) whose
                                 ## sequential fetches read `fptr9` at no cost, or NO_PAGE
     fptr9*: ptr UncheckedArray[uint8]
+    fitcm9*: bool               ## that line is ITCM (else an instruction-cache line)
     fpage7*: uint32             ## ARM7: the 4 KB page (address shr 12) whose
                                 ## sequential fetches read `fptr7`, or NO_PAGE
     fptr7*: ptr UncheckedArray[uint8]

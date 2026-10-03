@@ -272,6 +272,16 @@ block fetch_fast_paths:
         "ARM9: sequential after a C7 invalidate refills from memory"
   b7.write32(A + 20, 0x3333_3333'u32)
   check b.fetch32(A + 20) == 0x1000_0005'u32, "ARM9: ...and keeps the refilled line"
+  # into the next line: not cached yet (a fill from memory), then cached
+  # and changed behind the cache (the line as filled)
+  b7.write32(A + 32, 0x1000_0008'u32)
+  discard b.fetch32(A + 24)
+  check b.fetch32(A + 28) == 0x1000_0007'u32 and b.fetch32(A + 32) == 0x1000_0008'u32,
+        "ARM9: sequential into a line not cached fills it"
+  discard b.fetch32(A)                                    # a branch back
+  for k in 1'u32 .. 7: discard b.fetch32(A + 4 * k)
+  b7.write32(A + 32, 0x4444_4444'u32)
+  check b.fetch32(A + 32) == 0x1000_0008'u32, "ARM9: sequential into a cached line runs it as filled"
   # ARM7 in main RAM while the ARM9's write-back data cache dirties a line
   # of the same page: the ARM7 reads memory's side
   const B = 0x0230_0000'u32

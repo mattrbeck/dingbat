@@ -193,6 +193,18 @@ proc lookup_slow(c: var TagCache; a: uint32; allocate: bool): bool {.noinline.} 
     c.last = tag
   false
 
+proc hit_line*(c: var TagCache; a: uint32): bool {.inline.} =
+  ## `lookup` for a line known not to be `last`, without allocating: on a
+  ## hit it becomes `last`; a miss changes nothing (the caller then does
+  ## the full lookup).
+  let tag = (a shr 5) + 1
+  let s = int((a shr 5) and c.set_mask) * 4
+  if c.tags[s] == tag or c.tags[s + 1] == tag or c.tags[s + 2] == tag or
+     c.tags[s + 3] == tag:
+    c.last = tag
+    return true
+  false
+
 template lookup*(c: var TagCache; a: uint32; allocate: bool): bool =
   ## Hit? On a miss with `allocate`, the line is filled (round robin). The
   ## line used last is checked inline.

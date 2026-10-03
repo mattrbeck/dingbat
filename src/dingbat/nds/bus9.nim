@@ -670,7 +670,8 @@ proc fetch_line9(n: NDS; a: uint32) =
   ## load turns this off; line fills and tag changes only come from fetches
   ## outside the line, and C7 commands, which are CP15 writes.
   n.fline9 = NO_PAGE
-  if n.cp15.itcm_enabled and a < n.cp15.itcm_size:
+  n.fitcm9 = n.cp15.itcm_enabled and a < n.cp15.itcm_size
+  if n.fitcm9:
     n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.itcm[int(a and 0x7FE0)])
   elif n.tm.ic_on and n.tm.code_cachable(a):
     if (a shr 24) == 0x02:
@@ -703,6 +704,14 @@ template fetch_fast9(n: NDS; a: uint32; size: static uint32): bool =
   ## check: not a branch target nor a page's first word).
   (a shr 5) == n.fline9 and a == n.last_pc9 + size
 
+template fetch_next9(n: NDS; a: uint32; size: static uint32): bool =
+  ## A sequential fetch into the next line of the same 4 KB page (same
+  ## region, nothing apart): ITCM again, or an instruction-cache hit, which
+  ## makes it `last`: what fetch_cost9 would do, at no cost. A miss leaves
+  ## the tags alone and takes the slow path.
+  (a shr 5) == n.fline9 + 1 and a == n.last_pc9 + size and (a and 0xFFF'u32) != 0 and
+    (n.fitcm9 or n.tm.icache.hit_line(a))
+
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
   let n {.cursor.} = b.nds
   if likely(n.fetch_fast9(a, 4)):
@@ -710,6 +719,13 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
     n.last_pc9 = a
     n.last_fetch9 = a
     return cast[ptr uint32](addr n.fptr9[a and 31])[]
+  if n.fetch_next9(a, 4):
+    n.fline9 = a shr 5
+    n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.fptr9[32])
+    n.last_data9 = NO_ADDR
+    n.last_pc9 = a
+    n.last_fetch9 = a
+    return cast[ptr uint32](addr n.fptr9[0])[]
   n.fetch_slow9(a, 4)
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
@@ -719,6 +735,13 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
     n.last_pc9 = a
     n.last_fetch9 = a and not 3'u32
     return uint32(cast[ptr uint16](addr n.fptr9[a and 31])[])
+  if n.fetch_next9(a, 2):
+    n.fline9 = a shr 5
+    n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.fptr9[32])
+    n.last_data9 = NO_ADDR
+    n.last_pc9 = a
+    n.last_fetch9 = a
+    return uint32(cast[ptr uint16](addr n.fptr9[0])[])
   n.fetch_slow9(a, 2)
 
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()

@@ -180,7 +180,11 @@ answer is known in advance:
   move.
 
 `fetch32`/`fetch16` test one line or page number and the sequential
-address, then read the opcode through a host pointer; everything else goes
+address, then read the opcode through a host pointer. An ARM9 fetch that
+runs on into the next line of the same page (same region, nothing apart)
+needs only that line's tag check: ITCM again, or an instruction-cache hit
+(which makes it `last`, as the full lookup would); a miss leaves the tags
+alone for the full path to fill. Everything else goes
 the old way (`fetch_slow9`/`fetch_slow7`), which sets the shortcut up for
 the next fetch. It is turned off by everything that changes what it
 assumes: any CP15 write (TCMs, enables, C7 commands), WRAMCNT, a main RAM
