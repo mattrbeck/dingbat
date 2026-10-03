@@ -26,6 +26,9 @@ proc write32*(b: Dma9Bus; a: uint32; v: uint32) {.inline.}
 # Idle-loop skipping (arm/cpu.nim loop_edge): the epoch, and the timing
 # state that decides what the next accesses cost.
 proc idle_epoch*(b: Arm9Bus): uint64 {.inline.} = b.nds.idle_epoch + b.nds.idle_epoch9
+proc ev_epoch*(b: Arm9Bus): uint64 {.inline.} = b.nds.ev_epoch
+proc dev_read*(b: Arm9Bus): bool {.inline.} = b.nds.dev9
+proc clear_dev*(b: Arm9Bus) {.inline.} = b.nds.dev9 = false
 proc idle_sig*(b: Arm9Bus): IdleSig {.inline.} =
   let n {.cursor.} = b.nds
   [n.last_fetch9, n.last_data9, n.last_pc9, n.pu_ok[0], n.pu_ok[1], n.pu_ok[2],
@@ -36,6 +39,7 @@ proc dma_stall*(b: Dma9Bus; cycles: int64) =
   ## clock and the transfer's start.
   let n {.cursor.} = b.nds
   n.arm9.cycles = max(n.arm9.cycles, n.sched.now) + cycles
+  inc n.idle_epoch            # the CPU's clock moved (arm/cpu.nim loop_edge)
 
 # --- I/O ---------------------------------------------------------------
 
@@ -506,6 +510,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false;
   of 0x04:
     n.sync9()
     n.arm9.attn = true          # a read side effect may raise an IRQ (arm/cpu.nim run)
+    when cpu: n.dev9 = true     # a device: what an event may change (arm/cpu.nim loop_edge)
     let w = n.io9_read(a and not 3'u32)
     let o = a and 0x00FF_FFFC'u32
     if not io9_steady(o):
@@ -517,6 +522,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false;
     elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
     else: (w shr ((a and 3) * 8)) and 0xFF
   of 0x05:
+    when cpu: n.dev9 = true
     if not n.pal_oam_on(a): return 0
     let p = cast[ptr UncheckedArray[uint8]](addr n.gpu.palette[0])
     let i = int(a and 0x7FF)
@@ -524,19 +530,23 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false;
     elif width == 16: uint32(p[i]) or (uint32(p[i+1]) shl 8)
     else: uint32(p[i])
   of 0x06:
+    when cpu: n.dev9 = true
     var off: int
     let r = arm9_region(a, off)
     when width == 32: n.gpu.vram.read32(r, off)
     elif width == 16: uint32(n.gpu.vram.read16(r, off))
     else: uint32(n.gpu.vram.read8(r, off))
   of 0x07:
+    when cpu: n.dev9 = true
     if not n.pal_oam_on(a): return 0
     let p = cast[ptr UncheckedArray[uint8]](addr n.gpu.oam[0])
     let i = int(a and 0x7FF)
     when width == 32: uint32(p[i]) or (uint32(p[i+1]) shl 8) or (uint32(p[i+2]) shl 16) or (uint32(p[i+3]) shl 24)
     elif width == 16: uint32(p[i]) or (uint32(p[i+1]) shl 8)
     else: uint32(p[i])
-  of 0x08, 0x09, 0x0A: n.slot2_read(a, true, width)
+  of 0x08, 0x09, 0x0A:
+    when cpu: n.dev9 = true
+    n.slot2_read(a, true, width)
   of 0xFF:
     if a >= 0xFFFF0000'u32: rd(n.bios9, int(a and 0xFFF)) else: 0'u32
   else:
@@ -845,6 +855,7 @@ proc fetch_slow9(n: NDS; a: uint32; size: static uint32): uint32 {.noinline.} =
     if unlikely(n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0): return n.ic_code(a, int(size) * 8)
     return rd(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd(n.bios9, int(a and 0xFFF))
+  n.dev9 = true                 # code in shared WRAM or a device (VRAM, ...)
   n.ic_code(a, int(size) * 8)
 
 template fetch_fast9(n: NDS; a: uint32; size: static uint32): bool =

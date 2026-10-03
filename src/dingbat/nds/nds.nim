@@ -120,6 +120,10 @@ type
                                 ## change (arm/cpu.nim loop_edge; not saved)
     idle_epoch9*, idle_epoch7*: uint64  ## the same for what only that CPU
                                 ## sees: its TCMs or WRAM, its devices' reads
+    ev_epoch*: uint64           ## bumped by every event and `run_until` call:
+                                ## only loops that read a device see it
+    dev9*, dev7*: bool          ## that CPU read a device (I/O, VRAM, palette,
+                                ## OAM, the GBA slot) since its loop took ev_epoch
     # long slices (`run_until`, `slice_cut`); not machine state (not saved)
     long_on*: bool              ## enabled (DINGBAT_NDS_NO_SKIP=1 clears it)
     long_slice: bool            ## a CPU is running one: the other is halted
@@ -382,7 +386,7 @@ proc on_line_end(n: NDS) =
   n.sched.schedule(n.line_start + LINE_CYCLES, evLineEnd)
 
 proc dispatch(n: NDS; ev: NdsEvent) =
-  inc n.idle_epoch
+  inc n.ev_epoch              # devices; memory changes bump idle_epoch (arm/cpu.nim)
   case ev
   of evHBlank: n.on_hblank()
   of evLineEnd: n.on_line_end()
@@ -546,7 +550,7 @@ proc sleep_for(n: NDS; cycles: int64) =
   n.rtc.sleep_advance(cycles, proc(): bool = n.wake_pending())
   n.wake_from_sleep()
 
-proc slice_cut(n: NDS): int64 {.inline.} =
+proc slice_cut(n: NDS): int64 {.noinline.} =
   ## In a long slice (`run_until`), after anything the running CPU does
   ## that the SLICE-step loop would have acted on at the end of the step it
   ## happened in -- the halted CPU's interrupt arriving, an event booked or
@@ -555,15 +559,16 @@ proc slice_cut(n: NDS): int64 {.inline.} =
   ## long slice began after the access (`sched.now`: the clock of the
   ## access that did it). Called when `attn` is set (arm/cpu.nim run): every
   ## such action is an I/O access, a SWI or a CP15 write.
-  if not n.long_slice: return high(int64)
   let wakes = if n.long_h9: irq_wake(Arm9Bus(nds: n)) else: irq_wake(Arm7Bus(nds: n))
   if wakes or n.sched.next_at() != n.long_next or n.asleep():
     let c = max(n.sched.now, n.slice_from)
     n.cut_at = min(n.cut_at, n.slice_from + SLICE * ((c - n.slice_from) div SLICE + 1))
   n.cut_at
 
-proc slice_cut*(b: Arm9Bus): int64 {.inline.} = b.nds.slice_cut()
-proc slice_cut*(b: Arm7Bus): int64 {.inline.} = b.nds.slice_cut()
+proc slice_cut*(b: Arm9Bus): int64 {.inline.} =
+  if b.nds.long_slice: b.nds.slice_cut() else: high(int64)
+proc slice_cut*(b: Arm7Bus): int64 {.inline.} =
+  if b.nds.long_slice: b.nds.slice_cut() else: high(int64)
 
 proc run_long(n: NDS; slice_end: int64; h9: bool) =
   ## One CPU halted with no interrupt to wake it, the other running: the
@@ -607,16 +612,20 @@ proc quiet(n: NDS): bool {.inline.} =
   ## Neither CPU can change anything the other or the devices see before
   ## the next event: each is halted with no interrupt to wake it, or spins
   ## in a loop proven to be a no-op (arm/cpu.nim loop_edge) with nothing
-  ## touched since. Interleaving them in SLICE steps until then would give
-  ## the same result as running each straight to the event.
-  (n.arm9.idle_now() or (n.arm9.halted and not irq_wake(Arm9Bus(nds: n)))) and
-    (n.arm7.idle_now() or (n.arm7.halted and not irq_wake(Arm7Bus(nds: n))))
+  ## touched since and no interrupt it will take (an event that leaves the
+  ## loop proven may raise one: the handler then runs, which is work).
+  ## Interleaving them in SLICE steps until then would give the same result
+  ## as running each straight to the event.
+  template spins(c: untyped; bus: untyped): bool =
+    c.idle_now() and not (irq_line(bus) and (c.cpsr and FLAG_I) == 0)
+  (spins(n.arm9, Arm9Bus(nds: n)) or (n.arm9.halted and not irq_wake(Arm9Bus(nds: n)))) and
+    (spins(n.arm7, Arm7Bus(nds: n)) or (n.arm7.halted and not irq_wake(Arm7Bus(nds: n))))
 
 proc run_until*(n: NDS; target: int64) =
   ## Asleep, `target - now` is spent as sleep and the master clock stays.
   var ev: NdsEvent
   var at: int64
-  inc n.idle_epoch            # the frontend may have changed keys, touch, ...
+  inc n.ev_epoch              # the frontend may have changed keys, touch, ...
   if n.asleep():
     n.sleep_for(max(0'i64, target - n.sched.now))
     if n.spi.power_off: n.show_power_off()

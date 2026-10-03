@@ -18,6 +18,9 @@ proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.}
 # Idle-loop skipping (arm/cpu.nim loop_edge): the epoch, and the timing
 # state that decides what the next accesses cost.
 proc idle_epoch*(b: Arm7Bus): uint64 {.inline.} = b.nds.idle_epoch + b.nds.idle_epoch7
+proc ev_epoch*(b: Arm7Bus): uint64 {.inline.} = b.nds.ev_epoch
+proc dev_read*(b: Arm7Bus): bool {.inline.} = b.nds.dev7
+proc clear_dev*(b: Arm7Bus) {.inline.} = b.nds.dev7 = false
 proc idle_sig*(b: Arm7Bus): IdleSig {.inline.} =
   [b.nds.last_fetch7, b.nds.last_data7, 0, 0, 0, 0, 0, 0]
 
@@ -26,6 +29,7 @@ proc dma_stall*(b: Arm7Bus; cycles: int64) =
   ## clock and the transfer's start.
   let n {.cursor.} = b.nds
   n.arm7.cycles = max(n.arm7.cycles, n.sched.now) + cycles
+  inc n.idle_epoch            # the CPU's clock moved (arm/cpu.nim loop_edge)
 
 # --- I/O ---------------------------------------------------------------
 
@@ -166,6 +170,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
   of 0x04:
     n.sync7()
     n.arm7.attn = true          # a read side effect may raise an IRQ (arm/cpu.nim run)
+    n.dev7 = true               # a device: what an event may change (arm/cpu.nim loop_edge)
     if not io7_steady(a):
       # the IPC FIFO pop is seen by the ARM9 too; the rest only by this CPU
       if (a and 0x00FF_FFFC'u32) == 0x10_0000: inc n.idle_epoch else: inc n.idle_epoch7
@@ -185,11 +190,14 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
     else: (w shr ((a and 3) * 8)) and 0xFF
   of 0x06:
+    n.dev7 = true
     let off = int(a and 0x3FFFF)
     when width == 32: n.gpu.vram.read32(vrArm7, off)
     elif width == 16: uint32(n.gpu.vram.read16(vrArm7, off))
     else: uint32(n.gpu.vram.read8(vrArm7, off))
-  of 0x08, 0x09, 0x0A: n.slot2_read(a, false, width)
+  of 0x08, 0x09, 0x0A:
+    n.dev7 = true
+    n.slot2_read(a, false, width)
   else:
     n.note_unmapped("arm7", a, false)
     0'u32
