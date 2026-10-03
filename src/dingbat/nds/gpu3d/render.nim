@@ -31,7 +31,7 @@
 ##
 ## TODO(3d): rendering per line against mid-frame writes.
 
-import std/[algorithm, math]
+import std/[algorithm, math, tables]
 import ../mem/vram
 import geometry
 
@@ -76,11 +76,20 @@ type
     mixed: seq[seq[uint8]]        ## pages several banks overlap: OR'd copies
     order: seq[int64]             ## sort key << 20 | polygon index
     line_cost: array[H, int32]    ## estimated bus cycles to render each line
+    # decoded texels (`tex_cached`): texels in pixel format, filled as the
+    # dots read them, valid while vram.tex_gen stands
+    tc_gen: uint64                ## vram.tex_gen the cache holds texels of
+    tc_pool: seq[uint32]          ## every cached texture's texels, NOT_DECODED until read
+    tc_used: int                  ## texels of tc_pool handed out
+    tc_index: Table[uint64, int]  ## texture key -> its first texel in tc_pool
     rdlines*: uint32              ## RDLINES_COUNT this frame would leave
     underflow*: bool              ## a line was not ready when displayed
 
   PolyCtx = object
     attr, tex, pltt: uint32
+    tc: ptr UncheckedArray[uint32]  ## the texture's decoded texels, or nil (tex_at)
+    sw, th: int                   ## texture size
+    rep_s, rep_t, flip_s, flip_t: bool
     id: uint8
     alpha: int32                  ## 1..31 (wire-frame edges use 31)
     mode: uint32                  ## 0 modulate, 1 decal, 2 toon/highlight, 3 shadow
@@ -166,12 +175,10 @@ proc mix5(c0, c1: uint32; k0, k1, sh: int): uint32 =
     let b = int((c1 shr (5 * i)) and 31)
     result = result or (uint32((a * k0 + b * k1) shr sh) shl (5 * i))
 
-proc texel(r: Renderer; tex, pltt: uint32; s, t: int64): uint32 {.inline.} =
-  ## The texel at (s, t) (12.4) in pixel format; alpha 0 = transparent.
+proc texel_uv(r: Renderer; tex, pltt: uint32; u, v: int): uint32 =
+  ## Texel (u, v) of the texture in pixel format; alpha 0 = transparent.
+  ## Never NOT_DECODED: bit 31 is always clear.
   let sw = 8 shl int((tex shr 20) and 7)
-  let th = 8 shl int((tex shr 23) and 7)
-  let u = wrap_coord(int(s shr 4), sw, (tex and 0x10000) != 0, (tex and 0x40000) != 0)
-  let v = wrap_coord(int(t shr 4), th, (tex and 0x20000) != 0, (tex and 0x80000) != 0)
   let base = int(tex and 0xFFFF) * 8
   let pbase = int(pltt) * 16
   let zero_clear = (tex and 0x2000_0000'u32) != 0
@@ -227,6 +234,53 @@ proc texel(r: Renderer; tex, pltt: uint32; s, t: int64): uint32 {.inline.} =
     let c = r.tex16(base + i * 2)
     rgb6(c) or (if (c and 0x8000) == 0: 0'u32 else: 31'u32 shl 24)
   else: 0'u32
+
+# Decoded texels. A texel is a function of the texture parameters that
+# address it (TEXIMAGE_PARAM's address, size, format and colour-0 bit and,
+# for the paletted formats, PLTT_BASE), its (u, v) and the texture and
+# palette slots' contents, which change only with vram.tex_gen (a bank in a
+# slot has no CPU address: gpu3d.nim render_frame, docs/nds/perf.md "3D
+# frame reuse"). So each texture keeps a buffer of its texels, decoded by
+# texel_uv the first time a dot reads one, for as long as tex_gen stands.
+
+const
+  NOT_DECODED = 0xFFFF_FFFF'u32
+  TC_POOL = 1 shl 20              ## texels cached at most (4 MB); then the cache starts over
+  TC_MAX_TEX = 1 shl 18           ## larger textures (1024 x 512 and up) are decoded per dot
+
+proc tex_cached(r: Renderer; vram: Vram; tex, pltt: uint32): ptr UncheckedArray[uint32] =
+  ## The texel buffer for this texture (nil: too large to cache).
+  if r.tc_gen != vram.tex_gen:
+    r.tc_gen = vram.tex_gen
+    r.tc_index.clear()
+    r.tc_used = 0
+  let n = (8 shl int((tex shr 20) and 7)) * (8 shl int((tex shr 23) and 7))
+  if n > TC_MAX_TEX: return nil
+  let fmt = (tex shr 26) and 7
+  let key = (uint64(tex and 0x3FF0_FFFF'u32) shl 16) or uint64(if fmt == 7: 0'u32 else: pltt and 0x1FFF)
+  var at = r.tc_index.getOrDefault(key, -1)
+  if at < 0:
+    if r.tc_pool.len == 0: r.tc_pool = newSeq[uint32](TC_POOL)
+    if r.tc_used + n > TC_POOL:
+      r.tc_index.clear()
+      r.tc_used = 0
+    at = r.tc_used
+    r.tc_used += n
+    for i in at ..< at + n: r.tc_pool[i] = NOT_DECODED
+    r.tc_index[key] = at
+  cast[ptr UncheckedArray[uint32]](addr r.tc_pool[at])
+
+proc tex_at(r: Renderer; c: PolyCtx; s, t: int64): uint32 {.inline.} =
+  ## The texel at (s, t) (12.4): wrapped, clamped or flipped into the
+  ## texture, then decoded (or read from the cache).
+  let u = wrap_coord(int(s shr 4), c.sw, c.rep_s, c.flip_s)
+  let v = wrap_coord(int(t shr 4), c.th, c.rep_t, c.flip_t)
+  if c.tc == nil: return r.texel_uv(c.tex, c.pltt, u, v)
+  let i = v * c.sw + u
+  result = c.tc[i]
+  if result == NOT_DECODED:
+    result = r.texel_uv(c.tex, c.pltt, u, v)
+    c.tc[i] = result
 
 # ---------------------------------------------------------------------------
 # Rear plane
@@ -582,7 +636,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   let vb = int32(max(0'i64, min(ashr(at(L.c[2], R.c[2]), 3), 63'i64)))
   var tx = 0'u32
   if c.textured:
-    tx = r.texel(c.tex, c.pltt, at(L.s, R.s), at(L.t, R.t))
+    tx = r.tex_at(c, at(L.s, R.s), at(L.t, R.t))
   var px = r.blend_texel(c, vr, vg, vb, tx)
   # wire-frame lines are drawn at alpha 31 (GBATEK), whatever the texel's
   # alpha: transparent texels too (3d_lines on the reference cores)
@@ -656,7 +710,7 @@ proc charge(r: Renderer; y, x0, x1: int) {.inline.} =
   let w = max(0, min(W, x1) - max(0, x0))
   r.line_cost[y] += int32(RENDER_POLY_CYCLES + w div RENDER_DOTS_PER_CYCLE)
 
-proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcnt: uint32;
+proc draw_polygon(r: Renderer; vram: Vram; poly: Polygon; verts: openArray[Vertex]; disp3dcnt: uint32;
                   wbuffer: bool) =
   let n = int(poly.count)
   if n < 1 or n > 16: return
@@ -689,6 +743,14 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   # notes)
                   curse: (disp3dcnt and 0x30) == 0x20 and not poly.translucent and
                          ((poly.attr shr 4) and 3) != 3)
+  if c.textured:
+    c.sw = 8 shl int((poly.tex shr 20) and 7)
+    c.th = 8 shl int((poly.tex shr 23) and 7)
+    c.rep_s = (poly.tex and 0x10000) != 0
+    c.rep_t = (poly.tex and 0x20000) != 0
+    c.flip_s = (poly.tex and 0x40000) != 0
+    c.flip_t = (poly.tex and 0x80000) != 0
+    c.tc = r.tex_cached(vram, poly.tex, poly.pltt)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
   var line = true
@@ -1021,7 +1083,7 @@ proc render_frame_body(r: Renderer; vram: Vram; polys: openArray[Polygon];
   when defined(r3dprof):
     let tb = getMonoTime()
   for k in r.order:
-    r.draw_polygon(polys[int(k and 0xFFFFF)], verts, disp3dcnt, wbuffer)
+    r.draw_polygon(vram, polys[int(k and 0xFFFFF)], verts, disp3dcnt, wbuffer)
   when defined(r3dprof):
     prof_draw += (getMonoTime() - tb).inNanoseconds
   if (disp3dcnt and 0x10) != 0: r.anti_alias()

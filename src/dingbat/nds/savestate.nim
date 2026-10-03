@@ -84,8 +84,11 @@ const
   # coverage and the layer behind (`below`, `below_depth`) before anything
   # reads them, the page pointers and `order` are rebuilt
   # per frame. `color` (the frame being shown) and `regs` are saved.
+  # tc_*: decoded texels, a cache keyed by vram.tex_gen (remap() in
+  # after_load bumps it, so a loaded machine decodes afresh)
   RENDER_SKIP = ["depth", "opaque_id", "trans_id", "flags", "below", "below_depth", "aacov",
-                 "tex_pages", "pal_pages", "zero_page", "mixed", "order"]
+                 "tex_pages", "pal_pages", "zero_page", "mixed", "order",
+                 "tc_gen", "tc_pool", "tc_used", "tc_index"]
   TIMERS_SKIP = ["sched", "irq"]
   DMA_SKIP = ["irq"]
   IPC_SKIP = ["arm9", "arm7"]
