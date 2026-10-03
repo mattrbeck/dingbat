@@ -59,7 +59,7 @@ table's fixed default whatever EXMEMCNT said; the boot info said "no cart".
 | EEPROM | serial on bit 0 at 0x09000000+ (ROM up to 16 MB) or 0x09FFFF00+ (32 MB); the command's bit count when the next read arrives gives the chip size (9/73 bits = 4 Kbit, 17/81 = 64 Kbit); ready at once after a write (Assumed) | GBATEK "GBA Cart Backup EEPROM"; unit test only (no EEPROM cart was run) |
 | Rumble Pak | open bus AND FFFDh; writes latch AD1, latch changes per frame give the strength (one = 64/255, +64 each) | GBATEK (detection loop finds all 1000h halfwords; libnds' FFFDh check at 18 cycles passes) |
 | Expansion Pak | 8 MB RAM at 0x09000000, lock at 0x08240000 (starts unlocked; locked reads FFFFh, drops writes), byte stores ignored, header ID at 0x080000B0-BF, rest FFFFh | GBATEK for base/size/lock; the rest from the reference run only |
-| Boot info | 0x027FFC30 filled from the cart header (flags byte 0: Assumed); FFh with no cart | GBATEK boot-info list |
+| Boot info | 0x027FFC30 filled from the cart header; FFh with no cart, but the flags byte (0x027FFC35) 00h | GBATEK boot-info list; the flags byte as the real firmware leaves it with an empty slot (the user's dumps, `--boot firmware`), and as the reference's direct boot has it |
 
 API: `n.insert_slot2(kind, rom, save)` (`s2Empty`, `s2GbaCart`,
 `s2RumblePak`, `s2ExpansionPak`; before the first instruction it is power-on

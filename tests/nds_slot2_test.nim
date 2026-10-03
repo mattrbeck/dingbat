@@ -48,8 +48,8 @@ block open_bus:
   check s.rom_read16(0x0800_ABCE'u32, 10) == 0xFFEF, "10 cycles: address/2 OR FE08h"
   check s.rom_read16(0x0800_ABCE'u32, 18) == 0xFFFF, "18 cycles: FFFFh"
   check s.ram_read8(0x0A00_1234'u32) == 0xFF, "SRAM region FFh"
-  check s.gba_header_info() == [0xFF'u8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
-        "boot info for no cart: FFh"
+  check s.gba_header_info() == [0xFF'u8, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+        "boot info for no cart: FFh, the flags byte 00h (the real firmware's)"
 
 block rumble_pak:
   echo "Rumble Pak"
@@ -193,7 +193,7 @@ const
     0x00590058, 0x005B005A, 0x005D005C, 0x005F005E,       # 54-57 header
     0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,  # 58-62
     0xFE5FFE5E'u32, 0x0000FFFF,                               # 63-64
-    0xFFFFFFFF'u32, 0xFFFFFFFF'u32, 0xFFFFFFFF'u32,                   # 65-67 boot info
+    0xFFFFFFFF'u32, 0xFFFF00FF'u32, 0xFFFFFFFF'u32,                   # 65-67 boot info (flags 00h)
     0x0000E8FF, 0x0000607F, 0x000000FF, 0x0000FE09,       # 68-71
     0x0000FE08, 0x0000FE09, 0x0000FE08, 0x0000FE08, 0xFE09FE08'u32,  # 72-76
     0x0000FE6A, 0xFE6BFE6A'u32, 0xFE6BFE6A'u32,                   # 77-79 GPIO
