@@ -60,15 +60,18 @@ const
   RENDER_LEAD = 49                          ## line 214 to line 0 of the next frame
 
 type
+  Px = object                     ## a dot's state besides its colour, kept together
+    depth: uint32                 ## 24-bit Z or W
+    below: uint32                 ## the nearest opaque colour behind the top one (anti-aliasing)
+    below_depth: uint32
+    opaque_id: uint8              ## polygon ID of the last opaque pixel
+    trans_id: uint8               ## ID of the last translucent pixel, or NO_ID
+    flags: uint8
+    aacov: uint8                  ## anti-aliasing coverage of the opaque dot (31 = whole)
+
   Renderer* = ref object
     color*: array[NPIX, uint32]   ## the frame, pixel format above
-    depth: array[NPIX, uint32]    ## 24-bit Z or W
-    opaque_id: array[NPIX, uint8] ## polygon ID of the last opaque pixel
-    trans_id: array[NPIX, uint8]  ## ID of the last translucent pixel, or NO_ID
-    flags: array[NPIX, uint8]
-    below: array[NPIX, uint32]    ## the nearest opaque colour behind the top one (anti-aliasing)
-    below_depth: array[NPIX, uint32]
-    aacov: array[NPIX, uint8]     ## anti-aliasing coverage of the opaque dot (31 = whole)
+    px: array[NPIX, Px]           ## the rest of each dot's state
     regs*: array[40, uint32]      ## 0x4000320-0x40003BF as written (word index)
     tex_pages: array[32, ptr UncheckedArray[uint8]]   ## texture slots 0-3
     pal_pages: array[8, ptr UncheckedArray[uint8]]    ## palette slots (6 used)
@@ -304,13 +307,13 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
         let i = y * W + x
         r.color[i] = rgb6(c) or (if (c and 0x8000) != 0: 31'u32 shl 24 else: 0)
         let d15 = d and 0x7FFF
-        r.depth[i] = d15 * 0x200 + ((d15 + 1) div 0x8000) * 0x1FF
-        r.opaque_id[i] = id
-        r.trans_id[i] = NO_ID
-        r.aacov[i] = 31
-        r.below[i] = r.color[i]
-        r.below_depth[i] = r.depth[i]
-        r.flags[i] = if (d and 0x8000) != 0: FLAG_FOG else: 0
+        r.px[i].depth = d15 * 0x200 + ((d15 + 1) div 0x8000) * 0x1FF
+        r.px[i].opaque_id = id
+        r.px[i].trans_id = NO_ID
+        r.px[i].aacov = 31
+        r.px[i].below = r.color[i]
+        r.px[i].below_depth = r.px[i].depth
+        r.px[i].flags = if (d and 0x8000) != 0: FLAG_FOG else: 0
   else:
     let c = rgb6(cc) or (((cc shr 16) and 31) shl 24)
     let d15 = r.reg16(0x354) and 0x7FFF
@@ -318,13 +321,13 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
     let f = if (cc and 0x8000) != 0: FLAG_FOG else: 0'u8
     for i in 0 ..< NPIX:
       r.color[i] = c
-      r.depth[i] = d
-      r.opaque_id[i] = id
-      r.trans_id[i] = NO_ID
-      r.aacov[i] = 31
-      r.below[i] = c
-      r.below_depth[i] = d
-      r.flags[i] = f
+      r.px[i].depth = d
+      r.px[i].opaque_id = id
+      r.px[i].trans_id = NO_ID
+      r.px[i].aacov = 31
+      r.px[i].below = c
+      r.px[i].below_depth = d
+      r.px[i].flags = f
 
 # ---------------------------------------------------------------------------
 # Rasterisation
@@ -631,7 +634,7 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
   # (dots 0 <= n < len: the factors are in [0, 1)), so the clamps here and
   # on the colours below change nothing
   let dval = (when (K and K_INR) != 0: uint32(dv) else: uint32(max(0'i64, min(dv, 0xFF_FFFF'i64))))
-  let old = r.depth[i]
+  let old = r.px[i].depth
   var pass = if not simple and (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
   # With edge marking on and anti-aliasing off, where edges of two opaque
@@ -643,8 +646,8 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
   # (overriden by top xmajor/flat)", and the recorded colours of 38, 39, 43:
   # a further polygon's top run shows over the nearer one's bottom run or
   # bottom row; 42: a right diagonal over a bottom run does nothing).
-  if not simple and c.curse and role != 0 and r.opaque_id[i] == c.id and r.trans_id[i] == NO_ID:
-    let was = r.flags[i]
+  if not simple and c.curse and role != 0 and r.px[i].opaque_id == c.id and r.px[i].trans_id == NO_ID:
+    let was = r.px[i].flags
     if (role == ROLE_LEFT and (was and ROLE_RIGHT) != 0) or
        (role == ROLE_TOP and (was and ROLE_BOTTOM) != 0): pass = true
     elif (role == ROLE_RIGHT and (was and ROLE_LEFT) != 0) or
@@ -659,11 +662,11 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
     # shadow (ID > 0) draws only on flagged dots, clearing the flag, and
     # not on its own polygon ID. A shadow with no mask draws nothing.
     if c.id == 0:
-      if not pass: r.flags[i] = r.flags[i] or FLAG_STENCIL
+      if not pass: r.px[i].flags = r.px[i].flags or FLAG_STENCIL
       return
-    if (r.flags[i] and FLAG_STENCIL) == 0: return
-    r.flags[i] = r.flags[i] and not FLAG_STENCIL
-    if not pass or r.opaque_id[i] == c.id: return
+    if (r.px[i].flags and FLAG_STENCIL) == 0: return
+    r.px[i].flags = r.px[i].flags and not FLAG_STENCIL
+    if not pass or r.px[i].opaque_id == c.id: return
   elif not pass:
     # With anti-aliasing each dot keeps two layers: the top one and the
     # nearest one behind it, which a partly covered top dot mixes over at
@@ -672,8 +675,8 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
     # blend into it, whatever the drawing order (3d_aa, 3d_probe_aa2,
     # 3d_probe_aa3 on the reference cores). Only dots whose top is partly
     # covered or an edge ever read it.
-    if not aa or (r.aacov[i] >= 31 and (r.flags[i] and FLAG_EDGE) == 0) or
-       dval >= r.below_depth[i]: return
+    if not aa or (r.px[i].aacov >= 31 and (r.px[i].flags and FLAG_EDGE) == 0) or
+       dval >= r.px[i].below_depth: return
   template c6(a, b: int64): int32 =
     when (K and K_INR) != 0: int32(ashr(at(a, b), 3))
     else: int32(max(0'i64, min(ashr(at(a, b), 3), 63'i64)))
@@ -699,33 +702,33 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
       dst = px
   if not pass:
     if a == 31:
-      r.below[i] = px
-      r.below_depth[i] = dval
+      r.px[i].below = px
+      r.px[i].below_depth = dval
     else:
-      blend_into(r.below[i])
-      if (c.attr and 0x800) != 0: r.below_depth[i] = dval
+      blend_into(r.px[i].below)
+      if (c.attr and 0x800) != 0: r.px[i].below_depth = dval
     return
   if a == 31 and mode != 3:
     # anti-aliased edge dots keep their coverage for the post pass, and
     # what they cover moves one layer down
-    r.below[i] = r.color[i]
-    r.below_depth[i] = r.depth[i]
-    r.aacov[i] = uint8(cov)
+    r.px[i].below = r.color[i]
+    r.px[i].below_depth = r.px[i].depth
+    r.px[i].aacov = uint8(cov)
     r.color[i] = px
-    r.depth[i] = dval
-    r.opaque_id[i] = c.id
-    r.trans_id[i] = NO_ID
-    r.flags[i] = (if c.fog: FLAG_FOG else: 0'u8) or (if edge: FLAG_EDGE or role else: 0'u8)
+    r.px[i].depth = dval
+    r.px[i].opaque_id = c.id
+    r.px[i].trans_id = NO_ID
+    r.px[i].flags = (if c.fog: FLAG_FOG else: 0'u8) or (if edge: FLAG_EDGE or role else: 0'u8)
   else:
     # a translucent polygon does not blend twice over its own ID
-    if r.trans_id[i] == c.id: return
+    if r.px[i].trans_id == c.id: return
     blend_into(r.color[i])
     # over a partly covered edge dot it tints the layer behind as well
     # (3d_probe_aa3: anti-aliasing still applies under translucency)
-    if aa and (r.aacov[i] < 31 or (r.flags[i] and FLAG_EDGE) != 0): blend_into(r.below[i])
-    if (c.attr and 0x800) != 0: r.depth[i] = dval
-    r.trans_id[i] = c.id
-    if not c.fog: r.flags[i] = r.flags[i] and not FLAG_FOG
+    if aa and (r.px[i].aacov < 31 or (r.px[i].flags and FLAG_EDGE) != 0): blend_into(r.px[i].below)
+    if (c.attr and 0x800) != 0: r.px[i].depth = dval
+    r.px[i].trans_id = c.id
+    if not c.fog: r.px[i].flags = r.px[i].flags and not FLAG_FOG
 
 template by_kind(c: PolyCtx; sp: SpanStep; kin: static int; generic, go: untyped) =
   ## `go(K)` with K the facts that hold for this polygon and span
@@ -1030,21 +1033,21 @@ proc edge_mark(r: Renderer; aa: bool) =
   for y in 0 ..< H:
     for x in 0 ..< W:
       let i = y * W + x
-      if (r.flags[i] and FLAG_EDGE) == 0: continue
-      let id = r.opaque_id[i]
-      let d = r.depth[i]
+      if (r.px[i].flags and FLAG_EDGE) == 0: continue
+      let id = r.px[i].opaque_id
+      let d = r.px[i].depth
       template differs(xx, yy: int): bool =
         if xx < 0 or xx >= W or yy < 0 or yy >= H: id != clear_id and d < clear_depth
-        else: id != r.opaque_id[yy * W + xx] and d < r.depth[yy * W + xx]
+        else: id != r.px[yy * W + xx].opaque_id and d < r.px[yy * W + xx].depth
       if differs(x - 1, y) or differs(x + 1, y) or differs(x, y - 1) or differs(x, y + 1):
         marked.add int32(i)
   for i in marked:
-    let ec = rgb6(r.reg16(0x330 + int(r.opaque_id[i] shr 3) * 2))
+    let ec = rgb6(r.reg16(0x330 + int(r.px[i].opaque_id shr 3) * 2))
     if aa:
       # with anti-aliasing the edge colour goes on at about half strength
       # over the layer behind the dot (GBATEK; 3d_probe_aa_edge: alpha 16,
       # 3d_probe_aa3_edge: the layer, not the polygon's own colour)
-      let o = r.below[i]
+      let o = r.px[i].below
       template mixe(k: int): int32 = (ch(ec, k) * 17 + ch(o, k) * 15) shr 5
       r.color[i] = pack(mixe(0), mixe(1), mixe(2), 0) or (r.color[i] and 0xFF00_0000'u32)
     else:
@@ -1057,9 +1060,9 @@ proc anti_alias(r: Renderer) =
   ## (3d_probe_aa / _aa_edge pin the coverage, 3d_probe_aa2 / _aa3 the
   ## layer, translucent polygons included).
   for i in 0 ..< NPIX:
-    let cov = int32(r.aacov[i])
+    let cov = int32(r.px[i].aacov)
     if cov >= 31: continue
-    let o = r.below[i]
+    let o = r.px[i].below
     let px = r.color[i]
     template mixa(k: int): int32 = (ch(px, k) * (cov + 1) + ch(o, k) * (31 - cov)) shr 5
     # no coverage at all leaves the colour beneath
@@ -1079,9 +1082,9 @@ proc fog(r: Renderer; disp3dcnt: uint32) =
   var table: array[32, int32]
   for k in 0..31: table[k] = int32(r.reg8(0x360 + k) and 0x7F)
   for i in 0 ..< NPIX:
-    if (r.flags[i] and FLAG_FOG) == 0: continue
+    if (r.px[i].flags and FLAG_FOG) == 0: continue
     # FogDepthBoundary[n] = FOG_OFFSET + FOG_STEP*(n+1), on 15-bit depth
-    let d = int(r.depth[i] shr 9)
+    let d = int(r.px[i].depth shr 9)
     var dens: int32
     if step == 0: dens = (if d < offset + step: table[0] else: table[31])
     else:
