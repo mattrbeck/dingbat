@@ -10,10 +10,15 @@
 ## write32), so it sees exactly what that CPU sees -- except TCM, which DMA
 ## cannot reach (bus9 checks `dma_access`).
 ##
-## Bus time (placeholder, docs/nds/spec.md "Timing"): per unit one bus cycle
-## for each 32-bit-bus side (WRAM, I/O, OAM, BIOS) and one per halfword for
-## each 16-bit-bus side (main RAM, VRAM, palette, GBA slot), plus 4 cycles
-## per burst.
+## Bus time. ARM9 (the reference runs on tests/nds/src/disp_dmatime,
+## docs/oracles.md; GBATEK gives no DMA timing beyond "main memory read
+## cycles are performed simultaneously with write cycles to other memory"):
+## a 32-bit unit costs its read (main RAM 1, VRAM/palette 2, the 32-bit-bus
+## regions 1) plus its write (main RAM 2, VRAM/palette 2, others 1), a
+## 16-bit unit 2, main RAM to main RAM 18 (32-bit) or 16 (16-bit); a block
+## adds 1 cycle, 2 when it moves more than one unit. GBA-slot sides and the
+## ARM7 keep the earlier estimate: one bus cycle per side on a 32-bit bus,
+## one per halfword on a 16-bit one, plus 4 per block.
 
 import irq
 
@@ -75,6 +80,18 @@ proc side_cycles(a: uint32; word: bool): int64 {.inline.} =
   of 0x02, 0x05, 0x06, 0x08, 0x09, 0x0A: (if word: 2 else: 1)
   else: 1
 
+proc unit_cycles9(src, dst: uint32; word: bool): int64 {.inline.} =
+  ## ARM9 bus cycles per unit (see the module comment).
+  let s = src shr 24
+  let t = dst shr 24
+  if s in 0x08'u32..0x0A'u32 or t in 0x08'u32..0x0A'u32:
+    return side_cycles(src, word) + side_cycles(dst, word)
+  if s == 0x02 and t == 0x02: return (if word: 18 else: 16)
+  if not word: return 2
+  let r = if s in 0x05'u32..0x06'u32: 2'i64 else: 1'i64
+  let w = if t == 0x02 or t in 0x05'u32..0x06'u32: 2'i64 else: 1'i64
+  r + w
+
 proc transfer_units*[B](d: Dma; bus: B; i: int; units: uint32) =
   ## Move up to `units` of channel i's running block; the block ending
   ## raises the IRQ and reloads (repeat) or disables the channel.
@@ -85,7 +102,8 @@ proc transfer_units*[B](d: Dma; bus: B; i: int; units: uint32) =
   let step = if word: 4'u32 else: 2'u32
   let dst_ctl = (c.cnt shr 21) and 3
   let src_ctl = (c.cnt shr 23) and 3
-  let unit_cost = side_cycles(c.cur_src, word) + side_cycles(c.cur_dst, word)
+  let unit_cost = if d.is9: unit_cycles9(c.cur_src, c.cur_dst, word)
+                  else: side_cycles(c.cur_src, word) + side_cycles(c.cur_dst, word)
   d.dma_access = true
   for _ in 0 ..< n:
     if word:
@@ -102,7 +120,8 @@ proc transfer_units*[B](d: Dma; bus: B; i: int; units: uint32) =
     else: discard
   d.dma_access = false
   c.cur_count -= n
-  dma_stall(bus, 2 * (BURST_CYCLES + int64(n) * unit_cost))
+  let per_block = if not d.is9: BURST_CYCLES elif n > 1: 2'i64 else: 1'i64
+  dma_stall(bus, 2 * (per_block + int64(n) * unit_cost))
   if c.cur_count > 0: return
   if (c.cnt and (1'u32 shl 30)) != 0:
     d.irq.raise_bit(ord(irqDma0) + i)
