@@ -1053,10 +1053,13 @@ proc edge_mark(r: Renderer; aa: bool) =
     if aa:
       # with anti-aliasing the edge colour goes on at about half strength
       # over the layer behind the dot (GBATEK; 3d_probe_aa_edge: alpha 16,
-      # 3d_probe_aa3_edge: the layer, not the polygon's own colour)
+      # 3d_probe_aa3_edge: the layer, not the polygon's own colour); over a
+      # transparent rear plane it stays the edge colour at alpha 16, for the
+      # 2D side to blend (3d_probe_aa_rear_edge)
       let o = r.px[i].below
       template mixe(k: int): int32 = (ch(ec, k) * 17 + ch(o, k) * 15) shr 5
-      r.color[i] = pack(mixe(0), mixe(1), mixe(2), 0) or (r.color[i] and 0xFF00_0000'u32)
+      r.color[i] = if (o shr 24) == 0: ec or (16'u32 shl 24)
+                   else: pack(mixe(0), mixe(1), mixe(2), 0) or (r.color[i] and 0xFF00_0000'u32)
     else:
       r.color[i] = ec or (r.color[i] and 0xFF00_0000'u32)
 
@@ -1072,9 +1075,12 @@ proc anti_alias(r: Renderer) =
     let o = r.px[i].below
     let px = r.color[i]
     template mixa(k: int): int32 = (ch(px, k) * (cov + 1) + ch(o, k) * (31 - cov)) shr 5
-    # no coverage at all leaves the colour beneath
+    # no coverage at all leaves the colour beneath; over a transparent rear
+    # plane the dot keeps its colour and the coverage becomes its alpha, for
+    # the 2D side to blend (3d_probe_aa_rear*: no seam where nothing blends)
     r.color[i] = if cov == 0: o
-                 else: pack(mixa(0), mixa(1), mixa(2), (if (o shr 24) == 0: cov else: 31'i32))
+                 elif (o shr 24) == 0: (px and 0x00FF_FFFF'u32) or (uint32(cov) shl 24)
+                 else: pack(mixa(0), mixa(1), mixa(2), 31)
 
 proc fog(r: Renderer; disp3dcnt: uint32) =
   let fc = r.regs[(0x358 - 0x320) shr 2]

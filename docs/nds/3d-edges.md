@@ -267,6 +267,32 @@ avoid seams but left mesh silhouettes against same-ID polygons hard
 (SoulSilver's roof eaves and furniture outlines showed saw-tooth edges:
 the dot at the end of each run had no coverage and showed the rear plane).
 
+### Over a transparent rear plane (round 9)
+
+Where the layer behind an edge dot is the rear plane with alpha 0, the dot
+is not mixed with the rear plane's colour: it keeps its own colour and
+takes its coverage as its alpha, and an edge-marked dot takes the edge
+colour at alpha 16. The 2D side then blends it like any translucent 3D dot
+(over a 2nd target in BLDCNT) or shows it whole (no 2nd target). Both are
+the blend a translucent polygon gets, `(c (a + 1) + o (31 - a)) >> 5` over
+an opaque layer and the colour with alpha a over a transparent one, at
+a = coverage for AA and a = 16 for the edge colour.
+
+| | Before | Now (3d_probe_aa_rear*, reference runs) |
+|---|---|---|
+| AA dot over the rear plane at alpha 0 | mixed with the rear plane's colour by coverage, alpha = coverage | its own colour, alpha = coverage (0 dots off; 542 before) |
+| Edge-marked dot there (AA on) | edge colour at 17/32 over the rear plane's colour, alpha kept | edge colour, alpha 16, screen borders included (0 dots off; 1728 before) |
+
+What it did to a game: Pokemon SoulSilver clears to black at alpha 0 with
+no 2nd target, and its ground is a mesh of one ID with T-junctions (a
+polygon's corner on the middle of its neighbour's edge: vertices snap to
+whole dots, so the long edge and the two short ones part by under a dot).
+Dots on the long edge are covered by one side only and mixed over the
+rear plane; mixing with its black drew dashed dark lines down the grass
+beside the path. Now they show the ground's colour, as the reference
+does. SoulSilver p12 frame 6600 went from 15 to 12 dots off the
+reference; 3000/5000/8000 are unchanged.
+
 The second layer is kept only where the frame has AA on, and is only
 written for dots whose top is a partly covered edge dot or an edge-flagged
 dot (nothing else reads it). `below`/`below_depth` are per-frame scratch

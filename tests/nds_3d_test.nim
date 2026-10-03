@@ -781,6 +781,10 @@ const ROM_HASHES = [
   ("3d_probe_aa3_em", 0xC0E36B35'u32),
   ("3d_probe_aa4", 0xCE98E0F8'u32),
   ("3d_probe_aa_edge", 0xE3239CE2'u32),
+  ("3d_probe_aa_rear", 0x3BAC0FDB'u32),
+  ("3d_probe_aa_rear_bld", 0x3BAC0FDB'u32),   # the same 3D buffer; the screen differs
+  ("3d_probe_aa_rear_opq", 0x94CA5E73'u32),
+  ("3d_probe_aa_rear_edge", 0x3D233065'u32),
   ("3d_probe_clip", 0xA5425543'u32),
   ("3d_probe_clip_persp", 0xED82B05F'u32),
   ("3d_probe_clipq", 0x318D51CE'u32),
