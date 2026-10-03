@@ -228,14 +228,19 @@ proc wake_at*(g: Gpu3d; below: int): int64 =
     i += n
   NEVER
 
-proc update_irq*(g: Gpu3d) =
-  ## IF.21 is set as long as the selected condition holds.
-  if g.irq == nil or g.irq_mode == 0: return
-  g.catch_up(g.now())
+proc raise_level_irq(g: Gpu3d) {.inline.} =
+  ## IF.21 if the selected condition holds now (the engine caught up).
+  if g.irq == nil: return
   case g.irq_mode
   of 1: (if g.fifo_level < 128: g.irq.raise_irq(irqGxFifo))
   of 2: (if g.fifo_level == 0: g.irq.raise_irq(irqGxFifo))
   else: discard
+
+proc update_irq*(g: Gpu3d) =
+  ## IF.21 is set as long as the selected condition holds.
+  if g.irq == nil or g.irq_mode == 0: return
+  g.catch_up(g.now())
+  g.raise_level_irq()
 
 proc push(g: Gpu3d; cmd: uint8; param: uint32) =
   var t = g.write_time()
@@ -250,7 +255,8 @@ proc push(g: Gpu3d; cmd: uint8; param: uint32) =
     g.catch_up(t)
   g.fifo.addLast(FifoEntry(cmd: cmd, param: param, at: t))
   g.catch_up(t)
-  g.update_irq()
+  # update_irq, whose catch_up to now (<= t) would find nothing to start
+  g.raise_level_irq()
 
 proc next_packed(g: Gpu3d) =
   ## Issue the packed word's parameterless commands up to the next one that
