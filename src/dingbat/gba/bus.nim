@@ -1093,7 +1093,6 @@ proc write_word_mapped(bus: Bus; address: uint32; value: uint32) =
 
 # ---- Instruction-fetch fast path ----
 
-proc window_fetch_sync(bus: Bus; cost: int)
 proc fetch_half_miss(bus: Bus; address: uint32): uint16
 proc fetch_word_miss(bus: Bus; address: uint32): uint32
 proc swap_fetch_half(bus: Bus; address: uint32): uint16 {.noinline.}

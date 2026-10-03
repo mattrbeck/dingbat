@@ -285,6 +285,23 @@ proc contend_refill(cpu: CPU; s: int) {.noinline.} =
   cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0: bus.note_waits(s)
+
+proc window_refill(cpu: CPU; s: int) {.noinline.} =
+  ## REFILL_WINDOW_SPLIT: clear_pipeline's refill outside the gamepak with
+  ## the DMA access window open: two fetches, each with an end a PPU-timed
+  ## grant can come at, rather than one block the request waits behind.
+  let bus = cpu.gba.bus
+  let step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
+  # A burst granted at a fetch's end finds that fetch on the bus: r15 is the
+  # newest fetch mid-instruction (bus.read_open_bus_word), so it moves on
+  # after each sync, not before (DMA_SEES_REFILL_FETCH's case).
+  for _ in 0 .. 1:
+    bus.add_cycles(s)
+    bus.window_fetch_sync(s)
+    cpu.r[15] += step
+  when IRQ_LAST_WAITS:
+    if (bus.sync_bits and 8) != 0: bus.note_waits(s)
+
 proc leave_rom(bus: Bus; old_ahead: int8) {.noinline.} =
   ## PF_RUNS_OFF_ROM: the CPU branches out of the gamepak. The prefetcher
   ## goes on at the console's next fetch, from the end of the CPU's last
@@ -506,6 +523,10 @@ proc clear_pipeline*(cpu: CPU) =
   if cpu.gba.bus.contended[page]:
     cpu.contend_refill(s)
     return
+  when DMA_ACCESS_WINDOW and REFILL_WINDOW_SPLIT:
+    if (cpu.gba.bus.sync_bits and 2) != 0:
+      cpu.window_refill(s)
+      return
   cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
   cpu.gba.bus.add_cycles(2 * s)
   when IRQ_LAST_WAITS:

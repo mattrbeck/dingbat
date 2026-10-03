@@ -116,7 +116,8 @@ TABLE = {
                  for w in (1, 10, 11, 14)]
                 + [8 << 8 | 2, 22 << 8 | 1, 22 << 8 | 11]
                 + [c << 8 | w for c in (12, 13, 14) for w in (1, 6)]
-                + [c << 8 | w for c in (23, 24, 25, 26, 27, 28, 30) for w in (1, 10, 11, 14)]),
+                + [c << 8 | w for c in (23, 24, 25, 26, 27, 28, 30) for w in (1, 10, 11, 14)]
+                + [29 << 8 | w for w in (1, 10, 11, 14)]),
     # renderer contention, one access at k (dot k + 37 of this core's line):
     # (scene, access, first k, count) -- text BGs, 8bpp, fine scroll 7 and
     # 5 at the line's end, mode 2's lock-out, mode 1, the bitmap, palette

@@ -1357,6 +1357,20 @@ const HALT_WAKE_INSTR_COST* = 3
 const IRQ_ENTRY_EXTRA* {.intdefine.} = 1
   ## Cycles an IRQ entry costs beyond its pipeline refill (cpu.irq).
 const DMA_ACCESS_WINDOW* {.booldefine.} = true
+const REFILL_WINDOW_SPLIT* {.booldefine.} = true
+  ## With the access window open, a pipeline refill outside the gamepak is
+  ## two fetches a PPU-timed DMA can be granted between (cpu.window_refill),
+  ## not one block. hdmalag.s configuration 29 on an AGB SP: DMA1 (3 words)
+  ## and DMA3 (302 halfwords) every H-blank leave the CPU 3 cycles a line,
+  ## its `blo` loop from IWRAM progressing 3 cycles at a time; every burst
+  ## starts on its H-blank's cycle, 20 lines in a row. The core held the
+  ## grant behind a refill begun the cycle before the request (the H-blank
+  ## after the one whose window the `blo` itself took) and the next
+  ## opcode fetch -- that line's bursts started 2 cycles late, the next
+  ## H-blank found DMA3 still running and dropped it: 18 bursts. The refill
+  ## was the `blo`'s own, run after the bursts its fetch was granted at; the
+  ## window it needed was the next line's, which the last line's leftover
+  ## `window_closing` shut at that fetch (ppu.start_hblank now clears it).
 const SB_SWAP* = 64'u8
   ## bus.sync_bits bit 6: MEMCNT's swap is on (bus.nim, swap_read_word).
 const DMA_LEAD_CYCLES* {.intdefine.} = 1
@@ -1596,6 +1610,7 @@ proc trigger_video_capture*(dma: DMA; vcount: uint16)
 proc catch_up(bus: Bus) {.inline.}
 proc catch_up_access(bus: Bus; cost: int) {.inline.}
 proc imm_post_grant(bus: Bus) {.noinline.}
+proc window_fetch_sync(bus: Bus; cost: int)
 proc imm_pre_grant(bus: Bus; cost: int) {.noinline.}
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)

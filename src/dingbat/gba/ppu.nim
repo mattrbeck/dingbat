@@ -210,6 +210,12 @@ proc start_hblank*(ppu: PPU) =
       when WL_QUIET_EVENTS:
         if (ppu.gba.bus.sync_bits and 2) == 0: ppu.gba.wl_unsafe = true
       ppu.gba.bus.sync_bits = ppu.gba.bus.sync_bits or 2
+      when REFILL_WINDOW_SPLIT:
+        # A new window: the last line's request may still be waiting for
+        # the fetch that closes its window, when a burst has held the bus
+        # from that request to here (hdmalag.s configuration 29). That fetch
+        # must not close this one before its own request.
+        ppu.gba.bus.window_closing = false
       ppu.gba.bus.fetch_page = 0xFFFFFFFF'u32
       ppu.gba.bus.fetch_key = 0xFFFFFFFF'u32
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)

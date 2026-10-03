@@ -2403,8 +2403,8 @@
  {
   "payload": "hdmalag",
   "rom": "hdmalag.gba",
-  "sha1": "b8c1db115439d521ddc4b3550599c4a93aca21fe",
-  "frames": 1060,
+  "sha1": "efd2512d2e2edd3b1dfe161b07db58aa2828ff87",
+  "frames": 1092,
   "cells": [
    {
     "id": "hdmalag 0x1",
@@ -3030,6 +3030,26 @@
     "id": "hdmalag 0x1e0e",
     "kind": "hex",
     "want": "00000020"
+   },
+   {
+    "id": "hdmalag 0x1d01",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "hdmalag 0x1d0a",
+    "kind": "hex",
+    "want": "00005B70"
+   },
+   {
+    "id": "hdmalag 0x1d0b",
+    "kind": "hex",
+    "want": "00006026"
+   },
+   {
+    "id": "hdmalag 0x1d0e",
+    "kind": "hex",
+    "want": "0000001C"
    }
   ]
  },
