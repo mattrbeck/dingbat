@@ -97,6 +97,11 @@ type
     has_trailer*: bool
     trailer*:     array[16, byte]
     rtc* {.cursor.}: RTC
+    # EEPROM only: the battery file's bytes from 0x200 to its chip data's end
+    # (at most 0x2000), as loaded. A 4 Kbit chip uses the first 0x200; most
+    # emulators write 8 KB files for it anyway, and write_save puts these
+    # bytes back after the chip's so playing never shortens such a file.
+    eeprom_file_tail*: seq[byte]
   Storage* = ref StorageObj
 
   SRAM* = ref object of StorageObj
@@ -1818,6 +1823,9 @@ proc new_storage*(gba: GBA; rom_path: string): Storage =
       for i in 0 ..< RTC_TRAILER_LEN: result.trailer[i] = uint8(data[toff + i])
     let n = min(chip_len, result.memory.len)
     if n > 0: copyMem(addr result.memory[0], unsafeAddr data[0], n)
+    if t == stEEPROM and n > 0x200:
+      result.eeprom_file_tail = newSeq[byte](n - 0x200)
+      copyMem(addr result.eeprom_file_tail[0], unsafeAddr data[0x200], n - 0x200)
 
 proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false; hle_after_bios: bool = false): GBA =
   result = GBA(

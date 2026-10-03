@@ -493,17 +493,55 @@ block:  # EEPROM: trailer after an 8192-byte file for a 4Kbit game
         "8192+16 file: all 8192 chip bytes, no trailer bytes")
   check(g.datetime() == regs(2012, 12, 12, 3, 12, 13, 12), "8192+16 file: clock resumed",
         hex(g.datetime()))
-  # the game's first command reveals a 4Kbit part: the buffer shrinks
+  # the game's first command reveals a 4Kbit part: the buffer shrinks, the
+  # file does not (eeprom_file_tail)
   g.storage.memory.setLen(0x200)
+  g.storage.memory[0] = 0xA5
   g.storage.dirty = true
   g.storage.write_save()
   let w = readFile(sav_path(ee))
-  check(w.len == 0x200 + 16, "4Kbit part: 512 bytes + trailer", $w.len)
+  check(w.len == 0x2000 + 16, "4Kbit part from an 8192+16 file: 8192 bytes + trailer", $w.len)
+  check(w[0] == '\xA5' and w[1 ..< 0x2000] == f[1 ..< 0x2000],
+        "the chip's bytes as the game left them, the rest of the file as loaded")
   let g2 = boot(ee, E + 120)
-  check(g2.storage.memory[0 ..< 0x200] == cast[seq[byte]](f[0 ..< 0x200]),
-        "512+16 file: chip bytes intact")
-  check(g2.datetime() == regs(2012, 12, 12, 3, 12, 14, 12), "512+16 file: clock resumed",
+  check(g2.storage.memory[1 ..< 0x200] == cast[seq[byte]](f[1 ..< 0x200]),
+        "8192+16 file again: chip bytes intact")
+  check(g2.datetime() == regs(2012, 12, 12, 3, 12, 14, 12), "8192+16 file again: clock resumed",
         hex(g2.datetime()))
+  # a 512+16 file stays 512+16
+  var f5 = chip_image(0x200, 9)
+  for b in encode_trailer(cal(2012, 12, 12, 12, 12, 12), 3, 0x40, E): f5.add(char(b))
+  writeFile(sav_path(ee), f5)
+  let g3 = boot(ee, E + 60)
+  g3.storage.memory.setLen(0x200)
+  g3.storage.dirty = true
+  g3.storage.write_save()
+  check(readFile(sav_path(ee)).len == 0x200 + 16, "4Kbit part from a 512+16 file: 512 bytes + trailer")
+
+block:  # EEPROM, no RTC: an 8192-byte file for a 4Kbit game keeps its length
+  let ee = make_rom("plain_eeprom", ["EEPROM_V124"])
+  let f = chip_image(0x2000, 5)
+  writeFile(sav_path(ee), f)
+  let g = boot(ee)
+  g.storage.memory.setLen(0x200)  # what the first 4Kbit command does
+  g.storage.memory[0x1FF] = 0x3C
+  g.storage.dirty = true
+  g.storage.write_save()
+  let w = readFile(sav_path(ee))
+  check(w.len == 0x2000 and w[0 ..< 0x1FF] == f[0 ..< 0x1FF] and w[0x1FF] == '\x3C' and
+        w[0x200 ..< 0x2000] == f[0x200 ..< 0x2000],
+        "8192-byte file, 4Kbit part: 8192 bytes back, the game's write in the chip's", $w.len)
+  writeFile(sav_path(ee), chip_image(0x200, 5))
+  let g2 = boot(ee)
+  g2.storage.memory.setLen(0x200)
+  g2.storage.dirty = true
+  g2.storage.write_save()
+  check(readFile(sav_path(ee)).len == 0x200, "512-byte file, 4Kbit part: 512 bytes back")
+  removeFile(sav_path(ee))
+  let g3 = boot(ee)
+  g3.storage.dirty = true
+  g3.storage.write_save()
+  check(readFile(sav_path(ee)).len == 0x2000, "no file, size undetected: 8192 bytes as before")
 
 # ===========================================================================
 echo "=== Save states ==="
