@@ -594,9 +594,12 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
   if d <= 0:
     z = L.z; w = L.w
   else:
-    sp.step_to(n)
-    fl = sp.f
-    fc = fl + (if sp.acc != 0: 1'i64 else: 0'i64)
+    # (the linear factor serves equal-w spans only; the stepper's state is
+    # exact whenever it is read, so a run that skips it changes nothing)
+    when (K and K_PERSP) == 0:
+      sp.step_to(n)
+      fl = sp.f
+      fc = fl + (if sp.acc != 0: 1'i64 else: 0'i64)
     let dz = R.z - L.z
     # depth steps across the span by an 18-bit reciprocal of its length,
     # so it lands just short of the exact value at whole steps: a polygon
