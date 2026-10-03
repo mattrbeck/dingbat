@@ -833,6 +833,7 @@
   --btn-ab-bottom: #25272b;
   --btn-ab-border: #b44148;
   --btn-ab-border-w: 3px;
+  --btn-ab-ring: #b44148; /* kept by the see-through landscape pads */
   --btn-ab-label: #e6d9bf;
   --dpad-border: #b44148;
   --dpad-border-w: 3px;
@@ -6110,6 +6111,16 @@ body.debug-2p .home-tile-link {
   display: none;
 }
 
+/* Buttons in landscape styles the pads a phone lays over the game held
+   sideways (pointer: coarse, height up to 500px). Tablets keep their own
+   pads beside the picture and desktops have none, so the row would do
+   nothing there. */
+@media not all and (pointer: coarse), (min-width: 501px) and (min-height: 501px) {
+  .settings-pane #landscape-buttons-row {
+    display: none;
+  }
+}
+
 .theme-swatch {
   flex: 0 0 auto;
   width: 22px;
@@ -7287,14 +7298,50 @@ body.rewind-off #report-slider {
     padding: 6px calc(6px + var(--safe-r)) calc(6px + var(--safe-b))
       calc(6px + var(--safe-l));
   }
-  /* Fully transparent controls, just a faint outline and glyph: they
-     overlap the display area, so they must not obscure it */
+  /* Fully transparent controls, just a line and a glyph: they overlap the
+     display area, so they must not obscure it. Settings › Controls ›
+     Buttons in landscape: Outline (faint), Bold, or Solid (opaque-controls,
+     below). */
+  body {
+    --pad-line: rgba(var(--hi-rgb), 0.28);
+    --pad-glyph: rgba(var(--text-rgb), 0.5);
+    --pad-halo: rgba(0, 0, 0, 0.85);
+  }
+  body.bold-controls {
+    --pad-line: rgba(var(--hi-rgb), 0.9);
+    --pad-glyph: rgba(var(--text-rgb), 0.9);
+  }
+  :root[data-theme="light"] body {
+    --pad-line: rgba(24, 32, 52, 0.4);
+    --pad-glyph: rgba(var(--text-rgb), 0.6);
+    --pad-halo: rgba(255, 255, 255, 0.85);
+  }
+  :root[data-theme="light"] body.bold-controls {
+    --pad-line: rgba(24, 32, 52, 0.8);
+    --pad-glyph: rgba(var(--text-rgb), 0.9);
+  }
+  /* Solid pads use the plain border wherever a theme ring doesn't apply */
+  :root body.opaque-controls {
+    --pad-line: var(--border-2);
+  }
   .pad-btn,
   #dpad > #dpad-center {
     background: none;
-    border-color: rgba(var(--hi-rgb), 0.28);
+    border-color: var(--pad-line);
     box-shadow: none;
-    color: rgba(var(--text-rgb), 0.5);
+    color: var(--pad-glyph);
+  }
+  /* A theme's own ring (Famicom red) stays; any other d-pad and A/B take the
+     same line as the rest. The center's bars are inside the cross, and a bold
+     ring hides them (--dpad-bar-line) so the cross doesn't segment. */
+  #dpad > .pad-btn {
+    border-color: var(--dpad-border, var(--pad-line));
+  }
+  .pad-face {
+    border-color: var(--btn-ab-ring, var(--pad-line));
+  }
+  #dpad > #dpad-center {
+    border-color: var(--dpad-bar-line, var(--pad-line));
   }
   #dpad > #dpad-center::after,
   #joystick-base::after {
@@ -7307,6 +7354,27 @@ body.rewind-off #report-slider {
     background: none;
     border-color: rgba(var(--accent-rgb), 0.7);
     box-shadow: 0 0 14px -4px var(--accent-glow);
+  }
+  /* Bold: a 2px line in a dark halo (light on the light theme), so one of the
+     two always contrasts with the picture under it. drop-shadow follows the
+     drawn line and glyph only - the d-pad's open arm ends get no edge - and
+     is static, painted once per press like the rest of the pad. The knob
+     sits inside the base, which already haloes it. */
+  body.bold-controls .pad-btn {
+    border-width: 2px;
+  }
+  body.bold-controls .pad-face {
+    border-width: max(2px, var(--btn-ab-border-w));
+  }
+  body.bold-controls #dpad > .pad-btn {
+    border-width: max(2px, var(--dpad-border-w, 1px));
+  }
+  body.bold-controls .pad-btn:not(#joystick-knob),
+  body.bold-controls #dpad > #dpad-center {
+    filter: drop-shadow(0 0 1px var(--pad-halo)) drop-shadow(0 0 1px var(--pad-halo));
+  }
+  body.bold-controls #joystick-rim {
+    inset: -2px;
   }
   /* Opaque-controls opt-out; higher specificity and later, so it wins. */
   body.opaque-controls .pad-btn {
@@ -7354,21 +7422,6 @@ body.rewind-off #report-slider {
   }
   #select-start {
     gap: 12px;
-  }
-}
-
-/* Light theme, translucent pads: flip outline/glyph dark. After (and
-   re-asserting) the pressed rules, which these selectors outrank. */
-@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
-  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn,
-  :root[data-theme="light"] body:not(.opaque-controls) #dpad > #dpad-center {
-    border-color: rgba(24, 32, 52, 0.4);
-    color: rgba(var(--text-rgb), 0.6);
-  }
-  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn.pressed,
-  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn.arm-active {
-    color: var(--accent);
-    border-color: rgba(var(--accent-rgb), 0.7);
   }
 }
 

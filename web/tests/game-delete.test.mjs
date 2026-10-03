@@ -13,7 +13,7 @@ import { loadApp, jsonRes, bytesRes, u8, eq, settle } from "./helpers.mjs";
 const GLOBAL_KEYS = [
   "recent", "roms_sort", "gdrive_sync", "prints", "bios:gba", "bios:gbc",
   "system", "audio", "colorCorrect", "video", "keybindings", "large-controls",
-  "opaque-controls", "control-style", "joystick-mode", "hide-touch-on-gamepad",
+  "opaque-controls", "landscape-buttons", "control-style", "joystick-mode", "hide-touch-on-gamepad",
   "runahead", "gb-palette", "thumbs_offered",
 ];
 

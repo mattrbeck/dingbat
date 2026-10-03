@@ -10077,21 +10077,32 @@ const loadLargeControlsFromStorage = async () => {
   applyLargeControls(!!(await dbGet("large-controls")));
 };
 
-// --- Opaque controls in landscape ---
-const opaqueControlsToggle = /** @type {HTMLInputElement} */ (document.getElementById("opaque-controls-toggle"));
+// --- Buttons in landscape: "outline" | "bold" | "solid" ---
+// Phones held sideways draw the pads over the game (styles.css):
+// body.bold-controls and body.opaque-controls pick the look.
+let landscapeButtons = "outline";
+const landscapeButtonsChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#landscape-buttons-picker .choice-chip")));
 
-const applyOpaqueControls = (on) => {
-  document.body.classList.toggle("opaque-controls", on);
-  opaqueControlsToggle.checked = on;
+const applyLandscapeButtons = (look) => {
+  landscapeButtons = look === "bold" || look === "solid" ? look : "outline";
+  document.body.classList.toggle("bold-controls", landscapeButtons === "bold");
+  document.body.classList.toggle("opaque-controls", landscapeButtons === "solid");
+  syncChipGroup(landscapeButtonsChips, landscapeButtons);
 };
 
-opaqueControlsToggle.addEventListener("change", async () => {
-  applyOpaqueControls(opaqueControlsToggle.checked);
-  await dbPut("opaque-controls", opaqueControlsToggle.checked);
-});
+landscapeButtonsChips.forEach((chip) =>
+  chip.addEventListener("click", async () => {
+    applyLandscapeButtons(chip.dataset.value);
+    await dbPut("landscape-buttons", landscapeButtons);
+  })
+);
 
-const loadOpaqueControlsFromStorage = async () => {
-  applyOpaqueControls(!!(await dbGet("opaque-controls")));
+const loadLandscapeButtonsFromStorage = async () => {
+  let look = await dbGet("landscape-buttons");
+  // Before Bold this was the yes/no "Opaque controls in landscape".
+  if (look == null && (await dbGet("opaque-controls"))) look = "solid";
+  applyLandscapeButtons(look);
 };
 
 // --- Hide touch controls while a game controller is connected ---
@@ -10408,7 +10419,7 @@ themeChips.forEach((chip) =>
 // re-runs each subsystem's apply. No reload.
 const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
-  "keybindings", "large-controls", "opaque-controls",
+  "keybindings", "large-controls", "opaque-controls", "landscape-buttons",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
   "runahead", "gb-palette", "input-display", "library-open",
 ];
@@ -10462,7 +10473,7 @@ const resetAllSettings = async () => {
   renderKbBindings();
 
   applyLargeControls(false);
-  applyOpaqueControls(false);
+  applyLandscapeButtons("outline");
   applyControlStyle("dpad");
   applyJoystickMode("fixed");
   applyHideTouchOnGamepad(true);
@@ -14195,7 +14206,7 @@ const initStorage = async () => {
   // runtime and onRuntimeInitialized re-pushes the wasm-side mirrors.
   await loadKeybindingsFromStorage();
   await loadLargeControlsFromStorage();
-  await loadOpaqueControlsFromStorage();
+  await loadLandscapeButtonsFromStorage();
   await loadHideTouchOnGamepadFromStorage();
   await loadInputDisplayFromStorage();
   await loadControlStyleFromStorage();

@@ -913,15 +913,14 @@
                     <span class="switch-track"></span>
                   </label>
                 </div>
-                <div class="modal-toggle-row">
-                  <div>
-                    <span class="modal-row-label">Opaque controls in landscape</span>
-                    <span class="modal-toggle-sub">Solid touch buttons instead of see-through outlines</span>
+                <div class="modal-toggle-row row-flow" id="landscape-buttons-row">
+                  <span class="modal-row-label">Buttons in landscape</span>
+                  <div id="landscape-buttons-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Buttons in landscape">
+                    <button type="button" class="choice-chip selected" data-value="outline" role="radio" aria-checked="true">Outline</button>
+                    <button type="button" class="choice-chip" data-value="bold" role="radio" aria-checked="false">Bold</button>
+                    <button type="button" class="choice-chip" data-value="solid" role="radio" aria-checked="false">Solid</button>
                   </div>
-                  <label class="switch">
-                    <input type="checkbox" id="opaque-controls-toggle" />
-                    <span class="switch-track"></span>
-                  </label>
+                  <span class="modal-toggle-sub">Bold shows up on any picture</span>
                 </div>
                 <div class="modal-toggle-row">
                   <div>
