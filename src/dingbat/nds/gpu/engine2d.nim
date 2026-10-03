@@ -71,6 +71,8 @@ type
     objprio: array[256, uint8]            ## 4 = no OBJ pixel
     objattr: array[256, uint8]            ## OBJ_* flags
     winmask: array[256, uint8]            ## bits 0-3 BG, 4 OBJ, 5 effects
+    lsb: array[256, uint8]                ## the composite's dropped 6-bit low bits (bit 0 R, 1 G, 2 B)
+    lsb_on: bool                          ## `lsb` holds this line's (else all are zero)
     line_semi: bool                       ## any blending OBJ pixel on this line
     line_objwin: bool
     # line reuse (`render_line`): what each visible line was drawn from last
@@ -270,45 +272,63 @@ template ch_r(c: uint32): uint32 = c and 0x1F
 template ch_g(c: uint32): uint32 = (c shr 5) and 0x1F
 template ch_b(c: uint32): uint32 = (c shr 10) and 0x1F
 
-proc blend_alpha(a, b: uint16; eva, evb: uint32): uint16 {.inline.} =
-  ## (a*EVA + b*EVB) >> 4 per channel, saturated (one shift after the sum,
-  ## as measured on the AGB; the DS shares the colour-effect unit).
-  let a32 = uint32(a)
-  let b32 = uint32(b)
-  let r = min(31'u32, (ch_r(a32) * eva + ch_r(b32) * evb) shr 4)
-  let g = min(31'u32, (ch_g(a32) * eva + ch_g(b32) * evb) shr 4)
-  let bl = min(31'u32, (ch_b(a32) * eva + ch_b(b32) * evb) shr 4)
-  uint16(r or (g shl 5) or (bl shl 10))
+# Engine A's colour effects and master brightness work on 6-bit channels
+# (GBATEK MASTER_BRIGHT: "6bit R,G,B Intensities"; the 3D layer is 6-bit),
+# as the LCD's 18-bit output. A 2D colour enters as 2c (the reference runs
+# on disp_bright: a white 7FFFh is 62 after every path), a 3D one with its
+# own low bit. The composite (`gfx`, capture source A) keeps the top five
+# bits, which GBATEK's capture also stores ("15bit color depth (even when
+# capturing 18bit 3D-images)"), and `lsb` the dropped low bit of each
+# channel (bit 0 R, 1 G, 2 B) for master brightness. The display line is
+# the top five bits of the result.
 
-proc brighten(a: uint16; evy: uint32): uint16 {.inline.} =
-  let a32 = uint32(a)
-  let r = ch_r(a32)
-  let g = ch_g(a32)
-  let b = ch_b(a32)
-  uint16((r + (((31 - r) * evy) shr 4)) or ((g + (((31 - g) * evy) shr 4)) shl 5) or
-         ((b + (((31 - b) * evy) shr 4)) shl 10))
+template ch6(c: uint16; lo: uint8; i: static int): uint32 =
+  ## Channel i (0 R, 1 G, 2 B) of a 15-bit colour plus its low bits, 0..63.
+  (((uint32(c) shr (5 * i)) and 0x1F) shl 1) or ((uint32(lo) shr i) and 1)
 
-proc darken(a: uint16; evy: uint32): uint16 {.inline.} =
-  let a32 = uint32(a)
-  let k = 16 - evy
-  uint16(((ch_r(a32) * k) shr 4) or (((ch_g(a32) * k) shr 4) shl 5) or
-         (((ch_b(a32) * k) shr 4) shl 10))
+proc pack6(r, g, b: uint32; lo: var uint8): uint16 {.inline.} =
+  lo = uint8((r and 1) or ((g and 1) shl 1) or ((b and 1) shl 2))
+  uint16((r shr 1) or ((g shr 1) shl 5) or ((b shr 1) shl 10))
+
+proc blend_alpha(a: uint16; la: uint8; b: uint16; lb: uint8; eva, evb: uint32;
+                 lo: var uint8): uint16 {.inline.} =
+  ## (a*EVA + b*EVB) / 16 per 6-bit channel, rounded, saturated (the
+  ## reference runs on disp_bright page 2: 320 of 320 pixels, every other
+  ## rounding fails; GBATEK gives the GBA's 5-bit form).
+  template mix(i: static int): uint32 =
+    min(63'u32, (ch6(a, la, i) * eva + ch6(b, lb, i) * evb + 8) shr 4)
+  pack6(mix(0), mix(1), mix(2), lo)
+
+proc brighten(a: uint16; la: uint8; evy: uint32; lo: var uint8): uint16 {.inline.} =
+  ## I + (63-I)*EVY/16, rounded (the reference runs, as blend_alpha).
+  template up(i: static int): uint32 =
+    (let x = ch6(a, la, i); x + (((63 - x) * evy + 8) shr 4))
+  pack6(up(0), up(1), up(2), lo)
+
+proc darken(a: uint16; la: uint8; evy: uint32; lo: var uint8): uint16 {.inline.} =
+  ## I - I*EVY/16, the whole rounded (the reference runs, as blend_alpha:
+  ## rounding I*EVY/16 before the subtraction fails 48 of 160).
+  template down(i: static int): uint32 =
+    (ch6(a, la, i) * (16 - evy) + 8) shr 4
+  pack6(down(0), down(1), down(2), lo)
 
 # 3D layer pixels (gpu3d.line): one uint32 per pixel, red/green/blue in
 # bytes 0/1/2 as 6-bit values (0..63) and alpha in byte 3 as 0..31; alpha 0
 # is transparent (gpu3d.to_bgr555 / alpha5).
 
-proc blend_3d(p: uint32; below: uint16): uint16 {.inline.} =
+template lsb3d(p: uint32): uint8 =
+  ## The low bit of a 3D pixel's 6-bit channels, as `lsb` holds them.
+  uint8((p and 1) or ((p shr 7) and 2) or ((p shr 14) and 4))
+
+proc blend_3d(p: uint32; below: uint16; lb: uint8; lo: var uint8): uint16 {.inline.} =
   ## 3D over a 2nd-target layer: the 3D pixel's own alpha weights it,
-  ## (c3d*(a+1) + c2d*(31-a)) / 32 on 6-bit channels, 2D widened to 6 bits.
+  ## (c3d*(a+1) + c2d*(31-a)) / 32 on 6-bit channels, rounded (the
+  ## reference runs on disp_bright: 384 of 384 bands; GBATEK only guesses
+  ## "EVA=A/2, EVB=16-A/2", which fits 16).
   let a = alpha5(p)
-  let b = uint32(below)
-  template mix(c3, c2: uint32): uint32 =
-    (((c3 * (a + 1) + (c2 * 2) * (31 - a)) shr 5) shr 1) and 0x1F
-  let r = mix(p and 0x3F, ch_r(b))
-  let g = mix((p shr 8) and 0x3F, ch_g(b))
-  let bl = mix((p shr 16) and 0x3F, ch_b(b))
-  uint16(r or (g shl 5) or (bl shl 10))
+  template mix(i: static int): uint32 =
+    (((p shr (8 * i)) and 0x3F) * (a + 1) + ch6(below, lb, i) * (31 - a) + 16) shr 5
+  pack6(mix(0), mix(1), mix(2), lo)
 
 # ---------------------------------------------------------------------------
 # BG layers
@@ -738,26 +758,34 @@ proc composite(e: Engine2D; bgs: uint32; windows: bool) =
         take(LAYER_BD, backdrop)
       var c = c0
       when FX:
+        # the 3D pixel (if layer 0 or 1 is it) and the layers' 6-bit low bits
+        let p3 = if is3d and (l0 == 0 or (found == 2 and l1 == 0)):
+                   e.line3d[(x + int(e.bghofs[0])) and 511] else: 0'u32
+        let lo0 = if is3d and l0 == 0: lsb3d(p3) else: 0'u8
+        let lo1 = if is3d and found == 2 and l1 == 0: lsb3d(p3) else: 0'u8
+        var lo = lo0
         if (m and 0x20) != 0:
           let bot_second = found == 2 and (bld and (0x100'u32 shl l1)) != 0
           let attr = e.objattr[x]
           if l0 == LAYER_OBJ and (attr and (OBJ_SEMI or OBJ_BITMAP)) != 0 and bot_second:
             if (attr and OBJ_BITMAP) != 0:
               let a = uint32(attr and 0xF)
-              c = blend_alpha(c, c1, a + 1, 15 - a)
+              c = blend_alpha(c, lo0, c1, lo1, a + 1, 15 - a, lo)
             else:
-              c = blend_alpha(c, c1, eva, evb)
+              c = blend_alpha(c, lo0, c1, lo1, eva, evb, lo)
           elif l0 == 0 and is3d and bot_second:
-            c = blend_3d(e.line3d[(x + int(e.bghofs[0])) and 511], c1)
+            c = blend_3d(p3, c1, lo1, lo)
           elif (bld and (1'u32 shl l0)) != 0:
             case mode
             of 1:
-              if bot_second: c = blend_alpha(c, c1, eva, evb)
-            of 2: c = brighten(c, evy)
-            of 3: c = darken(c, evy)
+              if bot_second: c = blend_alpha(c, lo0, c1, lo1, eva, evb, lo)
+            of 2: c = brighten(c, lo0, evy, lo)
+            of 3: c = darken(c, lo0, evy, lo)
             else: discard
+        e.lsb[x] = lo
       e.gfx[x] = c
 
+  e.lsb_on = effects
   if windows:
     if effects: pixel_loop(true, true) else: pixel_loop(true, false)
   else:
@@ -805,23 +833,30 @@ proc end_line*(e: Engine2D) =
 # ---------------------------------------------------------------------------
 # Display output
 
-proc apply_master_brightness(e: Engine2D) =
+proc apply_master_brightness(e: Engine2D; lsb: bool) =
+  ## MASTER_BRIGHT on 6-bit channels (GBATEK: "New = Old + (63-Old) *
+  ## Factor/16", "New = Old - Old * Factor/16"), the result truncated (the
+  ## reference runs on disp_bright page 1: all 34 settings, 2D and 3D
+  ## inputs; truncating Old*Factor/16 instead, before the subtraction,
+  ## fails 448 of 1120). `lsb`: the composite's low bits apply (display
+  ## mode 1); VRAM and main-memory pixels are 15-bit, widened as 2c.
   let mode = e.master_bright shr 14
   let factor = min(16'u32, uint32(e.master_bright and 0x1F))
   if mode == 0 or mode == 3 or factor == 0: return
-  for c in e.line.mitems:
-    var r = uint32(c and 0x1F)
-    var g = uint32((c shr 5) and 0x1F)
-    var b = uint32((c shr 10) and 0x1F)
+  for i, c in e.line.mpairs:
+    let lo = if lsb: e.lsb[i] else: 0'u8
+    var r = ch6(c, lo, 0)
+    var g = ch6(c, lo, 1)
+    var b = ch6(c, lo, 2)
     if mode == 1:
-      r += ((31 - r) * factor) shr 4
-      g += ((31 - g) * factor) shr 4
-      b += ((31 - b) * factor) shr 4
+      r = (r * 16 + (63 - r) * factor) shr 4
+      g = (g * 16 + (63 - g) * factor) shr 4
+      b = (b * 16 + (63 - b) * factor) shr 4
     else:
-      r -= (r * factor) shr 4
-      g -= (g * factor) shr 4
-      b -= (b * factor) shr 4
-    c = uint16(r or (g shl 5) or (b shl 10))
+      r = (r * (16 - factor)) shr 4
+      g = (g * (16 - factor)) shr 4
+      b = (b * (16 - factor)) shr 4
+    c = uint16((r shr 1) or ((g shr 1) shl 5) or ((b shr 1) shl 10))
 
 proc render_bg_line*(e: Engine2D; y: int) =
   ## The graphics line straight to the display line (display mode 1).
@@ -941,7 +976,7 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
   else:
     # main-memory display: the line the FIFO delivered (bit 15 unused)
     for x in 0 ..< 256: e.line[x] = e.mmem_line[x] and 0x7FFF
-  e.apply_master_brightness()
+  e.apply_master_brightness(dm == 1 and e.lsb_on)
   if cache and (e.touch[TOUCH_ALL shr 6] and (1'u64 shl (TOUCH_ALL and 63))) == 0:
     e.lc_valid[y] = true
     e.lc_key[y] = key

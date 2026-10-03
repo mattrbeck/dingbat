@@ -868,6 +868,118 @@ proc rom_render_timing() =
   check(b and n.row(100) != (n.gpu.bottom[100 * 256 + 250] and 0x7FFF),
         "SWPV: a swap written at line 200 waits for the next line 192")
 
+proc rom_disp_bright() =
+  ## disp_bright (tests/nds/src/disp_bright): engine A's colour effects and
+  ## master brightness on 6-bit channels, 2D colours entering as 2c and 3D
+  ## ones as 2c+1, each result's top five bits displayed. The formulas are
+  ## the ones fitted to the reference runs' 6-bit output (docs/oracles.md,
+  ## disp_bright: every sample of all 55 settings); each frame is checked
+  ## against them with the registers the frame was drawn with.
+  echo "disp_bright ROM (6-bit colour effects and master brightness)"
+  let path = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "3d" /
+             "disp_bright.nds"
+  if not fileExists(path):
+    check(false, "missing " & path)
+    return
+  proc col2d(c: int): array[3, int] = [c, 31 - c, (c * 7) and 31]
+  proc w2(v: int): int = 2 * v
+  proc w3(v: int): int = (if v > 0: 2 * v + 1 else: 0)
+  const C3 = [[31, 31, 31], [17, 9, 3], [1, 2, 3], [16, 16, 16], [31, 0, 15], [5, 25, 30],
+              [31, 31, 31], [0, 0, 0], [17, 9, 3], [10, 20, 30], [29, 3, 11], [2, 31, 8]]
+  const C2 = [[0, 0, 0], [0, 0, 0], [31, 31, 31], [1, 1, 1], [15, 31, 0], [9, 3, 27],
+              [31, 31, 31], [31, 31, 31], [30, 1, 16], [20, 10, 0], [3, 3, 3], [16, 16, 16]]
+  proc master(v: int; mb: uint16): int =
+    let mode = int(mb shr 14)
+    let f = min(16, int(mb and 0x1F))
+    if mode == 1: (v * 16 + (63 - v) * f) shr 4
+    elif mode == 2: (v * (16 - f)) shr 4
+    else: v
+  proc px(n: NDS; x, y: int): array[3, int] =
+    let c = int(n.gpu.top[y * 256 + x])
+    [c and 31, (c shr 5) and 31, (c shr 10) and 31]
+  const DIGITS = ["####.##.##.####", ".#.##..#..#.###", "###..#####..###", "###..####..####",
+                  "#.##.####..#..#", "####..###..####", "####..####.####", "###..#..#..#..#",
+                  "####.#####.####", "####.####..####", "####.#####.##.#", "##.#.###.#.###.",
+                  "####..#..#..###", "##.#.##.##.###.", "####..####..###", "####..####..#.."]
+  proc hex_at(n: NDS; col, row, digits: int): int =
+    ## t3d_print's 3x5 glyphs (drawn 2x wide in rows 1-5 of a cell) read
+    ## back from the bottom screen; -1 if a cell holds no hex digit
+    result = 0
+    for d in 0 ..< digits:
+      var bits = ""
+      for gy in 1..5:
+        for gx in 0..2:
+          let x = (col + d) * 8 + gx * 2 + 1
+          bits.add(if (n.gpu.bottom[(row * 8 + gy) * 256 + x] and 0x7FFF) != 0: '#' else: '.')
+      let k = DIGITS.find(bits)
+      if k < 0: return -1
+      result = result * 16 + k
+  let n = load_nds(path)
+  var checked, bad = 0
+  var first_bad = ""
+  var prev_page1 = false
+  for f in 0 ..< 230:
+    n.run_frame()
+    # the setting this frame shows, as the ROM printed it on the bottom
+    # screen in the same V-blank as it wrote the registers: "MB ss vvvv"
+    let v = n.hex_at(6, 3, 4)
+    if v < 0: continue
+    let page1 = n.hex_at(3, 2, 1) == 1
+    let mb = if page1: uint16(v) else: 0'u16
+    let bld = if page1: 0x0010_0241'u32
+              else: 0x2503'u32 or (uint32(v shr 12) shl 6) or
+                    ((uint32(v and 0x1F) or (uint32((v shr 6) and 0x1F) shl 8)) shl 16)
+    let bldy = v and 0x1F
+    if f < 12: continue
+    # a page's first frame shows the 3D drawn for the page before
+    let switched = page1 != prev_page1
+    prev_page1 = page1
+    if switched: continue
+    proc cmp(n: NDS; x, y: int; want: array[3, int]; what: string) =
+      inc checked
+      let got = n.px(x, y)
+      if got != want:
+        inc bad
+        if first_bad.len == 0:
+          first_bad = what & " frame " & $f & " x " & $x & " y " & $y & ": got " & $got & " want " & $want
+    for c in 0 ..< 32:
+      let x = c * 8 + 4
+      if page1:
+        var a, b: array[3, int]
+        for i in 0..2:
+          a[i] = master(w2(col2d(c)[i]), mb) shr 1
+          b[i] = master(w3(col2d(c)[i]), mb) shr 1
+        n.cmp(x, 24, a, "2D + master brightness")
+        n.cmp(x, 72, b, "3D + master brightness")
+        let al = 1 + (c mod 30)
+        for k in 0 ..< 12:
+          var d: array[3, int]
+          for i in 0..2:
+            d[i] = master((w3(C3[k][i]) * (al + 1) + w2(C2[k][i]) * (31 - al) + 16) shr 5, mb) shr 1
+          n.cmp(x, 100 + 8 * k, d, "3D alpha over BG1")
+      else:
+        let mode = int(bld shr 6) and 3
+        let alpha = int(bld shr 16)
+        let ea = min(16, alpha and 0x1F)
+        let eb = min(16, (alpha shr 8) and 0x1F)
+        proc fx(top, below: int): int =
+          case mode
+          of 1: min(63, (top * ea + below * eb + 8) shr 4)
+          of 2: (top * 16 + (63 - top) * min(16, bldy) + 8) shr 4
+          of 3: (top * (16 - min(16, bldy)) + 8) shr 4
+          else: top
+        var r1, r2, r3: array[3, int]
+        for i in 0..2:
+          r1[i] = fx(w2(col2d(c)[i]), w2(col2d(31 - c)[i])) shr 1
+          r2[i] = fx(w2(col2d(c)[i]), w3(col2d(c xor 31)[i])) shr 1
+          r3[i] = col2d(c)[i]              # opaque 3D over a 2nd target: kept
+        n.cmp(x, 24, r1, "BG1 over BG2")
+        n.cmp(x, 72, r2, "BG1 over 3D")
+        n.cmp(x, 120, r3, "3D over BG2")
+        n.cmp(x, 168, r1, "BG1 over BG2 (lower)")
+  check(checked > 60000 and bad == 0, "disp_bright: " & $bad & " of " & $checked &
+        " samples differ" & (if first_bad.len > 0: " (first: " & first_bad & ")" else: ""))
+
 when isMainModule:
   if paramCount() >= 1: outdir = paramStr(1)
   createDir(outdir)
@@ -888,6 +1000,7 @@ when isMainModule:
   scene_overlap_edges()
   rom_scenes()
   rom_render_timing()
+  rom_disp_bright()
   if failures > 0:
     echo failures, " check(s) failed"
     quit(1)

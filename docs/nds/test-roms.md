@@ -70,7 +70,7 @@ and `tests/nds/tools/build_testroms.sh` fetches and builds all of the above
 | cached-memory-performance | (none recorded) | flush-all 500..1674 t, flush range 51..1771 t, uncached 61..3428 t | flush-all 504..1842 t (DC_FlushAll now empties the tags), the rest unchanged | 698..1784, 51..1582, 58..3431 |
 | BlocksDS `system/swi_calls` | swiIsDebugger() = 1 with the data cache on (GBATEK) | 0 | 1 (real and HLE BIOS) | 0 |
 | BlocksDS SDK tests, the other 40 | their own prints | -- | 34 print what the reference prints (MPU regions, TCM placement, vector base, IRQ handling, IPC FIFO full, hardware sqrt results, argv, atexit, sbrk, heap bounds, C++ exceptions, filesystem, textures, ...); 6 differ only in timing printouts or the date | -- |
-| BlocksDS examples, 52 hardware-feature ones | (reference comparison) | -- | 2D (21 graphics_2d, 8 video_effects, 2 console), BIOS, compression, interrupts, IPC, maths and timers identical to the reference before the input script's START (exit) except `video_effects/blending` (1-step blend rounding) and counters; `video_capture/*` differ (below) | -- |
+| BlocksDS examples, 52 hardware-feature ones | (reference comparison) | -- | 2D (21 graphics_2d, 8 video_effects, 2 console), BIOS, compression, interrupts, IPC, maths and timers identical to the reference before the input script's START (exit) except counters (`video_effects/blending`'s 1-step blend rounding closed by `disp_bright`); `video_capture/*` differ (below) | -- |
 
 How the BlocksDS ROMs were compared: every test 150 frames with no input
 (shots 60 and 148, best of the reference's frames within +-2); the
@@ -86,11 +86,11 @@ after which our screens keep the last picture and the reference's go black
   and `time/timers` (counters), `audio/capture_audio` (its waveform plot).
 - **The RTC**: `ipc/transfer_region` prints the date (ours ran on the host
   clock).
-- **`video_effects/blending`**: semi-transparent and bitmap OBJs blended one
-  5-bit step apart from the reference in some pixels. Ours follows GBATEK's
-  `min(31, (I1*EVA + I2*EVB) / 16)` for semi-transparent OBJs; the weights
-  of a bitmap OBJ's alpha (EVA = alpha + 1, EVB = 15 - alpha) are Assumed,
-  GBATEK gives none. Open: needs a console.
+- **`video_effects/blending`**: was one 5-bit step apart from the
+  reference in some blended pixels; identical since the colour effects
+  work on 6-bit channels with the reference's rounding (`disp_bright`,
+  docs/oracles.md and docs/nds/commercial.md). The weights of a bitmap
+  OBJ's alpha (EVA = alpha + 1, EVB = 15 - alpha) are still Assumed.
 - **`video_capture/*`**: `render_to_texture` (95 % of the top screen),
   `dual_screen_3d` (84 % of both), `motion_blur` (29-46 %), `bloom` (5 %),
   `two_pass_3d` (2 %), `simple_capture` (1 %) -- the capture/3D timing
@@ -184,9 +184,9 @@ Each in its own commit, each with checks in `tests/nds_testroms_test.nim`
   then render, with swaps throughout). We keep rendering the swapped list.
   The hardware renders through a 48-line cache (GBATEK) and so holds no
   frame to keep; what it shows needs a console.
-- **Blend rounding of semi-transparent and bitmap OBJs**
-  (`video_effects/blending`, above): one 5-bit step from the reference in
-  some pixels; the bitmap-OBJ alpha weights are Assumed. Needs a console.
+- **Colour-effect rounding** (`video_effects/blending`, above, and
+  `disp_bright`): ours now follows the reference's 6-bit forms, which
+  GBATEK does not give exactly; a console would confirm them.
 - **Cache maintenance and write-back timing.** cached-memory-performance
   measures DC flush-all at 504-1842 timer ticks in ours against
   698-1784 in the reference (flush range 899 vs 814 at 2 KB, 1771 vs 1582
