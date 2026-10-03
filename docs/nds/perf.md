@@ -1,10 +1,13 @@
 # DS performance: the cheap, exact wins, then caching and the interpreter
 
-Three rounds: low-hanging fruit (branch `nds-perf`: idle loops, 3D frame
+Four rounds: low-hanging fruit (branch `nds-perf`: idle loops, 3D frame
 reuse), a measured one on caching and the interpreter (branch
 `nds-cache-perf`: where the host instructions go, 2D line reuse, and the
-CPU's per-opcode overhead) and one on the 3D engine (branch `nds-3d-perf`,
-"3D renderer speed" below). One rule over everything: **a speed-up may not
+CPU's per-opcode overhead), one on what that left outside the 3D
+renderer (branch `nds-perf3`: the ARM9 data path, branch fetches, 2D
+compositing, slices and events; "Round 3" below) and one on the 3D engine
+(branch `nds-3d-perf`, "3D renderer speed" below).
+One rule over everything: **a speed-up may not
 change any output** -- frames, sound, the whole machine state (save-state
 payload), opcode counts, the sweep's statuses. The skips (idle loops, 3D
 frames, 2D lines) can be turned off with `DINGBAT_NDS_NO_SKIP=1`, and
@@ -28,9 +31,12 @@ could see change:
 | a store that changes main RAM or shared WRAM (a same-value store does not) | a store that changes its TCMs (ARM9) or ARM7 WRAM |
 | any store to I/O, VRAM, palette, OAM, the GBA slot | a read of an I/O register that is not *steady* (below) |
 | an IPC receive-FIFO pop | a GBA-slot read by the slot's owner (GPIO, RTC) |
-| every event dispatch | an ARM9 cache line fill, any CP15 write |
-| every `run_until` call (the frontend may have changed keys, touch, the lid) | an unmapped access (both CPUs: the count is state) |
-| an instruction-cache line kept before memory under it changes (docs/nds/cache.md) | |
+| a DMA's hold on the bus (`dma_stall`: the CPU's clock moves), a state load | an ARM9 cache line fill, any CP15 write |
+| an instruction-cache line kept before memory under it changes (docs/nds/cache.md) | an unmapped access (both CPUs: the count is state) |
+
+Events and frontend calls (`run_until`: keys, touch, the lid) bump an
+*event epoch* of their own, which only a loop that read a device since its
+epoch was taken must see ("Passable events" below).
 
 and each CPU counts its exceptions, mode switches and SWIs (HLE SWIs write
 memory directly). *Steady* registers are the ones only writes and events
@@ -63,10 +69,12 @@ were tried: they cost SoulSilver 1.2 % by missing its waits).
 
 **Slices.** `run_until` interleaves the CPUs in 64-cycle slices. When
 neither can change anything before the next event -- each is either in a
-proven loop with its epoch untouched, or halted with no interrupt to wake
-it -- interleaving changes nothing, and the slice runs straight to the
-event (as it already did with both halted). An event, a store or a
-volatile read ends the proof; it is re-made in two or three passes.
+proven loop with its epoch untouched and no interrupt it will take, or
+halted with no interrupt to wake it -- interleaving changes nothing, and
+the slice runs straight to the event (as it already did with both halted;
+with one halted and the other running, see "Long slices"). A store or a
+volatile read ends the proof, and an event does for a loop that read a
+device; it is re-made in two or three passes.
 
 **What it does not catch.** Loops that change memory every pass (libnds
 `scanKeys`' key-repeat countdown: MAXMXDS's menu), loops that poll a timer
@@ -198,7 +206,9 @@ answer is known in advance:
   move.
 
 `fetch32`/`fetch16` test one line or page number and the sequential
-address, then read the opcode through a host pointer. An ARM9 fetch that
+address, then read the opcode through a host pointer (a jump inside the
+page takes a short path too since round 3: "Jumps inside the fetch
+page"). An ARM9 fetch that
 runs on into the next line of the same page (same region, nothing apart)
 needs only that line's tag check: ITCM again, or an instruction-cache hit
 (which makes it `last`, as the full lookup would); a miss leaves the tags
@@ -259,6 +269,270 @@ between calls). Taking an exception only sets CPSR.I. The traced loop
 an `STR` to IME and an `MSR` clearing CPSR.I on both CPUs and checks the
 IRQ comes before the next opcode; leaving out the I/O write's flag fails
 it (the IRQ comes one opcode late).
+
+## Round 3 (`nds-perf3`): the data path, branch fetches, compositing, slices and events
+
+Same rule, same method, one change of yardstick: `ndsrun --perf-from F`
+now also prints the host instructions the timed frames took (macOS
+`proc_pid_rusage`), so the numbers below leave out loading the ROM and the
+state, which `/usr/bin/time` counts too (2.3 G for SoulSilver) and which
+does not repeat to better than 0.5 %; the emulated part repeats to 0.02 %.
+Below about 0.5 % two builds of nearly the same source still differ by
+code layout (inlining, register allocation in the run loops): a change
+was kept for what it does on the workloads together, not for a 0.3 % on
+one. `ndsrun --screen-hash N` (a CRC of both screens every N frames) joins
+`--state-hash` for changes to what is drawn, which the state leaves out.
+
+### ARM9 data TLB (bus9.nim `dtlb_*`, `read32` .. `write32`)
+
+What the general path (`read9`/`write9`: the ITCM and DTCM windows through
+`cp15` and `dma9`, the protection unit, `charge9`, the region decode)
+decides for an access depends, for most of them, on the page alone -- the
+TCM windows, the load modes, the data cache's enable and the page's
+cachability, all CP15 state -- and for main RAM on the line. In
+SoulSilver's overworld (600 frames) the ARM9 made 30 M loads and 20 M
+stores: DTCM 8.2 M / 7.6 M, main RAM through the cache 16.6 M / 9.1 M,
+I/O 3.8 M / 2.9 M, ITCM 1.1 M loads. So each direction has a 256-entry
+direct-mapped TLB (page -> kind, host pointer), filled by the general path
+and read by the inlined `read8`..`write32` first:
+
+| kind | load | store |
+|---|---|---|
+| DTCM | free, read the page | free, store (a change bumps the ARM9's epoch) |
+| main RAM through the cache | a tag hit (`last`, else the 4-way compare, which makes it `last` as the lookup would) is free and reads the CPU's copy: `dc_hit` is then true, so `dc_apart` does not matter | a tag hit on a *dirty* line: write9's plain store, free; a line no cache holds (`slot_of` = 0): a miss that allocates nothing, so the write buffer's or the uncached charge and a plain store |
+| main RAM past the cache | in a page with nothing apart: the uncached charge, memory as it is | on a line no cache holds: the write buffer's or the uncached charge, a plain store |
+
+Everything else -- misses, fills, a clean line's first store, I/O, VRAM --
+goes the general way, which does its own lookup, fill and charge. The
+DMA gets its own bus type (`Dma9Bus`), so its accesses never see the TLB
+(the TCMs are invisible to it). Entries follow CP15 state only: a CP15
+write that moves a TCM window or changes the TCM enables or load modes
+drops them all, one that changes cachability or the data cache's enable
+drops those it decides (cached main RAM, uncached pages a region makes
+cachable); C7 line operations need nothing, since line state is checked
+at every access; a main RAM page going apart drops its uncached load
+entry (`page_apart_now`; every mirror of a page has the same index); a
+state load and WRAMCNT drop everything. The TLB remembers what it filled
+since the last drop, so a drop clears only those entries: the BIOS in
+"The Strongest Demo" toggles the protection unit about 9400 times a frame,
+and a full clear there cost 24 %.
+
+After it, 23.6 M of the overworld's 29.7 M loads and 15.7 M of its 19.9 M
+stores take the short path (MAXMXDS: 50.9 M of 55.3 M loads; its 16.8 M
+VRAM stores, a frame buffer drawn by the CPU, do not). The binary grows by
+the inlined checks in every load and store handler (below).
+`nds_testroms_test` "ARM9 data TLB" switches the data cache off and on,
+makes a page uncachable, dirties clean lines through the TLB, invalidates a
+line under it, reads the uncached mirror of a line kept apart and stores
+through it to a cached line, turns the cache on over an uncached entry,
+moves DTCM over main RAM and away, uses load mode, lets DMA read behind
+DTCM and loads states with DTCM elsewhere; "data accesses match the long
+way" runs 30000 random loads and stores (8, 16, 32 bits) over DTCM,
+cached main RAM and its uncached mirror between C7 line commands, ARM7
+and DMA writes behind the cache and switches of the cache, the protection
+unit, cachability, the write buffer, DTCM and load mode, on two machines,
+one dropping its TLB before every access, and compares every value,
+charge, tracker and epoch and the whole state. Removing any drop rule,
+the hit, dirty or `slot_of` checks, the write buffer flag, the page-apart
+drop, the drop log's kinds or the DMA bus type fails one of the two.
+
+### Jumps inside the fetch page (bus9.nim `fetch_jump9`, bus7.nim `fetch_jump7`)
+
+The sequential fetch fast paths (above) held a line (ARM9) or page (ARM7);
+any branch target still took the whole fetch path. A jump inside the page
+now takes a short one:
+
+- **ARM9**: inside the 4 KB page of `fline9`, in the page the protection
+  unit allowed last for this privilege (`pu_ok[0]`, keyed by page and
+  User mode), to the same line (ITCM, or the instruction cache's `last`),
+  to ITCM, or to a line the instruction cache hits (made `last`; a miss
+  changes nothing and goes the long way) whose bytes are memory's (no kept
+  copy, nothing apart: as `fetch_next9`). fetch_cost9 there only calls the
+  loop head, charges the refill and does that lookup; the page is one host
+  block (ITCM, main RAM, the BIOS), so `fptr9` moves by lines.
+- **ARM7**: inside `fpage7`, the page's fixed nonsequential fetch plus the
+  refill's second fetch (`fjump7`, set with `fseq7`), then memory.
+
+A line `fetch_line9` set up is ITCM or `last` at that moment except in
+one shape: after the fast path is turned off, the second halfword of a
+Thumb word shares the word's fetch (no lookup) and sets the line up again.
+The resets are a CP15 write (an MCR: ARM code, whose next fetch is a new
+word and looks the line up), WRAMCNT (the line stays cached and `last`),
+a page going apart (the line is still cached; `line_clean9` decides) and a
+state load (the tags are in the state), so the line is cached and `last`
+whenever a jump can look at it. `nds_testroms_test` "fetch jumps match the
+long way" runs 20000 random jumps and sequential runs over ITCM, the BIOS,
+main RAM (lines cached, kept and apart, written behind by the ARM7, lines
+dropped by C7 from ARM code) and ARM7 WRAM, ARM and Thumb, on two
+machines, one taking the long way every time, and compares every opcode,
+charge and tracker; and a User-mode jump into privileged code must abort.
+Dropping the privilege check, the hit, the memory's-bytes condition or the
+ARM7's jump cost fails it.
+
+### Painted compositing (engine2d.nim `composite`)
+
+The per-pixel search for the top two layers became one pass per layer,
+lowest priority first: per priority level its BGs (higher numbers first),
+then that priority's OBJ pixels (`obj_prios` skips empty levels). Each
+pixel ends holding what the search in priority order finds first and,
+where an effect can need it, what it finds next -- the layer that was on
+top when the last one was laid. The passes are branch-free selects (masks,
+not `if`) over 256 pixels into local arrays, which the C compiler
+vectorises (the first try, with `if` and the engine's own `gfx` as the
+target, was not: clang could not if-convert it nor prove the arrays
+apart). The colour effect then runs the old per-pixel rules on the two
+layers; lines without effects need only the colour, brighten/darken only
+the top layer's number. The old search stays as `composite_search`, and
+`nds_2d_test` draws 400 random scenes (VRAM, palettes, OAM, 3D lines,
+modes, priorities, windows, effects, mosaic) both ways and compares all
+153 600 lines; painting OBJs at the wrong level, BGs in the wrong order or
+dropping the second layer fails it. Every frame's screens of 69 2D-heavy
+ROMs (`--screen-hash 1`) and, with reuse off, of all 504 ROMs in the cache
+were compared with the build before: identical.
+
+`gpu.nim render_line` routed each engine's finished line to the screens a
+pixel at a time through refs the compiler could not prove apart (2 % of
+SoulSilver's time); it is two 512-byte copies now.
+
+### Long slices (nds.nim `run_long`, `slice_cut`)
+
+SoulSilver runs one CPU alone a lot: in frames 0-6000, 11.6 M 64-cycle
+steps had the ARM9 halted (the ARM7 sequencing sound), 8.7 M the ARM7
+(the ARM9 working), against 5.2 M quiet slices and 2.2 M with both
+running -- 3400 steps a frame, each a slice-loop pass and two `run` calls.
+With one CPU halted and no interrupt to wake it, the other now runs
+straight to the next event. The step loop would have acted, at the end of
+the step in which it happened, on three things the running CPU can do:
+make the halted one's interrupt arrive, book or move an event, put the
+ARM7 to sleep (or the machine off). After any of them its run ends at the
+end of that step -- the next point on the 64-cycle grid from where the
+long slice began, after the access (`sched.now`) -- and the halted CPU is
+left where the steps would have left it: the step loop ran the ARM9 first,
+so an ARM7 woken by the ARM9 wakes at the start of that step, an ARM9
+woken by the ARM7 at its end. `slice_cut` is looked at with the CPU's
+`attn` (every such action is an I/O access, a SWI or a CP15 write) and
+once more after the run, for an access whose own cost carried the clock
+past the end (a full geometry FIFO, a DMA: SoulSilver's frame 1126 found
+that one). Nothing else happens between steps and a CPU's own execution
+does not depend on where its run calls end, so the result is the steps'.
+Off with `DINGBAT_NDS_NO_SKIP=1`. `nds_perf_test` "long slices" runs
+programs that wake the other CPU (both ways), book a timer (both CPUs),
+go to sleep, and stall in a DMA that books a timer (both CPUs), after 1-40
+loop passes so the access falls at every point of a step, with long slices
+on and off; removing any cut rule, either check after the run or the woken
+ARM7's step fails it.
+
+### Passable events (arm/cpu.nim `loop_edge`, `ev_epoch`)
+
+Every event and `run_until` call ended every idle-loop proof, so a
+spinning CPU re-proved its loop after each of the ~1100 events a frame
+(two or three passes, in 64-cycle steps meanwhile). Events and frontend
+calls change devices -- registers, VRAM through display capture, the 3D
+engine -- and memory only through stores, which bump the epoch
+themselves; so they now bump their own epoch (`ev_epoch`), which only a
+loop that read a device since its epoch was taken must see (`dev9`/`dev7`:
+I/O, VRAM, palette, OAM and GBA-slot reads, and code fetched from outside
+RAM; set by the bus). As in the GBA core's waitloop pass-through, a loop
+polling RAM -- a flag the other CPU or an interrupt handler sets, `B .` --
+stays proven across events. Three things an event does besides: a DMA's
+hold on the bus moves the CPU's clock (`dma_stall` bumps the epoch); a
+state load replaces memory (it bumps it too); and an interrupt it makes
+takeable is taken at the next `run`, which ends the proof (an exception),
+but until then the CPU is not quiet: its handler is work, which the long
+run of a quiet slice would let book events late (SoulSilver's frame 1002:
+its GX FIFO handler). SoulSilver's waits end by interrupt, so it gains
+nothing; spinners do. `nds_perf_test` "passable events" runs loops
+polling VCOUNT on either CPU (each noting a timer when it sees the line),
+a RAM loop held by H-blank DMA, a RAM loop whose timer handler wakes the
+halted ARM7 (which notes the time), and a state loaded over a proven loop;
+dropping either CPU's device flag, the DMA or load bump, or the interrupt
+check of `quiet` fails them.
+
+### Numbers: round 3
+
+Host instructions of the emulated frames (`--perf-from`), -d:danger,
+`--rtc 2004-01-01`, real BIOS unless noted; homebrew 600 frames with the
+sweep's default input script; each column adds one commit. Every row's
+screens, sound, opcode counts and whole-state hashes are the base's.
+
+| workload | base | TLB | +uncached | painted 2D | long slices | line copy | events | jumps | store misses | change |
+|---|---|---|---|---|---|---|---|---|---|---|
+| SoulSilver title, 600 frames from 1000 | 14.97 | 14.70 | 14.74 | 14.29 | 14.06 | 13.79 | 13.87 | 13.28 | 13.19 | -11.9 % |
+| SoulSilver intro, 600 frames from 3000 | 7.04 | 6.88 | 6.90 | 6.79 | 6.58 | 6.30 | 6.34 | 5.95 | 5.92 | -15.9 % |
+| SoulSilver overworld, 600 frames from 7100, walking | 24.82 | 22.83 | 23.00 | 22.87 | 22.51 | 22.24 | 22.47 | 21.09 | 20.93 | -15.7 % |
+| NitroGrafx | 57.33 | 57.43 | 57.49 | 56.11 | 54.49 | 54.22 | 54.90 | 48.17 | 47.68 | -16.8 % |
+| trans flag (beam race) | 38.46 | 38.52 | 38.52 | 38.56 | 37.85 | 37.59 | 38.23 | 37.20 | 37.17 | -3.4 % |
+| MAXMXDS | 45.28 | 42.48 | 42.13 | 41.78 | 40.49 | 40.23 | 40.44 | 37.03 | 37.04 | -18.2 % |
+| Cave Story | 23.90 | 22.66 | 22.71 | 22.62 | 22.22 | 21.95 | 22.03 | 20.92 | 20.45 | -14.4 % |
+| Tales of Dagur | 14.90 | 14.70 | 14.71 | 12.39 | 12.35 | 12.08 | 12.12 | 11.95 | 11.91 | -20.1 % |
+| Space Impakto | 14.48 | 14.15 | 14.15 | 13.71 | 13.46 | 13.20 | 13.28 | 12.83 | 12.77 | -11.8 % |
+| nesDS | 5.38 | 5.37 | 5.39 | 5.39 | 5.36 | 5.09 | 5.13 | 4.89 | 4.73 | -12.1 % |
+| Triple Triad | 9.48 | 9.49 | 9.49 | 9.07 | 8.99 | 8.72 | 8.74 | 8.41 | 8.26 | -12.9 % |
+| fb_both (both CPUs `B .`) | 3.26 | 3.26 | 3.26 | 3.27 | 3.28 | 3.01 | 1.99 | 1.93 | 1.93 | -40.8 % |
+| snd_tone (both CPUs spinning, sound) | 3.33 | 3.33 | 3.34 | 3.34 | 3.35 | 3.08 | 2.05 | 2.00 | 2.01 | -39.6 % |
+
+| SoulSilver p12, frames 0-8100 | base | now | change |
+|---|---|---|---|
+| real BIOS (shots e4b66d68 / 6cf51b7e / ae4536a1) | 180.96 G | 154.50 G | -14.6 % |
+| HLE BIOS | 177.15 G | 151.13 G | -14.7 % |
+| real BIOS, `/usr/bin/time` (with loading) | 183.0 G | 156.7 G | -14.4 % |
+| real BIOS, skipping off (`DINGBAT_NDS_NO_SKIP=1`), with loading | 293.0 G | 249.6 G | -14.8 % |
+| HLE BIOS, with loading | 175.4 G | 149.4 G | -14.8 % |
+
+The uncached kinds and the drop log were for "The Strongest Demo" (the
+first TLB cost it 24 %: 21.55 -> 26.76 G; now 18.42 G, -15 %) and the
+uncached mirror homebrew uses; the store misses for BlocksDS
+graphics/texture_allocation, which fills buffers through the write buffer
+(the first TLB cost it 14 %; now 56.97 -> 30.39 G, -47 %), and forcing
+in_itcm/in_dtcm/charge9 inline for 3d/disp_mmem (+4 % through the round
+until then, all DMA and I/O: 113.10 -> 111.57 G now); "events" is for
+spinners and costs SoulSilver 0.1-0.2 % (the jumps commit with and
+without it: title 13.26 / 13.28 G, overworld 21.04 / 21.09 G), within the
+layout noise above. Over the 152 ROMs under
+`homebrew*/` (600 frames, `/usr/bin/time`, loading included) the host
+instructions went from 1503.6 G to 1326.7 G (-11.8 %; ds81 -24.7 %,
+MAXMXDS -18.2 %, NitroGrafx -16.8 %, nitrotracker -16.1 %, bitbox
+-15.3 %, Cave Story -14.1 %).
+
+The DS web module (`web/nds/nds.wasm`, emcc -O3) grows from 780 648 to
+832 601 bytes (gzip 206 159 to 217 565), ndsrun from 1.93 to 2.00 MB:
+mostly the TLB checks inlined into every load and store handler.
+
+**Checks.** All 14 DS suites pass. SoulSilver p12 (real BIOS) gives the
+base's shots and whole-state hashes every 100 frames with skipping on and
+off, and the HLE run the base's shots; Continue from the New Bark save
+(c3) gives hle 6b9b805f, bios 228bc64d. Every commit ran the homebrew set
+(the 152 ROMs under `homebrew*/`) with skipping on and off: whole-state
+hashes every 30 frames, final screen, three shots, sound and opcode
+counts equal on/off and to the base; the final build ran all 507 ROMs in
+the cache the same way (our tests, the 3D suite, BlocksDS tests and
+examples, gbeplus, homebrew, libnds examples): all equal, host
+instructions 4028.8 -> 3571.1 G (-11.4 %, loading included), none more
+than 1 % slower than the base. New invalidation rules each have a test
+that fails when the rule is removed (above; the mutation runs are in the
+round's scratch directory).
+
+### Where the host instructions go (round 3)
+
+Sampled time of SoulSilver p12 frames 0-6000 (real BIOS), leaving out the
+ROM loading (12 % of the samples: page faults of copying a 256 MB ROM
+count as time, not as instructions):
+
+| component | round 2 | now |
+|---|---|---|
+| ARM9 (handlers with decode, fetch, data, loop) | 33 % | 33 % |
+| ARM7 | 30 % | 33 % |
+| 3D | 12 % | 16 % |
+| SPU (the mixer tick, sample fetch and decode) | 5 % | 7 % |
+| 2D | 8 % | 5 % |
+| slice loop and events | 3.6 % | 3 % |
+
+The ARM9's share stayed while the whole shrank: its data path and branch
+fetches were most of the round. What is left in both CPUs is the run
+loop's per-opcode bookkeeping (cur_pc, r15, next_pc, the opcode and cycle
+counts, the bus's wait accumulator), LDM/STM (a generic proc with a load
+or store per register) and the handlers themselves; the ARM7's share rose
+because the rest fell.
 
 ## Where the host instructions go (round 2, `nds-cache-perf`)
 
@@ -656,27 +930,27 @@ counts are identical. Host instructions over the 505 fell from 3968.9 G to
 
 ## Left for later
 
-- **Passable events.** Every event ends every proof; an SPU tick without
-  capture, a timer overflow without an IRQ or an H-blank without DMA
-  changes nothing a VCOUNT poll reads. Classing events (as the GBA core's
-  waitloop pass-through does) would save the two or three passes of
-  re-proof per event, which is most of what a `B .` spinner still costs.
+- **The SPU mixer** (7 % of SoulSilver's time): `step` is one large proc
+  called per sample, and `tick` walks all 16 channels three times with
+  64-bit pan and volume products. Per-channel constants (format, loop
+  points, shifts) could be derived when SOUNDxCNT is written, silent
+  channels skipped in the mix, and PCM samples inside the current word
+  stepped without the call.
+- **The effect pass for alpha, 3D and semi-transparent OBJs** is still
+  per pixel with branches (engine A in SoulSilver: BG0 is 3D, so every
+  line); with the second layer's number per pixel it could be masks too.
+- **CPU stores to VRAM** (MAXMXDS: 16.8 M in 600 frames, a frame buffer
+  drawn by the CPU) take the whole write path; a TLB kind for VRAM pages
+  (the bank's host pointer, the 1 KB change counts, PU-checked per
+  privilege like the fetch jumps) would make them short. ITCM data (1 M
+  loads in the overworld) likewise.
+- **The run loop's bookkeeping** per opcode (above) and LDM/STM, which
+  walk 16 register bits with a full load or store each.
+- **Loading.** A 256 MB ROM is read into a string, copied into a seq and
+  copied again into the cart: 2.3 G host instructions and, in time, more
+  (page faults) before the first frame.
 - **Timer polls.** A loop waiting for a timer counter could be skipped to
   the pass where the value crosses; not seen in a hot loop yet.
-- **One CPU halted, the other working.** Slices stay 64 cycles so a write
-  that wakes the halted CPU lands on the same slice boundary; ending the
-  slice at the next 64-cycle grid point after such a write would allow
-  longer slices; the slice loop is now 3.6 % of SoulSilver.
-- **The ARM9 data path** (6.5 % of SoulSilver, 13 % of its overworld):
-  the TCM tests go through two pointers (cp15, dma9) on every access and
-  main RAM through the D-cache tag check and `dc_apart`; a per-page "data
-  TLB" (host pointer, region, cost class), turned off where the fetch
-  fast path is, would roughly halve it. DTCM alone is too little (21 M of
-  71 M ARM9 accesses, ~5 instructions each).
-- **2D compositing** is most of the 2D cost left (Tales of Dagur, lines
-  whose scroll changes every frame): per-layer line reuse would save the
-  BG/OBJ passes but not the per-pixel layer search, which is the bigger
-  part; vectorising it is the lever there.
 - **Conditions by table** (a 16 x 16-bit table instead of the switch in
   `cond_passed`): same instruction count, fewer mispredicted branches;
   not measurable in instructions, so not kept.

@@ -19,6 +19,14 @@ export cpu, sched, gpu, engine2d, input, vram, cart, spu, slot2
 # after every call (docs/nds/perf.md, "Error-flag checks").
 {.push quirky: on.}
 
+const
+  DTLB_SIZE* = 256              ## ARM9 data TLB entries per direction (direct-mapped)
+  DT_DTCM* = 0'u32              ## DtlbEntry.kind: DTCM
+  DT_MAIN* = 1'u32              ## main RAM through the data cache
+  DT_UNC* = 2'u32               ## main RAM past it (loads: nothing apart in the page)
+  DT_BUF* = 4'u32               ## (or'd into a store entry) the page is write-buffered
+  DTLB_LOG = 32                 ## fills remembered for a cheap `dtlb_off`
+
 type
   NdsBoot* = enum
     nbDirect      ## load the card's binaries and start them (boot.nim)
@@ -28,6 +36,17 @@ type
     nds* {.cursor.}: NDS
   Arm7Bus* = object
     nds* {.cursor.}: NDS
+  Dma9Bus* = object
+    ## The ARM9 DMA's view of the bus (io/dma.nim): the CPU's accesses
+    ## without the data TLB (bus9.nim), TCMs invisible (`dma_access`)
+    nds* {.cursor.}: NDS
+
+  DtlbEntry* = object
+    ## One ARM9 data TLB entry (bus9.nim `dtlb_fill9`): a 4 KB page whose
+    ## accesses need no region decode
+    tag*: uint32                ## the page (address shr 12), or NO_PAGE
+    kind*: uint32               ## DT_DTCM, DT_MAIN, DT_UNC (stores: or DT_BUF)
+    base*: ptr UncheckedArray[uint8]  ## the page's bytes on the host
 
   NDS* = ref object
     sched*: NdsScheduler
@@ -81,6 +100,17 @@ type
                                 ## sequential fetches read `fptr7`, or NO_PAGE
     fptr7*: ptr UncheckedArray[uint8]
     fseq7*: array[2, int64]     ## and what one costs there: 16-bit, 32-bit
+    fjump7*: array[2, int64]    ## and a jump to an opcode there (with the refill)
+    # ARM9 data TLB (bus9.nim read32 .. write32): pages whose loads / stores
+    # take a short path; derived, not saved (`dtlb_off`)
+    rtlb9*, wtlb9*: array[DTLB_SIZE, DtlbEntry]
+    dtlb_log*, dtlb_dlog*: array[DTLB_LOG, uint16]  ## entries filled since
+                                ## the last drop (bit 15: a store entry), so a
+                                ## drop clears only those (the BIOS toggles the
+                                ## PU thousands of times a frame in "The
+                                ## Strongest Demo"); dlog: those whose kind the
+                                ## data cache's enable decides
+    dtlb_logged*, dtlb_dlogged*: int  ## how many; more than DTLB_LOG: all
     mmem_armed*: array[4, bool] ## DMA mode 4 channels running this frame
     frame_done*: bool
     sleeping*: bool             ## ARM7 HALTCNT sleep: every clock but the RTC's stopped
@@ -91,6 +121,17 @@ type
                                 ## change (arm/cpu.nim loop_edge; not saved)
     idle_epoch9*, idle_epoch7*: uint64  ## the same for what only that CPU
                                 ## sees: its TCMs or WRAM, its devices' reads
+    ev_epoch*: uint64           ## bumped by every event and `run_until` call:
+                                ## only loops that read a device see it
+    dev9*, dev7*: bool          ## that CPU read a device (I/O, VRAM, palette,
+                                ## OAM, the GBA slot) since its loop took ev_epoch
+    # long slices (`run_until`, `slice_cut`); not machine state (not saved)
+    long_on*: bool              ## enabled (DINGBAT_NDS_NO_SKIP=1 clears it)
+    long_slice: bool            ## a CPU is running one: the other is halted
+    long_h9: bool               ## the halted one is the ARM9
+    slice_from: int64           ## where its SLICE grid starts
+    long_next: int64            ## the next event when it began
+    cut_at: int64               ## the end of the step it was cut in (or high)
     # -d:ndsdebug only (tools/ndsrun.nim flags)
     iolog*: bool                ## log I/O accesses to stderr
     watch*: uint32              ## log writes to this word (0 = off)
@@ -179,17 +220,53 @@ proc slot2_write(n: NDS; a: uint32; v: uint32; is9: bool; width: static int) =
       s.rom_write((a and not 3'u32) + 2, v shr 16, 16)
     else: s.rom_write(a, v, width)
 
+proc dtlb_clear(n: NDS; log: var array[DTLB_LOG, uint16]; logged: var int) {.inline.} =
+  for k in 0 ..< min(logged, DTLB_LOG):
+    let i = int(log[k] and 0x7FFF)
+    if (log[k] and 0x8000) != 0: n.wtlb9[i].tag = NO_PAGE
+    else: n.rtlb9[i].tag = NO_PAGE
+  logged = 0
+
+proc dtlb_off*(n: NDS) =
+  ## The ARM9 data TLB starts over (bus9.nim dtlb_fill9): a CP15 write that
+  ## changes the TCMs or cachability, WRAMCNT, a state load. Only the
+  ## entries filled since need clearing (`dtlb_log`, `dtlb_dlog`).
+  if n.dtlb_logged > DTLB_LOG or n.dtlb_dlogged > DTLB_LOG:
+    for i in 0 ..< DTLB_SIZE:
+      n.rtlb9[i].tag = NO_PAGE
+      n.wtlb9[i].tag = NO_PAGE
+    n.dtlb_logged = 0
+    n.dtlb_dlogged = 0
+  else:
+    n.dtlb_clear(n.dtlb_log, n.dtlb_logged)
+    n.dtlb_clear(n.dtlb_dlog, n.dtlb_dlogged)
+
+proc dtlb_dc_switched*(n: NDS) =
+  ## The data cache was switched on or off (control bit 2, or the
+  ## protection unit's bit 0): the entries that depend on it go -- cached
+  ## main RAM, and uncached pages a region makes cachable (`dtlb_dlog`);
+  ## DTCM and pages no region caches stay (a BIOS that toggles the PU in a
+  ## loop keeps them: "The Strongest Demo").
+  if n.dtlb_dlogged > DTLB_LOG: n.dtlb_off()
+  else: n.dtlb_clear(n.dtlb_dlog, n.dtlb_dlogged)
+
 proc fetch_paths_off*(n: NDS) =
   ## Both CPUs' sequential fetch fast paths start over (bus9.nim fetch32,
-  ## bus7.nim fetch32): a CP15 write, WRAMCNT, a state load.
+  ## bus7.nim fetch32), and the ARM9 data TLB: a CP15 write, WRAMCNT, a
+  ## state load.
   n.fline9 = NO_PAGE
   n.fpage7 = NO_PAGE
+  n.dtlb_off()
 
 proc page_apart_now(n: NDS; p: int) {.inline.} =
   ## Main RAM page p is about to hold a memory side apart from what the CPU
-  ## reads, or a kept instruction-cache line: code there is read the slow way.
+  ## reads, or a kept instruction-cache line: code there is read the slow
+  ## way, and so are uncached loads (the data TLB's DT_UNC entries; every
+  ## mirror of the page has the same TLB index).
   if (n.fline9 shr 19) == 2 and int((n.fline9 shr 7) and 0x3FF) == p: n.fline9 = NO_PAGE
   if (n.fpage7 shr 12) == 2 and int(n.fpage7 and 0x3FF) == p: n.fpage7 = NO_PAGE
+  let e = addr n.rtlb9[p and (DTLB_SIZE - 1)]
+  if (e.tag shr 12) == 2 and int(e.tag and 0x3FF) == p: e.tag = NO_PAGE
 
 template rd16(s: seq[uint8]; i: int): uint32 =
   uint32(s[i]) or (uint32(s[i + 1]) shl 8)
@@ -212,7 +289,7 @@ proc gx_dma(n: NDS) =
   ## ARM9 DMA mode 7: bursts into the geometry FIFO while it is less than
   ## half full; at most one block per channel per call (a repeating channel
   ## goes on at the next request).
-  let bus = Arm9Bus(nds: n)
+  let bus = Dma9Bus(nds: n)
   for i in 0..3:
     var left = n.dma9.ch[i].cur_count
     while left > 0 and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtGxFifo and
@@ -251,7 +328,7 @@ proc mmem_request(ctx: pointer): bool {.nimcall.} =
   let n = cast[NDS](ctx)
   for i in 0..3:
     if n.mmem_armed[i] and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay:
-      n.dma9.transfer_units(Arm9Bus(nds: n), i, n.dma9.ch[i].cur_count)
+      n.dma9.transfer_units(Dma9Bus(nds: n), i, n.dma9.ch[i].cur_count)
       return true
   false
 
@@ -270,7 +347,7 @@ proc on_hblank(n: NDS) =
   g.in_hblank = true
   if g.vcount < VISIBLE_LINES:
     g.render_line(g.vcount)
-    n.dma9.trigger(Arm9Bus(nds: n), dtHBlank)
+    n.dma9.trigger(Dma9Bus(nds: n), dtHBlank)
   n.dispstat_irqs(g.stat9, n.irq9, irqHBlank)
   n.dispstat_irqs(g.stat7, n.irq7, irqHBlank)
 
@@ -294,14 +371,14 @@ proc on_line_end(n: NDS) =
     n.frame_done = true
     n.dispstat_irqs(g.stat9, n.irq9, irqVBlank)
     n.dispstat_irqs(g.stat7, n.irq7, irqVBlank)
-    n.dma9.trigger(Arm9Bus(nds: n), dtVBlank)
+    n.dma9.trigger(Dma9Bus(nds: n), dtVBlank)
     n.dma7.trigger(Arm7Bus(nds: n), dtVBlank)
     n.gpu3d.on_vblank()
     n.gx_service()         # the swap releases the FIFO
   elif g.vcount == LINES - 1:
     g.in_vblank = false
   elif g.vcount == 0:
-    n.dma9.trigger(Arm9Bus(nds: n), dtDisplayStart)
+    n.dma9.trigger(Dma9Bus(nds: n), dtDisplayStart)
     for i in 0..3:
       n.mmem_armed[i] = n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay
   if g.vcount == int(g.stat9.vcount_setting): n.dispstat_irqs(g.stat9, n.irq9, irqVCount)
@@ -310,7 +387,7 @@ proc on_line_end(n: NDS) =
   n.sched.schedule(n.line_start + LINE_CYCLES, evLineEnd)
 
 proc dispatch(n: NDS; ev: NdsEvent) =
-  inc n.idle_epoch
+  inc n.ev_epoch              # devices; memory changes bump idle_epoch (arm/cpu.nim)
   case ev
   of evHBlank: n.on_hblank()
   of evLineEnd: n.on_line_end()
@@ -319,7 +396,7 @@ proc dispatch(n: NDS; ev: NdsEvent) =
   of evCartDone:
     n.cart.word_ready()
     if n.cart.owner_arm7: n.dma7.trigger(Arm7Bus(nds: n), dtCart)
-    else: n.dma9.trigger(Arm9Bus(nds: n), dtCart)
+    else: n.dma9.trigger(Dma9Bus(nds: n), dtCart)
   of evSpuSample:
     n.spu.tick(Arm7Bus(nds: n))
     n.spu.next_tick += SPU_TICK_CYCLES
@@ -397,11 +474,14 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.gpu3d.reuse_on = skip
   n.gpu.engine_a.lc_on = skip
   n.gpu.engine_b.lc_on = skip
+  n.long_on = skip
   n.cp15.reset()
   n.tm.init_timing()
   n.tm.update_regions(n.cp15)
   n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
   n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR; n.last_pc9 = NO_ADDR
+  n.dtlb_logged = DTLB_LOG + 1         # every entry (tags start at 0, a page)
+  n.dtlb_dlogged = 0
   n.fetch_paths_off()
   n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
   if boot == nbFirmware and not force_hle and can_firmware_boot(bios9, bios7, firmware):
@@ -471,20 +551,82 @@ proc sleep_for(n: NDS; cycles: int64) =
   n.rtc.sleep_advance(cycles, proc(): bool = n.wake_pending())
   n.wake_from_sleep()
 
+proc slice_cut(n: NDS): int64 {.noinline.} =
+  ## In a long slice (`run_until`), after anything the running CPU does
+  ## that the SLICE-step loop would have acted on at the end of the step it
+  ## happened in -- the halted CPU's interrupt arriving, an event booked or
+  ## moved, the ARM7 going to sleep (or the machine off) -- the run ends at
+  ## the end of that step: the next point on the SLICE grid from where the
+  ## long slice began after the access (`sched.now`: the clock of the
+  ## access that did it). Called when `attn` is set (arm/cpu.nim run): every
+  ## such action is an I/O access, a SWI or a CP15 write.
+  let wakes = if n.long_h9: irq_wake(Arm9Bus(nds: n)) else: irq_wake(Arm7Bus(nds: n))
+  if wakes or n.sched.next_at() != n.long_next or n.asleep():
+    let c = max(n.sched.now, n.slice_from)
+    n.cut_at = min(n.cut_at, n.slice_from + SLICE * ((c - n.slice_from) div SLICE + 1))
+  n.cut_at
+
+proc slice_cut*(b: Arm9Bus): int64 {.inline.} =
+  if b.nds.long_slice: b.nds.slice_cut() else: high(int64)
+proc slice_cut*(b: Arm7Bus): int64 {.inline.} =
+  if b.nds.long_slice: b.nds.slice_cut() else: high(int64)
+
+proc run_long(n: NDS; slice_end: int64; h9: bool) =
+  ## One CPU halted with no interrupt to wake it, the other running: the
+  ## running one goes straight to `slice_end` (the next event) instead of in
+  ## SLICE steps, unless it does something the step loop would have acted
+  ## on (`slice_cut`); then it stops where that step ends, and the halted
+  ## one is left where the steps would have left it. The step loop ran the
+  ## ARM9 first in each step: a halted ARM7 woken by the ARM9 wakes at the
+  ## start of the step the ARM9 woke it in, a halted ARM9 woken by the ARM7
+  ## at the end of it (the next step). Between steps nothing else happens
+  ## (no event is due), and each CPU's own execution does not depend on
+  ## where its run calls end, so the result is the steps' result.
+  let start = n.sched.now
+  n.long_slice = true
+  n.long_h9 = h9
+  n.slice_from = start
+  n.long_next = n.sched.next_at()
+  n.cut_at = high(int64)
+  var e = slice_end
+  if h9:
+    if n.arm7.cycles < slice_end: n.arm7.run(slice_end)
+    discard n.slice_cut()       # the last access (its `attn` is not looked at
+    n.long_slice = false        # when it took the clock past the end)
+    e = min(e, n.cut_at)
+    n.arm9.cycles = max(n.arm9.cycles, e)   # halted to the end of the last step
+  else:
+    if n.arm9.cycles < slice_end: n.arm9.run(slice_end)
+    discard n.slice_cut()
+    n.long_slice = false
+    if n.cut_at != high(int64):
+      # the ARM7 sat out the steps before the one it was cut in, then gets it
+      e = min(e, n.cut_at)
+      n.arm7.cycles = max(n.arm7.cycles, n.cut_at - SLICE)
+      n.sched.now = n.cut_at - SLICE
+      if n.arm7.cycles < e: n.arm7.run(e)
+    else:
+      n.arm7.cycles = max(n.arm7.cycles, slice_end)
+  n.sched.now = e
+
 proc quiet(n: NDS): bool {.inline.} =
   ## Neither CPU can change anything the other or the devices see before
   ## the next event: each is halted with no interrupt to wake it, or spins
   ## in a loop proven to be a no-op (arm/cpu.nim loop_edge) with nothing
-  ## touched since. Interleaving them in SLICE steps until then would give
-  ## the same result as running each straight to the event.
-  (n.arm9.idle_now() or (n.arm9.halted and not irq_wake(Arm9Bus(nds: n)))) and
-    (n.arm7.idle_now() or (n.arm7.halted and not irq_wake(Arm7Bus(nds: n))))
+  ## touched since and no interrupt it will take (an event that leaves the
+  ## loop proven may raise one: the handler then runs, which is work).
+  ## Interleaving them in SLICE steps until then would give the same result
+  ## as running each straight to the event.
+  template spins(c: untyped; bus: untyped): bool =
+    c.idle_now() and not (irq_line(bus) and (c.cpsr and FLAG_I) == 0)
+  (spins(n.arm9, Arm9Bus(nds: n)) or (n.arm9.halted and not irq_wake(Arm9Bus(nds: n)))) and
+    (spins(n.arm7, Arm7Bus(nds: n)) or (n.arm7.halted and not irq_wake(Arm7Bus(nds: n))))
 
 proc run_until*(n: NDS; target: int64) =
   ## Asleep, `target - now` is spent as sleep and the master clock stays.
   var ev: NdsEvent
   var at: int64
-  inc n.idle_epoch            # the frontend may have changed keys, touch, ...
+  inc n.ev_epoch              # the frontend may have changed keys, touch, ...
   if n.asleep():
     n.sleep_for(max(0'i64, target - n.sched.now))
     if n.spi.power_off: n.show_power_off()
@@ -495,7 +637,16 @@ proc run_until*(n: NDS; target: int64) =
       return
     var slice_end = min(target, n.sched.next_at())
     let both_halted = n.arm9.halted and n.arm7.halted
-    if not both_halted and not n.quiet(): slice_end = min(slice_end, n.sched.now + SLICE)
+    if not both_halted and not n.quiet():
+      let h9 = n.arm9.halted and not irq_wake(Arm9Bus(nds: n))
+      let h7 = n.arm7.halted and not irq_wake(Arm7Bus(nds: n))
+      if (h9 or h7) and n.long_on and slice_end - n.sched.now > SLICE and
+         n.arm9.trace == 0 and n.arm7.trace == 0:
+        n.run_long(slice_end, h9)
+        while n.sched.pop_due(ev, at):
+          n.dispatch(ev)
+        continue
+      slice_end = min(slice_end, n.sched.now + SLICE)
     let start = n.sched.now
     if n.arm9.cycles < slice_end: n.arm9.run(slice_end)
     n.sched.now = start

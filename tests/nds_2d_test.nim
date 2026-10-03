@@ -6,7 +6,7 @@
 ##
 ##   nim c -r -d:release -d:test_harness --path:src tests/nds_2d_test.nim
 
-import std/[os, strutils]
+import std/[os, strutils, random]
 import dingbat/nds/mem/vram
 import dingbat/nds/gpu/[gpu, engine2d]
 import dingbat/nds/nds   # bgr555_to_rgba
@@ -497,6 +497,70 @@ proc scene_3d_capture() =
   g.start_line()
   check((a.dispcapcnt and 0x8000_0000'u32) == 0, "capture busy cleared at line 192")
 
+proc scene_composite_fuzz() =
+  ## engine2d.nim `composite` paints the layers over each other; it must
+  ## give what the per-pixel search in priority order gives
+  ## (`composite_search`): random VRAM, palettes, OAM, 3D lines, BG modes,
+  ## priorities, windows, effects and mosaic, every line drawn both ways.
+  echo "compositing: painted layers equal the per-pixel search"
+  var r = initRand(0x2D2D)
+  var line3d: array[256, uint32]
+  var lines, diffs = 0
+  var first = ""
+  for scene in 0 ..< 400:
+    let g = fresh()
+    for b in [vbA, vbB, vbC, vbD]:
+      let p = g.vram.bank_ptr(b)
+      let dense = r.rand(3)                         # how many pixels are opaque
+      for i in 0 ..< 128 * 1024:
+        p[i] = if r.rand(3) < dense: uint8(r.rand(255)) else: 0'u8
+    g.vram.write_cnt(vbA, 0x81)                     # A: engine A BG
+    g.vram.write_cnt(vbB, 0x82)                     # B: engine A OBJ
+    g.vram.write_cnt(vbC, 0x84)                     # C: engine B BG
+    g.vram.write_cnt(vbD, 0x84)                     # D: engine B OBJ
+    for i in 0 ..< 1024: g.palette[i] = uint16(r.rand(0xFFFF))
+    for i in 0 ..< 512: g.oam[i] = uint16(r.rand(0xFFFF))
+    for e in [g.engine_a, g.engine_b]:
+      e.reg32(0, uint32(r.rand(5)) or (uint32(r.rand(1)) shl 3) or (uint32(r.rand(0x3F)) shl 8) or
+                 (uint32(r.rand(7)) shl 13) or 0x1_0000'u32 or (uint32(r.rand(3)) shl 4) or
+                 (uint32(r.rand(3)) shl 20) or (uint32(r.rand(1)) shl 30) or (uint32(r.rand(1)) shl 31))
+      for bg in 0..3:
+        e.reg(uint32(0x08 + 2 * bg), uint32(r.rand(0xFFFF)))
+        e.reg(uint32(0x10 + 4 * bg), uint32(r.rand(0x1FF)))
+        e.reg(uint32(0x12 + 4 * bg), uint32(r.rand(0x1FF)))
+      for o in [0x20'u32, 0x22, 0x24, 0x26, 0x30, 0x32, 0x34, 0x36]:
+        e.reg(o, uint32(r.rand(0x200)) - 0x100)
+      for o in [0x28'u32, 0x2C, 0x38, 0x3C]: e.reg32(o, uint32(r.rand(0xFFFFF)))
+      e.reg32(0x40, uint32(r.rand(0x7FFF_FFFF)))
+      e.reg32(0x44, uint32(r.rand(0x7FFF_FFFF)))
+      e.reg32(0x48, uint32(r.rand(0x7FFF_FFFF)))
+      e.reg(0x4C, if r.rand(3) == 0: uint32(r.rand(0xFFFF)) else: 0'u32)
+      e.reg32(0x50, uint32(r.rand(0x7FFF_FFFF)))
+      e.reg(0x54, uint32(r.rand(20)))
+    g.engine_a.line3d = if r.rand(1) == 0: nil else: addr line3d
+    for v in 0 ..< 263:
+      g.vcount = v
+      g.start_line()
+      if v >= 192: continue
+      for x in 0 ..< 256:
+        line3d[x] = if r.rand(2) == 0: 0'u32
+                    else: uint32(r.rand(0x3F3F3F)) or (uint32(r.rand(31)) shl 24)
+      for e in [g.engine_a, g.engine_b]:
+        composite_by_search = false
+        e.render_line(v)
+        let painted = e.line
+        composite_by_search = true
+        e.render_line(v)
+        composite_by_search = false
+        inc lines
+        if e.line != painted:
+          inc diffs
+          if first.len == 0:
+            first = "scene " & $scene & " line " & $v & " dispcnt " & toHex(e.dispcnt, 8) &
+                    " bldcnt " & toHex(e.bldcnt, 4)
+        e.end_line()
+  check(diffs == 0, "every line (" & $lines & ") the same both ways", $diffs & " differ, first " & first)
+
 when isMainModule:
   scene_text()
   scene_extpal()
@@ -505,6 +569,7 @@ when isMainModule:
   scene_windows_blend()
   scene_window_wrap()
   scene_3d_capture()
+  scene_composite_fuzz()
   if failures > 0:
     echo failures, " failure(s)"
     quit(1)

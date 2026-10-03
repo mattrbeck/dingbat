@@ -45,7 +45,8 @@
 ## --rumble-log prints each frame where the slot-2 rumble strength changes.
 ## --rtc YYYY-MM-DD[THH:MM:SS] starts the RTC at that time and clocks it from
 ## emulated time, so runs are reproducible (default: host local time).
-## --perf-from F times frames F..end (printed as fps; default the whole run).
+## --perf-from F times frames F..end (printed as fps; default the whole run)
+## and, on macOS, counts the host instructions they took.
 ## --state-save FILE@F[,FILE@F...] writes a save state (packed, with a
 ## thumbnail) after frame F. --state-load FILE[@F] starts from a state: the
 ## run goes on from frame F (default: the V-blanks the state has counted,
@@ -56,6 +57,8 @@
 ## --state-hash N prints a CRC-32 of the whole machine state (the save-state
 ## payload) every N frames, for comparing two runs that should be identical
 ## (DINGBAT_NDS_NO_SKIP=1 turns idle-loop skipping and 3D frame reuse off: docs/nds/perf.md).
+## --screen-hash N prints a CRC-32 of each screen every N frames (the 2D/3D
+## output itself, which the state leaves out).
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
@@ -72,6 +75,20 @@ import zippy
 import dingbat/nds/[nds, savestate]
 import dingbat/nds/io/rtc
 import dingbat/gba/rtc_calendar
+
+when defined(macosx):
+  # host instructions retired so far (macOS proc_pid_rusage): --perf-from
+  # reports those of the frames it times, without the ROM and state loading
+  {.emit: """#include <libproc.h>
+#include <unistd.h>
+static unsigned long long ndsrun_host_instructions(void) {
+  struct rusage_info_v4 ri;
+  if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4, (rusage_info_t *)&ri) != 0) return 0;
+  return ri.ri_instructions;
+}""".}
+  proc host_instructions(): uint64 {.importc: "ndsrun_host_instructions", nodecl.}
+else:
+  proc host_instructions(): uint64 = 0
 
 proc crc32(data: openArray[uint8]): uint32 =
   var table {.global.}: array[256, uint32]
@@ -267,11 +284,13 @@ when isMainModule:
   var mic_path = ""
   var mic_at = 0
   var perf_from = 0
+  var perf_i0 = 0'u64
   var state_saves: seq[(string, int)]
   var state_load = ""
   var state_load_frame = -1
   var state_layout = false
   var state_hash = 0
+  var screen_hash = 0
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog", "rumble-log", "cartlog",
@@ -334,6 +353,7 @@ when isMainModule:
       of "iolog-from": iolog_from = parseInt(val)
       of "pcs": pcs = true
       of "state-hash": state_hash = parseInt(val)
+      of "screen-hash": screen_hash = parseInt(val)
       of "watch": watch = uint32(parseHexInt(val))
       of "text": text = val
       of "text-offset": text_offset = parseInt(val)
@@ -387,7 +407,9 @@ when isMainModule:
   let mic_samples = if mic_path.len > 0: read_wav_mono(mic_path, mic_rate) else: @[]
   for f in first_frame ..< frames:
     if mic_path.len > 0 and f == mic_at: n.push_mic(mic_samples, mic_rate)
-    if f == perf_from: perf_t0 = getMonoTime()
+    if f == perf_from:
+      perf_t0 = getMonoTime()
+      perf_i0 = host_instructions()
     if f == trace_at:
       n.arm9.trace = trace9
       n.arm7.trace = trace7
@@ -433,6 +455,11 @@ when isMainModule:
     if state_hash > 0 and (f + 1) mod state_hash == 0:
       let st = n.state_payload()
       echo "statehash ", f + 1, " ", toHex(crc32(st.toOpenArrayByte(0, st.high)), 8)
+    if screen_hash > 0 and (f + 1) mod screen_hash == 0:
+      let tb = cast[ptr UncheckedArray[uint8]](addr n.gpu.top[0])
+      let bb = cast[ptr UncheckedArray[uint8]](addr n.gpu.bottom[0])
+      echo "screenhash ", f + 1, " ", toHex(crc32(tb.toOpenArray(0, 256 * 192 * 2 - 1)), 8),
+           " ", toHex(crc32(bb.toOpenArray(0, 256 * 192 * 2 - 1)), 8)
     for (file, at) in state_saves:
       if f + 1 == at:
         let image = n.state_bytes(thumbnail = true)
@@ -452,6 +479,8 @@ when isMainModule:
     let secs = (getMonoTime() - perf_t0).inNanoseconds.float / 1e9
     echo "speed: frames ", perf_from, "-", frames, " in ", formatFloat(secs, ffDecimal, 2), " s = ",
          formatFloat(float(frames - perf_from) / secs, ffDecimal, 1), " fps"
+    let ins = host_instructions()
+    if ins > 0: echo "host instructions: frames ", perf_from, "-", frames, " ", ins - perf_i0
   if tops.len > 0:
     let cols = min(tops.len, 4)
     let rows = (tops.len + cols - 1) div cols

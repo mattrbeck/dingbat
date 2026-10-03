@@ -14,6 +14,10 @@
 ##                                added (the bus accumulates them)
 ##   idle_epoch(bus): uint64   -- changes whenever anything a loop could read
 ##                                may have changed (idle-loop skipping, below)
+##   ev_epoch(bus): uint64     -- changes with every event and frontend call:
+##                                what only a loop that read a device must see
+##   dev_read(bus): bool, clear_dev(bus) -- the CPU read a device since the
+##                                flag was cleared (set by the bus)
 ##   idle_sig(bus): IdleSig    -- the bus's timing state that the next
 ##                                access costs depend on
 ##   arm_table(B), thumb_table(B) -- the dispatch tables: the bus module
@@ -97,6 +101,7 @@ type
     wl_head: uint32         ## the watched loop head (a backward branch's target)
     wl_other: int32         ## arrivals at other heads since it was last visited
     wl_epoch: uint64        ## idle_epoch + wl_bump at the last visit
+    wl_ev: uint64           ## ev_epoch then (with the bus's dev_read cleared)
     wl_have: bool           ## wl_regs..wl_instrs hold the state at one visit
     wl_tries: int32         ## visits compared with that snapshot since
     wl_idle*: bool          ## the last visit matched it: repeating, nothing touched
@@ -1217,6 +1222,15 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
 # rule: output with skipping on must equal output with it off, byte for
 # byte (docs/nds/perf.md).
 #
+# Events and frontend calls change devices -- registers, VRAM (display
+# capture), the 3D engine -- and memory only through stores, which bump the
+# epoch themselves; a DMA's hold on the bus does too (dma_stall). So they
+# bump their own epoch (`ev_epoch`), which only a loop that read a device
+# since the epoch was taken must see (`dev_read`, set by the bus): a loop
+# polling RAM -- a flag the other CPU or an interrupt handler sets, `B .` --
+# stays proven across events. An interrupt an event makes takeable is taken
+# at the next `run` (an exception: wl_bump), which ends the proof too.
+#
 # The repeat may hold inner loops and calls (scanKeys in a keysDown wait):
 # other backward branches do not move the watched head unless it stops being
 # visited, and an arrival is compared with a snapshot kept for up to
@@ -1245,7 +1259,7 @@ proc loop_edge*[B](cpu: ArmCpu[B]) {.noinline.} =
   ## `cur_pc` has passed the run loop's clock check and the interrupt
   ## check, so whole repeats are skipped only while it would still start
   ## before `wl_until`.
-  mixin idle_epoch, idle_sig
+  mixin idle_epoch, ev_epoch, dev_read, clear_dev, idle_sig
   let head = cpu.cur_pc
   if head != cpu.wl_head:
     inc cpu.wl_other
@@ -1254,14 +1268,18 @@ proc loop_edge*[B](cpu: ArmCpu[B]) {.noinline.} =
     cpu.wl_head = head
     cpu.wl_other = 0
     cpu.wl_epoch = idle_epoch(cpu.bus) + cpu.wl_bump
+    cpu.wl_ev = ev_epoch(cpu.bus)
+    clear_dev(cpu.bus)
     cpu.wl_have = false
     cpu.wl_idle = false
     return
   cpu.wl_other = 0
   let epoch = idle_epoch(cpu.bus) + cpu.wl_bump
-  if epoch != cpu.wl_epoch or cpu.trace > 0:
+  if epoch != cpu.wl_epoch or (dev_read(cpu.bus) and ev_epoch(cpu.bus) != cpu.wl_ev) or cpu.trace > 0:
     # something was touched since the last visit: start over from here
     cpu.wl_epoch = epoch
+    cpu.wl_ev = ev_epoch(cpu.bus)
+    clear_dev(cpu.bus)
     cpu.wl_have = false
     cpu.wl_idle = false
     cpu.cool_down()
@@ -1302,8 +1320,9 @@ proc loop_edge*[B](cpu: ArmCpu[B]) {.noinline.} =
 
 proc idle_now*[B](cpu: ArmCpu[B]): bool {.inline.} =
   ## In a loop whose last pass was a no-op, with nothing touched since.
-  mixin idle_epoch
-  cpu.wl_idle and idle_epoch(cpu.bus) + cpu.wl_bump == cpu.wl_epoch
+  mixin idle_epoch, ev_epoch, dev_read
+  cpu.wl_idle and idle_epoch(cpu.bus) + cpu.wl_bump == cpu.wl_epoch and
+    (not dev_read(cpu.bus) or ev_epoch(cpu.bus) == cpu.wl_ev)
 
 proc run*[B](cpu: ArmCpu[B]; until: int64) =
   ## Execute until the CPU's clock reaches `until` (master cycles).
@@ -1317,7 +1336,8 @@ proc run*[B](cpu: ArmCpu[B]; until: int64) =
   ## (`set_cpsr`: MSR, a mode return), a SWI (HLE SWIs halt and write I/O)
   ## and a CP15 write (wait for interrupt). Taking an exception only sets
   ## CPSR.I. Between calls anything may have changed: `attn` starts set.
-  mixin irq_wake, irq_line
+  mixin irq_wake, irq_line, slice_cut
+  var until = until
   cpu.wl_until = until
   if unlikely(cpu.trace > 0):
     while cpu.cycles < until:
@@ -1333,6 +1353,12 @@ proc run*[B](cpu: ArmCpu[B]; until: int64) =
   while cpu.cycles < until:
     if unlikely(cpu.attn):
       cpu.attn = false
+      # the machine may end a long run early (nds.nim slice_cut)
+      let cut = slice_cut(cpu.bus)
+      if cut < until:
+        until = cut
+        cpu.wl_until = cut
+        if cpu.cycles >= until: break
       if cpu.halted:
         if irq_wake(cpu.bus):
           cpu.halted = false

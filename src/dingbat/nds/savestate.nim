@@ -52,13 +52,15 @@ const
     "bios9", "bios7",            # supplied on load
     "hle_bios9", "hle_bios7",    # checked against the loading machine (preamble)
     "unmapped_log", "iolog", "watch", "io_last", "io_repeat",   # debug logging
-    "idle_epoch", "idle_epoch9", "idle_epoch7",   # idle-loop skipping (arm/cpu.nim), re-proved after a load
-    "fline9", "fptr9", "fitcm9", "fpage7", "fptr7", "fseq7"]   # fetch fast paths, off after a load
+    "idle_epoch", "idle_epoch9", "idle_epoch7", "ev_epoch", "dev9", "dev7",   # idle-loop skipping (arm/cpu.nim), re-proved after a load
+    "fline9", "fptr9", "fitcm9", "fpage7", "fptr7", "fseq7", "fjump7",   # fetch fast paths, off after a load
+    "rtlb9", "wtlb9", "dtlb_log", "dtlb_dlog", "dtlb_logged", "dtlb_dlogged",   # ARM9 data TLB, off after a load
+    "long_on", "long_slice", "long_h9", "slice_from", "long_next", "cut_at"]   # run_until's long slices
   CPU_SKIP = ["bus", "trace", "profiling", "profile", "cprofile", "attn",
               # idle-loop skipping: a fresh detector proves the same loops again
               "wl_on", "wl_until", "wl_bump", "wl_head", "wl_other", "wl_epoch", "wl_have",
               "wl_tries", "wl_idle", "wl_cycles", "wl_instrs", "wl_fails", "wl_skipped",
-              "wl_cold", "wl_regs", "wl_cpsr", "wl_spsr", "wl_sig"]
+              "wl_cold", "wl_regs", "wl_cpsr", "wl_spsr", "wl_sig", "wl_ev"]
   # cachability by address and the cache enables: update_regions(cp15)
   TIMING_SKIP = ["ic_on", "dc_on", "icode", "idata", "ibuf", "mcode", "mdata", "mbuf"]
   # mmem_req/mmem_ctx: the machine's DMA mode 4 hook, set at construction
@@ -70,10 +72,10 @@ const
   VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat", "tex_gen", "vgen", "remap_gen", "pbase"]
   # pointers into Gpu's palette/OAM (kept); line3d is set before each use;
   # the line buffers and per-line scratch are rewritten before they are read
-  # (line, gfx, bgpix ... line_objwin); touch, lc_*, mem_gen: line reuse,
+  # (line, gfx, bgpix ... obj_prios); touch, lc_*, mem_gen: line reuse,
   # which remap() in after_load restarts (vram.remap_gen)
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d", "line", "gfx", "bgpix", "objpix",
-                 "objprio", "objattr", "winmask", "line_semi", "line_objwin",
+                 "objprio", "objattr", "winmask", "line_semi", "line_objwin", "obj_prios",
                  "lc_on", "mem_gen", "lgen", "touch", "lc_valid", "lc_key", "lc_touch", "lc_vsum",
                  "lc_line", "lc_3d", "lc_reused"]
   # reuse_*/last_*: what the last real render drew (render_frame); the
@@ -516,6 +518,7 @@ proc after_load(n: NDS) =
   ## index out of range with (a state is a stranger's file).
   n.gpu.vram.remap()
   n.fetch_paths_off()
+  inc n.idle_epoch            # every idle-loop proof starts over
   n.tm.update_regions(n.cp15)
   privateAccess(Geometry)
   privateAccess(Gpu3d)

@@ -43,6 +43,7 @@ proc machine(rom: string; skip: bool): NDS =
   result.gpu3d.reuse_on = skip
   result.gpu.engine_a.lc_on = skip
   result.gpu.engine_b.lc_on = skip
+  result.long_on = skip
 
 proc screens_equal(a, b: NDS): bool =
   a.gpu.top == b.gpu.top and a.gpu.bottom == b.gpu.bottom
@@ -293,6 +294,222 @@ block:
       a.run_frame(); c.run_frame()
     check(a.state_payload() == c.state_payload() and screens_equal(a, c),
           "scrolling: the loaded machine draws what the saving one does")
+
+echo "== long slices"
+
+# nds.nim run_long / slice_cut: one CPU halted with no interrupt to wake
+# it, the other runs straight to the next event, stopping on the SLICE grid
+# when it wakes the halted one, books or moves an event, or puts the
+# machine to sleep. Small programs on both CPUs do each of those after a
+# loop of 1..40 passes (so the access falls at every point of a step) and
+# run with long slices on and off: the whole state must agree.
+
+proc tiny_rom(): seq[uint8] =
+  ## A header plus two "b ." loops: ARM9 at 0x02000000, ARM7 at 0x037F8000.
+  result = newSeq[uint8](0x400)
+  proc w32(r: var seq[uint8]; o: int; v: uint32) =
+    for i in 0..3: r[o + i] = uint8(v shr (8 * i))
+  result.w32(0x20, 0x200); result.w32(0x24, 0x0200_0000); result.w32(0x28, 0x0200_0000)
+  result.w32(0x2C, 4)
+  result.w32(0x30, 0x300); result.w32(0x34, 0x037F_8000); result.w32(0x38, 0x037F_8000)
+  result.w32(0x3C, 4)
+  result.w32(0x200, 0xEAFF_FFFE'u32)
+  result.w32(0x300, 0xEAFF_FFFE'u32)
+
+const
+  LOOP = [0xE251_1001'u32, 0x1AFF_FFFD'u32]     # SUBS r1, r1, #1; BNE back
+  IO = 0xE3A0_0301'u32                          # MOV r0, #0x04000000
+  ACK_HANDLER = [IO, 0xE280_0C02'u32, 0xE280_0014'u32,   # r0 = IF
+                 0xE3A0_1801'u32, 0xE580_1000'u32,       # IF = bit 16 (IPC sync)
+                 0xE3A0_1008'u32, 0xE580_1000'u32,       # IF = bit 3 (timer 0)
+                 0xE285_5001'u32, 0xE12F_FF1E'u32]       # r5 += 1; BX LR
+
+proc long_case(name: string; runner9: bool; body: openArray[uint32];
+               setup: proc (n: NDS) {.nimcall.}) =
+  ## The running CPU (ARM9 or ARM7) runs MOV r1, #passes; LOOP; `body`;
+  ## then MOV r1, #200; LOOP; B . -- the other is halted.
+  var same = true
+  var where = ""
+  for passes in 1'u32 .. 40:
+    var ms: array[2, NDS]
+    for k in 0..1:
+      let n = new_nds(tiny_rom(), @[], @[], @[])
+      n.rtc.set_fixed_clock(n.sched, to_calendar_seconds(2004, 1, 1, 0, 0, 0))
+      n.arm9.wl_on = k == 0; n.arm7.wl_on = k == 0; n.long_on = k == 0
+      let code = if runner9: 0x0210_0000'u32 else: 0x0380_1000'u32
+      var prog = @[0xE3A0_1000'u32 or passes] & @LOOP & @body &
+                 @[0xE3A0_10C8'u32] & @LOOP & @[0xEAFF_FFFE'u32]
+      let b7 = Arm7Bus(nds: n)
+      for i, w in prog: b7.write32(code + uint32(4 * i), w)
+      for i, w in ACK_HANDLER:
+        b7.write32(0x0210_1000'u32 + uint32(4 * i), w)    # ARM9's handler
+        b7.write32(0x0380_2000'u32 + uint32(4 * i), w)    # ARM7's
+      Arm9Bus(nds: n).write32(0x0080_3FFC'u32, 0x0210_1000'u32)   # DTCM + 3FFCh
+      b7.write32(0x0380_FFFC'u32, 0x0380_2000'u32)
+      for c in [n.irq9, n.irq7]: c.ime = 1; c.ie = 0; c.iff = 0
+      if runner9:
+        n.arm9.set_cpsr(0x1F); n.arm9.next_pc = code
+        n.arm7.set_cpsr(0x1F); n.arm7.halted = true
+      else:
+        n.arm7.set_cpsr(0x1F); n.arm7.next_pc = code
+        n.arm9.set_cpsr(0x1F); n.arm9.halted = true
+      setup(n)
+      for _ in 0 ..< 3: n.run_until(n.sched.now + 7000)
+      ms[k] = n
+    if ms[0].state_payload() != ms[1].state_payload():
+      same = false
+      where.add " " & $passes
+  check(same, name & ": long slices give the step loop's state", "differs after" & where)
+
+# IPCSYNC bit 13 to the other CPU, whose IPCSYNC bit 14 and IE bit 16 are on
+const SYNC_IRQ = [IO, 0xE280_0E18'u32, 0xE3A0_2A02'u32, 0xE580_2000'u32]
+long_case("ARM9 wakes the halted ARM7", true, SYNC_IRQ, proc (n: NDS) =
+  Arm7Bus(nds: n).write16(0x0400_0180'u32, 0x4000); n.irq7.ie = 1'u32 shl 16)
+long_case("ARM7 wakes the halted ARM9", false, SYNC_IRQ, proc (n: NDS) =
+  Arm9Bus(nds: n).write16(0x0400_0180'u32, 0x4000); n.irq9.ie = 1'u32 shl 16)
+# timer 0, reload FFF0h, enabled with its IRQ: an event booked mid-run
+const TIMER = [IO, 0xE280_0C01'u32, 0xE3A0_18C0'u32, 0xE381_1CFF'u32,
+               0xE381_10F0'u32, 0xE580_1000'u32]
+long_case("ARM9 books a timer event", true, TIMER, proc (n: NDS) = n.irq9.ie = 8)
+long_case("ARM7 books a timer event", false, TIMER, proc (n: NDS) = n.irq7.ie = 8)
+# HALTCNT = sleep: the step loop stops at the end of that step
+long_case("ARM7 goes to sleep", false,
+          [IO, 0xE280_0C03'u32, 0xE280_0001'u32, 0xE3A0_10C0'u32, 0xE5C0_1000'u32],
+          proc (n: NDS) = discard)
+# DMA0 (r3 SAD, r4 DAD, r5 CNT): 400 words, fixed destination, into TM0CNT:
+# the timer is booked and the DMA holds the CPU past the next event, so the
+# run ends at the access that booked it (its `attn` never looked at)
+proc dma_setup(n: NDS; cpu9: bool) =
+  for i in 0'u32 ..< 400: Arm7Bus(nds: n).write32(0x0220_0000'u32 + 4 * i, 0x00C0_FFF0'u32)
+  let r = if cpu9: addr n.arm9.r else: addr n.arm7.r
+  r[3] = 0x0220_0000'u32; r[4] = 0x0400_0100'u32; r[5] = 0x8440_0000'u32 or 400
+  if cpu9: n.irq9.ie = 8 else: n.irq7.ie = 8
+const DMA = [IO, 0xE280_00B0'u32, 0xE880_0038'u32]
+long_case("ARM9 DMA books an event and stalls the CPU", true, DMA,
+          proc (n: NDS) = n.dma_setup(true))
+long_case("ARM7 DMA books an event and stalls the CPU", false, DMA,
+          proc (n: NDS) = n.dma_setup(false))
+
+echo "== passable events"
+
+# arm/cpu.nim loop_edge: events and frontend calls bump `ev_epoch`, which
+# only a loop that read a device must see; a loop polling RAM stays proven.
+# Each rule here, broken, lets the skipping machine run ahead of the one
+# that executes every pass. The CPU without code is halted with no
+# interrupt to wake it, so the one spinning runs straight to each event.
+
+proc pass_case(name: string; code9, code7: openArray[uint32];
+               setup: proc (n: NDS) {.nimcall.}; frames = 8) =
+  ## The ARM9 runs `code9` at 0x02100000, the ARM7 `code7` at 0x03801000
+  ## (each with r3 = 0x02180000, a RAM word); skipping on and off, the
+  ## state compared every frame.
+  var ms: array[2, NDS]
+  for k in 0..1:
+    let n = new_nds(tiny_rom(), @[], @[], @[])
+    n.rtc.set_fixed_clock(n.sched, to_calendar_seconds(2004, 1, 1, 0, 0, 0))
+    n.arm9.wl_on = k == 0; n.arm7.wl_on = k == 0; n.long_on = k == 0
+    let b7 = Arm7Bus(nds: n)
+    for i, w in code9: b7.write32(0x0210_0000'u32 + uint32(4 * i), w)
+    for i, w in code7: b7.write32(0x0380_1000'u32 + uint32(4 * i), w)
+    for i, w in ACK_HANDLER:
+      b7.write32(0x0210_1000'u32 + uint32(4 * i), w)
+      b7.write32(0x0380_2000'u32 + uint32(4 * i), w)
+    Arm9Bus(nds: n).write32(0x0080_3FFC'u32, 0x0210_1000'u32)
+    b7.write32(0x0380_FFFC'u32, 0x0380_2000'u32)
+    for c in [n.irq9, n.irq7]: c.ime = 1; c.ie = 0; c.iff = 0
+    n.arm9.set_cpsr(0x1F); n.arm9.next_pc = 0x0210_0000'u32; n.arm9.r[3] = 0x0218_0000'u32
+    n.arm7.set_cpsr(0x1F); n.arm7.next_pc = 0x0380_1000'u32; n.arm7.r[3] = 0x0218_0000'u32
+    n.arm9.halted = code9.len == 0
+    n.arm7.halted = code7.len == 0
+    setup(n)
+    ms[k] = n
+  var same = true
+  var at = -1
+  for f in 0 ..< frames:
+    ms[0].run_frame(); ms[1].run_frame()
+    if same and ms[0].state_payload() != ms[1].state_payload():
+      same = false; at = f
+  check(same, name, "differs at frame " & $at)
+  check(ms[0].arm9.wl_skipped + ms[0].arm7.wl_skipped > 0, name & ": the fast machine skipped")
+
+const
+  # loop: LDR r1, [r3]; CMP r1, #0; BEQ loop  (a RAM word nothing sets)
+  RAM_WAIT = [0xE593_1000'u32, 0xE351_0000'u32, 0x0AFF_FFFC'u32]
+  # r2 = 100; wait: until VCOUNT == r2 (a steady register: its reads bump
+  # no epoch); then r6 += timer 0's counter (when it saw the line), r2 += 1,
+  # back to 100 after 189
+  VCOUNT_WAIT = [IO, 0xE3A0_2064'u32,
+                 0xE1D0_10B6'u32, 0xE151_0002'u32, 0x1AFF_FFFC'u32,   # wait: LDRH VCOUNT; CMP; BNE
+                 0xE280_4C01'u32, 0xE1D4_50B0'u32, 0xE086_6005'u32,   # r6 += TM0CNT_L
+                 0xE282_2001'u32, 0xE352_00BE'u32, 0x03A0_2064'u32,   # r2 += 1; == 190: 100
+                 0xEAFF_FFF5'u32]                                     # B wait
+
+proc timer0_on(n: NDS; arm9: bool) =
+  if arm9: Arm9Bus(nds: n).write32(0x0400_0100'u32, 0x0080_0000'u32)
+  else: Arm7Bus(nds: n).write32(0x0400_0100'u32, 0x0080_0000'u32)
+
+pass_case("an ARM9 loop polling VCOUNT ends when the line changes", VCOUNT_WAIT, [],
+          proc (n: NDS) = n.timer0_on(true))
+pass_case("an ARM7 loop polling VCOUNT ends when the line changes", [], VCOUNT_WAIT,
+          proc (n: NDS) = n.timer0_on(false))
+# H-blank DMA, repeating, copying 4 unchanging words: memory stays the same,
+# but each transfer holds the bus (dma_stall) for less than a pass of
+# repeats would take
+pass_case("a RAM loop held by H-blank DMA keeps its timing", RAM_WAIT, [],
+          proc (n: NDS) =
+            let b = Arm9Bus(nds: n)
+            b.write32(0x0400_00B0'u32, 0x0220_0000'u32)
+            b.write32(0x0400_00B4'u32, 0x0221_0000'u32)
+            b.write32(0x0400_00B8'u32, 0x9600_0004'u32))
+# the ARM9 spins on RAM; a timer IRQ, which leaves the loop proven, runs a
+# handler that wakes the halted ARM7 (IPCSYNC): the interrupt is work, so
+# the machine is not quiet (nds.nim quiet) and the wake lands in its step
+const
+  WAKE_HANDLER = [IO, 0xE3A0_1A02'u32, 0xE580_1180'u32,   # IPCSYNC: IRQ to the ARM7
+                  0xE280_0C02'u32, 0xE280_0014'u32,
+                  0xE3A0_1008'u32, 0xE580_1000'u32,       # IF = timer 0
+                  0xE285_5001'u32, 0xE12F_FF1E'u32]       # r5 += 1; BX LR
+  WOKEN_HANDLER = [IO, 0xE280_4C01'u32, 0xE1D4_50B0'u32, 0xE086_6005'u32,   # r6 += TM0CNT_L
+                   0xE280_0C02'u32, 0xE280_0014'u32,
+                   0xE3A0_1801'u32, 0xE580_1000'u32,      # IF = IPC sync
+                   0xE12F_FF1E'u32]
+  HALT_LOOP = [IO, 0xE280_0C03'u32, 0xE3A0_1080'u32,      # r0 = HALTCNT - 1, r1 = halt
+               0xE5C0_1001'u32, 0xEAFF_FFFD'u32]          # loop: STRB r1, [r0, #1]; B loop
+pass_case("an interrupt taken in a RAM loop is work", RAM_WAIT, HALT_LOOP,
+          proc (n: NDS) =
+            for i, w in WAKE_HANDLER:
+              Arm7Bus(nds: n).write32(0x0210_1000'u32 + uint32(4 * i), w)
+            for i, w in WOKEN_HANDLER:                     # the ARM7 notes when it woke
+              Arm7Bus(nds: n).write32(0x0380_2000'u32 + uint32(4 * i), w)
+            n.timer0_on(false)
+            n.irq9.ie = 8
+            n.irq7.ie = 1'u32 shl 16
+            Arm7Bus(nds: n).write16(0x0400_0180'u32, 0x4000)              # ARM7 IPC IRQ on
+            Arm9Bus(nds: n).write32(0x0400_0100'u32, 0x00C0_C000'u32))   # timer 0, IRQ
+
+block:
+  # a state loaded over a machine spinning in a proven RAM loop: the loaded
+  # memory differs, so the proof must not survive the load (after_load)
+  proc spin_machine(): NDS =
+    result = new_nds(tiny_rom(), @[], @[], @[])
+    result.rtc.set_fixed_clock(result.sched, to_calendar_seconds(2004, 1, 1, 0, 0, 0))
+    for i, w in @RAM_WAIT & @[0xE3A0_2005'u32, 0xE583_2004'u32, 0xEAFF_FFFE'u32]:
+      Arm7Bus(nds: result).write32(0x0210_0000'u32 + uint32(4 * i), w)   # then [r3+4] = 5
+    result.arm9.set_cpsr(0x1F); result.arm9.next_pc = 0x0210_0000'u32
+    result.arm9.r[3] = 0x0218_0000'u32
+  let a = spin_machine()
+  for _ in 0 ..< 3: a.run_frame()
+  check(a.arm9.idle_now(), "the loop is proven")
+  let c = spin_machine()
+  check(c.load_state_bytes(a.state_bytes()), "state loads")
+  c.main_ram[0x18_0000] = 1                                   # the flag, set behind the CPU's back
+  let s1 = c.state_bytes()
+  let d = spin_machine()
+  check(a.load_state_bytes(s1) and d.load_state_bytes(s1), "the flag-set state loads")
+  for _ in 0 ..< 2:
+    a.run_frame(); d.run_frame()
+  check(a.state_payload() == d.state_payload() and a.main_ram[0x18_0004] == 5,
+        "loaded over the spinning machine, it runs as on a fresh one")
 
 echo ""
 if failures == 0:

@@ -11,6 +11,7 @@
 import std/[os, strutils]
 import dingbat/nds/[nds, savestate]
 import dingbat/nds/io/input
+import dingbat/nds/timing
 
 var failures = 0
 
@@ -311,6 +312,299 @@ block fetch_fast_paths:
         b7.fetch32(0x0300_0004'u32) == 0x6000_0001'u32, "ARM7: sequential fetches in shared WRAM"
   b.write8(0x0400_0247'u32, 0)                            # all to the ARM9: the ARM7 sees its own WRAM
   check b7.fetch32(0x0300_0008'u32) == 0x7000_0002'u32, "ARM7: WRAMCNT moves the next sequential fetch"
+
+block data_tlb:
+  # bus9.nim dtlb_fill9 / read32 .. write32: DTCM pages and cached main RAM
+  # pages take a short path (main RAM only on a tag hit, stores only into a
+  # dirty line); every change that makes the short path wrong must drop it
+  echo "ARM9 data TLB"
+  let n = machine()
+  let b = Arm9Bus(nds: n)
+  let b7 = Arm7Bus(nds: n)
+  n.cache_on(write_back = true)
+  const A = 0x0210_0000'u32
+  b7.write32(A, 0x1111_1111'u32)
+  discard b.read32(A)                                     # line filled, page entered
+  b.write32(A, 0x2222_2222'u32)                           # a clean line: dirtied the long way
+  b.write32(A, 0x3333_3333'u32)                           # a dirty line: the short way
+  check b.read32(A) == 0x3333_3333'u32 and b7.read32(A) == 0x1111_1111'u32,
+        "stores into a dirty line: the CPU sees them, memory keeps its side"
+  let ctl = n.cp15.control
+  b.cp15_write(0, 1, 0, 0, ctl and not 4'u32)             # data cache off
+  check b.read32(A) == 0x1111_1111'u32, "data cache switched off: loads read memory"
+  b.cp15_write(0, 1, 0, 0, ctl)
+  check b.read32(A) == 0x3333_3333'u32, "on again: the dirty line"
+  b.cp15_write(0, 2, 0, 0, 0)                             # region 1 no longer cachable
+  check b.read32(A) == 0x1111_1111'u32, "page made uncachable: loads read memory"
+  b.cp15_write(0, 2, 0, 0, 0x02)
+  # a clean line hit in a page the TLB holds for stores: memory keeps its side
+  b7.write32(A + 0x40, 0x4444_4444'u32)
+  discard b.read32(A + 0x40)
+  b.write32(A + 0x80, 0)                                  # (a miss: enters the page for stores)
+  b.write32(A + 0x40, 0x5555_5555'u32)
+  check b7.read32(A + 0x40) == 0x4444_4444'u32, "a store into a clean line dirties it"
+  # a dropped line: the next load misses and refills
+  b.cp15_write(0, 7, 6, 1, A)
+  check b.read32(A) == 0x1111_1111'u32 and n.tm.dcache.find_slot(A) >= 0,
+        "a load after C7 invalidate misses and fills the line again"
+  # the uncached mirror (region 2): pages with nothing apart are read as
+  # memory is; one going apart (a dirty line through the cached mirror) must
+  # be read the long way, memory's side
+  const U = A + 0x40_0000
+  b7.write32(A + 0x5400, 0x1212_1212'u32)               # (a page with nothing apart)
+  discard b.read32(A + 0x5400)                            # cached through the other mirror
+  check b.read32(U + 0x5400) == 0x1212_1212'u32, "uncached mirror"
+  b7.write32(A + 0x5400, 0x1313_1313'u32)                 # behind the cache: the page is apart
+  check b.read32(U + 0x5400) == 0x1313_1313'u32 and b.read32(A + 0x5400) == 0x1212_1212'u32,
+        "uncached load of a line the cache keeps apart reads memory"
+  # an uncached store to a line the cache holds reaches memory only
+  b.write32(U + 0x800, 0)                                 # (enters the page for stores)
+  b7.write32(A + 0x420, 0x1414_1414'u32)
+  discard b.read32(A + 0x420)                             # clean, cached
+  b.write32(U + 0x420, 0x1515_1515'u32)
+  check b.read32(A + 0x420) == 0x1414_1414'u32 and b7.read32(A + 0x420) == 0x1515_1515'u32,
+        "uncached store to a cached line: memory changes, the CPU's copy does not"
+  # data cache off, a cachable page is loaded uncached; switched on, it fills
+  b.cp15_write(0, 1, 0, 0, n.cp15.control and not 4'u32)
+  discard b.read32(A + 0x3800)                            # a page with nothing apart
+  b.cp15_write(0, 1, 0, 0, n.cp15.control or 4)
+  discard b.read32(A + 0x3800)
+  check n.tm.dcache.find_slot(A + 0x3800) >= 0, "a page loaded uncached while the cache was off is cached when it is on"
+  # DTCM over main RAM: moved away, the window's old pages are main RAM again
+  const D = 0x0230_0000'u32
+  b7.write32(D + 0x10, 0x6666_6666'u32)
+  b7.write32(D + 0x20, 0x6767_6767'u32)
+  b.cp15_write(0, 9, 1, 0, D or 0x0A)                     # DTCM 16 KB at D
+  b.write32(D + 0x10, 0x7777_7777'u32)
+  b.write32(D + 0x20, 0x7878_7878'u32)
+  check b.read32(D + 0x10) == 0x7777_7777'u32, "DTCM over main RAM"
+  b.cp15_write(0, 1, 0, 0, n.cp15.control or (1'u32 shl 17))   # DTCM load mode
+  check b.read32(D + 0x20) == 0x6767_6767'u32, "DTCM load mode: loads read main RAM"
+  b.cp15_write(0, 1, 0, 0, n.cp15.control and not (1'u32 shl 17))
+  check b.read32(D + 0x20) == 0x7878_7878'u32, "load mode off: DTCM"
+  # DMA does not see the TCMs (GBATEK "DS Memory Control - Cache and TCM")
+  b.write32(0x0400_00B0'u32, D + 0x20)                    # DMA0 SAD
+  b.write32(0x0400_00B4'u32, 0x0231_0000'u32)             # DMA0 DAD
+  b.write32(0x0400_00B8'u32, 0x8400_0001'u32)             # immediate, 32-bit, 1 unit
+  check b7.read32(0x0231_0000'u32) == 0x6767_6767'u32, "DMA reads main RAM behind DTCM"
+  let saved = n.state_bytes()
+  b.write32(D + 0x14, 0x7979_7979'u32)                    # D entered as DTCM for stores...
+  check b.read32(D + 0x10) == 0x7777_7777'u32, "DTCM again"   # ...and loads
+  b.cp15_write(0, 9, 1, 0, 0x0080_000A'u32)               # DTCM back where direct boot put it
+  check b.read32(D + 0x10) == 0x6666_6666'u32 and b.read32(0x0080_0010'u32) == 0x7777_7777'u32,
+        "DTCM moved away: its old pages are main RAM again"
+  b.write32(D + 0x30, 0x6868_6868'u32)
+  let n2 = machine()
+  let c = Arm9Bus(nds: n2)
+  c.cp15_write(0, 9, 1, 0, D or 0x0A)
+  discard c.read32(D + 0x30)                              # n2 enters D as DTCM...
+  check n2.load_state_bytes(n.state_bytes()), "state loads"
+  check c.read32(D + 0x30) == 0x6868_6868'u32, "...and a loaded state with DTCM elsewhere reads main RAM"
+  check n2.load_state_bytes(saved) and c.read32(D + 0x10) == 0x7777_7777'u32,
+        "a loaded state with DTCM at D reads DTCM"
+
+block fetch_jumps:
+  # bus9.nim fetch_jump9 / bus7.nim fetch_jump7: a jump inside the page the
+  # fast path holds skips fetch_cost9 / fetch_cost7. Random jumps and runs
+  # over ITCM, BIOS and main RAM pages (lines cached, kept, apart; another
+  # CPU writing behind) on two machines, one of them taking the long way
+  # every time (fetch_paths_off before each fetch): every opcode, the
+  # charged cycles and the trackers must agree.
+  echo "fetch jumps match the long way"
+  var ms: array[2, NDS]
+  for k in 0..1:
+    let n = machine()
+    n.arm9.wl_on = false
+    n.arm7.wl_on = false
+    n.cache_on(write_back = true)
+    let b = Arm9Bus(nds: n)
+    b.cp15_write(0, 6, 3, 0, 0x0000_0031'u32)             # region 3: 0-32 MB (ITCM)
+    b.cp15_write(0, 6, 4, 0, 0xFFFF_001F'u32)             # region 4: the BIOS, 64 KB
+    b.cp15_write(0, 5, 0, 2, 0x33333)                     # AP 3, regions 0-4
+    b.cp15_write(0, 5, 0, 3, 0x33333)
+    b.cp15_write(0, 2, 0, 1, 0x12)                        # I-cachable: regions 1, 4
+    b.cp15_write(0, 9, 1, 1, 0x0C)                        # ITCM 32 KB at 0
+    b.cp15_write(0, 1, 0, 0, n.cp15.control or (1'u32 shl 12) or (1'u32 shl 18))
+    for i in 0'u32 ..< 0x8000: n.main_ram[0x24_0000 + int(i)] = uint8(i * 7 + 3)
+    for i in 0'u32 ..< 0x2000: n.itcm[int(i)] = uint8(i * 5 + 1)
+    for i in 0'u32 ..< 0x2000: n.arm7_wram[int(i)] = uint8(i * 3 + 2)
+    ms[k] = n
+  var r = 0x1234_5678'u32
+  proc rnd(r: var uint32; m: uint32): uint32 =
+    r = r * 1103515245'u32 + 12345'u32
+    (r shr 8) mod m
+  var same9, same7 = true
+  var where = ""
+  const BASES9 = [0x0224_0000'u32, 0x0224_1000, 0x0000_1000, 0xFFFF_0000'u32]
+  const BASES7 = [0x0380_0000'u32, 0x0380_1000, 0x0224_2000, 0x0000_0000]
+  var pc9 = BASES9[0]
+  var pc7 = BASES7[0]
+  for step in 0 ..< 20000:
+    let op = r.rnd(100)
+    if op < 12:                                          # a jump: in the line, the page or elsewhere
+      let kind = r.rnd(3)
+      if kind == 0: pc9 = (pc9 and not 31'u32) or (r.rnd(8) * 4)
+      elif kind == 1: pc9 = (pc9 and not 0xFFF'u32) or (r.rnd(1024) * 4)
+      else: pc9 = BASES9[r.rnd(4)] + r.rnd(1024) * 4
+    elif op < 24:
+      let kind = r.rnd(3)
+      if kind == 0: pc7 = (pc7 and not 31'u32) or (r.rnd(8) * 4)
+      elif kind == 1: pc7 = (pc7 and not 0xFFF'u32) or (r.rnd(1024) * 4)
+      else: pc7 = BASES7[r.rnd(4)] + r.rnd(1024) * 4
+    elif op < 26:
+      # memory behind the code: the ARM7 writes a line, the ARM9 dirties one
+      let a = 0x0224_0000'u32 + r.rnd(0x2000) * 4
+      let v = r.rnd(0xFFFF)
+      for n in ms: Arm7Bus(nds: n).write32(a, v)
+    elif op < 28:
+      let a = 0x0224_0000'u32 + r.rnd(0x2000) * 4
+      for n in ms:
+        discard Arm9Bus(nds: n).read32(a)
+        Arm9Bus(nds: n).write32(a, 0x5A5A_0000'u32 + uint32(step))
+    elif op < 29 and (step and 64) == 0 and (pc9 and 3) == 0:
+      # drop a code line (an MCR: ARM code, the next fetch is a new word)
+      for n in ms: Arm9Bus(nds: n).cp15_write(0, 7, 5, 1, pc9)
+    var v9, v7: array[2, uint32]
+    let thumb = (step and 64) != 0
+    if not thumb:
+      pc9 = pc9 and not 3'u32
+      pc7 = pc7 and not 3'u32
+    for k in 0..1:
+      let n = ms[k]
+      if k == 1: n.fetch_paths_off()
+      v9[k] = if thumb: Arm9Bus(nds: n).fetch16(pc9) else: Arm9Bus(nds: n).fetch32(pc9)
+      if k == 1: n.fetch_paths_off()
+      v7[k] = if thumb: Arm7Bus(nds: n).fetch16(pc7) else: Arm7Bus(nds: n).fetch32(pc7)
+    let a = ms[0]
+    let c = ms[1]
+    if same9 and (v9[0] != v9[1] or a.wait9 != c.wait9 or a.last_pc9 != c.last_pc9 or
+                  a.last_fetch9 != c.last_fetch9 or a.last_data9 != c.last_data9 or
+                  a.tm.icache.last != c.tm.icache.last or a.pu_ok != c.pu_ok):
+      same9 = false; where.add " arm9@" & $step
+      echo "  first difference: pc9=", toHex(pc9), " thumb=", thumb, " op=", op, " v=", toHex(v9[0]), "/", toHex(v9[1]), " wait=", a.wait9, "/", c.wait9,
+           " lastpc=", toHex(a.last_pc9), "/", toHex(c.last_pc9), " lf=", toHex(a.last_fetch9), "/", toHex(c.last_fetch9),
+           " ld=", toHex(a.last_data9), "/", toHex(c.last_data9), " ic=", toHex(a.tm.icache.last), "/", toHex(c.tm.icache.last),
+           " pu=", toHex(a.pu_ok[0]), "/", toHex(c.pu_ok[0])
+    if same7 and (v7[0] != v7[1] or a.wait7 != c.wait7 or a.last_fetch7 != c.last_fetch7 or
+                  a.last_data7 != c.last_data7):
+      same7 = false; where.add " arm7@" & $step
+    pc9 += (if thumb: 2 else: 4)
+    pc7 += (if thumb: 2 else: 4)
+  check(same9 and same7, "ARM9 and ARM7: every fetch as the long way gives it", where)
+  # a jump in the fast line from User mode: the protection unit is asked
+  # again (its remembered page is per privilege)
+  let n = machine()
+  n.arm9.wl_on = false
+  n.cache_on(write_back = true)
+  let b = Arm9Bus(nds: n)
+  b.cp15_write(0, 2, 0, 1, 0x02)
+  b.cp15_write(0, 5, 0, 3, 0x313)                         # code AP: region 1 privileged only
+  b.cp15_write(0, 1, 0, 0, n.cp15.control or (1'u32 shl 12))
+  const P = 0x0225_0000'u32
+  discard b.fetch32(P)
+  discard b.fetch32(P + 4)
+  n.arm9.set_cpsr(0x10)                                   # User mode
+  n.arm9.abort = 0
+  discard b.fetch32(P + 12)                               # a jump inside the line
+  check(n.arm9.abort == ABORT_PREFETCH, "a User-mode jump into privileged code aborts",
+        "abort " & $n.arm9.abort)
+
+block data_tlb_random:
+  # The data TLB against the general path: random loads and stores (8, 16,
+  # 32 bits) over DTCM, cached main RAM and its uncached mirror, mixed with
+  # what changes the answer under them -- C7 clean / invalidate, the ARM7
+  # and DMA writing behind the cache, the cache, its regions and the write
+  # buffer switched, DTCM moved -- on two machines, one dropping its TLB
+  # before every access: every value, charge, tracker and epoch must agree,
+  # and the whole state every 500 steps.
+  echo "data accesses match the long way"
+  var ms: array[2, NDS]
+  for k in 0..1:
+    let n = machine()
+    n.arm9.wl_on = false
+    n.arm7.wl_on = false
+    n.cache_on(write_back = true)
+    for i in 0 ..< 0x4000: n.main_ram[0x26_0000 + i] = uint8(i * 13 + 5)
+    ms[k] = n
+  var r = 0x2468_ACE0'u32
+  proc rnd(r: var uint32; m: uint32): uint32 =
+    r = r * 1103515245'u32 + 12345'u32
+    (r shr 8) mod m
+  const AREAS = [0x0226_0000'u32, 0x0266_0000, 0x0080_0000, 0x0226_2000]   # cached, uncached, DTCM
+  var same = true
+  var where = ""
+  for step in 0 ..< 30000:
+    let op = r.rnd(1000)
+    let a = AREAS[r.rnd(4)] + r.rnd(0x800) * 4
+    let v = r.rnd(0x7FFF_FFFF)
+    if op < 6:
+      let line = 0x0226_0000'u32 + r.rnd(0x400) * 32
+      let cm = [6'u32, 10, 14][r.rnd(3)]
+      for n in ms: Arm9Bus(nds: n).cp15_write(0, 7, cm, 1, line)
+    elif op < 12:
+      let behind = 0x0226_0000'u32 + r.rnd(0x1000) * 4
+      for n in ms: Arm7Bus(nds: n).write32(behind, v)
+    elif op < 14:
+      let src = 0x0226_0000'u32 + r.rnd(0x800) * 4
+      let dst = 0x0226_0000'u32 + r.rnd(0x800) * 4
+      for n in ms:
+        let b = Arm9Bus(nds: n)
+        b.write32(0x0400_00B0'u32, src)
+        b.write32(0x0400_00B4'u32, dst)
+        b.write32(0x0400_00B8'u32, 0x8400_0008'u32)       # immediate, 8 words
+    elif op < 15:
+      let bit = [4'u32, 1, 1'u32 shl 16, 1'u32 shl 17][r.rnd(4)]   # D-cache, PU, DTCM, load mode
+      for n in ms: Arm9Bus(nds: n).cp15_write(0, 1, 0, 0, n.cp15.control xor bit)
+    elif op < 16:
+      let dc = [0x02'u32, 0x00, 0x06][r.rnd(3)]
+      let wb = [0x02'u32, 0x00, 0x06][r.rnd(3)]
+      for n in ms:
+        Arm9Bus(nds: n).cp15_write(0, 2, 0, 0, dc)             # cachable regions
+        Arm9Bus(nds: n).cp15_write(0, 3, 0, 0, wb)             # write-buffered regions
+    elif op < 17:
+      let base = [0x0080_0000'u32, 0x0226_2000][r.rnd(2)]
+      for n in ms: Arm9Bus(nds: n).cp15_write(0, 9, 1, 0, base or 0x0A)
+    var got: array[2, uint32]
+    let width = [8, 16, 32][r.rnd(3)]
+    let store = r.rnd(2) == 0
+    for k in 0..1:
+      let n = ms[k]
+      if k == 1: n.dtlb_off()
+      let b = Arm9Bus(nds: n)
+      if store:
+        case width
+        of 8: b.write8(a, uint8(v))
+        of 16: b.write16(a, uint16(v))
+        else: b.write32(a, v)
+      else:
+        got[k] = case width
+                 of 8: b.read8(a)
+                 of 16: b.read16(a)
+                 else: b.read32(a)
+    let x = ms[0]
+    let y = ms[1]
+    if same and (got[0] != got[1] or x.wait9 != y.wait9 or x.last_data9 != y.last_data9 or
+                 x.tm.dcache.last != y.tm.dcache.last or x.idle_epoch != y.idle_epoch or
+                 x.idle_epoch9 != y.idle_epoch9 or
+                 (step mod 500 == 499 and x.state_payload() != y.state_payload())):
+      same = false
+      where.add " step " & $step & " " & toHex(a) & (if store: " store" else: " load") & $width
+      for i in 0 ..< x.main_ram.len:
+        if x.main_ram[i] != y.main_ram[i]:
+          echo "  main_ram differs at ", toHex(i), ": ", x.main_ram[i], " / ", y.main_ram[i]; break
+      for i in 0 ..< x.dtcm.len:
+        if x.dtcm[i] != y.dtcm[i]:
+          echo "  dtcm differs at ", toHex(i); break
+      for i in 0 ..< 128:
+        if x.tm.dline[i] != y.tm.dline[i]:
+          echo "  dline ", i, " differs: ", x.tm.dline[i].line1, "/", y.tm.dline[i].line1, " dirty ",
+               x.tm.dline[i].dirty, "/", y.tm.dline[i].dirty, " sh ", x.tm.dline[i].shadowed, "/", y.tm.dline[i].shadowed
+      if x.tm.slot_of != y.tm.slot_of: echo "  slot_of differs"
+      if x.tm.page_apart != y.tm.page_apart: echo "  page_apart differs"
+      if x.pu_ok != y.pu_ok: echo "  pu_ok differs ", x.pu_ok, " ", y.pu_ok
+      if x.cp15 != y.cp15: echo "  cp15 differs"
+      if x.tm.icache.last != y.tm.icache.last: echo "  icache last differs"
+  check(same, "every load and store as the general path gives it", where)
 
 block irq_at_next_opcode:
   # arm/cpu.nim run checks halt and the IRQ line only when `attn` says they

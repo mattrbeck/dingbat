@@ -18,20 +18,28 @@ proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.}
 proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.}
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.}
 proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.}
+proc read16*(b: Dma9Bus; a: uint32): uint32 {.inline.}
+proc read32*(b: Dma9Bus; a: uint32): uint32 {.inline.}
+proc write16*(b: Dma9Bus; a: uint32; v: uint16) {.inline.}
+proc write32*(b: Dma9Bus; a: uint32; v: uint32) {.inline.}
 
 # Idle-loop skipping (arm/cpu.nim loop_edge): the epoch, and the timing
 # state that decides what the next accesses cost.
 proc idle_epoch*(b: Arm9Bus): uint64 {.inline.} = b.nds.idle_epoch + b.nds.idle_epoch9
+proc ev_epoch*(b: Arm9Bus): uint64 {.inline.} = b.nds.ev_epoch
+proc dev_read*(b: Arm9Bus): bool {.inline.} = b.nds.dev9
+proc clear_dev*(b: Arm9Bus) {.inline.} = b.nds.dev9 = false
 proc idle_sig*(b: Arm9Bus): IdleSig {.inline.} =
   let n {.cursor.} = b.nds
   [n.last_fetch9, n.last_data9, n.last_pc9, n.pu_ok[0], n.pu_ok[1], n.pu_ok[2],
    n.tm.icache.last, n.tm.dcache.last]
 
-proc dma_stall*(b: Arm9Bus; cycles: int64) =
+proc dma_stall*(b: Dma9Bus; cycles: int64) =
   ## A DMA held the bus: the CPU resumes `cycles` after the later of its own
   ## clock and the transfer's start.
   let n {.cursor.} = b.nds
   n.arm9.cycles = max(n.arm9.cycles, n.sched.now) + cycles
+  inc n.idle_epoch            # the CPU's clock moved (arm/cpu.nim loop_edge)
 
 # --- I/O ---------------------------------------------------------------
 
@@ -133,7 +141,7 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x0B0 .. 0x0EC:
     var was: array[4, bool]
     for i in 0..3: was[i] = n.dma9.ch[i].enabled
-    n.dma9.write_reg(Arm9Bus(nds: n), o, v, mask)
+    n.dma9.write_reg(Dma9Bus(nds: n), o, v, mask)
     # a channel (re)started mid-frame waits for the next frame in mode 4
     for i in 0..3:
       if n.dma9.ch[i].enabled and not was[i]: n.mmem_armed[i] = false
@@ -191,13 +199,13 @@ proc pal_oam_on(n: NDS; a: uint32): bool {.inline.} =
   ## disp_powcnt in the reference runs (docs/oracles.md).
   (n.gpu.powcnt1 and (if (a and 0x400) == 0: 2'u16 else: 0x200'u16)) != 0
 
-proc in_itcm(n: NDS; a: uint32; write: bool): bool {.inline.} =
+proc in_itcm(n: NDS; a: uint32; write: bool): bool {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## Load mode (CP15 control bit 19) makes the TCM write-only for data:
   ## reads fall through to the memory behind it.
   n.cp15.itcm_enabled and a < n.cp15.itcm_size and not n.dma9.dma_access and
     (write or not n.cp15.itcm_load_mode)
 
-proc in_dtcm(n: NDS; a: uint32; write: bool): bool {.inline.} =
+proc in_dtcm(n: NDS; a: uint32; write: bool): bool {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   n.cp15.dtcm_enabled and a >= n.cp15.dtcm_base and
     a - n.cp15.dtcm_base < n.cp15.dtcm_size and not n.dma9.dma_access and
     (write or not n.cp15.dtcm_load_mode)
@@ -366,7 +374,7 @@ proc dc_invalidate_all(n: NDS) =
   for slot in 0 ..< n.tm.dline.len: n.dc_drop(slot, false)
   n.tm.dcache.invalidate()
 
-proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
+proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## Charge a CPU data access outside the TCMs (timing.nim); DMA's own
   ## accesses are not charged.
   if n.dma9.dma_access: return
@@ -419,7 +427,61 @@ template pu_check9(n: NDS; a: uint32; kind: static int): bool =
   if likely(key == n.pu_ok[kind]): false
   else: n.pu_refuse9(a, kind, key)
 
-proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): uint32 =
+# --- ARM9 data TLB ----------------------------------------------------------
+#
+# Most ARM9 data accesses go to DTCM or to main RAM through the data cache
+# (SoulSilver's overworld: 33 M of 47 M in 600 frames). What the general
+# path decides for them depends on the page alone -- the TCM windows, the
+# load modes, the data cache's enable and the page's cachability, all CP15
+# state -- and, for main RAM, on the line: a tag hit costs nothing and
+# reads or writes the CPU's copy in `main_ram` (`dc_hit`: a hit is the line
+# under this very address, so `dc_apart` does not matter), a store into a
+# hit dirty line just stores. So a page is entered in the TLB (`rtlb9` for
+# loads, `wtlb9` for stores: load mode splits them) when the general path
+# finds it DTCM or main RAM, and `read32` .. `write32` take the short path
+# for it: DTCM always; cached main RAM on a tag hit (a dirty one for a
+# store); a store to a line no cache holds, and a load from an uncached
+# page with nothing apart, at the uncached charge; everything else, misses
+# included, goes the general way, which does the lookup, fill and charges
+# itself. The CPU's accesses only: DMA
+# goes through `Dma9Bus` (TCMs invisible, nothing charged). The entries
+# follow CP15 state only, so they are dropped by a CP15 write that changes
+# the TCMs, the protection unit's regions, the cache enables or
+# cachability (`cp15_write`), WRAMCNT and a state load (`fetch_paths_off`);
+# line state (fills, evictions, C7 clean / invalidate, DMA and the ARM7
+# writing behind the cache) is checked at every access.
+
+proc dtlb_fill9(n: NDS; a: uint32; write: bool; kind: uint32) =
+  ## Enter `a`'s page, found DTCM or cached main RAM by the general path.
+  ## TCM windows and protection regions are 4 KB multiples, so the page is
+  ## all one or the other. (DTCM may lie over main RAM's addresses.)
+  let i = int((a shr 12) and (DTLB_SIZE - 1))
+  template t: untyped = (if write: n.wtlb9[i] else: n.rtlb9[i])
+  if t.tag == a shr 12 and t.kind == kind: return   # (a miss in an entered page)
+  var e = DtlbEntry(tag: a shr 12, kind: kind)
+  if kind == DT_DTCM:
+    e.base = cast[ptr UncheckedArray[uint8]](addr n.dtcm[int((a - n.cp15.dtcm_base) and 0x3000)])
+  else:
+    e.base = cast[ptr UncheckedArray[uint8]](addr n.main_ram[int(a and 0x3FF000)])
+  let li = uint16(i) or (if write: 0x8000'u16 else: 0'u16)
+  if (kind and 3) == DT_MAIN or ((kind and 3) == DT_UNC and n.tm.data_cachable(a)):
+    if n.dtlb_dlogged < DTLB_LOG: n.dtlb_dlog[n.dtlb_dlogged] = li
+    inc n.dtlb_dlogged
+  else:
+    if n.dtlb_logged < DTLB_LOG: n.dtlb_log[n.dtlb_logged] = li
+    inc n.dtlb_logged
+  if write: n.wtlb9[i] = e
+  else: n.rtlb9[i] = e
+
+template dtlb_hit9(n: NDS; a: uint32): bool =
+  ## A data-cache hit on main RAM address `a` (`lookup` without allocating:
+  ## a hit makes the line `last`, as the general path's lookup would).
+  (a shr 5) + 1 == n.tm.dcache.last or n.tm.dcache.hit_line(a)
+
+proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false;
+           cpu: static bool = false): uint32 =
+  ## `timed`: a CPU or DMA access (charged, protection-checked); `cpu`: the
+  ## CPU's own, which may enter the page in the data TLB.
   template rd(s: seq[uint8]; i: int): uint32 =
     when width == 32: rd32(s, i)
     elif width == 16: rd16(s, i)
@@ -430,6 +492,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
       n.charge9_tcm(a, true)
     return rd(n.itcm, int(a and 0x7FFF))
   if n.in_dtcm(a, false):
+    when cpu: n.dtlb_fill9(a, false, DT_DTCM)
     when timed: n.charge9_tcm(a, false)
     return rd(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF))
   when timed:
@@ -437,6 +500,9 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     n.charge9(a, width, false)
   case a shr 24
   of 0x02:
+    when cpu:
+      if n.tm.dc_on and n.tm.data_cachable(a): n.dtlb_fill9(a, false, DT_MAIN)
+      elif n.tm.page_apart[(a and 0x3FFFFF) shr 12] == 0: n.dtlb_fill9(a, false, DT_UNC)
     let i = int(a and 0x3FFFFF)
     if unlikely(n.dc_apart(i)) and not n.dc_hit(a, n.dc_slot1(i shr 5) - 1):
       n.dc_mem_read(i, width)
@@ -448,6 +514,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
   of 0x04:
     n.sync9()
     n.arm9.attn = true          # a read side effect may raise an IRQ (arm/cpu.nim run)
+    when cpu: n.dev9 = true     # a device: what an event may change (arm/cpu.nim loop_edge)
     let w = n.io9_read(a and not 3'u32)
     let o = a and 0x00FF_FFFC'u32
     if not io9_steady(o):
@@ -459,6 +526,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
     else: (w shr ((a and 3) * 8)) and 0xFF
   of 0x05:
+    when cpu: n.dev9 = true
     if not n.pal_oam_on(a): return 0
     let p = cast[ptr UncheckedArray[uint8]](addr n.gpu.palette[0])
     let i = int(a and 0x7FF)
@@ -466,26 +534,31 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     elif width == 16: uint32(p[i]) or (uint32(p[i+1]) shl 8)
     else: uint32(p[i])
   of 0x06:
+    when cpu: n.dev9 = true
     var off: int
     let r = arm9_region(a, off)
     when width == 32: n.gpu.vram.read32(r, off)
     elif width == 16: uint32(n.gpu.vram.read16(r, off))
     else: uint32(n.gpu.vram.read8(r, off))
   of 0x07:
+    when cpu: n.dev9 = true
     if not n.pal_oam_on(a): return 0
     let p = cast[ptr UncheckedArray[uint8]](addr n.gpu.oam[0])
     let i = int(a and 0x7FF)
     when width == 32: uint32(p[i]) or (uint32(p[i+1]) shl 8) or (uint32(p[i+2]) shl 16) or (uint32(p[i+3]) shl 24)
     elif width == 16: uint32(p[i]) or (uint32(p[i+1]) shl 8)
     else: uint32(p[i])
-  of 0x08, 0x09, 0x0A: n.slot2_read(a, true, width)
+  of 0x08, 0x09, 0x0A:
+    when cpu: n.dev9 = true
+    n.slot2_read(a, true, width)
   of 0xFF:
     if a >= 0xFFFF0000'u32: rd(n.bios9, int(a and 0xFFF)) else: 0'u32
   else:
     n.note_unmapped("arm9", a, false)
     0'u32
 
-proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool = false) =
+proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool = false;
+            cpu: static bool = false) =
   watch_write(n, "9", n.arm9, a, v)
   template wr(s: var seq[uint8]; i: int; ep: untyped = n.idle_epoch) =
     # RAM: only a store that changes memory can end a polling loop (one
@@ -504,6 +577,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
       n.charge9_tcm(a, true)
     wr(n.itcm, int(a and 0x7FFF), n.idle_epoch9); return
   if n.in_dtcm(a, true):
+    when cpu: n.dtlb_fill9(a, true, DT_DTCM)
     when timed: n.charge9_tcm(a, false)
     wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF), n.idle_epoch9); return
   when timed:
@@ -512,6 +586,9 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
   if (a shr 24) - 2 >= 2: inc n.idle_epoch   # I/O, VRAM, palette, OAM, slot 2
   case a shr 24
   of 0x02:
+    when cpu:
+      n.dtlb_fill9(a, true, (if n.tm.dc_on and n.tm.data_cachable(a): DT_MAIN else: DT_UNC) or
+                            (if n.tm.data_buffered(a): DT_BUF else: 0'u32))
     let i = int(a and 0x3FFFFF)
     let held = n.tm.slot_of[i shr 5]
     let slot = int(held and 0xFF)
@@ -646,17 +723,95 @@ proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
     c += code9_uncached(a shr 24, n.slot9_t)
   n.wait9 += c
 
-proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 8, true)
-proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 16, true)
-proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 32, true)
+template dtlb_read9(n: NDS; a: uint32; T: typedesc) =
+  ## The data TLB's load: DTCM, or cached main RAM on a tag hit, is free
+  ## and reads the page (charge9_tcm / charge9 + read9 there); uncached main
+  ## RAM (a page with nothing apart) pays the uncached charge and reads
+  ## memory as it is.
+  when not defined(ndsdebug):
+    let e = addr n.rtlb9[int((a shr 12) and (DTLB_SIZE - 1))]
+    if likely(e.tag == a shr 12):
+      let p = cast[ptr T](addr e.base[a and 0xFFF])
+      if e.kind == DT_DTCM or (e.kind == DT_MAIN and n.dtlb_hit9(a)):
+        n.last_data9 = a
+        return uint32(p[])
+      if e.kind == DT_UNC:
+        let seq = a == n.last_data9 + (when sizeof(T) == 4: 4'u32 else: 2'u32)
+        n.last_data9 = a
+        n.wait9 += data9(0x02, sizeof(T) * 8, seq, n.slot9_t)
+        return uint32(p[])
+
+template dtlb_write9(n: NDS; a: uint32; v: typed; T: typedesc) =
+  ## The data TLB's store: DTCM, or a tag hit on a dirty line of cached
+  ## main RAM (write9's plain store; the hit makes the line `last`), costs
+  ## nothing; main RAM on a line no cache holds -- uncached, or a miss in a
+  ## cached page (no allocation on a store: the lookup changes nothing) --
+  ## pays the uncached or write-buffered charge and stores. Only a change
+  ## can end a polling loop. Not with -d:ndsdebug (write9 logs watched
+  ## words).
+  when not defined(ndsdebug):
+    let e = addr n.wtlb9[int((a shr 12) and (DTLB_SIZE - 1))]
+    if likely(e.tag == a shr 12):
+      let p = cast[ptr T](addr e.base[a and 0xFFF])
+      if e.kind == DT_DTCM:
+        n.sched.now = n.arm9.cycles       # sync9
+        n.last_data9 = a
+        if p[] != v:
+          inc n.idle_epoch9
+          p[] = v
+        return
+      let held = n.tm.slot_of[int((a and 0x3FFFFF) shr 5)]
+      let ds = int(held and 0xFF)
+      if held == 0 or ((e.kind and 3) == DT_MAIN and ds != 0 and
+                       n.tm.dline[ds - 1].tag1 == (a shr 5) + 1 and n.tm.dline[ds - 1].dirty):
+        if held != 0: n.tm.dcache.last = (a shr 5) + 1
+        else:
+          let seq = a == n.last_data9 + (when sizeof(T) == 4: 4'u32 else: 2'u32)
+          n.wait9 += (if (e.kind and DT_BUF) != 0: WBUF_WRITE
+                      else: data9(0x02, sizeof(T) * 8, seq, n.slot9_t))
+        n.sched.now = n.arm9.cycles
+        n.last_data9 = a
+        if p[] != v:
+          inc n.idle_epoch
+          p[] = v
+        return
+
+proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_read9(a, uint8)
+  n.read9(a, 8, true, true)
+proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_read9(a, uint16)
+  n.read9(a, 16, true, true)
+proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_read9(a, uint32)
+  n.read9(a, 32, true, true)
 
 proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.} =
-  b.nds.sync9()
-  b.nds.write9(a, uint32(v), 8, true)
+  let n {.cursor.} = b.nds
+  n.dtlb_write9(a, v, uint8)
+  n.sync9()
+  n.write9(a, uint32(v), 8, true, true)
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_write9(a, v, uint16)
+  n.sync9()
+  n.write9(a, uint32(v), 16, true, true)
+proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_write9(a, v, uint32)
+  n.sync9()
+  n.write9(a, v, 32, true, true)
+
+# The ARM9 DMA's accesses: the general path, without the data TLB.
+proc read16*(b: Dma9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 16, true)
+proc read32*(b: Dma9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 32, true)
+proc write16*(b: Dma9Bus; a: uint32; v: uint16) {.inline.} =
   b.nds.sync9()
   b.nds.write9(a, uint32(v), 16, true)
-proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
+proc write32*(b: Dma9Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.sync9()
   b.nds.write9(a, v, 32, true)
 
@@ -707,6 +862,7 @@ proc fetch_slow9(n: NDS; a: uint32; size: static uint32): uint32 {.noinline.} =
     if unlikely(n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0): return n.ic_code(a, int(size) * 8)
     return rd(n.main_ram, int(a and 0x3FFFFF))
   if a >= 0xFFFF0000'u32: return rd(n.bios9, int(a and 0xFFF))
+  n.dev9 = true                 # code in shared WRAM or a device (VRAM, ...)
   n.ic_code(a, int(size) * 8)
 
 template fetch_fast9(n: NDS; a: uint32; size: static uint32): bool =
@@ -726,6 +882,35 @@ template fetch_next9(n: NDS; a: uint32; size: static uint32): bool =
     (n.fitcm9 or (n.tm.icache.hit_line(a) and
       ((a shr 24) != 0x02 or n.tm.page_apart[(a and 0x3FFFFF) shr 12] == 0 or n.line_clean9(a))))
 
+template fetch_jump9(n: NDS; a: uint32): bool =
+  ## A jump (not to the next opcode) inside the 4 KB page of the line
+  ## `fetch_line9` set up, in the page the protection unit allowed last
+  ## (`pu_check9`'s remembered page and privilege): fetch_cost9 there only
+  ## calls the loop head, charges the refill and, for another line, does
+  ## the tag lookup -- when that line is ITCM, or an instruction-cache hit
+  ## (which makes it `last`; a miss changes nothing and goes the long way)
+  ## whose bytes are memory's (as `fetch_next9`). The same line is ITCM or
+  ## `last` already.
+  (a shr 12) == (n.fline9 shr 7) and
+    ((a shr 12) or (if (n.arm9.cpsr and 0x1F) == 0x10 and not n.arm9.bank_xfer: 0x8000_0000'u32
+                    else: 0'u32)) == n.pu_ok[0] and
+    ((a shr 5) == n.fline9 or n.fitcm9 or
+     (n.tm.icache.hit_line(a) and
+      ((a shr 24) != 0x02 or n.tm.page_apart[(a and 0x3FFFFF) shr 12] == 0 or n.line_clean9(a))))
+
+template fetch_jumped9(n: NDS; a: uint32) =
+  n.last_data9 = NO_ADDR
+  if a <= n.last_pc9:           # a backward branch's target: a loop head
+    if n.arm9.wl_cold > 0: dec n.arm9.wl_cold
+    elif n.arm9.wl_on: n.arm9.loop_edge()
+  n.last_pc9 = a
+  n.last_fetch9 = a and not 3'u32
+  n.wait9 += BRANCH9
+  # the line's bytes: the page is one block on the host (ITCM, main RAM, BIOS)
+  n.fptr9 = cast[ptr UncheckedArray[uint8]](cast[int](n.fptr9) +
+                                            (int(a shr 5) - int(n.fline9)) * 32)
+  n.fline9 = a shr 5
+
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
   if likely(n.fetch_fast9(a, 4)):
@@ -740,6 +925,9 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     n.last_pc9 = a
     n.last_fetch9 = a
     return cast[ptr uint32](addr n.fptr9[0])[]
+  if n.fetch_jump9(a):
+    n.fetch_jumped9(a)
+    return cast[ptr uint32](addr n.fptr9[a and 31])[]
   n.fetch_slow9(a, 4)
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
@@ -756,6 +944,9 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     n.last_pc9 = a
     n.last_fetch9 = a
     return uint32(cast[ptr uint16](addr n.fptr9[0])[])
+  if n.fetch_jump9(a):
+    n.fetch_jumped9(a)
+    return uint32(cast[ptr uint16](addr n.fptr9[a and 31])[])
   n.fetch_slow9(a, 2)
 
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()
@@ -779,6 +970,7 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
     (c.dcache_cfg, c.icache_cfg, c.wbuf_cfg, c.data_perm, c.code_perm, c.prot_regions)
   let ctl_before = n.cp15.control
   let before = tables(n.cp15)
+  let dc_before = n.tm.dc_on
   n.cp15.write(op1, cn, cm, op2, v)
   case cn
   of 1, 2, 3, 5, 6:
@@ -788,9 +980,16 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
     if tables(n.cp15) != before:
       n.tm.update_regions(n.cp15)
       n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
+      n.dtlb_off()              # cachability
     elif n.cp15.control != ctl_before:
       n.tm.update_control(n.cp15)
       n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
+      # the data TLB: TCM enables and load modes (bits 16-19) move pages
+      # between DTCM, ITCM and memory; the data cache's enable (the PU's
+      # included) decides cached main RAM
+      if ((n.cp15.control xor ctl_before) and 0xF_0000'u32) != 0: n.dtlb_off()
+      elif n.tm.dc_on != dc_before: n.dtlb_dc_switched()
+  of 9: n.dtlb_off()            # TCM windows
   of 7:
     # cache maintenance (GBATEK "ARM CP15 Cache Control"): C5 invalidate
     # the instruction cache, whole (op2 0) or the line at an address
