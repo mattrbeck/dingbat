@@ -27,7 +27,8 @@ header (`libretro.h`, MIT, vendored here) is used.
         [--wav OUT.wav] [--bios DIR] [--sysfile NAME=PATH]
         [--opt KEY=VALUE].. [--opts-file FILE].. [--no-core-opts]
         [--list-opts] [--layout auto|tb|bt|lr|rl] [--depth5]
-        [--workdir DIR] [--no-final] [--slot2 GBA[,SAVE]] [--rumble-log] [-v|-vv]
+        [--workdir DIR] [--no-final] [--slot2 GBA[,SAVE]] [--rumble-log]
+        [--ram-peek A1,..] [--ram-shots F1,..] [--sram FILE] [--sram-out FILE] [-v|-vv]
 
 - `--core` takes a path to a libretro core, or a short NAME looked up as
   `NAME`, `NAME_libretro.dylib/.so/.dll` in `$NDSREF_CORES`, then
@@ -70,6 +71,13 @@ header (`libretro.h`, MIT, vendored here) is used.
 - `--depth5` keeps the top 5 bits of each channel and widens them as
   `ndsrun` does (`(c << 3) | (c >> 2)`). Cores that output RGB565 or 6-bit
   widened XRGB8888 differ from `ndsrun` by 2-4 per channel without it.
+- `--ram-peek A1,..` prints those 32-bit words of the core's system RAM
+  (`RETRO_MEMORY_SYSTEM_RAM`, main RAM for the DS cores) after every frame
+  as `peek F A=V ..`, the format of `ndsrun --ram-peek`; `--ram-shots
+  F1,..` writes the whole of it to `PREFIX_ram_<F>.bin` after frame F
+  (`ndsrun --ram-shots` writes ours). With them a game's own counters and
+  random-number state can be followed in both runs (docs/nds/commercial.md).
+  `--sram-out FILE` writes the cart's save memory after the run.
 - `--slot2 GBA[,SAVE]` loads the ROM with a GBA ROM (and its save) in the
   GBA slot through the core's first subsystem that takes two or more files
   (`-v` lists the subsystems; melonDS DS calls it `gba`, "Slot 1 & 2

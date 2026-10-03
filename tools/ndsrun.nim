@@ -24,6 +24,10 @@
 ## it at every --shots frame too.
 ## --bgshot A0 draws that text BG straight from VRAM into the PNG's top half
 ## (no scroll/priority/blending).
+## --ram-peek A1,.. prints those 32-bit main RAM words (the CPU's view, untimed)
+## after every frame: "peek F A=V ..", as ndsref --ram-peek does.
+## --ram-shots F1,.. writes main RAM (4 MB, the CPU's view, untimed) to
+## <out>_ram_<F>.bin after frame F (to compare with ndsref --ram-shots).
 ## --dump9/--dump7 ADDR:LEN:FILE writes LEN bytes read through that CPU's bus at the
 ## end of the run to FILE (hex ADDR/LEN), for disassembly.
 ## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
@@ -255,6 +259,8 @@ when isMainModule:
   var presses: seq[Press]
   var shot = ""
   var shots: seq[int]
+  var ram_shots: seq[int]
+  var ram_peek: seq[uint32]
   var tops: seq[seq[uint32]]
   var peek9, peek7: seq[uint32]
   var dumps: seq[(bool, uint32, int, string)]
@@ -325,6 +331,10 @@ when isMainModule:
         for a in val.split(','): peek7.add uint32(parseHexInt(a))
       of "shots":
         for f in val.split(','): shots.add parseInt(f)
+      of "ram-peek":
+        for a in val.split(','): ram_peek.add uint32(parseHexInt(a))
+      of "ram-shots":
+        for f in val.split(','): ram_shots.add parseInt(f)
       of "iolog": iolog = true
       of "spilog": spilog = true
       of "cartlog": cartlog = true
@@ -439,6 +449,18 @@ when isMainModule:
         writeFile(file, pack_state(image))
         echo "state: frame ", at, " -> ", file, " (", image.len, " bytes, ",
              readFile(file).len, " packed)"
+    if ram_peek.len > 0:
+      var line = "peek " & $(f + 1)
+      for a in ram_peek:
+        let i = int(a and 0x3FFFFC'u32)
+        let v = uint32(n.main_ram[i]) or (uint32(n.main_ram[i+1]) shl 8) or
+                (uint32(n.main_ram[i+2]) shl 16) or (uint32(n.main_ram[i+3]) shl 24)
+        line.add " " & toHex(a, 8) & "=" & toHex(v, 8)
+      echo line
+    if f + 1 in ram_shots:
+      var bytes = newString(0x400000)
+      for i in 0 ..< 0x400000: bytes[i] = char(n.main_ram[i])   # untimed: the CPU's view
+      writeFile(outp.changeFileExt("") & "_ram_" & $(f + 1) & ".bin", bytes)
     if f + 1 in shots:
       let px = n.screens_rgba()
       write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)
