@@ -79,7 +79,8 @@ const
   # reuse_*/last_*: what the last real render drew (render_frame); the
   # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh
   GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",
-                "last_disp3dcnt", "last_param", "last_regs", "last_polys", "last_verts"]
+                "last_disp3dcnt", "last_param", "last_regs", "last_polys", "last_verts",
+                "last_is_cur"]
   # Per-frame scratch: render_frame's clear() rewrites depth, IDs, flags and
   # coverage and the layer behind (`below`, `below_depth`) before anything
   # reads them, the page pointers and `order` are rebuilt
