@@ -493,9 +493,13 @@ off, and the HLE run the base's shots; Continue from the New Bark save
 (c3) gives hle 6b9b805f, bios 228bc64d. Every commit ran the homebrew set
 (the 152 ROMs under `homebrew*/`) with skipping on and off: whole-state
 hashes every 30 frames, final screen, three shots, sound and opcode
-counts equal on/off and to the base. New invalidation rules each have a
-test that fails when the rule is removed (above; the mutation runs are in
-the round's scratch directory).
+counts equal on/off and to the base; the final build ran all 507 ROMs in
+the cache the same way (our tests, the 3D suite, BlocksDS tests and
+examples, gbeplus, homebrew, libnds examples): all equal, host
+instructions 4028.8 -> 3571.1 G (-11.4 %, loading included), none more
+than 1 % slower than the base. New invalidation rules each have a test
+that fails when the rule is removed (above; the mutation runs are in the
+round's scratch directory).
 
 ### Where the host instructions go (round 3)
 
