@@ -40,6 +40,8 @@ OUT = os.path.join(payloadcmp.ROMS, 'cyclelaws')
 # 0x0's return address used to be the one exception.
 HLE_EXCEPTIONS = {}
 
+from r0table import NEEDS_CART   # noqa: E402
+
 
 def kind_of(row, arg):
     if row.payload != 'breakram':
@@ -59,6 +61,10 @@ def build():
     """[(payload, ROM bytes, its laws.json entry)]"""
     out = []
     for payload, group in tables.by_payload(tables.rows()).items():
+        # a cartridge chip's analog time (r0table.NEEDS_CART) is not a
+        # console law: those rows stay out of the frozen ROMs
+        if payload in NEEDS_CART:
+            continue
         group = [settled(r) for r in group]
         args = [a for r in group for a in r.args]
         data = bytearray(open(payloadcmp.build_wrapper(tables.source(payload), args), 'rb').read())
