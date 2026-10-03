@@ -201,8 +201,15 @@ proc gate_opened*(intr: Interrupts) =
   intr.gate_open_at = intr.gba.scheduler.cycles + CycleCount(IRQ_GATE_DELAY)
   intr.schedule_interrupt_check(IRQ_GATE_DELAY)
 
+proc stop_key_condition(kp: Keypad): bool  # keypad.nim
+
 proc check_interrupts*(intr: Interrupts) =
   var pending = uint16(intr.reg_ie) and uint16(intr.reg_if)
+  # Stop also ends while the KEYCNT key condition holds (keypad enabled in
+  # IE), whatever KEYCNT's IRQ enable and IF say (keypad.nim
+  # stop_key_condition): no interrupt is raised by it.
+  let key_wake = intr.gba.cpu.stopped and intr.reg_ie.keypad and
+                 intr.gba.keypad.stop_key_condition()
   if DMA_STALLS_IRQ_SYNC and intr.pipe_raised != 0 and intr.gba.bus.dma_active and
      not intr.gba.cpu.halted:
     # A check dispatched inside a burst (its transfer loop drains due events
@@ -218,8 +225,8 @@ proc check_interrupts*(intr: Interrupts) =
       pending = pending or intr.pipe_bits
       intr.pipe_raised = 0
   intr.gba.cpu.irq_line = false
-  if pending != 0:
-    if intr.gba.cpu.stopped and (pending and STOP_WAKE_MASK) == 0:
+  if pending != 0 or key_wake:
+    if intr.gba.cpu.stopped and (pending and STOP_WAKE_MASK) == 0 and not key_wake:
       return  # Stop mode ignores other interrupt sources
     if intr.gba.cpu.stopped:
       # Waking from Stop turns the LCD back on without a memory write.
@@ -230,7 +237,7 @@ proc check_interrupts*(intr: Interrupts) =
     intr.gba.cpu.halted = false
     # the CPU's fetches take the bus back (DMA_BUS_WHILE_HALTED)
     intr.gba.bus.dma_bus_left = false
-    if intr.ime and intr.gba.scheduler.cycles >= intr.gate_open_at:
+    if pending != 0 and intr.ime and intr.gba.scheduler.cycles >= intr.gate_open_at:
       intr.gba.cpu.irq_line = true
       intr.gba.cpu.irq_line_at = intr.gba.scheduler.cycles
       when defined(itrace):

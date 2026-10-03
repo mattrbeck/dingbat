@@ -37,10 +37,14 @@
 @ KEYCNT, IE and IME are put back.
 @
 @ Argument bit 31 (ad hoc only, NOT in the r0table row): IE = keypad,
-@ KEYCNT 0xC000, IF clean, then SWI 3 (Stop). The answer is 0x57000000 |
-@ IF bit 12 if the console comes back -- the vacuous condition ends a Stop,
-@ as Ghost Rider's second Stop needs. If it does not come back, nothing
-@ else can wake it here: the console needs a power cycle.
+@ KEYCNT 0xC000 (bit 0 of the argument clear) or 0x8000 (set: the IRQ
+@ enable off), IF clean, then SWI 3 (Stop). The answer is 0x57000000 | IF
+@ bit 12 if the console comes back: the vacuous condition ends a Stop, as
+@ Ghost Rider's second Stop needs (0xC000), and does so without KEYCNT's
+@ IRQ enable, as the 0x8304 sleepers need (0x8000). If it does not come
+@ back, nothing else can wake it here: the console needs a power cycle.
+@ dingbat (stop_key_condition) returns 0x57000000 for both; the references
+@ return from any Stop (they treat it as a halt).
     .arm
     .text
     .global _start
@@ -169,6 +173,8 @@ restore:
 
 stopcell:
     mov r0, #0xC000
+    tst r9, #1
+    movne r0, #0x8000
     strh r0, [r3, #2]
     strh r2, [r4, #2]
     swi 0x030000                   @ Stop
