@@ -71,10 +71,10 @@ const
   VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat", "tex_gen", "vgen", "remap_gen", "pbase"]
   # pointers into Gpu's palette/OAM (kept); line3d is set before each use;
   # the line buffers and per-line scratch are rewritten before they are read
-  # (line, gfx, bgpix ... line_objwin); touch, lc_*, mem_gen: line reuse,
+  # (line, gfx, bgpix ... obj_prios); touch, lc_*, mem_gen: line reuse,
   # which remap() in after_load restarts (vram.remap_gen)
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d", "line", "gfx", "bgpix", "objpix",
-                 "objprio", "objattr", "winmask", "line_semi", "line_objwin",
+                 "objprio", "objattr", "winmask", "line_semi", "line_objwin", "obj_prios",
                  "lc_on", "mem_gen", "lgen", "touch", "lc_valid", "lc_key", "lc_touch", "lc_vsum",
                  "lc_line", "lc_3d", "lc_reused"]
   # reuse_*/last_*: what the last real render drew (render_frame); the

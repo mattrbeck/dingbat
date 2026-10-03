@@ -56,6 +56,8 @@
 ## --state-hash N prints a CRC-32 of the whole machine state (the save-state
 ## payload) every N frames, for comparing two runs that should be identical
 ## (DINGBAT_NDS_NO_SKIP=1 turns idle-loop skipping and 3D frame reuse off: docs/nds/perf.md).
+## --screen-hash N prints a CRC-32 of each screen every N frames (the 2D/3D
+## output itself, which the state leaves out).
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
@@ -272,6 +274,7 @@ when isMainModule:
   var state_load_frame = -1
   var state_layout = false
   var state_hash = 0
+  var screen_hash = 0
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog", "rumble-log", "cartlog",
@@ -334,6 +337,7 @@ when isMainModule:
       of "iolog-from": iolog_from = parseInt(val)
       of "pcs": pcs = true
       of "state-hash": state_hash = parseInt(val)
+      of "screen-hash": screen_hash = parseInt(val)
       of "watch": watch = uint32(parseHexInt(val))
       of "text": text = val
       of "text-offset": text_offset = parseInt(val)
@@ -433,6 +437,11 @@ when isMainModule:
     if state_hash > 0 and (f + 1) mod state_hash == 0:
       let st = n.state_payload()
       echo "statehash ", f + 1, " ", toHex(crc32(st.toOpenArrayByte(0, st.high)), 8)
+    if screen_hash > 0 and (f + 1) mod screen_hash == 0:
+      let tb = cast[ptr UncheckedArray[uint8]](addr n.gpu.top[0])
+      let bb = cast[ptr UncheckedArray[uint8]](addr n.gpu.bottom[0])
+      echo "screenhash ", f + 1, " ", toHex(crc32(tb.toOpenArray(0, 256 * 192 * 2 - 1)), 8),
+           " ", toHex(crc32(bb.toOpenArray(0, 256 * 192 * 2 - 1)), 8)
     for (file, at) in state_saves:
       if f + 1 == at:
         let image = n.state_bytes(thumbnail = true)

@@ -73,6 +73,7 @@ type
     winmask: array[256, uint8]            ## bits 0-3 BG, 4 OBJ, 5 effects
     line_semi: bool                       ## any blending OBJ pixel on this line
     line_objwin: bool
+    obj_prios: uint8                      ## bit p: an OBJ pixel of priority p was drawn
     # line reuse (`render_line`): what each visible line was drawn from last
     # time, and the line it gave; none of it is machine state (not saved)
     lc_on*: bool                          ## reuse enabled (the machine sets it)
@@ -523,6 +524,7 @@ proc render_objs(e: Engine2D; y: int) =
     e.objattr[x] = 0
   e.line_semi = false
   e.line_objwin = false
+  e.obj_prios = 0
   if (e.dispcnt and 0x1000) == 0: return
   let w = e.vram.view(e.obj_region, addr e.touch)
   let xw = e.vram.view(e.obj_ext_region, addr e.touch)
@@ -646,6 +648,7 @@ proc render_objs(e: Engine2D; y: int) =
       elif prio < e.objprio[col]:
         # OAM order with a strict compare: the lower index wins ties
         e.objprio[col] = prio
+        e.obj_prios = e.obj_prios or (1'u8 shl prio)
         e.objpix[col] = color and 0x7FFF
         e.objattr[col] = (e.objattr[col] and OBJ_WINDOW) or flag
         if flag != 0: e.line_semi = true
@@ -684,9 +687,132 @@ proc compute_windows(e: Engine2D): bool =
 
 proc composite(e: Engine2D; bgs: uint32; windows: bool) =
   ## Top two layers per pixel in priority order (OBJ before BGs of equal
-  ## priority, lower BG number first), then the colour effect. The loop is
-  ## instantiated for "windows on the line" x "an effect can apply", so the
-  ## common no-window, no-effect line is a plain top-layer search.
+  ## priority, lower BG number first), then the colour effect.
+  ##
+  ## Painted, not searched: starting from the backdrop, each layer is laid
+  ## over the line from the lowest priority up -- per priority level its BGs
+  ## (higher numbers first), then the OBJ pixels of that priority -- so a
+  ## pixel ends holding the first layer the search in priority order would
+  ## find, and (`SEC`) the one it would find next: the layer that was on top
+  ## when the last one was laid. Each pass is a plain select over 256
+  ## pixels the C compiler vectorises. The effect pass then runs the old
+  ## per-pixel rules on those two (`found == 2` is "a second layer").
+  ## Instantiated for windows on the line x what the effects need: nothing,
+  ## the top layer's number (brighten/darken), or the second layer too
+  ## (alpha, semi-transparent OBJs, 3D).
+  var walk: array[4, int]
+  var walk_prio: array[4, int]
+  var n = 0
+  for p in 0..3:
+    for bg in 0..3:
+      if (bgs and (1'u32 shl bg)) != 0 and int(e.bgcnt[bg] and 3) == p:
+        walk[n] = bg
+        walk_prio[n] = p
+        inc n
+  let backdrop = e.palette[0] and 0x7FFF
+  let bld = uint32(e.bldcnt)
+  let mode = (bld shr 6) and 3
+  let eva = min(16'u32, uint32(e.bldalpha and 0x1F))
+  let evb = min(16'u32, uint32((e.bldalpha shr 8) and 0x1F))
+  let evy = min(16'u32, uint32(e.bldy and 0x1F))
+  let is3d = e.bg0_is_3d and (bgs and 1) != 0
+  let want2 = mode == 1 or e.line_semi or is3d
+  let obj_on = (e.dispcnt and 0x1000) != 0 and e.obj_prios != 0
+  let effects = (mode != 0 and (bld and 0x3F) != 0) or e.line_semi or is3d
+  const NO_LAYER = 0xFF'u8
+  # locals, so the C compiler sees the passes' stores alias nothing they read
+  var top {.noinit.}: array[256, uint16]   # the top layer's colour
+  var topl {.noinit.}: array[256, uint8]   # the top layer's number
+  var sec {.noinit.}: array[256, uint16]   # the layer under it (SEC)
+  var secl {.noinit.}: array[256, uint8]
+  let win = cast[ptr UncheckedArray[uint8]](addr e.winmask[0])
+
+  template lay(x: int; vis: uint16; c: uint16; layer: uint8; TOPL, SEC: static bool) =
+    # one pixel of a pass; `vis` is 1 where the layer shows: masks, not
+    # branches, so the loop vectorises
+    let m16 = 0'u16 - vis
+    let m8 = uint8(m16)
+    when SEC:
+      sec[x] = (top[x] and m16) or (sec[x] and not m16)
+      secl[x] = (topl[x] and m8) or (secl[x] and not m8)
+    when TOPL:
+      topl[x] = (layer and m8) or (topl[x] and not m8)
+    top[x] = (c and m16) or (top[x] and not m16)
+
+  template paint(WIN, TOPL, SEC: static bool) =
+    for x in 0 ..< 256:
+      top[x] = backdrop
+      when TOPL: topl[x] = uint8(LAYER_BD)
+      when SEC: secl[x] = NO_LAYER
+    for p in countdown(3, 0):
+      for i in countdown(n - 1, 0):
+        if walk_prio[i] == p:
+          let bg = walk[i]
+          let src = cast[ptr UncheckedArray[uint16]](addr e.bgpix[bg][0])
+          for x in 0 ..< 256:
+            let c = src[x]
+            lay(x, (c shr 15) and (when WIN: uint16(win[x] shr bg) and 1 else: 1'u16),
+                c and 0x7FFF, uint8(bg), TOPL, SEC)
+      if obj_on and (e.obj_prios and (1'u8 shl p)) != 0:
+        let op = uint8(p)
+        for x in 0 ..< 256:
+          lay(x, uint16(e.objprio[x] == op) and (when WIN: uint16(win[x] shr 4) and 1 else: 1'u16),
+              e.objpix[x], uint8(LAYER_OBJ), TOPL, SEC)
+
+  template effect_pass(WIN, SEC: static bool) =
+    for x in 0 ..< 256:
+      let m = when WIN: uint32(win[x]) else: 0x3F'u32
+      if (m and 0x20) != 0:
+        let l0 = int(topl[x])
+        var c = top[x]
+        let bot_second = when SEC: secl[x] != NO_LAYER and (bld and (0x100'u32 shl secl[x])) != 0
+                         else: false
+        let attr = e.objattr[x]
+        if l0 == LAYER_OBJ and (attr and (OBJ_SEMI or OBJ_BITMAP)) != 0 and bot_second:
+          if (attr and OBJ_BITMAP) != 0:
+            let a = uint32(attr and 0xF)
+            c = blend_alpha(c, sec[x], a + 1, 15 - a)
+          else:
+            c = blend_alpha(c, sec[x], eva, evb)
+        elif l0 == 0 and is3d and bot_second:
+          c = blend_3d(e.line3d[(x + int(e.bghofs[0])) and 511], sec[x])
+        elif (bld and (1'u32 shl l0)) != 0:
+          case mode
+          of 1:
+            if bot_second: c = blend_alpha(c, sec[x], eva, evb)
+          of 2: c = brighten(c, evy)
+          of 3: c = darken(c, evy)
+          else: discard
+        top[x] = c
+
+  if not effects:
+    if windows: paint(true, false, false) else: paint(false, false, false)
+    e.gfx = top
+    return
+  elif not want2:
+    # brighten / darken only: the layer under the top one never matters
+    if windows:
+      paint(true, true, false); effect_pass(true, false)
+    else:
+      paint(false, true, false); effect_pass(false, false)
+  else:
+    if windows:
+      paint(true, true, true); effect_pass(true, true)
+    else:
+      paint(false, true, true); effect_pass(false, true)
+  e.gfx = top
+
+when defined(test_harness):
+  var composite_by_search* = false
+    ## tests/nds_2d_test.nim: draw with `composite_search`, the per-pixel
+    ## search `composite` must equal
+
+proc composite_search(e: Engine2D; bgs: uint32; windows: bool) {.used.} =
+  ## The compositing rules as a per-pixel search, kept for the 2D test to
+  ## check `composite` against: per pixel, the layers in priority order
+  ## (OBJ before BGs of equal priority, lower BG number first) until the top
+  ## one (and, when an effect can need it, the one under it) is found, then
+  ## the colour effect.
   var walk: array[4, int]
   var walk_prio: array[4, int]
   var n = 0
@@ -794,6 +920,10 @@ proc render_gfx*(e: Engine2D; y: int) =
     of bkExt: e.render_ext(bg, y)
     of bkLarge: e.render_large(y)
     else: discard
+  when defined(test_harness):
+    if composite_by_search:
+      e.composite_search(bgs, windows)
+      return
   e.composite(bgs, windows)
 
 proc end_line*(e: Engine2D) =
