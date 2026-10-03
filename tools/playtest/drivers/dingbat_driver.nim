@@ -2,10 +2,15 @@
 ## protocol documented in tools/playtest/README.md on stdin/stdout.
 ##
 ## Usage: dingbat_driver <rom.gba> <bios.bin|hle> [--run-bios] [--rtc EPOCH]
-##                       [--no-waitloop] [--audio PATH]
+##                       [--no-waitloop] [--audio PATH] [--mp2k-hle]
+##                       [--no-fifo-interp]
 ##   Without --rtc the cartridge RTC runs from the host clock.
 ##   --no-waitloop turns off idle-loop fast-forwarding (the shipped default
 ##   is on). --audio writes every mixed sample, s16le stereo at 32768 Hz.
+##   --mp2k-hle arms the MP2K sound-engine HLE (the apps' "Enhanced audio"
+##   setting, gba.mp2k_hle; off by default there and here). --no-fifo-interp
+##   emits the raw FIFO latches instead of the apps' default cubic
+##   reconstruction (apu.set_fifo_interp).
 ##   The battery save is <rom minus extension>.sav, exactly as the desktop
 ##   app places it; run the driver on a ROM symlink inside a private
 ##   directory so saves never touch the library.
@@ -78,6 +83,8 @@ proc main() =
   var run_bios = false
   var rtc_epoch = -1'i64
   var waitloop = true
+  var mp2k_hle = false
+  var fifo_interp = true
   let args = commandLineParams()
   var i = 0
   while i < args.len:
@@ -87,6 +94,8 @@ proc main() =
       inc i
       rtc_epoch = parseBiggestInt(args[i])
     of "--no-waitloop": waitloop = false
+    of "--mp2k-hle": mp2k_hle = true
+    of "--no-fifo-interp": fifo_interp = false
     of "--audio":
       # the APU's own dump (apu.nim), claimed when the core is created
       inc i
@@ -94,7 +103,7 @@ proc main() =
     else: positional.add(args[i])
     inc i
   if positional.len != 2:
-    stderr.writeLine "Usage: dingbat_driver <rom> <bios|hle> [--run-bios] [--rtc EPOCH] [--no-waitloop] [--audio PATH]"
+    stderr.writeLine "Usage: dingbat_driver <rom> <bios|hle> [--run-bios] [--rtc EPOCH] [--no-waitloop] [--audio PATH] [--mp2k-hle] [--no-fifo-interp]"
     quit(2)
   let rom_path = positional[0]
   let use_hle = positional[1] == "hle"
@@ -103,11 +112,25 @@ proc main() =
   emu.test_output = new_test_output()
   emu.post_init()
   emu.cpu.attempt_waitloop_detection = waitloop
+  emu.mp2k_hle = mp2k_hle
+  emu.apu.set_fifo_interp(fifo_interp)
   if rtc_epoch >= 0:
     emu.enable_deterministic_rtc(rtc_epoch)
 
   var frame = 0
   var held = 0
+  when defined(biosdrvtrace):
+    # apulog: every byte the CPU or DMA writes to the sound registers
+    # 0x04000060-0x0400008F (FIFO data excluded), one line each:
+    # FRAME CYCLE_IN_FRAME ADDR VALUE (mgba_driver's apulog writes the same)
+    var apulog: File = nil
+    proc log_io(address: uint32; value: uint8) {.closure.} =
+      let a = address and 0xFFFFFF'u32
+      if apulog != nil and a >= 0x60'u32 and a <= 0x8F'u32:
+        let now = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+        apulog.writeLine(&"{frame} {now - int64(emu.frame_start_cycles)} " &
+                         &"{(0x04000000'u32 or a).toHex(8)} {value.toHex(2)}")
+    bdIoHook = log_io
   reply &"ready dingbat save={emu.storage.save_path} size={emu.storage.memory.len}"
   var line: string
   while stdin.readLine(line):
@@ -153,6 +176,22 @@ proc main() =
         reply(if emu.save_state(parts[1]): "ok" else: "err state_save failed")
       of "state_load":
         reply(if emu.load_state(parts[1]): "ok" else: "err state_load failed")
+      of "chmask":
+        # chmask N: output mutes, APU.channel_mask (the apps' channel mutes;
+        # emulation is unaffected). Bits 0-3 PSG 1-4, 4 FIFO A, 5 FIFO B;
+        # a set bit plays.
+        let m = parseInt(parts[1])
+        for ch in 0 .. 5: emu.apu.channel_mask[ch] = (m shr ch and 1) == 1
+        reply "ok"
+      of "apulog":
+        # apulog PATH | apulog off (driver built with -d:biosdrvtrace)
+        when defined(biosdrvtrace):
+          if apulog != nil: apulog.close()
+          apulog = nil
+          if parts[1] != "off": apulog = open(parts[1], fmWrite)
+          reply "ok"
+        else:
+          reply "err build with -d:biosdrvtrace"
       of "layers":
         # debug visibility: bits 0-3 BG0-3, bit 4 OBJ
         emu.ppu.debug_layer_mask = uint8(parseHexInt(parts[1]))
@@ -235,6 +274,8 @@ proc main() =
         discard emu.rtc_xfer(0x64, b, 0)
         reply "ok"
       of "quit":
+        when defined(biosdrvtrace):
+          if apulog != nil: apulog.close()
         emu.storage.write_save()
         reply "ok"
         quit(0)

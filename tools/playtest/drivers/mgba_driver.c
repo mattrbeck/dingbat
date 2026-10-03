@@ -3,12 +3,20 @@
  *
  * Usage: mgba_driver <rom.gba> <bios.bin> [--run-bios] [--rtc EPOCH] [--audio PATH]
  *   --audio writes the core's output, s16le stereo at 32768 Hz, every frame.
+ *   `chmask N` mutes output channels through the core's public
+ *   enableAudioChannel (bits 0-3 PSG 1-4, 4 FIFO A, 5 FIFO B; set = plays);
+ *   `apulog PATH|off` logs the CPU's stores to the sound registers.
  *   The battery save is <rom minus extension>.sav, where mGBA's own frontend
  *   puts it by default. Run with TZ=UTC so a fixed RTC epoch reads the same
  *   wall-clock fields as the other drivers.
  *
  * Build: tools/playtest/build.sh
  */
+/* The library's build flags first: struct mCore's layout depends on them
+ * (USE_DEBUGGERS adds members ahead of savedataClone and the channel
+ * switches; without this, calls through those slots land on the wrong
+ * function pointer). */
+#include <mgba/flags.h>
 #include <mgba/core/core.h>
 #include <mgba/gba/core.h>
 #include <mgba/core/config.h>
@@ -91,8 +99,62 @@ static struct mRotationSource g_level = {
   .sample = rot_sample, .readTiltX = rot_zero, .readTiltY = rot_zero, .readGyroZ = rot_zero,
 };
 
+/* apulog: the CPU's stores to the sound registers 0x04000060-0x0400008F
+ * (FIFO data excluded), split into bytes low first, one line each in
+ * dingbat_driver's format: FRAME CYCLE_IN_FRAME ADDR VALUE. The ARM core's
+ * store callbacks are wrapped; the original is always called. */
+static FILE* g_apulog = NULL;
+static struct mCore* g_core = NULL;
+static int g_frame = 0;
+static uint64_t g_frame_start = 0;
+static void (*orig_store32)(struct ARMCore*, uint32_t, int32_t, int*);
+static void (*orig_store16)(struct ARMCore*, uint32_t, int16_t, int*);
+static void (*orig_store8)(struct ARMCore*, uint32_t, int8_t, int*);
+static uint32_t (*orig_storem)(struct ARMCore*, uint32_t, int, enum LSMDirection, int*);
+
+static void apulog_bytes(uint32_t address, uint32_t value, int width) {
+  if (!g_apulog) return;
+  struct GBA* gba = g_core->board;
+  uint64_t now = mTimingGlobalTime(&gba->timing);
+  for (int i = 0; i < width; ++i) {
+    uint32_t a = (address & ~(uint32_t) (width - 1)) + i;
+    if (a >= 0x04000060 && a <= 0x0400008F)
+      fprintf(g_apulog, "%d %llu %08X %02X\n", g_frame,
+              (unsigned long long) (now - g_frame_start), a, (value >> (8 * i)) & 0xFF);
+  }
+}
+static void log_store32(struct ARMCore* cpu, uint32_t a, int32_t v, int* c) {
+  apulog_bytes(a, (uint32_t) v, 4);
+  orig_store32(cpu, a, v, c);
+}
+static void log_store16(struct ARMCore* cpu, uint32_t a, int16_t v, int* c) {
+  apulog_bytes(a, (uint16_t) v, 2);
+  orig_store16(cpu, a, v, c);
+}
+static void log_store8(struct ARMCore* cpu, uint32_t a, int8_t v, int* c) {
+  apulog_bytes(a, (uint8_t) v, 1);
+  orig_store8(cpu, a, v, c);
+}
+static uint32_t log_storem(struct ARMCore* cpu, uint32_t base, int mask,
+                           enum LSMDirection dir, int* c) {
+  if (g_apulog && (base >> 24) == 0x04)
+    fprintf(g_apulog, "%d 0 STM %08X %04X\n", g_frame, base, mask);
+  return orig_storem(cpu, base, mask, dir, c);
+}
+static void apulog_hook(struct mCore* core) {
+  struct ARMCore* cpu = core->cpu;
+  if (cpu->memory.store8 == log_store8) return;
+  orig_store32 = cpu->memory.store32; cpu->memory.store32 = log_store32;
+  orig_store16 = cpu->memory.store16; cpu->memory.store16 = log_store16;
+  orig_store8 = cpu->memory.store8; cpu->memory.store8 = log_store8;
+  orig_storem = cpu->memory.storeMultiple; cpu->memory.storeMultiple = log_storem;
+}
+
 static void run_frame(struct mCore* core) {
+  struct GBA* gba = core->board;
+  g_frame_start = mTimingGlobalTime(&gba->timing);
   core->runFrame(core);
+  ++g_frame;
   drain_audio(core);
 }
 
@@ -185,6 +247,7 @@ int main(int argc, char** argv) {
   blip_set_rates(core->getAudioChannel(core, 1), core->frequency(core), 32768);
 
   int frame = 0;
+  g_core = core;
   char buf[512], out[64];
   printf("ready mgba save=%s\n", save);
   fflush(stdout);
@@ -325,7 +388,20 @@ int main(int argc, char** argv) {
       sscanf(arg, "%x %x", &addr, &val);
       core->busWrite8(core, addr, (uint8_t) val);
       reply("ok");
+    } else if (!strcmp(cmd, "chmask")) {
+      int m = atoi(arg);
+      for (int ch = 0; ch < 6; ++ch) core->enableAudioChannel(core, ch, (m >> ch) & 1);
+      reply("ok");
+    } else if (!strcmp(cmd, "apulog")) {
+      if (g_apulog) fclose(g_apulog);
+      g_apulog = NULL;
+      if (strcmp(arg, "off")) {
+        apulog_hook(core);
+        g_apulog = fopen(arg, "w");
+      }
+      reply(!strcmp(arg, "off") || g_apulog ? "ok" : "err cannot write");
     } else if (!strcmp(cmd, "quit")) {
+      if (g_apulog) fclose(g_apulog);
       if (g_audio) fclose(g_audio);
       core->deinit(core);
       reply("ok");

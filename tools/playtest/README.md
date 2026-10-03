@@ -170,7 +170,8 @@ found in the ROM.
 ## Driver protocol
 
 Each driver is started as `<driver> <rom> <bios.bin|hle> [--run-bios] [--rtc EPOCH] [--audio PATH]`
-(dingbat also `--no-waitloop`), prints `ready ...`, then answers one line per
+(dingbat also `--no-waitloop`, `--mp2k-hle` for the apps' Enhanced audio setting,
+`--no-fifo-interp` for the raw FIFO latches), prints `ready ...`, then answers one line per
 command with `ok [...]` or `err ...`:
 
 | command | effect |
@@ -186,6 +187,8 @@ command with `ok [...]` or `err ...`:
 | `rtc_get` | read the cartridge RTC over the GPIO port as a game does: DATE_TIME register bytes and the status byte, hex (dingbat, mGBA) |
 | `rtc_set YYMMDDWWHHMMSS` | DATE_TIME write of those register bytes (dingbat, mGBA — mGBA ignores clock writes) |
 | `poke8 ADDR VAL` | bus write, e.g. a flash command that dirties the save (mGBA) |
+| `chmask N` | output-only channel mutes, bits 0-3 PSG 1-4, 4 FIFO A, 5 FIFO B, a set bit plays (dingbat: `APU.channel_mask`; mGBA: its public `enableAudioChannel`); the frames are unaffected |
+| `apulog PATH` / `apulog off` | log every byte written to 0x04000060-0x0400008F as `FRAME CYCLE_IN_FRAME ADDR VALUE` (dingbat: `bin/dingbat_driver_trace`, built with the core's passive `-d:biosdrvtrace` I/O hook, selected with `PLAYTEST_DINGBAT_DRIVER`; mGBA: the CPU's stores, wrapped) |
 | `trace N PATH` | N single instruction steps, one line each to PATH: `PC CYCLES VCOUNT T/A` (r15 before the step, master-clock cycles it took), `FRAME` at each frame end (dingbat, mGBA). dingbat's r15 leads the instruction by 4 (Thumb), mGBA's by 2 |
 | `runto PC` | step until r15 == PC; replies r0..r15 (dingbat) |
 | `pft PC N PATH` | run to r15 == PC, then N steps with the `-d:pftrace` prefetch log to PATH (dingbat built with `-d:pftrace`) |

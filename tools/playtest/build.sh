@@ -36,6 +36,13 @@ nim c -d:test_harness -d:release --path:src --hints:off \
    --nimcache:"${TMPDIR:-/tmp}/nimcache-playtest-driver" \
    -o:"$OUT/dingbat_driver" tools/playtest/drivers/dingbat_driver.nim
 
+# The same driver with the core's passive I/O write hooks compiled in, for
+# `apulog` (select it with PLAYTEST_DINGBAT_DRIVER=.../dingbat_driver_trace)
+echo "== dingbat_driver_trace"
+nim c -d:test_harness -d:release -d:biosdrvtrace --path:src --hints:off \
+   --nimcache:"${TMPDIR:-/tmp}/nimcache-playtest-driver-trace" \
+   -o:"$OUT/dingbat_driver_trace" tools/playtest/drivers/dingbat_driver.nim
+
 echo "== screenread"
 swiftc -O tools/playtest/screenread.swift -o "$OUT/screenread"
 
