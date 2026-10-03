@@ -186,8 +186,11 @@ proc chain_next(dma: DMA; channel: int): bool =
 
 proc grant_follows(dma: DMA; channel: int): bool =
   ## DMA_PENDING_CHAIN: at the end of `channel`'s burst, whether run_pending
-  ## grants another latched request next (its own tests, in its order).
-  var p = dma.pending and not uint8(1 shl channel)
+  ## grants next another request that was already latched when this burst
+  ## was granted (its own tests, in its order). A request that arrived
+  ## during the burst is not chained: unmeasured, and Pokemon Mystery
+  ## Dungeon's quiz (official BIOS) moved when its FIFO refills were.
+  var p = dma.pending and dma.pending_at_grant and not uint8(1 shl channel)
   while p != 0:
     let ch = countTrailingZeroBits(p)
     p = p and not uint8(1 shl ch)
@@ -509,6 +512,8 @@ proc run_pending*(dma: DMA) =
                          (DMA_BUS_WHILE_HALTED and saved == 4 and bus.dma_bus_left and
                           dma.gba.cpu.halted)
       bus_driven = true
+    when DMA_PENDING_CHAIN:
+      if saved == 4: dma.pending_at_grant = dma.pending
     dma.run_channel(ch, nested = saved < 4)
     when DMA_BUS_WHILE_HALTED:
       if saved == 4: bus.dma_bus_left = dma.gba.cpu.halted

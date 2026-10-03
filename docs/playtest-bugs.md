@@ -2959,7 +2959,7 @@ in gba.nim:
 | `DMA_BUS_WHILE_HALTED` | a halted CPU drives nothing: a burst granted with the CPU halted since the last one ended reads that burst's last word (hdmaobus X_(k-1); the reader alone keeps its own `0300` every line) |
 | `DMA_READS_IO_LOAD` | the CPU's last data load counts when it was an I/O register too, and the I/O bus is 32 bits wide: an `ldrh` or `ldrb` of VCOUNT leaves DISPSTAT (`2E26`) on the lower half as well. The load's value stays through its internal cycle |
 | `DMA_SEES_REFILL_FETCH` | a request between a branch's two refill fetches finds the first (the loop's own first opcode); the core charges the refill as one block, so r15 alone answered the second |
-| `DMA_PENDING_CHAIN` | a request already latched when a burst ends follows it with no hand-back and no lead: the one-halfword reader holds the CPU 6 cycles, reader plus writer 10, not 12 -- hdmalag's "the second channel starts two cycles late here", from the CPU's side |
+| `DMA_PENDING_CHAIN` | a request latched together with a burst's (two channels on one H-blank) follows it with no hand-back and no lead: the one-halfword reader holds the CPU 6 cycles, reader plus writer 10, not 12 -- hdmalag's "the second channel starts two cycles late here", from the CPU's side. Requests arriving during a burst are not chained: unmeasured, and a first version that chained them too moved Pokemon Mystery Dungeon - Red Rescue Team's timing-seeded personality quiz under the official BIOS (other questions, the script desynced; all four configs pass with the narrower rule) |
 
 The last one also brings hdmalag's configurations 23-28 and 30 (DMA3 behind
 DMA1 across the drop edge) onto the console: recorded the same day and

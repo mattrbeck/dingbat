@@ -252,6 +252,9 @@ type
     # higher-priority request preempts via a nested run_pending. Always 0/4
     # between instructions, so not serialized.
     pending*:          uint8
+    # DMA_PENDING_CHAIN: the requests already latched when the burst in
+    # progress was granted (run_pending; transient, not serialized)
+    pending_at_grant*: uint8
     # When each armed immediate channel requests the bus (DMA_START_DELAY
     # after its enable write). Only read within that delay; in the state's
     # in-flight section (rev 9).
@@ -1487,8 +1490,11 @@ const DMA_CHAIN* {.booldefine.} = true
   ## the timer DMA1 enabled on the very next cycle (old count, new control),
   ## and the CPU is back two cycles sooner than for two separate bursts.
 const DMA_PENDING_CHAIN* {.booldefine.} = true
-  ## DMA_CHAIN for any request already latched when a burst ends: the next
-  ## grant follows with no hand-back and no lead between them. Two H-blank
+  ## DMA_CHAIN for a request that was already latched when a burst was
+  ## granted: the next grant follows with no hand-back and no lead between
+  ## them. A request that arrives during the burst still pays both (not
+  ## measured; chaining those too moved Pokemon Mystery Dungeon - Red Rescue
+  ## Team's timing-seeded quiz under the official BIOS). Two H-blank
   ## channels granted on the same H-blank: hdmalag.s on an AGB SP has the
   ## second's first read the cycle after the first's last write, and
   ## hdmaphase.s has the CPU held 10 cycles by a one-halfword reader and a
