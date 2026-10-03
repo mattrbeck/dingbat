@@ -168,8 +168,14 @@ still jumps out of its own proc; what changes is only that a caller in a
 quirky proc goes on after a callee that raised, and the exception reaches
 the first non-quirky frame (the frontend's call) later. With checks off
 (-d:danger, the web build) nothing in the core raises at all; in -d:release
-a bounds defect would surface a few instructions late. `savestate.nim`
-(state_error) and `read_file_bytes`/`load_nds` (IOError) stay outside.
+a bounds defect surfaces late, and not harmlessly: measured with a
+small program (-d:release, Nim's goto exceptions), the out-of-range access
+still happens (a read returns whatever lies there, so a write would land
+in memory) and the quirky caller goes on with that value before the
+exception reaches a non-quirky frame. A division by zero still stops the
+program at once. Modules that already push `checks: off` (render.nim)
+check nothing either way. `savestate.nim` (state_error) and
+`read_file_bytes`/`load_nds` (IOError) stay outside.
 
 ## Sequential fetch fast paths (bus9.nim `fetch_line9`, bus7.nim `fetch_page7`)
 
