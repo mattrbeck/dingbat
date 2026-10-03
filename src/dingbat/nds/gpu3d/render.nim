@@ -713,9 +713,26 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
     r.trans_id[i] = c.id
     if not c.fog: r.flags[i] = r.flags[i] and not FLAG_FOG
 
+template by_kind(c: PolyCtx; sp: SpanStep; generic, go: untyped) =
+  ## `go(K)` with K the facts that hold for this polygon and span
+  ## (`generic` when the polygon is not K_SIMPLE).
+  if c.wire or c.curse or c.mode != 0 or (c.attr and 0x4000) != 0:
+    generic
+  else:
+    template by_depth(t, e, a: static int) =
+      if c.wbuffer: go(K_SIMPLE or t or e or a or K_WBUF) else: go(K_SIMPLE or t or e or a or K_ZBUF)
+    template by_aa(t, e: static int) =
+      if c.aa: by_depth(t, e, K_AA) else: by_depth(t, e, K_NOAA)
+    template by_w(t: static int) =
+      if sp.eqw: by_aa(t, K_EQW) else: by_aa(t, K_PERSP)
+    if c.textured: by_w(K_TEX) else: by_w(K_UNTEX)
+
 proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; edge: bool;
           cov = 31'i32; role = 0'u8) =
-  plot_k[0](r, c, x, y, L, R, sp, edge, cov, role)
+  ## One dot (an edge's), by the instance of plot_k that knows the
+  ## polygon's and the span's flags.
+  template go(K: static int) = plot_k[K](r, c, x, y, L, R, sp, edge, cov, role)
+  by_kind(c, sp, go(0), go)
 
 proc fill_k[K: static int](r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr;
                            sp: var SpanStep; edge: bool; role: uint8) =
@@ -734,18 +751,8 @@ proc fill(r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr; sp: var SpanSt
   ## Dots x0 ..< x1 of row y, whole (coverage 31): `plot` for each, by the
   ## instance of plot_k that knows the polygon's and the span's flags.
   if x0 >= x1: return
-  if c.wire or c.curse or c.mode != 0 or (c.attr and 0x4000) != 0:
-    fill_k[0](r, c, y, x0, x1, L, R, sp, edge, role)
-    return
-  template go(t, e, a, b: static int) =
-    fill_k[K_SIMPLE or t or e or a or b](r, c, y, x0, x1, L, R, sp, edge, role)
-  template by_depth(t, e, a: static int) =
-    if c.wbuffer: go(t, e, a, K_WBUF) else: go(t, e, a, K_ZBUF)
-  template by_aa(t, e: static int) =
-    if c.aa: by_depth(t, e, K_AA) else: by_depth(t, e, K_NOAA)
-  template by_w(t: static int) =
-    if sp.eqw: by_aa(t, K_EQW) else: by_aa(t, K_PERSP)
-  if c.textured: by_w(K_TEX) else: by_w(K_UNTEX)
+  template go(K: static int) = fill_k[K](r, c, y, x0, x1, L, R, sp, edge, role)
+  by_kind(c, sp, go(0), go)
 
 proc aa_cov(e: Edge; y, x: int; right: bool; lend = 0'i32): int32 =
   ## Anti-aliasing coverage (0..31) of dot x on row y by edge e
