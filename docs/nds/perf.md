@@ -1,9 +1,10 @@
 # DS performance: the cheap, exact wins, then caching and the interpreter
 
-Two rounds: low-hanging fruit (branch `nds-perf`: idle loops, 3D frame
-reuse) and a measured one on caching and the interpreter (branch
+Three rounds: low-hanging fruit (branch `nds-perf`: idle loops, 3D frame
+reuse), a measured one on caching and the interpreter (branch
 `nds-cache-perf`: where the host instructions go, 2D line reuse, and the
-CPU's per-opcode overhead). One rule over everything: **a speed-up may not
+CPU's per-opcode overhead) and one on the 3D engine (branch `nds-3d-perf`,
+"3D renderer speed" below). One rule over everything: **a speed-up may not
 change any output** -- frames, sound, the whole machine state (save-state
 payload), opcode counts, the sweep's statuses. The skips (idle loops, 3D
 frames, 2D lines) can be turned off with `DINGBAT_NDS_NO_SKIP=1`, and
@@ -82,8 +83,11 @@ buffer, line costs, RDLINES, the underflow flag) follows from those alone;
 its other buffers are scratch, rewritten before they are read
 (render.nim, savestate.nim RENDER_SKIP). A frame whose inputs all equal
 the last drawn frame's comes out the same, so it is not drawn again.
-`render_frame` keeps copies of the buffers, registers and parameters it
-last drew and compares them field by field. For textures no copy is
+`render_frame` keeps copies of the registers and parameters it last drew
+and compares them field by field; the Polygon/Vertex lists it drew stay
+where they are (`last_is_cur`) until the next SWAP_BUFFERS moves those
+buffers to `last_polys`/`last_verts` (no copy), so a frame with no swap
+since the last render needs no list comparison at all. For textures no copy is
 needed: a bank in a texture or texture-palette slot (VRAMCNT MST 3) has no
 CPU address ("can be accessed only by the display controller", GBATEK "DS
 Memory Control - VRAM"), and display capture writes only LCDC-allocated
@@ -414,6 +418,236 @@ input script) ran on and off: identical state every 30 frames, final
 screens, sound and opcode counts in all 247. All twelve DS suites pass;
 the save-state layout is unchanged (old states load).
 
+## 3D renderer speed (round 3, `nds-3d-perf`)
+
+The benchmark is SoulSilver's title, frames 1000-3000: Lugia animated in
+3D on the bottom screen. HLE BIOS, -d:danger, `ndsrun --frames 3001 --rtc
+2004-01-01 --press START@700`. The game draws a new scene every second
+frame and the frame between two swaps is reused, so 1000 frames are drawn.
+Each one has 674 polygons, mostly 64x64 4-, 16- and 256-colour textures,
+repeated and modulated, W-buffered and anti-aliased (DISP3DCNT 0x19). It
+draws 233 K dots a frame, 168 K of which pass the depth test. 212 K of the
+dots lie in the runs between edges and 21 K are edge dots, and 97 % lie
+on spans whose ends' w differ (perspective). The scene was counted with
+the `-d:r3dprof` build plus histograms.
+
+### Where the title's host instructions went
+
+The totals are exact. Each was measured by retiring instructions on builds
+with one part switched off (rasterising, geometry command execution);
+`render.nim` stays as it is otherwise. The split inside the rasteriser
+comes from the in-process sampler (SIGPROF, pcs symbolised with inline
+frames).
+
+| whole run, frames 0-3001 | base (c0975913) | now |
+|---|---|---|
+| everything | 148.59 G | 108.31 G (-27.1 %) |
+| frames 1000-3000 only | 113.55 G | 78.32 G (-31.0 %) |
+| 3D rasteriser (`render_frame_body`) | 75.6 G (51 %) | 39.3 G (36 %) |
+| geometry commands (`execute`: matrices, lighting, vertices, clipping, assembly) | 6.9 G | 3.7 G |
+| everything else (CPUs, DMA, GX FIFO, 2D, SPU) | 66.1 G | 65.3 G |
+
+| sampled time, share of the whole run | base | now |
+|---|---|---|
+| per dot: depth test, interpolation, blending, writes | 38.1 % | 25.8 % |
+| texture fetch and decode (by format: `texel`) | 7.5 % | 2.2 % |
+| span and row setup (edge ends, span steps, AA coverage) | 1.9 % | 3.0 % |
+| polygon setup and sort | 3.3 % | 3.1 % |
+| clear, page tables, AA pass, frame reuse check, line hand-off | 0.8 % | 1.4 % |
+| geometry: clipping / assembly / commands | 1.3 / 0.8 / 1.4 % | 0.7 / 1.2 / 2.0 % |
+| GX FIFO, command timing, the FIFO IRQ | 4.7 % | 5.5 % |
+| 2D engines (engine A composites the 3D layer on every line) | 7.4 % | 10.0 % |
+
+The title uses no edge marking or fog. The AA pass, line budget and clear
+together came to 0.5 G before. The line hand-off is one 1 KB copy per
+line plus one 192 KB copy per drawn frame (`draw_lines`). The 2D side
+did not change; its share grew because the rest shrank.
+
+### What changed, in order, with each change's delta
+
+These are host instructions on the title (frames 0-3001). After every
+change the shots at 1500/2000/3000 are unchanged, HLE (be57c2d1 / 584005dd /
+1fff9866) and real BIOS (263b5ac4 / 839dafa9 / 115a4dc6).
+
+| commit | change | title |
+|---|---|---|
+| f0f2971d | span invariants (length, equal w, the depth step's 2^18 / len, a division per dot) set up once per span | -1.03 G |
+| cf53ae81 | decoded texel cache (below) | -8.05 G |
+| 8d25c0f5 | span runs by dot loops specialised per polygon and span (below), helpers pinned inline | -13.95 G |
+| 5134ed85 | the span loop keeps the context, ends and stepper in locals; `wrap_coord`'s clamp spelt out (system.clamp was a call per coordinate) | -4.23 G |
+| ad269de5 | polygons inside all six planes skip the six clipping passes | -2.68 G |
+| ca6fc28e | perspective span runs do not step the linear factor | -4.37 G |
+| 2834965f | edge dots by the specialised instances too | -0.41 G |
+| 9310ff29 | a FIFO write raises the level IRQ without a second catch-up | -0.69 G |
+| b2cc74d4 | frame reuse moves the drawn lists' buffers instead of copying them | -0.41 G |
+| 33c01d92 | span runs in range skip the colour and depth clamps | -2.76 G |
+| 4e0cdcc8 | texture flip by a per-polygon mask | -0.75 G |
+| f110533c | a dot's depth, IDs, flags, coverage and layer behind in one 16-byte record | -0.93 G |
+
+(8d25c0f5's commit message says -9.9 G. The three measured steps it
+combines, run one at a time, give -4.12, -7.36 and -2.47 G.)
+
+**Decoded texels (`tex_cached`, `tex_at`).** A texel depends only on these:
+
+- TEXIMAGE_PARAM's address, size, format and colour-0 bit;
+- PLTT_BASE, for the paletted formats;
+- (u, v);
+- the texture and palette slots' contents, which change only with
+  `vram.tex_gen` (the invariant 3D frame reuse already rests on).
+
+Each texture therefore keeps a buffer of its texels in pixel format. The
+old decoder (`texel_uv`) fills each texel the first time a dot reads it,
+and the buffer is kept while `tex_gen` stands. A fresh texel holds
+NOT_DECODED (0xFFFFFFFF); a decoded one never has bit 31 set. The buffers
+live in a pool of 1 M texels (4 MB), which starts over when it is full or
+`tex_gen` moves; a texture of 512 K texels or more is decoded per dot. The
+cache is outside the save state, and a load remaps VRAM (which bumps
+`tex_gen`). In SoulSilver `tex_gen` moved twice in the title's 1000
+drawn frames, and 15 times in the 400 frames drawn in p12's frames
+0-8100.
+
+**Specialised span loops (`fill`, `fill_k`, `plot_k`, `by_kind`).** The
+per-dot code is one generic body, `plot_k[K]`, where K is a set of facts
+known at compile time:
+
+- textured or not;
+- equal or unequal w at the span's ends;
+- anti-aliasing on or off;
+- W- or Z-buffer;
+- K_SIMPLE: not a wire-frame, not under the edge-marking rule,
+  modulation, and the "less" depth test;
+- K_INR, for `fill` only: the span is in range.
+
+A fact the instance knows becomes a constant the C compiler folds;
+otherwise the body reads the polygon context as before. `by_kind` tests
+the real flags once per span and picks the instance whose facts hold.
+Anything else uses K = 0, the old code unchanged, so the result is the
+same by construction. The runs between edges go through `fill`, one call
+per run with the context in locals. Edge dots go through `plot`, one
+dispatch per dot. The swapped-row loop visits the same dots: its filled
+ends as edge dots, the rest as one run.
+
+- **Perspective runs.** The 38-bit linear factor (SpanStep) serves only
+  equal-w spans. It stays exact whenever it is read, because it is either
+  stepped from a consistent (n, f, remainder) or recomputed by division,
+  so the perspective instances leave it alone.
+- **In range (K_INR).** A run's dots lie on the span (0 <= n < len), so
+  the interpolation factors are in [0, 1) and every colour, Z and w lies
+  between the two ends' values. `span_step` checks that both ends are in
+  range: colours in 0..511, Z in 0..0xFFFFFF, w in 1..0xFFFFFF (which also
+  keeps the perspective denominator positive). When they are, the per-dot
+  clamps cannot change anything and are left out. Edge dots, which can lie
+  off the span in crossed rows, keep the clamps.
+
+Divided by the title's dots, the rasteriser costs about 160 host
+instructions a dot, down from about 310. In the disassembly, a dot of a run
+that passes the depth test takes about 100 instructions on its main path:
+one division (the perspective factor; there were two), the attribute and
+texel arithmetic, blending, and 8 stores into one record.
+
+**Clipping.** A polygon inside all six planes leaves every
+Sutherland-Hodgman pass unchanged: each vertex is kept and none is added.
+`clip_polygon` therefore returns such a polygon at once. Before, it copied
+two 16-vertex arrays per plane.
+
+### Other workloads (host instructions, -d:danger)
+
+| workload | base | now | change |
+|---|---|---|---|
+| SoulSilver title, 3001 frames, HLE | 148.59 G | 108.31 G | -27.1 % |
+| SoulSilver title, 3001 frames, real BIOS | 149.82 G | 109.38 G | -27.0 % |
+| SoulSilver p12, frames 0-8100, real BIOS | 179.25 G | 169.66 G | -5.4 % |
+| SoulSilver p12, frames 0-8100, HLE BIOS | 175.42 G | 165.93 G | -5.4 % |
+| scene_sd4k (fogged tunnel) | 75.63 G | 57.03 G | -24.6 % |
+| Env_Mapping (nds-examples) | 10.98 G | 7.39 G | -32.7 % |
+| Toon_Shading | 3.97 G | 3.29 G | -17.2 % |
+| volumetricshadow (shadow volumes) | 31.54 G | 26.27 G | -16.7 % |
+| scene_our_first_time | 52.14 G | 46.50 G | -10.8 % |
+| Picking | 6.68 G | 6.11 G | -8.5 % |
+| portalds | 45.04 G | 41.32 G | -8.3 % |
+| blimpchicken | 28.07 G | 26.01 G | -7.3 % |
+| 3D_Both_Screens | 10.52 G | 9.78 G | -7.0 % |
+| tetris3d | 4.79 G | 4.48 G | -6.4 % |
+| wolveslayer | 18.62 G | 17.46 G | -6.3 % |
+| counterstrike | 10.19 G | 9.80 G | -3.8 % |
+| dscraft | 5.50 G | 5.35 G | -2.7 % |
+| NitroGrafx, Textured_Cube, Paletted_Cube, lesson08 | | | 0 to -0.4 % (CPU-bound) |
+
+Homebrew numbers are 600 frames with the sweep's default input; the
+libnds examples get `A@200` because they power off on START. Their screens
+match the base in every row. In p12 most overworld frames are reused (400
+drawn in 8100), so its 3D share was small to begin with.
+
+**The web build.** The DS wasm core runs in Node (`ENVIRONMENT=node`,
+emcc -O3), and node's retired instructions for the title's frames
+1000-3000 went from 171.17 G to 131.30 G (-23.3 %). These figures are
+frames 0-3000 minus frames 0-1000, and repeat to 0.1 %. The wasm module
+grew from 780 KB to 825 KB. Wall-clock fps could not be measured this
+round: the machine ran at load average 55-100 under other agents' jobs,
+and the same binary measured 18-38 fps from run to run. The instruction
+ratios predict about 420 fps native (from ~290) and about 270 fps wasm
+(from ~210) for frames 1000-3000. Those figures assume host time scales
+with instructions, which the rasteriser's divisions and mispredicted
+depth tests make optimistic.
+
+**Checks.** These outputs are unchanged at every commit, or at the
+batches of commits marked in the round's log:
+
+- `nds_3d_test`: 68 ROM hashes, unit scenes and render timing;
+- polyrastertest 77/77 (`nds_testroms_test`);
+- the hardware line captures, 198,404 of 198,404;
+- `nds_perf_test`: reuse on/off byte-identical;
+- the title's shots, HLE and real BIOS;
+- p12 e4b66d68 / 6cf51b7e / ae4536a1, real BIOS and HLE;
+- the continue-from-save check, hle 6b9b805f / bios 228bc64d.
+
+All 14 suites pass on the final commit. Every ROM in
+`~/.cache/dingbat-nds/roms` ran on the base and the final build: 505 ROMs,
+600 frames, the default input, real BIOS. In all 505 the whole-state hashes
+every 30 frames, the final screen, two shots, the sound and the opcode
+counts are identical. Host instructions over the 505 fell from 3968.9 G to
+3872.4 G (-2.4 %); most of those ROMs draw no 3D.
+
+### Tried and dropped
+
+- **Coverage step per edge.** `aa_cov`'s division moved into `make_edge`
+  cost +0.1 G: the larger Edge is copied per row.
+- **`below` written only for partly covered or edge dots.** This is
+  provably exact, because `below` is read only there and only an opaque
+  write makes a dot one. It saved 0.2 G, but it adds an invariant that
+  every future reader of `below` would have to know.
+
+### What is left
+
+- **The dot path** is about 25 % of the title's time. The rest of its
+  wall-clock cost is the perspective division per dot (an exact 8-bit
+  factor) and the depth-test branch, which fails 28 % of the time,
+  unpredictably. Going further needs several dots at once (SIMD), not
+  fewer instructions per dot.
+- **Edge dots** are 9 % of the dots and about a quarter of the
+  rasteriser's time. Each is a call and a dispatch, plus `aa_cov` with
+  its divisions. A row-at-a-time loop with the coverage stepped (h grows
+  by exactly `inc` per dot on x-major runs) would remove the calls.
+- **Row setup.** Each row runs two `edge_end` (one or two divisions each)
+  and `span_step` (three divisions): about 450 host instructions per row,
+  7.3 K rows a frame.
+- **Geometry** is 3.7 G: matrix products on every matrix command,
+  lighting per NORMAL, and three divisions per vertex in `to_screen`. The
+  GX FIFO bookkeeping (`push`, `catch_up`, deque operations) runs per
+  parameter word.
+- **The 2D side of the scene** (engine2d.nim, outside this round). Engine
+  A composites the 3D line under its BGs on every line. The 2D line reuse
+  compares the 1 KB 3D line by value, and a line whose 3D part changed is
+  composited again.
+- **A finding for the 3D owner.** This is not a speed issue and was not
+  changed here. render.nim's perspective factor `pfac` divides by
+  n·w0 + (d − n)·w1, which is 0 at an end whose vertex has w = 0 (the
+  only point inside the view volume with w = 0 is the eye itself, clip
+  (0, 0, 0, 0)). The division is then 0/0. arm64 gives 0, wasm traps
+  (`i64.div_s`), and an x86 build takes SIGFPE. `edge_end` has the same
+  form at n = d. K_INR's range check keeps the specialised loops away
+  from w < 1, but the generic path still divides.
+
 ## Left for later
 
 - **Passable events.** Every event ends every proof; an SPU tick without
@@ -441,6 +675,5 @@ the save-state layout is unchanged (old states load).
   `cond_passed`): same instruction count, fewer mispredicted branches;
   not measurable in instructions, so not kept.
 - **3D per line.** When rendering follows mid-frame register writes
-  (TODO in render.nim), the reuse key must include them. The 3D renderer
-  (12 % of SoulSilver now, the title's animated logo) is outside this
-  round.
+  (TODO in render.nim), the reuse key must include them. What is left of
+  the 3D engine's cost is listed at the end of "3D renderer speed".
