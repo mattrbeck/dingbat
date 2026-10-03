@@ -2144,13 +2144,18 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     if gba.timer.cycle_enabled[i] >= base:
       gba.timer.cycle_enabled[i] -= base
     elif gba.timer.tmcnt[i].enable and not gba.timer.tmcnt[i].cascade:
-      # Anchor predates the base: advance it by whole periods (keeping
-      # prescaler phase) and compensate the counter. No overflow can hide in
-      # the skipped window: its event would have fired and re-anchored.
+      # Anchor predates the base: fold the ticks over (anchor, base] into
+      # the counter and anchor on cycle 0, which lies in the same prescaler
+      # period (base is a multiple of 1024). No overflow can hide in the
+      # skipped window: its event would have fired and re-anchored. The
+      # anchor must not land after the rebased clock: the old one kept its
+      # offset within the period, and a read in the frame's first cycles
+      # below that offset took the "not started yet" path and answered the
+      # reload (0) -- once every 16 frames, as the frame's length walks the
+      # clock's low bits (tests/roms/payloads/envrestart.s waits on TM2).
       let period = CycleCount(TIMER_PERIODS[gba.timer.tmcnt[i].frequency])
-      let deficit = base - gba.timer.cycle_enabled[i]
-      let k = (deficit + period - 1) div period
-      gba.timer.cycle_enabled[i] = gba.timer.cycle_enabled[i] + k * period - base
+      let k = base div period - gba.timer.cycle_enabled[i] div period
+      gba.timer.cycle_enabled[i] = 0
       gba.timer.tm[i] += uint16(k)
     else:
       # Cascade/disabled: the anchor is unused; keep it in range

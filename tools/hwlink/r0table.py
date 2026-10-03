@@ -30,6 +30,9 @@ TABLE = {
     # and a timer stopped as the handler's first act
     'wakeirq': [0x00, 0x10, 0x20, 0x28, 0x60, 0x24, 0x2C, 0x64, 0x22, 0x26],
     'tmrw': [0x00, 0x01, 0x02, 0x10, 0x11, 0x20, 0x21, 0x30],
+    # a prescaled timer polled for ~38 frames: reads never jump (prescaler
+    # 64, 256, 1024)
+    'tmjump': [1, 2, 3],
     'lycwrite': [0],
     # tests/roms/payloads/probe.inc held to the console: dmaphase's controls,
     # a multiply period and three NOP phases, rebuilt from the kit

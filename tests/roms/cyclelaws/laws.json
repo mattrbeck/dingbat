@@ -10662,5 +10662,28 @@
     "want": "00090300"
    }
   ]
+ },
+ {
+  "payload": "tmjump",
+  "rom": "tmjump.gba",
+  "sha1": "5076a1888da885053d413f9bec1cc97e72666095",
+  "frames": 84,
+  "cells": [
+   {
+    "id": "tmjump 0x1",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "tmjump 0x2",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "tmjump 0x3",
+    "kind": "hex",
+    "want": "00000000"
+   }
+  ]
  }
 ]
