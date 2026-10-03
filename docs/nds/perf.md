@@ -170,10 +170,14 @@ answer is known in advance:
 
 - **ARM9**, inside the 32-byte line of the last fetch, when that fetch was
   an ITCM fetch or an instruction-cache hit or fill (the line is now
-  `icache.last`) and the bytes are memory's (ITCM, the BIOS, main RAM with
-  nothing apart in its page): no cost, no tag change, no protection check
-  (not a branch target, not a page's first word), no loop edge; only
-  `last_data9`, `last_pc9` and `last_fetch9` move.
+  `icache.last`) and the bytes are memory's (ITCM, the BIOS, a main RAM
+  line in a page with nothing apart, or with no kept copy and no dirty or
+  written-behind data-cache line of its own: `line_clean9`): no cost, no
+  tag change, no protection check (not a branch target, not a page's
+  first word), no loop edge; only `last_data9`, `last_pc9` and
+  `last_fetch9` move. (Homebrew that mixes code and written data in a
+  page -- NitroGrafx -- spent a third of its time in the slow path before
+  `line_clean9`.)
 - **ARM7**, inside the 4 KB page of the last fetch, in the BIOS (fetches
   pass BIOSPROT: pc = address), main RAM with nothing apart, or WRAM: the
   fixed sequential cost of that region; `last_data7` and `last_fetch7`

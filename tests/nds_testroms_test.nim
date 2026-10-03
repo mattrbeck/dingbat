@@ -282,6 +282,17 @@ block fetch_fast_paths:
   for k in 1'u32 .. 7: discard b.fetch32(A + 4 * k)
   b7.write32(A + 32, 0x4444_4444'u32)
   check b.fetch32(A + 32) == 0x1000_0008'u32, "ARM9: sequential into a cached line runs it as filled"
+  # code in a page with a dirty data-cache line: clean lines run straight
+  # from memory, the dirty line itself from memory's side (not the CPU's)
+  const C = 0x0228_0000'u32
+  for k in 0'u32 ..< 16: b7.write32(C + 4 * k, 0x5000_0000'u32 + k)
+  discard b.read32(C + 32)                                # D-cache line C+32 filled...
+  b.write32(C + 36, 0x6666_6666'u32)                      # ...and dirtied: the page is apart
+  check b.fetch32(C) == 0x5000_0000'u32 and b.fetch32(C + 4) == 0x5000_0001'u32 and
+        b.fetch32(C + 8) == 0x5000_0002'u32, "ARM9: sequential in a clean line of a page apart"
+  discard b.fetch32(C + 28)
+  check b.fetch32(C + 32) == 0x5000_0008'u32 and b.fetch32(C + 36) == 0x5000_0009'u32,
+        "ARM9: sequential into the dirty line runs memory's side"
   # ARM7 in main RAM while the ARM9's write-back data cache dirties a line
   # of the same page: the ARM7 reads memory's side
   const B = 0x0230_0000'u32

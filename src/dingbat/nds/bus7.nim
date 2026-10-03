@@ -364,7 +364,7 @@ proc fetch_slow7(n: NDS; a: uint32; width: static int): uint32 {.noinline.} =
   result = n.read7(a, width)
   if (a shr 12) != n.fpage7: n.fetch_page7(a)
 
-proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
   if likely((a shr 12) == n.fpage7 and a == n.last_fetch7 + 4):
     # fetch_cost7's sequential case, then read7
@@ -373,7 +373,7 @@ proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
     n.wait7 += n.fseq7[1]
     return cast[ptr uint32](addr n.fptr7[a and 0xFFF])[]
   n.fetch_slow7(a, 32)
-proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
   if likely((a shr 12) == n.fpage7 and a == n.last_fetch7 + 2):
     n.last_data7 = NO_ADDR

@@ -101,6 +101,11 @@ read-only).
   other SWI touches the caches or reads code.
 - **Thumb**: a line holds 16 Thumb opcodes; a Thumb pair still shares one
   fetch for timing and its second half is read from the same kept copy.
+- **Fetch fast path** (docs/nds/perf.md): sequential fetches inside the
+  line of an ITCM fetch or a hit, and into the next line of the same page
+  on a hit, read memory straight through a pointer while the page has
+  nothing apart; `page_apart_now` (called before `ic_keep` and
+  `dc_shadow` count a page apart), any CP15 write and WRAMCNT turn it off.
 
 **Save states** carry `iline` (line, kept flag, the kept bytes) and the
 widened `slot_of` / `page_apart` in section 5; a state loaded mid-stale

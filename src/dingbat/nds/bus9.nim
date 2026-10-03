@@ -660,12 +660,23 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.sync9()
   b.nds.write9(a, v, 32, true)
 
+proc line_clean9(n: NDS; a: uint32): bool {.noinline.} =
+  ## Main RAM line `a` (cached for code, the instruction cache holding it)
+  ## is read from memory as it is: no kept copy in its instruction-cache
+  ## slot, no memory side kept apart by the data cache (ic_code).
+  let line = int((a and 0x3FFFFF) shr 5)
+  let ds = n.dc_slot1(line)
+  if ds != 0 and n.tm.dline[ds - 1].shadowed: return false
+  let slot = n.tm.icache.find_slot(a)
+  slot < 0 or not n.tm.iline[slot].kept
+
 proc fetch_line9(n: NDS; a: uint32) =
   ## After a fetch from `a` that did not abort: when it was an ITCM fetch
   ## or an instruction-cache hit (the line is now `icache.last`) whose bytes
-  ## are memory's (ITCM, main RAM with nothing kept apart, the BIOS), the
-  ## rest of the line is sequential fetches that cost nothing and change
-  ## nothing but the trackers: `fetch32`/`fetch16` read them from `fptr9`.
+  ## are memory's (ITCM, the BIOS, a main RAM line with no kept copy and no
+  ## memory side apart), the rest of the line is sequential fetches that
+  ## cost nothing and change nothing but the trackers: `fetch32`/`fetch16`
+  ## read them from `fptr9`.
   ## A CP15 write, WRAMCNT, a page going apart (page_apart_now) or a state
   ## load turns this off; line fills and tag changes only come from fetches
   ## outside the line, and C7 commands, which are CP15 writes.
@@ -675,7 +686,7 @@ proc fetch_line9(n: NDS; a: uint32) =
     n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.itcm[int(a and 0x7FE0)])
   elif n.tm.ic_on and n.tm.code_cachable(a):
     if (a shr 24) == 0x02:
-      if n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0: return
+      if n.tm.page_apart[(a and 0x3FFFFF) shr 12] != 0 and not n.line_clean9(a): return
       n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.main_ram[int(a and 0x3FFFE0)])
     elif a >= 0xFFFF0000'u32:
       n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.bios9[int(a and 0xFE0)])
@@ -706,13 +717,16 @@ template fetch_fast9(n: NDS; a: uint32; size: static uint32): bool =
 
 template fetch_next9(n: NDS; a: uint32; size: static uint32): bool =
   ## A sequential fetch into the next line of the same 4 KB page (same
-  ## region, nothing apart): ITCM again, or an instruction-cache hit, which
-  ## makes it `last`: what fetch_cost9 would do, at no cost. A miss leaves
-  ## the tags alone and takes the slow path.
+  ## region): ITCM again, or an instruction-cache hit, which makes it
+  ## `last`: what fetch_cost9 would do, at no cost, when the line is read
+  ## from memory as it is (a page with nothing apart, or `line_clean9`). A
+  ## miss leaves the tags alone and takes the slow path, as does a line
+  ## apart (whose lookup then finds it `last`, as it would have).
   (a shr 5) == n.fline9 + 1 and a == n.last_pc9 + size and (a and 0xFFF'u32) != 0 and
-    (n.fitcm9 or n.tm.icache.hit_line(a))
+    (n.fitcm9 or (n.tm.icache.hit_line(a) and
+      ((a shr 24) != 0x02 or n.tm.page_apart[(a and 0x3FFFFF) shr 12] == 0 or n.line_clean9(a))))
 
-proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
   if likely(n.fetch_fast9(a, 4)):
     n.last_data9 = NO_ADDR
@@ -728,7 +742,7 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
     return cast[ptr uint32](addr n.fptr9[0])[]
   n.fetch_slow9(a, 4)
 
-proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
   if likely(n.fetch_fast9(a, 2)):
     n.last_data9 = NO_ADDR
