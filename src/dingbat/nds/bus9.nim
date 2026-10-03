@@ -450,12 +450,20 @@ proc dtlb_fill9(n: NDS; a: uint32; write: bool; kind: uint32) =
   ## TCM windows and protection regions are 4 KB multiples, so the page is
   ## all one or the other. (DTCM may lie over main RAM's addresses.)
   var e = DtlbEntry(tag: a shr 12, kind: kind)
-  if kind == DT_MAIN:
-    e.base = cast[ptr UncheckedArray[uint8]](addr n.main_ram[int(a and 0x3FF000)])
-  else:
+  if kind == DT_DTCM:
     e.base = cast[ptr UncheckedArray[uint8]](addr n.dtcm[int((a - n.cp15.dtcm_base) and 0x3000)])
-  if write: n.wtlb9[int((a shr 12) and (DTLB_SIZE - 1))] = e
-  else: n.rtlb9[int((a shr 12) and (DTLB_SIZE - 1))] = e
+  else:
+    e.base = cast[ptr UncheckedArray[uint8]](addr n.main_ram[int(a and 0x3FF000)])
+  let i = int((a shr 12) and (DTLB_SIZE - 1))
+  let li = uint16(i) or (if write: 0x8000'u16 else: 0'u16)
+  if kind == DT_MAIN or (kind != DT_DTCM and n.tm.data_cachable(a)):
+    if n.dtlb_dlogged < DTLB_LOG: n.dtlb_dlog[n.dtlb_dlogged] = li
+    inc n.dtlb_dlogged
+  else:
+    if n.dtlb_logged < DTLB_LOG: n.dtlb_log[n.dtlb_logged] = li
+    inc n.dtlb_logged
+  if write: n.wtlb9[i] = e
+  else: n.rtlb9[i] = e
 
 template dtlb_hit9(n: NDS; a: uint32): bool =
   ## A data-cache hit on main RAM address `a` (`lookup` without allocating:
@@ -486,6 +494,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false;
   of 0x02:
     when cpu:
       if n.tm.dc_on and n.tm.data_cachable(a): n.dtlb_fill9(a, false, DT_MAIN)
+      elif n.tm.page_apart[(a and 0x3FFFFF) shr 12] == 0: n.dtlb_fill9(a, false, DT_UNC)
     let i = int(a and 0x3FFFFF)
     if unlikely(n.dc_apart(i)) and not n.dc_hit(a, n.dc_slot1(i shr 5) - 1):
       n.dc_mem_read(i, width)
@@ -565,6 +574,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
   of 0x02:
     when cpu:
       if n.tm.dc_on and n.tm.data_cachable(a): n.dtlb_fill9(a, true, DT_MAIN)
+      else: n.dtlb_fill9(a, true, if n.tm.data_buffered(a): DT_UNC_BUF else: DT_UNC)
     let i = int(a and 0x3FFFFF)
     let held = n.tm.slot_of[i shr 5]
     let slot = int(held and 0xFF)
@@ -701,18 +711,28 @@ proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
 
 template dtlb_read9(n: NDS; a: uint32; T: typedesc) =
   ## The data TLB's load: DTCM, or cached main RAM on a tag hit, is free
-  ## and reads the page (charge9_tcm / charge9 + read9 there).
+  ## and reads the page (charge9_tcm / charge9 + read9 there); uncached main
+  ## RAM (a page with nothing apart) pays the uncached charge and reads
+  ## memory as it is.
   when not defined(ndsdebug):
     let e = addr n.rtlb9[int((a shr 12) and (DTLB_SIZE - 1))]
-    if likely(e.tag == a shr 12) and (e.kind == DT_DTCM or n.dtlb_hit9(a)):
-      n.last_data9 = a
-      return uint32(cast[ptr T](addr e.base[a and 0xFFF])[])
+    if likely(e.tag == a shr 12):
+      let p = cast[ptr T](addr e.base[a and 0xFFF])
+      if e.kind == DT_DTCM or (e.kind == DT_MAIN and n.dtlb_hit9(a)):
+        n.last_data9 = a
+        return uint32(p[])
+      if e.kind >= DT_UNC:
+        let seq = a == n.last_data9 + (when sizeof(T) == 4: 4'u32 else: 2'u32)
+        n.last_data9 = a
+        n.wait9 += data9(0x02, sizeof(T) * 8, seq, n.slot9_t)
+        return uint32(p[])
 
 template dtlb_write9(n: NDS; a: uint32; v: typed; T: typedesc) =
   ## The data TLB's store: DTCM, or a tag hit on a dirty line of cached
   ## main RAM (write9's plain store; the hit makes the line `last`), costs
-  ## nothing; only a change can end a polling loop. Not with -d:ndsdebug
-  ## (write9 logs watched words).
+  ## nothing; uncached main RAM on a line no cache holds pays the uncached
+  ## (or write-buffered) charge and stores. Only a change can end a polling
+  ## loop. Not with -d:ndsdebug (write9 logs watched words).
   when not defined(ndsdebug):
     let e = addr n.wtlb9[int((a shr 12) and (DTLB_SIZE - 1))]
     if likely(e.tag == a shr 12):
@@ -724,9 +744,14 @@ template dtlb_write9(n: NDS; a: uint32; v: typed; T: typedesc) =
           inc n.idle_epoch9
           p[] = v
         return
-      let ds = n.dc_slot1(int((a and 0x3FFFFF) shr 5))
-      if ds != 0 and n.tm.dline[ds - 1].tag1 == (a shr 5) + 1 and n.tm.dline[ds - 1].dirty:
-        n.tm.dcache.last = (a shr 5) + 1
+      let held = n.tm.slot_of[int((a and 0x3FFFFF) shr 5)]
+      let ds = int(held and 0xFF)
+      if (e.kind == DT_MAIN and ds != 0 and n.tm.dline[ds - 1].tag1 == (a shr 5) + 1 and
+          n.tm.dline[ds - 1].dirty) or (e.kind >= DT_UNC and held == 0):
+        if e.kind == DT_MAIN: n.tm.dcache.last = (a shr 5) + 1
+        else:
+          let seq = a == n.last_data9 + (when sizeof(T) == 4: 4'u32 else: 2'u32)
+          n.wait9 += (if e.kind == DT_UNC_BUF: WBUF_WRITE else: data9(0x02, sizeof(T) * 8, seq, n.slot9_t))
         n.sched.now = n.arm9.cycles
         n.last_data9 = a
         if p[] != v:
@@ -892,6 +917,7 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
     (c.dcache_cfg, c.icache_cfg, c.wbuf_cfg, c.data_perm, c.code_perm, c.prot_regions)
   let ctl_before = n.cp15.control
   let before = tables(n.cp15)
+  let dc_before = n.tm.dc_on
   n.cp15.write(op1, cn, cm, op2, v)
   case cn
   of 1, 2, 3, 5, 6:
@@ -905,7 +931,11 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
     elif n.cp15.control != ctl_before:
       n.tm.update_control(n.cp15)
       n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
-      n.dtlb_off()              # cache and TCM enables, load modes
+      # the data TLB: TCM enables and load modes (bits 16-19) move pages
+      # between DTCM, ITCM and memory; the data cache's enable (the PU's
+      # included) decides cached main RAM
+      if ((n.cp15.control xor ctl_before) and 0xF_0000'u32) != 0: n.dtlb_off()
+      elif n.tm.dc_on != dc_before: n.dtlb_dc_switched()
   of 9: n.dtlb_off()            # TCM windows
   of 7:
     # cache maintenance (GBATEK "ARM CP15 Cache Control"): C5 invalidate

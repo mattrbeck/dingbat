@@ -347,6 +347,29 @@ block data_tlb:
   b.cp15_write(0, 7, 6, 1, A)
   check b.read32(A) == 0x1111_1111'u32 and n.tm.dcache.find_slot(A) >= 0,
         "a load after C7 invalidate misses and fills the line again"
+  # the uncached mirror (region 2): pages with nothing apart are read as
+  # memory is; one going apart (a dirty line through the cached mirror) must
+  # be read the long way, memory's side
+  const U = A + 0x40_0000
+  b7.write32(A + 0x5400, 0x1212_1212'u32)               # (a page with nothing apart)
+  discard b.read32(A + 0x5400)                            # cached through the other mirror
+  check b.read32(U + 0x5400) == 0x1212_1212'u32, "uncached mirror"
+  b7.write32(A + 0x5400, 0x1313_1313'u32)                 # behind the cache: the page is apart
+  check b.read32(U + 0x5400) == 0x1313_1313'u32 and b.read32(A + 0x5400) == 0x1212_1212'u32,
+        "uncached load of a line the cache keeps apart reads memory"
+  # an uncached store to a line the cache holds reaches memory only
+  b.write32(U + 0x800, 0)                                 # (enters the page for stores)
+  b7.write32(A + 0x420, 0x1414_1414'u32)
+  discard b.read32(A + 0x420)                             # clean, cached
+  b.write32(U + 0x420, 0x1515_1515'u32)
+  check b.read32(A + 0x420) == 0x1414_1414'u32 and b7.read32(A + 0x420) == 0x1515_1515'u32,
+        "uncached store to a cached line: memory changes, the CPU's copy does not"
+  # data cache off, a cachable page is loaded uncached; switched on, it fills
+  b.cp15_write(0, 1, 0, 0, n.cp15.control and not 4'u32)
+  discard b.read32(A + 0x3800)                            # a page with nothing apart
+  b.cp15_write(0, 1, 0, 0, n.cp15.control or 4)
+  discard b.read32(A + 0x3800)
+  check n.tm.dcache.find_slot(A + 0x3800) >= 0, "a page loaded uncached while the cache was off is cached when it is on"
   # DTCM over main RAM: moved away, the window's old pages are main RAM again
   const D = 0x0230_0000'u32
   b7.write32(D + 0x10, 0x6666_6666'u32)

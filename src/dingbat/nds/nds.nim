@@ -23,6 +23,9 @@ const
   DTLB_SIZE* = 256              ## ARM9 data TLB entries per direction (direct-mapped)
   DT_DTCM* = 0'u32              ## DtlbEntry.kind: DTCM
   DT_MAIN* = 1'u32              ## main RAM through the data cache
+  DT_UNC* = 2'u32               ## main RAM past it (loads: nothing apart in the page)
+  DT_UNC_BUF* = 3'u32           ## the same, stores write-buffered
+  DTLB_LOG = 32                 ## fills remembered for a cheap `dtlb_off`
 
 type
   NdsBoot* = enum
@@ -42,7 +45,7 @@ type
     ## One ARM9 data TLB entry (bus9.nim `dtlb_fill9`): a 4 KB page whose
     ## accesses need no region decode
     tag*: uint32                ## the page (address shr 12), or NO_PAGE
-    kind*: uint32               ## DT_DTCM or DT_MAIN
+    kind*: uint32               ## DT_DTCM, DT_MAIN, DT_UNC, DT_UNC_BUF
     base*: ptr UncheckedArray[uint8]  ## the page's bytes on the host
 
   NDS* = ref object
@@ -100,6 +103,13 @@ type
     # ARM9 data TLB (bus9.nim read32 .. write32): pages whose loads / stores
     # take a short path; derived, not saved (`dtlb_off`)
     rtlb9*, wtlb9*: array[DTLB_SIZE, DtlbEntry]
+    dtlb_log*, dtlb_dlog*: array[DTLB_LOG, uint16]  ## entries filled since
+                                ## the last drop (bit 15: a store entry), so a
+                                ## drop clears only those (the BIOS toggles the
+                                ## PU thousands of times a frame in "The
+                                ## Strongest Demo"); dlog: those whose kind the
+                                ## data cache's enable decides
+    dtlb_logged*, dtlb_dlogged*: int  ## how many; more than DTLB_LOG: all
     mmem_armed*: array[4, bool] ## DMA mode 4 channels running this frame
     frame_done*: bool
     sleeping*: bool             ## ARM7 HALTCNT sleep: every clock but the RTC's stopped
@@ -198,13 +208,35 @@ proc slot2_write(n: NDS; a: uint32; v: uint32; is9: bool; width: static int) =
       s.rom_write((a and not 3'u32) + 2, v shr 16, 16)
     else: s.rom_write(a, v, width)
 
+proc dtlb_clear(n: NDS; log: var array[DTLB_LOG, uint16]; logged: var int) {.inline.} =
+  for k in 0 ..< min(logged, DTLB_LOG):
+    let i = int(log[k] and 0x7FFF)
+    if (log[k] and 0x8000) != 0: n.wtlb9[i].tag = NO_PAGE
+    else: n.rtlb9[i].tag = NO_PAGE
+  logged = 0
+
 proc dtlb_off*(n: NDS) =
   ## The ARM9 data TLB starts over (bus9.nim dtlb_fill9): a CP15 write that
-  ## changes the TCMs, the protection unit or the caches' enables and
-  ## regions, WRAMCNT, a state load.
-  for i in 0 ..< DTLB_SIZE:
-    n.rtlb9[i].tag = NO_PAGE
-    n.wtlb9[i].tag = NO_PAGE
+  ## changes the TCMs or cachability, WRAMCNT, a state load. Only the
+  ## entries filled since need clearing (`dtlb_log`, `dtlb_dlog`).
+  if n.dtlb_logged > DTLB_LOG or n.dtlb_dlogged > DTLB_LOG:
+    for i in 0 ..< DTLB_SIZE:
+      n.rtlb9[i].tag = NO_PAGE
+      n.wtlb9[i].tag = NO_PAGE
+    n.dtlb_logged = 0
+    n.dtlb_dlogged = 0
+  else:
+    n.dtlb_clear(n.dtlb_log, n.dtlb_logged)
+    n.dtlb_clear(n.dtlb_dlog, n.dtlb_dlogged)
+
+proc dtlb_dc_switched*(n: NDS) =
+  ## The data cache was switched on or off (control bit 2, or the
+  ## protection unit's bit 0): the entries that depend on it go -- cached
+  ## main RAM, and uncached pages a region makes cachable (`dtlb_dlog`);
+  ## DTCM and pages no region caches stay (a BIOS that toggles the PU in a
+  ## loop keeps them: "The Strongest Demo").
+  if n.dtlb_dlogged > DTLB_LOG: n.dtlb_off()
+  else: n.dtlb_clear(n.dtlb_dlog, n.dtlb_dlogged)
 
 proc fetch_paths_off*(n: NDS) =
   ## Both CPUs' sequential fetch fast paths start over (bus9.nim fetch32,
@@ -216,9 +248,13 @@ proc fetch_paths_off*(n: NDS) =
 
 proc page_apart_now(n: NDS; p: int) {.inline.} =
   ## Main RAM page p is about to hold a memory side apart from what the CPU
-  ## reads, or a kept instruction-cache line: code there is read the slow way.
+  ## reads, or a kept instruction-cache line: code there is read the slow
+  ## way, and so are uncached loads (the data TLB's DT_UNC entries; every
+  ## mirror of the page has the same TLB index).
   if (n.fline9 shr 19) == 2 and int((n.fline9 shr 7) and 0x3FF) == p: n.fline9 = NO_PAGE
   if (n.fpage7 shr 12) == 2 and int(n.fpage7 and 0x3FF) == p: n.fpage7 = NO_PAGE
+  let e = addr n.rtlb9[p and (DTLB_SIZE - 1)]
+  if (e.tag shr 12) == 2 and int(e.tag and 0x3FF) == p: e.tag = NO_PAGE
 
 template rd16(s: seq[uint8]; i: int): uint32 =
   uint32(s[i]) or (uint32(s[i + 1]) shl 8)
@@ -431,6 +467,8 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.tm.update_regions(n.cp15)
   n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
   n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR; n.last_pc9 = NO_ADDR
+  n.dtlb_logged = DTLB_LOG + 1         # every entry (tags start at 0, a page)
+  n.dtlb_dlogged = 0
   n.fetch_paths_off()
   n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
   if boot == nbFirmware and not force_hle and can_firmware_boot(bios9, bios7, firmware):
