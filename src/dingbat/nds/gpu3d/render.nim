@@ -89,7 +89,8 @@ type
     attr, tex, pltt: uint32
     tc: ptr UncheckedArray[uint32]  ## the texture's decoded texels, or nil (tex_at)
     sw, th: int                   ## texture size
-    rep_s, rep_t, flip_s, flip_t: bool
+    rep_s, rep_t: bool
+    fmask_s, fmask_t: int         ## size - 1 where that coordinate flips, else 0 (wrap_coord)
     id: uint8
     alpha: int32                  ## 1..31 (wire-frame edges use 31)
     mode: uint32                  ## 0 modulate, 1 decal, 2 toon/highlight, 3 shadow
@@ -163,11 +164,13 @@ template pal16(r: Renderer; a: int): uint32 =
   uint32(r.pal_pages[(a shr 14) and 7][a and 0x3FFF]) or
     (uint32(r.pal_pages[((a + 1) shr 14) and 7][(a + 1) and 0x3FFF]) shl 8)
 
-proc wrap_coord(c, size: int; repeat, flip: bool): int {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+proc wrap_coord(c, size: int; repeat: bool; fmask: int): int {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  ## c clamped, or repeated and, with fmask = size - 1, flipped every other
+  ## time (size - 1 - m = m xor (size - 1) for m < size, a power of two)
   # clamp, spelt out: system.clamp is not inlined
   if not repeat: return (if c < 0: 0 elif c > size - 1: size - 1 else: c)
   let m = c and (size - 1)
-  if flip and (c and size) != 0: size - 1 - m else: m
+  if (c and size) != 0: m xor fmask else: m
 
 proc mix5(c0, c1: uint32; k0, k1, sh: int): uint32 =
   ## per-channel (c0*k0 + c1*k1) >> sh on BGR555 colours
@@ -274,8 +277,8 @@ proc tex_cached(r: Renderer; vram: Vram; tex, pltt: uint32): ptr UncheckedArray[
 proc tex_at(r: Renderer; c: PolyCtx; s, t: int64): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## The texel at (s, t) (12.4): wrapped, clamped or flipped into the
   ## texture, then decoded (or read from the cache).
-  let u = wrap_coord(int(s shr 4), c.sw, c.rep_s, c.flip_s)
-  let v = wrap_coord(int(t shr 4), c.th, c.rep_t, c.flip_t)
+  let u = wrap_coord(int(s shr 4), c.sw, c.rep_s, c.fmask_s)
+  let v = wrap_coord(int(t shr 4), c.th, c.rep_t, c.fmask_t)
   if c.tc == nil: return r.texel_uv(c.tex, c.pltt, u, v)
   let i = v * c.sw + u
   result = c.tc[i]
@@ -835,8 +838,8 @@ proc draw_polygon(r: Renderer; vram: Vram; poly: Polygon; verts: openArray[Verte
     c.th = 8 shl int((poly.tex shr 23) and 7)
     c.rep_s = (poly.tex and 0x10000) != 0
     c.rep_t = (poly.tex and 0x20000) != 0
-    c.flip_s = (poly.tex and 0x40000) != 0
-    c.flip_t = (poly.tex and 0x80000) != 0
+    c.fmask_s = (if (poly.tex and 0x40000) != 0: c.sw - 1 else: 0)
+    c.fmask_t = (if (poly.tex and 0x80000) != 0: c.th - 1 else: 0)
     c.tc = r.tex_cached(vram, poly.tex, poly.pltt)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
