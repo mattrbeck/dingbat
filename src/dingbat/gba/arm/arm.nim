@@ -4,6 +4,14 @@ proc exception_return_restore*(cpu: CPU) =
   ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
   ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
   ## ran, so the pipeline offset is corrected when returning to thumb.
+  # User and System mode have no SPSR, and the CPSR is what reads in its
+  # place (MRS, alyosha psr): restoring it changes nothing, and the S-bit
+  # write is a plain branch. `cpu.spsr` in those modes is whatever another
+  # mode's switch left there -- a Thumb CPSR, say -- and restoring that sent
+  # Colin McRae Rally 2.0's `movs pc, lr` returns (ARM library code, System
+  # mode) back into ARM code in Thumb state.
+  if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0:
+    cpu.spsr = cpu.cpsr
   # An IRQ return costs what the instruction costs. The arithmetic below is
   # that, written against IRQ_ENTRY_EXTRA so the old uneven split
   # (-d:IRQ_ENTRY_EXTRA=2: a cycle more going in, a cycle given back here)

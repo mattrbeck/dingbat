@@ -230,10 +230,21 @@ TABLE = {
     # Vision 1-1 set the frame the level starts on (payloads/eesettle4k.s).
     # Never with a 64 Kbit cart in the slot.
     'eesettle4k': [0x103, 0x102, 0x100, 0x101],
+    # an S-bit write to r15 in System mode (no SPSR): movs / subs / ldm^,
+    # then the same after leaving a Thumb SPSR in IRQ mode
+    # (payloads/sysmovs.s; Colin McRae Rally 2.0's ARM library returns)
+    'sysmovs': [0, 1, 2, 0x10, 0x11, 0x12],
+    # the SRAM region on an EEPROM cart (nothing on /CS2): byte, halfword and
+    # word at five addresses, then the word reads after a gamepak load that
+    # left 0x5A on A16-A23 (payloads/sramfloat.s; Justice League Chronicles'
+    # boot walk). Needs an EEPROM cart in the slot, booted holding
+    # SELECT+START; without a cart every cell answers DEAD0001.
+    'sramfloat': ([w | a << 4 for a in range(5) for w in range(3)]
+                  + [0x100 | 2 | a << 4 for a in range(5)]),
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
-NEEDS_CART = {'eesettle', 'eesettle4k'}
+NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat'}
 
 
 def source(name):

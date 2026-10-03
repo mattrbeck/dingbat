@@ -4104,3 +4104,39 @@ Also seen, not changed: the interrupt was taken with r15 still odd
 (0x080003DF: `bx` leaves bit 0 in r15 until the next fetch masks it), so
 LR_irq was odd; the console's LR is always the halfword address plus 4. Only
 a handler that inspects LR could tell.
+
+## §NEXT — Colin McRae Rally 2.0, TOCA, Starsky & Hutch: `movs pc, lr` in System mode restored a stale SPSR, 2026-10-02
+
+**FIXED** (arm.nim `exception_return_restore`). Found by the same input sweep.
+Colin McRae Rally 2.0 (U): after the difficulty menu the HLE configuration
+soft-resets to the Spellbound logo and the official-BIOS one crashes into a
+pale garbage screen, where both references show the Rally Finland stage
+screen. TOCA World Touring Cars (E) and Starsky & Hutch (E) hang the same
+way. Broken at least since 2026-08-01 (not a recent regression).
+
+**The way in.** The three link an ARM run-time library whose routines
+return with `movs pc, lr` -- 26-bit-era style, restoring the flags -- and
+the games call them from System mode. Colin McRae's unsigned divide
+(0x08000534) returns that way from 0x080007F4 into its signed wrapper at
+0x0800081C, and dingbat came back in **Thumb** state: it ran the wrapper's
+ARM words as Thumb, reached a Thumb veneer region with the stack one frame
+off, and a function returned to a pointer in a data table (0x082B3BB0).
+The official-BIOS run then executed that table, whose stores overwrote the
+IRQ handler in IWRAM, and jumped to 0x01A4903C; the HLE run reached a soft
+reset.
+
+**Why Thumb.** User and System mode have no SPSR. An S-bit write to r15
+(`movs pc, lr`, `subs pc, lr, #n`, `ldm {..., pc}^`) restores CPSR from
+`cpu.spsr`, and in those modes that field held whatever `switch_mode` last
+copied there: a snapshot of some earlier CPSR, here a Thumb one. MRS already
+reads the CPSR in place of the SPSR in User and System mode (alyosha psr);
+the restore now does the same, so the S bit changes nothing there and the
+write is a plain branch (with the ALU's own flags, for movs/subs). The new
+payload `tests/roms/payloads/sysmovs.s` (r0table `sysmovs`, six cells: the
+three forms, with and without a Thumb SPSR left in IRQ mode) answers the
+same on dingbat (both BIOSes) and mGBA after the change -- movs/subs
+0x2000029F, ldm^ 0x6000029F -- where dingbat answered 0x0000021F before;
+the console has not run it (the ARM ARM calls the form unpredictable).
+
+All three games now play on with both BIOSes, matching mGBA at every
+screenshot of the sweep's 3000 frames.
