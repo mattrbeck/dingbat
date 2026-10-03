@@ -3743,3 +3743,170 @@ SELECT+START: `python3 tools/hwlink/r0table.py --record eesettle4k`.
 dingbat predicts 0x103 FFFFFFFF (blank last block) or the block, 0x102
 00000300, 0x100 / 0x101 0001A74A (108362); mGBA 00000301 and 0001C130
 (114992). Never with a 64 Kbit cart inserted. **No emulator change.**
+
+## 41. The PSG envelope restart and master volume: probes built, the SP not heard, 2026-10-02
+
+**Not settled on the console: the Mac's microphone could not be opened.**
+Every capture hung without a frame; `AVCaptureDevice.authorizationStatus`
+for audio reads *not determined* for this session's process, i.e. macOS is
+waiting for someone to answer the microphone prompt. Both probes and their
+listeners are ready for the next session that has the microphone (the user
+grants it once):
+
+    python3 tools/hwlink/envrestart_listen.py record   # ~30 s
+    python3 tools/hwlink/psgvol_listen.py record       # ~20 s
+
+and both dry-run in the emulators (`... emu dingbat mgba nba`).
+
+**1. Does an NRx2 write's extra envelope clock survive a trigger?**
+`common/psg_channels.nim` arms `env_extra_tick` when NRx2 takes a running
+channel's period from 0 to non-zero (SameSuite `nrx2_speed_change`, CGB) and
+`psg_trigger_envelope` does not clear it. The music engine most games use
+ends a note with NRx2 = 0x08 and a trigger, then starts the next by writing
+an increasing envelope and triggering at once, so in dingbat the new note's
+first step comes about 2 ms after the trigger instead of a period later.
+`tests/roms/payloads/envrestart.s` plays, on channels 2, 1 and 4, at four
+phases of the 64 Hz envelope clock (slots timed on TM2 so every slot starts
+at the same frame-sequencer phase): A, NRx2 = 0x09 written to a stopped
+channel and triggered; B0, the engine's sequence (0x08 + trigger, 62 ms
+later 0x09 and a trigger back to back); B20, the write 20 ms before the
+trigger. 6.5 envelope clocks after the trigger a period-0 write of the same
+direction freezes the level (nrx2table.s C7 showed that holds on the AGB),
+and each note ends in a 203 ms steady tone read against period-0 references
+(volumes 4 / 6 / 8 / 10) in the same take. Emulators: dingbat B0 = A + 1 at
+every period-1 cell of all three channels, mGBA and the second reference
+B0 = A; B20 = A everywhere. **Nothing changed**: the proposed
+`ch.env_extra_tick = false` in `psg_trigger_envelope` stays unapplied until
+the console answers (if the SP says B0 = A and the CGB is unknown, the AGB
+switch is `when PSG_AGB` in that template).
+
+**2. SOUNDCNT_L master volume, V / 8 or (V + 1) / 8, and the PSG : DMA
+ratio.** `tests/roms/payloads/psgvol.s` plays 1024 Hz tones only (one
+microphone response for all): channel 2 at volume 15 under master 7, 3, 0,
+1, 5, 7, then DirectSound A at 100% and 50% fed a full-swing square (16 x
+0x7F, 16 x 0x80) at 32768 Hz, twice over. Its dry run found a dingbat bug the
+console is not needed for:
+
+* **SOUNDBIAS was taken at half its level.** The bias field is bits 1-9
+  (GBATEK: "Bias Level (Default=100h)", the register's 200h), so in the
+  10-bit sum it counts twice; dingbat added the field (100h). The DAC's
+  0..3FFh was then centred 256 below the sum's zero: a DirectSound channel
+  at 100% (an 8-bit sample x4, +-512) clipped below -256, the negative half
+  of every peak past -64. The 50% / 100% ratio of the square read 0.67
+  instead of 0.50. Games hit it: 30 s of Kirby & The Amazing Mirror's intro
+  put 506 output samples on the floor (-256) and none above +364;
+  LeafGreen's 722. **FIXED** (`gba/apu.nim`): the bias is the field x2.
+* **(V + 1) / 8, unmeasured, applied.** The master volume is the PSG
+  block's own NR50, and the GB core scales by (V + 1) / 8 (Pan Docs: 0 is
+  an eighth, not silence); the GBA mixer used V / 8. The project's rule is
+  that the GBA follows the GB where the SP has not measured otherwise, and
+  both references agree with Pan Docs. **CHANGED** (`gba/apu.nim`), marked
+  unmeasured in the code; psgvol.s will settle it.
+
+After both, dingbat's DirectSound-100% : PSG ratio (one channel, volume 15,
+master 7, PSG 100%) is 4.23 against the second reference's 4.25 (mGBA about
+4.1, with a blip resampler's 50% / 100% of 0.60); before, 3.64 with V / 8
+and the clip. Predictions for the console: V / 8 gives P3 / P7 0.43, P1 / P7
+0.14, P0 silent; (V + 1) / 8 gives 0.50, 0.25, 0.125.
+
+**Found on the way: a prescaled timer read 0 once every 16 frames.**
+envrestart.s's first emulator run had its waits on TM2 (prescaler 256)
+return early. `end_frame` rebases the scheduler keeping the clock's low 10
+bits; a timer whose anchor predated the base had its ticks folded into the
+counter, but its anchor kept its offset within the prescaler period, which
+could land after the rebased clock. A read in the frame's first few cycles
+below that offset took the "not started yet" path and answered the reload.
+The frame's length walks the clock's low bits through a 16-frame cycle, so
+it came back once every 16 frames, at prescalers 64, 256 and 1024 (games
+reading a slow timer right at the start of V-blank). **FIXED** (`gba.nim`
+`end_frame`: the anchor goes to cycle 0, the same prescaler period).
+`tests/roms/payloads/tmjump.s` polls TM2 across the start of V-blank for 16
+frames: the SP reads no jump at any prescaler; the old core 6 at 256 and 30
+at 1024. Recorded and frozen (`tests/roms/cyclelaws/tmjump.gba`).
+
+Gates. Timer fix: runner 1433/1443 row-identical; cycle laws 2075/2075 HLE
+and Nintendo's BIOS; 22 playtest scripts (Harry Potter CoS to Kirby NiDL,
+dingbat and dingbat-bios against mGBA and the second reference) give the
+same verdict per game and config as before. Mixer (bias and master volume):
+`nimble test_psgagb`, `test_mp2kpass`, `test_silentaudio` pass; runner
+1433/1443 row-identical; eight audio scripts (Mother 3, LeafGreen, Golden
+Sun, Metroid Zero Mission, Aria of Sorrow, Breath of Fire, Minish Cap,
+Metroid Fusion) pass on all four emulators as before, every audio verdict
+the same (the two MINOR windows that were there stay one each: LeafGreen
+f6390 spectrum 0.38 -> 0.42, Metroid Fusion f23385 level 7 -> 6 dB).
+
+## 42. hdmalag configuration 29: the request that lands in a refill, 2026-10-02
+
+**FIXED** (`REFILL_WINDOW_SPLIT`, cpu.nim `window_refill`, ppu.nim
+`start_hblank`). Configuration 29 of `tests/roms/payloads/hdmalag.s` arms
+DMA1 (3 words, EWRAM scratch) and DMA3 (302 halfwords of TM0 stamps) on
+every H-blank: DMA3's burst ends 3 cycles before the next H-blank's grant,
+so the CPU, polling VCOUNT in a `ldrh / cmp / blo` loop from IWRAM, runs 3
+cycles a line. The console starts every burst on its H-blank's cycle (first
+read at 981 + 1232k, 20 bursts); dingbat started line 143's 2 cycles late,
+and the next H-blank found DMA3 still running and dropped it (18).
+
+A trace (`-d:itrace`) showed line 143's request landing at the second cycle
+of the `blo`'s refill -- a `blo` whose own fetch the line-142 burst had been
+granted at, so its refill ran after both bursts. dingbat charged that refill
+as one 2-cycle block with no access end, so the request waited for the next
+opcode fetch to end (grant at +3, not +1). Two changes:
+
+* with the DMA access window open, a refill outside the gamepak is two
+  fetches, each synced to its end (`window_refill`). r15 moves on after
+  each sync, so a burst granted between them still finds the first fetch on
+  the bus -- the hdmaphase/hdmaobus cells that pinned
+  `DMA_SEES_REFILL_FETCH` all hold (moving r15 first broke 23 of them);
+* the window it needed was line 143's, opened by `start_hblank` while the
+  bursts ran -- and the line-142 request's `window_closing`, still set
+  because no fetch had come between that request and the new window, shut
+  it at the `blo`'s fetch. Opening a window now clears it.
+
+Configuration 29's four cells recorded and frozen. hdmalag's other
+configurations, slotexec/slotbranch/slotdma (prefetch on and off) and the
+alyosha prefetcher ROMs unchanged. Runner 1433/1443 row-identical; cycle
+laws 2079/2079 HLE and Nintendo's BIOS; the 22 playtest scripts give the
+same verdict per game and config.
+
+## 43. Slot-code ldm and slotdma k = 4-8: the console runs something else, 2026-10-02
+
+No change. Two leftovers from §29 and §26, chased on the SP.
+
+**slotbranch rows 3 and 6** (a 3-register `ldmia` fetched from the empty
+slot, home path 22 / 25 on the console where dingbat says 20 / 23): not a
+per-run phase. `tests/roms/payloads/slotldm.s` (`python3
+tools/hwlink/slotbranch.py --tally --source=tests/roms/payloads/slotldm.s`)
+runs the home trial for 2- to 6-register `ldmia` from IWRAM, EWRAM and VRAM
+at four one-cycle sled offsets, 24 trials a row:
+
+| registers | IWRAM (dingbat / console) | EWRAM | VRAM |
+|---|---|---|---|
+| 2 | 19 / 19 x24 | 29 / 29 x24 | 21 / 21 x24 |
+| 3 | 20 / 20 x23, 22 x1 | 35 / 35 x7, 37 x17 | 23 / 23 x18, 25 x6 |
+| 4 | 21 / 21 x8, 23 x16 | 41 / 41 x9, 43 x15 | 25 / 25 x18, 27 x6 |
+| 5 | 22 / 22 x14, 24 x10 | 47 / 47 x4, 49 x20 | 27 / 27 x5, 29 x19 |
+| 6 | 23 / 23 x1, 25 x23 | 53 / 53 x11, 55 x13 | 29 / 29 x24 |
+
+Two registers never vary; three and more read dingbat's time or 2 more,
+trial by trial (both passes of one run disagree), in proportions that
+change between sessions (3-register IWRAM was high in about half its
+trials in a session with sled offsets 0-15) and do not follow the sled. A halt to line 100
+before each trial (a fixed PPU phase) spreads them wider (5-register EWRAM
+47-56). The same loads from IWRAM code (`tests/roms/payloads/ldmvar.s`) cost
+the same every time in every region (32 / 7 / 12, as both emulators say),
+so it is the empty slot's code fetches, not the loads, and no phase a
+payload can set (sled, PPU line) decides it. In
+a later session the 6-register EWRAM row read times of 0 and 1 with the
+right return address, unexplained. Without a cartridge this is not an
+instrument for multi-register loads; no rule, nothing to fit.
+
+**slotdma k = 4-8** (prefetcher off: console 1052, dingbat 1049): at those
+phases the H-blank DMA lands in the hop's 5-cycle nonsequential fetch, and
+the console's return address reads 08008009 where dingbat's and the
+console's own other phases read 08008007 (raw `r0`/`lr` columns of the
+payload's block): the forced-nonsequential fetch after the burst floated
+`addr >> 1` instead of the `0xFFFF` suffix and the console executed one more
+hop -- §22's "chain's raw +5 rows". The emulator image cannot float two
+values at one address, so the column compares different programs; the cost
+itself (DMA + 2) is §22's and dingbat's. With the prefetcher on the three
+one-cycle cells of §26 (k = 0, 12, 13: 1046 vs 1045) are unchanged.

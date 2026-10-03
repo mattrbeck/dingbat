@@ -1,6 +1,11 @@
 """Does a branch into the gamepak wait for a committed prefetch? Three ways.
 
     python3 slotbranch.py [--emulators-only] [--runs=N] [WAITCNT ...]
+    python3 slotbranch.py --tally --source=PATH [--runs=N]
+
+--tally runs any payload built like slotbranch.s (payloads/slotldm.s) and
+prints, per table row, how often each time came back over the runs and both
+passes, beside dingbat's: for rows the console answers more than one way.
 
 tests/roms/payloads/slotbranch.s explains the trial: one load fetched from an
 empty cartridge slot, then the BL-suffix float branching either straight home
@@ -38,15 +43,43 @@ def rows_of(source):
     return trials, trials + extra
 
 
+def tally(source, runs):
+    from collections import Counter
+    from monitor import Monitor, assemble
+    trials, planted = rows_of(source)
+    n = len(trials) * 2
+    rom = payloadcmp.build_wrapper(source, [0x4000])
+    slotexec.plant(rom, planted)
+    emu = payloadcmp.in_emulators(rom, 0, block=(RESULTS, n * 2), frames=40)
+    ding = slotexec.halfwords(emu['dingbat'], n)
+    code = assemble(source, out_dir=payloadcmp.SCRATCH)
+    seen = [Counter() for _ in trials]
+    for _ in range(runs):
+        with Monitor() as m:
+            m.ping()
+            m.run_payload(code, 0x4000)
+            got = slotexec.halfwords(m.read_mem(RESULTS, n * 2), n)
+        for i, (t, _, _) in enumerate(got):
+            seen[i % len(trials)][t] += 1
+    for i, (addr, label) in enumerate(trials):
+        print(f'{i:>3} dingbat {ding[i][0]:>5}  console {dict(sorted(seen[i].items()))}   {label}')
+    return 0
+
+
 def main(argv):
     emulators_only = '--emulators-only' in argv
     runs = 3
     rest = []
+    source = None
     for a in argv[1:]:
         if a.startswith('--runs='):
             runs = int(a.split('=')[1])
+        elif a.startswith('--source='):
+            source = a.split('=', 1)[1]
         elif not a.startswith('--'):
             rest.append(a)
+    if '--tally' in argv:
+        return tally(source or SOURCE, runs)
     waitcnts = [int(a, 0) for a in rest] or [0x4000]
     if not emulators_only and any(w != 0x4000 for w in waitcnts):
         print('refusing: only WAITCNT 0x4000 is known safe on the console '
