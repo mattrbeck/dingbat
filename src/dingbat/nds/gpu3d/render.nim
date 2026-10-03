@@ -532,12 +532,16 @@ type
     len: int64                  ## R.x - L.x (may be <= 0)
     zk: int64                   ## 2^18 div len (len > 0)
     eqw: bool
+    inr: bool                   ## both ends' colours (9-bit), Z and w in range (`fill`)
 
 proc span_step(L, R: EndAttr): SpanStep {.inline.} =
   let len = int64(R.x - L.x)
   let d = max(1'i64, len)
+  template c9(e: EndAttr): bool =
+    e.c[0] in 0'i64..511'i64 and e.c[1] in 0'i64..511'i64 and e.c[2] in 0'i64..511'i64
+  template zw(e: EndAttr): bool = e.z in 0'i64..0xFF_FFFF'i64 and e.w in 1'i64..0xFF_FFFF'i64
   SpanStep(d: d, q: (1'i64 shl 38) div d, rr: (1'i64 shl 38) mod d, n: -2, len: len,
-           zk: (1'i64 shl 18) div d, eqw: L.w == R.w)
+           zk: (1'i64 shl 18) div d, eqw: L.w == R.w, inr: c9(L) and c9(R) and zw(L) and zw(R))
 
 proc step_to(sp: var SpanStep; n: int64) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   if n == sp.n + 1:
@@ -567,6 +571,7 @@ const
   K_NOAA = 64       ## no anti-aliasing
   K_WBUF = 128      ## W-buffer depth
   K_ZBUF = 256      ## Z-buffer depth
+  K_INR = 512       ## the span is in range (SpanStep.inr) and the dot lies on it (0 <= n < len)
 
 template kf(K: static int; yes, no: static int; dyn: untyped): untyped =
   when (K and yes) != 0: true
@@ -619,7 +624,10 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
       a + ashr(dd * (if dd >= 0: fc else: fl), 38)
     else: a + ashr((b - a) * f8, 8)
   let dv = if kf(K, K_WBUF, K_ZBUF, c.wbuffer): w else: z
-  let dval = uint32(max(0'i64, min(dv, 0xFF_FFFF'i64)))
+  # On a span in range (K_INR) every value lies between its two ends'
+  # (dots 0 <= n < len: the factors are in [0, 1)), so the clamps here and
+  # on the colours below change nothing
+  let dval = (when (K and K_INR) != 0: uint32(dv) else: uint32(max(0'i64, min(dv, 0xFF_FFFF'i64))))
   let old = r.depth[i]
   var pass = if not simple and (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
@@ -663,9 +671,12 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
     # covered or an edge ever read it.
     if not aa or (r.aacov[i] >= 31 and (r.flags[i] and FLAG_EDGE) == 0) or
        dval >= r.below_depth[i]: return
-  let vr = int32(max(0'i64, min(ashr(at(L.c[0], R.c[0]), 3), 63'i64)))
-  let vg = int32(max(0'i64, min(ashr(at(L.c[1], R.c[1]), 3), 63'i64)))
-  let vb = int32(max(0'i64, min(ashr(at(L.c[2], R.c[2]), 3), 63'i64)))
+  template c6(a, b: int64): int32 =
+    when (K and K_INR) != 0: int32(ashr(at(a, b), 3))
+    else: int32(max(0'i64, min(ashr(at(a, b), 3), 63'i64)))
+  let vr = c6(L.c[0], R.c[0])
+  let vg = c6(L.c[1], R.c[1])
+  let vb = c6(L.c[2], R.c[2])
   var tx = 0'u32
   if textured:
     tx = r.tex_at(c, at(L.s, R.s), at(L.t, R.t))
@@ -713,14 +724,16 @@ proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp
     r.trans_id[i] = c.id
     if not c.fog: r.flags[i] = r.flags[i] and not FLAG_FOG
 
-template by_kind(c: PolyCtx; sp: SpanStep; generic, go: untyped) =
+template by_kind(c: PolyCtx; sp: SpanStep; kin: static int; generic, go: untyped) =
   ## `go(K)` with K the facts that hold for this polygon and span
-  ## (`generic` when the polygon is not K_SIMPLE).
-  if c.wire or c.curse or c.mode != 0 or (c.attr and 0x4000) != 0:
+  ## (`generic` when the polygon is not K_SIMPLE, or with `kin` = K_INR
+  ## when the span is not in range).
+  if c.wire or c.curse or c.mode != 0 or (c.attr and 0x4000) != 0 or (kin != 0 and not sp.inr):
     generic
   else:
     template by_depth(t, e, a: static int) =
-      if c.wbuffer: go(K_SIMPLE or t or e or a or K_WBUF) else: go(K_SIMPLE or t or e or a or K_ZBUF)
+      if c.wbuffer: go(K_SIMPLE or kin or t or e or a or K_WBUF)
+      else: go(K_SIMPLE or kin or t or e or a or K_ZBUF)
     template by_aa(t, e: static int) =
       if c.aa: by_depth(t, e, K_AA) else: by_depth(t, e, K_NOAA)
     template by_w(t: static int) =
@@ -732,7 +745,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   ## One dot (an edge's), by the instance of plot_k that knows the
   ## polygon's and the span's flags.
   template go(K: static int) = plot_k[K](r, c, x, y, L, R, sp, edge, cov, role)
-  by_kind(c, sp, go(0), go)
+  by_kind(c, sp, 0, go(0), go)
 
 proc fill_k[K: static int](r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr;
                            sp: var SpanStep; edge: bool; role: uint8) =
@@ -751,8 +764,9 @@ proc fill(r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr; sp: var SpanSt
   ## Dots x0 ..< x1 of row y, whole (coverage 31): `plot` for each, by the
   ## instance of plot_k that knows the polygon's and the span's flags.
   if x0 >= x1: return
+  # (its dots lie on the span: 0 <= x - L.x < len, or len <= 0)
   template go(K: static int) = fill_k[K](r, c, y, x0, x1, L, R, sp, edge, role)
-  by_kind(c, sp, go(0), go)
+  by_kind(c, sp, K_INR, go(0), go)
 
 proc aa_cov(e: Edge; y, x: int; right: bool; lend = 0'i32): int32 =
   ## Anti-aliasing coverage (0..31) of dot x on row y by edge e
