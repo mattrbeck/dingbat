@@ -108,9 +108,14 @@ and, for engine A, the 3D line) instead of drawn.
 
 - **Registers and latches**: compared as a key (`LineKey`) built at the
   line's start.
-- **Palette and OAM**: the bus counts every change to each engine's half
-  (`mem_gen`; a store of the value already there is not a change, so a
-  game's per-frame OAM copy costs nothing).
+- **Palette**: the bus counts every change to each engine's half
+  (`mem_gen`; a store of the value already there is not a change).
+- **OAM**: a change to an entry counts for the lines its OBJ is on before
+  and after the store (`oam_store`, `lgen`): `render_objs` skips an OBJ on
+  every other line before reading more than its first two halfwords. A
+  rotation/scaling parameter counts for the lines of every affine OBJ
+  using its group. A game's per-frame OAM copy with one sprite moving
+  redraws only the lines that sprite leaves and enters.
 - **VRAM**: per 1 KB block of the banks, `vram.vgen` counts the stores that
   changed a byte there. While a line is drawn, every VRAM read marks its
   block (the views know each page's place in the banks); the line keeps
@@ -135,9 +140,10 @@ fades) and the 3D line.
 `tests/nds_perf_test.nim` runs 15 2D ROMs (scrolling, affine and
 rotscale BGs, affine and extended-palette sprites, H-blank and mid-frame
 windows, bitmaps, 3D under 2D) with reuse on and off, changes palette, OAM,
-BG VRAM and the mapping behind reused lines through the bus, and loads a
-state over a running machine. Dropping the palette/OAM or the VRAM count
-fails it.
+BG VRAM and the mapping behind reused lines through the bus, then moves,
+grows, rotates, wraps and hides an OBJ through OAM alone, and loads a
+state over a running machine. Dropping the palette count, a block's
+count, the OBJ's old lines or the parameter group fails it.
 
 ## Error-flag checks (`quirky`)
 

@@ -546,16 +546,23 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
       let p = cast[ptr UncheckedArray[uint8]](
         if (a shr 24) == 5: addr n.gpu.palette[0] else: addr n.gpu.oam[0])
       let i = int(a and 0x7FF)
-      # a change is seen by the engine owning this half (line reuse, engine2d.nim)
+      # a change is seen by the engine owning this half (line reuse,
+      # engine2d.nim): a palette change by all its lines, an OAM change by
+      # the lines of the OBJs it moves
+      let e {.cursor.} = if (a and 0x400) == 0: n.gpu.engine_a else: n.gpu.engine_b
       let q = addr p[i]
-      when width == 32:
-        if cast[ptr uint32](q)[] != v:
-          cast[ptr uint32](q)[] = v
-          if (a and 0x400) == 0: inc n.gpu.engine_a.mem_gen else: inc n.gpu.engine_b.mem_gen
+      if (a shr 24) == 7:
+        e.oam_store((i and 0x3FF) shr 1, uint16(v))
+        when width == 32: e.oam_store(((i and 0x3FF) shr 1) + 1, uint16(v shr 16))
       else:
-        if cast[ptr uint16](q)[] != uint16(v):
-          cast[ptr uint16](q)[] = uint16(v)
-          if (a and 0x400) == 0: inc n.gpu.engine_a.mem_gen else: inc n.gpu.engine_b.mem_gen
+        when width == 32:
+          if cast[ptr uint32](q)[] != v:
+            cast[ptr uint32](q)[] = v
+            inc e.mem_gen
+        else:
+          if cast[ptr uint16](q)[] != uint16(v):
+            cast[ptr uint16](q)[] = uint16(v)
+            inc e.mem_gen
   of 0x06:
     when width != 8:
       var off: int

@@ -77,7 +77,8 @@ type
     # time, and the line it gave; none of it is machine state (not saved)
     lc_on*: bool                          ## reuse enabled (the machine sets it)
     mem_gen*: uint64                      ## bumped by the bus for every change to
-                                          ## this engine's palette or OAM half
+                                          ## this engine's palette half
+    lgen: array[192, uint64]              ## per line: OAM changes to OBJs on it
     touch: Touch                          ## the VRAM blocks the line being drawn read
     lc_valid: array[192, bool]
     lc_key: array[192, LineKey]
@@ -838,8 +839,9 @@ proc render_bg_line*(e: Engine2D; y: int) =
 # -- is scratch, rewritten before it is read, and not saved). So a line
 # whose inputs all equal those it had when last drawn comes out the same,
 # and is copied instead of drawn. The bus counts every change to the
-# palette or OAM half (`mem_gen`, a store of an equal value is not a
-# change); vram.nim counts the changes to each 1 KB block of the banks
+# palette half (`mem_gen`, a store of an equal value is not a change) and
+# hands OAM stores to `oam_store`, which counts them for the lines of the
+# OBJ they move (`lgen`); vram.nim counts the changes to each 1 KB block of the banks
 # (`vgen`) and the remaps, and the views mark every block the line reads
 # (`touch`), so the line is redrawn only when one of those blocks changed
 # (`touched_sum`); the registers and latches are compared as a key, the 3D
@@ -847,8 +849,40 @@ proc render_bg_line*(e: Engine2D; y: int) =
 # line. Off without the machine (`lc_on`, the 2D unit tests poke memory
 # directly) and with DINGBAT_NDS_NO_SKIP=1 (docs/nds/perf.md).
 
-proc line_key(e: Engine2D): LineKey =
-  LineKey(gen: e.mem_gen + e.vram.remap_gen, dispcnt: e.dispcnt,
+proc bump_obj_lines(e: Engine2D; a0, a1: uint16) =
+  ## The lines an OBJ with these attributes is on (`render_objs` skips it
+  ## everywhere else before reading anything more) see a change.
+  let affine = (a0 and 0x100) != 0
+  if not affine and (a0 and 0x200) != 0: return      # disabled
+  let shape = int(a0 shr 14)
+  if shape == 3: return
+  var bh = OBJ_SIZES[shape][a1 shr 14][1]
+  if affine and (a0 and 0x200) != 0: bh *= 2          # double size
+  let top = int(a0 and 0xFF)
+  for d in 0 ..< bh:
+    let y = (top + d) and 0xFF                        # Y wraps mod 256
+    if y < 192: inc e.lgen[y]
+
+proc oam_store*(e: Engine2D; k: int; v: uint16) =
+  ## The bus stores halfword k of this engine's OAM. For line reuse the
+  ## lines the entry's OBJ is on before and after see the change; a
+  ## rotation/scaling parameter, those of every affine OBJ using its group.
+  if e.oam[k] == v: return
+  let i = k shr 2
+  if (k and 3) == 3:
+    e.oam[k] = v
+    let g = uint16(i shr 2)
+    for j in 0 ..< 128:
+      let a0 = e.oam[j * 4]
+      let a1 = e.oam[j * 4 + 1]
+      if (a0 and 0x100) != 0 and ((a1 shr 9) and 0x1F) == g: e.bump_obj_lines(a0, a1)
+    return
+  e.bump_obj_lines(e.oam[i * 4], e.oam[i * 4 + 1])
+  e.oam[k] = v
+  e.bump_obj_lines(e.oam[i * 4], e.oam[i * 4 + 1])
+
+proc line_key(e: Engine2D; y: int): LineKey =
+  LineKey(gen: e.mem_gen + e.vram.remap_gen + e.lgen[y], dispcnt: e.dispcnt,
           bgcnt: e.bgcnt, bghofs: e.bghofs, bgvofs: e.bgvofs,
           bgpa: e.bgpa, bgpb: e.bgpb, bgpc: e.bgpc, bgpd: e.bgpd,
           bgx: e.bgx, bgy: e.bgy, mos_bgx: e.mos_bgx, mos_bgy: e.mos_bgy,
@@ -880,7 +914,7 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
   let cache = e.lc_on and dm == 1 and not need_gfx and y < 192
   var key: LineKey
   if cache:
-    key = e.line_key()
+    key = e.line_key(y)
     if e.lc_valid[y] and e.lc_key[y] == key and
        (e.line3d == nil or e.lc_3d[y] == e.line3d[]) and
        e.vram.touched_sum(e.lc_touch[y]) == e.lc_vsum[y]:

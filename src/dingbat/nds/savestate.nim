@@ -74,7 +74,7 @@ const
   # which remap() in after_load restarts (vram.remap_gen)
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d", "line", "gfx", "bgpix", "objpix",
                  "objprio", "objattr", "winmask", "line_semi", "line_objwin",
-                 "lc_on", "mem_gen", "touch", "lc_valid", "lc_key", "lc_touch", "lc_vsum",
+                 "lc_on", "mem_gen", "lgen", "touch", "lc_valid", "lc_key", "lc_touch", "lc_vsum",
                  "lc_line", "lc_3d", "lc_reused"]
   # reuse_*/last_*: what the last real render drew (render_frame); the
   # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh

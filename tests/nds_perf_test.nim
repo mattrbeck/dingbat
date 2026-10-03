@@ -258,10 +258,20 @@ block:
     poke("A palette", proc (bus: Arm9Bus) = write16(bus, 0x0500_0002'u32, 0x001F))
     poke("B palette", proc (bus: Arm9Bus) = write16(bus, 0x0500_0402'u32, 0x7C00))
     poke("B backdrop", proc (bus: Arm9Bus) = write16(bus, 0x0500_0400'u32, 0x03E0))
-    poke("B OAM", proc (bus: Arm9Bus) =                                  # an OBJ on
+    poke("B OBJ setup", proc (bus: Arm9Bus) =   # bank I as B's OBJ VRAM, solid tiles, OBJs on
+      write8(bus, 0x0400_0249'u32, 0x82)
+      for i in 0'u32 ..< 0x1000: write16(bus, 0x0660_0000'u32 + i * 2, 0x1111)
+      write16(bus, 0x0500_0602'u32, 0x03FF)
       write16(bus, 0x0400_1000'u32, uint16(read16(bus, 0x0400_1000'u32) or 0x1000))
-      write32(bus, 0x0700_0400'u32, 0x4000_0010'u32)
+      write32(bus, 0x0700_0400'u32, 0x4000_0010'u32)                    # 16x16 at (0, 16)
       write16(bus, 0x0700_0404'u32, 0x0001))
+    # OAM alone changes from here on: the lines the OBJ leaves and enters
+    poke("OBJ moved", proc (bus: Arm9Bus) = write16(bus, 0x0700_0400'u32, 0x0060))
+    poke("OBJ grown", proc (bus: Arm9Bus) = write16(bus, 0x0700_0402'u32, 0x8000))
+    poke("OBJ affine, double size", proc (bus: Arm9Bus) = write16(bus, 0x0700_0400'u32, 0x0330))
+    poke("affine parameter", proc (bus: Arm9Bus) = write16(bus, 0x0700_0406'u32, 0x7FFF))
+    poke("OBJ wraps past line 255", proc (bus: Arm9Bus) = write16(bus, 0x0700_0400'u32, 0x03F0))
+    poke("OBJ hidden", proc (bus: Arm9Bus) = write16(bus, 0x0700_0400'u32, 0x0200))
     poke("BG VRAM", proc (bus: Arm9Bus) =
       for i in 0'u32 ..< 0x800: write16(bus, 0x0600_0000'u32 + i * 2, uint16(i * 7))
       for i in 0'u32 ..< 0x800: write16(bus, 0x0620_0000'u32 + i * 2, uint16(i * 5)))
