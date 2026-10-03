@@ -110,12 +110,13 @@ read-only).
   A jump inside that page takes the same kind of short path when the
   target line is ITCM or a hit whose bytes are memory's (`fetch_jump9`).
 - **Data TLB** (docs/nds/perf.md, round 3): ARM9 loads and stores in a
-  cached main RAM page take a short path only on a tag hit (a store only
-  into a dirty line): exactly where the general path charges nothing and
-  uses the CPU's copy; misses, fills and clean lines go the general way.
-  Uncached pages take one only with nothing apart (loads) or on a line no
-  cache holds (stores); `page_apart_now` drops a page's uncached load
-  entry.
+  cached main RAM page take a short path on a tag hit (a store only into
+  a dirty line), exactly where the general path charges nothing and uses
+  the CPU's copy, and a store also on a line no cache holds (a miss that
+  allocates nothing); load misses, fills and clean lines go the general
+  way. Uncached pages take one only with nothing apart (loads) or on a
+  line no cache holds (stores); `page_apart_now` drops a page's uncached
+  load entry.
 
 **Save states** carry `iline` (line, kept flag, the kept bytes) and the
 widened `slot_of` / `page_apart` in section 5; a state loaded mid-stale

@@ -288,8 +288,8 @@ and read by the inlined `read8`..`write32` first:
 | kind | load | store |
 |---|---|---|
 | DTCM | free, read the page | free, store (a change bumps the ARM9's epoch) |
-| main RAM through the cache | a tag hit (`last`, else the 4-way compare, which makes it `last` as the lookup would) is free and reads the CPU's copy: `dc_hit` is then true, so `dc_apart` does not matter | a tag hit on a *dirty* line: write9's plain store, free |
-| main RAM past the cache | in a page with nothing apart: the uncached charge, memory as it is | on a line no cache holds (`slot_of` = 0): the uncached or write-buffered charge, a plain store |
+| main RAM through the cache | a tag hit (`last`, else the 4-way compare, which makes it `last` as the lookup would) is free and reads the CPU's copy: `dc_hit` is then true, so `dc_apart` does not matter | a tag hit on a *dirty* line: write9's plain store, free; a line no cache holds (`slot_of` = 0): a miss that allocates nothing, so the write buffer's or the uncached charge and a plain store |
+| main RAM past the cache | in a page with nothing apart: the uncached charge, memory as it is | on a line no cache holds: the write buffer's or the uncached charge, a plain store |
 
 Everything else -- misses, fills, a clean line's first store, I/O, VRAM --
 goes the general way, which does its own lookup, fill and charge. The
@@ -315,9 +315,15 @@ makes a page uncachable, dirties clean lines through the TLB, invalidates a
 line under it, reads the uncached mirror of a line kept apart and stores
 through it to a cached line, turns the cache on over an uncached entry,
 moves DTCM over main RAM and away, uses load mode, lets DMA read behind
-DTCM and loads states with DTCM elsewhere; removing any drop rule, the
-hit, dirty or `slot_of` checks, the page-apart drop, the drop log's kinds
-or the DMA bus type fails it.
+DTCM and loads states with DTCM elsewhere; "data accesses match the long
+way" runs 30000 random loads and stores (8, 16, 32 bits) over DTCM,
+cached main RAM and its uncached mirror between C7 line commands, ARM7
+and DMA writes behind the cache and switches of the cache, the protection
+unit, cachability, the write buffer, DTCM and load mode, on two machines,
+one dropping its TLB before every access, and compares every value,
+charge, tracker and epoch and the whole state. Removing any drop rule,
+the hit, dirty or `slot_of` checks, the write buffer flag, the page-apart
+drop, the drop log's kinds or the DMA bus type fails one of the two.
 
 ### Jumps inside the fetch page (bus9.nim `fetch_jump9`, bus7.nim `fetch_jump7`)
 
@@ -438,41 +444,47 @@ Host instructions of the emulated frames (`--perf-from`), -d:danger,
 sweep's default input script; each column adds one commit. Every row's
 screens, sound, opcode counts and whole-state hashes are the base's.
 
-| workload | base | TLB | +uncached | painted 2D | long slices | line copy | events | jumps | change |
-|---|---|---|---|---|---|---|---|---|---|
-| SoulSilver title, 600 frames from 1000 | 14.97 | 14.70 | 14.74 | 14.29 | 14.06 | 13.79 | 13.87 | 13.28 | -11.3 % |
-| SoulSilver intro, 600 frames from 3000 | 7.04 | 6.88 | 6.90 | 6.79 | 6.58 | 6.30 | 6.34 | 5.95 | -15.5 % |
-| SoulSilver overworld, 600 frames from 7100, walking | 24.82 | 22.83 | 23.00 | 22.87 | 22.51 | 22.24 | 22.47 | 21.09 | -15.0 % |
-| NitroGrafx | 57.33 | 57.43 | 57.49 | 56.11 | 54.49 | 54.22 | 54.90 | 48.17 | -16.0 % |
-| trans flag (beam race) | 38.46 | 38.52 | 38.52 | 38.56 | 37.85 | 37.59 | 38.23 | 37.20 | -3.3 % |
-| MAXMXDS | 45.28 | 42.48 | 42.13 | 41.78 | 40.49 | 40.23 | 40.44 | 37.03 | -18.2 % |
-| Cave Story | 23.90 | 22.66 | 22.71 | 22.62 | 22.22 | 21.95 | 22.03 | 20.92 | -12.5 % |
-| Tales of Dagur | 14.90 | 14.70 | 14.71 | 12.39 | 12.35 | 12.08 | 12.12 | 11.95 | -19.8 % |
-| Space Impakto | 14.48 | 14.15 | 14.15 | 13.71 | 13.46 | 13.20 | 13.28 | 12.83 | -11.4 % |
-| nesDS | 5.38 | 5.37 | 5.39 | 5.39 | 5.36 | 5.09 | 5.13 | 4.89 | -9.1 % |
-| Triple Triad | 9.48 | 9.49 | 9.49 | 9.07 | 8.99 | 8.72 | 8.74 | 8.41 | -11.2 % |
-| fb_both (both CPUs `B .`) | 3.26 | 3.26 | 3.26 | 3.27 | 3.28 | 3.01 | 1.99 | 1.93 | -40.8 % |
-| snd_tone (both CPUs spinning, sound) | 3.33 | 3.33 | 3.34 | 3.34 | 3.35 | 3.08 | 2.05 | 2.00 | -39.8 % |
+| workload | base | TLB | +uncached | painted 2D | long slices | line copy | events | jumps | store misses | change |
+|---|---|---|---|---|---|---|---|---|---|---|
+| SoulSilver title, 600 frames from 1000 | 14.97 | 14.70 | 14.74 | 14.29 | 14.06 | 13.79 | 13.87 | 13.28 | 13.19 | -11.9 % |
+| SoulSilver intro, 600 frames from 3000 | 7.04 | 6.88 | 6.90 | 6.79 | 6.58 | 6.30 | 6.34 | 5.95 | 5.92 | -15.9 % |
+| SoulSilver overworld, 600 frames from 7100, walking | 24.82 | 22.83 | 23.00 | 22.87 | 22.51 | 22.24 | 22.47 | 21.09 | 20.93 | -15.7 % |
+| NitroGrafx | 57.33 | 57.43 | 57.49 | 56.11 | 54.49 | 54.22 | 54.90 | 48.17 | 47.68 | -16.8 % |
+| trans flag (beam race) | 38.46 | 38.52 | 38.52 | 38.56 | 37.85 | 37.59 | 38.23 | 37.20 | 37.17 | -3.4 % |
+| MAXMXDS | 45.28 | 42.48 | 42.13 | 41.78 | 40.49 | 40.23 | 40.44 | 37.03 | 37.04 | -18.2 % |
+| Cave Story | 23.90 | 22.66 | 22.71 | 22.62 | 22.22 | 21.95 | 22.03 | 20.92 | 20.45 | -14.4 % |
+| Tales of Dagur | 14.90 | 14.70 | 14.71 | 12.39 | 12.35 | 12.08 | 12.12 | 11.95 | 11.91 | -20.1 % |
+| Space Impakto | 14.48 | 14.15 | 14.15 | 13.71 | 13.46 | 13.20 | 13.28 | 12.83 | 12.77 | -11.8 % |
+| nesDS | 5.38 | 5.37 | 5.39 | 5.39 | 5.36 | 5.09 | 5.13 | 4.89 | 4.73 | -12.1 % |
+| Triple Triad | 9.48 | 9.49 | 9.49 | 9.07 | 8.99 | 8.72 | 8.74 | 8.41 | 8.26 | -12.9 % |
+| fb_both (both CPUs `B .`) | 3.26 | 3.26 | 3.26 | 3.27 | 3.28 | 3.01 | 1.99 | 1.93 | 1.93 | -40.8 % |
+| snd_tone (both CPUs spinning, sound) | 3.33 | 3.33 | 3.34 | 3.34 | 3.35 | 3.08 | 2.05 | 2.00 | 2.01 | -39.6 % |
 
 | SoulSilver p12, frames 0-8100 | base | now | change |
 |---|---|---|---|
-| real BIOS (shots e4b66d68 / 6cf51b7e / ae4536a1) | 180.96 G | 155.76 G | -13.9 % |
-| HLE BIOS | 177.15 G | 152.29 G | -14.0 % |
-| real BIOS, `/usr/bin/time` (with loading) | 183.0 G | 157.9 G | -13.7 % |
-| real BIOS, skipping off (`DINGBAT_NDS_NO_SKIP=1`), with loading | 293.0 G | 250.9 G | -14.4 % |
+| real BIOS (shots e4b66d68 / 6cf51b7e / ae4536a1) | 180.96 G | 154.50 G | -14.6 % |
+| HLE BIOS | 177.15 G | 151.13 G | -14.7 % |
+| real BIOS, `/usr/bin/time` (with loading) | 183.0 G | 156.7 G | -14.4 % |
+| real BIOS, skipping off (`DINGBAT_NDS_NO_SKIP=1`), with loading | 293.0 G | 249.6 G | -14.8 % |
+| HLE BIOS, with loading | 175.4 G | 149.4 G | -14.8 % |
 
 The uncached kinds and the drop log were for "The Strongest Demo" (the
-first TLB cost it 24 %: 21.55 -> 26.76 G; now 18.71 G, -13 %) and the
-uncached mirror homebrew uses; "events" is for spinners and costs SoulSilver
-0.1-0.2 % (head with and without it: title 13.26 / 13.28 G, overworld
-21.04 / 21.09 G), within the layout noise above. Over the 152 ROMs under
+first TLB cost it 24 %: 21.55 -> 26.76 G; now 18.42 G, -15 %) and the
+uncached mirror homebrew uses; the store misses for BlocksDS
+graphics/texture_allocation, which fills buffers through the write buffer
+(the first TLB cost it 14 %; now 56.97 -> 30.39 G, -47 %), and forcing
+in_itcm/in_dtcm/charge9 inline for 3d/disp_mmem (+4 % through the round
+until then, all DMA and I/O: 113.10 -> 111.57 G now); "events" is for
+spinners and costs SoulSilver 0.1-0.2 % (the jumps commit with and
+without it: title 13.26 / 13.28 G, overworld 21.04 / 21.09 G), within the
+layout noise above. Over the 152 ROMs under
 `homebrew*/` (600 frames, `/usr/bin/time`, loading included) the host
-instructions went from 1503.0 G to 1334.3 G (-11.2 %; ds81 -24.9 %,
-MAXMXDS -18.2 %, nitrotracker -16.2 %, NitroGrafx -15.9 %, bitbox
--15.3 %).
+instructions went from 1503.6 G to 1326.7 G (-11.8 %; ds81 -24.7 %,
+MAXMXDS -18.2 %, NitroGrafx -16.8 %, nitrotracker -16.1 %, bitbox
+-15.3 %, Cave Story -14.1 %).
 
 The DS web module (`web/nds/nds.wasm`, emcc -O3) grows from 780 648 to
-830 997 bytes (gzip 206 159 to 217 032), ndsrun from 1.93 to 2.00 MB:
+832 601 bytes (gzip 206 159 to 217 565), ndsrun from 1.93 to 2.00 MB:
 mostly the TLB checks inlined into every load and store handler.
 
 **Checks.** All 14 DS suites pass. SoulSilver p12 (real BIOS) gives the
