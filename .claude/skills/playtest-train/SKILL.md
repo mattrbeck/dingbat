@@ -31,6 +31,18 @@ exists or other agents are testing.** A full suite now waits for the train's
 machine lock anyway (`--no-lock` exists for the lander's deliberate use, not
 for yours).
 
+## Before the train: CI's own tests
+
+The train covers games, not unit tests. Run every test step CI runs, read
+from `.github/workflows/test.yml` so the list cannot drift:
+
+    python3 tools/ci_local.py            # ~4 min; --only <substr> for one step
+
+A hand-picked gate list misses steps: the stub-BIOS commit (df656c3e)
+passed build, runner, cycle laws and the corpus and still failed CI's OBJ-list
+fuzz, which no gate list named. Revert timestamp-only `tests/results*.md`
+changes afterwards.
+
 ## Submitting
 
 Commit your change first (the train tests commits, not working trees). It
