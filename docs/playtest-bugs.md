@@ -4066,3 +4066,41 @@ four dingbat configurations for Circle of the Moon, Banjo-Kazooie, the
 Legacy of Goku I and II, Top Gun - Combat Zones, Pokemon Mystery Dungeon,
 Fire Emblem: The Sacred Stones, Mario Party Advance, Golden Sun and The Lost
 Age, Pokemon Emerald and FireRed.
+
+## §NEXT — Gradius Galaxies: black at the first stage, an interrupt return two bytes early, 2026-10-02
+
+**FIXED** (cpu.nim `refill_from_head`). Found by `tools/playtest/inputsweep.py`
+(START/A on a fixed beat, ~1600 library titles, dingbat against mGBA): in
+Gradius Galaxies (U) the stage fades in, START pauses it, and in both dingbat
+configurations (HLE and official BIOS) the screen goes black at f1021 and
+never changes again; mGBA and the second reference play on. Regressed with
+671d1162 (2026-09-24, the prefetcher running on while the CPU is off the
+gamepak).
+
+**Where the CPU went.** From f810 the game's main thread executes the open
+bus above the BIOS (Thumb, 0x0000B1F6 upwards to 0xC000, where an undefined
+instruction traps to 0x04 and returns there forever); interrupts still run,
+so the music driver and the V-blank handler keep going over a black screen.
+The way in: a Thumb `bx r0` at 0x080596D8 returns to 0x080003DB (`pop {r0};
+bx r0` in a veneer at 0x080003D4), a V-blank interrupt is taken on the very
+next boundary, and the handler's `subs pc, lr, #4` lands at 0x080003D8 --
+the second half of the `bl` before the veneer's pop -- which jumps to LR +
+0x2F6 in the BIOS's unused space.
+
+**Why two bytes early.** An exception return refills from the prefetcher's
+buffer when it lands exactly on the head the prefetcher went on at when the
+CPU left the gamepak (`refill_from_head`). The return runs in ARM state and
+its CPSR is restored afterwards, so the target was aligned as an ARM address
+(`and not 3`) unless it matched the head as a halfword. Here the head was
+0x080003D8 and the target 0x080003DA: word-aligned it matched, and the
+refill took ARM width at 0x080003D8. A return from an exception mode whose
+SPSR is Thumb, to an address with bit 1 set that is not the head, can only
+be a Thumb return; it now takes the ordinary refill. Every case the change
+touches was a wrong address before it, so no timing moves elsewhere: runner
+1433/1443 (no row changed), cycle laws hold (HLE and official BIOS,
+2072/2072), Gradius Galaxies plays through to the stage with both BIOSes.
+
+Also seen, not changed: the interrupt was taken with r15 still odd
+(0x080003DF: `bx` leaves bit 0 in r15 until the next fetch masks it), so
+LR_irq was odd; the console's LR is always the halfword address plus 4. Only
+a handler that inspects LR could tell.

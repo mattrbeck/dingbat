@@ -328,9 +328,19 @@ proc refill_from_head(cpu: CPU; page: int; noting: bool): bool {.noinline.} =
   let bus = cpu.gba.bus
   let head = bus.rom_next_addr and not 1'u32
   var thumb = cpu.cpsr.thumb
-  if not thumb and cpu.spsr.thumb and (cpu.r[15] and not 1'u32) == head:
+  if not thumb and cpu.spsr.thumb:
     let b = mode_bank(cast[CpuMode](cpu.cpsr.mode))
-    thumb = b != 0 and b != UNDEF_BANK
+    if b != 0 and b != UNDEF_BANK:
+      if (cpu.r[15] and not 1'u32) == head:
+        thumb = true
+      elif (cpu.r[15] and 2'u32) != 0:
+        # Not the head, and a halfword only a Thumb return reaches: aligned
+        # to a word it would match a head two bytes below it and refill two
+        # bytes early (Gradius Galaxies, its first stage: an interrupt
+        # taken just after a `bx` to 0x080003DB returned into the second
+        # half of the `bl` before it, and the CPU ran off into unmapped
+        # memory). The ordinary refill takes it.
+        return false
   let target = cpu.r[15] and (if thumb: not 1'u32 else: not 3'u32)
   if not bus.prefetch_on or bus.pf_paused or head != target:
     return false
