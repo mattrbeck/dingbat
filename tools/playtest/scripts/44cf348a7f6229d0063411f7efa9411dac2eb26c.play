@@ -1,0 +1,95 @@
+@title Deadly Skies (Europe)
+@file Deadly Skies (E).gba
+@game AAKP
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# New game, Normal, Save > Data 1 > Yes from the main menu (the EEPROM is
+# written here), then Mission 1 "First Takeoff": the briefing and the first
+# minute of flight with a pause. [load]: the title menu opens on Load,
+# Data 1 shows "Mission1 Normal", loading it reaches the main menu and the
+# mission select.
+# Finding ([load]): nba does not find its own save (an 8 KB file for this
+# 4 Kbit EEPROM): its title menu opens on New, and Load leads to the
+# difficulty select; dingbat-bios and mgba read theirs.
+# Regression guard: before 2026-10-02 an interrupt return to a Thumb
+# halfword was word-aligned (docs/playtest-bugs.md section 45), the same
+# fault as Gradius Galaxies; this game (Airforce Delta II in Japan) hung on
+# the way into the first mission.
+
+[new]
+wait 900
+press START
+wait 200
+checkpoint title window=30
+press START
+wait 150
+checkpoint main_menu window=30
+press A
+wait 200
+checkpoint difficulty window=30
+press A
+wait 200
+checkpoint game_menu window=30
+press DOWN
+wait 30
+press A
+wait 120
+checkpoint save_slots window=30
+press A
+wait 120
+press UP
+wait 30
+press A
+wait 200
+checkpoint saved window=30
+press B
+wait 90
+press UP
+wait 30
+press A
+wait 200
+checkpoint mission_select window=30
+press A
+wait 200
+checkpoint briefing window=30
+tap A times=8 every=40 hold=4
+wait 60
+tap A times=8 every=40 hold=4
+wait 60
+wait 200
+checkpoint mission1 window=30
+tap A times=10 every=30 hold=4
+hold LEFT
+wait 60
+release
+tap B times=5 every=30 hold=4
+checkpoint flying window=30
+press START
+wait 60
+checkpoint paused window=30
+press START
+wait 120
+checkpoint flying_late window=30
+
+[load]
+wait 900
+press START
+wait 200
+checkpoint title window=30
+press START
+wait 150
+checkpoint main_menu window=30
+press A
+wait 150
+wait 100
+checkpoint load_slots window=30
+press A
+wait 150
+press UP
+wait 30
+press A
+wait 200
+checkpoint resumed_menu window=30
+press A
+wait 200
+checkpoint mission_select window=30

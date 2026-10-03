@@ -1,0 +1,98 @@
+@title Gradius Galaxies (USA)
+@file Gradius Galaxies (U) [!].gba
+@game AGAE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# New game (Balanced type, power-up settings left as they are), stage 1 with
+# two pauses, then the ship is left to die: game over, continue NO, the
+# ranking, which is when the game writes its EEPROM. [load]: the attract
+# ranking from the save, then a new game to stage 1.
+# Regression guard: before 2026-10-02 an interrupt return to a Thumb
+# halfword was word-aligned (docs/playtest-bugs.md section 45), and dingbat
+# ran into the open bus above the BIOS: a black screen or a reset to the
+# Konami logo between the intro and the first stage.
+
+[new]
+wait 300
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press START
+wait 120
+press A
+wait 120
+checkpoint powerup_select window=30
+press A
+wait 300
+press A
+wait 300
+press A
+wait 400
+press A
+wait 400
+checkpoint stage1 window=30
+tap A times=30 every=10 hold=4
+press START
+wait 60
+checkpoint paused window=30
+press START
+tap A times=40 every=10 hold=4
+hold UP
+tap A times=10 every=8 hold=4
+release
+tap A times=30 every=10 hold=4
+hold DOWN
+tap A times=15 every=8 hold=4
+release
+tap A times=30 every=10 hold=4
+checkpoint stage1_enemies window=30
+tap A times=60 every=10 hold=4
+press START
+wait 40
+# no checkpoint: this pause freezes a different game frame on dingbat than
+# on the references (which agree), and play is identical again after it --
+# most likely START read a frame apart, the lag-frame phase (docs section 29)
+wait 60
+press START
+tap A times=30 every=10 hold=4
+checkpoint stage1_late window=30
+wait 1900
+wait 300
+checkpoint continue_prompt window=30
+press DOWN
+wait 20
+press A
+wait 300
+checkpoint ranking window=30
+wait 600
+
+[load]
+wait 600
+press START
+wait 120
+checkpoint title window=30
+# until text ING- timeout=3000 every=20  [reached dingbat-bios+2700 mgba+2700 nba+2700]
+wait 2704
+wait 90
+checkpoint ranking window=30
+press START
+wait 120
+press START
+wait 90
+press A
+wait 120
+press A
+wait 300
+press A
+wait 300
+press A
+wait 400
+press A
+wait 400
+checkpoint resumed_stage1 window=30
+tap A times=20 every=10 hold=4
+checkpoint stage1_play window=30

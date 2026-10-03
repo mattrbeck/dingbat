@@ -1,0 +1,97 @@
+@title Colin McRae Rally 2.0 (USA)
+@file Colin McRae Rally 2.0 (U).gba
+@game ACME
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+@save skip: choosing Save on the stage menu before the first stage leaves the EEPROM blank in all three emulators; the next chance is after a finished stage, which needs steering a frozen timeline cannot do reliably
+# English, Rally > Championship > New Game, Intermediate, one player, name
+# PL1, Ford Focus, the default transmission, Rally Finland stage 1 (a detour
+# through Quit > No and Save on the stage menu), then the race: full throttle
+# off the road into the trees.
+# Regression guard: before 2026-10-02 an S-bit write to r15 in System mode
+# (the run-time library's `movs pc, lr`) restored a stale SPSR and came back
+# in Thumb state (docs/playtest-bugs.md section 46): after the difficulty
+# menu the HLE configuration soft-reset to the Spellbound logo and the
+# official-BIOS one crashed into a garbage screen.
+
+[new]
+wait 600
+wait 300
+# until notblank timeout=1500 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 120
+wait 200
+checkpoint title window=30
+press START
+wait 120
+press A
+wait 120
+wait 120
+checkpoint main_menu window=30
+press A
+wait 120
+checkpoint mode_select window=30
+press A
+wait 120
+press A
+wait 120
+checkpoint difficulty window=30
+press A
+wait 150
+press A
+wait 150
+checkpoint name_entry window=30
+press START
+wait 150
+press A
+wait 150
+checkpoint car_select window=30
+press A
+wait 200
+press RIGHT
+wait 20
+press A
+wait 200
+checkpoint rally_finland window=30
+press A
+wait 200
+press B
+wait 60
+press LEFT
+wait 60
+press A
+wait 60
+press RIGHT
+wait 40
+press RIGHT
+wait 40
+press RIGHT
+wait 60
+press RIGHT
+wait 60
+press A
+wait 90
+press RIGHT
+wait 40
+press RIGHT
+wait 40
+press RIGHT
+wait 60
+checkpoint race_menu window=30
+press A
+wait 300
+checkpoint race_start window=30
+wait 150
+hold A
+wait 400
+checkpoint racing window=30
+hold A+LEFT
+wait 60
+hold A
+wait 300
+# no checkpoint here: after the steer the car's position on dingbat leaves
+# the references' (which agree; the lap timer still matches) -- the game runs
+# close to its frame budget and the emulators lose frames at different
+# points (docs/playtest-bugs.md section 29)
+wait 60
+release
