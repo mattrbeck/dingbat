@@ -10080,12 +10080,12 @@ const loadLargeControlsFromStorage = async () => {
 // --- Buttons in landscape: "outline" | "bold" | "solid" ---
 // Phones held sideways draw the pads over the game (styles.css):
 // body.bold-controls and body.opaque-controls pick the look.
-let landscapeButtons = "outline";
+let landscapeButtons = "bold";
 const landscapeButtonsChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
   document.querySelectorAll("#landscape-buttons-picker .choice-chip")));
 
 const applyLandscapeButtons = (look) => {
-  landscapeButtons = look === "bold" || look === "solid" ? look : "outline";
+  landscapeButtons = look === "outline" || look === "solid" ? look : "bold";
   document.body.classList.toggle("bold-controls", landscapeButtons === "bold");
   document.body.classList.toggle("opaque-controls", landscapeButtons === "solid");
   syncChipGroup(landscapeButtonsChips, landscapeButtons);
@@ -10473,7 +10473,7 @@ const resetAllSettings = async () => {
   renderKbBindings();
 
   applyLargeControls(false);
-  applyLandscapeButtons("outline");
+  applyLandscapeButtons("bold");
   applyControlStyle("dpad");
   applyJoystickMode("fixed");
   applyHideTouchOnGamepad(true);
