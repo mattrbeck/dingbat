@@ -24,7 +24,7 @@ const
   DT_DTCM* = 0'u32              ## DtlbEntry.kind: DTCM
   DT_MAIN* = 1'u32              ## main RAM through the data cache
   DT_UNC* = 2'u32               ## main RAM past it (loads: nothing apart in the page)
-  DT_UNC_BUF* = 3'u32           ## the same, stores write-buffered
+  DT_BUF* = 4'u32               ## (or'd into a store entry) the page is write-buffered
   DTLB_LOG = 32                 ## fills remembered for a cheap `dtlb_off`
 
 type
@@ -45,7 +45,7 @@ type
     ## One ARM9 data TLB entry (bus9.nim `dtlb_fill9`): a 4 KB page whose
     ## accesses need no region decode
     tag*: uint32                ## the page (address shr 12), or NO_PAGE
-    kind*: uint32               ## DT_DTCM, DT_MAIN, DT_UNC, DT_UNC_BUF
+    kind*: uint32               ## DT_DTCM, DT_MAIN, DT_UNC (stores: or DT_BUF)
     base*: ptr UncheckedArray[uint8]  ## the page's bytes on the host
 
   NDS* = ref object

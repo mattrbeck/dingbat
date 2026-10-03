@@ -509,6 +509,103 @@ block fetch_jumps:
   check(n.arm9.abort == ABORT_PREFETCH, "a User-mode jump into privileged code aborts",
         "abort " & $n.arm9.abort)
 
+block data_tlb_random:
+  # The data TLB against the general path: random loads and stores (8, 16,
+  # 32 bits) over DTCM, cached main RAM and its uncached mirror, mixed with
+  # what changes the answer under them -- C7 clean / invalidate, the ARM7
+  # and DMA writing behind the cache, the cache, its regions and the write
+  # buffer switched, DTCM moved -- on two machines, one dropping its TLB
+  # before every access: every value, charge, tracker and epoch must agree,
+  # and the whole state every 500 steps.
+  echo "data accesses match the long way"
+  var ms: array[2, NDS]
+  for k in 0..1:
+    let n = machine()
+    n.arm9.wl_on = false
+    n.arm7.wl_on = false
+    n.cache_on(write_back = true)
+    for i in 0 ..< 0x4000: n.main_ram[0x26_0000 + i] = uint8(i * 13 + 5)
+    ms[k] = n
+  var r = 0x2468_ACE0'u32
+  proc rnd(r: var uint32; m: uint32): uint32 =
+    r = r * 1103515245'u32 + 12345'u32
+    (r shr 8) mod m
+  const AREAS = [0x0226_0000'u32, 0x0266_0000, 0x0080_0000, 0x0226_2000]   # cached, uncached, DTCM
+  var same = true
+  var where = ""
+  for step in 0 ..< 30000:
+    let op = r.rnd(1000)
+    let a = AREAS[r.rnd(4)] + r.rnd(0x800) * 4
+    let v = r.rnd(0x7FFF_FFFF)
+    if op < 6:
+      let line = 0x0226_0000'u32 + r.rnd(0x400) * 32
+      let cm = [6'u32, 10, 14][r.rnd(3)]
+      for n in ms: Arm9Bus(nds: n).cp15_write(0, 7, cm, 1, line)
+    elif op < 12:
+      let behind = 0x0226_0000'u32 + r.rnd(0x1000) * 4
+      for n in ms: Arm7Bus(nds: n).write32(behind, v)
+    elif op < 14:
+      let src = 0x0226_0000'u32 + r.rnd(0x800) * 4
+      let dst = 0x0226_0000'u32 + r.rnd(0x800) * 4
+      for n in ms:
+        let b = Arm9Bus(nds: n)
+        b.write32(0x0400_00B0'u32, src)
+        b.write32(0x0400_00B4'u32, dst)
+        b.write32(0x0400_00B8'u32, 0x8400_0008'u32)       # immediate, 8 words
+    elif op < 15:
+      let bit = [4'u32, 1, 1'u32 shl 16, 1'u32 shl 17][r.rnd(4)]   # D-cache, PU, DTCM, load mode
+      for n in ms: Arm9Bus(nds: n).cp15_write(0, 1, 0, 0, n.cp15.control xor bit)
+    elif op < 16:
+      let dc = [0x02'u32, 0x00, 0x06][r.rnd(3)]
+      let wb = [0x02'u32, 0x00, 0x06][r.rnd(3)]
+      for n in ms:
+        Arm9Bus(nds: n).cp15_write(0, 2, 0, 0, dc)             # cachable regions
+        Arm9Bus(nds: n).cp15_write(0, 3, 0, 0, wb)             # write-buffered regions
+    elif op < 17:
+      let base = [0x0080_0000'u32, 0x0226_2000][r.rnd(2)]
+      for n in ms: Arm9Bus(nds: n).cp15_write(0, 9, 1, 0, base or 0x0A)
+    var got: array[2, uint32]
+    let width = [8, 16, 32][r.rnd(3)]
+    let store = r.rnd(2) == 0
+    for k in 0..1:
+      let n = ms[k]
+      if k == 1: n.dtlb_off()
+      let b = Arm9Bus(nds: n)
+      if store:
+        case width
+        of 8: b.write8(a, uint8(v))
+        of 16: b.write16(a, uint16(v))
+        else: b.write32(a, v)
+      else:
+        got[k] = case width
+                 of 8: b.read8(a)
+                 of 16: b.read16(a)
+                 else: b.read32(a)
+    let x = ms[0]
+    let y = ms[1]
+    if same and (got[0] != got[1] or x.wait9 != y.wait9 or x.last_data9 != y.last_data9 or
+                 x.tm.dcache.last != y.tm.dcache.last or x.idle_epoch != y.idle_epoch or
+                 x.idle_epoch9 != y.idle_epoch9 or
+                 (step mod 500 == 499 and x.state_payload() != y.state_payload())):
+      same = false
+      where.add " step " & $step & " " & toHex(a) & (if store: " store" else: " load") & $width
+      for i in 0 ..< x.main_ram.len:
+        if x.main_ram[i] != y.main_ram[i]:
+          echo "  main_ram differs at ", toHex(i), ": ", x.main_ram[i], " / ", y.main_ram[i]; break
+      for i in 0 ..< x.dtcm.len:
+        if x.dtcm[i] != y.dtcm[i]:
+          echo "  dtcm differs at ", toHex(i); break
+      for i in 0 ..< 128:
+        if x.tm.dline[i] != y.tm.dline[i]:
+          echo "  dline ", i, " differs: ", x.tm.dline[i].line1, "/", y.tm.dline[i].line1, " dirty ",
+               x.tm.dline[i].dirty, "/", y.tm.dline[i].dirty, " sh ", x.tm.dline[i].shadowed, "/", y.tm.dline[i].shadowed
+      if x.tm.slot_of != y.tm.slot_of: echo "  slot_of differs"
+      if x.tm.page_apart != y.tm.page_apart: echo "  page_apart differs"
+      if x.pu_ok != y.pu_ok: echo "  pu_ok differs ", x.pu_ok, " ", y.pu_ok
+      if x.cp15 != y.cp15: echo "  cp15 differs"
+      if x.tm.icache.last != y.tm.icache.last: echo "  icache last differs"
+  check(same, "every load and store as the general path gives it", where)
+
 block irq_at_next_opcode:
   # arm/cpu.nim run checks halt and the IRQ line only when `attn` says they
   # may have changed: an IRQ made takeable by the CPU's own store (IME
