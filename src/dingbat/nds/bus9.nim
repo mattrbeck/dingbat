@@ -18,6 +18,10 @@ proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.}
 proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.}
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.}
 proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.}
+proc read16*(b: Dma9Bus; a: uint32): uint32 {.inline.}
+proc read32*(b: Dma9Bus; a: uint32): uint32 {.inline.}
+proc write16*(b: Dma9Bus; a: uint32; v: uint16) {.inline.}
+proc write32*(b: Dma9Bus; a: uint32; v: uint32) {.inline.}
 
 # Idle-loop skipping (arm/cpu.nim loop_edge): the epoch, and the timing
 # state that decides what the next accesses cost.
@@ -27,7 +31,7 @@ proc idle_sig*(b: Arm9Bus): IdleSig {.inline.} =
   [n.last_fetch9, n.last_data9, n.last_pc9, n.pu_ok[0], n.pu_ok[1], n.pu_ok[2],
    n.tm.icache.last, n.tm.dcache.last]
 
-proc dma_stall*(b: Arm9Bus; cycles: int64) =
+proc dma_stall*(b: Dma9Bus; cycles: int64) =
   ## A DMA held the bus: the CPU resumes `cycles` after the later of its own
   ## clock and the transfer's start.
   let n {.cursor.} = b.nds
@@ -133,7 +137,7 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x0B0 .. 0x0EC:
     var was: array[4, bool]
     for i in 0..3: was[i] = n.dma9.ch[i].enabled
-    n.dma9.write_reg(Arm9Bus(nds: n), o, v, mask)
+    n.dma9.write_reg(Dma9Bus(nds: n), o, v, mask)
     # a channel (re)started mid-frame waits for the next frame in mode 4
     for i in 0..3:
       if n.dma9.ch[i].enabled and not was[i]: n.mmem_armed[i] = false
@@ -419,7 +423,49 @@ template pu_check9(n: NDS; a: uint32; kind: static int): bool =
   if likely(key == n.pu_ok[kind]): false
   else: n.pu_refuse9(a, kind, key)
 
-proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): uint32 =
+# --- ARM9 data TLB ----------------------------------------------------------
+#
+# Most ARM9 data accesses go to DTCM or to main RAM through the data cache
+# (SoulSilver's overworld: 33 M of 47 M in 600 frames). What the general
+# path decides for them depends on the page alone -- the TCM windows, the
+# load modes, the data cache's enable and the page's cachability, all CP15
+# state -- and, for main RAM, on the line: a tag hit costs nothing and
+# reads or writes the CPU's copy in `main_ram` (`dc_hit`: a hit is the line
+# under this very address, so `dc_apart` does not matter), a store into a
+# hit dirty line just stores. So a page is entered in the TLB (`rtlb9` for
+# loads, `wtlb9` for stores: load mode splits them) when the general path
+# finds it DTCM or cached main RAM, and `read32` .. `write32` take the
+# short path for it: DTCM always, main RAM on a tag hit (a dirty one for a
+# store); everything else, misses included, goes the general way, which
+# does the lookup, fill and charges itself. The CPU's accesses only: DMA
+# goes through `Dma9Bus` (TCMs invisible, nothing charged). The entries
+# follow CP15 state only, so they are dropped by a CP15 write that changes
+# the TCMs, the protection unit's regions, the cache enables or
+# cachability (`cp15_write`), WRAMCNT and a state load (`fetch_paths_off`);
+# line state (fills, evictions, C7 clean / invalidate, DMA and the ARM7
+# writing behind the cache) is checked at every access.
+
+proc dtlb_fill9(n: NDS; a: uint32; write: bool; kind: uint32) =
+  ## Enter `a`'s page, found DTCM or cached main RAM by the general path.
+  ## TCM windows and protection regions are 4 KB multiples, so the page is
+  ## all one or the other. (DTCM may lie over main RAM's addresses.)
+  var e = DtlbEntry(tag: a shr 12, kind: kind)
+  if kind == DT_MAIN:
+    e.base = cast[ptr UncheckedArray[uint8]](addr n.main_ram[int(a and 0x3FF000)])
+  else:
+    e.base = cast[ptr UncheckedArray[uint8]](addr n.dtcm[int((a - n.cp15.dtcm_base) and 0x3000)])
+  if write: n.wtlb9[int((a shr 12) and (DTLB_SIZE - 1))] = e
+  else: n.rtlb9[int((a shr 12) and (DTLB_SIZE - 1))] = e
+
+template dtlb_hit9(n: NDS; a: uint32): bool =
+  ## A data-cache hit on main RAM address `a` (`lookup` without allocating:
+  ## a hit makes the line `last`, as the general path's lookup would).
+  (a shr 5) + 1 == n.tm.dcache.last or n.tm.dcache.hit_line(a)
+
+proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false;
+           cpu: static bool = false): uint32 =
+  ## `timed`: a CPU or DMA access (charged, protection-checked); `cpu`: the
+  ## CPU's own, which may enter the page in the data TLB.
   template rd(s: seq[uint8]; i: int): uint32 =
     when width == 32: rd32(s, i)
     elif width == 16: rd16(s, i)
@@ -430,6 +476,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
       n.charge9_tcm(a, true)
     return rd(n.itcm, int(a and 0x7FFF))
   if n.in_dtcm(a, false):
+    when cpu: n.dtlb_fill9(a, false, DT_DTCM)
     when timed: n.charge9_tcm(a, false)
     return rd(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF))
   when timed:
@@ -437,6 +484,8 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     n.charge9(a, width, false)
   case a shr 24
   of 0x02:
+    when cpu:
+      if n.tm.dc_on and n.tm.data_cachable(a): n.dtlb_fill9(a, false, DT_MAIN)
     let i = int(a and 0x3FFFFF)
     if unlikely(n.dc_apart(i)) and not n.dc_hit(a, n.dc_slot1(i shr 5) - 1):
       n.dc_mem_read(i, width)
@@ -485,7 +534,8 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false): ui
     n.note_unmapped("arm9", a, false)
     0'u32
 
-proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool = false) =
+proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool = false;
+            cpu: static bool = false) =
   watch_write(n, "9", n.arm9, a, v)
   template wr(s: var seq[uint8]; i: int; ep: untyped = n.idle_epoch) =
     # RAM: only a store that changes memory can end a polling loop (one
@@ -504,6 +554,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
       n.charge9_tcm(a, true)
     wr(n.itcm, int(a and 0x7FFF), n.idle_epoch9); return
   if n.in_dtcm(a, true):
+    when cpu: n.dtlb_fill9(a, true, DT_DTCM)
     when timed: n.charge9_tcm(a, false)
     wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF), n.idle_epoch9); return
   when timed:
@@ -512,6 +563,8 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
   if (a shr 24) - 2 >= 2: inc n.idle_epoch   # I/O, VRAM, palette, OAM, slot 2
   case a shr 24
   of 0x02:
+    when cpu:
+      if n.tm.dc_on and n.tm.data_cachable(a): n.dtlb_fill9(a, true, DT_MAIN)
     let i = int(a and 0x3FFFFF)
     let held = n.tm.slot_of[i shr 5]
     let slot = int(held and 0xFF)
@@ -646,17 +699,77 @@ proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
     c += code9_uncached(a shr 24, n.slot9_t)
   n.wait9 += c
 
-proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 8, true)
-proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 16, true)
-proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 32, true)
+template dtlb_read9(n: NDS; a: uint32; T: typedesc) =
+  ## The data TLB's load: DTCM, or cached main RAM on a tag hit, is free
+  ## and reads the page (charge9_tcm / charge9 + read9 there).
+  when not defined(ndsdebug):
+    let e = addr n.rtlb9[int((a shr 12) and (DTLB_SIZE - 1))]
+    if likely(e.tag == a shr 12) and (e.kind == DT_DTCM or n.dtlb_hit9(a)):
+      n.last_data9 = a
+      return uint32(cast[ptr T](addr e.base[a and 0xFFF])[])
+
+template dtlb_write9(n: NDS; a: uint32; v: typed; T: typedesc) =
+  ## The data TLB's store: DTCM, or a tag hit on a dirty line of cached
+  ## main RAM (write9's plain store; the hit makes the line `last`), costs
+  ## nothing; only a change can end a polling loop. Not with -d:ndsdebug
+  ## (write9 logs watched words).
+  when not defined(ndsdebug):
+    let e = addr n.wtlb9[int((a shr 12) and (DTLB_SIZE - 1))]
+    if likely(e.tag == a shr 12):
+      let p = cast[ptr T](addr e.base[a and 0xFFF])
+      if e.kind == DT_DTCM:
+        n.sched.now = n.arm9.cycles       # sync9
+        n.last_data9 = a
+        if p[] != v:
+          inc n.idle_epoch9
+          p[] = v
+        return
+      let ds = n.dc_slot1(int((a and 0x3FFFFF) shr 5))
+      if ds != 0 and n.tm.dline[ds - 1].tag1 == (a shr 5) + 1 and n.tm.dline[ds - 1].dirty:
+        n.tm.dcache.last = (a shr 5) + 1
+        n.sched.now = n.arm9.cycles
+        n.last_data9 = a
+        if p[] != v:
+          inc n.idle_epoch
+          p[] = v
+        return
+
+proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_read9(a, uint8)
+  n.read9(a, 8, true, true)
+proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_read9(a, uint16)
+  n.read9(a, 16, true, true)
+proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_read9(a, uint32)
+  n.read9(a, 32, true, true)
 
 proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.} =
-  b.nds.sync9()
-  b.nds.write9(a, uint32(v), 8, true)
+  let n {.cursor.} = b.nds
+  n.dtlb_write9(a, v, uint8)
+  n.sync9()
+  n.write9(a, uint32(v), 8, true, true)
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_write9(a, v, uint16)
+  n.sync9()
+  n.write9(a, uint32(v), 16, true, true)
+proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
+  let n {.cursor.} = b.nds
+  n.dtlb_write9(a, v, uint32)
+  n.sync9()
+  n.write9(a, v, 32, true, true)
+
+# The ARM9 DMA's accesses: the general path, without the data TLB.
+proc read16*(b: Dma9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 16, true)
+proc read32*(b: Dma9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 32, true)
+proc write16*(b: Dma9Bus; a: uint32; v: uint16) {.inline.} =
   b.nds.sync9()
   b.nds.write9(a, uint32(v), 16, true)
-proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
+proc write32*(b: Dma9Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.sync9()
   b.nds.write9(a, v, 32, true)
 
@@ -788,9 +901,12 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
     if tables(n.cp15) != before:
       n.tm.update_regions(n.cp15)
       n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
+      n.dtlb_off()              # cachability
     elif n.cp15.control != ctl_before:
       n.tm.update_control(n.cp15)
       n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
+      n.dtlb_off()              # cache and TCM enables, load modes
+  of 9: n.dtlb_off()            # TCM windows
   of 7:
     # cache maintenance (GBATEK "ARM CP15 Cache Control"): C5 invalidate
     # the instruction cache, whole (op2 0) or the line at an address

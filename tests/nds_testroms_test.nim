@@ -11,6 +11,7 @@
 import std/[os, strutils]
 import dingbat/nds/[nds, savestate]
 import dingbat/nds/io/input
+import dingbat/nds/timing
 
 var failures = 0
 
@@ -311,6 +312,73 @@ block fetch_fast_paths:
         b7.fetch32(0x0300_0004'u32) == 0x6000_0001'u32, "ARM7: sequential fetches in shared WRAM"
   b.write8(0x0400_0247'u32, 0)                            # all to the ARM9: the ARM7 sees its own WRAM
   check b7.fetch32(0x0300_0008'u32) == 0x7000_0002'u32, "ARM7: WRAMCNT moves the next sequential fetch"
+
+block data_tlb:
+  # bus9.nim dtlb_fill9 / read32 .. write32: DTCM pages and cached main RAM
+  # pages take a short path (main RAM only on a tag hit, stores only into a
+  # dirty line); every change that makes the short path wrong must drop it
+  echo "ARM9 data TLB"
+  let n = machine()
+  let b = Arm9Bus(nds: n)
+  let b7 = Arm7Bus(nds: n)
+  n.cache_on(write_back = true)
+  const A = 0x0210_0000'u32
+  b7.write32(A, 0x1111_1111'u32)
+  discard b.read32(A)                                     # line filled, page entered
+  b.write32(A, 0x2222_2222'u32)                           # a clean line: dirtied the long way
+  b.write32(A, 0x3333_3333'u32)                           # a dirty line: the short way
+  check b.read32(A) == 0x3333_3333'u32 and b7.read32(A) == 0x1111_1111'u32,
+        "stores into a dirty line: the CPU sees them, memory keeps its side"
+  let ctl = n.cp15.control
+  b.cp15_write(0, 1, 0, 0, ctl and not 4'u32)             # data cache off
+  check b.read32(A) == 0x1111_1111'u32, "data cache switched off: loads read memory"
+  b.cp15_write(0, 1, 0, 0, ctl)
+  check b.read32(A) == 0x3333_3333'u32, "on again: the dirty line"
+  b.cp15_write(0, 2, 0, 0, 0)                             # region 1 no longer cachable
+  check b.read32(A) == 0x1111_1111'u32, "page made uncachable: loads read memory"
+  b.cp15_write(0, 2, 0, 0, 0x02)
+  # a clean line hit in a page the TLB holds for stores: memory keeps its side
+  b7.write32(A + 0x40, 0x4444_4444'u32)
+  discard b.read32(A + 0x40)
+  b.write32(A + 0x80, 0)                                  # (a miss: enters the page for stores)
+  b.write32(A + 0x40, 0x5555_5555'u32)
+  check b7.read32(A + 0x40) == 0x4444_4444'u32, "a store into a clean line dirties it"
+  # a dropped line: the next load misses and refills
+  b.cp15_write(0, 7, 6, 1, A)
+  check b.read32(A) == 0x1111_1111'u32 and n.tm.dcache.find_slot(A) >= 0,
+        "a load after C7 invalidate misses and fills the line again"
+  # DTCM over main RAM: moved away, the window's old pages are main RAM again
+  const D = 0x0230_0000'u32
+  b7.write32(D + 0x10, 0x6666_6666'u32)
+  b7.write32(D + 0x20, 0x6767_6767'u32)
+  b.cp15_write(0, 9, 1, 0, D or 0x0A)                     # DTCM 16 KB at D
+  b.write32(D + 0x10, 0x7777_7777'u32)
+  b.write32(D + 0x20, 0x7878_7878'u32)
+  check b.read32(D + 0x10) == 0x7777_7777'u32, "DTCM over main RAM"
+  b.cp15_write(0, 1, 0, 0, n.cp15.control or (1'u32 shl 17))   # DTCM load mode
+  check b.read32(D + 0x20) == 0x6767_6767'u32, "DTCM load mode: loads read main RAM"
+  b.cp15_write(0, 1, 0, 0, n.cp15.control and not (1'u32 shl 17))
+  check b.read32(D + 0x20) == 0x7878_7878'u32, "load mode off: DTCM"
+  # DMA does not see the TCMs (GBATEK "DS Memory Control - Cache and TCM")
+  b.write32(0x0400_00B0'u32, D + 0x20)                    # DMA0 SAD
+  b.write32(0x0400_00B4'u32, 0x0231_0000'u32)             # DMA0 DAD
+  b.write32(0x0400_00B8'u32, 0x8400_0001'u32)             # immediate, 32-bit, 1 unit
+  check b7.read32(0x0231_0000'u32) == 0x6767_6767'u32, "DMA reads main RAM behind DTCM"
+  let saved = n.state_bytes()
+  b.write32(D + 0x14, 0x7979_7979'u32)                    # D entered as DTCM for stores...
+  check b.read32(D + 0x10) == 0x7777_7777'u32, "DTCM again"   # ...and loads
+  b.cp15_write(0, 9, 1, 0, 0x0080_000A'u32)               # DTCM back where direct boot put it
+  check b.read32(D + 0x10) == 0x6666_6666'u32 and b.read32(0x0080_0010'u32) == 0x7777_7777'u32,
+        "DTCM moved away: its old pages are main RAM again"
+  b.write32(D + 0x30, 0x6868_6868'u32)
+  let n2 = machine()
+  let c = Arm9Bus(nds: n2)
+  c.cp15_write(0, 9, 1, 0, D or 0x0A)
+  discard c.read32(D + 0x30)                              # n2 enters D as DTCM...
+  check n2.load_state_bytes(n.state_bytes()), "state loads"
+  check c.read32(D + 0x30) == 0x6868_6868'u32, "...and a loaded state with DTCM elsewhere reads main RAM"
+  check n2.load_state_bytes(saved) and c.read32(D + 0x10) == 0x7777_7777'u32,
+        "a loaded state with DTCM at D reads DTCM"
 
 block irq_at_next_opcode:
   # arm/cpu.nim run checks halt and the IRQ line only when `attn` says they

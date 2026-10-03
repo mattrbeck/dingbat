@@ -19,6 +19,11 @@ export cpu, sched, gpu, engine2d, input, vram, cart, spu, slot2
 # after every call (docs/nds/perf.md, "Error-flag checks").
 {.push quirky: on.}
 
+const
+  DTLB_SIZE* = 256              ## ARM9 data TLB entries per direction (direct-mapped)
+  DT_DTCM* = 0'u32              ## DtlbEntry.kind: DTCM
+  DT_MAIN* = 1'u32              ## main RAM through the data cache
+
 type
   NdsBoot* = enum
     nbDirect      ## load the card's binaries and start them (boot.nim)
@@ -28,6 +33,17 @@ type
     nds* {.cursor.}: NDS
   Arm7Bus* = object
     nds* {.cursor.}: NDS
+  Dma9Bus* = object
+    ## The ARM9 DMA's view of the bus (io/dma.nim): the CPU's accesses
+    ## without the data TLB (bus9.nim), TCMs invisible (`dma_access`)
+    nds* {.cursor.}: NDS
+
+  DtlbEntry* = object
+    ## One ARM9 data TLB entry (bus9.nim `dtlb_fill9`): a 4 KB page whose
+    ## accesses need no region decode
+    tag*: uint32                ## the page (address shr 12), or NO_PAGE
+    kind*: uint32               ## DT_DTCM or DT_MAIN
+    base*: ptr UncheckedArray[uint8]  ## the page's bytes on the host
 
   NDS* = ref object
     sched*: NdsScheduler
@@ -81,6 +97,9 @@ type
                                 ## sequential fetches read `fptr7`, or NO_PAGE
     fptr7*: ptr UncheckedArray[uint8]
     fseq7*: array[2, int64]     ## and what one costs there: 16-bit, 32-bit
+    # ARM9 data TLB (bus9.nim read32 .. write32): pages whose loads / stores
+    # take a short path; derived, not saved (`dtlb_off`)
+    rtlb9*, wtlb9*: array[DTLB_SIZE, DtlbEntry]
     mmem_armed*: array[4, bool] ## DMA mode 4 channels running this frame
     frame_done*: bool
     sleeping*: bool             ## ARM7 HALTCNT sleep: every clock but the RTC's stopped
@@ -179,11 +198,21 @@ proc slot2_write(n: NDS; a: uint32; v: uint32; is9: bool; width: static int) =
       s.rom_write((a and not 3'u32) + 2, v shr 16, 16)
     else: s.rom_write(a, v, width)
 
+proc dtlb_off*(n: NDS) =
+  ## The ARM9 data TLB starts over (bus9.nim dtlb_fill9): a CP15 write that
+  ## changes the TCMs, the protection unit or the caches' enables and
+  ## regions, WRAMCNT, a state load.
+  for i in 0 ..< DTLB_SIZE:
+    n.rtlb9[i].tag = NO_PAGE
+    n.wtlb9[i].tag = NO_PAGE
+
 proc fetch_paths_off*(n: NDS) =
   ## Both CPUs' sequential fetch fast paths start over (bus9.nim fetch32,
-  ## bus7.nim fetch32): a CP15 write, WRAMCNT, a state load.
+  ## bus7.nim fetch32), and the ARM9 data TLB: a CP15 write, WRAMCNT, a
+  ## state load.
   n.fline9 = NO_PAGE
   n.fpage7 = NO_PAGE
+  n.dtlb_off()
 
 proc page_apart_now(n: NDS; p: int) {.inline.} =
   ## Main RAM page p is about to hold a memory side apart from what the CPU
@@ -212,7 +241,7 @@ proc gx_dma(n: NDS) =
   ## ARM9 DMA mode 7: bursts into the geometry FIFO while it is less than
   ## half full; at most one block per channel per call (a repeating channel
   ## goes on at the next request).
-  let bus = Arm9Bus(nds: n)
+  let bus = Dma9Bus(nds: n)
   for i in 0..3:
     var left = n.dma9.ch[i].cur_count
     while left > 0 and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtGxFifo and
@@ -251,7 +280,7 @@ proc mmem_request(ctx: pointer): bool {.nimcall.} =
   let n = cast[NDS](ctx)
   for i in 0..3:
     if n.mmem_armed[i] and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay:
-      n.dma9.transfer_units(Arm9Bus(nds: n), i, n.dma9.ch[i].cur_count)
+      n.dma9.transfer_units(Dma9Bus(nds: n), i, n.dma9.ch[i].cur_count)
       return true
   false
 
@@ -270,7 +299,7 @@ proc on_hblank(n: NDS) =
   g.in_hblank = true
   if g.vcount < VISIBLE_LINES:
     g.render_line(g.vcount)
-    n.dma9.trigger(Arm9Bus(nds: n), dtHBlank)
+    n.dma9.trigger(Dma9Bus(nds: n), dtHBlank)
   n.dispstat_irqs(g.stat9, n.irq9, irqHBlank)
   n.dispstat_irqs(g.stat7, n.irq7, irqHBlank)
 
@@ -294,14 +323,14 @@ proc on_line_end(n: NDS) =
     n.frame_done = true
     n.dispstat_irqs(g.stat9, n.irq9, irqVBlank)
     n.dispstat_irqs(g.stat7, n.irq7, irqVBlank)
-    n.dma9.trigger(Arm9Bus(nds: n), dtVBlank)
+    n.dma9.trigger(Dma9Bus(nds: n), dtVBlank)
     n.dma7.trigger(Arm7Bus(nds: n), dtVBlank)
     n.gpu3d.on_vblank()
     n.gx_service()         # the swap releases the FIFO
   elif g.vcount == LINES - 1:
     g.in_vblank = false
   elif g.vcount == 0:
-    n.dma9.trigger(Arm9Bus(nds: n), dtDisplayStart)
+    n.dma9.trigger(Dma9Bus(nds: n), dtDisplayStart)
     for i in 0..3:
       n.mmem_armed[i] = n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay
   if g.vcount == int(g.stat9.vcount_setting): n.dispstat_irqs(g.stat9, n.irq9, irqVCount)
@@ -319,7 +348,7 @@ proc dispatch(n: NDS; ev: NdsEvent) =
   of evCartDone:
     n.cart.word_ready()
     if n.cart.owner_arm7: n.dma7.trigger(Arm7Bus(nds: n), dtCart)
-    else: n.dma9.trigger(Arm9Bus(nds: n), dtCart)
+    else: n.dma9.trigger(Dma9Bus(nds: n), dtCart)
   of evSpuSample:
     n.spu.tick(Arm7Bus(nds: n))
     n.spu.next_tick += SPU_TICK_CYCLES
