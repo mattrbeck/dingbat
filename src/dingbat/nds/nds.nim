@@ -120,6 +120,13 @@ type
                                 ## change (arm/cpu.nim loop_edge; not saved)
     idle_epoch9*, idle_epoch7*: uint64  ## the same for what only that CPU
                                 ## sees: its TCMs or WRAM, its devices' reads
+    # long slices (`run_until`, `slice_cut`); not machine state (not saved)
+    long_on*: bool              ## enabled (DINGBAT_NDS_NO_SKIP=1 clears it)
+    long_slice: bool            ## a CPU is running one: the other is halted
+    long_h9: bool               ## the halted one is the ARM9
+    slice_from: int64           ## where its SLICE grid starts
+    long_next: int64            ## the next event when it began
+    cut_at: int64               ## the end of the step it was cut in (or high)
     # -d:ndsdebug only (tools/ndsrun.nim flags)
     iolog*: bool                ## log I/O accesses to stderr
     watch*: uint32              ## log writes to this word (0 = off)
@@ -462,6 +469,7 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.gpu3d.reuse_on = skip
   n.gpu.engine_a.lc_on = skip
   n.gpu.engine_b.lc_on = skip
+  n.long_on = skip
   n.cp15.reset()
   n.tm.init_timing()
   n.tm.update_regions(n.cp15)
@@ -538,6 +546,63 @@ proc sleep_for(n: NDS; cycles: int64) =
   n.rtc.sleep_advance(cycles, proc(): bool = n.wake_pending())
   n.wake_from_sleep()
 
+proc slice_cut(n: NDS): int64 {.inline.} =
+  ## In a long slice (`run_until`), after anything the running CPU does
+  ## that the SLICE-step loop would have acted on at the end of the step it
+  ## happened in -- the halted CPU's interrupt arriving, an event booked or
+  ## moved, the ARM7 going to sleep (or the machine off) -- the run ends at
+  ## the end of that step: the next point on the SLICE grid from where the
+  ## long slice began after the access (`sched.now`: the clock of the
+  ## access that did it). Called when `attn` is set (arm/cpu.nim run): every
+  ## such action is an I/O access, a SWI or a CP15 write.
+  if not n.long_slice: return high(int64)
+  let wakes = if n.long_h9: irq_wake(Arm9Bus(nds: n)) else: irq_wake(Arm7Bus(nds: n))
+  if wakes or n.sched.next_at() != n.long_next or n.asleep():
+    let c = max(n.sched.now, n.slice_from)
+    n.cut_at = min(n.cut_at, n.slice_from + SLICE * ((c - n.slice_from) div SLICE + 1))
+  n.cut_at
+
+proc slice_cut*(b: Arm9Bus): int64 {.inline.} = b.nds.slice_cut()
+proc slice_cut*(b: Arm7Bus): int64 {.inline.} = b.nds.slice_cut()
+
+proc run_long(n: NDS; slice_end: int64; h9: bool) =
+  ## One CPU halted with no interrupt to wake it, the other running: the
+  ## running one goes straight to `slice_end` (the next event) instead of in
+  ## SLICE steps, unless it does something the step loop would have acted
+  ## on (`slice_cut`); then it stops where that step ends, and the halted
+  ## one is left where the steps would have left it. The step loop ran the
+  ## ARM9 first in each step: a halted ARM7 woken by the ARM9 wakes at the
+  ## start of the step the ARM9 woke it in, a halted ARM9 woken by the ARM7
+  ## at the end of it (the next step). Between steps nothing else happens
+  ## (no event is due), and each CPU's own execution does not depend on
+  ## where its run calls end, so the result is the steps' result.
+  let start = n.sched.now
+  n.long_slice = true
+  n.long_h9 = h9
+  n.slice_from = start
+  n.long_next = n.sched.next_at()
+  n.cut_at = high(int64)
+  var e = slice_end
+  if h9:
+    if n.arm7.cycles < slice_end: n.arm7.run(slice_end)
+    discard n.slice_cut()       # the last access (its `attn` is not looked at
+    n.long_slice = false        # when it took the clock past the end)
+    e = min(e, n.cut_at)
+    n.arm9.cycles = max(n.arm9.cycles, e)   # halted to the end of the last step
+  else:
+    if n.arm9.cycles < slice_end: n.arm9.run(slice_end)
+    discard n.slice_cut()
+    n.long_slice = false
+    if n.cut_at != high(int64):
+      # the ARM7 sat out the steps before the one it was cut in, then gets it
+      e = min(e, n.cut_at)
+      n.arm7.cycles = max(n.arm7.cycles, n.cut_at - SLICE)
+      n.sched.now = n.cut_at - SLICE
+      if n.arm7.cycles < e: n.arm7.run(e)
+    else:
+      n.arm7.cycles = max(n.arm7.cycles, slice_end)
+  n.sched.now = e
+
 proc quiet(n: NDS): bool {.inline.} =
   ## Neither CPU can change anything the other or the devices see before
   ## the next event: each is halted with no interrupt to wake it, or spins
@@ -562,7 +627,16 @@ proc run_until*(n: NDS; target: int64) =
       return
     var slice_end = min(target, n.sched.next_at())
     let both_halted = n.arm9.halted and n.arm7.halted
-    if not both_halted and not n.quiet(): slice_end = min(slice_end, n.sched.now + SLICE)
+    if not both_halted and not n.quiet():
+      let h9 = n.arm9.halted and not irq_wake(Arm9Bus(nds: n))
+      let h7 = n.arm7.halted and not irq_wake(Arm7Bus(nds: n))
+      if (h9 or h7) and n.long_on and slice_end - n.sched.now > SLICE and
+         n.arm9.trace == 0 and n.arm7.trace == 0:
+        n.run_long(slice_end, h9)
+        while n.sched.pop_due(ev, at):
+          n.dispatch(ev)
+        continue
+      slice_end = min(slice_end, n.sched.now + SLICE)
     let start = n.sched.now
     if n.arm9.cycles < slice_end: n.arm9.run(slice_end)
     n.sched.now = start

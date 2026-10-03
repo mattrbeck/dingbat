@@ -1317,7 +1317,8 @@ proc run*[B](cpu: ArmCpu[B]; until: int64) =
   ## (`set_cpsr`: MSR, a mode return), a SWI (HLE SWIs halt and write I/O)
   ## and a CP15 write (wait for interrupt). Taking an exception only sets
   ## CPSR.I. Between calls anything may have changed: `attn` starts set.
-  mixin irq_wake, irq_line
+  mixin irq_wake, irq_line, slice_cut
+  var until = until
   cpu.wl_until = until
   if unlikely(cpu.trace > 0):
     while cpu.cycles < until:
@@ -1333,6 +1334,12 @@ proc run*[B](cpu: ArmCpu[B]; until: int64) =
   while cpu.cycles < until:
     if unlikely(cpu.attn):
       cpu.attn = false
+      # the machine may end a long run early (nds.nim slice_cut)
+      let cut = slice_cut(cpu.bus)
+      if cut < until:
+        until = cut
+        cpu.wl_until = cut
+        if cpu.cycles >= until: break
       if cpu.halted:
         if irq_wake(cpu.bus):
           cpu.halted = false
