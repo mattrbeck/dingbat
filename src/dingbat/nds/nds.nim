@@ -15,6 +15,10 @@ import hle_bios
 
 export cpu, sched, gpu, engine2d, input, vram, cart, spu, slot2
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   NdsBoot* = enum
     nbDirect      ## load the card's binaries and start them (boot.nim)
@@ -67,6 +71,16 @@ type
     last_fetch9*, last_data9*: uint32  ## sequential-access tracking
     last_pc9*: uint32           ## the ARM9's last opcode address (branch check)
     last_fetch7*, last_data7*: uint32
+    # sequential code fetch fast paths (bus9.nim / bus7.nim fetch32, fetch16);
+    # derived from the state above, not saved (`fetch_paths_off`)
+    fline9*: uint32             ## ARM9: the 32-byte line (address shr 5) whose
+                                ## sequential fetches read `fptr9` at no cost, or NO_PAGE
+    fptr9*: ptr UncheckedArray[uint8]
+    fitcm9*: bool               ## that line is ITCM (else an instruction-cache line)
+    fpage7*: uint32             ## ARM7: the 4 KB page (address shr 12) whose
+                                ## sequential fetches read `fptr7`, or NO_PAGE
+    fptr7*: ptr UncheckedArray[uint8]
+    fseq7*: array[2, int64]     ## and what one costs there: 16-bit, 32-bit
     mmem_armed*: array[4, bool] ## DMA mode 4 channels running this frame
     frame_done*: bool
     sleeping*: bool             ## ARM7 HALTCNT sleep: every clock but the RTC's stopped
@@ -127,6 +141,7 @@ proc slot2_read(n: NDS; a: uint32; is9: bool; width: static int): uint32 =
   if owner9 != is9: return 0
   # GPIO, RTC: values that change on their own; the other CPU reads zeros
   if is9: inc n.idle_epoch9 else: inc n.idle_epoch7
+  if is9: n.arm9.attn = true else: n.arm7.attn = true   # the slot's IRQ (arm/cpu.nim run)
   let s {.cursor.} = n.slot2
   if a >= 0x0A00_0000'u32:
     let b = s.ram_read8(a)
@@ -153,6 +168,7 @@ proc slot2_write(n: NDS; a: uint32; v: uint32; is9: bool; width: static int) =
       n.log_io(if is9: "9" else: "7", a, v, 0xFFFF_FFFF'u32, true,
                if is9: n.arm9.cur_pc else: n.arm7.cur_pc)
   if owner9 != is9: return
+  if is9: n.arm9.attn = true else: n.arm7.attn = true   # the slot's IRQ (arm/cpu.nim run)
   let s {.cursor.} = n.slot2
   if a >= 0x0A00_0000'u32:
     let b = when width == 8: uint8(v) else: uint8(v shr (8 * (a and (width div 8 - 1))))
@@ -162,6 +178,18 @@ proc slot2_write(n: NDS; a: uint32; v: uint32; is9: bool; width: static int) =
       s.rom_write(a and not 3'u32, v and 0xFFFF, 16)
       s.rom_write((a and not 3'u32) + 2, v shr 16, 16)
     else: s.rom_write(a, v, width)
+
+proc fetch_paths_off*(n: NDS) =
+  ## Both CPUs' sequential fetch fast paths start over (bus9.nim fetch32,
+  ## bus7.nim fetch32): a CP15 write, WRAMCNT, a state load.
+  n.fline9 = NO_PAGE
+  n.fpage7 = NO_PAGE
+
+proc page_apart_now(n: NDS; p: int) {.inline.} =
+  ## Main RAM page p is about to hold a memory side apart from what the CPU
+  ## reads, or a kept instruction-cache line: code there is read the slow way.
+  if (n.fline9 shr 19) == 2 and int((n.fline9 shr 7) and 0x3FF) == p: n.fline9 = NO_PAGE
+  if (n.fpage7 shr 12) == 2 and int(n.fpage7 and 0x3FF) == p: n.fpage7 = NO_PAGE
 
 template rd16(s: seq[uint8]; i: int): uint32 =
   uint32(s[i]) or (uint32(s[i + 1]) shl 8)
@@ -304,6 +332,8 @@ proc dispatch(n: NDS; ev: NdsEvent) =
 # ---------------------------------------------------------------------------
 # Construction and the frame loop
 
+{.pop.}   # file reading raises: the caller sees an IOError at once
+
 proc read_file_bytes(path: string): seq[uint8] =
   if path.len == 0 or not fileExists(path): return @[]
   let s = readFile(path)
@@ -365,11 +395,14 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.arm9.wl_on = skip
   n.arm7.wl_on = skip
   n.gpu3d.reuse_on = skip
+  n.gpu.engine_a.lc_on = skip
+  n.gpu.engine_b.lc_on = skip
   n.cp15.reset()
   n.tm.init_timing()
   n.tm.update_regions(n.cp15)
   n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
   n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR; n.last_pc9 = NO_ADDR
+  n.fetch_paths_off()
   n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
   if boot == nbFirmware and not force_hle and can_firmware_boot(bios9, bios7, firmware):
     n.firmware_boot()
@@ -393,6 +426,8 @@ proc load_nds*(rom_path: string; bios_dir = ""; boot = nbDirect): NDS =
           read_file_bytes(dir / "bios9.bin"), read_file_bytes(dir / "bios7.bin"),
           read_file_bytes(dir / "firmware.bin"),
           force_hle = getEnv("DINGBAT_NDS_HLE") == "1", boot = boot)
+
+{.push quirky: on.}
 
 # ---------------------------------------------------------------------------
 # Sleep (GBATEK "DS Power Control", HALTCNT; "BIOS Halt Functions", Stop/Sleep)
@@ -544,3 +579,5 @@ proc bgr555_to_rgba*(c: uint16): uint32 {.inline.} =
   let b = uint32((c shr 10) and 0x1F)
   ((r shl 3) or (r shr 2)) or (((g shl 3) or (g shr 2)) shl 8) or
     (((b shl 3) or (b shr 2)) shl 16) or 0xFF00_0000'u32
+
+{.pop.}

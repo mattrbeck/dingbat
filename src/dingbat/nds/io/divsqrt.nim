@@ -8,6 +8,10 @@
 
 import ../sched
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   DivSqrt* = ref object
     sched* {.cursor.}: NdsScheduler
@@ -124,3 +128,5 @@ proc write_reg*(d: DivSqrt; offset: uint32; v, mask: uint32) =
     d.sqrt_param = (d.sqrt_param and not (uint64(mask) shl 32)) or (uint64(v and mask) shl 32)
     d.compute_sqrt()
   else: discard
+
+{.pop.}

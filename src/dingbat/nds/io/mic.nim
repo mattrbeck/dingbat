@@ -9,6 +9,10 @@
 
 import ../sched
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   Mic* = ref object
     buf: seq[int16]
@@ -66,3 +70,5 @@ proc sample*(m: Mic): int =
   a + int((int64(b - a) * m.acc) div MASTER_HZ)
 
 proc queued*(m: Mic): int = m.buf.len - m.rd
+
+{.pop.}

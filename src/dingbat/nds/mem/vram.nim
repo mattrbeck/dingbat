@@ -10,6 +10,28 @@
 ## zero page when none is), and nil when several banks overlap; only nil
 ## pages take the bank-mask loop. `wfast` is the same for writes, nil for
 ## unmapped pages too. Both are rebuilt with the masks on every VRAMCNT write.
+##
+## Line reuse (gpu/engine2d.nim): `vgen` counts, per 1 KB block of `mem`,
+## the stores that changed a byte there, and `remap_gen` the remaps; a
+## view given a `Touch` set marks every block it reads in it (`pbase`: each
+## page's start in `mem`), so a line knows which blocks it depends on.
+
+import std/bitops
+
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
+const
+  VRAM_TOTAL = 656 * 1024
+  BLOCK_SHIFT = 10                     ## line reuse tracks 1 KB blocks
+  ZERO_BASE = VRAM_TOTAL               ## the zero page's block: never changes
+  VRAM_BLOCKS* = (VRAM_TOTAL shr BLOCK_SHIFT) + 1
+  TOUCH_WORDS* = (VRAM_BLOCKS + 63) div 64
+  TOUCH_ALL* = TOUCH_WORDS * 64 - 1    ## marked when a read took the overlapping-banks path
+
+type
+  Touch* = array[TOUCH_WORDS, uint64]  ## a set of blocks (bit b: block b)
 
 type
   VramBank* = enum vbA, vbB, vbC, vbD, vbE, vbF, vbG, vbH, vbI
@@ -40,6 +62,12 @@ type
     vramstat*: uint8                       ## 0x4000240 read on ARM7: C/D as WRAM
     tex_gen*: uint64                       ## bumped by every remap and every write
                                            ## through the texture/palette slots (not saved)
+    vgen*: array[VRAM_BLOCKS, uint32]      ## per 1 KB block of `mem`: stores that
+                                           ## changed it (line reuse; not saved)
+    remap_gen*: uint64                     ## remaps so far (not saved)
+    pbase: array[VramRegion, seq[int32]]   ## per page: its first byte's index in
+                                           ## `mem`, ZERO_BASE for the zero page,
+                                           ## -1 where banks overlap
 
 const
   PAGE_SHIFT = 14
@@ -51,7 +79,6 @@ const
   REGION_SIZE: array[VramRegion, int] = [656 * 1024, 512 * 1024, 256 * 1024, 128 * 1024,
                                          128 * 1024, 256 * 1024, 512 * 1024, 96 * 1024,
                                          32 * 1024, 16 * 1024, 32 * 1024, 16 * 1024]
-  VRAM_TOTAL = 656 * 1024
 
 proc bank_offsets(): array[VramBank, int] =
   var acc = 0
@@ -72,6 +99,7 @@ proc new_vram*(): Vram =
     result.pages[r] = newSeq[uint16](n)
     result.fast[r] = newSeq[PagePtr](n)
     result.wfast[r] = newSeq[PagePtr](n)
+    result.pbase[r] = newSeq[int32](n)
   result.rebuild_fast()
   # LCDC pages never change: bank b's LCDC window is fixed. (Present only
   # while the bank's MST is 0, so the mask is rebuilt in remap.)
@@ -161,21 +189,26 @@ proc locate(v: Vram; r: VramRegion; offset: int; b: VramBank): int {.inline.} =
 
 proc rebuild_fast(v: Vram) =
   let zp = cast[PagePtr](addr v.zero[0])
+  inc v.remap_gen
   for r in VramRegion:
     for p in 0 ..< v.pages[r].len:
       let m = v.pages[r][p]
       if m == 0:
         v.fast[r][p] = zp
         v.wfast[r][p] = nil
+        v.pbase[r][p] = ZERO_BASE
       elif (m and (m - 1)) == 0:
         var b = vbA
         while (m and (1'u16 shl ord(b))) == 0: inc b
-        let q = cast[PagePtr](addr v.mem[v.locate(r, p shl PAGE_SHIFT, b)])
+        let i = v.locate(r, p shl PAGE_SHIFT, b)
+        let q = cast[PagePtr](addr v.mem[i])
         v.fast[r][p] = q
         v.wfast[r][p] = q
+        v.pbase[r][p] = int32(i)
       else:
         v.fast[r][p] = nil
         v.wfast[r][p] = nil
+        v.pbase[r][p] = -1
 
 proc read8*(v: Vram; r: VramRegion; offset: int): uint8 =
   let o = offset mod REGION_SIZE[r]
@@ -214,15 +247,20 @@ proc write8*(v: Vram; r: VramRegion; offset: int; value: uint8) =
   if mask == 0: return
   for b in VramBank:
     if (mask and (1'u16 shl ord(b))) != 0:
-      v.mem[v.locate(r, o, b)] = value
+      let i = v.locate(r, o, b)
+      if v.mem[i] != value:
+        inc v.vgen[i shr BLOCK_SHIFT]
+        v.mem[i] = value
 
 proc write16*(v: Vram; r: VramRegion; offset: int; value: uint16) =
   if r in {vrTexture, vrTexPal}: inc v.tex_gen
   let o = offset mod REGION_SIZE[r]
   let q = v.wfast[r][o shr PAGE_SHIFT]
   if q != nil:
-    let i = o and (PAGE_SIZE - 2)
-    q[i] = uint8(value); q[i + 1] = uint8(value shr 8)
+    let p = cast[ptr uint16](addr q[o and (PAGE_SIZE - 2)])
+    if p[] != value:
+      inc v.vgen[(int(v.pbase[r][o shr PAGE_SHIFT]) + (o and (PAGE_SIZE - 2))) shr BLOCK_SHIFT]
+      p[] = value
     return
   v.write8(r, offset, uint8(value))
   v.write8(r, offset + 1, uint8(value shr 8))
@@ -257,42 +295,81 @@ proc bank_ptr*(v: Vram; b: VramBank): ptr UncheckedArray[uint8] =
 type
   RegionView* = object
     pages*: ptr UncheckedArray[PagePtr]
+    pbase: ptr UncheckedArray[int32]
+    touch: ptr Touch          ## blocks read go here
     mask*: int
     region*: VramRegion
     vram* {.cursor.}: Vram
 
-proc view*(v: Vram; r: VramRegion): RegionView {.inline.} =
+proc view*(v: Vram; r: VramRegion; touch: ptr Touch): RegionView {.inline.} =
   RegionView(pages: cast[ptr UncheckedArray[PagePtr]](addr v.fast[r][0]),
+             pbase: cast[ptr UncheckedArray[int32]](addr v.pbase[r][0]), touch: touch,
              mask: REGION_SIZE[r] - 1, region: r, vram: v)
+
+template mark(w: RegionView; o: int) =
+  ## The block holding byte `o` of a single-bank (or zero) page was read.
+  let b = (int(w.pbase[o shr PAGE_SHIFT]) + (o and (PAGE_SIZE - 1))) shr BLOCK_SHIFT
+  w.touch[b shr 6] = w.touch[b shr 6] or (1'u64 shl (b and 63))
+
+template mark_all(w: RegionView) =
+  ## A read through overlapping banks: the reader cannot be reused.
+  w.touch[TOUCH_ALL shr 6] = w.touch[TOUCH_ALL shr 6] or (1'u64 shl (TOUCH_ALL and 63))
 
 proc rd8*(w: RegionView; offset: int): uint8 {.inline.} =
   let o = offset and w.mask
   let q = w.pages[o shr PAGE_SHIFT]
-  if likely(q != nil): q[o and (PAGE_SIZE - 1)] else: w.vram.read8(w.region, o)
+  if likely(q != nil):
+    w.mark(o)
+    q[o and (PAGE_SIZE - 1)]
+  else:
+    w.mark_all()
+    w.vram.read8(w.region, o)
 
 proc rd16*(w: RegionView; offset: int): uint16 {.inline.} =
   ## Halfword at an even offset.
   let o = offset and w.mask
   let q = w.pages[o shr PAGE_SHIFT]
-  if likely(q != nil): cast[ptr uint16](addr q[o and (PAGE_SIZE - 2)])[]
-  else: w.vram.read16(w.region, o)
+  if likely(q != nil):
+    w.mark(o)
+    cast[ptr uint16](addr q[o and (PAGE_SIZE - 2)])[]
+  else:
+    w.mark_all()
+    w.vram.read16(w.region, o)
 
 proc rd32*(w: RegionView; offset: int): uint32 {.inline.} =
   ## Word at a 4-aligned offset.
   let o = offset and w.mask
   let q = w.pages[o shr PAGE_SHIFT]
-  if likely(q != nil): cast[ptr uint32](addr q[o and (PAGE_SIZE - 4)])[]
-  else: uint32(w.vram.read16(w.region, o)) or (uint32(w.vram.read16(w.region, o + 2)) shl 16)
+  if likely(q != nil):
+    w.mark(o)
+    cast[ptr uint32](addr q[o and (PAGE_SIZE - 4)])[]
+  else:
+    w.mark_all()
+    uint32(w.vram.read16(w.region, o)) or (uint32(w.vram.read16(w.region, o + 2)) shl 16)
 
 proc fetch8*(w: RegionView; offset: int; dst: var array[8, uint8]) {.inline.} =
   ## Eight bytes from an 8-aligned offset (one 8bpp tile row).
   let o = offset and w.mask
   let q = w.pages[o shr PAGE_SHIFT]
   if likely(q != nil):
+    w.mark(o)
     copyMem(addr dst[0], addr q[o and (PAGE_SIZE - 8)], 8)
   else:
+    w.mark_all()
     for k in 0..7: dst[k] = w.vram.read8(w.region, o + k)
+
+proc touched_sum*(v: Vram; t: Touch): uint64 =
+  ## How many changes the blocks in `t` have seen: the same sum later means
+  ## none of them changed since.
+  for wi in 0 ..< TOUCH_WORDS:
+    var m = t[wi]
+    while m != 0:
+      let b = wi * 64 + countTrailingZeroBits(m)
+      if b < VRAM_BLOCKS: result += uint64(v.vgen[b])
+      m = m and (m - 1)
 
 proc lcdc_mapped*(v: Vram; b: VramBank): bool =
   ## Bank enabled with MST 0 (its LCDC window): display capture's target.
   (v.cnt[b] and 0x87) == 0x80
+
+{.pop.}

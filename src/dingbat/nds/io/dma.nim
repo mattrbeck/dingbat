@@ -17,6 +17,10 @@
 
 import irq
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   DmaTiming* = enum
     dtImmediate, dtVBlank, dtHBlank, dtDisplayStart, dtMainMemDisplay,
@@ -154,3 +158,5 @@ proc write_reg*[B](d: Dma; bus: B; offset: uint32; v, mask: uint32) =
       if d.timing(i) == dtImmediate: d.transfer(bus, i)
       # Burst modes (dtGxFifo, dtMainMemDisplay) and slot-1 are started by
       # nds.nim when their source asks.
+
+{.pop.}

@@ -244,7 +244,12 @@ Since then (docs/nds/perf.md) idle-loop skipping removes most of a
 spinning program's cost when its loop provably changes nothing (`B .`
 endings, VCOUNT and IPC polls: 13x fewer host instructions on fb_both,
 -31 % on trans flag), and an unchanged 3D frame is reused; the figures
-above are from before.
+above are from before. After the interpreter and 2D round (perf.md, round
+2; same runs, M host instructions per frame, before -> after that round):
+trans flag 152 -> 64, NitroGrafx 171 -> 96, sd4k 163 -> 126, Our First
+Time 126 -> 88, MAXMXDS 125 -> 76, The Strongest Demo 47 -> 36, k2 26 ->
+16, dsma_stress_test 18 -> 15, the big holstein 17 -> 10, hbmenu 10.5 ->
+4.5; SoulSilver's boot (600 frames) 67.6 -> 49.0.
 
 ## Tables
 

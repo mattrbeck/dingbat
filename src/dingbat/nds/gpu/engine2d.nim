@@ -23,6 +23,10 @@
 import ../mem/vram
 import ../gpu3d/gpu3d
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 const
   MMEM_FIFO_WORDS* = 16   ## DISP_MMEM_FIFO depth (Assumed: 4 requests of 4 words)
 
@@ -69,6 +73,35 @@ type
     winmask: array[256, uint8]            ## bits 0-3 BG, 4 OBJ, 5 effects
     line_semi: bool                       ## any blending OBJ pixel on this line
     line_objwin: bool
+    # line reuse (`render_line`): what each visible line was drawn from last
+    # time, and the line it gave; none of it is machine state (not saved)
+    lc_on*: bool                          ## reuse enabled (the machine sets it)
+    mem_gen*: uint64                      ## bumped by the bus for every change to
+                                          ## this engine's palette half
+    lgen: array[192, uint64]              ## per line: OAM changes to OBJs on it
+    touch: Touch                          ## the VRAM blocks the line being drawn read
+    lc_valid: array[192, bool]
+    lc_key: array[192, LineKey]
+    lc_touch: array[192, Touch]           ## the VRAM blocks each line read...
+    lc_vsum: array[192, uint64]           ## ...and their change count then
+    lc_line: array[192, array[256, uint16]]
+    lc_3d: seq[array[256, uint32]]        ## engine A: the 3D line each was drawn with
+    lc_reused*: int                       ## lines reused so far (a statistic)
+
+  LineKey = object
+    ## Everything a visible line's pixels depend on besides the VRAM it
+    ## reads (`lc_touch`) and the 3D line: palette and OAM contents and the
+    ## VRAM mapping (counted by `gen`), the registers, the window and affine
+    ## latches as the line starts.
+    gen: uint64
+    dispcnt: uint32
+    bgcnt, bghofs, bgvofs: array[4, uint16]
+    bgpa, bgpb, bgpc, bgpd: array[2, int16]
+    bgx, bgy, mos_bgx, mos_bgy: array[2, int32]
+    winh: array[2, uint16]
+    winin, winout, mosaic, bldcnt, bldalpha, bldy, master_bright: uint16
+    win_inside: array[2, bool]
+    uses3d: bool
 
 const
   BG_LAYER_MASK = 0x1F00'u32
@@ -298,7 +331,7 @@ proc ext_slot(e: Engine2D; bg: int): int {.inline.} =
 
 proc render_text(e: Engine2D; bg, y: int) =
   let cnt = e.bgcnt[bg]
-  let w = e.vram.view(e.bg_region)
+  let w = e.vram.view(e.bg_region, addr e.touch)
   var char_base = int((cnt shr 2) and 0xF) * 0x4000
   var screen_base = int((cnt shr 8) and 0x1F) * 0x800
   if e.id == engA:
@@ -318,7 +351,7 @@ proc render_text(e: Engine2D; bg, y: int) =
   if ty >= 32: row_base += (if size == 3: 0x1000 else: 0x800)
   let is8 = (cnt and 0x80) != 0
   let ext = is8 and (e.dispcnt and 0x4000_0000'u32) != 0
-  let xw = e.vram.view(e.bg_ext_region)
+  let xw = e.vram.view(e.bg_ext_region, addr e.touch)
   let ext_base = e.ext_slot(bg) * 0x2000
   let pal = e.palette
   let dst = cast[ptr UncheckedArray[uint16]](addr e.bgpix[bg][0])
@@ -419,7 +452,7 @@ template affine_walk(e: Engine2D; bg, y, width, height: int; sample: untyped) =
 proc render_affine(e: Engine2D; bg, y: int) =
   ## GBA-style affine BG: 8-bit map entries, 8bpp tiles, standard palette.
   let cnt = e.bgcnt[bg]
-  let w = e.vram.view(e.bg_region)
+  let w = e.vram.view(e.bg_region, addr e.touch)
   var char_base = int((cnt shr 2) and 0xF) * 0x4000
   var screen_base = int((cnt shr 8) and 0x1F) * 0x800
   if e.id == engA:
@@ -437,7 +470,7 @@ proc render_ext(e: Engine2D; bg, y: int) =
   ## Extended BG (BGxCNT.7 / .2): 16-bit-entry tiled affine, 256-colour
   ## bitmap or direct-colour bitmap.
   let cnt = e.bgcnt[bg]
-  let w = e.vram.view(e.bg_region)
+  let w = e.vram.view(e.bg_region, addr e.touch)
   let pal = e.palette
   if (cnt and 0x80) == 0:
     var char_base = int((cnt shr 2) and 0xF) * 0x4000
@@ -448,7 +481,7 @@ proc render_ext(e: Engine2D; bg, y: int) =
     let size = 128 shl (cnt shr 14)
     let tiles = size shr 3
     let ext = (e.dispcnt and 0x4000_0000'u32) != 0
-    let xw = e.vram.view(e.bg_ext_region)
+    let xw = e.vram.view(e.bg_ext_region, addr e.touch)
     let ext_base = bg * 0x2000
     affine_walk(e, bg, y, size, size):
       let se = w.rd16(screen_base + ((py shr 3) * tiles + (px shr 3)) * 2)
@@ -474,7 +507,7 @@ proc render_ext(e: Engine2D; bg, y: int) =
 proc render_large(e: Engine2D; y: int) =
   ## Mode 6 BG2: one 256-colour bitmap over all 512K of BG VRAM.
   let cnt = e.bgcnt[2]
-  let w = e.vram.view(e.bg_region)
+  let w = e.vram.view(e.bg_region, addr e.touch)
   let pal = e.palette
   let (bw, bh) = if (cnt and 0x4000) != 0: (1024, 512) else: (512, 1024)
   affine_walk(e, 2, y, bw, bh):
@@ -491,8 +524,8 @@ proc render_objs(e: Engine2D; y: int) =
   e.line_semi = false
   e.line_objwin = false
   if (e.dispcnt and 0x1000) == 0: return
-  let w = e.vram.view(e.obj_region)
-  let xw = e.vram.view(e.obj_ext_region)
+  let w = e.vram.view(e.obj_region, addr e.touch)
+  let xw = e.vram.view(e.obj_ext_region, addr e.touch)
   let oam = e.oam
   let pal = cast[ptr UncheckedArray[uint16]](addr e.palette[256])
   let dc = e.dispcnt
@@ -730,18 +763,24 @@ proc composite(e: Engine2D; bgs: uint32; windows: bool) =
   else:
     if effects: pixel_loop(false, true) else: pixel_loop(false, false)
 
+proc shown_bgs(e: Engine2D): uint32 =
+  ## The BGs this line draws: DISPCNT's enables, less those the mode lacks.
+  let mode = int(e.bg_mode)
+  result = (e.dispcnt and BG_LAYER_MASK) shr 8
+  let (k2, k3) = BG23_KIND[mode]
+  if mode == 7 or (mode == 6 and e.id == engB): result = 0
+  if mode == 6: result = result and 0x5         # BG0 (3D) and BG2 only
+  if k2 == bkNone: result = result and not 4'u32
+  if k3 == bkNone: result = result and not 8'u32
+
 proc render_gfx*(e: Engine2D; y: int) =
   ## The graphics pipeline into e.gfx (display mode 1, and capture source A).
   if (e.dispcnt and 0x80) != 0:            # forced blank
     for x in 0 ..< 256: e.gfx[x] = 0x7FFF
     return
   let mode = int(e.bg_mode)
-  var bgs = (e.dispcnt and BG_LAYER_MASK) shr 8
+  let bgs = e.shown_bgs()
   let (k2, k3) = BG23_KIND[mode]
-  if mode == 7 or (mode == 6 and e.id == engB): bgs = 0
-  if mode == 6: bgs = bgs and 0x5               # BG0 (3D) and BG2 only
-  if k2 == bkNone: bgs = bgs and not 4'u32
-  if k3 == bkNone: bgs = bgs and not 8'u32
   e.render_objs(y)
   let windows = e.compute_windows()
   if (bgs and 1) != 0:
@@ -789,6 +828,81 @@ proc render_bg_line*(e: Engine2D; y: int) =
   e.render_gfx(y)
   e.line = e.gfx
 
+# ---------------------------------------------------------------------------
+# Line reuse
+#
+# A graphics line (display mode 1) reads the engine's registers and line
+# latches, its palette and OAM halves, the VRAM banks mapped into its BG,
+# OBJ and extended-palette regions, and (engine A) the 3D line; what it
+# writes that outlives the line is e.line and, with affine mosaic, the
+# reference-point latch (everything else -- bgpix, objpix, the window mask
+# -- is scratch, rewritten before it is read, and not saved). So a line
+# whose inputs all equal those it had when last drawn comes out the same,
+# and is copied instead of drawn. The bus counts every change to the
+# palette half (`mem_gen`, a store of an equal value is not a change) and
+# hands OAM stores to `oam_store`, which counts them for the lines of the
+# OBJ they move (`lgen`); vram.nim counts the changes to each 1 KB block of the banks
+# (`vgen`) and the remaps, and the views mark every block the line reads
+# (`touch`), so the line is redrawn only when one of those blocks changed
+# (`touched_sum`); the registers and latches are compared as a key, the 3D
+# line by value. Display capture, VRAM and main-memory display draw every
+# line. Off without the machine (`lc_on`, the 2D unit tests poke memory
+# directly) and with DINGBAT_NDS_NO_SKIP=1 (docs/nds/perf.md).
+
+proc bump_obj_lines(e: Engine2D; a0, a1: uint16) =
+  ## The lines an OBJ with these attributes is on (`render_objs` skips it
+  ## everywhere else before reading anything more) see a change.
+  let affine = (a0 and 0x100) != 0
+  if not affine and (a0 and 0x200) != 0: return      # disabled
+  let shape = int(a0 shr 14)
+  if shape == 3: return
+  var bh = OBJ_SIZES[shape][a1 shr 14][1]
+  if affine and (a0 and 0x200) != 0: bh *= 2          # double size
+  let top = int(a0 and 0xFF)
+  for d in 0 ..< bh:
+    let y = (top + d) and 0xFF                        # Y wraps mod 256
+    if y < 192: inc e.lgen[y]
+
+proc oam_store*(e: Engine2D; k: int; v: uint16) =
+  ## The bus stores halfword k of this engine's OAM. For line reuse the
+  ## lines the entry's OBJ is on before and after see the change; a
+  ## rotation/scaling parameter, those of every affine OBJ using its group.
+  if e.oam[k] == v: return
+  let i = k shr 2
+  if (k and 3) == 3:
+    e.oam[k] = v
+    let g = uint16(i shr 2)
+    for j in 0 ..< 128:
+      let a0 = e.oam[j * 4]
+      let a1 = e.oam[j * 4 + 1]
+      if (a0 and 0x100) != 0 and ((a1 shr 9) and 0x1F) == g: e.bump_obj_lines(a0, a1)
+    return
+  e.bump_obj_lines(e.oam[i * 4], e.oam[i * 4 + 1])
+  e.oam[k] = v
+  e.bump_obj_lines(e.oam[i * 4], e.oam[i * 4 + 1])
+
+proc line_key(e: Engine2D; y: int): LineKey =
+  LineKey(gen: e.mem_gen + e.vram.remap_gen + e.lgen[y], dispcnt: e.dispcnt,
+          bgcnt: e.bgcnt, bghofs: e.bghofs, bgvofs: e.bgvofs,
+          bgpa: e.bgpa, bgpb: e.bgpb, bgpc: e.bgpc, bgpd: e.bgpd,
+          bgx: e.bgx, bgy: e.bgy, mos_bgx: e.mos_bgx, mos_bgy: e.mos_bgy,
+          winh: e.winh, winin: e.winin, winout: e.winout, mosaic: e.mosaic,
+          bldcnt: e.bldcnt, bldalpha: e.bldalpha, bldy: e.bldy,
+          master_bright: e.master_bright, win_inside: e.win_inside,
+          uses3d: e.line3d != nil)
+
+proc latch_mosaic(e: Engine2D; y: int) =
+  ## What `affine_walk` leaves behind: an affine BG with mosaic latches its
+  ## reference point on a mosaic block's first line.
+  let bgs = e.shown_bgs()
+  let (k2, k3) = BG23_KIND[int(e.bg_mode)]
+  for bg in 2..3:
+    let k = if bg == 2: k2 else: k3
+    if (bgs and (1'u32 shl bg)) != 0 and k in [bkAffine, bkExt, bkLarge] and
+       (e.bgcnt[bg] and 0x40) != 0 and y mod e.mosaic_bg_v == 0:
+      e.mos_bgx[bg - 2] = e.bgx[bg - 2]
+      e.mos_bgy[bg - 2] = e.bgy[bg - 2]
+
 proc render_line*(e: Engine2D; y: int; need_gfx = false) =
   ## One visible line into e.line. Called at H-blank start of lines 0-191.
   ## `need_gfx` renders the graphics composite into e.gfx even when the
@@ -797,6 +911,19 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
     for x in 0 ..< 256: e.line[x] = 0
     return
   let dm = e.display_mode
+  let cache = e.lc_on and dm == 1 and not need_gfx and y < 192
+  var key: LineKey
+  if cache:
+    key = e.line_key(y)
+    if e.lc_valid[y] and e.lc_key[y] == key and
+       (e.line3d == nil or e.lc_3d[y] == e.line3d[]) and
+       e.vram.touched_sum(e.lc_touch[y]) == e.lc_vsum[y]:
+      e.latch_mosaic(y)
+      e.line = e.lc_line[y]
+      inc e.lc_reused
+      return
+  if cache:
+    for w in e.touch.mitems: w = 0
   if dm == 1 or need_gfx: e.render_gfx(y)
   case dm
   of 0:
@@ -815,5 +942,18 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
     # main-memory display: the line the FIFO delivered (bit 15 unused)
     for x in 0 ..< 256: e.line[x] = e.mmem_line[x] and 0x7FFF
   e.apply_master_brightness()
+  if cache and (e.touch[TOUCH_ALL shr 6] and (1'u64 shl (TOUCH_ALL and 63))) == 0:
+    e.lc_valid[y] = true
+    e.lc_key[y] = key
+    e.lc_touch[y] = e.touch
+    e.lc_vsum[y] = e.vram.touched_sum(e.touch)
+    e.lc_line[y] = e.line
+    if e.line3d != nil:
+      if e.lc_3d.len == 0: e.lc_3d.setLen(192)
+      e.lc_3d[y] = e.line3d[]
+  elif y < 192:
+    e.lc_valid[y] = false   # overlapping banks, capture, other display modes
+
+{.pop.}
 
 {.pop.}

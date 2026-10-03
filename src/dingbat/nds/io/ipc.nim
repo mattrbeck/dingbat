@@ -5,6 +5,10 @@
 import std/deques
 import irq
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   IpcEnd* = ref object
     ## One CPU's side. `send` is the FIFO this CPU writes; the other side's
@@ -96,3 +100,5 @@ proc recv*(p: Ipc; is9: bool): uint32 =
   me.last_recv = q[].popFirst
   if q[].len == 0 and other.send_empty_irq: other.irq.raise_irq(irqIpcSendEmpty)
   me.last_recv
+
+{.pop.}

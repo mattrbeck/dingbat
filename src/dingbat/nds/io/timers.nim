@@ -10,6 +10,10 @@
 import ../sched
 import irq
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   Timers* = ref object
     sched* {.cursor.}: NdsScheduler
@@ -81,3 +85,5 @@ proc write_reg*(t: Timers; offset: uint32; v, mask: uint32) =
       t.counter[i] = now_count
       t.start_at[i] = t.sched.now
     t.schedule_overflow(i)
+
+{.pop.}

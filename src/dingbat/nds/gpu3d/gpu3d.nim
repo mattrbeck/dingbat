@@ -53,6 +53,10 @@ import geometry, render
 
 export geometry.Vertex, geometry.Polygon, render.Renderer
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   FifoEntry = object
     cmd: uint8
@@ -440,3 +444,5 @@ proc render_line*(g: Gpu3d; y: int) =
   ## is drawn, line y at the latest.
   g.draw_lines(max(y + 1, g.due_lines(g.now())))
   copyMem(addr g.line[0], addr g.frame[y * 256], 256 * sizeof(uint32))
+
+{.pop.}

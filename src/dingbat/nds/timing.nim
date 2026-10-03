@@ -64,6 +64,10 @@
 
 import arm/cp15
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   SlotTiming* = object
     ## GBA-slot access times in bus cycles, from EXMEMCNT bits 0-4
@@ -187,6 +191,18 @@ proc lookup_slow(c: var TagCache; a: uint32; allocate: bool): bool {.noinline.} 
     c.tags[c.victim] = tag
     c.rr[set] = (c.rr[set] + 1) and 3
     c.last = tag
+  false
+
+proc hit_line*(c: var TagCache; a: uint32): bool {.inline.} =
+  ## `lookup` for a line known not to be `last`, without allocating: on a
+  ## hit it becomes `last`; a miss changes nothing (the caller then does
+  ## the full lookup).
+  let tag = (a shr 5) + 1
+  let s = int((a shr 5) and c.set_mask) * 4
+  if c.tags[s] == tag or c.tags[s + 1] == tag or c.tags[s + 2] == tag or
+     c.tags[s + 3] == tag:
+    c.last = tag
+    return true
   false
 
 template lookup*(c: var TagCache; a: uint32; allocate: bool): bool =
@@ -357,3 +373,5 @@ proc data7*(top: uint32; width: int; seq: bool; st: SlotTiming): int64 {.inline.
   of 0x08, 0x09: 2 * (slot_rom(st, width, seq) - (if seq: 0 else: 1))
   of 0x0A: 2 * (st.ram - (if seq: 0 else: 1))
   else: 2
+
+{.pop.}

@@ -63,6 +63,11 @@ neither CPU can change anything (each halted with no interrupt pending, or
 spinning in a loop proven to do nothing) a slice runs straight to the next
 event, and a CPU skips the whole passes of such a loop instead of executing
 them (docs/nds/perf.md: same clock, opcode count and state as executing).
+Inside one CPU's `run` call nothing else executes, so halt and the IRQ line
+are re-tested only after that CPU's own I/O, CPSR, SWI or CP15 writes
+(`attn`); opcodes dispatch through compile-time specialised tables
+(`dispatch_tables`), and sequential fetches inside a known line/page and
+own-WRAM ARM7 data take short paths with the same timing (perf.md).
 
 CPU timing (`timing.nim`, hooked in by bus9/bus7): every code fetch and
 data access is charged from GBATEK's "DS Memory Timings" tables (per region,
@@ -173,7 +178,7 @@ tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machi
 tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
 tests/nds_compat_test.nim          checks for the homebrew sweep's fixes, power-off, arm7_timing
-tests/nds_perf_test.nim            idle-loop skipping and 3D frame reuse change nothing
+tests/nds_perf_test.nim            idle-loop skipping, 3D frame and 2D line reuse change nothing
                                    (docs/nds/perf.md)
 tests/nds_testroms_test.nim        checks for the test-ROM hunt's fixes (docs/nds/test-roms.md)
 ```

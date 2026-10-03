@@ -165,6 +165,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
   of 0x04:
     n.sync7()
+    n.arm7.attn = true          # a read side effect may raise an IRQ (arm/cpu.nim run)
     if not io7_steady(a):
       # the IPC FIFO pop is seen by the ARM9 too; the rest only by this CPU
       if (a and 0x00FF_FFFC'u32) == 0x10_0000: inc n.idle_epoch else: inc n.idle_epoch7
@@ -229,6 +230,7 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
                else: 0xFF'u32 shl sh
     when defined(ndsdebug):
       if n.iolog: n.log_io("7", a and not 3'u32, v shl sh, mask, true, n.arm7.cur_pc)
+    n.arm7.attn = true          # IE/IF/IME, HALTCNT, DMA, ... (arm/cpu.nim run)
     n.io7_write(a and not 3'u32, v shl sh, mask)
   of 0x06:
     let off = int(a and 0x3FFFF)
@@ -261,35 +263,124 @@ proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   n.wait7 += code7(top, width, seq, n.slot7_t)
   if not seq: n.wait7 += code7(top, width, true, n.slot7_t)
 
+template wram7_fast(a: uint32): bool =
+  ## 0x03800000-0x03FFFFFF: the ARM7's own WRAM (and its mirrors), most of
+  ## its data accesses. data_cost7 + read7/write7 there come to this: two
+  ## master cycles whatever the width or sequence (timing.nim data7).
+  (a shr 23) == 7
+
+template wram7_charge(n: NDS; a: uint32) =
+  if not n.dma7.dma_access:
+    n.last_data7 = a
+    n.wait7 += 2
+
+template wram7_ptr(n: NDS; a: uint32; T: typedesc): ptr T =
+  cast[ptr T](addr n.arm7_wram[int(a and 0xFFFF)])
+
 proc read8*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost7(a, 8)
-  b.nds.read7(a, 8)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_charge(a)
+    return uint32(n.wram7_ptr(a, uint8)[])
+  n.data_cost7(a, 8)
+  n.read7(a, 8)
 proc read16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost7(a, 16)
-  b.nds.read7(a, 16)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_charge(a)
+    return uint32(n.wram7_ptr(a, uint16)[])
+  n.data_cost7(a, 16)
+  n.read7(a, 16)
 proc read32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost7(a, 32)
-  b.nds.read7(a, 32)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_charge(a)
+    return n.wram7_ptr(a, uint32)[]
+  n.data_cost7(a, 32)
+  n.read7(a, 32)
+
+template wram7_store(n: NDS; a: uint32; v: typed; T: typedesc) =
+  # write7's own-WRAM store: only a change can end a polling loop
+  n.wram7_charge(a)
+  n.sync7()
+  watch_write(n, "7", n.arm7, a, uint32(v))
+  let p = n.wram7_ptr(a, T)
+  if p[] != v:
+    inc n.idle_epoch7
+    p[] = v
 
 proc write8*(b: Arm7Bus; a: uint32; v: uint8) {.inline.} =
-  b.nds.data_cost7(a, 8)
-  b.nds.sync7()
-  b.nds.write7(a, uint32(v), 8)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_store(a, v, uint8)
+    return
+  n.data_cost7(a, 8)
+  n.sync7()
+  n.write7(a, uint32(v), 8)
 proc write16*(b: Arm7Bus; a: uint32; v: uint16) {.inline.} =
-  b.nds.data_cost7(a, 16)
-  b.nds.sync7()
-  b.nds.write7(a, uint32(v), 16)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_store(a, v, uint16)
+    return
+  n.data_cost7(a, 16)
+  n.sync7()
+  n.write7(a, uint32(v), 16)
 proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.} =
-  b.nds.data_cost7(a, 32)
-  b.nds.sync7()
-  b.nds.write7(a, v, 32)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_store(a, v, uint32)
+    return
+  n.data_cost7(a, 32)
+  n.sync7()
+  n.write7(a, v, 32)
 
-proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.fetch_cost7(a, 32)
-  b.nds.read7(a, 32)
-proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.fetch_cost7(a, 16)
-  b.nds.read7(a, 16)
+proc fetch_page7(n: NDS; a: uint32) =
+  ## After a fetch from `a`: in the BIOS, main RAM with nothing apart from
+  ## memory (bus9.nim dc_*) and WRAM, a sequential fetch reads memory at a
+  ## fixed cost and changes nothing but the trackers, so the rest of the
+  ## 4 KB page is read from `fptr7` (fetch32/fetch16). Fetches pass BIOSPROT
+  ## (pc = address). WRAMCNT, a page going apart (page_apart_now) or a
+  ## state load turns this off.
+  n.fpage7 = NO_PAGE
+  case a shr 24
+  of 0x00:
+    if a >= 0x4000: return
+    n.fptr7 = cast[ptr UncheckedArray[uint8]](addr n.bios7[int(a and 0x3000)])
+  of 0x02:
+    let p = int((a and 0x3FFFFF) shr 12)
+    if n.tm.page_apart[p] != 0: return
+    n.fptr7 = cast[ptr UncheckedArray[uint8]](addr n.main_ram[p shl 12])
+  of 0x03:
+    var shared: bool
+    let i = n.wram7(a and not 0xFFF'u32, shared)
+    n.fptr7 = cast[ptr UncheckedArray[uint8]](
+      if shared: addr n.shared_wram[i] else: addr n.arm7_wram[i])
+  else: return
+  n.fseq7 = [code7(a shr 24, 16, true, n.slot7_t), code7(a shr 24, 32, true, n.slot7_t)]
+  n.fpage7 = a shr 12
+
+proc fetch_slow7(n: NDS; a: uint32; width: static int): uint32 {.noinline.} =
+  n.fetch_cost7(a, width)
+  result = n.read7(a, width)
+  if (a shr 12) != n.fpage7: n.fetch_page7(a)
+
+proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  let n {.cursor.} = b.nds
+  if likely((a shr 12) == n.fpage7 and a == n.last_fetch7 + 4):
+    # fetch_cost7's sequential case, then read7
+    n.last_data7 = NO_ADDR
+    n.last_fetch7 = a
+    n.wait7 += n.fseq7[1]
+    return cast[ptr uint32](addr n.fptr7[a and 0xFFF])[]
+  n.fetch_slow7(a, 32)
+proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  let n {.cursor.} = b.nds
+  if likely((a shr 12) == n.fpage7 and a == n.last_fetch7 + 2):
+    n.last_data7 = NO_ADDR
+    n.last_fetch7 = a
+    n.wait7 += n.fseq7[0]
+    return uint32(cast[ptr uint16](addr n.fptr7[a and 0xFFF])[])
+  n.fetch_slow7(a, 16)
 
 # Sound: channel sample fetch and capture stores (io/spu.nim). No CPU clock
 # sync -- they run inside the evSpuSample dispatch.
@@ -311,3 +402,6 @@ proc data_cached*(b: Arm7Bus; a: uint32): bool = false   ## no data cache on the
 proc swi_hook*(b: Arm7Bus; comment: uint32): bool =
   ## HLE BIOS: true = the SWI ran in Nim (hle_bios.nim), skip the vector.
   b.nds.hle_bios7 and b.nds.arm7.hle_swi(comment)
+
+# The dispatch tables (arm/cpu.nim): after every mixin their handlers use.
+dispatch_tables(Arm7Bus)

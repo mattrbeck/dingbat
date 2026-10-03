@@ -228,6 +228,7 @@ proc direct_boot*(n: NDS) =
   n.cp15.write(0, 3, 0, 0, 0x02)              # write buffer: region 1
   n.cp15.write(0, 9, 1, 1, 0x20)
   n.tm.update_regions(n.cp15)
+  n.fetch_paths_off()
   n.arm9.vector_base = n.cp15.vector_base()
   n.arm9.set_cpsr(uint32(mSYS) or FLAG_F)
   n.arm9.set_mode_sp(mSYS, 0x00803EC0'u32)
@@ -251,6 +252,7 @@ proc firmware_boot*(n: NDS) =
   ## boots the card through the KEY1/KEY2 handshake (cart.nim). Values not
   ## given by GBATEK are marked Assumed.
   n.wramcnt = 0                      # Assumed: all shared WRAM to the ARM9
+  n.fetch_paths_off()
   n.exmemcnt = 0x2000                # bit 13 reads set (GBATEK); ARM9 owns the slots
   n.cart.owner_arm7 = false
   n.exmem7_lo = 0

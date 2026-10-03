@@ -32,6 +32,10 @@
 
 import ../../gba/storage_chip
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   Slot2Kind* = enum
     s2Empty, s2GbaCart, s2RumblePak, s2ExpansionPak
@@ -295,3 +299,5 @@ proc gba_header_info*(s: Slot2): array[12, uint8] =
   result[5] = 0    # "whatever flags": Assumed 0
   result[6] = r[0xB0]; result[7] = r[0xB1]
   for i in 0..3: result[8 + i] = r[0xAC + i]
+
+{.pop.}

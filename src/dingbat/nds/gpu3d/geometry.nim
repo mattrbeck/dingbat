@@ -11,6 +11,10 @@
 
 import std/math
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   Mat* = array[16, int32]       ## m[0..15], row-major
 
@@ -583,3 +587,5 @@ proc execute*(g: Geometry; cmd: uint8; p: openArray[uint32]) =
       # 4-bit sign, 12-bit fraction: values reaching 1.0 wrap
       g.vec_result[i] = cast[int16](uint16((cast[int32](uint32(r[i]) shl 19) shr 19) and 0xFFFF))
   else: discard
+
+{.pop.}

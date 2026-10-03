@@ -248,6 +248,125 @@ block instruction_cache_contents:
   b7.write32(A + 0x40, 0x6666_6666'u32)
   check b.fetch32(A + 0x40) == 0x5555_5555'u32, "a prefetched line runs what it was filled with"
 
+block fetch_fast_paths:
+  # bus9.nim fetch_line9 / bus7.nim fetch_page7: sequential fetches inside
+  # a line (ARM9) or page (ARM7) read memory directly; each change that
+  # makes that wrong must turn the shortcut off mid-run
+  echo "sequential fetch fast paths"
+  let n = machine()
+  n.arm9.wl_on = false
+  n.arm7.wl_on = false
+  let b = Arm9Bus(nds: n)
+  let b7 = Arm7Bus(nds: n)
+  n.cache_on(write_back = true)
+  b.cp15_write(0, 2, 0, 1, 0x02)                          # I-cachable: region 1
+  b.cp15_write(0, 1, 0, 0, n.cp15.control or (1'u32 shl 12))
+  const A = 0x0220_0000'u32
+  for k in 0'u32 ..< 8: b7.write32(A + 4 * k, 0x1000_0000'u32 + k)
+  check b.fetch32(A) == 0x1000_0000'u32 and b.fetch32(A + 4) == 0x1000_0001'u32,
+        "ARM9: a cached line, then a sequential fetch in it"
+  b7.write32(A + 8, 0x2222_2222'u32)                      # memory changes under the line
+  check b.fetch32(A + 8) == 0x1000_0002'u32, "ARM9: the next sequential fetch runs the line as filled"
+  b.cp15_write(0, 7, 5, 0, 0)
+  check b.fetch32(A + 12) == 0x1000_0003'u32 and b.fetch32(A + 16) == 0x1000_0004'u32,
+        "ARM9: sequential after a C7 invalidate refills from memory"
+  b7.write32(A + 20, 0x3333_3333'u32)
+  check b.fetch32(A + 20) == 0x1000_0005'u32, "ARM9: ...and keeps the refilled line"
+  # into the next line: not cached yet (a fill from memory), then cached
+  # and changed behind the cache (the line as filled)
+  b7.write32(A + 32, 0x1000_0008'u32)
+  discard b.fetch32(A + 24)
+  check b.fetch32(A + 28) == 0x1000_0007'u32 and b.fetch32(A + 32) == 0x1000_0008'u32,
+        "ARM9: sequential into a line not cached fills it"
+  discard b.fetch32(A)                                    # a branch back
+  for k in 1'u32 .. 7: discard b.fetch32(A + 4 * k)
+  b7.write32(A + 32, 0x4444_4444'u32)
+  check b.fetch32(A + 32) == 0x1000_0008'u32, "ARM9: sequential into a cached line runs it as filled"
+  # code in a page with a dirty data-cache line: clean lines run straight
+  # from memory, the dirty line itself from memory's side (not the CPU's)
+  const C = 0x0228_0000'u32
+  for k in 0'u32 ..< 16: b7.write32(C + 4 * k, 0x5000_0000'u32 + k)
+  discard b.read32(C + 32)                                # D-cache line C+32 filled...
+  b.write32(C + 36, 0x6666_6666'u32)                      # ...and dirtied: the page is apart
+  check b.fetch32(C) == 0x5000_0000'u32 and b.fetch32(C + 4) == 0x5000_0001'u32 and
+        b.fetch32(C + 8) == 0x5000_0002'u32, "ARM9: sequential in a clean line of a page apart"
+  discard b.fetch32(C + 28)
+  check b.fetch32(C + 32) == 0x5000_0008'u32 and b.fetch32(C + 36) == 0x5000_0009'u32,
+        "ARM9: sequential into the dirty line runs memory's side"
+  # ARM7 in main RAM while the ARM9's write-back data cache dirties a line
+  # of the same page: the ARM7 reads memory's side
+  const B = 0x0230_0000'u32
+  for k in 0'u32 ..< 8: b7.write32(B + 4 * k, 0x4000_0000'u32 + k)
+  check b7.fetch32(B) == 0x4000_0000'u32 and b7.fetch32(B + 4) == 0x4000_0001'u32,
+        "ARM7: sequential fetches in main RAM"
+  discard b.read32(B + 8)                                 # ARM9 D-cache line filled
+  b.write32(B + 8, 0x5555_5555'u32)                       # dirty: memory keeps its side
+  check b7.fetch32(B + 8) == 0x4000_0002'u32, "ARM7: a dirty ARM9 data-cache line is not what it runs"
+  # ARM7 in shared WRAM while WRAMCNT takes it away
+  b.write8(0x0400_0247'u32, 3)                            # all 32 KB to the ARM7
+  for k in 0'u32 ..< 8:
+    b7.write32(0x0300_0000'u32 + 4 * k, 0x6000_0000'u32 + k)
+    b7.write32(0x0380_0000'u32 + 4 * k, 0x7000_0000'u32 + k)
+  check b7.fetch32(0x0300_0000'u32) == 0x6000_0000'u32 and
+        b7.fetch32(0x0300_0004'u32) == 0x6000_0001'u32, "ARM7: sequential fetches in shared WRAM"
+  b.write8(0x0400_0247'u32, 0)                            # all to the ARM9: the ARM7 sees its own WRAM
+  check b7.fetch32(0x0300_0008'u32) == 0x7000_0002'u32, "ARM7: WRAMCNT moves the next sequential fetch"
+
+block irq_at_next_opcode:
+  # arm/cpu.nim run checks halt and the IRQ line only when `attn` says they
+  # may have changed: an IRQ made takeable by the CPU's own store (IME
+  # here; IE and IF alike) or CPSR write is taken before the next opcode.
+  # The HLE BIOS's IRQ vector calls the handler at [DTCM+3FFCh] /
+  # [0380FFFCh] with r3 untouched; the handler copies r3 (the opcodes run
+  # after the store) to r4.
+  echo "interrupts taken at the opcode after the write that allows them"
+  const BY_IME = [0xE3A0_44FF'u32,     # MOV r4, #0xFF000000
+                  0xE3A0_0301'u32,     # MOV r0, #0x04000000
+                  0xE280_0F82'u32,     # ADD r0, r0, #0x208 (IME)
+                  0xE3A0_1001'u32,     # MOV r1, #1
+                  0xE3A0_3000'u32,     # MOV r3, #0
+                  0xE580_1000'u32,     # STR r1, [r0]: IME = 1
+                  0xE283_3001'u32,     # ADD r3, r3, #1
+                  0xE283_3001'u32,     # ADD r3, r3, #1
+                  0xEAFF_FFFE'u32]     # B .
+  const BY_CPSR = [0xE3A0_44FF'u32,    # MOV r4, #0xFF000000
+                   0xE3A0_3000'u32,    # MOV r3, #0
+                   0xE321_F01F'u32,    # MSR CPSR_c, #0x1F: system mode, I clear
+                   0xE283_3001'u32,    # ADD r3, r3, #1
+                   0xE283_3001'u32,    # ADD r3, r3, #1
+                   0xEAFF_FFFE'u32]    # B .
+  const HANDLER = [0xE1A0_4003'u32,    # MOV r4, r3
+                   0xEAFF_FFFE'u32]    # B .
+  for arm9 in [true, false]:
+    for by_ime in [true, false]:
+      let n = machine()
+      n.arm9.wl_on = false
+      n.arm7.wl_on = false
+      let code = if arm9: 0x0210_0000'u32 else: 0x0380_1000'u32
+      let hand = code + 0x100
+      let main = if by_ime: @BY_IME else: @BY_CPSR
+      for i, w in main: Arm7Bus(nds: n).write32(code + uint32(4 * i), w)
+      for i, w in HANDLER: Arm7Bus(nds: n).write32(hand + uint32(4 * i), w)
+      let (me, other) = if arm9: (n.irq9, n.irq7) else: (n.irq7, n.irq9)
+      me.ie = 1; me.iff = 1                             # V-blank pending
+      me.ime = if by_ime: 0'u32 else: 1'u32
+      other.ie = 0
+      let cpsr = uint32(mSYS) or (if by_ime: 0'u32 else: FLAG_I)
+      if arm9:
+        Arm9Bus(nds: n).write32(0x0080_3FFC'u32, hand)  # DTCM + 3FFCh (direct boot's DTCM)
+        n.arm9.set_cpsr(cpsr)
+        n.arm9.next_pc = code
+        n.arm7.halted = true
+      else:
+        Arm7Bus(nds: n).write32(0x0380_FFFC'u32, hand)
+        n.arm7.set_cpsr(cpsr)
+        n.arm7.next_pc = code
+        n.arm9.halted = true
+      n.run_until(n.sched.now + 4000)
+      let r4 = if arm9: n.arm9.r[4] else: n.arm7.r[4]
+      check r4 == 0, (if arm9: "ARM9" else: "ARM7") & ": the IRQ comes before the opcode after " &
+            (if by_ime: "STR IME" else: "MSR clearing CPSR.I"), "r4 = " & toHex(r4)
+
 block icache_stale_rom:
   echo "icache_stale (tests/nds/src/icache_stale)"
   var ok: bool

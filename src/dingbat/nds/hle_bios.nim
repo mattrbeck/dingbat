@@ -31,6 +31,10 @@ import hle_bios_image
 
 export hle_bios_image
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 const
   BIOS9_SIZE* = 4 * 1024
   BIOS7_SIZE* = 16 * 1024
@@ -492,3 +496,5 @@ proc hle_swi*[B](cpu: ArmCpu[B]; comment: uint32): bool =
     when armv5(B): write32(cpu.bus, 0x04000300'u32, cpu.r[0])   # CustomPost
     else: write8(cpu.bus, 0x04000301'u32, uint8(cpu.r[2]))       # CustomHalt
   else: discard
+
+{.pop.}

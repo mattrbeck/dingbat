@@ -2,6 +2,10 @@
 ## (both 32-bit on the DS). The GBA's bits 0-13 keep their meaning; the DS
 ## adds IPC/cart/GX/lid/SPI/wifi lines (docs/nds/gbatek-notes.md).
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   IrqSource* = enum
     irqVBlank = 0, irqHBlank = 1, irqVCount = 2,
@@ -45,3 +49,5 @@ proc write_reg*(c: IrqCtl; offset: uint32; v, mask: uint32) =
   of 0x210: c.ie = (c.ie and not mask) or (v and mask)
   of 0x214: c.iff = c.iff and not (v and mask)   # write 1 to acknowledge
   else: discard
+
+{.pop.}

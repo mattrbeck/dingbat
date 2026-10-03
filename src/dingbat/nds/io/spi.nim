@@ -11,6 +11,10 @@
 import irq, input, mic
 import ../sched
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   FlashState = enum fsIdle, fsAddr, fsRead, fsWrite, fsErase, fsStatus, fsId, fsOther
 
@@ -394,3 +398,5 @@ proc write_data*(s: Spi; v: uint8) =
 proc read_reg*(s: Spi; offset: uint32): uint32 =
   let busy = if s.busy(): 0x80'u32 else: 0
   uint32(s.cnt) or busy or (uint32(s.data_out) shl 16)
+
+{.pop.}

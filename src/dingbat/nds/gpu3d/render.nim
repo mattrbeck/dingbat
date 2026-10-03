@@ -35,6 +35,10 @@ import std/[algorithm, math]
 import ../mem/vram
 import geometry
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 const
   W* = 256
   H* = 192
@@ -1017,3 +1021,5 @@ proc render_frame_body(r: Renderer; vram: Vram; polys: openArray[Polygon];
   if (disp3dcnt and 0x20) != 0: r.edge_mark((disp3dcnt and 0x10) != 0)
   if (disp3dcnt and 0x80) != 0: r.fog(disp3dcnt)
   r.budget()
+
+{.pop.}

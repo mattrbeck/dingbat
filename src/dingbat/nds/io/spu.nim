@@ -43,6 +43,10 @@
 ## output rate aliases at full level: Assumed), sub-tick start timing (a
 ## start bit takes effect at the next mixer tick).
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 const
   FIFO_WORDS* = 8           ## channel read-ahead, words (Assumed)
 
@@ -488,3 +492,5 @@ proc write_reg*(s: Spu; offset: uint32; v, mask: uint32) =
   of 0x518: s.cap[1].dad = merge(s.cap[1].dad) and 0x07FF_FFFC'u32
   of 0x51C: s.cap[1].len = uint16(merge(uint32(s.cap[1].len)) and 0xFFFF)
   else: discard
+
+{.pop.}

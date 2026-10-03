@@ -485,6 +485,10 @@ when isMainModule:
   echo "frames=", frames, " arm9 instrs=", n.arm9.instr_count, " pc=0x",
        toHex(n.arm9.next_pc, 8), " arm7 instrs=", n.arm7.instr_count, " pc=0x",
        toHex(n.arm7.next_pc, 8), " -> ", outp
+  # speed-up statistics (docs/nds/perf.md)
+  echo "skipped: arm9 ", n.arm9.wl_skipped, " arm7 ", n.arm7.wl_skipped,
+       " cycles; reused: 3d frames ", n.gpu3d.reused, ", 2d lines A ",
+       n.gpu.engine_a.lc_reused, " B ", n.gpu.engine_b.lc_reused
   for spec in text.split(','):
     # A0..A3 / B0..B3: engine and BG number
     if spec.len == 2:

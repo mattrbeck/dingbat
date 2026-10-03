@@ -25,6 +25,10 @@
 ## (length, then data), 02h = IR transmit, 08h = version (NEW firmware: AAh).
 ## No IR peer is modelled: receives return length 0, transmits vanish.
 
+# No proc here raises on purpose; `quirky` drops the error-flag test
+# after every call (docs/nds/perf.md, "Error-flag checks").
+{.push quirky: on.}
+
 type
   BackupKind* = enum
     bkAuto, bkNone, bkEeprom512, bkEeprom, bkEeprom128k, bkFram, bkFlash
@@ -389,3 +393,5 @@ proc deselect*(b: Backup) =
   if b.phase in {bpAddr, bpData, bpDone} and b.cmd in {0x02'u8, 0x0A, 0xDB, 0xD8}:
     b.status = b.status and not 2'u8
   b.phase = bpIdle
+
+{.pop.}
