@@ -468,12 +468,19 @@ proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32
 type
   SpanStep = object
     ## floor(n * 2^38 / d) and its remainder, stepped along a span so
-    ## that consecutive dots need no division
+    ## that consecutive dots need no division; and what every dot of the
+    ## span shares: its length, whether its ends' w are equal, and the
+    ## depth step's reciprocal
     d, q, rr, n, f, acc: int64
+    len: int64                  ## R.x - L.x (may be <= 0)
+    zk: int64                   ## 2^18 div len (len > 0)
+    eqw: bool
 
-proc span_step(xl, xr: int32): SpanStep {.inline.} =
-  let d = max(1'i64, int64(xr - xl))
-  SpanStep(d: d, q: (1'i64 shl 38) div d, rr: (1'i64 shl 38) mod d, n: -2)
+proc span_step(L, R: EndAttr): SpanStep {.inline.} =
+  let len = int64(R.x - L.x)
+  let d = max(1'i64, len)
+  SpanStep(d: d, q: (1'i64 shl 38) div d, rr: (1'i64 shl 38) mod d, n: -2, len: len,
+           zk: (1'i64 shl 18) div d, eqw: L.w == R.w)
 
 proc step_to(sp: var SpanStep; n: int64) {.inline.} =
   if n == sp.n + 1:
@@ -497,9 +504,9 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   # factor (38 bits, rounded so that every attribute comes out as
   # floor(a + (b - a) * n / d) exactly) is linear, else the 8-bit
   # perspective one. Depth first, the rest only for dots that pass.
-  let d = int64(R.x - L.x)
+  let d = sp.len
   let n = int64(x - L.x)
-  let eqw = L.w == R.w
+  let eqw = sp.eqw
   var fl, fc, f8, z, w: int64
   if d <= 0:
     z = L.z; w = L.w
@@ -513,7 +520,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
     # drawn later wins the tie where its depth rises along the span
     # (3d_probe_zinterp_x on the reference cores; any 16..30 bits fit,
     # 18 Assumed like the edge slope's)
-    z = L.z + ashr(dz * n * ((1'i64 shl 18) div d), 18)
+    z = L.z + ashr(dz * n * sp.zk, 18)
     if eqw:
       w = L.w
     else:
@@ -711,7 +718,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       if sx[i] > sx[ri]: ri = i
     let L = EndAttr(x: sx[li], c: va[li].c, s: va[li].s, t: va[li].t, z: va[li].z, w: va[li].w)
     let R = EndAttr(x: sx[ri], c: va[ri].c, s: va[ri].s, t: va[ri].t, z: va[ri].z, w: va[ri].w)
-    var sp = span_step(L.x, R.x)
+    var sp = span_step(L, R)
     r.charge(int(ymin), int(sx[li]), max(int(sx[ri]), int(sx[li]) + 1))
     for x in max(0, int(sx[li])) ..< min(W, max(int(sx[ri]), int(sx[li]) + 1)):
       r.plot(c, x, int(ymin), L, R, sp, true)
@@ -778,7 +785,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
         r.charge(y, int(xs), int(xe) + 1)
         let EL = pl.edge_end(va, y, xs)
         let ER = pr.edge_end(va, y, xe + 1)
-        var sp = span_step(EL.x, ER.x)
+        var sp = span_step(EL, ER)
         # anti-aliasing: a vertical edge gets no coverage in a swapped row
         # (polyrastertest's AA swapped vertical edge glitch: the hardware
         # inverts swapped edges' coverage, which leaves sloped edges as
@@ -817,7 +824,7 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let yr = if re.amaj and not re.dec and not re.vert: y + 1 else: y
     let EL = le.edge_end(va, yl, L.s)
     let ER = re.edge_end(va, yr, R.e)
-    var sp = span_step(EL.x, ER.x)
+    var sp = span_step(EL, ER)
     # edge roles (the overlapping-edge rule in plot): x-major runs are top
     # or bottom edges as the fill rules have them (a left run going right
     # is a bottom one, a right run going right a top one), other edges left
