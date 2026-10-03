@@ -4372,3 +4372,69 @@ guards; the playtest suite 122 of 135 with the same 13 failures as before
 Sapphire and Breath of Fire II failed once with the machine's load near
 250 -- empty screen reads, the official-BIOS configurations as well -- and
 passed on a rerun).
+
+## 49. Harry Potter CoS, Starsky & Hutch: an 8 KB save for a 4 Kbit EEPROM came back 512 bytes, 2026-10-03
+
+**FIXED** (gba.nim `new_storage`, storage.nim `battery_file_bytes`). The
+cross-load step of Harry Potter and the Chamber of Secrets (a known FAIL
+since the suite began) and of the new Starsky & Hutch (E) script booted the
+second reference's save -- an 8192-byte file, the size it writes for every
+EEPROM -- in each dingbat configuration, and the game's own write during
+`[load]` made dingbat rewrite the file at 512 bytes: the chip bytes intact,
+the file shortened. mGBA left the same file 8192 bytes long; the harness
+counts a shortened battery file as a dingbat problem (an extended one is
+fine).
+
+dingbat sizes an EEPROM from the game's first command (the DMA length), not
+from the file, because emulators write 8 KB files for 4 Kbit chips; the
+buffer starts at 8 KB and shrinks to 512 bytes on a 4 Kbit command. The
+file's bytes past 0x200 are now kept as loaded (`eeprom_file_tail`) and
+written back after the chip's, so a 4 Kbit game never shortens a file it was
+given; a 512-byte file stays 512 bytes and a 64 Kbit game is unchanged. With
+an RTC trailer the trailer still follows the chip data (8192 + 16). Guards:
+`nimble test_gbartc` (the "4Kbit part" cases now expect the file's own
+length). Starsky & Hutch and Harry Potter pass their cross-load matrices on
+all four configurations.
+
+## 50. Sleep mode: six games never woke from Stop, 2026-10-03
+
+**FIXED, hardware row pending** (interrupts.nim `check_interrupts`,
+keypad.nim `stop_key_condition`). Found by the deep input sweep
+(`inputsweep.py --pattern deep`: its save attempts open the pause menu and
+pick entries, and many pause menus end in Sleep). dingbat went black and
+silent for good where both references played on:
+
+| game | sleep routine | dingbat before |
+|---|---|---|
+| Ghost Rider (U), Catwoman (U), Action Man - Robot Atack (E) | KEYCNT 0xC304 (IRQ, AND, L+R+SELECT), Stop; on waking KEYCNT 0xC000 (IRQ, AND, no key) and Stop again | woke on L+R+SELECT, then stayed in the second Stop |
+| Cabbage Patch Kids - The Patch Puppy Rescue (U), Puyo Pop Fever (E), The Santa Clause 3 (U) | IE = keypad + gamepak, KEYCNT 0x8304 (AND, L+R+SELECT, **IRQ enable clear**), Stop, then wait for every key released | never woke |
+| Powerpuff Girls - Him and Seek (U) | KEYCNT 0xC304, one Stop | woke on L+R+SELECT (correct) |
+
+The references are no guide: both treat SWI 3 as a halt that the next
+interrupt ends, so they never sleep at all (the sweep's flags were the
+references playing on under a sleeping console). GBATEK: Stop "can be
+terminated by ... Joypad, Game Pak, or General-Purpose-SIO" interrupts, as
+far as enabled in IE -- it does not say whether the wake needs KEYCNT's IRQ
+enable or a fresh edge.
+
+The games say what the console does. The 0x8304 sleepers (three publishers)
+can only wake if the key condition ends Stop without bit 14; Ghost Rider's
+second Stop can only return if the condition ends Stop as a level: its
+IRQ handler acknowledged the first wake's IF before the 0xC000 store
+(traced: IF 0x0018 at the store), and nothing about the condition changes.
+dingbat now ends Stop while IE's keypad bit is set and KEYCNT's key
+condition holds (AND over the selected keys, vacuously true with none; OR:
+any), ignoring bit 14 and raising nothing; the keypad IRQ itself stays as
+it was (an edge of the condition with bit 14 set). Key changes during Stop
+re-check. All seven games now sleep, wake on L+R+SELECT and return to their
+menus; none wakes before the keys (checked by replaying each to its
+sleep, 60 frames idle, then L+R+SELECT).
+
+Probe: `tests/roms/payloads/keyirq.s`, r0table row `keyirq` (KEYCNT stores
+with nothing held: the vacuous AND, a rewrite of a matching value, the
+enable bit, a level after the acknowledge; emulators answer dingbat
+03FF0309, mgba 03FF0101/0100, the second reference 03FF030D). Its ad hoc
+Stop cells (arguments 0x80000000, 0x80000001: Stop under KEYCNT 0xC000 /
+0x8000 with IE = keypad) settle the model directly -- dingbat returns
+0x57000000 from both; a console that disagrees hangs and needs a power
+cycle. Runner 1433/1443, cycle laws hold with both BIOSes.
