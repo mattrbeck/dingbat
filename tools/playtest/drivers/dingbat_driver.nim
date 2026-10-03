@@ -131,6 +131,21 @@ proc main() =
         apulog.writeLine(&"{frame} {now - int64(emu.frame_start_cycles)} " &
                          &"{(0x04000000'u32 or a).toHex(8)} {value.toHex(2)}")
     bdIoHook = log_io
+    # pcwatch: instructions executed where no game keeps code -- the unused
+    # space above the BIOS, the I/O registers, the save chip, above the
+    # address space -- counted with the first one's address and frame. A
+    # count above zero is a CPU that has run off the rails.
+    var wild_count = 0
+    var wild_first = 0'u32
+    var wild_frame = -1
+    proc watch_pc(pc: uint32) {.closure.} =
+      let region = pc shr 24
+      if (pc >= 0x4000'u32 and region <= 0x01'u32) or region == 0x04'u32 or
+         region >= 0x0E'u32:
+        if wild_count == 0:
+          wild_first = pc
+          wild_frame = frame
+        inc wild_count
   reply &"ready dingbat save={emu.storage.save_path} size={emu.storage.memory.len}"
   var line: string
   while stdin.readLine(line):
@@ -224,6 +239,16 @@ proc main() =
           reply "ok"
         else:
           reply "err build with -d:biosdrvtrace"
+      of "pcwatch":
+        # pcwatch on | pcwatch -> "COUNT FIRST_PC FIRST_FRAME" (-d:biosdrvtrace)
+        when defined(biosdrvtrace):
+          if parts.len > 1 and parts[1] == "on":
+            bdPcHook = watch_pc
+            reply "ok"
+          else:
+            reply &"ok {wild_count} {wild_first.toHex(8)} {wild_frame}"
+        else:
+          reply "err build with -d:biosdrvtrace"
       of "layers":
         # debug visibility: bits 0-3 BG0-3, bit 4 OBJ
         emu.ppu.debug_layer_mask = uint8(parseHexInt(parts[1]))
@@ -299,6 +324,56 @@ proc main() =
         var s: seq[string]
         for k in 0 .. 15: s.add(emu.cpu.r[k].toHex(8))
         reply "ok " & s.join(" ")
+      of "runwild", "watchw", "runpc", "runpct":
+        # runwild FRAMES: step until the CPU executes where no code lives
+        # (pcwatch's regions) or FRAMES frames pass; watchw FRAMES ADDR: until
+        # the word at ADDR changes. Then the last 48 jumps (FROM>TO, oldest
+        # first, T = Thumb) and r0-r15 (debug). runpc FRAMES LO HI: until the
+        # PC is in [LO, HI); runpct the same in Thumb state only.
+        let limit = frame + parseInt(parts[1])
+        let watch = parts[0] == "watchw"
+        let ranged = parts[0] in ["runpc", "runpct"]
+        let thumb_only = parts[0] == "runpct"
+        let lo = if ranged: uint32(parseHexInt(parts[2])) else: 0'u32
+        let hi = if ranged: uint32(parseHexInt(parts[3])) else: 0'u32
+        let waddr = if watch: uint32(parseHexInt(parts[2])) else: 0'u32
+        let wold = if watch: emu.bus.read_word_internal(waddr) else: 0'u32
+        var ring: array[48, string]
+        var prev = 0'u32
+        var n = 0
+        var hit = false
+        while frame < limit:
+          let pc = emu.cpu.r[15] - (if emu.cpu.cpsr.thumb: 4'u32 else: 8'u32)
+          let region = pc shr 24
+          if ranged:
+            if pc >= lo and pc < hi and (emu.cpu.cpsr.thumb or not thumb_only):
+              hit = true
+              break
+          elif watch:
+            if emu.bus.read_word_internal(waddr) != wold:
+              hit = true
+              break
+          elif (pc >= 0x4000'u32 and region <= 0x01'u32) or region == 0x04'u32 or
+               region >= 0x0E'u32:
+            hit = true
+            break
+          if pc != prev + 2 and pc != prev + 4:
+            # jumps only: from>to, T = Thumb, and the stack pointer
+            ring[n mod ring.len] = prev.toHex(8) & ">" & pc.toHex(8) &
+              (if emu.cpu.cpsr.thumb: "T" else: "A") & "@" & emu.cpu.r[13].toHex(8)
+            inc n
+          prev = pc
+          emu.cpu.tick()
+          if emu.ppu.frame != 0:
+            emu.end_frame()
+            inc frame
+            emu.frame_start_cycles = emu.scheduler.cycles
+        var s: seq[string]
+        for k in max(0, n - ring.len) ..< n: s.add(ring[k mod ring.len])
+        var regs: seq[string]
+        for k in 0 .. 15: regs.add(emu.cpu.r[k].toHex(8))
+        reply &"ok {(if hit: \"hit\" else: \"none\")} frame={frame} vcount={emu.ppu.vcount} " &
+              s.join(",") & " | " & regs.join(" ")
       of "rtc_get":
         # DATE_TIME register bytes (year month day weekday hour minute second)
         # and the status register, hex

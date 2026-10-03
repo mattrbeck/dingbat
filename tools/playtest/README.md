@@ -167,6 +167,25 @@ found in the ROM.
 | `report.py` | suite -> findings (who stands alone at each difference) |
 | `hlecmp.py` | every script's `[new]` timeline in two dingbat configurations (`dingbat` and `dingbat-bios` by default), every frame's hash compared: where the HLE BIOS first draws what the official one does not |
 | `statecheck.py` | save-state round-trip check per emulator |
+| `bootsweep.py` | the library with no input: frames dingbat draws that no reference does |
+| `inputsweep.py` | the library with START/A on a beat: crashes, hangs, blank screens, silence, a CPU off the rails |
+
+## Library sweeps
+
+`inputsweep.py sweep --list roms.json --jobs 5 --tag NAME` plays each ROM
+(a JSON list of library file names) for 3000 frames in dingbat and mGBA:
+nothing for 300 frames, then START and A alternately once a second, which
+gets most games past the title into a menu or the first level. Each game
+gets every frame's hash, five screenshots, the audio level per second and
+the battery file, and is flagged only for gross failures against the
+reference (`hang`, `blank`, `few` distinct frames, `silent`, `crash`, a save
+unwritten or of another size). With `PLAYTEST_DINGBAT_DRIVER=bin/dingbat_driver_trace`
+it also flags `wild-pc`: an instruction executed where no code lives.
+`recheck --tag NAME --emus dingbat-bios,nba` runs the flagged games again in
+more emulators (results merge per game); `report --tag NAME` lists them and
+writes `out/inputsweep/NAME/games/<title>/compare.png`. Timing slips fork a
+game's path (an emulator a frame behind takes a press on another screen), so
+a flag is a lead for the screenshots, not a verdict.
 
 ## Driver protocol
 
@@ -193,6 +212,8 @@ command with `ok [...]` or `err ...`:
 | `trace N PATH` | N single instruction steps, one line each to PATH: `PC CYCLES VCOUNT T/A` (r15 before the step, master-clock cycles it took), `FRAME` at each frame end (dingbat, mGBA). dingbat's r15 leads the instruction by 4 (Thumb), mGBA's by 2; dingbat adds the absolute cycle the step started on and `R` on a step that only paid a parked HLE BIOS routine's remainder |
 | `rundigest N` | run N frames; per frame `FBHASH:COUNT:PCHASH:TIMEHASH` over the instructions run outside the BIOS (how many, which PCs, which PCs on which cycle of the frame): two configurations agree on all four while their game code runs identically (dingbat built with `-d:biosdrvtrace`) |
 | `runto PC` | step until r15 == PC; replies r0..r15 (dingbat) |
+| `runwild F` / `runpc F LO HI` / `runpct F LO HI` / `watchw F ADDR` | step for up to F frames until the CPU executes where no code lives / the PC is in [LO, HI) (`runpct`: in Thumb state) / the word at ADDR changes; replies `hit` or `none`, the frame, the last 48 jumps as `FROM>TO` with T/A and r13, then r0..r15 (dingbat) |
+| `pcwatch on` / `pcwatch` | count instructions executed where no code lives (above the BIOS, I/O, the save chip, above the address space); replies `COUNT FIRST_PC FIRST_FRAME` (dingbat trace build) |
 | `pft PC N PATH` | run to r15 == PC, then N steps with the `-d:pftrace` prefetch log to PATH (dingbat built with `-d:pftrace`) |
 | `quit` | flush the battery file and exit |
 
