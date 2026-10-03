@@ -541,6 +541,8 @@ proc scene_composite_fuzz() =
       e.reg(0x4C, if r.rand(3) == 0: uint32(r.rand(0xFFFF)) else: 0'u32)
       e.reg32(0x50, uint32(r.rand(0x7FFF_FFFF)))
       e.reg(0x54, uint32(r.rand(20)))
+      # master brightness: the one reader of the composite's 6-bit low bits
+      e.reg(0x6C, (uint32(r.rand(3)) shl 14) or uint32(r.rand(20)))
     g.engine_a.line3d = if r.rand(1) == 0: nil else: addr line3d
     for v in 0 ..< 263:
       g.vcount = v
