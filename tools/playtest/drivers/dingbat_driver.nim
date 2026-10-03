@@ -124,6 +124,7 @@ proc main() =
     # 0x04000060-0x0400008F (FIFO data excluded), one line each:
     # FRAME CYCLE_IN_FRAME ADDR VALUE (mgba_driver's apulog writes the same)
     var apulog: File = nil
+    var swilog: File = nil
     proc log_io(address: uint32; value: uint8) {.closure.} =
       let a = address and 0xFFFFFF'u32
       if apulog != nil and a >= 0x60'u32 and a <= 0x8F'u32:
@@ -236,6 +237,40 @@ proc main() =
           if apulog != nil: apulog.close()
           apulog = nil
           if parts[1] != "off": apulog = open(parts[1], fmWrite)
+          reply "ok"
+        else:
+          reply "err build with -d:biosdrvtrace"
+      of "swilog":
+        # swilog PATH | swilog off (-d:biosdrvtrace): one line per SWI from
+        # code outside the BIOS -- FRAME NUM RETURN_ADDR ABS_START CYCLES R0-R3
+        # -- the cycles from the swi to its return, so two configurations'
+        # logs show the first call that took another time (debug)
+        when defined(biosdrvtrace):
+          if swilog != nil: swilog.close()
+          swilog = nil
+          bdSwiHook = nil
+          bdPcHook = nil
+          if parts[1] != "off":
+            swilog = open(parts[1], fmWrite)
+            var ret = 0'u32
+            var t0 = 0'i64
+            var num = 0'u32
+            var regs = ""
+            proc absnow(): int64 =
+              emu.rebased + int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+            bdSwiHook = proc(n: uint32) {.closure.} =
+              let th = emu.cpu.cpsr.thumb
+              let pc = emu.cpu.r[15] - (if th: 4'u32 else: 8'u32)
+              if pc >= 0x4000'u32 and ret == 0:
+                ret = pc + (if th: 2'u32 else: 4'u32)
+                t0 = absnow()
+                num = n
+                regs = ""
+                for k in 0 .. 3: regs.add(" " & emu.cpu.r[k].toHex(8))
+            bdPcHook = proc(pc: uint32) {.closure.} =
+              if ret != 0 and pc == ret:
+                swilog.writeLine(&"{frame} {num.toHex(2)} {ret.toHex(8)} {t0} {absnow() - t0}{regs}")
+                ret = 0
           reply "ok"
         else:
           reply "err build with -d:biosdrvtrace"

@@ -4228,3 +4228,147 @@ dingbat where the scripts go.
   the semi-transparent-under-a-clear-bit path to be hit. Against the old
   compositor it fails (65613 pixels differ); against the fixed one it
   passes.
+
+## 48. The HLE BIOS's routines as stub-BIOS code, step by step: decompressors, copies, IntrWait, the math, RegisterRamReset, 2026-10-03
+
+**FIXED** for the routines below (hle_unc.nim, new; hle_bios.nim, hle_copy.nim,
+bus.nim, gba.nim). Section 44 left the decompressors writing their output up
+front and charging a cost model: a DMA burst inside one stalled the whole
+model where the console grants it between the routine's own accesses and
+runs part of it under the internal cycles (Castlevania - Circle of the
+Moon's sound FIFO inside its cartridge LZ77UnCompWrams, a cycle or two a
+call), an interrupt was taken on the cycle the line rose rather than at the
+end of the BIOS instruction in progress, and a frame drawn mid-call showed
+output the console had not written yet (Top Gun - Combat Zones' fade). The
+copies ran instruction by instruction but charged constants (no DMA
+overlap), and every SWI took an interrupt arriving between the dispatcher's
+`msr` and the routine after the SWI.
+
+**The routines run as BIOS code.** The stub BIOS now holds one `swi 0` per
+step of each routine (0x0C00-0x152F ARM, 0x3A00-0x3FFF Thumb), and the HLE
+executes a step by its address: the CPU fetches it (one BIOS cycle) and its
+body makes the console instruction's accesses and internal cycles through
+the bus calls the core's ARM and Thumb handlers make, in their order -- a
+load its access then an internal cycle, a store its access, a register
+shift or a multiply its internal cycles, a taken branch the refill -- then
+steps or branches to the next. So the CPU's own loop runs the routine:
+interrupts are taken at its instruction boundaries and return into it, DMA
+requests are granted between its accesses and run under its internal
+cycles, renderer contention meets each access when it is made, the frame
+loop stops between two steps, and a save state holds a routine in progress
+in its registers, its stack frames and r15. The SWI's exception entry, the
+dispatcher (its pushes on the SVC and System stacks, its read of the swi's
+comment byte in the caller's region, the `msr` into System mode with the
+caller's I bit) and its return (the pops, `movs pc, lr`) are steps too, so
+an interrupt in the dispatcher's window is taken there. Each routine's step
+sequence is the console's: tools/biosdrv/steptrace.nim logs every
+instruction the official BIOS executes in this core inside a probe's calls
+(its cycles, its accesses and their cycle in the step, the DMA in it), and
+the HLE's steps follow those kinds and that order; the comparison is
+tools/biosdrv/stepcmp.py, which lines the two traces up step by step,
+ignoring only the BIOS addresses. Nothing of the console's code is in the
+stub; the labels are hle_unc.nim's own.
+
+Covered: IntrWait and VBlankIntrWait, Div, DivArm, Sqrt, ArcTan, ArcTan2,
+CpuSet, CpuFastSet, GetBiosChecksum, BgAffineSet, ObjAffineSet, BitUnPack,
+LZ77UnCompWram/Vram, HuffUnComp, RLUnCompWram/Vram, the Diff filters,
+SoundBias, MidiKey2Freq and RegisterRamReset (which clears each group
+through a tail call into CpuFastSet, as the console's does). Halt and Stop
+keep their models (Halt already parked in stub code and took the window's
+interrupt), the sound driver too. With a BIOS image mapped (hle_after_bios)
+these SWIs now run the image's own routines.
+
+**What the console does that the HLE did not.** The probes for the step
+order also compare output and registers, and found:
+
+- LZ77 and RL runs are copied whole: a header length that ends inside a
+  back-reference or a run still writes all of it (up to 17 or 129 bytes
+  past the end; r1 ends past them) -- tools/biosdrv/uncedge.c.
+- LZ77UnCompVram reads a back-reference's byte from the destination with a
+  halfword load at an even distance from the destination pointer, so a
+  distance-1 reference at an odd position reads VRAM the routine has not
+  stored yet, and from an odd destination the loads rotate (uncedge.c,
+  uncalign.c). The HLE decompressed into a buffer and gave the "right"
+  bytes.
+- The Thumb routines (RLUnComp, the Diff filters, CpuSet's word path) take
+  their header with a load that does not rotate: a stream at an odd
+  halfword reads its header from the word below. Mortal Kombat - Deadly
+  Alliance keeps its RLUnCompWram streams there; the HLE's rotated header
+  gave it a length of 0 (a skip) or 0x1F00 where the console reads 0x3000
+  (its frames had parted at f463 with the first build of this section).
+  The ARM routines' header loads do rotate (uncalign.c).
+- HuffUnComp: the bitstream is read where the tree size puts it, off a word
+  boundary if so, with rotating loads (the HLE aligned it); each symbol is
+  shifted in at the top of the output word (a 4-bit leaf keeps its low
+  four bits), the word starts at 0, and it is stored and kept shifting
+  every (size & 7) + 4 leaves -- the count the routine spills and reloads
+  at every leaf; the HLE assumed 32 / size (tools/biosdrv/huffsz.c, every
+  size nibble).
+- BitUnPack does not mask a unit plus the offset to the destination width:
+  an overflow carries into the next unit (uncedge.c).
+- HuffUnComp and BitUnPack keep their spilled word above sp (sp moved down
+  two words), RLUnCompVram its two words above sp too (three words): a
+  handler pushing on the System stack cannot clobber them. The first build
+  of this section spilled below sp, and Dragon Ball Z - The Legacy of
+  Goku's first HuffUnComp ran ~10 times too long once its handler's push
+  overwrote the count (found by tools/biosdrv/uncregs.c, which logs the
+  registers each interrupt finds: steptrace.nim BD_IRQREGS=1).
+- RegisterRamReset's sound group keeps SOUNDBIAS's level bits and clears
+  the amplitude resolution (it reads the register first; the HLE wrote
+  0x200) -- tools/biosdrv/rrrsb.c; its wave RAM clears are eight words from
+  0x04000090, FIFO A and B included; the other-I/O group also stores 0xFF to
+  0x04000410.
+- IntrWait halts at least once even with the flag already set; without the
+  discard its first HALTCNT store goes through the dispatcher's r12 into
+  the BIOS (no halt); r12 = 0x04000000, r4 = 1, r2 the mirror and lr the
+  console's 0x344/0x34C are there while it waits; a nested IntrWait nests
+  through the stack -- all by construction now (tools/biosdrv/iwait.c).
+- The registers each routine leaves are the console's (uncfin.c, swiregs.c,
+  swisp2.c): LZ77UnCompVram leaves its pending halfword in r3, which Mortal
+  Kombat's next SWI found there; LZ77UnCompWram and LZ77UnCompVram keep the
+  console's own register for every value (uncregs.c: the registers an
+  interrupt finds match), the other routines their own within the ones the
+  console uses.
+- The affine sets' multiplies take the scales (x, x, y, y) and, in
+  BgAffineSet, -cx, cy, -cx, -cy as the multiplier, the last four
+  multiply-accumulates (tools/biosdrv/affset.c); MidiKey2Freq's two long
+  multiplies take the fine pitch in the top byte and the interpolated
+  multiplier (m2ftime.c).
+
+**Probes.** Every step of every call equal, HLE against the official BIOS
+(stepcmp.py; the IRQ frame's register values and the System stack's
+pushed return addresses aside): unct.c, uncfin.c (registers), uncdma.c
+(LZ77/RL/Huffman/Diff with the sound FIFO's DMA at 1254 and 777 cycles a
+sample, and a Timer 1 interrupt every 3000 cycles on top), uncedge.c,
+uncalign.c, uncregs.c, huffsz.c, iwait.c, affset.c, sbias.c, mathset.c
+(Div, DivArm, Sqrt and ArcTan over 50 inputs), atan2.c (every ArcTan2 path),
+rrrsb.c, and the existing cpusi4.c, fastsi.c, lz77t.c, lz77i.c, huff4.c,
+m2ftime.c, midikey.c, rrr.c, rrr2.c, rrr4.c, rrr5.c, rrrregs.c, swisp.c,
+swisp2.c, swiregs.c. compare.py over all 88 probes: every one as before or
+better -- lz77t.c from 11 marks and 484 cycles off to none, rrr.c from 3
+calls a cycle off to none, swiregs.c from 1 to none.
+
+**Games.** `hlecmp.py` over all 135 scripts, HLE against the official BIOS
+on every frame: 135 of 135 equal on every
+frame after f0, from 104 before this section (118 with the decompressors
+alone; Mortal Kombat - Deadly Alliance and Final Fantasy IV Advance, a
+frame each, came equal with the later rounds -- LZ77 in the console's registers
+(Mortal Kombat's next SWI read LZ77UnCompVram's r3), then the affine sets,
+the math routines and RegisterRamReset on the engine; Contra Advance's one difference was RegisterRamReset, two
+cycles short at frame 2, now exact).
+
+Tools: tools/biosdrv/steptrace.nim (step traces; BD_SWIWIN=1 brackets a
+game's SWIs, BD_IRQREGS=1 the registers each interrupt finds, BD_WATCHREG
+one register's writers), stepcmp.py, the playtest driver's `swilog` (each
+SWI's start, length and arguments) with tools/playtest/swicmp.py (the first
+call that differs between the two configurations) and
+tools/playtest/digcmp.py (`rundigest` compared: the first frame the game's
+code ran on other cycles).
+
+Gates: the runner 1433 of 1443 as before; the cycle laws 2085 of 2085
+under the HLE and under the official BIOS; the save-state compatibility
+guards; the playtest suite 122 of 135 with the same 13 failures as before
+(Pokemon Mystery Dungeon - Red Rescue Team, Pokemon Pinball: Ruby &
+Sapphire and Breath of Fire II failed once with the machine's load near
+250 -- empty screen reads, the official-BIOS configurations as well -- and
+passed on a rerun).

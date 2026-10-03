@@ -160,8 +160,8 @@ proc irq_enter*(cpu: CPU) =
     # irqwait.s on an AGB SP, a NOP sled interrupted by TM0, identical from
     # IWRAM; IWRAM fetches in one cycle and pays nothing).
     var inflight = 0
-    # An interrupt preempting an HLE BIOS routine whose remainder is parked
-    # (hle_charge_body_interruptible) is taken at the caller's next
+    # An interrupt preempting an HLE BIOS routine whose remainder an earlier
+    # build parked (on the halt-resume charge) is taken at the caller's next
     # instruction, but the console takes it inside BIOS code, whose
     # one-cycle fetch the entry overlaps: nothing in flight on the gamepak.
     # tools/biosdrv/lz77i.c (Thumb caller in the cartridge, WAITCNT 0x4317,

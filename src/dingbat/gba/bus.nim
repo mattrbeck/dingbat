@@ -521,6 +521,20 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # as the console's routine is, and the interrupt returns to it: a trap
     # into the HLE (hle_copy.nim, COPY_TRAP)
     write_stub_u32(result.bios, 0xBC8, 0xEF000000'u32)  # swi 0 (copy resume)
+    # The decompression and unpack routines run as BIOS code here, one
+    # instruction per address, each an ARM or a Thumb `swi 0` the HLE
+    # executes by where it is (hle_unc.nim)
+    for a in countup(int(UNC_ARM_LO), int(UNC_ARM_HI) - 4, 4):
+      write_stub_u32(result.bios, a, 0xEF000000'u32)
+    for a in countup(int(UNC_THUMB_LO), int(UNC_THUMB_HI) - 2, 2):
+      result.bios[a] = 0x00'u8
+      result.bios[a + 1] = 0xDF'u8
+    # Below the IRQ handler, where the console has code, a `b .`: a routine
+    # handed a source there reads it as BIOS code and finds a header of
+    # nonzero length, as on the console (tools/biosdrv/swisp2.c's skips,
+    # source 0x100: a zero length would end the source check early)
+    for a in countup(0x100, 0x124, 4):
+      write_stub_u32(result.bios, a, 0xEAFFFFFE'u32)
     write_stub_u32(result.bios, 0x1B8, 0x03007F00'u32)
     write_stub_u32(result.bios, 0x1BC, 0x03007FA0'u32)
     # Never executed: the two words after the IRQ return, so the two-ahead

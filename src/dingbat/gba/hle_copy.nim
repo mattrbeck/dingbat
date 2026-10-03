@@ -1,5 +1,14 @@
-# CpuSet and CpuFastSet, run instruction by instruction (included by
+# A CpuSet or CpuFastSet parked by an earlier build (included by
 # hle_bios.nim)
+#
+# The copies now run as stub-BIOS code (hle_unc.nim). Before that, from
+# 98c0d1ce, each unit of their loop ran as the routine's instructions here,
+# and a copy an interrupt or the end of a video frame stopped parked in BIOS
+# code: the SWI's frames on the SVC and System stacks, its state in r0-r12,
+# r15 on the trap at COPY_TRAP. A save state written while one waited holds
+# exactly that, so the trap and the code that runs a parked copy on to its
+# end stay, for such a state; nothing else enters here. What follows is that
+# code as it was.
 #
 # The copy routines run with the caller's IRQ mask, so an interrupt takes
 # them at the end of whichever of their instructions it arrives in: between
@@ -350,12 +359,6 @@ proc copy_exec(cpu: CPU; run: var CopyRun; framed: bool; t0: int64;
       return
   # (cont's renderer waits stay charged)
   cpu.copy_finish(run, framed, tail, exit_cost, stepped)
-
-proc copy_kind(fast: bool; ctrl: uint32): CopyKind =
-  let fill = bit(ctrl, 24)
-  if fast: (if fill: ckFastFill else: ckFastCopy)
-  elif bit(ctrl, 26): (if fill: ckWordFill else: ckWordCopy)
-  else: (if fill: ckHalfFill else: ckHalfCopy)
 
 proc copy_resume(cpu: CPU) =
   ## COPY_TRAP: the copy parked by copy_park goes on. The trap's own fetch

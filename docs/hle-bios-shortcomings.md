@@ -49,86 +49,59 @@ it deliberately does not model:
   stack words; what still differs there is SoundDriverMain's mixing
   locals), Gameboy Player
   Controller's stream from byte 11282 (its multiboot LZ77UnCompWram, EWRAM
-  to EWRAM, runs ~243k cycles short of the real one, which moves the sound
-  start), the FFCC loader's frame 3 and last silent FIFO burst (its first
+  to EWRAM, ran ~243k cycles short of the real one before the routine ran
+  as stub-BIOS code, which moved the sound start; not re-measured since), the FFCC loader's frame 3 and last silent FIFO burst (its first
   SoundDriverMain pass, on a SoundArea it set up itself, runs ~20 cycles
   long; not pinned down), Phantasy Star Collection's one lag frame, Lizzie
   McGuire (E)'s frames from 372 and X-Men's from 1680 (streams identical).
-* **Interrupted copies** (CpuSet, CpuFastSet) run instruction by
-  instruction (`hle_copy.nim`) and take an interrupt at the console's
-  boundary, parked in BIOS code with their state in registers, so the call
-  times and interrupt entries match the official BIOS on tools/biosdrv/
-  cpusi.c, cpusi4.c and fastsi.c. Not modelled: an interrupt that arrives
-  in the dispatcher between its `msr` and the routine (7 cycles: the push,
-  `add lr`, `bx`) or in the routine's setup before its loop is taken at the
-  loop's first boundary; the DMA a store to I/O arms is granted on the
-  console's cycle because the store lands a cycle early; while parked, the
-  System stack still holds the routine's frame where the console has
-  popped part of it (only in the exit), and r0-r12 hold the HLE's state, not
-  the console routine's registers.
-* **Interrupted decompression sees finished output.** The decompressors,
-  Diff filters, BitUnPack, the affine sets and GetBiosChecksum write their
-  output (the math routines Div, DivArm, Sqrt, ArcTan and ArcTan2 their
-  result registers) up front and then charge the whole cost model as
-  routine time that stops on the cycle an interrupt line rises; the
-  remainder rides the halt-resume path (also at the end of a video frame,
-  so the frame loop stops where the console's does). A handler inspecting
-  the destination mid-call sees the completed output, and so does the
-  renderer: a frame drawn while a long LZ77UnCompVram is under way shows
-  tiles the console has not written yet (Top Gun - Combat Zones' fade at
-  frame 1328). A DMA burst inside one of these bodies stalls the whole model
-  where the console grants it at the routine's access boundaries and runs
-  part of it under internal cycles: Castlevania - Circle of the Moon's sound
-  FIFO bursts inside its LZ77UnCompWrams move each call a cycle or two (the
-  same stream, no DMA: exact), which shifts its busy-wait loop from frame
-  324 and a particle at frame 5318. The interrupt is taken on
-  the cycle the line rises; the console takes it at the end of the BIOS
-  instruction in progress, 0-5 cycles later (Castlevania - Circle of the
-  Moon's timer IRQ inside a cartridge LZ77UnCompWram lands 2 cycles early,
-  which is enough to move its busy-wait loop's phase and, at frame 5319,
-  a timer-seeded particle). An LZ77UnCompWram from the cartridge runs 5-7%
-  short of the real routine on small streams (tools/biosdrv/lz77t.c: 99-143
-  cycles on a 64-byte one); from EWRAM it is exact, preempted or not
-  (lz77i.c, Thumb caller in the cartridge too).
-* **Renderer contention in routine bodies is read ahead.** A routine that
-  writes (or, LZ77UnCompVram, reads back) palette RAM, VRAM or OAM pays the
-  renderer's waits for each access at the cycle its model places it,
-  computed when the call starts with the display registers as they stand.
-  The interrupt handlers and DMA bursts that will run inside the call shift
-  the real accesses against the renderer, and display writes made during
-  the call change its fetch pattern; neither is seen. Banjo-Kazooie -
-  Grunty's Revenge's two title LZ77UnCompVrams (7 and 8 IRQs, sound DMA
-  throughout) run 10 cycles short and 2053 long of the console's ~1M each,
-  where without contention they ran 9639 and 17136 short. Where in
-  each step the accesses fall is the official BIOS's own timing for
-  LZ77UnCompVram, CpuSet and CpuFastSet, assumed for the rest. Even where
-  it is the BIOS's own, a cartridge-to-VRAM CpuFastSet during the display
-  still lands up to ~100 cycles either side of the console's (Fire Emblem:
-  The Sacred Stones' 256-word copies; not pinned down).
-* **Interrupted RegisterRamReset** encodes its continuation in r0 (bit 31
-  marker, bit 30 a stop at a frame's end, the body time reached in bits
-  8-29, the flags). A caller passing bit 31 set with garbage mid bits would
-  be misread; compilers emit clean flag bytes. A resume after an interrupt
-  pays a second dispatch (a frame-end resume does not); with WAITCNT's
-  prefetch on, a call with the other-I/O group returns a cycle late.
+* **The routines run as stub-BIOS code** (`hle_unc.nim`): RegisterRamReset,
+  IntrWait, VBlankIntrWait, Div, DivArm, Sqrt, ArcTan, ArcTan2, CpuSet,
+  CpuFastSet, GetBiosChecksum, BgAffineSet, ObjAffineSet, BitUnPack,
+  LZ77UnCompWram/Vram, HuffUnComp, RLUnCompWram/Vram, the Diff filters,
+  SoundBias and MidiKey2Freq, and the SWI dispatch and return around them.
+  Each console instruction is a step of its own in the stub BIOS that makes
+  that instruction's accesses and internal cycles, in its order, so
+  interrupts are taken at the console's boundaries (the dispatcher's window
+  between its `msr` and the routine included), DMA is granted between the
+  accesses and runs under the internal cycles, renderer contention meets
+  each access as it is made, a handler or the renderer sees the output
+  written so far, the frame loop stops between two steps and a save state
+  holds a routine in progress. Every step of every call matches the
+  official BIOS in this core on the tools/biosdrv probes (steptrace.nim,
+  stepcmp.py; docs/playtest-bugs.md, the stub-BIOS section). Not modelled:
+  - the registers an interrupt handler finds are the console's for
+    LZ77UnCompWram/Vram and IntrWait (r12 = 0x04000000, r4 = 1, r2 the
+    mirror, lr the console's return addresses); in the other routines r0-r12
+    mid-call hold this file's state (within the registers the console's
+    routine uses; the values left at the end are the console's), and the
+    IRQ's lr and the return addresses pushed on the System stack are stub
+    label addresses, not the console's BIOS addresses. The dispatcher's
+    r12 is a label address too;
+  - a BIOS read from a routine's body (the open-bus value an access to an
+    unmapped region returns, a BIOS-source CpuSet or decompression stream)
+    sees the stub, not the official image; GetBiosChecksum returns the
+    official sum, but a handler sees no partial sum in r0 mid-call;
+  - Div and DivArm with a zero divisor and a dividend of 2 or more hang the
+    console; here they return as for a dividend of 1;
+  - a MidiKey2Freq key negative as a signed word is clamped (the console
+    indexes out of its table);
+  - the step labels' order is part of the save-state format (a state holds
+    r15 inside the stub): new steps may only be appended to the enums;
+  - a state saved by an earlier build mid-copy, mid-decompression or inside
+    an IntrWait resumes on the old parked paths (`hle_copy.nim`, the
+    halt-resume fields), which keep the earlier gaps (no nesting, finished
+    output seen mid-call); one saved in an interrupted RegisterRamReset
+    (r0 bit 31, the old continuation) runs the routine again from its
+    start on the flags in r0's low byte.
+* **Halt and Stop** keep their models. Halt parks in the stub BIOS on the
+  `bx lr` after its HALTCNT write, keeps its return on the SVC and System
+  stacks, and returns through a trap at 0x170 (`hle_halt`), so it nests,
+  and an interrupt taken during it pushes the BIOS address the console's
+  does. Its SVC frame holds the caller's CPSR where the console's
+  dispatcher keeps r11.
 * **The reset vector (a jump to 0) re-runs an HLE boot** that waits out the
   real duration (270 vblanks plus the tail to scanline 126, measured against
   real-BIOS execution) with the display force-blanked and hands over the
   measured post-boot state — but VRAM/palette keep the pre-jump contents
   (no logo) and the jingle is silent. A jump landing exactly on a vblank
   start counts that vblank.
-* **`IntrWait(discard=0)` returns without halting when a masked flag is
-  already set.** The real routine halts at least once, and its first halt
-  uses the caller's stale r12 for the HALTCNT store. No ROM in the tree
-  exercises the difference; Assumed.
-* **Handler-visible r2/r4/lr/r11 during a wait** keep caller values (real:
-  mirror value / 1 / BIOS return address / spsr scratch). No known convention
-  reads them. r12 = 0x04000000 is modelled (the devkitARM crt0 IntrWait ack).
-* **Nested IntrWait** (a handler calling IntrWait/Stop while one is active)
-  overwrites the single set of resume fields; the real BIOS nests through the
-  stack. The parked decompression/RamReset remainder shares those fields.
-  Halt is exempt: it parks in the stub BIOS on the `bx lr` after its HALTCNT
-  write, keeps its return on the SVC and System stacks, and returns through
-  a trap at 0x170 (`hle_halt`), so it nests, and an interrupt taken during
-  it pushes the BIOS address the console's does. Its SVC frame holds the
-  caller's CPSR where the console's dispatcher keeps r11.

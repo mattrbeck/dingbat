@@ -1181,7 +1181,8 @@ proc migrate_intr_wait_frame(gba: GBA) =
   gba.bus.write_word_internal(usp - 12, 0x170'u32)
   gba.bus.write_word_internal(usp - 16, cpu.r[4])
   cpu.set_sys_sp(usp - 16)
-  # The halt loop's register convention (see hle_intr_wait)
+  # The halt loop's register convention (r4 = 1, r2 = the mirror, lr_sys =
+  # 0x34C, as check_intr_wait re-halts with)
   cpu.r[4] = 1
   cpu.r[2] = uint32(cpu.read_intr_mirror())
   cpu.set_sys_lr(0x34C'u32)

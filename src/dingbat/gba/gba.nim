@@ -1662,6 +1662,12 @@ proc read_instr*(cpu: CPU): uint32 {.inline.}
 # so nothing written in it survives; r8-r12 and the SPSR are unprobed and
 # follow the user bank. Never serialized (always empty at a boundary).
 const UNDEF_BANK* = 6
+# The stub BIOS's room for the HLE's decompression and unpack routines
+# (hle_unc.nim, filled in bus.nim new_bus): ARM instructions, then Thumb ones
+const UNC_ARM_LO* = 0x0C00'u32
+const UNC_ARM_HI* = 0x1530'u32
+const UNC_THUMB_LO* = 0x3A00'u32
+const UNC_THUMB_HI* = 0x4000'u32
 proc mode_bank*(m: CpuMode): int
 
 # Textual includes: the whole GBA core compiles as one module so the C
