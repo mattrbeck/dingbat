@@ -517,6 +517,10 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # default user and IRQ stack tops (GBATEK, BIOS RAM usage) as literals.
     # A halted CPU's last fetch is the second, and a DMA granted under the
     # halt reads its upper half (hdmaobus.s 0x300 on an AGB SP: 0300).
+    # A CpuSet / CpuFastSet an interrupt preempted parks here, in BIOS code
+    # as the console's routine is, and the interrupt returns to it: a trap
+    # into the HLE (hle_copy.nim, COPY_TRAP)
+    write_stub_u32(result.bios, 0xBC8, 0xEF000000'u32)  # swi 0 (copy resume)
     write_stub_u32(result.bios, 0x1B8, 0x03007F00'u32)
     write_stub_u32(result.bios, 0x1BC, 0x03007FA0'u32)
     # Never executed: the two words after the IRQ return, so the two-ahead

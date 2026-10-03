@@ -54,25 +54,34 @@ it deliberately does not model:
   SoundDriverMain pass, on a SoundArea it set up itself, runs ~20 cycles
   long; not pinned down), Phantasy Star Collection's one lag frame, Lizzie
   McGuire (E)'s frames from 372 and X-Men's from 1680 (streams identical).
-* **Interrupted-copy register remnants.** An IRQ preempting CpuSet /
-  CpuFastSet leaves the continuation in r0/r1/r2 (PC rewound onto the SWI).
-  On that path only, the halfword forms advance r0/r1 (the real routine
-  leaves them) and r2's count counts down. The copy is checked after every
-  unit (CpuSet) or 8-word burst (CpuFastSet), so the IRQ is taken at the end
-  of the unit the line rose in, not at the instruction inside it. The resume
-  is timed as the real routine's (no second dispatch; tools/biosdrv/cpusi.c
-  exact from an IWRAM caller; from the cartridge each preemption of a CpuSet
-  is ~2.4 cycles short, Thumb caller, and of a CpuFastSet ~7 long, Boktai 2
-  - Solar Boy Django's H-blank interrupts) unless a state load falls inside the
-  preemption, when it pays the dispatch once (the continuation marker is
-  not serialized).
+* **Interrupted copies** (CpuSet, CpuFastSet) run instruction by
+  instruction (`hle_copy.nim`) and take an interrupt at the console's
+  boundary, parked in BIOS code with their state in registers, so the call
+  times and interrupt entries match the official BIOS on tools/biosdrv/
+  cpusi.c, cpusi4.c and fastsi.c. Not modelled: an interrupt that arrives
+  in the dispatcher between its `msr` and the routine (7 cycles: the push,
+  `add lr`, `bx`) or in the routine's setup before its loop is taken at the
+  loop's first boundary; the DMA a store to I/O arms is granted on the
+  console's cycle because the store lands a cycle early; while parked, the
+  System stack still holds the routine's frame where the console has
+  popped part of it (only in the exit), and r0-r12 hold the HLE's state, not
+  the console routine's registers.
 * **Interrupted decompression sees finished output.** The decompressors,
   Diff filters, BitUnPack, the affine sets and GetBiosChecksum write their
   output (the math routines Div, DivArm, Sqrt, ArcTan and ArcTan2 their
   result registers) up front and then charge the whole cost model as
   routine time that stops on the cycle an interrupt line rises; the
-  remainder rides the halt-resume path. A handler inspecting the
-  destination mid-call sees the completed output. The interrupt is taken on
+  remainder rides the halt-resume path (also at the end of a video frame,
+  so the frame loop stops where the console's does). A handler inspecting
+  the destination mid-call sees the completed output, and so does the
+  renderer: a frame drawn while a long LZ77UnCompVram is under way shows
+  tiles the console has not written yet (Top Gun - Combat Zones' fade at
+  frame 1328). A DMA burst inside one of these bodies stalls the whole model
+  where the console grants it at the routine's access boundaries and runs
+  part of it under internal cycles: Castlevania - Circle of the Moon's sound
+  FIFO bursts inside its LZ77UnCompWrams move each call a cycle or two (the
+  same stream, no DMA: exact), which shifts its busy-wait loop from frame
+  324 and a particle at frame 5318. The interrupt is taken on
   the cycle the line rises; the console takes it at the end of the BIOS
   instruction in progress, 0-5 cycles later (Castlevania - Circle of the
   Moon's timer IRQ inside a cartridge LZ77UnCompWram lands 2 cycles early,
@@ -97,9 +106,11 @@ it deliberately does not model:
   still lands up to ~100 cycles either side of the console's (Fire Emblem:
   The Sacred Stones' 256-word copies; not pinned down).
 * **Interrupted RegisterRamReset** encodes its continuation in r0 (bit 31
-  marker, remaining phase charge in bits 8–29, pending flags). A caller
-  passing bit 31 set with garbage mid bits would be misread; compilers emit
-  clean flag bytes.
+  marker, bit 30 a stop at a frame's end, the body time reached in bits
+  8-29, the flags). A caller passing bit 31 set with garbage mid bits would
+  be misread; compilers emit clean flag bytes. A resume after an interrupt
+  pays a second dispatch (a frame-end resume does not); with WAITCNT's
+  prefetch on, a call with the other-I/O group returns a cycle late.
 * **The reset vector (a jump to 0) re-runs an HLE boot** that waits out the
   real duration (270 vblanks plus the tail to scanline 126, measured against
   real-BIOS execution) with the display force-blanked and hands over the

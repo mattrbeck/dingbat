@@ -3910,3 +3910,159 @@ hop -- §22's "chain's raw +5 rows". The emulator image cannot float two
 values at one address, so the column compares different programs; the cost
 itself (DMA + 2) is §22's and dingbat's. With the prefetcher on the three
 one-cycle cells of §26 (k = 0, 12, 13: 1046 vs 1045) are unchanged.
+
+## 44. The HLE BIOS against Nintendo's, frame by frame: RegisterRamReset, frame ends, copies, 2026-10-03
+
+**PARTLY FIXED** (hle_bios.nim, hle_copy.nim, cpu.nim, bus.nim, gba.nim).
+Section 38 left Castlevania - Circle of the Moon (`dingbat` and
+`dingbat-bios` part at f5318) and Banjo-Kazooie - Grunty's Revenge (f1194)
+as HLE-vs-official differences of another kind, and three small gaps.
+
+**A frame-by-frame comparison.** `tools/playtest/hlecmp.py` replays every
+ready script's `[new]` timeline in two dingbat configurations (default
+`dingbat` against `dingbat-bios`) and compares every frame's hash: per game
+the first differing frame, with frame 0 told apart (it is the frame the
+boot skip hands over on). Before this section 66 of the 135 scripts hashed
+identically under both BIOSes on every frame (88 apart from frame 0).
+To find where a game first sees a BIOS call take another time, the
+playtest driver gained `rundigest` (per frame: how many instructions ran
+outside the BIOS, which PCs in order, and which PCs at which cycle of the
+frame; built with `-d:biosdrvtrace`), its `trace` prints each step's
+absolute cycle (`gba.rebased`, what end_frame has subtracted since power-on;
+tests/biosdrv_probe.nim now uses it too, where its rebuild from frame
+lengths went wrong by 1024s after an HLE routine longer than a frame) and
+marks the steps that only paid a parked HLE remainder (`R`), and the probe
+takes `BD_IOALL=1` to log every I/O store.
+
+**Banjo-Kazooie: RegisterRamReset was 826 cycles long.** Banjo's digests
+part at f2: its boot calls RegisterRamReset(0xFD), and the HLE returned 826
+cycles after the official BIOS. tools/biosdrv/rrr.c, rrr2.c (every flag
+alone, combinations, none, the IWRAM flag; WAITCNT 0 and 0x4317): the
+routine always forces blank first, then runs the groups in the order other
+I/O, SIO, sound, EWRAM, VRAM, OAM, palette, IWRAM, each a fixed time, and
+the times add -- a fixed 135 cycles plus 410, 154, 203, 434240, 64576, 480,
+736 and 13168 per group. The old model charged each group the whole call's
+overhead (two groups paid it twice, no group not at all: 135 short). It is
+now a timeline: each store at the cycle the console makes it (BD_IOALL),
+the RAM clears ascending between their first and last store, groups later
+by those before them. The stores go through the bus as the routine's do,
+which also fixes what it leaves: DISPCNT forced blank even with no flags;
+IE, IF, WAITCNT and IME cleared first; KEYCNT untouched; RCNT 0x8000 and
+JOYCNT acknowledged; SOUNDBIAS 0x200, SOUNDCNT_H 0x880E, both wave RAM
+banks cleared; without the SIO flag the routine's two SIO stores 0x20 low
+(0x8000 to 0x04000114, 7 to 0x04000120); r0, r1 and r3 as the routine
+leaves them (rrrregs.c). Exact on all of rrr*.c's calls but one: with the
+prefetch buffer on at the call, the other-I/O group's call returns a cycle
+late. Banjo then hashes identically under both BIOSes on all 16369 frames.
+
+**Frame ends inside a routine.** An HLE routine is one instruction, so a
+routine running past the end of a frame carried `step_frame` on with it:
+the frame's hash was taken after it, with the next frame's first lines
+drawn into it when it ran that far (a boot RegisterRamReset is 1.8 frames:
+the frame-0 differences of most games), and the keys for the next frame
+came in late. The routine bodies now stop at a frame's end
+(`hle_frame_ended`), parked as for an interrupt: the decompressors and
+math routines on the halt-resume charge (`hle_park_frame_extra` nets out
+the handler-return refill the resume takes back, since no handler ran),
+RegisterRamReset on its r0 continuation (bit 30; the resume takes the
+second dispatch back, measured from the PPU's line-160 start where the stop
+came), the copies in BIOS code (below). rrr4.c, rrr5.c: frame-end resumes
+from ARM and Thumb callers in IWRAM, EWRAM and the cartridge, exact.
+
+**The small gaps.** The validation-skip paths now cost each routine's own
+time (`bios_check_skip_cost`: CpuSet 32, CpuFastSet 34, BitUnPack 41,
+LZ77UnCompWram 30, LZ77UnCompVram 40, HuffUnComp 39, RLUnCompWram 40,
+RLUnCompVram 43, the Diff filters 33/40/33; swisp2.c cases 42-52 exact).
+SoundBias(0) pays the falling path's 2 cycles with the level already 0
+(swisp.c exact). The 4-bit HuffUnComp per-leaf stack reload was right:
+tools/biosdrv/huff4.c (4- and 8-bit symbols, two- and four-leaf trees,
+IWRAM and EWRAM stacks) is exact on all 16 calls. And the registers the
+routines leave, which a game can read after the SWI, now match swisp.c,
+swisp2.c and the new swiregs.c: r0/r1 past the source and destination for
+the decompressors, filters, BitUnPack and affine sets (the Vram forms count
+whole halfwords), r3 = 0x170 where the routine's exit pops it, the last
+halfword read for Diff16bitUnFilter, the last output word for HuffUnComp,
+the last entry's pa for BgAffineSet, the multiplier for MidiKey2Freq,
+0x04000088 and the level for SoundBias, 1 and 0x4000 for
+GetBiosChecksum, CpuFastSet's r3 the last burst's second word; r0 past the
+header on the skip paths. Diff8bitUnFilterVram with an odd length was 2
+cycles long (swiregs.c lengths 1-9).
+
+**Copies taken by an interrupt between instructions.** Contra Advance's
+H-blank interrupts fall inside its copies (the merged SWI / interrupt
+entry logs of the two runs: entries 23 to 124 cycles apart): an interrupt
+inside a CpuSet or CpuFastSet was taken at the end of the whole unit (a
+transfer, or an 8-word burst -- up to ~120 cycles late in a CpuFastSet to
+VRAM), and
+from the caller's code after rewinding onto the SWI, with a fitted
+constant for the rest (cpusi.c: a Thumb caller in the cartridge 2 cycles a
+preemption short at WAITCNT 0x4317, 2 long at 0x0000; every interrupt's
+entry -4 to +7 cycles from the console's). `hle_copy.nim` now runs each
+unit as the routine's own instructions with their times (the driver's
+`trace` of the official BIOS, a step per instruction: CpuSet's halfword
+copy is test, branch, ldrh, strh, add, branch back; CpuFastSet's subs,
+ldmia, stmia, branch back), the loads and stores in their instruction, the
+boundaries after the loop up to the dispatcher's `msr`, and the loop placed
+where the console's starts against the swi (the comment read in the
+caller's region moves it: `routine_phase`). A preempted copy parks in BIOS
+code with the SWI's frames on the SVC and System stacks, its state in
+registers and the PC on a stub-BIOS trap (`COPY_TRAP`) the interrupt
+returns to, so the entry and return are the console's by construction and
+a save state taken meanwhile resumes it. On cpusi.c (and its WAITCNT 0x0317
+and 0x0000 rebuilds), the new cpusi4.c (four caller kinds) and fastsi.c
+(CpuFastSet copies and fills to EWRAM and VRAM) every call's time is the
+console's and every interrupt is entered on the console's cycle, but for
+4 of 3300 entries a cycle or three out. A store to I/O lands a cycle early,
+so the DMA it arms starts on the console's cycle (alyosha
+timing/dma_from_bios).
+
+**What is left.** `hlecmp.py` over all 135 scripts: the HLE and the
+official BIOS now hash identically on every frame, frame 0 included, in
+104 games (before: 66, and 88 leaving frame 0 aside; no game that matched
+before stopped matching). The 31 left, by first differing frame (frames
+differing / compared): Super Mario Advance 3 f171 (2775/5455), Sword of Mana
+f222 (36), Rayman Advance f256 (9), Kirby - Nightmare in Dream Land f368
+(1), Fire Emblem f389 (1), Super Mario Advance 2 f546 (3), Doom f589
+(34), Phantasy Star Collection f635 (1), Medabots AX f996 (2), Final
+Fantasy V Advance f1000 (2), Final Fantasy IV Advance f1005 (445), Contra
+Advance f1192 (1), Super Puzzle Fighter II Turbo f1276 (6), Fire Emblem:
+The Sacred Stones f1313 (8), Top Gun - Combat Zones f1328 (1), F-Zero -
+Maximum Velocity f1508 (28), Onimusha Tactics f1863 (2), Kingdom Hearts -
+Chain of Memories f1973 (91), Sabre Wulf f2679 (2), Dragon Ball Z -
+Supersonic Warriors f2813 (1), Advance Guardian Heroes f3098 (212), Mortal
+Kombat - Deadly Alliance f3685 (8), Dragon Ball Z - The Legacy of Goku f3827
+(1), Sonic Advance 3 f5189 (2), Castlevania - Circle of the Moon f5318
+(700), Street Fighter Alpha 3 f5712 (1), Advance Wars f7865 (2), Advance
+Wars 2 f8786 (4), Final Fantasy Tactics Advance f10983 (1), Tactics Ogre
+f11428 (1), Castlevania - Harmony of Dissonance f13346 (1). Most surface
+in a frame or a few: cycle-level differences that resync.
+
+The ones traced are the decompressors' and the other routine bodies'
+(Contra Advance's first difference is still to be traced): they still write their output up front and charge a cost model
+that stops on the cycle an interrupt line rises (the console takes it at
+the end of the BIOS instruction in progress, 0-5 cycles later), and a DMA
+burst inside one stalls the whole model where the console grants it at the
+routine's access boundaries and runs part of it under internal cycles.
+Castlevania - Circle of the Moon is the second: its f324 LZ77UnCompWram
+(5120 bytes from the cartridge, sound FIFO DMA running) returns a cycle
+after the HLE's, which moves the phase of its busy-wait loop from there on
+(the same stream in a probe: exact without DMA, 1 and 2 cycles long with a
+FIFO DMA every 1254 / 777 cycles); the frames part at f5318. Mortal Kombat
+- Deadly Alliance's RLUnCompWrams run under DMA too (a few hundred cycles
+apart per call). Top Gun - Combat Zones is the first: its fade at f1328
+draws tiles a long LZ77UnCompVram has not written yet on the console. The
+fix is the copies' treatment for each routine (their instructions' times
+from the trace, progressive stores, a BIOS-resident park), with the DMA
+grant and internal-cycle overlap inside each instruction on top; an
+interrupt arriving in the dispatcher's window before a routine, or in the
+return path of the routines other than the copies, is also still taken
+after the SWI.
+
+Gates: runner 1433/1443, no row changed (alyosha timing/dma_from_bios
+holds through the I/O store's early cycle); cycle laws all hold under the
+HLE and the official BIOS (2072/2072 each); every biosdrv probe as before
+or better (cpusi.c from 12 off-cycle calls to none); playtest PASS in all
+four dingbat configurations for Circle of the Moon, Banjo-Kazooie, the
+Legacy of Goku I and II, Top Gun - Combat Zones, Pokemon Mystery Dungeon,
+Fire Emblem: The Sacred Stones, Mario Party Advance, Golden Sun and The Lost
+Age, Pokemon Emerald and FireRed.

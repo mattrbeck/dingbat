@@ -1002,18 +1002,18 @@ proc tick*(cpu: CPU) =
         # (tools/biosdrv/lz77i.c: LZ77UnCompWram under a Timer 1 IRQ every
         # 1000/3000/12000 cycles, Thumb caller in the cartridge at WAITCNT
         # 0x4317: 4.3, 4.0 and 4.1 cycles long per IRQ without this, exact
-        # with it; an ARM caller in IWRAM was exact either way).
-        let bus = cpu.gba.bus
-        let page = int(bits_range(cur, 24, 27))
-        let refill = if cpu.cpsr.thumb: int(bus.wait16_n[page]) + int(bus.wait16_s[page])
-                     else: int(bus.wait32_n[page]) + int(bus.wait32_s[page])
-        let extra = refill - (int(bus.wait32_n[0]) + int(bus.wait32_s[0]))
+        # with it; an ARM caller in IWRAM was exact either way). A park at a
+        # frame's end carried this on top (hle_park_frame_extra).
+        let extra = cpu.hle_handler_refill_extra(cur)
         if extra > 0: owed -= min(extra, owed)
       let remain = cpu.hle_charge_units_interruptible(owed)
       when ROM_REFILL_ORDERED:
         if hot: cpu.gba.bus.rom_hot = true
       cpu.halt_resume_charge = int32(remain)
-      if remain != 0: return
+      if remain != 0:
+        if not cpu.halt_resume_pop:
+          cpu.halt_resume_charge += int32(cpu.hle_park_frame_extra(cur))
+        return
       if not cpu.halt_resume_pop:
         # The routine's end is its return to the caller, which flushes the
         # gamepak fetch stream as the uninterrupted SWI's does (hle_swi); the

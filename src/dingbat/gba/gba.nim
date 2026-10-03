@@ -1254,6 +1254,11 @@ type
     # Emulated cycle at which the current frame started; frame progress is
     # derived from it rather than counted per instruction.
     frame_start_cycles*: CycleCount
+    # Everything end_frame has subtracted from the scheduler since power-on:
+    # rebased + scheduler.cycles is an absolute clock, for debug tools that
+    # compare two runs (tools/playtest dingbat_driver `trace`,
+    # tests/biosdrv_probe.nim). Not serialized: a state load restarts it.
+    rebased*: int64
     # Length of the last state payload: the next is written into a buffer
     # of that capacity rather than grown from empty (savestate.nim)
     payload_len_hint: int
@@ -1649,6 +1654,7 @@ proc contend_wait(bus: Bus; address: uint32; is32: bool; cost: int): int
 proc contend_wait_ahead*(bus: Bus; address: uint32; is32: bool; ahead: int): int
 proc contend_slow(bus: Bus; address: uint32; is32: bool; cost: int): int {.noinline, raises: [].}
 proc hle_halt_return*(cpu: CPU)
+proc exception_return_restore*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}
 # The bank an undefined CPSR mode pattern selects: r13 and r14 read 0 there
 # and the mode field holds the pattern (hardware: gbaedge UNDMODE on AGB SP,
@@ -2143,6 +2149,7 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   # still stands (the GB's gb_rebase).
   ch4_advance_divisor(gba.apu.channel4, gba)
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
+  gba.rebased += int64(base)
   when defined(switrace): (swtBase += int64(base); inc swtFrame)
   gba.apu.apu_rebase(base)
   # FIFO transfer stamps and the MP2K HLE's pending slot hooks are absolute

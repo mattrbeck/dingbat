@@ -165,6 +165,7 @@ found in the ROM.
 | `freeze.py` / `freeze_all.py` | condition script -> frozen input timeline |
 | `audio.py` | audio features, comparison, WAV clips |
 | `report.py` | suite -> findings (who stands alone at each difference) |
+| `hlecmp.py` | every script's `[new]` timeline in two dingbat configurations (`dingbat` and `dingbat-bios` by default), every frame's hash compared: where the HLE BIOS first draws what the official one does not |
 | `statecheck.py` | save-state round-trip check per emulator |
 
 ## Driver protocol
@@ -189,7 +190,8 @@ command with `ok [...]` or `err ...`:
 | `poke8 ADDR VAL` | bus write, e.g. a flash command that dirties the save (mGBA) |
 | `chmask N` | output-only channel mutes, bits 0-3 PSG 1-4, 4 FIFO A, 5 FIFO B, a set bit plays (dingbat: `APU.channel_mask`; mGBA: its public `enableAudioChannel`); the frames are unaffected |
 | `apulog PATH` / `apulog off` | log every byte written to 0x04000060-0x0400008F as `FRAME CYCLE_IN_FRAME ADDR VALUE` (dingbat: `bin/dingbat_driver_trace`, built with the core's passive `-d:biosdrvtrace` I/O hook, selected with `PLAYTEST_DINGBAT_DRIVER`; mGBA: the CPU's stores, wrapped) |
-| `trace N PATH` | N single instruction steps, one line each to PATH: `PC CYCLES VCOUNT T/A` (r15 before the step, master-clock cycles it took), `FRAME` at each frame end (dingbat, mGBA). dingbat's r15 leads the instruction by 4 (Thumb), mGBA's by 2 |
+| `trace N PATH` | N single instruction steps, one line each to PATH: `PC CYCLES VCOUNT T/A` (r15 before the step, master-clock cycles it took), `FRAME` at each frame end (dingbat, mGBA). dingbat's r15 leads the instruction by 4 (Thumb), mGBA's by 2; dingbat adds the absolute cycle the step started on and `R` on a step that only paid a parked HLE BIOS routine's remainder |
+| `rundigest N` | run N frames; per frame `FBHASH:COUNT:PCHASH:TIMEHASH` over the instructions run outside the BIOS (how many, which PCs, which PCs on which cycle of the frame): two configurations agree on all four while their game code runs identically (dingbat built with `-d:biosdrvtrace`) |
 | `runto PC` | step until r15 == PC; replies r0..r15 (dingbat) |
 | `pft PC N PATH` | run to r15 == PC, then N steps with the `-d:pftrace` prefetch log to PATH (dingbat built with `-d:pftrace`) |
 | `quit` | flush the battery file and exit |

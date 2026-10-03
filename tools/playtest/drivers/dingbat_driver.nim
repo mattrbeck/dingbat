@@ -159,6 +159,38 @@ proc main() =
           inc frame
           hashes.add(fb_hash(emu.ppu.framebuffer).toHex)
         reply "ok " & hashes.join(" ")
+      of "rundigest":
+        # rundigest N (driver built with -d:biosdrvtrace): run N frames,
+        # replying per frame FBHASH:COUNT:PCHASH:TIMEHASH over the
+        # instructions executed outside the BIOS region -- how many, which
+        # PCs in order, and which PCs at which cycle of the frame. Two
+        # configurations whose game code runs the same instructions on the
+        # same cycles agree on all four; HLE against official BIOS, the
+        # first frame where TIMEHASH differs is where the game first saw a
+        # BIOS call take a different time. (debug)
+        when defined(biosdrvtrace):
+          var cnt = 0
+          var ph, th: uint64
+          bdPcHook = proc(pc: uint32) {.closure.} =
+            if pc >= 0x4000'u32:
+              inc cnt
+              ph = (ph xor uint64(pc)) * 0x100000001b3'u64
+              let t = int64(emu.scheduler.cycles) + int64(emu.bus.cycles) -
+                      int64(emu.frame_start_cycles)
+              th = (th xor (uint64(pc) shl 24) xor uint64(t)) * 0x100000001b3'u64
+          var outs: seq[string]
+          for _ in 1 .. parseInt(parts[1]):
+            cnt = 0
+            ph = 0xcbf29ce484222325'u64
+            th = ph
+            emu.step_frame()
+            inc frame
+            outs.add(fb_hash(emu.ppu.framebuffer).toHex & ":" & $cnt & ":" &
+                     ph.toHex & ":" & th.toHex)
+          bdPcHook = nil
+          reply "ok " & outs.join(" ")
+        else:
+          reply "err build with -d:biosdrvtrace"
       of "hash":
         reply "ok " & fb_hash(emu.ppu.framebuffer).toHex
       of "frame":
@@ -205,16 +237,24 @@ proc main() =
           s.add(emu.bus.read_byte_internal(a + k).toHex(2))
         reply "ok " & s
       of "trace":
-        # trace N PATH: N instruction steps, "PC CYCLES VCOUNT" per step to
-        # PATH (PC as r15 before the step, cycles the step took) (debug)
+        # trace N PATH: N instruction steps, "PC CYCLES VCOUNT T/A ABS [R]"
+        # per step to PATH (PC as r15 before the step, cycles the step took,
+        # the absolute master-clock cycle it started on, R on a step that
+        # paid a parked HLE routine remainder instead of executing) (debug)
         var f = open(parts[2], fmWrite)
         var prev = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
         for _ in 1 .. parseInt(parts[1]):
           let pc = emu.cpu.r[15]
           let th = emu.cpu.cpsr.thumb
+          let start = emu.rebased + prev
+          # a step that only pays an HLE routine's parked remainder at the
+          # instruction after its SWI (cpu.tick) executes no instruction: R
+          let parked = emu.cpu.halt_resume_charge != 0 and
+                       pc - (if th: 4'u32 else: 8'u32) == emu.cpu.halt_resume_addr
           emu.cpu.tick()
           let now = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
-          f.writeLine(pc.toHex(8) & " " & $(now - prev) & " " & $emu.ppu.vcount & (if th: " T" else: " A"))
+          f.writeLine(pc.toHex(8) & " " & $(now - prev) & " " & $emu.ppu.vcount &
+                      (if th: " T " else: " A ") & $start & (if parked: " R" else: ""))
           prev = now
           if emu.ppu.frame != 0:
             emu.end_frame()
