@@ -173,14 +173,13 @@ proc render_line*(g: Gpu; y: int) =
   let a_top = (g.powcnt1 and 0x8000) != 0
   let lcd_on = (g.powcnt1 and 1) != 0
   let base = y * 256
-  for x in 0 ..< 256:
-    let la = if lcd_on: a.line[x] else: 0'u16
-    let lb = if lcd_on: g.engine_b.line[x] else: 0'u16
-    if a_top:
-      g.top[base + x] = la
-      g.bottom[base + x] = lb
-    else:
-      g.top[base + x] = lb
-      g.bottom[base + x] = la
+  let (ta, tb) = if a_top: (addr g.top[base], addr g.bottom[base])
+                 else: (addr g.bottom[base], addr g.top[base])
+  if lcd_on:
+    copyMem(ta, addr a.line[0], 512)
+    copyMem(tb, addr g.engine_b.line[0], 512)
+  else:
+    zeroMem(ta, 512)
+    zeroMem(tb, 512)
 
 {.pop.}

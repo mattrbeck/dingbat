@@ -45,7 +45,8 @@
 ## --rumble-log prints each frame where the slot-2 rumble strength changes.
 ## --rtc YYYY-MM-DD[THH:MM:SS] starts the RTC at that time and clocks it from
 ## emulated time, so runs are reproducible (default: host local time).
-## --perf-from F times frames F..end (printed as fps; default the whole run).
+## --perf-from F times frames F..end (printed as fps; default the whole run)
+## and, on macOS, counts the host instructions they took.
 ## --state-save FILE@F[,FILE@F...] writes a save state (packed, with a
 ## thumbnail) after frame F. --state-load FILE[@F] starts from a state: the
 ## run goes on from frame F (default: the V-blanks the state has counted,
@@ -74,6 +75,20 @@ import zippy
 import dingbat/nds/[nds, savestate]
 import dingbat/nds/io/rtc
 import dingbat/gba/rtc_calendar
+
+when defined(macosx):
+  # host instructions retired so far (macOS proc_pid_rusage): --perf-from
+  # reports those of the frames it times, without the ROM and state loading
+  {.emit: """#include <libproc.h>
+#include <unistd.h>
+static unsigned long long ndsrun_host_instructions(void) {
+  struct rusage_info_v4 ri;
+  if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4, (rusage_info_t *)&ri) != 0) return 0;
+  return ri.ri_instructions;
+}""".}
+  proc host_instructions(): uint64 {.importc: "ndsrun_host_instructions", nodecl.}
+else:
+  proc host_instructions(): uint64 = 0
 
 proc crc32(data: openArray[uint8]): uint32 =
   var table {.global.}: array[256, uint32]
@@ -269,6 +284,7 @@ when isMainModule:
   var mic_path = ""
   var mic_at = 0
   var perf_from = 0
+  var perf_i0 = 0'u64
   var state_saves: seq[(string, int)]
   var state_load = ""
   var state_load_frame = -1
@@ -391,7 +407,9 @@ when isMainModule:
   let mic_samples = if mic_path.len > 0: read_wav_mono(mic_path, mic_rate) else: @[]
   for f in first_frame ..< frames:
     if mic_path.len > 0 and f == mic_at: n.push_mic(mic_samples, mic_rate)
-    if f == perf_from: perf_t0 = getMonoTime()
+    if f == perf_from:
+      perf_t0 = getMonoTime()
+      perf_i0 = host_instructions()
     if f == trace_at:
       n.arm9.trace = trace9
       n.arm7.trace = trace7
@@ -461,6 +479,8 @@ when isMainModule:
     let secs = (getMonoTime() - perf_t0).inNanoseconds.float / 1e9
     echo "speed: frames ", perf_from, "-", frames, " in ", formatFloat(secs, ffDecimal, 2), " s = ",
          formatFloat(float(frames - perf_from) / secs, ffDecimal, 1), " fps"
+    let ins = host_instructions()
+    if ins > 0: echo "host instructions: frames ", perf_from, "-", frames, " ", ins - perf_i0
   if tops.len > 0:
     let cols = min(tops.len, 4)
     let rows = (tops.len + cols - 1) div cols
