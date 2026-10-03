@@ -88,7 +88,8 @@ dmg_boot.bin
 *.boot.bin
 
 # Claude Code local state
-.claude/
+.claude/*
+!.claude/skills/
 
 # Windows cross-build output
 dist/

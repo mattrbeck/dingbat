@@ -98,9 +98,15 @@ def main():
         p.add_argument('--rtc', type=int, default=DEFAULT_RTC)
         p.add_argument('--no-cross', action='store_true', help='skip the cross-load matrix')
         p.add_argument('--no-audio', action='store_true', help='skip audio capture and comparison')
+        p.add_argument('--refs-from', default=None,
+                       help='replay the references (mgba, nba) from an earlier run instead of playing them: '
+                            'a run directory (run) or a suite directory (suite); a game whose script changed '
+                            'since runs them live')
         if name == 'suite':
             p.add_argument('--jobs', type=int, default=1, help='games run in parallel')
             p.add_argument('--tag', default=None, help='suite output directory name (default: a timestamp)')
+            p.add_argument('--no-lock', action='store_true',
+                           help='a full suite waits for the machine-wide playtest lock (train.py) unless this')
 
     args = ap.parse_args()
     if args.cmd == 'serve':
@@ -223,6 +229,10 @@ def suite(args):
     tag = args.tag or datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     sdir = os.path.join(args.out, 'suites', tag)
     os.makedirs(os.path.join(sdir, 'logs'), exist_ok=True)
+    refs = {}
+    if args.refs_from:
+        refs = {g['sha1']: g['outdir'] for g in json.load(open(os.path.join(args.refs_from, 'index.json')))['games']
+                if g.get('outdir')}
     rows, todo = [], []
     for fn in sorted(os.listdir(os.path.join(HERE, 'scripts'))):
         if not fn.endswith('.play'):
@@ -250,6 +260,7 @@ def suite(args):
                '--emus', args.emus, '--rtc', str(args.rtc), '--outdir-file', link]
         cmd += ['--no-cross'] if args.no_cross else []
         cmd += ['--no-audio'] if args.no_audio else []
+        cmd += ['--refs-from', refs[sha1]] if sha1 in refs else []
         with open(log, 'w') as fh:
             rc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode
         row = {'sha1': sha1, 'title': title, 'rc': rc, 'log': log}
@@ -271,12 +282,20 @@ def suite(args):
     if os.path.exists(index_path):
         mine = {sha1 for sha1, _ in todo} | {r['sha1'] for r in rows}
         rows = [r for r in json.load(open(index_path))['games'] if r['sha1'] not in mine] + rows
+    # a whole-corpus suite is the machine's big job: one at a time with the
+    # train (train.py holds the same lock while it runs)
+    lock = None
+    if not args.only and not args.no_lock and not os.environ.get('DINGBAT_TRAIN_INSIDE'):
+        import train
+        lock = train.machine_lock(wait=True, what=f'playtest.py suite {tag}')
     print(f'== suite {tag}: {len(todo)} games, {args.jobs} at a time -> {sdir}', flush=True)
     with cf.ThreadPoolExecutor(max(1, args.jobs)) as pool:
         for row in pool.map(one, todo):
             rows.append(row)
             json.dump({'tag': tag, 'emus': args.emus.split(','), 'games': rows},
                       open(os.path.join(sdir, 'index.json'), 'w'), indent=1)
+    if lock:
+        lock.release()
     print(f'\n== suite {tag}')
     for r in rows:
         print(f"{r['status']:8} {r['title'][:56]}")

@@ -31,6 +31,39 @@ differing audio. Exit status is 0 when every dingbat variant passes. A suite
 writes `out/suites/<tag>/index.json` (one row per game, logs beside it); a
 second suite with the same `--tag` extends it.
 
+## Testing a change against the corpus: the train
+
+When several changes (or several agents) want the whole corpus, don't run a
+full suite each: submit to the train, which merges every pending candidate
+onto `origin/main`, plays the corpus once in the dingbat configurations and
+replays the games that changed on each candidate alone to say whose change
+it was (the `playtest-train` skill in `.claude/skills/` is the how-to).
+
+```
+tools/playtest/train.py submit HEAD --name what --wait   # exit 0 clean, 1 changes, 2 conflict/build
+tools/playtest/train.py status                           # queue, running train, recent verdicts
+tools/playtest/train.py show ID                          # a verdict / a run's report
+```
+
+A game counts as changed when any dingbat configuration differs from the
+baseline in pass/fail or in any hash: a checkpoint or its frame window, the
+audio dump, the battery file, a `[load]` cell. Verdicts: fixed, regressed,
+mixed, neutral (hashes moved, verdicts did not), interaction (only the
+combination does it), conflict, build-failed; `tests/test_train.py` covers
+the comparison. State lives in `~/.cache/dingbat-train`. Whoever waits when
+no train is running drives it, under a machine-wide lock that a full
+`suite` also waits for (`--no-lock` to bypass; subsets never wait).
+
+Two pieces of the harness make it cheap: every phase keeps its whole result
+(`<phase>/result.json`, hash windows included), and `run`/`suite
+--refs-from` replays the references from an earlier run of the same script
+instead of playing them (their output does not depend on dingbat; a
+reference reading dingbat's save is replayed only when that save is
+byte-identical). `build.sh [TARGET...]` builds a subset, `NIMCACHE=` gives a
+build its own nimcache.
+
+## Findings
+
 `report.py` reduces a suite to findings: at each checkpoint the six emulators
 fall into groups that show the same screen, and a finding is a grouping
 (reported where it first appears) with the group that stands alone named as
@@ -165,6 +198,7 @@ found in the ROM.
 | `freeze.py` / `freeze_all.py` | condition script -> frozen input timeline |
 | `audio.py` | audio features, comparison, WAV clips |
 | `report.py` | suite -> findings (who stands alone at each difference) |
+| `train.py` | the test train: batched corpus runs with per-candidate attribution (`tests/test_train.py`) |
 | `hlecmp.py` | every script's `[new]` timeline in two dingbat configurations (`dingbat` and `dingbat-bios` by default), every frame's hash compared: where the HLE BIOS first draws what the official one does not |
 | `statecheck.py` | save-state round-trip check per emulator |
 | `bootsweep.py` | the library with no input: frames dingbat draws that no reference does |
