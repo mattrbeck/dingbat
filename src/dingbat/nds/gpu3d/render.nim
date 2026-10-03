@@ -163,7 +163,7 @@ template pal16(r: Renderer; a: int): uint32 =
   uint32(r.pal_pages[(a shr 14) and 7][a and 0x3FFF]) or
     (uint32(r.pal_pages[((a + 1) shr 14) and 7][(a + 1) and 0x3FFF]) shl 8)
 
-proc wrap_coord(c, size: int; repeat, flip: bool): int {.inline.} =
+proc wrap_coord(c, size: int; repeat, flip: bool): int {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   if not repeat: return clamp(c, 0, size - 1)
   let m = c and (size - 1)
   if flip and (c and size) != 0: size - 1 - m else: m
@@ -270,7 +270,7 @@ proc tex_cached(r: Renderer; vram: Vram; tex, pltt: uint32): ptr UncheckedArray[
     r.tc_index[key] = at
   cast[ptr UncheckedArray[uint32]](addr r.tc_pool[at])
 
-proc tex_at(r: Renderer; c: PolyCtx; s, t: int64): uint32 {.inline.} =
+proc tex_at(r: Renderer; c: PolyCtx; s, t: int64): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## The texel at (s, t) (12.4): wrapped, clamped or flipped into the
   ## texture, then decoded (or read from the cache).
   let u = wrap_coord(int(s shr 4), c.sw, c.rep_s, c.flip_s)
@@ -478,19 +478,21 @@ proc edge_end(e: Edge; va: openArray[VAttr]; y: int; x: int32): EndAttr {.inline
     result.t = A.t + ashr((B.t - A.t) * f, 9)
     result.w = A.w + ashr((B.w - A.w) * f, 9)
 
-proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32 {.inline.} =
+proc blend_texel(r: Renderer; c: PolyCtx; textured: bool; mode: uint32; vr, vg, vb: int32;
+                 tx: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## Vertex colour x texel by polygon mode (GBATEK "DS 3D Texture Blending");
-  ## 6-bit colour, 5-bit alpha.
+  ## 6-bit colour, 5-bit alpha. `textured` and `mode` are the context's
+  ## (passed apart so that the span loops can give them as constants).
   let av = c.alpha
   var tr, tg, tb, ta: int32
-  if c.textured:
+  if textured:
     tr = ch(tx, 0); tg = ch(tx, 1); tb = ch(tx, 2); ta = int32(tx shr 24)
   else:
     tr = 63; tg = 63; tb = 63; ta = 31
-  case c.mode
+  case mode
   of 1:
     # decal: the texel alpha mixes texel over vertex colour
-    if not c.textured or ta == 0: return pack(vr, vg, vb, av)
+    if not textured or ta == 0: return pack(vr, vg, vb, av)
     if ta == 31: return pack(tr, tg, tb, av)
     # 5-bit texel alpha over 32 (GBATEK writes (Rt*At + Rv*(63-At))/64;
     # 3d_blendmodes on the reference core pins this form exactly)
@@ -536,7 +538,7 @@ proc span_step(L, R: EndAttr): SpanStep {.inline.} =
   SpanStep(d: d, q: (1'i64 shl 38) div d, rr: (1'i64 shl 38) mod d, n: -2, len: len,
            zk: (1'i64 shl 18) div d, eqw: L.w == R.w)
 
-proc step_to(sp: var SpanStep; n: int64) {.inline.} =
+proc step_to(sp: var SpanStep; n: int64) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   if n == sp.n + 1:
     sp.f += sp.q
     sp.acc += sp.rr
@@ -549,10 +551,36 @@ proc step_to(sp: var SpanStep; n: int64) {.inline.} =
     sp.acc = nn - sp.f * sp.d
   sp.n = n
 
-proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; edge: bool;
-          cov = 31'i32; role = 0'u8) {.inline.} =
+# Dot kinds. `plot_k` is instantiated once with nothing known (K = 0:
+# every flag read from the context, as each edge dot is drawn) and, for the
+# runs between the edges (`fill`), once per combination of these facts,
+# which `fill` checks before choosing one; a known flag is a constant the C
+# compiler folds, so each instance is the same code with fewer tests.
+const
+  K_SIMPLE = 1      ## not wire-frame, no edge-marking rule, modulation, depth test "less"
+  K_TEX = 2         ## textured
+  K_UNTEX = 4       ## not textured
+  K_EQW = 8         ## the span's ends have equal w
+  K_PERSP = 16      ## ... unequal w
+  K_AA = 32         ## anti-aliasing
+  K_NOAA = 64       ## no anti-aliasing
+  K_WBUF = 128      ## W-buffer depth
+  K_ZBUF = 256      ## Z-buffer depth
+
+template kf(K: static int; yes, no: static int; dyn: untyped): untyped =
+  when (K and yes) != 0: true
+  elif (K and no) != 0: false
+  else: dyn
+
+proc plot_k[K: static int](r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep;
+                           edge: bool; cov: int32; role: uint8)
+    {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## One dot of the span from L to R; `cov` is its anti-aliasing coverage
   ## (0..31, 31 = whole); `role`: which edge the dot belongs to (ROLE_*).
+  const simple = (K and K_SIMPLE) != 0
+  let textured = kf(K, K_TEX, K_UNTEX, c.textured)
+  let aa = kf(K, K_AA, K_NOAA, c.aa)
+  let mode = (when simple: 0'u32 else: c.mode)
   let i = y * W + x
   # One division gives the dot's factor along the span; with equal w the
   # factor (38 bits, rounded so that every attribute comes out as
@@ -560,7 +588,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   # perspective one. Depth first, the rest only for dots that pass.
   let d = sp.len
   let n = int64(x - L.x)
-  let eqw = sp.eqw
+  let eqw = kf(K, K_EQW, K_PERSP, sp.eqw)
   var fl, fc, f8, z, w: int64
   if d <= 0:
     z = L.z; w = L.w
@@ -586,10 +614,10 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
       let dd = b - a
       a + ashr(dd * (if dd >= 0: fc else: fl), 38)
     else: a + ashr((b - a) * f8, 8)
-  let dv = if c.wbuffer: w else: z
+  let dv = if kf(K, K_WBUF, K_ZBUF, c.wbuffer): w else: z
   let dval = uint32(max(0'i64, min(dv, 0xFF_FFFF'i64)))
   let old = r.depth[i]
-  var pass = if (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
+  var pass = if not simple and (c.attr and 0x4000) != 0: abs(int64(dval) - int64(old)) <= 0x200
              else: dval < old
   # With edge marking on and anti-aliasing off, where edges of two opaque
   # polygons with the same ID overlap, a left edge wins over a right one
@@ -600,7 +628,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   # (overriden by top xmajor/flat)", and the recorded colours of 38, 39, 43:
   # a further polygon's top run shows over the nearer one's bottom run or
   # bottom row; 42: a right diagonal over a bottom run does nothing).
-  if c.curse and role != 0 and r.opaque_id[i] == c.id and r.trans_id[i] == NO_ID:
+  if not simple and c.curse and role != 0 and r.opaque_id[i] == c.id and r.trans_id[i] == NO_ID:
     let was = r.flags[i]
     if (role == ROLE_LEFT and (was and ROLE_RIGHT) != 0) or
        (role == ROLE_TOP and (was and ROLE_BOTTOM) != 0): pass = true
@@ -609,7 +637,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
   when defined(r3dprof):
     inc prof_dots
     if pass: inc prof_pass
-  if c.mode == 3:
+  if mode == 3:
     # Shadow volumes (GBATEK "DS 3D Shadow Polygons"), as the reference
     # cores agree on 3d_shadow: the mask (ID 0) flags the dots where its
     # back side is hidden, i.e. where the scene lies inside the volume; the
@@ -629,18 +657,18 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
     # blend into it, whatever the drawing order (3d_aa, 3d_probe_aa2,
     # 3d_probe_aa3 on the reference cores). Only dots whose top is partly
     # covered or an edge ever read it.
-    if not c.aa or (r.aacov[i] >= 31 and (r.flags[i] and FLAG_EDGE) == 0) or
+    if not aa or (r.aacov[i] >= 31 and (r.flags[i] and FLAG_EDGE) == 0) or
        dval >= r.below_depth[i]: return
   let vr = int32(max(0'i64, min(ashr(at(L.c[0], R.c[0]), 3), 63'i64)))
   let vg = int32(max(0'i64, min(ashr(at(L.c[1], R.c[1]), 3), 63'i64)))
   let vb = int32(max(0'i64, min(ashr(at(L.c[2], R.c[2]), 3), 63'i64)))
   var tx = 0'u32
-  if c.textured:
+  if textured:
     tx = r.tex_at(c, at(L.s, R.s), at(L.t, R.t))
-  var px = r.blend_texel(c, vr, vg, vb, tx)
+  var px = r.blend_texel(c, textured, mode, vr, vg, vb, tx)
   # wire-frame lines are drawn at alpha 31 (GBATEK), whatever the texel's
   # alpha: transparent texels too (3d_lines on the reference cores)
-  if c.wire: px = px or (31'u32 shl 24)
+  if not simple and c.wire: px = px or (31'u32 shl 24)
   let a = int32(px shr 24)
   if a <= c.aref: return
   template blend_into(dst: var uint32) =
@@ -659,7 +687,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
       blend_into(r.below[i])
       if (c.attr and 0x800) != 0: r.below_depth[i] = dval
     return
-  if a == 31 and c.mode != 3:
+  if a == 31 and mode != 3:
     # anti-aliased edge dots keep their coverage for the post pass, and
     # what they cover moves one layer down
     r.below[i] = r.color[i]
@@ -676,10 +704,36 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
     blend_into(r.color[i])
     # over a partly covered edge dot it tints the layer behind as well
     # (3d_probe_aa3: anti-aliasing still applies under translucency)
-    if c.aa and (r.aacov[i] < 31 or (r.flags[i] and FLAG_EDGE) != 0): blend_into(r.below[i])
+    if aa and (r.aacov[i] < 31 or (r.flags[i] and FLAG_EDGE) != 0): blend_into(r.below[i])
     if (c.attr and 0x800) != 0: r.depth[i] = dval
     r.trans_id[i] = c.id
     if not c.fog: r.flags[i] = r.flags[i] and not FLAG_FOG
+
+proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; edge: bool;
+          cov = 31'i32; role = 0'u8) =
+  plot_k[0](r, c, x, y, L, R, sp, edge, cov, role)
+
+proc fill_k[K: static int](r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr;
+                           sp: var SpanStep; edge: bool; role: uint8) =
+  for x in x0 ..< x1: plot_k[K](r, c, x, y, L, R, sp, edge, 31, role)
+
+proc fill(r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr; sp: var SpanStep;
+          edge: bool; role = 0'u8) =
+  ## Dots x0 ..< x1 of row y, whole (coverage 31): `plot` for each, by the
+  ## instance of plot_k that knows the polygon's and the span's flags.
+  if x0 >= x1: return
+  if c.wire or c.curse or c.mode != 0 or (c.attr and 0x4000) != 0:
+    fill_k[0](r, c, y, x0, x1, L, R, sp, edge, role)
+    return
+  template go(t, e, a, b: static int) =
+    fill_k[K_SIMPLE or t or e or a or b](r, c, y, x0, x1, L, R, sp, edge, role)
+  template by_depth(t, e, a: static int) =
+    if c.wbuffer: go(t, e, a, K_WBUF) else: go(t, e, a, K_ZBUF)
+  template by_aa(t, e: static int) =
+    if c.aa: by_depth(t, e, K_AA) else: by_depth(t, e, K_NOAA)
+  template by_w(t: static int) =
+    if sp.eqw: by_aa(t, K_EQW) else: by_aa(t, K_PERSP)
+  if c.textured: by_w(K_TEX) else: by_w(K_UNTEX)
 
 proc aa_cov(e: Edge; y, x: int; right: bool; lend = 0'i32): int32 =
   ## Anti-aliasing coverage (0..31) of dot x on row y by edge e
@@ -782,8 +836,7 @@ proc draw_polygon(r: Renderer; vram: Vram; poly: Polygon; verts: openArray[Verte
     let R = EndAttr(x: sx[ri], c: va[ri].c, s: va[ri].s, t: va[ri].t, z: va[ri].z, w: va[ri].w)
     var sp = span_step(L, R)
     r.charge(int(ymin), int(sx[li]), max(int(sx[ri]), int(sx[li]) + 1))
-    for x in max(0, int(sx[li])) ..< min(W, max(int(sx[ri]), int(sx[li]) + 1)):
-      r.plot(c, x, int(ymin), L, R, sp, true)
+    r.fill(c, int(ymin), max(0, int(sx[li])), min(W, max(int(sx[ri]), int(sx[li]) + 1)), L, R, sp, true)
     return
   # The rasteriser walks two chains of edges down from the top vertex (the
   # first one on the top row): one forward in vertex order, one backward,
@@ -870,10 +923,13 @@ proc draw_polygon(r: Renderer; vram: Vram; poly: Polygon; verts: openArray[Verte
           if lfill: edge_dot(xs, pl, false, lcx)
           if rfill and xe != xs: edge_dot(xe, pr, true, xe)
         else:
-          for x in max(0'i32, xs) .. min(W - 1, xe):
-            if x == xs and lfill: edge_dot(x, pl, false, lcx)
-            elif x == xe and rfill: edge_dot(x, pr, true, xe)
-            else: r.plot(c, int(x), y, EL, ER, sp, rim)
+          # x == xs and x == xe as edge dots when filled (xs first), the
+          # rest whole (edge_dot tests the screen bounds itself)
+          if lfill: edge_dot(xs, pl, false, lcx)
+          let a = if lfill: xs + 1 else: xs
+          let b = if rfill and not (lfill and xe == xs): xe - 1 else: xe
+          r.fill(c, y, max(0, int(a)), min(W - 1, int(b)) + 1, EL, ER, sp, rim)
+          if rfill and not (lfill and xe == xs): edge_dot(xe, pr, true, xe)
         continue
     let le = le0
     let re = re0
@@ -911,12 +967,12 @@ proc draw_polygon(r: Renderer; vram: Vram; poly: Polygon; verts: openArray[Verte
     let rdraw = rfull or (R.xmaj and R.inc) or R.vert or (last_flat and R.xmaj)
     if aa:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, le.aa_cov(y, x, false), lrole)
-      for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim, 31, mrole)
+      r.fill(c, y, max(0, int(L.e)), min(W, int(R.s)), EL, ER, sp, rim, mrole)
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)): r.plot(c, x, y, EL, ER, sp, true, re.aa_cov(y, x, true, L.e), rrole)
       continue
     if ldraw:
       for x in max(0, int(L.s)) ..< min(W, int(L.e)): r.plot(c, x, y, EL, ER, sp, true, 31, lrole)
-    for x in max(0, int(L.e)) ..< min(W, int(R.s)): r.plot(c, x, y, EL, ER, sp, rim, 31, mrole)
+    r.fill(c, y, max(0, int(L.e)), min(W, int(R.s)), EL, ER, sp, rim, mrole)
     if rdraw:
       for x in max(0, int(max(R.s, L.e))) ..< min(W, int(R.e)):
         r.plot(c, x, y, EL, ER, sp, true, 31, rrole)
