@@ -126,7 +126,8 @@ def same(aspect, a, b):
 def diff_fp(before, after):
     """{config: {aspect: [before, after]}} for every aspect that differs."""
     out = {}
-    for c in sorted(set(before) | set(after), key=lambda k: (k != '*', k)):
+    order = ['*'] + DINGBAT
+    for c in sorted(set(before) | set(after), key=lambda k: (order.index(k) if k in order else len(order), k)):
         b, a = before.get(c, {}), after.get(c, {})
         d = {k: [b.get(k), a.get(k)] for k in sorted(set(b) | set(a)) if not same(k, b.get(k), a.get(k))}
         if d:
@@ -211,7 +212,9 @@ def describe(aspects):
     parts = []
     for cfg, d in aspects.items():
         cps = sorted({k.split(':', 1)[1] for k in d if k.startswith(('cp:', 'win:'))})
-        loads = sorted(k.split(':', 1)[1] for k in d if k.startswith('load:'))
+        # a cell named from the configuration's side (self) so configurations group
+        loads = sorted('-in-'.join('self' if x == cfg else x for x in k.split(':', 1)[1].split('-in-'))
+                       for k in d if k.startswith('load:'))
         bits = []
         if 'pass' in d:
             bits.append(f"{'PASS' if d['pass'][0] else 'FAIL'}->{'PASS' if d['pass'][1] else 'FAIL'}")
@@ -229,8 +232,13 @@ def describe(aspects):
             bits.append('battery file')
         if loads:
             bits.append('load ' + ', '.join(loads[:3]) + (f' (+{len(loads) - 3})' if len(loads) > 3 else ''))
-        parts.append(f"{cfg}: {'; '.join(bits)}")
-    return ' | '.join(parts)
+        parts.append((cfg, '; '.join(bits)))
+    # configurations that changed the same way share one entry
+    grouped = {}
+    for cfg, text in parts:
+        grouped.setdefault(text, []).append(cfg)
+    return ' | '.join(f"{'all four' if len(cs) == 4 and '*' not in cs else ', '.join(cs)}: {text}"
+                      for text, cs in grouped.items())
 
 
 # ============================================================ suites on disk
@@ -418,22 +426,26 @@ def submit(args):
 def wait_for(cid, args):
     """Block until the candidate has a verdict, driving trains ourselves
     whenever nobody else is (the lock decides who)."""
-    last_note = 0
+    last_note, drove = 0, False
     while True:
         v = verdict_of(cid)
         if v:
-            print_verdict(v)
+            if not drove:     # a train we drove printed it already
+                print_verdict(v)
             return v.get('exit', 1)
         lk = machine_lock(wait=False)
         if lk:
+            drove = True
             try:
                 drive(args, lk, until=cid)
             finally:
                 lk.release()
             continue
         if time.time() - last_note > 300:
-            r = read_json(path('runner.json'), {})
-            print(f"waiting: train {r.get('run')} at {r.get('stage')} {r.get('detail', '')}", flush=True)
+            r = read_json(path('runner.json'))
+            h = read_json(path('holder.json'), {})
+            print(f"waiting: train {r['run']} at {r.get('stage')} {r.get('detail', '')}" if r else
+                  f"waiting: the lock is held by pid {h.get('pid')} ({h.get('what')})", flush=True)
             last_note = time.time()
         time.sleep(args.poll)
 
@@ -460,6 +472,7 @@ class Trees:
 
     def __init__(self, run_id, log):
         self.root = path('work', run_id, 'x')[:-2]
+        self.logdir = path('runs', run_id, 'x')[:-2]   # build logs outlive the trees
         self.log = log
         self.made = []
 
@@ -514,10 +527,15 @@ def ref_bins(base, trees, opts, log):
     h = hashlib.sha1()
     for f in REF_INPUTS:
         h.update(git('show', f'{base}:{f}', check=False).encode())
-    mgba = os.path.expanduser(os.environ.get('MGBA', '~/code/mgba-ref-src'))
-    nba = os.path.expanduser(os.environ.get('NBA', '~/code/NanoBoyAdvance'))
-    for lib in (f'{mgba}/build-headless/libmgba.a', f'{nba}/build/src/nba/libnba.a',
-                f'{nba}/build/src/platform/core/libplatform-core.a'):
+    # the reference libraries build.sh links (its MGBA= / NBA= defaults)
+    text = git('show', f'{base}:tools/playtest/build.sh', check=False)
+
+    def src_dir(var):
+        m = re.search(rf'^{var}=\$\{{{var}:-(.*?)\}}', text, re.M)
+        return os.path.expanduser(os.environ.get(var) or (m.group(1) if m else ''))
+    mgba, second = src_dir('MGBA'), src_dir('NBA')
+    for lib in (f'{mgba}/build-headless/libmgba.a', f'{second}/build/src/nba/libnba.a',
+                f'{second}/build/src/platform/core/libplatform-core.a'):
         try:
             st = os.stat(lib)
             h.update(f'{lib}|{st.st_size}|{int(st.st_mtime)}'.encode())
@@ -529,8 +547,10 @@ def ref_bins(base, trees, opts, log):
         return key, d
     log(f'building the reference drivers ({key})')
     wt = trees.add('refs', base)
-    sh(['bash', os.path.join(wt, 'tools/playtest/build.sh'), *REF_BINS], cwd=wt,
-       out=os.path.join(trees.root, 'build-refs.log'))
+    blog = os.path.join(trees.logdir, 'build-refs.log')
+    if sh(['bash', os.path.join(wt, 'tools/playtest/build.sh'), *REF_BINS], cwd=wt, out=blog, check=False):
+        raise SystemExit(f'the reference drivers do not build (log {blog}); pass --ref-bin DIR with '
+                         f'prebuilt {", ".join(REF_BINS)}')
     for b in REF_BINS:
         shutil.copy2(os.path.join(wt, 'tools/playtest/bin', b), os.path.join(d, b))
     trees.remove(wt)
@@ -544,7 +564,7 @@ def build(wt, refdir, trees, name, log):
     os.makedirs(bindir, exist_ok=True)
     for b in REF_BINS:
         shutil.copy2(os.path.join(refdir, b), os.path.join(bindir, b))
-    blog = os.path.join(trees.root, f'build-{name}.log')
+    blog = os.path.join(trees.logdir, f'build-{name}.log')
     t0 = time.time()
     env = dict(os.environ, NIMCACHE=os.path.join(trees.root, f'nimcache-{name}'))
     rc = sh(['bash', os.path.join(wt, 'tools/playtest/build.sh'), 'dingbat_driver'], cwd=wt, env=env,
@@ -674,7 +694,7 @@ def ensure_baseline(base, games, refkey, refdir, trees, opts, log, runner):
     log(f'baseline {base[:12]}: playing {len(missing)} games' + (f', references from {donor}' if donor else ', all six configurations'))
     wt = trees.add('base', base)
     if not build(wt, refdir, trees, 'base', log):
-        raise SystemExit(f'base {base[:12]} does not build: see {trees.root}/build-base.log')
+        raise SystemExit(f'base {base[:12]} does not build: see {trees.logdir}/build-base.log')
     run_suite(wt, os.path.join(bdir, 'out'), 'baseline', missing, donor, opts.jobs, log, runner, 'baseline')
     write_json(os.path.join(bdir, 'baseline.json'), {'base': base, 'refkey': refkey, 'updated': time.time()})
     trees.remove(wt)
@@ -822,7 +842,7 @@ def _train(car, opts, run_id, rd, log, runner, trees, run):
     if not build(comb, refdir, trees, 'combined', log):
         if len(aboard) == 1:
             verdicts[aboard[0]['id']] = set_verdict(aboard[0], 'build-failed', run_id,
-                                                    f'does not build on {base[:12]}', log=f'{trees.root}/build-combined.log')
+                                                    f'does not build on {base[:12]}', log=f'{trees.logdir}/build-combined.log')
             return finish(run, rd, log, verdicts, car)
         # who breaks it: each alone (kept for attribution)
         ok = []

@@ -170,7 +170,9 @@ class Attribution(unittest.TestCase):
         text = train.describe({'dingbat': d['dingbat']})
         self.assertIn('FAIL->PASS', text)
         self.assertIn('audio', text)
-        self.assertIn('load dingbat-in-mgba', text)
+        self.assertIn('load self-in-mgba', text)
+        # every configuration changing the same way is one entry
+        self.assertIn(' | all four: FAIL->PASS', train.describe(d))
 
 
 class Relevance(unittest.TestCase):
