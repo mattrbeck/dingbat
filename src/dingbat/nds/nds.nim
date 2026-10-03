@@ -100,6 +100,7 @@ type
                                 ## sequential fetches read `fptr7`, or NO_PAGE
     fptr7*: ptr UncheckedArray[uint8]
     fseq7*: array[2, int64]     ## and what one costs there: 16-bit, 32-bit
+    fjump7*: array[2, int64]    ## and a jump to an opcode there (with the refill)
     # ARM9 data TLB (bus9.nim read32 .. write32): pages whose loads / stores
     # take a short path; derived, not saved (`dtlb_off`)
     rtlb9*, wtlb9*: array[DTLB_SIZE, DtlbEntry]

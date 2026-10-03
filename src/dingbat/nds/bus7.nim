@@ -365,12 +365,25 @@ proc fetch_page7(n: NDS; a: uint32) =
       if shared: addr n.shared_wram[i] else: addr n.arm7_wram[i])
   else: return
   n.fseq7 = [code7(a shr 24, 16, true, n.slot7_t), code7(a shr 24, 32, true, n.slot7_t)]
+  n.fjump7 = [code7(a shr 24, 16, false, n.slot7_t) + n.fseq7[0],
+              code7(a shr 24, 32, false, n.slot7_t) + n.fseq7[1]]
   n.fpage7 = a shr 12
 
 proc fetch_slow7(n: NDS; a: uint32; width: static int): uint32 {.noinline.} =
   n.fetch_cost7(a, width)
   result = n.read7(a, width)
   if (a shr 12) != n.fpage7: n.fetch_page7(a)
+
+template fetch_jump7(n: NDS; a: uint32; width: static int) =
+  ## A jump (not to the next opcode) inside the page `fetch_page7` set up:
+  ## fetch_cost7's nonsequential case -- the loop head, the fetch and the
+  ## refill's second fetch, fixed costs in this page -- then memory as it is.
+  n.last_data7 = NO_ADDR
+  if a <= n.last_fetch7:        # a backward branch's target: a loop head
+    if n.arm7.wl_cold > 0: dec n.arm7.wl_cold
+    elif n.arm7.wl_on: n.arm7.loop_edge()
+  n.last_fetch7 = a
+  n.wait7 += n.fjump7[when width == 32: 1 else: 0]
 
 proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
@@ -380,6 +393,9 @@ proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     n.last_fetch7 = a
     n.wait7 += n.fseq7[1]
     return cast[ptr uint32](addr n.fptr7[a and 0xFFF])[]
+  if (a shr 12) == n.fpage7:
+    n.fetch_jump7(a, 32)
+    return cast[ptr uint32](addr n.fptr7[a and 0xFFF])[]
   n.fetch_slow7(a, 32)
 proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
@@ -387,6 +403,9 @@ proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     n.last_data7 = NO_ADDR
     n.last_fetch7 = a
     n.wait7 += n.fseq7[0]
+    return uint32(cast[ptr uint16](addr n.fptr7[a and 0xFFF])[])
+  if (a shr 12) == n.fpage7:
+    n.fetch_jump7(a, 16)
     return uint32(cast[ptr uint16](addr n.fptr7[a and 0xFFF])[])
   n.fetch_slow7(a, 16)
 

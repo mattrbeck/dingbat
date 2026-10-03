@@ -875,6 +875,35 @@ template fetch_next9(n: NDS; a: uint32; size: static uint32): bool =
     (n.fitcm9 or (n.tm.icache.hit_line(a) and
       ((a shr 24) != 0x02 or n.tm.page_apart[(a and 0x3FFFFF) shr 12] == 0 or n.line_clean9(a))))
 
+template fetch_jump9(n: NDS; a: uint32): bool =
+  ## A jump (not to the next opcode) inside the 4 KB page of the line
+  ## `fetch_line9` set up, in the page the protection unit allowed last
+  ## (`pu_check9`'s remembered page and privilege): fetch_cost9 there only
+  ## calls the loop head, charges the refill and, for another line, does
+  ## the tag lookup -- when that line is ITCM, or an instruction-cache hit
+  ## (which makes it `last`; a miss changes nothing and goes the long way)
+  ## whose bytes are memory's (as `fetch_next9`). The same line is ITCM or
+  ## `last` already.
+  (a shr 12) == (n.fline9 shr 7) and
+    ((a shr 12) or (if (n.arm9.cpsr and 0x1F) == 0x10 and not n.arm9.bank_xfer: 0x8000_0000'u32
+                    else: 0'u32)) == n.pu_ok[0] and
+    ((a shr 5) == n.fline9 or n.fitcm9 or
+     (n.tm.icache.hit_line(a) and
+      ((a shr 24) != 0x02 or n.tm.page_apart[(a and 0x3FFFFF) shr 12] == 0 or n.line_clean9(a))))
+
+template fetch_jumped9(n: NDS; a: uint32) =
+  n.last_data9 = NO_ADDR
+  if a <= n.last_pc9:           # a backward branch's target: a loop head
+    if n.arm9.wl_cold > 0: dec n.arm9.wl_cold
+    elif n.arm9.wl_on: n.arm9.loop_edge()
+  n.last_pc9 = a
+  n.last_fetch9 = a and not 3'u32
+  n.wait9 += BRANCH9
+  # the line's bytes: the page is one block on the host (ITCM, main RAM, BIOS)
+  n.fptr9 = cast[ptr UncheckedArray[uint8]](cast[int](n.fptr9) +
+                                            (int(a shr 5) - int(n.fline9)) * 32)
+  n.fline9 = a shr 5
+
 proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
   if likely(n.fetch_fast9(a, 4)):
@@ -889,6 +918,9 @@ proc fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     n.last_pc9 = a
     n.last_fetch9 = a
     return cast[ptr uint32](addr n.fptr9[0])[]
+  if n.fetch_jump9(a):
+    n.fetch_jumped9(a)
+    return cast[ptr uint32](addr n.fptr9[a and 31])[]
   n.fetch_slow9(a, 4)
 
 proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
@@ -905,6 +937,9 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     n.last_pc9 = a
     n.last_fetch9 = a
     return uint32(cast[ptr uint16](addr n.fptr9[0])[])
+  if n.fetch_jump9(a):
+    n.fetch_jumped9(a)
+    return uint32(cast[ptr uint16](addr n.fptr9[a and 31])[])
   n.fetch_slow9(a, 2)
 
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()

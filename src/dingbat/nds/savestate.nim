@@ -53,7 +53,7 @@ const
     "hle_bios9", "hle_bios7",    # checked against the loading machine (preamble)
     "unmapped_log", "iolog", "watch", "io_last", "io_repeat",   # debug logging
     "idle_epoch", "idle_epoch9", "idle_epoch7", "ev_epoch", "dev9", "dev7",   # idle-loop skipping (arm/cpu.nim), re-proved after a load
-    "fline9", "fptr9", "fitcm9", "fpage7", "fptr7", "fseq7",   # fetch fast paths, off after a load
+    "fline9", "fptr9", "fitcm9", "fpage7", "fptr7", "fseq7", "fjump7",   # fetch fast paths, off after a load
     "rtlb9", "wtlb9", "dtlb_log", "dtlb_dlog", "dtlb_logged", "dtlb_dlogged",   # ARM9 data TLB, off after a load
     "long_on", "long_slice", "long_h9", "slice_from", "long_next", "cut_at"]   # run_until's long slices
   CPU_SKIP = ["bus", "trace", "profiling", "profile", "cprofile", "attn",

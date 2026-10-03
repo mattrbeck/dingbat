@@ -403,6 +403,112 @@ block data_tlb:
   check n2.load_state_bytes(saved) and c.read32(D + 0x10) == 0x7777_7777'u32,
         "a loaded state with DTCM at D reads DTCM"
 
+block fetch_jumps:
+  # bus9.nim fetch_jump9 / bus7.nim fetch_jump7: a jump inside the page the
+  # fast path holds skips fetch_cost9 / fetch_cost7. Random jumps and runs
+  # over ITCM, BIOS and main RAM pages (lines cached, kept, apart; another
+  # CPU writing behind) on two machines, one of them taking the long way
+  # every time (fetch_paths_off before each fetch): every opcode, the
+  # charged cycles and the trackers must agree.
+  echo "fetch jumps match the long way"
+  var ms: array[2, NDS]
+  for k in 0..1:
+    let n = machine()
+    n.arm9.wl_on = false
+    n.arm7.wl_on = false
+    n.cache_on(write_back = true)
+    let b = Arm9Bus(nds: n)
+    b.cp15_write(0, 6, 3, 0, 0x0000_0031'u32)             # region 3: 0-32 MB (ITCM)
+    b.cp15_write(0, 6, 4, 0, 0xFFFF_001F'u32)             # region 4: the BIOS, 64 KB
+    b.cp15_write(0, 5, 0, 2, 0x33333)                     # AP 3, regions 0-4
+    b.cp15_write(0, 5, 0, 3, 0x33333)
+    b.cp15_write(0, 2, 0, 1, 0x12)                        # I-cachable: regions 1, 4
+    b.cp15_write(0, 9, 1, 1, 0x0C)                        # ITCM 32 KB at 0
+    b.cp15_write(0, 1, 0, 0, n.cp15.control or (1'u32 shl 12) or (1'u32 shl 18))
+    for i in 0'u32 ..< 0x8000: n.main_ram[0x24_0000 + int(i)] = uint8(i * 7 + 3)
+    for i in 0'u32 ..< 0x2000: n.itcm[int(i)] = uint8(i * 5 + 1)
+    for i in 0'u32 ..< 0x2000: n.arm7_wram[int(i)] = uint8(i * 3 + 2)
+    ms[k] = n
+  var r = 0x1234_5678'u32
+  proc rnd(r: var uint32; m: uint32): uint32 =
+    r = r * 1103515245'u32 + 12345'u32
+    (r shr 8) mod m
+  var same9, same7 = true
+  var where = ""
+  const BASES9 = [0x0224_0000'u32, 0x0224_1000, 0x0000_1000, 0xFFFF_0000'u32]
+  const BASES7 = [0x0380_0000'u32, 0x0380_1000, 0x0224_2000, 0x0000_0000]
+  var pc9 = BASES9[0]
+  var pc7 = BASES7[0]
+  for step in 0 ..< 20000:
+    let op = r.rnd(100)
+    if op < 12:                                          # a jump: in the line, the page or elsewhere
+      let kind = r.rnd(3)
+      if kind == 0: pc9 = (pc9 and not 31'u32) or (r.rnd(8) * 4)
+      elif kind == 1: pc9 = (pc9 and not 0xFFF'u32) or (r.rnd(1024) * 4)
+      else: pc9 = BASES9[r.rnd(4)] + r.rnd(1024) * 4
+    elif op < 24:
+      let kind = r.rnd(3)
+      if kind == 0: pc7 = (pc7 and not 31'u32) or (r.rnd(8) * 4)
+      elif kind == 1: pc7 = (pc7 and not 0xFFF'u32) or (r.rnd(1024) * 4)
+      else: pc7 = BASES7[r.rnd(4)] + r.rnd(1024) * 4
+    elif op < 26:
+      # memory behind the code: the ARM7 writes a line, the ARM9 dirties one
+      let a = 0x0224_0000'u32 + r.rnd(0x2000) * 4
+      let v = r.rnd(0xFFFF)
+      for n in ms: Arm7Bus(nds: n).write32(a, v)
+    elif op < 28:
+      let a = 0x0224_0000'u32 + r.rnd(0x2000) * 4
+      for n in ms:
+        discard Arm9Bus(nds: n).read32(a)
+        Arm9Bus(nds: n).write32(a, 0x5A5A_0000'u32 + uint32(step))
+    elif op < 29 and (step and 64) == 0 and (pc9 and 3) == 0:
+      # drop a code line (an MCR: ARM code, the next fetch is a new word)
+      for n in ms: Arm9Bus(nds: n).cp15_write(0, 7, 5, 1, pc9)
+    var v9, v7: array[2, uint32]
+    let thumb = (step and 64) != 0
+    if not thumb:
+      pc9 = pc9 and not 3'u32
+      pc7 = pc7 and not 3'u32
+    for k in 0..1:
+      let n = ms[k]
+      if k == 1: n.fetch_paths_off()
+      v9[k] = if thumb: Arm9Bus(nds: n).fetch16(pc9) else: Arm9Bus(nds: n).fetch32(pc9)
+      if k == 1: n.fetch_paths_off()
+      v7[k] = if thumb: Arm7Bus(nds: n).fetch16(pc7) else: Arm7Bus(nds: n).fetch32(pc7)
+    let a = ms[0]
+    let c = ms[1]
+    if same9 and (v9[0] != v9[1] or a.wait9 != c.wait9 or a.last_pc9 != c.last_pc9 or
+                  a.last_fetch9 != c.last_fetch9 or a.last_data9 != c.last_data9 or
+                  a.tm.icache.last != c.tm.icache.last or a.pu_ok != c.pu_ok):
+      same9 = false; where.add " arm9@" & $step
+      echo "  first difference: pc9=", toHex(pc9), " thumb=", thumb, " op=", op, " v=", toHex(v9[0]), "/", toHex(v9[1]), " wait=", a.wait9, "/", c.wait9,
+           " lastpc=", toHex(a.last_pc9), "/", toHex(c.last_pc9), " lf=", toHex(a.last_fetch9), "/", toHex(c.last_fetch9),
+           " ld=", toHex(a.last_data9), "/", toHex(c.last_data9), " ic=", toHex(a.tm.icache.last), "/", toHex(c.tm.icache.last),
+           " pu=", toHex(a.pu_ok[0]), "/", toHex(c.pu_ok[0])
+    if same7 and (v7[0] != v7[1] or a.wait7 != c.wait7 or a.last_fetch7 != c.last_fetch7 or
+                  a.last_data7 != c.last_data7):
+      same7 = false; where.add " arm7@" & $step
+    pc9 += (if thumb: 2 else: 4)
+    pc7 += (if thumb: 2 else: 4)
+  check(same9 and same7, "ARM9 and ARM7: every fetch as the long way gives it", where)
+  # a jump in the fast line from User mode: the protection unit is asked
+  # again (its remembered page is per privilege)
+  let n = machine()
+  n.arm9.wl_on = false
+  n.cache_on(write_back = true)
+  let b = Arm9Bus(nds: n)
+  b.cp15_write(0, 2, 0, 1, 0x02)
+  b.cp15_write(0, 5, 0, 3, 0x313)                         # code AP: region 1 privileged only
+  b.cp15_write(0, 1, 0, 0, n.cp15.control or (1'u32 shl 12))
+  const P = 0x0225_0000'u32
+  discard b.fetch32(P)
+  discard b.fetch32(P + 4)
+  n.arm9.set_cpsr(0x10)                                   # User mode
+  n.arm9.abort = 0
+  discard b.fetch32(P + 12)                               # a jump inside the line
+  check(n.arm9.abort == ABORT_PREFETCH, "a User-mode jump into privileged code aborts",
+        "abort " & $n.arm9.abort)
+
 block irq_at_next_opcode:
   # arm/cpu.nim run checks halt and the IRQ line only when `attn` says they
   # may have changed: an IRQ made takeable by the CPU's own store (IME
