@@ -453,8 +453,15 @@ proc edge_run(e: Edge; y: int; right: bool): Run {.inline.} =
 proc lin(a, b, n, d: int64): int64 {.inline.} =
   a + floorDiv((b - a) * n, d)
 
+# The divisor is 0 only where both points weigh nothing (w = 0: the eye
+# point in clip space). The factor is then 0, what an arm64 division by
+# zero answers, so every host draws it alike and the wasm build doesn't
+# trap. What the hardware does there is not known (Assumed).
 template pfac(n, d, w0, w1: int64; P: int): int64 =
-  ((n * w0) shl P) div (n * w0 + (d - n) * w1)
+  block:
+    let num = n * w0
+    let den = num + (d - n) * w1
+    if den == 0: 0'i64 else: (num shl P) div den
 
 proc edge_end(e: Edge; va: openArray[VAttr]; y: int; x: int32): EndAttr {.inline.} =
   ## The edge's attributes at row y (y + 1 for the far end of an x-major

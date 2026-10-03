@@ -546,6 +546,38 @@ proc scene_line_gaps() =
           (if has: "drawn" else: "left out") & " as on hardware")
     check((g.px(gapx - 1, gapy) and 0x3F3F3F) != 0, "line to (" & $dx & "," & $dy & "): the dot before is drawn")
 
+proc scene_eye_vertex() =
+  # A triangle with a corner at the eye point, clip space (0, 0, 0, 0):
+  # the projection sets w = z, so the vertex at the origin weighs nothing
+  # and the perspective factor along its edges is 0/0 at that end
+  # (render.nim pfac; 140 of this scene's dots reach it). An unguarded
+  # division traps in the wasm build; render.nim runs with checks off and
+  # arm64 answers 0, so natively this pins only that the scene draws, and
+  # draws alike every time.
+  echo "eye-point vertex (w = 0)"
+  var crcs: seq[uint32]
+  for _ in 0..1:
+    let (g, _) = fresh()
+    g.setup()
+    g.cmd(0x10, 0)
+    g.load4x4([1.0, 0, 0, 0,
+               0, 1, 0, 0,
+               0, 0, 1, 1,
+               0, 0, 0, 0])
+    g.cmd(0x10, 2)
+    g.cmd(0x29, poly_attr(31, front = true, back = true))
+    g.cmd(0x40, 0)
+    g.color(31, 0, 0); g.vtx(0.0, 0.0, 0.0)
+    g.color(0, 31, 0); g.vtx(-0.25, -0.25, 0.5)
+    g.color(0, 0, 31); g.vtx(0.0, 0.25, 1.0)
+    g.cmd(0x41)
+    g.finish("eye_vertex")
+    var px = newSeq[uint8](256 * 192 * 4)
+    for i in 0 ..< 256 * 192:
+      for k in 0..3: px[i * 4 + k] = uint8((g.ren.color[i] shr (8 * k)) and 0xFF)
+    crcs.add crc32(px)
+  check(crcs[0] == crcs[1], "an eye-point vertex draws the same twice")
+
 proc scene_overlap_edges() =
   # polyrastertest's "curse of edge marking" (docs/nds/3d-edges.md): a
   # white triangle and a red one 16/4096 behind it share their diagonal;
@@ -886,6 +918,7 @@ when isMainModule:
   scene_budget()
   scene_line_gaps()
   scene_overlap_edges()
+  scene_eye_vertex()
   rom_scenes()
   rom_render_timing()
   if failures > 0:
