@@ -26,6 +26,9 @@
 ## (no scroll/priority/blending).
 ## --ram-peek A1,.. prints those 32-bit main RAM words (the CPU's view, untimed)
 ## after every frame: "peek F A=V ..", as ndsref --ram-peek does.
+## --ram-poke A=V@F,.. writes the 32-bit word V to main RAM at A (the CPU's
+## view) before frame F runs, e.g. to give a game the random-number state
+## another run had there (docs/nds/commercial.md).
 ## --ram-shots F1,.. writes main RAM (4 MB, the CPU's view, untimed) to
 ## <out>_ram_<F>.bin after frame F (to compare with ndsref --ram-shots).
 ## --dump9/--dump7 ADDR:LEN:FILE writes LEN bytes read through that CPU's bus at the
@@ -261,6 +264,7 @@ when isMainModule:
   var shots: seq[int]
   var ram_shots: seq[int]
   var ram_peek: seq[uint32]
+  var ram_pokes: seq[(uint32, uint32, int)]
   var tops: seq[seq[uint32]]
   var peek9, peek7: seq[uint32]
   var dumps: seq[(bool, uint32, int, string)]
@@ -331,6 +335,11 @@ when isMainModule:
         for a in val.split(','): peek7.add uint32(parseHexInt(a))
       of "shots":
         for f in val.split(','): shots.add parseInt(f)
+      of "ram-poke":
+        for item in val.split(','):
+          let at = item.split('@')
+          let av = at[0].split('=')
+          ram_pokes.add (uint32(parseHexInt(av[0])), uint32(parseHexInt(av[1])), parseInt(at[1]))
       of "ram-peek":
         for a in val.split(','): ram_peek.add uint32(parseHexInt(a))
       of "ram-shots":
@@ -423,6 +432,10 @@ when isMainModule:
                  formatFloat(c / max(ip.getOrDefault(blk), 1), ffDecimal, 2), " cyc/instr"
             inc k
             if k == 25: break
+    for (a, v, at) in ram_pokes:
+      if f == at:
+        let i = int(a and 0x3FFFFC'u32)
+        for k in 0 ..< 4: n.main_ram[i + k] = uint8(v shr (8 * k))
     for p in presses:
       if f == p.first or f == p.last:
         if p.touch: n.set_touch(p.x, p.y, f == p.first)
@@ -436,6 +449,11 @@ when isMainModule:
       last_rumble = n.slot2_rumble()
       echo "rumble frame=", f, " strength=", last_rumble
     if pcs:
+      when defined(ndsdebug):
+        echo "frame ", f, " gx stall ", dbg_gx_stall, " dma ", dbg_dma_stall,
+             " arm9 busy ", n.arm9.cycles
+        dbg_gx_stall = 0
+        dbg_dma_stall = 0
       echo "frame ", f, " arm9 pc=", toHex(n.arm9.next_pc, 8),
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
            (if n.sleeping: " S" elif n.arm7.halted: " H" else: "")
