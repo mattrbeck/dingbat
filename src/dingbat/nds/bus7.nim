@@ -263,28 +263,76 @@ proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   n.wait7 += code7(top, width, seq, n.slot7_t)
   if not seq: n.wait7 += code7(top, width, true, n.slot7_t)
 
+template wram7_fast(a: uint32): bool =
+  ## 0x03800000-0x03FFFFFF: the ARM7's own WRAM (and its mirrors), most of
+  ## its data accesses. data_cost7 + read7/write7 there come to this: two
+  ## master cycles whatever the width or sequence (timing.nim data7).
+  (a shr 23) == 7
+
+template wram7_charge(n: NDS; a: uint32) =
+  if not n.dma7.dma_access:
+    n.last_data7 = a
+    n.wait7 += 2
+
+template wram7_ptr(n: NDS; a: uint32; T: typedesc): ptr T =
+  cast[ptr T](addr n.arm7_wram[int(a and 0xFFFF)])
+
 proc read8*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost7(a, 8)
-  b.nds.read7(a, 8)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_charge(a)
+    return uint32(n.wram7_ptr(a, uint8)[])
+  n.data_cost7(a, 8)
+  n.read7(a, 8)
 proc read16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost7(a, 16)
-  b.nds.read7(a, 16)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_charge(a)
+    return uint32(n.wram7_ptr(a, uint16)[])
+  n.data_cost7(a, 16)
+  n.read7(a, 16)
 proc read32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
-  b.nds.data_cost7(a, 32)
-  b.nds.read7(a, 32)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_charge(a)
+    return n.wram7_ptr(a, uint32)[]
+  n.data_cost7(a, 32)
+  n.read7(a, 32)
+
+template wram7_store(n: NDS; a: uint32; v: typed; T: typedesc) =
+  # write7's own-WRAM store: only a change can end a polling loop
+  n.wram7_charge(a)
+  n.sync7()
+  watch_write(n, "7", n.arm7, a, uint32(v))
+  let p = n.wram7_ptr(a, T)
+  if p[] != v:
+    inc n.idle_epoch7
+    p[] = v
 
 proc write8*(b: Arm7Bus; a: uint32; v: uint8) {.inline.} =
-  b.nds.data_cost7(a, 8)
-  b.nds.sync7()
-  b.nds.write7(a, uint32(v), 8)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_store(a, v, uint8)
+    return
+  n.data_cost7(a, 8)
+  n.sync7()
+  n.write7(a, uint32(v), 8)
 proc write16*(b: Arm7Bus; a: uint32; v: uint16) {.inline.} =
-  b.nds.data_cost7(a, 16)
-  b.nds.sync7()
-  b.nds.write7(a, uint32(v), 16)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_store(a, v, uint16)
+    return
+  n.data_cost7(a, 16)
+  n.sync7()
+  n.write7(a, uint32(v), 16)
 proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.} =
-  b.nds.data_cost7(a, 32)
-  b.nds.sync7()
-  b.nds.write7(a, v, 32)
+  let n {.cursor.} = b.nds
+  if wram7_fast(a):
+    n.wram7_store(a, v, uint32)
+    return
+  n.data_cost7(a, 32)
+  n.sync7()
+  n.write7(a, v, 32)
 
 proc fetch_page7(n: NDS; a: uint32) =
   ## After a fetch from `a`: in the BIOS, main RAM with nothing apart from

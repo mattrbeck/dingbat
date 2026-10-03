@@ -214,6 +214,15 @@ which reads those bits from the opcode: 1778 ARM and 100 Thumb procs per
 CPU. The binary grows by 0.8 MB (ndsrun 1.13 -> 1.94 MB). A bus module
 expands `dispatch_tables(B)` at its end, where every mixin is declared.
 
+## ARM7 WRAM data accesses (bus7.nim `wram7_fast`)
+
+Most ARM7 data accesses go to its own WRAM (0x03800000-0x03FFFFFF: 71 M
+of 85 M in SoulSilver's first 6000 frames). There `data_cost7` and
+`read7`/`write7` come to two master cycles whatever the width or sequence,
+`last_data7 = a`, and (for a store) the change-detecting store that bumps
+`idle_epoch7`; the bus's `read*`/`write*` do just that before the general
+path.
+
 ## Interrupt checks only when something changed (arm/cpu.nim `run`, `attn`)
 
 Before each opcode the run loop tested HALT and the IRQ line (IME, IE and
