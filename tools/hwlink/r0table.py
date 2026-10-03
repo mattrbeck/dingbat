@@ -221,10 +221,15 @@ TABLE = {
     # without a cart every cell answers DEAD0001. A chip's analog time, not a
     # console law: keep it out of the frozen cyclelaws ROMs.
     'eesettle': [3, 2, 0, 1],
+    # the same four cells on a 4 Kbit EEPROM cart (bit 8: 6-bit addresses),
+    # e.g. Klonoa - Empire of Dreams, whose 15 block writes on entering
+    # Vision 1-1 set the frame the level starts on (payloads/eesettle4k.s).
+    # Never with a 64 Kbit cart in the slot.
+    'eesettle4k': [0x103, 0x102, 0x100, 0x101],
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
-NEEDS_CART = {'eesettle'}
+NEEDS_CART = {'eesettle', 'eesettle4k'}
 
 
 def source(name):

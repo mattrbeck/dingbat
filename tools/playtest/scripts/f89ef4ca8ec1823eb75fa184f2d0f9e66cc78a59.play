@@ -15,6 +15,14 @@
 # Rockman; decline the tournament, UP wraps to セーブ, save.
 # [load]: title shows つづきから, NAVI SELECT, the PET menu on the saved date.
 # Japanese text does not OCR, so steps are fixed waits (menus here do not lag).
+# pet_greeting on: the NOW INSTALLING bar after NAVI SELECT pauses at random
+# from a per-frame LCG (0x02003F6C) that starts stepping at the title load,
+# two frames later on dingbat than on mGBA (the boot's EWRAM clear and the
+# title's EWRAM passes cost dingbat more, as the console's slotexec law
+# says), so dingbat leaves the install ~10 frames early and Mega Man's mosaic
+# fade-in ends early; with mGBA's LCG set to dingbat's the two match
+# (docs/playtest-bugs.md, "Rockman EXE 4.5: Mega Man's mosaic is the install
+# bar's dice").
 [new]
 wait 600
 # until text RESERVED timeout=900 every=10  [reached dingbat-bios+0 mgba+0 nba+0]

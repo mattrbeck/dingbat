@@ -9,15 +9,22 @@
 # story, Vision 1-1: grab a Moo, take a hit, jump up the ledges, pause,
 # Select Vision back to the map. [load]: Continue, file A shows
 # World 1 Ghazzaland, YES resumes on the Ghazzaland vision map.
-# Findings: the Vision 1-1 title card and first gameplay frames differ for
-# dingbat-bios only (f3320 and f3500: its first Moo is a few pixels/frames
-# off while mgba == nba); in the level the three drift by a frame here and
-# there and re-converge (identical at f4153). nba does not read back its
-# own 8 KB battery file: its title has no Continue on [load] (f1046).
-# new_game is compare=none: the title menu sits over scrolling clouds that
-# are at a different scroll position on all three at f1016 (dingbat-bios
-# differs from mgba by 30271 px, mgba from nba by 14367 px) and the OCR of
-# the copyright line flips; first run judged it MAJOR for dingbat-bios.
+# Findings: entering Vision 1-1 the game writes 15 EEPROM blocks, each
+# polled to ready; dingbat's block time (GBATEK's ~108368 cycles) brings the
+# title card and the level two frames before mgba (~115000 a block) and the
+# second reference: with -d:EEPROM_SETTLE_CYCLES=115005 all three are
+# pixel-identical at f3320 and f3500. The cart's own time is unmeasured
+# (r0table row eesettle4k). In the level the three drift by a frame here and
+# there and re-converge
+# (identical at f4153). nba does not read back its own 8 KB battery file:
+# its title has no Continue on [load] (f1046).
+# new_game is compare=none: the title menu's clouds are darkened (BLDY 5)
+# and dingbat is one 5-bit step darker than mgba on ~30k px -- the darken
+# rounding the SP's blendprobe photographs gave, not a scroll difference
+# (same cloud position); the second reference's clouds sit elsewhere
+# (14367 px from mgba).
+# The OCR of the copyright line flips (docs/playtest-bugs.md, "Klonoa: the
+# clouds are the darken rounding, the Vision 1-1 card is the cart's EEPROM").
 [new]
 wait 600
 wait 200

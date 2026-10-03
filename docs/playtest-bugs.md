@@ -3642,3 +3642,104 @@ LZ77UnCompVram 14, HuffUnComp 13, RLUnCompWram 14, RLUnCompVram 17,
 Diff8bitUnFilterWram 7, Diff8bitUnFilterVram 14, Diff16bitUnFilter 7): one
 `BIOS_CHECK_SKIP_COST` stands for all of them (swisp2.c cases 42-52). And
 SoundBias(0) with the level already at 0 is 2 cycles short (swisp.c).
+
+## 39. Rockman EXE 4.5: Mega Man's mosaic is the install bar's dice, and the dice are the boot's EWRAM cycles, 2026-10-02
+
+**Symptom.** At `pet_greeting` (f3624) all four dingbat configs show Mega
+Man fully drawn while mGBA and the second reference still show his mosaic
+fade-in (the second reference runs on the host clock, so from the PET menu
+on its screens are not diagnostic anyway, per the script). Asked: is
+dingbat ahead in time, or is MOSAIC latched or applied wrongly?
+
+**Not the mosaic.** dingbat *is* ahead -- mGBA shows at f what dingbat
+showed ten frames earlier (f3551-3604) -- but not because anything runs
+faster. Copying dingbat's two RNG words into mGBA at f3200 (`poke8` of
+0x02003F6C, 8 bytes, and 0x02003C84, 4 bytes) makes mGBA follow dingbat
+frame for frame through the install screen and show Mega Man fully drawn
+at f3624; VRAM, palette RAM and OAM are then byte-identical at f3502 and
+f3600. What is left (an 8-line step of the opening wipe at f3502, one
+5-bit step on ~1.2k pixels of the blended PET at f3600-3624) is the game's
+frame counter (0x02004B80), one behind mGBA's since f9 -- below.
+
+**Mechanism.** After NAVI SELECT the "NOW INSTALLING..." bar (f3274 on)
+advances with random pauses: mGBA's bar holds at 0x20 for nine frames
+(countdown at 0x0200F55E), dingbat's does not, and dingbat leaves the
+install ten frames early; the PET's mosaic fade-in follows. The pauses come
+from a per-frame LCG at 0x02003F6C. It is zeroed when the title loads and
+starts stepping at **f476 on mGBA, f477 on the second reference, f478 on
+dingbat** (all four configs alike). The script's keys arrive on fixed
+frames, so at NAVI SELECT dingbat's LCG holds mGBA's value of two frames
+before and throws other dice.
+
+**Where the two frames go** (instruction traces, `trace`, dingbat-bios-nowl
+against mGBA):
+
+1. *Boot RAM clear* (0x08000188: `subs; str r2,[r0,r1]; bne`, ARM from ROM
+   under WAITCNT 0x45B4 = WS0 3/1, prefetch on). Over IWRAM both take 22
+   cycles an iteration; over the 256 KB of EWRAM dingbat takes **26**,
+   mGBA still **22** -- the 6-cycle EWRAM word store costs mGBA nothing.
+   65536 x 4 = 262k cycles, 0.93 frame: the game's frame counter starts
+   f9 on dingbat, f8 on mGBA and the second reference.
+2. *Title load*. An XOR pass over EWRAM 0x02000000-0x0200A3F6 (0x08005C80:
+   `ldrb; eors; strb; subs; bge`) is **20** cycles an iteration in dingbat,
+   **16** in mGBA; a checksum over 0xC7A8 bytes (0x0804AB5C: `ldrb; adds;
+   subs; bge`) **16** against **14**. ~270k cycles, the second frame. (The
+   sound driver's V-blank code in ROM is ~1.1k cycles a frame dearer too.)
+
+**Who is right: dingbat, as far as the console has been asked.** Section
+22's `slotexec.s` on the AGB SP (section 29 leans on it the same way):
+EWRAM loads and stores from gamepak code with the prefetcher on cost what
+dingbat charges, and mGBA is 4-5 cycles short -- the same gap as both
+loops here. And mGBA's 16 for the XOR loop
+is under the 18 the ARM7TDMI's own counts give with every fetch served
+from a full prefetch buffer (two 3-cycle EWRAM byte accesses, the load's
+internal cycle, the taken branch's 4 + 2 refill, one cycle for each other
+instruction). The exact cells (3/1 waits) are not in the recorded tables:
+an empty-slot probe is only safe at WAITCNT 0 (section 22's rules), so
+this game's timing cannot be re-run on the rig as is. **No emulator
+change.** `pet_greeting` and everything after it in this script follow
+the install's dice; the script notes say so.
+
+## 40. Klonoa: the clouds are the darken rounding, the Vision 1-1 card is the cart's EEPROM, 2026-10-02
+
+**Symptom (curated, from an earlier evaluation).** The New Game screen's
+clouds and the Vision 1-1 title card differ on dingbat. The current suite
+no longer shows dingbat alone anywhere in this script (every checkpoint
+has all six emulators in one group, but the second reference alone at
+`vision_map` and `back_to_map`; `new_game` is compare=none, `level_start`
+a slip of +3 to mGBA and -2 to the second reference). Both reproduce
+frame by frame, as two mechanisms.
+
+**The clouds (f861-1070): rounding, not scroll.** The screen is under a
+brightness decrease (mGBA's registers: BLDCNT 0x00D6, BLDY 5). dingbat and
+mGBA have the clouds in the same place: all 30k pixels that differ are
+dingbat **one 5-bit step darker**, and every differing pair is exactly
+`t*11 >> 4` (dingbat) against `t - (t*5 >> 4)` (mGBA) for some t -- the
+darken rounding dingbat takes from the SP photographs of `blendprobe.gba`
+(`ppu.nim` `blend_colors`, docs/hwprobe-questions.md; an exact capture is
+still wanted there). The second reference differs from both by -3..+3 on
+~14k pixels (its clouds sit elsewhere). The Vision 1-1 card's fades show
+the same one-step darkening (f3230).
+
+**The Vision 1-1 card (f3213 on): the EEPROM's programming time.** From
+f3213 dingbat runs two frames ahead of both references (they agree with
+each other) through the title card and into the level. Entering Vision
+1-1 the game writes 15 blocks of its 4 Kbit EEPROM (f3204-3209), polling
+each to ready (0x08051798, `ldrh 0x0D000000; bit 0`, 32 cycles a poll in
+both): **108141 cycles a block in dingbat** (`EEPROM_SETTLE_CYCLES`,
+GBATEK's 108368 from the last data bit), **114776 in mGBA**. Built with
+`-d:EEPROM_SETTLE_CYCLES=115005` (section 36's mGBA figure), dingbat-bios
+equals mGBA frame for frame from f3167 and is pixel-identical to *both*
+references at f3320 and f3500; the frames that still differ are fade
+frames, i.e. the darken rounding above.
+
+**Who is right: the cart.** As in section 36: a block's programming time
+is the chip's, varies between parts, and is unmeasured; GBATEK's "ca.
+108368" stays. A 4 Kbit cart is a different chip from Super Mario Advance
+3's 64 Kbit one, so it gets its own row: `tests/roms/payloads/eesettle4k.s`
+(eesettle.s with 6-bit addresses; r0table row `eesettle4k`, cart rows are
+recorded only when named). With Klonoa in the SP's slot, booted holding
+SELECT+START: `python3 tools/hwlink/r0table.py --record eesettle4k`.
+dingbat predicts 0x103 FFFFFFFF (blank last block) or the block, 0x102
+00000300, 0x100 / 0x101 0001A74A (108362); mGBA 00000301 and 0001C130
+(114992). Never with a 64 Kbit cart inserted. **No emulator change.**
