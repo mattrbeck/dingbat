@@ -1,12 +1,16 @@
-# DS performance: the cheap, exact wins
+# DS performance: the cheap, exact wins, then caching and the interpreter
 
-Scope of this round (branch `nds-perf`): only low-hanging fruit, while
-accuracy work goes on. One rule over everything: **a speed-up may not
+Two rounds: low-hanging fruit (branch `nds-perf`: idle loops, 3D frame
+reuse) and a measured one on caching and the interpreter (branch
+`nds-cache-perf`: where the host instructions go, 2D line reuse, and the
+CPU's per-opcode overhead). One rule over everything: **a speed-up may not
 change any output** -- frames, sound, the whole machine state (save-state
-payload), opcode counts, the sweep's statuses. Each speed-up below can be
-turned off with `DINGBAT_NDS_NO_SKIP=1`, and `ndsrun --state-hash N` prints
-a CRC-32 of the whole state every N frames, so an on/off pair of runs can
-be compared byte for byte.
+payload), opcode counts, the sweep's statuses. The skips (idle loops, 3D
+frames, 2D lines) can be turned off with `DINGBAT_NDS_NO_SKIP=1`, and
+`ndsrun --state-hash N` prints a CRC-32 of the whole state every N frames,
+so an on/off pair of runs can be compared byte for byte; the interpreter
+changes are always on, and were checked by whole-state hashes against the
+build before them (same layout) and by the tests named in their sections.
 
 ## Idle-loop skipping (arm/cpu.nim `loop_edge`, nds.nim `quiet`)
 
@@ -246,7 +250,133 @@ an `STR` to IME and an `MSR` clearing CPSR.I on both CPUs and checks the
 IRQ comes before the next opcode; leaving out the I/O write's flag fails
 it (the IRQ comes one opcode late).
 
-## Numbers
+## Where the host instructions go (round 2, `nds-cache-perf`)
+
+Measured on `ndsrun` -d:danger (the web build's mode) with
+`/usr/bin/time -l` (instructions retired: load-independent, exact per
+binary) and an in-process sampler (SIGPROF every 100 us of CPU time,
+pcs symbolised with inline frames by `atos -i`, then sorted into
+components by the innermost recognisable frame; scripts in the round's
+scratch directory). SoulSilver p12 frames 0-6000, real BIOS: 187.5 G host
+instructions, 2.3 G of them loading the ROM; the CPUs *executed* 205 M
+ARM9 opcodes (238 M counted: idle-loop skipping did the rest) and 225 M
+ARM7 ones, so 431 host instructions per executed opcode all told.
+
+Sampled time at the start of the round (base 20a766f2), and the same
+converted to host instructions per executed opcode of that CPU (time share
+x 185 G / opcodes: approximate, as instructions per cycle differ a little
+by component):
+
+| component | ARM9 | ARM7 |
+|---|---|---|
+| run loop + `step` (IRQ line, halt, trace, cycle accounting, the error-flag tests after calls) | 8.0 % (72) | 8.8 % (72) |
+| opcode fetch (fetch timing, PU page check, I-cache tags, the read) | 4.8 % (43) | 2.0 % (16) |
+| decode (condition, the dispatch tree) | 4.3 % (39) | 4.7 % (39) |
+| handler bodies (ALU, transfers) | 4.0 % (36) | 6.5 % (53) |
+| data accesses (TCM/region tests, timing, D-cache tags and contents, I/O) | 7.0 % (63) | 7.0 % (58) |
+| **CPU** | **28.1 % (254)** | **29.0 % (239)** |
+
+The rest: 2D engines 22.1 %, 3D 8.4 %, startup and seq copies 5.1 %, SPU
+3.8 %, the slice loop and events 2.4 %. So per executed opcode the CPU
+side was ~245 host instructions, and the fetch side only ~1/6 of it: most
+went to loop overhead, decode and the data path.
+
+What each change removed (exact: successive builds, same frames,
+whole-state hashes equal):
+
+| change | SoulSilver 0-6000 | per executed opcode |
+|---|---|---|
+| base | 187.5 G | 431 |
+| 2D line reuse, one change count per engine | -35.4 G | (2D) |
+| error-flag tests after calls (`quirky`) | -18.8 G | -44 (32 of it CPU + bus) |
+| sequential fetch fast paths | -6.4 G | -15 |
+| dispatch tables (specialised decoders) | -9.9 G | -23 |
+| halt/IRQ checks only on `attn` | -5.4 G | -12 |
+| 2D: per-block VRAM, per-line OAM counts | -2.8 G | (2D) |
+| ARM9 fetch into the next cached line | -2.2 G | -5 |
+| ARM7 own-WRAM data | -2.1 G | -5 |
+| ARM9 fast path for clean lines in pages apart | +0.4 G | (-37 % on NitroGrafx) |
+| **now** | **104.9 G** | **239** |
+
+And where the time goes now (same sampler): ARM9 33 % (handler bodies
+with decode 13 %, data 6.5 %, fetch 7.6 %, loop 3.6 %, tags 1.9 %), ARM7
+30 % (handler bodies with decode 16.6 %, loop 5 %, data 4.1 %, fetch
+4.6 %), 3D 12 %, 2D 8 %, SPU 5 %, slice loop 3.6 %, startup 6 %. Per
+executed opcode that is roughly 160 host instructions for the ARM9 and
+140 for the ARM7, about 55 of them the run loop and fetch: the stores of
+pc, r15, cur_pc and the trackers, the table jump, and the cycle and opcode
+counts.
+
+## A decoded or block cache?
+
+The question was whether the code being "materially the same between
+caches" could be cached decoded. Decoding is now memoised at compile time
+instead: the dispatch tables are the decoder specialised for every index,
+and a lookup costs the same as a decoded-cache hit (a load and an indirect
+call) with nothing to invalidate. What a block cache could still remove is
+the per-opcode fetch work left in the fast paths -- the line/page and
+sequence compares, the opcode load, the index computation -- about 15 of
+the ~55 remaining loop and fetch instructions per opcode, an upper bound of
+6-7 % of SoulSilver now. Exactness would cost a write barrier on every
+code-holding page (both CPUs' stores, DMA, cache write-backs, the loaders)
+or a per-block check of the opcodes, which is the fetch it saves. The GBA
+core's cached-interpreter study (2026-07, since dropped from docs/)
+reached the same ceiling, +8-12 %, for the same reason: the timing
+model's per-access work, not decode, is what is left. Not built.
+
+## Numbers: round 2 (`nds-cache-perf`)
+
+Host instructions retired, -d:danger, real BIOS unless noted,
+`--rtc 2004-01-01`; homebrew: 600 frames, the sweep's default input
+script. Base = `worktree-nds-skeleton` 20a766f2. Every row's screens (and
+for SoulSilver the shots at 3000/5000/8000: e4b66d68 / 6cf51b7e /
+ae4536a1) and opcode counts are identical to the base; the state rows run
+from the same machine states (saved by each build: the layout dropped the
+2D scratch).
+
+| workload | base | now | change |
+|---|---|---|---|
+| SoulSilver p12, frames 0-8100 | 318.8 G | 182.9 G | -42.6 % |
+| SoulSilver p12, frames 0-8100, HLE BIOS | 307.8 G | 174.9 G | -43.2 % |
+| SoulSilver p12, frames 0-6000 | 187.5 G | 104.9 G | -44.0 % |
+| SoulSilver title, 600 frames from frame 1000 | 25.70 G | 17.28 G | -32.8 % |
+| SoulSilver intro dialogue, 600 frames from frame 3000 | 19.23 G | 9.40 G | -51.1 % |
+| SoulSilver overworld, 600 frames from frame 7100, walking | 42.91 G | 27.15 G | -36.7 % |
+| Cave Story | 33.86 G | 23.07 G | -31.9 % |
+| MAXMXDS | 74.28 G | 44.45 G | -40.2 % |
+| nesDS | 7.74 G | 4.60 G | -40.6 % |
+| NitroGrafx | 101.45 G | 56.49 G | -44.3 % |
+| trans flag (beam race) | 90.12 G | 37.62 G | -58.3 % |
+| Space Impakto | 23.65 G | 13.92 G | -41.1 % |
+| Tales of Dagur | 16.11 G | 14.35 G | -10.9 % |
+| Triple Triad | 15.72 G | 9.04 G | -42.5 % |
+
+Tales of Dagur scrolls its affine BGs every frame (engine A's lines all
+change) and maps two banks over one page of engine B's BG (the slow,
+OR'd path, never reused); its 2D compositing is what is left. NitroGrafx
+changes its palette or VRAM mapping every frame (no line reused); its gain
+is the interpreter's, a third of it from fetching code in pages that also
+hold written data (`line_clean9`).
+
+**Checks.** All 14 DS suites pass (`nds_perf_test` gained the 2D line
+reuse runs and pokes, `nds_testroms_test` the fetch fast path and
+interrupt latency checks). Every ROM in `~/.cache/dingbat-nds/roms` (504:
+our tests, the 3D suite, BlocksDS tests and examples, gbeplus, homebrew,
+libnds examples; 600 frames, the default input script, real BIOS) ran
+with skipping on and off and on the base build: whole-state hashes every
+30 frames equal on/off, and final screen, three shots, sound and opcode
+counts equal on/off and to the base, in all 504. Over the 504 runs the
+host instructions fell from 5809 G to 3961 G (-31.8 %; the largest:
+disp_mmem 132 -> 113 G, math__atan2 126 -> 66 G, NitroGrafx 102 -> 57 G,
+the gbeplus ARM9 tests ~99 -> ~70 G). SoulSilver with the HLE BIOS gives
+the same shots and opcode counts as before; a -d:release build (checks
+on) drops from 231.2 G to 135.0 G on frames 0-6000.
+
+The DS web module (`web/nds/nds.wasm`, emcc -O3) grows from 617 KB to
+780 KB (gzip 185 KB to 206 KB) with the dispatch tables; ndsrun from
+1.13 MB to 1.94 MB.
+
+## Numbers: the first round (`nds-perf`)
 
 Host instructions retired (`/usr/bin/time -l`), real BIOS unless noted,
 `--rtc 2004-01-01`, the sweep's default input script for homebrew; base =
@@ -296,10 +426,21 @@ the save-state layout is unchanged (old states load).
 - **One CPU halted, the other working.** Slices stay 64 cycles so a write
   that wakes the halted CPU lands on the same slice boundary; ending the
   slice at the next 64-cycle grid point after such a write would allow
-  longer slices, but the slice loop is ~1 % of SoulSilver.
-- **The interpreter itself** is the real lever (150-250 host instructions
-  per opcode; SoulSilver's profile: the run loop ~25 %, I-cache tag
-  lookups ~4 %, 2D compositing ~7 %, rasteriser ~5-20 %): decoded-opcode
-  caching, cheaper fetch timing. Not low-hanging.
+  longer slices; the slice loop is now 3.6 % of SoulSilver.
+- **The ARM9 data path** (6.5 % of SoulSilver, 13 % of its overworld):
+  the TCM tests go through two pointers (cp15, dma9) on every access and
+  main RAM through the D-cache tag check and `dc_apart`; a per-page "data
+  TLB" (host pointer, region, cost class), turned off where the fetch
+  fast path is, would roughly halve it. DTCM alone is too little (21 M of
+  71 M ARM9 accesses, ~5 instructions each).
+- **2D compositing** is most of the 2D cost left (Tales of Dagur, lines
+  whose scroll changes every frame): per-layer line reuse would save the
+  BG/OBJ passes but not the per-pixel layer search, which is the bigger
+  part; vectorising it is the lever there.
+- **Conditions by table** (a 16 x 16-bit table instead of the switch in
+  `cond_passed`): same instruction count, fewer mispredicted branches;
+  not measurable in instructions, so not kept.
 - **3D per line.** When rendering follows mid-frame register writes
-  (TODO in render.nim), the reuse key must include them.
+  (TODO in render.nim), the reuse key must include them. The 3D renderer
+  (12 % of SoulSilver now, the title's animated logo) is outside this
+  round.
