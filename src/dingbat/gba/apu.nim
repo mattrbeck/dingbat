@@ -407,9 +407,14 @@ proc get_sample*(apu: APU) =
     else:
       ch1 * int16(l.channel_1_right) + ch2 * int16(l.channel_2_right) +
       ch3 * int16(l.channel_3_right) + ch4 * int16(l.channel_4_right)
+  # The master volume is the PSG block's own NR50 (the GBA's SOUNDCNT_L
+  # bits 0-2 / 4-6 are that register): (V + 1) / 8, so 0 is an eighth, not
+  # silence -- Pan Docs, and the GB core's mix (gb/apu.nim). The GBA follows
+  # the GB where the SP has not measured otherwise; this one is not measured
+  # yet (tests/roms/payloads/psgvol.s, by microphone). It was V / 8 here.
   let shift = if psg_muted: 5 else: 5 - int(apu.soundcnt_h.sound_volume)
-  let psg_left  = int32(psg_sound_left)  * int32(l.left_volume)  shr shift
-  let psg_right = int32(psg_sound_right) * int32(l.right_volume) shr shift
+  let psg_left  = int32(psg_sound_left)  * (int32(l.left_volume) + 1)  shr shift
+  let psg_right = int32(psg_sound_right) * (int32(l.right_volume) + 1) shr shift
   var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
   # MP2K HLE (mp2k.nim): substitute the shadow render for the FIFO A/B
   # latches (L->A, R->B) while the engine mixer is live and owns the stream;
@@ -484,7 +489,12 @@ proc get_sample*(apu: APU) =
   let fine_gb = (if apu.channel_mask[5]: float32(int32(1) shl int(apu.soundcnt_h.dma_sound_b_volume)) else: 0'f32)
   let fine_left  = fine_a * fine_ga * float32(apu.soundcnt_h.dma_sound_a_left)  + fine_b * fine_gb * float32(apu.soundcnt_h.dma_sound_b_left)
   let fine_right = fine_a * fine_ga * float32(apu.soundcnt_h.dma_sound_a_right) + fine_b * fine_gb * float32(apu.soundcnt_h.dma_sound_b_right)
-  let bias = int32(apu.soundbias.bias_level)
+  # The level field is bits 1-9 (GBATEK: "Bias Level (Default=100h)", the
+  # register's 200h), so in the 10-bit sum it counts twice: 200h centres the
+  # DAC's 0..3FFh on a DMA channel's full swing (an 8-bit sample x4 at
+  # 100%). Taken as 100h, the sum clipped at -256 below and 767 above: the
+  # negative half of every DirectSound peak past -64 x4 was cut off.
+  let bias = int32(apu.soundbias.bias_level) shl 1
   # SOUNDBIAS bits 14-15 "Amplitude Resolution/Sampling Cycle" (GBATEK):
   # "0 9bit/32.768kHz, 1 8bit/65.536kHz, 2 7bit/131.072kHz, 3 6bit/262.144kHz".
   # Modelled by masking the low `res` bits of the biased 10-bit sum (res=0
