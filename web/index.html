@@ -923,6 +923,16 @@
                     <span class="switch-track"></span>
                   </label>
                 </div>
+                <!-- Only the see-through landscape pads draw an outline worth
+                     tuning, so the row hides while opaque controls are on. -->
+                <div class="modal-toggle-row" id="control-outline-row">
+                  <div>
+                    <span class="modal-row-label">Button outline width</span>
+                    <span class="modal-toggle-sub">Thicker see-through outlines in landscape are easier to spot without covering the game</span>
+                  </div>
+                  <output class="setting-range-value" id="control-outline-value" for="control-outline-slider">1px</output>
+                  <input type="range" id="control-outline-slider" class="setting-range" min="1" max="4" step="0.5" value="1" aria-label="Button outline width" />
+                </div>
                 <div class="modal-toggle-row">
                   <div>
                     <span class="modal-row-label">Rumble</span>

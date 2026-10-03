@@ -10079,10 +10079,13 @@ const loadLargeControlsFromStorage = async () => {
 
 // --- Opaque controls in landscape ---
 const opaqueControlsToggle = /** @type {HTMLInputElement} */ (document.getElementById("opaque-controls-toggle"));
+const controlOutlineRow = document.getElementById("control-outline-row");
 
 const applyOpaqueControls = (on) => {
   document.body.classList.toggle("opaque-controls", on);
   opaqueControlsToggle.checked = on;
+  // Opaque pads ignore the outline width (styles.css), so hide its slider.
+  controlOutlineRow.classList.toggle("hidden", on);
 };
 
 opaqueControlsToggle.addEventListener("change", async () => {
@@ -10092,6 +10095,37 @@ opaqueControlsToggle.addEventListener("change", async () => {
 
 const loadOpaqueControlsFromStorage = async () => {
   applyOpaqueControls(!!(await dbGet("opaque-controls")));
+};
+
+// --- Outline width of the see-through landscape controls ---
+// "control-outline" holds the width in px; styles.css reads it as
+// --pad-outline-w on body.
+const controlOutlineSlider = /** @type {HTMLInputElement} */ (document.getElementById("control-outline-slider"));
+const controlOutlineValue = document.getElementById("control-outline-value");
+const CONTROL_OUTLINE_MIN = 1;
+const CONTROL_OUTLINE_MAX = 4;
+const CONTROL_OUTLINE_DEFAULT = 1;
+
+const applyControlOutline = (px) => {
+  document.body.style.setProperty("--pad-outline-w", px + "px");
+  controlOutlineSlider.value = String(px);
+  const fill = ((px - CONTROL_OUTLINE_MIN) / (CONTROL_OUTLINE_MAX - CONTROL_OUTLINE_MIN)) * 100;
+  controlOutlineSlider.style.setProperty("--vol", fill + "%");
+  controlOutlineValue.textContent = px + "px";
+};
+
+// Live while dragging; stored once on release.
+controlOutlineSlider.addEventListener("input", () => {
+  applyControlOutline(Number(controlOutlineSlider.value));
+});
+controlOutlineSlider.addEventListener("change", async () => {
+  await dbPut("control-outline", Number(controlOutlineSlider.value));
+});
+
+const loadControlOutlineFromStorage = async () => {
+  const v = await dbGet("control-outline");
+  const ok = typeof v === "number" && v >= CONTROL_OUTLINE_MIN && v <= CONTROL_OUTLINE_MAX;
+  applyControlOutline(ok ? v : CONTROL_OUTLINE_DEFAULT);
 };
 
 // --- Hide touch controls while a game controller is connected ---
@@ -10408,7 +10442,7 @@ themeChips.forEach((chip) =>
 // re-runs each subsystem's apply. No reload.
 const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
-  "keybindings", "large-controls", "opaque-controls",
+  "keybindings", "large-controls", "opaque-controls", "control-outline",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
   "runahead", "gb-palette", "input-display", "library-open",
 ];
@@ -10463,6 +10497,7 @@ const resetAllSettings = async () => {
 
   applyLargeControls(false);
   applyOpaqueControls(false);
+  applyControlOutline(CONTROL_OUTLINE_DEFAULT);
   applyControlStyle("dpad");
   applyJoystickMode("fixed");
   applyHideTouchOnGamepad(true);
@@ -14196,6 +14231,7 @@ const initStorage = async () => {
   await loadKeybindingsFromStorage();
   await loadLargeControlsFromStorage();
   await loadOpaqueControlsFromStorage();
+  await loadControlOutlineFromStorage();
   await loadHideTouchOnGamepadFromStorage();
   await loadInputDisplayFromStorage();
   await loadControlStyleFromStorage();

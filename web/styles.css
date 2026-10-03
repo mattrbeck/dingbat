@@ -1512,7 +1512,10 @@ body:not(.running) #channels-indicator {
   color: var(--danger);
 }
 
-.vol-range {
+/* .setting-range shares the volume slider's look but not its class: index.js
+   drives every .vol-range as a volume control. */
+.vol-range,
+.setting-range {
   -webkit-appearance: none;
   appearance: none;
   height: 5px;
@@ -1532,7 +1535,8 @@ body:not(.running) #channels-indicator {
   width: 92px;
 }
 
-.vol-range::-webkit-slider-thumb {
+.vol-range::-webkit-slider-thumb,
+.setting-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 15px;
   height: 15px;
@@ -1543,7 +1547,8 @@ body:not(.running) #channels-indicator {
   cursor: pointer;
 }
 
-.vol-range::-moz-range-thumb {
+.vol-range::-moz-range-thumb,
+.setting-range::-moz-range-thumb {
   width: 15px;
   height: 15px;
   border: none;
@@ -4866,6 +4871,7 @@ body.debug-2p .home-tile-link {
 /* The sliders clear the native outline; give keyboard focus the same ring
    the switches use or a focused slider is invisible. */
 .vol-range:focus-visible,
+.setting-range:focus-visible,
 .report-slider:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
@@ -5151,6 +5157,24 @@ body.debug-2p .home-tile-link {
 .settings-pane #save-hook-row > .save-hook-input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* Slider rows: the current value stands where a switch would, and the
+   slider takes a third line at the row's full width. */
+.settings-pane .modal-toggle-row > .setting-range-value {
+  grid-area: 1 / 2 / span 2 / span 1;
+  justify-self: end;
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.settings-pane .modal-toggle-row > .setting-range {
+  grid-area: 3 / 1 / span 1 / span 2;
+  width: 100%;
+  margin: 14px 0 6px;
 }
 
 .settings-pane #save-hook-row > .save-hook-status {
@@ -7307,6 +7331,26 @@ body.rewind-off #report-slider {
     background: none;
     border-color: rgba(var(--accent-rgb), 0.7);
     box-shadow: 0 0 14px -4px var(--accent-glow);
+  }
+  /* Outline width from Settings › Controls (--pad-outline-w, set on body).
+     max() so a theme's bolder ring (Famicom's 3px A/B and cross) never thins
+     below its own width. Opaque pads keep their bevel, hence :not(). */
+  body:not(.opaque-controls) .pad-btn {
+    border-width: var(--pad-outline-w, 1px);
+  }
+  body:not(.opaque-controls) .pad-face {
+    border-width: max(var(--pad-outline-w, 1px), var(--btn-ab-border-w));
+  }
+  body:not(.opaque-controls) #dpad > .pad-btn {
+    border-width: max(var(--pad-outline-w, 1px), var(--dpad-border-w, 1px));
+  }
+  body:not(.opaque-controls) #dpad > #dpad-center {
+    border-top-width: max(var(--pad-outline-w, 1px), var(--dpad-border-w, 1px));
+    border-bottom-width: max(var(--pad-outline-w, 1px), var(--dpad-border-w, 1px));
+  }
+  /* Keep the direction arc riding the (now thicker) outer edge */
+  body:not(.opaque-controls) #joystick-rim {
+    inset: calc(-1 * var(--pad-outline-w, 1px));
   }
   /* Opaque-controls opt-out; higher specificity and later, so it wins. */
   body.opaque-controls .pad-btn {
