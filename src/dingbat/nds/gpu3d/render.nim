@@ -164,7 +164,8 @@ template pal16(r: Renderer; a: int): uint32 =
     (uint32(r.pal_pages[((a + 1) shr 14) and 7][(a + 1) and 0x3FFF]) shl 8)
 
 proc wrap_coord(c, size: int; repeat, flip: bool): int {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
-  if not repeat: return clamp(c, 0, size - 1)
+  # clamp, spelt out: system.clamp is not inlined
+  if not repeat: return (if c < 0: 0 elif c > size - 1: size - 1 else: c)
   let m = c and (size - 1)
   if flip and (c and size) != 0: size - 1 - m else: m
 
@@ -715,7 +716,15 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EndAttr; sp: var SpanStep; e
 
 proc fill_k[K: static int](r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr;
                            sp: var SpanStep; edge: bool; role: uint8) =
-  for x in x0 ..< x1: plot_k[K](r, c, x, y, L, R, sp, edge, 31, role)
+  # local copies: the C compiler keeps them in registers, where the
+  # parameters (pointers it cannot tell from the buffers being written)
+  # would be loaded again for every dot
+  let cl = c
+  let ll = L
+  let rl = R
+  var st = sp
+  for x in x0 ..< x1: plot_k[K](r, cl, x, y, ll, rl, st, edge, 31, role)
+  sp = st
 
 proc fill(r: Renderer; c: PolyCtx; y, x0, x1: int; L, R: EndAttr; sp: var SpanStep;
           edge: bool; role = 0'u8) =
