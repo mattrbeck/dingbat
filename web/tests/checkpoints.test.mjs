@@ -153,6 +153,34 @@ test("Drive gets a checkpoint's session at most every five minutes; leaving send
   assert.ok(queued(), "leaving the game sends the session it has");
 });
 
+test("where a picture will not store (Safari private browsing), the checkpoint is kept without it", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  loaded(app);
+  // The picture's writes fail, as a Blob does in WebKit's private browsing:
+  // the session picture's, and the checkpoint's first try.
+  const refused = [];
+  let ckptTries = 0;
+  app.state.idbFail = (op, key) => {
+    if (op !== "put") return false;
+    if (key === "sessionpic:A.gba" || (/^ckpt\d+:/.test(key) && ckptTries++ === 0)) {
+      refused.push(key);
+      return true;
+    }
+    return false;
+  };
+  const ts = Date.now();
+  app.runIn(`sessionSnapTs.set('A.gba', ${ts})`);
+  await app.runIn(`storeCheckpoint('A.gba', { bytes: new Uint8Array([1, 2]), ts: ${ts}, play: 60000,
+                                              epoch: 0, saveSig: null, pic: { fake: "blob" } })`);
+  await settle();
+  assert.equal(refused.length, 2, "both picture writes were refused: " + refused.join(", "));
+  assert.equal(app.idb.get("stateauto:A.gba").ts, ts, "the session is stored");
+  const idx = app.idb.get("ckpts:A.gba");
+  assert.equal(idx?.list.length, 1, "and the checkpoint");
+  assert.equal(app.idb.get("ckpt" + idx.list[0].slot + ":A.gba").pic, null, "without its picture");
+});
+
 test("a newer snapshot taken while a checkpoint packs is not written back over", async () => {
   const app = await loadApp();
   stubModule(app);
@@ -254,6 +282,88 @@ test("one crash resumes as usual; two in a row ask first", async () => {
   assert.ok(modal.classList.contains("open"));
   assert.match(app.document.getElementById("moments-title").textContent, /stopped unexpectedly/);
   assert.equal(app.document.getElementById("moments-from-save").hidden, false);
+});
+
+test("a run that ended cleanly but whose IndexedDB write was lost (a quitting browser) is no crash", async () => {
+  const app = await loadApp({ localStorageSeed: {
+    "dingbat_clean:quit": JSON.stringify({ game: "A.gba", long: false }) } });
+  app.idb.set("playing", { quit: { game: "A.gba", at: 1, long: false } });
+  await app.runIn("noteCrashedRuns()");
+  assert.equal(app.runIn("crashStreak('A.gba')"), 0);
+  assert.deepEqual(marks(app), []);
+  assert.equal(app.lsMap.has("dingbat_clean:quit"), false, "the note is used up");
+});
+
+test("a long clean run whose write was lost still clears the count", async () => {
+  const app = await loadApp({ localStorageSeed: {
+    "dingbat_clean:quit": JSON.stringify({ game: "A.gba", long: true }) } });
+  crashesOf(app, { "A.gba": { streak: 1, since: 5 } });
+  app.idb.set("playing", { quit: { game: "A.gba", at: 1, long: true } });
+  await app.runIn("noteCrashedRuns()");
+  assert.equal(app.runIn("crashStreak('A.gba')"), 0);
+});
+
+test("a crash after a minute of play starts a new row: what it resumed did not stop it", async () => {
+  const app = await loadApp();
+  crashesOf(app, { "A.gba": { streak: 1, since: 5 } });
+  app.idb.set("playing", { gone: { game: "A.gba", at: 1, long: true } });
+  await app.runIn("noteCrashedRuns()");
+  assert.equal(app.runIn("crashStreak('A.gba')"), 1, "two long sessions ended by quitting never ask");
+  app.idb.set("playing", { gone2: { game: "A.gba", at: 2, long: false } });
+  await app.runIn("noteCrashedRuns()");
+  assert.equal(app.runIn("crashStreak('A.gba')"), 2, "a quick one after it does");
+});
+
+test("the mark says when a run has played a minute", async () => {
+  const app = await loadApp();
+  loaded(app);
+  app.runIn("markPlaying()");
+  await settle();
+  assert.equal(Object.values(app.idb.get("playing"))[0].long, false);
+  app.runIn("runPlayMs = 61 * 1000; notePlayingLong()");
+  await settle();
+  assert.equal(Object.values(app.idb.get("playing"))[0].long, true);
+});
+
+// ── Last gasp ───────────────────────────────────────────────────────────────
+
+test("a quitting browser's session and unsaved battery are taken in at the next boot", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  loaded(app);
+  app.sandbox.FS.files.set("rom.sav", u8(4, 4));
+  app.idb.set("save:A.gba", u8(1, 1)); // the autosave had not run
+  await app.runIn("persistAutoState()"); // the close handlers' snapshot ...
+  // ... whose IndexedDB write never lands: put it back as unstored.
+  const rec = app.idb.get("stateauto:A.gba");
+  app.idb.delete("stateauto:A.gba");
+  app.runIn(`unstoredSnap = { name: "A.gba", bytes: new Uint8Array(${JSON.stringify([...rec.bytes])}),
+             ts: ${rec.ts}, saveSig: ${JSON.stringify(rec.saveSig)}, play: 0 }`);
+  app.runIn("leaveLastGasp()");
+  assert.ok(app.lsMap.has("dingbat_lastgasp"));
+
+  const next = await loadApp({ localStorageSeed: { dingbat_lastgasp: app.lsMap.get("dingbat_lastgasp") } });
+  next.idb.set("save:A.gba", u8(1, 1));
+  await next.runIn("takeLastGasp()");
+  const auto = next.idb.get("stateauto:A.gba");
+  assert.equal(auto.ts, rec.ts, "the session it closed on");
+  assert.deepEqual([...next.idb.get("save:A.gba")], [4, 4], "with the battery it carried");
+  assert.equal(next.lsMap.has("dingbat_lastgasp"), false);
+  assert.equal(next.idb.get("lastgasp"), rec.ts);
+});
+
+test("a last gasp older than the stored session, or already taken in, changes nothing", async () => {
+  const gasp = (ts) => JSON.stringify({ game: "A.gba", ts, saveSig: null, play: 0, page: "p",
+                                        state: Buffer.from([7]).toString("base64"), sav: null });
+  const app = await loadApp({ localStorageSeed: { dingbat_lastgasp: gasp(100) } });
+  app.idb.set("stateauto:A.gba", { bytes: u8(9), ts: 200, saveSig: null });
+  await app.runIn("takeLastGasp()");
+  assert.equal(app.idb.get("stateauto:A.gba").ts, 200);
+
+  const again = await loadApp({ localStorageSeed: { dingbat_lastgasp: gasp(300) } });
+  again.idb.set("lastgasp", 300);
+  await again.runIn("takeLastGasp()");
+  assert.equal(again.idb.get("stateauto:A.gba"), undefined, "one that came back is not taken twice");
 });
 
 // ── Going back ──────────────────────────────────────────────────────────────

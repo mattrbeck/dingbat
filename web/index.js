@@ -8154,9 +8154,15 @@ const persistAutoState = () => {
   // and its older ts, so it is not taken for this one. Each goes up when it
   // lands (the picture rides in the session's Drive file).
   const key = autoStateKey(name);
-  const put = dbPut(key, { bytes, ts, saveSig: liveSaveSig(), by: deviceId, dev: deviceLabel,
-                           play: playClock() })
-    .then(() => markUpload(key)).catch(() => {});
+  const rec = { bytes, ts, saveSig: liveSaveSig(), by: deviceId, dev: deviceLabel,
+                play: playClock() };
+  const snap = { name, ...rec };
+  unstoredSnap = snap;
+  const put = dbPut(key, rec)
+    .then(() => {
+      if (unstoredSnap === snap) unstoredSnap = null;
+      markUpload(key);
+    }).catch(() => {});
   if (fb) {
     frameBlobFromFb(fb.heap, fb.w, fb.h)
       .then((blob) => blob && dbPut(sessionPicKey(name), { ts, blob }).then(() => put)
@@ -8181,6 +8187,8 @@ const persistAutoState = () => {
 // - packing on this thread cost ~10 ms there, a dropped frame. Without a
 // worker it all runs here, as persistAutoState does.
 const CHECKPOINT_PLAY_MS = 60 * 1000;
+// How often the battery file is looked at for a fresh in-game save.
+const SAVE_SETTLE_MS = 500;
 // Taken in a tick that has room for it; a busy one passes it to the next,
 // for up to CKPT_WAIT_MS before one is taken anyway.
 const CKPT_SLACK_MS = 6;
@@ -8251,6 +8259,7 @@ const packCheckpoint = async (plain, fb, sav) => {
       return { bytes: new Uint8Array(got.packed), pic, saveSig: got.saveSig ?? null };
     }
     // The buffers went with the message; this one is lost, the next runs here.
+    log("checkpoint worker: " + got.error, "warn");
     return null;
   }
   const bytes = packStateBytes(plain);
@@ -8315,7 +8324,9 @@ const storeCheckpoint = async (name, snap) => {
   const key = autoStateKey(name);
   await dbPut(key, { bytes: snap.bytes, ts: snap.ts, saveSig: snap.saveSig, by: deviceId,
                      dev: deviceLabel, play: snap.play });
-  if (snap.pic) await dbPut(sessionPicKey(name), { ts: snap.ts, blob: snap.pic });
+  // A picture is a Blob, which Safari's private browsing will not store: the
+  // session goes on without it (the hero falls back to the library's).
+  if (snap.pic) await dbPut(sessionPicKey(name), { ts: snap.ts, blob: snap.pic }).catch(() => {});
   if (Date.now() - (sessionMarkedAt.get(name) || 0) >= SESSION_UPLOAD_MS) {
     sessionMarkedAt.set(name, Date.now());
     sessionUnsent.delete(name);
@@ -8388,11 +8399,17 @@ const addCheckpoint = async (name, snap) => {
   // The record and the index in one transaction: a slot the index names is
   // always the checkpoint it says. One it no longer names is overwritten
   // when its slot is next taken.
-  await dbMoveKeys([], [
+  const write = (pic) => dbMoveKeys([], [
     [ckptKey(name, entry.slot), { bytes: snap.bytes, ts: snap.ts, play: snap.play,
-                                  saveSig: snap.saveSig, pic: snap.pic || null }],
+                                  saveSig: snap.saveSig, pic }],
     [ckptIndexKey(name), { play: Math.max(idx.play || 0, snap.play), list: keep }],
   ]);
+  // Without its picture where a Blob will not store (Safari's private
+  // browsing, seen in WebKit): the moment matters, the picture does not.
+  try { await write(snap.pic || null); } catch (e) {
+    if (!snap.pic) throw e;
+    await write(null);
+  }
 };
 
 // A game booted: its clock goes on from where its index left it.
@@ -8420,30 +8437,38 @@ const evictCheckpoints = async (keep) => {
 
 // --- Crashes -------------------------------------------------------------
 // A page that dies while a game is on screen leaves its mark behind: each
-// page records itself in `playing` ({ <page>: { game, at } }) while its game
-// runs in view, and takes itself out when the game pauses, the page is
-// hidden or closed, or the game is left. One found at boot is a run that
-// ended without any of those - a crash, or a kill in the foreground -
+// page records itself in `playing` ({ <page>: { game, at, long } }) while
+// its game runs in view, and takes itself out when the game pauses, the
+// page is hidden or closed, or the game is left. One found at boot is a run
+// that ended without any of those - a crash, or a kill in the foreground -
 // unless its page is still alive, which that page's Web Lock says.
 //
 // Crashes are counted per game in a row (`crashes`: { games: { <game>:
-// { streak, since } }, seen: [<page>...] }); a run that plays CLEAN_RUN_MS
-// and ends normally clears the count. Two in a row and the game asks
-// before resuming (the sheet's crash form), since the moment it resumes
-// may be the cause.
+// { streak, since } }, seen: [<page>...] }). Two in a row and the game asks
+// before resuming (the sheet's crash form), since the moment it resumes may
+// be the cause. A run counts toward the row only while it is short: one
+// that played CLEAN_RUN_MS (`long`, set once it gets there) starts a new
+// row at one - whatever ended it, what it resumed did not stop it - and one
+// that played that long and ended normally clears the count.
 //
-// IndexedDB, not localStorage: Chrome writes localStorage to disk seconds
-// later, so a browser killed soon after a relaunch - a game that crashes
-// as soon as it resumes - lost the count and brought back the mark already
-// counted (seen in a SIGKILL test). A transaction is on disk when it
-// completes. `seen` keeps a mark that comes back from being counted twice.
+// The marks and counts are in IndexedDB: Chrome writes localStorage to disk
+// seconds later, so a browser killed soon after a relaunch - a game that
+// crashes as soon as it resumes - lost the count and brought back the mark
+// already counted (seen in a SIGKILL test). `seen` keeps a mark that comes
+// back from being counted twice. But a closing page's IndexedDB writes do
+// not land when the whole browser quits (Chrome and WebKit both, measured),
+// while a synchronous localStorage write made in Chrome's close handlers
+// does: so the end of a run is also said there (`dingbat_clean:<page>`),
+// and a mark with it is not a crash.
 const PLAYING_KEY = "playing";
 const CRASHES_KEY = "crashes";
+const CLEAN_PREFIX = "dingbat_clean:";
 const CLEAN_RUN_MS = 60 * 1000;
 const CRASH_ASK_STREAK = 2;
 const CRASH_SEEN_MAX = 50;
 const pageId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 let playingMarked = false;
+let playingLong = false;
 let coreFaulted = false;
 // Read at boot (noteCrashedRuns) and written through: the tap that asks
 // first reads it synchronously.
@@ -8453,6 +8478,10 @@ const crashRecord = (v) => v && typeof v === "object" && v.games && typeof v.gam
 const crashInfo = (name) => crashes.games[name] || null;
 const crashStreak = (name) => crashInfo(name)?.streak || 0;
 const storeCrashes = () => dbPut(CRASHES_KEY, crashes).catch(() => {});
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } };
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch {} };
+const lsKeys = () => { try { return Object.keys(localStorage); } catch { return []; } };
 
 // Held for this page's life, so another page can tell a mark of ours from
 // a crashed one's.
@@ -8460,66 +8489,178 @@ if (typeof navigator !== "undefined" && navigator.locks?.request) {
   try { navigator.locks.request("dingbat-page:" + pageId, () => new Promise(() => {})); } catch {}
 }
 
+const putMark = (mark) =>
+  dbUpdate(PLAYING_KEY, (v) => ({ ...(v && typeof v === "object" ? v : {}), [pageId]: mark }))
+    .catch(() => {});
 const markPlaying = () => {
   if (playingMarked || !currentOriginalName) return;
   playingMarked = true;
-  const mark = { game: currentOriginalName, at: Date.now() };
-  dbUpdate(PLAYING_KEY, (v) => ({ ...(v && typeof v === "object" ? v : {}), [pageId]: mark }))
-    .catch(() => {});
+  playingLong = runPlayMs >= CLEAN_RUN_MS;
+  lsDel(CLEAN_PREFIX + pageId);
+  putMark({ game: currentOriginalName, at: Date.now(), long: playingLong });
+};
+// From the tick: the run has played long enough that what it resumed did
+// not stop it.
+const notePlayingLong = () => {
+  if (!playingMarked || playingLong || runPlayMs < CLEAN_RUN_MS || !currentOriginalName) return;
+  playingLong = true;
+  putMark({ game: currentOriginalName, at: Date.now(), long: true });
 };
 // The run ended normally. A core that faulted keeps its mark: the next
 // boot counts it.
 const clearPlaying = () => {
   if (!playingMarked || coreFaulted) return;
   playingMarked = false;
+  const name = currentOriginalName;
+  const long = runPlayMs >= CLEAN_RUN_MS;
+  // First, and synchronously: what a quitting browser keeps.
+  lsSet(CLEAN_PREFIX + pageId, JSON.stringify({ game: name, long }));
   dbUpdate(PLAYING_KEY, (v) => {
     if (!v || typeof v !== "object" || !(pageId in v)) return undefined;
     const next = { ...v };
     delete next[pageId];
     return next;
-  }).catch(() => {});
-  const name = currentOriginalName;
-  if (name && runPlayMs >= CLEAN_RUN_MS && crashStreak(name)) {
+  }).then(() => lsDel(CLEAN_PREFIX + pageId)).catch(() => {});
+  if (name && long && crashStreak(name)) {
     delete crashes.games[name];
     storeCrashes();
   }
 };
 
-// At boot: the marks of pages that are gone are crashes.
+// At boot: the marks of pages that are gone, and did not end cleanly, are
+// crashes.
 const noteCrashedRuns = async () => {
   crashes = crashRecord(await dbGet(CRASHES_KEY).catch(() => null));
-  const marks = await dbGet(PLAYING_KEY).catch(() => null);
-  if (!marks || typeof marks !== "object") return;
+  const stored = await dbGet(PLAYING_KEY).catch(() => null);
+  const marks = stored && typeof stored === "object" ? stored : {};
   let held = new Set();
   try {
     const q = await navigator.locks?.query?.();
     for (const l of q?.held || []) held.add(l.name);
   } catch {}
-  const gone = Object.keys(marks).filter((id) => id !== pageId && !held.has("dingbat-page:" + id));
-  if (!gone.length) return;
+  const alive = (id) => id === pageId || held.has("dingbat-page:" + id);
+  const gone = Object.keys(marks).filter((id) => !alive(id));
   const counted = [];
+  let changed = false;
   for (const id of gone) {
     const game = marks[id]?.game;
     if (crashes.seen.includes(id) || typeof game !== "string") continue;
+    const clean = lsGet(CLEAN_PREFIX + id);
+    if (clean !== null) {
+      // Ended normally; only its IndexedDB write was lost.
+      let c = null;
+      try { c = JSON.parse(clean); } catch {}
+      if (c?.long && crashes.games[game]) { delete crashes.games[game]; changed = true; }
+      continue;
+    }
     const c = crashes.games[game] || { streak: 0, since: 0 };
-    crashes.games[game] = { streak: c.streak + 1, since: c.since || Date.now() };
+    crashes.games[game] = marks[id]?.long
+      ? { streak: 1, since: Date.now() }
+      : { streak: c.streak + 1, since: c.since || Date.now() };
     log("previous run of " + game + " ended unexpectedly (" + crashes.games[game].streak +
         " in a row)", "warn");
     counted.push(game);
+    changed = true;
   }
-  crashes.seen = [...crashes.seen, ...gone].slice(-CRASH_SEEN_MAX);
+  if (gone.length) {
+    crashes.seen = [...crashes.seen, ...gone].slice(-CRASH_SEEN_MAX);
+    changed = true;
+  }
   // The count first, with the marks it counted; then the marks go.
-  await storeCrashes();
-  await dbUpdate(PLAYING_KEY, (v) => {
-    if (!v || typeof v !== "object") return undefined;
-    const next = { ...v };
-    for (const id of gone) delete next[id];
-    return next;
-  }).catch(() => {});
+  if (changed) await storeCrashes();
+  if (gone.length) {
+    await dbUpdate(PLAYING_KEY, (v) => {
+      if (!v || typeof v !== "object") return undefined;
+      const next = { ...v };
+      for (const id of gone) delete next[id];
+      return next;
+    }).catch(() => {});
+  }
+  // Clean-end notes of pages that are gone: their marks are dealt with.
+  for (const id of gone) lsDel(CLEAN_PREFIX + id);
+  for (const k of lsKeys()) {
+    if (k.startsWith(CLEAN_PREFIX) && !alive(k.slice(CLEAN_PREFIX.length))) lsDel(k);
+  }
   // Its last checkpoint may never have been queued for Drive.
   for (const game of counted) {
     if (await dbGet(autoStateKey(game)).catch(() => null)) markUpload(autoStateKey(game));
   }
+};
+
+// --- Last gasp -------------------------------------------------------------
+// A browser that quits with the game on screen runs the page's close
+// handlers, but the IndexedDB writes they start never land (Chrome and
+// WebKit both, measured) - so the session taken there, and a battery the
+// autosave had not stored, were lost, and the next launch went back to the
+// last checkpoint. What does land in Chrome is a synchronous localStorage
+// write: so the close handlers also leave the session there, with the
+// battery when it is not stored yet (`dingbat_lastgasp`), and the next boot
+// takes it in when it is newer than the stored session. `lastgasp` in
+// IndexedDB is the newest one taken in, so one that comes back from
+// localStorage (written to disk late, like the marks) is never taken twice.
+const LAST_GASP_KEY = "dingbat_lastgasp";
+const LAST_GASP_SEEN_KEY = "lastgasp";
+// The newest snapshot of the game, while its IndexedDB write has not landed.
+let unstoredSnap = null;
+
+const bytesToB64 = (u8) => {
+  let s = "";
+  for (let i = 0; i < u8.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+};
+const b64ToBytes = (b64) => {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
+
+// From the close handlers, after persistAutoState and persistSave.
+const leaveLastGasp = () => {
+  const snap = unstoredSnap;
+  if (!snap || snap.name !== currentOriginalName || !currentRomName) return;
+  let sav = null;
+  try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
+  // The battery it was taken with, when the stored one is not that already.
+  const savSig = sigOfSave(sav);
+  const keepSav = !!sav && savSig === snap.saveSig &&
+    !(lastSaveSigKey === snap.name && lastSaveSig === savSig);
+  lsSet(LAST_GASP_KEY, JSON.stringify({
+    game: snap.name, ts: snap.ts, saveSig: snap.saveSig, play: snap.play, page: pageId,
+    state: bytesToB64(snap.bytes), sav: keepSav ? bytesToB64(sav) : null,
+  }));
+};
+
+// At boot, before anything reads the sessions.
+const takeLastGasp = async () => {
+  const raw = lsGet(LAST_GASP_KEY);
+  if (!raw) return;
+  let g = null;
+  try { g = JSON.parse(raw); } catch {}
+  const seen = (await dbGet(LAST_GASP_SEEN_KEY).catch(() => null)) || 0;
+  if (g && typeof g.game === "string" && typeof g.state === "string" && g.ts > seen &&
+      g.page !== pageId) {
+    const cur = await dbGet(autoStateKey(g.game)).catch(() => null);
+    if (!cur || !(cur.ts >= g.ts)) {
+      if (g.sav) {
+        const sav = b64ToBytes(g.sav);
+        if (sigOfSave(sav) === g.saveSig &&
+            sigOfSave(await dbGet("save:" + g.game).catch(() => null)) !== g.saveSig) {
+          await dbPut("save:" + g.game, sav);
+          markUpload("save:" + g.game);
+        }
+      }
+      await dbPut(autoStateKey(g.game), { bytes: b64ToBytes(g.state), ts: g.ts,
+                                          saveSig: g.saveSig, by: deviceId, dev: deviceLabel,
+                                          play: g.play });
+      markUpload(autoStateKey(g.game));
+      log("took in the session " + g.game + " was closed on", "info");
+    }
+    await dbPut(LAST_GASP_SEEN_KEY, g.ts).catch(() => {});
+  }
+  lsDel(LAST_GASP_KEY);
 };
 
 // A trap in the core leaves the page up with the game dead in it: as good
@@ -15042,6 +15183,7 @@ const initStorage = async () => {
   await loadPrinterPhotos();
   await loadSyncState();
   // After loadSyncState: a crashed run's session is queued for Drive.
+  await takeLastGasp().catch(() => {});
   await noteCrashedRuns().catch(() => {});
   await loadRomsSort();
   // After loadSyncState, which reads the tombstones it consults, and before
@@ -15395,6 +15537,27 @@ var Module = {
       }
     }, 5000);
 
+    // The battery stored within about a second of the game writing it, not
+    // at the next 5 s tick: a crash in between lost an in-game save
+    // (measured). The core writes the file the frame the game writes its
+    // save, and a save is written over many frames (a flash chip's sectors),
+    // so it is stored once the file has stopped changing for one look.
+    let savSeen = { name: null, mtime: 0, settled: true };
+    setInterval(() => {
+      if (linkMode || rollbackMode || netActive() || !currentRomName || !currentOriginalName) return;
+      let mtime = 0;
+      try { mtime = +FS.stat(stripExt(currentRomName) + ".sav").mtime; } catch { return; }
+      if (savSeen.name !== currentOriginalName) {
+        savSeen = { name: currentOriginalName, mtime, settled: true };
+      } else if (mtime !== savSeen.mtime) {
+        savSeen.mtime = mtime;
+        savSeen.settled = false;
+      } else if (!savSeen.settled) {
+        savSeen.settled = true;
+        persistSave(currentRomName, currentOriginalName);
+      }
+    }, SAVE_SETTLE_MS);
+
     window.addEventListener("beforeunload", () => {
       // Get the BYE out so the peer sees a clean exit (the sync parts run
       // before the page dies). A rollback session (netMode is false in it)
@@ -15405,9 +15568,14 @@ var Module = {
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
+        // The run's end first: a quitting WebKit lands that small write
+        // and none after it (measured), and a quit counted as a crash would
+        // count toward asking. Chrome lands none of them, and the session
+        // comes back from localStorage (see "Last gasp").
         clearPlaying();
         persistSave(currentRomName, currentOriginalName);
         persistAutoState();
+        leaveLastGasp();
         // Best-effort (the encode may not finish), and only a screen not yet
         // stored: a paused game's would re-queue a picture Drive may hold a
         // newer one of, from the device that played on.
@@ -15418,8 +15586,13 @@ var Module = {
     // Mobile browsers kill backgrounded tabs without pagehide: snapshot on hide.
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) return;
+      // As at beforeunload: a quitting browser may run this and no more.
       clearPlaying(); // hidden is a normal end, whatever happens after
+      if (currentRomName && currentOriginalName && !linkMode) {
+        persistSave(currentRomName, currentOriginalName);
+      }
       persistAutoState();
+      leaveLastGasp();
       storeLastFrame(); // as at beforeunload
     });
 
@@ -15432,9 +15605,11 @@ var Module = {
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
+        // As at beforeunload, in its order.
         clearPlaying();
         persistSave(currentRomName, currentOriginalName);
         persistAutoState(); // one-tap resume next launch
+        leaveLastGasp();
         storeLastFrame(); // as at beforeunload
       }
       if (audioCtx && audioCtx.state === "running") {
@@ -15730,6 +15905,7 @@ var Module = {
       updateRumble(timestamp);
       watchCanvasBacking();
       maybeCheckpoint(timestamp);
+      notePlayingLong();
       tickEnd = performance.now();
       requestAnimationFrame(tick);
     };

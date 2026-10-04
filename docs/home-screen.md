@@ -81,14 +81,37 @@ They go with a reset, a delete and Remove from this device; a rename moves
 them. Other games' checkpoints are freed before any ROM when storage runs
 out (`dbPutRoomy`).
 
-**Crashes.** While its game runs in view a page holds
-`dingbat_playing:<page>` in localStorage, cleared when the game pauses,
-the page is hidden or closed, or the game is left (`markPlaying`,
+**Crashes.** While its game runs in view a page records itself in the
+`playing` IndexedDB record, and takes itself out when the game pauses, the
+page is hidden or closed, or the game is left (`markPlaying`,
 `clearPlaying`). A mark found at boot whose page holds no Web Lock
 (`dingbat-page:<page>`) is a run that ended without any of those - a crash
-(`noteCrashedRuns`) - and counts toward `dingbat_crashes` (per game:
-`{ streak, since }`). A core trap keeps its mark. A run that plays
-`CLEAN_RUN_MS` (1 min) and ends normally clears the count.
+(`noteCrashedRuns`) - and counts in `crashes` (per game: `{ streak, since }`;
+`seen` keeps a mark from counting twice). IndexedDB, because Chrome writes
+localStorage to disk seconds late: a SIGKILL soon after a relaunch lost the
+count and brought back the mark it had counted. A core trap keeps its mark.
+A run counts toward the row only while it is short: once it has played
+`CLEAN_RUN_MS` (1 min, `long` in its mark) a crash starts a new row at one,
+and a normal end clears the count.
+
+A quitting browser runs the close handlers but lands none of their
+IndexedDB writes (Chrome; WebKit lands the first small one), measured with
+Playwright closes: so the end of a run is also written to localStorage
+synchronously (`dingbat_clean:<page>`; a mark with it is no crash), and the
+close handlers leave the session, with a battery not yet stored, in
+`dingbat_lastgasp`, which the next boot takes in when it is newer than the
+stored session (`takeLastGasp`; `lastgasp` in IndexedDB is the newest taken
+in, so one that comes back is not taken twice). Chrome closed mid-game then
+resumes exactly; WebKit, whose localStorage writes there do not land
+either, resumes at the last checkpoint. The close handlers clear the mark
+first, then store the battery and the session.
+
+The battery is stored once its file has stopped changing for
+`SAVE_SETTLE_MS` (0.5 s; `FS.stat` mtime), not only at the 5 s autosave: a
+crash 1.5 s after an in-game save kept it (it was lost before).
+
+Checkpoint and session pictures are Blobs, which WebKit's private browsing
+will not store: there they are skipped and the moment is kept without one.
 
 After a crash, the checkpoints taken before it are frozen until the count
 clears: what later runs take shares two places (`CKPT_CRASH_ROOM`), so a
