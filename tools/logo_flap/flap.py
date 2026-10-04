@@ -8,7 +8,9 @@ re-outlined with the logo's own rule: a transparent pixel that 4-touches a
 coloured pixel becomes outline.  The wings sit behind the body.
 
 Usage: flap.py [OUT_DIR]   writes 8- and 12-frame loops (frame PNGs, a 1x
-                           horizontal sheet, a 4x GIF); default ./frames
+                           horizontal sheet, a 4x GIF) for both lower-wing
+                           styles: OUT_DIR/{opposite,follow}/{8,12}/;
+                           default OUT_DIR is ./frames
 """
 import math
 import os
@@ -177,17 +179,22 @@ L_BEND = ((11.5, 4.5), (6.0, 14.0))
 R_BEND = ((35.5, 3.5), (39.0, 12.0))
 LL_PIVOT = (18.0, 19.5)
 RL_PIVOT = (29.5, 18.0)
+# lower wings bend at mid-length; the seam runs across the limb
+LL_BEND = ((14.0, 23.0), (22.0, 30.0))
+RL_BEND = ((34.0, 21.0), (27.0, 30.0))
 
 
-def compose(p, flap, bend=0, bob=0, legs=0):
-    """flap: degrees the wings have swung down from the logo pose; bend:
-    extra degrees the hands lag (positive = tips trail below the arm);
-    legs: degrees the legs swing in toward hanging straight down."""
+def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0):
+    """flap: degrees the upper wings have swung down from the logo pose;
+    bend: extra degrees the hands lag (positive = tips trail below the arm);
+    legs: degrees the lower wings swing in toward hanging straight down
+    (negative = lifted outward); legs_bend: extra degrees their tips lag,
+    same sense as legs."""
     canvas = {}
     canvas.update(outline(warp(p["lw"], L_PIVOT, -flap, (*L_BEND, -bend, -1))))
     canvas.update(outline(warp(p["rw"], R_PIVOT, flap, (*R_BEND, bend, 1))))
-    canvas.update(outline(warp(p["ll"], LL_PIVOT, -legs)))
-    canvas.update(outline(warp(p["rl"], RL_PIVOT, legs)))
+    canvas.update(outline(warp(p["ll"], LL_PIVOT, -legs, (*LL_BEND, -legs_bend, -1))))
+    canvas.update(outline(warp(p["rl"], RL_PIVOT, legs, (*RL_BEND, legs_bend, 1))))
     canvas.update(outline(p["core"]))
     return {(x, y + bob): c for (x, y), c in canvas.items()}
 
@@ -213,20 +220,33 @@ def sheet(frames, scale=4, bg=(40, 44, 52, 255), gap=2):
     return im
 
 
-def pose(t, amp=80, bend_down=18, bend_up=34, lift=2, swing=12):
-    """Phase t in [0,1): 0 = logo pose (wings up), 0.5 = wings down."""
+def pose(t, amp=80, bend_down=18, bend_up=34, lift=2, lower="opposite",
+         swing=12, lower_amp=22, lower_bend=12):
+    """Phase t in [0,1): 0 = logo pose (wings up), 0.5 = wings down.
+
+    lower = "opposite": the lower wings flap against the upper pair, lifting
+    outward on the downstroke and dropping back on the upstroke, tips
+    lagging.  lower = "follow": they only hang straighter after the
+    downstroke, like dangling legs."""
     c = math.cos(2 * math.pi * t)
     s_ = math.sin(2 * math.pi * t)
     flap = amp * (1 - c) / 2
     bend = -(bend_down if s_ > 0 else bend_up) * s_
     # the body is pushed up by the downstroke and peaks just after it
     bob = -round(lift * (1 - math.cos(2 * math.pi * (t - 0.08))) / 2)
-    # legs hang straighter while the body is driven up, then swing back;
-    # the phase warp makes them peak after the wings bottom out yet rest at
-    # exactly 0 in the logo pose, so the loop has no seam
-    w = t - 0.11 * math.sin(math.pi * t) ** 2
-    legs = swing * (1 - math.cos(2 * math.pi * w)) / 2
-    return flap, bend, bob, legs
+    if lower == "opposite":
+        # a touch behind the upper wings, resting at exactly 0 in the logo
+        # pose so the loop has no seam
+        w = t - 0.06 * math.sin(math.pi * t) ** 2
+        legs = -lower_amp * (1 - math.cos(2 * math.pi * w)) / 2
+        legs_bend = lower_bend * math.sin(2 * math.pi * w)
+    else:
+        # hang straighter while the body is driven up, then swing back; the
+        # phase warp peaks them after the wings bottom out
+        w = t - 0.11 * math.sin(math.pi * t) ** 2
+        legs = swing * (1 - math.cos(2 * math.pi * w)) / 2
+        legs_bend = 0
+    return flap, bend, bob, legs, legs_bend
 
 
 def render(g, n, **kw):
@@ -253,10 +273,11 @@ def save_gif(frames, path, ms, scale=4, bg=(40, 44, 52)):
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "frames")
     g = load()
-    for n, fps in ((8, 12), (12, 18)):
-        d = os.path.join(out, "%d" % n)
+    for (lower, n), fps in (((l, n), f) for l in ("opposite", "follow")
+                            for n, f in ((8, 12), (12, 18))):
+        d = os.path.join(out, lower, "%d" % n)
         os.makedirs(d, exist_ok=True)
-        frames = render(g, n)
+        frames = render(g, n, lower=lower)
         for i, f in enumerate(frames):
             f.save(os.path.join(d, "frame_%02d.png" % i))
         sheet(frames, 1, (0, 0, 0, 0), 0).save(os.path.join(d, "sheet.png"))
