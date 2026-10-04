@@ -5712,6 +5712,7 @@ function flapKeyframes(beats) {
       t += (FLAP_MS / FLAP_FRAMES) * slow;
     }
   }
+  /** @type {Keyframe[]} */
   const frames = at.map(([k, ms]) => ({
     objectPosition: (k * 100 / (FLAP_FRAMES - 1)).toFixed(4) + "% 0",
     offset: ms / t, easing: "step-end" }));
