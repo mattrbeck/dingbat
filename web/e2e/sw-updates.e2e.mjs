@@ -21,7 +21,11 @@ import { builtWeb, sleep, WEB } from "./devices.mjs";
 import { synctestRom, SYNCTEST_NAME as GAME } from "./synctest-rom.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
-const skip = builtWeb() ? false : "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)";
+// Not on CI unless asked (DINGBAT_E2E_CRASH=1), as crash-recovery.e2e.mjs:
+// a step failed once in three runs on CI's Linux WebKit; steady locally.
+const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)"
+  : process.env.CI && !process.env.DINGBAT_E2E_CRASH
+    ? "flaky on CI's runners (DINGBAT_E2E_CRASH=1 runs it)" : false;
 const ENGINES = process.env.DINGBAT_E2E_NO_CHROMIUM ? ["webkit"] : ["chromium", "webkit"];
 const channel = process.env.DINGBAT_E2E_CHROMIUM_CHANNEL;
 
