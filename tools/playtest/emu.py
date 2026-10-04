@@ -45,6 +45,31 @@ class DriverError(RuntimeError):
     pass
 
 
+_fresh_checked = set()
+
+
+def check_driver_fresh(path):
+    """Refuse a dingbat driver older than the core it is built from: a run on
+    a stale bin/ silently tests old code (an HLE comparison on 2026-10-03 ran
+    a driver from before the commit it was checking)."""
+    if path in _fresh_checked:
+        return
+    root = os.path.dirname(os.path.dirname(HERE))
+    newest, newest_file = 0.0, None
+    for top in (os.path.join(root, 'src'), os.path.join(HERE, 'drivers')):
+        for d, _, files in os.walk(top):
+            for f in files:
+                if f.endswith('.nim'):
+                    p = os.path.join(d, f)
+                    m = os.path.getmtime(p)
+                    if m > newest:
+                        newest, newest_file = m, p
+    if os.path.getmtime(path) < newest:
+        raise DriverError(f'{path} is older than {os.path.relpath(newest_file, root)}: rebuild it with '
+                          f'`bash tools/playtest/build.sh dingbat_driver dingbat_driver_trace`')
+    _fresh_checked.add(path)
+
+
 class Emulator:
     def __init__(self, name, rom, envdir, bios=DEFAULT_BIOS, rtc_epoch=None,
                  save_in=None, extra_args=(), audio=None):
@@ -66,6 +91,8 @@ class Emulator:
         if binary == 'dingbat_driver':
             # a variant build under test (tools/knobsweep.py) without touching bin/
             path = os.environ.get('PLAYTEST_DINGBAT_DRIVER', path)
+            if 'PLAYTEST_DINGBAT_DRIVER' not in os.environ:
+                check_driver_fresh(path)
         cmd = [path, self.rom, bios if real_bios else 'hle']
         if rtc_epoch is not None:
             cmd += ['--rtc', str(rtc_epoch)]
