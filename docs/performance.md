@@ -242,14 +242,22 @@ six intros, retired instructions (min of 4), per-frame hashes identical:
   by construction instead): the five CPU fields `tick` tests go through
   setters that keep `cpu_slow`. -1.5..-2.5 %; the DS's attention flag, set
   from every event that could change them, was not built.
-* **No error-flag test after calls (`quirky`)**: only in `-d:danger` builds
-  (`QUIRKY_CORE`, gba.nim), +3-4 % on the web. Natively it is worth ~10 %,
-  but quirky, an out-of-range access goes ahead before anything tests the
-  flag: `tools/statefuzz.nim kirby.gba 3000 777` finds two hostile states
-  that fault while running, and the quirky desktop build died of SIGSEGV
-  where main reports an IndexDefect. `--panics:on` instead recovered only
-  ~2-3 % (3674 of 6658 flag tests remain), and would make the state
-  loaders' Defect backstops fatal. The same push over `common/scheduler.nim`
+* **No error-flag test after calls (`quirky`)**: every optimised build
+  (`gba_quirky`, gba.nim), +3-4 % on the web, -9.3..-13.5 % host
+  instructions on the desktop (MKSC -9.3 %, Emerald walking -13.5 %;
+  frame hashes identical). Quirky, an out-of-range access goes ahead before
+  anything tests the flag, so it waited on the save-state loader:
+  `tools/statefuzz.nim kirby.gba 3000 777` found two hostile states that
+  faulted while running (a FIFO position), an audit of every loaded field
+  found the rest (pipeline, PSG duty/shift/period/bank/clock shift, RTC
+  bit count and clock, Flash bank and type, EEPROM size and counters, a
+  duplicated PPU event chain that overflowed the scheduler, the prefetch
+  stamp, the affine reference points), and the loader now refuses all of
+  them (`run_hostile_fields`, tests/savestate_compat_test.nim; main loads
+  all seventeen). statefuzz builds with `-d:gba_quirky=false` so it still
+  sees a fault where it happens. `--panics:on` instead recovered only ~2-3 %
+  (3674 of 6658 flag tests remain), and would make the state loaders'
+  Defect backstops fatal. The same push over `common/scheduler.nim`
   measured -0.1 %.
 
 What is left of per-line reuse: after the change above, Emerald still draws

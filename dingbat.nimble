@@ -63,7 +63,7 @@ task test_desktop, "Run the desktop frontend tests (input, settings, link, saves
 task statefuzz_build, "Build the hostile-input save-state fuzzer":
   # Run by hand, not in the suite (minutes per core): `./statefuzz <rom>
   # sweep 255` exits non-zero on any uncontained Defect.
-  exec "nim c -d:test_harness -d:release --path:src -o:statefuzz tools/statefuzz.nim"
+  exec "nim c -d:test_harness -d:release -d:gba_quirky=false --path:src -o:statefuzz tools/statefuzz.nim"
 
 task test_rewind, "Run the rewind-ring property tests (IDs, eviction, keyframes)":
   exec "nim c -r -d:test_harness -d:release --path:src " &

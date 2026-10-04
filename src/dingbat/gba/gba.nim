@@ -10,20 +10,24 @@ import ../common/lut_macros
 import rtc_calendar
 export rtc_calendar
 
-# In a -d:danger build (the web) the core is quirky: a call does not test
-# Nim's error flag afterwards. With goto exceptions every call to a proc that
-# may raise (and Defects count, so every call) is followed by a load and a
-# branch on that flag, even with the checks off; dropping them is 3-4 % on
-# the web build and ~10 % of the host instructions natively. -d:danger has
-# no bounds checks to lose, so there it changes nothing else. Not in the
-# desktop -d:release build, whose bounds checks are why it isn't -d:danger:
-# quirky, an out-of-range access goes ahead before anything tests the flag,
-# and a hostile state's stray index (tools/statefuzz.nim, seed 777) became
-# a SIGSEGV where it is now a reported IndexDefect. A proc that catches
-# can't be quirky, and the procs that load files and states are not, so a
-# raise there (a missing ROM, a damaged state) still stops them at once:
-# those are the `quirky: off` pushes below and in bus.nim.
-const QUIRKY_CORE = defined(danger)
+# In an optimised build (-d:release, -d:danger) the core is quirky: a call
+# does not test Nim's error flag afterwards. With goto exceptions every call
+# to a proc that may raise (and Defects count, so every call) is followed by
+# a load and a branch on that flag, even with the checks off; dropping them
+# is 3-4 % on the web build and ~10 % of the host instructions natively.
+# The cost: a check that fails in the core still raises, but the code goes
+# on (the out-of-range access included) until the first caller outside it
+# tests the flag, so a wild index is a SIGSEGV instead of an IndexDefect.
+# The core's own state cannot make one; a loaded state is the outside input
+# that could, which is why the loader range-checks every field the core
+# indexes with (savestate.nim; tools/statefuzz.nim finds the ones it
+# misses, built with -d:gba_quirky=false so that a fault is reported where
+# it happens). A proc that catches can't be quirky, and the procs that load
+# files and states are not, so a raise there (a missing ROM, a damaged
+# state) still stops them at once: those are the `quirky: off` pushes below
+# and in bus.nim.
+const gba_quirky {.booldefine.} = defined(release) or defined(danger)
+const QUIRKY_CORE = gba_quirky
 when QUIRKY_CORE:
   {.push quirky: on.}
 
