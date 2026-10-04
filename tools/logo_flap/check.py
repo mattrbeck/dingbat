@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Continuity check for the flap loops: per frame, how much of each wing is
 still visible (% of frame 0), whether each lower wing still meets the body
-or an upper wing, and how many separate pixel islands the sprite has.
+or an upper wing, how many separate pixel islands the sprite has, and how
+many black dots sit boxed in where body meets wing (should be 0).
 
 Usage: check.py N [pose_param=value ...]    e.g. check.py 12 lower_amp=14
 """
@@ -48,10 +49,13 @@ def report(n, **kw):
         for k in ("ll", "rl"):
             touch[k] = any(own.get((x + dx, y + dy)) in ("core", "lw", "rw")
                            for (x, y), v in own.items() if v == k for dx, dy in N4)
-        rows.append((i, {k: round(100 * cnt[k] / base[k]) for k in cnt}, touch, components(px)))
-    for i, vis, touch, comp in rows:
-        print("  f%02d vis%% lw %3d rw %3d ll %3d rl %3d | touch ll %d rl %d | islands %d"
-              % (i, vis["lw"], vis["rw"], vis["ll"], vis["rl"], touch["ll"], touch["rl"], comp))
+        dots = sum(1 for (x, y), c in px.items() if c == flap.OUTLINE and (
+            lambda o: None not in o and "core" in o and set(o) - {"core"})(
+            [own.get((x + dx, y + dy)) for dx, dy in N4]))
+        rows.append((i, {k: round(100 * cnt[k] / base[k]) for k in cnt}, touch, components(px), dots))
+    for i, vis, touch, comp, dots in rows:
+        print("  f%02d vis%% lw %3d rw %3d ll %3d rl %3d | touch ll %d rl %d | islands %d | dots %d"
+              % (i, vis["lw"], vis["rw"], vis["ll"], vis["rl"], touch["ll"], touch["rl"], comp, dots))
 
 
 if __name__ == "__main__":
