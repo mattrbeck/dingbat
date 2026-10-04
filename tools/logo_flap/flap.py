@@ -114,13 +114,17 @@ def ramp(v, lo, hi):
     return t * t * (3 - 2 * t)
 
 
-def warp(px, pivot, angle, bend=None, pad=24):
-    """RotSprite-style warp: rotate px about pivot by angle (deg, clockwise
-    on screen), after bending the hand about the wrist.
+def warp(px, pivot, angle, bend=None, sweep=(0.0, 0.0), pad=24):
+    """RotSprite-style warp: bend the hand about the wrist, rotate about the
+    pivot by angle (deg, clockwise on screen), then swing forward about the
+    pivot's vertical axis, all sampled back to front from an 8x EPX copy.
 
     bend = (wrist, seam_end, extra_deg, side): pixels on the `side` (+1/-1)
-    of the line wrist->seam_end rotate an extra extra_deg about the wrist, eased in over
-    a few pixels so the membrane stretches instead of tearing."""
+    of the line wrist->seam_end rotate an extra extra_deg about the wrist,
+    eased in over a few pixels so the membrane stretches instead of tearing.
+    sweep = (arm_deg, hand_deg): forward swing toward the viewer; the hand
+    swings arm_deg + hand_deg, so a forward stroke cups.  Seen head-on a
+    swing only foreshortens toward the pivot (x scales by cos)."""
     xs = [p[0] for p in px]
     ys = [p[1] for p in px]
     x0, y0 = min(xs) - 2, min(ys) - 2
@@ -128,20 +132,30 @@ def warp(px, pivot, angle, bend=None, pad=24):
     grid = [[px.get((x, y)) for x in range(x0, x1)] for y in range(y0, y1)]
     big = epx(epx(epx(grid)))
     bh, bw = len(big), len(big[0])
+    extra = 0.0
     if bend:
         (wx, wy), (ex, ey), extra, side = bend
         nx, ny = side * (ey - wy), -side * (ex - wx)
         nl = math.hypot(nx, ny)
         nx, ny = nx / nl, ny / nl
+    arm_sw, hand_sw = sweep
+
+    def weight(s):
+        if not bend:
+            return 0.0
+        return ramp((s[0] - wx) * nx + (s[1] - wy) * ny, -1.0, 3.0)
+
     out = {}
     for y in range(min(ys) - pad, max(ys) + pad):
         for x in range(min(xs) - pad, max(xs) + pad):
-            q = rot((x + 0.5, y + 0.5), pivot, -angle)
-            s = q
-            if bend:
-                for _ in range(6):
-                    d = (s[0] - wx) * nx + (s[1] - wy) * ny
-                    s = rot(q, (wx, wy), -extra * ramp(d, -1.0, 3.0))
+            q = (x + 0.5, y + 0.5)
+            s = rot(q, pivot, -angle)
+            for _ in range(8 if (bend or arm_sw) else 1):
+                w = weight(s)
+                cs = math.cos(math.radians(arm_sw + w * hand_sw))
+                f = (pivot[0] + (q[0] - pivot[0]) / cs, q[1])
+                b = rot(f, pivot, -angle)
+                s = rot(b, (wx, wy), -extra * w) if bend else b
             u, v = (s[0] - x0) * 8, (s[1] - y0) * 8
             iu, iv = int(math.floor(u)), int(math.floor(v))
             if 0 <= iu < bw and 0 <= iv < bh:
@@ -184,17 +198,20 @@ LL_BEND = ((14.0, 23.0), (22.0, 30.0))
 RL_BEND = ((34.0, 21.0), (27.0, 30.0))
 
 
-def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0):
+def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0, sweep=0, cup=0):
     """flap: degrees the upper wings have swung down from the logo pose;
     bend: extra degrees the hands lag (positive = tips trail below the arm);
+    sweep: degrees the upper wings swing forward, toward the viewer; cup:
+    extra forward swing of the hands;
     legs: degrees the lower wings swing in toward hanging straight down
     (negative = lifted outward); legs_bend: extra degrees their tips lag,
     same sense as legs."""
     canvas = {}
-    canvas.update(outline(warp(p["lw"], L_PIVOT, -flap, (*L_BEND, -bend, -1))))
-    canvas.update(outline(warp(p["rw"], R_PIVOT, flap, (*R_BEND, bend, 1))))
+    # back to front: lower wings, upper wings, then the body over the roots
     canvas.update(outline(warp(p["ll"], LL_PIVOT, -legs, (*LL_BEND, -legs_bend, -1))))
     canvas.update(outline(warp(p["rl"], RL_PIVOT, legs, (*RL_BEND, legs_bend, 1))))
+    canvas.update(outline(warp(p["lw"], L_PIVOT, -flap, (*L_BEND, -bend, -1), (sweep, cup))))
+    canvas.update(outline(warp(p["rw"], R_PIVOT, flap, (*R_BEND, bend, 1), (sweep, cup))))
     canvas.update(outline(p["core"]))
     return {(x, y + bob): c for (x, y), c in canvas.items()}
 
@@ -221,7 +238,7 @@ def sheet(frames, scale=4, bg=(40, 44, 52, 255), gap=2):
 
 
 def pose(t, amp=80, bend_down=18, bend_up=34, lift=2, lower="opposite",
-         swing=12, lower_amp=22, lower_bend=12):
+         swing=12, lower_amp=22, lower_bend=12, fwd=30, cup_amp=20, fwd_start=0.15, fwd_end=0.85):
     """Phase t in [0,1): 0 = logo pose (wings up), 0.5 = wings down.
 
     lower = "opposite": the lower wings flap against the upper pair, lifting
@@ -246,7 +263,14 @@ def pose(t, amp=80, bend_down=18, bend_up=34, lift=2, lower="opposite",
         w = t - 0.11 * math.sin(math.pi * t) ** 2
         legs = swing * (1 - math.cos(2 * math.pi * w)) / 2
         legs_bend = 0
-    return flap, bend, bob, legs, legs_bend
+    # the upper wings reach forward most at the bottom of the stroke, where
+    # head-on that reads as the tips wrapping in (at the level pose it only
+    # reads as a shorter wing), and are drawn back during the upstroke, so
+    # the tips loop instead of retracing; the hands lead, cupping the wing
+    u = min(1.0, max(0.0, (t - fwd_start) / (fwd_end - fwd_start)))
+    reach = math.sin(math.pi * u) ** 2
+    sweep, cup = fwd * reach, cup_amp * reach
+    return flap, bend, bob, legs, legs_bend, sweep, cup
 
 
 def render(g, n, **kw):
