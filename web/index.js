@@ -531,7 +531,7 @@ document.addEventListener("click", (e) => {
   if (!t || typeof t.closest !== "function") return;
   // Modals and the menu run their own focus management.
   if (t.closest(".modal-overlay")) return;
-  if (!t.closest("#topbar, #topbar-handle")) return;
+  if (!t.closest("#topbar")) return;
   if (anyModalOpen()) return;
   const ctl = t.closest("button, [href], [tabindex]");
   // Text fields and range inputs keep focus (the typing escape hatch depends
@@ -14009,10 +14009,86 @@ if (!requestFs) {
   document.addEventListener("webkitfullscreenchange", onFsChange);
 }
 
-// --- Mobile-landscape top bar handle ---
-document.getElementById("topbar-handle").addEventListener("click", () => {
-  document.body.classList.toggle("topbar-open");
-});
+// --- Mobile-landscape top bar: tap the picture ---
+// On a phone held sideways the bar waits off-screen; a tap on the picture (or
+// the letterbox round it) brings it down and another puts it away. It has to
+// be a deliberate tap, not a thumb that slid off a button mid-game: one
+// finger with no other on the screen, short and still, and a thumb's width
+// clear of the drawn controls. While zoomed, a double tap resets the zoom, so
+// there the bar waits out the double-tap window first.
+const PHONE_LANDSCAPE = "(pointer: coarse) and (orientation: landscape) and (max-height: 500px)";
+{
+  const BAR_TAP_MAX_MS = 250, BAR_TAP_SLOP = 12, BAR_TAP_MARGIN = 20, BAR_DBLTAP_MS = 300;
+  const touches = new Set();   // every touch down, on a control or not
+  let cand = null;             // the lone touch that may yet be a tap
+  let pending = 0;             // zoomed: the toggle waiting out a double tap
+
+  const nearControl = (x, y) => {
+    const m = BAR_TAP_MARGIN;
+    for (const el of document.querySelectorAll("#controls .pad-btn")) {
+      const r = el.getBoundingClientRect();
+      if (r.width && x > r.left - m && x < r.right + m && y > r.top - m && y < r.bottom + m) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // The stage's picture and letterbox, or the touch overlay's layout boxes
+  // between its buttons (they span the picture). Never a control, the bar, a
+  // menu, a toast or a modal.
+  const onPicture = (/** @type {any} */ t) => {
+    if (!t || typeof t.closest !== "function") return false;
+    if (t.closest("#stage")) return !t.closest("#home");
+    return !!t.closest("#controls") && !t.closest(ZOOM_NOT_SURFACE);
+  };
+  const toggleBar = () => document.body.classList.toggle("topbar-open");
+
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    touches.add(e.pointerId);
+    cand = touches.size === 1 && document.body.classList.contains("running") &&
+      matchMedia(PHONE_LANDSCAPE).matches && !anyModalOpen() &&
+      onPicture(e.target) && !nearControl(e.clientX, e.clientY)
+      ? { id: e.pointerId, ts: performance.now(), x: e.clientX, y: e.clientY }
+      : null;
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (cand && e.pointerId === cand.id &&
+        Math.hypot(e.clientX - cand.x, e.clientY - cand.y) > BAR_TAP_SLOP) cand = null;
+  });
+  const lift = (/** @type {PointerEvent} */ e) => {
+    touches.delete(e.pointerId);
+    if (!cand || cand.id !== e.pointerId) return;
+    const c = cand;
+    cand = null;
+    if (e.type !== "pointerup" || performance.now() - c.ts > BAR_TAP_MAX_MS) return;
+    if (pending) {             // the second tap of a double: the zoom's, not ours
+      clearTimeout(pending);
+      pending = 0;
+    } else if (zoomS > 1) {
+      pending = setTimeout(() => { pending = 0; toggleBar(); }, BAR_DBLTAP_MS);
+    } else {
+      toggleBar();
+    }
+  };
+  document.addEventListener("pointerup", lift);
+  document.addEventListener("pointercancel", lift);
+
+  // Nothing on screen says the bar is there, so say it once: the first time a
+  // game runs on a phone held sideways.
+  const BAR_HINT_KEY = "dingbat_bar_tap_hint";
+  const maybeHint = () => {
+    if (!document.body.classList.contains("running") ||
+        !matchMedia(PHONE_LANDSCAPE).matches) return;
+    try {
+      if (localStorage.getItem(BAR_HINT_KEY)) return;
+      localStorage.setItem(BAR_HINT_KEY, "1");
+    } catch { return; }
+    pushToast("Tap the picture to show the bar", 4000, null);
+  };
+  new MutationObserver(maybeHint).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  matchMedia(PHONE_LANDSCAPE).addEventListener?.("change", maybeHint);
+}
 
 // --- Gamepad support (polled each frame) ---
 
