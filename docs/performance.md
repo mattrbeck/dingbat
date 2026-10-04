@@ -219,6 +219,53 @@ out of line anyway, natively and in wasm: now `always_inline` under clang
 framebuffer a halfword at a time into a buffer grown from empty; one copy
 into a pre-sized buffer halves rewind's cost.
 
+## Carried over from the DS core (2026-10-03)
+
+The DS core's caching round (branch `worktree-nds-skeleton`) proposed six
+items for the GBA. What each came to, measured on six gameplay states and
+six intros, retired instructions (min of 4), per-frame hashes identical:
+
+* **Same-value stores don't dirty the frame** (the cheap half of "per-line
+  reuse"). The whole-frame render skip never fired in gameplay: every game
+  rewrites its PPU registers from a shadow copy each V-blank and DMAs the
+  same OAM, and any store set `render_dirty`. Now a PRAM/VRAM/OAM store
+  dirties only if it changes the memory, a register write only if it
+  changes a field it writes (`dirty_if_changed` in ppu.nim: DISPCNT with
+  the BG-enable latches, the affine reference points with the internal
+  point a write reloads), and `latch_oam` only if the view it copies
+  differs. Kirby -30 %, F-Zero GPL intro -27 %, Emerald walking -25 %,
+  Minish Cap -22 %, FireRed -11 %, Emerald -10 %, GS TLA -8 %; Golden Sun
+  and Mario Kart redraw every frame (0 %). Web: Kirby +29 %, Emerald +10 %.
+  Guarded by `tests/render_skip_test.nim` (a never-skipping twin; breaking
+  the reference-point, VRAM or OAM check makes it fail).
+* **One test before each opcode** (the DS's interrupt-check item, made exact
+  by construction instead): the five CPU fields `tick` tests go through
+  setters that keep `cpu_slow`. -1.5..-2.5 %; the DS's attention flag, set
+  from every event that could change them, was not built.
+* **No error-flag test after calls (`quirky`)**: only in `-d:danger` builds
+  (`QUIRKY_CORE`, gba.nim), +3-4 % on the web. Natively it is worth ~10 %,
+  but quirky, an out-of-range access goes ahead before anything tests the
+  flag: `tools/statefuzz.nim kirby.gba 3000 777` finds two hostile states
+  that fault while running, and the quirky desktop build died of SIGSEGV
+  where main reports an IndexDefect. `--panics:on` instead recovered only
+  ~2-3 % (3674 of 6658 flag tests remain), and would make the state
+  loaders' Defect backstops fatal. The same push over `common/scheduler.nim`
+  measured -0.1 %.
+
+What is left of per-line reuse: after the change above, Emerald still draws
+59 % of its lines, FireRed 52 %, GS TLA 64 %, though 99 % of them come out
+identical to the previous frame's. Those frames change only VRAM (BG tiles
+at 0x3400-0x3FFF, OBJ tiles at 0x10000) and OAM, so reusing their lines
+needs the DS's full machinery: per-1 KB VRAM blocks marked as each line
+reads them, and per-sprite line coverage. Ceiling about 11-15 % on those
+titles (~20k host instructions a line), ~0 on Kirby and Minish Cap.
+
+Not pursued, from the profile: the sequential fetch already tests the
+fetch key, page, hot flag and next address (a few instructions of ~250 per
+opcode); folding them is worth 1-2 % at most, inside the inlining-cliff
+noise. Thumb already has its 1024-entry specialised table; a decoded-block
+cache stays rejected (see above).
+
 ## Game Boy / Game Boy Color (2026-09-29)
 
 Where the time went (native, `sample`, 11 GBC titles and one DMG): the FIFO
