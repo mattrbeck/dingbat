@@ -117,31 +117,41 @@ const showUpdateButton = () => {
   updateBtn.hidden = false;
 };
 
-const checkForUpdate = async () => {
+// current: the cached version.txt (the running build); latest: a fresh one;
+// deployed: the CACHE_VERSION in a fresh sw.js. Pages' CDN propagates
+// per-object, so an update is only actually fetchable once sw.js and
+// version.txt agree. null when any of them can't be fetched (offline).
+const probeBuilds = async () => {
   try {
-    // current: the cached version.txt; latest: a fresh one; deployed: the
-    // CACHE_VERSION in a fresh sw.js. Pages' CDN propagates per-object, so
-    // the button only shows once sw.js and version.txt agree, i.e. the
-    // update is actually fetchable.
     let [cachedRes, networkRes, swRes] = await Promise.all([
       fetch("version.txt"),
       fetch("version.txt", { cache: "no-store" }),
       fetch("sw.js", { cache: "no-store" }),
     ]);
-    if (!cachedRes.ok || !networkRes.ok || !swRes.ok) return;
-    let current = (await cachedRes.text()).trim();
-    let latest = (await networkRes.text()).trim();
-    let deployed = (await swRes.text()).match(/CACHE_VERSION = "([^"]+)"/)?.[1];
-    if (current && latest && latest !== current) {
-      if (deployed === latest) {
-        showUpdateButton();
-      } else {
-        // Still propagating: skip the stamp so the next visibility change retries.
-        return;
-      }
+    if (!cachedRes.ok || !networkRes.ok || !swRes.ok) return null;
+    return {
+      current: (await cachedRes.text()).trim(),
+      latest: (await networkRes.text()).trim(),
+      deployed: (await swRes.text()).match(/CACHE_VERSION = "([^"]+)"/)?.[1],
+    };
+  } catch {
+    return null;
+  }
+};
+
+const checkForUpdate = async () => {
+  const builds = await probeBuilds();
+  if (!builds) return;
+  const { current, latest, deployed } = builds;
+  if (current && latest && latest !== current) {
+    if (deployed === latest) {
+      showUpdateButton();
+    } else {
+      // Still propagating: skip the stamp so the next visibility change retries.
+      return;
     }
-    localStorage.setItem(UPDATE_CHECK_KEY, Date.now().toString());
-  } catch {}
+  }
+  try { localStorage.setItem(UPDATE_CHECK_KEY, Date.now().toString()); } catch {}
 };
 
 const maybeCheckForUpdate = () => {
@@ -6278,6 +6288,8 @@ const copyFramebuffer = () => {
 const storeLastFrame = ({ force = false } = {}) => {
   if (!currentRomName || !currentOriginalName) return Promise.resolve();
   if (linkMode || rollbackMode || netActive()) return Promise.resolve();
+  if (sessionHeldFor === currentOriginalName) return Promise.resolve(); // a boot screen
+
   const fb = copyFramebuffer();
   if (!fb) return Promise.resolve();
   const { heap, w, h } = fb;
@@ -6436,7 +6448,7 @@ const launchRom = async (name, { resume = false, fresh = false, flyFrom = null }
   await touchRecent(name);
   if (gen !== loadGen) return;
   let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
-  loadRom("rom" + ext, name,
+  return loadRom("rom" + ext, name,
     { gen, rom: data, resume: session, skipResumeOffer: resume || fresh });
 };
 
@@ -7785,6 +7797,95 @@ const stateRejectMessage = (bytes) => {
   return why.charAt(0).toUpperCase() + why.slice(1).replace(/\.$/, "");
 };
 
+// --- A state from a newer dingbat: update, then offer the load again ---
+// The core refuses only states from the future (it reads every older
+// revision, serialize.nim), so the cure is the newer build. Such a refusal
+// fetches it and reloads, saying so; what was being loaded is kept under
+// UPDATE_RETRY_KEY and offered again, one tap, once the new build is up.
+const UPDATE_RETRY_KEY = "updateretry";
+// An older retry is from an update that never landed.
+const UPDATE_RETRY_MAX_AGE = 10 * 60 * 1000;
+
+const TOO_NEW_COPY = {
+  offline:
+    "That save state was made by a newer version of dingbat. Connect to the internet so dingbat can update, then try again.",
+  unpublished:
+    "That save state was made by a newer version of dingbat that isn't available here yet. Try again later.",
+  arriving:
+    "That save state was made by a newer version of dingbat. The update is still on its way — try again in a few minutes.",
+  updating: "That save state was made by a newer version of dingbat. Updating dingbat so it can load…",
+  stuck: "dingbat couldn't update, so that save state still can't load. Try again later.",
+};
+
+// A refused load's toast, or, for a state from a newer dingbat, the update.
+// `retry` is what to load again after it: { kind: "session" } the game's
+// session, { kind: "slot", slot }, or { kind: "bytes", bytes } for a state
+// kept nowhere else (an import). Called straight after the refusal, before
+// another wasm call can replace its kind.
+const refuseState = (bytes, retry) => {
+  if (!looksLikeStateFile(bytes) || stateRejectKind() !== SRK.TOO_NEW ||
+      !currentOriginalName || linkMode || rollbackMode || netActive()) {
+    showToast(stateRejectMessage(bytes));
+    return;
+  }
+  const name = currentOriginalName;
+  // Now, not after the probe: a hide meanwhile would snapshot the boot.
+  if (retry.kind === "session") sessionHeldFor = name;
+  updateForNewerState({ ...retry, name });
+};
+
+const updateForNewerState = async (retry) => {
+  const builds = await probeBuilds();
+  if (!builds) { showToast(TOO_NEW_COPY.offline); return; }
+  const { current, latest, deployed } = builds;
+  // The same build: the state came from one this site doesn't serve (a
+  // development build), or version.txt hasn't reached this edge yet.
+  if (!latest || latest === current) { showToast(TOO_NEW_COPY.unpublished); return; }
+  if (deployed !== latest) { showToast(TOO_NEW_COPY.arriving); return; }
+  if (appUpdating) return; // an update already under way reloads anyway
+  paused = true; // the game waits out the download
+  pushToast(TOO_NEW_COPY.updating, 120000, null);
+  // The game as it is now goes down first (a held session: its battery
+  // only), rather than trusting the reload's pagehide to finish it.
+  if (currentRomName && currentOriginalName) {
+    try {
+      await persistSave(currentRomName, currentOriginalName);
+      await persistAutoState();
+    } catch {}
+  }
+  try {
+    await dbPut(UPDATE_RETRY_KEY, { ...retry, from: current, ts: Date.now() });
+  } catch {}
+  applyUpdate();
+};
+
+// After the update a refused state asked for: offer the load again. A tap,
+// not a launch at boot: it is also the gesture iOS wants before a game's
+// audio can start.
+const offerStateRetry = async () => {
+  let rec = null;
+  try { rec = await dbGet(UPDATE_RETRY_KEY); } catch {}
+  if (!rec) return;
+  try { await dbDelete(UPDATE_RETRY_KEY); } catch {}
+  if (!rec.name || !(Date.now() - rec.ts < UPDATE_RETRY_MAX_AGE)) return;
+  let running = "";
+  try { running = (await (await fetch("version.txt")).text()).trim(); } catch {}
+  if (running && running === rec.from) { showToast(TOO_NEW_COPY.stuck); return; }
+  const session = rec.kind === "session";
+  showActionToast(
+    "dingbat updated — " + (session ? "your session" : "that save state") + " can load now",
+    session ? "Resume" : "Load", () => retryStateLoad(rec), 20000);
+};
+
+const retryStateLoad = async (rec) => {
+  // The session first: for a slot or an import, it is where the game was
+  // when the load was asked for, so the load's Undo goes back there.
+  await launchRom(rec.name, { resume: true });
+  if (currentOriginalName !== rec.name) return; // failed, or another tap won
+  if (rec.kind === "slot") await loadFromSlot(rec.slot);
+  else if (rec.kind === "bytes" && rec.bytes) applyImportedState(rec.bytes);
+};
+
 // Apply a state image; true when accepted. keepRewind is only for undoing
 // a rewind-scrubber commit (same timeline as the ring); every other load
 // drops the ring.
@@ -7909,8 +8010,10 @@ const loadFromSlot = async (slot) => {
     stateUndoBytes = undo;
     stateUndoName = currentOriginalName;
     showActionToast("State loaded", "Undo", undoStateLoad, 6000, { game: true });
+  } else if (ok) {
+    showToast("State loaded");
   } else {
-    showToast(ok ? "State loaded" : stateRejectMessage(bytes));
+    refuseState(bytes, { kind: "slot", slot });
   }
   return ok;
 };
@@ -7973,11 +8076,17 @@ const deviceWords = (dev) => !dev ? "another device"
 // session another device took since.
 let sessionMoved = true;
 let sessionSnapFor = null;
+// The game whose session no snapshot may replace: a resume this build
+// refused as too new left the core on a fresh boot, and a snapshot of that
+// would put the boot screen over the newer session, here and on Drive. Held
+// until another game loads (loadRom); the battery save still persists.
+var sessionHeldFor = null;
 
 const persistAutoState = () => {
   if (!currentRomName || !currentOriginalName) return;
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
   const name = currentOriginalName;
+  if (sessionHeldFor === name) return; // see sessionHeldFor
   if (!sessionMoved && sessionSnapFor === name) return;
   const bytes = captureStateBytes();
   if (!bytes) return;
@@ -8118,7 +8227,8 @@ const offerAutoResume = async () => {
       showToast("The game has saved since — that session is gone");
       return;
     }
-    showToast(applyStateBytes(auto.bytes) ? "Resumed" : stateRejectMessage(auto.bytes));
+    if (applyStateBytes(auto.bytes)) showToast("Resumed");
+    else refuseState(auto.bytes, { kind: "session" });
   }, 8000, { game: true });
 };
 
@@ -8950,7 +9060,8 @@ document.getElementById("export-state").addEventListener("click", () => {
 
 // Apply an imported .state to the running game (not persisted).
 const applyImportedState = (bytes) => {
-  showToast(applyStateBytes(bytes) ? "State loaded" : stateRejectMessage(bytes));
+  if (applyStateBytes(bytes)) showToast("State loaded");
+  else refuseState(bytes, { kind: "bytes", bytes });
 };
 
 document.getElementById("import-state").addEventListener("click", () => {
@@ -10703,6 +10814,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
   loadingName = null;
   currentRomName = romName;
+  sessionHeldFor = null; // the held session was the outgoing game's
   currentOriginalName = name;
   applyAudioLowpass(); // the filter follows the machine: GBA in, GB out
   lastFrameSig = null; // a new game: the tick's skip must not carry over
@@ -10714,7 +10826,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
     if (opts.resume.saveSig !== liveSaveSig()) {
       showToast("The game has saved since — starting from that save");
     } else if (!applyStateBytes(opts.resume.bytes)) {
-      showToast(stateRejectMessage(opts.resume.bytes));
+      refuseState(opts.resume.bytes, { kind: "session" });
     }
   }
   // Again, for a capture started on the outgoing game during the awaits
@@ -14294,6 +14406,7 @@ var Module = {
     // first pull has had its say.
     setTimeout(() => { offerThumbnailsAfterBoot().catch(() => {}); }, 1500);
     setTimeout(() => { packStoredStates().catch(() => {}); }, 4000);
+    offerStateRetry().catch(() => {});
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;

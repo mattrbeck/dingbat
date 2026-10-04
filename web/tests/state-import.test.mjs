@@ -136,7 +136,9 @@ test("a session snapshot a newer dingbat wrote says so when Resume is refused", 
   assert.ok(pill, "the Resume offer is up");
   pill.onclick();
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+  // The harness's fetch fails, so this is the offline branch of the update
+  // the refusal starts (state-too-new.test.mjs has the rest).
   assert.match(app.toasts.at(-1), /newer version of dingbat/);
-  assert.match(app.toasts.at(-1), /Reload/);
+  assert.match(app.toasts.at(-1), /Connect to the internet/);
   assert.doesNotMatch(app.toasts.at(-1), /different game|didn't match/);
 });
