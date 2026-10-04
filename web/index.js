@@ -5689,34 +5689,67 @@ let playedThisVisit = false;
 // frame 0 is the logo at rest (styles.css, "Both logos are drawn from
 // flap.png"). It flaps when there is a reason to: while the app is getting
 // ready, and when the logo travels - a game opening or closing, or the
-// brand crossing between the hero and the bar on a scroll. Every flap is a
-// whole wingbeat, so it always comes to rest on frame 0.
-const FLAP_MS = 667; // 16 frames at 24 fps, the same as styles.css's logo-flap
+// brand crossing between the hero and the bar on a scroll. A flap ends with
+// a wingbeat that slows into rest, so it settles on frame 0 rather than
+// stopping dead there.
+const FLAP_MS = 667; // a wingbeat: 16 frames at 24 fps, as styles.css's logo-flap
+const FLAP_FRAMES = 16;
+// In the settling wingbeat each frame lasts longer than the one before, the
+// last (1 + FLAP_EASE) times a normal frame.
+const FLAP_EASE = 1.5;
 const BRAND_FLAP_ID = "brand-flap";
 
-// One wingbeat on `el`, or null where motion is unwanted. A flap already
-// under way is left to finish rather than started over, which would stutter.
-function flapOnce(el, id = BRAND_FLAP_ID) {
+// Keyframes for `beats` wingbeats, the last one settling, and how long they
+// take. Every frame holds (step-end) until the next: the strip must jump
+// from frame to frame, never slide between them.
+function flapKeyframes(beats) {
+  const at = [];
+  let t = 0;
+  for (let b = 0; b < beats; b++) {
+    for (let k = 0; k < FLAP_FRAMES; k++) {
+      at.push([k, t]);
+      const slow = b === beats - 1 ? 1 + FLAP_EASE * (k / (FLAP_FRAMES - 1)) ** 2 : 1;
+      t += (FLAP_MS / FLAP_FRAMES) * slow;
+    }
+  }
+  const frames = at.map(([k, ms]) => ({
+    objectPosition: (k * 100 / (FLAP_FRAMES - 1)).toFixed(4) + "% 0",
+    offset: ms / t, easing: "step-end" }));
+  frames.push({ objectPosition: "0% 0", offset: 1 });
+  return { frames, duration: t };
+}
+
+// A flap on `el` - two wingbeats unless told otherwise - or null where motion
+// is unwanted. A flap already under way is left to finish rather than
+// started over, which would stutter.
+function flapOnce(el, id = BRAND_FLAP_ID, beats = 2) {
   if (!el?.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
   if (el.getAnimations?.().some((a) => a.id === id && a.playState === "running")) return null;
-  let a = el.animate([{ objectPosition: "0 0" }, { objectPosition: "106.6667% 0" }],
-                     { duration: FLAP_MS, easing: "steps(16, jump-end)", fill: "backwards" });
+  const { frames, duration } = flapKeyframes(beats);
+  let a = el.animate(frames, { duration, fill: "backwards" });
   a.id = id;
   return a;
 }
 
 // The hero's logo flaps from first paint (index.html gives it .flapping,
 // styles.css runs it) until the app is ready to use: the runtime is up and,
-// when a library is on its way, it is on screen. Then it finishes the
-// wingbeat it is in and stops on frame 0.
+// when a library is on its way, it is on screen. Then, where the wingbeat
+// it is in ends, it gives one more that slows into rest - so even a quick
+// start shows two flaps and the slow finish.
 function settleBootFlap() {
   const logo = document.getElementById("home-logo");
   if (!logo?.classList.contains("flapping")) return;
   if (!document.body.classList.contains("runtime-ready") || homePending) return;
-  const stop = () => logo.classList.remove("flapping");
-  logo.addEventListener("animationiteration", stop, { once: true });
+  let done = false;
+  const stop = (settle) => {
+    if (done) return;
+    done = true;
+    logo.classList.remove("flapping");
+    if (settle) flapOnce(logo, BRAND_FLAP_ID, 1);
+  };
+  logo.addEventListener("animationiteration", () => stop(true), { once: true });
   // No iteration event comes if it is not being drawn (or motion is off).
-  setTimeout(stop, FLAP_MS + 100);
+  setTimeout(() => stop(false), FLAP_MS + 100);
 }
 
 const revealHome = () => {

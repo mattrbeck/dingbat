@@ -795,7 +795,25 @@ test("the word is only solid at the end it belongs to", async () => {
 
 // ── The logo flaps ──────────────────────────────────────────────────────────
 // flap.png is a strip of 16 wing-flap frames whose frame 0 is the logo at
-// rest. A flap is one whole wingbeat, so it always ends back on frame 0.
+// rest. A flap is two wingbeats, the second slowing into rest, so it always
+// ends back on frame 0.
+
+test("a flap is two wingbeats; the second slows down and lands on frame 0",
+     async () => {
+  const app = await loadApp();
+  const { frames, duration } = app.api.flapKeyframes(2);
+  assert.equal(frames.length, 2 * 16 + 1, "every frame of both beats, then rest");
+  assert.equal(frames[frames.length - 1].objectPosition, "0% 0", "ends on the logo");
+  assert.ok(frames.slice(0, -1).every((f) => f.easing === "step-end"),
+            "frames jump, the strip never slides");
+  const len = (i) => (frames[i + 1].offset - frames[i].offset) * duration;
+  const normal = app.api.FLAP_MS / 16;
+  assert.ok(Math.abs(len(3) - normal) < 0.01, "the first beat runs at 24 fps");
+  for (let i = 17; i < 32; i++) {
+    assert.ok(len(i) > len(i - 1), `the second beat keeps slowing (frame ${i})`);
+  }
+  assert.ok(len(31) > 2 * normal, "and its last frame is well over twice as long");
+});
 
 const flaps = (app, id) => flightOn(app, id)
   .filter((a) => a.frames.some((f) => f.objectPosition !== undefined));
@@ -810,7 +828,8 @@ test("the logo flaps on the way; closing, the hero's copy beats in step",
   const [hero] = flaps(app, "home-logo");
   assert.ok(bar && hero, "both copies flap when a game closes");
   for (const a of [bar, hero]) {
-    assert.equal(a.opts.duration, app.api.FLAP_MS, "one whole wingbeat");
+    assert.equal(a.opts.duration, app.api.flapKeyframes(2).duration, "two wingbeats");
+    assert.equal(a.frames.length, 33, "the second settling onto the logo");
     assert.equal(a.id, app.api.BRAND_FLY_ID, "part of the flight, so the next one clears it");
     assert.equal(a.opts.fill, "backwards", "and it lets go of the logo when done");
   }
@@ -863,5 +882,10 @@ test("the boot flap stops at the end of a wingbeat once the app is ready",
                "not cut off mid-beat the moment it is ready");
   await logo.dispatch("animationiteration");
   assert.equal(logo.classList.contains("flapping"), false,
-               "it stops where a wingbeat ends, on frame 0");
+               "the loop gives way where a wingbeat ends");
+  const settling = flaps(app, "home-logo");
+  assert.equal(settling.length, 1, "to one more wingbeat");
+  assert.equal(settling[0].frames.length, 17, "a single beat");
+  assert.equal(settling[0].opts.duration, app.api.flapKeyframes(1).duration,
+               "that slows into rest");
 });
