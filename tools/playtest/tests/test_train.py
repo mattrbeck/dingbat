@@ -175,6 +175,119 @@ class Attribution(unittest.TestCase):
         self.assertIn(' | all four: FAIL->PASS', train.describe(d))
 
 
+class Noise(unittest.TestCase):
+    BASE = 'b' * 40
+
+    def rerun(self, fps):
+        """A rerun callback returning `fps` and recording what it was asked."""
+        self.asked = None
+
+        def f(subset):
+            self.asked = list(subset)
+            return {s: fps[s] for s in subset if s in fps}
+        return f
+
+    def test_no_rerun_when_nothing_changed(self):
+        C, changed, noise, reran = train.denoise({'g': fp()}, {'g': fp()}, self.BASE, {}, self.rerun({}))
+        self.assertIsNone(self.asked)
+        self.assertEqual((changed, noise, reran), ({}, {}, []))
+
+    def test_noisy_cell_excluded_real_change_kept(self):
+        # the second reference reading dingbat's save plays live: its cell
+        # moves on base too; the audio change is the candidate's
+        base = {'g': fp(), 'h': fp()}
+        comb = {'g': fp(audio='au1', load_hash={'*': 'ld0', 'dingbat': 'ld5'}), 'h': fp()}
+        again = {'g': fp(load_hash={'*': 'ld0', 'dingbat': 'ld6'})}
+        C, changed, noise, reran = train.denoise(base, comb, self.BASE, {}, self.rerun(again))
+        self.assertEqual(self.asked, ['g'])     # only the changed game is replayed
+        self.assertEqual(list(noise['g']), ['dingbat'])
+        self.assertEqual(list(noise['g']['dingbat']), ['load:dingbat-in-mgba'])
+        self.assertEqual(noise['g']['dingbat']['load:dingbat-in-mgba']['how'], 'rerun')
+        self.assertEqual(set(changed['g']), set(CONFIGS))
+        self.assertNotIn('load:dingbat-in-mgba', changed['g']['dingbat'])
+        self.assertIn('audio', changed['g']['dingbat'])
+        self.assertEqual(train.classify(base['g'], C['g'])['kind'], 'neutral')
+
+    def test_change_that_is_only_noise_drops_out(self):
+        comb = {'g': fp(load_hash='ld9')}
+        C, changed, noise, reran = train.denoise({'g': fp()}, comb, self.BASE, {}, self.rerun({'g': fp(load_hash='ld7')}))
+        self.assertEqual(changed, {})
+        self.assertEqual(set(noise['g']), set(CONFIGS))
+        # nothing left for the candidates: attribution sees no change
+        cells = {cfg: list(d) for cfg, d in noise['g'].items()}
+        att = train.attribute({'g': fp()}, C, {'A': {'g': train.mask(comb['g'], fp(), cells)}})
+        self.assertEqual(att['effects']['A'], {})
+
+    def test_ocr_only_flip_reproduced_by_base_is_noise(self):
+        # the baseline's OCR came back empty: FAIL with every hash the same
+        flaky = fp(passed={'*': True, 'dingbat-bios': False}, status='FAIL')
+        C, changed, noise, reran = train.denoise({'g': flaky}, {'g': fp()}, self.BASE, {}, self.rerun({'g': fp()}))
+        self.assertEqual(changed, {})
+        self.assertEqual(sorted(noise['g']), ['*', 'dingbat-bios'])
+        self.assertEqual(train.ocr_only(noise['g']), ['dingbat-bios'])
+        text = train.describe_noise(noise['g'])
+        self.assertIn('FAIL->PASS', text)
+
+    def test_ocr_only_flip_not_reproduced_is_kept(self):
+        flaky = fp(passed={'*': True, 'dingbat-bios': False}, status='FAIL')
+        C, changed, noise, reran = train.denoise({'g': fp()}, {'g': flaky}, self.BASE, {}, self.rerun({'g': fp()}))
+        self.assertEqual(noise, {})
+        self.assertEqual(train.classify(fp(), C['g'])['kind'], 'regressed')
+
+    def test_rerun_that_did_not_play_teaches_nothing(self):
+        dead = train.fingerprint({'status': 'ERROR'})
+        C, changed, noise, reran = train.denoise({'g': fp()}, {'g': fp(audio='x')}, self.BASE, {},
+                                                 self.rerun({'g': dead}))
+        self.assertEqual(noise, {})
+        self.assertIn('g', changed)
+
+    def test_ledger_written_read_and_accepted_on_the_same_base(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, 'noise.json')
+            base, comb = {'g': fp()}, {'g': fp(load_hash='ld9')}
+            _, _, noise, _ = train.denoise(base, comb, self.BASE, {}, self.rerun({'g': fp(load_hash='ld9')}))
+            fresh = {}      # what the train reads from a missing noise.json
+            train.update_ledger(fresh, noise, self.BASE, {'g': 'Game'}, now='t1')
+            train.write_json(p, fresh)
+            ledger = train.read_json(p)
+            cell = ledger['cells']['g dingbat load:dingbat-in-mgba']
+            self.assertEqual((cell['seen'], cell['title'], cell['last_seen']), (1, 'Game', 't1'))
+            self.assertEqual(len(cell['examples']), 2)
+            self.assertEqual(len(train.chronic(ledger)), 4)
+            # the next train on the same base: the combined value base already
+            # produced is unchanged without a rerun
+            C, changed, noise2, reran = train.denoise(base, comb, self.BASE, ledger, self.rerun({}))
+            self.assertIsNone(self.asked)
+            self.assertEqual(changed, {})
+            self.assertEqual({e['how'] for e in noise2['g'].values() for e in e.values()}, {'known'})
+            ledger = train.update_ledger(ledger, noise2, self.BASE, {'g': 'Game'}, now='t2')
+            self.assertEqual(ledger['cells']['g dingbat load:dingbat-in-mgba']['seen'], 2)
+            # on another base the value is only informative: rerun, and a
+            # surviving change is flagged as a known noisy cell
+            C, changed, noise3, reran = train.denoise(base, comb, 'c' * 40, ledger, self.rerun({'g': fp()}))
+            self.assertEqual(self.asked, ['g'])
+            self.assertIn('g', changed)
+            self.assertIn('dingbat load:dingbat-in-mgba (noise seen 2x)', train.known_noisy(ledger, 'g', changed['g']))
+
+
+    def test_report_lists_noise(self):
+        flaky = fp(passed={'*': True, 'dingbat-bios': False}, status='FAIL')
+        _, _, noise, _ = train.denoise({'g': flaky}, {'g': fp()}, self.BASE, {}, self.rerun({'g': fp()}))
+        g = {'sha1': 'g' * 40, 'title': 'Kart', 'what': train.describe_noise(noise['g']), 'how': ['rerun'],
+             'ocr_only': train.ocr_only(noise['g'])}
+        car = [{'id': 'x', 'name': 'cand', 'sha': 'a' * 40}]
+        run = {'id': 'r', 'base': self.BASE, 'verdicts': {'x': {'status': 'clean', 'noise': [g]}}}
+        with tempfile.TemporaryDirectory() as d:
+            home, train.HOME = train.HOME, d
+            try:
+                text = train.render_report(run, car)
+            finally:
+                train.HOME = home
+        self.assertIn('## Noise (not attributed)', text)
+        self.assertIn('Kart', text)
+        self.assertIn('differs between two runs of the base (OCR only in dingbat-bios', text)
+
+
 class Relevance(unittest.TestCase):
     def test_paths(self):
         self.assertTrue(train.relevant(['src/dingbat/gba/ppu.nim']))

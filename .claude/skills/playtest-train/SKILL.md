@@ -92,11 +92,27 @@ flips.
 | `conflict` | does not merge onto `origin/main` | rebase and resubmit |
 | deferred | conflicts with an earlier candidate in the same train | nothing: it rides the next train first |
 | `build-failed` | does not build on `origin/main` | fix and resubmit |
+| noise | a cell that differs between two runs of base itself (or matches a value an earlier run of this base produced): listed, never attributed, never makes a verdict `changed` | nothing; a cell that keeps coming back is a harness or reference flake worth a look |
 
 The report (`~/.cache/dingbat-train/runs/<run>/report.md`) lists, per
 changed game, the baseline run, the combined run and your candidate's own
 run directories: compare their `report.html` and `cmp/*.png`. Fixed games
 show the problems they had; regressed ones the problems they have now.
+
+Before attribution, the games that changed are played once more on base
+itself. Whatever differs between the cached baseline and that second run of
+base is the base's own nondeterminism -- typically the second reference
+reading the host clock in a `[load]` cell it plays live, or OCR coming back
+empty under load (a pass/fail flip with every frame hash identical, marked
+"OCR only"). Those cells are taken out of every candidate's diff and shown
+as `noise <game>: ... differs between two runs of the base; not attributed`.
+Each one is counted in the noise ledger (`noise.json` in the train home):
+`train.py status` lists the chronic ones, `train.py show noise` all of them.
+On a later train of the same base, a combined value that base already
+produced counts as unchanged without a rerun; a change that survives on a
+cell seen noisy before is marked `known noisy` in the report -- still yours
+to explain, but look at the ledger first. A train where nothing changed
+does no rerun.
 
 Caveat: a game identical on the combined build is taken as identical on
 every candidate (frozen inputs, deterministic core). Two changes that exactly

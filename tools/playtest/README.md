@@ -43,6 +43,7 @@ it was (the `playtest-train` skill in `.claude/skills/` is the how-to).
 tools/playtest/train.py submit HEAD --name what --wait   # exit 0 clean, 1 changes, 2 conflict/build
 tools/playtest/train.py status                           # queue, running train, recent verdicts
 tools/playtest/train.py show ID                          # a verdict / a run's report
+tools/playtest/train.py show noise                       # the noise ledger, most often seen first
 ```
 
 A game counts as changed when any dingbat configuration differs from the
@@ -53,6 +54,19 @@ combination does it), conflict, build-failed; `tests/test_train.py` covers
 the comparison. State lives in `~/.cache/dingbat-train`. Whoever waits when
 no train is running drives it, under a machine-wide lock that a full
 `suite` also waits for (`--no-lock` to bypass; subsets never wait).
+
+Not every cell is deterministic: the second reference reads the host clock
+where it plays live (loading dingbat's save), and OCR can come back empty
+under heavy load. So when the combined run changed anything, the train plays
+those games once more on base itself (base's driver is cached with the
+baseline) before attributing. A cell that differs between the two runs of
+base is noise: left out of every verdict, listed in the report's "Noise"
+section, and counted in `noise.json` under the train home (game, config,
+cell, times seen, example values). On a later train of the same base, a
+combined value that base already produced is noise without a rerun; on
+another base the ledger only marks a surviving change "known noisy".
+Checkpoint OCR that reads no text from a picture that is not blank is read
+once more before it is scored.
 
 Two pieces of the harness make it cheap: every phase keeps its whole result
 (`<phase>/result.json`, hash windows included), and `run`/`suite

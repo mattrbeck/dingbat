@@ -139,7 +139,7 @@ class Executor:
         frame = self.emu.frame
         self.emu.shot(path)
         after = self.emu.runhash(window) if window else []
-        read = self.reader.read(path, key=center_hash)
+        read = self.reader.read(path, key=center_hash, retry_empty=True)
         img.write_png(os.path.join(self.outdir, f'{name}.png'), img.read_ppm(path))
         # runhash's last hash is the current frame: hashes[center] is the
         # checkpoint frame, neighbours are one frame apart

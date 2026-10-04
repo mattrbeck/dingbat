@@ -30,6 +30,12 @@ A train, holding the machine-wide lock (one train or full suite at a time):
      each changed hash is credited to the candidate that reproduces it. A
      change no candidate reproduces alone (or one a candidate makes that the
      combined build does not show) is an interaction, for a human.
+  6. Before attribution, the changed games are played once more on base
+     itself (its driver cached with the baseline). A cell that differs
+     between the two runs of base is noise: it is left out of every verdict,
+     listed in the report's noise section and counted in noise.json (the
+     noise ledger). A combined value an earlier run of the same base already
+     produced is noise without a rerun. Nothing changed: no rerun.
 
 The scripts are frozen input timelines and every configuration is
 deterministic, so a game identical to the baseline on the combined build is
@@ -38,10 +44,11 @@ identical on each candidate -- unless two candidates' changes exactly cancel.
 State lives outside every checkout, in $DINGBAT_TRAIN_HOME (default
 ~/.cache/dingbat-train): queue/, verdicts/, runs/<id>/ (report.md,
 report.json, log.txt, the suites' run directories), baselines/, refbin/,
-work/ (temporary worktrees, removed after each train). Nothing is pushed and
+noise.json, work/ (temporary worktrees, removed after each train). Nothing is pushed and
 no existing checkout is touched.
 """
 import argparse
+import copy
 import datetime
 import fcntl
 import hashlib
@@ -239,6 +246,131 @@ def describe(aspects):
         grouped.setdefault(text, []).append(cfg)
     return ' | '.join(f"{'all four' if len(cs) == 4 and '*' not in cs else ', '.join(cs)}: {text}"
                       for text, cs in grouped.items())
+
+
+def _usable(fp):
+    """A run that produced results (not an ERROR row with nothing in it)."""
+    return any(c != '*' for c in fp)
+
+
+def mask(fp, base_fp, cells):
+    """fp with every aspect in cells ({config: [aspects]}) set to base_fp's
+    value, so diff_fp no longer sees it."""
+    out = copy.deepcopy(fp)
+    for cfg, ks in cells.items():
+        for k in ks:
+            if k in base_fp.get(cfg, {}):
+                out.setdefault(cfg, {})[k] = copy.deepcopy(base_fp[cfg][k])
+            elif cfg in out:
+                out[cfg].pop(k, None)
+    return out
+
+
+def known_values(ledger, base, sha1, cfg, aspect):
+    """Values earlier runs of this base produced for one cell (the ledger)."""
+    e = (ledger or {}).get('cells', {}).get(f'{sha1} {cfg} {aspect}') or {}
+    return e.get('base_values', {}).get(base[:12], [])
+
+
+def denoise(B, C, base, ledger, rerun):
+    """Take the base's own nondeterminism out of the combined run.
+
+    B, C: {sha1: fingerprint} of the baseline and the combined run;
+    ledger: the noise ledger; rerun(sha1s) -> {sha1: fingerprint} plays
+    those games on base again (called only when something changed after the
+    ledger's known values). -> (C masked, changed, noise, rerun_sha1s) where
+    noise is {sha1: {config: {aspect: {how, baseline, combined[, rerun]}}}}:
+    'known' a combined value an earlier run of this base produced, 'rerun' a
+    cell that differs between the baseline and the second run of base."""
+    noise = {}
+
+    def note(s, cfg, k, **kw):
+        noise.setdefault(s, {}).setdefault(cfg, {})[k] = kw
+
+    def cells(s):
+        return {cfg: list(d) for cfg, d in noise.get(s, {}).items()}
+
+    changed = diff_suites(B, C)[0]
+    if not changed:
+        return C, {}, {}, []
+    for s, d in changed.items():
+        for cfg, aspects in d.items():
+            for k, (bv, cv) in aspects.items():
+                if cv in known_values(ledger, base, s, cfg, k):
+                    note(s, cfg, k, how='known', baseline=bv, combined=cv)
+    C = dict(C, **{s: mask(C[s], B[s], cells(s)) for s in noise})
+    todo = sorted(diff_suites({s: B[s] for s in changed}, {s: C[s] for s in changed})[0])
+    R = rerun(todo) if todo else {}
+    for s in todo:
+        if s not in R or not _usable(R[s]) or not _usable(B[s]):
+            continue        # the rerun did not play it: nothing to learn
+        for cfg, aspects in diff_fp(B[s], R[s]).items():
+            if cfg != '*' and cfg not in R[s]:
+                continue
+            for k, (bv, rv) in aspects.items():
+                note(s, cfg, k, how='rerun', baseline=bv, rerun=rv, combined=C[s].get(cfg, {}).get(k))
+        C[s] = mask(C[s], B[s], cells(s))
+    changed = diff_suites({s: B[s] for s in changed}, {s: C[s] for s in changed})[0]
+    return C, changed, noise, todo
+
+
+def ocr_only(noise_cfgs):
+    """Configurations whose noise is a pass/fail flip with every frame hash
+    identical: OCR read the same frames differently."""
+    out = []
+    for cfg, ks in noise_cfgs.items():
+        if cfg == '*' or not set(ks) & {'pass', 'play'}:
+            continue
+        if not any(k.startswith(('cp:', 'win:')) for k in ks):
+            out.append(cfg)
+    return out
+
+
+def describe_noise(cfgs):
+    """describe() of one game's noise cells ({config: {aspect: entry}})."""
+    return describe({cfg: {k: [e['baseline'], e.get('rerun', e.get('combined'))] for k, e in d.items()}
+                     for cfg, d in cfgs.items()})
+
+
+def update_ledger(ledger, noise, base, titles, now=None):
+    """Count every noise cell in the ledger; a rerun cell also records the
+    values base produced (accepted as unchanged on later trains of base)."""
+    now = now or datetime.datetime.now().isoformat(timespec='seconds')
+    ledger = {} if ledger is None else ledger
+    cl = ledger.setdefault('cells', {})
+    for s, cfgs in noise.items():
+        for cfg, d in cfgs.items():
+            for k, e in d.items():
+                c = cl.setdefault(f'{s} {cfg} {k}', {'sha1': s, 'config': cfg, 'aspect': k, 'seen': 0,
+                                                     'first_seen': now, 'examples': [], 'base_values': {}})
+                c.update(title=titles.get(s, s), seen=c['seen'] + 1, last_seen=now)
+                if e['how'] != 'rerun':
+                    continue
+                for v in (e['baseline'], e['rerun']):
+                    if v not in c['examples']:
+                        c['examples'] = (c['examples'] + [v])[-4:]
+                bv = c['base_values'].setdefault(base[:12], [])
+                for v in (e['baseline'], e['rerun']):
+                    if v not in bv:
+                        bv.append(v)
+                del bv[:-6]
+                for old in list(c['base_values'])[:-3]:
+                    del c['base_values'][old]
+    return ledger
+
+
+def chronic(ledger, n=None):
+    """Ledger cells, most often seen first."""
+    cells = sorted((ledger or {}).get('cells', {}).values(), key=lambda c: (-c['seen'], c.get('title', '')))
+    return cells[:n] if n else cells
+
+
+def known_noisy(ledger, sha1, aspects):
+    """'config aspect (seen N)' for the changed cells the ledger has seen
+    as noise on any base."""
+    cl = (ledger or {}).get('cells', {})
+    return [f"{cfg} {k} (noise seen {cl[f'{sha1} {cfg} {k}']['seen']}x)" for cfg, d in aspects.items() for k in d
+            if f'{sha1} {cfg} {k}' in cl]
 
 
 # ============================================================ suites on disk
@@ -457,11 +589,20 @@ def print_verdict(v):
             print(f"   {k:9} {g['title']}: {g['what']}")
     for g in v.get('added', []):
         print(f"   added     {g['title']}: {g['status']}")
+    for g in v.get('noise', []):
+        print(f"   noise     {g['title']}: {noise_text(g)}")
     for i in v.get('interactions', []):
         print(f"   INTERACTION {i['title']} with {', '.join(i['involved'])}: "
               f"{'; '.join((i['unexplained'] + i['overlapping'])[:4])}")
     if v.get('report'):
         print(f"   report: {v['report']}")
+
+
+def noise_text(g):
+    why = 'differs between two runs of the base' if 'rerun' in g['how'] else \
+        'a value an earlier run of the base produced (noise ledger)'
+    ocr = f" (OCR only in {', '.join(g['ocr_only'])}: frame hashes identical)" if g.get('ocr_only') else ''
+    return f"{g['what']} -- {why}{ocr}; not attributed"
 
 
 # ============================================================ worktrees and builds
@@ -695,8 +836,39 @@ def ensure_baseline(base, games, refkey, refdir, trees, opts, log, runner):
     wt = trees.add('base', base)
     if not build(wt, refdir, trees, 'base', log):
         raise SystemExit(f'base {base[:12]} does not build: see {trees.logdir}/build-base.log')
+    keep_driver(wt, bdir)
     run_suite(wt, os.path.join(bdir, 'out'), 'baseline', missing, donor, opts.jobs, log, runner, 'baseline')
     write_json(os.path.join(bdir, 'baseline.json'), {'base': base, 'refkey': refkey, 'updated': time.time()})
+    trees.remove(wt)
+    return sdir
+
+
+def keep_driver(wt, bdir):
+    """Cache base's dingbat_driver with its baseline for the noise rerun."""
+    os.makedirs(os.path.join(bdir, 'bin'), exist_ok=True)
+    shutil.copy2(os.path.join(wt, 'tools/playtest/bin/dingbat_driver'), os.path.join(bdir, 'bin', 'dingbat_driver'))
+
+
+def rerun_base(base, refkey, refdir, subset, refs_from, trees, opts, log, runner, rd):
+    """Play `subset` on base again (its cached driver, or built now), the
+    references replayed the way the combined run replayed them. -> suite
+    directory, or None when base does not build."""
+    bdir = baseline_for(base, refkey)
+    cached = os.path.join(bdir, 'bin', 'dingbat_driver')
+    wt = trees.add('base-again', base)
+    if os.path.exists(cached):
+        bindir = os.path.join(wt, 'tools/playtest/bin')
+        os.makedirs(bindir, exist_ok=True)
+        for b in REF_BINS:
+            shutil.copy2(os.path.join(refdir, b), os.path.join(bindir, b))
+        shutil.copy2(cached, os.path.join(bindir, 'dingbat_driver'))
+        log(f'  base driver: cached ({cached})')
+    elif build(wt, refdir, trees, 'base-again', log):
+        keep_driver(wt, bdir)
+    else:
+        trees.remove(wt)
+        return None
+    sdir = run_suite(wt, os.path.join(rd, 'out-base'), 'base', subset, refs_from, opts.jobs, log, runner, 'base again')
     trees.remove(wt)
     return sdir
 
@@ -868,15 +1040,34 @@ def _train(car, opts, run_id, rd, log, runner, trees, run):
     csuite = run_suite(comb, os.path.join(rd, 'out-combined'), 'combined', games, None if live else bsuite,
                        opts.jobs, log, runner, 'combined')
     B, C = load_suite(bsuite), load_suite(csuite)
-    changed, added, removed = diff_suites({s: f for s, (r, f) in B.items()},
-                                          {s: f for s, (r, f) in C.items()})
-    log(f'  diff vs baseline: {len(changed)} changed, {len(added)} added, {len(removed)} not run')
-    run.update(combined=csuite, changed=changed, added=added)
+    Bf, Cf = {s: f for s, (r, f) in B.items()}, {s: f for s, (r, f) in C.items()}
+    raw, added, removed = diff_suites(Bf, Cf)
+    log(f'  diff vs baseline: {len(raw)} changed, {len(added)} added, {len(removed)} not run')
+
+    # ---- noise: the changed games once more on base itself
+    ledger = read_json(path('noise.json'), {}) or {}
+
+    def rerun(subset):
+        runner.stage('noise', f'{len(subset)} games on base again')
+        sd = rerun_base(base, refkey, refdir, [(s, C[s][0]['title']) for s in subset],
+                        None if live else bsuite, trees, opts, log, runner, rd)
+        if not sd:
+            log('  base does not build again: no noise check')
+            return {}
+        run['base_again'] = sd
+        return {s: f for s, (r, f) in load_suite(sd).items()}
+    Cf, changed, noise, reran = denoise(Bf, Cf, base, ledger, rerun)
+    if noise:
+        ledger = update_ledger(ledger, noise, base, {s: (C.get(s) or B.get(s))[0]['title'] for s in noise})
+        write_json(path('noise.json'), ledger)
+    log(f'  noise: {len(noise)} game(s) with cells that differ between runs of base'
+        + (f' ({len(reran)} replayed on base)' if reran else '') + f'; {len(changed)} changed after it')
+    run.update(combined=csuite, changed=changed, added=added, noise=noise, reran=reran)
 
     # ---- attribution
     cand_fps, cand_rows = {}, {}
     if len(aboard) == 1:
-        cand_fps[aboard[0]['id']] = {s: C[s][1] for s in changed}
+        cand_fps[aboard[0]['id']] = {s: Cf[s] for s in changed}
         cand_rows[aboard[0]['id']] = {s: C[s][0] for s in changed}
     elif changed:
         runner.stage('attribute')
@@ -894,11 +1085,12 @@ def _train(car, opts, run_id, rd, log, runner, trees, run):
             s = run_suite(wt, os.path.join(rd, f'out-c{i}'), f'c{i}', subset,
                           None if c['name'] in live else bsuite, opts.jobs, log, runner, f"alone: {c['name']}")
             got = load_suite(s)
-            cand_fps[c['id']] = {k: f for k, (r, f) in got.items()}
+            cand_fps[c['id']] = {k: mask(f, Bf[k], {cfg: list(d) for cfg, d in noise.get(k, {}).items()})
+                                 for k, (r, f) in got.items() if k in Bf}
             cand_rows[c['id']] = {k: r for k, (r, f) in got.items()}
             run.setdefault('alone', {})[c['id']] = s
             trees.remove(wt)
-    att = attribute({s: B[s][1] for s in changed}, {s: C[s][1] for s in changed}, cand_fps) if changed \
+    att = attribute({s: Bf[s] for s in changed}, {s: Cf[s] for s in changed}, cand_fps) if changed \
         else {'effects': {c['id']: {} for c in aboard}, 'interactions': [], 'shared': {}}
     run['attribution'] = att
 
@@ -914,6 +1106,9 @@ def _train(car, opts, run_id, rd, log, runner, trees, run):
             a = row and row.get('outdir')
         return {'baseline': B[s][0].get('outdir'), 'combined': C[s][0].get('outdir'), 'alone': a}
 
+    noise_list = [{'sha1': s, 'title': title(s), 'what': describe_noise(cfgs),
+                   'how': sorted({e['how'] for d in cfgs.values() for e in d.values()}),
+                   'ocr_only': ocr_only(cfgs)} for s, cfgs in sorted(noise.items())]
     for c in aboard:
         eff = att['effects'].get(c['id'], {})
         groups = {'fixed': [], 'regressed': [], 'mixed': [], 'neutral': []}
@@ -924,6 +1119,7 @@ def _train(car, opts, run_id, rd, log, runner, trees, run):
                                       'configs': e['configs'], 'aspects': e['aspects'],
                                       'problems_before': _problems(B[s][0]),
                                       'problems_after': _problems(cand_rows.get(c['id'], {}).get(s, {})),
+                                      'known_noisy': known_noisy(ledger, s, e['aspects']),
                                       'outdirs': outdirs(s, c['id'])})
         inter = [dict(i, title=title(i['sha1'])) for i in att['interactions'] if c['id'] in i['involved']]
         adds = [{'sha1': s, 'title': C[s][0]['title'], 'status': C[s][0]['status'],
@@ -934,7 +1130,7 @@ def _train(car, opts, run_id, rd, log, runner, trees, run):
         if c['name'] in run.get('alone_build_failed', []):
             note = 'builds only together with the rest of the batch: attribution incomplete'
         verdicts[c['id']] = set_verdict(c, status, run_id, note, base=base, interactions=inter, added=adds,
-                                        aboard=[a['name'] for a in aboard], **groups)
+                                        aboard=[a['name'] for a in aboard], noise=noise_list, **groups)
     return finish(run, rd, log, verdicts, car)
 
 
@@ -997,6 +1193,8 @@ def render_report(run, car):
                     for cfg, ps in g['problems_before'].items():
                         if ps and g['configs'].get(cfg) == 'fixed':
                             L.append(f"  - was {cfg}: {'; '.join(ps)[:300]}")
+                if g.get('known_noisy'):
+                    L.append(f"  - known noisy: {'; '.join(g['known_noisy'])}")
                 o = g.get('outdirs') or {}
                 L.append(f"  - runs: baseline `{o.get('baseline')}`, combined `{o.get('combined')}`"
                          + (f", alone `{o['alone']}`" if o.get('alone') else ''))
@@ -1005,6 +1203,13 @@ def render_report(run, car):
         for i in v.get('interactions', []):
             L.append(f"- **interaction** {i['title']} with {', '.join(i['involved'])}: "
                      f"{'; '.join((i['unexplained'] + i['overlapping'])[:6])}")
+    nl = next((v['noise'] for v in vs.values() if v.get('noise')), [])
+    if nl:
+        L += ['', '## Noise (not attributed)', '',
+              f"Cells that differ between the baseline and a second run of base `{run['base'][:12]}`, or match "
+              'a value an earlier run of it produced; no candidate is credited or blamed for them. '
+              f"Counted in `{path('noise.json')}`.", '']
+        L += [f"- {g['title']} (`{g['sha1'][:10]}`): {noise_text(g)}" for g in nl]
     if run.get('ejected'):
         L += ['', '## Ejected (ride the next train first)']
         for e in run['ejected']:
@@ -1070,10 +1275,24 @@ def status(args):
         n = {k: len(v.get(k, [])) for k in ('fixed', 'regressed', 'mixed', 'neutral', 'interactions')}
         print(f"  {v.get('decided')}  {v.get('status', '?'):12} {v.get('name')}  "
               + ' '.join(f'{k}={x}' for k, x in n.items() if x))
+    cells = chronic(read_json(path('noise.json'), {}))
+    if cells:
+        many = [c for c in cells if c['seen'] > 1]
+        print(f"noise ledger: {len(cells)} cell(s), {len(many)} seen more than once"
+              + ('; most often: ' + '; '.join(f"{c['title']} {c['config']} {c['aspect']} {c['seen']}x"
+                                              for c in many[:3]) if many else '')
+              + ' (`train.py show noise`)')
     return 0
 
 
 def show(args):
+    if args.id == 'noise':
+        cells = chronic(read_json(path('noise.json'), {}))
+        print(f'{len(cells)} noise cell(s) in {path("noise.json")}' + (':' if cells else ''))
+        for c in cells:
+            print(f"  {c['seen']:3}x  {c['title']} (`{c['sha1'][:10]}`) {c['config']} {c['aspect']}  "
+                  f"last {c['last_seen']}; e.g. {json.dumps(c['examples'][:2])[:120]}")
+        return 0
     vd = os.path.dirname(path('verdicts', 'x'))
     hits = [f for f in os.listdir(vd) if args.id in f]
     if hits:
@@ -1119,7 +1338,7 @@ def main(argv=None):
     train_opts(p)
     p = sub.add_parser('status')
     p.add_argument('--recent', type=int, default=8)
-    p = sub.add_parser('show', help="a candidate's verdict (id or a part of it) or a run's report")
+    p = sub.add_parser('show', help="a candidate's verdict (id or a part of it), a run's report, or `noise` (the ledger)")
     p.add_argument('id')
     p = sub.add_parser('baseline', help='build (or adopt) the cached baseline of a commit')
     p.add_argument('--commit', default=None, help='default: origin/main, fetched')
