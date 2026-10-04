@@ -335,6 +335,21 @@ def render(g, n, **kw):
     return frames
 
 
+# The settling wingbeat's size against a full one. Easing a sprite by
+# holding frames longer reads as lag; a smaller flap at the same frame rate
+# reads as gliding to a stop.
+SETTLE = 0.45
+
+
+def render_settle(g, n=16, s=SETTLE):
+    """A smaller wingbeat to follow a full one: frames 1..n-1 (frame 0, the
+    logo at rest, is the full beat's), every movement scaled by s."""
+    p = parts(g)
+    kw = dict(amp=60 * s, bend_down=18 * s, bend_up=34 * s, lift=2 * s,
+              lower_amp=8 * s, lower_bend=14 * s, fwd=30 * s, cup_amp=20 * s)
+    return [to_image(compose(p, *pose(i / n, **kw))) for i in range(1, n)]
+
+
 def save_gif(frames, path, ms, scale=4, bg=(40, 44, 52)):
     big = []
     for f in frames:
@@ -382,5 +397,7 @@ if __name__ == "__main__":
             # the chosen loop, beside the logo PNGs; GIF delays are in
             # centiseconds, so 24 fps is written as 40 ms (25 fps)
             save_clear_gif(frames, os.path.join(HERE, "..", "..", "README", "dingbat_flap.gif"), 40)
-            # the web app's logos draw from this strip (styles.css)
-            sheet(frames, 1, (0, 0, 0, 0), 0).save(os.path.join(HERE, "..", "..", "web", "flap.png"))
+            # the web app's logos draw from this strip (styles.css): the full
+            # wingbeat's 16 frames, then the settling one's 15
+            sheet(frames + render_settle(g), 1, (0, 0, 0, 0), 0).save(
+                os.path.join(HERE, "..", "..", "web", "flap.png"))

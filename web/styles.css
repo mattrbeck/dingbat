@@ -3044,14 +3044,15 @@ body.home-card .home-recent-head {
   background: var(--chrome-btn-top);
 }
 
-/* Both logos are drawn from flap.png: a strip of 16 wing-flap frames, each
-   56x40 art pixels with the 48x29 logo at (4,4), and frame 0 the logo at
-   rest. --logo-w is the width of the LOGO, not of the frame. The frame's
+/* Both logos are drawn from flap.png: a strip of 31 wing-flap frames, each
+   56x40 art pixels with the 48x29 logo at (4,4). Frames 0-15 are a full
+   wingbeat, frame 0 the logo at rest; 16-30 are a smaller one that glides
+   back to rest. --logo-w is the width of the LOGO, not of the frame. The frame's
    box is bigger, to give the wings room, and negative margins pull it back
    to the logo's own footprint, so the layout is what it was when this was
    favicon.svg - and both boxes grow by the same factor, so the flight's
    measurements between them still line up. object-position picks the
-   frame: frame k of 16 sits k/15 of the way along the strip. */
+   frame: frame k sits k/30 of the way along the strip. */
 #bar-logo,
 #home-logo {
   width: calc(var(--logo-w) * 56 / 48);
@@ -3067,10 +3068,10 @@ body.home-card .home-recent-head {
   --logo-w: 22px;
 }
 
-/* One wingbeat: 16 frames at 24 fps. index.js plays the same keyframes. */
+/* One full wingbeat: frames 0-15 at 24 fps (16/30 of the strip). */
 @keyframes logo-flap {
   from { object-position: 0 0; }
-  to { object-position: 106.6667% 0; }
+  to { object-position: 53.3333% 0; }
 }
 
 /* From first paint until the app is ready (index.js takes .flapping off at
