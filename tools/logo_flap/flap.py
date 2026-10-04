@@ -199,7 +199,7 @@ RL_BEND = ((34.0, 21.0), (27.0, 30.0))
 
 
 def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0, sweep=0, cup=0,
-            far=1.0, owners=False):
+            far=1.0, far_reach=None, owners=False):
     """flap: degrees the upper wings have swung down from the logo pose;
     bend: extra degrees the hands lag (positive = tips trail below the arm);
     legs: degrees the lower wings swing in toward hanging straight down
@@ -207,7 +207,8 @@ def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0, sweep=0, cup=0,
     same sense as legs; sweep: degrees the upper wings swing forward,
     toward the viewer; cup: extra forward swing of the hands; far: the
     right wing's share of the left wing's swing.  The logo is a 3/4 view
-    with the right wing the far one, and a far wing's arc looks smaller.
+    with the right wing the far one, and a far wing's arc looks smaller;
+    far_reach: its share of the forward reach (default: far).
 
     owners=True also returns {pixel: layer name} for the visible pixels
     (outline pixels as None)."""
@@ -226,8 +227,9 @@ def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0, sweep=0, cup=0,
     # the upper wings always pass in front of the lower ones; the far
     # (right) wing's smaller swing keeps it off its lower wing
     put("lw", outline(warp(p["lw"], L_PIVOT, -flap, (*L_BEND, -bend, -1), (sweep, cup))))
+    fr = far if far_reach is None else far_reach
     put("rw", outline(warp(p["rw"], R_PIVOT, far * flap, (*R_BEND, far * bend, 1),
-                           (far * sweep, far * cup))))
+                           (fr * sweep, fr * cup))))
     # where a lower wing joins the body the logo has no outline between
     # them; the body's rebuilt outline yields to a lower wing there
     def joint(q):
@@ -261,7 +263,7 @@ def sheet(frames, scale=4, bg=(40, 44, 52, 255), gap=2):
     return im
 
 
-def pose(t, amp=72, far=0.7, ease=0.6, bend_down=18, bend_up=34, lift=2, lower="opposite",
+def pose(t, amp=60, far=0.87, far_reach=1.0, ease=0.6, bend_down=18, bend_up=34, lift=2, lower="opposite",
          swing=12, lower_amp=8, lower_bend=14, lower_lag=0.15, fwd=30, cup_amp=20, fwd_start=0.15, fwd_end=0.85):
     """Phase t in [0,1): 0 = logo pose (wings up), 0.5 = wings down.
 
@@ -300,7 +302,7 @@ def pose(t, amp=72, far=0.7, ease=0.6, bend_down=18, bend_up=34, lift=2, lower="
     u = min(1.0, max(0.0, (t - fwd_start) / (fwd_end - fwd_start)))
     reach = math.sin(math.pi * u) ** 2
     sweep, cup = fwd * reach, cup_amp * reach
-    return flap, bend, bob, legs, legs_bend, sweep, cup, far
+    return flap, bend, bob, legs, legs_bend, sweep, cup, far, far_reach
 
 
 def render(g, n, **kw):
