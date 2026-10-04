@@ -91,7 +91,9 @@ class Emulator:
         if binary == 'dingbat_driver':
             # a variant build under test (tools/knobsweep.py) without touching bin/
             path = os.environ.get('PLAYTEST_DINGBAT_DRIVER', path)
-            if 'PLAYTEST_DINGBAT_DRIVER' not in os.environ:
+            # bin/'s drivers (dingbat_driver_trace included) are this
+            # checkout's; a variant build elsewhere is the caller's business
+            if os.path.dirname(os.path.abspath(path)) == BIN:
                 check_driver_fresh(path)
         cmd = [path, self.rom, bios if real_bios else 'hle']
         if rtc_epoch is not None:
