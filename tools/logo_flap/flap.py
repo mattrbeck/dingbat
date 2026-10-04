@@ -7,9 +7,9 @@ shoulder with RotSprite-style sampling (EPX x3 = 8x, nearest sample), and is
 re-outlined with the logo's own rule: a transparent pixel that 4-touches a
 coloured pixel becomes outline.  The wings sit behind the body.
 
-Usage: flap.py [OUT_DIR]   writes 8- and 12-frame loops (frame PNGs, a 1x
+Usage: flap.py [OUT_DIR]   writes 8-, 12- and 16-frame loops (frame PNGs, a 1x
                            horizontal sheet, a 4x GIF) for both lower-wing
-                           styles: OUT_DIR/{opposite,follow}/{8,12}/;
+                           styles: OUT_DIR/{opposite,follow}/{8,12,16}/;
                            default OUT_DIR is ./frames
 """
 import math
@@ -152,8 +152,8 @@ def warp(px, pivot, angle, bend=None, sweep=(0.0, 0.0), pad=24):
             s = rot(q, pivot, -angle)
             for _ in range(8 if (bend or arm_sw) else 1):
                 w = weight(s)
-                cs = math.cos(math.radians(arm_sw + w * hand_sw))
-                f = (pivot[0] + (q[0] - pivot[0]) / cs, q[1])
+                sw = math.radians(arm_sw + w * hand_sw)
+                f = (pivot[0] + (q[0] - pivot[0]) / math.cos(sw), q[1])
                 b = rot(f, pivot, -angle)
                 s = rot(b, (wx, wy), -extra * w) if bend else b
             u, v = (s[0] - x0) * 8, (s[1] - y0) * 8
@@ -196,24 +196,54 @@ RL_PIVOT = (29.5, 18.0)
 # lower wings bend at mid-length; the seam runs across the limb
 LL_BEND = ((14.0, 23.0), (22.0, 30.0))
 RL_BEND = ((34.0, 21.0), (27.0, 30.0))
+# the upper wings pass in front of the lower wings except within this many
+# pixels of where a lower wing joins the body, so it never comes loose
+LOWER_ROOT = 6.0
 
 
-def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0, sweep=0, cup=0):
+def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0, sweep=0, cup=0,
+            owners=False):
     """flap: degrees the upper wings have swung down from the logo pose;
     bend: extra degrees the hands lag (positive = tips trail below the arm);
-    sweep: degrees the upper wings swing forward, toward the viewer; cup:
-    extra forward swing of the hands;
     legs: degrees the lower wings swing in toward hanging straight down
     (negative = lifted outward); legs_bend: extra degrees their tips lag,
-    same sense as legs."""
-    canvas = {}
+    same sense as legs; sweep: degrees the upper wings swing forward,
+    toward the viewer; cup: extra forward swing of the hands.
+
+    owners=True also returns {pixel: layer name} for the visible pixels
+    (outline pixels as None)."""
+    canvas, owner = {}, {}
+
+    def put(name, px, keep=lambda q: False):
+        for q, c in px.items():
+            if keep(q):
+                continue
+            canvas[q] = c
+            owner[q] = None if c == OUTLINE else name
+
+    lower = {"ll": outline(warp(p["ll"], LL_PIVOT, -legs, (*LL_BEND, -legs_bend, -1))),
+             "rl": outline(warp(p["rl"], RL_PIVOT, legs, (*RL_BEND, legs_bend, 1)))}
     # back to front: lower wings, upper wings, then the body over the roots
-    canvas.update(outline(warp(p["ll"], LL_PIVOT, -legs, (*LL_BEND, -legs_bend, -1))))
-    canvas.update(outline(warp(p["rl"], RL_PIVOT, legs, (*RL_BEND, legs_bend, 1))))
-    canvas.update(outline(warp(p["lw"], L_PIVOT, -flap, (*L_BEND, -bend, -1), (sweep, cup))))
-    canvas.update(outline(warp(p["rw"], R_PIVOT, flap, (*R_BEND, bend, 1), (sweep, cup))))
-    canvas.update(outline(p["core"]))
-    return {(x, y + bob): c for (x, y), c in canvas.items()}
+    put("ll", lower["ll"])
+    put("rl", lower["rl"])
+    # the upper wings pass in front, but each lower wing's root stays
+    # visible so it never looks cut off or vanishes as a wing goes by
+    def root(q):
+        return any(q in lower[k] and lower[k][q] != OUTLINE and
+                   math.hypot(q[0] + 0.5 - piv[0], q[1] + 0.5 - piv[1]) < LOWER_ROOT
+                   for k, piv in (("ll", LL_PIVOT), ("rl", RL_PIVOT)))
+    put("lw", outline(warp(p["lw"], L_PIVOT, -flap, (*L_BEND, -bend, -1), (sweep, cup))), root)
+    put("rw", outline(warp(p["rw"], R_PIVOT, flap, (*R_BEND, bend, 1), (sweep, cup))), root)
+    # where a lower wing joins the body the logo has no outline between
+    # them; the body's rebuilt outline yields to a lower wing there
+    def joint(q):
+        if q in p["core"] or owner.get(q) not in ("ll", "rl"):
+            return False
+        return any(math.hypot(q[0] + 0.5 - j[0], q[1] + 0.5 - j[1]) < 3.0
+                   for j in (LL_PIVOT, RL_PIVOT))
+    put("core", outline(p["core"]), joint)
+    shift = lambda d: {(x, y + bob): v for (x, y), v in d.items()}
+    return (shift(canvas), shift(owner)) if owners else shift(canvas)
 
 
 # frame box: the logo sits at (OX, OY) so its own pixels never move
@@ -237,8 +267,8 @@ def sheet(frames, scale=4, bg=(40, 44, 52, 255), gap=2):
     return im
 
 
-def pose(t, amp=80, bend_down=18, bend_up=34, lift=2, lower="opposite",
-         swing=12, lower_amp=22, lower_bend=12, fwd=30, cup_amp=20, fwd_start=0.15, fwd_end=0.85):
+def pose(t, amp=72, ease=0.6, bend_down=18, bend_up=34, lift=2, lower="opposite",
+         swing=12, lower_amp=10, lower_bend=6, lower_lag=0.15, fwd=30, cup_amp=20, fwd_start=0.15, fwd_end=0.85):
     """Phase t in [0,1): 0 = logo pose (wings up), 0.5 = wings down.
 
     lower = "opposite": the lower wings flap against the upper pair, lifting
@@ -247,14 +277,20 @@ def pose(t, amp=80, bend_down=18, bend_up=34, lift=2, lower="opposite",
     downstroke, like dangling legs."""
     c = math.cos(2 * math.pi * t)
     s_ = math.sin(2 * math.pi * t)
-    flap = amp * (1 - c) / 2
-    bend = -(bend_down if s_ > 0 else bend_up) * s_
+    # mostly eased, partly linear, so the 8-frame loop's steps are even
+    tri = 1 - abs(1 - 2 * t)
+    flap = amp * (ease * (1 - c) / 2 + (1 - ease) * tri)
+    # tips lag wing speed; the lag grows smoothly from the downstroke's
+    # strength to the upstroke's instead of switching at the bottom
+    lag = (bend_down + bend_up) / 2 - (bend_up - bend_down) / 2 * s_
+    bend = -lag * s_
     # the body is pushed up by the downstroke and peaks just after it
     bob = -round(lift * (1 - math.cos(2 * math.pi * (t - 0.08))) / 2)
     if lower == "opposite":
-        # a touch behind the upper wings, resting at exactly 0 in the logo
-        # pose so the loop has no seam
-        w = t - 0.06 * math.sin(math.pi * t) ** 2
+        # behind the upper wings, so an upper wing covers the lower one in
+        # a single pass instead of uncovering and covering it again; rests
+        # at exactly 0 in the logo pose so the loop has no seam
+        w = t - lower_lag * math.sin(math.pi * t) ** 2
         legs = -lower_amp * (1 - math.cos(2 * math.pi * w)) / 2
         legs_bend = lower_bend * math.sin(2 * math.pi * w)
     else:
@@ -298,7 +334,7 @@ if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "frames")
     g = load()
     for (lower, n), fps in (((l, n), f) for l in ("opposite", "follow")
-                            for n, f in ((8, 12), (12, 18))):
+                            for n, f in ((8, 12), (12, 18), (16, 24))):
         d = os.path.join(out, lower, "%d" % n)
         os.makedirs(d, exist_ok=True)
         frames = render(g, n, lower=lower)
