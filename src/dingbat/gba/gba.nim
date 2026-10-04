@@ -10,6 +10,23 @@ import ../common/lut_macros
 import rtc_calendar
 export rtc_calendar
 
+# In a -d:danger build (the web) the core is quirky: a call does not test
+# Nim's error flag afterwards. With goto exceptions every call to a proc that
+# may raise (and Defects count, so every call) is followed by a load and a
+# branch on that flag, even with the checks off; dropping them is 3-4 % on
+# the web build and ~10 % of the host instructions natively. -d:danger has
+# no bounds checks to lose, so there it changes nothing else. Not in the
+# desktop -d:release build, whose bounds checks are why it isn't -d:danger:
+# quirky, an out-of-range access goes ahead before anything tests the flag,
+# and a hostile state's stray index (tools/statefuzz.nim, seed 777) became
+# a SIGSEGV where it is now a reported IndexDefect. A proc that catches
+# can't be quirky, and the procs that load files and states are not, so a
+# raise there (a missing ROM, a damaged state) still stops them at once:
+# those are the `quirky: off` pushes below and in bus.nim.
+const QUIRKY_CORE = defined(danger)
+when QUIRKY_CORE:
+  {.push quirky: on.}
+
 when defined(pftrace):
   # -d:pftrace: dump ROM-bus activity inside each mGBA-suite Timing window
   # (between TM0's enable and disable writes) that contained a DMA grant; this
@@ -1694,8 +1711,10 @@ template note_waits*(bus: Bus; cost: int) =
 
 include pipeline
 # Cartridge: ROM image, save memory, GPIO-attached RTC
+{.push quirky: off.}
 include cartridge
 include storage
+{.pop.}
 include storage/sram
 include storage/flash
 include storage/eeprom
@@ -1789,6 +1808,7 @@ include ppu
 include contention
 include mmio
 
+{.push quirky: off.}
 proc new_storage*(gba: GBA; rom_path: string): Storage =
   # changeFileExt, not "up to the last dot": an extensionless path (the
   # command line takes any) would otherwise name `<parent>.sav` or `.sav`
@@ -1838,6 +1858,7 @@ proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false
   result.scheduler = new_scheduler()
   result.cartridge = new_cartridge(rom_path)
   result.cheats    = new_cheat_engine(cpGBA)
+{.pop.}
 
 proc handle_saves*(gba: GBA)
 
@@ -2093,6 +2114,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
 # own entry (795 mod 1024 here: 75,997,979 cycles to the first ROM fetch).
 const SKIP_BIOS_PRESCALER_PHASE {.intdefine.} = 776
 
+{.push quirky: off.}
 proc post_init*(gba: GBA) =
   if not gba.run_bios:
     gba.scheduler.cycles = CycleCount(SKIP_BIOS_PRESCALER_PHASE)
@@ -2142,6 +2164,7 @@ proc post_init*(gba: GBA) =
     for i in 0 ..< 2 * PSG_WAVE_BANK:
       gba.apu.channel3.wave_ram[i] = 0
     gba.ppu.skip_boot_phase()
+{.pop.}
 
 proc handle_saves*(gba: GBA) =
   gba.scheduler.schedule(280896, etSaves)
@@ -2311,4 +2334,8 @@ method toggle_sync*(gba: GBA) =
   gba.apu.toggle_sync()
 
 # Save-state visitor over every component above (also serves rewind/rollback)
+{.push quirky: off.}
 include savestate
+{.pop.}
+when QUIRKY_CORE:
+  {.pop.}   # quirky: on, from the top

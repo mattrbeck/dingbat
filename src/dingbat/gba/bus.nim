@@ -442,6 +442,7 @@ proc write_stub_u32(bios: var seq[byte]; offset: int; value: uint32) =
   bios[offset + 2] = byte(value shr 16)
   bios[offset + 3] = byte(value shr 24)
 
+{.push quirky: off.}   # opens the BIOS file (gba.nim, quirky)
 proc new_bus*(gba: GBA; bios_path: string): Bus =
   result = Bus(gba: gba)
   result.sched = gba.scheduler
@@ -620,6 +621,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
   result.tilt_present = gba.cartridge != nil and
     gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]
   result.update_waitcnt(WAITCNT())  # reset-state waitstates
+
+{.pop.}
 
 proc bus_page(address: uint32): int {.inline.} =
   int(bits_range(address, 24, 27))
