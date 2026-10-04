@@ -344,6 +344,28 @@ def save_gif(frames, path, ms, scale=4, bg=(40, 44, 52)):
     big[0].save(path, save_all=True, append_images=big[1:], duration=ms, loop=0)
 
 
+def pixels(im):
+    # getdata is deprecated in new Pillow; its replacement is missing in old
+    return getattr(im, "get_flattened_data", im.getdata)()
+
+
+def save_clear_gif(frames, path, ms, scale=4):
+    """Transparent GIF (one palette index is clear) for pages of either
+    theme, such as the README on GitHub."""
+    colours = sorted({c[:3] for f in frames for c in pixels(f) if c[3]})
+    flat = [0, 0, 0] + [v for c in colours for v in c]
+    index = {c: i + 1 for i, c in enumerate(colours)}
+    out = []
+    for f in frames:
+        big = f.resize((W * scale, H * scale), Image.NEAREST)
+        im = Image.new("P", big.size, 0)
+        im.putpalette(flat)
+        im.putdata([index[c[:3]] if c[3] else 0 for c in pixels(big)])
+        out.append(im)
+    out[0].save(path, save_all=True, append_images=out[1:], duration=ms, loop=0,
+                transparency=0, disposal=2, optimize=False)
+
+
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "frames")
     g = load()
@@ -356,3 +378,7 @@ if __name__ == "__main__":
             f.save(os.path.join(d, "frame_%02d.png" % i))
         sheet(frames, 1, (0, 0, 0, 0), 0).save(os.path.join(d, "sheet.png"))
         save_gif(frames, os.path.join(d, "flap_x4.gif"), round(1000 / fps))
+        if (lower, n) == ("opposite", 16) and len(sys.argv) == 1:
+            # the chosen loop, beside the logo PNGs; GIF delays are in
+            # centiseconds, so 24 fps is written as 40 ms (25 fps)
+            save_clear_gif(frames, os.path.join(HERE, "..", "..", "README", "dingbat_flap.gif"), 40)
