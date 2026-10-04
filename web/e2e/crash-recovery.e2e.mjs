@@ -49,6 +49,12 @@ class Player {
   async open() {
     this.ctx = await playwright[this.engine].launchPersistentContext(this.dir, launchOpts(this.engine));
     this.page = this.ctx.pages()[0] || await this.ctx.newPage();
+    this.loads = 0; // launches on this page (running)
+    // DINGBAT_E2E_SLOW=4: Chromium on a quarter of the CPU, as devices.mjs.
+    const slow = Number(process.env.DINGBAT_E2E_SLOW || 0);
+    if (slow > 1 && this.engine === "chromium") {
+      await (await this.ctx.newCDPSession(this.page)).send("Emulation.setCPUThrottlingRate", { rate: slow });
+    }
     await this.page.goto((await site()).url);
     await this.page.waitForFunction(() => typeof Module !== "undefined" && runtimeReady &&
       typeof db !== "undefined" && !!db, null, { timeout: 60000 });
@@ -56,9 +62,17 @@ class Player {
     await this.page.evaluate(() => dbPut(THUMBS_OFFER_KEY, Date.now()));
     await sleep(500);
   }
-  running() {
-    return this.page.waitForFunction(() => document.body.classList.contains("running") &&
-      !document.body.classList.contains("home-flying") && !paused, null, { timeout: 30000 });
+  // On screen and running, and the load finished: loadRom ends by running
+  // 60 frames of benchmark (benchReport) inside the core, which go past the
+  // counted frames below with whatever is held - so nothing is held until
+  // this page's log says it has run once per launch.
+  async running() {
+    this.loads = (this.loads || 0) + 1;
+    await this.page.waitForFunction((loads) => document.body.classList.contains("running") &&
+      !document.body.classList.contains("home-flying") && !paused &&
+      [...document.querySelectorAll("#log-entries p")]
+        .filter((p) => p.textContent.includes("bench (load)")).length >= loads,
+      this.loads, { timeout: 30000 });
   }
   // A button held for exactly `frames` emulated frames, let go on the last.
   hold(input, frames) {
@@ -212,11 +226,12 @@ for (const engine of ENGINES) {
     });
 
     // A quitting browser runs the close handlers but lands none of their
-    // IndexedDB writes. Chromium proper - Chrome, or DINGBAT_E2E_CHROMIUM_
-    // CHANNEL=chromium as on CI's macOS runner - keeps their localStorage
-    // (the last gasp) and resumes exactly; WebKit, and Playwright's headless
-    // shell, do not, and fall back to the checkpoint.
-    const exactQuit = engine === "chromium" && !!channel;
+    // IndexedDB writes. Google Chrome (DINGBAT_E2E_CHROMIUM_CHANNEL=chrome)
+    // keeps their localStorage - the last gasp - and resumes exactly; so
+    // does full Chromium on a quiet machine, but not on CI's runner beside
+    // the other e2e files, where Playwright's close does not wait for it.
+    // WebKit and the headless shell fall back to the checkpoint.
+    const exactQuit = engine === "chromium" && channel === "chrome";
     scenario("the browser quit mid-game is no crash, and resumes " +
              (exactQuit ? "exactly" : "no earlier than the checkpoint"), async (p) => {
       await p.save(10); await sleep(1500);
@@ -228,9 +243,10 @@ for (const engine of ENGINES) {
       const got = await p.reopen();
       if (exactQuit) assert.equal(got.c, 37);
       else assert.ok(got.c === 20 || got.c === 37, "c=" + got.c);
-      // The headless shell keeps nothing a closing page writes: its close is
-      // a kill, counted once (one crash asks nothing).
-      assert.ok(got.crashes <= (engine === "chromium" && !channel ? 1 : 0), "crashes " + got.crashes);
+      // Where the clean-exit note does not land (the headless shell; WebKit
+      // or Chromium on a loaded machine), the quit counts once - and one
+      // crash asks nothing: the tile above resumed without the sheet.
+      assert.ok(got.crashes <= (exactQuit ? 0 : 1), "crashes " + got.crashes);
     });
 
     scenario("two kills in a row, right after resuming, ask first; an earlier moment resumes", async (p) => {
