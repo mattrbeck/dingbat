@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""Generate wing-flap frames for the dingbat logo (README/dingbat.png).
+
+The logo is split into three layers: body (head, ears, legs) and the two
+wings.  Each wing loses its silhouette outline, is rotated about its
+shoulder with RotSprite-style sampling (EPX x3 = 8x, nearest sample), and is
+re-outlined with the logo's own rule: a transparent pixel that 4-touches a
+coloured pixel becomes outline.  The wings sit behind the body.
+
+Usage: flap.py [OUT_DIR]   writes 8- and 12-frame loops (frame PNGs, a 1x
+                           horizontal sheet, a 4x GIF); default ./frames
+"""
+import math
+import os
+import sys
+
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "..", "..", "README", "dingbat.png")
+
+T = None  # transparent
+
+
+def load():
+    im = Image.open(SRC).convert("RGBA")
+    w, h = im.size
+    g = [[None] * w for _ in range(h)]
+    for y in range(h):
+        for x in range(w):
+            p = im.getpixel((x, y))
+            g[y][x] = None if p[3] == 0 else p[:3]
+    return g
+
+
+OUTLINE = (4, 1, 0)
+
+
+def is_left_wing(x, y):
+    return x <= 15 and y <= 15
+
+
+def is_right_wing(x, y):
+    return x >= 29 and y <= 13 and not (x <= 30 and y <= 7)
+
+
+def layer(g, pred):
+    h, w = len(g), len(g[0])
+    return {(x, y): g[y][x] for y in range(h) for x in range(w)
+            if g[y][x] is not None and pred(x, y)}
+
+
+def strip_silhouette(px):
+    """Drop outline pixels that touch the outside of this layer."""
+    out = {}
+    for (x, y), c in px.items():
+        if c == OUTLINE and any((x + dx, y + dy) not in px
+                                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+            continue
+        out[(x, y)] = c
+    return out
+
+
+def outline(px, keep=None):
+    """Add 1px outline (4-neighbour rule) around coloured pixels."""
+    out = dict(px)
+    for (x, y), c in px.items():
+        if c == OUTLINE:
+            continue
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            q = (x + dx, y + dy)
+            if q not in px:
+                out[q] = OUTLINE
+    return out
+
+
+def epx(grid):
+    h, w = len(grid), len(grid[0])
+    o = [[None] * (w * 2) for _ in range(h * 2)]
+
+    def at(x, y):
+        if 0 <= x < w and 0 <= y < h:
+            return grid[y][x]
+        return None
+    for y in range(h):
+        for x in range(w):
+            p = grid[y][x]
+            a, b, c, d = at(x, y - 1), at(x + 1, y), at(x - 1, y), at(x, y + 1)
+            e1 = e2 = e3 = e4 = p
+            if c == a and c != d and a != b:
+                e1 = a
+            if a == b and a != c and b != d:
+                e2 = b
+            if d == c and d != b and c != a:
+                e3 = c
+            if b == d and b != a and d != c:
+                e4 = d
+            o[2 * y][2 * x], o[2 * y][2 * x + 1] = e1, e2
+            o[2 * y + 1][2 * x], o[2 * y + 1][2 * x + 1] = e3, e4
+    return o
+
+
+def rot(p, c, deg):
+    a = math.radians(deg)
+    ca, sa = math.cos(a), math.sin(a)
+    dx, dy = p[0] - c[0], p[1] - c[1]
+    return (c[0] + ca * dx - sa * dy, c[1] + sa * dx + ca * dy)
+
+
+def ramp(v, lo, hi):
+    t = min(1.0, max(0.0, (v - lo) / (hi - lo)))
+    return t * t * (3 - 2 * t)
+
+
+def warp(px, pivot, angle, bend=None, pad=24):
+    """RotSprite-style warp: rotate px about pivot by angle (deg, clockwise
+    on screen), after bending the hand about the wrist.
+
+    bend = (wrist, seam_end, extra_deg, side): pixels on the `side` (+1/-1)
+    of the line wrist->seam_end rotate an extra extra_deg about the wrist, eased in over
+    a few pixels so the membrane stretches instead of tearing."""
+    xs = [p[0] for p in px]
+    ys = [p[1] for p in px]
+    x0, y0 = min(xs) - 2, min(ys) - 2
+    x1, y1 = max(xs) + 3, max(ys) + 3
+    grid = [[px.get((x, y)) for x in range(x0, x1)] for y in range(y0, y1)]
+    big = epx(epx(epx(grid)))
+    bh, bw = len(big), len(big[0])
+    if bend:
+        (wx, wy), (ex, ey), extra, side = bend
+        nx, ny = side * (ey - wy), -side * (ex - wx)
+        nl = math.hypot(nx, ny)
+        nx, ny = nx / nl, ny / nl
+    out = {}
+    for y in range(min(ys) - pad, max(ys) + pad):
+        for x in range(min(xs) - pad, max(xs) + pad):
+            q = rot((x + 0.5, y + 0.5), pivot, -angle)
+            s = q
+            if bend:
+                for _ in range(6):
+                    d = (s[0] - wx) * nx + (s[1] - wy) * ny
+                    s = rot(q, (wx, wy), -extra * ramp(d, -1.0, 3.0))
+            u, v = (s[0] - x0) * 8, (s[1] - y0) * 8
+            iu, iv = int(math.floor(u)), int(math.floor(v))
+            if 0 <= iu < bw and 0 <= iv < bh:
+                c = big[iv][iu]
+                if c is not None:
+                    out[(x, y)] = c
+    return out
+
+
+def is_left_leg(x, y):
+    return x <= 17 and y >= 19 and not is_left_wing(x, y)
+
+
+def is_right_leg(x, y):
+    return x >= 30 and y >= 17
+
+
+def parts(g):
+    wing = lambda x, y: is_left_wing(x, y) or is_right_wing(x, y)
+    leg = lambda x, y: is_left_leg(x, y) or is_right_leg(x, y)
+    return {
+        "lw": strip_silhouette(layer(g, is_left_wing)),
+        "rw": strip_silhouette(layer(g, is_right_wing)),
+        "ll": strip_silhouette(layer(g, is_left_leg)),
+        "rl": strip_silhouette(layer(g, is_right_leg)),
+        "core": layer(g, lambda x, y: not wing(x, y) and not leg(x, y)),
+    }
+
+
+L_PIVOT = (16.0, 13.0)
+R_PIVOT = (28.0, 13.0)
+# wrist joint and the far end of the seam between arm-side and hand-side
+# membrane; the seam's outer side is the hand
+L_BEND = ((11.5, 4.5), (6.0, 14.0))
+R_BEND = ((35.5, 3.5), (39.0, 12.0))
+LL_PIVOT = (18.0, 19.5)
+RL_PIVOT = (29.5, 18.0)
+
+
+def compose(p, flap, bend=0, bob=0, legs=0):
+    """flap: degrees the wings have swung down from the logo pose; bend:
+    extra degrees the hands lag (positive = tips trail below the arm);
+    legs: degrees the legs swing in toward hanging straight down."""
+    canvas = {}
+    canvas.update(outline(warp(p["lw"], L_PIVOT, -flap, (*L_BEND, -bend, -1))))
+    canvas.update(outline(warp(p["rw"], R_PIVOT, flap, (*R_BEND, bend, 1))))
+    canvas.update(outline(warp(p["ll"], LL_PIVOT, -legs)))
+    canvas.update(outline(warp(p["rl"], RL_PIVOT, legs)))
+    canvas.update(outline(p["core"]))
+    return {(x, y + bob): c for (x, y), c in canvas.items()}
+
+
+# frame box: the logo sits at (OX, OY) so its own pixels never move
+W, H, OX, OY = 56, 40, 4, 4
+
+
+def to_image(px):
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    for (x, y), c in px.items():
+        if 0 <= x + OX < W and 0 <= y + OY < H:
+            im.putpixel((x + OX, y + OY), c + (255,))
+    return im
+
+
+def sheet(frames, scale=4, bg=(40, 44, 52, 255), gap=2):
+    n = len(frames)
+    im = Image.new("RGBA", (n * (W + gap) * scale, H * scale), bg)
+    for i, f in enumerate(frames):
+        big = f.resize((W * scale, H * scale), Image.NEAREST)
+        im.alpha_composite(big, (i * (W + gap) * scale, 0))
+    return im
+
+
+def pose(t, amp=80, bend_down=18, bend_up=34, lift=2, swing=12):
+    """Phase t in [0,1): 0 = logo pose (wings up), 0.5 = wings down."""
+    c = math.cos(2 * math.pi * t)
+    s_ = math.sin(2 * math.pi * t)
+    flap = amp * (1 - c) / 2
+    bend = -(bend_down if s_ > 0 else bend_up) * s_
+    # the body is pushed up by the downstroke and peaks just after it
+    bob = -round(lift * (1 - math.cos(2 * math.pi * (t - 0.08))) / 2)
+    # legs hang straighter while the body is driven up, then swing back;
+    # the phase warp makes them peak after the wings bottom out yet rest at
+    # exactly 0 in the logo pose, so the loop has no seam
+    w = t - 0.11 * math.sin(math.pi * t) ** 2
+    legs = swing * (1 - math.cos(2 * math.pi * w)) / 2
+    return flap, bend, bob, legs
+
+
+def render(g, n, **kw):
+    p = parts(g)
+    frames = []
+    for i in range(n):
+        if i == 0:
+            px = {(x, y): g[y][x] for y in range(len(g)) for x in range(len(g[0])) if g[y][x]}
+        else:
+            px = compose(p, *pose(i / n, **kw))
+        frames.append(to_image(px))
+    return frames
+
+
+def save_gif(frames, path, ms, scale=4, bg=(40, 44, 52)):
+    big = []
+    for f in frames:
+        im = Image.new("RGBA", (W * scale, H * scale), bg + (255,))
+        im.alpha_composite(f.resize((W * scale, H * scale), Image.NEAREST))
+        big.append(im.convert("RGB"))
+    big[0].save(path, save_all=True, append_images=big[1:], duration=ms, loop=0)
+
+
+if __name__ == "__main__":
+    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "frames")
+    g = load()
+    for n, fps in ((8, 12), (12, 18)):
+        d = os.path.join(out, "%d" % n)
+        os.makedirs(d, exist_ok=True)
+        frames = render(g, n)
+        for i, f in enumerate(frames):
+            f.save(os.path.join(d, "frame_%02d.png" % i))
+        sheet(frames, 1, (0, 0, 0, 0), 0).save(os.path.join(d, "sheet.png"))
+        save_gif(frames, os.path.join(d, "flap_x4.gif"), round(1000 / fps))
