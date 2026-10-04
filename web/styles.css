@@ -7207,49 +7207,47 @@ body.rewind-off #report-slider {
  * screen edges, semi-transparent so they don't hide the game.
  */
 
-/* Handle base style (only displayed by the landscape block below) */
+/* Handle base style (only displayed by the landscape block below). It sits
+   at the bottom between Select and Start, not on the top edge: iOS keeps the
+   top strip of the screen for its own edge swipes (Notification Centre in a
+   home-screen app, the toolbar in Safari) and delays or drops touches that
+   begin there, and a page cannot opt out. Down here it is under the thumbs
+   and drawn like the pads around it. */
 #topbar-handle {
   display: none;
   position: fixed;
-  top: 0;
+  bottom: calc(18px + var(--safe-b));
   left: 50%;
   transform: translateX(-50%);
   z-index: 41;
-  width: 52px;
-  height: 24px;
+  width: 48px;
+  height: 28px;
   align-items: center;
   justify-content: center;
   padding: 0;
-  color: var(--text-dim);
-  background: rgba(var(--surface-1-rgb), 0.55);
-  border: 1px solid var(--border-2);
-  border-top: none;
-  border-radius: 0 0 9px 9px;
+  color: var(--pad-glyph, var(--text-dim));
+  background: none;
+  border: 1px solid var(--pad-line, var(--border-2));
+  border-radius: 999px;
   cursor: pointer;
-  transition: top 0.2s ease;
   overflow: visible;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* iOS keeps the top strip of the screen for its own edge swipes
-   (Notification Centre in a home-screen app, the toolbar in Safari) and
-   delays or drops touches that begin there; a page cannot opt out. So the
-   tab stays small at the edge, but what it answers to hangs below that
-   strip: a thumb aimed at it lands in here. */
+/* A 64x48 touch area round the drawn pill */
 #topbar-handle::before {
   content: "";
   position: absolute;
-  inset: 0 -24px -32px;
+  inset: -10px -8px;
 }
 
 #topbar-handle svg {
-  width: 15px;
-  height: 15px;
+  width: 20px;
+  height: 20px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: 3.2;
   stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 0.2s ease;
 }
 
 @media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
@@ -7267,14 +7265,26 @@ body.rewind-off #report-slider {
     transform: translateY(0);
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
   }
+  /* Centred between the pills, not on the screen: the d-pad side is wider */
   body.running #topbar-handle {
     display: flex;
+    left: calc(50% + (var(--ls-dpad) - var(--ls-ab)) / 2);
   }
   body.running.topbar-open #topbar-handle {
-    top: var(--bar-h);
+    color: var(--accent);
+    border-color: rgba(var(--accent-rgb), 0.7);
   }
-  body.running.topbar-open #topbar-handle svg {
-    transform: rotate(180deg);
+  body.bold-controls #topbar-handle {
+    border-width: 2px;
+    filter: drop-shadow(0 0 1px var(--pad-halo)) drop-shadow(0 0 1px var(--pad-halo));
+  }
+  body.opaque-controls #topbar-handle {
+    background: linear-gradient(180deg, var(--surface-3), var(--surface-1));
+    box-shadow: inset 0 1px 0 var(--inset-hi), 0 2px 5px rgba(0, 0, 0, 0.4);
+  }
+  /* Level with the taller large-controls pills */
+  body.large-controls #topbar-handle {
+    bottom: calc(20px + var(--safe-b));
   }
   /* No bar on screen to sit under, so the capture banner hugs the top of the
      full-height stage — and rides down with the bar when the handle pulls it
@@ -7407,19 +7417,21 @@ body.rewind-off #report-slider {
      screen and pads itself past each cluster. On every phone in landscape
      the clusters sit at their px caps (#dpad/#ab above: 158 / 62 x 2.2,
      large 210 / 82 x 2.2), so those caps place the pills. */
-  body.running #controls {
+  body.running {
     --ls-dpad: 158px;
     --ls-ab: calc(62px * 2.2);
     --ls-pill-gap: 20px;
   }
-  body.running.large-controls #controls {
+  body.running.large-controls {
     --ls-dpad: 210px;
     --ls-ab: calc(82px * 2.2);
   }
+  /* The gap keeps room for the top bar's handle between the pills; on a
+     narrow phone in large controls the pills give way to it. */
   #select-start {
     justify-self: stretch;
     justify-content: space-between;
-    gap: 0;
+    gap: 72px;
     padding: 0 calc(var(--ls-ab) + var(--ls-pill-gap)) 0
       calc(var(--ls-dpad) + var(--ls-pill-gap));
     /* #main-controls' padding-bottom: the clusters' bottom line */
