@@ -78,7 +78,7 @@ task test_psgagb, "Run the PSG's AGB-only checks (the SP's answers) on both core
        "-o:dingbat_psgagb_test tests/psg_agb_test.nim"
 
 task test_statesoak, "Run the range-checked serialize-while-running soak (both cores)":
-  exec "nim c -r -d:test_harness -d:release --path:src " &
+  exec "nim c -r -d:test_harness -d:release -d:gba_quirky=false --path:src " &
        "-o:dingbat_state_soak_test tests/state_soak_test.nim"
 
 task test_silentaudio, "Check a core that skips mixing (muted) runs exactly as one that mixes":

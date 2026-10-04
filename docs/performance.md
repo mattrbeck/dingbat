@@ -243,9 +243,10 @@ six intros, retired instructions (min of 4), per-frame hashes identical:
   setters that keep `cpu_slow`. -1.5..-2.5 %; the DS's attention flag, set
   from every event that could change them, was not built.
 * **No error-flag test after calls (`quirky`)**: every optimised build
-  (`gba_quirky`, gba.nim), +3-4 % on the web, -9.3..-13.5 % host
-  instructions on the desktop (MKSC -9.3 %, Emerald walking -13.5 %;
-  frame hashes identical). Quirky, an out-of-range access goes ahead before
+  (`gba_quirky`, gba.nim), +3-4 % on the web, -9.4..-13.7 % host
+  instructions on the desktop (MKSC -9.4 %, Emerald walking -13.7 %;
+  frame hashes identical, and all 7,899 library ROMs end in the same frames
+  and state). Quirky, an out-of-range access goes ahead before
   anything tests the flag, so it waited on the save-state loader:
   `tools/statefuzz.nim kirby.gba 3000 777` found two hostile states that
   faulted while running (a FIFO position), an audit of every loaded field
