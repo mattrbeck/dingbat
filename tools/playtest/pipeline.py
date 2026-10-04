@@ -509,11 +509,16 @@ def cross_load_verdict(report, s, refs, problems):
         if s not in (w, r):
             continue
         # booting must not rewrite the file -- unless the references rewrite
-        # the same save the same way (the game's own boot bookkeeping)
+        # the same save the same way (the game's own boot bookkeeping). A
+        # reference that cannot show its own save (it never got past boot)
+        # leaving the file alone is no evidence: Sonic Advance hangs on grey
+        # bars in the second reference, so its blank save stays blank there
+        # and the game's first-boot header write looked like dingbat's fault
         if not cell['save_unchanged']:
             after = cell.get('save_after') or {}
             padded = after.get('diff', {}).get('bytes') == 0 and after.get('size', 0) > after.get('size_before', 0)
-            refs_keep = [x for x in refs if f'{w}-in-{x}' in cells and cells[f'{w}-in-{x}']['save_unchanged']]
+            refs_keep = [x for x in refs if f'{w}-in-{x}' in cells and cells[f'{w}-in-{x}']['save_unchanged']
+                         and healthy(x)]
             if r == s and refs_keep:
                 problems.append(f'{w} save in {r}: battery file changed by booting, {"/".join(refs_keep)} left it '
                                 f'unchanged: {after}')

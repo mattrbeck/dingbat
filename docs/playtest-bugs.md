@@ -4438,3 +4438,21 @@ Stop cells (arguments 0x80000000, 0x80000001: Stop under KEYCNT 0xC000 /
 0x8000 with IE = keypad) settle the model directly -- dingbat returns
 0x57000000 from both; a console that disagrees hangs and needs a power
 cycle. Runner 1433/1443, cycle laws hold with both BIOSes.
+
+## §51. Sonic Advance: a reference that never boots is no witness for the save, 2026-10-03
+
+**Symptom.** All four dingbat configs failed the save cross-load: "nba save
+in dingbat: battery file changed by booting, nba left it unchanged" (the
+first 4 KB of 64 KB).
+
+**Cause: the harness.** The second reference never gets past the grey bars
+of section 1 in this game, so its [new] run writes nothing and its save is
+blank (64 KB of 0xFF). A blank FLASH sends the game to the language screen,
+and picking a language writes the "PIRO" header block -- in dingbat and in
+mGBA alike, byte for byte (both write the same 4086 non-0xFF bytes). The
+second reference "left it unchanged" only because it was still on grey
+bars. `cross_load_verdict` now counts a reference as keeping a save only
+when that reference shows its own save the way another emulator does (the
+`healthy` test it already used for the reverse direction); otherwise the
+rewrite is the game's own and is a note. Sonic Advance passes in all four
+configs; no other game in the corpus had this problem.
