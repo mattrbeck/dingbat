@@ -230,14 +230,32 @@ def compose(p, flap, bend=0, bob=0, legs=0, legs_bend=0, sweep=0, cup=0,
     fr = far if far_reach is None else far_reach
     put("rw", outline(warp(p["rw"], R_PIVOT, far * flap, (*R_BEND, far * bend, 1),
                            (fr * sweep, fr * cup))))
-    # where a lower wing joins the body the logo has no outline between
-    # them; the body's rebuilt outline yields to a lower wing there
+    # where a wing joins the body the logo has no outline between them (the
+    # right arm's pink runs straight into the body); the body's rebuilt
+    # outline yields to the wing there, or it is left as a black dot inside
+    # the wing whenever the wing swings back over it
+    joints = {"ll": LL_PIVOT, "rl": RL_PIVOT, "lw": L_PIVOT, "rw": R_PIVOT}
+
     def joint(q):
-        if q in p["core"] or owner.get(q) not in ("ll", "rl"):
+        j = joints.get(owner.get(q))
+        if q in p["core"] or j is None:
             return False
-        return any(math.hypot(q[0] + 0.5 - j[0], q[1] + 0.5 - j[1]) < 3.0
-                   for j in (LL_PIVOT, RL_PIVOT))
+        return math.hypot(q[0] + 0.5 - j[0], q[1] + 0.5 - j[1]) < 3.0
     put("core", outline(p["core"]), joint)
+    # a black pixel boxed in by body and wing colour is a stranded bit of
+    # the body's edge (the logo's own outline at the right shoulder, for
+    # one); fill it from the wing so it can't flicker as a hole.  The
+    # face's dark pixels touch only body colour and are kept
+    wings = ("lw", "rw", "ll", "rl")
+    for q in [q for q, c in canvas.items() if c == OUTLINE]:
+        nb = [(q[0] + dx, q[1] + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+        own = [owner.get(r) for r in nb]
+        if None in own or "core" not in own:
+            continue
+        from_wing = [r for r in nb if owner[r] in wings]
+        if from_wing:
+            fill = max(from_wing, key=lambda r: sum(canvas[r] == canvas[s] for s in from_wing))
+            canvas[q], owner[q] = canvas[fill], owner[fill]
     shift = lambda d: {(x, y + bob): v for (x, y), v in d.items()}
     return (shift(canvas), shift(owner)) if owners else shift(canvas)
 
