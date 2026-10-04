@@ -20,7 +20,7 @@ proc new_cpu*(gba: GBA): CPU =
     cpsr: cast[PSR](uint32(modeSYS)),
     spsr: cast[PSR](uint32(modeSYS)),
     pipeline: Pipeline(),
-    halted: false,
+    halted_v: false,
     attempt_waitloop_detection: true,
     cache_waitloop_results: true,
     branch_dest: 0,
@@ -952,7 +952,9 @@ proc irq_in_last_waits(cpu: CPU): bool {.inline.} =
   else:
     false
 
-proc tick*(cpu: CPU) =
+proc tick_checks(cpu: CPU): bool =
+  ## What tick does before an opcode when cpu_slow is set; true when the CPU
+  ## is to go no further this tick (a parked charge still owed).
   # IRQ before the IntrWait re-halt check: the handler must run (and set the
   # BIOS mirror flags) or IntrWait re-halts forever.
   if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable and
@@ -975,7 +977,7 @@ proc tick*(cpu: CPU) =
           cpu.gba.bus.add_cycles(HALT_WAKE_INSTR_COST)
         elif cpu.halt_resume_charge >= HALT_WAKE_INSTR_COST:
           cpu.gba.bus.add_cycles(HALT_WAKE_INSTR_COST)
-          cpu.halt_resume_charge -= HALT_WAKE_INSTR_COST
+          cpu.halt_resume_charge = cpu.halt_resume_charge - HALT_WAKE_INSTR_COST
       cpu.irq()
   # The halt-wake entry exemption covers only the first boundary after the wake.
   cpu.halt_wake = false
@@ -1022,8 +1024,9 @@ proc tick*(cpu: CPU) =
       cpu.halt_resume_charge = int32(remain)
       if remain != 0:
         if not cpu.halt_resume_pop:
-          cpu.halt_resume_charge += int32(cpu.hle_park_frame_extra(cur))
-        return
+          cpu.halt_resume_charge = cpu.halt_resume_charge +
+            int32(cpu.hle_park_frame_extra(cur))
+        return true
       if not cpu.halt_resume_pop:
         # The routine's end is its return to the caller, which flushes the
         # gamepak fetch stream as the uninterrupted SWI's does (hle_swi); the
@@ -1043,6 +1046,10 @@ proc tick*(cpu: CPU) =
         cpu.r[2] = cpu.gba.bus.read_word_internal(usp - 8)
         cpu.set_sys_lr(cpu.gba.bus.read_word_internal(usp - 4))
         cpu.set_sys_sp(usp)
+
+proc tick*(cpu: CPU) =
+  # With none of the fields it reads set (cpu_slow), tick_checks does nothing
+  if cpu.cpu_slow and cpu.tick_checks(): return
   if not cpu.halted:
     when defined(gsbon):
       # Camelot "Bon" (Golden Sun) hook, parked behind -d:gsbon: a PC compare

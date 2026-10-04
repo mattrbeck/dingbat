@@ -670,30 +670,34 @@ type
     refill_pending*: bool
     reg_banks*:   array[7, array[7, uint32]]  # [6] = UNDEF_BANK, see cpu.nim
     spsr_banks*:  array[6, uint32]
-    halted*:      bool
+    halted_v:     bool  # these five: through their setters (cpu_slow below)
     stopped*:     bool  # Stop mode: halted, and only keypad/cartridge/SIO IRQs wake
     # Level-triggered IRQ signal (IE & IF != 0 and IME), maintained by
     # check_interrupts; sampled at instruction boundaries only
-    irq_line*:    bool
+    irq_line_v:   bool
     # When the synchroniser raised irq_line (IRQ_LAST_WAITS).
     irq_line_at*: CycleCount
     # Set when an IRQ wakes the CPU from halt. Nothing reads it any more; it
     # stays because it is serialized CPU state.
-    halt_wake*:   bool
+    halt_wake_v:  bool
     # HLE IntrWait: while active, the CPU re-halts at resume_addr until the
     # user IRQ handler ORs a masked flag into the BIOS mirror at 0x03007FF8
-    intr_wait_active*:      bool
+    intr_wait_active_v:     bool
     intr_wait_mask*:        uint16
     intr_wait_resume_addr*: uint32
     # HLE Halt/Stop: the real BIOS runs its SWI-dispatcher return path after
     # the wake IRQ is serviced, so its cost is charged when execution reaches
     # the instruction after the SWI.
-    halt_resume_charge*:    int32
+    halt_resume_charge_v:   int32
     halt_resume_addr*:      uint32
     # The parked charge belongs to a Halt/Stop SWI, whose entry left the
     # dispatcher's {r2, lr} frame live (System sp shifted down 8); the resume
     # must pop it. Decompression SWIs park charges here but never shift sp.
     halt_resume_pop*:       bool
+    # Any of halted, irq_line, halt_wake, intr_wait_active or a parked
+    # halt_resume_charge: tick's checks before an opcode have something to do.
+    # Kept by those five fields' setters, so it is exact by construction.
+    cpu_slow*:              bool
     # An HLE CpuSet/CpuFastSet preempted by an IRQ rewinds onto its SWI with
     # the continuation in r0-r2 (hle_bios.nim); these name that SWI and
     # state so the re-dispatch is known as the same routine resuming (it
@@ -1305,6 +1309,33 @@ type
     cheat_hooks: MemHooks        # built once, reused each frame (see apply_cheats)
     when defined(test_harness):
       test_output*: TestOutput
+
+# The fields tick tests before every opcode. Each write goes through a
+# setter that keeps cpu_slow, so a CPU with none of them set takes one test.
+# Getters are procs, not templates, so `+=` on one can't skip its setter.
+proc set_cpu_slow(cpu: CPU) {.inline.} =
+  cpu.cpu_slow = cpu.halted_v or cpu.irq_line_v or cpu.halt_wake_v or
+                 cpu.intr_wait_active_v or cpu.halt_resume_charge_v != 0
+proc halted*(cpu: CPU): bool {.inline.} = cpu.halted_v
+proc irq_line*(cpu: CPU): bool {.inline.} = cpu.irq_line_v
+proc halt_wake*(cpu: CPU): bool {.inline.} = cpu.halt_wake_v
+proc intr_wait_active*(cpu: CPU): bool {.inline.} = cpu.intr_wait_active_v
+proc halt_resume_charge*(cpu: CPU): int32 {.inline.} = cpu.halt_resume_charge_v
+proc `halted=`*(cpu: CPU; v: bool) {.inline.} =
+  cpu.halted_v = v
+  cpu.set_cpu_slow()
+proc `irq_line=`*(cpu: CPU; v: bool) {.inline.} =
+  cpu.irq_line_v = v
+  cpu.set_cpu_slow()
+proc `halt_wake=`*(cpu: CPU; v: bool) {.inline.} =
+  cpu.halt_wake_v = v
+  cpu.set_cpu_slow()
+proc `intr_wait_active=`*(cpu: CPU; v: bool) {.inline.} =
+  cpu.intr_wait_active_v = v
+  cpu.set_cpu_slow()
+proc `halt_resume_charge=`*(cpu: CPU; v: int32) {.inline.} =
+  cpu.halt_resume_charge_v = v
+  cpu.set_cpu_slow()
 
 # Forward declarations to handle circular include dependencies
 proc irq*(cpu: CPU)
