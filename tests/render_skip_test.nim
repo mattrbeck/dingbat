@@ -1,0 +1,245 @@
+## The GBA whole-frame render skip against a twin that renders every line.
+## The skip (ppu.nim `scanline`) reuses the last framebuffer while no write
+## since the frame began changed anything the PPU draws from; a write that
+## stores what was already there (a game's shadow registers, palette or
+## OAM copied in every V-blank) does not count. Every case here runs two
+## machines through the same frames, one with `render_dirty` forced on so
+## it never skips, and requires identical framebuffers after every frame:
+##   1. the GBA ROMs under tests/roms, plus any listed in
+##      DINGBAT_RENDER_SKIP_ROMS (files or directories, ':'-separated);
+##   2. a synthetic scene with pokes through the real bus paths: same-value
+##      stores to every PPU register, PRAM, VRAM (halfword and byte) and OAM
+##      must leave the frame skipped; changed ones must redraw it; and a
+##      same-value BG2Y store mid-frame, which still resets the internal
+##      reference point that advanced since V-blank, must redraw the lines
+##      below it.
+## Run with: nimble test_renderskip
+
+import std/[os, strutils]
+import dingbat/gba/gba
+
+var failures = 0
+
+proc check(cond: bool; name: string; detail = "") =
+  if cond:
+    echo "  [PASS] ", name
+  else:
+    echo "  [FAIL] ", name, (if detail.len > 0: "  " & detail else: "")
+    inc failures
+
+proc first_diff(a, b: GBA): int =
+  ## The first framebuffer index where the two differ, or -1.
+  for i in 0 ..< a.ppu.framebuffer.len:
+    if a.ppu.framebuffer[i] != b.ppu.framebuffer[i]: return i
+  -1
+
+proc frame(g: GBA; force: bool; line = -1; poke: proc(g: GBA) = nil) =
+  ## step_frame's loop, with `poke` run at the first boundary on `line`.
+  ## `force` makes this the twin that never skips.
+  if force: g.ppu.render_dirty = true
+  g.frame_start_cycles = g.scheduler.cycles
+  var poked = poke == nil
+  while g.ppu.frame == 0:
+    if not poked and int(g.ppu.vcount) == line:
+      poke(g)
+      poked = true
+    g.cpu.tick()
+  g.end_frame()
+
+# ---- 1. ROMs ----------------------------------------------------------------
+
+proc run_rom(src: string; frames: int) =
+  # Each machine on its own copy: a save chip writes its .sav beside the ROM
+  var g: array[2, GBA]
+  for i in 0 .. 1:
+    let dir = getTempDir() / "dingbat_render_skip" / $i
+    createDir(dir)
+    let path = dir / src.extractFilename
+    copyFile(src, path)
+    removeFile(path.changeFileExt(".sav"))
+    g[i] = new_gba("", path, run_bios = false, use_hle = true)
+    g[i].post_init()
+  let (a, b) = (g[0], g[1])
+  let path = src
+  var static_frames = 0
+  var bad = -1
+  for f in 0 ..< frames:
+    a.frame(force = false)
+    b.frame(force = true)
+    if a.ppu.frame_static: inc static_frames
+    if bad < 0 and first_diff(a, b) >= 0: bad = f
+  check(bad < 0, path.extractFilename & " (" & $static_frames & "/" & $frames &
+        " frames skipped)", if bad >= 0: "first differs at frame " & $bad else: "")
+
+# ---- 2. Synthetic scene -------------------------------------------------------
+
+const IO = 0x04000000'u32
+
+proc make_rom(): string =
+  # ARM `b .` at the entry point: the CPU spins and the PPU draws only what
+  # the test puts in memory
+  result = getTempDir() / "dingbat_render_skip_synthetic.gba"
+  var rom = newString(0x8000)
+  rom[0] = '\xFE'; rom[1] = '\xFF'; rom[2] = '\xFF'; rom[3] = '\xEA'
+  writeFile(result, rom)
+
+proc setup(g: GBA) =
+  let bus = g.bus
+  # Mode 1: BG0 text (4bpp, char 0, screen 31), BG2 affine (8bpp, char 1,
+  # screen 16, 256x256), sprites on, 1D OBJ mapping
+  bus.write_half_internal(IO + 0x00, 0x1541)
+  bus.write_half_internal(IO + 0x08, 0x1F00)
+  bus.write_half_internal(IO + 0x0C, 0x5084)
+  bus.write_half_internal(IO + 0x20, 0x0100)  # BG2PA
+  bus.write_half_internal(IO + 0x26, 0x0100)  # BG2PD
+  for i in 1'u32 .. 255:
+    bus.write_half_internal(0x05000000'u32 + 2 * i, uint16((i * 37) and 0x7FFF))
+    bus.write_half_internal(0x05000200'u32 + 2 * i, uint16((i * 91) and 0x7FFF))
+  # BG0 tile 1, every map entry on it
+  for i in 0'u32 ..< 16:
+    bus.write_word_internal(0x06000020'u32 + 4 * i, 0x12345678'u32 + i * 0x01010101'u32)
+  for i in 0'u32 ..< 1024:
+    bus.write_half_internal(0x0600F800'u32 + 2 * i, 1)
+  # BG2: tiles 0-255 at char 1 (0x4000 on) are row-numbered, the 32x32 map
+  # at screen 16 (0x8000) names tile = row, so each line of the picture
+  # shows which BG row it came from
+  for t in 0'u32 ..< 32:
+    for p in 0'u32 ..< 16:
+      bus.write_word_internal(0x06004000'u32 + 64 * t + 4 * p,
+                              (t * 8 + p div 2 + 1) * 0x01010101'u32)
+  for r in 0'u32 ..< 32:
+    for c in 0'u32 ..< 16:
+      bus.write_half_internal(0x06008000'u32 + 32 * r + 2 * c, uint16(r or (r shl 8)))
+  # One 16x16 sprite at (60, 40), tile 2 of OBJ VRAM
+  for i in 0'u32 ..< 32:
+    bus.write_word_internal(0x06010040'u32 + 4 * i, 0x11223344'u32 + i)
+  bus.write_half_internal(0x07000000, 40)
+  bus.write_half_internal(0x07000002, 0x4000 or 60)
+  bus.write_half_internal(0x07000004, 2)
+  for i in 1'u32 ..< 128:   # the rest hidden
+    bus.write_half_internal(0x07000000'u32 + 8 * i, 0x0200)
+
+proc pair(): (GBA, GBA) =
+  let rom = make_rom()
+  let a = new_gba("", rom, run_bios = false, use_hle = true)
+  a.post_init()
+  let b = new_gba("", rom, run_bios = false, use_hle = true)
+  b.post_init()
+  a.setup(); b.setup()
+  for i in 0 ..< 4:          # settle, so the next clean frame skips
+    a.frame(false); b.frame(true)
+  (a, b)
+
+proc same_frames(a, b: GBA; n: int; line: int; poke: proc(g: GBA);
+                 name: string; expect_static: bool) =
+  ## n frames with `poke` on `line` in each; frames must match, and the
+  ## skipping machine must skip (or redraw) every one of them.
+  var bad = -1
+  var statics = 0
+  for f in 0 ..< n:
+    a.frame(false, line, poke)
+    b.frame(true, line, poke)
+    if a.ppu.frame_static: inc statics
+    if bad < 0 and first_diff(a, b) >= 0: bad = f
+  check(bad < 0, name & ": frames match", if bad >= 0: "frame " & $bad else: "")
+  if expect_static:
+    check(statics == n, name & ": every frame skipped", $statics & "/" & $n)
+  else:
+    check(statics == 0, name & ": every frame redrawn", $statics & "/" & $n)
+
+proc synthetic() =
+  echo "synthetic scene"
+  var (a, b) = pair()
+  same_frames(a, b, 3, -1, nil, "no writes", expect_static = true)
+
+  # Same-value stores to every PPU register but the affine reference points
+  # (below) and DISPSTAT, with the values setup and the boot left there
+  let same_regs = proc(g: GBA) =
+    let bus = g.bus
+    bus.write_half_internal(IO + 0x00, 0x1541)
+    bus.write_half_internal(IO + 0x08, 0x1F00)
+    bus.write_half_internal(IO + 0x0C, 0x5084)
+    for r in [0x10'u32, 0x12, 0x14, 0x16, 0x18, 0x1A, 0x1C, 0x1E, 0x22, 0x24,
+              0x32, 0x34, 0x40, 0x42, 0x44, 0x46, 0x48, 0x4A, 0x4C, 0x50,
+              0x52, 0x54]:
+      bus.write_half_internal(IO + r, 0)
+    # PA and PD of both affine BGs are 0x100 (the BIOS leaves BG3's so)
+    for r in [0x20'u32, 0x26, 0x30, 0x36]:
+      bus.write_half_internal(IO + r, 0x0100)
+  same_frames(a, b, 3, 0, same_regs, "same-value registers at V-blank's end",
+              expect_static = true)
+  same_frames(a, b, 3, 200, same_regs, "same-value registers in V-blank",
+              expect_static = true)
+  let same_mem = proc(g: GBA) =
+    let bus = g.bus
+    bus.write_half_internal(0x0600F800, 2)   # BG0 map entry 0 changed...
+    bus.write_half_internal(0x0600F800, 1)   # ...and put back
+  same_frames(a, b, 3, 100, same_mem, "VRAM changed and restored mid-frame",
+              expect_static = false)
+  let same_mem2 = proc(g: GBA) =
+    let bus = g.bus
+    bus.write_half_internal(0x05000002, uint16(37))
+    bus.write_word_internal(0x05000200, (91'u32 shl 16))
+    bus.write_half_internal(0x0600F800, 1)
+    bus.write_word_internal(0x06008020, 0x01010101'u32)   # BG2 map row 1
+    bus.write_byte_internal(0x06004000, 1)   # 0x0101: what is there
+    bus.write_word_internal(0x07000000, 40'u32 or ((0x4000'u32 or 60) shl 16))
+    bus.write_half_internal(0x07000004, 2)
+  # one redrawn frame for the changed-and-restored ones above, then static
+  a.frame(false); b.frame(true)
+  same_frames(a, b, 3, 100, same_mem2, "same-value PRAM/VRAM/OAM mid-frame",
+              expect_static = true)
+
+  # Changed values redraw
+  var k = 0'u16
+  let pal = proc(g: GBA) = g.bus.write_half_internal(0x05000002, 0x7C00'u16 xor k)
+  for i in 0 ..< 3:
+    k = uint16(i + 1)
+    same_frames(a, b, 1, 120, pal, "palette change mid-frame #" & $i, expect_static = false)
+  var x = 60'u16
+  let obj = proc(g: GBA) = g.bus.write_half_internal(0x07000002, 0x4000'u16 or x)
+  for i in 0 ..< 3:
+    x = uint16(61 + i)
+    same_frames(a, b, 1, 30, obj, "sprite moved mid-frame #" & $i, expect_static = false)
+  let hofs = proc(g: GBA) = g.bus.write_half_internal(IO + 0x10, uint16(k))
+  for i in 0 ..< 3:
+    k = uint16(i + 5)
+    same_frames(a, b, 1, 70, hofs, "BG0HOFS change mid-frame #" & $i, expect_static = false)
+  let vram = proc(g: GBA) = g.bus.write_byte_internal(0x06000020, uint8(k))
+  for i in 0 ..< 3:
+    k = uint16(i + 9)
+    same_frames(a, b, 1, 50, vram, "VRAM byte change mid-frame #" & $i, expect_static = false)
+
+  # The affine reference: BG2Y written with the value it already holds,
+  # 80 lines into the frame, moves the internal point back to it
+  (a, b) = pair()
+  for g in [a, b]: g.bus.write_half_internal(IO + 0x00, 0x1441)  # BG2 + OBJ only
+  for i in 0 ..< 2: a.frame(false); b.frame(true)
+  same_frames(a, b, 2, -1, nil, "affine scene settles", expect_static = true)
+  let refy = proc(g: GBA) =
+    g.bus.write_half_internal(IO + 0x2C, 0)
+    g.bus.write_half_internal(IO + 0x2E, 0)
+  same_frames(a, b, 3, 80, refy, "same-value BG2Y mid-frame", expect_static = false)
+  # The same store in V-blank finds the point already reloaded: no change
+  a.frame(false); b.frame(true)
+  same_frames(a, b, 3, 200, refy, "same-value BG2Y in V-blank", expect_static = true)
+
+when isMainModule:
+  echo "ROMs"
+  var roms: seq[string]
+  for f in walkFiles(currentSourcePath.parentDir / "roms" / "*.gba"): roms.add f
+  for item in getEnv("DINGBAT_RENDER_SKIP_ROMS").split(':'):
+    if item.len == 0: continue
+    if dirExists(item):
+      for f in walkFiles(item / "*.gba"): roms.add f
+    else:
+      roms.add item
+  let frames = parseInt(getEnv("DINGBAT_RENDER_SKIP_FRAMES", "300"))
+  for r in roms: run_rom(r, frames)
+  synthetic()
+  if failures == 0:
+    echo "render_skip: all passed"
+    quit(0)
+  else:
+    echo "render_skip: ", failures, " FAILED"
+    quit(1)

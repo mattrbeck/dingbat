@@ -35,6 +35,7 @@ build runner          dingbat_test_runner           tests/dingbat_test_runner.ni
 build ppucomposite    dingbat_ppucomposite_test     tests/ppucomposite_test.nim
 build ppubgunpack     dingbat_ppubgunpack_test      tests/ppubgunpack_test.nim
 build ppuobjlist      dingbat_ppuobjlist_test       tests/ppuobjlist_test.nim
+build renderskip      dingbat_renderskip_test       tests/render_skip_test.nim
 build savestatecompat dingbat_savestate_compat_test tests/savestate_compat_test.nim
 build rewind          dingbat_rewind_test           tests/rewind_test.nim
 build lcdresponse     dingbat_lcdresponse_test      tests/lcdresponse_test.nim

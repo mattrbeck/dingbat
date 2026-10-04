@@ -37,6 +37,9 @@ task test_ppucomposite, "Run the GBA PPU compositor invariant tests":
 task test_ppubgunpack, "Run the 4bpp BG tile-unpack equivalence tests":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_ppubgunpack_test tests/ppubgunpack_test.nim"
+task test_renderskip, "Run the GBA whole-frame render skip against a never-skipping twin":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_renderskip_test tests/render_skip_test.nim"
+
 task test_mp2kpass, "Run the MP2K HLE pass-detection and level-control tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_mp2kpass_test tests/mp2k_pass_test.nim"
 

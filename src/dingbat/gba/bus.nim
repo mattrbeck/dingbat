@@ -688,6 +688,31 @@ proc write_u16_ptr(buf: var seq[byte]; offset: uint32; val: uint16) {.inline.} =
 proc write_u32_ptr(buf: var seq[byte]; offset: uint32; val: uint32) {.inline.} =
   cast[ptr uint32](addr buf[offset])[] = val
 
+# Stores into PRAM, VRAM and OAM. Only one that changes what is there dirties
+# the frame (ppu.render_dirty, the whole-frame render skip): a game that
+# rewrites the same palette or OAM every frame draws the same picture.
+proc vid_store16(ppu: PPU; buf: var seq[byte]; offset: uint32; val: uint16) {.inline.} =
+  if read_u16_ptr(buf, offset) != val:
+    ppu.render_dirty = true
+    write_u16_ptr(buf, offset, val)
+
+proc vid_store32(ppu: PPU; buf: var seq[byte]; offset: uint32; val: uint32) {.inline.} =
+  if read_u32_ptr(buf, offset) != val:
+    ppu.render_dirty = true
+    write_u32_ptr(buf, offset, val)
+
+proc oam_store16(ppu: PPU; offset: uint32; val: uint16) {.inline.} =
+  ppu.oam_touched()   # as every OAM store (serialized: oam_view_stale)
+  if read_u16_ptr(ppu.oam, offset) != val:
+    ppu.render_dirty = true
+    write_u16_ptr(ppu.oam, offset, val)
+
+proc oam_store32(ppu: PPU; offset: uint32; val: uint32) {.inline.} =
+  ppu.oam_touched()   # as every OAM store (serialized: oam_view_stale)
+  if read_u32_ptr(ppu.oam, offset) != val:
+    ppu.render_dirty = true
+    write_u32_ptr(ppu.oam, offset, val)
+
 # ROM reads: the buffer is sized to the next power of two >= the cart; reads
 # past it return the open-bus pattern
 
@@ -878,15 +903,13 @@ proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
     wcWatch(bus, address, 1)
   of 0x4: bus.gba.mmio[address] = value
   of 0x5:
-    bus.gba.ppu.render_dirty = true
-    write_u16_ptr(bus.gba.ppu.pram, address and 0x3FE'u32, 0x0101'u16 * uint16(value))
+    bus.gba.ppu.vid_store16(bus.gba.ppu.pram, address and 0x3FE'u32, 0x0101'u16 * uint16(value))
   of 0x6:
     let limit: uint32 = if bus.gba.ppu.bitmap(): 0x13FFF'u32 else: 0x0FFFF'u32
     var a = 0x1FFFE'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
     if a <= limit:
-      bus.gba.ppu.render_dirty = true
-      write_u16_ptr(bus.gba.ppu.vram, a, 0x0101'u16 * uint16(value))
+      bus.gba.ppu.vid_store16(bus.gba.ppu.vram, a, 0x0101'u16 * uint16(value))
   of 0x7: discard  # can't write bytes to oam
   of 0x8, 0xD:
     if address_in_gpio(address):
@@ -924,17 +947,13 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
       bus.write_byte_internal(address, uint8(value))
       bus.write_byte_internal(address + 1, uint8(value shr 8))
   of 0x5:
-    bus.gba.ppu.render_dirty = true
-    write_u16_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
+    bus.gba.ppu.vid_store16(bus.gba.ppu.pram, address and 0x3FF'u32, value)
   of 0x6:
     var a = 0x1FFFF'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
-    bus.gba.ppu.render_dirty = true
-    write_u16_ptr(bus.gba.ppu.vram, a, value)
+    bus.gba.ppu.vid_store16(bus.gba.ppu.vram, a, value)
   of 0x7:
-    bus.gba.ppu.render_dirty = true
-    bus.gba.ppu.oam_touched()
-    write_u16_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
+    bus.gba.ppu.oam_store16(address and 0x3FF'u32, value)
   of 0x8, 0xD:
     if address_in_gpio(address):
       bus.gpio[address] = uint8(value)
@@ -981,17 +1000,13 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
       bus.write_byte_internal(address + 2, uint8(value shr 16))
       bus.write_byte_internal(address + 3, uint8(value shr 24))
   of 0x5:
-    bus.gba.ppu.render_dirty = true
-    write_u32_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
+    bus.gba.ppu.vid_store32(bus.gba.ppu.pram, address and 0x3FF'u32, value)
   of 0x6:
     var a = 0x1FFFF'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
-    bus.gba.ppu.render_dirty = true
-    write_u32_ptr(bus.gba.ppu.vram, a, value)
+    bus.gba.ppu.vid_store32(bus.gba.ppu.vram, a, value)
   of 0x7:
-    bus.gba.ppu.render_dirty = true
-    bus.gba.ppu.oam_touched()
-    write_u32_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
+    bus.gba.ppu.oam_store32(address and 0x3FF'u32, value)
   of 0x8, 0xD:
     if address_in_gpio(address):
       bus.gpio[address] = uint8(value)

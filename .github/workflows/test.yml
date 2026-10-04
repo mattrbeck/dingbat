@@ -60,6 +60,12 @@ jobs:
         # scan must produce byte-identical sprite_pixels. No ROMs.
         shell: bash
         run: ./dingbat_ppuobjlist_test
+      - name: GBA whole-frame render skip against a never-skipping twin
+        # tests/roms' GBA ROMs and a synthetic scene poked through the bus
+        # (same-value and changed registers, PRAM, VRAM, OAM, a mid-frame
+        # BG2Y store) must draw byte-identical frames with the skip on.
+        shell: bash
+        run: ./dingbat_renderskip_test
       - name: MP2K HLE pass detection and FIFO level control
         # The driver's stores sent through the bus (lock, ring, song-change
         # locks, a mono driver's scratch half, state loads, same-slot passes,
