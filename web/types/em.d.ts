@@ -60,6 +60,7 @@ interface EmscriptenModule {
   _getAudioBufferLen?(): number;
   _clearAudioBuffer?(): void;
   _wasm_state_size?(): number;
+  _wasm_state_plain_size?(): number;
   _wasm_state_data?(): number;
   _wasm_pack_state?(data: number, len: number): number;
   _wasm_flush_save?(): void;

@@ -20,6 +20,8 @@ const perGameKeys = (n) => [
   "sessionpic:" + n,
   "cheats:" + n,
   "oldsave:" + n,
+  "ckpts:" + n,
+  ...[0, 1, 2, 3, 4, 5, 6, 7, 8].map((s) => "ckpt" + s + ":" + n),
   "state:" + n, "statemeta:" + n,
   ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((s) =>
     ["state:" + n + ":slot" + s, "statemeta:" + n + ":slot" + s]),
@@ -29,7 +31,7 @@ const perGameKeys = (n) => [
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
     !k.startsWith("art:") && !k.startsWith("sessionpic:") &&
-    !k.startsWith("cheats:"));
+    !k.startsWith("cheats:") && !/^ckpts?\d*:/.test(k));
 
 const seedValue = (key, name) => {
   if (key.startsWith("rom:")) return { name, data: u8(1, 2, 3, 4) };

@@ -687,6 +687,25 @@
       </div>
     </div>
 
+    <!-- Resume from earlier: the game's session and its checkpoints (index.js
+         "Checkpoints"), in the Save States grid. Opened from the game's menu,
+         or in its crash form when the game has stopped unexpectedly twice. -->
+    <div id="moments-modal" class="modal-overlay">
+      <div class="modal modal-states" role="dialog" aria-modal="true" aria-labelledby="moments-title">
+        <button type="button" class="modal-close" id="moments-close" aria-label="Close">&times;</button>
+        <h2 id="moments-title">Resume from earlier</h2>
+        <p id="moments-hint" class="modal-hint"></p>
+        <div id="moments-grid" class="states-grid moments-grid"></div>
+        <p id="moments-note" class="modal-hint moments-note" hidden></p>
+        <div class="states-actions states-actions-split">
+          <button type="button" class="button button-sm" id="moments-from-save">Start from in-game save</button>
+          <div class="states-actions-right">
+            <button type="button" class="button button-sm button-primary" id="moments-resume" disabled>Resume</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Rewind scrubber: the Report-a-Bug scrubber's box (.report-scrub etc.)
          with a film strip added. The strip is one canvas drawn from the
          thumbnails the rewind ring captured at push time. -->

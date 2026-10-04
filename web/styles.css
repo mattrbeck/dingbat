@@ -4394,6 +4394,40 @@ body.debug-2p .home-tile-link {
   flex-shrink: 0;
 }
 
+/* ---- Resume from earlier (the Save States grid, read-only) ---- */
+/* The note under the grid says what going back to the chosen moment does
+   to the in-game save; it is the only text that changes with the choice,
+   so it reads in the body colour, apart from the hint above. */
+.moments-note {
+  margin: -6px 0 16px;
+  color: var(--text);
+}
+
+#moments-from-save[hidden] {
+  display: none;
+}
+
+/* Alone, Resume still sits at the right, where Save States puts it. */
+#moments-modal .states-actions-right {
+  margin-left: auto;
+}
+
+/* Two lines, not one: "12 min earlier" and a clock time do not share a
+   phone-width third, and neither may be the one cut short. */
+.moments-grid .state-slot .slot-label {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.state-slot .moment-before-save {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .states-actions {
   display: flex;
   justify-content: flex-end;

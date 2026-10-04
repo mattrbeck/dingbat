@@ -164,6 +164,29 @@ phone's tab really being suspended.
       Ignore it instead and keep playing: nothing is lost on the phone,
       and its session is the one the Mac picks up next.
 
+## A game that keeps stopping (checkpoints)
+
+Gated: `web/tests/checkpoints.test.mjs` (retention, the crash count, late
+results, going back past a save). Seen in headless Chromium with FireRed:
+the worker path, a browser killed with the game on screen, the relaunch
+resuming the last checkpoint, two kills and the sheet. Not gated: a real
+Android Chrome crash, iOS Safari's worker, a phone's frame pacing.
+
+- [ ] **Crash, pick up.** On the phone play a few minutes without saving in
+      game, then kill the browser from the app switcher *with the game on
+      screen*. Reopen and tap the game: it resumes within about a minute of
+      where it was.
+- [ ] **No hitch.** Play a slow-phone GBA game for a few minutes with the
+      log open: no audible or visible stutter on the minute.
+- [ ] **Twice and it asks.** Kill it twice in a row just after it resumes:
+      the third tap opens *“Game” stopped unexpectedly*. Pick an earlier
+      moment: it resumes there. Kill it again and the earlier moments are
+      still listed.
+- [ ] **Resume from earlier, past a save.** Save in game, play a minute, then
+      the game's menu → Resume from earlier → a moment marked *Before your
+      last save*: it resumes there, and the menu offers Restore old save
+      (*The save you replaced*), which brings the newer save back.
+
 ## State-machine fix round (formal/FINDINGS.md)
 
 Driven through the real UI in headless Chromium: the local scenarios, and

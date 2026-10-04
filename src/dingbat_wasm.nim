@@ -434,6 +434,15 @@ proc wasm_state_size(): cint {.exportc.} =
   of ekNone: stateImage = ""
   cint(stateImage.len)
 
+proc wasm_state_plain_size(): cint {.exportc.} =
+  ## As wasm_state_size, the image left plain: the periodic checkpoint
+  ## deflates it in a worker (web/ckptworker.js), off the frame's thread.
+  case stateKind
+  of ekGBA: stateImage = stateGba.state_bytes()
+  of ekGB:  stateImage = stateGb.state_bytes()
+  of ekNone: stateImage = ""
+  cint(stateImage.len)
+
 proc wasm_state_data(): pointer {.exportc.} =
   ## Buffer from the last wasm_state_size() call; JS copies it out before
   ## calling wasm_state_size() again.

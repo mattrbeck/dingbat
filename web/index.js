@@ -753,7 +753,8 @@ const sweepOrphanedAutoStates = async () => {
   for (let r of await getRecentMeta()) if (r?.name) known.add(r.name);
   for (let k of keys) {
     if (typeof k !== "string") continue;
-    const prefix = ["stateauto:", "sessionpic:"].find((p) => k.startsWith(p));
+    const prefix = ["stateauto:", "sessionpic:"].find((p) => k.startsWith(p)) ||
+      k.match(CKPT_KEY_RE)?.[0];
     if (prefix && !known.has(k.slice(prefix.length))) await dbDelete(k);
   }
 };
@@ -1667,6 +1668,9 @@ const isRomLoaded = (name) =>
 //            their meta; the only group Drive mirrors besides the ROM
 //   session  the auto-resume snapshot and its picture; the snapshot is
 //            mirrored (its picture riding in it), the hand-off between devices
+//   checkpoints  earlier moments of play and their index (Resume from
+//            earlier); this device only, and they go with the session
+//            wherever the progress goes, but not when a kept save is restored
 //   prefs    the cheat list; never synced
 //   kept     a save from before the game was deleted and loaded again
 //            (keptSaveKey), mirrored; a save reset leaves it, being a way
@@ -1681,6 +1685,7 @@ const perGameKeys = (name) => {
     bytes: [romKey(name), artKey(name), frameKey(name)],
     saves,
     session: [autoStateKey(name), sessionPicKey(name)],
+    checkpoints: ckptKeys(name),
     prefs: [CHEATS_KEY(name)],
     kept: [keptSaveKey(name)],
   };
@@ -1693,6 +1698,11 @@ const deleteKeys = async (keys) => {
     // In the segment that issues the delete: a persist of this save waiting
     // on a quota eviction must not put it back (persistSeq).
     if (k.startsWith("save:")) retireSavePuts(k.slice(5));
+    // A checkpoint packing meanwhile must not write the session back.
+    if (k.startsWith("stateauto:")) {
+      const g = k.slice(10);
+      sessionEpochs.set(g, sessionEpoch(g) + 1);
+    }
     await dbDelete(k);
   }
 };
@@ -1701,7 +1711,7 @@ const deleteKeys = async (keys) => {
 // a full save state, and "Resume" would restore the wiped progress.
 const deleteSaveData = async (name) => {
   let k = perGameKeys(name);
-  await deleteKeys([...k.saves, ...k.session]);
+  await deleteKeys([...k.saves, ...k.session, ...k.checkpoints]);
 };
 
 // Remove every trace of one game from this device. Drive is untouched here.
@@ -1719,7 +1729,7 @@ const resetCurrentSaveFile = async () => {
   await dbDelete("save:" + name);
   await dbDelete("save:" + name + "-p2");
   // The reboot ends in offerAutoResume, which would offer to un-reset.
-  await deleteKeys(perGameKeys(name).session);
+  await deleteKeys([...perGameKeys(name).session, ...perGameKeys(name).checkpoints]);
   markDelete("save:" + name);
   markDelete("save:" + name + "-p2");
   markDelete(autoStateKey(name));
@@ -1734,6 +1744,7 @@ const resetCurrentSaveFile = async () => {
 // reboot under (loadRom), or null when no game is loaded.
 const detachLoadedGame = () => {
   if (!currentRomName || !currentOriginalName) return null;
+  clearPlaying();
   const game = { romName: currentRomName, originalName: currentOriginalName };
   nextLoadGen();
   try { FS.unlink(stripExt(game.romName) + ".sav"); } catch {}
@@ -4638,7 +4649,8 @@ const removeGameFromDevice = async (game) => {
   // bytes + session; saves and prefs stay (see perGameKeys). The picture
   // stays too: it is mirrored, tiny, and the Drive-only tile keeps its face.
   let keys = perGameKeys(game);
-  await deleteKeys([...keys.bytes.filter((k) => k !== frameKey(game)), ...keys.session]);
+  await deleteKeys([...keys.bytes.filter((k) => k !== frameKey(game)), ...keys.session,
+                    ...keys.checkpoints]);
   markGameUpload(game); // the ROM is gone, so this queues the saves we kept
   return true;
 };
@@ -6153,6 +6165,7 @@ const isQuotaError = (e) =>
 // the older one is then not put back over it, and the result is null.
 const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
   let freed = 0;
+  let evictedCkpts = false;
   let put = true;
   for (;;) {
     if (freed && superseded()) {
@@ -6164,6 +6177,11 @@ const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
       break;
     } catch (e) {
       if (!isQuotaError(e)) throw e;
+      // Other games' earlier moments go first, then ROM files.
+      if (!evictedCkpts) {
+        evictedCkpts = true;
+        if (await evictCheckpoints(keep)) continue;
+      }
       if (!(await evictOldestRom(keep))) return false;
       freed++;
     }
@@ -6422,7 +6440,9 @@ const touchRecent = async (name) => {
 // afterwards, the choice having been made on the home screen. Without it the
 // boot ends in the "Last session saved" offer, which is what a library tile
 // and a file dropped on the page get.
-const launchRom = async (name, { resume = false, fresh = false, flyFrom = null } = {}) => {
+// `session`: a moment to go back into instead (resumeMoment).
+const launchRom = async (name, { resume = false, fresh = false, flyFrom = null,
+                                 session: chosen = null } = {}) => {
   const gen = nextLoadGen(); // a later tap supersedes this one (loadGen)
   // The grid renders before the wasm runtime is up; wait here.
   await ensureRuntimeReady();
@@ -6433,7 +6453,7 @@ const launchRom = async (name, { resume = false, fresh = false, flyFrom = null }
     showToast("This game's ROM is no longer stored — load the file again");
     return;
   }
-  let session = resume ? await resumeSessionFor(name) : null;
+  let session = chosen || (resume ? await resumeSessionFor(name) : null);
   if (gen !== loadGen) return;
   // The flight lands intact only on the frame the session goes back to: the
   // hero, when it is already showing it, else the session's own picture,
@@ -6449,7 +6469,7 @@ const launchRom = async (name, { resume = false, fresh = false, flyFrom = null }
   if (gen !== loadGen) return;
   let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
   return loadRom("rom" + ext, name,
-    { gen, rom: data, resume: session, skipResumeOffer: resume || fresh });
+    { gen, rom: data, resume: session, skipResumeOffer: resume || fresh || !!chosen });
 };
 
 // Home-screen recent grid: the game library.
@@ -6701,6 +6721,15 @@ const tileMenuEntries = (name, f) => {
       run: () => downloadGameAction(name),
     }));
   }
+  // Earlier moments of play (checkpoints), kept on this device: the way back
+  // when where the game stopped is what keeps stopping it.
+  if (f.moments && !f.driveOnly && !f.missing) {
+    items.push(tileMenuItem({
+      label: "Resume from earlier",
+      disabled: busy,
+      run: () => openMomentsModal(name),
+    }));
+  }
   items.push(tileMenuItem({
     label: "Rename",
     disabled: busy,
@@ -6841,9 +6870,9 @@ const placeTileMenu = (anchor, at) => {
 // `at` = {x, y} for a right-click; else the menu hangs off `anchor`.
 const openTileMenu = async (name, anchor, tile, at = null, session = false) => {
   closeTileMenu();
-  let [localRoms, withSaves, kept] = await Promise.all(
-    [localRomSet(), romsWithSaveData(), getKeptSave(name)]);
-  let f = { ...gameFlags(name, localRoms, new Set(withSaves)), kept };
+  let [localRoms, withSaves, kept, moments] = await Promise.all(
+    [localRomSet(), romsWithSaveData(), getKeptSave(name), hasEarlierMoments(name)]);
+  let f = { ...gameFlags(name, localRoms, new Set(withSaves)), kept, moments };
   tileMenuFor = name;
   tileMenuAnchor = anchor;
   // A tile is a picture in a grid of them, so the menu has to say which game
@@ -6946,6 +6975,7 @@ const wireTileMenu = (tile, launch, romName) => {
 // since the snapshot.
 const openLibraryGame = async (romName, { driveOnly = false, missing = false, flyFrom = null, resume = libraryOpen === "resume" } = {}) => {
   if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
+  if (!driveOnly && crashGate(romName)) return;
   if (!driveOnly) { launchRom(romName, { resume, flyFrom }); return; }
   if (missing) { relinkGameAction(romName, { launch: true }); return; }
   await fetchTileGame(romName, { open: { resume, flyFrom } });
@@ -7366,6 +7396,7 @@ document.addEventListener("keydown", (e) => {
     closeSavesModal();
     closeUpdateModal();
     closeStatesModal();
+    closeMomentsModal();
     closeCheatsModal();
     closeReportModal();
     closeRewindScrubber();
@@ -8082,25 +8113,49 @@ let sessionSnapFor = null;
 // until another game loads (loadRom); the battery save still persists.
 var sessionHeldFor = null;
 
+// The newest snapshot taken of each game (its ts), and each game's session
+// epoch, bumped when its session is deleted (deleteKeys). A checkpoint packs
+// in a worker and lands later; it writes the session only while it is still
+// the newest one taken and nothing has deleted the session since - a Main
+// Menu, a switch or a close takes a newer one in the meantime, and a reset
+// wipes it.
+const sessionSnapTs = new Map();
+const sessionEpochs = new Map();
+const sessionEpoch = (name) => sessionEpochs.get(name) || 0;
+
 const persistAutoState = () => {
   if (!currentRomName || !currentOriginalName) return;
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
   const name = currentOriginalName;
   if (sessionHeldFor === name) return; // see sessionHeldFor
-  if (!sessionMoved && sessionSnapFor === name) return;
+  // A checkpoint still packing is not yet stored: a closing page takes the
+  // moment itself (and the checkpoint, now older, is dropped when it lands).
+  if (!sessionMoved && sessionSnapFor === name && !ckptInFlight) {
+    // Nothing new to take, but a checkpoint's session may be here unsent
+    // (sendSessionNow): leaving the game sends it.
+    if (sessionUnsent.has(name)) {
+      sessionUnsent.delete(name);
+      const key = autoStateKey(name);
+      return checkpointLanded().then(() => markUpload(key));
+    }
+    return;
+  }
   const bytes = captureStateBytes();
   if (!bytes) return;
   const ts = Date.now();
   const fb = copyFramebuffer();
   sessionMoved = false;
   sessionSnapFor = name;
+  sessionSnapTs.set(name, ts);
+  sessionUnsent.delete(name);
   // liveSaveSig flushes first: the signature is the battery this state carries.
   // The snapshot is written at once and its picture after the encode: a
   // closing page may cut the encode short, which leaves the older picture
   // and its older ts, so it is not taken for this one. Each goes up when it
   // lands (the picture rides in the session's Drive file).
   const key = autoStateKey(name);
-  const put = dbPut(key, { bytes, ts, saveSig: liveSaveSig(), by: deviceId, dev: deviceLabel })
+  const put = dbPut(key, { bytes, ts, saveSig: liveSaveSig(), by: deviceId, dev: deviceLabel,
+                           play: playClock() })
     .then(() => markUpload(key)).catch(() => {});
   if (fb) {
     frameBlobFromFb(fb.heap, fb.w, fb.h)
@@ -8110,6 +8165,370 @@ const persistAutoState = () => {
   }
   return put;
 };
+
+// --- Checkpoints ---------------------------------------------------------
+// The session above is taken when the game is left or the page hidden. A
+// browser that crashes, or is killed while the game is on screen, gives no
+// such moment, so the session would be wherever the game was last left -
+// an hour back, or (saved in game since) none. So while a game runs, every
+// CHECKPOINT_PLAY_MS of play takes the session again, and keeps it as a
+// checkpoint: a few earlier moments, kept on this device only, for when the
+// newest one is the thing that crashes (Resume from earlier).
+//
+// The frame's thread only copies: the plain state image, the screen and the
+// battery file (wasm_state_plain_size, ~1 ms; ~4 ms on a phone-speed CPU).
+// ckptworker.js packs the state, signs the battery and encodes the picture
+// - packing on this thread cost ~10 ms there, a dropped frame. Without a
+// worker it all runs here, as persistAutoState does.
+const CHECKPOINT_PLAY_MS = 60 * 1000;
+// Taken in a tick that has room for it; a busy one passes it to the next,
+// for up to CKPT_WAIT_MS before one is taken anyway.
+const CKPT_SLACK_MS = 6;
+const CKPT_WAIT_MS = 5000;
+// Drive gets a checkpoint's session at most this often while playing; Main
+// Menu, a hide or a close sends the newest at once (sessionUnsent).
+const SESSION_UPLOAD_MS = 5 * 60 * 1000;
+
+// Play time, the clock checkpoints are spaced on: wall time would put a
+// week-old evening's checkpoints all in one bucket the moment play resumed.
+// Per game and per device, carried in the checkpoint index (`play`): the
+// run's base plus the ms this run has played.
+let runPlayMs = 0;
+let ckptPlayBase = 0;
+let ckptLastAt = 0; // runPlayMs at the last checkpoint
+const playClock = () => ckptPlayBase + runPlayMs;
+
+// Games whose session is a checkpoint's not yet queued for Drive.
+const sessionUnsent = new Set();
+const sessionMarkedAt = new Map();
+let ckptInFlight = null;
+const checkpointLanded = () => ckptInFlight || Promise.resolve();
+
+// One worker, made on first use; null where there is none to make (no
+// Worker, no CompressionStream: iOS 15), and the page does the work.
+let ckptWorker;
+let ckptWorkerSeq = 0;
+const ckptWorkerWaits = new Map();
+const getCkptWorker = () => {
+  if (ckptWorker !== undefined) return ckptWorker;
+  ckptWorker = null;
+  if (typeof Worker !== "function" || typeof CompressionStream !== "function") return null;
+  try {
+    ckptWorker = new Worker("ckptworker.js");
+    ckptWorker.onmessage = (e) => {
+      const wait = ckptWorkerWaits.get(e.data?.id);
+      if (!wait) return;
+      ckptWorkerWaits.delete(e.data.id);
+      wait(e.data);
+    };
+    ckptWorker.onerror = () => {
+      // A worker that cannot load (an old cache without the file): every
+      // checkpoint from here runs on the page.
+      for (const wait of ckptWorkerWaits.values()) wait({ error: "worker failed" });
+      ckptWorkerWaits.clear();
+      ckptWorker = null;
+    };
+  } catch { ckptWorker = null; }
+  return ckptWorker;
+};
+
+// -> { bytes (packed), pic (Blob | null), saveSig }, or null.
+const packCheckpoint = async (plain, fb, sav) => {
+  const worker = getCkptWorker();
+  if (worker) {
+    const id = ++ckptWorkerSeq;
+    const got = await new Promise((resolve) => {
+      ckptWorkerWaits.set(id, resolve);
+      // The state moves; the screen is copied (150 KB), so the page still
+      // has it to draw where the worker cannot (no OffscreenCanvas JPEG).
+      worker.postMessage({ id, state: plain.buffer, fb: fb ? fb.heap.buffer : null,
+                           w: fb?.w, h: fb?.h, scale: FRAME_SCALE, q: FRAME_JPEG_Q,
+                           sav: sav ? sav.buffer : null }, [plain.buffer]);
+    });
+    if (!got.error) {
+      let pic = got.pic || null;
+      if (!pic && fb) pic = await frameBlobFromFb(fb.heap, fb.w, fb.h).catch(() => null);
+      return { bytes: new Uint8Array(got.packed), pic, saveSig: got.saveSig ?? null };
+    }
+    // The buffers went with the message; this one is lost, the next runs here.
+    return null;
+  }
+  const bytes = packStateBytes(plain);
+  if (!bytes) return null;
+  const pic = fb ? await frameBlobFromFb(fb.heap, fb.w, fb.h).catch(() => null) : null;
+  return { bytes, pic, saveSig: sigOfSave(sav) };
+};
+
+const capturePlainState = () => {
+  if (typeof Module === "undefined" || !Module._wasm_state_plain_size) return null;
+  const len = Module._wasm_state_plain_size();
+  if (len <= 0) return null;
+  const ptr = Module._wasm_state_data();
+  if (!ptr) return null;
+  return new Uint8Array(Module.memory.buffer, ptr, len).slice();
+};
+
+// From the end of every running tick, after the frame is on screen.
+const maybeCheckpoint = (timestamp) => {
+  if (ckptInFlight || !currentRomName || !currentOriginalName) return;
+  if (linkMode || rollbackMode || netActive() || clipReplayActive || rewindHeld) return;
+  if (sessionHeldFor === currentOriginalName) return; // a boot screen (sessionHeldFor)
+  const due = runPlayMs - ckptLastAt - CHECKPOINT_PLAY_MS;
+  if (due < 0) return;
+  if (performance.now() - timestamp > CKPT_SLACK_MS && due < CKPT_WAIT_MS) return;
+  takeCheckpoint();
+};
+
+const takeCheckpoint = () => {
+  const name = currentOriginalName;
+  ckptLastAt = runPlayMs;
+  flushSoloSave(); // the battery the state carries, into its file
+  const plain = capturePlainState();
+  if (!plain) return null;
+  let sav = null;
+  try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
+  const fb = copyFramebuffer();
+  const ts = Date.now();
+  const play = playClock();
+  const epoch = sessionEpoch(name);
+  sessionMoved = false;
+  sessionSnapFor = name;
+  sessionSnapTs.set(name, ts);
+  const run = packCheckpoint(plain, fb, sav)
+    .then((snap) => snap && storeCheckpoint(name, { ...snap, ts, play, epoch }))
+    .catch((e) => log("checkpoint: " + (e?.message || e), "warn"))
+    .finally(() => { if (ckptInFlight === run) ckptInFlight = null; });
+  ckptInFlight = run;
+  return run;
+};
+
+const storeCheckpoint = async (name, snap) => {
+  // A newer snapshot, or a delete, since this one was taken: it is history.
+  if (sessionSnapTs.get(name) !== snap.ts || sessionEpoch(name) !== snap.epoch) return;
+  if (sessionHeldFor === name) return; // held since it was taken
+  // The battery it carries, stored now if the 5 s autosave has not yet: a
+  // crash before that would leave a session that matches no stored save.
+  if (currentOriginalName === name && currentRomName &&
+      !(lastSaveSigKey === name && lastSaveSig === snap.saveSig)) {
+    await persistSave(currentRomName, name);
+  }
+  const key = autoStateKey(name);
+  await dbPut(key, { bytes: snap.bytes, ts: snap.ts, saveSig: snap.saveSig, by: deviceId,
+                     dev: deviceLabel, play: snap.play });
+  if (snap.pic) await dbPut(sessionPicKey(name), { ts: snap.ts, blob: snap.pic });
+  if (Date.now() - (sessionMarkedAt.get(name) || 0) >= SESSION_UPLOAD_MS) {
+    sessionMarkedAt.set(name, Date.now());
+    sessionUnsent.delete(name);
+    markUpload(key);
+  } else {
+    sessionUnsent.add(name);
+  }
+  await addCheckpoint(name, snap);
+};
+
+// The kept checkpoints of a game: `ckpts:<game>` is the index ({ play, list:
+// [{ slot, ts, play, saveSig }] }), and `ckpt<slot>:<game>` each one's
+// { bytes, ts, play, saveSig, pic }. Local only: never in a Drive name.
+const CKPT_SLOTS = 9;
+const ckptIndexKey = (name) => "ckpts:" + name;
+const ckptKey = (name, slot) => "ckpt" + slot + ":" + name;
+const ckptKeys = (name) => [ckptIndexKey(name),
+  ...Array.from({ length: CKPT_SLOTS }, (_, i) => ckptKey(name, i))];
+const CKPT_KEY_RE = /^ckpts?\d*:/;
+
+// Which to keep, spread over play time: the newest, and the oldest of each
+// span behind it - up to 3 min, 10 min, 30 min, 2 h, 8 h, and beyond - so
+// there is always one a little way back and one a long way back. Past
+// CKPT_MAX_AGE_MS of real time one goes.
+//
+// After the game stops unexpectedly (crashSince), the ones taken before
+// that are frozen until it has run cleanly again: a checkpoint that crashes
+// the game can be resumed again and again, and what those runs take must
+// not push out the moments from before it. They share CKPT_CRASH_ROOM.
+const CKPT_SPANS = [3, 10, 30, 120, 480].map((m) => m * 60 * 1000);
+const CKPT_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+const CKPT_CRASH_ROOM = 2;
+const newestFirst = (a, b) => (b.play - a.play) || (b.ts - a.ts);
+const spreadCheckpoints = (list) => {
+  if (!list.length) return [];
+  const sorted = [...list].sort(newestFirst);
+  const top = sorted[0];
+  const oldest = new Map(); // span index -> the oldest in it
+  for (const e of sorted.slice(1)) {
+    const age = top.play - e.play;
+    let span = CKPT_SPANS.findIndex((s) => age <= s);
+    if (span < 0) span = CKPT_SPANS.length;
+    oldest.set(span, e); // sorted newest first: the last one seen is the oldest
+  }
+  return [top, ...[...oldest.keys()].sort((a, b) => a - b).map((k) => oldest.get(k))];
+};
+const keepCheckpoints = (list, crashSince = 0, now = Date.now()) => {
+  const live = list.filter((e) => now - e.ts < CKPT_MAX_AGE_MS);
+  if (!crashSince) return spreadCheckpoints(live);
+  const frozen = live.filter((e) => e.ts < crashSince);
+  const since = live.filter((e) => e.ts >= crashSince).sort(newestFirst)
+    .slice(0, CKPT_CRASH_ROOM);
+  return [...since, ...frozen.sort(newestFirst)].slice(0, CKPT_SLOTS);
+};
+
+const readCheckpointIndex = async (name) => {
+  const idx = await dbGet(ckptIndexKey(name)).catch(() => null);
+  return idx && Array.isArray(idx.list) ? idx : { play: 0, list: [] };
+};
+
+const addCheckpoint = async (name, snap) => {
+  const idx = await readCheckpointIndex(name);
+  if (sessionEpoch(name) !== snap.epoch) return; // reset while it was read
+  const entry = { slot: -1, ts: snap.ts, play: snap.play, saveSig: snap.saveSig };
+  const keep = keepCheckpoints([...idx.list, entry], crashInfo(name)?.since || 0);
+  if (!keep.includes(entry)) return;
+  const used = new Set(keep.filter((e) => e !== entry).map((e) => e.slot));
+  entry.slot = [...Array(CKPT_SLOTS).keys()].find((s) => !used.has(s)) ?? -1;
+  if (entry.slot < 0) return;
+  // The record and the index in one transaction: a slot the index names is
+  // always the checkpoint it says. One it no longer names is overwritten
+  // when its slot is next taken.
+  await dbMoveKeys([], [
+    [ckptKey(name, entry.slot), { bytes: snap.bytes, ts: snap.ts, play: snap.play,
+                                  saveSig: snap.saveSig, pic: snap.pic || null }],
+    [ckptIndexKey(name), { play: Math.max(idx.play || 0, snap.play), list: keep }],
+  ]);
+};
+
+// A game booted: its clock goes on from where its index left it.
+const startCheckpointClock = (name) => {
+  runPlayMs = 0;
+  ckptLastAt = 0;
+  ckptPlayBase = 0;
+  readCheckpointIndex(name).then((idx) => {
+    if (currentOriginalName !== name) return;
+    ckptPlayBase = Math.max(idx.play || 0, ...idx.list.map((e) => e.play || 0));
+  });
+};
+
+// Storage running out: other games' checkpoints go before any ROM does.
+const evictCheckpoints = async (keep) => {
+  let freed = false;
+  for (const k of await dbKeys()) {
+    if (typeof k !== "string" || !CKPT_KEY_RE.test(k)) continue;
+    if (k.slice(k.indexOf(":") + 1) === keep) continue;
+    await dbDelete(k);
+    freed = true;
+  }
+  return freed;
+};
+
+// --- Crashes -------------------------------------------------------------
+// A page that dies while a game is on screen leaves its mark behind: each
+// page records itself in `playing` ({ <page>: { game, at } }) while its game
+// runs in view, and takes itself out when the game pauses, the page is
+// hidden or closed, or the game is left. One found at boot is a run that
+// ended without any of those - a crash, or a kill in the foreground -
+// unless its page is still alive, which that page's Web Lock says.
+//
+// Crashes are counted per game in a row (`crashes`: { games: { <game>:
+// { streak, since } }, seen: [<page>...] }); a run that plays CLEAN_RUN_MS
+// and ends normally clears the count. Two in a row and the game asks
+// before resuming (the sheet's crash form), since the moment it resumes
+// may be the cause.
+//
+// IndexedDB, not localStorage: Chrome writes localStorage to disk seconds
+// later, so a browser killed soon after a relaunch - a game that crashes
+// as soon as it resumes - lost the count and brought back the mark already
+// counted (seen in a SIGKILL test). A transaction is on disk when it
+// completes. `seen` keeps a mark that comes back from being counted twice.
+const PLAYING_KEY = "playing";
+const CRASHES_KEY = "crashes";
+const CLEAN_RUN_MS = 60 * 1000;
+const CRASH_ASK_STREAK = 2;
+const CRASH_SEEN_MAX = 50;
+const pageId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+let playingMarked = false;
+let coreFaulted = false;
+// Read at boot (noteCrashedRuns) and written through: the tap that asks
+// first reads it synchronously.
+let crashes = { games: {}, seen: [] };
+const crashRecord = (v) => v && typeof v === "object" && v.games && typeof v.games === "object"
+  ? { games: v.games, seen: Array.isArray(v.seen) ? v.seen : [] } : { games: {}, seen: [] };
+const crashInfo = (name) => crashes.games[name] || null;
+const crashStreak = (name) => crashInfo(name)?.streak || 0;
+const storeCrashes = () => dbPut(CRASHES_KEY, crashes).catch(() => {});
+
+// Held for this page's life, so another page can tell a mark of ours from
+// a crashed one's.
+if (typeof navigator !== "undefined" && navigator.locks?.request) {
+  try { navigator.locks.request("dingbat-page:" + pageId, () => new Promise(() => {})); } catch {}
+}
+
+const markPlaying = () => {
+  if (playingMarked || !currentOriginalName) return;
+  playingMarked = true;
+  const mark = { game: currentOriginalName, at: Date.now() };
+  dbUpdate(PLAYING_KEY, (v) => ({ ...(v && typeof v === "object" ? v : {}), [pageId]: mark }))
+    .catch(() => {});
+};
+// The run ended normally. A core that faulted keeps its mark: the next
+// boot counts it.
+const clearPlaying = () => {
+  if (!playingMarked || coreFaulted) return;
+  playingMarked = false;
+  dbUpdate(PLAYING_KEY, (v) => {
+    if (!v || typeof v !== "object" || !(pageId in v)) return undefined;
+    const next = { ...v };
+    delete next[pageId];
+    return next;
+  }).catch(() => {});
+  const name = currentOriginalName;
+  if (name && runPlayMs >= CLEAN_RUN_MS && crashStreak(name)) {
+    delete crashes.games[name];
+    storeCrashes();
+  }
+};
+
+// At boot: the marks of pages that are gone are crashes.
+const noteCrashedRuns = async () => {
+  crashes = crashRecord(await dbGet(CRASHES_KEY).catch(() => null));
+  const marks = await dbGet(PLAYING_KEY).catch(() => null);
+  if (!marks || typeof marks !== "object") return;
+  let held = new Set();
+  try {
+    const q = await navigator.locks?.query?.();
+    for (const l of q?.held || []) held.add(l.name);
+  } catch {}
+  const gone = Object.keys(marks).filter((id) => id !== pageId && !held.has("dingbat-page:" + id));
+  if (!gone.length) return;
+  const counted = [];
+  for (const id of gone) {
+    const game = marks[id]?.game;
+    if (crashes.seen.includes(id) || typeof game !== "string") continue;
+    const c = crashes.games[game] || { streak: 0, since: 0 };
+    crashes.games[game] = { streak: c.streak + 1, since: c.since || Date.now() };
+    log("previous run of " + game + " ended unexpectedly (" + crashes.games[game].streak +
+        " in a row)", "warn");
+    counted.push(game);
+  }
+  crashes.seen = [...crashes.seen, ...gone].slice(-CRASH_SEEN_MAX);
+  // The count first, with the marks it counted; then the marks go.
+  await storeCrashes();
+  await dbUpdate(PLAYING_KEY, (v) => {
+    if (!v || typeof v !== "object") return undefined;
+    const next = { ...v };
+    for (const id of gone) delete next[id];
+    return next;
+  }).catch(() => {});
+  // Its last checkpoint may never have been queued for Drive.
+  for (const game of counted) {
+    if (await dbGet(autoStateKey(game)).catch(() => null)) markUpload(autoStateKey(game));
+  }
+};
+
+// A trap in the core leaves the page up with the game dead in it: as good
+// as a crash, so its mark stays for the next boot.
+window.addEventListener("error", (e) => {
+  if (typeof WebAssembly !== "undefined" && e?.error instanceof WebAssembly.RuntimeError) {
+    coreFaulted = true;
+  }
+});
 
 // A session as one Drive file: "DGBSESS1", the header's length (u32 LE),
 // the header (JSON: ts, saveSig, by, dev and the two lengths), the state,
@@ -8348,6 +8767,211 @@ statesDeleteBtn.addEventListener("click", async () => {
   markDelete(slotMetaKey(currentOriginalName, selectedSlot));
   showToast("Deleted " + label);
   await renderStatesGrid();
+});
+
+// --- Resume from earlier ---------------------------------------------------
+// The moments a game can go back into: its session (where it stopped) and
+// its checkpoints, newest first, each with its picture, how much play
+// earlier it is and when. Two ways in, and nothing anywhere else: the
+// game's menu (Resume from earlier), and - after the game has stopped
+// unexpectedly CRASH_ASK_STREAK times in a row - a tap on the game itself,
+// which opens this instead of resuming the moment that may be the cause.
+//
+// A moment from before the game's last in-game save takes its battery back
+// with it (a state carries the cart's RAM). The newer save is kept aside
+// first, as a restored save keeps the one it replaces: Restore old save, on
+// the game's menu, switches back.
+const momentsModal = document.getElementById("moments-modal");
+const momentsGrid = document.getElementById("moments-grid");
+const momentsTitle = document.getElementById("moments-title");
+const momentsHint = document.getElementById("moments-hint");
+const momentsNote = document.getElementById("moments-note");
+const momentsResumeBtn = /** @type {HTMLButtonElement} */ (document.getElementById("moments-resume"));
+const momentsFromSaveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("moments-from-save"));
+let momentsFor = null;
+let momentsList = [];
+let momentsPick = 0;
+let momentsSaveSig = null;
+let momentsUrls = [];
+
+// -> [{ kind: "session" | "checkpoint", slot?, ts, play, saveSig }], newest first.
+const listMoments = async (name) => {
+  const out = [];
+  const auto = await dbGet(autoStateKey(name)).catch(() => null);
+  const idx = await readCheckpointIndex(name);
+  const ckpts = [...idx.list].sort(newestFirst);
+  if (auto?.bytes) {
+    out.push({ kind: "session", ts: auto.ts, play: auto.play ?? ckpts[0]?.play ?? 0,
+               saveSig: auto.saveSig });
+  }
+  for (const e of ckpts) {
+    if (auto?.bytes && e.ts >= auto.ts) continue; // the session is that moment, or newer
+    out.push({ kind: "checkpoint", slot: e.slot, ts: e.ts, play: e.play, saveSig: e.saveSig });
+  }
+  return out;
+};
+const hasEarlierMoments = async (name) => (await readCheckpointIndex(name)).list.length > 0;
+
+const momentRecord = (name, m) =>
+  dbGet(m.kind === "session" ? autoStateKey(name) : ckptKey(name, m.slot)).catch(() => null);
+const momentPicture = async (name, m) => {
+  if (m.kind === "checkpoint") return (await momentRecord(name, m))?.pic || null;
+  const p = await dbGet(sessionPicKey(name)).catch(() => null);
+  return p?.blob && p.ts === m.ts ? p.blob : null;
+};
+
+// "4 min earlier", "2 h earlier": play time, the clock the moments are kept on.
+const fmtPlayGap = (ms) => {
+  const m = Math.round(ms / 60000);
+  if (m < 1) return "Just before";
+  if (m < 60) return m + " min earlier";
+  const h = ms / 3600000;
+  return (h < 10 ? Math.round(h * 2) / 2 : Math.round(h)) + " h earlier";
+};
+const fmtMomentTime = (ts) => {
+  try {
+    const d = new Date(ts);
+    return d.toDateString() === new Date().toDateString()
+      ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : fmtStateTime(ts);
+  } catch { return ""; }
+};
+
+const selectMoment = (i) => {
+  momentsPick = i;
+  for (const el of /** @type {HTMLCollectionOf<HTMLElement>} */ (momentsGrid.children)) {
+    el.classList.toggle("selected", Number(el.dataset.i) === i);
+  }
+  const m = momentsList[i];
+  momentsResumeBtn.disabled = !m;
+  const before = !!m && m.saveSig !== momentsSaveSig && momentsSaveSig !== null;
+  momentsNote.hidden = !before;
+  momentsNote.textContent = before
+    ? "This is from before your last in-game save, which goes back with it. Your newer save " +
+      "is kept: Restore old save, on the game's menu, brings it back." : "";
+};
+
+const renderMoments = async (name) => {
+  for (const u of momentsUrls) URL.revokeObjectURL(u);
+  momentsUrls = [];
+  momentsList = await listMoments(name);
+  momentsSaveSig = sigOfSave(await dbGet("save:" + name).catch(() => null));
+  if (momentsFor !== name) return;
+  momentsGrid.replaceChildren();
+  const top = momentsList[0];
+  for (let i = 0; i < momentsList.length; i++) {
+    const m = momentsList[i];
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "state-slot";
+    cell.dataset.i = /** @type {*} */ (i);
+    const thumb = document.createElement("img");
+    thumb.className = "slot-thumb";
+    thumb.alt = "";
+    const label = document.createElement("div");
+    label.className = "slot-label";
+    const what = document.createElement("span");
+    what.className = "slot-num";
+    what.textContent = i === 0 ? "Latest" : fmtPlayGap(top.play - m.play);
+    const when = document.createElement("span");
+    when.textContent = fmtMomentTime(m.ts);
+    label.append(what, when);
+    cell.append(thumb, label);
+    if (m.saveSig !== momentsSaveSig && momentsSaveSig !== null) {
+      const note = document.createElement("span");
+      note.className = "moment-before-save";
+      note.textContent = "Before your last save";
+      cell.append(note);
+    }
+    cell.addEventListener("click", () => selectMoment(i));
+    cell.addEventListener("dblclick", () => { selectMoment(i); momentsResumeBtn.click(); });
+    momentsGrid.append(cell);
+    momentPicture(name, m).then((blob) => {
+      if (!blob || momentsFor !== name) return;
+      const url = URL.createObjectURL(blob);
+      momentsUrls.push(url);
+      thumb.src = url;
+    }).catch(() => {});
+  }
+  selectMoment(0);
+};
+
+// `crash`: the form a tap on a game that keeps stopping opens.
+const openMomentsModal = (name, { crash = false } = {}) => {
+  closeTileMenu();
+  momentsFor = name;
+  const n = crashStreak(name);
+  momentsTitle.textContent = crash
+    ? displayName(name) + " stopped unexpectedly" : "Resume from earlier";
+  momentsHint.textContent = crash
+    ? "It closed without warning the last " + (n === 2 ? "two" : n) + " times. If the " +
+      "moment it resumes from is what's stopping it, pick an earlier one."
+    : "Moments from your recent play, kept on this device.";
+  momentsFromSaveBtn.hidden = !crash;
+  momentsGrid.replaceChildren();
+  momentsNote.hidden = true;
+  momentsResumeBtn.disabled = true;
+  momentsModal.classList.add("open");
+  trapFocus(momentsModal);
+  return renderMoments(name);
+};
+
+const closeMomentsModal = () => {
+  if (!momentsModal.classList.contains("open")) return;
+  momentsModal.classList.remove("open");
+  releaseFocus(momentsModal);
+  momentsFor = null;
+  for (const u of momentsUrls) URL.revokeObjectURL(u);
+  momentsUrls = [];
+};
+
+// Back into one moment: the game boots on its stored save and the moment
+// goes in during the boot (loadRom's `resume`, forced - the battery comes
+// with it). True when the boot was started.
+const resumeMoment = async (name, m) => {
+  if (isRomLoaded(name) && (linkMode || rollbackMode || netActive())) {
+    showToast("Exit the online session first");
+    return false;
+  }
+  // The running game's save as it is now is the one that may be replaced.
+  if (currentOriginalName === name && currentRomName) await persistSave(currentRomName, name);
+  const rec = await momentRecord(name, m);
+  if (!rec?.bytes) {
+    showToast("That moment is no longer stored");
+    return false;
+  }
+  const cur = await dbGet("save:" + name).catch(() => null);
+  if (cur?.length && rec.saveSig !== sigOfSave(cur)) {
+    const now = Date.now();
+    await keepOldSave(name, { data: new Uint8Array(cur), at: now, del: now, kept: now,
+                              why: "replaced" });
+  }
+  launchRom(name, { session: { bytes: rec.bytes, saveSig: rec.saveSig, force: true } });
+  return true;
+};
+
+// A tap on a game that has stopped unexpectedly twice in a row asks first.
+const crashGate = (name) => {
+  if (crashStreak(name) < CRASH_ASK_STREAK || isRomLoaded(name)) return false;
+  openMomentsModal(name, { crash: true });
+  return true;
+};
+
+momentsResumeBtn.addEventListener("click", async () => {
+  const name = momentsFor;
+  const m = momentsList[momentsPick];
+  if (!name || !m) return;
+  closeMomentsModal();
+  await resumeMoment(name, m);
+});
+momentsFromSaveBtn.addEventListener("click", () => {
+  const name = momentsFor;
+  if (!name) return;
+  closeMomentsModal();
+  launchRom(name, { fresh: true });
+});
+document.getElementById("moments-close").addEventListener("click", closeMomentsModal);
+momentsModal.addEventListener("click", (e) => {
+  if (e.target === momentsModal) closeMomentsModal();
 });
 
 // --- Report a Bug modal ---
@@ -10789,6 +11413,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   if (typeof netShutdown === "function" && sessionHoldsCore()) await netShutdown();
   if (abandoned()) return;
   if (currentRomName && currentOriginalName) {
+    clearPlaying();
     await persistAutoState(); // where the outgoing game was left
     if (abandoned()) return;
     await storeLastFrame({ force: true }); // the outgoing game's picture
@@ -10819,11 +11444,14 @@ const loadRom = async (romName, originalName, opts = {}) => {
   applyAudioLowpass(); // the filter follows the machine: GBA in, GB out
   lastFrameSig = null; // a new game: the tick's skip must not carry over
   sessionMoved = true; // and no snapshot of it yet
+  startCheckpointClock(name);
   // The session the home screen chose to go back into, put back in this same
   // synchronous run so no frame of the boot is ever drawn. Checked once more
   // against the battery just installed, as the offer's Resume checks it.
   if (opts.resume) {
-    if (opts.resume.saveSig !== liveSaveSig()) {
+    // `force`: an earlier moment chosen from the sheet, whose battery goes
+    // back with it (resumeMoment kept the newer save aside first).
+    if (!opts.resume.force && opts.resume.saveSig !== liveSaveSig()) {
       showToast("The game has saved since — starting from that save");
     } else if (!applyStateBytes(opts.resume.bytes)) {
       refuseState(opts.resume.bytes, { kind: "session" });
@@ -12830,6 +13458,7 @@ const refreshHero = (roms, localRoms, keys) => {
 const heroPrimary = () => {
   if (heroCard.dataset.mode === "paused") { resumeFromHero(); return; }
   if (!heroName) return;
+  if (crashGate(heroName)) return;
   if (heroSession) { launchRom(heroName, { resume: true, flyFrom: heroShot }); return; }
   openLibraryGame(heroName, { ...heroFile, flyFrom: heroShot, resume: true });
 };
@@ -13056,6 +13685,7 @@ const unloadGame = async ({ flushSave = true, picture = true } = {}) => {
   const gen = nextLoadGen();
   const romName = currentRomName;
   const originalName = currentOriginalName;
+  clearPlaying();
   // The closing picture and session, taken while the name is still attached.
   if (flushSave) await persistAutoState();
   if (gen !== loadGen) return false;
@@ -14335,6 +14965,8 @@ const initStorage = async () => {
   // driven off the count.
   await loadPrinterPhotos();
   await loadSyncState();
+  // After loadSyncState: a crashed run's session is queued for Drive.
+  await noteCrashedRuns().catch(() => {});
   await loadRomsSort();
   // After loadSyncState, which reads the tombstones it consults, and before
   // the first render: an adopted game is a library game from the start.
@@ -14697,6 +15329,7 @@ var Module = {
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
+        clearPlaying();
         persistSave(currentRomName, currentOriginalName);
         persistAutoState();
         // Best-effort (the encode may not finish), and only a screen not yet
@@ -14709,6 +15342,7 @@ var Module = {
     // Mobile browsers kill backgrounded tabs without pagehide: snapshot on hide.
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) return;
+      clearPlaying(); // hidden is a normal end, whatever happens after
       persistAutoState();
       storeLastFrame(); // as at beforeunload
     });
@@ -14722,6 +15356,7 @@ var Module = {
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
+        clearPlaying();
         persistSave(currentRomName, currentOriginalName);
         persistAutoState(); // one-tap resume next launch
         storeLastFrame(); // as at beforeunload
@@ -14819,6 +15454,7 @@ var Module = {
       syncWakeLock(); // acquire while stepping, release on pause/menu (idempotent)
       applyAudioSession(); // other apps' audio plays while paused (idempotent)
       if (paused) {
+        clearPlaying(); // a paused game is not a run a crash could end
         updateRumble(timestamp); // drops body.rumbling promptly on pause
         watchCanvasBacking();
         lastFrameTime = 0;
@@ -14830,6 +15466,9 @@ var Module = {
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       const rafIv = timestamp - lastFrameTime;
       if (!fastForward && rafIv > 4 && rafIv < 40) ffVsyncMs += (rafIv - ffVsyncMs) * 0.05;
+      // Play time for the checkpoints: a stall (a hidden tab's) counts as little.
+      runPlayMs += Math.min(rafIv, 250);
+      if (!linkMode && !rollbackMode && !netMode && !document.hidden) markPlaying();
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
       if (rollbackMode) {
@@ -15014,6 +15653,7 @@ var Module = {
       updateGlow();
       updateRumble(timestamp);
       watchCanvasBacking();
+      maybeCheckpoint(timestamp);
       tickEnd = performance.now();
       requestAnimationFrame(tick);
     };
