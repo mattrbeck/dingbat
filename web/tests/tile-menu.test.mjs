@@ -791,3 +791,77 @@ test("the word is only solid at the end it belongs to", async () => {
   assert.equal(word.frames[0].opacity, 0, "and the other way round coming up");
   assert.equal(word.frames[word.frames.length - 1].opacity, 1);
 });
+
+
+// ── The logo flaps ──────────────────────────────────────────────────────────
+// flap.png is a strip of 16 wing-flap frames whose frame 0 is the logo at
+// rest. A flap is one whole wingbeat, so it always ends back on frame 0.
+
+const flaps = (app, id) => flightOn(app, id)
+  .filter((a) => a.frames.some((f) => f.objectPosition !== undefined));
+
+test("the logo flaps on the way; closing, the hero's copy beats in step",
+     async () => {
+  const app = await loadApp();
+  givenBoxes(app);
+
+  app.api.flyBrand(false);
+  const [bar] = flaps(app, "bar-logo");
+  const [hero] = flaps(app, "home-logo");
+  assert.ok(bar && hero, "both copies flap when a game closes");
+  for (const a of [bar, hero]) {
+    assert.equal(a.opts.duration, app.api.FLAP_MS, "one whole wingbeat");
+    assert.equal(a.id, app.api.BRAND_FLY_ID, "part of the flight, so the next one clears it");
+    assert.equal(a.opts.fill, "backwards", "and it lets go of the logo when done");
+  }
+
+  app.api.flyBrand(true);
+  assert.equal(bar.playState, "idle", "a new flight clears the last one's flap");
+  assert.equal(hero.playState, "idle", "the hero's included");
+  assert.equal(flaps(app, "bar-logo").length, 1, "opening, the flying logo flaps");
+  assert.equal(flaps(app, "home-logo").length, 0, "and the hidden hero does not");
+});
+
+test("a scroll across halfway gives the arriving copy one wingbeat", async () => {
+  const app = await loadApp();
+  givenBoxes(app);
+  app.document.getElementById("home").setBox(0, 0, 800, 800);
+  const brand = app.document.getElementById("home-brand");
+  const at = (top) => { brand.setBox(420, top, 160, 140); app.api.scrollBrand(); };
+
+  at(290);
+  assert.equal(app.api.brandP, 0);
+  assert.equal(flaps(app, "bar-logo").length + flaps(app, "home-logo").length, 0,
+               "nothing while the hero's brand is in view");
+
+  at(-30); // a little under the bar: not across yet
+  assert.equal(flaps(app, "bar-logo").length, 0);
+  at(-100); // past halfway
+  assert.equal(flaps(app, "bar-logo").length, 1, "the bar's copy arrives flapping");
+  at(-120);
+  assert.equal(flaps(app, "bar-logo").length, 1, "once, not on every scroll event");
+
+  at(-10); // back across
+  assert.equal(flaps(app, "home-logo").length, 1, "the hero's copy flaps as it returns");
+  at(-100);
+  assert.equal(flaps(app, "bar-logo").length, 1,
+               "a crossing during a wingbeat lets it finish instead of restarting");
+});
+
+test("the boot flap stops at the end of a wingbeat once the app is ready",
+     async () => {
+  const app = await loadApp();
+  const logo = app.document.getElementById("home-logo");
+  logo.classList.add("flapping");
+  app.document.body.classList.remove("runtime-ready");
+  app.api.settleBootFlap();
+  assert.equal(logo.classList.contains("flapping"), true, "still booting: keep flapping");
+
+  app.document.body.classList.add("runtime-ready");
+  app.api.settleBootFlap();
+  assert.equal(logo.classList.contains("flapping"), true,
+               "not cut off mid-beat the moment it is ready");
+  await logo.dispatch("animationiteration");
+  assert.equal(logo.classList.contains("flapping"), false,
+               "it stops where a wingbeat ends, on frame 0");
+});

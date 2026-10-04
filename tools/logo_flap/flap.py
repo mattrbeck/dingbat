@@ -382,3 +382,5 @@ if __name__ == "__main__":
             # the chosen loop, beside the logo PNGs; GIF delays are in
             # centiseconds, so 24 fps is written as 40 ms (25 fps)
             save_clear_gif(frames, os.path.join(HERE, "..", "..", "README", "dingbat_flap.gif"), 40)
+            # the web app's logos draw from this strip (styles.css)
+            sheet(frames, 1, (0, 0, 0, 0), 0).save(os.path.join(HERE, "..", "..", "web", "flap.png"))

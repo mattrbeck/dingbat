@@ -16,6 +16,7 @@ const ASSETS = [
   "./site.webmanifest",
   "./apple-touch-icon-precomposed.png",
   "./favicon.svg",
+  "./flap.png",
   "./favicon-96x96.png",
   "./google-signin-dark.svg",
   "./google-signin-light.svg",

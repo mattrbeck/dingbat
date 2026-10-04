@@ -3044,10 +3044,45 @@ body.home-card .home-recent-head {
   background: var(--chrome-btn-top);
 }
 
-#bar-logo {
-  width: 22px;
-  height: auto;
+/* Both logos are drawn from flap.png: a strip of 16 wing-flap frames, each
+   56x40 art pixels with the 48x29 logo at (4,4), and frame 0 the logo at
+   rest. --logo-w is the width of the LOGO, not of the frame. The frame's
+   box is bigger, to give the wings room, and negative margins pull it back
+   to the logo's own footprint, so the layout is what it was when this was
+   favicon.svg - and both boxes grow by the same factor, so the flight's
+   measurements between them still line up. object-position picks the
+   frame: frame k of 16 sits k/15 of the way along the strip. */
+#bar-logo,
+#home-logo {
+  width: calc(var(--logo-w) * 56 / 48);
+  height: calc(var(--logo-w) * 40 / 48);
+  margin: calc(var(--logo-w) * -4 / 48) calc(var(--logo-w) * -4 / 48)
+          calc(var(--logo-w) * -7 / 48);
+  object-fit: cover;
+  object-position: 0 0;
   image-rendering: pixelated;
+}
+
+#bar-logo {
+  --logo-w: 22px;
+}
+
+/* One wingbeat: 16 frames at 24 fps. index.js plays the same keyframes. */
+@keyframes logo-flap {
+  from { object-position: 0 0; }
+  to { object-position: 106.6667% 0; }
+}
+
+/* From first paint until the app is ready (index.js takes .flapping off at
+   the end of a wingbeat, so it settles on frame 0). */
+#home-logo.flapping {
+  animation: logo-flap 667ms steps(16, jump-end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #home-logo.flapping {
+    animation: none;
+  }
 }
 
 /* --chrome-ink, not --text: the device themes paint the bar their shell
@@ -3077,11 +3112,9 @@ body.home-card #home-brand {
 }
 
 #home-logo {
-  width: 76px;
-  height: auto;
-  image-rendering: pixelated;
+  --logo-w: 76px;
   filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6));
-  margin-bottom: 14px;
+  margin-bottom: calc(14px + var(--logo-w) * -7 / 48);
 }
 
 #home-brand h1 {
@@ -6918,8 +6951,8 @@ body.link-gb #controls {
     gap: 18px;
   }
   #home-logo {
-    width: 58px;
-    margin-bottom: 4px;
+    --logo-w: 58px;
+    margin-bottom: calc(4px + var(--logo-w) * -7 / 48);
   }
   #home-brand h1 {
     font-size: 24px;

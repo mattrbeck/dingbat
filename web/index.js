@@ -5684,9 +5684,45 @@ if (homePending) document.body.classList.add("lib-has-games");
 // (paused, then Last played after a close) rather than the brand.
 let playedThisVisit = false;
 
+// --- The logo flaps ----------------------------------------------------------
+// Both logos are drawn from flap.png, a strip of 16 wing-flap frames whose
+// frame 0 is the logo at rest (styles.css, "Both logos are drawn from
+// flap.png"). It flaps when there is a reason to: while the app is getting
+// ready, and when the logo travels - a game opening or closing, or the
+// brand crossing between the hero and the bar on a scroll. Every flap is a
+// whole wingbeat, so it always comes to rest on frame 0.
+const FLAP_MS = 667; // 16 frames at 24 fps, the same as styles.css's logo-flap
+const BRAND_FLAP_ID = "brand-flap";
+
+// One wingbeat on `el`, or null where motion is unwanted. A flap already
+// under way is left to finish rather than started over, which would stutter.
+function flapOnce(el, id = BRAND_FLAP_ID) {
+  if (!el?.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
+  if (el.getAnimations?.().some((a) => a.id === id && a.playState === "running")) return null;
+  let a = el.animate([{ objectPosition: "0 0" }, { objectPosition: "106.6667% 0" }],
+                     { duration: FLAP_MS, easing: "steps(16, jump-end)", fill: "backwards" });
+  a.id = id;
+  return a;
+}
+
+// The hero's logo flaps from first paint (index.html gives it .flapping,
+// styles.css runs it) until the app is ready to use: the runtime is up and,
+// when a library is on its way, it is on screen. Then it finishes the
+// wingbeat it is in and stops on frame 0.
+function settleBootFlap() {
+  const logo = document.getElementById("home-logo");
+  if (!logo?.classList.contains("flapping")) return;
+  if (!document.body.classList.contains("runtime-ready") || homePending) return;
+  const stop = () => logo.classList.remove("flapping");
+  logo.addEventListener("animationiteration", stop, { once: true });
+  // No iteration event comes if it is not being drawn (or motion is off).
+  setTimeout(stop, FLAP_MS + 100);
+}
+
 const revealHome = () => {
   if (!homePending) return;
   homePending = false;
+  settleBootFlap();
   document.documentElement.classList.remove("home-pending");
   // The brand was up all along; what was held under it fades in.
   const inner = document.getElementById("home-inner");
@@ -12457,8 +12493,20 @@ const brandProgress = () => {
 
 const syncBrand = () => setBrandP(brandProgress());
 
+// A scroll that carries the brand across - past halfway, where the bar's
+// copy takes over from the hero's - gives whichever copy is arriving a
+// wingbeat. Only on a scroll: the other callers of syncBrand are a game
+// opening or closing, and those flights flap on their own.
+const scrollBrand = () => {
+  let was = brandP;
+  syncBrand();
+  if (brandAnim) return;
+  if (was < 0.5 && brandP >= 0.5) flapOnce(barLogo);
+  else if (was >= 0.5 && brandP < 0.5) flapOnce(brandLogo);
+};
+
 if (homeScroller.addEventListener) {
-  homeScroller.addEventListener("scroll", syncBrand, { passive: true });
+  homeScroller.addEventListener("scroll", scrollBrand, { passive: true });
   window.addEventListener("resize", syncBrand);
 }
 
@@ -12477,7 +12525,7 @@ if (homeScroller.addEventListener) {
 // done the element goes back to being described by the stylesheet and nothing
 // else. A brand that cannot be shown is worse than a brand that does not fly.
 const BRAND_FLY_ID = "brand-fly";
-const BRAND_FLIERS = [barBrand, barLogo, barWord, brandEl];
+const BRAND_FLIERS = [barBrand, barLogo, barWord, brandEl, brandLogo];
 
 const cancelFlight = () => {
   for (let el of BRAND_FLIERS) {
@@ -12531,6 +12579,14 @@ const flyBrand = (up) => {
        { opacity: 1, offset: 1 }]
     : [{ opacity: 1, offset: 0 }, { opacity: 0, offset: 0.4 },
        { opacity: 0, offset: 1 }];
+
+  // The logo flaps on the way. Tagged with the flight, so the next flight
+  // clears it like everything else, but not waited on below: a wingbeat
+  // outlasts the trip, and the logo finishes it where it lands. Closing,
+  // the hero's copy beats in step underneath it, so when the bar's copy
+  // hands over mid-beat the two are on the same frame.
+  flapOnce(barLogo, BRAND_FLY_ID);
+  if (!up) flapOnce(brandLogo, BRAND_FLY_ID);
 
   let made;
   if (up) {
@@ -14401,6 +14457,7 @@ var Module = {
     // Unblock queued launches and retire the boot progress strip.
     markRuntimeReady();
     document.body.classList.add("runtime-ready");
+    settleBootFlap();
     // The one-time library-pictures offer: after the grid and the Drive
     // session (resumeDriveOnBoot) have had a moment to settle, and the
     // first pull has had its say.
