@@ -209,6 +209,27 @@ test("a reset while a checkpoint packs is not undone by it", async () => {
   assert.equal(app.idb.get("ckpts:A.gba"), undefined);
 });
 
+test("an in-game save is stored once its file stops changing, not at the 5 s autosave", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  loaded(app);
+  let mtime = 1000;
+  app.sandbox.FS.stat = () => ({ mtime, size: 2 });
+  app.sandbox.FS.files.set("rom.sav", u8(1, 1));
+  await app.runIn("watchBattery()"); // first look: what is there now
+  assert.equal(app.idb.get("save:A.gba"), undefined);
+  // The game writes its save over a few frames...
+  app.sandbox.FS.files.set("rom.sav", u8(2, 2)); mtime = 1100;
+  await app.runIn("watchBattery()");
+  app.sandbox.FS.files.set("rom.sav", u8(3, 3)); mtime = 1200;
+  await app.runIn("watchBattery()");
+  assert.equal(app.idb.get("save:A.gba"), undefined, "not while it is still being written");
+  // ...and stops.
+  await app.runIn("watchBattery()");
+  await settle();
+  assert.deepEqual([...app.idb.get("save:A.gba")], [3, 3], "stored at the next look");
+});
+
 // ── Crashes ─────────────────────────────────────────────────────────────────
 
 const marks = (app) => Object.keys(app.idb.get("playing") || {});

@@ -166,11 +166,14 @@ phone's tab really being suspended.
 
 ## A game that keeps stopping (checkpoints)
 
-Gated: `web/tests/checkpoints.test.mjs` (retention, the crash count, late
-results, going back past a save). Seen in headless Chromium with FireRed:
-the worker path, a browser killed with the game on screen, the relaunch
-resuming the last checkpoint, two kills and the sheet. Not gated: a real
-Android Chrome crash, iOS Safari's worker, a phone's frame pacing.
+Gated: `web/tests/checkpoints.test.mjs` (retention, the crash count, the
+clean-exit note, the last gasp, late results, pictures that will not store,
+the battery watcher, going back past a save); `web/e2e/crash-recovery.e2e.mjs`
+(the browser SIGKILLed or closed with the test ROM on screen, in Chromium
+and WebKit: where each relaunch resumes, what counts as a crash, the sheet
+after two); `web/e2e/sw-updates.e2e.mjs` (the worker and page stay one build
+across deploys, Force update, no network, an old sw.js). Not gated: a real
+Android Chrome crash, Safari's own Cmd-Q, a phone's frame pacing.
 
 - [ ] **Crash, pick up.** On the phone play a few minutes without saving in
       game, then kill the browser from the app switcher *with the game on

@@ -8189,6 +8189,27 @@ const persistAutoState = () => {
 const CHECKPOINT_PLAY_MS = 60 * 1000;
 // How often the battery file is looked at for a fresh in-game save.
 const SAVE_SETTLE_MS = 500;
+
+// The battery stored within about a second of the game writing it, not at
+// the next 5 s autosave: a crash in between lost an in-game save (measured).
+// The core writes the file the frame the game writes its save, and a save
+// is written over many frames (a flash chip's sectors), so it is stored
+// once the file has stopped changing for one look. Every SAVE_SETTLE_MS.
+let savSeen = { name: null, mtime: 0, settled: true };
+const watchBattery = () => {
+  if (linkMode || rollbackMode || netActive() || !currentRomName || !currentOriginalName) return;
+  let mtime = 0;
+  try { mtime = +FS.stat(stripExt(currentRomName) + ".sav").mtime; } catch { return; }
+  if (savSeen.name !== currentOriginalName) {
+    savSeen = { name: currentOriginalName, mtime, settled: true };
+  } else if (mtime !== savSeen.mtime) {
+    savSeen.mtime = mtime;
+    savSeen.settled = false;
+  } else if (!savSeen.settled) {
+    savSeen.settled = true;
+    return persistSave(currentRomName, currentOriginalName);
+  }
+};
 // Taken in a tick that has room for it; a busy one passes it to the next,
 // for up to CKPT_WAIT_MS before one is taken anyway.
 const CKPT_SLACK_MS = 6;
@@ -15537,26 +15558,7 @@ var Module = {
       }
     }, 5000);
 
-    // The battery stored within about a second of the game writing it, not
-    // at the next 5 s tick: a crash in between lost an in-game save
-    // (measured). The core writes the file the frame the game writes its
-    // save, and a save is written over many frames (a flash chip's sectors),
-    // so it is stored once the file has stopped changing for one look.
-    let savSeen = { name: null, mtime: 0, settled: true };
-    setInterval(() => {
-      if (linkMode || rollbackMode || netActive() || !currentRomName || !currentOriginalName) return;
-      let mtime = 0;
-      try { mtime = +FS.stat(stripExt(currentRomName) + ".sav").mtime; } catch { return; }
-      if (savSeen.name !== currentOriginalName) {
-        savSeen = { name: currentOriginalName, mtime, settled: true };
-      } else if (mtime !== savSeen.mtime) {
-        savSeen.mtime = mtime;
-        savSeen.settled = false;
-      } else if (!savSeen.settled) {
-        savSeen.settled = true;
-        persistSave(currentRomName, currentOriginalName);
-      }
-    }, SAVE_SETTLE_MS);
+    setInterval(watchBattery, SAVE_SETTLE_MS);
 
     window.addEventListener("beforeunload", () => {
       // Get the BYE out so the peer sees a clean exit (the sync parts run
