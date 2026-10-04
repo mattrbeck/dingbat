@@ -7258,6 +7258,11 @@ body.rewind-off #report-slider {
     transform: translateY(0);
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
   }
+  /* Pure Black leaves the bar see-through so the glow shows behind it, but
+     here the bar comes down over the picture and L/R: give it the black. */
+  :root[data-theme="black"] body.running #topbar {
+    background: var(--bg);
+  }
   /* No bar on screen to sit under, so the capture banner hugs the top of the
      full-height stage — and rides down with the bar when it slides in. */
   body.running #clip-banner {
