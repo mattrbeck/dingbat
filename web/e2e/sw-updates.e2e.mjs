@@ -21,11 +21,8 @@ import { builtWeb, sleep, WEB } from "./devices.mjs";
 import { synctestRom, SYNCTEST_NAME as GAME } from "./synctest-rom.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
-// Not on CI unless asked (DINGBAT_E2E_CRASH=1), as crash-recovery.e2e.mjs:
-// a step failed once in three runs on CI's Linux WebKit; steady locally.
-const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)"
-  : process.env.CI && !process.env.DINGBAT_E2E_CRASH
-    ? "flaky on CI's runners (DINGBAT_E2E_CRASH=1 runs it)" : false;
+// On CI in test.yml's "crash + updates" shard, as crash-recovery.e2e.mjs.
+const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)" : false;
 const ENGINES = process.env.DINGBAT_E2E_NO_CHROMIUM ? ["webkit"] : ["chromium", "webkit"];
 const channel = process.env.DINGBAT_E2E_CHROMIUM_CHANNEL;
 
@@ -74,8 +71,11 @@ for (const engine of ENGINES) {
       await writeFile(join(dir, "ckptworker.js"), (await readFile(join(WEB, "ckptworker.js"), "utf8")) +
         `\nself.addEventListener("message", (e) => { if (e.data?.ping) self.postMessage({ pong: "${letter}" }); });\n`);
     };
+    // Up, and its service worker registration in hand: an applyUpdate before
+    // register() resolves finds none and takes the clean-slate path.
     const booted = () => page.waitForFunction(
-      () => typeof Module !== "undefined" && runtimeReady, null, { timeout: 60000 });
+      () => typeof Module !== "undefined" && runtimeReady &&
+        (!("serviceWorker" in navigator) || !!swRegistration), null, { timeout: 60000 });
     // Which build the page is, and which its checkpoint worker is.
     const builds = () => page.evaluate(async () => {
       const w = getCkptWorker();
@@ -114,9 +114,14 @@ for (const engine of ENGINES) {
       await page.evaluate(() => swRegistration.update());
       await page.waitForFunction(() => !!swRegistration.waiting, null, { timeout: 60000 });
     };
+    // The page `fn` reloads, booted: told apart from this one by a mark only
+    // this one carries. Waiting for the next "load" event instead took a
+    // late one of the reload before (CI: "then applied" still on build B).
     const reloadedBy = async (fn) => {
-      await Promise.all([page.waitForEvent("load", { timeout: 60000 }), page.evaluate(fn)]);
-      await booted();
+      await page.evaluate(() => { window.__beforeReload = true; });
+      await page.evaluate(fn);
+      await page.waitForFunction(() => !window.__beforeReload && typeof Module !== "undefined" &&
+        runtimeReady, null, { timeout: 60000 });
       await sleep(500);
     };
     const takeCheckpoint = () => page.evaluate(async () => {

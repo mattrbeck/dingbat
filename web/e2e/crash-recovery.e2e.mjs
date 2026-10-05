@@ -22,16 +22,13 @@ import { synctestRom, SYNCTEST_NAME as GAME } from "./synctest-rom.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
 
-// Not on CI unless asked (DINGBAT_E2E_CRASH=1): on its shared runners a
-// browser's storage across a kill or a restart is not dependable enough to
-// gate on - Linux WebKit's network process (which holds the storage)
-// outlives the SIGKILL of its browser, and on macOS a battery stored
-// seconds before a close was gone after it, in runs where every other
-// scenario held. Locally (a Mac) the suite is steady: the whole e2e
-// directory twice in parallel, 67/67 both times.
-const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)"
-  : process.env.CI && !process.env.DINGBAT_E2E_CRASH
-    ? "storage across a kill is not dependable on CI's runners (DINGBAT_E2E_CRASH=1 runs it)" : false;
+// On CI it has a runner to itself (test.yml's "crash + updates" shard). It
+// flaked there beside the other e2e files, every run differently, until
+// (1) a relaunch waited for the last browser on its profile to be gone (a
+// WebKit network process still holding the storage left the next launch
+// an empty or stale one), (2) a kill took the browser's whole tree, and
+// (3) each "stored" was waited for rather than slept on.
+const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)" : false;
 const ENGINES = process.env.DINGBAT_E2E_NO_CHROMIUM ? ["webkit"] : ["chromium", "webkit"];
 const channel = process.env.DINGBAT_E2E_CHROMIUM_CHANNEL;
 const launchOpts = (engine) => ({
@@ -41,6 +38,17 @@ const launchOpts = (engine) => ({
 
 let web = null;
 const site = async () => (web ??= await serveWeb());
+
+// Polled, not slept on: a fixed sleep long enough for a loaded CI runner is
+// a waste everywhere else, and one that is not is a flake.
+const until = async (cond, what, ms) => {
+  const end = Date.now() + ms;
+  for (;;) {
+    if (await cond()) return;
+    if (Date.now() > end) assert.fail("timed out waiting for " + (typeof what === "function" ? what() : what));
+    await sleep(100);
+  }
+};
 after(() => web?.close());
 
 // One player on one browser profile, which outlives the browser.
@@ -56,8 +64,17 @@ class Player {
     await this.running();
   }
   async open() {
+    // The last browser on this profile all gone first: a process of it still
+    // holding the storage (WebKit's network process outlives its browser by
+    // a while, on Linux after a SIGKILL of the rest, on a Mac after a close)
+    // left the next launch an empty or stale IndexedDB - the CI flakes.
+    await this.released();
     this.ctx = await playwright[this.engine].launchPersistentContext(this.dir, launchOpts(this.engine));
-    this.page = this.ctx.pages()[0] || await this.ctx.newPage();
+    await this.visit(this.ctx.pages()[0] || await this.ctx.newPage());
+  }
+  // The app opened in `page`, a tab of the running browser.
+  async visit(page) {
+    this.page = page;
     this.loads = 0; // launches on this page (running)
     // DINGBAT_E2E_SLOW=4: Chromium on a quarter of the CPU, as devices.mjs.
     const slow = Number(process.env.DINGBAT_E2E_SLOW || 0);
@@ -111,6 +128,45 @@ class Player {
       return FS.readFile(currentRomName.replace(/\.[^.]+$/, "") + ".sav")[0] - 1;
     });
   }
+  // The battery stored: IndexedDB's copy is the file the core wrote. The
+  // page stores it once the file has held still for a look (watchBattery),
+  // about a second after the game's last write - waited for, not slept on.
+  async stored() {
+    await until(() => this.page.evaluate(async () => {
+      let file;
+      try { file = FS.readFile(currentRomName.replace(/\.[^.]+$/, "") + ".sav"); } catch { return false; }
+      const kept = await dbGet("save:" + currentOriginalName);
+      return !!kept && kept.length === file.length && kept.every((b, i) => b === file[i]);
+    }), "the battery stored", 10000);
+  }
+  // The processes using this profile: started with it, theirs, and any
+  // holding a file in it (on a Mac, WebKit's network process is none of
+  // the first two).
+  procs() {
+    const table = execSync("ps -axo pid=,ppid=,stat=,command=").toString().split("\n")
+      .map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/)).filter(Boolean)
+      .map(([, pid, ppid, stat, cmd]) => ({ pid: +pid, ppid: +ppid, stat, cmd }))
+      .filter((p) => !p.stat.startsWith("Z"));
+    const ours = new Set(table.filter((p) => p.cmd.includes(this.dir) && !p.cmd.includes("ps -axo"))
+      .map((p) => p.pid));
+    let holders = "";
+    try { holders = execSync(`lsof -t +D ${JSON.stringify(this.dir)}`, { stdio: ["ignore", "pipe", "ignore"] }).toString(); }
+    catch (e) { holders = e.stdout?.toString() || ""; } // exit 1: none
+    for (const p of holders.split(/\s+/)) if (+p) ours.add(+p);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const p of table) if (ours.has(p.ppid) && !ours.has(p.pid)) { ours.add(p.pid); grew = true; }
+    }
+    ours.delete(process.pid);
+    const alive = new Set(table.map((p) => p.pid));
+    return table.filter((p) => ours.has(p.pid) && alive.has(p.pid));
+  }
+  async released() {
+    if (!this.dir) return;
+    await until(() => this.procs().length === 0,
+      () => "the last browser on the profile gone: " +
+        JSON.stringify(this.procs().map((p) => p.cmd.slice(0, 80))), 30000);
+  }
   // The minute's checkpoint, taken now and landed.
   checkpoint() {
     return this.page.evaluate(() => {
@@ -124,18 +180,22 @@ class Player {
     this.diag = { beforeKill: await this.page.evaluate(async () => ({
       hidden: document.hidden, marked: playingMarked, playing: await dbGet("playing"),
     })).catch((e) => String(e)) };
-    const procs = execSync("ps -axo pid=,command=").toString().split("\n")
-      .filter((l) => l.includes(this.dir) && !l.includes("ps -axo"));
-    const pids = procs.map((l) => Number(l.trim().split(/\s+/)[0])).filter((p) => p && p !== process.pid);
-    this.diag.killed = procs.map((l) => l.trim().split(/\s+/).slice(1, 2).join(" "));
-    assert.ok(pids.length > 0, "found the browser's processes to kill");
-    for (const p of pids) { try { process.kill(p, "SIGKILL"); } catch {} }
-    await sleep(2000);
+    // Its whole tree: Linux WebKit's network process (which holds the
+    // storage) is a child of the browser without the profile in its command
+    // line, and outlived a kill of only the processes that had it.
+    const procs = this.procs();
+    this.diag.killed = procs.map((p) => p.cmd.split(/\s+/)[0].split("/").pop());
+    assert.ok(procs.length > 0, "found the browser's processes to kill");
+    for (const p of procs) { try { process.kill(p.pid, "SIGKILL"); } catch {} }
+    await this.released();
     await this.ctx.close().catch(() => {});
   }
   // Launched again, and the game's tile tapped: where does it come back?
-  async reopen() {
-    await this.open();
+  // { tab: true }: in a new tab of the browser still running, not a
+  // relaunch.
+  async reopen({ tab = false } = {}) {
+    if (tab) await this.visit(await this.ctx.newPage());
+    else await this.open();
     const crashes = await this.page.evaluate((g) => crashStreak(g), GAME);
     if (this.diag) {
       this.diag.boot = await this.page.evaluate(async () => ({
@@ -161,22 +221,17 @@ for (const engine of ENGINES) {
       const p = new Player(engine);
       try { await p.start(); await body(p); } finally { await p.end(); }
     });
-    // A kill counted as a crash. On CI's Linux WebKit the count has come out
-    // one short now and then (and not on the run before): reported there,
-    // with what it was made from, while that is looked into; enforced
-    // everywhere else.
-    const lenientCount = process.platform === "linux" && engine === "webkit";
+    // A kill counted as a crash, with what the count was made from when it
+    // is wrong. (On CI's Linux WebKit it came out one short now and then
+    // while a kill left the network process running; see kill().)
     const expectCrashes = (p, got, want) => {
-      if (got === want) return;
-      const why = `crash count ${got}, wanted ${want}: ${JSON.stringify(p.diag)}`;
-      if (lenientCount) console.log("NOTE " + why);
-      else assert.fail(why);
+      if (got !== want) assert.fail(`crash count ${got}, wanted ${want}: ${JSON.stringify(p.diag)}`);
     };
 
     // The report that started it: a long session, no recent in-game save,
     // the browser crashed, and the relaunch went back to the last hide.
     scenario("a crash while playing resumes at the last checkpoint", async (p) => {
-      await p.save(10); await sleep(1500);   // saved in game at 10
+      await p.save(10); await p.stored();     // saved in game at 10
       await p.play(40);
       await p.checkpoint();                  // the minute's checkpoint, at 50
       await p.play(30);                      // 80 when the browser dies
@@ -186,18 +241,18 @@ for (const engine of ENGINES) {
       expectCrashes(p, got.crashes, 1); // counted, and one crash asks nothing
     });
 
-    scenario("a crash 1.5 s after an in-game save keeps that save", async (p) => {
-      await p.save(10); await sleep(1500);
+    scenario("a crash soon after an in-game save keeps that save", async (p) => {
+      await p.save(10); await p.stored();
       await p.save(15);                      // 25 saved in game
-      await sleep(1500);                     // stored once the file settles
+      await p.stored();                      // stored once the file settles
       await p.kill();
       assert.equal((await p.reopen()).c, 25);
     });
 
     scenario("a crash after an in-game save with no checkpoint since boots on that save", async (p) => {
-      await p.save(10); await sleep(1500);
+      await p.save(10); await p.stored();
       await p.checkpoint();                  // at 10, before the save below
-      await p.save(20); await sleep(1500);   // 30 saved and stored
+      await p.save(20); await p.stored();     // 30 saved and stored
       await p.play(10);
       await p.kill();
       assert.equal((await p.reopen()).c, 30, "never the checkpoint from before the save");
@@ -212,7 +267,7 @@ for (const engine of ENGINES) {
     });
 
     scenario("a crash while a checkpoint packs leaves the one before it whole", async (p) => {
-      await p.save(10); await sleep(1500);
+      await p.save(10); await p.stored();
       await p.play(20);
       await p.checkpoint();                  // 30, landed
       await p.play(20);                      // 50
@@ -226,12 +281,13 @@ for (const engine of ENGINES) {
     });
 
     scenario("a crash on the home screen after Main Menu resumes there, and is no crash", async (p) => {
-      await p.save(10); await sleep(1500);
+      await p.save(10); await p.stored();
       await p.play(33);
       await p.page.click("#menu-btn");
       await p.page.click("#main-menu");
       await p.page.waitForFunction(() => document.body.classList.contains("paused"));
-      await sleep(500);
+      await until(() => p.page.evaluate(async () => !unstoredSnap && !playingMarked &&
+        !(pageId in ((await dbGet("playing")) || {}))), "the session and the run's end stored", 10000);
       await p.kill();
       const got = await p.reopen();
       assert.equal(got.c, 43);
@@ -247,12 +303,17 @@ for (const engine of ENGINES) {
     });
 
     scenario("the tab closed mid-game resumes exactly, and is no crash", async (p) => {
-      await p.save(10); await sleep(1500);
+      await p.save(10); await p.stored();
       await p.play(27);                      // 37
-      await p.page.close({ runBeforeUnload: true });
-      await sleep(1000);
-      await p.ctx.close();
-      const got = await p.reopen();
+      // The browser stays up: another tab keeps it (closing a context's
+      // last tab quits the browser, and WebKit lands a quitting browser's
+      // IndexedDB writes only now and then - the quit scenario below). The
+      // game is then opened in a new tab, whose reads IndexedDB orders after
+      // the closed tab's writes: nothing to wait out.
+      const keeper = await p.ctx.newPage();
+      await Promise.all([p.page.waitForEvent("close"), p.page.close({ runBeforeUnload: true })]);
+      const got = await p.reopen({ tab: true });
+      await keeper.close();
       assert.equal(got.c, 37);
       assert.equal(got.crashes, 0);
     });
@@ -266,7 +327,7 @@ for (const engine of ENGINES) {
     const exactQuit = engine === "chromium" && channel === "chrome";
     scenario("the browser quit mid-game is no crash, and resumes " +
              (exactQuit ? "exactly" : "no earlier than the checkpoint"), async (p) => {
-      await p.save(10); await sleep(1500);
+      await p.save(10); await p.stored();
       await p.play(10);
       await p.checkpoint();                  // 20
       await p.play(17);                      // 37
@@ -282,7 +343,7 @@ for (const engine of ENGINES) {
     });
 
     scenario("two kills in a row, right after resuming, ask first; an earlier moment resumes", async (p) => {
-      await p.save(10); await sleep(1500);
+      await p.save(10); await p.stored();
       await p.play(20);
       await p.checkpoint();                  // 30
       await p.play(20);
@@ -294,7 +355,6 @@ for (const engine of ENGINES) {
       await p.open();
       const streak = await p.page.evaluate((g) => crashStreak(g), GAME);
       expectCrashes(p, streak, 2);
-      if (streak !== 2) return; // lenient only: no sheet to look at
       await p.page.locator(".home-tile-launch").first().click();
       await p.page.waitForFunction(() =>
         document.getElementById("moments-modal").classList.contains("open"), null, { timeout: 10000 });
