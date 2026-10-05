@@ -12214,6 +12214,61 @@ const frameAdvance = () => {
   drawGame();
 };
 
+// --- The console's own picture and sound, for everything exported ---
+// Clips, recordings and screenshots carry the scene as the console makes
+// it: the core's framebuffer at a whole-number scale (no LCD response,
+// colour correction, DMG shades, SGB border or upscale filter) and its mix
+// without the MP2K HLE, the FIFO smoothing or the channel mutes. Those are
+// ways of playing, not part of the game. The HLE only shadows the game's
+// own mixer (mp2k.nim), so switching it off for a replay changes nothing
+// the replay emulates.
+const NATIVE_SCALE = 4;
+let nativeSmall = null;
+let nativeBig = null;
+
+// Paint the current frame into the export canvas, which is reused (a
+// recorder's captureStream follows it) until the picture's size changes.
+// Null with no core.
+const nativeFrameCanvas = () => {
+  if (typeof Module === "undefined" || !Module._wasm_native_fb_ptr) return null;
+  const ptr = Module._wasm_native_fb_ptr();
+  if (!ptr) return null;
+  const [w, h] = gameRes();
+  if (!nativeSmall || nativeSmall.width !== w || nativeSmall.height !== h) {
+    nativeSmall = document.createElement("canvas");
+    nativeSmall.width = w;
+    nativeSmall.height = h;
+    nativeBig = document.createElement("canvas");
+    nativeBig.width = w * NATIVE_SCALE;
+    nativeBig.height = h * NATIVE_SCALE;
+  }
+  nativeSmall.getContext("2d").putImageData(
+    bgr555ToImageData(new Uint8Array(Module.memory.buffer, ptr, w * h * 2), 0, w, h), 0, 0);
+  const ctx = nativeBig.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(nativeSmall, 0, 0, nativeBig.width, nativeBig.height);
+  return nativeBig;
+};
+
+// The core's native mix while an export runs (and audible at all, whatever
+// the volume); the player's own settings back after.
+const setNativeAudio = (on) => {
+  if (typeof Module === "undefined") return;
+  if (on) {
+    if (Module._wasm_set_mp2k_hle) Module._wasm_set_mp2k_hle(0);
+    if (Module._wasm_set_fifo_interp) Module._wasm_set_fifo_interp(0);
+    if (Module._wasm_set_channel_mutes) Module._wasm_set_channel_mutes(0);
+    if (Module._wasm_set_audio_silent) Module._wasm_set_audio_silent(0);
+  } else {
+    // Another export still running keeps it (a Record across a clip).
+    if (clipReplayActive || (recRecorder && recRecorder.state === "recording")) return;
+    applyMp2kHle();
+    applyFifoInterp();
+    applyChannelMutes();
+    applyAudioSilent();
+  }
+};
+
 // --- Retroactive clip capture ---
 // The wasm side keeps one state anchor per second plus a per-frame input
 // log (clip_* in dingbat_wasm.nim). clip_begin rewinds to the anchor before
@@ -12326,7 +12381,7 @@ const endClipExport = () => {
     clipProgressModal.classList.remove("open");
     releaseFocus(clipProgressModal);
   }
-  applyAudioSilent();    // the export had the core mix whatever the volume
+  setNativeAudio(false); // the player's mix back
   drawGame();            // the live picture back on the canvas
 };
 
@@ -12349,12 +12404,12 @@ const abortRetroClip = () => {
 // The realtime path: the tick steps clip_tick and pushAudio sends each
 // frame's samples to the private tap. Returns false (nothing armed) on failure.
 const startClipRecorder = (slug, mime) => {
-  // The framebuffer holds the clip's first frame: push it to the canvas
-  // before captureStream attaches, or the recorder opens on the live moment.
-  drawGame();
+  // The framebuffer holds the clip's first frame: paint it before
+  // captureStream attaches, or the recorder opens on the live moment.
+  const frame = nativeFrameCanvas();
   let stream;
   try {
-    stream = canvasEl.captureStream(60);
+    stream = frame.captureStream(60);
   } catch {
     showToast("Couldn't capture the game canvas");
     return false;
@@ -12438,7 +12493,8 @@ const clipEncodeAudio = async (pcm, len, acfg) => {
 
 // The WebCodecs path, from clip_begin's armed replay to a saved file.
 const clipEncode = async (gen, slug, mime) => {
-  const w = canvasEl.width, h = canvasEl.height;
+  const first = nativeFrameCanvas();
+  const w = first ? first.width : 0, h = first ? first.height : 0;
   const cfg = await clipCodecConfig(w, h);
   if (gen !== clipExportGen || !clipReplayActive) return; // cancelled while asking
   if (!cfg) {
@@ -12480,10 +12536,8 @@ const clipEncode = async (gen, slug, mime) => {
       while (performance.now() - t0 < 12 && venc.encodeQueueSize < 8) {
         left = Module._clip_tick();
         if (left < 0) break;          // the live state is back
-        drawGame();
-        // Read in the task that drew it: the WebGL canvas keeps no buffer.
-        const vf = new VideoFrame(canvasEl, { timestamp: Math.round(done * frameUs),
-                                              duration: Math.round(frameUs) });
+        const vf = new VideoFrame(nativeFrameCanvas(), { timestamp: Math.round(done * frameUs),
+                                                         duration: Math.round(frameUs) });
         venc.encode(vf, { keyFrame: done % CLIP_KEY_EVERY === 0 });
         vf.close();
         const n = Module._getAudioBufferLen();
@@ -12544,9 +12598,7 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
   clipTotalFrames = frames;
   clipExportWasPaused = paused;
   paused = false; // the replay must run even if the game was paused
-  // Sound for the file even when the player has the volume off (the tap
-  // and the encoder sit before the volume).
-  if (Module._wasm_set_audio_silent) Module._wasm_set_audio_silent(0);
+  setNativeAudio(true);
   document.body.classList.add("clip-replaying");
   clipProgressLabel.textContent = label;
   setClipProgress(0);
@@ -12904,13 +12956,17 @@ const stopClipRecording = () => {
   if (recRecorder && recRecorder.state !== "inactive") recRecorder.stop();
 };
 
+// Records the console's own picture and sound (nativeFrameCanvas,
+// setNativeAudio): the HLE and the rest of the player's mix are off, and
+// heard off, while it runs.
 const startClipRecording = () => {
   if (recRecorder || clipReplayActive || !currentRomName) return;
   const mime = clipMimeType();
   if (!mime) { showToast("Video recording isn't supported in this browser"); return; }
+  const frame = nativeFrameCanvas();
   let stream;
   try {
-    stream = canvasEl.captureStream(60);
+    stream = frame.captureStream(60);
   } catch {
     showToast("Couldn't capture the game canvas");
     return;
@@ -12926,9 +12982,11 @@ const startClipRecording = () => {
     showToast("Couldn't start the recorder");
     return;
   }
+  setNativeAudio(true);
   recRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
   recRecorder.onstop = () => {
     if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
+    setNativeAudio(false);
     clearTimeout(recStopTimer);
     const blob = new Blob(recChunks, { type: recRecorder.mimeType });
     recRecorder = null;
@@ -14442,33 +14500,21 @@ thumbsModal.addEventListener("click", (e) => {
 });
 
 // --- Screenshot ---
-// No preserveDrawingBuffer: pixels are only valid within the render task,
-// so captureCanvas() runs from the main loop right after a frame is drawn.
-let pendingShot = false;
-
-const captureCanvas = () => {
-  pendingShot = false;
-  /** @type {HTMLCanvasElement} */ (document.getElementById("canvas")).toBlob((blob) => {
+// The console's own picture (nativeFrameCanvas), read straight from the
+// core: no render task to wait for, and a paused game is not stepped.
+const takeScreenshot = () => {
+  menuDropdown.hidden = true;
+  if (!currentRomName) return;
+  const frame = nativeFrameCanvas();
+  if (!frame || typeof frame.toBlob !== "function") return;
+  frame.toBlob((blob) => {
     if (!blob) return;
     let a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = (currentOriginalName || "dingbat").replace(/\.[^.]*$/, "") + ".png";
     a.click();
-    URL.revokeObjectURL(a.href);
-  });
-};
-
-const takeScreenshot = () => {
-  menuDropdown.hidden = true;
-  if (!currentRomName || typeof Module === "undefined" || !Module._loop_tick) return;
-  if (paused) {
-    // Paused: draw one frame, then grab it in the same task.
-    Module._loop_tick();
-    drawGame();
-    captureCanvas();
-  } else {
-    pendingShot = true; // grabbed by the running loop after the next render
-  }
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  }, "image/png");
 };
 
 document.getElementById("screenshot").addEventListener("click", takeScreenshot);
@@ -16270,13 +16316,12 @@ var Module = {
       } else {
         presentSkips++; // diagnostics: ticks that reused the shown frame
       }
-      presentSkip = false;
-      // Screenshot: grab it in this task (no preserveDrawingBuffer).
-      if (pendingShot) {
-        Module._loop_tick();
-        drawGame();
-        captureCanvas();
+      // A recorder at realtime (Record, or a clip replay without WebCodecs)
+      // films the export canvas, not this one: paint it each new frame.
+      if (!presentSkip && (recRecorder || (clipReplayActive && !clipEncodeActive))) {
+        nativeFrameCanvas();
       }
+      presentSkip = false;
       updateSleepOverlay();
       updateHleIndicator();
       updateGlow();

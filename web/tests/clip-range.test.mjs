@@ -16,7 +16,8 @@ const withRing = (app, n) =>
   app.runIn(`
     globalThis.clipBeginCalls = [];
     globalThis.Module = {
-      memory: { buffer: new ArrayBuffer(64 * 1024) },
+      memory: { buffer: new ArrayBuffer(256 * 1024) },
+      _wasm_native_fb_ptr: () => 16,
       _clip_scrub_generate: () => ${n},
       _clip_scrub_thumb_w: () => 4,
       _clip_scrub_thumb_h: () => 3,
@@ -462,3 +463,26 @@ test("recording shows progress over a hidden replay, and Cancel gives the game b
     assert.equal(panel.classList.contains("open"), false);
     assert.equal(app.document.body.classList.contains("clip-replaying"), false);
   });
+
+// Exports carry the console's own sound: the HLE, the FIFO smoothing and
+// any channel mutes are the player's way of listening, off while a clip
+// records and back as it ends.
+test("a clip records the native mix and gives the player's back after", async () => {
+  const app = await open();
+  app.runIn(`
+    globalThis.__mix = [];
+    for (const k of ["mp2k_hle", "fifo_interp", "channel_mutes", "audio_silent"])
+      Module["_wasm_set_" + k] = (v) => __mix.push(k + "=" + v);
+    mp2kHle = true; fifoInterp = true; channelMutes = 0b100; muted = true;
+    window.acquireClipAudio = () => null;
+    window.releaseClipAudio = () => {};
+    0`);
+  await app.document.getElementById("clip-save").dispatch("click");
+  eq(app.runIn("__mix.splice(0)"),
+     ["mp2k_hle=0", "fifo_interp=0", "channel_mutes=0", "audio_silent=0"],
+     "native while it records");
+  await app.document.getElementById("clip-progress-cancel").dispatch("click");
+  eq(app.runIn("__mix.splice(0)"),
+     ["mp2k_hle=1", "fifo_interp=1", "channel_mutes=4", "audio_silent=1"],
+     "the player's mix (and mute) back afterwards");
+});

@@ -137,6 +137,8 @@ class FakeElement {
   getAnimations() {
     return (this._anims || []).filter((a) => a.playState !== "idle");
   }
+  // A recorder's view of a canvas (clip export, Record).
+  captureStream() { return { addTrack() {}, getAudioTracks: () => [] }; }
   getContext() {
     // 2D-context stand-in: every method is a no-op except the two that are
     // read from (getImageData().data would otherwise be `undefined.data`).

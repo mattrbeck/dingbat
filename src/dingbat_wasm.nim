@@ -242,6 +242,16 @@ proc wasm_game_fb_ptr(): pointer {.exportc.} =
   ## after the last tick of the RAF turn.
   gamePtr
 
+proc wasm_native_fb_ptr(): pointer {.exportc.} =
+  ## The console's own picture: the core's BGR555 framebuffer (GB/GBC
+  ## 160x144, GBA 240x160), before the LCD response, colour correction, the
+  ## DMG shades, the SGB border and every upscale filter. What clips,
+  ## recordings and screenshots are made of; readable at any time.
+  case stateKind
+  of ekGBA: (if stateGba != nil: cast[pointer](addr stateGba.ppu.framebuffer[0]) else: nil)
+  of ekGB:  (if stateGb  != nil: cast[pointer](addr stateGb.ppu.framebuffer[0]) else: nil)
+  of ekNone: nil
+
 # --- Super Game Boy ---
 # The border is a second layer, not a bigger framebuffer: the core keeps
 # emitting 160x144 and the presenter composites 256x224 around it, so

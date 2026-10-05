@@ -15,7 +15,10 @@ The full feature list for both front-ends and both emulated systems.
 - Run-ahead (opt-in, 1–2 frames); disabled while linked
 - "Clip that!": retroactive capture of the last minute of play, replayed deterministically
   from state anchors plus the input log, trimmed in the same film-strip scrubber, and
-  encoded off screen (WebCodecs to MP4, faster than realtime; MediaRecorder elsewhere)
+  encoded off screen (WebCodecs to MP4, faster than realtime; MediaRecorder elsewhere).
+  Clips, Record and screenshots carry the console's own picture (the framebuffer at 4x,
+  no filters, colour correction, LCD response, DMG shades or SGB border) and sound
+  (no MP2K HLE, FIFO smoothing or channel mutes)
 - Cheats: Game Genie, GameShark, Action Replay / CodeBreaker
 - Per-ROM saves in IndexedDB; "Manage ROMs and Saves" resets or deletes a game
 - Online link play with room codes; local 2P on one machine

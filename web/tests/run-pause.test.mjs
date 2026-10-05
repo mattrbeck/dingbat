@@ -71,7 +71,8 @@ test("Space and Period still work in the game view", async () => {
 // clip-range tests' stubs).
 const CLIP_STUBS = `
   globalThis.Module = {
-    memory: { buffer: new ArrayBuffer(64 * 1024) },
+    memory: { buffer: new ArrayBuffer(256 * 1024) },
+    _wasm_native_fb_ptr: () => 16,
     _clip_scrub_generate: () => 40,
     _clip_scrub_thumb_w: () => 4,
     _clip_scrub_thumb_h: () => 3,
@@ -231,9 +232,11 @@ test("in the game view the same keys act", async () => {
   assert.equal(app.runIn("__saves"), 1, "F5 saves a state");
   assert.equal(await press(app, "F8"), true);
   assert.equal(app.runIn("__loads"), 1, "F8 loads one");
-  app.runIn("paused = true");
+  app.runIn("paused = true; globalThis.__fbReads = 0; " +
+            "Module._wasm_native_fb_ptr = () => { __fbReads++; return 0; }");
   assert.equal(await press(app, "F9"), true);
-  assert.equal(app.runIn("__ticks"), 1, "F9 renders the paused frame to grab it");
+  assert.equal(app.runIn("__fbReads"), 1, "F9 reads the console's own picture");
+  assert.equal(app.runIn("__ticks"), 0, "...without stepping the paused game to get one");
 });
 
 // The SDL runtime's window key grab preventDefaults Tab page-wide from the
