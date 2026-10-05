@@ -67,7 +67,7 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
 - `save:<g>` only ever holds game g's battery
   (`SavePersistence.provenance`).
 - The run/pause invariant holds for every event
-  (`RunPause.inv_reachable`; at 03f88d6c `RunPause.inv_calm`, see below).
+  (`RunPause.inv_reachable`; flights included since fbdb7975, see below).
 
 **Still open, all low:**
 - The Drive spinner with no token and pending work, and one denied popup
@@ -121,15 +121,20 @@ The three models follow the code at 03f88d6c (citations at that commit).
   interleaving; new: `boot_resume_keeps_battery`, `handoff_drops_only_stored`.
 - **Modals.** The clip export's progress panel is a trap owner that closes
   itself when the export ends. Without nesting it returns focus where it was
-  (`single_progress_returns`). With the known nested-trap class, a new
-  instance: `bug_drop_during_clip_export_loses_focus` (low; a file failing
-  the ROM check dropped during an export, Cancel, then the export ends: focus
-  on `<body>`).
+  (`single_progress_returns`). Found at 03f88d6c, **fixed in fbdb7975**: a
+  file failing the ROM check dropped during an export put its prompt over
+  the panel, and after Cancel and the export's end focus was on `<body>`
+  (low). The drop is now refused while a clip records:
+  `regress_drop_during_clip_export_loses_focus`; test "a file dropped while a
+  clip records is refused (bug_drop_during_clip_export_loses_focus)" in
+  `web/tests/run-pause.test.mjs`. Still open in the known nested-trap class:
+  a sync begun before the export reaching its deleted-games prompt over the
+  panel (`obs_tomb_over_progress_loses_focus`).
 - **RunPause.** The off-screen export: Cancel and a load landing mid-encode
   both restore `paused` once, and the encode's tail does not touch it again
   (`clip_cancel_restores_pause`, `clip_load_mid_encode`,
-  `clip_cancel_then_tail`). **New bug (low-medium): a flight's hold is a
-  plain `paused = true`.** `holdForFlight` (resume from the hero, or a launch
+  `clip_cancel_then_tail`). **Found at 03f88d6c, fixed in fbdb7975 (low-medium):
+  a flight's hold was a plain `paused = true`.** `holdForFlight` (resume from the hero, or a launch
   from the home screen, for the 460 ms the picture flies) writes the global
   every pausing surface snapshots as the player's choice, and
   `releaseFlight` unpauses whenever `body.running` and the button is unlit:
@@ -141,14 +146,22 @@ The three models follow the code at 03f88d6c (citations at that commit).
     which then runs behind it (`bug_link_modal_in_flight_runs_behind`);
   - Pause / Space / Period during the flight unpauses (Period frame-steps)
     instead of pausing (`bug_pause_in_flight_lost`).
-  The invariant now holds over `Calm` traces (no pause or pausing overlay
-  while a flight holds; all reduced-motion traces): `inv_calm`,
-  `pause_tap_flips_calm`. Fix: keep the flight's hold out of the player's
-  choice: a helper that, while `flightHeld`, drops the hold and returns the
-  player's choice (`pauseButton.classList.contains("paused")`) for every
-  snapshot and toggle (`openReportModal`, `openRewindScrubber`,
-  `openClipScrubber`, `togglePause`, Period's `!paused` test, netplay's
-  `netFrozeGame`).
+  The fix: `playerPaused()` reads the pause button while a flight holds the
+  game, and `takePlayerPause()` also takes the run state over from the
+  flight; every snapshot and toggle takes it (`openReportModal`,
+  `openRewindScrubber`, `openClipScrubber`, `startClipExport`, `togglePause`,
+  netplay's `netFrozeGame`), and Period asks `playerPaused()`. The model
+  follows it; the invariant holds over every reachable state again
+  (`inv_reachable`, `pause_tap_flips`), and the traces are
+  `regress_overlay_in_flight_runs_behind`,
+  `regress_overlay_in_flight_sticks_paused`,
+  `regress_link_modal_in_flight_runs_behind`, `regress_pause_in_flight_lost`.
+  Tests in `web/tests/run-pause.test.mjs`: "Report a Bug opened mid-flight
+  keeps the game frozen, and closing it runs it (bug_overlay_in_flight_runs_behind,
+  bug_overlay_in_flight_sticks_paused)", "Pause pressed mid-flight pauses, and
+  the landing keeps it (bug_pause_in_flight_lost)", "Period mid-flight pauses
+  rather than stepping the held game". The Link Cable case
+  (`netplay.js`) has the model's regression only, no browser test.
 
 The rest of this file is the original audit, as found at dd7ba741f.
 
