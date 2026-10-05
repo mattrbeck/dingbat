@@ -2393,8 +2393,12 @@ const probeDriveBroker = async () => {
 // this device is back on popups).
 let driveBrokerRetryAt = 0;
 let driveRefreshInFlight = null;
+// A refresh token is used only for the account it was granted for. One kept
+// from before refreshAcct existed has none recorded and is trusted as before.
+const driveRefreshUsable = () => !!syncState.refresh &&
+  (syncState.refreshAcct == null || syncState.refreshAcct === syncState.acct);
 const driveRefreshSilently = ({ force = false } = {}) => {
-  if (!syncState.refresh || !driveBrokerBase()) return Promise.resolve(false);
+  if (!driveRefreshUsable() || !driveBrokerBase()) return Promise.resolve(false);
   if (!force && Date.now() < driveBrokerRetryAt) return Promise.resolve(false);
   driveRefreshInFlight ??= (async () => {
     const rt = syncState.refresh;
@@ -2519,13 +2523,14 @@ const driveCodeGrant = async (hint, { connect = false } = {}) => {
   if (status !== 200 || !j?.access_token) {
     throw new Error("Google sign-in failed" + (j?.error ? ": " + j.error : ""));
   }
+  // Whose grant this is, learned before anything is adopted. A re-grant
+  // for the linked account can come back as another (the consent screen
+  // lets the person pick), and the next sync would write this library into
+  // that account's Drive (bug_consent_regrant_crosses_accounts). A sign-in's
+  // is kept beside its refresh token (refreshAcct).
+  let sub = await driveTokenSub(j.access_token);
   if (connect) driveSession++;
   else {
-    // A re-grant for the linked account, but the consent screen lets the
-    // person pick another: whose grant it is is learned before anything is
-    // adopted, or the next sync writes this library into that account's
-    // Drive (bug_consent_regrant_crosses_accounts).
-    let sub = await driveTokenSub(j.access_token);
     if (!syncState.connected || issued !== driveSession) {
       throw new Error("Signed out of Google Drive");
     }
@@ -2540,6 +2545,8 @@ const driveCodeGrant = async (hint, { connect = false } = {}) => {
   // Replaced even when none came back: one kept from before may belong to
   // another account.
   syncState.refresh = j.refresh_token || null;
+  // "" when the account could not be learned: such a token is never used.
+  syncState.refreshAcct = sub || "";
   driveBrokerRetryAt = 0;
   await saveSyncState();
 };
@@ -3084,6 +3091,9 @@ const loadSyncState = async () => {
       tokenExp: typeof s.tokenExp === "number" ? s.tokenExp : 0,
       // Refresh token from the broker's code exchange (driveCodeGrant).
       refresh: typeof s.refresh === "string" ? s.refresh : null,
+      // The account the refresh token was granted for; null when it was
+      // stored before this was kept (driveRefreshUsable).
+      refreshAcct: typeof s.refreshAcct === "string" ? s.refreshAcct : null,
       // No consent screen offered before this (driveWantsUpgrade).
       upgradeRestUntil: typeof s.upgradeRestUntil === "number" ? s.upgradeRestUntil : 0,
       email: typeof s.email === "string" ? s.email : null,
@@ -5263,6 +5273,11 @@ const gdriveConnect = async () => {
   } finally {
     driveConnecting--;
   }
+  // The refresh token the broker sign-in stored is another account's than
+  // the one confirmed (a re-grant swapped the token meanwhile): dropped, or
+  // every silent renewal would fetch that account's token with this one
+  // loaded (bug_refresh_token_outlives_its_account).
+  if (syncState.refresh && acct && syncState.refreshAcct !== acct) syncState.refresh = null;
   // Whose token this is could not be learned, and another account's queued
   // work, tombstones and renames are what is loaded: syncing now could send
   // them to this one. Better to ask again.
@@ -5335,7 +5350,7 @@ const driveTokenStale = () =>
 // a refresh token and the broker has not just failed; else on a gesture.
 const armDriveRenewOnGesture = () => {
   if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
-  if (syncState.refresh && driveBrokerBase() && Date.now() >= driveBrokerRetryAt) {
+  if (driveRefreshUsable() && driveBrokerBase() && Date.now() >= driveBrokerRetryAt) {
     renewDriveToken({ gesture: false });
     return;
   }
