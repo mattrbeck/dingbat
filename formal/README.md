@@ -20,7 +20,7 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 | `Handoff` | picking a game up on another device: the session on Drive, the hold-back, the pull's hand-off and Switch, the hero's picture, the checkpoints; Matt's fourteen steps |
 | `RunPause` | `paused`, pausing overlays, clip export, picture flights, remote pause, Screen Wake Lock, AudioContext |
 | `SavePersistence` | `rom.sav` ↔ `save:<game>`, persistSave, auto-state, checkpoints, the hero's Resume, slots, reset, import |
-| `DriveSession` | token renewal, sign in/out, the upload queue, the sync lamp |
+| `DriveSession` | token renewal (popup and refresh-token broker), sign in/out, the upload queue, the sync lamp |
 | `DriveLibrary` | mergeLibrary algebra, tombstones, renames, pull/flush commits across two devices |
 | `Thumbnails` | storeLastFrame, grid picture fetches, object URLs, the picture batch |
 | `Modals` | the focus trap, promise-returning prompts, the clip export's progress panel |

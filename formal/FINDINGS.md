@@ -63,7 +63,9 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
 - The merge is idempotent on every input, rename markers included
   (`DriveLibrary.merge_idem`).
 - No sync crosses a sign-out or an account switch
-  (`DriveSession.Session.Safe`).
+  (`DriveSession.Session.Safe`). Since the token broker this needs every
+  grant a sign-in did not ask for to be the loaded account's: see the
+  2026-10-05 re-audit at the end of this file.
 - `save:<g>` only ever holds game g's battery
   (`SavePersistence.provenance`).
 - The run/pause invariant holds for every event
@@ -347,7 +349,8 @@ Each file lists its theorems. The headline ones:
   paint nothing; object URLs are revoked at most once and never while on
   screen; nothing leaks.
 - **Drive:** at most one sync job runs at a time; a failed upload stays queued;
-  renewal attempts never outnumber user gestures (so the old offline microtask
+  popup renewals never outnumber user gestures, and every broker renewal is
+  paid for by an armDriveRenewOnGesture call no renewal makes (so the old offline microtask
   loop cannot recur); the lamp is not spinning when the queue is quiet.
   Tombstones are never invented, and the Drive lost-update race only delays a
   tombstone, never loses it. `renameGame`'s key move is atomic. The merge is
@@ -435,6 +438,8 @@ state: a key saved again or deleted while the flush sends others is on
 Drive with its newest bytes, or off it, after the next flush. The library
 is no longer written when the merge leaves its text unchanged
 (`libraryUnchanged`); `DriveLibrary`'s anchors were stale before this.
+Both Drive models were re-modelled against the parallel code on 2026-10-05
+(below).
 
 **Abstractions:** listed in the file's header. Bytes are opaque (compression
 is invisible here), one game, both devices hold its ROM, loads are atomic.
@@ -525,3 +530,42 @@ delete is queued (6dd57564, which the model had not followed).
   (`DriveLibrary`'s, not modelled here). Fix: the model's fix (2), a
   synchronous set of names a delete or rename has retired, checked in the
   pull's write segment.
+
+## Re-audit of the Drive models (2026-10-05, 03f88d6c, `WebState/DriveLibrary`, `WebState/DriveSession`)
+
+Both models follow the code at 03f88d6c again: the token broker (92c9e49c,
+6961bab6, b7ddc0be), the parallel flush and prefetching pull (da1d7c55),
+driveFetch's 429/5xx retries (fdc02cf1), the unchanged library left unwritten
+(`libraryUnchanged`), `runFullSync` saving the game in memory first, and the
+Drive-only tile download (`fetchTileGame`). Every earlier theorem still
+holds, re-proved over the new events, except the cross-account guarantee,
+which now has an assumption and two counterexamples.
+
+**DriveLibrary.** New: `seen` (the library a sync read) and the `flushKeep` /
+`pullKeep` paths that skip the write. A skip never changes Drive and, when
+Drive still holds what was read, is the write (`keep_leaves_drive`,
+`keep_eq_write`); in `race_delays_tomb`'s lost update a flush whose merge
+added nothing now leaves the other device's tombstone in place
+(`keep_spares_newer_write`). The parallel upload pass, the ROM skip and the
+download prefetch change no library behaviour (header).
+
+**DriveSession.** The `Session` model now has the refresh token, the broker's
+shared refresh, the consent screen (as a renewal's upgrade, a sign-in, and
+driveFetch's 401 re-grant), armDriveRenewOnGesture's broker path and
+armDriveRenewListener, and the retries. Proved: a signed-out tab sends
+nothing, now with no assumption (`send_only_signed_in`); popup renewals never
+outnumber gestures, every broker renewal is paid for by an
+armDriveRenewOnGesture call that no renewal, refresh or grant makes
+(`silent_le_arms`, `renewal_never_arms`); one GIS request and one refresh,
+no orphaned waiter. `no_cross_account` and `active_is_own_account` hold in
+every reachable state where no grant a sign-in did not ask for was adopted
+for another account (the ghost `stray`); both ways one can be are reachable:
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| D1 | Medium (real, needs the person to pick another account) | **A consent re-grant can bring another account's token into the running session** (`bug_consent_regrant_crosses_accounts`, `bug_consent_renewal_crosses_accounts`). A popup-flow device (no refresh token) once the broker answers: an upload's 401 with activation, or the first tap (the upgrade), opens Google's consent screen through `driveRegrantPopup` -> `driveCodeGrant`, hinted with the loaded account. If the person ends up granting another account (the hinted one is not signed in to Google in this browser and they sign in with another), `driveCodeGrant` checks only that the session is the one that asked (2519-2522) and adopts that account's token and refresh token without a new session or an account check. The running flush replays and writes on with it; on driveFetch's path nothing ever calls gdriveFetchEmail, so the loaded account's queues, tombstones and library keep syncing into the other account's Drive, and renewals keep refreshing the other grant. | In `driveCodeGrant`, for a re-grant (`connect` false), learn the granted account (tokeninfo on `j.access_token`) before adopting anything, re-check the session after that await, and refuse (no token, no refresh token stored) when its `sub` is not `syncState.acct`. |
+| D2 | Very low | **A broker refresh started during a sign-in that is then refused adopts that sign-in's account** (`bug_refresh_of_refused_signin`). Two sign-ins at once (the first finishes as account 1; the second's grant, account 2, lands and stores its refresh token); a refresh starts in that session (a Drive-only tile's ensureDriveSignedIn); the second sign-in's tokeninfo fails and it is refused (5224-5228) without a new session, so the refresh lands as current and account 2's token is adopted with account 1 loaded and nothing identifying. | `driveSession++` in gdriveConnect's refusal branch, so anything that started during the refused sign-in is stale when it answers. |
+
+Still open from before: `bug_spinner_without_work` /
+`bug_spinner_after_renewal` (now only without a refresh token or with the
+broker down) and `bug_one_popup_two_strikes` (popup flow only).
