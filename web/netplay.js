@@ -202,7 +202,8 @@ const openNetConnect = async (attach) => {
   // Freeze the game for the whole of code entry, pairing and transfer: left
   // running, its own link handshake times out before the peer connects.
   // Thawed by netShutdown or when the session starts.
-  netFrozeGame = !!currentRomName && !paused;
+  // The player's choice, not a flight's hold (takePlayerPause, index.js).
+  netFrozeGame = !!currentRomName && !takePlayerPause();
   if (netFrozeGame) {
     paused = true;
     document.body.classList.add("paused");

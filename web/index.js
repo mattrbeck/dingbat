@@ -9223,7 +9223,7 @@ reportSlider.addEventListener("input", updateReportPreview);
 
 const openReportModal = () => {
   menuDropdown.hidden = true;
-  reportWasPaused = paused;
+  reportWasPaused = takePlayerPause();
   // Freeze so the strip stays the ring's contents (samples are addressed
   // by snapshot ID, so an evicted one goes blank rather than sliding).
   paused = true;
@@ -9824,7 +9824,7 @@ const openRewindScrubber = () => {
   if (!rewindOn) return;   // no ring, so the strip would only ever be empty
   if (!currentOriginalName || !speedControlsOk()) return;
   if (typeof Module === "undefined" || !Module._wasm_rewind_scrub_generate) return;
-  rwWasPaused = paused;
+  rwWasPaused = takePlayerPause();
   // Freeze the core so the ring stays what the strip shows.
   paused = true;
   rwStage = 0;
@@ -12062,6 +12062,13 @@ document.addEventListener("drop", (e) => {
   e.preventDefault();
   dragCounter = 0;
   dropOverlay.classList.remove("visible");
+  // A recording clip owns the machine, as for every other control; a file
+  // check's prompt over its panel lost the focus trap when both closed
+  // (bug_drop_during_clip_export_loses_focus).
+  if (clipReplayActive) {
+    if (e.dataTransfer.files?.length > 0) showToast("Finish or cancel the clip first");
+    return;
+  }
   if (e.dataTransfer.files?.length > 0) handleDroppedFile(e.dataTransfer.files[0]);
 });
 
@@ -12073,7 +12080,7 @@ const showPauseChoice = (on) => {
   document.body.classList.toggle("paused", on);
 };
 const togglePause = (fromRemote) => {
-  paused = !paused;
+  paused = !takePlayerPause();
   if (paused) storeLastFrame({ force: true }); // the paused picture is the library's
   showPauseChoice(paused);
   // Linked online, pause freezes both sides (a one-sided pause stalls the
@@ -12608,7 +12615,7 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
   clipReplayActive = true;
   clipEncodeActive = webcodecs;
   clipTotalFrames = frames;
-  clipExportWasPaused = paused;
+  clipExportWasPaused = takePlayerPause();
   paused = false; // the replay must run even if the game was paused
   setNativeAudio(true);
   document.body.classList.add("clip-replaying");
@@ -12884,7 +12891,7 @@ const openClipScrubber = () => {
     return;
   }
   if (clipReplayActive) return;
-  clipWasPaused = paused;
+  clipWasPaused = takePlayerPause();
   // Freeze the core so the anchors cannot age out from under the markers.
   paused = true;
   clipStrip.release();
@@ -13277,7 +13284,7 @@ const shortcutKeyHandler = (e, down) => {
       // Frame advance: first press pauses, further presses step one frame.
       // Single-core only.
       if (e.shiftKey || !currentRomName || !gameShown || !speedControlsOk()) break;
-      if (!paused) {
+      if (!playerPaused()) {
         if (!e.repeat) pauseButton.click();
       } else {
         frameAdvance();
@@ -14140,6 +14147,18 @@ const powerOn = (rect) => {
 // Holding the game for a flight, and letting it go. `flightHeld` is only ours:
 // a pause the player makes meanwhile is theirs and is kept.
 let flightHeld = false;
+// Whether the PLAYER has the game paused. While a flight holds the game,
+// `paused` is the flight's, not a choice: it is the pause button that says.
+const playerPaused = () => (flightHeld ? pauseButton.classList.contains("paused") : paused);
+// The same, for a surface that takes the run state over (an overlay that
+// pauses and gives back, a toggle): it takes it from the flight too, so the
+// flight's landing lets go of nothing it no longer holds
+// (bug_overlay_in_flight_*, bug_pause_in_flight_lost, bug_link_modal_in_flight_*).
+const takePlayerPause = () => {
+  const p = playerPaused();
+  flightHeld = false;
+  return p;
+};
 const holdForFlight = () => {
   flightHeld = true;
   paused = true;

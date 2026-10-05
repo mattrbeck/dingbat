@@ -256,3 +256,55 @@ test("Tab on the home screen is the page's, before the runtime's key grab", asyn
   app.document.body.classList.add("running");
   assert.equal(await tab(), false, "in the game view Tab stays the game's (fast-forward)");
 });
+
+// --- A picture flight's hold -------------------------------------------------
+// A hero Resume or a launch from home holds the game (`paused`) for the
+// ~460 ms its picture flies; that hold is not the player's pause, so a
+// surface opened or a pause pressed during it must not take it for one.
+
+const flying = async (extra = "") => {
+  const app = await inGame(extra);
+  app.runIn("holdForFlight()");
+  assert.equal(paused(app), true, "the flight holds the game");
+  return app;
+};
+
+test("Report a Bug opened mid-flight keeps the game frozen, and closing it runs it " +
+     "(bug_overlay_in_flight_runs_behind, bug_overlay_in_flight_sticks_paused)", async () => {
+  const app = await flying();
+  app.runIn("openReportModal()");
+  app.runIn("releaseFlight()");                      // the picture lands
+  assert.equal(paused(app), true, "the game must not run behind the report");
+  app.runIn("closeReportModal()");
+  assert.equal(paused(app), false, "closing it gives back the player's choice: running");
+  assert.equal(icon(app), "Pause");
+});
+
+test("Pause pressed mid-flight pauses, and the landing keeps it (bug_pause_in_flight_lost)",
+  async () => {
+    const app = await flying();
+    await key(app, "Space");
+    app.runIn("releaseFlight()");
+    assert.equal(paused(app), true, "the player paused");
+    assert.equal(icon(app), "Resume");
+  });
+
+test("Period mid-flight pauses rather than stepping the held game", async () => {
+  const app = await flying(`
+    globalThis.__ticks = 0;
+    globalThis.Module = { _loop_tick: () => { __ticks++; } };
+  `);
+  await key(app, "Period");
+  assert.equal(app.runIn("__ticks"), 0, "the first press is a pause, not a step");
+  app.runIn("releaseFlight()");
+  assert.equal(paused(app), true);
+  assert.equal(icon(app), "Resume");
+});
+
+test("a file dropped while a clip records is refused (bug_drop_during_clip_export_loses_focus)",
+  async () => {
+    const app = await inGame("clipReplayActive = true;");
+    await app.dispatchDoc("drop", { dataTransfer: { files: [{ name: "x.sav" }] } });
+    assert.ok(app.toasts.includes("Finish or cancel the clip first"));
+    assert.deepEqual(app.alerts, [], "no import (or its prompts) starts over the panel");
+  });
