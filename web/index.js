@@ -2520,8 +2520,21 @@ const driveCodeGrant = async (hint, { connect = false } = {}) => {
     throw new Error("Google sign-in failed" + (j?.error ? ": " + j.error : ""));
   }
   if (connect) driveSession++;
-  else if (!syncState.connected || issued !== driveSession) {
-    throw new Error("Signed out of Google Drive");
+  else {
+    // A re-grant for the linked account, but the consent screen lets the
+    // person pick another: whose grant it is is learned before anything is
+    // adopted, or the next sync writes this library into that account's
+    // Drive (bug_consent_regrant_crosses_accounts).
+    let sub = await driveTokenSub(j.access_token);
+    if (!syncState.connected || issued !== driveSession) {
+      throw new Error("Signed out of Google Drive");
+    }
+    if (syncState.acct && sub !== syncState.acct) {
+      throw new Error(sub
+        ? "That's a different Google account — choose " +
+          (syncState.email || "the one this library is linked to")
+        : "Couldn't confirm which Google account signed in — try again");
+    }
   }
   adoptGrantedToken(j);
   // Replaced even when none came back: one kept from before may belong to
@@ -2556,6 +2569,18 @@ const driveRegrantPopup = async () => {
     saveSyncState();
   }
   if (failure) throw new DriveUpgradeDeclined(failure.message);
+};
+
+// The account a token was granted for (tokeninfo's `sub`), or null when it
+// could not be learned. Adopts nothing.
+const driveTokenSub = async (tok) => {
+  try {
+    let res = await fetch("https://oauth2.googleapis.com/tokeninfo?access_token=" +
+                          encodeURIComponent(tok));
+    if (!res.ok) return null;
+    let info = await res.json();
+    return typeof info.sub === "string" ? info.sub : null;
+  } catch { return null; }
 };
 
 // Works because GDRIVE_SCOPE includes "email".
@@ -5244,6 +5269,10 @@ const gdriveConnect = async () => {
   if (!acct && syncState.acct) {
     syncState.refresh = null;
     clearDriveToken();
+    // A session of its own ends with it: a refresh it started (a Drive-only
+    // tile's ensureDriveSignedIn) would otherwise land as current and adopt
+    // the refused account's token (bug_refresh_of_refused_signin).
+    driveSession++;
     throw new Error("Couldn't confirm which Google account signed in — try again");
   }
   driveSession++; // a new session, whichever account it is
