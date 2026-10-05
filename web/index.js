@@ -2559,7 +2559,9 @@ const driveCodeGrant = async (hint, { connect = false } = {}) => {
 const DRIVE_UPGRADE_REST_MS = 24 * 60 * 60 * 1000;
 class DriveUpgradeDeclined extends Error {}
 const driveWantsUpgrade = () =>
-  !!GDRIVE_CLIENT_ID && !!syncState.connected && !syncState.refresh &&
+  // Not "no refresh token": one this device may not use (another
+  // account's, or of unknown account) leaves it on popups, so it is offered.
+  !!GDRIVE_CLIENT_ID && !!syncState.connected && !driveRefreshUsable() &&
   driveBrokerOk && !!driveBrokerBase() &&
   Date.now() >= (syncState.upgradeRestUntil || 0);
 
