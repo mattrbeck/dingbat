@@ -16,14 +16,14 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 
 | File | Machine |
 |---|---|
-| `GameLifecycle` | launchRom / loadRom / resumeGame / unloadGame, paused card, resume toast |
+| `GameLifecycle` | launchRom / loadRom / resumeGame / unloadGame, the hero, resume toast and resuming launches, the hand-off's unload, checkpoints |
 | `Handoff` | picking a game up on another device: the session on Drive, the hold-back, the pull's hand-off and Switch, the hero's picture; Matt's fourteen steps |
-| `RunPause` | `paused`, pausing overlays, remote pause, Screen Wake Lock, AudioContext |
+| `RunPause` | `paused`, pausing overlays, clip export, picture flights, remote pause, Screen Wake Lock, AudioContext |
 | `SavePersistence` | `rom.sav` ↔ `save:<game>`, persistSave, auto-state, slots, reset, import |
 | `DriveSession` | token renewal, sign in/out, the upload queue, the sync lamp |
 | `DriveLibrary` | mergeLibrary algebra, tombstones, renames, pull/flush commits across two devices |
 | `Thumbnails` | storeLastFrame, grid picture fetches, object URLs, the picture batch |
-| `Modals` | the focus trap, promise-returning prompts |
+| `Modals` | the focus trap, promise-returning prompts, the clip export's progress panel |
 | `Netplay` | web/netplay.js signaling, redial ladder, channel race, rollback entry/exit |
 | `ServiceWorker` | update check, web/sw.js install/activate/fetch, reload on controllerchange |
 

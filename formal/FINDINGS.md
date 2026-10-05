@@ -67,7 +67,7 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
 - `save:<g>` only ever holds game g's battery
   (`SavePersistence.provenance`).
 - The run/pause invariant holds for every event
-  (`RunPause.inv_reachable`).
+  (`RunPause.inv_reachable`; at 03f88d6c `RunPause.inv_calm`, see below).
 
 **Still open, all low:**
 - The Drive spinner with no token and pending work, and one denied popup
@@ -104,6 +104,51 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
   this change touched: re-model them at the next audit. Kept aside, not
   lost: a new file an old build (no generation stamp) creates for a
   re-imported game, until that device's service worker updates.
+
+## Re-audit at 03f88d6c (2026-10-05): GameLifecycle, RunPause, Modals
+
+The three models follow the code at 03f88d6c (citations at that commit).
+
+- **GameLifecycle.** The paused card is the hero's paused mode (it stays up,
+  stale but inert, after a close until the library re-renders); a launch from
+  the home screen can go back into the session at the boot (`launchRom`'s
+  `resume`: the session read before `touchRecent`, applied in L4 only if taken
+  with the battery just installed); going home stores the session and the
+  save and dismisses the Resume offer; a hidden tab stores the save too; the
+  pull's hand-off lets the game in memory go (no flush, only when its live
+  battery is the stored save) and lands Drive's save; checkpoints store the
+  session every minute of play. Every property still holds over every
+  interleaving; new: `boot_resume_keeps_battery`, `handoff_drops_only_stored`.
+- **Modals.** The clip export's progress panel is a trap owner that closes
+  itself when the export ends. Without nesting it returns focus where it was
+  (`single_progress_returns`). With the known nested-trap class, a new
+  instance: `bug_drop_during_clip_export_loses_focus` (low; a file failing
+  the ROM check dropped during an export, Cancel, then the export ends: focus
+  on `<body>`).
+- **RunPause.** The off-screen export: Cancel and a load landing mid-encode
+  both restore `paused` once, and the encode's tail does not touch it again
+  (`clip_cancel_restores_pause`, `clip_load_mid_encode`,
+  `clip_cancel_then_tail`). **New bug (low-medium): a flight's hold is a
+  plain `paused = true`.** `holdForFlight` (resume from the hero, or a launch
+  from the home screen, for the 460 ms the picture flies) writes the global
+  every pausing surface snapshots as the player's choice, and
+  `releaseFlight` unpauses whenever `body.running` and the button is unlit:
+  - an overlay opened during the flight (Rewind double-tap, Report a Bug,
+    Clip that!) records the flight's pause; the landing runs the game behind
+    it, and closing it freezes the game under a Pause icon
+    (`bug_overlay_in_flight_runs_behind`, `bug_overlay_in_flight_sticks_paused`);
+  - the Link Cable modal opened during the flight does not freeze the game,
+    which then runs behind it (`bug_link_modal_in_flight_runs_behind`);
+  - Pause / Space / Period during the flight unpauses (Period frame-steps)
+    instead of pausing (`bug_pause_in_flight_lost`).
+  The invariant now holds over `Calm` traces (no pause or pausing overlay
+  while a flight holds; all reduced-motion traces): `inv_calm`,
+  `pause_tap_flips_calm`. Fix: keep the flight's hold out of the player's
+  choice: a helper that, while `flightHeld`, drops the hold and returns the
+  player's choice (`pauseButton.classList.contains("paused")`) for every
+  snapshot and toggle (`openReportModal`, `openRewindScrubber`,
+  `openClipScrubber`, `togglePause`, Period's `!paused` test, netplay's
+  `netFrozeGame`).
 
 The rest of this file is the original audit, as found at dd7ba741f.
 

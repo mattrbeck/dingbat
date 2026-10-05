@@ -1,42 +1,57 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/index.js: abortRetroClip closeClipScrubber closeReportModal closeRewindScrubber emulationActive finishRetroClip launchRom loadRom resumeGame shortcutKeyHandler showMainMenu startClipExport syncWakeLock togglePause unloadGame on:visibilitychange on:pointerup
+-- @models web/index.js: abortRetroClip clipEncode closeClipScrubber closeReportModal closeRewindScrubber emulationActive endClipExport finishRetroClip holdForFlight launchRom loadRom openClipScrubber openReportModal openRewindScrubber releaseFlight resumeFromHero resumeGame shortcutKeyHandler showMainMenu startClipExport syncWakeLock takePendingFlight togglePause unloadGame on:visibilitychange on:pointerup
 -- @models web/netplay.js: acquireWakeLock closeNetModal netDismissModal netFail netShutdown openNetConnect rbConnect rbStartIfReady rbTeardown releaseWakeLock
 
 /-
 # Run/pause state of the emulator (web/index.js, web/netplay.js)
 
-Written against dd7ba741f. `step` now models the code as fixed on this branch
-(`git log -- formal/WebState/RunPause.lean`): "web: a pause is only ever
-undone by whoever holds it", dad5ede17 (loadRom closes Report a Bug and the
-Link Cable modal), and "web: the game keys act in the game view only; a load
-ends a capture begun during it", at whose index.js the line numbers are.
+Written against dd7ba741f, then remodelled at 03f88d6c (line numbers below are
+index.js at that commit; netplay.js's have not moved since dd2221ea). At
+03f88d6c the clip export runs off screen behind a progress panel, and the
+game's picture flies between the home screen and the screen, holding the
+game while it does.
 
-The core steps in the rAF `tick` (index.js 11493) iff `!paused` and a game is
+The core steps in the rAF `tick` (index.js 16071) iff `!paused` and a game is
 loaded; rAF does not fire while the tab is hidden. So "running" is
 `loaded && !paused && visible`, and every pausing surface works by writing the
-one global `paused` (index.js 7854). The writers are:
+one global `paused` (index.js 11528). The writers are:
 
-* the pause button / Space / Period       -> `togglePause`      (8356)
-* the peer, in a rollback session         -> `applyRemotePause` (8370)
+* the pause button / Space / Period       -> `togglePause`      (12063)
+* the peer, in a rollback session         -> `applyRemotePause` (12077)
 * Report a Bug, the rewind scrubber, the clip range picker: each snapshots
   `paused` into its own `*WasPaused` on open and writes it back on close
-  (5953/5984, 6462/6494, 8865/8909)
-* the home screen                         -> `showMainMenu` / `resumeGame` (9517/9532)
+  (9212/9243, 9810/9842, 12812/12856)
+* the home screen                         -> `showMainMenu` / `resumeGame` (13474/13503)
 * the Link Cable modal                    -> `netFrozeGame` (netplay.js 200, 1556)
-* a clip export's replay                  -> `startClipExport` snapshots `paused` into
-  `clipExportWasPaused` and sets `paused = false` (8620-8621); `finishRetroClip`
-  writes it back (8533)
-* `loadRom` (8029), `unloadGame` (9819), `enterRollbackMode` (9419),
-  `launchNetRom` (netplay.js 1436), `rbConnect` (1146).
+* a clip export                           -> `startClipExport` snapshots `paused` into
+  `clipExportWasPaused` and sets `paused = false` (12545-12546); `endClipExport`
+  writes it back (12323). `endClipExport` runs from `finishRetroClip` (12333:
+  the realtime recorder's end in the tick, 16171), from `abortRetroClip`
+  (12343, via `finishRetroClip(false)`: the progress panel's Cancel 12564,
+  `loadRom`, a failed start), and from the WebCodecs encode's `finally`
+  (`clipEncode` 12440-12523, at 12520), guarded there by the export generation
+  `clipExportGen` (12233) and `clipReplayActive`: the encode awaits between
+  frame batches (12498), and a Cancel or a load landing in one of those awaits
+  has already restored `paused`, so the encode's tail returns without touching it
+* a flight (`holdForFlight` 14073 / `releaseFlight` 14078, `flightHeld` 14072):
+  the hero's Resume (`resumeFromHero` 14107) and a launch from the home screen
+  (`loadRom` -> `takePendingFlight` 11747 / 14130) set `paused = true` while the
+  picture flies (`FLIGHT_MS` 460, 13981); the flight's end (or the launch's
+  2.5 s safety timer, 14137) sets `paused = false` again if `body.running` and
+  the pause button is not lit; `showMainMenu` (13482) and `unloadGame` (14199)
+  release it first
+* `loadRom` (11726), `unloadGame` (14200), `enterRollbackMode` (13366),
+  `launchNetRom` (netplay.js 1436), `rbConnect` (1146), and
+  `updateForNewerState` (7877, which then reloads the page: not modelled).
 
 The pause button's icon/title (`#pause.paused`, title "Resume") is `lit`.
 There is no separate "the user's own pause choice" variable: `lit` is the
 closest thing (only `togglePause` and `applyRemotePause` set it from a pause
 choice), so the properties are stated against it.
 
-The Screen Wake Lock (index.js 7871-7907) is re-synced on every rAF tick
-(11497) and on `visibilitychange`; its `request()` is an await (the `.then` at
-7885 is a separate event). netplay.js keeps a second, independent wake lock
+The Screen Wake Lock (index.js 11548-11581) is re-synced on every rAF tick
+(16075) and on `visibilitychange`; its `request()` is an await (the `.then` at
+11559 is a separate event). netplay.js keeps a second, independent wake lock
 for the Link Cable modal (`acquireWakeLock`, netplay.js 941-956), also behind
 an await.
 
@@ -44,28 +59,42 @@ an await.
 
 * 2P local link (`linkMode`) and the SIO online path (`netMode`, `launchNetRom`)
   are not modelled; `rb` is the rollback session (`rollbackMode`), whose
-  `currentRomName` stays set, so `rb -> loaded`. `emulationActive` (7876) is
+  `currentRomName` stays set, so `rb -> loaded`. `emulationActive` (11550) is
   `loaded && !paused`. `rbConnect`'s `paused = true` (netplay.js 1146) happens
   while the Link Cable modal already froze the game, so it is not an event.
 * One ROM identity: `loaded` = `!!currentRomName`. `loadRom` is two events:
-  its first segment (`loadStart`: `abortRetroClip`, 7978), which a call makes
-  at any time, and its synchronous commit (`loadRom`, 8007-8049), which may
+  its first segment (`loadStart`: `abortRetroClip`, 11657), which a call makes
+  at any time, and its synchronous commit (`loadRom`, 11680-11748, after the `dbGet` at 11679), which may
   land at any later time outside a rollback session (a drop on `document`,
-  8397, has no modal guard; a Drive download or IndexedDB read in flight
-  under `launchRom`/a tile tap lands whenever it lands; `abandoned()`, 7976,
+  12049, has no modal guard; a Drive download or IndexedDB read in flight
+  under `launchRom`/a tile tap lands whenever it lands; `abandoned()`, 11655,
   drops it in a session). A commit with no `loadStart` before it only adds
-  behaviours. The session teardown between them (7984) is `netEnd`.
-* `unloadGame`'s final synchronous segment (9812-9834) is one event, enabled
-  whenever a single-core game is loaded (its awaits let it land late).
+  behaviours. The session teardown between them (11664) is `netEnd`. A commit
+  that ends in `takePendingFlight`'s hold is `loadRomFly`.
+* `unloadGame`'s final synchronous segment (14192-14216) is one event, enabled
+  whenever a single-core game is loaded (its awaits let it land late; a
+  hand-off's Switch toast, z-index 600 over the progress panel's 500, can
+  start one during a clip export).
 * `netShutdown`'s post-await tail (`closeNetModal`, netplay.js 1610) is folded
   into its first segment; nothing in the tail touches `paused`/`lit`.
 * Non-pausing modals (settings, save states, cheats...) are not modelled: they
   never write `paused`, and while one is open the pause button is covered too.
 * User input (taps, keys) requires `visible`; network and timer events do not.
   The tick (and `finishRetroClip` inside it) requires `visible`: rAF stops.
-  During a clip export's replay every control is inert (`body.clip-replaying`,
-  styles.css 7462-7468: the playback controls and the menu) and
-  `shortcutKeyHandler` ignores keys (9183), so no tap, key or menu item fires.
+  The WebCodecs encode is timer-driven and may end while hidden, so the
+  export's end (`clipDone`) is enabled whenever a replay runs; both ends set
+  the same state. During a clip export every control is inert
+  (`body.clip-replaying`, styles.css 8645-8649), the progress panel covers the
+  page and holds the focus trap, and `shortcutKeyHandler` ignores keys
+  (13130), so the panel's Cancel (`clipCancel`) is the only control.
+  A stale encode's tail never ends a later export (`clipExportGen`); ending
+  a running export early is the same transition as its normal end, so the
+  generation is not a field.
+* A flight lasts the animation (460 ms) after `resumeGame` or the boot. The
+  model lets its end (`flightEnd`) land at any time while it holds.
+  `resumeFly` is the hero's Resume with motion allowed (`canFly`: Web
+  Animations, no `prefers-reduced-motion`); `resume` is the same tap without
+  a flight. `body.running` is `loaded && !home`.
 * Wake-lock grants follow the Screen Wake Lock spec: the grant task checks
   visibility and resolves in the same task, and the `.then` runs in that
   task's microtask checkpoint, so grant + `.then` is one event (`wakeGrant`),
@@ -75,34 +104,48 @@ an await.
   its own reasons (battery). Lock identities are fresh naturals.
 * Audio: only `audioCtx.state === "running"` (`ctxRunning`); the code does
   not promise to suspend it on pause (see `obs_pause_keeps_audio_context`).
+
+## Results
+
+* `inv_calm`: the run/pause discipline (`Inv`) holds in every state reached
+  without the player pausing or opening a pausing overlay while a flight
+  holds the game (`Calm`; every trace with reduced motion is one).
+* `bug_overlay_in_flight_runs_behind` / `bug_overlay_in_flight_sticks_paused`
+  / `bug_link_modal_in_flight_runs_behind` / `bug_pause_in_flight_lost`: a
+  flight's hold is a plain `paused = true`, so an overlay opened during it
+  snapshots the flight's pause as the player's, the flight's end then runs
+  the game behind it, and closing it leaves the game frozen under a Pause
+  icon; a pause tap or Space during it unpauses instead.
+* The wake-lock and Link Cable lock results hold in every reachable state.
 -/
 namespace WebState.RunPause
 
 /-- The run/pause part of the state. -/
 structure Pz where
-  loaded     : Bool   -- !!currentRomName (index.js 7837)
-  rb         : Bool   -- rollbackMode (enterRollbackMode 9409)
-  paused     : Bool   -- paused (7854)
+  loaded     : Bool   -- !!currentRomName (index.js 11511)
+  rb         : Bool   -- rollbackMode (enterRollbackMode 13355)
+  paused     : Bool   -- paused (11528)
   lit        : Bool   -- pauseButton.classList "paused"/"active" + title "Resume"
-  home       : Bool   -- a loaded game with body.running removed (showMainMenu 9517)
+  home       : Bool   -- a loaded game with body.running removed (showMainMenu 13474)
   report     : Bool   -- reportModal.classList "open"
-  reportWas  : Bool   -- reportWasPaused (5892)
+  reportWas  : Bool   -- reportWasPaused (9151)
   rw         : Bool   -- rewindModal.classList "open"
-  rwWas      : Bool   -- rwWasPaused (6383)
+  rwWas      : Bool   -- rwWasPaused (9731)
   clip       : Bool   -- clipModal.classList "open"
-  clipWas    : Bool   -- clipWasPaused (8655)
+  clipWas    : Bool   -- clipWasPaused (12601)
   netModal   : Bool   -- netModal.classList "open" (netplay.js)
   netFroze   : Bool   -- netFrozeGame (netplay.js 172)
-  replay     : Bool   -- clipReplayActive (8514)
-  exportWas  : Bool   -- clipExportWasPaused (8517)
+  replay     : Bool   -- clipReplayActive (12229), with the progress panel open
+  exportWas  : Bool   -- clipExportWasPaused (12236)
+  flight     : Bool   -- flightHeld (14072)
 
 /-- The page-lifecycle, wake-lock and audio part of the state. -/
 structure Wk where
   visible    : Bool          -- document.visibilityState === "visible"
   bfcache    : Bool          -- between pagehide and pageshow
   ctxRunning : Bool          -- audioCtx.state === "running"
-  sentinel   : Option Nat    -- wakeSentinel (7874)
-  requesting : Bool          -- wakeRequesting (7875) = the request's .then is pending
+  sentinel   : Option Nat    -- wakeSentinel (11548)
+  requesting : Bool          -- wakeRequesting (11549) = the request's .then is pending
   netLock    : Option Nat    -- screenLock (netplay.js 940)
   netPending : Nat           -- acquireWakeLock() continuations in flight (netplay.js 941)
   idxLocks   : List Nat      -- UA-held screen locks obtained by syncWakeLock
@@ -118,43 +161,49 @@ def init : State :=
   { p := { loaded := false, rb := false, paused := false, lit := false, home := false,
            report := false, reportWas := false, rw := false, rwWas := false,
            clip := false, clipWas := false, netModal := false, netFroze := false,
-           replay := false, exportWas := false },
+           replay := false, exportWas := false, flight := false },
     w := { visible := true, bfcache := false, ctxRunning := false, sentinel := none,
            requesting := false, netLock := none, netPending := 0, idxLocks := [],
            netLocks := [], relQ := [], nextId := 0 } }
 
 inductive Event where
-  | pauseTap              -- #pause pointerup/click (8391-8405); hidden on home (styles.css 1110)
-  | pauseKey              -- Space (9217) / Period (9259) -> pauseButton.click(), in the game view
-  | remotePause (on : Bool) -- RB_PAUSE from the peer (netplay.js 1203) -> applyRemotePause (8370)
-  | openReport | closeReport          -- 5953 / 5984
-  | openRw | closeRw                  -- 6462 / 6494
-  | openClip | closeClip              -- 8865 / 8909
-  | clipSave                          -- clipSaveBtn (8918): closeClipScrubber + startClipExport
-  | clipDone                          -- tick -> finishRetroClip(true) (11577 / 8531)
-  | mainMenu | resume                 -- showMainMenu 9517 / resumeGame 9532
-  | loadStart                         -- loadRom's first segment: abortRetroClip (7978)
-  | loadRom                           -- loadRom's commit segment (8007-8049)
-  | unload                            -- unloadGame's final segment (9812-9834)
+  | pauseTap              -- #pause pointerup/click (12100-12112); shown only in the game view (styles.css 1090-1096)
+  | pauseKey              -- Space (13164) / Period (13206) -> pauseButton.click(), in the game view
+  | remotePause (on : Bool) -- RB_PAUSE from the peer (netplay.js 1203) -> applyRemotePause (12077)
+  | openReport | closeReport          -- 9212 / 9243
+  | openRw | closeRw                  -- 9810 / 9842
+  | openClip | closeClip              -- 12812 / 12856
+  | clipSave                          -- clipSaveBtn (12865): closeClipScrubber + startClipExport
+  | clipDone                          -- the export's end: tick -> finishRetroClip(true) (16171 / 12333),
+                                      --   or the encode's finally -> endClipExport (12520 / 12320)
+  | clipCancel                        -- the progress panel's Cancel (12564) -> abortRetroClip (12343)
+  | mainMenu | resume                 -- showMainMenu 13474 / resumeGame 13503
+  | resumeFly                         -- the hero's Resume, flying: resumeFromHero (14107-14114)
+  | loadStart                         -- loadRom's first segment: abortRetroClip (11657)
+  | loadRom                           -- loadRom's commit segment (11680-11748)
+  | loadRomFly                        -- ...ending in takePendingFlight's hold (11747, 14130-14136)
+  | flightEnd                         -- releaseFlight (14078) at the flight's end (14113, 14143)
+                                      --   or the launch's safety timer (14137)
+  | unload                            -- unloadGame's final segment (14192-14216)
   | openNet                           -- openNetConnect after its awaits (netplay.js 176-205)
   | netDismiss                        -- netDismissModal -> netShutdown, pre-session (netplay.js 1614)
   | netFailKeep                       -- netFail pre-session: netShutdown({ keepModal: true }) (netplay.js 235-243)
   | netStart                          -- rbStartIfReady: closeNetModal + enterRollbackMode (netplay.js 1300)
   | netEnd                            -- netShutdown of a session (netplay.js 1546-1567 + rbTeardown)
-  | tabHide | tabShow                 -- visibilitychange (index 7907; netplay.js 958)
-  | tick                              -- rAF tick -> syncWakeLock (11497)
-  | wakeGrant | wakeDeny              -- wakeLock.request(...).then / .catch (7885 / 7897)
+  | tabHide | tabShow                 -- visibilitychange (index 11581; netplay.js 958)
+  | tick                              -- rAF tick -> syncWakeLock (16075)
+  | wakeGrant | wakeDeny              -- wakeLock.request(...).then / .catch (11559 / 11571)
   | netGrant | netDeny                -- acquireWakeLock's await resumes / throws (netplay.js 943)
-  | relFire                           -- a queued "release" event is dispatched (listener 7893)
+  | relFire                           -- a queued "release" event is dispatched (listener 11567)
   | uaRevoke                          -- the UA drops the page's held lock (battery, ...)
-  | pagehide | pageshow | gesture     -- 11397 / 11414 / resumeAudio (11247) on a user gesture
+  | pagehide | pageshow | gesture     -- 15972 / 15992 / resumeAudio (15801) on a user gesture
   deriving DecidableEq, Repr
 
 def anyModal (p : Pz) : Bool := p.report || p.rw || p.clip || p.netModal
 
-/-- emulationActive (7876). -/
+/-- emulationActive (11550). -/
 def active (p : Pz) : Bool := p.loaded && !p.paused
-/-- syncWakeLock's `want` (7880): running and visible. -/
+/-- syncWakeLock's `want` (11554): running and visible. -/
 def want (s : State) : Bool := active s.p && s.w.visible
 
 /-- `s.release()` on a sentinel the page holds: the spec removes it at once and
@@ -164,13 +213,13 @@ def relIdx (w : Wk) (l : Nat) : Wk :=
     { w with idxLocks := w.idxLocks.filter (fun x => x != l), relQ := w.relQ ++ [l] }
   else w
 
-/-- syncWakeLock (7878-7906), its synchronous part. -/
+/-- syncWakeLock (11552-11580), its synchronous part. -/
 def syncW (p : Pz) (w : Wk) : Wk :=
   if active p && w.visible && w.sentinel.isNone && !w.requesting then
-    { w with requesting := true }                                   -- 7882-7884
+    { w with requesting := true }                                   -- 11555-11558
   else if !(active p && w.visible) then
     match w.sentinel with
-    | some l => relIdx { w with sentinel := none } l                -- 7901-7904
+    | some l => relIdx { w with sentinel := none } l                -- 11575-11578
     | none => w
   else w
 
@@ -200,21 +249,22 @@ variable (w : Wk)
   unfold releaseNetLock; split <;> (try split) <;> rfl
 end relproj
 
-/-- togglePause (8356); the relay to the peer is not state here. -/
+/-- togglePause (12063); the relay to the peer is not state here. -/
 def togglePause (p : Pz) : Pz := { p with paused := !p.paused, lit := !p.paused }
 
-def closeReportM (p : Pz) : Pz :=      -- closeReportModal (5984)
+def closeReportM (p : Pz) : Pz :=      -- closeReportModal (9243)
   if p.report then { p with report := false, paused := p.reportWas } else p
-def closeRwM (p : Pz) : Pz :=          -- closeRewindScrubber (6494)
+def closeRwM (p : Pz) : Pz :=          -- closeRewindScrubber (9842)
   if p.rw then { p with rw := false, paused := p.rwWas } else p
-def closeClipM (p : Pz) : Pz :=        -- closeClipScrubber (8909)
+def closeClipM (p : Pz) : Pz :=        -- closeClipScrubber (12856)
   if p.clip then { p with clip := false, paused := p.clipWas } else p
 
 /-- netShutdown's thaw (netplay.js 1556-1562), outside netFail's keepModal. -/
 def thaw (p : Pz) : Pz :=
   if p.netFroze then { p with netFroze := false, paused := false, lit := false } else p
 
-/-- startClipExport (8567-8623), the arming path. -/
+/-- startClipExport (12534-12562), the arming path: it snapshots `paused`
+(12545-12546) and opens the progress panel. -/
 def startClip (p : Pz) : Pz :=
   if !p.replay && p.loaded && !p.rb then
     { p with replay := true, exportWas := p.paused, paused := false }
@@ -224,13 +274,20 @@ def startClip (p : Pz) : Pz :=
 modal closed; the `netDismiss` event's effect. -/
 def closeNetM (p : Pz) : Pz := if p.netModal then { thaw p with netModal := false } else p
 
-/-- abortRetroClip -> finishRetroClip(false) (8544 / 8531). -/
+/-- abortRetroClip -> finishRetroClip(false) -> endClipExport (12343 / 12333 / 12320). -/
 def abortClip (p : Pz) : Pz :=
   if p.replay then { p with replay := false, paused := p.exportWas } else p
 
-/-- loadRom's commit (8007-8049): abortRetroClip (8016); closeRewindScrubber();
+/-- releaseFlight (14078-14084): `paused = false` if `body.running` and the
+pause button is not lit. -/
+def releaseFlight (p : Pz) : Pz :=
+  if p.flight then
+    { p with flight := false, paused := if p.loaded && !p.home && !p.lit then false else p.paused }
+  else p
+
+/-- loadRom's commit (11680-11748): abortRetroClip (11713); closeRewindScrubber();
 closeClipScrubber(); closeReportModal(); an open Link Cable modal:
-netDismissModal (8028); paused = false; the button reset; body.running. -/
+netDismissModal (11725); paused = false; the button reset; body.running. -/
 def commitLoad (p : Pz) : Pz :=
   { closeNetM (closeReportM (closeClipM (closeRwM (abortClip p)))) with
       loaded := true, paused := false, lit := false, home := false }
@@ -253,8 +310,8 @@ def endSession (p : Pz) : Pz := { thaw p with rb := false, netModal := false }
 
 def stepP (p : Pz) : Event → Pz
   | .pauseTap => togglePause p
-  | .pauseKey => if p.home then p else togglePause p     -- 9212-9218: the game view only
-  -- 8370-8378: not on home; under Report a Bug, the choice closing it gives back
+  | .pauseKey => if p.home then p else togglePause p     -- 13159-13167: the game view only
+  -- 12077-12085: not on home; under Report a Bug, the choice closing it gives back
   | .remotePause on =>
     if p.home then p
     else if p.report then { p with reportWas := on, lit := on }
@@ -266,12 +323,19 @@ def stepP (p : Pz) : Event → Pz
   | .openClip => { p with clipWas := p.paused, paused := true, clip := true }
   | .closeClip => closeClipM p
   | .clipSave => startClip (closeClipM p)
-  | .clipDone => { p with replay := false, paused := p.exportWas }   -- finishRetroClip 8533
-  | .mainMenu => { p with paused := true, home := true } -- the button is untouched
+  | .clipDone => { p with replay := false, paused := p.exportWas }   -- endClipExport 12323
+  | .clipCancel => abortClip p
+  -- releaseFlight (13482), then paused = true; the button is untouched
+  | .mainMenu => { p with paused := true, home := true, flight := false }
   | .resume => { p with paused := false, lit := false, home := false }
+  -- resumeGame, then holdForFlight (14073): paused = true again, the button unlit
+  | .resumeFly => { p with paused := true, lit := false, home := false, flight := true }
   | .loadStart => abortClip p
   | .loadRom => commitLoad p
-  | .unload => { p with loaded := false, paused := true, lit := false, home := false }
+  | .loadRomFly => { commitLoad p with paused := true, flight := true }
+  | .flightEnd => releaseFlight p
+  | .unload => { p with loaded := false, paused := true, lit := false, home := false,
+                        flight := false }
   | .openNet =>
     let fr := p.loaded && !p.paused                      -- netFrozeGame (netplay.js 200)
     { p with netModal := true, netFroze := fr, paused := p.paused || fr, lit := p.lit || fr }
@@ -281,17 +345,18 @@ def stepP (p : Pz) : Event → Pz
     { p with netModal := false, netFroze := false, rb := true, paused := false, lit := false,
              home := false }
   | .netEnd => endSession p
-  -- pagehide (11397-11399): netShutdown() in a session, as beforeunload
+  -- pagehide (15972-15974): netShutdown() in a session, as beforeunload
   | .pagehide => if p.rb then endSession p else p
   | _ => p
 
 def stepW (p : Pz) (w : Wk) : Event → Wk
   | .openNet => { w with netPending := w.netPending + 1 }   -- acquireWakeLock() (netplay.js 189)
   | .netDismiss | .netStart | .netEnd => releaseNetLock w     -- closeNetModal (netplay.js 110)
-  | .loadRom => if p.netModal then releaseNetLock w else w    -- netDismissModal (8028)
+  | .loadRom | .loadRomFly =>
+    if p.netModal then releaseNetLock w else w               -- netDismissModal (11725)
   | .tabHide =>
     -- the UA releases every screen lock and queues their "release" events; then the
-    -- visibilitychange listeners: syncWakeLock (7907); netplay's only stamps a time (958)
+    -- visibilitychange listeners: syncWakeLock (11581); netplay's only stamps a time (958)
     syncW p { w with visible := false, relQ := w.relQ ++ w.idxLocks ++ w.netLocks,
                      idxLocks := [], netLocks := [] }
   | .tabShow =>
@@ -299,12 +364,12 @@ def stepW (p : Pz) (w : Wk) : Event → Wk
     if p.netModal then { w with netPending := w.netPending + 1 } else w   -- netplay.js 964
   | .tick => syncW p w
   | .wakeGrant =>
-    if !w.visible then { w with requesting := false }      -- rejected: .catch (7897)
+    if !w.visible then { w with requesting := false }      -- rejected: .catch (11571)
     else
       let n := w.nextId
-      if !active p then                                    -- 7888-7890: s.release()
+      if !active p then                                    -- 11562-11564: s.release()
         { w with requesting := false, nextId := n + 1, relQ := w.relQ ++ [n] }
-      else                                                 -- 7892
+      else                                                 -- 11566
         { w with requesting := false, nextId := n + 1, idxLocks := n :: w.idxLocks,
                  sentinel := some n }
   | .wakeDeny => { w with requesting := false }
@@ -324,17 +389,17 @@ def stepW (p : Pz) (w : Wk) : Event → Wk
     match w.relQ with
     | [] => w
     | l :: r => { w with relQ := r,
-                         sentinel := if w.sentinel == some l then none else w.sentinel }  -- 7824
+                         sentinel := if w.sentinel == some l then none else w.sentinel }  -- 11568
   | .uaRevoke =>
     match w.idxLocks with
     | [] => w
     | l :: r => { w with idxLocks := r, relQ := w.relQ ++ [l] }
-  -- pagehide: a session's netShutdown (11399; its closeNetModal is the folded
-  -- tail); the context is suspended (11407)
+  -- pagehide: a session's netShutdown (15974; its closeNetModal is the folded
+  -- tail); the context is suspended (15986)
   | .pagehide =>
     let w := if p.rb then releaseNetLock w else w
     { w with ctxRunning := false, bfcache := true }
-  | .pageshow => { w with bfcache := false, ctxRunning := w.ctxRunning || p.loaded }  -- 11414
+  | .pageshow => { w with bfcache := false, ctxRunning := w.ctxRunning || p.loaded }  -- 15992
   | .gesture => { w with ctxRunning := true }
   | _ => w
 
@@ -343,18 +408,22 @@ def step (s : State) (e : Event) : State := { p := stepP s.p e, w := stepW s.p s
 /-- When the event can happen. -/
 def en (s : State) : Event → Bool
   | .pauseTap => s.w.visible && s.p.loaded && !anyModal s.p && !s.p.home && !s.p.replay
-  | .pauseKey => s.w.visible && s.p.loaded && !anyModal s.p && !s.p.replay  -- 9183, 9203, 9206
+  | .pauseKey => s.w.visible && s.p.loaded && !anyModal s.p && !s.p.replay  -- 13130, 13150, 13159
   | .remotePause _ => s.p.rb
-  | .openReport => s.w.visible && !anyModal s.p && !s.p.replay   -- hamburger, or the paused card's ⋯ (4769)
-  | .closeReport | .closeRw | .closeClip => s.w.visible  -- buttons; Escape runs every closer (5255)
-  | .openRw => s.w.visible && s.p.loaded && !s.p.rb && !s.p.home && !anyModal s.p && !s.p.replay  -- 6466, styles 1173
+  | .openReport => s.w.visible && !anyModal s.p && !s.p.replay   -- the menu, or the hero's ⋯ (6704)
+  | .closeReport | .closeRw | .closeClip => s.w.visible  -- buttons; Escape runs every closer (7389-7408)
+  | .openRw => s.w.visible && s.p.loaded && !s.p.rb && !s.p.home && !anyModal s.p && !s.p.replay  -- 9810-9813, styles 1159
   | .openClip => s.w.visible && s.p.loaded && !s.p.rb && !s.p.home && !anyModal s.p && !s.p.replay
   | .clipSave => s.w.visible && s.p.clip
-  | .clipDone => s.w.visible && s.p.replay
+  | .clipDone => s.p.replay
+  | .clipCancel => s.w.visible && s.p.replay
   | .mainMenu => s.w.visible && s.p.loaded && !s.p.home && !anyModal s.p && !s.p.replay
   | .resume => s.w.visible && s.p.loaded && s.p.home && !anyModal s.p
+  -- in a session drawPausedHero hides the hero (13854): no flight from it
+  | .resumeFly => s.w.visible && s.p.loaded && s.p.home && !anyModal s.p && !s.p.rb
   | .loadStart => true
-  | .loadRom => !s.p.rb
+  | .loadRom | .loadRomFly => !s.p.rb
+  | .flightEnd => s.p.flight
   | .unload => s.p.loaded && !s.p.rb
   | .openNet => s.w.visible && !anyModal s.p && !s.p.rb && !s.p.replay
   | .netDismiss => s.w.visible && s.p.netModal && !s.p.rb
@@ -405,13 +474,35 @@ theorem witness_sound {es : List Event} {bad : State → Bool}
 
 /-! ## Part 1: the run/pause discipline -/
 
+/-- What the player does that pauses the game or opens a pausing overlay over
+it: the events whose effect on `paused` the flight's hold confuses. -/
+def Event.pausesGame : Event → Bool
+  | .pauseTap | .pauseKey | .openReport | .openRw | .openClip | .openNet => true
+  | _ => false
+
+/-- The states reached without the player pausing or opening a pausing
+overlay while a flight holds the game: every trace with reduced motion (no
+flight ever holds), and every trace whose player leaves the ~0.5 s of a
+flight alone. -/
+inductive Calm : State → Prop
+  | init : Calm init
+  | step {s e} : Calm s → en s e = true → (s.p.flight && e.pausesGame) = false → Calm (step s e)
+
+theorem calm_reachable {s : State} (h : Calm s) : Reachable s := by
+  induction h with
+  | init => exact .init
+  | step _ he _ ih => exact .step ih he
+
 /-- The intended properties, plus the bookkeeping that makes them inductive.
 * `frozen`:  a loaded game never steps behind a pausing overlay or the home screen.
 * `label`:   with nothing over the game, the button's icon/title matches `paused`
-  (a clip export's replay, which greys every control out, runs regardless).
+  (a clip export's replay, which greys every control out, runs regardless; a
+  flight holds the game paused under the unlit icon until it lands).
 * `restore*`: each open overlay, and a running clip export, remembers exactly
   the user's own choice, so closing it gives that choice back (neither sticks
-  the game paused nor unpauses a game the user paused). -/
+  the game paused nor unpauses a game the user paused).
+* `fly`: a flight holds the game in view with nothing over it and the icon
+  unlit, so its end (`paused = false`) gives the player's choice back. -/
 structure Inv (p : Pz) : Prop where
   rbLoaded : p.rb = true → p.loaded = true
   excl1    : p.report = true → p.rw = false ∧ p.clip = false ∧ p.netModal = false
@@ -423,7 +514,7 @@ structure Inv (p : Pz) : Prop where
   frozen   : p.loaded = true → (p.report || p.rw || p.clip || p.netModal || p.home) = true →
                p.paused = true
   label    : p.loaded = true → (p.report || p.rw || p.clip || p.netModal) = false →
-               p.home = false → p.replay = false → p.paused = p.lit
+               p.home = false → p.replay = false → p.flight = false → p.paused = p.lit
   restoreReport : p.loaded = true → p.report = true → p.reportWas = (p.lit || p.home)
   restoreRw     : p.loaded = true → p.rw = true → p.rwWas = p.lit
   restoreClip   : p.loaded = true → p.clip = true → p.clipWas = p.lit
@@ -433,52 +524,89 @@ structure Inv (p : Pz) : Prop where
   netFroze1 : p.netFroze = true → p.netModal = true ∧ (p.loaded = true → p.home = false ∧ p.lit = true)
   netOwn    : p.loaded = true → p.netModal = true → p.netFroze = false → p.home = false →
                 p.lit = true
+  fly       : p.flight = true → p.loaded = true ∧ p.rb = false ∧ p.home = false ∧
+                p.lit = false ∧ p.replay = false ∧ (p.report || p.rw || p.clip || p.netModal) = false
 
 theorem inv_init : Inv init.p := by
   constructor <;> simp [init]
 
+theorem commitLoad_flight (p : Pz) : (commitLoad p).flight = p.flight := by
+  unfold commitLoad closeNetM closeReportM closeClipM closeRwM abortClip thaw
+  (repeat' split) <;> rfl
+
 theorem inv_commitLoad {p : Pz} (h : Inv p) (hrb : p.rb = false) : Inv (commitLoad p) := by
+  obtain ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11⟩ := commitLoad_fields p
+  have c12 := commitLoad_flight p
+  have nf : (commitLoad p).netFroze = false := by
+    cases hf : (commitLoad p).netFroze
+    · rfl
+    · obtain ⟨a, b⟩ := c11 hf; rw [(h.netFroze1 a).1] at b; cases b
+  constructor <;> simp [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c12, hrb, nf]
+
+/-- A boot that lands under the launch's flight. -/
+theorem inv_commitLoadFly {p : Pz} (h : Inv p) (hrb : p.rb = false) :
+    Inv { commitLoad p with paused := true, flight := true } := by
   obtain ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11⟩ := commitLoad_fields p
   have nf : (commitLoad p).netFroze = false := by
     cases hf : (commitLoad p).netFroze
     · rfl
     · obtain ⟨a, b⟩ := c11 hf; rw [(h.netFroze1 a).1] at b; cases b
-  constructor <;> simp [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, hrb, nf]
+  constructor <;> simp [c1, c2, c3, c4, c5, c6, c8, c9, c10, hrb, nf]
 
 set_option maxHeartbeats 4000000 in
-theorem inv_step {s : State} {e : Event} (h : Inv s.p) (he : en s e = true) :
-    Inv (step s e).p := by
+theorem inv_step {s : State} {e : Event} (h : Inv s.p) (he : en s e = true)
+    (hc : (s.p.flight && e.pausesGame) = false) : Inv (step s e).p := by
   cases e
   case loadRom =>
     simp only [en, Bool.not_eq_eq_eq_not, Bool.not_true] at he
     exact inv_commitLoad h he
+  case loadRomFly =>
+    simp only [en, Bool.not_eq_eq_eq_not, Bool.not_true] at he
+    exact inv_commitLoadFly h he
   all_goals
-    obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14, h15, h16⟩ := h
+    obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14, h15, h16, h17⟩ := h
     simp only [en, anyModal] at he
+    simp only [Event.pausesGame, Bool.and_true, Bool.and_false] at hc
     constructor <;> simp only [step, stepP, togglePause, closeReportM, closeRwM, closeClipM,
-      thaw, endSession, startClip, abortClip] <;> (repeat' split) <;> grind
+      thaw, endSession, startClip, abortClip, releaseFlight] <;> (repeat' split) <;> grind
 
-/-- **The run/pause discipline holds in every reachable state**, whatever the
+/-- **The run/pause discipline holds in every calm state**: whatever the
 interleaving of taps, keys, the peer, overlays, the home screen, loads, closes,
-link sessions, clip exports, hides and page lifecycle. -/
-theorem inv_reachable {s : State} (h : Reachable s) : Inv s.p := by
+link sessions, clip exports (and their Cancel, and their ends landing late),
+flights, hides and page lifecycle, as long as the player does not pause or
+open a pausing overlay while a flight holds the game. (Doing that breaks it:
+`bug_overlay_in_flight_runs_behind` and its neighbours below.) -/
+theorem inv_calm {s : State} (h : Calm s) : Inv s.p := by
   induction h with
   | init => exact inv_init
-  | step _ he ih => exact inv_step ih he
+  | step _ he hc ih => exact inv_step ih he hc
 
 /-- Corollary (frozen): a loaded game never runs behind Report a Bug, a
 scrubber, the Link Cable modal or the home screen. -/
-theorem frozen_reachable {s : State} (h : Reachable s) (hl : s.p.loaded = true)
+theorem frozen_calm {s : State} (h : Calm s) (hl : s.p.loaded = true)
     (ho : (anyModal s.p || s.p.home) = true) : active s.p = false := by
-  have := (inv_reachable h).frozen hl
+  have := (inv_calm h).frozen hl
   simp only [anyModal] at ho
   simp [active, this ho]
 
-/-- Corollary (label): with nothing over the game, the icon says what the core does. -/
-theorem label_reachable {s : State} (h : Reachable s) (hl : s.p.loaded = true)
-    (hm : anyModal s.p = false) (hh : s.p.home = false) (hr : s.p.replay = false) :
-    s.p.paused = s.p.lit :=
-  (inv_reachable h).label hl hm hh hr
+/-- Corollary (label): with nothing over the game and no flight on its way,
+the icon says what the core does. -/
+theorem label_calm {s : State} (h : Calm s) (hl : s.p.loaded = true)
+    (hm : anyModal s.p = false) (hh : s.p.home = false) (hr : s.p.replay = false)
+    (hf : s.p.flight = false) : s.p.paused = s.p.lit :=
+  (inv_calm h).label hl hm hh hr hf
+
+/-- Corollary: outside a flight, a pause tap flips the player's choice, and the
+core follows it. -/
+theorem pause_tap_flips_calm {s : State} (h : Calm s) (he : en s .pauseTap = true)
+    (hf : s.p.flight = false) :
+    (step s .pauseTap).p.lit = !s.p.lit ∧ (step s .pauseTap).p.paused = (step s .pauseTap).p.lit := by
+  have hI := inv_calm h
+  simp only [en, anyModal, Bool.and_eq_true, Bool.not_eq_eq_eq_not, Bool.not_true] at he
+  obtain ⟨⟨⟨⟨hv, hl⟩, hm⟩, hh⟩, hr⟩ := he
+  have hm' : (s.p.report || s.p.rw || s.p.clip || s.p.netModal) = false := hm
+  have := hI.label hl hm' hh hr hf
+  simp [step, stepP, togglePause, this]
 
 /-! ### The old traces, on the fixed code -/
 
@@ -487,13 +615,14 @@ screen in front of it. -/
 def runsBehind (s : State) : Bool :=
   s.p.loaded && (anyModal s.p || s.p.home) && !s.p.paused && s.w.visible
 
-/-- Nothing covers the game, and the pause button's icon/title contradicts `paused`. -/
+/-- Nothing covers the game, no flight is on its way to it, and the pause
+button's icon/title contradicts `paused`. -/
 def labelWrong (s : State) : Bool :=
-  s.p.loaded && !anyModal s.p && !s.p.home && !s.p.replay && (s.p.paused != s.p.lit)
+  s.p.loaded && !anyModal s.p && !s.p.home && !s.p.replay && !s.p.flight && (s.p.paused != s.p.lit)
 
 /-- Was `bug_space_on_home_runs_game`: Space (or Period) on the home screen.
 `shortcutKeyHandler` now acts on the game keys only with `body.running`
-(9212-9214), so the game `showMainMenu` froze stays frozen. -/
+(13159-13161), so the game `showMainMenu` froze stays frozen. -/
 theorem regress_space_on_home_runs_game :
     witnesses [.loadRom, .mainMenu, .pauseKey] (fun s => s.p.home && !runsBehind s) = true := by
   decide
@@ -531,8 +660,8 @@ theorem regress_link_end_on_home_runs :
       (fun s => s.p.home && !runsBehind s) = true := by decide
 
 /-- Was `bug_clip_export_drops_pause`: a clip exported from a paused game. The
-replay still runs unpaused, and `finishRetroClip` now puts the player's pause
-back. -/
+replay still runs unpaused, and its end (`endClipExport`, 12323) now puts the
+player's pause back. -/
 theorem regress_clip_export_drops_pause :
     witnesses [.loadRom, .pauseTap, .openClip, .clipSave, .clipDone]
       (fun s => !labelWrong s && s.p.paused && s.p.lit && !s.p.replay) = true := by decide
@@ -550,7 +679,7 @@ theorem regress_link_setup_error_then_dismiss :
 
 /-- Was `bug_load_under_report_runs`: a ROM dropped on the page (or a launch
 whose download was in flight) while Report a Bug is open. `loadRom`'s commit now
-closes the report (8027) before `paused = false`, restoring the old session's
+closes the report (11724) before `paused = false`, restoring the old session's
 state first, so the new game does not run under it... -/
 theorem regress_load_under_report_runs :
     witnesses [.loadRom, .pauseTap, .openReport, .loadStart, .loadRom]
@@ -564,7 +693,7 @@ theorem regress_load_under_report_sticks_paused :
 
 /-- Was `bug_load_under_link_modal_runs`: a paused game (so `netFrozeGame`
 stayed false) replaced by a dropped ROM under the Link Cable modal. The commit
-now dismisses the modal (8028), and with it the modal's wake lock. -/
+now dismisses the modal (11725), and with it the modal's wake lock. -/
 theorem regress_load_under_link_modal_runs :
     witnesses [.loadRom, .pauseTap, .openNet, .netGrant, .loadStart, .loadRom]
       (fun s => !s.p.netModal && !runsBehind s && !labelWrong s &&
@@ -572,13 +701,82 @@ theorem regress_load_under_link_modal_runs :
 
 /-- A clip export started on the outgoing game while a load is in flight
 (between `loadRom`'s first segment and its commit): the commit ends it too
-(8016), so the capture does not run on into the new game, and its end does not
+(11713), so the capture does not run on into the new game, and its end does not
 write the old game's pause onto the new one. (Without that abort the replay is
 still running here, and its end, `clipDone`, froze the new game under a Pause
 icon.) -/
 theorem regress_load_during_clip_export :
     witnesses [.loadRom, .pauseTap, .loadStart, .openClip, .clipSave, .loadRom]
       (fun s => !s.p.replay && !s.p.paused && !labelWrong s) = true := by decide
+
+/-! ### The off-screen export (fa62cc6b): Cancel, and a load mid-encode -/
+
+/-- Cancel on the progress panel, from a paused game: `abortRetroClip` puts
+the player's pause back, with the icon to match. -/
+theorem clip_cancel_restores_pause :
+    witnesses [.loadRom, .pauseTap, .openClip, .clipSave, .clipCancel]
+      (fun s => !s.p.replay && s.p.paused && s.p.lit && !labelWrong s) = true := by decide
+
+/-- A ROM dropped (or a download landing) while the WebCodecs encode is
+between frame batches: the load's first segment aborts the export, restoring
+the old game's pause, and the commit runs the new game. The encode's tail then
+finds `clipReplayActive` false (or a newer `clipExportGen`) and returns without
+touching `paused`: no export end is pending (`clipDone` is not enabled). -/
+theorem clip_load_mid_encode :
+    witnesses [.loadRom, .pauseTap, .openClip, .clipSave, .loadStart, .loadRom]
+      (fun s => !s.p.replay && !s.p.paused && !s.p.lit && !labelWrong s &&
+                !en s .clipDone) = true := by decide
+
+/-- A Cancel's restore is final: the encode's tail cannot end the export a
+second time, whatever lands in between (here a fresh pause and resume). -/
+theorem clip_cancel_then_tail :
+    witnesses [.loadRom, .openClip, .clipSave, .clipCancel, .pauseTap]
+      (fun s => s.p.paused && s.p.lit && !en s .clipDone) = true := by decide
+
+/-! ### Flights: the counterexamples (03f88d6c)
+
+`holdForFlight` (14073) writes the one global `paused`, and every other
+pausing surface reads that global as the player's choice. -/
+
+/-- **Bug.** The player resumes from the hero and, while the picture is still
+flying (460 ms), double-taps Rewind (or opens Report a Bug, or Clip that!).
+The scrubber snapshots the flight's `paused = true` as the player's choice;
+the flight lands, `releaseFlight` sees `body.running` and an unlit button and
+sets `paused = false`: the game runs behind the scrubber. -/
+theorem bug_overlay_in_flight_runs_behind :
+    witnesses [.loadRom, .mainMenu, .resumeFly, .openRw, .flightEnd] runsBehind = true := by
+  decide
+
+/-- ...and closing the scrubber gives back the flight's pause: the game is
+frozen under a Pause icon that says it runs. The same from a launch's flight
+with Report a Bug. -/
+theorem bug_overlay_in_flight_sticks_paused :
+    witnesses [.loadRom, .mainMenu, .resumeFly, .openRw, .flightEnd, .closeRw] labelWrong = true ∧
+    witnesses [.loadStart, .loadRomFly, .openReport, .flightEnd, .closeReport] labelWrong = true := by
+  decide
+
+/-- **Bug.** The Link Cable modal opened during a launch's flight: the game
+looks paused, so `netFrozeGame` stays false, and the flight's end runs the
+game behind the modal (the pairing screen). -/
+theorem bug_link_modal_in_flight_runs_behind :
+    witnesses [.loadStart, .loadRomFly, .openNet, .flightEnd] runsBehind = true := by decide
+
+/-- **Bug.** Pause (the button, Space or Period) while the picture is flying:
+`togglePause` flips the flight's `paused = true` to `false`, so the button
+stays unlit and the game runs at once: the player's pause is lost. (Outside a
+flight a tap always flips the choice: `pause_tap_flips_calm`.) -/
+theorem bug_pause_in_flight_lost :
+    witnesses [.loadRom, .mainMenu, .resumeFly]
+      (fun s => en s .pauseTap && s.p.lit == (step s .pauseTap).p.lit &&
+                active (step s .pauseTap).p) = true := by decide
+
+/-- None of these is calm: the invariant breaks only through an act during
+a flight. A flight left alone lands on the player's choice. -/
+theorem flight_alone_lands :
+    witnesses [.loadRom, .mainMenu, .resumeFly, .tick, .flightEnd]
+      (fun s => !s.p.flight && !s.p.paused && !s.p.lit && !labelWrong s) = true ∧
+    witnesses [.loadRom, .pauseTap, .mainMenu, .resume, .loadStart, .loadRomFly, .flightEnd]
+      (fun s => !s.p.paused && !s.p.lit && !labelWrong s) = true := by decide
 
 /-! ## Part 2: the Screen Wake Lock -/
 
@@ -648,6 +846,7 @@ theorem winv_step {s : State} {e : Event} (h : WInv s.w) (he : en s e = true) :
     | exact hr
     | skip
   case loadRom => split; exact hr; exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
+  case loadRomFly => split; exact hr; exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
   case pagehide =>
     obtain ⟨g1, g2, g3, g4, g5, g6, g7, g8⟩ : WInv (if s.p.rb = true then releaseNetLock s.w else s.w) := by
       split; exact hr; exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
@@ -725,7 +924,7 @@ theorem wake_no_leak {s : State} (h : Reachable s) :
   · simp [h1] at hl; exact hl ▸ hs
 
 /-- `wakeSentinel` is never stale for long: its lock is held, or its "release" event
-is queued and will clear it (the listener at 7893). -/
+is queued and will clear it (the listener at 11567). -/
 theorem wake_sentinel_live {s : State} (h : Reachable s) {l : Nat}
     (hs : s.w.sentinel = some l) : s.w.idxLocks = [l] ∨ l ∈ s.w.relQ :=
   (winv_reachable h).live l hs
@@ -843,7 +1042,7 @@ theorem ni_step {s : State} {e : Event} (h : NI s) : NI (step s e) := by
   obtain ⟨a, b⟩ := h
   obtain ⟨r1, r2⟩ := releaseNetLock_clears a
   cases e <;> simp only [NI, step, stepP, stepW, closeReportM, closeRwM, closeClipM, startClip,
-    abortClip]
+    abortClip, releaseFlight]
   all_goals first
     | exact ⟨a, b⟩
     | ((repeat' split) <;> exact ⟨a, b⟩)
@@ -851,6 +1050,11 @@ theorem ni_step {s : State} {e : Event} (h : NI s) : NI (step s e) := by
     | skip
   case openNet => exact ⟨a, fun h => by cases h⟩
   case loadRom =>
+    split
+    · exact ⟨by simp [r1], fun _ => r1⟩
+    · rename_i hn
+      exact ⟨a, fun _ => b (by simpa using hn)⟩
+  case loadRomFly =>
     split
     · exact ⟨by simp [r1], fun _ => r1⟩
     · rename_i hn
@@ -910,7 +1114,7 @@ theorem regress_link_modal_wake_lock_leak :
 /-! ## Part 3: audio -/
 
 /-- Not a promise the code makes, recorded so nobody assumes it: pausing (by any
-path) leaves the AudioContext running; only pagehide suspends it (11407). The
+path) leaves the AudioContext running; only pagehide suspends it (15986). The
 paused core just stops pushing buffers, so output falls silent once the queued
 lead drains. -/
 theorem obs_pause_keeps_audio_context :
