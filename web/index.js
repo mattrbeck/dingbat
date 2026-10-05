@@ -4142,6 +4142,10 @@ const fromWhere = (news) => {
 
 // Let the copy in memory go and land the newer files in its place.
 const takeHandoff = async (game, news) => {
+  // Before any await: a checkpoint packing meanwhile is of the copy being
+  // let go, and must not write its session over the one landing here
+  // (bug_checkpoint_after_switch).
+  sessionEpochs.set(game, sessionEpoch(game) + 1);
   if (!(await unloadGame({ flushSave: false, picture: false }))) return false;
   for (let { key, f, bytes } of news) {
     await writeSyncBytes(key, bytes);
@@ -4450,6 +4454,10 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // deleteGameEverywhere queue before they wipe, so this check, in the
       // same segment as the write, sees every such delete.
       if (syncState.queueDel.includes(name)) continue;
+      // Renamed here while it downloaded: written now it would land under
+      // the old name, an orphan no rename may reuse; it comes down under the
+      // new name once the rename reaches Drive (bug_pull_after_rename_orphans_frame).
+      if (renamedAway.has(p.game)) continue;
       if (sig !== syncState.sigs[name]) {
         live(await writeSyncBytes(name, bytes));
         syncState.sigs[name] = sig;
@@ -4783,6 +4791,11 @@ const renameInventoryLines = (inv) => {
 };
 
 // Returns { ok: true, moved } or { ok: false, error } (shown verbatim).
+// Names this session renamed a game away from, until the name is claimed
+// again (a rename into it, or a fresh import): a pull downloading a file
+// under one must not write it (pullSyncInner's write segment).
+const renamedAway = new Set();
+
 const renameGame = async (oldName, newName) => {
   if (!db) return { ok: false, error: "Storage isn't ready yet — try again in a moment." };
   if (oldName === newName) return { ok: false, error: "That's already this game's name." };
@@ -4797,6 +4810,9 @@ const renameGame = async (oldName, newName) => {
     return { ok: false,
              error: "“" + displayName(newName) + "” already exists in your library. Nothing was changed." };
   }
+
+  renamedAway.add(oldName);
+  renamedAway.delete(newName);
 
   // The game in memory: flush under the old name, then detach so no write
   // path recreates an old key or lands on a new one mid-transaction.
@@ -4897,6 +4913,7 @@ const renameGame = async (oldName, newName) => {
     });
   } catch (e) {
     // Rolled back whole: put the session back.
+    renamedAway.delete(oldName);
     if (loaded) currentOriginalName = oldName;
     return { ok: false, error: (e?.message || "The rename could not be completed.") +
                               " Nothing was changed." };
@@ -6376,6 +6393,7 @@ const enforceRomBudget = async (list) => {
 // Move `name` to the front of the index and spend the byte budget over the
 // result (ROM files only, never saves).
 const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0 } = {}) => updateRecent(async (all) => {
+  if (fresh) renamedAway.delete(name); // a new claim on the name
   let prev = all.find((r) => r?.name === name);
   let list = all.filter((r) => r.name !== name);
   let ts = Date.now();
