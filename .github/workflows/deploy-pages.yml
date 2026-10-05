@@ -3,6 +3,9 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    # Nothing under these ships (the site is web/ plus the wasm build), and a
+    # deploy re-stamps the service worker: every open copy offers an update.
+    paths-ignore: ["docs/**", "tools/**", "notes/**", "README.md", "README/**", ".claude/**"]
   workflow_dispatch:
 
 permissions:
@@ -23,22 +26,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nim
-        # choosenim fetches its script and then the toolchain; retry both.
-        run: |
-          set -eo pipefail
-          .github/scripts/retry.sh 3 bash -c \
-            'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
-               https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
-          echo "$HOME/.nimble/bin" >> $GITHUB_PATH
-
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: jiro4989/setup-nim-action@v2
         with:
-          version: "4.0.23"
+          # Pinned, as test.yml's NIM_VERSION.
+          nim-version: "2.2.12"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Emscripten
+        uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ runner.os }}-4.0.23
+
+      - name: Install Emscripten
+        # As test.yml's wasm job (the two share the cache above).
+        run: .github/scripts/install-emsdk.sh 4.0.23
+
+      - name: Cache nimble's sdl2
+        id: nimble-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: nimble-wasm-${{ runner.os }}-nim2.2.12-sdl2-2.0.6
 
       - name: Install nimble dependencies
         # nimble queries the package's git remote for tags: a network fetch.
-        run: .github/scripts/retry.sh 3 nimble install -y sdl2
+        # Pinned, as test.yml's wasm job (the two share the cache above).
+        if: steps.nimble-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/retry.sh 3 nimble install -y sdl2@2.0.6
 
       - name: Build WASM
         run: nim c -d:emscripten src/dingbat_wasm.nim

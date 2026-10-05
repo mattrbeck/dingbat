@@ -6,6 +6,8 @@ name: Build
 on:
   push:
     branches: [main]
+    # No input to a desktop build (test.yml's list).
+    paths-ignore: ["docs/**", "tools/**", "notes/**", "README.md", "README/**", ".claude/**"]
   pull_request:
   workflow_dispatch:
 

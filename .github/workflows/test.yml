@@ -1,6 +1,27 @@
 name: Test Suite
-# workflow_dispatch: re-run a suspected flake without pushing a dummy commit.
-on: [push, pull_request, workflow_dispatch]
+# Pushes to main only: every landing pushed its commit to main AND to its
+# worktree-* branch, and both ran the whole suite on the same SHA. A branch is
+# tested on request: gh workflow run "Test Suite" --ref <branch>
+# (workflow_dispatch also re-runs a suspected flake without a dummy commit).
+# docs/ and tools/ are no input to any job here (tests/results*.md are, so
+# never ignore *.md wholesale).
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "tools/**", "notes/**", "README.md", "README/**", ".claude/**"]
+  pull_request:
+    paths-ignore: ["docs/**", "tools/**", "notes/**", "README.md", "README/**", ".claude/**"]
+  workflow_dispatch:
+# Every commit on main keeps its own run; anywhere else a newer run of the
+# same ref cancels the older one.
+concurrency:
+  group: test-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+env:
+  # Pinned, so a toolchain release cannot change CI under an unchanged tree.
+  # The nimcache key carries NIM_VERSION: a new compiler starts it afresh.
+  NIM_VERSION: "2.2.12"
+  NODE_VERSION: "24"
 jobs:
   test:
     strategy:
@@ -8,8 +29,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # A green job is ~15 min on Windows, ~3 on Linux; an hour is headroom so a
-    # wedged step reports instead of burning the 6h default.
+    # A green job is ~14 min on Windows, ~11 on Linux; an hour is headroom so
+    # a wedged step reports instead of burning the 6h default.
     timeout-minutes: 60
     env:
       # Cached test-ROM dir, read by tests/dingbat_test_runner.nim.
@@ -17,6 +38,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: ${{ env.NIM_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: Cache downloaded test ROMs
         # Exact key, no restore-keys: the runner reuses any present file by
         # name, so a partial restore could serve a stale ROM. Bump the matching
@@ -34,11 +61,33 @@ jobs:
         # the script.
         shell: bash
         run: .github/scripts/install-test-deps.sh
+      - name: Restore the test builds' nimcache
+        # main's latest. Nim writes a module's C only when it changes and
+        # recompiles only C whose hash changed, so a restored cache spares
+        # most of the C compiler, which is most of the build: all 25 tests
+        # on an 8-core Mac took 295 CPU-s cold, 205 after an edit to ppu.nim
+        # and cpu.nim, 80 with no Nim change. (Sharing one cache between
+        # targets in a run saves nothing - see build-tests.sh.) Keyed on the
+        # Nim it compiles, so a commit that changes none restores exactly and
+        # saves nothing.
+        id: nimcache
+        uses: actions/cache/restore@v4
+        with:
+          path: .nimcache-tests
+          key: nimcache-tests-${{ runner.os }}-nim${{ env.NIM_VERSION }}-${{ hashFiles('src/**/*.nim', 'src/**/*.c', 'src/**/*.h', 'tests/**/*.nim', 'nim.cfg', '.github/scripts/build-tests.sh') }}
+          restore-keys: nimcache-tests-${{ runner.os }}-nim${{ env.NIM_VERSION }}-
       - name: Build test binaries (in parallel)
         # Independent `nim c` runs in parallel; the steps below only run
         # what this built. Flag rationale lives in the script.
         shell: bash
         run: .github/scripts/build-tests.sh
+      - name: Save the nimcache for the next run
+        # From main only (~180 MB an OS): a branch restores main's.
+        if: github.ref == 'refs/heads/main' && steps.nimcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .nimcache-tests
+          key: nimcache-tests-${{ runner.os }}-nim${{ env.NIM_VERSION }}-${{ hashFiles('src/**/*.nim', 'src/**/*.c', 'src/**/*.h', 'tests/**/*.nim', 'nim.cfg', '.github/scripts/build-tests.sh') }}
       - name: Run tests
         # Blargg / Mooneye / mGBA suite / Acid2 / Mealybug / jsmolka / gambatte.
         # Exits non-zero only on a regression against tests/results.md.
@@ -308,25 +357,36 @@ jobs:
             tests/results_gambatte.md
 
   wasm:
-    # The web build, made once for both end-to-end jobs (the test job never
+    # The web build, made once for the end-to-end jobs (the test job never
     # makes it).
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Install Nim
-        # As in deploy-pages.yml: choosenim fetches a script, then the toolchain.
-        run: |
-          set -eo pipefail
-          .github/scripts/retry.sh 3 bash -c \
-            'curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 \
-               https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
-          echo "$HOME/.nimble/bin" >> $GITHUB_PATH
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: jiro4989/setup-nim-action@v2
         with:
-          version: "4.0.23"
+          nim-version: ${{ env.NIM_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache Emscripten
+        uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ runner.os }}-4.0.23
+      - name: Install Emscripten
+        # Installs on a cache miss only (~45 s); the script says why this is
+        # not mymindstorm/setup-emsdk.
+        run: .github/scripts/install-emsdk.sh 4.0.23
+      - name: Cache nimble's sdl2
+        id: nimble-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: nimble-wasm-${{ runner.os }}-nim${{ env.NIM_VERSION }}-sdl2-2.0.6
       - name: Install nimble dependencies
-        run: .github/scripts/retry.sh 3 nimble install -y sdl2
+        # A network fetch (nimble asks the package's git remote for tags),
+        # ~50 s; pinned, so the cache above is exactly what it would install.
+        if: steps.nimble-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/retry.sh 3 nimble install -y sdl2@2.0.6
       - name: Build WASM
         run: nim c -d:emscripten src/dingbat_wasm.nim
       - uses: actions/upload-artifact@v4
@@ -339,44 +399,79 @@ jobs:
 
   web-e2e:
     # The web app end to end: two browsers (an iPhone and a Mac) running the
-    # real build against one fake Google Drive -
-    # picking a game up on another device (web/e2e/).
+    # real build against one fake Google Drive - picking a game up on
+    # another device (web/e2e/) - and a browser killed or closed mid-game.
+    # Sharded by file and device pair: one job ran every file at once and
+    # took ~13 min (fourteen-steps alone ~10), its files' browsers sharing
+    # the runner's cores - where the crash suite's flakes came from. Each
+    # shard runs its files one after the other (--test-concurrency=1), so
+    # a file's browsers have the machine to themselves.
     needs: wasm
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: "fourteen-steps iphone+mac", files: e2e/fourteen-steps.e2e.mjs, pairs: "iphone+mac" }
+          - { shard: "fourteen-steps mac+iphone", files: e2e/fourteen-steps.e2e.mjs, pairs: "mac+iphone" }
+          - { shard: "handoff iphone+mac", files: e2e/handoff.e2e.mjs, pairs: "iphone+mac" }
+          - { shard: "handoff mac+mac", files: e2e/handoff.e2e.mjs, pairs: "mac+mac" }
+          - { shard: "crash + updates", files: "e2e/crash-recovery.e2e.mjs e2e/sw-updates.e2e.mjs", pairs: "" }
+    name: web-e2e (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: actions/download-artifact@v4
         with:
           name: wasm
           path: web
       - name: Let a stalled package download fail over
+        id: apt
         # Ubuntu's mirror has stalled for minutes on single packages, and
-        # WebKit's dependencies are a hundred of them (28 min once).
+        # WebKit's dependencies are a hundred of them (28 min once). Their
+        # .debs are kept where actions/cache can restore them (apt's own
+        # directory is root's): five shards each installing them is five
+        # draws of a slow mirror (125 MB at 300 kB/s, 7 min, once).
         run: |
-          printf 'Acquire::http::Timeout "20";\nAcquire::Retries "5";\n' |
-            sudo tee /etc/apt/apt.conf.d/99dingbat-timeouts
+          mkdir -p ~/apt-archives/partial
+          printf 'Acquire::http::Timeout "20";\nAcquire::Retries "5";\nDir::Cache::Archives "%s";\n' \
+            "$HOME/apt-archives" | sudo tee /etc/apt/apt.conf.d/99dingbat-timeouts
+          echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Cache WebKit's system packages
+        # A new runner image restores the last set and fetches only what moved.
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives/*.deb
+          key: apt-e2e-${{ runner.os }}-${{ steps.apt.outputs.image }}-${{ hashFiles('web/package-lock.json') }}
+          restore-keys: apt-e2e-${{ runner.os }}-
       - name: Cache Playwright's browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-e2e-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
-      - name: Two devices, one fake Drive
+      - name: Browsers
         working-directory: web
-        # Both devices in WebKit (the Mac with a Mac's user agent): these
-        # runners draw Chromium's WebGL in software at about three frames a
-        # second, the probe's first lines; Chromium runs locally by default.
-        env:
-          DINGBAT_E2E_NO_CHROMIUM: "1"
+        # npm ci and the browser download are idempotent network fetches.
         run: |
           set -e
           ../.github/scripts/retry.sh 3 npm ci
           ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium webkit
-          node e2e/speed-probe.mjs || true   # how fast each browser runs the game here
-          node --test e2e/*.e2e.mjs
+      - name: ${{ matrix.shard }}
+        working-directory: web
+        # Both devices in WebKit (the Mac with a Mac's user agent): these
+        # runners draw Chromium's WebGL in software at about three frames a
+        # second (e2e/speed-probe.mjs measures it; run it by hand).
+        env:
+          DINGBAT_E2E_NO_CHROMIUM: "1"
+          DINGBAT_E2E_PAIRS: ${{ matrix.pairs }}
+        run: node --test --test-concurrency=1 ${{ matrix.files }}
       - name: Manual-code pairing in WebKit
         # WebKit's libraries are installed above; the test job runs it in
         # Chromium.
+        if: matrix.pairs == ''
         working-directory: web
         run: node manualpair.test.mjs webkit
 
@@ -384,11 +479,24 @@ jobs:
     # The same on a Mac, where Playwright's WebKit is Apple's - the engine an
     # iPhone and Safari run; the Linux job's is the GTK port - and Chromium
     # draws fast enough to be the Mac, so this is the iPhone + Chrome pair.
+    # Sharded as web-e2e; handoff stays whole (both pairs ~5 min here).
     needs: wasm
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: "fourteen-steps iphone+mac", files: e2e/fourteen-steps.e2e.mjs, pairs: "iphone+mac" }
+          - { shard: "fourteen-steps mac+iphone", files: e2e/fourteen-steps.e2e.mjs, pairs: "mac+iphone" }
+          - { shard: "handoff", files: e2e/handoff.e2e.mjs, pairs: "iphone+mac,mac+mac" }
+          - { shard: "crash + updates", files: "e2e/crash-recovery.e2e.mjs e2e/sw-updates.e2e.mjs", pairs: "" }
+    name: web-e2e-macos (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: actions/download-artifact@v4
         with:
           name: wasm
@@ -398,19 +506,22 @@ jobs:
         with:
           path: ~/Library/Caches/ms-playwright
           key: playwright-e2e-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
-      - name: Two devices, one fake Drive
+      - name: Browsers
         working-directory: web
-        env:
-          DINGBAT_E2E_CHROMIUM_CHANNEL: chromium
         run: |
           set -e
           ../.github/scripts/retry.sh 3 npm ci
           ../.github/scripts/retry.sh 3 npx playwright install chromium webkit
-          node e2e/speed-probe.mjs || true   # how fast each browser runs the game here
-          node --test e2e/*.e2e.mjs
+      - name: ${{ matrix.shard }}
+        working-directory: web
+        env:
+          DINGBAT_E2E_CHROMIUM_CHANNEL: chromium
+          DINGBAT_E2E_PAIRS: ${{ matrix.pairs }}
+        run: node --test --test-concurrency=1 ${{ matrix.files }}
       - name: Present shaders in WebKit (Safari's engine, the iPhone's)
         # As the Linux test job runs them in Chromium. The manual-code pairing
         # runs in web-e2e: this runner gives headless WebKit no network for
         # WebRTC (no ICE candidates, so no code to exchange).
+        if: matrix.pairs == ''
         working-directory: web
         run: node render.test.mjs webkit
