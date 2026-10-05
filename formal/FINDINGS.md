@@ -439,7 +439,7 @@ is invisible here), one game, both devices hold its ROM, loads are atomic.
 
 ## Re-audit at 03f88d6c (2026-10-05): SavePersistence, ServiceWorker, Netplay
 
-The three models follow 03f88d6c again (line numbers at that commit).
+The three models follow 03f88d6c again; SavePersistence follows the fix of its three new findings, 87eea59f (line numbers at that commit).
 
 - **SavePersistence** now models the checkpoints (`takeCheckpoint`,
   `storeCheckpoint` and its guard, `addCheckpoint`'s epoch re-check, the
@@ -451,6 +451,19 @@ The three models follow 03f88d6c again (line numbers at that commit).
   `persist_marks_upload` still hold over every interleaving.
   `open_pull_resurrects_reset_save` was already fixed by 6dd57564 (the pull
   checks the delete queue); it is now `regress_pull_resurrects_reset_save`.
+  On the fixed code it also proves, for every reachable state, that the
+  stored session is the newest snapshot ever stored for its game and was
+  taken since the session was last deleted (`session_newest_and_current`,
+  which C2 broke), and, for every state, that a quota retry writes only if
+  nothing took a later number for the save (`retry_gives_way`, with
+  `persistCall_seq_mono` and the `*_takes_number` lemmas; C1) and that a pull skips a
+  save whose delete is queued, both Resets queue it as they wipe, and the
+  queue is not sent mid-pull (`pull_respects_queue`, `reset_queues_at_once`,
+  `flush_waits_for_pulls`; C3). `NoResurrect` is not claimed for every
+  state: the model stamps a pull's bytes when it starts, so a pull begun
+  after a Drive flush sent a Delete's queued delete looks like a
+  resurrection when it lands, where in the JS it is another device's newer
+  save.
 - **ServiceWorker** adds the update a save state from a newer build asks for
   (`updateForNewerState`: `applyUpdate` with the game loaded and no
   confirm). `no_forced_midgame` and `no_reload_without_a_click` still hold,
@@ -460,10 +473,10 @@ The three models follow 03f88d6c again (line numbers at that commit).
 - **Netplay**: citations only. `loadRom`'s resume runs in the solo commit,
   after any session has ended, and keeps the solo core on its own game.
 
-**New, all Low (narrow windows), reproduced against the real `web/index.js` in the web/tests harness (C1's Import variant from the model only):**
+**New, all Low (narrow windows), all fixed in 87eea59f.** Each was reproduced against the real `web/index.js` (C1's Import variant from the model only), and each `bug_*` below is now a `regress_*` theorem whose trace ends safely:
 
-| # | What happens | Trace | Fix |
-|---|---|---|---|
-| C1 | **A quota retry after a checkpoint eviction puts the old save back.** `dbPutRoomy` frees other games' checkpoints first and retries at once, but asks `superseded()` only `if (freed && …)`, and `freed` counts ROMs. A newer persist, a Reset, a Delete or an Import landing while the checkpoints are deleted is overwritten; after Reset or Import the reboot boots on the old save, after Delete the deleted save is back and queued for Drive. | `SavePersistence.bug_ckpt_evict_retry_writes_older_save`, `bug_ckpt_evict_retry_undoes_reset`, `bug_ckpt_evict_retry_resurrects_deleted_save`, `bug_ckpt_evict_retry_over_import` | Ask `superseded()` before every retry: a `retried` flag set in the `catch`, tested where `freed` is now. |
-| C2 | **A checkpoint's session lands over a newer one, or after a Reset.** `storeCheckpoint` checks `sessionSnapTs`/the epoch, then (battery not yet stored) `await persistSave`, then puts the session without checking again. Main Menu, a hide, a close or a switch in that await is replaced by the older moment; a Reset or Delete gets the pre-reset session back (carrying the wiped battery's signature; `addCheckpoint` re-checks, so the moment itself stays out). | `bug_ckpt_store_over_newer_session`, `bug_ckpt_store_undoes_session_reset` | Repeat the 8337 check (and `sessionHeldFor`) after the `await persistSave`, before the session put. |
-| C3 | **The Saves panel's Reset is undone by a pull landing in it.** `resetCurrentSaveFile` detaches and deletes, but queues its Drive deletes (`markDelete`) only after its awaits; a pull that started downloading the save before the game was tapped passes all three of its checks (not loaded, not loading, not queued), writes it back, and the reboot boots on it. `resetGameAction` queues first and is safe (`reset_game_action_holds_off_pull`). | `bug_file_reset_undone_by_pull` | Move the three `markDelete`s up to just after `retireSavePuts` (before the first await), as `resetGameSaves` does. |
+| # | What happened | Trace (now `regress_*`) | Fix (87eea59f) | Tests |
+|---|---|---|---|---|
+| C1 | **A quota retry after a checkpoint eviction puts the old save back.** `dbPutRoomy` frees other games' checkpoints first and retries at once, but asks `superseded()` only `if (freed && …)`, and `freed` counts ROMs. A newer persist, a Reset, a Delete or an Import landing while the checkpoints are deleted is overwritten; after Reset or Import the reboot boots on the old save, after Delete the deleted save is back and queued for Drive. | `SavePersistence.bug_ckpt_evict_retry_writes_older_save`, `bug_ckpt_evict_retry_undoes_reset`, `bug_ckpt_evict_retry_resurrects_deleted_save`, `bug_ckpt_evict_retry_over_import` | `retried`, set in the `catch` before either eviction, replaces `freed` in the `superseded()` check. | web/tests/ckpt-evict.test.mjs |
+| C2 | **A checkpoint's session lands over a newer one, or after a Reset.** `storeCheckpoint` checks `sessionSnapTs`/the epoch, then (battery not yet stored) `await persistSave`, then puts the session without checking again. Main Menu, a hide, a close or a switch in that await is replaced by the older moment; a Reset or Delete gets the pre-reset session back (carrying the wiped battery's signature; `addCheckpoint` re-checks, so the moment itself stays out). | `bug_ckpt_store_over_newer_session`, `bug_ckpt_store_undoes_session_reset` | `stale()` (ts, epoch, `sessionHeldFor`) checked at entry and again right after `await persistSave`. | web/tests/ckpt-store.test.mjs |
+| C3 | **The Saves panel's Reset is undone by a pull landing in it.** `resetCurrentSaveFile` detaches and deletes, but queues its Drive deletes (`markDelete`) only after its awaits; a pull that started downloading the save before the game was tapped passes all three of its checks (not loaded, not loading, not queued), writes it back, and the reboot boots on it. `resetGameAction` queues first and is safe (`reset_game_action_holds_off_pull`). | `bug_file_reset_undone_by_pull` | The three `markDelete`s run right after `retireSavePuts`, before the first await. | web/tests/reset-pull.test.mjs |

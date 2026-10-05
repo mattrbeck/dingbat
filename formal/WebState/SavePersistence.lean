@@ -8,7 +8,8 @@ What a game's battery save goes through on its way from the wasm core to the
 IndexedDB key `save:<game>` (and from there to Drive's upload queue), and back;
 and the session snapshot (`stateauto:<game>`) and checkpoints that carry it.
 
-`step` models the code at 03f88d6c (line numbers are at that commit). The
+`step` models the code as fixed by 87eea59f ("web: three save races the
+SavePersistence re-audit found"; line numbers are at that commit). The
 machine at dd7ba741f, and its seven counterexamples, are in this file's
 history; each trace is replayed against `step` as a `regress_*` theorem. The
 re-audit at 03f88d6c added the checkpoints (6ee01e88: `takeCheckpoint`,
@@ -16,7 +17,8 @@ re-audit at 03f88d6c added the checkpoints (6ee01e88: `takeCheckpoint`,
 `resumeMoment`), the hero's Resume that boots straight into the session
 (`launchRom`'s `resume`, `loadRom`'s `opts.resume`), the session epochs, the
 Saves panel's Reset as its own path, and the Drive pull's re-check of the
-delete queue; it found three new counterexamples (`bug_*` below).
+delete queue; it found three new counterexamples, fixed in 87eea59f and
+replayed below as `regress_*` theorems.
 
 * The core keeps the cart's battery RAM in memory and marks it dirty when the
   game writes it (`ram_dirty`, gb.nim; `storage.dirty`, gba storage.nim). Once
@@ -24,79 +26,80 @@ delete queue; it found three new counterexamples (`bug_*` below).
   next to the ROM (`handle_saves`: gb.nim 3443 `mbc_save`, gba.nim 2206
   `write_save`); a paused core runs no frames, so a state loaded while paused
   leaves its RAM in the core only. `wasm_flush_save` (dingbat_wasm.nim 461)
-  writes it on demand: `flushSoloSave` (7433) calls it for the loaded solo
+  writes it on demand: `flushSoloSave` (7440) calls it for the loaded solo
   game, and every reader of that game's file calls `flushSoloSave` first.
   Every solo ROM is the FS file `rom.<ext>` (written at the boot, loadRom
-  11688), so there is ONE battery file, `rom.sav`, shared by every game.
-* `persistSave(romName, originalName)` (7440) flushes the solo core when
-  `romName` is the loaded game's (7443), reads that file synchronously, skips
-  if its signature equals `lastSaveSig` for the same name (7447), else takes
-  the next number in `persistSeq` (7426, 7448-7449) and
-  `await dbPutRoomy("save:" + originalName, ...)` (6166; the put is issued in
+  11700), so there is ONE battery file, `rom.sav`, shared by every game.
+* `persistSave(romName, originalName)` (7447) flushes the solo core when
+  `romName` is the loaded game's (7450), reads that file synchronously, skips
+  if its signature equals `lastSaveSig` for the same name (7454), else takes
+  the next number in `persistSeq` (7433, 7455-7456) and
+  `await dbPutRoomy("save:" + originalName, ...)` (6169; the put is issued in
   the same segment). On a QuotaExceededError dbPutRoomy first frees other
-  games' checkpoints (`evictCheckpoints` 8448, 6181-6184) and puts again; if
+  games' checkpoints (`evictCheckpoints` 8460, 6188-6191) and puts again; if
   none were freed (or the put fails again) it evicts a ROM (`evictOldestRom`,
-  6185) and puts again unless something has taken a later number for the same
-  save meanwhile (`superseded()`, 6171, asked only once a ROM has gone:
-  `freed`). Then it remembers the signature and calls
-  `markUpload("save:" + originalName)` (7460-7463). A later persist, and a
-  delete (`retireSavePuts` 7427: deleteKeys 1700, resetCurrentSaveFile 1728)
-  or an import (7592) of the same save, each take a number.
-  Callers: the 5 s `setInterval` (15921), the settle watch, `beforeunload`
-  (15931), `visibilitychange` (15957), `pagehide` (15972) and Main Menu
-  (`showMainMenu` 13491-13494) with the *current* names; `loadRom` (11672)
-  for the outgoing game; `unloadGame` (14192) for the game it closes, before
-  its names are nulled; `storeCheckpoint` (8341-8344) and `resumeMoment`
-  (9098) for the loaded game.
-* `loadRom` (11646): outgoing game: `await persistAutoState()`,
-  `await storeLastFrame()`, `await persistSave(...)` (11666-11674); then
-  `loadingName = g` and `await dbGet("save:" + g)` (11678-11679); then ONE
-  segment (11688-11726) writes the ROM, `installSave` (7477: writes the FS
+  6192). Before every retry it asks `superseded()` (6177, `retried` 6186):
+  something that took a later number for the same save meanwhile wins, and
+  the retry gives way. Then it remembers the signature and calls
+  `markUpload("save:" + originalName)` (7467-7470). A later persist, and a
+  delete (`retireSavePuts` 7434: deleteKeys 1700, resetCurrentSaveFile 1728)
+  or an import (7599) of the same save, each take a number.
+  Callers: the 5 s `setInterval` (15933), the settle watch, `beforeunload`
+  (15943), `visibilitychange` (15969), `pagehide` (15984) and Main Menu
+  (`showMainMenu` 13503-13506) with the *current* names; `loadRom` (11684)
+  for the outgoing game; `unloadGame` (14204) for the game it closes, before
+  its names are nulled; `storeCheckpoint` (8350-8356) and `resumeMoment`
+  (9110) for the loaded game.
+* `loadRom` (11658): outgoing game: `await persistAutoState()`,
+  `await storeLastFrame()`, `await persistSave(...)` (11678-11686); then
+  `loadingName = g` and `await dbGet("save:" + g)` (11690-11691); then ONE
+  segment (11700-11738) writes the ROM, `installSave` (7484: writes the FS
   `.sav`, or unlinks it when there is no stored save, and sets `lastSaveSig`
   to what it wrote), `initFromEmscripten` (builds the new core, which reads
   `rom.sav` if it exists, gba.nim 1847 `new_storage`, gb `mbc_load`; no flush
   of the outgoing core), clears `loadingName`, names the game, puts back the
-  session the launch chose (`opts.resume`, 11702-11710: unless `force`, only
+  session the launch chose (`opts.resume`, 11714-11722: unless `force`, only
   when its `saveSig` is the battery just installed, `liveSaveSig`), and sets
-  `paused = false`. Then `offerAutoResume` (11764, 8791) unless the launch
+  `paused = false`. Then `offerAutoResume` (11776, 8803) unless the launch
   chose (`skipResumeOffer`).
-* Resume snapshot: `persistAutoState` (8126) stores `stateauto:<game>` with
-  the FS `.sav` signature (`liveSaveSig` 8744, which flushes first: the
+* Resume snapshot: `persistAutoState` (8133) stores `stateauto:<game>` with
+  the FS `.sav` signature (`liveSaveSig` 8756, which flushes first: the
   signature is the battery the state carries) and stamps `sessionSnapTs`
-  (8149); `offerAutoResume` and the toast's tap re-check it against
-  `save:<game>` (`autoStateMatchesSave` 8752), and the tap also against the
-  live battery (8806-8807) before `applyStateBytes` (7923), which marks the
+  (8156); `offerAutoResume` and the toast's tap re-check it against
+  `save:<game>` (`autoStateMatchesSave` 8764), and the tap also against the
+  live battery (8818-8819) before `applyStateBytes` (7930), which marks the
   cart RAM dirty when it changed (gb savestate.nim 975, gba savestate.nim
-  774). The hero's Resume (`launchRom(name, {resume: true})` 6456 ->
-  `resumeSessionFor` 8760, the same check) hands the session to `loadRom`.
-* Checkpoints: every minute of play `maybeCheckpoint` (8302) runs
-  `takeCheckpoint` (8312): flush, capture, stamp `sessionSnapTs` and note the
-  session epoch, pack in a worker. `storeCheckpoint` (8335) drops it if a
-  newer snapshot was taken or the session deleted since (8337; the epoch is
-  bumped by `deleteKeys` 1702-1705 where it deletes `stateauto:`); else, if
-  the battery it carries is not the stored one, `await persistSave`
-  (8341-8344); then the session put (8346), the picture's, and
-  `addCheckpoint` (8411: read the index, re-check the epoch (8413), write
-  the moment). The moments sheet's `resumeMoment` (9092) launches with an
+  774). The hero's Resume (`launchRom(name, {resume: true})` 6463 ->
+  `resumeSessionFor` 8772, the same check) hands the session to `loadRom`.
+* Checkpoints: every minute of play `maybeCheckpoint` (8309) runs
+  `takeCheckpoint` (8319): flush, capture, stamp `sessionSnapTs` and note the
+  session epoch, pack in a worker. `storeCheckpoint` (8342) drops it if a
+  newer snapshot was taken or the session deleted (or held) since (`stale`
+  8345-8347; the epoch is bumped by `deleteKeys` 1702-1705 where it deletes
+  `stateauto:`); else, if the battery it carries is not the stored one,
+  `await persistSave` (8350-8352) and the same check again (8355); then the
+  session put (8358), the picture's, and
+  `addCheckpoint` (8423: read the index, re-check the epoch (8425), write
+  the moment). The moments sheet's `resumeMoment` (9104) launches with an
   earlier moment, `force`: its battery goes back with it (the newer save
   kept aside).
-* Slots: `saveToSlot` (7985), `loadFromSlot` (8025). Import:
-  `applyImportedSave` (7572) detaches the game (as Reset), retires waiting
+* Slots: `saveToSlot` (7992), `loadFromSlot` (8032). Import:
+  `applyImportedSave` (7579) detaches the game (as Reset), retires waiting
   puts, puts the imported bytes, `markUpload`s them and reboots. Delete:
-  `deleteGameAction` (2151) -> `unloadGame({flushSave:false})` (14173) ->
-  `deleteGameEverywhere` (4668: queues every key's Drive delete first, 4675).
-  Close: `unloadGame` (14173): after its awaits, if no later load or close
+  `deleteGameAction` (2154) -> `unloadGame({flushSave:false})` (14185) ->
+  `deleteGameEverywhere` (4671: queues every key's Drive delete first, 4678).
+  Close: `unloadGame` (14185): after its awaits, if no later load or close
   has taken the token, flush, detach and unlink in one segment
-  (14192-14195). Reset: `resetGameAction` (2077) detaches a loaded game first
-  (`detachLoadedGame` 1745: the token, unlink the FS .sav, null the names),
-  then `resetGameSaves` (4659: queues the Drive deletes, 4665, then deletes,
+  (14204-14207). Reset: `resetGameAction` (2080) detaches a loaded game first
+  (`detachLoadedGame` 1748: the token, unlink the FS .sav, null the names),
+  then `resetGameSaves` (4662: queues the Drive deletes, 4668, then deletes,
   `deleteSaveData` 1712), then reboots it with `loadRom`. The Saves panel's
   Reset (`resetCurrentSaveFile` 1723) detaches, deletes the save, the session
-  and the checkpoints (slots stay), and queues its Drive deletes only after
-  those awaits (1733-1735), then reboots. Drive pull (`pullSyncInner` 4201):
-  the `isRomLoaded || loadingName` guard before the download (4414) and again
-  after it (4442), the delete queue (4449), then `writeSyncBytes` (4451,
-  3215). Pulls and flushes run one at a time (`runExclusive` 3753).
+  and the checkpoints (slots stay), having queued its Drive deletes before
+  the first await (1732-1734), then reboots. Drive pull (`pullSyncInner` 4204):
+  the `isRomLoaded || loadingName` guard before the download (4417) and again
+  after it (4445), the delete queue (4452), then `writeSyncBytes` (4454,
+  3218). Pulls and flushes run one at a time (`runExclusive` 3756).
 
 ## Model
 
@@ -136,7 +139,7 @@ promise resolutions runs in one microtask checkpoint).
   `dbGet` and `keepOldSave` (a copy under `oldsave:`, not modelled) are left
   to `tick` and the moment read.
 * `persistAutoState`'s skips are not modelled: with no frame, state load or
-  boot since the last snapshot and no checkpoint in flight (8133) the record
+  boot since the last snapshot and no checkpoint in flight (8140) the record
   it would write is the one already stored (but for its ts); a session held
   after a refused too-new state (`sessionHeldFor`) only arises from a refusal
   this model does not have (the core's version check). The snapshot always
@@ -188,8 +191,8 @@ structure Core where
   dirty : Bool          -- gb `cart.ram_dirty` / gba `storage.dirty`
 deriving DecidableEq, Repr
 
-/-- A `stateauto:<game>` record (persistAutoState 8157), or a checkpoint's
-    (takeCheckpoint 8316-8319): the captured core and `saveSig`. -/
+/-- A `stateauto:<game>` record (persistAutoState 8164), or a checkpoint's
+    (takeCheckpoint 8323-8326): the captured core and `saveSig`. -/
 structure Snap where
   core    : Core
   saveSig : Option Bytes   -- sigOfSave(FS .sav at capture); none = no .sav
@@ -198,60 +201,62 @@ deriving DecidableEq, Repr
 /-- What the awaiting caller of a `persistSave` does when it returns. -/
 inductive After where
   | none                      -- the setInterval / pagehide / beforeunload / unloadGame call
-  | load (g : Nat) (gb : Bool) -- loadRom 11672: the rest of loadRom
+  | load (g : Nat) (gb : Bool) -- loadRom 11684: the rest of loadRom
 deriving DecidableEq, Repr
 
 inductive Pending where
-  /-- persistSave 7450: `dbPutRoomy` put issued and accepted; awaiting it. -/
+  /-- persistSave 7457: `dbPutRoomy` put issued and accepted; awaiting it. -/
   | persist (g : Nat) (b : Bytes) (k : After)
-  /-- dbPutRoomy 6179-6184: the put failed with QuotaExceededError; awaiting
-      `evictCheckpoints`. Resumed `ok`: a checkpoint was freed and the put,
-      issued again (`continue`), is accepted, with no `superseded()` check
-      (6171 asks only once a ROM has gone). Otherwise (nothing freed, or the
-      put failed again) on to a ROM: `evict`. -/
+  /-- dbPutRoomy 6185-6190: the put failed with QuotaExceededError
+      (`retried` 6186); awaiting `evictCheckpoints`. Resumed `ok`: a
+      checkpoint was freed (`continue`), and unless something has taken a
+      number for this save past `t` (6177) the put, issued again, is
+      accepted. Otherwise (nothing freed, or the put failed again) on to a
+      ROM: `evict`. -/
   | evictCk (g : Nat) (b : Bytes) (k : After) (t : Nat)
-  /-- dbPutRoomy 6185: awaiting `evictOldestRom`, after which the same bytes
+  /-- dbPutRoomy 6192: awaiting `evictOldestRom`, after which the same bytes
       are put again, unless something has taken a number for this save past
-      `t` (6171). -/
+      `t` (6177). -/
   | evict (g : Nat) (b : Bytes) (k : After) (t : Nat)
-  /-- loadRom 11668-11672: awaiting persistAutoState + storeLastFrame. -/
+  /-- loadRom 11680-11684: awaiting persistAutoState + storeLastFrame. -/
   | loadPre (g : Nat) (gb : Bool)
-  /-- loadRom 11679: awaiting `dbGet("save:"+g)` (= v). -/
+  /-- loadRom 11691: awaiting `dbGet("save:"+g)` (= v). -/
   | loadRestore (g : Nat) (gb : Bool) (v : Option Bytes)
-  /-- offerAutoResume 8796: awaiting `dbGet(stateauto)` (= a). -/
+  /-- offerAutoResume 8808: awaiting `dbGet(stateauto)` (= a). -/
   | offerGet (g : Nat) (a : Option Snap)
-  /-- offerAutoResume 8799 / autoStateMatchesSave: awaiting `dbGet(save)`. -/
+  /-- offerAutoResume 8811 / autoStateMatchesSave: awaiting `dbGet(save)`. -/
   | offerCheck (g : Nat) (a : Snap) (v : Option Bytes)
-  /-- the Resume toast's handler 8806: awaiting `dbGet(save)`. -/
+  /-- the Resume toast's handler 8818: awaiting `dbGet(save)`. -/
   | tapCheck (g : Nat) (a : Snap) (v : Option Bytes)
-  /-- unloadGame 14180-14184: awaiting persistAutoState + storeLastFrame. -/
+  /-- unloadGame 14192-14196: awaiting persistAutoState + storeLastFrame. -/
   | unloadPre (g : Nat) (flush : Bool) (thenDelete : Bool)
-  /-- deleteGameEverywhere 4676 -> deleteKeys: awaiting the rom/art/frame deletes. -/
+  /-- deleteGameEverywhere 4679 -> deleteKeys: awaiting the rom/art/frame deletes. -/
   | delSaves (g : Nat)
   /-- ... save:g deleted; awaiting the slot, session and checkpoint deletes. -/
   | delRest (g : Nat)
-  /-- resetGameAction 2081 / resetCurrentSaveFile 1729: save:g deleted; awaiting
+  /-- resetGameAction 2084 / resetCurrentSaveFile 1735: save:g deleted; awaiting
       the other deletes. `loaded`: the game was loaded and has been detached;
       `gb`: its core's kind; `file`: the Saves panel's Reset. -/
   | resetRest (g : Nat) (loaded : Bool) (gb : Bool) (file : Bool)
   /-- loadFromSlot: awaiting `dbGet(state:g)` (= v). -/
   | slotGet (g : Nat) (v : Option Core)
-  /-- applyImportedSave 7593: awaiting `dbPut(save:g)` of the imported bytes. -/
+  /-- applyImportedSave 7600: awaiting `dbPut(save:g)` of the imported bytes. -/
   | importPut (g : Nat) (gb : Bool)
-  /-- Drive pull 4414-4438: passed the guard, awaiting the download. -/
+  /-- Drive pull 4417-4441: passed the guard, awaiting the download. -/
   | pull (g : Nat) (b : Bytes)
-  /-- takeCheckpoint 8327: the worker packing; then storeCheckpoint's first
+  /-- takeCheckpoint 8334: the worker packing; then storeCheckpoint's first
       segment. `n`: the `sessionSnapTs` it stamped; `e`: the epoch it noted. -/
   | ckStore (g : Nat) (a : Snap) (n e : Nat)
-  /-- storeCheckpoint 8343: awaiting persistSave; then the session put (8346). -/
-  | ckPut (g : Nat) (a : Snap) (e : Nat)
-  /-- storeCheckpoint 8346-8358 -> addCheckpoint 8412: awaiting the puts and
-      readCheckpointIndex; then the epoch re-check (8413) and the write. -/
+  /-- storeCheckpoint 8352: awaiting persistSave; then `stale()` again (8355)
+      and the session put (8358). -/
+  | ckPut (g : Nat) (a : Snap) (n e : Nat)
+  /-- storeCheckpoint 8358-8370 -> addCheckpoint 8424: awaiting the puts and
+      readCheckpointIndex; then the epoch re-check (8425) and the write. -/
   | ckAdd (g : Nat) (a : Snap) (e : Nat)
-  /-- launchRom 6448-6456 with `resume`: awaiting resumeSessionFor (its
+  /-- launchRom 6455-6463 with `resume`: awaiting resumeSessionFor (its
       `dbGet(stateauto)` read `a`) and the ROM. -/
   | heroGet (g : Nat) (gb : Bool) (a : Option Snap)
-  /-- resumeMoment 9099-9110: awaiting momentRecord (read `m`), the save
+  /-- resumeMoment 9111-9122: awaiting momentRecord (read `m`), the save
       read and keepOldSave; then launchRom with the moment, `force`. -/
   | momGet (g : Nat) (gb : Bool) (m : Option Snap)
 deriving DecidableEq, Repr
@@ -270,13 +275,13 @@ structure St where
   paused  : Bool                 -- paused
   cur     : Option Nat           -- currentRomName && currentOriginalName
   lastSig : Option (Nat × Bytes) -- lastSaveSigKey / lastSaveSig
-  seq     : Nat → Nat            -- persistSeq (7426): the last number taken for save:g
+  seq     : Nat → Nat            -- persistSeq (7433): the last number taken for save:g
   loading : Option Nat           -- loadingName
   pend    : List Pending         -- in-flight continuations
   toast   : Option (Nat × Snap)  -- the Resume action toast
   ckpt    : Nat → Option Snap    -- IndexedDB "ckpt<slot>:<g>" + "ckpts:<g>" (one moment)
-  snapTs  : Nat → Nat            -- sessionSnapTs (8122): the newest snapshot's stamp
-  epoch   : Nat → Nat            -- sessionEpochs (8123)
+  snapTs  : Nat → Nat            -- sessionSnapTs (8129): the newest snapshot's stamp
+  epoch   : Nat → Nat            -- sessionEpochs (8130)
   boot    : Nat → Option (Snap × Bool) -- the session g's load carries (opts.resume; force)
   queued  : Nat → Bool           -- syncState.queueDel holds "save:<g>"
   -- ghost state (not in the JS; for stating properties)
@@ -286,6 +291,8 @@ structure St where
   deletes : List Nat             -- markDelete("save:"+g)
   wiped   : Nat → Option Nat     -- clock when save:g was last deleted by the user
   floor   : Nat → Nat            -- newest version of g's save ever written to rom.sav or save:g
+  sessAt  : Nat → Nat × Nat      -- the stored session's (sessionSnapTs stamp, epoch) when taken
+  sessMax : Nat → Nat            -- the newest stamp ever stored as g's session
 
 def init : St :=
   { clock := 1, idb := fun _ => none, auto := fun _ => none, slot := fun _ => none,
@@ -293,29 +300,30 @@ def init : St :=
     loading := none, pend := [], toast := none, ckpt := fun _ => none, snapTs := fun _ => 0,
     epoch := fun _ => 0, boot := fun _ => none, queued := fun _ => false,
     writes := [], uploads := [], resumes := [],
-    deletes := [], wiped := fun _ => none, floor := fun _ => 0 }
+    deletes := [], wiped := fun _ => none, floor := fun _ => 0,
+    sessAt := fun _ => (0, 0), sessMax := fun _ => 0 }
 
 inductive Ev where
   | play                    -- the running game writes its cart battery RAM
   | frame                   -- handle_saves: dirty RAM -> rom.sav (once per frame)
   | pause                   -- showMainMenu (home) / pause button
-  | unpause                 -- resumeGame (13503): needs a loaded game
-  | tick (ok : Bool)        -- setInterval 15921 / pagehide 15972 / beforeunload 15931 /
-                            -- Main Menu 13493: persistSave(current names); ok = the put is accepted
-  | hide                    -- visibilitychange 15957 / pagehide / Main Menu 13492: persistAutoState()
-  | launch (g : Nat) (gb : Bool) -- loadRom("rom.<ext>", g): tile tap (launchRom 6444), file drop, restart
+  | unpause                 -- resumeGame (13515): needs a loaded game
+  | tick (ok : Bool)        -- setInterval 15933 / pagehide 15984 / beforeunload 15943 /
+                            -- Main Menu 13505: persistSave(current names); ok = the put is accepted
+  | hide                    -- visibilitychange 15969 / pagehide / Main Menu 13504: persistAutoState()
+  | launch (g : Nat) (gb : Bool) -- loadRom("rom.<ext>", g): tile tap (launchRom 6451), file drop, restart
   | resume (i : Nat) (ok : Bool) -- the i-th pending continuation runs
-  | close                   -- "Close" on the paused card: unloadGame() (14173)
-  | delete (g : Nat)        -- deleteGameAction(g) (2151)
-  | reset (g : Nat) (file : Bool) -- resetGameAction(g) (2077); file: the Saves panel's resetCurrentSaveFile (1723)
+  | close                   -- "Close" on the paused card: unloadGame() (14185)
+  | delete (g : Nat)        -- deleteGameAction(g) (2154)
+  | reset (g : Nat) (file : Bool) -- resetGameAction(g) (2080); file: the Saves panel's resetCurrentSaveFile (1723)
   | tapResume               -- tap "Resume" on the toast
   | slotSave                -- saveToSlot(0)
   | slotLoad                -- loadFromSlot(0)
-  | importSave              -- applyImportedSave, after the confirms (7590)
-  | pullStart (g : Nat)     -- Drive pull reaches save:g (4414)
-  | ckpt                    -- maybeCheckpoint (8302) -> takeCheckpoint (8312), from a running tick
-  | hero (g : Nat) (gb : Bool)   -- the hero's Resume: launchRom(g, {resume: true}) (6444)
-  | moment (g : Nat) (gb : Bool) -- "Resume from earlier": resumeMoment(g, m) (9092)
+  | importSave              -- applyImportedSave, after the confirms (7597)
+  | pullStart (g : Nat)     -- Drive pull reaches save:g (4417)
+  | ckpt                    -- maybeCheckpoint (8309) -> takeCheckpoint (8319), from a running tick
+  | hero (g : Nat) (gb : Bool)   -- the hero's Resume: launchRom(g, {resume: true}) (6451)
+  | moment (g : Nat) (gb : Bool) -- "Resume from earlier": resumeMoment(g, m) (9104)
   | driveFlush (g : Nat)    -- a Drive flush sends save:g's queued delete (flushSyncInner)
 deriving DecidableEq, Repr
 
@@ -325,7 +333,7 @@ def push (s : St) (p : Pending) : St := { s with pend := s.pend ++ [p] }
 def raise (s : St) (b : Bytes) : St :=
   { s with floor := upd s.floor b.game (max (s.floor b.game) b.ver) }
 
-/-- `flushSoloSave` (7433) -> `wasm_flush_save`: with a game loaded, the core's
+/-- `flushSoloSave` (7440) -> `wasm_flush_save`: with a game loaded, the core's
     dirty battery RAM into `rom.sav`, now. -/
 def flushCore (s : St) : St :=
   match s.cur, s.core with
@@ -337,7 +345,7 @@ def flushCore (s : St) : St :=
     else s
   | _, _ => s
 
-/-- loadRom 11677-11679 after the outgoing persist: `loadingName = g`, the
+/-- loadRom 11689-11691 after the outgoing persist: `loadingName = g`, the
     dbGet of the incoming save. Nothing is switched yet: the outgoing game
     stays named, on its own `rom.sav`, until the boot (`l4`). -/
 def l3 (s : St) (g : Nat) (gb : Bool) : St :=
@@ -347,34 +355,36 @@ def finish (s : St) : After → St
   | .none => s
   | .load g gb => l3 s g gb
 
-/-- persistSave 7440-7451, its synchronous first segment: the flush (for the
+/-- persistSave 7447-7458, its synchronous first segment: the flush (for the
     loaded game's file), then the read. -/
 def persistCall (s : St) (g : Nat) (ok : Bool) (k : After) : St :=
-  let s := if s.cur = some g then flushCore s else s        -- 7443
+  let s := if s.cur = some g then flushCore s else s        -- 7450
   match s.fs with
-  | none => finish s k                                     -- 7444-7445 no FS file
+  | none => finish s k                                     -- 7451-7452 no FS file
   | some b =>
-    if s.lastSig = some (g, b) then finish s k              -- 7447 unchanged
+    if s.lastSig = some (g, b) then finish s k              -- 7454 unchanged
     else
-      let t := s.seq g + 1                                  -- 7448-7449 persistSeq
+      let t := s.seq g + 1                                  -- 7455-7456 persistSeq
       let s := { s with seq := upd s.seq g t }
-      if ok then                                            -- 7450-7451 put issued, accepted
+      if ok then                                            -- 7457-7458 put issued, accepted
         push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
           (.persist g b k)
-      else push s (.evictCk g b k t)                        -- 6179-6184 quota: checkpoints first
+      else push s (.evictCk g b k t)                        -- 6185-6191 quota: checkpoints first
 
-/-- persistAutoState 8126-8161 (the dbPut's effect; nobody awaits its tail):
+/-- persistAutoState 8133-8168 (the dbPut's effect; nobody awaits its tail):
     the state captured, then `liveSaveSig` flushes and reads the file; the
-    snapshot's stamp (8149). -/
+    snapshot's stamp (8156). -/
 def autoSnap (s : St) : St :=
   match s.cur, s.core with
   | some g, some c =>
     let s1 := flushCore s
     { s1 with auto := upd s1.auto g (some ⟨c, s1.fs⟩),
-              snapTs := upd s1.snapTs g (s1.snapTs g + 1) }
+              snapTs := upd s1.snapTs g (s1.snapTs g + 1),
+              sessAt := upd s1.sessAt g (s1.snapTs g + 1, s1.epoch g),
+              sessMax := upd s1.sessMax g (max (s1.sessMax g) (s1.snapTs g + 1)) }
   | _, _ => s
 
-/-- loadRom 11646-11668, first segment: the load token (which clears
+/-- loadRom 11658-11680, first segment: the load token (which clears
     `loadingName`), the session it carries (`opts.resume`, `r`), then the
     outgoing game's snapshot and await. -/
 def launchCall (s : St) (g : Nat) (gb : Bool) (r : Option (Snap × Bool)) : St :=
@@ -383,7 +393,7 @@ def launchCall (s : St) (g : Nat) (gb : Bool) (r : Option (Snap × Bool)) : St :
   | some _ => push (autoSnap s) (.loadPre g gb)
   | none => l3 s g gb          -- nothing loaded: straight to the dbGet
 
-/-- offerAutoResume 8791-8796: first segment. -/
+/-- offerAutoResume 8803-8808: first segment. -/
 def offerStart (s : St) : St :=
   match s.cur with
   | some n => push s (.offerGet n (s.auto n))
@@ -399,14 +409,14 @@ def applyState (s : St) (sc : Core) : St :=
 def restamp (t : Nat) (sc : Core) : Core :=
   { sc with ram := sc.ram.map (fun r => ⟨r.game, t⟩) }
 
-/-- loadRom 11688-11726, one segment: installSave replaces `rom.sav` by exactly
+/-- loadRom 11700-11738, one segment: installSave replaces `rom.sav` by exactly
     the incoming save (unlinks it when there is none) and remembers its
     signature; initFromEmscripten builds the new core on it (and flushes no
     outgoing core); `loadingName` is cleared and the game named. Then the
-    session the launch chose goes in (11702-11710): unless forced, only when
+    session the launch chose goes in (11714-11722): unless forced, only when
     its `saveSig` is the battery just installed (`liveSaveSig`: the new core
     is clean, so the file is `v`); a forced moment is the user's choice of
-    save, a fresh version. With none, offerAutoResume's start (11764). -/
+    save, a fresh version. With none, offerAutoResume's start (11776). -/
 def l4 (s : St) (g : Nat) (gb : Bool) (v : Option Bytes) : St :=
   let s1 := { s with fs := v, cur := some g, paused := false, core := some ⟨g, gb, v, false⟩,
                      loading := none, lastSig := v.map (fun b => (g, b)) }
@@ -420,10 +430,10 @@ def l4 (s : St) (g : Nat) (gb : Bool) (v : Option Bytes) : St :=
 def gbOf (s : St) : Bool := match s.core with | some c => c.gb | none => false
 
 /-- A delete or an import of save:g takes a `persistSeq` number
-    (`retireSavePuts` 7427): a put waiting on an eviction gives way. -/
+    (`retireSavePuts` 7434): a put waiting on an eviction gives way. -/
 def retire (s : St) (g : Nat) : St := { s with seq := upd s.seq g (s.seq g + 1) }
 
-/-- storeCheckpoint 8341-8342: the battery the checkpoint carries is not the
+/-- storeCheckpoint 8350-8351: the battery the checkpoint carries is not the
     stored one, so it awaits persistSave first. -/
 def ckNeeds (s : St) (g : Nat) (a : Snap) : Bool :=
   decide (s.cur = some g) &&
@@ -431,55 +441,58 @@ def ckNeeds (s : St) (g : Nat) (a : Snap) : Bool :=
      | some b => decide (s.lastSig ≠ some (g, b))
      | none => true)
 
-/-- The session put of a checkpoint (8346), then addCheckpoint's awaits. -/
-def ckSession (s : St) (g : Nat) (a : Snap) (e : Nat) : St :=
-  push { s with auto := upd s.auto g (some a) } (.ckAdd g a e)
+/-- The session put of a checkpoint (8358), then addCheckpoint's awaits. -/
+def ckSession (s : St) (g : Nat) (a : Snap) (n e : Nat) : St :=
+  push { s with auto := upd s.auto g (some a), sessAt := upd s.sessAt g (n, e),
+                sessMax := upd s.sessMax g (max (s.sessMax g) n) } (.ckAdd g a e)
 
 def resumeP (s : St) (p : Pending) (ok : Bool) : St :=
   match p with
-  | .persist g b k =>                                       -- 7460-7463
+  | .persist g b k =>                                       -- 7467-7470
       finish { s with lastSig := some (g, b), uploads := s.uploads ++ [(g, b)] } k
   | .evictCk g b k t =>
-      if ok then                                            -- 6183 `continue`: put again,
-        push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
-          (.persist g b k)                                  -- no superseded() (freed = 0)
-      else push s (.evict g b k t)                          -- 6185: a ROM next
-  | .evict g b k t =>
-      if ok then                                            -- 6185-6186: evicted one
-        if s.seq g ≠ t then finish s k                      -- 6171, 7452: taken over
-        else                                                -- 6176: put again
+      if ok then                                            -- 6190 `continue`
+        if s.seq g ≠ t then finish s k                      -- 6177 (retried), 7459: taken over
+        else                                                -- 6182: put again
           push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
             (.persist g b k)
-      else finish { s with lastSig := none } k               -- 7453-7458: nothing left to give
-  | .loadPre g gb =>                                        -- 11672 (names re-read here)
+      else push s (.evict g b k t)                          -- 6192: a ROM next
+  | .evict g b k t =>
+      if ok then                                            -- 6192-6193: evicted one
+        if s.seq g ≠ t then finish s k                      -- 6177, 7459: taken over
+        else                                                -- 6182: put again
+          push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
+            (.persist g b k)
+      else finish { s with lastSig := none } k               -- 7460-7465: nothing left to give
+  | .loadPre g gb =>                                        -- 11684 (names re-read here)
       match s.cur with
       | some a => persistCall s a ok (.load g gb)
       | none => s
   | .loadRestore g gb v => l4 s g gb v
-  | .offerGet g a =>                                        -- 8798-8799
+  | .offerGet g a =>                                        -- 8810-8811
       match a with
       | some a' => if s.cur = some g then push s (.offerCheck g a' (s.idb g)) else s
       | none => s
-  | .offerCheck g a v =>                                    -- 8799-8801
+  | .offerCheck g a v =>                                    -- 8811-8813
       if a.saveSig = v ∧ s.cur = some g then { s with toast := some (g, a) } else s
-  | .tapCheck g a v =>                                      -- 8806-8811: stored and live save
+  | .tapCheck g a v =>                                      -- 8818-8823: stored and live save
       if a.saveSig = v ∧ s.cur = some g then
         let s := flushCore s                                -- liveSaveSig flushes first
         if a.saveSig = s.fs then applyState { s with resumes := s.resumes ++ [(g, a, v)] } a.core
         else s
       else s
   | .unloadPre g flush thenDelete =>
-      -- 14181-14185: a later load or close has taken the token: the game it
+      -- 14193-14197: a later load or close has taken the token: the game it
       -- set out to close is no longer the one named.
       if s.cur != some g then s
       else if flush then
-        -- 14192-14195: the flush (the core's RAM, then the file), while the
+        -- 14204-14207: the flush (the core's RAM, then the file), while the
         -- name still says the core is g's; then detach and unlink, one segment
         let s2 := persistCall s g ok .none
         { s2 with cur := none, fs := none, paused := true }
       else
-        let s2 := { s with cur := none, fs := none, paused := true }  -- 14193-14200
-        -- 2160 deleteGameEverywhere: the Drive deletes queued first (4675)
+        let s2 := { s with cur := none, fs := none, paused := true }  -- 14205-14212
+        -- 2163 deleteGameEverywhere: the Drive deletes queued first (4678)
         if thenDelete then push { s2 with queued := upd s2.queued g true } (.delSaves g) else s2
   | .delSaves g =>                                          -- deleteKeys 1700, 1706
       push (retire { s with idb := upd s.idb g none, wiped := upd s.wiped g (some s.clock),
@@ -489,36 +502,35 @@ def resumeP (s : St) (p : Pending) (ok : Bool) : St :=
                epoch := upd s.epoch g (s.epoch g + 1), ckpt := upd s.ckpt g none, -- checkpoints
                deletes := s.deletes ++ [g] }
   | .resetRest g loaded gb file =>
-      -- 1730-1736 / 4666 -> deleteSaveData 1714: the slots (resetGameAction
-      -- only), the session (with its epoch) and the checkpoints; the Saves
-      -- panel's Reset queues its Drive deletes only now (1733-1735)
+      -- 1736-1739 / 4669 -> deleteSaveData 1714: the slots (resetGameAction
+      -- only), the session (with its epoch) and the checkpoints
       let s1 := { s with slot := if file then s.slot else upd s.slot g none,
                          auto := upd s.auto g none,
                          epoch := upd s.epoch g (s.epoch g + 1), ckpt := upd s.ckpt g none,
-                         queued := if file then upd s.queued g true else s.queued,
                          deletes := s.deletes ++ [g] }
-      if loaded then launchCall s1 g gb none else s1        -- 2083 / 1736 the reboot: loadRom
+      if loaded then launchCall s1 g gb none else s1        -- 2086 / 1739 the reboot: loadRom
   | .slotGet _ v =>                                         -- loadFromSlot (no name re-check)
       match v with
       | some sc => applyState { s with clock := s.clock + 1 } (restamp s.clock sc)
       | none => s
-  | .importPut g gb =>                                      -- 7594-7598: markUpload, reboot
+  | .importPut g gb =>                                      -- 7601-7605: markUpload, reboot
       launchCall s g gb none
-  | .pull g b =>                                            -- 4442, 4449-4451: re-checked, written
+  | .pull g b =>                                            -- 4445, 4452-4454: re-checked, written
       if s.cur = some g ∨ s.loading = some g ∨ s.queued g = true then s
       else raise { s with idb := upd s.idb g (some b) } b
   | .ckStore g a n e =>
-      -- 8337: a newer snapshot, or a delete, since: dropped
+      -- 8347: a newer snapshot, or a delete, since: dropped
       if s.snapTs g = n ∧ s.epoch g = e then
-        if ckNeeds s g a then push (persistCall s g ok .none) (.ckPut g a e)  -- 8341-8343
-        else ckSession s g a e                              -- 8346 in this segment
+        if ckNeeds s g a then push (persistCall s g ok .none) (.ckPut g a n e)  -- 8350-8352
+        else ckSession s g a n e                            -- 8358 in this segment
       else s
-  | .ckPut g a e => ckSession s g a e                       -- 8346: no re-check after the await
-  | .ckAdd g a e =>                                         -- 8413: re-checked, 8423-8433
+  | .ckPut g a n e =>                                       -- 8355: `stale()` again, then 8358
+      if s.snapTs g = n ∧ s.epoch g = e then ckSession s g a n e else s
+  | .ckAdd g a e =>                                         -- 8425: re-checked, 8435-8445
       if s.epoch g = e then { s with ckpt := upd s.ckpt g (some a) } else s
-  | .heroGet g gb a =>                                      -- 6456-6472: the session, if it passed
+  | .heroGet g gb a =>                                      -- 6463-6479: the session, if it passed
       launchCall s g gb (if ok then a.map (fun a => (a, false)) else none)
-  | .momGet g gb m =>                                       -- 9100-9110
+  | .momGet g gb m =>                                       -- 9112-9122
       match m with
       | some a => launchCall s g gb (some (a, true))
       | none => s
@@ -552,31 +564,32 @@ def step (s : St) : Ev → St
       match s.pend[i]? with
       | some p => resumeP { s with pend := s.pend.eraseIdx i } p ok
       | none => s
-  | .close =>                                               -- 14173-14180: the token, then
+  | .close =>                                               -- 14185-14192: the token, then
       match s.cur with
       | some g => push (autoSnap { s with loading := none }) (.unloadPre g true false)
       | none => s
-  | .delete g =>                                            -- 2152-2160
+  | .delete g =>                                            -- 2155-2163
       if s.cur = some g then push { s with loading := none } (.unloadPre g false true)
-      else push { s with queued := upd s.queued g true } (.delSaves g)   -- 4675 queued first
+      else push { s with queued := upd s.queued g true } (.delSaves g)   -- 4678 queued first
   | .reset g file =>
-      -- resetGameAction 2078-2081: a loaded game is detached first
-      -- (detachLoadedGame 1745-1753: the token, unlink the FS .sav, null the
-      -- names), in the same segment as the queue (4665) and the first delete
+      -- resetGameAction 2081-2084: a loaded game is detached first
+      -- (detachLoadedGame 1748-1756: the token, unlink the FS .sav, null the
+      -- names), in the same segment as the queue (4668) and the first delete
       -- (deleteSaveData -> deleteKeys 1700, 1706: the persistSeq number, then
-      -- save:g). resetCurrentSaveFile 1725-1729: the same for the loaded game
-      -- (none loaded: it returns), without the queue.
+      -- save:g). resetCurrentSaveFile 1725-1735: the same for the loaded game
+      -- (none loaded: it returns), its queue (1732-1734) before the first
+      -- await since 87eea59f.
       let loaded := decide (s.cur = some g)
       if file && !loaded then s else
       let s0 := if loaded then { s with fs := none, cur := none, loading := none } else s
-      let s0 := if file then s0 else { s0 with queued := upd s0.queued g true }
+      let s0 := { s0 with queued := upd s0.queued g true }
       push (retire { s0 with idb := upd s0.idb g none, wiped := upd s0.wiped g (some s0.clock),
                              floor := upd s0.floor g 0 } g) (.resetRest g loaded (gbOf s) file)
   | .tapResume =>
       match s.toast with
       | some (g, a) =>
         let s1 := { s with toast := none }
-        if s.cur = some g then push s1 (.tapCheck g a (s.idb g)) else s1   -- 8802-8806
+        if s.cur = some g then push s1 (.tapCheck g a (s.idb g)) else s1   -- 8814-8818
       | none => s
   | .slotSave =>
       match s.cur, s.core with
@@ -587,7 +600,7 @@ def step (s : St) : Ev → St
       | some g => push s (.slotGet g (s.slot g))
       | none => s
   | .importSave =>
-      -- 7590-7593: detached (as Reset), the persistSeq number, the put issued
+      -- 7597-7600: detached (as Reset), the persistSeq number, the put issued
       match s.cur, s.core with
       | some g, some c =>
         let b : Bytes := ⟨g, s.clock⟩
@@ -596,10 +609,10 @@ def step (s : St) : Ev → St
           (.importPut g c.gb)
       | _, _ => s
   | .pullStart g =>
-      if s.cur = some g ∨ s.loading = some g then s         -- 4414
+      if s.cur = some g ∨ s.loading = some g then s         -- 4417
       else push { s with clock := s.clock + 1 } (.pull g ⟨g, s.clock⟩)
   | .ckpt =>
-      -- takeCheckpoint 8313-8331: flush, capture, read the file, the stamp
+      -- takeCheckpoint 8320-8338: flush, capture, read the file, the stamp
       -- and the epoch; the pack goes to the worker
       if s.paused then s else
       match s.cur, s.core with
@@ -608,8 +621,8 @@ def step (s : St) : Ev → St
         let n := s1.snapTs g + 1
         push { s1 with snapTs := upd s1.snapTs g n } (.ckStore g ⟨c, s1.fs⟩ n (s1.epoch g))
       | _, _ => s
-  | .hero g gb => push s (.heroGet g gb (s.auto g))          -- resumeSessionFor 8761
-  | .moment g gb => push s (.momGet g gb (s.ckpt g))         -- momentRecord 9099
+  | .hero g gb => push s (.heroGet g gb (s.auto g))          -- resumeSessionFor 8773
+  | .moment g gb => push s (.momGet g gb (s.ckpt g))         -- momentRecord 9111
   | .driveFlush g =>                                        -- runExclusive: not mid-pull
       if s.pend.any Pending.isPull then s else { s with queued := upd s.queued g false }
 
@@ -670,7 +683,7 @@ def POK : Pending → Prop
   | .slotGet _ v => ∀ c, v = some c → WF c
   | .pull g b => b.game = g
   | .ckStore _ a _ _ => WF a.core
-  | .ckPut _ a _ => WF a.core
+  | .ckPut _ a _ _ => WF a.core
   | .ckAdd _ a _ => WF a.core
   | .heroGet _ _ a => ∀ a', a = some a' → WF a'.core
   | .momGet _ _ m => ∀ a', m = some a' → WF a'.core
@@ -1054,9 +1067,9 @@ theorem finv_drop {s : St} (h : FInv s) (g : Nat) (sl : Nat → Option Core)
     · exact h.ckpt g' a ha
   · exact h.boot
 
-theorem ckSession_inv {s : St} (g : Nat) (a : Snap) (e : Nat) (h : FInv s) (ha : WF a.core) :
-    FInv (ckSession s g a e) :=
-  push_inv (p := .ckAdd g a e) (finv_auto h g a ha) ha
+theorem ckSession_inv {s : St} (g : Nat) (a : Snap) (n e : Nat) (h : FInv s) (ha : WF a.core) :
+    FInv (ckSession s g a n e) :=
+  push_inv (p := .ckAdd g a e) (finv_congr (finv_auto h g a ha) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl) ha
 
 theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p) :
     FInv (resumeP s p ok) := by
@@ -1065,7 +1078,9 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
   | evictCk g b k t =>
     simp only [resumeP]
     split
-    · exact push_inv (raise_inv b (finv_put h g b hp _)) (show POK (.persist g b k) from hp)
+    · split
+      · exact finish_inv k h
+      exact push_inv (raise_inv b (finv_put h g b hp _)) (show POK (.persist g b k) from hp)
     · exact push_inv h (show POK (.evict g b k t) from hp)
   | evict g b k t =>
     simp only [resumeP]
@@ -1165,7 +1180,7 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
           split at hc
           · cases hc
           · exact h.slot g' c hc)
-      (upd s.epoch g (s.epoch g + 1)) (if file then upd s.queued g true else s.queued)
+      (upd s.epoch g (s.epoch g + 1)) s.queued
       (s.deletes ++ [g])
     split
     · exact launchCall_inv g gb none h1 (fun _ _ hr => by cases hr)
@@ -1193,10 +1208,14 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
           rename_i hn
           simp only [ckNeeds, Bool.and_eq_true, decide_eq_true_eq] at hn
           exact fs_of_cur h hn.1 b hb
-        exact push_inv (persistCall_inv g ok .none h hfs) (show POK (.ckPut g a e) from hp)
-      · exact ckSession_inv g a e h hp
+        exact push_inv (persistCall_inv g ok .none h hfs) (show POK (.ckPut g a n e) from hp)
+      · exact ckSession_inv g a n e h hp
     · exact h
-  | ckPut g a e => exact ckSession_inv g a e h hp
+  | ckPut g a n e =>
+    simp only [resumeP]
+    split
+    · exact ckSession_inv g a n e h hp
+    · exact h
   | ckAdd g a e =>
     simp only [resumeP]
     split
@@ -1368,11 +1387,8 @@ theorem step_inv {s : St} (e : Ev) (h : FInv s) : FInv (step s e) := by
     · exact h
     generalize (if decide (s.cur = some g) = true then { s with fs := none, cur := none, loading := none }
                 else s) = s0 at h0 ⊢
-    have h1 : FInv (if file = true then s0 else { s0 with queued := upd s0.queued g true }) := by
-      split
-      · exact h0
-      · exact finv_congr h0 rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
-    generalize (if file = true then s0 else { s0 with queued := upd s0.queued g true }) = s1 at h1 ⊢
+    have h1 : FInv { s0 with queued := upd s0.queued g true } :=
+      finv_congr h0 rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
     refine push_inv ?_ trivial
     simp only [retire]
     constructor
@@ -1783,6 +1799,425 @@ theorem resume_only_on_sig_match {s : St} (h : Reachable s) : ResumeGuard s :=
 theorem persist_marks_upload {s : St} (h : Reachable s) : UploadInv s :=
   (reachable_ginv h).upload
 
+/-! ## The stored session is the newest one taken, and taken since its last delete
+
+The checkpoint's session put (fixed in 87eea59f) asks again, after its
+persist's await, whether a newer snapshot was taken or the session deleted
+since. With that, every `stateauto:<g>` record is the newest snapshot of `g`
+ever stored, and was taken after the session's last delete (its epoch is the
+current one), under every interleaving of checkpoints, Main Menu, hides,
+closes, switches, Resets and Deletes. At 03f88d6c this failed:
+`regress_ckpt_store_over_newer_session`, `regress_ckpt_store_undoes_session_reset`
+replay the traces. -/
+
+/-- The session bookkeeping a state carries. -/
+def SP (s : St) := (s.auto, s.snapTs, s.epoch, s.sessAt, s.sessMax)
+
+def SessInv (s : St) : Prop :=
+  ∀ g, s.sessMax g ≤ s.snapTs g ∧ (s.auto g ≠ none → s.sessAt g = (s.sessMax g, s.epoch g))
+
+theorem sinv_of_sp {s s' : St} (h : SessInv s) (e : SP s' = SP s) : SessInv s' := by
+  simp only [SP, Prod.mk.injEq] at e
+  obtain ⟨e1, e2, e3, e4, e5⟩ := e
+  intro g
+  rw [e1, e2, e3, e4, e5]
+  exact h g
+
+theorem flushCore_sp (s : St) : SP (flushCore s) = SP s := by
+  obtain ⟨f, c, fl, e⟩ := flushCore_eq s
+  rw [e]; rfl
+
+theorem finish_sp (s : St) (k : After) : SP (finish s k) = SP s := by
+  cases k <;> rfl
+
+theorem persistCall_sp (s : St) (g : Nat) (ok : Bool) (k : After) :
+    SP (persistCall s g ok k) = SP s := by
+  unfold persistCall
+  have e0 : SP (if s.cur = some g then flushCore s else s) = SP s := by
+    split
+    · exact flushCore_sp s
+    · rfl
+  generalize (if s.cur = some g then flushCore s else s) = s' at e0 ⊢
+  dsimp only
+  split
+  · rw [finish_sp]; exact e0
+  · split
+    · rw [finish_sp]; exact e0
+    · split
+      · exact e0
+      · exact e0
+
+theorem applyState_sp (s : St) (sc : Core) : SP (applyState s sc) = SP s := by
+  unfold applyState
+  split
+  · split <;> rfl
+  · rfl
+
+theorem offerStart_sp (s : St) : SP (offerStart s) = SP s := by
+  unfold offerStart
+  split <;> rfl
+
+theorem l4_sp (s : St) (g : Nat) (gb : Bool) (v : Option Bytes) : SP (l4 s g gb v) = SP s := by
+  simp only [l4]
+  split
+  · exact offerStart_sp _
+  · split
+    · rw [applyState_sp]; rfl
+    · rfl
+  · rw [applyState_sp]; rfl
+
+theorem sinv_autoSnap {s : St} (h : SessInv s) : SessInv (autoSnap s) := by
+  unfold autoSnap
+  split
+  · rename_i g c _ _
+    have h1 : SessInv (flushCore s) := sinv_of_sp h (flushCore_sp s)
+    generalize flushCore s = s1 at h1 ⊢
+    intro g'
+    simp only [upd_apply]
+    by_cases hg : g' = g
+    · subst hg
+      have := (h1 g').1
+      simp only [↓reduceIte]
+      refine ⟨by omega, fun _ => ?_⟩
+      simp only [Prod.mk.injEq, and_true]
+      omega
+    · simp only [hg, ↓reduceIte]
+      exact h1 g'
+  · exact h
+
+theorem sinv_launchCall {s : St} (g : Nat) (gb : Bool) (r : Option (Snap × Bool))
+    (h : SessInv s) : SessInv (launchCall s g gb r) := by
+  have h' : SessInv { s with loading := none, boot := upd s.boot g r } := sinv_of_sp h rfl
+  unfold launchCall
+  dsimp only
+  split
+  · exact sinv_of_sp (sinv_autoSnap h') rfl
+  · exact sinv_of_sp h' rfl
+
+/-- A checkpoint's session put, as storeCheckpoint now makes it: only while
+    its stamp is the newest taken and its epoch the current one. -/
+theorem sinv_ckSession {s : St} (g : Nat) (a : Snap) (n e : Nat) (h : SessInv s)
+    (hn : s.snapTs g = n) (he : s.epoch g = e) : SessInv (ckSession s g a n e) := by
+  intro g'
+  simp only [ckSession, push, upd_apply]
+  by_cases hg : g' = g
+  · subst hg
+    have := (h g').1
+    simp only [↓reduceIte]
+    refine ⟨by omega, fun _ => ?_⟩
+    simp only [Prod.mk.injEq]
+    exact ⟨by omega, he.symm⟩
+  · simp only [hg, ↓reduceIte]
+    exact h g'
+
+/-- The session of `g` deleted, its epoch bumped (deleteKeys), and other
+    records alongside. -/
+theorem sinv_drop {s : St} (h : SessInv s) (g : Nat) (sl : Nat → Option Core)
+    (d : List Nat) :
+    SessInv { s with slot := sl, auto := upd s.auto g none,
+                     epoch := upd s.epoch g (s.epoch g + 1), ckpt := upd s.ckpt g none,
+                     deletes := d } := by
+  intro g'
+  simp only [upd_apply]
+  by_cases hg : g' = g
+  · subst hg
+    simp only [↓reduceIte, ne_eq, not_true_eq_false, false_implies, and_true]
+    exact (h g').1
+  · simp only [hg, ↓reduceIte]
+    exact h g'
+
+theorem sinv_resumeP {s : St} (p : Pending) (ok : Bool) (h : SessInv s) :
+    SessInv (resumeP s p ok) := by
+  cases p with
+  | persist g b k => exact sinv_of_sp h (by rw [resumeP, finish_sp]; rfl)
+  | evictCk g b k t =>
+    simp only [resumeP]
+    split
+    · split
+      · exact sinv_of_sp h (finish_sp _ _)
+      · exact sinv_of_sp h rfl
+    · exact sinv_of_sp h rfl
+  | evict g b k t =>
+    simp only [resumeP]
+    split
+    · split
+      · exact sinv_of_sp h (finish_sp _ _)
+      · exact sinv_of_sp h rfl
+    · exact sinv_of_sp h (by rw [finish_sp]; rfl)
+  | loadPre g gb =>
+    simp only [resumeP]
+    split
+    · exact sinv_of_sp h (persistCall_sp _ _ _ _)
+    · exact h
+  | loadRestore g gb v => exact sinv_of_sp h (l4_sp _ _ _ _)
+  | offerGet g a =>
+    simp only [resumeP]
+    split
+    · split
+      · exact sinv_of_sp h rfl
+      · exact h
+    · exact h
+  | offerCheck g a v =>
+    simp only [resumeP]
+    split
+    · exact sinv_of_sp h rfl
+    · exact h
+  | tapCheck g a v =>
+    simp only [resumeP]
+    split
+    · have h1 : SessInv (flushCore s) := sinv_of_sp h (flushCore_sp s)
+      split
+      · exact sinv_of_sp h1 (by rw [applyState_sp]; rfl)
+      · exact h1
+    · exact h
+  | unloadPre g flush thenDelete =>
+    simp only [resumeP]
+    split
+    · exact h
+    · split
+      · exact sinv_of_sp h (by
+          show SP (persistCall s g ok .none) = SP s
+          exact persistCall_sp _ _ _ _)
+      · split
+        · exact sinv_of_sp h rfl
+        · exact sinv_of_sp h rfl
+  | delSaves g => exact sinv_of_sp h rfl
+  | delRest g => exact sinv_drop h g _ _
+  | resetRest g loaded gb file =>
+    simp only [resumeP]
+    have h1 := sinv_drop h g (if file then s.slot else upd s.slot g none) (s.deletes ++ [g])
+    split
+    · exact sinv_launchCall g gb none h1
+    · exact h1
+  | slotGet g v =>
+    simp only [resumeP]
+    split
+    · exact sinv_of_sp h (by rw [applyState_sp]; rfl)
+    · exact h
+  | importPut g gb => exact sinv_launchCall g gb none h
+  | pull g b =>
+    simp only [resumeP]
+    split
+    · exact h
+    · exact sinv_of_sp h rfl
+  | ckStore g a n e =>
+    simp only [resumeP]
+    split
+    · rename_i hg
+      split
+      · exact sinv_of_sp h (by
+          show SP (push (persistCall s g ok .none) (.ckPut g a n e)) = SP s
+          exact persistCall_sp _ _ _ _)
+      · exact sinv_ckSession g a n e h hg.1 hg.2
+    · exact h
+  | ckPut g a n e =>
+    simp only [resumeP]
+    split
+    · rename_i hg
+      exact sinv_ckSession g a n e h hg.1 hg.2
+    · exact h
+  | ckAdd g a e =>
+    simp only [resumeP]
+    split
+    · exact sinv_of_sp h rfl
+    · exact h
+  | heroGet g gb a => exact sinv_launchCall g gb _ h
+  | momGet g gb m =>
+    simp only [resumeP]
+    split
+    · exact sinv_launchCall g gb _ h
+    · exact h
+
+theorem sinv_step {s : St} (e : Ev) (h : SessInv s) : SessInv (step s e) := by
+  cases e with
+  | play =>
+    simp only [step]
+    split
+    · exact h
+    · split
+      · exact sinv_of_sp h rfl
+      · exact h
+  | frame =>
+    simp only [step]
+    split
+    · exact h
+    · split
+      · split
+        · split
+          · exact sinv_of_sp h rfl
+          · exact h
+        · exact h
+      · exact h
+  | pause => exact sinv_of_sp h rfl
+  | unpause =>
+    simp only [step]
+    split
+    · exact sinv_of_sp h rfl
+    · exact h
+  | tick ok =>
+    simp only [step]
+    split
+    · exact sinv_of_sp h (persistCall_sp _ _ _ _)
+    · exact h
+  | hide => exact sinv_autoSnap h
+  | launch g gb => exact sinv_launchCall g gb none h
+  | resume i ok =>
+    simp only [step]
+    split
+    · exact sinv_resumeP _ ok (sinv_of_sp h rfl)
+    · exact h
+  | close =>
+    simp only [step]
+    split
+    · have h1 : SessInv { s with loading := none } := sinv_of_sp h rfl
+      exact sinv_of_sp (sinv_autoSnap h1) rfl
+    · exact h
+  | delete g =>
+    simp only [step]
+    split
+    · exact sinv_of_sp h rfl
+    · exact sinv_of_sp h rfl
+  | reset g file =>
+    simp only [step]
+    split
+    · exact h
+    · split
+      · exact sinv_of_sp h rfl
+      · exact sinv_of_sp h rfl
+  | tapResume =>
+    simp only [step]
+    split
+    · split
+      · exact sinv_of_sp h rfl
+      · exact sinv_of_sp h rfl
+    · exact h
+  | slotSave =>
+    simp only [step]
+    split
+    · exact sinv_of_sp h rfl
+    · exact h
+  | slotLoad =>
+    simp only [step]
+    split
+    · exact sinv_of_sp h rfl
+    · exact h
+  | importSave =>
+    simp only [step]
+    split
+    · exact sinv_of_sp h rfl
+    · exact h
+  | pullStart g =>
+    simp only [step]
+    split
+    · exact h
+    · exact sinv_of_sp h rfl
+  | ckpt =>
+    simp only [step]
+    split
+    · exact h
+    · split
+      · rename_i g c _ _
+        have h1 : SessInv (flushCore s) := sinv_of_sp h (flushCore_sp s)
+        generalize flushCore s = s1 at h1 ⊢
+        intro g'
+        simp only [push, upd_apply]
+        by_cases hg : g' = g
+        · subst hg
+          have := h1 g'
+          simp only [↓reduceIte]
+          exact ⟨by omega, this.2⟩
+        · simp only [hg, ↓reduceIte]
+          exact h1 g'
+      · exact h
+  | hero g gb => exact sinv_of_sp h rfl
+  | moment g gb => exact sinv_of_sp h rfl
+  | driveFlush g =>
+    simp only [step]
+    split
+    · exact h
+    · exact sinv_of_sp h rfl
+
+theorem sinv_init : SessInv init := fun _ => ⟨Nat.le_refl _, fun h => absurd rfl h⟩
+
+/-- **The stored session is the newest snapshot of the game ever stored, and
+    was taken since the session was last deleted**, in every reachable state. -/
+theorem session_newest_and_current {s : St} (h : Reachable s) : SessInv s := by
+  induction h with
+  | init => exact sinv_init
+  | step e _ ih => exact sinv_step e ih
+
+/-! ## Quota retries and pulls give way (87eea59f)
+
+For every state, not only reachable ones: a retry waiting on an eviction
+(checkpoints or a ROM) writes `save:<g>` only if no persist, delete or
+import has taken a number for the save since (`retry_gives_way`), and the
+number only grows (a persist adds one, `persistCall_seq_mono`); every wipe and import takes one
+(`reset_takes_number`, `delete_takes_number`, `import_takes_number`). A
+pull's write is skipped while the save's delete is queued
+(`pull_respects_queue`), both Resets queue it in the segment that wipes
+(`reset_queues_at_once`), and the queue is not sent while a pull is in
+flight (`flush_waits_for_pulls`). `NoResurrect` itself is not claimed for
+every state: a pull's bytes are stamped when it starts, so one started after
+a Drive flush sent a Delete's queued delete (a save another device uploaded
+since) and landing after the local wipe looks like a resurrection here,
+while in the JS it is that device's newer save. -/
+
+theorem retry_gives_way (s : St) (i : Nat) (ok : Bool) {g t : Nat} {b : Bytes} {k : After}
+    (hi : s.pend[i]? = some (.evictCk g b k t) ∨ s.pend[i]? = some (.evict g b k t))
+    (hs : s.seq g ≠ t) : (step s (.resume i ok)).idb = s.idb := by
+  rcases hi with hi | hi <;> simp only [step, hi, resumeP] <;> cases ok <;>
+    simp only [Bool.false_eq_true, ↓reduceIte, hs, ne_eq, not_false_eq_true] <;>
+    first | rfl | (rw [show ∀ s' k, (finish s' k).idb = s'.idb from
+                     fun s' k => by cases k <;> rfl]) | skip
+
+theorem finish_seq (s : St) (k : After) : (finish s k).seq = s.seq := by cases k <;> rfl
+
+theorem persistCall_seq_mono (s : St) (g : Nat) (ok : Bool) (k : After) (x : Nat) :
+    s.seq x ≤ (persistCall s g ok k).seq x := by
+  unfold persistCall
+  have e0 : (if s.cur = some g then flushCore s else s).seq = s.seq := by
+    split
+    · obtain ⟨f, c, fl, e⟩ := flushCore_eq s; rw [e]
+    · rfl
+  generalize (if s.cur = some g then flushCore s else s) = s' at e0 ⊢
+  rw [← e0]
+  dsimp only
+  split
+  · rw [finish_seq]; exact Nat.le_refl _
+  · split
+    · rw [finish_seq]; exact Nat.le_refl _
+    · split <;> (simp only [push, raise, upd_apply]; split <;> (try subst_vars) <;> omega)
+
+theorem reset_takes_number (s : St) (g : Nat) (file : Bool)
+    (hl : file = false ∨ s.cur = some g) :
+    (step s (.reset g file)).seq g = s.seq g + 1 ∧ (step s (.reset g file)).queued g = true ∧
+      (step s (.reset g file)).idb g = none := by
+  rcases hl with hl | hl
+  · subst hl; simp only [step]; split <;> simp_all [push, retire] <;> split <;> simp
+  · cases file <;> simp only [step, hl] <;> simp [push, retire]
+
+theorem delete_takes_number (s : St) (i g : Nat) (ok : Bool) (hi : s.pend[i]? = some (.delSaves g)) :
+    (step s (.resume i ok)).seq g = s.seq g + 1 ∧ (step s (.resume i ok)).idb g = none := by
+  simp [step, hi, resumeP, push, retire]
+
+theorem import_takes_number (s : St) (g : Nat) (c : Core) (hc : s.cur = some g)
+    (hcore : s.core = some c) :
+    (step s .importSave).seq g = s.seq g + 1 := by
+  simp [step, hc, hcore, push, raise, retire]
+
+theorem pull_respects_queue (s : St) (i g : Nat) (b : Bytes) (ok : Bool)
+    (hi : s.pend[i]? = some (.pull g b)) (hq : s.queued g = true) :
+    (step s (.resume i ok)).idb = s.idb := by
+  simp [step, hi, resumeP, hq]
+
+theorem reset_queues_at_once (s : St) (g : Nat) (file : Bool)
+    (hl : file = false ∨ s.cur = some g) : (step s (.reset g file)).queued g = true :=
+  (reset_takes_number s g file hl).2.1
+
+theorem flush_waits_for_pulls (s : St) (g : Nat) (hp : s.pend.any Pending.isPull = true) :
+    step s (.driveFlush g) = s := by
+  simp [step, hp]
+
 /-! ## The dd7ba741f counterexamples, replayed against the code
 
 Game 0 and game 1 are two library games; `false`/`true` after `launch` is
@@ -1918,8 +2353,8 @@ open Ev in
     dbPutRoomy awaits evictOldestRom; a newer save is persisted meanwhile; the
     eviction completes. At dd7ba741f the OLD bytes were then put again, over
     the newer ones (and uploaded); the retry now sees the later persist's
-    number and gives way. (When a checkpoint is what gave way, it does not:
-    `bug_ckpt_evict_retry_writes_older_save`.) -/
+    number and gives way. (When a checkpoint is what gave way it did not,
+    until 87eea59f: `regress_ckpt_evict_retry_writes_older_save`.) -/
 def trQuotaPre : List Ev :=
   [launch 0 false, resume 0 true, resume 0 true,
    play, frame, tick false,                           -- v1: put rejected (quota) -> evict
@@ -1965,7 +2400,7 @@ and not in `rom.sav`. The outgoing persist of a switch and the flush of a
 close run while the game is still named, and flush the core first: that RAM
 is what they store, under its own game. -/
 
-/-- A switch's outgoing persist (loadRom 8031) stores the core's unflushed RAM
+/-- A switch's outgoing persist (loadRom 8038) stores the core's unflushed RAM
     under the outgoing game. -/
 theorem switch_persists_dirty_ram {s : St} {i g a : Nat} {gb : Bool} {c : Core} {r : Bytes}
     (hi : s.pend[i]? = some (.loadPre g gb)) (hc : s.cur = some a) (hcore : s.core = some c)
@@ -1973,7 +2408,7 @@ theorem switch_persists_dirty_ram {s : St} {i g a : Nat} {gb : Bool} {c : Core} 
     (step s (.resume i true)).idb a = some r ∧ (a, r) ∈ (step s (.resume i true)).writes := by
   simp [step, hi, resumeP, hc, persistCall, flushCore, hcore, hd, hr, hls, raise, push, upd]
 
-/-- A close (unloadGame 9844) stores the core's unflushed RAM under its game. -/
+/-- A close (unloadGame 9856) stores the core's unflushed RAM under its game. -/
 theorem close_persists_dirty_ram {s : St} {i a : Nat} {td : Bool} {c : Core} {r : Bytes}
     (hi : s.pend[i]? = some (.unloadPre a true td)) (hc : s.cur = some a)
     (hcore : s.core = some c) (hd : c.dirty = true) (hr : c.ram = some r)
@@ -2072,84 +2507,84 @@ theorem regress_quota_retry_over_import :
     Reachable s ∧ s.idb 0 = some ⟨0, 2⟩ :=
   ⟨run_reachable _ _ .init, by decide⟩
 
-/-! ## A quota retry after a checkpoint gave way (03f88d6c)
+/-! ## A quota retry after a checkpoint gave way (found at 03f88d6c, fixed in 87eea59f)
 
-dbPutRoomy now gives up other games' checkpoints before any ROM (6181-6184),
-and puts again straight after (`continue`). Its `superseded()` check (6171)
-is asked only `if (freed && ...)`, and `freed` counts ROMs: the retry after
-a checkpoint eviction puts the old bytes back unasked. Every trace that the
-ROM path now survives, the checkpoint path still fails. A device is only
-near full when it has been playing for a while, so other games' checkpoints
-are there to give way. -/
+dbPutRoomy gives up other games' checkpoints before any ROM (6188-6191), and
+puts again straight after (`continue`). At 03f88d6c its `superseded()` check
+was asked only `if (freed && ...)`, and `freed` counts ROMs: the retry after a
+checkpoint eviction put the old bytes back unasked. Now it is asked before
+every retry (`retried`, 6174-6186), and each trace below, which ended with the
+old save in `save:0`, ends safely (`retry_gives_way` covers every state).
+Tests: web/tests/ckpt-evict.test.mjs. -/
 
 open Ev in
-/-- As `regress_quota_retry_writes_older_save`, but the eviction that the
-    first put waits on frees another game's checkpoints: the older save goes
-    back over the newer one in `save:0`, and is queued for Drive after it. -/
-theorem bug_ckpt_evict_retry_writes_older_save :
-    let s := run init (trQuotaPre ++ [resume 0 true, resume 0 true])
-    Reachable s ∧ s.idb 0 = some ⟨0, 1⟩ ∧ s.fs = some ⟨0, 2⟩ ∧
-      s.uploads = [(0, ⟨0, 2⟩), (0, ⟨0, 1⟩)] :=
+/-- Was `bug_ckpt_evict_retry_writes_older_save`: as
+    `regress_quota_retry_writes_older_save`, but the eviction the first put
+    waits on frees another game's checkpoints. At 03f88d6c the older save went
+    back over the newer one in `save:0` and was queued for Drive after it; now
+    the retry gives way. -/
+theorem regress_ckpt_evict_retry_writes_older_save :
+    let s := run init (trQuotaPre ++ [resume 0 true])
+    Reachable s ∧ s.idb 0 = some ⟨0, 2⟩ ∧ s.uploads = [(0, ⟨0, 2⟩)] ∧ s.pend = [] :=
   ⟨run_reachable _ _ .init, by decide, by decide, by decide⟩
 
 open Ev in
-/-- A Reset while the first put waits on the checkpoint eviction: the retry
-    puts the wiped save back, and the Reset's reboot boots the game on it.
-    The reset is undone. -/
+/-- Was `bug_ckpt_evict_retry_undoes_reset`: a Reset while the first put
+    waits on the checkpoint eviction. The retry used to put the wiped save
+    back, and the Reset's reboot booted on it; now the game starts fresh. -/
 def trCkReset : List Ev :=
   [launch 0 false, resume 0 true, resume 0 true, play, frame, tick false,  -- v1: quota
    reset 0 false,                                     -- detached, save:0 deleted
-   resume 0 true,                                     -- a checkpoint freed: v1 put again
+   resume 0 true,                                     -- a checkpoint freed: gives way
    resume 0 true,                                     -- the rest of the deletes; the reboot
-   resume 1 true]                                     -- the boot reads save:0
+   resume 0 true]                                     -- the boot reads save:0
 
-theorem bug_ckpt_evict_retry_undoes_reset :
+theorem regress_ckpt_evict_retry_undoes_reset :
     let s := run init trCkReset
-    Reachable s ∧ s.idb 0 = some ⟨0, 1⟩ ∧ s.wiped 0 = some 2 ∧
-      s.core = some ⟨0, false, some ⟨0, 1⟩, false⟩ ∧ ¬ NoResurrect s := by
-  refine ⟨run_reachable _ _ .init, by decide, by decide, by decide, fun h => ?_⟩
-  have := h 0 ⟨0, 1⟩ 2 (by decide) (by decide)
-  exact absurd this (by decide)
+    Reachable s ∧ s.idb 0 = none ∧ s.wiped 0 = some 2 ∧
+      s.core = some ⟨0, false, none, false⟩ ∧ NoResurrect s := by
+  have hw : (run init trCkReset).wiped = upd (fun _ => none) 0 (some 2) := rfl
+  have hi : (run init trCkReset).idb 0 = none := by decide
+  refine ⟨run_reachable _ _ .init, hi, by rw [hw]; rfl, by decide, ?_⟩
+  intro g b t hb ht
+  rw [hw, upd_apply] at ht
+  split at ht
+  · subst_vars; rw [hi] at hb; cases hb
+  · cases ht
 
 open Ev in
-/-- The same with Delete: the deleted game's save is back in IndexedDB (and
-    queued for Drive by the retry's `markUpload`). -/
-theorem bug_ckpt_evict_retry_resurrects_deleted_save :
+/-- Was `bug_ckpt_evict_retry_resurrects_deleted_save`: the same with Delete.
+    The deleted game's save used to come back (and be queued for Drive). -/
+theorem regress_ckpt_evict_retry_resurrects_deleted_save :
     let s := run init [launch 0 false, resume 0 true, resume 0 true, play, frame, tick false,
-                       delete 0, resume 1 true, resume 1 true, resume 0 true, resume 1 true]
-    Reachable s ∧ s.idb 0 = some ⟨0, 1⟩ ∧ s.wiped 0 = some 2 ∧ (0, ⟨0, 1⟩) ∈ s.uploads ∧
-      ¬ NoResurrect s := by
-  refine ⟨run_reachable _ _ .init, by decide, by decide, by decide, fun h => ?_⟩
-  have := h 0 ⟨0, 1⟩ 2 (by decide) (by decide)
-  exact absurd this (by decide)
+                       delete 0, resume 1 true, resume 1 true, resume 0 true]
+    Reachable s ∧ s.idb 0 = none ∧ s.wiped 0 = some 2 ∧ (0, ⟨0, 1⟩) ∉ s.uploads :=
+  ⟨run_reachable _ _ .init, by decide, by decide, by decide⟩
 
 open Ev in
-/-- ...and with an import: the replaced save goes back over the imported
-    one, and the import's reboot boots on it. -/
-theorem bug_ckpt_evict_retry_over_import :
+/-- Was `bug_ckpt_evict_retry_over_import`: the replaced save used to go back
+    over the imported one, and the import's reboot booted on it. -/
+theorem regress_ckpt_evict_retry_over_import :
     let s := run init [launch 0 false, resume 0 true, resume 0 true, play, frame, tick false,
-                       importSave, resume 0 true, resume 0 true, resume 1 true]
-    Reachable s ∧ s.idb 0 = some ⟨0, 1⟩ ∧ s.core = some ⟨0, false, some ⟨0, 1⟩, false⟩ :=
+                       importSave, resume 0 true, resume 0 true, resume 0 true]
+    Reachable s ∧ s.idb 0 = some ⟨0, 2⟩ ∧ s.core = some ⟨0, false, some ⟨0, 2⟩, false⟩ :=
   ⟨run_reachable _ _ .init, by decide, by decide⟩
 
-/-! ## A checkpoint's session after its battery's persist (03f88d6c)
+/-! ## A checkpoint's session after its battery's persist (found at 03f88d6c, fixed in 87eea59f)
 
 storeCheckpoint checks that no newer snapshot was taken and the session was
-not deleted (8337), then, when the battery it carries is not stored yet,
-`await persistSave(...)` (8343), and only then puts the session (8346),
-without asking again. addCheckpoint re-checks the epoch after its own await
-(8413); the session put does not. Main Menu, a hide, a close, a switch, a
-Reset or a Delete in that await is overwritten by, or undone by, the older
-moment. The battery is unstored whenever the game saved in the last 5 s (the
-autosave's period), so the await is there at most checkpoints that follow
-an in-game save. -/
+not deleted (`stale`, 8345-8347), then, when the battery it carries is not
+stored yet, `await persistSave(...)` (8352). At 03f88d6c it then put the
+session without asking again; a Main Menu, a hide, a close, a switch, a Reset
+or a Delete in that await was overwritten or undone by the older moment. It
+now asks again (8355). `session_newest_and_current` covers every state.
+Tests: web/tests/ckpt-store.test.mjs. -/
 
 open Ev in
 /-- A checkpoint is taken a few seconds after an in-game save; its persist is
     in flight when the player goes to Main Menu (`hide`: persistAutoState
-    takes the newer session, v2). The checkpoint's session (v1) then lands
-    over it: the session left at Main Menu is gone, here and, once queued,
-    on Drive. -/
+    takes the newer session, v2). Was `bug_ckpt_store_over_newer_session`:
+    the checkpoint's session (v1) used to land over it. Now it is dropped. -/
 def trCkOverNewer : List Ev :=
   [launch 0 false, resume 0 true, resume 0 true,
    play, frame,                                       -- in-game save v1, not yet persisted
@@ -2157,31 +2592,29 @@ def trCkOverNewer : List Ev :=
    resume 0 true,                                     -- storeCheckpoint: v1 unstored: persist
    play, frame,                                       -- the game moves on (v2)
    hide,                                              -- Main Menu / hide: the session at v2
-   resume 1 true]                                     -- the persist resolves: v1's session put
+   resume 1 true]                                     -- the persist resolves: stale, dropped
 
-theorem bug_ckpt_store_over_newer_session :
-    ((run init (trCkOverNewer.take 10)).auto 0).map Snap.saveSig = some (some ⟨0, 2⟩) ∧
+theorem regress_ckpt_store_over_newer_session :
     let s := run init trCkOverNewer
-    Reachable s ∧ (s.auto 0).map Snap.saveSig = some (some ⟨0, 1⟩) ∧ s.snapTs 0 = 2 :=
-  ⟨by decide, run_reachable _ _ .init, by decide, by decide⟩
+    Reachable s ∧ (s.auto 0).map Snap.saveSig = some (some ⟨0, 2⟩) ∧ s.snapTs 0 = 2 ∧
+      SessInv s :=
+  ⟨run_reachable _ _ .init, by decide, by decide,
+   session_newest_and_current (run_reachable _ _ .init)⟩
 
 open Ev in
-/-- The same await against a Reset: the Reset deletes the session (and bumps
-    its epoch), and the checkpoint's put brings back the session from before
-    it, carrying the wiped battery's signature (addCheckpoint's own re-check
-    keeps the moment out). -/
+/-- The same await against a Reset (the Reset deletes the session and bumps
+    its epoch). Was `bug_ckpt_store_undoes_session_reset`: the checkpoint's
+    put used to bring back the session from before the Reset. -/
 def trCkReset2 : List Ev :=
   [launch 0 false, resume 0 true, resume 0 true,
    play, frame, ckpt, resume 0 true,                  -- the checkpoint's persist in flight
    reset 0 false,                                     -- detached, save:0 deleted
    resume 2 true,                                     -- the session and checkpoints deleted; reboot
-   resume 1 true,                                     -- the session put: the pre-reset one
-   resume 2 true]                                     -- addCheckpoint: epoch moved, refused
+   resume 1 true]                                     -- the persist resolves: epoch moved, dropped
 
-theorem bug_ckpt_store_undoes_session_reset :
+theorem regress_ckpt_store_undoes_session_reset :
     let s := run init trCkReset2
-    Reachable s ∧ 0 ∈ s.deletes ∧ s.epoch 0 = 1 ∧
-      (s.auto 0).map Snap.saveSig = some (some ⟨0, 1⟩) ∧ s.ckpt 0 = none :=
+    Reachable s ∧ 0 ∈ s.deletes ∧ s.epoch 0 = 1 ∧ s.auto 0 = none ∧ s.ckpt 0 = none :=
   ⟨run_reachable _ _ .init, by decide, by decide, by decide, by decide⟩
 
 /-- Taken and stored with nothing in between, a checkpoint's session and
@@ -2193,12 +2626,22 @@ theorem ckpt_stores_session_and_moment :
       (s.ckpt 0).map Snap.saveSig = some (some ⟨0, 1⟩) :=
   ⟨run_reachable _ _ .init, by decide, by decide⟩
 
+/-- ...and so does one whose battery had to be persisted first, with nothing
+    landing in that await. -/
+theorem ckpt_stores_after_its_persist :
+    let s := run init [.launch 0 false, .resume 0 true, .resume 0 true, .play, .frame,
+                       .ckpt, .resume 0 true, .resume 1 true, .resume 1 true]
+    Reachable s ∧ s.idb 0 = some ⟨0, 1⟩ ∧ (s.auto 0).map Snap.saveSig = some (some ⟨0, 1⟩) ∧
+      (s.ckpt 0).map Snap.saveSig = some (some ⟨0, 1⟩) :=
+  ⟨run_reachable _ _ .init, by decide, by decide, by decide⟩
+
 /-! ## The Drive pull against a Reset or a Delete
 
 The pull's per-save write issues its put after an await. It re-checks that
-the game is not loaded or loading (4442) and, since 6dd57564, that no delete
-of the save is queued for Drive (4449): `resetGameSaves` and
-`deleteGameEverywhere` queue theirs before they wipe. -/
+the game is not loaded or loading (4445) and, since 6dd57564, that no delete
+of the save is queued for Drive (4452): `resetGameSaves`,
+`deleteGameEverywhere` and (since 87eea59f) `resetCurrentSaveFile` queue
+theirs before they wipe. -/
 
 open Ev in
 /-- A Drive pull is downloading game 1's save when the player resets game 1
@@ -2221,31 +2664,37 @@ theorem regress_pull_resurrects_reset_save :
   · cases ht
 
 open Ev in
-/-- The Saves panel's Reset (`resetCurrentSaveFile`) queues its Drive deletes
-    only after its awaits (1733-1735), and the game is detached during them:
-    a pull that started before the game was loaded, and whose download lands
-    in that window, passes all three checks and writes the save back; the
-    Reset's reboot then boots the game on it. -/
+/-- The Saves panel's Reset (`resetCurrentSaveFile`) while a pull that started
+    before the game was loaded is downloading its save. Was
+    `bug_file_reset_undone_by_pull`: it queued its Drive deletes only after
+    its awaits, during which the game is detached, so the download passed all
+    three checks, was written back, and the Reset's reboot booted on it. The
+    queue now goes in before the first await (1732-1734): the download is
+    skipped and the game starts fresh. Test: web/tests/reset-pull.test.mjs. -/
 def trFileResetPull : List Ev :=
   [pullStart 0,                                       -- a pull is downloading save:0
    launch 0 false, resume 1 true, resume 1 true,      -- the player taps game 0: it boots
-   reset 0 true,                                      -- Saves panel: Reset (detached, deleted)
-   resume 0 true,                                     -- the download lands: written
-   resume 0 true,                                     -- the deletes; queued now; the reboot
+   reset 0 true,                                      -- Saves panel: Reset (detached, queued, deleted)
+   resume 0 true,                                     -- the download lands: skipped
+   resume 0 true,                                     -- the deletes; the reboot
    resume 0 true]                                     -- the boot reads save:0
 
-theorem bug_file_reset_undone_by_pull :
+theorem regress_file_reset_undone_by_pull :
     let s := run init trFileResetPull
-    Reachable s ∧ s.wiped 0 = some 2 ∧ s.idb 0 = some ⟨0, 1⟩ ∧
-      s.core = some ⟨0, false, some ⟨0, 1⟩, false⟩ ∧ ¬ NoResurrect s := by
-  refine ⟨run_reachable _ _ .init, by decide, by decide, by decide, fun h => ?_⟩
-  have := h 0 ⟨0, 1⟩ 2 (by decide) (by decide)
-  exact absurd this (by decide)
+    Reachable s ∧ s.wiped 0 = some 2 ∧ s.idb 0 = none ∧
+      s.core = some ⟨0, false, none, false⟩ ∧ NoResurrect s := by
+  have hw : (run init trFileResetPull).wiped = upd (fun _ => none) 0 (some 2) := rfl
+  have hi : (run init trFileResetPull).idb 0 = none := by decide
+  refine ⟨run_reachable _ _ .init, by rw [hw]; rfl, hi, by decide, ?_⟩
+  intro g b t hb ht
+  rw [hw, upd_apply] at ht
+  split at ht
+  · subst_vars; rw [hi] at hb; cases hb
+  · cases ht
 
 open Ev in
-/-- The game menu's Reset (`resetGameAction`) on the same trace: its queue
-    goes in with the detach, the download is skipped, and the game starts
-    fresh. -/
+/-- The game menu's Reset (`resetGameAction`) on the same trace was already
+    safe: its queue goes in with the detach. -/
 theorem reset_game_action_holds_off_pull :
     let s := run init [pullStart 0, launch 0 false, resume 1 true, resume 1 true,
                        reset 0 false, resume 0 true, resume 0 true, resume 0 true]
