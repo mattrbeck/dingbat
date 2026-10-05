@@ -25,6 +25,7 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 | `Thumbnails` | storeLastFrame, grid picture fetches, object URLs, the picture batch |
 | `Modals` | the focus trap, promise-returning prompts, the clip export's progress panel |
 | `Netplay` | web/netplay.js signaling, redial ladder, channel race, rollback entry/exit |
+| `LinkPairing` | two players on one code: both clients, the signaling server (server.nim / server.js) and the network between them; suspension, unseen socket deaths, the pairing deadline |
 | `ServiceWorker` | update check, web/sw.js install/activate/fetch, reload on controllerchange, the update a too-new save state asks for |
 
 `FINDINGS.md` ranks every counterexample the web models found.

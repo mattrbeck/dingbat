@@ -649,3 +649,42 @@ at 5ea4d552.
 | # | Severity | Finding | Fix |
 |---|---|---|---|
 | L1 | Low-medium (needs a name reused within one page session; loses another device's save) | **A name renamed away stays skipped after a game comes back under it** (`bug_remote_rename_into_away_name_skips_saves`, `bug_download_into_away_name_skips_saves`, `bug_away_not_vacant`). `renamedAway` is cleared only by `renameGame` into the name and by a fresh import (`bumpRecentIndex`'s `fresh`), but two other paths land a game under a name: another device's rename into it, applied by the pull (`applyRemoteRename` 4048), and a Drive-only tile's download (`downloadGame` 4616, `bumpRecentIndex(game, { gen })`, not fresh). Trace: device 0 renames A to B; device 1 renames X into the freed A (or imports another game as A, which device 0 then downloads); device 0 now holds that game under A with A still in `renamedAway`, and every pull for the rest of the session skips its save, session and picture (the skip records no `rmt`). Device 1 plays it and syncs; device 0 never gets that save, and a play there starts from its own (none, or older) and its flush, blind for saves, puts it over device 1's on Drive. A reload clears the set. | Claim the name wherever a game lands under it: `renamedAway.delete(to)` in `applyRemoteRename` once its move commits, and `renamedAway.delete(game)` in `downloadGame` (or in `bumpRecentIndex` whatever `fresh` is: every caller's game is under that name by then); or have the write segment skip only while nothing is held under the name. **Fixed in be44ad4c:** `applyRemoteRename` releases its target as it starts and `bumpRecentIndex` releases its name on every call. The traces are `regress_remote_rename_into_away_name_skips_saves`, `regress_download_into_away_name_skips_saves`, `regress_away_not_vacant`; proved for every reachable state: no name renamed away from holds a record here (`away_vacant`), so every save a pull lists for a game held here is written unless its delete is queued (`pullSave_writes_held`). Thumbnails needs no change (a name enters its library only by an import or as a rename's target, both already released). Tests in web/tests/rename-pull.test.mjs, "a name another device's rename brings back is written by the pull again" and "a Drive-only game downloaded under a name renamed away from is written by the pull again": both fail on 5ea4d552, and each fails with only its own half of be44ad4c reverted. |
+
+## Two players on one code (2026-10-05, 29172ad4, `WebState/LinkPairing`)
+
+Matt: linking with friends "fails on the first try consistently, but we can
+connect the second or third time". `Netplay` folds the server into "a reply
+arrives"; `LinkPairing` models both browsers, the signaling server and the
+network between them (FIFO sockets, sockets that die without the server
+hearing, iOS suspending a page, the timers). Four traces from a fresh start
+with an open peer-to-peer path each fail the first pairing on both sides and
+leave a retry, with both players now in the foreground, to succeed. Which of
+them bit is not known (the device log's `netplay:` lines would say); the
+first needs no fault at all, the next two need only a player who switches
+apps (to text the code) while waiting.
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| P1 | High (no fault needed; depends on the geometry of the three paths) | **The friend's channel opening first fails ours** (`bug_linked_close_fails_both`). When a DataChannel opens, that side closes its signaling socket; the server tells the other `peer-closed`, and `onSigMessage` failed "The other side left" unless `rtcConnected`. The creator's channel opens about half a round trip before the answerer's, so whenever the path through the server is shorter than the direct one the guest fails, closes its pc, and the host's freshly open channel drops: "Connection lost during setup". | With the friend's description in hand (`sdpIn`), `peer-closed` is ignored and the channel (or the deadline) decides. `regress_linked_close` (with either server); test "a friend whose channel opened first and left the server doesn't fail ours". |
+| P2 | High (a phone that suspends the page while waiting) | **Paired with its own ghost** (`bug_paired_with_own_ghost`). A waits; iOS suspends the page and the socket dies without the server hearing (the reaper takes 90 s). Back in the foreground A's `onclose` redials, and the server pairs the new socket as guest of A's own dead seat; A waits 20 s for an offer from itself and blames a strict NAT, while B is told "that code is already in use". | The rendezvous carries a per-page id (`NET_PAGE_ID`); both servers drop a seat held by the same id (`evict`) and seat the arrival, telling a friend paired with the stale socket `peer-closed`. server.js now funnels every close through `leave`, which ignores a socket that no longer holds a seat. `regress_paired_with_own_ghost`; proved: the fixed server never says "in use" to two players (`no_in_use`) nor seats one page twice (`seats_distinct`). The client half alone recovers when B arrives after A's deadline (`regress_own_ghost_client_only`) but not during it (`client_only_ghost_still_in_use`): **deploy the server.** Tests in web/signaling/server.test.mjs (Node and Nim), which fail on the old server. |
+| P3 | High (same trigger, socket survives) | **A frozen host fails both** (`bug_frozen_host_fails_both`). A waits, the page is suspended with the socket alive; B pairs and waits for an offer A cannot make; B's 20 s deadline says "strict NAT"; A wakes to `paired` then `peer-closed`: "The other side left". | `rtcGaveUp`: a deadline (or ICE `failed`) with no description from the friend sends us back to waiting on the code (`sigRewait`: close pc and socket, rendezvous again, one redial-ladder step); `peer-closed` with no description does the same. The NAT verdict needs two pairings in a row that exchanged descriptions and still never opened (`nat_after_two_strikes`). `regress_frozen_host`; tests "a friend gone before the descriptions crossed sends us back to waiting", "a friend who never answers sends us back to waiting at 20 s", "two pairings that exchanged descriptions and never opened are the NAT verdict". |
+| P4 | Medium (a slow first dial) | **The fallback strands the friend** (`bug_fallback_after_pairing_fails_friend`). The 2 s "server didn't respond" timer was armed at the click and so covered DNS + TCP + TLS + upgrade + reply; when it fired after the rendezvous reached the server, B left for the manual exchange and A failed "The other side left". | A goes back to waiting instead (`regress_fallback_after_pairing`), and the fallback now gives the dial 4 s (the probe's verdict) and the reply 2 s from the socket opening, which the model cannot see (its timers fire whenever armed). |
+
+Also proved for the fixed client: it never shows "The other side left"
+(`no_peer_left`). Not proved: that a link which opened only drops on a
+Cancel (it needs pc and message-ordering invariants the model does not carry
+yet), and liveness in general (the `regress_*` traces show recovery for each
+counterexample, not for every run).
+
+`Netplay` follows the fixed code too: the pairing deadline's verdict is a
+free Bool there (NAT verdict or `rewait`), a `peer-closed` before any
+description is `peerLeft`, and a failed reconnect dial lands in the ladder,
+not `netFail`. Its socket, timer, ladder (`redial_bounded`: the rewait dial
+counts as a ladder step), channel-race and save theorems all still hold;
+`rewait_on_deadline`, `rewait_on_peer_left`, `rewait_dial_failure_redials`
+and `nat_verdict_fails` witness the new paths. Real browsers:
+web/e2e/link-pairing.e2e.mjs (two Chromium contexts, real WebRTC, server.js)
+links two players, and links them again with no press after a first pairing
+that can never open; the second case fails on 29172ad4. It is not in CI's
+e2e shards, which run WebKit only, and WebKit never pairs two of its own
+contexts (it filters host candidates).
