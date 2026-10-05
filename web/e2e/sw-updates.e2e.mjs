@@ -113,11 +113,32 @@ for (const engine of ENGINES) {
       await setBuild(version, letter, o);
       // Asked until the new worker waits: right after the site comes back
       // from "offline" (its sockets dropped), WebKit's update() has
-      // rejected with "TypeError: Internal error" (CI, once).
-      await page.waitForFunction(() => {
-        if (!swRegistration.waiting && !swRegistration.installing) swRegistration.update().catch(() => {});
-        return !!swRegistration.waiting;
-      }, null, { timeout: 60000, polling: 1000 });
+      // rejected with "TypeError: Internal error" (CI). What each ask came
+      // to is kept for a deploy that never lands.
+      await page.evaluate(() => { window.__updates = []; });
+      try {
+        await page.waitForFunction(() => {
+          const reg = swRegistration;
+          if (!reg.waiting && !reg.installing) {
+            reg.update().then(() => {
+              const w = reg.installing;
+              window.__updates.push("asked: " + (w ? "installing" : reg.waiting ? "waiting" : "nothing new"));
+              w?.addEventListener("statechange", () => window.__updates.push("worker " + w.state));
+            }, (e) => window.__updates.push("rejected: " + e));
+          }
+          return !!reg.waiting;
+        }, null, { timeout: 60000, polling: 1000 });
+      } catch (e) {
+        const seen = await page.evaluate(() => [...new Set(window.__updates)]).catch(() => []);
+        throw new Error(`build ${letter} never waited: ${JSON.stringify(seen)}`);
+      }
+    };
+    // Back from "offline" as a player is: the app opened again. A page left
+    // as it was had WebKit's later updates fail (CI, Linux).
+    const online = async () => {
+      site.offline(false);
+      await page.goto(site.url).catch(() => {});
+      await booted().catch(() => {});
     };
     // The page `fn` reloads, booted: told apart from this one by a mark only
     // this one carries. Waiting for the next "load" event instead took a
@@ -218,7 +239,7 @@ for (const engine of ENGINES) {
         const r = await takeCheckpoint();
         assert.equal(r.worker, "up");
         assert.ok(r.kept >= 1 && r.packed, JSON.stringify(r));
-      } finally { site.offline(false); }
+      } finally { await online(); }
     });
 
     test("a sw.js that does not list the worker: network when online, the page when not", async () => {
@@ -235,7 +256,7 @@ for (const engine of ENGINES) {
         const r = await takeCheckpoint();
         assert.equal(r.worker, "none");
         assert.ok(r.kept >= 1 && r.packed, JSON.stringify(r));
-      } finally { site.offline(false); }
+      } finally { await online(); }
     });
   });
 }
