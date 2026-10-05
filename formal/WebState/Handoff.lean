@@ -1,13 +1,16 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/index.js: autoStateMatchesSave flushSyncInner handoffNews heldGameIsSent launchRom liveSaveSig loadRom markUpload persistAutoState persistSave pullSyncInner refreshHero renderClosedHero resumeGame resumeSessionFor runFullSync sessionBundle sessionFromBundle showMainMenu storeLastFrame switchToHandoff takeHandoff unloadGame on:visibilitychange
+-- @models web/index.js: autoStateMatchesSave flushSyncInner handoffNews heldGameIsSent launchRom liveSaveSig loadRom markUpload persistAutoState persistSave pullSyncInner refreshHero renderClosedHero resumeGame resumeSessionFor runFullSync sessionBundle sessionFromBundle showMainMenu storeLastFrame switchToHandoff takeHandoff unloadGame maybeCheckpoint takeCheckpoint storeCheckpoint noteCrashedRuns on:visibilitychange
 
 /-
 # Picking a game up on another device (web/index.js)
 
 Model of the cross-device hand-off as shipped in 43b30d1c (main 11025707),
-and of the fixes this model led to (`Code.fixed`). Two devices share one game
-and one Google Drive appDataFolder. What travels for the game is three Drive
-files:
+and of the fixes this model led to (`Code.fixed`), followed to 03f88d6c,
+where the crash checkpoints (6ee01e88..096edd3e) became a second writer of
+the session: while a game runs, every 60 s of play a checkpoint takes the
+session again from a worker's callback (`Code.proposed` adds this audit's fix
+for it). Two devices share one game and one Google Drive appDataFolder. What
+travels for the game is three Drive files:
 
 * `save:<game>`, the in-game battery save;
 * `stateauto:<game>`, the session: the Resume snapshot, its `saveSig` (the
@@ -23,9 +26,15 @@ The code modelled, by function:
   (the core writes its FS .sav) and the 5 s `persistSave`, `showMainMenu`,
   `resumeGame`, the hero's Close (`unloadGame`), `pagehide` /
   `visibilitychange` (hidden), and a page killed and opened again;
-* `persistAutoState` with its `sessionMoved` / `sessionSnapFor` gate,
-  `persistSave` with `lastSaveSig`, `storeLastFrame` with `lastFrameSig`,
-  `markUpload` with `syncRemarked`;
+* `persistAutoState` with its `sessionMoved` / `sessionSnapFor` /
+  `ckptInFlight` gate and `sessionUnsent`, `persistSave` with `lastSaveSig`,
+  `storeLastFrame` with `lastFrameSig`, `markUpload` with `syncRemarked`;
+* the checkpoints: `maybeCheckpoint` / `takeCheckpoint` at the end of a
+  running tick, then `storeCheckpoint` segment by segment (its newest check,
+  `await persistSave`, the session put, queued or left in `sessionUnsent`
+  under `SESSION_UPLOAD_MS`, `addCheckpoint`); the page's `playing` mark
+  (`markPlaying` / `clearPlaying`) and the boot's `noteCrashedRuns`, which
+  queues the session of a game whose page died with it running;
 * the sync engine, one segment per event between awaits that matter:
   `runFullSync` (Sync now), `flushSyncInner` (the listing, then per queued
   file: read + the session hold-back + start the upload; then the upload
@@ -71,6 +80,35 @@ The code modelled, by function:
 * The toast's Switch is offered once per newer copy (`handoffOffered`); it is
   the `switch` event, available while the stash is held, and timing it out is
   not tapping it.
+* Both devices run one build, so no session is refused as too new:
+  `sessionHeldFor` (`refuseState`, 7856-7866) stays null, and its gates in
+  `persistAutoState`, `storeLastFrame`, `maybeCheckpoint` and
+  `storeCheckpoint` never fire. A held game only writes less.
+* The close handlers' writes land. In a quitting browser they reach
+  IndexedDB at the next boot through the last gasp (`leaveLastGasp` /
+  `takeLastGasp`, 8642-8685, from localStorage, before anything reads the
+  session), which ends in the same records.
+* The crash sheet's "Resume from earlier" (`launchRom`'s `session` with
+  `force`, from the local checkpoint history, which keeps the newer save
+  aside first) is the player's explicit rollback, kept on one device; it is
+  not modelled, and `tap_never_rolls_back_save` is about the tap.
+* A checkpoint's `ts`/`play` and the picture it carries are not modelled
+  (its picture is its moment's, as a session's is); the history it adds to
+  (`addCheckpoint`) is local, and is only the last segment's wait. The
+  `SESSION_UPLOAD_MS` throttle is a free choice per checkpoint (`send`).
+  `noteCrashedRuns` counts a page whose `playing` mark outlived it; here a
+  `reload` with the mark standing.
+
+Line numbers below are web/index.js at 03f88d6c: `launchRom` 6444-6473,
+`loadRom` 11646-11766, `persistAutoState` 8126-8173, `maybeCheckpoint`
+8302-8310, `takeCheckpoint` 8312-8333, `storeCheckpoint` 8335-8359,
+`noteCrashedRuns` 8553-8609, `persistSave` 7440-7468, `storeLastFrame`
+6306-6328, `showMainMenu` 13474-13501, `unloadGame` 14173-14219,
+`takeHandoff` 4141-4150, `switchToHandoff` 4158-4183, `heldGameIsSent`
+4127-4132, `handoffNews` 4103-4121, `pullSyncInner` 4201-4545 (the hand-off
+section 4314-4358), `flushSyncInner` 3769-3997, `markUpload` 3714-3721,
+`runFullSync` 4547-4560, `renderClosedHero` 13882-13928, `refreshHero`
+13934-13945, `resumeGame` 13503-13514, `resumeSessionFor` 8760-8769.
 
 ## Results
 
@@ -100,7 +138,11 @@ The code modelled, by function:
   histories of three moves (sync stopped mid-pull, play, play and save,
   Close, Sync, page killed and reopened, Switch; alternating devices),
   syncing each device in turn leaves both resuming the same moment on the
-  same save as Drive's copy, each hero showing where its tap goes.
+  same save as Drive's copy, each hero showing where its tap goes. With a
+  checkpoint's move added (a checkpoint past its check when Main Menu is
+  tapped, landing later; 1024 histories), the proposed code converges
+  (`proposed_converges_*`) and the code at 03f88d6c does not
+  (`fixed_diverges_with_checkpoints`).
 * The shipped code's counterexamples (each reproduced against the real
   web/index.js by a test in web/tests/handoff.test.mjs, failing before the
   fix): `bug_switch_during_upload`, `bug_close_during_handoff`,
@@ -109,6 +151,12 @@ The code modelled, by function:
 * Open by design, when two devices played without syncing in between:
   `edge_concurrent_play_held_wins`, `edge_closed_copy_yields`,
   `edge_listing_race`.
+* The checkpoints (03f88d6c), open: `bug_checkpoint_after_switch` (Switch
+  tapped while a checkpoint packs: the turned-down moment lands back over
+  the chosen one and goes up with Switch's re-send) and
+  `bug_checkpoint_over_main_menu` (Main Menu tapped while a checkpoint
+  awaits `persistSave`: the older moment lands over the newer snapshot).
+  Both end safely with the proposed fix (`proposed_*`).
 
 ## The fixes (`Code.fixed`)
 
@@ -121,6 +169,14 @@ The code modelled, by function:
   downloads is left to the files pass, as any closed game.
 * `heldGameIsSent` asks after its read, and the caller checks `running` and
   `loadGen` again in the run that takes the hand-off.
+
+## The proposed fix (`Code.proposed`, not in the JS yet)
+
+* `takeHandoff` moves the game's session epoch (`sessionEpochs`, as
+  `deleteKeys` does for a delete), so a checkpoint of the copy let go is
+  history wherever it is.
+* `storeCheckpoint` asks its question (`sessionSnapTs`, epoch, held) again
+  after `await persistSave`, right before its session put.
 -/
 
 namespace WebState.Handoff
@@ -202,9 +258,32 @@ inductive Eng
   | pullFiles (list : Listing)
   deriving Repr
 
-/-- Which code: as shipped in 43b30d1c, or with this model's fixes. -/
-inductive Code | shipped | fixed
+/-- Which code: as shipped in 43b30d1c; with the first audit's fixes, which
+is the code at 03f88d6c (`fixed`); or that with this audit's proposed fix for
+the checkpoints (`proposed`: `takeHandoff` moves the session's epoch, and
+`storeCheckpoint` asks again after its `await persistSave`). The checkpoints
+are 03f88d6c's in all three; the traces on `shipped` take none. -/
+inductive Code | shipped | fixed | proposed
   deriving DecidableEq, Repr
+
+/-- A checkpoint in flight (`ckptInFlight`, one per page): `takeCheckpoint`
+copied the moment and the battery (`packing`, the worker packs them); then
+`storeCheckpoint` checked it is still the newest snapshot and is awaiting
+its `persistSave` (`saving`), has put the session and awaits the put
+(`storing`), and has queued it or not and awaits `addCheckpoint`, the local
+history (`indexing`); the `finally` lets it go. -/
+inductive Ck
+  | none
+  | packing (x : Sess)
+  | saving (x : Sess)
+  | storing
+  | indexing
+  deriving DecidableEq, Repr
+
+/-- No checkpoint in flight (`!ckptInFlight`). -/
+def Ck.idle : Ck → Bool
+  | .none => true
+  | _ => false
 
 /-- One device. -/
 structure Dv where
@@ -247,6 +326,16 @@ structure Dv where
   eng : Eng := .idle
   /-- A flush and a pull queued behind the running job (`runExclusive`). -/
   chained : Bool := false
+  /-- `ckptInFlight`, and where it stands. -/
+  ckpt : Ck := .none
+  /-- The checkpoint in flight is still the newest snapshot of the game:
+  `sessionSnapTs.get(game)` is its `ts` and `sessionEpoch(game)` its epoch. -/
+  newest : Bool := false
+  /-- `sessionUnsent.has(game)`: a checkpoint's session stored, not queued. -/
+  unsent : Bool := false
+  /-- `playingMarked`: the page's mark that its game is running in view, which
+  a page killed with it standing leaves for the next boot (`noteCrashedRuns`). -/
+  playing : Bool := false
   deriving Repr
 
 structure S where
@@ -314,13 +403,18 @@ def mark (v : Dv) (k : Key) : Dv :=
   if v.queued.get k then { v with remarked := v.remarked.set k true }
   else { v with queued := v.queued.set k true }
 
-/-- `persistAutoState` (the snapshot is skipped when the game has not moved
-since the last one). -/
+/-- `persistAutoState`: the snapshot is skipped when the game has not moved
+since the last one (a checkpoint's counts) and no checkpoint is in flight;
+then a checkpoint's session still unsent is queued (`sessionUnsent`; the
+`checkpointLanded()` it waits on has resolved, so the queueing is a microtask
+away). A snapshot taken is the newest (`sessionSnapTs`), so a checkpoint in
+flight is history. -/
 def persistAutoState (v : Dv) (d : Dev) : Dv :=
   if v.mode = .closed then v
-  else if !v.moved && v.snapped then v
+  else if !v.moved && v.snapped && v.ckpt.idle then
+    if v.unsent then mark { v with unsent := false } .sess else v
   else mark { v with files := v.files.set .sess (some (.sess ⟨v.moment, v.battery, d⟩)),
-                     moved := false, snapped := true } .sess
+                     moved := false, snapped := true, newest := false, unsent := false } .sess
 
 /-- `persistSave`: the FS .sav into `save:<game>` when it changed since
 `lastSaveSig`; an empty .sav is no save. -/
@@ -363,31 +457,70 @@ def tap (v : Dv) : Dv :=
     | some x => if x.sig = bat then { base with moment := x.m, battery := x.sig } else base
     | none => base
 
-/-- `showMainMenu`. -/
+/-- `showMainMenu` (the paused tick's `clearPlaying` with it). -/
 def mainMenu (v : Dv) (d : Dev) : Dv :=
   if v.mode ≠ .running then v
   else
     let v := persistSave (persistAutoState (storeFrame true v) d)
-    { v with mode := .home, drawn := v.moment, drawnFor := true, heroUp := true }
+    { v with mode := .home, drawn := v.moment, drawnFor := true, heroUp := true,
+             playing := false }
 
-/-- `pagehide` (and `visibilitychange` hidden, with the 5 s save). -/
+/-- `pagehide` (and `visibilitychange` hidden): `clearPlaying`, the save, the
+session, and the picture where the screen changed since the last one. -/
 def hide (v : Dv) (d : Dev) : Dv :=
-  storeFrame false (persistAutoState (persistSave v) d)
+  { storeFrame false (persistAutoState (persistSave v) d) with playing := false }
 
 /-- The hero's Close (`unloadGame`): shown only for the game paused at home. -/
 def close (v : Dv) (d : Dev) : Dv :=
   if v.mode ≠ .home then v
   else
     let v := persistSave (storeFrame true (persistAutoState { v with gen := v.gen + 1 } d))
-    refresh { v with mode := .closed, battery := 0 }
+    refresh { v with mode := .closed, battery := 0, playing := false }
 
 /-- The page is killed and opened again: what IndexedDB and the sync state
-hold survives, nothing in memory does. -/
+hold survives, nothing in memory does. A page killed with its game running
+in view left its `playing` mark, and the next boot (`noteCrashedRuns`)
+queues the game's session: its last checkpoint may not have been. -/
 def reload (v : Dv) : Dv :=
-  { v with mode := .closed, moment := 0, battery := 0, moved := true, snapped := false,
-           lastSave := 0, lastFrame := none, gen := v.gen + 1,
-           remarked := KMap.all false, force := false, stash := [], offered := false,
-           heroUp := false, drawnFor := false, eng := .idle, chained := false }
+  let w : Dv :=
+    { v with mode := .closed, moment := 0, battery := 0, moved := true, snapped := false,
+             lastSave := 0, lastFrame := none, gen := v.gen + 1,
+             remarked := KMap.all false, force := false, stash := [], offered := false,
+             heroUp := false, drawnFor := false, eng := .idle, chained := false,
+             ckpt := .none, newest := false, unsent := false, playing := false }
+  if v.playing && (v.files.get .sess).isSome then mark w .sess else w
+
+/-! ## Checkpoints -/
+
+/-- `maybeCheckpoint` -> `takeCheckpoint`, at the end of a running tick: the
+moment and the battery (`flushSoloSave`, then the file) copied, the game
+counted as not moved, and this the newest snapshot. -/
+def ckptTake (v : Dv) (d : Dev) : Dv :=
+  if v.mode = .running && v.ckpt.idle then
+    { v with moved := false, snapped := true, newest := true,
+             ckpt := .packing ⟨v.moment, v.battery, d⟩ }
+  else v
+
+/-- The checkpoint's next segment. `send` is `storeCheckpoint`'s
+`SESSION_UPLOAD_MS` throttle: queued for Drive, or left in `sessionUnsent`. -/
+def ckptStep (c : Code) (send : Bool) (v : Dv) : Dv :=
+  match v.ckpt with
+  | .none => v
+  | .packing x =>
+    -- `storeCheckpoint`'s first check; then the battery it carries is stored,
+    -- where the game is still loaded and that battery is not already.
+    if !v.newest then { v with ckpt := .none }
+    else
+      let v := if v.mode ≠ .closed && x.sig ≠ v.lastSave then persistSave v else v
+      { v with ckpt := .saving x }
+  | .saving x =>
+    -- After `await persistSave`: the session put. `proposed` asks again.
+    if c = .proposed && !v.newest then { v with ckpt := .none }
+    else { v with files := v.files.set .sess (some (.sess x)), ckpt := .storing }
+  | .storing =>
+    let v := if send then mark { v with unsent := false } .sess else { v with unsent := true }
+    { v with ckpt := .indexing }
+  | .indexing => { v with ckpt := .none }
 
 /-- A flush then a pull: started now, or queued behind the running job. -/
 def startSync (v : Dv) : Dv :=
@@ -413,7 +546,12 @@ def land (v : Dv) (n : News) : Dv :=
   { v with files := v.files.set n.k (some n.b), sigs := v.sigs.set n.k (some n.b),
            rmt := v.rmt.set n.k n.mt }
 def take (v : Dv) (news : List News) : Dv :=
-  news.foldl land { v with mode := .closed, battery := 0, gen := v.gen + 1, drawnFor := false }
+  news.foldl land { v with mode := .closed, battery := 0, gen := v.gen + 1, drawnFor := false,
+                           playing := false }
+/-- `proposed`: `takeHandoff` also moves the session's epoch, as `deleteKeys`
+does, so a checkpoint of the copy let go is history. -/
+def takeC (c : Code) (v : Dv) (news : List News) : Dv :=
+  if c = .proposed then take { v with newest := false } news else take v news
 
 /-- The offer (`handoffStash`, the session marked seen, the toast). -/
 def markSeen (v : Dv) (n : News) : Dv :=
@@ -451,7 +589,7 @@ def stillHeld (v : Dv) (g0 : Nat) : Bool :=
 session's hold-back waived (`handoffForce`); fixed: re-marked. -/
 def resend (c : Code) (v : Dv) (n : News) : Dv :=
   let v := mark { v with sigs := v.sigs.set n.k none, force := v.force || n.k == .sess } n.k
-  if c = .fixed then { v with remarked := v.remarked.set n.k true } else v
+  if c ≠ .shipped then { v with remarked := v.remarked.set n.k true } else v
 
 /-- `switchToHandoff`: the stash lands as the hand-off does, and is sent up
 again over whatever this device sent meanwhile. Fixed: also re-marked, so a
@@ -462,7 +600,7 @@ def switch (c : Code) (v : Dv) : Dv :=
     let news := v.stash
     let v : Dv := { v with stash := [], offered := false,
                            queued := (v.queued.set .save false).set .sess false }
-    startSync (refresh (news.foldl (resend c) (take v news)))
+    startSync (refresh (news.foldl (resend c) (takeC c v news)))
 
 /-! ## The engine -/
 
@@ -538,7 +676,7 @@ def tick (c : Code) (s : S) (d : Dev) : S :=
       -- `onHome` and `heldGameIsSent`'s first checks, then its `dbGet`.
       if v.mode ≠ .running then s.setDev d { v with eng := .pullCheck list news (sentBefore v) g0 }
       else s.setDev d { (offer v news) with eng := .pullFiles list }
-    | .fixed =>
+    | .fixed | .proposed =>
       if !stillHeld v g0 then s.setDev d { v with eng := .pullFiles list }
       else if v.mode ≠ .running then s.setDev d { v with eng := .pullCheck list news true g0 }
       else s.setDev d { (offer v news) with eng := .pullFiles list }
@@ -548,11 +686,11 @@ def tick (c : Code) (s : S) (d : Dev) : S :=
       let sent := sent1 && v.battery == saveVal (v.files.get .save)
       if sent && v.mode != .closed then s.setDev d { (take v news) with eng := .pullFiles list }
       else s.setDev d { (offer v news) with eng := .pullFiles list }
-    | .fixed =>
+    | .fixed | .proposed =>
       -- Asked again in the run that acts: nothing changed since the read.
       let sent := sentBefore v && v.battery == saveVal (v.files.get .save) &&
                   v.mode == .home && v.gen == g0
-      if sent then s.setDev d { (take v news) with eng := .pullFiles list }
+      if sent then s.setDev d { (takeC c v news) with eng := .pullFiles list }
       else if stillHeld v g0 then s.setDev d { (offer v news) with eng := .pullFiles list }
       else s.setDev d { v with eng := .pullFiles list }
   | .pullFiles list => s.setDev d (pullFiles v list)
@@ -579,6 +717,10 @@ inductive Ev
   | switch (d : Dev)
   /-- The device's engine runs its next segment. -/
   | tick (d : Dev)
+  /-- A running tick takes a checkpoint (every 60 s of play). -/
+  | ckptTake (d : Dev)
+  /-- The checkpoint in flight runs its next segment. -/
+  | ckpt (d : Dev) (send : Bool)
   deriving DecidableEq, Repr
 
 def onDev (s : S) (d : Dev) (f : Dv → Dv) : S := s.setDev d (f (s.dev d))
@@ -587,7 +729,8 @@ def step (c : Code) (s : S) : Ev → S
   | .tap d => onDev s d tap
   | .frames d =>
     if (s.dev d).mode = .running then
-      { onDev s d (fun v => { v with moment := s.clock + 1, moved := true }) with clock := s.clock + 1 }
+      { onDev s d (fun v => { v with moment := s.clock + 1, moved := true, playing := true })
+        with clock := s.clock + 1 }
     else s
   | .gameSaves d =>
     if (s.dev d).mode = .running then
@@ -605,6 +748,8 @@ def step (c : Code) (s : S) : Ev → S
       | _ => startSync v)
   | .switch d => onDev s d (switch c)
   | .tick d => tick c s d
+  | .ckptTake d => onDev s d (fun v => ckptTake v d)
+  | .ckpt d send => onDev s d (ckptStep c send)
 
 def run (c : Code) (s : S) (es : List Ev) : S := es.foldl (step c) s
 
@@ -776,7 +921,8 @@ theorem drive_session_written_only_by_upload (c : Code) (s : S) (e : Ev)
 @[simp] theorem mark_eng (v : Dv) (k : Key) : (mark v k).eng = v.eng := by
   unfold mark; split <;> rfl
 @[simp] theorem persistAutoState_eng (v : Dv) (d : Dev) : (persistAutoState v d).eng = v.eng := by
-  unfold persistAutoState; split <;> (try split) <;> simp
+  unfold persistAutoState; repeat' split
+  all_goals simp
 @[simp] theorem persistSave_eng (v : Dv) : (persistSave v).eng = v.eng := by
   unfold persistSave; split <;> simp
 @[simp] theorem storeFrame_eng (f : Bool) (v : Dv) : (storeFrame f v).eng = v.eng := by
@@ -793,6 +939,9 @@ theorem foldl_eng {β : Type} (f : Dv → β → Dv) (hf : ∀ v x, (f v x).eng 
   unfold resend; split <;> simp
 @[simp] theorem take_eng (v : Dv) (news : List News) : (take v news).eng = v.eng := by
   unfold take; rw [foldl_eng _ land_eng]
+@[simp] theorem takeC_eng (c : Code) (v : Dv) (news : List News) : (takeC c v news).eng = v.eng := by
+  unfold takeC; split <;> simp
+@[simp] theorem takeC_fixed (v : Dv) (news : List News) : takeC .fixed v news = take v news := rfl
 @[simp] theorem tap_eng (v : Dv) : (tap v).eng = v.eng := by
   unfold tap; split <;> simp only [] <;> (repeat' split) <;> rfl
 @[simp] theorem mainMenu_eng (v : Dv) (d : Dev) : (mainMenu v d).eng = v.eng := by
@@ -800,6 +949,13 @@ theorem foldl_eng {β : Type} (f : Dv → β → Dv) (hf : ∀ v x, (f v x).eng 
 @[simp] theorem hide_eng (v : Dv) (d : Dev) : (hide v d).eng = v.eng := by simp [hide]
 @[simp] theorem close_eng (v : Dv) (d : Dev) : (close v d).eng = v.eng := by
   unfold close; split <;> simp
+@[simp] theorem reload_eng (v : Dv) : (reload v).eng = .idle := by
+  unfold reload; split <;> simp
+@[simp] theorem ckptTake_eng (v : Dv) (d : Dev) : (ckptTake v d).eng = v.eng := by
+  unfold ckptTake; split <;> rfl
+@[simp] theorem ckptStep_eng (c : Code) (b : Bool) (v : Dv) : (ckptStep c b v).eng = v.eng := by
+  unfold ckptStep; repeat' split
+  all_goals simp
 
 @[simp] theorem dev_with (t : S) (d : Dev) (x : Listing) (y : Nat) :
     ({ t with drv := x, clock := y } : S).dev d = t.dev d := by cases d <;> rfl
@@ -883,7 +1039,7 @@ theorem session_upload_was_approved (c : Code) (s : S) (e : Ev) (d : Dev) (list 
   | reload d' =>
     left; simp only [step] at h
     by_cases hd : d' = d
-    · subst hd; simp [onDev, reload] at h
+    · subst hd; simp [onDev] at h
     · simpa [onDev, dev_setDev_ne _ _ (Ne.symm hd)] using h
   | syncNow d' =>
     left; simp only [step] at h
@@ -919,6 +1075,11 @@ theorem session_upload_was_approved (c : Code) (s : S) (e : Ev) (d : Dev) (list 
       · exact h
       · simp at h
     · simpa [onDev, dev_setDev_ne _ _ (Ne.symm hd)] using h
+  | ckpt d' b =>
+    left; simp only [step] at h
+    by_cases hd : d' = d
+    · subst hd; simpa [onDev] using h
+    · simpa [onDev, dev_setDev_ne _ _ (Ne.symm hd)] using h
   | _ d' =>
     left; simp only [step] at h
     by_cases hd : d' = d
@@ -936,7 +1097,8 @@ theorem foldl_pres {α β : Type} (P : Dv → α) (f : Dv → β → Dv) (hf : �
 @[simp] theorem mark_mode (v : Dv) (k : Key) : (mark v k).mode = v.mode := by
   unfold mark; split <;> rfl
 @[simp] theorem persistAutoState_mode (v : Dv) (d : Dev) : (persistAutoState v d).mode = v.mode := by
-  unfold persistAutoState; split <;> (try split) <;> simp
+  unfold persistAutoState; repeat' split
+  all_goals simp
 @[simp] theorem persistSave_mode (v : Dv) : (persistSave v).mode = v.mode := by
   unfold persistSave; split <;> simp
 @[simp] theorem storeFrame_mode (f : Bool) (v : Dv) : (storeFrame f v).mode = v.mode := by
@@ -962,6 +1124,11 @@ theorem newsStep_mode (list : Listing) (acc : Dv × List News) (k : Key) :
 
 @[simp] theorem startSync_mode (v : Dv) : (startSync v).mode = v.mode := by
   unfold startSync; split <;> rfl
+@[simp] theorem ckptTake_mode (v : Dv) (d : Dev) : (ckptTake v d).mode = v.mode := by
+  unfold ckptTake; split <;> rfl
+@[simp] theorem ckptStep_mode (c : Code) (b : Bool) (v : Dv) : (ckptStep c b v).mode = v.mode := by
+  unfold ckptStep; repeat' split
+  all_goals simp
 theorem tap_not_closed (v : Dv) (h : v.mode ≠ .closed) : (tap v).mode ≠ .closed := by
   unfold tap; split <;> simp_all
 
@@ -1032,6 +1199,11 @@ theorem pull_unloads_only_a_sent_game (s : S) (e : Ev) (d : Dev)
     by_cases hd : d' = d
     · subst hd; simp only [step, onDev, dev_setDev] at h1; split at h1 <;> simp_all
     · simp [step, onDev, dev_setDev_ne _ _ (Ne.symm hd)] at h1; exact h0 h1
+  | ckpt d' b =>
+    exfalso
+    by_cases hd : d' = d
+    · subst hd; simp_all [step, onDev]
+    · simp [step, onDev, dev_setDev_ne _ _ (Ne.symm hd)] at h1; exact h0 h1
   | _ d' =>
     exfalso
     by_cases hd : d' = d
@@ -1060,7 +1232,8 @@ news holds one entry per file). -/
 theorem take_lands (v : Dv) (news : List News) (hd : news.Pairwise (fun x y => x.k ≠ y.k)) :
     ∀ n ∈ news, (take v news).files.get n.k = some n.b := by
   unfold take
-  generalize ({ v with mode := .closed, battery := 0, gen := v.gen + 1, drawnFor := false } : Dv) = w
+  generalize ({ v with mode := .closed, battery := 0, gen := v.gen + 1, drawnFor := false,
+                       playing := false } : Dv) = w
   induction news generalizing w with
   | nil => intro n hn; cases hn
   | cons x l ih =>
@@ -1081,7 +1254,9 @@ theorem foldl_land_eng (l : List News) :
 theorem take_with_eng (v : Dv) (news : List News) (e e' : Eng) :
     ({ (take { v with eng := e } news) with eng := e' } : Dv) = { (take v news) with eng := e' } := by
   unfold take
-  show ({ (List.foldl land ({ ({ v with mode := .closed, battery := 0, gen := v.gen + 1, drawnFor := false } : Dv) with eng := e } : Dv) news) with eng := e' } : Dv) = _
+  show ({ (List.foldl land ({ ({ v with mode := .closed, battery := 0, gen := v.gen + 1, drawnFor := false,
+                                         playing := false } : Dv) with eng := e } : Dv) news)
+          with eng := e' } : Dv) = _
   rw [foldl_land_eng]
 
 /-- **A game held at home, unmoved, its save and session sent, is always
@@ -1103,7 +1278,7 @@ theorem handed_off_when_sent (s : S) (d : Dev) (list : Listing) (news : List New
       (s.dev d).gen == g0) = true := by
     simp only [sentBefore] at hs ⊢; simp [hs, hb, hm, hg]
   simp only [hc, ↓reduceIte]
-  simp only [dev_setDev, take_with_eng]
+  simp only [dev_setDev, takeC_fixed, take_with_eng]
 
 /-! ### The picture follows -/
 
@@ -1295,12 +1470,82 @@ theorem edge_listing_race :
     driveMoment p = p.b.moment ∧ driveMoment s = p.a.moment := by
   decide +kernel
 
+/-! ## Checkpoints: what this audit found (03f88d6c)
+
+A checkpoint (every 60 s of play) writes the session from a worker's
+callback, seconds' worth of awaits after the moment it copied. It gives way
+to a newer snapshot or a delete (`sessionSnapTs`, `sessionEpoch`), asked once,
+before `await persistSave`. Two writers it does not give way to: -/
+
+/-- Device 1 holds its older copy and goes back into it; a pull while it runs
+offers Switch. It plays on; a running tick takes a checkpoint... -/
+def ckptSwitchPre : List Ev :=
+  handPrefix ++ [.tap .a, .frames .a, .trigger .a] ++ settle .a ++ [.frames .a, .ckptTake .a]
+/-- ...and the player taps Switch while the worker packs it (a GBA state:
+tens to hundreds of ms). The checkpoint lands, then both sync. -/
+def ckptSwitchTrace : List Ev :=
+  ckptSwitchPre ++ [.switch .a] ++ List.replicate 4 (.ckpt .a true) ++ settle .a ++ sync .b
+
+/-- **The checkpoint lands over the copy the player switched to**: `takeHandoff`
+moves neither `sessionSnapTs` nor the epoch, so the checkpoint is still "the
+newest" and puts the turned-down moment back in `stateauto:`; Switch's own
+re-send (the key queued again, its `sigs` forgotten) sends it to Drive. Both devices
+resume the moment the player turned down. -/
+theorem bug_checkpoint_after_switch :
+    let s := run .fixed init ckptSwitchTrace
+    let chosen := (run .fixed init handPrefix).b.moment
+    let turnedDown := (run .fixed init ckptSwitchPre).a.moment
+    turnedDown ≠ chosen ∧ resumePoint s.a = turnedDown ∧ driveMoment s = turnedDown ∧
+    resumePoint s.b = turnedDown := by
+  decide +kernel
+
+/-- **Proposed** (`takeHandoff` moves the session's epoch): the checkpoint is
+history, and the chosen copy is the copy everywhere. -/
+theorem proposed_checkpoint_after_switch :
+    let s := run .proposed init ckptSwitchTrace
+    let chosen := (run .proposed init handPrefix).b.moment
+    resumePoint s.a = chosen ∧ driveMoment s = chosen ∧ resumePoint s.b = chosen := by
+  decide +kernel
+
+/-- Device 1 plays, saves in game, and a checkpoint is taken before the 5 s
+autosave stored that save; `storeCheckpoint` passes its check and awaits
+`persistSave`. Frames run on, and the player taps Main Menu, which takes the
+newest snapshot. -/
+def ckptMenuPre : List Ev :=
+  [.tap .a, .frames .a, .mainMenu .a] ++ sync .a ++
+  [.tap .a, .frames .a, .gameSaves .a, .frames .a, .ckptTake .a, .ckpt .a true,
+   .frames .a, .mainMenu .a]
+/-- The checkpoint goes on; then each device syncs. -/
+def ckptMenuTrace : List Ev := ckptMenuPre ++ List.replicate 3 (.ckpt .a true) ++ sync .a ++ sync .b
+
+/-- **The checkpoint lands over the snapshot Main Menu took after it**: it asked
+before its `await persistSave` and not after. The session stored, sent and
+picked up on device 2 is the older moment; device 1, unmoved, never takes
+the newer one again, and after Close resumes the older moment too. -/
+theorem bug_checkpoint_over_main_menu :
+    let left := (run .fixed init ckptMenuPre).a.moment
+    let s := run .fixed init ckptMenuTrace
+    let s' := step .fixed s (.close .a)
+    s.a.mode = .home ∧ s.a.moment = left ∧ driveMoment s ≠ left ∧ resumePoint s.b ≠ left ∧
+    resumePoint s'.a ≠ left := by
+  decide +kernel
+
+/-- **Proposed** (`storeCheckpoint` asks again after `await persistSave`):
+the moment left is the moment everywhere. -/
+theorem proposed_checkpoint_over_main_menu :
+    let left := (run .proposed init ckptMenuPre).a.moment
+    let s := run .proposed init ckptMenuTrace
+    let s' := step .proposed s (.close .a)
+    driveMoment s = left ∧ resumePoint s.b = left ∧ resumePoint s'.a = left := by
+  decide +kernel
+
 /-! ## Convergence -/
 
 /-- One move of one device: sync and stop mid-pull (at the hand-off), play,
 play and save in game, Close, a full Sync, the page killed and opened again,
-Switch. -/
-def move (d : Dev) : Fin 7 → List Ev
+Switch; and (7) play and save in game with a checkpoint taken and past its
+check when Main Menu is tapped, landing later. -/
+def move (d : Dev) : Fin 8 → List Ev
   | 0 => [.syncNow d] ++ List.replicate 7 (.tick d)
   | 1 => [.tap d, .frames d, .mainMenu d]
   | 2 => [.tap d, .frames d, .gameSaves d, .autosave d, .mainMenu d]
@@ -1308,10 +1553,14 @@ def move (d : Dev) : Fin 7 → List Ev
   | 4 => sync d
   | 5 => [.hide d, .reload d, .pull d] ++ settle d
   | 6 => [.switch d]
+  | 7 => [.tap d, .frames d, .gameSaves d, .ckptTake d, .ckpt d true, .frames d, .mainMenu d]
 
-/-- Each device syncs in turn, three times: enough for a held copy that was
-offered Switch to go up, and the other device to take it. -/
-def finalRound : List Ev := sync .a ++ sync .b ++ sync .a ++ sync .b ++ sync .a ++ sync .b
+/-- A checkpoint still in flight lands; then each device syncs in turn, three
+times: enough for a held copy that was offered Switch to go up, and the other
+device to take it. -/
+def finalRound : List Ev :=
+  List.replicate 3 (.ckpt .a true) ++ List.replicate 3 (.ckpt .b true) ++
+  sync .a ++ sync .b ++ sync .a ++ sync .b ++ sync .a ++ sync .b
 
 /-- Where Drive's copy resumes: its session where it was taken with Drive's save. -/
 def driveResume (s : S) : Nat :=
@@ -1328,18 +1577,26 @@ def agree (s : S) : Bool :=
   saveVal (s.a.files.get .save) == saveVal (s.b.files.get .save) &&
   truePicture s.a && truePicture s.b
 
-def moves : List (Fin 7) := [0, 1, 2, 3, 4, 5, 6]
+/-- The moves of the first audit, and with the checkpoint's. -/
+def moves : List (Fin 8) := [0, 1, 2, 3, 4, 5, 6]
+def movesCkpt : List (Fin 8) := moves ++ [7]
 
-def converges (c : Code) (d e : Dev) : Bool :=
-  moves.all fun x => moves.all fun y => moves.all fun z =>
+def converges (c : Code) (ms : List (Fin 8)) (d e : Dev) : Bool :=
+  ms.all fun x => ms.all fun y => ms.all fun z =>
     agree (run c init (move d x ++ move e y ++ move d z ++ finalRound))
 
 /-- **Both devices end up agreeing**: from all 343 histories of three moves
 (device 1, device 2, device 1), syncing each in turn leaves both resuming the
 same moment, on the same save, as Drive holds, each hero showing where its
 tap goes. -/
-theorem converges_a_b_a : converges .fixed .a .b = true := by decide +kernel
+theorem converges_a_b_a : converges .fixed moves .a .b = true := by decide +kernel
 /-- The same, device 2 first. -/
-theorem converges_b_a_b : converges .fixed .b .a = true := by decide +kernel
+theorem converges_b_a_b : converges .fixed moves .b .a = true := by decide +kernel
+
+/-- With the checkpoint's move too (512 histories each way), the proposed fix
+converges; the code at 03f88d6c does not (`bug_checkpoint_over_main_menu`). -/
+theorem proposed_converges_a_b_a : converges .proposed movesCkpt .a .b = true := by decide +kernel
+theorem proposed_converges_b_a_b : converges .proposed movesCkpt .b .a = true := by decide +kernel
+theorem fixed_diverges_with_checkpoints : converges .fixed movesCkpt .a .b = false := by decide +kernel
 
 end WebState.Handoff

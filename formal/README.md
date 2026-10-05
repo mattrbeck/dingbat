@@ -17,7 +17,7 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 | File | Machine |
 |---|---|
 | `GameLifecycle` | launchRom / loadRom / resumeGame / unloadGame, the hero, resume toast and resuming launches, the hand-off's unload, checkpoints |
-| `Handoff` | picking a game up on another device: the session on Drive, the hold-back, the pull's hand-off and Switch, the hero's picture; Matt's fourteen steps |
+| `Handoff` | picking a game up on another device: the session on Drive, the hold-back, the pull's hand-off and Switch, the hero's picture, the checkpoints; Matt's fourteen steps |
 | `RunPause` | `paused`, pausing overlays, clip export, picture flights, remote pause, Screen Wake Lock, AudioContext |
 | `SavePersistence` | `rom.sav` ↔ `save:<game>`, persistSave, auto-state, checkpoints, the hero's Resume, slots, reset, import |
 | `DriveSession` | token renewal, sign in/out, the upload queue, the sync lamp |

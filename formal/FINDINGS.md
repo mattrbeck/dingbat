@@ -76,8 +76,10 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
   swallowed rename error (`Modals`).
 - The manual-code retry, and a cancelled dial marking the server down
   (`Netplay`).
-- Orphan `frame:` records, and the batch overwriting a pulled frame
-  (`Thumbnails`).
+- Orphan `frame:` records (the batch racing a tombstone delete; a pull
+  racing a rename, found 2026-10-05), and the batch overwriting a pulled
+  frame (`Thumbnails`). A delete racing the frame chain or a pull is no
+  longer reachable (see the re-audit at the end).
 - A force update's copy into the live cache is not atomic (`ServiceWorker`).
 - The merge is still non-commutative on a same-millisecond rename tie and
   non-associative on `imp`.
@@ -480,3 +482,46 @@ The three models follow 03f88d6c again; SavePersistence follows the fix of its t
 | C1 | **A quota retry after a checkpoint eviction puts the old save back.** `dbPutRoomy` frees other games' checkpoints first and retries at once, but asks `superseded()` only `if (freed && …)`, and `freed` counts ROMs. A newer persist, a Reset, a Delete or an Import landing while the checkpoints are deleted is overwritten; after Reset or Import the reboot boots on the old save, after Delete the deleted save is back and queued for Drive. | `SavePersistence.bug_ckpt_evict_retry_writes_older_save`, `bug_ckpt_evict_retry_undoes_reset`, `bug_ckpt_evict_retry_resurrects_deleted_save`, `bug_ckpt_evict_retry_over_import` | `retried`, set in the `catch` before either eviction, replaces `freed` in the `superseded()` check. | web/tests/ckpt-evict.test.mjs |
 | C2 | **A checkpoint's session lands over a newer one, or after a Reset.** `storeCheckpoint` checks `sessionSnapTs`/the epoch, then (battery not yet stored) `await persistSave`, then puts the session without checking again. Main Menu, a hide, a close or a switch in that await is replaced by the older moment; a Reset or Delete gets the pre-reset session back (carrying the wiped battery's signature; `addCheckpoint` re-checks, so the moment itself stays out). | `bug_ckpt_store_over_newer_session`, `bug_ckpt_store_undoes_session_reset` | `stale()` (ts, epoch, `sessionHeldFor`) checked at entry and again right after `await persistSave`. | web/tests/ckpt-store.test.mjs |
 | C3 | **The Saves panel's Reset is undone by a pull landing in it.** `resetCurrentSaveFile` detaches and deletes, but queues its Drive deletes (`markDelete`) only after its awaits; a pull that started downloading the save before the game was tapped passes all three of its checks (not loaded, not loading, not queued), writes it back, and the reboot boots on it. `resetGameAction` queues first and is safe (`reset_game_action_holds_off_pull`). | `bug_file_reset_undone_by_pull` | The three `markDelete`s run right after `retireSavePuts`, before the first await. | web/tests/reset-pull.test.mjs |
+
+## Re-audit at 03f88d6c (2026-10-05): `Handoff` and `Thumbnails`
+
+**Handoff.** The crash checkpoints (6ee01e88..096edd3e) made a second writer
+of the session: while a game runs, every 60 s of play `takeCheckpoint`
+copies the moment and `storeCheckpoint` writes it from the worker's
+callback, giving way only to a newer snapshot or a delete (`sessionSnapTs`,
+the session epoch), asked once, before its `await persistSave`. The model
+now has the checkpoint segment by segment, `sessionUnsent`, the
+`ckptInFlight` gate in `persistAutoState`, the `playing` mark and
+`noteCrashedRuns`' re-queue at boot. Every earlier theorem still holds on
+the code at 03f88d6c (`Code.fixed`), including both convergence checks
+over the first audit's moves. Two new counterexamples, both open:
+
+| # | Severity | What happens | Proposed fix |
+|---|---|---|---|
+| H4 | Medium | **Switch tapped while a checkpoint packs** (`bug_checkpoint_after_switch`). `takeHandoff` moves neither `sessionSnapTs` nor the epoch, so the checkpoint, still "the newest", lands after the hand-off and writes the turned-down moment over the chosen session; Switch's own re-send (the key queued again, its `sigs` forgotten) then sends it to Drive. Both devices resume the moment the player turned down. Needs the tap within the pack (tens to hundreds of ms after a checkpoint, once per minute of play). | `takeHandoff` moves the session epoch (`sessionEpochs.set(game, sessionEpoch(game) + 1)`, as `deleteKeys` does) before it writes; with H5's re-check, which catches a checkpoint already past its first check. |
+| H5 | Low | **Main Menu (or a hide, or Close) while a checkpoint awaits `persistSave`** (`bug_checkpoint_over_main_menu`). The checkpoint asked before that await and writes its older moment over the snapshot just taken; the game, unmoved, never takes the newer one again, so that moment goes to Drive, the other device and the next Resume. The lost play is what ran between the checkpoint and the tap (well under a second), and only when the game had saved in game within about a second before the checkpoint. | `storeCheckpoint` asks again (`sessionSnapTs`, epoch, `sessionHeldFor`) after `await persistSave`, right before its session put. |
+
+`Code.proposed` is the code with both fixes: the two traces end safely
+(`proposed_*`), and with a checkpoint move added to the convergence check
+(1024 histories) it converges where 03f88d6c does not
+(`proposed_converges_*`, `fixed_diverges_with_checkpoints`).
+
+**Thumbnails.** Re-modelled from its stamp (43e81209). Since 43b30d1c the
+hide stores only a changed screen, now its own event; `deleteGameEverywhere`
+queues its Drive deletes before its wipe and the pull skips a file whose
+delete is queued (6dd57564, which the model had not followed).
+- No longer reachable, now `regress_*`: a delete racing the frame chain
+  (Delete starts from home, where the game is paused on the screen Main Menu
+  stored, so a hide during the unload stores nothing), and a delete racing a
+  pull's frame download.
+- Still open: the batch racing a pull's tombstone delete
+  (`bug_thumbs_resurrects_frame`), the batch overwriting a pulled frame,
+  the menu revoking a displayed URL.
+- New, low: **a pull racing a rename** (`bug_pull_after_rename_orphans_frame`).
+  The pull's write segment asks about the delete queue and the game in
+  memory, not a rename, so a frame downloading while its game is renamed
+  lands under the old name: an orphan that makes a later rename to that name
+  fail. The same window writes a save or a session under the old name
+  (`DriveLibrary`'s, not modelled here). Fix: the model's fix (2), a
+  synchronous set of names a delete or rename has retired, checked in the
+  pull's write segment.
