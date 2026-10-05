@@ -436,3 +436,34 @@ is no longer written when the merge leaves its text unchanged
 
 **Abstractions:** listed in the file's header. Bytes are opaque (compression
 is invisible here), one game, both devices hold its ROM, loads are atomic.
+
+## Re-audit at 03f88d6c (2026-10-05): SavePersistence, ServiceWorker, Netplay
+
+The three models follow 03f88d6c again (line numbers at that commit).
+
+- **SavePersistence** now models the checkpoints (`takeCheckpoint`,
+  `storeCheckpoint` and its guard, `addCheckpoint`'s epoch re-check, the
+  moments sheet's forced resume), the hero's Resume that boots straight into
+  the session (`loadRom`'s `opts.resume`), the session epochs, quota
+  evictions that free checkpoints before ROMs, the Saves panel's Reset as its
+  own path, and the Drive pull's delete-queue check. `provenance`,
+  `resume_only_on_sig_match` (the boot-time resume included) and
+  `persist_marks_upload` still hold over every interleaving.
+  `open_pull_resurrects_reset_save` was already fixed by 6dd57564 (the pull
+  checks the delete queue); it is now `regress_pull_resurrects_reset_save`.
+- **ServiceWorker** adds the update a save state from a newer build asks for
+  (`updateForNewerState`: `applyUpdate` with the game loaded and no
+  confirm). `no_forced_midgame` and `no_reload_without_a_click` still hold,
+  with that load counted as the player's ask; another tab's game is still
+  never reloaded (`newer_state_update_reloads_only_its_tab`). The new
+  `ASSETS` (clipmux.js, flap.png, ckptworker.js) change nothing modelled.
+- **Netplay**: citations only. `loadRom`'s resume runs in the solo commit,
+  after any session has ended, and keeps the solo core on its own game.
+
+**New, all Low (narrow windows), reproduced against the real `web/index.js` in the web/tests harness (C1's Import variant from the model only):**
+
+| # | What happens | Trace | Fix |
+|---|---|---|---|
+| C1 | **A quota retry after a checkpoint eviction puts the old save back.** `dbPutRoomy` frees other games' checkpoints first and retries at once, but asks `superseded()` only `if (freed && …)`, and `freed` counts ROMs. A newer persist, a Reset, a Delete or an Import landing while the checkpoints are deleted is overwritten; after Reset or Import the reboot boots on the old save, after Delete the deleted save is back and queued for Drive. | `SavePersistence.bug_ckpt_evict_retry_writes_older_save`, `bug_ckpt_evict_retry_undoes_reset`, `bug_ckpt_evict_retry_resurrects_deleted_save`, `bug_ckpt_evict_retry_over_import` | Ask `superseded()` before every retry: a `retried` flag set in the `catch`, tested where `freed` is now. |
+| C2 | **A checkpoint's session lands over a newer one, or after a Reset.** `storeCheckpoint` checks `sessionSnapTs`/the epoch, then (battery not yet stored) `await persistSave`, then puts the session without checking again. Main Menu, a hide, a close or a switch in that await is replaced by the older moment; a Reset or Delete gets the pre-reset session back (carrying the wiped battery's signature; `addCheckpoint` re-checks, so the moment itself stays out). | `bug_ckpt_store_over_newer_session`, `bug_ckpt_store_undoes_session_reset` | Repeat the 8337 check (and `sessionHeldFor`) after the `await persistSave`, before the session put. |
+| C3 | **The Saves panel's Reset is undone by a pull landing in it.** `resetCurrentSaveFile` detaches and deletes, but queues its Drive deletes (`markDelete`) only after its awaits; a pull that started downloading the save before the game was tapped passes all three of its checks (not loaded, not loading, not queued), writes it back, and the reboot boots on it. `resetGameAction` queues first and is safe (`reset_game_action_holds_off_pull`). | `bug_file_reset_undone_by_pull` | Move the three `markDelete`s up to just after `retireSavePuts` (before the first await), as `resetGameSaves` does. |
