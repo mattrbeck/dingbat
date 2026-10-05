@@ -16,8 +16,8 @@ const swAssets = () => {
   );
 };
 
-// Only <script src> and stylesheet/manifest links are enforced; conditional
-// loads (?probe) and icons are not offline-critical.
+// Only <script src> and stylesheet/manifest links are enforced; icons are not
+// offline-critical.
 const htmlRefs = () => {
   const html = read("index.html");
   const refs = [];
