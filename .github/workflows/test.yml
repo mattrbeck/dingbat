@@ -317,6 +317,11 @@ jobs:
         # A room code must be freed the instant its clients disconnect, not at TTL.
         if: runner.os == 'Linux'
         run: node web/signaling/server.test.mjs
+      - name: Signaling server room lifecycle (Nim, the deployed twin)
+        if: runner.os == 'Linux'
+        run: |
+          nim c -d:release -d:test_harness --opt:size --hints:off -o:signalsrv-ci web/signaling/server.nim
+          SIGNAL_CMD=./signalsrv-ci node web/signaling/server.test.mjs
       - name: Web present-shader UV tripwire (pure Node, no browser)
         # Asserts the live `v_uv` expression in web/glpresent.js maps the
         # screen to the full [0,1] texture, row 0 at the top.

@@ -91,16 +91,30 @@ const makeSession = (attach) => ({
   ptr: 0,
   started: false,       // wasm core linked, game ticking
   rtcConnected: false,  // DataChannel open
+  sdpIn: false,         // the friend's description arrived for this pairing
+  strikes: 0,           // pairings whose descriptions crossed and still never opened
+  rewaited: false,      // a pairing ended and we went back to waiting on the code
   helloDone: false,     // wire handshake validated (first successful tick)
   rxQueue: [],
   stallSince: 0,
 });
 let netAttach = true;   // attach mode of the current/last pending session (for retry)
 // Switches the modal to the manual code exchange when the server has not
-// answered a rendezvous in time; disarmed by any server reply (a lone peer
-// on "waiting" is healthy).
+// answered in time: the dial gets the liveness probe's budget, then the
+// rendezvous its own 2 s from the socket opening (a cold cellular TLS dial can
+// eat most of 2 s by itself). Disarmed by any server reply (a lone peer on
+// "waiting" is healthy).
 let manualFallbackTimer = 0;
 const MANUAL_FALLBACK_DELAY = 2000;
+const SIG_DIAL_TIMEOUT = 4000;
+// Sent with every rendezvous, the same across redials: the server drops this
+// page's stale seat (a socket that died without it hearing, e.g. iOS suspended
+// the tab) instead of pairing us with it or calling the code in use.
+const NET_PAGE_ID = (() => {
+  const a = new Uint32Array(4);
+  crypto.getRandomValues(a);
+  return Array.from(a, (x) => x.toString(16).padStart(8, "0")).join("");
+})();
 // Redial schedule for a server socket that drops after answering at least
 // once; then give up into the manual exchange. Any server reply refills it.
 const SIG_REDIAL_DELAYS = [1000, 2000, 4000];
@@ -254,7 +268,9 @@ const netFail = (msg) => {
   }
 };
 
-const sigConnect = () =>
+// `redial`: a failed dial lands back in the redial ladder (via onclose)
+// rather than ending the session.
+const sigConnect = (redial = false) =>
   new Promise((resolve) => {
     let ws;
     try {
@@ -277,7 +293,7 @@ const sigConnect = () =>
       if (opened) return; // an established socket's failure is onclose's to handle
       sigServerUp = false;
       log("netplay: dial " + NET_SIGNAL_URL + " errored before opening", "warn");
-      if (hasAltPath()) {
+      if (hasAltPath() || redial) {
         if (net.bc && !net.dc) {
           netSetStatus("Server unavailable — a second tab of this browser can still link");
         }
@@ -308,15 +324,77 @@ const sigConnect = () =>
     };
   });
 
-// Response deadline for a just-sent rendezvous; any server reply disarms it.
-const armManualFallback = (session) => {
+// Response deadline for a dial or a just-sent rendezvous; any server reply
+// disarms it.
+const armManualFallback = (session, ms = MANUAL_FALLBACK_DELAY) => {
   clearTimeout(manualFallbackTimer);
   manualFallbackTimer = setTimeout(() => {
     if (net === session && !net.dc && !net.rtcConnected && !net.started) {
       sigServerUp = false;
       manualEnter(true);
     }
-  }, MANUAL_FALLBACK_DELAY);
+  }, ms);
+};
+
+const sigRendezvous = (session) => {
+  sigSend({ t: "rendezvous", code: session.code, id: NET_PAGE_ID });
+  armManualFallback(session);
+};
+
+// A dial after the first (a redial, or back to waiting): rendezvous again on
+// the same code once it opens.
+const sigDialAgain = async (session) => {
+  armManualFallback(session, SIG_DIAL_TIMEOUT);
+  if (await sigConnect(true)) {
+    if (net !== session || session.dc) return;
+    sigRendezvous(session);
+  }
+  // else: that dial's onclose lands back in sigRedial
+};
+
+// This pairing is over before linking, but the friend may still come: they
+// left the server or were suspended (a phone in the background) before the
+// descriptions crossed, or the channel never opened. Drop the peer connection
+// and the socket and rendezvous again on the same code, as if Connect had just
+// been pressed (formal/WebState/LinkPairing.lean, `rewait`).
+const sigRewait = (why) => {
+  const session = net;
+  if (!session || !session.code || session.rtcConnected || session.started) return;
+  log("netplay: " + why + " — back to waiting on the code", "warn");
+  clearTimeout(session.rtcDeadline);
+  clearTimeout(session.redialTimer);
+  try { session.pc?.close(); } catch {}
+  session.pc = null;
+  session.dc = null; // a host's channel belonged to that pc
+  session.isHost = null;
+  session.sdpIn = false;
+  session.rewaited = true;
+  const ws = session.ws;
+  session.ws = null;
+  if (ws) {
+    try { ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null; ws.close(); } catch {}
+  }
+  // The dial counts against the redial ladder: a server that dies under it
+  // gets the ladder's remaining steps, then the manual exchange.
+  if (session.redials++ >= SIG_REDIAL_DELAYS.length) {
+    sigServerUp = false;
+    manualEnter(true);
+    return;
+  }
+  netSetStatus("Waiting for your friend…");
+  sigDialAgain(session);
+};
+
+// The pairing deadline, or ICE giving up: a pairing whose descriptions crossed
+// and still never opened is a strike, and two in a row are the NAT verdict;
+// otherwise the friend stopped answering, so wait for them again.
+const rtcGaveUp = (session, pc, why) => {
+  if (net !== session || session.pc !== pc || session.rtcConnected || session.started) return;
+  if (session.sdpIn && ++session.strikes >= 2) {
+    netFail("Could not connect peer-to-peer (a strict NAT on one side may be blocking it)");
+    return;
+  }
+  sigRewait(why);
 };
 
 // The server socket died mid-wait; the room died with it, so reconnect and
@@ -338,54 +416,69 @@ const sigRedial = () => {
   netSetStatus("Reconnecting to the linking server…");
   log("netplay: signaling socket dropped — redial " + (attempt + 1) + "/" +
       SIG_REDIAL_DELAYS.length + " in " + SIG_REDIAL_DELAYS[attempt] + "ms", "warn");
-  session.redialTimer = setTimeout(async () => {
+  session.redialTimer = setTimeout(() => {
     if (net !== session || session.dc || session.rtcConnected || session.started) return;
-    if (await sigConnect()) {
-      if (net !== session || session.dc) return;
-      sigSend({ t: "rendezvous", code: session.code });
-      armManualFallback(session);
-    }
-    // else: that dial's onclose lands back in sigRedial
+    sigDialAgain(session);
   }, SIG_REDIAL_DELAYS[attempt]);
 };
 
 const onSigMessage = async (msg) => {
   if (!net) return;
+  const session = net;
   // Any reply is proof of life: disarm the fallback, refill the redial budget.
   clearTimeout(manualFallbackTimer);
-  net.redials = 0;
+  session.redials = 0;
   sigServerUp = true;
+  if (msg.t !== "sdp" && msg.t !== "ice") {
+    log("netplay: server: " + msg.t + (msg.role ? " " + msg.role : "") +
+        (msg.msg ? " " + msg.msg : ""));
+  }
+  // The pc this message is about: an await can outlive it (back to waiting
+  // closes it), and its errors are then nobody's business.
+  const pc = session.pc;
   try {
     switch (msg.t) {
       case "waiting":
-        netSetStatus("");
+        netSetStatus(session.rewaited ? "Waiting for your friend…" : "");
         break;
       case "paired":
         // host = WebRTC offerer = unit 0.
-        net.isHost = msg.role === "host";
+        session.isHost = msg.role === "host";
         netSetStatus("Friend found — connecting…");
-        await startRtc(net.isHost);
+        await startRtc(session.isHost);
         break;
       case "sdp":
-        if (!net.pc) return;
-        await net.pc.setRemoteDescription(msg.d);
+        if (!pc) return;
+        session.sdpIn = true; // the friend is alive and paired with us
+        await pc.setRemoteDescription(msg.d);
         if (msg.d.type === "offer") {
-          const answer = await net.pc.createAnswer();
-          await net.pc.setLocalDescription(answer);
-          sigSend({ t: "sdp", d: net.pc.localDescription });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (net !== session || session.pc !== pc) return;
+          sigSend({ t: "sdp", d: pc.localDescription });
         }
         break;
       case "ice":
-        if (net.pc && msg.c) await net.pc.addIceCandidate(msg.c).catch(() => {});
+        if (pc && msg.c) await pc.addIceCandidate(msg.c).catch(() => {});
         break;
       case "peer-closed":
-        if (!net.rtcConnected) netFail("The other side left");
+        if (session.rtcConnected) break;
+        // The friend left the server. With the descriptions crossed it has
+        // most likely linked and released the room a round trip before our
+        // channel opens: leave it to our channel, or the deadline. Otherwise
+        // it left before pairing: wait for it again.
+        if (session.sdpIn) {
+          log("netplay: friend left the server mid-pairing — waiting on the channel");
+          break;
+        }
+        sigRewait("friend left before pairing");
         break;
       case "error":
         netFail(msg.msg || "Connection error");
         break;
     }
   } catch (e) {
+    if (net !== session || (pc && session.pc !== pc)) return; // superseded
     netFail("Connection setup failed: " + e.message);
   }
 };
@@ -394,36 +487,41 @@ const startRtc = async (isOfferer) => {
   const session = net;
   const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
   session.pc = pc;
+  session.sdpIn = false;
   // A checking phase that never starts never reaches 'failed' on its own.
   clearTimeout(session.rtcDeadline);
-  session.rtcDeadline = setTimeout(() => {
-    if (net === session && !net.rtcConnected && !net.started) {
-      netFail("Could not connect peer-to-peer (a strict NAT on one side may be blocking it)");
-    }
-  }, RTC_CONNECT_DEADLINE);
+  session.rtcDeadline = setTimeout(
+    () => rtcGaveUp(session, pc, "no link " + RTC_CONNECT_DEADLINE / 1000 + " s after pairing"),
+    RTC_CONNECT_DEADLINE
+  );
   pc.onicecandidate = (e) => {
-    if (e.candidate) sigSend({ t: "ice", c: e.candidate });
+    if (e.candidate && net === session && session.pc === pc) sigSend({ t: "ice", c: e.candidate });
   };
   pc.onconnectionstatechange = () => {
     if (!net || net.pc !== pc) return;
     const st = pc.connectionState;
     if (st === "failed") {
-      netFail(
-        net.rtcConnected
-          ? "Peer connection lost"
-          : "Could not connect peer-to-peer (a strict NAT on one side may be blocking it)"
-      );
+      if (net.rtcConnected) netFail("Peer connection lost");
+      else rtcGaveUp(session, pc, "ICE failed");
     } else if ((st === "disconnected" || st === "closed") && net.started) {
       netPeerGone("Peer connection lost");
     }
   };
   if (isOfferer) {
     wireChannel(pc.createDataChannel("link", { ordered: true }));
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+    } catch (e) {
+      if (net !== session || session.pc !== pc) return; // back to waiting meanwhile
+      throw e;
+    }
+    if (net !== session || session.pc !== pc) return;
     sigSend({ t: "sdp", d: pc.localDescription });
   } else {
-    pc.ondatachannel = (e) => wireChannel(e.channel);
+    pc.ondatachannel = (e) => {
+      if (net === session && session.pc === pc) wireChannel(e.channel);
+    };
   }
 };
 
@@ -1409,13 +1507,13 @@ netJoinGo.addEventListener("click", async () => {
   session.code = code;
   netSetConnecting(true);
   netSetStatus("Connecting…");
-  armManualFallback(session);
+  armManualFallback(session, SIG_DIAL_TIMEOUT);
   // Same-browser BroadcastChannel and signaling server race; the first to
   // connect wins (wireChannel tears the loser down).
   startLocalLink(code);
   if (await sigConnect()) {
     if (net !== session || net.dc) return; // paired locally or cancelled
-    sigSend({ t: "rendezvous", code });
+    sigRendezvous(session);
   } else if (net === session && !net.dc && !net.rtcConnected) {
     clearTimeout(manualFallbackTimer);
     manualEnter(true);

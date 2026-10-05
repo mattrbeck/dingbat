@@ -647,6 +647,68 @@ async function run() {
     } finally { unlinkSync(secretFile); }
   } finally { google.close(); }
 
+  // A page that redials sends the same id: its stale seat (a socket that died
+  // without the server hearing, e.g. a phone that suspended the tab) is
+  // dropped, never paired with or counted as a third peer
+  // (formal/WebState/LinkPairing.lean, bug_paired_with_own_ghost).
+  console.log('a redialing page takes back its own stale seat:');
+  await withServer(PORT2, { SIGNAL_STATS: '1' }, async (port) => {
+    const A = 'pageA0000000001', B = 'pageB0000000001';
+    // While waiting: the new socket waits in the stale one's place.
+    {
+      const a1 = await wsConnect(port);
+      a1.send({ t: 'rendezvous', code: 'GHOST1', id: A });
+      assert((await a1.next()).t === 'waiting', 'A waits on its first socket');
+      const a2 = await wsConnect(port);
+      a2.send({ t: 'rendezvous', code: 'GHOST1', id: A });
+      assert((await a2.next()).t === 'waiting', 'A\'s redial waits, not paired with its own seat');
+      await sleep(100);
+      assert(a1.isClosed, 'the stale socket is closed');
+      assert((await liveRooms(port)) === 1, 'still one room, held by the redial');
+      const b = await wsConnect(port);
+      b.send({ t: 'rendezvous', code: 'GHOST1', id: B });
+      const ap = await a2.next(), bp = await b.next();
+      assert(ap.t === 'paired' && ap.role === 'host', 'A\'s redial pairs as host');
+      assert(bp.t === 'paired' && bp.role === 'guest', 'B pairs as guest');
+      a2.close(); b.close();
+      await waitRooms(port, 0);
+    }
+    // While paired with the stale seat: the friend is told, the redial waits,
+    // and the friend's own redial pairs with it.
+    {
+      const a1 = await wsConnect(port);
+      a1.send({ t: 'rendezvous', code: 'GHOST2', id: A });
+      await a1.next(); // waiting
+      const b1 = await wsConnect(port);
+      b1.send({ t: 'rendezvous', code: 'GHOST2', id: B });
+      assert((await b1.next()).role === 'guest', 'B pairs with A\'s first socket');
+      const a2 = await wsConnect(port);
+      a2.send({ t: 'rendezvous', code: 'GHOST2', id: A });
+      assert((await a2.next()).t === 'waiting', 'A\'s redial is not "in use": it waits');
+      assert((await b1.next()).t === 'peer-closed', 'B, paired with the stale seat, is told');
+      const b2 = await wsConnect(port);
+      b2.send({ t: 'rendezvous', code: 'GHOST2', id: B });
+      assert((await b2.next()).role === 'guest', 'B\'s rendezvous again pairs with the redial');
+      assert((await a2.next()).role === 'host', 'A\'s redial is the host');
+      a1.close(); b1.close();
+      await sleep(100);
+      assert((await liveRooms(port)) === 1, 'the stale sockets closing leaves the new pair alone');
+      a2.close(); b2.close();
+      await waitRooms(port, 0);
+    }
+    // A different page on a full code is still turned away.
+    {
+      const a = await wsConnect(port), b = await wsConnect(port), c = await wsConnect(port);
+      a.send({ t: 'rendezvous', code: 'GHOST3', id: A }); await a.next();
+      b.send({ t: 'rendezvous', code: 'GHOST3', id: B }); await a.next(); await b.next();
+      c.send({ t: 'rendezvous', code: 'GHOST3', id: 'pageC0000000001' });
+      const m = await c.next();
+      assert(m.t === 'error' && /in use/.test(m.msg), 'a third page is still "in use"');
+      a.close(); b.close(); c.close();
+      await waitRooms(port, 0);
+    }
+  });
+
   if (failures) { console.error(`\n${failures} assertion(s) failed`); process.exit(1); }
   console.log('\nall signaling room-lifecycle and token-broker tests passed');
 }

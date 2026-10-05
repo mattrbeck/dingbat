@@ -122,10 +122,17 @@ different CRCs and link fine; incompatible games fail their own handshake.
 * Web: `?linkdelay=NN` injects send latency; `?signal=URL` overrides the
   signaling endpoint.
 * `web/signaling/server.nim` (deployed; ~7 MB RSS) and `server.js` are
-  byte-for-byte protocol twins: `create → code`, `join(code)`, relay
-  SDP/ICE between two sockets, close. Six-char codes from an unambiguous
-  alphabet, single-use, ~10 min TTL; room/connection caps, handshake timeout,
-  keepalive + idle reaper. Build: `nim c -d:release -d:test_harness
+  protocol twins: both players send `rendezvous` with the code they agreed
+  and their page's id; the first holds the room (`waiting`, ~10 min TTL), the
+  second pairs (`paired` host/guest), the server relays SDP/ICE between the
+  two sockets, and either leaving tells the other `peer-closed`. A page that
+  redials with its id takes back its own stale seat (a socket that died
+  unseen, e.g. a suspended phone) instead of being paired with it or told the
+  code is in use. The client goes back to waiting on the code whenever a
+  pairing ends before linking, and gives the NAT verdict only after two
+  pairings that exchanged descriptions and never opened; the machine is
+  modelled in `formal/WebState/LinkPairing.lean`. Room/connection caps,
+  handshake timeout, keepalive + idle reaper. Build: `nim c -d:release -d:test_harness
   --opt:size -o:signalsrv web/signaling/server.nim` (`-d:test_harness` skips
   the repo's SDL/GL link flags; static Linux builds need musl). TLS terminates
   at the reverse proxy. Both pass `server.test.mjs` (`SIGNAL_CMD=./signalsrv`).

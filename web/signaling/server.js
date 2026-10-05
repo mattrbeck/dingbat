@@ -13,8 +13,10 @@
 //   node server.js [port]        # default 8790
 //
 // Wire protocol (JSON text messages):
-//   client -> server: {"t":"rendezvous","code":"PIKA"} both peers send the same
-//                                                    code they agreed on
+//   client -> server: {"t":"rendezvous","code":"PIKA","id":"..."}
+//                                                    both peers send the same
+//                                                    code they agreed on; id
+//                                                    is the page's (optional)
 //   server -> client: {"t":"waiting"}                first arrival with a code;
 //                                                    hold for the peer
 //                     {"t":"paired"}                 both present (whoever
@@ -35,6 +37,12 @@
 // offerer / SIO multi-mode parent). A code is a rendezvous point for exactly
 // two peers; a third using the same code is rejected. Codes are normalized to
 // uppercase alphanumerics and an unclaimed room expires after 10 minutes.
+//
+// A page that redials (its old socket died without this server hearing: a
+// phone suspended the tab, a Wi-Fi hop) sends the same `id`, and its stale
+// seat is dropped rather than paired with or counted as a third peer; a friend
+// paired with the stale socket is told peer-closed and rendezvouses again
+// (formal/WebState/LinkPairing.lean, `regress_paired_with_own_ghost`).
 //
 // Abuse hardening (all mirrored in server.nim — keep the twins in sync):
 //   - Per-IP limits (rendezvous rate, concurrent sockets, waiting rooms) are
@@ -135,6 +143,10 @@ function effectiveIp(direct, xff) {
 // Fold a user-typed code to the canonical form both peers must match on.
 const normalizeCode = (raw) =>
   String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// A page id is opaque and never relayed; anything else is no id.
+const normalizeId = (raw) =>
+  typeof raw === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(raw) ? raw : '';
 
 // ---------------- minimal WebSocket implementation ----------------
 
@@ -321,12 +333,31 @@ function relayFrom(room, from, to) {
   };
 }
 
+// Every way a socket leaves its room funnels through here: the room dies and
+// the other seat is told and closed. A socket that no longer holds a seat (its
+// page took the seat back on a new socket) touches nothing.
+function leave(ws) {
+  const code = ws.roomCode;
+  if (!code) return;
+  ws.roomCode = null;
+  const room = rooms.get(code);
+  if (!room || (room.host !== ws && room.guest !== ws)) return;
+  const other = room.host === ws ? room.guest : room.host;
+  closeRoom(code);
+  if (other && !other.closed) {
+    other.roomCode = null;
+    send(other, { t: 'peer-closed' });
+    other.close();
+  }
+}
+
 function attach(ws) {
   // Each socket is in exactly one of three states: fresh (no message yet),
   // waiting (first with a code, holding a room), or paired. Pairing swaps
   // BOTH sockets' onmessage to the enforcing relay (relayFrom), so this
   // setup handler never sees a paired socket again.
-  let code = null;      // room this socket belongs to (as host or guest)
+  ws.roomCode = null;   // room this socket belongs to (as host or guest)
+  ws.pageId = '';
 
   // A socket that connects and never rendezvouses is either a stalled client or
   // a resource-holding probe; drop it so it can't accumulate.
@@ -353,9 +384,27 @@ function attach(ws) {
       if (w.count > MAX_RENDEZVOUS_PER_WINDOW) {
         return fail(ws, 'too many attempts — wait a minute and try again');
       }
-      if (code) return fail(ws, 'already in a room');
+      if (ws.roomCode) return fail(ws, 'already in a room');
       const c = normalizeCode(msg.code);
       if (c.length < MIN_CODE_LEN) return fail(ws, 'code too short');
+      ws.pageId = normalizeId(msg.id);
+      const held = rooms.get(c);
+      const stale = held && ws.pageId &&
+        [held.host, held.guest].find((x) => x && x.pageId === ws.pageId);
+      if (stale) {
+        // This page's own seat, on a socket it has given up on: drop it
+        // without a word, tell a friend paired with it (who then rendezvouses
+        // again), and take the code afresh below.
+        const other = stale === held.host ? held.guest : held.host;
+        closeRoom(c);
+        stale.roomCode = null;
+        stale.close();
+        if (other && !other.closed) {
+          other.roomCode = null;
+          send(other, { t: 'peer-closed' });
+          other.close();
+        }
+      }
       const room = rooms.get(c);
       if (!room) {
         if (rooms.size >= MAX_ROOMS) return fail(ws, 'server busy — try again shortly');
@@ -364,7 +413,7 @@ function attach(ws) {
         }
         // First to arrive with this code: host it and wait for the peer.
         clearHandshakeTimer();
-        code = c;
+        ws.roomCode = c;
         rooms.set(c, {
           host: ws,
           guest: null,
@@ -384,7 +433,7 @@ function attach(ws) {
         dropIp(ipWaiting, room.host.ip); // no longer an unclaimed waiting room
         clearTimeout(room.timer);
         room.timer = null;
-        code = c;
+        ws.roomCode = c;
         // Both sides start WebRTC now. The host (first arrival) is the offerer
         // and unit 0 / multi-mode parent in the game.
         const host = room.host;
@@ -392,11 +441,6 @@ function attach(ws) {
         // within the room's byte budget. Payload contents are never inspected.
         host.onmessage = relayFrom(room, host, ws);
         ws.onmessage = relayFrom(room, ws, host);
-        host.onclose = () => {
-          closeRoom(c);
-          send(ws, { t: 'peer-closed' });
-          ws.close();
-        };
         send(host, { t: 'paired', role: 'host' });
         send(ws, { t: 'paired', role: 'guest' });
       } else {
@@ -409,17 +453,7 @@ function attach(ws) {
 
   ws.onclose = () => {
     clearHandshakeTimer();
-    if (!code) return;
-    const room = rooms.get(code);
-    if (!room) return;
-    // Unpaired host leaving, or either side of a pair: tear the room down
-    // and let the survivor know.
-    const other = room.host === ws ? room.guest : room.host;
-    closeRoom(code);
-    if (other && !other.closed) {
-      send(other, { t: 'peer-closed' });
-      other.close();
-    }
+    leave(ws);
   };
 }
 

@@ -5,7 +5,9 @@
 ##   ./server [port]        # default 8790 (or $PORT)
 ##
 ## Wire protocol (JSON text messages; client side in netplay.js):
-##   client -> server: {"t":"rendezvous","code":"PIKA"}  both peers send the code
+##   client -> server: {"t":"rendezvous","code":"PIKA","id":"..."}
+##                                                       both peers send the code;
+##                                                       id is the page's (optional)
 ##   server -> client: {"t":"waiting"}                   first arrival holds a room
 ##                     {"t":"paired","role":"host"}      first arrival's role
 ##                     {"t":"paired","role":"guest"}     second arrival's role
@@ -14,6 +16,12 @@
 ##   After "paired", only {"t":"sdp"} and {"t":"ice"} envelopes are relayed,
 ##   payloads uninspected, within a per-room byte budget; anything else closes
 ##   the room, so the server cannot carry game/save/ROM bytes.
+##
+## A page that redials (its old socket died without this server hearing: a
+## phone suspended the tab) sends the same id; its stale seat is dropped
+## rather than paired with or counted as a third peer, and a friend paired with
+## the stale socket is told peer-closed and rendezvouses again
+## (formal/WebState/LinkPairing.lean, `regress_paired_with_own_ghost`).
 ##
 ## No TLS: a reverse proxy terminates wss:// and forwards plain ws://. The
 ## request path is ignored, except /oauth (below).
@@ -73,6 +81,7 @@ type
     buf: string            # bytes read from the socket but not yet consumed
     frag: string           # payload of an in-progress fragmented message
     code: string           # room this socket belongs to ("" = none yet)
+    id: string             # the page's id from its rendezvous ("" = none)
     peer: Conn             # set once paired; nil while unpaired
     closed: bool
     createdAt: float
@@ -150,6 +159,13 @@ proc normalizeCode(raw: string): string =
   for ch in raw:
     if ch in {'A'..'Z', '0'..'9'}: result.add ch
     elif ch in {'a'..'z'}: result.add chr(ch.ord - 32)
+
+# A page id is opaque and never relayed; anything else is no id.
+proc normalizeId(raw: string): string =
+  if raw.len < 8 or raw.len > 64: return ""
+  for ch in raw:
+    if ch notin {'A'..'Z', 'a'..'z', '0'..'9', '_', '-'}: return ""
+  raw
 
 # RFC 6455 accept key. Non-async so the digest temporary never lives in an
 # async environment frame.
@@ -276,11 +292,12 @@ proc onText(c: Conn, text: string) {.async.} =
       return
     await c.peer.sendText(text)
     return
-  var t, codeRaw: string
+  var t, codeRaw, idRaw: string
   try:
     let j = parseJson(text)
     t = j{"t"}.getStr("")
     codeRaw = j{"code"}.getStr("")
+    idRaw = j{"id"}.getStr("")
   except CatchableError:
     await c.fail("not JSON")
     return
@@ -303,6 +320,26 @@ proc onText(c: Conn, text: string) {.async.} =
   if code.len < MinCodeLen:
     await c.fail("code too short")
     return
+  c.id = normalizeId(idRaw)
+  if c.id.len > 0 and rooms.hasKey(code):
+    let held = rooms[code]
+    var stale: Conn = nil
+    if held.host.id == c.id: stale = held.host
+    elif held.guest != nil and held.guest.id == c.id: stale = held.guest
+    if stale != nil:
+      # This page's own seat, on a socket it has given up on: drop it without
+      # a word, tell a friend paired with it (who then rendezvouses again), and
+      # take the code afresh below.
+      let other = if stale == held.host: held.guest else: held.host
+      rooms.del(code)
+      if held.guest == nil: dropIp(ipWaiting, held.host.ip)
+      stale.code = ""
+      stale.peer = nil
+      closeSock(stale)
+      if other != nil and not other.closed:
+        other.code = ""
+        other.peer = nil
+        asyncCheck notifyClosed(other)
   if not rooms.hasKey(code):
     if rooms.len >= MaxRooms:
       await c.fail("server busy — try again shortly")

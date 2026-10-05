@@ -119,7 +119,7 @@ const setup = async (opts = {}) => {
   sockets[0].open();
 
   const el = (id) => app.document.getElementById(id);
-  const api = vm.runInContext(`({ openNetConnect, get net() { return net; } })`, app.context);
+  const api = vm.runInContext(`({ openNetConnect, get net() { return net; }, pageId: NET_PAGE_ID })`, app.context);
 
   // Returns the click-handler promise, pending until the test settles the dial.
   const connect = async (code) => {
@@ -141,7 +141,7 @@ test("a solo peer parked on 'waiting' outlives the 2s fallback and still pairs",
   const ws = lastWS();
   ws.open();
   await clicked;
-  assert.deepEqual(ws.sent, [{ t: "rendezvous", code: "TESTX" }]);
+  assert.deepEqual(ws.sent, [{ t: "rendezvous", code: "TESTX", id: api.pageId }]);
 
   ws.reply({ t: "waiting" });
   await flush();
@@ -190,7 +190,8 @@ test("a socket that drops mid-wait redials, re-registers the code, and keeps wai
   assert.notEqual(ws2, ws, "a fresh socket was dialed");
   ws2.open();
   await flush();
-  assert.deepEqual(ws2.sent, [{ t: "rendezvous", code: "REDIA" }], "same code re-registered");
+  assert.deepEqual(ws2.sent, [{ t: "rendezvous", code: "REDIA", id: api.pageId }],
+    "same code re-registered, under the same page id");
 
   ws2.reply({ t: "waiting" });
   await flush();
@@ -351,15 +352,82 @@ test("Share stays hidden without the Web Share API", async () => {
   assert.equal(el("net-manual-share").hidden, true);
 });
 
-test("a mid-handshake drop doesn't redial; an unopened DataChannel fails at the 20s deadline", async () => {
-  const { el, api, connect, advance, flush, lastWS, sockets } = await setup();
+// The traces of formal/WebState/LinkPairing.lean, replayed against the real
+// netplay.js. Each failed on the first try before the fix.
+
+// A guest paired and holding the host's offer (it has answered).
+const pairedGuestWithOffer = async (t, code) => {
+  const clicked = t.connect(code);
+  await t.flush();
+  const ws = t.lastWS();
+  ws.open();
+  await clicked;
+  ws.reply({ t: "waiting" });
+  ws.reply({ t: "paired", role: "guest" });
+  await t.flush();
+  ws.reply({ t: "sdp", d: { type: "offer", sdp: "v=0" } });
+  await t.flush();
+  assert.ok(ws.sent.some((m) => m.t === "sdp"), "the guest answered");
+  return ws;
+};
+
+test("a friend whose channel opened first and left the server doesn't fail ours (bug_linked_close_fails_both)", async () => {
+  const t = await setup();
+  const ws = await pairedGuestWithOffer(t, "RACE1");
+  // The host's channel opened a round trip before ours: it closed its socket,
+  // and the server says so before our channel opens.
+  ws.reply({ t: "peer-closed" });
+  ws.serverDrop();
+  await t.flush();
+  assert.ok(!t.el("net-status").classList.contains("net-error"), "no error");
+  assert.equal(t.pcs.at(-1).closed, false, "our peer connection is kept");
+  assert.equal(t.sockets.length, 2, "no new rendezvous: the friend is linking, not gone");
+
+  const dc = { readyState: "open", close() {} };
+  t.pcs.at(-1).ondatachannel({ channel: dc });
+  dc.onopen();
+  assert.equal(t.api.net.rtcConnected, true, "our channel opens and the link goes on");
+});
+
+test("a friend gone before the descriptions crossed sends us back to waiting, not an error (bug_frozen_host_fails_both)", async () => {
+  const t = await setup();
+  const clicked = t.connect("FROZE");
+  await t.flush();
+  const ws = t.lastWS();
+  ws.open();
+  await clicked;
+  ws.reply({ t: "waiting" });
+  ws.reply({ t: "paired", role: "host" }); // we offer; the friend never answers
+  await t.flush();
+  assert.ok(ws.sent.some((m) => m.t === "sdp"), "host sent its offer");
+  ws.reply({ t: "peer-closed" }); // the friend's 20 s ran out while we were frozen
+  ws.serverDrop();
+  await t.flush();
+
+  assert.ok(!t.el("net-status").classList.contains("net-error"), "no error");
+  assert.equal(t.el("net-status").textContent, "Waiting for your friend…");
+  assert.equal(t.pcs.at(-1).closed, true, "the dead pairing's pc is closed");
+  const ws2 = t.lastWS();
+  assert.notEqual(ws2, ws, "a fresh socket was dialed");
+  ws2.open();
+  await t.flush();
+  assert.deepEqual(ws2.sent, [{ t: "rendezvous", code: "FROZE", id: t.api.pageId }],
+    "the same code, the same page");
+  ws2.reply({ t: "waiting" });
+  await t.flush();
+  assert.equal(t.el("net-status").textContent, "Waiting for your friend…");
+  assert.equal(t.el("net-join-go").textContent, "Cancel", "still connecting");
+});
+
+test("a mid-handshake drop doesn't redial; a friend who never answers sends us back to waiting at 20 s", async () => {
+  const { el, api, connect, advance, flush, lastWS, sockets, pcs } = await setup();
   const clicked = connect("TESTX");
   await flush();
   const ws = lastWS();
   ws.open();
   await clicked;
   ws.reply({ t: "waiting" });
-  ws.reply({ t: "paired", role: "guest" }); // guest: waits for ondatachannel
+  ws.reply({ t: "paired", role: "guest" }); // guest: waits for an offer
   await flush();
   assert.equal(el("net-status").textContent, "Friend found — connecting…");
 
@@ -367,13 +435,38 @@ test("a mid-handshake drop doesn't redial; an unopened DataChannel fails at the 
   await flush();
   assert.equal(sockets.length, 2, "no redial while a pairing is in flight");
 
-  await advance(20000); // ICE never starts checking — the deadline resolves it
+  await advance(20000); // no offer ever came: the friend stopped answering
   await flush();
-  assert.match(el("net-status").textContent, /peer-to-peer/);
-  assert.ok(el("net-status").classList.contains("net-error"));
-  assert.ok(api.net, "the session re-armed so the player can retry");
-  assert.equal(el("net-join-go").textContent, "Connect");
+  assert.ok(!el("net-status").classList.contains("net-error"), "not a NAT verdict");
+  assert.equal(el("net-status").textContent, "Waiting for your friend…");
+  assert.equal(pcs.at(-1).closed, true);
+  assert.equal(sockets.length, 3, "one rendezvous again, on the same code");
+  lastWS().open();
+  await flush();
+  assert.deepEqual(lastWS().sent, [{ t: "rendezvous", code: "TESTX", id: api.pageId }]);
+});
 
-  await advance(60 * 1000);
-  assert.equal(sockets.length, 2, "the failed pairing never dials the server again");
+test("two pairings that exchanged descriptions and never opened are the NAT verdict", async () => {
+  const t = await setup();
+  await pairedGuestWithOffer(t, "NATTY");
+  await t.advance(20000); // strike one: back to waiting
+  await t.flush();
+  assert.ok(!t.el("net-status").classList.contains("net-error"), "one failed pairing is not a verdict");
+  const ws2 = t.lastWS();
+  ws2.open();
+  await t.flush();
+  ws2.reply({ t: "paired", role: "guest" });
+  await t.flush();
+  ws2.reply({ t: "sdp", d: { type: "offer", sdp: "v=0" } });
+  await t.flush();
+  await t.advance(20000); // strike two
+  await t.flush();
+  assert.match(t.el("net-status").textContent, /peer-to-peer/);
+  assert.ok(t.el("net-status").classList.contains("net-error"));
+  assert.ok(t.api.net, "the session re-armed so the player can retry");
+  assert.equal(t.api.net.strikes, 0, "a retry starts with a clean slate");
+  assert.equal(t.el("net-join-go").textContent, "Connect");
+  const dials = t.sockets.length;
+  await t.advance(60 * 1000);
+  assert.equal(t.sockets.length, dials, "the verdict stops dialing");
 });
