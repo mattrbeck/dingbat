@@ -8656,27 +8656,36 @@ body.clip-replaying #glow-canvas {
 .modal-clip-progress {
   max-width: 340px;
 }
+.modal-clip-progress h2,
+.modal-clip-progress .modal-hint {
+  text-align: center;
+}
 .modal-clip-progress h2 {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  margin-bottom: 14px;
 }
 .modal-clip-progress .modal-hint {
   margin: -8px 0 16px;
 }
-.rec-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--danger);
-  box-shadow: 0 0 0 3px rgba(var(--danger-rgb), 0.25);
-  animation: rec-pulse 1.2s ease-in-out infinite;
+/* The logo flapping while the clip records. flap.png is the strip of 31
+   wing-flap frames (56x40 art px each, tools/logo_flap/flap.py); frames
+   0-15 are one full wingbeat, looped here at 24 fps, at 2x so the pixels
+   stay whole. object-position picks the frame: frame k is k/30 along. */
+.clip-progress-flap {
+  display: block;
+  width: 112px;
+  height: 80px;
+  margin: 0 auto 6px;
+  object-fit: cover;
+  object-position: 0 0;
+  image-rendering: pixelated;
+  animation: clip-flap 667ms steps(16, jump-end) infinite;
 }
-@keyframes rec-pulse {
-  50% { opacity: 0.35; }
+@keyframes clip-flap {
+  from { object-position: 0 0; }
+  to { object-position: 53.3333% 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .rec-dot { animation: none; }
+  .clip-progress-flap { animation: none; }
 }
 .clip-progress-row {
   display: flex;

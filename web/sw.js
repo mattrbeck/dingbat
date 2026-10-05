@@ -9,6 +9,7 @@ const ASSETS = [
   "./glpresent.js",
   "./saveimport.js",
   "./clipmux.js",
+  "./flap.png",
   "./ckptworker.js",
   "./sdputil.js",
   "./netplay.js",
