@@ -2394,9 +2394,12 @@ const probeDriveBroker = async () => {
 let driveBrokerRetryAt = 0;
 let driveRefreshInFlight = null;
 // A refresh token is used only for the account it was granted for. One kept
-// from before refreshAcct existed has none recorded and is trusted as before.
+// from before refreshAcct existed has none recorded, and a device that has
+// not learned its own account has nothing to hold it against: both are
+// trusted as before.
 const driveRefreshUsable = () => !!syncState.refresh &&
-  (syncState.refreshAcct == null || syncState.refreshAcct === syncState.acct);
+  (syncState.refreshAcct == null || !syncState.acct ||
+   syncState.refreshAcct === syncState.acct);
 const driveRefreshSilently = ({ force = false } = {}) => {
   if (!driveRefreshUsable() || !driveBrokerBase()) return Promise.resolve(false);
   if (!force && Date.now() < driveBrokerRetryAt) return Promise.resolve(false);
