@@ -15663,13 +15663,20 @@ var Module = {
     let lowpassNode = null;
     let playTime = 0;
 
-    // Optional ~12 kHz low-pass (off = no filter node in the path). Clip
-    // recording tap: the master gain also feeds a MediaStreamDestination;
-    // routeOutput re-attaches it across lowpass toggles.
+    // The recorder's audio (Record, and Clip that! where there is no
+    // WebCodecs): every pushed buffer is also played into a MediaStream
+    // destination in a context of its own at 48 kHz. Not a branch of the
+    // 32768 Hz graph: Chrome's MediaRecorder, handed a 32768 Hz track,
+    // drops ~2 % of it and stamps the rest unevenly (a 60 ms hole and
+    // dozens of 2-6 ms gaps and overlaps in 10 s, measured), which players
+    // render as chop; at 48 kHz the same recording is whole.
+    let clipTapCtx = null;
     let clipTapNode = null;
+    let clipTapTime = 0;
     let clipTapActive = false;
     // A clip replay's sound goes to the tap alone, never to the speakers.
     let clipTapPrivate = false;
+    const CLIP_TAP_LEAD = 0.05;   // s queued ahead in the tap's context
 
     const routeOutput = () => {
       if (!audioCtx || !gainNode) return;
@@ -15689,7 +15696,6 @@ var Module = {
       } else {
         gainNode.connect(audioCtx.destination);
       }
-      if (clipTapActive && clipTapNode) gainNode.connect(clipTapNode);
     };
     window.updateAudioLowpass = () => routeOutput();
     // Recorder-side hooks; the tap's MediaStream, or null pre-unlock.
@@ -15697,16 +15703,40 @@ var Module = {
     // else (a clip replay); otherwise the tap hears what the speakers do.
     window.acquireClipAudio = (priv = false) => {
       if (!audioCtx || !gainNode) return null;
-      if (!clipTapNode) clipTapNode = audioCtx.createMediaStreamDestination();
+      if (!clipTapCtx) {
+        try {
+          clipTapCtx = new AudioContext({ sampleRate: 48000 });
+        } catch (e) {
+          clipTapCtx = new AudioContext();
+        }
+        clipTapNode = clipTapCtx.createMediaStreamDestination();
+      }
+      if (clipTapCtx.state !== "running") clipTapCtx.resume().catch(() => {});
       clipTapPrivate = !!priv;
-      clipTapActive = !priv;
-      routeOutput();
+      clipTapActive = true;
+      clipTapTime = 0;
       return clipTapNode.stream;
     };
     window.releaseClipAudio = () => {
       clipTapActive = false;
       clipTapPrivate = false;
-      if (audioCtx && gainNode) routeOutput();
+      // Idle, it would hold an output stream open for nothing.
+      if (clipTapCtx) clipTapCtx.suspend().catch(() => {});
+    };
+    // The buffer pushAudio just built, into the tap's context. AudioBuffers
+    // are not tied to a context; this one is resampled there. Its own lead
+    // servo, as pushAudio's: the two contexts' clocks are not one clock.
+    const feedClipTap = (buffer) => {
+      const now = clipTapCtx.currentTime;
+      if (clipTapTime < now + 0.01) clipTapTime = now + CLIP_TAP_LEAD;
+      const src = clipTapCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(clipTapNode);
+      const excess = clipTapTime - now - CLIP_TAP_LEAD;
+      const rate = 1 + Math.max(-0.004, Math.min(0.004, excess * 0.15));
+      src.playbackRate.value = rate;
+      src.start(clipTapTime);
+      clipTapTime += buffer.duration / rate;
     };
     // Under fast-forward, play the frames that fit within this much queued
     // lead and drop the rest (audio can only play at realtime rate).
@@ -15835,9 +15865,13 @@ var Module = {
         right[i] = heap[i * 2 + 1];
       }
       Module._clearAudioBuffer();
+      if (clipTapActive && clipTapCtx) {
+        feedClipTap(buffer);
+        if (clipTapPrivate) return;   // a replay: not for the speakers
+      }
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(clipTapPrivate && clipTapNode ? clipTapNode : gainNode);
+      source.connect(gainNode);
       // Playback-rate servo: hold the lead near its target from both
       // directions (above: marginally fast, draining production drift;
       // below: marginally slow, rebuilding the cushion). Clamped to +/-0.4%
