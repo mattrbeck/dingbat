@@ -27,6 +27,17 @@ declare var SDPCodec: SDPCodecT;
 // saveimport.js (classic script, sets window.SaveImport; not in
 // tsconfig.main's files because its UMD-style closure is checked by the node
 // test runner instead)
+// clipmux.js (classic script, sets window.ClipMux; checked by its node test)
+type ClipMuxChunk = { data: Uint8Array; timestamp: number; duration?: number; key?: boolean };
+declare var ClipMux: {
+  mp4(input: {
+    video: { width: number; height: number; description: Uint8Array; chunks: ClipMuxChunk[] };
+    audio?: { codec: "aac" | "opus"; sampleRate: number; channels: number; bitrate?: number;
+              frames?: number; priming?: number;
+              description?: Uint8Array | null; chunks: ClipMuxChunk[] } | null;
+  }): Uint8Array;
+};
+
 declare var SaveImport: {
   unwrap(bytes: Uint8Array, fileName: string): {
     ok: boolean;
@@ -59,7 +70,7 @@ interface Window {
   updateAudioLowpass?: () => void;
   // clip-recording audio tap (published from the same closure; consumed by
   // the module-scope retroactive-capture code)
-  acquireClipAudio?: () => MediaStream | null;
+  acquireClipAudio?: (priv?: boolean) => MediaStream | null;
   releaseClipAudio?: () => void;
   // UMD export mirror (sdputil.js does `root.SDPCodec = ...`)
   SDPCodec?: SDPCodecT;

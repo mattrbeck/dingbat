@@ -109,7 +109,7 @@ test("a quiet install caches every asset from its own build", async () => {
   const sw = setup();
   assert.equal(await sw.install(), "installed");
   assert.deepEqual([...sw.builds(sw.liveName)], [BUILD_A]);
-  assert.equal(sw.caches.get(sw.liveName).entries.size, 18, "all ASSETS cached");
+  assert.equal(sw.caches.get(sw.liveName).entries.size, 19, "all ASSETS cached");
 });
 
 test("Force update that straddles a deploy leaves the live cache as it was", async () => {
@@ -130,6 +130,6 @@ test("a quiet Force update rewrites the live cache with the deployed build", asy
   sw.server.deployed = "bbbbbbb";
   assert.equal(await sw.reinstall(), true);
   assert.deepEqual([...sw.builds(sw.liveName)], ["bbbbbbb"]);
-  assert.equal(sw.caches.get(sw.liveName).entries.size, 18);
+  assert.equal(sw.caches.get(sw.liveName).entries.size, 19);
   assert.deepEqual([...sw.caches.keys()], [sw.liveName], "no staging cache left behind");
 });

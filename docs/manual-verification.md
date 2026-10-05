@@ -8,22 +8,27 @@ whenever something lands that needs the same treatment.
 ## "Clip that!" — range-based clip export
 
 Gated: replay determinism (`tests/clip_replay_test.nim`), range arithmetic
-(`web/tests/clip-range.test.mjs`). Not gated: the FILE, the strip as touch.
+and the strip drag (`web/tests/clip-range.test.mjs`), the MP4 writer
+(`web/tests/clipmux.test.mjs`). Measured headless (Chromium + WebKit,
+2026-10-05): a 10 s clip encodes in ~2.7 s, audio sample-aligned to the
+picture after the AAC priming edit list, and bit-for-bit the game's own
+samples up to the codec. Not gated: real devices.
 
 - [ ] **The file is the range.** Pick a range around a level transition;
-      the .webm starts on the in marker's frame and ends on the out marker's,
+      the .mp4 starts on the in marker's frame and ends on the out marker's,
       no leading live frames, no tail to "now".
-- [ ] **Audio in sync** through a 60 s export; **a full minute exports**
-      (banner to 100 %, controls inert, game resumes where it was).
-- [ ] **Phone (LAN https).** Markers never swap, no momentum after lift, a
-      tap moves the NEARER marker; portrait, landscape, rotate with the
-      picker open.
-- [ ] **Safari** produces .mp4; confirm it plays with audio.
+- [ ] **Nothing plays while it records**: no picture, no sound, just the
+      "Recording clip" panel counting to 100 %; Cancel gives the game back
+      where it was; a full minute exports.
+- [ ] **The .mp4 plays** in QuickTime / Photos (iPhone), with sound, in sync.
+- [ ] **Phone (LAN https).** Each bound follows the finger; a bound held at
+      the strip's end scrolls the film; no momentum after lift; portrait,
+      landscape, rotate with the picker open.
 - [ ] **Rewind off**: the picker still shows a full strip.
 - [ ] **iOS memory**: several minutes with the 6 MB clip cap, no reload or
       JIT demotion; oldest frame still ~a minute back on a GB game.
-- [ ] **Rewind scrubber** (shared film-strip component): drag, tap,
-      two-stage confirm, save-loss warning.
+- [ ] **Rewind scrubber** (shared film-strip component, the scrolling kind):
+      drag, tap, two-stage confirm, save-loss warning.
 
 ## Input display overlay
 

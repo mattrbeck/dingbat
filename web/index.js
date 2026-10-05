@@ -9336,6 +9336,7 @@ const STRIP_FRAME_W_FLOOR = 16;
  * @param {number} [opts.frameWMax]      px ceiling on a frame's width
  * @param {number} [opts.fitFrames]      frame pitches that MUST fit the width
  * @param {number} [opts.frameWFloor]    px floor the fit rule may shrink to
+ * @param {boolean} [opts.direct]       a drag carries the marker (else scrolls the film)
  */
 const createFilmStrip = ({
   canvas, wrap, markers, paint, onChange,
@@ -9344,6 +9345,11 @@ const createFilmStrip = ({
   frameWMax = STRIP_FRAME_W_MAX,
   fitFrames = 0,
   frameWFloor = STRIP_FRAME_W_FLOOR,
+  // false: the marker stays put and a drag scrolls the film under it (the
+  // rewind playhead). true: a drag carries the grabbed marker with the
+  // finger over a still film, which scrolls only at the strip's ends (the
+  // clip's two bounds, which are pulled in and out, not scrubbed).
+  direct = false,
 }) => {
   let samples = 0;
   let thumbs = null;      // packed BGR555, copied out of wasm at open
@@ -9354,6 +9360,18 @@ const createFilmStrip = ({
   let pitch = 0;          // px per sample along the strip
   let values = markers.map(() => 0);
   let active = 0;         // which marker the view follows / a drag moves
+  // Direct mode: the film offset a drag holds still (and keeps once the
+  // finger lifts, so nothing jumps); null lets placement() frame the view.
+  let held = null;
+
+  // Layout sizes, not getBoundingClientRect's: the modal opens with a
+  // scale-in, and a strip framed mid-animation was framed for a narrower
+  // strip than the one the finger then lands on. (The test DOM has rects only.)
+  const layoutW = (el) => el.offsetWidth || el.getBoundingClientRect().width;
+  const layoutH = (el) => el.offsetHeight || el.getBoundingClientRect().height;
+  // Where the film is, for a pointer: the canvas's left edge (the markers
+  // are placed in its coordinates) and its width.
+  const filmFrame = () => ({ left: canvas.getBoundingClientRect().left, width: layoutW(canvas) });
 
   const frameSize = (stripW, stripH) => {
     const maxH = Math.max(8, stripH - 6);
@@ -9379,10 +9397,10 @@ const createFilmStrip = ({
   const build = () => {
     stripColor = null;
     stripDim = null;
+    held = null;   // the pitch may change, so a held offset means nothing
     if (!thumbs || samples <= 0) return;
-    const rect = wrap.getBoundingClientRect();
-    const stripH = Math.max(24, Math.round(rect.height) - 2);
-    const { tw, th } = frameSize(Math.max(120, Math.round(rect.width)), stripH);
+    const stripH = Math.max(24, Math.round(layoutH(wrap)) - 2);
+    const { tw, th } = frameSize(Math.max(120, Math.round(layoutW(wrap))), stripH);
     pitch = tw + STRIP_GAP;
     const total = samples * pitch;
 
@@ -9429,22 +9447,32 @@ const createFilmStrip = ({
   // rides the middle and the film scrolls under it until the film runs out
   // of slack; then the markers travel, else half the strip is empty at the
   // "now" end, where these modals open.
+  const offRange = (cssW) => {
+    const filmW = samples * pitch;
+    return filmW <= cssW
+      ? { lo: (cssW - filmW) / 2, hi: (cssW - filmW) / 2 } // short film: centred
+      : { lo: cssW - filmW, hi: 0 };
+  };
+
   const placement = (cssW) => {
     const filmW = samples * pitch;
     const xsFilm = markers.map((m, i) => edgeX(values[i], m.edge));
-    const lo = Math.min(...xsFilm);
-    const hi = Math.max(...xsFilm);
-    const focus = hi - lo <= cssW ? (lo + hi) / 2 : xsFilm[active];
-    const off = filmW <= cssW
-      ? (cssW - filmW) / 2               // short film: centred, markers move
-      : Math.min(0, Math.max(cssW - filmW, cssW / 2 - focus));
+    const { lo: offLo, hi: offHi } = offRange(cssW);
+    let off;
+    if (held !== null) {
+      off = Math.min(offHi, Math.max(offLo, held));
+    } else {
+      const lo = Math.min(...xsFilm);
+      const hi = Math.max(...xsFilm);
+      const focus = hi - lo <= cssW ? (lo + hi) / 2 : xsFilm[active];
+      off = filmW <= cssW ? offLo : Math.min(offHi, Math.max(offLo, cssW / 2 - focus));
+    }
     return { off, xs: xsFilm.map((x) => x + off) };
   };
 
   const draw = () => {
-    const rect = canvas.getBoundingClientRect();
-    const cssW = Math.max(1, Math.round(rect.width));
-    const cssH = Math.max(1, Math.round(rect.height));
+    const cssW = Math.max(1, Math.round(layoutW(canvas)));
+    const cssH = Math.max(1, Math.round(layoutH(canvas)));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
       canvas.width = cssW * dpr;
@@ -9511,11 +9539,15 @@ const createFilmStrip = ({
   let dragging = false;
   let lastX = 0;
   let travel = 0;
+  let grabDX = 0;         // direct: finger x less the grabbed marker's, at the press
+  let edgeTimer = 0;      // direct: the rAF scrolling the film at an end
+  let edgeLast = 0;
+  let heading = 0;        // direct: -1 / +1, the way the finger last moved
 
   // A press grabs the nearest marker on screen.
   const grabNearest = (clientX) => {
     if (markers.length === 1) return 0;
-    const rect = wrap.getBoundingClientRect();
+    const rect = filmFrame();
     const { xs } = placement(rect.width);
     const px = clientX - rect.left;
     let best = 0;
@@ -9542,6 +9574,7 @@ const createFilmStrip = ({
       samples = n;
       stripColor = null;
       stripDim = null;
+      held = null;
     },
     /** Drop everything on close (tens of thumbnails). */
     release() {
@@ -9551,11 +9584,16 @@ const createFilmStrip = ({
       samples = 0;
     },
     setValue(i, v, snap, bounds) {
+      // A move from outside the strip (a knob, a preset) hands the framing
+      // back, so the view goes to the marker that moved.
+      held = null;
       const moved = setValue(i, v, snap, bounds);
       if (moved) onChange(i);
       return moved;
     },
     setActive(i) { active = i; },
+    /** Let placement() frame the view again (a fresh open). */
+    reframe() { held = null; },
     build,
     draw,
     shadeBetween,
@@ -9572,13 +9610,55 @@ const createFilmStrip = ({
     /** Bind the drag/tap gesture. `bounds(i)` returns marker i's clamp. */
     attach(bounds) {
       const boundsFor = (i) => (bounds ? bounds(i) : undefined);
+      // Direct: the grabbed marker goes where the finger is, over a film
+      // held at `held`. The inverse of edgeX.
+      const followFinger = () => {
+        const rect = filmFrame();
+        const filmX = lastX - rect.left - grabDX - held;
+        const v = markers[active].edge === "lead"
+          ? samples - 1 - filmX / pitch
+          : samples - filmX / pitch;
+        if (setValue(active, v, false, boundsFor(active))) onChange(active);
+        else draw();
+      };
+      // A finger held near either end, having moved toward it, scrolls the
+      // film that way, faster the nearer the edge, so a bound can be pulled
+      // past what is on screen. (A bound grabbed near an end and pulled
+      // inward must not set the film creeping.)
+      const EDGE = 28;            // px from each end that scrolls
+      const EDGE_SPEED = 700;     // px/s at the very edge
+      const edgeStep = (now) => {
+        edgeTimer = 0;
+        if (!dragging || held === null) return;
+        const rect = filmFrame();
+        const x = lastX - rect.left;
+        const push = x < EDGE && heading < 0 ? (EDGE - x) / EDGE
+          : x > rect.width - EDGE && heading > 0 ? -(x - (rect.width - EDGE)) / EDGE : 0;
+        if (push === 0) return;
+        const dt = edgeLast ? Math.min(0.05, (now - edgeLast) / 1000) : 1 / 60;
+        edgeLast = now;
+        const { lo, hi } = offRange(rect.width);
+        const next = Math.min(hi, Math.max(lo, held + Math.max(-1, Math.min(1, push)) * EDGE_SPEED * dt));
+        if (next !== held) {
+          held = next;
+          followFinger();
+        }
+        edgeTimer = requestAnimationFrame(edgeStep);
+      };
       wrap.addEventListener("pointerdown", (e) => {
         if (samples <= 0) return;
         e.preventDefault();
         dragging = true;
         travel = 0;
+        heading = 0;
         lastX = e.clientX;
         active = grabNearest(e.clientX);
+        if (direct) {
+          const rect = filmFrame();
+          const { off, xs } = placement(rect.width);
+          held = off;
+          grabDX = e.clientX - rect.left - xs[active];
+        }
         wrap.setPointerCapture(e.pointerId);
         draw();  // the view follows the newly active marker
       });
@@ -9587,23 +9667,32 @@ const createFilmStrip = ({
         const dx = e.clientX - lastX;
         lastX = e.clientX;
         travel += Math.abs(dx);
+        if (dx !== 0) heading = Math.sign(dx);
+        if (direct) {
+          followFinger();
+          if (!edgeTimer) {
+            edgeLast = 0;
+            edgeTimer = requestAnimationFrame(edgeStep);
+          }
+          return;
+        }
         // Dragging right pulls older frames under the marker.
         api.setValue(active, values[active] + dx / pitch, false, boundsFor(active));
       });
       const endDrag = (e) => {
         if (!dragging) return;
         dragging = false;
+        if (edgeTimer) { cancelAnimationFrame(edgeTimer); edgeTimer = 0; }
         if (wrap.hasPointerCapture?.(e.pointerId)) wrap.releasePointerCapture(e.pointerId);
         if (travel <= STRIP_TAP_SLOP && e.type === "pointerup") {
           // A tap moves the nearest marker to the frame under the finger,
           // resolved through the draw's own placement.
-          const rect = wrap.getBoundingClientRect();
+          const rect = filmFrame();
           const { off } = placement(rect.width);
           const filmX = e.clientX - rect.left - off;
-          api.setValue(active, samples - 1 - Math.floor(filmX / pitch), true,
-                       boundsFor(active));
+          setValue(active, samples - 1 - Math.floor(filmX / pitch), true, boundsFor(active));
         } else {
-          api.setValue(active, values[active], true, boundsFor(active)); // settle
+          setValue(active, values[active], true, boundsFor(active)); // settle
         }
         onChange(active);
       };
@@ -12128,15 +12217,48 @@ const frameAdvance = () => {
 // --- Retroactive clip capture ---
 // The wasm side keeps one state anchor per second plus a per-frame input
 // log (clip_* in dingbat_wasm.nim). clip_begin rewinds to the anchor before
-// the range and re-emulates to its first frame; clip_tick then replays at
-// realtime while a MediaRecorder captures the canvas and the audio tap.
+// the range and re-emulates to its first frame; clip_tick steps one frame of
+// it. The replay is neither shown nor heard: a progress panel covers the
+// screen (the canvas under it is hidden) while the frames and their sound
+// go to an encoder.
+//  - WebCodecs (clipEncode): as fast as the machine allows, each frame and
+//    its samples straight from the core into an MP4 (clipmux.js). Nothing is
+//    timed by a clock, so nothing can stutter, and the sound is the core's.
+//  - Otherwise MediaRecorder over the canvas and a private audio tap (one
+//    that never reaches the speakers), stepped at realtime by the tick.
 var clipReplayActive = false;
+// The WebCodecs path owns the core: the tick keeps off it.
+var clipEncodeActive = false;
+// Bumped per export, so a cancelled encode's tail never ends a later one.
+var clipExportGen = 0;
 // `paused` as the export found it: the replay unpauses the core to run, and
 // the live game comes back to the player's choice, not to the replay's.
 var clipExportWasPaused = false;
 var clipRecorder = null;
 var clipChunks = [];
+var clipTotalFrames = 0;
 const clipLastItem = document.getElementById("clip-last");
+
+// Both consoles run 70224 dots a frame at 4 MiHz (GBA: 280896 at 16 MiHz).
+const CLIP_FPS = 4194304 / 70224;
+const CLIP_SRC_RATE = 32768;           // the core's sample rate
+const CLIP_AUDIO_RATE = 48000;         // what AAC and Opus encoders take
+const CLIP_VIDEO_BPS = 8_000_000;
+const CLIP_AUDIO_BPS = 160_000;
+const CLIP_KEY_EVERY = 120;            // frames between keyframes (~2 s)
+
+const clipProgressModal = document.getElementById("clip-progress-modal");
+const clipProgressLabel = document.getElementById("clip-progress-label");
+const clipProgressBar = document.getElementById("clip-progress-bar");
+const clipProgressFill = document.getElementById("clip-progress-fill");
+const clipProgressPct = document.getElementById("clip-progress-pct");
+
+const setClipProgress = (frac) => {
+  const pct = Math.max(0, Math.min(100, Math.floor(frac * 100)));
+  clipProgressFill.style.width = pct + "%";
+  clipProgressPct.textContent = pct + "%";
+  clipProgressBar.setAttribute("aria-valuenow", String(pct));
+};
 
 const clipMimeType = () => {
   if (typeof MediaRecorder === "undefined") return null;
@@ -12147,17 +12269,75 @@ const clipMimeType = () => {
   return null;
 };
 
-const finishRetroClip = (save) => {
+const clipWebCodecs = () =>
+  typeof VideoEncoder !== "undefined" && typeof AudioEncoder !== "undefined" &&
+  typeof VideoFrame !== "undefined" && typeof AudioData !== "undefined" &&
+  typeof OfflineAudioContext !== "undefined" && typeof ClipMux !== "undefined";
+
+// The first H.264 profile and the first audio codec this browser encodes,
+// or null (then the realtime recorder records the clip).
+const clipCodecConfig = async (w, h) => {
+  if (!clipWebCodecs()) return null;
+  let video = null;
+  // Level 5.1 covers the largest canvas (1440x960 at 60).
+  for (const codec of ["avc1.640033", "avc1.4d0033", "avc1.420033"]) {
+    const c = { codec, width: w, height: h, bitrate: CLIP_VIDEO_BPS, framerate: 60,
+                avc: { format: /** @type {"avc"} */ ("avc") } };
+    try {
+      if ((await VideoEncoder.isConfigSupported(c)).supported) { video = c; break; }
+    } catch {}
+  }
+  if (!video) return null;
+  for (const [kind, codec] of [["aac", "mp4a.40.2"], ["opus", "opus"]]) {
+    const c = { codec, sampleRate: CLIP_AUDIO_RATE, numberOfChannels: 2, bitrate: CLIP_AUDIO_BPS };
+    try {
+      if ((await AudioEncoder.isConfigSupported(c)).supported)
+        return { video, audio: { kind: /** @type {"aac" | "opus"} */ (kind), config: c } };
+    } catch {}
+  }
+  return null;
+};
+
+const clipBytes = (buf) =>
+  buf instanceof ArrayBuffer ? new Uint8Array(buf.slice(0))
+    : new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+
+const saveClipBlob = (blob, slug) => {
+  if (!blob.size) { showToast("The clip came out empty"); return; }
+  const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+  const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${base}-${slug}-${stamp}.${ext}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  showToast("Clip saved");
+};
+
+// Back to the live game, whichever path ran and however it ended. The core
+// is already live again (clip_tick's last step, or clip_abort).
+const endClipExport = () => {
   clipReplayActive = false;
+  clipEncodeActive = false;
   paused = clipExportWasPaused;
   document.body.classList.remove("clip-replaying");
-  clipBanner.hidden = true;
+  if (clipProgressModal.classList.contains("open")) {
+    clipProgressModal.classList.remove("open");
+    releaseFocus(clipProgressModal);
+  }
+  applyAudioSilent();    // the export had the core mix whatever the volume
+  drawGame();            // the live picture back on the canvas
+};
+
+const finishRetroClip = (save) => {
   if (clipRecorder && clipRecorder.state !== "inactive") {
     if (save) clipRecorder.stop(); // onstop saves the blob
     else { clipRecorder.ondataavailable = null; clipRecorder.onstop = null;
            clipRecorder.stop(); clipChunks = []; clipRecorder = null;
            if (typeof window.releaseClipAudio === "function") window.releaseClipAudio(); }
   }
+  endClipExport();
 };
 
 const abortRetroClip = () => {
@@ -12166,48 +12346,26 @@ const abortRetroClip = () => {
   finishRetroClip(false);
 };
 
-var clipTotalFrames = 0;
-var clipBannerLabel = "";
-const clipBanner = document.getElementById("clip-banner");
-const updateClipBanner = (left) => {
-  const pct = clipTotalFrames > 0
-    ? Math.min(100, Math.round(100 * (clipTotalFrames - left) / clipTotalFrames)) : 0;
-  clipBanner.textContent = `${clipBannerLabel}… ${pct}%`;
-};
-
-/**
- * Replay [startAgo, endAgo), both in frames before now, into a video file.
- * @param {number} startAgo
- * @param {number} endAgo
- * @param {string} slug   filename infix, e.g. "last10s"
- * @param {string} label  banner wording, e.g. "Capturing the last 10s"
- * @returns {boolean} true once the replay is armed and recording
- */
-const startClipExport = (startAgo, endAgo, slug, label) => {
-  if (clipReplayActive || !currentRomName || !speedControlsOk()) return false;
-  const mime = clipMimeType();
-  if (!mime) { showToast("Video recording isn't supported in this browser"); return false; }
-  const frames = Module._clip_begin ? Module._clip_begin(startAgo, endAgo) : 0;
-  if (frames <= 0) { showToast("Not enough gameplay history yet"); return false; }
-  // The framebuffer now holds the clip's first frame: push it to the canvas
+// The realtime path: the tick steps clip_tick and pushAudio sends each
+// frame's samples to the private tap. Returns false (nothing armed) on failure.
+const startClipRecorder = (slug, mime) => {
+  // The framebuffer holds the clip's first frame: push it to the canvas
   // before captureStream attaches, or the recorder opens on the live moment.
   drawGame();
   let stream;
   try {
     stream = canvasEl.captureStream(60);
   } catch {
-    Module._clip_abort();
     showToast("Couldn't capture the game canvas");
     return false;
   }
   const audio = typeof window.acquireClipAudio === "function"
-    ? window.acquireClipAudio() : null;
+    ? window.acquireClipAudio(true) : null;
   if (audio) for (const t of audio.getAudioTracks()) stream.addTrack(t);
   clipChunks = [];
   try {
-    clipRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    clipRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: CLIP_VIDEO_BPS });
   } catch {
-    Module._clip_abort();
     if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
     showToast("Couldn't start the recorder");
     return false;
@@ -12218,28 +12376,197 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
     const blob = new Blob(clipChunks, { type: clipRecorder.mimeType });
     clipRecorder = null;
     clipChunks = [];
-    if (!blob.size) { showToast("The clip came out empty"); return; }
-    const ext = blob.type.includes("mp4") ? "mp4" : "webm";
-    const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${base}-${slug}-${stamp}.${ext}`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    showToast("Clip saved");
+    saveClipBlob(blob, slug);
   };
   clipRecorder.start(500);
-  clipReplayActive = true;
-  clipTotalFrames = frames;
-  clipBannerLabel = label;
-  document.body.classList.add("clip-replaying");
-  clipBanner.hidden = false;
-  updateClipBanner(frames);
-  clipExportWasPaused = paused;
-  paused = false; // the replay must run even if the game was paused
   return true;
 };
+
+// The whole clip's samples, resampled to the encoder's rate by the browser
+// and encoded. `pcm` is the core's interleaved stereo, one array per frame.
+const clipEncodeAudio = async (pcm, len, acfg) => {
+  const frames = len / 2;
+  const rate = acfg.config.sampleRate;
+  const oc = new OfflineAudioContext(2, Math.max(1, Math.ceil((frames * rate) / CLIP_SRC_RATE)), rate);
+  const src = oc.createBuffer(2, Math.max(1, frames), CLIP_SRC_RATE);
+  const l0 = src.getChannelData(0), r0 = src.getChannelData(1);
+  let o = 0;
+  for (const p of pcm) {
+    for (let k = 0; k < p.length; k += 2) { l0[o] = p[k]; r0[o] = p[k + 1]; o++; }
+  }
+  const node = oc.createBufferSource();
+  node.buffer = src;
+  node.connect(oc.destination);
+  node.start();
+  const out = await oc.startRendering();
+
+  const chunks = [];
+  let description = null;
+  let failure = null;
+  const aenc = new AudioEncoder({
+    output: (c, meta) => {
+      const data = new Uint8Array(c.byteLength);
+      c.copyTo(data);
+      chunks.push({ data, timestamp: c.timestamp, duration: c.duration ?? 0 });
+      if (meta?.decoderConfig?.description) description = clipBytes(meta.decoderConfig.description);
+    },
+    error: (e) => { failure = e; },
+  });
+  try {
+    aenc.configure(acfg.config);
+    const l = out.getChannelData(0), r = out.getChannelData(1);
+    const BLOCK = 4800;
+    for (let s = 0; s < out.length; s += BLOCK) {
+      if (failure) throw failure;
+      const n = Math.min(BLOCK, out.length - s);
+      const data = new Float32Array(n * 2);
+      data.set(l.subarray(s, s + n), 0);
+      data.set(r.subarray(s, s + n), n);
+      const ad = new AudioData({ format: "f32-planar", sampleRate: rate, numberOfFrames: n,
+                                 numberOfChannels: 2, timestamp: Math.round((s * 1e6) / rate), data });
+      aenc.encode(ad);
+      ad.close();
+    }
+    await aenc.flush();
+    if (failure) throw failure;
+  } finally {
+    try { aenc.close(); } catch {}
+  }
+  return { codec: acfg.kind, sampleRate: rate, channels: 2, bitrate: CLIP_AUDIO_BPS,
+           frames: out.length, description, chunks };
+};
+
+// The WebCodecs path, from clip_begin's armed replay to a saved file.
+const clipEncode = async (gen, slug, mime) => {
+  const w = canvasEl.width, h = canvasEl.height;
+  const cfg = await clipCodecConfig(w, h);
+  if (gen !== clipExportGen || !clipReplayActive) return; // cancelled while asking
+  if (!cfg) {
+    // No encoder here: the realtime recorder instead, from the same frame.
+    clipEncodeActive = false;
+    if (!mime || !startClipRecorder(slug, mime)) {
+      if (!mime) showToast("Video recording isn't supported in this browser");
+      abortRetroClip();
+    }
+    return;
+  }
+
+  const vChunks = [];
+  let vDesc = null;
+  let failure = null;
+  const venc = new VideoEncoder({
+    output: (c, meta) => {
+      const data = new Uint8Array(c.byteLength);
+      c.copyTo(data);
+      vChunks.push({ data, timestamp: c.timestamp, duration: c.duration ?? 0, key: c.type === "key" });
+      if (meta?.decoderConfig?.description) vDesc = clipBytes(meta.decoderConfig.description);
+    },
+    error: (e) => { failure = e; },
+  });
+  const pcm = [];
+  let pcmLen = 0;
+  const frameUs = 1e6 / CLIP_FPS;
+  const total = clipTotalFrames;
+  let done = 0;
+  const live = () => gen === clipExportGen && clipReplayActive;
+  try {
+    venc.configure(cfg.video);
+    // Frames in ~12 ms batches, then a yield: the panel repaints and Cancel
+    // is heard. The encoder's queue is the brake on a fast core.
+    for (let left = 0; left >= 0;) {
+      if (!live()) return;            // Cancel or a game switch: already restored
+      if (failure) throw failure;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 12 && venc.encodeQueueSize < 8) {
+        left = Module._clip_tick();
+        if (left < 0) break;          // the live state is back
+        drawGame();
+        // Read in the task that drew it: the WebGL canvas keeps no buffer.
+        const vf = new VideoFrame(canvasEl, { timestamp: Math.round(done * frameUs),
+                                              duration: Math.round(frameUs) });
+        venc.encode(vf, { keyFrame: done % CLIP_KEY_EVERY === 0 });
+        vf.close();
+        const n = Module._getAudioBufferLen();
+        if (n > 0) {
+          pcm.push(new Float32Array(Module.memory.buffer, Module._getAudioBufferPtr(), n).slice());
+          pcmLen += n;
+        }
+        Module._clearAudioBuffer();
+        done++;
+      }
+      setClipProgress((0.9 * done) / Math.max(1, total));
+      if (left >= 0) await new Promise((r) => setTimeout(r, 0));
+    }
+    await venc.flush();
+    if (failure) throw failure;
+    if (!live()) return;
+    if (!vDesc) throw new Error("the encoder gave no avcC");
+    const audio = pcmLen > 0 ? await clipEncodeAudio(pcm, pcmLen, cfg.audio) : null;
+    if (!live()) return;
+    setClipProgress(0.98);
+    const bytes = ClipMux.mp4({
+      video: { width: w, height: h, description: vDesc, chunks: vChunks },
+      audio,
+    });
+    setClipProgress(1);
+    saveClipBlob(new Blob([/** @type {Uint8Array<ArrayBuffer>} */ (bytes)], { type: "video/mp4" }), slug);
+  } catch (e) {
+    console.error("clip: encode failed", e);
+    if (live()) showToast("Couldn't record the clip");
+  } finally {
+    try { venc.close(); } catch {}
+    if (live()) {
+      if (Module._clip_abort) Module._clip_abort();  // a no-op once the replay ran out
+      endClipExport();
+    }
+  }
+};
+
+/**
+ * Replay [startAgo, endAgo), both in frames before now, into a video file,
+ * off screen, behind a progress panel.
+ * @param {number} startAgo
+ * @param {number} endAgo
+ * @param {string} slug   filename infix, e.g. "clip10s"
+ * @param {string} label  what is being recorded, e.g. "The last 10s"
+ * @returns {boolean} true once the replay is armed and recording
+ */
+const startClipExport = (startAgo, endAgo, slug, label) => {
+  if (clipReplayActive || !currentRomName || !speedControlsOk()) return false;
+  const webcodecs = clipWebCodecs();
+  const mime = clipMimeType();
+  if (!webcodecs && !mime) { showToast("Video recording isn't supported in this browser"); return false; }
+  const frames = Module._clip_begin ? Module._clip_begin(startAgo, endAgo) : 0;
+  if (frames <= 0) { showToast("Not enough gameplay history yet"); return false; }
+  const gen = ++clipExportGen;
+  clipReplayActive = true;
+  clipEncodeActive = webcodecs;
+  clipTotalFrames = frames;
+  clipExportWasPaused = paused;
+  paused = false; // the replay must run even if the game was paused
+  // Sound for the file even when the player has the volume off (the tap
+  // and the encoder sit before the volume).
+  if (Module._wasm_set_audio_silent) Module._wasm_set_audio_silent(0);
+  document.body.classList.add("clip-replaying");
+  clipProgressLabel.textContent = label;
+  setClipProgress(0);
+  clipProgressModal.classList.add("open");
+  trapFocus(clipProgressModal);
+  if (webcodecs) {
+    clipEncode(gen, slug, mime);
+  } else if (!startClipRecorder(slug, /** @type {string} */ (mime))) {
+    abortRetroClip();
+    return false;
+  }
+  return true;
+};
+
+document.getElementById("clip-progress-cancel").addEventListener("click", () => {
+  if (clipReplayActive) {
+    abortRetroClip();
+    showToast("Clip cancelled");
+  }
+});
 
 const CLIP_QUICK_SECONDS = 10;
 
@@ -12286,6 +12613,7 @@ const clipStrip = createFilmStrip({
   frameWMin: 26,
   frameWMax: 40,
   fitFrames: CLIP_QUICK_SECONDS + 1,
+  direct: true,
   markers: [
     { el: document.getElementById("clip-marker-start"), edge: "lead" },
     { el: document.getElementById("clip-marker-end"), edge: "trail" },
@@ -12396,7 +12724,7 @@ const clipRefresh = () => {
   clipEstimate.textContent =
     len > 0
       ? `${seconds.toFixed(1)}s of video, roughly ${Math.max(1, Math.round(seconds))} MB. ` +
-        "The clip is re-played at normal speed while it records, so it takes that long."
+        "It records off screen; you'll see how far along it is."
       : "";
   clipSaveBtn.disabled = len <= 0;
 };
@@ -12540,8 +12868,8 @@ clipSaveBtn.addEventListener("click", () => {
   const seconds = Math.max(1, Math.round(len / 60));
   closeClipScrubber();
   startClipExport(start, end, `clip${seconds}s`,
-                  end === 0 ? `Capturing the last ${seconds}s`
-                            : `Capturing ${seconds}s of gameplay`);
+                  end === 0 ? `The last ${seconds}s`
+                            : `${seconds}s of gameplay`);
 });
 
 document.getElementById("clip-scrub-close").addEventListener("click", closeClipScrubber);
@@ -15340,6 +15668,8 @@ var Module = {
     // routeOutput re-attaches it across lowpass toggles.
     let clipTapNode = null;
     let clipTapActive = false;
+    // A clip replay's sound goes to the tap alone, never to the speakers.
+    let clipTapPrivate = false;
 
     const routeOutput = () => {
       if (!audioCtx || !gainNode) return;
@@ -15363,15 +15693,19 @@ var Module = {
     };
     window.updateAudioLowpass = () => routeOutput();
     // Recorder-side hooks; the tap's MediaStream, or null pre-unlock.
-    window.acquireClipAudio = () => {
+    // `priv`: the samples pushed from now on reach the tap and nothing
+    // else (a clip replay); otherwise the tap hears what the speakers do.
+    window.acquireClipAudio = (priv = false) => {
       if (!audioCtx || !gainNode) return null;
       if (!clipTapNode) clipTapNode = audioCtx.createMediaStreamDestination();
-      clipTapActive = true;
+      clipTapPrivate = !!priv;
+      clipTapActive = !priv;
       routeOutput();
       return clipTapNode.stream;
     };
     window.releaseClipAudio = () => {
       clipTapActive = false;
+      clipTapPrivate = false;
       if (audioCtx && gainNode) routeOutput();
     };
     // Under fast-forward, play the frames that fit within this much queued
@@ -15503,7 +15837,7 @@ var Module = {
       Module._clearAudioBuffer();
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(gainNode);
+      source.connect(clipTapPrivate && clipTapNode ? clipTapNode : gainNode);
       // Playback-rate servo: hold the lead near its target from both
       // directions (above: marginally fast, draining production drift;
       // below: marginally slow, rebuilding the cushion). Clamped to +/-0.4%
@@ -15777,21 +16111,29 @@ var Module = {
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         blitLinkCanvases();
+      } else if (clipReplayActive && clipEncodeActive) {
+        // clipEncode steps the core itself, off screen and off the clock.
+        accumulator = 0;
+        presentSkip = true;
       } else if (clipReplayActive) {
-        // Capture replay: clip_tick presents each frame and returns -1 when
-        // the log is exhausted (the live state is already restored).
+        // Realtime capture replay (no WebCodecs): clip_tick presents each
+        // frame and returns -1 when the log is exhausted (the live state is
+        // already restored). pushAudio feeds the private tap only.
         let framesRun = 0;
         let done = false;
         while (accumulator >= FRAME_TIME && framesRun < 2) {
           const left = Module._clip_tick();
           if (left < 0) { done = true; break; }
-          if ((left & 15) === 0) updateClipBanner(left);
+          if ((left & 15) === 0)
+            setClipProgress((clipTotalFrames - left) / Math.max(1, clipTotalFrames));
           pushAudio();
           frameCount++;
           accumulator -= FRAME_TIME;
           framesRun++;
         }
-        if (accumulator > FRAME_TIME * 2) accumulator = 0;
+        // As the normal loop: zeroing the debt would delete those frames'
+        // audio, a gap in the recording at every hitch.
+        if (accumulator > FRAME_TIME * 2) accumulator = FRAME_TIME * 2;
         if (done) finishRetroClip(true);
       } else if (rewindHeld) {
         // Pop ~30 snapshots/s (10 frames each, ~5x realtime backward); the

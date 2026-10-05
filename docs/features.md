@@ -14,7 +14,8 @@ The full feature list for both front-ends and both emulated systems.
   (menu, or double-tap the rewind button) that warns before rolling back an in-game save
 - Run-ahead (opt-in, 1–2 frames); disabled while linked
 - "Clip that!": retroactive capture of the last minute of play, replayed deterministically
-  from state anchors plus the input log, trimmed in the same film-strip scrubber
+  from state anchors plus the input log, trimmed in the same film-strip scrubber, and
+  encoded off screen (WebCodecs to MP4, faster than realtime; MediaRecorder elsewhere)
 - Cheats: Game Genie, GameShark, Action Replay / CodeBreaker
 - Per-ROM saves in IndexedDB; "Manage ROMs and Saves" resets or deletes a game
 - Online link play with room codes; local 2P on one machine
