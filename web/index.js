@@ -4046,6 +4046,9 @@ const flushSyncInner = async () => {
 // old-name one is dropped. Returns { moved, leftover }, or null when the
 // transaction failed.
 const applyRemoteRename = async (from, to) => {
+  // Another device's game claims the name: a pull may write under it again
+  // (renamedAway; bug_remote_rename_into_away_name_skips_saves).
+  renamedAway.delete(to);
   let fromKeys = allPerGameKeys(from);
   let toKeys = allPerGameKeys(to);
   // The game may be open: flush the pending save under the old name,
@@ -4831,9 +4834,10 @@ const renameInventoryLines = (inv) => {
 };
 
 // Returns { ok: true, moved } or { ok: false, error } (shown verbatim).
-// Names this session renamed a game away from, until the name is claimed
-// again (a rename into it, or a fresh import): a pull downloading a file
-// under one must not write it (pullSyncInner's write segment).
+// Names this session renamed a game away from, until a game holds the name
+// again (a rename into it, here or from another device, or any library entry
+// under it): a pull downloading a file under one must not write it
+// (pullSyncInner's write segment).
 const renamedAway = new Set();
 
 const renameGame = async (oldName, newName) => {
@@ -6442,7 +6446,10 @@ const enforceRomBudget = async (list) => {
 // Move `name` to the front of the index and spend the byte budget over the
 // result (ROM files only, never saves).
 const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0 } = {}) => updateRecent(async (all) => {
-  if (fresh) renamedAway.delete(name); // a new claim on the name
+  // Any game under the name claims it again - an import, a Drive-only
+  // tile's download, a launch - and a pull may write under it once more
+  // (bug_download_into_away_name_skips_saves).
+  renamedAway.delete(name);
   let prev = all.find((r) => r?.name === name);
   let list = all.filter((r) => r.name !== name);
   let ts = Date.now();
