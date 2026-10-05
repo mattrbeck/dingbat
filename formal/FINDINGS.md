@@ -64,8 +64,8 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
   (`DriveLibrary.merge_idem`).
 - No sync crosses a sign-out or an account switch
   (`DriveSession.Session.Safe`). Since the token broker this needs every
-  grant a sign-in did not ask for to be the loaded account's: see the
-  2026-10-05 re-audit at the end of this file.
+  broker refresh to be the loaded account's (a consent re-grant always is
+  since 6367e296): see the 2026-10-05 re-audit at the end of this file.
 - `save:<g>` only ever holds game g's battery
   (`SavePersistence.provenance`).
 - The run/pause invariant holds for every event
@@ -570,8 +570,22 @@ for another account (the ghost `stray`); both ways one can be are reachable:
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
-| D1 | Medium (real, needs the person to pick another account) | **A consent re-grant can bring another account's token into the running session** (`bug_consent_regrant_crosses_accounts`, `bug_consent_renewal_crosses_accounts`). A popup-flow device (no refresh token) once the broker answers: an upload's 401 with activation, or the first tap (the upgrade), opens Google's consent screen through `driveRegrantPopup` -> `driveCodeGrant`, hinted with the loaded account. If the person ends up granting another account (the hinted one is not signed in to Google in this browser and they sign in with another), `driveCodeGrant` checks only that the session is the one that asked (2519-2522) and adopts that account's token and refresh token without a new session or an account check. The running flush replays and writes on with it; on driveFetch's path nothing ever calls gdriveFetchEmail, so the loaded account's queues, tombstones and library keep syncing into the other account's Drive, and renewals keep refreshing the other grant. | In `driveCodeGrant`, for a re-grant (`connect` false), learn the granted account (tokeninfo on `j.access_token`) before adopting anything, re-check the session after that await, and refuse (no token, no refresh token stored) when its `sub` is not `syncState.acct`. |
-| D2 | Very low | **A broker refresh started during a sign-in that is then refused adopts that sign-in's account** (`bug_refresh_of_refused_signin`). Two sign-ins at once (the first finishes as account 1; the second's grant, account 2, lands and stores its refresh token); a refresh starts in that session (a Drive-only tile's ensureDriveSignedIn); the second sign-in's tokeninfo fails and it is refused (5224-5228) without a new session, so the refresh lands as current and account 2's token is adopted with account 1 loaded and nothing identifying. | `driveSession++` in gdriveConnect's refusal branch, so anything that started during the refused sign-in is stale when it answers. |
+| D1 | Medium (real, needs the person to pick another account); **fixed in 6367e296** | **A consent re-grant can bring another account's token into the running session** (`bug_consent_regrant_crosses_accounts`, `bug_consent_renewal_crosses_accounts`). A popup-flow device (no refresh token) once the broker answers: an upload's 401 with activation, or the first tap (the upgrade), opens Google's consent screen through `driveRegrantPopup` -> `driveCodeGrant`, hinted with the loaded account. If the person ends up granting another account (the hinted one is not signed in to Google in this browser and they sign in with another), `driveCodeGrant` checks only that the session is the one that asked (2519-2522) and adopts that account's token and refresh token without a new session or an account check. The running flush replays and writes on with it; on driveFetch's path nothing ever calls gdriveFetchEmail, so the loaded account's queues, tombstones and library keep syncing into the other account's Drive, and renewals keep refreshing the other grant. | In `driveCodeGrant`, for a re-grant (`connect` false), learn the granted account (tokeninfo on `j.access_token`) before adopting anything, re-check the session after that await, and refuse (no token, no refresh token stored) when its `sub` is not `syncState.acct`. |
+| D2 | Very low; **fixed in 6367e296** | **A broker refresh started during a sign-in that is then refused adopts that sign-in's account** (`bug_refresh_of_refused_signin`). Two sign-ins at once (the first finishes as account 1; the second's grant, account 2, lands and stores its refresh token); a refresh starts in that session (a Drive-only tile's ensureDriveSignedIn); the second sign-in's tokeninfo fails and it is refused (5224-5228) without a new session, so the refresh lands as current and account 2's token is adopted with account 1 loaded and nothing identifying. | `driveSession++` in gdriveConnect's refusal branch, so anything that started during the refused sign-in is stale when it answers. |
+| D3 | Very low; open | **A broker sign-in can keep a refresh token for an account other than the one it confirms** (`bug_refresh_token_outlives_its_account`, found modelling the fix). Two sign-ins at once (the token flow's finishes as account 1; the broker's grant, account 2, lands with its refresh token); in that window a flush from before the sign-out gets 401, the forced refresh fails (broker down) and, with activation, the token flow re-grants account 1 in the current session. The broker sign-in's tokeninfo then confirms the token the tab holds now (account 1's), so it completes as account 1 keeping account 2's refresh token (gdriveConnect clears `syncState.refresh` only on the token flow, 5260, or on refusal). Every later broker renewal adopts account 2's token with account 1 loaded, and the next sync crosses. | Tie the refresh token to the account it was granted for: in gdriveConnect's broker path, keep `syncState.refresh` only if the token tokeninfo confirmed is the one `driveCodeGrant` adopted (else null it); or store the grant's `sub` beside the refresh token and have `driveRefreshSilently` use it only when it equals `syncState.acct`. |
+
+**After 6367e296** (`DriveSession` follows it; line numbers there are at
+6367e296): D1 and D2 are `regress_consent_regrant_refused`,
+`regress_consent_renewal_refused` (+ `consent_regrant_same_account`, the
+upgrade for the linked account still adopted) and
+`regress_refresh_of_refused_signin`; `codeAccept_stray_same` proves a consent
+re-grant can no longer be stray. `no_cross_account` / `active_is_own_account`
+still need `stray` false, because D3 is reachable through a broker refresh.
+Regression tests in web/tests/drive-session.test.mjs ("a consent re-grant
+that comes back as another account is refused...", "a consent re-grant for
+the linked account is adopted...", "a broker refresh started during a
+sign-in that is then refused...") fail on the code before 6367e296 and pass
+on it.
 
 Still open from before: `bug_spinner_without_work` /
 `bug_spinner_after_renewal` (now only without a refresh token or with the
