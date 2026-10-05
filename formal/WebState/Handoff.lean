@@ -5,11 +5,12 @@
 # Picking a game up on another device (web/index.js)
 
 Model of the cross-device hand-off as shipped in 43b30d1c (main 11025707),
-and of the fixes this model led to (`Code.fixed`), followed to 03f88d6c,
+and of the fixes this model led to, followed to 03f88d6c (`Code.audited`),
 where the crash checkpoints (6ee01e88..096edd3e) became a second writer of
 the session: while a game runs, every 60 s of play a checkpoint takes the
-session again from a worker's callback (`Code.proposed` adds this audit's fix
-for it). Two devices share one game and one Google Drive appDataFolder. What
+session again from a worker's callback. The re-audit there found two races
+in them, fixed in 87eea59f and bfe5d5c5; `Code.fixed` is the code at
+bfe5d5c5. Two devices share one game and one Google Drive appDataFolder. What
 travels for the game is three Drive files:
 
 * `save:<game>`, the in-game battery save;
@@ -81,12 +82,12 @@ The code modelled, by function:
   the `switch` event, available while the stash is held, and timing it out is
   not tapping it.
 * Both devices run one build, so no session is refused as too new:
-  `sessionHeldFor` (`refuseState`, 7856-7866) stays null, and its gates in
+  `sessionHeldFor` (`refuseState`, 7881-7891) stays null, and its gates in
   `persistAutoState`, `storeLastFrame`, `maybeCheckpoint` and
   `storeCheckpoint` never fire. A held game only writes less.
 * The close handlers' writes land. In a quitting browser they reach
   IndexedDB at the next boot through the last gasp (`leaveLastGasp` /
-  `takeLastGasp`, 8642-8685, from localStorage, before anything reads the
+  `takeLastGasp`, 8672-8715, from localStorage, before anything reads the
   session), which ends in the same records.
 * The crash sheet's "Resume from earlier" (`launchRom`'s `session` with
   `force`, from the local checkpoint history, which keeps the newer save
@@ -99,16 +100,16 @@ The code modelled, by function:
   `noteCrashedRuns` counts a page whose `playing` mark outlived it; here a
   `reload` with the mark standing.
 
-Line numbers below are web/index.js at 03f88d6c: `launchRom` 6444-6473,
-`loadRom` 11646-11766, `persistAutoState` 8126-8173, `maybeCheckpoint`
-8302-8310, `takeCheckpoint` 8312-8333, `storeCheckpoint` 8335-8359,
-`noteCrashedRuns` 8553-8609, `persistSave` 7440-7468, `storeLastFrame`
-6306-6328, `showMainMenu` 13474-13501, `unloadGame` 14173-14219,
-`takeHandoff` 4141-4150, `switchToHandoff` 4158-4183, `heldGameIsSent`
-4127-4132, `handoffNews` 4103-4121, `pullSyncInner` 4201-4545 (the hand-off
-section 4314-4358), `flushSyncInner` 3769-3997, `markUpload` 3714-3721,
-`runFullSync` 4547-4560, `renderClosedHero` 13882-13928, `refreshHero`
-13934-13945, `resumeGame` 13503-13514, `resumeSessionFor` 8760-8769.
+Line numbers below are web/index.js at bfe5d5c5: `launchRom` 6469-6498,
+`loadRom` 11676-11796, `persistAutoState` 8151-8198, `maybeCheckpoint`
+8327-8335, `takeCheckpoint` 8337-8358, `storeCheckpoint` 8360-8389,
+`noteCrashedRuns` 8583-8639, `persistSave` 7465-7493, `storeLastFrame`
+6330-6352, `showMainMenu` 13569-13596, `unloadGame` 14280-14326,
+`takeHandoff` 4144-4157, `switchToHandoff` 4165-4190, `heldGameIsSent`
+4130-4135, `handoffNews` 4106-4124, `pullSyncInner` 4208-4556 (the hand-off
+section 4321-4365), `flushSyncInner` 3772-4000, `markUpload` 3717-3724,
+`runFullSync` 4558-4571, `renderClosedHero` 13977-14023, `refreshHero`
+14029-14040, `resumeGame` 13598-13609, `resumeSessionFor` 8790-8799.
 
 ## Results
 
@@ -140,9 +141,9 @@ section 4314-4358), `flushSyncInner` 3769-3997, `markUpload` 3714-3721,
   syncing each device in turn leaves both resuming the same moment on the
   same save as Drive's copy, each hero showing where its tap goes. With a
   checkpoint's move added (a checkpoint past its check when Main Menu is
-  tapped, landing later; 1024 histories), the proposed code converges
-  (`proposed_converges_*`) and the code at 03f88d6c does not
-  (`fixed_diverges_with_checkpoints`).
+  tapped, landing later; 1024 histories), the code converges too
+  (`converges_ckpt_*`); at 03f88d6c it did not
+  (`audited_diverges_with_checkpoints`).
 * The shipped code's counterexamples (each reproduced against the real
   web/index.js by a test in web/tests/handoff.test.mjs, failing before the
   fix): `bug_switch_during_upload`, `bug_close_during_handoff`,
@@ -151,14 +152,16 @@ section 4314-4358), `flushSyncInner` 3769-3997, `markUpload` 3714-3721,
 * Open by design, when two devices played without syncing in between:
   `edge_concurrent_play_held_wins`, `edge_closed_copy_yields`,
   `edge_listing_race`.
-* The checkpoints (03f88d6c), open: `bug_checkpoint_after_switch` (Switch
-  tapped while a checkpoint packs: the turned-down moment lands back over
-  the chosen one and goes up with Switch's re-send) and
+* The checkpoints at 03f88d6c (`audited`): `bug_checkpoint_after_switch`
+  (Switch tapped while a checkpoint packs: the turned-down moment lands back
+  over the chosen one and goes up with Switch's re-send) and
   `bug_checkpoint_over_main_menu` (Main Menu tapped while a checkpoint
   awaits `persistSave`: the older moment lands over the newer snapshot).
-  Both end safely with the proposed fix (`proposed_*`).
+  Both traces end safely in the fixed code (`regress_*`), each replayed
+  against the real web/index.js (web/tests/handoff-ckpt.test.mjs,
+  web/tests/ckpt-store.test.mjs), failing before the fix.
 
-## The fixes (`Code.fixed`)
+## The fixes (`Code.fixed`; the first three already in `audited`)
 
 * `switchToHandoff` re-marks what it re-queues (`syncRemarked`): a flush
   sending this device's own copy when Switch is tapped no longer takes the
@@ -170,13 +173,12 @@ section 4314-4358), `flushSyncInner` 3769-3997, `markUpload` 3714-3721,
 * `heldGameIsSent` asks after its read, and the caller checks `running` and
   `loadGen` again in the run that takes the hand-off.
 
-## The proposed fix (`Code.proposed`, not in the JS yet)
-
-* `takeHandoff` moves the game's session epoch (`sessionEpochs`, as
-  `deleteKeys` does for a delete), so a checkpoint of the copy let go is
-  history wherever it is.
+* `takeHandoff` moves the game's session epoch before its first await
+  (`sessionEpochs`, as `deleteKeys` does for a delete; bfe5d5c5, 4148), so a
+  checkpoint of the copy let go is history wherever it is.
 * `storeCheckpoint` asks its question (`sessionSnapTs`, epoch, held) again
-  after `await persistSave`, right before its session put.
+  after `await persistSave`, right before its session put (87eea59f,
+  8363-8373).
 -/
 
 namespace WebState.Handoff
@@ -258,12 +260,12 @@ inductive Eng
   | pullFiles (list : Listing)
   deriving Repr
 
-/-- Which code: as shipped in 43b30d1c; with the first audit's fixes, which
-is the code at 03f88d6c (`fixed`); or that with this audit's proposed fix for
-the checkpoints (`proposed`: `takeHandoff` moves the session's epoch, and
-`storeCheckpoint` asks again after its `await persistSave`). The checkpoints
-are 03f88d6c's in all three; the traces on `shipped` take none. -/
-inductive Code | shipped | fixed | proposed
+/-- Which code: as shipped in 43b30d1c; with the first audit's fixes, the
+code at 03f88d6c (`audited`); or the code at bfe5d5c5 (`fixed`), where also
+`takeHandoff` moves the session's epoch and `storeCheckpoint` asks again
+after its `await persistSave`. The checkpoints are 03f88d6c's in `shipped`
+and `audited`; the traces on `shipped` take none. -/
+inductive Code | shipped | audited | fixed
   deriving DecidableEq, Repr
 
 /-- A checkpoint in flight (`ckptInFlight`, one per page): `takeCheckpoint`
@@ -514,8 +516,8 @@ def ckptStep (c : Code) (send : Bool) (v : Dv) : Dv :=
       let v := if v.mode ≠ .closed && x.sig ≠ v.lastSave then persistSave v else v
       { v with ckpt := .saving x }
   | .saving x =>
-    -- After `await persistSave`: the session put. `proposed` asks again.
-    if c = .proposed && !v.newest then { v with ckpt := .none }
+    -- After `await persistSave`: the session put. `fixed` asks again (87eea59f).
+    if c = .fixed && !v.newest then { v with ckpt := .none }
     else { v with files := v.files.set .sess (some (.sess x)), ckpt := .storing }
   | .storing =>
     let v := if send then mark { v with unsent := false } .sess else { v with unsent := true }
@@ -548,10 +550,11 @@ def land (v : Dv) (n : News) : Dv :=
 def take (v : Dv) (news : List News) : Dv :=
   news.foldl land { v with mode := .closed, battery := 0, gen := v.gen + 1, drawnFor := false,
                            playing := false }
-/-- `proposed`: `takeHandoff` also moves the session's epoch, as `deleteKeys`
-does, so a checkpoint of the copy let go is history. -/
+/-- `fixed` (bfe5d5c5): `takeHandoff` also moves the session's epoch before its
+first await, as `deleteKeys` does, so a checkpoint of the copy let go is
+history. -/
 def takeC (c : Code) (v : Dv) (news : List News) : Dv :=
-  if c = .proposed then take { v with newest := false } news else take v news
+  if c = .fixed then take { v with newest := false } news else take v news
 
 /-- The offer (`handoffStash`, the session marked seen, the toast). -/
 def markSeen (v : Dv) (n : News) : Dv :=
@@ -676,7 +679,7 @@ def tick (c : Code) (s : S) (d : Dev) : S :=
       -- `onHome` and `heldGameIsSent`'s first checks, then its `dbGet`.
       if v.mode ≠ .running then s.setDev d { v with eng := .pullCheck list news (sentBefore v) g0 }
       else s.setDev d { (offer v news) with eng := .pullFiles list }
-    | .fixed | .proposed =>
+    | .audited | .fixed =>
       if !stillHeld v g0 then s.setDev d { v with eng := .pullFiles list }
       else if v.mode ≠ .running then s.setDev d { v with eng := .pullCheck list news true g0 }
       else s.setDev d { (offer v news) with eng := .pullFiles list }
@@ -686,7 +689,7 @@ def tick (c : Code) (s : S) (d : Dev) : S :=
       let sent := sent1 && v.battery == saveVal (v.files.get .save)
       if sent && v.mode != .closed then s.setDev d { (take v news) with eng := .pullFiles list }
       else s.setDev d { (offer v news) with eng := .pullFiles list }
-    | .fixed | .proposed =>
+    | .audited | .fixed =>
       -- Asked again in the run that acts: nothing changed since the read.
       let sent := sentBefore v && v.battery == saveVal (v.files.get .save) &&
                   v.mode == .home && v.gen == g0
@@ -941,7 +944,7 @@ theorem foldl_eng {β : Type} (f : Dv → β → Dv) (hf : ∀ v x, (f v x).eng 
   unfold take; rw [foldl_eng _ land_eng]
 @[simp] theorem takeC_eng (c : Code) (v : Dv) (news : List News) : (takeC c v news).eng = v.eng := by
   unfold takeC; split <;> simp
-@[simp] theorem takeC_fixed (v : Dv) (news : List News) : takeC .fixed v news = take v news := rfl
+@[simp] theorem takeC_audited (v : Dv) (news : List News) : takeC .audited v news = take v news := rfl
 @[simp] theorem tap_eng (v : Dv) : (tap v).eng = v.eng := by
   unfold tap; split <;> simp only [] <;> (repeat' split) <;> rfl
 @[simp] theorem mainMenu_eng (v : Dv) (d : Dev) : (mainMenu v d).eng = v.eng := by
@@ -1259,14 +1262,23 @@ theorem take_with_eng (v : Dv) (news : List News) (e e' : Eng) :
           with eng := e' } : Dv) = _
   rw [foldl_land_eng]
 
+theorem takeC_with_eng (c : Code) (v : Dv) (news : List News) (e e' : Eng) :
+    ({ (takeC c { v with eng := e } news) with eng := e' } : Dv) =
+      { (takeC c v news) with eng := e' } := by
+  unfold takeC; split
+  · exact take_with_eng { v with newest := false } news e e'
+  · exact take_with_eng v news e e'
+
 /-- **A game held at home, unmoved, its save and session sent, is always
 handed over** (fixed code): with nothing done in between, the pull's next
-two segments let the copy in memory go and land the other device's files. -/
+two segments let the copy in memory go (its checkpoint, if any, history:
+`takeC`) and land the other device's files. -/
 theorem handed_off_when_sent (s : S) (d : Dev) (list : Listing) (news : List News) (g0 : Nat)
     (he : (s.dev d).eng = .pullNews list news g0) (hn : news ≠ [])
     (hm : (s.dev d).mode = .home) (hg : (s.dev d).gen = g0) (hs : sentBefore (s.dev d) = true)
     (hb : (s.dev d).battery = saveVal ((s.dev d).files.get .save)) :
-    (tick .fixed (tick .fixed s d) d).dev d = { (take (s.dev d) news) with eng := .pullFiles list } := by
+    (tick .fixed (tick .fixed s d) d).dev d =
+      { (takeC .fixed (s.dev d) news) with eng := .pullFiles list } := by
   have hne : news.isEmpty = false := by cases news <;> simp_all
   have h1 : tick .fixed s d = s.setDev d { s.dev d with eng := .pullCheck list news true g0 } := by
     simp only [tick, he, hne, stillHeld]
@@ -1278,7 +1290,7 @@ theorem handed_off_when_sent (s : S) (d : Dev) (list : Listing) (news : List New
       (s.dev d).gen == g0) = true := by
     simp only [sentBefore] at hs ⊢; simp [hs, hb, hm, hg]
   simp only [hc, ↓reduceIte]
-  simp only [dev_setDev, takeC_fixed, take_with_eng]
+  simp only [dev_setDev, takeC_with_eng]
 
 /-! ### The picture follows -/
 
@@ -1470,12 +1482,15 @@ theorem edge_listing_race :
     driveMoment p = p.b.moment ∧ driveMoment s = p.a.moment := by
   decide +kernel
 
-/-! ## Checkpoints: what this audit found (03f88d6c)
+/-! ## Checkpoints: what the re-audit found at 03f88d6c, fixed in 87eea59f / bfe5d5c5
 
 A checkpoint (every 60 s of play) writes the session from a worker's
-callback, seconds' worth of awaits after the moment it copied. It gives way
-to a newer snapshot or a delete (`sessionSnapTs`, `sessionEpoch`), asked once,
-before `await persistSave`. Two writers it does not give way to: -/
+callback, seconds' worth of awaits after the moment it copied. At 03f88d6c
+(`audited`) it gave way to a newer snapshot or a delete (`sessionSnapTs`,
+`sessionEpoch`), asked once, before `await persistSave`, and two writers it
+did not give way to. Now (`fixed`) `takeHandoff` moves the epoch before its
+first await (bfe5d5c5, 4148), and `storeCheckpoint` asks again right after
+`await persistSave` (87eea59f, 8363-8373). -/
 
 /-- Device 1 holds its older copy and goes back into it; a pull while it runs
 offers Switch. It plays on; a running tick takes a checkpoint... -/
@@ -1486,24 +1501,25 @@ tens to hundreds of ms). The checkpoint lands, then both sync. -/
 def ckptSwitchTrace : List Ev :=
   ckptSwitchPre ++ [.switch .a] ++ List.replicate 4 (.ckpt .a true) ++ settle .a ++ sync .b
 
-/-- **The checkpoint lands over the copy the player switched to**: `takeHandoff`
-moves neither `sessionSnapTs` nor the epoch, so the checkpoint is still "the
-newest" and puts the turned-down moment back in `stateauto:`; Switch's own
+/-- **The checkpoint lands over the copy the player switched to** (03f88d6c):
+`takeHandoff` moved neither `sessionSnapTs` nor the epoch, so the checkpoint
+was still "the newest" and puts the turned-down moment back in `stateauto:`; Switch's own
 re-send (the key queued again, its `sigs` forgotten) sends it to Drive. Both devices
 resume the moment the player turned down. -/
 theorem bug_checkpoint_after_switch :
-    let s := run .fixed init ckptSwitchTrace
-    let chosen := (run .fixed init handPrefix).b.moment
-    let turnedDown := (run .fixed init ckptSwitchPre).a.moment
+    let s := run .audited init ckptSwitchTrace
+    let chosen := (run .audited init handPrefix).b.moment
+    let turnedDown := (run .audited init ckptSwitchPre).a.moment
     turnedDown ≠ chosen ∧ resumePoint s.a = turnedDown ∧ driveMoment s = turnedDown ∧
     resumePoint s.b = turnedDown := by
   decide +kernel
 
-/-- **Proposed** (`takeHandoff` moves the session's epoch): the checkpoint is
-history, and the chosen copy is the copy everywhere. -/
-theorem proposed_checkpoint_after_switch :
-    let s := run .proposed init ckptSwitchTrace
-    let chosen := (run .proposed init handPrefix).b.moment
+/-- **Fixed** (bfe5d5c5: `takeHandoff` moves the session's epoch): the
+checkpoint is history, and the chosen copy is the copy everywhere. Replayed
+against the real web/index.js by web/tests/handoff-ckpt.test.mjs. -/
+theorem regress_checkpoint_after_switch :
+    let s := run .fixed init ckptSwitchTrace
+    let chosen := (run .fixed init handPrefix).b.moment
     resumePoint s.a = chosen ∧ driveMoment s = chosen ∧ resumePoint s.b = chosen := by
   decide +kernel
 
@@ -1518,24 +1534,25 @@ def ckptMenuPre : List Ev :=
 /-- The checkpoint goes on; then each device syncs. -/
 def ckptMenuTrace : List Ev := ckptMenuPre ++ List.replicate 3 (.ckpt .a true) ++ sync .a ++ sync .b
 
-/-- **The checkpoint lands over the snapshot Main Menu took after it**: it asked
-before its `await persistSave` and not after. The session stored, sent and
+/-- **The checkpoint lands over the snapshot Main Menu took after it**
+(03f88d6c): it asked before its `await persistSave` and not after. The session stored, sent and
 picked up on device 2 is the older moment; device 1, unmoved, never takes
 the newer one again, and after Close resumes the older moment too. -/
 theorem bug_checkpoint_over_main_menu :
-    let left := (run .fixed init ckptMenuPre).a.moment
-    let s := run .fixed init ckptMenuTrace
-    let s' := step .fixed s (.close .a)
+    let left := (run .audited init ckptMenuPre).a.moment
+    let s := run .audited init ckptMenuTrace
+    let s' := step .audited s (.close .a)
     s.a.mode = .home ∧ s.a.moment = left ∧ driveMoment s ≠ left ∧ resumePoint s.b ≠ left ∧
     resumePoint s'.a ≠ left := by
   decide +kernel
 
-/-- **Proposed** (`storeCheckpoint` asks again after `await persistSave`):
-the moment left is the moment everywhere. -/
-theorem proposed_checkpoint_over_main_menu :
-    let left := (run .proposed init ckptMenuPre).a.moment
-    let s := run .proposed init ckptMenuTrace
-    let s' := step .proposed s (.close .a)
+/-- **Fixed** (87eea59f: `storeCheckpoint` asks again after `await
+persistSave`; web/tests/ckpt-store.test.mjs): the moment left is the moment
+everywhere. -/
+theorem regress_checkpoint_over_main_menu :
+    let left := (run .fixed init ckptMenuPre).a.moment
+    let s := run .fixed init ckptMenuTrace
+    let s' := step .fixed s (.close .a)
     driveMoment s = left ∧ resumePoint s.b = left ∧ resumePoint s'.a = left := by
   decide +kernel
 
@@ -1593,10 +1610,11 @@ theorem converges_a_b_a : converges .fixed moves .a .b = true := by decide +kern
 /-- The same, device 2 first. -/
 theorem converges_b_a_b : converges .fixed moves .b .a = true := by decide +kernel
 
-/-- With the checkpoint's move too (512 histories each way), the proposed fix
-converges; the code at 03f88d6c does not (`bug_checkpoint_over_main_menu`). -/
-theorem proposed_converges_a_b_a : converges .proposed movesCkpt .a .b = true := by decide +kernel
-theorem proposed_converges_b_a_b : converges .proposed movesCkpt .b .a = true := by decide +kernel
-theorem fixed_diverges_with_checkpoints : converges .fixed movesCkpt .a .b = false := by decide +kernel
+/-- With the checkpoint's move too (512 histories each way), the code
+converges; at 03f88d6c it did not (`bug_checkpoint_over_main_menu`). -/
+theorem converges_ckpt_a_b_a : converges .fixed movesCkpt .a .b = true := by decide +kernel
+theorem converges_ckpt_b_a_b : converges .fixed movesCkpt .b .a = true := by decide +kernel
+theorem audited_diverges_with_checkpoints : converges .audited movesCkpt .a .b = false := by
+  decide +kernel
 
 end WebState.Handoff

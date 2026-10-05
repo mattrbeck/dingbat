@@ -10,9 +10,9 @@ by the per-game menu's head, shown through object URLs.
 
 Modelled at dd7ba741f, with the load path as fixed by "web: a game is named
 only once its core and save are in; loads and closes take a token"
-(fd2dfd79); re-audited at 03f88d6c. Line numbers are web/index.js at
-03f88d6c. What moved since the model was stamped (43e81209), and how the
-model follows:
+(fd2dfd79); re-audited at 03f88d6c, and following the fix it led to
+(bfe5d5c5). Line numbers are web/index.js at bfe5d5c5. What moved since the
+model was stamped (43e81209), and how the model follows:
 * the hide (`visibilitychange`, `pagehide`, `beforeunload`) stores the
   picture unforced since 43b30d1c: only a screen that changed since the last
   capture (`lastFrameSig`). That is the `hide` event, apart from `forced`
@@ -21,13 +21,17 @@ model follows:
   and the pull skips, in the run that writes, a file whose delete is queued
   or whose game is in memory (6dd57564, before the stamp but not modelled
   then): `delQ`, `delSent`, and `pullWrite`'s checks;
+* since bfe5d5c5 renameGame puts the name it renames away from in
+  `renamedAway` (4814; out again on its rollback, 4916, a rename back into
+  it, 4815, or a fresh import, 6396) and the pull's write segment skips a
+  game in it (4460): `ren`;
 * `unloadGame({ picture: false })` (`takeHandoff`, a hand-off) captures
   nothing; `storeLastFrame` bails for a game whose session was refused as
   too new (`sessionHeldFor`, a boot screen). Both only remove a write (see
   Abstractions);
 * `updatePausedCard` became the hero's paused mode, `drawPausedHero`
-  (13852–13874), the same paint under the same label; the closed hero
-  (`renderClosedHero`, 13882–13928) is a new reader, see Abstractions;
+  (13947–13969), the same paint under the same label; the closed hero
+  (`renderClosedHero`, 13977–14023) is a new reader, see Abstractions;
 * behaviour-neutral here: the grid's add tile went, a tile's picture is
   decoded before the first render shows (`img.decode()`, `revealHome`), the
   tile menu reads two more things in its one `Promise.all`, `launchRom`
@@ -38,31 +42,31 @@ model follows:
   ("sessionpic:"), which the grid and the menu never read.
 
 ## Writers of "frame:<name>"
-* `storeLastFrame` (6306–6328): copies the wasm framebuffer
-  (`copyFramebuffer`, 6299–6305) and the name `currentOriginalName`
+* `storeLastFrame` (6330–6352): copies the wasm framebuffer
+  (`copyFramebuffer`, 6323–6329) and the name `currentOriginalName`
   synchronously, then on `frameStoreChain` (a FIFO promise chain) awaits
-  `frameBlobFromFb` (canvas `toBlob`, 6271–6288) and then
-  `dbPut(frameKey(name))` + `markUpload`. Callers: the 60 s tick (6331,
-  only `!paused`), `visibilitychange` (15966), `pagehide` (15983),
-  `beforeunload` (15952), unforced; `togglePause` (12065), `showMainMenu`
-  (13487), `saveToSlot` (7993), `loadRom`'s outgoing capture (11670),
-  `unloadGame` (14184), forced.
-* `thumbsPictureOne` (14336–14383), one game of the "Library pictures, in
-  one go" batch (`runThumbnailBatch`, 14385–14428).
-* The Drive pull (4371–4456 → `writeSyncBytes`, 3224–3229), for every
+  `frameBlobFromFb` (canvas `toBlob`, 6295–6312) and then
+  `dbPut(frameKey(name))` + `markUpload`. Callers: the 60 s tick (6355,
+  only `!paused`), `visibilitychange` (16061), `pagehide` (16078),
+  `beforeunload` (16047), unforced; `togglePause` (12102), `showMainMenu`
+  (13582), `saveToSlot` (8018), `loadRom`'s outgoing capture (11700),
+  `unloadGame` (14291), forced.
+* `thumbsPictureOne` (14443–14490), one game of the "Library pictures, in
+  one go" batch (`runThumbnailBatch`, 14492–14535).
+* The Drive pull (4378–4467 → `writeSyncBytes`, 3227–3232), for every
   library game whose remote frame changed.
 
 ## Readers / object URLs
-* `refreshHomeRecent` (7179–7386): `homeRenderGen` (6533) generation,
-  `homeArtUrls` (6530) array of the committed render's URLs, per-tile
-  `getRomFrame(..) → showPicture || getRomArt(..) → showPicture` (7272–7288),
-  one `replaceChildren` commit then revoke the old array (7368–7376). Sort
-  (`setRomsSort`, 1826) re-renders; the filter (`applyLibFilter`, 1922) only
+* `refreshHomeRecent` (7204–7411): `homeRenderGen` (6558) generation,
+  `homeArtUrls` (6555) array of the committed render's URLs, per-tile
+  `getRomFrame(..) → showPicture || getRomArt(..) → showPicture` (7297–7313),
+  one `replaceChildren` commit then revoke the old array (7393–7401). Sort
+  (`setRomsSort`, 1829) re-renders; the filter (`applyLibFilter`, 1925) only
   toggles `hidden` and never touches a picture, so it is not an event here.
-* The menu head `buildTileMenuHead` (6798–6841): `tileMenuPicUrl` (6551),
-  guarded by `tileMenuFor !== name`; `closeTileMenu` (6562) revokes it;
-  `openTileMenu` (6871) closes, awaits, then sets `tileMenuFor`.
-* The paused hero `drawPausedHero` (13852–13874) paints the framebuffer
+* The menu head `buildTileMenuHead` (6823–6866): `tileMenuPicUrl` (6576),
+  guarded by `tileMenuFor !== name`; `closeTileMenu` (6587) revokes it;
+  `openTileMenu` (6896) closes, awaits, then sets `tileMenuFor`.
+* The paused hero `drawPausedHero` (13947–13969) paints the framebuffer
   synchronously under `currentOriginalName`'s label (no URL).
 
 ## How the model follows the method
@@ -86,7 +90,7 @@ was checked by hand to also respect issue order (see the report per bug).
 **Pixels.** A picture is `Pic`: `owner` = the game whose screen the pixels
 are, `stamp` = unique capture order. `core` is the game whose framebuffer
 `wasm_fb_ptr` returns (the core `initFromEmscripten` last loaded; it is left
-in place by `unloadGame` and by the batch, 14167–14169, 14232). A rename
+in place by `unloadGame` and by the batch, 14274–14276, 14339). A rename
 relabels `owner` (the same game under a new name) – a modelling device only.
 
 **Fixes.** `step` takes `fix : Bool`. `fix = false` is the code as it is;
@@ -99,7 +103,8 @@ proves the guard never fires;
 (2) a synchronous `goneNames` set, filled at the start of delete and rename,
 emptied by an import / a rename onto the name, checked right before every
 frame `dbPut` (the chain, the batch, the pull; the pull's check of the
-delete queue covers a delete, not a rename: `bug_pull_after_rename_orphans_frame`);
+delete queue covers a delete, `renamedAway` a rename, so the code now does
+this for the pull: `regress_pull_after_rename_orphans_frame`);
 (3) the batch writes with `store.add` (fails if a frame already exists), and
 the menu paints only into a still-connected `pic`.
 `gone` is maintained in both models but only consulted when `fix`.
@@ -125,8 +130,8 @@ the menu paints only into a still-connected `pic`.
   record is deleted first — `perGameKeys` lists it first, 1685 — so
   `launchRom` finds no bytes).
 * The thumbs modal is focus-trapped over the library and the paused hero
-  (`openThumbsOffer` 14274–14281, `trapFocus`); closing it cancels the run
-  (`closeThumbsModal` 14266–14270). So `unloadBegin`, `renBegin`, `openStart` need the modal
+  (`openThumbsOffer` 14381–14388, `trapFocus`); closing it cancels the run
+  (`closeThumbsModal` 14373–14377). So `unloadBegin`, `renBegin`, `openStart` need the modal
   down (`modalUp`). `loadBegin` and `delKeys` are NOT gated (a Drive download
   finishing launches; a pull's tombstone deletes).
 * `renameGame`'s reads before its detach are merged into `renBegin`
@@ -135,7 +140,7 @@ the menu paints only into a still-connected `pic`.
 * `deleteGameEverywhere` = `delKeys` (`markDelete` of every key, then the
   `deleteKeys` loop; a write landing between its individual deletes is
   deleted anyway) then `delRecent` (the "recent" put with the tombstone).
-  The pull's tombstone path (4276) wipes without queueing deletes, but it
+  The pull's tombstone path (4283) wipes without queueing deletes, but it
   runs inside a pull before that pull's frames pass, which skips a game no
   longer in the merged library, and pulls run one at a time
   (`runExclusive`): no frame download of that game is in flight, so the
@@ -144,12 +149,12 @@ the menu paints only into a still-connected `pic`.
   show what a resurrected frame does next, and the delete queue `delQ`,
   which the pull reads; a flush sends a delete (`delSent`) only with no pull
   download in flight (flush and pull are exclusive). The pull's own
-  library commit (4483) belongs to the Drive-library machine; its frame
+  library commit (4494) belongs to the Drive-library machine; its frame
   loop is modelled with the local library standing in for `lib.recents`.
-* The batch's per-chunk checks (14365) are merged into the one in the capture
-  segment (14372): one check instead of many allows more interleavings.
+* The batch's per-chunk checks (14472) are merged into the one in the capture
+  segment (14479): one check instead of many allows more interleavings.
 * Every menu open builds a head here, the paused hero's session open too
-  (it builds none, 6882–6890): more fetches, more URL traffic, a superset.
+  (it builds none, 6907–6915): more fetches, more URL traffic, a superset.
 * The closed hero (`renderClosedHero`) draws a `createImageBitmap` of the
   session's picture, the frame or the art onto a canvas (no object URL),
   read by its own name under its own generation (`heroGen`); what it shows
@@ -201,7 +206,7 @@ inductive Fetch where
   | done
   deriving DecidableEq, Repr
 
-/-- A `.home-tile` built by one render (7238–7362). -/
+/-- A `.home-tile` built by one render (7263–7387). -/
 structure Tile where
   gen : Nat           -- the closure's `gen`
   name : Nat          -- the closure's `romName`
@@ -209,15 +214,15 @@ structure Tile where
   fetch : Fetch
   deriving DecidableEq, Repr
 
-/-- A `.tile-menu-pic` span built by `buildTileMenuHead` (6798–6818). -/
+/-- A `.tile-menu-pic` span built by `buildTileMenuHead` (6823–6843). -/
 structure MPic where
   name : Nat
   img : Option Nat
   fetch : Fetch
   deriving DecidableEq, Repr
 
-/-- `refreshHomeRecent` suspended at `getRecentMeta` (7181, before `++gen`),
-at `dbKeys` (7217) or at `loadRomSizes` (7227). -/
+/-- `refreshHomeRecent` suspended at `getRecentMeta` (7206, before `++gen`),
+at `dbKeys` (7242) or at `loadRomSizes` (7252). -/
 inductive RStage where
   | pending
   | keys (g : Nat)
@@ -241,10 +246,10 @@ structure Job where
 frame capture it awaits (`none`: storeLastFrame bailed, nothing awaited). -/
 inductive Sess where
   | idle
-  | loadOut (b : Nat) (w : Option Nat)   -- loadRom, awaiting outgoing store (11668–11672)
-  | loadRestore (b : Nat)                -- loadRom, awaiting dbGet(save:b) (11679)
-  | unloading (w : Option Nat)           -- unloadGame, awaiting its store (14184)
-  | renaming (x y : Nat) (loaded : Bool) -- renameGame, awaiting dbMoveKeys (4892)
+  | loadOut (b : Nat) (w : Option Nat)   -- loadRom, awaiting outgoing store (11698–11702)
+  | loadRestore (b : Nat)                -- loadRom, awaiting dbGet(save:b) (11709)
+  | unloading (w : Option Nat)           -- unloadGame, awaiting its store (14291)
+  | renaming (x y : Nat) (loaded : Bool) -- renameGame, awaiting dbMoveKeys (4911)
   deriving DecidableEq, Repr
 
 /-- The batch's game in flight: booting/stepping (`enc = none`) or encoded. -/
@@ -262,6 +267,7 @@ structure State where
   art : Nat → Option Pic               -- "art:<n>"
   upQ : Nat → Bool                     -- syncState.queueUp ∋ "frame:<n>"
   delQ : Nat → Bool                    -- syncState.queueDel ∋ "frame:<n>"
+  ren : Nat → Bool                     -- renamedAway ∋ n
   -- the session
   cur : Option Nat                     -- currentOriginalName (∧ currentRomName)
   core : Option Nat                    -- whose framebuffer wasm_fb_ptr returns
@@ -272,10 +278,10 @@ structure State where
   clock : Nat                          -- capture stamps
   gone : Nat → Bool                    -- (fix) goneNames
   delPending : List Nat                -- deleteGameEverywhere between its deletes and its "recent" put
-  -- Drive pull: frame downloads in flight (4371–4456)
+  -- Drive pull: frame downloads in flight (4378–4467)
   pulls : Nat → Option (Nat × Pic)
   nPulls : Nat
-  -- the batch (thumbsRun, 14250)
+  -- the batch (thumbsRun, 14357)
   tRun : Bool
   tCancel : Bool                       -- run.cancelled
   tCands : List Nat                    -- cands, from the index i on
@@ -297,7 +303,7 @@ structure State where
   menuFor : Option Nat                 -- tileMenuFor
   menuHead : Option Nat                -- the .tile-menu-pic attached in #tile-menu-head
   menuUrl : Option Nat                 -- tileMenuPicUrl
-  opens : Nat → Option Nat             -- openTileMenu awaiting Promise.all (6873)
+  opens : Nat → Option Nat             -- openTileMenu awaiting Promise.all (6898)
   nOpens : Nat
   mpics : Nat → Option MPic
   nPics : Nat
@@ -308,6 +314,7 @@ def init : State where
   art := fun _ => none
   upQ := fun _ => false
   delQ := fun _ => false
+  ren := fun _ => false
   cur := none
   core := none
   paused := false
@@ -347,48 +354,48 @@ def init : State where
 
 inductive Ev where
   -- session and frame capture
-  | loadBegin (b : Nat)   -- loadRom 11646–11670 (to the outgoing store's await)
-  | loadOutDone           -- loadRom 11671–11679: outgoing store and save awaited; dbGet(save:b) issued
-  | loadInit              -- loadRom 11680–11748: dbGet resolved, initFromEmscripten, names
-  | unloadBegin           -- unloadGame 14173–14184 (Close, and Delete/Remove of the loaded game)
-  | unloadFinish          -- unloadGame 14185–14218
-  | tick                  -- setInterval 4384
-  | hide                  -- visibilitychange 15966 / pagehide 15983 / beforeunload 15952 (unforced)
-  | forced                -- saveToSlot 7993
-  | pause                 -- showMainMenu 13474–13501 / togglePause 12063–12065 (+ drawPausedHero)
+  | loadBegin (b : Nat)   -- loadRom 11676–11700 (to the outgoing store's await)
+  | loadOutDone           -- loadRom 11701–11709: outgoing store and save awaited; dbGet(save:b) issued
+  | loadInit              -- loadRom 11710–11778: dbGet resolved, initFromEmscripten, names
+  | unloadBegin           -- unloadGame 14280–14291 (Close, and Delete/Remove of the loaded game)
+  | unloadFinish          -- unloadGame 14292–14325
+  | tick                  -- setInterval 6355
+  | hide                  -- visibilitychange 16061 / pagehide 16078 / beforeunload 16047 (unforced)
+  | forced                -- saveToSlot 8018
+  | pause                 -- showMainMenu 13569–13596 / togglePause 12100–12102 (+ drawPausedHero)
   | resume                -- resumeGame
-  | encodeDone            -- chain head: toBlob called back → dbPut issued (6320–6322)
-  | putDone               -- chain head: dbPut resolved → markUpload (6323)
+  | encodeDone            -- chain head: toBlob called back → dbPut issued (6344–6346)
+  | putDone               -- chain head: dbPut resolved → markUpload (6347)
   -- library
-  | importGame (n : Nat)  -- addRecentRom 6414–6429 (ROM, art, index)
-  | delKeys (n : Nat)     -- deleteGameEverywhere 4675–4676 (markDelete each key, deleteGameLocalData) / pull tombstone 4276
-  | delRecent (n : Nat)   -- deleteGameEverywhere 4679–4691 ("recent" put, the tombstone)
-  | delSent (n : Nat)     -- flushSyncInner 3843–3863: a flush sends the delete
-  | renBegin (x y : Nat)  -- renameGame 4783–4803
-  | renMove               -- renameGame 4875–4912 (dbMoveKeys, one transaction)
-  | removeLocal (n : Nat) -- removeGameFromDevice 4651–4653 (art goes, frame stays)
-  | pullList (n : Nat)    -- pull 4371–4378, 4405–4413: frame listed, download issued
-  | pullWrite (i : Nat)   -- pull 4438–4456: download resolved, checks, writeSyncBytes
+  | importGame (n : Nat)  -- addRecentRom 6439–6454 (ROM, art, index)
+  | delKeys (n : Nat)     -- deleteGameEverywhere 4686–4687 (markDelete each key, deleteGameLocalData) / pull tombstone 4283
+  | delRecent (n : Nat)   -- deleteGameEverywhere 4690–4702 ("recent" put, the tombstone)
+  | delSent (n : Nat)     -- flushSyncInner 3846–3866: a flush sends the delete
+  | renBegin (x y : Nat)  -- renameGame 4799–4822
+  | renMove               -- renameGame 4894–4932 (dbMoveKeys, one transaction)
+  | removeLocal (n : Nat) -- removeGameFromDevice 4662–4664 (art goes, frame stays)
+  | pullList (n : Nat)    -- pull 4378–4385, 4412–4420: frame listed, download issued
+  | pullWrite (i : Nat)   -- pull 4445–4467: download resolved, checks, writeSyncBytes
   -- the batch
-  | thumbStart            -- runThumbnailBatch 14385–14401
-  | thumbInit             -- thumbsPictureOne 14336–14356 (check, initFromEmscripten)
-  | thumbCapture          -- thumbsPictureOne 14357–14377 (last check, framebuffer copy, toBlob issued)
-  | thumbPut              -- thumbsPictureOne 14378–14382 (dbPut, markUpload)
-  | thumbCancel           -- closeThumbsModal 14266 / Stop 14431
-  | thumbEnd              -- runThumbnailBatch finally 14417–14421
+  | thumbStart            -- runThumbnailBatch 14492–14508
+  | thumbInit             -- thumbsPictureOne 14443–14463 (check, initFromEmscripten)
+  | thumbCapture          -- thumbsPictureOne 14464–14484 (last check, framebuffer copy, toBlob issued)
+  | thumbPut              -- thumbsPictureOne 14485–14489 (dbPut, markUpload)
+  | thumbCancel           -- closeThumbsModal 14373 / Stop 14538
+  | thumbEnd              -- runThumbnailBatch finally 14524–14528
   -- the grid
-  | renderStart           -- refreshHomeRecent 7179–7181 (getRecentMeta issued)
-  | renderMeta (i : Nat)  -- 7182–7217 (++homeRenderGen; empty-library branch; dbKeys issued)
-  | renderKeys (i : Nat)  -- 7219–7227 (gen check; refreshHero; loadRomSizes)
-  | renderCommit (i : Nat) -- 7228–7385 (gen check; tiles + fetches; commit; revoke old array)
-  | fetchFrame (t : Nat)  -- 7284–7286: getRomFrame resolved → showPicture || getRomArt
-  | fetchArt (t : Nat)    -- 7286: getRomArt resolved → showPicture
+  | renderStart           -- refreshHomeRecent 7204–7206 (getRecentMeta issued)
+  | renderMeta (i : Nat)  -- 7207–7242 (++homeRenderGen; empty-library branch; dbKeys issued)
+  | renderKeys (i : Nat)  -- 7244–7252 (gen check; refreshHero; loadRomSizes)
+  | renderCommit (i : Nat) -- 7253–7410 (gen check; tiles + fetches; commit; revoke old array)
+  | fetchFrame (t : Nat)  -- 7309–7311: getRomFrame resolved → showPicture || getRomArt
+  | fetchArt (t : Nat)    -- 7311: getRomArt resolved → showPicture
   -- the menu
-  | openStart (n : Nat)   -- openTileMenu 6871–6874 (closeTileMenu, Promise.all issued)
-  | openDone (i : Nat)    -- openTileMenu 6875–6901 (tileMenuFor, buildTileMenuHead issues getRomFrame)
-  | menuClose             -- closeTileMenu 6562–6577
-  | mFetchFrame (e : Nat) -- 6807: getRomFrame resolved → frame || getRomArt
-  | mFetchArt (e : Nat)   -- 6808–6817: blob → revoke old, create, paint
+  | openStart (n : Nat)   -- openTileMenu 6896–6899 (closeTileMenu, Promise.all issued)
+  | openDone (i : Nat)    -- openTileMenu 6900–6926 (tileMenuFor, buildTileMenuHead issues getRomFrame)
+  | menuClose             -- closeTileMenu 6587–6602
+  | mFetchFrame (e : Nat) -- 6832: getRomFrame resolved → frame || getRomArt
+  | mFetchArt (e : Nat)   -- 6833–6842: blob → revoke old, create, paint
   deriving DecidableEq, Repr
 
 /-! ## Step -/
@@ -407,7 +414,7 @@ theorem ifp {c : Prop} [Decidable c] (h : c) {α : Sort _} {t e : α} :
 
 def modalUp (s : State) : Bool := s.tRun && !s.tCancel
 
-/-- `storeLastFrame` (6306–6328), the synchronous part: copy the framebuffer
+/-- `storeLastFrame` (6330–6352), the synchronous part: copy the framebuffer
 and the name, append a link to the chain. Returns the stamp awaited. -/
 def storeFrame (fix : Bool) (s : State) : State × Option Nat :=
   match s.cur, s.core with
@@ -422,7 +429,7 @@ def ready (s : State) : Option Nat → Bool
   | none => true
   | some v => s.chain.all (fun j => decide (v < j.pic.stamp))
 
-/-- `drawPausedHero` (13852–13874). -/
+/-- `drawPausedHero` (13947–13969). -/
 def cardOf (fix : Bool) (s : State) : Option (Nat × Nat) :=
   match s.cur, s.core with
   | some g, some c => if fix && c != g then none else some (g, c)
@@ -436,7 +443,7 @@ def revokeArr (a : Arr) (urls : Nat → Option Url) : Nat → Option Url :=
 def revokeOne (o : Option Nat) (urls : Nat → Option Url) : Nat → Option Url :=
   fun u => if o = some u then (urls u).map (fun r => { r with revoked := r.revoked + 1 }) else urls u
 
-/-- `closeTileMenu` (6562–6577). -/
+/-- `closeTileMenu` (6587–6602). -/
 def closeMenu (s : State) : State :=
   if s.menuOpen then
     { s with menuOpen := false, menuHead := none, menuFor := none, menuUrl := none,
@@ -446,21 +453,21 @@ def closeMenu (s : State) : State :=
 def relabel (x y : Nat) (m : Nat) : Nat := if m = x then y else m
 
 /-- The tiles one render builds, at indices `base ..< base + roms.length`,
-each with its `getRomFrame` issued now (7284). -/
+each with its `getRomFrame` issued now (7309). -/
 def mkTiles (s : State) (g : Nat) (roms : List Nat) : Nat → Option Tile :=
   fun t =>
     if s.nTiles ≤ t ∧ t < s.nTiles + roms.length then
       some ⟨g, roms.getD (t - s.nTiles) 0, none, .frameWait (s.frame (roms.getD (t - s.nTiles) 0))⟩
     else s.tiles t
 
-/-- `showPicture` succeeding (7272–7283): a URL into this render's array,
+/-- `showPicture` succeeding (7297–7308): a URL into this render's array,
 the tile's <img>. -/
 def paintTile (s : State) (t : Nat) (tile : Tile) (p : Pic) (k : Key) : State :=
   { s with urls := upd s.urls s.nUrls (some ⟨p, k, .grid tile.gen, 0⟩),
            nUrls := s.nUrls + 1,
            tiles := upd s.tiles t (some { tile with img := some s.nUrls, fetch := .done }) }
 
-/-- The menu head's `.then((blob) => ..)` (6808–6817). -/
+/-- The menu head's `.then((blob) => ..)` (6833–6842). -/
 def paintMenu (fix : Bool) (s : State) (e : Nat) (mp : MPic) (p : Pic) (k : Key) : State :=
   let s1 := { s with mpics := upd s.mpics e (some { mp with fetch := .done }) }
   if s.menuFor = some mp.name ∧ (fix = false ∨ s.menuHead = some e) then
@@ -470,8 +477,8 @@ def paintMenu (fix : Bool) (s : State) (e : Nat) (mp : MPic) (p : Pic) (k : Key)
   else s1
 
 def step (fix : Bool) (s : State) : Ev → State
-  -- loadRom 11646–11670: with a game in, persistAutoState then storeLastFrame
-  -- (the outgoing picture) is awaited; with none, straight to 11677. (The load
+  -- loadRom 11676–11700: with a game in, persistAutoState then storeLastFrame
+  -- (the outgoing picture) is awaited; with none, straight to 11707. (The load
   -- path, loadBegin/loadOutDone/loadInit, is as of the commit "web: a game is
   -- named only once its core and save are in; loads and closes take a token";
   -- at dd7ba741f the names switched before `await restoreSave`.)
@@ -481,44 +488,44 @@ def step (fix : Bool) (s : State) : Ev → State
       | some _ => let r := storeFrame fix s; { r.1 with sess := .loadOut b r.2 }
       | none => { s with sess := .loadRestore b }
     else s
-  -- loadRom 11671–11679: persistSave awaited; `await dbGet(save:b)`. The
+  -- loadRom 11701–11709: persistSave awaited; `await dbGet(save:b)`. The
   -- outgoing game stays named (and paused as it was) until the boot.
   | .loadOutDone =>
     match s.sess with
     | .loadOut b w => if ready s w then { s with sess := .loadRestore b } else s
     | _ => s
-  -- loadRom 11680–11748: initFromEmscripten, and in the same segment
+  -- loadRom 11710–11778: initFromEmscripten, and in the same segment
   -- currentRomName/currentOriginalName := b, lastFrameSig := null, paused := false.
   | .loadInit =>
     match s.sess with
     | .loadRestore b => { s with core := some b, cur := some b, paused := false, sess := .idle }
     | _ => s
-  -- unloadGame 14173–14184: await storeLastFrame({force:true}).
+  -- unloadGame 14280–14291: await storeLastFrame({force:true}).
   | .unloadBegin =>
     if s.sess = .idle ∧ s.cur.isSome ∧ modalUp s = false then
       let r := storeFrame fix s; { r.1 with sess := .unloading r.2 }
     else s
-  -- unloadGame 14185–14218: names := null, paused := true; the core stays.
+  -- unloadGame 14292–14325: names := null, paused := true; the core stays.
   | .unloadFinish =>
     match s.sess with
     | .unloading w => if ready s w then { s with cur := none, paused := true, sess := .idle } else s
     | _ => s
-  -- 6331: setInterval(() => { if (!paused) storeLastFrame(); }, FRAME_TICK_MS)
+  -- 6355: setInterval(() => { if (!paused) storeLastFrame(); }, FRAME_TICK_MS)
   | .tick => if s.paused = false then (storeFrame fix s).1 else s
-  -- visibilitychange 15957–15967 / pagehide 15972–15990 / beforeunload
-  -- 15931–15954: storeLastFrame() unforced (since 43b30d1c), which skips a
+  -- visibilitychange 16052–16062 / pagehide 16067–16085 / beforeunload
+  -- 16026–16049: storeLastFrame() unforced (since 43b30d1c), which skips a
   -- screen unchanged since the last capture: a paused one (see Abstractions).
   | .hide => if s.paused = false then (storeFrame fix s).1 else s
-  -- saveToSlot 7993: storeLastFrame({force:true}) whatever `paused` says.
+  -- saveToSlot 8018: storeLastFrame({force:true}) whatever `paused` says.
   | .forced => (storeFrame fix s).1
-  -- showMainMenu 13474–13501 / togglePause 12063–12065.
+  -- showMainMenu 13569–13596 / togglePause 12100–12102.
   | .pause =>
     if s.cur.isSome then
       let s2 := (storeFrame fix { s with paused := true }).1
       { s2 with card := cardOf fix s2 }
     else s
   | .resume => if s.cur.isSome then { s with paused := false } else s
-  -- 6320–6322: the head link's toBlob called back; dbPut issued.
+  -- 6344–6346: the head link's toBlob called back; dbPut issued.
   -- (fix: skip the write if the name has gone.)
   | .encodeDone =>
     match s.chain with
@@ -528,29 +535,29 @@ def step (fix : Bool) (s : State) : Ev → State
       else { s with frame := upd s.frame j.name (some j.pic), wsc := true,
                     chain := { j with put := true } :: rest }
     | [] => s
-  -- 6323: markUpload(frameKey(name)); the link settles.
+  -- 6347: markUpload(frameKey(name)); the link settles.
   | .putDone =>
     match s.chain with
     | j :: rest => if j.put then { s with chain := rest, upQ := upd s.upQ j.name true } else s
     | [] => s
-  -- addRecentRom 6414–6429.
+  -- addRecentRom 6439–6454 (bumpRecentIndex with `fresh`: renamedAway loses n, 6396).
   | .importGame n =>
     if s.sess = .idle ∧ n ∉ s.delPending then
       { s with lib := if n ∈ s.lib then s.lib else n :: s.lib,
                art := upd s.art n (some ⟨n, s.clock⟩), clock := s.clock + 1,
-               gone := upd s.gone n false, wsc := true }
+               gone := upd s.gone n false, ren := upd s.ren n false, wsc := true }
     else s
-  -- deleteGameEverywhere 4675–4676: markDelete of every key (queueUp loses
+  -- deleteGameEverywhere 4686–4687: markDelete of every key (queueUp loses
   -- it, queueDel gains it), then deleteGameLocalData → deleteKeys (rom, art,
-  -- frame, ...). deleteGameAction (2151) unloads a loaded game first; the
-  -- pull's tombstone path (4274–4276, no markDelete) skips a loaded one.
+  -- frame, ...). deleteGameAction (2154) unloads a loaded game first; the
+  -- pull's tombstone path (4281–4283, no markDelete) skips a loaded one.
   | .delKeys n =>
     if s.sess = .idle ∧ s.cur ≠ some n ∧ n ∉ s.delPending then
       { s with frame := upd s.frame n none, art := upd s.art n none, wsc := true,
                gone := upd s.gone n true, delPending := n :: s.delPending,
                upQ := upd s.upQ n false, delQ := upd s.delQ n true }
     else s
-  -- deleteGameEverywhere 4679–4691: "recent" without it, and the tombstone.
+  -- deleteGameEverywhere 4690–4702: "recent" without it, and the tombstone.
   | .delRecent n =>
     if n ∈ s.delPending then
       { s with lib := s.lib.filter (· ≠ n), delPending := s.delPending.filter (· ≠ n) }
@@ -559,20 +566,23 @@ def step (fix : Bool) (s : State) : Ev → State
     if (List.range s.nPulls).all (fun i => (s.pulls i).isNone) then
       { s with delQ := upd s.delQ n false }
     else s
-  -- renameGame 4783–4803: a loaded game is detached (currentOriginalName := null).
+  -- renameGame 4799–4822: renamedAway gains x and loses y (4814–4815); a
+  -- loaded game is detached (currentOriginalName := null).
   | .renBegin x y =>
     if s.sess = .idle ∧ modalUp s = false ∧ x ∈ s.lib ∧ x ≠ y ∧ x ∉ s.delPending ∧ y ∉ s.delPending then
       let l := decide (s.cur = some x)
       { s with cur := if l then none else s.cur, gone := upd s.gone x true,
-               sess := .renaming x y l }
+               ren := upd (upd s.ren x true) y false, sess := .renaming x y l }
     else s
-  -- renameGame 4875–4912: dbMoveKeys moves every key and "recent" in one
-  -- transaction; a collision aborts it whole and the session is put back.
+  -- renameGame 4894–4932: dbMoveKeys moves every key and "recent" in one
+  -- transaction; a collision aborts it whole, the session is put back and x
+  -- leaves renamedAway (4916).
   | .renMove =>
     match s.sess with
     | .renaming x y l =>
       if y ∈ s.lib ∨ (s.frame y).isSome ∨ (s.art y).isSome then
-        { s with cur := if l then some x else s.cur, gone := upd s.gone x false, sess := .idle }
+        { s with cur := if l then some x else s.cur, gone := upd s.gone x false,
+                 ren := upd s.ren x false, sess := .idle }
       else
         let rl := relabel x y
         { s with
@@ -586,32 +596,32 @@ def step (fix : Bool) (s : State) : Ev → State
           upQ := upd (upd s.upQ y (s.upQ x)) x false,
           wsc := true, sess := .idle }
     | _ => s
-  -- removeGameFromDevice 4651–4653: bytes (not the frame), session, checkpoints go.
+  -- removeGameFromDevice 4662–4664: bytes (not the frame), session, checkpoints go.
   | .removeLocal n =>
     if n ∈ s.lib then { s with art := upd s.art n none, wsc := true } else s
-  -- pull 4371–4378, 4405–4413: a library game's remote frame, not the loaded game.
+  -- pull 4378–4385, 4412–4420: a library game's remote frame, not the loaded game.
   | .pullList n =>
     if n ∈ s.lib ∧ s.cur ≠ some n then
       { s with pulls := upd s.pulls s.nPulls (some (n, ⟨n, s.clock⟩)),
                nPulls := s.nPulls + 1, clock := s.clock + 1 }
     else s
-  -- pull 4438–4456: the download resolved; in the run that writes, skip a game
-  -- in memory (4442) or a file whose delete is queued (4449); writeSyncBytes
-  -- → dbPut (3224–3229).
+  -- pull 4445–4467: the download resolved; in the run that writes, skip a game
+  -- in memory (4449), a file whose delete is queued (4456) or a game renamed
+  -- away from (4460); writeSyncBytes → dbPut (3227–3232).
   | .pullWrite i =>
     match s.pulls i with
     | some (n, p) =>
       let s1 := { s with pulls := upd s.pulls i none }
-      if (fix && s.gone n) || s.delQ n || s.cur == some n then s1
+      if (fix && s.gone n) || s.delQ n || s.cur == some n || s.ren n then s1
       else { s1 with frame := upd s.frame n (some p), wsc := true }
     | none => s
-  -- runThumbnailBatch 14385–14401: candidates = library games with no frame.
+  -- runThumbnailBatch 14492–14508: candidates = library games with no frame.
   | .thumbStart =>
     if s.tRun = false ∧ s.cur = none ∧ s.sess = .idle then
       { s with tRun := true, tCancel := false,
                tCands := s.lib.filter (fun n => (s.frame n).isNone), tJob := none }
     else s
-  -- thumbsPictureOne 14350–14356: `if (run.cancelled || currentRomName ..)
+  -- thumbsPictureOne 14457–14463: `if (run.cancelled || currentRomName ..)
   -- return false`, then initFromEmscripten(thumb.<ext>).
   | .thumbInit =>
     if s.tRun ∧ s.tJob = none then
@@ -621,7 +631,7 @@ def step (fix : Bool) (s : State) : Ev → State
         else { s with core := some n, tJob := some ⟨n, none⟩ }
       | [] => s
     else s
-  -- thumbsPictureOne 14364–14377: the stepping loop's checks, the last one in
+  -- thumbsPictureOne 14471–14484: the stepping loop's checks, the last one in
   -- the same segment as the framebuffer copy; frameBlobFromFb issued.
   | .thumbCapture =>
     match s.tJob, s.core with
@@ -630,7 +640,7 @@ def step (fix : Bool) (s : State) : Ev → State
       else { s with tJob := some ⟨n, some ⟨c, s.clock⟩⟩, clock := s.clock + 1 }
     | some ⟨_, none⟩, none => { s with tJob := none, tCands := s.tCands.tail }
     | _, _ => s
-  -- thumbsPictureOne 14378–14382: dbPut(frameKey(name)), markUpload — no
+  -- thumbsPictureOne 14485–14489: dbPut(frameKey(name)), markUpload — no
   -- re-check of anything. (fix: add-only, and skip a gone name.)
   | .thumbPut =>
     match s.tJob with
@@ -643,11 +653,11 @@ def step (fix : Bool) (s : State) : Ev → State
   | .thumbCancel => if s.tRun then { s with tCancel := true } else s
   | .thumbEnd =>
     if s.tRun ∧ s.tJob = none ∧ (s.tCands = [] ∨ s.tCancel) then { s with tRun := false } else s
-  -- refreshHomeRecent 7179–7181: getRecentMeta issued (gen NOT yet taken).
+  -- refreshHomeRecent 7204–7206: getRecentMeta issued (gen NOT yet taken).
   | .renderStart =>
     { s with renders := upd s.renders s.nRenders (some ⟨s.lib, .pending⟩), nRenders := s.nRenders + 1 }
-  -- 7182–7217: gen = ++homeRenderGen. Empty library: commit nothing,
-  -- revoke homeArtUrls, homeArtUrls = artUrls (7185–7203).
+  -- 7207–7242: gen = ++homeRenderGen. Empty library: commit nothing,
+  -- revoke homeArtUrls, homeArtUrls = artUrls (7210–7228).
   | .renderMeta i =>
     match s.renders i with
     | some ⟨roms, .pending⟩ =>
@@ -657,14 +667,14 @@ def step (fix : Bool) (s : State) : Ev → State
                  wsc := false }
       else { s with gen := s.gen + 1, renders := upd s.renders i (some ⟨roms, .keys (s.gen + 1)⟩) }
     | _ => s
-  -- 7219: `if (gen !== homeRenderGen) return;`
+  -- 7244: `if (gen !== homeRenderGen) return;`
   | .renderKeys i =>
     match s.renders i with
     | some ⟨roms, .keys g⟩ =>
       if g = s.gen then { s with renders := upd s.renders i (some ⟨roms, .sizes g⟩) }
       else { s with renders := upd s.renders i none }
     | _ => s
-  -- 7228–7376: gen check; build every tile and issue its getRomFrame;
+  -- 7253–7401: gen check; build every tile and issue its getRomFrame;
   -- replaceChildren; revoke homeArtUrls; homeArtUrls = artUrls.
   | .renderCommit i =>
     match s.renders i with
@@ -675,7 +685,7 @@ def step (fix : Bool) (s : State) : Ev → State
                  wsc := false, renders := upd s.renders i none }
       else { s with renders := upd s.renders i none }
     | _ => s
-  -- 7272–7286: showPicture(frame, ..) — `if (!blob || gen !== homeRenderGen)
+  -- 7297–7311: showPicture(frame, ..) — `if (!blob || gen !== homeRenderGen)
   -- return null` — else getRomArt issued.
   | .fetchFrame t =>
     match s.tiles t with
@@ -698,14 +708,14 @@ def step (fix : Bool) (s : State) : Ev → State
       | .artWait none => { s with tiles := upd s.tiles t (some { tile with fetch := .done }) }
       | _ => s
     | none => s
-  -- openTileMenu 6871–6874 (the long-press timer 6953 calls it with no
+  -- openTileMenu 6896–6899 (the long-press timer 6978 calls it with no
   -- tileMenuFor check).
   | .openStart n =>
     if modalUp s = false then
       let s1 := closeMenu s
       { s1 with opens := upd s1.opens s1.nOpens (some n), nOpens := s1.nOpens + 1 }
     else s
-  -- 6875–6890: tileMenuFor := name; buildTileMenuHead: a new pic span,
+  -- 6900–6915: tileMenuFor := name; buildTileMenuHead: a new pic span,
   -- getRomFrame issued, tileMenuHead.replaceChildren(pic, text).
   | .openDone i =>
     match s.opens i with
@@ -822,7 +832,7 @@ screen, where the game is paused on the screen Main Menu stored: the hide
 stores nothing. No other store reaches the chain during the unload: the
 60 s tick skips a paused game, and `saveToSlot` (the one other forced store,
 `.forced` here) is the game's own menu's, with F5 swallowed on the home
-screen (13236), so a `.forced` in this window is an order the model allows
+screen (13331), so a `.forced` in this window is an order the model allows
 and a browser does not produce. -/
 def deleteTrace : List Ev :=
   [.importGame 0, .loadBegin 0, .loadInit, .pause,
@@ -846,14 +856,18 @@ theorem regress_pull_resurrects_frame :
     orphan (run false init [.importGame 0, .pullList 0, .delKeys 0, .delRecent 0, .pullWrite 0]) 0
       = false := by decide
 
-/-- The same download with a rename instead: renameGame moves the game's keys
-(and its `sigs`/`rmt`) to the new name, queues nothing for the old one, and
-the pull's write segment asks only about the queue and the game in memory.
-The picture lands under the old name: an orphan, which also makes a later
-rename of any game to that name fail ("already exists in your library"). -/
-theorem bug_pull_after_rename_orphans_frame :
+/-- The same download with a rename instead. At 03f88d6c renameGame moved the
+game's keys (and its `sigs`/`rmt`) to the new name and queued nothing for
+the old one, and the pull's write segment asked only about the delete queue
+and the game in memory: the picture landed under the old name, an orphan
+that made a later rename of any game to that name fail ("already exists in
+your library"). Since bfe5d5c5 renameGame puts the old name in
+`renamedAway` right after its collision checks (4814), and the pull's write segment
+skips a game in it (4460): the picture comes down under the new name once
+the rename reaches Drive. Replayed by web/tests/rename-pull.test.mjs. -/
+theorem regress_pull_after_rename_orphans_frame :
     let s := run false init [.importGame 0, .pullList 0, .renBegin 0 1, .renMove, .pullWrite 0]
-    orphan s 0 = true ∧ s.lib = [1] := by decide
+    orphan s 0 = false ∧ s.lib = [1] := by decide
 
 /-- The batch pictures a game that a delete (the pull's tombstone path, not
 behind the modal) removes while it is being stepped; its dbPut has no
@@ -2463,7 +2477,7 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
       split
       · exact hs1
       · rename_i hgone
-        have hg : s.gone n = false := by simp at hgone; exact hgone.1.1
+        have hg : s.gone n = false := by simp at hgone; exact hgone.1.1.1
         exact { hs1 with
           ownFrame := by
             intro m q hq; simp only [upd_apply] at hq
@@ -3039,7 +3053,7 @@ theorem chainOk_reachable {fix : Bool} {s : State} (h : Reachable fix s) : Chain
 
 /-- The link `toBlob` resolves for and writes next is the oldest capture
 still pending: a forced capture landing during the tick's encode stores
-last (the comment at 6290–6296 holds). -/
+last (the comment at 6314–6320 holds). -/
 theorem chain_writes_in_capture_order {fix : Bool} {s : State} (h : Reachable fix s)
     (j : Job) (rest : List Job) (hc : s.chain = j :: rest) :
     ∀ j' ∈ rest, j.pic.stamp < j'.pic.stamp := by
