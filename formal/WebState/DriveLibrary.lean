@@ -8,23 +8,28 @@ Model of the Drive "library" file and the code that reads, merges and writes
 it. First written on top of 7ca348ebf (the Drive sync fix series); against
 dd7ba741f the same model refuted the properties below with the `bug_*` traces
 listed in formal/FINDINGS.md (#6, #7), and each is now a `regress_*` theorem.
-Re-audited against 03f88d6c (2026-10-05), and caught up to 5ea4d552: every
-line number below is web/index.js at 5ea4d552. Since 03f88d6c, bfe5d5c5 keeps
+Re-audited against 03f88d6c (2026-10-05), and caught up to be44ad4c: every
+line number below is web/index.js at be44ad4c. Since 03f88d6c, bfe5d5c5 keeps
 `renamedAway`, the names this session renamed a game away from
 (`renameGame` adds the old name after its collision checks and deletes the
-new one, 4854-4855, and deletes the old one again on a rollback, 4956, not
-modelled as the rename is atomic here; a fresh import claims the name,
-`bumpRecentIndex` 6445), and the pull's write segment skips them (4500). To
-say what that skip does, the model now has the download pass's save write
-(`pullScan`, `pullSave`, field `away`; Layer 2b's last section): no pull
-writes under such a name (`pullSave_skips_away`), a save downloading during a
-rename no longer lands under the old name
-(`regress_pull_after_rename_orphans_save`), and, found doing so, a name that
-comes back here by another device's rename or by a download keeps being
-skipped (`bug_remote_rename_into_away_name_skips_saves`,
-`bug_download_into_away_name_skips_saves`, `bug_away_not_vacant`). The
-other changes since (`runPool`, `libraryUnchanged`, the token broker) were
-already followed at 03f88d6c.
+new one, 4858-4859, and deletes the old one again on a rollback, 4960, not
+modelled as the rename is atomic here), and the pull's write segment skips
+them (4503). be44ad4c releases a name wherever a game comes to hold it:
+`applyRemoteRename` releases its target as it starts (4051), and
+`bumpRecentIndex` releases its name on every call (6452: an import, a
+download, a launch), not only a fresh import's. To say what the skip does,
+the model now has the download pass's save write (`pullScan`, `pullSave`,
+field `away`; Layer 2b's last section): no pull writes under such a name
+(`pullSave_skips_away`), a save downloading during a rename no longer lands
+under the old name (`regress_pull_after_rename_orphans_save`), no name
+renamed away from ever holds a record here (`away_vacant`), and so every
+save a pull lists for a game held here is written unless its delete is
+queued (`pullSave_writes_held`). Catching up to 5ea4d552 found the two ways
+a name came back unreleased before be44ad4c (another device's rename, a
+download), now `regress_remote_rename_into_away_name_skips_saves`,
+`regress_download_into_away_name_skips_saves`, `regress_away_not_vacant`.
+The other changes since (`runPool`, `libraryUnchanged`, the token broker)
+were already followed at 03f88d6c.
 
 * `mergeLibrary` (web/index.js 3423-3507): the pure join of two libraries,
   modelled line for line (`mergeLibrary` below), including JS `Map` insertion
@@ -33,25 +38,25 @@ already followed at 03f88d6c.
   `imp >= r.ts`, 3473-3474) and spends a processed marker *from* that name
   (`done`, 3475).
 * the protocol around it: `flushSyncInner` (3812-4040), `pullSyncInner`
-  (4248-4596), `deleteGameEverywhere` (4719-4743), `renameGame` (4839-4973),
-  `applyRemoteRename` (4048-4127), `bumpRecentIndex` (6444-6473) via import
-  (`addRecentRom` 6488) and play (`touchRecent` 6507), and `downloadGame`
-  (4616-4676). Every `await` that matters is an event boundary. Fixed: both
+  (4251-4599), `deleteGameEverywhere` (4722-4746), `renameGame` (4843-4977),
+  `applyRemoteRename` (4048-4130), `bumpRecentIndex` (6448-6480) via import
+  (`addRecentRom` 6495) and play (`touchRecent` 6514), and `downloadGame`
+  (4619-4679). Every `await` that matters is an event boundary. Fixed: both
   commits re-merge the library they adopt with the device's library as it is
-  *now*, in the same segment, under `updateRecent` (6290, flush 4014, pull
-  4534), the one lock every "recent" read-modify-write goes through;
-  `renameGame` stamps the renamed entry `imp: ts` (4946).
-* Fixed after a two-device UI run (the Sync button, `runFullSync` 4598, is
+  *now*, in the same segment, under `updateRecent` (6294, flush 4014, pull
+  4537), the one lock every "recent" read-modify-write goes through;
+  `renameGame` stamps the renamed entry `imp: ts` (4950).
+* Fixed after a two-device UI run (the Sync button, `runFullSync` 4601, is
   the `syncTap` event): the flush's upload pass asks the library it merged
   (3924-3928) and leaves a deleted game's keys off Drive, a renamed game's
   queued for the pull to move; the pull's commit queues the deletion of every
-  Drive file of a game the library it adopts has deleted (4546-4553). Before,
+  Drive file of a game the library it adopts has deleted (4549-4556). Before,
   a device that had not pulled a delete put the game back on Drive for good.
 * Since 2026-10-01 (da1d7c55) neither sync writes the library when the merge
   leaves it, to the byte, as the one copy it read (`libraryUnchanged` 3373:
   `readDriveLibrary` 3357 keeps the text when the listing had one copy; the
   flush skips its second listing and the write at 4003-4005, the pull its
-  write at 4580). Modelled: `seen` is what the read read, and `flushKeep` /
+  write at 4583). Modelled: `seen` is what the read read, and `flushKeep` /
   `pullKeep` are the commits' paths with no write, enabled only when the
   library equals `seen`. Both write paths stay enabled too (a copy written in
   another key order, by an older build, differs in text though not in
@@ -97,10 +102,11 @@ Results in one place:
   `rename_moves_everything`, `race_delays_tomb`.
 * the unchanged library left unwritten: `keep_leaves_drive`,
   `keep_eq_write`, `pullKeep_eq_write`, `keep_spares_newer_write`.
-* the pull's save writes (bfe5d5c5): `pullSave_skips_away`,
-  `regress_pull_after_rename_orphans_save`; still refuted (found catching up
-  to 5ea4d552): `bug_remote_rename_into_away_name_skips_saves`,
-  `bug_download_into_away_name_skips_saves`, `bug_away_not_vacant`.
+* the pull's save writes (bfe5d5c5, be44ad4c): `pullSave_skips_away`,
+  `away_vacant`, `pullSave_writes_held`; traces
+  `regress_pull_after_rename_orphans_save`,
+  `regress_remote_rename_into_away_name_skips_saves`,
+  `regress_download_into_away_name_skips_saves`, `regress_away_not_vacant`.
 * the findings' traces, fixed: `regress_delete_during_flush`,
   `regress_delete_during_pull`, `regress_import_during_pull`,
   `regress_rename_during_pull`, `regress_rename_undo_settles` (a sync cycle is
@@ -130,19 +136,19 @@ Results in one place:
   stamp, so the one atomic pass stands for any order of them. A ROM Drive
   already holds at this generation and whose bytes this device knows
   (3945-3949) leaves the queue unread: what `upFile` does with a present ROM.
-* A pull's rename pass (one `dbMoveKeys` transaction per marker, 4268-4296)
+* A pull's rename pass (one `dbMoveKeys` transaction per marker, 4271-4299)
   is one event. Of the per-game download pass (its downloads started ahead,
   `downloadAhead` 2841) only the saves' writes are modelled: `pullScan` is its
-  listing of the local keys (`localSyncFiles` + `romsHere`, 4410-4413), and
+  listing of the local keys (`localSyncFiles` + `romsHere`, 4413-4416), and
   `pullSave d g` is one save's write segment, which may run at any time
   after it and before the commit (the download awaited before it is folded
   in: Drive's file is the one the pull listed). It writes only for a game
-  whose ROM was here at the scan, and skips a key queued for deletion (4496)
-  and a name renamed away (4500); its other checks (the game loaded or
+  whose ROM was here at the scan, and skips a key queued for deletion (4499)
+  and a name renamed away (4503); its other checks (the game loaded or
   loading, unchanged on Drive, an older generation, the same bytes) only drop
   writes. Pictures, sessions and kept saves (the same write, other kinds) and
-  the ROM byte budget are not modelled; nor are the setting riding the pull (`syncSaveHook` 4262)
-  and the hand-off of the game in memory (4361-4405, `WebState/Handoff`).
+  the ROM byte budget are not modelled; nor are the setting riding the pull (`syncSaveHook` 4265)
+  and the hand-off of the game in memory (4364-4408, `WebState/Handoff`).
   `renPending` (a link session blocking a migration) is never set, as no
   link session is modelled.
 * `deleteGameEverywhere`, `renameGame`, import and play are atomic events:
@@ -152,16 +158,16 @@ Results in one place:
   dropped: any save a player makes queues an upload, so a flush can always
   be triggered.
 * A battery or session write with no launch (the 5 s autosave, and the one
-  `runFullSync` now makes of the game in memory before it queues, 4600-4605)
+  `runFullSync` now makes of the game in memory before it queues, 4603-4608)
   touches only the store and the upload queue, never "recent", tombstones or
   markers; `play` (a launch plus a save) is the event that writes "recent",
   and no stated property depends on the store beyond what `play` exercises.
-* The "removed on another device" modal (`confirmTombstones` 5165) is the
+* The "removed on another device" modal (`confirmTombstones` 5169) is the
   `restore` flag of `pullTombs`; the traces take "Continue". The wrappers
   `deleteGameAction` (2154) and `downloadGameAction` (2115, now through
-  `fetchTileGame` 7182, which signs in and calls `downloadGame` once however
+  `fetchTileGame` 7189, which signs in and calls `downloadGame` once however
   many taps join it) add only an unload, a tile's progress and toasts.
-  "Remove from this device" (`removeGameFromDevice` 4682) raises no
+  "Remove from this device" (`removeGameFromDevice` 4685) raises no
   tombstone and does not touch the library, so it is not an event here.
 * The Drive listing is taken as complete and as holding one "library" file:
   `driveListAll` (2703) follows `nextPageToken`, and `driveListMap` /
@@ -2130,15 +2136,15 @@ inductive Pend where
   /-- ...after `writeDriveLibrary` landed (4003-4005), or was skipped as
   unchanged (`flushKeep`). -/
   | fWritten (lib : Lib) (revived : List Nat)
-  /-- pullSyncInner after `driveListMap` + `readDriveLibrary` (4260-4263). -/
+  /-- pullSyncInner after `driveListMap` + `readDriveLibrary` (4263-4266). -/
   | pRead (d : Lib) (remote : List Item)
   | pMerged (lib : Lib) (remote : List Item)
-  /-- ...after the remote-rename pass (4265-4296). -/
+  /-- ...after the remote-rename pass (4268-4299). -/
   | pRenamed (lib : Lib) (remote : List Item)
-  /-- ...after the "removed on another device" modal (4298-4328). -/
+  /-- ...after the "removed on another device" modal (4301-4331). -/
   | pTombed (lib : Lib) (remote : List Item)
   /-- ...after tomb/ren/recent were adopted; `writeDriveLibrary` pending
-  (4534-4580), or skipped as unchanged (`pullKeep`). -/
+  (4537-4583), or skipped as unchanged (`pullKeep`). -/
   | pCommitted (lib : Lib)
 deriving DecidableEq, Repr
 
@@ -2159,15 +2165,15 @@ structure Dev where
   qRen : List (Key × Key)
   /-- the op in flight on `syncChain` -/
   pend : Pend
-  /-- ghost: "…is now…— renamed on another device" toasts shown (4293) -/
+  /-- ghost: "…is now…— renamed on another device" toasts shown (4296) -/
   toasts : Nat
   /-- `libraryText` of the running sync's listing (3345, 3357): the library
   its read read, which `libraryUnchanged` (3373) compares the merge with -/
   seen : Lib
-  /-- `renamedAway` (4837, bfe5d5c5): the names this session renamed a game
+  /-- `renamedAway` (4841, bfe5d5c5): the names this session renamed a game
   away from, until a rename into one or a fresh import claims it again -/
   away : List Nat
-  /-- the running pull's `romsHere` (4410-4413): the games whose ROM was here when
+  /-- the running pull's `romsHere` (4413-4416): the games whose ROM was here when
   its download pass listed the local keys; `none` until it has -/
   scan : Option (List Nat)
 deriving DecidableEq, Repr
@@ -2230,7 +2236,7 @@ inductive Ev where
   | pullTombs (d : Bool) (restore : Bool)
   | pullCommit (d : Bool)
   | pullWrite (d : Bool)
-  /-- `libraryUnchanged(lib, remote)` (4580): no write -/
+  /-- `libraryUnchanged(lib, remote)` (4583): no write -/
   | pullKeep (d : Bool)
   /-- the download pass lists the local keys (`localSyncFiles`, `romsHere`) -/
   | pullScan (d : Bool)
@@ -2305,20 +2311,26 @@ def flushCommitDev (dv : Dev) (lib : Lib) (revived : List Nat) : Dev :=
             recent := if revived.isEmpty || add.isEmpty then dv.recent else sortDesc (dv.recent ++ add),
             pend := .idle }
 
-/-! ### pullSyncInner (4248-4596) -/
+/-! ### pullSyncInner (4251-4599) -/
 
-/-- `applyRemoteRename(r.from, r.to)` (4048-4127) plus the queueing of
-old-name Drive files that follows it (4275-4285). It
-makes no claim on `r.to`: `away` is left as it was. -/
+/-- One kind's move in `applyRemoteRename`'s `dbMoveKeys(..., { skipCollisions: true })`:
+`(records, moved)`. -/
+def mvKey (r : Ren) (acc : List Item × Nat) (k : Nat) : List Item × Nat :=
+  if hasKey acc.1 (r.src, k) && !hasKey acc.1 (r.dst, k) then
+    (acc.1.map (fun i => if i.key == (r.src, k) then { i with game := r.dst } else i), acc.2 + 1)
+  else acc
+
+/-- `applyRemoteRename(r.from, r.to)` (4048-4130) plus the queueing of
+old-name Drive files that follows it (4278-4288). Since
+be44ad4c it releases `r.to` from `away` as it starts: another device's game
+claims the name. -/
 def remoteRename (remote : List Item) (dv : Dev) (r : Ren) : Dev :=
   if !dv.store.any (fun i => i.game == r.src) then dv else           -- hasAnyLocalRecord
   -- dbMoveKeys(..., { skipCollisions: true })
-  let mv : List Item × Nat → Nat → List Item × Nat := fun acc k =>
-    if hasKey acc.1 (r.src, k) && !hasKey acc.1 (r.dst, k) then
-      (acc.1.map (fun i => if i.key == (r.src, k) then { i with game := r.dst } else i), acc.2 + 1)
-    else acc
-  let (st1, moved) := kinds.foldl mv (dv.store, 0)
-  -- collided pairs holding identical bytes: the old-name copy is dropped (4117-4125)
+  let res := kinds.foldl (mvKey r) (dv.store, 0)
+  let st1 := res.1
+  let moved := res.2
+  -- collided pairs holding identical bytes: the old-name copy is dropped (4120-4128)
   let st2 := st1.filter (fun i => !(i.game == r.src &&
                 st1.any (fun j => j.key == (r.dst, i.kind) && j.blob == i.blob)))
   let mapKey : Key → Key := fun k => if k.1 == r.src then (r.dst, k.2) else k
@@ -2327,9 +2339,11 @@ def remoteRename (remote : List Item) (dv : Dev) (r : Ren) : Dev :=
     if hasKey remote (r.src, k) && !q.any (fun x => x.1 == (r.src, k))
     then q ++ [((r.src, k), (r.dst, k))] else q) qRen1
   { dv with store := st2, qUp := dedup (dv.qUp.map mapKey), qDel := dedup (dv.qDel.map mapKey),
-            qRen := qRen2, toasts := dv.toasts + (if moved > 0 then 1 else 0) }
+            qRen := qRen2, toasts := dv.toasts + (if moved > 0 then 1 else 0),
+            -- `renamedAway.delete(to)`, before its first await (be44ad4c)
+            away := dv.away.filter (· != r.dst) }
 
-/-- 4298-4328: "Games removed on another device". -/
+/-- 4301-4331: "Games removed on another device". -/
 def pullTombsDev (dv : Dev) (lib : Lib) (remote : List Item) (restore : Bool) (now : Nat) : Dev :=
   let pending := (lib.tomb.filter (fun t => dv.store.any (fun i => i.game == t.name))).map (·.name)
   if pending.isEmpty then { dv with pend := .pTombed lib remote }
@@ -2358,7 +2372,7 @@ def pullCommitDev (dv : Dev) (lib : Lib) (remote : List Item) : Dev :=
 
 /-! ### The user's actions -/
 
-/-- `deleteGameEverywhere` (4719-4743), signed in. -/
+/-- `deleteGameEverywhere` (4722-4746), signed in. -/
 def deleteDev (dv : Dev) (g now : Nat) : Dev :=
   { dv with store := dv.store.filter (fun i => i.game != g),
             recent := dv.recent.filter (fun r => r.name != g),
@@ -2366,7 +2380,7 @@ def deleteDev (dv : Dev) (g now : Nat) : Dev :=
             qUp := dv.qUp.filter (fun k => k.1 != g),
             tomb := dv.tomb.filter (fun t => t.name != g) ++ [⟨g, now⟩] }
 
-/-- `renameGame` (4839-4973) past its checks: one `dbMoveKeys` transaction
+/-- `renameGame` (4843-4977) past its checks: one `dbMoveKeys` transaction
 moves every record, writes "recent" and the new sync state. -/
 def renameOk (dv : Dev) (a b : Nat) : Bool :=
   a != b && !dv.recent.any (fun r => r.name == b) && !dv.store.any (fun i => i.game == b)
@@ -2387,7 +2401,7 @@ def renameDev (dv : Dev) (a b now : Nat) : Dev :=
     -- `renamedAway.add(oldName); renamedAway.delete(newName)` (bfe5d5c5)
     away := addUniq (dv.away.filter (· != b)) a }
 
-/-- `bumpRecentIndex` (6444-6473). -/
+/-- `bumpRecentIndex` (6448-6480). -/
 def bump (dv : Dev) (g now : Nat) (fresh : Bool) : List Entry :=
   let prev := dv.recent.find? (fun r => r.name == g)
   let ts := if fresh then now else
@@ -2397,26 +2411,28 @@ def bump (dv : Dev) (g now : Nat) (fresh : Bool) : List Entry :=
   let imp := if fresh then now else (prev.map (·.imp)).getD 0
   ⟨g, ts, imp⟩ :: dv.recent.filter (fun r => r.name != g)
 
-/-- `addRecentRom` (6488-6504): ROM bytes, then a fresh import, then upload. -/
+/-- `addRecentRom` (6495-6511): ROM bytes, then a fresh import, then upload. -/
 def importDev (dv : Dev) (g blob now : Nat) : Dev :=
   let st := putItem dv.store ⟨g, 0, blob⟩
-  -- bumpRecentIndex's `if (fresh) renamedAway.delete(name)` (bfe5d5c5)
+  -- bumpRecentIndex's `renamedAway.delete(name)` (bfe5d5c5; on every call since be44ad4c)
   { dv with store := st, recent := bump dv g now true, away := dv.away.filter (· != g),
             qUp := ((st.filter (fun i => i.game == g)).map Item.key).foldl addUniq dv.qUp }
 
-/-- A launch (`touchRecent`) and a battery save (`persistSave` + `markUpload`). -/
+/-- A launch (`touchRecent`, whose `bumpRecentIndex` releases the name from
+`away` since be44ad4c) and a battery save (`persistSave` + `markUpload`). -/
 def playDev (dv : Dev) (g blob now : Nat) : Dev :=
   { dv with recent := bump dv g now false, store := putItem dv.store ⟨g, 1, blob⟩,
-            qUp := addUniq dv.qUp (g, 1) }
+            qUp := addUniq dv.qUp (g, 1), away := dv.away.filter (· != g) }
 
-/-- `downloadGame` (4616-4676). No claim on the name: `bumpRecentIndex(game, { gen })`
-(4663) is not `fresh`, so `away` is left as it was. -/
+/-- `downloadGame` (4619-4679). Its `bumpRecentIndex(game, { gen })` (4666)
+releases the name from `away` since be44ad4c, on every call, `fresh` or not. -/
 def downloadDev (dv : Dev) (files : List Item) (g now : Nat) : Dev :=
   let fs := files.filter (fun f => f.game == g)
   if fs.isEmpty then dv
-  else { dv with store := fs.foldl putItem dv.store, recent := bump dv g now false }
+  else { dv with store := fs.foldl putItem dv.store, recent := bump dv g now false,
+                 away := dv.away.filter (· != g) }
 
-/-- `romsHere` (4413): the games whose ROM key is here. -/
+/-- `romsHere` (4416): the games whose ROM key is here. -/
 def romsHere (dv : Dev) : List Nat := dv.store.filterMap (fun i => if i.kind == 0 then some i.game else none)
 
 /-- The download pass lists the local keys once its tomb pass is done. -/
@@ -2425,10 +2441,10 @@ def pullScanDev (dv : Dev) : Dev :=
   | .pTombed _ _ => { dv with scan := some (romsHere dv) }
   | _ => dv
 
-/-- The download pass's write of `save:g` (4426-4509): only a game whose ROM
-was here at the scan (4454-4458), and in the segment that writes, not a key
-queued for deletion (4496) and, since bfe5d5c5 (`fix`), not a name this
-session renamed away from (4500). Its other checks (the game loaded or
+/-- The download pass's write of `save:g` (4429-4512): only a game whose ROM
+was here at the scan (4457-4461), and in the segment that writes, not a key
+queued for deletion (4499) and, since bfe5d5c5 (`fix`), not a name this
+session renamed away from (4503). Its other checks (the game loaded or
 loading, unchanged on Drive, an older generation, the same bytes) only drop
 writes. Drive's file is the one the pull listed (`remote`). -/
 def pullSaveDev (fix : Bool) (dv : Dev) (g : Nat) : Dev :=
@@ -3407,7 +3423,7 @@ theorem regress_rename_during_pull :
     s.lib.ren = [⟨1, 2, 2⟩] ∧ s.files = [⟨2, 0, 10⟩] := by
   decide
 
-/-! ### The pull's save writes and `renamedAway` (bfe5d5c5)
+/-! ### The pull's save writes and `renamedAway` (bfe5d5c5, be44ad4c)
 
 The download pass's write segment (`pullSave`, `pullSaveDev`) skips a name
 this session renamed a game away from (`away`). -/
@@ -3453,56 +3469,320 @@ theorem regress_pull_after_rename_orphans_save :
     s2.d0.store.all (·.game != 1) ∧ renameOk s2.d0 2 1 = true ∧ (⟨1, 1, 12⟩ : Item) ∈ s2.files := by
   decide
 
-/-- Found modelling bfe5d5c5: `renamedAway` is cleared only by a rename into
-the name and by a fresh import (`bumpRecentIndex`'s `fresh`), but a game can
-come back under the name two other ways. Device 0 holds A (1) and X (3) and
-renames A to B (2); device 1 renames X into the freed A, and device 0's pull
-applies that rename (`applyRemoteRename`, 4048, no claim): device 0 holds X
-under 1, with 1 still renamed away. Device 1 plays it (save 31) and syncs. -/
+/-- Found catching this model up to 5ea4d552, fixed in be44ad4c: before it,
+`renamedAway` was cleared only by a rename into the name and by a fresh
+import, but a game can come back under the name two other ways. Device 0
+holds A (1) and X (3) and renames A to B (2); device 1 renames X into the
+freed A, and device 0's pull applies that rename (`applyRemoteRename` 4048):
+device 0 holds X under 1. Device 1 plays it (save 31) and syncs. -/
 def setupRA : List Ev := [.importRom false 1 10, .importRom false 3 30] ++ flush false ++
   pull true ++ [.download true 3, .rename false 1 2] ++ flush false ++ pull true ++
   [.rename true 3 1] ++ flush true ++ pull false ++ [.play true 1 31] ++ flush true
 
-/-- **Refuted: a name another device's rename brought back stays renamed
-away**, and device 0's pulls skip its save for the rest of the session (each
-one, as the skip records nothing): device 0 holds the game's ROM under 1 and
-never gets Drive's save 31. A play there then starts from no save, and its
-flush (blind for saves) puts 32 over 31 on Drive: device 1's progress is
-lost. -/
-theorem bug_remote_rename_into_away_name_skips_saves :
-    let s := run init (setupRA ++ pullS false [1] ++ pullS false [1])
-    s.d0.away = [1] ∧ hasKey s.d0.store (1, 0) = true ∧ hasKey s.d0.store (1, 1) = false ∧
-    (⟨1, 1, 31⟩ : Item) ∈ s.files ∧
-    let s2 := run s ([.play false 1 32] ++ flush false)
-    (⟨1, 1, 31⟩ : Item) ∉ s2.files ∧ (⟨1, 1, 32⟩ : Item) ∈ s2.files := by
+/-- **Fixed (be44ad4c): a name another device's rename brings back is
+released** (was `bug_remote_rename_into_away_name_skips_saves`: 1 stayed
+renamed away, every pull of the session skipped its save, and device 0's
+next play went up over device 1's 31). `applyRemoteRename` now releases its
+target as it starts, so the next pull writes 31 here. -/
+theorem regress_remote_rename_into_away_name_skips_saves :
+    let s := run init (setupRA ++ pullS false [1])
+    s.d0.away = [] ∧ hasKey s.d0.store (1, 0) = true ∧
+    (⟨1, 1, 31⟩ : Item) ∈ s.d0.store ∧ (⟨1, 1, 31⟩ : Item) ∈ s.files := by
   decide
 
-/-- The same through `downloadGame` (4616, `bumpRecentIndex` without
-`fresh`): device 0 renames 1 to 2; device 1 imports another game as 1 and
-plays it (save 21); device 0 downloads that Drive-only tile, so it holds 1
-with 1 still renamed away. Device 1 plays on (save 22); device 0's pull skips
-it and keeps 21. -/
+/-- The same through `downloadGame` (4619): device 0 renames 1 to 2; device
+1 imports another game as 1 and plays it (save 21); device 0 downloads that
+Drive-only tile, so it holds 1. Device 1 plays on (save 22) and syncs. -/
 def setupRB0 : List Ev := [.importRom false 1 10] ++ flush false ++ [.rename false 1 2] ++
   flush false ++ pull true ++ [.importRom true 1 20, .play true 1 21] ++ flush true ++
   pull false ++ [.download false 1]
 def setupRB : List Ev := setupRB0 ++ [.play true 1 22] ++ flush true
 
-theorem bug_download_into_away_name_skips_saves :
+/-- **Fixed (be44ad4c): a downloaded game releases its name** (was
+`bug_download_into_away_name_skips_saves`: the pull skipped 22 and device 0
+kept 21). `bumpRecentIndex` now releases its name on every call, so the
+download releases 1 and the next pull writes 22. -/
+theorem regress_download_into_away_name_skips_saves :
     let s := run init (setupRB ++ pullS false [1])
-    s.d0.away = [1] ∧ (⟨1, 0, 20⟩ : Item) ∈ s.d0.store ∧ (⟨1, 1, 21⟩ : Item) ∈ s.d0.store ∧
-    (⟨1, 1, 22⟩ : Item) ∈ s.files ∧ (⟨1, 1, 22⟩ : Item) ∉ s.d0.store := by
+    s.d0.away = [] ∧ (⟨1, 0, 20⟩ : Item) ∈ s.d0.store ∧ (⟨1, 1, 22⟩ : Item) ∈ s.d0.store ∧
+    (⟨1, 1, 21⟩ : Item) ∉ s.d0.store := by
   decide
 
-/-- What the claim rule means: a name this session renamed away from holds no
-record here (so skipping its downloads loses nothing). Both traces break it
-before their last pull. -/
-def AwayVacant (dv : Dev) : Prop := ∀ g ∈ dv.away, dv.store.all (·.game != g) = true
+/-! #### No record is ever held under a name renamed away from
 
-theorem bug_away_not_vacant :
-    ¬ AwayVacant (run init setupRA).d0 ∧ ¬ AwayVacant (run init setupRB0).d0 := by
-  refine ⟨fun h => ?_, fun h => ?_⟩
-  · have := h 1 (by decide); revert this; decide
-  · have := h 1 (by decide); revert this; decide
+The rule bfe5d5c5 and be44ad4c implement: a name in `renamedAway` holds no
+record on this device, so the skip only ever drops a write that would orphan
+a file. Every way a record lands under a name (a rename into it, here or
+from another device; an import, a download, a play; the pull's own write)
+releases it or is skipped for it. -/
+
+/-- A name renamed away from holds no record here (was `bug_away_not_vacant`
+before be44ad4c, on both traces above). -/
+def AwayVacant (dv : Dev) : Prop := ∀ g ∈ dv.away, ∀ i ∈ dv.store, i.game ≠ g
+
+instance (dv : Dev) : Decidable (AwayVacant dv) := by unfold AwayVacant; infer_instance
+
+theorem regress_away_not_vacant :
+    AwayVacant (run init setupRA).d0 ∧ AwayVacant (run init setupRB0).d0 := by
+  decide
+
+theorem av_of {v dv : Dev} (h : AwayVacant dv) (hs : v.store = dv.store) (ha : v.away = dv.away) :
+    AwayVacant v := by
+  intro g hg i hi; rw [hs] at hi; rw [ha] at hg; exact h g hg i hi
+
+theorem mem_putItem {l : List Item} {x i : Item} (h : i ∈ putItem l x) : i ∈ l ∨ i = x := by
+  simp only [putItem, List.mem_append, List.mem_filter, List.mem_singleton] at h
+  rcases h with ⟨h, _⟩ | h
+  · exact Or.inl h
+  · exact Or.inr h
+
+theorem mem_foldl_putItem (fs : List Item) :
+    ∀ (l : List Item) (i : Item), i ∈ fs.foldl putItem l → i ∈ l ∨ i ∈ fs := by
+  induction fs with
+  | nil => intro l i h; exact Or.inl h
+  | cons x xs ih =>
+    intro l i h
+    simp only [List.foldl] at h
+    rcases ih _ _ h with h | h
+    · rcases mem_putItem h with h | h
+      · exact Or.inl h
+      · right; simp [h]
+    · right; simp [h]
+
+theorem mem_addUniq {l : List Nat} {x g : Nat} (h : g ∈ addUniq l x) : g ∈ l ∨ g = x := by
+  unfold addUniq at h
+  split at h
+  · exact Or.inl h
+  · simp only [List.mem_append, List.mem_singleton] at h; exact h
+
+/-- A store with records added under `g` only, and `g` released. -/
+theorem av_put {dv : Dev} (h : AwayVacant dv) (g : Nat) (st : List Item)
+    (hst : ∀ i ∈ st, i ∈ dv.store ∨ i.game = g) (v : Dev) (hs : v.store = st)
+    (ha : v.away = dv.away.filter (· != g)) : AwayVacant v := by
+  intro g' hg i hi
+  rw [ha, List.mem_filter] at hg
+  rw [hs] at hi
+  rcases hst i hi with hi | hi
+  · exact h g' hg.1 i hi
+  · rw [hi]; intro e; subst e; simp at hg
+
+theorem renFile_sa (acc : Dev × List Item) (q : Key × Key) :
+    (renFile acc q).1.store = acc.1.store ∧ (renFile acc q).1.away = acc.1.away := by
+  unfold renFile
+  repeat' split
+  all_goals exact ⟨rfl, rfl⟩
+
+theorem foldl_renFile_sa (L : List (Key × Key)) : ∀ acc : Dev × List Item,
+    (L.foldl renFile acc).1.store = acc.1.store ∧ (L.foldl renFile acc).1.away = acc.1.away := by
+  induction L with
+  | nil => intro acc; exact ⟨rfl, rfl⟩
+  | cons q qs ih =>
+    intro acc
+    simp only [List.foldl]
+    rw [(ih _).1, (ih _).2, (renFile_sa _ _).1, (renFile_sa _ _).2]
+    exact ⟨rfl, rfl⟩
+
+theorem av_flushFiles {dv : Dev} (h : AwayVacant dv) (files : List Item) (lib : Lib) (p : Pend) :
+    AwayVacant { (flushFilesDev dv files lib).1 with pend := p } := by
+  have hf := foldl_renFile_sa dv.qRen (dv, files)
+  exact av_of h hf.1 hf.2
+
+theorem mvKey_mem (r : Ren) (S : List Item) (acc : List Item × Nat) (k : Nat)
+    (h : ∀ i ∈ acc.1, i ∈ S ∨ i.game = r.dst) : ∀ i ∈ (mvKey r acc k).1, i ∈ S ∨ i.game = r.dst := by
+  unfold mvKey
+  split
+  · intro i hi
+    simp only [List.mem_map] at hi
+    obtain ⟨j, hj, rfl⟩ := hi
+    split
+    · exact Or.inr rfl
+    · exact h j hj
+  · exact h
+
+theorem foldl_mvKey_mem (r : Ren) (S : List Item) (L : List Nat) : ∀ acc : List Item × Nat,
+    (∀ i ∈ acc.1, i ∈ S ∨ i.game = r.dst) → ∀ i ∈ (L.foldl (mvKey r) acc).1, i ∈ S ∨ i.game = r.dst := by
+  induction L with
+  | nil => intro acc h; exact h
+  | cons k ks ih => intro acc h; exact ih _ (mvKey_mem r S acc k h)
+
+theorem av_remoteRename (R : List Item) {dv : Dev} (h : AwayVacant dv) (r : Ren) :
+    AwayVacant (remoteRename R dv r) := by
+  unfold remoteRename
+  split
+  · exact h
+  · apply av_put h r.dst _ _ _ rfl rfl
+    intro i hi
+    exact foldl_mvKey_mem r dv.store kinds (dv.store, 0) (fun i hi => Or.inl hi) i
+      ((List.mem_filter.1 hi).1)
+
+theorem av_foldl_remoteRename (R : List Item) (L : List Ren) :
+    ∀ dv : Dev, AwayVacant dv → AwayVacant (L.foldl (remoteRename R) dv) := by
+  induction L with
+  | nil => intro dv h; exact h
+  | cons r rs ih => intro dv h; exact ih _ (av_remoteRename R h r)
+
+theorem av_pullTombs {dv : Dev} (h : AwayVacant dv) (lib : Lib) (R : List Item) (r : Bool) (n : Nat) :
+    AwayVacant (pullTombsDev dv lib R r n) := by
+  unfold pullTombsDev
+  simp only
+  split
+  · exact h
+  · split
+    · exact h
+    · intro g hg i hi
+      exact h g hg i ((List.mem_filter.1 hi).1)
+
+theorem av_pullScan {dv : Dev} (h : AwayVacant dv) : AwayVacant (pullScanDev dv) := by
+  unfold pullScanDev; split <;> exact h
+
+theorem av_pullSave {dv : Dev} (h : AwayVacant dv) (g : Nat) : AwayVacant (pullSaveDev true dv g) := by
+  unfold pullSaveDev
+  split
+  · split
+    · rename_i i hfind
+      split
+      · rename_i hc
+        have hg : g ∉ dv.away := by
+          intro hm; simp [hm] at hc
+        have hig : i.game = g := by
+          have := List.find?_some hfind
+          simp only [beq_iff_eq, Item.key, Prod.mk.injEq] at this
+          exact this.1
+        intro g' hg' j hj
+        rcases mem_putItem hj with hj | hj
+        · exact h g' hg' j hj
+        · rw [hj, hig]; intro e; subst e; exact hg hg'
+      · exact h
+    · exact h
+  · exact h
+
+theorem av_delete {dv : Dev} (h : AwayVacant dv) (g n : Nat) : AwayVacant (deleteDev dv g n) := by
+  intro g' hg i hi
+  exact h g' hg i ((List.mem_filter.1 hi).1)
+
+theorem av_rename {dv : Dev} (h : AwayVacant dv) (a b n : Nat) (hab : a ≠ b) :
+    AwayVacant (renameDev dv a b n) := by
+  intro g hg i hi
+  simp only [renameDev] at hg hi
+  simp only [List.mem_map] at hi
+  obtain ⟨j, hj, rfl⟩ := hi
+  rcases mem_addUniq hg with hg | hg
+  · rw [List.mem_filter] at hg
+    have hgb : g ≠ b := by simpa using hg.2
+    split
+    · exact fun e => hgb e.symm
+    · exact h g hg.1 j hj
+  · subst hg
+    split
+    · exact fun e => hab e.symm
+    · rename_i hja; simpa using hja
+
+theorem av_import {dv : Dev} (h : AwayVacant dv) (g blob n : Nat) : AwayVacant (importDev dv g blob n) := by
+  apply av_put h g (putItem dv.store ⟨g, 0, blob⟩) _ _ rfl rfl
+  intro i hi; rcases mem_putItem hi with hi | hi
+  · exact Or.inl hi
+  · exact Or.inr (by rw [hi])
+
+theorem av_play {dv : Dev} (h : AwayVacant dv) (g blob n : Nat) : AwayVacant (playDev dv g blob n) := by
+  apply av_put h g (putItem dv.store ⟨g, 1, blob⟩) _ _ rfl rfl
+  intro i hi; rcases mem_putItem hi with hi | hi
+  · exact Or.inl hi
+  · exact Or.inr (by rw [hi])
+
+theorem av_download {dv : Dev} (h : AwayVacant dv) (F : List Item) (g n : Nat) :
+    AwayVacant (downloadDev dv F g n) := by
+  unfold downloadDev
+  simp only
+  split
+  · exact h
+  · apply av_put h g _ _ _ rfl rfl
+    intro i hi
+    rcases mem_foldl_putItem _ _ _ hi with hi | hi
+    · exact Or.inl hi
+    · right; simp only [List.mem_filter, beq_iff_eq] at hi; exact hi.2
+
+/-- One step keeps `AwayVacant` on every device. -/
+theorem step_av (s : St) (e : Ev) (d : Bool) (h : AwayVacant (s.dev d)) :
+    AwayVacant ((step s e).dev d) := by
+  by_cases hd : e.dev ≠ d
+  · rw [step_other_dev s e d hd]; exact h
+  have hd : e.dev = d := by simpa using hd
+  subst hd
+  cases e with
+  | flushRead d | flushMerge d | flushWrite d | flushKeep d | flushCommit d
+  | pullRead d | pullMerge d | pullCommit d | pullWrite d | pullKeep d | syncTap d =>
+    simp only [Ev.dev] at h ⊢
+    simp only [step]
+    repeat' split
+    all_goals (cases d <;> exact h)
+  | flushFiles d =>
+    simp only [Ev.dev] at h ⊢
+    simp only [step]
+    split
+    · cases d <;> exact av_flushFiles h _ _ _
+    · exact h
+  | pullRenames d =>
+    simp only [Ev.dev] at h ⊢
+    simp only [step]
+    split
+    · cases d <;> exact av_foldl_remoteRename _ _ _ h
+    · exact h
+  | pullTombs d restore =>
+    simp only [Ev.dev] at h ⊢
+    simp only [step]
+    split
+    · cases d <;> exact av_pullTombs h _ _ _ _
+    · exact h
+  | pullScan d => simp only [Ev.dev] at h ⊢; cases d <;> exact av_pullScan h
+  | pullSave d g => simp only [Ev.dev] at h ⊢; cases d <;> exact av_pullSave h g
+  | delete d g => simp only [Ev.dev] at h ⊢; cases d <;> exact av_delete h _ _
+  | rename d a b =>
+    simp only [Ev.dev] at h ⊢
+    simp only [step]
+    split
+    · rename_i hok
+      have hab : a ≠ b := by
+        simp only [renameOk, Bool.and_eq_true, bne_iff_ne] at hok; exact hok.1.1
+      cases d <;> exact av_rename h _ _ _ hab
+    · exact h
+  | importRom d g blob => simp only [Ev.dev] at h ⊢; cases d <;> exact av_import h _ _ _
+  | play d g blob =>
+    simp only [Ev.dev] at h ⊢
+    simp only [step]
+    split
+    · cases d <;> exact av_play h _ _ _
+    · exact h
+  | download d g => simp only [Ev.dev] at h ⊢; cases d <;> exact av_download h _ _ _
+
+/-- **A name renamed away from never holds a record on this device**, in
+every reachable state (be44ad4c). -/
+theorem away_vacant {s : St} (hr : Reachable s) (d : Bool) : AwayVacant (s.dev d) := by
+  induction hr with
+  | init => intro g hg; cases d <;> simp [init, Dev.empty, St.dev] at hg
+  | step e _ ih => exact step_av _ e d ih
+
+/-- **Every save a pull lists for a game held here is written**, unless its
+delete is queued (and, in the JS, unless the game is loaded or loading, its
+Drive copy unchanged, of an older generation, or the same bytes): the
+`renamedAway` skip never drops the save of a game whose ROM is here. -/
+theorem pullSave_writes_held {s : St} (hr : Reachable s) (d : Bool) (g : Nat) (lib : Lib)
+    (remote : List Item) (here : List Nat) (i : Item)
+    (hp : (s.dev d).pend = .pTombed lib remote) (hs : (s.dev d).scan = some here)
+    (hh : g ∈ here) (hrom : hasKey (s.dev d).store (g, 0) = true)
+    (hi : remote.find? (fun j => j.key == (g, 1)) = some i) (hq : (g, 1) ∉ (s.dev d).qDel) :
+    ((step s (.pullSave d g)).dev d).store = putItem (s.dev d).store i := by
+  have hav := away_vacant hr d
+  have hg : g ∉ (s.dev d).away := by
+    intro hm
+    simp only [hasKey, List.any_eq_true, beq_iff_eq] at hrom
+    obtain ⟨j, hj, hk⟩ := hrom
+    simp only [Item.key, Prod.mk.injEq] at hk
+    exact hav g hm j hj hk.1
+  have e : (step s (.pullSave d g)).dev d = pullSaveDev true (s.dev d) g := by cases d <;> rfl
+  rw [e]
+  unfold pullSaveDev
+  rw [hp, hs]
+  simp [hi, hh, hq, hg]
 
 /-- Found by the model of the first fix (`renameGame`'s claim alone): device 0
 renames A (1) to B (2); device 1 renames X (3) into the freed A, then deletes
@@ -3534,12 +3814,6 @@ Found by a two-device UI run: a device that had not pulled a delete re-uploaded
 the deleted game on a Sync tap (its flush uploaded every queued key Drive
 lacked, without asking the library it had just merged), and nothing ever took
 those files down. -/
-
-theorem mem_putItem {l : List Item} {it i : Item} (h : i ∈ putItem l it) : i ∈ l ∨ i = it := by
-  simp only [putItem, List.mem_append, List.mem_filter, List.mem_singleton] at h
-  rcases h with ⟨h, _⟩ | h
-  · exact Or.inl h
-  · exact Or.inr h
 
 theorem upFile_mem (dv : Dev) (f : List Item) (k : Key) {i : Item} (h : i ∈ upFile dv f k) :
     i ∈ f ∨ i.key = k := by
