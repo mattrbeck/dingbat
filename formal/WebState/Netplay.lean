@@ -3,66 +3,71 @@
 -- @models web/netplay.js: armManualFallback launchNetRom makeSession manualConfirmGo manualEnter manualPrepare netDismissModal netFail netHoldsCore netShutdown onSigMessage openNetConnect rbConnect rbStartIfReady rbTeardown rbTryInit sigConnect sigRedial startLocalLink startRtc wireChannel
 
 /-
-# Online link play: connection lifecycle (web/netplay.js, web/index.js @ 03f88d6c)
+# Online link play: connection lifecycle (web/netplay.js, web/index.js @ 5ea4d552)
 
 netplay.js keeps one module global `net` (39), the pending/active session
 built by `makeSession` (75). Paths to a transport:
 
-* signaling socket (`sigConnect` 256) + WebRTC DataChannel (`startRtc` 392,
-  `wireChannel` 429), with a response deadline (`armManualFallback` 311),
-  a redial ladder (`sigRedial` 323, `SIG_REDIAL_DELAYS` 106) and a
-  "paired"-to-open deadline (`rtcDeadline`, 398);
-* a same-browser BroadcastChannel (`startLocalLink` 545 / `LocalChannel` 483)
+* signaling socket (`sigConnect` 257) + WebRTC DataChannel (`startRtc` 393,
+  `wireChannel` 430), with a response deadline (`armManualFallback` 312),
+  a redial ladder (`sigRedial` 324, `SIG_REDIAL_DELAYS` 106) and a
+  "paired"-to-open deadline (`rtcDeadline`, 399);
+* a same-browser BroadcastChannel (`startLocalLink` 546 / `LocalChannel` 484)
   racing the socket; `wireChannel` keeps the first channel and closes later
-  ones ("the loser is torn down here", 430);
-* the manual code exchange (`manualEnter` 764, `manualPrepare` 705,
-  `manualConfirmGo` 821), entered when the server is (or was last seen) down.
+  ones ("the loser is torn down here", 431);
+* the manual code exchange (`manualEnter` 765, `manualPrepare` 706,
+  `manualConfirmGo` 822), entered when the server is (or was last seen) down.
 
-`netShutdown` (1556) tears a session down; `netFail` (240) is a setup failure
+`netShutdown` (1557) tears a session down; `netFail` (241) is a setup failure
 that shuts down with the modal kept and re-arms a fresh session.
 
-index.js side: `rollbackMode` (10857) is set by `enterRollbackMode` (13356) from
-`rbStartIfReady` (netplay.js 1305), which also sets `netMode = false`; the rAF
-`tick` runs exactly one branch: rollback (16095), else netMode (16132), else
-linkMode (16136), else the solo core. The `pagehide` (15972) / `beforeunload`
-(15931) handlers tear the session down `if (netActive() || rollbackMode)`;
-`loadRom` (11646) also for a rollback session set up and not yet started
-(`sessionHoldsCore` 11651, `netHoldsCore`, netplay.js 44: its cores have
+index.js side: `rollbackMode` (10936) is set by `enterRollbackMode` (13500) from
+`rbStartIfReady` (netplay.js 1306), which also sets `netMode = false`; the rAF
+`tick` runs exactly one branch: rollback (16239), else netMode (16276), else
+linkMode (16280), else the solo core. The `pagehide` (16116) / `beforeunload`
+(16075) handlers tear the session down `if (netActive() || rollbackMode)`;
+`loadRom` (11725) also for a rollback session set up and not yet started
+(`sessionHoldsCore` 11730, `netHoldsCore`, netplay.js 44: its cores have
 replaced the solo one), and returns without naming its game when any such
-session took the core during its awaits (`abandoned` 11655).
-Those, and loadRom's dismissal of an open Link Cable modal (11725) where it
+session took the core during its awaits (`abandoned` 11734).
+Those, and loadRom's dismissal of an open Link Cable modal (11804) where it
 names the new game, model the code as fixed by "web: a rollback session ends
 before a launch or a page close", "web: a game loaded under Report a Bug or
 the Link Cable modal does not run behind it" and "web: a load ends a rollback
-session that is set up but not started" (ba3f2261). Line numbers are at
-03f88d6c. At dd7ba741f they tore down only `if (netMode)`, and `netMode` is
+session that is set up but not started" (ba3f2261). Modelled at 03f88d6c
+and caught up to 5ea4d552 (see below); every line number is at 5ea4d552
+(web/netplay.js, web/index.js and src/dingbat_wasm.nim). At dd7ba741f they tore down only `if (netMode)`, and `netMode` is
 false in a rollback session.
 
 What changed in index.js since, and why the model is unchanged by it:
 `loadRom`'s commit may now apply a session to the solo core it just booted
-(`opts.resume`, 11702-11710: the hero's Resume, or an earlier moment
+(`opts.resume`, 11781-11789: the hero's Resume, or an earlier moment
 chosen from the sheet); that state is the same game's, so the solo core
 still holds its own game's battery (`solo.1 = game`), which is all the save
 properties here read, and the rollback session never sees it (a resume
 runs only in the solo commit, after any session was ended). `dbPutRoomy`
-(6166) now frees other games' checkpoints before ROM files on a quota error;
+(6235) now frees other games' checkpoints before ROM files on a quota error;
 quota errors are not modelled here (the first put is issued synchronously,
-6176, which is what rbTeardown's ordering rests on), and the retry's
-missing check is SavePersistence's `bug_ckpt_evict_*`. `persistSave` also
-posts the stored save to the save webhook (7464), which touches no state
-here.
+6248, which is what rbTeardown's ordering rests on), and the retry's check
+(`retried`, 6238-6252: since 87eea59f any retry asks `superseded()` first) is
+SavePersistence's (`regress_ckpt_evict_*`). `persistSave` also
+posts the stored save to the save webhook (7538), which touches no state
+here. `openNetConnect` (netplay.js 181) now takes the run state from a
+picture flight's hold (`netFrozeGame = !!currentRomName &&
+!takePlayerPause()`, 206, fbdb7975); whether the game runs under the modal
+is RunPause's, and this model has no pause state.
 
 ## What is modelled
 
 * Sessions are numbered; `cur` is `net` (none = null). Sockets are numbered
   with the WebSocket readyState, whether `onopen` ran (`opened`, the closure
-  variable in sigConnect 269), whether the handlers were nulled
-  (`manualEnter` 781), and the queued `error`/`close` events. Per the
+  variable in sigConnect 270), whether the handlers were nulled
+  (`manualEnter` 782), and the queued `error`/`close` events. Per the
   WHATWG spec, `close()` on a CONNECTING socket *fails* it: `error` then
   `close` are queued; on an OPEN socket only `close` is queued; a socket not
   OPEN delivers no messages.
-* The awaiting caller of each `sigConnect` promise (the Connect button 1395 or
-  a redial timer 340) is a pending continuation on the socket, resumed by
+* The awaiting caller of each `sigConnect` promise (the Connect button 1396 or
+  a redial timer 341) is a pending continuation on the socket, resumed by
   `resume` at any later point.
 * Channels: `local sid` (the LocalChannel of session sid), `rtc p` (the
   DataChannel of peer connection p), `manual p` (the pre-created manual-exchange
@@ -71,23 +76,23 @@ here.
 * Saves: `store g` is the IndexedDB `save:<g>` record as (whose battery data,
   version). The solo core holds `solo`; the rollback session's own core
   (`rollback_init` builds fresh cores; `rollback_exit_to_single` promotes
-  ours and writes its .sav, dingbat_wasm.nim 1548) holds `(sessGame, rbV)`.
+  ours and writes its .sav, dingbat_wasm.nim 1558) holds `(sessGame, rbV)`.
 
 ## Abstractions
 
-* rbConnect / the hello-state exchange / `rbTryInit` (netplay.js 1270:
+* rbConnect / the hello-state exchange / `rbTryInit` (netplay.js 1271:
   `rollback_init` boots the session's cores in place of the solo one,
   `rb.inited`) are one event `rbInit` (enabled once the channel is open);
-  the READY exchange / `rbStartIfReady` (1305: `net.started`, rollback mode)
+  the READY exchange / `rbStartIfReady` (1306: `net.started`, rollback mode)
   is `rbStart`. Between them the session holds the core but has not started:
   "Ready — waiting for your friend…", which can last a whole cross-game ROM
   transfer. The SIO path (`?rollback=0`, `launchNetRom`) is not modelled.
 * `netShutdown`'s tail after `await rbTeardown()` (closing dc/pc/ws) is folded
   into its first segment. rbTeardown's `persistSave(currentRomName,
   currentOriginalName)` evaluates its arguments, reads the FS and issues the
-  IndexedDB put synchronously (dbPutRoomy -> dbPut, index.js 6176/568), so the
+  IndexedDB put synchronously (dbPutRoomy -> dbPut, index.js 6248/568), so the
   write's key is fixed at teardown time and is modelled there.
-* `loadRom`'s awaits before its commit (11659-11683) are `launch`/`loadCommit`.
+* `loadRom`'s awaits before its commit (11738-11762) are `launch`/`loadCommit`.
 * One "waiting"/"paired" reply stands for any server message; SDP/ICE
   contents are not modelled (a pc either yields its channel or not).
 * `navigator.onLine` is true; BroadcastChannel exists.
@@ -133,8 +138,8 @@ inductive Waiter where
 
 structure Sock where
   st       : SSt := .none
-  opened   : Bool := false       -- sigConnect's `opened` (269)
-  detached : Bool := false       -- handlers nulled by manualEnter (781)
+  opened   : Bool := false       -- sigConnect's `opened` (270)
+  detached : Bool := false       -- handlers nulled by manualEnter (782)
   errQ     : Bool := false       -- an `error` event queued
   closeQ   : Bool := false       -- a `close` event queued
   res      : Option Bool := none -- sigConnect's promise resolved with
@@ -239,7 +244,7 @@ def closeWsOpt : Option Nat → State → State
 def newSession (s : State) : State :=
   { s with cur := some s.nextSid, nextSid := s.nextSid + 1 }
 
-/-- manualPrepare (705), first segment: close the old pc, mint a new pc and its
+/-- manualPrepare (706), first segment: close the old pc, mint a new pc and its
     unwired channel; the code is ready after `manualReady`. -/
 def manualPrepare (s : State) : State :=
   match s.cur with
@@ -248,7 +253,7 @@ def manualPrepare (s : State) : State :=
     let p := s.nextPc
     updS sid (fun x => { x with pc := some p, manualReady := false }) { s with nextPc := p + 1 }
 
-/-- manualEnter (764): clear the three timers, null the socket's handlers and
+/-- manualEnter (765): clear the three timers, null the socket's handlers and
     close it, drop the BroadcastChannel, show the manual view, then
     manualPrepare (a new pc). Written as one record update. -/
 def manualEnter (s : State) : State :=
@@ -286,7 +291,7 @@ def curWs (s : State) : Option Nat :=
 def shutSock (s : State) (j : Nat) : Sock :=
   if curWs s = some j then closeF (s.socks j) else s.socks j
 
-/-- netShutdown (1556). `keep` = `{ keepModal: true }`. rbTeardown (1328), when
+/-- netShutdown (1557). `keep` = `{ keepModal: true }`. rbTeardown (1329), when
     the session's rollback cores exist (`rb.inited`, started or not), promotes
     ours to the solo core, leaves rollback mode and persists it under
     `currentOriginalName`. -/
@@ -304,13 +309,13 @@ def shutdown (keep : Bool) (s : State) : State :=
     store := if rb then put s.game (s.sessGame, s.rbV) s.store else s.store,
     modal := keep && s.modal, manualView := keep && s.manualView }
 
-/-- netDismissModal (1625), as loadRom calls it when the modal is open: a
+/-- netDismissModal (1626), as loadRom calls it when the modal is open: a
     session still pairing is shut down; otherwise the modal just closes. (The
     Dismiss event below is the same code.) -/
 def dismissModal (s : State) : State :=
   if (curSess s).started || s.cur.isNone then { s with modal := false } else shutdown false s
 
-/-- netFail (240): setup failure (or peer gone once started). -/
+/-- netFail (241): setup failure (or peer gone once started). -/
 def netFail (s : State) : State :=
   match s.cur with
   | some sid => if (s.sess sid).started then shutdown false s else
@@ -320,13 +325,13 @@ def netFail (s : State) : State :=
       let s := shutdown true s
       if s.modal then newSession s else s
 
-/-- sigConnect (256): a new CONNECTING socket becomes net.ws. -/
+/-- sigConnect (257): a new CONNECTING socket becomes net.ws. -/
 def sigConnect (sid : Nat) (w : Waiter) (s : State) : State :=
   let k := s.nextSock
   let s := updK k (fun _ => { st := .connecting, waiter := w }) { s with nextSock := k + 1 }
   updS sid (fun x => { x with ws := some k }) s
 
-/-- sigRedial (323). -/
+/-- sigRedial (324). -/
 def sigRedial (sid : Nat) (s : State) : State :=
   let x := s.sess sid
   if !x.code then s else
@@ -336,7 +341,7 @@ def sigRedial (sid : Nat) (s : State) : State :=
   if attempt ≥ 3 then manualEnter { s with sigUp := some false }
   else updS sid (fun x => { x with redialT := true }) s
 
-/-- wireChannel (429): keep the first channel, close any later one. -/
+/-- wireChannel (430): keep the first channel, close any later one. -/
 def wireChannel (c : Chan) (s : State) : State :=
   match s.cur with
   | none => s
@@ -351,7 +356,7 @@ def wireChannel (c : Chan) (s : State) : State :=
       | .local _ => s
       | _ => updS sid (fun x => { x with bc := false }) s
 
-/-- dc.onopen (441): linked; close the signaling socket and forget it. -/
+/-- dc.onopen (442): linked; close the signaling socket and forget it. -/
 def dcOnOpen (s : State) : State :=
   match s.cur with
   | none => s
@@ -361,7 +366,7 @@ def dcOnOpen (s : State) : State :=
     let s := closeWsOpt x.ws s
     updS sid (fun x => { x with ws := none }) s
 
-/-- hasAltPath (268). -/
+/-- hasAltPath (269). -/
 def hasAltPath (s : State) : Bool :=
   match s.cur with
   | none => false
@@ -369,8 +374,8 @@ def hasAltPath (s : State) : Bool :=
 
 inductive Event where
   | openModal                 -- Link Cable menu item -> openNetConnect (181)
-  | joinClick                 -- Connect / Cancel (1395)
-  | dismiss                   -- x, backdrop, Escape -> netDismissModal (1625)
+  | joinClick                 -- Connect / Cancel (1396)
+  | dismiss                   -- x, backdrop, Escape -> netDismissModal (1626)
   | sockOpen (k : Nat)        -- the server accepts
   | sockRefused (k : Nat)     -- the dial fails (server down)
   | sockDrop (k : Nat)        -- an open socket drops
@@ -378,23 +383,23 @@ inductive Event where
   | sockClose (k : Nat)       -- its queued `close` event is dispatched
   | sockMsg (k : Nat) (paired : Bool)  -- a server message ("waiting" / "paired")
   | resume (k : Nat)          -- the `await sigConnect()` continuation runs
-  | fallbackFire             -- manualFallbackTimer (311)
-  | redialFire (sid : Nat)    -- a redial timer (340)
-  | deadlineFire (sid : Nat)  -- rtcDeadline (398 / 886)
-  | localPair                 -- another tab answers on the BroadcastChannel (545-595)
+  | fallbackFire             -- manualFallbackTimer (312)
+  | redialFire (sid : Nat)    -- a redial timer (341)
+  | deadlineFire (sid : Nat)  -- rtcDeadline (399 / 887)
+  | localPair                 -- another tab answers on the BroadcastChannel (546-596)
   | rtcChannel                -- the pc's DataChannel appears (createDataChannel / ondatachannel)
   | dcOpen                    -- the wired RTC/manual channel opens
-  | toManual                  -- "use codes instead" (1692)
+  | toManual                  -- "use codes instead" (1693)
   | manualReady               -- manualPrepare's awaits finish: the code is minted
-  | remint                    -- manualPrepare again (45 s timer / return to foreground, 753/963)
-  | confirmHost (srdOk : Bool) -- manualConfirmGo as the host (821); setRemoteDescription ok?
+  | remint                    -- manualPrepare again (45 s timer / return to foreground, 754/964)
+  | confirmHost (srdOk : Bool) -- manualConfirmGo as the host (822); setRemoteDescription ok?
   | rbInit                    -- rbConnect .. rbTryInit: the session's cores hold the core
   | rbStart                   -- rbStartIfReady: the rollback session runs
   | rbProgress                -- the linked game writes its battery (e.g. a trade)
   | disconnect                -- Disconnect (two-step), idle timeout, peer gone
   | launch (g : Nat)          -- tile tap / file drop -> loadRom, first segment
-  | loadCommit                -- loadRom's commit (11688-11726)
-  | pagehide                  -- tab closed / navigated (15972)
+  | loadCommit                -- loadRom's commit (11767-11805)
+  | pagehide                  -- tab closed / navigated (16116)
   deriving DecidableEq, Repr
 
 def en (s : State) : Event → Bool
@@ -435,7 +440,7 @@ def step (s : State) : Event → State
   | .openModal =>
     let s := { newSession s with modal := true, manualView := false }
     if s.sigUp == some false then manualEnter s else s
-  -- netJoinGo (1395): Cancel while dialing/listening, else rendezvous
+  -- netJoinGo (1396): Cancel while dialing/listening, else rendezvous
   | .joinClick =>
     match s.cur with
     | none => s
@@ -446,7 +451,7 @@ def step (s : State) : Event → State
       else
         let s := updS sid (fun x => { x with code := true, bc := true }) { s with fallback := some sid }
         sigConnect sid (.join sid) s
-  -- netDismissModal (1625)
+  -- netDismissModal (1626)
   | .dismiss =>
     if (curSess s).started || s.cur.isNone then { s with modal := false } else shutdown false s
   | .sockOpen k =>
@@ -456,7 +461,7 @@ def step (s : State) : Event → State
     else updK k (fun y => { y with opened := true, res := some true }) { s with sigUp := some true }
   | .sockRefused k => updK k (fun y => { y with st := .closed, errQ := true, closeQ := true }) s
   | .sockDrop k => updK k (fun y => { y with st := .closed, closeQ := true }) s
-  -- ws.onerror (275)
+  -- ws.onerror (276)
   | .sockErr k =>
     let y := s.socks k
     let s := updK k (fun y => { y with errQ := false }) s
@@ -465,7 +470,7 @@ def step (s : State) : Event → State
       let s := { s with sigUp := some false }
       let s := if hasAltPath s then s else netFail s
       updK k (fun y => { y with res := some false }) s
-  -- ws.onclose (289)
+  -- ws.onclose (290)
   | .sockClose k =>
     let y := s.socks k
     let s := updK k (fun y => { y with closeQ := false }) s
@@ -476,14 +481,14 @@ def step (s : State) : Event → State
       let x := s.sess sid
       if x.ws != some k || x.rtcConnected || x.started || x.pc.isSome then s
       else sigRedial sid s
-  -- onSigMessage (351): uses the global `net`, not the socket's session
+  -- onSigMessage (352): uses the global `net`, not the socket's session
   | .sockMsg _ paired =>
     match s.cur with
     | none => s
     | some sid =>
       let s := updS sid (fun x => { x with redials := 0, rdials := 0 }) { s with fallback := none, sigUp := some true }
       if paired && (s.sess sid).pc.isNone then
-        -- startRtc (392): new pc, deadline armed
+        -- startRtc (393): new pc, deadline armed
         let p := s.nextPc
         updS sid (fun x => { x with pc := some p, deadline := true }) { s with nextPc := p + 1 }
       else s
@@ -493,7 +498,7 @@ def step (s : State) : Event → State
     let s := updK k (fun y => { y with waiter := .none }) s
     match y.waiter, y.res with
     | .join sid, some ok =>
-      if ok then s   -- (1417) rendezvous sent if still ours; nothing modelled changes
+      if ok then s   -- (1418) rendezvous sent if still ours; nothing modelled changes
       else if s.cur == some sid && (s.sess sid).dc.isNone && !(s.sess sid).rtcConnected then
         manualEnter { s with fallback := none }
       else s
@@ -518,7 +523,7 @@ def step (s : State) : Event → State
     let s := updS sid (fun x => { x with deadline := false }) s
     let x := s.sess sid
     if s.cur == some sid && !x.rtcConnected && !x.started then netFail s else s
-  -- pair (573): LocalChannel wired, then chan.onopen() synchronously
+  -- pair (574): LocalChannel wired, then chan.onopen() synchronously
   | .localPair =>
     match s.cur with
     | none => s
@@ -534,7 +539,7 @@ def step (s : State) : Event → State
     | some sid => updS sid (fun x => { x with manualReady := true }) s
     | none => s
   | .remint => manualPrepare s
-  -- manualConfirmGo (821), host side: wireChannel(session.manualChan) BEFORE
+  -- manualConfirmGo (822), host side: wireChannel(session.manualChan) BEFORE
   -- `await setRemoteDescription`; on failure it returns with the input editable.
   | .confirmHost ok =>
     match s.cur, (curSess s).pc with
@@ -542,7 +547,7 @@ def step (s : State) : Event → State
       let s := wireChannel (.manual p) s
       if ok then updS sid (fun x => { x with confirmed := true, deadline := true }) s else s
     | _, _ => s
-  -- rbTryInit (1270): rollback_init boots the session's cores from the named
+  -- rbTryInit (1271): rollback_init boots the session's cores from the named
   -- game's state (its battery included) in place of the solo core.
   | .rbInit =>
     match s.cur with
@@ -550,7 +555,7 @@ def step (s : State) : Event → State
     | some sid =>
       let s := updS sid (fun x => { x with inited := true }) s
       { s with sessGame := s.game, rbV := s.solo.2 }
-  -- rbStartIfReady (1305) + enterRollbackMode (13356)
+  -- rbStartIfReady (1306) + enterRollbackMode (13500)
   | .rbStart =>
     match s.cur with
     | none => s
@@ -559,7 +564,7 @@ def step (s : State) : Event → State
       { s with netMode := false, rollbackMode := true, modal := false, manualView := false }
   | .rbProgress => { s with rbV := s.rbV + 1 }
   | .disconnect => shutdown false s
-  -- loadRom (11646-11665): `if (sessionHoldsCore()) await netShutdown()`, i.e.
+  -- loadRom (11725-11744): `if (sessionHoldsCore()) await netShutdown()`, i.e.
   -- netMode, rollbackMode, or a rollback session set up and not yet started
   -- (netHoldsCore): the session ends while currentOriginalName still names
   -- its game, before anything boots.
@@ -567,8 +572,8 @@ def step (s : State) : Event → State
     let s := if s.netMode || s.rollbackMode || (curSess s).inited then shutdown false s else s
     { s with loadPending := some g }
   -- persistSave(outgoing) ... then one segment: initFromEmscripten,
-  -- currentOriginalName = g (11688-11694), and (11725) an open Link Cable modal
-  -- dismissed. 11665-11683 (`abandoned`): a session that took the core during the awaits
+  -- currentOriginalName = g (11767-11773), and (11804) an open Link Cable modal
+  -- dismissed. 11744-11762 (`abandoned`): a session that took the core during the awaits
   -- owns it: the load returns without naming its game.
   | .loadCommit =>
     match s.loadPending with
@@ -578,7 +583,7 @@ def step (s : State) : Event → State
       let s := { s with store := put s.game s.solo s.store }
       let s := { s with game := g, solo := s.store g, loadPending := none }
       if s.modal then dismissModal s else s
-  -- pagehide (15972) / beforeunload (15931): `if (netActive() || rollbackMode)
+  -- pagehide (16116) / beforeunload (16075): `if (netActive() || rollbackMode)
   -- netShutdown()` (its put is issued synchronously), then
   -- persistSave(currentRomName, ...). `lostProgress`: the page died in a
   -- session whose progress is not in the store.
@@ -1853,7 +1858,7 @@ theorem regress_launch_during_rollback_splits_identity :
 
 /-- A session that is set up and starts while a load is between its first
     segment and its commit: the load names nothing (loadRom's `abandoned`,
-    11680), and ending the session later persists it under its own game. -/
+    11759), and ending the session later persists it under its own game. -/
 theorem regress_session_starts_mid_load :
     witnesses [.openModal, .joinClick, .localPair, .launch 1, .rbInit, .rbStart, .rbProgress,
                .loadCommit, .disconnect]
@@ -1880,7 +1885,7 @@ theorem load_dismisses_pairing_modal :
     netDismissModal ran the teardown after the new game was named and booted,
     and rbTeardown promoted the session's core (game 0's) and persisted it
     under game 1's name. The load now ends the session first (sessionHoldsCore,
-    loadRom 11651-11665): game 0's core is stored under game 0, game 1's save
+    loadRom 11730-11744): game 0's core is stored under game 0, game 1's save
     is untouched, and game 1 runs. -/
 theorem regress_load_during_rollback_setup :
     witnesses [.openModal, .joinClick, .localPair, .rbInit, .launch 1, .loadCommit]

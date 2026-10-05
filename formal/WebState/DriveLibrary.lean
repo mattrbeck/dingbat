@@ -8,35 +8,50 @@ Model of the Drive "library" file and the code that reads, merges and writes
 it. First written on top of 7ca348ebf (the Drive sync fix series); against
 dd7ba741f the same model refuted the properties below with the `bug_*` traces
 listed in formal/FINDINGS.md (#6, #7), and each is now a `regress_*` theorem.
-Re-audited against 03f88d6c (2026-10-05): every line number below is
-web/index.js at that commit.
+Re-audited against 03f88d6c (2026-10-05), and caught up to 5ea4d552: every
+line number below is web/index.js at 5ea4d552. Since 03f88d6c, bfe5d5c5 keeps
+`renamedAway`, the names this session renamed a game away from
+(`renameGame` adds the old name after its collision checks and deletes the
+new one, 4854-4855, and deletes the old one again on a rollback, 4956, not
+modelled as the rename is atomic here; a fresh import claims the name,
+`bumpRecentIndex` 6445), and the pull's write segment skips them (4500). To
+say what that skip does, the model now has the download pass's save write
+(`pullScan`, `pullSave`, field `away`; Layer 2b's last section): no pull
+writes under such a name (`pullSave_skips_away`), a save downloading during a
+rename no longer lands under the old name
+(`regress_pull_after_rename_orphans_save`), and, found doing so, a name that
+comes back here by another device's rename or by a download keeps being
+skipped (`bug_remote_rename_into_away_name_skips_saves`,
+`bug_download_into_away_name_skips_saves`, `bug_away_not_vacant`). The
+other changes since (`runPool`, `libraryUnchanged`, the token broker) were
+already followed at 03f88d6c.
 
-* `mergeLibrary` (web/index.js 3380-3464): the pure join of two libraries,
+* `mergeLibrary` (web/index.js 3423-3507): the pure join of two libraries,
   modelled line for line (`mergeLibrary` below), including JS `Map` insertion
   order and the stable sorts, because tie-breaking depends on both. Fixed: a
   marker's move claims its new name (`claim`: the entry at `to` carries
-  `imp >= r.ts`, 3430-3431) and spends a processed marker *from* that name
-  (`done`, 3432).
-* the protocol around it: `flushSyncInner` (3769-3997), `pullSyncInner`
-  (4201-4545), `deleteGameEverywhere` (4668-4692), `renameGame` (4783-4913),
-  `applyRemoteRename` (4005-4084), `bumpRecentIndex` (6371-6399) via import
-  (`addRecentRom` 6414) and play (`touchRecent` 6433), and `downloadGame`
-  (4565-4625). Every `await` that matters is an event boundary. Fixed: both
+  `imp >= r.ts`, 3473-3474) and spends a processed marker *from* that name
+  (`done`, 3475).
+* the protocol around it: `flushSyncInner` (3812-4040), `pullSyncInner`
+  (4248-4596), `deleteGameEverywhere` (4719-4743), `renameGame` (4839-4973),
+  `applyRemoteRename` (4048-4127), `bumpRecentIndex` (6444-6473) via import
+  (`addRecentRom` 6488) and play (`touchRecent` 6507), and `downloadGame`
+  (4616-4676). Every `await` that matters is an event boundary. Fixed: both
   commits re-merge the library they adopt with the device's library as it is
-  *now*, in the same segment, under `updateRecent` (6217, flush 3971, pull
-  4483), the one lock every "recent" read-modify-write goes through;
-  `renameGame` stamps the renamed entry `imp: ts` (4887).
-* Fixed after a two-device UI run (the Sync button, `runFullSync` 4547, is
+  *now*, in the same segment, under `updateRecent` (6290, flush 4014, pull
+  4534), the one lock every "recent" read-modify-write goes through;
+  `renameGame` stamps the renamed entry `imp: ts` (4946).
+* Fixed after a two-device UI run (the Sync button, `runFullSync` 4598, is
   the `syncTap` event): the flush's upload pass asks the library it merged
-  (3881-3885) and leaves a deleted game's keys off Drive, a renamed game's
+  (3924-3928) and leaves a deleted game's keys off Drive, a renamed game's
   queued for the pull to move; the pull's commit queues the deletion of every
-  Drive file of a game the library it adopts has deleted (4495-4502). Before,
+  Drive file of a game the library it adopts has deleted (4546-4553). Before,
   a device that had not pulled a delete put the game back on Drive for good.
 * Since 2026-10-01 (da1d7c55) neither sync writes the library when the merge
-  leaves it, to the byte, as the one copy it read (`libraryUnchanged` 3330:
-  `readDriveLibrary` 3314 keeps the text when the listing had one copy; the
-  flush skips its second listing and the write at 3960-3962, the pull its
-  write at 4529). Modelled: `seen` is what the read read, and `flushKeep` /
+  leaves it, to the byte, as the one copy it read (`libraryUnchanged` 3373:
+  `readDriveLibrary` 3357 keeps the text when the listing had one copy; the
+  flush skips its second listing and the write at 4003-4005, the pull its
+  write at 4580). Modelled: `seen` is what the read read, and `flushKeep` /
   `pullKeep` are the commits' paths with no write, enabled only when the
   library equals `seen`. Both write paths stay enabled too (a copy written in
   another key order, by an older build, differs in text though not in
@@ -51,7 +66,7 @@ markers), where outputs come from (no tombstone or marker is invented), and
 that the whole merge, markers included, is idempotent (Layer 1d).
 
 Layer 2 (protocol) models two devices and Drive with no compare-and-swap
-(`driveUploadFile` 2744 sends no If-Match / revision precondition), proves the
+(`driveUploadFile` 2784 sends no If-Match / revision precondition), proves the
 Drive lost-update race only delays a tombstone, that no step drops a
 tombstone a device holds except for a newer play or the person's own rename
 or delete, and replays every finding's trace against the fixed code.
@@ -82,6 +97,10 @@ Results in one place:
   `rename_moves_everything`, `race_delays_tomb`.
 * the unchanged library left unwritten: `keep_leaves_drive`,
   `keep_eq_write`, `pullKeep_eq_write`, `keep_spares_newer_write`.
+* the pull's save writes (bfe5d5c5): `pullSave_skips_away`,
+  `regress_pull_after_rename_orphans_save`; still refuted (found catching up
+  to 5ea4d552): `bug_remote_rename_into_away_name_skips_saves`,
+  `bug_download_into_away_name_skips_saves`, `bug_away_not_vacant`.
 * the findings' traces, fixed: `regress_delete_during_flush`,
   `regress_delete_during_pull`, `regress_import_during_pull`,
   `regress_rename_during_pull`, `regress_rename_undo_settles` (a sync cycle is
@@ -100,47 +119,53 @@ Results in one place:
   state and statemeta keys all behave like `save:` in every modelled branch;
   `art:`/`frame:`/`stateauto:` (the session)/cheats are not needed for any
   stated property). The flush's hold-back of a session another device wrote
-  unseen (3908-3920) is `WebState/Handoff`'s: it only leaves a session key
+  unseen (3951-3963) is `WebState/Handoff`'s: it only leaves a session key
   queued and unsent.
-* A flush's three queue passes (renames 3819-3842, deletes 3843-3864,
-  uploads 3867-3958) are one event, deciding against Drive as it is at that
+* A flush's three queue passes (renames 3862-3885, deletes 3886-3907,
+  uploads 3910-4001) are one event, deciding against Drive as it is at that
   moment; the delete-stamp outrank (`delTs`) is not modelled (it only drops
   deletes, never adds tombstones). The upload pass now runs up to
-  `SYNC_PARALLEL` keys at once (`runPool` 2783), each key's checks and
+  `SYNC_PARALLEL` keys at once (`runPool` 2823), each key's checks and
   bookkeeping touching only its own queue entry, `sigs`, `rmt` and delete
   stamp, so the one atomic pass stands for any order of them. A ROM Drive
   already holds at this generation and whose bytes this device knows
-  (3902-3906) leaves the queue unread: what `upFile` does with a present ROM.
-* A pull's rename pass (one `dbMoveKeys` transaction per marker, 4221-4249)
-  is one event; the per-game save/picture download pass (its downloads now
-  started ahead, `downloadAhead` 2801, and which games are here read from
-  the keys, `romsHere` 4366, not by loading each ROM; its check that a key
-  queued for deletion is not written back, 4449) and the ROM byte budget are
-  not modelled; nor are the setting riding the pull (`syncSaveHook` 4215)
-  and the hand-off of the game in memory (4314-4358, `WebState/Handoff`).
+  (3945-3949) leaves the queue unread: what `upFile` does with a present ROM.
+* A pull's rename pass (one `dbMoveKeys` transaction per marker, 4268-4296)
+  is one event. Of the per-game download pass (its downloads started ahead,
+  `downloadAhead` 2841) only the saves' writes are modelled: `pullScan` is its
+  listing of the local keys (`localSyncFiles` + `romsHere`, 4410-4413), and
+  `pullSave d g` is one save's write segment, which may run at any time
+  after it and before the commit (the download awaited before it is folded
+  in: Drive's file is the one the pull listed). It writes only for a game
+  whose ROM was here at the scan, and skips a key queued for deletion (4496)
+  and a name renamed away (4500); its other checks (the game loaded or
+  loading, unchanged on Drive, an older generation, the same bytes) only drop
+  writes. Pictures, sessions and kept saves (the same write, other kinds) and
+  the ROM byte budget are not modelled; nor are the setting riding the pull (`syncSaveHook` 4262)
+  and the hand-off of the game in memory (4361-4405, `WebState/Handoff`).
   `renPending` (a link session blocking a migration) is never set, as no
   link session is modelled.
 * `deleteGameEverywhere`, `renameGame`, import and play are atomic events:
   each writes "recent" (and the sync state) inside one `updateRecent`
   section, which the commits also take, so no commit interleaves with them.
-* The flush trigger guard (`pendingCount() || tomb || ren`, 3777) is
+* The flush trigger guard (`pendingCount() || tomb || ren`, 3820) is
   dropped: any save a player makes queues an upload, so a flush can always
   be triggered.
 * A battery or session write with no launch (the 5 s autosave, and the one
-  `runFullSync` now makes of the game in memory before it queues, 4549-4554)
+  `runFullSync` now makes of the game in memory before it queues, 4600-4605)
   touches only the store and the upload queue, never "recent", tombstones or
   markers; `play` (a launch plus a save) is the event that writes "recent",
   and no stated property depends on the store beyond what `play` exercises.
-* The "removed on another device" modal (`confirmTombstones` 5105) is the
+* The "removed on another device" modal (`confirmTombstones` 5165) is the
   `restore` flag of `pullTombs`; the traces take "Continue". The wrappers
-  `deleteGameAction` (2151) and `downloadGameAction` (2112, now through
-  `fetchTileGame` 7108, which signs in and calls `downloadGame` once however
+  `deleteGameAction` (2154) and `downloadGameAction` (2115, now through
+  `fetchTileGame` 7182, which signs in and calls `downloadGame` once however
   many taps join it) add only an unload, a tile's progress and toasts.
-  "Remove from this device" (`removeGameFromDevice` 4631) raises no
+  "Remove from this device" (`removeGameFromDevice` 4682) raises no
   tombstone and does not touch the library, so it is not an event here.
 * The Drive listing is taken as complete and as holding one "library" file:
-  `driveListAll` (2663) follows `nextPageToken`, and `driveListMap` /
-  `readDriveLibrary` / `writeDriveLibrary` (3285-3344) merge every copy two
+  `driveListAll` (2703) follows `nextPageToken`, and `driveListMap` /
+  `readDriveLibrary` / `writeDriveLibrary` (3328-3387) merge every copy two
   devices created, write the oldest and delete the ones they merged. With
   more than one copy `libraryText` is not kept and the write always runs.
 * Sessions (sign out / in, another account) are `DriveSession`'s: here one
@@ -171,7 +196,7 @@ structure Ren where
   ts : Nat
 deriving DecidableEq, Repr
 
-/-- The Drive file "library": `{ recents, tomb, ren }` (web/index.js 3317-3321, as `readDriveLibrary` reads it). -/
+/-- The Drive file "library": `{ recents, tomb, ren }` (web/index.js 3360-3364, as `readDriveLibrary` reads it). -/
 structure Lib where
   recents : List Entry
   tomb : List Tomb
@@ -266,14 +291,14 @@ end JMap
 
 /-! ## Stable sorts (`Array.prototype.sort` is stable since ES2019) -/
 
-/-- Insert for the descending sort `(x, y) => y.ts - x.ts` (web/index.js 3460). -/
+/-- Insert for the descending sort `(x, y) => y.ts - x.ts` (web/index.js 3503). -/
 def insDesc (x : Entry) : List Entry → List Entry
   | [] => [x]
   | y :: ys => if y.ts ≤ x.ts then x :: y :: ys else y :: insDesc x ys
 
 def sortDesc (l : List Entry) : List Entry := l.foldr insDesc []
 
-/-- Insert for the ascending sort `(x, y) => x.ts - y.ts` (web/index.js 3407). -/
+/-- Insert for the ascending sort `(x, y) => x.ts - y.ts` (web/index.js 3450). -/
 def insAsc (x : Ren) : List Ren → List Ren
   | [] => [x]
   | y :: ys => if x.ts ≤ y.ts then x :: y :: ys else y :: insAsc x ys
@@ -334,9 +359,9 @@ theorem foldl_sortDesc {β : Type} (f : β → Entry → β)
     simp only [List.foldl]
     exact ih _
 
-/-! ## `mergeLibrary` (web/index.js 3380-3464), line for line -/
+/-! ## `mergeLibrary` (web/index.js 3423-3507), line for line -/
 
-/-- One pass of the recents loop (3382-3395): the newest play wins the entry;
+/-- One pass of the recents loop (3425-3438): the newest play wins the entry;
 the newest import claim from either side is kept alongside it. -/
 def recStep (m : JMap Entry) (e : Entry) : JMap Entry :=
   let prev := m.get e.name
@@ -350,7 +375,7 @@ def recStep (m : JMap Entry) (e : Entry) : JMap Entry :=
     | none => m1
   else m1
 
-/-- The marker loop (3397-3404): newest marker per old name wins; a tie keeps
+/-- The marker loop (3440-3447): newest marker per old name wins; a tie keeps
 the one seen first. Self-renames are skipped. -/
 def renStep (m : JMap Ren) (r : Ren) : JMap Ren :=
   if r.src = r.dst then m else
@@ -382,13 +407,13 @@ def applyRen (st : JMap Entry × JMap Ren × List Nat) (r : Ren) : JMap Entry ×
         | some t => if t.ts < e.ts then bn.set r.dst ⟨r.dst, e.ts, e.imp⟩ else bn
       (claim bn' r.dst r.ts, if r.dst ∈ st.2.2 then st.2.1.del r.dst else st.2.1, st.2.2 ++ [r.src])
 
-/-- The tombstone loop (3437-3446): newest per name, a tie keeps the first. -/
+/-- The tombstone loop (3480-3489): newest per name, a tie keeps the first. -/
 def tombStep (m : JMap Tomb) (t : Tomb) : JMap Tomb :=
   match m.get t.name with
   | none => m.set t.name t
   | some p => if t.ts > p.ts then m.set t.name t else m
 
-/-- The prune loop (3447-3458): a newer entry supersedes the tombstone,
+/-- The prune loop (3490-3501): a newer entry supersedes the tombstone,
 otherwise the tombstone removes the entry. -/
 def pruneStep (st : JMap Entry × JMap Tomb) (n : Nat) : JMap Entry × JMap Tomb :=
   match st.2.get n with
@@ -1397,7 +1422,7 @@ theorem merge_rename_beats_delete_of_old_name :
     names m.recents = [2] ∧ m.tomb = [⟨1, 11⟩] := by decide
 
 /-- Delete then re-add: an import after the tombstone revives the game and
-retires the tombstone; one in the same millisecond does not (`>` at 3456). -/
+retires the tombstone; one in the same millisecond does not (`>` at 3499). -/
 theorem merge_readd_after_delete :
     (mergeLibrary ⟨[], [⟨1, 5⟩], []⟩ ⟨[⟨1, 7, 7⟩], [], []⟩) = ⟨[⟨1, 7, 7⟩], [], []⟩ ∧
     (mergeLibrary ⟨[], [⟨1, 5⟩], []⟩ ⟨[⟨1, 5, 5⟩], [], []⟩) = ⟨[], [⟨1, 5⟩], []⟩ := by decide
@@ -2096,24 +2121,24 @@ def putItem (l : List Item) (i : Item) : List Item := l.filter (fun j => j.key !
 /-- The continuation a device's `runExclusive` chain has in flight. -/
 inductive Pend where
   | idle
-  /-- flushSyncInner after `driveListMap` + `readDriveLibrary` (3787-3790). -/
+  /-- flushSyncInner after `driveListMap` + `readDriveLibrary` (3830-3833). -/
   | fRead (d : Lib)
-  /-- ...after `localLibrary` and the merge; queues settled (3790-3817). -/
+  /-- ...after `localLibrary` and the merge; queues settled (3833-3860). -/
   | fMerged (lib : Lib) (revived : List Nat)
-  /-- ...after the rename/delete/upload passes (3819-3958). -/
+  /-- ...after the rename/delete/upload passes (3862-4001). -/
   | fFiles (lib : Lib) (revived : List Nat)
-  /-- ...after `writeDriveLibrary` landed (3960-3962), or was skipped as
+  /-- ...after `writeDriveLibrary` landed (4003-4005), or was skipped as
   unchanged (`flushKeep`). -/
   | fWritten (lib : Lib) (revived : List Nat)
-  /-- pullSyncInner after `driveListMap` + `readDriveLibrary` (4213-4216). -/
+  /-- pullSyncInner after `driveListMap` + `readDriveLibrary` (4260-4263). -/
   | pRead (d : Lib) (remote : List Item)
   | pMerged (lib : Lib) (remote : List Item)
-  /-- ...after the remote-rename pass (4218-4249). -/
+  /-- ...after the remote-rename pass (4265-4296). -/
   | pRenamed (lib : Lib) (remote : List Item)
-  /-- ...after the "removed on another device" modal (4251-4281). -/
+  /-- ...after the "removed on another device" modal (4298-4328). -/
   | pTombed (lib : Lib) (remote : List Item)
   /-- ...after tomb/ren/recent were adopted; `writeDriveLibrary` pending
-  (4483-4529), or skipped as unchanged (`pullKeep`). -/
+  (4534-4580), or skipped as unchanged (`pullKeep`). -/
   | pCommitted (lib : Lib)
 deriving DecidableEq, Repr
 
@@ -2134,14 +2159,20 @@ structure Dev where
   qRen : List (Key × Key)
   /-- the op in flight on `syncChain` -/
   pend : Pend
-  /-- ghost: "…is now…— renamed on another device" toasts shown (4246) -/
+  /-- ghost: "…is now…— renamed on another device" toasts shown (4293) -/
   toasts : Nat
-  /-- `libraryText` of the running sync's listing (3302, 3314): the library
-  its read read, which `libraryUnchanged` (3330) compares the merge with -/
+  /-- `libraryText` of the running sync's listing (3345, 3357): the library
+  its read read, which `libraryUnchanged` (3373) compares the merge with -/
   seen : Lib
+  /-- `renamedAway` (4837, bfe5d5c5): the names this session renamed a game
+  away from, until a rename into one or a fresh import claims it again -/
+  away : List Nat
+  /-- the running pull's `romsHere` (4410-4413): the games whose ROM was here when
+  its download pass listed the local keys; `none` until it has -/
+  scan : Option (List Nat)
 deriving DecidableEq, Repr
 
-def Dev.empty : Dev := ⟨[], [], [], [], [], [], [], .idle, 0, Lib.empty⟩
+def Dev.empty : Dev := ⟨[], [], [], [], [], [], [], .idle, 0, Lib.empty, [], none⟩
 
 structure St where
   d0 : Dev
@@ -2181,7 +2212,7 @@ def St.setDev (s : St) : Bool → Dev → St
     (s.setDev d v).deleted = s.deleted := by
   cases d <;> rfl
 
-/-- `localLibrary()` (3466-3470). -/
+/-- `localLibrary()` (3509-3513). -/
 def localLib (dv : Dev) : Lib := ⟨dv.recent, dv.tomb, dv.ren⟩
 
 inductive Ev where
@@ -2189,7 +2220,7 @@ inductive Ev where
   | flushMerge (d : Bool)
   | flushFiles (d : Bool)
   | flushWrite (d : Bool)
-  /-- `libraryUnchanged(lib, remote)` (3960): the merge is the library read,
+  /-- `libraryUnchanged(lib, remote)` (4003): the merge is the library read,
   and neither the second listing nor the write is sent -/
   | flushKeep (d : Bool)
   | flushCommit (d : Bool)
@@ -2199,8 +2230,13 @@ inductive Ev where
   | pullTombs (d : Bool) (restore : Bool)
   | pullCommit (d : Bool)
   | pullWrite (d : Bool)
-  /-- `libraryUnchanged(lib, remote)` (4529): no write -/
+  /-- `libraryUnchanged(lib, remote)` (4580): no write -/
   | pullKeep (d : Bool)
+  /-- the download pass lists the local keys (`localSyncFiles`, `romsHere`) -/
+  | pullScan (d : Bool)
+  /-- the download pass's write segment for `save:g` (the download itself
+  awaited before it, any time after the scan) -/
+  | pullSave (d : Bool) (g : Nat)
   | delete (d : Bool) (g : Nat)
   | rename (d : Bool) (a b : Nat)
   | importRom (d : Bool) (g blob : Nat)
@@ -2211,9 +2247,9 @@ inductive Ev where
   | syncTap (d : Bool)
 deriving DecidableEq, Repr
 
-/-! ### flushSyncInner (3769-3997) -/
+/-! ### flushSyncInner (3812-4040) -/
 
-/-- 3790-3817: merge, then cancel the queued deletes of revived games and the
+/-- 3833-3860: merge, then cancel the queued deletes of revived games and the
 queued renames of spent markers. -/
 def flushMergeDev (dv : Dev) (D : Lib) : Dev :=
   let lib := mergeLibrary D (localLib dv)
@@ -2223,7 +2259,7 @@ def flushMergeDev (dv : Dev) (D : Lib) : Dev :=
             qRen := dv.qRen.filter (fun q => !spent.contains q.1.1),
             pend := .fMerged lib revived }
 
-/-- One queued file rename (3820-3841). -/
+/-- One queued file rename (3863-3884). -/
 def renFile (acc : Dev × List Item) (q : Key × Key) : Dev × List Item :=
   let (dv, files) := acc
   if hasKey files q.1 then
@@ -2233,7 +2269,7 @@ def renFile (acc : Dev × List Item) (q : Key × Key) : Dev × List Item :=
     ({ dv with qUp := dv.qUp ++ [q.2] }, files)                            -- upload instead
   else (dv, files)
 
-/-- One queued upload (3867-3958): a missing file uploads; a present ROM is
+/-- One queued upload (3910-4001): a missing file uploads; a present ROM is
 never re-sent; anything else re-uploads. -/
 def upFile (dv : Dev) (files : List Item) (k : Key) : List Item :=
   match dv.store.find? (fun i => i.key == k) with
@@ -2250,7 +2286,7 @@ def flushPrePass (dv : Dev) (files : List Item) : Dev × List Item :=
   let (dv1, f1) := dv.qRen.foldl renFile (dv, files)
   (dv1, f1.filter (fun i => !dv1.qDel.contains i.key))
 
-/-- 3819-3958 as one event: renames, then deletes, then uploads. The upload
+/-- 3862-4001 as one event: renames, then deletes, then uploads. The upload
 pass asks the library the flush merged (`lib`): a deleted game's keys leave
 the queue unsent, a renamed game's wait in it for the pull to move them. -/
 def flushFilesDev (dv : Dev) (files : List Item) (lib : Lib) : Dev × List Item :=
@@ -2269,10 +2305,11 @@ def flushCommitDev (dv : Dev) (lib : Lib) (revived : List Nat) : Dev :=
             recent := if revived.isEmpty || add.isEmpty then dv.recent else sortDesc (dv.recent ++ add),
             pend := .idle }
 
-/-! ### pullSyncInner (4201-4545) -/
+/-! ### pullSyncInner (4248-4596) -/
 
-/-- `applyRemoteRename(r.from, r.to)` (4005-4084) plus the queueing of
-old-name Drive files that follows it (4228-4238). -/
+/-- `applyRemoteRename(r.from, r.to)` (4048-4127) plus the queueing of
+old-name Drive files that follows it (4275-4285). It
+makes no claim on `r.to`: `away` is left as it was. -/
 def remoteRename (remote : List Item) (dv : Dev) (r : Ren) : Dev :=
   if !dv.store.any (fun i => i.game == r.src) then dv else           -- hasAnyLocalRecord
   -- dbMoveKeys(..., { skipCollisions: true })
@@ -2281,7 +2318,7 @@ def remoteRename (remote : List Item) (dv : Dev) (r : Ren) : Dev :=
       (acc.1.map (fun i => if i.key == (r.src, k) then { i with game := r.dst } else i), acc.2 + 1)
     else acc
   let (st1, moved) := kinds.foldl mv (dv.store, 0)
-  -- collided pairs holding identical bytes: the old-name copy is dropped (4074-4082)
+  -- collided pairs holding identical bytes: the old-name copy is dropped (4117-4125)
   let st2 := st1.filter (fun i => !(i.game == r.src &&
                 st1.any (fun j => j.key == (r.dst, i.kind) && j.blob == i.blob)))
   let mapKey : Key → Key := fun k => if k.1 == r.src then (r.dst, k.2) else k
@@ -2292,7 +2329,7 @@ def remoteRename (remote : List Item) (dv : Dev) (r : Ren) : Dev :=
   { dv with store := st2, qUp := dedup (dv.qUp.map mapKey), qDel := dedup (dv.qDel.map mapKey),
             qRen := qRen2, toasts := dv.toasts + (if moved > 0 then 1 else 0) }
 
-/-- 4251-4281: "Games removed on another device". -/
+/-- 4298-4328: "Games removed on another device". -/
 def pullTombsDev (dv : Dev) (lib : Lib) (remote : List Item) (restore : Bool) (now : Nat) : Dev :=
   let pending := (lib.tomb.filter (fun t => dv.store.any (fun i => i.game == t.name))).map (·.name)
   if pending.isEmpty then { dv with pend := .pTombed lib remote }
@@ -2321,7 +2358,7 @@ def pullCommitDev (dv : Dev) (lib : Lib) (remote : List Item) : Dev :=
 
 /-! ### The user's actions -/
 
-/-- `deleteGameEverywhere` (4668-4692), signed in. -/
+/-- `deleteGameEverywhere` (4719-4743), signed in. -/
 def deleteDev (dv : Dev) (g now : Nat) : Dev :=
   { dv with store := dv.store.filter (fun i => i.game != g),
             recent := dv.recent.filter (fun r => r.name != g),
@@ -2329,7 +2366,7 @@ def deleteDev (dv : Dev) (g now : Nat) : Dev :=
             qUp := dv.qUp.filter (fun k => k.1 != g),
             tomb := dv.tomb.filter (fun t => t.name != g) ++ [⟨g, now⟩] }
 
-/-- `renameGame` (4783-4913) past its checks: one `dbMoveKeys` transaction
+/-- `renameGame` (4839-4973) past its checks: one `dbMoveKeys` transaction
 moves every record, writes "recent" and the new sync state. -/
 def renameOk (dv : Dev) (a b : Nat) : Bool :=
   a != b && !dv.recent.any (fun r => r.name == b) && !dv.store.any (fun i => i.game == b)
@@ -2346,9 +2383,11 @@ def renameDev (dv : Dev) (a b now : Nat) : Dev :=
     qDel := dv.qDel.filter (fun k => !(mirrored.map newOf).contains k),
     qRen := dv.qRen ++ mirrored.map (fun k => (k, (b, k.2))),
     tomb := dv.tomb.filter (fun t => t.name != a && t.name != b),
-    ren := dv.ren.filter (fun r => r.src != a && r.src != b) ++ [⟨a, b, now⟩] }
+    ren := dv.ren.filter (fun r => r.src != a && r.src != b) ++ [⟨a, b, now⟩],
+    -- `renamedAway.add(oldName); renamedAway.delete(newName)` (bfe5d5c5)
+    away := addUniq (dv.away.filter (· != b)) a }
 
-/-- `bumpRecentIndex` (6371-6399). -/
+/-- `bumpRecentIndex` (6444-6473). -/
 def bump (dv : Dev) (g now : Nat) (fresh : Bool) : List Entry :=
   let prev := dv.recent.find? (fun r => r.name == g)
   let ts := if fresh then now else
@@ -2358,10 +2397,11 @@ def bump (dv : Dev) (g now : Nat) (fresh : Bool) : List Entry :=
   let imp := if fresh then now else (prev.map (·.imp)).getD 0
   ⟨g, ts, imp⟩ :: dv.recent.filter (fun r => r.name != g)
 
-/-- `addRecentRom` (6414-6430): ROM bytes, then a fresh import, then upload. -/
+/-- `addRecentRom` (6488-6504): ROM bytes, then a fresh import, then upload. -/
 def importDev (dv : Dev) (g blob now : Nat) : Dev :=
   let st := putItem dv.store ⟨g, 0, blob⟩
-  { dv with store := st, recent := bump dv g now true,
+  -- bumpRecentIndex's `if (fresh) renamedAway.delete(name)` (bfe5d5c5)
+  { dv with store := st, recent := bump dv g now true, away := dv.away.filter (· != g),
             qUp := ((st.filter (fun i => i.game == g)).map Item.key).foldl addUniq dv.qUp }
 
 /-- A launch (`touchRecent`) and a battery save (`persistSave` + `markUpload`). -/
@@ -2369,11 +2409,37 @@ def playDev (dv : Dev) (g blob now : Nat) : Dev :=
   { dv with recent := bump dv g now false, store := putItem dv.store ⟨g, 1, blob⟩,
             qUp := addUniq dv.qUp (g, 1) }
 
-/-- `downloadGame` (4565-4625). -/
+/-- `downloadGame` (4616-4676). No claim on the name: `bumpRecentIndex(game, { gen })`
+(4663) is not `fresh`, so `away` is left as it was. -/
 def downloadDev (dv : Dev) (files : List Item) (g now : Nat) : Dev :=
   let fs := files.filter (fun f => f.game == g)
   if fs.isEmpty then dv
   else { dv with store := fs.foldl putItem dv.store, recent := bump dv g now false }
+
+/-- `romsHere` (4413): the games whose ROM key is here. -/
+def romsHere (dv : Dev) : List Nat := dv.store.filterMap (fun i => if i.kind == 0 then some i.game else none)
+
+/-- The download pass lists the local keys once its tomb pass is done. -/
+def pullScanDev (dv : Dev) : Dev :=
+  match dv.pend with
+  | .pTombed _ _ => { dv with scan := some (romsHere dv) }
+  | _ => dv
+
+/-- The download pass's write of `save:g` (4426-4509): only a game whose ROM
+was here at the scan (4454-4458), and in the segment that writes, not a key
+queued for deletion (4496) and, since bfe5d5c5 (`fix`), not a name this
+session renamed away from (4500). Its other checks (the game loaded or
+loading, unchanged on Drive, an older generation, the same bytes) only drop
+writes. Drive's file is the one the pull listed (`remote`). -/
+def pullSaveDev (fix : Bool) (dv : Dev) (g : Nat) : Dev :=
+  match dv.pend, dv.scan with
+  | .pTombed _ remote, some here =>
+    match remote.find? (fun i => i.key == (g, 1)) with
+    | some i =>
+      if here.contains g && !dv.qDel.contains (g, 1) && !(fix && dv.away.contains g)
+      then { dv with store := putItem dv.store i } else dv
+    | none => dv
+  | _, _ => dv
 
 /-- `runFullSync`'s queueing: every key this device holds. -/
 def syncTapDev (dv : Dev) : Dev := { dv with qUp := (dv.store.map Item.key).foldl addUniq dv.qUp }
@@ -2410,7 +2476,7 @@ def step (s : St) : Ev → St
     | _ => s
   | .pullRead d =>
     match (s.dev d).pend with
-    | .idle => s.setDev d { s.dev d with pend := .pRead s.lib s.files, seen := s.lib }
+    | .idle => s.setDev d { s.dev d with pend := .pRead s.lib s.files, seen := s.lib, scan := none }
     | _ => s
   | .pullMerge d =>
     match (s.dev d).pend with
@@ -2451,6 +2517,8 @@ def step (s : St) : Ev → St
     else s
   | .download d g => { s.setDev d (downloadDev (s.dev d) s.files g s.now) with now := s.now + 1 }
   | .syncTap d => s.setDev d (syncTapDev (s.dev d))
+  | .pullScan d => s.setDev d (pullScanDev (s.dev d))
+  | .pullSave d g => s.setDev d (pullSaveDev true (s.dev d) g)
 
 def run (s : St) (es : List Ev) : St := es.foldl step s
 
@@ -2596,6 +2664,16 @@ theorem downloadDev_tp (dv : Dev) (F : List Item) (g n : Nat) :
     (downloadDev dv F g n).tomb = dv.tomb := (downloadDev_tp dv F g n).1
 @[simp] theorem downloadDev_pend (dv : Dev) (F : List Item) (g n : Nat) :
     (downloadDev dv F g n).pend = dv.pend := (downloadDev_tp dv F g n).2
+
+theorem pullScanDev_tp (dv : Dev) : (pullScanDev dv).tomb = dv.tomb ∧ (pullScanDev dv).pend = dv.pend := by
+  unfold pullScanDev; split <;> exact ⟨rfl, rfl⟩
+theorem pullSaveDev_tp (f : Bool) (dv : Dev) (g : Nat) :
+    (pullSaveDev f dv g).tomb = dv.tomb ∧ (pullSaveDev f dv g).pend = dv.pend := by
+  unfold pullSaveDev; split
+  · split
+    · split <;> exact ⟨rfl, rfl⟩
+    · exact ⟨rfl, rfl⟩
+  · exact ⟨rfl, rfl⟩
 
 theorem pullTombsDev_sub (dv : Dev) (lib : Lib) (R : List Item) (r : Bool) (n : Nat) :
     ∀ t ∈ devTombs (pullTombsDev dv lib R r n), t ∈ dv.tomb ∨ t ∈ lib.tomb := by
@@ -2821,6 +2899,12 @@ theorem step_tombs (s : St) (e : Ev) :
   | syncTap d =>
     left; dsimp only [step] at ht
     exact setDev_sub s d (syncTapDev (s.dev d)) (dsub_same _ _ rfl rfl) ht
+  | pullScan d =>
+    left; dsimp only [step] at ht
+    exact setDev_sub s d _ (dsub_same _ _ (pullScanDev_tp _).1 (pullScanDev_tp _).2) ht
+  | pullSave d g =>
+    left; dsimp only [step] at ht
+    exact setDev_sub s d _ (dsub_same _ _ (pullSaveDev_tp _ _ _).1 (pullSaveDev_tp _ _ _).2) ht
 
 theorem step_deleted_sub (s : St) (e : Ev) : ∀ t ∈ s.deleted, t ∈ (step s e).deleted := by
   intro t ht
@@ -2862,6 +2946,7 @@ def Ev.dev : Ev → Bool
   | .pullKeep d => d
   | .delete d _ | .rename d _ _ | .importRom d _ _ | .play d _ _ | .download d _ => d
   | .syncTap d => d
+  | .pullScan d | .pullSave d _ => d
 
 /-- **The other device cannot touch this one's sync state**: in particular a
 Drive lost update can take a tombstone or marker off Drive, never out of the
@@ -3019,6 +3104,16 @@ theorem step_keeps_tomb (s : St) (e : Ev) (d : Bool) (t : Tomb) (ht : t ∈ (s.d
     exact Or.inl (keep (by
       have : ((step s (.syncTap d')).dev d') = syncTapDev (s.dev d') := by cases d' <;> rfl
       rw [this]; rfl))
+  | pullScan d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by
+      have : ((step s (.pullScan d')).dev d') = pullScanDev (s.dev d') := by cases d' <;> rfl
+      rw [this]; exact (pullScanDev_tp _).1))
+  | pullSave d' g =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by
+      have : ((step s (.pullSave d' g)).dev d') = pullSaveDev true (s.dev d') g := by cases d' <;> rfl
+      rw [this]; exact (pullSaveDev_tp _ _ _).1))
 
 
 theorem step_flushRead_of (s : St) (d : Bool) (h : (s.dev d).pend = .idle) :
@@ -3312,6 +3407,103 @@ theorem regress_rename_during_pull :
     s.lib.ren = [⟨1, 2, 2⟩] ∧ s.files = [⟨2, 0, 10⟩] := by
   decide
 
+/-! ### The pull's save writes and `renamedAway` (bfe5d5c5)
+
+The download pass's write segment (`pullSave`, `pullSaveDev`) skips a name
+this session renamed a game away from (`away`). -/
+
+/-- A pull with its download pass: the scan, then the save writes of `gs`. -/
+def pullS (d : Bool) (gs : List Nat) : List Ev :=
+  [.pullRead d, .pullMerge d, .pullRenames d, .pullTombs d false, .pullScan d] ++
+  gs.map (fun g => Ev.pullSave d g) ++ [.pullCommit d, .pullWrite d]
+
+/-- **No pull writes under a name this session renamed away from.** -/
+theorem pullSave_skips_away (s : St) (d : Bool) (g : Nat) (h : g ∈ (s.dev d).away) :
+    step s (.pullSave d g) = s := by
+  have hd : pullSaveDev true (s.dev d) g = s.dev d := by
+    unfold pullSaveDev
+    split
+    · split
+      · simp [h]
+      · rfl
+    · rfl
+  simp only [step, hd]
+  cases d <;> cases s <;> rfl
+
+/-- Device 0 imports 1 (ROM 10, save 11) and syncs; device 1 downloads it,
+plays (save 12) and flushes. Device 0's pull lists its local keys, the person
+renames 1 to 2 while the save downloads, and the write segment runs. -/
+def setupS : List Ev := [.importRom false 1 10, .play false 1 11] ++ flush false ++ pull true ++
+  [.download true 1, .play true 1 12] ++ flush true
+def raceS : List Ev := [.pullRead false, .pullMerge false, .pullRenames false,
+  .pullTombs false false, .pullScan false, .rename false 1 2]
+
+/-- **Fixed (bfe5d5c5): a save downloading during a rename does not land
+under the old name.** Before, the write put device 1's save under 1 beside the
+moved game (an orphan, `pullSaveDev false`), and renaming 2 back to 1 was then
+refused ("already exists"); the save form of Thumbnails'
+`bug_pull_after_rename_orphans_frame`. Now nothing lands under 1, the rename
+back is allowed, and the save stays on Drive under 1 for the rename's flush to
+move. -/
+theorem regress_pull_after_rename_orphans_save :
+    let s := run init (setupS ++ raceS)
+    let old := pullSaveDev false s.d0 1
+    (⟨1, 1, 12⟩ : Item) ∈ old.store ∧ renameOk old 2 1 = false ∧
+    let s2 := run s [.pullSave false 1, .pullCommit false, .pullWrite false]
+    s2.d0.store.all (·.game != 1) ∧ renameOk s2.d0 2 1 = true ∧ (⟨1, 1, 12⟩ : Item) ∈ s2.files := by
+  decide
+
+/-- Found modelling bfe5d5c5: `renamedAway` is cleared only by a rename into
+the name and by a fresh import (`bumpRecentIndex`'s `fresh`), but a game can
+come back under the name two other ways. Device 0 holds A (1) and X (3) and
+renames A to B (2); device 1 renames X into the freed A, and device 0's pull
+applies that rename (`applyRemoteRename`, 4048, no claim): device 0 holds X
+under 1, with 1 still renamed away. Device 1 plays it (save 31) and syncs. -/
+def setupRA : List Ev := [.importRom false 1 10, .importRom false 3 30] ++ flush false ++
+  pull true ++ [.download true 3, .rename false 1 2] ++ flush false ++ pull true ++
+  [.rename true 3 1] ++ flush true ++ pull false ++ [.play true 1 31] ++ flush true
+
+/-- **Refuted: a name another device's rename brought back stays renamed
+away**, and device 0's pulls skip its save for the rest of the session (each
+one, as the skip records nothing): device 0 holds the game's ROM under 1 and
+never gets Drive's save 31. A play there then starts from no save, and its
+flush (blind for saves) puts 32 over 31 on Drive: device 1's progress is
+lost. -/
+theorem bug_remote_rename_into_away_name_skips_saves :
+    let s := run init (setupRA ++ pullS false [1] ++ pullS false [1])
+    s.d0.away = [1] ∧ hasKey s.d0.store (1, 0) = true ∧ hasKey s.d0.store (1, 1) = false ∧
+    (⟨1, 1, 31⟩ : Item) ∈ s.files ∧
+    let s2 := run s ([.play false 1 32] ++ flush false)
+    (⟨1, 1, 31⟩ : Item) ∉ s2.files ∧ (⟨1, 1, 32⟩ : Item) ∈ s2.files := by
+  decide
+
+/-- The same through `downloadGame` (4616, `bumpRecentIndex` without
+`fresh`): device 0 renames 1 to 2; device 1 imports another game as 1 and
+plays it (save 21); device 0 downloads that Drive-only tile, so it holds 1
+with 1 still renamed away. Device 1 plays on (save 22); device 0's pull skips
+it and keeps 21. -/
+def setupRB0 : List Ev := [.importRom false 1 10] ++ flush false ++ [.rename false 1 2] ++
+  flush false ++ pull true ++ [.importRom true 1 20, .play true 1 21] ++ flush true ++
+  pull false ++ [.download false 1]
+def setupRB : List Ev := setupRB0 ++ [.play true 1 22] ++ flush true
+
+theorem bug_download_into_away_name_skips_saves :
+    let s := run init (setupRB ++ pullS false [1])
+    s.d0.away = [1] ∧ (⟨1, 0, 20⟩ : Item) ∈ s.d0.store ∧ (⟨1, 1, 21⟩ : Item) ∈ s.d0.store ∧
+    (⟨1, 1, 22⟩ : Item) ∈ s.files ∧ (⟨1, 1, 22⟩ : Item) ∉ s.d0.store := by
+  decide
+
+/-- What the claim rule means: a name this session renamed away from holds no
+record here (so skipping its downloads loses nothing). Both traces break it
+before their last pull. -/
+def AwayVacant (dv : Dev) : Prop := ∀ g ∈ dv.away, dv.store.all (·.game != g) = true
+
+theorem bug_away_not_vacant :
+    ¬ AwayVacant (run init setupRA).d0 ∧ ¬ AwayVacant (run init setupRB0).d0 := by
+  refine ⟨fun h => ?_, fun h => ?_⟩
+  · have := h 1 (by decide); revert this; decide
+  · have := h 1 (by decide); revert this; decide
+
 /-- Found by the model of the first fix (`renameGame`'s claim alone): device 0
 renames A (1) to B (2); device 1 renames X (3) into the freed A, then deletes
 A; device 0, not having pulled, plays X (a later play overrules the delete, so
@@ -3514,7 +3706,7 @@ kept save with the game's (`restoreKeptSave`).
   never one the library has moved past.
 
 Abstractions beyond Layer 2's: no rename markers (Layers 1-2 cover them; a
-rename carries its generation to the new name, `mergeLibrary` 3416-3420); the
+rename carries its generation to the new name, `mergeLibrary` 3459-3463); the
 library's lists up to order; a kept save is the kind-2 file of its game
 (`oldsave:`), synced like any other, its newer-wins rule (`storeKeptRecord`)
 and the 30-day expiry (`expireKeptSaves`) not modelled (each trace keeps one
@@ -3903,9 +4095,9 @@ def downloadG (gens : Bool) (dv : DevG) (files : List FileG) (g now : Nat) : Dev
     else putF st { f with gen := 0 }) dv.store
   { dv with store := st, recent := bumpG gens dv g now false (if gens then top else 0) }
 
-/-- `restoreKeptSave` (3588-3621): the kept save and the game's save change
+/-- `restoreKeptSave` (3631-3664): the kept save and the game's save change
 places (the session, which holds the save being replaced, is deleted here and
-now on Drive too, `markDelete` 3611; sessions are not modelled). With
+now on Drive too, `markDelete` 3654; sessions are not modelled). With
 no save to put aside, the kept record becomes one that offers nothing (blob
 0, the JS `data: null`), which replaces the older copies other devices hold. -/
 def restoreG (dv : DevG) (g : Nat) : DevG :=

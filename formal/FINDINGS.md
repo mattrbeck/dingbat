@@ -610,3 +610,41 @@ re-grant for another or an unknown account is refused).
 Still open from before: `bug_spinner_without_work` /
 `bug_spinner_after_renewal` (now only without a refresh token or with the
 broker down) and `bug_one_popup_two_strikes` (popup flow only).
+
+## Caught up to 5ea4d552 (2026-10-05): GameLifecycle, Modals, Netplay, DriveSession, DriveLibrary
+
+Each model now cites web/index.js (and web/netplay.js, src/dingbat_wasm.nim)
+at 5ea4d552.
+
+- **GameLifecycle** (from 03f88d6c). `dbPutRoomy`'s retry check (87eea59f),
+  the drop refused while a clip records (fbdb7975), the pull's `renamedAway`
+  skip (bfe5d5c5), `storeCheckpoint`'s second `stale()` check and
+  `takeHandoff`'s epoch bump (87eea59f, bfe5d5c5) each only drop a write or
+  an `openFile`, or touch state the model does not have (the quota path,
+  clips, renames, the session epoch). No state, event or step changed;
+  every property holds as before.
+- **Modals** (from fbdb7975). `renameGame`'s `renamedAway` bookkeeping
+  touches no modal state; citations only.
+- **Netplay** (from 03f88d6c). `dbPutRoomy`'s retry (quota errors are not
+  modelled) and `openNetConnect`'s `netFrozeGame = !!currentRomName &&
+  !takePlayerPause()` (no pause state here; RunPause has it). Citations only.
+- **DriveSession** (from 3bbe0d7f). `wantsUpgrade` follows 0865de24: a linked
+  device whose refresh token it may not use is offered the consent screen
+  (`upgrade_offered_unusable_refresh`), which closes the `driveWantsUpgrade`
+  item above. 5ea4d552 trusts a refresh token on a device with no account
+  recorded (`!syncState.acct`); the model's `acct` is always an account, so
+  `usable` is unchanged and `no_cross_account`, `active_is_own_account` and
+  `never_stray` still hold with no assumption. Outside the model, as before:
+  a device with no account recorded adopts a re-grant for whichever account
+  it is (2540 checks only a known `acct`), so it has no loaded account to
+  cross from.
+- **DriveLibrary** (from 03f88d6c). New: the pull's save writes (`pullScan`,
+  `pullSave`) and `renamedAway` (field `away`). `pullSave_skips_away`; the
+  save form of Thumbnails' rename race is now
+  `regress_pull_after_rename_orphans_save` (the pre-fix write orphans the
+  save and refuses the rename back; the fixed one does neither). One new
+  counterexample, not fixed:
+
+| # | Severity | Finding | Suggested fix |
+|---|---|---|---|
+| L1 | Low-medium (needs a name reused within one page session; loses another device's save) | **A name renamed away stays skipped after a game comes back under it** (`bug_remote_rename_into_away_name_skips_saves`, `bug_download_into_away_name_skips_saves`, `bug_away_not_vacant`). `renamedAway` is cleared only by `renameGame` into the name and by a fresh import (`bumpRecentIndex`'s `fresh`), but two other paths land a game under a name: another device's rename into it, applied by the pull (`applyRemoteRename` 4048), and a Drive-only tile's download (`downloadGame` 4616, `bumpRecentIndex(game, { gen })`, not fresh). Trace: device 0 renames A to B; device 1 renames X into the freed A (or imports another game as A, which device 0 then downloads); device 0 now holds that game under A with A still in `renamedAway`, and every pull for the rest of the session skips its save, session and picture (the skip records no `rmt`). Device 1 plays it and syncs; device 0 never gets that save, and a play there starts from its own (none, or older) and its flush, blind for saves, puts it over device 1's on Drive. A reload clears the set. | Claim the name wherever a game lands under it: `renamedAway.delete(to)` in `applyRemoteRename` once its move commits, and `renamedAway.delete(game)` in `downloadGame` (or in `bumpRecentIndex` whatever `fresh` is: every caller's game is under that name by then); or have the write segment skip only while nothing is held under the name. |

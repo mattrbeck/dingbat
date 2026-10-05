@@ -17,42 +17,48 @@ device out), the parallel flush (da1d7c55) and driveFetch's retries
 findings (a consent re-grant for another account is refused; a refused
 sign-in ends its session), and 3bbe0d7f, which fixed the third found while
 modelling those (a refresh token is used only for the account it was
-granted for). Every line number below is web/index.js at 3bbe0d7f.
+granted for). Caught up to 5ea4d552: 0865de24 offers the consent screen to a
+device whose refresh token it may not use (`driveWantsUpgrade` asks
+`!driveRefreshUsable()`, not `!syncState.refresh`: `wantsUpgrade`), and
+5ea4d552 trusts a refresh token on a device with no account recorded
+(`!syncState.acct`), a state outside this model (every state here has a
+loaded account, see Abstractions). Every line number below is web/index.js
+at 5ea4d552.
 
 ## `Queue`: the dirty queue, the flusher, the lamp (one account, linked)
 
-JS: `markUpload` (3752), `scheduleFlush` (3738), `flushSync` (3800),
-`runExclusive`/`syncChain` (3790-3795), `flushSyncInner` (3807-4035),
-`pullSync`/`pullSyncInner` (4235-4591, opaque), `runFullSync` (4593),
-`refreshSyncStatus`/`setSyncStatus` (3701-3733), the triggers
-`syncPollTick`/`online`/`offline`/`visibilitychange` (5520-5549), and the
+JS: `markUpload` (3757), `scheduleFlush` (3743), `flushSync` (3805),
+`runExclusive`/`syncChain` (3795-3800), `flushSyncInner` (3812-4040),
+`pullSync`/`pullSyncInner` (4240-4596, opaque), `runFullSync` (4598),
+`refreshSyncStatus`/`setSyncStatus` (3706-3738), the triggers
+`syncPollTick`/`online`/`offline`/`visibilitychange` (5525-5554), and the
 save writers that call `markUpload` after their IndexedDB write commits
-(`persistSave` 7509-7537, `saveToSlot` 8054-8077).
+(`persistSave` 7514-7542, `saveToSlot` 8059-8082).
 
 `flushSyncInner` is split at every await that can matter to the queue:
 the prelude (`driveListMap`, `readDriveLibrary`, renames, deletes: one await),
 then per queued name `readSyncBytes` (the IndexedDB read itself is an event
 `readSnap`, the continuation `readResume` another), `driveUploadFile` (sent
 with whatever token is current at send time), the re-grant inside
-`driveFetch` (2629-2653), `writeDriveLibrary`, and the final/`catch`
+`driveFetch` (2634-2658), `writeDriveLibrary`, and the final/`catch`
 `saveSyncState`.
 
 ## `Session`: tokens, the broker, connect/sign-out, renewal, accounts
 
 JS: `gdriveAcquireToken` (2277-2325, `gdriveTokenInFlight`), the broker
-(`driveRefreshSilently` 2400-2428 and its shared `driveRefreshInFlight`;
-`driveCodeGrant` 2490-2552, the consent screen; `driveWantsUpgrade` 2561;
-`driveRegrantPopup` 2569-2579), `gdriveFetchEmail`/`adoptDriveAccount`
-(2599-2616, 3173-3199), `gdriveSignOut` (2901-2917), `gdriveConnect`
-(5257-5301), `armDriveRenewOnGesture` (5351) and `armDriveRenewListener`
-(5362), `renewDriveToken` (5385-5454) and `driveSessionResumed` (5458),
-`syncPollTick` (5520), the in-flight flush seen coarsely (it captures its
-library at the start and writes it at the end, 3828 and 3999) and
-`driveFetch`'s 401 path and retries (2629-2664). A session number
+(`driveRefreshSilently` 2403-2431 and its shared `driveRefreshInFlight`;
+`driveCodeGrant` 2493-2555, the consent screen; `driveWantsUpgrade` 2564-2569;
+`driveRegrantPopup` 2574-2584), `gdriveFetchEmail`/`adoptDriveAccount`
+(2604-2621, 3178-3204), `gdriveSignOut` (2906-2922), `gdriveConnect`
+(5262-5306), `armDriveRenewOnGesture` (5356) and `armDriveRenewListener`
+(5367), `renewDriveToken` (5390-5459) and `driveSessionResumed` (5463),
+`syncPollTick` (5525), the in-flight flush seen coarsely (it captures its
+library at the start and writes it at the end, 3833 and 4004) and
+`driveFetch`'s 401 path and retries (2634-2669). A session number
 (`driveSession` 2257, `driveSessionGuard` 2266) that Sign out, a sign-in's
 grant, a sign-in's end and an account switch each advance; the flush, the
 pull, the renewal, the refresh and driveFetch's replay stop after any await
-that finds it moved. `syncActive` (3202) needs a linked tab with no sign-in
+that finds it moved. `syncActive` (3207) needs a linked tab with no sign-in
 mid-way; a GIS grant is kept only for the session that asked for it, or for a
 sign-in waiting on it (`gdriveTokenForConnect`); a refresh's or a consent
 re-grant's only for the session that asked; gdriveFetchEmail ignores an
@@ -67,16 +73,16 @@ be confirmed is refused.
   modelled in DriveLibrary (`flush_uploads_only_live`), and `no_lost_upload`
   is about the keys of games that exist under their name.
 * Queue: the upload pass now runs up to `SYNC_PARALLEL` keys at once
-  (`runPool` 2818, 3905). Each key's segment touches only its own queue
+  (`runPool` 2823, 3910). Each key's segment touches only its own queue
   entry, `syncRemarked` entry, `sigs`, `rmt` and delete stamp, and a failure
   starts no further key but lets the running ones land; so what happens to
   each key is a run of this one-key-at-a-time pass with other events between
   its read, its upload and its landing, which the model already allows, and
   the properties are per key (`no_lost_upload`, `in_flight_is_queued`) or
   about the job (`mutual_exclusion`, `busy_iff_running`). A ROM Drive already
-  holds (3940-3944) leaves the queue unread: its Drive copy is already the
+  holds (3945-3949) leaves the queue unread: its Drive copy is already the
   local one (a ROM never changes). A session another device wrote unseen
-  stays queued, unsent (3946-3958, `WebState/Handoff`): what a held-back key
+  stays queued, unsent (3951-3963, `WebState/Handoff`): what a held-back key
   does here is stay queued, which every property allows.
 * Session: an account switch's grid swap (`adoptDriveAccount` ->
   `swapAccountGames`: tiles with nothing on this device but their picture go
@@ -88,17 +94,17 @@ be confirmed is refused.
 * Queue: only `queueUp` is modelled; `queueDel`/`queueRen` and tombstones/
   renames (another model) are folded into the prelude await and into
   `libPending` (the flush proceeds with an empty `queueUp` when
-  `syncState.tomb`/`ren` are non-empty, 3815). `pendingCount()` is
+  `syncState.tomb`/`ren` are non-empty, 3820). `pendingCount()` is
   `queueUp.length`; queued deletes/renames would only make the lamp *more*
   often "syncing".
 * Queue: local bytes are a version counter per name (`ver`), Drive's copy is
   the version last uploaded (`drive`); FNV signatures are assumed injective
-  and the "already on Drive with this sig" skip (3968-3969) is dropped:
+  and the "already on Drive with this sig" skip (3973-3974) is dropped:
   skipping never re-queues or un-queues anything, it only avoids a request.
   No local deletes (`ver` only grows).
 * Queue: pull is opaque: it may run, fail (optionally clearing the token via
   `driveFetch`'s 401 path), and on success may queue a name
-  ("reconcile upward", 4508-4519) and flip `libPending`. It does not model
+  ("reconcile upward", 4513-4524) and flip `libPending`. It does not model
   pull writing local bytes (merge logic, another model).
 * Queue: the token is a Bool (live / null). How it comes back is the
   `Session` model's business; here `tokArrive` (a grant from a renewal, a
@@ -109,10 +115,10 @@ be confirmed is refused.
   re-grant (the broker's, or a popup's with activation) is tried for.
 * Queue: timers are Bools (armed or not) that may fire at any time; the
   3-minute poll interval is always armed (`startSyncTriggers`, never cleared).
-  driveFetch's wait-and-retry on 429/5xx (2658-2664) only stretches an
+  driveFetch's wait-and-retry on 429/5xx (2663-2669) only stretches an
   upload's time in flight.
 * Queue: `runFullSync`'s save of the game in memory before it queues
-  (4595-4600, new) is a `write` and a `mark` of those keys, events the model
+  (4600-4605, new) is a `write` and a `mark` of those keys, events the model
   lets run at any time.
 * Session: file contents are not modelled; the flush is a count of uploads
   plus the library it captured. The GIS popup is one in-flight request
@@ -124,19 +130,31 @@ be confirmed is refused.
   its caller's own request, answered by `renewCode`/`connCode`/`reauthCode`
   with any account or none: Google's page lets the person sign in as anyone
   when the hinted account is not signed in to that browser, and the code's
-  own comments expect the account to change there (5317, 5450-5451). The
+  own comments expect the account to change there (5322, 5455-5456). The
   account a refresh token was granted for (`refreshAcct`, tokeninfo's `sub`
-  at the grant, 2531 and 2549) is what `refresh` holds here; a grant whose
-  tokeninfo failed stores `""` and is never used (and a sign-in drops it,
-  5280), where the model keeps it as that account's, which only adds
-  renewals. A refresh token stored before 3bbe0d7f has no `refreshAcct` and
-  is trusted as before (2399); the model starts with none, so a device still
-  carrying another account's token from an earlier build is outside it. Whether the
+  at the grant, 2534 and 2552) is what `refresh` holds here; a grant whose
+  tokeninfo failed stores `""`, which a re-grant for a loaded account refuses
+  (2540) and a sign-in that confirms its account drops (5285), where the
+  model keeps it as that account's: that trades the JS's popups (and, since
+  0865de24, its consent-screen offer, `!driveRefreshUsable()`) for broker
+  renewals of the same account; the model reaches those popups and offers
+  from a device with no refresh token, and every re-grant they bring is held
+  to the loaded account (`codeAccept`), so no property rests on which one a
+  device takes. A refresh token stored before 3bbe0d7f has no `refreshAcct`
+  and is trusted as before, and since 5ea4d552 so is any refresh token on a
+  device with no account recorded (`syncState.acct` null: linked by an
+  earlier build, or a first sign-in whose tokeninfo failed), 2400-2402. The
+  model's `acct` is always an account (it starts with account 1 loaded and a
+  sign-in or adoption only ever loads another), so neither case is in it: a
+  device with no loaded account has no queues of another account to carry
+  across (a re-grant there is adopted whichever account it is, 2540, as
+  before 5ea4d552), and every cross-account trace below has a known loaded
+  account. Whether the
   broker answers and the upgrade offer is not resting (`offerSet`), and the
   broker's back-off (`backoffSet`), are free flags. `navigator.onLine`, the
   GIS script load, driveTokenStale() and `hasUserActivation()` are event
   parameters. `appUpdating` is false.
-* Session: `ensureDriveSignedIn` (5307) joins the same requests (the refresh,
+* Session: `ensureDriveSignedIn` (5312) joins the same requests (the refresh,
   forced; the GIS request or a consent screen with activation) as a renewal
   and is not modelled separately; the trace `regress_refresh_of_refused_signin`
   uses `arm` for the refresh it can start.
@@ -144,7 +162,7 @@ be confirmed is refused.
   taken as passing (only syncable keys of an enrolled device are modelled).
   `markDelete`/`markGameUpload` are not modelled (see the report).
   `tap` is not guarded by the Sync now button's `disabled` (the Settings
-  Sync button, 3003, never is).
+  Sync button, 3008, never is).
 * Session: the re-grant is modelled on uploads only; a 401 in the prelude
   or the library write is folded into `jobFail`. `resumeDriveOnBoot` is the
   initial state (expired persisted token, no refresh token: arm the gesture
@@ -157,7 +175,7 @@ be confirmed is refused.
   fall-through to `gdriveConnect` while linked is not modelled (`signIn`
   requires a signed-out tab); its grant is a connect's grant and takes a new
   session all the same. A library write the merge left unchanged is skipped
-  since da1d7c55 (`libraryUnchanged` 3998); skipping only drops a request.
+  since da1d7c55 (`libraryUnchanged` 4003); skipping only drops a request.
 * Both: every JS continuation is its own event, enabled whenever its await
   could have resolved; microtask ordering is not assumed (over-approximates
   interleavings, which is sound for the invariants; each counterexample was
@@ -190,6 +208,9 @@ Proved (every reachable state):
   refresh; every caller awaiting either has it in flight.
 * `Session.broker_renews_without_gesture`: once the consent screen gave a
   refresh token, a lost token comes back with no gesture.
+* `Session.upgrade_offered_unusable_refresh` (0865de24): a linked device
+  whose refresh token is not the loaded account's is offered the consent
+  screen, as one with none is.
 
 The findings' traces, fixed: `Queue.regress_redirty_kept`,
 `Session.regress_renewal_after_signout`, `regress_signed_out_quiet`,
@@ -215,29 +236,29 @@ def upd (f : Nat → Nat) (i v : Nat) : Nat → Nat := fun j => if j = i then v 
 
 namespace Queue
 
-/-- `syncStatus` (3680). -/
+/-- `syncStatus` (3685). -/
 inductive Status where
   | idle | syncing | done | offline | paused
   deriving DecidableEq, Repr
 
-/-- `flushSyncInner`'s program counter (3807). -/
+/-- `flushSyncInner`'s program counter (3812). -/
 inductive FPc where
   /-- queued behind `syncChain`, body not entered -/
   | start
-  /-- awaiting `driveListMap` / `readDriveLibrary` / renames / deletes (3825-3902) -/
+  /-- awaiting `driveListMap` / `readDriveLibrary` / renames / deletes (3830-3907) -/
   | prelude
-  /-- awaiting `readSyncBytes(name)` (3945); `snap` = the IndexedDB read has run and saw it -/
+  /-- awaiting `readSyncBytes(name)` (3950); `snap` = the IndexedDB read has run and saw it -/
   | read (name : Nat) (rest : List Nat) (snap : Option Nat)
-  /-- awaiting `driveUploadFile(name, bytes)` (3970); `withTok`: gdriveToken was non-null at send -/
+  /-- awaiting `driveUploadFile(name, bytes)` (3975); `withTok`: gdriveToken was non-null at send -/
   | upload (name : Nat) (v : Nat) (withTok : Bool) (rest : List Nat)
   /-- `driveFetch` got 401: awaiting the broker's refresh, then (with
-  activation) `driveRegrantPopup()` (2634-2638) -/
+  activation) `driveRegrantPopup()` (2639-2643) -/
   | reauth (name : Nat) (v : Nat) (rest : List Nat)
-  /-- awaiting `writeDriveLibrary(lib, await driveListMap())` (3998-4000) -/
+  /-- awaiting `writeDriveLibrary(lib, await driveListMap())` (4003-4005) -/
   | libWrite
-  /-- awaiting `saveSyncState()` on success (4023) -/
+  /-- awaiting `saveSyncState()` on success (4028) -/
   | okSave
-  /-- in `catch`: `syncBusy = false` done, awaiting `saveSyncState()` (4027-4034) -/
+  /-- in `catch`: `syncBusy = false` done, awaiting `saveSyncState()` (4032-4039) -/
   | failSave
   deriving DecidableEq, Repr
 
@@ -248,7 +269,7 @@ inductive Job where
   | pull (started : Bool) (silent : Bool)
   deriving DecidableEq, Repr
 
-/-- `runFullSync` (4593) after its `syncActive()` check. -/
+/-- `runFullSync` (4598) after its `syncActive()` check. -/
 inductive Rfs where
   /-- awaiting `localSyncFiles()` -/
   | listing
@@ -257,21 +278,21 @@ inductive Rfs where
   deriving DecidableEq, Repr
 
 structure St where
-  tok        : Bool          -- !!gdriveToken (syncActive, 3202)
-  fails      : Nat           -- driveRenewFails (5344)
+  tok        : Bool          -- !!gdriveToken (syncActive, 3207)
+  fails      : Nat           -- driveRenewFails (5349)
   ver        : Nat → Nat     -- the bytes under each IndexedDB key, as a version
   drive      : Nat → Nat     -- the version Drive holds for that name
   marks      : List Nat      -- committed writes whose markUpload has not run yet
   queueUp    : List Nat      -- syncState.queueUp
   remarked   : List Nat      -- syncRemarked: queued names saved again since their flush item began
   libPending : Bool          -- syncState.tomb.length || syncState.ren.length
-  busy       : Bool          -- syncBusy (3065)
-  status     : Status        -- syncStatus (3680)
-  doneArmed  : Bool          -- syncDoneTimer (3069)
-  debounce   : Bool          -- syncTimer (3066)
-  cap        : Bool          -- syncCapTimer (3067)
-  chain      : List Job      -- syncChain: head runs, the rest wait (runExclusive 3791)
-  pullQueued : Bool          -- pullQueued (3797)
+  busy       : Bool          -- syncBusy (3070)
+  status     : Status        -- syncStatus (3685)
+  doneArmed  : Bool          -- syncDoneTimer (3074)
+  debounce   : Bool          -- syncTimer (3071)
+  cap        : Bool          -- syncCapTimer (3072)
+  chain      : List Job      -- syncChain: head runs, the rest wait (runExclusive 3796)
+  pullQueued : Bool          -- pullQueued (3802)
   pullCalls  : List Bool     -- pending `.then(() => pullSync(...))` / renewal's pullSync
   rfs        : List Rfs      -- runFullSync calls in flight
   held       : List Nat      -- keys that hold bytes (localSyncFiles)
@@ -283,28 +304,28 @@ def init : St :=
     chain := [], pullQueued := false, pullCalls := [], rfs := [], held := [] }
 
 inductive Ev where
-  /-- a save/state/frame write commits (persistSave 7519, saveToSlot 8064) -/
+  /-- a save/state/frame write commits (persistSave 7524, saveToSlot 8069) -/
   | write (i : Nat)
-  /-- its `markUpload(i)` continuation runs (7532, 8070) -/
+  /-- its `markUpload(i)` continuation runs (7537, 8075) -/
   | mark (i : Nat)
-  /-- syncTimer / syncCapTimer fire `flushSync` (3741-3743) -/
+  /-- syncTimer / syncCapTimer fire `flushSync` (3746-3748) -/
   | debounce | cap
-  /-- syncPollTick (5520) -/
+  /-- syncPollTick (5525) -/
   | poll
-  /-- window `online` (5536), `offline` (5541), visibilitychange->visible (5544) -/
+  /-- window `online` (5541), `offline` (5546), visibilitychange->visible (5549) -/
   | online | offline | visible
-  /-- a Sync button with a live token ("Sync now" 5635, Settings 3003): runFullSync -/
+  /-- a Sync button with a live token ("Sync now" 5640, Settings 3008): runFullSync -/
   | tap
   /-- runFullSync continuation #k resumes -/
   | rfsStep (k : Nat)
   /-- a token is granted (a renewal, a broker refresh); `pullAfter`: the renewal's
-  `driveSessionResumed` tail (5398-5401, 5445-5453, 5458-5465) -/
+  `driveSessionResumed` tail (5403-5406, 5450-5458, 5463-5470) -/
   | tokArrive (pullAfter : Bool)
-  /-- some other driveFetch hit 401 and no re-grant answered (2639-2647) -/
+  /-- some other driveFetch hit 401 and no re-grant answered (2644-2652) -/
   | tokLost
-  /-- renewDriveToken's catch (5423-5442) -/
+  /-- renewDriveToken's catch (5428-5447) -/
   | renewFail
-  /-- syncDoneTimer fires (3707) -/
+  /-- syncDoneTimer fires (3712) -/
   | doneTimer
   /-- pending pullSync call #k runs -/
   | callPull (k : Nat)
@@ -316,7 +337,7 @@ inductive Ev where
   | readResume
   | upOk
   /-- the upload got 401; `activation`: a re-grant is tried (a refresh token
-  for the broker, or user activation for a popup, 2634-2638) -/
+  for the broker, or user activation for a popup, 2639-2643) -/
   | up401 (activation : Bool)
   | upFail
   | reauthOk
@@ -330,17 +351,17 @@ inductive Ev where
 
 def pending (s : St) : Nat := s.queueUp.length
 
-/-- setSyncStatus (3701): also (re)arms the "done" -> idle timer. -/
+/-- setSyncStatus (3706): also (re)arms the "done" -> idle timer. -/
 def setStatus (s : St) (x : Status) : St := { s with status := x, doneArmed := x == .done }
 
-/-- refreshSyncStatus (3724-3733), with driveLinked() true. -/
+/-- refreshSyncStatus (3729-3738), with driveLinked() true. -/
 def refresh (s : St) : St :=
   if !s.tok && decide (s.fails ≥ 3) && decide (pending s > 0) then setStatus s .paused
   else if s.busy || decide (pending s > 0) then setStatus s .syncing
   else if s.status == .syncing then setStatus s .done
   else s
 
-/-- scheduleFlush (3738-3745). -/
+/-- scheduleFlush (3743-3750). -/
 def scheduleFlush (s : St) : St := refresh { s with debounce := true, cap := true }
 
 /-- markUpload: a name already queued is remembered as re-dirtied
@@ -350,11 +371,11 @@ def markUpload (s : St) (i : Nat) : St :=
            else { s with queueUp := s.queueUp ++ [i] }
   scheduleFlush s
 
-/-- flushSync (3800-3806): disarm both timers, append to the chain. -/
+/-- flushSync (3805-3811): disarm both timers, append to the chain. -/
 def flushSync (s : St) (after : Option Bool) : St :=
   { s with debounce := false, cap := false, chain := s.chain ++ [.flush .start after] }
 
-/-- pullSync (4235-4242). -/
+/-- pullSync (4240-4247). -/
 def pullSync (s : St) (silent : Bool) : St :=
   if s.pullQueued then s else { s with pullQueued := true, chain := s.chain ++ [.pull false silent] }
 
@@ -367,7 +388,7 @@ def finish (s : St) (after : Option Bool) : St :=
   | some sil => { popHead s with pullCalls := s.pullCalls ++ [sil] }
   | none => popHead s
 
-/-- `catch (e) { syncBusy = false; await saveSyncState(); ... }` (4026-4034) -/
+/-- `catch (e) { syncBusy = false; await saveSyncState(); ... }` (4031-4039) -/
 def catchFail (s : St) (after : Option Bool) : St := setHead { s with busy := false } (.flush .failSave after)
 
 /-- next iteration of `for (let name of syncState.queueUp.slice())`, or the library write.
@@ -390,15 +411,15 @@ def step (s : St) : Ev → St
   | .mark i => if i ∈ s.marks then markUpload { s with marks := s.marks.erase i } i else s
   | .debounce => if s.debounce then flushSync s none else s
   | .cap => if s.cap then flushSync s none else s
-  -- syncPollTick (5528-5530): `if (!syncActive()) return; pending ? flush.then(pull) : pull`
+  -- syncPollTick (5533-5535): `if (!syncActive()) return; pending ? flush.then(pull) : pull`
   | .poll => if !s.tok then s else if pending s > 0 then flushSync s (some true) else pullSync s true
-  -- online (5536-5540)
+  -- online (5541-5545)
   | .online => if !s.tok then s else flushSync (refresh s) (some true)
-  -- offline (5541-5543)
+  -- offline (5546-5548)
   | .offline => if pending s > 0 then setStatus s .offline else s
-  -- visibilitychange (5548)
+  -- visibilitychange (5553)
   | .visible => if s.tok then flushSync s (some true) else s
-  -- runFullSync (4593-4606): `if (!syncActive()) return; ... await localSyncFiles()`
+  -- runFullSync (4598-4611): `if (!syncActive()) return; ... await localSyncFiles()`
   | .tap => if s.tok then { s with rfs := s.rfs ++ [.listing] } else s
   | .rfsStep k =>
       match s.rfs[k]? with
@@ -427,12 +448,12 @@ def step (s : St) : Ev → St
   | .jobStart =>
       match s.chain with
       | .flush .start after :: _ =>
-          -- flushSyncInner 3808-3823
+          -- flushSyncInner 3813-3828
           if !s.tok then finish s after
           else if pending s = 0 && !s.libPending then finish (refresh s) after
           else setHead (setStatus { s with busy := true } .syncing) (.flush .prelude after)
       | .pull false sil :: _ =>
-          -- pullSync's job 4238-4241, pullSyncInner 4244-4249
+          -- pullSync's job 4243-4246, pullSyncInner 4249-4254
           let s := { s with pullQueued := false }
           if !s.tok then popHead s
           else setHead (if sil then { s with busy := true } else setStatus { s with busy := true } .syncing)
@@ -460,7 +481,7 @@ def step (s : St) : Ev → St
   | .upOk =>
       match s.chain with
       | .flush (.upload n v true r) after :: _ =>
-          -- 3959-3996: Drive has v; sigs[name] = sig; queueUp.filter(name) unless re-dirtied
+          -- 3964-4001: Drive has v; sigs[name] = sig; queueUp.filter(name) unless re-dirtied
           nextItem (dropItem { s with drive := upd s.drive n v } n) r after
       | _ => s
   | .up401 act =>
@@ -544,14 +565,14 @@ theorem regress_redirty_kept :
   decide
 
 /-- With the token gone (a 401 on a background flush with no user activation,
-2636: e.g. a gamepad player after the hour, with no refresh token or the
+2641: e.g. a gamepad player after the hour, with no refresh token or the
 broker down), a new save makes
 refreshSyncStatus say "syncing" (it only says "paused" after 3 renewal
-strikes), the debounce flush returns at `if (!syncActive()) return` (3808)
+strikes), the debounce flush returns at `if (!syncActive()) return` (3813)
 without touching the lamp, and nothing is left to run: the spinner turns
 with nothing in flight, nothing scheduled, and the home Sync button disabled
-(`accountSync.disabled = kind === "syncing"`, 5623). The poll does
-nothing either (5528). -/
+(`accountSync.disabled = kind === "syncing"`, 5628). The poll does
+nothing either (5533). -/
 def spinTrace : List Ev :=
   [.write 0, .mark 0, .debounce, .jobStart, .preludeOk, .readSnap, .readResume,
    .up401 false, .saveDone,
@@ -564,7 +585,7 @@ theorem bug_spinner_without_work :
   decide
 
 /-- And once a gesture renews the token, renewDriveToken's tail only pulls
-(`driveSessionResumed` 5464): the pull's refreshSyncStatus keeps "syncing", nothing flushes, and the
+(`driveSessionResumed` 5469): the pull's refreshSyncStatus keeps "syncing", nothing flushes, and the
 disabled Sync button waits for the next 3-minute poll. -/
 theorem bug_spinner_after_renewal :
     let s := run init (spinTrace ++ [.tokArrive true, .callPull 0, .jobStart, .pullOk none false])
@@ -1120,21 +1141,21 @@ theorem reachable_inv {s : St} (h : Reachable s) : Inv s := by
 /-! ### Proved properties -/
 
 /-- **No two Drive jobs run at once.** Every job behind the chain head is
-still waiting to start: `runExclusive` (3791) is the only way into
+still waiting to start: `runExclusive` (3796) is the only way into
 `flushSyncInner`/`pullSyncInner`, so no flush overlaps another flush or a
 pull, and no name is being uploaded by two flushes. -/
 theorem mutual_exclusion {s : St} (h : Reachable s) :
     ∀ j ∈ s.chain.tail, j.waiting = true :=
   (reachable_inv h).tailWaiting
 
-/-- `queueUp` never holds a name twice (markUpload 3755, markGameUpload 3775,
-runFullSync 4602 and the pull's reconcile 4516 all check `includes` first), so a flush's snapshot
+/-- `queueUp` never holds a name twice (markUpload 3760, markGameUpload 3780,
+runFullSync 4607 and the pull's reconcile 4521 all check `includes` first), so a flush's snapshot
 uploads each name at most once. -/
 theorem queue_nodup {s : St} (h : Reachable s) : s.queueUp.Nodup :=
   (reachable_inv h).qNodup
 
 /-- `syncBusy` is exactly "a flush or pull body is between its start and its
-end" (3822, 4024, 4027, 4248, 4581, 4587). -/
+end" (3827, 4029, 4032, 4253, 4586, 4592). -/
 theorem busy_iff_running {s : St} (h : Reachable s) :
     s.busy = headRunning s.chain :=
   (reachable_inv h).busyRun
@@ -1179,13 +1200,13 @@ theorem failed_regrant_stays_queued {s : St} (h : Reachable s)
 /-! ### `markUpload` remembers a re-dirtied in-flight name
 
 ```js
-const syncRemarked = new Set();                                  // 3751
-// markUpload (3752):
+const syncRemarked = new Set();                                  // 3756
+// markUpload (3757):
 if (!syncState.queueUp.includes(name)) syncState.queueUp.push(name);
 else syncRemarked.add(name);
-// flushSyncInner, top of the queueUp loop body, before readSyncBytes (3936):
+// flushSyncInner, top of the queueUp loop body, before readSyncBytes (3941):
 syncRemarked.delete(name);
-// ...and the filter after the upload (3993):
+// ...and the filter after the upload (3998):
 if (!syncRemarked.has(name))
   syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
 ```
@@ -1605,19 +1626,19 @@ namespace WebState.DriveSession.Session
 /-- renewDriveToken's continuation. `was` = wasSignedOut; `ep` = the Drive
 session it started in (`driveSessionGuard()` at its start). -/
 inductive RPc where
-  /-- awaiting `driveRefreshSilently()` (5398); `gest`: called by the gesture
+  /-- awaiting `driveRefreshSilently()` (5403); `gest`: called by the gesture
   listener, not by armDriveRenewOnGesture (`{ gesture: false }`); `res` once
   the refresh settled (at once, `some false`, with no refresh token or while
   the broker backs off) -/
   | silent (was : Bool) (ep : Nat) (gest : Bool) (res : Option Bool)
-  /-- awaiting `loadGisScript()` (5411) -/
+  /-- awaiting `loadGisScript()` (5416) -/
   | gis (was : Bool) (ep : Nat)
-  /-- awaiting `driveRegrantPopup()` (5421): the token flow's shared
+  /-- awaiting `driveRegrantPopup()` (5426): the token flow's shared
   `gdriveAcquireToken("")` (`code = none`), or the consent screen,
   `driveCodeGrant` issued in session `iss` (`code = some iss`, its own popup);
   `up` = the renewal's `upgrade`; `res` once it settled -/
   | acq (was : Bool) (up : Bool) (ep : Nat) (code : Option Nat) (res : Option Bool)
-  /-- awaiting `gdriveFetchEmail()` in `driveSessionResumed` (5459); the
+  /-- awaiting `gdriveFetchEmail()` in `driveSessionResumed` (5464); the
   tokeninfo fetch carried `tokAt` -/
   | email (tokAt : Option Nat) (ep : Nat)
   deriving DecidableEq, Repr
@@ -1709,7 +1730,7 @@ inductive Ev where
   `up401`/`reauthRes`/`pullDone`) -/
   | arm (online : Bool)
   /-- armDriveRenewListener after a probe found the upgrade on offer
-  (resumeDriveOnBoot 5474, syncPollTick 5524) -/
+  (resumeDriveOnBoot 5479, syncPollTick 5529) -/
   | armListen
   /-- `probeDriveBroker` settles, or the upgrade offer's day of rest ends -/
   | offerSet (ok : Bool)
@@ -1771,7 +1792,7 @@ inductive Ev where
   | pullDone (clear : Bool)
   deriving DecidableEq, Repr
 
-/-- armDriveRenewListener (5362). -/
+/-- armDriveRenewListener (5367). -/
 def armL (s : St) : St :=
   if s.armed || !s.connected || decide (s.fails ≥ 3) then s else { s with armed := true }
 
@@ -1780,24 +1801,35 @@ hint, recording the session it was issued in. -/
 def joinOrCreate (s : St) (hint : Option Nat) : St :=
   if s.req.isSome then s else { s with req := some (hint, s.epoch) }
 
-/-- `driveRefreshUsable` (2398-2399, 3bbe0d7f): a refresh token granted for
+/-- `driveRefreshUsable` (2400-2402, 3bbe0d7f, 5ea4d552): a refresh token granted for
 the loaded account (`refreshAcct`, the account tokeninfo named at the grant,
-is the account `refresh` stands for here). -/
+is the account `refresh` stands for here). 5ea4d552's `!syncState.acct`
+clause (no account recorded) never holds here: `acct` is always loaded. -/
 def usable (s : St) : Bool := s.refresh == some s.acct
 
-/-- driveRefreshSilently goes to the broker (2401-2402): a usable refresh
+/-- driveRefreshSilently goes to the broker (2404-2405): a usable refresh
 token, and not backing off unless forced. -/
 def refreshNow (s : St) (force : Bool) : Bool := usable s && (force || !s.backoff)
 
-/-- `driveRefreshInFlight ??= ...` (2403): join the refresh in flight, or send
+/-- `driveRefreshInFlight ??= ...` (2406): join the refresh in flight, or send
 one with the refresh token held now, in this session. -/
 def joinR (s : St) : St :=
   match s.rfr, s.refresh with
   | none, some r => { s with rfr := some (r, s.epoch) }
   | _, _ => s
 
-/-- driveWantsUpgrade (2561). -/
-def wantsUpgrade (s : St) : Bool := s.connected && s.refresh.isNone && s.offer
+/-- driveWantsUpgrade (2564-2569): since 0865de24 it asks for no refresh
+token this device may use (`!driveRefreshUsable()`), not for none at all: one
+kept for another account (or, in the JS, of unknown account) leaves the device
+on popups, so the consent screen is offered to it too. -/
+def wantsUpgrade (s : St) : Bool := s.connected && !usable s && s.offer
+
+/-- 0865de24: a linked device holding a refresh token for another account
+than the loaded one (one it may not use) is offered the consent screen, as
+one holding none is; before, `!syncState.refresh` left it on popups. -/
+theorem upgrade_offered_unusable_refresh (s : St) (hc : s.connected = true)
+    (ho : s.offer = true) (hr : s.refresh ≠ some s.acct) : wantsUpgrade s = true := by
+  simp [wantsUpgrade, usable, hc, ho, hr]
 
 def CPc.ident : CPc → Bool
   | .acq _ _ => true
@@ -1857,7 +1889,7 @@ def finish (s : St) (after : Bool) : St :=
   if after then { popHead s with pullCalls := s.pullCalls + 1 } else popHead s
 
 /-- renewDriveToken's first segment, up to `await driveRefreshSilently()`
-(5385-5398). `gest`: from the gesture listener (`renewCall` counts it). -/
+(5390-5403). `gest`: from the gesture listener (`renewCall` counts it). -/
 def renewStart (s : St) (online : Bool) (gest : Bool) : St :=
   if !s.connected then s
   else if !online then armL s
@@ -1869,7 +1901,7 @@ def renewCall (s : St) (online : Bool) (gest : Bool) : St :=
   renewStart (if gest then { s with renewCalls := s.renewCalls + 1 }
               else { s with silentCalls := s.silentCalls + 1 }) online gest
 
-/-- armDriveRenewOnGesture (5351-5358): renew now through the broker when
+/-- armDriveRenewOnGesture (5356-5363): renew now through the broker when
 this device has a refresh token and the broker is not backing off, else arm
 the listener. -/
 def armOG (s : St) (online : Bool) : St :=
@@ -1878,18 +1910,18 @@ def armOG (s : St) (online : Bool) : St :=
   else if usable s && !s.backoff then renewCall s online false
   else armL s
 
-/-- gdriveSignOut (2901-2917): a new session, the refresh token forgotten. -/
+/-- gdriveSignOut (2906-2922): a new session, the refresh token forgotten. -/
 def signOutFx (s : St) : St :=
   { s with refresh := none, email := none, connected := false, token := none,
            epoch := s.epoch + 1 }
 
-/-- driveCodeGrant's tail for a re-grant (`connect` false, 2531-2551): since
-6367e296 the grant's account is learned first (2531, `driveTokenSub` 2583-2591, its
+/-- driveCodeGrant's tail for a re-grant (`connect` false, 2534-2554): since
+6367e296 the grant's account is learned first (2534, `driveTokenSub` 2588-2596, its
 await folded into the answer, which `g` is), then it is kept only in the
 session that asked, on a linked tab, and only for the loaded account
-(2534-2542; a tokeninfo that fails is a refusal, `none`); the token and the
+(2537-2545; a tokeninfo that fails is a refusal, `none`); the token and the
 refresh token replaced, the broker's back-off cleared. Then
-driveRegrantPopup (2572-2578): a failure rests the offer. The second
+driveRegrantPopup (2577-2583): a failure rests the offer. The second
 component is the outcome. -/
 def codeAccept (s : St) (iss : Nat) (g : Option Nat) : St × Bool :=
   match g with
@@ -1925,23 +1957,23 @@ def stampJS (r : Bool) : Job → Job
 def settleR (s : St) (r : Bool) : St :=
   { s with rfr := none, renews := s.renews.map (stampRS r), chain := s.chain.map (stampJS r) }
 
-/-- The JS each branch follows (web/index.js at 3bbe0d7f): the gesture
-listener (`armDriveRenewListener` 5362-5380) and `renewDriveToken` 5385-5454
-(its `over()` 5393-5396, the silent refresh 5398-5402, the gesture-less fallback
-5403, the upgrade check 5405-5407, the script 5411-5415, activation 5419,
-the popup 5421, the consent decline 5428-5431, the strikes 5434-5442, the
-tail 5445-5453) and `driveSessionResumed` 5458-5465; `armDriveRenewOnGesture`
-5351-5358; `driveRefreshSilently` 2400-2428 (its `stale()` 2408, adoption
-2412-2415, invalid_grant 2419-2422, back-off 2424); `driveCodeGrant` 2490-2552
-(its account and session checks 2531-2542, the refresh token 2547-2550) and `driveRegrantPopup` 2569-2579; the GIS
+/-- The JS each branch follows (web/index.js at 5ea4d552): the gesture
+listener (`armDriveRenewListener` 5367-5385) and `renewDriveToken` 5390-5459
+(its `over()` 5398-5401, the silent refresh 5403-5407, the gesture-less fallback
+5408, the upgrade check 5410-5412, the script 5416-5420, activation 5424,
+the popup 5426, the consent decline 5433-5436, the strikes 5439-5447, the
+tail 5450-5458) and `driveSessionResumed` 5463-5470; `armDriveRenewOnGesture`
+5356-5363; `driveRefreshSilently` 2403-2431 (its `stale()` 2411, adoption
+2415-2418, invalid_grant 2422-2425, back-off 2427); `driveCodeGrant` 2493-2555
+(its account and session checks 2534-2545, the refresh token 2550-2553) and `driveRegrantPopup` 2574-2584; the GIS
 callback in `gdriveAcquireToken` 2277-2325 (the session rule at 2304-2308);
-`gdriveConnect` 5257-5301 (its grant 5265-5271, the refusal 5284-5292, the
-new session 5293); `gdriveSignOut` 2901-2917; `syncPollTick` 5520-5531,
-`online` 5536, `visibilitychange` 5544; `flushSyncInner` 3807-4035
-(`live()` after every await) and `pullSync` 4235; `driveFetch` 2622-2667
-(the 401 path 2629-2653, its replay's session check 2651, the 429/5xx
-retries 2658-2664); `gdriveFetchEmail` 2599-2616 and `adoptDriveAccount`
-3173-3199. -/
+`gdriveConnect` 5262-5306 (its grant 5270-5276, the refusal 5289-5297, the
+new session 5298); `gdriveSignOut` 2906-2922; `syncPollTick` 5525-5536,
+`online` 5541, `visibilitychange` 5549; `flushSyncInner` 3812-4040
+(`live()` after every await) and `pullSync` 4240; `driveFetch` 2627-2672
+(the 401 path 2634-2658, its replay's session check 2656, the 429/5xx
+retries 2663-2669); `gdriveFetchEmail` 2604-2621 and `adoptDriveAccount`
+3178-3204. -/
 def step (s : St) : Ev → St
   | .gesture on =>
       let s := { s with gestures := s.gestures + 1 }
@@ -2053,8 +2085,8 @@ def step (s : St) : Ev → St
       match s.connects[k]? with
       | some (.acq true none) =>
           match g with
-          -- its account learned (2531), `if (connect) driveSession++;`, the token and
-          -- the refresh token adopted, `refreshAcct` = that account (2549)
+          -- its account learned (2534), `if (connect) driveSession++;`, the token and
+          -- the refresh token adopted, `refreshAcct` = that account (2552)
           | some a => { s with token := some a, refresh := some a, backoff := false,
                                epoch := s.epoch + 1, connects := s.connects.set k (.acq true (some true)) }
           | none => { s with connects := s.connects.set k (.acq true (some false)) }
@@ -2063,7 +2095,7 @@ def step (s : St) : Ev → St
       match s.connects[k]? with
       | some (.acq c (some r)) =>
           let s := { s with connects := s.connects.eraseIdx k }
-          -- the token flow: `syncState.refresh = null` (5270)
+          -- the token flow: `syncState.refresh = null` (5275)
           if r then { s with connects := s.connects ++ [.email s.token],
                              refresh := if c then s.refresh else none }
           else s
@@ -2073,12 +2105,12 @@ def step (s : St) : Ev → St
       | some (.email t) =>
           let s := { s with connects := s.connects.eraseIdx k }
           -- `if (!acct && syncState.acct) { syncState.refresh = null; clearDriveToken();
-          -- driveSession++; throw }` (5284-5292; the new session since 6367e296)
+          -- driveSession++; throw }` (5289-5297; the new session since 6367e296)
           if !identified s t ok then { s with token := none, refresh := none, epoch := s.epoch + 1 }
           else
             let s := fetchEmail s t ok
             -- a refresh token that is not the confirmed account's is dropped
-            -- (5280, 3bbe0d7f)
+            -- (5285, 3bbe0d7f)
             { s with fails := 0, connected := true, epoch := s.epoch + 1,
                      connects := s.connects ++ [.save],
                      refresh := if s.refresh == some s.acct then s.refresh else none }
@@ -2189,7 +2221,7 @@ theorem reachable_run (es : List Ev) : ∀ s, Reachable s → Reachable (run s e
   | nil => intro s h; exact h
   | cons e es ih => intro s h; exact ih _ (Reachable.step e h)
 
-/-! ### The findings' traces, against the code at 3bbe0d7f -/
+/-! ### The findings' traces, against the code at 5ea4d552 -/
 
 /-- A renewal in flight survives Sign out (null-token variant: a background
 flush's 401 cleared the token and armed the renewal while Settings was open).
@@ -2336,7 +2368,7 @@ def consentTrace : List Ev :=
    .reauthRes true, .reauthCode (some 2), .reauthRes true, .upOk]
 
 /-- **Fixed: the other account's grant is refused** (tokeninfo's `sub` is
-learned before anything is adopted, 2531-2542): nothing adopted, no refresh
+learned before anything is adopted, 2534-2545): nothing adopted, no refresh
 token stored, the flush ends on driveFetch's catch (token dropped, renewal
 armed), and nothing reaches account 2's Drive. -/
 theorem regress_consent_regrant_refused :
@@ -2383,7 +2415,7 @@ def unconfirmedRefreshTrace : List Ev :=
    .connCode 0 (some 2), .arm true, .connAcq 0, .connEmail 1 false, .rfrOk,
    .poll true, .jobStart true, .preludeOk 0]
 
-/-- **Fixed: the refusal ends its session** (5290), so the refresh's answer
+/-- **Fixed: the refusal ends its session** (5295), so the refresh's answer
 is stale and refused; nothing syncs. -/
 theorem regress_refresh_of_refused_signin :
     let s := run init unconfirmedRefreshTrace
@@ -2402,10 +2434,10 @@ activation the token flow re-grants account 1 in the current session (the
 linked tab's request, hinted with account 1). The broker sign-in's tokeninfo
 then asks about the token the tab holds now, account 1's, and confirms it:
 the sign-in completes as account 1, keeping account 2's refresh token
-(gdriveConnect clears `syncState.refresh` only on the token flow, 5270, or
+(gdriveConnect clears `syncState.refresh` only on the token flow, 5275, or
 on refusal). From then on every broker renewal adopts account 2's token
 with account 1 loaded and nothing identifying (driveRefreshSilently keeps a
-refresh's answer for any linked session it was sent in, 2407-2414), and the
+refresh's answer for any linked session it was sent in, 2410-2417), and the
 next sync wrote account 1's library into account 2's Drive. Needed two
 sign-ins at once, a stale flush's 401 with activation and the broker down
 inside one sign-in's window: very unlikely. -/
@@ -2418,8 +2450,8 @@ def unboundRefreshTrace : List Ev :=
    .backoffSet false, .arm true, .rfrOk, .poll true, .jobStart true, .preludeOk 0]
 
 /-- **Fixed: the sign-in drops the refresh token that is not the confirmed
-account's** (5280), a refresh token is used only for its own account
-(`driveRefreshUsable` 2398-2399), the later renewal falls back to the
+account's** (5285), a refresh token is used only for its own account
+(`driveRefreshUsable` 2400-2402), the later renewal falls back to the
 gesture listener, and the next sync stays in account 1's Drive. -/
 theorem regress_refresh_token_outlives_its_account :
     let s := run init unboundRefreshTrace
@@ -2432,8 +2464,8 @@ theorem regress_refresh_token_outlives_its_account :
 only ones that may open a popup), `silentCalls` the broker-only ones
 armDriveRenewOnGesture makes (`{ gesture: false }`), `armCalls` the calls of
 armDriveRenewOnGesture itself. A renewal's own fallbacks go to
-armDriveRenewListener, never back through armDriveRenewOnGesture (5352-5357,
-5403), so a failing broker cannot loop: every silent renewal is paid for by
+armDriveRenewListener, never back through armDriveRenewOnGesture (5357-5362,
+5408), so a failing broker cannot loop: every silent renewal is paid for by
 an armDriveRenewOnGesture call, and those come only from outside a renewal
 (the poll, visibilitychange, boot, and a 401 that no re-grant answered). -/
 

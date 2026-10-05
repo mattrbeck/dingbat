@@ -7,9 +7,13 @@
 Written against dd7ba741f and remodelled at 03f88d6c, where the clip
 export's banner has become a progress panel (`#clip-progress-modal`) that
 takes the focus trap and closes itself when the export ends. `step` follows
-the code as fixed in fbdb7975 (a drop while a clip records is refused, 12068-
-12071), at whose index.js the line numbers are; the 03f88d6c counterexample
-it fixed is replayed as `regress_drop_during_clip_export_loses_focus`.
+the code as fixed in fbdb7975 (a drop while a clip records is refused, 12135-
+12138); the 03f88d6c counterexample it fixed is replayed as
+`regress_drop_during_clip_export_loses_focus`. Caught up to 5ea4d552: the one
+modelled function changed since is `renameGame` (bfe5d5c5: `renamedAway`
+gains the old name and loses the new one after its collision checks, and
+loses the old one again on a rollback), which touches no modal state; it is
+still one await here. Line numbers are web/index.js at 5ea4d552.
 
 What the code has (there is no modal *stack*):
 
@@ -20,22 +24,22 @@ What the code has (there is no modal *stack*):
   connected and displayed (501), falling back to `menuBtn`.
 * Static overlays with their own open flag: settings (`openSettingsModal`
   1166, `closeSettingsModal` 1201, also closed by the popstate/back handler
-  997), update (237/232), the ROM-check prompt (`askRomWarn` 11901,
-  `settleRomWarn` 11889, `closeRomWarnModal` 11897), and the clip export's
-  progress panel (opened by `startClipExport`, 12624-12625; closed by
-  `endClipExport`, 12399-12402, which runs when the export ends, from its
-  Cancel 12635, or from a load aborting it, whatever has the trap then).
-* Dynamic "sync" overlays built by `buildSyncModal` (5156): their Escape
-  listener is document-*capture* and calls `stopPropagation` (5182-5185), so
-  while one is up the global Escape handler (7396, document bubble) does not
-  run. Two users: `openRenameModal` (4924, guarded by `renameModalOpen`) and
-  `confirmTombstones` (5108, a Promise resolved by `done`).
-* The global Escape handler closes every static modal blindly (7396-7415),
+  997), update (237/232), the ROM-check prompt (`askRomWarn` 11968,
+  `settleRomWarn` 11956, `closeRomWarnModal` 11964), and the clip export's
+  progress panel (opened by `startClipExport`, 12691-12692; closed by
+  `endClipExport`, 12466-12469, which runs when the export ends, from its
+  Cancel 12702, or from a load aborting it, whatever has the trap then).
+* Dynamic "sync" overlays built by `buildSyncModal` (5213): their Escape
+  listener is document-*capture* and calls `stopPropagation` (5239-5242), so
+  while one is up the global Escape handler (7463, document bubble) does not
+  run. Two users: `openRenameModal` (4981, guarded by `renameModalOpen`) and
+  `confirmTombstones` (5165, a Promise resolved by `done`).
+* The global Escape handler closes every static modal blindly (7463-7482),
   except the progress panel, which only its Cancel or the export's end closes.
-* Promise-returning modals: `confirmTombstones` (5108) and `askRomWarn` (11901).
+* Promise-returning modals: `confirmTombstones` (5165) and `askRomWarn` (11968).
 * There is no body scroll-lock or `inert` flag tied to modals: overlays are
   `position: fixed; inset: 0; z-index: 500` (styles.css 4175) and
-  `anyModalOpen()` (13173) is computed from the DOM (`.modal-overlay.open`), so
+  `anyModalOpen()` (13240) is computed from the DOM (`.modal-overlay.open`), so
   "flag set iff stack non-empty" holds by construction and is not modelled.
   (`inert` is used only for the settings sheet's off-stage screen, 941-949.)
 
@@ -53,18 +57,19 @@ What the code has (there is no modal *stack*):
 * Saves/states/moments/cheats/report/rewind/clip/thumbs modals are the same
   pattern as settings/update (flag + trapFocus/releaseFocus + closed by
   Escape); settings and update stand for them. The clip range picker's Save
-  (12936) closes the picker (releasing the trap to where it was) and then
+  (13003) closes the picker (releasing the trap to where it was) and then
   opens the progress panel: `clipStart`, from nothing open, with focus where
   the picker's close put it.
-* `openRenameModal`'s two storage reads (4930-4932, nothing modal between
-  them) are one await (`renameLoaded`/`renameLoadFail`); `renameGame` (5081)
-  is one await (`renameResult`). `handleRomFile`'s FileReader +
+* `openRenameModal`'s two storage reads (4987-4989, nothing modal between
+  them) are one await (`renameLoaded`/`renameLoadFail`); `renameGame` (5138)
+  is one await (`renameResult`); its `renamedAway` bookkeeping (4854-4855,
+  4956: the pull's write skip, DriveLibrary) is no modal state. `handleRomFile`'s FileReader +
   `confirmSuspectRom` is one event (`dropSuspect`): nothing between them
   touches modal state.
 * A pending `runFullSync` is one flag; it reaches `confirmTombstones` at most
-  once per sync (`syncTomb`, 4261) and finishes when the promise settles. Only
-  one sync at a time (the Drive sync machine's `runExclusive` chain, 3756;
-  `runFullSync`'s own awaits before it, 4554-4557, touch no modal).
+  once per sync (`syncTomb`, 4305) and finishes when the promise settles. Only
+  one sync at a time (the Drive sync machine's `runExclusive` chain, 3796;
+  `runFullSync`'s own awaits before it, 4602-4605, touch no modal).
 * Escape with two sync overlays up fires both capture listeners; the model
   lets `escSync o` close one at a time (an over-approximation, sound for the
   invariants; no counterexample below needs two sync overlays under Escape).
@@ -88,14 +93,14 @@ inductive El where
 
 inductive RPhase where
   | idle     -- not created
-  | loading  -- openRenameModal awaiting libraryNames/renameInventory (4930-4932)
+  | loading  -- openRenameModal awaiting libraryNames/renameInventory (4987-4989)
   | shown    -- overlay in the DOM
   | gone     -- dismissed (or the load failed)
   deriving DecidableEq, Repr
 
 structure RInst where
   phase    : RPhase := .idle
-  inflight : Bool := false   -- the Rename button's `await renameGame` (5081)
+  inflight : Bool := false   -- the Rename button's `await renameGame` (5138)
   deriving DecidableEq, Repr
 
 inductive PSt where
@@ -115,10 +120,10 @@ structure State where
   owner        : Option Ov     -- modalTrapOverlay (458)
   ret          : Option El     -- modalReturnFocus (456)
   focus        : El            -- document.activeElement
-  warnResolve  : Option Nat    -- romWarnResolve (11887): which promise it resolves
+  warnResolve  : Option Nat    -- romWarnResolve (11954): which promise it resolves
   warnP        : Nat → PSt     -- the promises askRomWarn returned
   nextWarn     : Nat
-  renameFlag   : Bool          -- renameModalOpen (4922)
+  renameFlag   : Bool          -- renameModalOpen (4979)
   ren          : Nat → RInst
   nextRen      : Nat
   syncPending  : Bool          -- a runFullSync in flight
@@ -159,7 +164,7 @@ def anySync (s : State) : Bool :=
   (List.range s.nextRen).any (fun i => (s.ren i).phase == .shown) ||
   (List.range s.nextTomb).any (fun i => (s.tomb i).shown)
 
-/-- anyModalOpen() (13173). -/
+/-- anyModalOpen() (13240). -/
 def anyOpen (s : State) : Bool :=
   s.settingsOpen || s.updateOpen || s.romWarnOpen || s.progressOpen || anySync s
 
@@ -202,11 +207,11 @@ def closeSettings (s : State) : State :=
 def closeUpdate (s : State) : State :=
   releaseFocus .update { s with updateOpen := false }
 
-/-- endClipExport's close of the progress panel (12399-12402). -/
+/-- endClipExport's close of the progress panel (12466-12469). -/
 def closeProgress (s : State) : State :=
   if s.progressOpen then releaseFocus .progress { s with progressOpen := false } else s
 
-/-- settleRomWarn (11889): take the resolver, clear it, close, release, resolve. -/
+/-- settleRomWarn (11956): take the resolver, clear it, close, release, resolve. -/
 def settleRomWarn (s : State) : State :=
   let r := s.warnResolve
   let s := releaseFocus .romWarn { s with warnResolve := none, romWarnOpen := false }
@@ -214,25 +219,25 @@ def settleRomWarn (s : State) : State :=
   | some n => { s with warnP := fun j => if j = n then .settled else s.warnP j }
   | none => s
 
-/-- closeRomWarnModal (11897). -/
+/-- closeRomWarnModal (11964). -/
 def closeRomWarn (s : State) : State :=
   if s.warnResolve.isSome then settleRomWarn s else s
 
-/-- askRomWarn (11901): a new promise; the resolver slot is overwritten. -/
+/-- askRomWarn (11968): a new promise; the resolver slot is overwritten. -/
 def askRomWarn (s : State) : State :=
   let n := s.nextWarn
   trapFocus .romWarn
     { s with warnP := fun j => if j = n then .pending else s.warnP j,
              nextWarn := n + 1, warnResolve := some n, romWarnOpen := true }
 
-/-- The rename modal's `close` (4941): clear the flag, then `m.dismiss()`
-    (5194: remove the Escape listener, releaseFocus, overlay.remove()). -/
+/-- The rename modal's `close` (4998): clear the flag, then `m.dismiss()`
+    (5251: remove the Escape listener, releaseFocus, overlay.remove()). -/
 def renameClose (i : Nat) (s : State) : State :=
   let s := { s with renameFlag := false }
   let s := setRen i { s.ren i with phase := .gone } s
   releaseFocus (.rename i) s
 
-/-- confirmTombstones' `done` (5111): dismiss, then resolve. The sync resumes. -/
+/-- confirmTombstones' `done` (5168): dismiss, then resolve. The sync resumes. -/
 def tombDone (i : Nat) (s : State) : State :=
   let s := setTomb i { shown := false, settles := (s.tomb i).settles + 1 } s
   let s := releaseFocus (.tomb i) s
@@ -243,24 +248,24 @@ inductive Event where
   | closeSettings         -- close button, swipe, or Android back (popstate 997)
   | openUpdate            -- #update-btn with a game loaded (237-240)
   | closeUpdate           -- Not now / x / backdrop (247-252)
-  | dropSuspect           -- a file failing looksLikeValidRom dropped (drop 12061: no modal guard,
-                          --   but refused with a toast while a clip records, 12068-12071)
-  | romWarnLoad           -- "Load anyway" (11918)
-  | romWarnCancel         -- Cancel / x / backdrop (11919-11923)
-  | escGlobal             -- Escape reaching the document-bubble handler (7396)
-  | escSync (o : Ov)      -- Escape caught by a sync overlay's capture listener (5182-5185)
-  | syncStart             -- Sync in the settings Drive section (2973), the account menu (5577)
-                          --   or on the home screen (5755)
-  | syncTomb              -- that sync's pull reaches confirmTombstones (4261)
+  | dropSuspect           -- a file failing looksLikeValidRom dropped (drop 12128: no modal guard,
+                          --   but refused with a toast while a clip records, 12135-12138)
+  | romWarnLoad           -- "Load anyway" (11985)
+  | romWarnCancel         -- Cancel / x / backdrop (11986-11990)
+  | escGlobal             -- Escape reaching the document-bubble handler (7463)
+  | escSync (o : Ov)      -- Escape caught by a sync overlay's capture listener (5239-5242)
+  | syncStart             -- Sync in the settings Drive section (3010), the account menu (5643)
+                          --   or on the home screen (5821)
+  | syncTomb              -- that sync's pull reaches confirmTombstones (4305)
   | tombChoose (i : Nat)  -- Restore / Continue / x / backdrop on tomb overlay i
-  | renameMenu            -- tile menu "Rename" (6743) -> openRenameModal, first segment
-  | renameLoaded (i : Nat)  -- its storage reads resolve: build the overlay (4945)
+  | renameMenu            -- tile menu "Rename" (6810) -> openRenameModal, first segment
+  | renameLoaded (i : Nat)  -- its storage reads resolve: build the overlay (5002)
   | renameLoadFail (i : Nat)
-  | renameGo (i : Nat)      -- "Rename" in the confirm pane (5078)
+  | renameGo (i : Nat)      -- "Rename" in the confirm pane (5135)
   | renameResult (i : Nat) (ok : Bool)  -- `await renameGame` resumes
   | renameCancel (i : Nat)  -- Cancel / Close / x / backdrop
-  | clipStart             -- the clip range picker's Save (12936): the progress panel opens
-  | clipEnd               -- the export ends (endClipExport 12394: done, failed, Cancel 12635,
+  | clipStart             -- the clip range picker's Save (13003): the progress panel opens
+  | clipEnd               -- the export ends (endClipExport 12461: done, failed, Cancel 12702,
                           --   or a load's abort): the panel closes
   deriving DecidableEq, Repr
 
@@ -302,7 +307,7 @@ def step (s : State) : Event → State
   | .dropSuspect => fixup (askRomWarn s)
   | .romWarnLoad => fixup (settleRomWarn s)
   | .romWarnCancel => fixup (closeRomWarn s)
-  -- 7396-7415: closeSettingsModal(); ...; closeUpdateModal(); ...; closeRomWarnModal(); ...
+  -- 7463-7482: closeSettingsModal(); ...; closeUpdateModal(); ...; closeRomWarnModal(); ...
   | .escGlobal => fixup (closeRomWarn (closeUpdate (closeSettings s)))
   | .escSync o => match o with
     | .rename i => fixup (renameClose i s)
@@ -314,20 +319,20 @@ def step (s : State) : Event → State
     fixup (trapFocus (.tomb n)
       (setTomb n { shown := true, settles := 0 } { s with nextTomb := n + 1, tombWaiting := true }))
   | .tombChoose i => fixup (tombDone i s)
-  -- 4925-4926: if (renameModalOpen) return; renameModalOpen = true; ...await
+  -- 4982-4983: if (renameModalOpen) return; renameModalOpen = true; ...await
   | .renameMenu =>
     if s.renameFlag then s
     else setRen s.nextRen { phase := .loading } { s with renameFlag := true, nextRen := s.nextRen + 1 }
   | .renameLoaded i => fixup (trapFocus (.rename i) (setRen i { s.ren i with phase := .shown } s))
   | .renameLoadFail i => setRen i { s.ren i with phase := .gone } { s with renameFlag := false }
   | .renameGo i => setRen i { s.ren i with inflight := true } s
-  -- 5081-5083: let res = await renameGame(...); if (!res.ok) { showErrorStep(...); return; } close(); ...
+  -- 5138-5140: let res = await renameGame(...); if (!res.ok) { showErrorStep(...); return; } close(); ...
   | .renameResult i ok =>
     let s' := setRen i { s.ren i with inflight := false } s
     if ok then fixup (renameClose i s')
     else if (s.ren i).phase == .shown then s' else { s' with errorLost := true }
   | .renameCancel i => fixup (renameClose i s)
-  -- 12624-12625: classList.add("open"); trapFocus(clipProgressModal)
+  -- 12691-12692: classList.add("open"); trapFocus(clipProgressModal)
   | .clipStart => fixup (trapFocus .progress { s with progressOpen := true })
   | .clipEnd => fixup (closeProgress s)
 
@@ -1056,7 +1061,7 @@ theorem single_progress_returns {s : State} (h : Reach1 s) (ho : s.progressOpen 
 check, dropped while a clip recorded, put its prompt over the progress panel;
 its Cancel handed focus back into the panel with no trap, and the export's end
 then lost focus to `<body>`. The drop is now refused while a clip records
-(12068-12071): no prompt opens over the panel, which keeps the trap. -/
+(12135-12138): no prompt opens over the panel, which keeps the trap. -/
 theorem regress_drop_during_clip_export_loses_focus :
     witnesses [.clipStart]
       (fun s => !en s .dropSuspect && s.owner == some .progress) = true ∧
