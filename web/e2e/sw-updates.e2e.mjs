@@ -21,8 +21,14 @@ import { builtWeb, sleep, WEB } from "./devices.mjs";
 import { synctestRom, SYNCTEST_NAME as GAME } from "./synctest-rom.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
-// On CI in test.yml's "crash + updates" shard, as crash-recovery.e2e.mjs.
-const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)" : false;
+// Not on CI unless asked (DINGBAT_E2E_UPDATES=1). On its own shard there
+// it still failed one run in two: after the "no network" test, Linux
+// WebKit's next update() never settled (an install hung, not failed), and
+// on the Mac a deploy while a checkpoint packs never reloaded the page.
+// Steady locally, Chromium and WebKit.
+const skip = !builtWeb() ? "web/em.wasm not built (nim c -d:emscripten src/dingbat_wasm.nim)"
+  : process.env.CI && !process.env.DINGBAT_E2E_UPDATES
+    ? "flaky on CI's runners (DINGBAT_E2E_UPDATES=1 runs it)" : false;
 const ENGINES = process.env.DINGBAT_E2E_NO_CHROMIUM ? ["webkit"] : ["chromium", "webkit"];
 const channel = process.env.DINGBAT_E2E_CHROMIUM_CHANNEL;
 

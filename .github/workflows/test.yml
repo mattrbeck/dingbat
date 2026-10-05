@@ -417,7 +417,7 @@ jobs:
           - { shard: "fourteen-steps mac+iphone", files: e2e/fourteen-steps.e2e.mjs, pairs: "mac+iphone" }
           - { shard: "handoff iphone+mac", files: e2e/handoff.e2e.mjs, pairs: "iphone+mac" }
           - { shard: "handoff mac+mac", files: e2e/handoff.e2e.mjs, pairs: "mac+mac" }
-          - { shard: "crash + updates", files: "e2e/crash-recovery.e2e.mjs e2e/sw-updates.e2e.mjs", pairs: "" }
+          - { shard: "crash recovery", files: e2e/crash-recovery.e2e.mjs, pairs: "" }
     name: web-e2e (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4
@@ -490,7 +490,7 @@ jobs:
           - { shard: "fourteen-steps iphone+mac", files: e2e/fourteen-steps.e2e.mjs, pairs: "iphone+mac" }
           - { shard: "fourteen-steps mac+iphone", files: e2e/fourteen-steps.e2e.mjs, pairs: "mac+iphone" }
           - { shard: "handoff", files: e2e/handoff.e2e.mjs, pairs: "iphone+mac,mac+mac" }
-          - { shard: "crash + updates", files: "e2e/crash-recovery.e2e.mjs e2e/sw-updates.e2e.mjs", pairs: "" }
+          - { shard: "crash recovery", files: e2e/crash-recovery.e2e.mjs, pairs: "" }
     name: web-e2e-macos (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4

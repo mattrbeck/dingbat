@@ -172,9 +172,12 @@ the battery watcher, going back past a save); `web/e2e/crash-recovery.e2e.mjs`
 (the browser SIGKILLed or closed with the test ROM on screen, in Chromium
 and WebKit: where each relaunch resumes, what counts as a crash, the sheet
 after two); `web/e2e/sw-updates.e2e.mjs` (the worker and page stay one build
-across deploys, Force update, no network, an old sw.js). The two e2e files
-gate CI in their own shard (test.yml "crash + updates", a runner to
-themselves) and run locally with the rest (`node --test e2e/*.e2e.mjs`).
+across deploys, Force update, no network, an old sw.js). Both run locally
+with the rest (`node --test e2e/*.e2e.mjs`); the crash suite also gates CI
+in its own shard (test.yml "crash recovery"), while the update suite runs
+on CI only when asked (`DINGBAT_E2E_UPDATES=1`: its no-network steps still
+hang WebKit's next install there now and then). Run it before landing a
+change to sw.js or the update flow.
 Not gated: a real
 Android Chrome crash, Safari's own Cmd-Q, a phone's frame pacing.
 

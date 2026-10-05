@@ -22,7 +22,7 @@ import { synctestRom, SYNCTEST_NAME as GAME } from "./synctest-rom.mjs";
 
 const playwright = createRequire(join(WEB, "package.json"))("playwright");
 
-// On CI it has a runner to itself (test.yml's "crash + updates" shard). It
+// On CI it has a runner to itself (test.yml's "crash recovery" shard). It
 // flaked there beside the other e2e files, every run differently, until
 // (1) a relaunch waited for the last browser on its profile to be gone (a
 // WebKit network process still holding the storage left the next launch
