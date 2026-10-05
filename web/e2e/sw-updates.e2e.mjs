@@ -111,8 +111,13 @@ for (const engine of ENGINES) {
     // A deploy reaches the browser: the new sw.js installs and waits.
     const deploy = async (version, letter, o) => {
       await setBuild(version, letter, o);
-      await page.evaluate(() => swRegistration.update());
-      await page.waitForFunction(() => !!swRegistration.waiting, null, { timeout: 60000 });
+      // Asked until the new worker waits: right after the site comes back
+      // from "offline" (its sockets dropped), WebKit's update() has
+      // rejected with "TypeError: Internal error" (CI, once).
+      await page.waitForFunction(() => {
+        if (!swRegistration.waiting && !swRegistration.installing) swRegistration.update().catch(() => {});
+        return !!swRegistration.waiting;
+      }, null, { timeout: 60000, polling: 1000 });
     };
     // The page `fn` reloads, booted: told apart from this one by a mark only
     // this one carries. Waiting for the next "load" event instead took a
