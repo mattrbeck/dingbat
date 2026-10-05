@@ -136,6 +136,21 @@ the payloads make a replay diverge (GB `apu.noise_phase`,
 forced-low `cpu.irq_line` on load, the IRQ synchroniser's stamps), which
 matters for rollback netplay as well as rewind.
 
+**Re-audit at 03f88d6c (2026-10-05)**, GameLifecycle, NetLink,
+SavePersistence and Settings against the procs changed since their last
+stamp: packed `.state` files (`write_state_file` packs, `parse_state_payload`
+unpacks first; a body that does not inflate is refused like a cut file), an
+EEPROM `.sav`'s bytes past a 4 Kbit chip kept (`new_storage`), the muted
+core's `APU.silent` set beside the master volume (`apply_master_volume`),
+pitch-correct fast-forward and the low-pass on by default with
+`defaults_rev` (`new_config`, `parse_config`; every file this build writes is
+rev 2, so the config round trip holds), and `new_net_core` clearing
+`wl_cross_events`. None moves a modelled property; every theorem re-proved
+unchanged. Found by reading, not a state bug: a core that has begun a link
+handshake keeps `wl_cross_events` off after the link ends or the handshake
+fails, so its idle-loop skip stays the narrower one (host time only) until
+the next load.
+
 | File | Machine |
 |---|---|
 | `GameLifecycle` | load_rom and its callers (CLI, drop, Open, Recent, Reset), zip cache, flush on switch/quit, what leaks between games |
