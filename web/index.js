@@ -1726,13 +1726,16 @@ const resetCurrentSaveFile = async () => {
   if (!game) return;
   const name = game.originalName;
   retireSavePuts(name); // as deleteKeys
+  // Queued before the first await, as resetGameSaves does: a pull that is
+  // downloading this save checks the queue before writing it back, and
+  // would otherwise land it in these awaits (bug_file_reset_undone_by_pull).
+  markDelete("save:" + name);
+  markDelete("save:" + name + "-p2");
+  markDelete(autoStateKey(name));
   await dbDelete("save:" + name);
   await dbDelete("save:" + name + "-p2");
   // The reboot ends in offerAutoResume, which would offer to un-reset.
   await deleteKeys([...perGameKeys(name).session, ...perGameKeys(name).checkpoints]);
-  markDelete("save:" + name);
-  markDelete("save:" + name + "-p2");
-  markDelete(autoStateKey(name));
   loadRom(game.romName, name);
 };
 
@@ -6166,9 +6169,12 @@ const isQuotaError = (e) =>
 const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
   let freed = 0;
   let evictedCkpts = false;
+  // Any retry, after checkpoints or ROMs gave way: both awaits let a newer
+  // value (or a reset, delete or import) in (bug_ckpt_evict_retry_*).
+  let retried = false;
   let put = true;
   for (;;) {
-    if (freed && superseded()) {
+    if (retried && superseded()) {
       put = null;
       break;
     }
@@ -6177,6 +6183,7 @@ const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
       break;
     } catch (e) {
       if (!isQuotaError(e)) throw e;
+      retried = true;
       // Other games' earlier moments go first, then ROM files.
       if (!evictedCkpts) {
         evictedCkpts = true;
@@ -8333,14 +8340,19 @@ const takeCheckpoint = () => {
 };
 
 const storeCheckpoint = async (name, snap) => {
-  // A newer snapshot, or a delete, since this one was taken: it is history.
-  if (sessionSnapTs.get(name) !== snap.ts || sessionEpoch(name) !== snap.epoch) return;
-  if (sessionHeldFor === name) return; // held since it was taken
+  // A newer snapshot, or a delete or reset, since this one was taken: it is
+  // history. Held since it was taken: not ours to write.
+  const stale = () => sessionSnapTs.get(name) !== snap.ts ||
+    sessionEpoch(name) !== snap.epoch || sessionHeldFor === name;
+  if (stale()) return;
   // The battery it carries, stored now if the 5 s autosave has not yet: a
   // crash before that would leave a session that matches no stored save.
   if (currentOriginalName === name && currentRomName &&
       !(lastSaveSigKey === name && lastSaveSig === snap.saveSig)) {
     await persistSave(currentRomName, name);
+    // Again: a Main Menu, a hide or a reset can land in that await, and
+    // this older session would go over theirs (bug_ckpt_store_over_*).
+    if (stale()) return;
   }
   const key = autoStateKey(name);
   await dbPut(key, { bytes: snap.bytes, ts: snap.ts, saveSig: snap.saveSig, by: deviceId,
