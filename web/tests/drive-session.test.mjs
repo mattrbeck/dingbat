@@ -325,12 +325,20 @@ test("a consent re-grant for the linked account is adopted, and the flush finish
 });
 
 // DriveSession.Session.bug_refresh_of_refused_signin /
-// regress_refresh_of_refused_signin.
-test("a broker refresh started during a sign-in that is then refused does not adopt that account", async () => {
+// regress_refresh_of_refused_signin. Two taps on Sign in (the second after
+// the first's code is back, so it does not cancel it); the first finishes as
+// account 1; the second's grant lands and stores its refresh token; a tap on
+// a Drive-only tile (ensureDriveSignedIn) starts a broker refresh while the
+// second is still confirming; then the second's confirmation fails and it is
+// refused. `secondTok`/`secondSub`: the second grant's token and account.
+const refusedSignInWithRefresh = async ({ secondTok }) => {
   const clock = makeClock();
   const accounts = makeAccounts(clock);
   const app = await linked(clock, accounts, { connected: false, email: null, refresh: null });
   app.api.gdriveToken = null;
+  const gisDown = Promise.reject(new Error("offline"));      // no token-flow popup either
+  gisDown.catch(() => {});
+  app.api.gisScriptPromise = gisDown;
   const flow = installCodeFlow(app);
   let releaseEx1, releaseRefresh, failInfo;
   const ex1 = new Promise((r) => { releaseEx1 = r; });
@@ -340,19 +348,20 @@ test("a broker refresh started during a sign-in that is then refused does not ad
   const { hits, fetch: routed } = withBrokerFetch(app, accounts, {
     "/oauth/exchange": () => (++exchanges === 1
       ? ex1.then(() => [200, { access_token: "tok1", expires_in: 3599, refresh_token: "rt1" }])
-      : [200, { access_token: "tok2", expires_in: 3599, refresh_token: "rt2" }]),
+      : [200, { access_token: secondTok, expires_in: 3599, refresh_token: "rt2" }]),
     "/oauth/refresh": () => refreshAnswer,
   });
-  // The second sign-in's tokeninfo is held, then fails.
+  // The second sign-in's confirmation (tokeninfo once its refresh token is
+  // stored) is held, then fails; the grant's own tokeninfo answers.
   app.setFetch(async (url, opts) => {
-    if (String(url).includes("tokeninfo") && String(url).includes("tok2")) {
+    if (String(url).includes("tokeninfo") && String(url).includes(secondTok) &&
+        app.api.syncState.refresh === "rt2") {
       await infoGate;
       return jsonRes({}, 503);
     }
     return routed(url, opts);
   });
 
-  // Two taps on Sign in: the second after the first's code is back.
   const first = app.api.gdriveConnect();
   await until(() => flow.popups.length === 1, "the first consent screen");
   await deliverCode(app, flow.popups[0], "code-1");
@@ -365,17 +374,23 @@ test("a broker refresh started during a sign-in that is then refused does not ad
   await deliverCode(app, flow.popups[1], "code-2");
   await until(() => app.api.syncState.refresh === "rt2", "the second grant landed");
 
-  // A Drive-only tile's tap during the second sign-in: a broker refresh.
   flow.blocked = true;                            // (no further consent screen)
   const ensuring = app.api.ensureDriveSignedIn();
-  await until(() => hits.includes("/oauth/refresh"), "the refresh on the wire");
+  for (let i = 0; i < 10; i++) await settle();
   failInfo();                                     // the second sign-in is refused
   const err = await second;
   assert.match(String(err?.message), /confirm which Google account/);
-  releaseRefresh([200, { access_token: "tok2", expires_in: 3599 }]);
+  releaseRefresh([200, { access_token: secondTok, expires_in: 3599 }]);
   await ensuring;
-  await settle();
+  for (let i = 0; i < 5; i++) await settle();
+  return { app, accounts, hits };
+};
 
+// The second sign-in was account 2: nothing of it is adopted, nothing
+// reaches its Drive (since 3bbe0d7f its refresh token, account 2's, is not
+// even sent while account 1 is loaded).
+test("a broker refresh started during a sign-in that is then refused does not adopt that account", async () => {
+  const { app, accounts } = await refusedSignInWithRefresh({ secondTok: "tok2" });
   assert.notEqual(app.api.gdriveToken, "tok2", "the refused sign-in's token is not adopted");
   assert.equal(app.api.syncActive(), false);
   await app.api.dbPut("save:G.gba", u8(1));
@@ -383,4 +398,80 @@ test("a broker refresh started during a sign-in that is then refused does not ad
   await app.api.flushSync();
   await settle();
   eq(accounts.drives.a2.log, [], "nothing reaches account 2's Drive");
+});
+
+// The second sign-in was account 1 again, its refresh token usable: the
+// refused sign-in's session is over, so the refresh it started answers into
+// nothing, and the tab is left without a token, as the refusal says.
+test("a broker refresh started during a sign-in that is then refused lands in a session that is over", async () => {
+  const { app, hits } = await refusedSignInWithRefresh({ secondTok: "tok1" });
+  assert.ok(hits.includes("/oauth/refresh"), "the refresh did go out");
+  assert.equal(app.api.gdriveToken, null, "but its answer is not adopted");
+  assert.equal(app.api.syncActive(), false);
+});
+
+// DriveSession.Session.bug_refresh_token_outlives_its_account /
+// regress_refresh_token_outlives_its_account. A broker sign-in's grant is
+// account 2's, but by the time it confirms the account the tab holds
+// account 1's token (a re-grant for the loaded account landed while the
+// grant was being saved: emulated here by setting the token as that save
+// commits). The sign-in completes as account 1; account 2's refresh token
+// must not stay behind, or the next silent renewal fetches account 2's
+// token with account 1 loaded.
+test("a broker sign-in confirmed as another account keeps no refresh token for the first", async () => {
+  const clock = makeClock();
+  const accounts = makeAccounts(clock);
+  const app = await linked(clock, accounts, { connected: false, email: null, refresh: null });
+  app.api.gdriveToken = null;
+  const flow = installCodeFlow(app);
+  const { hits } = withBrokerFetch(app, accounts, {
+    "/oauth/exchange": [200, { access_token: "tok2", expires_in: 3599, refresh_token: "rt2" }],
+    "/oauth/refresh": [200, { access_token: "tok2", expires_in: 3599 }],
+  });
+  let swapped = false;
+  app.state.idbFail = (op, key) => {
+    if (!swapped && op === "put" && key === "gdrive_sync" &&
+        app.api.syncState.refresh === "rt2" && app.api.gdriveToken === "tok2") {
+      swapped = true;
+      app.api.gdriveToken = "tok1";             // the re-grant for account 1 lands
+    }
+    return null;
+  };
+  const connecting = app.api.gdriveConnect();
+  await until(() => flow.popups.length === 1, "the consent screen");
+  await deliverCode(app, flow.popups[0], "the-code");
+  await connecting;
+  await settle();
+  assert.ok(swapped, "the re-grant landed between the grant and its confirmation");
+  assert.equal(app.api.syncState.acct, "a1", "signed in as account 1");
+  assert.notEqual(app.api.syncState.refresh, "rt2", "account 2's refresh token is dropped");
+
+  // The hour is up: the poll's renewal.
+  app.api.gdriveTokenExp = clock.peek() + 60 * 1000;
+  app.api.syncPollTick();
+  for (let i = 0; i < 10; i++) await settle();
+  assert.ok(!hits.includes("/oauth/refresh"), "no renewal with account 2's refresh token");
+  assert.notEqual(app.api.gdriveToken, "tok2", "account 2's token is never adopted");
+  await app.api.dbPut("save:G.gba", u8(1));
+  app.api.markUpload("save:G.gba");
+  await app.api.flushSync();
+  await settle();
+  eq(accounts.drives.a2.log, [], "nothing reaches account 2's Drive");
+});
+
+// ...and a refresh token kept for another account is never sent.
+test("a refresh token granted for another account than the loaded one is never used", async () => {
+  const clock = makeClock();
+  const accounts = makeAccounts(clock);
+  const app = await linked(clock, accounts, { refresh: "rt2", refreshAcct: "a2" });
+  app.api.gdriveToken = "tok1";
+  app.api.gdriveTokenExp = clock.peek() + 60 * 1000;   // stale
+  const { hits } = withBrokerFetch(app, accounts, {
+    "/oauth/refresh": [200, { access_token: "tok2", expires_in: 3599 }],
+  });
+  assert.equal(await app.api.driveRefreshSilently({ force: true }), false);
+  app.api.armDriveRenewOnGesture();
+  for (let i = 0; i < 5; i++) await settle();
+  eq(hits, [], "the broker is never asked");
+  assert.equal(app.api.gdriveToken, "tok1");
 });
