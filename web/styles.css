@@ -1487,6 +1487,65 @@ body:not(.running) #channels-indicator {
   stroke-linejoin: round;
 }
 
+/* A controller the page can see (index.js "Controller presence"). Chrome
+   ink like the channels reminder; a press lights it in the accent for a
+   beat, so a player can see their buttons reach the page. */
+#pad-indicator {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  max-width: 220px;
+  padding: 0 9px;
+  border: 1px solid var(--chrome-btn-border);
+  border-radius: 999px;
+  background: none;
+  color: var(--chrome-ink-dim);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.25s, border-color 0.25s, box-shadow 0.25s;
+}
+#pad-indicator[hidden] {
+  display: none;
+}
+#pad-indicator:hover {
+  color: var(--chrome-ink);
+}
+#pad-indicator.pad-live {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  transition: none;
+}
+#pad-indicator svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#pad-indicator-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The name is desktop detail: phones keep the icon. */
+@media (max-width: 759px) {
+  #pad-indicator {
+    padding: 0 7px;
+  }
+  #pad-indicator-label {
+    display: none;
+  }
+}
+
 /* Gentle glow so it reads as "lit", echoing the running-status LED */
 #hle-indicator.on svg {
   filter: drop-shadow(0 0 3px var(--accent-glow));

@@ -15159,6 +15159,87 @@ const padHint = (key, msg) => {
   pushToast(msg, 6000, null);
 };
 
+// --- Controller presence ---
+// A browser hands a page a controller only once one of its buttons is
+// pressed after the page loads (and only to a secure page), so "is it
+// connected?" needs an answer on screen: the bar's icon while one is here,
+// lit on each press, a toast as one arrives or goes, and Settings › Controls
+// naming it - or saying what it takes for one to show up.
+const padIndicator = document.getElementById("pad-indicator");
+const padIndicatorLabel = document.getElementById("pad-indicator-label");
+const padStatusEl = document.getElementById("pad-status");
+let padSeen = new Map();   // index -> { id, mapping } as last shown
+let padPulseTimer = 0;
+
+// "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)"
+// (Chromium) or "045e-0b13-Xbox Wireless Controller" (Firefox) -> the name.
+const padName = (id) => String(id || "")
+  .replace(/\s*\((?:STANDARD GAMEPAD|Vendor:)[^)]*\)\s*$/i, "")
+  .replace(/^[0-9a-f]{1,4}-[0-9a-f]{1,4}-/i, "")
+  .trim() || "Controller";
+
+const padStatusText = () => {
+  if (padSeen.size) {
+    return [...padSeen.values()].map((p) => "Connected: " + padName(p.id) +
+      (p.mapping === "standard" ? "" : " (no standard layout: some buttons may be in odd places)")).join(" · ");
+  }
+  if (typeof isSecureContext !== "undefined" && !isSecureContext) {
+    return "Controllers need a secure page: open dingbat over https (or localhost).";
+  }
+  return "No controller yet. Connect one, then press any button on it: " +
+         "browsers only show a controller to a page after a button press.";
+};
+
+const padPresence = (pads) => {
+  const now = new Map();
+  for (const p of pads) if (p) now.set(p.index, { id: p.id, mapping: p.mapping });
+  let changed = now.size !== padSeen.size;
+  for (const [i, p] of now) {
+    const was = padSeen.get(i);
+    if (!was || was.id !== p.id) {
+      changed = true;
+      pushToast("Controller connected: " + padName(p.id) +
+        (p.mapping === "standard" ? "" : " (no standard layout: some buttons may be in odd places)"), 4000, null);
+    }
+  }
+  for (const [i, p] of padSeen) {
+    if (!now.has(i)) { changed = true; pushToast("Controller disconnected: " + padName(p.id), 4000, null); }
+  }
+  if (!changed) return;
+  padSeen = now;
+  const first = [...now.values()][0];
+  padIndicator.hidden = !first;
+  padIndicatorLabel.textContent = first ? padName(first.id) + (now.size > 1 ? " +" + (now.size - 1) : "") : "";
+  padIndicator.title = first ? [...now.values()].map((p) => padName(p.id)).join(", ") +
+    " — controller settings" : "";
+  if (padStatusEl) padStatusEl.textContent = padStatusText();
+};
+if (padStatusEl) padStatusEl.textContent = padStatusText();
+
+// Lit for a beat on a press.
+const padPulse = () => {
+  padIndicator.classList.add("pad-live");
+  clearTimeout(padPulseTimer);
+  padPulseTimer = setTimeout(() => padIndicator.classList.remove("pad-live"), 160);
+};
+
+padIndicator.addEventListener("click", () => {
+  openSettingsModal();
+  openSettingsSection("controls");
+  const head = padStatusEl;
+  if (head) {
+    const top = head.getBoundingClientRect().top - settingsScroll.getBoundingClientRect().top;
+    settingsScroll.scrollTop += top - 40;
+  }
+});
+
+// The events come before the game loop polls (and while it is not running).
+for (const ev of ["gamepadconnected", "gamepaddisconnected"]) {
+  window.addEventListener(ev, () => {
+    padPresence(navigator.getGamepads ? navigator.getGamepads() : []);
+  });
+}
+
 const padContext = () => {
   if (settingsModal.classList.contains("open")) return "settings";
   if (tileMenuFor !== null) return "tilemenu";
@@ -15172,6 +15253,8 @@ const pollGamepads = () => {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let anyConnected = false;
   for (const pad of pads) if (pad) { anyConnected = true; break; }
+  // Some browsers hand a pad over with no event: the poll keeps the bar honest.
+  if (anyConnected || padSeen.size) padPresence(pads);
   document.body.classList.toggle(
     "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
   if (!anyConnected) {
@@ -15216,6 +15299,7 @@ const pollGamepads = () => {
   }
   const dir = ctx === "game" ? -1 : padNavPress(now);
   const anyPress = padNow.some((p, i) => p && !padPrev[i]);
+  if (anyPress) padPulse();
   switch (ctx) {
     case "settings":
       settingsGamepadNav(dir);

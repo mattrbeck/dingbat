@@ -52,14 +52,19 @@ test("a controller finds a game, starts it, plays it and goes home", { skip, tim
   browser = await playwright[engine].launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on("pageerror", (e) => console.log("pageerror:", e.message));
-  // The pad: what navigator.getGamepads returns, driven from here.
+  // The pad: what navigator.getGamepads returns, driven from here. As a
+  // browser does, it is handed over only from its first button press.
   await page.addInitScript(() => {
     window.__pad = new Array(17).fill(false);
-    navigator.getGamepads = () => [{
-      id: "scripted pad", index: 0, connected: true, mapping: "standard", timestamp: performance.now(),
-      buttons: window.__pad.map((p) => ({ pressed: p, touched: p, value: p ? 1 : 0 })),
-      axes: [0, 0, 0, 0],
-    }];
+    let shown = false;
+    navigator.getGamepads = () => {
+      shown ||= window.__pad.some(Boolean);
+      return shown ? [{
+        id: "scripted pad", index: 0, connected: true, mapping: "standard", timestamp: performance.now(),
+        buttons: window.__pad.map((p) => ({ pressed: p, touched: p, value: p ? 1 : 0 })),
+        axes: [0, 0, 0, 0],
+      }] : [];
+    };
   });
   let shot = 0;
   const snap = async (name) => {
@@ -103,6 +108,11 @@ test("a controller finds a game, starts it, plays it and goes home", { skip, tim
   await tap(P.DOWN);
   assert.equal(await focused(), GBA_NAME, "the first press focuses the most recent game");
   assert.ok(await page.evaluate(() => document.body.classList.contains("pad-nav")), "the pad's ring is on");
+  assert.deepEqual(await page.evaluate(() => ({
+    shown: !document.getElementById("pad-indicator").hidden,
+    name: document.getElementById("pad-indicator-label").textContent,
+    told: [...document.querySelectorAll("#toast .toast-msg")].some((t) => t.textContent === "Controller connected: scripted pad"),
+  })), { shown: true, name: "scripted pad", told: true }, "the bar says a controller is here");
   // Right, then down a row: spatial, through the grid.
   await tap(P.RIGHT);
   const right = await focused();
