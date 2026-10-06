@@ -267,15 +267,6 @@
         </svg>
       </button>
 
-      <!-- A game controller the page can see: shown from the first moment a
-           browser hands one over (a button press after load) until it goes,
-           lit for a beat on every press so input visibly gets through. Opens
-           Settings › Controls, where its name and layout are. -->
-      <button type="button" id="pad-indicator" hidden aria-label="Controller connected">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 8h9a4.5 4.5 0 0 1 4.4 3.6l.9 4.5a2.6 2.6 0 0 1-4.6 2.1L15.5 16h-7l-1.7 2.2a2.6 2.6 0 0 1-4.6-2.1l.9-4.5A4.5 4.5 0 0 1 7.5 8z"/><path d="M8 10.5v3M6.5 12h3"/><circle cx="15.5" cy="11.2" r=".6" fill="currentColor"/><circle cx="17" cy="12.8" r=".6" fill="currentColor"/></svg>
-        <span id="pad-indicator-label"></span>
-      </button>
-
       <div id="volume-control">
         <button type="button" class="icon-btn" id="mute-btn" title="Mute" aria-label="Mute">
           <svg class="ico-vol" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>
@@ -1044,6 +1035,10 @@
                     <div class="kb-shortcut"><span>Screenshot</span><kbd>F9</kbd></div>
                   </div>
                   <p class="modal-hint">If a game key and a shortcut share a key, the game wins.</p>
+                </div>
+                <!-- Outside #kb-section, which touch devices hide: a tablet with
+                     a controller needs this too. -->
+                <div id="pad-section">
                   <div class="modal-subhead">Controller</div>
                   <p class="modal-hint" id="pad-status" aria-live="polite"></p>
                   <div id="pad-shortcuts">

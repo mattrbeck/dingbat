@@ -18,8 +18,7 @@ const inGame = async () => {
     currentRomName = "rom.gba";
     currentOriginalName = "Game.gba";
     document.body.classList.add("has-game", "running");
-    menuDropdown.hidden = true; // as the markup has them (the fake DOM starts them shown)
-    padIndicator.hidden = true;
+    menuDropdown.hidden = true; // as the markup has it (the fake DOM starts it shown)
     globalThis.setInputCalls = [];
     globalThis.Module = { _setInput: (id, d) => setInputCalls.push([id, d]) };
     globalThis.padDown = new Set();
@@ -131,30 +130,24 @@ test("in Settings, RB steps the section and B closes it; nothing reaches the cor
   assert.equal(sent(app), "[]");
 });
 
-test("a controller showing up is said: the bar's icon, its name, a toast; going, the same", async () => {
+test("a controller showing up is said: a toast and its name in Settings; going, the same", async () => {
   const app = await inGame();
   app.runIn(`
     globalThis.padList = [];
     navigator.getGamepads = () => padList;
     pollGamepads();`);
-  assert.equal(app.runIn("padIndicator.hidden"), true, "nothing shown before a pad");
   assert.match(app.runIn("padStatusEl.textContent"), /press any button/);
   app.runIn(`padList = [{ index: 0, id: "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)",
     mapping: "standard", buttons: Array.from({ length: 17 }, () => ({ pressed: false })), axes: [0, 0] }];
     pollGamepads();`);
-  assert.equal(app.runIn("padIndicator.hidden"), false);
-  assert.equal(app.runIn("padIndicatorLabel.textContent"), "Xbox Wireless Controller");
   assert.ok(app.toasts.includes("Controller connected: Xbox Wireless Controller"));
   assert.equal(app.runIn("padStatusEl.textContent"), "Connected: Xbox Wireless Controller");
-  // A press lights it.
-  app.runIn("padList[0].buttons[0] = { pressed: true }; pollGamepads()");
-  assert.equal(app.runIn(`padIndicator.classList.contains("pad-live")`), true);
   // Polled every frame, said once.
   app.runIn("pollGamepads(); pollGamepads()");
   assert.equal(app.toasts.filter((t) => t.startsWith("Controller connected")).length, 1);
   app.runIn("padList = []; pollGamepads()");
-  assert.equal(app.runIn("padIndicator.hidden"), true);
   assert.ok(app.toasts.includes("Controller disconnected: Xbox Wireless Controller"));
+  assert.match(app.runIn("padStatusEl.textContent"), /press any button/);
 });
 
 test("a pad without the standard layout says so", async () => {

@@ -109,10 +109,9 @@ test("a controller finds a game, starts it, plays it and goes home", { skip, tim
   assert.equal(await focused(), GBA_NAME, "the first press focuses the most recent game");
   assert.ok(await page.evaluate(() => document.body.classList.contains("pad-nav")), "the pad's ring is on");
   assert.deepEqual(await page.evaluate(() => ({
-    shown: !document.getElementById("pad-indicator").hidden,
-    name: document.getElementById("pad-indicator-label").textContent,
     told: [...document.querySelectorAll("#toast .toast-msg")].some((t) => t.textContent === "Controller connected: scripted pad"),
-  })), { shown: true, name: "scripted pad", told: true }, "the bar says a controller is here");
+    status: document.getElementById("pad-status").textContent,
+  })), { told: true, status: "Connected: scripted pad" }, "the page says a controller is here");
   // Right, then down a row: spatial, through the grid.
   await tap(P.RIGHT);
   const right = await focused();
