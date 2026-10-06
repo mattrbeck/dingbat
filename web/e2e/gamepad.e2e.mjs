@@ -71,10 +71,14 @@ test("a controller finds a game, starts it, plays it and goes home", { skip, tim
     if (SHOTS) await page.screenshot({ path: join(SHOTS, String(++shot).padStart(2, "0") + "-" + name + ".png") });
   };
   // A press spans a few animation frames, as a thumb's does.
-  const down = (b) => page.evaluate((b) => { window.__pad[b] = true; }, b);
-  const up = (b) => page.evaluate((b) => { window.__pad[b] = false; }, b);
+  // Each edge waits until the app's poll has seen it (padNow), not a fixed
+  // time: on a slow runner a short press can fall between two polls.
+  const seen = (b, on) => page.waitForFunction(([b, on]) => padNow[b] === on, [b, on],
+                                               { polling: 20, timeout: 10000 });
+  const down = async (b) => { await page.evaluate((b) => { window.__pad[b] = true; }, b); await seen(b, true); };
+  const up = async (b) => { await page.evaluate((b) => { window.__pad[b] = false; }, b); await seen(b, false); };
   const tap = async (...bs) => {
-    for (const b of bs) { await down(b); await sleep(80); await up(b); await sleep(80); }
+    for (const b of bs) { await down(b); await up(b); }
   };
   const focused = () => page.evaluate(() => {
     const el = document.activeElement;
@@ -194,17 +198,17 @@ test("a controller finds a game, starts it, plays it and goes home", { skip, tim
   await snap("states-modal");
   await tap(P.B);
   await until(page, () => !document.getElementById("states-modal").classList.contains("open"), "Save States closed");
-  await sleep(100);
-  assert.equal(await page.evaluate(() => !paused), true, "the game runs again after the modal");
+  await until(page, () => !paused, "the game running again after the modal");
   await tap(P.R3);
   assert.equal(await page.evaluate(() => !menuDropdown.hidden && paused), true, "R3 opened the menu again");
   await tap(P.B);
-  assert.equal(await page.evaluate(() => menuDropdown.hidden && !paused), true, "B closed it and the game runs");
+  assert.equal(await page.evaluate(() => menuDropdown.hidden), true, "B closed it");
+  await until(page, () => !paused, "the game running again after B");
 
   // Select+Start held: the menu again; down to Main Menu, A: home.
-  await down(P.BACK); await down(P.START); await sleep(700);
-  await up(P.START); await up(P.BACK); await sleep(80);
-  assert.equal(await page.evaluate(() => !menuDropdown.hidden && paused), true, "the held chord opened the menu");
+  await down(P.BACK); await down(P.START);
+  await until(page, () => !menuDropdown.hidden && paused, "the held chord opening the menu", 5000);
+  await up(P.START); await up(P.BACK);
   for (let i = 0; i < 4 && (await focused()) !== "main-menu"; i++) await tap(P.DOWN);
   assert.equal(await focused(), "main-menu", "down reaches Main Menu");
   await tap(P.A);
