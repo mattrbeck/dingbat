@@ -23,12 +23,18 @@ window.addEventListener("keydown", (e) => {
 // registered before em.js so it runs first, and stops text-field events
 // there. Bubble, not capture: the fields' own listeners must still see the
 // target phase. Tab belongs to the hook above; Escape must keep flowing to
-// the close-all-modals handler.
+// the close-all-modals handler. On the home screen the same goes for a
+// focused button or select: Enter and Space must press it (a library tile,
+// from the keyboard or after the pad put focus there), not be swallowed for
+// the core paused behind the page.
 {
   const typingGuard = (e) => {
     if (e.code === "Tab" || e.code === "Escape") return;
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+      e.stopImmediatePropagation();
+    } else if (t && (t.tagName === "BUTTON" || t.tagName === "SELECT") &&
+               !document.body.classList.contains("running")) {
       e.stopImmediatePropagation();
     }
   };
@@ -1972,13 +1978,14 @@ const renderLibChips = (roms, localRoms) => {
     }
     b.addEventListener("click", () => { onTap(); renderLibChips(roms, localRoms); applyLibFilter(); });
     chips.push(b);
+    return b;
   };
   if (systems.length > 1) {
     for (let s of systems) {
       chip(s, counts[s], libFilter.systems.has(s), "lib-chip-sys", () => {
         if (libFilter.systems.has(s)) libFilter.systems.delete(s);
         else libFilter.systems.add(s);
-      });
+      }).dataset.sys = s; // the pad's LB/RB step through these
     }
   }
   // A game whose file is neither here nor on Drive is on neither side of
@@ -11039,6 +11046,10 @@ const routeP1Input = (inputId, down) => {
 // Intercepts bound keys before the SDL layer and calls _setInput directly.
 const gameKeyHandler = (e, down) => {
   if (settingsModal.classList.contains("open")) return;
+  // The home screen keeps a loaded game paused behind it: there Enter, Space
+  // and the arrows are the page's (a focused tile), not the hidden core's.
+  // A release still goes through, so a key held across Main Menu lets go.
+  if (down && !document.body.classList.contains("running")) return;
   // Not while typing in a text field.
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
@@ -14732,84 +14743,382 @@ const PHONE_LANDSCAPE = "(pointer: coarse) and (orientation: landscape) and (max
 }
 
 // --- Gamepad support (polled each frame) ---
+// A pad drives whatever is on screen. In the game view it plays (A/B/X/Y,
+// shoulders, Back/Start, d-pad and left stick are the console's), with the
+// triggers and stick clicks left for the app: RT holds fast-forward, LT holds
+// rewind, and R3, the Guide button or Select+Start held opens the menu,
+// paused, like a console's own. Everywhere else - the library, the menu,
+// Settings, the other modals - the d-pad and stick move focus, A presses
+// and B backs out (Escape). The Guide button is the OS's on most machines
+// (Launchpad, Game Bar, Steam), hence the stick click and the chord.
 
-const gpPrev = new Array(10).fill(false);
+// Standard-mapping button indices (w3c Gamepad "standard" layout).
+const PB = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, BACK: 8, START: 9,
+  L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15, GUIDE: 16 };
+const PAD_BUTTONS = 17;
+
+const gpPrev = new Array(10).fill(false); // the game inputs the core was last sent
 const GP_DEADZONE = 0.4;
+let padNow = new Array(PAD_BUTTONS).fill(false);
+let padPrev = new Array(PAD_BUTTONS).fill(false);
+const padHit = (i) => padNow[i] && !padPrev[i];
+let padCtx = "";              // the surface the pad drove last poll
+const PAD_CHORD_MS = 500;     // Select+Start held this long opens the menu
+let padChordSince = 0;
+let padChordFired = false;
+let padMenuPaused = false;    // the pad's menu paused the game; closing it resumes
+let padMenuBar = false;       // ... and put the phone-landscape bar up for it
+let padFastForward = false;   // RT's hold, as kbFastForward is Tab's
+let padSpeedBeforeHold = "normal";
+let padRewindHeld = false;
+
+// D-pad and stick navigation repeats while held, like a key.
+const PAD_REPEAT_DELAY_MS = 380;
+const PAD_REPEAT_MS = 110;
+let padNavDir = -1, padNavSince = 0, padNavLast = 0;
+// The direction to move this poll (with auto-repeat), or -1.
+const padNavPress = (now) => {
+  const d = [PB.UP, PB.DOWN, PB.LEFT, PB.RIGHT].find((i) => padNow[i]);
+  if (d === undefined) { padNavDir = -1; return -1; }
+  if (d !== padNavDir) { padNavDir = d; padNavSince = padNavLast = now; return d; }
+  if (now - padNavSince >= PAD_REPEAT_DELAY_MS && now - padNavLast >= PAD_REPEAT_MS) {
+    padNavLast = now;
+    return d;
+  }
+  return -1;
+};
+
+// Pad focus is drawn whatever the browser thinks of :focus-visible (a
+// programmatic focus after a mouse click gets none); a pointer or key puts
+// it back to the browser's.
+const padNavOn = () => document.body.classList.add("pad-nav");
+for (const ev of ["pointerdown", "keydown"]) {
+  document.addEventListener(ev, (e) => {
+    // Not the Escape that B dispatches.
+    if (e.isTrusted) document.body.classList.remove("pad-nav");
+  }, true);
+}
+
+const padReachable = (/** @type {HTMLElement} */ el) =>
+  !(/** @type {any} */ (el).disabled) && el.getClientRects().length > 0 &&
+  !el.closest("[inert], [hidden]") && getComputedStyle(el).visibility !== "hidden";
+
+// The nearest of `items` from `from` in direction `dir`: candidates must lie
+// that way, overlap in the cross axis wins, then the shortest gap.
+const padSpatialPick = (items, from, dir) => {
+  const r = from.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  let best = null, bestScore = Infinity;
+  for (const el of items) {
+    if (el === from) continue;
+    const q = el.getBoundingClientRect();
+    const qx = q.left + q.width / 2, qy = q.top + q.height / 2;
+    let main, cross;
+    const gap = (a0, a1, b0, b1) => Math.max(0, b0 - a1, a0 - b1); // 0 when overlapping
+    if (dir === PB.UP || dir === PB.DOWN) {
+      if (dir === PB.UP ? qy >= cy - 1 : qy <= cy + 1) continue;
+      main = dir === PB.UP ? r.top - q.bottom : q.top - r.bottom;
+      cross = gap(r.left, r.right, q.left, q.right);
+      cross = cross * 3 + Math.abs(qx - cx) * 0.05;
+    } else {
+      if (dir === PB.LEFT ? qx >= cx - 1 : qx <= cx + 1) continue;
+      main = dir === PB.LEFT ? r.left - q.right : q.left - r.right;
+      cross = gap(r.top, r.bottom, q.top, q.bottom);
+      cross = cross * 3 + Math.abs(qy - cy) * 0.05;
+    }
+    const score = Math.max(0, main) + cross;
+    if (score < bestScore) { bestScore = score; best = el; }
+  }
+  return best;
+};
+
+const padFocus = (/** @type {HTMLElement} */ el, block = "nearest") => {
+  padNavOn();
+  el.focus({ preventScroll: true });
+  el.scrollIntoView?.({ block: /** @type {ScrollLogicalPosition} */ (block), inline: "nearest" });
+};
+
+// Left/right on a slider or a select changes it rather than leaving it.
+const padAdjust = (/** @type {HTMLElement} */ el, dir) => {
+  const step = dir === PB.RIGHT ? 1 : dir === PB.LEFT ? -1 : 0;
+  if (!step || !el) return false;
+  if (el.tagName === "INPUT" && /** @type {HTMLInputElement} */ (el).type === "range") {
+    const r = /** @type {HTMLInputElement} */ (el);
+    if (step > 0) r.stepUp(); else r.stepDown();
+  } else if (el.tagName === "SELECT") {
+    const sel = /** @type {HTMLSelectElement} */ (el);
+    const i = sel.selectedIndex + step;
+    if (i < 0 || i >= sel.options.length) return true;
+    sel.selectedIndex = i;
+  } else {
+    return false;
+  }
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
+};
+
+// One step of focus navigation over `items`; nothing focused there yet
+// takes `first` (or the first item) without moving.
+const padMove = (items, dir, first = null, block = "nearest") => {
+  if (!items.length) return;
+  const cur = /** @type {HTMLElement} */ (document.activeElement);
+  if (!cur || !items.includes(cur)) { padFocus(first || items[0], block); return; }
+  if (padAdjust(cur, dir)) { padNavOn(); return; }
+  const next = padSpatialPick(items, cur, dir);
+  if (next) padFocus(next, block);
+};
+
+const padPress = () => {
+  const el = /** @type {HTMLElement} */ (document.activeElement);
+  if (!el || el === document.body || el.tagName === "SELECT") return;
+  padNavOn();
+  el.click();
+};
+
+// B: what Escape does where the pad is (close the modal, the menu).
+const padBack = () => {
+  const t = document.activeElement || document.body;
+  t.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+};
 
 // Gamepad inside Settings: shoulders cycle sections, d-pad walks controls,
-// A activates, B goes back. Everything is consumed; nothing reaches the game.
-const settingsGamepadNav = (want) => {
-  const hit = (i) => want[i] && !gpPrev[i];
-  if (hit(8)) selectSettingsTab(settingsStep(settingsSection, -1)); // L
-  if (hit(9)) selectSettingsTab(settingsStep(settingsSection, 1));  // R
-  if (hit(5)) {                                                     // B
+// A activates, B goes back.
+const settingsGamepadNav = (dir) => {
+  if (padHit(PB.LB)) selectSettingsTab(settingsStep(settingsSection, -1));
+  if (padHit(PB.RB)) selectSettingsTab(settingsStep(settingsSection, 1));
+  if (padHit(PB.B)) {
     if (settingsOnDetail) showSettingsList();
     else closeSettingsModal();
     return;
   }
-  if (hit(4)) {                                                     // A
+  if (padHit(PB.A)) {
     const el = /** @type {HTMLElement} */ (document.activeElement);
-    if (el && settingsModal.contains(el) && el.click) el.click();
+    if (el && settingsModal.contains(el) && el.click) { padNavOn(); el.click(); }
   }
-  if (hit(0) || hit(1)) {                                           // d-pad
+  const cur = /** @type {HTMLElement} */ (document.activeElement);
+  if ((dir === PB.LEFT || dir === PB.RIGHT) && cur && settingsModal.contains(cur)) {
+    if (padAdjust(cur, dir)) padNavOn();
+  }
+  if (dir === PB.UP || dir === PB.DOWN) {
     const items = modalFocusables(settingsModal);
     if (!items.length) return;
-    const d = hit(1) ? 1 : -1;
-    let i = items.indexOf(document.activeElement);
+    const d = dir === PB.DOWN ? 1 : -1;
+    let i = items.indexOf(cur);
     if (i < 0) i = d > 0 ? -1 : 0;
-    items[(i + d + items.length) % items.length].focus();
+    padFocus(items[(i + d + items.length) % items.length]);
   }
 };
 
-const pollGamepads = () => {
-  const settingsOpen = settingsModal.classList.contains("open");
-  if (!settingsOpen && (typeof Module === "undefined" || !Module._setInput)) return;
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  const want = new Array(10).fill(false);
-  let anyConnected = false;
-  for (const pad of pads) {
-    if (!pad) continue;
-    anyConnected = true;
-    const b = (i) => pad.buttons[i] && pad.buttons[i].pressed;
-    if (b(0) || b(3)) want[4] = true; // A / Y -> A
-    if (b(1) || b(2)) want[5] = true; // B / X -> B
-    if (b(8)) want[6] = true; // Back -> Select
-    if (b(9)) want[7] = true; // Start
-    if (b(4) || b(6)) want[8] = true; // LB / LT -> L
-    if (b(5) || b(7)) want[9] = true; // RB / RT -> R
-    if (b(12)) want[0] = true; // Dpad
-    if (b(13)) want[1] = true;
-    if (b(14)) want[2] = true;
-    if (b(15)) want[3] = true;
-    const ax = pad.axes[0] || 0;
-    const ay = pad.axes[1] || 0; // Left stick
-    if (ay < -GP_DEADZONE) want[0] = true;
-    if (ay > GP_DEADZONE) want[1] = true;
-    if (ax < -GP_DEADZONE) want[2] = true;
-    if (ax > GP_DEADZONE) want[3] = true;
-    // Tilt cart: the left stick is the accelerometer; claims the target only
-    // while deflected.
-    if (tiltActive && !settingsOpen) {
-      if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
-        padTiltLive = true;
-        tiltTargetX = ax;
-        tiltTargetY = ay;
-      } else if (padTiltLive) {
-        padTiltLive = false;
-        tiltTargetX = 0;
-        tiltTargetY = 0;
-      }
+// The open modal on top: the trap's owner, else the last one open.
+const padTopModal = () => {
+  if (modalTrapOverlay && modalTrapOverlay.classList.contains("open")) return modalTrapOverlay;
+  const open = document.querySelectorAll(".modal-overlay.open");
+  return /** @type {HTMLElement} */ (open[open.length - 1]);
+};
+
+const padMenuItems = () => /** @type {HTMLElement[]} */ (
+  [...menuDropdown.querySelectorAll("button, input[type=range]")].filter(padReachable));
+
+// The library: the hero, the tiles, the chips and the head's buttons. The
+// search field and the sort select are not the pad's (LT/RT sort; nothing
+// types); a tile's corner buttons are Y's menu.
+const padHomeItems = () => /** @type {HTMLElement[]} */ (
+  [...document.querySelectorAll("#home button, #topbar button")].filter((el) =>
+    el.getAttribute("tabindex") !== "-1" &&
+    !el.matches(".home-tile-more, .home-tile-dl, .home-tile-link, .lib-search-clear") &&
+    padReachable(/** @type {HTMLElement} */ (el))));
+
+const padHomeFirst = (items) =>
+  items.find((el) => el.id === "hero-resume") ||
+  items.find((el) => el.id === "home-resume") ||
+  items.find((el) => el.classList.contains("home-tile-launch")) || items[0];
+
+// The arrow keys walk the grid the way the d-pad does, from a focused tile.
+const PAD_ARROWS = { ArrowUp: PB.UP, ArrowDown: PB.DOWN, ArrowLeft: PB.LEFT, ArrowRight: PB.RIGHT };
+document.addEventListener("keydown", (e) => {
+  const dir = PAD_ARROWS[e.key];
+  if (dir === undefined || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (document.body.classList.contains("running") || anyModalOpen() || tileMenuFor !== null) return;
+  const t = /** @type {HTMLElement} */ (e.target);
+  if (!t || !t.classList || !t.classList.contains("home-tile-launch")) return;
+  const next = padSpatialPick(padHomeItems(), t, dir);
+  e.preventDefault();
+  if (next) {
+    next.focus({ preventScroll: true });
+    next.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }
+});
+
+// LB/RB: the system filter steps All -> each system -> All.
+const padStepSystemFilter = (step) => {
+  const systems = [...libChips.querySelectorAll(".lib-chip-sys")].map(
+    (c) => /** @type {HTMLElement} */ (c).dataset.sys);
+  if (!systems.length) return;
+  const states = ["", ...systems];
+  const cur = libFilter.systems.size === 1 ? [...libFilter.systems][0] : "";
+  const want = states[(states.indexOf(cur) + step + states.length) % states.length];
+  // Each chip click re-renders the chips, so look them up afresh each time.
+  for (let guard = 0; guard < 8; guard++) {
+    const wrong = /** @type {HTMLElement} */ ([...libChips.querySelectorAll(".lib-chip-sys")].find((c) =>
+      (c.getAttribute("aria-pressed") === "true") !== (/** @type {HTMLElement} */ (c).dataset.sys === want)));
+    if (!wrong) break;
+    wrong.click();
+  }
+  padRefocusUntil = performance.now() + PAD_REFOCUS_MS;
+};
+
+const padStepSort = (step) => {
+  const v = LIB_SORTS[(LIB_SORTS.indexOf(romsSort) + step + LIB_SORTS.length) % LIB_SORTS.length];
+  setRomsSort(v);
+  padRefocusUntil = performance.now() + PAD_REFOCUS_MS;
+};
+
+// A filter hides, and a sort rebuilds, the tile that had focus: for a moment
+// after either, focus that went with it lands on the first game shown.
+const PAD_REFOCUS_MS = 1500;
+let padRefocusUntil = 0;
+
+const padHomeNav = (dir) => {
+  const items = padHomeItems();
+  let cur = /** @type {HTMLElement} */ (document.activeElement);
+  // Focus on a tile's corner button (where closing its menu puts it back)
+  // is focus on the tile.
+  const curTile = cur && cur.closest?.(".home-tile");
+  if (curTile && !cur.classList.contains("home-tile-launch")) {
+    const launch = /** @type {HTMLElement} */ (curTile.querySelector(".home-tile-launch"));
+    if (launch && items.includes(launch)) { launch.focus({ preventScroll: true }); cur = launch; }
+  }
+  const onTile = cur && cur.classList.contains("home-tile-launch");
+  if (padRefocusUntil && !(cur && items.includes(cur))) {
+    if (performance.now() > padRefocusUntil) padRefocusUntil = 0;
+    else {
+      const tile = items.find((el) => el.classList.contains("home-tile-launch"));
+      if (tile) { padRefocusUntil = 0; padFocus(tile, "center"); }
     }
   }
-  document.body.classList.toggle(
-    "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
-  if (!anyConnected) return;
-  if (settingsOpen) {
-    settingsGamepadNav(want);
-    // A button held across the close must not arrive as a fresh press.
-    for (let i = 0; i < 10; i++) gpPrev[i] = want[i];
-    return;
+  if (dir >= 0) padMove(items, dir, padHomeFirst(items), "center");
+  if (padHit(PB.A)) {
+    if (cur && items.includes(cur)) padPress();
+    else { const f = padHomeFirst(items); if (f) padFocus(f, "center"); }
   }
+  if (padHit(PB.Y)) {
+    // A tile's (or the hero's) ⋯ menu.
+    const more = onTile ? cur.parentElement?.querySelector(".home-tile-more")
+      : cur && cur.closest("#hero") ? document.getElementById("hero-more") : null;
+    if (more) { padNavOn(); /** @type {HTMLElement} */ (more).click(); }
+  }
+  if (padHit(PB.START)) {
+    // The hero's game: Resume, or Play when it has no session.
+    const go = ["hero-resume", "hero-play", "home-resume"].map((id) => document.getElementById(id))
+      .find((el) => el && padReachable(el));
+    if (go) { padNavOn(); go.click(); }
+  }
+  if (libBar && !libBar.hidden) {
+    if (padHit(PB.LB)) padStepSystemFilter(-1);
+    if (padHit(PB.RB)) padStepSystemFilter(1);
+    if (padHit(PB.LT)) padStepSort(-1);
+    if (padHit(PB.RT)) padStepSort(1);
+  }
+  if (padHit(PB.B)) {
+    // Back to the top of the page, where the game in hand is.
+    const f = padHomeFirst(items);
+    if (f) padFocus(f, "center");
+  }
+};
+
+// The menu, opened from the pad over a running game: paused, the way a
+// console's own menu is; closing it (B, Start, the same button again, or an
+// item that closes it) resumes once nothing else is open.
+const openPadMenu = () => {
+  if (!menuDropdown.hidden) return;
+  if (!playerPaused()) { togglePause(); padMenuPaused = true; }
+  if (!document.body.classList.contains("topbar-open")) {
+    document.body.classList.add("topbar-open"); // phone landscape keeps the bar folded away
+    padMenuBar = true;
+  }
+  menuBtn.click();
+  const items = padMenuItems();
+  const first = items.find((el) => el.id === "save-state") || items[0];
+  if (first) padFocus(first);
+};
+const closePadMenu = () => { menuDropdown.hidden = true; };
+
+const padMenuNav = (dir) => {
+  if (dir >= 0) padMove(padMenuItems(), dir);
+  if (padHit(PB.A)) padPress();
+  if (padHit(PB.B) || padHit(PB.START) || padHit(PB.R3) || padHit(PB.GUIDE)) closePadMenu();
+};
+
+// Back in the game with nothing over it: undo what the pad's menu did.
+const settlePadMenu = () => {
+  if (padMenuBar) { padMenuBar = false; document.body.classList.remove("topbar-open"); }
+  if (padMenuPaused) {
+    padMenuPaused = false;
+    if (playerPaused()) togglePause();
+  }
+};
+
+const endPadHolds = () => {
+  if (padFastForward) {
+    padFastForward = false;
+    if (fastForward) applySpeed(padSpeedBeforeHold);
+  }
+  if (padRewindHeld) { padRewindHeld = false; setRewindHeld(false); }
+};
+
+// The triggers, the stick click, Guide and the chord, over the game view.
+// A pad that does not claim the standard layout numbers its buttons its own
+// way (an SNES-style pad can send Select and Start as 6 and 7, LT and RT
+// here): the trigger holds, R3 and Guide stand down for it, so a button
+// meant for the game never rewinds or fast-forwards it.
+let padStd = true; // every connected pad claims the standard layout
+const padGameSystem = (now) => {
+  if (typeof clipReplayActive !== "undefined" && clipReplayActive) return;
+  if (padNow[PB.RT] && padStd && !padFastForward && speedControlsOk() && currentRomName) {
+    padFastForward = true;
+    padSpeedBeforeHold = fastForward ? "normal" : currentSpeed();
+    setFastForward(true);
+    setSpeed2x(false);
+  } else if (!padNow[PB.RT] && padFastForward) {
+    padFastForward = false;
+    if (fastForward) applySpeed(padSpeedBeforeHold);
+  }
+  if (padNow[PB.LT] && padStd && !padRewindHeld && speedControlsOk() && currentRomName) {
+    padRewindHeld = true;
+    setRewindHeld(true);
+  } else if (!padNow[PB.LT] && padRewindHeld) {
+    padRewindHeld = false;
+    setRewindHeld(false);
+  }
+  let open = padStd && (padHit(PB.R3) || padHit(PB.GUIDE));
+  if (padNow[PB.BACK] && padNow[PB.START]) {
+    if (!padChordSince) padChordSince = now;
+    else if (!padChordFired && now - padChordSince >= PAD_CHORD_MS) { padChordFired = true; open = true; }
+  } else {
+    padChordSince = 0;
+    padChordFired = false;
+  }
+  if (open) openPadMenu();
+};
+
+// The ten console inputs from the pad, as the core numbers them.
+const padGameInputs = () => {
+  const want = new Array(10).fill(false);
+  if (padNow[PB.A] || padNow[PB.Y]) want[4] = true;      // A / Y -> A
+  if (padNow[PB.B] || padNow[PB.X]) want[5] = true;      // B / X -> B
+  if (padNow[PB.BACK]) want[6] = true;                    // Back -> Select
+  if (padNow[PB.START]) want[7] = true;
+  if (padNow[PB.LB]) want[8] = true;                      // LB -> L
+  if (padNow[PB.RB]) want[9] = true;                      // RB -> R
+  if (padNow[PB.UP]) want[0] = true;                      // d-pad (and the stick)
+  if (padNow[PB.DOWN]) want[1] = true;
+  if (padNow[PB.LEFT]) want[2] = true;
+  if (padNow[PB.RIGHT]) want[3] = true;
+  return want;
+};
+
+const sendGameInputs = (want) => {
   for (let i = 0; i < 10; i++) {
     if (want[i] !== gpPrev[i]) {
       // The gamepad does not pass through routeP1Input, so it notifies the
@@ -14825,6 +15134,114 @@ const pollGamepads = () => {
       }
       gpPrev[i] = want[i];
     }
+  }
+};
+
+const padContext = () => {
+  if (settingsModal.classList.contains("open")) return "settings";
+  if (tileMenuFor !== null) return "tilemenu";
+  if (anyModalOpen()) return "modal";
+  if (!menuDropdown.hidden) return "menu";
+  if (!document.body.classList.contains("running")) return "home";
+  return "game";
+};
+
+const pollGamepads = () => {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let anyConnected = false;
+  for (const pad of pads) if (pad) { anyConnected = true; break; }
+  document.body.classList.toggle(
+    "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
+  if (!anyConnected) {
+    endPadHolds();
+    return;
+  }
+  const now = performance.now();
+  padPrev = padNow;
+  padNow = new Array(PAD_BUTTONS).fill(false);
+  const ctx = padContext();
+  padStd = true;
+  for (const pad of pads) {
+    if (!pad) continue;
+    if (pad.mapping !== "standard") padStd = false;
+    for (let i = 0; i < PAD_BUTTONS; i++) if (pad.buttons[i] && pad.buttons[i].pressed) padNow[i] = true;
+    const ax = pad.axes[0] || 0;
+    const ay = pad.axes[1] || 0; // Left stick: the d-pad
+    if (ay < -GP_DEADZONE) padNow[PB.UP] = true;
+    if (ay > GP_DEADZONE) padNow[PB.DOWN] = true;
+    if (ax < -GP_DEADZONE) padNow[PB.LEFT] = true;
+    if (ax > GP_DEADZONE) padNow[PB.RIGHT] = true;
+    // Tilt cart: the left stick is the accelerometer; claims the target only
+    // while deflected.
+    if (tiltActive && ctx === "game") {
+      if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
+        padTiltLive = true;
+        tiltTargetX = ax;
+        tiltTargetY = ay;
+      } else if (padTiltLive) {
+        padTiltLive = false;
+        tiltTargetX = 0;
+        tiltTargetY = 0;
+      }
+    }
+  }
+  const gameReady = typeof Module !== "undefined" && !!Module._setInput;
+  if (ctx !== padCtx) {
+    // Leaving the game: let go of everything the core and the speed hold
+    // had from the pad. Arriving anywhere: a button held across the switch
+    // is not a press there (padPrev carries it).
+    if (padCtx === "game" && gameReady) sendGameInputs(new Array(10).fill(false));
+    if (ctx !== "game") endPadHolds();
+    padCtx = ctx;
+  }
+  const dir = ctx === "game" ? -1 : padNavPress(now);
+  const anyPress = padNow.some((p, i) => p && !padPrev[i]);
+  switch (ctx) {
+    case "settings":
+      settingsGamepadNav(dir);
+      break;
+    case "tilemenu": {
+      const items = tileMenuButtons().filter((b) => !b.disabled);
+      if (dir === PB.UP || dir === PB.DOWN) padMove(items, dir);
+      if (padHit(PB.A)) padPress();
+      if (padHit(PB.B) || padHit(PB.Y)) closeTileMenu();
+      break;
+    }
+    case "modal": {
+      const top = padTopModal();
+      if (top && dir >= 0) padMove(modalFocusables(top), dir);
+      if (padHit(PB.A)) padPress();
+      if (padHit(PB.B)) padBack();
+      break;
+    }
+    case "menu":
+      padMenuNav(dir);
+      break;
+    case "home":
+      padMenuPaused = false; // Main Menu from the pad's menu: the game stays paused
+      if (padMenuBar) { padMenuBar = false; document.body.classList.remove("topbar-open"); }
+      // Only on a press: the items cost a style read apiece.
+      if (dir >= 0 || anyPress || padRefocusUntil) padHomeNav(dir);
+      break;
+    case "game":
+      if (!gameReady) break;
+      settlePadMenu();
+      padGameSystem(now);
+      if (padContext() !== "game") {
+        // The menu just opened over it: the game lets go now, not a frame on.
+        sendGameInputs(new Array(10).fill(false));
+        endPadHolds();
+        padCtx = padContext();
+        break;
+      }
+      sendGameInputs(padGameInputs());
+      break;
+  }
+  // Away from the game, the console inputs track the pad without being
+  // sent, so a button held into the game is not a press there either.
+  if (ctx !== "game") {
+    const want = padGameInputs();
+    for (let i = 0; i < 10; i++) gpPrev[i] = want[i];
   }
 };
 

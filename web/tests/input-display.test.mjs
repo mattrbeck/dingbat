@@ -20,6 +20,10 @@ const boot = async ({ on = true } = {}) => {
   // gameKeyHandler routes nothing without a core present.
   app.runIn(`globalThis.setInputCalls = [];
              globalThis.Module = { _setInput: (id, d) => setInputCalls.push([id, d]) };`);
+  // In the game view: on the home screen the keys and the pad are the page's.
+  // The fake DOM starts every element shown; the markup starts the menu
+  // hidden, and an open menu is the pad's too.
+  app.runIn(`document.body.classList.add("running"); menuDropdown.hidden = true;`);
   if (on) await app.runIn("setInputDisplay(true)");
   await settle();
   return app;

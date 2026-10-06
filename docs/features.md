@@ -7,6 +7,9 @@ The full feature list for both front-ends and both emulated systems.
 - Installable offline-capable PWA; the home screen opens on the library, and the game
   you are playing heads it when you step out (see [home-screen.md](home-screen.md))
 - Touch controls (phone and tablet layouts, both orientations); gamepad support
+- Controller-only use: the d-pad and A/B walk the library, menus and modals (Y opens a
+  game's options, LB/RB filter, LT/RT sort, Start resumes); in a game RT holds fast
+  forward, LT holds rewind, and R3, Guide or a held Select+Start opens the menu paused
 - Save states: nine per-ROM slots with thumbnails, Quick Save / Quick Load, and a session
   saved on exit that a game picks up again from the library (or, by setting, offers after
   booting from the in-game save); Undo for state loads and Reset
