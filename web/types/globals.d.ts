@@ -68,6 +68,7 @@ interface Window {
   // audio hooks published from inside Module.onRuntimeInitialized
   updateGain?: () => void;
   updateAudioLowpass?: () => void;
+  audioRunning?: () => boolean;
   // clip-recording audio tap (published from the same closure; consumed by
   // the module-scope retroactive-capture code)
   acquireClipAudio?: (priv?: boolean) => MediaStream | null;

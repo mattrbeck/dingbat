@@ -3661,6 +3661,24 @@ body.runtime-ready #boot-progress {
   transform: translateY(1px);
 }
 
+/* A tile with keyboard or gamepad focus: the amber ring, thick enough to
+   find from the sofa. */
+.home-tile-launch:focus-visible,
+body.pad-nav .home-tile-launch:focus {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+/* The pad's focus anywhere else (index.js "Gamepad support"). Drawn on
+   :focus, not :focus-visible: a programmatic focus after a mouse click
+   gets no :focus-visible, and the pad has no other way to say where it is.
+   A pointer or key drops body.pad-nav again. */
+body.pad-nav :is(button, input, select, [tabindex]):focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .home-tile-thumb {
   position: relative;
   width: 100%;
