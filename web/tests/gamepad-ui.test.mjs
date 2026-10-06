@@ -23,6 +23,7 @@ const inGame = async () => {
     globalThis.Module = { _setInput: (id, d) => setInputCalls.push([id, d]) };
     globalThis.padDown = new Set();
     navigator.getGamepads = () => [{
+      index: 0, id: "pad", mapping: "standard",
       buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: padDown.has(i) })),
       axes: [0, 0],
     }];
@@ -148,6 +149,28 @@ test("a controller showing up is said: a toast and its name in Settings; going, 
   app.runIn("padList = []; pollGamepads()");
   assert.ok(app.toasts.includes("Controller disconnected: Xbox Wireless Controller"));
   assert.match(app.runIn("padStatusEl.textContent"), /press any button/);
+});
+
+test("Settings shows the buttons held, by the browser's numbers", async () => {
+  const app = await inGame();
+  app.runIn("openSettingsModal()");
+  await press(app, BACK, START);
+  assert.equal(app.runIn("padTestEl.textContent"), "holding 8 (Select), 9 (Start)");
+  assert.equal(app.runIn("padTestEl.hidden"), false);
+  await release(app, BACK, START);
+  assert.equal(app.runIn("padTestEl.textContent"), "press a button to test it");
+});
+
+test("a pad without the standard layout never rewinds or fast-forwards from 6 and 7", async () => {
+  const app = await inGame();
+  // An SNES-style pad: Select and Start come as 6 and 7.
+  app.runIn(`navigator.getGamepads = () => [{ index: 0, id: "USB Gamepad", mapping: "",
+    buttons: Array.from({ length: 12 }, (_, i) => ({ pressed: padDown.has(i) })), axes: [0, 0] }];`);
+  await press(app, LT, RT);
+  assert.equal(app.runIn("rewindHeld"), false);
+  assert.equal(speed(app), "normal");
+  await press(app, R3);
+  assert.equal(app.runIn("menuDropdown.hidden"), true);
 });
 
 test("a pad without the standard layout says so", async () => {

@@ -15086,9 +15086,14 @@ const endPadHolds = () => {
 };
 
 // The triggers, the stick click, Guide and the chord, over the game view.
+// A pad that does not claim the standard layout numbers its buttons its own
+// way (an SNES-style pad can send Select and Start as 6 and 7, LT and RT
+// here): the trigger holds, R3 and Guide stand down for it, so a button
+// meant for the game never rewinds or fast-forwards it.
+let padStd = true; // every connected pad claims the standard layout
 const padGameSystem = (now) => {
   if (typeof clipReplayActive !== "undefined" && clipReplayActive) return;
-  if (padNow[PB.RT] && !padFastForward && speedControlsOk() && currentRomName) {
+  if (padNow[PB.RT] && padStd && !padFastForward && speedControlsOk() && currentRomName) {
     padFastForward = true;
     padSpeedBeforeHold = fastForward ? "normal" : currentSpeed();
     setFastForward(true);
@@ -15097,14 +15102,14 @@ const padGameSystem = (now) => {
     padFastForward = false;
     if (fastForward) applySpeed(padSpeedBeforeHold);
   }
-  if (padNow[PB.LT] && !padRewindHeld && speedControlsOk() && currentRomName) {
+  if (padNow[PB.LT] && padStd && !padRewindHeld && speedControlsOk() && currentRomName) {
     padRewindHeld = true;
     setRewindHeld(true);
   } else if (!padNow[PB.LT] && padRewindHeld) {
     padRewindHeld = false;
     setRewindHeld(false);
   }
-  let open = padHit(PB.R3) || padHit(PB.GUIDE);
+  let open = padStd && (padHit(PB.R3) || padHit(PB.GUIDE));
   if (padNow[PB.BACK] && padNow[PB.START]) {
     if (!padChordSince) padChordSince = now;
     else if (!padChordFired && now - padChordSince >= PAD_CHORD_MS) { padChordFired = true; open = true; }
@@ -15207,6 +15212,34 @@ const padPresence = (pads) => {
 };
 if (padStatusEl) padStatusEl.textContent = padStatusText();
 
+// The button tester under the status line: what is held, by the browser's
+// own numbers (and the standard layout's names where the pad claims it).
+const padTestEl = document.getElementById("pad-test");
+const PAD_STD_NAMES = ["A", "B", "X", "Y", "LB", "RB", "LT", "RT", "Select", "Start",
+  "L3", "R3", "Up", "Down", "Left", "Right", "Guide"];
+let padTestText = "";
+const padTest = (pads) => {
+  if (!padTestEl) return;
+  const parts = [];
+  for (const p of pads) {
+    if (!p) continue;
+    const std = p.mapping === "standard";
+    const held = [];
+    p.buttons.forEach((b, i) => {
+      if (b && b.pressed) held.push(std && PAD_STD_NAMES[i] ? `${i} (${PAD_STD_NAMES[i]})` : `${i}`);
+    });
+    (p.axes || []).forEach((v, i) => {
+      if (Math.abs(v) > GP_DEADZONE) held.push(`axis ${i} ${v > 0 ? "+" : "−"}`);
+    });
+    parts.push((pads.filter(Boolean).length > 1 ? padName(p.id) + ": " : "") +
+      (held.length ? "holding " + held.join(", ") : "press a button to test it") +
+      (std ? "" : " · no standard layout"));
+  }
+  const text = parts.join(" · ");
+  padTestEl.hidden = !text;
+  if (text !== padTestText) { padTestText = text; padTestEl.textContent = text; }
+};
+
 // The events come before the game loop polls (and while it is not running).
 for (const ev of ["gamepadconnected", "gamepaddisconnected"]) {
   window.addEventListener(ev, () => {
@@ -15239,8 +15272,10 @@ const pollGamepads = () => {
   padPrev = padNow;
   padNow = new Array(PAD_BUTTONS).fill(false);
   const ctx = padContext();
+  padStd = true;
   for (const pad of pads) {
     if (!pad) continue;
+    if (pad.mapping !== "standard") padStd = false;
     for (let i = 0; i < PAD_BUTTONS; i++) if (pad.buttons[i] && pad.buttons[i].pressed) padNow[i] = true;
     const ax = pad.axes[0] || 0;
     const ay = pad.axes[1] || 0; // Left stick: the d-pad
@@ -15275,6 +15310,7 @@ const pollGamepads = () => {
   const anyPress = padNow.some((p, i) => p && !padPrev[i]);
   switch (ctx) {
     case "settings":
+      padTest(pads);
       settingsGamepadNav(dir);
       break;
     case "tilemenu": {
