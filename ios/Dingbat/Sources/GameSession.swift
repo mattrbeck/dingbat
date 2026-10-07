@@ -46,6 +46,10 @@ final class GameSession: NSObject, ObservableObject {
     /// Inputs currently held, by id (touch, controller and hardware keys
     /// merged), for the input display.
     @Published private(set) var held: Set<Int> = []
+    /// Local 2P: both players' cores run (TwoPlayer).
+    @Published private(set) var twoPlayer = false
+    /// The player the touch controls (and keyboard) drive in 2P.
+    @Published private(set) var focusPlayer = 0
 
     private var link: CADisplayLink?
     private var framesThisSecond = 0
@@ -115,6 +119,7 @@ final class GameSession: NSObject, ObservableObject {
         NetLink.shared.shutdown()
         AddPictures.shared.cancel()  // the launch takes the core
         if game != nil { leaveGame() }
+        endTwoPlayer()
         dingbat_init()
         let bios = entry.isGBA ? RomLibrary.gbaBiosURL : RomLibrary.gbcBootromURL
         let biosArg = FileManager.default.fileExists(atPath: bios.path) ? bios.path : nil
@@ -181,7 +186,7 @@ final class GameSession: NSObject, ObservableObject {
         CrashWatch.stopped(game?.fileName, played: runPlay)
         persistSession()
         storeLastFrame()
-        dingbat_flush_save()
+        flushSave()
     }
 
     /// Close: the session and picture are kept, the core goes (web
@@ -191,6 +196,7 @@ final class GameSession: NSObject, ObservableObject {
         ClipExporter.shared.gameLeaving()
         NetLink.shared.shutdown()
         leaveGame()
+        endTwoPlayer()
         stopLink()
         dingbat_unload(1)
         game = nil
@@ -210,6 +216,7 @@ final class GameSession: NSObject, ObservableObject {
         ClipExporter.shared.gameLeaving()
         NetLink.shared.shutdown()
         CrashWatch.stopped(game?.fileName, played: runPlay)
+        twoPlayer = false
         stopLink()
         dingbat_unload(0)
         game = nil
@@ -240,7 +247,7 @@ final class GameSession: NSObject, ObservableObject {
         guard game != nil else { return }
         persistSession()
         storeLastFrame()
-        dingbat_flush_save()
+        flushSave()
         if !paused {
             setPaused(true)
             pausedForBackground = true
@@ -257,7 +264,62 @@ final class GameSession: NSObject, ObservableObject {
     @objc private func appWillTerminate() {
         guard game != nil else { return }
         persistSession()
-        dingbat_flush_save()
+        flushSave()
+    }
+
+    // MARK: local 2P
+
+    /// Both players' battery saves, or the one game's.
+    func flushSave() {
+        if twoPlayer { dingbat_link_flush_saves() } else { dingbat_flush_save() }
+    }
+
+    /// Two cores of this game on one screen (web launchLinkRom). Player 2
+    /// starts from a copy of player 1's save the first time.
+    @discardableResult
+    func openTwoPlayer(_ entry: RomEntry) -> Bool {
+        guard entry.isLocal else { return false }
+        guard open(entry, resume: false) != .failed, let p1 = RomLibrary.shared.prepareCoreLink(entry) else { return false }
+        let fm = FileManager.default
+        let p2 = entry.dir.appendingPathComponent("rom-p2." + entry.ext)
+        let p2Save = entry.dir.appendingPathComponent("rom-p2.sav")
+        try? fm.removeItem(at: p2)
+        guard (try? fm.createSymbolicLink(at: p2, withDestinationURL: entry.url)) != nil else { return false }
+        if !fm.fileExists(atPath: p2Save.path), fm.fileExists(atPath: entry.saveURL.path) {
+            try? fm.copyItem(at: entry.saveURL, to: p2Save)
+        }
+        // The solo boot set the BIOS; the pair replaces its core.
+        guard dingbat_link_init(p1.path, p2.path) == 1 else {
+            close()
+            AppModel.shared.toast("Couldn't start 2P link mode")
+            return false
+        }
+        twoPlayer = true
+        focusPlayer = 0
+        sessionMoved = false
+        setSpeed(.normal)
+        present()
+        TwoPlayer.refresh()
+        return true
+    }
+
+    /// Touch (and keys) to the other player: nothing held may stick.
+    func setFocusPlayer(_ p: Int) {
+        guard twoPlayer, p != focusPlayer else { return }
+        for i in 0..<10 { dingbat_link_input(0, Int32(i), 0); dingbat_link_input(1, Int32(i), 0) }
+        sources = [:]
+        held = []
+        focusPlayer = p
+    }
+
+    /// The pair ends with the game (close, another game): both saves
+    /// written, and player 2's goes to Drive too.
+    private func endTwoPlayer() {
+        guard twoPlayer, let g = game else { return }
+        dingbat_link_flush_saves()
+        twoPlayer = false
+        focusPlayer = 0
+        DriveSync.shared.markUpload("save:" + g.fileName + "-p2")
     }
 
     // MARK: frame loop
@@ -321,7 +383,8 @@ final class GameSession: NSObject, ObservableObject {
             let ahead = speed == .normal ? Settings.shared.runahead : 0
             let owed = framesOwed(link, dt: dt)
             for _ in 0..<owed {
-                if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
+                if twoPlayer { dingbat_link_tick() }
+                else if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
                 ran += 1
             }
             keepAudioAlive()
@@ -333,7 +396,8 @@ final class GameSession: NSObject, ObservableObject {
             runPlay += min(dt, 0.25)
             if let g = game { CrashWatch.playing(g.fileName, played: runPlay) }
             saveCheckTime += dt
-            if dingbat_frame_static() == 0 { present() }
+            if dingbat_frame_static() == 0 || twoPlayer { present() }
+            if twoPlayer { TwoPlayer.refresh() }
             #if DEBUG
             latencyCheck()
             #endif
@@ -680,6 +744,11 @@ final class GameSession: NSObject, ObservableObject {
     /// source: "touch", "pad", "key" — each source's held set is tracked so
     /// a release on one never lifts a press held on another.
     func setInput(_ id: Int, _ down: Bool, source: String = "touch") {
+        if twoPlayer {
+            // A controller is always player 2; touch and keys the focused one.
+            dingbat_link_input(source == "pad" ? 1 : Int32(focusPlayer), Int32(id), down ? 1 : 0)
+            return
+        }
         var set = sources[source] ?? []
         if down { set.insert(id) } else { set.remove(id) }
         sources[source] = set
@@ -714,7 +783,7 @@ final class GameSession: NSObject, ObservableObject {
                 rumbling = false
                 onRumble?(false)
             }
-            dingbat_flush_save()
+            flushSave()
             storeLastFrame()
         }
         AudioOutput.shared.refreshSession()
@@ -723,6 +792,8 @@ final class GameSession: NSObject, ObservableObject {
     func togglePause() { setPaused(!paused) }
 
     func setSpeed(_ s: Speed, relay: Bool = true) {
+        // 2P: lockstep at 1x.
+        if twoPlayer && s != .normal { return }
         // Linked, only 2x: both sides run it together.
         if NetLink.shared.linked {
             guard s == .normal || s == .double else { return }
@@ -758,7 +829,7 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     func setRewinding(_ r: Bool) {
-        guard game != nil, Settings.shared.rewind, !NetLink.shared.linked else { rewinding = false; return }
+        guard game != nil, Settings.shared.rewind, !NetLink.shared.linked, !twoPlayer else { rewinding = false; return }
         if r && paused { setPaused(false) }
         rewinding = r
         if r { dingbat_audio_clear() }
@@ -766,7 +837,7 @@ final class GameSession: NSObject, ObservableObject {
 
     /// One frame while paused; its audio is dropped.
     func stepFrame() {
-        guard game != nil, !NetLink.shared.linked else { return }
+        guard game != nil, !NetLink.shared.linked, !twoPlayer else { return }
         if !paused { setPaused(true) }
         dingbat_run_frame()
         dingbat_audio_clear()
@@ -909,7 +980,7 @@ final class GameSession: NSObject, ObservableObject {
 
     /// Hard reset from the save, with Undo (web #reset).
     func reset() {
-        guard game != nil, !NetLink.shared.holdsCore else { return }
+        guard game != nil, !NetLink.shared.holdsCore, !twoPlayer else { return }
         let undo = captureState()
         _ = dingbat_reset()
         // A reset builds a fresh core: cheats and the camera's feed go with
@@ -935,8 +1006,10 @@ final class GameSession: NSObject, ObservableObject {
     /// too.
     func persistSession(checkpoint: Bool = false) {
         guard let g = game, sessionMoved else { return }
-        guard !NetLink.shared.holdsCore else { dingbat_flush_save(); return }
-        dingbat_flush_save()
+        // A linked core's state is not the game's session (its clock, its
+        // partner): the battery only.
+        guard !NetLink.shared.holdsCore, !twoPlayer else { flushSave(); return }
+        flushSave()
         guard let bytes = captureState() else { return }
         let meta = SessionMeta(ts: DriveSync.now(), saveSig: RomLibrary.currentSaveSig(g),
                                by: DriveSync.deviceID, dev: DriveSync.deviceLabel)

@@ -148,6 +148,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Local 2P on this game (the tile's 2P, behind `-2p`).
+    func launchTwoPlayer(_ entry: RomEntry) {
+        toasts.removeAll { $0.game }
+        guard session.openTwoPlayer(entry) else { return }
+        heroGame = entry
+        menuOpen = false
+        topbarOpen = false
+        withAnimation(.easeOut(duration: 0.25)) { screen = .play }
+    }
+
     /// Booted from the save with a session still standing: offer it (web
     /// offerAutoResume, "Last session saved 5m ago [Resume]").
     private func offerSession(_ entry: RomEntry) {
@@ -224,7 +234,7 @@ final class AppModel: ObservableObject {
         session.setPaused(true)
         session.persistSession()
         session.storeLastFrame()
-        dingbat_flush_save()
+        session.flushSave()
         toasts.removeAll { $0.game }
         withAnimation(.easeOut(duration: 0.25)) { screen = .home }
     }

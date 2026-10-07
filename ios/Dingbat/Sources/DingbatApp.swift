@@ -46,7 +46,9 @@ struct DingbatApp: App {
                 let all = RomLibrary.shared.entries
                 if let e = all.first(where: { $0.name == name || $0.fileName == name }) ?? (name == nil ? all.first : nil) {
                     // `-tap`: as a tap on the game (a crash streak asks first).
-                    if let n = value("-resume-moment").flatMap(Int.init), Checkpoints.moments(e).indices.contains(n) {
+                    if args.contains("-2p-start") {
+                        model.launchTwoPlayer(e)
+                    } else if let n = value("-resume-moment").flatMap(Int.init), Checkpoints.moments(e).indices.contains(n) {
                         model.resumeMoment(e, Checkpoints.moments(e)[n])
                     } else if args.contains("-tap") { model.tapGame(e, resume: args.contains("-resume")) }
                     else { model.launch(e, resume: args.contains("-resume")) }

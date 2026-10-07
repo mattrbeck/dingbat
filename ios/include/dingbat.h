@@ -203,6 +203,19 @@ int dingbat_rollback_confirmed(void);
 int dingbat_rollback_dump_size(int player);
 const void *dingbat_rollback_dump_data(void);
 
+/* Local 2P: two cores of one ROM on the cable. Player 1 on rom0 (the
+ * game's own file: its save, its sound), player 2 on rom1 (its own .sav,
+ * silent). Player 1's picture is dingbat_game_fb(); while it runs, solo
+ * frames, input, states, rewind, cheats and reset refuse. */
+int dingbat_link_init(const char *rom0, const char *rom1);
+void dingbat_link_tick(void);
+const uint16_t *dingbat_link_fb(int player);
+const uint32_t *dingbat_link_rgba(int player);   /* colour-corrected, R first */
+void dingbat_link_input(int player, int input_id, int pressed);
+int dingbat_link_active(void);
+void dingbat_link_flush_saves(void);
+void dingbat_link_exit(void);
+
 /* Audio routing: 0 play, 1 capture only, 2 drop, 3 play and capture. */
 void dingbat_audio_set_mode(int mode);
 int dingbat_audio_get_mode(void);
