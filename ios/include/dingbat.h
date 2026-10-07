@@ -74,6 +74,10 @@ const uint32_t *dingbat_framebuffer_rgba(void);
 
 int dingbat_fb_width(void);   /* 240 (GBA) or 160 (GB/GBC) */
 int dingbat_fb_height(void);  /* 160 (GBA) or 144 (GB/GBC) */
+/* Ambient glow: the composited picture point-sampled into gw x gh RGBA8888
+ * (R first); remap 1 swaps the four DMG shades for p0..p3 (0xAABBGGRR). */
+const uint32_t *dingbat_glow_sample(int gw, int gh, int remap,
+                                    uint32_t p0, uint32_t p1, uint32_t p2, uint32_t p3);
 int dingbat_out_width(void);  /* 256 with an SGB border, else fb width */
 int dingbat_out_height(void); /* 224 with an SGB border, else fb height */
 
@@ -214,6 +218,9 @@ void dingbat_audio_capture_clear(void);
 int dingbat_audio_read(float *dst, int max_frames);
 
 int dingbat_audio_queued_frames(void);
+/* Fast-forward: play the ring as it comes, no rate control. Main thread. */
+void dingbat_audio_set_free(int on);
+int dingbat_audio_underruns(void);  /* times the reader ran dry (diagnostics) */
 void dingbat_audio_clear(void);     /* main thread: drop queued audio */
 int dingbat_audio_sample_rate(void); /* 32768 */
 

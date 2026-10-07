@@ -7,12 +7,14 @@ import UIKit
 /// flags, rewind, save states, sessions). Core calls stay on the main thread;
 /// the audio render block only touches the realtime-safe dingbat_audio_* API.
 ///
-/// Pacing: the APU fills a 32768 Hz ring as emulation runs and the audio
-/// node drains it in real time. Each display tick runs frames only while
-/// dingbat_audio_ahead() == 0 (bounded), so the audio clock paces emulation;
-/// 2x drops every other sample and slow motion queues each twice, so the same
-/// rule runs them at 2x and 0.5x. Fast-forward drops audio-sync and runs
-/// frames for most of each display interval.
+/// Pacing: the display clock, as the web paces by requestAnimationFrame.
+/// Each tick owes frames for the time since the last one; on a 60 Hz display
+/// (or a multiple) the game runs at exactly 60 frames a second, one per
+/// refresh, 0.46% above the GBA's 59.73 so no refresh repeats or skips a
+/// frame. The audio reader absorbs the difference between the two clocks by
+/// resampling a hair (dingbat_ios_audio.c). 2x halves the samples per frame
+/// and slow motion doubles them, so the same rule runs both. Fast-forward
+/// runs frames for most of each display interval and plays what it can.
 final class GameSession: NSObject, ObservableObject {
     static let shared = GameSession()
 
@@ -53,7 +55,7 @@ final class GameSession: NSObject, ObservableObject {
     private var shotTime: CFTimeInterval = 0          // seconds run since the last library picture
     private var saveCheckTime: CFTimeInterval = 0
     private var lastTick: CFTimeInterval = 0
-    private var clockDebt: Double = 0                 // frames owed while audio cannot pace
+    private var frameDebt: Double = 0                 // frames owed to the display clock
     private var sources: [String: Set<Int>] = [:]     // held inputs per source ("touch", "pad"...)
     /// Whether the game in memory moved since its last session snapshot
     /// (web sessionMoved): a game sitting paused takes no new snapshot.
@@ -270,7 +272,7 @@ final class GameSession: NSObject, ObservableObject {
             return
         }
         if NetLink.shared.linked {
-            ran = linkedFrames(dt: dt)
+            ran = linkedFrames(link, dt: dt)
             if ran > 0 {
                 sessionMoved = true
                 saveCheckTime += dt
@@ -295,22 +297,13 @@ final class GameSession: NSObject, ObservableObject {
                 ran += 1
             } while CACurrentMediaTime() - t0 < budget && ran < 40
         case .normal, .double, .slow:
-            let cap = speed == .double ? 8 : 4
             let ahead = speed == .normal ? Settings.shared.runahead : 0
-            let step = { if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() } }
-            if AudioOutput.shared.isRunning {
-                clockDebt = 0
-                while dingbat_audio_ahead() == 0 && ran < cap { step(); ran += 1 }
-            } else {
-                // No audio engine to drain the ring (stopped by an
-                // interruption that never reported its end): pace by the
-                // clock so the game does not freeze, and keep trying the engine.
-                let rate = speed == .double ? 119.5 : speed == .slow ? 29.9 : 59.7
-                clockDebt = min(clockDebt + dt * rate, Double(cap))
-                dingbat_audio_clear()
-                while clockDebt >= 1 && ran < cap { step(); ran += 1; clockDebt -= 1 }
-                AudioOutput.shared.restartIfNeeded()
+            let owed = framesOwed(link, dt: dt)
+            for _ in 0..<owed {
+                if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
+                ran += 1
             }
+            keepAudioAlive()
         }
         if ran > 0 {
             sessionMoved = true
@@ -341,6 +334,36 @@ final class GameSession: NSObject, ObservableObject {
         onTick?()
     }
 
+    /// Frames this display tick owes (web: the RAF accumulator). Rounded,
+    /// not floored, so a refresh that lands a hair early or late still runs
+    /// its one frame; a missed refresh is made up on the next.
+    private func framesOwed(_ link: CADisplayLink, dt: CFTimeInterval) -> Int {
+        let period = link.targetTimestamp - link.timestamp
+        let hz = period > 0 ? 1 / period : 60
+        let k = (hz / 60).rounded()
+        // A display at a multiple of 60 Hz: one frame per refresh, exactly.
+        let base = k >= 1 && abs(hz / 60 - k) < 0.03 ? 60.0 : 59.7275
+        let mult = speed == .double ? 2.0 : speed == .slow ? 0.5 : 1.0
+        let cap = speed == .double ? 8 : 4
+        frameDebt += dt * base * mult
+        let n = max(0, min(cap, Int(frameDebt.rounded())))
+        frameDebt = min(1, max(-1, frameDebt - Double(n)))
+        return n
+    }
+
+    /// No audio engine to drain the ring (stopped by an interruption that
+    /// never reported its end): drop what queued so it cannot back up, and
+    /// keep trying the engine.
+    private func keepAudioAlive() {
+        guard !AudioOutput.shared.isRunning else { return }
+        dingbat_audio_clear()
+        AudioOutput.shared.restartIfNeeded()
+    }
+
+    #if DEBUG
+    static let audioStats = ProcessInfo.processInfo.arguments.contains("-audio-stats")
+    #endif
+
     // MARK: online link
 
     /// The link idle watch (web RB_IDLE_*): only the emulated cable's
@@ -354,8 +377,7 @@ final class GameSession: NSObject, ObservableObject {
     /// One tick of linked play: frames while the audio wants them (or the
     /// clock, with no audio engine), each sent to the friend with this
     /// player's buttons. A stall (-1) waits for the friend's input.
-    private func linkedFrames(dt: CFTimeInterval) -> Int {
-        let cap = speed == .double ? 8 : 4
+    private func linkedFrames(_ link: CADisplayLink, dt: CFTimeInterval) -> Int {
         var bits: UInt16 = 0
         for id in held where id >= 0 && id < 10 { bits |= UInt16(1) << UInt16(id) }
         var ran = 0
@@ -380,19 +402,11 @@ final class GameSession: NSObject, ObservableObject {
             ran += 1
             return true
         }
-        if AudioOutput.shared.isRunning {
-            clockDebt = 0
-            while dingbat_audio_ahead() == 0 && ran < cap { if !step() { break } }
-        } else {
-            let rate = speed == .double ? 119.5 : 59.7
-            clockDebt = min(clockDebt + dt * rate, Double(cap))
-            dingbat_audio_clear()
-            while clockDebt >= 1 && ran < cap {
-                if !step() { clockDebt = 0; break }
-                clockDebt -= 1
-            }
-            AudioOutput.shared.restartIfNeeded()
+        for _ in 0..<framesOwed(link, dt: dt) {
+            // Stalled at the prediction window: wait for the friend.
+            if !step() { frameDebt = 0; break }
         }
+        keepAudioAlive()
         return ran
     }
 
@@ -458,7 +472,7 @@ final class GameSession: NSObject, ObservableObject {
         linkTransfers = 0
         linkActivity = CACurrentMediaTime()
         lastTick = 0
-        clockDebt = 0
+        frameDebt = 0
         // Not relayed: the friend unfreezes on its own start.
         if paused {
             paused = false
@@ -532,6 +546,20 @@ final class GameSession: NSObject, ObservableObject {
         }
         let rounded = Int(f + 0.5)
         if fps != rounded { fps = rounded }
+        #if DEBUG
+        // `-audio-stats`: a line a second (fps, ring depth, reader underruns)
+        // into tmp/audiostats.txt, for checking pacing in the simulator.
+        if Self.audioStats {
+            let line = String(format: "fps=%.1f speed=%@ depth=%d underruns=%d\n", f, "\(speed)",
+                              dingbat_audio_queued_frames(), dingbat_audio_underruns())
+            let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("audiostats.txt")
+            if let h = try? FileHandle(forWritingTo: url) {
+                h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
+            } else {
+                try? line.write(to: url, atomically: true, encoding: .utf8)
+            }
+        }
+        #endif
         let unusual = expected < 0 || abs(f - expected) > max(3, expected * 0.05)
         if fpsUnusual != unusual { fpsUnusual = unusual }
         let hle = dingbat_hle_audio_active() != 0
@@ -622,6 +650,7 @@ final class GameSession: NSObject, ObservableObject {
         dingbat_set_fast_forward(s == .fastForward ? 1 : 0)
         dingbat_set_turbo(s == .double ? 1 : 0)
         dingbat_set_slowmo(s == .slow ? 1 : 0)
+        dingbat_audio_set_free(s == .fastForward ? 1 : 0)
     }
 
     func toggleFastForward() { setSpeed(speed == .fastForward ? .normal : .fastForward) }

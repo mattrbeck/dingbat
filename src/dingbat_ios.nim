@@ -491,6 +491,70 @@ proc dingbat_sgb_backdrop(): cint {.exportc, cdecl.} =
   if stateKind == ekGB and stateGb != nil and stateGb.sgb_active():
     cint(stateGb.sgb_backdrop()) else: 0
 
+# --- Ambient-glow sampler (dingbat_wasm.nim's wasm_glow_sample) ---
+# Composites the way the presenter does (border over the Game Boy window
+# over the backdrop), without upscale filters or scanlines. The DMG shade
+# palette is passed in, not stored.
+
+var glowBuffer: seq[uint32]
+
+proc dingbat_glow_sample(gw, gh: cint; remap: cint;
+                         p0, p1, p2, p3: uint32): ptr uint32 {.exportc, cdecl.} =
+  ## Point-sample the composited picture into a gw x gh RGBA8888 buffer (R
+  ## first in memory). One sample per cell: an area average would cost 20x
+  ## for a difference invisible behind the blur.
+  if gw <= 0 or gh <= 0: return nil
+  let fbp = live_fb()
+  if fbp == nil: return nil
+  let fb = fbp
+  let lut = if stateKind == ekGB: addr colorLutGbc else: addr colorLutGba
+  let gameW = if stateKind == ekGB: GB_W else: GBA_W
+  let gameH = if stateKind == ekGB: GB_H else: GBA_H
+  let border = dingbat_sgb_border() != 0
+  let outW = if border: SGB_BORDER_W else: gameW
+  let outH = if border: SGB_BORDER_H else: gameH
+  let offX = if border: (SGB_BORDER_W - GB_W) div 2 else: 0
+  let offY = if border: (SGB_BORDER_H - GB_H) div 2 else: 0
+  let bp = if border: cast[ptr UncheckedArray[uint16]](stateGb.sgb_border_ptr()) else: nil
+  let backdrop = if border: stateGb.sgb_backdrop() else: 0'u16
+
+  template unpack(v: uint16): uint32 =
+    # Straight 5->8 bit: border art and the backdrop are SNES output and the
+    # shader does not correct them either.
+    let r = uint32(v and 0x1F); let g = uint32((v shr 5) and 0x1F)
+    let b = uint32((v shr 10) and 0x1F)
+    0xFF000000'u32 or ((b * 255 div 31) shl 16) or
+                      ((g * 255 div 31) shl 8) or (r * 255 div 31)
+
+  if glowBuffer.len != gw * gh: glowBuffer.setLen(gw * gh)
+  for y in 0 ..< gh:
+    let oy = ((2 * y + 1) * outH) div (2 * gh)
+    for x in 0 ..< gw:
+      let ox = ((2 * x + 1) * outW) div (2 * gw)
+      var px: uint32
+      if border and (bp[oy * SGB_BORDER_W + ox] and 0x8000'u16) != 0:
+        px = unpack(bp[oy * SGB_BORDER_W + ox] and 0x7FFF'u16)
+      else:
+        let gx = ox - offX
+        let gy = oy - offY
+        if gx >= 0 and gx < gameW and gy >= 0 and gy < gameH:
+          let raw = fb[gy * gameW + gx] and 0x7FFF'u16
+          # A chosen shade palette is already display space, so it bypasses
+          # the panel model here as in the shader.
+          if remap != 0:
+            case raw
+            of 0x6BDF: px = p0
+            of 0x3ABF: px = p1
+            of 0x35BD: px = p2
+            of 0x2CEF: px = p3
+            else:      px = lut[raw]
+          else:
+            px = lut[raw]
+        else:
+          px = unpack(backdrop)
+      glowBuffer[y * gw + x] = px
+  addr glowBuffer[0]
+
 proc dingbat_out_width(): cint {.exportc, cdecl.} =
   ## The presented picture's width: 256 with an SGB border, else the game's.
   if dingbat_sgb_border() != 0: cint(SGB_BORDER_W) else: dingbat_fb_width()

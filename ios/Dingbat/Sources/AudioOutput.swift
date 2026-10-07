@@ -149,6 +149,10 @@ final class AudioOutput {
         category = want
         let av = AVAudioSession.sharedInstance()
         try? av.setCategory(want, mode: .default, options: want == .ambient ? [.mixWithOthers] : [])
+        // Small render quanta (~6 ms, not the default ~23 ms): the ring is
+        // drained in sips, so its depth, and the rate control on it, stay
+        // steady.
+        try? av.setPreferredIOBufferDuration(0.0058)
         try? av.setActive(true)
         if started && !engine.isRunning { try? engine.start() }
     }
