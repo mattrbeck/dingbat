@@ -76,6 +76,15 @@ the same frame).
   (a native menu cannot be opened from a pad), and skips text fields
   (search, codes) and the paused hero's ⋯ menu; Y on a tile and the touch
   screen reach those.
+- **A demo game.** A fresh install puts the Goodboy Galaxy demo (the
+  homebrew demo checked in for the web build) in the library, so the app
+  opens on something playable; the web starts empty. Signed in, it syncs
+  to Drive like any other game.
+- **"Open in dingbat"** from Files or another app takes ROMs, zips, saves
+  (.sav .srm .sps .xps .gsv) and .state files; a save or state goes into
+  the running game through Manage Saves (the web's drag and drop).
+- **The build** in Settings is the commit a build phase stamps into
+  Info.plist (the web reads version.txt).
 - **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.
@@ -84,9 +93,11 @@ the same frame).
 
 - **The link's same-browser BroadcastChannel path** (two tabs of one
   browser): there is no second tab in an app.
+- **Picture flights** between the hero and the game (the picture flying
+  between its card and the stage).
 - **Web-only plumbing**: the service worker's update button and Force
-  update, Fullscreen, the diagnostic log, drag and drop, the "File Check
-  Failed" header warning, picture flights between the hero and the game.
+  update, Fullscreen, the diagnostic log, drag and drop (Open in stands
+  in for it).
 
 ## Not verified on a device
 
