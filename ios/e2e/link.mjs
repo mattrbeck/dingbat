@@ -14,10 +14,12 @@
 //   node ios/e2e/link.mjs <path to Dingbat.app> [simulator udid]
 //
 // Cases: the same GBA game on both sides (no transfer); the same GB game;
-// two different GBA games (each side sends the other its ROM first).
+// two different GBA games (each side sends the other its ROM first); and the
+// manual code exchange with no server at all (each side pastes the other's
+// code; the app's goes through tmp/linkcode.txt and tmp/friendcode.txt).
 
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync, copyFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
@@ -69,14 +71,16 @@ const launchApp = (rom, args, log) => {
 
 const STOP = 600;
 
-const runCase = async (name, { webRom, appRom, appGame }) => {
+const runCase = async (name, { webRom, appRom, appGame, manual = false }) => {
   console.log(`\n${name}`);
   const code = "T" + Math.random().toString(36).slice(2, 8).toUpperCase();
   const log = join(SHOTS, `link-${name.replace(/\W+/g, "-")}.log`);
   const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1000, height: 800 } });
   const page = await ctx.newPage();
   page.on("console", (m) => { if (/netplay/.test(m.text())) console.log("  web:", m.text()); });
-  await page.goto(web.url + "?signal=ws://127.0.0.1:" + PORT);
+  // The manual case points both at a server that is not there.
+  const sig = "ws://127.0.0.1:" + (manual ? 9 : PORT);
+  await page.goto(web.url + "?signal=" + sig);
   await page.waitForFunction(() => typeof Module !== "undefined" && !!Module._rollback_tick, null, { timeout: 30000 });
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
@@ -97,13 +101,33 @@ const runCase = async (name, { webRom, appRom, appGame }) => {
     };
   }, STOP);
 
-  launchApp(appRom, ["-autoplay", appGame, "-signal", "ws://127.0.0.1:" + PORT,
-                     "-link", code, "-link-stop-at", String(STOP), "-link-press"], log);
+  launchApp(appRom, ["-autoplay", appGame, "-signal", sig,
+                     ...(manual ? ["-link-manual"] : ["-link", code]),
+                     "-link-stop-at", String(STOP), "-link-press"], log);
   await sleep(1500);
   await page.click("#menu-btn");
   await page.click("#net-connect");
-  await page.fill("#net-code-input", code);
-  await page.click("#net-join-go");
+  if (manual) {
+    // The page's own probe found no server: it may already be there.
+    await sleep(300);
+    if (await page.isVisible("#net-to-manual")) await page.click("#net-to-manual");
+    const webCode = await page.waitForFunction(() => net?.manualCode, null, { timeout: 20000 })
+      .then((h) => h.jsonValue());
+    const tmp = join(simctl("get_app_container", UDID, BUNDLE, "data").trim(), "tmp");
+    let appCode = "";
+    for (let i = 0; i < 100 && !appCode; i++) {
+      await sleep(200);
+      if (existsSync(join(tmp, "linkcode.txt"))) appCode = readFileSync(join(tmp, "linkcode.txt"), "utf8").trim();
+    }
+    assert.ok(appCode, "the app minted a code");
+    console.log(`  codes: app ${appCode.length} chars, web ${webCode.length} chars`);
+    writeFileSync(join(tmp, "friendcode.txt"), webCode);
+    await page.fill("#net-manual-in", appCode);
+    await page.click("#net-manual-confirm");
+  } else {
+    await page.fill("#net-code-input", code);
+    await page.click("#net-join-go");
+  }
 
   // Linked on both sides, then both at the stop with every input in.
   await page.waitForFunction(() => rollbackMode, null, { timeout: 60000 });
@@ -155,6 +179,8 @@ const cases = [
                      appGame: "gblinktest.gb" }],
   ["two GBA games, sent both ways", { webRom: join(ROOT, "tests/roms/linktest.gba"),
                                       appRom: join(ROOT, "web/goodboy-demo-en.gba"), appGame: "goodboy-demo-en.gba" }],
+  ["manual codes, no server", { webRom: join(ROOT, "tests/roms/linktest.gba"), appRom: join(ROOT, "tests/roms/linktest.gba"),
+                                appGame: "linktest.gba", manual: true }],
 ];
 const only = process.env.ONLY;
 for (const [name, c] of cases) {
