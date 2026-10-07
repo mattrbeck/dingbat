@@ -52,6 +52,22 @@ final class AppModel: ObservableObject {
     @Published var gamepadHidesTouch = false
     /// Unseen printed photos (the menu's dot).
     @Published var newPrints = false
+    /// A game with no ROM here whose file the person is picking again
+    /// ("Find the file…").
+    @Published var relinking: RomEntry?
+    /// A picked file of a different size than the game had: asked first.
+    @Published var relinkConfirm: (entry: RomEntry, bytes: Data)?
+    /// A Drive-only game coming down to be opened (the tile's "Opening").
+    @Published var opening: String?
+    /// Tiles whose download failed (until the next tap), or just finished
+    /// (a check for 2 s).
+    @Published var tileFailed = Set<String>()
+    @Published var tileDone = Set<String>()
+
+    /// "Games removed on another device": the games, answered by Continue
+    /// (false) or Restore (true).
+    @Published var tombstonePrompt: [String]?
+    private var tombstoneAnswer: CheckedContinuation<Bool, Never>?
 
     let session = GameSession.shared
     let library = RomLibrary.shared
@@ -84,6 +100,12 @@ final class AppModel: ObservableObject {
     /// Open a game and go to the play screen. `resume`: put its session back
     /// in during the boot (the hero's Resume, a tile in Resume mode).
     func launch(_ entry: RomEntry, resume: Bool) {
+        // No ROM here: Drive hands it back, or the person finds the file.
+        if !entry.isLocal {
+            if DriveSync.shared.driveHasRom(entry.fileName) { fetchThenLaunch(entry, resume: resume) }
+            else { relinking = entry }
+            return
+        }
         toasts.removeAll { $0.game }
         let result = session.open(entry, resume: resume)
         guard result != .failed else {
@@ -196,6 +218,95 @@ final class AppModel: ObservableObject {
         sheetPausedGame = screen == .play && session.game != nil && !session.paused
         if sheetPausedGame { session.setPaused(true) }
         sheet = s
+    }
+
+    /// Ask whether games deleted on another device go here too (web
+    /// confirmTombstones). True = Restore.
+    @MainActor
+    func confirmTombstones(_ games: [String]) async -> Bool {
+        #if DEBUG
+        // Dev hook for headless tests: `-answer-tombstones continue|restore`.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-answer-tombstones"), i + 1 < args.count {
+            return args[i + 1] == "restore"
+        }
+        #endif
+        tombstoneAnswer?.resume(returning: false)
+        return await withCheckedContinuation { cont in
+            tombstoneAnswer = cont
+            tombstonePrompt = games
+        }
+    }
+
+    func answerTombstones(restore: Bool) {
+        tombstonePrompt = nil
+        tombstoneAnswer?.resume(returning: restore)
+        tombstoneAnswer = nil
+    }
+
+    // MARK: games with no ROM here
+
+    /// A Drive-only game's tap (web fetchTileGame): down, then open. A tap
+    /// on another tile meanwhile is the later word: this one just downloads.
+    private func fetchThenLaunch(_ e: RomEntry, resume: Bool) {
+        let name = e.fileName
+        opening = name
+        tileFailed.remove(name)
+        Task { @MainActor in
+            let ok = await DriveSync.shared.downloadGame(name)
+            let mine = opening == name
+            if mine { opening = nil }
+            guard ok else { tileFailed.insert(name); return }
+            if mine { launch(RomEntry(fileName: name), resume: resume) } else { markDone(name) }
+        }
+    }
+
+    /// The tile's ↓ and the menu's Download to this device.
+    func downloadOnly(_ e: RomEntry) {
+        let name = e.fileName
+        tileFailed.remove(name)
+        Task { @MainActor in
+            if await DriveSync.shared.downloadGame(name) { markDone(name) } else { tileFailed.insert(name) }
+        }
+    }
+
+    private func markDone(_ name: String) {
+        tileDone.insert(name)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.tileDone.remove(name) }
+    }
+
+    /// Find the file: the picked bytes go under the game's own name, so its
+    /// save pairs with it again (web relinkGameAction).
+    func relink(_ e: RomEntry, to url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard url.pathExtension.lowercased() == e.ext else {
+            toast("“\(e.name)” needs a .\(e.ext) file", duration: 4)
+            return
+        }
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else {
+            toast("Couldn't read that file", duration: 4)
+            return
+        }
+        let noted = library.romSize(e.fileName)
+        if noted > 0 && noted != data.count {
+            relinkConfirm = (e, data)
+            return
+        }
+        finishRelink(e, data)
+    }
+
+    func finishRelink(_ e: RomEntry, _ data: Data) {
+        relinkConfirm = nil
+        do { try data.write(to: e.url, options: .atomic) } catch {
+            toast("Couldn't keep that file", duration: 4)
+            return
+        }
+        library.noteRomSize(e.fileName, data.count)
+        DriveSync.shared.markGameUpload(e.fileName)
+        library.pictureGen += 1
+        library.refresh()
+        toast("“\(e.name)” is back on this device")
     }
 
     // MARK: printer

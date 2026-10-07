@@ -12,7 +12,7 @@ import std/[os, strutils]
 import dingbat_ios
 
 proc dingbat_load_rom(rom, bios: cstring): cint {.importc, cdecl.}
-proc dingbat_unload() {.importc, cdecl.}
+proc dingbat_unload(flush: cint) {.importc, cdecl.}
 proc dingbat_reset(): cint {.importc, cdecl.}
 proc dingbat_loaded(): cint {.importc, cdecl.}
 proc dingbat_is_gb(): cint {.importc, cdecl.}
@@ -138,7 +138,7 @@ block:
     echo "  note sgbtest.gb sent no border in 600 frames"
   dingbat_set_input(7, 1); dingbat_run_frame(); dingbat_set_input(7, 0)
   check dingbat_reset() == 0, "reset reloads"
-  dingbat_unload()
+  dingbat_unload(1)
   check dingbat_loaded() == 0 and dingbat_game_fb() == nil, "unload drops the core"
 
 if failures > 0:

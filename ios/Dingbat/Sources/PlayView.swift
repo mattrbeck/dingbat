@@ -299,6 +299,7 @@ struct TopBar: View {
                 }
             }
             Spacer(minLength: 2)
+            SyncIndicator()
             StatusReadout()
             if settings.channelMutes != 0 {
                 Button {

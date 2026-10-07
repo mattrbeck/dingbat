@@ -73,7 +73,20 @@ final class Settings: ObservableObject {
     @Published var theme: ThemeName { didSet { d.set(theme.rawValue, forKey: "dingbat_theme"); applyVideo() } }
     @Published var rewind: Bool { didSet { d.set(rewind, forKey: "rewindOn"); dingbat_set_rewind(rewind ? 1 : 0, 0) } }
     @Published var runahead: Int { didSet { d.set(runahead, forKey: "runahead") } }
-    @Published var saveWebhook: String { didSet { d.set(saveWebhook, forKey: "save-hook") } }
+    @Published var saveWebhook: String {
+        didSet {
+            d.set(saveWebhook, forKey: "save-hook")
+            if !adoptingWebhook { DriveSync.shared.setSaveHook(saveWebhook) }
+        }
+    }
+    private var adoptingWebhook = false
+
+    /// The webhook another device set, from Drive (not sent back).
+    func adoptSyncedWebhook(_ url: String) {
+        adoptingWebhook = true
+        saveWebhook = url
+        adoptingWebhook = false
+    }
 
     var palette: Palette { theme.palette }
 

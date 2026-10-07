@@ -32,6 +32,19 @@ struct ManageSavesView: View {
                     SheetConfirmButton(label: "Reset", confirmLabel: "Confirm reset?", action: resetSave)
                         .fixedSize()
                 }
+                // A save kept from before the game was deleted, or the one a
+                // restore replaced (web #kept-save-row): 30 days from the delete.
+                if let g = session.game, let kept = DriveSync.shared.keptSave(g.fileName) {
+                    SheetRow(label: kept.title,
+                             sub: (kept.at > 0 ? "Saved " + TileMenuView.fmtTime(kept.at) + " · " : "") +
+                                  "kept until " + Self.fmtDay(kept.del + DriveSync.keptSaveMs)) {
+                        SheetConfirmButton(label: "Restore", confirmLabel: "Replace current save?") {
+                            SheetNav.close()
+                            DriveSync.shared.restoreKeptSave(g.fileName)
+                        }
+                        .fixedSize()
+                    }
+                }
                 SheetSubhead(text: "Save state file")
                 SheetRow(label: "Export state",
                          sub: "Download the current state as a .state file (desktop-compatible). Manage slots in Save States.") {
@@ -99,7 +112,12 @@ struct ManageSavesView: View {
     private func installSave(_ r: SaveImport.Result, for g: RomEntry) {
         SheetNav.close()
         Self.reboot(g) {
+            try? RomLibrary.ensureDir(g.dir)
             try? r.bytes.write(to: g.saveURL, options: .atomic)
+            // The session carries the save being replaced.
+            RomLibrary.deleteKeys(["stateauto:" + g.fileName])
+            DriveSync.shared.markDelete("stateauto:" + g.fileName)
+            DriveSync.shared.markUpload("save:" + g.fileName)
         }
         if let f = r.format {
             AppModel.shared.toast("Imported \(f) save" + (r.title.map { " — \($0)" } ?? ""))
@@ -112,8 +130,11 @@ struct ManageSavesView: View {
         guard let g = session.game else { return }
         SheetNav.close()
         Self.reboot(g) {
-            let fm = FileManager.default
-            for f in [g.saveURL, g.sessionURL, g.sessionMetaURL, g.sessionPicURL] { try? fm.removeItem(at: f) }
+            // Queued for Drive before the files go (a pull downloading this
+            // save checks the queue before writing it back).
+            DriveSync.shared.markDelete("save:" + g.fileName)
+            DriveSync.shared.markDelete("stateauto:" + g.fileName)
+            RomLibrary.deleteKeys(["save:" + g.fileName, "stateauto:" + g.fileName])
         }
         RomLibrary.shared.pictureGen += 1
         AppModel.shared.toast("Save reset — starting fresh")
@@ -122,6 +143,12 @@ struct ManageSavesView: View {
     /// Close the game first (its in-memory save is flushed there, so it can't
     /// land on top of the change afterwards), change the files, boot it again
     /// from the save.
+    static func fmtDay(_ ms: Double) -> String {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMM d")
+        return f.string(from: Date(timeIntervalSince1970: ms / 1000))
+    }
+
     static func reboot(_ g: RomEntry, change: () -> Void) {
         let model = AppModel.shared
         model.session.close()

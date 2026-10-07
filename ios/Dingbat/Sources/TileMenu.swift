@@ -20,6 +20,22 @@ struct TileMenuView: View {
         VStack(alignment: .leading, spacing: 0) {
             head
             Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 6)
+            let drive = DriveSync.shared
+            let local = entry.isLocal
+            let onDrive = drive.driveHasRom(entry.fileName)
+            if !local && !onDrive {
+                item("find", "Find the file…") {
+                    model.sheet = nil
+                    model.relinking = entry
+                }
+            }
+            if !local && onDrive {
+                item("download", "Download to this device",
+                     disabled: drive.downloading[entry.fileName] != nil ? "Downloading…" : nil) {
+                    model.sheet = nil
+                    model.downloadOnly(entry)
+                }
+            }
             item("rename", "Rename") {
                 model.sheet = .rename(entry)
             }
@@ -29,6 +45,22 @@ struct TileMenuView: View {
                  confirm: "Delete all save data?") {
                 model.sheet = nil
                 HomeActions.resetSaveData(entry)
+            }
+            if let kept = drive.keptSave(entry.fileName) {
+                item("restore", "Restore old save", sub: kept.why == "replaced" ? "The save you replaced"
+                        : "From before you deleted it" + (kept.at > 0 ? " · saved " + Self.fmtTime(kept.at) : ""),
+                     confirm: "Replace the current save?") {
+                    model.sheet = nil
+                    drive.restoreKeptSave(entry.fileName)
+                }
+            }
+            if local && drive.linked {
+                item("remove", "Remove from this device",
+                     disabled: onDrive ? nil : "Not backed up to Drive yet — this is your only copy",
+                     confirm: loaded ? "Close and remove?" : "Remove from this device?") {
+                    model.sheet = nil
+                    Task { @MainActor in await drive.removeFromDevice(entry.fileName) }
+                }
             }
             item("delete", "Delete", danger: true,
                  confirm: loaded ? "Close and delete everything?" : "Delete ROM and save data?") {
@@ -45,7 +77,20 @@ struct TileMenuView: View {
         .presentationDragIndicator(.visible)
     }
 
-    private var hasSavesHeight: CGFloat { library.hasSaveData(entry) ? 280 : 298 }
+    private var hasSavesHeight: CGFloat {
+        let drive = DriveSync.shared
+        var rows = 3
+        if !entry.isLocal { rows += 1 }
+        if drive.keptSave(entry.fileName) != nil { rows += 1 }
+        if entry.isLocal && drive.linked { rows += 1 }
+        return CGFloat(150 + rows * 50)
+    }
+
+    static func fmtTime(_ ms: Double) -> String {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMM d HH:mm")
+        return f.string(from: Date(timeIntervalSince1970: ms / 1000))
+    }
 
     /// The game's picture, its name, "SYS · size" (web buildTileMenuHead).
     private var head: some View {
@@ -81,7 +126,7 @@ struct TileMenuView: View {
     /// web tileMenuItem: a disabled item says why under its label; a
     /// destructive one asks for a second tap within 3.5 s.
     private func item(_ id: String, _ label: String, danger: Bool = false, disabled: String? = nil,
-                      confirm: String? = nil, run: @escaping () -> Void) -> some View {
+                      sub: String? = nil, confirm: String? = nil, run: @escaping () -> Void) -> some View {
         let isArmed = armed == id
         return Button {
             if confirm != nil, !isArmed {
@@ -102,7 +147,7 @@ struct TileMenuView: View {
                     .foregroundColor(isArmed ? palette.accentInk
                                      : disabled != nil ? palette.textFaint
                                      : danger ? palette.danger : palette.text)
-                if let sub = isArmed ? "Tap again to confirm" : disabled {
+                if let sub = isArmed ? "Tap again to confirm" : (disabled ?? sub) {
                     Text(sub)
                         .font(.system(size: 12))
                         .foregroundColor(isArmed ? palette.accentInk : palette.textDim)
@@ -163,27 +208,29 @@ enum HomeActions {
     static func delete(_ e: RomEntry) {
         let model = AppModel.shared
         if GameSession.shared.game == e { model.closeGame() }
-        RomLibrary.shared.delete(e)
         if model.heroGame == e { model.heroGame = nil }
-        model.toast("Deleted")
+        Task { @MainActor in
+            await RomLibrary.shared.delete(e)
+            model.toast(DriveSync.shared.enrolled ? "Deleted from all your devices" : "Deleted from this device")
+        }
     }
 
     /// Rename every file of the game. One in memory stays open under its new
     /// name: it is closed (the session is kept), renamed, and put back from
     /// that session, still paused.
-    @discardableResult
-    static func rename(_ e: RomEntry, to name: String) -> RomEntry? {
+    static func rename(_ e: RomEntry, to name: String) {
         let model = AppModel.shared
         let session = GameSession.shared
         let wasLoaded = session.game == e
         if wasLoaded { model.closeGame() }
-        guard let fresh = RomLibrary.shared.rename(e, to: name) else { return nil }
-        if model.heroGame == e { model.heroGame = fresh }
-        if wasLoaded, session.open(fresh, resume: true) != .failed {
-            session.setPaused(true)
+        Task { @MainActor in
+            guard let fresh = await RomLibrary.shared.rename(e, to: name) else { return }
+            if model.heroGame == e { model.heroGame = fresh }
+            if wasLoaded, session.open(fresh, resume: true) != .failed {
+                session.setPaused(true)
+            }
+            model.toast("Renamed to “\(fresh.name)”")
         }
-        model.toast("Renamed to “\(fresh.name)”")
-        return fresh
     }
 }
 

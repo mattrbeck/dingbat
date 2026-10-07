@@ -35,8 +35,8 @@ int dingbat_load_rom(const char *rom_path, const char *bios_path);
 int dingbat_load_rom_bytes(const void *data, int len, const char *persist_path,
                            const char *bios_path);
 
-/* Flush the battery save and drop the core. */
-void dingbat_unload(void);
+/* Drop the core, flushing its battery save first unless flush is 0. */
+void dingbat_unload(int flush);
 
 /* Hard reset: flush battery save, reload the current ROM. 0 = ok. */
 int dingbat_reset(void);

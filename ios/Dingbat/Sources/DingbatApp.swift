@@ -12,6 +12,7 @@ struct DingbatApp: App {
         Settings.shared.apply()
         RomLibrary.shared.installBundledDemo()
         Peripherals.shared.install()
+        Task { @MainActor in await DriveSync.shared.resumeOnBoot() }
     }
 
     /// Dev hook: `simctl launch booted com.mattrb.dingbat -autoplay [name]`
@@ -37,9 +38,30 @@ struct DingbatApp: App {
         let entries = RomLibrary.shared.entries
         if args.contains("-autoplay") {
             let name = value("-autoplay")
-            if let e = entries.first(where: { $0.name == name }) ?? entries.first {
-                model.launch(e, resume: false)
+            // A game a first Drive pull is bringing is waited for (10 s).
+            // `-resume` opens it as the hero's Resume does.
+            func attempt(_ left: Int) {
+                let all = RomLibrary.shared.entries
+                if let e = all.first(where: { $0.name == name || $0.fileName == name }) ?? (name == nil ? all.first : nil) {
+                    model.launch(e, resume: args.contains("-resume"))
+                    // `-home-after N`: Main Menu N seconds into the game
+                    // (its session is taken), counted from the game opening
+                    // (a Drive-only game downloads first).
+                    if let h = value("-home-after").flatMap(Double.init) {
+                        func whenRunning(_ tries: Int) {
+                            if model.screen == .play && model.session.game != nil {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + h) { model.showMainMenu() }
+                            } else if tries > 0 {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { whenRunning(tries - 1) }
+                            }
+                        }
+                        whenRunning(120)
+                    }
+                } else if left > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { attempt(left - 1) }
+                }
             }
+            attempt(20)
         }
         if args.contains("-landscape"),
            let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
@@ -81,8 +103,10 @@ struct DingbatApp: App {
                 .onAppear(perform: autoplay)
                 .onOpenURL { url in
                     // "Open in dingbat" from Files or another app.
-                    if let e = try? RomLibrary.shared.importRom(from: url) {
-                        AppModel.shared.launch(e, resume: false)
+                    Task { @MainActor in
+                        if let e = try? await RomLibrary.shared.importRom(from: url) {
+                            AppModel.shared.launch(e, resume: false)
+                        }
                     }
                 }
         }
@@ -104,6 +128,11 @@ struct RootView: View {
                     .transition(.opacity)
             }
             ToastStack()
+                .sheet(isPresented: Binding(get: { model.tombstonePrompt != nil },
+                                            set: { if !$0 && model.tombstonePrompt != nil { model.answerTombstones(restore: false) } })) {
+                    TombstoneSheet(games: model.tombstonePrompt ?? [])
+                        .environment(\.palette, palette)
+                }
         }
         .sheet(item: $model.sheet, onDismiss: sheetDismissed) { sheet in
             SheetHost(sheet: sheet)

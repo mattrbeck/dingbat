@@ -663,6 +663,9 @@ private struct GeneralPane: View {
             }
         }
         .padding(.bottom, 18)
+        SheetSubhead(text: "Google Drive")
+        DriveSettingsBlock()
+            .padding(.bottom, 18)
         SheetSubhead(text: "Emulation")
         SheetToggleRow(label: "Rewind",
                        sub: "Hold the rewind button to jump back, or double-tap it for a timeline you can scrub. Costs a few percent of speed; turning it off hides the rewind button.",

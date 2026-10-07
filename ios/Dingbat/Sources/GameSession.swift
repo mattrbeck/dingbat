@@ -98,11 +98,12 @@ final class GameSession: NSObject, ObservableObject {
         dingbat_init()
         let bios = entry.isGBA ? RomLibrary.gbaBiosURL : RomLibrary.gbcBootromURL
         let biosArg = FileManager.default.fileExists(atPath: bios.path) ? bios.path : nil
-        let rc = biosArg.map { dingbat_load_rom(entry.url.path, $0) } ?? dingbat_load_rom(entry.url.path, nil)
+        let path = RomLibrary.shared.prepareCoreLink(entry)?.path ?? entry.url.path
+        let rc = biosArg.map { dingbat_load_rom(path, $0) } ?? dingbat_load_rom(path, nil)
         guard rc == 0 else {
             // The old game was already left; nothing of it may stay loaded
             // (a later flush would write its battery over this one's files).
-            dingbat_unload()
+            dingbat_unload(1)
             stopLink()
             game = nil
             paused = false
@@ -122,7 +123,9 @@ final class GameSession: NSObject, ObservableObject {
         playTime = 0
         shotTime = 0
         lastSaveSig = RomLibrary.currentSaveSig(entry)
+        lastFrameSig = nil
         RomLibrary.shared.touch(entry)
+        RomLibrary.shared.noteRomSize(entry.fileName, entry.bytes)
         CheatStore.restore(for: entry)
         tiltKind = Int(dingbat_cart_has_tilt())
         hasCamera = dingbat_cart_has_camera() != 0
@@ -163,7 +166,23 @@ final class GameSession: NSObject, ObservableObject {
         guard game != nil else { return }
         leaveGame()
         stopLink()
-        dingbat_unload()
+        dingbat_unload(1)
+        game = nil
+        paused = false
+        speed = .normal
+        rewinding = false
+        clearInputs()
+        UIApplication.shared.isIdleTimerDisabled = false
+        AudioOutput.shared.refreshSession()
+    }
+
+    /// Let the game in memory go with nothing of it written: no session, no
+    /// picture, no battery flush (Drive hand-off: another device's newer
+    /// save and session land in its place).
+    func discard() {
+        guard game != nil else { return }
+        stopLink()
+        dingbat_unload(0)
         game = nil
         paused = false
         speed = .normal
@@ -345,6 +364,7 @@ final class GameSession: NSObject, ObservableObject {
         let sig = RomLibrary.currentSaveSig(g)
         guard sig != lastSaveSig else { return }
         lastSaveSig = sig
+        DriveSync.shared.markUpload("save:" + g.fileName)
         SaveWebhook.post(game: g)
     }
 
@@ -489,12 +509,25 @@ final class GameSession: NSObject, ObservableObject {
         var thumb: UIImage?
     }
 
+    /// A slot's time and thumbnail, from its meta record (web
+    /// statemeta:<name>[:slotN] = { thumb: data URL, ts }); a slot with no
+    /// meta (another build's) dates from its file.
     func slotInfo(_ slot: Int) -> SlotInfo? {
         guard let g = game else { return nil }
         let url = g.stateURL(slot: slot)
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let date = attrs[.modificationDate] as? Date else { return nil }
-        return SlotInfo(date: date, thumb: UIImage(contentsOfFile: g.stateThumbURL(slot: slot).path))
+        guard let meta = try? Data(contentsOf: g.stateMetaURL(slot: slot)),
+              let o = (try? JSONSerialization.jsonObject(with: meta)) as? [String: Any] else {
+            return SlotInfo(date: date, thumb: nil)
+        }
+        var thumb: UIImage?
+        if let s = o["thumb"] as? String, let comma = s.firstIndex(of: ","),
+           let d = Data(base64Encoded: String(s[s.index(after: comma)...])) {
+            thumb = UIImage(data: d)
+        }
+        let ts = (o["ts"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) } ?? date
+        return SlotInfo(date: ts, thumb: thumb)
     }
 
     /// Save to a slot (0 = Quick). Returns false when nothing was written.
@@ -505,10 +538,20 @@ final class GameSession: NSObject, ObservableObject {
             return false
         }
         do {
+            try RomLibrary.ensureDir(g.dir)
             try data.write(to: g.stateURL(slot: slot), options: .atomic)
-            if let png = currentImage(maxWidth: 160)?.pngData() {
-                try? png.write(to: g.stateThumbURL(slot: slot), options: .atomic)
+            // 160 px wide, as the web's (which writes WebP; a JPEG data URL
+            // reads the same everywhere).
+            var meta = JSObject()
+            if let jpg = currentImage(maxWidth: 160)?.jpegData(compressionQuality: 0.7) {
+                meta["thumb"] = .string("data:image/jpeg;base64," + jpg.base64EncodedString())
+            } else {
+                meta["thumb"] = .null
             }
+            meta["ts"] = .number(DriveSync.now())
+            try? JSValue.object(meta).data().write(to: g.stateMetaURL(slot: slot), options: .atomic)
+            DriveSync.shared.markUpload(RomLibrary.slotStateKey(g.fileName, slot))
+            DriveSync.shared.markUpload(RomLibrary.slotMetaKey(g.fileName, slot))
             return true
         } catch {
             AppModel.shared.toast("Save state failed: \(error.localizedDescription)")
@@ -541,7 +584,9 @@ final class GameSession: NSObject, ObservableObject {
     func deleteState(slot: Int) {
         guard let g = game else { return }
         try? FileManager.default.removeItem(at: g.stateURL(slot: slot))
-        try? FileManager.default.removeItem(at: g.stateThumbURL(slot: slot))
+        try? FileManager.default.removeItem(at: g.stateMetaURL(slot: slot))
+        DriveSync.shared.markDelete(RomLibrary.slotStateKey(g.fileName, slot))
+        DriveSync.shared.markDelete(RomLibrary.slotMetaKey(g.fileName, slot))
     }
 
     /// Hard reset from the save, with Undo (web #reset).
@@ -572,24 +617,39 @@ final class GameSession: NSObject, ObservableObject {
         guard let g = game, sessionMoved else { return }
         dingbat_flush_save()
         guard let bytes = captureState() else { return }
-        let meta = SessionMeta(ts: Date().timeIntervalSince1970 * 1000,
-                               saveSig: RomLibrary.currentSaveSig(g))
+        let meta = SessionMeta(ts: DriveSync.now(), saveSig: RomLibrary.currentSaveSig(g),
+                               by: DriveSync.deviceID, dev: DriveSync.deviceLabel)
         do {
+            try RomLibrary.ensureDir(g.dir)
+            // The old picture goes first: one left beside a newer snapshot
+            // would be taken for its own (web sessionpic's ts check).
+            try? FileManager.default.removeItem(at: g.sessionPicURL)
             try bytes.write(to: g.sessionURL, options: .atomic)
-            try JSONEncoder().encode(meta).write(to: g.sessionMetaURL, options: .atomic)
-            if let png = currentImage()?.pngData() {
-                try? png.write(to: g.sessionPicURL, options: .atomic)
+            try meta.header(state: bytes.count, pic: 0).write(to: g.sessionMetaURL, options: .atomic)
+            if let jpg = currentImage()?.jpegData(compressionQuality: 0.75) {
+                try? jpg.write(to: g.sessionPicURL, options: .atomic)
             }
             sessionMoved = false
             RomLibrary.shared.pictureGen += 1
+            DriveSync.shared.markUpload("stateauto:" + g.fileName)
         } catch {}
     }
 
-    /// The library picture: the last screen (web frame:<name>).
+    /// Signature of the last picture stored, so an unchanged screen (a title
+    /// screen left running) is neither rewritten nor sent again.
+    private var lastFrameSig: String?
+
+    /// The library picture: the last screen, a JPEG at 2x native as the
+    /// web's (frame:<name>), mirrored on Drive.
     func storeLastFrame() {
-        guard let g = game, let png = currentImage()?.pngData() else { return }
-        try? png.write(to: g.shotURL, options: .atomic)
+        guard let g = game, let jpg = currentImage()?.jpegData(compressionQuality: 0.75) else { return }
+        let sig = DriveSync.sig(jpg)
+        guard sig != lastFrameSig else { return }
+        lastFrameSig = sig
+        try? RomLibrary.ensureDir(g.dir)
+        try? jpg.write(to: g.shotURL, options: .atomic)
         RomLibrary.shared.pictureGen += 1
+        DriveSync.shared.markUpload("frame:" + g.fileName)
     }
 
     /// The picture now, colour corrected (no filters or palette), optionally
