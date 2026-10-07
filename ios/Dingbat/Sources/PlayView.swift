@@ -1,214 +1,777 @@
 import SwiftUI
+import UIKit
 
-/// The play screen: top bar (web UI's #top-bar), the game screen on the
-/// stage, and the touch gamepad — stacked below the screen in portrait,
-/// flanking it in landscape (matching the web layout breakpoints).
+/// The play screen (web body.running): the top bar, the game on the stage,
+/// and the touch controls, arranged per device and orientation by
+/// PlayLayout. The in-game menu drops down from the bar's hamburger.
 struct PlayView: View {
-    let rom: RomEntry
-    let onExit: () -> Void
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var session: GameSession
+    @EnvironmentObject var settings: Settings
+    @Environment(\.palette) var palette
 
-    @StateObject private var session = EmulatorSession()
-    @State private var pressed: Set<Int> = []
-    @State private var padRects: [PadRect] = []
+    var body: some View {
+        PlayLayout(stage: GameStage(), bar: TopBar())
+            .overlay(alignment: .topLeading) {
+                if model.menuOpen {
+                    GameMenu()
+                }
+            }
+            .statusBarHidden(true)
+            .persistentSystemOverlays(.hidden)
+    }
+}
+
+// MARK: - The stage
+
+/// The game picture on the stage: contain-fit (whole multiples with integer
+/// scaling), the ambient glow behind it, pinch zoom, the rumble shake, and in
+/// phone landscape a tap on the picture shows and hides the top bar.
+struct GameStage: View {
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var session: GameSession
+    @EnvironmentObject var settings: Settings
+    @Environment(\.palette) var palette
+    @Environment(\.verticalSizeClass) var vSize
+
+    @State private var zoom: CGFloat = 1
+    @State private var zoomBase: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    @State private var panBase: CGSize = .zero
+    @State private var lastGame: RomEntry?
+
+    /// Phone landscape (web: coarse pointer, landscape, max-height 500).
+    private var phoneLandscape: Bool { vSize == .compact }
 
     var body: some View {
         GeometryReader { geo in
-            let landscape = geo.size.width > geo.size.height
+            let size = pictureSize(in: geo.size)
             ZStack {
-                Theme.bg.ignoresSafeArea()
-                if landscape {
-                    landscapeLayout
-                } else {
-                    portraitLayout
+                (palette.chromeTransparent ? Color.clear : palette.stage)
+                if settings.ambientGlow {
+                    GlowView()
+                        .frame(width: size.width, height: size.height)
+                        .scaleEffect(1.45)
+                        .opacity(0.8)
+                        .allowsHitTesting(false)
                 }
-                TouchRoutingOverlay(
-                    rects: padRects,
-                    onInput: { id, down in session.setInput(id, down) },
-                    onPressedChange: { pressed = $0 })
-                if let toast = session.stateToast {
-                    toastView(toast)
-                }
-                if session.loadFailed {
-                    loadFailedView
-                }
-            }
-        }
-        .coordinateSpace(name: "pad")
-        .onPreferenceChange(PadRectsKey.self) { padRects = $0 }
-        .onAppear { session.start(rom: rom) }
-        .onDisappear { session.stop() }
-        .statusBarHidden(true)
-    }
-
-    // MARK: layouts
-
-    private var portraitLayout: some View {
-        VStack(spacing: 0) {
-            topBar
-            screen
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.stage)
-            controlsPortrait
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 8)
-                .background(
-                    LinearGradient(colors: [Color(hex: 0x0E1119), Theme.bg],
-                                   startPoint: .top, endPoint: .bottom))
-        }
-    }
-
-    private var controlsPortrait: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 14) {
-                ShoulderButton(label: "L", id: 8, pressed: pressed)
-                ShoulderButton(label: "R", id: 9, pressed: pressed)
-            }
-            HStack {
-                DPadView(size: 174, pressed: pressed)
-                Spacer()
-                FaceButtonsView(buttonSize: 64, pressed: pressed)
-            }
-            HStack(spacing: 18) {
-                PillButton(label: "Select", id: 6, pressed: pressed)
-                PillButton(label: "Start", id: 7, pressed: pressed)
-            }
-        }
-    }
-
-    private var landscapeLayout: some View {
-        VStack(spacing: 0) {
-            topBar
-            HStack(spacing: 8) {
-                VStack {
-                    ShoulderButton(label: "L", id: 8, pressed: pressed)
-                        .frame(width: 120)
-                    Spacer()
-                    DPadView(size: 150, pressed: pressed)
-                    Spacer()
-                    PillButton(label: "Select", id: 6, pressed: pressed)
-                }
-                .frame(width: 180)
-                screen
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.stage)
-                VStack {
-                    ShoulderButton(label: "R", id: 9, pressed: pressed)
-                        .frame(width: 120)
-                    Spacer()
-                    FaceButtonsView(buttonSize: 58, pressed: pressed)
-                    Spacer()
-                    PillButton(label: "Start", id: 7, pressed: pressed)
-                }
-                .frame(width: 180)
-            }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 6)
-        }
-    }
-
-    // MARK: pieces
-
-    private var topBar: some View {
-        HStack(spacing: 6) {
-            barButton("chevron.left") {
-                onExit()
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(rom.name)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundColor(Theme.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(session.sleeping ? "SLEEPING" : "\(session.fps) fps")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(session.sleeping ? Theme.accent : Theme.textFaint)
-                    .fixedSize()
-            }
-            .layoutPriority(1)
-            Spacer(minLength: 4)
-            barButton("arrow.counterclockwise") { session.reset() }
-            barButton(session.paused ? "play.fill" : "pause.fill",
-                      active: session.paused) { session.togglePause() }
-            barButton("forward.fill", active: session.fastForward) {
-                session.toggleFastForward()
-            }
-            barButton("square.and.arrow.down") { session.saveState() }
-            barButton("square.and.arrow.up") { session.loadState() }
-            barButton(session.muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                      active: session.muted) { session.toggleMute() }
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 52)
-        .background(Theme.surface1)
-        .overlay(Rectangle().fill(Theme.border).frame(height: 1), alignment: .bottom)
-    }
-
-    private func barButton(_ systemName: String, active: Bool = false,
-                           action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(active ? Theme.accent : Theme.textDim)
-                .frame(width: 31, height: 34)
-                .background(active ? Theme.accentGlow.opacity(0.35) : Color.clear)
-                .cornerRadius(8)
-        }
-    }
-
-    private var screen: some View {
-        GeometryReader { geo in
-            let fbw = CGFloat(max(Int(dingbat_fb_width()), 1))
-            let fbh = CGFloat(max(Int(dingbat_fb_height()), 1))
-            let rawScale = min(geo.size.width / fbw, geo.size.height / fbh)
-            // Integer scaling in *device pixels* (like the web canvas) for
-            // crisp, evenly-sized pixels while still filling the stage.
-            let px = UIScreen.main.scale
-            let scale = rawScale >= 1 ? floor(rawScale * px) / px : rawScale
-            ZStack {
-                if let image = session.image {
-                    Image(decorative: image, scale: 1)
-                        .interpolation(.none)
-                        .resizable()
-                        .frame(width: fbw * scale, height: fbh * scale)
-                } else {
-                    Text("dingbat")
-                        .font(.system(size: 15, design: .monospaced))
-                        .foregroundColor(Theme.textFaint)
+                GameScreenView()
+                    .frame(width: size.width, height: size.height)
+                    .modifier(RumbleShake(active: session.rumbling))
+                    .scaleEffect(zoom)
+                    .offset(pan)
+                    .accessibilityLabel("Game screen")
+                if settings.inputDisplay {
+                    InputOverlay()
+                        .frame(width: size.width, height: size.height, alignment: .bottomLeading)
+                        .allowsHitTesting(false)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
+            .contentShape(Rectangle())
+            .gesture(magnify(geo.size, picture: size))
+            .simultaneousGesture(zoom > 1 ? panGesture(geo.size, picture: size) : nil)
+            .gesture(taps(geo.size, picture: size))
+            .onChange(of: session.game) { g in
+                if g != lastGame { lastGame = g; resetZoom(animated: false) }
+            }
+            .onChange(of: model.screen) { s in if s == .home { resetZoom(animated: false) } }
         }
     }
 
-    private func toastView(_ message: String) -> some View {
-        VStack {
-            Text(message)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundColor(Theme.accent)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Theme.surface2)
-                .cornerRadius(8)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border2, lineWidth: 1))
-                .padding(.top, 64)
-            Spacer()
+    /// The picture's box: contain-fit of the presented size (an SGB border
+    /// makes it 256x224), in whole device-pixel multiples with integer
+    /// scaling.
+    private func pictureSize(in box: CGSize) -> CGSize {
+        _ = session.frameGen  // re-evaluate when an SGB border appears
+        let w = CGFloat(max(dingbat_out_width(), 1)), h = CGFloat(max(dingbat_out_height(), 1))
+        let fit = min(box.width / w, box.height / h)
+        guard fit > 0 else { return .zero }
+        let px = UIScreen.main.scale
+        var scale = fit
+        if settings.integerScale {
+            let s = floor(fit)  // whole multiples of the native size, in points
+            if s >= 1 { scale = s } else { scale = (fit * px).rounded(.down) / px }
+        } else {
+            scale = (fit * px).rounded(.down) / px
         }
-        .allowsHitTesting(false)
-        .transition(.opacity)
+        return CGSize(width: (w * scale).rounded(.down), height: (h * scale).rounded(.down))
     }
 
-    private var loadFailedView: some View {
-        VStack(spacing: 12) {
-            Text("Failed to load ROM")
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .foregroundColor(Theme.danger)
-            Button("Back") { onExit() }
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundColor(Theme.accent)
+    private func clampPan(_ p: CGSize, zoom z: CGFloat, box: CGSize, picture: CGSize) -> CGSize {
+        // Inside the stage when smaller, covering it when larger (web clamp).
+        let pw = picture.width * z, ph = picture.height * z
+        let mx = abs(pw - box.width) / 2, my = abs(ph - box.height) / 2
+        return CGSize(width: min(mx, max(-mx, p.width)), height: min(my, max(-my, p.height)))
+    }
+
+    private func magnify(_ box: CGSize, picture: CGSize) -> some Gesture {
+        MagnificationGesture()
+            .onChanged { v in
+                zoom = min(6, max(1, zoomBase * v))
+                pan = clampPan(pan, zoom: zoom, box: box, picture: picture)
+            }
+            .onEnded { _ in
+                zoomBase = zoom
+                panBase = pan
+                if zoom <= 1.01 { resetZoom(animated: true) }
+            }
+    }
+
+    private func panGesture(_ box: CGSize, picture: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { v in
+                pan = clampPan(CGSize(width: panBase.width + v.translation.width,
+                                      height: panBase.height + v.translation.height),
+                               zoom: zoom, box: box, picture: picture)
+            }
+            .onEnded { _ in panBase = pan }
+    }
+
+    /// Zoomed: a double tap resets (the single tap waits it out). Phone
+    /// landscape: a single tap clear of every control toggles the top bar.
+    private func taps(_ box: CGSize, picture: CGSize) -> some Gesture {
+        let single = SpatialTapGesture(count: 1, coordinateSpace: .global)
+            .onEnded { v in toggleBar(at: v.location) }
+        let double = TapGesture(count: 2).onEnded { resetZoom(animated: true) }
+        return double.exclusively(before: single)
+    }
+
+    private func toggleBar(at p: CGPoint) {
+        guard phoneLandscape, model.session.game != nil else { return }
+        let clear = PadGeometry.shared.rects.allSatisfy { !$0.insetBy(dx: -20, dy: -20).contains(p) }
+        guard clear else { return }
+        withAnimation(.easeOut(duration: 0.2)) { model.topbarOpen.toggle() }
+        BarTapHint.markUsed()
+    }
+
+    private func resetZoom(animated: Bool) {
+        let apply = { zoom = 1; zoomBase = 1; pan = .zero; panBase = .zero }
+        if animated { withAnimation(.easeOut(duration: 0.25), apply) } else { apply() }
+    }
+}
+
+/// The one-time "Tap the picture to show the bar" toast for phone landscape.
+enum BarTapHint {
+    private static let key = "dingbat_bar_tap_hint"
+    static func showIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        AppModel.shared.toast("Tap the picture to show the bar", duration: 4)
+    }
+    static func markUsed() { UserDefaults.standard.set(true, forKey: key) }
+}
+
+/// The rumble motor shakes the picture (web body.rumbling).
+struct RumbleShake: ViewModifier {
+    let active: Bool
+    func body(content: Content) -> some View {
+        if active {
+            TimelineView(.animation) { ctx in
+                let t = ctx.date.timeIntervalSinceReferenceDate
+                content.offset(x: CGFloat(sin(t * 95)) * 1.6, y: CGFloat(cos(t * 83)) * 1.2)
+            }
+        } else {
+            content
         }
-        .padding(24)
-        .background(Theme.surface1)
-        .cornerRadius(11)
+    }
+}
+
+/// Ambient glow: a coarse sample of the picture, saturated x1.5, blended
+/// over the last at 0.3 and blurred behind the screen (web glow composer),
+/// sampled ~10 times a second.
+struct GlowView: View {
+    @EnvironmentObject var session: GameSession
+    @EnvironmentObject var settings: Settings
+    @State private var image: UIImage?
+    @State private var ema = [Float](repeating: 0, count: 24 * 16 * 3)
+    @State private var fresh = true
+    private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.medium)
+                    .blur(radius: 32)
+            } else {
+                Color.clear
+            }
+        }
+        .onReceive(timer) { _ in sample() }
+        .onChange(of: session.game) { _ in fresh = true }
+    }
+
+    private func sample() {
+        guard session.game != nil, !session.paused || fresh,
+              let fbp = dingbat_framebuffer(), let lut = dingbat_framebuffer_rgba() else { return }
+        let fw = Int(dingbat_fb_width()), fh = Int(dingbat_fb_height())
+        let gw = 24, gh = 16
+        let pal = (dingbat_is_gb() != 0 && dingbat_is_cgb() == 0) ? settings.dmgPalette : nil
+        var out = [UInt32](repeating: 0, count: gw * gh)
+        for y in 0..<gh {
+            let oy = ((2 * y + 1) * fh) / (2 * gh)
+            for x in 0..<gw {
+                let ox = ((2 * x + 1) * fw) / (2 * gw)
+                let i = oy * fw + ox
+                var r: Float, g: Float, b: Float
+                if let pal, let shade = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF].firstIndex(of: Int(fbp[i] & 0x7FFF)) {
+                    let c = pal[shade]
+                    r = Float((c >> 16) & 255); g = Float((c >> 8) & 255); b = Float(c & 255)
+                } else {
+                    let c = lut[i]
+                    r = Float(c & 255); g = Float((c >> 8) & 255); b = Float((c >> 16) & 255)
+                }
+                let luma = 0.299 * r + 0.587 * g + 0.114 * b
+                r = min(255, max(0, luma + (r - luma) * 1.5))
+                g = min(255, max(0, luma + (g - luma) * 1.5))
+                b = min(255, max(0, luma + (b - luma) * 1.5))
+                let o = (y * gw + x) * 3
+                if fresh { ema[o] = r; ema[o + 1] = g; ema[o + 2] = b } else {
+                    ema[o] += (r - ema[o]) * 0.3; ema[o + 1] += (g - ema[o + 1]) * 0.3
+                    ema[o + 2] += (b - ema[o + 2]) * 0.3
+                }
+                out[y * gw + x] = 0xFF00_0000 | (UInt32(ema[o + 2]) << 16) | (UInt32(ema[o + 1]) << 8) | UInt32(ema[o])
+            }
+        }
+        fresh = false
+        let data = out.withUnsafeBufferPointer { Data(buffer: $0) }
+        guard let provider = CGDataProvider(data: data as CFData),
+              let cg = CGImage(width: gw, height: gh, bitsPerComponent: 8, bitsPerPixel: 32,
+                               bytesPerRow: gw * 4, space: CGColorSpaceCreateDeviceRGB(),
+                               bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                               provider: provider, decode: nil, shouldInterpolate: true,
+                               intent: .defaultIntent) else { return }
+        image = UIImage(cgImage: cg)
+    }
+}
+
+/// "Show inputs on screen": the held buttons, bottom-left of the picture.
+struct InputOverlay: View {
+    @EnvironmentObject var session: GameSession
+    private static let names = ["↑", "↓", "←", "→", "A", "B", "SELECT", "START", "L", "R"]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(session.held.sorted(), id: \.self) { id in
+                Text(Self.names[id])
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.55)))
+            }
+        }
+        .padding(8)
+    }
+}
+
+// MARK: - Top bar
+
+/// The in-game top bar (web #topbar while running), in markup order.
+struct TopBar: View {
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var session: GameSession
+    @EnvironmentObject var settings: Settings
+    @Environment(\.palette) var palette
+    @Environment(\.horizontalSizeClass) var hSize
+
+    private var wide: Bool { hSize == .regular }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if wide {
+                Button { model.showMainMenu() } label: { BarBrand() }
+                    .accessibilityLabel("Main Menu")
+            }
+            BarIconButton(system: "line.3.horizontal", label: "Menu", active: model.menuOpen,
+                          dot: model.newPrints) {
+                withAnimation(.easeOut(duration: 0.15)) { model.menuOpen.toggle() }
+                if model.menuOpen { session.setPaused(true) } else { session.setPaused(false) }
+            }
+            PlaybackCluster()
+            if session.tiltKind > 0 {
+                BarIconButton(system: "scope", label: "Recenter tilt") {
+                    Peripherals.shared.recenterTilt()
+                }
+            }
+            if session.hasCamera {
+                BarIconButton(system: Peripherals.shared.cameraOn ? "arrow.triangle.2.circlepath.camera" : "camera",
+                              label: "Camera") {
+                    Peripherals.shared.cameraButton()
+                }
+            }
+            Spacer(minLength: 2)
+            StatusReadout()
+            if settings.channelMutes != 0 {
+                Button {
+                    model.openSheet(.settings(section: "audio"))
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "speaker.slash")
+                        Text(wide ? "\(settings.channelMutes.nonzeroBitCount) off" : "\(settings.channelMutes.nonzeroBitCount)")
+                    }
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(palette.accent)
+                    .padding(.horizontal, 7)
+                    .frame(height: 26)
+                    .background(Capsule().fill(palette.accentGlow.opacity(0.4)))
+                }
+                .accessibilityLabel("Muted channels")
+            }
+            if settings.mp2kHle && session.mp2kAvailable {
+                BarIconButton(system: "music.note", label: "Enhanced music",
+                              active: session.hleActive && !session.hleSessionOff) {
+                    session.hleSessionOff.toggle()
+                    session.applyHle()
+                    model.toast(session.hleSessionOff ? "Enhanced music off for this game"
+                                                      : "Enhanced music on")
+                }
+            }
+            VolumeControl(showSlider: wide)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 52)
+        .background(
+            Group {
+                if palette.chromeTransparent && !(model.topbarOpen) {
+                    Color.clear
+                } else {
+                    LinearGradient(colors: [palette.topbarTop, palette.topbarBottom],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+            }
+        )
+        .overlay(Rectangle().fill(palette.frameLine).frame(height: 1), alignment: .bottom)
+    }
+}
+
+struct BarBrand: View {
+    @Environment(\.palette) var palette
+    var body: some View {
+        HStack(spacing: 6) {
+            Image("Logo")
+                .resizable()
+                .frame(width: 22, height: 22)
+            Text("dingbat")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(palette.chromeInk)
+        }
+        .padding(.trailing, 6)
+    }
+}
+
+/// A top-bar icon button (web .icon-btn), shell-skinned on device themes.
+struct BarIconButton: View {
+    @Environment(\.palette) var palette
+    let system: String
+    var label: String
+    var active = false
+    var dot = false
+    var width: CGFloat = 34
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(active ? palette.accent : palette.chromeInk)
+                .frame(width: width, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(active
+                              ? AnyShapeStyle(LinearGradient(colors: [palette.accentTintTop, palette.btnActiveBottom],
+                                                             startPoint: .top, endPoint: .bottom))
+                              : AnyShapeStyle(LinearGradient(colors: [palette.chromeBtnTop, palette.chromeBtnBottom],
+                                                             startPoint: .top, endPoint: .bottom)))
+                )
+                .overlay(RoundedRectangle(cornerRadius: 9)
+                    .stroke(active ? palette.accent.opacity(0.5) : palette.chromeBtnBorder, lineWidth: 1))
+                .overlay(alignment: .topTrailing) {
+                    if dot {
+                        Circle().fill(palette.accent).frame(width: 7, height: 7).offset(x: -4, y: 4)
+                    }
+                }
+        }
+        .accessibilityLabel(label)
+    }
+}
+
+/// Reset · Rewind · Pause · (paused: Step | running: 2x · Fast forward).
+struct PlaybackCluster: View {
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var session: GameSession
+    @EnvironmentObject var settings: Settings
+    @Environment(\.palette) var palette
+    @Environment(\.horizontalSizeClass) var hSize
+
+    @State private var lastRewindTap: Date = .distantPast
+    @State private var rewindDown: Date?
+    @State private var stepTimer: Timer?
+
+    var body: some View {
+        let w: CGFloat = hSize == .regular ? 34 : 30
+        HStack(spacing: hSize == .regular ? 6 : 2) {
+            BarIconButton(system: "arrow.counterclockwise", label: "Reset", width: w) { session.reset() }
+            if settings.rewind {
+                rewindButton(width: w)
+            }
+            BarIconButton(system: session.paused ? "play.fill" : "pause.fill",
+                          label: "Pause / Resume", active: session.paused, width: w) {
+                model.menuOpen = false
+                session.togglePause()
+            }
+            if session.paused {
+                stepButton(width: w)
+            } else {
+                Button { session.toggleDouble() } label: {
+                    SpeedGlyph(count: 2, active: session.speed == .double, width: w)
+                }
+                .accessibilityLabel("2x Speed")
+                Button { session.toggleFastForward() } label: {
+                    SpeedGlyph(count: 3, active: session.speed == .fastForward, width: w)
+                }
+                .accessibilityLabel("Fast Forward")
+            }
+        }
+    }
+
+    /// Hold to rewind; a quick double tap opens the scrubber (web: <=250 ms
+    /// press, <=300 ms gap).
+    private func rewindButton(width: CGFloat) -> some View {
+        SpeedGlyph(count: 2, active: session.rewinding, width: width, backward: true)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        guard rewindDown == nil else { return }
+                        rewindDown = Date()
+                        session.setRewinding(true)
+                    }
+                    .onEnded { _ in
+                        session.setRewinding(false)
+                        let press = Date().timeIntervalSince(rewindDown ?? Date())
+                        rewindDown = nil
+                        guard press <= 0.25 else { lastRewindTap = .distantPast; return }
+                        if Date().timeIntervalSince(lastRewindTap) <= 0.3 + 0.25 {
+                            lastRewindTap = .distantPast
+                            model.openSheet(.rewind)
+                        } else {
+                            lastRewindTap = Date()
+                        }
+                    }
+            )
+            .accessibilityLabel("Rewind: hold to rewind, double-tap to pick a moment")
+            .accessibilityAddTraits(.isButton)
+    }
+
+    /// Tap = one frame; hold 400 ms, then a frame every 100 ms.
+    private func stepButton(width: CGFloat) -> some View {
+        BarIconButtonLabel(system: "forward.frame.fill", width: width)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        guard stepTimer == nil else { return }
+                        session.stepFrame()
+                        stepTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                            stepTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                                session.stepFrame()
+                            }
+                        }
+                    }
+                    .onEnded { _ in
+                        stepTimer?.invalidate()
+                        stepTimer = nil
+                    }
+            )
+            .accessibilityLabel("Step one frame")
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
+struct BarIconButtonLabel: View {
+    @Environment(\.palette) var palette
+    let system: String
+    var width: CGFloat = 34
+    var body: some View {
+        Image(systemName: system)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(palette.chromeInk)
+            .frame(width: width, height: 34)
+            .background(RoundedRectangle(cornerRadius: 9)
+                .fill(LinearGradient(colors: [palette.chromeBtnTop, palette.chromeBtnBottom],
+                                     startPoint: .top, endPoint: .bottom)))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(palette.chromeBtnBorder, lineWidth: 1))
+    }
+}
+
+/// The web's double (2x, rewind) and triple (fast-forward) triangles.
+struct SpeedGlyph: View {
+    @Environment(\.palette) var palette
+    let count: Int
+    let active: Bool
+    var width: CGFloat = 34
+    var backward = false
+
+    var body: some View {
+        Triangles(count: count)
+            .fill(active ? palette.accent : palette.chromeInk)
+            .frame(width: count == 3 ? 18 : 15, height: 11)
+            .rotationEffect(backward ? .degrees(180) : .zero)
+            .frame(width: width, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(active
+                          ? AnyShapeStyle(LinearGradient(colors: [palette.accentTintTop, palette.btnActiveBottom],
+                                                         startPoint: .top, endPoint: .bottom))
+                          : AnyShapeStyle(LinearGradient(colors: [palette.chromeBtnTop, palette.chromeBtnBottom],
+                                                         startPoint: .top, endPoint: .bottom)))
+            )
+            .overlay(RoundedRectangle(cornerRadius: 9)
+                .stroke(active ? palette.accent.opacity(0.5) : palette.chromeBtnBorder, lineWidth: 1))
+            .contentShape(Rectangle())
+    }
+
+    struct Triangles: Shape {
+        let count: Int
+        func path(in r: CGRect) -> Path {
+            var p = Path()
+            let w = r.width / CGFloat(count)
+            for i in 0..<count {
+                let x = r.minX + CGFloat(i) * w
+                p.move(to: CGPoint(x: x, y: r.minY))
+                p.addLine(to: CGPoint(x: x + w, y: r.midY))
+                p.addLine(to: CGPoint(x: x, y: r.maxY))
+                p.closeSubpath()
+            }
+            return p
+        }
+    }
+}
+
+/// fps when it is not what the mode expects, or SLEEPING.
+struct StatusReadout: View {
+    @EnvironmentObject var session: GameSession
+    @Environment(\.palette) var palette
+    @Environment(\.horizontalSizeClass) var hSize
+
+    var body: some View {
+        if session.sleeping {
+            Text("SLEEPING")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(palette.accent)
+        } else if session.fpsUnusual {
+            Text(hSize == .regular ? "\(session.fps) fps" : "\(session.fps)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(palette.statusInk)
+                .fixedSize()
+        }
+    }
+}
+
+/// Mute button + slider (0–100, step 5). In game on phones the slider lives
+/// in the menu instead.
+struct VolumeControl: View {
+    @EnvironmentObject var settings: Settings
+    @Environment(\.palette) var palette
+    var showSlider: Bool
+    var sliderWidth: CGFloat = 96
+
+    var body: some View {
+        HStack(spacing: 4) {
+            BarIconButton(system: settings.muted || settings.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                          label: settings.muted ? "Unmute" : "Mute", active: settings.muted) {
+                settings.muted.toggle()
+            }
+            if showSlider {
+                VolumeSlider()
+                    .frame(width: sliderWidth)
+            }
+        }
+    }
+}
+
+struct VolumeSlider: View {
+    @EnvironmentObject var settings: Settings
+    @Environment(\.palette) var palette
+    var body: some View {
+        Slider(value: Binding(get: { Double(settings.volume) },
+                              set: { v in
+                                  settings.volume = Int((v / 5).rounded() * 5)
+                                  if settings.muted && settings.volume > 0 { settings.muted = false }
+                              }),
+               in: 0...100, step: 5)
+            .tint(palette.accent)
+            .accessibilityLabel("Volume")
+    }
+}
+
+// MARK: - The in-game menu
+
+/// The hamburger's dropdown (web #menu-dropdown), in order.
+struct GameMenu: View {
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var session: GameSession
+    @EnvironmentObject var settings: Settings
+    @Environment(\.palette) var palette
+    @Environment(\.horizontalSizeClass) var hSize
+    @State private var captureOpen = false
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // Scrim: a tap outside closes the menu and resumes.
+            Color.black.opacity(0.001)
+                .ignoresSafeArea()
+                .onTapGesture { close(resume: true) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    quickRow
+                    item("house", "Main Menu") { model.showMainMenu() }
+                    sep
+                    item("square.grid.2x2", "Save States") { model.openSheet(.states) }
+                    item("folder", "Manage Saves") { model.openSheet(.saves) }
+                    item("camera", "Capture", trailing: captureOpen ? "chevron.down" : "chevron.right",
+                         dot: model.newPrints) {
+                        withAnimation(.easeOut(duration: 0.15)) { captureOpen.toggle() }
+                    }
+                    if captureOpen {
+                        item("camera.viewfinder", "Screenshot", sub: true) { screenshot() }
+                        if !PrintStore.all().isEmpty {
+                            item("printer", "Printed Photos", sub: true, dot: model.newPrints) {
+                                model.openSheet(.prints)
+                            }
+                        }
+                    }
+                    if hSize != .regular {
+                        HStack(spacing: 10) {
+                            Image(systemName: "speaker.wave.2")
+                                .foregroundColor(palette.textDim)
+                            VolumeSlider()
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(height: 44)
+                    }
+                    sep
+                    item("star", "Cheats") { model.openSheet(.cheats) }
+                    item("gearshape", "Settings") { model.openSheet(.settings(section: nil)) }
+                    sep
+                    item("ladybug", "Report a Bug") { model.openSheet(.report) }
+                }
+                .padding(6)
+            }
+            .frame(width: 252)
+            .frame(maxHeight: 520)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(RoundedRectangle(cornerRadius: 14).fill(palette.surface1))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border2, lineWidth: 1))
+            .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
+            .padding(.top, 56)
+            .padding(.leading, hSize == .regular ? 120 : 10)
+            .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
+        }
+    }
+
+    private var quickRow: some View {
+        HStack(spacing: 6) {
+            quick("square.and.arrow.down", "Quick Save") {
+                if session.saveState(slot: 0) { model.toast("State saved") }
+                close(resume: true)
+            }
+            quick("square.and.arrow.up", "Quick Load") {
+                session.loadState(slot: 0)
+                close(resume: true)
+            }
+            if settings.rewind {
+                quick("film", "Rewind to a Moment") { model.openSheet(.rewind) }
+            }
+            quick("tortoise", "Slow Motion", active: session.speed == .slow) {
+                session.toggleSlowMotion()
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    private var sep: some View {
+        Rectangle().fill(palette.border).frame(height: 1).padding(.vertical, 4)
+    }
+
+    private func quick(_ icon: String, _ label: String, active: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundColor(active ? palette.accent : palette.text)
+                .frame(maxWidth: .infinity)
+                .frame(height: 45)
+                .background(RoundedRectangle(cornerRadius: 10)
+                    .fill(active ? palette.accentTintTop : palette.surface2))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .stroke(active ? palette.accent.opacity(0.5) : palette.border, lineWidth: 1))
+        }
+        .accessibilityLabel(label)
+    }
+
+    private func item(_ icon: String, _ label: String, trailing: String? = nil, sub: Bool = false,
+                      dot: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15))
+                    .frame(width: 22)
+                    .foregroundColor(palette.textDim)
+                Text(label)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(palette.text)
+                if dot { Circle().fill(palette.accent).frame(width: 6, height: 6) }
+                Spacer()
+                if let trailing {
+                    Image(systemName: trailing)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(palette.textFaint)
+                }
+            }
+            .padding(.leading, sub ? 26 : 12)
+            .padding(.trailing, 12)
+            .frame(height: 42)
+            .contentShape(Rectangle())
+        }
+    }
+
+    private func close(resume: Bool) {
+        withAnimation(.easeOut(duration: 0.15)) { model.menuOpen = false }
+        if resume && model.sheet == nil { session.setPaused(false) }
+    }
+
+    /// The console's own picture at 4x (no filters, colour correction,
+    /// palette or border), as the web's screenshot.
+    private func screenshot() {
+        guard let g = session.game, let fb = dingbat_framebuffer() else { return }
+        let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
+        guard let img = GameSession.bgr555Image(UnsafeRawPointer(fb), width: w, height: h) else { return }
+        let size = CGSize(width: w * 4, height: h * 4)
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        let big = UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
+            ctx.cgContext.interpolationQuality = .none
+            img.draw(in: CGRect(origin: .zero, size: size))
+        }
+        guard let png = big.pngData() else { return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(g.stem).png")
+        try? png.write(to: url)
+        Share.present([url])
+    }
+}
+
+/// UIActivityViewController from SwiftUI (exports: screenshots, saves,
+/// states, prints, bug reports).
+enum Share {
+    static func present(_ items: [Any]) {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              var top = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return }
+        while let p = top.presentedViewController { top = p }
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        vc.popoverPresentationController?.sourceView = top.view
+        vc.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: 60, width: 1, height: 1)
+        top.present(vc, animated: true)
     }
 }
