@@ -86,6 +86,11 @@ final class AppModel: ObservableObject {
 
     var heroPaused: Bool { heroGame != nil && session.game == heroGame }
 
+    /// A game in a session that cannot just be closed: an online link or
+    /// local 2P (web gameFlags.busy). The hero cannot draw it, and every
+    /// action on its files waits for the session to end.
+    var sessionBusy: Bool { session.game != nil && (NetLink.shared.holdsCore || session.twoPlayer) }
+
     // MARK: toasts
 
     func toast(_ text: String, action: (String, () -> Void)? = nil, duration: Double? = nil, game: Bool = false) {
