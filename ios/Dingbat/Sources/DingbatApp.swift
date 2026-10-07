@@ -115,9 +115,10 @@ struct RootView: View {
     private func sheetDismissed() {
         // The game paused for the sheet; it runs again only on the play
         // screen (web: modals pause, closing resumes).
-        if model.screen == .play && model.sheet == nil && !model.menuOpen {
+        if model.screen == .play && model.sheet == nil && !model.menuOpen && model.sheetPausedGame {
             model.session.setPaused(false)
         }
+        model.sheetPausedGame = false
     }
 }
 

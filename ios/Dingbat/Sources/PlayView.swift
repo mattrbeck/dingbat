@@ -405,6 +405,10 @@ struct PlaybackCluster: View {
     @State private var lastRewindTap: Date = .distantPast
     @State private var rewindDown: Date?
     @State private var stepTimer: Timer?
+    // Held states that SwiftUI resets when the touch ends OR is cancelled
+    // (Control Centre, the app going inactive), so neither button can stick.
+    @GestureState private var rewindHeld = false
+    @GestureState private var stepHeld = false
 
     var body: some View {
         let w: CGFloat = hSize == .regular ? 34 : 30
@@ -437,26 +441,24 @@ struct PlaybackCluster: View {
     /// press, <=300 ms gap).
     private func rewindButton(width: CGFloat) -> some View {
         SpeedGlyph(count: 2, active: session.rewinding, width: width, backward: true)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard rewindDown == nil else { return }
-                        rewindDown = Date()
-                        session.setRewinding(true)
-                    }
-                    .onEnded { _ in
-                        session.setRewinding(false)
-                        let press = Date().timeIntervalSince(rewindDown ?? Date())
-                        rewindDown = nil
-                        guard press <= 0.25 else { lastRewindTap = .distantPast; return }
-                        if Date().timeIntervalSince(lastRewindTap) <= 0.3 + 0.25 {
-                            lastRewindTap = .distantPast
-                            model.openSheet(.rewind)
-                        } else {
-                            lastRewindTap = Date()
-                        }
-                    }
-            )
+            .gesture(DragGesture(minimumDistance: 0).updating($rewindHeld) { _, held, _ in held = true })
+            .onChange(of: rewindHeld) { held in
+                if held {
+                    rewindDown = Date()
+                    session.setRewinding(true)
+                    return
+                }
+                session.setRewinding(false)
+                let press = Date().timeIntervalSince(rewindDown ?? Date())
+                rewindDown = nil
+                guard press <= 0.25 else { lastRewindTap = .distantPast; return }
+                if Date().timeIntervalSince(lastRewindTap) <= 0.3 + 0.25 {
+                    lastRewindTap = .distantPast
+                    model.openSheet(.rewind)
+                } else {
+                    lastRewindTap = Date()
+                }
+            }
             .accessibilityLabel("Rewind: hold to rewind, double-tap to pick a moment")
             .accessibilityAddTraits(.isButton)
     }
@@ -464,24 +466,26 @@ struct PlaybackCluster: View {
     /// Tap = one frame; hold 400 ms, then a frame every 100 ms.
     private func stepButton(width: CGFloat) -> some View {
         BarIconButtonLabel(system: "forward.frame.fill", width: width)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard stepTimer == nil else { return }
+            .gesture(DragGesture(minimumDistance: 0).updating($stepHeld) { _, held, _ in held = true })
+            .onChange(of: stepHeld) { held in
+                stopStepping()
+                guard held else { return }
+                session.stepFrame()
+                stepTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                    stepTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                        guard session.paused else { stopStepping(); return }
                         session.stepFrame()
-                        stepTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
-                            stepTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-                                session.stepFrame()
-                            }
-                        }
                     }
-                    .onEnded { _ in
-                        stepTimer?.invalidate()
-                        stepTimer = nil
-                    }
-            )
+                }
+            }
+            .onDisappear(perform: stopStepping)
             .accessibilityLabel("Step one frame")
             .accessibilityAddTraits(.isButton)
+    }
+
+    private func stopStepping() {
+        stepTimer?.invalidate()
+        stepTimer = nil
     }
 }
 

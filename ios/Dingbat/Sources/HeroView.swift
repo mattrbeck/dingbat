@@ -40,6 +40,8 @@ struct HeroView: View {
         }
         .onAppear(perform: grab)
         .onChange(of: session.game) { _ in grab() }
+        // A state loaded from the ⋯ menu's sheets changes the paused picture.
+        .onChange(of: model.sheet == nil) { closed in if closed { grab() } }
     }
 
     private var frameWidth: CGFloat {

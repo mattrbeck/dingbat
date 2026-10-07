@@ -87,6 +87,8 @@ final class AppModel: ObservableObject {
         toasts.removeAll { $0.game }
         let result = session.open(entry, resume: resume)
         guard result != .failed else {
+            heroGame = heroGame.flatMap { library.entry(named: $0.fileName) }
+            screen = .home
             toast("Couldn't start “\(entry.name)” — the file may not be a game", duration: 4)
             return
         }
@@ -97,6 +99,8 @@ final class AppModel: ObservableObject {
         switch result {
         case .savedSince:
             toast("The game has saved since — starting from that save", duration: 4, game: true)
+        case .resumeRejected(let why):
+            toast(why + " Started from the in-game save instead.", duration: 6, game: true)
         case .ok where !resume:
             offerSession(entry)
         default:
@@ -160,6 +164,10 @@ final class AppModel: ObservableObject {
         library.refresh()
     }
 
+    /// Whether opening the sheet paused the game, so its dismissal resumes
+    /// it; a game the player had paused stays paused.
+    var sheetPausedGame = false
+
     /// Whether the open menu paused the game (a controller's menu shortcut
     /// does; the hamburger does not), so closing it resumes.
     private var menuPausedGame = false
@@ -185,7 +193,8 @@ final class AppModel: ObservableObject {
     func openSheet(_ s: Sheet) {
         menuOpen = false
         menuPausedGame = false
-        if screen == .play, session.game != nil { session.setPaused(true) }
+        sheetPausedGame = screen == .play && session.game != nil && !session.paused
+        if sheetPausedGame { session.setPaused(true) }
         sheet = s
     }
 
