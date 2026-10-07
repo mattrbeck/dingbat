@@ -764,7 +764,7 @@ struct GameMenu: View {
             withAnimation(.easeOut(duration: 0.15)) { captureOpen.toggle() }
         }
         if captureOpen {
-            item("camera.viewfinder", "Screenshot", sub: true) { screenshot() }
+            item("camera.viewfinder", "Screenshot", sub: true) { Share.screenshot() }
             item(clips.recording ? "stop.circle.fill" : "record.circle",
                  clips.recording ? "Stop Recording" : "Record", sub: true,
                  tint: clips.recording ? palette.danger : nil) {
@@ -846,11 +846,13 @@ struct GameMenu: View {
         }
         .padFocus("menu:" + label, press: action)
     }
+}
 
+extension Share {
     /// The console's own picture at 4x (no filters, colour correction,
-    /// palette or border), as the web's screenshot.
-    private func screenshot() {
-        guard let g = session.game, let fb = dingbat_framebuffer() else { return }
+    /// palette or border), as the web's screenshot (the menu, F9).
+    static func screenshot() {
+        guard let g = GameSession.shared.game, let fb = dingbat_framebuffer() else { return }
         let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
         guard let img = GameSession.bgr555Image(UnsafeRawPointer(fb), width: w, height: h) else { return }
         let size = CGSize(width: w * 4, height: h * 4)

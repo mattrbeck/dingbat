@@ -41,6 +41,7 @@ the same frame).
 | Speeds and audio: 2x, unbounded fast-forward, slow motion, rewind, run-ahead, pitch-correct fast-forward, enhanced music, audio interpolation, the 12 kHz analog filter, channel mutes, Play in Silent Mode | `GameSession`, `AudioOutput`, `dingbat_ios_audio.c` |
 | Controllers (web mapping; RT holds fast-forward, LT rewind, R3 or Select+Start held opens the menu paused; hide touch controls), rumble, tilt carts, the Game Boy Camera, the Game Boy Printer, the save webhook | `Controllers`, `Peripherals`, `GameSession` |
 | A controller alone, outside the game: the d-pad and stick move focus spatially over the home screen, the in-game menu and every sheet, A presses, B goes back (a Settings section, then the sheet or menu; at home, the top), Y opens a game's options, LB/RB step the system filter, LT/RT the sort, Start resumes the hero's game; buttons held across a switch are not presses on arrival. No bar icon, toasts or readouts, as on the web | `PadNav` (iOS has no controller focus engine outside tvOS), `Controllers` |
+| A hardware keyboard: the ten bindings with the Default and Home-row presets (Settings › Controls › Keyboard, shown while one is connected: tap a key, press its replacement), the web's shortcuts (Space, Tab, Shift+Tab, \`, Shift+\`, ., M, I, F5, F8, F9) and Escape for the menu; outside the game the arrows, Return and Escape drive the UI as the pad does | `Keyboard` (GCKeyboard; bindings in the web's SDL keycodes) |
 
 ## Native differences
 
@@ -76,7 +77,6 @@ the same frame).
   browser): there is no second tab in an app. **Local 2P** (two games on
   one screen, the 2P tile) is not ported either.
 - **"Add pictures"** (picturing every game in one batch).
-- **Hardware keyboards**: key bindings and the keyboard shortcuts list.
 - **Web-only plumbing**: the service worker's update button and Force
   update, Fullscreen, the diagnostic log, drag and drop, the "File Check
   Failed" header warning, picture flights between the hero and the game.

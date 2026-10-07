@@ -36,6 +36,7 @@ final class Peripherals: ObservableObject {
         session.onRumble = { [weak self] on in self?.rumble(on) }
         session.onTick = { [weak self] in self?.tick() }
         Controllers.shared.start()
+        Keyboard.shared.start()
         // tiltKind and hasCamera are set after `game` in GameSession.open:
         // look once the open has finished.
         session.$game

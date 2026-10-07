@@ -253,6 +253,7 @@ struct SettingsView: View {
 
 private struct ControlsPane: View {
     @ObservedObject private var s = Settings.shared
+    @ObservedObject private var kb = Keyboard.shared
 
     var body: some View {
         SheetToggleRow(label: "Large on-screen controls",
@@ -284,6 +285,9 @@ private struct ControlsPane: View {
                      sub: "Resume goes back to the moment you left. From save starts from the game’s own save, and offers the moment after.") {
             SheetChipPicker(selection: $s.libraryOpen, options: [(.resume, "Resume"), (.save, "From save")])
         }
+        // web #kb-section, which touch devices hide: here, while a
+        // keyboard is connected.
+        if kb.connected { KeyboardBlock() }
         SheetSubhead(text: "Controller")
         ShortcutList(rows: [
             ("A", "A or Y"),
@@ -294,7 +298,69 @@ private struct ControlsPane: View {
             ("Fast forward (hold)", "RT"),
             ("Rewind (hold)", "LT"),
             ("Menu, paused", "R3 / hold Select+Start"),
+            ("Move / press", "D-pad / A"),
+            ("Back / close", "B"),
+            ("Library: game options", "Y"),
+            ("Library: resume the game", "Start"),
+            ("Library: filter / sort", "LB RB / LT RT"),
         ])
+    }
+}
+
+/// web #kb-section: the preset, the ten bindings (tap one, then press its
+/// key), and the shortcuts.
+private struct KeyboardBlock: View {
+    @ObservedObject private var kb = Keyboard.shared
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        SheetSubhead(text: "Keyboard")
+        SheetRow(label: "Preset") {
+            SheetSelect(selection: Binding(get: { kb.preset }, set: { kb.setPreset($0) }),
+                        options: [(.default, "Default"), (.homerow, "Home-row"), (.custom, "Custom")],
+                        accessibilityLabel: "Keyboard preset")
+        }
+        SheetHint("Tap a key, then press its replacement. Saved automatically.")
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], alignment: .leading, spacing: 8) {
+            ForEach(0..<10, id: \.self) { i in
+                HStack(spacing: 10) {
+                    let on = kb.capturing == i
+                    Button { kb.capturing = on ? nil : i } label: {
+                        Text(on ? "Press a key" : Keyboard.name(kb.bindings[i]))
+                            .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                            .foregroundColor(on ? palette.accentInk : palette.text)
+                            .frame(minWidth: 84)
+                            .padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(on ? palette.accent : palette.surface2))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.border2, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .padFocus("key\(i)") { kb.capturing = on ? nil : i }
+                    .accessibilityLabel(Keyboard.inputNames[i] + ": " + Keyboard.name(kb.bindings[i]))
+                    Text(Keyboard.inputNames[i])
+                        .font(.system(size: 13.5))
+                        .foregroundColor(palette.textDim)
+                }
+            }
+        }
+        .padding(.bottom, 16)
+        .onDisappear { kb.capturing = nil }
+        SheetSubhead(text: "Shortcuts")
+        ShortcutList(rows: [
+            ("Pause / Resume", "Space"),
+            ("Fast forward (hold)", "Tab"),
+            ("2× speed", "Shift+Tab"),
+            ("Slow motion", "Shift+`"),
+            ("Rewind (hold)", "`"),
+            ("Pause & step one frame", "."),
+            ("Mute", "M"),
+            ("Show inputs on screen", "I"),
+            ("Save state", "F5"),
+            ("Load state", "F8"),
+            ("Screenshot", "F9"),
+            ("Menu, paused", "Escape"),
+        ])
+        SheetHint("If a game key and a shortcut share a key, the game wins.")
     }
 }
 
