@@ -49,6 +49,7 @@ static uint16_t g_format = AUDIO_S16LSB;
 static int      g_freq   = 32768;
 static int      g_paused = 1;
 static int      g_stall_ms = 0;  /* consecutive SDL_Delay ms without a drain */
+static int      g_stretch = 0;   /* slow motion: every frame queued twice */
 
 static size_t bytes_per_frame(void) {
   return g_format == AUDIO_F32LSB ? 8 : 4; /* stereo */
@@ -95,10 +96,30 @@ void SDL_PauseAudioDevice(uint32_t dev, int pause_on) {
   SDL_PauseAudio(pause_on);
 }
 
+static void queue_locked(const void *data, uint32_t len);
+
 int SDL_QueueAudio(uint32_t dev, const void *data, uint32_t len) {
   (void)dev;
-  if (data == NULL || len == 0 || len > RING_CAP) return 0;
+  if (data == NULL || len == 0 || len > RING_CAP / 2) return 0;
   pthread_mutex_lock(&g_lock);
+  if (g_stretch) {
+    /* Each stereo frame twice: the ring fills twice as fast, so audio-sync
+     * pacing runs the core at half speed, an octave down. */
+    size_t bpf = bytes_per_frame();
+    uint8_t pair[16];
+    for (uint32_t off = 0; off + bpf <= len; off += (uint32_t)bpf) {
+      memcpy(pair, (const uint8_t *)data + off, bpf);
+      memcpy(pair + bpf, (const uint8_t *)data + off, bpf);
+      queue_locked(pair, (uint32_t)(2 * bpf));
+    }
+  } else {
+    queue_locked(data, len);
+  }
+  pthread_mutex_unlock(&g_lock);
+  return 0;
+}
+
+static void queue_locked(const void *data, uint32_t len) {
   if (g_size + len > RING_CAP) { /* drop oldest to make room */
     size_t drop = g_size + len - RING_CAP;
     g_head = (g_head + drop) % RING_CAP;
@@ -110,8 +131,6 @@ int SDL_QueueAudio(uint32_t dev, const void *data, uint32_t len) {
   memcpy(g_ring + tail, data, first);
   memcpy(g_ring, (const uint8_t *)data + first, len - first);
   g_size += len;
-  pthread_mutex_unlock(&g_lock);
-  return 0;
 }
 
 uint32_t SDL_GetQueuedAudioSize(uint32_t dev) {
@@ -189,3 +208,12 @@ int dingbat_audio_queued_frames(void) {
 }
 
 int dingbat_audio_sample_rate(void) { return g_freq; }
+
+void dingbat_audio_set_stretch(int on) {
+  pthread_mutex_lock(&g_lock);
+  g_stretch = on != 0;
+  pthread_mutex_unlock(&g_lock);
+}
+
+/* Drop whatever is queued (a frame stepped while paused plays nothing). */
+void dingbat_audio_clear(void) { SDL_ClearQueuedAudio(0); }
