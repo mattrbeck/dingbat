@@ -592,6 +592,13 @@ final class DriveSync: ObservableObject {
         return stored
     }
 
+    /// A save about to be replaced by an earlier moment's battery, kept aside
+    /// (web resumeMoment): Restore old save switches back.
+    func keepReplacedSave(_ game: String, _ data: Data) {
+        let now = Self.now()
+        keepOldSave(game, KeptSave(data: data, at: now, del: now, kept: now, why: "replaced"))
+    }
+
     /// Restore: the kept save becomes the game's save, and the game's save
     /// is kept in its place, so a second Restore undoes the first.
     @MainActor
@@ -1291,6 +1298,7 @@ final class DriveSync: ObservableObject {
         if GameSession.shared.game?.fileName == game { AppModel.shared.closeGame() }
         let k = RomLibrary.perGameKeys(game)
         RomLibrary.deleteKeys(["rom:" + game, "art:" + game] + k.session)
+        Checkpoints.delete(RomEntry(fileName: game))
         try? FileManager.default.removeItem(at: RomEntry(fileName: game).coreURL)
         markGameUpload(game)
         RomLibrary.shared.pictureGen += 1

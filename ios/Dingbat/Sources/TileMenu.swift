@@ -36,6 +36,14 @@ struct TileMenuView: View {
                     model.downloadOnly(entry)
                 }
             }
+            // Earlier moments of play, kept on this device: the way back when
+            // where the game stopped is what keeps stopping it.
+            if local && Checkpoints.hasAny(entry) {
+                item("moments", "Resume from earlier",
+                     disabled: loaded && NetLink.shared.holdsCore ? "In an online session" : nil) {
+                    model.sheet = .moments(entry, crash: false)
+                }
+            }
             item("rename", "Rename") {
                 model.sheet = .rename(entry)
             }
@@ -83,6 +91,7 @@ struct TileMenuView: View {
         if !entry.isLocal { rows += 1 }
         if drive.keptSave(entry.fileName) != nil { rows += 1 }
         if entry.isLocal && drive.linked { rows += 1 }
+        if entry.isLocal && Checkpoints.hasAny(entry) { rows += 1 }
         return CGFloat(150 + rows * 50)
     }
 

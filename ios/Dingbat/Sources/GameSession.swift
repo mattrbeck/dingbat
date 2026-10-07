@@ -50,6 +50,20 @@ final class GameSession: NSObject, ObservableObject {
     private var pausedForBackground = false
     private var lastRewindPop: CFTimeInterval = 0
     private var playTime: CFTimeInterval = 0          // seconds run since the last checkpoint
+    /// Seconds this run has played, and the game's play clock (ms) before
+    /// it: the clock checkpoints are spaced on (Checkpoints).
+    private var runPlay: CFTimeInterval = 0
+    private var playBase: Double = 0
+    private var playClock: Double { playBase + runPlay * 1000 }
+    /// Seconds of play between checkpoints (web CHECKPOINT_PLAY_MS); DEBUG
+    /// builds take `-ckpt-every N` for tests.
+    static let checkpointEvery: CFTimeInterval = {
+        #if DEBUG
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-ckpt-every"), i + 1 < a.count, let n = Double(a[i + 1]) { return n }
+        #endif
+        return 60
+    }()
     private var shotTime: CFTimeInterval = 0          // seconds run since the last library picture
     private var saveCheckTime: CFTimeInterval = 0
     private var lastTick: CFTimeInterval = 0
@@ -124,6 +138,9 @@ final class GameSession: NSObject, ObservableObject {
         rewinding = false
         playTime = 0
         shotTime = 0
+        runPlay = 0
+        let idx = Checkpoints.readIndex(entry)
+        playBase = max(idx.play, idx.list.map(\.play).max() ?? 0)
         lastSaveSig = RomLibrary.currentSaveSig(entry)
         lastFrameSig = nil
         RomLibrary.shared.touch(entry)
@@ -157,6 +174,7 @@ final class GameSession: NSObject, ObservableObject {
     /// Leave the game in memory for another (web: a switch): snapshot the
     /// session, store the picture, flush the save.
     private func leaveGame() {
+        CrashWatch.stopped(game?.fileName, played: runPlay)
         persistSession()
         storeLastFrame()
         dingbat_flush_save()
@@ -187,6 +205,7 @@ final class GameSession: NSObject, ObservableObject {
         guard game != nil else { return }
         ClipExporter.shared.gameLeaving()
         NetLink.shared.shutdown()
+        CrashWatch.stopped(game?.fileName, played: runPlay)
         stopLink()
         dingbat_unload(0)
         game = nil
@@ -316,6 +335,8 @@ final class GameSession: NSObject, ObservableObject {
             sessionMoved = true
             playTime += dt
             shotTime += dt
+            runPlay += min(dt, 0.25)
+            if let g = game { CrashWatch.playing(g.fileName, played: runPlay) }
             saveCheckTime += dt
             if dingbat_frame_static() == 0 { present() }
             ClipExporter.shared.recordTick()
@@ -323,9 +344,9 @@ final class GameSession: NSObject, ObservableObject {
             // Checkpoint: the session again every minute of play, so an app
             // the system kills in the background (or a crash) resumes about
             // a minute back (web CHECKPOINT_PLAY_MS).
-            if playTime >= 60 {
+            if playTime >= Self.checkpointEvery {
                 playTime = 0
-                persistSession()
+                persistSession(checkpoint: true)
             }
             if shotTime >= 60 {
                 shotTime = 0
@@ -598,6 +619,7 @@ final class GameSession: NSObject, ObservableObject {
         // The screen stays awake while a game runs (web: Screen Wake Lock).
         UIApplication.shared.isIdleTimerDisabled = !p
         if p {
+            CrashWatch.stopped(game?.fileName, played: runPlay)
             rewinding = false
             if rumbleWasOn {
                 rumbleWasOn = false
@@ -817,7 +839,9 @@ final class GameSession: NSObject, ObservableObject {
 
     /// Snapshot the session (web persistAutoState) when the game moved since
     /// the last one: the state, what save it carries, and its picture.
-    func persistSession() {
+    /// `checkpoint`: the minute's snapshot, kept among the earlier moments
+    /// too.
+    func persistSession(checkpoint: Bool = false) {
         guard let g = game, sessionMoved else { return }
         guard !NetLink.shared.holdsCore else { dingbat_flush_save(); return }
         dingbat_flush_save()
@@ -831,8 +855,11 @@ final class GameSession: NSObject, ObservableObject {
             try? FileManager.default.removeItem(at: g.sessionPicURL)
             try bytes.write(to: g.sessionURL, options: .atomic)
             try meta.header(state: bytes.count, pic: 0).write(to: g.sessionMetaURL, options: .atomic)
-            if let jpg = currentImage()?.jpegData(compressionQuality: 0.75) {
-                try? jpg.write(to: g.sessionPicURL, options: .atomic)
+            let jpg = currentImage()?.jpegData(compressionQuality: 0.75)
+            if let jpg { try? jpg.write(to: g.sessionPicURL, options: .atomic) }
+            Checkpoints.notePlay(g, playClock)
+            if checkpoint {
+                Checkpoints.add(g, bytes: bytes, pic: jpg, ts: meta.ts, play: playClock, saveSig: meta.saveSig)
             }
             sessionMoved = false
             RomLibrary.shared.pictureGen += 1

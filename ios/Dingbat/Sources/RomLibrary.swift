@@ -494,6 +494,8 @@ final class RomLibrary: ObservableObject {
         await updateRecent { recents in
             DriveSync.shared.renameLocal(from: e.fileName, to: newName, ts: ts)
             Self.moveRecords(from: e.fileName, to: newName)
+            Checkpoints.move(from: e, to: fresh)
+            CrashWatch.forget(e.fileName)
             guard let old = recents.first(where: { $0.string("name") == e.fileName }) else { return nil }
             var list = recents.filter { $0.string("name") != e.fileName }
             list.insert(Lib.entry(name: newName, ts: ts, impFirst: ts, gen: Lib.gen(old)), at: 0)
@@ -533,6 +535,8 @@ final class RomLibrary: ObservableObject {
         DriveSync.shared.queueSaveDataDeletes(e.fileName)
         let k = Self.perGameKeys(e.fileName)
         Self.deleteKeys(k.saves + k.session)
+        Checkpoints.delete(e)
+        CrashWatch.forget(e.fileName)
         pictureGen += 1
     }
 
@@ -549,6 +553,7 @@ final class RomLibrary: ObservableObject {
         DriveSync.shared.markDeleteAll(Self.perGameKeys(name).all)
         Self.deleteKeys(Self.perGameKeys(name).all)
         try? FileManager.default.removeItem(at: e.dir)
+        CrashWatch.forget(name)
         await updateRecent { list in
             DriveSync.shared.addTombstone(name, gen: list.first { $0.string("name") == name }.map(Lib.gen) ?? 0)
             return list.filter { $0.string("name") != name }

@@ -129,11 +129,11 @@ struct HeroView: View {
                     plain("Close") { model.closeGame() }
                         .accessibilityHint("Close the game — your save is kept")
                 } else if hasSession {
-                    primary("Resume", icon: "play.fill") { model.launch(entry, resume: true) }
-                    plain("Play") { model.launch(entry, resume: false) }
+                    primary("Resume", icon: "play.fill") { model.tapGame(entry, resume: true) }
+                    plain("Play") { model.tapGame(entry, resume: false) }
                         .accessibilityHint("Start the game from its in-game save")
                 } else {
-                    primary("Play", icon: "play.fill") { model.launch(entry, resume: false) }
+                    primary("Play", icon: "play.fill") { model.tapGame(entry, resume: false) }
                 }
                 more
             }
@@ -183,9 +183,9 @@ struct HeroView: View {
 
     private func resume() {
         if paused { model.resumeFromHero() } else if HomePictures.shared.hasSession(entry) {
-            model.launch(entry, resume: true)
+            model.tapGame(entry, resume: true)
         } else {
-            model.launch(entry, resume: false)
+            model.tapGame(entry, resume: false)
         }
     }
 

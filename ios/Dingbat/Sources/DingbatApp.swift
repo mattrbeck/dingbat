@@ -8,6 +8,8 @@ struct DingbatApp: App {
     @StateObject private var library = RomLibrary.shared
 
     init() {
+        // Before anything opens a game: a run that ended unseen is counted.
+        CrashWatch.noteCrashedRun()
         dingbat_init()
         Settings.shared.apply()
         RomLibrary.shared.installBundledDemo()
@@ -43,7 +45,11 @@ struct DingbatApp: App {
             func attempt(_ left: Int) {
                 let all = RomLibrary.shared.entries
                 if let e = all.first(where: { $0.name == name || $0.fileName == name }) ?? (name == nil ? all.first : nil) {
-                    model.launch(e, resume: args.contains("-resume"))
+                    // `-tap`: as a tap on the game (a crash streak asks first).
+                    if let n = value("-resume-moment").flatMap(Int.init), Checkpoints.moments(e).indices.contains(n) {
+                        model.resumeMoment(e, Checkpoints.moments(e)[n])
+                    } else if args.contains("-tap") { model.tapGame(e, resume: args.contains("-resume")) }
+                    else { model.launch(e, resume: args.contains("-resume")) }
                     // `-home-after N`: Main Menu N seconds into the game
                     // (its session is taken), counted from the game opening
                     // (a Drive-only game downloads first).
@@ -113,6 +119,7 @@ struct DingbatApp: App {
                 case "prints": model.openSheet(.prints)
                 case "report": model.openSheet(.report)
                 case "clip": model.openSheet(.clip)
+                case "moments": if let e = entries.first { model.openSheet(.moments(e, crash: CrashWatch.streak(e.fileName) >= CrashWatch.askStreak)) }
                 case "link": NetLink.shared.openSheet()
                 case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }
                 case "rename": if let e = entries.first { model.openSheet(.rename(e)) }
@@ -196,6 +203,7 @@ struct SheetHost: View {
         case .prints: PrintsView()
         case .report: ReportBugView()
         case .clip: ClipRangeView()
+        case .moments(let e, let crash): MomentsView(entry: e, crash: crash)
         case .link: LinkCableView()
         case .tileMenu(let e): TileMenuView(entry: e)
         case .rename(let e): RenameView(entry: e)
