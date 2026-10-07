@@ -172,11 +172,7 @@ struct DingbatApp: App {
                 .onAppear(perform: autoplay)
                 .onOpenURL { url in
                     // "Open in dingbat" from Files or another app.
-                    Task { @MainActor in
-                        if let e = try? await RomLibrary.shared.importRom(from: url) {
-                            AppModel.shared.launch(e, resume: false)
-                        }
-                    }
+                    Task { @MainActor in await AppModel.shared.openIncoming(url) }
                 }
         }
     }
@@ -202,6 +198,17 @@ struct RootView: View {
                     TombstoneSheet(games: model.tombstonePrompt ?? [])
                         .environment(\.palette, palette)
                 }
+        }
+        .alert(model.romWarn?.title ?? "", isPresented: Binding(get: { model.romWarn != nil },
+                                                                 set: { if !$0 && model.romWarn != nil { model.answerRomWarn(false) } })) {
+            Button("Cancel", role: .cancel) { model.answerRomWarn(false) }
+            Button("Load Anyway") { model.answerRomWarn(true) }
+        } message: {
+            Text(model.romWarn?.text ?? "")
+        }
+        .alert(model.notice ?? "", isPresented: Binding(get: { model.notice != nil },
+                                                         set: { if !$0 { model.notice = nil } })) {
+            Button("OK", role: .cancel) {}
         }
         .sheet(item: $model.sheet, onDismiss: sheetDismissed) { sheet in
             SheetHost(sheet: sheet)

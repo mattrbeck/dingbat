@@ -305,14 +305,55 @@ final class RomLibrary: ObservableObject {
     // MARK: import
 
     enum ImportError: LocalizedError {
-        case unsupported, noRomInZip, unreadable(String)
+        case unsupported, noRomInZip, unreadable(String), declined
         var errorDescription: String? {
             switch self {
             case .unsupported: return "Unsupported file — pick a .gba, .gb, .gbc or a .zip"
             case .noRomInZip: return "No .gba, .gb or .gbc file inside that zip"
             case .unreadable(let m): return m
+            case .declined: return nil
             }
         }
+    }
+
+    // ROM header sanity check (web looksLikeValidRom). Any signal matches
+    // (homebrew is often raw objcopy output with no logo and an unfixed
+    // checksum), and a failed check only asks, never blocks:
+    //   .gba     byte 3 is 0xEA (ARM branch entry), OR the Nintendo logo at
+    //            0x004, OR the header checksum at 0xBD (GBATEK).
+    //   .gb/.gbc the Nintendo logo at 0x104, OR the header checksum at 0x14D
+    //            (Pan Docs).
+    private static let gbaLogoPrefix: [UInt8] = [0x24, 0xff, 0xae, 0x51, 0x69, 0x9a, 0xa2, 0x21]
+    private static let gbLogoPrefix: [UInt8] = [0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b]
+
+    static func looksLikeValidRom(_ d: Data, ext: String) -> Bool {
+        let b = [UInt8](d.prefix(0x150))
+        func at(_ off: Int, _ ref: [UInt8]) -> Bool {
+            off + ref.count <= b.count && ref.indices.allSatisfy { b[off + $0] == ref[$0] }
+        }
+        if ext == "gba" {
+            if b.count >= 4 && b[3] == 0xea { return true }
+            if b.count < 0xc0 { return false }
+            if at(0x004, gbaLogoPrefix) { return true }
+            var sum = 0
+            for i in 0xa0...0xbc { sum += Int(b[i]) }
+            return Int(b[0xbd]) == (-(sum + 0x19)) & 0xff
+        }
+        if b.count < 0x150 { return false }
+        if at(0x104, gbLogoPrefix) { return true }
+        var chk = 0
+        for i in 0x134...0x14c { chk = (chk - Int(b[i]) - 1) & 0xff }
+        return Int(b[0x14d]) == chk
+    }
+
+    /// The question before a suspect ROM is kept (web confirmSuspectRom).
+    @MainActor
+    static func confirmSuspect(_ d: Data, name: String, ext: String) async -> Bool {
+        if looksLikeValidRom(d, ext: ext) { return true }
+        let system = ext == "gba" ? "GBA" : ext == "gbc" || ext == "cgb" ? "Game Boy Color" : "Game Boy"
+        return await AppModel.shared.askRomWarn(
+            "File Check Failed",
+            "\"\(name)\" doesn't look like a valid \(system) ROM — it may be corrupt or not a game at all. Load it anyway?")
     }
 
     /// Import from the document picker (security-scoped URL) or an Open-in.
@@ -330,6 +371,8 @@ final class RomLibrary: ObservableObject {
         }
         if ext == "zip" {
             guard let z = ZipReader.extractRom(from: data) else { throw ImportError.noRomInZip }
+            let inner = (z.name as NSString).pathExtension.lowercased()
+            guard await Self.confirmSuspect(z.rom, name: z.name, ext: inner) else { throw ImportError.declined }
             let e = try await add(romData: z.rom, fileName: z.name)
             if let art = z.art, let img = UIImage(data: art), let png = img.pngData() {
                 try? Self.ensureDir(e.dir)
@@ -339,6 +382,9 @@ final class RomLibrary: ObservableObject {
             return e
         }
         guard Self.romExtensions.contains(ext) else { throw ImportError.unsupported }
+        guard await Self.confirmSuspect(data, name: source.lastPathComponent, ext: ext) else {
+            throw ImportError.declined
+        }
         return try await add(romData: data, fileName: source.lastPathComponent)
     }
 
