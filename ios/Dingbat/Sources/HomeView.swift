@@ -34,9 +34,13 @@ struct HomeView: View {
     /// LIB_BAR_MIN), or while a filter is running so it can be cleared.
     static let libBarMin = 9
 
-    /// The hero's game, while it is still in the library.
+    @ObservedObject private var link = NetLink.shared
+
+    /// The hero's game, while it is still in the library. None while a
+    /// link or 2P session holds the game (web drawPausedHero): Resume
+    /// game stands in for it.
     private var hero: RomEntry? {
-        guard let h = model.heroGame, library.entries.contains(h) else { return nil }
+        guard !model.sessionBusy, let h = model.heroGame, library.entries.contains(h) else { return nil }
         return h
     }
 
@@ -137,6 +141,7 @@ struct HomeView: View {
                     }
                 } else {
                     brandBlock
+                    if model.sessionBusy { ResumeSessionButton() }
                 }
                 if !solo {
                     library(rows: gridRows, layout: layout, wide: wide, underHero: hero != nil)
@@ -332,6 +337,30 @@ struct EmptyStart: View {
 
 /// A quiet dashed pill under a hero that is the whole library (web
 /// #home-solo-add): a second game is a thing to offer, not to push.
+/// web #home-resume: back to a session the hero cannot draw (an online
+/// link, local 2P).
+struct ResumeSessionButton: View {
+    @Environment(\.palette) var palette
+
+    var body: some View {
+        Button { AppModel.shared.resumeFromHero() } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "play.fill").font(.system(size: 15))
+                Text("Resume game").font(.system(size: 15, weight: .semibold))
+            }
+            .foregroundColor(palette.accentInk)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 11)
+            .background(Capsule().fill(LinearGradient(colors: [palette.accent2, palette.accent],
+                                                      startPoint: .top, endPoint: .bottom)))
+            .overlay(Capsule().stroke(palette.accent.opacity(0.6), lineWidth: 1))
+            .shadow(color: palette.accentGlow, radius: 12, y: 8)
+        }
+        .buttonStyle(PressStyle())
+        .padFocus("home-resume", radius: 22) { AppModel.shared.resumeFromHero() }
+    }
+}
+
 struct AddPill: View {
     @Environment(\.palette) var palette
     let add: () -> Void

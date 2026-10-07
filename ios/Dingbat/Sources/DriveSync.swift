@@ -605,6 +605,11 @@ final class DriveSync: ObservableObject {
     func restoreKeptSave(_ game: String) {
         guard let rec = keptSave(game), let data = rec.data else { return }
         let e = RomEntry(fileName: game)
+        // Two cores are writing a linked game's saves (web restoreKeptSave).
+        if GameSession.shared.game == e && AppModel.shared.sessionBusy {
+            AppModel.shared.toast("Exit the online session first")
+            return
+        }
         let wasOpen = GameSession.shared.game == e
         if wasOpen { AppModel.shared.closeGame() }
         let cur = try? Data(contentsOf: e.saveURL)

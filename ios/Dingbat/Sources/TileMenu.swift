@@ -15,6 +15,9 @@ struct TileMenuView: View {
     @State private var armedAt = Date.distantPast
 
     private var loaded: Bool { GameSession.shared.game == entry }
+    /// web tileMenuEntries' busy: the loaded game's files wait for its
+    /// link or 2P session to end.
+    private var busy: String? { loaded && model.sessionBusy ? "Exit the online session first" : nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,23 +42,23 @@ struct TileMenuView: View {
             // Earlier moments of play, kept on this device: the way back when
             // where the game stopped is what keeps stopping it.
             if local && Checkpoints.hasAny(entry) {
-                item("moments", "Resume from earlier",
-                     disabled: loaded && NetLink.shared.holdsCore ? "In an online session" : nil) {
+                item("moments", "Resume from earlier", disabled: busy) {
                     model.sheet = .moments(entry, crash: false)
                 }
             }
-            item("rename", "Rename") {
+            item("rename", "Rename", disabled: busy) {
                 model.sheet = .rename(entry)
             }
             let hasSaves = library.hasSaveData(entry)
             item("reset", "Reset save data",
-                 disabled: hasSaves ? nil : "No save data yet",
+                 disabled: busy ?? (hasSaves ? nil : "No save data yet"),
                  confirm: "Delete all save data?") {
                 model.sheet = nil
                 HomeActions.resetSaveData(entry)
             }
             if let kept = drive.keptSave(entry.fileName) {
-                item("restore", "Restore old save", sub: kept.why == "replaced" ? "The save you replaced"
+                item("restore", "Restore old save", disabled: busy,
+                     sub: kept.why == "replaced" ? "The save you replaced"
                         : "From before you deleted it" + (kept.at > 0 ? " · saved " + Self.fmtTime(kept.at) : ""),
                      confirm: "Replace the current save?") {
                     model.sheet = nil
@@ -64,13 +67,13 @@ struct TileMenuView: View {
             }
             if local && drive.linked {
                 item("remove", "Remove from this device",
-                     disabled: onDrive ? nil : "Not backed up to Drive yet — this is your only copy",
+                     disabled: busy ?? (onDrive ? nil : "Not backed up to Drive yet — this is your only copy"),
                      confirm: loaded ? "Close and remove?" : "Remove from this device?") {
                     model.sheet = nil
                     Task { @MainActor in await drive.removeFromDevice(entry.fileName) }
                 }
             }
-            item("delete", "Delete", danger: true,
+            item("delete", "Delete", danger: true, disabled: busy,
                  confirm: loaded ? "Close and delete everything?" : "Delete ROM and save data?") {
                 model.sheet = nil
                 HomeActions.delete(entry)
