@@ -74,9 +74,12 @@ struct DingbatApp: App {
                             DispatchQueue.main.asyncAfter(deadline: .now() + r) { ClipExporter.shared.stopRecording() }
                         }
                     }
+                    #if DEBUG
+                    // `-latency-test N`: N timed presses (GameSession).
                     if let n = value("-latency-test").flatMap(Int.init) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.session.startLatencyTest(n) }
                     }
+                    #endif
                     // `-speed 2x|slow|ff`: that speed once the game runs.
                     if let sp = value("-speed") {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
