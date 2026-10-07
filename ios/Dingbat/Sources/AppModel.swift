@@ -160,8 +160,31 @@ final class AppModel: ObservableObject {
         library.refresh()
     }
 
+    /// Whether the open menu paused the game (a controller's menu shortcut
+    /// does; the hamburger does not), so closing it resumes.
+    private var menuPausedGame = false
+
+    func openMenu(paused: Bool) {
+        if paused, session.game != nil, !session.paused {
+            session.setPaused(true)
+            menuPausedGame = true
+        }
+        withAnimation(.easeOut(duration: 0.15)) { menuOpen = true }
+    }
+
+    func closeMenu() {
+        withAnimation(.easeOut(duration: 0.15)) { menuOpen = false }
+        if menuPausedGame && sheet == nil && screen == .play { session.setPaused(false) }
+        menuPausedGame = false
+    }
+
+    func toggleMenu() {
+        if menuOpen { closeMenu() } else { openMenu(paused: false) }
+    }
+
     func openSheet(_ s: Sheet) {
         menuOpen = false
+        menuPausedGame = false
         if screen == .play, session.game != nil { session.setPaused(true) }
         sheet = s
     }

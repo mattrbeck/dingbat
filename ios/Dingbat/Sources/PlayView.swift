@@ -288,8 +288,7 @@ struct TopBar: View {
             }
             BarIconButton(system: "line.3.horizontal", label: "Menu", active: model.menuOpen,
                           dot: model.newPrints) {
-                withAnimation(.easeOut(duration: 0.15)) { model.menuOpen.toggle() }
-                if model.menuOpen { session.setPaused(true) } else { session.setPaused(false) }
+                model.toggleMenu()
             }
             PlaybackCluster()
             if session.tiltKind > 0 {
@@ -420,7 +419,7 @@ struct PlaybackCluster: View {
             }
             BarIconButton(system: session.paused ? "play.fill" : "pause.fill",
                           label: "Pause / Resume", active: session.paused, width: w) {
-                model.menuOpen = false
+                model.closeMenu()
                 session.togglePause()
             }
             if session.paused {
@@ -623,7 +622,7 @@ struct GameMenu: View {
             // Scrim: a tap outside closes the menu and resumes.
             Color.black.opacity(0.001)
                 .ignoresSafeArea()
-                .onTapGesture { close(resume: true) }
+                .onTapGesture { model.closeMenu() }
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     quickRow
@@ -676,11 +675,11 @@ struct GameMenu: View {
         HStack(spacing: 6) {
             quick("square.and.arrow.down", "Quick Save") {
                 if session.saveState(slot: 0) { model.toast("State saved") }
-                close(resume: true)
+                model.closeMenu()
             }
             quick("square.and.arrow.up", "Quick Load") {
                 session.loadState(slot: 0)
-                close(resume: true)
+                model.closeMenu()
             }
             if settings.rewind {
                 quick("film", "Rewind to a Moment") { model.openSheet(.rewind) }
@@ -735,11 +734,6 @@ struct GameMenu: View {
             .frame(height: 42)
             .contentShape(Rectangle())
         }
-    }
-
-    private func close(resume: Bool) {
-        withAnimation(.easeOut(duration: 0.15)) { model.menuOpen = false }
-        if resume && model.sheet == nil { session.setPaused(false) }
     }
 
     /// The console's own picture at 4x (no filters, colour correction,

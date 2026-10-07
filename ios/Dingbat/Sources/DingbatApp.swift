@@ -50,10 +50,7 @@ struct DingbatApp: App {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             if args.contains("-home") { model.showMainMenu() }
-            if args.contains("-menu") {
-                model.menuOpen = true
-                model.session.setPaused(true)
-            }
+            if args.contains("-menu") { model.openMenu(paused: true) }
             if let s = value("-sheet") {
                 let parts = s.split(separator: ":").map(String.init)
                 switch parts[0] {
