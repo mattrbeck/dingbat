@@ -74,6 +74,14 @@ final class AppModel: ObservableObject {
     /// "Games removed on another device": the games, answered by Continue
     /// (false) or Restore (true).
     @Published var tombstonePrompt: [String]?
+    /// One question about a file before it is accepted (web askRomWarn).
+    @Published var romWarn: (title: String, text: String)?
+    private var romWarnAnswer: CheckedContinuation<Bool, Never>?
+    /// A plain notice with OK (web alert()).
+    @Published var notice: String?
+    /// A save or state handed to the app ("Open in dingbat"), waiting for
+    /// Manage Saves to take it through its confirms.
+    var pendingImport: (data: Data, fileName: String)?
     private var tombstoneAnswer: CheckedContinuation<Bool, Never>?
 
     let session = GameSession.shared
@@ -307,6 +315,54 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @MainActor
+    func askRomWarn(_ title: String, _ text: String) async -> Bool {
+        romWarnAnswer?.resume(returning: false)
+        return await withCheckedContinuation { cont in
+            romWarnAnswer = cont
+            romWarn = (title, text)
+        }
+    }
+
+    func answerRomWarn(_ go: Bool) {
+        romWarn = nil
+        romWarnAnswer?.resume(returning: go)
+        romWarnAnswer = nil
+    }
+
+    /// "Open in dingbat" (web handleDroppedFile): a save or state goes into
+    /// the running game; anything else is a ROM or zip to add and open.
+    @MainActor
+    func openIncoming(_ url: URL) async {
+        let ext = url.pathExtension.lowercased()
+        let saveExts: Set<String> = ["sav", "srm", "sps", "xps", "gsv"]
+        if saveExts.contains(ext) || ext == "state" {
+            let kind = ext == "state" ? "save state" : "save file"
+            if sessionBusy {
+                notice = "Can't import a \(kind) while a link cable is connected. Disconnect first, then try again."
+                return
+            }
+            guard session.game != nil else {
+                notice = "Open a game first, then open its \(kind) to import it."
+                return
+            }
+            guard let data = SheetFiles.read(url) else {
+                notice = "Couldn't read that file."
+                return
+            }
+            pendingImport = (data, url.lastPathComponent)
+            openSheet(.saves)
+            return
+        }
+        do {
+            let e = try await library.importRom(from: url)
+            launch(e, resume: false)
+        } catch RomLibrary.ImportError.declined {
+        } catch {
+            toast(error.localizedDescription, duration: 4)
+        }
+    }
+
     func answerTombstones(restore: Bool) {
         tombstonePrompt = nil
         tombstoneAnswer?.resume(returning: restore)
@@ -367,7 +423,10 @@ final class AppModel: ObservableObject {
             relinkConfirm = (e, data)
             return
         }
-        finishRelink(e, data)
+        Task { @MainActor in
+            guard await RomLibrary.confirmSuspect(data, name: url.lastPathComponent, ext: e.ext) else { return }
+            finishRelink(e, data)
+        }
     }
 
     func finishRelink(_ e: RomEntry, _ data: Data) {

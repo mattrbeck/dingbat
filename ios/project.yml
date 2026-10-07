@@ -61,7 +61,22 @@ targets:
             UTTypeDescription: Game Boy Color ROM
             UTTypeConformsTo: [public.data]
             UTTypeTagSpecification:
-              public.filename-extension: [gbc]
+              public.filename-extension: [gbc, cgb]
+          - UTTypeIdentifier: com.mattrb.dingbat.sgb
+            UTTypeDescription: Super Game Boy ROM
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [sgb]
+          - UTTypeIdentifier: com.mattrb.dingbat.save
+            UTTypeDescription: Game save
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [sav, srm, sps, xps, gsv]
+          - UTTypeIdentifier: com.mattrb.dingbat.state
+            UTTypeDescription: dingbat save state
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [state]
         CFBundleDocumentTypes:
           - CFBundleTypeName: Game ROM
             LSHandlerRank: Alternate
@@ -69,6 +84,14 @@ targets:
               - com.mattrb.dingbat.gba
               - com.mattrb.dingbat.gb
               - com.mattrb.dingbat.gbc
+              - com.mattrb.dingbat.sgb
+              - public.zip-archive
+          # A save or state opened from Files goes into the running game.
+          - CFBundleTypeName: Game save or state
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.mattrb.dingbat.save
+              - com.mattrb.dingbat.state
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat

@@ -62,6 +62,15 @@ struct ManageSavesView: View {
             if kind == .save { importSave(data, fileName: url.lastPathComponent) } else { importState(data) }
         }
         .sheetAsk($ask)
+        .onAppear {
+            // "Open in dingbat" with a save or state (AppModel.openIncoming).
+            guard let p = AppModel.shared.pendingImport else { return }
+            AppModel.shared.pendingImport = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                if p.fileName.lowercased().hasSuffix(".state") { importState(p.data) }
+                else { importSave(p.data, fileName: p.fileName) }
+            }
+        }
         .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
             Button("OK", role: .cancel) {}
         }

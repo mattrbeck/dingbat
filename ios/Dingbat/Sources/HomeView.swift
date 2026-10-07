@@ -101,7 +101,17 @@ struct HomeView: View {
         .alert("A Different File", isPresented: Binding(get: { model.relinkConfirm != nil },
                                                          set: { if !$0 { model.relinkConfirm = nil } })) {
             Button("Cancel", role: .cancel) { model.relinkConfirm = nil }
-            Button("Use It") { if let c = model.relinkConfirm { model.finishRelink(c.entry, c.bytes) } }
+            Button("Use It") {
+                guard let c = model.relinkConfirm else { return }
+                model.relinkConfirm = nil
+                // Then the file check, as the web asks both in turn.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    Task { @MainActor in
+                        guard await RomLibrary.confirmSuspect(c.bytes, name: c.entry.fileName, ext: c.entry.ext) else { return }
+                        model.finishRelink(c.entry, c.bytes)
+                    }
+                }
+            }
         } message: {
             Text("That file isn't the size this game's was. Its save may not work with it. Use it anyway?")
         }
@@ -271,6 +281,7 @@ struct HomeView: View {
             do {
                 let e = try await library.importRom(from: url)
                 model.launch(e, resume: false)
+            } catch RomLibrary.ImportError.declined {
             } catch {
                 model.toast(error.localizedDescription, duration: 4)
             }
