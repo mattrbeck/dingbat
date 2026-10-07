@@ -17,13 +17,58 @@ struct DingbatApp: App {
     /// Dev hook: `simctl launch booted com.mattrb.dingbat -autoplay [name]`
     /// jumps straight into the named (or first) library ROM, so headless
     /// tooling can exercise the play screen without synthesizing taps.
+    ///
+    /// More hooks for screenshots, applied in order after it:
+    ///   -landscape            rotate to landscape
+    ///   -theme <name>         app theme for this run (not saved)
+    ///   -home                 Main Menu (the paused hero)
+    ///   -menu                 open the in-game menu
+    ///   -sheet <id>           open a sheet: settings[:section], states,
+    ///                         saves, rewind, cheats, prints, report,
+    ///                         tile (first game's menu), rename
     private func autoplay() {
         let args = ProcessInfo.processInfo.arguments
-        guard let idx = args.firstIndex(of: "-autoplay") else { return }
-        let name = idx + 1 < args.count ? args[idx + 1] : nil
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count,
+                  !args[i + 1].hasPrefix("-") else { return nil }
+            return args[i + 1]
+        }
+        let model = AppModel.shared
         let entries = RomLibrary.shared.entries
-        if let e = entries.first(where: { $0.name == name }) ?? entries.first {
-            AppModel.shared.launch(e, resume: false)
+        if args.contains("-autoplay") {
+            let name = value("-autoplay")
+            if let e = entries.first(where: { $0.name == name }) ?? entries.first {
+                model.launch(e, resume: false)
+            }
+        }
+        if args.contains("-landscape"),
+           let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+        }
+        if let t = value("-theme"), let theme = ThemeName(rawValue: t) {
+            Settings.shared.theme = theme
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if args.contains("-home") { model.showMainMenu() }
+            if args.contains("-menu") {
+                model.menuOpen = true
+                model.session.setPaused(true)
+            }
+            if let s = value("-sheet") {
+                let parts = s.split(separator: ":").map(String.init)
+                switch parts[0] {
+                case "settings": model.openSheet(.settings(section: parts.count > 1 ? parts[1] : nil))
+                case "states": model.openSheet(.states)
+                case "saves": model.openSheet(.saves)
+                case "rewind": model.openSheet(.rewind)
+                case "cheats": model.openSheet(.cheats)
+                case "prints": model.openSheet(.prints)
+                case "report": model.openSheet(.report)
+                case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }
+                case "rename": if let e = entries.first { model.openSheet(.rename(e)) }
+                default: break
+                }
+            }
         }
     }
 
