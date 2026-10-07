@@ -115,6 +115,13 @@ struct DingbatApp: App {
             Settings.shared.theme = theme
         }
         #if DEBUG
+        if let keys = value("-keys") {
+            for (i, name) in keys.split(separator: " ").enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(i) * 0.6) {
+                    Keyboard.shared.debugTap(String(name))
+                }
+            }
+        }
         if let script = value("-pad") {
             for (i, name) in script.split(separator: " ").enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(i) * 0.6) {

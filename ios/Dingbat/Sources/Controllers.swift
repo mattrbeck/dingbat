@@ -67,6 +67,7 @@ final class Controllers {
             .receive(on: RunLoop.main)
             .sink { [weak self] in
                 PadNav.shared.scopeChanged()
+                Keyboard.shared.releaseAll()
                 self?.update()
             }
             .store(in: &bag)
