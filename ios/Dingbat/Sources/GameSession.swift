@@ -94,6 +94,7 @@ final class GameSession: NSObject, ObservableObject {
     /// in-game save.
     @discardableResult
     func open(_ entry: RomEntry, resume: Bool) -> OpenResult {
+        ClipExporter.shared.gameLeaving()
         if game != nil { leaveGame() }
         dingbat_init()
         let bios = entry.isGBA ? RomLibrary.gbaBiosURL : RomLibrary.gbcBootromURL
@@ -164,6 +165,7 @@ final class GameSession: NSObject, ObservableObject {
     /// unloadGame). The hero turns to closed.
     func close() {
         guard game != nil else { return }
+        ClipExporter.shared.gameLeaving()
         leaveGame()
         stopLink()
         dingbat_unload(1)
@@ -181,6 +183,7 @@ final class GameSession: NSObject, ObservableObject {
     /// save and session land in its place).
     func discard() {
         guard game != nil else { return }
+        ClipExporter.shared.gameLeaving()
         stopLink()
         dingbat_unload(0)
         game = nil
@@ -233,8 +236,15 @@ final class GameSession: NSObject, ObservableObject {
 
     // MARK: frame loop
 
+    /// A clip's replay owns the core: no frames of the live game meanwhile.
+    private(set) var clipHold = false
+    func holdForClip(_ on: Bool) {
+        clipHold = on
+        if !on { lastTick = 0 }
+    }
+
     @objc private func tick(_ link: CADisplayLink) {
-        guard game != nil else { return }
+        guard game != nil, !clipHold else { return }
         let now = link.timestamp
         let dt = lastTick == 0 ? 0 : min(now - lastTick, 0.25)
         lastTick = now
@@ -289,6 +299,7 @@ final class GameSession: NSObject, ObservableObject {
             shotTime += dt
             saveCheckTime += dt
             if dingbat_frame_static() == 0 { present() }
+            ClipExporter.shared.recordTick()
             pollPeripherals()
             // Checkpoint: the session again every minute of play, so an app
             // the system kills in the background (or a crash) resumes about

@@ -16,6 +16,7 @@
  */
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -50,6 +51,16 @@ static int      g_freq   = 32768;
 static int      g_paused = 1;
 static int      g_stall_ms = 0;  /* consecutive SDL_Delay ms without a drain */
 static int      g_stretch = 0;   /* slow motion: every frame queued twice */
+
+/* Where queued samples go: 0 the speakers (the ring), 1 the capture buffer
+ * only (a clip's replay, which is not heard), 2 nowhere (its silent
+ * pre-roll), 3 both (Record, which captures what is heard). The capture
+ * buffer is float32 stereo whatever the APU queued, and is read from the
+ * main thread, the same thread that queues. */
+static int      g_mode = 0;
+static float   *g_cap = NULL;
+static size_t   g_cap_frames = 0;    /* frames held */
+static size_t   g_cap_alloc = 0;     /* frames allocated */
 
 static size_t bytes_per_frame(void) {
   return g_format == AUDIO_F32LSB ? 8 : 4; /* stereo */
@@ -98,9 +109,33 @@ void SDL_PauseAudioDevice(uint32_t dev, int pause_on) {
 
 static void queue_locked(const void *data, uint32_t len);
 
+static void capture(const void *data, uint32_t len) {
+  size_t bpf = g_format == AUDIO_F32LSB ? 8 : 4;
+  size_t n = len / bpf;
+  if (g_cap_frames + n > g_cap_alloc) {
+    size_t want = g_cap_alloc ? g_cap_alloc * 2 : 32768;
+    while (want < g_cap_frames + n) want *= 2;
+    float *p = realloc(g_cap, want * 2 * sizeof(float));
+    if (!p) return;
+    g_cap = p;
+    g_cap_alloc = want;
+  }
+  float *dst = g_cap + g_cap_frames * 2;
+  if (g_format == AUDIO_F32LSB) {
+    memcpy(dst, data, n * 8);
+  } else {
+    const int16_t *src = data;
+    for (size_t i = 0; i < n * 2; i++) dst[i] = (float)src[i] / 32768.0f;
+  }
+  g_cap_frames += n;
+}
+
 int SDL_QueueAudio(uint32_t dev, const void *data, uint32_t len) {
   (void)dev;
   if (data == NULL || len == 0 || len > RING_CAP / 2) return 0;
+  if (g_mode == 2) return 0;
+  if (g_mode == 1 || g_mode == 3) capture(data, len);
+  if (g_mode == 1) return 0;
   pthread_mutex_lock(&g_lock);
   if (g_stretch) {
     /* Each stereo frame twice: the ring fills twice as fast, so audio-sync
@@ -217,3 +252,21 @@ void dingbat_audio_set_stretch(int on) {
 
 /* Drop whatever is queued (a frame stepped while paused plays nothing). */
 void dingbat_audio_clear(void) { SDL_ClearQueuedAudio(0); }
+
+void dingbat_audio_set_mode(int mode) { g_mode = mode; }
+int dingbat_audio_get_mode(void) { return g_mode; }
+
+/* Move up to max_frames captured frames (float32 stereo, interleaved) into
+ * dst; returns how many. Main thread. */
+int dingbat_audio_capture_take(float *dst, int max_frames) {
+  size_t n = g_cap_frames < (size_t)max_frames ? g_cap_frames : (size_t)max_frames;
+  if (n == 0 || dst == NULL) return 0;
+  memcpy(dst, g_cap, n * 8);
+  memmove(g_cap, g_cap + n * 2, (g_cap_frames - n) * 8);
+  g_cap_frames -= n;
+  return (int)n;
+}
+
+int dingbat_audio_captured_frames(void) { return (int)g_cap_frames; }
+
+void dingbat_audio_capture_clear(void) { g_cap_frames = 0; }

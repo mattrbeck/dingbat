@@ -57,6 +57,20 @@ struct DingbatApp: App {
                         }
                         whenRunning(120)
                     }
+                    // `-clip-after N`: Clip that! of everything so far, N
+                    // seconds into the game (a headless check of the export).
+                    // `-record-for N`: Record from the start for N seconds.
+                    if let r = value("-record-for").flatMap(Double.init) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            ClipExporter.shared.toggleRecording()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + r) { ClipExporter.shared.stopRecording() }
+                        }
+                    }
+                    if let c = value("-clip-after").flatMap(Double.init) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + c) {
+                            ClipExporter.shared.exportClip(startAgo: 3600, endAgo: 0, slug: "clipcheck", label: "Everything")
+                        }
+                    }
                 } else if left > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { attempt(left - 1) }
                 }
@@ -83,6 +97,7 @@ struct DingbatApp: App {
                 case "cheats": model.openSheet(.cheats)
                 case "prints": model.openSheet(.prints)
                 case "report": model.openSheet(.report)
+                case "clip": model.openSheet(.clip)
                 case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }
                 case "rename": if let e = entries.first { model.openSheet(.rename(e)) }
                 default: break
@@ -164,6 +179,7 @@ struct SheetHost: View {
         case .cheats: CheatsView()
         case .prints: PrintsView()
         case .report: ReportBugView()
+        case .clip: ClipRangeView()
         case .tileMenu(let e): TileMenuView(entry: e)
         case .rename(let e): RenameView(entry: e)
         }

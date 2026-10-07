@@ -163,6 +163,30 @@ int dingbat_rewind_commit(int sample);
 /* Replace the cheat list with .cht text; returns parse errors or "". */
 const char *dingbat_load_cheats(const char *text);
 
+/* --- Clips ("Clip that!") --- */
+/* The core keeps a state each second and the inputs of every frame for the
+ * last minute; a replay re-emulates a range of it exactly. */
+void dingbat_set_clip_cap(int bytes);
+int dingbat_clip_history_frames(void);
+int dingbat_clip_scrub_generate(int max_samples);   /* newest first */
+int dingbat_clip_scrub_thumb_w(void);
+int dingbat_clip_scrub_thumb_h(void);
+const void *dingbat_clip_scrub_thumbs(void);          /* BGR555 */
+int dingbat_clip_scrub_frames_ago(int sample);
+/* Arm a replay of [start_ago, end_ago) frames before now: frames it runs,
+ * or 0. Step it with dingbat_clip_tick (frames left, -1 = done and the live
+ * game is back); dingbat_clip_abort restores the live game early. */
+int dingbat_clip_begin(int start_ago, int end_ago);
+int dingbat_clip_tick(void);
+void dingbat_clip_abort(void);
+
+/* Audio routing: 0 play, 1 capture only, 2 drop, 3 play and capture. */
+void dingbat_audio_set_mode(int mode);
+int dingbat_audio_get_mode(void);
+int dingbat_audio_capture_take(float *dst, int max_frames);
+int dingbat_audio_captured_frames(void);
+void dingbat_audio_capture_clear(void);
+
 /* --- audio pull API (realtime-safe, see src/dingbat_ios_audio.c) --- */
 
 /* Fill dst with up to max_frames interleaved float32 stereo frames at
