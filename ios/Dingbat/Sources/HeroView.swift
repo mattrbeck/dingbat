@@ -171,7 +171,7 @@ struct HeroView: View {
             let g = entry.fileName
             let pending = ["save:" + g, "stateauto:" + g, "frame:" + g].contains(where: drive.state.queueUp.contains)
             if !pending { return "Paused · Synced" }
-            return drive.status == .offline ? "Paused · Not synced yet" : "Paused · Syncing…"
+            return drive.status.stalled ? "Paused · Not synced yet" : "Paused · Syncing…"
         }
         if let m = RomLibrary.shared.sessionMeta(entry), HomePictures.shared.hasSession(entry),
            let by = m.by, by != DriveSync.deviceID {

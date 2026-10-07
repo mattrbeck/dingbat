@@ -1136,6 +1136,12 @@ enum CheatStore {
 /// POSTed there as multipart form data (save, game, savedAt); the response
 /// is never read.
 enum SaveWebhook {
+    /// The last send's outcome, for Settings (web setSaveHookStatus).
+    final class Status: ObservableObject {
+        static let shared = Status()
+        @Published var text = ""
+    }
+
     static func post(game: RomEntry) {
         let urlString = Settings.shared.saveWebhook.trimmingCharacters(in: .whitespaces)
         guard !urlString.isEmpty, let url = URL(string: urlString),
@@ -1154,6 +1160,12 @@ enum SaveWebhook {
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.httpBody = body
-        URLSession.shared.dataTask(with: req).resume()
+        let name = game.name
+        URLSession.shared.dataTask(with: req) { _, _, err in
+            let time = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+            DispatchQueue.main.async {
+                Status.shared.text = err == nil ? "Last sent \(time) · \(name)" : "Couldn't reach it at \(time)"
+            }
+        }.resume()
     }
 }

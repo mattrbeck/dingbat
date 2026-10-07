@@ -212,7 +212,35 @@ final class DriveSync: ObservableObject {
     static let keptSaveMs: Double = 30 * 24 * 3600 * 1000
     static let parallel = 6
 
-    enum Status: String { case idle, syncing, done, offline }
+    /// web syncStatus. `paused`: out of token and out of silent renewals
+    /// with changes waiting (said quietly, not a sign-in prompt).
+    enum Status: String {
+        case idle, syncing, done, offline, paused
+        /// Not reaching Drive, whichever the reason (web: one icon for both).
+        var stalled: Bool { self == .offline || self == .paused }
+        var word: String {
+            switch self {
+            case .syncing: return "Syncing"
+            case .done: return "Synced"
+            case .offline: return "Offline"
+            case .paused: return "Paused"
+            case .idle: return ""
+            }
+        }
+        /// web SYNC_DESCS.
+        var desc: String {
+            switch self {
+            case .syncing: return "Syncing your games with Google Drive…"
+            case .done: return "All changes are synced to Google Drive"
+            case .offline: return "Offline — your changes will sync when you reconnect"
+            case .paused: return "Tap Sync to reconnect to Google Drive — your changes are saved"
+            case .idle: return ""
+            }
+        }
+    }
+    /// Silent renewals that failed in a row (web driveRenewFails).
+    private var renewFails = 0
+    private static let renewMaxFails = 3
 
     /// Everything that describes one account's Drive, parked under its id
     /// when another account signs in here.
@@ -345,7 +373,8 @@ final class DriveSync: ObservableObject {
     }
 
     private func refreshStatus() {
-        if !active { setStatus(.idle) } else if status == .offline && pendingCount == 0 { setStatus(.idle) }
+        if linked && !active && renewFails >= Self.renewMaxFails && pendingCount > 0 { setStatus(.paused); stateTick &+= 1; return }
+        if !active { setStatus(.idle) } else if status.stalled && pendingCount == 0 { setStatus(.idle) }
         stateTick &+= 1
     }
 
@@ -1445,12 +1474,16 @@ final class DriveSync: ObservableObject {
                 guard self.state.connected, issued == self.session else { return false }
                 self.adoptGrant(g)
                 self.saveState()
+                self.renewFails = 0
+                if self.status == .paused { self.setStatus(.idle) }
                 return true
             } catch DriveAuth.AuthError.grantGone {
                 if self.state.refresh == rt { self.signOut(message: DriveAuth.AuthError.grantGone.localizedDescription) }
                 return false
             } catch {
                 self.brokerRetryAt = Self.now() + 60_000
+                self.renewFails += 1
+                self.refreshStatus()
                 return false
             }
         }
