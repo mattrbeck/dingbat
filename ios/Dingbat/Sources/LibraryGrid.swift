@@ -166,7 +166,15 @@ struct LibLayout {
 struct LibFilter: Equatable {
     var query = ""
     var systems: Set<String> = []
-    var active: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty || !systems.isEmpty }
+    /// web libFilter.loc: where the game's file is. A game whose file is on
+    /// neither side is in neither choice.
+    enum Loc { case all, device, drive }
+    var loc = Loc.all
+    var active: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty || !systems.isEmpty || loc != .all }
+
+    static func loc(of e: RomEntry) -> Loc? {
+        e.isLocal ? .device : DriveSync.shared.driveHasRom(e.fileName) ? .drive : nil
+    }
 
     static let systemOrder = ["GBA": 0, "GBC": 1, "GB": 2]
 
@@ -233,6 +241,7 @@ struct LibFilter: Equatable {
     func matches(_ e: RomEntry) -> Bool {
         if !query.isEmpty && !Self.searchMatch(query, foldedName: Self.fold(e.name)) { return false }
         if !systems.isEmpty && !systems.contains(e.system) { return false }
+        if loc != .all && Self.loc(of: e) != loc { return false }
         return true
     }
 }
@@ -308,13 +317,31 @@ struct LibraryBar: View {
     let counts: [String: Int]
     let wide: Bool
     @FocusState private var searchFocused: Bool
+    @ObservedObject private var drive = DriveSync.shared
+    @ObservedObject private var library = RomLibrary.shared
+
+    /// "On device" / "On Drive", while signed in with games on both sides
+    /// (web renderLibChips).
+    private var locCounts: (device: Int, drive: Int)? {
+        guard drive.linked else { return nil }
+        var d = 0, r = 0
+        for e in library.entries {
+            switch LibFilter.loc(of: e) {
+            case .device: d += 1
+            case .drive: r += 1
+            default: break
+            }
+        }
+        return d > 0 && r > 0 ? (d, r) : nil
+    }
+    private var showChips: Bool { systems.count > 1 || locCounts != nil }
 
     var body: some View {
         Group {
             if wide {
                 HStack(spacing: 8) {
                     search
-                    if systems.count > 1 { chips }
+                    if showChips { chips }
                     sortMenu
                 }
             } else {
@@ -323,7 +350,7 @@ struct LibraryBar: View {
                         search
                         sortMenu
                     }
-                    if systems.count > 1 {
+                    if showChips {
                         ScrollView(.horizontal, showsIndicators: false) { chips }
                     }
                 }
@@ -368,33 +395,48 @@ struct LibraryBar: View {
 
     private var chips: some View {
         HStack(spacing: 6) {
-            ForEach(systems, id: \.self) { s in
-                let on = filter.systems.contains(s)
-                Button {
-                    if on { filter.systems.remove(s) } else { filter.systems.insert(s) }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(s)
-                        // The counts are wide-screen detail: on a phone they
-                        // cost the chips their one row.
-                        if wide, let n = counts[s] {
-                            Text("\(n)").fontWeight(.medium)
-                                .foregroundColor(on ? palette.accent.opacity(0.8) : palette.textFaint)
-                        }
+            if systems.count > 1 {
+                ForEach(systems, id: \.self) { s in
+                    let on = filter.systems.contains(s)
+                    chip(s, count: counts[s], on: on, id: "chip:" + s) {
+                        if on { filter.systems.remove(s) } else { filter.systems.insert(s) }
                     }
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(on ? palette.accent : palette.textDim)
-                    .padding(.horizontal, 10)
-                    .frame(height: wide ? 28 : 30)
-                    .background(Capsule().fill(on ? palette.accent.opacity(0.12) : palette.surface2))
-                    .overlay(Capsule().stroke(on ? palette.accent.opacity(0.5) : palette.border2, lineWidth: 1))
                 }
-                .accessibilityAddTraits(on ? .isSelected : [])
-                .padFocus("chip:" + s, radius: 15) {
-                    if on { filter.systems.remove(s) } else { filter.systems.insert(s) }
+            }
+            if let lc = locCounts {
+                chip("On device", count: lc.device, on: filter.loc == .device, id: "chip:device", mono: false) {
+                    filter.loc = filter.loc == .device ? .all : .device
+                }
+                chip("On Drive", count: lc.drive, on: filter.loc == .drive, id: "chip:drive", mono: false) {
+                    filter.loc = filter.loc == .drive ? .all : .drive
                 }
             }
         }
+        // The choice went away (signed out, or one side emptied).
+        .onChange(of: locCounts == nil) { gone in if gone && filter.loc != .all { filter.loc = .all } }
+    }
+
+    private func chip(_ label: String, count: Int?, on: Bool, id: String, mono: Bool = true,
+                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(label)
+                // The counts are wide-screen detail: on a phone they cost
+                // the chips their one row.
+                if wide, let n = count {
+                    Text("\(n)").fontWeight(.medium)
+                        .foregroundColor(on ? palette.accent.opacity(0.8) : palette.textFaint)
+                }
+            }
+            .font(.system(size: mono ? 11 : 12, weight: mono ? .bold : .semibold, design: mono ? .monospaced : .default))
+            .foregroundColor(on ? palette.accent : palette.textDim)
+            .padding(.horizontal, 10)
+            .frame(height: wide ? 28 : 30)
+            .background(Capsule().fill(on ? palette.accent.opacity(0.12) : palette.surface2))
+            .overlay(Capsule().stroke(on ? palette.accent.opacity(0.5) : palette.border2, lineWidth: 1))
+        }
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .padFocus(id, radius: 15, press: action)
     }
 
     private var sortMenu: some View {
