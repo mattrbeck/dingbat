@@ -245,6 +245,7 @@ struct LibraryHead: View {
     let countText: String
     let underHero: Bool
     let add: () -> Void
+    @ObservedObject private var library = RomLibrary.shared
 
     var body: some View {
         HStack(spacing: 8) {
@@ -259,6 +260,13 @@ struct LibraryHead: View {
             }
             .lineLimit(1)
             Spacer(minLength: 8)
+            // Only while some game has no picture (web #home-thumbs).
+            if library.pictureGen >= 0 && AddPictures.shared.anyToPicture {
+                Button("Add pictures") { AddPictures.shared.open() }
+                    .font(.system(size: 13))
+                    .foregroundColor(palette.textDim)
+                    .padFocus("thumbs") { AddPictures.shared.open() }
+            }
             Button(action: add) {
                 HStack(spacing: 6) {
                     Image(systemName: "plus").font(.system(size: 12, weight: .semibold))

@@ -72,6 +72,13 @@ struct HomeView: View {
             .background(palette.homeBg.ignoresSafeArea())
         }
         .environment(\.padScope, "home")
+        .onAppear {
+            // The one-time offer, once a first Drive pull has had a moment
+            // to bring pictures down (not in scripted test launches).
+            let args = ProcessInfo.processInfo.arguments
+            guard !args.contains("-autoplay"), !args.contains("-sheet") else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { AddPictures.shared.maybeOffer() }
+        }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .zip, .data],
                       allowsMultipleSelection: false) { result in
