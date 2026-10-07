@@ -47,7 +47,7 @@ struct GameStage: View {
             ZStack {
                 (palette.chromeTransparent ? Color.clear : palette.stage)
                 if settings.ambientGlow {
-                    GlowView()
+                    GlowView(box: size)
                         .frame(width: size.width, height: size.height)
                         .scaleEffect(1.45)
                         .opacity(0.8)
@@ -66,7 +66,9 @@ struct GameStage: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .clipped()
+            // OLED black: the chrome is see-through and the glow bleeds
+            // behind it (web: the stage stops clipping).
+            .clipped(antialiased: false, if: !palette.chromeTransparent)
             .contentShape(Rectangle())
             .gesture(magnify(geo.size, picture: size))
             .simultaneousGesture(zoom > 1 ? panGesture(geo.size, picture: size) : nil)
@@ -86,14 +88,11 @@ struct GameStage: View {
         let fit = min(box.width / w, box.height / h)
         guard fit > 0 else { return .zero }
         let px = UIScreen.main.scale
-        var scale = fit
-        if settings.integerScale {
-            let s = floor(fit)  // whole multiples of the native size, in points
-            if s >= 1 { scale = s } else { scale = (fit * px).rounded(.down) / px }
-        } else {
-            scale = (fit * px).rounded(.down) / px
-        }
-        return CGSize(width: (w * scale).rounded(.down), height: (h * scale).rounded(.down))
+        // web: whole multiples of the native size in points with integer
+        // scaling, else a plain contain-fit (the edges land on device pixels).
+        let scale = settings.integerScale && fit >= 1 ? floor(fit) : fit
+        return CGSize(width: (w * scale * px).rounded(.down) / px,
+                      height: (h * scale * px).rounded(.down) / px)
     }
 
     private func clampPan(_ p: CGSize, zoom z: CGFloat, box: CGSize, picture: CGSize) -> CGSize {
@@ -178,70 +177,59 @@ struct RumbleShake: ViewModifier {
 /// Ambient glow: a coarse sample of the picture, saturated x1.5, blended
 /// over the last at 0.3 and blurred behind the screen (web glow composer),
 /// sampled ~10 times a second.
+private extension View {
+    @ViewBuilder func clipped(antialiased: Bool, if on: Bool) -> some View {
+        if on { clipped(antialiased: antialiased) } else { self }
+    }
+}
+
 struct GlowView: View {
+    /// The picture's box, in points (the glow is composed for it).
+    let box: CGSize
     @EnvironmentObject var session: GameSession
     @EnvironmentObject var settings: Settings
-    @State private var image: UIImage?
-    @State private var ema = [Float](repeating: 0, count: 24 * 16 * 3)
+    @State private var image: CGImage?
     @State private var fresh = true
-    private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+    @State private var composer = GlowComposer(sw: 24, sh: 16)
 
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
+                // Stretched bilinearly, as the browser stretches the canvas.
+                Image(decorative: image, scale: 1)
                     .resizable()
                     .interpolation(.medium)
-                    .blur(radius: 32)
             } else {
                 Color.clear
             }
         }
-        .onReceive(timer) { _ in sample() }
-        .onChange(of: session.game) { _ in fresh = true }
-    }
-
-    private func sample() {
-        guard session.game != nil, !session.paused || fresh,
-              let fbp = dingbat_framebuffer(), let lut = dingbat_framebuffer_rgba() else { return }
-        let fw = Int(dingbat_fb_width()), fh = Int(dingbat_fb_height())
-        let gw = 24, gh = 16
-        let pal = (dingbat_is_gb() != 0 && dingbat_is_cgb() == 0) ? settings.dmgPalette : nil
-        var out = [UInt32](repeating: 0, count: gw * gh)
-        for y in 0..<gh {
-            let oy = ((2 * y + 1) * fh) / (2 * gh)
-            for x in 0..<gw {
-                let ox = ((2 * x + 1) * fw) / (2 * gw)
-                let i = oy * fw + ox
-                var r: Float, g: Float, b: Float
-                if let pal, let shade = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF].firstIndex(of: Int(fbp[i] & 0x7FFF)) {
-                    let c = pal[shade]
-                    r = Float((c >> 16) & 255); g = Float((c >> 8) & 255); b = Float(c & 255)
-                } else {
-                    let c = lut[i]
-                    r = Float(c & 255); g = Float((c >> 8) & 255); b = Float((c >> 16) & 255)
-                }
-                let luma = 0.299 * r + 0.587 * g + 0.114 * b
-                r = min(255, max(0, luma + (r - luma) * 1.5))
-                g = min(255, max(0, luma + (g - luma) * 1.5))
-                b = min(255, max(0, luma + (b - luma) * 1.5))
-                let o = (y * gw + x) * 3
-                if fresh { ema[o] = r; ema[o + 1] = g; ema[o + 2] = b } else {
-                    ema[o] += (r - ema[o]) * 0.3; ema[o + 1] += (g - ema[o + 1]) * 0.3
-                    ema[o + 2] += (b - ema[o + 2]) * 0.3
-                }
-                out[y * gw + x] = 0xFF00_0000 | (UInt32(ema[o + 2]) << 16) | (UInt32(ema[o + 1]) << 8) | UInt32(ema[o])
+        // 10 Hz, for as long as the view lives (a timer publisher stored on
+        // the struct is rebuilt with it and never fires).
+        .task {
+            while !Task.isCancelled {
+                sample()
+                try? await Task.sleep(nanoseconds: 100_000_000)
             }
         }
+        .onChange(of: session.game) { _ in fresh = true }
+        .onChange(of: settings.ambientGlow) { _ in fresh = true }
+    }
+
+    /// web updateGlow: the core samples (it owns the LUT and the SGB
+    /// border); a monochrome Game Boy's chosen shade palette is passed in.
+    private func sample() {
+        guard session.game != nil else { return }
+        composer.layout(width: box.width, height: box.height)
+        func abgr(_ c: UInt32) -> UInt32 {
+            0xFF00_0000 | ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF)
+        }
+        let mono = dingbat_is_gb() != 0 && dingbat_is_cgb() == 0 && dingbat_sgb_active() == 0
+        let pal = mono ? settings.dmgPalette : nil
+        let p = pal.map { $0.map(abgr) } ?? [0, 0, 0, 0]
+        guard let rgba = dingbat_glow_sample(Int32(composer.sw), Int32(composer.sh), pal == nil ? 0 : 1,
+                                             p[0], p[1], p[2], p[3]) else { return }
+        if let img = composer.compose(rgba, fresh: fresh) { image = img }
         fresh = false
-        let data = out.withUnsafeBufferPointer { Data(buffer: $0) }
-        guard let provider = CGDataProvider(data: data as CFData),
-              let cg = CGImage(width: gw, height: gh, bitsPerComponent: 8, bitsPerPixel: 32,
-                               bytesPerRow: gw * 4, space: CGColorSpaceCreateDeviceRGB(),
-                               bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-                               provider: provider, decode: nil, shouldInterpolate: true,
-                               intent: .defaultIntent) else { return }
-        image = UIImage(cgImage: cg)
     }
 }
 

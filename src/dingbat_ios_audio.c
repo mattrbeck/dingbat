@@ -9,10 +9,13 @@
  * float32 stereo, both 32768 Hz; the format is whatever the last
  * SDL_OpenAudio() asked for). Consumer: the CoreAudio render thread calls
  * dingbat_audio_read(), which converts to float32 and never touches the Nim
- * runtime. The shell checks dingbat_audio_ahead() before each frame so the
- * APU's blocking get_sample() backstop is rarely hit; if the audio engine
- * stops mid-frame (interruption, route change), SDL_Delay() drops the queue
- * after ~250 ms so emulation never deadlocks.
+ * runtime. The shell paces emulation by the display clock (as the web does
+ * by requestAnimationFrame); the two clocks drift, so the reader resamples
+ * by a hair (dynamic rate control, at most 1.5%) to hold the ring near a
+ * target depth: no gaps when the consumer briefly outpaces the producer, no
+ * creeping latency when it lags. If the audio engine stops mid-frame
+ * (interruption, route change), SDL_Delay() drops the queue after ~250 ms so
+ * emulation never deadlocks.
  */
 
 #include <stdint.h>
@@ -64,6 +67,49 @@ static size_t   g_cap_alloc = 0;     /* frames allocated */
 
 static size_t bytes_per_frame(void) {
   return g_format == AUDIO_F32LSB ? 8 : 4; /* stereo */
+}
+
+/* Dynamic rate control, reader side (render thread only, under g_lock).
+ * Target depth ~39 ms: above the render quantum plus one video frame's worth
+ * of samples, which arrive in a burst while the frame emulates. */
+#define DRC_TARGET   1280       /* frames at 32768 Hz */
+#define DRC_GAIN     0.02       /* ratio change per unit of relative depth error */
+#define DRC_MAX      0.015      /* never more than 1.5% off pitch */
+#define DRC_CAP      (3 * DRC_TARGET) /* beyond: drop back to the target (a stall's backlog) */
+static int      g_free = 0;      /* fast-forward: no rate control, play what is there */
+static int      g_primed = 0;    /* playing; else waiting for the ring to refill */
+static double   g_fill = DRC_TARGET; /* smoothed depth */
+static double   g_t = 0;         /* position between hist[1] and hist[2] */
+static float    g_hist[4][2];    /* x[-1], x[0], x[1], x[2] for Catmull-Rom */
+static unsigned g_underruns = 0;
+
+/* Pop one stereo frame as float; 0 when the ring is empty. */
+static int pop_frame(float out[2]) {
+  size_t bpf = bytes_per_frame();
+  if (g_size < bpf) return 0;
+  for (int c = 0; c < 2; c++) {
+    if (g_format == AUDIO_F32LSB) {
+      uint8_t b[4];
+      for (int i = 0; i < 4; i++) b[i] = g_ring[(g_head + i) % RING_CAP];
+      memcpy(&out[c], b, 4);
+      g_head = (g_head + 4) % RING_CAP;
+      g_size -= 4;
+    } else {
+      uint8_t lo = g_ring[g_head % RING_CAP];
+      uint8_t hi = g_ring[(g_head + 1) % RING_CAP];
+      out[c] = (float)(int16_t)((uint16_t)lo | ((uint16_t)hi << 8)) / 32768.0f;
+      g_head = (g_head + 2) % RING_CAP;
+      g_size -= 2;
+    }
+  }
+  return 1;
+}
+
+static void drop_frames(size_t n) {
+  size_t bytes = n * bytes_per_frame();
+  if (bytes > g_size) bytes = g_size;
+  g_head = (g_head + bytes) % RING_CAP;
+  g_size -= bytes;
 }
 
 /* ---- SDL2 audio symbols the core links against ---- */
@@ -208,32 +254,78 @@ int dingbat_audio_read(float *dst, int max_frames) {
     return 0;
   }
   size_t bpf = bytes_per_frame();
-  size_t frames = g_size / bpf;
-  if (frames > (size_t)max_frames) frames = (size_t)max_frames;
-  for (size_t f = 0; f < frames; f++) {
+  size_t depth = g_size / bpf;
+  int n = 0;
+  if (g_free) {
+    /* Fast-forward: whatever the last chunk was, as it comes. */
+    float f[2];
+    while (n < max_frames && pop_frame(f)) { dst[2 * n] = f[0]; dst[2 * n + 1] = f[1]; n++; }
+    g_primed = 0;
+    if (n > 0) g_stall_ms = 0;
+    pthread_mutex_unlock(&g_lock);
+    return n;
+  }
+  if (depth > DRC_CAP) {
+    drop_frames(depth - DRC_TARGET);
+    depth = DRC_TARGET;
+    g_fill = DRC_TARGET;
+  }
+  if (!g_primed) {
+    /* After a gap, wait until most of the target is back: one clean start
+     * instead of a stutter of tiny underruns. */
+    if (depth < (DRC_TARGET * 3) / 4) {
+      pthread_mutex_unlock(&g_lock);
+      return 0;
+    }
+    for (int i = 1; i < 4; i++) pop_frame(g_hist[i]);
+    g_hist[0][0] = g_hist[1][0]; g_hist[0][1] = g_hist[1][1];
+    g_t = 0;
+    g_fill = (double)depth;
+    g_primed = 1;
+  }
+  /* Smoothed depth -> a ratio a fraction of a percent either side of 1.
+   * Deeper than the target: consume a little faster, and the reverse. */
+  g_fill += ((double)depth - g_fill) * 0.08;
+  double err = (g_fill - DRC_TARGET) / DRC_TARGET;
+  double step = 1.0 + err * DRC_GAIN;
+  if (step > 1.0 + DRC_MAX) step = 1.0 + DRC_MAX;
+  if (step < 1.0 - DRC_MAX) step = 1.0 - DRC_MAX;
+  for (; n < max_frames; n++) {
+    /* Catmull-Rom between x[0] and x[1]. */
+    float t = (float)g_t, t2 = t * t, t3 = t2 * t;
     for (int c = 0; c < 2; c++) {
-      if (g_format == AUDIO_F32LSB) {
-        uint8_t b[4];
-        for (int i = 0; i < 4; i++) b[i] = g_ring[(g_head + i) % RING_CAP];
-        float v;
-        memcpy(&v, b, 4);
-        dst[f * 2 + c] = v;
-        g_head = (g_head + 4) % RING_CAP;
-        g_size -= 4;
-      } else {
-        uint8_t lo = g_ring[g_head % RING_CAP];
-        uint8_t hi = g_ring[(g_head + 1) % RING_CAP];
-        int16_t v = (int16_t)((uint16_t)lo | ((uint16_t)hi << 8));
-        dst[f * 2 + c] = (float)v / 32768.0f;
-        g_head = (g_head + 2) % RING_CAP;
-        g_size -= 2;
-      }
+      float p0 = g_hist[0][c], p1 = g_hist[1][c], p2 = g_hist[2][c], p3 = g_hist[3][c];
+      dst[2 * n + c] = 0.5f * ((2.0f * p1) + (-p0 + p2) * t +
+                               (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
+                               (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
+    }
+    g_t += step;
+    int dry = 0;
+    while (g_t >= 1.0) {
+      g_t -= 1.0;
+      memmove(g_hist[0], g_hist[1], sizeof(g_hist[0]) * 3);
+      if (!pop_frame(g_hist[3])) { dry = 1; break; }
+    }
+    if (dry) {
+      /* Ran dry: the rest of this buffer is silence, then a clean restart. */
+      g_primed = 0;
+      g_underruns++;
+      n++;
+      break;
     }
   }
-  if (frames > 0) g_stall_ms = 0; /* consumer is alive */
+  if (n > 0) g_stall_ms = 0; /* consumer is alive */
   pthread_mutex_unlock(&g_lock);
-  return (int)frames;
+  return n;
 }
+
+void dingbat_audio_set_free(int on) {
+  pthread_mutex_lock(&g_lock);
+  g_free = on != 0;
+  pthread_mutex_unlock(&g_lock);
+}
+
+int dingbat_audio_underruns(void) { return (int)g_underruns; }
 
 int dingbat_audio_queued_frames(void) {
   pthread_mutex_lock(&g_lock);

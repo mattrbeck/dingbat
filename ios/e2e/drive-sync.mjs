@@ -29,6 +29,9 @@ import {
 const APP = process.argv[2];
 const UDID = process.argv[3] || process.env.SIMDEV || "20B3E400-B140-4C0D-A981-A87BDBEDAEF9";
 const BUNDLE = "com.mattrb.dingbat";
+// Muted through the launch arguments, which the app's defaults always read
+// (a `defaults write` from outside can land beside its container).
+const MUTED = ["-audio.muted", "YES"];
 if (!APP) { console.error("usage: node ios/e2e/drive-sync.mjs <Dingbat.app> [udid]"); process.exit(2); }
 if (!builtWeb()) { console.error("web/em.wasm not built"); process.exit(2); }
 
@@ -75,7 +78,7 @@ const launchApp = (args, { fresh = false } = {}) => {
   }
   simctl("spawn", UDID, "defaults", "write", BUNDLE, "audio.muted", "-bool", "true");
   simctl("spawn", UDID, "defaults", "write", BUNDLE, "hide-touch-on-gamepad", "-bool", "false");
-  simctl("launch", UDID, BUNDLE, ...args);
+  simctl("launch", UDID, BUNDLE, ...MUTED, ...args);
 };
 
 // The games the app holds records of (its per-game folders).

@@ -66,6 +66,12 @@ struct DingbatApp: App {
                             DispatchQueue.main.asyncAfter(deadline: .now() + r) { ClipExporter.shared.stopRecording() }
                         }
                     }
+                    // `-speed 2x|slow|ff`: that speed once the game runs.
+                    if let sp = value("-speed") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            model.session.setSpeed(sp == "2x" ? .double : sp == "slow" ? .slow : sp == "ff" ? .fastForward : .normal)
+                        }
+                    }
                     // `-link CODE`: Link Cable with that code once the game
                     // runs (DEBUG `-signal ws://host:8790` picks the server).
                     if let code = value("-link") {

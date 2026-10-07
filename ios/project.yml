@@ -27,7 +27,11 @@ targets:
       path: Dingbat/Info.plist
       properties:
         CFBundleDisplayName: dingbat
-        UILaunchScreen: {}
+        # The home screen's colour with the bat, so the launch flows into it.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+          UIImageRespectsSafeAreaInsets: true
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UIRequiresFullScreen: true
@@ -68,6 +72,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat
+        DEVELOPMENT_TEAM: FGP2K9PPW9
+        CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.9"
         SWIFT_OBJC_BRIDGING_HEADER: Dingbat/Sources/Bridging.h
         HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/include $(PROJECT_DIR)/lib/include"

@@ -57,9 +57,12 @@ the same frame).
 - **Sign-in** opens Google's consent page in the system browser sheet;
   the web's `oauth-callback.html` hands an app sign-in on to
   `dingbat://oauth`, so that page must be deployed for the app to sign in.
-- **Linked play paces by the audio clock**, as solo play does, rather than
-  by the display; the web paces by requestAnimationFrame. Either side
-  stalls at the prediction window when the other falls behind.
+- **Pacing.** Frames follow the display clock, as the web's follow
+  requestAnimationFrame; on a 60 Hz screen the game runs at exactly 60
+  frames a second (0.46% above the hardware's 59.73) so every refresh shows
+  one new frame, and the audio reader resamples by a hair (at most 1.5%) to
+  keep its buffer level instead of running dry. The web steps at 59.73 and
+  drops a frame every few seconds.
 - **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.

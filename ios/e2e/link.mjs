@@ -26,6 +26,9 @@ import { serveWeb, builtWeb, WEB, sleep } from "../../web/e2e/devices.mjs";
 const APP = process.argv[2];
 const UDID = process.argv[3] || process.env.SIMDEV || "20B3E400-B140-4C0D-A981-A87BDBEDAEF9";
 const BUNDLE = "com.mattrb.dingbat";
+// Muted through the launch arguments, which the app's defaults always read
+// (a `defaults write` from outside can land beside its container).
+const MUTED = ["-audio.muted", "YES"];
 const ROOT = new URL("../..", import.meta.url).pathname;
 const SHOTS = process.env.SHOTS || "/tmp";
 if (!APP) { console.error("usage: node ios/e2e/link.mjs <Dingbat.app> [udid]"); process.exit(2); }
@@ -61,7 +64,7 @@ const launchApp = (rom, args, log) => {
   copyFileSync(rom, join(data, "Documents/roms", rom.split("/").pop()));
   simctl("spawn", UDID, "defaults", "write", BUNDLE, "audio.muted", "-bool", "true");
   if (existsSync(log)) rmSync(log);
-  simctl("launch", "--stderr=" + log, UDID, BUNDLE, ...args);
+  simctl("launch", "--stderr=" + log, UDID, BUNDLE, ...MUTED, ...args);
 };
 
 const STOP = 600;
