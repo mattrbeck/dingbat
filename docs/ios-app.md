@@ -61,8 +61,11 @@ the same frame).
   requestAnimationFrame; on a 60 Hz screen the game runs at exactly 60
   frames a second (0.46% above the hardware's 59.73) so every refresh shows
   one new frame, and the audio reader resamples by a hair (at most 1.5%) to
-  keep its buffer level instead of running dry. The web steps at 59.73 and
-  drops a frame every few seconds.
+  hold its buffer at ~25 ms (~55 ms in slow motion) instead of running dry.
+  The web steps at 59.73 and drops a frame every few seconds. Measured in
+  the simulator (`-latency-test 40` on tonc's m7_demo): press to the changed
+  frame presented, p50 12.9 / max 15.1 ms; audio ring ~27 ms on top of a
+  ~5 ms output buffer. Audio depth does not delay input or video.
 - **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.
