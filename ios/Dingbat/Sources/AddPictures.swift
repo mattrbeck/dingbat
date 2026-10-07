@@ -160,7 +160,7 @@ struct AddPicturesView: View {
     @State private var includeDrive = false
 
     var body: some View {
-        SheetChrome(title: "Add pictures to your library?", onClose: close) {
+        SheetChrome(title: "Add pictures to your library?", fit: true, onClose: close) {
             if job.running {
                 Text(job.status)
                     .font(.system(size: 13.5))

@@ -10,17 +10,25 @@ enum SheetNav {
     static func close() { AppModel.shared.sheet = nil }
 }
 
-/// Title bar + scrolling body on the modal surface.
+/// Title bar + scrolling body on the modal surface. `fit`: the sheet is as
+/// tall as its content (web: a short modal is a small box, not a page).
 struct SheetChrome<Content: View>: View {
     let title: String
     var scroll = true
+    var fit = false
     var onClose: () -> Void = SheetNav.close
     @ViewBuilder var content: () -> Content
     @Environment(\.palette) private var palette
+    @State private var headerH: CGFloat = 0
+    @State private var bodyH: CGFloat = 0
 
     var body: some View {
-        VStack(spacing: 0) {
+        let chrome = VStack(spacing: 0) {
             SheetHeader(title: title, onClose: onClose)
+                .background(GeometryReader { g in
+                    Color.clear.onAppear { headerH = g.size.height }
+                        .onChange(of: g.size.height) { headerH = $0 }
+                })
             if scroll {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -29,6 +37,10 @@ struct SheetChrome<Content: View>: View {
                             .padding(.horizontal, 22)
                             .padding(.top, 4)
                             .padding(.bottom, 28)
+                            .background(GeometryReader { g in
+                                Color.clear.onAppear { bodyH = g.size.height }
+                                    .onChange(of: g.size.height) { bodyH = $0 }
+                            })
                     }
                     .padScrollFollow(proxy)
                 }
@@ -39,6 +51,11 @@ struct SheetChrome<Content: View>: View {
         .foregroundColor(palette.text)
         .background(palette.surface1.ignoresSafeArea())
         .sheetToasts()
+        if fit && scroll && bodyH > 0 {
+            chrome.presentationDetents([.height(headerH + bodyH + 8)])
+        } else {
+            chrome
+        }
     }
 }
 

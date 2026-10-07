@@ -10,7 +10,7 @@ struct LinkCableView: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        SheetChrome(title: "Connect link cable") {
+        SheetChrome(title: "Connect link cable", fit: true) {
             if link.manualView { manual } else { shared }
             if !link.status.isEmpty {
                 Text(link.status)

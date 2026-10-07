@@ -264,6 +264,8 @@ struct LibraryHead: View {
             if library.pictureGen >= 0 && AddPictures.shared.anyToPicture {
                 Button("Add pictures") { AddPictures.shared.open() }
                     .font(.system(size: 13))
+                    .lineLimit(1)
+                    .fixedSize()
                     .foregroundColor(palette.textDim)
                     .padFocus("thumbs") { AddPictures.shared.open() }
             }
@@ -272,6 +274,8 @@ struct LibraryHead: View {
                     Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
                     Text("Add a game").font(.system(size: 13))
                 }
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundColor(palette.text)
                 .padding(.leading, 11)
                 .padding(.trailing, 14)
