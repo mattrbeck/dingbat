@@ -76,10 +76,6 @@ the same frame).
   (a native menu cannot be opened from a pad), and skips text fields
   (search, codes) and the paused hero's ⋯ menu; Y on a tile and the touch
   screen reach those.
-- **A demo game.** A fresh install puts the Goodboy Galaxy demo (the
-  homebrew demo checked in for the web build) in the library, so the app
-  opens on something playable; the web starts empty. Signed in, it syncs
-  to Drive like any other game.
 - **"Open in dingbat"** from Files or another app takes ROMs, zips, saves
   (.sav .srm .sps .xps .gsv) and .state files; a save or state goes into
   the running game through Manage Saves (the web's drag and drop).

@@ -401,16 +401,19 @@ final class RomLibrary: ObservableObject {
         return e
     }
 
-    /// The homebrew demo shipped in the bundle is copied in once.
-    func installBundledDemo() {
-        let key = "demo-installed"
-        guard !UserDefaults.standard.bool(forKey: key),
-              let bundled = Bundle.main.url(forResource: "goodboy-demo-en", withExtension: "gba") else { return }
-        UserDefaults.standard.set(true, forKey: key)
-        let dest = Self.romsDir.appendingPathComponent(bundled.lastPathComponent)
-        guard !FileManager.default.fileExists(atPath: dest.path) else { return }
-        try? FileManager.default.copyItem(at: bundled, to: dest)
-        refresh()
+    /// Builds before this one put the web embed's demo game in the library on
+    /// first run (and, signed in, on Drive). It is the embed's alone: where
+    /// this app put it there, it goes again, from Drive too, once.
+    @MainActor
+    func removeInstalledDemo() async {
+        let d = UserDefaults.standard
+        guard d.bool(forKey: "demo-installed") else { return }
+        d.removeObject(forKey: "demo-installed")
+        let e = RomEntry(fileName: "goodboy-demo-en.gba")
+        guard entries.contains(e) else { return }
+        if GameSession.shared.game == e { GameSession.shared.discard() }
+        if AppModel.shared.heroGame == e { AppModel.shared.heroGame = nil }
+        await delete(e)
     }
 
     /// The link the core loads, pointed at the ROM afresh (the app's

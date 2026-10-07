@@ -12,9 +12,11 @@ struct DingbatApp: App {
         CrashWatch.noteCrashedRun()
         dingbat_init()
         Settings.shared.apply()
-        RomLibrary.shared.installBundledDemo()
         Peripherals.shared.install()
-        Task { @MainActor in await DriveSync.shared.resumeOnBoot() }
+        Task { @MainActor in
+            await RomLibrary.shared.removeInstalledDemo()
+            await DriveSync.shared.resumeOnBoot()
+        }
     }
 
     /// Dev hook: `simctl launch booted com.mattrb.dingbat -autoplay [name]`
