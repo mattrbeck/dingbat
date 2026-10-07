@@ -14,6 +14,7 @@ struct PlayView: View {
                     GameMenu()
                 }
             }
+            .overlay { ClipProgressView() }
             .statusBarHidden(true)
             .persistentSystemOverlays(.hidden)
     }
@@ -643,6 +644,7 @@ struct GameMenu: View {
     @Environment(\.palette) var palette
     @Environment(\.horizontalSizeClass) var hSize
     @State private var captureOpen = false
+    @ObservedObject private var clips = ClipExporter.shared
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -663,6 +665,13 @@ struct GameMenu: View {
                     }
                     if captureOpen {
                         item("camera.viewfinder", "Screenshot", sub: true) { screenshot() }
+                        item(clips.recording ? "stop.circle.fill" : "record.circle",
+                             clips.recording ? "Stop Recording" : "Record", sub: true,
+                             tint: clips.recording ? palette.danger : nil) {
+                            model.closeMenu()
+                            clips.toggleRecording()
+                        }
+                        item("film.stack", "Clip that!", sub: true) { model.openSheet(.clip) }
                         if !PrintStore.all().isEmpty {
                             item("printer", "Printed Photos", sub: true, dot: model.newPrints) {
                                 model.openSheet(.prints)
@@ -738,16 +747,16 @@ struct GameMenu: View {
     }
 
     private func item(_ icon: String, _ label: String, trailing: String? = nil, sub: Bool = false,
-                      dot: Bool = false, action: @escaping () -> Void) -> some View {
+                      dot: Bool = false, tint: Color? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 15))
                     .frame(width: 22)
-                    .foregroundColor(palette.textDim)
+                    .foregroundColor(tint ?? palette.textDim)
                 Text(label)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(palette.text)
+                    .foregroundColor(tint ?? palette.text)
                 if dot { Circle().fill(palette.accent).frame(width: 6, height: 6) }
                 Spacer()
                 if let trailing {

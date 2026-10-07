@@ -15,6 +15,7 @@
 # the CoreAudio render thread.
 
 import std/[os, strutils, math]
+import zippy  # clip anchors and their thumbnails are stored deflated
 import dingbat/common/input
 import dingbat/common/rewind
 import dingbat/common/serialize
@@ -41,6 +42,34 @@ var romPath:   string  = ""
 var biosPath:  string  = ""
 var statePrinter: GbPrinter = nil      # always attached on a GB core
 var rewindHistory: Rewind = nil
+
+# Clip capture state (the procs are at the end, "Retroactive clip capture").
+const CLIP_SNAP_INTERVAL = 60          # anchor + thumbnail cadence (frames)
+const CLIP_MAX_FRAMES = 60 * 60        # rolling history window (~60 s)
+const CLIP_CAP_BYTES = 24 * 1024 * 1024
+
+type ClipAnchor = object
+  frame: int          # canonical frame index this state is the start of
+  packed: string      # zlib'd state payload
+  thumb: seq[byte]    # zlib'd BGR555 thumbnail (may be empty)
+  tw, th: int
+
+var clipCapBytes = CLIP_CAP_BYTES
+var clipAnchors: seq[ClipAnchor] = @[]
+var clipAnchorBytes = 0
+var clipInputs: seq[uint16] = @[]      # button mask per canonical frame
+var clipInputsStart = 0                # absolute frame of clipInputs[0]
+var clipFrameIndex = 0                 # canonical frames since core init
+var clipCurButtons: uint16 = 0         # live mask, mirrored from set_input
+var clipLiveStash = ""                 # live state while a replay runs
+var clipCursor = 0
+var clipEnd = 0
+var clipReplaying = false
+
+proc dingbat_audio_set_mode(mode: cint) {.importc, cdecl.}
+proc dingbat_audio_get_mode(): cint {.importc, cdecl.}
+proc clip_reset()
+
 
 proc NimMain() {.importc.}
 proc dingbat_audio_set_stretch(on: cint) {.importc, cdecl.}
@@ -215,6 +244,7 @@ proc load_rom_impl(path, bios: string): cint =
       stateGba.apu.set_fifo_interp(optFifoInterp)
     romPath = path
     biosPath = bios
+    clip_reset()
     lcdResp.reset()
     rewindHistory = if rewindEnabled: new_rewind(rewindCapBytes) else: nil
     apply_audio()
@@ -294,7 +324,10 @@ proc push_rewind() =
         pixels: downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H, 120, 108)))
   of ekNone: discard
 
+proc clip_note_frame()
+
 proc step_canonical() =
+  clip_note_frame()
   case stateKind
   of ekGBA: stateGba.step_frame()
   of ekGB:
@@ -473,6 +506,11 @@ proc dingbat_set_input(input_id: cint; pressed: cint) {.exportc, cdecl.} =
   if input_id < 0 or input_id > ord(Input.high): return
   let inp = Input(input_id)
   let down = pressed != 0
+  if down: clipCurButtons = clipCurButtons or (1'u16 shl input_id)
+  else: clipCurButtons = clipCurButtons and not (1'u16 shl input_id)
+  # During a clip replay the input log owns the core; the live mask is
+  # re-applied when it ends.
+  if clipReplaying: return
   case stateKind
   of ekGBA: stateGba.handle_input(inp, down)
   of ekGB:  stateGb.handle_input(inp, down)
@@ -822,3 +860,186 @@ proc dingbat_load_cheats(text: cstring): cstring {.exportc, cdecl.} =
       if cheatErrBuf.len > 0: cheatErrBuf.add "\n"
       cheatErrBuf.add (if c.name.len > 0: c.name else: "?") & ": " & c.error
   cstring(cheatErrBuf)
+
+# --- Retroactive clip capture ("Clip that!", dingbat_wasm.nim's clip_*) ---
+# A rolling ring of state anchors (one per second) plus a per-frame input
+# log; deterministic replay from the anchor at or before the chosen start
+# rebuilds the frames the player saw, which the shell encodes. Separate from
+# the rewind ring: rewind may be off and keeps no inputs. The GBA RTC reads
+# wall clock, so a replayed clock can differ by the clip's length.
+
+proc clip_reset() =
+  clipAnchors.setLen(0)
+  clipAnchorBytes = 0
+  clipInputs.setLen(0)
+  clipInputsStart = 0
+  clipFrameIndex = 0
+  clipCurButtons = 0
+  clipLiveStash = ""
+  clipReplaying = false
+
+proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
+
+proc clip_note_frame() =
+  ## Once per canonical frame before it steps: an anchor every second, the
+  ## held buttons every frame, and eviction past the window or the budget.
+  if clipReplaying or stateKind == ekNone: return
+  if clipFrameIndex mod CLIP_SNAP_INTERVAL == 0:
+    let payload = current_payload()
+    if payload.len > 0:
+      var a = ClipAnchor(frame: clipFrameIndex, packed: compress(payload, BestSpeed, dfZlib))
+      let fb = live_fb()
+      let (w, h) = if stateKind == ekGB: (GB_W, GB_H) else: (GBA_W, GBA_H)
+      let th = 120 * h div w
+      let pixels = downscale_bgr555(toOpenArray(fb, 0, w * h - 1), w, h, 120, th)
+      a.thumb = compress(pixels, BestSpeed, dfZlib)
+      a.tw = 120
+      a.th = th
+      clipAnchors.add(a)
+      clipAnchorBytes += clip_anchor_size(a)
+  clipInputs.add(clipCurButtons)
+  inc clipFrameIndex
+  let oldest = clipFrameIndex - CLIP_MAX_FRAMES
+  while clipAnchors.len > 1 and clipAnchors[1].frame <= oldest:
+    clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
+    clipAnchors.delete(0)
+  while clipAnchors.len > 1 and clipAnchorBytes > clipCapBytes:
+    clipAnchorBytes -= clip_anchor_size(clipAnchors[0])
+    clipAnchors.delete(0)
+  if clipAnchors.len > 0 and clipInputsStart < clipAnchors[0].frame:
+    let drop = clipAnchors[0].frame - clipInputsStart
+    if drop > 0 and drop <= clipInputs.len:
+      clipInputs = clipInputs[drop .. ^1]
+      clipInputsStart += drop
+
+proc clip_apply_payload(payload: string): bool =
+  try:
+    apply_payload(payload)
+    stateKind != ekNone
+  except CatchableError:
+    false
+
+proc clip_set_buttons(mask: uint16) =
+  for i in 0 .. ord(Input.high):
+    let down = (mask and (1'u16 shl i)) != 0
+    case stateKind
+    of ekGBA: stateGba.handle_input(Input(i), down)
+    of ekGB:  stateGb.handle_input(Input(i), down)
+    of ekNone: discard
+
+proc dingbat_set_clip_cap(bytes: cint) {.exportc, cdecl.} =
+  if bytes > 0: clipCapBytes = int(bytes)
+
+proc dingbat_clip_history_frames(): cint {.exportc, cdecl.} =
+  ## How far back a clip may start, in frames.
+  if stateKind == ekNone or clipAnchors.len == 0: return 0
+  cint(clipFrameIndex - clipAnchors[0].frame)
+
+var clipStripThumbs: seq[byte] = @[]
+var clipStripAgo: seq[int] = @[]
+var clipStripW = 0
+var clipStripH = 0
+
+proc dingbat_clip_scrub_generate(max_samples: cint): cint {.exportc, cdecl.} =
+  ## Up to max_samples anchor thumbnails spread across the window, newest
+  ## first. Returns the count.
+  clipStripThumbs = @[]
+  clipStripAgo = @[]
+  if stateKind == ekNone: return 0
+  var usable: seq[int] = @[]
+  for i in countdown(clipAnchors.high, 0):
+    if clipAnchors[i].thumb.len > 0: usable.add(i)
+  if usable.len == 0: return 0
+  let n = min(max(1, int(max_samples)), usable.len)
+  for s in 0 ..< n:
+    let i = usable[if n == 1: 0 else: s * (usable.len - 1) div (n - 1)]
+    var pixels: seq[byte]
+    try: pixels = uncompress(clipAnchors[i].thumb, dfZlib)
+    except CatchableError: continue
+    clipStripW = clipAnchors[i].tw
+    clipStripH = clipAnchors[i].th
+    clipStripThumbs.add pixels
+    clipStripAgo.add(clipFrameIndex - clipAnchors[i].frame)
+  cint(clipStripAgo.len)
+
+proc dingbat_clip_scrub_thumb_w(): cint {.exportc, cdecl.} = cint(clipStripW)
+proc dingbat_clip_scrub_thumb_h(): cint {.exportc, cdecl.} = cint(clipStripH)
+proc dingbat_clip_scrub_thumbs(): pointer {.exportc, cdecl.} =
+  if clipStripThumbs.len > 0: addr clipStripThumbs[0] else: nil
+
+proc dingbat_clip_scrub_frames_ago(sample: cint): cint {.exportc, cdecl.} =
+  if sample < 0 or sample >= clipStripAgo.len: return 0
+  cint(clipStripAgo[int(sample)])
+
+proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
+  ## Arm a replay of [start_ago, end_ago) frames before now: stash the live
+  ## state, restore the anchor at or before the start, silently re-emulate
+  ## to the start frame. Returns the frames the replay runs (step them with
+  ## dingbat_clip_tick), 0 with no usable history.
+  if stateKind == ekNone or clipReplaying or clipAnchors.len == 0: return 0
+  var startFrame = clipFrameIndex - max(0, int(start_ago))
+  let endFrame = clipFrameIndex - max(0, int(end_ago))
+  if startFrame < clipAnchors[0].frame: startFrame = clipAnchors[0].frame
+  if startFrame < clipInputsStart: startFrame = clipInputsStart
+  if endFrame <= startFrame: return 0
+  var pick = 0
+  for i in 0 ..< clipAnchors.len:
+    if clipAnchors[i].frame <= startFrame: pick = i
+    else: break
+  var anchorPayload: string
+  try: anchorPayload = uncompress(clipAnchors[pick].packed, dfZlib)
+  except CatchableError: return 0
+  clipLiveStash = current_payload()
+  if clipLiveStash.len == 0: return 0
+  if not clip_apply_payload(anchorPayload):
+    clipLiveStash = ""
+    return 0
+  clipCursor = clipAnchors[pick].frame
+  clipEnd = endFrame
+  clipReplaying = true
+  if statePrinter != nil: statePrinter.muted = true
+  # Silent pre-roll to exactly the chosen frame: its sound is dropped.
+  let mode = dingbat_audio_get_mode()
+  dingbat_audio_set_mode(2)
+  while clipCursor < startFrame:
+    let idx = clipCursor - clipInputsStart
+    if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
+    case stateKind
+    of ekGBA: stateGba.step_frame()
+    of ekGB:  stateGb.step_frame()
+    of ekNone: break
+    inc clipCursor
+  dingbat_audio_set_mode(mode)
+  cint(clipEnd - clipCursor)
+
+proc dingbat_clip_tick(): cint {.exportc, cdecl.} =
+  ## One replay frame with its logged input; its picture is then at
+  ## dingbat_framebuffer. Frames remaining, or -1 once done (the live state
+  ## is already back).
+  if not clipReplaying: return -1
+  if clipCursor >= clipEnd:
+    discard clip_apply_payload(clipLiveStash)
+    clipLiveStash = ""
+    clipReplaying = false
+    if statePrinter != nil: statePrinter.muted = false
+    clip_set_buttons(clipCurButtons)
+    present_live()
+    return -1
+  let idx = clipCursor - clipInputsStart
+  if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
+  case stateKind
+  of ekGBA: stateGba.step_frame()
+  of ekGB:  stateGb.step_frame()
+  of ekNone: return -1
+  inc clipCursor
+  cint(clipEnd - clipCursor)
+
+proc dingbat_clip_abort() {.exportc, cdecl.} =
+  ## Bail out of a replay: the live state comes back.
+  if not clipReplaying: return
+  discard clip_apply_payload(clipLiveStash)
+  clipLiveStash = ""
+  clipReplaying = false
+  if statePrinter != nil: statePrinter.muted = false
+  clip_set_buttons(clipCurButtons)
+  present_live()

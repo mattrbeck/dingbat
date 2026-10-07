@@ -1,7 +1,7 @@
 ## The iOS app's C API (src/dingbat_ios.nim), driven the way the Swift shell
 ## drives it: through the exported C symbols, on committed ROMs. Covers load,
 ## frames, state round trips and refusals, hold-to-rewind, the rewind
-## scrubber's commit, run-ahead, cheats, the LCD response and the Super Game
+## scrubber's commit, clip replay, run-ahead, cheats, the LCD response and the Super Game
 ## Boy border.
 ## Run standalone: nimble test_iosapi   (or ./dingbat_ios_api_test)
 ##
@@ -38,6 +38,9 @@ proc dingbat_rewind_scrub_seconds_ago(s: cint): cint {.importc, cdecl.}
 proc dingbat_rewind_commit(s: cint): cint {.importc, cdecl.}
 proc dingbat_load_cheats(text: cstring): cstring {.importc, cdecl.}
 proc dingbat_set_input(id, pressed: cint) {.importc, cdecl.}
+proc dingbat_clip_begin(startAgo, endAgo: cint): cint {.importc, cdecl.}
+proc dingbat_clip_tick(): cint {.importc, cdecl.}
+proc dingbat_clip_scrub_generate(n: cint): cint {.importc, cdecl.}
 
 var failures = 0
 template check(cond: bool; what: string) =
@@ -108,6 +111,29 @@ block:
   # The state header carries no wall clock, so equal images mean the same
   # emulated machine.
   check plain == ahead, "30 frames with run-ahead 2 = 30 plain frames"
+
+echo "GBA: a clip replays the frames the player saw"
+block:
+  # 3 s of play with inputs changing, every frame's picture hashed.
+  var seen: seq[uint64] = @[]
+  for f in 0 ..< 180:
+    dingbat_set_input(4, cint((f div 7) mod 2))
+    dingbat_set_input(3, cint((f div 23) mod 2))
+    dingbat_run_frame()
+    seen.add frameHash()
+  dingbat_set_input(4, 0); dingbat_set_input(3, 0)
+  let live = takeState()
+  # The frames 150..90 frames back: seen[30 ..< 90].
+  let n = dingbat_clip_begin(150, 90)
+  check n == 60, "the replay runs the 60 frames asked for (got " & $n & ")"
+  var same = true
+  for i in 0 ..< int(n):
+    if dingbat_clip_tick() < 0: same = false; break
+    if frameHash() != seen[30 + i]: same = false
+  check same, "every replayed frame matches what was seen"
+  check dingbat_clip_tick() == -1, "the replay ends"
+  check takeState() == live, "the live game is back, untouched"
+  check dingbat_clip_scrub_generate(16) >= 3, "the clip strip has a thumbnail per second"
 
 echo "GBA: cheats"
 block:
