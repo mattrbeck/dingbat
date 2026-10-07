@@ -43,6 +43,8 @@ final class AppModel: ObservableObject {
         var duration: Double
         /// Dismissed when the player goes back to the home screen.
         var game: Bool
+        /// Bumped when a repeat extends it, so an older timer lets it be.
+        var gen = 0
     }
 
     @Published var screen: Screen = .home
@@ -101,13 +103,32 @@ final class AppModel: ObservableObject {
 
     // MARK: toasts
 
+    /// web pushToast: the newest goes on top and older ones stay put; a
+    /// repeated plain message extends the one showing, and a repeated offer
+    /// replaces it so the freshest action runs. At most three.
     func toast(_ text: String, action: (String, () -> Void)? = nil, duration: Double? = nil, game: Bool = false) {
-        let t = Toast(text: text, action: action.map { (label: $0.0, run: $0.1) },
-                      duration: duration ?? (action == nil ? 2.2 : 8), game: game)
-        toasts.append(t)
-        if toasts.count > 3 { toasts.removeFirst(toasts.count - 3) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + t.duration) { [weak self] in
-            self?.dismissToast(t.id)
+        let ms = duration ?? (action == nil ? 2.2 : 8)
+        for live in toasts where live.text == text {
+            if action == nil && live.action == nil {
+                if let i = toasts.firstIndex(where: { $0.id == live.id }) {
+                    toasts[i].gen += 1
+                    armToast(toasts[i], ms)
+                }
+                return
+            }
+            if let action, live.action?.label == action.0 { dismissToast(live.id) }
+        }
+        let t = Toast(text: text, action: action.map { (label: $0.0, run: $0.1) }, duration: ms, game: game)
+        toasts.insert(t, at: 0)
+        if toasts.count > 3 { toasts.removeLast(toasts.count - 3) }
+        armToast(t, ms)
+    }
+
+    private func armToast(_ t: Toast, _ seconds: Double) {
+        let id = t.id, gen = t.gen
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.toasts.first(where: { $0.id == id })?.gen == gen else { return }
+            self.dismissToast(id)
         }
     }
 

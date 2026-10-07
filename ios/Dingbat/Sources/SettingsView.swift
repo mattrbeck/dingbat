@@ -1,4 +1,15 @@
 import SwiftUI
+
+/// The build's identity (web version.txt): the commit a build phase stamps
+/// into Info.plist (project.yml), else the marketing version.
+enum AppBuild {
+    static var commit: String { Bundle.main.infoDictionary?["DingbatCommit"] as? String ?? "" }
+    static var label: String {
+        let c = commit
+        if !c.isEmpty && c != "unknown" { return "dingbat " + String(c.prefix(12)) }
+        return "dingbat " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
+    }
+}
 import UniformTypeIdentifiers
 
 /// Settings › sections, in the web's order (web #settings-tabs).
@@ -222,12 +233,20 @@ struct SettingsView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    /// web #settings-version: the build's commit; a tap copies it.
     private var versionText: some View {
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        return Text("dingbat \(v)")
-            .font(.system(size: 11.5, design: .monospaced))
-            .foregroundColor(palette.textFaint)
-            .frame(maxWidth: .infinity)
+        let text = AppBuild.label
+        return Button {
+            UIPasteboard.general.string = text
+            AppModel.shared.toast("Copied " + text)
+        } label: {
+            Text(text)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundColor(palette.textFaint)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Copies the build")
     }
 
     @ViewBuilder

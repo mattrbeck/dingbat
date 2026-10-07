@@ -92,9 +92,22 @@ targets:
             LSItemContentTypes:
               - com.mattrb.dingbat.save
               - com.mattrb.dingbat.state
+    # The commit, for Settings' version line and bug reports (web version.txt).
+    postBuildScripts:
+      - name: Stamp the commit
+        basedOnDependencyAnalysis: false
+        # After Info.plist is written, not alongside it.
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          sha=$(git -C "$PROJECT_DIR/.." rev-parse HEAD 2>/dev/null || echo unknown)
+          plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :DingbatCommit $sha" "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :DingbatCommit string $sha" "$plist"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         DEVELOPMENT_TEAM: FGP2K9PPW9
         CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.9"
