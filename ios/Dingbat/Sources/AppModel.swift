@@ -117,7 +117,12 @@ final class AppModel: ObservableObject {
         // No ROM here: Drive hands it back, or the person finds the file.
         if !entry.isLocal {
             if DriveSync.shared.driveHasRom(entry.fileName) { fetchThenLaunch(entry, resume: resume) }
-            else { relinking = entry }
+            else {
+                // A tap on a game whose file is gone: found, it opens (web
+                // relinkGameAction {launch}).
+                relinking = entry
+                relinkLaunch = true
+            }
             return
         }
         toasts.removeAll { $0.game }
@@ -191,12 +196,12 @@ final class AppModel: ObservableObject {
 
     /// A tap that opens a game (a tile, the closed hero): one that has
     /// stopped unexpectedly twice in a row asks first (web crashGate).
-    func tapGame(_ entry: RomEntry, resume: Bool) {
+    func tapGame(_ entry: RomEntry, resume: Bool, fresh: Bool = false) {
         if CrashWatch.streak(entry.fileName) >= CrashWatch.askStreak && session.game != entry && entry.isLocal {
             openSheet(.moments(entry, crash: true))
             return
         }
-        launch(entry, resume: resume)
+        launch(entry, resume: resume, fresh: fresh)
     }
 
     /// Back into an earlier moment (web resumeMoment): the game boots on its
@@ -330,7 +335,12 @@ final class AppModel: ObservableObject {
         let name = e.fileName
         tileFailed.remove(name)
         Task { @MainActor in
-            if await DriveSync.shared.downloadGame(name) { markDone(name) } else { tileFailed.insert(name) }
+            if await DriveSync.shared.downloadGame(name) {
+                markDone(name)
+                toast("Synced to this device")
+            } else {
+                tileFailed.insert(name)
+            }
         }
     }
 
@@ -362,6 +372,8 @@ final class AppModel: ObservableObject {
 
     func finishRelink(_ e: RomEntry, _ data: Data) {
         relinkConfirm = nil
+        let open = relinkLaunch
+        relinkLaunch = false
         do { try data.write(to: e.url, options: .atomic) } catch {
             toast("Couldn't keep that file", duration: 4)
             return
@@ -371,7 +383,12 @@ final class AppModel: ObservableObject {
         library.pictureGen += 1
         library.refresh()
         toast("“\(e.name)” is back on this device")
+        if open { launch(e, resume: false) }
     }
+
+    /// The pending Find the file came from a tap on the game, so it opens
+    /// once found; from the tile menu it does not.
+    var relinkLaunch = false
 
     // MARK: printer
 

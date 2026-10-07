@@ -611,7 +611,12 @@ final class DriveSync: ObservableObject {
             return
         }
         let wasOpen = GameSession.shared.game == e
-        if wasOpen { AppModel.shared.closeGame() }
+        // Flushed, then let go (web: persisted, then detached); booted again
+        // on the restored save below.
+        if wasOpen {
+            dingbat_flush_save()
+            GameSession.shared.discard()
+        }
         let cur = try? Data(contentsOf: e.saveURL)
         let now = Self.now()
         let at = (cur?.isEmpty ?? true) ? 0
@@ -628,6 +633,7 @@ final class DriveSync: ObservableObject {
         try? next.json.write(to: e.oldSaveURL, options: .atomic)
         markUpload("oldsave:" + game)
         RomLibrary.shared.pictureGen += 1
+        if wasOpen { HomeActions.reboot(e) }
         AppModel.shared.toast(cur?.isEmpty ?? true ? "Old save restored" : "Old save restored — Restore again to switch back")
     }
 

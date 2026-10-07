@@ -174,6 +174,13 @@ final class Settings: ObservableObject {
 
     /// Settings › General › Reset all settings: every key back to its
     /// default (the library, saves and states are untouched).
+    /// Mute / unmute (web toggleMute): unmuting at volume 0 would still be
+    /// silent, so it comes back at 50.
+    func toggleMute() {
+        muted.toggle()
+        if !muted && volume == 0 { volume = 50 }
+    }
+
     func resetAll() {
         for k in ["large-controls", "landscape-buttons", "gbRumble", "control-style", "joystick-mode",
                   "hide-touch-on-gamepad", "input-display", "library-open", "haptics",
@@ -186,6 +193,7 @@ final class Settings: ObservableObject {
             d.removeObject(forKey: k)
         }
         let fresh = Settings()
+        Keyboard.shared.setPreset(.default)  // the key bindings too (web resetAllSettings)
         largeControls = fresh.largeControls
         landscapeButtons = fresh.landscapeButtons
         rumble = fresh.rumble

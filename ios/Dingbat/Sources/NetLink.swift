@@ -833,6 +833,8 @@ final class NetLink: ObservableObject {
         let model = AppModel.shared
         model.sheetPausedGame = false
         if case .link = model.sheet { model.sheet = nil }
+        // Begun from the paused hero's ⋯: the session plays on the play screen.
+        if model.screen != .play { withAnimation(.easeOut(duration: 0.25)) { model.screen = .play } }
         GameSession.shared.enterLinked()
         model.toast(s.isHost == true ? "Player 2 connected — full speed" : "Connected — full speed")
         // The ROMs and states now live in the cores.
