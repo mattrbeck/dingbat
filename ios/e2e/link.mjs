@@ -178,7 +178,7 @@ const cases = [
   ["same GB game", { webRom: join(ROOT, "tests/roms/gblinktest.gb"), appRom: join(ROOT, "tests/roms/gblinktest.gb"),
                      appGame: "gblinktest.gb" }],
   ["two GBA games, sent both ways", { webRom: join(ROOT, "tests/roms/linktest.gba"),
-                                      appRom: join(ROOT, "web/goodboy-demo-en.gba"), appGame: "goodboy-demo-en.gba" }],
+                                      appRom: join(ROOT, "tests/roms/gbaedge.gba"), appGame: "gbaedge.gba" }],
   ["manual codes, no server", { webRom: join(ROOT, "tests/roms/linktest.gba"), appRom: join(ROOT, "tests/roms/linktest.gba"),
                                 appGame: "linktest.gba", manual: true }],
 ];
