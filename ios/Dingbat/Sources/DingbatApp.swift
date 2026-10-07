@@ -147,8 +147,11 @@ struct ToastStack: View {
     @Environment(\.palette) var palette
 
     var body: some View {
+        // In a game the stack sits under the top bar, clear of the touch
+        // controls; on the home screen it is bottom-centre as on the web.
+        let top = model.screen == .play
         VStack(spacing: 8) {
-            Spacer()
+            if !top { Spacer() }
             ForEach(model.toasts) { t in
                 HStack(spacing: 10) {
                     Text(t.text)
@@ -182,11 +185,13 @@ struct ToastStack: View {
                         a.run()
                     }
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.move(edge: top ? .top : .bottom).combined(with: .opacity))
             }
+            if top { Spacer() }
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 24)
+        .padding(.bottom, top ? 0 : 24)
+        .padding(.top, top ? 60 : 0)
         .animation(.easeOut(duration: 0.2), value: model.toasts.map(\.id))
         .allowsHitTesting(!model.toasts.isEmpty)
     }

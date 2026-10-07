@@ -36,9 +36,10 @@ final class GameSession: NSObject, ObservableObject {
     @Published private(set) var tiltKind: Int = 0
     @Published private(set) var hasCamera = false
     @Published private(set) var rumbling = false
-    /// Bumped on every presented frame that changed (for observers that
-    /// sample the picture: glow, input overlay).
-    @Published private(set) var frameGen = 0
+    /// The presented picture's size in native pixels (256x224 once an SGB
+    /// border arrives). Published only when it changes: a per-frame value
+    /// here would rebuild every view observing the session 60 times a second.
+    @Published private(set) var outSize = CGSize(width: 240, height: 160)
     /// Inputs currently held, by id (touch, controller and hardware keys
     /// merged), for the input display.
     @Published private(set) var held: Set<Int> = []
@@ -272,7 +273,8 @@ final class GameSession: NSObject, ObservableObject {
 
     private func present() {
         GameRenderer.shared.present()
-        frameGen &+= 1
+        let size = CGSize(width: Int(dingbat_out_width()), height: Int(dingbat_out_height()))
+        if size != outSize { outSize = size }
     }
 
     private func fpsAccount(_ now: CFTimeInterval, ran: Int) {
@@ -357,6 +359,11 @@ final class GameSession: NSObject, ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = !p
         if p {
             rewinding = false
+            if rumbleWasOn {
+                rumbleWasOn = false
+                rumbling = false
+                onRumble?(false)
+            }
             dingbat_flush_save()
             storeLastFrame()
         }

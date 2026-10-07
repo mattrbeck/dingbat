@@ -6,9 +6,6 @@ import UIKit
 /// PlayLayout. The in-game menu drops down from the bar's hamburger.
 struct PlayView: View {
     @EnvironmentObject var model: AppModel
-    @EnvironmentObject var session: GameSession
-    @EnvironmentObject var settings: Settings
-    @Environment(\.palette) var palette
 
     var body: some View {
         PlayLayout(stage: GameStage(), bar: TopBar())
@@ -84,8 +81,7 @@ struct GameStage: View {
     /// makes it 256x224), in whole device-pixel multiples with integer
     /// scaling.
     private func pictureSize(in box: CGSize) -> CGSize {
-        _ = session.frameGen  // re-evaluate when an SGB border appears
-        let w = CGFloat(max(dingbat_out_width(), 1)), h = CGFloat(max(dingbat_out_height(), 1))
+        let w = max(session.outSize.width, 1), h = max(session.outSize.height, 1)
         let fit = min(box.width / w, box.height / h)
         guard fit > 0 else { return .zero }
         let px = UIScreen.main.scale
