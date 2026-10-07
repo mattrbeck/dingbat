@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
         case tileMenu(RomEntry), rename(RomEntry)
         /// Resume from earlier; `crash`: the "stopped unexpectedly" form.
         case moments(RomEntry, crash: Bool)
+        case addPictures
         var id: String {
             switch self {
             case .settings: return "settings"
@@ -30,6 +31,7 @@ final class AppModel: ObservableObject {
             case .tileMenu(let e): return "tile:" + e.id
             case .rename(let e): return "rename:" + e.id
             case .moments(let e, _): return "moments:" + e.id
+            case .addPictures: return "addPictures"
             }
         }
     }
