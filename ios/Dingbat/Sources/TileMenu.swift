@@ -137,8 +137,8 @@ struct TileMenuView: View {
     private func item(_ id: String, _ label: String, danger: Bool = false, disabled: String? = nil,
                       sub: String? = nil, confirm: String? = nil, run: @escaping () -> Void) -> some View {
         let isArmed = armed == id
-        return Button {
-            if confirm != nil, !isArmed {
+        let tap = {
+            if confirm != nil, armed != id {
                 armed = id
                 armedAt = Date()
                 let stamp = armedAt
@@ -149,7 +149,8 @@ struct TileMenuView: View {
             }
             armed = nil
             run()
-        } label: {
+        }
+        return Button(action: tap) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(isArmed ? (confirm ?? label) : label)
                     .font(.system(size: 15))

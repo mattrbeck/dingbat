@@ -40,6 +40,7 @@ the same frame).
 | Presenter: colour correction per panel, None / LCD grid / RGB subpixels / hq4x / xBR, Game Boy shade palettes, the Super Game Boy border, integer scaling, LCD response, ambient glow, pinch zoom | `PresentShader` (the web shader in Metal), `GameRenderer`, `GameStage` |
 | Speeds and audio: 2x, unbounded fast-forward, slow motion, rewind, run-ahead, pitch-correct fast-forward, enhanced music, audio interpolation, the 12 kHz analog filter, channel mutes, Play in Silent Mode | `GameSession`, `AudioOutput`, `dingbat_ios_audio.c` |
 | Controllers (web mapping; RT holds fast-forward, LT rewind, R3 or Select+Start held opens the menu paused; hide touch controls), rumble, tilt carts, the Game Boy Camera, the Game Boy Printer, the save webhook | `Controllers`, `Peripherals`, `GameSession` |
+| A controller alone, outside the game: the d-pad and stick move focus spatially over the home screen, the in-game menu and every sheet, A presses, B goes back (a Settings section, then the sheet or menu; at home, the top), Y opens a game's options, LB/RB step the system filter, LT/RT the sort, Start resumes the hero's game; buttons held across a switch are not presses on arrival. No bar icon, toasts or readouts, as on the web | `PadNav` (iOS has no controller focus engine outside tvOS), `Controllers` |
 
 ## Native differences
 
@@ -67,6 +68,10 @@ the same frame).
   the simulator (`-latency-test 40` on tonc's m7_demo): press to the changed
   frame presented, p50 12.9 / max 15.1 ms; audio ring ~27 ms on top of a
   ~5 ms output buffer. Audio depth does not delay input or video.
+- **A controller in menus** steps a pick-list to its next option with A
+  (a native menu cannot be opened from a pad), and skips text fields
+  (search, codes) and the paused hero's ⋯ menu; Y on a tile and the touch
+  screen reach those.
 - **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.
@@ -77,8 +82,6 @@ the same frame).
   browser): there is no second tab in an app. **Local 2P** (two games on
   one screen, the 2P tile) is not ported either.
 - **"Add pictures"** (picturing every game in one batch).
-- **Controller navigation of the library, menus and Settings.** In a game
-  the controller plays; elsewhere it does nothing yet.
 - **Hardware keyboards**: key bindings and the keyboard shortcuts list.
 - **Web-only plumbing**: the service worker's update button and Force
   update, Fullscreen, the diagnostic log, drag and drop, the "File Check

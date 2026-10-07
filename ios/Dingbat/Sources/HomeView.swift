@@ -66,10 +66,12 @@ struct HomeView: View {
                     .onAppear {
                         scrollToTop = { withAnimation { proxy.scrollTo("home-top", anchor: .top) } }
                     }
+                    .padScrollFollow(proxy)
                 }
             }
             .background(palette.homeBg.ignoresSafeArea())
         }
+        .environment(\.padScope, "home")
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .zip, .data],
                       allowsMultipleSelection: false) { result in
@@ -111,6 +113,7 @@ struct HomeView: View {
             .filter { filter.matches($0) && (filtering || $0 != hero) }
         let cells = entries.count - (hero != nil ? 1 : 0)
         let layout = LibLayout(viewport: viewport, inner: inner, count: cells, underHero: hero != nil)
+        let _ = padGrid(gridRows, cols: layout.fit)
 
         VStack(spacing: 26) {
             if entries.isEmpty {
@@ -163,7 +166,7 @@ struct HomeView: View {
                 Section {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: layout.gap) {
                         ForEach(rows) { e in
-                            LibraryTile(entry: e, pictureGen: library.pictureGen).id(e.id)
+                            LibraryTile(entry: e, pictureGen: library.pictureGen)
                         }
                     }
                     // The tracks centre in the block; under a hero on a wide
@@ -205,6 +208,41 @@ struct HomeView: View {
         .onChange(of: systems) { present in
             // A system that left the library leaves the filter too.
             filter.systems.formIntersection(present)
+        }
+    }
+
+    // MARK: controller
+
+    /// The grid is lazy: a step past the last tile laid out goes by index
+    /// (the scroll then brings it in). LB/RB step the system filter, LT/RT
+    /// the sort (web gamepad home).
+    private func padGrid(_ rows: [RomEntry], cols: Int) {
+        let nav = PadNav.shared
+        let ids = rows.map { "tile:" + $0.id }
+        nav.edge["home"] = { id, dir in
+            guard let i = ids.firstIndex(of: id) else { return nil }
+            let j: Int
+            switch dir {
+            case .down: j = i + cols
+            case .up: j = i - cols
+            case .right: j = i + 1
+            case .left: j = i - 1
+            }
+            return ids.indices.contains(j) ? ids[j] : nil
+        }
+        let counts = Set(library.entries.map(\.system))
+        let systems = ["GBA", "GBC", "GB"].filter { counts.contains($0) }
+        nav.homeFilter = { step in
+            let opts: [String?] = [nil] + systems
+            let cur: String? = filter.systems.count == 1 ? filter.systems.first : nil
+            let i = opts.firstIndex(where: { $0 == cur }) ?? 0
+            let next = opts[(i + step + opts.count) % opts.count]
+            filter.systems = next.map { [$0] } ?? []
+        }
+        nav.homeSort = { step in
+            let all = LibFilter.Sort.allCases
+            let i = all.firstIndex(of: sort) ?? 0
+            sort = all[(i + step + all.count) % all.count]
         }
     }
 

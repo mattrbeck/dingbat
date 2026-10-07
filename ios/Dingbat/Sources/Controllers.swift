@@ -30,6 +30,14 @@ final class Controllers {
     private var chordTimer: Timer?
     private var chordFired = false
     private var engines: [ObjectIdentifier: (CHHapticEngine, CHHapticAdvancedPatternPlayer?)] = [:]
+    /// Outside the game: the UI buttons held at the last read, the
+    /// direction repeating while held, and whether the game had the pad.
+    private var uiHeld: Set<String> = []
+    private var repeatTimer: Timer?
+    private var wasInGame = true
+    /// Console buttons held when the game got the pad back: not presses
+    /// until let go (the B that closed the menu).
+    private var arrivalHeld: Set<Int> = []
     private var bag = Set<AnyCancellable>()
 
     private var session: GameSession { .shared }
@@ -57,7 +65,10 @@ final class Controllers {
         Publishers.Merge3(model.$menuOpen.map { _ in () }, model.$sheet.map { _ in () },
                           model.$screen.map { _ in () })
             .receive(on: RunLoop.main)
-            .sink { [weak self] in self?.update() }
+            .sink { [weak self] in
+                PadNav.shared.scopeChanged()
+                self?.update()
+            }
             .store(in: &bag)
     }
 
@@ -81,8 +92,17 @@ final class Controllers {
         var want: Set<Int> = []
         var rt = false, lt = false, r3 = false, select = false, startBtn = false
         var stickNow: CGPoint?
+        var ui: Set<String> = []
         for c in GCController.controllers() {
             guard let p = c.extendedGamepad else { continue }
+            if p.buttonA.isPressed { ui.insert("a") }
+            if p.buttonB.isPressed { ui.insert("b") }
+            if p.buttonY.isPressed { ui.insert("y") }
+            if p.leftShoulder.isPressed { ui.insert("lb") }
+            if p.rightShoulder.isPressed { ui.insert("rb") }
+            if p.leftTrigger.isPressed { ui.insert("lt") }
+            if p.rightTrigger.isPressed { ui.insert("rt") }
+            if p.buttonMenu.isPressed { ui.insert("start") }
             if p.buttonA.isPressed || p.buttonY.isPressed { want.insert(4) }
             if p.buttonB.isPressed || p.buttonX.isPressed { want.insert(5) }
             if p.buttonOptions?.isPressed == true { want.insert(6); select = true }
@@ -104,11 +124,23 @@ final class Controllers {
             r3 = r3 || p.rightThumbstickButton?.isPressed == true
         }
         stick = stickNow
-        guard inGame else {
+        for (dir, id) in [("up", 0), ("down", 1), ("left", 2), ("right", 3)] where want.contains(id) { ui.insert(dir) }
+        let nowInGame = inGame
+        if nowInGame != wasInGame {
+            // Held across the switch: not a press on arrival.
+            if nowInGame { arrivalHeld = want } else { uiHeld = ui }
+            wasInGame = nowInGame
+        }
+        guard nowInGame else {
             letGo()
             r3Was = r3
+            drive(ui)
             return
         }
+        uiHeld = []
+        repeatTimer?.invalidate()
+        arrivalHeld.formIntersection(want)
+        want.subtract(arrivalHeld)
         // The triggers' holds.
         if rt != fastForwardHeld {
             fastForwardHeld = rt
@@ -141,6 +173,43 @@ final class Controllers {
         }
         send(want)
     }
+
+    /// The UI's turn (PadNav): presses on the way down, directions
+    /// repeating while held.
+    private func drive(_ now: Set<String>) {
+        let pressed = now.subtracting(uiHeld)
+        uiHeld = now
+        let nav = PadNav.shared
+        let dirs: [String: PadNav.Dir] = ["up": .up, "down": .down, "left": .left, "right": .right]
+        for (name, dir) in dirs where pressed.contains(name) {
+            nav.move(dir)
+            repeatTimer?.invalidate()
+            repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+                self?.repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] t in
+                    guard let self, self.uiHeld.contains(name) else { t.invalidate(); return }
+                    nav.move(dir)
+                }
+            }
+        }
+        if pressed.contains("a") { nav.press() }
+        if pressed.contains("b") { nav.goBack() }
+        if pressed.contains("y") { nav.alt() }
+        guard nav.scope == "home" else { return }
+        if pressed.contains("lb") { nav.homeFilter?(-1) }
+        if pressed.contains("rb") { nav.homeFilter?(1) }
+        if pressed.contains("lt") { nav.homeSort?(-1) }
+        if pressed.contains("rt") { nav.homeSort?(1) }
+        if pressed.contains("start"), model.heroGame != nil { model.resumeFromHero() }
+    }
+
+    #if DEBUG
+    /// `-pad "down right a"`: presses as the UI would get them (tests).
+    func debugPress(_ name: String) {
+        guard !inGame else { return }
+        drive(uiHeld.union([name]))
+        drive(uiHeld.subtracting([name]))
+    }
+    #endif
 
     private func openMenu() {
         letGo()

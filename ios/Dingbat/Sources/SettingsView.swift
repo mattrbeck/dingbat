@@ -44,12 +44,15 @@ struct SettingsView: View {
     @State private var current: SettingsSection = .controls
     @State private var pushed = false
     @State private var ready = false
+    @State private var wideLayout = false
 
     var body: some View {
         GeometryReader { geo in
             Group {
                 if geo.size.width >= 600 { rail } else { phone }
             }
+            .onAppear { wideLayout = geo.size.width >= 600 }
+            .onChange(of: geo.size.width) { wideLayout = $0 >= 600 }
         }
         .foregroundColor(palette.text)
         .background(palette.surface1.ignoresSafeArea())
@@ -66,6 +69,14 @@ struct SettingsView: View {
             }
         }
         .onChange(of: current) { s in UserDefaults.standard.set(s.rawValue, forKey: SettingsSection.storageKey) }
+        .onAppear {
+            // B in a pushed section goes back to the list first.
+            PadNav.shared.back[AppModel.Sheet.settings(section: nil).id] = {
+                guard pushed && !wideLayout else { return false }
+                withAnimation(.easeOut(duration: 0.22)) { pushed = false }
+                return true
+            }
+        }
     }
 
     // MARK: wide: rail + content
@@ -89,8 +100,11 @@ struct SettingsView: View {
             Rectangle().fill(palette.border).frame(width: 1).ignoresSafeArea()
             VStack(spacing: 0) {
                 SheetHeader(title: current.name, onClose: SheetNav.close)
-                ScrollView { pane(current) }
-                    .id(current)
+                ScrollViewReader { proxy in
+                    ScrollView { pane(current) }
+                        .padScrollFollow(proxy)
+                }
+                .id(current)
             }
         }
     }
@@ -138,8 +152,11 @@ struct SettingsView: View {
                     } trailing: {
                         stepper
                     }
-                    ScrollView { pane(current) }
-                        .id(current)
+                    ScrollViewReader { proxy in
+                        ScrollView { pane(current) }
+                            .padScrollFollow(proxy)
+                    }
+                    .id(current)
                 }
                 .transition(.move(edge: .trailing))
                 .gesture(DragGesture(minimumDistance: 24).onEnded { v in
@@ -198,6 +215,7 @@ struct SettingsView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .background(RoundedRectangle(cornerRadius: 8).fill(selected ? palette.accent.opacity(0.10) : .clear))
+            .padFocus("section:" + s.rawValue, press: action)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -340,7 +358,7 @@ private struct GameBoyPane: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.border2, lineWidth: 1))
                 .accessibilityHidden(true)
-                Button("Reset") {
+                PadButton("Reset") {
                     s.gbPaletteMode = .default
                     s.gbPaletteCustom = Settings.hardwareShades
                 }
@@ -419,8 +437,8 @@ private struct BiosFileRow: View {
                 .foregroundColor(palette.textFaint)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Button("Choose") { picking = true }.buttonStyle(SheetButtonStyle())
-            Button("Remove") {
+            PadButton("Choose") { picking = true }.buttonStyle(SheetButtonStyle())
+            PadButton("Remove") {
                 try? FileManager.default.removeItem(at: url)
                 gen += 1
                 onChange()
@@ -592,7 +610,7 @@ private struct AudioPane: View {
                         .font(.system(size: 12.5))
                         .foregroundColor(palette.textDim)
                     Spacer()
-                    Button("All channels on") { s.channelMutes = 0 }.buttonStyle(SheetButtonStyle())
+                    PadButton("All channels on") { s.channelMutes = 0 }.buttonStyle(SheetButtonStyle())
                 }
             }
         }
