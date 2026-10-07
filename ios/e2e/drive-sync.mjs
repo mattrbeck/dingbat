@@ -73,9 +73,9 @@ const launchApp = (args, { fresh = false } = {}) => {
     trySimctl("uninstall", UDID, BUNDLE);
     simctl("install", UDID, APP);
   }
-  simctl("spawn", UDID, "defaults", "write", BUNDLE, "audio.muted", "-bool", "true");
-  simctl("spawn", UDID, "defaults", "write", BUNDLE, "hide-touch-on-gamepad", "-bool", "false");
-  simctl("launch", UDID, BUNDLE, ...args);
+  // Settings as launch arguments (the app's argument domain): a
+  // `defaults write` through simctl can land outside the app's container.
+  simctl("launch", UDID, BUNDLE, "-audio.muted", "YES", "-hide-touch-on-gamepad", "NO", ...args);
 };
 
 // The games the app holds records of (its per-game folders).

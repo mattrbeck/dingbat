@@ -22,12 +22,15 @@ struct SheetChrome<Content: View>: View {
         VStack(spacing: 0) {
             SheetHeader(title: title, onClose: onClose)
             if scroll {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) { content() }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 22)
-                        .padding(.top, 4)
-                        .padding(.bottom, 28)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) { content() }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 22)
+                            .padding(.top, 4)
+                            .padding(.bottom, 28)
+                    }
+                    .padScrollFollow(proxy)
                 }
             } else {
                 content()
@@ -93,6 +96,7 @@ struct SheetCloseButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")
+        .padFocus("close", press: action)
     }
 }
 
@@ -177,20 +181,23 @@ struct SheetConfirmButton: View {
     @State private var armGen = 0
 
     var body: some View {
-        Button(armed ? confirmLabel : label) {
-            if !armed {
-                armed = true
-                armGen += 1
-                let gen = armGen
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-                    if armGen == gen { armed = false }
-                }
-                return
+        Button(armed ? confirmLabel : label, action: tap)
+            .buttonStyle(SheetButtonStyle(kind: armed ? .armed : kind, fill: fill))
+            .padFocus("confirm:" + label, press: tap)
+    }
+
+    private func tap() {
+        if !armed {
+            armed = true
+            armGen += 1
+            let gen = armGen
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+                if armGen == gen { armed = false }
             }
-            armed = false
-            action()
+            return
         }
-        .buttonStyle(SheetButtonStyle(kind: armed ? .armed : kind, fill: fill))
+        armed = false
+        action()
     }
 }
 
@@ -288,6 +295,9 @@ struct SheetToggleRow: View {
                 .labelsHidden()
                 .toggleStyle(SheetSwitchStyle())
                 .accessibilityLabel(label)
+                .padFocus("toggle:" + label, radius: 13) {
+                    withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) { isOn.toggle() }
+                }
         }
     }
 }
@@ -394,7 +404,10 @@ struct SheetChip<Leading: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .padFocus("chip:" + padID, press: action)
     }
+
+    @State private var padID = UUID().uuidString
 }
 
 extension SheetChip where Leading == EmptyView {
@@ -448,7 +461,14 @@ struct SheetSelect<Value: Hashable>: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border2, lineWidth: 1))
         }
         .accessibilityLabel(accessibilityLabel)
+        // A pad cannot open the menu: A steps to the next option.
+        .padFocus("select:" + padID) {
+            let i = options.firstIndex { $0.0 == selection } ?? -1
+            if !options.isEmpty { selection = options[(i + 1) % options.count].0 }
+        }
     }
+
+    @State private var padID = UUID().uuidString
 }
 
 /// web .settings-disclosure: a folding section header.
@@ -475,6 +495,7 @@ struct SheetDisclosure: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padFocus("disclosure:" + title) { withAnimation(.easeOut(duration: 0.18)) { open.toggle() } }
         .padding(.bottom, open ? 6 : 12)
         .accessibilityValue(open ? "Expanded" : "Collapsed")
     }

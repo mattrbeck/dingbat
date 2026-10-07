@@ -66,7 +66,7 @@ struct LinkCableView: View {
                     }
                 }
                 .buttonStyle(SheetButtonStyle(small: false, fill: true))
-                Button("Copy code") { link.copyCode() }
+                PadButton("Copy code") { link.copyCode() }
                     .buttonStyle(SheetButtonStyle(small: false, fill: true))
             }
             .disabled(link.manualCode == nil)
@@ -81,7 +81,7 @@ struct LinkCableView: View {
                         .onSubmit { link.confirmManual() }
                         .accessibilityLabel("Friend's code")
                 }
-                Button("Confirm") { link.confirmManual() }
+                PadButton("Confirm") { link.confirmManual() }
                     .buttonStyle(SheetButtonStyle(kind: .primary, small: false))
                     .disabled(link.friendLocked || link.manualCode == nil
                               || link.friendCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

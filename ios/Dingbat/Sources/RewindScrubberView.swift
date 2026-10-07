@@ -32,7 +32,7 @@ struct RewindScrubberView: View {
                     .padding(.top, 14)
             }
             HStack(spacing: 10) {
-                Button("Cancel") { SheetNav.close() }
+                PadButton("Cancel") { SheetNav.close() }
                     .buttonStyle(SheetButtonStyle(small: false))
                 Button(commitLabel, action: commitTapped)
                     .buttonStyle(SheetButtonStyle(kind: stage > 0 ? .armed : .primary, small: false, fill: true))

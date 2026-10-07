@@ -61,9 +61,10 @@ const launchApp = (rom, args, log) => {
   const data = simctl("get_app_container", UDID, BUNDLE, "data").trim();
   mkdirSync(join(data, "Documents/roms"), { recursive: true });
   copyFileSync(rom, join(data, "Documents/roms", rom.split("/").pop()));
-  simctl("spawn", UDID, "defaults", "write", BUNDLE, "audio.muted", "-bool", "true");
   if (existsSync(log)) rmSync(log);
-  simctl("launch", "--stderr=" + log, UDID, BUNDLE, ...args);
+  // Muted by launch argument (the app's argument domain): a `defaults
+  // write` through simctl can land outside the app's container.
+  simctl("launch", "--stderr=" + log, UDID, BUNDLE, "-audio.muted", "YES", ...args);
 };
 
 const STOP = 600;

@@ -105,6 +105,15 @@ struct DingbatApp: App {
         if let t = value("-theme"), let theme = ThemeName(rawValue: t) {
             Settings.shared.theme = theme
         }
+        #if DEBUG
+        if let script = value("-pad") {
+            for (i, name) in script.split(separator: " ").enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(i) * 0.6) {
+                    Controllers.shared.debugPress(String(name))
+                }
+            }
+        }
+        #endif
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             if args.contains("-home") { model.showMainMenu() }
             if args.contains("-menu") { model.openMenu(paused: true) }
@@ -175,6 +184,7 @@ struct RootView: View {
         .sheet(item: $model.sheet, onDismiss: sheetDismissed) { sheet in
             SheetHost(sheet: sheet)
                 .environment(\.palette, palette)
+                .environment(\.padScope, sheet.id)
                 .preferredColorScheme(palette.colorScheme)
         }
     }

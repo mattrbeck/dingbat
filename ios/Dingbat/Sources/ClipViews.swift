@@ -51,9 +51,9 @@ struct ClipRangeView: View {
             .background(RoundedRectangle(cornerRadius: 11).fill(palette.surface2))
             .overlay(RoundedRectangle(cornerRadius: 11).stroke(palette.border, lineWidth: 1))
             HStack(spacing: 8) {
-                Button("Last 10s") { preset(10) }
-                Button("Last 30s") { preset(30) }
-                Button("Everything") { preset(0) }
+                PadButton("Last 10s") { preset(10) }
+                PadButton("Last 30s") { preset(30) }
+                PadButton("Everything") { preset(0) }
             }
             .buttonStyle(SheetButtonStyle())
             .padding(.top, 12)
@@ -65,7 +65,7 @@ struct ClipRangeView: View {
                     .padding(.top, 10)
             }
             HStack(spacing: 10) {
-                Button("Cancel") { SheetNav.close() }
+                PadButton("Cancel") { SheetNav.close() }
                     .buttonStyle(SheetButtonStyle(small: false))
                 Button("Save this clip", action: save)
                     .buttonStyle(SheetButtonStyle(kind: .primary, small: false, fill: true))
@@ -274,7 +274,7 @@ struct ClipProgressView: View {
                             .frame(width: 40, alignment: .trailing)
                     }
                     .frame(width: 240)
-                    Button("Cancel") { ClipExporter.shared.cancelExport() }
+                    PadButton("Cancel") { ClipExporter.shared.cancelExport() }
                         .buttonStyle(SheetButtonStyle())
                         .padding(.top, 6)
                 }
