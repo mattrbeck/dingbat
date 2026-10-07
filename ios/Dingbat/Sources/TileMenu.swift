@@ -417,6 +417,8 @@ struct RenameView: View {
         if has(entry.sessionURL) { out.append("The resume snapshot") }
         if has(entry.cheatsURL) { out.append("Your cheat list") }
         if has(entry.oldSaveURL) { out.append("The save kept from before you deleted it") }
+        let prints = PrintStore.all().filter { PrintStore.game(of: $0) == entry.fileName }.count
+        if prints > 0 { out.append(prints == 1 ? "1 printed photo" : "\(prints) printed photos") }
         return out
     }
 

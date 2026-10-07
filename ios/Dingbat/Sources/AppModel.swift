@@ -60,7 +60,11 @@ final class AppModel: ObservableObject {
     /// A controller is connected and Settings hides the touch controls.
     @Published var gamepadHidesTouch = false
     /// Unseen printed photos (the menu's dot).
-    @Published var newPrints = false
+    /// A print not yet looked at: the dot trail to Printed Photos, kept
+    /// across launches (web printer-photos seen flag).
+    @Published var newPrints = UserDefaults.standard.bool(forKey: "prints-new") {
+        didSet { UserDefaults.standard.set(newPrints, forKey: "prints-new") }
+    }
     /// A game with no ROM here whose file the person is picking again
     /// ("Find the file…").
     @Published var relinking: RomEntry?
@@ -473,7 +477,7 @@ final class AppModel: ObservableObject {
     // MARK: printer
 
     func printed(_ img: UIImage) {
-        PrintStore.add(img)
+        PrintStore.add(img, game: session.game?.fileName)
         newPrints = true
         toast("Photo printed", action: ("View", { [weak self] in self?.openSheet(.prints) }), duration: 6)
     }
@@ -497,7 +501,31 @@ enum PrintStore {
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
-    static func add(_ img: UIImage) {
+    /// Each print remembers its game (web photo.game): stored as
+    /// print-<ms>--<game>.png, so the newest still sorts first.
+    static func game(of url: URL) -> String? {
+        let n = url.deletingPathExtension().lastPathComponent
+        guard let r = n.range(of: "--") else { return nil }
+        return String(n[r.upperBound...])
+    }
+
+    /// The name it is shared under (web: <game>-print-<stamp>.png).
+    static func shareName(_ url: URL) -> String {
+        let n = url.deletingPathExtension().lastPathComponent
+        let stamp = n.dropFirst("print-".count).prefix { $0.isNumber }
+        guard let g = game(of: url) else { return url.lastPathComponent }
+        return (g as NSString).deletingPathExtension + "-print-" + stamp + ".png"
+    }
+
+    /// A renamed game's prints follow it.
+    static func rename(from old: String, to new: String) {
+        for u in all() where game(of: u) == old {
+            let stamp = u.deletingPathExtension().lastPathComponent.components(separatedBy: "--")[0]
+            try? FileManager.default.moveItem(at: u, to: RomLibrary.printsDir.appendingPathComponent("\(stamp)--\(new).png"))
+        }
+    }
+
+    static func add(_ img: UIImage, game: String? = nil) {
         // 2x nearest neighbour, as the web gallery shows them.
         let size = CGSize(width: img.size.width * 2, height: img.size.height * 2)
         let fmt = UIGraphicsImageRendererFormat()
@@ -507,7 +535,8 @@ enum PrintStore {
             img.draw(in: CGRect(origin: .zero, size: size))
         }
         let stamp = Int(Date().timeIntervalSince1970 * 1000)
-        try? big.pngData()?.write(to: RomLibrary.printsDir.appendingPathComponent("print-\(stamp).png"))
+        let name = "print-\(stamp)" + (game.map { "--" + $0 } ?? "") + ".png"
+        try? big.pngData()?.write(to: RomLibrary.printsDir.appendingPathComponent(name))
         for old in all().dropFirst(30) { try? FileManager.default.removeItem(at: old) }
     }
 }
