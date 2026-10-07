@@ -158,7 +158,7 @@ struct AccountMenu: View {
                 .buttonStyle(.plain)
                 .disabled(drive.status == .syncing)
                 HStack {
-                    Button("Sign out") {
+                    PadButton("Sign out") {
                         dismiss()
                         drive.signOut()
                     }
@@ -255,7 +255,7 @@ struct TombstoneSheet: View {
             }
             .frame(maxHeight: 220)
             HStack {
-                Button("Restore") { AppModel.shared.answerTombstones(restore: true) }
+                PadButton("Restore") { AppModel.shared.answerTombstones(restore: true) }
                     .foregroundColor(palette.textDim)
                 Spacer()
                 Button {
@@ -290,7 +290,7 @@ struct HomeDriveRow: View {
                 .font(.system(size: 13))
                 .foregroundColor(palette.textDim)
             if drive.linked {
-                Button("Sync") { Task { @MainActor in await drive.runFullSync() } }
+                PadButton("Sync") { Task { @MainActor in await drive.runFullSync() } }
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(palette.text)
             } else {
@@ -323,8 +323,8 @@ struct DriveSettingsBlock: View {
                 Text(statusLine)
                     .font(.system(size: 12.5)).foregroundColor(palette.textDim)
                 HStack(spacing: 10) {
-                    Button("Sync") { Task { @MainActor in await drive.runFullSync() } }
-                    Button("Sign out") { drive.signOut() }
+                    PadButton("Sync") { Task { @MainActor in await drive.runFullSync() } }
+                    PadButton("Sign out") { drive.signOut() }
                     Spacer()
                 }
                 .font(.system(size: 14, weight: .semibold))

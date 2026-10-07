@@ -23,16 +23,16 @@ struct SaveStatesView: View {
                 }
                 .padding(.bottom, 18)
                 HStack(spacing: 10) {
-                    Button("Delete") { askDelete() }
+                    PadButton("Delete") { askDelete() }
                         .buttonStyle(SheetButtonStyle(kind: .danger))
                         .disabled(infos[selected] == nil)
                     Spacer()
-                    Button("Load") {
+                    PadButton("Load") {
                         if session.loadState(slot: selected) { SheetNav.close() }
                     }
                     .buttonStyle(SheetButtonStyle())
                     .disabled(infos[selected] == nil)
-                    Button("Save") {
+                    PadButton("Save") {
                         if session.saveState(slot: selected) {
                             AppModel.shared.toast("Saved to slot \(selected + 1)")
                             reload()
@@ -109,6 +109,7 @@ private struct SlotCell: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .padFocus("slot\(slot)", press: action)
         .accessibilityLabel(slot == 0 ? "Slot 1, Quick" : "Slot \(slot + 1)")
         .accessibilityValue(info.map { Self.when($0.date) } ?? "empty")
         .accessibilityAddTraits(selected ? .isSelected : [])

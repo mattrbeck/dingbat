@@ -391,6 +391,10 @@ struct BarIconButton: View {
     let action: () -> Void
 
     var body: some View {
+        button.padFocus("bar:" + label, radius: 9, press: action)
+    }
+
+    private var button: some View {
         Button(action: action) {
             Image(systemName: system)
                 .font(.system(size: 15, weight: .semibold))
@@ -680,6 +684,7 @@ struct GameMenu: View {
             Color.black.opacity(0.001)
                 .ignoresSafeArea()
                 .onTapGesture { model.closeMenu() }
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     if !link.linked { quickRow }
@@ -704,6 +709,8 @@ struct GameMenu: View {
                 }
                 .padding(6)
             }
+            .padScrollFollow(proxy)
+            }
             .frame(width: 252)
             .frame(maxHeight: 520)
             .fixedSize(horizontal: false, vertical: true)
@@ -714,6 +721,7 @@ struct GameMenu: View {
             .padding(.leading, hSize == .regular ? 120 : 10)
             .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
         }
+        .environment(\.padScope, "menu")
     }
 
     /// Link Cable, or while linked a two-step Disconnect (a mis-tap would
@@ -797,6 +805,7 @@ struct GameMenu: View {
                     .stroke(active ? palette.accent.opacity(0.5) : palette.border, lineWidth: 1))
         }
         .accessibilityLabel(label)
+        .padFocus("quick:" + label, radius: 10, press: action)
     }
 
     private func item(_ icon: String, _ label: String, trailing: String? = nil, sub: Bool = false,
@@ -823,6 +832,7 @@ struct GameMenu: View {
             .frame(height: 42)
             .contentShape(Rectangle())
         }
+        .padFocus("menu:" + label, press: action)
     }
 
     /// The console's own picture at 4x (no filters, colour correction,

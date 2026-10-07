@@ -39,9 +39,9 @@ struct PrintsView: View {
                     .accessibilityLabel("Printed photo")
             }
             HStack(spacing: 8) {
-                Button("Save PNG") { Share.present([url]) }
+                PadButton("Save PNG") { Share.present([url]) }
                     .buttonStyle(SheetButtonStyle())
-                Button("Delete") {
+                PadButton("Delete") {
                     try? FileManager.default.removeItem(at: url)
                     prints = PrintStore.all()
                 }

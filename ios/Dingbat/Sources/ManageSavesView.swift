@@ -25,7 +25,7 @@ struct ManageSavesView: View {
                     Button("Export", action: exportSave).buttonStyle(SheetButtonStyle())
                 }
                 SheetRow(label: "Import save file", sub: "Replace the game's save (.sav) and reload it") {
-                    Button("Import") { pickKind = .save; picking = true }.buttonStyle(SheetButtonStyle())
+                    PadButton("Import") { pickKind = .save; picking = true }.buttonStyle(SheetButtonStyle())
                 }
                 SheetRow(label: "Reset save file",
                          sub: "Wipe this game's save and reload it as a fresh cartridge") {
@@ -51,7 +51,7 @@ struct ManageSavesView: View {
                     Button("Export", action: exportState).buttonStyle(SheetButtonStyle())
                 }
                 SheetRow(label: "Import state", sub: "Apply a .state file to the running game") {
-                    Button("Import") { pickKind = .state; picking = true }.buttonStyle(SheetButtonStyle())
+                    PadButton("Import") { pickKind = .state; picking = true }.buttonStyle(SheetButtonStyle())
                 }
             }
         }

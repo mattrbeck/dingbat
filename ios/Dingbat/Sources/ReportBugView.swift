@@ -44,7 +44,7 @@ struct ReportBugView: View {
             scrubBox
             HStack(spacing: 10) {
                 Spacer()
-                Button("Cancel") { SheetNav.close() }.buttonStyle(SheetButtonStyle())
+                PadButton("Cancel") { SheetNav.close() }.buttonStyle(SheetButtonStyle())
                 Button("Download report", action: download)
                     .buttonStyle(SheetButtonStyle(kind: .primary))
                     .disabled(session.game == nil)

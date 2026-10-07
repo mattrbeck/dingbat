@@ -192,7 +192,9 @@ struct HeroView: View {
     // MARK: buttons
 
     private func primary(_ label: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        // A pad arriving at home starts on the hero's main button.
+        PadNav.shared.preferred["home"] = "hero:" + label
+        return Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon).font(.system(size: 13))
                 Text(label).font(.system(size: 15, weight: .semibold))
@@ -207,6 +209,7 @@ struct HeroView: View {
             .shadow(color: palette.accentGlow, radius: 6, y: 2)
         }
         .buttonStyle(PressStyle())
+        .padFocus("hero:" + label, radius: 24, press: action)
     }
 
     private func plain(_ label: String, action: @escaping () -> Void) -> some View {
@@ -221,6 +224,7 @@ struct HeroView: View {
                 .overlay(Capsule().stroke(palette.border2, lineWidth: 1))
         }
         .buttonStyle(PressStyle())
+        .padFocus("hero:" + label, radius: 24, press: action)
     }
 
     /// ⋯: the session menu while paused (web sessionMenuEntries), the
@@ -242,6 +246,7 @@ struct HeroView: View {
             Button { model.openSheet(.tileMenu(entry)) } label: { label }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("More for this game")
+                .padFocus("hero:more", radius: 24) { model.openSheet(.tileMenu(entry)) }
         }
     }
 }

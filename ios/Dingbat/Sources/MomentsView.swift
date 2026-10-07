@@ -30,7 +30,7 @@ struct MomentsView: View {
             }
             HStack(spacing: 10) {
                 if crash {
-                    Button("Start from in-game save") {
+                    PadButton("Start from in-game save") {
                         SheetNav.close()
                         AppModel.shared.launch(entry, resume: false, fresh: true)
                     }
@@ -103,6 +103,7 @@ struct MomentsView: View {
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { pick = i; resume() }
         .onTapGesture { pick = i }
+        .padFocus("moment\(i)") { pick = i }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }

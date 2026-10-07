@@ -273,6 +273,7 @@ struct LibraryHead: View {
                 .overlay(Capsule().stroke(palette.border2, lineWidth: 1))
             }
             .buttonStyle(PressStyle())
+            .padFocus("add", radius: 17, press: add)
         }
         .padding(.top, underHero ? 20 : 0)
         .overlay(alignment: .top) {
@@ -377,6 +378,9 @@ struct LibraryBar: View {
                     .overlay(Capsule().stroke(on ? palette.accent.opacity(0.5) : palette.border2, lineWidth: 1))
                 }
                 .accessibilityAddTraits(on ? .isSelected : [])
+                .padFocus("chip:" + s, radius: 15) {
+                    if on { filter.systems.remove(s) } else { filter.systems.insert(s) }
+                }
             }
         }
     }
@@ -400,6 +404,10 @@ struct LibraryBar: View {
         }
         .accessibilityLabel("Sort the library")
         .fixedSize()
+        .padFocus("sort") {
+            let all = LibFilter.Sort.allCases
+            sort = all[((all.firstIndex(of: sort) ?? 0) + 1) % all.count]
+        }
     }
 }
 
@@ -453,6 +461,9 @@ struct LibraryTile: View {
         .offset(y: pressed ? 1 : 0)
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture { model.openLibraryGame(entry) }
+        .padFocus("tile:" + entry.id, radius: 10, alt: { model.openSheet(.tileMenu(entry)) }) {
+            model.openLibraryGame(entry)
+        }
         .onLongPressGesture(minimumDuration: 0.45, maximumDistance: 10) {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             model.openSheet(.tileMenu(entry))
