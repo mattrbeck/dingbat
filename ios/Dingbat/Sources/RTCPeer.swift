@@ -8,6 +8,11 @@ final class RTCPeer {
     private(set) var pc: Int32 = -1
     private(set) var dc: Int32 = -1
     private var closed = false
+    /// Manual exchange: our own channel, made before the offer (its m-line)
+    /// and wired only if we turn out to be the host; the guest takes the
+    /// host's from the data channel callback instead.
+    private var ownDc: Int32 = -1
+    private var acceptIncoming = true
 
     var onLocalDescription: ((_ sdp: String, _ type: String) -> Void)?
     var onLocalCandidate: ((_ candidate: String, _ mid: String) -> Void)?
@@ -17,10 +22,13 @@ final class RTCPeer {
     var onClosed: (() -> Void)?
     var onMessage: ((Data) -> Void)?
     var onBufferedLow: (() -> Void)?
+    /// ICE gathering finished: the local description holds every candidate.
+    var onGatheringComplete: (() -> Void)?
 
     /// `offerer`: create the channel (and with it the offer); the answerer
-    /// waits for the friend's.
-    init?(iceServers: [String], offerer: Bool) {
+    /// waits for the friend's. `manual`: both sides offer, and which channel
+    /// carries the link is settled later (useOwnChannel / useFriendsChannel).
+    init?(iceServers: [String], offerer: Bool, manual: Bool = false) {
         var urls = iceServers.map { strdup($0) }
         defer { urls.forEach { free($0) } }
         var config = rtcConfiguration()
@@ -60,7 +68,24 @@ final class RTCPeer {
             }
             RTCPeer.from(ptr).post { $0.onState?(name) }
         }
-        if offerer {
+        rtcSetGatheringStateChangeCallback(pc) { _, state, ptr in
+            guard let ptr, state == RTC_GATHERING_COMPLETE else { return }
+            RTCPeer.from(ptr).post { $0.onGatheringComplete?() }
+        }
+        if manual {
+            acceptIncoming = false
+            var init_ = rtcDataChannelInit()
+            let dc = rtcCreateDataChannelEx(pc, "link", &init_)
+            guard dc >= 0 else { rtcDeletePeerConnection(pc); return nil }
+            ownDc = dc
+            rtcSetDataChannelCallback(pc) { _, dc, ptr in
+                guard let ptr else { return }
+                let peer = RTCPeer.from(ptr)
+                guard peer.acceptIncoming, peer.dc < 0, !peer.closed else { return }
+                peer.wire(dc)
+                if rtcIsOpen(dc) { peer.post { $0.onOpen?() } }
+            }
+        } else if offerer {
             var init_ = rtcDataChannelInit()  // reliable and ordered
             let dc = rtcCreateDataChannelEx(pc, "link", &init_)
             guard dc >= 0 else { rtcDeletePeerConnection(pc); return nil }
@@ -115,6 +140,31 @@ final class RTCPeer {
 
     var isOpen: Bool { dc >= 0 && !closed && rtcIsOpen(dc) }
 
+    /// Manual exchange, host: our own channel carries the link.
+    func useOwnChannel() {
+        guard ownDc >= 0, dc < 0, !closed else { return }
+        wire(ownDc)
+        if rtcIsOpen(ownDc) { post { $0.onOpen?() } }
+    }
+
+    /// Manual exchange, guest: the host's channel will arrive.
+    func useFriendsChannel() { acceptIncoming = true }
+
+    /// The local description as it stands (with the candidates gathered so
+    /// far), and its type.
+    var localDescription: (sdp: String, type: String)? {
+        guard !closed else { return nil }
+        func read(_ f: (Int32, UnsafeMutablePointer<CChar>?, Int32) -> Int32) -> String? {
+            let n = f(pc, nil, 0)
+            guard n > 0 else { return nil }
+            var buf = [CChar](repeating: 0, count: Int(n))
+            guard f(pc, &buf, n) > 0 else { return nil }
+            return String(cString: buf)
+        }
+        guard let sdp = read(rtcGetLocalDescription), let type = read(rtcGetLocalDescriptionType) else { return nil }
+        return (sdp, type)
+    }
+
     func setRemoteDescription(sdp: String, type: String) -> Bool {
         !closed && rtcSetRemoteDescription(pc, sdp, type) >= 0
     }
@@ -144,6 +194,7 @@ final class RTCPeer {
         guard !closed else { return }
         closed = true
         if dc >= 0 { rtcClose(dc); rtcDelete(dc) }
+        if ownDc >= 0 && ownDc != dc { rtcClose(ownDc); rtcDelete(ownDc) }
         if pc >= 0 { rtcClosePeerConnection(pc); rtcDeletePeerConnection(pc) }
     }
 

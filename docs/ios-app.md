@@ -33,7 +33,7 @@ the same frame).
 | Menu: Quick Save / Quick Load / Rewind to a Moment / Slow Motion, Main Menu, Save States, Manage Saves, Capture (Screenshot, Record, Clip that!, Printed Photos), Link Cable, Cheats, Settings, Report a Bug | `GameMenu` and the sheets |
 | Google Drive: sign in through the browser (the web's broker flow), one library with dingbat.gg (saves, states, sessions, pictures, the library file, renames, deletions with the "removed on another device" sheet), Drive-only tiles that download on tap, hand-off between devices, kept saves, the sync indicator and Sync now | `DriveAuth`, `DriveClient`, `DriveSync`, `DriveViews` |
 | Record and "Clip that!": the last minute replayed frame-exact from the clip ring into an MP4 (H.264 at 4x, AAC), with the "Save a Clip" range picker and progress; Record captures play as it happens. The file goes to the share sheet | `ClipExporter`, `ClipViews`, `dingbat_clip_*` |
-| Link Cable online: the same code on both sides pairs through the web's signaling server, then a WebRTC data channel carries the web's input-rollback protocol, so an iPhone links with a browser or another iPhone. Cross-game trades send each side's ROM first; pause and 2x drive both sides; Disconnect (two taps, menu or the bar's pill); idle auto-disconnect; the game plays on when the friend leaves | `NetLink`, `RTCPeer` (libdatachannel), `LinkSignaling`, `LinkCableView`, `dingbat_rollback_*` |
+| Link Cable online: the same code on both sides pairs through the web's signaling server, then a WebRTC data channel carries the web's input-rollback protocol, so an iPhone links with a browser or another iPhone. Cross-game trades send each side's ROM first; pause and 2x drive both sides; Disconnect (two taps, menu or the bar's pill); idle auto-disconnect; the game plays on when the friend leaves. With no server (or by choice) the manual code exchange: Share code / Copy code, the friend's code, Confirm; codes re-minted while unshared, the fallback when the server does not answer | `NetLink`, `RTCPeer` (libdatachannel), `LinkSignaling`, `SDPCodec` (the web's byte format), `LinkCableView`, `dingbat_rollback_*` |
 | Save States (9 slots, slot 1 is Quick, thumbnails), Manage Saves (export / import .sav incl. SharkPort and GameShark SP, reset; export / import .state), the rewind scrubber with its staged commit and Undo, Cheats, Printed Photos, Report a Bug (JSON with a state from any moment) | `SaveStatesView`, `ManageSavesView` + `SaveImport`, `RewindScrubberView`, `CheatsView`, `PrintsView`, `ReportBugView` |
 | Settings, all six sections with the web's rows, keys and defaults, the eleven app themes | `SettingsView`, `Settings`, `Theme` |
 | Presenter: colour correction per panel, None / LCD grid / RGB subpixels / hq4x / xBR, Game Boy shade palettes, the Super Game Boy border, integer scaling, LCD response, ambient glow, pinch zoom | `PresentShader` (the web shader in Metal), `GameRenderer`, `GameStage` |
@@ -66,10 +66,9 @@ the same frame).
 
 ## Left off, and why
 
-- **The link's manual code exchange** (trading SDP codes when the
-  signaling server is down) and the same-browser BroadcastChannel path:
-  the app needs the server to pair. **Local 2P** (two games on one
-  screen, the 2P tile) is not ported either.
+- **The link's same-browser BroadcastChannel path** (two tabs of one
+  browser): there is no second tab in an app. **Local 2P** (two games on
+  one screen, the 2P tile) is not ported either.
 - **Crash recovery beyond the minute checkpoint**: the checkpoint history,
   "Resume from earlier" and the "stopped unexpectedly" sheet.
 - **"Add pictures"** (picturing every game in one batch).

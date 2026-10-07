@@ -68,6 +68,13 @@ struct DingbatApp: App {
                     }
                     // `-link CODE`: Link Cable with that code once the game
                     // runs (DEBUG `-signal ws://host:8790` picks the server).
+                    // `-link-manual`: the manual code exchange (codes through
+                    // files in tmp/, see NetLink.debugManual).
+                    #if DEBUG
+                    if args.contains("-link-manual") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NetLink.shared.debugManual() }
+                    }
+                    #endif
                     if let code = value("-link") {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                             NetLink.shared.openSheet()
