@@ -41,7 +41,7 @@ struct AccountButton: View {
     @State private var open = false
 
     private var kind: String {
-        drive.status == .syncing ? "syncing" : drive.status == .offline ? "attention" : "ok"
+        drive.status == .syncing ? "syncing" : drive.status.stalled ? "attention" : "ok"
     }
 
     var body: some View {
@@ -67,7 +67,7 @@ struct AccountButton: View {
             .frame(width: 36, height: 34)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(drive.linked ? "Google Drive: " + (drive.status == .syncing ? "Syncing" : drive.status == .offline ? "Offline" : "Signed in") : "Sign in")
+        .accessibilityLabel(drive.linked ? "Google Drive: " + (drive.status == .syncing ? "Syncing" : drive.status.stalled ? drive.status.word : "Signed in") : "Sign in")
         .popover(isPresented: $open) {
             AccountMenu()
                 .environment(\.palette, palette)
@@ -132,7 +132,7 @@ struct AccountMenu: View {
                 }
                 let (title, sub) = statusText
                 HStack(alignment: .top, spacing: 10) {
-                    Circle().fill(drive.status == .offline ? palette.accent : drive.status == .syncing ? palette.textFaint : palette.live)
+                    Circle().fill(drive.status.stalled ? palette.accent : drive.status == .syncing ? palette.textFaint : palette.live)
                         .frame(width: 8, height: 8)
                         .padding(.top, 5)
                     VStack(alignment: .leading, spacing: 2) {
@@ -190,6 +190,9 @@ struct AccountMenu: View {
         switch drive.status {
         case .syncing:
             return ("Syncing with Google Drive…", n > 0 ? waiting + " going up." : "Checking for changes.")
+        case .paused:
+            return ("Google Drive needs you again",
+                    (n > 0 ? waiting + " waiting. They" : "Your changes") + " are safe on this device. Tap Sync now to reconnect.")
         case .offline:
             return ("Can't reach Google Drive",
                     (n > 0 ? waiting + " waiting. They" : "Your changes") + " are safe on this device and upload when Drive is back.")
@@ -211,20 +214,21 @@ struct SyncIndicator: View {
             HStack(spacing: 4) {
                 switch drive.status {
                 case .syncing: ProgressView().scaleEffect(0.55).tint(palette.statusInk)
-                case .offline: Image(systemName: "icloud.slash").font(.system(size: 11, weight: .semibold))
+                case .offline, .paused: Image(systemName: "icloud.slash").font(.system(size: 11, weight: .semibold))
                 default: Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
                 }
                 if hSize == .regular {
-                    Text(drive.status == .syncing ? "Syncing" : drive.status == .offline ? "Offline" : "Synced")
+                    Text(drive.status.word)
                         .font(.system(size: 11, design: .monospaced))
                 }
             }
-            .foregroundColor(drive.status == .offline ? palette.accent : palette.statusInk)
-            .frame(height: 20)
+            .foregroundColor(drive.status.stalled ? palette.accent : palette.statusInk)
+            .frame(minWidth: 24, minHeight: 20)
+            .contentShape(Rectangle())
+            .onTapGesture { AppModel.shared.toast(drive.status.desc) }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(drive.status == .syncing ? "Syncing your games with Google Drive"
-                                : drive.status == .offline ? "Offline — your changes will sync when you reconnect"
-                                : "All changes are synced to Google Drive")
+            .accessibilityLabel(drive.status.desc)
+            .accessibilityAddTraits(.isButton)
         }
     }
 }

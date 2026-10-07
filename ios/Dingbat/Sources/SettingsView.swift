@@ -750,6 +750,7 @@ private struct GeneralPane: View {
     @State private var advancedOpen = false
     @State private var hook = Settings.shared.saveWebhook
     @State private var hookStatus = ""
+    @ObservedObject private var hookSent = SaveWebhook.Status.shared
 
     var body: some View {
         SheetSubhead(text: "App theme", rule: false)
@@ -783,7 +784,7 @@ private struct GeneralPane: View {
         if advancedOpen {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Save webhook").font(.system(size: 14.5, weight: .medium))
-                Text("Every time a game writes its save, also send the save file to this address as an HTTP POST (form field “save”). Leave empty to turn off.")
+                Text("Every time a game writes its save, also send the save file to this address as an HTTP POST (form field “save”). Leave empty to turn off. Synced to your other devices when signed in.")
                     .font(.system(size: 12))
                     .foregroundColor(palette.textFaint)
                     .fixedSize(horizontal: false, vertical: true)
@@ -801,6 +802,8 @@ private struct GeneralPane: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border2, lineWidth: 1))
                 if !hookStatus.isEmpty {
                     Text(hookStatus).font(.system(size: 12)).foregroundColor(palette.textDim)
+                } else if !hookSent.text.isEmpty && !s.saveWebhook.isEmpty {
+                    Text(hookSent.text).font(.system(size: 12)).foregroundColor(palette.textDim)
                 }
             }
             .padding(.bottom, 18)
