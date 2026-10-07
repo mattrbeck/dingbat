@@ -1,0 +1,81 @@
+# The iOS app
+
+`ios/` is a native SwiftUI app around the core (`libdingbat.a`, built from
+`src/dingbat_ios.nim`). It follows the web front-end (`web/`): the same
+screens, labels, settings and defaults, so a player moving between
+dingbat.gg and the app finds the same thing. This page says what the app
+has, where it differs from the web, and what it leaves off.
+
+Build: `ios/build-core.sh` (both slices), then `cd ios && xcodegen
+generate` and build the `Dingbat` scheme. The presenter's Metal shader is
+compiled at launch (`PresentShader.swift`), so the build needs no Metal
+toolchain. The C API is tested on the desktop by
+`tests/ios_api_test.nim` (`nimble test_iosapi`, in CI on Linux).
+
+## What matches the web
+
+| Web | iOS |
+|---|---|
+| Home: brand, hero (paused / closed, Resume · Play · Close · ⋯), library grid with pictures and cartridge labels, search / system chips / sort from 9 games, tile menu (Rename, Reset save data, Delete), Add a game (a ROM or a .zip with box art) | `HomeView`, `HeroView`, `LibraryGrid`, `Cartridge`, `TileMenu` |
+| Sessions: the `stateauto` snapshot on leaving a game and every minute of play, valid only while the save it carries is the stored one; "Opening a game from the library" (Resume / From save) and the "Last session saved … Resume" offer | `GameSession.persistSession`, `RomLibrary.resumableSession`, `AppModel.launch` |
+| In-game top bar: menu, reset (Undo), rewind (hold; double tap opens the scrubber), pause, frame step while paused, 2x, fast-forward, tilt recenter, camera, fps when unusual / SLEEPING, muted-channels pill, enhanced-music note, volume | `PlayView.swift` (`TopBar`) |
+| Phone landscape: see-through pads (Outline / Bold / Solid), chevron d-pad, Select/Start pills inboard, a tap on the picture shows and hides the bar | `PlayLayout`, `TouchControls`, `GameStage` |
+| Portrait, tablet rails, Large controls, joystick (fixed / floating), Game Boy games without L/R; controls fixed-size, the picture yields | `PlayLayout`, `TouchControls` |
+| Menu: Quick Save / Quick Load / Rewind to a Moment / Slow Motion, Main Menu, Save States, Manage Saves, Capture (Screenshot, Printed Photos), Cheats, Settings, Report a Bug | `GameMenu` and the sheets |
+| Save States (9 slots, slot 1 is Quick, thumbnails), Manage Saves (export / import .sav incl. SharkPort and GameShark SP, reset; export / import .state), the rewind scrubber with its staged commit and Undo, Cheats, Printed Photos, Report a Bug (JSON with a state from any moment) | `SaveStatesView`, `ManageSavesView` + `SaveImport`, `RewindScrubberView`, `CheatsView`, `PrintsView`, `ReportBugView` |
+| Settings, all six sections with the web's rows, keys and defaults, the eleven app themes | `SettingsView`, `Settings`, `Theme` |
+| Presenter: colour correction per panel, None / LCD grid / RGB subpixels / hq4x / xBR, Game Boy shade palettes, the Super Game Boy border, integer scaling, LCD response, ambient glow, pinch zoom | `PresentShader` (the web shader in Metal), `GameRenderer`, `GameStage` |
+| Speeds and audio: 2x, unbounded fast-forward, slow motion, rewind, run-ahead, pitch-correct fast-forward, enhanced music, audio interpolation, the 12 kHz analog filter, channel mutes, Play in Silent Mode | `GameSession`, `AudioOutput`, `dingbat_ios_audio.c` |
+| Controllers (web mapping; RT holds fast-forward, LT rewind, R3 or Select+Start held opens the menu paused; hide touch controls), rumble, tilt carts, the Game Boy Camera, the Game Boy Printer, the save webhook | `Controllers`, `Peripherals`, `GameSession` |
+
+## Native differences
+
+- **Haptics.** A light tick on every touch-control press (Settings ›
+  Controls › Haptic feedback, on by default); rumble drives Core Haptics on
+  the phone and controller. The web can only vibrate on Android.
+- **Files.** ROMs, saves and states are plain files in the app's Documents
+  folder, visible in the Files app (layout in `RomLibrary.swift`). Exports
+  go through the share sheet. There is no storage budget or eviction.
+- **Tilt** starts when a tilt cart loads (Core Motion needs no permission);
+  the web asks first. The web's flick (jolt) channel is not ported.
+- **A state from a newer dingbat** says to update the app; the web
+  downloads its newer build and offers the load again.
+- **Pausing** for the background, the app switcher or a call takes the
+  session and flushes the save, as the web does on a hidden tab.
+- **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
+  menu is a sheet on iPad too; in a game the toasts sit under the top bar,
+  clear of the controls.
+
+## Left off, and why
+
+- **Link cable, online and local 2P** (rooms, manual codes, rollback,
+  `#net-modal`, the 2P tile). Online play needs WebRTC (or a native
+  transport to the signaling server); local 2P was left with it.
+- **Google Drive sync** and everything built on it: the account slot,
+  sync indicator and Sync now, Drive-only and missing tiles (download,
+  Remove from this device, Find the file), "On device" / "On Drive" chips,
+  hand-off between devices, kept saves (Restore old save), the "Games
+  removed on another device" sheet. It needs an iOS OAuth client and a
+  native Drive client.
+- **Record and "Clip that!"** The web encodes with MediaRecorder /
+  WebCodecs; a native version needs AVAssetWriter and the core's clip
+  exports (`clip_*` in `dingbat_wasm.nim`), not yet in the iOS API.
+- **Crash recovery beyond the minute checkpoint**: the checkpoint history,
+  "Resume from earlier" and the "stopped unexpectedly" sheet.
+- **"Add pictures"** (picturing every game in one batch).
+- **Controller navigation of the library, menus and Settings.** In a game
+  the controller plays; elsewhere it does nothing yet.
+- **Hardware keyboards**: key bindings and the keyboard shortcuts list.
+- **Web-only plumbing**: the service worker's update button and Force
+  update, Fullscreen, the diagnostic log, drag and drop, the "File Check
+  Failed" header warning, picture flights between the hero and the game.
+
+## Not verified on a device
+
+Everything above was built for the simulator and the device and checked in
+headless simulator screenshots; the C API is covered by
+`tests/ios_api_test.nim`. Taps could not be driven there, so these need a
+pass on a real iPhone and iPad: touch routing, every sheet's buttons,
+import/export through the share sheet and Files, the rewind scrubber's
+commit, controllers, rumble, tilt, the camera, audio (Play in Silent Mode,
+interruptions) and performance.
