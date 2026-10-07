@@ -95,6 +95,7 @@ final class GameSession: NSObject, ObservableObject {
     @discardableResult
     func open(_ entry: RomEntry, resume: Bool) -> OpenResult {
         ClipExporter.shared.gameLeaving()
+        NetLink.shared.shutdown()
         if game != nil { leaveGame() }
         dingbat_init()
         let bios = entry.isGBA ? RomLibrary.gbaBiosURL : RomLibrary.gbcBootromURL
@@ -166,6 +167,7 @@ final class GameSession: NSObject, ObservableObject {
     func close() {
         guard game != nil else { return }
         ClipExporter.shared.gameLeaving()
+        NetLink.shared.shutdown()
         leaveGame()
         stopLink()
         dingbat_unload(1)
@@ -184,6 +186,7 @@ final class GameSession: NSObject, ObservableObject {
     func discard() {
         guard game != nil else { return }
         ClipExporter.shared.gameLeaving()
+        NetLink.shared.shutdown()
         stopLink()
         dingbat_unload(0)
         game = nil
@@ -266,6 +269,22 @@ final class GameSession: NSObject, ObservableObject {
             fpsAccount(now, ran: 0)
             return
         }
+        if NetLink.shared.linked {
+            ran = linkedFrames(dt: dt)
+            if ran > 0 {
+                sessionMoved = true
+                saveCheckTime += dt
+                present()
+                if saveCheckTime >= 1 {
+                    saveCheckTime = 0
+                    checkSaveChanged()
+                }
+            }
+            watchLinkIdle(now)
+            fpsAccount(now, ran: ran)
+            onTick?()
+            return
+        }
         switch speed {
         case .fastForward:
             // As many frames as fit in most of this display interval.
@@ -320,6 +339,174 @@ final class GameSession: NSObject, ObservableObject {
         sleeping = dingbat_is_stopped() != 0
         fpsAccount(now, ran: ran)
         onTick?()
+    }
+
+    // MARK: online link
+
+    /// The link idle watch (web RB_IDLE_*): only the emulated cable's
+    /// activity counts, never game knowledge. Lenient until the cable has
+    /// seen real use, tight after; both reset on every transfer.
+    private var linkUsed = false
+    private var linkBusy = false
+    private var linkTransfers: Int32 = 0
+    private var linkActivity: CFTimeInterval = 0
+
+    /// One tick of linked play: frames while the audio wants them (or the
+    /// clock, with no audio engine), each sent to the friend with this
+    /// player's buttons. A stall (-1) waits for the friend's input.
+    private func linkedFrames(dt: CFTimeInterval) -> Int {
+        let cap = speed == .double ? 8 : 4
+        var bits: UInt16 = 0
+        for id in held where id >= 0 && id < 10 { bits |= UInt16(1) << UInt16(id) }
+        var ran = 0
+        #if DEBUG
+        if let stop = Self.linkStopAt, dingbat_rollback_head() >= stop {
+            linkDebugDump()
+            return 0
+        }
+        if Self.linkPress {
+            // A changing pattern, so the friend mispredicts and rolls back.
+            let h = Int(dingbat_rollback_head())
+            bits = (h / 23) % 2 == 0 ? 1 << 4 : (h / 37) % 2 == 0 ? 1 << 3 : 0
+        }
+        #endif
+        func step() -> Bool {
+            #if DEBUG
+            if let stop = Self.linkStopAt, dingbat_rollback_head() >= stop { return false }
+            #endif
+            let f = dingbat_rollback_tick(Int32(bits))
+            guard f >= 0 else { return false }
+            NetLink.shared.sendInput(frame: f, bits: bits)
+            ran += 1
+            return true
+        }
+        if AudioOutput.shared.isRunning {
+            clockDebt = 0
+            while dingbat_audio_ahead() == 0 && ran < cap { if !step() { break } }
+        } else {
+            let rate = speed == .double ? 119.5 : 59.7
+            clockDebt = min(clockDebt + dt * rate, Double(cap))
+            dingbat_audio_clear()
+            while clockDebt >= 1 && ran < cap {
+                if !step() { clockDebt = 0; break }
+                clockDebt -= 1
+            }
+            AudioOutput.shared.restartIfNeeded()
+        }
+        return ran
+    }
+
+    #if DEBUG
+    /// `-link-stop-at F`: stop ticking at frame F; once the friend's inputs
+    /// have caught up, log both cores' state hashes (ios/e2e/link.mjs
+    /// compares them with the browser's). `-link-press`: scripted buttons.
+    static let linkStopAt: Int32? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-link-stop-at"), i + 1 < a.count else { return nil }
+        return Int32(a[i + 1])
+    }()
+    static let linkPress = ProcessInfo.processInfo.arguments.contains("-link-press")
+    private var linkDumped = false
+    private func linkDebugDump() {
+        guard !linkDumped else { return }
+        let head = dingbat_rollback_head(), conf = dingbat_rollback_confirmed()
+        let file = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("linkdump.txt")
+        guard conf == head - 1 else {
+            try? "waiting head=\(head) confirmed=\(conf)\n".write(to: file, atomically: true, encoding: .utf8)
+            return
+        }
+        linkDumped = true
+        var out = "LINKDUMP head=\(head) confirmed=\(conf)"
+        for p in Int32(0)...1 {
+            let n = Int(dingbat_rollback_dump_size(p))
+            var h: UInt32 = 0x811c9dc5
+            if n > 0, let d = dingbat_rollback_dump_data() {
+                let b = d.assumingMemoryBound(to: UInt8.self)
+                for i in 0 ..< n { h = (h ^ UInt32(b[i])) &* 0x01000193 }
+            }
+            out += " p\(p)=\(n):\(String(h, radix: 16))"
+        }
+        try? (out + "\n").write(to: file, atomically: true, encoding: .utf8)
+    }
+    #endif
+
+    private func watchLinkIdle(_ now: CFTimeInterval) {
+        let t = dingbat_rollback_transfers()
+        if t != linkTransfers {
+            linkTransfers = t
+            linkActivity = now
+            if t > 0 { linkUsed = true }
+            if t >= 300 { linkBusy = true }
+        } else if linkUsed && now - linkActivity > (linkBusy ? 20 : 90) {
+            linkUsed = false
+            NetLink.shared.idleDisconnect()
+        }
+    }
+
+    /// The session is about to take the core: nothing of the solo game's
+    /// extras may run on into it.
+    func linkWillStart() {
+        ClipExporter.shared.gameLeaving()
+        rewinding = false
+        setSpeed(.normal)
+    }
+
+    /// Linked: the session's core is the game now (web enterRollbackMode).
+    func enterLinked() {
+        linkUsed = false
+        linkBusy = false
+        linkTransfers = 0
+        linkActivity = CACurrentMediaTime()
+        lastTick = 0
+        clockDebt = 0
+        // Not relayed: the friend unfreezes on its own start.
+        if paused {
+            paused = false
+            UIApplication.shared.isIdleTimerDisabled = true
+            AudioOutput.shared.refreshSession()
+        }
+        present()
+    }
+
+    /// The session handed this player's core back as the solo game.
+    func leaveLinked() {
+        if speed != .normal { setSpeed(.normal) }
+        lastSaveSig = game.map { RomLibrary.currentSaveSig($0) } ?? nil
+        sessionMoved = true
+        guard let g = game, dingbat_loaded() != 0 else { return }
+        // The kept core is the session's own: what the solo core carried
+        // goes back on, as after a reset.
+        CheatStore.restore(for: g)
+        if hasCamera { _ = dingbat_camera_attach() }
+        applyHle()
+        present()
+    }
+
+    /// A session that took the core and could not run gives the game back
+    /// as it was, still frozen under the link sheet.
+    func restoreAfterFailedLink(_ state: Data) {
+        guard let g = game, dingbat_loaded() == 0 else { return }
+        open(g, resume: false)
+        apply(state: state, keepRewind: false)
+        setPaused(true, relay: false)
+    }
+
+    /// The friend paused or resumed: match without sending it back. A sheet
+    /// holding the game keeps it, and closing the sheet gives the friend's
+    /// choice back (web applyRemotePause).
+    func remotePause(_ on: Bool) {
+        let model = AppModel.shared
+        if model.sheet != nil {
+            model.sheetPausedGame = !on
+            if on && !paused { setPaused(true, relay: false) }
+            return
+        }
+        guard model.screen == .play else { return }
+        setPaused(on, relay: false)
+    }
+
+    func remoteSpeed(_ on: Bool) {
+        setSpeed(on ? .double : .normal, relay: false)
     }
 
     private func present() {
@@ -403,9 +590,10 @@ final class GameSession: NSObject, ObservableObject {
 
     // MARK: pause / speed / rewind
 
-    func setPaused(_ p: Bool) {
+    func setPaused(_ p: Bool, relay: Bool = true) {
         guard game != nil, paused != p else { return }
         paused = p
+        if relay && NetLink.shared.linked { NetLink.shared.sendPause(p) }
         pausedForBackground = false
         // The screen stays awake while a game runs (web: Screen Wake Lock).
         UIApplication.shared.isIdleTimerDisabled = !p
@@ -424,7 +612,12 @@ final class GameSession: NSObject, ObservableObject {
 
     func togglePause() { setPaused(!paused) }
 
-    func setSpeed(_ s: Speed) {
+    func setSpeed(_ s: Speed, relay: Bool = true) {
+        // Linked, only 2x: both sides run it together.
+        if NetLink.shared.linked {
+            guard s == .normal || s == .double else { return }
+            if relay && s != speed { NetLink.shared.sendSpeed(s == .double) }
+        }
         speed = s
         dingbat_set_fast_forward(s == .fastForward ? 1 : 0)
         dingbat_set_turbo(s == .double ? 1 : 0)
@@ -451,7 +644,7 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     func setRewinding(_ r: Bool) {
-        guard game != nil, Settings.shared.rewind else { rewinding = false; return }
+        guard game != nil, Settings.shared.rewind, !NetLink.shared.linked else { rewinding = false; return }
         if r && paused { setPaused(false) }
         rewinding = r
         if r { dingbat_audio_clear() }
@@ -459,7 +652,7 @@ final class GameSession: NSObject, ObservableObject {
 
     /// One frame while paused; its audio is dropped.
     func stepFrame() {
-        guard game != nil else { return }
+        guard game != nil, !NetLink.shared.linked else { return }
         if !paused { setPaused(true) }
         dingbat_run_frame()
         dingbat_audio_clear()
@@ -602,7 +795,7 @@ final class GameSession: NSObject, ObservableObject {
 
     /// Hard reset from the save, with Undo (web #reset).
     func reset() {
-        guard game != nil else { return }
+        guard game != nil, !NetLink.shared.holdsCore else { return }
         let undo = captureState()
         _ = dingbat_reset()
         // A reset builds a fresh core: cheats and the camera's feed go with
@@ -626,6 +819,7 @@ final class GameSession: NSObject, ObservableObject {
     /// the last one: the state, what save it carries, and its picture.
     func persistSession() {
         guard let g = game, sessionMoved else { return }
+        guard !NetLink.shared.holdsCore else { dingbat_flush_save(); return }
         dingbat_flush_save()
         guard let bytes = captureState() else { return }
         let meta = SessionMeta(ts: DriveSync.now(), saveSig: RomLibrary.currentSaveSig(g),

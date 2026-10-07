@@ -274,6 +274,7 @@ struct TopBar: View {
     @EnvironmentObject var settings: Settings
     @Environment(\.palette) var palette
     @Environment(\.horizontalSizeClass) var hSize
+    @ObservedObject private var link = NetLink.shared
 
     private var wide: Bool { hSize == .regular }
 
@@ -300,6 +301,7 @@ struct TopBar: View {
                 }
             }
             Spacer(minLength: 2)
+            if link.linked { LinkDisconnectPill(wide: wide) }
             SyncIndicator()
             StatusReadout()
             if settings.channelMutes != 0 {
@@ -318,7 +320,7 @@ struct TopBar: View {
                 }
                 .accessibilityLabel("Muted channels")
             }
-            if settings.mp2kHle && session.mp2kAvailable {
+            if settings.mp2kHle && session.mp2kAvailable && !link.linked {
                 BarIconButton(system: "music.note", label: "Enhanced music",
                               active: session.hleActive && !session.hleSessionOff) {
                     session.hleSessionOff.toggle()
@@ -342,6 +344,36 @@ struct TopBar: View {
             }
         )
         .overlay(Rectangle().fill(palette.frameLine).frame(height: 1), alignment: .bottom)
+    }
+}
+
+/// web #rb-disconnect: linked, a pill in the bar; two taps end the session.
+struct LinkDisconnectPill: View {
+    let wide: Bool
+    @Environment(\.palette) var palette
+    @State private var armed = false
+
+    var body: some View {
+        Button {
+            if armed {
+                armed = false
+                NetLink.shared.disconnect()
+            } else {
+                armed = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { armed = false }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                if wide && !armed { Image(systemName: "cable.connector") }
+                Text(armed ? "Are you sure?" : wide ? "Disconnect Link Cable" : "Disconnect")
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(armed ? .white : palette.accent)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(Capsule().fill(armed ? palette.danger : palette.accentGlow.opacity(0.4)))
+        }
+        .accessibilityLabel("Disconnect link cable")
     }
 }
 
@@ -412,11 +444,15 @@ struct PlaybackCluster: View {
     @GestureState private var rewindHeld = false
     @GestureState private var stepHeld = false
 
+    @ObservedObject private var link = NetLink.shared
+
     var body: some View {
         let w: CGFloat = hSize == .regular ? 34 : 30
         HStack(spacing: hSize == .regular ? 6 : 2) {
-            BarIconButton(system: "arrow.counterclockwise", label: "Reset", width: w) { session.reset() }
-            if settings.rewind {
+            if !link.linked {
+                BarIconButton(system: "arrow.counterclockwise", label: "Reset", width: w) { session.reset() }
+            }
+            if settings.rewind && !link.linked {
                 rewindButton(width: w)
             }
             BarIconButton(system: session.paused ? "play.fill" : "pause.fill",
@@ -424,17 +460,19 @@ struct PlaybackCluster: View {
                 model.closeMenu()
                 session.togglePause()
             }
-            if session.paused {
+            if session.paused && !link.linked {
                 stepButton(width: w)
-            } else {
+            } else if !session.paused {
                 Button { session.toggleDouble() } label: {
                     SpeedGlyph(count: 2, active: session.speed == .double, width: w)
                 }
                 .accessibilityLabel("2x Speed")
-                Button { session.toggleFastForward() } label: {
-                    SpeedGlyph(count: 3, active: session.speed == .fastForward, width: w)
+                if !link.linked {
+                    Button { session.toggleFastForward() } label: {
+                        SpeedGlyph(count: 3, active: session.speed == .fastForward, width: w)
+                    }
+                    .accessibilityLabel("Fast Forward")
                 }
-                .accessibilityLabel("Fast Forward")
             }
         }
     }
@@ -644,7 +682,9 @@ struct GameMenu: View {
     @Environment(\.palette) var palette
     @Environment(\.horizontalSizeClass) var hSize
     @State private var captureOpen = false
+    @State private var disconnectArmed = false
     @ObservedObject private var clips = ClipExporter.shared
+    @ObservedObject private var link = NetLink.shared
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -654,30 +694,10 @@ struct GameMenu: View {
                 .onTapGesture { model.closeMenu() }
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    quickRow
+                    if !link.linked { quickRow }
                     item("house", "Main Menu") { model.showMainMenu() }
                     sep
-                    item("square.grid.2x2", "Save States") { model.openSheet(.states) }
-                    item("folder", "Manage Saves") { model.openSheet(.saves) }
-                    item("camera", "Capture", trailing: captureOpen ? "chevron.down" : "chevron.right",
-                         dot: model.newPrints) {
-                        withAnimation(.easeOut(duration: 0.15)) { captureOpen.toggle() }
-                    }
-                    if captureOpen {
-                        item("camera.viewfinder", "Screenshot", sub: true) { screenshot() }
-                        item(clips.recording ? "stop.circle.fill" : "record.circle",
-                             clips.recording ? "Stop Recording" : "Record", sub: true,
-                             tint: clips.recording ? palette.danger : nil) {
-                            model.closeMenu()
-                            clips.toggleRecording()
-                        }
-                        item("film.stack", "Clip that!", sub: true) { model.openSheet(.clip) }
-                        if !PrintStore.all().isEmpty {
-                            item("printer", "Printed Photos", sub: true, dot: model.newPrints) {
-                                model.openSheet(.prints)
-                            }
-                        }
-                    }
+                    if !link.linked { soloItems }
                     if hSize != .regular {
                         HStack(spacing: 10) {
                             Image(systemName: "speaker.wave.2")
@@ -688,7 +708,8 @@ struct GameMenu: View {
                         .frame(height: 44)
                     }
                     sep
-                    item("star", "Cheats") { model.openSheet(.cheats) }
+                    linkItem
+                    if !link.linked { item("star", "Cheats") { model.openSheet(.cheats) } }
                     item("gearshape", "Settings") { model.openSheet(.settings(section: nil)) }
                     sep
                     item("ladybug", "Report a Bug") { model.openSheet(.report) }
@@ -704,6 +725,50 @@ struct GameMenu: View {
             .padding(.top, 56)
             .padding(.leading, hSize == .regular ? 120 : 10)
             .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
+        }
+    }
+
+    /// Link Cable, or while linked a two-step Disconnect (a mis-tap would
+    /// end the session for both).
+    @ViewBuilder private var linkItem: some View {
+        if link.linked {
+            item("cable.connector", disconnectArmed ? "Are you sure?" : "Disconnect",
+                 tint: disconnectArmed ? palette.danger : nil) {
+                if disconnectArmed {
+                    disconnectArmed = false
+                    model.closeMenu()
+                    link.disconnect()
+                } else {
+                    disconnectArmed = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { disconnectArmed = false }
+                }
+            }
+        } else {
+            item("cable.connector", "Link Cable") { link.openSheet() }
+        }
+    }
+
+    @ViewBuilder private var soloItems: some View {
+        item("square.grid.2x2", "Save States") { model.openSheet(.states) }
+        item("folder", "Manage Saves") { model.openSheet(.saves) }
+        item("camera", "Capture", trailing: captureOpen ? "chevron.down" : "chevron.right",
+             dot: model.newPrints) {
+            withAnimation(.easeOut(duration: 0.15)) { captureOpen.toggle() }
+        }
+        if captureOpen {
+            item("camera.viewfinder", "Screenshot", sub: true) { screenshot() }
+            item(clips.recording ? "stop.circle.fill" : "record.circle",
+                 clips.recording ? "Stop Recording" : "Record", sub: true,
+                 tint: clips.recording ? palette.danger : nil) {
+                model.closeMenu()
+                clips.toggleRecording()
+            }
+            item("film.stack", "Clip that!", sub: true) { model.openSheet(.clip) }
+            if !PrintStore.all().isEmpty {
+                item("printer", "Printed Photos", sub: true, dot: model.newPrints) {
+                    model.openSheet(.prints)
+                }
+            }
         }
     }
 

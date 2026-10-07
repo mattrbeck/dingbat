@@ -66,6 +66,14 @@ struct DingbatApp: App {
                             DispatchQueue.main.asyncAfter(deadline: .now() + r) { ClipExporter.shared.stopRecording() }
                         }
                     }
+                    // `-link CODE`: Link Cable with that code once the game
+                    // runs (DEBUG `-signal ws://host:8790` picks the server).
+                    if let code = value("-link") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            NetLink.shared.openSheet()
+                            NetLink.shared.connectTapped(code: code)
+                        }
+                    }
                     if let c = value("-clip-after").flatMap(Double.init) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + c) {
                             ClipExporter.shared.exportClip(startAgo: 3600, endAgo: 0, slug: "clipcheck", label: "Everything")
@@ -98,6 +106,7 @@ struct DingbatApp: App {
                 case "prints": model.openSheet(.prints)
                 case "report": model.openSheet(.report)
                 case "clip": model.openSheet(.clip)
+                case "link": NetLink.shared.openSheet()
                 case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }
                 case "rename": if let e = entries.first { model.openSheet(.rename(e)) }
                 default: break
@@ -180,6 +189,7 @@ struct SheetHost: View {
         case .prints: PrintsView()
         case .report: ReportBugView()
         case .clip: ClipRangeView()
+        case .link: LinkCableView()
         case .tileMenu(let e): TileMenuView(entry: e)
         case .rename(let e): RenameView(entry: e)
         }

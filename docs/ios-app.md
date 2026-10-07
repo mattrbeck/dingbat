@@ -6,11 +6,20 @@ screens, labels, settings and defaults, so a player moving between
 dingbat.gg and the app finds the same thing. This page says what the app
 has, where it differs from the web, and what it leaves off.
 
-Build: `ios/build-core.sh` (both slices), then `cd ios && xcodegen
-generate` and build the `Dingbat` scheme. The presenter's Metal shader is
-compiled at launch (`PresentShader.swift`), so the build needs no Metal
-toolchain. The C API is tested on the desktop by
-`tests/ios_api_test.nim` (`nimble test_iosapi`, in CI on Linux).
+Build: `ios/build-core.sh` and `ios/build-webrtc.sh` (both slices; the
+second fetches libdatachannel and mbedTLS at pinned tags into `ios/deps`
+and needs CMake and Ninja), then `cd ios && xcodegen generate` and build
+the `Dingbat` scheme. The presenter's Metal shader is compiled at launch
+(`PresentShader.swift`), so the build needs no Metal toolchain. The C API
+is tested on the desktop by `tests/ios_api_test.nim` (`nimble
+test_iosapi`, in CI on Linux).
+
+Tests against the real web build, on a headless simulator (both muted):
+`node ios/e2e/drive-sync.mjs <Dingbat.app>` (one Drive library across the
+app and a browser, through a fake Drive) and `node ios/e2e/link.mjs
+<Dingbat.app>` (an online link between the app and Chromium through a local
+signaling server; both must hold byte-identical states for both players at
+the same frame).
 
 ## What matches the web
 
@@ -21,7 +30,10 @@ toolchain. The C API is tested on the desktop by
 | In-game top bar: menu, reset (Undo), rewind (hold; double tap opens the scrubber), pause, frame step while paused, 2x, fast-forward, tilt recenter, camera, fps when unusual / SLEEPING, muted-channels pill, enhanced-music note, volume | `PlayView.swift` (`TopBar`) |
 | Phone landscape: see-through pads (Outline / Bold / Solid), chevron d-pad, Select/Start pills inboard, a tap on the picture shows and hides the bar | `PlayLayout`, `TouchControls`, `GameStage` |
 | Portrait, tablet rails, Large controls, joystick (fixed / floating), Game Boy games without L/R; controls fixed-size, the picture yields | `PlayLayout`, `TouchControls` |
-| Menu: Quick Save / Quick Load / Rewind to a Moment / Slow Motion, Main Menu, Save States, Manage Saves, Capture (Screenshot, Printed Photos), Cheats, Settings, Report a Bug | `GameMenu` and the sheets |
+| Menu: Quick Save / Quick Load / Rewind to a Moment / Slow Motion, Main Menu, Save States, Manage Saves, Capture (Screenshot, Record, Clip that!, Printed Photos), Link Cable, Cheats, Settings, Report a Bug | `GameMenu` and the sheets |
+| Google Drive: sign in through the browser (the web's broker flow), one library with dingbat.gg (saves, states, sessions, pictures, the library file, renames, deletions with the "removed on another device" sheet), Drive-only tiles that download on tap, hand-off between devices, kept saves, the sync indicator and Sync now | `DriveAuth`, `DriveClient`, `DriveSync`, `DriveViews` |
+| Record and "Clip that!": the last minute replayed frame-exact from the clip ring into an MP4 (H.264 at 4x, AAC), with the "Save a Clip" range picker and progress; Record captures play as it happens. The file goes to the share sheet | `ClipExporter`, `ClipViews`, `dingbat_clip_*` |
+| Link Cable online: the same code on both sides pairs through the web's signaling server, then a WebRTC data channel carries the web's input-rollback protocol, so an iPhone links with a browser or another iPhone. Cross-game trades send each side's ROM first; pause and 2x drive both sides; Disconnect (two taps, menu or the bar's pill); idle auto-disconnect; the game plays on when the friend leaves | `NetLink`, `RTCPeer` (libdatachannel), `LinkSignaling`, `LinkCableView`, `dingbat_rollback_*` |
 | Save States (9 slots, slot 1 is Quick, thumbnails), Manage Saves (export / import .sav incl. SharkPort and GameShark SP, reset; export / import .state), the rewind scrubber with its staged commit and Undo, Cheats, Printed Photos, Report a Bug (JSON with a state from any moment) | `SaveStatesView`, `ManageSavesView` + `SaveImport`, `RewindScrubberView`, `CheatsView`, `PrintsView`, `ReportBugView` |
 | Settings, all six sections with the web's rows, keys and defaults, the eleven app themes | `SettingsView`, `Settings`, `Theme` |
 | Presenter: colour correction per panel, None / LCD grid / RGB subpixels / hq4x / xBR, Game Boy shade palettes, the Super Game Boy border, integer scaling, LCD response, ambient glow, pinch zoom | `PresentShader` (the web shader in Metal), `GameRenderer`, `GameStage` |
@@ -42,24 +54,22 @@ toolchain. The C API is tested on the desktop by
   downloads its newer build and offers the load again.
 - **Pausing** for the background, the app switcher or a call takes the
   session and flushes the save, as the web does on a hidden tab.
+- **Sign-in** opens Google's consent page in the system browser sheet;
+  the web's `oauth-callback.html` hands an app sign-in on to
+  `dingbat://oauth`, so that page must be deployed for the app to sign in.
+- **Linked play paces by the audio clock**, as solo play does, rather than
+  by the display; the web paces by requestAnimationFrame. Either side
+  stalls at the prediction window when the other falls behind.
 - **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.
 
 ## Left off, and why
 
-- **Link cable, online and local 2P** (rooms, manual codes, rollback,
-  `#net-modal`, the 2P tile). Online play needs WebRTC (or a native
-  transport to the signaling server); local 2P was left with it.
-- **Google Drive sync** and everything built on it: the account slot,
-  sync indicator and Sync now, Drive-only and missing tiles (download,
-  Remove from this device, Find the file), "On device" / "On Drive" chips,
-  hand-off between devices, kept saves (Restore old save), the "Games
-  removed on another device" sheet. It needs an iOS OAuth client and a
-  native Drive client.
-- **Record and "Clip that!"** The web encodes with MediaRecorder /
-  WebCodecs; a native version needs AVAssetWriter and the core's clip
-  exports (`clip_*` in `dingbat_wasm.nim`), not yet in the iOS API.
+- **The link's manual code exchange** (trading SDP codes when the
+  signaling server is down) and the same-browser BroadcastChannel path:
+  the app needs the server to pair. **Local 2P** (two games on one
+  screen, the 2P tile) is not ported either.
 - **Crash recovery beyond the minute checkpoint**: the checkpoint history,
   "Resume from earlier" and the "stopped unexpectedly" sheet.
 - **"Add pictures"** (picturing every game in one batch).
@@ -74,8 +84,11 @@ toolchain. The C API is tested on the desktop by
 
 Everything above was built for the simulator and the device and checked in
 headless simulator screenshots; the C API is covered by
-`tests/ios_api_test.nim`. Taps could not be driven there, so these need a
+`tests/ios_api_test.nim`, Drive and the link by the `ios/e2e` tests
+against the web build. Taps could not be driven there, so these need a
 pass on a real iPhone and iPad: touch routing, every sheet's buttons,
 import/export through the share sheet and Files, the rewind scrubber's
 commit, controllers, rumble, tilt, the camera, audio (Play in Silent Mode,
-interruptions) and performance.
+interruptions) and performance; real Google sign-in (needs the deployed
+callback page); and an online link across two networks (the tests pair on
+one machine, so NAT traversal over STUN is unproven from the app).

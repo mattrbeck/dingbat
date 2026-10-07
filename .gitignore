@@ -97,6 +97,7 @@ dist/
 
 # iOS build artifacts (built by ios/build-core.sh / xcodegen)
 ios/lib/
+ios/deps/
 ios/Dingbat.xcodeproj/
 ios/build/
 ios/DerivedData/
