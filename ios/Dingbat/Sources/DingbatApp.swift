@@ -20,7 +20,7 @@ struct DingbatApp: App {
     ///
     /// More hooks for screenshots, applied in order after it:
     ///   -landscape            rotate to landscape
-    ///   -theme <name>         app theme for this run (not saved)
+    ///   -theme <name>         app theme (saved, as a pick in Settings is)
     ///   -home                 Main Menu (the paused hero)
     ///   -menu                 open the in-game menu
     ///   -sheet <id>           open a sheet: settings[:section], states,
