@@ -535,6 +535,17 @@ struct LibraryTile: View {
                 .frame(width: 28, height: 26)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
                 .padding(6)
+        } else if local && TwoPlayer.enabled {
+            // web ?2p: two linked cores of this game on one screen.
+            Button { model.launchTwoPlayer(entry) } label: {
+                Text("2P")
+                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                    .foregroundColor(Color.white.opacity(0.9))
+                    .frame(width: 28, height: 26)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
+            }
+            .padding(6)
+            .accessibilityLabel("Start 2-player link: \(entry.name)")
         } else if !local {
             Button {
                 if onDrive { model.downloadOnly(entry) } else { model.relinking = entry }

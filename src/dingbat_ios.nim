@@ -82,6 +82,15 @@ var rbLocal = 0                         # the core this player drives
 var rbEpoch: int64 = 0                  # the shared RTC clock
 proc rb_active(): bool {.inline.} = rbGba != nil or rbGb != nil
 proc dingbat_rollback_exit() {.exportc, cdecl.}
+# Local 2P (web link_*): two cores of one ROM on the in-process cable. Player
+# 1's core is the live one as above (its save is the game's, its sound the
+# one heard); player 2's runs silent on its own battery file.
+var lkGba: gbalink.Link = nil
+var lkGb: gblink.GbLink = nil
+proc lk_active(): bool {.inline.} = lkGba != nil or lkGb != nil
+proc dingbat_link_exit() {.exportc, cdecl.}
+## A session owns the live core: nothing outside it may move it.
+proc core_shared(): bool {.inline.} = rb_active() or lk_active()
 
 proc dingbat_audio_set_mode(mode: cint) {.importc, cdecl.}
 proc dingbat_audio_get_mode(): cint {.importc, cdecl.}
@@ -230,6 +239,12 @@ proc apply_audio() =
     let rc = rbGb.link.cores[1 - rbLocal]
     rc.apu.silent = true
     rc.apu.audio_dev = 0
+  if lkGba != nil:
+    lkGba.cores[1].set_audio_silent(true)
+    lkGba.cores[1].apu.audio_dev = 0
+  if lkGb != nil:
+    lkGb.cores[1].apu.silent = true
+    lkGb.cores[1].apu.audio_dev = 0
   apply_channel_mutes()
 
 proc flush_current_save() =
@@ -245,6 +260,7 @@ proc flush_current_save() =
 proc load_rom_impl(path, bios: string): cint =
   if not fileExists(path): return -1
   dingbat_rollback_exit()
+  dingbat_link_exit()
   flush_current_save()
   let ext = path.splitFile().ext.toLowerAscii()
   statePrinter = nil
@@ -316,6 +332,11 @@ proc dingbat_unload(flush: cint) {.exportc, cdecl.} =
       rbGba = nil
       rbGb = nil
       gbRtcNowOverride = -1
+  if lk_active():
+    if flush != 0: dingbat_link_exit()
+    else:
+      lkGba = nil
+      lkGb = nil
   stateKind = ekNone
   stateGba = nil
   stateGb = nil
@@ -326,7 +347,7 @@ proc dingbat_unload(flush: cint) {.exportc, cdecl.} =
 
 proc dingbat_reset(): cint {.exportc, cdecl.} =
   ## Hard reset: flushes the battery save and reloads the current ROM.
-  if stateKind == ekNone or romPath.len == 0 or rb_active(): return -1
+  if stateKind == ekNone or romPath.len == 0 or core_shared(): return -1
   load_rom_impl(romPath, biosPath)
 
 proc dingbat_loaded(): cint {.exportc, cdecl.} =
@@ -371,7 +392,7 @@ proc step_canonical() =
 
 proc dingbat_run_frame() {.exportc, cdecl.} =
   ## One emulated frame; its picture is then at dingbat_game_fb().
-  if stateKind == ekNone or rb_active(): return
+  if stateKind == ekNone or core_shared(): return
   step_canonical()
   present_live()
 
@@ -381,7 +402,7 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
   ## dingbat_run_frame with N frames of run-ahead: one canonical frame (its
   ## audio played), then N silent lookahead frames whose picture is shown,
   ## then the canonical state restored (docs/run-ahead.md).
-  if stateKind == ekNone or rb_active(): return
+  if stateKind == ekNone or core_shared(): return
   step_canonical()
   if n <= 0:
     present_live()
@@ -578,7 +599,7 @@ proc dingbat_set_mp2k_hle(on: cint) {.exportc, cdecl.} =
   optMp2kHle = on != 0
   # Not onto a linked core: the HLE runs in place of the game's own mixer
   # code, so switching it mid-session would desync the friend.
-  if stateKind == ekGBA and stateGba != nil and not rb_active():
+  if stateKind == ekGBA and stateGba != nil and not core_shared():
     stateGba.mp2k_hle = optMp2kHle
 
 proc dingbat_set_fifo_interp(on: cint) {.exportc, cdecl.} =
@@ -602,7 +623,7 @@ proc dingbat_hle_audio_active(): cint {.exportc, cdecl.} =
 proc dingbat_set_input(input_id: cint; pressed: cint) {.exportc, cdecl.} =
   ## input_id: 0 UP, 1 DOWN, 2 LEFT, 3 RIGHT, 4 A, 5 B, 6 SELECT, 7 START,
   ## 8 L, 9 R (same ids as the web build's data-inputs).
-  if input_id < 0 or input_id > ord(Input.high) or rb_active(): return
+  if input_id < 0 or input_id > ord(Input.high) or core_shared(): return
   let inp = Input(input_id)
   let down = pressed != 0
   if down: clipCurButtons = clipCurButtons or (1'u16 shl input_id)
@@ -770,7 +791,7 @@ proc dingbat_load_state(data: pointer; len: cint; keep_rewind: cint): cint {.exp
   ## keep_rewind (undoing a scrubber commit, whose ring is this state's past).
   last_state_error = ""
   last_state_reject_kind = srkNone
-  if data == nil or len <= 0 or rb_active(): return 0
+  if data == nil or len <= 0 or core_shared(): return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
   let ok = case stateKind
@@ -948,7 +969,7 @@ proc dingbat_load_cheats(text: cstring): cstring {.exportc, cdecl.} =
     of ekGB:  (if stateGb  != nil: stateGb.cheats  else: nil)
     of ekNone: nil
   cheatErrBuf = ""
-  if eng == nil or rb_active(): return cstring(cheatErrBuf)
+  if eng == nil or core_shared(): return cstring(cheatErrBuf)
   eng.deserialize($text)
   case stateKind
   of ekGBA: stateGba.refresh_cheat_rom_patches()
@@ -1206,6 +1227,7 @@ proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
   ## seed both sides pass. The solo core is flushed and dropped. Returns 1,
   ## or 0 with no game loaded.
   dingbat_rollback_exit()
+  dingbat_link_exit()
   flush_current_save()
   stateKind = ekNone
   stateGba = nil
@@ -1375,3 +1397,117 @@ proc dingbat_rollback_dump_size(player: cint): cint {.exportc, cdecl.} =
 
 proc dingbat_rollback_dump_data(): pointer {.exportc, cdecl.} =
   if rbDumpImage.len > 0: addr rbDumpImage[0] else: nil
+
+# --- 2P local link (dingbat_wasm.nim's link_*) ---
+# Two cores of one ROM over the lockstep cable, on screen side by side. The
+# paths are the same ROM under two names so each core has its own .sav:
+# player 1's the game's own, player 2's beside it.
+
+proc dingbat_link_init(rom0, rom1: cstring): cint {.exportc, cdecl.} =
+  ## Player 1 on `rom0` (the game's own file), player 2 on `rom1`. The solo
+  ## core is flushed and dropped. Returns 1, or 0 with no game loaded.
+  dingbat_link_exit()
+  dingbat_rollback_exit()
+  flush_current_save()
+  stateKind = ekNone
+  stateGba = nil
+  stateGb = nil
+  statePrinter = nil
+  rewindHistory = nil  # rewinding one core would desync the pair
+  gamePtr = nil
+  if rom0 == nil or rom1 == nil: return 0
+  let paths = [$rom0, $rom1]
+  try:
+    if paths[0].splitFile().ext.toLowerAscii() in GB_ROM_EXTS:
+      let bootrom = if biosPath.len > 0 and fileExists(biosPath): biosPath else: ""
+      var cores: seq[GB] = @[]
+      for path in paths:
+        if not fileExists(path): return 0
+        let core = new_gb(bootrom, path, false, bootrom.len > 0)
+        core.post_init()
+        cores.add(core)
+      lkGb = new_gb_link(cores)
+      stateKind = ekGB
+      stateGb = cores[0]
+    else:
+      let haveBios = biosPath.len > 0 and fileExists(biosPath)
+      let mode = if haveBios: optGbaBiosMode else: 0
+      var cores: seq[GBA] = @[]
+      for path in paths:
+        if not fileExists(path): return 0
+        let core = new_gba(if haveBios: biosPath else: "", path,
+                           run_bios = haveBios and optGbaRunBios,
+                           use_hle = mode == 0,
+                           hle_after_bios = mode == 2)
+        core.post_init()
+        core.mp2k_hle = optMp2kHle
+        core.apu.set_fifo_interp(optFifoInterp)
+        cores.add(core)
+      lkGba = new_link(cores)
+      stateKind = ekGBA
+      stateGba = cores[0]
+  except CatchableError:
+    lkGba = nil
+    lkGb = nil
+    stateKind = ekNone
+    return 0
+  romPath = paths[0]
+  clip_reset()
+  lcdResp.reset()
+  apply_audio()
+  present_live()
+  1
+
+proc dingbat_link_tick() {.exportc, cdecl.} =
+  ## Both cores one lockstep frame; player 1's picture is then at
+  ## dingbat_game_fb(), each player's raw at dingbat_link_fb.
+  if lkGb != nil: lkGb.step_frame()
+  elif lkGba != nil: lkGba.step_frame()
+  else: return
+  present_live()
+
+proc dingbat_link_fb(player: cint): ptr uint16 {.exportc, cdecl.} =
+  ## `player`'s (0/1) BGR555 framebuffer, the game's size.
+  if player < 0 or player > 1: return nil
+  if lkGb != nil: return cast[ptr uint16](addr lkGb.cores[player].ppu.framebuffer[0])
+  if lkGba != nil: return cast[ptr uint16](addr lkGba.cores[player].ppu.framebuffer[0])
+  nil
+
+var lkRgba: seq[uint32] = @[]
+
+proc dingbat_link_rgba(player: cint): ptr uint32 {.exportc, cdecl.} =
+  ## `player`'s picture as colour-corrected RGBA8888 (the web's link
+  ## canvases), converted on call.
+  let fb = cast[ptr UncheckedArray[uint16]](dingbat_link_fb(player))
+  if fb == nil: return nil
+  let n = game_pixels()
+  let lut = if lkGb != nil: addr colorLutGbc else: addr colorLutGba
+  if lkRgba.len != n: lkRgba.setLen(n)
+  for i in 0 ..< n: lkRgba[i] = lut[fb[i] and 0x7FFF]
+  addr lkRgba[0]
+
+proc dingbat_link_input(player, input_id, pressed: cint) {.exportc, cdecl.} =
+  if input_id < 0 or input_id > ord(Input.high) or player < 0 or player > 1: return
+  if lkGb != nil: lkGb.cores[player].handle_input(Input(input_id), pressed != 0)
+  elif lkGba != nil: lkGba.cores[player].handle_input(Input(input_id), pressed != 0)
+
+proc dingbat_link_active(): cint {.exportc, cdecl.} =
+  if lk_active(): 1 else: 0
+
+proc dingbat_link_flush_saves() {.exportc, cdecl.} =
+  ## Both players' battery saves to their files.
+  if lkGba != nil:
+    for core in lkGba.cores: core.storage.write_save()
+  if lkGb != nil:
+    for core in lkGb.cores: core.cartridge.mbc_save()
+
+proc dingbat_link_exit() {.exportc, cdecl.} =
+  ## Both saves written, the pair dropped; no game left loaded.
+  if not lk_active(): return
+  dingbat_link_flush_saves()
+  lkGba = nil
+  lkGb = nil
+  stateKind = ekNone
+  stateGba = nil
+  stateGb = nil
+  gamePtr = nil

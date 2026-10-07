@@ -8,7 +8,7 @@ struct PlayView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        PlayLayout(stage: GameStage(), bar: TopBar())
+        PlayLayout(stage: StageOrPair(), bar: TopBar())
             .overlay(alignment: .topLeading) {
                 if model.menuOpen {
                     GameMenu()
@@ -308,7 +308,7 @@ struct TopBar: View {
                 }
                 .accessibilityLabel("Muted channels")
             }
-            if settings.mp2kHle && session.mp2kAvailable && !link.linked {
+            if settings.mp2kHle && session.mp2kAvailable && !(link.linked || session.twoPlayer) {
                 BarIconButton(system: "music.note", label: "Enhanced music",
                               active: session.hleActive && !session.hleSessionOff) {
                     session.hleSessionOff.toggle()
@@ -441,10 +441,10 @@ struct PlaybackCluster: View {
     var body: some View {
         let w: CGFloat = hSize == .regular ? 34 : 30
         HStack(spacing: hSize == .regular ? 6 : 2) {
-            if !link.linked {
+            if !(link.linked || session.twoPlayer) {
                 BarIconButton(system: "arrow.counterclockwise", label: "Reset", width: w) { session.reset() }
             }
-            if settings.rewind && !link.linked {
+            if settings.rewind && !(link.linked || session.twoPlayer) {
                 rewindButton(width: w)
             }
             BarIconButton(system: session.paused ? "play.fill" : "pause.fill",
@@ -452,14 +452,14 @@ struct PlaybackCluster: View {
                 model.closeMenu()
                 session.togglePause()
             }
-            if session.paused && !link.linked {
+            if session.paused && !(link.linked || session.twoPlayer) {
                 stepButton(width: w)
             } else if !session.paused {
                 Button { session.toggleDouble() } label: {
                     SpeedGlyph(count: 2, active: session.speed == .double, width: w)
                 }
                 .accessibilityLabel("2x Speed")
-                if !link.linked {
+                if !(link.linked || session.twoPlayer) {
                     Button { session.toggleFastForward() } label: {
                         SpeedGlyph(count: 3, active: session.speed == .fastForward, width: w)
                     }
@@ -687,10 +687,10 @@ struct GameMenu: View {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    if !link.linked { quickRow }
+                    if !(link.linked || session.twoPlayer) { quickRow }
                     item("house", "Main Menu") { model.showMainMenu() }
                     sep
-                    if !link.linked { soloItems }
+                    if !(link.linked || session.twoPlayer) { soloItems }
                     if hSize != .regular {
                         HStack(spacing: 10) {
                             Image(systemName: "speaker.wave.2")
@@ -701,8 +701,8 @@ struct GameMenu: View {
                         .frame(height: 44)
                     }
                     sep
-                    linkItem
-                    if !link.linked { item("star", "Cheats") { model.openSheet(.cheats) } }
+                    if !session.twoPlayer { linkItem }
+                    if !(link.linked || session.twoPlayer) { item("star", "Cheats") { model.openSheet(.cheats) } }
                     item("gearshape", "Settings") { model.openSheet(.settings(section: nil)) }
                     sep
                     item("ladybug", "Report a Bug") { model.openSheet(.report) }

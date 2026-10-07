@@ -31,6 +31,7 @@ the same frame).
 | Phone landscape: see-through pads (Outline / Bold / Solid), chevron d-pad, Select/Start pills inboard, a tap on the picture shows and hides the bar | `PlayLayout`, `TouchControls`, `GameStage` |
 | Portrait, tablet rails, Large controls, joystick (fixed / floating), Game Boy games without L/R; controls fixed-size, the picture yields | `PlayLayout`, `TouchControls` |
 | Menu: Quick Save / Quick Load / Rewind to a Moment / Slow Motion, Main Menu, Save States, Manage Saves, Capture (Screenshot, Record, Clip that!, Printed Photos), Link Cable, Cheats, Settings, Report a Bug | `GameMenu` and the sheets |
+| Local 2P (the web's debug rig behind `?2p`; here the `-2p` launch argument shows each tile's 2P): two cores of one game on the emulated cable, both screens at once; touch drives the screen tapped last, a controller player 2; player 1's battery is the game's save, player 2's its own (`save:<name>-p2`, a copy of player 1's the first time); rewind, states, cheats, speed and capture stand down | `TwoPlayer`, `dingbat_link_*` |
 | Add pictures: every game with no picture booted in the core without becoming the loaded game (its session put back, or its boot run toward a title, bounded), the screen kept as its library picture; offered once, then from the library head while any game lacks one; signed in, Drive-only games too, fetched and not kept | `AddPictures` |
 | Crash recovery: the session taken every minute of play, kept as checkpoints too (nine, spread over play time, the ones from before a crash frozen); runs that end unseen counted per game, and after two in a row a tap on the game opens "… stopped unexpectedly" (Resume an earlier moment, or Start from in-game save); the tile menu's Resume from earlier. A moment from before the last in-game save takes its battery back, the newer save kept for Restore old save | `Checkpoints`, `CrashWatch`, `MomentsView` |
 | Google Drive: sign in through the browser (the web's broker flow), one library with dingbat.gg (saves, states, sessions, pictures, the library file, renames, deletions with the "removed on another device" sheet), Drive-only tiles that download on tap, hand-off between devices, kept saves, the sync indicator and Sync now | `DriveAuth`, `DriveClient`, `DriveSync`, `DriveViews` |
@@ -81,8 +82,7 @@ the same frame).
 ## Left off, and why
 
 - **The link's same-browser BroadcastChannel path** (two tabs of one
-  browser): there is no second tab in an app. **Local 2P** (two games on
-  one screen, the 2P tile) is not ported either.
+  browser): there is no second tab in an app.
 - **Web-only plumbing**: the service worker's update button and Force
   update, Fullscreen, the diagnostic log, drag and drop, the "File Check
   Failed" header warning, picture flights between the hero and the game.

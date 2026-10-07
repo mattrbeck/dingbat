@@ -47,6 +47,12 @@ proc dingbat_rollback_tick(bits: cint): cint {.importc, cdecl.}
 proc dingbat_rollback_feed(frame, bits: cint) {.importc, cdecl.}
 proc dingbat_rollback_active(): cint {.importc, cdecl.}
 proc dingbat_rollback_exit_to_single(): cint {.importc, cdecl.}
+proc dingbat_link_init(rom0, rom1: cstring): cint {.importc, cdecl.}
+proc dingbat_link_tick() {.importc, cdecl.}
+proc dingbat_link_fb(player: cint): ptr uint16 {.importc, cdecl.}
+proc dingbat_link_input(player, id, pressed: cint) {.importc, cdecl.}
+proc dingbat_link_active(): cint {.importc, cdecl.}
+proc dingbat_link_exit() {.importc, cdecl.}
 
 var failures = 0
 template check(cond: bool; what: string) =
@@ -189,6 +195,35 @@ block:
   check dingbat_rollback_init(cstring(rom), cstring(friendRom), 1, 1) == 1, "a second session"
   check dingbat_load_rom(cstring(rom), nil) == 0 and dingbat_rollback_active() == 0,
     "loading a game ends a session"
+
+echo "Local 2P link"
+block:
+  proc fbHash(p: cint; n: int): uint64 =
+    let fb = cast[ptr UncheckedArray[uint16]](dingbat_link_fb(p))
+    result = 1469598103934665603'u64
+    for i in 0 ..< n: result = (result xor uint64(fb[i])) * 1099511628211'u64
+  let one = staged("tests/roms/linktest.gba")
+  let two = tmp / "linktest-p2.gba"
+  copyFile(one, two)
+  check dingbat_link_init(cstring(one), cstring(two)) == 1 and dingbat_link_active() == 1, "two cores linked"
+  for _ in 0 ..< 240: dingbat_link_tick()
+  check dingbat_game_fb() != nil and dingbat_link_fb(1) != nil, "both pictures"
+  let before = takeState()
+  dingbat_run_frame()
+  check takeState() == before, "solo frames refuse while linked"
+  dingbat_link_input(1, 7, 1)
+  for _ in 0 ..< 10: dingbat_link_tick()
+  dingbat_link_input(1, 7, 0)
+  for _ in 0 ..< 60: dingbat_link_tick()
+  dingbat_link_exit()
+  check dingbat_link_active() == 0 and dingbat_loaded() == 0, "exit leaves nothing loaded"
+  let g1 = staged("tests/roms/gblinktest.gb")
+  let g2 = tmp / "gblinktest-p2.gb"
+  copyFile(g1, g2)
+  check dingbat_link_init(cstring(g1), cstring(g2)) == 1 and dingbat_is_gb() == 1, "a GB pair"
+  for _ in 0 ..< 240: dingbat_link_tick()
+  check fbHash(0, 160 * 144) != 0'u64, "GB frames run"
+  check dingbat_load_rom(cstring(g1), nil) == 0 and dingbat_link_active() == 0, "loading a game ends the pair"
 
 echo "GB: LCD response"
 block:
