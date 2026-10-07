@@ -25,6 +25,20 @@ licence asks to be kept.
 | NimYAML | MIT | Felix Krause |
 | stb_image, stb_image_write | public domain / MIT | Sean Barrett |
 
+## Compiled into the iOS build only
+
+The online link's WebRTC data channel, built unmodified from the pinned
+tags by `ios/build-webrtc.sh` (libdatachannel v0.24.6, mbedTLS v3.6.7).
+The MPL-2.0 components' source is the upstream source at those tags.
+
+| Component | Licence | Copyright |
+|---|---|---|
+| libdatachannel | MPL-2.0 | Paul-Louis Ageneau |
+| libjuice (ICE) | MPL-2.0 | Paul-Louis Ageneau |
+| usrsctp (SCTP) | BSD-3-Clause | Randall Stewart and Michael Tuexen |
+| plog (logging, header-only) | MIT | Sergey Podobry |
+| Mbed TLS, with its p256-m and Everest (Curve25519) third-party code | Apache-2.0 | the Mbed TLS contributors |
+
 ## Code derived from other projects
 
 - **Booth multiplier carry model** (`src/dingbat/gba/arm/arm.nim`): a port of

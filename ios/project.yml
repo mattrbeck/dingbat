@@ -2,6 +2,7 @@
 #
 # Build steps:
 #   ios/build-core.sh                # produce ios/lib/*/libdingbat.a first
+#   ios/build-webrtc.sh              # and ios/lib/*/libwebrtcdc.a (online link)
 #   cd ios && xcodegen generate      # emits Dingbat.xcodeproj (gitignored)
 #   xcodebuild -project Dingbat.xcodeproj -scheme Dingbat \
 #     -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
@@ -35,6 +36,7 @@ targets:
           NSAllowsLocalNetworking: true
         NSCameraUsageDescription: A Game Boy Camera cart can see through your camera.
         NSMotionUsageDescription: Tilt carts play by tilting your device.
+        NSLocalNetworkUsageDescription: The link cable connects straight to a friend on the same Wi-Fi.
         ITSAppUsesNonExemptEncryption: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -68,9 +70,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat
         SWIFT_VERSION: "5.9"
         SWIFT_OBJC_BRIDGING_HEADER: Dingbat/Sources/Bridging.h
-        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/include"
+        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/include $(PROJECT_DIR)/lib/include"
         LIBRARY_SEARCH_PATHS: "$(PROJECT_DIR)/lib/$(PLATFORM_NAME)"
-        OTHER_LDFLAGS: "-ldingbat"
+        OTHER_LDFLAGS: "-ldingbat -lwebrtcdc -lc++"
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64

@@ -12,7 +12,7 @@ final class AppModel: ObservableObject {
     /// time; the game stays paused while any is up.
     enum Sheet: Identifiable, Equatable {
         case settings(section: String?)
-        case states, saves, rewind, cheats, prints, report, clip
+        case states, saves, rewind, cheats, prints, report, clip, link
         case tileMenu(RomEntry), rename(RomEntry)
         var id: String {
             switch self {
@@ -24,6 +24,7 @@ final class AppModel: ObservableObject {
             case .prints: return "prints"
             case .report: return "report"
             case .clip: return "clip"
+            case .link: return "link"
             case .tileMenu(let e): return "tile:" + e.id
             case .rename(let e): return "rename:" + e.id
             }

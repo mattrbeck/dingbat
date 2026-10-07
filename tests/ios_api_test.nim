@@ -41,6 +41,12 @@ proc dingbat_set_input(id, pressed: cint) {.importc, cdecl.}
 proc dingbat_clip_begin(startAgo, endAgo: cint): cint {.importc, cdecl.}
 proc dingbat_clip_tick(): cint {.importc, cdecl.}
 proc dingbat_clip_scrub_generate(n: cint): cint {.importc, cdecl.}
+proc dingbat_rollback_init(rom0, rom1: cstring; local: cint; epoch: cdouble): cint {.importc, cdecl.}
+proc dingbat_rollback_load_state(player: cint; data: pointer; len: cint): cint {.importc, cdecl.}
+proc dingbat_rollback_tick(bits: cint): cint {.importc, cdecl.}
+proc dingbat_rollback_feed(frame, bits: cint) {.importc, cdecl.}
+proc dingbat_rollback_active(): cint {.importc, cdecl.}
+proc dingbat_rollback_exit_to_single(): cint {.importc, cdecl.}
 
 var failures = 0
 template check(cond: bool; what: string) =
@@ -140,6 +146,49 @@ block:
   check $dingbat_load_cheats("[x] Good\n82000000 0001\n\n") == "", "a valid code parses"
   check ($dingbat_load_cheats("[x] Bad\nnot a code\n\n")).startsWith("Bad:"), "a bad code is named"
   check $dingbat_load_cheats("") == "", "clearing"
+
+echo "GBA: online link rollback"
+block:
+  # Two sessions from the same states: one hears the friend at once, one
+  # 6 frames late (predicting, then rolling back). They must end identical.
+  let rom = staged("web/goodboy-demo-en.gba")
+  let friendRom = tmp / "friend.gba"
+  copyFile(rom, friendRom)
+  check dingbat_load_rom(cstring(rom), nil) == 0, "loads"
+  for _ in 0 ..< 120: dingbat_run_frame()
+  let mine = takeState()
+  for _ in 0 ..< 30: dingbat_run_frame()
+  let theirs = takeState()
+  proc lb(f: int): cint = cint(if (f div 9) mod 2 == 0: 1 shl 4 else: 1 shl 3)
+  proc rb(f: int): cint = cint(if (f div 5) mod 3 == 0: 1 shl 7 else: 1 shl 2)
+  proc run(delay: int): string =
+    doAssert dingbat_rollback_init(cstring(rom), cstring(friendRom), 0, 1_700_000_000) == 1
+    doAssert dingbat_rollback_load_state(0, unsafeAddr mine[0], cint(mine.len)) == 1
+    doAssert dingbat_rollback_load_state(1, unsafeAddr theirs[0], cint(theirs.len)) == 1
+    var f = 0
+    var fed = 0
+    while f < 240:
+      while fed <= f - delay:
+        dingbat_rollback_feed(cint(fed), rb(fed)); inc fed
+      let got = dingbat_rollback_tick(lb(f))
+      doAssert got == cint(f), "tick " & $f & " gave " & $got
+      inc f
+    while fed < 240:
+      dingbat_rollback_feed(cint(fed), rb(fed)); inc fed
+    result = takeState()
+  let direct = run(0)
+  check dingbat_rollback_active() == 1, "a session runs"
+  dingbat_run_frame()
+  check takeState() == direct, "solo frames refuse while linked"
+  check not applyState(mine), "states refuse while linked"
+  let late = run(6)
+  check late == direct, "6 frames of prediction + rollback = the inputs on time"
+  check dingbat_rollback_exit_to_single() == 1 and dingbat_rollback_active() == 0, "back to solo"
+  dingbat_run_frame()
+  check takeState() != late, "the kept core plays on"
+  check dingbat_rollback_init(cstring(rom), cstring(friendRom), 1, 1) == 1, "a second session"
+  check dingbat_load_rom(cstring(rom), nil) == 0 and dingbat_rollback_active() == 0,
+    "loading a game ends a session"
 
 echo "GB: LCD response"
 block:

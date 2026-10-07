@@ -81,8 +81,10 @@ origins allowlist — https required off localhost, raw IPs rejected).
 ## iOS app
 
 A native SwiftUI app with the web front-end's screens, settings and themes,
-haptic touch controls, controllers, rumble, tilt and the Game Boy Camera.
-No link cable, Drive sync or clip recording yet: [ios-app.md](ios-app.md).
+haptic touch controls, controllers, rumble, tilt and the Game Boy Camera,
+Google Drive sync with dingbat.gg, Record and "Clip that!", and the online
+link cable (an iPhone links with a browser). No local 2P or manual link
+codes yet: [ios-app.md](ios-app.md).
 
 ## Game Boy / Game Boy Color
 

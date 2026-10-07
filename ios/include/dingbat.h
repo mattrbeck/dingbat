@@ -180,6 +180,25 @@ int dingbat_clip_begin(int start_ago, int end_ago);
 int dingbat_clip_tick(void);
 void dingbat_clip_abort(void);
 
+/* Online link (input rollback): both players' cores run here, only inputs
+ * cross the network. rom0 is the host's game, rom1 the guest's; this
+ * player's own game at its real path so its battery save is the game's.
+ * While a session runs its local core serves the picture, audio and save
+ * calls; frames, input, states, rewind, cheats and reset refuse. */
+int dingbat_rollback_init(const char *rom0, const char *rom1, int local_player, double epoch);
+int dingbat_rollback_load_state(int player, const void *data, int len);
+int dingbat_rollback_tick(int local_bits);    /* frame to send, -1 = stalled */
+void dingbat_rollback_feed(int frame, int bits);
+int dingbat_rollback_active(void);
+int dingbat_rollback_transfers(void);         /* cable activity counter */
+void dingbat_rollback_exit(void);
+int dingbat_rollback_exit_to_single(void);    /* keep playing, cable unplugged */
+int dingbat_rollback_head(void);
+int dingbat_rollback_confirmed(void);
+/* Debug: core `player`'s full state (desync checks); data valid until the next call. */
+int dingbat_rollback_dump_size(int player);
+const void *dingbat_rollback_dump_data(void);
+
 /* Audio routing: 0 play, 1 capture only, 2 drop, 3 play and capture. */
 void dingbat_audio_set_mode(int mode);
 int dingbat_audio_get_mode(void);

@@ -22,8 +22,13 @@ import dingbat/common/serialize
 import dingbat/common/cheats
 import dingbat/common/lcd_response
 import dingbat/common/rom_exts
+import dingbat/common/scheduler
 import dingbat/gba/gba
+import dingbat/gba/link as gbalink
+import dingbat/gba/rollback as gbarb
 import dingbat/gb/gb
+import dingbat/gb/link as gblink
+import dingbat/gb/rollback as gbrb
 import dingbat/gb/printer
 
 {.compile: "dingbat_ios_audio.c".}
@@ -65,6 +70,18 @@ var clipLiveStash = ""                 # live state while a replay runs
 var clipCursor = 0
 var clipEnd = 0
 var clipReplaying = false
+
+# Online link (input rollback, web rollback_*): both players' cores run here
+# and only inputs cross the network. While a session runs, its local core is
+# also stateGba/stateGb, so the picture, audio and save exports serve it;
+# everything that would move that core outside the session (frames, input,
+# states, rewind, cheats, reset) refuses.
+var rbGba: gbarb.RollbackSession = nil
+var rbGb: gbrb.GbRollbackSession = nil
+var rbLocal = 0                         # the core this player drives
+var rbEpoch: int64 = 0                  # the shared RTC clock
+proc rb_active(): bool {.inline.} = rbGba != nil or rbGb != nil
+proc dingbat_rollback_exit() {.exportc, cdecl.}
 
 proc dingbat_audio_set_mode(mode: cint) {.importc, cdecl.}
 proc dingbat_audio_get_mode(): cint {.importc, cdecl.}
@@ -204,6 +221,15 @@ proc apply_audio() =
     stateGb.apu.set_pitch_correct_ff(optPitchCorrect)
     stateGb.apu.sync = not optFastForward
   of ekNone: discard
+  # The friend's core: silent, and nothing of it reaches the audio ring.
+  if rbGba != nil:
+    let rc = rbGba.link.cores[1 - rbLocal]
+    rc.set_audio_silent(true)
+    rc.apu.audio_dev = 0
+  if rbGb != nil:
+    let rc = rbGb.link.cores[1 - rbLocal]
+    rc.apu.silent = true
+    rc.apu.audio_dev = 0
   apply_channel_mutes()
 
 proc flush_current_save() =
@@ -218,6 +244,7 @@ proc flush_current_save() =
 
 proc load_rom_impl(path, bios: string): cint =
   if not fileExists(path): return -1
+  dingbat_rollback_exit()
   flush_current_save()
   let ext = path.splitFile().ext.toLowerAscii()
   statePrinter = nil
@@ -283,6 +310,12 @@ proc dingbat_unload(flush: cint) {.exportc, cdecl.} =
   ## `flush` is 0: a copy let go for another device's newer one (Drive
   ## hand-off) must not write its RAM over the save landing in its place.
   if flush != 0: flush_current_save()
+  if rb_active():
+    if flush != 0: dingbat_rollback_exit()
+    else:
+      rbGba = nil
+      rbGb = nil
+      gbRtcNowOverride = -1
   stateKind = ekNone
   stateGba = nil
   stateGb = nil
@@ -293,7 +326,7 @@ proc dingbat_unload(flush: cint) {.exportc, cdecl.} =
 
 proc dingbat_reset(): cint {.exportc, cdecl.} =
   ## Hard reset: flushes the battery save and reloads the current ROM.
-  if stateKind == ekNone or romPath.len == 0: return -1
+  if stateKind == ekNone or romPath.len == 0 or rb_active(): return -1
   load_rom_impl(romPath, biosPath)
 
 proc dingbat_loaded(): cint {.exportc, cdecl.} =
@@ -338,7 +371,7 @@ proc step_canonical() =
 
 proc dingbat_run_frame() {.exportc, cdecl.} =
   ## One emulated frame; its picture is then at dingbat_game_fb().
-  if stateKind == ekNone: return
+  if stateKind == ekNone or rb_active(): return
   step_canonical()
   present_live()
 
@@ -348,7 +381,7 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
   ## dingbat_run_frame with N frames of run-ahead: one canonical frame (its
   ## audio played), then N silent lookahead frames whose picture is shown,
   ## then the canonical state restored (docs/run-ahead.md).
-  if stateKind == ekNone: return
+  if stateKind == ekNone or rb_active(): return
   step_canonical()
   if n <= 0:
     present_live()
@@ -479,7 +512,9 @@ proc dingbat_set_gb_model(model: cint) {.exportc, cdecl.} =
 proc dingbat_set_mp2k_hle(on: cint) {.exportc, cdecl.} =
   ## Remembered for later cores and applied to the live one.
   optMp2kHle = on != 0
-  if stateKind == ekGBA and stateGba != nil:
+  # Not onto a linked core: the HLE runs in place of the game's own mixer
+  # code, so switching it mid-session would desync the friend.
+  if stateKind == ekGBA and stateGba != nil and not rb_active():
     stateGba.mp2k_hle = optMp2kHle
 
 proc dingbat_set_fifo_interp(on: cint) {.exportc, cdecl.} =
@@ -503,7 +538,7 @@ proc dingbat_hle_audio_active(): cint {.exportc, cdecl.} =
 proc dingbat_set_input(input_id: cint; pressed: cint) {.exportc, cdecl.} =
   ## input_id: 0 UP, 1 DOWN, 2 LEFT, 3 RIGHT, 4 A, 5 B, 6 SELECT, 7 START,
   ## 8 L, 9 R (same ids as the web build's data-inputs).
-  if input_id < 0 or input_id > ord(Input.high): return
+  if input_id < 0 or input_id > ord(Input.high) or rb_active(): return
   let inp = Input(input_id)
   let down = pressed != 0
   if down: clipCurButtons = clipCurButtons or (1'u16 shl input_id)
@@ -671,7 +706,7 @@ proc dingbat_load_state(data: pointer; len: cint; keep_rewind: cint): cint {.exp
   ## keep_rewind (undoing a scrubber commit, whose ring is this state's past).
   last_state_error = ""
   last_state_reject_kind = srkNone
-  if data == nil or len <= 0: return 0
+  if data == nil or len <= 0 or rb_active(): return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
   let ok = case stateKind
@@ -849,7 +884,7 @@ proc dingbat_load_cheats(text: cstring): cstring {.exportc, cdecl.} =
     of ekGB:  (if stateGb  != nil: stateGb.cheats  else: nil)
     of ekNone: nil
   cheatErrBuf = ""
-  if eng == nil: return cstring(cheatErrBuf)
+  if eng == nil or rb_active(): return cstring(cheatErrBuf)
   eng.deserialize($text)
   case stateKind
   of ekGBA: stateGba.refresh_cheat_rom_patches()
@@ -1043,3 +1078,236 @@ proc dingbat_clip_abort() {.exportc, cdecl.} =
   if statePrinter != nil: statePrinter.muted = false
   clip_set_buttons(clipCurButtons)
   present_live()
+
+# --- Online link: input rollback (dingbat_wasm.nim's rollback_*) ---
+# The shell runs dingbat_rollback_tick once per frame with this player's
+# buttons, ships the returned frame and those buttons to the friend, and
+# feeds the friend's with dingbat_rollback_feed; the session predicts and
+# rolls back itself (gba/rollback.nim, gb/rollback.nim). Determinism needs
+# the same ROMs, states and core build on both sides and the shared RTC
+# epoch. Core 0 is the host's game, core 1 the guest's.
+
+var rbRomPaths: array[2, string]
+
+proc rb_mute_replays(core: GBA) =
+  ## A rolled-back frame was already heard: its re-simulation queues nothing
+  ## (the device is closed for the sample; the mix itself still runs, so the
+  ## core stays bit-identical).
+  let orig = core.scheduler.dispatch
+  core.scheduler.dispatch = proc(kind: scheduler.EventType) =
+    if kind == etAPUSample and rbGba != nil and rbGba.replaying:
+      let apu = rbGba.link.cores[rbLocal].apu
+      let dev = apu.audio_dev
+      apu.audio_dev = 0
+      orig(kind)
+      apu.audio_dev = dev
+    else:
+      orig(kind)
+
+proc rb_mute_replays(core: GB) =
+  let orig = core.scheduler.dispatch
+  core.scheduler.dispatch = proc(kind: scheduler.EventType) =
+    if kind == etAPUSample and rbGb != nil and rbGb.replaying:
+      let apu = rbGb.link.cores[rbLocal].apu
+      let dev = apu.audio_dev
+      apu.audio_dev = 0
+      orig(kind)
+      apu.audio_dev = dev
+    else:
+      orig(kind)
+
+proc rb_become_live() =
+  ## The session's local core is the one the picture and audio exports serve.
+  if rbGba != nil:
+    stateKind = ekGBA
+    stateGba = rbGba.link.cores[rbLocal]
+    stateGb = nil
+  elif rbGb != nil:
+    stateKind = ekGB
+    stateGb = rbGb.link.cores[rbLocal]
+    stateGba = nil
+  statePrinter = nil  # the cable is the link's
+  rewindHistory = nil
+  romPath = rbRomPaths[rbLocal]
+  clip_reset()
+  lcdResp.reset()
+  apply_audio()
+  present_live()
+
+proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
+                           epoch: cdouble): cint {.exportc, cdecl.} =
+  ## rom0/rom1: the host's and the guest's ROM files (this player's own game
+  ## at its real path, so its battery save is the game's); `local_player`
+  ## (0/1) the core this player drives; `epoch` the shared unix-seconds RTC
+  ## seed both sides pass. The solo core is flushed and dropped. Returns 1,
+  ## or 0 with no game loaded.
+  dingbat_rollback_exit()
+  flush_current_save()
+  stateKind = ekNone
+  stateGba = nil
+  stateGb = nil
+  statePrinter = nil
+  rewindHistory = nil
+  gamePtr = nil
+  if local_player < 0 or local_player > 1 or rom0 == nil or rom1 == nil: return 0
+  rbLocal = int(local_player)
+  rbEpoch = int64(epoch)
+  rbRomPaths = [$rom0, $rom1]
+  try:
+    if rbRomPaths[0].splitFile().ext.toLowerAscii() in GB_ROM_EXTS:
+      # As the web build: the cart header picks the model, and the boot ROM
+      # only when one is installed.
+      let bootrom = if biosPath.len > 0 and fileExists(biosPath): biosPath else: ""
+      enable_deterministic_gb_rtc(rbEpoch)  # applies to the cart and state loads
+      var cores: seq[GB] = @[]
+      for path in rbRomPaths:
+        if not fileExists(path): return 0
+        let core = new_gb(bootrom, path, false, bootrom.len > 0)
+        core.post_init()
+        cores.add(core)
+      rb_mute_replays(cores[rbLocal])
+      rbGb = gbrb.new_gb_rollback_session(new_gb_link(cores), rbLocal, 12)
+    else:
+      let haveBios = biosPath.len > 0 and fileExists(biosPath)
+      let mode = if haveBios: optGbaBiosMode else: 0
+      var cores: seq[GBA] = @[]
+      for path in rbRomPaths:
+        if not fileExists(path): return 0
+        let core = new_gba(if haveBios: biosPath else: "", path,
+                           run_bios = haveBios and optGbaRunBios,
+                           use_hle = mode == 0,
+                           hle_after_bios = mode == 2)
+        core.post_init()  # builds the APU state set_fifo_interp touches
+        core.mp2k_hle = optMp2kHle
+        core.apu.set_fifo_interp(optFifoInterp)
+        core.enable_deterministic_rtc(rbEpoch)
+        cores.add(core)
+      rb_mute_replays(cores[rbLocal])
+      rbGba = gbarb.new_rollback_session(new_link(cores), rbLocal, 12)
+  except CatchableError:
+    rbGba = nil
+    rbGb = nil
+    gbRtcNowOverride = -1
+    return 0
+  rb_become_live()
+  1
+
+proc dingbat_rollback_load_state(player: cint; data: pointer; len: cint): cint {.exportc, cdecl.} =
+  ## Seed core `player` from a full save state (a .state file's bytes) before
+  ## the first tick. The shared RTC is re-applied after: the state carries
+  ## the solo wall clock. Returns 1 on success.
+  if player < 0 or player > 1 or data == nil or len <= 0: return 0
+  var image = newString(int(len))
+  copyMem(addr image[0], data, int(len))
+  var ok = false
+  if rbGb != nil:
+    enable_deterministic_gb_rtc(rbEpoch)
+    ok = rbGb.link.cores[int(player)].load_state_bytes(image)
+  elif rbGba != nil:
+    let core = rbGba.link.cores[int(player)]
+    ok = core.load_state_bytes(image)
+    if ok: core.enable_deterministic_rtc(rbEpoch)
+  if ok and int(player) == rbLocal:
+    lcdResp.reset()
+    present_live()
+  if ok: 1 else: 0
+
+proc dingbat_rollback_tick(local_bits: cint): cint {.exportc, cdecl.} =
+  ## One frame with this player's buttons and the friend's predicted ones.
+  ## Returns the frame just simulated (send it with `local_bits`), or -1 when
+  ## stalled at the prediction window waiting for the friend.
+  if rbGb != nil:
+    if gbrb.tick(rbGb, uint16(local_bits)) == grbStalled: return -1
+    present_live()
+    return cint(rbGb.head - 1)
+  if rbGba == nil: return -1
+  if gbarb.tick(rbGba, uint16(local_bits)) == rbStalled: return -1
+  present_live()
+  cint(rbGba.head - 1)
+
+proc dingbat_rollback_feed(frame, bits: cint) {.exportc, cdecl.} =
+  ## The friend's buttons for `frame` (may roll back and re-simulate).
+  if frame < 0: return
+  if rbGb != nil: gbrb.feed_remote(rbGb, int(frame), uint16(bits))
+  elif rbGba != nil: gbarb.feed_remote(rbGba, int(frame), uint16(bits))
+
+proc dingbat_rollback_active(): cint {.exportc, cdecl.} =
+  if rb_active(): 1 else: 0
+
+proc dingbat_rollback_transfers(): cint {.exportc, cdecl.} =
+  ## Monotonic count of transfers on the emulated cable: a linked game keeps
+  ## it moving and stops when it closes the link (the idle auto-disconnect).
+  if rbGb != nil: return cint(rbGb.link.transfers and 0x7fffffff)
+  if rbGba != nil: return cint(rbGba.link.transfers and 0x7fffffff)
+  0
+
+proc dingbat_rollback_exit() {.exportc, cdecl.} =
+  ## End the session with nothing kept running (both battery saves written).
+  if rbGba != nil:
+    for core in rbGba.link.cores: core.storage.write_save()
+    rbGba = nil
+  elif rbGb != nil:
+    for core in rbGb.link.cores: core.cartridge.mbc_save()
+    rbGb = nil
+    gbRtcNowOverride = -1
+  else:
+    return
+  stateKind = ekNone
+  stateGba = nil
+  stateGb = nil
+  gamePtr = nil
+
+proc dingbat_rollback_exit_to_single(): cint {.exportc, cdecl.} =
+  ## Leave the session but keep playing: this player's core, with its
+  ## progress, becomes the solo core with the cable unplugged (a GB core gets
+  ## its printer back); the friend's core goes. Returns 1, 0 with no session.
+  if rbGb != nil:
+    let core = rbGb.link.cores[rbLocal]
+    core.cartridge.mbc_save()
+    rbGb = nil
+    gbRtcNowOverride = -1
+    stateKind = ekGB
+    stateGb = core
+    stateGba = nil
+    statePrinter = new_gb_printer()
+    core.set_serial_driver(GbPrinterDriver(printer: statePrinter))
+  elif rbGba != nil:
+    let core = rbGba.link.cores[rbLocal]
+    core.storage.write_save()
+    core.set_sio_driver(NullSioDriver())
+    rbGba = nil
+    stateKind = ekGBA
+    stateGba = core
+    stateGb = nil
+  else:
+    return 0
+  romPath = rbRomPaths[rbLocal]
+  rewindHistory = if rewindEnabled: new_rewind(rewindCapBytes) else: nil
+  clip_reset()
+  lcdResp.reset()
+  apply_audio()
+  present_live()
+  1
+
+proc dingbat_rollback_head(): cint {.exportc, cdecl.} =
+  ## Next frame to simulate; -1 with no session.
+  if rbGb != nil: cint(rbGb.head) elif rbGba != nil: cint(rbGba.head) else: -1
+
+proc dingbat_rollback_confirmed(): cint {.exportc, cdecl.} =
+  ## Last frame with the friend's real input; -1 for none.
+  if rbGb != nil: cint(rbGb.confirmed) elif rbGba != nil: cint(rbGba.confirmed) else: -1
+
+var rbDumpImage = ""
+
+proc dingbat_rollback_dump_size(player: cint): cint {.exportc, cdecl.} =
+  ## Debug (web rollback_dump_size): core `player`'s full state into a buffer,
+  ## its length; dingbat_rollback_dump_data points at it. The same bytes on
+  ## both sides at the same confirmed frame, or the link has desynced.
+  rbDumpImage = ""
+  if player < 0 or player > 1: return 0
+  if rbGb != nil: rbDumpImage = rbGb.link.cores[player].state_bytes()
+  elif rbGba != nil: rbDumpImage = rbGba.link.cores[player].state_bytes()
+  cint(rbDumpImage.len)
+
+proc dingbat_rollback_dump_data(): pointer {.exportc, cdecl.} =
+  if rbDumpImage.len > 0: addr rbDumpImage[0] else: nil
