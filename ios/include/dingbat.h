@@ -154,6 +154,9 @@ int dingbat_rewind_scrub_thumb_h(void);
 const void *dingbat_rewind_scrub_thumbs(void); /* BGR555, w*h*2 per sample */
 int dingbat_rewind_scrub_seconds_ago(int sample); /* tenths */
 int dingbat_rewind_scrub_save_differs(int sample);
+/* Sample's full .state image into the dingbat_state_data() buffer; its
+ * length, 0 when gone. The live core is left as it was. */
+int dingbat_rewind_scrub_state_size(int sample);
 int dingbat_rewind_commit(int sample);
 
 /* --- Cheats --- */

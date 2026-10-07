@@ -756,6 +756,32 @@ proc dingbat_rewind_scrub_save_differs(sample: cint): cint {.exportc, cdecl.} =
   except CatchableError: discard
   if differs: 1 else: 0
 
+proc dingbat_rewind_scrub_state_size(sample: cint): cint {.exportc, cdecl.} =
+  ## Build the chosen sample's full .state image (header + payload +
+  ## thumbnail) into the dingbat_state_data() buffer, put the live core
+  ## back, and return the size (0 when the sample is gone). Report a Bug
+  ## attaches it.
+  if sample < 0 or sample >= scrubIds.len or rewindHistory == nil:
+    return 0
+  # By absolute ID: a positional index would slide onto a different moment
+  # if anything evicted since the strip was captured.
+  let snap = rewindHistory.snapshot_by_id(scrubIds[sample])
+  if snap.len == 0: return 0
+  let stash = current_payload()
+  stateImage = ""
+  try:
+    apply_payload(snap)
+    stateImage = case stateKind
+      of ekGBA: pack_state(stateGba.state_bytes(thumbnail = true))
+      of ekGB:  pack_state(stateGb.state_bytes(thumbnail = true))
+      of ekNone: ""
+  except CatchableError:
+    stateImage = ""
+  if stash.len > 0:
+    try: apply_payload(stash)
+    except CatchableError: discard
+  cint(stateImage.len)
+
 proc dingbat_rewind_commit(sample: cint): cint {.exportc, cdecl.} =
   ## Rewind the live core to `sample` and drop every newer snapshot. The shell
   ## keeps its own pre-commit state for Undo.
