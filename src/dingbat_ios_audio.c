@@ -11,7 +11,7 @@
  * dingbat_audio_read(), which converts to float32 and never touches the Nim
  * runtime. The shell paces emulation by the display clock (as the web does
  * by requestAnimationFrame); the two clocks drift, so the reader resamples
- * by a hair (dynamic rate control, at most 1.5%) to hold the ring near a
+ * by a hair (dynamic rate control, at most 1.5%) to hold the ring at a
  * target depth: no gaps when the consumer briefly outpaces the producer, no
  * creeping latency when it lags. If the audio engine stops mid-frame
  * (interruption, route change), SDL_Delay() drops the queue after ~250 ms so
@@ -70,16 +70,23 @@ static size_t bytes_per_frame(void) {
 }
 
 /* Dynamic rate control, reader side (render thread only, under g_lock).
- * Target depth ~39 ms: above the render quantum plus one video frame's worth
- * of samples, which arrive in a burst while the frame emulates. */
-#define DRC_TARGET   1280       /* frames at 32768 Hz */
+ * Target depth: one video frame's worth of samples (they arrive in a burst
+ * while the frame emulates) plus the render quantum and some slack for a
+ * late display tick. The integral term carries the steady offset between
+ * the clocks (60 Hz vs the GBA's 59.73 is +0.46%), so the depth settles on
+ * the target instead of above it. */
+#define DRC_TARGET   g_target   /* frames at 32768 Hz */
 #define DRC_GAIN     0.02       /* ratio change per unit of relative depth error */
+#define DRC_IGAIN    0.0004     /* the integral's step per callback, per unit error */
+#define DRC_IMAX     0.01
 #define DRC_MAX      0.015      /* never more than 1.5% off pitch */
 #define DRC_CAP      (3 * DRC_TARGET) /* beyond: drop back to the target (a stall's backlog) */
+static int      g_target = 832; /* ~25 ms; slow motion asks for more */
 static int      g_free = 0;      /* fast-forward: no rate control, play what is there */
 static int      g_primed = 0;    /* playing; else waiting for the ring to refill */
-static double   g_fill = DRC_TARGET; /* smoothed depth */
-static double   g_t = 0;         /* position between hist[1] and hist[2] */
+static double   g_fill = 832;    /* smoothed depth */
+static double   g_t = 0;
+static double   g_integ = 0;     /* the clocks' steady offset, learnt */         /* position between hist[1] and hist[2] */
 static float    g_hist[4][2];    /* x[-1], x[0], x[1], x[2] for Catmull-Rom */
 static unsigned g_underruns = 0;
 
@@ -287,7 +294,10 @@ int dingbat_audio_read(float *dst, int max_frames) {
    * Deeper than the target: consume a little faster, and the reverse. */
   g_fill += ((double)depth - g_fill) * 0.08;
   double err = (g_fill - DRC_TARGET) / DRC_TARGET;
-  double step = 1.0 + err * DRC_GAIN;
+  g_integ += err * DRC_IGAIN;
+  if (g_integ > DRC_IMAX) g_integ = DRC_IMAX;
+  if (g_integ < -DRC_IMAX) g_integ = -DRC_IMAX;
+  double step = 1.0 + err * DRC_GAIN + g_integ;
   if (step > 1.0 + DRC_MAX) step = 1.0 + DRC_MAX;
   if (step < 1.0 - DRC_MAX) step = 1.0 - DRC_MAX;
   for (; n < max_frames; n++) {
@@ -317,6 +327,14 @@ int dingbat_audio_read(float *dst, int max_frames) {
   if (n > 0) g_stall_ms = 0; /* consumer is alive */
   pthread_mutex_unlock(&g_lock);
   return n;
+}
+
+/* The depth to hold, in frames: ~25 ms by default. Slow motion delivers a
+ * frame's 33 ms of sound in one burst, so it needs more. Main thread. */
+void dingbat_audio_set_target(int frames) {
+  pthread_mutex_lock(&g_lock);
+  g_target = frames < 256 ? 256 : frames;
+  pthread_mutex_unlock(&g_lock);
 }
 
 void dingbat_audio_set_free(int on) {

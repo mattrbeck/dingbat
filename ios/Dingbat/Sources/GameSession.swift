@@ -1,3 +1,4 @@
+import AVFoundation
 import QuartzCore
 import SwiftUI
 import UIKit
@@ -311,6 +312,9 @@ final class GameSession: NSObject, ObservableObject {
             shotTime += dt
             saveCheckTime += dt
             if dingbat_frame_static() == 0 { present() }
+            #if DEBUG
+            latencyCheck()
+            #endif
             ClipExporter.shared.recordTick()
             pollPeripherals()
             // Checkpoint: the session again every minute of play, so an app
@@ -362,6 +366,61 @@ final class GameSession: NSObject, ObservableObject {
 
     #if DEBUG
     static let audioStats = ProcessInfo.processInfo.arguments.contains("-audio-stats")
+
+    /// `-latency-test N` (with tonc's m7_demo, where Up moves the view the
+    /// next frame): N presses of Up at random moments; each is timed from the
+    /// press to the present of the first changed frame. Also the audio path:
+    /// the ring's depth, sampled every tick, plus iOS's IO buffer and output
+    /// latency. Results in tmp/latency.txt.
+    private var latPress: CFTimeInterval = 0
+    private var latBase: UInt64 = 0
+    private var latTimes: [Double] = []
+    private var latRing: [Double] = []
+    private var latLeft = 0
+
+    func startLatencyTest(_ n: Int) {
+        latLeft = n
+        scheduleLatencyPress()
+    }
+
+    private func fbHash() -> UInt64 {
+        guard let fb = dingbat_framebuffer() else { return 0 }
+        var h: UInt64 = 1469598103934665603
+        for i in 0 ..< Int(dingbat_fb_width() * dingbat_fb_height()) { h = (h ^ UInt64(fb[i])) &* 1099511628211 }
+        return h
+    }
+
+    private func scheduleLatencyPress() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25 + Double.random(in: 0..<0.25)) { [weak self] in
+            guard let self else { return }
+            self.latBase = self.fbHash()
+            self.latPress = CACurrentMediaTime()
+            self.setInput(0, true, source: "test")
+        }
+    }
+
+    private func latencyCheck() {
+        latRing.append(Double(dingbat_audio_queued_frames()) / 32.768)
+        guard latPress > 0, fbHash() != latBase else { return }
+        latTimes.append((CACurrentMediaTime() - latPress) * 1000)
+        latPress = 0
+        setInput(0, false, source: "test")
+        latLeft -= 1
+        if latLeft > 0 { scheduleLatencyPress(); return }
+        let t = latTimes.sorted(), r = latRing.sorted()
+        let av = AVAudioSession.sharedInstance()
+        let out = String(format: """
+            presses=%d press->present ms: min %.1f p50 %.1f avg %.1f max %.1f
+            ring ms: min %.1f p50 %.1f avg %.1f max %.1f
+            ioBuffer ms %.1f outputLatency ms %.1f sampleRate %.0f
+
+            """, t.count, t.first ?? 0, t[t.count / 2],
+            t.reduce(0, +) / Double(t.count), t.last ?? 0,
+            r.first ?? 0, r[r.count / 2], r.reduce(0, +) / Double(r.count), r.last ?? 0,
+            av.ioBufferDuration * 1000, av.outputLatency * 1000, av.sampleRate)
+        try? out.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("latency.txt"),
+                       atomically: true, encoding: .utf8)
+    }
     #endif
 
     // MARK: online link
@@ -651,6 +710,9 @@ final class GameSession: NSObject, ObservableObject {
         dingbat_set_turbo(s == .double ? 1 : 0)
         dingbat_set_slowmo(s == .slow ? 1 : 0)
         dingbat_audio_set_free(s == .fastForward ? 1 : 0)
+        // Slow motion's frames each bring 33 ms of sound at once: a deeper
+        // ring (~55 ms) so it never runs dry between them; ~25 ms otherwise.
+        dingbat_audio_set_target(s == .slow ? 1800 : 832)
     }
 
     func toggleFastForward() { setSpeed(speed == .fastForward ? .normal : .fastForward) }
