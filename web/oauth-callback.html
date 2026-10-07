@@ -26,6 +26,13 @@
 (() => {
   const KEY = "dingbat-oauth";
   const q = new URLSearchParams(location.search);
+  // The iOS app's sign-in (its state starts "app."): Google sent the code
+  // here, the redirect the web client allows; the app's browser sheet ends
+  // when the page moves on to its scheme, and it exchanges the code itself.
+  if ((q.get("state") || "").startsWith("app.")) {
+    location.replace("dingbat://oauth?" + q.toString());
+    return;
+  }
   const msg = {
     type: KEY,
     state: q.get("state") || "",
