@@ -1,4 +1,5 @@
 import AVFoundation
+import UIKit
 
 /// AVAudioSourceNode pulling float32 stereo at 32768 Hz from the core's ring
 /// (the engine resamples). The render block stays realtime-safe: no
@@ -37,6 +38,19 @@ final class AudioOutput {
         state.pointee.b2 = Float((1 - cw) / 2 / a0)
         state.pointee.a1 = Float(-2 * cw / a0)
         state.pointee.a2 = Float((1 - alpha) / a0)
+    }
+
+    var isRunning: Bool { started && engine.isRunning }
+
+    /// Try the engine again, at most every half second.
+    private var lastRestart: CFTimeInterval = 0
+    func restartIfNeeded() {
+        guard started, !engine.isRunning else { return }
+        let now = CACurrentMediaTime()
+        guard now - lastRestart > 0.5 else { return }
+        lastRestart = now
+        try? AVAudioSession.sharedInstance().setActive(true)
+        try? engine.start()
     }
 
     func setAnalogFilter(_ on: Bool) {
@@ -102,6 +116,19 @@ final class AudioOutput {
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             try? self?.engine.start()
         }
+        // An interruption's end is not guaranteed (a call taken in the
+        // background); coming back to the foreground tries again.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.restartIfNeeded()
+        }
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.category = nil
+            self.refreshSession()
+            self.restartIfNeeded()
+        }
         started = true
         try? engine.start()
     }
@@ -115,7 +142,10 @@ final class AudioOutput {
         let session = GameSession.shared
         let audible = session.game != nil && !session.paused && !s.muted && s.volume > 0
         let want: AVAudioSession.Category = (s.playInSilent && audible) ? .playback : .ambient
-        guard want != category else { return }
+        guard want != category else {
+            restartIfNeeded()
+            return
+        }
         category = want
         let av = AVAudioSession.sharedInstance()
         try? av.setCategory(want, mode: .default, options: want == .ambient ? [.mixWithOthers] : [])

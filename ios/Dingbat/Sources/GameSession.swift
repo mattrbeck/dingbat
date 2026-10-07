@@ -53,6 +53,7 @@ final class GameSession: NSObject, ObservableObject {
     private var shotTime: CFTimeInterval = 0          // seconds run since the last library picture
     private var saveCheckTime: CFTimeInterval = 0
     private var lastTick: CFTimeInterval = 0
+    private var clockDebt: Double = 0                 // frames owed while audio cannot pace
     private var sources: [String: Set<Int>] = [:]     // held inputs per source ("touch", "pad"...)
     /// Whether the game in memory moved since its last session snapshot
     /// (web sessionMoved): a game sitting paused takes no new snapshot.
@@ -86,7 +87,7 @@ final class GameSession: NSObject, ObservableObject {
 
     // MARK: open / close
 
-    enum OpenResult { case ok, failed, resumed, savedSince }
+    enum OpenResult: Equatable { case ok, failed, resumed, savedSince, resumeRejected(String) }
 
     /// Boot a game. `resume` puts its session back in during the boot when
     /// one still counts (web launchRom {resume}); otherwise it boots from the
@@ -99,7 +100,15 @@ final class GameSession: NSObject, ObservableObject {
         let biosArg = FileManager.default.fileExists(atPath: bios.path) ? bios.path : nil
         let rc = biosArg.map { dingbat_load_rom(entry.url.path, $0) } ?? dingbat_load_rom(entry.url.path, nil)
         guard rc == 0 else {
+            // The old game was already left; nothing of it may stay loaded
+            // (a later flush would write its battery over this one's files).
+            dingbat_unload()
+            stopLink()
             game = nil
+            paused = false
+            clearInputs()
+            UIApplication.shared.isIdleTimerDisabled = false
+            AudioOutput.shared.refreshSession()
             return .failed
         }
         game = entry
@@ -120,7 +129,9 @@ final class GameSession: NSObject, ObservableObject {
         var result = OpenResult.ok
         if resume {
             if let s = RomLibrary.shared.resumableSession(entry) {
-                if apply(state: s.bytes, keepRewind: false) == nil {
+                if let why = apply(state: s.bytes, keepRewind: false) {
+                    result = .resumeRejected(why)
+                } else {
                     result = .resumed
                     sessionMoved = false
                 }
@@ -238,9 +249,19 @@ final class GameSession: NSObject, ObservableObject {
         case .normal, .double, .slow:
             let cap = speed == .double ? 8 : 4
             let ahead = speed == .normal ? Settings.shared.runahead : 0
-            while dingbat_audio_ahead() == 0 && ran < cap {
-                if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
-                ran += 1
+            let step = { if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() } }
+            if AudioOutput.shared.isRunning {
+                clockDebt = 0
+                while dingbat_audio_ahead() == 0 && ran < cap { step(); ran += 1 }
+            } else {
+                // No audio engine to drain the ring (stopped by an
+                // interruption that never reported its end): pace by the
+                // clock so the game does not freeze, and keep trying the engine.
+                let rate = speed == .double ? 119.5 : speed == .slow ? 29.9 : 59.7
+                clockDebt = min(clockDebt + dt * rate, Double(cap))
+                dingbat_audio_clear()
+                while clockDebt >= 1 && ran < cap { step(); ran += 1; clockDebt -= 1 }
+                AudioOutput.shared.restartIfNeeded()
             }
         }
         if ran > 0 {
@@ -528,6 +549,10 @@ final class GameSession: NSObject, ObservableObject {
         guard game != nil else { return }
         let undo = captureState()
         _ = dingbat_reset()
+        // A reset builds a fresh core: cheats and the camera's feed go with
+        // the old one (the web's reset is a whole loadRom, which restores both).
+        if let g = game { CheatStore.restore(for: g) }
+        if hasCamera { _ = dingbat_camera_attach() }
         applyHle()
         sessionMoved = true
         present()

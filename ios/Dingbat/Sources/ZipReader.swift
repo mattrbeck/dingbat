@@ -75,6 +75,8 @@ enum ZipReader {
     /// Raw deflate (Apple's COMPRESSION_ZLIB is raw RFC 1951).
     private static func inflate(_ src: Data, size: Int) -> Data? {
         guard size > 0 else { return Data() }
+        // A header can claim anything; no cartridge or picture is near this.
+        guard !src.isEmpty, size <= 64 << 20 else { return nil }
         var out = Data(count: size)
         let n = out.withUnsafeMutableBytes { dst in
             src.withUnsafeBytes { s in
