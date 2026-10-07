@@ -636,9 +636,10 @@ proc rebuild_obj_lines*(ppu: PPU) =
 proc oam_touched*(ppu: PPU) {.inline.} =
   ## Mark `oam_view` stale, which rebuilds the per-line OBJ candidate list
   ## when the next line start copies it. MUST be called by every path
-  ## that mutates ppu.oam: bus.write_half_internal / write_word_internal
-  ## (byte writes to OAM are discarded; DMA and cheats funnel through these),
-  ## load_ppu_state (covers rewind, rollback and link restores), and the HLE
+  ## that mutates ppu.oam: bus.oam_store16 / oam_store32 inline it, setting
+  ## oam_view_stale on every store but clearing the contention key only for
+  ## one that changes that map (byte writes to OAM are discarded; DMA and
+  ## cheats funnel through these), load_ppu_state (covers rewind, rollback and link restores), and the HLE
   ## RegisterRamReset OAM clear. Test code seeding ppu.oam must call it and
   ## then latch_oam.
   ## Backstops: scanline() force-rebuilds once per frame, and -d:objListVerify

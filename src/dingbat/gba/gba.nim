@@ -1678,6 +1678,7 @@ proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
 proc oam_touched*(ppu: PPU) {.inline.}
+proc cont_obj_entry_moved(ppu: PPU; e: int; old0, old1: uint16)
 proc draw*(ppu: PPU)
 proc scanline*(ppu: PPU)
 proc start_line*(ppu: PPU)

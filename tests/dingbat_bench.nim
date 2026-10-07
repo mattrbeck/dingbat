@@ -260,6 +260,14 @@ proc main() =
       discard fh.writeBuffer(addr emu.ppu.framebuffer[0], emu.ppu.framebuffer.len * 2)
       fh.close()
       return
+    # DINGBAT_BENCH_SAVESTATE: as on the GB path, write a .state after the
+    # warmup so later runs resume the scene with DINGBAT_BENCH_STATE.
+    let save_path = getEnv("DINGBAT_BENCH_SAVESTATE")
+    if save_path.len > 0:
+      for f in 0 ..< warmup: run_scripted(f)
+      if not emu.save_state(save_path): quit(1)
+      echo "bench: wrote state after ", warmup, " frames: ", save_path
+      return
     for f in 0 ..< warmup: run_scripted(f)
     let rw = make_bench_rewind()
     let mode = rewind_mode()
@@ -307,6 +315,8 @@ proc main() =
            " engaged=", emu.mp2k.engaged,
            " avg_out_energy=", (if emu.mp2k.dbg_out_count > 0:
              formatFloat(emu.mp2k.dbg_out_energy / emu.mp2k.dbg_out_count.float, ffDecimal, 4) else: "0")
+    when defined(contObjVerify):
+      echo "contObjVerify: ", gba.contObjVerifyHits, " kept maps checked, all fresh"
     when defined(fetchprof):
       let names = ["fh_hot", "fh_slow", "fw_hot", "fw_slow", "rac_fetch", "rac_data",
                    "rac_pfhit", "rac_seq", "rac_nonseq", "rac_went_hot",

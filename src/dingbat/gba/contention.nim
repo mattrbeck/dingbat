@@ -166,11 +166,13 @@ proc cont_build_pram(ppu: PPU; key: uint32) =
 
 const OBJ_SCAN_START = 40
 
-proc cont_obj_on_line(sp: ptr UncheckedArray[Sprite]; e, target: int): bool {.inline.} =
-  let s = sp[e]
+proc cont_obj_on_line(s: Sprite; target: int): bool {.inline.} =
   if (s.attr0 and 0x0300'u16) == 0x0200'u16: return false  # disabled
   let g = obj_geometry(s)
   g.h > 0 and g.y <= target and target < g.y + g.h
+
+proc cont_obj_on_line(sp: ptr UncheckedArray[Sprite]; e, target: int): bool {.inline.} =
+  sp[e].cont_obj_on_line(target)
 
 proc cont_build_obj(ppu: PPU; line: int; key: int64) =
   ppu.cont_objv.cont_clear()
@@ -234,6 +236,21 @@ proc cont_build_obj(ppu: PPU; line: int; key: int64) =
         i = e + 2
         break
 
+when defined(contObjVerify):
+  var contObjVerifyHits*: int = 0
+
+proc cont_obj_entry_moved(ppu: PPU; e: int; old0, old1: uint16) =
+  ## OAM entry e's attr0/attr1 just changed in a bit the map reads (bus.nim
+  ## oam_store16/32), from (old0, old1). An entry off the map's target line
+  ## both before and after costs the scan the same two dots, so only one on
+  ## it either way changes the map.
+  if ppu.cont_obj_key < 0: return
+  let target = (int(ppu.cont_obj_key shr 8) + 1) mod 228
+  let sp = cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
+  if sp.cont_obj_on_line(e, target) or
+     Sprite(attr0: old0, attr1: old1).cont_obj_on_line(target):
+    ppu.cont_obj_key = -1
+
 proc cont_obj_free(ppu: PPU; want_oam: bool; line, t: int): int =
   ## The first dot at or after t the OBJ layer does not hold OAM / OBJ VRAM;
   ## both relative to `line`'s start. Dots 0-39 of a line still belong to
@@ -250,9 +267,20 @@ proc cont_obj_free(ppu: PPU; want_oam: bool; line, t: int): int =
     d += 1232
     base -= 1232
   for hop in 0 .. 2:
-    # OAM writes clear the key (ppu.oam_touched)
+    # OAM stores that change the map clear the key (cont_obj_entry_moved;
+    # ppu.oam_touched for the rest)
     let key = (int64(l) shl 8) or int64((uint16(ppu.dispcnt) shr 5) and 0xFF)
     if key != ppu.cont_obj_key: ppu.cont_build_obj(l, key)
+    else:
+      when defined(contObjVerify):
+        # Self-checking build: a kept map must equal a fresh one, or a
+        # store that changed it left it keyed (cont_obj_entry_moved)
+        let (kept_v, kept_o) = (ppu.cont_objv, ppu.cont_oam)
+        ppu.cont_build_obj(l, key)
+        inc contObjVerifyHits
+        if kept_v != ppu.cont_objv or kept_o != ppu.cont_oam:
+          quit("contObjVerify: stale OBJ contention map, line " & $l &
+               " frame " & $ppu.frame, 3)
     let f = if want_oam: ppu.cont_oam.cont_next_free(d)
             else: ppu.cont_objv.cont_next_free(d)
     if f < 1232 + OBJ_SCAN_START:

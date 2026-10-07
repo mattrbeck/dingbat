@@ -701,17 +701,37 @@ proc vid_store32(ppu: PPU; buf: var seq[byte]; offset: uint32; val: uint32) {.in
     ppu.render_dirty = true
     write_u32_ptr(buf, offset, val)
 
+# The OBJ layer's contention map (contention.nim cont_build_obj) reads only
+# where each entry sits vertically and how big it is: attr0's Y, affine,
+# double-size/disable and shape bits and attr1's size bits. A store that
+# leaves those alone -- attr1's X and flips, attr2, the affine parameters --
+# keeps the map, which a game rewriting OAM from H-blank DMA every line
+# would otherwise rebuild on every access; one that moves an entry keeps it
+# too unless the entry is on the map's line (cont_obj_entry_moved).
+const OAM_CONT_MASK16 = [0xC3FF'u16, 0xC000'u16, 0'u16, 0'u16]
+
 proc oam_store16(ppu: PPU; offset: uint32; val: uint16) {.inline.} =
-  ppu.oam_touched()   # as every OAM store (serialized: oam_view_stale)
-  if read_u16_ptr(ppu.oam, offset) != val:
+  ppu.oam_view_stale = true   # as every OAM store (serialized); see oam_touched
+  let old = read_u16_ptr(ppu.oam, offset)
+  if old != val:
     ppu.render_dirty = true
     write_u16_ptr(ppu.oam, offset, val)
+    if ((old xor val) and OAM_CONT_MASK16[(offset shr 1) and 3]) != 0:
+      let e = offset and not 7'u32
+      let a0 = if (offset and 2) == 0: old else: read_u16_ptr(ppu.oam, e)
+      let a1 = if (offset and 2) != 0: old else: read_u16_ptr(ppu.oam, e + 2)
+      ppu.cont_obj_entry_moved(int(offset shr 3), a0, a1)
 
 proc oam_store32(ppu: PPU; offset: uint32; val: uint32) {.inline.} =
-  ppu.oam_touched()   # as every OAM store (serialized: oam_view_stale)
-  if read_u32_ptr(ppu.oam, offset) != val:
+  ppu.oam_view_stale = true   # as every OAM store (serialized); see oam_touched
+  let old = read_u32_ptr(ppu.oam, offset)
+  if old != val:
     ppu.render_dirty = true
     write_u32_ptr(ppu.oam, offset, val)
+    # word 0 of an entry is attr0 | attr1 shl 16; word 1 (attr2, the
+    # affine parameter) is never read by the map
+    if (offset and 4) == 0 and ((old xor val) and 0xC000C3FF'u32) != 0:
+      ppu.cont_obj_entry_moved(int(offset shr 3), uint16(old), uint16(old shr 16))
 
 # ROM reads: the buffer is sized to the next power of two >= the cart; reads
 # past it return the open-bus pattern

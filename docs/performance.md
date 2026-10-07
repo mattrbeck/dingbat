@@ -275,6 +275,41 @@ opcode); folding them is worth 1-2 % at most, inside the inlining-cliff
 noise. Thumb already has its 1024-entry specialised table; a decoded-block
 cache stays rejected (see above).
 
+## OAM stores and the OBJ contention map (2026-10-07)
+
+Varooom 3D (a Butano homebrew) was the slowest GBA game seen: ~140 fps
+uncapped, 176 fps native from an in-race state against 600+ for typical
+games. `sample` put 70 % of the time in `cont_build_obj`: the game rewrites
+OAM ~14,500 halfwords a frame (H-blank DMA), every OAM store cleared the
+OBJ layer's contention map (`oam_touched`), and the next OAM/OBJ-VRAM
+access, the DMA's own next store included, rebuilt it with a scan of all
+128 entries -- 14,390 rebuilds a frame.
+
+The map reads only attr0's Y, affine, double-size and shape bits and
+attr1's size bits, and an entry off the map's line costs the scan the same
+two dots wherever it sits. So `oam_store16/32` (bus.nim) now clear the key
+only when a store changes those bits for an entry on the map's line
+before or after (`cont_obj_entry_moved`); `oam_view_stale` is still set on
+every store. Rebuilds 14,390 -> ~690 a frame.
+
+* Varooom 3D race: 75.6M -> 27.5M host instructions a frame (-64 %),
+  **176 -> 616 fps** native (3.5x; hwcycles -71 %).
+* The 140-game playtest corpus, each script's `[new]` timeline replayed
+  under the real BIOS: Yu-Gi-Oh! The Sacred Cards -10.8 % instructions (+12 % fps-equivalent),
+  Classic NES Zelda, Sword of Mana, Donkey Kong Country 3, Super Puzzle
+  Fighter II and Mario vs. Donkey Kong -1.3 to -2.6 %, the rest flat
+  within noise (median 0.0 %, none slower beyond 0.3 %).
+* Exact, not approximate: frame and state hashes identical over 6,000
+  frames of Varooom 3D, mGBA suite output byte-identical, and
+  `-d:contObjVerify` (rebuild on every kept map and compare) ran the whole
+  corpus plus Varooom 3D with no stale map (73.7M checks on Varooom alone).
+
+What is left there is ordinary: `tick`, `arm_execute`, `render_sprites`,
+`cont_build_obj` at ~12 % (rebuilds for sprites that really move on the
+line, and ~156 a frame from accesses at dots 0-39 swapping between a
+line's map and the previous one's -- a two-line cache would take the
+latter, ~2-3 %).
+
 ## Game Boy / Game Boy Color (2026-09-29)
 
 Where the time went (native, `sample`, 11 GBC titles and one DMG): the FIFO
