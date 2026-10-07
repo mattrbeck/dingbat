@@ -353,6 +353,8 @@ final class GameSession: NSObject, ObservableObject {
         guard game != nil, paused != p else { return }
         paused = p
         pausedForBackground = false
+        // The screen stays awake while a game runs (web: Screen Wake Lock).
+        UIApplication.shared.isIdleTimerDisabled = !p
         if p {
             rewinding = false
             dingbat_flush_save()
