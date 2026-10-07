@@ -240,7 +240,13 @@ struct HeroView: View {
         if paused {
             Menu {
                 SessionMenuItems()
-            } label: { label }
+            } label: {
+                label.overlay(alignment: .topTrailing) {
+                    if model.newPrints {
+                        Circle().fill(palette.accent).frame(width: 8, height: 8).offset(x: -6, y: 6)
+                    }
+                }
+            }
                 .accessibilityLabel("More for this game")
         } else {
             Button { model.openSheet(.tileMenu(entry)) } label: { label }

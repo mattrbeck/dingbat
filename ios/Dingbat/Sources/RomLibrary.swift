@@ -540,6 +540,7 @@ final class RomLibrary: ObservableObject {
         await updateRecent { recents in
             DriveSync.shared.renameLocal(from: e.fileName, to: newName, ts: ts)
             Self.moveRecords(from: e.fileName, to: newName)
+            PrintStore.rename(from: e.fileName, to: newName)
             Checkpoints.move(from: e, to: fresh)
             CrashWatch.forget(e.fileName)
             guard let old = recents.first(where: { $0.string("name") == e.fileName }) else { return nil }

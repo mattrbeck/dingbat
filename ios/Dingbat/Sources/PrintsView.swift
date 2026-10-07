@@ -39,7 +39,11 @@ struct PrintsView: View {
                     .accessibilityLabel("Printed photo")
             }
             HStack(spacing: 8) {
-                PadButton("Save PNG") { Share.present([url]) }
+                PadButton("Save PNG") {
+                    // Under the web's name, <game>-print-<stamp>.png.
+                    let copy = (try? Data(contentsOf: url)).flatMap { SheetFiles.temp($0, name: PrintStore.shareName(url)) }
+                    Share.present([copy ?? url])
+                }
                     .buttonStyle(SheetButtonStyle())
                 PadButton("Delete") {
                     try? FileManager.default.removeItem(at: url)
