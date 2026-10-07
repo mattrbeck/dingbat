@@ -926,6 +926,7 @@ final class GameSession: NSObject, ObservableObject {
             AppModel.shared.toast("Couldn't capture the emulator state")
             return false
         }
+        storeLastFrame()  // a save is a moment worth a picture (web storeLastFrame force)
         do {
             try RomLibrary.ensureDir(g.dir)
             try data.write(to: g.stateURL(slot: slot), options: .atomic)

@@ -215,7 +215,7 @@ final class Keyboard: ObservableObject {
             guard !shift, !linked else { return }
             if session.paused { session.stepFrame() } else { session.togglePause() }
         case 109:
-            if !shift { s.muted.toggle() }
+            if !shift { s.toggleMute() }
         case 105:
             if !shift { s.inputDisplay.toggle() }
         case 0x4000003E:  // F5

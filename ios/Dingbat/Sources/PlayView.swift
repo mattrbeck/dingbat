@@ -613,7 +613,7 @@ struct VolumeControl: View {
         HStack(spacing: 4) {
             BarIconButton(system: settings.muted || settings.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
                           label: settings.muted ? "Unmute" : "Mute", active: settings.muted) {
-                settings.muted.toggle()
+                settings.toggleMute()
             }
             if showSlider {
                 VolumeSlider()

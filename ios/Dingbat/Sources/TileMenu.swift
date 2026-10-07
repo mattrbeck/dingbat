@@ -29,6 +29,7 @@ struct TileMenuView: View {
             if !local && !onDrive {
                 item("find", "Find the file…") {
                     model.sheet = nil
+                    model.relinkLaunch = false
                     model.relinking = entry
                 }
             }
@@ -196,6 +197,7 @@ struct SessionMenuItems: View {
         if !PrintStore.all().isEmpty {
             Button { model.openSheet(.prints) } label: { Label("Printed photos", systemImage: "printer") }
         }
+        Button { NetLink.shared.openSheet() } label: { Label("Link cable", systemImage: "cable.connector") }
         Button { model.openSheet(.cheats) } label: { Label("Cheats", systemImage: "star") }
         Button { model.openSheet(.report) } label: { Label("Report a bug", systemImage: "ladybug") }
     }
@@ -206,14 +208,27 @@ struct SessionMenuItems: View {
 /// What the file menu's items do (web resetGameAction, deleteGameAction,
 /// renameGame), the game in memory included.
 enum HomeActions {
-    /// Reset save data. The game in memory is closed first, so its battery
-    /// RAM is not flushed back over the reset (the web reboots it fresh; here
-    /// the hero turns to closed and the next Play starts fresh).
+    /// Reset save data (web resetGameAction). The game in memory is let go
+    /// unflushed, so its battery RAM cannot write back over the reset, and
+    /// boots again fresh, still where the player is.
     static func resetSaveData(_ e: RomEntry) {
         let model = AppModel.shared
-        if GameSession.shared.game == e { model.closeGame() }
+        let session = GameSession.shared
+        let loaded = session.game == e
+        if loaded { session.discard() }
         RomLibrary.shared.resetSaveData(e)
-        model.toast("Save data deleted")
+        if loaded { reboot(e) }
+        model.toast(loaded ? "Save data deleted — starting fresh" : "Save data deleted")
+    }
+
+    /// Boot `e` again from its save, playing if the player is in the game,
+    /// paused behind the hero otherwise.
+    static func reboot(_ e: RomEntry) {
+        let model = AppModel.shared
+        let session = GameSession.shared
+        guard session.open(e, resume: false) != .failed else { return }
+        model.heroGame = e
+        if model.screen != .play { session.setPaused(true) }
     }
 
     /// Delete the ROM and everything of it; the game in memory is closed
