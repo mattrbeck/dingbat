@@ -76,6 +76,22 @@ struct HomeView: View {
             importPicked(result)
         }
         .onChange(of: sort) { s in LibFilter.Sort.saved = s }
+        .background(EmptyView().fileImporter(isPresented: Binding(get: { model.relinking != nil },
+                                                                  set: { if !$0 { model.relinking = nil } }),
+                                             allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .data],
+                                             allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first, let e = model.relinking {
+                model.relink(e, to: url)
+            }
+            model.relinking = nil
+        })
+        .alert("A Different File", isPresented: Binding(get: { model.relinkConfirm != nil },
+                                                         set: { if !$0 { model.relinkConfirm = nil } })) {
+            Button("Cancel", role: .cancel) { model.relinkConfirm = nil }
+            Button("Use It") { if let c = model.relinkConfirm { model.finishRelink(c.entry, c.bytes) } }
+        } message: {
+            Text("That file isn't the size this game's was. Its save may not work with it. Use it anyway?")
+        }
     }
 
     @State private var scrollToTop: (() -> Void)?
@@ -100,6 +116,7 @@ struct HomeView: View {
             if entries.isEmpty {
                 brandBlock
                 EmptyStart { importing = true }
+                HomeDriveRow()
             } else {
                 if let hero {
                     HeroView(entry: hero, wide: wide, viewport: viewport, solo: solo)
@@ -200,11 +217,13 @@ struct HomeView: View {
             if case .failure(let err) = result { model.toast(err.localizedDescription, duration: 4) }
             return
         }
-        do {
-            let e = try library.importRom(from: url)
-            model.launch(e, resume: false)
-        } catch {
-            model.toast(error.localizedDescription, duration: 4)
+        Task { @MainActor in
+            do {
+                let e = try await library.importRom(from: url)
+                model.launch(e, resume: false)
+            } catch {
+                model.toast(error.localizedDescription, duration: 4)
+            }
         }
     }
 }
@@ -314,6 +333,7 @@ struct HomeBar: View {
                 BarIconButton(system: "gearshape", label: "Settings") {
                     model.openSheet(.settings(section: nil))
                 }
+                AccountButton()
             }
             // Wide screens centre it.
             if wide { brandButton(p) }

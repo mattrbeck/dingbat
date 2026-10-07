@@ -248,9 +248,11 @@ proc dingbat_load_rom_bytes(data: pointer; len: cint; persist_path: cstring;
     return -3
   dingbat_load_rom(persist_path, bios_path)
 
-proc dingbat_unload() {.exportc, cdecl.} =
-  ## Flush the battery save and drop the core (closing a game).
-  flush_current_save()
+proc dingbat_unload(flush: cint) {.exportc, cdecl.} =
+  ## Drop the core (closing a game), flushing its battery save first unless
+  ## `flush` is 0: a copy let go for another device's newer one (Drive
+  ## hand-off) must not write its RAM over the save landing in its place.
+  if flush != 0: flush_current_save()
   stateKind = ekNone
   stateGba = nil
   stateGb = nil

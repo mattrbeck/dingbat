@@ -31,6 +31,8 @@ targets:
         LSSupportsOpeningDocumentsInPlace: true
         UIRequiresFullScreen: true
         UIStatusBarHidden: false
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         NSCameraUsageDescription: A Game Boy Camera cart can see through your camera.
         NSMotionUsageDescription: Tilt carts play by tilting your device.
         ITSAppUsesNonExemptEncryption: false

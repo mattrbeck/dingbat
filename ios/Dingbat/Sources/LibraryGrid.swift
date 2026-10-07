@@ -411,10 +411,15 @@ struct LibraryBar: View {
 struct LibraryTile: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.palette) var palette
+    @ObservedObject private var drive = DriveSync.shared
     let entry: RomEntry
     /// Read only so the picture is redrawn when it changes.
     let pictureGen: Int
     @State private var pressed = false
+
+    /// No ROM here: Drive holds it (web .home-tile-cloud) or not (missing).
+    private var local: Bool { entry.isLocal }
+    private var onDrive: Bool { !local && drive.driveHasRom(entry.fileName) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -422,6 +427,8 @@ struct LibraryTile: View {
                 .aspectRatio(3 / 2, contentMode: .fit)
                 .clipped()
                 .id(pictureGen)
+                .opacity(local ? 1 : 0.72)
+                .overlay { loadOverlay }
             HStack(spacing: 8) {
                 Text(entry.name)
                     .font(.system(size: 13))
@@ -429,6 +436,7 @@ struct LibraryTile: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .opacity(local ? 1 : 0.72)
                 SysChip(system: entry.system)
             }
             .padding(.horizontal, 10)
@@ -437,8 +445,11 @@ struct LibraryTile: View {
         .background(LinearGradient(colors: [palette.surface2, palette.surface1],
                                    startPoint: .top, endPoint: .bottom))
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(pressed ? palette.border2 : palette.border, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+            .strokeBorder(pressed ? palette.border2 : local ? palette.border : palette.border2,
+                          style: StrokeStyle(lineWidth: 1, dash: local ? [] : [4, 3])))
         .overlay(alignment: .topTrailing) { moreButton }
+        .overlay(alignment: .topLeading) { cornerButton }
         .offset(y: pressed ? 1 : 0)
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture { model.openLibraryGame(entry) }
@@ -450,6 +461,78 @@ struct LibraryTile: View {
         .accessibilityLabel("\(entry.name), \(entry.system)")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "More for this game") { model.openSheet(.tileMenu(entry)) }
+    }
+
+    /// What the tile says while its game comes down (web paintTileLoad).
+    @ViewBuilder private var loadOverlay: some View {
+        let name = entry.fileName
+        if let (got, total) = drive.downloading[name] {
+            let opening = model.opening == name
+            ZStack {
+                Color.black.opacity(0.55)
+                VStack(spacing: 6) {
+                    Text(opening ? (total > 0 && got >= total ? "Starting…" : "Opening") : "Downloading")
+                        .font(.system(size: 13, weight: .semibold))
+                    if total > 0 {
+                        Text(String(format: "%.1f of %.1f MB", Double(got) / 1048576, Double(total) / 1048576))
+                            .font(.system(size: 11, design: .monospaced))
+                        ProgressView(value: Double(min(got, total)), total: Double(total))
+                            .tint(palette.accent)
+                            .frame(width: 90)
+                    }
+                }
+                .foregroundColor(.white)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 1).stroke(opening ? palette.accent : .clear, lineWidth: 2))
+        } else if model.opening == name {
+            ZStack {
+                Color.black.opacity(0.55)
+                VStack(spacing: 4) {
+                    Text(drive.active ? "Opening" : "Signing in…").font(.system(size: 13, weight: .semibold))
+                    if !drive.active { Text("Google Drive").font(.system(size: 11)) }
+                }
+                .foregroundColor(.white)
+            }
+        } else if model.tileFailed.contains(name) {
+            ZStack {
+                Color.black.opacity(0.6)
+                VStack(spacing: 4) {
+                    Text("Couldn't download").font(.system(size: 13, weight: .semibold))
+                    Text("Tap to try again").font(.system(size: 11))
+                }
+                .foregroundColor(.white)
+            }
+        }
+    }
+
+    /// ↓ for a Drive-only game, a magnifier for a missing one, a check for a
+    /// download that just landed.
+    @ViewBuilder private var cornerButton: some View {
+        let name = entry.fileName
+        if model.tileDone.contains(name) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(palette.live)
+                .frame(width: 28, height: 26)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
+                .padding(6)
+        } else if !local {
+            Button {
+                if onDrive { model.downloadOnly(entry) } else { model.relinking = entry }
+            } label: {
+                Group {
+                    if drive.downloading[name] != nil { ProgressView().scaleEffect(0.6).tint(.white) }
+                    else { Image(systemName: onDrive ? "arrow.down" : "magnifyingglass") }
+                }
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(Color.white.opacity(0.85))
+                .frame(width: 28, height: 26)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
+            }
+            .padding(6)
+            .disabled(drive.downloading[name] != nil)
+            .accessibilityLabel(onDrive ? "Download \(entry.name) to this device" : "Find the file for \(entry.name)")
+        }
     }
 
     private var moreButton: some View {

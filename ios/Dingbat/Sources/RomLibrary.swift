@@ -8,25 +8,34 @@ extension UTType {
     static var gbcRom: UTType { UTType(importedAs: "com.mattrb.dingbat.gbc") }
 }
 
-/// One game in the library. Its files are keyed by the ROM's file stem,
-/// which the library keeps unique:
+/// One game in the library, named as the web names it: the ROM's file name,
+/// extension and all ("Pokemon Emerald.gba"). Every record of the game is
+/// keyed by it, as the web's IndexedDB keys and Drive's file names are
+/// ("save:Pokemon Emerald.gba"), so the two stay one library:
 ///
-///   Documents/roms/<stem>.<ext>          the ROM (visible in the Files app)
-///   Documents/roms/<stem>.sav            battery save (the core writes it)
-///   Documents/states/<stem>.state        save-state slot 1 ("Quick")
-///   Documents/states/<stem>.slotN.state  slots 2..9 (N = 1..8), + .png thumbs
-///   Documents/sessions/<stem>.state      the session ("Resume"), + .json, .png
-///   Documents/shots/<stem>.png           the library picture (last screen)
-///   Documents/art/<stem>.png             box art from a zip
-///   Documents/cheats/<stem>.cht          cheats (.cht text)
+///   Documents/roms/<name>                    the ROM (visible in Files)
+///   games/<name>/rom.<ext>                   a link to it, which the core loads
+///   games/<name>/rom.sav                     battery save   (save:<name>)
+///   games/<name>/state<N>.state              slot N+1        (state:<name>[:slotN])
+///   games/<name>/state<N>.meta.json          its thumbnail   (statemeta:...)
+///   games/<name>/session.state|.json|.jpg    the session     (stateauto:<name>)
+///   games/<name>/frame.jpg                   last screen     (frame:<name>)
+///   games/<name>/art.png, cheats.cht         box art, cheats (this device only)
+///   games/<name>/oldsave.json                a kept save     (oldsave:<name>)
+///
+/// games/ lives in Application Support. A game can be in the library with no
+/// ROM here: on Drive only (downloads on demand) or missing.
 struct RomEntry: Identifiable, Equatable, Hashable {
-    let url: URL
+    /// The web's game name, the key of every record.
+    let fileName: String
 
-    var id: String { url.lastPathComponent }
-    var fileName: String { url.lastPathComponent }
-    var stem: String { url.deletingPathExtension().lastPathComponent }
+    init(fileName: String) { self.fileName = fileName }
+
+    var id: String { fileName }
+    var stem: String { (fileName as NSString).deletingPathExtension }
+    /// What the person sees (web displayName).
     var name: String { stem }
-    var ext: String { url.pathExtension.lowercased() }
+    var ext: String { (fileName as NSString).pathExtension.lowercased() }
     /// web systemOf(): .gba GBA; .gbc/.cgb GBC; anything else GB.
     var system: String {
         switch ext {
@@ -37,9 +46,30 @@ struct RomEntry: Identifiable, Equatable, Hashable {
     }
     var isGBA: Bool { system == "GBA" }
 
+    var url: URL { RomLibrary.romsDir.appendingPathComponent(fileName) }
+    var dir: URL { RomLibrary.gamesDir.appendingPathComponent(fileName, isDirectory: true) }
+    /// The path the core loads: a link to the ROM inside the game's folder, so
+    /// the battery save it writes beside it (rom.sav) is this game's alone.
+    var coreURL: URL { dir.appendingPathComponent("rom." + (ext.isEmpty ? "gb" : ext)) }
+    var saveURL: URL { dir.appendingPathComponent("rom.sav") }
+    func stateURL(slot: Int) -> URL { dir.appendingPathComponent("state\(slot).state") }
+    func stateMetaURL(slot: Int) -> URL { dir.appendingPathComponent("state\(slot).meta.json") }
+    var sessionURL: URL { dir.appendingPathComponent("session.state") }
+    var sessionMetaURL: URL { dir.appendingPathComponent("session.json") }
+    var sessionPicURL: URL { dir.appendingPathComponent("session.jpg") }
+    var shotURL: URL { dir.appendingPathComponent("frame.jpg") }
+    var artURL: URL { dir.appendingPathComponent("art.png") }
+    var cheatsURL: URL { dir.appendingPathComponent("cheats.cht") }
+    var oldSaveURL: URL { dir.appendingPathComponent("oldsave.json") }
+
+    /// The ROM file is on this device.
+    var isLocal: Bool { FileManager.default.fileExists(atPath: url.path) }
+
     var bytes: Int {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-        return (attrs?[.size] as? NSNumber)?.intValue ?? 0
+        if let n = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber {
+            return n.intValue
+        }
+        return RomLibrary.shared.romSize(fileName)
     }
     var sizeText: String { RomEntry.formatBytes(bytes) }
 
@@ -49,43 +79,59 @@ struct RomEntry: Identifiable, Equatable, Hashable {
         return "\(max(1, bytes >> 10)) KB"
     }
 
-    var saveURL: URL { url.deletingPathExtension().appendingPathExtension("sav") }
-    func stateURL(slot: Int) -> URL {
-        RomLibrary.statesDir.appendingPathComponent(slot == 0 ? "\(stem).state" : "\(stem).slot\(slot).state")
-    }
-    func stateThumbURL(slot: Int) -> URL {
-        RomLibrary.statesDir.appendingPathComponent(slot == 0 ? "\(stem).png" : "\(stem).slot\(slot).png")
-    }
-    var sessionURL: URL { RomLibrary.sessionsDir.appendingPathComponent("\(stem).state") }
-    var sessionMetaURL: URL { RomLibrary.sessionsDir.appendingPathComponent("\(stem).json") }
-    var sessionPicURL: URL { RomLibrary.sessionsDir.appendingPathComponent("\(stem).png") }
-    var shotURL: URL { RomLibrary.shotsDir.appendingPathComponent("\(stem).png") }
-    var artURL: URL { RomLibrary.artDir.appendingPathComponent("\(stem).png") }
-    var cheatsURL: URL { RomLibrary.cheatsDir.appendingPathComponent("\(stem).cht") }
-
-    /// Every per-game file, for rename and delete.
-    var allFiles: [URL] {
-        var out = [url, saveURL, sessionURL, sessionMetaURL, sessionPicURL, shotURL, artURL, cheatsURL]
-        for s in 0..<9 { out.append(stateURL(slot: s)); out.append(stateThumbURL(slot: s)) }
-        return out
-    }
-
     var hasSave: Bool {
         guard let n = (try? FileManager.default.attributesOfItem(atPath: saveURL.path))?[.size] as? NSNumber else { return false }
         return n.intValue > 0
     }
 }
 
-/// What a session snapshot was taken with (web stateauto:<name> minus the
-/// bytes, which sit in their own file).
-struct SessionMeta: Codable {
-    var ts: Double          // ms since 1970
-    var saveSig: String?    // signature of the .sav the state carries
+/// A session snapshot's header (web stateauto:<name> minus the bytes): the
+/// JSON a session's Drive file carries, kept verbatim in session.json.
+struct SessionMeta {
+    var ts: Double                // ms since 1970
+    /// The .sav signature the state carries. `nil` with `hasSaveSig` true is
+    /// "taken with no save" and counts; absent is a snapshot from before the
+    /// signature existed, never offered.
+    var saveSig: String?
+    var hasSaveSig: Bool
+    var by: String?               // the device that took it (web deviceId)
+    var dev: String?              // what kind of device ("iPhone")
+
+    init(ts: Double, saveSig: String?, by: String?, dev: String?) {
+        self.ts = ts
+        self.saveSig = saveSig
+        self.hasSaveSig = true
+        self.by = by
+        self.dev = dev
+    }
+
+    init?(json: Data) {
+        guard let o = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
+              let ts = (o["ts"] as? NSNumber)?.doubleValue else { return nil }
+        self.ts = ts
+        self.hasSaveSig = o.keys.contains("saveSig")
+        self.saveSig = o["saveSig"] as? String
+        self.by = o["by"] as? String
+        self.dev = o["dev"] as? String
+    }
+
+    /// The bundle header as the web writes it (sessionBundle): ts, saveSig,
+    /// by, dev and the two lengths, in that order.
+    func header(state: Int, pic: Int) -> Data {
+        var o = JSObject()
+        o["ts"] = .number(ts)
+        if hasSaveSig { o["saveSig"] = saveSig.map { .string($0) } ?? .null }
+        o["by"] = by.map { .string($0) } ?? .null
+        o["dev"] = dev.map { .string($0) } ?? .null
+        o["state"] = .number(Double(state))
+        o["pic"] = .number(Double(pic))
+        return JSValue.object(o).data()
+    }
 }
 
-/// The library: ROM files plus a recency index (`library.json`, newest
-/// first). ROMs dropped into Documents/roms by the Files app join on the
-/// next refresh.
+/// The library: the recency index ("recent" on the web: newest first,
+/// `{ name, ts, imp?, gen? }`, the list the Drive library merges), the ROM
+/// files, and every per-game record. Main thread only.
 final class RomLibrary: ObservableObject {
     static let shared = RomLibrary()
 
@@ -94,31 +140,42 @@ final class RomLibrary: ObservableObject {
     @Published var pictureGen = 0
 
     static let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    static let support: URL = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("dingbat", isDirectory: true)
+    }()
     static let romsDir = docs.appendingPathComponent("roms", isDirectory: true)
-    static let statesDir = docs.appendingPathComponent("states", isDirectory: true)
-    static let sessionsDir = docs.appendingPathComponent("sessions", isDirectory: true)
-    static let shotsDir = docs.appendingPathComponent("shots", isDirectory: true)
-    static let artDir = docs.appendingPathComponent("art", isDirectory: true)
-    static let cheatsDir = docs.appendingPathComponent("cheats", isDirectory: true)
+    static let gamesDir = support.appendingPathComponent("games", isDirectory: true)
     static let printsDir = docs.appendingPathComponent("prints", isDirectory: true)
-    static let biosDir = docs.appendingPathComponent("bios", isDirectory: true)
-    static let indexURL = docs.appendingPathComponent("library.json")
+    static let biosDir = support.appendingPathComponent("bios", isDirectory: true)
+    static let recentURL = support.appendingPathComponent("recent.json")
+    static let romSizesURL = support.appendingPathComponent("romsizes.json")
     static let gbaBiosURL = biosDir.appendingPathComponent("gba_bios.bin")
     static let gbcBootromURL = biosDir.appendingPathComponent("gbc_bootrom.bin")
 
     static let romExtensions: Set<String> = ["gba", "gb", "gbc", "cgb", "sgb"]
 
-    private struct IndexEntry: Codable { var file: String; var ts: Double }
-    private var recency: [String: Double] = [:]
+    /// The recency index, newest first. Changed only through `updateRecent`.
+    private(set) var recents: [JSObject] = []
+    private var romSizes: [String: Int] = [:]
 
     init() {
-        for dir in [Self.romsDir, Self.statesDir, Self.sessionsDir, Self.shotsDir, Self.artDir,
-                    Self.cheatsDir, Self.printsDir, Self.biosDir] {
+        for dir in [Self.romsDir, Self.gamesDir, Self.printsDir, Self.biosDir] {
             try? Self.ensureDir(dir)
         }
-        if let data = try? Data(contentsOf: Self.indexURL),
-           let idx = try? JSONDecoder().decode([IndexEntry].self, from: data) {
-            for e in idx { recency[e.file] = e.ts }
+        // Application Support is backed up, but nothing in it is the person's
+        // to browse; keep Files showing only roms/ and prints/.
+        LegacyLayout.migrate()
+        if let data = try? Data(contentsOf: Self.recentURL),
+           let arr = JSValue.parse(data)?.arrayValue {
+            recents = arr.compactMap { v in
+                guard let o = v.objectValue, let n = o.string("name"), !n.isEmpty else { return nil }
+                return Lib.entry(name: n, ts: o.number("ts") ?? 0, imp: o.number("imp"), gen: Lib.gen(o))
+            }
+        }
+        if let data = try? Data(contentsOf: Self.romSizesURL),
+           let o = try? JSONDecoder().decode([String: Int].self, from: data) {
+            romSizes = o
         }
         refresh()
     }
@@ -127,38 +184,122 @@ final class RomLibrary: ObservableObject {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
+    // MARK: the index
+
+    /// ROMs that arrived in Documents/roms through the Files app join the
+    /// index as imports; the grid is the index.
     func refresh() {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: Self.romsDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        let roms = files.filter { Self.romExtensions.contains($0.pathExtension.lowercased()) }
-        for f in roms where recency[f.lastPathComponent] == nil {
-            // A file that arrived through the Files app: place it by its date.
-            let date = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            recency[f.lastPathComponent] = (date ?? Date()).timeIntervalSince1970 * 1000
+        var added: [RomEntry] = []
+        for f in files where Self.romExtensions.contains(f.pathExtension.lowercased()) {
+            let name = f.lastPathComponent
+            if !recents.contains(where: { $0.string("name") == name }) {
+                let date = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                let ts = ((date ?? Date()).timeIntervalSince1970 * 1000).rounded()
+                recents.append(Lib.entry(name: name, ts: ts, imp: ts, gen: 0))
+                added.append(RomEntry(fileName: name))
+            }
         }
-        entries = roms
-            .sorted { (recency[$0.lastPathComponent] ?? 0) > (recency[$1.lastPathComponent] ?? 0) }
-            .map { RomEntry(url: $0) }
-        saveIndex()
+        if !added.isEmpty {
+            recents.sort { ($0.number("ts") ?? 0) > ($1.number("ts") ?? 0) }
+            saveRecents()
+            for e in added { DriveSync.shared.markGameUpload(e.fileName) }
+        }
+        publish()
     }
 
-    private func saveIndex() {
-        let idx = entries.map { IndexEntry(file: $0.fileName, ts: recency[$0.fileName] ?? 0) }
-        if let data = try? JSONEncoder().encode(idx) {
-            try? data.write(to: Self.indexURL, options: .atomic)
-        }
+    private func publish() {
+        entries = recents.compactMap { $0.string("name") }.map { RomEntry(fileName: $0) }
     }
 
-    func lastPlayed(_ e: RomEntry) -> Double { recency[e.fileName] ?? 0 }
+    private func saveRecents() {
+        try? Self.ensureDir(Self.support)
+        try? JSValue.array(recents.map { .object($0) }).data().write(to: Self.recentURL, options: .atomic)
+    }
 
-    /// A play moves the game to the front (web addRecentRom).
-    func touch(_ e: RomEntry) {
-        recency[e.fileName] = Date().timeIntervalSince1970 * 1000
-        refresh()
+    private var recentChain: Task<Void, Never>?
+
+    /// Every change to the index goes through here, one at a time, each
+    /// starting from the list the one before left (web updateRecent): an
+    /// import, a play, a delete, a rename and both sync commits all read,
+    /// change and write it back with awaits in between. `fn` returns the new
+    /// list, or nil to leave it.
+    @MainActor
+    @discardableResult
+    func updateRecent(_ fn: @escaping @MainActor ([JSObject]) async throws -> [JSObject]?) async rethrows -> [JSObject]? {
+        let prev = recentChain
+        var result: [JSObject]?
+        var failure: Error?
+        let task = Task { @MainActor in
+            await prev?.value
+            do {
+                if let next = try await fn(self.recents) {
+                    self.recents = next
+                    self.saveRecents()
+                    self.publish()
+                    result = next
+                }
+            } catch { failure = error }
+        }
+        recentChain = task
+        await task.value
+        if let failure { try { throw failure }() }
+        return result
+    }
+
+    func lastPlayed(_ e: RomEntry) -> Double {
+        recents.first { $0.string("name") == e.fileName }?.number("ts") ?? 0
+    }
+
+    func gen(of name: String) -> Int {
+        recents.first { $0.string("name") == name }.map(Lib.gen) ?? 0
     }
 
     func entry(named file: String) -> RomEntry? {
         entries.first { $0.fileName == file }
+    }
+
+    /// Move a game to the front (web bumpRecentIndex). `fresh` is a real
+    /// import: a new claim on the name (`imp`), and the next generation after
+    /// one this device deleted. `atLeast` raises the generation (a download of
+    /// files written for a newer one).
+    @MainActor
+    func bump(_ name: String, fresh: Bool = false, gen atLeast: Int = 0) async {
+        await updateRecent { all in
+            DriveSync.shared.renamedAway.remove(name)
+            let prev = all.first { $0.string("name") == name }
+            var list = all.filter { $0.string("name") != name }
+            var ts = (Date().timeIntervalSince1970 * 1000).rounded()
+            // A relaunch under a not-yet-applied rename marker must not
+            // outrank it; a re-import is a new claim.
+            if !fresh, let m = DriveSync.shared.state.ren.first(where: { $0.from == name }),
+               m.ts != 0, ts >= m.ts {
+                ts = m.ts - 1
+            }
+            let imp = fresh ? ts : prev?.number("imp")
+            var gen = max(prev.map(Lib.gen) ?? 0, atLeast)
+            if fresh, let t = DriveSync.shared.state.tomb.first(where: { $0.name == name }) {
+                gen = max(gen, t.gen + 1)
+            }
+            list.insert(Lib.entry(name: name, ts: ts, impFirst: imp, gen: gen), at: 0)
+            return list
+        }
+    }
+
+    /// A play moves the game to the front.
+    func touch(_ e: RomEntry) {
+        Task { @MainActor in await bump(e.fileName) }
+    }
+
+    // MARK: sizes
+
+    func romSize(_ name: String) -> Int { romSizes[name] ?? 0 }
+
+    func noteRomSize(_ name: String, _ n: Int) {
+        guard n > 0, romSizes[name] != n else { return }
+        romSizes[name] = n
+        if let data = try? JSONEncoder().encode(romSizes) { try? data.write(to: Self.romSizesURL, options: .atomic) }
     }
 
     // MARK: import
@@ -174,19 +315,12 @@ final class RomLibrary: ObservableObject {
         }
     }
 
-    /// A free stem: "Name", else "Name (2)", ... (stems key every file).
-    private func freeStem(_ stem: String, ext: String, replacing: String? = nil) -> String {
-        let taken = Set(entries.map { $0.stem.lowercased() }).subtracting([replacing?.lowercased() ?? ""])
-        if !taken.contains(stem.lowercased()) { return stem }
-        var n = 2
-        while taken.contains("\(stem) (\(n))".lowercased()) { n += 1 }
-        return "\(stem) (\(n))"
-    }
-
     /// Import from the document picker (security-scoped URL) or an Open-in.
-    /// The same file name again replaces the ROM and keeps its saves.
+    /// The same file name again replaces the ROM and keeps its saves (the web
+    /// keys games by file name too).
     @discardableResult
-    func importRom(from source: URL) throws -> RomEntry {
+    @MainActor
+    func importRom(from source: URL) async throws -> RomEntry {
         let scoped = source.startAccessingSecurityScopedResource()
         defer { if scoped { source.stopAccessingSecurityScopedResource() } }
         let ext = source.pathExtension.lowercased()
@@ -196,29 +330,29 @@ final class RomLibrary: ObservableObject {
         }
         if ext == "zip" {
             guard let z = ZipReader.extractRom(from: data) else { throw ImportError.noRomInZip }
-            let e = try add(romData: z.rom, fileName: z.name)
+            let e = try await add(romData: z.rom, fileName: z.name)
             if let art = z.art, let img = UIImage(data: art), let png = img.pngData() {
+                try? Self.ensureDir(e.dir)
                 try? png.write(to: e.artURL)
                 pictureGen += 1
             }
             return e
         }
         guard Self.romExtensions.contains(ext) else { throw ImportError.unsupported }
-        return try add(romData: data, fileName: source.lastPathComponent)
+        return try await add(romData: data, fileName: source.lastPathComponent)
     }
 
-    private func add(romData: Data, fileName: String) throws -> RomEntry {
-        let ext = (fileName as NSString).pathExtension.lowercased()
-        let stem = (fileName as NSString).deletingPathExtension
-        let existing = entries.first { $0.fileName.lowercased() == fileName.lowercased() }
-        let finalStem = existing?.stem ?? freeStem(stem, ext: ext)
-        let dest = Self.romsDir.appendingPathComponent("\(finalStem).\(ext)")
-        do { try romData.write(to: dest, options: .atomic) } catch {
+    /// Bytes first, index second (web addRecentRom).
+    @MainActor
+    func add(romData: Data, fileName: String) async throws -> RomEntry {
+        let e = RomEntry(fileName: fileName)
+        do { try romData.write(to: e.url, options: .atomic) } catch {
             throw ImportError.unreadable("Couldn't keep that file: \(error.localizedDescription)")
         }
-        recency[dest.lastPathComponent] = Date().timeIntervalSince1970 * 1000
-        refresh()
-        return RomEntry(url: dest)
+        noteRomSize(fileName, romData.count)
+        await bump(fileName, fresh: true)
+        DriveSync.shared.markGameUpload(fileName)
+        return e
     }
 
     /// The homebrew demo shipped in the bundle is copied in once.
@@ -233,9 +367,101 @@ final class RomLibrary: ObservableObject {
         refresh()
     }
 
+    /// The link the core loads, pointed at the ROM afresh (the app's
+    /// container path changes between installs).
+    func prepareCoreLink(_ e: RomEntry) -> URL? {
+        guard e.isLocal else { return nil }
+        let fm = FileManager.default
+        try? Self.ensureDir(e.dir)
+        try? fm.removeItem(at: e.coreURL)
+        do { try fm.createSymbolicLink(at: e.coreURL, withDestinationURL: e.url) } catch { return nil }
+        return e.coreURL
+    }
+
+    // MARK: per-game records (web perGameKeys)
+
+    static let numStateSlots = 9
+
+    static func slotStateKey(_ name: String, _ slot: Int) -> String {
+        slot == 0 ? "state:" + name : "state:\(name):slot\(slot)"
+    }
+    static func slotMetaKey(_ name: String, _ slot: Int) -> String {
+        slot == 0 ? "statemeta:" + name : "statemeta:\(name):slot\(slot)"
+    }
+
+    struct GameKeys {
+        var bytes: [String], saves: [String], session: [String], prefs: [String], kept: [String]
+        var all: [String] { bytes + saves + session + prefs + kept }
+    }
+
+    static func perGameKeys(_ name: String) -> GameKeys {
+        var saves = ["save:" + name, "save:" + name + "-p2"]
+        for s in 0..<numStateSlots { saves += [slotStateKey(name, s), slotMetaKey(name, s)] }
+        return GameKeys(bytes: ["rom:" + name, "art:" + name, "frame:" + name],
+                        saves: saves,
+                        session: ["stateauto:" + name, "sessionpic:" + name],
+                        prefs: ["cheats:" + name],
+                        kept: ["oldsave:" + name])
+    }
+
+    /// The file(s) a key is stored in. A session is three files; the others one.
+    static func files(forKey k: String) -> [URL] {
+        func game(_ prefix: String) -> RomEntry? {
+            k.hasPrefix(prefix) ? RomEntry(fileName: String(k.dropFirst(prefix.count))) : nil
+        }
+        if let e = game("rom:") { return [e.url] }
+        if let e = game("art:") { return [e.artURL] }
+        if let e = game("frame:") { return [e.shotURL] }
+        if let e = game("cheats:") { return [e.cheatsURL] }
+        if let e = game("oldsave:") { return [e.oldSaveURL] }
+        if let e = game("stateauto:") { return [e.sessionURL, e.sessionMetaURL, e.sessionPicURL] }
+        if let e = game("sessionpic:") { return [e.sessionPicURL] }
+        if k.hasPrefix("save:") {
+            let g = String(k.dropFirst(5))
+            if g.hasSuffix("-p2") {
+                return [RomEntry(fileName: String(g.dropLast(3))).dir.appendingPathComponent("rom-p2.sav")]
+            }
+            return [RomEntry(fileName: g).saveURL]
+        }
+        for (prefix, meta) in [("statemeta:", true), ("state:", false)] where k.hasPrefix(prefix) {
+            var g = String(k.dropFirst(prefix.count))
+            var slot = 0
+            if let r = g.range(of: #":slot(\d+)$"#, options: .regularExpression) {
+                slot = Int(g[r].dropFirst(5)) ?? 0
+                g = String(g[..<r.lowerBound])
+            }
+            let e = RomEntry(fileName: g)
+            return [meta ? e.stateMetaURL(slot: slot) : e.stateURL(slot: slot)]
+        }
+        return []
+    }
+
+    static func hasKey(_ k: String) -> Bool {
+        guard let f = files(forKey: k).first else { return false }
+        return FileManager.default.fileExists(atPath: f.path)
+    }
+
+    /// Remove keys (web deleteKeys).
+    static func deleteKeys(_ keys: [String]) {
+        for k in keys {
+            for f in files(forKey: k) { try? FileManager.default.removeItem(at: f) }
+        }
+    }
+
+    /// Anything of the game on this device besides the picture a pull
+    /// brought (web holdsGame).
+    func holdsGame(_ name: String) -> Bool {
+        Self.perGameKeys(name).all.contains { $0 != "frame:" + name && Self.hasKey($0) }
+    }
+
+    func hasAnyLocalRecord(_ name: String) -> Bool {
+        Self.perGameKeys(name).all.contains { Self.hasKey($0) }
+    }
+
     // MARK: per-game actions
 
-    /// web renameNameError: the validation for the Rename sheet.
+    /// web renameNameError: the validation for the Rename sheet. `raw` is
+    /// the new name without its extension, which is kept.
     func renameError(_ e: RomEntry, to raw: String) -> String? {
         let name = raw.trimmingCharacters(in: .whitespaces)
         if name.isEmpty { return "Enter a name" }
@@ -245,48 +471,99 @@ final class RomLibrary: ObservableObject {
             return "A name can't contain / \\ or :"
         }
         if name.hasPrefix(".") { return "A name can't start with a dot" }
+        if name.lowercased().hasSuffix("-p2") { return "A name can't end in “-p2”" }
         if name == e.stem { return "That's already its name" }
-        if entries.contains(where: { $0 != e && $0.stem.lowercased() == name.lowercased() }) {
+        let full = name + "." + (e.fileName as NSString).pathExtension
+        if recents.contains(where: { $0.string("name") == full }) ||
+            Self.perGameKeys(full).all.contains(where: Self.hasKey) {
             return "Another game already has that name"
         }
         return nil
     }
 
-    /// Rename every file of the game in one go.
+    /// Rename every record of the game in one go (web renameGame); Drive
+    /// renames its files in place and other devices follow the marker.
+    @MainActor
     @discardableResult
-    func rename(_ e: RomEntry, to raw: String) -> RomEntry? {
-        let name = raw.trimmingCharacters(in: .whitespaces)
-        guard renameError(e, to: name) == nil else { return nil }
-        let fresh = RomEntry(url: Self.romsDir.appendingPathComponent("\(name).\(e.ext)"))
-        let fm = FileManager.default
-        for (from, to) in zip(e.allFiles, fresh.allFiles) where fm.fileExists(atPath: from.path) {
-            try? fm.moveItem(at: from, to: to)
+    func rename(_ e: RomEntry, to raw: String) async -> RomEntry? {
+        let stem = raw.trimmingCharacters(in: .whitespaces)
+        guard renameError(e, to: stem) == nil else { return nil }
+        let newName = stem + "." + (e.fileName as NSString).pathExtension
+        let fresh = RomEntry(fileName: newName)
+        let ts = (Date().timeIntervalSince1970 * 1000).rounded()
+        await updateRecent { recents in
+            DriveSync.shared.renameLocal(from: e.fileName, to: newName, ts: ts)
+            Self.moveRecords(from: e.fileName, to: newName)
+            guard let old = recents.first(where: { $0.string("name") == e.fileName }) else { return nil }
+            var list = recents.filter { $0.string("name") != e.fileName }
+            list.insert(Lib.entry(name: newName, ts: ts, impFirst: ts, gen: Lib.gen(old)), at: 0)
+            return list
         }
-        recency[fresh.fileName] = recency.removeValue(forKey: e.fileName) ?? Date().timeIntervalSince1970 * 1000
-        refresh()
+        if let size = romSizes[e.fileName] { noteRomSize(newName, size) }
         pictureGen += 1
+        DriveSync.shared.scheduleFlush()
         return fresh
     }
 
-    /// Reset save data: the battery save, every state and the session go.
-    func resetSaveData(_ e: RomEntry) {
+    /// Move every record of `from` to `to`. Collisions are skipped (left in
+    /// place); returns the pairs skipped.
+    @discardableResult
+    static func moveRecords(from: String, to: String) -> [(String, String)] {
         let fm = FileManager.default
-        var files = [e.saveURL, e.sessionURL, e.sessionMetaURL, e.sessionPicURL]
-        for s in 0..<9 { files.append(e.stateURL(slot: s)); files.append(e.stateThumbURL(slot: s)) }
-        for f in files { try? fm.removeItem(at: f) }
+        let fk = perGameKeys(from).all, tk = perGameKeys(to).all
+        var skipped: [(String, String)] = []
+        try? ensureDir(RomEntry(fileName: to).dir)
+        for (f, t) in zip(fk, tk) where f != "sessionpic:" + from {
+            let src = files(forKey: f), dst = files(forKey: t)
+            guard src.contains(where: { fm.fileExists(atPath: $0.path) }) else { continue }
+            if dst.contains(where: { fm.fileExists(atPath: $0.path) }) { skipped.append((f, t)); continue }
+            for (s, d) in zip(src, dst) where fm.fileExists(atPath: s.path) { try? fm.moveItem(at: s, to: d) }
+        }
+        let oldDir = RomEntry(fileName: from).dir
+        try? fm.removeItem(at: RomEntry(fileName: from).coreURL)
+        if let left = try? fm.contentsOfDirectory(atPath: oldDir.path), left.isEmpty {
+            try? fm.removeItem(at: oldDir)
+        }
+        return skipped
+    }
+
+    /// Reset save data: the battery save, every state and the session go
+    /// (web resetGameSaves / deleteSaveData); Drive is told first.
+    func resetSaveData(_ e: RomEntry) {
+        DriveSync.shared.queueSaveDataDeletes(e.fileName)
+        let k = Self.perGameKeys(e.fileName)
+        Self.deleteKeys(k.saves + k.session)
         pictureGen += 1
     }
 
     func hasSaveData(_ e: RomEntry) -> Bool {
-        let fm = FileManager.default
-        if e.hasSave || fm.fileExists(atPath: e.sessionURL.path) { return true }
-        return (0..<9).contains { fm.fileExists(atPath: e.stateURL(slot: $0).path) }
+        let k = Self.perGameKeys(e.fileName)
+        return (k.saves + k.session).contains(where: Self.hasKey)
     }
 
-    func delete(_ e: RomEntry) {
-        for f in e.allFiles { try? FileManager.default.removeItem(at: f) }
-        recency.removeValue(forKey: e.fileName)
-        refresh()
+    /// Delete everywhere (web deleteGameEverywhere): every record goes, and
+    /// a tombstone tells the other devices.
+    @MainActor
+    func delete(_ e: RomEntry) async {
+        let name = e.fileName
+        DriveSync.shared.markDeleteAll(Self.perGameKeys(name).all)
+        Self.deleteKeys(Self.perGameKeys(name).all)
+        try? FileManager.default.removeItem(at: e.dir)
+        await updateRecent { list in
+            DriveSync.shared.addTombstone(name, gen: list.first { $0.string("name") == name }.map(Lib.gen) ?? 0)
+            return list.filter { $0.string("name") != name }
+        }
+        DriveSync.shared.saveState()
+        DriveSync.shared.scheduleFlush()
+        pictureGen += 1
+    }
+
+    /// Drop the entry and every record here, Drive untouched (a tombstone
+    /// from another device, web deleteGameLocalData).
+    func deleteLocalData(_ name: String) {
+        let e = RomEntry(fileName: name)
+        Self.deleteKeys(Self.perGameKeys(name).all)
+        try? FileManager.default.removeItem(at: e.dir)
         pictureGen += 1
     }
 
@@ -306,28 +583,116 @@ final class RomLibrary: ObservableObject {
 
     func sessionMeta(_ e: RomEntry) -> SessionMeta? {
         guard let data = try? Data(contentsOf: e.sessionMetaURL) else { return nil }
-        return try? JSONDecoder().decode(SessionMeta.self, from: data)
+        return SessionMeta(json: data)
     }
 
     /// The session where it can be resumed: one taken with the save stored
     /// now (web resumeSessionFor). A game that saved since boots from that
     /// save, so a snapshot can never roll an in-game save back.
     func resumableSession(_ e: RomEntry) -> (bytes: Data, meta: SessionMeta)? {
-        guard let meta = sessionMeta(e), let bytes = try? Data(contentsOf: e.sessionURL),
-              !bytes.isEmpty else { return nil }
+        guard let meta = sessionMeta(e), meta.hasSaveSig,
+              let bytes = try? Data(contentsOf: e.sessionURL), !bytes.isEmpty else { return nil }
         guard meta.saveSig == Self.currentSaveSig(e) else { return nil }
         return (bytes, meta)
     }
 
     /// The picture a tile or the closed hero shows: the session's own picture
-    /// while it belongs to a resumable session, else the last screen, else
-    /// the box art (nil: draw the cartridge).
+    /// while it belongs to a resumable session, else the last screen (nil:
+    /// box art or the cartridge).
     func picture(for e: RomEntry, preferSession: Bool) -> UIImage? {
         if preferSession, resumableSession(e) != nil,
            let img = UIImage(contentsOfFile: e.sessionPicURL.path) { return img }
-        if let img = UIImage(contentsOfFile: e.shotURL.path) { return img }
-        return nil
+        return UIImage(contentsOfFile: e.shotURL.path)
     }
 
     func art(for e: RomEntry) -> UIImage? { UIImage(contentsOfFile: e.artURL.path) }
+}
+
+/// Library entries (web `recent`), built in the web's key order so the
+/// shared library file serializes as the web's does.
+enum Lib {
+    static func gen(_ o: JSObject) -> Int {
+        guard let g = o.number("gen"), g > 0, g == g.rounded() else { return 0 }
+        return Int(g)
+    }
+
+    /// withGen({ name, ts }, gen) with `imp` set after (mergeLibrary's order).
+    static func entry(name: String, ts: Double, imp: Double?, gen: Int) -> JSObject {
+        var o = JSObject([("name", .string(name)), ("ts", .number(ts))])
+        if gen > 0 { o["gen"] = .number(Double(gen)) }
+        if let imp, imp != 0 { o["imp"] = .number(imp) }
+        return o
+    }
+
+    /// withGen(imp ? { name, ts, imp } : { name, ts }, gen) (bumpRecentIndex's
+    /// and renameGame's order).
+    static func entry(name: String, ts: Double, impFirst imp: Double?, gen: Int) -> JSObject {
+        var o = JSObject([("name", .string(name)), ("ts", .number(ts))])
+        if let imp, imp != 0 { o["imp"] = .number(imp) }
+        if gen > 0 { o["gen"] = .number(Double(gen)) }
+        return o
+    }
+}
+
+/// The layout before Drive (files keyed by the stem in Documents/states,
+/// sessions, shots...), moved under the web's keys once.
+enum LegacyLayout {
+    static func migrate() {
+        let fm = FileManager.default
+        let docs = RomLibrary.docs
+        let key = "layout-v2"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        defer { UserDefaults.standard.set(true, forKey: key) }
+        let roms = (try? fm.contentsOfDirectory(at: RomLibrary.romsDir, includingPropertiesForKeys: nil)) ?? []
+        for rom in roms where RomLibrary.romExtensions.contains(rom.pathExtension.lowercased()) {
+            let stem = rom.deletingPathExtension().lastPathComponent
+            let e = RomEntry(fileName: rom.lastPathComponent)
+            try? RomLibrary.ensureDir(e.dir)
+            func move(_ from: URL, _ to: URL) {
+                if fm.fileExists(atPath: from.path) && !fm.fileExists(atPath: to.path) { try? fm.moveItem(at: from, to: to) }
+            }
+            move(rom.deletingPathExtension().appendingPathExtension("sav"), e.saveURL)
+            let states = docs.appendingPathComponent("states")
+            for s in 0..<RomLibrary.numStateSlots {
+                move(states.appendingPathComponent(s == 0 ? "\(stem).state" : "\(stem).slot\(s).state"), e.stateURL(slot: s))
+                try? fm.removeItem(at: states.appendingPathComponent(s == 0 ? "\(stem).png" : "\(stem).slot\(s).png"))
+            }
+            let sessions = docs.appendingPathComponent("sessions")
+            move(sessions.appendingPathComponent("\(stem).state"), e.sessionURL)
+            move(sessions.appendingPathComponent("\(stem).json"), e.sessionMetaURL)
+            try? fm.removeItem(at: sessions.appendingPathComponent("\(stem).png"))
+            let shot = docs.appendingPathComponent("shots/\(stem).png")
+            if let img = UIImage(contentsOfFile: shot.path), let jpg = img.jpegData(compressionQuality: 0.75) {
+                try? jpg.write(to: e.shotURL)
+            }
+            try? fm.removeItem(at: shot)
+            move(docs.appendingPathComponent("art/\(stem).png"), e.artURL)
+            move(docs.appendingPathComponent("cheats/\(stem).cht"), e.cheatsURL)
+        }
+        for d in ["states", "sessions", "shots", "art", "cheats", "bios"] {
+            let dir = docs.appendingPathComponent(d)
+            if d == "bios" {
+                for f in ["gba_bios.bin", "gbc_bootrom.bin"] {
+                    let from = dir.appendingPathComponent(f)
+                    let to = RomLibrary.biosDir.appendingPathComponent(f)
+                    if fm.fileExists(atPath: from.path) && !fm.fileExists(atPath: to.path) { try? fm.moveItem(at: from, to: to) }
+                }
+            }
+            if let left = try? fm.contentsOfDirectory(atPath: dir.path), left.isEmpty { try? fm.removeItem(at: dir) }
+        }
+        // The old recency index (file + ts) seeds the new one.
+        let old = docs.appendingPathComponent("library.json")
+        if let data = try? Data(contentsOf: old),
+           let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]],
+           !fm.fileExists(atPath: RomLibrary.recentURL.path) {
+            let list: [JSValue] = arr.compactMap { o in
+                guard let f = o["file"] as? String else { return nil }
+                let ts = (o["ts"] as? NSNumber)?.doubleValue ?? 0
+                return .object(Lib.entry(name: f, ts: ts.rounded(), imp: nil, gen: 0))
+            }
+            try? RomLibrary.ensureDir(RomLibrary.support)
+            try? JSValue.array(list).data().write(to: RomLibrary.recentURL)
+        }
+        try? fm.removeItem(at: old)
+    }
 }

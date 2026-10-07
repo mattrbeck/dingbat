@@ -9,6 +9,7 @@ struct HeroView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var session: GameSession
     @EnvironmentObject var library: RomLibrary
+    @ObservedObject private var drive = DriveSync.shared
     @Environment(\.palette) var palette
 
     let entry: RomEntry
@@ -149,7 +150,7 @@ struct HeroView: View {
     private var kicker: some View {
         HStack(spacing: 10) {
             HeroLED(lit: paused)
-            Text(paused ? "PAUSED" : "LAST PLAYED")
+            Text(kickerText.uppercased())
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .tracking(1.9)
                 .foregroundColor(paused ? palette.accent : palette.textDim)
@@ -158,7 +159,26 @@ struct HeroView: View {
             SysChip(system: entry.system, height: 18)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(paused ? "Paused, \(entry.system)" : "Last played, \(entry.system)")
+        .accessibilityLabel("\(kickerText), \(entry.system)")
+    }
+
+    /// web heroStateText: "Paused · Synced", "Last played", or where the
+    /// session was left ("On your iPhone · 5m ago").
+    private var kickerText: String {
+        _ = drive.stateTick
+        if paused {
+            guard drive.linked else { return "Paused" }
+            let g = entry.fileName
+            let pending = ["save:" + g, "stateauto:" + g, "frame:" + g].contains(where: drive.state.queueUp.contains)
+            if !pending { return "Paused · Synced" }
+            return drive.status == .offline ? "Paused · Not synced yet" : "Paused · Syncing…"
+        }
+        if let m = RomLibrary.shared.sessionMeta(entry), HomePictures.shared.hasSession(entry),
+           let by = m.by, by != DriveSync.deviceID {
+            let ago = Date().timeIntervalSince1970 * 1000 - m.ts < 60000 ? "just now" : AppModel.fmtAgo(m.ts)
+            return "On " + DriveSync.deviceWords(m.dev) + " · " + ago
+        }
+        return "Last played"
     }
 
     private func resume() {
