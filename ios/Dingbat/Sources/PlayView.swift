@@ -591,18 +591,44 @@ struct VolumeControl: View {
     }
 }
 
+/// The volume range (web .vol-range): a thin track and a small thumb, so it
+/// fits the 64 pt phone home bar as well as the menu row.
 struct VolumeSlider: View {
     @EnvironmentObject var settings: Settings
     @Environment(\.palette) var palette
+
     var body: some View {
-        Slider(value: Binding(get: { Double(settings.volume) },
-                              set: { v in
-                                  settings.volume = Int((v / 5).rounded() * 5)
-                                  if settings.muted && settings.volume > 0 { settings.muted = false }
-                              }),
-               in: 0...100, step: 5)
-            .tint(palette.accent)
-            .accessibilityLabel("Volume")
+        GeometryReader { geo in
+            let w = geo.size.width
+            let f = CGFloat(settings.muted ? 0 : settings.volume) / 100
+            ZStack(alignment: .leading) {
+                Capsule().fill(palette.surface3).frame(height: 4)
+                Capsule().fill(palette.accent).frame(width: max(4, w * f), height: 4)
+                Circle()
+                    .fill(palette.accent2)
+                    .overlay(Circle().stroke(palette.accentInk.opacity(0.35), lineWidth: 1))
+                    .frame(width: 14, height: 14)
+                    .offset(x: (w - 14) * f)
+            }
+            .frame(height: geo.size.height)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { v in
+                let x = min(max(0, v.location.x - 7), w - 14) / max(1, w - 14)
+                settings.volume = Int((x * 20).rounded()) * 5
+                if settings.muted && settings.volume > 0 { settings.muted = false }
+            })
+        }
+        .frame(height: 30)
+        .accessibilityElement()
+        .accessibilityLabel("Volume")
+        .accessibilityValue("\(settings.volume)")
+        .accessibilityAdjustableAction { dir in
+            switch dir {
+            case .increment: settings.volume = min(100, settings.volume + 5)
+            case .decrement: settings.volume = max(0, settings.volume - 5)
+            @unknown default: break
+            }
+        }
     }
 }
 
