@@ -61,7 +61,7 @@ struct SheetHeader<Leading: View, Trailing: View>: View {
             Text(title)
                 .font(.system(size: 17, weight: .bold))
                 .foregroundColor(palette.text)
-                .lineLimit(1)
+                .lineLimit(2)
             Spacer(minLength: 8)
             trailing()
             if let onClose { SheetCloseButton(action: onClose) }

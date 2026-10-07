@@ -31,6 +31,7 @@ the same frame).
 | Phone landscape: see-through pads (Outline / Bold / Solid), chevron d-pad, Select/Start pills inboard, a tap on the picture shows and hides the bar | `PlayLayout`, `TouchControls`, `GameStage` |
 | Portrait, tablet rails, Large controls, joystick (fixed / floating), Game Boy games without L/R; controls fixed-size, the picture yields | `PlayLayout`, `TouchControls` |
 | Menu: Quick Save / Quick Load / Rewind to a Moment / Slow Motion, Main Menu, Save States, Manage Saves, Capture (Screenshot, Record, Clip that!, Printed Photos), Link Cable, Cheats, Settings, Report a Bug | `GameMenu` and the sheets |
+| Crash recovery: the session taken every minute of play, kept as checkpoints too (nine, spread over play time, the ones from before a crash frozen); runs that end unseen counted per game, and after two in a row a tap on the game opens "… stopped unexpectedly" (Resume an earlier moment, or Start from in-game save); the tile menu's Resume from earlier. A moment from before the last in-game save takes its battery back, the newer save kept for Restore old save | `Checkpoints`, `CrashWatch`, `MomentsView` |
 | Google Drive: sign in through the browser (the web's broker flow), one library with dingbat.gg (saves, states, sessions, pictures, the library file, renames, deletions with the "removed on another device" sheet), Drive-only tiles that download on tap, hand-off between devices, kept saves, the sync indicator and Sync now | `DriveAuth`, `DriveClient`, `DriveSync`, `DriveViews` |
 | Record and "Clip that!": the last minute replayed frame-exact from the clip ring into an MP4 (H.264 at 4x, AAC), with the "Save a Clip" range picker and progress; Record captures play as it happens. The file goes to the share sheet | `ClipExporter`, `ClipViews`, `dingbat_clip_*` |
 | Link Cable online: the same code on both sides pairs through the web's signaling server, then a WebRTC data channel carries the web's input-rollback protocol, so an iPhone links with a browser or another iPhone. Cross-game trades send each side's ROM first; pause and 2x drive both sides; Disconnect (two taps, menu or the bar's pill); idle auto-disconnect; the game plays on when the friend leaves. With no server (or by choice) the manual code exchange: Share code / Copy code, the friend's code, Confirm; codes re-minted while unshared, the fallback when the server does not answer | `NetLink`, `RTCPeer` (libdatachannel), `LinkSignaling`, `SDPCodec` (the web's byte format), `LinkCableView`, `dingbat_rollback_*` |
@@ -75,8 +76,6 @@ the same frame).
 - **The link's same-browser BroadcastChannel path** (two tabs of one
   browser): there is no second tab in an app. **Local 2P** (two games on
   one screen, the 2P tile) is not ported either.
-- **Crash recovery beyond the minute checkpoint**: the checkpoint history,
-  "Resume from earlier" and the "stopped unexpectedly" sheet.
 - **"Add pictures"** (picturing every game in one batch).
 - **Controller navigation of the library, menus and Settings.** In a game
   the controller plays; elsewhere it does nothing yet.
