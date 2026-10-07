@@ -144,6 +144,7 @@ struct DingbatApp: App {
                 case "prints": model.openSheet(.prints)
                 case "report": model.openSheet(.report)
                 case "clip": model.openSheet(.clip)
+                case "addPictures": model.openSheet(.addPictures)
                 case "moments": if let e = entries.first { model.openSheet(.moments(e, crash: CrashWatch.streak(e.fileName) >= CrashWatch.askStreak)) }
                 case "link": NetLink.shared.openSheet()
                 case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }
@@ -230,6 +231,7 @@ struct SheetHost: View {
         case .report: ReportBugView()
         case .clip: ClipRangeView()
         case .moments(let e, let crash): MomentsView(entry: e, crash: crash)
+        case .addPictures: AddPicturesView()
         case .link: LinkCableView()
         case .tileMenu(let e): TileMenuView(entry: e)
         case .rename(let e): RenameView(entry: e)

@@ -113,6 +113,7 @@ final class GameSession: NSObject, ObservableObject {
     func open(_ entry: RomEntry, resume: Bool) -> OpenResult {
         ClipExporter.shared.gameLeaving()
         NetLink.shared.shutdown()
+        AddPictures.shared.cancel()  // the launch takes the core
         if game != nil { leaveGame() }
         dingbat_init()
         let bios = entry.isGBA ? RomLibrary.gbaBiosURL : RomLibrary.gbcBootromURL
@@ -978,7 +979,13 @@ final class GameSession: NSObject, ObservableObject {
     /// The picture now, colour corrected (no filters or palette), optionally
     /// scaled down.
     func currentImage(maxWidth: Int? = nil) -> UIImage? {
-        guard game != nil, let ptr = dingbat_framebuffer_rgba() else { return nil }
+        guard game != nil else { return nil }
+        return Self.coreImage(maxWidth: maxWidth)
+    }
+
+    /// Whatever the core holds (Add pictures boots games it never loads).
+    static func coreImage(maxWidth: Int? = nil) -> UIImage? {
+        guard let ptr = dingbat_framebuffer_rgba() else { return nil }
         let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
         let data = Data(bytes: UnsafeRawPointer(ptr), count: w * h * 4)
         guard let provider = CGDataProvider(data: data as CFData),

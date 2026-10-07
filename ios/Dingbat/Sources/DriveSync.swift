@@ -1277,6 +1277,27 @@ final class DriveSync: ObservableObject {
         }
     }
 
+    /// Add pictures: a Drive-only game's ROM, and its save (kept here by
+    /// Remove from this device, or Drive's), into memory; nothing written.
+    @MainActor
+    func fetchForPicture(_ game: String) async -> (rom: Data, save: Data?)? {
+        guard linked, await ensureSignedIn() else { return nil }
+        client.live = guardSession()
+        do {
+            let remote = try await listMap()
+            let files = remote.map.values.filter { parseDriveFileName($0.name)?.game == game }
+            guard let rf = files.first(where: { parseDriveFileName($0.name)?.kind == "rom" }) else { return nil }
+            let rom = try await client.download(rf.id)
+            var save = try? Data(contentsOf: RomEntry(fileName: game).saveURL)
+            if save?.isEmpty ?? true, let sf = files.first(where: { $0.name == "save:" + game }) {
+                save = try await client.download(sf.id)
+            }
+            return (rom, save)
+        } catch {
+            return nil
+        }
+    }
+
     /// Free the ROM bytes and session; saves stay and go up (web
     /// removeGameFromDevice). Never takes the last copy.
     @MainActor
