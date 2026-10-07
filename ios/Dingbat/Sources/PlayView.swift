@@ -59,9 +59,13 @@ struct GameStage: View {
                     .scaleEffect(zoom)
                     .offset(pan)
                     .accessibilityLabel("Game screen")
-                if settings.inputDisplay {
-                    InputOverlay()
-                        .frame(width: size.width, height: size.height, alignment: .bottomLeading)
+                // web #input-overlay: the stage's bottom-left corner, only
+                // while a controller has the touch pad hidden (the touch
+                // controls already show every press), never in local 2P.
+                if settings.inputDisplay && model.gamepadHidesTouch && !session.twoPlayer {
+                    InputOverlay(gb: session.isGB)
+                        .padding(14)
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
                         .allowsHitTesting(false)
                 }
             }
@@ -234,22 +238,107 @@ struct GlowView: View {
 }
 
 /// "Show inputs on screen": the held buttons, bottom-left of the picture.
+/// "Show inputs on screen" (web #input-overlay): a small controller drawn in
+/// the touch pad's own colours, each button lighting while held. A mirror of
+/// input, never a control; it lights instantly (one that eases would lie).
+/// Game Boy games have no shoulder row.
 struct InputOverlay: View {
+    let gb: Bool
     @EnvironmentObject var session: GameSession
-    private static let names = ["↑", "↓", "←", "→", "A", "B", "SELECT", "START", "L", "R"]
+    @Environment(\.palette) var palette
+    private let u: CGFloat = 11
+
+    private func on(_ id: Int) -> Bool { session.held.contains(id) }
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(session.held.sorted(), id: \.self) { id in
-                Text(Self.names[id])
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.55)))
+        VStack(alignment: .leading, spacing: u * 0.55) {
+            if !gb {
+                HStack(spacing: u * 0.6) {
+                    shoulder("L", 8, left: true)
+                    shoulder("R", 9, left: false)
+                }
+            }
+            HStack(spacing: u * 0.9) {
+                dpad
+                VStack(spacing: u * 0.45) {
+                    pill("SELECT", 6)
+                    pill("START", 7)
+                }
+                HStack(spacing: u * 0.5) {
+                    round("B", 5).offset(y: u * 0.26)
+                    round("A", 4).offset(y: -u * 0.26)
+                }
             }
         }
-        .padding(8)
+        .fixedSize()
+        .padding(u * 0.9)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .background(RoundedRectangle(cornerRadius: 8).fill(palette.stage.opacity(0.45)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.frameLine, lineWidth: 1))
+    }
+
+    private func fill(_ lit: Bool, _ top: Color, _ bottom: Color) -> LinearGradient {
+        LinearGradient(colors: lit ? [palette.accentTintTop, palette.padPressedBottom] : [top, bottom],
+                       startPoint: .top, endPoint: .bottom)
+    }
+
+    private func shoulder(_ t: String, _ id: Int, left: Bool) -> some View {
+        let lit = on(id)
+        let shape = UnevenRoundedRectangle(topLeadingRadius: u * 0.5, bottomLeadingRadius: u * 0.25,
+                                           bottomTrailingRadius: u * 0.25, topTrailingRadius: u * 0.5)
+        return Text(t)
+            .font(.system(size: u * 0.95, weight: .bold))
+            .tracking(u * 0.095)
+            .foregroundColor(lit ? palette.accent : palette.padLabel)
+            .frame(maxWidth: .infinity, minHeight: u * 1.5, maxHeight: u * 1.5)
+            .background(shape.fill(fill(lit, palette.padTop, palette.padBottom)))
+            .overlay(shape.stroke(lit ? palette.accent.opacity(0.7) : palette.padBorder, lineWidth: 1))
+            .shadow(color: lit ? palette.accent.opacity(0.5) : .clear, radius: u * 0.65)
+    }
+
+    /// A cross: four arms and a hub that never lights.
+    private var dpad: some View {
+        let s = u * 1.5
+        func arm(_ id: Int, _ shape: UnevenRoundedRectangle) -> some View {
+            let lit = on(id)
+            return shape.fill(fill(lit, palette.padTop, palette.padBottom))
+                .overlay(shape.stroke(lit ? palette.accent.opacity(0.7) : palette.dpadBorderC, lineWidth: 1))
+                .shadow(color: lit ? palette.accent.opacity(0.5) : .clear, radius: u * 0.65)
+                .frame(width: s, height: s)
+        }
+        let r = s * 0.25
+        return VStack(spacing: 0) {
+            arm(0, UnevenRoundedRectangle(topLeadingRadius: r, topTrailingRadius: r))
+            HStack(spacing: 0) {
+                arm(2, UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r))
+                Rectangle().fill(fill(false, palette.padTop, palette.padBottom)).frame(width: s, height: s)
+                arm(3, UnevenRoundedRectangle(bottomTrailingRadius: r, topTrailingRadius: r))
+            }
+            arm(1, UnevenRoundedRectangle(bottomLeadingRadius: r, bottomTrailingRadius: r))
+        }
+    }
+
+    private func pill(_ t: String, _ id: Int) -> some View {
+        let lit = on(id)
+        return Text(t)
+            .font(.system(size: u * 0.72, weight: .bold))
+            .tracking(u * 0.058)
+            .foregroundColor(lit ? palette.accent : palette.pillLabelC)
+            .frame(width: u * 4.4, height: u * 1.3)
+            .background(Capsule().fill(fill(lit, palette.pillTopC, palette.pillBottomC)))
+            .overlay(Capsule().stroke(lit ? palette.accent.opacity(0.7) : palette.padBorder, lineWidth: 1))
+            .shadow(color: lit ? palette.accent.opacity(0.5) : .clear, radius: u * 0.65)
+    }
+
+    private func round(_ t: String, _ id: Int) -> some View {
+        let lit = on(id)
+        return Text(t)
+            .font(.system(size: u, weight: .bold))
+            .foregroundColor(lit ? palette.accent : palette.abLabelC)
+            .frame(width: u * 2.1, height: u * 2.1)
+            .background(Circle().fill(fill(lit, palette.abTopC, palette.abBottomC)))
+            .overlay(Circle().stroke(lit ? palette.accent.opacity(0.7) : palette.abBorderC, lineWidth: 1))
+            .shadow(color: lit ? palette.accent.opacity(0.5) : .clear, radius: u * 0.65)
     }
 }
 
