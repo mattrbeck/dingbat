@@ -75,7 +75,8 @@ struct TileMenuView: View {
                 }
             }
             item("delete", "Delete", danger: true, disabled: busy,
-                 confirm: loaded ? "Close and delete everything?" : "Delete ROM and save data?") {
+                 confirm: loaded ? "Close and delete everything?"
+                    : !local && !onDrive ? "Delete this game and its save?" : "Delete ROM and save data?") {
                 model.sheet = nil
                 HomeActions.delete(entry)
             }
@@ -105,6 +106,20 @@ struct TileMenuView: View {
         return f.string(from: Date(timeIntervalSince1970: ms / 1000))
     }
 
+    /// web tileMenuStatus: the system, the size, and the one thing nothing
+    /// else in the menu says, that a game whose file is gone left its save.
+    private var status: String {
+        var bits = [entry.system, entry.sizeText].filter { !$0.isEmpty }
+        let onDrive = DriveSync.shared.driveHasRom(entry.fileName)
+        let saves = library.hasSaveData(entry)
+        if !entry.isLocal && !onDrive {
+            bits.append(saves ? "the file is not here, but your save is" : "the file is not on this device")
+        } else if !entry.isLocal && saves {
+            bits.append("your save is still on this device")
+        }
+        return bits.joined(separator: " · ")
+    }
+
     /// The game's picture, its name, "SYS · size" (web buildTileMenuHead).
     private var head: some View {
         HStack(spacing: 10) {
@@ -127,7 +142,7 @@ struct TileMenuView: View {
                     .foregroundColor(palette.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text([entry.system, entry.sizeText].filter { !$0.isEmpty }.joined(separator: " · "))
+                Text(status)
                     .font(.system(size: 12))
                     .foregroundColor(palette.textDim)
             }
@@ -252,7 +267,12 @@ enum HomeActions {
         let wasLoaded = session.game == e
         if wasLoaded { model.closeGame() }
         Task { @MainActor in
-            guard let fresh = await RomLibrary.shared.rename(e, to: name) else { return }
+            guard let fresh = await RomLibrary.shared.rename(e, to: name) else {
+                if wasLoaded, session.open(e, resume: true) != .failed { session.setPaused(true) }
+                model.toast("Couldn't rename “\(e.name)” — its ROM, saves and save states are all still under that name",
+                            duration: 5)
+                return
+            }
             if model.heroGame == e { model.heroGame = fresh }
             if wasLoaded, session.open(fresh, resume: true) != .failed {
                 session.setPaused(true)
@@ -372,6 +392,12 @@ struct RenameView: View {
                 }
                 .font(.system(size: 14))
             }
+            if lines.isEmpty && !DriveSync.shared.linked {
+                hint("This game has no saved data on this device yet — only its place in your library moves.")
+            }
+            if DriveSync.shared.linked {
+                hint("Copies on Google Drive are renamed on the next sync, and your other devices follow.")
+            }
             if loaded {
                 hint("This game is open right now. It stays open, under its new name.")
             }
@@ -385,10 +411,12 @@ struct RenameView: View {
         var out: [String] = []
         if has(entry.url) { out.append(has(entry.artURL) ? "The ROM file and its box art" : "The ROM file") }
         if entry.hasSave { out.append("1 save file") }
+        if has(entry.dir.appendingPathComponent("rom-p2.sav")) { out.append("The 2-player link save") }
         let states = (0..<9).filter { has(entry.stateURL(slot: $0)) }.count
         if states > 0 { out.append(states == 1 ? "1 save state" : "\(states) save states") }
         if has(entry.sessionURL) { out.append("The resume snapshot") }
         if has(entry.cheatsURL) { out.append("Your cheat list") }
+        if has(entry.oldSaveURL) { out.append("The save kept from before you deleted it") }
         return out
     }
 

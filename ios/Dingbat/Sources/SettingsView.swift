@@ -514,10 +514,18 @@ private struct BiosFileRow: View {
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
     }
 
+    /// The picked file's own name (web bios.name), kept beside it.
+    private var nameURL: URL { url.appendingPathExtension("name") }
+    private var status: String {
+        guard let size else { return "Not set" }
+        if let n = try? String(contentsOf: nameURL, encoding: .utf8), !n.isEmpty { return n }
+        return RomEntry.formatBytes(size)
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Text(label).font(.system(size: 14.5, weight: .medium)).fixedSize()
-            Text(size.map { RomEntry.formatBytes($0) } ?? "Not set")
+            Text(status)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(palette.textFaint)
                 .lineLimit(1)
@@ -525,6 +533,7 @@ private struct BiosFileRow: View {
             PadButton("Choose") { picking = true }.buttonStyle(SheetButtonStyle())
             PadButton("Remove") {
                 try? FileManager.default.removeItem(at: url)
+                try? FileManager.default.removeItem(at: nameURL)
                 gen += 1
                 onChange()
             }
@@ -541,6 +550,7 @@ private struct BiosFileRow: View {
             do {
                 try RomLibrary.ensureDir(url.deletingLastPathComponent())
                 try data.write(to: url, options: .atomic)
+                try? src.lastPathComponent.write(to: nameURL, atomically: true, encoding: .utf8)
             } catch {
                 failed = "Couldn't keep that file: \(error.localizedDescription)"
             }
