@@ -54,7 +54,8 @@ the same frame).
   folder, visible in the Files app (layout in `RomLibrary.swift`). Exports
   go through the share sheet. There is no storage budget or eviction.
 - **Tilt** starts when a tilt cart loads (Core Motion needs no permission);
-  the web asks first. The web's flick (jolt) channel is not ported.
+  the web asks first. A flick rides on top of the tilt as on the web (the
+  jolt channel, from Core Motion's user acceleration).
 - **A state from a newer dingbat** says to update the app; the web
   downloads its newer build and offers the load again.
 - **Pausing** for the background, the app switcher or a call takes the
