@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import SwiftUI
 
 /// Online link play (web/netplay.js): both players type the same code, the
@@ -15,8 +16,11 @@ import SwiftUI
 /// Core 0 is the host's game, core 1 the guest's. When the ROM hashes differ
 /// (a cross-game trade) each side also sends its ROM.
 ///
-/// Left out from the web: the manual code exchange (no server), and the
-/// same-browser BroadcastChannel path.
+/// With the server unreachable (or by choice) the manual exchange pairs
+/// instead: each side mints a code holding its whole description
+/// (SDPCodec), sends it any way it likes and pastes the friend's.
+///
+/// Left out from the web: the same-browser BroadcastChannel path.
 final class NetLink: ObservableObject {
     static let shared = NetLink()
 
@@ -26,15 +30,28 @@ final class NetLink: ObservableObject {
     @Published private(set) var connecting = false
     /// The session runs: the game ticks linked.
     @Published private(set) var linked = false
+    /// The manual exchange is on screen instead of the shared code.
+    @Published private(set) var manualView = false
+    /// Our code, nil while it is being minted.
+    @Published private(set) var manualCode: String?
+    /// The friend's code field, and whether it is locked in (confirmed).
+    @Published var friendCode = ""
+    @Published private(set) var friendLocked = false
 
     /// The session owns the core (from rollback_init, before it starts).
     var holdsCore: Bool { session?.rb?.inited == true }
 
     // web NET_ICE_SERVERS, timings
     static let iceServers = ["stun:stun.l.google.com:19302"]
-    static let dialTimeout: TimeInterval = 8
+    static let dialTimeout: TimeInterval = 4
+    static let rendezvousTimeout: TimeInterval = 2
     static let redialDelays: [TimeInterval] = [1, 2, 4]
     static let rtcDeadline: TimeInterval = 20
+    /// Manual codes: ICE gathering's cap once a public address is in hand,
+    /// and without one (cellular STUN can be slow); a code's useful life.
+    static let gatherTimeout: TimeInterval = 3.5
+    static let gatherExtended: TimeInterval = 8
+    static let codeMaxAge: TimeInterval = 45
 
     /// Sent with every rendezvous: the server drops a stale seat of ours
     /// instead of pairing us with it (web NET_PAGE_ID).
@@ -55,6 +72,7 @@ final class NetLink: ObservableObject {
         var started = false
         var timer: DispatchWorkItem?
         var rb: RB?
+        var manual = false
     }
 
     private final class RB {
@@ -83,6 +101,36 @@ final class NetLink: ObservableObject {
 
     private var session: Session?
 
+    /// The server's last known liveness (nil: never tried): an open sheet
+    /// goes straight to the manual exchange when it was last seen down.
+    private var serverUp: Bool?
+    private var probeAt = Date.distantPast
+    private var online = true
+    private let pathMonitor = NWPathMonitor()
+    private var codeShared = false
+    private var freshTimer: DispatchWorkItem?
+    private var hiddenAt = Date()
+
+    private init() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async { self?.online = path.status == .satisfied }
+        }
+        pathMonitor.start(queue: .global(qos: .utility))
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.hiddenAt = Date()
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.cameBack()
+        }
+    }
+
+    private var sheetUp: Bool {
+        if case .link = AppModel.shared.sheet { return true }
+        return false
+    }
+
     // web RB_* kinds
     private static let hello: UInt8 = 0, input: UInt8 = 1, stateBegin: UInt8 = 2, stateChunk: UInt8 = 3
     private static let romBegin: UInt8 = 4, romChunk: UInt8 = 5, ready: UInt8 = 6, speed: UInt8 = 7, pause: UInt8 = 8
@@ -98,7 +146,18 @@ final class NetLink: ObservableObject {
         if session != nil { shutdown(keepSheet: true) }
         setStatus("")
         connecting = false
+        resetManual()
         AppModel.shared.openSheet(.link)
+        // The screen stays on while the sheet is up: an auto-lock suspends
+        // the app and kills the NAT mappings behind the wait.
+        UIApplication.shared.isIdleTimerDisabled = true
+        if serverUp == false && online {
+            NSLog("netlink: last probe saw the server down — opening onto the manual exchange")
+            probeServer(force: true)
+            enterManual(attemptFailed: false)
+        } else {
+            probeServer()
+        }
     }
 
     /// The sheet's Connect button; while connecting it reads Cancel.
@@ -125,11 +184,43 @@ final class NetLink: ObservableObject {
     func sheetClosed() {
         if let s = session, !s.started { shutdown(keepSheet: true) }
         connecting = false
+        resetManual()
+        let gs = GameSession.shared
+        UIApplication.shared.isIdleTimerDisabled = gs.game != nil && !gs.paused
     }
 
     private func dismiss() {
         if let s = session, !s.started { shutdown(keepSheet: true) }
         if case .link = AppModel.shared.sheet { AppModel.shared.sheet = nil }
+    }
+
+    /// Liveness probe (web probeSignalServer): at most every 30 s.
+    private func probeServer(force: Bool = false) {
+        guard force || Date().timeIntervalSince(probeAt) >= 30 else { return }
+        probeAt = Date()
+        let ws = LinkSignaling()
+        var settled = false
+        let timeout = DispatchWorkItem { [weak self] in
+            guard !settled else { return }
+            settled = true
+            self?.serverUp = false
+            ws.close()
+        }
+        ws.onOpen = { [weak self] in
+            guard !settled else { return }
+            settled = true
+            timeout.cancel()
+            self?.serverUp = true
+            ws.close()
+        }
+        ws.onClose = { [weak self] _ in
+            guard !settled else { return }
+            settled = true
+            timeout.cancel()
+            self?.serverUp = false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: timeout)
+        ws.connect()
     }
 
     private func setStatus(_ text: String, error: Bool = false) {
@@ -145,15 +236,19 @@ final class NetLink: ObservableObject {
         s.ws = ws
         ws.onOpen = { [weak self] in
             guard let self, self.session === s, s.ws === ws else { return }
+            self.serverUp = true
             ws.send(["t": "rendezvous", "code": s.code, "id": Self.pageID])
-            self.arm(s, after: Self.dialTimeout) { [weak self] in
-                self?.fail("The linking server didn't respond — try again")
+            // No answer in time: the manual exchange instead.
+            self.arm(s, after: Self.rendezvousTimeout) { [weak self] in
+                self?.serverUp = false
+                self?.enterManual(attemptFailed: true)
             }
         }
         ws.onClose = { [weak self] opened in
             guard let self, self.session === s, s.ws === ws else { return }
             s.ws = nil
             if !opened && s.redials == 0 && !s.rewaited {
+                self.serverUp = false
                 self.fail("Couldn't reach the linking server — check your connection")
                 return
             }
@@ -168,7 +263,8 @@ final class NetLink: ObservableObject {
             self.onSignal(msg, s)
         }
         arm(s, after: Self.dialTimeout) { [weak self] in
-            self?.fail("Couldn't reach the linking server — check your connection")
+            self?.serverUp = false
+            self?.enterManual(attemptFailed: true)
         }
         ws.connect()
     }
@@ -177,7 +273,8 @@ final class NetLink: ObservableObject {
         let attempt = s.redials
         s.redials += 1
         guard attempt < Self.redialDelays.count else {
-            fail("Lost the linking server — try again")
+            serverUp = false
+            enterManual(attemptFailed: true)
             return
         }
         setStatus("Reconnecting to the linking server…")
@@ -202,6 +299,7 @@ final class NetLink: ObservableObject {
         // Any reply is proof of life.
         s.timer?.cancel()
         s.redials = 0
+        serverUp = true
         switch msg["t"] as? String {
         case "waiting":
             setStatus("Waiting for your friend…")
@@ -247,7 +345,8 @@ final class NetLink: ObservableObject {
         s.ws?.close()
         s.ws = nil
         if s.redials >= Self.redialDelays.count {
-            fail("Lost the linking server — try again")
+            serverUp = false
+            enterManual(attemptFailed: true)
             return
         }
         s.redials += 1
@@ -273,10 +372,16 @@ final class NetLink: ObservableObject {
         peer.onLocalCandidate = { [weak s] cand, mid in
             s?.ws?.send(["t": "ice", "c": ["candidate": cand, "sdpMid": mid, "sdpMLineIndex": 0]])
         }
+        wire(peer, s)
+    }
+
+    /// The channel's events, for either pairing path.
+    private func wire(_ peer: RTCPeer, _ s: Session) {
         peer.onState = { [weak self] st in
             guard let self, self.session === s, s.peer === peer else { return }
             if st == "failed" {
                 if s.rtcConnected { self.fail("Peer connection lost") }
+                else if s.manual { self.manualFailed() }
                 else { self.rtcGaveUp(s, "ICE failed") }
             } else if (st == "disconnected" || st == "closed") && s.started {
                 self.peerGone("Peer connection lost")
@@ -320,6 +425,212 @@ final class NetLink: ObservableObject {
         }
         rewait(s, why)
     }
+
+    // MARK: the manual exchange
+
+    /// Switch the sheet to the manual exchange (web manualEnter).
+    /// `attemptFailed`: a live attempt found the server unreachable.
+    func enterManual(attemptFailed: Bool) {
+        guard sheetUp, !manualView else { return }
+        guard online else {
+            setStatus("No network connection — join the same Wi-Fi as your friend and retry", error: true)
+            return
+        }
+        if let s = session {
+            guard !s.rtcConnected, !s.started else { return }
+            s.timer?.cancel()
+            s.ws?.close()
+            s.ws = nil
+        }
+        if attemptFailed { NSLog("netlink: server attempt failed — switching to the manual code exchange") }
+        connecting = false
+        setStatus(attemptFailed ? "Couldn't connect — the linking server didn't respond" : "", error: attemptFailed)
+        manualView = true
+        prepareManual(keepFriendBox: false)
+    }
+
+    /// Back to the shared code; the prepared offer is dropped.
+    func manualBack() {
+        if let s = session, s.rtcConnected || s.started { return }
+        shutdown(keepSheet: true)
+        resetManual()
+        setStatus("")
+    }
+
+    private func resetManual() {
+        manualView = false
+        manualCode = nil
+        friendCode = ""
+        friendLocked = false
+        codeShared = false
+        freshTimer?.cancel()
+    }
+
+    /// Mint our code: an offer with ICE gathered to the end (nothing can
+    /// trickle), encoded. It waits unwired for which side we turn out to be.
+    private func prepareManual(keepFriendBox: Bool) {
+        let s = session ?? Session()
+        session = s
+        s.manual = true
+        s.peer?.close()
+        s.peer = nil
+        manualCode = nil
+        codeShared = false
+        freshTimer?.cancel()
+        if !keepFriendBox {
+            friendCode = ""
+            friendLocked = false
+        }
+        guard let peer = RTCPeer(iceServers: Self.iceServers, offerer: true, manual: true) else {
+            setStatus("Couldn't prepare a code: the connection could not be made", error: true)
+            return
+        }
+        s.peer = peer
+        wire(peer, s)
+        let t0 = CACurrentMediaTime()
+        var sawSrflx = false
+        var done = false
+        let finish = { [weak self] in
+            guard let self, !done, self.session === s, s.peer === peer else { return }
+            done = true
+            guard let d = peer.localDescription, let code = SDPCodec.encode(type: d.type, sdp: d.sdp) else {
+                self.setStatus("Couldn't prepare a code: couldn't encode the offer", error: true)
+                return
+            }
+            self.manualCode = code
+            let kinds = SDPCodec.candidateKinds(d.sdp)
+            NSLog("netlink: manual code minted in %dms: %@", Int((CACurrentMediaTime() - t0) * 1000),
+                  kinds.isEmpty ? "no candidates" : kinds.joined(separator: " "))
+            if !kinds.contains(where: { $0.hasPrefix("srflx") }) {
+                NSLog("netlink: manual code has no public address — it can only pair on this network")
+            }
+            self.armFresh(s)
+            #if DEBUG
+            self.debugCodeMinted(code)
+            #endif
+        }
+        peer.onLocalCandidate = { cand, _ in if cand.contains(" srflx ") { sawSrflx = true } }
+        peer.onGatheringComplete = { finish() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.gatherTimeout) { if sawSrflx { finish() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.gatherExtended) { finish() }
+    }
+
+    /// NAT mappings behind a code decay within a minute: an unshared code is
+    /// minted again before then. A shared one is kept (the friend has it).
+    private func armFresh(_ s: Session) {
+        freshTimer?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            guard let self, self.session === s, !self.codeShared, !s.rtcConnected, self.manualView,
+                  self.friendCode.isEmpty, !self.friendLocked else { return }
+            self.prepareManual(keepFriendBox: true)
+        }
+        freshTimer = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.codeMaxAge, execute: w)
+    }
+
+    /// Back in the foreground: an unshared code is minted again quietly; a
+    /// shared one only after long enough away for it to have died.
+    private func cameBack() {
+        guard sheetUp else { return }
+        UIApplication.shared.isIdleTimerDisabled = true
+        guard manualView, let s = session, !s.rtcConnected, !s.started, !friendLocked,
+              manualCode != nil else { return }
+        if !codeShared {
+            prepareManual(keepFriendBox: true)
+        } else if Date().timeIntervalSince(hiddenAt) > Self.codeMaxAge {
+            prepareManual(keepFriendBox: true)
+            setStatus("Away a while — your code was refreshed, share the new one")
+        }
+    }
+
+    func copyCode() {
+        guard let code = manualCode else { return }
+        codeShared = true
+        freshTimer?.cancel()
+        UIPasteboard.general.string = code
+        AppModel.shared.toast("Code copied")
+    }
+
+    /// The share sheet with the bare code: whatever the friend pastes back
+    /// must decode.
+    func shareCode() {
+        guard let code = manualCode else { return }
+        codeShared = true
+        freshTimer?.cancel()
+        Share.present([code])
+    }
+
+    /// Confirm: the friend's code becomes the answer to our offer, on both
+    /// sides; comparing the two codes picks the DTLS roles and the host seat.
+    func confirmManual() {
+        guard let s = session, let peer = s.peer, let mine = manualCode, !friendLocked else { return }
+        let friend = friendCode.filter { !$0.isWhitespace }
+        guard !friend.isEmpty else { return }
+        if friend == mine {
+            setStatus("That's your own code — paste your friend's", error: true)
+            return
+        }
+        if let fd = SDPCodec.decode(friend) {
+            let age = fd.mintedAt.map { "\(max(0, Int(Date().timeIntervalSince1970) - Int($0)))s old" } ?? "age unknown"
+            NSLog("netlink: friend's code: %@ — %@", SDPCodec.candidateKinds(fd.sdp).joined(separator: " "), age)
+        }
+        // Byte order, as the browser compares its strings.
+        let isHost = friend.utf8.lexicographicallyPrecedes(mine.utf8)
+        guard let remote = SDPCodec.answerFrom(friend, setup: isHost ? "active" : "passive") else {
+            setStatus("That code didn't read cleanly — recopy it and try again", error: true)
+            return
+        }
+        s.isHost = isHost
+        if isHost { peer.useOwnChannel() } else { peer.useFriendsChannel() }
+        guard peer.setRemoteDescription(sdp: remote, type: "answer") else {
+            setStatus("Pairing failed: the code was refused", error: true)
+            return
+        }
+        friendLocked = true
+        freshTimer?.cancel()
+        setStatus("Connecting…")
+        // A list with nothing routable leaves ICE checking forever.
+        arm(s, after: Self.rtcDeadline) { [weak self] in
+            NSLog("netlink: manual pairing deadline — no connection in %ds", Int(Self.rtcDeadline))
+            self?.manualFailed()
+        }
+    }
+
+    /// The traded codes are spent with the connection: both sides fail
+    /// together, so both mint again together.
+    private func manualFailed() {
+        fail("Couldn't connect with those codes")
+        if manualView && sheetUp {
+            setStatus("Couldn't connect — trade these fresh codes and try again", error: true)
+        }
+    }
+
+    #if DEBUG
+    /// `-link-manual`: the manual exchange, with our code written to
+    /// tmp/linkcode.txt and the friend's read from tmp/friendcode.txt
+    /// (ios/e2e/link.mjs).
+    func debugManual() {
+        openSheet()
+        enterManual(attemptFailed: false)
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        let theirs = tmp.appendingPathComponent("friendcode.txt")
+        try? FileManager.default.removeItem(at: theirs)
+        func poll() {
+            if let code = try? String(contentsOf: theirs, encoding: .utf8), !code.isEmpty, manualCode != nil {
+                friendCode = code
+                confirmManual()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: poll)
+        }
+        poll()
+    }
+
+    private func debugCodeMinted(_ code: String) {
+        let f = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("linkcode.txt")
+        try? code.write(to: f, atomically: true, encoding: .utf8)
+    }
+    #endif
 
     // MARK: rollback setup
 
@@ -563,6 +874,7 @@ final class NetLink: ObservableObject {
         NSLog("netlink: %@", msg)
         shutdown(keepSheet: true)
         setStatus(msg, error: true)
+        if manualView && sheetUp { prepareManual(keepFriendBox: false) }
     }
 
     /// The friend is gone: this game keeps running with the cable pulled.
