@@ -151,7 +151,7 @@ struct ReportBugView: View {
         let machine = withUnsafeBytes(of: &sys.machine) { raw in
             String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
         }
-        return "dingbat \(version) (\(build)) | ios | \(d.systemName) \(d.systemVersion) | \(machine) | "
+        return "dingbat \(version) (\(build)) \(AppBuild.commit) | ios | \(d.systemName) \(d.systemVersion) | \(machine) | "
             + "\(Int(s.bounds.width))x\(Int(s.bounds.height))@\(Int(s.scale))"
     }
 
