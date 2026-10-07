@@ -54,6 +54,11 @@ build gbapurebase     dingbat_gbapurebase_test      tests/gbapu_rebase_test.nim
 build psgagb         dingbat_psgagb_test           tests/psg_agb_test.nim
 build statesoak       dingbat_state_soak_test       tests/state_soak_test.nim -d:gba_quirky=false
 build silentaudio     dingbat_silent_audio_test     tests/silent_audio_test.nim --path:tests -d:soak_lib
+# The iOS app's C API; its audio ring is pthread C, so not on Windows.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) ;;
+  *) build iosapi     dingbat_ios_api_test          tests/ios_api_test.nim ;;
+esac
 # Dear ImGui through imguin, which compiles its C++ in the same build. Skipped
 # only where install-test-deps.sh could not install imguin (Windows).
 if [ "${DINGBAT_NO_IMGUIN:-}" != 1 ]; then

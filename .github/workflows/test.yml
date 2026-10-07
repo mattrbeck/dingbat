@@ -160,6 +160,12 @@ jobs:
         # stop storms (the one place the catch-up cadence shows).
         shell: bash
         run: ./dingbat_silent_audio_test
+      - name: iOS app C API (load, states, rewind scrubber, run-ahead, cheats, SGB)
+        # src/dingbat_ios.nim through its exported symbols, as the Swift
+        # shell calls it. Not built on Windows (pthread audio ring).
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./dingbat_ios_api_test
       - name: LCD panel-response model invariants
         # Self-comparing panel-model invariants: static frames bit-exact,
         # transitions reach their target, 30 Hz alternation settles. No ROMs.
