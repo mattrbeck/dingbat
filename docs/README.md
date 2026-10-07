@@ -27,6 +27,7 @@ One line per document: what it is for and who reads it. Scores live only in
 - [web_audio_pacing.md](web_audio_pacing.md) — the web audio scheduling-lead servo and how to measure it. Web maintainers.
 - [hle-bios-shortcomings.md](hle-bios-shortcomings.md) — what the built-in GBA HLE BIOS does not do. GBA maintainers.
 - [gba-rtc.md](gba-rtc.md) — the GBA cartridge clock: host time unless a game sets it, the battery-save RTC trailer, behaviour next to mGBA and real carts. GBA maintainers, anyone moving saves between emulators.
+- [ios-app.md](ios-app.md) — the native iOS app: what matches the web front-end, native differences, what is left off. iOS maintainers.
 - [ios-feasibility.md](ios-feasibility.md) — the iOS core build and what is proven. Anyone reviving the iOS port.
 - [performance.md](performance.md) — harnesses, measurement rules, what is known about cost. Anyone doing perf work.
 - [gb_oam_dma_cost.md](gb_oam_dma_cost.md) — measuring a change on the GB CPU bus hot path (the inline cliff). GB perf work.
