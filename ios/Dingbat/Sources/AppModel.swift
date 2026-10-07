@@ -14,6 +14,8 @@ final class AppModel: ObservableObject {
         case settings(section: String?)
         case states, saves, rewind, cheats, prints, report, clip, link
         case tileMenu(RomEntry), rename(RomEntry)
+        /// Resume from earlier; `crash`: the "stopped unexpectedly" form.
+        case moments(RomEntry, crash: Bool)
         var id: String {
             switch self {
             case .settings: return "settings"
@@ -27,6 +29,7 @@ final class AppModel: ObservableObject {
             case .link: return "link"
             case .tileMenu(let e): return "tile:" + e.id
             case .rename(let e): return "rename:" + e.id
+            case .moments(let e, _): return "moments:" + e.id
             }
         }
     }
@@ -101,7 +104,9 @@ final class AppModel: ObservableObject {
 
     /// Open a game and go to the play screen. `resume`: put its session back
     /// in during the boot (the hero's Resume, a tile in Resume mode).
-    func launch(_ entry: RomEntry, resume: Bool) {
+    /// `moment`: an earlier moment chosen from Resume from earlier, which
+    /// goes in with its battery; `fresh`: from the in-game save, no offer.
+    func launch(_ entry: RomEntry, resume: Bool, moment: Data? = nil, fresh: Bool = false) {
         // No ROM here: Drive hands it back, or the person finds the file.
         if !entry.isLocal {
             if DriveSync.shared.driveHasRom(entry.fileName) { fetchThenLaunch(entry, resume: resume) }
@@ -120,12 +125,21 @@ final class AppModel: ObservableObject {
         menuOpen = false
         topbarOpen = false
         withAnimation(.easeOut(duration: 0.25)) { screen = .play }
+        if let moment {
+            if let why = session.apply(state: moment, keepRewind: false) {
+                toast(why, duration: 6, game: true)
+            } else {
+                // Its battery is the game's save now (the newer one was kept).
+                dingbat_flush_save()
+            }
+            return
+        }
         switch result {
         case .savedSince:
             toast("The game has saved since — starting from that save", duration: 4, game: true)
         case .resumeRejected(let why):
             toast(why + " Started from the in-game save instead.", duration: 6, game: true)
-        case .ok where !resume:
+        case .ok where !resume && !fresh:
             offerSession(entry)
         default:
             break
@@ -155,7 +169,38 @@ final class AppModel: ObservableObject {
             resumeFromHero()
             return
         }
-        launch(entry, resume: settings.libraryOpen == .resume)
+        tapGame(entry, resume: settings.libraryOpen == .resume)
+    }
+
+    /// A tap that opens a game (a tile, the closed hero): one that has
+    /// stopped unexpectedly twice in a row asks first (web crashGate).
+    func tapGame(_ entry: RomEntry, resume: Bool) {
+        if CrashWatch.streak(entry.fileName) >= CrashWatch.askStreak && session.game != entry && entry.isLocal {
+            openSheet(.moments(entry, crash: true))
+            return
+        }
+        launch(entry, resume: resume)
+    }
+
+    /// Back into an earlier moment (web resumeMoment): the game boots on its
+    /// save and the moment goes in. One from before the last in-game save
+    /// takes its battery back with it; the newer save is kept aside first.
+    func resumeMoment(_ e: RomEntry, _ m: Checkpoints.Moment) {
+        if session.game == e && NetLink.shared.holdsCore {
+            toast("Exit the online session first")
+            return
+        }
+        // The running game's battery as it is now is the one that may go.
+        if session.game == e { dingbat_flush_save() }
+        guard let bytes = Checkpoints.bytes(e, m), !bytes.isEmpty else {
+            toast("That moment is no longer stored")
+            return
+        }
+        if let cur = try? Data(contentsOf: e.saveURL), !cur.isEmpty,
+           m.saveSig != RomLibrary.saveSignature(cur) {
+            DriveSync.shared.keepReplacedSave(e.fileName, cur)
+        }
+        launch(e, resume: false, moment: bytes)
     }
 
     /// Back to the game in memory.
