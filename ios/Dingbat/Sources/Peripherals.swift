@@ -15,7 +15,8 @@ import UIKit
 ///   stage shakes the picture itself.
 /// - Tilt carts (web "Tilt cart input"): the device's attitude against a
 ///   captured neutral pose, ±25° = full deflection; gyro carts read the
-///   rotation rate. The d-pad and the controller's left stick tilt too.
+///   rotation rate; a flick's linear acceleration rides on top (the jolt).
+///   The d-pad and the controller's left stick tilt too.
 /// - GB Camera (web "GB Camera webcam source"): a real camera, cover-cropped
 ///   to the 128x120 sensor in grey at ~15 fps; until then the viewfinder
 ///   carries a text notice saying how to turn it on.
@@ -172,6 +173,10 @@ final class Peripherals: ObservableObject {
     private var neutral: CMAttitude?
     private var tiltX = 0.0, tiltY = 0.0
     private var targetX = 0.0, targetY = 0.0
+    /// The jolt channel (web tiltJolt*): a flick is a sharp acceleration the
+    /// attitude alone underreports, so the linear acceleration rides on top
+    /// of the tilt and decays fast.
+    private var joltX = 0.0, joltY = 0.0
     private var glideUntil = Date.distantPast
     private var settleUntil = Date.distantPast
     private var rebaseWork: DispatchWorkItem?
@@ -217,6 +222,7 @@ final class Peripherals: ObservableObject {
     private func rebaselineTilt() {
         guard motionOn else { return }
         settleUntil = Date().addingTimeInterval(Self.settleSeconds)
+        joltX = 0; joltY = 0  // a turn's spike is not a flick
         rebaseWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.motionOn else { return }
@@ -243,6 +249,7 @@ final class Peripherals: ObservableObject {
             fromSensor = true
             if now < settleUntil {
                 // Mid-turn: hold the last value (a snap to level is a flick).
+                joltX = 0; joltY = 0
             } else if kind == 2 {
                 // Gyro cart: the rotation rate about the screen's normal;
                 // 180°/s is extreme.
@@ -258,6 +265,11 @@ final class Peripherals: ObservableObject {
                     targetX = max(-1, min(1, sx / Self.orientRange))
                     targetY = max(-1, min(1, sy / Self.orientRange))
                 }
+                // Linear acceleration (g) into screen space; under 0.4 g is
+                // the hand's tremor.
+                let (gx, gy) = Self.toScreen(dm.userAcceleration.x, dm.userAcceleration.y)
+                if abs(gx) > 0.4 { joltX = max(-3, min(3, gx * 1.5)) }
+                if abs(gy) > 0.4 { joltY = max(-3, min(3, gy * 1.5)) }
             }
         } else {
             targetX = 0; targetY = 0
@@ -271,9 +283,12 @@ final class Peripherals: ObservableObject {
             tiltX += (targetX - tiltX) * k
             tiltY += (targetY - tiltY) * k
         }
-        // Negated at the send: the ball rolls into the tilt.
+        // Negated at the send: the ball rolls into the tilt. Flicks may pass
+        // 1 g: the MBC7 latch has headroom to 3 g.
         let clamp3 = { (v: Double) in max(-3, min(3, v)) }
-        dingbat_set_tilt(clamp3(-tiltX), clamp3(-tiltY))
+        dingbat_set_tilt(clamp3(-(tiltX + joltX)), clamp3(-(tiltY + joltY)))
+        joltX *= 0.55
+        joltY *= 0.55
     }
 
     private static func toScreen(_ x: Double, _ y: Double) -> (Double, Double) {
