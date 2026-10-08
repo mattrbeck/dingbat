@@ -38,6 +38,14 @@ declare var ClipMux: {
   }): Uint8Array;
 };
 
+// zipwrite.js (classic script, sets window.ZipWrite; checked by its node test)
+type ZipWriteFile = { name: string; data: Uint8Array; date?: Date };
+declare var ZipWrite: {
+  build(files: ZipWriteFile[], now?: Date): Uint8Array[];
+  blob(files: ZipWriteFile[], now?: Date): Blob;
+  crc32(bytes: Uint8Array): number;
+};
+
 declare var SaveImport: {
   unwrap(bytes: Uint8Array, fileName: string): {
     ok: boolean;

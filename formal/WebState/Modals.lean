@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/index.js: anyModalOpen askRomWarn buildSyncModal closeRomWarnModal closeSettingsModal closeUpdateModal confirmSuspectRom confirmTombstones endClipExport handleRomFile openRenameModal openSettingsModal releaseFocus renameGame renameInventory runFullSync settleRomWarn startClipExport trapFocus on:popstate on:drop
+-- @models web/index.js: anyModalOpen askRomWarn buildSyncModal closeRomWarnModal closeSettingsModal closeUpdateModal confirmSuspectRom confirmTombstones endClipExport handleRomFile openExportModal openRenameModal openSettingsModal releaseFocus renameGame renameInventory runFullSync settleRomWarn startClipExport trapFocus on:popstate on:drop
 
 /-
 # Modal focus management and modal plumbing (web/index.js)
@@ -32,8 +32,10 @@ What the code has (there is no modal *stack*):
 * Dynamic "sync" overlays built by `buildSyncModal` (5213): their Escape
   listener is document-*capture* and calls `stopPropagation` (5239-5242), so
   while one is up the global Escape handler (7463, document bubble) does not
-  run. Two users: `openRenameModal` (4981, guarded by `renameModalOpen`) and
-  `confirmTombstones` (5165, a Promise resolved by `done`).
+  run. Three users: `openRenameModal` (4981, guarded by `renameModalOpen`),
+  `openExportModal` (guarded by `exportModalOpen`, the same shape: storage
+  reads, then the overlay; rename stands for it) and `confirmTombstones`
+  (5165, a Promise resolved by `done`).
 * The global Escape handler closes every static modal blindly (7463-7482),
   except the progress panel, which only its Cancel or the export's end closes.
 * Promise-returning modals: `confirmTombstones` (5165) and `askRomWarn` (11968).

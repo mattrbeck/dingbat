@@ -5220,6 +5220,487 @@ const confirmTombstones = (games) =>
     m.body.appendChild(actions);
   });
 
+// --- Export: one game's files, out to the person's own disk ---------------
+// The tile menu's Export… lists every kind of file this game has here, one
+// checkbox each, ticked as they were last time. The ROM always starts
+// unticked: the person most likely has it already, and it is the one big
+// file. A kind this game has nothing of is not offered at all. One file goes
+// out as itself; more go out as one .zip (zipwrite.js) with an info.json
+// saying what each file is, for an import to read one day.
+//
+// Every state kind - the nine slots, where you left off, the earlier moments
+// - is one choice: none of them opens anywhere but here, so there is nothing
+// to pick between.
+const EXPORT_TICKS_KEY = "export-ticks";
+// Headings are clutter over a short list; from this many rows they group it.
+const EXPORT_SECTION_MIN = 5;
+const EXPORT_STATES_DIR = "dingbat save states/";
+
+// File names from game names: the characters a filesystem refuses go.
+const exportSafeName = (s) => String(s).replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").trim() || "game";
+const exportStamp = (ts) => {
+  let d = new Date(ts);
+  let p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+         `${p(d.getHours())}-${p(d.getMinutes())}`;
+};
+const exportDay = (ts) => exportStamp(ts).slice(0, 10);
+const exportBytes = (v) =>
+  v instanceof Uint8Array ? v : v instanceof ArrayBuffer ? new Uint8Array(v)
+  : ArrayBuffer.isView(v) ? new Uint8Array(v.buffer, v.byteOffset, v.byteLength) : null;
+const exportBlobBytes = async (b) =>
+  b instanceof Blob && b.size ? new Uint8Array(await b.arrayBuffer()) : null;
+const exportDataUrl = (url) => {
+  let m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(typeof url === "string" ? url : "");
+  if (!m || !m[2]) return null;
+  let ext = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+              "image/gif": ".gif" }[m[1]] || ".png";
+  return { ext, bytes: b64ToBytes(m[3]) };
+};
+const exportImgExt = (blob) =>
+  ({ "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+     "image/gif": ".gif" }[blob?.type] || ".png");
+
+// --- Game Boy Camera photos, out of the camera's own save ---
+// The cart's 128 KB of RAM holds 30 photo slots: slot k's 128x112 picture
+// is 0xE00 bytes of 2bpp tiles (16 across, 14 down) at 0x2000 + k * 0x1000.
+// Which slots hold a photo, and where each sits in the album, is a 30-byte
+// table at 0x11B2: the photo's album number minus one, 0xFF for an empty
+// slot. The table is followed by "Magic" and a checksum, and the whole run
+// is repeated at 0x11D7 as a backup copy. Layout from Raphaël Boichot's
+// public write-up of the save format ("Inject pictures in your Game Boy
+// Camera saves"); Pan Docs covers the mapper and sensor, not the album.
+const CAM_CART_TYPE = 0xfc;
+const CAM_RAM_SIZE = 0x20000;
+const CAM_SLOTS = 30;
+const CAM_PHOTO_W = 128, CAM_PHOTO_H = 112;
+const camAlbum = (sav) => {
+  const magicAt = (o) => [..."Magic"].every((c, i) => sav[o + i] === c.charCodeAt(0));
+  for (const at of [0x11b2, 0x11d7]) {
+    if (magicAt(at + CAM_SLOTS)) return sav.subarray(at, at + CAM_SLOTS);
+  }
+  return null;
+};
+// [{ number, pixels }] in album order; pixels are 0 (lightest) to 3.
+const cameraPhotos = (rom, sav) => {
+  if (!rom || rom.length <= 0x147 || rom[0x147] !== CAM_CART_TYPE) return [];
+  if (!sav || sav.length < CAM_RAM_SIZE) return [];
+  const album = camAlbum(sav);
+  if (!album) return [];
+  const out = [];
+  for (let slot = 0; slot < CAM_SLOTS; slot++) {
+    const n = album[slot];
+    if (n >= CAM_SLOTS) continue; // 0xFF: empty
+    const base = 0x2000 + slot * 0x1000;
+    const pixels = new Uint8Array(CAM_PHOTO_W * CAM_PHOTO_H);
+    for (let ty = 0; ty < CAM_PHOTO_H / 8; ty++) {
+      for (let tx = 0; tx < CAM_PHOTO_W / 8; tx++) {
+        const tile = base + (ty * (CAM_PHOTO_W / 8) + tx) * 16;
+        for (let row = 0; row < 8; row++) {
+          const lo = sav[tile + row * 2], hi = sav[tile + row * 2 + 1];
+          for (let bit = 0; bit < 8; bit++) {
+            const v = ((lo >> (7 - bit)) & 1) | (((hi >> (7 - bit)) & 1) << 1);
+            pixels[(ty * 8 + row) * CAM_PHOTO_W + tx * 8 + bit] = v;
+          }
+        }
+      }
+    }
+    out.push({ number: n + 1, pixels });
+  }
+  return out.sort((a, b) => a.number - b.number);
+};
+// A 2-bit greyscale PNG (PNG spec, colour type 0, bit depth 2), its zlib
+// stream made of stored blocks: four shades are exactly what the format
+// holds, and at 3.6 KB a photo there is nothing worth compressing.
+const greyPng2 = (pixels, w, h) => {
+  const row = 1 + w / 4;
+  const raw = new Uint8Array(row * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Shade 0 is the lightest; PNG grey 3 is white.
+      raw[y * row + 1 + (x >> 2)] |= (3 - pixels[y * w + x]) << (6 - (x & 3) * 2);
+    }
+  }
+  // Stored deflate blocks (RFC 1951 3.2.4): header byte, LEN, NLEN, bytes.
+  const blocks = [];
+  for (let o = 0; o < raw.length; o += 0xffff) {
+    const n = Math.min(0xffff, raw.length - o);
+    const last = o + n >= raw.length ? 1 : 0;
+    blocks.push(Uint8Array.of(last, n & 0xff, n >> 8, ~n & 0xff, (~n >> 8) & 0xff),
+                raw.subarray(o, o + n));
+  }
+  let a = 1, b = 0;
+  for (const v of raw) { a = (a + v) % 65521; b = (b + a) % 65521; }
+  const zlib = [Uint8Array.of(0x78, 0x01), ...blocks,
+                Uint8Array.of(b >> 8, b & 0xff, a >> 8, a & 0xff)];
+  const join = (parts) => {
+    const out = new Uint8Array(parts.reduce((s, p) => s + p.length, 0));
+    let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  };
+  const u32 = (n) => Uint8Array.of(n >>> 24, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+  const chunk = (type, data) => {
+    const td = join([new TextEncoder().encode(type), data]);
+    return join([u32(data.length), td, u32(ZipWrite.crc32(td))]);
+  };
+  const ihdr = join([u32(w), u32(h), Uint8Array.of(2, 0, 0, 0, 0)]);
+  return join([Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+               chunk("IHDR", ihdr), chunk("IDAT", join(zlib)), chunk("IEND", new Uint8Array(0))]);
+};
+
+const plural = (n, one, many = one + "s") => n + " " + (n === 1 ? one : many);
+
+// What this game has to export, as the rows of the modal: { kind, group,
+// label, sub, files: [{ path, data, solo? }] }. `path` is where a file sits
+// in the zip; `solo` is its name when it goes out alone. Only kinds with
+// something in them are listed.
+const exportInventory = async (name) => {
+  const base = exportSafeName(stripExt(name) || name);
+  const items = [];
+  const add = (kind, group, label, sub, files) => {
+    files = files.filter((f) => f.data && f.data.length);
+    if (files.length) items.push({ kind, group, label, sub, files });
+  };
+
+  const rom = await getRomBytes(name);
+  add("rom", "The game", "ROM", exportSafeName(name), [{ path: exportSafeName(name), data: rom }]);
+
+  const sav = exportBytes(await dbGet(linkSaveKey(name, 0)));
+  const sav2 = exportBytes(await dbGet(linkSaveKey(name, 1)));
+  add("save", "Progress", "Save file",
+      "Your in-game progress · .sav" + (sav2 && sav2.length ? " · with Player 2's" : ""),
+      [{ path: base + ".sav", data: sav, solo: base + ".sav" },
+       { path: base + " (Player 2).sav", data: sav2 }]);
+
+  const states = [];
+  let slots = 0, quick = false;
+  for (let s = 0; s < NUM_STATE_SLOTS; s++) {
+    const bytes = exportBytes(await dbGet(slotStateKey(name, s)));
+    if (!bytes || !bytes.length) continue;
+    const label = s === 0 ? "Quick" : "Slot " + s;
+    if (s === 0) quick = true; else slots++;
+    states.push({ path: EXPORT_STATES_DIR + label + ".state", data: bytes,
+                  solo: base + (s === 0 ? "" : " (" + label + ")") + ".state" });
+    const pic = exportDataUrl((await dbGet(slotMetaKey(name, s)))?.thumb);
+    if (pic) states.push({ path: EXPORT_STATES_DIR + label + pic.ext, data: pic.bytes });
+  }
+  const auto = await dbGet(autoStateKey(name));
+  const autoBytes = exportBytes(auto?.bytes);
+  if (autoBytes && autoBytes.length) {
+    states.push({ path: EXPORT_STATES_DIR + "Where you left off.state", data: autoBytes,
+                  solo: base + " (where you left off).state" });
+    const pic = await dbGet(sessionPicKey(name));
+    const picBytes = await exportBlobBytes(pic?.blob);
+    if (picBytes) states.push({ path: EXPORT_STATES_DIR + "Where you left off" + exportImgExt(pic.blob),
+                                data: picBytes });
+  }
+  let moments = 0;
+  const taken = new Set();
+  for (const e of (await readCheckpointIndex(name)).list) {
+    const rec = await dbGet(ckptKey(name, e.slot));
+    const bytes = exportBytes(rec?.bytes);
+    if (!bytes || !bytes.length) continue;
+    moments++;
+    let stem = EXPORT_STATES_DIR + "Moments/" + exportStamp(rec.ts || e.ts);
+    for (let i = 2; taken.has(stem); i++) stem = stem.replace(/( \(\d+\))?$/, ` (${i})`);
+    taken.add(stem);
+    states.push({ path: stem + ".state", data: bytes,
+                  solo: base + " (" + stem.slice(stem.lastIndexOf("/") + 1) + ").state" });
+    const picBytes = await exportBlobBytes(rec.pic);
+    if (picBytes) states.push({ path: stem + exportImgExt(rec.pic), data: picBytes });
+  }
+  const what = [quick && "Quick", slots && plural(slots, "slot"),
+                autoBytes?.length && "where you left off", moments && plural(moments, "moment")]
+    .filter(Boolean).join(", ");
+  add("states", "Progress", "Save states", what + " · dingbat only", states);
+
+  const kept = await getKeptSave(name);
+  if (kept) {
+    const when = kept.at ? exportDay(kept.at) : "";
+    const stem = (kept.why === "replaced" ? "Replaced save" : "Save from before you deleted it") +
+                 (when ? " " + when : "");
+    add("kept", "Progress", kept.why === "replaced" ? "Replaced save" : "Old save",
+        (kept.why === "replaced" ? "The save you replaced" : "From before you deleted it") +
+        (kept.at ? " · " + fmtStateTime(kept.at) : "") + " · .sav",
+        [{ path: "old saves/" + stem + ".sav", data: exportBytes(kept.data),
+           solo: base + " (" + stem.toLowerCase() + ").sav" }]);
+  }
+
+  const photos = cameraPhotos(rom, sav);
+  add("camera", "Pictures", "Camera photos",
+      plural(photos.length, "photo") + " from the camera's album · .png",
+      photos.map((p) => ({ path: "camera/Photo " + String(p.number).padStart(2, "0") + ".png",
+                           data: greyPng2(p.pixels, CAM_PHOTO_W, CAM_PHOTO_H) })));
+
+  const prints = printerPhotos.filter((p) => p?.game === name);
+  const printFiles = [];
+  for (const p of prints) {
+    const png = exportDataUrl(p.png);
+    let stem = "prints/" + exportStamp(p.ts);
+    for (let i = 2; taken.has(stem); i++) stem = stem.replace(/( \(\d+\))?$/, ` (${i})`);
+    taken.add(stem);
+    if (png) printFiles.push({ path: stem + png.ext, data: png.bytes });
+  }
+  add("prints", "Pictures", "Printed photos",
+      plural(printFiles.length, "Game Boy Printer photo") + " · .png", printFiles);
+
+  const frame = await getRomFrame(name);
+  add("thumb", "Pictures", "Library thumbnail", "The picture on its tile · " + exportImgExt(frame),
+      [{ path: "pictures/Thumbnail" + exportImgExt(frame), data: await exportBlobBytes(frame),
+         solo: base + exportImgExt(frame) }]);
+  const art = await getRomArt(name);
+  add("art", "Pictures", "Box art", "The cover it came with · " + exportImgExt(art),
+      [{ path: "pictures/Box art" + exportImgExt(art), data: await exportBlobBytes(art),
+         solo: base + " box art" + exportImgExt(art) }]);
+
+  const cheats = await dbGet(CHEATS_KEY(name));
+  const cheatList = Array.isArray(cheats) ? cheats : [];
+  add("cheats", "Extras", "Cheats", plural(cheatList.length, "code") + " · .cht",
+      [{ path: base + ".cht", data: cheatList.length ? new TextEncoder().encode(serializeCheats(cheatList)) : null,
+         solo: base + ".cht" }]);
+  return items;
+};
+
+const exportSize = (item) => item.files.reduce((s, f) => s + f.data.length, 0);
+
+// The file the chosen rows become: { fileName, blob, count }. One file goes
+// out bare; anything more is a zip with info.json in it.
+const exportPackage = (name, chosen, now = Date.now()) => {
+  const files = chosen.flatMap((it) => it.files.map((f) => ({ ...f, kind: it.kind })));
+  if (files.length === 1) {
+    const f = files[0];
+    const fileName = f.solo || f.path.slice(f.path.lastIndexOf("/") + 1);
+    return { fileName, blob: new Blob([f.data], { type: "application/octet-stream" }),
+             count: 1 };
+  }
+  const info = {
+    app: "dingbat",
+    format: 1,
+    game: name,
+    system: systemOf(name),
+    exported: new Date(now).toISOString(),
+    files: files.map((f) => ({ path: f.path, kind: f.kind })),
+  };
+  const entries = [
+    { name: "info.json", data: new TextEncoder().encode(JSON.stringify(info, null, 2) + "\n") },
+    ...files.map((f) => ({ name: f.path, data: f.data })),
+  ];
+  const base = exportSafeName(stripExt(name) || name);
+  return { fileName: base + " — dingbat " + exportDay(now) + ".zip",
+           blob: ZipWrite.blob(entries, new Date(now)), count: chosen.length };
+};
+
+const exportDownload = (fileName, blob) => {
+  let a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  a.click();
+  // Safari starts the download after the click returns; a revoke right away
+  // can cancel it.
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+};
+
+// What was ticked last time, the ROM never among it.
+const exportTicks = async () => {
+  let t = await dbGet(EXPORT_TICKS_KEY).catch(() => null);
+  return t && typeof t === "object" ? t : {};
+};
+const exportTicked = (ticks, kind) => kind !== "rom" && ticks[kind] !== false;
+
+let exportModalOpen = false;
+
+const openExportModal = async (name) => {
+  if (exportModalOpen) return;
+  exportModalOpen = true;
+  let items, ticks;
+  try {
+    // The running game's battery RAM first, so the .sav is as fresh as the
+    // screen.
+    if (isRomLoaded(name) && currentRomName) await persistSave(currentRomName, name);
+    [items, ticks] = await Promise.all([exportInventory(name), exportTicks()]);
+  } catch {
+    exportModalOpen = false;
+    showToast("Couldn't read this game's files");
+    return;
+  }
+  if (!items.length) {
+    exportModalOpen = false;
+    showToast("Nothing to export for this game yet");
+    return;
+  }
+
+  let m;
+  const close = () => {
+    exportModalOpen = false;
+    m.dismiss();
+  };
+  m = buildSyncModal({ title: "What would you like to export?",
+                       hint: displayName(name) + " · " + systemOf(name), onDismiss: close });
+  m.modal.classList.add("export-modal");
+
+  const on = new Map(items.map((it) => [it, exportTicked(ticks, it.kind)]));
+  const list = document.createElement("div");
+  list.className = "export-list";
+  const sectioned = items.length >= EXPORT_SECTION_MIN;
+  let group = null;
+  items.forEach((it, i) => {
+    if (sectioned && it.group !== group) {
+      group = it.group;
+      let h = document.createElement("div");
+      h.className = "modal-subhead export-subhead" + (list.children.length ? "" : " no-rule");
+      h.textContent = group;
+      list.appendChild(h);
+    }
+    let row = document.createElement("label");
+    row.className = "export-row";
+    let box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = on.get(it);
+    // "export-save" and "export-state" are the in-game menu's buttons.
+    box.id = "export-pick-" + it.kind;
+    let text = document.createElement("span");
+    text.className = "export-row-text";
+    let label = document.createElement("span");
+    label.className = "export-row-label";
+    label.textContent = it.label;
+    let sub = document.createElement("span");
+    sub.className = "export-row-sub";
+    sub.textContent = it.sub;
+    text.append(label, sub);
+    let size = document.createElement("span");
+    size.className = "export-row-size";
+    size.textContent = formatBytes(exportSize(it));
+    row.append(box, text, size);
+    row.classList.toggle("off", !box.checked);
+    box.addEventListener("change", () => {
+      on.set(it, box.checked);
+      row.classList.toggle("off", !box.checked);
+      refresh();
+    });
+    list.appendChild(row);
+  });
+
+  const foot = document.createElement("div");
+  foot.className = "export-foot";
+  const footText = document.createElement("div");
+  footText.className = "export-foot-text";
+  const fileLine = document.createElement("span");
+  fileLine.className = "export-file";
+  const sumLine = document.createElement("span");
+  sumLine.className = "export-sum";
+  footText.append(fileLine, sumLine);
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "button button-ghost";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", close);
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "button button-primary";
+  // The two buttons wrap together, under the file line on a phone.
+  const footActions = document.createElement("div");
+  footActions.className = "export-foot-actions";
+  footActions.append(cancel, go);
+  foot.append(footText, footActions);
+
+  const chosen = () => items.filter((it) => on.get(it));
+  const refresh = () => {
+    const c = chosen();
+    const files = c.flatMap((it) => it.files);
+    go.disabled = !c.length;
+    go.textContent = c.length ? "Export " + c.length : "Export";
+    if (!c.length) {
+      fileLine.textContent = "Nothing selected";
+      sumLine.textContent = "Tick something to export";
+      return;
+    }
+    const bytes = files.reduce((s, f) => s + f.data.length, 0);
+    if (files.length === 1) {
+      const f = files[0];
+      fileLine.textContent = f.solo || f.path.slice(f.path.lastIndexOf("/") + 1);
+      sumLine.textContent = formatBytes(bytes) + " · a single file";
+    } else {
+      fileLine.textContent = exportSafeName(stripExt(name) || name) + " — dingbat " +
+                             exportDay(Date.now()) + ".zip";
+      sumLine.textContent = plural(c.length, "item") + " · " + formatBytes(bytes);
+    }
+  };
+
+  go.addEventListener("click", async () => {
+    const c = chosen();
+    if (!c.length) return;
+    const remember = {};
+    for (const it of items) if (it.kind !== "rom") remember[it.kind] = on.get(it);
+    dbPut(EXPORT_TICKS_KEY, { ...ticks, ...remember }).catch(() => {});
+    let pkg;
+    try {
+      pkg = exportPackage(name, c);
+    } catch (e) {
+      showToast("Couldn't export: " + e.message);
+      return;
+    }
+    exportDownload(pkg.fileName, pkg.blob);
+    showDone(pkg, c);
+  });
+
+  const showDone = (pkg, c) => {
+    m.heading.textContent = "Exported";
+    m.hintEl?.remove();
+    m.body.replaceChildren();
+    const card = document.createElement("div");
+    card.className = "export-done-file";
+    const n = document.createElement("span");
+    n.className = "export-file";
+    n.textContent = pkg.fileName;
+    const s = document.createElement("span");
+    s.className = "export-sum";
+    s.textContent = (pkg.count > 1 ? plural(pkg.count, "item") + " · " : "") +
+                    formatBytes(pkg.blob.size) + " · in your downloads";
+    card.append(n, s);
+    m.body.appendChild(card);
+    const kinds = new Set(c.map((it) => it.kind));
+    if (kinds.has("states")) {
+      const p = document.createElement("p");
+      p.className = "modal-hint export-done-note";
+      p.textContent = kinds.has("save")
+        ? "The .sav opens in any emulator. The save states only open in dingbat."
+        : "The save states only open in dingbat.";
+      m.body.appendChild(p);
+    }
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    // Phones keep downloads out of sight; the share sheet puts the file in
+    // Files, AirDrop or a message, which is where it was going anyway.
+    const file = typeof File === "function"
+      ? new File([pkg.blob], pkg.fileName, { type: pkg.blob.type }) : null;
+    if (file && navigator.canShare?.({ files: [file] })) {
+      const share = document.createElement("button");
+      share.type = "button";
+      share.className = "button";
+      share.textContent = "Share…";
+      share.addEventListener("click", () => {
+        navigator.share({ files: [file] }).catch(() => {});
+      });
+      actions.appendChild(share);
+    }
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "button button-primary";
+    done.textContent = "Done";
+    done.addEventListener("click", close);
+    actions.appendChild(done);
+    m.body.appendChild(actions);
+    done.focus();
+  };
+
+  m.body.append(list, foot);
+  refresh();
+  // On Export: what was ticked last time goes with one press (Enter, or A on
+  // a pad), and the boxes are an arrow away.
+  go.focus();
+};
+
 // --- Modal plumbing ------------------------------------------------------
 const buildSyncModal = ({ title, hint, onDismiss }) => {
   let overlay = document.createElement("div");
@@ -5236,11 +5717,12 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
   let h = document.createElement("h2");
   h.textContent = title;
   modal.appendChild(h);
+  let hintEl = null;
   if (hint) {
-    let p = document.createElement("p");
-    p.className = "modal-hint";
-    p.textContent = hint;
-    modal.appendChild(p);
+    hintEl = document.createElement("p");
+    hintEl.className = "modal-hint";
+    hintEl.textContent = hint;
+    modal.appendChild(hintEl);
   }
   let body = document.createElement("div");
   modal.appendChild(body);
@@ -5258,7 +5740,7 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
     closeBtn.hidden = true;
   }
   return {
-    overlay, modal, body,
+    overlay, modal, body, heading: h, hintEl,
     dismiss: () => {
       document.removeEventListener("keydown", onKey, true);
       releaseFocus(overlay);
@@ -6823,6 +7305,21 @@ const tileMenuEntries = (name, f) => {
     disabled: busy,
     run: () => openRenameModal(name),
   }));
+  // Just above the ways to lose a save: the way to keep one. It only reads,
+  // so an online session does not hold it up. A game kept only on Drive
+  // comes down first, as Download does, and is exported from here.
+  if (f.driveOnly && !f.missing) {
+    items.push(tileMenuItem({
+      label: "Download and export…",
+      disabled: f.downloading ? "Downloading…" : "",
+      run: async () => { if (await downloadGameAction(name)) await openExportModal(name); },
+    }));
+  } else {
+    items.push(tileMenuItem({
+      label: "Export…",
+      run: () => openExportModal(name),
+    }));
+  }
   items.push(tileMenuItem({
     label: "Reset save data",
     disabled: busy || (f.hasSaves ? "" : "No save data yet"),

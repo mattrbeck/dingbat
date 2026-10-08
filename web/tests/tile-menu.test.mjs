@@ -91,6 +91,7 @@ test("never signed in: Rename, Reset, Delete — and nothing that needs explaini
   assert.ok(tile.classList.contains("menu-open"));
   eq(rows(app), [
     ["Rename", "", false],
+    ["Export…", "", false],
     ["Reset save data", "No save data yet", true],
     ["Delete", "", false],
   ]);
@@ -102,7 +103,7 @@ test("a local game with a save: Reset is live, and still says nothing", async ()
   seed(app, ["Zelda.gbc"], { saves: ["Zelda.gbc"] });
   await boot(app);
   await open(app, "Zelda.gbc");
-  eq(rows(app)[1], ["Reset save data", "", false]);
+  eq(rows(app)[2], ["Reset save data", "", false]);
 });
 
 test("signed in and backed up to Drive: Remove joins, no descriptions anywhere", async () => {
@@ -113,6 +114,7 @@ test("signed in and backed up to Drive: Remove joins, no descriptions anywhere",
   await open(app, "Zelda.gbc");
   eq(rows(app), [
     ["Rename", "", false],
+    ["Export…", "", false],
     ["Reset save data", "", false],
     ["Remove from this device", "", false],
     ["Delete", "", false],
@@ -126,7 +128,7 @@ test("signed in but the ROM is not on Drive yet: Remove is blocked, and says why
   signIn(app); // no sig for the ROM
   await boot(app);
   await open(app, "Zelda.gbc");
-  eq(rows(app)[2], ["Remove from this device", "Not backed up to Drive yet — this is your only copy", true]);
+  eq(rows(app)[3], ["Remove from this device", "Not backed up to Drive yet — this is your only copy", true]);
 });
 
 test("a ROM this device never uploaded, but a pull saw on Drive, can be removed", async () => {
@@ -136,7 +138,7 @@ test("a ROM this device never uploaded, but a pull saw on Drive, can be removed"
   app.api.syncState.rmt["rom:Zelda.gbc"] = "2026-01-01T00:00:00Z"; // what a pull records
   await boot(app);
   await open(app, "Zelda.gbc");
-  eq(rows(app)[2], ["Remove from this device", "", false]);
+  eq(rows(app)[3], ["Remove from this device", "", false]);
 });
 
 test("a delete queued for the ROM also counts as not on Drive", async () => {
@@ -156,7 +158,7 @@ test("the paused game: Remove and Delete close it themselves, and the question s
   app.api.currentOriginalName = "Zelda.gbc";
   await boot(app);
   await open(app, "Zelda.gbc");
-  eq(rows(app)[2], ["Remove from this device", "", false], "no longer blocked");
+  eq(rows(app)[3], ["Remove from this device", "", false], "no longer blocked");
   const rm = item(app, "Remove from this device");
   await rm.click(); // arm only
   assert.equal(labelOf(rm), "Close and remove?");
@@ -179,6 +181,7 @@ test("an online session holds every item, naming the session", async () => {
   await open(app, "Zelda.gbc");
   eq(rows(app), [
     ["Rename", "Exit the online session first", true],
+    ["Export…", "", false],
     ["Reset save data", "Exit the online session first", true],
     ["Remove from this device", "Exit the online session first", true],
     ["Delete", "Exit the online session first", true],
@@ -195,7 +198,7 @@ test("the same-browser 2P rig holds them too", async () => {
   app.api.linkRomEntry = { name: "Zelda.gbc" };
   await boot(app);
   await open(app, "Zelda.gbc");
-  eq(rows(app).map((r) => r[2]), [true, true, true, true]);
+  eq(rows(app).map((r) => r[2]), [true, false, true, true, true]);
   app.api.linkMode = false;
   app.api.linkRomEntry = null;
 });
@@ -209,6 +212,7 @@ test("a Drive-only game, signed in: Download leads; Remove is absent", async () 
   eq(rows(app), [
     ["Download to this device", "", false],
     ["Rename", "", false],
+    ["Download and export…", "", false],
     ["Reset save data", "No save data yet", true],
     ["Delete", "", false],
   ]);
@@ -222,7 +226,7 @@ test("a game freed from this device keeps saying the save stayed", async () => {
   await boot(app);
   await open(app, "Cloud.gba");
   assert.equal(status(app), "GBA · your save is still on this device");
-  eq(rows(app)[2], ["Reset save data", "", false], "and that save is what Reset wipes");
+  eq(rows(app)[3], ["Reset save data", "", false], "and that save is what Reset wipes");
 });
 
 test("saves that live only on Drive are not claimed to be on this device", async () => {
@@ -252,7 +256,7 @@ test("a Drive-only game, signed out: Download is offered and signs in when tappe
   signedOutEnrolled(app, { "rom:Cloud.gba": "sig" });
   await boot(app);
   await open(app, "Cloud.gba");
-  eq(labels(app), ["Download to this device", "Rename", "Reset save data", "Delete"]);
+  eq(labels(app), ["Download to this device", "Rename", "Download and export…", "Reset save data", "Delete"]);
   eq(rows(app)[0], ["Download to this device", "", false]);
 });
 
@@ -300,7 +304,7 @@ test("a game whose file is nowhere: Find the file leads, and the status says why
   seed(app, ["Lost.gba"], { local: [], saves: ["Lost.gba"] });
   await boot(app);
   await open(app, "Lost.gba");
-  eq(labels(app), ["Find the file…", "Rename", "Reset save data", "Delete"]);
+  eq(labels(app), ["Find the file…", "Rename", "Export…", "Reset save data", "Delete"]);
   assert.match(status(app), /the file is not here, but your save is/);
   // Neither location chip claims it, so neither filter shows it.
   assert.equal(tileOf(app, "Lost.gba").dataset.loc, "missing");
@@ -468,7 +472,7 @@ test("Reset save data wipes the saves and keeps the ROM and the tile", async () 
   eq(app.toasts.slice(-1), ["Save data deleted"]);
   await boot(app);
   await open(app, "A.gba");
-  eq(rows(app)[1], ["Reset save data", "No save data yet", true]);
+  eq(rows(app)[2], ["Reset save data", "No save data yet", true]);
 });
 
 test("Rename opens the rename box for that game", async () => {
@@ -561,7 +565,7 @@ test("the card's ⋯ is the session's; a tile's is the file's; neither is both",
   app.api.closeTileMenu();
 
   await open(app, "Zelda.gbc");
-  eq(labels(app), ["Rename", "Reset save data", "Delete"],
+  eq(labels(app), ["Rename", "Export…", "Reset save data", "Delete"],
      "what you do to its file, and nothing about the session");
   assert.ok(items(app).every((b) => !kid(b, "tile-menu-icon")),
             "the file items have never had a glyph anywhere");

@@ -437,7 +437,7 @@
   "WebState/Modals": {
     "web/index.js#anyModalOpen": "710d144eee6ed386",
     "web/index.js#askRomWarn": "d976cb7fd30d4f1d",
-    "web/index.js#buildSyncModal": "df4901df361fe930",
+    "web/index.js#buildSyncModal": "024d985d136e974f",
     "web/index.js#closeRomWarnModal": "e618dca3ce8990c6",
     "web/index.js#closeSettingsModal": "69259f4cccd2d280",
     "web/index.js#closeUpdateModal": "eeb5a617520b1515",
@@ -445,6 +445,7 @@
     "web/index.js#confirmTombstones": "5cd003dd4ec55ca1",
     "web/index.js#endClipExport": "727705f706e0b4e7",
     "web/index.js#handleRomFile": "24ea1020b594a4d7",
+    "web/index.js#openExportModal": "bff1df44923356bd",
     "web/index.js#openRenameModal": "5a27b46ef589b87b",
     "web/index.js#openSettingsModal": "3fe1e7c4be668d4b",
     "web/index.js#releaseFocus": "5778f9463d49f09e",
