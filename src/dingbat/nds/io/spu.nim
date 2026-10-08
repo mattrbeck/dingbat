@@ -43,9 +43,11 @@
 ## output rate aliases at full level: Assumed), sub-tick start timing (a
 ## start bit takes effect at the next mixer tick).
 
+import ../quirky
+
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 const
   FIFO_WORDS* = 8           ## channel read-ahead, words (Assumed)

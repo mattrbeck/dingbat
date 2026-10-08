@@ -22,10 +22,11 @@
 
 import ../mem/vram
 import ../gpu3d/gpu3d
+import ../quirky
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 const
   MMEM_FIFO_WORDS* = 16   ## DISP_MMEM_FIFO depth (Assumed: 4 requests of 4 words)
@@ -248,8 +249,9 @@ proc write_reg*(e: Engine2D; offset: uint32; v, mask: uint32) =
   else: discard
 
 # The renderer below indexes its fixed 256-entry line buffers and VRAM
-# page views with in-range values only; runtime checks off as in the GBA bus.
-{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+# page views with in-range values only; runtime checks off as in the GBA bus
+# (index checks on in statefuzz's build: quirky.nim).
+{.push boundChecks: nds_render_checks, overflowChecks: off, rangeChecks: off.}
 
 # ---------------------------------------------------------------------------
 # Line latches (every line, V-blank included)

@@ -25,9 +25,11 @@
 ## (length, then data), 02h = IR transmit, 08h = version (NEW firmware: AAh).
 ## No IR peer is modelled: receives return length 0, transmits vanish.
 
+import ../quirky
+
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 type
   BackupKind* = enum
