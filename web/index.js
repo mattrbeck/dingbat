@@ -11843,37 +11843,6 @@ const loadHideTouchOnGamepadFromStorage = async () => {
   applyHideTouchOnGamepad(typeof v === "boolean" ? v : true);
 };
 
-// --- Hide the top bar while playing (phone held upright) ---
-// "fold-bar-upright" (default on): body.bar-fold lets styles.css fold the
-// bar away over a running game on a phone held upright, as a phone held
-// sideways always does; a tap on the picture brings it back ("Mobile top
-// bar: tap the picture"). Settings > Controls and the DS Screens panel both
-// carry the switch.
-var foldBarUpright = true;
-const foldBarToggles = /** @type {HTMLInputElement[]} */ ([
-  document.getElementById("fold-bar-toggle"),
-  ...document.querySelectorAll("#nds-panel [data-fold-bar]"),
-]);
-const applyFoldBar = (on) => {
-  foldBarUpright = on;
-  for (const t of foldBarToggles) t.checked = on;
-  document.body.classList.toggle("bar-fold", on);
-  // Unfolded upright, the bar is in its place: nothing left open over the
-  // picture (sideways it still folds).
-  if (!on && !matchMedia(PHONE_LANDSCAPE).matches) document.body.classList.remove("topbar-open");
-  if (typeof updateCanvasScaling === "function") updateCanvasScaling();
-};
-for (const t of foldBarToggles) {
-  t.addEventListener("change", async () => {
-    applyFoldBar(t.checked);
-    await dbPut("fold-bar-upright", foldBarUpright);
-  });
-}
-const loadFoldBarFromStorage = async () => {
-  const v = await dbGet("fold-bar-upright");
-  applyFoldBar(typeof v === "boolean" ? v : true);
-};
-
 // --- Touch direction input: d-pad vs joystick ---
 // "control-style" ("dpad" | "joystick") and "joystick-mode" ("fixed" |
 // "floating"); body.joystick-controls swaps the d-pad for the joystick.
@@ -12167,7 +12136,7 @@ themeChips.forEach((chip) =>
 const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls", "landscape-buttons",
-  "control-style", "joystick-mode", "hide-touch-on-gamepad", "fold-bar-upright",
+  "control-style", "joystick-mode", "hide-touch-on-gamepad",
   "runahead", "gb-palette", "input-display", "library-open", "nds-layout", "nds-display",
 ];
 
@@ -12224,7 +12193,6 @@ const resetAllSettings = async () => {
   applyControlStyle("dpad");
   applyJoystickMode("fixed");
   applyHideTouchOnGamepad(true);
-  applyFoldBar(true);
   applyInputDisplay(false);
   applyLibraryOpen("resume");
 
@@ -15429,16 +15397,14 @@ if (!requestFs) {
   document.addEventListener("webkitfullscreenchange", onFsChange);
 }
 
-// --- Mobile top bar: tap the picture ---
-// On a phone held sideways, and on one held upright with "Hide the top bar
-// while playing" on, the bar waits off-screen; a tap on the picture (or the
-// letterbox round it) brings it down and another puts it away. It has to
+// --- Mobile-landscape top bar: tap the picture ---
+// On a phone held sideways the bar waits off-screen; a tap on the picture (or
+// the letterbox round it) brings it down and another puts it away. It has to
 // be a deliberate tap, not a thumb that slid off a button mid-game: one
 // finger with no other on the screen, short and still, and a thumb's width
 // clear of the drawn controls. While zoomed, a double tap resets the zoom, so
 // there the bar waits out the double-tap window first.
 const PHONE_LANDSCAPE = "(pointer: coarse) and (orientation: landscape) and (max-height: 500px)";
-const PHONE_UPRIGHT = "(pointer: coarse) and (orientation: portrait) and (max-width: 699px)";
 {
   const BAR_TAP_MAX_MS = 250, BAR_TAP_SLOP = 12, BAR_TAP_MARGIN = 20, BAR_DBLTAP_MS = 300;
   const touches = new Set();   // every touch down, on a control or not
@@ -15464,10 +15430,10 @@ const PHONE_UPRIGHT = "(pointer: coarse) and (orientation: portrait) and (max-wi
     return !!t.closest("#controls") && !t.closest(ZOOM_NOT_SURFACE);
   };
   const toggleBar = () => document.body.classList.toggle("topbar-open");
-  // Where the bar is folded away (styles.css): a phone held sideways, and
-  // one held upright with "Hide the top bar while playing" on.
+  // Where the bar is folded away: a phone held sideways, and a DS game on a
+  // phone held upright with "Hide the top bar" on (styles.css).
   const barFolds = () => matchMedia(PHONE_LANDSCAPE).matches ||
-    (foldBarUpright && matchMedia(PHONE_UPRIGHT).matches);
+    (ndsGameLoaded() && ndsDisplay.barHide && matchMedia(NDS_PHONE_UPRIGHT).matches);
 
   document.addEventListener("pointerdown", (e) => {
     if (e.pointerType !== "touch") return;
@@ -15514,7 +15480,6 @@ const PHONE_UPRIGHT = "(pointer: coarse) and (orientation: portrait) and (max-wi
   };
   new MutationObserver(maybeHint).observe(document.body, { attributes: true, attributeFilter: ["class"] });
   matchMedia(PHONE_LANDSCAPE).addEventListener?.("change", maybeHint);
-  matchMedia(PHONE_UPRIGHT).addEventListener?.("change", maybeHint);
 }
 
 // --- Gamepad support (polled each frame) ---
@@ -17054,11 +17019,11 @@ window.ndsBench = ndsBench;
 // screens (top over bottom), each view puts one where the arrangement says.
 let ndsLayoutPref = "auto";
 // The other display choices (Settings > Nintendo DS and the Screens panel),
-// stored together as "nds-display" (a record's old barHide is ignored: the
-// bar folds for every game now, "fold-bar-upright").
-/** @typedef {{ swap: boolean, gap: string, rot: number }} NdsDisplay */
+// stored together as "nds-display". barHide: phones held upright give the
+// top bar's room to the screens (styles.css "DS: the top bar").
+/** @typedef {{ swap: boolean, gap: string, rot: number, barHide: boolean }} NdsDisplay */
 /** @type {Readonly<NdsDisplay>} */
-const NDS_DISPLAY_DEFAULTS = Object.freeze({ swap: false, gap: "hinge", rot: 0 });
+const NDS_DISPLAY_DEFAULTS = Object.freeze({ swap: false, gap: "hinge", rot: 0, barHide: true });
 /** @type {NdsDisplay} */
 let ndsDisplay = { ...NDS_DISPLAY_DEFAULTS };
 let ndsLay = NdsUtil.layout(0, 0, "stack", { gap: NdsUtil.GAPS.hinge });
@@ -17329,6 +17294,7 @@ window.addEventListener("blur", () => ndsTouchEnd(null));
 // A touch the DS screens keep for themselves, which the bar's tap leaves
 // alone: on the touch screen (the stylus), or on the top screen where a tap
 // swaps them (Focus, One screen).
+const NDS_PHONE_UPRIGHT = "(pointer: coarse) and (orientation: portrait) and (max-width: 699px)";
 const ndsTapTaken = (x, y) => {
   if (!ndsGameLoaded() || !ndsLay) return false;
   const rect = canvasEl.getBoundingClientRect();
@@ -17479,11 +17445,13 @@ const ndsSyncDisplayUI = () => {
   syncChipGroup(ndsChips("gap"), ndsDisplay.gap);
   syncChipGroup(ndsChips("rot"), String(ndsDisplay.rot));
   for (const t of ndsToggles("swap")) t.checked = ndsDisplay.swap;
+  for (const t of ndsToggles("barHide")) t.checked = ndsDisplay.barHide;
   if (ndsLayoutBtn) {
     ndsLayoutBtn.title = "Screens: " + NDS_LAYOUT_NAMES[ndsLayoutPref];
     ndsLayoutBtn.dataset.layout = ndsLayoutPref;
   }
   ndsSwapBtn?.setAttribute("aria-pressed", ndsDisplay.swap ? "true" : "false");
+  document.body.classList.toggle("nds-bar-hide", ndsDisplay.barHide);
 };
 
 const applyNdsLayout = (v) => {
@@ -17504,6 +17472,7 @@ const applyNdsDisplay = (d) => {
     swap: v.swap === true,
     gap: Object.hasOwn(NdsUtil.GAPS, v.gap) ? v.gap : NDS_DISPLAY_DEFAULTS.gap,
     rot: NdsUtil.ROTATIONS.includes(v.rot) ? v.rot : NDS_DISPLAY_DEFAULTS.rot,
+    barHide: typeof v.barHide === "boolean" ? v.barHide : NDS_DISPLAY_DEFAULTS.barHide,
   };
   ndsTouchEnd(null);
   ndsSyncDisplayUI();
@@ -17524,7 +17493,7 @@ for (const chip of ndsChips("gap")) {
 for (const chip of ndsChips("rot")) {
   chip.addEventListener("click", () => setNdsDisplay({ rot: Number(chip.dataset.value) }));
 }
-for (const name of ["swap"]) {
+for (const name of ["swap", "barHide"]) {
   for (const t of ndsToggles(name)) {
     t.addEventListener("change", () => setNdsDisplay({ [name]: t.checked }));
   }
@@ -17979,7 +17948,6 @@ const initStorage = async () => {
   await loadLargeControlsFromStorage();
   await loadLandscapeButtonsFromStorage();
   await loadHideTouchOnGamepadFromStorage();
-  await loadFoldBarFromStorage();
   await loadInputDisplayFromStorage();
   await loadControlStyleFromStorage();
   await loadNdsLayoutFromStorage();

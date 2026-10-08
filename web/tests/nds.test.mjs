@@ -512,22 +512,23 @@ const key = (app, type, code, extra = {}) =>
 test("the display choices are stored, come back, and anything unknown falls back", async () => {
   const { app } = await dsGame();
   await app.runIn("setNdsLayout('focus')");
-  await app.runIn("setNdsDisplay({ gap: 'console', rot: 3, swap: true })");
+  await app.runIn("setNdsDisplay({ gap: 'console', rot: 3, swap: true, barHide: false })");
   assert.equal(app.idb.get("nds-layout"), "focus");
-  eq(app.idb.get("nds-display"), { swap: true, gap: "console", rot: 3 });
+  eq(app.idb.get("nds-display"), { swap: true, gap: "console", rot: 3, barHide: false });
+  assert.equal(app.document.body.classList.contains("nds-bar-hide"), false);
   // A fresh page reads them back.
   const app2 = await loadApp();
   for (const [k, v] of app.idb) app2.idb.set(k, v);
   await app2.runIn("loadNdsLayoutFromStorage()");
   assert.equal(app2.runIn("ndsLayoutPref"), "focus");
-  eq(app2.runIn("({ ...ndsDisplay })"), { swap: true, gap: "console", rot: 3 });
-  // A damaged record: every field its default; an old barHide is dropped
-  // (the bar folds for every game now: fold-bar-upright).
-  app2.idb.set("nds-display", { gap: "huge", rot: 2, swap: "yes", barHide: false });
+  eq(app2.runIn("({ ...ndsDisplay })"), { swap: true, gap: "console", rot: 3, barHide: false });
+  // A damaged record: every field its default (the bar hides on phones).
+  app2.idb.set("nds-display", { gap: "huge", rot: 2, swap: "yes" });
   app2.idb.set("nds-layout", "sideways");
   await app2.runIn("loadNdsLayoutFromStorage()");
   assert.equal(app2.runIn("ndsLayoutPref"), "auto");
-  eq(app2.runIn("({ ...ndsDisplay })"), { swap: false, gap: "hinge", rot: 0 });
+  eq(app2.runIn("({ ...ndsDisplay })"), { swap: false, gap: "hinge", rot: 0, barHide: true });
+  assert.equal(app2.document.body.classList.contains("nds-bar-hide"), true);
   // Reset all settings forgets them.
   assert.ok(app2.runIn("SETTINGS_KEYS").includes("nds-display"));
 });
