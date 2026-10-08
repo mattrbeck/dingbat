@@ -3,6 +3,12 @@
 // LCD grid, RGB subpixels, Game Boy shade palettes, Super Game Boy border).
 // Compiled at launch with makeLibrary(source:), so building the app needs
 // no Metal toolchain.
+//
+// A DS game is drawn view by view (web glpresent.js frame.out views): each
+// screen of the 256x384 composite into its own rect of the picture, turned,
+// through the same fragment shader, which reads that screen's texels only
+// (texOrigin) and lays the grid / subpixel looks on the screen's own pixels,
+// so a turned screen turns its stripes as the real panel would.
 
 let presentShaderSource = #"""
 #include <metal_stdlib>
@@ -36,7 +42,31 @@ struct PresentUniforms {
   int pad0;
   float4 sgbBackdrop;
   float4 dmgPal[4];    // sRGB 0..1, shade 0 (lightest) -> 3
+  float2 texOrigin;    // DS: the screen's first texel in the composite (0 or 192 down)
+  float2 pad2;
 };
+
+// A DS view: its rect in clip space (left, top, right, bottom) and the
+// quarter turn it is drawn with (0, 1 clockwise, 3 anticlockwise).
+struct ViewUniforms {
+  float4 dst;
+  int rot;
+  int pad0;
+  int pad1;
+  int pad2;
+};
+
+// One DS screen as a quad (a 4-vertex strip); uv is the screen's own (row 0
+// its top row) whatever the turn: the web's toComposite, per corner.
+vertex VOut nds_vertex(uint vid [[vertex_id]], constant ViewUniforms &v [[buffer(1)]]) {
+  float2 c = float2(float(vid & 1u), float(vid >> 1));
+  VOut o;
+  o.pos = float4(mix(v.dst.x, v.dst.z, c.x), mix(v.dst.y, v.dst.w, c.y), 0.0, 1.0);
+  o.uv = v.rot == 1 ? float2(c.y, 1.0 - c.x)
+       : v.rot == 3 ? float2(1.0 - c.y, c.x)
+       : c;
+  return o;
+}
 
 constant float3 DMG_SHADE[4] = { float3(31.0, 30.0, 26.0),   // 0x6BDF
                                  float3(31.0, 21.0, 14.0),   // 0x3ABF
@@ -50,7 +80,7 @@ struct Ctx {
 };
 
 static float3 fetchRGB(thread const Ctx &c, int2 p) {
-  uint2 q = uint2(clamp(p, int2(0), c.gmax));
+  uint2 q = uint2(clamp(p, int2(0), c.gmax)) + uint2(c.u.texOrigin);
   uint packed = uint(c.tex.read(q).r) & 0x7FFFu;
   float3 col = float3(float(packed & 31u),
                       float((packed >> 5) & 31u),

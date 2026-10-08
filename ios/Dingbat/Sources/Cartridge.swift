@@ -96,18 +96,20 @@ struct CartridgeView: View {
     let boxWidth: CGFloat
 
     var body: some View {
-        let gba = entry.isGBA
-        let w = boxWidth * (gba ? 0.40 : 0.25)
-        let h = gba ? w * 5 / 8 : w * 6 / 5
+        let gba = entry.isGBA, ds = entry.isNDS
+        // web .cart-ds: small and nearly square (33:35), 28% of the box.
+        let w = boxWidth * (gba ? 0.40 : ds ? 0.28 : 0.25)
+        let h = gba ? w * 5 / 8 : ds ? w * 35 / 33 : w * 6 / 5
         let labelFont = gba ? min(22, max(9, boxWidth * 0.054)) : min(20, max(8, boxWidth * 0.046))
         let (top, bottom, labelBg): (Color, Color, Color) = {
             switch entry.system {
             case "GBA": return (palette.cartGbaTop, palette.cartGbaBottom, palette.badgeGbaFg)
             case "GBC": return (palette.cartGbcTop, palette.cartGbcBottom, palette.badgeGbcFg)
+            case "DS": return (palette.cartDsTop, palette.cartDsBottom, palette.badgeDsFg)
             default: return (palette.cartGbTop, palette.cartGbBottom, palette.badgeGbFg)
             }
         }()
-        let shape = CartShape(gba: gba)
+        let shape = CartShape(gba: gba, ds: ds)
         ZStack(alignment: .top) {
             shape.fill(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
             // inset 0 1px 0 highlight
@@ -119,9 +121,9 @@ struct CartridgeView: View {
                 .foregroundColor(Color(red: 10 / 255, green: 10 / 255, blue: 20 / 255, opacity: 0.78))
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
-                .frame(width: w * (gba ? 0.64 : 0.76), height: h * (gba ? 0.50 : 0.48))
+                .frame(width: w * (gba ? 0.64 : ds ? 0.78 : 0.76), height: h * (gba ? 0.50 : ds ? 0.46 : 0.48))
                 .background(RoundedRectangle(cornerRadius: 4).fill(labelBg))
-                .padding(.top, boxWidth * (gba ? 0.05 : 0.07))
+                .padding(.top, gba ? boxWidth * 0.05 : ds ? w * 0.08 : boxWidth * 0.07)
         }
         .frame(width: w, height: h)
         .clipShape(shape)
@@ -131,14 +133,28 @@ struct CartridgeView: View {
 }
 
 /// web .lib-cart's outline: rounded, the bottom corners tighter on a GBA
-/// cart; a Game Boy cart rounded at the foot with its top-right corner cut.
+/// cart; a Game Boy cart rounded at the foot with its top-right corner cut;
+/// a DS card the same cut smaller (web .cart-ds clip-path: 84% across,
+/// 12% down).
 struct CartShape: Shape {
     var gba: Bool
+    var ds = false
 
     func path(in r: CGRect) -> Path {
         var p = Path()
         let w = r.width, h = r.height
-        if gba {
+        if ds {
+            let rt = w * 0.06, rb = w * 0.08
+            p.move(to: CGPoint(x: r.minX + rt, y: r.minY))
+            p.addLine(to: CGPoint(x: r.minX + w * 0.84, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.minY + h * 0.12))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - rb))
+            p.addQuadCurve(to: CGPoint(x: r.maxX - rb, y: r.maxY), control: CGPoint(x: r.maxX, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.minX + rb, y: r.maxY))
+            p.addQuadCurve(to: CGPoint(x: r.minX, y: r.maxY - rb), control: CGPoint(x: r.minX, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.minX, y: r.minY + rt))
+            p.addQuadCurve(to: CGPoint(x: r.minX + rt, y: r.minY), control: CGPoint(x: r.minX, y: r.minY))
+        } else if gba {
             let rt = w * 0.10, rb = w * 0.06
             p.move(to: CGPoint(x: r.minX + rt, y: r.minY))
             p.addLine(to: CGPoint(x: r.maxX - rt, y: r.minY))
@@ -166,7 +182,7 @@ struct CartShape: Shape {
     }
 }
 
-/// A system chip (web .sys-chip.badge-*): "GBA", "GBC" or "GB".
+/// A system chip (web .sys-chip.badge-*): "GBA", "GBC", "GB" or "DS".
 struct SysChip: View {
     @Environment(\.palette) var palette
     let system: String

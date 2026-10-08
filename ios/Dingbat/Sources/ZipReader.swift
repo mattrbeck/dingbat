@@ -60,7 +60,7 @@ enum ZipReader {
             }
         }
 
-        let romExts: Set<String> = ["gba", "gb", "gbc", "cgb", "sgb"]
+        let romExts: Set<String> = ["gba", "gb", "gbc", "cgb", "sgb", "nds"]
         let imgExts: Set<String> = ["png", "jpg", "jpeg", "webp", "gif"]
         func ext(_ n: String) -> String { (n as NSString).pathExtension.lowercased() }
         func base(_ n: String) -> String { (n as NSString).lastPathComponent }

@@ -104,8 +104,17 @@ final class Controllers {
             if p.leftTrigger.isPressed { ui.insert("lt") }
             if p.rightTrigger.isPressed { ui.insert("rt") }
             if p.buttonMenu.isPressed { ui.insert("start") }
-            if p.buttonA.isPressed || p.buttonY.isPressed { want.insert(4) }
-            if p.buttonB.isPressed || p.buttonX.isPressed { want.insert(5) }
+            if GameSession.shared.isNDS {
+                // A DS game has four face buttons: each by its label on the
+                // pad (web padGameInputs).
+                if p.buttonA.isPressed { want.insert(4) }
+                if p.buttonB.isPressed { want.insert(5) }
+                if p.buttonX.isPressed { want.insert(10) }
+                if p.buttonY.isPressed { want.insert(11) }
+            } else {
+                if p.buttonA.isPressed || p.buttonY.isPressed { want.insert(4) }
+                if p.buttonB.isPressed || p.buttonX.isPressed { want.insert(5) }
+            }
             if p.buttonOptions?.isPressed == true { want.insert(6); select = true }
             if p.buttonMenu.isPressed { want.insert(7); startBtn = true }
             if p.leftShoulder.isPressed { want.insert(8) }

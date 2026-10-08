@@ -170,6 +170,12 @@ final class AppModel: ObservableObject {
         heroGame = entry
         menuOpen = false
         topbarOpen = false
+        // Signed in to Drive: say once a session that DS games stay here
+        // (web ndsNoteDriveSkip).
+        if entry.isNDS && DriveSync.shared.enrolled && !ndsDriveNoted {
+            ndsDriveNoted = true
+            toast("DS games stay on this device — Drive sync skips them for now", duration: 4, game: true)
+        }
         // Measured while the tapped picture is still on screen.
         if moment == nil { Flights.shared.launching(entry, resumed: result == .resumed) }
         withAnimation(.easeOut(duration: 0.25)) { screen = .play }
@@ -193,6 +199,8 @@ final class AppModel: ObservableObject {
             break
         }
     }
+
+    private var ndsDriveNoted = false
 
     /// Local 2P on this game (the tile's 2P, behind `-2p`).
     func launchTwoPlayer(_ entry: RomEntry) {

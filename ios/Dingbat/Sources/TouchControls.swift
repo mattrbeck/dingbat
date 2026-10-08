@@ -5,7 +5,8 @@ import UIKit
 // Select/Start. SwiftUI draws the pads at the frames PlayGeometry gives them;
 // one invisible UIKit view on top routes every touch (web dpadTouchStart/
 // Move/End, the standalone buttons, joystickTouchStart/Move). Input ids:
-// 0 Up, 1 Down, 2 Left, 3 Right, 4 A, 5 B, 6 Select, 7 Start, 8 L, 9 R.
+// 0 Up, 1 Down, 2 Left, 3 Right, 4 A, 5 B, 6 Select, 7 Start, 8 L, 9 R,
+// and for a DS game 10 X, 11 Y.
 
 /// What the pads show as held, written by the router.
 final class TouchPadState: ObservableObject {
@@ -180,20 +181,37 @@ struct TouchControls: View {
             FaceButton(label: "B", skin: skin, pressed: state.lit.contains(5))
                 .frame(width: f.b.width, height: f.b.height)
                 .offset(x: f.b.minX, y: f.b.minY)
+            if !f.x.isNull {
+                FaceButton(label: "X", skin: skin, pressed: state.lit.contains(10))
+                    .frame(width: f.x.width, height: f.x.height)
+                    .offset(x: f.x.minX, y: f.x.minY)
+                FaceButton(label: "Y", skin: skin, pressed: state.lit.contains(11))
+                    .frame(width: f.y.width, height: f.y.height)
+                    .offset(x: f.y.minX, y: f.y.minY)
+            }
             if !f.l.isNull {
-                ShoulderKey(label: "L", skin: skin, pressed: state.lit.contains(8))
+                ShoulderKey(label: "L", skin: skin, pressed: state.lit.contains(8), short: f.shortShoulders)
                     .frame(width: f.l.width, height: f.l.height)
                     .offset(x: f.l.minX, y: f.l.minY)
-                ShoulderKey(label: "R", skin: skin, pressed: state.lit.contains(9))
+                ShoulderKey(label: "R", skin: skin, pressed: state.lit.contains(9), short: f.shortShoulders)
                     .frame(width: f.r.width, height: f.r.height)
                     .offset(x: f.r.minX, y: f.r.minY)
             }
-            PillKey(label: "Select", font: geometry.pillFont, skin: skin, pressed: state.lit.contains(6))
-                .frame(width: f.select.width, height: f.select.height)
-                .offset(x: f.select.minX, y: f.select.minY)
-            PillKey(label: "Start", font: geometry.pillFont, skin: skin, pressed: state.lit.contains(7))
-                .frame(width: f.start.width, height: f.start.height)
-                .offset(x: f.start.minX, y: f.start.minY)
+            if f.circlePills {
+                CirclePillKey(label: "Select", skin: skin, pressed: state.lit.contains(6))
+                    .frame(width: f.select.width, height: f.select.height)
+                    .offset(x: f.select.minX, y: f.select.minY)
+                CirclePillKey(label: "Start", skin: skin, pressed: state.lit.contains(7))
+                    .frame(width: f.start.width, height: f.start.height)
+                    .offset(x: f.start.minX, y: f.start.minY)
+            } else {
+                PillKey(label: "Select", font: geometry.pillFont, skin: skin, pressed: state.lit.contains(6))
+                    .frame(width: f.select.width, height: f.select.height)
+                    .offset(x: f.select.minX, y: f.select.minY)
+                PillKey(label: "Start", font: geometry.pillFont, skin: skin, pressed: state.lit.contains(7))
+                    .frame(width: f.start.width, height: f.start.height)
+                    .offset(x: f.start.minX, y: f.start.minY)
+            }
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         // Opening or resuming a game: the controls rise a little into place
@@ -345,14 +363,16 @@ struct FaceButton: View {
     }
 }
 
-/// web .pad-shoulder: 10pt top corners, 6pt bottom.
+/// web .pad-shoulder: 10pt top corners, 6pt bottom. `short`: a DS game's
+/// 120x28 ones on a phone held upright (8 and 5, a 12pt label).
 struct ShoulderKey: View {
     let label: String
     let skin: PadSkin
     let pressed: Bool
+    var short = false
 
     var body: some View {
-        let shape = CornerRect(top: 10, bottom: 6)
+        let shape = CornerRect(top: short ? 8 : 10, bottom: short ? 5 : 6)
         ZStack {
             if let fill = skin.fill(.pad, pressed: pressed) {
                 shape.fill(gradient(fill))
@@ -360,8 +380,8 @@ struct ShoulderKey: View {
             shape.inset(by: skin.borderWidth(.pad) / 2)
                 .stroke(skin.border(.pad, pressed: pressed), lineWidth: skin.borderWidth(.pad))
             Text(label)
-                .font(.system(size: 15, weight: .semibold))
-                .tracking(1.8)
+                .font(.system(size: short ? 12 : 15, weight: .semibold))
+                .tracking(short ? 1.4 : 1.8)
                 .foregroundColor(skin.label(.pad, pressed: pressed))
         }
         .modifier(PadShadow(skin: skin, pressed: pressed))
@@ -388,6 +408,35 @@ struct PillKey: View {
                 .foregroundColor(skin.label(.pill, pressed: pressed))
         }
         .modifier(PadShadow(skin: skin, pressed: pressed))
+    }
+}
+
+/// A DS game's Select/Start on a phone: a 28pt circle, its name in small
+/// capitals under it (web body.nds-mode .pad-pill and its ::after label,
+/// 8pt, 3pt below).
+struct CirclePillKey: View {
+    let label: String
+    let skin: PadSkin
+    let pressed: Bool
+
+    var body: some View {
+        ZStack {
+            if let fill = skin.fill(.pill, pressed: pressed) {
+                Circle().fill(gradient(fill))
+            }
+            Circle().strokeBorder(skin.border(.pill, pressed: pressed), lineWidth: skin.borderWidth(.pill))
+        }
+        .modifier(PadShadow(skin: skin, pressed: pressed))
+        .overlay(alignment: .top) {
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .semibold))
+                .tracking(0.8)
+                .lineLimit(1)
+                .fixedSize()
+                .foregroundColor(skin.label(.pill, pressed: pressed).opacity(0.8))
+                .shadow(color: skin.halo ?? .clear, radius: skin.halo == nil ? 0 : 1)
+                .offset(y: 31)
+        }
     }
 }
 
@@ -517,7 +566,7 @@ final class TouchRouterView: UIView {
 
     /// Each d-pad cell's inputs, row by row; the middle has none.
     private static let cellInputs: [[Int]] = [[0, 2], [0], [0, 3], [2], [], [3], [1, 2], [1], [1, 3]]
-    private static let buttonIds = [8, 9, 6, 7, 4, 5]   // shoulders and pills sit above the joystick region
+    private static let buttonIds = [8, 9, 6, 7, 4, 5, 10, 11]   // shoulders and pills sit above the joystick region
 
     private static let joyDeadzone: CGFloat = 0.35   // radial, fraction of the base radius
     private static let joyAxial: CGFloat = 0.4       // per-axis threshold, as the controller stick

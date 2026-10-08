@@ -194,6 +194,7 @@ final class Settings: ObservableObject {
         }
         let fresh = Settings()
         Keyboard.shared.setPreset(.default)  // the key bindings too (web resetAllSettings)
+        NdsState.shared.resetDisplay()       // and the DS screens (nds-layout, nds-display)
         largeControls = fresh.largeControls
         landscapeButtons = fresh.landscapeButtons
         rumble = fresh.rumble

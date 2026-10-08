@@ -53,6 +53,16 @@ struct DriveLibrary {
     var tomb: [Tomb] = []
     var ren: [Ren] = []
 
+    /// The library as Drive gets it (web driveLibraryOf): DS games are this
+    /// device's only, so none of their entries, tombstones or rename
+    /// markers goes up.
+    var forDrive: DriveLibrary {
+        let ds = RomLibrary.isNdsName
+        return DriveLibrary(recents: recents.filter { !ds($0.string("name") ?? "") },
+                            tomb: tomb.filter { !ds($0.name) },
+                            ren: ren.filter { !ds($0.from) && !ds($0.to) })
+    }
+
     var js: JSValue {
         .object(JSObject([("recents", .array(recents.map { .object($0) })),
                           ("tomb", .array(tomb.map { .object($0.js) })),
@@ -166,6 +176,15 @@ func mergeLibrary(_ a: DriveLibrary, _ b: DriveLibrary) -> DriveLibrary {
     }
     return DriveLibrary(recents: stableSorted(byName.values, by: { ts($0) > ts($1) }),
                         tomb: tomb.values, ren: ren.values)
+}
+
+/// A Drive file name / key that belongs to a DS game (web driveExcluded):
+/// nothing of a DS game goes to Drive (docs/nds/web.md "Google Drive: DS
+/// games stay local"): the account's other devices run builds with no DS
+/// core, which would list a synced .nds as a Game Boy game.
+func driveExcluded(_ key: String) -> Bool {
+    guard let p = parseDriveFileName(key) else { return false }
+    return RomLibrary.isNdsName(p.game)
 }
 
 /// Drive file name -> (game, kind); nil for anything unknown. Slot 0 keeps
@@ -391,14 +410,14 @@ final class DriveSync: ObservableObject {
     }
 
     func markUpload(_ name: String) {
-        guard enrolled, parseDriveFileName(name) != nil else { return }
+        guard enrolled, parseDriveFileName(name) != nil, !driveExcluded(name) else { return }
         if !state.queueUp.contains(name) { state.queueUp.append(name) } else { remarked.insert(name) }
         saveState()
         scheduleFlush()
     }
 
     func markDelete(_ name: String) {
-        guard enrolled, parseDriveFileName(name) != nil else { return }
+        guard enrolled, parseDriveFileName(name) != nil, !driveExcluded(name) else { return }
         if !state.queueDel.contains(name) { state.queueDel.append(name) }
         // Stamped when asked for, not when it reaches Drive: an offline
         // Tuesday delete must not outrank another device's Wednesday write.
@@ -414,7 +433,7 @@ final class DriveSync: ObservableObject {
     }
 
     func markGameUpload(_ game: String) {
-        guard enrolled else { return }
+        guard enrolled, !RomLibrary.isNdsName(game) else { return }
         for n in localFiles(for: game) where !state.queueUp.contains(n) { state.queueUp.append(n) }
         saveState()
         scheduleFlush()
@@ -478,7 +497,7 @@ final class DriveSync: ObservableObject {
             games.insert(f)
         }
         for g in games {
-            for k in RomLibrary.perGameKeys(g).all {
+            for k in RomLibrary.perGameKeys(g).all where !driveExcluded(k) {
                 guard let p = parseDriveFileName(k), RomLibrary.hasKey(k) else { continue }
                 out[k] = p
             }
@@ -716,12 +735,12 @@ final class DriveSync: ObservableObject {
     }
 
     private func libraryUnchanged(_ lib: DriveLibrary, _ l: Listing) -> Bool {
-        l.libraryText != nil && l.libraryText == lib.js.stringify()
+        l.libraryText != nil && l.libraryText == lib.forDrive.js.stringify()
     }
 
     private func writeLibrary(_ lib: DriveLibrary, _ remote: Listing, readFrom: Listing) async throws {
         let keep = remote.map[Self.libraryFile]
-        try await client.uploadFile(name: Self.libraryFile, bytes: lib.js.data(), existingID: keep?.id)
+        try await client.uploadFile(name: Self.libraryFile, bytes: lib.forDrive.js.data(), existingID: keep?.id)
         for f in remote.libraryCopies where f.id != keep?.id && readFrom.libraryRead.contains(f.id) {
             try? await client.delete(f.id)
         }

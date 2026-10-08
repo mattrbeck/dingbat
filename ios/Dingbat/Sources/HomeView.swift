@@ -84,14 +84,14 @@ struct HomeView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { AddPictures.shared.maybeOffer() }
         }
         .fileImporter(isPresented: $importing,
-                      allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .zip, .data],
+                      allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .ndsRom, .zip, .data],
                       allowsMultipleSelection: false) { result in
             importPicked(result)
         }
         .onChange(of: sort) { s in LibFilter.Sort.saved = s }
         .background(EmptyView().fileImporter(isPresented: Binding(get: { model.relinking != nil },
                                                                   set: { if !$0 { model.relinking = nil } }),
-                                             allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .data],
+                                             allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .ndsRom, .data],
                                              allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let url = urls.first, let e = model.relinking {
                 model.relink(e, to: url)
@@ -175,7 +175,7 @@ struct HomeView: View {
         let total = entries.count
         let countText = shown == total ? "\(total) \(total == 1 ? "game" : "games")" : "\(shown) of \(total)"
         let counts = entries.reduce(into: [String: Int]()) { $0[$1.system, default: 0] += 1 }
-        let systems = ["GBA", "GBC", "GB"].filter { (counts[$0] ?? 0) > 0 }
+        let systems = ["GBA", "GBC", "GB", "DS"].filter { (counts[$0] ?? 0) > 0 }
 
         VStack(spacing: 0) {
             LibraryHead(countText: countText, underHero: underHero) { importing = true }
@@ -258,7 +258,7 @@ struct HomeView: View {
             return ids.indices.contains(j) ? ids[j] : nil
         }
         let counts = Set(library.entries.map(\.system))
-        let systems = ["GBA", "GBC", "GB"].filter { counts.contains($0) }
+        let systems = ["GBA", "GBC", "GB", "DS"].filter { counts.contains($0) }
         nav.homeFilter = { step in
             let opts: [String?] = [nil] + systems
             let cur: String? = filter.systems.count == 1 ? filter.systems.first : nil

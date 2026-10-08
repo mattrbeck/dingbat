@@ -19,6 +19,7 @@
 				<string>com.mattrb.dingbat.gb</string>
 				<string>com.mattrb.dingbat.gbc</string>
 				<string>com.mattrb.dingbat.sgb</string>
+				<string>com.mattrb.dingbat.nds</string>
 				<string>public.zip-archive</string>
 			</array>
 		</dict>
@@ -135,6 +136,23 @@
 				<array>
 					<string>gbc</string>
 					<string>cgb</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Nintendo DS ROM</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.mattrb.dingbat.nds</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>nds</string>
 				</array>
 			</dict>
 		</dict>

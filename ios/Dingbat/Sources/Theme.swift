@@ -163,6 +163,11 @@ struct Palette {
     var badgeGbBg = Color(red: 95 / 255, green: 191 / 255, blue: 106 / 255, opacity: 0.16)
     var badgeGbcFg = Color(hex: 0x5FD6DE)
     var badgeGbcBg = Color(red: 79 / 255, green: 208 / 255, blue: 216 / 255, opacity: 0.16)
+    // Nintendo DS (web styles.css "Nintendo DS": --badge-ds-*, --cart-ds-*).
+    var cartDsTop = Color(hex: 0x5D6170)
+    var cartDsBottom = Color(hex: 0x3C3F4B)
+    var badgeDsFg = Color(hex: 0xFF9F80)
+    var badgeDsBg = Color(red: 1, green: 128 / 255, blue: 96 / 255, opacity: 0.16)
 
     var abTopC: Color { abTop ?? padTop }
     var abBottomC: Color { abBottom ?? padBottom }
@@ -179,6 +184,7 @@ struct Palette {
         switch system {
         case "GBA": return (badgeGbaFg, badgeGbaBg)
         case "GBC": return (badgeGbcFg, badgeGbcBg)
+        case "DS": return (badgeDsFg, badgeDsBg)
         default: return (badgeGbFg, badgeGbBg)
         }
     }
@@ -266,6 +272,7 @@ struct Palette {
             p.badgeGbaFg = Color(hex: 0x4F46B8); p.badgeGbaBg = Color(red: 99 / 255, green: 91 / 255, blue: 1, opacity: 0.14)
             p.badgeGbFg = Color(hex: 0x1E7A2E); p.badgeGbBg = Color(red: 46 / 255, green: 150 / 255, blue: 60 / 255, opacity: 0.15)
             p.badgeGbcFg = Color(hex: 0x086F77); p.badgeGbcBg = Color(red: 20 / 255, green: 160 / 255, blue: 170 / 255, opacity: 0.14)
+            p.badgeDsFg = Color(hex: 0xB0472A); p.badgeDsBg = Color(red: 210 / 255, green: 90 / 255, blue: 60 / 255, opacity: 0.14)
             p.chromeInk = p.text; p.chromeInkDim = p.textDim; p.statusInk = p.textDim
             p.chromeBtnTop = p.surface2; p.chromeBtnBottom = p.surface2Lo; p.chromeBtnBorder = p.border
             p.padTop = p.surface3; p.padBottom = p.surface1; p.padBorder = p.border2; p.padLabel = p.textDim

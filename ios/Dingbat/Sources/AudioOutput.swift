@@ -1,8 +1,9 @@
 import AVFoundation
 import UIKit
 
-/// AVAudioSourceNode pulling float32 stereo at 32768 Hz from the core's ring
-/// (the engine resamples). The render block stays realtime-safe: no
+/// AVAudioSourceNode pulling float32 stereo at the core's rate from its ring
+/// (32768 Hz; a DS game's 32728 Hz), the engine resampling. The node is
+/// rebuilt when a load changes the rate (syncRate). The render block stays realtime-safe: no
 /// allocation, no locks besides the ring's mutex, no calls into Nim.
 ///
 /// The analog filter (Settings › Audio, GBA only) is the web's 12 kHz
@@ -15,6 +16,8 @@ final class AudioOutput {
     private let scratch = UnsafeMutablePointer<Float>.allocate(capacity: 16384)
     private var started = false
     private var category: AVAudioSession.Category?
+    /// The rate the node's format was built for.
+    private var nodeRate: Double = 0
 
     /// Read by the render thread; written from main. Word-sized flags.
     fileprivate let state = UnsafeMutablePointer<FilterState>.allocate(capacity: 1)
@@ -64,10 +67,30 @@ final class AudioOutput {
     func start() {
         guard node == nil else { return }
         refreshSession()
+        guard makeNode() else { return }
+        observe()
+        started = true
+        try? engine.start()
+    }
 
-        guard let format = AVAudioFormat(
-            standardFormatWithSampleRate: Double(dingbat_audio_sample_rate()),
-            channels: 2) else { return }
+    /// The core's rate moved (a DS game after a GB/GBA one, or the
+    /// reverse; dingbat.h: re-read it after each load): the node goes and
+    /// one in the new format takes its place.
+    func syncRate() {
+        let rate = Double(dingbat_audio_sample_rate())
+        guard node != nil, rate > 0, rate != nodeRate else { return }
+        engine.stop()
+        if let old = node { engine.detach(old) }
+        node = nil
+        guard makeNode() else { return }
+        try? engine.start()
+    }
+
+    @discardableResult
+    private func makeNode() -> Bool {
+        let rate = Double(dingbat_audio_sample_rate())
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2) else { return false }
+        nodeRate = rate
 
         let scratch = self.scratch
         let st = self.state
@@ -103,7 +126,10 @@ final class AudioOutput {
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
         self.node = node
+        return true
+    }
 
+    private func observe() {
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: nil, queue: .main) { [weak self] note in
@@ -129,8 +155,6 @@ final class AudioOutput {
             self.refreshSession()
             self.restartIfNeeded()
         }
-        started = true
-        try? engine.start()
     }
 
     /// "Play in Silent Mode": the playback category (plays with the ring/

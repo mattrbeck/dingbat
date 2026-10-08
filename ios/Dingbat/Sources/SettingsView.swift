@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 
 /// Settings › sections, in the web's order (web #settings-tabs).
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case controls, gb, gba, video, audio, general
+    case controls, gb, gba, ds, video, audio, general
 
     var id: String { rawValue }
 
@@ -23,6 +23,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .controls: return "Controls"
         case .gb: return "Game Boy"
         case .gba: return "GBA"
+        case .ds: return "Nintendo DS"
         case .video: return "Video"
         case .audio: return "Audio"
         case .general: return "General"
@@ -36,6 +37,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .controls: return "Touch buttons, joystick, controller"
         case .gb: return "Palette, Super Game Boy, boot ROM"
         case .gba: return "BIOS file, BIOS calls, intro"
+        case .ds: return "Screen layout, BIOS and firmware"
         case .video: return "Color, filters, LCD grid, glow"
         case .audio: return "Quality, filtering, fast-forward"
         case .general: return "Theme, rewind, run-ahead"
@@ -256,6 +258,7 @@ struct SettingsView: View {
             case .controls: ControlsPane()
             case .gb: GameBoyPane()
             case .gba: GbaPane()
+            case .ds: NdsSettingsPane()
             case .video: VideoPane()
             case .audio: AudioPane()
             case .general: GeneralPane()
@@ -312,6 +315,7 @@ private struct ControlsPane: View {
             ("A", "A or Y"),
             ("B", "B or X"),
             ("Select / Start", "Options / Menu"),
+            ("X / Y (DS games)", "X / Y"),
             ("L / R", "LB / RB"),
             ("D-pad", "D-pad or left stick"),
             ("Fast forward (hold)", "RT"),
@@ -341,7 +345,7 @@ private struct KeyboardBlock: View {
         }
         SheetHint("Tap a key, then press its replacement. Saved automatically.")
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], alignment: .leading, spacing: 8) {
-            ForEach(0..<10, id: \.self) { i in
+            ForEach(0..<Keyboard.inputNames.count, id: \.self) { i in
                 HStack(spacing: 10) {
                     let on = kb.capturing == i
                     Button { kb.capturing = on ? nil : i } label: {

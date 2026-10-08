@@ -1,4 +1,5 @@
 import SwiftUI
+import Metal
 import UIKit
 
 /// The play screen (web body.running): the top bar, the game on the stage,
@@ -6,12 +7,19 @@ import UIKit
 /// PlayLayout. The in-game menu drops down from the bar's hamburger.
 struct PlayView: View {
     @EnvironmentObject var model: AppModel
+    @EnvironmentObject var session: GameSession
+    @ObservedObject private var nds = NdsState.shared
 
     var body: some View {
         PlayLayout(stage: StageOrPair(), bar: TopBar())
             .overlay(alignment: .topLeading) {
                 if model.menuOpen {
                     GameMenu()
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if nds.panelOpen && session.isNDS && !model.menuOpen {
+                    NdsPanel()
                 }
             }
             .overlay { ClipProgressView() }
@@ -22,6 +30,32 @@ struct PlayView: View {
 
 // MARK: - The stage
 
+/// What PlayLayout tells the stage about its place (web: the media queries
+/// the stage's CSS reads).
+struct StageContext: Equatable {
+    /// The bar folds off the top and a tap on the picture brings it down:
+    /// a phone held sideways, and a DS game on a phone held upright with
+    /// "Hide the top bar" on.
+    var barFolds = false
+    /// DS on a phone held sideways: the widest the screens may be, between
+    /// the d-pad and the face buttons and clear of the pills (web ndsAvail).
+    var ndsMaxWidth: CGFloat?
+    /// DS on a phone held upright: the screens sit at the stage's top, the
+    /// room they do not fill below them.
+    var ndsTop = false
+}
+
+private struct StageContextKey: EnvironmentKey {
+    static let defaultValue = StageContext()
+}
+
+extension EnvironmentValues {
+    var stageContext: StageContext {
+        get { self[StageContextKey.self] }
+        set { self[StageContextKey.self] = newValue }
+    }
+}
+
 /// The game picture on the stage: contain-fit (whole multiples with integer
 /// scaling), the ambient glow behind it, pinch zoom, the rumble shake, and in
 /// phone landscape a tap on the picture shows and hides the top bar.
@@ -31,6 +65,8 @@ struct GameStage: View {
     @EnvironmentObject var settings: Settings
     @Environment(\.palette) var palette
     @Environment(\.verticalSizeClass) var vSize
+    @Environment(\.stageContext) var ctx
+    @ObservedObject private var nds = NdsState.shared
 
     @State private var zoom: CGFloat = 1
     @State private var zoomBase: CGFloat = 1
@@ -43,10 +79,12 @@ struct GameStage: View {
 
     var body: some View {
         GeometryReader { geo in
-            let size = pictureSize(in: geo.size)
-            ZStack {
+            let lay = session.isNDS ? ndsLayout(in: geo.size) : nil
+            let size = lay.map(ndsPictureSize) ?? pictureSize(in: geo.size)
+            ZStack(alignment: lay != nil && ctx.ndsTop ? .top : .center) {
                 (palette.chromeTransparent ? Color.clear : palette.stage)
-                if settings.ambientGlow {
+                // The glow is the GB/GBA presenter's (web: a DS game skips it).
+                if settings.ambientGlow && !session.isNDS {
                     GlowView(box: size)
                         .frame(width: size.width, height: size.height)
                         .scaleEffect(1.45)
@@ -55,6 +93,9 @@ struct GameStage: View {
                 }
                 GameScreenView()
                     .frame(width: size.width, height: size.height)
+                    // The lid closed: the screens dim (web nds-lid-closed).
+                    .brightness(session.isNDS && nds.lidClosed ? -0.55 : 0)
+                    .overlay { if session.isNDS { NdsStylus() } }
                     .flightAnchor("screen")
                     .flightHidden(.screen)
                     .modifier(RumbleShake(active: session.rumbling))
@@ -70,13 +111,19 @@ struct GameStage: View {
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
                         .allowsHitTesting(false)
                 }
+                if session.isNDS { NdsStageLayers() }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .onAppear { if let lay { pushNds(lay) } }
+            .onChange(of: lay) { if let l = $0 { pushNds(l) } }
+            .onChange(of: palette.name) { _ in if let lay { pushNds(lay) } }
             // OLED black: the chrome is see-through and the glow bleeds
             // behind it (web: the stage stops clipping).
             .clipped(antialiased: false, if: !palette.chromeTransparent)
             .contentShape(Rectangle())
-            .gesture(magnify(geo.size, picture: size))
+            // A DS game's screens are the stylus's: no pinch zoom (web
+            // body.nds-mode #canvas touch-action: none).
+            .gesture(session.isNDS ? nil : magnify(geo.size, picture: size))
             .simultaneousGesture(zoom > 1 ? panGesture(geo.size, picture: size) : nil)
             .gesture(taps(geo.size, picture: size))
             .onChange(of: session.game) { g in
@@ -99,6 +146,35 @@ struct GameStage: View {
         let scale = settings.integerScale && fit >= 1 ? floor(fit) : fit
         return CGSize(width: (w * scale * px).rounded(.down) / px,
                       height: (h * scale * px).rounded(.down) / px)
+    }
+
+    /// The DS arrangement for the room there is (web ndsUpdateLayout with
+    /// ndsAvail's box).
+    private func ndsLayout(in box: CGSize) -> NdsUtil.Layout {
+        let w = min(box.width, ctx.ndsMaxWidth ?? .infinity)
+        return NdsUtil.layout(w, box.height, nds.arrangement, gap: nds.gap.px,
+                              integer: settings.integerScale, swap: nds.swap, rot: nds.rot)
+    }
+
+    /// The arrangement's picture, in whole device pixels.
+    private func ndsPictureSize(_ lay: NdsUtil.Layout) -> CGSize {
+        let px = UIScreen.main.scale
+        return CGSize(width: (lay.w * lay.scale * px).rounded(.down) / px,
+                      height: (lay.h * lay.scale * px).rounded(.down) / px)
+    }
+
+    /// The presenter and the stylus follow the arrangement.
+    private func pushNds(_ lay: NdsUtil.Layout) {
+        nds.layout = lay
+        let r = GameRenderer.shared
+        r.ndsViews = NdsUtil.views(lay)
+        r.ndsSize = CGSize(width: lay.w, height: lay.h)
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(palette.chromeTransparent ? .black : palette.stage).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        r.ndsClear = MTLClearColor(red: Double(red), green: Double(green), blue: Double(blue), alpha: 1)
+        NdsStylusView.current?.lift()
+        NdsStylusView.current?.notePicture()
+        r.redraw()
     }
 
     private func clampPan(_ p: CGSize, zoom z: CGFloat, box: CGSize, picture: CGSize) -> CGSize {
@@ -141,9 +217,12 @@ struct GameStage: View {
     }
 
     private func toggleBar(at p: CGPoint) {
-        guard phoneLandscape, model.session.game != nil else { return }
+        guard ctx.barFolds || phoneLandscape, model.session.game != nil else { return }
         let clear = PadGeometry.shared.rects.allSatisfy { !$0.insetBy(dx: -20, dy: -20).contains(p) }
         guard clear else { return }
+        // Never the DS's touch screen, nor (Focus, One screen) the top
+        // screen, whose tap swaps them (web ndsTapTaken).
+        guard !nds.tapTaken(p) else { return }
         withAnimation(.easeOut(duration: 0.2)) { model.topbarOpen.toggle() }
         BarTapHint.markUsed()
     }
@@ -409,6 +488,7 @@ struct TopBar: View {
                 }
             }
             VolumeControl(showSlider: wide)
+            if session.isNDS { NdsBarButtons() }
         }
         .padding(.horizontal, 10)
         .frame(height: 52)
@@ -535,7 +615,8 @@ struct PlaybackCluster: View {
             if !(link.linked || session.twoPlayer) {
                 BarIconButton(system: "arrow.counterclockwise", label: "Reset", width: w) { session.reset() }
             }
-            if settings.rewind && !(link.linked || session.twoPlayer) {
+            // No rewind ring on the DS core (web body.nds-mode #rewind).
+            if settings.rewind && !session.isNDS && !(link.linked || session.twoPlayer) {
                 rewindButton(width: w)
             }
             BarIconButton(system: session.paused ? "play.fill" : "pause.fill",
@@ -792,8 +873,12 @@ struct GameMenu: View {
                         .frame(height: 44)
                     }
                     sep
-                    if !session.twoPlayer { linkItem }
-                    if !(link.linked || session.twoPlayer) { item("star", "Cheats") { model.openSheet(.cheats) } }
+                    // The link cable and the cheat engines are the GB/GBA
+                    // cores' (web body.nds-mode #net-connect, #open-cheats).
+                    if !session.twoPlayer && !session.isNDS { linkItem }
+                    if !(link.linked || session.twoPlayer || session.isNDS) {
+                        item("star", "Cheats") { model.openSheet(.cheats) }
+                    }
                     item("gearshape", "Settings") { model.openSheet(.settings(section: nil)) }
                     sep
                     item("ladybug", "Report a Bug") { model.openSheet(.report) }
@@ -844,6 +929,18 @@ struct GameMenu: View {
         }
         if captureOpen {
             item("camera.viewfinder", "Screenshot", sub: true) { Share.screenshot() }
+            // Clip that! replays the GB/GBA core's history; Record goes with
+            // it (web body.nds-mode #clip-last, #record-clip).
+            if !session.isNDS { recordItems }
+            if !PrintStore.all().isEmpty {
+                item("printer", "Printed Photos", sub: true, dot: model.newPrints) {
+                    model.openSheet(.prints)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var recordItems: some View {
             item(clips.recording ? "stop.circle.fill" : "record.circle",
                  clips.recording ? "Stop Recording" : "Record", sub: true,
                  tint: clips.recording ? palette.danger : nil) {
@@ -851,12 +948,6 @@ struct GameMenu: View {
                 clips.toggleRecording()
             }
             item("film.stack", "Clip that!", sub: true) { model.openSheet(.clip) }
-            if !PrintStore.all().isEmpty {
-                item("printer", "Printed Photos", sub: true, dot: model.newPrints) {
-                    model.openSheet(.prints)
-                }
-            }
-        }
     }
 
     private var quickRow: some View {
@@ -869,7 +960,7 @@ struct GameMenu: View {
                 session.loadState(slot: 0)
                 model.closeMenu()
             }
-            if settings.rewind {
+            if settings.rewind && !session.isNDS {
                 quick("film", "Rewind to a Moment") { model.openSheet(.rewind) }
             }
             quick("tortoise", "Slow Motion", active: session.speed == .slow) {

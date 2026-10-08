@@ -30,6 +30,9 @@ final class AddPictures: ObservableObject {
         let fm = FileManager.default
         return RomLibrary.shared.entries.compactMap { e in
             if fm.fileExists(atPath: e.shotURL.path) { return nil }
+            // The batch boots games on the GB/GBA core: a DS game gets its
+            // picture by being played (web).
+            if e.isNDS { return nil }
             if e.isLocal { return Candidate(entry: e, local: true) }
             return includeDrive && DriveSync.shared.driveHasRom(e.fileName) ? Candidate(entry: e, local: false) : nil
         }

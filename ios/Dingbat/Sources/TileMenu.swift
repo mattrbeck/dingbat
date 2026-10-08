@@ -119,7 +119,10 @@ struct TileMenuView: View {
     /// web tileMenuStatus: the system, the size, and the one thing nothing
     /// else in the menu says, that a game whose file is gone left its save.
     private var status: String {
-        var bits = [entry.system, entry.sizeText].filter { !$0.isEmpty }
+        var bits = [entry.system]
+        // DS games never sync (driveExcluded): say so where sync is in play.
+        if entry.isNDS && DriveSync.shared.linked { bits.append("this device only") }
+        bits += [entry.sizeText].filter { !$0.isEmpty }
         let onDrive = DriveSync.shared.driveHasRom(entry.fileName)
         let saves = library.hasSaveData(entry)
         if !entry.isLocal && !onDrive {

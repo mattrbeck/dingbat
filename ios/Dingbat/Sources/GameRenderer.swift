@@ -25,6 +25,17 @@ private struct PresentUniforms {
     var pad0: Int32 = 0
     var sgbBackdrop: SIMD4<Float> = .zero
     var dmgPal: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>) = (.zero, .zero, .zero, .zero)
+    var texOrigin: SIMD2<Float> = .zero
+    var pad2: SIMD2<Float> = .zero
+}
+
+/// Matches ViewUniforms in the shader: a DS view's clip-space rect and turn.
+private struct ViewUniforms {
+    var dst: SIMD4<Float> = .zero
+    var rot: Int32 = 0
+    var pad0: Int32 = 0
+    var pad1: Int32 = 0
+    var pad2: Int32 = 0
 }
 
 /// Uploads the core's raw BGR555 frame to an R16Uint texture and runs the
@@ -35,12 +46,21 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     let device: MTLDevice?
     private let queue: MTLCommandQueue?
     private var pipeline: MTLRenderPipelineState?
+    private var ndsPipeline: MTLRenderPipelineState?
     private var gameTex: MTLTexture?
     private var borderTex: MTLTexture?
     private var lastBorderGen: Int32 = -1
     private(set) weak var view: MTKView?
 
     var options = PresentOptions()
+
+    /// A DS game's arrangement (GameStage sets it with the picture's box):
+    /// the views in layout pixels of the turned picture (w x h), and the
+    /// stage's colour for the gaps and Focus's empty corner (web: the
+    /// presenter clears in the stage's colour).
+    var ndsViews: [NdsUtil.View] = []
+    var ndsSize = CGSize(width: 256, height: 392)
+    var ndsClear = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
     override init() {
         device = MTLCreateSystemDefaultDevice()
@@ -56,6 +76,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         desc.fragmentFunction = lib.makeFunction(name: "present_fragment")
         desc.colorAttachments[0].pixelFormat = .bgra8Unorm
         pipeline = try? device.makeRenderPipelineState(descriptor: desc)
+        desc.vertexFunction = lib.makeFunction(name: "nds_vertex")
+        ndsPipeline = try? device.makeRenderPipelineState(descriptor: desc)
         let bd = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .r16Uint, width: 256, height: 224, mipmapped: false)
         bd.usage = .shaderRead
@@ -113,6 +135,10 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
+        if dingbat_is_nds() != 0 {
+            drawNds(in: view)
+            return
+        }
         guard let pipeline, let queue, let gameTex, let borderTex,
               let pass = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
@@ -148,6 +174,43 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         enc.setFragmentTexture(borderTex, index: 1)
         enc.setFragmentBytes(&u, length: MemoryLayout<PresentUniforms>.stride, index: 0)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        enc.endEncoding()
+        cmd.present(drawable)
+        cmd.commit()
+    }
+
+    /// A DS frame: the stage's colour, then each shown screen into its rect,
+    /// turned, filtered as the web filters DS screens (no colour correction,
+    /// no palette: the DS's own panels).
+    private func drawNds(in view: MTKView) {
+        view.clearColor = ndsClear
+        guard let ndsPipeline, let queue, let gameTex, let borderTex,
+              let pass = view.currentRenderPassDescriptor,
+              let drawable = view.currentDrawable,
+              let cmd = queue.makeCommandBuffer(),
+              let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        enc.setRenderPipelineState(ndsPipeline)
+        enc.setFragmentTexture(gameTex, index: 0)
+        enc.setFragmentTexture(borderTex, index: 1)
+        let lw = Float(max(1, ndsSize.width)), lh = Float(max(1, ndsSize.height))
+        for v in ndsViews where gameTex.height >= 384 {
+            var u = PresentUniforms()
+            u.texSize = SIMD2(256, 192)
+            u.scanWidth = 256
+            u.scanHeight = 192
+            u.filter = Int32(options.filter)
+            u.grid = options.grid ? 1 : 0
+            u.subpixel = options.subpixel ? 1 : 0
+            u.texOrigin = SIMD2(0, v.screen == .top ? 0 : 192)
+            var vu = ViewUniforms()
+            let r = v.dst
+            vu.dst = SIMD4(Float(r.minX) / lw * 2 - 1, 1 - Float(r.minY) / lh * 2,
+                           Float(r.maxX) / lw * 2 - 1, 1 - Float(r.maxY) / lh * 2)
+            vu.rot = Int32(v.rot)
+            enc.setVertexBytes(&vu, length: MemoryLayout<ViewUniforms>.stride, index: 1)
+            enc.setFragmentBytes(&u, length: MemoryLayout<PresentUniforms>.stride, index: 0)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
         enc.endEncoding()
         cmd.present(drawable)
         cmd.commit()

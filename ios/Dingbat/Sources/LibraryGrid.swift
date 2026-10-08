@@ -176,7 +176,7 @@ struct LibFilter: Equatable {
         e.isLocal ? .device : DriveSync.shared.driveHasRom(e.fileName) ? .drive : nil
     }
 
-    static let systemOrder = ["GBA": 0, "GBC": 1, "GB": 2]
+    static let systemOrder = ["GBA": 0, "GBC": 1, "GB": 2, "DS": 3]
 
     enum Sort: String, CaseIterable, Identifiable {
         case recent, alpha, system
@@ -582,7 +582,7 @@ struct LibraryTile: View {
                 .frame(width: 28, height: 26)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.55)))
                 .padding(6)
-        } else if local && TwoPlayer.enabled {
+        } else if local && TwoPlayer.enabled && !entry.isNDS {
             // web ?2p: two linked cores of this game on one screen.
             Button { model.launchTwoPlayer(entry) } label: {
                 Text("2P")

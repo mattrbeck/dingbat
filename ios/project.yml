@@ -59,6 +59,11 @@ targets:
             UTTypeConformsTo: [public.data]
             UTTypeTagSpecification:
               public.filename-extension: [gbc, cgb]
+          - UTTypeIdentifier: com.mattrb.dingbat.nds
+            UTTypeDescription: Nintendo DS ROM
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [nds]
           - UTTypeIdentifier: com.mattrb.dingbat.sgb
             UTTypeDescription: Super Game Boy ROM
             UTTypeConformsTo: [public.data]
@@ -82,6 +87,7 @@ targets:
               - com.mattrb.dingbat.gb
               - com.mattrb.dingbat.gbc
               - com.mattrb.dingbat.sgb
+              - com.mattrb.dingbat.nds
               - public.zip-archive
           # A save or state opened from Files goes into the running game.
           - CFBundleTypeName: Game save or state

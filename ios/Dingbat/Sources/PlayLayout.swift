@@ -25,24 +25,42 @@ struct ControlFrames: Equatable {
     var r: CGRect = .null
     var select: CGRect = .null
     var start: CGRect = .null
+    /// The DS's X and Y (.null for the other systems).
+    var x: CGRect = .null
+    var y: CGRect = .null
     /// The pills' touch area reaches past the drawn pill above and below
     /// (phone landscape), never sideways.
     var pillSlop: CGFloat = 0
+    /// A DS game on a phone: Select/Start are 28pt circles labelled
+    /// underneath, each hit 8pt past its circle and on its label (web
+    /// .pad-pill::before inset -8px -8px -20px).
+    var circlePills = false
+    /// A DS game on a phone held upright: the short L/R, hit 6pt above and
+    /// below.
+    var shoulderSlop: CGFloat = 0
+    /// A DS game on a phone held upright: the short L/R's look.
+    var shortShoulders = false
 
     func hitRect(_ id: Int) -> CGRect {
+        func pill(_ r: CGRect) -> CGRect {
+            circlePills ? CGRect(x: r.minX - 8, y: r.minY - 8, width: r.width + 16, height: r.height + 28)
+                        : r.insetBy(dx: 0, dy: -pillSlop)
+        }
         switch id {
         case 4: return a
         case 5: return b
-        case 6: return select.insetBy(dx: 0, dy: -pillSlop)
-        case 7: return start.insetBy(dx: 0, dy: -pillSlop)
-        case 8: return l
-        case 9: return r
+        case 6: return pill(select)
+        case 7: return pill(start)
+        case 8: return l.insetBy(dx: 0, dy: -shoulderSlop)
+        case 9: return r.insetBy(dx: 0, dy: -shoulderSlop)
+        case 10: return x
+        case 11: return y
         default: return .null
         }
     }
 
     func drawn(joystick: Bool) -> [CGRect] {
-        [joystick ? joyBase : dpad, a, b, l, r, select, start].filter { !$0.isNull }
+        [joystick ? joyBase : dpad, a, b, x, y, l, r, select, start].filter { !$0.isNull }
     }
 }
 
@@ -61,6 +79,18 @@ struct PlayGeometry: Equatable {
     var controls: ControlFrames?
     var large = false
     var pillFont: CGFloat = 11
+    /// The bar folds off the top until a tap on the picture: a phone held
+    /// sideways, and a DS game on a phone held upright with "Hide the top
+    /// bar" on.
+    var barFolds = false
+    /// DS, phone held sideways: the widest the screens may be (web ndsAvail).
+    var ndsMaxWidth: CGFloat?
+    /// DS, phone held upright: the screens at the stage's top.
+    var ndsTop = false
+
+    var stageContext: StageContext {
+        StageContext(barFolds: barFolds, ndsMaxWidth: ndsMaxWidth, ndsTop: ndsTop)
+    }
 
     static let barHeight: CGFloat = 52
 
@@ -72,6 +102,10 @@ struct PlayGeometry: Equatable {
         var isGB: Bool
         var large: Bool
         var hidden: Bool
+        /// A Nintendo DS game; its own layout only where this says so.
+        var nds = false
+        var ndsBarHide = true
+        var joystick = false
     }
 
     static func make(_ i: Inputs) -> PlayGeometry {
@@ -82,15 +116,87 @@ struct PlayGeometry: Equatable {
         let landscape = i.size.width > i.size.height
         if i.compactHeight && landscape {
             g.mode = .phoneLandscape
+            g.barFolds = true
             g.phoneLandscape(i)
         } else if i.regular && landscape {
             g.mode = .tabletLandscape
             g.tabletLandscape(i)
+        } else if i.nds && i.size.width < 700 {
+            g.mode = .portrait
+            g.ndsPortrait(i)
         } else {
             g.mode = .portrait
             g.portrait(i)
         }
         return g
+    }
+
+    // MARK: DS, phone held upright
+
+    /// web styles.css "DS on a phone held upright: the two screens get the
+    /// room". The bar folds off the top (with "Hide the top bar") and the
+    /// top screen goes up to the notch or Dynamic Island; L/R are short at
+    /// the strip's top corners; Select/Start small labelled circles at the
+    /// bottom between the d-pad and B; the d-pad and face buttons keep their
+    /// size, their row exactly the d-pad's height on the strip's bottom
+    /// padding. Only the screens give or take room.
+    private mutating func ndsPortrait(_ i: Inputs) {
+        let w = size.width, h = size.height
+        let padTop: CGFloat = 8, gap: CGFloat = 8, shoulderH: CGFloat = 28
+        let padBottom = max(10, safe.bottom - 12)
+        let padL = 16 + safe.leading, padR = 16 + safe.trailing
+        let cw = w - padL - padR
+        let mainH = i.large ? min(cw * 0.62, 330) : min(cw * 0.46, 240)
+        let stripH = padTop + shoulderH + gap + mainH + padBottom
+        ndsTop = true
+        bar = CGRect(x: safe.leading, y: safe.top, width: w - safe.leading - safe.trailing, height: Self.barHeight)
+        // --nds-top: the status-bar inset less what lies beside the cut-out,
+        // 14pt on a notched phone and 11pt on a Dynamic Island one (an inset
+        // of 54pt or more), so the screen's top edge meets it; a plain 20pt
+        // status bar keeps the whole inset.
+        let ndsTopY = safe.top > 53 ? safe.top - 11 : safe.top > 20 ? safe.top - 14 : safe.top
+        barFolds = i.ndsBarHide
+        let stageTop = barFolds ? ndsTopY : bar.maxY
+        guard !i.hidden else {
+            stage = CGRect(x: 0, y: stageTop, width: w, height: max(0, h - safe.bottom - stageTop))
+            return
+        }
+        strip = CGRect(x: 0, y: h - stripH, width: w, height: stripH)
+        stage = CGRect(x: 0, y: stageTop, width: w, height: max(0, strip.minY - stageTop))
+
+        var f = ControlFrames()
+        let top = strip.minY + padTop
+        f.l = CGRect(x: padL, y: top, width: 120, height: shoulderH)
+        f.r = CGRect(x: w - padR - 120, y: top, width: 120, height: shoulderH)
+        f.shoulderSlop = 6
+        f.shortShoulders = true
+        let y0 = top + shoulderH + gap
+        let cb = mainH
+        let dpad = i.large ? min(0.62 * cw, 330, cb) : min(0.46 * cw, 240, cb)
+        f.dpad = CGRect(x: padL, y: y0 + (cb - dpad) / 2, width: dpad, height: dpad)
+        f.joyRegion = CGRect(x: padL, y: y0, width: cw / 2, height: cb)
+        f.joyBase = CGRect(x: f.joyRegion.midX - dpad / 2, y: f.joyRegion.midY - dpad / 2, width: dpad, height: dpad)
+        let btn = i.large ? min(0.42 * cw / 2.8, 74, cb / 2.8) : min(0.46 * cw / 2.7, 84, cb / 2.7)
+        placeDiamond(&f, in: CGRect(x: w - padR - 2.5 * btn, y: y0, width: 2.5 * btn, height: cb), button: btn)
+        // 28pt circles 22pt apart, centred, their bottoms 12pt above the
+        // strip's bottom padding.
+        let cy = strip.maxY - padBottom - 12 - 28
+        f.select = CGRect(x: w / 2 - 11 - 28, y: cy, width: 28, height: 28)
+        f.start = CGRect(x: w / 2 + 11, y: cy, width: 28, height: 28)
+        f.circlePills = true
+        controls = f
+    }
+
+    /// web body.nds-mode #ab: A/B/X/Y a diamond of the same buttons (X top,
+    /// Y left, A right, B bottom), 0.75 of a button from the centre each
+    /// way, in a box 2.5 buttons wide.
+    private func placeDiamond(_ f: inout ControlFrames, in ab: CGRect, button btn: CGFloat) {
+        let cx = ab.midX, cy = ab.midY, d = 0.75 * btn
+        func at(_ x: CGFloat, _ y: CGFloat) -> CGRect { CGRect(x: x - btn / 2, y: y - btn / 2, width: btn, height: btn) }
+        f.a = at(cx + d, cy)
+        f.y = at(cx - d, cy)
+        f.x = at(cx, cy - d)
+        f.b = at(cx, cy + d)
     }
 
     // MARK: portrait (phones, and tablets held upright)
@@ -140,10 +246,10 @@ struct PlayGeometry: Equatable {
         // Upright, the base sits centred in its region.
         f.joyBase = CGRect(x: f.joyRegion.midX - dpad / 2, y: f.joyRegion.midY - dpad / 2, width: dpad, height: dpad)
         let btn = i.large ? min(0.42 * cw / 2.8, 74, cb / 2.8) : min(0.46 * cw / 2.7, 84, cb / 2.7)
-        let abW = btn * (i.large ? 2.05 : 2.2)
+        let abW = btn * (i.nds ? 2.5 : i.large ? 2.05 : 2.2)
         let abH = min(0.46 * cw, 240, cb)
         let ab = CGRect(x: w - padR - abW, y: y0 + (cb - abH) / 2, width: abW, height: abH)
-        placeAB(&f, in: ab, button: btn)
+        if i.nds { placeDiamond(&f, in: ab, button: btn) } else { placeAB(&f, in: ab, button: btn) }
 
         let pw: CGFloat = i.large ? 120 : 150
         if tablet {
@@ -181,9 +287,14 @@ struct PlayGeometry: Equatable {
         f.joyRegion = CGRect(x: left, y: top, width: cw / 2, height: base - top)
         f.joyBase = f.dpad   // sideways, where the d-pad would rest
         let btn = i.large ? min(0.40 * cw / 2.6, 82, 0.92 * cb / 2.6) : min(0.32 * cw / 2.6, 62, 0.76 * cb / 2.6)
-        let abW = btn * 2.2
         let abH = i.large ? min(0.46 * cw, 240, 0.92 * cb) : min(0.32 * cw, 180, 0.76 * cb)
-        placeAB(&f, in: CGRect(x: right - abW, y: base - abH, width: abW, height: abH), button: btn)
+        if i.nds {
+            let abW = btn * 2.5
+            placeDiamond(&f, in: CGRect(x: right - abW, y: base - abH, width: abW, height: abH), button: btn)
+        } else {
+            let abW = btn * 2.2
+            placeAB(&f, in: CGRect(x: right - abW, y: base - abH, width: abW, height: abH), button: btn)
+        }
         if !i.isGB {
             let sw: CGFloat = i.large ? 120 : 104, sh: CGFloat = i.large ? 46 : 44
             f.l = CGRect(x: left, y: top, width: sw, height: sh)
@@ -191,8 +302,27 @@ struct PlayGeometry: Equatable {
         }
         // Select/Start: labelled pills just inboard of each cluster, their
         // bottoms level with the clusters'.
-        let pw: CGFloat = i.large ? 84 : 76, ph: CGFloat = i.large ? 40 : 36
         pillFont = i.large ? 12 : 11
+        if i.nds {
+            // web "DS on a phone held sideways": Select/Start the upright
+            // phone's small labelled circles, in the right rail centred
+            // under R (18pt below it, 22pt apart), so the screens get the
+            // whole height between the d-pad and the face buttons.
+            let cy = f.r.maxY + 18
+            f.select = CGRect(x: f.r.midX - 11 - 28, y: cy, width: 28, height: 28)
+            f.start = CGRect(x: f.r.midX + 11, y: cy, width: 28, height: 28)
+            f.circlePills = true
+            // web ndsAvail: symmetric about the stage's centre, 8pt clear of
+            // the d-pad (or the stick's base) and of the face buttons.
+            let lEdge = i.joystick ? f.joyBase.maxX : f.dpad.maxX
+            let mid = stage.midX
+            let half = min(mid - lEdge, f.y.minX - mid) - 8
+            if half > 0 { ndsMaxWidth = 2 * half }
+            controls = f
+            return
+        }
+        let pw: CGFloat = i.large ? 84 : 76, ph: CGFloat = i.large ? 40 : 36
+        let abW = btn * 2.2
         let rowL = f.dpad.maxX + 20, rowR = f.a.maxX - abW - 20
         f.select = CGRect(x: rowL, y: base - ph, width: pw, height: ph)
         f.start = CGRect(x: rowR - pw, y: base - ph, width: pw, height: ph)
@@ -227,8 +357,12 @@ struct PlayGeometry: Equatable {
         f.joyRegion = CGRect(x: left, y: top + 10, width: (right - left) / 2, height: base - top - 10)
         f.joyBase = f.dpad
         let btn: CGFloat = i.large ? 92 : 73
-        let abW = btn * 2.2
-        placeAB(&f, in: CGRect(x: right - abW, y: base - dpad, width: abW, height: dpad), button: btn)
+        let abW = btn * (i.nds ? 2.5 : 2.2)
+        if i.nds {
+            placeDiamond(&f, in: CGRect(x: right - abW, y: base - dpad, width: abW, height: dpad), button: btn)
+        } else {
+            placeAB(&f, in: CGRect(x: right - abW, y: base - dpad, width: abW, height: dpad), button: btn)
+        }
         if !i.isGB {
             let sw: CGFloat = i.large ? 170 : 150
             let y = h - (10 + safe.bottom + dpad + 22) - 46
@@ -271,7 +405,9 @@ struct PlayLayout<Stage: View, Bar: View>: View {
     @Environment(\.horizontalSizeClass) var hSize
     // Not the session itself: it changes every frame.
     @State private var isGB = GameSession.shared.isGB
+    @State private var isNDS = GameSession.shared.isNDS
     @State private var game = GameSession.shared.game
+    @ObservedObject private var nds = NdsState.shared
 
     var body: some View {
         // The outer reader sees the safe area; the inner one spans the
@@ -280,6 +416,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
             content(safe: outer.safeAreaInsets)
         }
         .onReceive(GameSession.shared.$isGB) { isGB = $0 }
+        .onReceive(GameSession.shared.$isNDS) { isNDS = $0 }
         .onReceive(GameSession.shared.$game) { game = $0 }
     }
 
@@ -288,21 +425,24 @@ struct PlayLayout<Stage: View, Bar: View>: View {
             let g = PlayGeometry.make(.init(
                 size: geo.size, safe: safe, compactHeight: vSize == .compact,
                 regular: hSize == .regular && vSize == .regular, isGB: isGB,
-                large: settings.largeControls, hidden: model.gamepadHidesTouch))
+                large: settings.largeControls, hidden: model.gamepadHidesTouch,
+                nds: isNDS, ndsBarHide: nds.barHide, joystick: settings.controlStyle == .joystick))
             let origin = geo.frame(in: .global).origin
             ZStack(alignment: .topLeading) {
                 (palette.chromeTransparent ? Color.clear : palette.stage)
                     .frame(width: g.size.width, height: g.size.height)
                 stage
+                    .environment(\.stageContext, g.stageContext)
                     .frame(width: g.stage.width, height: g.stage.height)
                     .offset(x: g.stage.minX, y: g.stage.minY)
                 if !g.strip.isNull {
-                    ControlStrip(rect: g.strip, safeBottom: g.safe.bottom)
+                    ControlStrip(rect: g.strip, safeBottom: g.safe.bottom,
+                                 stripeBase: g.ndsTop ? max(10, g.safe.bottom - 12) + 48 : nil)
                 }
                 if let f = g.controls {
                     TouchControls(frames: f, geometry: g)
                     TouchRouter(frames: f, enabled: !model.menuOpen,
-                                blockedTop: g.mode == .phoneLandscape && barDown ? g.bar.maxY : 0)
+                                blockedTop: g.barFolds && barDown ? g.bar.maxY : 0)
                         .frame(width: g.size.width, height: g.size.height)
                 }
                 barLayer(g)
@@ -321,6 +461,37 @@ struct PlayLayout<Stage: View, Bar: View>: View {
 
     @ViewBuilder
     private func barLayer(_ g: PlayGeometry) -> some View {
+        if g.mode == .portrait && g.barFolds {
+            // A DS game on a phone held upright: the bar waits off the top
+            // and comes down over the top screen (web nds-bar-hide), its
+            // colour running up behind the status area.
+            VStack(spacing: 0) {
+                Group {
+                    if palette.chromeTransparent { palette.bg } else { palette.topbarTop }
+                }
+                .frame(height: g.bar.minY)
+                bar
+                    .padding(.leading, g.safe.leading)
+                    .padding(.trailing, g.safe.trailing)
+                    .frame(width: g.size.width, height: PlayGeometry.barHeight)
+                    .background(
+                        palette.chromeTransparent
+                            ? AnyView(palette.bg)
+                            : AnyView(LinearGradient(colors: [palette.topbarTop, palette.topbarBottom],
+                                                     startPoint: .top, endPoint: .bottom)))
+                    .overlay(Rectangle().fill(palette.frameLine).frame(height: 1), alignment: .bottom)
+            }
+            .frame(width: g.size.width)
+            .shadow(color: .black.opacity(barDown ? 0.55 : 0), radius: 13, y: 10)
+            .offset(y: barDown ? 0 : -(g.bar.maxY + 30))
+            .animation(.easeOut(duration: 0.2), value: barDown)
+        } else {
+            barLayerStandard(g)
+        }
+    }
+
+    @ViewBuilder
+    private func barLayerStandard(_ g: PlayGeometry) -> some View {
         switch g.mode {
         case .phoneLandscape:
             // Off the top until a tap on the picture (or the menu) brings
@@ -360,7 +531,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
 
     private func publish(_ g: PlayGeometry, origin: CGPoint) {
         PadGeometry.shared.rects = (g.controls?.drawn(joystick: settings.controlStyle == .joystick) ?? []).map { $0.offsetBy(dx: origin.x, dy: origin.y) }
-        if g.mode == .phoneLandscape && GameSession.shared.game != nil { BarTapHint.showIfNeeded() }
+        if g.barFolds && GameSession.shared.game != nil { BarTapHint.showIfNeeded() }
         if g.controls == nil { TouchRouterView.current?.releaseAll() }
     }
 }
@@ -372,6 +543,9 @@ struct ControlStrip: View {
     @Environment(\.palette) var palette
     let rect: CGRect
     let safeBottom: CGFloat
+    /// DS upright: the pinstripes run through the bottom of the clusters,
+    /// which sit on the strip's bottom padding (this far up, then 12pt more).
+    var stripeBase: CGFloat?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -380,8 +554,13 @@ struct ControlStrip: View {
                                startPoint: .top, endPoint: .bottom)
             }
             if let stripe = palette.panelStripe {
-                stripe.frame(height: 4).offset(y: rect.height - safeBottom - 116)
-                stripe.frame(height: 4).offset(y: rect.height - safeBottom - 104)
+                if let b = stripeBase {
+                    stripe.frame(height: 4).offset(y: rect.height - b)
+                    stripe.frame(height: 4).offset(y: rect.height - b + 12)
+                } else {
+                    stripe.frame(height: 4).offset(y: rect.height - safeBottom - 116)
+                    stripe.frame(height: 4).offset(y: rect.height - safeBottom - 104)
+                }
             }
             palette.frameLine.frame(height: 1)
         }

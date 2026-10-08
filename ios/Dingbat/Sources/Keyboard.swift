@@ -9,11 +9,17 @@ import SwiftUI
 final class Keyboard: ObservableObject {
     static let shared = Keyboard()
 
-    static let inputNames = ["Up", "Down", "Left", "Right", "A", "B", "Select", "Start", "L", "R"]
+    /// The ten inputs, then the DS's X and Y (web INPUT_NAMES): those two
+    /// count only while a DS game runs (web boundInput), so elsewhere their
+    /// keys stay free (I is the input-display shortcut).
+    static let inputNames = ["Up", "Down", "Left", "Right", "A", "B", "Select", "Start", "L", "R",
+                             "X (DS)", "Y (DS)"]
     static let presetDefault = [0x40000052, 0x40000051, 0x40000050, 0x4000004F,  // arrows
-                                122, 120, 8, 13, 97, 115]                        // Z X Backspace Return A S
+                                122, 120, 8, 13, 97, 115,                        // Z X Backspace Return A S
+                                100, 99]                                         // D C
     static let presetHomeRow = [101, 100, 115, 102,                              // E D S F
-                                107, 106, 108, 59, 119, 114]                     // K J L ; W R
+                                107, 106, 108, 59, 119, 114,                     // K J L ; W R
+                                105, 117]                                        // I U
 
     @Published private(set) var bindings: [Int]
     /// The binding waiting for its key (Settings), or nil.
@@ -27,7 +33,14 @@ final class Keyboard: ObservableObject {
     private init() {
         let stored = UserDefaults.standard.array(forKey: "keybindings") as? [Int]
         // Escape is never a binding: it would stop closing every sheet.
-        bindings = stored?.count == 10 ? stored!.map { $0 == 27 ? -1 : $0 } : Self.presetDefault
+        var b = stored.map { $0.map { $0 == 27 ? -1 : $0 } } ?? Self.presetDefault
+        if b.count == 10 {
+            // A ten-key profile from before the DS gains X/Y: its preset's
+            // keys, or none where the profile already uses them (web).
+            let preset = Array(b) == Array(Self.presetHomeRow.prefix(10)) ? Self.presetHomeRow : Self.presetDefault
+            b += preset.suffix(2).map { b.contains($0) ? -1 : $0 }
+        }
+        bindings = b.count == 12 ? b : Self.presetDefault
     }
 
     func start() {
@@ -156,6 +169,7 @@ final class Keyboard: ObservableObject {
             if let id = held.removeValue(forKey: sdl) { session.setInput(id, false, source: "key") }
             if sdl == 9 && ffHeld { ffHeld = false; session.holdFastForward(false) }
             if sdl == 96 && rewindHeld { rewindHeld = false; session.setRewinding(false) }
+            if sdl == 104 { NdsState.shared.blow("key", false) }
             return
         }
         if let i = capturing {
@@ -165,7 +179,8 @@ final class Keyboard: ObservableObject {
         // Typing in a field is the field's.
         if UIResponder.textInputActive { return }
         if inGame {
-            if let id = bindings.firstIndex(of: sdl) {  // game keys always win
+            // Game keys always win; X/Y only while a DS game runs.
+            if let id = bindings.firstIndex(of: sdl), id < 10 || session.isNDS {
                 held[sdl] = id
                 session.setInput(id, true, source: "key")
                 return
@@ -190,6 +205,19 @@ final class Keyboard: ObservableObject {
     private func shortcut(_ sdl: Int, shift: Bool) {
         let linked = NetLink.shared.linked
         let s = Settings.shared
+        // A DS game's (web ndsShortcut): V the next arrangement, B swap, O
+        // the next turn, N the lid, H held for Blow.
+        if session.isNDS && !shift {
+            let nds = NdsState.shared
+            switch sdl {
+            case 118: nds.nextArrangement(); return
+            case 98: nds.swapScreens(); return
+            case 111: nds.nextTurn(); return
+            case 110: nds.setLid(!nds.lidClosed); return
+            case 104: nds.blow("key", true); return
+            default: break
+            }
+        }
         switch sdl {
         case 27:
             model.openMenu(paused: true)
@@ -261,6 +289,7 @@ final class Keyboard: ObservableObject {
         held = [:]
         if ffHeld { ffHeld = false; session.holdFastForward(false) }
         if rewindHeld { rewindHeld = false; session.setRewinding(false) }
+        NdsState.shared.blow("key", false)
     }
 }
 

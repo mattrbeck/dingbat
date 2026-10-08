@@ -31,6 +31,9 @@ final class GameSession: NSObject, ObservableObject {
     @Published private(set) var fpsUnusual = false
     @Published private(set) var sleeping = false
     @Published private(set) var isGB = false
+    /// A Nintendo DS game: its own core, screens, controls and gates (web
+    /// body.nds-mode).
+    @Published private(set) var isNDS = false
     @Published private(set) var mp2kAvailable = false
     @Published private(set) var hleActive = false
     /// Settings › Audio's HLE switched off for this game only (the top-bar
@@ -101,7 +104,7 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     var biosPath: String? {
-        guard let g = game else { return nil }
+        guard let g = game, !g.isNDS else { return nil }
         let url = g.isGBA ? RomLibrary.gbaBiosURL : RomLibrary.gbcBootromURL
         return FileManager.default.fileExists(atPath: url.path) ? url.path : nil
     }
@@ -122,7 +125,10 @@ final class GameSession: NSObject, ObservableObject {
         endTwoPlayer()
         dingbat_init()
         let bios = entry.isGBA ? RomLibrary.gbaBiosURL : RomLibrary.gbcBootromURL
-        let biosArg = FileManager.default.fileExists(atPath: bios.path) ? bios.path : nil
+        // A DS game boots on dingbat_set_nds_bios's dumps (or the HLE BIOS
+        // and the built-in firmware) and this device's flash.
+        if entry.isNDS { NdsState.prepareLoad() }
+        let biosArg = !entry.isNDS && FileManager.default.fileExists(atPath: bios.path) ? bios.path : nil
         let path = RomLibrary.shared.prepareCoreLink(entry)?.path ?? entry.url.path
         let rc = biosArg.map { dingbat_load_rom(path, $0) } ?? dingbat_load_rom(path, nil)
         guard rc == 0 else {
@@ -131,6 +137,8 @@ final class GameSession: NSObject, ObservableObject {
             dingbat_unload(1)
             stopLink()
             game = nil
+            isNDS = false
+            NdsState.shared.left()
             paused = false
             clearInputs()
             UIApplication.shared.isIdleTimerDisabled = false
@@ -139,6 +147,9 @@ final class GameSession: NSObject, ObservableObject {
         }
         game = entry
         isGB = dingbat_is_gb() != 0
+        isNDS = dingbat_is_nds() != 0
+        NdsState.shared.left()
+        if isNDS { NdsState.shared.booted() }
         hleSessionOff = false
         applyHle()
         sessionMoved = true
@@ -171,7 +182,10 @@ final class GameSession: NSObject, ObservableObject {
             }
         }
         paused = false
+        if isNDS { NdsState.shared.syncPower() }
         AudioOutput.shared.start()
+        // The ring's rate moves with the core (DS 32728 Hz, else 32768).
+        AudioOutput.shared.syncRate()
         AudioOutput.shared.setAnalogFilter(Settings.shared.analogFilter && entry.isGBA)
         AudioOutput.shared.refreshSession()
         startLink()
@@ -200,6 +214,8 @@ final class GameSession: NSObject, ObservableObject {
         stopLink()
         dingbat_unload(1)
         game = nil
+        isNDS = false
+        NdsState.shared.left()
         paused = false
         speed = .normal
         rewinding = false
@@ -220,6 +236,8 @@ final class GameSession: NSObject, ObservableObject {
         stopLink()
         dingbat_unload(0)
         game = nil
+        isNDS = false
+        NdsState.shared.left()
         paused = false
         speed = .normal
         rewinding = false
@@ -397,19 +415,23 @@ final class GameSession: NSObject, ObservableObject {
             let budget = max(0.004, link.targetTimestamp - CACurrentMediaTime() - 0.003)
             let t0 = CACurrentMediaTime()
             repeat {
+                if isNDS { NdsState.shared.blowFrame() }
                 dingbat_run_frame()
                 ran += 1
             } while CACurrentMediaTime() - t0 < budget && ran < 40
         case .normal, .double, .slow:
-            let ahead = speed == .normal ? Settings.shared.runahead : 0
+            // Run-ahead is the GB/GBA cores' (a DS frame is a plain one).
+            let ahead = speed == .normal && !isNDS ? Settings.shared.runahead : 0
             let owed = framesOwed(link, dt: dt)
             for _ in 0..<owed {
+                if isNDS { NdsState.shared.blowFrame() }
                 if twoPlayer { dingbat_link_tick() }
                 else if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
                 ran += 1
             }
             keepAudioAlive()
         }
+        if ran > 0 && isNDS && NdsState.shared.syncPower() { ndsPoweredOff() }
         if ran > 0 {
             sessionMoved = true
             playTime += dt
@@ -452,8 +474,9 @@ final class GameSession: NSObject, ObservableObject {
         let period = link.targetTimestamp - link.timestamp
         let hz = period > 0 ? 1 / period : 60
         let k = (hz / 60).rounded()
-        // A display at a multiple of 60 Hz: one frame per refresh, exactly.
-        let base = k >= 1 && abs(hz / 60 - k) < 0.03 ? 60.0 : 59.7275
+        // A display at a multiple of 60 Hz: one frame per refresh, exactly
+        // (a DS's 59.83 too: the audio reader absorbs the 0.29%).
+        let base = k >= 1 && abs(hz / 60 - k) < 0.03 ? 60.0 : isNDS ? NdsUtil.fps : 59.7275
         let mult = speed == .double ? 2.0 : speed == .slow ? 0.5 : 1.0
         let cap = speed == .double ? 8 : 4
         frameDebt += dt * base * mult
@@ -883,7 +906,11 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     func setRewinding(_ r: Bool) {
-        guard game != nil, Settings.shared.rewind, !NetLink.shared.linked, !twoPlayer else { rewinding = false; return }
+        // No rewind ring on the DS core.
+        guard game != nil, Settings.shared.rewind, !isNDS, !NetLink.shared.linked, !twoPlayer else {
+            rewinding = false
+            return
+        }
         if r && paused { setPaused(false) }
         rewinding = r
         if r { dingbat_audio_clear() }
@@ -896,6 +923,7 @@ final class GameSession: NSObject, ObservableObject {
         dingbat_run_frame()
         dingbat_audio_clear()
         sessionMoved = true
+        if isNDS && NdsState.shared.syncPower() { ndsPoweredOff() }
         present()
     }
 
@@ -923,6 +951,11 @@ final class GameSession: NSObject, ObservableObject {
         }
         if ok == 1 {
             sessionMoved = true
+            // A state taken switched off loads off, and one taken running
+            // switches an off console on (the lid stays the app's).
+            if isNDS {
+                if NdsState.shared.syncPower() { ndsPoweredOff() }
+            }
             present()
             return nil
         }
@@ -941,6 +974,7 @@ final class GameSession: NSObject, ObservableObject {
         case 5: return "That save state file is incomplete — the download or copy was cut short. Try getting the file again."
         case 6: return "That save state is damaged and can't be loaded. The game is still running and nothing was changed."
         case 7: return "There's no save state in that slot yet."
+        case 8: return "That save state was made by another version of dingbat's DS core, or with a different BIOS or GBA-slot cart, and can't be loaded here. The game is still running and nothing was changed."
         default:
             let why = String(cString: dingbat_state_error())
             return why.isEmpty ? "That save state couldn't be loaded." : why.prefix(1).uppercased() + why.dropFirst()
@@ -976,6 +1010,10 @@ final class GameSession: NSObject, ObservableObject {
     /// Save to a slot (0 = Quick). Returns false when nothing was written.
     @discardableResult
     func saveState(slot: Int) -> Bool {
+        if isNDS && NdsState.shared.poweredOff {
+            AppModel.shared.toast("The DS is switched off - restart it first")
+            return false
+        }
         guard let g = game, let data = captureState() else {
             AppModel.shared.toast("Couldn't capture the emulator state")
             return false
@@ -1038,6 +1076,7 @@ final class GameSession: NSObject, ObservableObject {
         guard game != nil, !NetLink.shared.holdsCore, !twoPlayer else { return }
         let undo = captureState()
         _ = dingbat_reset()
+        if isNDS { ndsBooted() }
         // A reset builds a fresh core: cheats and the camera's feed go with
         // the old one (the web's reset is a whole loadRom, which restores both).
         if let g = game { CheatStore.restore(for: g) }
@@ -1094,6 +1133,8 @@ final class GameSession: NSObject, ObservableObject {
     /// The library picture: the last screen, a JPEG at 2x native as the
     /// web's (frame:<name>), mirrored on Drive.
     func storeLastFrame() {
+        // A switched-off DS keeps the last picture played (web storeLastFrame).
+        if isNDS && NdsState.shared.poweredOff { return }
         guard let g = game, let jpg = currentImage()?.jpegData(compressionQuality: 0.75) else { return }
         let sig = DriveSync.sig(jpg)
         guard sig != lastFrameSig else { return }
@@ -1108,13 +1149,57 @@ final class GameSession: NSObject, ObservableObject {
     /// scaled down.
     func currentImage(maxWidth: Int? = nil) -> UIImage? {
         guard game != nil else { return nil }
+        // A DS game's picture is its top screen (web ndsTopRgba: the
+        // library, the paused hero, the slot thumbnail).
+        if isNDS, let top = dingbat_nds_top_rgba() {
+            return Self.rgbaImage(top, width: 256, height: 192, maxWidth: maxWidth)
+        }
         return Self.coreImage(maxWidth: maxWidth)
+    }
+
+    // MARK: Nintendo DS
+
+    /// A DS boot in place (Reset, Restart): the lid open, nothing held, the
+    /// power read again.
+    private func ndsBooted() {
+        NdsState.shared.booted()
+        NdsState.shared.syncPower()
+    }
+
+    /// The game switched the DS off (web ndsSyncPower): no sound, the
+    /// battery and flash stored at once, and the session over: its resume
+    /// snapshot goes (a tile starts the game afresh, which is what
+    /// switching on again is), and no picture of the black screens is kept.
+    private func ndsPoweredOff() {
+        dingbat_audio_clear()
+        flushSave()
+        sessionMoved = false
+        if let g = game {
+            for u in [g.sessionURL, g.sessionMetaURL, g.sessionPicURL] { try? FileManager.default.removeItem(at: u) }
+            RomLibrary.shared.pictureGen += 1
+        }
+    }
+
+    /// The power-off layer's Restart: the DS reboots in place on the save
+    /// just stored (web: loadRom in place, no Undo).
+    func ndsRestart() {
+        guard isNDS else { return }
+        _ = dingbat_reset()
+        ndsBooted()
+        sessionMoved = true
+        if paused { setPaused(false) }
+        present()
     }
 
     /// Whatever the core holds (Add pictures boots games it never loads).
     static func coreImage(maxWidth: Int? = nil) -> UIImage? {
         guard let ptr = dingbat_framebuffer_rgba() else { return nil }
-        let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
+        return rgbaImage(ptr, width: Int(dingbat_fb_width()), height: Int(dingbat_fb_height()), maxWidth: maxWidth)
+    }
+
+    /// RGBA8888 (R first) to an image, 2x native (or `maxWidth` wide),
+    /// nearest neighbour.
+    static func rgbaImage(_ ptr: UnsafePointer<UInt32>, width w: Int, height h: Int, maxWidth: Int? = nil) -> UIImage? {
         let data = Data(bytes: UnsafeRawPointer(ptr), count: w * h * 4)
         guard let provider = CGDataProvider(data: data as CFData),
               let cg = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32,

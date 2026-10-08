@@ -6,6 +6,7 @@ extension UTType {
     static var gbaRom: UTType { UTType(importedAs: "com.mattrb.dingbat.gba") }
     static var gbRom: UTType { UTType(importedAs: "com.mattrb.dingbat.gb") }
     static var gbcRom: UTType { UTType(importedAs: "com.mattrb.dingbat.gbc") }
+    static var ndsRom: UTType { UTType(importedAs: "com.mattrb.dingbat.nds") }
 }
 
 /// One game in the library, named as the web names it: the ROM's file name,
@@ -36,15 +37,19 @@ struct RomEntry: Identifiable, Equatable, Hashable {
     /// What the person sees (web displayName).
     var name: String { stem }
     var ext: String { (fileName as NSString).pathExtension.lowercased() }
-    /// web systemOf(): .gba GBA; .gbc/.cgb GBC; anything else GB.
+    /// web systemOf(): .gba GBA; .nds DS; .gbc/.cgb GBC; anything else GB.
     var system: String {
         switch ext {
         case "gba": return "GBA"
+        case "nds": return "DS"
         case "gbc", "cgb": return "GBC"
         default: return "GB"
         }
     }
     var isGBA: Bool { system == "GBA" }
+    /// A Nintendo DS game (web isNdsRomName): its own core, its own screens
+    /// and controls, and nothing of it on Drive.
+    var isNDS: Bool { system == "DS" }
 
     var url: URL { RomLibrary.romsDir.appendingPathComponent(fileName) }
     var dir: URL { RomLibrary.gamesDir.appendingPathComponent(fileName, isDirectory: true) }
@@ -153,7 +158,12 @@ final class RomLibrary: ObservableObject {
     static let gbaBiosURL = biosDir.appendingPathComponent("gba_bios.bin")
     static let gbcBootromURL = biosDir.appendingPathComponent("gbc_bootrom.bin")
 
-    static let romExtensions: Set<String> = ["gba", "gb", "gbc", "cgb", "sgb"]
+    static let romExtensions: Set<String> = ["gba", "gb", "gbc", "cgb", "sgb", "nds"]
+
+    /// web NdsUtil.isNdsName.
+    static func isNdsName(_ name: String) -> Bool {
+        (name as NSString).pathExtension.lowercased() == "nds"
+    }
 
     /// The recency index, newest first. Changed only through `updateRecent`.
     private(set) var recents: [JSObject] = []
@@ -308,8 +318,8 @@ final class RomLibrary: ObservableObject {
         case unsupported, noRomInZip, unreadable(String), declined
         var errorDescription: String? {
             switch self {
-            case .unsupported: return "Unsupported file — pick a .gba, .gb, .gbc or a .zip"
-            case .noRomInZip: return "No .gba, .gb or .gbc file inside that zip"
+            case .unsupported: return "Unsupported file — pick a .gba, .gb, .gbc, .nds or a .zip"
+            case .noRomInZip: return "No .gba, .gb, .gbc or .nds file inside that zip"
             case .unreadable(let m): return m
             case .declined: return nil
             }
@@ -327,6 +337,7 @@ final class RomLibrary: ObservableObject {
     private static let gbLogoPrefix: [UInt8] = [0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b]
 
     static func looksLikeValidRom(_ d: Data, ext: String) -> Bool {
+        if ext == "nds" { return NdsUtil.looksLikeNdsRom(d) }
         let b = [UInt8](d.prefix(0x150))
         func at(_ off: Int, _ ref: [UInt8]) -> Bool {
             off + ref.count <= b.count && ref.indices.allSatisfy { b[off + $0] == ref[$0] }
@@ -350,7 +361,8 @@ final class RomLibrary: ObservableObject {
     @MainActor
     static func confirmSuspect(_ d: Data, name: String, ext: String) async -> Bool {
         if looksLikeValidRom(d, ext: ext) { return true }
-        let system = ext == "gba" ? "GBA" : ext == "gbc" || ext == "cgb" ? "Game Boy Color" : "Game Boy"
+        let system = ext == "gba" ? "GBA" : ext == "nds" ? "Nintendo DS"
+            : ext == "gbc" || ext == "cgb" ? "Game Boy Color" : "Game Boy"
         return await AppModel.shared.askRomWarn(
             "File Check Failed",
             "\"\(name)\" doesn't look like a valid \(system) ROM — it may be corrupt or not a game at all. Load it anyway?")

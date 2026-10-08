@@ -161,6 +161,31 @@ struct DingbatApp: App {
                 }
             }
         }
+        // DS: `-nds-layout auto|stack|side|focus|single` and `-nds-swap`
+        // (saved, as a pick is), `-topbar-open` (the folded bar brought
+        // down, as a tap on the picture does), `-nds-panel` (the Screens
+        // panel), `-nds-lid` (closed), `-nds-touch X,Y[,seconds held]` (the
+        // stylus self-test: the bottom screen's pixel aimed through the
+        // layout and sent through the finger's mapping, `-nds-touch-after S`
+        // seconds in, default 6).
+        if let l = value("-nds-layout").flatMap(NdsUtil.Arrangement.init(rawValue:)) { NdsState.shared.arrangement = l }
+        if args.contains("-nds-swap") { NdsState.shared.swap = true }
+        if let g = value("-nds-gap").flatMap(NdsUtil.Gap.init(rawValue:)) { NdsState.shared.gap = g }
+        if let r = value("-nds-rot").flatMap(Int.init) { NdsState.shared.rot = r }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            if args.contains("-topbar-open") { model.topbarOpen = true }
+            if args.contains("-nds-panel") { NdsState.shared.panelOpen = true }
+            if args.contains("-nds-lid") { NdsState.shared.setLid(true) }
+        }
+        if let t = value("-nds-touch") {
+            let n = t.split(separator: ",").compactMap { Double($0) }
+            let after = value("-nds-touch-after").flatMap(Double.init) ?? 6
+            if n.count >= 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + after) {
+                    NdsStylusView.current?.selfTest(Int(n[0]), Int(n[1]), hold: n.count > 2 ? n[2] : 1)
+                }
+            }
+        }
         if let script = value("-pad") {
             for (i, name) in script.split(separator: " ").enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(i) * 0.6) {
