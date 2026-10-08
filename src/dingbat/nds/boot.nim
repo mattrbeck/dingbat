@@ -210,6 +210,7 @@ proc direct_boot*(n: NDS) =
   # (docs/oracles.md)
   n.gpu.write_powcnt1(0x820F)
   n.powcnt2 = 1
+  n.wifiwaitcnt = 0x30               # the firmware's (GBATEK; the reference's direct boot too)
   n.biosprot = 0x1204
   n.cart.romctrl = 0x2000_0000'u32  # reset released, KEY2 data mode
   # CP15 and CPUs as the BIOS's own hand-off leaves them: on its way to the
@@ -272,6 +273,7 @@ proc firmware_boot*(n: NDS) =
   n.biosprot = 0                     # GBATEK "BIOSPROT": zero on power-up
   n.gpu.write_powcnt1(0)             # Assumed: everything off
   n.powcnt2 = 1                      # GBATEK "POWCNT2": speakers on, wifi off
+  n.wifiwaitcnt = 0                  # Assumed; the firmware sets 0030h
   n.cart.power_on()
   n.cp15.reset()
   n.arm9.vector_base = n.cp15.vector_base()

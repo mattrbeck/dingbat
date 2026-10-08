@@ -423,11 +423,11 @@ proc hle_overhead[B](cpu: ArmCpu[B]; comment, r2: uint32) =
   var c: int64
   when armv5(B):
     case comment
-    of 0x0B: c = 300 + units * (if fill: (if word: 6 else: 7) else: (if word: 8 else: 9))
-    of 0x0C: c = 300 + units * (if fill: 4 else: 5)
-    of 0x09: c = 620
-    of 0x0D: c = 1200
-    of 0x0E: c = 360 + int64(r2) * 54
+    of 0x0B: c = 296 + units * (if fill: 6 else: (if word: 8 else: 7))
+    of 0x0C: c = 296 + units * (if fill: 4 else: 5)
+    of 0x09: c = 616
+    of 0x0D: c = 1196
+    of 0x0E: c = 350 + int64(r2) * 99 div 2
     else: c = 0
     cpu.icycles += c
   else:

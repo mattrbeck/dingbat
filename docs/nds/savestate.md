@@ -126,11 +126,16 @@ run guest code), so the CPU and memory sections cover it.
 The layout hash is fnv1a of `state_layout`: every saved field's name and
 type in walk order, enums with their members and ordinals. A build whose
 walk differs refuses the state (`srkIncompatible`) instead of misreading
-it, whether or not `NDS_PAYLOAD_VERSION` was bumped. There are no
-migrations yet: while the DS core is a prototype, any field change makes
-older DS states unloadable. Once states must survive updates, bump the
-revision on a layout change and read the old layout in a migration, as the
-GB/GBA loaders do.
+it, whether or not `NDS_PAYLOAD_VERSION` was bumped. One kind of change is
+let through: a plain field added since (`ADDED_FIELDS` in savestate.nim,
+newest last, with its type). A state whose layout hash is this build's
+layout without the newest k of them loads with those fields left at the
+loading machine's value, so only a field whose boot value is right at any
+moment belongs there (`wifiwaitcnt`, round 10: games keep the 0030h boot
+leaves). Any other change makes older DS states unloadable; once states
+must survive those too, bump the revision and read the old layout in a
+migration, as the GB/GBA loaders do. nds_savestate_test writes an older
+build's payload (`state_payload_older`) and loads it.
 
 ### Range guards
 

@@ -271,8 +271,55 @@ block arm7_timing:
     check res(7) == 91, "8 STR to main RAM: 1N code + N32 (10) each", $res(7)
     check res(8) == 29, "LDMIA 8 from main RAM: N32 + 7 S32 (2) + 1S + 1I", $res(8)
     check res(9) == 19, "8 MUL (one I each) + loop", $res(9)
+    # code in main RAM: a data access between two opcode fetches makes the
+    # next fetch nonsequential (N32 9 instead of S32 2; bus7.nim
+    # break_fetch7). The reference: 157 / 157 / 49 / 85.
+    check res(16) == 173, "main-RAM code, 8 LDR main RAM: each LDR's next fetch N", $res(16)
+    check res(17) == 165, "main-RAM code, 8 STR main RAM: each STR's next fetch N (2N)", $res(17)
+    check res(18) == 29, "main-RAM code, 8 MOV: sequential fetches S32 2", $res(18)
+    check res(19) == 52, "main-RAM code, a word copy LDR + STR", $res(19)
+    check res(21) == 101, "main-RAM code, 8 LDR WRAM: the fetch after each N", $res(21)
+    # wifi regions by WIFIWAITCNT (GBATEK; the reference measures the same)
+    let wwc = b.read32(0x0220_0000'u32 + 4 * 26)
+    check wwc == 0x30, "WIFIWAITCNT after direct boot = 0030h (the firmware's)", toHex(wwc)
+    check res(22) == 99, "8 LDRH wifi RAM, WS0 N = 10", $res(22)
+    check res(23) == 147, "8 LDR wifi RAM, WS0 N + S = 10 + 6", $res(23)
+    check res(24) == 139, "8 STR wifi RAM, WS0 N + S", $res(24)
+    check res(25) == 67, "8 LDRH WS1, N = 6", $res(25)
+    check res(27) == 163, "WIFIWAITCNT 7: WS0 N = 18", $res(27)
+    check res(28) == 99, "WIFIWAITCNT 7: WS1 N = 10", $res(28)
     echo "  (info: Thumb SUB/BGT pass ", res(1), " cycles, BIOS WaitByLoop pass ", res(13),
          "; GBATEK's table: 4)"
+
+# ---------------------------------------------------------------------------
+# ARM9 load/store times (tests/nds/src/disp_cpu9time, built by
+# tests/nds/tools/build_3d.sh): 256 x the bus cycles of one pass of 8
+# accesses + SUBS/BGT, code from the instruction cache. GBATEK's NDS9/DATA
+# table gives whole load/store times: the access overlaps the opcode's own
+# cycle (arm/cpu.nim single_access, bus9.nim overlap9); docs/nds/accuracy.md.
+
+block arm9_timing:
+  echo "ARM9 timing (disp_cpu9time ROM)"
+  let path = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "3d" / "disp_cpu9time.nds"
+  if not fileExists(path):
+    echo "  (skipped: build it with tests/nds/tools/build_3d.sh disp_cpu9time)"
+  else:
+    let n = load_nds(path)
+    for f in 0 ..< 70: n.run_frame()
+    let b = Arm9Bus(nds: n)
+    proc cell(page, row, col: int): uint32 =
+      # a pass's bus cycles x 256, rounded to whole cycles (the timer
+      # samples can land a cycle apart)
+      (b.read32(0x0230_0100'u32 + uint32(4 * (page * 96 + row * 4 + col))) + 0x80) and not 0xFF'u32
+    check cell(0, 2, 0) == 0x2200, "8 LDR from I/O: 4 bus cycles each (NDS9/DATA N32)", toHex(cell(0, 2, 0))
+    check cell(0, 2, 2) == 0x2200, "8 STR to I/O: 4 each (STR 1S+1N in parallel)", toHex(cell(0, 2, 2))
+    check cell(0, 17, 0) == 0x2600, "8 x (LDR I/O + TST of it): no interlock cycle", toHex(cell(0, 17, 0))
+    check cell(0, 7, 0) == 0x600, "8 LDR from DTCM: 0.5 each (TCM)", toHex(cell(0, 7, 0))
+    check cell(0, 5, 0) == 0x5200, "8 LDR uncached main RAM: 10 each", toHex(cell(0, 5, 0))
+    check cell(0, 10, 0) == 0x2A00, "8 LDR VRAM: 5 each", toHex(cell(0, 10, 0))
+    check cell(1, 14, 0) == 0x7000, "uncached main-RAM code, 8 LDR I/O: codetime + datatime - 2",
+          toHex(cell(1, 14, 0))
+    check cell(1, 2, 0) == 0x200, "SUBS/BGT from the cache: 4 cycles (GBATEK WaitByLoop)", toHex(cell(1, 2, 0))
 
 # ---------------------------------------------------------------------------
 # Power-off (ColecoDS, StellaDS, ... exit through libnds's shutdown: the ARM7

@@ -69,6 +69,7 @@ type
     vcount_write*: int          ## VCOUNT written in lines 202-212, else -1
     postflg9*, postflg7*: uint8
     powcnt2*: uint16
+    wifiwaitcnt*: uint16        ## ARM7 WIFIWAITCNT: wifi WS0/WS1 access times
     biosprot*: uint32
     gpu*: Gpu
     gpu3d*: Gpu3d
@@ -87,6 +88,10 @@ type
     pu_ok*: array[3, uint32]    ## protection unit: last page allowed per
                                 ## fetch / read / write (bus9.nim)
     wait9*, wait7*: int64       ## bus cycles charged to the running instruction
+    ovl9*: int64                ## the ARM9 opcode (by its start cycle) whose own
+                                ## cycle a data access may overlap (bus9.nim)
+    ovlx9*: int64               ## the ARM9 opcode whose fetch went to the bus
+    ovl_top9*: uint32           ## and the region it came from (address top byte)
     last_fetch9*, last_data9*: uint32  ## sequential-access tracking
     last_pc9*: uint32           ## the ARM9's last opcode address (branch check)
     last_fetch7*, last_data7*: uint32
@@ -486,6 +491,7 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.dtlb_dlogged = 0
   n.fetch_paths_off()
   n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
+  n.ovl9 = -1; n.ovlx9 = -1             # no opcode (bus9.nim overlap9)
   if boot == nbFirmware and not force_hle and can_firmware_boot(bios9, bios7, firmware):
     n.firmware_boot()
   else:

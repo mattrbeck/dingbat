@@ -12,7 +12,9 @@
 // same reads by DMA (channel 0, start mode 5 "DS Cartridge Slot", one word
 // per request, repeat, source fixed), first-word column = 0:
 //   D200  200h bytes   DG1  200h with gap1 = 657h   D1K  1000h bytes
-// The card's words go to 0x02200000. Built with build_3d.sh (disp_* ROMs).
+// The card's words go to 0x02200000. From frame 60, page 2 ("P2"): the
+// G1 read with the CPU polling only after a delay (see card_read_late).
+// Built with build_3d.sh (disp_* ROMs).
 #include "t3d.h"
 #include "tm.h"
 
@@ -70,6 +72,33 @@ static void card_read(u32 addr, u32 ctrl, int words) {
   total = clock_now() - t0;
 }
 
+// The same 200h-byte read, but the CPU starts polling only `delay` bus
+// cycles after the ROMCTRL write: does the card wait at each word until it
+// is read (one data latch), or run on into a buffer?
+static void card_read_late(u32 addr, u32 ctrl, u32 delay) {
+  CARDCMD[0] = 0xB7;
+  CARDCMD[1] = addr >> 24;
+  CARDCMD[2] = addr >> 16;
+  CARDCMD[3] = addr >> 8;
+  CARDCMD[4] = addr;
+  CARDCMD[5] = 0;
+  CARDCMD[6] = 0;
+  CARDCMD[7] = 0;
+  u32 t0 = clock_now();
+  ROMCTRL = ctrl;
+  while (clock_now() - t0 < delay) {}
+  int n = 0;
+  first_word = 0;
+  while (ROMCTRL & (1u << 31)) {
+    if (ROMCTRL & (1u << 23)) {
+      (void)CARDDATA;
+      if (n == 0) first_word = clock_now() - t0;
+      n++;
+    }
+  }
+  total = clock_now() - t0;
+}
+
 int main(void) {
   t3d_init("disp_cardtime: card read timing");
   icache_on();
@@ -107,6 +136,19 @@ int main(void) {
     card_dma(0x8000 + 0x200 * i, dctrl[i]);
     t3d_print(0, 18 + i, dnames[i]);
     t3d_hex(16, 18 + i, total, 6);
+  }
+  t3d_print(0, 22, "DONE");
+  for (int f = 0; f < 60; f++) wait_vblank();
+  // page 2 (frame 60 on): late polling, gap1 = 657h, 200h bytes; columns:
+  // the delay, the first word's time, the end
+  for (int r = 0; r < 24; r++) t3d_print(0, r, "                                ");
+  t3d_print(0, 0, "P2 LATE POLL G1");
+  static const u32 delays[6] = {0, 0x1000, 0x2000, 0x3000, 0x4000, 0x8000};
+  for (int i = 0; i < 6; i++) {
+    card_read_late(0x8000 + 0x200 * i, ctrl[3], delays[i]);
+    t3d_hex(0, 2 + i, delays[i], 6);
+    t3d_hex(8, 2 + i, first_word, 6);
+    t3d_hex(16, 2 + i, total, 6);
   }
   t3d_print(0, 22, "DONE");
   while (1) wait_vblank();
