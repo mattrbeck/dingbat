@@ -62,6 +62,8 @@
 	<string>A Game Boy Camera cart can see through your camera.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>The link cable connects straight to a friend on the same Wi-Fi.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A DS game can listen through your microphone, only while you turn it on in its Screens panel.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Tilt carts play by tilting your device.</string>
 	<key>UIFileSharingEnabled</key>
@@ -191,6 +193,7 @@
 					<string>sps</string>
 					<string>xps</string>
 					<string>gsv</string>
+					<string>dsv</string>
 				</array>
 			</dict>
 		</dict>

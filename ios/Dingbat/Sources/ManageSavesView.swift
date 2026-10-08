@@ -92,7 +92,10 @@ struct ManageSavesView: View {
     private func importSave(_ data: Data, fileName: String) {
         guard let g = session.game else { return }
         let unwrapped: SaveImport.Result
-        switch SaveImport.unwrap(data, fileName: fileName) {
+        // A DS save is stored whole: no GBA container sniffing (the core
+        // strips a .dsv footer and fits the size to the card's chip).
+        switch g.isNDS ? .success(SaveImport.Result(bytes: data, format: nil, title: nil, warning: nil))
+                       : SaveImport.unwrap(data, fileName: fileName) {
         case .failure(.bad(let why)):
             notice = why
             return

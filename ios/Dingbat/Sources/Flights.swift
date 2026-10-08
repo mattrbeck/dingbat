@@ -105,7 +105,9 @@ final class Flights: ObservableObject {
     /// frame it lands on; otherwise it powers on from black.
     func launching(_ entry: RomEntry, resumed: Bool) {
         defer { source = nil }
-        guard Self.canFly, let s = source, s.entry == entry, Date().timeIntervalSince(s.at) < 60,
+        // A DS game's picture is its top screen and its stage two screens:
+        // no frame to fly between them (the screens just come on).
+        guard Self.canFly, !entry.isNDS, let s = source, s.entry == entry, Date().timeIntervalSince(s.at) < 60,
               let from = rects[s.key] else { return }
         let hero = s.key == "hero"
         // What the picture shows now: the hero's preferring the session's
@@ -136,7 +138,7 @@ final class Flights: ObservableObject {
     /// gets there.
     func resuming(_ entry: RomEntry) {
         defer { source = nil }
-        guard Self.canFly, let s = source, s.entry == entry, let from = rects[s.key],
+        guard Self.canFly, !entry.isNDS, let s = source, s.entry == entry, let from = rects[s.key],
               let img = GameSession.shared.currentImage() else { return }
         arm(.screen, Flight(image: img, mode: .fit, from: from, to: .zero,
                             fromRadius: s.key == "hero" ? 14 : 0, toRadius: 0))
@@ -149,7 +151,7 @@ final class Flights: ObservableObject {
         cancel()
         source = nil
         let s = GameSession.shared
-        guard Self.canFly, !s.twoPlayer, !NetLink.shared.linked,
+        guard Self.canFly, !s.twoPlayer, !s.isNDS, !NetLink.shared.linked,
               let from = rects["screen"], let img = s.currentImage() else { return }
         beginArrival(lasting: 0.9)
         arm(.hero, Flight(image: img, mode: .fit, from: from, to: .zero, fromRadius: 0, toRadius: 14))

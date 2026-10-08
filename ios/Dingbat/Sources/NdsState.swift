@@ -128,6 +128,7 @@ final class NdsState: ObservableObject {
         lidClosed = false
         blowers = []
         panelOpen = false
+        NdsMic.shared.stop()
         if poweredOff { poweredOff = false }
         NdsStylusView.current?.lift()
     }
@@ -141,6 +142,7 @@ final class NdsState: ObservableObject {
         poweredOff = off
         if off {
             blowers = []
+            NdsMic.shared.stop()
             NdsStylusView.current?.lift()
         }
         return off

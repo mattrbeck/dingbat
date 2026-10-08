@@ -165,14 +165,19 @@ final class AudioOutput {
         let s = Settings.shared
         let session = GameSession.shared
         let audible = session.game != nil && !session.paused && !s.muted && s.volume > 0
-        let want: AVAudioSession.Category = (s.playInSilent && audible) ? .playback : .ambient
+        // A DS game's microphone on: play-and-record while it listens (out
+        // of the speaker, not the earpiece), the usual choice after.
+        let mic = NdsMic.shared.on
+        let want: AVAudioSession.Category = mic ? .playAndRecord : (s.playInSilent && audible) ? .playback : .ambient
         guard want != category else {
             restartIfNeeded()
             return
         }
         category = want
         let av = AVAudioSession.sharedInstance()
-        try? av.setCategory(want, mode: .default, options: want == .ambient ? [.mixWithOthers] : [])
+        let options: AVAudioSession.CategoryOptions = mic ? [.defaultToSpeaker, .allowBluetoothA2DP]
+            : want == .ambient ? [.mixWithOthers] : []
+        try? av.setCategory(want, mode: .default, options: options)
         // Small render quanta (~6 ms, not the default ~23 ms): the ring is
         // drained in sips, so its depth, and the rate control on it, stay
         // steady.

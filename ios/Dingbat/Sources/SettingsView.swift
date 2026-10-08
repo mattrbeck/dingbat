@@ -382,8 +382,13 @@ private struct KeyboardBlock: View {
             ("Load state", "F8"),
             ("Screenshot", "F9"),
             ("Menu, paused", "Escape"),
+            ("DS: next screen arrangement", "V"),
+            ("DS: swap the screens", "B"),
+            ("DS: turn the screens", "O"),
+            ("DS: close / open the lid", "N"),
+            ("DS: blow (hold)", "H"),
         ])
-        SheetHint("If a game key and a shortcut share a key, the game wins.")
+        SheetHint("If a game key and a shortcut share a key, the game wins. X (DS) and Y (DS) count only while a DS game runs.")
     }
 }
 

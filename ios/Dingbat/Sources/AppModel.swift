@@ -375,7 +375,7 @@ final class AppModel: ObservableObject {
     @MainActor
     func openIncoming(_ url: URL) async {
         let ext = url.pathExtension.lowercased()
-        let saveExts: Set<String> = ["sav", "srm", "sps", "xps", "gsv"]
+        let saveExts: Set<String> = ["sav", "srm", "sps", "xps", "gsv", "dsv"]
         if saveExts.contains(ext) || ext == "state" {
             let kind = ext == "state" ? "save state" : "save file"
             if sessionBusy {

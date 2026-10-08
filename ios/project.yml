@@ -36,6 +36,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSCameraUsageDescription: A Game Boy Camera cart can see through your camera.
+        NSMicrophoneUsageDescription: A DS game can listen through your microphone, only while you turn it on in its Screens panel.
         NSMotionUsageDescription: Tilt carts play by tilting your device.
         NSLocalNetworkUsageDescription: The link cable connects straight to a friend on the same Wi-Fi.
         ITSAppUsesNonExemptEncryption: false
@@ -73,7 +74,7 @@ targets:
             UTTypeDescription: Game save
             UTTypeConformsTo: [public.data]
             UTTypeTagSpecification:
-              public.filename-extension: [sav, srm, sps, xps, gsv]
+              public.filename-extension: [sav, srm, sps, xps, gsv, dsv]
           - UTTypeIdentifier: com.mattrb.dingbat.state
             UTTypeDescription: dingbat save state
             UTTypeConformsTo: [public.data]

@@ -85,6 +85,7 @@ struct NdsBarButtons: View {
 /// A tap outside closes it.
 struct NdsPanel: View {
     @ObservedObject private var nds = NdsState.shared
+    @ObservedObject private var mic = NdsMic.shared
     @Environment(\.palette) var palette
     @Environment(\.horizontalSizeClass) var hSize
     @GestureState private var blowHeld = false
@@ -121,6 +122,7 @@ struct NdsPanel: View {
                         .buttonStyle(SheetButtonStyle())
                     PadButton(nds.lidClosed ? "Open the lid" : "Close the lid") { nds.setLid(!nds.lidClosed) }
                         .buttonStyle(SheetButtonStyle(kind: nds.lidClosed ? .primary : .normal))
+                    micButton
                     blowButton
                 }
                 if UIDevice.current.userInterfaceIdiom == .phone {
@@ -160,6 +162,34 @@ struct NdsPanel: View {
                 .foregroundColor(palette.textDim)
             content()
         }
+    }
+
+    /// The live microphone, a toggle; its fill is the level (web
+    /// [data-nds-action="mic"]).
+    private var micButton: some View {
+        Button { mic.toggle() } label: {
+            Text("Microphone")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(mic.on ? palette.accent : palette.text)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 32)
+                .background(
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 8).fill(palette.surface3)
+                            if mic.on {
+                                Rectangle().fill(palette.accent.opacity(0.2))
+                                    .frame(width: g.size.width * mic.level)
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    })
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .stroke(mic.on ? palette.accent.opacity(0.55) : palette.border2, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Microphone")
+        .accessibilityValue(mic.on ? "On" : "Off")
     }
 
     /// Blow, held: noise into the microphone while the finger stays down
