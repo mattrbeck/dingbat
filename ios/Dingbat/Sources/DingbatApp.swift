@@ -10,6 +10,8 @@ struct DingbatApp: App {
     init() {
         // Before anything opens a game: a run that ended unseen is counted.
         CrashWatch.noteCrashedRun()
+        // Before the first frame: the home page starts ready to rise in.
+        _ = LaunchIntro.shared
         dingbat_init()
         Settings.shared.apply()
         Peripherals.shared.install()
@@ -214,6 +216,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
             FlightOverlay()
+            LaunchIntroOverlay()
             ToastStack()
                 .sheet(isPresented: Binding(get: { model.tombstonePrompt != nil },
                                             set: { if !$0 && model.tombstonePrompt != nil { model.answerTombstones(restore: false) } })) {

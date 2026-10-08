@@ -86,6 +86,12 @@ the same frame).
   A game frame flies at its own shape on black, so a Game Boy picture in a
   3:2 tile grows into its 10:9 screen instead of stretching. Reduce Motion
   turns them off.
+- **The opening.** The launch screen is the logo on the home screen's
+  colour; the app's first frame is an exact copy of it, and the bat then
+  flies up to its place above the library, flapping one full beat and a
+  smaller settling one (the logo-flap strip, 24 fps), as the colour lifts
+  and the page rises in under it. The web has no launch screen. Reduce
+  Motion skips it; so do scripted launches (`-autoplay`, `-sheet`, ...).
 - **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.
