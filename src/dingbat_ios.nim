@@ -13,6 +13,13 @@
 # Every function here must be called from one thread (the shell's main thread
 # via CADisplayLink); only the plain-C dingbat_audio_* functions are safe from
 # the CoreAudio render thread.
+#
+# Nintendo DS games run on the DS core (dingbat/nds, the web's
+# dingbat_nds_wasm.nim is its other front end), behind the same calls: one
+# 256x384 picture (top screen over bottom), the same audio ring at the DS's
+# own rate, the same states and battery files. "Nintendo DS" below has the
+# DS-only parts; everything the DS core lacks (rewind, clips, cheats,
+# run-ahead, link, SGB and the cart peripherals) is a no-op or a refusal.
 
 import std/[os, strutils, math]
 import zippy  # clip anchors and their thumbnails are stored deflated
@@ -23,6 +30,8 @@ import dingbat/common/cheats
 import dingbat/common/lcd_response
 import dingbat/common/rom_exts
 import dingbat/common/scheduler
+import dingbat/common/atomicfile
+import dingbat/common/timestretch
 import dingbat/gba/gba
 import dingbat/gba/link as gbalink
 import dingbat/gba/rollback as gbarb
@@ -30,6 +39,9 @@ import dingbat/gb/gb
 import dingbat/gb/link as gblink
 import dingbat/gb/rollback as gbrb
 import dingbat/gb/printer
+import dingbat/nds/nds except Input  # the DS core's Input object, not ours
+import dingbat/nds/savestate
+import dingbat/nds/io/backup
 
 {.compile: "dingbat_ios_audio.c".}
 
@@ -37,12 +49,16 @@ const GBA_W = 240
 const GBA_H = 160
 const GB_W  = 160
 const GB_H  = 144
+const NDS_W = 256                        # the composite: top screen over bottom
+const NDS_SCREEN_H = 192
+const NDS_H = 2 * NDS_SCREEN_H
 
-type EmuKind = enum ekNone, ekGBA, ekGB
+type EmuKind = enum ekNone, ekGBA, ekGB, ekNDS
 
 var stateKind: EmuKind = ekNone
 var stateGba:  GBA     = nil
 var stateGb:   GB      = nil
+var stateNds:  NDS     = nil
 var romPath:   string  = ""
 var biosPath:  string  = ""
 var statePrinter: GbPrinter = nil      # always attached on a GB core
@@ -180,6 +196,16 @@ var lcdOn = false
 var lcdResp: LcdResponse
 var gamePtr: pointer = nil
 
+# The DS's two screens as one picture, top over bottom, copied out of the
+# core once per presented frame so the shell uploads one 256x384 texture.
+var ndsComposite: seq[uint16] = @[]
+
+proc nds_compose() =
+  if ndsComposite.len != NDS_W * NDS_H: ndsComposite.setLen(NDS_W * NDS_H)
+  const SCREEN = NDS_W * NDS_SCREEN_H
+  copyMem(addr ndsComposite[0], addr stateNds.gpu.top[0], SCREEN * 2)
+  copyMem(addr ndsComposite[SCREEN], addr stateNds.gpu.bottom[0], SCREEN * 2)
+
 proc sync_lcd_panel() =
   let gb = stateKind == ekGB and stateGb != nil
   lcdResp.set_panel(lcdOn.resolve(
@@ -196,12 +222,24 @@ proc live_fb(): ptr UncheckedArray[uint16] =
   case stateKind
   of ekGBA: cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0])
   of ekGB:  cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0])
+  of ekNDS:
+    if ndsComposite.len == 0: nil
+    else: cast[ptr UncheckedArray[uint16]](addr ndsComposite[0])
   of ekNone: nil
 
 proc game_pixels(): int =
-  if stateKind == ekGB: GB_W * GB_H else: GBA_W * GBA_H
+  case stateKind
+  of ekGB: GB_W * GB_H
+  of ekNDS: NDS_W * NDS_H
+  else: GBA_W * GBA_H
 
 proc present_live() =
+  if stateKind == ekNDS:
+    # No LCD response model for the DS's panels (the web has none either):
+    # the composite is the picture.
+    nds_compose()
+    gamePtr = addr ndsComposite[0]
+    return
   let fb = live_fb()
   if fb != nil: prepare_game_frame(fb, game_pixels())
 
@@ -211,7 +249,7 @@ proc apply_channel_mutes() =
   case stateKind
   of ekGBA: mask(stateGba.apu, 6)
   of ekGB:  mask(stateGb.apu, 4)
-  of ekNone: discard
+  of ekNDS, ekNone: discard  # the DS's 16 voices have no output mask
 
 proc apply_audio() =
   ## Every output-side option onto the live core; called after each build.
@@ -229,7 +267,7 @@ proc apply_audio() =
     stateGb.apu.turbo = optTurbo
     stateGb.apu.set_pitch_correct_ff(optPitchCorrect)
     stateGb.apu.sync = not optFastForward
-  of ekNone: discard
+  of ekNDS, ekNone: discard  # the DS's output path reads the options per frame
   # The friend's core: silent, and nothing of it reaches the audio ring.
   if rbGba != nil:
     let rc = rbGba.link.cores[1 - rbLocal]
@@ -247,6 +285,274 @@ proc apply_audio() =
     lkGb.cores[1].apu.audio_dev = 0
   apply_channel_mutes()
 
+# --- Nintendo DS ---
+# The DS-only half of the API (the web's dingbat_nds_wasm.nim + index.js
+# "Nintendo DS", docs/nds/web.md): boot on optional BIOS/firmware dumps, the
+# battery file beside the ROM, the console's firmware flash kept per device,
+# the lid, and the sound queued into the same ring as the GB/GBA APUs'.
+
+var ndsBios9Path, ndsBios7Path, ndsFirmwarePath: string  # "" = HLE / synthesized
+var ndsFlashPath = ""            # where the console's flash is kept ("" = nowhere)
+var ndsBios9, ndsBios7: seq[uint8]   # what the running game booted on (a reset reuses them)
+var ndsFwBase = ""               # the firmware base the running core's flash was written on
+var ndsSavePath = ""
+var ndsLidClosed = false
+
+proc read_bytes(path: string): seq[uint8] =
+  ## A file's bytes straight into a seq (a 128 MB ROM read once, not via a
+  ## string copy); empty for "" or a missing file.
+  if path.len == 0 or not fileExists(path): return @[]
+  var f: File
+  if not open(f, path, fmRead): return @[]
+  try:
+    let n = int(getFileSize(f))
+    result = newSeqUninit[uint8](n)
+    if n > 0 and readBuffer(f, addr result[0], n) != n: result = @[]
+  finally:
+    close(f)
+
+proc to_str(b: openArray[uint8]): string =
+  result = newString(b.len)
+  if b.len > 0: copyMem(addr result[0], unsafeAddr b[0], b.len)
+
+proc looks_like_nds_rom(head: openArray[uint8]): bool =
+  ## GBATEK's header checks, as the web's NdsUtil.looksLikeNdsRom: the logo's
+  ## CRC CF56h at 15Ch, or the header CRC16 at 15Eh over 000h..15Dh.
+  if head.len < 0x200: return false
+  let logo = uint16(head[0x15C]) or (uint16(head[0x15D]) shl 8)
+  if logo == 0xCF56'u16: return true
+  let crc = uint16(head[0x15E]) or (uint16(head[0x15F]) shl 8)
+  crc == crc16(head.toOpenArray(0, 0x15D))
+
+proc is_nds_file(path: string): bool =
+  ## A DS game: `.nds`, or a file of another name (not a GB/GBA one) whose
+  ## header passes the DS checks.
+  let ext = path.splitFile().ext.toLowerAscii()
+  if ext == ".nds": return true
+  if ext in ROM_EXTS or not fileExists(path): return false
+  var f: File
+  if not open(f, path, fmRead): return false
+  var head = newSeq[uint8](0x200)
+  try:
+    if readBuffer(f, addr head[0], 0x200) != 0x200: return false
+  finally:
+    close(f)
+  looks_like_nds_rom(head)
+
+# The firmware flash (docs/nds/web.md "Firmware settings"). What a game or
+# the DS menu writes to it is one console's, shared by every DS game, and
+# kept with the firmware base it was written on: "built-in" or the user's
+# dump's signature (the web's saveSignature: fnv1a32 ":" length). The next
+# boot gets it only on that base: over a dump, the written image whole; on
+# the built-in firmware, only its user area (Wi-Fi connections and both
+# user-settings copies) laid over this build's synth_firmware, so a later
+# fix to the built-in header or wifi calibration still reaches it.
+
+const NDS_FW_BUILTIN = "built-in"
+const NDS_FLASH_MAGIC = "DGBNDSFW"
+  ## The flash file's trailer: base bytes, base length (u32 LE), this magic.
+
+proc fw_base_of(dump: openArray[uint8]): string =
+  if dump.len == 0: return NDS_FW_BUILTIN
+  var h = 0x811c9dc5'u32
+  for b in dump: h = (h xor uint32(b)) * 0x01000193'u32
+  $h & ":" & $dump.len
+
+proc fw_user_area(img: openArray[uint8]): (int, int) =
+  ## [020h]*8 - 400h to + 200h: the three access points and both user
+  ## settings copies (NdsUtil.fwUserArea; 3FE00h when the header says
+  ## nothing usable).
+  var u = if img.len >= 0x22: (int(img[0x20]) or (int(img[0x21]) shl 8)) * 8 else: 0
+  if u <= 0 or u + 0x200 > img.len: u = 0x3FE00
+  (max(0, u - 0x400), u + 0x200)
+
+proc fw_overlay_user(base, written: seq[uint8]): seq[uint8] =
+  ## `base` with `written`'s user area; empty when the two place it apart.
+  let (s, e) = fw_user_area(base)
+  let (ws, we) = fw_user_area(written)
+  if s != ws or e != we or written.len < e or base.len < e: return @[]
+  result = base
+  copyMem(addr result[s], unsafeAddr written[s], e - s)
+
+proc read_flash_record(path: string): tuple[data: seq[uint8]; base: string] =
+  let raw = read_bytes(path)
+  let m = NDS_FLASH_MAGIC.len
+  if raw.len < m + 4: return
+  if to_str(raw.toOpenArray(raw.len - m, raw.len - 1)) != NDS_FLASH_MAGIC: return
+  let lp = raw.len - m - 4
+  let blen = int(raw[lp]) or (int(raw[lp + 1]) shl 8) or (int(raw[lp + 2]) shl 16) or
+             (int(raw[lp + 3]) shl 24)
+  if blen < 0 or blen > lp: return
+  result.base = to_str(raw.toOpenArray(lp - blen, lp - 1))
+  result.data = raw[0 ..< lp - blen]
+
+proc write_flash_record(path: string; data: openArray[uint8]; base: string) =
+  var s = to_str(data)
+  s.add base
+  let n = uint32(base.len)
+  for i in 0 ..< 4: s.add char((n shr (8 * i)) and 0xFF)
+  s.add NDS_FLASH_MAGIC
+  write_file_atomic(path, s)
+
+proc nds_firmware_for(dump: seq[uint8]; base: string): seq[uint8] =
+  ## The firmware the next boot gets: the written record on this base, else
+  ## the dump, else empty (the core synthesizes one).
+  let rec = read_flash_record(ndsFlashPath)
+  if rec.base != base or rec.data.len == 0: return dump
+  if dump.len > 0: return rec.data
+  let laid = fw_overlay_user(synth_firmware(), rec.data)
+  if laid.len > 0: laid else: rec.data
+
+proc nds_flush() =
+  ## The battery file when the game wrote the chip, and the flash when a
+  ## game wrote it (and there is somewhere to keep it). A write that fails
+  ## stays dirty for the next flush.
+  if stateNds == nil: return
+  let b = stateNds.cart.backup
+  if b.dirty and b.data.len > 0 and ndsSavePath.len > 0:
+    try:
+      write_file_atomic(ndsSavePath, to_str(b.data))
+      b.dirty = false
+    except CatchableError: discard
+  if stateNds.spi.firmware_dirty and ndsFlashPath.len > 0:
+    try:
+      write_flash_record(ndsFlashPath, stateNds.spi.firmware, ndsFwBase)
+      stateNds.spi.firmware_dirty = false
+    except CatchableError: discard
+
+# Sound: the SPU's interleaved float32 stereo at 33513982 / 1024 Hz
+# (io/spu.nim), queued after each frame through the SDL symbols
+# dingbat_ios_audio.c provides, as float32 like the GB APU's, at the DS rate
+# rounded to a whole Hz (the ring's reader resamples by more than that
+# difference anyway). The pacing thresholds are the GB APU's in frames:
+# ahead past 512 queued, the blocking backstop past 4096.
+
+type DsAudioSpec = object   # SDL_AudioSpec's layout (dingbat_ios_audio.c)
+  freq: cint
+  format: uint16
+  channels: uint8
+  silence: uint8
+  samples: uint16
+  padding: uint16
+  size: uint32
+  callback: pointer
+  userdata: pointer
+
+proc ds_open_audio(desired, obtained: ptr DsAudioSpec): cint {.importc: "SDL_OpenAudio", cdecl.}
+proc ds_pause_audio(pause_on: cint) {.importc: "SDL_PauseAudio", cdecl.}
+proc ds_queue_audio(dev: uint32; data: pointer; len: uint32): cint {.importc: "SDL_QueueAudio", cdecl.}
+proc ds_queued_bytes(dev: uint32): uint32 {.importc: "SDL_GetQueuedAudioSize", cdecl.}
+proc ds_clear_audio(dev: uint32) {.importc: "SDL_ClearQueuedAudio", cdecl.}
+proc ds_delay(ms: uint32) {.importc: "SDL_Delay", cdecl.}
+
+const NDS_AUDIO_RATE = int(SAMPLE_RATE + 0.5)                # 32728 (32728.498)
+const NDS_FRAME_SAMPLES = int(FRAME_CYCLES div SPU_TICK_CYCLES)  # 547 a frame
+const NDS_SYNC_AHEAD_BYTES = 512'u32 * 8
+const NDS_SYNC_BACKSTOP_BYTES = 4096'u32 * 8
+
+var ndsOut: seq[float32] = @[]
+var ndsStretch: TimeStretch = nil
+var ndsStretchOn = false
+var ndsStretchIn, ndsStretchOut = 0   # frames pushed / pulled since it engaged
+var ndsTurboParity = false
+
+proc nds_audio_open() =
+  var spec = DsAudioSpec(freq: cint(NDS_AUDIO_RATE), format: 0x8120'u16,  # AUDIO_F32LSB
+                         channels: 2, samples: 128)
+  if ds_open_audio(addr spec, nil) == 0: ds_pause_audio(0)
+
+proc nds_queue_audio() =
+  ## This frame's samples into the ring, after volume and 2x. Asleep or
+  ## switched off the SPU stands still, but time does not: a frame's worth
+  ## of silence keeps the ring's clock pacing the frames at real speed.
+  let spu = stateNds.spu
+  let made = spu.sample_count
+  let n = if stateNds.asleep(): max(made, NDS_FRAME_SAMPLES) else: made
+  if n == 0: return
+  let silent = optMute or optVolume <= 0
+  let vf = float32(optVolume) / 100'f32
+  ndsOut.setLen(2 * n)
+  for i in 0 ..< 2 * n:
+    ndsOut[i] = if silent or i >= 2 * made: 0'f32
+                elif vf != 1'f32: spu.samples[i] * vf
+                else: spu.samples[i]
+  spu.clear_samples()
+  var frames = n
+  if optTurbo:
+    if optPitchCorrect and not silent:
+      # WSOLA: every frame in, exactly half as many out over time.
+      if not ndsStretchOn:
+        if ndsStretch == nil: ndsStretch = new_time_stretch()
+        else: ndsStretch.reset()
+        ndsStretchOn = true
+        ndsStretchIn = 0
+        ndsStretchOut = 0
+      for i in 0 ..< n: ndsStretch.push(ndsOut[2 * i], ndsOut[2 * i + 1])
+      ndsStretchIn += n
+      frames = ndsStretchIn div 2 - ndsStretchOut
+      for o in 0 ..< frames:
+        let (l, r) = ndsStretch.pull()
+        ndsOut[2 * o] = l
+        ndsOut[2 * o + 1] = r
+      ndsStretchOut += frames
+    else:
+      # Every other frame: the octave-up 2x.
+      ndsStretchOn = false
+      frames = 0
+      for i in 0 ..< n:
+        ndsTurboParity = not ndsTurboParity
+        if ndsTurboParity:
+          ndsOut[2 * frames] = ndsOut[2 * i]
+          ndsOut[2 * frames + 1] = ndsOut[2 * i + 1]
+          inc frames
+  else:
+    ndsStretchOn = false
+  if frames == 0: return
+  if optFastForward:
+    ds_clear_audio(1)   # keep only the freshest, as the APUs do unsynced
+  else:
+    while ds_queued_bytes(1) > NDS_SYNC_BACKSTOP_BYTES: ds_delay(1)
+  discard ds_queue_audio(1, addr ndsOut[0], uint32(frames * 8))
+
+proc nds_audio_ahead(): bool =
+  not optFastForward and ds_queued_bytes(1) > NDS_SYNC_AHEAD_BYTES
+
+proc nds_build(rom: sink seq[uint8]; save: seq[uint8]; firmware: seq[uint8]) =
+  ## A DS on `rom`, the BIOS in ndsBios9/ndsBios7 (empty = HLE) and
+  ## `firmware` (empty = synthesized), its chip starting from `save` (the
+  ## core's set_data rules, docs/nds/saves.md). Every boot starts with the
+  ## lid open.
+  stateNds = new_nds(rom, ndsBios9, ndsBios7, firmware)
+  if save.len > 0: stateNds.cart.backup.set_data(save)
+  ndsLidClosed = false
+  stateNds.set_lid(false)
+  ndsStretchOn = false
+  nds_audio_open()
+
+proc nds_reboot() =
+  ## Power-cycle in place (the web's nds_reboot): same ROM, the BIOS the game
+  ## started with, the flash as the old core left it (still dirty when there
+  ## was nowhere to keep it), the battery file as just flushed.
+  nds_flush()
+  var rom = move(stateNds.cart.rom)
+  let fw_dirty = stateNds.spi.firmware_dirty
+  var fw = move(stateNds.spi.firmware)
+  stateNds = nil
+  nds_build(move(rom), read_bytes(ndsSavePath), fw)
+  stateNds.spi.firmware_dirty = fw_dirty
+
+proc dingbat_set_nds_bios(bios9, bios7, firmware: cstring) {.exportc, cdecl.} =
+  ## Paths of the user's dumps (NULL = the HLE BIOS / the synthesized
+  ## firmware), read when the next DS game loads.
+  ndsBios9Path = if bios9 != nil: $bios9 else: ""
+  ndsBios7Path = if bios7 != nil: $bios7 else: ""
+  ndsFirmwarePath = if firmware != nil: $firmware else: ""
+
+proc dingbat_set_nds_flash_path(path: cstring) {.exportc, cdecl.} =
+  ## Where this device's DS flash is kept (NULL = nowhere: written settings
+  ## last until the game closes).
+  ndsFlashPath = if path != nil: $path else: ""
+
 proc flush_current_save() =
   case stateKind
   of ekGBA:
@@ -255,6 +561,7 @@ proc flush_current_save() =
   of ekGB:
     if stateGb != nil:
       stateGb.cartridge.mbc_save()
+  of ekNDS: nds_flush()
   of ekNone: discard
 
 proc load_rom_impl(path, bios: string): cint =
@@ -264,8 +571,25 @@ proc load_rom_impl(path, bios: string): cint =
   flush_current_save()
   let ext = path.splitFile().ext.toLowerAscii()
   statePrinter = nil
+  # One core at a time: the DS's ROM alone can be 128 MB, so the old core
+  # goes before the new game is read.
+  stateNds = nil
+  stateGba = nil
+  stateGb = nil
+  gamePtr = nil
   try:
-    if ext in GB_ROM_EXTS:
+    if is_nds_file(path):
+      stateKind = ekNone
+      var rom = read_bytes(path)
+      if not looks_like_nds_rom(rom): return -2
+      ndsBios9 = read_bytes(ndsBios9Path)
+      ndsBios7 = read_bytes(ndsBios7Path)
+      let dump = read_bytes(ndsFirmwarePath)
+      ndsFwBase = fw_base_of(dump)
+      ndsSavePath = path.changeFileExt("sav")
+      nds_build(move(rom), read_bytes(ndsSavePath), nds_firmware_for(dump, ndsFwBase))
+      stateKind = ekNDS
+    elif ext in GB_ROM_EXTS:
       stateKind = ekGB
       let bootrom = if bios.len > 0 and fileExists(bios): bios else: ""
       stateGb = new_gb(bootrom, path, false, bootrom.len > 0,
@@ -289,7 +613,9 @@ proc load_rom_impl(path, bios: string): cint =
     biosPath = bios
     clip_reset()
     lcdResp.reset()
-    rewindHistory = if rewindEnabled: new_rewind(rewindCapBytes) else: nil
+    # No rewind ring on the DS core (docs/nds/web.md "Gated off").
+    rewindHistory = if rewindEnabled and stateKind != ekNDS: new_rewind(rewindCapBytes)
+                    else: nil
     apply_audio()
     present_live()
     return 0
@@ -297,6 +623,7 @@ proc load_rom_impl(path, bios: string): cint =
     stateKind = ekNone
     stateGba = nil
     stateGb = nil
+    stateNds = nil
     gamePtr = nil
     return -2
 
@@ -340,18 +667,33 @@ proc dingbat_unload(flush: cint) {.exportc, cdecl.} =
   stateKind = ekNone
   stateGba = nil
   stateGb = nil
+  stateNds = nil
   statePrinter = nil
   rewindHistory = nil
   gamePtr = nil
   romPath = ""
 
 proc dingbat_reset(): cint {.exportc, cdecl.} =
-  ## Hard reset: flushes the battery save and reloads the current ROM.
+  ## Hard reset: flushes the battery save and reloads the current ROM. A DS
+  ## game reboots in place instead (nds_reboot): the ROM is not read again.
   if stateKind == ekNone or romPath.len == 0 or core_shared(): return -1
+  if stateKind == ekNDS:
+    nds_reboot()
+    clip_reset()
+    present_live()
+    return 0
   load_rom_impl(romPath, biosPath)
 
 proc dingbat_loaded(): cint {.exportc, cdecl.} =
   if stateKind == ekNone: 0 else: 1
+
+proc dingbat_is_nds(): cint {.exportc, cdecl.} =
+  if stateKind == ekNDS: 1 else: 0
+
+proc ios_nds_core*(): NDS =
+  ## The running DS core, nil otherwise: for tests (tests/ios_api_test.nim
+  ## looks at what reached it), not part of the C API.
+  if stateKind == ekNDS: stateNds else: nil
 
 proc dingbat_is_gb(): cint {.exportc, cdecl.} =
   if stateKind == ekGB: 1 else: 0
@@ -376,7 +718,7 @@ proc push_rewind() =
       proc(): string = stateGb.state_payload(),
       proc(): RewindThumb = RewindThumb(w: 120, h: 108,
         pixels: downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H, 120, 108)))
-  of ekNone: discard
+  of ekNDS, ekNone: discard
 
 proc clip_note_frame()
 
@@ -387,6 +729,9 @@ proc step_canonical() =
   of ekGB:
     stateGb.step_frame()
     if statePrinter != nil: statePrinter.tick_frame()
+  of ekNDS:
+    stateNds.run_frame()
+    nds_queue_audio()
   of ekNone: discard
   push_rewind()
 
@@ -404,7 +749,7 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
   ## then the canonical state restored (docs/run-ahead.md).
   if stateKind == ekNone or core_shared(): return
   step_canonical()
-  if n <= 0:
+  if n <= 0 or stateKind == ekNDS:  # no run-ahead on the DS: a plain frame
     present_live()
     return
   let pixels = game_pixels()
@@ -429,7 +774,7 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
     copyMem(addr runaheadFrame[0], addr stateGb.ppu.framebuffer[0], pixels * 2)
     try: stateGb.apply_state_payload(snap)
     except CatchableError: discard
-  of ekNone: return
+  of ekNDS, ekNone: return
   prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr runaheadFrame[0]), pixels)
 
 proc dingbat_game_fb(): ptr uint16 {.exportc, cdecl.} =
@@ -445,20 +790,43 @@ proc dingbat_framebuffer(): ptr uint16 {.exportc, cdecl.} =
 proc dingbat_framebuffer_rgba(): ptr uint32 {.exportc, cdecl.} =
   ## Colour-corrected RGBA8888 (R first in memory) of the core's framebuffer,
   ## converted on call: thumbnails, the library picture and the ambient glow.
+  ## The DS composite is converted straight (5 to 8 bits): colour correction
+  ## models the GBA and GBC panels, not the DS's.
   let fb = live_fb()
   if fb == nil: return nil
   let n = game_pixels()
+  if stateKind == ekNDS:
+    if rgbaBuffer.len != n: rgbaBuffer.setLen(n)
+    for i in 0 ..< n: rgbaBuffer[i] = bgr555_to_rgba(fb[i] and 0x7FFF)
+    return addr rgbaBuffer[0]
   let lut = if stateKind == ekGB: addr colorLutGbc else: addr colorLutGba
   if rgbaBuffer.len != n: rgbaBuffer.setLen(n)
   for i in 0 ..< n:
     rgbaBuffer[i] = lut[fb[i] and 0x7FFF]
   addr rgbaBuffer[0]
 
+var ndsTopRgba: seq[uint32] = @[]
+
+proc dingbat_nds_top_rgba(): ptr uint32 {.exportc, cdecl.} =
+  ## The DS's top screen alone, 256x192 RGBA8888 (R first), converted on
+  ## call: the library picture is the top screen, as on the web.
+  if stateKind != ekNDS: return nil
+  const n = NDS_W * NDS_SCREEN_H
+  if ndsTopRgba.len != n: ndsTopRgba.setLen(n)
+  for i in 0 ..< n: ndsTopRgba[i] = bgr555_to_rgba(stateNds.gpu.top[i] and 0x7FFF)
+  addr ndsTopRgba[0]
+
 proc dingbat_fb_width(): cint {.exportc, cdecl.} =
-  if stateKind == ekGB: GB_W else: GBA_W
+  case stateKind
+  of ekGB: GB_W
+  of ekNDS: NDS_W
+  else: GBA_W
 
 proc dingbat_fb_height(): cint {.exportc, cdecl.} =
-  if stateKind == ekGB: GB_H else: GBA_H
+  case stateKind
+  of ekGB: GB_H
+  of ekNDS: NDS_H
+  else: GBA_H
 
 proc dingbat_frame_static(): cint {.exportc, cdecl.} =
   ## 1 if the last GBA frame was unchanged (render skip) and no LCD response
@@ -528,6 +896,15 @@ proc dingbat_glow_sample(gw, gh: cint; remap: cint;
   let fbp = live_fb()
   if fbp == nil: return nil
   let fb = fbp
+  if glowBuffer.len != gw * gh: glowBuffer.setLen(gw * gh)
+  if stateKind == ekNDS:
+    # The 256x384 composite, straight 5->8 bit (no panel model, no shades).
+    for y in 0 ..< gh:
+      let oy = ((2 * y + 1) * NDS_H) div (2 * gh)
+      for x in 0 ..< gw:
+        let ox = ((2 * x + 1) * NDS_W) div (2 * gw)
+        glowBuffer[y * gw + x] = bgr555_to_rgba(fb[oy * NDS_W + ox] and 0x7FFF'u16)
+    return addr glowBuffer[0]
   let lut = if stateKind == ekGB: addr colorLutGbc else: addr colorLutGba
   let gameW = if stateKind == ekGB: GB_W else: GBA_W
   let gameH = if stateKind == ekGB: GB_H else: GBA_H
@@ -547,7 +924,6 @@ proc dingbat_glow_sample(gw, gh: cint; remap: cint;
     0xFF000000'u32 or ((b * 255 div 31) shl 16) or
                       ((g * 255 div 31) shl 8) or (r * 255 div 31)
 
-  if glowBuffer.len != gw * gh: glowBuffer.setLen(gw * gh)
   for y in 0 ..< gh:
     let oy = ((2 * y + 1) * outH) div (2 * gh)
     for x in 0 ..< gw:
@@ -620,9 +996,18 @@ proc dingbat_hle_audio_active(): cint {.exportc, cdecl.} =
 
 # --- Input ---
 
+const NDS_BUTTON_OF = [nbUp, nbDown, nbLeft, nbRight, nbA, nbB, nbSelect, nbStart,
+                       nbL, nbR, nbX, nbY]
+  ## The app's input ids to the DS's buttons (web: NdsUtil.FROM_APP).
+
 proc dingbat_set_input(input_id: cint; pressed: cint) {.exportc, cdecl.} =
   ## input_id: 0 UP, 1 DOWN, 2 LEFT, 3 RIGHT, 4 A, 5 B, 6 SELECT, 7 START,
-  ## 8 L, 9 R (same ids as the web build's data-inputs).
+  ## 8 L, 9 R (same ids as the web build's data-inputs); 10 X and 11 Y for
+  ## a DS game (ignored elsewhere).
+  if stateKind == ekNDS:
+    if input_id >= 0 and input_id <= NDS_BUTTON_OF.high:
+      stateNds.set_button(NDS_BUTTON_OF[input_id], pressed != 0)
+    return
   if input_id < 0 or input_id > ord(Input.high) or core_shared(): return
   let inp = Input(input_id)
   let down = pressed != 0
@@ -634,10 +1019,41 @@ proc dingbat_set_input(input_id: cint; pressed: cint) {.exportc, cdecl.} =
   case stateKind
   of ekGBA: stateGba.handle_input(inp, down)
   of ekGB:  stateGb.handle_input(inp, down)
-  of ekNone: discard
+  of ekNDS, ekNone: discard
+
+proc dingbat_nds_touch(x, y, down: cint) {.exportc, cdecl.} =
+  ## The stylus on the bottom screen: x 0..255, y 0..191 (clamped), down 0/1.
+  ## A closed lid has no touch screen to reach: no touch lands while it is.
+  if stateKind != ekNDS: return
+  stateNds.set_touch(int(x), int(y), down != 0 and not ndsLidClosed)
+
+proc dingbat_nds_set_lid(closed: cint) {.exportc, cdecl.} =
+  ## Close (1) or open (0) the hinge (EXTKEYIN bit 7; opening raises the
+  ## ARM7's lid IRQ, and a game typically sleeps while it is shut). Every
+  ## boot starts open; a state load tells the core the lid as last set here.
+  ndsLidClosed = closed != 0
+  if stateKind != ekNDS: return
+  if ndsLidClosed: stateNds.set_touch(0, 0, false)
+  stateNds.set_lid(ndsLidClosed)
+
+proc dingbat_nds_push_mic(samples: ptr UncheckedArray[int16]; n: cint;
+                          rate: cint) {.exportc, cdecl.} =
+  ## Queue `n` mono int16 microphone samples at `rate` Hz behind what is
+  ## queued (io/mic.nim plays them out against emulated time; at most
+  ## 250 ms stays queued).
+  if stateKind == ekNDS and samples != nil and n > 0 and rate > 0:
+    stateNds.push_mic(toOpenArray(samples, 0, int(n) - 1), int(rate))
+
+proc dingbat_nds_powered_off(): cint {.exportc, cdecl.} =
+  ## 1 once the program has shut the DS down (power manager register 0 bit
+  ## 6): both screens black, no sound; only dingbat_reset (or a load) turns
+  ## it back on.
+  if stateKind == ekNDS and stateNds.powered_off(): 1 else: 0
 
 proc dingbat_is_stopped(): cint {.exportc, cdecl.} =
-  ## 1 while the GBA is in Stop mode (sleeping), for a UI badge.
+  ## 1 while the GBA is in Stop mode or the DS sleeps (its lid shut, or
+  ## the game's own sleep), for a UI badge.
+  if stateKind == ekNDS: return (if stateNds.asleep(): 1 else: 0)
   if stateKind == ekGBA and stateGba != nil and stateGba.cpu.stopped: 1 else: 0
 
 proc dingbat_rumble(): cint {.exportc, cdecl.} =
@@ -732,7 +1148,8 @@ proc dingbat_set_volume(volume: cint; mute: cint) {.exportc, cdecl.} =
 
 proc dingbat_set_channel_mutes(bits: cint) {.exportc, cdecl.} =
   ## Bit i mutes channel i: Square 1, Square 2, Wave, Noise, Sample A,
-  ## Sample B (the GB has the first four). Output only; kept across loads.
+  ## Sample B (the GB has the first four; the DS none). Output only; kept
+  ## across loads.
   chanMutes = bits
   apply_channel_mutes()
 
@@ -763,6 +1180,7 @@ proc dingbat_audio_ahead(): cint {.exportc, cdecl.} =
   let ahead = case stateKind
     of ekGBA: stateGba.apu.audio_ahead()
     of ekGB:  stateGb.apu.audio_ahead()
+    of ekNDS: nds_audio_ahead()
     of ekNone: false
   if ahead: 1 else: 0
 
@@ -774,10 +1192,14 @@ var stateImage: string = ""
 
 proc dingbat_state_size(): cint {.exportc, cdecl.} =
   ## Serialize the full state (same bytes as desktop .state files) into a
-  ## retained buffer; returns its length, 0 when no core runs.
+  ## retained buffer; returns its length, 0 when no core runs. A DS switched
+  ## off has none (nothing to come back to: the web's rule).
   case stateKind
   of ekGBA: stateImage = pack_state(stateGba.state_bytes(thumbnail = true))
   of ekGB:  stateImage = pack_state(stateGb.state_bytes(thumbnail = true))
+  of ekNDS:
+    stateImage = if stateNds.powered_off(): ""
+                 else: pack_state(stateNds.state_bytes(thumbnail = true))
   of ekNone: stateImage = ""
   cint(stateImage.len)
 
@@ -797,17 +1219,24 @@ proc dingbat_load_state(data: pointer; len: cint; keep_rewind: cint): cint {.exp
   let ok = case stateKind
     of ekGBA: stateGba.load_state_bytes(image)
     of ekGB:  stateGb.load_state_bytes(image)
+    of ekNDS: stateNds.load_state_bytes(image)
     of ekNone: false
   if ok:
     if keep_rewind == 0 and rewindHistory != nil: rewindHistory.clear()
     if statePrinter != nil: statePrinter.resync()
+    if stateKind == ekNDS:
+      # The lid is where the app has it, not where the state had it.
+      stateNds.set_lid(ndsLidClosed)
+      if ndsLidClosed: stateNds.set_touch(0, 0, false)
+      stateNds.spu.clear_samples()
     lcdResp.reset()
     present_live()
   if ok: 1 else: 0
 
 proc dingbat_state_error_kind(): cint {.exportc, cdecl.} =
   ## StateRejectKind ordinal: 0 none, 1 not a state, 2 wrong core, 3 wrong
-  ## ROM, 4 too new, 5 truncated, 6 corrupt, 7 no file.
+  ## ROM, 4 too new, 5 truncated, 6 corrupt, 7 no file, 8 incompatible (a DS
+  ## state of this game this build cannot restore: another layout or BIOS).
   cint(ord(last_state_reject_kind))
 
 proc dingbat_state_error(): cstring {.exportc, cdecl.} =
@@ -822,20 +1251,20 @@ proc dingbat_set_rewind(on: cint; cap_bytes: cint) {.exportc, cdecl.} =
   rewindEnabled = on != 0
   if not rewindEnabled:
     rewindHistory = nil
-  elif rewindHistory == nil and stateKind != ekNone:
+  elif rewindHistory == nil and stateKind notin {ekNone, ekNDS}:
     rewindHistory = new_rewind(rewindCapBytes)
 
 proc current_payload(): string =
   case stateKind
   of ekGBA: (if stateGba != nil: stateGba.state_payload() else: "")
   of ekGB:  (if stateGb  != nil: stateGb.state_payload()  else: "")
-  of ekNone: ""
+  of ekNDS, ekNone: ""
 
 proc apply_payload(payload: string) =
   case stateKind
   of ekGBA: stateGba.apply_state_payload(payload)
   of ekGB:  stateGb.apply_state_payload(payload)
-  of ekNone: discard
+  of ekNDS, ekNone: discard
 
 proc dingbat_rewind_pop(): cint {.exportc, cdecl.} =
   ## Step back one snapshot (REWIND_INTERVAL frames) and present it. Returns
@@ -895,7 +1324,7 @@ proc cart_save_bytes(): seq[byte] =
     if stateGb != nil and stateGb.cartridge != nil and stateGb.cartridge.has_battery:
       stateGb.cartridge.ram
     else: @[]
-  of ekNone: @[]
+  of ekNDS, ekNone: @[]
 
 proc dingbat_rewind_scrub_save_differs(sample: cint): cint {.exportc, cdecl.} =
   ## 1 when committing to `sample` would change the cartridge save data.
@@ -934,7 +1363,7 @@ proc dingbat_rewind_scrub_state_size(sample: cint): cint {.exportc, cdecl.} =
     stateImage = case stateKind
       of ekGBA: pack_state(stateGba.state_bytes(thumbnail = true))
       of ekGB:  pack_state(stateGb.state_bytes(thumbnail = true))
-      of ekNone: ""
+      of ekNDS, ekNone: ""
   except CatchableError:
     stateImage = ""
   if stash.len > 0:
@@ -967,14 +1396,14 @@ proc dingbat_load_cheats(text: cstring): cstring {.exportc, cdecl.} =
   let eng = case stateKind
     of ekGBA: (if stateGba != nil: stateGba.cheats else: nil)
     of ekGB:  (if stateGb  != nil: stateGb.cheats  else: nil)
-    of ekNone: nil
+    of ekNDS, ekNone: nil
   cheatErrBuf = ""
   if eng == nil or core_shared(): return cstring(cheatErrBuf)
   eng.deserialize($text)
   case stateKind
   of ekGBA: stateGba.refresh_cheat_rom_patches()
   of ekGB:  stateGb.refresh_cheat_rom_patches()
-  of ekNone: discard
+  of ekNDS, ekNone: discard
   for c in eng.cheats:
     if c.error.len > 0:
       if cheatErrBuf.len > 0: cheatErrBuf.add "\n"
@@ -1003,7 +1432,7 @@ proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
 proc clip_note_frame() =
   ## Once per canonical frame before it steps: an anchor every second, the
   ## held buttons every frame, and eviction past the window or the budget.
-  if clipReplaying or stateKind == ekNone: return
+  if clipReplaying or stateKind in {ekNone, ekNDS}: return  # no clips on the DS
   if clipFrameIndex mod CLIP_SNAP_INTERVAL == 0:
     let payload = current_payload()
     if payload.len > 0:
@@ -1045,7 +1474,7 @@ proc clip_set_buttons(mask: uint16) =
     case stateKind
     of ekGBA: stateGba.handle_input(Input(i), down)
     of ekGB:  stateGb.handle_input(Input(i), down)
-    of ekNone: discard
+    of ekNDS, ekNone: discard
 
 proc dingbat_set_clip_cap(bytes: cint) {.exportc, cdecl.} =
   if bytes > 0: clipCapBytes = int(bytes)
@@ -1096,7 +1525,7 @@ proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   ## state, restore the anchor at or before the start, silently re-emulate
   ## to the start frame. Returns the frames the replay runs (step them with
   ## dingbat_clip_tick), 0 with no usable history.
-  if stateKind == ekNone or clipReplaying or clipAnchors.len == 0: return 0
+  if stateKind in {ekNone, ekNDS} or clipReplaying or clipAnchors.len == 0: return 0
   var startFrame = clipFrameIndex - max(0, int(start_ago))
   let endFrame = clipFrameIndex - max(0, int(end_ago))
   if startFrame < clipAnchors[0].frame: startFrame = clipAnchors[0].frame
@@ -1127,7 +1556,7 @@ proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
     case stateKind
     of ekGBA: stateGba.step_frame()
     of ekGB:  stateGb.step_frame()
-    of ekNone: break
+    of ekNDS, ekNone: break
     inc clipCursor
   dingbat_audio_set_mode(mode)
   cint(clipEnd - clipCursor)
@@ -1150,7 +1579,7 @@ proc dingbat_clip_tick(): cint {.exportc, cdecl.} =
   case stateKind
   of ekGBA: stateGba.step_frame()
   of ekGB:  stateGb.step_frame()
-  of ekNone: return -1
+  of ekNDS, ekNone: return -1
   inc clipCursor
   cint(clipEnd - clipCursor)
 
@@ -1225,13 +1654,16 @@ proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
   ## at its real path, so its battery save is the game's); `local_player`
   ## (0/1) the core this player drives; `epoch` the shared unix-seconds RTC
   ## seed both sides pass. The solo core is flushed and dropped. Returns 1,
-  ## or 0 with no game loaded.
+  ## or 0 with no game loaded. A DS game (either side) is refused up front
+  ## with nothing touched: the DS core has no link.
+  if rom0 != nil and rom1 != nil and (is_nds_file($rom0) or is_nds_file($rom1)): return 0
   dingbat_rollback_exit()
   dingbat_link_exit()
   flush_current_save()
   stateKind = ekNone
   stateGba = nil
   stateGb = nil
+  stateNds = nil
   statePrinter = nil
   rewindHistory = nil
   gamePtr = nil
@@ -1405,13 +1837,16 @@ proc dingbat_rollback_dump_data(): pointer {.exportc, cdecl.} =
 
 proc dingbat_link_init(rom0, rom1: cstring): cint {.exportc, cdecl.} =
   ## Player 1 on `rom0` (the game's own file), player 2 on `rom1`. The solo
-  ## core is flushed and dropped. Returns 1, or 0 with no game loaded.
+  ## core is flushed and dropped. Returns 1, or 0 with no game loaded. A DS
+  ## game is refused up front with nothing touched (no DS link).
+  if rom0 != nil and rom1 != nil and (is_nds_file($rom0) or is_nds_file($rom1)): return 0
   dingbat_link_exit()
   dingbat_rollback_exit()
   flush_current_save()
   stateKind = ekNone
   stateGba = nil
   stateGb = nil
+  stateNds = nil
   statePrinter = nil
   rewindHistory = nil  # rewinding one core would desync the pair
   gamePtr = nil

@@ -106,6 +106,42 @@ not in CI (usage in the file).
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.
 
+## Nintendo DS (core and C API)
+
+The core side is done; the Swift side is not (no Swift file plays a DS
+game yet). `libdingbat.a` carries the DS core (`src/dingbat/nds/`) behind
+the same C API as the GB/GBA cores, mirroring the web's DS front end
+(`src/dingbat_nds_wasm.nim`, index.js "Nintendo DS", docs/nds/web.md).
+`ios/include/dingbat.h` is the contract; in short:
+
+| | |
+|---|---|
+| Loading | `dingbat_load_rom` / `_bytes` take a `.nds` (or any file whose header passes the DS checks) and boot the DS core; a GB/GBA load drops it and the reverse. `dingbat_is_nds`. The battery is `<rom minus extension>.sav`, fitted to the card's chip by the DS rules (docs/nds/saves.md) and written back exact. |
+| BIOS, firmware | `dingbat_set_nds_bios(bios9, bios7, firmware)`: dump paths or NULL for the HLE BIOS / synthesized firmware, read at the next DS load (a reset keeps the BIOS the game started with). |
+| Firmware flash | `dingbat_set_nds_flash_path`: one file per device, as the web's `bios:ndsflash` record: written on flush when a game wrote the flash, booted only on the firmware it was written on (a dump: whole; built-in: the user area over this build's synthesized image). |
+| Picture | One 256x384 BGR555 buffer, top screen over bottom (`dingbat_game_fb`, `fb_width/height` 256x384), no colour correction or LCD response (the DS's panels); `dingbat_nds_top_rgba` for the library picture; the glow samples the composite. |
+| Input | ids 10 X, 11 Y; `dingbat_nds_touch` (bottom-screen pixels), `dingbat_nds_set_lid` (each boot open; a state load keeps the app's lid), `dingbat_nds_push_mic`. |
+| Sound | The SPU's stereo into the same ring at 32728 Hz (`dingbat_audio_sample_rate` moves with the core: re-read it after a load). The pacing contract (`dingbat_audio_ahead`) is the GB APU's in frames; a sleeping or switched-off DS queues a frame of silence a frame, so pacing holds. Volume, mute, 2x (decimated or WSOLA), slow motion and fast-forward work; channel mutes do not apply. |
+| States | `dingbat_state_size/data`, `dingbat_load_state` in the DS format (thumbnail 128x192, both screens); error kind 8 = incompatible (another DS layout or BIOS). None of a switched-off console. |
+| Power | `dingbat_nds_powered_off`; `dingbat_reset` reboots in place (same ROM and BIOS, the flash kept) and switches it back on, as the web's Restart. |
+| Not on the DS | Rewind and its scrubber, clips, run-ahead (a plain frame), cheats, link (refused before anything is touched), SGB, tilt, camera, printer, rumble, MP2K: no-ops, zeros or refusals that never reach the last GB/GBA game. |
+
+Tests: `tests/ios_api_test.nim` drives all of it on the homebrew DS test
+ROMs (`~/.cache/dingbat-nds/roms`, skipped where absent, so not in CI):
+both screens, the stylus, X/Y, the lid, the battery coming back, the flash
+kept across a reset and a reload and kept apart on another firmware,
+power-off, states, the ring's rate and 2x, DS to GBA to DS, the real BIOS
+when dumped, and the frame time of SoulSilver when it is at hand.
+
+Performance (this Mac, M-series, -d:release as the iOS build, HLE BIOS,
+measured on a busy machine): Pokemon SoulSilver's intro, frames 600-1500,
+0.86-0.96 ms a frame (~1100 fps) in the Mac test when it ran unhindered,
+2.1-2.4 ms (420-475 fps) when the machine was loaded, and 2.4 ms in the
+simulator slice of `libdingbat.a` driven through the C API from a small C
+program (`simctl spawn`), which also checked the picture and the ring's
+32728 Hz there. No device measurement yet. The DS core adds ~2.8 MB to
+each slice (2.07 MB to 4.86 MB).
+
 ## Left off, and why
 
 - **The link's same-browser BroadcastChannel path** (two tabs of one
