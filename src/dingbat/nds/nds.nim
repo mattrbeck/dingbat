@@ -141,8 +141,8 @@ type
 
 const
   MAIN_RAM_SIZE = 4 * 1024 * 1024
-  ARM9_CYCLES_PER_INSTR = 1     ## one ARM9 clock; memory adds the rest (timing.nim)
-  ARM7_CYCLES_PER_INSTR = 0     ## all ARM7 time is its fetch + data + internal cycles
+  ARM9_CYCLES_PER_INSTR* = 1    ## one ARM9 clock; memory adds the rest (timing.nim)
+  ARM7_CYCLES_PER_INSTR* = 0    ## all ARM7 time is its fetch + data + internal cycles
   SLICE = 64                    ## max master cycles one CPU runs ahead
   NO_PAGE = 0xFFFF_FFFF'u32     ## pu_ok: nothing remembered
 

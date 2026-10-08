@@ -185,6 +185,17 @@ program at once. Modules that already push `checks: off` (render.nim)
 check nothing either way. `savestate.nim` (state_error) and
 `read_file_bytes`/`load_nds` (IOError) stay outside.
 
+The core's own state cannot make a wild index; a loaded state is the
+outside input that could, so the loader refuses every field the core
+indexes, shifts or divides with, or runs its clocks by
+(docs/nds/savestate.md, "Range guards"). `nds/quirky.nim` holds the
+switch: `-d:nds_quirky=false` builds the core with the tests after calls,
+and `-d:nds_render_checks` turns index checks on in the 2D line renderer
+and the 3D per-dot path (off in every other build). tools/statefuzz.nim is
+built with both, so a hostile state's fault is a Defect where it happens.
+The default build's C is unchanged by the switch (compared module by
+module, names aside).
+
 ## Sequential fetch fast paths (bus9.nim `fetch_line9`, bus7.nim `fetch_page7`)
 
 Most opcode fetches follow the one before. For those, the timing model's

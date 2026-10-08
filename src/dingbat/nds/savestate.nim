@@ -28,6 +28,7 @@
 
 import std/[deques, importutils, typetraits]
 import ../common/serialize
+from ../gba/storage_chip import StorageType, FlashStateFlag, storage_bytes
 import nds, sched, timing
 import arm/[cpu, cp15]
 import mem/vram
@@ -143,6 +144,8 @@ type
   Saver = object
     buf: string
     pos: int
+    min_block: int      ## record blocks this long or longer (0: none; state_blocks)
+    blocks: seq[tuple[name: string; lo, hi: int]]
   Loader = object
     data: ptr UncheckedArray[char]
     len, pos: int
@@ -155,6 +158,9 @@ proc put(s: var Saver; p: pointer; n: int) {.inline.} =
   if s.pos + n > s.buf.len: s.buf.setLen(max(2 * s.buf.len, s.pos + n))
   copyMem(addr s.buf[s.pos], p, n)
   s.pos += n
+
+proc note_block(s: var Saver; name: string; at, n: int) {.inline.} =
+  if s.min_block > 0 and n >= s.min_block: s.blocks.add((name, at, at + n))
 
 proc get(l: var Loader; p: pointer; n: int) {.inline.} =
   if n == 0: return
@@ -223,6 +229,9 @@ proc io_seq_len[S](s: var S; cur: int; name: static string): int =
     int(n)
 
 proc io[S, T](s: var S; x: var T; name: static string) =
+  const leaf = not (T is (array or seq or Deque or object or tuple or AirFrame))
+  when S is Saver and leaf:
+    let at = s.pos
   when S is Layout:
     when T is (array or seq or Deque or object or tuple):
       var e: T     # walked once for its element/field types below
@@ -306,7 +315,9 @@ proc io[S, T](s: var S; x: var T; name: static string) =
       io(s, e[low(e)], "[]")
       dec s.depth
     elif is_block(E):
-      when S is Saver: s.put(addr x, sizeof(x))
+      when S is Saver:
+        s.note_block(name, s.pos, sizeof(x))
+        s.put(addr x, sizeof(x))
       else: s.get(addr x, sizeof(x))
     else:
       for i in low(x) .. high(x): io(s, x[i], name)
@@ -322,7 +333,9 @@ proc io[S, T](s: var S; x: var T; name: static string) =
       when S is Loader: x.setLen(n)
       when is_block(E):
         if n > 0:
-          when S is Saver: s.put(addr x[0], n * sizeof(E))
+          when S is Saver:
+            s.note_block(name, s.pos, n * sizeof(E))
+            s.put(addr x[0], n * sizeof(E))
           else: s.get(addr x[0], n * sizeof(E))
       else:
         for i in 0 ..< n: io(s, x[i], name)
@@ -354,11 +367,14 @@ proc io[S, T](s: var S; x: var T; name: static string) =
       walk(s, x, NO_SKIP)
   else:
     {.error: "DS save state: no rule for field '" & name & "'".}
+  when S is Saver and leaf:
+    s.note_block(name, at, s.pos - at)
 
 proc section[S](s: var S; tag: uint8; title: static string) =
   ## A marker byte between sections: a desynchronised read stops at the
   ## next one instead of loading garbage further on.
   when S is Saver:
+    if s.min_block > 0: s.blocks.add(("[" & title & "]", s.pos, s.pos))
     var t = tag
     s.put(addr t, 1)
   elif S is Loader:
@@ -513,6 +529,169 @@ proc state_payload*(n: NDS): string =
   s.buf.setLen(s.pos)
   move(s.buf)
 
+proc state_blocks*(n: NDS; min_bytes: int): seq[tuple[name: string; lo, hi: int]] =
+  ## The payload ranges (`state_payload` offsets) of the numeric arrays and
+  ## seqs and the single fields of at least `min_bytes`, by field name: with
+  ## 256 the memories (RAM, VRAM, palettes, OAM, the save chip) and the
+  ## large tables, which tools/statefuzz.nim leaves out of a sweep; with 1
+  ## every field, to name the one at an offset. Each section starts with an
+  ## empty range named "[its title]".
+  var s = Saver(buf: newString(8 * 1024 * 1024), min_block: max(min_bytes, 1))
+  s.write_preamble(n)
+  io_machine(s, n)
+  s.blocks
+
+proc check_range64(v, lo, hi: int64; field: string) =
+  ## `check_range` for 64-bit fields and uint32s (an int is 32 bits on wasm)
+  if v < lo or v > hi:
+    raise state_error("DS state field '" & field & "' is out of range (" &
+                      $v & " not in " & $lo & ".." & $hi & ")")
+
+const
+  MAX_CLOCK = 1'i64 shl 55
+    ## The master clock's bound (17 years of running), far from where the
+    ## difference of two times overflows an int64
+  MAX_BOOKING = 1'i64 shl 40
+    ## The furthest ahead an event may be booked (~4.5 hours; a machine's
+    ## furthest is the RTC's next minute)
+
+proc check_clocks(n: NDS) =
+  ## The master clock and what is dated by it. Each CPU runs from its own
+  ## clock to the slice end, so one far behind would run for hours to catch
+  ## up; an event booked far in the past would repeat to catch up the same
+  ## way (the display's line, the sound mixer's tick).
+  privateAccess(NdsScheduler)
+  template time_in(t: int64; lo, hi: int64; name: string) = check_range64(t, lo, hi, name)
+  let now = n.sched.now
+  time_in(now, 0, MAX_CLOCK, "sched.now")
+  time_in(n.arm9.cycles, now - FRAME_CYCLES, now + 64 * FRAME_CYCLES, "arm9.cycles")
+  time_in(n.arm7.cycles, now - FRAME_CYCLES, now + 64 * FRAME_CYCLES, "arm7.cycles")
+  # cycles an instruction has run up and not yet charged (0 between them)
+  time_in(n.wait9, 0, FRAME_CYCLES, "wait9")
+  time_in(n.wait7, 0, FRAME_CYCLES, "wait7")
+  time_in(n.arm9.icycles, 0, FRAME_CYCLES, "arm9.icycles")
+  time_in(n.arm7.icycles, 0, FRAME_CYCLES, "arm7.icycles")
+  time_in(n.line_start, now - FRAME_CYCLES, now + LINE_CYCLES, "line_start")
+  time_in(n.spu.next_tick, now - FRAME_CYCLES, now + FRAME_CYCLES, "spu.next_tick")
+  # the machine's constants, set when it is made: what an instruction
+  # costs, which events are a timer unit's, which DMA unit and which
+  # display engine is which
+  if n.arm9.base_cycles != ARM9_CYCLES_PER_INSTR or
+     n.arm7.base_cycles != ARM7_CYCLES_PER_INSTR or
+     n.timers9.first_event != evTimer9_0 or n.timers7.first_event != evTimer7_0 or
+     not n.dma9.is9 or n.dma7.is9 or
+     n.gpu.engine_a.id != engA or n.gpu.engine_b.id != engB:
+    raise state_error("DS state has another machine's constants")
+  # the GBA slot's access times (bus cycles), from EXMEMCNT (slot_timing;
+  # all 0 before the first write)
+  for t in [n.slot9_t, n.slot7_t]:
+    for v in [t.rom_n, t.rom_s, t.ram]: time_in(v, 0, 18, "slot timing")
+  # Times a unit counts from or compares with the clock (the timers, the
+  # divider, the busy flags, wifi's timers and frames in flight, the 3D
+  # engine's FIFO and rendering, the RTC's base): any time, past or future,
+  # as long as a difference of two cannot overflow. -1 and high(int64) are
+  # "none" to the units that use them.
+  template dated(t: int64; name: string) = time_in(t, -MAX_CLOCK, MAX_CLOCK, name)
+  privateAccess(Spi)
+  privateAccess(Cart)
+  privateAccess(Wifi)
+  privateAccess(Gpu3d)
+  privateAccess(Rtc)
+  privateAccess(Mic)
+  for t in [n.timers9, n.timers7]:
+    for v in t.start_at: dated(v, "timers.start_at")
+  dated(n.divsqrt.div_done, "divsqrt.div_done")
+  dated(n.divsqrt.sqrt_done, "divsqrt.sqrt_done")
+  dated(n.spi.busy_until, "spi.busy_until")
+  dated(n.spi.wip_until, "spi.wip_until")
+  dated(n.cart.spi_busy_until, "cart.spi_busy_until")
+  let w = n.wifi
+  for v in [w.random_at, w.us_base_at, w.next_ms, w.irq15_at, w.cmd_count_at,
+            w.tx_at, w.reply_at]:
+    dated(v, "wifi time")
+  template frame_times(f: AirFrame) =
+    if f != nil:
+      for v in [f.start, f.data_at, f.stop]: dated(v, "wifi frame time")
+  frame_times(w.tx_frame)
+  for r in w.rx:
+    for name, f in r.fieldPairs:   # RxSlot is private to wifi.nim
+      when name == "f": frame_times(f)
+      elif name in ["start_at", "end_at"]: dated(f, "wifi.rx")
+  let g = n.gpu3d
+  for v in [g.cur_end, g.stall_until, g.next_vblank, g.render_t0]: dated(v, "gpu3d time")
+  for e in g.fifo:
+    for name, f in e.fieldPairs:   # FifoEntry is private to gpu3d.nim
+      when name == "at": dated(f, "gpu3d.fifo")
+  check_range(g.done_lines, 0, 192, "gpu3d.done_lines")
+  let r = n.rtc
+  for v in [r.offset, r.adj_since, r.fixed_start, r.last_ticks]: dated(v, "rtc ticks")
+  time_in(r.slept, 0, MAX_CLOCK, "rtc.slept")
+  if r.next_due != high(int64): dated(r.next_due, "rtc.next_due")
+  # the microphone queue is played out from `last` to now at `rate` (samples
+  # a second; a frontend's is at most 48000) and `acc` is a sample's fraction
+  let m = n.spi.mic
+  time_in(m.last, 0, now, "mic.last")
+  check_range(m.rate, 0, 1 shl 20, "mic.rate")
+  time_in(m.acc, 0, MASTER_HZ - 1, "mic.acc")
+  # `next` is the earliest booking, kept by the scheduler as events come and
+  # go; one later than that never fires (run_until stops at `next`), one
+  # earlier stops the clock there for good
+  var seen: set[NdsEvent]
+  n.sched.next = high(int64)
+  for e in n.sched.events:
+    for name, f in e.fieldPairs:   # Pending is private to sched.nim
+      when name == "kind":
+        if f in seen: raise state_error("DS state books an event twice")
+        seen.incl f
+      elif name == "at":
+        time_in(f, now - FRAME_CYCLES, now + MAX_BOOKING, "event")
+        n.sched.next = min(n.sched.next, f)
+
+proc check_caches(n: NDS) =
+  ## The ARM9 caches' contents (timing.nim, bus9.nim dc_*/ic_*): every line
+  ## held is a main RAM line in the set its address picks, the data cache
+  ## holds a line in one slot only, an empty slot holds nothing dirty, and
+  ## the round-robin and victim pointers stay inside their sets. The tables
+  ## built from the slots (`slot_of`, `page_apart`, `shadows`) are then
+  ## rebuilt from them rather than trusted: each is an index or a count the
+  ## next fill or eviction follows.
+  privateAccess(TagCache)
+  let t = addr n.tm
+  let lines = n.main_ram.len div 32
+  for (c, name) in [(addr t.icache, "icache"), (addr t.dcache, "dcache")]:
+    if int(c.set_mask) + 1 != c.rr.len or c.tags.len != 4 * c.rr.len:
+      raise state_error("DS state " & name & " has the wrong number of sets")
+    for r in c.rr: check_range(int(r), 0, 3, name & ".rr")
+    check_range(c.victim, 0, c.tags.len - 1, name & ".victim")
+  template in_its_set(line1: uint32; slot: int; c: TagCache; name: string) =
+    check_range64(int64(line1), 0, lines, name)
+    if line1 != 0 and int((line1 - 1) and c.set_mask) != slot div 4:
+      raise state_error("DS state field '" & name & "' is a line outside its set")
+  for v in t.slot_of.mitems: v = 0
+  for v in t.page_apart.mitems: v = 0
+  t.shadows = 0
+  for slot in 0 ..< t.dline.len:
+    let d = t.dline[slot]
+    in_its_set(d.line1, slot, t.dcache, "dline.line1")
+    if d.line1 == 0:
+      if d.dirty or d.shadowed:
+        raise state_error("DS state has an empty data-cache slot holding data")
+      continue
+    let line = int(d.line1 - 1)
+    if t.slot_of[line] != 0:
+      raise state_error("DS state holds a main RAM line in two data-cache slots")
+    t.slot_of[line] = uint16(slot + 1)
+    if d.shadowed:
+      inc t.shadows
+      inc t.page_apart[line shr 7]
+  for slot in 0 ..< t.iline.len:
+    let il = t.iline[slot]
+    in_its_set(il.line1, slot, t.icache, "iline.line1")
+    if il.line1 == 0: continue
+    let line = int(il.line1 - 1)
+    t.slot_of[line] += IC_ONE
+    if il.kept: inc t.page_apart[line shr 7]
+
 proc after_load(n: NDS) =
   ## Rebuild what the state leaves out, then refuse values the machine would
   ## index out of range with (a state is a stranger's file).
@@ -530,9 +709,26 @@ proc after_load(n: NDS) =
   privateAccess(Mic)
   privateAccess(Engine2D)
   privateAccess(NdsScheduler)
+  privateAccess(Slot2)
+  privateAccess(Gpu)
   let g = n.gpu3d.geo
   check_range(g.nbuf, 0, 3, "geometry.nbuf")
   check_range(n.gpu3d.pk_left, 0, 32, "gpu3d.pk_left")
+  check_range(g.vram_count, 0, MAX_VERTS, "geometry.vram_count")
+  # what the commands mask them to (geometry.nim), so their next step
+  # cannot overflow
+  check_range(g.mode, 0, 3, "geometry.mode")
+  check_range(g.prim, 0, 3, "geometry.prim")
+  check_range(g.proj_sp, 0, 1, "geometry.proj_sp")
+  check_range(g.tex_sp, 0, 1, "geometry.tex_sp")
+  check_range(g.pos_sp, 0, 63, "geometry.pos_sp")
+  for v in [g.vp_x1, g.vp_y1, g.vp_x2, g.vp_y2]:
+    check_range(int(v), 0, 255, "geometry.viewport")   # VIEWPORT's bytes
+  # a polygon's vertices are a run of its list's (render.nim draw_polygon)
+  for (polys, verts) in [(addr g.polys, addr g.verts), (addr n.gpu3d.polys, addr n.gpu3d.verts)]:
+    for p in polys[]:
+      if p.first < 0 or p.count < 0 or int(p.first) + int(p.count) > verts[].len:
+        raise state_error("DS state has a polygon past the end of its vertices")
   let c = n.cart
   check_range(c.buf.len, 0, 0x4000, "cart.buf")
   check_range(c.pos, 0, c.buf.len, "cart.pos")
@@ -550,21 +746,54 @@ proc after_load(n: NDS) =
   check_range(n.spi.fid_idx, 0, high(int32), "spi.fid_idx")
   check_range(n.spi.pm_index, -1, 0xFF, "spi.pm_index")
   check_range(n.wifi.tx_src, -1, 6, "wifi.tx_src")
+  check_range(n.wifi.tx_hdr, -1, 0xFFFF, "wifi.tx_hdr")
   check_range(n.spi.mic.rd, 0, n.spi.mic.buf.len, "mic.rd")
+  # the stylus on the bottom screen (set_touch clamps it), which the touch
+  # controller scales by the firmware's calibration
+  check_range(n.input.touch_x, 0, 255, "input.touch_x")
+  check_range(n.input.touch_y, 0, 191, "input.touch_y")
   for ch in n.spu.ch:
     check_range(ch.adpcm_index, 0, 88, "spu.adpcm_index")
     check_range(ch.loop_index, 0, 88, "spu.loop_index")
+    # SOUNDxLEN as written (22 bits; the stream length is PNT + LEN in an
+    # int32); the read-ahead runs from the word being played to FIFO_WORDS
+    # past it (`fill` loops until it gets there); the timer count stays
+    # under a step past 0x10000 (`advance` steps until it is back below),
+    # and a start delay is at most 11 samples
+    check_range64(int64(ch.len), 0, 0x3F_FFFF, "spu.len")
+    check_range(int(ch.sw), 0, high(int32), "spu.sw")
+    check_range64(ch.fetched, ch.sw, int64(ch.sw) + FIFO_WORDS, "spu.fetched")
+    check_range64(int64(ch.ctr), 0, 0x1_0000 + int64(TIMER_STEP), "spu.ctr")
+    check_range(int(ch.pos), -11, high(int32), "spu.pos")
+  # a block runs to its end in one go (dma.nim `transfer`): no longer than
+  # DMAxCNT can ask for (count_of)
+  for (d, most) in [(n.dma9, 0x20_0000'i64), (n.dma7, 0x1_0000'i64)]:
+    for c in d.ch: check_range64(int64(c.cur_count), 0, most, "dma.cur_count")
+  for k in n.spu.cap:
+    # bytes of a word gathered (a shift: `capture_store`), words left of LEN
+    check_range(k.acc_bytes, 0, 3, "capture.acc_bytes")
+    check_range64(int64(k.words_left), 0, 0x1_0000, "capture.words_left")
+  # The GBA slot's save chip: its memory as long as its type's (insert_gba),
+  # the FLASH bank inside it (storage_chip.nim indexes it unmasked), and the
+  # EEPROM's bit counts (`eeprom_read` shifts by what is left)
+  let s2 = n.slot2
+  if s2.kind == s2GbaCart:
+    if s2.save_type == stEEPROM: check_one_of(s2.save.len, [0x200, 0x2000], "slot2.save")
+    else: check_one_of(s2.save.len, [storage_bytes(s2.save_type)], "slot2.save")
+    if s2.save_type in {stFLASH, stFLASH512, stFLASH1M}:
+      check_range(int(s2.flash_bank), 0, s2.save.len div 0x10000 - 1, "slot2.flash_bank")
+      if fsSetBank in s2.flash_state and s2.save_type != stFLASH1M:
+        raise state_error("DS state sets a bank on a one-bank FLASH")
+  check_range(s2.ee_bits, 0, high(int32), "slot2.ee_bits")
+  check_range(s2.ee_out_left, 0, 68, "slot2.ee_out_left")
   for e in [n.gpu.engine_a, n.gpu.engine_b]:
     check_range(e.mmem_rd, 0, MMEM_FIFO_WORDS * 2 - 1, "engine.mmem_rd")
     check_range(e.mmem_n, 0, MMEM_FIFO_WORDS * 2, "engine.mmem_n")
   check_range(n.gpu.vcount, 0, LINES - 1, "gpu.vcount")
+  check_range(n.gpu.mmem_need, 0, 256 * 192, "gpu.mmem_need")
   check_range(n.vcount_write, -1, LINES - 1, "vcount_write")
-  var seen: set[NdsEvent]
-  for e in n.sched.events:
-    for name, f in e.fieldPairs:   # Pending is private to sched.nim
-      when name == "kind":
-        if f in seen: raise state_error("DS state books an event twice")
-        seen.incl f
+  n.check_clocks()
+  n.check_caches()
 
 proc apply_payload(n: NDS; payload: string) =
   var l = Loader(data: cast[ptr UncheckedArray[char]](unsafeAddr payload[0]),
