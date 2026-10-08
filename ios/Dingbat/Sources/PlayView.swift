@@ -55,6 +55,8 @@ struct GameStage: View {
                 }
                 GameScreenView()
                     .frame(width: size.width, height: size.height)
+                    .flightAnchor("screen")
+                    .flightHidden(.screen)
                     .modifier(RumbleShake(active: session.rumbling))
                     .scaleEffect(zoom)
                     .offset(pan)

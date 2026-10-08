@@ -48,7 +48,16 @@ struct DingbatApp: App {
                 let all = RomLibrary.shared.entries
                 if let e = all.first(where: { $0.name == name || $0.fileName == name }) ?? (name == nil ? all.first : nil) {
                     // `-tap`: as a tap on the game (a crash streak asks first).
-                    if args.contains("-2p-start") {
+                    // `-from tile|hero`: the tap came from that picture (its
+                    // flight plays; give the home screen a moment first).
+                    if let from = value("-from"), left == 20 {
+                        let key = from == "hero" ? "hero" : "tile:" + e.id
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            Flights.shared.source(key, e)
+                            if from == "hero" && model.session.game == e { model.resumeFromHero() }
+                            else { model.tapGame(e, resume: args.contains("-resume")) }
+                        }
+                    } else if args.contains("-2p-start") {
                         model.launchTwoPlayer(e)
                     } else if let n = value("-resume-moment").flatMap(Int.init), Checkpoints.moments(e).indices.contains(n) {
                         model.resumeMoment(e, Checkpoints.moments(e)[n])
@@ -60,7 +69,17 @@ struct DingbatApp: App {
                     if let h = value("-home-after").flatMap(Double.init) {
                         func whenRunning(_ tries: Int) {
                             if model.screen == .play && model.session.game != nil {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + h) { model.showMainMenu() }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + h) {
+                                    model.showMainMenu()
+                                    // `-back-after M`: the hero's Resume M
+                                    // seconds later (its flight back).
+                                    if let b = value("-back-after").flatMap(Double.init) {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + b) {
+                                            Flights.shared.source("hero", e)
+                                            model.resumeFromHero()
+                                        }
+                                    }
+                                }
                             } else if tries > 0 {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { whenRunning(tries - 1) }
                             }
@@ -194,6 +213,7 @@ struct RootView: View {
                 HomeView()
                     .transition(.opacity)
             }
+            FlightOverlay()
             ToastStack()
                 .sheet(isPresented: Binding(get: { model.tombstonePrompt != nil },
                                             set: { if !$0 && model.tombstonePrompt != nil { model.answerTombstones(restore: false) } })) {

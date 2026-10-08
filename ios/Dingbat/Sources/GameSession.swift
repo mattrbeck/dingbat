@@ -331,8 +331,17 @@ final class GameSession: NSObject, ObservableObject {
         if !on { lastTick = 0 }
     }
 
+    /// A picture flying onto the screen holds the game until it lands
+    /// (Flights): no frame runs underneath.
+    private(set) var flightHold = false
+    func holdForFlight(_ on: Bool) {
+        guard flightHold != on else { return }
+        flightHold = on
+        if !on { lastTick = 0 }
+    }
+
     @objc private func tick(_ link: CADisplayLink) {
-        guard game != nil, !clipHold else { return }
+        guard game != nil, !clipHold, !flightHold else { return }
         let now = link.timestamp
         let dt = lastTick == 0 ? 0 : min(now - lastTick, 0.25)
         lastTick = now
