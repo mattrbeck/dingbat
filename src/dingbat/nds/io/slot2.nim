@@ -31,10 +31,11 @@
 ##   that sticks only while unlocked) works on it.
 
 import ../../gba/storage_chip
+import ../quirky
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 type
   Slot2Kind* = enum

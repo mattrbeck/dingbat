@@ -43,9 +43,11 @@
 ## output rate aliases at full level: Assumed), sub-tick start timing (a
 ## start bit takes effect at the next mixer tick).
 
+import ../quirky
+
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 const
   FIFO_WORDS* = 8           ## channel read-ahead, words (Assumed)
@@ -91,7 +93,7 @@ type
 const
   SPU_TICK_CYCLES* = 2048   ## master cycles per mixer tick (1024 bus cycles)
   SAMPLE_RATE* = 33_513_982.0 / 1024.0
-  TIMER_STEP = 512'u32      ## channel timer counts per mixer tick
+  TIMER_STEP* = 512'u32     ## channel timer counts per mixer tick
   MAX_FRAMES = 32768        ## undrained output is dropped beyond this
 
   FMT_PCM8 = 0'u32

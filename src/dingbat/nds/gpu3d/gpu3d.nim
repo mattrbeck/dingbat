@@ -50,12 +50,13 @@ import ../mem/vram
 import ../io/irq
 import ../sched
 import geometry, render
+import ../quirky
 
 export geometry.Vertex, geometry.Polygon, render.Renderer
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 type
   FifoEntry = object
