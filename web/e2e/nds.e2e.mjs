@@ -340,8 +340,8 @@ test("phone sideways: every arrangement stays clear of the control rails", { ski
     const b = await boxes(page);
     assert.ok(b.canvas.l >= b.dpad.r - 0.5 && b.canvas.r <= b.ab.l + 0.5,
               `${tag(m)}: between the d-pad and the face buttons`);
-    assert.ok(b.canvas.l >= b.select.r - 0.5 && b.canvas.r <= b.start.l + 0.5,
-              `${tag(m)}: clear of Select and Start`);
+    const apart = (p, q) => p.r <= q.l + 0.5 || q.r <= p.l + 0.5 || p.b <= q.t + 0.5 || q.b <= p.t + 0.5;
+    assert.ok(apart(b.canvas, b.select) && apart(b.canvas, b.start), `${tag(m)}: clear of Select and Start`);
   }
   assert.deepEqual(errors, []);
   await ctx.close();

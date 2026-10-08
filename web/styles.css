@@ -9407,8 +9407,66 @@ body:not(.running) #nds-off {
     letter-spacing: 0.1em;
     text-transform: uppercase;
     white-space: nowrap;
-    color: var(--pill-label);
+    color: inherit;
     opacity: 0.8;
+  }
+  body.nds-mode #select::after {
+    content: "Select";
+  }
+  body.nds-mode #start::after {
+    content: "Start";
+  }
+}
+
+/* DS on a phone held sideways: Select and Start are the same small
+   labelled circles, in the right rail under R (the console has them on its
+   right too), so the screens get the whole height between the d-pad and
+   the face buttons; inboard pills beside the screens left them 303 px
+   tall of 393. Game Boy and GBA games keep their pills. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  body.nds-mode #select-start {
+    /* Placed in the controls' padding box, not the grid row it had. */
+    grid-row: auto;
+    grid-column: auto;
+    position: absolute;
+    top: calc(6px + 44px + 18px);
+    right: calc(6px + var(--safe-r));
+    width: 104px;
+    padding: 0;
+    margin: 0;
+    justify-content: center;
+    gap: 22px;
+  }
+  body.nds-mode.large-controls #select-start {
+    top: calc(6px + 46px + 18px);
+    width: 120px;
+  }
+  body.nds-mode .pad-pill,
+  body.nds-mode.large-controls .pad-pill {
+    flex: none;
+    width: 28px;
+    min-width: 0;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 0;
+    letter-spacing: 0;
+  }
+  body.nds-mode .pad-pill::before,
+  body.nds-mode.large-controls .pad-pill::before {
+    inset: -8px -8px -20px;
+  }
+  body.nds-mode .pad-pill::after {
+    position: absolute;
+    top: calc(100% + 3px);
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: inherit;
   }
   body.nds-mode #select::after {
     content: "Select";

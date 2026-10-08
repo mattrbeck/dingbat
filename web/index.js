@@ -17306,8 +17306,8 @@ const ndsTapTaken = (x, y) => {
 // The room the screens get. On a phone held sideways the touch controls are
 // rails over the stage's sides (styles.css), and the bottom screen under a
 // rail could not be touched: the screens fit between the d-pad (or stick)
-// and the face buttons instead, and clear of the Select/Start pills just
-// inboard of them, centred as the stage centres them.
+// and the face buttons instead, centred as the stage centres them (a DS
+// game's Select/Start sit in the right rail under R, styles.css).
 /** @param {[number, number]} wh @returns {[number, number]} */
 const ndsAvail = ([w, h]) => {
   const ctl = document.getElementById("controls");
@@ -17317,14 +17317,10 @@ const ndsAvail = ([w, h]) => {
   const right = document.getElementById("ab");
   const l = left?.getBoundingClientRect(), r = right?.getBoundingClientRect();
   if (!l?.width || !r?.width) return [w, h];
-  const sel = document.getElementById("select")?.getBoundingClientRect();
-  const st = document.getElementById("start")?.getBoundingClientRect();
-  const lEdge = Math.max(l.right, sel?.width ? sel.right : 0);
-  const rEdge = Math.min(r.left, st?.width ? st.left : Infinity);
   const s = stageEl.getBoundingClientRect();
   const mid = s.left + s.width / 2;
   // Symmetric about the stage's centre: the canvas is centred there.
-  const half = Math.min(mid - lEdge, rEdge - mid) - 8;
+  const half = Math.min(mid - l.right, r.left - mid) - 8;
   return half > 0 ? [Math.min(w, 2 * half), h] : [w, h];
 };
 
