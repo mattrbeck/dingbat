@@ -37,9 +37,6 @@ final class Settings: ObservableObject {
     @Published var controlStyle: ControlStyle { didSet { d.set(controlStyle.rawValue, forKey: "control-style") } }
     @Published var joystickMode: JoystickMode { didSet { d.set(joystickMode.rawValue, forKey: "joystick-mode") } }
     @Published var hideTouchOnGamepad: Bool { didSet { d.set(hideTouchOnGamepad, forKey: "hide-touch-on-gamepad") } }
-    /// Phone held upright: the bar folds off the top over a game, as it
-    /// does sideways (web fold-bar-upright).
-    @Published var foldBar: Bool { didSet { d.set(foldBar, forKey: "fold-bar-upright") } }
     @Published var inputDisplay: Bool { didSet { d.set(inputDisplay, forKey: "input-display") } }
     @Published var libraryOpen: LibraryOpen { didSet { d.set(libraryOpen.rawValue, forKey: "library-open") } }
     @Published var haptics: Bool { didSet { d.set(haptics, forKey: "haptics") } }
@@ -103,7 +100,6 @@ final class Settings: ObservableObject {
         controlStyle = ControlStyle(rawValue: str("control-style") ?? "") ?? .dpad
         joystickMode = JoystickMode(rawValue: str("joystick-mode") ?? "") ?? .fixed
         hideTouchOnGamepad = bool("hide-touch-on-gamepad", true)
-        foldBar = bool("fold-bar-upright", true)
         inputDisplay = bool("input-display", false)
         libraryOpen = LibraryOpen(rawValue: str("library-open") ?? "") ?? .resume
         haptics = bool("haptics", true)
@@ -187,7 +183,7 @@ final class Settings: ObservableObject {
 
     func resetAll() {
         for k in ["large-controls", "landscape-buttons", "gbRumble", "control-style", "joystick-mode",
-                  "hide-touch-on-gamepad", "fold-bar-upright", "input-display", "library-open", "haptics",
+                  "hide-touch-on-gamepad", "input-display", "library-open", "haptics",
                   "gb-palette.mode", "gb-palette.custom", "sgbEnable", "sgbBorder",
                   "gbaRunBios", "gbaBiosMode", "colorCorrect", "video.upscaleFilter",
                   "video.integerScale", "video.lcdResponse", "video.ambientGlow",
@@ -204,7 +200,6 @@ final class Settings: ObservableObject {
         controlStyle = fresh.controlStyle
         joystickMode = fresh.joystickMode
         hideTouchOnGamepad = fresh.hideTouchOnGamepad
-        foldBar = fresh.foldBar
         inputDisplay = fresh.inputDisplay
         libraryOpen = fresh.libraryOpen
         haptics = fresh.haptics

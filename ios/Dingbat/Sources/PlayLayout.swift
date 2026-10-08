@@ -12,8 +12,6 @@ import UIKit
 final class PadGeometry {
     static let shared = PadGeometry()
     var rects: [CGRect] = []
-    /// The bar is folded away, so a tap on the picture toggles it.
-    var barFolds = false
 }
 
 /// Where each touch control sits, in the play screen's own coordinates.
@@ -28,10 +26,8 @@ struct ControlFrames: Equatable {
     var select: CGRect = .null
     var start: CGRect = .null
     /// The pills' touch area reaches past the drawn pill above and below
-    /// (phone landscape, phone upright), never sideways.
+    /// (phone landscape), never sideways.
     var pillSlop: CGFloat = 0
-    /// The same for the shoulders (phone upright's slim row).
-    var shoulderSlop: CGFloat = 0
 
     func hitRect(_ id: Int) -> CGRect {
         switch id {
@@ -39,8 +35,8 @@ struct ControlFrames: Equatable {
         case 5: return b
         case 6: return select.insetBy(dx: 0, dy: -pillSlop)
         case 7: return start.insetBy(dx: 0, dy: -pillSlop)
-        case 8: return l.isNull ? l : l.insetBy(dx: 0, dy: -shoulderSlop)
-        case 9: return r.isNull ? r : r.insetBy(dx: 0, dy: -shoulderSlop)
+        case 8: return l
+        case 9: return r
         default: return .null
         }
     }
@@ -65,16 +61,8 @@ struct PlayGeometry: Equatable {
     var controls: ControlFrames?
     var large = false
     var pillFont: CGFloat = 11
-    var shoulderFont: CGFloat = 15
-    /// The bar waits off the top until a tap on the picture brings it down:
-    /// always on a phone held sideways, and on one held upright with "Hide
-    /// the top bar while playing" on.
-    var barFolds = false
 
     static let barHeight: CGFloat = 52
-    /// Phone upright: the picture is a window this far in from each side
-    /// (web --stage-inset).
-    static let stageInset: CGFloat = 12
 
     struct Inputs: Equatable {
         var size: CGSize
@@ -84,8 +72,6 @@ struct PlayGeometry: Equatable {
         var isGB: Bool
         var large: Bool
         var hidden: Bool
-        /// Settings › Controls › Hide the top bar while playing.
-        var foldBar: Bool = true
     }
 
     static func make(_ i: Inputs) -> PlayGeometry {
@@ -116,7 +102,6 @@ struct PlayGeometry: Equatable {
         let w = size.width, h = size.height
         let short = h <= 620
         let tablet = w >= 700
-        if !tablet { return phonePortrait(i) }
         let padTop: CGFloat = short ? 10 : 14
         let padBottom: CGFloat = (short ? 12 : 16) + safe.bottom
         let gap: CGFloat = short ? 10 : 14
@@ -177,80 +162,12 @@ struct PlayGeometry: Equatable {
         controls = f
     }
 
-    // MARK: phone upright
-
-    /// web "Phone held upright: the picture gets the room": L, Select,
-    /// Start and R share one slim row over the d-pad and the face buttons
-    /// (the shoulders at the edges, the pills between them), the bar folds
-    /// off the top until a tap on the picture (Settings › Controls › Hide
-    /// the top bar while playing), and the picture is a window 12pt in from
-    /// the sides. The d-pad and the face buttons keep their size.
-    private mutating func phonePortrait(_ i: Inputs) {
-        let w = size.width, h = size.height
-        let short = h <= 620
-        let padTop: CGFloat = short ? 10 : 14
-        let padBottom: CGFloat = (short ? 12 : 16) + safe.bottom
-        let gap: CGFloat = 12
-        let padL = 16 + safe.leading, padR = 16 + safe.trailing
-        let rowH: CGFloat = 30
-        let mainH = i.large ? min(0.64 * w, 330) : min(0.54 * w, 290)
-        pillFont = 9
-        shoulderFont = 12
-        barFolds = i.foldBar
-        bar = CGRect(x: safe.leading, y: safe.top, width: w - safe.leading - safe.trailing, height: Self.barHeight)
-        let stageTop = barFolds ? safe.top : bar.maxY
-        let sx = Self.stageInset + safe.leading
-        let sw = max(0, w - 2 * Self.stageInset - safe.leading - safe.trailing)
-        guard !i.hidden else {
-            stage = CGRect(x: sx, y: stageTop, width: sw, height: max(0, h - safe.bottom - stageTop))
-            return
-        }
-        let stripH = padTop + rowH + gap + mainH + padBottom
-        strip = CGRect(x: 0, y: h - stripH, width: w, height: stripH)
-        stage = CGRect(x: sx, y: stageTop, width: sw, height: max(0, strip.minY - stageTop))
-
-        var f = ControlFrames()
-        let cw = w - padL - padR
-        let top = strip.minY + padTop
-        if !i.isGB {
-            let lw: CGFloat = 76
-            f.l = CGRect(x: padL, y: top, width: lw, height: rowH)
-            f.r = CGRect(x: w - padR - lw, y: top, width: lw, height: rowH)
-        }
-        let pw: CGFloat = 60, ph: CGFloat = 24
-        let mid = padL + cw / 2
-        f.select = CGRect(x: mid - 5 - pw, y: top + (rowH - ph) / 2, width: pw, height: ph)
-        f.start = CGRect(x: mid + 5, y: top + (rowH - ph) / 2, width: pw, height: ph)
-        // Smaller to see, not to hit: 7pt past the drawn edge above and below.
-        f.pillSlop = 7
-        f.shoulderSlop = 7
-        placeCluster(&f, y0: top + rowH + gap, height: mainH, left: padL, width: cw, large: i.large)
-        controls = f
-    }
-
-    /// The d-pad (or the joystick's region) and the face buttons in a row
-    /// `height` tall from `y0` (web #main-controls), as portrait has them.
-    private func placeCluster(_ f: inout ControlFrames, y0: CGFloat, height cb: CGFloat,
-                              left padL: CGFloat, width cw: CGFloat, large: Bool) {
-        let dpad = large ? min(0.62 * cw, 330, cb) : min(0.46 * cw, 240, cb)
-        f.dpad = CGRect(x: padL, y: y0 + (cb - dpad) / 2, width: dpad, height: dpad)
-        f.joyRegion = CGRect(x: padL, y: y0, width: cw / 2, height: cb)
-        // Upright, the base sits centred in its region.
-        f.joyBase = CGRect(x: f.joyRegion.midX - dpad / 2, y: f.joyRegion.midY - dpad / 2, width: dpad, height: dpad)
-        let btn = large ? min(0.42 * cw / 2.8, 74, cb / 2.8) : min(0.46 * cw / 2.7, 84, cb / 2.7)
-        let abW = btn * (large ? 2.05 : 2.2)
-        let abH = min(0.46 * cw, 240, cb)
-        let ab = CGRect(x: padL + cw - abW, y: y0 + (cb - abH) / 2, width: abW, height: abH)
-        placeAB(&f, in: ab, button: btn)
-    }
-
     // MARK: phone landscape
 
     /// web max-height 500 landscape: the stage takes the whole screen, the
     /// bar waits off the top, and see-through pads hug the screen edges.
     private mutating func phoneLandscape(_ i: Inputs) {
         let w = size.width, h = size.height
-        barFolds = true
         bar = CGRect(x: 0, y: 0, width: w, height: Self.barHeight)
         stage = CGRect(origin: .zero, size: size)
         guard !i.hidden else { return }
@@ -371,8 +288,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
             let g = PlayGeometry.make(.init(
                 size: geo.size, safe: safe, compactHeight: vSize == .compact,
                 regular: hSize == .regular && vSize == .regular, isGB: isGB,
-                large: settings.largeControls, hidden: model.gamepadHidesTouch,
-                foldBar: settings.foldBar))
+                large: settings.largeControls, hidden: model.gamepadHidesTouch))
             let origin = geo.frame(in: .global).origin
             ZStack(alignment: .topLeading) {
                 (palette.chromeTransparent ? Color.clear : palette.stage)
@@ -386,7 +302,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
                 if let f = g.controls {
                     TouchControls(frames: f, geometry: g)
                     TouchRouter(frames: f, enabled: !model.menuOpen,
-                                blockedTop: g.barFolds && barDown ? g.bar.maxY : 0)
+                                blockedTop: g.mode == .phoneLandscape && barDown ? g.bar.maxY : 0)
                         .frame(width: g.size.width, height: g.size.height)
                 }
                 barLayer(g)
@@ -396,7 +312,6 @@ struct PlayLayout<Stage: View, Bar: View>: View {
             .onChange(of: g) { publish($0, origin: origin) }
             .onChange(of: game) { _ in publish(g, origin: origin) }
             .onChange(of: settings.controlStyle) { _ in publish(g, origin: origin) }
-            .onChange(of: settings.foldBar) { _ in publish(g, origin: origin) }
         }
         .ignoresSafeArea()
         .onDisappear { PadGeometry.shared.rects = [] }
@@ -423,27 +338,6 @@ struct PlayLayout<Stage: View, Bar: View>: View {
                 .shadow(color: .black.opacity(barDown ? 0.55 : 0), radius: 13, y: 10)
                 .offset(y: barDown ? 0 : -(PlayGeometry.barHeight + 30))
                 .animation(.easeOut(duration: 0.2), value: barDown)
-        case .portrait where g.barFolds:
-            // Folded off the top until a tap on the picture (or the menu)
-            // brings it down over the picture; its colour runs up behind
-            // the status area with it.
-            ZStack(alignment: .topLeading) {
-                Group {
-                    if palette.chromeTransparent { palette.bg } else {
-                        LinearGradient(colors: [palette.topbarTop, palette.topbarBottom],
-                                       startPoint: .top, endPoint: .bottom)
-                    }
-                }
-                .frame(width: g.size.width, height: g.bar.maxY)
-                bar
-                    .frame(width: g.bar.width, height: g.bar.height)
-                    .offset(x: g.bar.minX, y: g.bar.minY)
-            }
-            .frame(width: g.size.width, height: g.bar.maxY, alignment: .topLeading)
-            .overlay(Rectangle().fill(palette.frameLine).frame(height: 1), alignment: .bottom)
-            .shadow(color: .black.opacity(barDown ? 0.55 : 0), radius: 13, y: 10)
-            .offset(y: barDown ? 0 : -(g.bar.maxY + 30))
-            .animation(.easeOut(duration: 0.2), value: barDown)
         case .portrait, .tabletLandscape:
             // The bar's colour runs up behind the status area.
             Group {
@@ -466,10 +360,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
 
     private func publish(_ g: PlayGeometry, origin: CGPoint) {
         PadGeometry.shared.rects = (g.controls?.drawn(joystick: settings.controlStyle == .joystick) ?? []).map { $0.offsetBy(dx: origin.x, dy: origin.y) }
-        PadGeometry.shared.barFolds = g.barFolds
-        if g.barFolds && GameSession.shared.game != nil { BarTapHint.showIfNeeded() }
-        // Unfolded, the bar is in its place: nothing left open over the picture.
-        if !g.barFolds && model.topbarOpen { model.topbarOpen = false }
+        if g.mode == .phoneLandscape && GameSession.shared.game != nil { BarTapHint.showIfNeeded() }
         if g.controls == nil { TouchRouterView.current?.releaseAll() }
     }
 }

@@ -294,11 +294,6 @@ private struct ControlsPane: View {
                 SheetChipPicker(selection: $s.joystickMode, options: [(.fixed, "Fixed"), (.floating, "Floating")])
             }
         }
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            SheetToggleRow(label: "Hide the top bar while playing",
-                           sub: "On a phone held upright the picture takes the bar’s room. Tap the picture to bring the bar back",
-                           isOn: $s.foldBar)
-        }
         SheetToggleRow(label: "Hide touch controls with a controller",
                        sub: "Hide the on-screen buttons while a game controller is connected",
                        isOn: $s.hideTouchOnGamepad)

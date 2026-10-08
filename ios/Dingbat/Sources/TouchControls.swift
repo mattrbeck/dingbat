@@ -181,10 +181,10 @@ struct TouchControls: View {
                 .frame(width: f.b.width, height: f.b.height)
                 .offset(x: f.b.minX, y: f.b.minY)
             if !f.l.isNull {
-                ShoulderKey(label: "L", font: geometry.shoulderFont, skin: skin, pressed: state.lit.contains(8))
+                ShoulderKey(label: "L", skin: skin, pressed: state.lit.contains(8))
                     .frame(width: f.l.width, height: f.l.height)
                     .offset(x: f.l.minX, y: f.l.minY)
-                ShoulderKey(label: "R", font: geometry.shoulderFont, skin: skin, pressed: state.lit.contains(9))
+                ShoulderKey(label: "R", skin: skin, pressed: state.lit.contains(9))
                     .frame(width: f.r.width, height: f.r.height)
                     .offset(x: f.r.minX, y: f.r.minY)
             }
@@ -348,13 +348,11 @@ struct FaceButton: View {
 /// web .pad-shoulder: 10pt top corners, 6pt bottom.
 struct ShoulderKey: View {
     let label: String
-    var font: CGFloat = 15
     let skin: PadSkin
     let pressed: Bool
 
     var body: some View {
-        // The slim row's shoulders (a smaller label) get smaller corners.
-        let shape = font < 15 ? CornerRect(top: 8, bottom: 5) : CornerRect(top: 10, bottom: 6)
+        let shape = CornerRect(top: 10, bottom: 6)
         ZStack {
             if let fill = skin.fill(.pad, pressed: pressed) {
                 shape.fill(gradient(fill))
@@ -362,8 +360,8 @@ struct ShoulderKey: View {
             shape.inset(by: skin.borderWidth(.pad) / 2)
                 .stroke(skin.border(.pad, pressed: pressed), lineWidth: skin.borderWidth(.pad))
             Text(label)
-                .font(.system(size: font, weight: .semibold))
-                .tracking(font * 0.12)
+                .font(.system(size: 15, weight: .semibold))
+                .tracking(1.8)
                 .foregroundColor(skin.label(.pad, pressed: pressed))
         }
         .modifier(PadShadow(skin: skin, pressed: pressed))
