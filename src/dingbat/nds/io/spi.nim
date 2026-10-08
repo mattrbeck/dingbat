@@ -10,10 +10,11 @@
 
 import irq, input, mic
 import ../sched
+import ../quirky
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 type
   FlashState = enum fsIdle, fsAddr, fsRead, fsWrite, fsErase, fsStatus, fsId, fsOther

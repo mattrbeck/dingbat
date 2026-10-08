@@ -34,10 +34,11 @@
 import std/[algorithm, math, tables]
 import ../mem/vram
 import geometry
+import ../quirky
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 const
   W* = 256
@@ -158,8 +159,9 @@ proc build_pages(r: Renderer; vram: Vram) =
   for p in 0..7: r.pal_pages[p] = (if p < 6: r.page_ptr(vram, vrTexPal, p) else: zero)
 
 # The per-dot path runs without runtime checks: every index into the
-# buffers and page tables is clamped or masked to its range.
-{.push checks: off.}
+# buffers and page tables is clamped or masked to its range (index checks
+# on in statefuzz's build: quirky.nim).
+{.push checks: off, boundChecks: nds_render_checks.}
 
 template tex8(r: Renderer; a: int): uint32 = uint32(r.tex_pages[(a shr 14) and 31][a and 0x3FFF])
 template tex16(r: Renderer; a: int): uint32 = r.tex8(a) or (r.tex8(a + 1) shl 8)

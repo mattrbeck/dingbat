@@ -17,10 +17,11 @@
 ## page's start in `mem`), so a line knows which blocks it depends on.
 
 import std/bitops
+import ../quirky
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 const
   VRAM_TOTAL = 656 * 1024

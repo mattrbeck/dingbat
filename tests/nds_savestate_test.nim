@@ -3,7 +3,8 @@
 ## queued, a card transfer in flight, sound channels playing -- loaded into a
 ## fresh machine runs on to the same screens and sound as the machine it was
 ## taken from, and saving it again gives the same bytes. Plus the refusals:
-## another game, damage, another layout, another BIOS.
+## another game, damage, another layout, another BIOS, and hostile values in
+## the fields the core indexes or runs its clocks by.
 ##
 ## Test ROMs come from ${DINGBAT_NDS_ROMS:-~/.cache/dingbat-nds/roms}
 ## (tests/nds/README.md); BIOS dumps from $DINGBAT_NDS_BIOS when set (the HLE
@@ -17,7 +18,9 @@ import std/importutils
 import dingbat/nds/air
 import dingbat/nds/io/[dma, rtc, cart, slot2, wifi]
 import dingbat/gba/rtc_calendar
-import dingbat/nds/gpu3d/gpu3d
+import dingbat/nds/gpu3d/[gpu3d, geometry]
+import dingbat/nds/[sched, timing]
+import dingbat/gba/storage_chip
 import dingbat/common/serialize
 
 var failures = 0
@@ -290,6 +293,112 @@ proc refusals() =
         "an older build's state loads, and the machine is as the newer state leaves it",
         last_state_error)
 
+proc hostile_fields() =
+  ## A file is outside input: the payload hash is an integrity check, so a
+  ## state can say anything. Every field the core later indexes, shifts or
+  ## divides with, or runs its clocks by, is refused at load, never handed
+  ## on, because the core is quirky (nds/quirky.nim): past a failed check it
+  ## goes on, and a wild index is a SIGSEGV, not an IndexDefect. Each value
+  ## is written by the real saver from a machine holding it, then offered to
+  ## another one, which has to refuse it and stay as it was.
+  ## tools/statefuzz.nim finds these; each is one it found, or the audit
+  ## that followed.
+  echo "hostile fields: a state's indexes and clocks are checked at load"
+  let path = rom_dir / "fb_both.nds"
+  let path3d = rom_dir / "3d" / "3d_texfmt.nds"
+  if not fileExists(path) or not fileExists(path3d):
+    check(false, "missing " & path & " / " & path3d)
+    return
+  privateAccess(NdsScheduler)
+  privateAccess(TagCache)
+  privateAccess(Geometry)
+  proc offer(what: string; poke: proc (n: NDS); rom = path; prep: proc (n: NDS) = nil) =
+    proc made(): NDS =
+      result = machine(rom)
+      if prep != nil: prep(result)
+      for _ in 0 ..< 30: result.run_frame()
+    let src = made()
+    poke(src)
+    let img = src.state_bytes()
+    let dst = made()
+    let before = dst.state_payload()
+    check(not dst.load_state_bytes(img) and dst.state_payload() == before,
+          what & " is refused, machine untouched", last_state_error)
+  offer("an ARM9 clock far behind the master clock",
+        proc (n: NDS) = n.arm9.cycles -= 1'i64 shl 56)
+  offer("an ARM7 clock far ahead of it",
+        proc (n: NDS) = n.arm7.cycles += 1'i64 shl 50)
+  offer("a master clock past 2^55 cycles",
+        proc (n: NDS) =
+          n.sched.now += 1'i64 shl 56
+          n.arm9.cycles += 1'i64 shl 56
+          n.arm7.cycles += 1'i64 shl 56)
+  offer("an event booked a second in the past",
+        proc (n: NDS) = n.sched.schedule(n.sched.now - MASTER_HZ, evRtc))
+  offer("the sound mixer's tick far in the past",
+        proc (n: NDS) = n.spu.next_tick -= 1'i64 shl 56)
+  offer("a line that began a second ago",
+        proc (n: NDS) = n.line_start -= MASTER_HZ)
+  offer("an ARM7 instruction that turns its clock back",
+        proc (n: NDS) = n.arm7.base_cycles = -1)
+  offer("a timer unit booking another unit's events",
+        proc (n: NDS) = n.timers9.first_event = evRtc)
+  offer("a data-cache line past main RAM",
+        proc (n: NDS) = n.tm.dline[5].line1 = 0x0040_0000)
+  offer("a data-cache line outside its set",
+        proc (n: NDS) = n.tm.dline[5].line1 = 1)
+  offer("a main RAM line in two data-cache slots",
+        proc (n: NDS) =
+          n.tm.dline[4].line1 = 2
+          n.tm.dline[5].line1 = 2)
+  offer("an empty data-cache slot holding a dirty line",
+        proc (n: NDS) =
+          n.tm.dline[5].line1 = 0
+          n.tm.dline[5].dirty = true)
+  offer("a cache round-robin pointer past its set",
+        proc (n: NDS) = n.tm.icache.rr[3] = 7)
+  offer("a cache victim past the cache",
+        proc (n: NDS) = n.tm.dcache.victim = 4096)
+  offer("a polygon past the end of its vertices",
+        proc (n: NDS) = n.gpu3d.polys.add(Polygon(first: int32(n.gpu3d.verts.len), count: 3)),
+        path3d)
+  offer("a 3D frame drawn to line -16777216",
+        proc (n: NDS) = n.gpu3d.done_lines = -16777216, path3d)
+  offer("an ARM7 instruction with 2^62 internal cycles to charge",
+        proc (n: NDS) = n.arm7.icycles = 1'i64 shl 62)
+  offer("a sound channel 2^32 - 84 words long",
+        proc (n: NDS) = n.spu.ch[3].len = 0xFFFF_FFAC'u32)
+  offer("an ADPCM decoder sample of 2^31 - 2^24",
+        proc (n: NDS) = n.spu.ch[3].adpcm_pcm = 0x7F00_0000)
+  offer("a sound channel that has read 2^31 words ahead",
+        proc (n: NDS) = n.spu.ch[3].fetched = high(int32))
+  offer("a DMA block of 2^32 - 1 words",
+        proc (n: NDS) = n.dma9.ch[1].cur_count = 0xFFFF_FFFF'u32)
+  offer("a viewport 2^31 dots wide",
+        proc (n: NDS) = n.gpu3d.geo.vp_x2 = high(int32), path3d)
+  offer("a second FLASH bank on a 64 KB GBA-slot FLASH",
+        proc (n: NDS) =
+          privateAccess(Slot2)
+          n.slot2.save_type = stFLASH
+          n.slot2.save.setLen(0x10000)
+          n.slot2.flash_bank = 1,
+        rom_dir / "slot2_probe.nds",
+        proc (n: NDS) = n.insert_slot2(s2GbaCart, gba_cart()))
+
+  # `next` (the earliest booking) is rebuilt, not trusted: one later than
+  # the first event would stop the clock there for good
+  let a = machine(path)
+  for _ in 0 ..< 30: a.run_frame()
+  let want = a.state_payload()
+  a.sched.next = high(int64)
+  let img = a.state_bytes()
+  let b = machine(path)
+  check(b.load_state_bytes(img) and b.state_payload() == want,
+        "a state's stale earliest booking is put right at load", last_state_error)
+  let f = b.gpu.frame_count
+  b.run_frame()
+  check(b.gpu.frame_count == f + 1, "and the machine runs on")
+
 when isMainModule:
   let cases = [
     Case(name: "3d_sort", rom: "3d/3d_sort.nds", frames: 10, moment: "mid-frame"),
@@ -321,6 +430,7 @@ when isMainModule:
   for c in cases: round_trip(c)
   wifi_pair()
   refusals()
+  hostile_fields()
   if failures > 0:
     echo failures, " check(s) failed"
     quit(1)

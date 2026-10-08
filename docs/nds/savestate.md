@@ -147,8 +147,61 @@ undefined bits, and after the walk the fields used as array indices are
 checked (polygon assembly count, packed-command parameters, card position,
 RTC/SPI/backup counters, ADPCM indices, main-memory FIFO indices, wifi
 transmit source, mic read position, VCOUNT, no event booked twice). Any
-refusal restores the machine from a payload taken just before. The guards
-cover what a crafted file could index with; they have not been fuzzed.
+refusal restores the machine from a payload taken just before.
+
+The core is quirky (docs/nds/perf.md, "Error-flag checks"): past a failed
+check it goes on, so a wild index is a stray access, not an IndexDefect.
+`tools/statefuzz.nim` (a `.nds` ROM; built with `-d:nds_quirky=false
+-d:nds_render_checks`, `nimble statefuzz_build`) sets each byte of a
+state's fields in turn (the memories are left alone: the guest writes
+them itself), reseals the payload hash, loads the result and runs four
+frames, each in a child process, so a Defect, a signal or a hang (20 s) is
+counted where it happens. What it found, and an audit of the fields it
+had not reached (the GBA slot, DMA, the viewport, the stylus), the loader
+now refuses (`after_load`, `check_clocks`, `check_caches`):
+
+- **Clocks.** The master clock past 2^55 cycles; a CPU's clock more than
+  a frame behind it (the CPU would run for hours to catch up) or 64 ahead;
+  an event booked more than a frame in the past (it would repeat to catch
+  up: the display line, the sound mixer's tick) or 2^40 cycles ahead; the
+  current line's start, the mixer's next tick, cycles an instruction has
+  not charged yet (`wait9`/`wait7`, `icycles`) outside their frame; an
+  instruction cost, a timer unit's events, a DMA unit's or a display
+  engine's identity other than the machine's own constants; the GBA slot's
+  access times past 18. Every other dated field
+  (timers, the divider, the busy flags, wifi's timers and frames in
+  flight, the 3D engine's FIFO and rendering, the RTC's tick bases) within
+  2^55 of zero, so a difference of two cannot overflow; the mic queue's
+  position not after now, its rate at most 2^20 a second. `next`, the
+  earliest booking, is rebuilt from the events rather than read: one later
+  than the first event stopped the clock there for good.
+- **ARM9 caches.** A line held is main RAM's and in the set its address
+  picks, the data cache holds it in one slot, an empty slot holds nothing
+  dirty, round-robin and victim pointers stay in their sets; the per-line
+  and per-page tables built from the slots (`slot_of`, `page_apart`,
+  `shadows`) are rebuilt instead of read.
+- **3D.** A polygon's vertices inside its list, the vertex count, matrix
+  mode, primitive, stack pointers and viewport within what the commands
+  mask them to, the lines drawn so far of a frame within 192.
+- **DMA and display.** A running block no longer than DMAxCNT can ask for
+  (it runs to its end in one go), the main-memory display's pixels still
+  to request within a frame, the stylus on the bottom screen.
+- **Sound.** SOUNDxLEN within its 22 bits, the ADPCM decoder's sample
+  within 16 bits, the read-ahead between the word playing and FIFO_WORDS
+  past it, the timer count under a step past 0x10000, a start delay of at
+  most 11 samples; a capture unit's gathered bytes and words left.
+- **GBA slot.** The save chip's memory as long as its type's, a FLASH bank
+  inside it (and a bank switch only on a 1 Mbit part), the EEPROM's bit
+  counts; wifi's TX header address.
+
+After the fixes, sweeps setting each byte to 0xFF, 0x7F and 0x00 in
+fb_both (frame 120), 3d_texfmt (frame 60) and SoulSilver (p12 frame 7000,
+also 0x80) -- 461,337 states -- and 4,200 random multi-byte mutants of the
+three find nothing uncontained. `tests/nds_savestate_test.nim`
+`hostile_fields` writes such values with the real saver and offers them to
+another machine, which refuses each and stays as it was. Every check holds for states taken at 45 moments each of
+eleven test ROMs (real and HLE BIOS) and 43 each from four SoulSilver
+states (3000, 5000, 7000, 8000), which load and save back byte for byte.
 
 ## Evidence
 
@@ -245,4 +298,3 @@ the screens and the polygon RAM.
 - Migrations once DS states must outlive a build (see Compatibility).
 - Firmware writes (user settings saved through SPI) are not in the state:
   they persist in the firmware image the frontend keeps, if any.
-- Field-fuzzing the loader (tools/statefuzz.nim does it for the GBA).

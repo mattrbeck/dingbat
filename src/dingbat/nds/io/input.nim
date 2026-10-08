@@ -6,10 +6,11 @@
 ## "DS Interrupts": "Screens unfolding").
 
 import irq
+import ../quirky
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 type
   NdsButton* = enum

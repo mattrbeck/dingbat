@@ -12,12 +12,13 @@ import gpu/[gpu, engine2d]
 import gpu3d/gpu3d
 import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi, slot2, mic]
 import hle_bios
+import quirky
 
 export cpu, sched, gpu, engine2d, input, vram, cart, spu, slot2
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 const
   DTLB_SIZE* = 256              ## ARM9 data TLB entries per direction (direct-mapped)
@@ -145,8 +146,8 @@ type
 
 const
   MAIN_RAM_SIZE = 4 * 1024 * 1024
-  ARM9_CYCLES_PER_INSTR = 1     ## one ARM9 clock; memory adds the rest (timing.nim)
-  ARM7_CYCLES_PER_INSTR = 0     ## all ARM7 time is its fetch + data + internal cycles
+  ARM9_CYCLES_PER_INSTR* = 1    ## one ARM9 clock; memory adds the rest (timing.nim)
+  ARM7_CYCLES_PER_INSTR* = 0    ## all ARM7 time is its fetch + data + internal cycles
   SLICE = 64                    ## max master cycles one CPU runs ahead
   NO_PAGE = 0xFFFF_FFFF'u32     ## pu_ok: nothing remembered
 
@@ -515,7 +516,7 @@ proc load_nds*(rom_path: string; bios_dir = ""; boot = nbDirect): NDS =
           read_file_bytes(dir / "firmware.bin"),
           force_hle = getEnv("DINGBAT_NDS_HLE") == "1", boot = boot)
 
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 # ---------------------------------------------------------------------------
 # Sleep (GBATEK "DS Power Control", HALTCNT; "BIOS Halt Functions", Stop/Sleep)

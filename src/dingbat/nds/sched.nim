@@ -9,9 +9,11 @@
 ## members are part of its layout hash, so adding one refuses older states
 ## rather than misreading them.
 
+import quirky
+
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 type
   NdsEvent* = enum

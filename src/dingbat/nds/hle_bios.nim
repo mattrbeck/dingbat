@@ -28,12 +28,13 @@
 import std/math
 import arm/cpu
 import hle_bios_image
+import quirky
 
 export hle_bios_image
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
 # after every call (docs/nds/perf.md, "Error-flag checks").
-{.push quirky: on.}
+{.push quirky: nds_quirky.}
 
 const
   BIOS9_SIZE* = 4 * 1024
