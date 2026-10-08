@@ -129,6 +129,10 @@ task test_silentaudio, "Check a core that skips mixing (muted) runs exactly as o
   exec "nim c -r -d:test_harness -d:release -d:soak_lib --path:src --path:tests " &
        "-o:dingbat_silent_audio_test tests/silent_audio_test.nim"
 
+task test_iosapi, "Drive the iOS app's C API (src/dingbat_ios.nim) on committed ROMs":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_ios_api_test tests/ios_api_test.nim"
+
 task test_cyclelaws,"Hold the core to the cycle laws recorded from an AGB SP":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_cyclelaws_test tests/cyclelaws_test.nim"

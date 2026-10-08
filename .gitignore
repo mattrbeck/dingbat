@@ -102,6 +102,7 @@ dist/
 
 # iOS build artifacts (built by ios/build-core.sh / xcodegen)
 ios/lib/
+ios/deps/
 ios/Dingbat.xcodeproj/
 ios/build/
 ios/DerivedData/
@@ -187,6 +188,7 @@ tools/gbgate/roms.txt
 /dingbat_ndscpu_test
 /dingbat_state_soak_test
 /dingbat_silent_audio_test
+/dingbat_ios_api_test
 /dingbat_desktop_settings_test
 /dingbat_desktop_lifecycle_test
 /dingbat_desktop_modal_test

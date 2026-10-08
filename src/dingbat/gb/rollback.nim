@@ -126,6 +126,11 @@ proc tick*(sess: GbRollbackSession; localBits: uint16): GbRbStatus =
   sess.localIn[sess.head] = localBits
   sess.sim(sess.head)
   inc sess.head
+  # Remote inputs that arrived before head reached them extend the confirmed
+  # frontier now (they were simulated as known, so nothing re-runs); left to
+  # the next arrival, a peer that goes quiet would leave this side stalled at
+  # the window with the inputs it needs already in hand.
+  sess.reconcile()
   grbAdvanced
 
 proc checksum*(sess: GbRollbackSession): uint64 =

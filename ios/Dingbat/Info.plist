@@ -18,6 +18,19 @@
 				<string>com.mattrb.dingbat.gba</string>
 				<string>com.mattrb.dingbat.gb</string>
 				<string>com.mattrb.dingbat.gbc</string>
+				<string>com.mattrb.dingbat.sgb</string>
+				<string>public.zip-archive</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Game save or state</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.mattrb.dingbat.save</string>
+				<string>com.mattrb.dingbat.state</string>
 			</array>
 		</dict>
 	</array>
@@ -35,14 +48,36 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>A Game Boy Camera cart can see through your camera.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>The link cable connects straight to a friend on the same Wi-Fi.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Tilt carts play by tilting your device.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<true/>
+	</dict>
 	<key>UIRequiresFullScreen</key>
 	<true/>
+	<key>UIStatusBarHidden</key>
+	<false/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -99,6 +134,62 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>gbc</string>
+					<string>cgb</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Super Game Boy ROM</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.mattrb.dingbat.sgb</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>sgb</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Game save</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.mattrb.dingbat.save</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>sav</string>
+					<string>srm</string>
+					<string>sps</string>
+					<string>xps</string>
+					<string>gsv</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>dingbat save state</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.mattrb.dingbat.state</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>state</string>
 				</array>
 			</dict>
 		</dict>

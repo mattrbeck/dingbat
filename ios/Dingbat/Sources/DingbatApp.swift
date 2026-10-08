@@ -2,42 +2,346 @@ import SwiftUI
 
 @main
 struct DingbatApp: App {
-    @StateObject private var library = RomLibrary()
-    @State private var current: RomEntry?
+    @StateObject private var model = AppModel.shared
+    @StateObject private var settings = Settings.shared
+    @StateObject private var session = GameSession.shared
+    @StateObject private var library = RomLibrary.shared
+
+    init() {
+        // Before anything opens a game: a run that ended unseen is counted.
+        CrashWatch.noteCrashedRun()
+        // Before the first frame: the home page starts ready to rise in.
+        _ = LaunchIntro.shared
+        dingbat_init()
+        Settings.shared.apply()
+        Peripherals.shared.install()
+        Task { @MainActor in
+            await RomLibrary.shared.removeInstalledDemo()
+            await DriveSync.shared.resumeOnBoot()
+        }
+    }
 
     /// Dev hook: `simctl launch booted com.mattrb.dingbat -autoplay [name]`
     /// jumps straight into the named (or first) library ROM, so headless
     /// tooling can exercise the play screen without synthesizing taps.
-    private static func autoplayEntry(in library: RomLibrary) -> RomEntry? {
+    ///
+    /// More hooks for screenshots, applied in order after it:
+    ///   -landscape            rotate to landscape
+    ///   -theme <name>         app theme (saved, as a pick in Settings is)
+    ///   -home                 Main Menu (the paused hero)
+    ///   -menu                 open the in-game menu
+    ///   -sheet <id>           open a sheet: settings[:section], states,
+    ///                         saves, rewind, cheats, prints, report,
+    ///                         tile (first game's menu), rename, export
+    private func autoplay() {
         let args = ProcessInfo.processInfo.arguments
-        guard let idx = args.firstIndex(of: "-autoplay") else { return nil }
-        let name = idx + 1 < args.count ? args[idx + 1] : nil
-        if let name, let match = library.entries.first(where: { $0.name == name }) {
-            return match
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count,
+                  !args[i + 1].hasPrefix("-") else { return nil }
+            return args[i + 1]
         }
-        return library.entries.first
+        let model = AppModel.shared
+        let entries = RomLibrary.shared.entries
+        if args.contains("-autoplay") {
+            let name = value("-autoplay")
+            // A game a first Drive pull is bringing is waited for (10 s).
+            // `-resume` opens it as the hero's Resume does.
+            func attempt(_ left: Int) {
+                let all = RomLibrary.shared.entries
+                if let e = all.first(where: { $0.name == name || $0.fileName == name }) ?? (name == nil ? all.first : nil) {
+                    // `-tap`: as a tap on the game (a crash streak asks first).
+                    // `-from tile|hero`: the tap came from that picture (its
+                    // flight plays; give the home screen a moment first).
+                    if let from = value("-from"), left == 20 {
+                        let key = from == "hero" ? "hero" : "tile:" + e.id
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            Flights.shared.source(key, e)
+                            if from == "hero" && model.session.game == e { model.resumeFromHero() }
+                            else { model.tapGame(e, resume: args.contains("-resume")) }
+                        }
+                    } else if args.contains("-2p-start") {
+                        model.launchTwoPlayer(e)
+                    } else if let n = value("-resume-moment").flatMap(Int.init), Checkpoints.moments(e).indices.contains(n) {
+                        model.resumeMoment(e, Checkpoints.moments(e)[n])
+                    } else if args.contains("-tap") { model.tapGame(e, resume: args.contains("-resume")) }
+                    else { model.launch(e, resume: args.contains("-resume")) }
+                    // `-home-after N`: Main Menu N seconds into the game
+                    // (its session is taken), counted from the game opening
+                    // (a Drive-only game downloads first).
+                    if let h = value("-home-after").flatMap(Double.init) {
+                        func whenRunning(_ tries: Int) {
+                            if model.screen == .play && model.session.game != nil {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + h) {
+                                    model.showMainMenu()
+                                    // `-back-after M`: the hero's Resume M
+                                    // seconds later (its flight back).
+                                    if let b = value("-back-after").flatMap(Double.init) {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + b) {
+                                            Flights.shared.source("hero", e)
+                                            model.resumeFromHero()
+                                        }
+                                    }
+                                }
+                            } else if tries > 0 {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { whenRunning(tries - 1) }
+                            }
+                        }
+                        whenRunning(120)
+                    }
+                    // `-clip-after N`: Clip that! of everything so far, N
+                    // seconds into the game (a headless check of the export).
+                    // `-record-for N`: Record from the start for N seconds.
+                    if let r = value("-record-for").flatMap(Double.init) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            ClipExporter.shared.toggleRecording()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + r) { ClipExporter.shared.stopRecording() }
+                        }
+                    }
+                    #if DEBUG
+                    // `-load-state FILE`: that state (in Documents) goes in
+                    // once the game runs, before any `-link` (ios/e2e/trade.mjs).
+                    if let st = value("-load-state") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                            if let d = try? Data(contentsOf: docs.appendingPathComponent(st)),
+                               let why = model.session.apply(state: d, keepRewind: false) {
+                                print("load-state: " + why)
+                            }
+                        }
+                    }
+                    // `-latency-test N`: N timed presses (GameSession).
+                    if let n = value("-latency-test").flatMap(Int.init) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.session.startLatencyTest(n) }
+                    }
+                    #endif
+                    // `-speed 2x|slow|ff`: that speed once the game runs.
+                    if let sp = value("-speed") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            model.session.setSpeed(sp == "2x" ? .double : sp == "slow" ? .slow : sp == "ff" ? .fastForward : .normal)
+                        }
+                    }
+                    // `-link CODE`: Link Cable with that code once the game
+                    // runs (DEBUG `-signal ws://host:8790` picks the server).
+                    // `-link-manual`: the manual code exchange (codes through
+                    // files in tmp/, see NetLink.debugManual).
+                    #if DEBUG
+                    if args.contains("-link-manual") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NetLink.shared.debugManual() }
+                    }
+                    #endif
+                    if let code = value("-link") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            NetLink.shared.openSheet()
+                            NetLink.shared.connectTapped(code: code)
+                        }
+                    }
+                    if let c = value("-clip-after").flatMap(Double.init) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + c) {
+                            ClipExporter.shared.exportClip(startAgo: 3600, endAgo: 0, slug: "clipcheck", label: "Everything")
+                        }
+                    }
+                } else if left > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { attempt(left - 1) }
+                }
+            }
+            attempt(20)
+        }
+        if args.contains("-landscape"),
+           let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+        }
+        if let t = value("-theme"), let theme = ThemeName(rawValue: t) {
+            Settings.shared.theme = theme
+        }
+        #if DEBUG
+        if let keys = value("-keys") {
+            for (i, name) in keys.split(separator: " ").enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(i) * 0.6) {
+                    Keyboard.shared.debugTap(String(name))
+                }
+            }
+        }
+        if let script = value("-pad") {
+            for (i, name) in script.split(separator: " ").enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(i) * 0.6) {
+                    Controllers.shared.debugPress(String(name))
+                }
+            }
+        }
+        #endif
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if args.contains("-home") { model.showMainMenu() }
+            if args.contains("-menu") { model.openMenu(paused: true) }
+            if let s = value("-sheet") {
+                let parts = s.split(separator: ":").map(String.init)
+                switch parts[0] {
+                case "settings": model.openSheet(.settings(section: parts.count > 1 ? parts[1] : nil))
+                case "states": model.openSheet(.states)
+                case "saves": model.openSheet(.saves)
+                case "rewind": model.openSheet(.rewind)
+                case "cheats": model.openSheet(.cheats)
+                case "prints": model.openSheet(.prints)
+                case "report": model.openSheet(.report)
+                case "clip": model.openSheet(.clip)
+                case "addPictures": model.openSheet(.addPictures)
+                case "moments": if let e = entries.first { model.openSheet(.moments(e, crash: CrashWatch.streak(e.fileName) >= CrashWatch.askStreak)) }
+                case "link": NetLink.shared.openSheet()
+                case "tile": if let e = entries.first { model.openSheet(.tileMenu(e)) }
+                case "rename": if let e = entries.first { model.openSheet(.rename(e)) }
+                case "export": if let e = entries.first(where: { $0.fileName == value("-autoplay") }) ?? entries.first { model.openSheet(.export(e)) }
+                default: break
+                }
+            }
+        }
     }
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if let rom = current {
-                    PlayView(rom: rom) {
-                        current = nil
-                        library.refresh()
-                    }
-                } else {
-                    HomeView(library: library) { entry in
-                        current = entry
-                    }
+            RootView()
+                .environmentObject(model)
+                .environmentObject(settings)
+                .environmentObject(session)
+                .environmentObject(library)
+                .environment(\.palette, settings.palette)
+                .preferredColorScheme(settings.palette.colorScheme)
+                .onAppear(perform: autoplay)
+                .onOpenURL { url in
+                    // "Open in dingbat" from Files or another app.
+                    Task { @MainActor in await AppModel.shared.openIncoming(url) }
                 }
-            }
-            .preferredColorScheme(.dark)
-            .onAppear {
-                if current == nil, let entry = Self.autoplayEntry(in: library) {
-                    current = entry
-                }
-            }
         }
+    }
+}
+
+struct RootView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.palette) var palette
+
+    var body: some View {
+        ZStack {
+            palette.bg.ignoresSafeArea()
+            if model.screen == .play && model.session.game != nil {
+                PlayView()
+                    .transition(.opacity)
+            } else {
+                HomeView()
+                    .transition(.opacity)
+            }
+            FlightOverlay()
+            LaunchIntroOverlay()
+            ToastStack()
+                .sheet(isPresented: Binding(get: { model.tombstonePrompt != nil },
+                                            set: { if !$0 && model.tombstonePrompt != nil { model.answerTombstones(restore: false) } })) {
+                    TombstoneSheet(games: model.tombstonePrompt ?? [])
+                        .environment(\.palette, palette)
+                }
+        }
+        .alert(model.romWarn?.title ?? "", isPresented: Binding(get: { model.romWarn != nil },
+                                                                 set: { if !$0 && model.romWarn != nil { model.answerRomWarn(false) } })) {
+            Button("Cancel", role: .cancel) { model.answerRomWarn(false) }
+            Button("Load Anyway") { model.answerRomWarn(true) }
+        } message: {
+            Text(model.romWarn?.text ?? "")
+        }
+        .alert(model.notice ?? "", isPresented: Binding(get: { model.notice != nil },
+                                                         set: { if !$0 { model.notice = nil } })) {
+            Button("OK", role: .cancel) {}
+        }
+        .sheet(item: $model.sheet, onDismiss: sheetDismissed) { sheet in
+            SheetHost(sheet: sheet)
+                .environment(\.palette, palette)
+                .environment(\.padScope, sheet.id)
+                .preferredColorScheme(palette.colorScheme)
+        }
+    }
+
+    private func sheetDismissed() {
+        // The game paused for the sheet; it runs again only on the play
+        // screen (web: modals pause, closing resumes).
+        if model.screen == .play && model.sheet == nil && !model.menuOpen && model.sheetPausedGame {
+            model.session.setPaused(false)
+        }
+        model.sheetPausedGame = false
+    }
+}
+
+/// Routes each sheet to its view.
+struct SheetHost: View {
+    let sheet: AppModel.Sheet
+
+    var body: some View {
+        switch sheet {
+        case .settings(let section): SettingsView(initialSection: section)
+        case .states: SaveStatesView()
+        case .saves: ManageSavesView()
+        case .rewind: RewindScrubberView()
+        case .cheats: CheatsView()
+        case .prints: PrintsView()
+        case .report: ReportBugView()
+        case .clip: ClipRangeView()
+        case .moments(let e, let crash): MomentsView(entry: e, crash: crash)
+        case .addPictures: AddPicturesView()
+        case .link: LinkCableView()
+        case .tileMenu(let e): TileMenuView(entry: e)
+        case .rename(let e): RenameView(entry: e)
+        case .export(let e): ExportView(entry: e)
+        }
+    }
+}
+
+/// The toast stack (web #toast): bottom-centre, at most three; an action
+/// toast is one tap target with a close button.
+struct ToastStack: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.palette) var palette
+
+    var body: some View {
+        // In a game the stack sits under the top bar, clear of the touch
+        // controls; on the home screen it is bottom-centre as on the web.
+        let top = model.screen == .play
+        VStack(spacing: 8) {
+            if !top { Spacer() }
+            ForEach(model.toasts) { t in
+                HStack(spacing: 10) {
+                    Text(t.text)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(palette.text)
+                        .multilineTextAlignment(.leading)
+                    if let a = t.action {
+                        Text(a.label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(palette.accent)
+                        Button {
+                            model.dismissToast(t.id)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(palette.textDim)
+                                .frame(width: 22, height: 22)
+                        }
+                        .accessibilityLabel("Dismiss")
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(palette.surface2))
+                .overlay(Capsule().stroke(palette.border2, lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+                .contentShape(Capsule())
+                .onTapGesture {
+                    if let a = t.action {
+                        model.dismissToast(t.id)
+                        a.run()
+                    }
+                }
+                .transition(.move(edge: top ? .top : .bottom).combined(with: .opacity))
+            }
+            if top { Spacer() }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, top ? 0 : 24)
+        .padding(.top, top ? 60 : 0)
+        .animation(.easeOut(duration: 0.2), value: model.toasts.map(\.id))
+        .allowsHitTesting(!model.toasts.isEmpty)
     }
 }

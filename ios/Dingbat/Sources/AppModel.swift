@@ -1,0 +1,563 @@
+import SwiftUI
+import UIKit
+
+/// App-level state: which screen is up, the hero, toasts and sheets (web:
+/// body.running / showMainMenu / the hero / the toast stack / the modals).
+final class AppModel: ObservableObject {
+    static let shared = AppModel()
+
+    enum Screen { case home, play }
+
+    /// Sheets and modals (web: #states-modal, #saves-modal, ...). One at a
+    /// time; the game stays paused while any is up.
+    enum Sheet: Identifiable, Equatable {
+        case settings(section: String?)
+        case states, saves, rewind, cheats, prints, report, clip, link
+        case tileMenu(RomEntry), rename(RomEntry), export(RomEntry)
+        /// Resume from earlier; `crash`: the "stopped unexpectedly" form.
+        case moments(RomEntry, crash: Bool)
+        case addPictures
+        var id: String {
+            switch self {
+            case .settings: return "settings"
+            case .states: return "states"
+            case .saves: return "saves"
+            case .rewind: return "rewind"
+            case .cheats: return "cheats"
+            case .prints: return "prints"
+            case .report: return "report"
+            case .clip: return "clip"
+            case .link: return "link"
+            case .tileMenu(let e): return "tile:" + e.id
+            case .rename(let e): return "rename:" + e.id
+            case .export(let e): return "export:" + e.id
+            case .moments(let e, _): return "moments:" + e.id
+            case .addPictures: return "addPictures"
+            }
+        }
+    }
+
+    struct Toast: Identifiable {
+        let id = UUID()
+        var text: String
+        var action: (label: String, run: () -> Void)?
+        var duration: Double
+        /// Dismissed when the player goes back to the home screen.
+        var game: Bool
+        /// Bumped when a repeat extends it, so an older timer lets it be.
+        var gen = 0
+    }
+
+    @Published var screen: Screen = .home
+    /// The game played this visit, which heads the home screen (web
+    /// playedThisVisit). Paused while it is the one in memory, else closed.
+    @Published var heroGame: RomEntry?
+    @Published var sheet: Sheet?
+    @Published private(set) var toasts: [Toast] = []
+    /// The in-game menu (hamburger) is open.
+    @Published var menuOpen = false
+    /// Phone landscape: the top bar is down (a tap on the picture toggles it).
+    @Published var topbarOpen = false
+    /// A controller is connected and Settings hides the touch controls.
+    @Published var gamepadHidesTouch = false
+    /// Unseen printed photos (the menu's dot).
+    /// A print not yet looked at: the dot trail to Printed Photos, kept
+    /// across launches (web printer-photos seen flag).
+    @Published var newPrints = UserDefaults.standard.bool(forKey: "prints-new") {
+        didSet { UserDefaults.standard.set(newPrints, forKey: "prints-new") }
+    }
+    /// A game with no ROM here whose file the person is picking again
+    /// ("Find the file…").
+    @Published var relinking: RomEntry?
+    /// A picked file of a different size than the game had: asked first.
+    @Published var relinkConfirm: (entry: RomEntry, bytes: Data)?
+    /// A Drive-only game coming down to be opened (the tile's "Opening").
+    @Published var opening: String?
+    /// Tiles whose download failed (until the next tap), or just finished
+    /// (a check for 2 s).
+    @Published var tileFailed = Set<String>()
+    @Published var tileDone = Set<String>()
+
+    /// "Games removed on another device": the games, answered by Continue
+    /// (false) or Restore (true).
+    @Published var tombstonePrompt: [String]?
+    /// One question about a file before it is accepted (web askRomWarn).
+    @Published var romWarn: (title: String, text: String)?
+    private var romWarnAnswer: CheckedContinuation<Bool, Never>?
+    /// A plain notice with OK (web alert()).
+    @Published var notice: String?
+    /// A save or state handed to the app ("Open in dingbat"), waiting for
+    /// Manage Saves to take it through its confirms.
+    var pendingImport: (data: Data, fileName: String)?
+    private var tombstoneAnswer: CheckedContinuation<Bool, Never>?
+
+    let session = GameSession.shared
+    let library = RomLibrary.shared
+    let settings = Settings.shared
+
+    private init() {
+        session.onPrint = { [weak self] img in self?.printed(img) }
+    }
+
+    var heroPaused: Bool { heroGame != nil && session.game == heroGame }
+
+    /// A game in a session that cannot just be closed: an online link or
+    /// local 2P (web gameFlags.busy). The hero cannot draw it, and every
+    /// action on its files waits for the session to end.
+    var sessionBusy: Bool { session.game != nil && (NetLink.shared.holdsCore || session.twoPlayer) }
+
+    // MARK: toasts
+
+    /// web pushToast: the newest goes on top and older ones stay put; a
+    /// repeated plain message extends the one showing, and a repeated offer
+    /// replaces it so the freshest action runs. At most three.
+    func toast(_ text: String, action: (String, () -> Void)? = nil, duration: Double? = nil, game: Bool = false) {
+        let ms = duration ?? (action == nil ? 2.2 : 8)
+        for live in toasts where live.text == text {
+            if action == nil && live.action == nil {
+                if let i = toasts.firstIndex(where: { $0.id == live.id }) {
+                    toasts[i].gen += 1
+                    armToast(toasts[i], ms)
+                }
+                return
+            }
+            if let action, live.action?.label == action.0 { dismissToast(live.id) }
+        }
+        let t = Toast(text: text, action: action.map { (label: $0.0, run: $0.1) }, duration: ms, game: game)
+        toasts.insert(t, at: 0)
+        if toasts.count > 3 { toasts.removeLast(toasts.count - 3) }
+        armToast(t, ms)
+    }
+
+    private func armToast(_ t: Toast, _ seconds: Double) {
+        let id = t.id, gen = t.gen
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.toasts.first(where: { $0.id == id })?.gen == gen else { return }
+            self.dismissToast(id)
+        }
+    }
+
+    func dismissToast(_ id: UUID) {
+        toasts.removeAll { $0.id == id }
+    }
+
+    // MARK: navigation
+
+    /// Open a game and go to the play screen. `resume`: put its session back
+    /// in during the boot (the hero's Resume, a tile in Resume mode).
+    /// `moment`: an earlier moment chosen from Resume from earlier, which
+    /// goes in with its battery; `fresh`: from the in-game save, no offer.
+    func launch(_ entry: RomEntry, resume: Bool, moment: Data? = nil, fresh: Bool = false) {
+        // No ROM here: Drive hands it back, or the person finds the file.
+        if !entry.isLocal {
+            if DriveSync.shared.driveHasRom(entry.fileName) { fetchThenLaunch(entry, resume: resume) }
+            else {
+                // A tap on a game whose file is gone: found, it opens (web
+                // relinkGameAction {launch}).
+                relinking = entry
+                relinkLaunch = true
+            }
+            return
+        }
+        toasts.removeAll { $0.game }
+        let result = session.open(entry, resume: resume)
+        guard result != .failed else {
+            heroGame = heroGame.flatMap { library.entry(named: $0.fileName) }
+            screen = .home
+            toast("Couldn't start “\(entry.name)” — the file may not be a game", duration: 4)
+            return
+        }
+        heroGame = entry
+        menuOpen = false
+        topbarOpen = false
+        // Measured while the tapped picture is still on screen.
+        if moment == nil { Flights.shared.launching(entry, resumed: result == .resumed) }
+        withAnimation(.easeOut(duration: 0.25)) { screen = .play }
+        if let moment {
+            if let why = session.apply(state: moment, keepRewind: false) {
+                toast(why, duration: 6, game: true)
+            } else {
+                // Its battery is the game's save now (the newer one was kept).
+                dingbat_flush_save()
+            }
+            return
+        }
+        switch result {
+        case .savedSince:
+            toast("The game has saved since — starting from that save", duration: 4, game: true)
+        case .resumeRejected(let why):
+            toast(why + " Started from the in-game save instead.", duration: 6, game: true)
+        case .ok where !resume && !fresh:
+            offerSession(entry)
+        default:
+            break
+        }
+    }
+
+    /// Local 2P on this game (the tile's 2P, behind `-2p`).
+    func launchTwoPlayer(_ entry: RomEntry) {
+        toasts.removeAll { $0.game }
+        guard session.openTwoPlayer(entry) else { return }
+        heroGame = entry
+        menuOpen = false
+        topbarOpen = false
+        withAnimation(.easeOut(duration: 0.25)) { screen = .play }
+    }
+
+    /// Booted from the save with a session still standing: offer it (web
+    /// offerAutoResume, "Last session saved 5m ago [Resume]").
+    private func offerSession(_ entry: RomEntry) {
+        guard let s = library.resumableSession(entry) else { return }
+        toast("Last session saved \(Self.fmtAgo(s.meta.ts))", action: ("Resume", { [weak self] in
+            guard let self, self.session.game == entry else { return }
+            guard let now = self.library.resumableSession(entry) else {
+                self.toast("The game has saved since — that session is gone")
+                return
+            }
+            if self.session.apply(state: now.bytes, keepRewind: false) == nil {
+                self.toast("Resumed")
+            }
+        }), duration: 8, game: true)
+    }
+
+    /// A tile tap (web openLibraryGame): the hero's game in memory resumes
+    /// as it is; otherwise "Opening a game from the library" decides.
+    func openLibraryGame(_ entry: RomEntry) {
+        Flights.shared.source("tile:" + entry.id, entry)
+        if session.game == entry {
+            resumeFromHero()
+            return
+        }
+        tapGame(entry, resume: settings.libraryOpen == .resume)
+    }
+
+    /// A tap that opens a game (a tile, the closed hero): one that has
+    /// stopped unexpectedly twice in a row asks first (web crashGate).
+    func tapGame(_ entry: RomEntry, resume: Bool, fresh: Bool = false) {
+        if CrashWatch.streak(entry.fileName) >= CrashWatch.askStreak && session.game != entry && entry.isLocal {
+            openSheet(.moments(entry, crash: true))
+            return
+        }
+        launch(entry, resume: resume, fresh: fresh)
+    }
+
+    /// Back into an earlier moment (web resumeMoment): the game boots on its
+    /// save and the moment goes in. One from before the last in-game save
+    /// takes its battery back with it; the newer save is kept aside first.
+    func resumeMoment(_ e: RomEntry, _ m: Checkpoints.Moment) {
+        if session.game == e && NetLink.shared.holdsCore {
+            toast("Exit the online session first")
+            return
+        }
+        // The running game's battery as it is now is the one that may go.
+        if session.game == e { dingbat_flush_save() }
+        guard let bytes = Checkpoints.bytes(e, m), !bytes.isEmpty else {
+            toast("That moment is no longer stored")
+            return
+        }
+        if let cur = try? Data(contentsOf: e.saveURL), !cur.isEmpty,
+           m.saveSig != RomLibrary.saveSignature(cur) {
+            DriveSync.shared.keepReplacedSave(e.fileName, cur)
+        }
+        launch(e, resume: false, moment: bytes)
+    }
+
+    /// Back to the game in memory.
+    func resumeFromHero() {
+        guard session.game != nil else {
+            if let h = heroGame { launch(h, resume: true) }
+            return
+        }
+        menuOpen = false
+        if let g = session.game { Flights.shared.resuming(g) }
+        withAnimation(.easeOut(duration: 0.25)) { screen = .play }
+        session.setPaused(false)
+    }
+
+    /// Main Menu: pause, store the picture and the session, flush the save,
+    /// go home (web showMainMenu).
+    func showMainMenu() {
+        menuOpen = false
+        topbarOpen = false
+        session.setPaused(true)
+        session.persistSession()
+        session.storeLastFrame()
+        session.flushSave()
+        toasts.removeAll { $0.game }
+        // Where the screen is, before it goes: the picture flies from here.
+        Flights.shared.goingHome()
+        withAnimation(.easeOut(duration: 0.25)) { screen = .home }
+    }
+
+    /// The paused hero's Close: the session is kept, the core goes.
+    func closeGame() {
+        session.close()
+        library.refresh()
+    }
+
+    /// Whether opening the sheet paused the game, so its dismissal resumes
+    /// it; a game the player had paused stays paused.
+    var sheetPausedGame = false
+
+    /// Whether the open menu paused the game (a controller's menu shortcut
+    /// does; the hamburger does not), so closing it resumes.
+    private var menuPausedGame = false
+
+    func openMenu(paused: Bool) {
+        if paused, session.game != nil, !session.paused {
+            session.setPaused(true)
+            menuPausedGame = true
+        }
+        withAnimation(.easeOut(duration: 0.15)) { menuOpen = true }
+    }
+
+    func closeMenu() {
+        withAnimation(.easeOut(duration: 0.15)) { menuOpen = false }
+        if menuPausedGame && sheet == nil && screen == .play { session.setPaused(false) }
+        menuPausedGame = false
+    }
+
+    func toggleMenu() {
+        if menuOpen { closeMenu() } else { openMenu(paused: false) }
+    }
+
+    func openSheet(_ s: Sheet) {
+        menuOpen = false
+        menuPausedGame = false
+        sheetPausedGame = screen == .play && session.game != nil && !session.paused
+        if sheetPausedGame { session.setPaused(true) }
+        sheet = s
+    }
+
+    /// Ask whether games deleted on another device go here too (web
+    /// confirmTombstones). True = Restore.
+    @MainActor
+    func confirmTombstones(_ games: [String]) async -> Bool {
+        #if DEBUG
+        // Dev hook for headless tests: `-answer-tombstones continue|restore`.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-answer-tombstones"), i + 1 < args.count {
+            return args[i + 1] == "restore"
+        }
+        #endif
+        tombstoneAnswer?.resume(returning: false)
+        return await withCheckedContinuation { cont in
+            tombstoneAnswer = cont
+            tombstonePrompt = games
+        }
+    }
+
+    @MainActor
+    func askRomWarn(_ title: String, _ text: String) async -> Bool {
+        romWarnAnswer?.resume(returning: false)
+        return await withCheckedContinuation { cont in
+            romWarnAnswer = cont
+            romWarn = (title, text)
+        }
+    }
+
+    func answerRomWarn(_ go: Bool) {
+        romWarn = nil
+        romWarnAnswer?.resume(returning: go)
+        romWarnAnswer = nil
+    }
+
+    /// "Open in dingbat" (web handleDroppedFile): a save or state goes into
+    /// the running game; anything else is a ROM or zip to add and open.
+    @MainActor
+    func openIncoming(_ url: URL) async {
+        let ext = url.pathExtension.lowercased()
+        let saveExts: Set<String> = ["sav", "srm", "sps", "xps", "gsv"]
+        if saveExts.contains(ext) || ext == "state" {
+            let kind = ext == "state" ? "save state" : "save file"
+            if sessionBusy {
+                notice = "Can't import a \(kind) while a link cable is connected. Disconnect first, then try again."
+                return
+            }
+            guard session.game != nil else {
+                notice = "Open a game first, then open its \(kind) to import it."
+                return
+            }
+            guard let data = SheetFiles.read(url) else {
+                notice = "Couldn't read that file."
+                return
+            }
+            pendingImport = (data, url.lastPathComponent)
+            openSheet(.saves)
+            return
+        }
+        do {
+            let e = try await library.importRom(from: url)
+            launch(e, resume: false)
+        } catch RomLibrary.ImportError.declined {
+        } catch {
+            toast(error.localizedDescription, duration: 4)
+        }
+    }
+
+    func answerTombstones(restore: Bool) {
+        tombstonePrompt = nil
+        tombstoneAnswer?.resume(returning: restore)
+        tombstoneAnswer = nil
+    }
+
+    // MARK: games with no ROM here
+
+    /// A Drive-only game's tap (web fetchTileGame): down, then open. A tap
+    /// on another tile meanwhile is the later word: this one just downloads.
+    private func fetchThenLaunch(_ e: RomEntry, resume: Bool) {
+        let name = e.fileName
+        opening = name
+        tileFailed.remove(name)
+        Task { @MainActor in
+            let ok = await DriveSync.shared.downloadGame(name)
+            let mine = opening == name
+            if mine { opening = nil }
+            guard ok else { tileFailed.insert(name); return }
+            if mine { launch(RomEntry(fileName: name), resume: resume) } else { markDone(name) }
+        }
+    }
+
+    /// The tile's ↓ and the menu's Download to this device.
+    func downloadOnly(_ e: RomEntry) {
+        let name = e.fileName
+        tileFailed.remove(name)
+        Task { @MainActor in
+            if await DriveSync.shared.downloadGame(name) {
+                markDone(name)
+                toast("Synced to this device")
+            } else {
+                tileFailed.insert(name)
+            }
+        }
+    }
+
+    /// "Download and export…" (web): the game comes down, then Export… opens.
+    func downloadThenExport(_ e: RomEntry) {
+        let name = e.fileName
+        tileFailed.remove(name)
+        Task { @MainActor in
+            if await DriveSync.shared.downloadGame(name) {
+                markDone(name)
+                openSheet(.export(RomEntry(fileName: name)))
+            } else {
+                tileFailed.insert(name)
+            }
+        }
+    }
+
+    private func markDone(_ name: String) {
+        tileDone.insert(name)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.tileDone.remove(name) }
+    }
+
+    /// Find the file: the picked bytes go under the game's own name, so its
+    /// save pairs with it again (web relinkGameAction).
+    func relink(_ e: RomEntry, to url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard url.pathExtension.lowercased() == e.ext else {
+            toast("“\(e.name)” needs a .\(e.ext) file", duration: 4)
+            return
+        }
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else {
+            toast("Couldn't read that file", duration: 4)
+            return
+        }
+        let noted = library.romSize(e.fileName)
+        if noted > 0 && noted != data.count {
+            relinkConfirm = (e, data)
+            return
+        }
+        Task { @MainActor in
+            guard await RomLibrary.confirmSuspect(data, name: url.lastPathComponent, ext: e.ext) else { return }
+            finishRelink(e, data)
+        }
+    }
+
+    func finishRelink(_ e: RomEntry, _ data: Data) {
+        relinkConfirm = nil
+        let open = relinkLaunch
+        relinkLaunch = false
+        do { try data.write(to: e.url, options: .atomic) } catch {
+            toast("Couldn't keep that file", duration: 4)
+            return
+        }
+        library.noteRomSize(e.fileName, data.count)
+        DriveSync.shared.markGameUpload(e.fileName)
+        library.pictureGen += 1
+        library.refresh()
+        toast("“\(e.name)” is back on this device")
+        if open { launch(e, resume: false) }
+    }
+
+    /// The pending Find the file came from a tap on the game, so it opens
+    /// once found; from the tile menu it does not.
+    var relinkLaunch = false
+
+    // MARK: printer
+
+    func printed(_ img: UIImage) {
+        PrintStore.add(img, game: session.game?.fileName)
+        newPrints = true
+        toast("Photo printed", action: ("View", { [weak self] in self?.openSheet(.prints) }), duration: 6)
+    }
+
+    static func fmtAgo(_ ts: Double) -> String {
+        let m = Int(((Date().timeIntervalSince1970 * 1000 - ts) / 60000).rounded())
+        if m < 1 { return "moments ago" }
+        if m < 60 { return "\(m)m ago" }
+        let h = Int((Double(m) / 60).rounded())
+        if h < 48 { return "\(h)h ago" }
+        return "\(Int((Double(h) / 24).rounded()))d ago"
+    }
+}
+
+/// Game Boy Printer photos (web `prints`, newest first, up to 30).
+enum PrintStore {
+    static func all() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: RomLibrary.printsDir, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "png" }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+
+    /// Each print remembers its game (web photo.game): stored as
+    /// print-<ms>--<game>.png, so the newest still sorts first.
+    static func game(of url: URL) -> String? {
+        let n = url.deletingPathExtension().lastPathComponent
+        guard let r = n.range(of: "--") else { return nil }
+        return String(n[r.upperBound...])
+    }
+
+    /// The name it is shared under (web: <game>-print-<stamp>.png).
+    static func shareName(_ url: URL) -> String {
+        let n = url.deletingPathExtension().lastPathComponent
+        let stamp = n.dropFirst("print-".count).prefix { $0.isNumber }
+        guard let g = game(of: url) else { return url.lastPathComponent }
+        return (g as NSString).deletingPathExtension + "-print-" + stamp + ".png"
+    }
+
+    /// A renamed game's prints follow it.
+    static func rename(from old: String, to new: String) {
+        for u in all() where game(of: u) == old {
+            let stamp = u.deletingPathExtension().lastPathComponent.components(separatedBy: "--")[0]
+            try? FileManager.default.moveItem(at: u, to: RomLibrary.printsDir.appendingPathComponent("\(stamp)--\(new).png"))
+        }
+    }
+
+    static func add(_ img: UIImage, game: String? = nil) {
+        // 2x nearest neighbour, as the web gallery shows them.
+        let size = CGSize(width: img.size.width * 2, height: img.size.height * 2)
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        let big = UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
+            ctx.cgContext.interpolationQuality = .none
+            img.draw(in: CGRect(origin: .zero, size: size))
+        }
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
+        let name = "print-\(stamp)" + (game.map { "--" + $0 } ?? "") + ".png"
+        try? big.pngData()?.write(to: RomLibrary.printsDir.appendingPathComponent(name))
+        for old in all().dropFirst(30) { try? FileManager.default.removeItem(at: old) }
+    }
+}

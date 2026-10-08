@@ -2,11 +2,11 @@
 #
 # Build steps:
 #   ios/build-core.sh                # produce ios/lib/*/libdingbat.a first
+#   ios/build-webrtc.sh              # and ios/lib/*/libwebrtcdc.a (online link)
 #   cd ios && xcodegen generate      # emits Dingbat.xcodeproj (gitignored)
 #   xcodebuild -project Dingbat.xcodeproj -scheme Dingbat \
 #     -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
 #
-# goodboy-demo-en.gba is the homebrew demo already checked in for the web build.
 name: Dingbat
 options:
   bundleIdPrefix: com.mattrb
@@ -19,16 +19,26 @@ targets:
     platform: iOS
     sources:
       - path: Dingbat/Sources
-      - path: ../web/goodboy-demo-en.gba
-        buildPhase: resources
+      - path: Dingbat/Resources
     info:
       path: Dingbat/Info.plist
       properties:
         CFBundleDisplayName: dingbat
-        UILaunchScreen: {}
+        # The home screen's colour with the bat, so the launch flows into it.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+          UIImageRespectsSafeAreaInsets: true
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UIRequiresFullScreen: true
+        UIStatusBarHidden: false
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSCameraUsageDescription: A Game Boy Camera cart can see through your camera.
+        NSMotionUsageDescription: Tilt carts play by tilting your device.
+        NSLocalNetworkUsageDescription: The link cable connects straight to a friend on the same Wi-Fi.
+        ITSAppUsesNonExemptEncryption: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
@@ -48,7 +58,22 @@ targets:
             UTTypeDescription: Game Boy Color ROM
             UTTypeConformsTo: [public.data]
             UTTypeTagSpecification:
-              public.filename-extension: [gbc]
+              public.filename-extension: [gbc, cgb]
+          - UTTypeIdentifier: com.mattrb.dingbat.sgb
+            UTTypeDescription: Super Game Boy ROM
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [sgb]
+          - UTTypeIdentifier: com.mattrb.dingbat.save
+            UTTypeDescription: Game save
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [sav, srm, sps, xps, gsv]
+          - UTTypeIdentifier: com.mattrb.dingbat.state
+            UTTypeDescription: dingbat save state
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [state]
         CFBundleDocumentTypes:
           - CFBundleTypeName: Game ROM
             LSHandlerRank: Alternate
@@ -56,12 +81,37 @@ targets:
               - com.mattrb.dingbat.gba
               - com.mattrb.dingbat.gb
               - com.mattrb.dingbat.gbc
+              - com.mattrb.dingbat.sgb
+              - public.zip-archive
+          # A save or state opened from Files goes into the running game.
+          - CFBundleTypeName: Game save or state
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.mattrb.dingbat.save
+              - com.mattrb.dingbat.state
+    # The commit, for Settings' version line and bug reports (web version.txt).
+    postBuildScripts:
+      - name: Stamp the commit
+        basedOnDependencyAnalysis: false
+        # After Info.plist is written, not alongside it.
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          sha=$(git -C "$PROJECT_DIR/.." rev-parse HEAD 2>/dev/null || echo unknown)
+          plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :DingbatCommit $sha" "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :DingbatCommit string $sha" "$plist"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        DEVELOPMENT_TEAM: FGP2K9PPW9
+        CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.9"
         SWIFT_OBJC_BRIDGING_HEADER: Dingbat/Sources/Bridging.h
-        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/include"
+        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/include $(PROJECT_DIR)/lib/include"
         LIBRARY_SEARCH_PATHS: "$(PROJECT_DIR)/lib/$(PLATFORM_NAME)"
-        OTHER_LDFLAGS: "-ldingbat"
+        OTHER_LDFLAGS: "-ldingbat -lwebrtcdc -lc++"
         TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64

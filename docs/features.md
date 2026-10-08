@@ -78,6 +78,14 @@ origins allowlist — https required off localhost, raw IPs rejected).
 - Link Cable window for network play
 - Debug windows: PPU, IO registers, scheduler
 
+## iOS app
+
+A native SwiftUI app with the web front-end's screens, settings and themes,
+haptic touch controls, controllers, rumble, tilt and the Game Boy Camera,
+Google Drive sync with dingbat.gg, Record and "Clip that!", and the online
+link cable (an iPhone links with a browser, through the server or by
+trading codes). No local 2P yet: [ios-app.md](ios-app.md).
+
 ## Game Boy / Game Boy Color
 
 - Sound with an output-stage DC blocker (the coupling capacitor between mixer and jack)
