@@ -26,7 +26,7 @@
 ## (numeric arrays as one block), seqs and Deques as a u32 count then their
 ## elements, objects as their fields.
 
-import std/[deques, importutils, typetraits]
+import std/[deques, importutils, strutils, typetraits]
 import ../common/serialize
 import nds, sched, timing
 import arm/[cpu, cp15]
@@ -118,6 +118,15 @@ const
   # is set after a load as for the card's save chip
   SLOT2_SKIP = ["rom", "dirty"]
   NO_SKIP: array[0, string] = []
+  # Fields added to the payload since states were first kept, oldest first,
+  # with their type as the layout names it. A state whose layout is this
+  # one's without the newest k of them still loads: those fields keep the
+  # loading machine's value (a running game's, or what boot gave). Only a
+  # plain field whose boot value is right for any moment belongs here;
+  # anything else changes the layout outright and old states are refused.
+  ADDED_FIELDS = [
+    ("wifiwaitcnt", "uint16"),   # ARM7 WIFIWAITCNT (bus7.nim): boot leaves 0030h, as games keep it
+  ]
 
 # Seqs whose length varies at run time, with the longest a machine makes;
 # every other seq must match the loading machine's length.
@@ -144,9 +153,11 @@ type
   Saver = object
     buf: string
     pos: int
+    missing: seq[string]   ## test only: write an older layout (state_payload_older)
   Loader = object
     data: ptr UncheckedArray[char]
     len, pos: int
+    missing: seq[string]   ## ADDED_FIELDS the state's older layout lacks
   Layout = object
     text: string
     depth: int
@@ -203,7 +214,10 @@ proc set_names[E](e: E): string = enum_names(E)
 template walk(s, obj, skip: untyped) =
   for fname, f in fieldPairs(obj):
     when fname notin skip:
-      io(s, f, fname)
+      when typeof(s) is (Loader or Saver):
+        if s.missing.len == 0 or fname notin s.missing: io(s, f, fname)
+      else:
+        io(s, f, fname)
 
 proc io_seq_len[S](s: var S; cur: int; name: static string): int =
   ## A seq's or Deque's count: written, or read and checked.
@@ -460,6 +474,26 @@ proc layout_hash(n: NDS): uint32 =
     layout_hash_cache = fnv1a(state_layout(n)) or 1
   layout_hash_cache
 
+proc older_layout_hash(n: NDS; k: int): uint32 =
+  ## The layout hash of this build's layout without the newest k of
+  ## ADDED_FIELDS: what a build from before them wrote.
+  let lines = state_layout(n).split('\n')
+  var gone: seq[string]
+  for (name, kind) in ADDED_FIELDS[^k .. ^1]: gone.add name & ": " & kind
+  var text = ""
+  for i, line in lines:
+    if line.strip() in gone: continue
+    text.add line
+    if i < lines.high: text.add '\n'
+  fnv1a(text) or 1
+
+proc older_layout_fields(n: NDS; hash: uint32): int =
+  ## How many of ADDED_FIELDS (the newest) a state with this layout hash
+  ## lacks, when its layout is this one's without them; -1 for any other.
+  for k in 1 .. ADDED_FIELDS.len:
+    if n.older_layout_hash(k) == hash: return k
+  -1
+
 proc bios_identity(n: NDS; arm9: bool): uint32 =
   if arm9: fnv1a(n.bios9) else: fnv1a(n.bios7)
 
@@ -474,7 +508,8 @@ proc slot2_identity(n: NDS): uint32 =
   result = (result xor uint32(r.len)) * 0x01000193'u32
 
 proc write_preamble(s: var Saver; n: NDS) =
-  var w = [PREAMBLE_MAGIC, n.layout_hash(),
+  var w = [PREAMBLE_MAGIC,
+           (if s.missing.len > 0: n.older_layout_hash(s.missing.len) else: n.layout_hash()),
            uint32(ord(n.hle_bios9)) or (uint32(ord(n.hle_bios7)) shl 1),
            n.bios_identity(true), n.bios_identity(false),
            uint32(ord(n.slot2.kind)), n.slot2_identity()]
@@ -486,8 +521,11 @@ proc check_preamble(l: var Loader; n: NDS) =
   if w[0] != PREAMBLE_MAGIC:
     raise state_error("DS state payload has no preamble")
   if w[1] != n.layout_hash():
-    raise state_error("DS state was made by a build whose DS state layout " &
-                      "differs from this one's", srkIncompatible)
+    let k = n.older_layout_fields(w[1])
+    if k < 0:
+      raise state_error("DS state was made by a build whose DS state layout " &
+                        "differs from this one's", srkIncompatible)
+    for (name, _) in ADDED_FIELDS[^k .. ^1]: l.missing.add name
   for (arm9, name, hle_bit, hle) in [(true, "ARM9", 1'u32, n.hle_bios9),
                                      (false, "ARM7", 2'u32, n.hle_bios7)]:
     let state_hle = (w[2] and hle_bit) != 0
@@ -513,6 +551,17 @@ proc state_payload*(n: NDS): string =
   io_machine(s, n)
   s.buf.setLen(s.pos)
   move(s.buf)
+
+when defined(test_harness):
+  proc state_payload_older*(n: NDS; k: int): string =
+    ## The payload a build from before the newest k ADDED_FIELDS wrote
+    ## (nds_savestate_test: such a state still loads).
+    var s = Saver(buf: newString(8 * 1024 * 1024))
+    for (name, _) in ADDED_FIELDS[^k .. ^1]: s.missing.add name
+    s.write_preamble(n)
+    io_machine(s, n)
+    s.buf.setLen(s.pos)
+    move(s.buf)
 
 proc after_load(n: NDS) =
   ## Rebuild what the state leaves out, then refuse values the machine would
