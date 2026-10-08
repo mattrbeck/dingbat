@@ -143,6 +143,53 @@ test("more than one goes out as a zip, every file where the design puts it", asy
   eq(info.files.find((f) => f.path === "Crystal.sav"), { path: "Crystal.sav", kind: "save" });
 });
 
+// ── An export added back as a game ──────────────────────────────────────────
+// Until import reads the rest, a zip of ours goes through Add a game: its ROM
+// is the file info.json calls the ROM, and its box art is the file it calls
+// box art - never the library thumbnail or a print, whichever is largest.
+
+const gbRom = () => {
+  const rom = new Uint8Array(0x150).fill(0x22);
+  let chk = 0;
+  for (let i = 0x134; i <= 0x14c; i++) chk = (chk - rom[i] - 1) & 0xff;
+  rom[0x14d] = chk; // header checksum: passes the ROM check
+  return rom;
+};
+
+const addBack = async (app, kinds) => {
+  const { exportInventory, exportPackage } = fns(app);
+  const inv = await exportInventory("Crystal.gbc");
+  const pkg = exportPackage("Crystal.gbc", inv.filter((i) => kinds.includes(i.kind)), T);
+  for (const k of [...app.idb.keys()]) if (k.endsWith(":Crystal.gbc")) app.idb.delete(k);
+  const buf = await pkg.blob.arrayBuffer();
+  // Adding it also boots it; the core is a stub.
+  app.runIn(`globalThis.Module = { ccall: () => {}, _loop_tick: () => {}, _clearAudioBuffer: () => {},
+    _wasm_fb_ptr: () => 16, _malloc: () => 8, _free: () => {},
+    memory: { buffer: new ArrayBuffer(16 + 240 * 160 * 4) } };`);
+  await vm.runInContext("handleZipFile", app.context)({ name: pkg.fileName, arrayBuffer: async () => buf });
+  await settle();
+};
+
+test("an export with no box art adds back with no box art, however big its thumbnail", async () => {
+  const app = await loadApp();
+  seedEverything(app);
+  app.idb.set("rom:Crystal.gbc", { name: "Crystal.gbc", data: gbRom() });
+  app.idb.set("frame:Crystal.gbc", jpeg(70)); // the largest picture in the zip
+  await addBack(app, ["rom", "thumb", "prints"]);
+  eq(Array.from(app.idb.get("rom:Crystal.gbc").data), Array.from(gbRom()));
+  assert.equal(app.idb.get("art:Crystal.gbc"), undefined);
+});
+
+test("an export with box art adds back with that box art", async () => {
+  const app = await loadApp();
+  seedEverything(app);
+  app.idb.set("rom:Crystal.gbc", { name: "Crystal.gbc", data: gbRom() });
+  app.idb.set("frame:Crystal.gbc", new Blob([new Uint8Array(500)], { type: "image/jpeg" }));
+  await addBack(app, ["rom", "thumb", "art"]);
+  const art = app.idb.get("art:Crystal.gbc");
+  eq(Array.from(new Uint8Array(await art.arrayBuffer())), [0x89, 0x50, 71]);
+});
+
 // ── The Game Boy Camera's album ─────────────────────────────────────────────
 
 const camRom = () => { const r = new Uint8Array(0x150); r[0x147] = 0xfc; return r; };

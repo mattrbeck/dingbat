@@ -12504,6 +12504,21 @@ romWarnModal.addEventListener("click", (e) => {
   if (e.target === romWarnModal) closeRomWarnModal();
 });
 
+// A dingbat export's map of path -> kind, from its info.json; null for any
+// other zip (or an info.json that is not ours).
+const exportKinds = async (zip) => {
+  let e = zip.entries.find((x) => x.name === "info.json");
+  if (!e) return null;
+  try {
+    let info = JSON.parse(new TextDecoder().decode(await zip.extract(e)));
+    if (info?.app !== "dingbat" || !Array.isArray(info.files)) return null;
+    return new Map(info.files.filter((f) => typeof f?.path === "string")
+                             .map((f) => [f.path, f.kind]));
+  } catch {
+    return null;
+  }
+};
+
 const handleZipFile = async (file) => {
   const gen = nextLoadGen(); // a later tap or open supersedes this one (loadGen)
   let zip;
@@ -12513,13 +12528,19 @@ const handleZipFile = async (file) => {
     alert("Couldn't read that zip: " + e.message);
     return;
   }
-  let romEntry = zip.entries.find((e) => usable(e) && ROM_EXTS.includes(extOf(e.name)));
+  // One of our own exports says what each file is (exportPackage's
+  // info.json): its box art is the file it calls box art, or there is none.
+  // Guessing would make the library thumbnail or a printed photo the cover.
+  let kinds = await exportKinds(zip);
+  let ofKind = (k) => kinds && zip.entries.find((e) => kinds.get(e.name) === k);
+  let romEntry = ofKind("rom") ||
+    zip.entries.find((e) => usable(e) && ROM_EXTS.includes(extOf(e.name)));
   if (!romEntry) {
     alert("No .gba, .gb or .gbc ROM was found inside that zip.");
     return;
   }
-  // The largest embedded image is almost always the box art.
-  let imgEntry = zip.entries
+  // Anyone else's zip: the largest embedded image is almost always the box art.
+  let imgEntry = kinds ? ofKind("art") : zip.entries
     .filter((e) => usable(e) && IMG_EXTS.includes(extOf(e.name)))
     .sort((a, b) => b.uncompSize - a.uncompSize)[0];
 

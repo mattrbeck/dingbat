@@ -348,7 +348,7 @@
     "web/index.js#flushSoloSave": "2340e230a58f9dc9",
     "web/index.js#getRomBytes": "e6452fac5996d411",
     "web/index.js#handleRomFile": "24ea1020b594a4d7",
-    "web/index.js#handleZipFile": "cc75f3408d5eeb3a",
+    "web/index.js#handleZipFile": "bcc6b8621fa17b21",
     "web/index.js#heldGameIsSent": "a63b109a83858e3b",
     "web/index.js#installSave": "5f8c3f38c6924afa",
     "web/index.js#isRomLoaded": "033aac3c52739679",
