@@ -628,7 +628,9 @@ final class RomLibrary: ObservableObject {
     static func saveSignature(_ data: Data?) -> String? {
         guard let data, !data.isEmpty else { return nil }
         var h: UInt32 = 0x811C9DC5
-        for b in data { h ^= UInt32(b); h = h &* 0x0100_0193 }
+        data.withUnsafeBytes { (p: UnsafeRawBufferPointer) in
+            for b in p { h ^= UInt32(b); h = h &* 0x0100_0193 }
+        }
         return "\(h):\(data.count)"
     }
 

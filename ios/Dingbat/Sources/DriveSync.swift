@@ -900,7 +900,7 @@ final class DriveSync: ObservableObject {
         }
         if let bytes {
             let r = remote.map[name]
-            let sig = Self.sig(bytes)
+            let sig = await Self.sigOff(bytes)
             let restamp = r != nil && r!.gen != gen
             if r == nil || (restamp && r!.gen < gen) || (!name.hasPrefix("rom:") && sig != state.sigs[name]) {
                 let mt = try await client.uploadFile(name: name, bytes: bytes, existingID: r?.id, gen: gen, restamp: restamp)
@@ -1033,7 +1033,7 @@ final class DriveSync: ObservableObject {
                 if GameSession.shared.game?.fileName == p.game { continue }
                 if state.queueDel.contains(name) { continue }
                 if renamedAway.contains(p.game) { continue }
-                let sig = Self.sig(bytes)
+                let sig = await Self.sigOff(bytes)
                 if sig != state.sigs[name] {
                     try writeSyncBytes(name, bytes)
                     state.sigs[name] = sig
@@ -1302,8 +1302,12 @@ final class DriveSync: ObservableObject {
                 }
                 let bytes = try await client.download(f.id, onBytes: tick)
                 try live()
+                // A ROM is up to 32 MB: its signature is worked out off the
+                // main thread.
+                let sig = await Self.sigOff(bytes)
+                try live()
                 try writeSyncBytes(f.name, bytes)
-                state.sigs[f.name] = Self.sig(bytes)
+                state.sigs[f.name] = sig
                 state.rmt[f.name] = f.modifiedTime
             }
             await RomLibrary.shared.bump(game, gen: gen)
@@ -1573,6 +1577,28 @@ final class DriveSync: ObservableObject {
         }
         await pull()
         if pendingCount > 0 { await flushNow() }
+        #if DEBUG
+        // `-drive-download a,b,...`: those games come down at once, as taps on
+        // their tiles do; tmp/download.txt says when each landed
+        // (ios/e2e/drive-big.mjs).
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-drive-download"), i + 1 < args.count {
+            let names = args[i + 1].split(separator: ",").map(String.init)
+            let file = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("download.txt")
+            let t0 = Date()
+            var lines = [String(format: "start %.0f", ProcessInfo.processInfo.systemUptime * 1000)]
+            await withTaskGroup(of: String.self) { group in
+                for n in names {
+                    group.addTask { @MainActor in
+                        let ok = await self.downloadGame(n)
+                        return "\(n) \(ok ? "ok" : "failed") \(Int(Date().timeIntervalSince(t0) * 1000))"
+                    }
+                }
+                for await line in group { lines.append(line) }
+            }
+            try? (lines.joined(separator: "\n") + "\nDONE\n").write(to: file, atomically: true, encoding: .utf8)
+        }
+        #endif
     }
 
     @MainActor
@@ -1616,6 +1642,11 @@ final class DriveSync: ObservableObject {
 
     /// FNV-1a + length, as the web's sigOfBytes.
     static func sig(_ d: Data) -> String { RomLibrary.saveSignature(d) ?? "0:0" }
+
+    /// The same, a big file's (a ROM is up to 32 MB) off the main thread.
+    static func sigOff(_ d: Data) async -> String {
+        d.count > 1 << 20 ? await Task.detached(priority: .userInitiated) { sig(d) }.value : sig(d)
+    }
 
     static func display(_ name: String) -> String { (name as NSString).deletingPathExtension }
 

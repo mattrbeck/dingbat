@@ -10,6 +10,9 @@ struct DingbatApp: App {
     init() {
         // Before anything opens a game: a run that ended unseen is counted.
         CrashWatch.noteCrashedRun()
+        #if DEBUG
+        StallLog.startIfAsked()
+        #endif
         // Before the first frame: the home page starts ready to rise in.
         _ = LaunchIntro.shared
         dingbat_init()
