@@ -153,6 +153,28 @@ of per block: 70 % and 90 %; per block it costs 2 % fewer host
 instructions overall). What is left is mostly register changes (scroll,
 fades) and the 3D line.
 
+**Same-value stores** (checked 2026-10-08, after the GBA found its render
+skip never fired in gameplay because games rewrite registers, OAM and
+palettes from shadow copies every V-blank). Here they were already absorbed
+everywhere: a palette or OAM store that writes what is there counts no
+change (bus9.nim, `oam_store`), nor does a VRAM store (vram.nim
+`write8`/`write16`) or a VRAMCNT write (`write_cnt`), and the registers are
+compared by value in the key. SoulSilver p12 frames 7001-8000 (the 3D
+bedroom and the walk downstairs), counted in a probe build: 459,426 OAM
+halfword stores of an equal value against 2,006 changes, 490,099 VRAM
+stores against 10,037, 513 palette stores against 16, VRAMCNT 43 against
+406; 93.8 % of the 383,616 lines were reused. With the equal-value checks
+taken out, 80.4 % were (lines lost to OAM rose from 96 to 22,320, to VRAM
+from 3,520 to 31,608) and the frames cost 4.6 % more host instructions
+(39.98 G -> 41.83 G), with the same screens at the end. The lines still drawn are real changes: 3D line 7,679, a remap
+6,592, registers 5,747, VRAM 3,520, palette 192, OAM 96 (frames 3001-4000
+and 5001-6000: registers 12.4k / 12.6k, palette 6.0k / 9.0k, VRAM
+3.6k / 4.9k). A drawn line costs ~23,000 host instructions here (reuse off
+entirely: 48.34 G), so a remap that left out the engines whose views did
+not change would save at most 0.4 % of this stretch and nothing elsewhere;
+not done. 3D: 833 of 949 frames reused, 107 with new polygons, 6 with a
+new DISP3DCNT or swap parameter, 3 that only a texture remap held back.
+
 `tests/nds_perf_test.nim` runs 15 2D ROMs (scrolling, affine and
 rotscale BGs, affine and extended-palette sprites, H-blank and mid-frame
 windows, bitmaps, 3D under 2D) with reuse on and off, changes palette, OAM,
