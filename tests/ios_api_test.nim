@@ -88,7 +88,7 @@ proc staged(src: string): string =
 echo "GBA: load, frames, states"
 block:
   dingbat_set_rewind(1, 0)
-  check dingbat_load_rom(cstring(staged("web/goodboy-demo-en.gba")), nil) == 0, "loads"
+  check dingbat_load_rom(cstring(staged("tests/roms/gbaedge.gba")), nil) == 0, "loads"
   check dingbat_loaded() == 1 and dingbat_is_gb() == 0, "a GBA core runs"
   for _ in 0 ..< 240: dingbat_run_frame()
   check dingbat_game_fb() != nil, "a picture to present"
@@ -157,7 +157,7 @@ echo "GBA: online link rollback"
 block:
   # Two sessions from the same states: one hears the friend at once, one
   # 6 frames late (predicting, then rolling back). They must end identical.
-  let rom = staged("web/goodboy-demo-en.gba")
+  let rom = staged("tests/roms/gbaedge.gba")
   let friendRom = tmp / "friend.gba"
   copyFile(rom, friendRom)
   check dingbat_load_rom(cstring(rom), nil) == 0, "loads"
