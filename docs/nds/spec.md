@@ -94,7 +94,11 @@ setting). With these, SoulSilver runs frame-locked with the reference core
 (docs/oracles.md, "NDS core"). `arm7_timing` pins the ARM7's costs; the
 reference core is 3 cycles cheaper on ARM7 main-RAM data than GBATEK, and
 both charge an ARM7 SUB/BGT loop 3 cycles where GBATEK's WaitByLoop table
-gives 4 (docs/nds/accuracy.md).
+gives 4 (docs/nds/accuracy.md). An ARM9 single load or store costs
+GBATEK's NDS9/DATA time as a whole (the access overlaps the opcode),
+ARM7 wifi accesses follow WIFIWAITCNT, and an ARM7 opcode fetch after a
+data access is nonsequential; `disp_cpu9time` pins the ARM9's costs
+(docs/nds/accuracy.md section 7).
 
 The geometry engine takes GBATEK's cycles per command, a full GX FIFO holds
 the writing CPU (and the ARM7), SWAP_BUFFERS waits for V-blank + 392, DMA

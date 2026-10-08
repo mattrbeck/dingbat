@@ -12,8 +12,8 @@ Results in one line each:
 
 | Game | Reaches | Picture vs the reference | Sound | BIOS: real / HLE | Save |
 |---|---|---|---|---|---|
-| Golden Sun: Dark Dawn (BO5E) | title, naming, the 26 000-frame intro, the first field (the lookout cabin) under player control, the Psynergy menu | identical where the two are in step (title, menus, intro pages: 0 to a few hundred dots apart, all animation phase); 11-40 frames behind by the end of the intro | correlation 0.97-0.995 with the reference where in step, spectra 0.96-0.999, levels within 0.4 dB | identical (to frame 6000 compared) | 512 KB FLASH detected (the game uses 256 KB); format at boot as the reference; no in-game save reached |
-| Pokemon Mystery Dungeon: Explorers of Darkness (YFYE) | intro demo, title, personality quiz (incl. the touch-and-hold aura test), partner and hero naming, the story, Beach Cave B1F, a fight (Corsola defeated) | identical where in step; the random choices (demo cast, quiz questions, so the hero) differ: the game's per-frame RNG starts 2 frames apart | spectra 0.99-0.996, levels within 0.4 dB; some notes a 5.2 ms sequencer tick apart | identical through the first dungeon (after the logo fix below) | 512 KB FLASH detected (the reference uses 256 KB); the first save is after the dungeon |
+| Golden Sun: Dark Dawn (BO5E) | title, naming, the 26 000-frame intro, the first field (the lookout cabin) under player control, the Psynergy menu | identical where the two are in step (title, menus, intro pages: 0 to a few hundred dots apart, all animation phase); 22-29 frames behind through the intro pages (35-53 before round 10) | correlation 0.97-0.995 with the reference where in step, spectra 0.96-0.999, levels within 0.4 dB | identical (to frame 6000 compared) | 512 KB FLASH detected (the game uses 256 KB); format at boot as the reference; no in-game save reached |
+| Pokemon Mystery Dungeon: Explorers of Darkness (YFYE) | intro demo, title, personality quiz (incl. the touch-and-hold aura test), partner and hero naming, the story, Beach Cave B1F, a fight (Corsola defeated) | identical where in step; the random choices (demo cast, personality, so the hero) differ; the per-frame RNG now runs on the reference's frames (it started 2 early before round 10) | spectra 0.99-0.996, levels within 0.4 dB; some notes a 5.2 ms sequencer tick apart | identical through the first dungeon (after the logo fix below) | 512 KB FLASH detected (the reference uses 256 KB); the first save is after the dungeon |
 | Pokemon SoulSilver (IPGE) | p12 (New Bark Town) plus: the touch menu's SAVE (saved and continued from), Professor Elm's lab and his talk | p12 checkpoints as before (3000/5000/8000 hashes unchanged); 6000 now identical | (unchanged, 0.99 correlation) | identical | 512 KB FLASH; our save and the reference's both continue identically; the two saves differ in 6 bytes |
 
 ## Method
@@ -129,7 +129,8 @@ lab), UP 2120-2220 (to Elm), A every 20 to 6700: Elm's talk).
 
 ### Left (classified)
 
-- **Loads take longer than on the reference** (timing): the title fade
+- **Loads take longer than on the reference** (timing; round 10 below
+  took 4 of the title's 9 frames and a third of the intro's lag): the title fade
   starts ~5 frames late (frame 405), loading the menu costs ~9 more,
   naming ~6 more; by the end of the intro pages ours is 11-40 frames
   behind. Where the two are in step every compared frame matches to a few
@@ -190,6 +191,13 @@ lab), UP 2120-2220 (to Elm), A every 20 to 6700: Elm's talk).
   2 frames are the boot: in frame 2 ours has already copied the ARM7's
   code to 023E0000 where the reference has not. Everything not random is
   identical frame for frame (title, menus, intro movie at 0 dots).
+  *Round 10* (below): the 2 frames were the ARM7's boot -- its code in
+  main RAM copying itself and testing wifi RAM -- costing too little: the
+  wifi waitstates (WIFIWAITCNT) were not modelled and the opcode fetch
+  after a data access stayed sequential. The RNG now starts at frame 25 and
+  its word equals the reference's every frame through 10 600 frames; the
+  intro demo's cast and the personality still come out differently (the
+  game draws them from more than this word).
 - With the same script the reference ends at the hero naming screen
   (its random path asks other questions), so dungeon scenes cannot be
   compared frame for frame; the dungeon's picture (tiles, sprites, HUD,
@@ -223,6 +231,10 @@ lab), UP 2120-2220 (to Elm), A every 20 to 6700: Elm's talk).
 
 ## Card timing (measured, not changed)
 
+(Round 10 added `disp_cardtime` page 2: polling started late, both cores
+hold each word until it is read; and the CPU-polled rows now within 1 % of
+the reference, docs/nds/accuracy.md section 7.)
+
 `disp_cardtime` reads the card by CPU polling and by slot-1 DMA. By DMA
 ours moves a word every 20 bus cycles (4 bytes at 6.7 MHz, GBATEK) and
 the reference every ~23; its first word comes ~38 byte times after the
@@ -254,10 +266,41 @@ overworld, which already runs below 60 fps on a phone) -- it renders 3D
 on both screens (capture every frame) with heavy H-blank and GX-FIFO DMA;
 and SoulSilver's overworld at 75 M against its 3D bedroom's 36 M.
 
+## Round 10: load timing (branch `nds-compat10`)
+
+What made Golden Sun's loads slow and Mystery Dungeon's boot fast, found
+with two new probes (`disp_cpu9time`, `arm7_timing` rows 16-28) and
+profiles of the loads; the whole account, with the evidence for each
+change, is docs/nds/accuracy.md section 7.
+
+- Golden Sun loads by polling the card with the ARM9 (02049AF4h: LDR
+  ROMCTRL, TST DRQ, LDR 4100010h, STRCC) between H-blank / capture / GX
+  DMAs that hold the ARM9 56 % of every frame, and decompresses through
+  the data cache from ITCM. Our ARM9 loads and stores cost the opcode's
+  cycle and an interlock on top of GBATEK's access times (I/O 5 bus cycles
+  where GBATEK and the reference say 4): CPU-polled card reads were 7-8 %
+  slower than the reference's, now within 1 %. The title fade-in: frame 418
+  before, 414 now, the reference 409; menus and naming 9-10 late before,
+  7-8 now; the game's logic counter (02079244h, 30 Hz) 35-53 frames behind
+  the reference's through the intro pages before, 22-29 now.
+- The rest of Golden Sun's gap is the data cache: ours charges GBATEK's
+  23-bus-cycle line fill, the reference no misses at all (every cached
+  access ~1.5 bus cycles). With cheap fills ours runs 4-9 frames *ahead*.
+  Kept GBATEK.
+- Mystery Dungeon: above (RNG on the reference's frames).
+- SoulSilver: p12 3000 / 5000 / 6000 / 6600 unchanged (e4b66d68 /
+  6cf51b7e / 5f7fa5c3 / dfb2fd6c), real BIOS and HLE; 8000 is now
+  8971b401 (was ae4536a1): the walk downstairs loads as on the reference,
+  the A presses hit Mom's text on the same page ("Professor Elm,"), 142
+  dots from the reference (was 283; the rest are 3D edges). The continue
+  check (`c3`, frame 1500) gives hle 836b6cbf, bios 836b6cbf (the base now
+  gives f99395b3 / 1f63fcdf; all four the same New Bark picture, its
+  animation phase).
+
 ## Also open
 
-- ARM9 I/O read cost (above): a likely cause of the longer loads; a
-  hardware or test-ROM measurement of ARM9 I/O and timer reads would
+- ARM9 I/O read cost (above): measured and fixed in round 10 (below); a
+  hardware measurement of ARM9 I/O and timer reads would
   settle it.
 - Capture blending (`gpu.nim` capture_line) still truncates per GBATEK
   where the reference rounds (docs/oracles.md); `video_capture/motion_blur`
