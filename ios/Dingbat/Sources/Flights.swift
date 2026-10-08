@@ -55,8 +55,19 @@ final class Flights: ObservableObject {
     @Published private(set) var flight: Flight?
     /// The screen coming on from black after a dark landing.
     @Published private(set) var powerOn: (rect: CGRect, start: Date)?
-    /// The home screen rising in under a picture coming home.
+    /// The home screen rising in under a picture coming home (or the
+    /// opening's logo), each part `arrivalDelay` later than its own delay.
     private(set) var arriving = false
+    private(set) var arrivalDelay = 0.0
+
+    func beginArrival(lasting: Double, after delay: Double = 0) {
+        arriving = true
+        arrivalDelay = delay
+        let g = gen
+        DispatchQueue.main.asyncAfter(deadline: .now() + lasting * Self.slow) {
+            if self.gen == g { self.arriving = false; self.arrivalDelay = 0 }
+        }
+    }
 
     /// Where each picture is now, in window coordinates: "screen", "hero",
     /// "tile:<id>".
@@ -140,9 +151,7 @@ final class Flights: ObservableObject {
         let s = GameSession.shared
         guard Self.canFly, !s.twoPlayer, !NetLink.shared.linked,
               let from = rects["screen"], let img = s.currentImage() else { return }
-        arriving = true
-        let g = gen
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9 * Self.slow) { if self.gen == g { self.arriving = false } }
+        beginArrival(lasting: 0.9)
         arm(.hero, Flight(image: img, mode: .fit, from: from, to: .zero, fromRadius: 0, toRadius: 14))
     }
 
@@ -257,7 +266,8 @@ private struct HomeRise: ViewModifier {
             .offset(y: up ? 0 : 14)
             .onAppear {
                 guard !up else { return }
-                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.5 * Flights.slow).delay(delay * Flights.slow)) { up = true }
+                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.5 * Flights.slow)
+                    .delay((delay + Flights.shared.arrivalDelay) * Flights.slow)) { up = true }
             }
     }
 }

@@ -299,6 +299,7 @@ struct HomeView: View {
 /// The big brand (web #home-brand): logo, wordmark and slogan.
 struct HomeBrand: View {
     @Environment(\.palette) var palette
+    @ObservedObject private var intro = LaunchIntro.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -307,16 +308,28 @@ struct HomeBrand: View {
                 .interpolation(.none)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 76)
+                // The opening's logo lands here (LaunchIntro).
+                .background(GeometryReader { g in
+                    let r = g.frame(in: .global)
+                    Color.clear
+                        .onAppear { intro.brandAt(r) }
+                        .onChange(of: r) { intro.brandAt($0) }
+                })
+                .opacity(intro.hidesBrand ? 0 : 1)
                 .shadow(color: .black.opacity(palette.isLight ? 0.25 : 0.6), radius: 7, y: 4)
                 .padding(.bottom, 14)
-            Text("dingbat")
-                .font(.system(size: 30, weight: .bold))
-                .tracking(-0.3)
-                .foregroundColor(palette.text)
-            Text("a game boy & game boy advance emulator")
-                .font(.system(size: 13.5))
-                .foregroundColor(palette.textFaint)
-                .padding(.top, 6)
+            VStack(spacing: 0) {
+                Text("dingbat")
+                    .font(.system(size: 30, weight: .bold))
+                    .tracking(-0.3)
+                    .foregroundColor(palette.text)
+                Text("a game boy & game boy advance emulator")
+                    .font(.system(size: 13.5))
+                    .foregroundColor(palette.textFaint)
+                    .padding(.top, 6)
+            }
+            // After the opening's bat has flown up past them.
+            .homeRise(0.8)
         }
         .multilineTextAlignment(.center)
         .accessibilityElement(children: .combine)
