@@ -77,7 +77,11 @@ not in CI (usage in the file).
   The web steps at 59.73 and drops a frame every few seconds. Measured in
   the simulator (`-latency-test 40` on tonc's m7_demo): press to the changed
   frame presented, p50 12.9 / max 15.1 ms; audio ring ~27 ms on top of a
-  ~5 ms output buffer. Audio depth does not delay input or video.
+  ~5 ms output buffer. Audio depth does not delay input or video. A tick
+  that runs several frames (fast-forward, 2x, a missed refresh) presents
+  if any of them changed the picture, not only the last: `-present-check`
+  counts ticks whose screen is not the game's current picture (LeafGreen's
+  intro at fast-forward: 123 of 1260 before, 0 after).
 - **A controller in menus** steps a pick-list to its next option with A
   (a native menu cannot be opened from a pad), and skips text fields
   (search, codes) and the paused hero's ⋯ menu; Y on a tile and the touch
