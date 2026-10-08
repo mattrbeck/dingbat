@@ -13,6 +13,10 @@
 ##      same-value BG2Y store mid-frame, which still resets the internal
 ##      reference point that advanced since V-blank, must redraw the lines
 ##      below it.
+## And the frontend's skip (`ppu.no_draw`, a frame it will not show): a
+## third machine on each ROM draws only some frames; it must run exactly as
+## the others (the same state after every frame) and, on a frame it draws,
+## show the same picture.
 ## Run with: nimble test_renderskip
 
 import std/[os, strutils]
@@ -46,12 +50,24 @@ proc frame(g: GBA; force: bool; line = -1; poke: proc(g: GBA) = nil) =
     g.cpu.tick()
   g.end_frame()
 
+proc runs_as(c, b: GBA): bool =
+  ## c's state is b's but for what only drawing writes: the picture, and
+  ## the mosaic's latched affine point (latched again on line 0 of every
+  ## drawn frame before anything reads it).
+  let fb = c.ppu.framebuffer
+  let mosaic = c.ppu.mosaic_bgref_int
+  c.ppu.framebuffer = b.ppu.framebuffer
+  c.ppu.mosaic_bgref_int = b.ppu.mosaic_bgref_int
+  result = c.state_payload() == b.state_payload()
+  c.ppu.framebuffer = fb
+  c.ppu.mosaic_bgref_int = mosaic
+
 # ---- 1. ROMs ----------------------------------------------------------------
 
 proc run_rom(src: string; frames: int) =
   # Each machine on its own copy: a save chip writes its .sav beside the ROM
-  var g: array[2, GBA]
-  for i in 0 .. 1:
+  var g: array[3, GBA]
+  for i in 0 .. 2:
     let dir = getTempDir() / "dingbat_render_skip" / $i
     createDir(dir)
     let path = dir / src.extractFilename
@@ -59,17 +75,32 @@ proc run_rom(src: string; frames: int) =
     removeFile(path.changeFileExt(".sav"))
     g[i] = new_gba("", path, run_bios = false, use_hle = true)
     g[i].post_init()
-  let (a, b) = (g[0], g[1])
+  let (a, b, c) = (g[0], g[1], g[2])
   let path = src
   var static_frames = 0
   var bad = -1
+  var ran_off = -1
+  var drew_off = -1
+  var drawn = 0
   for f in 0 ..< frames:
     a.frame(force = false)
     b.frame(force = true)
+    # c: runs of up to six undrawn frames, as fast-forward makes
+    c.ppu.no_draw = not (f mod 4 == 3 or f mod 7 == 0)
+    c.frame(force = false)
     if a.ppu.frame_static: inc static_frames
     if bad < 0 and first_diff(a, b) >= 0: bad = f
+    if ran_off < 0 and not c.runs_as(b): ran_off = f
+    if not c.ppu.no_draw:
+      inc drawn
+      if drew_off < 0 and first_diff(c, b) >= 0: drew_off = f
   check(bad < 0, path.extractFilename & " (" & $static_frames & "/" & $frames &
         " frames skipped)", if bad >= 0: "first differs at frame " & $bad else: "")
+  check(ran_off < 0, path.extractFilename & ": undrawn frames run the same",
+        if ran_off >= 0: "state first differs after frame " & $ran_off else: "")
+  check(drew_off < 0, path.extractFilename & ": drawn frames (" & $drawn & "/" &
+        $frames & ") show the same picture",
+        if drew_off >= 0: "first differs at frame " & $drew_off else: "")
 
 # ---- 2. Synthetic scene -------------------------------------------------------
 

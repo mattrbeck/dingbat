@@ -900,6 +900,12 @@ type
     render_dirty*: bool
     skip_render*:  bool
     frame_static*: bool
+    # The frontend will not show this frame (fast-forward, 2x, a display
+    # slower than the game, run-ahead's hidden frames): nothing is drawn.
+    # Set by the frontend between frames; never serialized, since drawing
+    # changes no emulated state (OAM and line latches live outside
+    # scanline), so a skipped frame runs exactly as a drawn one.
+    no_draw*: bool
     # Debug-UI layer visibility (bits 0-3 = BG0-3, bit 4 = OBJ; 1 = shown).
     # ANDed into the per-scanline enable computation only, so the per-pixel
     # compositing hot path is untouched.

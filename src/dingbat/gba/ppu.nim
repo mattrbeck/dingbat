@@ -1393,6 +1393,11 @@ proc scanline*(ppu: PPU) =
     # missed-oam_touched backstop
     ppu.obj_list_rebuilds = 0
     ppu.obj_list_dirty = true
+  if ppu.no_draw:
+    # Not shown, so not drawn; the framebuffer no longer holds this frame,
+    # so the next drawn one is drawn whole
+    ppu.render_dirty = true
+    return
   if ppu.skip_render:
     if ppu.render_dirty:
       ppu.skip_render = false
@@ -1460,6 +1465,8 @@ proc rerender_frame*(ppu: PPU) =
       ppu.bgref_int[bg][r] = ppu.bgref[bg][r].num
   # Force the render-skip logic to actually draw every line this pass.
   ppu.render_dirty = true
+  let saved_no_draw = ppu.no_draw
+  ppu.no_draw = false
   for row in 0'u16 .. 159'u16:
     ppu.vcount = row
     ppu.scanline()
@@ -1468,6 +1475,7 @@ proc rerender_frame*(ppu: PPU) =
       ppu.bgref_int[bg][1] += ppu.bgaff[bg][3].num  # bgy += dmy
   ppu.vcount = saved_vcount
   ppu.bgref_int = saved_bgref_int
+  ppu.no_draw = saved_no_draw
   # Make the next real frame render and the frontend re-upload
   ppu.render_dirty = true
   ppu.skip_render = false
