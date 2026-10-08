@@ -50,6 +50,16 @@ struct TileMenuView: View {
             item("rename", "Rename", disabled: busy) {
                 model.sheet = .rename(entry)
             }
+            // It only reads, so an online session does not hold it up.
+            if !local && onDrive {
+                item("export", "Download and export…",
+                     disabled: drive.downloading[entry.fileName] != nil ? "Downloading…" : nil) {
+                    model.sheet = nil
+                    model.downloadThenExport(entry)
+                }
+            } else {
+                item("export", "Export…") { model.sheet = .export(entry) }
+            }
             let hasSaves = library.hasSaveData(entry)
             item("reset", "Reset save data",
                  disabled: busy ?? (hasSaves ? nil : "No save data yet"),
@@ -92,7 +102,7 @@ struct TileMenuView: View {
 
     private var hasSavesHeight: CGFloat {
         let drive = DriveSync.shared
-        var rows = 3
+        var rows = 4
         if !entry.isLocal { rows += 1 }
         if drive.keptSave(entry.fileName) != nil { rows += 1 }
         if entry.isLocal && drive.linked { rows += 1 }

@@ -96,6 +96,12 @@ not in CI (usage in the file).
   smaller settling one (the logo-flap strip, 24 fps), as the colour lifts
   and the page rises in under it. The web has no launch screen. Reduce
   Motion skips it; so do scripted launches (`-autoplay`, `-sheet`, ...).
+- **Export…** writes the file into the app's Exports folder (Files ›
+  dingbat › Exports) where the web downloads it; Share… on the done screen
+  sends it on. The rows, files, names, zip and info.json are the web's,
+  byte for byte (`node ios/e2e/export-core.mjs` checks the zip writer,
+  camera photos, info.json and adding an export back as a game against the
+  web's own functions).
 - **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.

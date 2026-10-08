@@ -2,7 +2,8 @@ import Compression
 import Foundation
 
 /// The web's unzip(): read a zip's central directory, take the first ROM
-/// inside and the largest image (box art). Stored and deflated entries only.
+/// inside and the largest image (box art), or, for a dingbat export, the
+/// ROM and box art its info.json names. Stored and deflated entries only.
 enum ZipReader {
     struct Result {
         var name: String
@@ -65,10 +66,16 @@ enum ZipReader {
         func base(_ n: String) -> String { (n as NSString).lastPathComponent }
         let visible = entries.filter { !$0.name.hasSuffix("/") && !base($0.name).hasPrefix(".") &&
                                        !$0.name.hasPrefix("__MACOSX") }
-        guard let romEntry = visible.first(where: { romExts.contains(ext($0.name)) }),
+        // One of our own exports says what each file is (info.json): its box
+        // art is the file it calls box art, or there is none; guessing would
+        // make the library thumbnail or a printed photo the cover.
+        let kinds = ExportCore.exportKinds(entries.first { $0.name == "info.json" }.flatMap { data($0) })
+        let ofKind = { (k: String) in kinds.flatMap { kinds in entries.first { kinds[$0.name] == k } } }
+        guard let romEntry = ofKind("rom") ?? visible.first(where: { romExts.contains(ext($0.name)) }),
               let rom = data(romEntry) else { return nil }
-        let art = visible.filter { imgExts.contains(ext($0.name)) }
-            .max { $0.size < $1.size }.flatMap { data($0) }
+        // Anyone else's zip: the largest image is almost always the box art.
+        let art = kinds != nil ? ofKind("art").flatMap { data($0) }
+            : visible.filter { imgExts.contains(ext($0.name)) }.max { $0.size < $1.size }.flatMap { data($0) }
         return Result(name: base(romEntry.name), rom: rom, art: art)
     }
 

@@ -13,7 +13,7 @@ final class AppModel: ObservableObject {
     enum Sheet: Identifiable, Equatable {
         case settings(section: String?)
         case states, saves, rewind, cheats, prints, report, clip, link
-        case tileMenu(RomEntry), rename(RomEntry)
+        case tileMenu(RomEntry), rename(RomEntry), export(RomEntry)
         /// Resume from earlier; `crash`: the "stopped unexpectedly" form.
         case moments(RomEntry, crash: Bool)
         case addPictures
@@ -30,6 +30,7 @@ final class AppModel: ObservableObject {
             case .link: return "link"
             case .tileMenu(let e): return "tile:" + e.id
             case .rename(let e): return "rename:" + e.id
+            case .export(let e): return "export:" + e.id
             case .moments(let e, _): return "moments:" + e.id
             case .addPictures: return "addPictures"
             }
@@ -425,6 +426,20 @@ final class AppModel: ObservableObject {
             if await DriveSync.shared.downloadGame(name) {
                 markDone(name)
                 toast("Synced to this device")
+            } else {
+                tileFailed.insert(name)
+            }
+        }
+    }
+
+    /// "Download and export…" (web): the game comes down, then Export… opens.
+    func downloadThenExport(_ e: RomEntry) {
+        let name = e.fileName
+        tileFailed.remove(name)
+        Task { @MainActor in
+            if await DriveSync.shared.downloadGame(name) {
+                markDone(name)
+                openSheet(.export(RomEntry(fileName: name)))
             } else {
                 tileFailed.insert(name)
             }
