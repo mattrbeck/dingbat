@@ -6,8 +6,9 @@
  * desktop build.
  *
  * Producer: the emulator thread, via SDL_QueueAudio (GBA int16 stereo, GB
- * float32 stereo, both 32768 Hz; the format is whatever the last
- * SDL_OpenAudio() asked for). Consumer: the CoreAudio render thread calls
+ * float32 stereo, both 32768 Hz; the DS float32 stereo at 32728 Hz, queued
+ * by dingbat_ios.nim itself after each frame; the format is whatever the
+ * last SDL_OpenAudio() asked for). Consumer: the CoreAudio render thread calls
  * dingbat_audio_read(), which converts to float32 and never touches the Nim
  * runtime. The shell paces emulation by the display clock (as the web does
  * by requestAnimationFrame); the two clocks drift, so the reader resamples
