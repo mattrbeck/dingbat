@@ -131,8 +131,9 @@ struct GameStage: View {
             .onEnded { _ in panBase = pan }
     }
 
-    /// Zoomed: a double tap resets (the single tap waits it out). Phone
-    /// landscape: a single tap clear of every control toggles the top bar.
+    /// Zoomed: a double tap resets (the single tap waits it out). Where the
+    /// bar folds away (a phone held sideways, or upright with "Hide the top
+    /// bar while playing"): a single tap clear of every control toggles it.
     private func taps(_ box: CGSize, picture: CGSize) -> some Gesture {
         let single = SpatialTapGesture(count: 1, coordinateSpace: .global)
             .onEnded { v in toggleBar(at: v.location) }
@@ -141,7 +142,7 @@ struct GameStage: View {
     }
 
     private func toggleBar(at p: CGPoint) {
-        guard phoneLandscape, model.session.game != nil else { return }
+        guard PadGeometry.shared.barFolds, model.session.game != nil else { return }
         let clear = PadGeometry.shared.rects.allSatisfy { !$0.insetBy(dx: -20, dy: -20).contains(p) }
         guard clear else { return }
         withAnimation(.easeOut(duration: 0.2)) { model.topbarOpen.toggle() }
@@ -154,7 +155,8 @@ struct GameStage: View {
     }
 }
 
-/// The one-time "Tap the picture to show the bar" toast for phone landscape.
+/// The one-time "Tap the picture to show the bar" toast, the first time
+/// the bar folds away over a game.
 enum BarTapHint {
     private static let key = "dingbat_bar_tap_hint"
     static func showIfNeeded() {
