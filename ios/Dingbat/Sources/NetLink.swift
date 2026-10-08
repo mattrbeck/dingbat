@@ -9,12 +9,16 @@ import SwiftUI
 /// and a browser link as two browsers do.
 ///
 /// Wire protocol, first byte = kind, big-endian (web RB_*):
-///   0 hello [epoch u32][romHash u32]   1 input [frame i32][bits u16]
+///   0 hello [epoch u32][romHash u32][len u32][crc32 u32][fnv u32]
+///   1 input [frame i32][bits u16]
 ///   2 state-begin [len u32]            3 state-chunk [bytes]
 ///   4 rom-begin [len u32]              5 rom-chunk [bytes]
-///   6 ready   7 speed [on u8]   8 pause [on u8]
-/// Core 0 is the host's game, core 1 the guest's. When the ROM hashes differ
-/// (a cross-game trade) each side also sends its ROM.
+///   6 ready   7 speed [on u8]   8 pause [on u8]   9 have-rom   10 need-rom
+/// Core 0 is the host's game, core 1 the guest's. When the ROMs differ (a
+/// cross-game trade) each side also needs the other's: a side whose hello
+/// names its whole ROM answers the friend's with have-rom (it is in the
+/// library, so it is not sent) or need-rom, and a ROM goes over only on
+/// need-rom; to an older build (a 9-byte hello, no answer) it goes at once.
 ///
 /// With the server unreachable (or by choice) the manual exchange pairs
 /// instead: each side mints a code holding its whole description
@@ -84,6 +88,11 @@ final class NetLink: ObservableObject {
         var gamePath = ""
         var romBytes = Data()
         var romHash: UInt32 = 0
+        var romId = RomIdentity(len: 0, crc: 0, fnv: 0)
+        var remoteRomId: RomIdentity?
+        /// The friend's ROM came from this library; ours is already theirs.
+        var romFromLibrary = false
+        var friendHasRom = false
         var localState = Data()
         var remoteState: Data?
         var stateBuf = Data()
@@ -136,6 +145,8 @@ final class NetLink: ObservableObject {
     // web RB_* kinds
     private static let hello: UInt8 = 0, input: UInt8 = 1, stateBegin: UInt8 = 2, stateChunk: UInt8 = 3
     private static let romBegin: UInt8 = 4, romChunk: UInt8 = 5, ready: UInt8 = 6, speed: UInt8 = 7, pause: UInt8 = 8
+    private static let haveRom: UInt8 = 9, needRom: UInt8 = 10
+    private static let helloLen = 21  // with the whole-ROM identity
     private static let chunk = 16384
     private static let highWater = 4 * 1024 * 1024
     private static let romMax = 48 * 1024 * 1024
@@ -669,10 +680,12 @@ final class NetLink: ObservableObject {
         rb.gamePath = game.coreURL.path
         rb.romBytes = rom
         rb.romHash = Self.fnv1a(rom)
+        rb.romId = RomIdentity(rom)
         rb.localState = state
         s.rb = rb
         setStatus("Syncing…")
-        send([Self.hello] + Self.be32(rb.epoch) + Self.be32(rb.romHash), s)
+        send([Self.hello] + Self.be32(rb.epoch) + Self.be32(rb.romHash)
+             + Self.be32(rb.romId.len) + Self.be32(rb.romId.crc) + Self.be32(rb.romId.fnv), s)
         send([Self.stateBegin] + Self.be32(UInt32(state.count)), s)
         var off = 0
         while off < state.count {
@@ -735,15 +748,32 @@ final class NetLink: ObservableObject {
         case Self.pause:
             if data.count >= 2 { GameSession.shared.remotePause(data[data.startIndex + 1] == 1) }
             return
+        case Self.haveRom:
+            // Our ROM is already on the friend's side.
+            rb.friendHasRom = true
+            rb.romSendStarted = true
+            rb.romSent = rb.romBytes.count
+            showTransfer(rb)
+            return
+        case Self.needRom:
+            sendOurRom(s)
+            return
         case Self.hello:
             guard data.count >= 9 else { return }
             rb.remoteRomHash = Self.read32(data, 5)
             if s.isHost != true { rb.epoch = Self.read32(data, 1) }  // the host's clock
             rb.remoteHello = true
-            if rb.remoteRomHash != rb.romHash {
+            // A friend that names its whole ROM also answers for ours; both
+            // sides then compare whole ROMs, an older build the first 1 MB.
+            let answers = data.count >= Self.helloLen
+            if answers {
+                rb.remoteRomId = RomIdentity(len: Self.read32(data, 9), crc: Self.read32(data, 13),
+                                             fnv: Self.read32(data, 17))
+            }
+            if answers ? rb.remoteRomId != rb.romId : rb.remoteRomHash != rb.romHash {
                 rb.needRom = true
                 showTransfer(rb)
-                sendOurRom(s)
+                if let want = rb.remoteRomId { answerRom(want, rb, s) } else { sendOurRom(s) }
             }
         case Self.stateBegin:
             guard data.count >= 5 else { return }
@@ -769,7 +799,8 @@ final class NetLink: ObservableObject {
             rb.romBuf.append(data.dropFirst())
             showTransfer(rb)
             if rb.romBuf.count >= rb.remoteRomLen {
-                guard Self.fnv1a(rb.romBuf) == rb.remoteRomHash else {
+                guard Self.fnv1a(rb.romBuf) == rb.remoteRomHash,
+                      rb.remoteRomId.map({ RomIdentity(rb.romBuf) == $0 }) ?? true else {
                     fail("Game transfer was corrupted — try again")
                     return
                 }
@@ -780,6 +811,29 @@ final class NetLink: ObservableObject {
             return
         }
         tryInit(s)
+    }
+
+    /// The friend named its whole ROM: look for it in the library (off the
+    /// main thread), and say whether it needs to come over.
+    private func answerRom(_ want: RomIdentity, _ rb: RB, _ s: Session) {
+        let entries = RomLibrary.shared.entries
+        DispatchQueue.global(qos: .userInitiated).async {
+            let bytes = LinkRomLookup.find(want, in: entries)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, s.rb === rb else { return }
+                if let bytes {
+                    rb.remoteRom = bytes
+                    rb.remoteRomLen = bytes.count
+                    rb.romFromLibrary = true
+                    print("netlink: the friend's game is in the library — not transferred")
+                    self.send([Self.haveRom], s)
+                } else {
+                    self.send([Self.needRom], s)
+                }
+                self.showTransfer(rb)
+                self.tryInit(s)
+            }
+        }
     }
 
     /// The friend's hello, state and (cross-game) ROM in hand: build both

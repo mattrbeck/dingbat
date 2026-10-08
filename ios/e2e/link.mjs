@@ -14,9 +14,11 @@
 //   node ios/e2e/link.mjs <path to Dingbat.app> [simulator udid]
 //
 // Cases: the same GBA game on both sides (no transfer); the same GB game;
-// two different GBA games (each side sends the other its ROM first); and the
-// manual code exchange with no server at all (each side pastes the other's
-// code; the app's goes through tmp/linkcode.txt and tmp/friendcode.txt).
+// two different GBA games (each side sends the other its ROM first), and
+// the same with the friend's game already in one side's library (it says
+// so, and that ROM never crosses); and the manual code exchange with no
+// server at all (each side pastes the other's code; the app's goes through
+// tmp/linkcode.txt and tmp/friendcode.txt).
 
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
@@ -55,7 +57,7 @@ const web = await serveWeb();
 const browser = await playwright.chromium.launch({ headless: true, args: ["--mute-audio"] });
 
 // The app, freshly installed and muted, with `rom` in its library.
-const launchApp = (rom, args, log) => {
+const launchApp = (rom, args, log, extra = []) => {
   trySimctl("boot", UDID);
   simctl("bootstatus", UDID);
   trySimctl("terminate", UDID, BUNDLE);
@@ -63,7 +65,7 @@ const launchApp = (rom, args, log) => {
   simctl("install", UDID, APP);
   const data = simctl("get_app_container", UDID, BUNDLE, "data").trim();
   mkdirSync(join(data, "Documents/roms"), { recursive: true });
-  copyFileSync(rom, join(data, "Documents/roms", rom.split("/").pop()));
+  for (const r of [...extra, rom]) copyFileSync(r, join(data, "Documents/roms", r.split("/").pop()));
   simctl("spawn", UDID, "defaults", "write", BUNDLE, "audio.muted", "-bool", "true");
   if (existsSync(log)) rmSync(log);
   simctl("launch", "--stderr=" + log, UDID, BUNDLE, ...MUTED, ...args);
@@ -71,7 +73,7 @@ const launchApp = (rom, args, log) => {
 
 const STOP = 600;
 
-const runCase = async (name, { webRom, appRom, appGame, manual = false }) => {
+const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas = [], appHas = [], expect }) => {
   console.log(`\n${name}`);
   const code = "T" + Math.random().toString(36).slice(2, 8).toUpperCase();
   const log = join(SHOTS, `link-${name.replace(/\W+/g, "-")}.log`);
@@ -82,11 +84,20 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false }) => {
   const sig = "ws://127.0.0.1:" + (manual ? 9 : PORT);
   await page.goto(web.url + "?signal=" + sig);
   await page.waitForFunction(() => typeof Module !== "undefined" && !!Module._rollback_tick, null, { timeout: 30000 });
-  const [chooser] = await Promise.all([
+  // Games already in the browser's library: each added, then Main Menu.
+  for (const r of webHas) {
+    const [c] = await Promise.all([page.waitForEvent("filechooser"),
+      page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click()]);
+    await c.setFiles({ name: r.split("/").pop(), mimeType: "application/octet-stream", buffer: readFileSync(r) });
+    await page.waitForFunction(() => document.body.classList.contains("running") && !paused, null, { timeout: 20000 });
+    await page.evaluate(() => document.getElementById("main-menu").click());
+    await page.waitForFunction(() => !document.body.classList.contains("running"), null, { timeout: 10000 });
+  }
+  const [chooser2] = await Promise.all([
     page.waitForEvent("filechooser"),
     page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click(),
   ]);
-  await chooser.setFiles({ name: webRom.split("/").pop(), mimeType: "application/octet-stream",
+  await chooser2.setFiles({ name: webRom.split("/").pop(), mimeType: "application/octet-stream",
                            buffer: readFileSync(webRom) });
   await page.waitForFunction(() => document.body.classList.contains("running") && !paused, null, { timeout: 20000 });
   // Scripted buttons by frame, and a stop at STOP: set inside the tick so
@@ -103,7 +114,7 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false }) => {
 
   launchApp(appRom, ["-autoplay", appGame, "-signal", sig,
                      ...(manual ? ["-link-manual"] : ["-link", code]),
-                     "-link-stop-at", String(STOP), "-link-press"], log);
+                     "-link-stop-at", String(STOP), "-link-press"], log, appHas);
   await sleep(1500);
   await page.click("#menu-btn");
   await page.click("#net-connect");
@@ -142,6 +153,8 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false }) => {
     appLine = appState.startsWith("LINKDUMP") ? appState : "";
   }
   trySimctl("io", UDID, "screenshot", join(SHOTS, `link-${name.replace(/\W+/g, "-")}.png`));
+  const xfer = await page.evaluate(() => ({ fromLibrary: net.rb.romFromLibrary, friendHas: net.rb.friendHasRom,
+                                            got: net.rb.romGot }));
   const webDump = await page.evaluate(() => {
     const out = { head: Module._rollback_head(), confirmed: Module._rollback_confirmed(), p: [] };
     for (let p = 0; p < 2; p++) {
@@ -166,6 +179,12 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false }) => {
   await ctx.close();
   assert.ok(appLine, "the app reached the stop frame with every input in");
   assert.equal(appLine, webLine, "both players' cores identical on both sides");
+  if (expect) {
+    const x = xfer;
+    console.log("  web transfer " + JSON.stringify(x));
+    assert.deepEqual({ fromLibrary: x.fromLibrary, friendHas: x.friendHas }, expect, "who already had which game");
+    if (x.fromLibrary) assert.equal(x.got, 0, "the browser was sent nothing it had");
+  }
   assert.ok(alive, "the app plays on after the browser disconnects (" + after + ")");
   assert.ok(!/netlink: /.test(appLog) || !/failed|lost/i.test(appLog), "no link failure logged");
   console.log("  ok");
@@ -179,6 +198,14 @@ const cases = [
                      appGame: "gblinktest.gb" }],
   ["two GBA games, sent both ways", { webRom: join(ROOT, "tests/roms/linktest.gba"),
                                       appRom: join(ROOT, "tests/roms/gbaedge.gba"), appGame: "gbaedge.gba" }],
+  ["two GBA games, the app already has the browser's", { webRom: join(ROOT, "tests/roms/linktest.gba"),
+                                      appRom: join(ROOT, "tests/roms/gbaedge.gba"), appGame: "gbaedge.gba",
+                                      appHas: [join(ROOT, "tests/roms/linktest.gba")],
+                                      expect: { fromLibrary: false, friendHas: true } }],
+  ["two GBA games, the browser already has the app's", { webRom: join(ROOT, "tests/roms/linktest.gba"),
+                                      appRom: join(ROOT, "tests/roms/gbaedge.gba"), appGame: "gbaedge.gba",
+                                      webHas: [join(ROOT, "tests/roms/gbaedge.gba")],
+                                      expect: { fromLibrary: true, friendHas: false } }],
   ["manual codes, no server", { webRom: join(ROOT, "tests/roms/linktest.gba"), appRom: join(ROOT, "tests/roms/linktest.gba"),
                                 appGame: "linktest.gba", manual: true }],
 ];
