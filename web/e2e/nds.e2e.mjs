@@ -278,12 +278,12 @@ for (const vp of [{ width: 375, height: 812 }, { width: 390, height: 844 }]) {
       await addGame(page, rom("fb_both.nds"));
       await framesPast(page, 5);
       await setMode(page, { layout: "stack", swap: false, rot: 0, gap: "hinge" });
-      await page.evaluate(() => setNdsDisplay({ barHide: false }));
+      await page.evaluate(() => applyFoldBar(false));
       await sleep(300);
       const ref = await ctlRects(page);
       const shown = await boxes(page);
       assert.ok(shown.bar.b > 40, "the bar is on screen");
-      await page.evaluate(() => setNdsDisplay({ barHide: true }));
+      await page.evaluate(() => applyFoldBar(true));
       await sleep(400);
       const hidden = await boxes(page);
       assert.ok(hidden.bar.b <= 0.5, "the bar went off the top: " + hidden.bar.b);

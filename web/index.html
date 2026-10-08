@@ -384,7 +384,7 @@
       </div>
       <label class="nds-panel-toggle nds-phone-only">
         <span>Hide the top bar (phone held upright)</span>
-        <span class="switch"><input type="checkbox" data-nds-toggle="barHide" /><span class="switch-track"></span></span>
+        <span class="switch"><input type="checkbox" data-fold-bar /><span class="switch-track"></span></span>
       </label>
     </div>
 
@@ -1053,6 +1053,16 @@
                   </div>
                   <span class="modal-toggle-sub">Fixed stays put; floating follows your thumb</span>
                 </div>
+                <div class="modal-toggle-row phone-only">
+                  <div>
+                    <span class="modal-row-label">Hide the top bar while playing</span>
+                    <span class="modal-toggle-sub">On a phone held upright the picture takes the bar's room. Tap the picture to bring the bar back</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="fold-bar-toggle" data-fold-bar checked />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
                 <div class="modal-toggle-row">
                   <div>
                     <span class="modal-row-label">Hide touch controls with a controller</span>
@@ -1261,16 +1271,6 @@
                   </div>
                   <label class="switch">
                     <input type="checkbox" data-nds-toggle="swap" />
-                    <span class="switch-track"></span>
-                  </label>
-                </div>
-                <div class="modal-toggle-row nds-phone-only">
-                  <div>
-                    <span class="modal-row-label">Hide the top bar while playing</span>
-                    <span class="modal-toggle-sub">On a phone held upright, the screens take the bar's room. The handle at the top brings the bar back</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" data-nds-toggle="barHide" />
                     <span class="switch-track"></span>
                   </label>
                 </div>
