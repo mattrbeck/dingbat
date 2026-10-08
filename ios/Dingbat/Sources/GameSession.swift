@@ -270,9 +270,21 @@ final class GameSession: NSObject, ObservableObject {
     // MARK: local 2P
 
     /// Both players' battery saves, or the one game's.
+    /// Writes the battery and, where it changed, queues it for Drive: every
+    /// way out of a game comes through here (web persistSave marks on each),
+    /// so a save made in its last second is never left off Drive.
     func flushSave() {
         if twoPlayer { dingbat_link_flush_saves() } else { dingbat_flush_save() }
+        checkSaveChanged()
+        if twoPlayer, let g = game {
+            let sig = RomLibrary.saveSignature(try? Data(contentsOf: g.dir.appendingPathComponent("rom-p2.sav")))
+            if sig != lastP2SaveSig {
+                lastP2SaveSig = sig
+                DriveSync.shared.markUpload("save:" + g.fileName + "-p2")
+            }
+        }
     }
+    private var lastP2SaveSig: String?
 
     /// Two cores of this game on one screen (web launchLinkRom). Player 2
     /// starts from a copy of player 1's save the first time.
@@ -671,7 +683,8 @@ final class GameSession: NSObject, ObservableObject {
     /// The session handed this player's core back as the solo game.
     func leaveLinked() {
         if speed != .normal { setSpeed(.normal) }
-        lastSaveSig = game.map { RomLibrary.currentSaveSig($0) } ?? nil
+        // A save made in the session (a trade's) goes to Drive.
+        checkSaveChanged()
         sessionMoved = true
         guard let g = game, dingbat_loaded() != 0 else { return }
         // The kept core is the session's own: what the solo core carried
