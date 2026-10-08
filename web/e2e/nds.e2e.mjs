@@ -283,6 +283,16 @@ for (const vp of [{ width: 375, height: 812 }, { width: 390, height: 844 }]) {
       const ref = await ctlRects(page);
       const shown = await boxes(page);
       assert.ok(shown.bar.b > 40, "the bar is on screen");
+      // Select and Start are small circles, hit past their edge and on the
+      // label under them; L and R are short.
+      const small = await page.evaluate(() => {
+        const at = (id, dx, dy) => { const r = document.getElementById(id).getBoundingClientRect();
+                                     return document.elementFromPoint(r.left + r.width / 2 + dx, r.bottom + dy)?.id; };
+        const sel = document.getElementById("select").getBoundingClientRect();
+        return { w: sel.width, h: sel.height, label: at("select", 0, 10), side: at("start", 18, -14),
+                 l: document.getElementById("l").getBoundingClientRect().height };
+      });
+      assert.deepEqual(small, { w: 28, h: 28, label: "select", side: "start", l: 28 });
       await page.evaluate(() => setNdsDisplay({ barHide: true }));
       await sleep(400);
       const hidden = await boxes(page);

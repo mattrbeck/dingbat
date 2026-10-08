@@ -9293,12 +9293,28 @@ body:not(.running) #nds-off {
   justify-content: center;
 }
 
-/* DS: the top bar. A phone held upright gives the bar's room to the
-   screens (body.nds-bar-hide, the "Hide the top bar" choice): the bar
-   slides off as it does on a phone held sideways, and a tap on the picture
-   away from the touch screen brings it back (index.js "Mobile-landscape top
-   bar"). The touch controls do not move. */
+/* DS on a phone held upright: the two screens get the room.
+   - The bar folds off the top (body.nds-bar-hide, the "Hide the top bar"
+     choice, on by default) and a tap on the picture away from the touch
+     screen brings it down over the top screen (index.js "Mobile-landscape
+     top bar").
+   - With it folded, the top screen goes up to the notch or the Dynamic
+     Island: --nds-top is the status-bar inset less what lies beside the
+     cut-out (14 px on a notched phone, 11 px on an island one, where the
+     inset is 54 px or more); a phone with a plain 20 px status bar, or a
+     browser tab (no inset), keeps the whole inset. Any room the screens
+     do not fill goes below them, not above.
+   - L and R are short (120 x 28) at the strip's top corners; Select and
+     Start are small circles (28 px) labelled underneath, at the bottom
+     between the d-pad and B, each hit 8 px past its circle; the d-pad and
+     the face buttons keep their size and sit at the bottom, the cluster's
+     row exactly the d-pad's height.
+   Game Boy and GBA games keep their own layout. */
 @media (pointer: coarse) and (orientation: portrait) and (max-width: 699px) {
+  :root {
+    --nds-top: calc(var(--safe-t) - clamp(0px, (var(--safe-t) - 20px) * 100, 14px)
+      + clamp(0px, (var(--safe-t) - 53px) * 100, 3px));
+  }
   body.running.nds-mode.nds-bar-hide #topbar {
     position: fixed;
     top: 0;
@@ -9312,8 +9328,94 @@ body:not(.running) #nds-off {
     transform: translateY(0);
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
   }
+  body.running.nds-mode #stage {
+    align-items: flex-start;
+  }
   body.running.nds-mode.nds-bar-hide #stage {
-    padding-top: var(--safe-t);
+    padding-top: var(--nds-top);
+  }
+  body.nds-mode #controls {
+    position: relative;
+    grid-template-rows: auto 1fr;
+    gap: 8px;
+    padding-top: 8px;
+    padding-bottom: max(10px, calc(var(--safe-b) - 12px));
+    /* The pinstripes through the bottom of the clusters, which now sit on
+       the strip's bottom padding. */
+    background:
+      linear-gradient(var(--panel-stripe), var(--panel-stripe)) 0
+        calc(100% - max(10px, calc(var(--safe-b) - 12px)) - 48px) / 100% 4px no-repeat,
+      linear-gradient(var(--panel-stripe), var(--panel-stripe)) 0
+        calc(100% - max(10px, calc(var(--safe-b) - 12px)) - 36px) / 100% 4px no-repeat,
+      linear-gradient(180deg, var(--control-strip-top), var(--control-strip-bottom));
+  }
+  body.nds-mode #lr {
+    justify-content: space-between;
+  }
+  body.nds-mode .pad-shoulder,
+  body.nds-mode.large-controls .pad-shoulder {
+    position: relative;
+    flex: 0 0 120px;
+    height: 28px;
+    font-size: 12px;
+    border-radius: 8px 8px 5px 5px;
+  }
+  /* 6 px more to hit above and below, inside the strip's padding and gap. */
+  body.nds-mode .pad-shoulder::before {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
+  body.nds-mode #main-controls {
+    height: min(calc((100vw - 32px - var(--safe-l) - var(--safe-r)) * 0.46), 240px);
+  }
+  body.nds-mode.large-controls #main-controls {
+    height: min(calc((100vw - 32px - var(--safe-l) - var(--safe-r)) * 0.62), 330px);
+  }
+  body.nds-mode #select-start {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(max(10px, calc(var(--safe-b) - 12px)) + 12px);
+    gap: 22px;
+    pointer-events: none;
+  }
+  body.nds-mode .pad-pill,
+  body.nds-mode.large-controls .pad-pill {
+    position: relative;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 0;
+    letter-spacing: 0;
+    pointer-events: auto;
+  }
+  body.nds-mode .pad-pill::before {
+    content: "";
+    position: absolute;
+    inset: -8px -8px -20px;
+  }
+  body.nds-mode .pad-pill::after {
+    position: absolute;
+    top: calc(100% + 3px);
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--pill-label);
+    opacity: 0.8;
+  }
+  body.nds-mode #select::after {
+    content: "Select";
+  }
+  body.nds-mode #start::after {
+    content: "Start";
   }
 }
+
 

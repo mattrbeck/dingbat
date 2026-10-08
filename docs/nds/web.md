@@ -84,8 +84,24 @@ record falls back field by field; Reset all settings clears both.
 | Swap (B) | The bottom screen first: above / left, or the large (only) one in Focus and One screen. **A tap on the top screen swaps** in Focus and One screen (lifted within 500 ms and 12 px): nothing is touched there, so the small top screen comes up large with one tap, and the large top screen goes small. |
 | Gap | None, Hinge (8 px, the default and what it was), or Like the console (90 px; Focus keeps at most the hinge's 8). The console's figure is an estimate, Assumed: a DS Lite's half is 73.9 mm deep closed, its 62 x 46 mm screens are 0.24 mm a pixel, about 14 mm from the top screen to the hinge and 8 mm on to the bottom one, 22 mm or ~90 px. Worth a ruler on a real console. |
 | Turn (O) | Upright, Book left (the picture a quarter turn anticlockwise: top screen left, touch screen right, the right-handed way book games are held) and Book right (clockwise). The whole arrangement turns, and Automatic weighs the turned shapes. |
-| Hide the top bar (phones) | On by default: on a phone held upright (coarse pointer, under 700 px wide) the bar slides off the top during a DS game, as it already does on a phone held sideways, and a tap on the picture brings it back (and takes it away): the top screen, or the stage round the screens, never the touch screen (the stylus's) nor, in Focus and One screen, the top screen (its tap swaps). The stage gains the bar's 52 px; iOS standalone keeps `--safe-t` above it. |
+| Hide the top bar (phones) | On by default: on a phone held upright (coarse pointer, under 700 px wide) the bar slides off the top during a DS game, as it already does on a phone held sideways, and a tap on the picture brings it back over the top screen (and takes it away): the top screen, or the stage round the screens, never the touch screen (the stylus's) nor, in Focus and One screen, the top screen (its tap swaps). With the bar folded the top screen goes up to the notch or the Dynamic Island ("Phone held upright" below). |
 | V | Next arrangement (with a toast). |
+
+### Phone held upright
+
+A DS game on a phone held upright (coarse pointer, portrait, under 700 px
+wide) has its own controls strip; Game Boy and GBA games keep theirs.
+
+| | |
+|---|---|
+| Top screen | With the bar folded, as high as the phone allows: `--nds-top` is the status-bar inset less what lies beside the cut-out, 14 px on a notched phone and 11 px on a Dynamic Island one (an inset of 54 px or more), so the screen's top edge meets the notch or island. A plain 20 px status bar, or a browser tab (no inset), keeps the whole inset. Room the screens do not fill goes below them. |
+| L, R | 120 x 28 at the strip's top corners (were the full-width 46 px row), hit 6 px above and below. |
+| Select, Start | 28 px circles labelled underneath, at the bottom between the d-pad and B (were a 150 x 34 row of pills under the clusters). Each is hit 8 px past its circle and on its label. |
+| D-pad, face buttons | Their size as before; the row they sit in is exactly the d-pad's height, on the strip's bottom padding (the home indicator's inset less 12 px, at least 10). |
+
+On a 393 x 852 iPhone (59 / 34 insets) the stacked screens are 374 px wide,
+from 267; a 13 mini (375 x 812) 361 from 253, a Pro Max (430 x 932) 415
+from 306. The first iPhone SE is not a target for DS games (too slow).
 
 The touch controls never change: only the stage gives or takes room (the
 e2e checks every control's box is identical in every mode, with the bar
