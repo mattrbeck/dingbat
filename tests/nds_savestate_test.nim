@@ -360,6 +360,8 @@ proc hostile_fields() =
         proc (n: NDS) = n.arm7.icycles = 1'i64 shl 62)
   offer("a sound channel 2^32 - 84 words long",
         proc (n: NDS) = n.spu.ch[3].len = 0xFFFF_FFAC'u32)
+  offer("an ADPCM decoder sample of 2^31 - 2^24",
+        proc (n: NDS) = n.spu.ch[3].adpcm_pcm = 0x7F00_0000)
   offer("a sound channel that has read 2^31 words ahead",
         proc (n: NDS) = n.spu.ch[3].fetched = high(int32))
   offer("a DMA block of 2^32 - 1 words",

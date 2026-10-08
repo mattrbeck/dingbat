@@ -181,17 +181,20 @@ now refuses (`after_load`, `check_clocks`, `check_caches`):
 - **DMA and display.** A running block no longer than DMAxCNT can ask for
   (it runs to its end in one go), the main-memory display's pixels still
   to request within a frame, the stylus on the bottom screen.
-- **Sound.** SOUNDxLEN within its 22 bits, the read-ahead between the word
-  playing and FIFO_WORDS past it, the timer count under a step past
-  0x10000, a start delay of at most 11 samples; a capture unit's gathered
-  bytes and words left.
+- **Sound.** SOUNDxLEN within its 22 bits, the ADPCM decoder's sample
+  within 16 bits, the read-ahead between the word playing and FIFO_WORDS
+  past it, the timer count under a step past 0x10000, a start delay of at
+  most 11 samples; a capture unit's gathered bytes and words left.
 - **GBA slot.** The save chip's memory as long as its type's, a FLASH bank
   inside it (and a bank switch only on a 1 Mbit part), the EEPROM's bit
   counts; wifi's TX header address.
 
-`tests/nds_savestate_test.nim` `hostile_fields` writes such values with the
-real saver and offers them to another machine, which refuses each and
-stays as it was. Every check holds for states taken at 45 moments each of
+After the fixes, sweeps setting each byte to 0xFF, 0x7F and 0x00 in
+fb_both (frame 120), 3d_texfmt (frame 60) and SoulSilver (p12 frame 7000,
+also 0x80) -- 461,337 states -- and 4,200 random multi-byte mutants of the
+three find nothing uncontained. `tests/nds_savestate_test.nim`
+`hostile_fields` writes such values with the real saver and offers them to
+another machine, which refuses each and stays as it was. Every check holds for states taken at 45 moments each of
 eleven test ROMs (real and HLE BIOS) and 43 each from four SoulSilver
 states (3000, 5000, 7000, 8000), which load and save back byte for byte.
 

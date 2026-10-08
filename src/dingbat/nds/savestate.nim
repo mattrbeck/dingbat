@@ -755,13 +755,17 @@ proc after_load(n: NDS) =
   for ch in n.spu.ch:
     check_range(ch.adpcm_index, 0, 88, "spu.adpcm_index")
     check_range(ch.loop_index, 0, 88, "spu.loop_index")
+    # the decoder's sample, a header's int16 or clipped to it (adpcm_step
+    # adds a step to it)
+    check_range(ch.adpcm_pcm, -0x8000, 0x7FFF, "spu.adpcm_pcm")
+    check_range(ch.loop_pcm, -0x8000, 0x7FFF, "spu.loop_pcm")
     # SOUNDxLEN as written (22 bits; the stream length is PNT + LEN in an
     # int32); the read-ahead runs from the word being played to FIFO_WORDS
     # past it (`fill` loops until it gets there); the timer count stays
     # under a step past 0x10000 (`advance` steps until it is back below),
     # and a start delay is at most 11 samples
     check_range64(int64(ch.len), 0, 0x3F_FFFF, "spu.len")
-    check_range(int(ch.sw), 0, high(int32), "spu.sw")
+    check_range(int(ch.sw), 0, high(int32) - FIFO_WORDS, "spu.sw")
     check_range64(ch.fetched, ch.sw, int64(ch.sw) + FIFO_WORDS, "spu.fetched")
     check_range64(int64(ch.ctr), 0, 0x1_0000 + int64(TIMER_STEP), "spu.ctr")
     check_range(int(ch.pos), -11, high(int32), "spu.pos")
