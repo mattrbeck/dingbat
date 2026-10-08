@@ -1089,7 +1089,10 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 );
 
 // Input-rollback wire protocol over the DataChannel (first byte = kind):
-//   0 hello        : [0][epoch u32][romHash u32]  (host's epoch is the shared clock)
+//   0 hello        : [0][epoch u32][romHash u32][len u32][crc32 u32][fnv u32]
+//                    (host's epoch is the shared clock; romHash covers the
+//                    first 1 MB, the rest identify the whole ROM; builds
+//                    before the whole-ROM fields send the first 9 bytes)
 //   1 input        : [1][frame i32][bits u16]      (this peer's buttons for a frame)
 //   2 state-begin  : [2][len u32]                  (full save-state, chunked)
 //   3 state-chunk  : [3][bytes…]
@@ -1098,15 +1101,22 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 //   6 ready        : [6]                           (cores built + states loaded)
 //   7 speed        : [7][on u8]                     (2x fast-forward toggle — both cores)
 //   8 pause        : [8][on u8]
+//   9 have-rom     : [9]                           (your ROM is in my library: don't send it)
+//  10 need-rom     : [10]                          (send me your ROM)
 // Both peers run both cores (core 0 = host's game, core 1 = guest's): each
 // side's save-state is exchanged and loaded into the matching core, then only
 // inputs cross the network. When the hello hashes differ (cross-game trade)
-// each peer also streams its ROM so both hold the same {host, guest} pair.
+// each peer also streams its ROM so both hold the same {host, guest} pair,
+// unless the friend already has it: a peer whose hello names the whole ROM
+// looks the friend's up in its library and answers have-rom or need-rom, and
+// a ROM goes over the wire only on need-rom (to an older build, which never
+// answers, it goes at once, as before).
 // The "ready" barrier keeps either peer from ticking until both have booted.
 
 const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
 const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
-const RB_PAUSE = 8;
+const RB_PAUSE = 8, RB_HAVE_ROM = 9, RB_NEED_ROM = 10;
+const RB_HELLO_LEN = 21; // with the whole-ROM identity
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
 // cap, past which send() throws and the dropped chunk corrupts the ROM.
@@ -1121,6 +1131,78 @@ const rbHash = (bytes) => {
   const n = Math.min(bytes.length, 1 << 20);
   for (let i = 0; i < n; i++) h = Math.imul(h ^ bytes[i], 0x01000193) >>> 0;
   return h >>> 0;
+};
+
+// The whole ROM's identity: its length, CRC-32 and FNV-1a over every byte.
+// What a library copy must match exactly before it stands in for the
+// friend's (no crypto.subtle: it is missing on plain-http LAN pages).
+let rbCrcTable = null;
+const rbRomId = (bytes) => {
+  if (!rbCrcTable) {
+    rbCrcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      rbCrcTable[n] = c >>> 0;
+    }
+  }
+  let crc = 0xffffffff, h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    crc = rbCrcTable[(crc ^ b) & 0xff] ^ (crc >>> 8);
+    h = Math.imul(h ^ b, 0x01000193);
+  }
+  return { len: bytes.length, crc: (crc ^ 0xffffffff) >>> 0, fnv: h >>> 0 };
+};
+const rbSameRom = (a, b) => !!a && !!b && a.len === b.len && a.crc === b.crc && a.fnv === b.fnv;
+
+// Library games' identities, so a later link reads only the likely match.
+// A hint, never trusted: the bytes are measured again before use.
+const RB_ROM_IDS_KEY = "linkromids";
+
+// A library game whose bytes are exactly the ROM `want` names, or null.
+const rbFindLocalRom = async (want) => {
+  await loadRomSizes();
+  const ids = (await dbGet(RB_ROM_IDS_KEY)) || {};
+  const names = (await getRecentMeta()).map((r) => r?.name).filter(Boolean);
+  // Games already known to be it first, then any of that size (or of no
+  // recorded size) not measured yet.
+  const known = names.filter((n) => rbSameRom(ids[n], want));
+  const fresh = names.filter((n) => !known.includes(n) &&
+    (!ids[n] || ids[n].len !== romSizeOf(n)) && [0, want.len].includes(romSizeOf(n)));
+  // Measuring a big library the first time is cut off after a few seconds
+  // (the friend is waiting on the answer); what was measured is kept, so a
+  // later link goes further.
+  const until = Date.now() + 4000;
+  let changed = false, found = null;
+  for (const n of [...known, ...fresh]) {
+    if (!known.includes(n) && Date.now() > until) break;
+    const bytes = await getRomBytes(n);
+    if (!bytes) continue;
+    ids[n] = rbRomId(bytes);
+    changed = true;
+    if (rbSameRom(ids[n], want)) { found = bytes; break; }
+  }
+  if (changed) await dbPut(RB_ROM_IDS_KEY, ids).catch(() => {});
+  return found;
+};
+
+// The friend named its whole ROM: answer whether it needs to come over.
+const rbAnswerRom = async (rb, want) => {
+  let bytes = null;
+  try { bytes = await rbFindLocalRom(want); } catch {}
+  if (net?.rb !== rb) return;
+  if (bytes) {
+    rb.remoteRom = bytes;
+    rb.remoteRomLen = rb.remoteRomGot = bytes.length;
+    rb.romFromLibrary = true;
+    log("netplay: your friend's game is in the library — not transferred");
+    rbSend(new Uint8Array([RB_HAVE_ROM]));
+  } else {
+    rbSend(new Uint8Array([RB_NEED_ROM]));
+  }
+  rbShowXferProgress();
+  rbTryInit();
 };
 
 const rbSend = (buf) => {
@@ -1249,10 +1331,15 @@ const rbConnect = async () => {
   // unfreezes into the session.
   paused = true;
   const romBytes = FS.readFile(currentRomName);
+  const romId = rbRomId(romBytes);
   net.rb = {
     localPlayer: net.isHost ? 0 : 1,
     epoch: net.isHost ? Math.floor(Date.now() / 1000) : 0,
     romHash: rbHash(romBytes),
+    romId,
+    remoteRomId: null,
+    romFromLibrary: false,
+    friendHasRom: false,
     romBytes,
     romLen: romBytes.length,
     localState,
@@ -1275,11 +1362,14 @@ const rbConnect = async () => {
     inited: false,
   };
   netSetStatus("Syncing…");
-  const h = new ArrayBuffer(9);
+  const h = new ArrayBuffer(RB_HELLO_LEN);
   const hv = new DataView(h);
   hv.setUint8(0, RB_HELLO);
   hv.setUint32(1, net.rb.epoch);
   hv.setUint32(5, net.rb.romHash);
+  hv.setUint32(9, romId.len);
+  hv.setUint32(13, romId.crc);
+  hv.setUint32(17, romId.fnv);
   rbSend(h);
   rbSendState(localState);
 };
@@ -1309,14 +1399,31 @@ const rbMessage = (data) => {
     window.applyRemotePause?.(v.getUint8(1) === 1);
     return;
   }
+  if (kind === RB_HAVE_ROM) {
+    // Our ROM is already on the friend's side.
+    rb.friendHasRom = true;
+    rb.romSendStarted = true;
+    rb.romSent = rb.romLen;
+    rbShowXferProgress();
+    return;
+  }
+  if (kind === RB_NEED_ROM) {
+    rbSendOurRom();
+    return;
+  }
   if (kind === RB_HELLO) {
     rb.remoteRomHash = v.getUint32(5);
     if (!net.isHost) rb.epoch = v.getUint32(1); // guest adopts the host's clock
     rb.remoteHello = true;
-    if (rb.remoteRomHash !== rb.romHash) {
+    // A friend that names its whole ROM also answers for ours; both sides
+    // then compare whole ROMs, an older build only the first 1 MB.
+    const answers = data.byteLength >= RB_HELLO_LEN;
+    if (answers) rb.remoteRomId = { len: v.getUint32(9), crc: v.getUint32(13), fnv: v.getUint32(17) };
+    if (answers ? !rbSameRom(rb.remoteRomId, rb.romId) : rb.remoteRomHash !== rb.romHash) {
       rb.needRom = true;
       rbShowXferProgress();
-      rbSendOurRom();
+      if (answers) rbAnswerRom(rb, rb.remoteRomId);
+      else rbSendOurRom();
     }
   } else if (kind === RB_STATE_BEGIN) {
     rb.stateBuf = new Uint8Array(v.getUint32(1));
@@ -1344,7 +1451,8 @@ const rbMessage = (data) => {
     rbShowXferProgress();
     if (rb.romGot >= rb.romBuf.length) {
       // The channel is reliable+ordered, so this only guards a real mismatch.
-      if (rbHash(rb.romBuf) !== rb.remoteRomHash) {
+      if (rbHash(rb.romBuf) !== rb.remoteRomHash ||
+          (rb.remoteRomId && !rbSameRom(rbRomId(rb.romBuf), rb.remoteRomId))) {
         netFail("Game transfer was corrupted — try again");
         return;
       }
