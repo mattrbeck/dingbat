@@ -36,6 +36,8 @@ loop_arm_nop8:
 	subs	r0, r0, #1
 	bgt	1b
 	bx	lr
+	.global loop_arm_nop8_end
+loop_arm_nop8_end:
 
 @ 8 LDRH from r1 (sequential halfwords) per pass
 	.global loop_ldrh8
@@ -66,6 +68,8 @@ loop_ldr8:
 	subs	r0, r0, #1
 	bgt	1b
 	bx	lr
+	.global loop_ldr8_end
+loop_ldr8_end:
 
 @ 8 STR per pass
 	.global loop_str8
@@ -81,6 +85,8 @@ loop_str8:
 	subs	r0, r0, #1
 	bgt	1b
 	bx	lr
+	.global loop_str8_end
+loop_str8_end:
 
 @ LDMIA of 8 registers per pass
 	.global loop_ldm8
@@ -132,5 +138,17 @@ loop_thumb_untaken:
 	subs	r0, #1
 	bgt	1b
 2:	bx	lr
+
+@ a word copy per pass, as a crt0's copy loop: LDR from r1, STR to r1 + 64
+	.arm
+	.global loop_copy
+loop_copy:
+1:	ldr	r2, [r1]
+	str	r2, [r1, #64]
+	subs	r0, r0, #1
+	bgt	1b
+	bx	lr
+	.global loop_copy_end
+loop_copy_end:
 
 	.end

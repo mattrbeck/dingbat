@@ -16,6 +16,21 @@
      13 BIOS WaitByLoop (SWI 03h) with r0 = 256 / 512: T(512) - T(256)
      14 BIOS GetCRC16 (SWI 0Eh) over 512 more bytes of ARM7 WRAM
      15 the same over main RAM
+   Code copied to main RAM (ARM state; one bus, so a data access between
+   two opcode fetches breaks their sequence):
+     16 8 x LDR from main RAM    17 8 x STR to main RAM
+     18 8 x MOV + SUBS/BGT      19 a word copy (LDR, STR) in main RAM
+     20 the word copy run from ARM7 WRAM (data in main RAM)
+     21 8 x LDR from ARM7 WRAM
+   The wifi regions (POWCNT2 bit 1 on), code in ARM7 WRAM (GBATEK
+   WIFIWAITCNT: WS0 4800000h-4807FFFh, WS1 4808000h-480FFFFh, times per
+   halfword):
+     22 8 x LDRH wifi RAM (04804000h, WS0)   23 8 x LDR wifi RAM
+     24 8 x STR wifi RAM                       25 8 x LDRH WS1 (04808000h)
+     26 WIFIWAITCNT as found at entry (the firmware's setting), wifi on
+     rows 22-25 with WIFIWAITCNT = 0030h (the firmware's); then with 0007h
+     (WS0 18/4, WS1 10/10):
+     27 8 x LDRH wifi RAM   28 8 x LDRH WS1
    RES[0] = 'PERI' when done. */
 #include "../periph_suite/periph.h"
 
@@ -35,11 +50,23 @@ void loop_ldm8(u32, volatile void *);
 void loop_mul8(u32, volatile void *);
 void loop_thumb_call(u32, volatile void *);
 void loop_thumb_untaken(u32, volatile void *);
+void loop_copy(u32, volatile void *);
+void loop_arm_nop8_end(void);
+void loop_ldr8_end(void);
+void loop_str8_end(void);
+void loop_copy_end(void);
 
 static u32 wram_buf[16];
 static u32 crc_buf[256];
 #define MAIN_BUF ((volatile u32 *)0x02300000)
 #define MAIN_CODE ((volatile u16 *)0x02301000)
+#define MAIN_ARM ((volatile u32 *)0x02302000)   /* 256-byte slots */
+
+static loop_fn to_main(int slot, loop_fn f, void (*end)(void)) {
+  volatile u32 *d = MAIN_ARM + slot * 64;
+  for (const u32 *p = (const u32 *)f; p < (const u32 *)end; p++) *d++ = *p;
+  return (loop_fn)(MAIN_ARM + slot * 64);
+}
 
 static inline u32 now(void) {
   u32 hi, lo, hi2;
@@ -113,6 +140,24 @@ int main(void) {
   RES[13] = timed_wbl(512) - timed_wbl(256);
   RES[14] = timed_crc(crc_buf, 1024) - timed_crc(crc_buf, 512);
   RES[15] = timed_crc(MAIN_BUF, 1024) - timed_crc(MAIN_BUF, 512);
+  RES[16] = slope(to_main(0, loop_ldr8, loop_ldr8_end), MAIN_BUF);
+  RES[17] = slope(to_main(1, loop_str8, loop_str8_end), MAIN_BUF);
+  RES[18] = slope(to_main(2, loop_arm_nop8, loop_arm_nop8_end), 0);
+  RES[19] = slope(to_main(3, loop_copy, loop_copy_end), MAIN_BUF);
+  RES[20] = slope(loop_copy, MAIN_BUF);
+  RES[21] = slope(to_main(0, loop_ldr8, loop_ldr8_end), wram_buf);
+  REG16(0x04000304) = 3;     /* POWCNT2: speakers, wifi */
+  RES[26] = REG16(0x04000206);
+  REG16(0x04000206) = 0x30;
+  volatile void *wram_w = (volatile void *)0x04804000, *ws1 = (volatile void *)0x04808000;
+  RES[22] = slope(loop_ldrh8, wram_w);
+  RES[23] = slope(loop_ldr8, wram_w);
+  RES[24] = slope(loop_str8, wram_w);
+  RES[25] = slope(loop_ldrh8, ws1);
+  REG16(0x04000206) = 0x07;
+  RES[27] = slope(loop_ldrh8, wram_w);
+  RES[28] = slope(loop_ldrh8, ws1);
+  REG16(0x04000206) = 0x30;
   RES[0] = RES_MAGIC;
   while (1) {}
 }
