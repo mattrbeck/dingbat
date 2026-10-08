@@ -661,6 +661,9 @@ final class RomLibrary: ObservableObject {
     }
 
     func art(for e: RomEntry) -> UIImage? { UIImage(contentsOfFile: e.artURL.path) }
+
+    /// The picture taken with the session (what a resume lands on).
+    func sessionPicture(_ e: RomEntry) -> UIImage? { UIImage(contentsOfFile: e.sessionPicURL.path) }
 }
 
 /// Library entries (web `recent`), built in the web's key order so the

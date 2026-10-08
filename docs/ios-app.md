@@ -81,6 +81,11 @@ the same frame).
   the running game through Manage Saves (the web's drag and drop).
 - **The build** in Settings is the commit a build phase stamps into
   Info.plist (the web reads version.txt).
+- **Picture flights** follow the web's (460 ms, the same curve; a picture
+  that is not the frame about to show darkens and the screen powers on).
+  A game frame flies at its own shape on black, so a Game Boy picture in a
+  3:2 tile grows into its 10:9 screen instead of stretching. Reduce Motion
+  turns them off.
 - **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
   menu is a sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.
@@ -89,8 +94,6 @@ the same frame).
 
 - **The link's same-browser BroadcastChannel path** (two tabs of one
   browser): there is no second tab in an app.
-- **Picture flights** between the hero and the game (the picture flying
-  between its card and the stage).
 - **Web-only plumbing**: the service worker's update button and Force
   update, Fullscreen, the diagnostic log, drag and drop (Open in stands
   in for it).

@@ -31,11 +31,12 @@ struct HeroView: View {
                 HStack(alignment: .center, spacing: solo ? 48 : 40) {
                     frame.frame(width: frameWidth)
                     details(hasSession: hasSession).frame(maxWidth: solo ? 380 : 460, alignment: .leading)
+                        .homeRise(0.2)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 16) {
                     frame.padding(.bottom, 2)
-                    details(hasSession: hasSession)
+                    details(hasSession: hasSession).homeRise(0.2)
                 }
             }
         }
@@ -101,6 +102,8 @@ struct HeroView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border2, lineWidth: 1))
                 .shadow(color: .black.opacity(palette.isLight ? 0.22 : 0.55), radius: 22, y: 20)
+                .flightAnchor("hero")
+                .flightHidden(.hero)
             }
             .buttonStyle(PressStyle())
             .accessibilityLabel("Resume game")
@@ -125,15 +128,15 @@ struct HeroView: View {
                 .truncationMode(.tail)
             HStack(spacing: 10) {
                 if paused {
-                    primary("Resume", icon: "play.fill") { model.resumeFromHero() }
+                    primary("Resume", icon: "play.fill") { fly(); model.resumeFromHero() }
                     plain("Close") { model.closeGame() }
                         .accessibilityHint("Close the game — your save is kept")
                 } else if hasSession {
-                    primary("Resume", icon: "play.fill") { model.tapGame(entry, resume: true) }
-                    plain("Play") { model.tapGame(entry, resume: false, fresh: true) }
+                    primary("Resume", icon: "play.fill") { fly(); model.tapGame(entry, resume: true) }
+                    plain("Play") { fly(); model.tapGame(entry, resume: false, fresh: true) }
                         .accessibilityHint("Start the game from its in-game save")
                 } else {
-                    primary("Play", icon: "play.fill") { model.tapGame(entry, resume: false, fresh: true) }
+                    primary("Play", icon: "play.fill") { fly(); model.tapGame(entry, resume: false, fresh: true) }
                 }
                 more
             }
@@ -181,7 +184,11 @@ struct HeroView: View {
         return "Last played"
     }
 
+    /// The game opens from the hero: its picture flies to the screen.
+    private func fly() { Flights.shared.source("hero", entry) }
+
     private func resume() {
+        fly()
         if paused { model.resumeFromHero() } else if HomePictures.shared.hasSession(entry) {
             model.tapGame(entry, resume: true)
         } else {

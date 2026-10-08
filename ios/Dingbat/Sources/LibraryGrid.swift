@@ -488,6 +488,7 @@ struct LibraryTile: View {
             GamePicture(entry: entry)
                 .aspectRatio(3 / 2, contentMode: .fit)
                 .clipped()
+                .flightAnchor("tile:" + entry.id)
                 .id(pictureGen)
                 .opacity(local ? 1 : 0.72)
                 .overlay { loadOverlay }

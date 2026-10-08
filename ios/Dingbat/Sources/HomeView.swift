@@ -180,6 +180,7 @@ struct HomeView: View {
         VStack(spacing: 0) {
             LibraryHead(countText: countText, underHero: underHero) { importing = true }
                 .frame(maxWidth: layout.width)
+                .homeRise(0.28)
             let columns = Array(repeating: GridItem(.fixed(layout.track), spacing: layout.gap, alignment: .top),
                                 count: layout.fit)
             // On phones the bar sticks under the top bar while the grid
@@ -187,8 +188,9 @@ struct HomeView: View {
             LazyVStack(spacing: 0, pinnedViews: wide ? [] : [.sectionHeaders]) {
                 Section {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: layout.gap) {
-                        ForEach(rows) { e in
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { i, e in
                             LibraryTile(entry: e, pictureGen: library.pictureGen)
+                                .homeRise(0.32 + 0.04 * Double(min(i, 4)))
                         }
                     }
                     // The tracks centre in the block; under a hero on a wide
@@ -197,6 +199,7 @@ struct HomeView: View {
                     .frame(width: underHero && wide ? layout.width : nil,
                            alignment: underHero && wide ? .leading : .center)
                 } header: {
+                    Group {
                     if total >= Self.libBarMin || filter.active {
                         if wide {
                             LibraryBar(filter: $filter, sort: $sort, systems: systems, counts: counts, wide: true)
@@ -212,6 +215,8 @@ struct HomeView: View {
                                 .padding(.bottom, 10)
                         }
                     }
+                    }
+                    .homeRise(0.28)
                 }
             }
             if rows.isEmpty && filter.active {

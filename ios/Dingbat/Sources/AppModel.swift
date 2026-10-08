@@ -169,6 +169,8 @@ final class AppModel: ObservableObject {
         heroGame = entry
         menuOpen = false
         topbarOpen = false
+        // Measured while the tapped picture is still on screen.
+        if moment == nil { Flights.shared.launching(entry, resumed: result == .resumed) }
         withAnimation(.easeOut(duration: 0.25)) { screen = .play }
         if let moment {
             if let why = session.apply(state: moment, keepRewind: false) {
@@ -220,6 +222,7 @@ final class AppModel: ObservableObject {
     /// A tile tap (web openLibraryGame): the hero's game in memory resumes
     /// as it is; otherwise "Opening a game from the library" decides.
     func openLibraryGame(_ entry: RomEntry) {
+        Flights.shared.source("tile:" + entry.id, entry)
         if session.game == entry {
             resumeFromHero()
             return
@@ -265,6 +268,7 @@ final class AppModel: ObservableObject {
             return
         }
         menuOpen = false
+        if let g = session.game { Flights.shared.resuming(g) }
         withAnimation(.easeOut(duration: 0.25)) { screen = .play }
         session.setPaused(false)
     }
@@ -279,6 +283,8 @@ final class AppModel: ObservableObject {
         session.storeLastFrame()
         session.flushSave()
         toasts.removeAll { $0.game }
+        // Where the screen is, before it goes: the picture flies from here.
+        Flights.shared.goingHome()
         withAnimation(.easeOut(duration: 0.25)) { screen = .home }
     }
 
