@@ -69,7 +69,10 @@ proc io7_read(n: NDS; a: uint32): uint32 =
   of 0x184: n.ipc.read_fifocnt(false)
   of 0x1A0 .. 0x1B8: (if n.cart.owner_arm7: n.cart.read_reg(o) else: 0'u32)
   of 0x1C0: n.spi.read_reg(o)
-  of 0x204: uint32((n.exmemcnt and 0xFF80'u16) or n.exmem7_lo)
+  of 0x204:
+    # EXMEMSTAT | WIFIWAITCNT (the latter only with wifi powered: GBATEK)
+    uint32((n.exmemcnt and 0xFF80'u16) or n.exmem7_lo) or
+      (if (n.powcnt2 and 2) != 0: uint32(n.wifiwaitcnt) shl 16 else: 0'u32)
   of 0x208, 0x210, 0x214: n.irq7.read_reg(o)
   of 0x240: uint32(n.gpu.vram.vramstat) or (uint32(n.wramcnt) shl 8)
   of 0x300: uint32(n.postflg7)
@@ -96,6 +99,9 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0x7F) != 0:
       n.exmem7_lo = (n.exmem7_lo and not uint16(mask and 0x7F)) or uint16(v and mask and 0x7F)
       n.slot7_t = slot_timing(n.exmem7_lo)
+    if (mask and 0x003F_0000'u32) != 0 and (n.powcnt2 and 2) != 0:
+      n.wifiwaitcnt = (n.wifiwaitcnt and not uint16((mask shr 16) and 0x3F)) or
+                      uint16((v shr 16) and (mask shr 16) and 0x3F)
   of 0x0B0 .. 0x0DC: n.dma7.write_reg(Arm7Bus(nds: n), o, v, mask)
   of 0x100 .. 0x10C: n.timers7.write_reg(o, v, mask)
   of 0x130:
@@ -251,25 +257,46 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
 
 # --- CPU mixins --------------------------------------------------------
 
+template break_fetch7(n: NDS) =
+  ## A data access takes the ARM7's one bus between two opcode fetches, so
+  ## the next fetch is nonsequential: no main-RAM burst carries on across
+  ## it (GBATEK "ARM CPU Instruction Cycle Times": STR = 2N, the code half
+  ## nonsequential; "Main Memory is ALWAYS having the nonsequential 3 wait
+  ## PENALTY"). After a load GBATEK's 1S+1N+1I would leave it sequential;
+  ## the reference core charges it nonsequential too, and Pokemon Mystery
+  ## Dungeon's boot (ARM7 code in main RAM testing wifi RAM) keeps its
+  ## per-frame RNG on the reference's frames only so (arm7_timing rows
+  ## 16-21, docs/nds/accuracy.md, docs/oracles.md). Marked as an odd
+  ## `last_fetch7`: fetch_cost7 / fetch_jump7 then charge N without the
+  ## branch refill.
+  n.last_fetch7 = n.last_fetch7 or 1
+
 proc data_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   ## Charge a CPU data access (timing.nim); DMA's own accesses are not.
   if n.dma7.dma_access: return
   let seq = a == n.last_data7 + (when width == 32: 4'u32 else: 2'u32)
   n.last_data7 = a
-  n.wait7 += data7(a shr 24, width, seq, n.slot7_t)
+  n.break_fetch7()
+  if (a shr 23) == 0x09:        # 0x04800000-0x04FFFFFF: the wifi regions
+    n.wait7 += wifi7(n.wifiwaitcnt, a, width, seq)
+  else:
+    n.wait7 += data7(a shr 24, width, seq, n.slot7_t)
 
 proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
-  ## A nonsequential fetch (a branch) also pays the refill's second fetch.
+  ## A nonsequential fetch (a branch) also pays the refill's second fetch;
+  ## the next opcode after a data access is nonsequential alone
+  ## (break_fetch7).
   n.last_data7 = NO_ADDR
+  let after_data = a == (n.last_fetch7 and not 1'u32) + (when width == 32: 4'u32 else: 2'u32)
   let seq = a == n.last_fetch7 + (when width == 32: 4'u32 else: 2'u32)
   # a backward branch's target: a loop head (arm/cpu.nim loop_edge)
-  if not seq and a <= n.last_fetch7:
+  if not seq and not after_data and a <= n.last_fetch7:
     if n.arm7.wl_cold > 0: dec n.arm7.wl_cold
     elif n.arm7.wl_on: n.arm7.loop_edge()
   n.last_fetch7 = a
   let top = a shr 24
   n.wait7 += code7(top, width, seq, n.slot7_t)
-  if not seq: n.wait7 += code7(top, width, true, n.slot7_t)
+  if not seq and not after_data: n.wait7 += code7(top, width, true, n.slot7_t)
 
 template wram7_fast(a: uint32): bool =
   ## 0x03800000-0x03FFFFFF: the ARM7's own WRAM (and its mirrors), most of
@@ -280,6 +307,7 @@ template wram7_fast(a: uint32): bool =
 template wram7_charge(n: NDS; a: uint32) =
   if not n.dma7.dma_access:
     n.last_data7 = a
+    n.break_fetch7()
     n.wait7 += 2
 
 template wram7_ptr(n: NDS; a: uint32; T: typedesc): ptr T =
@@ -379,11 +407,16 @@ template fetch_jump7(n: NDS; a: uint32; width: static int) =
   ## fetch_cost7's nonsequential case -- the loop head, the fetch and the
   ## refill's second fetch, fixed costs in this page -- then memory as it is.
   n.last_data7 = NO_ADDR
-  if a <= n.last_fetch7:        # a backward branch's target: a loop head
-    if n.arm7.wl_cold > 0: dec n.arm7.wl_cold
-    elif n.arm7.wl_on: n.arm7.loop_edge()
-  n.last_fetch7 = a
-  n.wait7 += n.fjump7[when width == 32: 1 else: 0]
+  if a == (n.last_fetch7 and not 1'u32) + (when width == 32: 4'u32 else: 2'u32):
+    # the next opcode after a data access that broke the sequence
+    n.last_fetch7 = a
+    n.wait7 += n.fjump7[when width == 32: 1 else: 0] - n.fseq7[when width == 32: 1 else: 0]
+  else:
+    if a <= n.last_fetch7:        # a backward branch's target: a loop head
+      if n.arm7.wl_cold > 0: dec n.arm7.wl_cold
+      elif n.arm7.wl_on: n.arm7.loop_edge()
+    n.last_fetch7 = a
+    n.wait7 += n.fjump7[when width == 32: 1 else: 0]
 
 proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   let n {.cursor.} = b.nds
@@ -419,6 +452,7 @@ proc irq_wake*(b: Arm7Bus): bool {.inline.} =
   ## Halt ends on (IE and IF) != 0 whatever IME says; sleep only through
   ## `wake_from_sleep` (nds.nim).
   not b.nds.sleeping and b.nds.irq7.wake()
+proc data_overlap*(b: Arm7Bus) {.inline.} = discard   ## ARM9 only (bus9.nim)
 proc access_cycles*(b: Arm7Bus): int64 {.inline.} =
   result = b.nds.wait7
   b.nds.wait7 = 0

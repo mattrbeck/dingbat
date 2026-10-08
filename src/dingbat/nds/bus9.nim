@@ -382,6 +382,21 @@ proc dc_invalidate_all(n: NDS) =
   for slot in 0 ..< n.tm.dline.len: n.dc_drop(slot, false)
   n.tm.dcache.invalidate()
 
+template overlap9(n: NDS; a: uint32): int64 =
+  ## A single load/store's bus access overlaps the opcode (arm/cpu.nim
+  ## single_access), once per opcode: its own cycle, or with the opcode
+  ## fetched over the bus from another region 2 bus cycles (GBATEK "DS
+  ## Memory Timings": "When executing code in uncached main ram, and
+  ## accessing data (elsewhere than in main memory, cache/tcm), then
+  ## execution time is typically codetime+datatime-2"; disp_cpu9time rows
+  ## CU/CW, docs/nds/accuracy.md).
+  (if n.ovl9 == n.arm9.cycles:
+     n.ovl9 = -1
+     (if n.ovlx9 == n.arm9.cycles and n.ovl_top9 != (a shr 24): 4'i64 else: 1'i64)
+   else: 0'i64)
+
+proc data_overlap*(b: Arm9Bus) {.inline.} = b.nds.ovl9 = b.nds.arm9.cycles
+
 proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## Charge a CPU data access outside the TCMs (timing.nim); DMA's own
   ## accesses are not charged.
@@ -392,16 +407,17 @@ proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline, codege
   if n.tm.dc_on and n.tm.data_cachable(a):
     if write:
       if not n.tm.dcache.lookup(a, false):
-        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq, n.slot9_t))
+        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq, n.slot9_t)) -
+                   n.overlap9(a)
     elif not n.tm.dcache.lookup(a, true):
-      n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
+      n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN) - n.overlap9(a)
       n.dc_fill(a)
       inc n.idle_epoch          # tags change, and an evicted dirty line reaches memory
     return
   if write and top == 2 and n.tm.data_buffered(a):
-    n.wait9 += WBUF_WRITE
+    n.wait9 += WBUF_WRITE - n.overlap9(a)
     return
-  n.wait9 += data9(top, width, seq, n.slot9_t)
+  n.wait9 += data9(top, width, seq, n.slot9_t) - n.overlap9(a)
 
 template charge9_tcm(n: NDS; a: uint32; itcm: bool) =
   ## DTCM data is free; ITCM data costs a cycle (GBATEK: no parallel access)
@@ -729,6 +745,8 @@ proc fetch_cost9(n: NDS; a: uint32; size: static uint32): bool {.inline.} =
       inc n.idle_epoch9         # a line fill changes the tags
   else:
     c += code9_uncached(a shr 24, n.slot9_t)
+    n.ovlx9 = n.arm9.cycles     # a load/store may overlap this fetch (overlap9)
+    n.ovl_top9 = a shr 24
   n.wait9 += c
 
 template dtlb_read9(n: NDS; a: uint32; T: typedesc) =
@@ -746,7 +764,7 @@ template dtlb_read9(n: NDS; a: uint32; T: typedesc) =
       if e.kind == DT_UNC:
         let seq = a == n.last_data9 + (when sizeof(T) == 4: 4'u32 else: 2'u32)
         n.last_data9 = a
-        n.wait9 += data9(0x02, sizeof(T) * 8, seq, n.slot9_t)
+        n.wait9 += data9(0x02, sizeof(T) * 8, seq, n.slot9_t) - n.overlap9(a)
         return uint32(p[])
 
 template dtlb_write9(n: NDS; a: uint32; v: typed; T: typedesc) =
@@ -776,7 +794,7 @@ template dtlb_write9(n: NDS; a: uint32; v: typed; T: typedesc) =
         else:
           let seq = a == n.last_data9 + (when sizeof(T) == 4: 4'u32 else: 2'u32)
           n.wait9 += (if (e.kind and DT_BUF) != 0: WBUF_WRITE
-                      else: data9(0x02, sizeof(T) * 8, seq, n.slot9_t))
+                      else: data9(0x02, sizeof(T) * 8, seq, n.slot9_t)) - n.overlap9(a)
         n.sched.now = n.arm9.cycles
         n.last_data9 = a
         if p[] != v:

@@ -281,6 +281,14 @@ proc refusals() =
         a.state_payload() == before,
         "a state with a GBA cart in the slot is refused by a machine without it", last_state_error)
   check(a.load_state_bytes(image) and a.state_payload() == before, "and the good one loads")
+  # A state from a build before a field was added (savestate.nim
+  # ADDED_FIELDS) still loads: the field keeps the machine's value.
+  let older = a.state_payload_older(1)
+  check(older.len < before.len, "an older build's payload lacks the newest added field")
+  let b = machine(path)
+  check(b.load_state_bytes(remade(older)) and b.state_payload() == before,
+        "an older build's state loads, and the machine is as the newer state leaves it",
+        last_state_error)
 
 when isMainModule:
   let cases = [
