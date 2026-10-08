@@ -40,6 +40,8 @@ final class NetLink: ObservableObject {
 
     /// The session owns the core (from rollback_init, before it starts).
     var holdsCore: Bool { session?.rb?.inited == true }
+    /// This side's player in the session (0 hosts), once there is one.
+    var localPlayer: Int? { session?.rb?.localPlayer }
 
     // web NET_ICE_SERVERS, timings
     static let iceServers = ["stun:stun.l.google.com:19302"]

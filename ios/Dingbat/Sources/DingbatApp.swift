@@ -98,6 +98,17 @@ struct DingbatApp: App {
                         }
                     }
                     #if DEBUG
+                    // `-load-state FILE`: that state (in Documents) goes in
+                    // once the game runs, before any `-link` (ios/e2e/trade.mjs).
+                    if let st = value("-load-state") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                            if let d = try? Data(contentsOf: docs.appendingPathComponent(st)),
+                               let why = model.session.apply(state: d, keepRewind: false) {
+                                print("load-state: " + why)
+                            }
+                        }
+                    }
                     // `-latency-test N`: N timed presses (GameSession).
                     if let n = value("-latency-test").flatMap(Int.init) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.session.startLatencyTest(n) }

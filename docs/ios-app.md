@@ -19,7 +19,11 @@ Tests against the real web build, on a headless simulator (both muted):
 app and a browser, through a fake Drive) and `node ios/e2e/link.mjs
 <Dingbat.app>` (an online link between the app and Chromium through a local
 signaling server; both must hold byte-identical states for both players at
-the same frame).
+the same frame). `ios/e2e/trade.mjs` plays a whole Pokémon trade, FireRed
+in Chromium against LeafGreen in the app from save states at the Cable Club
+counter, over a relay that delays, jitters and drops the WebRTC packets
+(`ios/e2e/netem.mjs`, no root needed); it needs the real games, so it is
+not in CI (usage in the file).
 
 ## What matches the web
 

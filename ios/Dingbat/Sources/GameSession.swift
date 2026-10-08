@@ -549,6 +549,7 @@ final class GameSession: NSObject, ObservableObject {
         func step() -> Bool {
             #if DEBUG
             if let stop = Self.linkStopAt, dingbat_rollback_head() >= stop { return false }
+            if let script = Self.linkScript() { bits = script.bits(at: Int(dingbat_rollback_head())) }
             #endif
             let f = dingbat_rollback_tick(Int32(bits))
             guard f >= 0 else { return false }
@@ -574,6 +575,37 @@ final class GameSession: NSObject, ObservableObject {
         return Int32(a[i + 1])
     }()
     static let linkPress = ProcessInfo.processInfo.arguments.contains("-link-press")
+
+    /// `-link-script NAME`: this player's buttons by linked frame, from
+    /// NAME.p<player>.txt in Documents: "<frame> <mask>" lines, each held
+    /// until the next (the cores' bit order: Up Down Left Right A B Select
+    /// Start L R). ios/e2e/trade.mjs.
+    struct LinkScript {
+        let at: [(frame: Int, bits: UInt16)]
+        func bits(at f: Int) -> UInt16 {
+            var b: UInt16 = 0
+            for e in at { if e.frame <= f { b = e.bits } else { break } }
+            return b
+        }
+    }
+    private static var linkScripts: [Int: LinkScript] = [:]
+    static func linkScript() -> LinkScript? {
+        guard let p = NetLink.shared.localPlayer else { return nil }
+        if let s = linkScripts[p] { return s }
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-link-script"), i + 1 < a.count else { return nil }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let text = try? String(contentsOf: docs.appendingPathComponent(a[i + 1] + ".p\(p).txt"),
+                                     encoding: .utf8) else { return nil }
+        let rows = text.split(separator: "\n").compactMap { line -> (frame: Int, bits: UInt16)? in
+            let p = line.split(separator: " ")
+            guard p.count == 2, let f = Int(p[0]), let b = UInt16(p[1]) else { return nil }
+            return (f, b)
+        }
+        let s = LinkScript(at: rows.sorted { $0.frame < $1.frame })
+        linkScripts[p] = s
+        return s
+    }
     private var linkDumped = false
     private func linkDebugDump() {
         guard !linkDumped else { return }
