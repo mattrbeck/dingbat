@@ -17,7 +17,10 @@
 // RTT, 2% loss each way); NETEM=off links straight. NETEM_PLAY, the same
 // form, switches to another once linked: the setup's two 16 MB ROMs are
 // loss- and RTT-bound bulk transfers (minutes at 300 ms RTT), the trade is
-// not. SHOTS=<dir> keeps the screenshots (default /tmp). The script is the one trade_repro proved
+// not. HAVE=app puts FireRed in the app's library first, HAVE=web
+// LeafGreen in the browser's, HAVE=both each (a ROM the friend already has
+// never crosses).
+// SHOTS=<dir> keeps the screenshots (default /tmp). The script is the one trade_repro proved
 // (tests/trade_repro.nim): `node ios/e2e/trade.mjs --nav out.txt` writes it
 // in that harness's format.
 
@@ -117,7 +120,16 @@ try {
   await page.goto(web.url + "?signal=" + sig);
   await page.waitForFunction(() => typeof Module !== "undefined" && !!Module._rollback_tick, null, { timeout: 30000 });
 
-  // The browser: FireRed, at the counter.
+  const have = process.env.HAVE || "";
+  // The browser: FireRed, at the counter (LeafGreen in its library first).
+  if (have === "both" || have === "web") {
+    const [c] = await Promise.all([page.waitForEvent("filechooser"),
+      page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click()]);
+    await c.setFiles({ name: "PokemonLeafGreen.gba", mimeType: "application/octet-stream", buffer: readFileSync(LG) });
+    await page.waitForFunction(() => document.body.classList.contains("running") && !paused, null, { timeout: 30000 });
+    await page.evaluate(() => document.getElementById("main-menu").click());
+    await page.waitForFunction(() => !document.body.classList.contains("running"), null, { timeout: 10000 });
+  }
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
     page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click(),
@@ -148,6 +160,7 @@ try {
   const data = simctl("get_app_container", UDID, BUNDLE, "data").trim();
   mkdirSync(join(data, "Documents/roms"), { recursive: true });
   copyFileSync(LG, join(data, "Documents/roms/PokemonLeafGreen.gba"));
+  if (have === "both" || have === "app") copyFileSync(FR, join(data, "Documents/roms/PokemonFireRed.gba"));
   copyFileSync(LG_STATE, join(data, "Documents/lg.state"));
   for (const p of [0, 1]) {
     writeFileSync(join(data, `Documents/trade.p${p}.txt`), script(p).map((e) => e.join(" ")).join("\n") + "\n");
@@ -174,7 +187,8 @@ try {
     await sleep(5000);
   }
   console.log(`  linked after ${secs()} (ROMs and states exchanged); browser is player ` +
-              await page.evaluate(() => net.rb.localPlayer));
+              await page.evaluate(() => net.rb.localPlayer) + "; " + JSON.stringify(await page.evaluate(() =>
+                ({ fromLibrary: net.rb.romFromLibrary, friendHas: net.rb.friendHasRom }))));
   if (net && play) {
     net.set({ delay: play[0], jitter: play[1], loss: play[2] });
     console.log(`  network now: ${play[0]} ms ±${play[1]} each way, ${(play[2] * 100).toFixed(1)}% loss each way`);
