@@ -12,6 +12,8 @@
 ##   swi_hook(bus, comment): bool  -- true = handled by HLE, skip the vector
 ##   access_cycles(bus): int   -- cycles the last instruction's bus accesses
 ##                                added (the bus accumulates them)
+##   data_overlap(bus)         -- a single load/store's access may overlap the
+##                                opcode (ARMv5: single_access below)
 ##   idle_epoch(bus): uint64   -- changes whenever anything a loop could read
 ##                                may have changed (idle-loop skipping, below)
 ##   ev_epoch(bus): uint64     -- changes with every event and frontend call:
@@ -27,8 +29,9 @@
 ## the bus charged for its code fetch and data accesses (nds/timing.nim),
 ## plus its internal cycles (GBATEK "ARM CPU Instruction Cycle Times": +1I
 ## for a register-specified shift, LDR/LDM/SWP, m(+1/+2)I for multiplies;
-## the ARM9 counts loads and multiplies as one/two interlock cycles). An
-## ARM7 cycle is two master cycles, an ARM9 cycle one. The GBA core's
+## the ARM9 counts LDM/SWP and multiplies as one/two interlock cycles, and
+## a single load or store as GBATEK's whole access time: single_access).
+## An ARM7 cycle is two master cycles, an ARM9 cycle one. The GBA core's
 ## cycle-exact prefetch model is deliberately not shared (docs/nds/spec.md).
 
 import std/[bitops, macros]
@@ -490,6 +493,22 @@ proc write_reg_load[B](cpu: ArmCpu[B]; rd: int; v: uint32) {.inline.} =
   else:
     cpu.r[rd] = v
 
+template single_access[B](cpu: ArmCpu[B]; load: bool) =
+  ## A single load or store (LDR/STR/LDRH/STRH/LDRB/STRB/LDRD/STRD) is
+  ## about to make its data access. ARM7: a load adds its internal cycle
+  ## (GBATEK "ARM CPU Instruction Cycle Times": LDR 1S+1N+1I, STR 2N).
+  ## ARM9: GBATEK's DS Memory Timings table gives whole load/store times
+  ## ("NDS9/DATA", e.g. 4 bus cycles for I/O; "STR 1S+1N (not 2N, and both
+  ## in parallel)"), so the access overlaps the opcode's own cycle (the
+  ## bus's `data_overlap`) and the load interlock (GBATEK's "1L", charged
+  ## only when the next opcode uses the result) is not modelled: Assumed
+  ## hidden. disp_cpu9time measures the same on the reference core
+  ## (docs/nds/accuracy.md).
+  mixin data_overlap, armv5
+  when armv5(B): data_overlap(cpu.bus)
+  else:
+    if load: inc cpu.icycles
+
 proc arm_single_transfer[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   mixin read8, write8, write32
   let p = (instr and (1'u32 shl 24)) != 0
@@ -509,8 +528,8 @@ proc arm_single_transfer[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl
   let base = cpu.r[rn]
   let offset_addr = if u: base + offset else: base - offset
   let a = if p: offset_addr else: base
+  cpu.single_access(load)
   if load:
-    inc cpu.icycles
     let v = if byt: read8(cpu.bus, a) else: cpu.load_word_rotated(a)
     if (not p or w) and rn != rd: cpu.r[rn] = offset_addr
     cpu.write_reg_load(rd, v)
@@ -536,8 +555,8 @@ proc arm_halfword_transfer[B](cpu: ArmCpu[B]; instr: uint32) {.inline.} =
   let offset_addr = if u: base + offset else: base - offset
   let a = if p: offset_addr else: base
   let wb = not p or w
+  cpu.single_access(load)
   if load:
-    inc cpu.icycles
     var v: uint32
     case sh
     of 1:
@@ -955,13 +974,13 @@ proc thumb_dispatch[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "st
             cpu.undefined_instr(); return
         cpu.jump_interwork(sv)
   of 9: # LDR pc-relative
-    inc cpu.icycles
+    cpu.single_access(true)
     let rd = int((instr shr 8) and 7)
     cpu.r[rd] = cpu.load_word_rotated((pc4 and not 3'u32) + (instr and 0xFF) * 4)
   of 10, 11: # load/store register offset
     let rd = int(instr and 7)
     let a = cpu.r[(instr shr 3) and 7] + cpu.r[(instr shr 6) and 7]
-    if ((instr shr 9) and 7) >= 3: inc cpu.icycles
+    cpu.single_access(((instr shr 9) and 7) >= 3)
     case (instr shr 9) and 7
     of 0: write32(cpu.bus, a and not 3'u32, cpu.r[rd])
     of 1: write16(cpu.bus, a and not 1'u32, uint16(cpu.r[rd]))
@@ -984,8 +1003,8 @@ proc thumb_dispatch[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "st
     let off = (instr shr 6) and 0x1F
     let byt = (instr and 0x1000) != 0
     let a = if byt: base + off else: base + off * 4
+    cpu.single_access((instr and 0x800) != 0)
     if (instr and 0x800) != 0:
-      inc cpu.icycles
       cpu.r[rd] = if byt: read8(cpu.bus, a) else: cpu.load_word_rotated(a)
     else:
       if byt: write8(cpu.bus, a, uint8(cpu.r[rd]))
@@ -993,8 +1012,8 @@ proc thumb_dispatch[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "st
   of 16, 17: # STRH/LDRH imm
     let rd = int(instr and 7)
     let a = cpu.r[(instr shr 3) and 7] + ((instr shr 6) and 0x1F) * 2
+    cpu.single_access((instr and 0x800) != 0)
     if (instr and 0x800) != 0:
-      inc cpu.icycles
       when armv5(B): cpu.r[rd] = read16(cpu.bus, a and not 1'u32)
       else: cpu.r[rd] = rotateRightBits(read16(cpu.bus, a and not 1'u32), (a and 1) * 8)
     else:
@@ -1002,8 +1021,8 @@ proc thumb_dispatch[B](cpu: ArmCpu[B]; instr: uint32) {.inline, codegenDecl: "st
   of 18, 19: # SP-relative
     let rd = int((instr shr 8) and 7)
     let a = cpu.r[13] + (instr and 0xFF) * 4
+    cpu.single_access((instr and 0x800) != 0)
     if (instr and 0x800) != 0:
-      inc cpu.icycles
       cpu.r[rd] = cpu.load_word_rotated(a)
     else: write32(cpu.bus, a and not 3'u32, cpu.r[rd])
   of 20, 21: # ADD rd, pc/sp, imm

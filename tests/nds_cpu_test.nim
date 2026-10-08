@@ -36,6 +36,7 @@ template bus_procs(B: typedesc) =
   proc irq_line(b: B): bool = false
   proc irq_wake(b: B): bool = false
   proc access_cycles(b: B): int64 = 0
+  proc data_overlap(b: B) = discard
   proc swi_hook(b: B; comment: uint32): bool = false
   proc cp15_read(b: B; op1, cn, cm, op2: uint32): uint32 =
     if cn == 13: b.t.cp15_pid else: 0x41059461'u32

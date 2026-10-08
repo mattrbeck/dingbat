@@ -18,6 +18,11 @@
 ##
 ## ARM9 opcode fetches are always nonsequential 32-bit (a Thumb pair shares
 ## one fetch); data may be sequential (LDM/STM/LDRD after the first word).
+## The NDS9/DATA values are whole load/store times: a single LDR/STR's
+## access overlaps the opcode's own cycle (arm/cpu.nim single_access,
+## bus9.nim overlap9). ARM7 accesses to the wifi regions take WIFIWAITCNT's
+## times (wifi7); an ARM7 opcode fetch after a data access is
+## nonsequential (bus7.nim break_fetch7).
 ##
 ## The GBA-slot rows are for EXMEMCNT's default access times (ROM 10 + 6,
 ## SRAM 10); each CPU's own EXMEMCNT bits 0-4 pick them (GBATEK "DS Memory
@@ -364,6 +369,22 @@ proc code7*(top: uint32; width: int; seq: bool; st: SlotTiming): int64 {.inline.
   of 0x08, 0x09: 2 * slot_rom(st, width, seq)
   of 0x0A: 2 * st.ram
   else: 2
+
+proc wifi7*(cnt: uint16; a: uint32; width: int; seq: bool): int64 {.inline.} =
+  ## ARM7 data access to the wifi regions, master cycles: WIFIWAITCNT's
+  ## times per halfword (GBATEK "DS Wifi Unused Registers", WIFIWAITCNT):
+  ## WS0 (4800000h-4807FFFh, the RAM) N = 10/8/6/18, S = 6/4; WS1
+  ## (4808000h-480FFFFh, the registers) N = 10/8/6/18, S = 10/4; a word is
+  ## two halfwords. The reference core measures the same (arm7_timing rows
+  ## 22-28, docs/nds/accuracy.md). Above 4810000h the WS bit (address bit
+  ## 15) is Assumed to pick the same way.
+  const first = [10'i64, 8, 6, 18]
+  let ws1 = (a and 0x8000'u32) != 0
+  let n = if ws1: first[(cnt shr 3) and 3] else: first[cnt and 3]
+  let s = if ws1: (if (cnt and 0x20) != 0: 4'i64 else: 10)
+          else: (if (cnt and 0x04) != 0: 4'i64 else: 6)
+  let one = if seq: s else: n
+  2 * (if width == 32: one + s else: one)
 
 proc data7*(top: uint32; width: int; seq: bool; st: SlotTiming): int64 {.inline.} =
   case top
