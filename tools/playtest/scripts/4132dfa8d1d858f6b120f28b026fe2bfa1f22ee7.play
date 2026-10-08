@@ -1,0 +1,47 @@
+@title Contra Advance - The Alien Wars EX (Europe)
+@file Contra Advance - The Alien Wars EX (E).gba
+@game AAWP
+@save none
+@chip none (no save library string; no battery save, the game has no password either)
+@frozen dingbat-bios,mgba,nba
+
+# 1 PLAYER > NEW GAME, then stage 1 on foot: shoot the car, run right
+# firing (one life lost on the way), pause and unpause. No [load].
+# Session notes: at the title nba saw PRESS START 4 frames before the
+# others (blink phase differs at f600). In stage 1 nba draws the rifle's
+# muzzle flash and the flying pods' thruster flames on different frames
+# from dingbat-bios and mgba (f1608, f2068, f2464, f2904); positions,
+# enemies and lives agree. On stop, mgba leaves a 0-byte .sav, nba a
+# blank 32 KB one, dingbat-bios none.
+
+[new]
+wait 600
+# until text 'PRESS START' timeout=600 every=4  [reached dingbat-bios+4 mgba+4 nba+0]
+wait 8
+checkpoint title window=30
+press START
+wait 60
+wait 16
+checkpoint main_menu window=30 compare=text
+press START
+wait 120
+wait 16
+press START
+wait 180
+checkpoint level_intro window=30
+wait 200
+checkpoint gameplay_start window=30
+tap RIGHT+B times=15 every=10 hold=8
+tap B times=20 every=8 hold=4
+tap RIGHT+B times=30 every=10 hold=8
+tap LEFT+B times=4 every=8 hold=4
+tap B times=8 every=8 hold=4
+tap RIGHT+B times=30 every=10 hold=8
+checkpoint respawn window=30
+tap B times=10 every=8 hold=4
+tap RIGHT+B times=12 every=10 hold=8
+press START
+wait 30
+checkpoint paused window=30
+press START
+wait 30

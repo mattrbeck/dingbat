@@ -1,0 +1,48 @@
+@title Sonic Advance 2 (USA)
+@file Sonic Advance 2 (U) (M6) [!].gba
+@game A2NE
+@chip FLASH512
+
+# With no save the game asks for a language and a player name, and writes the
+# new profile as soon as the name is confirmed: English, name "AA", END.
+# [load] skips both screens and shows the name under Options > Player Data.
+
+[new]
+until text "SELECT A LANGUAGE" timeout=900 every=5
+wait 30
+checkpoint language window=0
+press A
+until text "REG. NAME" timeout=600 every=5
+wait 30
+checkpoint name_entry window=0
+# "A" is one row down, one column right of "0"
+press DOWN after=10
+press RIGHT after=10
+press A after=15
+press A after=15
+# START jumps to END
+press START after=30
+checkpoint name_entered window=0
+press A
+until text "PRESENTED" timeout=600 every=5
+checkpoint presented window=0
+until text "PRESS START" timeout=1200 every=10
+wait 30
+checkpoint title window=0
+
+[load]
+until text "PRESS START" timeout=1800 every=10
+wait 30
+checkpoint title window=0
+press START
+until text "SINGLE PLAYER" timeout=300 every=5
+wait 60
+press A
+until text "OPTION" timeout=300 every=5
+wait 40
+press DOWN after=20
+press DOWN after=20
+press A
+until text "PLAYER DATA" timeout=300 every=5
+wait 40
+checkpoint options window=0

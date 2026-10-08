@@ -2,80 +2,95 @@
 @file Mario Golf - Advance Tour (U).gba
 @game BMGE
 @chip SRAM
+@frozen dingbat-bios,mgba,nba
 
 # Story mode from a blank cart: keep the default golfer name (Neil), mash
 # through the arrival at the Marion Club and the manager's welcome speech
 # (about 19000 frames of dialogue), then Pause > Save and Quit. [load] takes
 # STORY from the main menu, continues the saved game in the Manager's Room and
 # opens the pause menu there.
-
 [new]
 wait 600
-mash START until text "START" timeout=1500 every=30
+# mash START until text START timeout=1500 every=30  [taps dingbat-bios:7 mgba:7 nba:7]
+tap START times=7 every=30 hold=4
 wait 30
 checkpoint title window=30
 press START
-until text "game character" timeout=900 every=10
+# until text 'game character' timeout=900 every=10  [reached dingbat-bios+270 mgba+270 nba+270]
+wait 274
 checkpoint toad window=30
 press A
 wait 90
 press A
 wait 90
-mash A until text "name" timeout=1500 every=30
+# mash A until text name timeout=1500 every=30  [taps dingbat-bios:15 mgba:15 nba:15]
+tap A times=15 every=30 hold=4
 press A
-until text "HIJK" timeout=300 every=5
+# until text HIJK timeout=300 every=5  [reached dingbat-bios+25 mgba+25 nba+25]
+wait 29
 wait 20
 checkpoint name_entry window=30 compare=text
-# the cursor starts on Finish
 press A
-until text "Tear it up" timeout=300 every=5
+# until text 'Tear it up' timeout=300 every=5  [reached dingbat-bios+75 mgba+75 nba+75]
+wait 79
 checkpoint named window=30 compare=text
-mash A until text "rival the likes" timeout=12000 every=30
+# mash A until text 'rival the likes' timeout=12000 every=30  [taps dingbat-bios:319 mgba:319 nba:319]
+tap A times=319 every=30 hold=4
 checkpoint manager window=30 compare=text
-mash A until text "assist you" timeout=6000 every=30
-# the last lines of the speech: each ends a mash so a stray press can never
-# re-open a conversation with the manager once the player can move
-mash B until text "club champ of other" timeout=4000 every=30
+# mash A until text 'assist you' timeout=6000 every=30  [taps dingbat-bios:200 mgba:200 nba:200]
+tap A times=200 every=30 hold=4
+# mash B until text 'club champ of other' timeout=4000 every=30  [taps dingbat-bios:12 mgba:12 nba:12]
+tap B times=12 every=30 hold=4
 wait 30
 press B after=60
-mash B until text "just play Mario" timeout=1500 every=30
+# mash B until text 'just play Mario' timeout=1500 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap B times=1 every=30 hold=4
 wait 30
 press B after=60
-mash B until text "neglect your practice" timeout=1500 every=30
+# mash B until text 'neglect your practice' timeout=1500 every=30  [taps dingbat-bios:3 mgba:3 nba:3]
+tap B times=3 every=30 hold=4
 wait 30
 press B after=60
-mash B until text "ultimate golfer" timeout=1500 every=30
+# mash B until text 'ultimate golfer' timeout=1500 every=30  [taps dingbat-bios:3 mgba:3 nba:3]
+tap B times=3 every=30 hold=4
 wait 30
 press B after=60
-until notext "ultimate golfer" timeout=300 every=10
-mash START until text "Save and" timeout=1800 every=90
+# until notext 'ultimate golfer' timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+# mash START until text 'Save and' timeout=1800 every=90  [taps dingbat-bios:2 mgba:2 nba:2]
+tap START times=2 every=90 hold=4
 wait 30
 checkpoint pause_menu window=30 compare=text
-# UP wraps from Character Data to Save and Quit
 press UP after=20
 press A
-until text "Save current data" timeout=300 every=5
+# until text 'Save current data' timeout=300 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 20
 checkpoint save_prompt window=30 compare=text
 press A
-until text "Data saved" timeout=600 every=5
+# until text 'Data saved' timeout=600 every=5  [reached dingbat-bios+25 mgba+25 nba+25]
+wait 29
 wait 60
 checkpoint saved window=30 compare=text
 
 [load]
-mash START until text "START" timeout=1500 every=30
+# mash START until text START timeout=1500 every=30  [taps dingbat-bios:10 mgba:10 nba:10]
+tap START times=10 every=30 hold=4
 wait 30
 checkpoint title window=30
 press START
-until text "Play through the story" timeout=300 every=5
+# until text 'Play through the story' timeout=300 every=5  [reached dingbat-bios+70 mgba+70 nba+70]
+wait 74
 wait 30
 checkpoint main_menu window=30 compare=text
 press A
-until text "saved data here" timeout=300 every=5
+# until text 'saved data here' timeout=300 every=5  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 30
 checkpoint continue_prompt window=30 compare=text
 press A
 wait 180
-mash START until text "Save and" timeout=1200 every=90
+# mash START until text 'Save and' timeout=1200 every=90  [taps dingbat-bios:1 mgba:1 nba:1]
+tap START times=1 every=90 hold=4
 wait 30
 checkpoint pause_menu window=30 compare=text

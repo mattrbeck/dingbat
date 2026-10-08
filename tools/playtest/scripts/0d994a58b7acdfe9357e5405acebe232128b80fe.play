@@ -2,37 +2,43 @@
 @file Super Monkey Ball Jr (U) [!].gba
 @game ALUE
 @chip EEPROM (EEPROM_V + SRAM_V + FLASH_V strings)
+@frozen dingbat-bios,mgba,nba
 
 # The game formats its save on first boot. Leaving Game Options after a
 # change writes it ("Saving game data..."): music volume High -> Medium.
 # [load] shows the loaded setting on the Game Options screen.
-
 [new]
-mash START until text "Game Start" timeout=1500 every=30
+# mash START until text 'Game Start' timeout=1500 every=30  [taps dingbat-bios:33 mgba:33 nba:33]
+tap START times=33 every=30 hold=4
 wait 30
-# (no checkpoint on the title menu: the monkey animation never lines up)
 press DOWN after=20
 press A
-until text "Reset" timeout=300 every=10
+# until text Reset timeout=300 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 30
-checkpoint options
+checkpoint options window=30
 press DOWN after=15
 press DOWN after=15
 press LEFT after=30
-until text "Medium" timeout=120 every=5
-checkpoint volume_medium
+# until text Medium timeout=120 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+checkpoint volume_medium window=30
 press B
-until text "power off" timeout=300 every=2
+# until text 'power off' timeout=300 every=2  [reached dingbat-bios+62 mgba+60 nba+62]
+wait 66
 checkpoint saving window=0
-until notext "power off" timeout=900 every=5
-until text "Press START" timeout=600 every=10
+# until notext 'power off' timeout=900 every=5  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
+# until text 'Press START' timeout=600 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
 
 [load]
-mash START until text "Game Start" timeout=1500 every=30
+# mash START until text 'Game Start' timeout=1500 every=30  [taps dingbat-bios:31 mgba:31 nba:31]
+tap START times=31 every=30 hold=4
 wait 30
-# (no checkpoint on the title menu: the monkey animation never lines up)
 press DOWN after=20
 press A
-until text "Reset" timeout=300 every=10
+# until text Reset timeout=300 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 30
-checkpoint options_loaded
+checkpoint options_loaded window=30

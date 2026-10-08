@@ -9,7 +9,8 @@
 #
 # Outputs (<out_prefix>.*):
 #   io.txt     every I/O write outside the sound FIFOs to 0x060-0x0DF,
-#              0x100-0x10F and 0x200-0x20B: frame, absolute cycle, PC, DMA
+#              0x100-0x10F and 0x200-0x20B (with BD_IOALL=1 to any I/O
+#              register): frame, absolute cycle, PC, DMA
 #              flag, address, byte
 #   fifoA.bin / fifoB.bin  every byte that reached FIFO A / B, in order
 #   fifo.txt   one line per FIFO word burst: frame, cycle, channel, 4 bytes
@@ -52,10 +53,8 @@ proc main() =
   let mk = newFileStream(prefix & ".marks.bin", fmWrite)
   var frame = 0
   var word: array[4, uint8]
-  var abs_base = 0'i64   # absolute cycles at the current frame's start
-  var s0 = 0'i64         # scheduler.cycles at the current frame's start
   proc now(): int64 =
-    abs_base + (int64(emu.scheduler.cycles) - s0) + int64(emu.bus.cycles)
+    emu.rebased + int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
   proc snapshot(m: uint32) =
     mk.write(m); mk.write(uint32(frame)); mk.write(now())
     for (ad, ln) in regions:
@@ -63,6 +62,8 @@ proc main() =
         mk.write(emu.bus.read_byte_internal(ad + uint32(i)))
   # BD_SNAPEVERY=1: also snapshot (marker 0xFF) at the end of every frame
   let snapevery = getEnv("BD_SNAPEVERY") == "1"
+  # BD_IOALL=1: io.txt logs every I/O write (FIFO data and the marker aside)
+  let ioall = getEnv("BD_IOALL") == "1"
   bdIoHook = proc(address: uint32; value: uint8) =
     let a = address and 0xFFFFFF'u32
     if a >= 0xA0'u32 and a <= 0xA7'u32:
@@ -73,7 +74,8 @@ proc main() =
         ft.writeLine($frame & " " & $now() & " " & $ch & " " &
                       toHex(word[0], 2) & toHex(word[1], 2) & toHex(word[2], 2) &
                       toHex(word[3], 2))
-    elif (a >= 0x60'u32 and a <= 0xDF'u32) or (a >= 0x100'u32 and a <= 0x10F'u32) or
+    elif (ioall and a != 0xFF0'u32) or
+         (a >= 0x60'u32 and a <= 0xDF'u32) or (a >= 0x100'u32 and a <= 0x10F'u32) or
          (a >= 0x200'u32 and a <= 0x20B'u32):
       io.writeLine($frame & " " & $now() & " pc=" & toHex(emu.cpu.r[15], 8) &
                    (if emu.bus.dma_active: " D " else: " - ") &
@@ -153,14 +155,7 @@ proc main() =
   let fr = newFileStream(prefix & ".frames.txt", fmWrite)
   for f in 0 ..< frames:
     frame = f
-    s0 = int64(emu.scheduler.cycles)
     emu.step_frame()
-    # end_frame rebased the scheduler to cycles & 1023: rebuild the
-    # pre-rebase count as the one nearest a frame's length on from s0
-    let post = int64(emu.scheduler.cycles)
-    var best = post
-    while best - s0 < 280896 - 512: best += 1024
-    abs_base += best - s0
     fr.writeLine($f & " " & toHex(cast[uint64](hash(emu.ppu.framebuffer)), 16))
     if snapevery: snapshot(0xFF)
   bdIoHook = nil

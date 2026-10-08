@@ -7,7 +7,7 @@ import { loadApp } from "./helpers.mjs";
 
 const MODAL_IDS = [
   "settings-modal", "saves-modal", "update-modal",
-  "states-modal", "cheats-modal", "report-modal",
+  "states-modal", "cheats-modal", "report-modal", "moments-modal",
 ];
 
 test("Escape closes every index.js-owned modal", async () => {

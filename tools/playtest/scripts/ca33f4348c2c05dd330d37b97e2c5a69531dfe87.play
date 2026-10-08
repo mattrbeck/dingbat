@@ -2,42 +2,399 @@
 @file Metroid Fusion (U) [!].gba
 @game AMTE
 @chip SRAM
-@status wip: reaches Samus in control in the docking bay after the opening story (file A); starting the file writes only small header blocks, and the first real save is a save room on the Main Deck a few rooms away (walk left out of the docking bay, through the rooms past the Navigation Room). Exploring blind, Samus walked left into the next room and got hidden behind the foreground wall; the route needs platforming. A human should record: file A, Start, tap through the story, walk to the first Navigation Room and the save room beside it, stand on the save pad and answer Yes, quit after the save message. [load]: SAMUS DATA shows file A with a time; START resumes in the save room.
-
-# New file A; A taps through the story slides (each ends on a black frame).
+@frozen dingbat-bios,mgba,nba
+# File A, A taps through the story; from the docking bay left, up the
+# hydraulic-press shaft (spin jumps, ledge grabs), Main Deck, Navigation Room
+# briefing; Quarantine Bay (kill the Hornoad, absorb the X); back up and to
+# the Navigation Room for the second briefing; then the ladder room's grate
+# column up to the first Save Room (Yes, "Save complete.").
+# nba draws Samus's run/spin animation a frame off and its camera scrolls a
+# few pixels differently in the press shaft and the grate column; mgba and
+# nba saves are identical, dingbat-bios's save differs in 3 bytes (0x214,
+# 0x218 checksum, 0x2E7 = 4 vs 7, the play-time frame counter).
 
 [new]
 wait 600
-until notblank timeout=1200 every=10
-mash START until text "START" timeout=1200 every=30
+wait 4
+tap START times=2 every=30 hold=4
 checkpoint title window=30
 press START
-until text "SAMUS DATA" timeout=900 every=10
+wait 84
 wait 30
 checkpoint file_select window=0 compare=text
-# file A: START / COPY DATA / ERASE DATA, then start
 press A after=60
 press A after=90
-until notblank timeout=900 every=4
-until text "Biologic" timeout=1500 every=10
+wait 84
+wait 204
 wait 20
-checkpoint intro window=0 compare=text
-mash A until notext "Biologic" timeout=600 every=20
-mash A until blank timeout=6000 every=30
-until notblank timeout=600 every=4
-mash A until blank timeout=6000 every=30
-until notblank timeout=600 every=4
-mash A until blank timeout=6000 every=30
-until notblank timeout=600 every=4
+tap A times=2 every=20 hold=4
+tap A times=16 every=30 hold=4
+wait 8
+tap A times=115 every=30 hold=4
+wait 32
+tap A times=189 every=30 hold=4
+wait 8
 wait 30
-checkpoint ship_map window=0 compare=text
-mash A until blank timeout=6000 every=30
-until notblank timeout=600 every=4
+tap A times=113 every=30 hold=4
+wait 12
 wait 30
-mash A until blank timeout=6000 every=30
-until notblank timeout=600 every=4
+tap A times=30 every=30 hold=4
+wait 12
 wait 60
-mash A until blank timeout=6000 every=30
-until notblank timeout=600 every=4
+tap A times=93 every=30 hold=4
+wait 12
 wait 60
 checkpoint docking_bay window=0 compare=none
+wait 60
+press LEFT hold=120
+tap B times=2 every=10 hold=4
+press LEFT hold=120
+wait 60
+press LEFT hold=150
+tap B times=2 every=10 hold=4
+press LEFT hold=100
+wait 60
+press LEFT hold=20
+hold LEFT
+press A hold=25 after=5
+release
+wait 30
+press RIGHT hold=14
+hold RIGHT
+wait 6
+press A hold=30 after=10
+release
+wait 20
+hold LEFT
+press A hold=30 after=10
+release
+wait 20
+wait 30
+hold LEFT
+press A hold=30 after=30
+release
+wait 20
+press UP hold=10 after=30
+tap B times=2 every=10 hold=4
+press LEFT hold=120
+wait 60
+tap B times=3 every=15 hold=4
+press LEFT hold=60
+wait 60
+hold RIGHT
+wait 20
+press A hold=30 after=20
+release
+wait 20
+press LEFT hold=14
+press A hold=30
+wait 30
+hold RIGHT
+wait 4
+press A hold=25 after=25
+release
+wait 20
+press RIGHT hold=16
+press A hold=30
+wait 40
+hold LEFT
+press A hold=30 after=10
+release
+wait 30
+hold LEFT
+press A hold=30 after=10
+release
+wait 30
+press RIGHT
+press A hold=10
+hold A+LEFT
+wait 20
+hold LEFT
+wait 20
+release
+wait 20
+tap B times=2 every=10 hold=4
+press LEFT hold=100
+wait 60
+checkpoint main_deck window=0 compare=text
+press LEFT hold=120
+tap B times=2 every=10 hold=4
+press LEFT hold=100
+wait 60
+press LEFT hold=50
+hold UP
+wait 120
+release
+press RIGHT hold=10
+hold UP
+press A hold=20 after=60
+release
+press START
+wait 60
+press START
+wait 40
+tap B times=2 every=10 hold=4
+press LEFT hold=150
+wait 60
+press LEFT hold=25
+press UP hold=10 after=200
+checkpoint briefing window=0 compare=text
+tap A times=40 every=30 hold=4
+tap B times=2 every=10 hold=4
+press RIGHT hold=180
+wait 60
+press LEFT hold=10
+press RIGHT hold=2
+tap B times=3 every=15 hold=4
+press RIGHT hold=80
+wait 60
+press LEFT hold=200
+tap B times=2 every=10 hold=4
+press LEFT hold=100
+wait 60
+tap B times=3 every=15 hold=4
+press LEFT hold=100
+wait 60
+press RIGHT hold=70
+hold LEFT
+wait 10
+press A hold=30 after=20
+release
+wait 20
+press LEFT hold=120
+hold LEFT
+press A hold=20 after=60
+release
+hold RIGHT
+wait 4
+press A hold=30 after=20
+release
+wait 20
+hold RIGHT
+press A hold=20 after=100
+release
+press LEFT hold=8
+hold RIGHT
+wait 4
+press A hold=30 after=120
+release
+hold LEFT
+wait 4
+press A hold=30 after=10
+release
+wait 30
+hold LEFT
+press A hold=25 after=120
+release
+wait 60
+press LEFT hold=60
+wait 30
+hold LEFT
+press A hold=25 after=60
+release
+press START
+wait 60
+press START
+wait 40
+press LEFT hold=4
+tap B times=6 every=12 hold=4
+press LEFT hold=60
+press RIGHT hold=40
+wait 40
+press LEFT hold=60
+wait 20
+press RIGHT hold=25
+wait 60
+press RIGHT hold=20
+wait 60
+press LEFT hold=160
+tap B times=2 every=10 hold=4
+press LEFT hold=80
+wait 60
+hold LEFT
+press A hold=25 after=100
+release
+hold LEFT
+press A hold=25 after=30
+release
+tap B times=10 every=10 hold=4
+hold L+DOWN
+tap B times=10 every=10 hold=4
+release
+press UP after=10
+press LEFT hold=40
+wait 60
+press A hold=20 after=40
+wait 60
+checkpoint x_absorbed window=0 compare=none
+hold RIGHT
+press A hold=25 after=40
+press A hold=25 after=40
+press A hold=25 after=40
+release
+wait 30
+tap B times=2 every=10 hold=4
+press RIGHT hold=100
+wait 60
+press RIGHT hold=50
+hold RIGHT
+press A hold=25 after=10
+release
+wait 30
+press RIGHT
+hold LEFT
+wait 10
+press A hold=30 after=10
+release
+wait 20
+press RIGHT
+hold LEFT
+wait 10
+press A hold=30 after=10
+release
+wait 20
+hold RIGHT
+press A hold=30 after=60
+tap B times=2 every=10 hold=4
+wait 60
+release
+press START
+wait 60
+wait 120
+press START
+wait 60
+press START
+wait 40
+press RIGHT hold=200
+press LEFT hold=60
+wait 30
+press LEFT hold=40
+wait 40
+press RIGHT hold=250
+wait 30
+wait 30
+press LEFT hold=40
+press UP hold=10 after=200
+tap A times=45 every=30 hold=4
+tap A times=60 every=30 hold=4
+tap A times=80 every=30 hold=4
+tap A times=60 every=30 hold=4
+press START
+wait 60
+press START
+wait 40
+press RIGHT hold=120
+tap B times=2 every=10 hold=4
+press RIGHT hold=100
+wait 60
+wait 40
+press RIGHT hold=90
+press RIGHT hold=90
+wait 60
+wait 90
+tap B times=2 every=10 hold=4
+press LEFT hold=60
+wait 60
+press LEFT hold=300
+tap B times=2 every=10 hold=4
+press LEFT hold=60
+wait 60
+wait 60
+press RIGHT hold=60
+wait 80
+press RIGHT hold=40
+press LEFT hold=40
+hold RIGHT
+wait 10
+press A hold=30
+release
+wait 30
+hold RIGHT
+press A hold=25 after=20
+release
+wait 20
+press UP hold=10 after=30
+press RIGHT hold=25
+press LEFT hold=1
+press A hold=30
+hold LEFT
+wait 20
+release
+wait 10
+hold LEFT
+wait 8
+press A hold=30 after=10
+release
+wait 20
+press UP hold=10 after=30
+press A hold=10
+hold A+RIGHT
+wait 20
+hold RIGHT
+wait 8
+release
+wait 20
+press UP hold=10 after=30
+press A hold=10
+hold A+LEFT
+wait 20
+hold LEFT
+wait 8
+release
+wait 20
+press UP hold=10 after=30
+press A hold=10
+hold A+RIGHT
+wait 20
+hold RIGHT
+wait 8
+release
+wait 20
+press UP hold=10 after=30
+hold RIGHT
+wait 40
+tap B times=2 every=10 hold=4
+wait 60
+release
+wait 60
+wait 60
+tap B times=6 every=10 hold=4
+press RIGHT hold=60
+wait 30
+tap B times=2 every=10 hold=4
+press RIGHT hold=80
+wait 90
+press RIGHT hold=40
+wait 120
+press A hold=15
+press RIGHT hold=14
+wait 150
+press RIGHT hold=4
+wait 150
+press RIGHT hold=8
+wait 150
+wait 30
+checkpoint save_prompt window=0 compare=text
+press A
+wait 240
+checkpoint saved window=0 compare=text
+wait 60
+
+[load]
+wait 600
+# until notblank timeout=1200 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+# mash START until text START timeout=1200 every=30  [taps dingbat-bios:2 mgba:2 nba:2]
+tap START times=2 every=30 hold=4
+press START
+# until text 'SAMUS DATA' timeout=900 every=10  [reached dingbat-bios+60 mgba+60 nba+70]
+wait 74
+wait 30
+checkpoint file_select_saved window=0 compare=text
+press A after=60
+wait 30
+checkpoint file_menu window=0 compare=text
+press A
+wait 400
+checkpoint resumed window=30
+

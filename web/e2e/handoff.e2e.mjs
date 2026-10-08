@@ -170,10 +170,25 @@ for (const [kindA, kindB] of PAIRS) {
       assert.ok(await isPlaying(a), "not yanked out of the game");
       await tapToast(a, "Switch");
       await idle(a);
+      // The home redraws after the switch's own awaits, which a quiet sync
+      // queue does not wait for. On CI's Linux WebKit the hero has stayed
+      // "paused" with the game unloaded (8+ runs since September, both
+      // pairs): a timeout here says so, with what the hero's render had.
+      try {
+        await a.page.waitForFunction(() => document.getElementById("hero").dataset.mode === "closed",
+                                     null, { timeout: 15000 });
+      } catch {
+        assert.fail("the hero never showed the closed game: " + await a.page.evaluate(() =>
+          JSON.stringify({
+            loaded: currentOriginalName, loading: loadingName, stash: handoffStash?.game ?? null,
+            paused, played: playedThisVisit, heroName, heroHidden: heroCard.hidden,
+            heroGen, homeRenderGen, heroDrawnFor, body: document.body.className,
+            toasts: window.__toastLog,
+            log: [...document.querySelectorAll("#log-entries p")].slice(-12).map((p) => p.textContent),
+          })));
+      }
       const h = await hero(a);
-      assert.equal(h.mode, "closed", await a.page.evaluate(() => JSON.stringify({
-        loaded: currentOriginalName, stash: handoffStash?.game ?? null, paused,
-        body: document.body.className, toasts: window.__toastLog })));
+      assert.equal(h.mode, "closed");
       assert.ok(samePicture(h.pixel, there.screen), "A shows B's moment");
       assert.equal(drive.session(GAME).ts, theirs.ts, "and B's session is Drive's copy again");
       await resumeHero(a);

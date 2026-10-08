@@ -2,56 +2,68 @@
 @file Fire Emblem - The Sacred Stones (U).gba
 @game BE8E
 @chip SRAM_F (FRAM)
+@frozen dingbat-bios,mgba,nba
 
 # New Game on Normal into the first slot, skip the opening, skip the Prologue
 # cutscenes with START until the first Player Phase: the chapter slot and the
 # suspend data are both written by then. [load] takes Resume Chapter back onto
 # the Prologue map.
-
 [new]
 wait 600
-mash A until text "START" timeout=1500 every=30
+# mash A until text START timeout=1500 every=30  [taps dingbat-bios:16 mgba:16 nba:16]
+tap A times=16 every=30 hold=4
 wait 60
 checkpoint title window=30
 press START
-until text "Extras" timeout=600 every=10
+# until text Extras timeout=600 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
 wait 60
 press A
-until text "Select Mode" timeout=300 every=5
+# until text 'Select Mode' timeout=300 every=5  [reached dingbat-bios+20 mgba+20 nba+25]
+wait 29
 wait 30
 checkpoint select_mode window=30
 press DOWN after=20
 press A
-until text "NO DATA" timeout=300 every=5
+# until text 'NO DATA' timeout=300 every=5  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 30
 checkpoint slots_empty window=30
 press A
-until text "age long past" timeout=900 every=10
+# until text 'age long past' timeout=900 every=10  [reached dingbat-bios+220 mgba+210 nba+220]
+wait 224
 checkpoint intro window=30
 press START
 wait 180
 press START
-until text "Prologue" timeout=900 every=10
+# until text Prologue timeout=900 every=10  [reached dingbat-bios+240 mgba+210 nba+240]
+wait 244
 wait 20
 checkpoint prologue window=30 compare=text
-mash START until text "PHASE" timeout=3000 every=10
-until notext "PHASE" timeout=300 every=5
+# mash START until text PHASE timeout=3000 every=10  [taps dingbat-bios:53 mgba:51 nba:53]
+tap START times=53 every=10 hold=4
+# until notext PHASE timeout=300 every=5  [reached dingbat-bios+35 mgba+20 nba+40]
+wait 44
 wait 30
 checkpoint player_phase window=30 compare=text
 
 [load]
 wait 600
-mash A until text "START" timeout=1500 every=30
+# mash A until text START timeout=1500 every=30  [taps dingbat-bios:16 mgba:16 nba:16]
+tap A times=16 every=30 hold=4
 wait 60
 press START
-until text "Resume Chapter" timeout=600 every=10
+# until text 'Resume Chapter' timeout=600 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 60
 checkpoint main_menu window=30 compare=text
 press A
-until text "Renais" timeout=300 every=5
+# until text Renais timeout=300 every=5  [reached dingbat-bios+5 mgba+5 nba+10]
+wait 14
 wait 30
 checkpoint slot_prologue window=30
 press A
-until text "Plain" timeout=900 every=10
+# until text Plain timeout=900 every=10  [reached dingbat-bios+70 mgba+70 nba+70]
+wait 74
 wait 60
 checkpoint resumed_map window=30 compare=text

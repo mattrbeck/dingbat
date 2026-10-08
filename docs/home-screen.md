@@ -49,6 +49,93 @@ stored save is the one it was taken with (`saveSig`, `resumeSessionFor`): a
 game that has saved since boots from that save, so a snapshot can never
 roll a save back. The page reloaded, the hero is closed.
 
+While the game runs, the session is also taken every minute of play
+(`CHECKPOINT_PLAY_MS`, a **checkpoint**), so a browser that crashes or is
+killed with the game on screen - no hide, no close, nothing to take it on -
+resumes about a minute back rather than wherever the game was last left.
+See *A game that keeps stopping* below.
+
+## A game that keeps stopping
+
+**Checkpoints.** Every minute of play (`maybeCheckpoint`, from the end of a
+tick that has room: under `CKPT_SLACK_MS` spent, or `CKPT_WAIT_MS` overdue)
+the session is taken again and a copy kept as an earlier moment. The
+frame's thread only copies out the plain state image
+(`wasm_state_plain_size`), the screen and the battery file, ~1 ms (~4 ms at
+4x CPU throttling); `ckptworker.js` deflates the state into the stored
+format (`pack_state`'s: header flagged, body zlib, via `CompressionStream`),
+signs the battery and encodes the picture. Packing on the page cost
+2.3 ms / 9.9 ms in game (FireRed), a dropped frame on a phone. Without a
+worker (iOS 15) the page does it all, as before. A result that lands after
+a newer snapshot (Main Menu, a switch) or a delete of the session is
+dropped (`sessionSnapTs`, `sessionEpoch`). Drive gets a checkpoint's session
+at most every `SESSION_UPLOAD_MS` (5 min); leaving the game sends the newest
+at once (`sessionUnsent`).
+
+Checkpoints are kept on this device only (`ckpts:<game>` index,
+`ckpt<slot>:<game>` records, nine slots), spread over *play* time, which the
+index carries (`play`), so a week away does not lump them into one bucket:
+the newest, and the oldest within each of 3 min, 10 min, 30 min, 2 h, 8 h
+and beyond behind it (`keepCheckpoints`). Older than 30 days, one goes.
+They go with a reset, a delete and Remove from this device; a rename moves
+them. Other games' checkpoints are freed before any ROM when storage runs
+out (`dbPutRoomy`).
+
+**Crashes.** While its game runs in view a page records itself in the
+`playing` IndexedDB record, and takes itself out when the game pauses, the
+page is hidden or closed, or the game is left (`markPlaying`,
+`clearPlaying`). A mark found at boot whose page holds no Web Lock
+(`dingbat-page:<page>`) is a run that ended without any of those - a crash
+(`noteCrashedRuns`) - and counts in `crashes` (per game: `{ streak, since }`;
+`seen` keeps a mark from counting twice). IndexedDB, because Chrome writes
+localStorage to disk seconds late: a SIGKILL soon after a relaunch lost the
+count and brought back the mark it had counted. A core trap keeps its mark.
+A run counts toward the row only while it is short: once it has played
+`CLEAN_RUN_MS` (1 min, `long` in its mark) a crash starts a new row at one,
+and a normal end clears the count.
+
+A quitting browser runs the close handlers but lands none of their
+IndexedDB writes (Chrome; WebKit lands the first small one), measured with
+Playwright closes: so the end of a run is also written to localStorage
+synchronously (`dingbat_clean:<page>`; a mark with it is no crash), and the
+close handlers leave the session, with a battery not yet stored, in
+`dingbat_lastgasp`, which the next boot takes in when it is newer than the
+stored session (`takeLastGasp`; `lastgasp` in IndexedDB is the newest taken
+in, so one that comes back is not taken twice). Chrome closed mid-game then
+resumes exactly; WebKit, whose localStorage writes there do not land
+either, resumes at the last checkpoint. The close handlers clear the mark
+first, then store the battery and the session.
+
+The battery is stored once its file has stopped changing for
+`SAVE_SETTLE_MS` (0.5 s; `FS.stat` mtime), not only at the 5 s autosave: a
+crash 1.5 s after an in-game save kept it (it was lost before).
+
+Checkpoint and session pictures are Blobs, which WebKit's private browsing
+will not store: there they are skipped and the moment is kept without one.
+
+After a crash, the checkpoints taken before it are frozen until the count
+clears: what later runs take shares two places (`CKPT_CRASH_ROOM`), so a
+checkpoint that crashes the game can be reopened any number of times and
+the moments before it are still there.
+
+**What the player sees.** Normally nothing: one crash and the next tap
+resumes the newest checkpoint, the case this is for. Two in a row
+(`CRASH_ASK_STREAK`) and a tap on the game (tile or hero) opens the sheet
+instead of resuming (`crashGate`): *“Game” stopped unexpectedly* - it
+closed without warning the last two times; if the moment it resumes from is
+the cause, pick an earlier one. The sheet is the Save States grid: *Latest*
+(the session) then each kept checkpoint, labelled by play time back (*4 min
+earlier*, *2 h earlier*) and the clock time, *Latest* chosen; **Resume**,
+and **Start from in-game save**. The same sheet, without the crash wording
+or the save button, is **Resume from earlier** on the game's menu whenever
+it has checkpoints.
+
+A moment from before the last in-game save carries that older battery: the
+cell says *Before your last save*, the note under the grid says what
+happens, and choosing it keeps the newer save aside first (`keepOldSave`,
+*The save you replaced*) so **Restore old save** switches back
+(`resumeMoment`; loadRom's `resume.force` applies it despite the save).
+
 The kicker over the name says where the game stands:
 
 | Hero | Kicker |

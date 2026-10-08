@@ -1,0 +1,81 @@
+@title Mega Man & Bass (USA)
+@file Megaman & Bass (U) [!].gba
+@game A6ME
+@chip EEPROM
+@save skip: the game only formats the EEPROM at boot (10 bytes: "ROCKFOL0" signature + checksum, identical on all three); CONTINUE then offers RESUME / DATA 1-4, all empty. The first real save is after clearing the opening Robot Museum stage, whose lava room (fire pillars, gaps that need Bass's double jump) and boss were out of reach in budget
+@frozen dingbat-bios,mgba,nba
+
+# New game as Bass, through the museum garden and the drill corridor into the
+# lava room (double jump A, A again in the air, holding RIGHT); ends on the
+# second lava platform (checkpoint lava_room).
+# Controls: A jump (twice for a double jump), B buster.
+# Seen while authoring: nba's frames differ from dingbat-bios/mgba through
+# most of the stage (title menu slide f600 differs on all three; f2158 and
+# f2268 dingbat-bios and mgba draw no Bass on the frame where nba does, i.e.
+# the hurt blink is on a different phase; f2634 the reverse).
+[new]
+wait 600
+wait 60
+checkpoint title window=30
+press A
+wait 120
+wait 180
+checkpoint player_select window=30
+press RIGHT
+wait 20
+press A
+wait 200
+tap A times=20 every=20 hold=4
+checkpoint museum window=30
+press RIGHT hold=60
+press B hold=30
+press RIGHT hold=60
+press B hold=30
+press RIGHT hold=80
+press B hold=20
+press RIGHT hold=80
+press B hold=20
+press B hold=30
+press A+RIGHT hold=20
+press RIGHT hold=60
+press A+RIGHT hold=25
+press RIGHT hold=40
+wait 1
+press RIGHT hold=120
+press B hold=30
+press RIGHT hold=60
+press B hold=30
+press RIGHT hold=60
+press A+RIGHT hold=20
+press RIGHT hold=16
+press A+RIGHT hold=20
+press RIGHT hold=16
+press A+RIGHT hold=20
+press RIGHT hold=16
+press A+RIGHT hold=20
+press RIGHT hold=16
+press A+RIGHT hold=20
+press RIGHT hold=16
+press A+RIGHT hold=20
+press RIGHT hold=16
+press A+RIGHT hold=20
+press RIGHT hold=16
+press A+RIGHT hold=20
+press RIGHT hold=16
+wait 10
+press B hold=40
+press A+RIGHT hold=24
+press RIGHT hold=14
+press RIGHT hold=30
+press RIGHT hold=20
+press A+RIGHT hold=40
+press RIGHT hold=10
+press RIGHT hold=20
+press RIGHT hold=12
+press A+RIGHT hold=16
+press RIGHT hold=4
+press A+RIGHT hold=20
+press RIGHT hold=30
+press RIGHT hold=30
+checkpoint lava_room window=30
+

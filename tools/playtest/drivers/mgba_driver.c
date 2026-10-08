@@ -1,13 +1,22 @@
 /* Persistent headless mGBA driver for tools/playtest (links libmgba as a
  * black-box reference). Speaks the line protocol in tools/playtest/README.md.
  *
- * Usage: mgba_driver <rom.gba> <bios.bin> [--run-bios] [--rtc EPOCH]
+ * Usage: mgba_driver <rom.gba> <bios.bin> [--run-bios] [--rtc EPOCH] [--audio PATH]
+ *   --audio writes the core's output, s16le stereo at 32768 Hz, every frame.
+ *   `chmask N` mutes output channels through the core's public
+ *   enableAudioChannel (bits 0-3 PSG 1-4, 4 FIFO A, 5 FIFO B; set = plays);
+ *   `apulog PATH|off` logs the CPU's stores to the sound registers.
  *   The battery save is <rom minus extension>.sav, where mGBA's own frontend
  *   puts it by default. Run with TZ=UTC so a fixed RTC epoch reads the same
  *   wall-clock fields as the other drivers.
  *
  * Build: tools/playtest/build.sh
  */
+/* The library's build flags first: struct mCore's layout depends on them
+ * (USE_DEBUGGERS adds members ahead of savedataClone and the channel
+ * switches; without this, calls through those slots land on the wrong
+ * function pointer). */
+#include <mgba/flags.h>
 #include <mgba/core/core.h>
 #include <mgba/gba/core.h>
 #include <mgba/core/config.h>
@@ -15,6 +24,7 @@
 #include <mgba/core/serialize.h>
 #include <mgba-util/vfs.h>
 #include <mgba/internal/gba/gba.h>
+#include <mgba/core/blip_buf.h>
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -60,6 +70,93 @@ static void null_log(struct mLogger* log, int cat, enum mLogLevel level,
 static struct mLogger g_logger = { .log = null_log };
 
 static void reply(const char* s) { printf("%s\n", s); fflush(stdout); }
+
+static FILE* g_audio = NULL;
+
+/* Drain both blip channels after a frame into the --audio file */
+static void drain_audio(struct mCore* core) {
+  struct blip_t* l = core->getAudioChannel(core, 0);
+  struct blip_t* r = core->getAudioChannel(core, 1);
+  int16_t buf[2048 * 2];
+  for (;;) {
+    int n = blip_samples_avail(l);
+    if (n > 2048) n = 2048;
+    if (n <= 0) break;
+    blip_read_samples(l, buf, n, 1);
+    blip_read_samples(r, buf + 1, n, 1);
+    if (g_audio) fwrite(buf, sizeof(int16_t) * 2, n, g_audio);
+  }
+}
+
+/* A console held level and still. With no rotation source attached, mGBA's
+ * tilt-sensor carts (Yoshi Topsy-Turvy, Koro Koro Puzzle) read 0xFFF on
+ * both axes -- a sensor pinned at full tilt -- and calibrate to that, where
+ * dingbat answers its level reading (bus.nim TILT_X/Y_CENTER). Zero tilt is
+ * the frontend's "level" through mGBA's public peripheral interface. */
+static void rot_sample(struct mRotationSource* r) { (void) r; }
+static int32_t rot_zero(struct mRotationSource* r) { (void) r; return 0; }
+static struct mRotationSource g_level = {
+  .sample = rot_sample, .readTiltX = rot_zero, .readTiltY = rot_zero, .readGyroZ = rot_zero,
+};
+
+/* apulog: the CPU's stores to the sound registers 0x04000060-0x0400008F
+ * (FIFO data excluded), split into bytes low first, one line each in
+ * dingbat_driver's format: FRAME CYCLE_IN_FRAME ADDR VALUE. The ARM core's
+ * store callbacks are wrapped; the original is always called. */
+static FILE* g_apulog = NULL;
+static struct mCore* g_core = NULL;
+static int g_frame = 0;
+static uint64_t g_frame_start = 0;
+static void (*orig_store32)(struct ARMCore*, uint32_t, int32_t, int*);
+static void (*orig_store16)(struct ARMCore*, uint32_t, int16_t, int*);
+static void (*orig_store8)(struct ARMCore*, uint32_t, int8_t, int*);
+static uint32_t (*orig_storem)(struct ARMCore*, uint32_t, int, enum LSMDirection, int*);
+
+static void apulog_bytes(uint32_t address, uint32_t value, int width) {
+  if (!g_apulog) return;
+  struct GBA* gba = g_core->board;
+  uint64_t now = mTimingGlobalTime(&gba->timing);
+  for (int i = 0; i < width; ++i) {
+    uint32_t a = (address & ~(uint32_t) (width - 1)) + i;
+    if (a >= 0x04000060 && a <= 0x0400008F)
+      fprintf(g_apulog, "%d %llu %08X %02X\n", g_frame,
+              (unsigned long long) (now - g_frame_start), a, (value >> (8 * i)) & 0xFF);
+  }
+}
+static void log_store32(struct ARMCore* cpu, uint32_t a, int32_t v, int* c) {
+  apulog_bytes(a, (uint32_t) v, 4);
+  orig_store32(cpu, a, v, c);
+}
+static void log_store16(struct ARMCore* cpu, uint32_t a, int16_t v, int* c) {
+  apulog_bytes(a, (uint16_t) v, 2);
+  orig_store16(cpu, a, v, c);
+}
+static void log_store8(struct ARMCore* cpu, uint32_t a, int8_t v, int* c) {
+  apulog_bytes(a, (uint8_t) v, 1);
+  orig_store8(cpu, a, v, c);
+}
+static uint32_t log_storem(struct ARMCore* cpu, uint32_t base, int mask,
+                           enum LSMDirection dir, int* c) {
+  if (g_apulog && (base >> 24) == 0x04)
+    fprintf(g_apulog, "%d 0 STM %08X %04X\n", g_frame, base, mask);
+  return orig_storem(cpu, base, mask, dir, c);
+}
+static void apulog_hook(struct mCore* core) {
+  struct ARMCore* cpu = core->cpu;
+  if (cpu->memory.store8 == log_store8) return;
+  orig_store32 = cpu->memory.store32; cpu->memory.store32 = log_store32;
+  orig_store16 = cpu->memory.store16; cpu->memory.store16 = log_store16;
+  orig_store8 = cpu->memory.store8; cpu->memory.store8 = log_store8;
+  orig_storem = cpu->memory.storeMultiple; cpu->memory.storeMultiple = log_storem;
+}
+
+static void run_frame(struct mCore* core) {
+  struct GBA* gba = core->board;
+  g_frame_start = mTimingGlobalTime(&gba->timing);
+  core->runFrame(core);
+  ++g_frame;
+  drain_audio(core);
+}
 
 /* Cartridge RTC over the GPIO port through the core's bus, bit-banged exactly
  * as dingbat_driver's rtc_xfer does (commands MSB first, parameters LSB
@@ -109,6 +206,7 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--run-bios")) run_bios = 1;
     else if (!strcmp(argv[i], "--rtc") && i + 1 < argc) rtc_epoch = atoll(argv[++i]);
+    else if (!strcmp(argv[i], "--audio") && i + 1 < argc) g_audio = fopen(argv[++i], "wb");
     else if (npos < 2) pos[npos++] = argv[i];
   }
   if (npos != 2) {
@@ -123,8 +221,10 @@ int main(int argc, char** argv) {
   mCoreInitConfig(core, NULL);
   mCoreConfigSetValue(&core->config, "idleOptimization", "ignore");
   core->opts.skipBios = !run_bios;
+  core->opts.volume = 0x100;   /* zero-initialised opts would mute the mixer */
   core->loadConfig(core, &core->config);
   core->setVideoBuffer(core, (color_t*) vbuf, W);
+  core->setPeripheral(core, mPERIPH_ROTATION, &g_level);
 
   if (!mCoreLoadFile(core, rom)) { fprintf(stderr, "failed to load %s\n", rom); return 3; }
   char save[1024];
@@ -143,8 +243,11 @@ int main(int argc, char** argv) {
     core->rtc.value = rtc_epoch * 1000;
   }
   core->reset(core);
+  blip_set_rates(core->getAudioChannel(core, 0), core->frequency(core), 32768);
+  blip_set_rates(core->getAudioChannel(core, 1), core->frequency(core), 32768);
 
   int frame = 0;
+  g_core = core;
   char buf[512], out[64];
   printf("ready mgba save=%s\n", save);
   fflush(stdout);
@@ -157,7 +260,7 @@ int main(int argc, char** argv) {
       core->setKeys(core, (uint32_t) atoi(arg));
       reply("ok");
     } else if (!strcmp(cmd, "run")) {
-      for (int k = atoi(arg); k > 0; --k) { core->runFrame(core); ++frame; }
+      for (int k = atoi(arg); k > 0; --k) { run_frame(core); ++frame; }
       snprintf(out, sizeof out, "ok %d", frame);
       reply(out);
     } else if (!strcmp(cmd, "runhash")) {
@@ -165,7 +268,7 @@ int main(int argc, char** argv) {
       if (count > 100000) count = 100000;
       char* p = hashes;
       for (int k = 0; k < count; ++k) {
-        core->runFrame(core); ++frame;
+        run_frame(core); ++frame;
         p += sprintf(p, " %016llX", (unsigned long long) fb_hash());
       }
       printf("ok%s\n", hashes);
@@ -233,6 +336,31 @@ int main(int argc, char** argv) {
              (unsigned long long) mTimingGlobalTime(&gba->timing),
              core->busRead16(core, 0x04000006), gba->cpu->gprs[15]);
       fflush(stdout);
+    } else if (!strcmp(cmd, "trace")) {
+      /* trace N PATH: N single steps, "PC CYCLES VCOUNT" per step to PATH
+       * (PC = r15 before the step, master-clock cycles the step took) */
+      long want = 0;
+      char path[400] = {0};
+      sscanf(arg, "%ld %399s", &want, path);
+      struct GBA* gba = core->board;
+      FILE* f = fopen(path, "w");
+      unsigned long long prev = mTimingGlobalTime(&gba->timing);
+      unsigned startframe = gba->video.frameCounter;
+      for (long k = 0; k < want && f; ++k) {
+        unsigned pc = gba->cpu->gprs[15];
+        int th = gba->cpu->cpsr.t;
+        core->step(core);
+        unsigned long long now = mTimingGlobalTime(&gba->timing);
+        fprintf(f, "%08X %llu %u %c\n", pc, now - prev, core->busRead16(core, 0x04000006), th ? 'T' : 'A');
+        prev = now;
+        if (gba->video.frameCounter != startframe) {
+          startframe = gba->video.frameCounter;
+          ++frame;
+          fprintf(f, "FRAME\n");
+        }
+      }
+      if (f) fclose(f);
+      reply(f ? "ok" : "err cannot write");
     } else if (!strcmp(cmd, "stepuntil")) {
       /* stepuntil ADDR MASK: single-step until (busRead16(ADDR) & MASK) != 0;
        * reports the master clock (cycles since reset), VCOUNT, PC */
@@ -260,7 +388,21 @@ int main(int argc, char** argv) {
       sscanf(arg, "%x %x", &addr, &val);
       core->busWrite8(core, addr, (uint8_t) val);
       reply("ok");
+    } else if (!strcmp(cmd, "chmask")) {
+      int m = atoi(arg);
+      for (int ch = 0; ch < 6; ++ch) core->enableAudioChannel(core, ch, (m >> ch) & 1);
+      reply("ok");
+    } else if (!strcmp(cmd, "apulog")) {
+      if (g_apulog) fclose(g_apulog);
+      g_apulog = NULL;
+      if (strcmp(arg, "off")) {
+        apulog_hook(core);
+        g_apulog = fopen(arg, "w");
+      }
+      reply(!strcmp(arg, "off") || g_apulog ? "ok" : "err cannot write");
     } else if (!strcmp(cmd, "quit")) {
+      if (g_apulog) fclose(g_apulog);
+      if (g_audio) fclose(g_audio);
       core->deinit(core);
       reply("ok");
       return 0;

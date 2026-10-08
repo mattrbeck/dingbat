@@ -1,0 +1,67 @@
+@title Classic NES Series - Zelda II - The Adventure of Link (USA)
+@file Classic NES Series - Zelda II - The Adventure of Link (U).gba
+@game FLBE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Register a file named "AA" (the game writes the battery save: "SAVING...
+# WAIT A MOMENT"), start it, walk out of the north palace, along the road to
+# a forest encounter, and swing at the moblin and deelers there. In-game
+# progress is only saved on game over, so [load] shows file "AA" on the select
+# screen, starts it again in the palace and walks out to the overworld.
+# Seen while authoring: nba is a frame or two apart in the forest fight
+# (f2991 the moblin's spear, f3121 Link's damage flicker); dingbat-bios and
+# mgba stay identical. dingbat-bios and nba write byte-identical saves, mgba
+# differs only in the never-written area (00 instead of FF).
+
+[new]
+wait 600
+wait 200
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+tap DOWN times=3 every=10 hold=4
+press START
+wait 60
+press A after=15
+press A after=15
+wait 10
+checkpoint name_entry window=10
+tap SELECT times=3 every=15 hold=4
+wait 20
+press START
+wait 60
+checkpoint saving window=0
+wait 180
+checkpoint file_registered window=30
+press START
+wait 180
+checkpoint palace window=30
+press RIGHT hold=300
+wait 120
+checkpoint overworld window=30
+press RIGHT hold=200
+press DOWN hold=60
+wait 30
+wait 90
+checkpoint encounter window=30
+wait 40
+press RIGHT hold=120
+tap B times=3 every=20 hold=4
+wait 20
+press RIGHT hold=20
+tap B times=6 every=15 hold=4
+wait 20
+checkpoint forest_fight window=10
+
+[load]
+wait 800
+press START
+wait 120
+checkpoint file_select_saved window=30
+press START
+wait 180
+checkpoint resumed window=30
+press RIGHT hold=300
+wait 120
+checkpoint overworld_again window=30

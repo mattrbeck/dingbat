@@ -1,0 +1,108 @@
+@title Street Fighter Alpha 3 (USA)
+@file Street Fighter Alpha 3 (U).gba
+@game AZUE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Let the intro and attract demo run, START to the title and mode menu, Option Mode >
+# Game Option: difficulty 4 -> 2 stars, EXIT (the game saves its options), then Single
+# Mode with Ryu (A-ism) and fight the first round against Gen. [load] opens Game Option
+# again and shows the 2-star difficulty.
+# Notes: the attract-mode CPU fight diverges: at f2500 the two fighters are in different
+# places and poses on each of the three emulators. Because of that the title's blinking
+# PRESS START is in a different phase on each one (at f2600 it is missing on dingbat-bios,
+# shown on mgba, and nba is still fading in). From the mode menu on all three agree.
+# Taps on the difficulty row with hold=4 did nothing on any emulator; hold=10 works.
+
+[new]
+wait 600
+wait 1900
+wait 20
+wait 20
+press START
+wait 120
+wait 60
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 20
+press A
+wait 90
+checkpoint option_mode window=30
+press A
+wait 60
+tap LEFT times=8 every=10 hold=4
+wait 20
+tap DOWN times=10 every=10 hold=4
+wait 20
+tap UP times=10 every=12 hold=6
+wait 20
+press LEFT hold=10
+wait 20
+press LEFT hold=10
+wait 20
+checkpoint difficulty_2 window=30
+tap DOWN times=10 every=12 hold=6
+wait 20
+press A
+wait 90
+checkpoint option_saved window=30
+tap DOWN times=2 every=12 hold=6
+wait 20
+press A
+wait 90
+press A
+wait 90
+tap DOWN times=2 every=12 hold=6
+wait 20
+press A
+wait 90
+tap UP times=3 every=15 hold=6
+wait 20
+press A
+wait 90
+checkpoint player_select window=30
+press A
+wait 60
+tap A times=4 every=40 hold=6
+wait 300
+press A
+wait 400
+tap A times=3 every=60 hold=6
+wait 400
+checkpoint versus window=30
+wait 300
+press RIGHT hold=30
+tap A times=6 every=15 hold=4
+tap B times=6 every=15 hold=4
+press RIGHT hold=20
+tap A times=6 every=15 hold=4
+wait 30
+checkpoint fight window=30
+press RIGHT hold=60
+tap A times=8 every=12 hold=4
+tap B times=8 every=12 hold=4
+wait 30
+checkpoint fight_hits window=30
+
+[load]
+wait 2540
+press START
+wait 180
+checkpoint main_menu window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 20
+press A
+wait 90
+press A
+wait 60
+checkpoint game_option_loaded window=30

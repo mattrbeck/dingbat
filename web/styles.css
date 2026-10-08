@@ -833,6 +833,7 @@
   --btn-ab-bottom: #25272b;
   --btn-ab-border: #b44148;
   --btn-ab-border-w: 3px;
+  --btn-ab-ring: #b44148; /* kept by the see-through landscape pads */
   --btn-ab-label: #e6d9bf;
   --dpad-border: #b44148;
   --dpad-border-w: 3px;
@@ -1430,6 +1431,62 @@ body:not(.running) .cart-btn {
   color: var(--accent);
 }
 
+/* Channels muted reminder (Settings › Audio › Channels). Chrome ink, never
+   the accent: that colour is the enhanced-audio indicator's. */
+#channels-indicator {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--chrome-btn-border);
+  border-radius: 999px;
+  background: none;
+  color: var(--chrome-ink-dim);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#channels-indicator[hidden],
+body:not(.running) #channels-indicator {
+  display: none;
+}
+
+#channels-indicator:hover {
+  color: var(--chrome-ink);
+}
+
+#channels-indicator:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Phones as narrow as the first SE: the crossed speaker and the count. */
+@media (max-width: 400px) {
+  #channels-indicator {
+    gap: 3px;
+    padding: 0 7px;
+  }
+  .channels-indicator-word {
+    display: none;
+  }
+}
+
+#channels-indicator svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* Gentle glow so it reads as "lit", echoing the running-status LED */
 #hle-indicator.on svg {
   filter: drop-shadow(0 0 3px var(--accent-glow));
@@ -1965,6 +2022,19 @@ body.running #canvas {
   border-radius: 4px;
   /* A crisp 1px edge only; a drop shadow reads as a permanent glow. */
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+/* A mouse resting on the picture hides (index.js, "Idle cursor"). Set on
+   #canvas alone, so the hit test is the boundary: the letterbox and
+   anything drawn over the frame keep the pointer. */
+body.cursor-idle #canvas {
+  cursor: none;
+}
+
+/* Pinch zoom (index.js, "Frame zoom") is CSS scale + translate, set under
+   the fingers with no transition; only the double-tap reset glides. */
+#canvas.zoom-ease {
+  transition: scale 0.2s ease, translate 0.2s ease;
 }
 
 /* Ambient glow backdrop: a coarse sample of the frame, inflated past the
@@ -3591,6 +3661,24 @@ body.runtime-ready #boot-progress {
   transform: translateY(1px);
 }
 
+/* A tile with keyboard or gamepad focus: the amber ring, thick enough to
+   find from the sofa. */
+.home-tile-launch:focus-visible,
+body.pad-nav .home-tile-launch:focus {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+/* The pad's focus anywhere else (index.js "Gamepad support"). Drawn on
+   :focus, not :focus-visible: a programmatic focus after a mouse click
+   gets no :focus-visible, and the pad has no other way to say where it is.
+   A pointer or key drops body.pad-nav again. */
+body.pad-nav :is(button, input, select, [tabindex]):focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .home-tile-thumb {
   position: relative;
   width: 100%;
@@ -4227,7 +4315,8 @@ body.debug-2p .home-tile-link {
 #thumbs-progress[hidden],
 #thumbs-offer[hidden],
 #thumbs-drive-row[hidden],
-#kept-save-row[hidden] {
+#kept-save-row[hidden],
+#play-in-silent-row[hidden] {
   display: none;
 }
 
@@ -4321,6 +4410,40 @@ body.debug-2p .home-tile-link {
   font-weight: 700;
   color: var(--text);
   flex-shrink: 0;
+}
+
+/* ---- Resume from earlier (the Save States grid, read-only) ---- */
+/* The note under the grid says what going back to the chosen moment does
+   to the in-game save; it is the only text that changes with the choice,
+   so it reads in the body colour, apart from the hint above. */
+.moments-note {
+  margin: -6px 0 16px;
+  color: var(--text);
+}
+
+#moments-from-save[hidden] {
+  display: none;
+}
+
+/* Alone, Resume still sits at the right, where Save States puts it. */
+#moments-modal .states-actions-right {
+  margin-left: auto;
+}
+
+/* Two lines, not one: "12 min earlier" and a clock time do not share a
+   phone-width third, and neither may be the one cut short. */
+.moments-grid .state-slot .slot-label {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.state-slot .moment-before-save {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .states-actions {
@@ -5658,6 +5781,129 @@ body.debug-2p .home-tile-link {
   transform: rotate(90deg);
 }
 
+/* ---- Settings › Audio › Channels (per-channel mutes, this game only) ---- */
+.channels-note {
+  margin: 0 0 16px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.channel-group {
+  margin-bottom: 18px;
+}
+
+.channel-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.channel-all {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.channel-all:hover {
+  color: var(--accent-2);
+}
+
+.channel-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.channel-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.channel-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* On: tinted with the accent and a sounding speaker. Off: dashed outline, a
+   crossed speaker and struck label, so the state never rests on colour. */
+.channel-chip {
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border-radius: var(--radius);
+  background: rgba(var(--accent-rgb), 0.14);
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  color: var(--accent-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.channel-chip svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.channel-chip .ch-ico-off,
+.channel-chip[aria-pressed="false"] .ch-ico-on {
+  display: none;
+}
+
+.channel-chip[aria-pressed="false"] .ch-ico-off {
+  display: block;
+}
+
+.channel-chip[aria-pressed="false"] {
+  background: transparent;
+  border: 1px dashed var(--border-2);
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.channel-chip:focus-visible,
+.channel-all:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.channels-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.channels-foot[hidden] {
+  display: none;
+}
+
+.channels-foot .button {
+  min-height: 44px;
+}
+
 .settings-note {
   margin-top: 14px;
   padding-top: 10px;
@@ -5917,6 +6163,16 @@ body.debug-2p .home-tile-link {
   display: none;
 }
 
+/* Buttons in landscape styles the pads a phone lays over the game held
+   sideways (pointer: coarse, height up to 500px). Tablets keep their own
+   pads beside the picture and desktops have none, so the row would do
+   nothing there. */
+@media not all and (pointer: coarse), (min-width: 501px) and (min-height: 501px) {
+  .settings-pane #landscape-buttons-row {
+    display: none;
+  }
+}
+
 .theme-swatch {
   flex: 0 0 auto;
   width: 22px;
@@ -6074,6 +6330,121 @@ body.debug-2p .home-tile-link {
   margin-top: 20px;
 }
 
+/* ---- Export (tile menu ▸ Export…) ----
+   A plain list of checkboxes: no cards, the headings (from five rows) are
+   the only grouping. */
+.export-modal {
+  max-width: 440px;
+}
+.export-list {
+  display: flex;
+  flex-direction: column;
+}
+.export-list .export-subhead {
+  margin: 10px 0 2px;
+}
+.export-list .export-subhead.no-rule {
+  margin-top: 0;
+}
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 2px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.export-row input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.export-row:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* The row wears the ring; the box inside it would be a second one. */
+.export-row input:focus-visible {
+  outline: none;
+}
+.export-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.export-row-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.export-row-sub {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.export-row-size {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.export-row.off .export-row-text,
+.export-row.off .export-row-size {
+  opacity: 0.55;
+}
+.export-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.export-foot-actions {
+  display: flex;
+  gap: 9px;
+  margin-left: auto;
+}
+.export-foot-text {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.export-file {
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.export-sum {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.export-done-file {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+/* Fingers: taller rows, bigger boxes. */
+@media (pointer: coarse) {
+  .export-row {
+    min-height: 48px;
+  }
+  .export-row input {
+    width: 22px;
+    height: 22px;
+  }
+}
+
 .modal-close {
   position: absolute;
   top: 14px;
@@ -6152,12 +6523,19 @@ body.debug-2p .home-tile-link {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
-/* Shortcuts reference list (desktop-only: lives inside #kb-section) */
-#kb-shortcuts {
+/* Shortcuts reference lists: the keyboard's (desktop-only: lives inside
+   #kb-section) and the controller's (everywhere: a tablet takes a pad). */
+#kb-shortcuts,
+#pad-shortcuts {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px 14px;
   margin-bottom: 14px;
+}
+@media (max-width: 759px) {
+  #pad-shortcuts {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kb-shortcut {
@@ -6998,46 +7376,15 @@ body.rewind-off #report-slider {
  * ==========================================================
  * Mobile landscape: maximise the screen
  * ==========================================================
- * The top bar slides off-screen (a handle at the top edge pulls it back),
+ * The top bar slides off-screen (a tap on the picture brings it back),
  * the stage takes the full height, and the overlaid touch controls hug the
  * screen edges, semi-transparent so they don't hide the game.
  */
 
-/* Handle base style (only displayed by the landscape block below) */
-#topbar-handle {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 41;
-  width: 46px;
-  height: 19px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  color: var(--text-dim);
-  background: rgba(var(--surface-1-rgb), 0.55);
-  border: 1px solid var(--border-2);
-  border-top: none;
-  border-radius: 0 0 9px 9px;
-  cursor: pointer;
-  transition: top 0.2s ease;
-}
-
-#topbar-handle svg {
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 0.2s ease;
-}
-
 @media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
-  /* Top bar off-screen by default; the handle slides it in/out */
+  /* Top bar off-screen by default; a tap on the picture slides it in/out
+     (index.js). Not a handle on the top edge: iOS keeps that strip for its
+     own swipes and delays or drops touches that begin there. */
   body.running #topbar {
     position: fixed;
     top: 0;
@@ -7051,24 +7398,10 @@ body.rewind-off #report-slider {
     transform: translateY(0);
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
   }
-  body.running #topbar-handle {
-    display: flex;
-  }
-  body.running.topbar-open #topbar-handle {
-    top: var(--bar-h);
-  }
-  body.running.topbar-open #topbar-handle svg {
-    transform: rotate(180deg);
-  }
-  /* No bar on screen to sit under, so the capture banner hugs the top of the
-     full-height stage — and rides down with the bar when the handle pulls it
-     in, the same way the handle itself does. */
-  body.running #clip-banner {
-    top: calc(var(--safe-t) + 10px);
-    transition: top 0.2s ease;
-  }
-  body.running.topbar-open #clip-banner {
-    top: calc(var(--bar-h) + var(--safe-t) + 10px);
+  /* Pure Black leaves the bar see-through so the glow shows behind it, but
+     here the bar comes down over the picture and L/R: give it the black. */
+  :root[data-theme="black"] body.running #topbar {
+    background: var(--bg);
   }
   /* With the bar gone the stage owns the full height */
   body.running #canvas {
@@ -7082,14 +7415,50 @@ body.rewind-off #report-slider {
     padding: 6px calc(6px + var(--safe-r)) calc(6px + var(--safe-b))
       calc(6px + var(--safe-l));
   }
-  /* Fully transparent controls, just a faint outline and glyph: they
-     overlap the display area, so they must not obscure it */
+  /* Fully transparent controls, just a line and a glyph: they overlap the
+     display area, so they must not obscure it. Settings › Controls ›
+     Buttons in landscape: Outline (faint), Bold, or Solid (opaque-controls,
+     below). */
+  body {
+    --pad-line: rgba(var(--hi-rgb), 0.28);
+    --pad-glyph: rgba(var(--text-rgb), 0.5);
+    --pad-halo: rgba(0, 0, 0, 0.85);
+  }
+  body.bold-controls {
+    --pad-line: rgba(var(--hi-rgb), 0.9);
+    --pad-glyph: rgba(var(--text-rgb), 0.9);
+  }
+  :root[data-theme="light"] body {
+    --pad-line: rgba(24, 32, 52, 0.4);
+    --pad-glyph: rgba(var(--text-rgb), 0.6);
+    --pad-halo: rgba(255, 255, 255, 0.85);
+  }
+  :root[data-theme="light"] body.bold-controls {
+    --pad-line: rgba(24, 32, 52, 0.8);
+    --pad-glyph: rgba(var(--text-rgb), 0.9);
+  }
+  /* Solid pads use the plain border wherever a theme ring doesn't apply */
+  :root body.opaque-controls {
+    --pad-line: var(--border-2);
+  }
   .pad-btn,
   #dpad > #dpad-center {
     background: none;
-    border-color: rgba(var(--hi-rgb), 0.28);
+    border-color: var(--pad-line);
     box-shadow: none;
-    color: rgba(var(--text-rgb), 0.5);
+    color: var(--pad-glyph);
+  }
+  /* A theme's own ring (Famicom red) stays; any other d-pad and A/B take the
+     same line as the rest. The center's bars are inside the cross, and a bold
+     ring hides them (--dpad-bar-line) so the cross doesn't segment. */
+  #dpad > .pad-btn {
+    border-color: var(--dpad-border, var(--pad-line));
+  }
+  .pad-face {
+    border-color: var(--btn-ab-ring, var(--pad-line));
+  }
+  #dpad > #dpad-center {
+    border-color: var(--dpad-bar-line, var(--pad-line));
   }
   #dpad > #dpad-center::after,
   #joystick-base::after {
@@ -7102,6 +7471,27 @@ body.rewind-off #report-slider {
     background: none;
     border-color: rgba(var(--accent-rgb), 0.7);
     box-shadow: 0 0 14px -4px var(--accent-glow);
+  }
+  /* Bold: a 2px line in a dark halo (light on the light theme), so one of the
+     two always contrasts with the picture under it. drop-shadow follows the
+     drawn line and glyph only - the d-pad's open arm ends get no edge - and
+     is static, painted once per press like the rest of the pad. The knob
+     sits inside the base, which already haloes it. */
+  body.bold-controls .pad-btn {
+    border-width: 2px;
+  }
+  body.bold-controls .pad-face {
+    border-width: max(2px, var(--btn-ab-border-w));
+  }
+  body.bold-controls #dpad > .pad-btn {
+    border-width: max(2px, var(--dpad-border-w, 1px));
+  }
+  body.bold-controls .pad-btn:not(#joystick-knob),
+  body.bold-controls #dpad > #dpad-center {
+    filter: drop-shadow(0 0 1px var(--pad-halo)) drop-shadow(0 0 1px var(--pad-halo));
+  }
+  body.bold-controls #joystick-rim {
+    inset: -2px;
   }
   /* Opaque-controls opt-out; higher specificity and later, so it wins. */
   body.opaque-controls .pad-btn {
@@ -7128,42 +7518,86 @@ body.rewind-off #report-slider {
     border-color: rgba(var(--accent-rgb), 0.55);
     box-shadow: inset 0 2px 7px var(--inset-lo), 0 0 16px -3px var(--accent-glow);
   }
-  /* Select / Start shrink to small, label-less circles (the text isn't
-     needed at this size; position tells them apart) */
-  .pad-pill {
-    flex: 0 0 38px;
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    font-size: 0;
+  /* Select / Start: labelled pills just inboard of the d-pad and A/B, their
+     bottoms level with the clusters', where the thumbs already are (centred
+     at the bottom they sat out of reach on a big phone). The row spans the
+     screen and pads itself past each cluster. On every phone in landscape
+     the clusters sit at their px caps (#dpad/#ab above: 158 / 62 x 2.2,
+     large 210 / 82 x 2.2), so those caps place the pills. */
+  body.running {
+    --ls-dpad: 158px;
+    --ls-ab: calc(62px * 2.2);
+    --ls-pill-gap: 20px;
   }
-  /* Large-controls keeps the circular landscape pills, at the old size (the
-     portrait large-mode pill rule would otherwise re-widen them to 120x28
-     labelled bars). */
-  body.large-controls .pad-pill {
-    flex: 0 0 42px;
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    font-size: 0;
+  body.running.large-controls {
+    --ls-dpad: 210px;
+    --ls-ab: calc(82px * 2.2);
   }
   #select-start {
-    gap: 12px;
+    justify-self: stretch;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 0 calc(var(--ls-ab) + var(--ls-pill-gap)) 0
+      calc(var(--ls-dpad) + var(--ls-pill-gap));
+    /* #main-controls' padding-bottom: the clusters' bottom line */
+    margin-bottom: 8px;
+    /* The row lies over the picture; only the pills take touches. */
+    pointer-events: none;
   }
-}
-
-/* Light theme, translucent pads: flip outline/glyph dark. After (and
-   re-asserting) the pressed rules, which these selectors outrank. */
-@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
-  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn,
-  :root[data-theme="light"] body:not(.opaque-controls) #dpad > #dpad-center {
-    border-color: rgba(24, 32, 52, 0.4);
-    color: rgba(var(--text-rgb), 0.6);
+  .pad-pill {
+    position: relative;
+    flex: 0 1 76px;
+    min-width: 44px;
+    height: 36px;
+    font-size: 11px;
+    pointer-events: auto;
   }
-  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn.pressed,
-  :root[data-theme="light"] body:not(.opaque-controls) .pad-btn.arm-active {
-    color: var(--accent);
-    border-color: rgba(var(--accent-rgb), 0.7);
+  /* The touch area reaches past the drawn pill above and below (48px tall),
+     never sideways: Start sits 20px from B. */
+  .pad-pill::before {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
+  body.large-controls .pad-pill {
+    flex-basis: 84px;
+    height: 40px;
+    font-size: 12px;
+  }
+  body.large-controls .pad-pill::before {
+    inset: -4px 0;
+  }
+  /* See-through pads: arrows on the d-pad's arms, and no lines across the
+     cross where the arms meet the middle, so up and down read as one bar
+     (the outline alone draws the cross). Solid pads keep their own look. */
+  body:not(.opaque-controls) {
+    --dpad-bar-line: transparent;
+  }
+  body:not(.opaque-controls) #dpad > :is(#up, #down, #left, #right)::after {
+    content: "";
+    width: 36%;
+    aspect-ratio: 1 / 1;
+    background: currentColor;
+    -webkit-mask: var(--dpad-arrow) center / contain no-repeat;
+    mask: var(--dpad-arrow) center / contain no-repeat;
+  }
+  body:not(.opaque-controls) #dpad {
+    --dpad-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 15l6-6 6 6' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+  body:not(.opaque-controls) #dpad > #down::after {
+    transform: rotate(180deg);
+  }
+  body:not(.opaque-controls) #dpad > #left::after {
+    transform: rotate(-90deg);
+  }
+  body:not(.opaque-controls) #dpad > #right::after {
+    transform: rotate(90deg);
+  }
+  /* The bar's brand gives way while a game runs, as it does on a phone held
+     upright: the bar is only up for a moment, and its width goes to the
+     buttons (Disconnect ran under the wordmark on a 13 mini). */
+  body.running #brand-slot {
+    display: none;
   }
 }
 
@@ -8253,8 +8687,7 @@ body.running.sync-shown #status {
     transition: color 0.35s ease;
   }
   body.running #topbar,
-  #topbar-handle,
-  #topbar-handle svg,
+  #canvas.zoom-ease,
   #joystick-base.homing,
   #joystick-knob.homing {
     transition: none;
@@ -8345,33 +8778,87 @@ body.net-mode #menu-btn.has-new-photo::after {
   display: none;
 }
 
-/* Retroactive capture in progress: the replay owns the screen — every
-   control goes inert (the wasm side also ignores core input) and the
-   banner is the one live element. */
+/* Retroactive capture in progress: the replay owns the machine — every
+   control goes inert (the wasm side also ignores core input) — and is not
+   for watching: the canvas and its glow are hidden under the progress panel
+   (opacity, not visibility, so the canvas still renders for the recorder). */
 body.clip-replaying #playback-controls,
 body.clip-replaying #topbar .icon-btn,
 body.clip-replaying #controls {
   pointer-events: none;
   opacity: 0.45;
 }
+body.clip-replaying #canvas,
+body.clip-replaying #glow-canvas {
+  opacity: 0;
+}
 
-/* Just under the top bar; a body-level sibling of #topbar so the landscape
-   transform cannot capture it. The bar is (bar-h + safe-t) tall, so the
-   safe-t term is required. */
-#clip-banner {
-  position: fixed;
-  z-index: 550;
-  left: 50%;
-  top: calc(var(--bar-h, 52px) + var(--safe-t) + 10px);
-  transform: translateX(-50%);
-  padding: 6px 14px;
+.modal-clip-progress {
+  max-width: 340px;
+}
+.modal-clip-progress h2,
+.modal-clip-progress .modal-hint {
+  text-align: center;
+}
+.modal-clip-progress h2 {
+  margin-bottom: 14px;
+}
+.modal-clip-progress .modal-hint {
+  margin: -8px 0 16px;
+}
+/* The logo flapping while the clip records. flap.png is the strip of 31
+   wing-flap frames (56x40 art px each, tools/logo_flap/flap.py); frames
+   0-15 are one full wingbeat, looped here at 24 fps, at 2x so the pixels
+   stay whole. object-position picks the frame: frame k is k/30 along. */
+.clip-progress-flap {
+  display: block;
+  width: 112px;
+  height: 80px;
+  margin: 0 auto 6px;
+  object-fit: cover;
+  object-position: 0 0;
+  image-rendering: pixelated;
+  animation: clip-flap 667ms steps(16, jump-end) infinite;
+}
+@keyframes clip-flap {
+  from { object-position: 0 0; }
+  to { object-position: 53.3333% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clip-progress-flap { animation: none; }
+}
+.clip-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.clip-progress-bar {
+  position: relative;
+  flex: 1;
+  height: 8px;
   border-radius: 999px;
-  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+  background: var(--surface-3);
   border: 1px solid var(--border-2);
-  color: var(--text);
+  overflow: hidden;
+}
+.clip-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+.clip-progress-pct {
+  min-width: 3.2em;
+  text-align: right;
   font-size: 13px;
   font-weight: 600;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.modal-clip-progress .states-actions {
+  margin-top: 18px;
 }
 
 /* --- Cartridge-specific top-bar actions (#tilt-recenter, #cam-flip) ---
@@ -8808,10 +9295,9 @@ body:not(.running) #nds-off {
 
 /* DS: the top bar. A phone held upright gives the bar's room to the
    screens (body.nds-bar-hide, the "Hide the top bar" choice): the bar
-   slides off as it does on a phone held sideways, and the same handle at
-   the top brings it back. The stage keeps the handle's strip under the
-   status bar, so the handle never covers a screen; the touch controls do
-   not move. */
+   slides off as it does on a phone held sideways, and a tap on the picture
+   away from the touch screen brings it back (index.js "Mobile-landscape top
+   bar"). The touch controls do not move. */
 @media (pointer: coarse) and (orientation: portrait) and (max-width: 699px) {
   body.running.nds-mode.nds-bar-hide #topbar {
     position: fixed;
@@ -8826,37 +9312,8 @@ body:not(.running) #nds-off {
     transform: translateY(0);
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
   }
-  body.running.nds-mode.nds-bar-hide #topbar-handle {
-    display: flex;
-    top: var(--safe-t);
-  }
-  body.running.nds-mode.nds-bar-hide.topbar-open #topbar-handle {
-    top: calc(var(--bar-h) + var(--safe-t));
-  }
-  body.running.nds-mode.nds-bar-hide.topbar-open #topbar-handle svg {
-    transform: rotate(180deg);
-  }
   body.running.nds-mode.nds-bar-hide #stage {
-    padding-top: calc(var(--safe-t) + 20px);
-  }
-  body.running.nds-mode.nds-bar-hide #clip-banner {
-    top: calc(var(--safe-t) + 26px);
-  }
-  body.running.nds-mode.nds-bar-hide.topbar-open #clip-banner {
-    top: calc(var(--bar-h) + var(--safe-t) + 10px);
+    padding-top: var(--safe-t);
   }
 }
 
-/* Phone held sideways: Select/Start leave the bottom middle, where the
-   touch screen is, for the right rail just under R (the console has them
-   on its right too). Same circles, same order, same gap. */
-@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
-  body.nds-mode #select-start {
-    grid-column: 2 / 3;
-    grid-row: 1 / 2;
-    justify-self: end;
-    align-self: start;
-    margin-top: 58px;
-    margin-right: 33px;
-  }
-}

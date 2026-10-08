@@ -356,7 +356,10 @@ EventType ordinals / payload revisions), `test_cheats`, `test_rewind`, `test_cli
 (both cores built with checks on, a payload into a real rewind ring every frame with
 rewinds, replays and loads into a newly built core, over every committed ROM and a seeded
 random register-writing program per core; known core issues print `[KNOWN]`,
-`DINGBAT_SOAK_STRICT=1` fails on them; an argument filters the cases), `test_printer`,
+`DINGBAT_SOAK_STRICT=1` fails on them; an argument filters the cases),
+`test_silentaudio` (a core toggling `APU.silent`, the muted no-mix path, must match a
+mixing twin's payload every frame: committed ROMs, the soak's random programs and
+channel-1 stop storms), `test_printer`,
 `test_lcdresponse`, `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
 battery-save RTC trailer), `test_desktop` (the desktop frontend's logic that
 builds without SDL: held input and key routing, the config file, the

@@ -2,33 +2,37 @@
 @file WarioWare Inc. (U).gba
 @game AZWE
 @chip SRAM
+@frozen dingbat-bios,mgba,nba
 
 # First boot asks for a name and a gender; confirming them writes the save
 # (the battery file is still blank on the title screen). [load] skips the
 # name entry straight to the main menu and the stage select.
-
 [new]
 wait 600
 press START
-until text "PRESS STAR" timeout=600 every=5
+# until text 'PRESS STAR' timeout=600 every=5  [reached dingbat-bios+120 mgba+120 nba+120]
+wait 124
 checkpoint title window=30
 press START
-until text "NAME ENTR" timeout=300 every=5
+# until text 'NAME ENTR' timeout=300 every=5  [reached dingbat-bios+55 mgba+55 nba+55]
+wait 59
 wait 30
 checkpoint name_entry window=30
-# type "A", scroll left onto END, confirm
 press A after=30
 press LEFT after=50
 press A
-until text "How about" timeout=300 every=5
+# until text 'How about' timeout=300 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 20
 checkpoint confirm_name window=30
 press A
-until text "Which" timeout=300 every=5
+# until text Which timeout=300 every=5  [reached dingbat-bios+15 mgba+15 nba+20]
+wait 24
 wait 20
 checkpoint gender window=30
 press A
-until text "Diamond City" timeout=300 every=5
+# until text 'Diamond City' timeout=300 every=5  [reached dingbat-bios+95 mgba+100 nba+100]
+wait 104
 wait 30
 checkpoint diamond_city window=30
 wait 300
@@ -37,13 +41,16 @@ checkpoint city window=10
 [load]
 wait 600
 press START
-until text "PRESS STAR" timeout=600 every=5
+# until text 'PRESS STAR' timeout=600 every=5  [reached dingbat-bios+120 mgba+120 nba+120]
+wait 124
 wait 30
 press START
-until text "Options" timeout=600 every=5
+# until text Options timeout=600 every=5  [reached dingbat-bios+90 mgba+85 nba+85]
+wait 94
 wait 30
 checkpoint main_menu window=30 compare=text
 press A
-until text "Genre" timeout=300 every=5
+# until text Genre timeout=300 every=5  [reached dingbat-bios+60 mgba+60 nba+65]
+wait 69
 wait 30
 checkpoint stage_select window=30 compare=text

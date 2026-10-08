@@ -41,6 +41,7 @@ web/rom.gbc
 /dingbat_ppucomposite_test
 /dingbat_ppubgunpack_test
 /dingbat_ppuobjlist_test
+/dingbat_renderskip_test
 /dingbat_mp2kpass_test
 /dingbat_mgba_video
 /dingbat_savestate_compat_test
@@ -93,7 +94,8 @@ dmg_boot.bin
 *.boot.bin
 
 # Claude Code local state
-.claude/
+.claude/*
+!.claude/skills/
 
 # Windows cross-build output
 dist/
@@ -184,6 +186,7 @@ tools/gbgate/roms.txt
 /dingbat_psgagb_test
 /dingbat_ndscpu_test
 /dingbat_state_soak_test
+/dingbat_silent_audio_test
 /dingbat_desktop_settings_test
 /dingbat_desktop_lifecycle_test
 /dingbat_desktop_modal_test

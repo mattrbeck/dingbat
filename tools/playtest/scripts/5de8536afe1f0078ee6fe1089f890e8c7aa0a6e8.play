@@ -2,30 +2,228 @@
 @file Metroid - Zero Mission (U) [!].gba
 @game BMXE
 @chip SRAM
-@status wip: reaches Samus standing in the first Brinstar room on a new Normal file. Starting the file writes only the header/select-slot blocks (no Samus data: file A still reads --:--:--), so the first real save needs Samus to reach the first save station in Brinstar (platforming through several rooms). A human should record: file A, Start Game, Normal, play to the first save room, stand on the station and answer Yes, quit after "Save complete". [load]: file A shows Brinstar and the play time; Start Game resumes in the save room.
-
-# Intro > title (PRESS START) > SAMUS DATA > file A > Start Game > Normal >
-# intro text > Brinstar.
+@frozen dingbat-bios,mgba
+# New file A on Normal: left over the rock to the Morph Ball, back right
+# rolling under the rocks, through the breakable-block room and the Skree
+# corridor, morph into the Chozo statue's hand (map hint, energy refill), then
+# the shaft and the first Save Room; Yes, "Save Complete".
+# Recorded without nba: in the authoring session nba drew a Zoomer at a
+# different place from f2715 (dingbat-bios and mgba agree), its kill drop gave
+# 99 energy instead of 84 around f3300, and by f4968 an extra Zoomer had
+# knocked Samus back, so the session went on without it. (The replay with
+# nba still reaches the save: morph_ball differs MAJOR on nba, energy 99.)
 
 [new]
 wait 600
 press START
-until text "ZERO MISSI" timeout=600 every=10
+# until text 'ZERO MISSI' timeout=600 every=10  [reached dingbat-bios+10 mgba+10]
+wait 14
 wait 60
-checkpoint title
+checkpoint title window=30
 press START
-until text "SAMUS DATA" timeout=600 every=10
+# until text 'SAMUS DATA' timeout=600 every=10  [reached dingbat-bios+90 mgba+90]
+wait 94
 wait 60
-checkpoint samus_data
+checkpoint samus_data window=30
 press A
-until text "Start Game" timeout=300 every=5
+# until text 'Start Game' timeout=300 every=5  [reached dingbat-bios+20 mgba+20]
+wait 24
 wait 60
 press A
-until text "Difficulty" timeout=300 every=5
+# until text Difficulty timeout=300 every=5  [reached dingbat-bios+10 mgba+10]
+wait 14
 wait 30
-checkpoint difficulty
+checkpoint difficulty window=30
 press A
-until text "Planet Zebes" timeout=900 every=10
-mash A until notext "Zebes" timeout=1200 every=20
+# until text 'Planet Zebes' timeout=900 every=10  [reached dingbat-bios+470 mgba+470]
+wait 474
+# mash A until notext Zebes timeout=1200 every=20  [taps dingbat-bios:15 mgba:15]
+tap A times=15 every=20 hold=4
 wait 600
 checkpoint brinstar window=10
+press LEFT hold=150
+hold LEFT
+tap B times=12 every=12 hold=4
+release
+press A hold=20
+press LEFT hold=20
+wait 20
+press RIGHT hold=12
+hold LEFT
+press A hold=25 after=25
+release
+press RIGHT hold=4
+hold LEFT
+press A hold=25 after=25
+release
+press RIGHT hold=4
+hold LEFT
+press A hold=25 after=60
+release
+hold LEFT
+tap B times=5 every=10 hold=4
+release
+hold LEFT
+press A hold=20 after=10
+release
+tap B times=3 every=8 hold=4
+tap B times=4 every=8 hold=4
+press A hold=25 after=5
+press LEFT hold=20
+wait 60
+press RIGHT
+press A hold=25
+press LEFT hold=15
+wait 120
+hold LEFT
+press A hold=25 after=20
+release
+wait 120
+checkpoint morph_ball window=0 compare=text
+press A
+wait 60
+press RIGHT hold=60
+wait 120
+tap A times=3 every=30 hold=4
+wait 60
+press A
+wait 60
+press START
+wait 90
+checkpoint map window=0 compare=text
+press START
+wait 90
+press RIGHT hold=90
+press LEFT hold=8
+hold RIGHT
+press A hold=20 after=60
+release
+tap DOWN times=2 every=8 hold=4
+wait 10
+press RIGHT hold=90
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press RIGHT hold=120
+press UP after=20
+hold RIGHT
+press A hold=20 after=30
+tap B times=6 every=10 hold=4
+release
+press DOWN hold=10 after=30
+press DOWN hold=10 after=30
+press DOWN hold=10 after=20
+press RIGHT hold=120
+press UP after=20
+press RIGHT hold=2
+tap B times=6 every=10 hold=4
+press UP after=10
+press A hold=15
+tap B times=4 every=6 hold=4
+wait 20
+tap B times=5 every=8 hold=4
+wait 30
+hold RIGHT
+press A hold=20 after=150
+release
+hold RIGHT
+press A hold=25 after=120
+release
+hold RIGHT
+press A hold=20 after=40
+release
+tap B times=2 every=10 hold=4
+press RIGHT hold=150
+wait 40
+tap B times=10 every=8 hold=4
+tap B times=8 every=8 hold=4
+hold RIGHT
+tap B times=10 every=10 hold=4
+release
+wait 60
+hold RIGHT
+tap B times=12 every=10 hold=4
+release
+hold RIGHT
+tap B times=12 every=10 hold=4
+release
+wait 40
+press DOWN after=15
+press DOWN after=15
+press RIGHT hold=150
+press START
+wait 60
+press START
+wait 60
+press UP after=20
+press LEFT hold=30
+wait 10
+press A hold=16
+hold A+RIGHT
+wait 10
+release
+wait 30
+press DOWN after=15
+press DOWN after=15
+wait 120
+wait 200
+press RIGHT hold=15
+wait 200
+wait 120
+checkpoint chozo_hint window=0 compare=text
+wait 300
+press A
+wait 150
+press UP after=20
+hold RIGHT
+press A hold=25 after=60
+release
+wait 120
+press UP after=20
+press A
+wait 60
+press UP after=20
+hold RIGHT
+press A hold=25 after=60
+release
+tap B times=2 every=10 hold=4
+press RIGHT hold=100
+wait 60
+hold RIGHT
+tap B times=14 every=10 hold=4
+release
+wait 60
+checkpoint save_room window=10
+press RIGHT hold=40
+wait 120
+checkpoint save_prompt window=0
+press A
+# until text complete timeout=600 every=10  [reached dingbat-bios+240 mgba+240]
+wait 244
+wait 10
+checkpoint saved window=0 compare=text
+wait 60
+
+[load]
+wait 600
+press START
+# until text 'ZERO MISSI' timeout=600 every=10  [reached dingbat-bios+20 mgba+20]
+wait 24
+wait 60
+press START
+# until text 'SAMUS DATA' timeout=600 every=10  [reached dingbat-bios+90 mgba+90]
+wait 94
+wait 60
+checkpoint samus_data_saved window=30
+press A
+# until text 'Start Game' timeout=300 every=5  [reached dingbat-bios+20 mgba+20]
+wait 24
+wait 30
+press A
+wait 300
+checkpoint resumed window=30
+wait 120
+press START
+wait 60
+checkpoint resumed_map window=0 compare=text
+

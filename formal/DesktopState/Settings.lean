@@ -18,6 +18,29 @@ were then brought in line with the settings fix round (branch
 worktree-agent-a08659528cd06b57b), so the `regress_*` theorems describe what
 shipped. Every `bug_*` theorem still describes the code at a2e038f82.
 
+**Re-audited at 03f88d6c** (2026-10-05) for the procs that changed since the
+last stamp; their citations below say `@03f88d6c`, every other line number
+is still a2e038f82's (those procs' tokens are unchanged since they were last
+checked):
+* `apply_master_volume` (dingbat 594-602 @03f88d6c) also sets each core's
+  `APU.silent` to `cfg.mute or cfg.volume <= 0` (gba `set_audio_silent`,
+  gba.nim 1816-1824; gb `apu.silent`), so a muted core skips its mix. It is
+  written in the same proc as the master volume from the same two cfg
+  fields, on every path that already called it (`load_rom` 802, the Volume
+  slider 1520, Mute 1525, live_sync 2243 @03f88d6c), so `Core.volume`
+  stands for (volume, mute, silent) and `liveOK_real` covers it unchanged.
+* `new_config` (config 310-339 @03f88d6c): pitch-correct fast-forward and the
+  analog low-pass default on (`CONFIG_DEFAULTS_REV` = 2, config 416-422).
+  `interp` (all four audio niceties) already defaulted on; the MP2K HLE is
+  still off by default, the one member `interp` misdescribes, as before.
+* `parse_config` (config 424-526 @03f88d6c) reads `defaults_rev` (426-429)
+  and takes the new defaults for those two keys from a file below rev 2
+  (470-473). `config_entries` writes `defaults_rev: 2` first (593), so every
+  file this build writes is rev 2 and `persist` (load(save(c))) is unchanged.
+  A rev-1 file written by an older build is outside `Disk`: its `false` for
+  those two (the old default; neither could be turned off without first
+  being turned on) loads as `true`, once, by design.
+
 | Nim                                                          | lines            |
 |--------------------------------------------------------------|------------------|
 | `ConfigEditor.render` (open edge -> do_reset, igBegin(&open),| config_editor    |
@@ -294,7 +317,9 @@ structure Cfg where
   recent    : Option FileE       -- cfg.recents[0]
   fullscreen : Bool              -- cfg.fullscreen (fixed; the code as it is has no such key)
 
-/-- new_config (config 286-313). -/
+/-- new_config (config 310-339 @03f88d6c; pitch_correct_ff and audio_lowpass on
+since defaults rev 2, so all of `interp`'s fifo_interp / pitch / low-pass
+default on). -/
 def defaults : Cfg :=
   { kb := defaultKb, pad := defaultPad, useHle := true, afterBios := false,
     runBios := false, biosFile := false, sgb := false,
@@ -313,7 +338,10 @@ widget binds only named ones. Everything else round-trips (bools, the
 clamped volume, the recents list through yaml_str's quoting).
 With `numericKeys` an unnamed key is written as its decimal keycode and
 parsed back, so every binding survives (tests/desktop_settings_test.nim
-round-trips a keypad key and e-acute through the real config.nim). -/
+round-trips a keypad key and e-acute through the real config.nim).
+@03f88d6c: save_config also writes `defaults_rev: 2` (config_entries, config
+593), and parse_config honours a file's pitch_correct_ff / audio_lowpass only
+at rev >= 2 (470-473), so the round trip still keeps every field. -/
 def persist (fx : Fix) (c : Cfg) : Cfg :=
   { c with kb := fun k => if k.named || fx.numericKeys then c.kb k else none,
            pad := fun b => if b < 15 then c.pad b else none }
@@ -409,7 +437,7 @@ structure Core where
   afterBios : Bool      -- gba.hle_after_bios
   runBios   : Bool      -- gba.run_bios
   biosFile  : Bool      -- a BIOS image is mapped (not bus.stub_bios)
-  volume    : Nat       -- apu master volume
+  volume    : Nat       -- apu master volume (with mute and APU.silent, written together)
   interp    : Bool      -- GBA apu fifo_interp
 
 inductive Pc where
@@ -463,7 +491,9 @@ def save (fx : Fix) (s : S) : S :=
   { s with disk := .ok s.cfg,
            lostBad := if fx.moveAside then s.lostBad else s.lostBad || s.disk.isBad }
 
-/-- apply_master_volume (570-574). -/
+/-- apply_master_volume (594-602 @03f88d6c): the master volume and mute, and
+`APU.silent := cfg.mute or cfg.volume <= 0` (a muted core skips its mix), all
+from cfg in one proc; `volume` stands for the three. -/
 def applyVolume (s : S) : S :=
   { s with core := s.core.map fun c => { c with volume := s.cfg.volume } }
 

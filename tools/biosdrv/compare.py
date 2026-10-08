@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 PROBE = os.environ.get("PROBE", os.path.join(ROOT, "biosdrv_probe"))
 BIOS = os.environ.get("BIOS", "/Users/matt/code/dingbat/tests/roms/gba_bios.bin")
-OUT = "/tmp/bd"
+OUT = os.environ.get("BD_OUT", "/tmp/bd")
 
 
 def regions_of(rom):

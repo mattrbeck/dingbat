@@ -1,0 +1,113 @@
+@title Doom (USA, Europe)
+@file Doom (U) [!].gba
+@game ADME
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+@save skip: no save before finishing a level. The pause menu has only OPTIONS / LOAD GAME / QUIT GAME and LOAD GAME lists four SLOT EMPTY, so the first write should come at the end of E1M1 (not reached). The level-skip cheat (pause, hold L+R, A B A A B B B A) jumps straight to E1M2 and writes nothing. Blocker for a frozen script: identical input leaves the player in different places on the three emulators (movement follows the game's rendered frame rate), so a route through E1M1 does not carry across emulators.
+# New game, episode 1, "I'm too young to die", walk around the E1M1 start area,
+# turn on the computer-map cheat (pause, hold L+R, B A A A A A A A) and look at the
+# automap, walk east into the brown-floored room, fire once, pause.
+# Notes: at f600 the logo is drawn more slowly on dingbat-bios (shorter stroke
+# than on mgba/nba). In E1M1 the view after identical input differs from about
+# f1758 on: the player is a little further forward on mgba, and by f2949 all three
+# stand in clearly different places. In a second session (UP held 150 frames from the
+# start, then pause) dingbat-bios and nba stood in the same place and mgba did not;
+# after more walking along walls dingbat-bios and nba drifted apart too. The pause-menu cursor DOWN at f2624 (6-frame
+# hold) was missed by mgba once (it opened OPTIONS while the others opened LOAD GAME).
+
+[new]
+wait 600
+wait 300
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press A
+wait 60
+checkpoint episode window=30
+press A
+wait 60
+press UP
+wait 10
+press UP
+wait 10
+press UP
+wait 10
+press UP
+wait 10
+checkpoint skill window=30
+press A
+wait 200
+checkpoint e1m1_start window=30
+press UP hold=60
+press START
+wait 40
+press B
+wait 30
+press SELECT
+wait 30
+press START
+wait 30
+press SELECT
+wait 30
+press SELECT
+wait 10
+press UP hold=120
+wait 10
+press LEFT hold=30
+wait 10
+press UP hold=120
+wait 10
+press SELECT
+wait 10
+press SELECT
+wait 10
+press START
+wait 30
+hold L+R
+wait 10
+press L+R+B
+wait 8
+press L+R+A
+wait 8
+press L+R+A
+wait 8
+press L+R+A
+wait 8
+press L+R+A
+wait 8
+press L+R+A
+wait 8
+press L+R+A
+wait 8
+press L+R+A
+wait 8
+release
+wait 30
+press START
+wait 30
+press SELECT
+wait 20
+press SELECT
+wait 10
+press RIGHT hold=60
+wait 10
+press SELECT
+wait 10
+press L hold=40
+wait 10
+press RIGHT hold=40
+press DOWN hold=30
+wait 5
+press SELECT
+wait 10
+press UP hold=150
+wait 10
+checkpoint e1m1_east_room window=30
+press A
+wait 30
+press START
+wait 40
+checkpoint pause_menu window=30
+press START
+wait 30

@@ -1,0 +1,104 @@
+@title Breath of Fire II (USA)
+@file Breath of Fire II (U) [!].gba
+@game AB2E
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game in file 1, name "AA". The game writes the new file to SRAM when
+# the options screen is closed (back at GAME START); then play the
+# grey-tinted prologue: young Ryu's room, the call from Ganer, up the stairs
+# into the church and talk to Ganer, back to the house. The first in-game
+# save (a church priest after the prologue) was not reached. [load]
+# continues file 1, which restarts the prologue.
+# Finding: through the whole grey prologue (from ~f5731) nba draws the
+# greyscale palette with a pink/violet tint where dingbat-bios and mgba
+# are neutral grey.
+[new]
+wait 600
+press START
+wait 300
+checkpoint title window=30 compare=text
+press START
+wait 120
+press A
+wait 200
+checkpoint file_select window=30 compare=text
+press A
+wait 300
+press A after=20
+press A after=20
+checkpoint naming window=30 compare=text
+press START after=30
+press A
+wait 300
+tap DOWN times=3 every=15 hold=4
+wait 10
+checkpoint options window=30 compare=text
+press A
+wait 300
+checkpoint game_start window=30 compare=text
+press A
+wait 120
+press A
+wait 600
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=90 every=20 hold=4
+press START
+wait 40
+press R
+wait 40
+press DOWN hold=40
+wait 10
+wait 60
+tap A times=90 every=20 hold=4
+tap A times=90 every=20 hold=4
+press B
+wait 30
+press UP hold=40
+wait 20
+press UP hold=60
+wait 60
+press RIGHT hold=40
+press UP hold=80
+wait 60
+press LEFT hold=40
+wait 60
+press LEFT hold=10
+press A
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+wait 300
+tap A times=30 every=60 hold=4
+wait 200
+press DOWN hold=40
+press RIGHT hold=80
+wait 20
+press LEFT hold=24
+press DOWN hold=100
+wait 20
+wait 60
+press DOWN hold=60
+wait 60
+press A
+wait 60
+tap A times=20 every=60 hold=4
+press LEFT hold=40
+wait 30
+checkpoint house window=30
+
+[load]
+wait 600
+press START
+wait 300
+press START
+wait 120
+checkpoint continue_menu window=30 compare=text
+press A
+wait 120
+checkpoint file_list window=30 compare=text
+press A
+wait 600
+tap A times=30 every=20 hold=4
+checkpoint resumed window=30

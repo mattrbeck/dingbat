@@ -27,8 +27,14 @@
 @   request latched on line 159 (another channel's) runs in V-blank (12).
 @ - Two channels granted on the same H-blank: the second's first read is
 @   the cycle after the first's last write (d = 2, 4, 7, 21 below: A starts
-@   at 981 + d). dingbat starts it two cycles later; that moves configs 24
-@   and 29 across the edge above, which is why 23-30 are not in the law.
+@   at 981 + d). dingbat started it two cycles later, which moved configs
+@   24, 27 and 29 across the edge above; since DMA_PENDING_CHAIN
+@   (2026-10-02) 23-28 and 30 are in the law, and 29 since
+@   REFILL_WINDOW_SPLIT: its bursts leave the CPU 3 cycles a line, and
+@   every burst starts on its H-blank's cycle even when the `blo` loop's
+@   refill straddles the request (20 bursts; dingbat held the grant behind
+@   the refill and the next fetch, started a line 2 cycles late and dropped
+@   the next: 18).
 @   A DMA1 preempting a running DMA2 on the next H-blank (13, 14) makes its
 @   first read at 2217 on the console, 2212 in dingbat.
 @

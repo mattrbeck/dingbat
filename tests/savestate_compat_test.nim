@@ -16,12 +16,13 @@
 ##
 ## Run with: nimble test_savestate_compat
 ## Regenerate the current-version corpus: <this binary> --write-corpus
-## (older entries can only come from an old checkout). A payload revision
+## (older entries can only come from an old checkout). Since container 8 the
+## corpus is written packed, as every stored state is. A payload revision
 ## inside container 7 gets its own entry beside the ones already there:
 ## `<this binary> --write-corpus gb gbrev6` writes <rom>.v7-gbrev6.state for
 ## the GB ROMs only.
 
-import std/[os, strutils, algorithm]
+import std/[os, strutils, algorithm, options, sequtils]
 import tables
 import dingbat/common/serialize
 import dingbat/common/scheduler
@@ -202,14 +203,14 @@ proc write_corpus(only = ""; suffix = "") =
       let emu = new_gba_for(rom)
       for _ in 0 ..< frames: emu.step_frame()
       let path = CORPUS_DIR / name_of(rom)
-      writeFile(path, emu.state_bytes(thumbnail = true))
+      writeFile(path, pack_state(emu.state_bytes(thumbnail = true)))
       echo "wrote ", path
   if only in ["", "gb"]:
     for (rom, frames) in GB_ROMS:
       let emu = new_gb_for(rom)
       for _ in 0 ..< frames: emu.step_frame()
       let path = CORPUS_DIR / name_of(rom)
-      writeFile(path, emu.state_bytes(thumbnail = true))
+      writeFile(path, pack_state(emu.state_bytes(thumbnail = true)))
       echo "wrote ", path
 
 proc file_version(data: string): uint32 =
@@ -328,15 +329,19 @@ proc run_roundtrip() =
     check(tw > 0 and th > 0 and px.len == tw * th * 2,
           "GBA " & rom & " thumbnail trailer")
     # The loader refuses a GBA state with no pending PPU event (step_frame's
-    # `while ppu.frame == 0` would never end); assert every writer makes one.
-    var ppu_events = 0
+    # `while ppu.frame == 0` would never end), and one with two links of the
+    # chain or an H-blank flag without its end of H-blank; assert every
+    # writer makes exactly one chain.
+    var links, flags, ends = 0
     for ev in emu.scheduler.events:
-      if ev.kind in {etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag,
-                     etPPUEndHBlank}:
-        inc ppu_events
-    check(ppu_events > 0,
-          "GBA " & rom & " carries a pending PPU event at a frame boundary",
-          "got " & $ppu_events)
+      case ev.kind
+      of etPPUStartLine, etPPUStartHBlank: inc links
+      of etPPUEndHBlank: inc links; inc ends
+      of etPPUSetHBlankFlag: inc flags
+      else: discard
+    check(links == 1 and flags <= ends,
+          "GBA " & rom & " carries one PPU event chain at a frame boundary",
+          "got " & $links & " links, " & $flags & " flag events")
   for (rom, frames) in GB_ROMS:
     let emu = new_gb_for(rom)
     for _ in 0 ..< frames: emu.step_frame()
@@ -754,6 +759,134 @@ proc run_rejections() =
   check(not emu.load_state_bytes(good[0 ..< good.len div 2]), "truncated refused")
   check(not emu.load_state_bytes("not a state at all"), "garbage refused")
   check(emu.state_payload() == before, "emulator untouched after every refusal")
+
+proc run_hostile_fields() =
+  ## A file is outside input: the payload hash is an integrity check, so a
+  ## state can say anything. Every field the core later uses as an index, a
+  ## shift or a divisor is refused at load, never handed on, because the
+  ## optimised core is quirky (gba.nim): past a failed check it goes on, and
+  ## a wild index is a SIGSEGV, not an IndexDefect. Each value is written by
+  ## the real saver from a machine holding it, then offered to another one,
+  ## which has to refuse it and stay as it was. tools/statefuzz.nim finds
+  ## these; each is one it found, or the audit that followed.
+  echo "hostile fields: a state's indexes, shifts and divisors are range-checked"
+  let tmp = getTempDir()
+  let base_rom = readFile(ROM_DIR / GBA_ROMS[0][0])
+  proc cart(marker: string): string =
+    if marker.len == 0: return ROM_DIR / GBA_ROMS[0][0]
+    result = tmp / ("dingbat_hostile_" & marker & ".gba")
+    writeFile(result, base_rom & marker & "\0")
+  proc offer(marker, what: string; poke: proc (e: GBA)) =
+    let path = cart(marker)
+    let src = new_gba("", path, run_bios = false, use_hle = true)
+    src.post_init()
+    for _ in 0 ..< 30: src.step_frame()
+    poke(src)
+    let img = src.state_bytes()
+    let dst = new_gba("", path, run_bios = false, use_hle = true)
+    dst.post_init()
+    for _ in 0 ..< 30: dst.step_frame()
+    let before = dst.state_payload()
+    check(not dst.load_state_bytes(img) and dst.state_payload() == before,
+          what & " is refused, emulator untouched")
+  offer("", "a FIFO read position past the FIFO",
+        proc (e: GBA) = e.apu.dma_channels.positions[0] = 0x10000006)
+  offer("", "a negative FIFO fill",
+        proc (e: GBA) = e.apu.dma_channels.sizes[1] = -5)
+  offer("", "a pipeline position past its two words",
+        proc (e: GBA) = e.cpu.pipeline.pos = 5)
+  offer("", "a square duty past PSG_DUTY",
+        proc (e: GBA) = e.apu.channel2.duty = 9)
+  offer("", "a sweep shift of 40",
+        proc (e: GBA) = e.apu.channel1.shift = 40)
+  offer("", "a frequency of 0x800 (a zero period)",
+        proc (e: GBA) = e.apu.channel3.frequency = 0x800)
+  offer("", "a wave bank past the wave RAM",
+        proc (e: GBA) = e.apu.channel3.wave_ram_bank = 2)
+  offer("", "a noise clock shift of 30",
+        proc (e: GBA) = e.apu.channel4.clock_shift = 30)
+  offer("", "an RTC read with no bits",
+        proc (e: GBA) =
+          e.bus.gpio.rtc.state = rtcReading
+          e.bus.gpio.rtc.buffer.size = 0)
+  offer("", "an RTC bias of 2^62 seconds",
+        proc (e: GBA) = e.bus.gpio.rtc.bias = 1'i64 shl 62)
+  offer("", "an affine reference point that overflows",
+        proc (e: GBA) = e.ppu.bgref_int[0][1] = high(int32))
+  offer("", "a second PPU event chain",
+        proc (e: GBA) = e.scheduler.schedule(100, etPPUStartLine))
+  offer("FLASH_V", "a second bank on a one-bank flash",
+        proc (e: GBA) = Flash(e.storage).bank = 1)
+  offer("FLASH_V", "a bank-set pending on a one-bank flash",
+        proc (e: GBA) = Flash(e.storage).state.incl(fsSetBank))
+  offer("FLASH_V", "a 1 Mbit flash type over 64 KB",
+        proc (e: GBA) = Flash(e.storage).flash_type = stFLASH1M)
+  offer("EEPROM_V", "a 64 Kbit EEPROM over a 512-byte buffer",
+        proc (e: GBA) =
+          let ep = EEPROM(e.storage)
+          ep.eeprom_size = some(eeprom64k)
+          ep.memory.setLen(0x200))
+  offer("EEPROM_V", "an EEPROM read at bit 64",
+        proc (e: GBA) = EEPROM(e.storage).read_bits = 64)
+  for m in ["FLASH_V", "EEPROM_V"]:
+    removeFile(tmp / ("dingbat_hostile_" & m & ".gba"))
+    removeFile(tmp / ("dingbat_hostile_" & m & ".sav"))
+
+  # The scheduler drops an event rather than write past its buffer (only a
+  # corrupt state could fill it)
+  let s = new_scheduler()
+  for i in 0 ..< MAX_EVENTS + 8: s.schedule(1000 + i, etPPUStartLine)
+  check(toSeq(s.events).len == MAX_EVENTS,
+        "a full scheduler drops an event instead of overrunning its buffer")
+
+proc run_packed() =
+  ## pack_state is how every stored state is written (.state files, the
+  ## web's IndexedDB and Drive, iOS): header readable as is, body deflated.
+  echo "packed: stored states are deflated, and read back the same"
+  let emu = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: emu.step_frame()
+  let plain = emu.state_bytes(thumbnail = true)
+  let packed = pack_state(plain)
+  check(is_packed_state(packed) and not is_packed_state(plain), "flag marks the packed image")
+  check(packed.len * 4 < plain.len,
+        "a GBA state packs to under a quarter", $plain.len & " -> " & $packed.len)
+  check(packed[0 ..< 14] == plain[0 ..< 14] and packed[16 ..< 32] == plain[16 ..< 32],
+        "magic, version, core, revision, ROM identity and payload length stay " &
+        "readable in the header")
+  check(unpack_state(packed) == plain, "unpack gives the plain image back")
+  check(pack_state(packed) == packed, "packing twice is packing once")
+  check(unpack_state(plain) == plain, "an older, plain state passes through")
+  let before = emu.state_payload()
+  check(emu.load_state_bytes(packed) and emu.state_payload() == before,
+        "a packed state loads")
+  check(emu.state_is_for(packed), "a packed state names its cart (whole-ROM trailer inside)")
+  check(parse_state_thumbnail(packed) == parse_state_thumbnail(plain) and
+        parse_state_thumbnail(packed).w > 0, "its thumbnail reads")
+  check(parse_state_whole_rom(packed) == parse_state_whole_rom(plain),
+        "its whole-ROM trailer reads")
+  var damaged = packed
+  damaged[STATE_HEADER_SIZE + 40] = char(uint8(damaged[STATE_HEADER_SIZE + 40]) xor 0x55'u8)
+  check(not emu.load_state_bytes(damaged) and last_state_reject_kind == srkCorrupt and
+        emu.state_payload() == before, "a damaged body is refused, emulator untouched")
+  check(not emu.load_state_bytes(packed[0 ..< packed.len div 2]) and
+        emu.state_payload() == before, "a cut-off packed state is refused")
+  var newer = packed
+  newer[8] = char(uint8(STATE_VERSION) + 1)
+  check(not emu.load_state_bytes(newer) and last_state_reject_kind == srkTooNew,
+        "a newer container is still refused as newer")
+  let g = new_gb_for(GB_ROMS[0][0])
+  for _ in 0 ..< 30: g.step_frame()
+  let gplain = g.state_bytes(thumbnail = true)
+  let gpacked = pack_state(gplain)
+  check(gpacked.len < gplain.len and g.load_state_bytes(gpacked) and
+        g.state_is_for(gpacked), "a GB state packs and loads",
+        $gplain.len & " -> " & $gpacked.len)
+  let dir = getTempDir() / "dingbat_packed_test"
+  createDir(dir)
+  let path = dir / "slot.state"
+  check(emu.save_state(path, thumbnail = true) and is_packed_state(readFile(path)) and
+        emu.load_state(path), "save_state writes a packed file, load_state reads it")
+  removeDir(dir)
 
 # 4. The GBA rev 3 -> 4 IntrWait migration, the only one that rewrites guest
 # memory. Shapes:
@@ -1424,6 +1557,8 @@ when isMainModule:
   run_whole_rom()
   run_cart_shapes()
   run_rejections()
+  run_hostile_fields()
+  run_packed()
   run_intr_wait_migration()
   run_gba_inflight()
   run_corpus()

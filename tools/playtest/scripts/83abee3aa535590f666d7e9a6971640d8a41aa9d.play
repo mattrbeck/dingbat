@@ -2,36 +2,41 @@
 @file Onimusha Tactics (U).gba
 @game A6OE
 @chip EEPROM (EEPROM_V + SRAM_V strings)
+@frozen dingbat-bios,mgba,nba
 
 # New game, skip the intro and the first scenes, decline the tutorial, then
 # use the in-battle Save (slot 1) on the first player phase of Episode 1.
-
 [new]
-mash START until text "Load Game" timeout=1500 every=30
+# mash START until text 'Load Game' timeout=1500 every=30  [taps dingbat-bios:9 mgba:9 nba:9]
+tap START times=9 every=30 hold=4
 wait 30
-checkpoint title_menu
+checkpoint title_menu window=30
 press A
-until blank timeout=600 every=5
-until notblank timeout=1200 every=10
-# "Long, long ago..." intro: START skips it
+# until blank timeout=600 every=5  [reached dingbat-bios+60 mgba+60 nba+65]
+wait 69
+# until notblank timeout=1200 every=10  [reached dingbat-bios+190 mgba+190 nba+200]
+wait 204
 wait 60
 press START
-until text "Episode" timeout=600 every=10
+# until text Episode timeout=600 every=10  [reached dingbat-bios+140 mgba+140 nba+120]
+wait 144
 wait 180
-checkpoint episode
+checkpoint episode window=30
 press START
-until blank timeout=600 every=5
-until notblank timeout=1200 every=10
+# until blank timeout=600 every=5  [reached dingbat-bios+45 mgba+45 nba+50]
+wait 54
+# until notblank timeout=1200 every=10  [reached dingbat-bios+70 mgba+70 nba+70]
+wait 74
 wait 90
-# opening scene: START skips to the mission screen
 press START
-until text "Death of" timeout=600 every=10
+# until text 'Death of' timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 20
-checkpoint mission
+checkpoint mission window=30
 press A
-until text "how to" timeout=600 every=10
+# until text 'how to' timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+20]
+wait 24
 wait 20
-# "Want to learn how to fight?" -> No
 press DOWN after=10
 press A after=30
 wait 40
@@ -41,42 +46,52 @@ press A after=90
 press A after=90
 press A after=90
 wait 180
-mash START until text "End Phase" timeout=1500 every=60
+# mash START until text 'End Phase' timeout=1500 every=60  [taps dingbat-bios:6 mgba:6 nba:6]
+tap START times=6 every=60 hold=4
 wait 10
-checkpoint battle_menu
+checkpoint battle_menu window=30
 press DOWN after=20
 press A
-until notblank timeout=600 every=10
-until text "Empty" timeout=600 every=10
+# until notblank timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+# until text Empty timeout=600 every=10  [reached dingbat-bios+90 mgba+90 nba+90]
+wait 94
 wait 30
-checkpoint save_slots
+checkpoint save_slots window=30
 press A
-until text "Here" timeout=300 every=5
+# until text Here timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 20
-# the prompt defaults to No
 press UP after=20
 press A
-until text "completed" timeout=900 every=5
+# until text completed timeout=900 every=5  [reached dingbat-bios+185 mgba+195 nba+175]
+wait 199
 checkpoint saved window=0
 
 [load]
-mash START until text "Load Game" timeout=1500 every=30
+# mash START until text 'Load Game' timeout=1500 every=30  [taps dingbat-bios:8 mgba:8 nba:8]
+tap START times=8 every=30 hold=4
 wait 30
-checkpoint title_menu
-# with a save the cursor starts on Load Game
+checkpoint title_menu window=30
 press A
-until blank timeout=600 every=5
-until text "Playtime" timeout=900 every=10
+# until blank timeout=600 every=5  [reached dingbat-bios+60 mgba+60 nba+65]
+wait 69
+# until text Playtime timeout=900 every=10  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
 wait 20
-checkpoint load_slots
+checkpoint load_slots window=30
 press A after=40
-until text "data" timeout=300 every=5
+# until text data timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 press UP after=20
 press A after=10
-until blank timeout=600 every=5
-until notblank timeout=900 every=10
+# until blank timeout=600 every=5  [reached dingbat-bios+120 mgba+120 nba+120]
+wait 124
+# until notblank timeout=900 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 120
-checkpoint resumed
+checkpoint resumed window=30
 press START after=40
-until text "End Phase" timeout=120 every=5
-checkpoint resumed_menu
+# until text 'End Phase' timeout=120 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+checkpoint resumed_menu window=30

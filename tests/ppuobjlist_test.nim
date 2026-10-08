@@ -469,8 +469,24 @@ proc test_nonbus_writers(emu: GBA) =
   for line in 0 .. 159:
     if ppu.obj_line_mask[line][0] != 0 or ppu.obj_line_mask[line][1] != 0:
       pre_nonempty = true
+  # RegisterRamReset runs as stub-BIOS code (hle_unc.nim), and its
+  # dispatcher reads the number from the caller's `swi`: execute a real
+  # `swi 0x01` from IWRAM and let the CPU run the routine back out to the
+  # `b .` after it
+  const at = 0x03000100'u32
+  emu.bus.write_word_internal(at, 0xEF010000'u32)       # swi 0x01 (ARM)
+  emu.bus.write_word_internal(at + 4, 0xEAFFFFFE'u32)   # b .
+  emu.cpu.cpsr.thumb = false
   emu.cpu.r[0] = 0x10'u32                 # bit 4 = OAM
-  emu.cpu.hle_swi(0x01'u32)
+  emu.cpu.set_reg(15, at)
+  var returned = false
+  for i in 0 ..< 200_000:
+    emu.cpu.tick()
+    if emu.cpu.r[15] >= at + 4 and emu.cpu.r[15] < at + 16:
+      returned = true
+      break
+  check(returned, "RegisterRamReset(OAM) returned to its caller",
+        "the routine never came back out of the BIOS")
   ppu.latch_oam()                         # the next line start takes it
   var oam_cleared = true
   for b in ppu.oam:

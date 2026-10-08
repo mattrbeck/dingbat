@@ -1,0 +1,61 @@
+@title TOCA World Touring Cars (Europe)
+@file TOCA World Touring Cars (E) [!].gba
+@game ATQP
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Quick Race at Brands Hatch with the default Lexus GS300: the grid, two
+# stretches at full throttle (a short steer right), the pause menu, then
+# back to the race. The game writes its EEPROM (71 bytes, settings and lap
+# records) on the way; [load] boots it to the Quick Race screen.
+# Regression guard: before 2026-10-02 an S-bit write to r15 in System mode
+# (the run-time library's `movs pc, lr`) restored a stale SPSR and came back
+# in Thumb state (docs/playtest-bugs.md section 46): dingbat hung on the way
+# into the race.
+
+[new]
+wait 600
+wait 300
+checkpoint title window=30
+press START
+wait 150
+checkpoint main_menu window=30
+press A
+wait 200
+checkpoint venue window=30
+press A
+wait 300
+checkpoint quick_race window=30
+press A
+wait 400
+checkpoint loading window=30
+press A
+wait 300
+checkpoint grid window=30
+hold A
+wait 400
+checkpoint racing window=30
+hold A+RIGHT
+wait 30
+hold A
+wait 300
+checkpoint racing_late window=30
+release
+press START
+wait 60
+checkpoint paused window=30
+press A
+hold A
+wait 200
+release
+
+[load]
+wait 900
+checkpoint title window=30
+press START
+wait 150
+checkpoint main_menu window=30
+press A
+wait 200
+press A
+wait 300
+checkpoint quick_race window=30

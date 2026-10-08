@@ -1,0 +1,73 @@
+@title Rayman 3 (USA)
+@file Rayman 3 - Hoodlum Havoc (U) (M3).gba
+@game AYZE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+@save skip: the game writes a save slot only when a level is finished; quitting from the pause menu (done here) writes just the settings (15 bytes) and the slot list still reads EMPTY x3 on a reload. Level 1 (Forgotten Forest) was not finished: past the first ledge Rayman stops at the root cave and no input moved him on in two sessions.
+
+# Intro skipped, title, English, Single Player, first slot, story text
+# skipped into level 1: run right, jump onto the first ledge (first lum),
+# drop down, pause > QUIT > YES back to the main menu.
+# Findings: the three emulators are a frame or two apart from the intro on
+# (f600 Murfy's wing animation differs on all three; "PRESS START" shows
+# on dingbat-bios and nba at f844 but not on mgba). In the live session the
+# decorative butterflies in level 1 sat in different places on each (f1974);
+# the frozen replay shows level1 and first_lum identical on all three.
+# nba writes an 8 KB EEPROM file, the others 512 bytes.
+[new]
+wait 600
+press START hold=10
+wait 200
+# until text 'PRESS START' timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+0]
+wait 14
+wait 20
+checkpoint title window=30 compare=text
+press START hold=10
+wait 120
+checkpoint language window=30
+press A hold=10
+wait 180
+checkpoint main_menu window=30 compare=text
+press A hold=10
+wait 120
+checkpoint slots window=30 compare=text
+press A hold=10
+wait 120
+checkpoint story_text window=30
+press START hold=10
+wait 240
+checkpoint level1 window=30 compare=none
+press START hold=10
+wait 60
+checkpoint pause window=30 compare=text
+press A hold=10
+wait 30
+press RIGHT hold=90
+press RIGHT hold=120
+hold RIGHT
+press A hold=15
+wait 60
+release
+hold RIGHT
+wait 60
+press A hold=15
+wait 45
+press A hold=15
+wait 45
+release
+wait 60
+checkpoint first_lum window=30 compare=none
+press START hold=10
+wait 60
+press DOWN hold=10
+wait 20
+press DOWN hold=10
+wait 20
+press A hold=10
+wait 120
+press UP hold=10
+wait 20
+checkpoint quit_prompt window=30 compare=text
+press A hold=10
+wait 300
+checkpoint after_quit window=30 compare=text

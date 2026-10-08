@@ -1,0 +1,60 @@
+@title Yu-Gi-Oh! - The Eternal Duelist Soul (USA)
+@file Yu-Gi-Oh! - The Eternal Duelist Soul (U) [!].gba
+@game AY5E
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+# New Game, Tea's intro, pick the red starter deck. The game writes its SRAM save right
+# after the intro (before the first duel), so [new] ends on the first duel's field and
+# [load] Continues into the main menu (Campaign / Link Battle / Deck Edit ...) and opens Deck Edit.
+# Notes: at f3106 (first duel, opening hand) mgba deals a different hand (four yellow
+# cards and a green one) from dingbat-bios and nba (green, three yellow, pink), and mgba is
+# still showing "Draw Phase": the deck shuffle differs on mgba. dingbat-bios and nba agree.
+# That is why the duel itself is not played here: the same input would play a different duel on mgba.
+# At f1466 the fade-out after picking the deck is at a different step on each emulator.
+# Title screen (f854/f884, both [new] and [load]): mgba and nba are pixel-identical,
+# but dingbat-bios differs on every row. The green grid background is offset by about
+# one pixel horizontally (shifting dingbat-bios by 1 px cuts the differing pixels from
+# 13370 to 10577, so it is not only a shift), and the logo and menu text look the same.
+# Explained 2026-10-02 (docs/playtest-bugs.md, "Yu-Gi-Oh! ... the title a frame late"):
+# a boot load loop (f575-582, EWRAM ldrb from gamepak code) costs dingbat 72.6
+# cycles an iteration, mgba 64.8 (below the bus floor), so dingbat is a frame
+# behind from f582; the grid is mgba's previous frame and the emblem's flame
+# rests 2 px right. Same in [load] with any save.
+
+[new]
+wait 600
+# until notblank timeout=1500 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 200
+checkpoint title window=30
+press A
+wait 120
+tap A times=15 every=20 hold=4
+checkpoint deck_choice window=30
+press A
+wait 60
+wait 60
+tap A times=20 every=20 hold=4
+tap A times=20 every=20 hold=4
+tap A times=30 every=20 hold=4
+checkpoint start_duel window=30
+wait 120
+checkpoint duel_field window=30
+
+[load]
+wait 600
+# until notblank timeout=1500 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 200
+checkpoint continue_title window=30
+press A
+wait 150
+wait 30
+checkpoint resumed_menu window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press A
+wait 90
+checkpoint deck_edit window=30

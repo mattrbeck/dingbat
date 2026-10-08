@@ -1,0 +1,120 @@
+@title Dragon Ball Z - Supersonic Warriors (USA)
+@file Dragon Ball Z - Supersonic Warriors (U).gba
+@game AZJE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Option mode > Setting: difficulty NORMAL -> EASY, exit (the game saves the setting), then
+# Training > Practice with Goku and land a few hits. [load] opens Setting again and shows EASY.
+# Notes: dingbat-bios and mgba keep a 512-byte EEPROM file, nba an 8192-byte one.
+# In the live [load] session nba booted its own save and showed difficulty NORMAL
+# (dingbat-bios and mgba showed EASY), so on nba the setting did not come back.
+# nba runs a few frames ahead of the other two through most menu transitions.
+
+[new]
+wait 600
+# until notblank timeout=1200 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 120
+wait 300
+# until text START timeout=1500 every=10  [reached dingbat-bios+100 mgba+100 nba+90]
+wait 104
+wait 30
+checkpoint title window=30
+press START
+wait 90
+wait 120
+checkpoint story_mode window=30
+press RIGHT hold=8
+wait 60
+press RIGHT hold=10
+wait 90
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+checkpoint option_mode window=30
+press A
+wait 90
+wait 60
+checkpoint option_menu window=30
+press A
+wait 90
+press LEFT hold=8
+wait 30
+checkpoint setting_easy window=30
+press B
+wait 90
+wait 60
+checkpoint option_after_save window=30
+press B
+wait 90
+press UP hold=8
+wait 60
+press UP hold=8
+wait 60
+press UP hold=8
+wait 60
+wait 30
+press A
+wait 120
+press UP hold=8
+wait 30
+press A
+wait 120
+checkpoint team_select window=30
+press A
+wait 60
+press START
+wait 90
+press A
+wait 120
+checkpoint training_menu window=30
+press A
+wait 300
+checkpoint training_fight window=30
+press RIGHT hold=40
+tap A times=8 every=12 hold=4
+tap B times=6 every=15 hold=4
+wait 60
+checkpoint training_hit window=30
+
+[load]
+wait 600
+# until notblank timeout=1200 every=10  [reached dingbat-bios+0 mgba+0 nba+10]
+wait 14
+wait 120
+wait 300
+# until text START timeout=1500 every=10  [reached dingbat-bios+90 mgba+90 nba+90]
+wait 94
+wait 30
+press START
+wait 210
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+press DOWN hold=8
+wait 60
+wait 30
+press A
+wait 150
+press A
+wait 90
+checkpoint setting_loaded window=30
+press B
+wait 90
+checkpoint option_menu_loaded window=30

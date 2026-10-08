@@ -1,0 +1,39 @@
+@title Kirby - Nightmare in Dream Land (USA)
+@file Kirby - Nightmare in Dreamland (U) [!].gba
+@game A7KE
+@chip SRAM
+
+# Pick FILE1 (creates the file), start the one-player adventure, arrive in the
+# Vegetable Valley hub. The file select then shows FILE1 as "Water Drop".
+
+[new]
+mash START until text "FILE SELECT" timeout=1800 every=30
+wait 60
+checkpoint file_select_empty window=0
+press A
+until text "START GAME" timeout=300 every=5
+wait 30
+checkpoint game_select window=0
+press A
+until text "PLAYER" timeout=300 every=5
+wait 30
+press A
+until text "00000000" timeout=900 every=10
+wait 120
+checkpoint hub window=0
+
+[load]
+mash START until text "FILE SELECT" timeout=1800 every=30
+until text "Drop" timeout=300 every=5
+wait 60
+checkpoint file_select_saved window=0
+press A
+until text "START GAME" timeout=300 every=5
+wait 30
+press A
+until text "PLAYER" timeout=300 every=5
+wait 30
+press A
+until text "00000000" timeout=900 every=10
+wait 120
+checkpoint hub window=0

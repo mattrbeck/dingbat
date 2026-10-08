@@ -1,0 +1,97 @@
+@title F-Zero - Maximum Velocity (USA, Europe)
+@file F-Zero - Maximum Velocity (UE) [!].gba
+@game AFZE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New ENTRY named "AA" (the game writes SRAM when the entry is created),
+# Grand Prix / Pawn / Beginner with Hot Violet, drive the start of Bianca
+# City (brake through the countdown, then accelerate), pause, GIVE UP,
+# retire. [load]: the entry list shows "AA", select it, main menu, machine.
+# Finding: nba's frame hash differs from dingbat-bios/mgba on every screen
+# with the scrolling Earth / mode-7 track background (from f786 on): the
+# affine background sits a couple of lines off and the race timer reads
+# one hundredth lower (0'00"66 vs 0'00"68 at f2848). Text-only screens
+# (series/class select) are identical on all three.
+[new]
+wait 600
+checkpoint title window=30
+press START
+wait 120
+wait 30
+checkpoint entry_screen window=30
+press A
+wait 60
+press A
+wait 60
+press A after=20
+press A after=20
+checkpoint name_entry window=30
+press START after=30
+press A
+wait 90
+press A
+wait 90
+checkpoint main_menu window=30
+press A
+wait 60
+press A
+wait 60
+checkpoint machine_select window=30
+press A
+wait 60
+press A
+wait 60
+press A
+wait 120
+press A
+wait 300
+# until notext CIRQUIT timeout=900 every=10  [reached dingbat-bios+10 mgba+20 nba+20]
+wait 24
+wait 60
+wait 240
+checkpoint race_start window=30
+wait 200
+hold B
+wait 300
+hold A
+wait 60
+wait 60
+wait 60
+checkpoint racing window=30
+wait 60
+press A+LEFT hold=20
+wait 40
+release
+press START after=30
+checkpoint pause_menu window=30 compare=text
+press DOWN after=10
+press A
+wait 120
+press A
+wait 60
+press START
+wait 90
+checkpoint you_lost window=30 compare=text
+wait 180
+press A
+wait 120
+checkpoint results window=30 compare=text
+press A
+wait 150
+wait 240
+
+[load]
+wait 600
+checkpoint title window=30
+press START
+wait 150
+checkpoint entry_list window=30
+press A
+wait 90
+checkpoint main_menu window=30
+press A
+wait 60
+press A
+wait 60
+checkpoint machine_select window=30

@@ -7,12 +7,16 @@
 ## (a state that loads and faults later is the same bug).
 ##
 ## Build (or `nimble statefuzz_build`):
-##   nim c -d:test_harness -d:release --path:src -o:statefuzz tools/statefuzz.nim
+##   nim c -d:test_harness -d:release -d:gba_quirky=false --path:src -o:statefuzz tools/statefuzz.nim
+## (-d:gba_quirky=false: a quirky core goes on past a failed check, so a stray
+## index is a SIGSEGV that ends the run instead of a Defect it counts)
 ##
 ## `sweep` sets every payload byte in turn and exits non-zero on any
 ## uncontained Defect, so it is usable as a gate:
 ##   ./statefuzz roms/some.gb  sweep 255
 ##   ./statefuzz roms/some.gba sweep 255
+## A sweep takes a payload offset range after the post-frame count, to split
+## it over processes: `sweep 255 4 0 100000`.
 
 import std/[os, strutils, random, strformat]
 import dingbat/common/serialize
@@ -170,7 +174,11 @@ when isMainModule:
     var bad = 0
     var refused = 0
     let total = base.len - STATE_HEADER_SIZE
-    for off in STATE_HEADER_SIZE ..< base.len:
+    # Optional payload offset range [lo, hi), to shard a sweep over processes
+    # (a GBA state is ~500k offsets, hours on one core)
+    let lo = if args.len > 4: parseInt(args[4]) else: 0
+    let hi = if args.len > 5: min(parseInt(args[5]), total) else: total
+    for off in STATE_HEADER_SIZE + lo ..< STATE_HEADER_SIZE + hi:
       if base[off] == bval: continue
       var mutant = base
       mutant[off] = bval
@@ -198,7 +206,7 @@ when isMainModule:
       if (off - STATE_HEADER_SIZE) mod 20000 == 0:
         echo &"  ... {poff}/{total}"
     echo &"\nSWEEP {rom} byte=0x{toHex(int(uint8(bval)), 2)} " &
-         &"{total} offsets, refused {refused}, UNCONTAINED {bad}"
+         &"offsets {lo}..<{hi} of {total}, refused {refused}, UNCONTAINED {bad}"
     quit(if bad > 0: 1 else: 0)
 
   var accepted = 0      # loaded without raising

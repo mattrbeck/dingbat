@@ -1598,7 +1598,8 @@ const AgbeegSha1 = "4949798dde70f46d24bca5ee9c890cfa7c5101d8"
 proc build_gba_misc_tests(): seq[TestDef] =
   ## ROMs that print their verdicts and ship no reference image, scored on a
   ## pinned hash of the frame whose every verdict reads "Passed" (checked by
-  ## eye when pinned; the frame shows no clock or other varying value).
+  ## eye when pinned; the frame shows no clock or other varying value), plus
+  ## this repo's own reference-frame ROMs at the end.
   # gba-rtc-test r2: 17 pin-level tests of the cart's Seiko S-3511A (the RTC
   # state machine: CS/SCK framing, SIO sampling, read looping, status write
   # commit points, in-pin levels). The cartridge build, not the multiboot one.
@@ -1661,6 +1662,21 @@ proc build_gba_misc_tests(): seq[TestDef] =
       no_save: true,
       agbeeg_check: check,
     ))
+
+  # This repo's semiobjwin.gba (tests/roms/semiobjwin.s): a semi-transparent
+  # OBJ alpha-blends with a 2nd target under a window whose colour-effect bit
+  # is clear, and nothing else blends there. Scored against a reference frame
+  # (tests/roms/semiobjwin_expected.png) that both reference emulators draw
+  # identically in 5-bit colour; not hardware-photographed.
+  result.add(TestDef(
+    name: "dingbat/semiobjwin",
+    rom_path: "tests/roms/semiobjwin.gba",
+    mode: tmScreenshot,
+    timeout: 400,          # the picture is static; 400 clears a --bios boot
+    color: true,
+    no_save: true,
+    expected_png: "tests/roms/semiobjwin_expected.png",
+  ))
 
 proc build_hwverified_tests(): seq[TestDef] =
   ## This repo's own proof ROMs (tests/roms/hwverified), each carrying the

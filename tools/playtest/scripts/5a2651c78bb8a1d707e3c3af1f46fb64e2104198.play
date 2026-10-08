@@ -1,0 +1,116 @@
+@title Crash Bandicoot - The Huge Adventure (USA)
+@file Crash Bandicoot - The Huge Adventure (U) [!].gba
+@game ACQE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# New Game, skip the story, enter Jungle Jam (level 1), run and spin a few
+# crates and enemies, pause > Warp Room, START (Load-Save) > Save Game >
+# slot 1; the save menu then shows slot 1 filled (0%).
+# [load]: title > Load Game shows slot 1, load it (warp room), enter level 1.
+# Findings: nba writes an 8192-byte file for this 4Kbit EEPROM (dingbat-bios,
+# mgba: 512 bytes, same 14 data bytes); booted with it, nba shows every Load
+# Game slot EMPTY and stays on the load screen, so nba's [load] checkpoints
+# differ. Title/menu screens have blink/rotation phase differences (nba on the
+# title logo, mgba on the save-menu cursor at f3895), hence compare=text.
+
+[new]
+wait 600
+wait 300
+wait 400
+press START
+wait 120
+wait 120
+checkpoint title window=30 compare=text
+press A
+wait 180
+checkpoint story window=30
+press START
+wait 240
+checkpoint warp_room window=30 compare=text
+press A
+wait 300
+checkpoint level1 window=30
+hold RIGHT
+wait 40
+press RIGHT+B
+hold RIGHT
+wait 60
+press RIGHT+A hold=15
+hold RIGHT
+wait 60
+release
+hold RIGHT
+wait 30
+press RIGHT+B
+hold RIGHT
+wait 30
+press RIGHT+B
+hold RIGHT
+wait 40
+release
+hold RIGHT
+wait 60
+release
+press B
+wait 30
+hold RIGHT
+wait 40
+release
+press B
+wait 30
+press B
+wait 30
+hold RIGHT
+wait 50
+release
+hold RIGHT
+wait 10
+press RIGHT+B
+hold RIGHT
+wait 60
+release
+press B
+wait 30
+hold RIGHT
+wait 80
+release
+checkpoint running window=30 compare=none
+press START
+wait 60
+checkpoint pause_menu window=30
+tap DOWN times=3 every=20 hold=4
+wait 10
+press A
+wait 240
+press START
+wait 120
+checkpoint save_menu window=30 compare=text
+tap DOWN times=2 every=20 hold=4
+wait 10
+press A
+wait 90
+checkpoint save_slots window=30 compare=text
+press A
+wait 90
+tap UP times=2 every=20 hold=4
+wait 10
+press A
+wait 90
+checkpoint saved window=0 compare=text
+
+[load]
+wait 1300
+press START
+wait 240
+press DOWN
+wait 20
+press A
+wait 120
+checkpoint load_slots window=30 compare=text
+press A
+wait 300
+checkpoint resumed window=30 compare=text
+press A
+wait 300
+checkpoint resumed_level window=30

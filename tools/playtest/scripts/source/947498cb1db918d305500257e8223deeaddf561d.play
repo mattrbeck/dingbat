@@ -1,0 +1,69 @@
+@title Yoshi Topsy-Turvy (USA)
+@file Yoshi Topsy-Turvy (U).gba
+@game KYGE
+@chip EEPROM + tilt sensor
+
+# With no save the game makes you calibrate the tilt sensor before the title.
+# The drivers cannot tilt, so every step is confirmed at the resting reading;
+# answering Yes to "Is the ball moving the way you want?" writes the
+# calibration to EEPROM (the stored readings are whatever each emulator's
+# idle sensor returns). With a save the game skips calibration and asks which
+# system you are using instead.
+
+[new]
+wait 600
+checkpoint warning window=0
+press A
+until text "Caution" timeout=600 every=10
+wait 60
+checkpoint caution window=0
+press A
+until text "slight angle" timeout=600 every=10
+wait 60
+press A
+until text "tilt techniques" timeout=600 every=10
+wait 60
+press A
+until text "Step One" timeout=600 every=10
+wait 60
+checkpoint step_one window=0
+press A
+until text "stand up straight" timeout=600 every=10
+wait 60
+press A
+until text "Tilt until" timeout=600 every=10
+wait 60
+checkpoint tilt_right window=0
+press A
+until text "Step Two" timeout=600 every=10
+wait 60
+press A
+until text "stand up straight" timeout=600 every=10
+wait 60
+press A
+until text "Tilt until" timeout=600 every=10
+wait 60
+press A
+until text "the way you want" timeout=600 every=10
+wait 60
+checkpoint confirm window=0
+press A
+until text "Nintendo" timeout=600 every=10
+until text "PRESS STAR" timeout=1500 every=10
+wait 30
+checkpoint title window=0 compare=text
+
+[load]
+wait 600
+press A
+until text "Choose the system" timeout=600 every=10
+wait 60
+checkpoint choose_system window=0
+press A
+until text "PRESS STAR" timeout=1500 every=10
+wait 60
+press START
+until text "New Game" timeout=300 every=5
+wait 60
+# the title art animates behind the menu: recorded, not judged
+checkpoint main_menu window=0 compare=none

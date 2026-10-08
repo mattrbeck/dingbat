@@ -2,6 +2,7 @@
 @file Pokemon Mystery Dungeon - Red Rescue Team (U).gba
 @game B24E
 @chip FLASH1M
+@frozen dingbat-bios,mgba,nba
 
 # New game: A through the personality quiz (first answer every time), keep
 # the default partner and its name, name yourself "aa", A through the story
@@ -9,74 +10,88 @@
 # the player's Pokemon, and the dungeon layout depend on timing, so they
 # differ between emulators; loading the quicksave restores the saving
 # emulator's team and layout everywhere.
-
 [new]
 wait 600
 press START
-mash START until text "New Game" timeout=3000 every=60
+# mash START until text 'New Game' timeout=3000 every=60  [taps dingbat-bios:40 mgba:40 nba:40]
+tap START times=40 every=60 hold=4
 wait 60
-checkpoint main_menu
-mash A until text "nickname" timeout=8000 every=30
+checkpoint main_menu window=30
+# mash A until text nickname timeout=8000 every=30  [taps dingbat-bios:64 mgba:64 nba:64]
+tap A times=64 every=30 hold=4
 wait 90
-checkpoint partner_nickname compare=text
+checkpoint partner_nickname window=30 compare=text
 press A after=90
 press START after=30
 press A
-until text "Yes" timeout=300 every=5
+# until text Yes timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 press UP after=20
 press A after=60
-mash A until text "your name" timeout=9000 every=30
+# mash A until text 'your name' timeout=9000 every=30  [taps dingbat-bios:85 mgba:85 nba:85]
+tap A times=85 every=30 hold=4
 wait 60
-mash A until text "END" timeout=3000 every=30
+# mash A until text END timeout=3000 every=30  [taps dingbat-bios:5 mgba:5 nba:5]
+tap A times=5 every=30 hold=4
 wait 30
-checkpoint name_entry
+checkpoint name_entry window=30
 press A after=20
 press START after=30
 press A
-until text "Yes" timeout=300 every=5
+# until text Yes timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+5]
+wait 9
 wait 60
 press UP after=20
 press A after=60
-mash A until text "B1F" timeout=9000 every=30
-checkpoint tiny_woods
-until notext "Tiny" timeout=600 every=10
-# the partner explains the controls first; a menu only opens once it is gone
-until text "Head for" timeout=900 every=5
-mash A until notext "Head for" timeout=1200 every=30
+# mash A until text B1F timeout=9000 every=30  [taps dingbat-bios:60 mgba:60 nba:61]
+tap A times=61 every=30 hold=4
+checkpoint tiny_woods window=30
+# until notext Tiny timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+30]
+wait 34
+# until text 'Head for' timeout=900 every=5  [reached dingbat-bios+20 mgba+10 nba+55]
+wait 59
+# mash A until notext 'Head for' timeout=1200 every=30  [taps dingbat-bios:3 mgba:2 nba:4]
+tap A times=4 every=30 hold=4
 wait 60
-mash B until text "Others" timeout=600 every=60
+# mash B until text Others timeout=600 every=60  [taps dingbat-bios:1 mgba:3 nba:1]
+tap B times=3 every=60 hold=4
 wait 20
 checkpoint dungeon_menu window=0
 press DOWN after=10
 press DOWN after=10
 press DOWN after=10
-# Others > Quicksave or Give Up > Quicksave (the small menu font OCRs badly)
 press A after=40
 press DOWN after=10
 press A after=40
 press A
-until text "preparation" timeout=300 every=5
+# until text preparation timeout=300 every=5  [reached dingbat-bios+60 mgba+55 nba+60]
+wait 64
 wait 60
 checkpoint quicksave_prompt window=0
 press UP after=20
 press A
-until text "has been saved" timeout=1500 every=10
+# until text 'has been saved' timeout=1500 every=10  [reached dingbat-bios+340 mgba+410 nba+350]
+wait 414
 checkpoint saved window=0
 
 [load]
 wait 600
 press START
-mash START until text "Continue" timeout=3000 every=60
+# mash START until text Continue timeout=3000 every=60  [taps dingbat-bios:14 mgba:14 nba:14]
+tap START times=14 every=60 hold=4
 wait 60
-checkpoint continue_menu compare=text
+checkpoint continue_menu window=30 compare=text
 press A
-until text "quicksave" timeout=600 every=10
+# until text quicksave timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 60
-checkpoint resume_prompt compare=text
+checkpoint resume_prompt window=30 compare=text
 press UP after=20
 press A
-until text "B1F" timeout=1200 every=10
-until notext "Tiny" timeout=600 every=10
+# until text B1F timeout=1200 every=10  [reached dingbat-bios+70 mgba+70 nba+70]
+wait 74
+# until notext Tiny timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
 wait 90
 checkpoint dungeon window=10 compare=none

@@ -259,3 +259,142 @@ test("the paused hero says whether its moment has reached Drive", async () => {
   app.api.syncState.connected = false;
   assert.equal(app.runIn(`heroStateText("paused")`), "Paused", "signed out: no Drive to speak of");
 });
+
+// --- Races the Lean model found (formal/WebState/Handoff.lean) --------------
+
+const sessOnDrive = (app, drive) =>
+  app.runIn(`sessionFromBundle(new Uint8Array(${JSON.stringify([...drive.get("stateauto:A.gba").bytes])}))`).rec;
+
+// The other device paused at another moment on the same save: a session of
+// its own, the save Drive already has.
+const otherDeviceMovesOn = async (app, drive) => {
+  app.context.__rec = { bytes: u8(0x0a, 4, 77), ts: 777, by: "other-device", dev: "iPhone",
+                        saveSig: app.runIn(`saveSignature(new Uint8Array([0x0a, 4]))`) };
+  const f = drive.get("stateauto:A.gba");
+  f.bytes = await app.runIn(`sessionBundle("A.gba", __rec)`);
+  f.modifiedTime = new Date(Date.parse(f.modifiedTime) + 60e3).toISOString();
+};
+
+// bug_switch_during_upload: Switch tapped while the flush the offer scheduled
+// is sending this device's own session. That upload's completion took the
+// key off the queue, so the chosen copy never went up: Drive kept the moment
+// the player had just turned down, and the other device picked that up.
+test("Switch while this device's own session is on the wire: the chosen copy still goes up", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const app = await device(drive, clock);
+  await playAndPause(app, 4);
+  await app.api.flushSync();
+  await drain();
+  await otherDevicePauses(app, drive, 9);
+  // Played on here, unsent: the Sync holds the session back and offers Switch.
+  app.runIn("resumeGame(); sessionMoved = true; showMainMenu()");
+  await drain();
+  await app.runIn("runFullSync()");
+  await drain();
+  assert.ok(app.toasts.some((t) => t.includes("since you opened it here")), app.toasts.join(" | "));
+  assert.equal(sessOnDrive(app, drive).by, "other-device", "held back so far");
+
+  // The flush the offer scheduled sends this device's session; Switch lands mid-upload.
+  const id = drive.get("stateauto:A.gba").id;
+  const h = drive.hold((e) => e.method === "PATCH" && e.url.includes("/upload/") && e.url.includes(id));
+  const flushing = app.api.flushSync();
+  await h.reached;
+  await app.runIn(`switchToHandoff("A.gba")`);
+  h.release();
+  await flushing;
+  await drain(40);
+
+  assert.equal(app.idb.get("stateauto:A.gba").by, "other-device", "here: the copy chosen");
+  assert.equal(sessOnDrive(app, drive).by, "other-device", "and on Drive, not the one turned down");
+  eq(drive.get("save:A.gba").bytes, u8(0x0a, 9));
+});
+
+// bug_close_during_handoff: the game closed while the pull downloads the other
+// device's session. The pull went on as if the game were still held: it put up
+// the offer and marked that session seen, so the files pass skipped it and this
+// device kept resuming its own older moment for good.
+test("Close while the hand-off downloads: the other device's session still lands", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const app = await device(drive, clock);
+  await playAndPause(app, 4);
+  await app.api.flushSync();
+  await drain();
+  await otherDeviceMovesOn(app, drive);
+
+  const id = drive.get("stateauto:A.gba").id;
+  const h = drive.hold((e) => e.method === "GET" && e.url.includes(id + "?alt=media"));
+  const pulling = app.api.pullSync();
+  await h.reached;
+  await app.runIn("unloadGame()");
+  h.release();
+  await pulling;
+  await drain();
+
+  assert.equal(app.api.currentOriginalName, null);
+  assert.equal(app.idb.get("stateauto:A.gba").by, "other-device", "the newer session is here");
+  const s = await app.runIn(`resumeSessionFor("A.gba")`);
+  eq(s.bytes, u8(0x0a, 4, 77), "and Resume goes to its moment");
+  assert.ok(!app.toasts.some((t) => t.includes("since you opened it here")),
+            "no offer for a game no longer open: " + app.toasts.join(" | "));
+});
+
+// bug_resume_during_handoff: Resume tapped while heldGameIsSent reads the
+// stored save. The pull had decided "at home" before that read, and unloaded
+// the game the player had just gone back into.
+test("Resume tapped during the hand-off's check: the game is not yanked", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const app = await device(drive, clock);
+  await playAndPause(app, 4);
+  await app.api.flushSync();
+  await drain();
+  await otherDevicePauses(app, drive, 9);
+
+  // The read of the save after handoffNews has fetched the session.
+  const id = drive.get("stateauto:A.gba").id;
+  const fetched = () => drive.log.some((e) => e.url.includes(id + "?alt=media"));
+  let tapped = false;
+  app.state.idbFail = (op, key) => {
+    if (!tapped && op === "get" && key === "save:A.gba" && fetched()) {
+      tapped = true;
+      app.runIn("resumeGame(); sessionMoved = true"); // the tap, and a frame
+    }
+    return false;
+  };
+  await app.api.pullSync();
+  await drain();
+  app.state.idbFail = null;
+
+  assert.ok(tapped, "the read happened");
+  assert.equal(app.api.currentOriginalName, "A.gba", "still playing");
+  assert.ok(app.document.body.classList.contains("running"));
+  assert.ok(app.toasts.some((t) => t.includes("since you opened it here")), app.toasts.join(" | "));
+});
+
+// A session left on Drive by a deleted generation of the game is no other
+// device's newer moment: nothing will ever mark it seen, and held back for it
+// this device's session would never go up (the status stuck on Syncing).
+test("a session from a deleted generation of the game does not hold this one back", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const app = await device(drive, clock);
+  app.idb.set("recent", [{ name: "A.gba", ts: 1, gen: 2 }]);
+  await playAndPause(app, 4);
+  await app.api.flushSync();
+  await drain();
+  // Drive's copy is now an older generation's, written since this device looked.
+  const f = drive.get("stateauto:A.gba");
+  f.bytes = u8(1, 2, 3);
+  f.appProperties = { gen: "1" };
+  f.modifiedTime = new Date(Date.parse(f.modifiedTime) + 60e3).toISOString();
+  app.runIn("resumeGame(); sessionMoved = true; showMainMenu()");
+  await drain();
+  await app.api.flushSync();
+  await drain();
+  assert.ok(!app.api.syncState.queueUp.includes("stateauto:A.gba"), "not held back");
+  const s = app.runIn(`sessionFromBundle(new Uint8Array(${JSON.stringify([...drive.get("stateauto:A.gba").bytes])}))`);
+  assert.ok(s, "this device's session replaced the stale one");
+  assert.equal(drive.get("stateauto:A.gba").appProperties?.gen, "2");
+});

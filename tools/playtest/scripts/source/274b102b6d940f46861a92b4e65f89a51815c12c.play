@@ -1,0 +1,187 @@
+@title Kirby & The Amazing Mirror (USA)
+@file Kirby & The Amazing Mirror (U).gba
+@game B8KE
+@chip SRAM
+
+# File 1 > Start Game > One Player. The game formats the files at the first
+# file pick, but progress is only written when Kirby goes through a door: fly
+# right through the first Rainbow Route room (inhale the star block under the
+# pillar), float onto the cloud ledge and enter the mirror door. The helper
+# Kirbys and the enemies move differently in each emulator, so gameplay
+# screens are judged loosely; only the player's inputs are fixed.
+# [load]: nothing on the file select or the resumed Rainbow Route start looks
+# different from a new file (0%, same room), so the load checkpoints prove
+# only that every save boots identically everywhere.
+
+[new]
+until text "AMAZING" timeout=900 every=10
+wait 60
+checkpoint title window=0
+# the first START finishes the title animation, the second opens the files
+press START
+wait 180
+press START
+until text "FILE SELECT" timeout=600 every=5
+wait 30
+checkpoint file_select window=0
+press A
+until text "START GAME" timeout=600 every=5
+wait 60
+checkpoint game_select window=0 compare=text
+press A
+until text "ONE PLAYER" timeout=600 every=5
+wait 60
+press A
+wait 600
+checkpoint rainbow_route window=0 compare=none
+wait 400
+# first room: run and hop right to the pillar
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 30
+release
+# drop down and inhale the star block under the pillar
+press B after=90
+press RIGHT hold=90
+press B hold=60 after=30
+press RIGHT hold=10
+press B hold=60 after=10
+press B after=40
+press RIGHT hold=120 after=30
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 40
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 40
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 40
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 40
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 40
+release
+hold RIGHT
+press RIGHT+A hold=20
+hold RIGHT
+wait 40
+release
+checkpoint below_ledge window=0 compare=none
+# float up around the left end of the ledge and over to the mirror door
+press LEFT hold=40
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press LEFT+A hold=8 after=4
+press LEFT+A hold=8 after=4
+press LEFT+A hold=8 after=4
+press LEFT+A hold=8 after=4
+press LEFT+A hold=8 after=4
+press LEFT+A hold=8 after=4
+press LEFT+A hold=8 after=4
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press A hold=8 after=8
+press RIGHT+A hold=8 after=4
+press RIGHT+A hold=8 after=4
+press RIGHT+A hold=8 after=4
+press RIGHT+A hold=8 after=4
+press RIGHT+A hold=8 after=4
+press RIGHT+A hold=8 after=4
+press RIGHT+A hold=8 after=4
+press RIGHT+A hold=8 after=4
+press B after=60
+checkpoint at_door window=0 compare=none
+# the door write happens as Kirby goes through
+press UP hold=10 after=20
+wait 900
+checkpoint next_room window=0
+
+[load]
+until text "AMAZING" timeout=900 every=10
+wait 60
+press START
+wait 180
+press START
+until text "FILE SELECT" timeout=600 every=5
+wait 30
+checkpoint file_select window=0
+press A
+until text "START GAME" timeout=600 every=5
+wait 60
+press A
+until text "ONE PLAYER" timeout=600 every=5
+wait 60
+press A
+wait 1000
+checkpoint resumed window=0

@@ -43,6 +43,7 @@ interface EmscriptenModule {
   _wasm_mp2k_available?(): number;
   _wasm_hle_audio_active?(): number;
   _wasm_game_fb_ptr?(): number;
+  _wasm_native_fb_ptr?(): number;
   _wasm_sgb_enable?(on: number): void;
   _wasm_sgb_active?(): number;
   _wasm_sgb_border?(): number;
@@ -60,11 +61,15 @@ interface EmscriptenModule {
   _getAudioBufferLen?(): number;
   _clearAudioBuffer?(): void;
   _wasm_state_size?(): number;
+  _wasm_state_plain_size?(): number;
   _wasm_state_data?(): number;
+  _wasm_pack_state?(data: number, len: number): number;
   _wasm_flush_save?(): void;
   _wasm_set_turbo?(on: number): void;
   _wasm_set_slowmo?(on: number): void;
   _wasm_set_pitch_correct_ff?(on: number): void;
+  _wasm_set_channel_mutes?(bits: number): void;
+  _wasm_set_audio_silent?(on: number): void;
   _wasm_state_error?(): number;
   _wasm_state_error_kind?(): number;
   _wasm_load_state?(data: number, len: number, keepRewind: number): number;
@@ -152,4 +157,5 @@ declare var FS: {
   close(stream: object): void;
   readFile(path: string): Uint8Array;
   unlink(path: string): void;
+  stat(path: string): { mtime: Date | number; size: number };
 };

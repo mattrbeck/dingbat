@@ -1,0 +1,90 @@
+@title Harvest Moon - Friends of Mineral Town (USA)
+@file Harvest Moon - Friends of Mineral Town (U) [!].gba
+@game A4NE
+@chip SRAM
+
+# New game: player, farm and dog all named "A", birthday Spring 1. Mash
+# through the opening (Thomas, the flashback) until the player wakes in the
+# farmhouse on Spring 2, walk to the diary beside the bed and write Data 1.
+# [load]: Continue > Data 1 > Yes, then walk out of the door into Thomas.
+# The name/diary font reads poorly under OCR, so the menus are paced by frames
+# (all three emulators run them frame-identically).
+
+[new]
+wait 600
+press START
+until text "HARVEST" timeout=600 every=10
+wait 60
+checkpoint title window=0
+press START
+wait 120
+wait 30
+checkpoint name_entry window=0
+# name "A": A types it, START jumps to End, A confirms, A answers Yes
+press A after=20
+press START after=30
+press A after=60
+press A after=90
+until text "Birthday" timeout=300 every=10
+checkpoint birthday window=0
+press A after=90
+press A after=90
+press A after=120
+# farm name "A"
+press A after=20
+press START after=30
+press A after=120
+press A after=120
+# dog name "A"
+press A after=120
+press START after=30
+press A after=120
+press A after=240
+checkpoint summary window=0
+press A after=300
+wait 120
+checkpoint farm_intro window=0
+mash A until stable 120 timeout=3000 every=20
+press A after=60
+press A after=60
+# the day-2 wake-up in the farmhouse; mashing A ends facing the table
+mash A until text "Table" timeout=7000 every=20
+press B after=30
+until notext "Table" timeout=120 every=4
+press RIGHT hold=30 after=10
+press UP hold=40 after=10
+press RIGHT hold=12 after=10
+press UP hold=4 after=10
+press A after=40
+press RIGHT hold=8 after=10
+press UP hold=4 after=10
+press A after=40
+until text "Buttons" timeout=900 every=10
+wait 60
+checkpoint diary window=0
+press A after=90
+press A after=120
+checkpoint saved window=0
+
+[load]
+wait 600
+press START
+until text "continue" timeout=600 every=10
+wait 60
+checkpoint title_continue window=0
+press A
+until text "Buttons" timeout=600 every=10
+wait 120
+checkpoint diary_load window=0
+press A
+wait 300
+press A
+wait 400
+checkpoint farmhouse window=30
+press LEFT hold=150 after=10
+press DOWN hold=150 after=60
+press RIGHT hold=72 after=10
+press DOWN hold=60
+until text "Thomas" timeout=600 every=10
+wait 60
+checkpoint outside window=30 compare=text

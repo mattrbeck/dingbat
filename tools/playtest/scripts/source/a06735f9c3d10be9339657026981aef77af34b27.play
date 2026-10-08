@@ -1,0 +1,86 @@
+@title Yu-Gi-Oh! The Sacred Cards (USA)
+@file Yu-Gi-Oh! - The Sacred Cards (U) [!].gba
+@game AY8E
+@chip SRAM (ROM also names SRAM_F)
+
+# New game named "A", tap through Joey's wake-up dialog, walk to the PC on
+# the desk and save. [load] continues from the title, lands in the bedroom
+# (no Joey) and opens Status, which shows the name A.
+
+[new]
+wait 600
+until text "1996" timeout=2400 every=30
+wait 60
+checkpoint title
+press A hold=10
+until text "OK" timeout=600 every=10
+wait 60
+checkpoint name_entry
+press A hold=10 after=60
+press START hold=10 after=60
+press A hold=10
+until blank timeout=600 every=5
+until notblank timeout=900 every=10
+until text "Tournament" timeout=1200 every=10
+wait 30
+checkpoint joey_arrives window=0
+mash A until text "morning" timeout=600 every=60
+wait 30
+checkpoint joey
+# the dialog is ~20 pages; surplus taps in the room do nothing
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+press A after=36
+wait 120
+checkpoint room window=10
+press UP hold=20 after=30
+press LEFT hold=20 after=30
+press RIGHT hold=20 after=20
+press UP hold=30 after=20
+press A after=30
+until text "save" timeout=300 every=10
+wait 30
+checkpoint save_prompt window=0
+press A
+until text "completed" timeout=600 every=5
+wait 30
+checkpoint saved window=0
+
+[load]
+wait 600
+until text "1996" timeout=2400 every=30
+wait 60
+checkpoint title_continue window=10
+press A hold=10
+until blank timeout=600 every=5
+until notblank timeout=900 every=10
+wait 120
+checkpoint resumed window=10
+press SELECT hold=10
+until text "Trunk" timeout=300 every=10
+wait 30
+press A hold=10
+until text "Money" timeout=300 every=10
+wait 60
+checkpoint status window=10

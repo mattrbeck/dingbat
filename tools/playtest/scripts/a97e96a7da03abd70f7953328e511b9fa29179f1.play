@@ -1,0 +1,87 @@
+@title Mega Man Battle Network 4 - Red Sun (USA)
+@file Megaman Battle Network 4 - Red Sun (U).gba
+@game B4WE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game, A through the opening (science lab, Lan's room), pick up the PET
+# from Lan's desk, then PET > Save at 00:02 play time. [load] CONTINUE (cursor
+# starts on it) and the PET menu over Lan's room.
+# Seen while authoring: the game XORs its whole save with a random byte;
+# dingbat-bios wrote mask 0x91 while mgba and nba both wrote 0x62, so
+# dingbat-bios's random state differed from the other two by the save (nothing
+# visible on screen before it). Title-screen frame differs in dingbat-bios at f774.
+
+[new]
+wait 600
+# until text 'PRESS START' timeout=900 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
+wait 20
+checkpoint title window=30
+press START hold=10
+wait 60
+checkpoint main_menu window=30
+press A hold=10
+wait 300
+checkpoint intro window=30
+tap A times=40 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=80 every=20 hold=4
+tap A times=80 every=20 hold=4
+checkpoint lans_room window=30
+press START hold=10
+wait 40
+press DOWN hold=20
+wait 10
+press RIGHT hold=40
+press A
+wait 40
+press DOWN hold=16
+press RIGHT hold=30
+press A
+wait 40
+press RIGHT hold=20
+press A
+wait 40
+press UP hold=10
+press A
+wait 40
+press START hold=10
+wait 40
+press LEFT hold=10
+press UP hold=10
+press A
+wait 40
+tap A times=8 every=20 hold=4
+press START hold=10
+wait 40
+tap A times=20 every=20 hold=4
+checkpoint got_pet window=30
+press START hold=10
+wait 40
+checkpoint pet_menu window=30
+tap DOWN times=7 every=16 hold=8
+wait 10
+press A hold=8
+wait 40
+checkpoint save_prompt window=30
+press A hold=8
+wait 60
+checkpoint saved window=0
+wait 60
+
+[load]
+wait 600
+# until text 'PRESS START' timeout=900 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
+wait 20
+press START hold=10
+wait 60
+checkpoint continue_menu window=30
+press A hold=10
+wait 300
+checkpoint resumed window=30
+press START hold=10
+wait 40
+checkpoint resumed_menu window=30

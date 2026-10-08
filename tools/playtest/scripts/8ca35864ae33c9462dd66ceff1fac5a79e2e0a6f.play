@@ -2,17 +2,18 @@
 @file Classic NES Series - Super Mario Bros. (U).gba
 @game FSME
 @chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
 
 # Start 1-1, walk right and bump the first ? block (coin, 200 points), open
 # the L+R menu and SAVE HIGH SCORE. [load] proves the save by the title
 # screen's TOP- score reading 000200 instead of 000000.
 # The walk/jump is frame-exact from the START press; it matched on all three
 # emulators when recorded.
-
 [new]
 wait 300
-until text "PLAYER GAME" timeout=600 every=10
-checkpoint title
+# until text 'PLAYER GAME' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+checkpoint title window=30
 press START after=240
 hold RIGHT
 wait 80
@@ -23,22 +24,27 @@ press RIGHT hold=12 after=4
 press A hold=20 after=40
 checkpoint coin window=0
 press L+R hold=10
-until text "SAVE HIGH" timeout=120 every=5
+# until text 'SAVE HIGH' timeout=120 every=5  [reached dingbat-bios+5 mgba+0 nba+5]
+wait 9
 wait 30
 checkpoint menu window=0
-mash DOWN until selected "SAVE HIGH" timeout=300 every=30
+# mash DOWN until selected 'SAVE HIGH' timeout=300 every=30  [taps dingbat-bios:3 mgba:3 nba:3]
+tap DOWN times=3 every=30 hold=4
 press A
-until text "SCORE SAVED" timeout=300 every=5
+# until text 'SCORE SAVED' timeout=300 every=5  [reached dingbat-bios+15 mgba+15 nba+20]
+wait 24
 wait 30
 checkpoint saved window=0
 
 [load]
 wait 300
-until text "PLAYER GAME" timeout=600 every=10
+# until text 'PLAYER GAME' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint title_loaded window=10
 press START after=240
 press L+R hold=10
-until text "SAVE HIGH" timeout=120 every=5
+# until text 'SAVE HIGH' timeout=120 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint menu_loaded window=0

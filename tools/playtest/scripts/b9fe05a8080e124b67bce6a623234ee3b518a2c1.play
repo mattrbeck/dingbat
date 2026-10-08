@@ -2,43 +2,52 @@
 @file Wario Land 4 (UE) [!].gba
 @game AWAE
 @chip SRAM
+@frozen dingbat-bios,mgba,nba
 
 # New game in slot A on Normal: the game writes the slot as soon as the
 # difficulty is chosen ("Entry Passage" then shows on the file select).
 # Play on through the intro cutscene into the first room.
-
 [new]
 wait 600
 press START
-until text "tendo" timeout=600 every=10
+# until text tendo timeout=600 every=10  [reached dingbat-bios+20 mgba+20 nba+10]
+wait 24
 wait 30
-checkpoint title
+checkpoint title window=30
 press START
-until text "DELETE DATA" timeout=600 every=10
+# until text 'DELETE DATA' timeout=600 every=10  [reached dingbat-bios+120 mgba+120 nba+120]
+wait 124
 wait 60
-checkpoint file_select
+checkpoint file_select window=30
 press A
-until text "Hard" timeout=300 every=5
+# until text Hard timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
-checkpoint difficulty
+checkpoint difficulty window=30
 press A
-until notext "DELETE DATA" timeout=600 every=10
+# until notext 'DELETE DATA' timeout=600 every=10  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
 wait 1800
-until notblank timeout=600 every=10
+# until notblank timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 120
 checkpoint in_game window=10
 
 [load]
 wait 600
 press START
-until text "tendo" timeout=600 every=10
+# until text tendo timeout=600 every=10  [reached dingbat-bios+20 mgba+20 nba+10]
+wait 24
 wait 30
 press START
-until text "Passage" timeout=600 every=10
+# until text Passage timeout=600 every=10  [reached dingbat-bios+130 mgba+130 nba+130]
+wait 134
 wait 60
-checkpoint file_select
+checkpoint file_select window=30
 press A
-until notext "DELETE DATA" timeout=600 every=10
-until text "Entry" timeout=600 every=10
+# until notext 'DELETE DATA' timeout=600 every=10  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
+# until text Entry timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 60
-checkpoint pyramid
+checkpoint pyramid window=30

@@ -59,6 +59,9 @@ proc load_cpu_state(cpu: CPU; r: var Reader; rev: uint32) =
   cpu.pipeline.buffer[1] = r.read_u32()
   cpu.pipeline.pos  = int(r.read_u8())
   cpu.pipeline.size = int(r.read_u8())
+  # `shift`/`peek` index the two-word buffer with `pos` before masking it
+  check_range(cpu.pipeline.pos, 0, 1, "pipeline.pos")
+  check_range(cpu.pipeline.size, 0, 2, "pipeline.size")
   cpu.halted  = r.read_bool()
   cpu.stopped = r.read_bool()
   cpu.intr_wait_active      = r.read_bool()
@@ -294,6 +297,10 @@ proc save_gpio_state(gpio: GPIO; w: var Writer) =
   w.write_u8(uint8(rtc.wday_bias))
   w.write_bool(rtc.bias_host)
 
+const RTC_MAX_SECONDS = 1'i64 shl 40
+  ## A bound for the RTC's epoch and bias (seconds, ~35,000 years), far from
+  ## where their sum overflows
+
 proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_GPIO)
   gpio.data = r.read_u8()
@@ -310,6 +317,18 @@ proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
   rtc.reg = int(r.read_i32())
   rtc.buffer.size = int(r.read_i32())
   rtc.buffer.value = r.read_u64()
+  # The bit count is a shift amount (rtc_rising, rtc_falling): legal only
+  # inside the transfer the state is in
+  let bits = rtc.buffer.size
+  check_range(bits, 0, 64, "rtc.buffer.size")
+  case rtc.state
+  of rtcCommand: check_range(bits, 0, 7, "rtc.buffer.size")
+  of rtcReading: check_range(bits, 1, 64, "rtc.buffer.size")
+  of rtcWriting:
+    if rtc.reg == 1: check_range(bits, 0, 16, "rtc.buffer.size")
+    elif rtc_register_bytes(rtc.reg) > 0:
+      check_range(bits, 0, rtc_register_bytes(rtc.reg) * 8 - 1, "rtc.buffer.size")
+  else: discard
   if rev >= 7:
     rtc.status = r.read_u8() and S3511_STATUS_RW_BITS
   else:
@@ -322,6 +341,8 @@ proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
   if rev >= 3:
     rtc.deterministic = r.read_bool()
     rtc.epoch = cast[int64](r.read_u64())
+    if rtc.epoch < -RTC_MAX_SECONDS or rtc.epoch > RTC_MAX_SECONDS:
+      raise state_error("save state field 'rtc.epoch' is out of range")
   else:
     # rev <= 2 had no deterministic RTC mode; epoch is ignored while off.
     rtc.deterministic = false
@@ -333,6 +354,9 @@ proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
     check_range(int(wd), 0, 6, "rtc.wday_bias")
     rtc.wday_bias = int(wd)
     rtc.bias_host = r.read_bool()
+    # Seconds; added to the source clock and handed to std/times
+    if rtc.bias < -RTC_MAX_SECONDS or rtc.bias > RTC_MAX_SECONDS:
+      raise state_error("save state field 'rtc.bias' is out of range")
   else:
     # rev <= 6 ignored clock writes and read no battery trailer: the clock
     # was always the source clock in the host zone (UTC when deterministic)
@@ -393,6 +417,11 @@ proc load_ppu_state(ppu: PPU; r: var Reader; rev: uint32) =
       ppu.bgref[bg][i] = cast[BGREF](r.read_u32())
       ppu.bgref_int[bg][i] = r.read_i32()
       ppu.mosaic_bgref_int[bg][i] = r.read_i32()
+      # A 28-bit reference point plus at most 160 lines of a 16-bit step;
+      # wilder, the per-line add overflows an int32
+      check_range(int(ppu.bgref_int[bg][i]), -(1 shl 28), 1 shl 28, "ppu.bgref_int")
+      check_range(int(ppu.mosaic_bgref_int[bg][i]), -(1 shl 28), 1 shl 28,
+                  "ppu.mosaic_bgref_int")
   ppu.win0h  = cast[WINH](r.read_u16())
   ppu.win1h  = cast[WINH](r.read_u16())
   ppu.win0v  = cast[WINV](r.read_u16())
@@ -580,6 +609,11 @@ proc load_apu_state(apu: APU; r: var Reader) =
     ch.duty = r.read_u8()
     ch.length_load = r.read_u8()
     ch.frequency = r.read_u16()
+    # A shift amount (ch1_sweep_calc), PSG_DUTY's index, and the period
+    # (0x800 - f), which a 0x800 makes 0: a divisor in psg_steps_due
+    check_range(int(ch.shift), 0, 7, "channel1.shift")
+    check_range(int(ch.duty), 0, 3, "channel1.duty")
+    check_range(int(ch.frequency), 0, 0x7FF, "channel1.frequency")
   block:
     let ch = apu.channel2
     load_channel_env(ch, r)
@@ -587,6 +621,8 @@ proc load_apu_state(apu: APU; r: var Reader) =
     ch.duty = r.read_u8()
     ch.length_load = r.read_u8()
     ch.frequency = r.read_u16()
+    check_range(int(ch.duty), 0, 3, "channel2.duty")
+    check_range(int(ch.frequency), 0, 0x7FF, "channel2.frequency")
   block:
     let ch = apu.channel3
     load_channel_base(ch, r)
@@ -600,6 +636,9 @@ proc load_apu_state(apu: APU; r: var Reader) =
     ch.volume_code = r.read_u8()
     ch.volume_force = r.read_bool()
     ch.frequency = r.read_u16()
+    # The bank picks a half of wave_ram (the guest's 0x90-0x9F accesses)
+    check_range(int(ch.wave_ram_bank), 0, 1, "channel3.wave_ram_bank")
+    check_range(int(ch.frequency), 0, 0x7FF, "channel3.frequency")
   block:
     let ch = apu.channel4
     load_channel_env(ch, r)
@@ -608,12 +647,17 @@ proc load_apu_state(apu: APU; r: var Reader) =
     ch.clock_shift = r.read_u8()
     ch.width_mode = r.read_u8()
     ch.divisor_code = r.read_u8()
+    # A shift amount into the period (ch4_timer, which the load itself calls)
+    check_range(int(ch.clock_shift), 0, 15, "channel4.clock_shift")
   block:
     let dc = apu.dma_channels
     for f in 0 .. 1:
       for i in 0 .. 31: dc.fifos[f][i] = r.read_i8()
       dc.positions[f] = int(r.read_i32())
       dc.sizes[f] = int(r.read_i32())
+      # Both index `fifos` (dma_channels.nim) unmasked
+      check_range(dc.positions[f], 0, 31, "fifo.position")
+      check_range(dc.sizes[f], 0, 32, "fifo.size")
       dc.latches[f] = r.read_i16()
   # Drop the half-filled sample buffer and the pre-load SDL queue backlog
   apu.buffer_pos = 0
@@ -678,14 +722,27 @@ proc load_storage_state(st: Storage; r: var Reader) =
     let ft = r.read_u8()
     if int(ft) > ord(stFLASH1M):
       raise state_error("invalid flash type in save state")
+    # The type decides whether SET_BANK works, so it has to describe the
+    # part whose memory length was checked above
+    if storage_bytes(StorageType(ft)) != n:
+      raise state_error("save state flash type does not fit its memory")
     fl.flash_type = StorageType(ft)
     let fst = r.read_u8()
     check_no_undefined_bits(uint32(fst), FlashStateFlag.high.int + 1, "flash.state")
     fl.state = cast[set[FlashStateFlag]](fst)
     fl.bank = r.read_u8()
+    # memory[0x10000 * bank + a], unmasked
+    check_range(int(fl.bank), 0, n div 0x10000 - 1, "flash.bank")
+    if fsSetBank in fl.state and fl.flash_type != stFLASH1M:
+      raise state_error("save state sets a bank on a one-bank flash")
   elif st of EEPROM:
     let ep = EEPROM(st)
     let sz = r.read_u8()
+    # The size decides the address width, so it has to fit the buffer: a
+    # 64 Kbit address over a 512-byte buffer writes past it. Undetected, the
+    # buffer is still the largest one (new_eeprom).
+    check_range(int(sz), 0, 2, "eeprom.size")
+    check_one_of(n, [(if sz == 1'u8: 0x200 else: 0x2000)], "eeprom.memory.len")
     ep.eeprom_size = case sz
       of 0'u8: none(EepromSize)
       of 1'u8: some(eeprom4k)
@@ -702,10 +759,12 @@ proc load_storage_state(st: Storage; r: var Reader) =
     ep.ignored_reads = int(r.read_i32())
     ep.read_bits = int(r.read_i32())
     ep.wrote_bits = int(r.read_i32())
-    # address * 8 + wrote_bits div 8 indexes `memory` directly
+    # address * 8 + wrote_bits div 8 indexes `memory` directly, and the
+    # counters stop only by reaching exactly 64 (which resets them), so 64
+    # itself would run on past the block
     check_range(ep.ignored_reads, 0, 4, "eeprom.ignored_reads")
-    check_range(ep.read_bits, 0, 64, "eeprom.read_bits")
-    check_range(ep.wrote_bits, 0, 64, "eeprom.wrote_bits")
+    check_range(ep.read_bits, 0, 63, "eeprom.read_bits")
+    check_range(ep.wrote_bits, 0, 63, "eeprom.wrote_bits")
     # A 10-bit address can exceed a 4 Kbit part
     if int(ep.address) * 8 + 8 > ep.memory.len:
       raise state_error("eeprom address " & $ep.address & " is past the end of a " &
@@ -1181,7 +1240,8 @@ proc migrate_intr_wait_frame(gba: GBA) =
   gba.bus.write_word_internal(usp - 12, 0x170'u32)
   gba.bus.write_word_internal(usp - 16, cpu.r[4])
   cpu.set_sys_sp(usp - 16)
-  # The halt loop's register convention (see hle_intr_wait)
+  # The halt loop's register convention (r4 = 1, r2 = the mirror, lr_sys =
+  # 0x34C, as check_intr_wait re-halts with)
   cpu.r[4] = 1
   cpu.r[2] = uint32(cpu.read_intr_mirror())
   cpu.set_sys_lr(0x34C'u32)
@@ -1190,6 +1250,10 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
                           in_process = false) =
   var r = Reader(buf: payload)
   load_cpu_state(gba.cpu, r, rev)
+  # No payload carries an LDM^ glitch (gba_state_payload settles it); one
+  # pending in this machine would restore its own registers over the
+  # loaded ones
+  gba.cpu.ldm_glitch = 0
   if rev < 4 and gba.cpu.intr_wait_active and not gba.cpu.halted:
     raise newException(StateError,
       "this save state was taken inside a BIOS IntrWait with the interrupt " &
@@ -1210,17 +1274,38 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   # Only the PPU event chain increments ppu.frame, and a running machine
   # always carries exactly one of its events. A state with none (a corrupt
   # event kind is still a legal enum value) would hang step_frame forever.
-  # "At least one of the chain" so this holds if the capture phase changes.
+  # Any link of the chain, so this holds if the capture phase changes. Not
+  # two: each would schedule the next link, doubling every line until the
+  # event buffer is full. start_hblank schedules two, the end of H-blank and
+  # the flag a few cycles in (not a link: it schedules nothing), and the
+  # line's start cycle is dated from the link (load_ppu_state).
   block:
-    var has_ppu_event = false
+    var counts: array[4, int]
     for ev in gba.scheduler.events:
-      if ev.kind in {etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag,
-                     etPPUEndHBlank}:
-        has_ppu_event = true
-        break
-    if not has_ppu_event:
+      case ev.kind
+      of etPPUStartLine:     inc counts[0]
+      of etPPUStartHBlank:   inc counts[1]
+      of etPPUEndHBlank:     inc counts[2]
+      of etPPUSetHBlankFlag: inc counts[3]
+      else: discard
+    let links = counts[0] + counts[1] + counts[2]
+    if links == 0:
       raise state_error("save state has no pending PPU event, so its display " &
                         "could never advance")
+    if links > 1 or counts[3] > counts[2]:
+      raise state_error("save state's PPU events are not one chain")
+  # The prefetch stamp, now that there is a clock to check it against: no
+  # further ahead than an event may be, and anything further behind than an
+  # event may be overdue reads the same (an idle ROM bus) without the
+  # distance overflowing an int on the 32-bit web build
+  block:
+    let now = gba.scheduler.cycles
+    let rfs = gba.bus.rom_free_since
+    if rfs >= now:
+      if rfs - now > MAX_EVENT_HORIZON:
+        raise state_error("save state field 'bus.rom_free_since' is an implausible cycle")
+    elif now - rfs > MAX_EVENT_OVERDUE:
+      gba.bus.rom_free_since = now - MAX_EVENT_OVERDUE
   load_irq_state(gba.interrupts, r)
   load_mmio_state(gba.mmio, r)
   load_keypad_state(gba.keypad, r)

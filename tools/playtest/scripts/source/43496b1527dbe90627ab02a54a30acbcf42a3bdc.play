@@ -1,0 +1,25 @@
+@title Hello Kitty - Happy Party Pals (USA)
+@file Hello Kitty - Happy Party Pals (U).gba
+@game B86E
+@save none
+@chip none (password game: no library ID string, main menu offers Password)
+
+# The cart has no battery save: progress is a password. [new] only proves
+# the game boots and plays with no backup chip; the save check then shows
+# what file each emulator leaves behind (none is correct). No [load].
+
+[new]
+until text "Webfoot" timeout=1500 every=10
+wait 30
+press START
+until text "party pals" timeout=900 every=10
+wait 60
+checkpoint title
+press A
+until text "Password" timeout=600 every=10
+wait 30
+checkpoint main_menu
+press A
+until text "Hostess" timeout=900 every=10
+wait 30
+checkpoint level_intro

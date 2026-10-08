@@ -1,0 +1,104 @@
+@title Boktai 2 - Solar Boy Django (USA)
+@file Boktai 2 - Solar Boy Django (U).gba
+@game U32E
+@chip EEPROM + RTC + solar sensor
+@frozen dingbat-bios,mgba,nba
+@save skip: no save in the pause menu (map / items / valuables / status / config / sleep); the first save is past the opening valley in town, not reached. The EEPROM written here holds only the sensor/time/region settings.
+
+# Solar sensor notice, sensor calibration, time setting (START = END),
+# region (Eastern 4, Washington D.C.), Konami logo, title, GAME START /
+# start from beginning, no Boktai password, name "DjangoA", A through the
+# opening with Otenko, the pause-menu tabs, walk up the Undead valley path.
+# Authored on mgba and nba while dingbat froze on the REGION SETTING screen
+# (no key taken from f1498 on) at some clock times, the default 00:00 among
+# them: a timer interrupt raised inside a DMA3 burst was delivered a second
+# time with no source, and the game's handler jumped to a null vector
+# (docs/playtest-bugs.md section 27). Since that fix dingbat and
+# dingbat-bios replay this timeline on the references' screens at every
+# checkpoint (title: 4 frames behind mgba, 7 ahead of nba), so with
+# dingbat-bios in the lockstep the slowest emulator, and the 604 resolved
+# for 'PUSH START', stay nba's.
+# nba's RTC is the host clock (time setting shows the real date, status
+# screen TIME differs from mgba), so screens with the clock differ.
+[new]
+wait 600
+checkpoint solar_notice window=30 compare=text
+press A
+wait 300
+checkpoint sensor_setting window=30
+press A
+wait 300
+checkpoint time_setting window=30 compare=none
+press START
+wait 300
+checkpoint region window=30
+press A
+wait 300
+# until text 'PUSH START' timeout=900 every=10  [reached mgba+590 nba+600]
+wait 604
+wait 20
+checkpoint title window=30
+press START
+wait 120
+press START hold=10
+wait 120
+press A hold=10
+wait 180
+checkpoint game_start window=30
+press A hold=10
+wait 180
+press DOWN hold=10
+wait 20
+press A hold=10
+wait 180
+press B hold=10
+wait 120
+press RIGHT hold=10
+wait 20
+press A hold=10
+wait 180
+checkpoint player_name window=30
+press A hold=10
+wait 180
+press START hold=10
+wait 120
+press A hold=10
+wait 180
+checkpoint confirm_name window=30
+press A hold=10
+wait 300
+tap A times=20 every=30 hold=4
+press START hold=10
+wait 180
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+checkpoint gameplay window=30
+press START hold=10
+wait 60
+press B hold=10
+wait 60
+press SELECT hold=10
+wait 60
+press START hold=10
+wait 60
+press R hold=10
+wait 60
+press R hold=10
+wait 60
+press R hold=10
+wait 60
+press R hold=10
+wait 60
+press R hold=10
+wait 60
+checkpoint menu_sleep window=30 compare=text
+press B hold=10
+wait 60
+press DOWN hold=90
+tap A times=15 every=30 hold=4
+press UP hold=150
+press RIGHT hold=200
+tap A times=20 every=30 hold=4
+press RIGHT hold=200
+press UP+RIGHT hold=200
+checkpoint valley_path window=30

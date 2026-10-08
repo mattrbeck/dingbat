@@ -20,7 +20,7 @@ proc new_cpu*(gba: GBA): CPU =
     cpsr: cast[PSR](uint32(modeSYS)),
     spsr: cast[PSR](uint32(modeSYS)),
     pipeline: Pipeline(),
-    halted: false,
+    halted_v: false,
     attempt_waitloop_detection: true,
     cache_waitloop_results: true,
     branch_dest: 0,
@@ -122,9 +122,11 @@ proc irq_enter*(cpu: CPU) =
       block:
         var f: File
         if f.open(getEnv("IRQLOG", "/tmp/irqlog.txt"), fmAppend):
-          f.writeLine("irq now=" & $(cpu.gba.bus.sched.cycles + CycleCount(cpu.gba.bus.cycles)) &
+          f.writeLine("irq now=" & $((when defined(switrace): swtBase else: 0'i64) +
+            int64(cpu.gba.bus.sched.cycles) + int64(cpu.gba.bus.cycles)) &
             " pc=" & toHex(cpu.r[15], 8) & " wake=" & $cpu.halt_wake &
-            " vcount=" & $cpu.gba.ppu.vcount & " if=" & toHex(uint16(cpu.gba.interrupts.reg_if), 4))
+            " vcount=" & $cpu.gba.ppu.vcount & " if=" & toHex(uint16(cpu.gba.interrupts.reg_if), 4) &
+            (when defined(switrace): " f=" & $swtFrame else: ""))
           f.close()
     # Taken between an LDM^ and its next instruction: the entry is that
     # instruction, and it reads none of the glitched registers.
@@ -158,7 +160,16 @@ proc irq_enter*(cpu: CPU) =
     # irqwait.s on an AGB SP, a NOP sled interrupted by TM0, identical from
     # IWRAM; IWRAM fetches in one cycle and pays nothing).
     var inflight = 0
-    if not cpu.halt_wake:
+    # An interrupt preempting an HLE BIOS routine whose remainder an earlier
+    # build parked (on the halt-resume charge) is taken at the caller's next
+    # instruction, but the console takes it inside BIOS code, whose
+    # one-cycle fetch the entry overlaps: nothing in flight on the gamepak.
+    # tools/biosdrv/lz77i.c (Thumb caller in the cartridge, WAITCNT 0x4317,
+    # a Timer 1 IRQ every 1000/3000 cycles): 0.85 cycles long per IRQ with
+    # the gamepak's in-flight fetch, within 2 cycles a call without it.
+    let hle_body = cpu.halt_resume_charge != 0 and not cpu.halt_resume_pop and
+                   lr - 4 == cpu.halt_resume_addr
+    if not cpu.halt_wake and not hle_body:
       let page = int(bits_range(lr, 24, 27))
       if page in 8..13:
         let bus = cpu.gba.bus
@@ -274,6 +285,23 @@ proc contend_refill(cpu: CPU; s: int) {.noinline.} =
   cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0: bus.note_waits(s)
+
+proc window_refill(cpu: CPU; s: int) {.noinline.} =
+  ## REFILL_WINDOW_SPLIT: clear_pipeline's refill outside the gamepak with
+  ## the DMA access window open: two fetches, each with an end a PPU-timed
+  ## grant can come at, rather than one block the request waits behind.
+  let bus = cpu.gba.bus
+  let step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
+  # A burst granted at a fetch's end finds that fetch on the bus: r15 is the
+  # newest fetch mid-instruction (bus.read_open_bus_word), so it moves on
+  # after each sync, not before (DMA_SEES_REFILL_FETCH's case).
+  for _ in 0 .. 1:
+    bus.add_cycles(s)
+    bus.window_fetch_sync(s)
+    cpu.r[15] += step
+  when IRQ_LAST_WAITS:
+    if (bus.sync_bits and 8) != 0: bus.note_waits(s)
+
 proc leave_rom(bus: Bus; old_ahead: int8) {.noinline.} =
   ## PF_RUNS_OFF_ROM: the CPU branches out of the gamepak. The prefetcher
   ## goes on at the console's next fetch, from the end of the CPU's last
@@ -300,9 +328,19 @@ proc refill_from_head(cpu: CPU; page: int; noting: bool): bool {.noinline.} =
   let bus = cpu.gba.bus
   let head = bus.rom_next_addr and not 1'u32
   var thumb = cpu.cpsr.thumb
-  if not thumb and cpu.spsr.thumb and (cpu.r[15] and not 1'u32) == head:
+  if not thumb and cpu.spsr.thumb:
     let b = mode_bank(cast[CpuMode](cpu.cpsr.mode))
-    thumb = b != 0 and b != UNDEF_BANK
+    if b != 0 and b != UNDEF_BANK:
+      if (cpu.r[15] and not 1'u32) == head:
+        thumb = true
+      elif (cpu.r[15] and 2'u32) != 0:
+        # Not the head, and a halfword only a Thumb return reaches: aligned
+        # to a word it would match a head two bytes below it and refill two
+        # bytes early (Gradius Galaxies, its first stage: an interrupt
+        # taken just after a `bx` to 0x080003DB returned into the second
+        # half of the `bl` before it, and the CPU ran off into unmapped
+        # memory). The ordinary refill takes it.
+        return false
   let target = cpu.r[15] and (if thumb: not 1'u32 else: not 3'u32)
   if not bus.prefetch_on or bus.pf_paused or head != target:
     return false
@@ -425,7 +463,7 @@ proc clear_pipeline*(cpu: CPU) =
             else:
               let sp = int(bus.wait16_s[page])
               elapsed < 8 * sp and elapsed mod sp == sp - 1
-          if commit: both += 1
+          if commit and BRANCH_COMMIT_WAIT: both += 1
       if not streamed:
         # The CPU's own fetches: the prefetcher starts behind them
         bus.pf_paused = false
@@ -495,6 +533,10 @@ proc clear_pipeline*(cpu: CPU) =
   if cpu.gba.bus.contended[page]:
     cpu.contend_refill(s)
     return
+  when DMA_ACCESS_WINDOW and REFILL_WINDOW_SPLIT:
+    if (cpu.gba.bus.sync_bits and 2) != 0:
+      cpu.window_refill(s)
+      return
   cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
   cpu.gba.bus.add_cycles(2 * s)
   when IRQ_LAST_WAITS:
@@ -879,7 +921,9 @@ proc hle_halt_return*(cpu: CPU) =
   ## which the trap's own fetch is one.
   let bus = cpu.gba.bus
   cpu.idle(HALT_BIOS_RETURN - 1)
-  # System stack: the dispatcher's {r2, lr}
+  # System stack: the dispatcher's {r2, lr}, a pop that pays the stack's
+  # region (hle_bios.nim swi_stack_exit; IWRAM is in HALT_BIOS_RETURN)
+  bus.add_cycles(cpu.sys_stack_waits().stack_block(2))
   cpu.r[2] = bus.read_word_internal(cpu.r[13])
   cpu.r[14] = bus.read_word_internal(cpu.r[13] + 4)
   cpu.r[13] += 8
@@ -908,7 +952,9 @@ proc irq_in_last_waits(cpu: CPU): bool {.inline.} =
   else:
     false
 
-proc tick*(cpu: CPU) =
+proc tick_checks(cpu: CPU): bool =
+  ## What tick does before an opcode when cpu_slow is set; true when the CPU
+  ## is to go no further this tick (a parked charge still owed).
   # IRQ before the IntrWait re-halt check: the handler must run (and set the
   # BIOS mirror flags) or IntrWait re-halts forever.
   if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable and
@@ -931,7 +977,7 @@ proc tick*(cpu: CPU) =
           cpu.gba.bus.add_cycles(HALT_WAKE_INSTR_COST)
         elif cpu.halt_resume_charge >= HALT_WAKE_INSTR_COST:
           cpu.gba.bus.add_cycles(HALT_WAKE_INSTR_COST)
-          cpu.halt_resume_charge -= HALT_WAKE_INSTR_COST
+          cpu.halt_resume_charge = cpu.halt_resume_charge - HALT_WAKE_INSTR_COST
       cpu.irq()
   # The halt-wake entry exemption covers only the first boundary after the wake.
   cpu.halt_wake = false
@@ -968,18 +1014,28 @@ proc tick*(cpu: CPU) =
         # (tools/biosdrv/lz77i.c: LZ77UnCompWram under a Timer 1 IRQ every
         # 1000/3000/12000 cycles, Thumb caller in the cartridge at WAITCNT
         # 0x4317: 4.3, 4.0 and 4.1 cycles long per IRQ without this, exact
-        # with it; an ARM caller in IWRAM was exact either way).
-        let bus = cpu.gba.bus
-        let page = int(bits_range(cur, 24, 27))
-        let refill = if cpu.cpsr.thumb: int(bus.wait16_n[page]) + int(bus.wait16_s[page])
-                     else: int(bus.wait32_n[page]) + int(bus.wait32_s[page])
-        let extra = refill - (int(bus.wait32_n[0]) + int(bus.wait32_s[0]))
+        # with it; an ARM caller in IWRAM was exact either way). A park at a
+        # frame's end carried this on top (hle_park_frame_extra).
+        let extra = cpu.hle_handler_refill_extra(cur)
         if extra > 0: owed -= min(extra, owed)
       let remain = cpu.hle_charge_units_interruptible(owed)
       when ROM_REFILL_ORDERED:
         if hot: cpu.gba.bus.rom_hot = true
       cpu.halt_resume_charge = int32(remain)
-      if remain != 0: return
+      if remain != 0:
+        if not cpu.halt_resume_pop:
+          cpu.halt_resume_charge = cpu.halt_resume_charge +
+            int32(cpu.hle_park_frame_extra(cur))
+        return true
+      if not cpu.halt_resume_pop:
+        # The routine's end is its return to the caller, which flushes the
+        # gamepak fetch stream as the uninterrupted SWI's does (hle_swi); the
+        # stream the preempting handler's return left must not carry on
+        # into the caller's code. tools/biosdrv/lz77i.c, Thumb caller in
+        # the cartridge: 2 cycles short a preempted call without this,
+        # exact with it.
+        cpu.gba.bus.rom_hot = false
+        cpu.gba.bus.rom_next_addr = 1
       # Dispatcher exit path: pop the caller's r12 from its SVC-stack slot.
       cpu.r[12] = cpu.gba.bus.read_word_internal(cpu.svc_sp() - 8)
       if cpu.halt_resume_pop:
@@ -990,6 +1046,10 @@ proc tick*(cpu: CPU) =
         cpu.r[2] = cpu.gba.bus.read_word_internal(usp - 8)
         cpu.set_sys_lr(cpu.gba.bus.read_word_internal(usp - 4))
         cpu.set_sys_sp(usp)
+
+proc tick*(cpu: CPU) =
+  # With none of the fields it reads set (cpu_slow), tick_checks does nothing
+  if cpu.cpu_slow and cpu.tick_checks(): return
   if not cpu.halted:
     when defined(gsbon):
       # Camelot "Bon" (Golden Sun) hook, parked behind -d:gsbon: a PC compare
@@ -1025,6 +1085,8 @@ proc tick*(cpu: CPU) =
         gsProbeIn = inIw
     when defined(pcprofile):
       let prof_region = bits_range(cpu.r[15], 24, 27)
+    when defined(switrace):
+      cpu.swt_pc(cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32))
     when defined(biosdrvtrace):
       if bdPcHook != nil:
         bdPcHook(cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32))
@@ -1035,7 +1097,9 @@ proc tick*(cpu: CPU) =
       it_init()
       block:
         let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
-        if not it_on and cur >= it_lo and cur <= it_hi: it_on = true
+        if not it_on and cur >= it_lo and cur <= it_hi:
+          if it_skip > 0: dec it_skip
+          else: it_on = true
         let now = int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
         itl("I " & toHex(cur, 8) & " t=" & $now & " vc=" & $cpu.gba.ppu.vcount &
             " dot=" & $(now - cpu.gba.ppu.line_start_cycle))

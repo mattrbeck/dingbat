@@ -1,0 +1,50 @@
+@title Rocky (USA)
+@file Rocky (U) (M5).gba
+@chip EEPROM (ROM also names SRAM)
+
+# English, Movie Mode, new player in slot 1 named "A". Confirming the name
+# writes the player record (EEPROM bytes 0x00-0x3F) and opens the
+# FIGHT / CUT SCENES menu.
+
+[new]
+wait 600
+mash START until text "LANGUAGE" timeout=1200 every=20
+wait 60
+checkpoint language
+press A hold=10
+until text "OPTIONS" timeout=600 every=10
+wait 30
+checkpoint main_menu
+press A hold=10
+until text "DELETE PLAYER" timeout=600 every=10
+wait 30
+press A hold=10
+until text "GAME" timeout=600 every=10
+wait 60
+checkpoint player_slots
+press A hold=10
+until text "ENTER NAME" timeout=600 every=10
+wait 60
+checkpoint name_entry
+press A hold=10
+until text "FIGHT" timeout=600 every=10
+wait 180
+checkpoint saved window=10
+
+[load]
+wait 600
+mash START until text "LANGUAGE" timeout=1200 every=20
+wait 60
+press A hold=10
+until text "OPTIONS" timeout=600 every=10
+wait 30
+press A hold=10
+until text "DELETE PLAYER" timeout=600 every=10
+wait 30
+press A hold=10
+until notext "DELETE PLAYER" timeout=600 every=10
+wait 90
+checkpoint player_slots_loaded window=10
+press A hold=10
+wait 150
+checkpoint player_menu_loaded window=10

@@ -17,6 +17,10 @@ proc battery_file_bytes*(st: Storage): string =
   result = newString(st.memory.len)
   if st.memory.len > 0:
     copyMem(addr result[0], unsafeAddr st.memory[0], st.memory.len)
+  # A 4 Kbit EEPROM loaded from a longer file (eeprom_file_tail): the file
+  # keeps its length and its bytes past the chip, as they were.
+  if st.memory.len == 0x200:
+    for b in st.eeprom_file_tail: result.add(char(b))
   if st.rtc != nil:
     let t = rtc_trailer_bytes(st.rtc)
     for b in t: result.add(char(b))

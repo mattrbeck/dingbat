@@ -15,6 +15,7 @@
 
 import std/[os, strutils, math]
 import dingbat/common/input
+import dingbat/common/serialize  # pack_state
 import dingbat/gba/gba
 import dingbat/gb/gb
 
@@ -176,9 +177,14 @@ proc dingbat_flush_save() {.exportc, cdecl.} =
 
 proc dingbat_set_volume(volume: cint; mute: cint) {.exportc, cdecl.} =
   ## volume 0..100; at 100 unmuted samples pass through bit-identical.
+  let silent = mute != 0 or volume <= 0  # the cores skip mixing (APU.silent)
   case stateKind
-  of ekGBA: stateGba.apu.set_master_volume(int(volume), mute != 0)
-  of ekGB:  stateGb.apu.set_master_volume(int(volume), mute != 0)
+  of ekGBA:
+    stateGba.apu.set_master_volume(int(volume), mute != 0)
+    stateGba.set_audio_silent(silent)
+  of ekGB:
+    stateGb.apu.set_master_volume(int(volume), mute != 0)
+    stateGb.apu.silent = silent
   of ekNone: discard
 
 proc dingbat_set_fast_forward(enabled: cint) {.exportc, cdecl.} =
@@ -210,8 +216,8 @@ proc dingbat_state_size(): cint {.exportc, cdecl.} =
   ## Serialize the full state (same bytes as desktop .state files) into a
   ## retained buffer; returns its length, 0 when no core runs.
   case stateKind
-  of ekGBA: stateImage = stateGba.state_bytes()
-  of ekGB:  stateImage = stateGb.state_bytes()
+  of ekGBA: stateImage = pack_state(stateGba.state_bytes())
+  of ekGB:  stateImage = pack_state(stateGb.state_bytes())
   of ekNone: stateImage = ""
   cint(stateImage.len)
 

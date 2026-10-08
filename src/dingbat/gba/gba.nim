@@ -12,6 +12,27 @@ export rtc_calendar
 import storage_chip
 export storage_chip
 
+# In an optimised build (-d:release, -d:danger) the core is quirky: a call
+# does not test Nim's error flag afterwards. With goto exceptions every call
+# to a proc that may raise (and Defects count, so every call) is followed by
+# a load and a branch on that flag, even with the checks off; dropping them
+# is 3-4 % on the web build and ~10 % of the host instructions natively.
+# The cost: a check that fails in the core still raises, but the code goes
+# on (the out-of-range access included) until the first caller outside it
+# tests the flag, so a wild index is a SIGSEGV instead of an IndexDefect.
+# The core's own state cannot make one; a loaded state is the outside input
+# that could, which is why the loader range-checks every field the core
+# indexes with (savestate.nim; tools/statefuzz.nim finds the ones it
+# misses, built with -d:gba_quirky=false so that a fault is reported where
+# it happens). A proc that catches can't be quirky, and the procs that load
+# files and states are not, so a raise there (a missing ROM, a damaged
+# state) still stops them at once: those are the `quirky: off` pushes below
+# and in bus.nim.
+const gba_quirky {.booldefine.} = defined(release) or defined(danger)
+const QUIRKY_CORE = gba_quirky
+when QUIRKY_CORE:
+  {.push quirky: on.}
+
 when defined(pftrace):
   # -d:pftrace: dump ROM-bus activity inside each mGBA-suite Timing window
   # (between TM0's enable and disable writes) that contained a DMA grant; this
@@ -33,12 +54,14 @@ when defined(itrace):
   # and runs ITRACE_N lines; timer, interrupt and DMA events interleave.
   var it_lo*, it_hi*: uint32
   var it_left* = -1
+  var it_skip* = 0
   var it_on*: bool
   proc it_init*() =
     if it_left == -1:
       it_lo = uint32(parseHexInt(getEnv("ITRACE_LO", "0")))
       it_hi = uint32(parseHexInt(getEnv("ITRACE_HI", "0")))
       it_left = parseInt(getEnv("ITRACE_N", "400"))
+      it_skip = parseInt(getEnv("ITRACE_SKIP", "0"))
   proc itl*(s: string) =
     if it_on and it_left > 0:
       dec it_left
@@ -93,6 +116,11 @@ type
     has_trailer*: bool
     trailer*:     array[16, byte]
     rtc* {.cursor.}: RTC
+    # EEPROM only: the battery file's bytes from 0x200 to its chip data's end
+    # (at most 0x2000), as loaded. A 4 Kbit chip uses the first 0x200; most
+    # emulators write 8 KB files for it anyway, and write_save puts these
+    # bytes back after the chip's so playing never shortens such a file.
+    eeprom_file_tail*: seq[byte]
   Storage* = ref StorageObj
 
   SRAM* = ref object of StorageObj
@@ -245,6 +273,9 @@ type
     # higher-priority request preempts via a nested run_pending. Always 0/4
     # between instructions, so not serialized.
     pending*:          uint8
+    # DMA_PENDING_CHAIN: the requests already latched when the burst in
+    # progress was granted (run_pending; transient, not serialized)
+    pending_at_grant*: uint8
     # When each armed immediate channel requests the bus (DMA_START_DELAY
     # after its enable write). Only read within that delay; in the state's
     # in-flight section (rev 9).
@@ -515,6 +546,10 @@ type
     in_catch_up*: bool              # a dispatch from inside an access's sync (catch_up_slow)
     dma_end_at*: CycleCount         # when the last CPU-interrupting burst let go
     dma_held*: int                  # and how long it had held the bus
+    # Running total of the cycles DMA bursts stopped the CPU for: the HLE
+    # BIOS's routine-body cost models measure their own time net of it
+    # (hle_bios.nim hle_body_now). A difference counter only; not serialized.
+    dma_stall_total*: int64
     # Open-bus latch left by DMA: the last word a DMA moved stays on the data
     # bus until the CPU's next bus access replaces it, so an unmapped read
     # sees that word only if it is the first access after the burst
@@ -555,6 +590,18 @@ type
     dma_bus_req*:        CycleCount  # when the burst in progress asked for the bus
     ldrsh_odd*:          bool
     dma_bus_fresh*:      bool  # no transfer of this burst has driven the bus yet
+    # DMA_BUS_BACK_TO_BACK: the burst being granted follows another with no
+    # CPU access between them (set by dma.run_pending per grant)
+    dma_bus_kept*:       bool
+    # DMA_BUS_WHILE_HALTED: the last burst let go of the bus with the CPU
+    # halted, and the CPU has not run since (cleared by the wake)
+    dma_bus_left*:       bool
+    # DMA_READS_IO_LOAD: the value the CPU's last I/O register load read
+    load_io*:            uint32
+    load_io_ok*:         bool  # load_io is that load's (its read has happened)
+    # DMA_SEES_REFILL_FETCH: of the instruction the burst was granted in by
+    # its closing tick, the cycles still to run after the request
+    dma_bus_tail*:       int
     iwram_latch*:        uint32  # the last word a DMA moved to or from IWRAM
     dma_request_at*:     CycleCount
     dma_has_run*:        bool
@@ -622,30 +669,34 @@ type
     refill_pending*: bool
     reg_banks*:   array[7, array[7, uint32]]  # [6] = UNDEF_BANK, see cpu.nim
     spsr_banks*:  array[6, uint32]
-    halted*:      bool
+    halted_v:     bool  # these five: through their setters (cpu_slow below)
     stopped*:     bool  # Stop mode: halted, and only keypad/cartridge/SIO IRQs wake
     # Level-triggered IRQ signal (IE & IF != 0 and IME), maintained by
     # check_interrupts; sampled at instruction boundaries only
-    irq_line*:    bool
+    irq_line_v:   bool
     # When the synchroniser raised irq_line (IRQ_LAST_WAITS).
     irq_line_at*: CycleCount
     # Set when an IRQ wakes the CPU from halt. Nothing reads it any more; it
     # stays because it is serialized CPU state.
-    halt_wake*:   bool
+    halt_wake_v:  bool
     # HLE IntrWait: while active, the CPU re-halts at resume_addr until the
     # user IRQ handler ORs a masked flag into the BIOS mirror at 0x03007FF8
-    intr_wait_active*:      bool
+    intr_wait_active_v:     bool
     intr_wait_mask*:        uint16
     intr_wait_resume_addr*: uint32
     # HLE Halt/Stop: the real BIOS runs its SWI-dispatcher return path after
     # the wake IRQ is serviced, so its cost is charged when execution reaches
     # the instruction after the SWI.
-    halt_resume_charge*:    int32
+    halt_resume_charge_v:   int32
     halt_resume_addr*:      uint32
     # The parked charge belongs to a Halt/Stop SWI, whose entry left the
     # dispatcher's {r2, lr} frame live (System sp shifted down 8); the resume
     # must pop it. Decompression SWIs park charges here but never shift sp.
     halt_resume_pop*:       bool
+    # Any of halted, irq_line, halt_wake, intr_wait_active or a parked
+    # halt_resume_charge: tick's checks before an opcode have something to do.
+    # Kept by those five fields' setters, so it is exact by construction.
+    cpu_slow*:              bool
     # An HLE CpuSet/CpuFastSet preempted by an IRQ rewinds onto its SWI with
     # the continuation in r0-r2 (hle_bios.nim); these name that SWI and
     # state so the re-dispatch is known as the same routine resuming (it
@@ -923,6 +974,10 @@ type
     # Master volume as an 8.8 fixed-point factor (256 = unity)
     master_volume_factor*: int32
     master_muted*:      bool
+    # Nobody hears this core (muted, volume 0, a run-ahead lookahead, link
+    # player 2): get_sample skips the catch-up and the mix (set_audio_silent).
+    # Presentation-only, not serialised.
+    silent*:            bool
     # 2x speed: drop every other stereo frame at the queue point
     turbo*:             bool
     turbo_parity:       bool  # emscripten per-sample decimation state
@@ -1224,6 +1279,11 @@ type
     # Emulated cycle at which the current frame started; frame progress is
     # derived from it rather than counted per instruction.
     frame_start_cycles*: CycleCount
+    # Everything end_frame has subtracted from the scheduler since power-on:
+    # rebased + scheduler.cycles is an absolute clock, for debug tools that
+    # compare two runs (tools/playtest dingbat_driver `trace`,
+    # tests/biosdrv_probe.nim). Not serialized: a state load restarts it.
+    rebased*: int64
     # Length of the last state payload: the next is written into a buffer
     # of that capacity rather than grown from empty (savestate.nim)
     payload_len_hint: int
@@ -1248,6 +1308,33 @@ type
     cheat_hooks: MemHooks        # built once, reused each frame (see apply_cheats)
     when defined(test_harness):
       test_output*: TestOutput
+
+# The fields tick tests before every opcode. Each write goes through a
+# setter that keeps cpu_slow, so a CPU with none of them set takes one test.
+# Getters are procs, not templates, so `+=` on one can't skip its setter.
+proc set_cpu_slow(cpu: CPU) {.inline.} =
+  cpu.cpu_slow = cpu.halted_v or cpu.irq_line_v or cpu.halt_wake_v or
+                 cpu.intr_wait_active_v or cpu.halt_resume_charge_v != 0
+proc halted*(cpu: CPU): bool {.inline.} = cpu.halted_v
+proc irq_line*(cpu: CPU): bool {.inline.} = cpu.irq_line_v
+proc halt_wake*(cpu: CPU): bool {.inline.} = cpu.halt_wake_v
+proc intr_wait_active*(cpu: CPU): bool {.inline.} = cpu.intr_wait_active_v
+proc halt_resume_charge*(cpu: CPU): int32 {.inline.} = cpu.halt_resume_charge_v
+proc `halted=`*(cpu: CPU; v: bool) {.inline.} =
+  cpu.halted_v = v
+  cpu.set_cpu_slow()
+proc `irq_line=`*(cpu: CPU; v: bool) {.inline.} =
+  cpu.irq_line_v = v
+  cpu.set_cpu_slow()
+proc `halt_wake=`*(cpu: CPU; v: bool) {.inline.} =
+  cpu.halt_wake_v = v
+  cpu.set_cpu_slow()
+proc `intr_wait_active=`*(cpu: CPU; v: bool) {.inline.} =
+  cpu.intr_wait_active_v = v
+  cpu.set_cpu_slow()
+proc `halt_resume_charge=`*(cpu: CPU; v: int32) {.inline.} =
+  cpu.halt_resume_charge_v = v
+  cpu.set_cpu_slow()
 
 # Forward declarations to handle circular include dependencies
 proc irq*(cpu: CPU)
@@ -1281,6 +1368,11 @@ proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inlin
 
 # A branch into the gamepak refills N then S, in that order (cpu.clear_pipeline).
 const ROM_REFILL_ORDERED* {.booldefine.} = true
+const BRANCH_COMMIT_WAIT* {.booldefine.} = true
+  ## A branch out of a gamepak stream waits out a prefetch halfword in its
+  ## final cycle (cpu.clear_pipeline). A knob for docs/playtest-bugs.md
+  ## section 29 (Final Fight One): off, dingbat lands 9.7k cycles sooner there and
+  ## still a frame later than both reference emulators.
 const ROM_REFILL_ORDERED_PF* {.booldefine.} = true
 const DMA_KEEPS_PREFETCH* {.booldefine.} = true
   ## A DMA that never touches the gamepak leaves the prefetcher running: the
@@ -1322,6 +1414,20 @@ const HALT_WAKE_INSTR_COST* = 3
 const IRQ_ENTRY_EXTRA* {.intdefine.} = 1
   ## Cycles an IRQ entry costs beyond its pipeline refill (cpu.irq).
 const DMA_ACCESS_WINDOW* {.booldefine.} = true
+const REFILL_WINDOW_SPLIT* {.booldefine.} = true
+  ## With the access window open, a pipeline refill outside the gamepak is
+  ## two fetches a PPU-timed DMA can be granted between (cpu.window_refill),
+  ## not one block. hdmalag.s configuration 29 on an AGB SP: DMA1 (3 words)
+  ## and DMA3 (302 halfwords) every H-blank leave the CPU 3 cycles a line,
+  ## its `blo` loop from IWRAM progressing 3 cycles at a time; every burst
+  ## starts on its H-blank's cycle, 20 lines in a row. The core held the
+  ## grant behind a refill begun the cycle before the request (the H-blank
+  ## after the one whose window the `blo` itself took) and the next
+  ## opcode fetch -- that line's bursts started 2 cycles late, the next
+  ## H-blank found DMA3 still running and dropped it: 18 bursts. The refill
+  ## was the `blo`'s own, run after the bursts its fetch was granted at; the
+  ## window it needed was the next line's, which the last line's leftover
+  ## `window_closing` shut at that fetch (ppu.start_hblank now clears it).
 const SB_SWAP* = 64'u8
   ## bus.sync_bits bit 6: MEMCNT's swap is on (bus.nim, swap_read_word).
 const DMA_LEAD_CYCLES* {.intdefine.} = 1
@@ -1393,6 +1499,48 @@ const DMA_READS_CPU_BUS* {.booldefine.} = true
   ## word the burst itself moved, or, for its first transfer, the CPU's last
   ## bus transaction -- its data load if that came after its last opcode
   ## fetch, else the fetched opcode (Bus.dma_bus_word).
+const DMA_BUS_BACK_TO_BACK* {.booldefine.} = true
+  ## DMA_READS_CPU_BUS's "the CPU's last bus transaction" only holds when the
+  ## CPU had the bus last. Bursts granted one after another with no CPU
+  ## access between them (two channels on the same H-blank, a chained
+  ## immediate pair) hand the bus over with the earlier burst's last word
+  ## still on it, and the later burst's first unmapped read gets that word
+  ## (tests/roms/payloads/hdmalag.s on an AGB SP: the second channel on an
+  ## H-blank reads the cycle after the first's last write). Phantasy Star
+  ## Collection's Master System player depends on it: DMA1 (H-blank, ROM
+  ## table -> BG1VOFS) and DMA2 (H-blank, fixed write-only BG1VOFS ->
+  ## BG0VOFS) keep its high-priority window layer scrolling with the
+  ## picture; with the CPU's opcode instead every window was drawn with
+  ## shifted scanlines. Both reference emulators agree, and so does the
+  ## console: tests/roms/payloads/hdmaobus.s on an AGB SP, 2026-10-02, the
+  ## second channel reads the first's X_k on every line, CPU in a NOP sled
+  ## or halted (docs/playtest-bugs.md section 28).
+const DMA_BUS_WHILE_HALTED* {.booldefine.} = true
+  ## A halted CPU drives nothing, so the data bus keeps the last word a DMA
+  ## put on it until the CPU runs again: a burst granted while the CPU has
+  ## stayed halted since the previous one ended reads that word for its
+  ## first unmapped read, not the opcode the CPU fetched before halting.
+  ## tests/roms/payloads/hdmaobus.s on an AGB SP, 2026-10-02: an H-blank
+  ## DMA reading write-only BG1VOFS ahead of the channel that writes X_k
+  ## there each line reads X_(k-1) under a halt (cells 0x301-0x305), and the
+  ## BIOS's fetched literal (0x0300) only on the first line (0x300).
+const DMA_READS_IO_LOAD* {.booldefine.} = true
+  ## DMA_READS_CPU_BUS's data load includes an I/O register's: the value the
+  ## CPU read is what the burst finds on the bus. hdmaobus.s on an AGB SP,
+  ## 2026-10-02: an H-blank DMA reading write-only BG1VOFS while the CPU
+  ## polls VCOUNT with `ldrh` reads the polled line number (cell 0x306, line
+  ## 46: 002E), where the opcode fallback answered the loop's `bne` (1AFF).
+  ## The I/O bus is 32 bits wide: hdmaphase.s, an `ldrh` or `ldrb` of VCOUNT
+  ## leaves DISPSTAT on the word's other half too (Bus.dma_bus_word).
+const DMA_SEES_REFILL_FETCH* {.booldefine.} = true
+  ## A pipeline refill is two fetches, and a burst requested between them
+  ## finds the first on the bus. The core charges the refill as one block
+  ## and moves r15 past both, so a burst granted by the closing tick of a
+  ## branch with a refill fetch still to start reads one fetch further back.
+  ## hdmaphase.s on an AGB SP, an H-blank DMA reading write-only I/O against
+  ## a `bne` loop from IWRAM: the request one cycle before the loop's end
+  ## reads the branch target (the loop's first opcode), where r15 alone
+  ## answered the second (n = 1 rows, every load width and either half).
 const IMM_BOUNDARY_GRANT* {.booldefine.} = true
   ## An immediate DMA whose request (two cycles after the enable) falls
   ## exactly between two instructions is granted there, ahead of the next
@@ -1412,6 +1560,16 @@ const DMA_CHAIN* {.booldefine.} = true
   ## armed by the next store (its request lands in DMA1's burst); DMA0 reads
   ## the timer DMA1 enabled on the very next cycle (old count, new control),
   ## and the CPU is back two cycles sooner than for two separate bursts.
+const DMA_PENDING_CHAIN* {.booldefine.} = true
+  ## DMA_CHAIN for a request that was already latched when a burst was
+  ## granted: the next grant follows with no hand-back and no lead between
+  ## them. A request that arrives during the burst still pays both (not
+  ## measured; chaining those too moved Pokemon Mystery Dungeon - Red Rescue
+  ## Team's timing-seeded quiz under the official BIOS). Two H-blank
+  ## channels granted on the same H-blank: hdmalag.s on an AGB SP has the
+  ## second's first read the cycle after the first's last write, and
+  ## hdmaphase.s has the CPU held 10 cycles by a one-halfword reader and a
+  ## one-halfword writer (6 by the reader alone), not 12.
 const IMM_ACCESS_WAIT* {.booldefine.} = true
   ## An immediate DMA whose request lands inside a CPU data access that
   ## began before it waits for that access to end, and the access sees
@@ -1509,11 +1667,13 @@ proc trigger_video_capture*(dma: DMA; vcount: uint16)
 proc catch_up(bus: Bus) {.inline.}
 proc catch_up_access(bus: Bus; cost: int) {.inline.}
 proc imm_post_grant(bus: Bus) {.noinline.}
+proc window_fetch_sync(bus: Bus; cost: int)
 proc imm_pre_grant(bus: Bus; cost: int) {.noinline.}
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
 proc oam_touched*(ppu: PPU) {.inline.}
+proc cont_obj_entry_moved(ppu: PPU; e: int; old0, old1: uint16)
 proc draw*(ppu: PPU)
 proc scanline*(ppu: PPU)
 proc start_line*(ppu: PPU)
@@ -1544,8 +1704,10 @@ proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 
 proc clear_pipeline*(cpu: CPU)
 # Renderer contention's wait for one access (contention.nim)
 proc contend_wait(bus: Bus; address: uint32; is32: bool; cost: int): int
+proc contend_wait_ahead*(bus: Bus; address: uint32; is32: bool; ahead: int): int
 proc contend_slow(bus: Bus; address: uint32; is32: bool; cost: int): int {.noinline, raises: [].}
 proc hle_halt_return*(cpu: CPU)
+proc exception_return_restore*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}
 # The bank an undefined CPSR mode pattern selects: r13 and r14 read 0 there
 # and the mode field holds the pattern (hardware: gbaedge UNDMODE on AGB SP,
@@ -1553,6 +1715,12 @@ proc read_instr*(cpu: CPU): uint32 {.inline.}
 # so nothing written in it survives; r8-r12 and the SPSR are unprobed and
 # follow the user bank. Never serialized (always empty at a boundary).
 const UNDEF_BANK* = 6
+# The stub BIOS's room for the HLE's decompression and unpack routines
+# (hle_unc.nim, filled in bus.nim new_bus): ARM instructions, then Thumb ones
+const UNC_ARM_LO* = 0x0C00'u32
+const UNC_ARM_HI* = 0x1530'u32
+const UNC_THUMB_LO* = 0x3A00'u32
+const UNC_THUMB_HI* = 0x4000'u32
 proc mode_bank*(m: CpuMode): int
 
 # Textual includes: the whole GBA core compiles as one module so the C
@@ -1574,8 +1742,10 @@ template note_waits*(bus: Bus; cost: int) =
 
 include pipeline
 # Cartridge: ROM image, save memory, GPIO-attached RTC
+{.push quirky: off.}
 include cartridge
 include storage
+{.pop.}
 include storage/sram
 include storage/flash
 include storage/eeprom
@@ -1639,6 +1809,16 @@ include bus
 include mp2k
 include gs_bon
 
+proc set_audio_silent*(gba: GBA; on: bool) =
+  ## Whether anybody hears this core (APU.silent): muted, volume 0, link
+  ## player 2. Call between frames. The sound-driver HLEs render nothing while
+  ## silent, so turning sound back on re-latches their voices from the
+  ## engine's own state, as a state load does.
+  if gba.apu.silent and not on:
+    if gba.mp2k != nil: gba.mp2k.mp2k_state_loaded()
+    if gba.gs_bon != nil: gba.gs_bon.gs_state_loaded()
+  gba.apu.silent = on
+
 # Sprite accessor procs (needed by ppu)
 proc obj_shape*(s: Sprite): uint32 = bits_range(s.attr0, 14, 15)
 proc color_mode_8bpp*(s: Sprite): bool = bit(s.attr0, 13)
@@ -1659,6 +1839,7 @@ include ppu
 include contention
 include mmio
 
+{.push quirky: off.}
 proc new_storage*(gba: GBA; rom_path: string): Storage =
   # changeFileExt, not "up to the last dot": an extensionless path (the
   # command line takes any) would otherwise name `<parent>.sav` or `.sav`
@@ -1693,6 +1874,9 @@ proc new_storage*(gba: GBA; rom_path: string): Storage =
       for i in 0 ..< RTC_TRAILER_LEN: result.trailer[i] = uint8(data[toff + i])
     let n = min(chip_len, result.memory.len)
     if n > 0: copyMem(addr result.memory[0], unsafeAddr data[0], n)
+    if t == stEEPROM and n > 0x200:
+      result.eeprom_file_tail = newSeq[byte](n - 0x200)
+      copyMem(addr result.eeprom_file_tail[0], unsafeAddr data[0x200], n - 0x200)
 
 proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false; hle_after_bios: bool = false): GBA =
   result = GBA(
@@ -1705,6 +1889,7 @@ proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false
   result.scheduler = new_scheduler()
   result.cartridge = new_cartridge(rom_path)
   result.cheats    = new_cheat_engine(cpGBA)
+{.pop.}
 
 proc handle_saves*(gba: GBA)
 
@@ -1960,6 +2145,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
 # own entry (795 mod 1024 here: 75,997,979 cycles to the first ROM fetch).
 const SKIP_BIOS_PRESCALER_PHASE {.intdefine.} = 776
 
+{.push quirky: off.}
 proc post_init*(gba: GBA) =
   if not gba.run_bios:
     gba.scheduler.cycles = CycleCount(SKIP_BIOS_PRESCALER_PHASE)
@@ -2009,6 +2195,7 @@ proc post_init*(gba: GBA) =
     for i in 0 ..< 2 * PSG_WAVE_BANK:
       gba.apu.channel3.wave_ram[i] = 0
     gba.ppu.skip_boot_phase()
+{.pop.}
 
 proc handle_saves*(gba: GBA) =
   gba.scheduler.schedule(280896, etSaves)
@@ -2030,6 +2217,8 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   # still stands (the GB's gb_rebase).
   ch4_advance_divisor(gba.apu.channel4, gba)
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
+  gba.rebased += int64(base)
+  when defined(switrace): (swtBase += int64(base); inc swtFrame)
   gba.apu.apu_rebase(base)
   # FIFO transfer stamps and the MP2K HLE's pending slot hooks are absolute
   # cycles too (mp2k.nim measure_latency)
@@ -2045,13 +2234,18 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     if gba.timer.cycle_enabled[i] >= base:
       gba.timer.cycle_enabled[i] -= base
     elif gba.timer.tmcnt[i].enable and not gba.timer.tmcnt[i].cascade:
-      # Anchor predates the base: advance it by whole periods (keeping
-      # prescaler phase) and compensate the counter. No overflow can hide in
-      # the skipped window: its event would have fired and re-anchored.
+      # Anchor predates the base: fold the ticks over (anchor, base] into
+      # the counter and anchor on cycle 0, which lies in the same prescaler
+      # period (base is a multiple of 1024). No overflow can hide in the
+      # skipped window: its event would have fired and re-anchored. The
+      # anchor must not land after the rebased clock: the old one kept its
+      # offset within the period, and a read in the frame's first cycles
+      # below that offset took the "not started yet" path and answered the
+      # reload (0) -- once every 16 frames, as the frame's length walks the
+      # clock's low bits (tests/roms/payloads/envrestart.s waits on TM2).
       let period = CycleCount(TIMER_PERIODS[gba.timer.tmcnt[i].frequency])
-      let deficit = base - gba.timer.cycle_enabled[i]
-      let k = (deficit + period - 1) div period
-      gba.timer.cycle_enabled[i] = gba.timer.cycle_enabled[i] + k * period - base
+      let k = base div period - gba.timer.cycle_enabled[i] div period
+      gba.timer.cycle_enabled[i] = 0
       gba.timer.tm[i] += uint16(k)
     else:
       # Cascade/disabled: the anchor is unused; keep it in range
@@ -2171,4 +2365,8 @@ method toggle_sync*(gba: GBA) =
   gba.apu.toggle_sync()
 
 # Save-state visitor over every component above (also serves rewind/rollback)
+{.push quirky: off.}
 include savestate
+{.pop.}
+when QUIRKY_CORE:
+  {.pop.}   # quirky: on, from the top

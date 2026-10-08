@@ -442,6 +442,7 @@ proc write_stub_u32(bios: var seq[byte]; offset: int; value: uint32) =
   bios[offset + 2] = byte(value shr 16)
   bios[offset + 3] = byte(value shr 24)
 
+{.push quirky: off.}   # opens the BIOS file (gba.nim, quirky)
 proc new_bus*(gba: GBA; bios_path: string): Bus =
   result = Bus(gba: gba)
   result.sched = gba.scheduler
@@ -513,6 +514,30 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x1A4, 0xEA000000'u32)  # b    0x1AC
     write_stub_u32(result.bios, 0x1AC, 0xE3A0C301'u32)  # mov  ip, #0x04000000
     write_stub_u32(result.bios, 0x1B0, 0xE5CC2301'u32)  # strb r2, [ip, #0x301]
+    # Never executed: the words after the `bx lr` the halt parks on, the
+    # default user and IRQ stack tops (GBATEK, BIOS RAM usage) as literals.
+    # A halted CPU's last fetch is the second, and a DMA granted under the
+    # halt reads its upper half (hdmaobus.s 0x300 on an AGB SP: 0300).
+    # A CpuSet / CpuFastSet an interrupt preempted parks here, in BIOS code
+    # as the console's routine is, and the interrupt returns to it: a trap
+    # into the HLE (hle_copy.nim, COPY_TRAP)
+    write_stub_u32(result.bios, 0xBC8, 0xEF000000'u32)  # swi 0 (copy resume)
+    # The decompression and unpack routines run as BIOS code here, one
+    # instruction per address, each an ARM or a Thumb `swi 0` the HLE
+    # executes by where it is (hle_unc.nim)
+    for a in countup(int(UNC_ARM_LO), int(UNC_ARM_HI) - 4, 4):
+      write_stub_u32(result.bios, a, 0xEF000000'u32)
+    for a in countup(int(UNC_THUMB_LO), int(UNC_THUMB_HI) - 2, 2):
+      result.bios[a] = 0x00'u8
+      result.bios[a + 1] = 0xDF'u8
+    # Below the IRQ handler, where the console has code, a `b .`: a routine
+    # handed a source there reads it as BIOS code and finds a header of
+    # nonzero length, as on the console (tools/biosdrv/swisp2.c's skips,
+    # source 0x100: a zero length would end the source check early)
+    for a in countup(0x100, 0x124, 4):
+      write_stub_u32(result.bios, a, 0xEAFFFFFE'u32)
+    write_stub_u32(result.bios, 0x1B8, 0x03007F00'u32)
+    write_stub_u32(result.bios, 0x1BC, 0x03007FA0'u32)
     # Never executed: the two words after the IRQ return, so the two-ahead
     # pipeline latch reads the same values as the real BIOS leaves
     write_stub_u32(result.bios, 0x140, 0xE92D5800'u32)
@@ -597,6 +622,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]
   result.update_waitcnt(WAITCNT())  # reset-state waitstates
 
+{.pop.}
+
 proc bus_page(address: uint32): int {.inline.} =
   int(bits_range(address, 24, 27))
 
@@ -660,6 +687,51 @@ proc write_u16_ptr(buf: var seq[byte]; offset: uint32; val: uint16) {.inline.} =
 
 proc write_u32_ptr(buf: var seq[byte]; offset: uint32; val: uint32) {.inline.} =
   cast[ptr uint32](addr buf[offset])[] = val
+
+# Stores into PRAM, VRAM and OAM. Only one that changes what is there dirties
+# the frame (ppu.render_dirty, the whole-frame render skip): a game that
+# rewrites the same palette or OAM every frame draws the same picture.
+proc vid_store16(ppu: PPU; buf: var seq[byte]; offset: uint32; val: uint16) {.inline.} =
+  if read_u16_ptr(buf, offset) != val:
+    ppu.render_dirty = true
+    write_u16_ptr(buf, offset, val)
+
+proc vid_store32(ppu: PPU; buf: var seq[byte]; offset: uint32; val: uint32) {.inline.} =
+  if read_u32_ptr(buf, offset) != val:
+    ppu.render_dirty = true
+    write_u32_ptr(buf, offset, val)
+
+# The OBJ layer's contention map (contention.nim cont_build_obj) reads only
+# where each entry sits vertically and how big it is: attr0's Y, affine,
+# double-size/disable and shape bits and attr1's size bits. A store that
+# leaves those alone -- attr1's X and flips, attr2, the affine parameters --
+# keeps the map, which a game rewriting OAM from H-blank DMA every line
+# would otherwise rebuild on every access; one that moves an entry keeps it
+# too unless the entry is on the map's line (cont_obj_entry_moved).
+const OAM_CONT_MASK16 = [0xC3FF'u16, 0xC000'u16, 0'u16, 0'u16]
+
+proc oam_store16(ppu: PPU; offset: uint32; val: uint16) {.inline.} =
+  ppu.oam_view_stale = true   # as every OAM store (serialized); see oam_touched
+  let old = read_u16_ptr(ppu.oam, offset)
+  if old != val:
+    ppu.render_dirty = true
+    write_u16_ptr(ppu.oam, offset, val)
+    if ((old xor val) and OAM_CONT_MASK16[(offset shr 1) and 3]) != 0:
+      let e = offset and not 7'u32
+      let a0 = if (offset and 2) == 0: old else: read_u16_ptr(ppu.oam, e)
+      let a1 = if (offset and 2) != 0: old else: read_u16_ptr(ppu.oam, e + 2)
+      ppu.cont_obj_entry_moved(int(offset shr 3), a0, a1)
+
+proc oam_store32(ppu: PPU; offset: uint32; val: uint32) {.inline.} =
+  ppu.oam_view_stale = true   # as every OAM store (serialized); see oam_touched
+  let old = read_u32_ptr(ppu.oam, offset)
+  if old != val:
+    ppu.render_dirty = true
+    write_u32_ptr(ppu.oam, offset, val)
+    # word 0 of an entry is attr0 | attr1 shl 16; word 1 (attr2, the
+    # affine parameter) is never read by the map
+    if (offset and 4) == 0 and ((old xor val) and 0xC000C3FF'u32) != 0:
+      ppu.cont_obj_entry_moved(int(offset shr 3), uint16(old), uint16(old shr 16))
 
 # ROM reads: the buffer is sized to the next power of two >= the cart; reads
 # past it return the open-bus pattern
@@ -851,15 +923,13 @@ proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
     wcWatch(bus, address, 1)
   of 0x4: bus.gba.mmio[address] = value
   of 0x5:
-    bus.gba.ppu.render_dirty = true
-    write_u16_ptr(bus.gba.ppu.pram, address and 0x3FE'u32, 0x0101'u16 * uint16(value))
+    bus.gba.ppu.vid_store16(bus.gba.ppu.pram, address and 0x3FE'u32, 0x0101'u16 * uint16(value))
   of 0x6:
     let limit: uint32 = if bus.gba.ppu.bitmap(): 0x13FFF'u32 else: 0x0FFFF'u32
     var a = 0x1FFFE'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
     if a <= limit:
-      bus.gba.ppu.render_dirty = true
-      write_u16_ptr(bus.gba.ppu.vram, a, 0x0101'u16 * uint16(value))
+      bus.gba.ppu.vid_store16(bus.gba.ppu.vram, a, 0x0101'u16 * uint16(value))
   of 0x7: discard  # can't write bytes to oam
   of 0x8, 0xD:
     if address_in_gpio(address):
@@ -897,17 +967,13 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
       bus.write_byte_internal(address, uint8(value))
       bus.write_byte_internal(address + 1, uint8(value shr 8))
   of 0x5:
-    bus.gba.ppu.render_dirty = true
-    write_u16_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
+    bus.gba.ppu.vid_store16(bus.gba.ppu.pram, address and 0x3FF'u32, value)
   of 0x6:
     var a = 0x1FFFF'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
-    bus.gba.ppu.render_dirty = true
-    write_u16_ptr(bus.gba.ppu.vram, a, value)
+    bus.gba.ppu.vid_store16(bus.gba.ppu.vram, a, value)
   of 0x7:
-    bus.gba.ppu.render_dirty = true
-    bus.gba.ppu.oam_touched()
-    write_u16_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
+    bus.gba.ppu.oam_store16(address and 0x3FF'u32, value)
   of 0x8, 0xD:
     if address_in_gpio(address):
       bus.gpio[address] = uint8(value)
@@ -954,17 +1020,13 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
       bus.write_byte_internal(address + 2, uint8(value shr 16))
       bus.write_byte_internal(address + 3, uint8(value shr 24))
   of 0x5:
-    bus.gba.ppu.render_dirty = true
-    write_u32_ptr(bus.gba.ppu.pram, address and 0x3FF'u32, value)
+    bus.gba.ppu.vid_store32(bus.gba.ppu.pram, address and 0x3FF'u32, value)
   of 0x6:
     var a = 0x1FFFF'u32 and address
     if a > 0x17FFF'u32: a -= 0x8000'u32
-    bus.gba.ppu.render_dirty = true
-    write_u32_ptr(bus.gba.ppu.vram, a, value)
+    bus.gba.ppu.vid_store32(bus.gba.ppu.vram, a, value)
   of 0x7:
-    bus.gba.ppu.render_dirty = true
-    bus.gba.ppu.oam_touched()
-    write_u32_ptr(bus.gba.ppu.oam, address and 0x3FF'u32, value)
+    bus.gba.ppu.oam_store32(address and 0x3FF'u32, value)
   of 0x8, 0xD:
     if address_in_gpio(address):
       bus.gpio[address] = uint8(value)
@@ -1087,7 +1149,6 @@ proc write_word_mapped(bus: Bus; address: uint32; value: uint32) =
 
 # ---- Instruction-fetch fast path ----
 
-proc window_fetch_sync(bus: Bus; cost: int)
 proc fetch_half_miss(bus: Bus; address: uint32): uint16
 proc fetch_word_miss(bus: Bus; address: uint32): uint32
 proc swap_fetch_half(bus: Bus; address: uint32): uint16 {.noinline.}
@@ -1391,6 +1452,7 @@ template load_sync(bus: Bus; address: uint32; cost: int; size: int;
       bus.load_addr = address
       bus.load_size = size
       bus.load_pc = bus.gba.cpu.r[15]
+      when DMA_READS_IO_LOAD: bus.load_io_ok = false
       bus.load_end = bus.bus_now()
       bus.load_start = bus.load_end - CycleCount(cost)
     when IMM_ACCESS_WAIT:
@@ -1429,6 +1491,15 @@ template store_sync(bus: Bus; address: uint32; cost: int; access: untyped) =
 # test (SB_SWAP, swap_read_word) sits only where MEMCNT's swap can reach and
 # costs an MMIO access nothing.
 
+proc io_loaded[T: uint8 | uint16 | uint32](bus: Bus; address: uint32; v: T): T {.inline.} =
+  ## The value a CPU load read from an I/O register, in its byte lanes, kept
+  ## for a burst that finds it on the bus (DMA_READS_IO_LOAD,
+  ## Bus.dma_bus_word)
+  when DMA_READS_CPU_BUS and DMA_READS_IO_LOAD:
+    bus.load_io = uint32(v) shl ((address and uint32(4 - sizeof(T))) * 8)
+    bus.load_io_ok = true
+  v
+
 proc `[]`*(bus: Bus; address: uint32): uint8 =
   bdWatchRead(address, 1)
   bus.rom_cool()
@@ -1436,7 +1507,8 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.cycles += cost
   if bus_page(address) == 0x4:
     if not bus.dma_active:
-      bus.load_sync(address, cost, (if bus.ldrsh_odd: 2 else: 1), bus.read_byte_internal(address))
+      bus.load_sync(address, cost, (if bus.ldrsh_odd: 2 else: 1), bus.io_loaded(address, bus.read_byte_internal(address)))
+      return bus.io_loaded(address, bus.read_byte_internal(address))
   elif bus.sync_bits != 0:
     if not bus.dma_active:
       bus.load_sync(address, cost, (if bus.ldrsh_odd: 2 else: 1), bus.read_byte_mapped(address))
@@ -1451,7 +1523,8 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
   bus.cycles += cost
   if bus_page(address) == 0x4:
     if not bus.dma_active:
-      bus.load_sync(address, cost, 2, bus.read_half_internal(address))
+      bus.load_sync(address, cost, 2, bus.io_loaded(address, bus.read_half_internal(address)))
+      return bus.io_loaded(address, bus.read_half_internal(address))
   elif bus.sync_bits != 0:
     if not bus.dma_active:
       bus.load_sync(address, cost, 2, bus.read_half_mapped(address))
@@ -1517,7 +1590,8 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
   bus.cycles += cost
   if bus_page(address) == 0x4:
     if not bus.dma_active:
-      bus.load_sync(address, cost, 4, bus.read_word_internal(address))
+      bus.load_sync(address, cost, 4, bus.io_loaded(address, bus.read_word_internal(address)))
+      return bus.io_loaded(address, bus.read_word_internal(address))
   elif bus.sync_bits != 0:
     if not bus.dma_active:
       bus.load_sync(address, cost, 4, bus.read_word_mapped(address))
@@ -1981,6 +2055,31 @@ proc dma_bus_word(bus: Bus): uint32 =
     of 0x7:
       if bits_range(a, 28, 31) == 0:
         return bus.read_word_internal(a and not 3'u32)
+    of 0x4:
+      when DMA_READS_IO_LOAD:
+        # The I/O bus is 32 bits wide and a load of any width drives the
+        # whole word: hdmaphase.s on an AGB SP, an `ldrh` or `ldrb` of VCOUNT
+        # (04000006) leaves DISPSTAT (2E26) on the lower half as well. The
+        # loaded lanes are the value the CPU read; the others are read now,
+        # with the burst's own word for any that would read the bus back.
+        if bits_range(a, 28, 31) == 0:
+          # A burst granted as the load's access ends runs before the core
+          # performs the read: the load's lanes as they read now.
+          let lanes = if not bus.load_io_ok: 0'u32
+                      else:
+                        case bus.load_size
+                        of 4: 0xFFFFFFFF'u32
+                        of 2:
+                          if (a and 1) != 0: 0xFF'u32 shl ((a and 3) * 8)  # ldrsh_odd's byte
+                          else: 0xFFFF'u32 shl ((a and 2) * 8)
+                        else: 0xFF'u32 shl ((a and 3) * 8)
+          var w = bus.load_io and lanes
+          bus.dma_bus_fresh = false
+          for k in 0'u32 .. 3'u32:
+            if (lanes and (0xFF'u32 shl (8 * k))) == 0:
+              w = w or (uint32(bus.read_byte_internal((a and not 3'u32) + k)) shl (8 * k))
+          bus.dma_bus_fresh = true
+          return w
     of 0x3:
       if bits_range(a, 28, 31) == 0:
         let w = bus.read_word_internal(a and not 3'u32)
@@ -2003,7 +2102,16 @@ proc dma_bus_word(bus: Bus): uint32 =
   # next one, whose fetch has not happened.
   var pc = bus.gba.cpu.r[15]
   if bus.synced == 0 and not bus.gba.cpu.halted:
-    pc -= (if bus.gba.cpu.cpsr.thumb: 2'u32 else: 4'u32)
+    let step = if bus.gba.cpu.cpsr.thumb: 2'u32 else: 4'u32
+    pc -= step
+    when DMA_SEES_REFILL_FETCH:
+      # ... and when that instruction ended in a refill whose second fetch
+      # had not begun at the request, the first is the newest on the bus
+      if bus.gba.cpu.refill_pending and bus.dma_bus_tail > 0:
+        let page = bits_range(bus.gba.cpu.r[15], 24, 27)
+        let second = if bus.gba.cpu.cpsr.thumb: int(bus.wait16_s[page])
+                     else: int(bus.wait32_s[page])
+        if bus.dma_bus_tail >= second: pc -= step
   bus.fetch_bus_word(pc)
 
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =

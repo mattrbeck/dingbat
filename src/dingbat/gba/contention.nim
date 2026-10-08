@@ -166,11 +166,13 @@ proc cont_build_pram(ppu: PPU; key: uint32) =
 
 const OBJ_SCAN_START = 40
 
-proc cont_obj_on_line(sp: ptr UncheckedArray[Sprite]; e, target: int): bool {.inline.} =
-  let s = sp[e]
+proc cont_obj_on_line(s: Sprite; target: int): bool {.inline.} =
   if (s.attr0 and 0x0300'u16) == 0x0200'u16: return false  # disabled
   let g = obj_geometry(s)
   g.h > 0 and g.y <= target and target < g.y + g.h
+
+proc cont_obj_on_line(sp: ptr UncheckedArray[Sprite]; e, target: int): bool {.inline.} =
+  sp[e].cont_obj_on_line(target)
 
 proc cont_build_obj(ppu: PPU; line: int; key: int64) =
   ppu.cont_objv.cont_clear()
@@ -234,6 +236,21 @@ proc cont_build_obj(ppu: PPU; line: int; key: int64) =
         i = e + 2
         break
 
+when defined(contObjVerify):
+  var contObjVerifyHits*: int = 0
+
+proc cont_obj_entry_moved(ppu: PPU; e: int; old0, old1: uint16) =
+  ## OAM entry e's attr0/attr1 just changed in a bit the map reads (bus.nim
+  ## oam_store16/32), from (old0, old1). An entry off the map's target line
+  ## both before and after costs the scan the same two dots, so only one on
+  ## it either way changes the map.
+  if ppu.cont_obj_key < 0: return
+  let target = (int(ppu.cont_obj_key shr 8) + 1) mod 228
+  let sp = cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
+  if sp.cont_obj_on_line(e, target) or
+     Sprite(attr0: old0, attr1: old1).cont_obj_on_line(target):
+    ppu.cont_obj_key = -1
+
 proc cont_obj_free(ppu: PPU; want_oam: bool; line, t: int): int =
   ## The first dot at or after t the OBJ layer does not hold OAM / OBJ VRAM;
   ## both relative to `line`'s start. Dots 0-39 of a line still belong to
@@ -250,9 +267,20 @@ proc cont_obj_free(ppu: PPU; want_oam: bool; line, t: int): int =
     d += 1232
     base -= 1232
   for hop in 0 .. 2:
-    # OAM writes clear the key (ppu.oam_touched)
+    # OAM stores that change the map clear the key (cont_obj_entry_moved;
+    # ppu.oam_touched for the rest)
     let key = (int64(l) shl 8) or int64((uint16(ppu.dispcnt) shr 5) and 0xFF)
     if key != ppu.cont_obj_key: ppu.cont_build_obj(l, key)
+    else:
+      when defined(contObjVerify):
+        # Self-checking build: a kept map must equal a fresh one, or a
+        # store that changed it left it keyed (cont_obj_entry_moved)
+        let (kept_v, kept_o) = (ppu.cont_objv, ppu.cont_oam)
+        ppu.cont_build_obj(l, key)
+        inc contObjVerifyHits
+        if kept_v != ppu.cont_objv or kept_o != ppu.cont_oam:
+          quit("contObjVerify: stale OBJ contention map, line " & $l &
+               " frame " & $ppu.frame, 3)
     let f = if want_oam: ppu.cont_oam.cont_next_free(d)
             else: ppu.cont_objv.cont_next_free(d)
     if f < 1232 + OBJ_SCAN_START:
@@ -263,18 +291,43 @@ proc cont_obj_free(ppu: PPU; want_oam: bool; line, t: int): int =
     base += 1232
   base + d
 
+proc contend_wait_at(bus: Bus; address: uint32; is32: bool; line, dot: int): int {.raises: [].}
+
 proc contend_wait(bus: Bus; address: uint32; is32: bool; cost: int): int =
   ## Cycles an access to palette RAM, VRAM or OAM that started `cost` cycles
   ## ago waits for the renderer.
   if address >= 0x10000000'u32: return 0
   let ppu {.cursor.} = bus.gba.ppu
-  let page = int(bits_range(address, 24, 27))
   var dot = int(int64(bus.sched.cycles) + int64(bus.cycles - cost) - ppu.line_start_cycle)
   var line = int(ppu.vcount)
   while dot >= 1232:
     dot -= 1232
     line = if line == 227: 0 else: line + 1
   if dot < 0: return 0
+  bus.contend_wait_at(address, is32, line, dot)
+
+proc contend_wait_ahead*(bus: Bus; address: uint32; is32: bool; ahead: int): int =
+  ## The renderer's wait for an access made `ahead` cycles from now, with
+  ## the display registers as they stand: for the HLE BIOS's routine
+  ## bodies, which make their accesses all at once and price them by when
+  ## the real routine makes them. Gated as Bus.contended is
+  ## (ppu.contend_mask_update), but by the line the access falls on.
+  if not CONTENTION or address >= 0x10000000'u32: return 0
+  let page = bits_range(address, 24, 27)
+  if page < 5 or page > 7: return 0
+  let ppu {.cursor.} = bus.gba.ppu
+  if ppu.dispcnt.forced_blank and not bit(uint16(ppu.dispcnt), 12): return 0
+  let d = int64(bus.sched.cycles) + int64(bus.cycles) + int64(ahead) - ppu.line_start_cycle
+  if d < 0: return 0
+  # the frame repeats every 228 lines
+  let line = int((int64(ppu.vcount) + d div 1232) mod 228)
+  if line >= 160 and line != 227: return 0
+  bus.contend_wait_at(address, is32, line, int(d mod 1232))
+
+proc contend_wait_at(bus: Bus; address: uint32; is32: bool; line, dot: int): int {.raises: [].} =
+  ## contend_wait for an access starting on `dot` of `line`.
+  let ppu {.cursor.} = bus.gba.ppu
+  let page = int(bits_range(address, 24, 27))
   var obj = page == 7
   if page == 6:
     var a = address and 0x1FFFF'u32

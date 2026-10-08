@@ -1,0 +1,58 @@
+@title Mega Man Battle Network 5 - Team Protoman (USA)
+@file Megaman Battle Network 5 - Team Protoman (U).gba
+@game BRBE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game, A through the opening to Lan's room (mail from MegaMan), then
+# PET > Save at 00:01 play time. [load] CONTINUE (cursor starts on it) and the
+# PET menu over Lan's room.
+# Seen while authoring: the save is XOR-masked with a random value and all
+# three emulators wrote a different save (dingbat-bios, mgba and nba each have
+# their own sha1), so their random states had diverged by f4928 although every
+# screen up to there looked the same.
+
+[new]
+wait 600
+checkpoint title window=30
+press START hold=10
+wait 60
+checkpoint main_menu window=30
+press A hold=10
+wait 300
+checkpoint intro window=30
+tap A times=60 every=20 hold=4
+tap A times=60 every=20 hold=4
+checkpoint lans_room window=30
+press START hold=10
+wait 40
+tap A times=30 every=20 hold=4
+press START hold=10
+wait 40
+wait 60
+tap A times=10 every=20 hold=4
+press START hold=10
+wait 40
+checkpoint pet_menu window=30
+tap DOWN times=7 every=16 hold=8
+wait 10
+press A hold=8
+wait 40
+checkpoint save_prompt window=30
+press A hold=8
+wait 60
+checkpoint saved window=0
+wait 60
+
+[load]
+wait 600
+wait 60
+press START hold=10
+wait 60
+checkpoint continue_menu window=30
+press A hold=10
+wait 300
+checkpoint resumed window=30
+press START hold=10
+wait 40
+checkpoint resumed_menu window=30

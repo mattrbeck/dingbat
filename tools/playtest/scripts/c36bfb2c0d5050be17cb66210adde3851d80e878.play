@@ -1,0 +1,95 @@
+@title Starsky & Hutch (Europe)
+@file Starsky & Hutch (E) (M5).gba
+@game AYHP
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# English, Story Mode > New Game, name PL1, save slot 1 (the game writes its
+# EEPROM here), Season 1 Episode 1 "Fast Cars": the briefing, then the
+# chase at full throttle into a building. [load]: Story Mode > Resume Game
+# shows "1. PL1" and resumes episode 1.
+# Finding ([load], select_game): nba shows slot 1 empty with its own save
+# (an 8 KB file for this 4 Kbit EEPROM) and stays on the Select Game screen;
+# dingbat-bios and mgba read theirs and resume.
+# Regression guard: before 2026-10-02 an S-bit write to r15 in System mode
+# (the run-time library's `movs pc, lr`) restored a stale SPSR and came back
+# in Thumb state (docs/playtest-bugs.md section 46): dingbat hung on the way
+# into the episode.
+
+[new]
+wait 600
+wait 300
+wait 300
+checkpoint legal window=30
+press A
+wait 200
+wait 300
+# until changed timeout=1500 every=10  [reached dingbat-bios+120 mgba+120 nba+110]
+wait 124
+wait 120
+checkpoint language window=30
+press A
+wait 200
+wait 120
+checkpoint title window=30
+press START
+wait 150
+checkpoint main_menu window=30
+press A
+wait 200
+checkpoint story_mode window=30
+press A
+wait 200
+checkpoint name_entry window=30
+press DOWN
+wait 30
+press A
+wait 200
+wait 60
+checkpoint save_slot window=30
+press A
+wait 200
+checkpoint episode1 window=30
+press A
+wait 300
+checkpoint briefing window=30
+press A
+wait 300
+press A
+wait 300
+checkpoint driving window=30
+hold A
+wait 240
+checkpoint chase window=30
+release
+
+[load]
+wait 1200
+press A
+wait 500
+# until changed timeout=1500 every=10  [reached dingbat-bios+140 mgba+140 nba+140]
+wait 144
+wait 120
+press A
+wait 320
+checkpoint title window=30
+press START
+wait 150
+press A
+wait 200
+press DOWN
+wait 30
+press A
+wait 200
+wait 60
+checkpoint select_game window=30
+press A
+wait 200
+wait 100
+checkpoint episode1 window=30
+press A
+wait 300
+press A
+wait 300
+press A
+wait 300
+checkpoint driving window=30

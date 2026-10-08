@@ -1,0 +1,84 @@
+@title F-Zero - GP Legend (USA)
+@file F-Zero GP Legend (U).gba
+@game BFZE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New entry "AA" (SRAM is written when the entry is created), Story mode as
+# Rick Wheeler: mission 1 cutscene (A through the text, START skips), drive
+# the start of the race, pause, GIVE UP, MISSION FAILED, retry NO, back to
+# the story character select. [load]: entry 1 shows the saved name, main
+# menu, story select.
+# Findings in the race (f2976 on): the three emulators start the race on
+# different frames after the START skip (timer 0'00"86 / 88 / 85 at f3216
+# for dingbat-bios / mgba / nba) and mgba draws garbage tiles where the
+# course map sits (bottom left) on every race frame; dingbat-bios and nba
+# show a blank corner there. Race checkpoints are compare=none/text.
+[new]
+wait 600
+wait 120
+# until text PRESS timeout=900 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 30
+checkpoint title window=30
+press START
+wait 120
+checkpoint entries window=30
+press A
+wait 90
+press A after=20
+press A after=20
+checkpoint name_entry window=30
+press START after=30
+press A
+wait 120
+checkpoint entry_made window=30
+press A
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+press A
+wait 180
+checkpoint story_rick window=30
+press A
+wait 240
+press A
+wait 240
+checkpoint cutscene window=30 compare=text
+tap A times=10 every=30 hold=4
+press START
+wait 120
+wait 120
+press A hold=120
+checkpoint racing window=30 compare=none
+hold A
+wait 120
+release
+press START
+wait 30
+checkpoint pause_menu window=30 compare=text
+press DOWN after=10
+press A
+wait 120
+checkpoint mission_failed window=30 compare=text
+press A
+wait 150
+checkpoint results window=30 compare=text
+press RIGHT after=10
+press A
+wait 180
+checkpoint back_to_select window=30
+
+[load]
+wait 734
+checkpoint title window=30
+press START
+wait 120
+checkpoint entry_list window=30
+press A
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+checkpoint story_select window=30

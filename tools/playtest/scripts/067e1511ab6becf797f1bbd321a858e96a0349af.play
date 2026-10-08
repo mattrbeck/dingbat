@@ -2,17 +2,18 @@
 @file Metal Slug Advance (U).gba
 @game BSME
 @chip EEPROM
+@frozen dingbat-bios,mgba,nba
 
 # File 001 > Normal > Walter; B skips the landing cutscene to the Base Camp
 # menu, whose SAVE writes the file ("Game data saved."). [load]: file 001
 # now holds the game and continues into Base Camp.
 # The menu font reads poorly under OCR, so the Base Camp steps are paced by
 # frames (all three emulators run them frame-identically).
-
 [new]
 wait 600
 press START
-until text "FILE" timeout=600 every=10
+# until text FILE timeout=600 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
 wait 30
 checkpoint file_select_empty window=0
 press A
@@ -22,10 +23,12 @@ press A
 wait 180
 checkpoint soldier_select window=0
 press A
-until text "LIFE" timeout=900 every=10
+# until text LIFE timeout=900 every=10  [reached dingbat-bios+180 mgba+180 nba+180]
+wait 184
 wait 60
 checkpoint landing window=30
-mash B until text "CAMP" timeout=1200 every=30
+# mash B until text CAMP timeout=1200 every=30  [taps dingbat-bios:16 mgba:16 nba:17]
+tap B times=17 every=30 hold=4
 wait 60
 checkpoint base_camp window=0
 press DOWN after=20
@@ -41,11 +44,14 @@ checkpoint saved window=0
 [load]
 wait 600
 press START
-until text "FILE" timeout=600 every=10
+# until text FILE timeout=600 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
 wait 30
 checkpoint file_select_saved window=0
 press A
-until text "CAMP" timeout=1200 every=10
+# nba could not follow from here: 'until text "CAMP" timeout=1200 every=10': timed out after 1200 frames waiting for text 'CAMP'
+# until text CAMP timeout=1200 every=10  [reached dingbat-bios+70 mgba+70]
+wait 74
 wait 60
 checkpoint resumed_base_camp window=0
 press DOWN after=20

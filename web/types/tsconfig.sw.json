@@ -1,5 +1,6 @@
 {
-  // Typecheck project for the service worker (its own scope, WebWorker lib).
+  // Typecheck project for the service worker and the checkpoint worker
+  // (worker scopes, WebWorker lib).
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
@@ -11,6 +12,7 @@
     "types": []
   },
   "files": [
-    "../sw.js"
+    "../sw.js",
+    "../ckptworker.js"
   ]
 }

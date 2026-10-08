@@ -1,32 +1,49 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/index.js: anyModalOpen askRomWarn buildSyncModal closeRomWarnModal closeSettingsModal closeUpdateModal confirmSuspectRom confirmTombstones handleRomFile openRenameModal openSettingsModal releaseFocus renameGame renameInventory runFullSync settleRomWarn trapFocus on:popstate on:drop
+-- @models web/index.js: anyModalOpen askRomWarn buildSyncModal closeRomWarnModal closeSettingsModal closeUpdateModal confirmSuspectRom confirmTombstones endClipExport handleRomFile openExportModal openRenameModal openSettingsModal releaseFocus renameGame renameInventory runFullSync settleRomWarn startClipExport trapFocus on:popstate on:drop
 
 /-
-# Modal focus management and modal plumbing (web/index.js @ dd7ba741f)
+# Modal focus management and modal plumbing (web/index.js)
+
+Written against dd7ba741f and remodelled at 03f88d6c, where the clip
+export's banner has become a progress panel (`#clip-progress-modal`) that
+takes the focus trap and closes itself when the export ends. `step` follows
+the code as fixed in fbdb7975 (a drop while a clip records is refused, 12135-
+12138); the 03f88d6c counterexample it fixed is replayed as
+`regress_drop_during_clip_export_loses_focus`. Caught up to 5ea4d552: the one
+modelled function changed since is `renameGame` (bfe5d5c5: `renamedAway`
+gains the old name and loses the new one after its collision checks, and
+loses the old one again on a rollback), which touches no modal state; it is
+still one await here. Line numbers are web/index.js at 5ea4d552.
 
 What the code has (there is no modal *stack*):
 
 * ONE focus-trap slot: `modalTrapOverlay` (owner), `modalReturnFocus` (where
-  focus goes back), `modalTrapHandler` (index.js 425-427). `trapFocus`
-  (439) overwrites all three; `releaseFocus` (460) is a no-op unless its
+  focus goes back), `modalTrapHandler` (index.js 456-458). `trapFocus`
+  (470) overwrites all three; `releaseFocus` (491) is a no-op unless its
   argument is the owner, else it restores `modalReturnFocus` if it is still
-  connected and displayed, falling back to `menuBtn`.
+  connected and displayed (501), falling back to `menuBtn`.
 * Static overlays with their own open flag: settings (`openSettingsModal`
-  1112, `closeSettingsModal` 1146, also closed by the popstate/back handler
-  943), update (206/201), the ROM-check prompt (`askRomWarn` 8057,
-  `settleRomWarn` 8045, `closeRomWarnModal` 8053).
-* Dynamic "sync" overlays built by `buildSyncModal` (3607): their Escape
-  listener is document-*capture* and calls `stopPropagation`, so while one is
-  up the global Escape handler (5213, document bubble) does not run. Two users:
-  `openRenameModal` (3375, guarded by `renameModalOpen`) and
-  `confirmTombstones` (3559, a Promise resolved by `done`).
-* The global Escape handler closes every static modal blindly (5213).
-* Promise-returning modals: `confirmTombstones` (3559) and `askRomWarn` (8057).
+  1166, `closeSettingsModal` 1201, also closed by the popstate/back handler
+  997), update (237/232), the ROM-check prompt (`askRomWarn` 11968,
+  `settleRomWarn` 11956, `closeRomWarnModal` 11964), and the clip export's
+  progress panel (opened by `startClipExport`, 12691-12692; closed by
+  `endClipExport`, 12466-12469, which runs when the export ends, from its
+  Cancel 12702, or from a load aborting it, whatever has the trap then).
+* Dynamic "sync" overlays built by `buildSyncModal` (5213): their Escape
+  listener is document-*capture* and calls `stopPropagation` (5239-5242), so
+  while one is up the global Escape handler (7463, document bubble) does not
+  run. Three users: `openRenameModal` (4981, guarded by `renameModalOpen`),
+  `openExportModal` (guarded by `exportModalOpen`, the same shape: storage
+  reads, then the overlay; rename stands for it) and `confirmTombstones`
+  (5165, a Promise resolved by `done`).
+* The global Escape handler closes every static modal blindly (7463-7482),
+  except the progress panel, which only its Cancel or the export's end closes.
+* Promise-returning modals: `confirmTombstones` (5165) and `askRomWarn` (11968).
 * There is no body scroll-lock or `inert` flag tied to modals: overlays are
-  `position: fixed; inset: 0; z-index: 500` (styles.css 3361) and
-  `anyModalOpen()` (8999) is computed from the DOM (`.modal-overlay.open`), so
+  `position: fixed; inset: 0; z-index: 500` (styles.css 4175) and
+  `anyModalOpen()` (13240) is computed from the DOM (`.modal-overlay.open`), so
   "flag set iff stack non-empty" holds by construction and is not modelled.
-  (`inert` is used only for the settings sheet's off-stage screen, 889.)
+  (`inert` is used only for the settings sheet's off-stage screen, 941-949.)
 
 ## Abstractions
 
@@ -39,26 +56,35 @@ What the code has (there is no modal *stack*):
 * Focus fix-up: when an overlay closes while focus is inside it, the browser
   moves focus to `body` (`fixup`, applied at the end of every event).
 * Every overlay has a focusable element, so `trapFocus` always focuses inside.
-* Saves/states/cheats/report/rewind/clip/thumbs modals are the same pattern as
-  settings/update (flag + trapFocus/releaseFocus + closed by Escape); settings
-  and update stand for them.
-* `openRenameModal`'s two storage reads (3380-3383) are one await
-  (`renameLoaded`/`renameLoadFail`); `renameGame` (3514) is one await
-  (`renameResult`). `handleRomFile`'s FileReader + `confirmSuspectRom` is one
-  event (`dropSuspect`): nothing between them touches modal state.
+* Saves/states/moments/cheats/report/rewind/clip/thumbs modals are the same
+  pattern as settings/update (flag + trapFocus/releaseFocus + closed by
+  Escape); settings and update stand for them. The clip range picker's Save
+  (13003) closes the picker (releasing the trap to where it was) and then
+  opens the progress panel: `clipStart`, from nothing open, with focus where
+  the picker's close put it.
+* `openRenameModal`'s two storage reads (4987-4989, nothing modal between
+  them) are one await (`renameLoaded`/`renameLoadFail`); `renameGame` (5138)
+  is one await (`renameResult`); its `renamedAway` bookkeeping (4854-4855,
+  4956: the pull's write skip, DriveLibrary) is no modal state. `handleRomFile`'s FileReader +
+  `confirmSuspectRom` is one event (`dropSuspect`): nothing between them
+  touches modal state.
 * A pending `runFullSync` is one flag; it reaches `confirmTombstones` at most
-  once per sync (`syncTomb`) and finishes when the promise settles. Only one
-  sync at a time (the Drive sync machine's `runExclusive` chain, 2912).
+  once per sync (`syncTomb`, 4305) and finishes when the promise settles. Only
+  one sync at a time (the Drive sync machine's `runExclusive` chain, 3796;
+  `runFullSync`'s own awaits before it, 4602-4605, touch no modal).
 * Escape with two sync overlays up fires both capture listeners; the model
   lets `escSync o` close one at a time (an over-approximation, sound for the
   invariants; no counterexample below needs two sync overlays under Escape).
 * User clicks inside an overlay are enabled whenever it is open (the model
-  does not track z-order), again an over-approximation.
+  does not track z-order), again an over-approximation. The export's end
+  (`clipEnd`) is not a click: it lands whenever the encode or the recording
+  finishes, over whatever is open then.
 -/
 namespace WebState.Modals
 
 inductive Ov where
   | settings | update | romWarn
+  | progress           -- #clip-progress-modal
   | rename (i : Nat)   -- the i-th overlay built by openRenameModal
   | tomb (i : Nat)     -- the i-th overlay built by confirmTombstones
   deriving DecidableEq, Repr
@@ -69,14 +95,14 @@ inductive El where
 
 inductive RPhase where
   | idle     -- not created
-  | loading  -- openRenameModal awaiting libraryNames/renameInventory (3380)
+  | loading  -- openRenameModal awaiting libraryNames/renameInventory (4987-4989)
   | shown    -- overlay in the DOM
   | gone     -- dismissed (or the load failed)
   deriving DecidableEq, Repr
 
 structure RInst where
   phase    : RPhase := .idle
-  inflight : Bool := false   -- the Rename button's `await renameGame` (3514)
+  inflight : Bool := false   -- the Rename button's `await renameGame` (5138)
   deriving DecidableEq, Repr
 
 inductive PSt where
@@ -92,13 +118,14 @@ structure State where
   settingsOpen : Bool          -- settingsModal.classList "open"
   updateOpen   : Bool          -- updateModal.classList "open"
   romWarnOpen  : Bool          -- romWarnModal.classList "open"
-  owner        : Option Ov     -- modalTrapOverlay (427)
-  ret          : Option El     -- modalReturnFocus (425)
+  progressOpen : Bool          -- clipProgressModal.classList "open"
+  owner        : Option Ov     -- modalTrapOverlay (458)
+  ret          : Option El     -- modalReturnFocus (456)
   focus        : El            -- document.activeElement
-  warnResolve  : Option Nat    -- romWarnResolve (8043): which promise it resolves
+  warnResolve  : Option Nat    -- romWarnResolve (11954): which promise it resolves
   warnP        : Nat → PSt     -- the promises askRomWarn returned
   nextWarn     : Nat
-  renameFlag   : Bool          -- renameModalOpen (3373)
+  renameFlag   : Bool          -- renameModalOpen (4979)
   ren          : Nat → RInst
   nextRen      : Nat
   syncPending  : Bool          -- a runFullSync in flight
@@ -111,6 +138,7 @@ def init : State where
   settingsOpen := false
   updateOpen := false
   romWarnOpen := false
+  progressOpen := false
   owner := none
   ret := none
   focus := .page
@@ -130,6 +158,7 @@ def isOpen (s : State) : Ov → Bool
   | .settings => s.settingsOpen
   | .update => s.updateOpen
   | .romWarn => s.romWarnOpen
+  | .progress => s.progressOpen
   | .rename i => (s.ren i).phase == .shown
   | .tomb i => (s.tomb i).shown
 
@@ -137,21 +166,21 @@ def anySync (s : State) : Bool :=
   (List.range s.nextRen).any (fun i => (s.ren i).phase == .shown) ||
   (List.range s.nextTomb).any (fun i => (s.tomb i).shown)
 
-/-- anyModalOpen() (8999). -/
+/-- anyModalOpen() (13240). -/
 def anyOpen (s : State) : Bool :=
-  s.settingsOpen || s.updateOpen || s.romWarnOpen || anySync s
+  s.settingsOpen || s.updateOpen || s.romWarnOpen || s.progressOpen || anySync s
 
-/-- `isConnected && offsetParent !== null` (468). -/
+/-- `isConnected && offsetParent !== null` (501). -/
 def visible (s : State) : El → Bool
   | .inside o => isOpen s o
   | .body => false
   | _ => true
 
-/-- trapFocus (439). -/
+/-- trapFocus (470). -/
 def trapFocus (o : Ov) (s : State) : State :=
   { s with owner := some o, ret := some s.focus, focus := .inside o }
 
-/-- releaseFocus (460). -/
+/-- releaseFocus (491). -/
 def releaseFocus (o : Ov) (s : State) : State :=
   if s.owner = some o then
     { s with owner := none, ret := none,
@@ -172,15 +201,19 @@ def setRen (i : Nat) (r : RInst) (s : State) : State :=
 def setTomb (i : Nat) (t : TInst) (s : State) : State :=
   { s with tomb := fun j => if j = i then t else s.tomb j }
 
-/-- closeSettingsModal (1146): remove "open", then releaseFocus. -/
+/-- closeSettingsModal (1201): remove "open", then releaseFocus. -/
 def closeSettings (s : State) : State :=
   releaseFocus .settings { s with settingsOpen := false }
 
-/-- closeUpdateModal (201). -/
+/-- closeUpdateModal (232). -/
 def closeUpdate (s : State) : State :=
   releaseFocus .update { s with updateOpen := false }
 
-/-- settleRomWarn (8045): take the resolver, clear it, close, release, resolve. -/
+/-- endClipExport's close of the progress panel (12466-12469). -/
+def closeProgress (s : State) : State :=
+  if s.progressOpen then releaseFocus .progress { s with progressOpen := false } else s
+
+/-- settleRomWarn (11956): take the resolver, clear it, close, release, resolve. -/
 def settleRomWarn (s : State) : State :=
   let r := s.warnResolve
   let s := releaseFocus .romWarn { s with warnResolve := none, romWarnOpen := false }
@@ -188,25 +221,25 @@ def settleRomWarn (s : State) : State :=
   | some n => { s with warnP := fun j => if j = n then .settled else s.warnP j }
   | none => s
 
-/-- closeRomWarnModal (8053). -/
+/-- closeRomWarnModal (11964). -/
 def closeRomWarn (s : State) : State :=
   if s.warnResolve.isSome then settleRomWarn s else s
 
-/-- askRomWarn (8057): a new promise; the resolver slot is overwritten. -/
+/-- askRomWarn (11968): a new promise; the resolver slot is overwritten. -/
 def askRomWarn (s : State) : State :=
   let n := s.nextWarn
   trapFocus .romWarn
     { s with warnP := fun j => if j = n then .pending else s.warnP j,
              nextWarn := n + 1, warnResolve := some n, romWarnOpen := true }
 
-/-- The rename modal's `close` (3392): clear the flag, then `m.dismiss()`
-    (3645: remove the Escape listener, releaseFocus, overlay.remove()). -/
+/-- The rename modal's `close` (4998): clear the flag, then `m.dismiss()`
+    (5251: remove the Escape listener, releaseFocus, overlay.remove()). -/
 def renameClose (i : Nat) (s : State) : State :=
   let s := { s with renameFlag := false }
   let s := setRen i { s.ren i with phase := .gone } s
   releaseFocus (.rename i) s
 
-/-- confirmTombstones' `done` (3562): dismiss, then resolve. The sync resumes. -/
+/-- confirmTombstones' `done` (5168): dismiss, then resolve. The sync resumes. -/
 def tombDone (i : Nat) (s : State) : State :=
   let s := setTomb i { shown := false, settles := (s.tomb i).settles + 1 } s
   let s := releaseFocus (.tomb i) s
@@ -214,28 +247,33 @@ def tombDone (i : Nat) (s : State) : State :=
 
 inductive Event where
   | openSettings          -- #settings-btn / #open-settings click
-  | closeSettings         -- close button, swipe, or Android back (popstate 943)
-  | openUpdate            -- #update-btn with a game loaded (206)
-  | closeUpdate           -- Not now / x / backdrop (216-221)
-  | dropSuspect           -- a file failing looksLikeValidRom dropped (drop 8210 has no modal guard)
-  | romWarnLoad           -- "Load anyway" (8073)
-  | romWarnCancel         -- Cancel / x / backdrop (8074-8078)
-  | escGlobal             -- Escape reaching the document-bubble handler (5213)
-  | escSync (o : Ov)      -- Escape caught by a sync overlay's capture listener (3633)
-  | syncStart             -- Sync in the settings Drive section (2265) or on the home screen (3904)
-  | syncTomb              -- that sync's pull reaches confirmTombstones (2961)
+  | closeSettings         -- close button, swipe, or Android back (popstate 997)
+  | openUpdate            -- #update-btn with a game loaded (237-240)
+  | closeUpdate           -- Not now / x / backdrop (247-252)
+  | dropSuspect           -- a file failing looksLikeValidRom dropped (drop 12128: no modal guard,
+                          --   but refused with a toast while a clip records, 12135-12138)
+  | romWarnLoad           -- "Load anyway" (11985)
+  | romWarnCancel         -- Cancel / x / backdrop (11986-11990)
+  | escGlobal             -- Escape reaching the document-bubble handler (7463)
+  | escSync (o : Ov)      -- Escape caught by a sync overlay's capture listener (5239-5242)
+  | syncStart             -- Sync in the settings Drive section (3010), the account menu (5643)
+                          --   or on the home screen (5821)
+  | syncTomb              -- that sync's pull reaches confirmTombstones (4305)
   | tombChoose (i : Nat)  -- Restore / Continue / x / backdrop on tomb overlay i
-  | renameMenu            -- tile menu "Rename" (4751) -> openRenameModal, first segment
-  | renameLoaded (i : Nat)  -- its storage reads resolve: build the overlay (3396)
+  | renameMenu            -- tile menu "Rename" (6810) -> openRenameModal, first segment
+  | renameLoaded (i : Nat)  -- its storage reads resolve: build the overlay (5002)
   | renameLoadFail (i : Nat)
-  | renameGo (i : Nat)      -- "Rename" in the confirm pane (3511)
+  | renameGo (i : Nat)      -- "Rename" in the confirm pane (5135)
   | renameResult (i : Nat) (ok : Bool)  -- `await renameGame` resumes
   | renameCancel (i : Nat)  -- Cancel / Close / x / backdrop
+  | clipStart             -- the clip range picker's Save (13003): the progress panel opens
+  | clipEnd               -- the export ends (endClipExport 12461: done, failed, Cancel 12702,
+                          --   or a load's abort): the panel closes
   deriving DecidableEq, Repr
 
 /-- Only the settings modal is up (its own buttons are reachable). -/
 def onlySettings (s : State) : Bool :=
-  s.settingsOpen && !s.updateOpen && !s.romWarnOpen && !anySync s
+  s.settingsOpen && !s.updateOpen && !s.romWarnOpen && !s.progressOpen && !anySync s
 
 def isSyncOv : Ov → Bool
   | .rename _ | .tomb _ => true
@@ -246,7 +284,7 @@ def en (s : State) : Event → Bool
   | .closeSettings => s.settingsOpen
   | .openUpdate => !anyOpen s
   | .closeUpdate => s.updateOpen
-  | .dropSuspect => true
+  | .dropSuspect => !s.progressOpen
   | .romWarnLoad => s.romWarnOpen
   | .romWarnCancel => s.romWarnOpen
   | .escGlobal => !anySync s
@@ -260,6 +298,8 @@ def en (s : State) : Event → Bool
   | .renameGo i => (s.ren i).phase == .shown && !(s.ren i).inflight
   | .renameResult i _ => (s.ren i).inflight
   | .renameCancel i => (s.ren i).phase == .shown
+  | .clipStart => !anyOpen s
+  | .clipEnd => s.progressOpen
 
 def step (s : State) : Event → State
   | .openSettings => fixup (trapFocus .settings { s with settingsOpen := true, focus := .opener .settings })
@@ -269,7 +309,7 @@ def step (s : State) : Event → State
   | .dropSuspect => fixup (askRomWarn s)
   | .romWarnLoad => fixup (settleRomWarn s)
   | .romWarnCancel => fixup (closeRomWarn s)
-  -- 5213: closeSettingsModal(); ...; closeUpdateModal(); ...; closeRomWarnModal(); ...
+  -- 7463-7482: closeSettingsModal(); ...; closeUpdateModal(); ...; closeRomWarnModal(); ...
   | .escGlobal => fixup (closeRomWarn (closeUpdate (closeSettings s)))
   | .escSync o => match o with
     | .rename i => fixup (renameClose i s)
@@ -281,19 +321,22 @@ def step (s : State) : Event → State
     fixup (trapFocus (.tomb n)
       (setTomb n { shown := true, settles := 0 } { s with nextTomb := n + 1, tombWaiting := true }))
   | .tombChoose i => fixup (tombDone i s)
-  -- 3375: if (renameModalOpen) return; renameModalOpen = true; ...await
+  -- 4982-4983: if (renameModalOpen) return; renameModalOpen = true; ...await
   | .renameMenu =>
     if s.renameFlag then s
     else setRen s.nextRen { phase := .loading } { s with renameFlag := true, nextRen := s.nextRen + 1 }
   | .renameLoaded i => fixup (trapFocus (.rename i) (setRen i { s.ren i with phase := .shown } s))
   | .renameLoadFail i => setRen i { s.ren i with phase := .gone } { s with renameFlag := false }
   | .renameGo i => setRen i { s.ren i with inflight := true } s
-  -- 3514: let res = await renameGame(...); if (!res.ok) { showErrorStep(...); return; } close(); ...
+  -- 5138-5140: let res = await renameGame(...); if (!res.ok) { showErrorStep(...); return; } close(); ...
   | .renameResult i ok =>
     let s' := setRen i { s.ren i with inflight := false } s
     if ok then fixup (renameClose i s')
     else if (s.ren i).phase == .shown then s' else { s' with errorLost := true }
   | .renameCancel i => fixup (renameClose i s)
+  -- 12691-12692: classList.add("open"); trapFocus(clipProgressModal)
+  | .clipStart => fixup (trapFocus .progress { s with progressOpen := true })
+  | .clipEnd => fixup (closeProgress s)
 
 inductive Reachable : State → Prop
   | init : Reachable init
@@ -351,6 +394,7 @@ theorem inv_init : Inv init := by
 @[simp] theorem isOpen_settings (s : State) : isOpen s .settings = s.settingsOpen := rfl
 @[simp] theorem isOpen_update (s : State) : isOpen s .update = s.updateOpen := rfl
 @[simp] theorem isOpen_romWarn (s : State) : isOpen s .romWarn = s.romWarnOpen := rfl
+@[simp] theorem isOpen_progress (s : State) : isOpen s .progress = s.progressOpen := rfl
 @[simp] theorem isOpen_rename (s : State) (i) : isOpen s (.rename i) = ((s.ren i).phase == .shown) := rfl
 @[simp] theorem isOpen_tomb (s : State) (i) : isOpen s (.tomb i) = (s.tomb i).shown := rfl
 
@@ -384,6 +428,8 @@ variable (s : State) (o : Ov)
   unfold fixup; split <;> (try split) <;> rfl
 @[simp] theorem fixup_romWarn : (fixup s).romWarnOpen = s.romWarnOpen := by
   unfold fixup; split <;> (try split) <;> rfl
+@[simp] theorem fixup_progress : (fixup s).progressOpen = s.progressOpen := by
+  unfold fixup; split <;> (try split) <;> rfl
 @[simp] theorem fixup_ren : (fixup s).ren = s.ren := by
   unfold fixup; split <;> (try split) <;> rfl
 @[simp] theorem fixup_nextRen : (fixup s).nextRen = s.nextRen := by
@@ -416,6 +462,8 @@ variable (s : State) (o : Ov)
   unfold releaseFocus; split <;> rfl
 @[simp] theorem rel_romWarn : (releaseFocus o s).romWarnOpen = s.romWarnOpen := by
   unfold releaseFocus; split <;> rfl
+@[simp] theorem rel_progress : (releaseFocus o s).progressOpen = s.progressOpen := by
+  unfold releaseFocus; split <;> rfl
 @[simp] theorem rel_ren : (releaseFocus o s).ren = s.ren := by
   unfold releaseFocus; split <;> rfl
 @[simp] theorem rel_nextRen : (releaseFocus o s).nextRen = s.nextRen := by
@@ -443,14 +491,15 @@ end fields
 
 theorem isOpen_congr {s t : State} (h1 : s.settingsOpen = t.settingsOpen)
     (h2 : s.updateOpen = t.updateOpen) (h3 : s.romWarnOpen = t.romWarnOpen)
-    (h4 : s.ren = t.ren) (h5 : s.tomb = t.tomb) (o : Ov) : isOpen s o = isOpen t o := by
+    (h4 : s.ren = t.ren) (h5 : s.tomb = t.tomb) (h6 : s.progressOpen = t.progressOpen) (o : Ov) :
+    isOpen s o = isOpen t o := by
   cases o <;> simp [isOpen, *]
 
 @[simp] theorem isOpen_fixup (s : State) (o : Ov) : isOpen (fixup s) o = isOpen s o :=
-  isOpen_congr (by simp) (by simp) (by simp) (by simp) (by simp) o
+  isOpen_congr (by simp) (by simp) (by simp) (by simp) (by simp) (by simp) o
 
 @[simp] theorem isOpen_rel (s : State) (o o' : Ov) : isOpen (releaseFocus o' s) o = isOpen s o :=
-  isOpen_congr (by simp) (by simp) (by simp) (by simp) (by simp) o
+  isOpen_congr (by simp) (by simp) (by simp) (by simp) (by simp) (by simp) o
 
 /-- `ownerOpen` is handled by cases on the overlay; everything else by simp + grind. -/
 syntax "inv_tac" "[" Lean.Parser.Tactic.simpLemma,* "]" : tactic
@@ -470,6 +519,12 @@ include h
 
 theorem inv_closeSettings : Inv (closeSettings s) := by inv_tac [closeSettings]
 theorem inv_closeUpdate : Inv (closeUpdate s) := by inv_tac [closeUpdate]
+theorem inv_closeProgress : Inv (closeProgress s) := by
+  unfold closeProgress; split
+  · inv_tac []
+  · exact h
+theorem inv_clipStart : Inv (trapFocus .progress { s with progressOpen := true }) := by
+  inv_tac [trapFocus]
 theorem inv_settleRomWarn : Inv (settleRomWarn s) := by inv_tac [settleRomWarn]
 theorem inv_closeRomWarn : Inv (closeRomWarn s) := by
   unfold closeRomWarn; split
@@ -551,6 +606,8 @@ theorem inv_step {s : State} {e : Event} (h : Inv s) (he : en s e = true) : Inv 
   | renameCancel i =>
     simp [en] at he
     exact inv_fixup (inv_renameClose h i (ren_lt h (by intro hc; simp [hc] at he)))
+  | clipStart => exact inv_fixup (inv_clipStart h)
+  | clipEnd => exact inv_fixup (inv_closeProgress h)
 
 theorem inv_reachable {s : State} (h : Reachable s) : Inv s := by
   induction h with
@@ -596,6 +653,10 @@ theorem orph_closeSettings : Orphan (closeSettings s) n := by
   obtain ⟨a, b, c⟩ := h; unfold closeSettings; exact ⟨by simp [a], by simp [b], by simp [c]⟩
 theorem orph_closeUpdate : Orphan (closeUpdate s) n := by
   obtain ⟨a, b, c⟩ := h; unfold closeUpdate; exact ⟨by simp [a], by simp [b], by simp [c]⟩
+theorem orph_closeProgress : Orphan (closeProgress s) n := by
+  obtain ⟨a, b, c⟩ := h; unfold closeProgress; split
+  · exact ⟨by simp [a], by simp [b], by simp [c]⟩
+  · exact ⟨a, b, c⟩
 end orphan
 
 theorem orphan_stable {s : State} {n : Nat} (ho : Orphan s n) (e : Event) :
@@ -621,6 +682,7 @@ theorem orphan_stable {s : State} {n : Nat} (ho : Orphan s n) (e : Event) :
     · exact ho
     · exact ho
     · exact ho
+    · exact ho
     · apply orph_fixup; unfold renameClose; apply orph_rel; exact ⟨by simp [setRen, a], by simp [setRen, b], by simp [setRen, c]⟩
     · apply orph_fixup; unfold tombDone; simp only [Orphan, setTomb]; refine ⟨?_, ?_, ?_⟩ <;> simp [a, b, c]
   | renameMenu =>
@@ -639,6 +701,7 @@ theorem orphan_stable {s : State} {n : Nat} (ho : Orphan s n) (e : Event) :
     exact ⟨by simp [setRen, a], by simp [setRen, b], by simp [setRen, c]⟩
   | tombChoose i =>
     apply orph_fixup; unfold tombDone; simp only [Orphan, setTomb]; refine ⟨?_, ?_, ?_⟩ <;> simp [a, b, c]
+  | clipEnd => exact orph_fixup (orph_closeProgress ho)
   | _ =>
     simp only [step]
     all_goals first
@@ -683,11 +746,12 @@ def outside : El → Bool
 theorem anyOpen_false {s : State} (h : Inv s) (ha : anyOpen s = false) (o : Ov) :
     isOpen s o = false := by
   simp [anyOpen, anySync] at ha
-  obtain ⟨⟨⟨hs, hu⟩, hw⟩, hr, ht⟩ := ha
+  obtain ⟨⟨⟨⟨hs, hu⟩, hw⟩, hp⟩, hr, ht⟩ := ha
   cases o with
   | settings => simp [hs]
   | update => simp [hu]
   | romWarn => simp [hw]
+  | progress => simp [hp]
   | rename i =>
     rcases Nat.lt_or_ge i s.nextRen with hl | hl
     · simpa using hr i hl
@@ -753,7 +817,7 @@ theorem inv1_close {s t : State} (i1 : Inv1 s) (x : Ov)
     refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
     · intro o ho
       have ho' : isOpen t o = true := by
-        rw [← ho]; exact isOpen_congr rfl rfl rfl rfl rfl o
+        rw [← ho]; exact isOpen_congr rfl rfl rfl rfl rfl rfl o
       by_cases hox : o = x
       · subst hox; rw [hx] at ho'; cases ho'
       · have := i1.openOwns o (by rw [← hoth o hox]; exact ho')
@@ -800,7 +864,7 @@ theorem inv1_open {s t : State} (hi : Inv s) (ha : anyOpen s = false) (x : Ov)
     by_cases hox : o = x
     · subst hox; rfl
     · have : isOpen t o = true := by
-        rw [← ho]; exact (isOpen_congr rfl rfl rfl rfl rfl o).symm
+        rw [← ho]; exact (isOpen_congr rfl rfl rfl rfl rfl rfl o).symm
       rw [hoth o hox, hc o] at this; cases this
   · intro o _; exact ⟨f, rfl, hf⟩
   · intro h; simp [trapFocus] at h; subst h; simp [trapFocus, hS rfl]
@@ -816,13 +880,18 @@ theorem inv1_closeSettings : Inv1 (closeSettings s) :=
   inv1_close i1 .settings (by simp [isOpen]) (by intro o ho; cases o <;> simp_all [isOpen]) rfl rfl rfl
 theorem inv1_closeUpdate : Inv1 (closeUpdate s) :=
   inv1_close i1 .update (by simp [isOpen]) (by intro o ho; cases o <;> simp_all [isOpen]) rfl rfl rfl
+theorem inv1_closeProgress : Inv1 (closeProgress s) := by
+  unfold closeProgress; split
+  · exact inv1_close i1 .progress (by simp [isOpen]) (by intro o ho; cases o <;> simp_all [isOpen])
+      rfl rfl rfl
+  · exact i1
 theorem inv1_settle : Inv1 (settleRomWarn s) := by
   have h := inv1_close i1 .romWarn (t := { s with warnResolve := none, romWarnOpen := false })
     (by simp [isOpen]) (by intro o ho; cases o <;> simp_all [isOpen]) rfl rfl rfl
   unfold settleRomWarn
   cases s.warnResolve with
   | none => exact h
-  | some n => exact inv1_congr h rfl rfl rfl (fun o => isOpen_congr rfl rfl rfl rfl rfl o)
+  | some n => exact inv1_congr h rfl rfl rfl (fun o => isOpen_congr rfl rfl rfl rfl rfl rfl o)
 theorem inv1_closeRomWarn : Inv1 (closeRomWarn s) := by
   unfold closeRomWarn; split
   · exact inv1_settle i1
@@ -833,7 +902,7 @@ theorem inv1_renameClose (i : Nat) : Inv1 (renameClose i s) :=
 theorem inv1_tombDone (i : Nat) : Inv1 (tombDone i s) := by
   have h := inv1_close i1 (.tomb i) (t := setTomb i { shown := false, settles := (s.tomb i).settles + 1 } s)
     (by simp [isOpen, setTomb]) (by intro o ho; cases o <;> simp_all [isOpen, setTomb]) rfl rfl rfl
-  exact inv1_congr h rfl rfl rfl (fun o => isOpen_congr rfl rfl rfl rfl rfl o)
+  exact inv1_congr h rfl rfl rfl (fun o => isOpen_congr rfl rfl rfl rfl rfl rfl o)
 end single
 
 theorem fx {u : State} (a : Inv u) (b : Inv1 u) : Inv1 (fixup u) := by rw [fixup_id a b]; exact b
@@ -896,7 +965,7 @@ theorem inv1_step {s : State} {e : Event} (hi : Inv s) (i1 : Inv1 s) (he : en s 
     cases o <;> simp [en, isSyncOv] at he
     · exact fx (inv_renameClose hi _ (ren_lt hi (by intro hc; simp [hc] at he))) (inv1_renameClose i1 _)
     · exact fx (inv_tombDone hi _ he) (inv1_tombDone i1 _)
-  | syncStart => exact inv1_congr i1 rfl rfl rfl (fun o => isOpen_congr rfl rfl rfl rfl rfl o)
+  | syncStart => exact inv1_congr i1 rfl rfl rfl (fun o => isOpen_congr rfl rfl rfl rfl rfl rfl o)
   | tombChoose i =>
     simp [en] at he
     exact fx (inv_tombDone hi i he) (inv1_tombDone i1 i)
@@ -936,10 +1005,18 @@ theorem inv1_step {s : State} {e : Event} (hi : Inv s) (i1 : Inv1 s) (he : en s 
         (inv1_renameClose hs' i)
     · split
       · exact hs'
-      · exact inv1_congr hs' rfl rfl rfl (fun o => isOpen_congr rfl rfl rfl rfl rfl o)
+      · exact inv1_congr hs' rfl rfl rfl (fun o => isOpen_congr rfl rfl rfl rfl rfl rfl o)
   | renameCancel i =>
     simp [en] at he
     exact fx (inv_renameClose hi i (ren_lt hi (by intro hc; simp [hc] at he))) (inv1_renameClose i1 i)
+  | clipStart =>
+    simp [en] at he
+    have := inv1_open hi he .progress s.focus (closed_facts hi i1 he).2
+      (t := { s with progressOpen := true })
+      (by simp [isOpen]) (by intro o ho; cases o <;> simp_all [isOpen]) (by intro h; cases h)
+      (by intro h; cases h)
+    exact fx (inv_clipStart hi) this
+  | clipEnd => exact fx (inv_closeProgress hi) (inv1_closeProgress i1)
 
 theorem inv1_reach {s : State} (h : Reach1 s) : Inv s ∧ Inv1 s := by
   induction h with
@@ -967,5 +1044,39 @@ theorem single_settings_restores {s : State} (h : Reach1 s) (ho : s.settingsOpen
   simp only [step]
   rw [fixup_id hI h1]
   simp [closeSettings, releaseFocus, hown, hret, visible]
+
+
+/-! ## The clip export's progress panel (fa62cc6b) -/
+
+/-- Without nesting, the export's end (done, failed, or its Cancel) gives focus
+back to where it was when the export started, outside every modal. -/
+theorem single_progress_returns {s : State} (h : Reach1 s) (ho : s.progressOpen = true) :
+    ∃ e, s.ret = some e ∧ outside e = true ∧ (step s .clipEnd).focus = e := by
+  have ⟨_, i1⟩ := inv1_reach h
+  have hown : s.owner = some .progress := i1.openOwns .progress (by simp [ho])
+  obtain ⟨e, he, heo⟩ := i1.retOut .progress hown
+  refine ⟨e, he, heo, ?_⟩
+  simp only [step, closeProgress, ho, ↓reduceIte, releaseFocus, hown, he]
+  cases e <;> simp_all [outside, fixup, visible]
+
+/-- Was `bug_drop_during_clip_export_loses_focus`: a file failing the ROM
+check, dropped while a clip recorded, put its prompt over the progress panel;
+its Cancel handed focus back into the panel with no trap, and the export's end
+then lost focus to `<body>`. The drop is now refused while a clip records
+(12135-12138): no prompt opens over the panel, which keeps the trap. -/
+theorem regress_drop_during_clip_export_loses_focus :
+    witnesses [.clipStart]
+      (fun s => !en s .dropSuspect && s.owner == some .progress) = true ∧
+    witnesses [.clipStart, .clipEnd] (fun s => s.focus == .page && s.owner.isNone) = true := by
+  decide
+
+/-- Still open, the known nested-trap class: a Drive sync begun before the
+export can reach its deleted-games prompt (`confirmTombstones`) while the
+panel is up; the prompt takes the trap, and after it the export's end loses
+focus to `<body>`, as for the tombstone prompt over Settings. -/
+theorem obs_tomb_over_progress_loses_focus :
+    witnesses [.syncStart, .clipStart, .syncTomb, .tombChoose 0, .clipEnd]
+      (fun s => s.focus == .body && !anyOpen s) = true := by
+  decide
 
 end WebState.Modals

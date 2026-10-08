@@ -1,0 +1,104 @@
+@title Klonoa - Empire of Dreams (USA)
+@file Klonoa - Empire of Dreams (U) [!].gba
+@game AKLE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# New Game in file A (the game writes the file to EEPROM when it is created
+# and again on entering Vision 1-1), skip the intro, world map, Ghazzaland
+# story, Vision 1-1: grab a Moo, take a hit, jump up the ledges, pause,
+# Select Vision back to the map. [load]: Continue, file A shows
+# World 1 Ghazzaland, YES resumes on the Ghazzaland vision map.
+# Findings: entering Vision 1-1 the game writes 15 EEPROM blocks, each
+# polled to ready; dingbat's block time (GBATEK's ~108368 cycles) brings the
+# title card and the level two frames before mgba (~115000 a block) and the
+# second reference: with -d:EEPROM_SETTLE_CYCLES=115005 all three are
+# pixel-identical at f3320 and f3500. The cart's own time is unmeasured
+# (r0table row eesettle4k). In the level the three drift by a frame here and
+# there and re-converge
+# (identical at f4153). nba does not read back its own 8 KB battery file:
+# its title has no Continue on [load] (f1046).
+# new_game is compare=none: the title menu's clouds are darkened (BLDY 5)
+# and dingbat is one 5-bit step darker than mgba on ~30k px -- the darken
+# rounding the SP's blendprobe photographs gave, not a scroll difference
+# (same cloud position); the second reference's clouds sit elsewhere
+# (14367 px from mgba).
+# The OCR of the copyright line flips (docs/playtest-bugs.md, "Klonoa: the
+# clouds are the darken rounding, the Vision 1-1 card is the cart's EEPROM").
+[new]
+wait 600
+wait 200
+checkpoint title window=30
+press START
+wait 120
+checkpoint new_game window=30 compare=none
+press A
+wait 180
+checkpoint save_file window=30 compare=text
+press A
+wait 180
+press A
+wait 240
+press START
+wait 240
+checkpoint world_map window=30
+press A
+wait 180
+press A
+wait 180
+checkpoint story window=30
+press START
+wait 240
+checkpoint vision_map window=30
+press A
+wait 240
+checkpoint tutorial window=30 compare=text
+press A
+wait 60
+wait 180
+wait 180
+checkpoint level_start window=30
+press B
+wait 40
+press RIGHT hold=90
+press RIGHT hold=120
+hold RIGHT
+press A hold=20
+wait 40
+press A hold=20
+wait 60
+release
+press B
+wait 30
+hold RIGHT
+press A hold=25
+wait 60
+release
+wait 30
+press B
+wait 40
+checkpoint holding_moo window=30
+press START
+wait 30
+checkpoint pause window=30 compare=text
+press DOWN after=10
+press DOWN after=10
+press A
+wait 60
+wait 240
+checkpoint back_to_map window=30
+
+[load]
+wait 860
+press START
+wait 180
+checkpoint continue_menu window=30 compare=text
+press DOWN after=10
+press A
+wait 180
+checkpoint save_file window=30 compare=text
+press A
+wait 240
+press A
+wait 300
+checkpoint resumed_map window=30

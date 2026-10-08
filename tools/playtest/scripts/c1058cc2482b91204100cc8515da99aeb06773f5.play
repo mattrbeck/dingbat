@@ -2,18 +2,239 @@
 @file Drill Dozer (U).gba
 @game V49E
 @chip SRAM
-
-@status wip: reaches File 1 New Game and the opening (the truck at night, the drive into the city); nothing is written to SRAM through the file menu, the Sound/Rumble options (changing both and backing out to the title leaves SRAM blank) or starting File 1, so the first save needs the first stage played through (drilling, enemies, the boss) to the stage-clear save. A human should record: title > File 1 New Game > play stage 1 to the end and accept the save, quit after the save message. [load]: File 1 shows the progress; pick it to reach the map/hideout.
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing is written through the file menu or the opening; the first save is the stage-clear save after stage 1 (the Skullker hideout and its boss), longer than this session got: the route here reaches the second gear (shift-up tutorial passed) in the hideout
+# File 1 New Game, the opening, the lobby floor gives way; underground:
+# drill tutorial (hold R), jump-drill through the grey rubble, the bolted
+# purple blocks and the gold blocks into the hideout, up the platforms,
+# through the purple column into the gear room; gear 2 and its shift-up
+# tutorial (R, then R again at SHIFT UP).
+# nba's camera trails by a few pixels in vertical scrolls (f4032, f4182,
+# f15491) and its sprite animation frames differ; the drill-dust particles
+# land differently on mgba (f11467, f11731, f15926: dingbat-bios = nba).
 
 [new]
 wait 600
 press A
-mash START until text "Rumble" timeout=1500 every=40
+# mash START until text Rumble timeout=1500 every=40  [taps dingbat-bios:10 mgba:10 nba:10]
+tap START times=10 every=40 hold=4
 wait 60
 checkpoint file_select_empty window=30
 press A
 wait 600
 checkpoint truck window=30
-mash B until stable 45 timeout=3000 every=30
+# mash B until stable 45 timeout=3000 every=30  [taps dingbat-bios:16 mgba:16 nba:16]
+tap B times=16 every=30 hold=4
 wait 30
 checkpoint opening window=30
+tap A times=40 every=30 hold=4
+checkpoint lobby window=30
+press RIGHT hold=200
+tap A times=5 every=30 hold=4
+press R hold=60
+wait 150
+wait 200
+# until notblank timeout=1200 every=10  [reached dingbat-bios+460 mgba+460 nba+460]
+wait 464
+wait 120
+tap A times=30 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=20 every=30 hold=4
+checkpoint underground window=30
+press RIGHT hold=150
+press RIGHT hold=200
+wait 60
+wait 120
+press A
+wait 60
+tap A times=5 every=30 hold=4
+wait 60
+tap A times=10 every=30 hold=4
+wait 60
+press R hold=150
+wait 60
+tap A times=6 every=30 hold=4
+wait 90
+hold RIGHT+R
+wait 200
+release
+tap A times=15 every=30 hold=4
+wait 60
+press RIGHT hold=100
+press RIGHT hold=1
+hold R
+wait 60
+hold R+RIGHT
+wait 120
+release
+hold R+RIGHT
+wait 300
+release
+press A hold=30
+wait 40
+wait 30
+press A hold=30
+hold A+LEFT
+wait 10
+hold LEFT
+wait 30
+release
+hold R+RIGHT
+wait 200
+release
+press A hold=12
+hold A+R+RIGHT
+wait 30
+hold R+RIGHT
+wait 60
+release
+hold R+RIGHT
+wait 200
+release
+hold R+RIGHT
+wait 300
+release
+press A hold=12
+hold A+R+RIGHT
+wait 30
+hold R+RIGHT
+wait 90
+release
+press A hold=12
+hold A+R+RIGHT
+wait 30
+hold R+RIGHT
+wait 90
+release
+press A hold=12
+hold A+R+RIGHT
+wait 30
+hold R+RIGHT
+wait 90
+release
+hold RIGHT
+press A hold=20 after=60
+press A hold=25 after=100
+release
+hold R+RIGHT
+wait 150
+release
+hold R+RIGHT
+wait 100
+release
+wait 5
+hold R+RIGHT
+wait 100
+release
+wait 5
+hold R+RIGHT
+wait 100
+release
+press RIGHT hold=60
+# until notblank timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 60
+checkpoint green_room window=0
+press RIGHT hold=90
+hold R+RIGHT
+wait 100
+release
+wait 5
+hold R+RIGHT
+wait 100
+release
+press B
+wait 90
+tap A times=20 every=30 hold=4
+wait 60
+press RIGHT hold=120
+hold R+RIGHT
+wait 100
+release
+wait 5
+hold R+RIGHT
+wait 100
+release
+wait 5
+hold R+RIGHT
+wait 100
+release
+press RIGHT hold=150
+# until notblank timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 60
+press RIGHT hold=70
+press RIGHT hold=25
+press A hold=20
+press RIGHT hold=10
+wait 30
+press B
+wait 60
+tap B times=20 every=30 hold=4
+wait 30
+wait 60
+press A hold=20
+press RIGHT hold=15
+wait 30
+press A hold=20 after=30
+press A hold=20 after=30
+press A hold=20 after=30
+press A hold=20 after=30
+hold R+RIGHT
+wait 120
+release
+release
+wait 5
+hold R+RIGHT
+wait 100
+release
+wait 5
+hold R+RIGHT
+wait 100
+release
+wait 5
+hold R+RIGHT
+wait 100
+release
+wait 60
+press LEFT hold=20
+wait 60
+wait 120
+tap A times=10 every=30 hold=4
+wait 60
+press LEFT hold=8
+hold DOWN+R
+wait 150
+release
+tap A times=20 every=30 hold=4
+wait 60
+hold R
+wait 60
+wait 40
+release
+tap A times=10 every=30 hold=4
+wait 60
+hold R
+wait 50
+release
+wait 2
+hold R
+wait 60
+release
+wait 30
+wait 60
+tap A times=10 every=30 hold=4
+wait 60
+hold R
+wait 55
+release
+wait 3
+hold R
+wait 30
+wait 90
+release
+wait 60
+tap A times=15 every=30 hold=4
+wait 60
+checkpoint gear2_room window=30
+

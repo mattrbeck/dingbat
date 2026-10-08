@@ -592,10 +592,14 @@ proc apply_panel_uniforms() =
   glUniform1i(glGetUniformLocation(app.game_shader, "border_texture"), 1)
 
 proc apply_master_volume() =
+  # Nothing audible: the cores skip mixing (APU.silent) and queue zeros
+  let silent = app.cfg.mute or app.cfg.volume <= 0
   if app.gba_emu != nil:
     app.gba_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
+    app.gba_emu.set_audio_silent(silent)
   if app.gb_emu != nil:
     app.gb_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
+    app.gb_emu.apu.silent = silent
 
 proc apply_pitch_correct_ff() =
   if app.gba_emu != nil:

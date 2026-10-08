@@ -23,12 +23,18 @@ window.addEventListener("keydown", (e) => {
 // registered before em.js so it runs first, and stops text-field events
 // there. Bubble, not capture: the fields' own listeners must still see the
 // target phase. Tab belongs to the hook above; Escape must keep flowing to
-// the close-all-modals handler.
+// the close-all-modals handler. On the home screen the same goes for a
+// focused button or select: Enter and Space must press it (a library tile,
+// from the keyboard or after the pad put focus there), not be swallowed for
+// the core paused behind the page.
 {
   const typingGuard = (e) => {
     if (e.code === "Tab" || e.code === "Escape") return;
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+      e.stopImmediatePropagation();
+    } else if (t && (t.tagName === "BUTTON" || t.tagName === "SELECT") &&
+               !document.body.classList.contains("running")) {
       e.stopImmediatePropagation();
     }
   };
@@ -117,31 +123,41 @@ const showUpdateButton = () => {
   updateBtn.hidden = false;
 };
 
-const checkForUpdate = async () => {
+// current: the cached version.txt (the running build); latest: a fresh one;
+// deployed: the CACHE_VERSION in a fresh sw.js. Pages' CDN propagates
+// per-object, so an update is only actually fetchable once sw.js and
+// version.txt agree. null when any of them can't be fetched (offline).
+const probeBuilds = async () => {
   try {
-    // current: the cached version.txt; latest: a fresh one; deployed: the
-    // CACHE_VERSION in a fresh sw.js. Pages' CDN propagates per-object, so
-    // the button only shows once sw.js and version.txt agree, i.e. the
-    // update is actually fetchable.
     let [cachedRes, networkRes, swRes] = await Promise.all([
       fetch("version.txt"),
       fetch("version.txt", { cache: "no-store" }),
       fetch("sw.js", { cache: "no-store" }),
     ]);
-    if (!cachedRes.ok || !networkRes.ok || !swRes.ok) return;
-    let current = (await cachedRes.text()).trim();
-    let latest = (await networkRes.text()).trim();
-    let deployed = (await swRes.text()).match(/CACHE_VERSION = "([^"]+)"/)?.[1];
-    if (current && latest && latest !== current) {
-      if (deployed === latest) {
-        showUpdateButton();
-      } else {
-        // Still propagating: skip the stamp so the next visibility change retries.
-        return;
-      }
+    if (!cachedRes.ok || !networkRes.ok || !swRes.ok) return null;
+    return {
+      current: (await cachedRes.text()).trim(),
+      latest: (await networkRes.text()).trim(),
+      deployed: (await swRes.text()).match(/CACHE_VERSION = "([^"]+)"/)?.[1],
+    };
+  } catch {
+    return null;
+  }
+};
+
+const checkForUpdate = async () => {
+  const builds = await probeBuilds();
+  if (!builds) return;
+  const { current, latest, deployed } = builds;
+  if (current && latest && latest !== current) {
+    if (deployed === latest) {
+      showUpdateButton();
+    } else {
+      // Still propagating: skip the stamp so the next visibility change retries.
+      return;
     }
-    localStorage.setItem(UPDATE_CHECK_KEY, Date.now().toString());
-  } catch {}
+  }
+  try { localStorage.setItem(UPDATE_CHECK_KEY, Date.now().toString()); } catch {}
 };
 
 const maybeCheckForUpdate = () => {
@@ -521,7 +537,7 @@ document.addEventListener("click", (e) => {
   if (!t || typeof t.closest !== "function") return;
   // Modals and the menu run their own focus management.
   if (t.closest(".modal-overlay")) return;
-  if (!t.closest("#topbar, #topbar-handle")) return;
+  if (!t.closest("#topbar")) return;
   if (anyModalOpen()) return;
   const ctl = t.closest("button, [href], [tabindex]");
   // Text fields and range inputs keep focus (the typing escape hatch depends
@@ -579,6 +595,26 @@ const dbKeys = () => new Promise((resolve, reject) => {
   let req = tx.objectStore("blobs").getAllKeys();
   req.onsuccess = () => resolve(req.result || []);
   req.onerror = () => reject(req.error);
+});
+
+// Read a record and replace it in one readwrite transaction, so nothing
+// written between the read and the write is lost. `fn` runs synchronously on
+// the stored value and returns the new one, or undefined to leave it.
+// Resolves whether it wrote.
+const dbUpdate = (key, fn) => new Promise((resolve, reject) => {
+  let tx = db.transaction("blobs", "readwrite");
+  let store = tx.objectStore("blobs");
+  let wrote = false;
+  let req = store.get(key);
+  req.onsuccess = () => {
+    let next = fn(req.result ?? null);
+    if (next === undefined) return;
+    store.put(next, key);
+    wrote = true;
+  };
+  tx.oncomplete = () => resolve(wrote);
+  tx.onerror = () => reject(tx.error);
+  tx.onabort = () => reject(tx.error);
 });
 
 // Move keys and write unrelated records in one readwrite transaction (a
@@ -723,7 +759,8 @@ const sweepOrphanedAutoStates = async () => {
   for (let r of await getRecentMeta()) if (r?.name) known.add(r.name);
   for (let k of keys) {
     if (typeof k !== "string") continue;
-    const prefix = ["stateauto:", "sessionpic:"].find((p) => k.startsWith(p));
+    const prefix = ["stateauto:", "sessionpic:"].find((p) => k.startsWith(p)) ||
+      k.match(CKPT_KEY_RE)?.[0];
     if (prefix && !known.has(k.slice(prefix.length))) await dbDelete(k);
   }
 };
@@ -1154,6 +1191,7 @@ const openSettingsModal = () => {
   renderKbBindings();
   // Fresh open starts with Advanced folded (guarded for the pre-parse window).
   if (typeof collapseAdvanced === "function") collapseAdvanced();
+  if (typeof collapseChannels === "function") collapseChannels();
   // The remembered section stays selected, but the sheet always opens on
   // the list rather than drilled into it.
   let last = null;
@@ -1204,6 +1242,96 @@ advancedToggle.addEventListener("click", () => {
   advancedSub.hidden = !advancedSub.hidden;
   advancedToggle.setAttribute("aria-expanded", advancedSub.hidden ? "false" : "true");
 });
+
+// --- Settings › Audio › Channels ---
+// Mute single channels to hear the rest on their own: a listening aid,
+// output only (APU.channel_mask). Settable with or without a game; it holds
+// across game loads until turned back on, and is never saved (a reload
+// clears it). Bit i mutes channel i: Square 1, Square 2, Wave, Noise, Sample
+// A, Sample B (the last two GBA only). #channels-indicator shows in game
+// while any is muted.
+let channelMutes = 0;
+const channelsToggle = document.getElementById("channels-toggle");
+const channelsSub = document.getElementById("channels-sub");
+const channelsFoot = document.getElementById("channels-foot");
+const channelsSummary = document.getElementById("channels-summary");
+const channelsIndicator = document.getElementById("channels-indicator");
+const channelsIndicatorLabel = document.getElementById("channels-indicator-label");
+const channelChips = [0, 1, 2, 3, 4, 5].map((i) => document.getElementById("channel-chip-" + i));
+// Each group's Mute all / Turn on, with the bits it covers.
+const channelGroups = [
+  { btn: document.getElementById("channels-all-tone"), bits: 0b001111 },
+  { btn: document.getElementById("channels-all-sample"), bits: 0b110000 },
+];
+const mutedCount = (bits) => {
+  let n = 0;
+  for (let b = bits; b; b &= b - 1) n++;
+  return n;
+};
+
+const renderChannels = () => {
+  channelChips.forEach((chip, i) => {
+    chip.setAttribute("aria-pressed", (channelMutes >> i) & 1 ? "false" : "true");
+  });
+  for (const g of channelGroups) {
+    g.btn.textContent = (channelMutes & g.bits) === g.bits ? "Turn on" : "Mute all";
+  }
+  const count = mutedCount(channelMutes);
+  const what = count === 1 ? "1 channel muted" : count + " channels muted";
+  channelsFoot.hidden = count === 0;
+  channelsSummary.textContent = what;
+  channelsIndicator.hidden = count === 0;
+  channelsIndicatorLabel.textContent = String(count);
+  channelsIndicator.title = "Audio: " + what;
+  channelsIndicator.setAttribute("aria-label", "Audio: " + what + ". Open channels");
+};
+
+// The wasm side keeps them for every core it builds; pushed again once the
+// runtime is up, for mutes set before it was.
+const applyChannelMutes = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_channel_mutes) {
+    Module._wasm_set_channel_mutes(channelMutes);
+  }
+};
+
+const setChannelMutes = (bits) => {
+  channelMutes = bits;
+  applyChannelMutes();
+  renderChannels();
+};
+
+const resetChannelMutes = () => setChannelMutes(0);
+
+const setChannelsOpen = (open) => {
+  channelsSub.hidden = !open;
+  channelsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  renderChannels();
+};
+
+// Folded on every Settings open, unless something is muted.
+const collapseChannels = () => setChannelsOpen(channelMutes !== 0);
+
+channelsToggle.addEventListener("click", () => setChannelsOpen(channelsSub.hidden));
+channelChips.forEach((chip, i) => {
+  chip.addEventListener("click", () => setChannelMutes(channelMutes ^ (1 << i)));
+});
+for (const g of channelGroups) {
+  g.btn.addEventListener("click", () => {
+    setChannelMutes((channelMutes & g.bits) === g.bits
+      ? channelMutes & ~g.bits : channelMutes | g.bits);
+  });
+}
+document.getElementById("channels-reset").addEventListener("click", resetChannelMutes);
+
+channelsIndicator.addEventListener("click", () => {
+  openSettingsModal();
+  openSettingsSection("audio");
+  setChannelsOpen(true);
+  const top = channelsToggle.getBoundingClientRect().top - settingsScroll.getBoundingClientRect().top;
+  settingsScroll.scrollTop += top - 12;
+  channelsToggle.focus({ preventScroll: true });
+});
+renderChannels();
 
 settingsModal.addEventListener("click", (e) => {
   if (e.target === settingsModal) closeSettingsModal();
@@ -1551,6 +1679,9 @@ const isRomLoaded = (name) =>
 //            their meta; the only group Drive mirrors besides the ROM
 //   session  the auto-resume snapshot and its picture; the snapshot is
 //            mirrored (its picture riding in it), the hand-off between devices
+//   checkpoints  earlier moments of play and their index (Resume from
+//            earlier); this device only, and they go with the session
+//            wherever the progress goes, but not when a kept save is restored
 //   prefs    the cheat list; never synced
 //   kept     a save from before the game was deleted and loaded again
 //            (keptSaveKey), mirrored; a save reset leaves it, being a way
@@ -1565,6 +1696,7 @@ const perGameKeys = (name) => {
     bytes: [romKey(name), artKey(name), frameKey(name)],
     saves,
     session: [autoStateKey(name), sessionPicKey(name)],
+    checkpoints: ckptKeys(name),
     prefs: [CHEATS_KEY(name)],
     kept: [keptSaveKey(name)],
   };
@@ -1577,6 +1709,11 @@ const deleteKeys = async (keys) => {
     // In the segment that issues the delete: a persist of this save waiting
     // on a quota eviction must not put it back (persistSeq).
     if (k.startsWith("save:")) retireSavePuts(k.slice(5));
+    // A checkpoint packing meanwhile must not write the session back.
+    if (k.startsWith("stateauto:")) {
+      const g = k.slice(10);
+      sessionEpochs.set(g, sessionEpoch(g) + 1);
+    }
     await dbDelete(k);
   }
 };
@@ -1585,7 +1722,7 @@ const deleteKeys = async (keys) => {
 // a full save state, and "Resume" would restore the wiped progress.
 const deleteSaveData = async (name) => {
   let k = perGameKeys(name);
-  await deleteKeys([...k.saves, ...k.session]);
+  await deleteKeys([...k.saves, ...k.session, ...k.checkpoints]);
 };
 
 // Remove every trace of one game from this device. Drive is untouched here.
@@ -1600,13 +1737,16 @@ const resetCurrentSaveFile = async () => {
   if (!game) return;
   const name = game.originalName;
   retireSavePuts(name); // as deleteKeys
-  await dbDelete("save:" + name);
-  await dbDelete("save:" + name + "-p2");
-  // The reboot ends in offerAutoResume, which would offer to un-reset.
-  await deleteKeys(perGameKeys(name).session);
+  // Queued before the first await, as resetGameSaves does: a pull that is
+  // downloading this save checks the queue before writing it back, and
+  // would otherwise land it in these awaits (bug_file_reset_undone_by_pull).
   markDelete("save:" + name);
   markDelete("save:" + name + "-p2");
   markDelete(autoStateKey(name));
+  await dbDelete("save:" + name);
+  await dbDelete("save:" + name + "-p2");
+  // The reboot ends in offerAutoResume, which would offer to un-reset.
+  await deleteKeys([...perGameKeys(name).session, ...perGameKeys(name).checkpoints]);
   loadRom(game.romName, name);
 };
 
@@ -1618,6 +1758,7 @@ const resetCurrentSaveFile = async () => {
 // reboot under (loadRom), or null when no game is loaded.
 const detachLoadedGame = () => {
   if (!currentRomName || !currentOriginalName) return null;
+  clearPlaying();
   const game = { romName: currentRomName, originalName: currentOriginalName };
   nextLoadGen();
   try { FS.unlink(stripExt(game.romName) + ".sav"); } catch {}
@@ -1842,13 +1983,14 @@ const renderLibChips = (roms, localRoms) => {
     }
     b.addEventListener("click", () => { onTap(); renderLibChips(roms, localRoms); applyLibFilter(); });
     chips.push(b);
+    return b;
   };
   if (systems.length > 1) {
     for (let s of systems) {
       chip(s, counts[s], libFilter.systems.has(s), "lib-chip-sys", () => {
         if (libFilter.systems.has(s)) libFilter.systems.delete(s);
         else libFilter.systems.add(s);
-      });
+      }).dataset.sys = s; // the pad's LB/RB step through these
     }
   }
   // A game whose file is neither here nor on Drive is on neither side of
@@ -2263,8 +2405,15 @@ const probeDriveBroker = async () => {
 // this device is back on popups).
 let driveBrokerRetryAt = 0;
 let driveRefreshInFlight = null;
+// A refresh token is used only for the account it was granted for. One kept
+// from before refreshAcct existed has none recorded, and a device that has
+// not learned its own account has nothing to hold it against: both are
+// trusted as before.
+const driveRefreshUsable = () => !!syncState.refresh &&
+  (syncState.refreshAcct == null || !syncState.acct ||
+   syncState.refreshAcct === syncState.acct);
 const driveRefreshSilently = ({ force = false } = {}) => {
-  if (!syncState.refresh || !driveBrokerBase()) return Promise.resolve(false);
+  if (!driveRefreshUsable() || !driveBrokerBase()) return Promise.resolve(false);
   if (!force && Date.now() < driveBrokerRetryAt) return Promise.resolve(false);
   driveRefreshInFlight ??= (async () => {
     const rt = syncState.refresh;
@@ -2389,14 +2538,30 @@ const driveCodeGrant = async (hint, { connect = false } = {}) => {
   if (status !== 200 || !j?.access_token) {
     throw new Error("Google sign-in failed" + (j?.error ? ": " + j.error : ""));
   }
+  // Whose grant this is, learned before anything is adopted. A re-grant
+  // for the linked account can come back as another (the consent screen
+  // lets the person pick), and the next sync would write this library into
+  // that account's Drive (bug_consent_regrant_crosses_accounts). A sign-in's
+  // is kept beside its refresh token (refreshAcct).
+  let sub = await driveTokenSub(j.access_token);
   if (connect) driveSession++;
-  else if (!syncState.connected || issued !== driveSession) {
-    throw new Error("Signed out of Google Drive");
+  else {
+    if (!syncState.connected || issued !== driveSession) {
+      throw new Error("Signed out of Google Drive");
+    }
+    if (syncState.acct && sub !== syncState.acct) {
+      throw new Error(sub
+        ? "That's a different Google account — choose " +
+          (syncState.email || "the one this library is linked to")
+        : "Couldn't confirm which Google account signed in — try again");
+    }
   }
   adoptGrantedToken(j);
   // Replaced even when none came back: one kept from before may belong to
   // another account.
   syncState.refresh = j.refresh_token || null;
+  // "" when the account could not be learned: such a token is never used.
+  syncState.refreshAcct = sub || "";
   driveBrokerRetryAt = 0;
   await saveSyncState();
 };
@@ -2409,7 +2574,9 @@ const driveCodeGrant = async (hint, { connect = false } = {}) => {
 const DRIVE_UPGRADE_REST_MS = 24 * 60 * 60 * 1000;
 class DriveUpgradeDeclined extends Error {}
 const driveWantsUpgrade = () =>
-  !!GDRIVE_CLIENT_ID && !!syncState.connected && !syncState.refresh &&
+  // Not "no refresh token": one this device may not use (another
+  // account's, or of unknown account) leaves it on popups, so it is offered.
+  !!GDRIVE_CLIENT_ID && !!syncState.connected && !driveRefreshUsable() &&
   driveBrokerOk && !!driveBrokerBase() &&
   Date.now() >= (syncState.upgradeRestUntil || 0);
 
@@ -2426,6 +2593,18 @@ const driveRegrantPopup = async () => {
     saveSyncState();
   }
   if (failure) throw new DriveUpgradeDeclined(failure.message);
+};
+
+// The account a token was granted for (tokeninfo's `sub`), or null when it
+// could not be learned. Adopts nothing.
+const driveTokenSub = async (tok) => {
+  try {
+    let res = await fetch("https://oauth2.googleapis.com/tokeninfo?access_token=" +
+                          encodeURIComponent(tok));
+    if (!res.ok) return null;
+    let info = await res.json();
+    return typeof info.sub === "string" ? info.sub : null;
+  } catch { return null; }
 };
 
 // Works because GDRIVE_SCOPE includes "email".
@@ -2489,8 +2668,45 @@ const driveFetch = async (url, opts = {}) => {
     live();
     res = await send();
   }
+  // Drive asking to slow down, or briefly failing: sent again after a wait
+  // (driveRetryWait) rather than failing the whole sync to "Offline" - a sync
+  // keeps several requests in flight (SYNC_PARALLEL), so a burst can meet
+  // Drive's per-user rate limit. Again only in the session it began in.
+  for (let attempt = 0; !res.ok && attempt < DRIVE_RETRIES; attempt++) {
+    let wait = await driveRetryWait(res, opts.method || "GET", attempt);
+    if (wait === null) break;
+    await new Promise((r) => setTimeout(r, wait));
+    live();
+    res = await send();
+  }
   if (!res.ok) throw new Error("Drive request failed (HTTP " + res.status + ")");
   return res;
+};
+
+// How many times, and from what first wait, a refused Drive request is sent
+// again; the wait doubles each time.
+const DRIVE_RETRIES = 3;
+let driveRetryMs = 500;
+// The wait before sending `res`'s request again, or null when it is not one
+// to repeat. A rate limit (429, or 403 with a rate reason) refused the request
+// before doing anything, so any request goes again. A server error (5xx) may
+// have done it anyway: only a read or an in-place update (GET, PATCH) is
+// safe to repeat - a repeated create could leave two files of one name, and
+// a repeated delete would fail on the file it just deleted. Drive's
+// Retry-After is honoured up to 10 s.
+const driveRetryWait = async (res, method, attempt) => {
+  let limited = res.status === 429;
+  if (res.status === 403) {
+    let body = await res.json?.().catch(() => null);
+    let reasons = (body?.error?.errors || []).map((e) => e?.reason);
+    limited = reasons.some((r) => r === "rateLimitExceeded" || r === "userRateLimitExceeded");
+  }
+  let transient = [500, 502, 503, 504].includes(res.status) &&
+                  (method === "GET" || method === "PATCH");
+  if (!limited && !transient) return null;
+  let after = Number(res.headers?.get?.("retry-after"));
+  if (after > 0) return Math.min(after * 1000, 10000);
+  return driveRetryMs * 2 ** attempt * (0.75 + Math.random() / 2);
 };
 
 // Every page of the listing. A library runs to about 22 Drive files a game,
@@ -2611,6 +2827,48 @@ const driveDownload = async (fileId, onBytes = null) => {
   let at = 0;
   for (let p of parts) { out.set(p, at); at += p.length; }
   return out;
+};
+
+// `fn` over `items`, at most `n` running at once, started in order. The
+// first failure starts nothing further and is thrown once the ones already
+// running have ended, so nothing is left writing after the caller moves on.
+const runPool = async (items, n, fn) => {
+  let next = 0;
+  /** @type {{ e: unknown } | null} */
+  let failure = null;
+  const worker = async () => {
+    while (!failure && next < items.length) {
+      const item = items[next++];
+      try { await fn(item); } catch (e) { failure ||= { e }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  if (failure) throw failure.e;
+};
+
+// Downloads started ahead of a loop that takes them one at a time, in order:
+// at most `n` on the wire, the earliest first. `take(f)` is the one for f
+// (started now if it was not yet); `stop()` starts no more. One the loop
+// never takes costs only its bytes, and a failure is the taker's to see.
+const downloadAhead = (files, n = SYNC_PARALLEL) => {
+  let started = new Map();
+  let waiting = files.slice();
+  let active = 0;
+  const start = (f) => {
+    let p = started.get(f.id);
+    if (p) return p;
+    active++;
+    p = driveDownload(f.id);
+    p.catch(() => {}).finally(() => { active--; pump(); });
+    started.set(f.id, p);
+    return p;
+  };
+  const pump = () => { while (active < n && waiting.length) start(waiting.shift()); };
+  pump();
+  return {
+    take: (f) => { waiting = waiting.filter((w) => w.id !== f.id); return start(f); },
+    stop: () => { waiting = []; },
+  };
 };
 
 // Drive file name -> { game, kind }; null for anything unknown. `kind` is
@@ -2810,6 +3068,10 @@ const LIBRARY_FILE = "library";
 const SYNC_DEBOUNCE_MS = 2000;   // quiet period before a flush
 const SYNC_MAX_WAIT_MS = 10000;  // ...but never sit on changes longer than this
 const SYNC_POLL_MS = 3 * 60 * 1000;
+// Drive requests a sync keeps in flight at once. Each is a round trip of
+// 100-300 ms from a phone; one at a time, a second device's first pull of a
+// 20-game library took 13 s at 150 ms (web/e2e/sync-bench.mjs).
+const SYNC_PARALLEL = 6;
 
 // Persisted under "gdrive_sync". sigs = last agreed content signature per
 // Drive file; rmt = its last seen modifiedTime; queueRen = pending remote
@@ -2846,6 +3108,9 @@ const loadSyncState = async () => {
       tokenExp: typeof s.tokenExp === "number" ? s.tokenExp : 0,
       // Refresh token from the broker's code exchange (driveCodeGrant).
       refresh: typeof s.refresh === "string" ? s.refresh : null,
+      // The account the refresh token was granted for; null when it was
+      // stored before this was kept (driveRefreshUsable).
+      refreshAcct: typeof s.refreshAcct === "string" ? s.refreshAcct : null,
       // No consent screen offered before this (driveWantsUpgrade).
       upgradeRestUntil: typeof s.upgradeRestUntil === "number" ? s.upgradeRestUntil : 0,
       email: typeof s.email === "string" ? s.email : null,
@@ -2972,7 +3237,6 @@ const localFilesForGame = async (game) => {
   for (let [k, p] of await localSyncFiles()) if (p.game === game) names.push(k);
   return names;
 };
-const hasLocalRom = async (game) => !!(await dbGet(romKey(game)))?.data?.length;
 const hasLocalData = async (game) => (await localFilesForGame(game)).length > 0;
 // Over every per-game record, including the ones Drive never mirrors.
 const hasAnyLocalRecord = async (game) => {
@@ -3088,6 +3352,9 @@ const driveListMap = async () => {
 // The ids of the copies a read actually merged, per listing: only those may
 // be retired, since only their contents are in what gets written.
 const libraryRead = new WeakMap();
+// The text of the one copy a listing had, as read: a library merged to the
+// same text is already Drive's, and writing it again is a wasted round trip.
+const libraryText = new WeakMap();
 const readDriveLibrary = async (remote) => {
   let copies = libraryCopies.get(remote) ||
     (remote.get(LIBRARY_FILE) ? [remote.get(LIBRARY_FILE)] : []);
@@ -3098,8 +3365,10 @@ const readDriveLibrary = async (remote) => {
     // write a library that no longer holds what it says.
     let bytes = await driveDownload(f.id);
     let o;
+    let text = new TextDecoder().decode(bytes);
+    if (copies.length === 1) libraryText.set(remote, text);
     // Unreadable content has nothing in it to keep; the next write replaces it.
-    try { o = JSON.parse(new TextDecoder().decode(bytes)); } catch { o = {}; }
+    try { o = JSON.parse(text); } catch { o = {}; }
     libs.push({
       recents: Array.isArray(o?.recents) ? o.recents : [],
       tomb: Array.isArray(o?.tomb) ? o.tomb : [],
@@ -3112,6 +3381,9 @@ const readDriveLibrary = async (remote) => {
   // More than one: the union, by the same merge the devices use.
   return libs.slice(1).reduce((a, b) => mergeLibrary(a, b), libs[0]);
 };
+// Whether `lib` is, to the byte, the one copy read under `readFrom`.
+const libraryUnchanged = (lib, readFrom) =>
+  libraryText.has(readFrom) && libraryText.get(readFrom) === JSON.stringify(lib);
 // `readFrom` is the listing the library was read under (the flush lists
 // again before writing). The write goes to the oldest copy; the other
 // copies that read merged are then deleted, their contents being in it.
@@ -3657,10 +3929,12 @@ const flushSyncInner = async () => {
       delete delStamps()[name];
       syncState.queueDel = syncState.queueDel.filter((n) => n !== name);
     }
-    for (let name of syncState.queueUp.slice()) {
+    // Each file's checks and bookkeeping touch only its own keys, so several
+    // go at once (runPool); a failure still stops the flush, as before.
+    await runPool(syncState.queueUp.slice(), SYNC_PARALLEL, async (name) => {
       // Gone from the queue since this pass began: a delete asked for it
       // (markDelete unqueues), or a rename moved it to its new name.
-      if (!syncState.queueUp.includes(name)) continue;
+      if (!syncState.queueUp.includes(name)) return;
       // The library merged above has the last word on which games exist and
       // what they are called, and a device that has not pulled yet can hold
       // files it has overruled (a Sync tap queues every local file). A game
@@ -3673,9 +3947,9 @@ const flushSyncInner = async () => {
       let game = parsed?.game;
       if (game && deletedIn(lib, game)) {
         syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
-        continue;
+        return;
       }
-      if (game && lib.ren.some((r) => r.from === game)) continue;
+      if (game && lib.ren.some((r) => r.from === game)) return;
       // The generation this device holds the game at, read now: an import
       // made since the merge starts a new one.
       let gen = game
@@ -3685,20 +3959,31 @@ const flushSyncInner = async () => {
       // keeps its save aside and drops the rest (convertStaleGame).
       if (game && genBound(parsed.kind) && libGen(lib, game) > gen) {
         syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
-        continue;
+        return;
       }
       // A save of this key from here on is newer than the bytes read below.
       syncRemarked.delete(name);
+      // A ROM never changes: one Drive holds at this generation (or a newer
+      // one), already known here, is not read again - tens of MB a game on
+      // every Sync now.
+      let held0 = remote.get(name);
+      if (parsed?.kind === "rom" && held0 && fileGen(held0) >= gen && syncState.sigs[name]) {
+        syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
+        return;
+      }
       let bytes = live(await readSyncBytes(name));
       // A session another device wrote since this one last saw Drive's copy
       // is not written over unseen: it stays queued, and the pull after this
       // flush decides (a hand-off, or the offer to switch, which marks it
-      // seen - then this one, the newer, goes up).
+      // seen - then this one, the newer, goes up). One a deleted generation
+      // of the game left is no other device's moment, and nothing would ever
+      // mark it seen: it is written over (below).
       let r0 = remote.get(name);
       let forced = handoffForce.delete(name);
-      if (bytes && parsed?.kind === "session" && r0 && syncState.rmt[name] !== r0.modifiedTime &&
+      if (bytes && parsed?.kind === "session" && r0 && fileGen(r0) >= gen &&
+          syncState.rmt[name] !== r0.modifiedTime &&
           sigOfBytes(bytes) !== syncState.sigs[name] && !forced) {
-        continue;
+        return;
       }
       if (bytes) {
         let r = remote.get(name);
@@ -3737,8 +4022,11 @@ const flushSyncInner = async () => {
       if (!syncRemarked.has(name)) {
         syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
       }
+    });
+    // Unchanged, it is not written, and so needs no second listing either.
+    if (!libraryUnchanged(lib, remote)) {
+      await writeDriveLibrary(lib, live(await driveListMap()), remote);
     }
-    await writeDriveLibrary(lib, live(await driveListMap()), remote);
     live();
     // `lib` was merged before the awaits above. A delete, import or rename
     // made here since then is in this device's library now and not in
@@ -3782,6 +4070,9 @@ const flushSyncInner = async () => {
 // old-name one is dropped. Returns { moved, leftover }, or null when the
 // transaction failed.
 const applyRemoteRename = async (from, to) => {
+  // Another device's game claims the name: a pull may write under it again
+  // (renamedAway; bug_remote_rename_into_away_name_skips_saves).
+  renamedAway.delete(to);
   let fromKeys = allPerGameKeys(from);
   let toKeys = allPerGameKeys(to);
   // The game may be open: flush the pending save under the old name,
@@ -3900,11 +4191,13 @@ const handoffNews = async (game, remote, lib, live) => {
 };
 
 // Nothing of the game in memory is waiting to go up: its session is of this
-// moment, and its battery is the stored save, sent.
+// moment, and its battery is the stored save, sent. Asked after the read, so
+// the caller acts on it in the same run: a tap during the read (Resume, and
+// frames run) is seen.
 const heldGameIsSent = async (game) => {
+  let stored = await dbGet("save:" + game).catch(() => null);
   if (sessionMoved || sessionSnapFor !== game) return false;
   if (HANDOFF_KEYS(game).some((k) => syncState.queueUp.includes(k))) return false;
-  let stored = await dbGet("save:" + game).catch(() => null);
   return liveSaveSig() === sigOfSave(stored);
 };
 
@@ -3916,6 +4209,10 @@ const fromWhere = (news) => {
 
 // Let the copy in memory go and land the newer files in its place.
 const takeHandoff = async (game, news) => {
+  // Before any await: a checkpoint packing meanwhile is of the copy being
+  // let go, and must not write its session over the one landing here
+  // (bug_checkpoint_after_switch).
+  sessionEpochs.set(game, sessionEpoch(game) + 1);
   if (!(await unloadGame({ flushSave: false, picture: false }))) return false;
   for (let { key, f, bytes } of news) {
     await writeSyncBytes(key, bytes);
@@ -3947,6 +4244,10 @@ const switchToHandoff = async (game) => {
     delete syncState.sigs[key];
     handoffForce.add(key);
     markUpload(key);
+    // As saved again: a flush may be sending this device's own copy right
+    // now (the offer schedules one), and its completion would otherwise
+    // take the key off the queue with the turned-down copy on Drive.
+    syncRemarked.add(key);
   }
   await saveSyncState();
   refreshHomeRecent();
@@ -3980,6 +4281,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
   if (!silent) setSyncStatus("syncing");
   let gridDirty = false;
   let queuedMissing = false;
+  /** @type {ReturnType<typeof downloadAhead> | null} */
+  let ahead = null;
   try {
     let remote = live(await driveListMap());
     // Not the library's business: a setting riding the same pull.
@@ -4086,16 +4389,26 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     let held = currentOriginalName;
     if (held && currentRomName && !linkMode && !rollbackMode && !netActive() &&
         loadingName !== held && lib.recents.some((r) => r.name === held)) {
+      // The downloads below take seconds, and the player may close the game,
+      // go back into it or load another meanwhile (each moves loadGen).
+      const g0 = loadGen;
+      const running = () => document.body.classList.contains("running");
+      // Still the game in memory, by the player's leave: a game closed (or
+      // closing) since is no longer held - the files pass, or the next pull,
+      // lands what came, as for any closed game, where an offer would mark
+      // it seen and leave the closed copy resuming its older moment.
+      const stillHeld = () => currentOriginalName === held && (loadGen === g0 || running());
       let news = live(await handoffNews(held, remote, lib, live));
-      if (news.length) {
+      if (news.length && stillHeld()) {
         let where = fromWhere(news);
-        let onHome = !document.body.classList.contains("running");
-        if (onHome && live(await heldGameIsSent(held)) && currentOriginalName === held &&
+        // Decided in the run that acts: heldGameIsSent asks after its read.
+        if (!running() && live(await heldGameIsSent(held)) && loadGen === g0 &&
+            !running() && currentOriginalName === held &&
             live(await takeHandoff(held, news))) {
           gridDirty = true;
           showToast("“" + displayName(held) + "” was played on " + where +
                     " since — Resume picks up there");
-        } else {
+        } else if (stillHeld()) {
           // A later pull no longer lists what it marked seen below: kept.
           let kept = handoffStash?.game === held
             ? handoffStash.news.filter((o) => !news.some((n) => n.key === o.key)) : [];
@@ -4122,6 +4435,21 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     // game in the library: a Drive-only tile shows the screen another device
     // last saw (20 KB, and the whole point of the picture).
     let local = live(await localSyncFiles());
+    // Which games' ROMs are here, from the keys: every write of one carries
+    // its bytes, and reading each to ask cost its whole size per file.
+    let romsHere = new Set([...local].filter(([, p]) => p.kind === "rom").map(([, p]) => p.game));
+    // The files the loop below will fetch, started ahead (downloadAhead):
+    // the same tests it applies before a download, minus the ones it makes
+    // again after (a game loaded meanwhile). It still takes, checks and
+    // writes them one at a time, in this order.
+    ahead = downloadAhead([...remote].filter(([name, f]) => {
+      let p = name !== LIBRARY_FILE && parseDriveFileName(name);
+      if (!p || p.kind === "rom" || syncState.rmt[name] === f.modifiedTime) return false;
+      if (genBound(p.kind) && fileGen(f) < libGen(lib, p.game)) return false;
+      if (isRomLoaded(p.game) || loadingName === p.game) return false;
+      return p.kind === "frame" ? lib.recents.some((r) => r.name === p.game)
+        : romsHere.has(p.game) || (p.kind === "oldsave" && local.has(name));
+    }).map(([, f]) => f));
     for (let [name, f] of remote) {
       live(); // the downloads below await, and write the sync state after
       if (name === LIBRARY_FILE) continue;
@@ -4150,7 +4478,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       }
       if (p.kind === "frame") {
         if (!lib.recents.some((r) => r.name === p.game)) continue; // not a library game
-      } else if (!(await hasLocalRom(p.game)) &&
+      } else if (!romsHere.has(p.game) &&
                  // A kept save held here follows Drive's (a restore elsewhere).
                  !(p.kind === "oldsave" && local.has(name))) {
         continue;                                  // Drive-only: pull on demand
@@ -4181,7 +4509,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         else markDelete(name);
         continue;
       }
-      let bytes = live(await driveDownload(f.id));
+      let bytes = live(await ahead.take(f));
       // Again, in the run that writes: a tap during the download has booted
       // the game on the older save, and its first flush would write that
       // back over this one and upload it over the other device's.
@@ -4193,6 +4521,10 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // deleteGameEverywhere queue before they wipe, so this check, in the
       // same segment as the write, sees every such delete.
       if (syncState.queueDel.includes(name)) continue;
+      // Renamed here while it downloaded: written now it would land under
+      // the old name, an orphan no rename may reuse; it comes down under the
+      // new name once the rename reaches Drive (bug_pull_after_rename_orphans_frame).
+      if (renamedAway.has(p.game)) continue;
       if (sig !== syncState.sigs[name]) {
         live(await writeSyncBytes(name, bytes));
         syncState.sigs[name] = sig;
@@ -4203,6 +4535,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       local.delete(name);
     }
 
+    ahead.stop();
     live();
     // Reconcile upward: queue anything held here that the listing lacks
     // (sigs only remember what was once uploaded). Tombstoned games stay deleted.
@@ -4271,11 +4604,12 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // could ask for again.
       return recents;
     });
-    await writeDriveLibrary(lib, remote);
+    if (!libraryUnchanged(lib, remote)) await writeDriveLibrary(lib, remote);
     live();
     await saveSyncState();
     gridDirty = true;
   } catch (e) {
+    ahead?.stop();
     syncBusy = false;
     if (e instanceof DriveSessionEnded) { refreshSyncStatus(); return; }
     console.warn("Drive pull failed:", e);
@@ -4393,7 +4727,8 @@ const removeGameFromDevice = async (game) => {
   // bytes + session; saves and prefs stay (see perGameKeys). The picture
   // stays too: it is mirrored, tiny, and the Drive-only tile keeps its face.
   let keys = perGameKeys(game);
-  await deleteKeys([...keys.bytes.filter((k) => k !== frameKey(game)), ...keys.session]);
+  await deleteKeys([...keys.bytes.filter((k) => k !== frameKey(game)), ...keys.session,
+                    ...keys.checkpoints]);
   markGameUpload(game); // the ROM is gone, so this queues the saves we kept
   return true;
 };
@@ -4523,6 +4858,12 @@ const renameInventoryLines = (inv) => {
 };
 
 // Returns { ok: true, moved } or { ok: false, error } (shown verbatim).
+// Names this session renamed a game away from, until a game holds the name
+// again (a rename into it, here or from another device, or any library entry
+// under it): a pull downloading a file under one must not write it
+// (pullSyncInner's write segment).
+const renamedAway = new Set();
+
 const renameGame = async (oldName, newName) => {
   if (!db) return { ok: false, error: "Storage isn't ready yet — try again in a moment." };
   if (oldName === newName) return { ok: false, error: "That's already this game's name." };
@@ -4537,6 +4878,9 @@ const renameGame = async (oldName, newName) => {
     return { ok: false,
              error: "“" + displayName(newName) + "” already exists in your library. Nothing was changed." };
   }
+
+  renamedAway.add(oldName);
+  renamedAway.delete(newName);
 
   // The game in memory: flush under the old name, then detach so no write
   // path recreates an old key or lands on a new one mid-transaction.
@@ -4637,6 +4981,7 @@ const renameGame = async (oldName, newName) => {
     });
   } catch (e) {
     // Rolled back whole: put the session back.
+    renamedAway.delete(oldName);
     if (loaded) currentOriginalName = oldName;
     return { ok: false, error: (e?.message || "The rename could not be completed.") +
                               " Nothing was changed." };
@@ -4892,6 +5237,487 @@ const confirmTombstones = (games) =>
     m.body.appendChild(actions);
   });
 
+// --- Export: one game's files, out to the person's own disk ---------------
+// The tile menu's Export… lists every kind of file this game has here, one
+// checkbox each, ticked as they were last time. The ROM always starts
+// unticked: the person most likely has it already, and it is the one big
+// file. A kind this game has nothing of is not offered at all. One file goes
+// out as itself; more go out as one .zip (zipwrite.js) with an info.json
+// saying what each file is, for an import to read one day.
+//
+// Every state kind - the nine slots, where you left off, the earlier moments
+// - is one choice: none of them opens anywhere but here, so there is nothing
+// to pick between.
+const EXPORT_TICKS_KEY = "export-ticks";
+// Headings are clutter over a short list; from this many rows they group it.
+const EXPORT_SECTION_MIN = 5;
+const EXPORT_STATES_DIR = "dingbat save states/";
+
+// File names from game names: the characters a filesystem refuses go.
+const exportSafeName = (s) => String(s).replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").trim() || "game";
+const exportStamp = (ts) => {
+  let d = new Date(ts);
+  let p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+         `${p(d.getHours())}-${p(d.getMinutes())}`;
+};
+const exportDay = (ts) => exportStamp(ts).slice(0, 10);
+const exportBytes = (v) =>
+  v instanceof Uint8Array ? v : v instanceof ArrayBuffer ? new Uint8Array(v)
+  : ArrayBuffer.isView(v) ? new Uint8Array(v.buffer, v.byteOffset, v.byteLength) : null;
+const exportBlobBytes = async (b) =>
+  b instanceof Blob && b.size ? new Uint8Array(await b.arrayBuffer()) : null;
+const exportDataUrl = (url) => {
+  let m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(typeof url === "string" ? url : "");
+  if (!m || !m[2]) return null;
+  let ext = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+              "image/gif": ".gif" }[m[1]] || ".png";
+  return { ext, bytes: b64ToBytes(m[3]) };
+};
+const exportImgExt = (blob) =>
+  ({ "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+     "image/gif": ".gif" }[blob?.type] || ".png");
+
+// --- Game Boy Camera photos, out of the camera's own save ---
+// The cart's 128 KB of RAM holds 30 photo slots: slot k's 128x112 picture
+// is 0xE00 bytes of 2bpp tiles (16 across, 14 down) at 0x2000 + k * 0x1000.
+// Which slots hold a photo, and where each sits in the album, is a 30-byte
+// table at 0x11B2: the photo's album number minus one, 0xFF for an empty
+// slot. The table is followed by "Magic" and a checksum, and the whole run
+// is repeated at 0x11D7 as a backup copy. Layout from Raphaël Boichot's
+// public write-up of the save format ("Inject pictures in your Game Boy
+// Camera saves"); Pan Docs covers the mapper and sensor, not the album.
+const CAM_CART_TYPE = 0xfc;
+const CAM_RAM_SIZE = 0x20000;
+const CAM_SLOTS = 30;
+const CAM_PHOTO_W = 128, CAM_PHOTO_H = 112;
+const camAlbum = (sav) => {
+  const magicAt = (o) => [..."Magic"].every((c, i) => sav[o + i] === c.charCodeAt(0));
+  for (const at of [0x11b2, 0x11d7]) {
+    if (magicAt(at + CAM_SLOTS)) return sav.subarray(at, at + CAM_SLOTS);
+  }
+  return null;
+};
+// [{ number, pixels }] in album order; pixels are 0 (lightest) to 3.
+const cameraPhotos = (rom, sav) => {
+  if (!rom || rom.length <= 0x147 || rom[0x147] !== CAM_CART_TYPE) return [];
+  if (!sav || sav.length < CAM_RAM_SIZE) return [];
+  const album = camAlbum(sav);
+  if (!album) return [];
+  const out = [];
+  for (let slot = 0; slot < CAM_SLOTS; slot++) {
+    const n = album[slot];
+    if (n >= CAM_SLOTS) continue; // 0xFF: empty
+    const base = 0x2000 + slot * 0x1000;
+    const pixels = new Uint8Array(CAM_PHOTO_W * CAM_PHOTO_H);
+    for (let ty = 0; ty < CAM_PHOTO_H / 8; ty++) {
+      for (let tx = 0; tx < CAM_PHOTO_W / 8; tx++) {
+        const tile = base + (ty * (CAM_PHOTO_W / 8) + tx) * 16;
+        for (let row = 0; row < 8; row++) {
+          const lo = sav[tile + row * 2], hi = sav[tile + row * 2 + 1];
+          for (let bit = 0; bit < 8; bit++) {
+            const v = ((lo >> (7 - bit)) & 1) | (((hi >> (7 - bit)) & 1) << 1);
+            pixels[(ty * 8 + row) * CAM_PHOTO_W + tx * 8 + bit] = v;
+          }
+        }
+      }
+    }
+    out.push({ number: n + 1, pixels });
+  }
+  return out.sort((a, b) => a.number - b.number);
+};
+// A 2-bit greyscale PNG (PNG spec, colour type 0, bit depth 2), its zlib
+// stream made of stored blocks: four shades are exactly what the format
+// holds, and at 3.6 KB a photo there is nothing worth compressing.
+const greyPng2 = (pixels, w, h) => {
+  const row = 1 + w / 4;
+  const raw = new Uint8Array(row * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Shade 0 is the lightest; PNG grey 3 is white.
+      raw[y * row + 1 + (x >> 2)] |= (3 - pixels[y * w + x]) << (6 - (x & 3) * 2);
+    }
+  }
+  // Stored deflate blocks (RFC 1951 3.2.4): header byte, LEN, NLEN, bytes.
+  const blocks = [];
+  for (let o = 0; o < raw.length; o += 0xffff) {
+    const n = Math.min(0xffff, raw.length - o);
+    const last = o + n >= raw.length ? 1 : 0;
+    blocks.push(Uint8Array.of(last, n & 0xff, n >> 8, ~n & 0xff, (~n >> 8) & 0xff),
+                raw.subarray(o, o + n));
+  }
+  let a = 1, b = 0;
+  for (const v of raw) { a = (a + v) % 65521; b = (b + a) % 65521; }
+  const zlib = [Uint8Array.of(0x78, 0x01), ...blocks,
+                Uint8Array.of(b >> 8, b & 0xff, a >> 8, a & 0xff)];
+  const join = (parts) => {
+    const out = new Uint8Array(parts.reduce((s, p) => s + p.length, 0));
+    let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  };
+  const u32 = (n) => Uint8Array.of(n >>> 24, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+  const chunk = (type, data) => {
+    const td = join([new TextEncoder().encode(type), data]);
+    return join([u32(data.length), td, u32(ZipWrite.crc32(td))]);
+  };
+  const ihdr = join([u32(w), u32(h), Uint8Array.of(2, 0, 0, 0, 0)]);
+  return join([Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+               chunk("IHDR", ihdr), chunk("IDAT", join(zlib)), chunk("IEND", new Uint8Array(0))]);
+};
+
+const plural = (n, one, many = one + "s") => n + " " + (n === 1 ? one : many);
+
+// What this game has to export, as the rows of the modal: { kind, group,
+// label, sub, files: [{ path, data, solo? }] }. `path` is where a file sits
+// in the zip; `solo` is its name when it goes out alone. Only kinds with
+// something in them are listed.
+const exportInventory = async (name) => {
+  const base = exportSafeName(stripExt(name) || name);
+  const items = [];
+  const add = (kind, group, label, sub, files) => {
+    files = files.filter((f) => f.data && f.data.length);
+    if (files.length) items.push({ kind, group, label, sub, files });
+  };
+
+  const rom = await getRomBytes(name);
+  add("rom", "The game", "ROM", exportSafeName(name), [{ path: exportSafeName(name), data: rom }]);
+
+  const sav = exportBytes(await dbGet(linkSaveKey(name, 0)));
+  const sav2 = exportBytes(await dbGet(linkSaveKey(name, 1)));
+  add("save", "Progress", "Save file",
+      "Your in-game progress · .sav" + (sav2 && sav2.length ? " · with Player 2's" : ""),
+      [{ path: base + ".sav", data: sav, solo: base + ".sav" },
+       { path: base + " (Player 2).sav", data: sav2 }]);
+
+  const states = [];
+  let slots = 0, quick = false;
+  for (let s = 0; s < NUM_STATE_SLOTS; s++) {
+    const bytes = exportBytes(await dbGet(slotStateKey(name, s)));
+    if (!bytes || !bytes.length) continue;
+    const label = s === 0 ? "Quick" : "Slot " + s;
+    if (s === 0) quick = true; else slots++;
+    states.push({ path: EXPORT_STATES_DIR + label + ".state", data: bytes,
+                  solo: base + (s === 0 ? "" : " (" + label + ")") + ".state" });
+    const pic = exportDataUrl((await dbGet(slotMetaKey(name, s)))?.thumb);
+    if (pic) states.push({ path: EXPORT_STATES_DIR + label + pic.ext, data: pic.bytes });
+  }
+  const auto = await dbGet(autoStateKey(name));
+  const autoBytes = exportBytes(auto?.bytes);
+  if (autoBytes && autoBytes.length) {
+    states.push({ path: EXPORT_STATES_DIR + "Where you left off.state", data: autoBytes,
+                  solo: base + " (where you left off).state" });
+    const pic = await dbGet(sessionPicKey(name));
+    const picBytes = await exportBlobBytes(pic?.blob);
+    if (picBytes) states.push({ path: EXPORT_STATES_DIR + "Where you left off" + exportImgExt(pic.blob),
+                                data: picBytes });
+  }
+  let moments = 0;
+  const taken = new Set();
+  for (const e of (await readCheckpointIndex(name)).list) {
+    const rec = await dbGet(ckptKey(name, e.slot));
+    const bytes = exportBytes(rec?.bytes);
+    if (!bytes || !bytes.length) continue;
+    moments++;
+    let stem = EXPORT_STATES_DIR + "Moments/" + exportStamp(rec.ts || e.ts);
+    for (let i = 2; taken.has(stem); i++) stem = stem.replace(/( \(\d+\))?$/, ` (${i})`);
+    taken.add(stem);
+    states.push({ path: stem + ".state", data: bytes,
+                  solo: base + " (" + stem.slice(stem.lastIndexOf("/") + 1) + ").state" });
+    const picBytes = await exportBlobBytes(rec.pic);
+    if (picBytes) states.push({ path: stem + exportImgExt(rec.pic), data: picBytes });
+  }
+  const what = [quick && "Quick", slots && plural(slots, "slot"),
+                autoBytes?.length && "where you left off", moments && plural(moments, "moment")]
+    .filter(Boolean).join(", ");
+  add("states", "Progress", "Save states", what + " · dingbat only", states);
+
+  const kept = await getKeptSave(name);
+  if (kept) {
+    const when = kept.at ? exportDay(kept.at) : "";
+    const stem = (kept.why === "replaced" ? "Replaced save" : "Save from before you deleted it") +
+                 (when ? " " + when : "");
+    add("kept", "Progress", kept.why === "replaced" ? "Replaced save" : "Old save",
+        (kept.why === "replaced" ? "The save you replaced" : "From before you deleted it") +
+        (kept.at ? " · " + fmtStateTime(kept.at) : "") + " · .sav",
+        [{ path: "old saves/" + stem + ".sav", data: exportBytes(kept.data),
+           solo: base + " (" + stem.toLowerCase() + ").sav" }]);
+  }
+
+  const photos = cameraPhotos(rom, sav);
+  add("camera", "Pictures", "Camera photos",
+      plural(photos.length, "photo") + " from the camera's album · .png",
+      photos.map((p) => ({ path: "camera/Photo " + String(p.number).padStart(2, "0") + ".png",
+                           data: greyPng2(p.pixels, CAM_PHOTO_W, CAM_PHOTO_H) })));
+
+  const prints = printerPhotos.filter((p) => p?.game === name);
+  const printFiles = [];
+  for (const p of prints) {
+    const png = exportDataUrl(p.png);
+    let stem = "prints/" + exportStamp(p.ts);
+    for (let i = 2; taken.has(stem); i++) stem = stem.replace(/( \(\d+\))?$/, ` (${i})`);
+    taken.add(stem);
+    if (png) printFiles.push({ path: stem + png.ext, data: png.bytes });
+  }
+  add("prints", "Pictures", "Printed photos",
+      plural(printFiles.length, "Game Boy Printer photo") + " · .png", printFiles);
+
+  const frame = await getRomFrame(name);
+  add("thumb", "Pictures", "Library thumbnail", "The picture on its tile · " + exportImgExt(frame),
+      [{ path: "pictures/Thumbnail" + exportImgExt(frame), data: await exportBlobBytes(frame),
+         solo: base + exportImgExt(frame) }]);
+  const art = await getRomArt(name);
+  add("art", "Pictures", "Box art", "The cover it came with · " + exportImgExt(art),
+      [{ path: "pictures/Box art" + exportImgExt(art), data: await exportBlobBytes(art),
+         solo: base + " box art" + exportImgExt(art) }]);
+
+  const cheats = await dbGet(CHEATS_KEY(name));
+  const cheatList = Array.isArray(cheats) ? cheats : [];
+  add("cheats", "Extras", "Cheats", plural(cheatList.length, "code") + " · .cht",
+      [{ path: base + ".cht", data: cheatList.length ? new TextEncoder().encode(serializeCheats(cheatList)) : null,
+         solo: base + ".cht" }]);
+  return items;
+};
+
+const exportSize = (item) => item.files.reduce((s, f) => s + f.data.length, 0);
+
+// The file the chosen rows become: { fileName, blob, count }. One file goes
+// out bare; anything more is a zip with info.json in it.
+const exportPackage = (name, chosen, now = Date.now()) => {
+  const files = chosen.flatMap((it) => it.files.map((f) => ({ ...f, kind: it.kind })));
+  if (files.length === 1) {
+    const f = files[0];
+    const fileName = f.solo || f.path.slice(f.path.lastIndexOf("/") + 1);
+    return { fileName, blob: new Blob([f.data], { type: "application/octet-stream" }),
+             count: 1 };
+  }
+  const info = {
+    app: "dingbat",
+    format: 1,
+    game: name,
+    system: systemOf(name),
+    exported: new Date(now).toISOString(),
+    files: files.map((f) => ({ path: f.path, kind: f.kind })),
+  };
+  const entries = [
+    { name: "info.json", data: new TextEncoder().encode(JSON.stringify(info, null, 2) + "\n") },
+    ...files.map((f) => ({ name: f.path, data: f.data })),
+  ];
+  const base = exportSafeName(stripExt(name) || name);
+  return { fileName: base + " — dingbat " + exportDay(now) + ".zip",
+           blob: ZipWrite.blob(entries, new Date(now)), count: chosen.length };
+};
+
+const exportDownload = (fileName, blob) => {
+  let a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  a.click();
+  // Safari starts the download after the click returns; a revoke right away
+  // can cancel it.
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+};
+
+// What was ticked last time, the ROM never among it.
+const exportTicks = async () => {
+  let t = await dbGet(EXPORT_TICKS_KEY).catch(() => null);
+  return t && typeof t === "object" ? t : {};
+};
+const exportTicked = (ticks, kind) => kind !== "rom" && ticks[kind] !== false;
+
+let exportModalOpen = false;
+
+const openExportModal = async (name) => {
+  if (exportModalOpen) return;
+  exportModalOpen = true;
+  let items, ticks;
+  try {
+    // The running game's battery RAM first, so the .sav is as fresh as the
+    // screen.
+    if (isRomLoaded(name) && currentRomName) await persistSave(currentRomName, name);
+    [items, ticks] = await Promise.all([exportInventory(name), exportTicks()]);
+  } catch {
+    exportModalOpen = false;
+    showToast("Couldn't read this game's files");
+    return;
+  }
+  if (!items.length) {
+    exportModalOpen = false;
+    showToast("Nothing to export for this game yet");
+    return;
+  }
+
+  let m;
+  const close = () => {
+    exportModalOpen = false;
+    m.dismiss();
+  };
+  m = buildSyncModal({ title: "What would you like to export?",
+                       hint: displayName(name) + " · " + systemOf(name), onDismiss: close });
+  m.modal.classList.add("export-modal");
+
+  const on = new Map(items.map((it) => [it, exportTicked(ticks, it.kind)]));
+  const list = document.createElement("div");
+  list.className = "export-list";
+  const sectioned = items.length >= EXPORT_SECTION_MIN;
+  let group = null;
+  items.forEach((it, i) => {
+    if (sectioned && it.group !== group) {
+      group = it.group;
+      let h = document.createElement("div");
+      h.className = "modal-subhead export-subhead" + (list.children.length ? "" : " no-rule");
+      h.textContent = group;
+      list.appendChild(h);
+    }
+    let row = document.createElement("label");
+    row.className = "export-row";
+    let box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = on.get(it);
+    // "export-save" and "export-state" are the in-game menu's buttons.
+    box.id = "export-pick-" + it.kind;
+    let text = document.createElement("span");
+    text.className = "export-row-text";
+    let label = document.createElement("span");
+    label.className = "export-row-label";
+    label.textContent = it.label;
+    let sub = document.createElement("span");
+    sub.className = "export-row-sub";
+    sub.textContent = it.sub;
+    text.append(label, sub);
+    let size = document.createElement("span");
+    size.className = "export-row-size";
+    size.textContent = formatBytes(exportSize(it));
+    row.append(box, text, size);
+    row.classList.toggle("off", !box.checked);
+    box.addEventListener("change", () => {
+      on.set(it, box.checked);
+      row.classList.toggle("off", !box.checked);
+      refresh();
+    });
+    list.appendChild(row);
+  });
+
+  const foot = document.createElement("div");
+  foot.className = "export-foot";
+  const footText = document.createElement("div");
+  footText.className = "export-foot-text";
+  const fileLine = document.createElement("span");
+  fileLine.className = "export-file";
+  const sumLine = document.createElement("span");
+  sumLine.className = "export-sum";
+  footText.append(fileLine, sumLine);
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "button button-ghost";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", close);
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "button button-primary";
+  // The two buttons wrap together, under the file line on a phone.
+  const footActions = document.createElement("div");
+  footActions.className = "export-foot-actions";
+  footActions.append(cancel, go);
+  foot.append(footText, footActions);
+
+  const chosen = () => items.filter((it) => on.get(it));
+  const refresh = () => {
+    const c = chosen();
+    const files = c.flatMap((it) => it.files);
+    go.disabled = !c.length;
+    go.textContent = c.length ? "Export " + c.length : "Export";
+    if (!c.length) {
+      fileLine.textContent = "Nothing selected";
+      sumLine.textContent = "Tick something to export";
+      return;
+    }
+    const bytes = files.reduce((s, f) => s + f.data.length, 0);
+    if (files.length === 1) {
+      const f = files[0];
+      fileLine.textContent = f.solo || f.path.slice(f.path.lastIndexOf("/") + 1);
+      sumLine.textContent = formatBytes(bytes) + " · a single file";
+    } else {
+      fileLine.textContent = exportSafeName(stripExt(name) || name) + " — dingbat " +
+                             exportDay(Date.now()) + ".zip";
+      sumLine.textContent = plural(c.length, "item") + " · " + formatBytes(bytes);
+    }
+  };
+
+  go.addEventListener("click", async () => {
+    const c = chosen();
+    if (!c.length) return;
+    const remember = {};
+    for (const it of items) if (it.kind !== "rom") remember[it.kind] = on.get(it);
+    dbPut(EXPORT_TICKS_KEY, { ...ticks, ...remember }).catch(() => {});
+    let pkg;
+    try {
+      pkg = exportPackage(name, c);
+    } catch (e) {
+      showToast("Couldn't export: " + e.message);
+      return;
+    }
+    exportDownload(pkg.fileName, pkg.blob);
+    showDone(pkg, c);
+  });
+
+  const showDone = (pkg, c) => {
+    m.heading.textContent = "Exported";
+    m.hintEl?.remove();
+    m.body.replaceChildren();
+    const card = document.createElement("div");
+    card.className = "export-done-file";
+    const n = document.createElement("span");
+    n.className = "export-file";
+    n.textContent = pkg.fileName;
+    const s = document.createElement("span");
+    s.className = "export-sum";
+    s.textContent = (pkg.count > 1 ? plural(pkg.count, "item") + " · " : "") +
+                    formatBytes(pkg.blob.size) + " · in your downloads";
+    card.append(n, s);
+    m.body.appendChild(card);
+    const kinds = new Set(c.map((it) => it.kind));
+    if (kinds.has("states")) {
+      const p = document.createElement("p");
+      p.className = "modal-hint export-done-note";
+      p.textContent = kinds.has("save")
+        ? "The .sav opens in any emulator. The save states only open in dingbat."
+        : "The save states only open in dingbat.";
+      m.body.appendChild(p);
+    }
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    // Phones keep downloads out of sight; the share sheet puts the file in
+    // Files, AirDrop or a message, which is where it was going anyway.
+    const file = typeof File === "function"
+      ? new File([pkg.blob], pkg.fileName, { type: pkg.blob.type }) : null;
+    if (file && navigator.canShare?.({ files: [file] })) {
+      const share = document.createElement("button");
+      share.type = "button";
+      share.className = "button";
+      share.textContent = "Share…";
+      share.addEventListener("click", () => {
+        navigator.share({ files: [file] }).catch(() => {});
+      });
+      actions.appendChild(share);
+    }
+    const done = document.createElement("button");
+    done.type = "button";
+    done.className = "button button-primary";
+    done.textContent = "Done";
+    done.addEventListener("click", close);
+    actions.appendChild(done);
+    m.body.appendChild(actions);
+    done.focus();
+  };
+
+  m.body.append(list, foot);
+  refresh();
+  // On Export: what was ticked last time goes with one press (Enter, or A on
+  // a pad), and the boxes are an arrow away.
+  go.focus();
+};
+
 // --- Modal plumbing ------------------------------------------------------
 const buildSyncModal = ({ title, hint, onDismiss }) => {
   let overlay = document.createElement("div");
@@ -4908,11 +5734,12 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
   let h = document.createElement("h2");
   h.textContent = title;
   modal.appendChild(h);
+  let hintEl = null;
   if (hint) {
-    let p = document.createElement("p");
-    p.className = "modal-hint";
-    p.textContent = hint;
-    modal.appendChild(p);
+    hintEl = document.createElement("p");
+    hintEl.className = "modal-hint";
+    hintEl.textContent = hint;
+    modal.appendChild(hintEl);
   }
   let body = document.createElement("div");
   modal.appendChild(body);
@@ -4930,7 +5757,7 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
     closeBtn.hidden = true;
   }
   return {
-    overlay, modal, body,
+    overlay, modal, body, heading: h, hintEl,
     dismiss: () => {
       document.removeEventListener("keydown", onKey, true);
       releaseFocus(overlay);
@@ -4961,12 +5788,21 @@ const gdriveConnect = async () => {
   } finally {
     driveConnecting--;
   }
+  // The refresh token the broker sign-in stored is another account's than
+  // the one confirmed (a re-grant swapped the token meanwhile): dropped, or
+  // every silent renewal would fetch that account's token with this one
+  // loaded (bug_refresh_token_outlives_its_account).
+  if (syncState.refresh && acct && syncState.refreshAcct !== acct) syncState.refresh = null;
   // Whose token this is could not be learned, and another account's queued
   // work, tombstones and renames are what is loaded: syncing now could send
   // them to this one. Better to ask again.
   if (!acct && syncState.acct) {
     syncState.refresh = null;
     clearDriveToken();
+    // A session of its own ends with it: a refresh it started (a Drive-only
+    // tile's ensureDriveSignedIn) would otherwise land as current and adopt
+    // the refused account's token (bug_refresh_of_refused_signin).
+    driveSession++;
     throw new Error("Couldn't confirm which Google account signed in — try again");
   }
   driveSession++; // a new session, whichever account it is
@@ -5029,7 +5865,7 @@ const driveTokenStale = () =>
 // a refresh token and the broker has not just failed; else on a gesture.
 const armDriveRenewOnGesture = () => {
   if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
-  if (syncState.refresh && driveBrokerBase() && Date.now() >= driveBrokerRetryAt) {
+  if (driveRefreshUsable() && driveBrokerBase() && Date.now() >= driveBrokerRetryAt) {
     renewDriveToken({ gesture: false });
     return;
   }
@@ -5908,9 +6744,13 @@ const isQuotaError = (e) =>
 // the older one is then not put back over it, and the result is null.
 const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
   let freed = 0;
+  let evictedCkpts = false;
+  // Any retry, after checkpoints or ROMs gave way: both awaits let a newer
+  // value (or a reset, delete or import) in (bug_ckpt_evict_retry_*).
+  let retried = false;
   let put = true;
   for (;;) {
-    if (freed && superseded()) {
+    if (retried && superseded()) {
       put = null;
       break;
     }
@@ -5919,6 +6759,12 @@ const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
       break;
     } catch (e) {
       if (!isQuotaError(e)) throw e;
+      retried = true;
+      // Other games' earlier moments go first, then ROM files.
+      if (!evictedCkpts) {
+        evictedCkpts = true;
+        if (await evictCheckpoints(keep)) continue;
+      }
       if (!(await evictOldestRom(keep))) return false;
       freed++;
     }
@@ -6045,6 +6891,8 @@ const storeLastFrame = ({ force = false } = {}) => {
   if (!currentRomName || !currentOriginalName) return Promise.resolve();
   if (linkMode || rollbackMode || netActive()) return Promise.resolve();
   if (ndsOffFor()) return Promise.resolve(); // the picture stays the last one played
+  if (sessionHeldFor === currentOriginalName) return Promise.resolve(); // a boot screen
+
   const fb = copyFramebuffer();
   if (!fb) return Promise.resolve();
   const { heap, w, h } = fb;
@@ -6106,6 +6954,10 @@ const enforceRomBudget = async (list) => {
 // Move `name` to the front of the index and spend the byte budget over the
 // result (ROM files only, never saves).
 const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0 } = {}) => updateRecent(async (all) => {
+  // Any game under the name claims it again - an import, a Drive-only
+  // tile's download, a launch - and a pull may write under it once more
+  // (bug_download_into_away_name_skips_saves).
+  renamedAway.delete(name);
   let prev = all.find((r) => r?.name === name);
   let list = all.filter((r) => r.name !== name);
   let ts = Date.now();
@@ -6177,7 +7029,9 @@ const touchRecent = async (name) => {
 // afterwards, the choice having been made on the home screen. Without it the
 // boot ends in the "Last session saved" offer, which is what a library tile
 // and a file dropped on the page get.
-const launchRom = async (name, { resume = false, fresh = false, flyFrom = null } = {}) => {
+// `session`: a moment to go back into instead (resumeMoment).
+const launchRom = async (name, { resume = false, fresh = false, flyFrom = null,
+                                 session: chosen = null } = {}) => {
   const gen = nextLoadGen(); // a later tap supersedes this one (loadGen)
   // The grid renders before the wasm runtime is up; wait here.
   await ensureRuntimeReady();
@@ -6188,7 +7042,7 @@ const launchRom = async (name, { resume = false, fresh = false, flyFrom = null }
     showToast("This game's ROM is no longer stored — load the file again");
     return;
   }
-  let session = resume ? await resumeSessionFor(name) : null;
+  let session = chosen || (resume ? await resumeSessionFor(name) : null);
   if (gen !== loadGen) return;
   // The flight lands intact only on the frame the session goes back to: the
   // hero, when it is already showing it, else the session's own picture,
@@ -6203,8 +7057,8 @@ const launchRom = async (name, { resume = false, fresh = false, flyFrom = null }
   await touchRecent(name);
   if (gen !== loadGen) return;
   let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
-  loadRom("rom" + ext, name,
-    { gen, rom: data, resume: session, skipResumeOffer: resume || fresh });
+  return loadRom("rom" + ext, name,
+    { gen, rom: data, resume: session, skipResumeOffer: resume || fresh || !!chosen });
 };
 
 // Home-screen recent grid: the game library.
@@ -6464,11 +7318,35 @@ const tileMenuEntries = (name, f) => {
       run: () => downloadGameAction(name),
     }));
   }
+  // Earlier moments of play (checkpoints), kept on this device: the way back
+  // when where the game stopped is what keeps stopping it.
+  if (f.moments && !f.driveOnly && !f.missing) {
+    items.push(tileMenuItem({
+      label: "Resume from earlier",
+      disabled: busy,
+      run: () => openMomentsModal(name),
+    }));
+  }
   items.push(tileMenuItem({
     label: "Rename",
     disabled: busy,
     run: () => openRenameModal(name),
   }));
+  // Just above the ways to lose a save: the way to keep one. It only reads,
+  // so an online session does not hold it up. A game kept only on Drive
+  // comes down first, as Download does, and is exported from here.
+  if (f.driveOnly && !f.missing) {
+    items.push(tileMenuItem({
+      label: "Download and export…",
+      disabled: f.downloading ? "Downloading…" : "",
+      run: async () => { if (await downloadGameAction(name)) await openExportModal(name); },
+    }));
+  } else {
+    items.push(tileMenuItem({
+      label: "Export…",
+      run: () => openExportModal(name),
+    }));
+  }
   items.push(tileMenuItem({
     label: "Reset save data",
     disabled: busy || (f.hasSaves ? "" : "No save data yet"),
@@ -6606,9 +7484,9 @@ const placeTileMenu = (anchor, at) => {
 // `at` = {x, y} for a right-click; else the menu hangs off `anchor`.
 const openTileMenu = async (name, anchor, tile, at = null, session = false) => {
   closeTileMenu();
-  let [localRoms, withSaves, kept] = await Promise.all(
-    [localRomSet(), romsWithSaveData(), getKeptSave(name)]);
-  let f = { ...gameFlags(name, localRoms, new Set(withSaves)), kept };
+  let [localRoms, withSaves, kept, moments] = await Promise.all(
+    [localRomSet(), romsWithSaveData(), getKeptSave(name), hasEarlierMoments(name)]);
+  let f = { ...gameFlags(name, localRoms, new Set(withSaves)), kept, moments };
   tileMenuFor = name;
   tileMenuAnchor = anchor;
   // A tile is a picture in a grid of them, so the menu has to say which game
@@ -6711,6 +7589,7 @@ const wireTileMenu = (tile, launch, romName) => {
 // since the snapshot.
 const openLibraryGame = async (romName, { driveOnly = false, missing = false, flyFrom = null, resume = libraryOpen === "resume" } = {}) => {
   if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
+  if (!driveOnly && crashGate(romName)) return;
   if (!driveOnly) { launchRom(romName, { resume, flyFrom }); return; }
   if (missing) { relinkGameAction(romName, { launch: true }); return; }
   await fetchTileGame(romName, { open: { resume, flyFrom } });
@@ -7131,6 +8010,7 @@ document.addEventListener("keydown", (e) => {
     closeSavesModal();
     closeUpdateModal();
     closeStatesModal();
+    closeMomentsModal();
     closeCheatsModal();
     closeReportModal();
     closeRewindScrubber();
@@ -7489,6 +8369,51 @@ const looksLikeStateFile = (bytes) =>
   !!bytes && bytes.length >= STATE_MAGIC.length &&
   [...STATE_MAGIC].every((c, i) => bytes[i] === c.charCodeAt(0));
 
+// Every state the core hands out is packed (pack_state in serialize.nim):
+// the header as it was, flagged in byte 15, the rest deflated - a GBA state
+// is ~550 KB plain and ~55 KB packed.
+const isPackedState = (bytes) =>
+  looksLikeStateFile(bytes) && bytes.length > 15 && (bytes[15] & 0x80) !== 0;
+
+const packStateBytes = (bytes) => {
+  if (typeof Module === "undefined" || !Module._wasm_pack_state) return null;
+  let ptr = Module._malloc(bytes.length);
+  if (!ptr) return null;
+  new Uint8Array(Module.memory.buffer, ptr, bytes.length).set(bytes);
+  let len = Module._wasm_pack_state(ptr, bytes.length);
+  Module._free(ptr);
+  if (len <= 0) return null;
+  return new Uint8Array(Module.memory.buffer, Module._wasm_state_data(), len).slice();
+};
+
+// Slots saved before states were packed are packed once, at boot, and sent
+// up again in their smaller form. Sessions are left: each is rewritten the
+// next time its game is left, and repacking one would hand the other device
+// new bytes for the same moment, which reads as news (handoffNews).
+const packStoredStates = async () => {
+  if (typeof Module === "undefined" || !Module._wasm_pack_state) return 0;
+  let keys = [];
+  try { keys = await dbKeys(); } catch { return 0; }
+  let packed = 0;
+  for (const key of keys) {
+    if (typeof key !== "string" || !key.startsWith("state:")) continue;
+    let wrote = false;
+    try {
+      wrote = await dbUpdate(key, (stored) => {
+        const bytes = stored instanceof ArrayBuffer ? new Uint8Array(stored) : stored;
+        if (!(bytes instanceof Uint8Array) || !looksLikeStateFile(bytes) ||
+            isPackedState(bytes)) return undefined;
+        const next = packStateBytes(bytes);
+        return next && isPackedState(next) ? next : undefined;
+      });
+    } catch {}
+    if (!wrote) continue;
+    packed++;
+    markUpload(key);
+  }
+  return packed;
+};
+
 // Toast copy per StateRejectKind (src/dingbat/common/serialize.nim, via
 // wasm_state_error_kind): one sentence per cause saying what to do.
 const SRK = {
@@ -7548,6 +8473,95 @@ const stateRejectMessage = (bytes) => {
   if (!why) return "That save state couldn't be loaded.";
   // Fall back to the core's own wording, sentence-cased.
   return why.charAt(0).toUpperCase() + why.slice(1).replace(/\.$/, "");
+};
+
+// --- A state from a newer dingbat: update, then offer the load again ---
+// The core refuses only states from the future (it reads every older
+// revision, serialize.nim), so the cure is the newer build. Such a refusal
+// fetches it and reloads, saying so; what was being loaded is kept under
+// UPDATE_RETRY_KEY and offered again, one tap, once the new build is up.
+const UPDATE_RETRY_KEY = "updateretry";
+// An older retry is from an update that never landed.
+const UPDATE_RETRY_MAX_AGE = 10 * 60 * 1000;
+
+const TOO_NEW_COPY = {
+  offline:
+    "That save state was made by a newer version of dingbat. Connect to the internet so dingbat can update, then try again.",
+  unpublished:
+    "That save state was made by a newer version of dingbat that isn't available here yet. Try again later.",
+  arriving:
+    "That save state was made by a newer version of dingbat. The update is still on its way — try again in a few minutes.",
+  updating: "That save state was made by a newer version of dingbat. Updating dingbat so it can load…",
+  stuck: "dingbat couldn't update, so that save state still can't load. Try again later.",
+};
+
+// A refused load's toast, or, for a state from a newer dingbat, the update.
+// `retry` is what to load again after it: { kind: "session" } the game's
+// session, { kind: "slot", slot }, or { kind: "bytes", bytes } for a state
+// kept nowhere else (an import). Called straight after the refusal, before
+// another wasm call can replace its kind.
+const refuseState = (bytes, retry) => {
+  if (!looksLikeStateFile(bytes) || stateRejectKind() !== SRK.TOO_NEW ||
+      !currentOriginalName || linkMode || rollbackMode || netActive()) {
+    showToast(stateRejectMessage(bytes));
+    return;
+  }
+  const name = currentOriginalName;
+  // Now, not after the probe: a hide meanwhile would snapshot the boot.
+  if (retry.kind === "session") sessionHeldFor = name;
+  updateForNewerState({ ...retry, name });
+};
+
+const updateForNewerState = async (retry) => {
+  const builds = await probeBuilds();
+  if (!builds) { showToast(TOO_NEW_COPY.offline); return; }
+  const { current, latest, deployed } = builds;
+  // The same build: the state came from one this site doesn't serve (a
+  // development build), or version.txt hasn't reached this edge yet.
+  if (!latest || latest === current) { showToast(TOO_NEW_COPY.unpublished); return; }
+  if (deployed !== latest) { showToast(TOO_NEW_COPY.arriving); return; }
+  if (appUpdating) return; // an update already under way reloads anyway
+  paused = true; // the game waits out the download
+  pushToast(TOO_NEW_COPY.updating, 120000, null);
+  // The game as it is now goes down first (a held session: its battery
+  // only), rather than trusting the reload's pagehide to finish it.
+  if (currentRomName && currentOriginalName) {
+    try {
+      await persistSave(currentRomName, currentOriginalName);
+      await persistAutoState();
+    } catch {}
+  }
+  try {
+    await dbPut(UPDATE_RETRY_KEY, { ...retry, from: current, ts: Date.now() });
+  } catch {}
+  applyUpdate();
+};
+
+// After the update a refused state asked for: offer the load again. A tap,
+// not a launch at boot: it is also the gesture iOS wants before a game's
+// audio can start.
+const offerStateRetry = async () => {
+  let rec = null;
+  try { rec = await dbGet(UPDATE_RETRY_KEY); } catch {}
+  if (!rec) return;
+  try { await dbDelete(UPDATE_RETRY_KEY); } catch {}
+  if (!rec.name || !(Date.now() - rec.ts < UPDATE_RETRY_MAX_AGE)) return;
+  let running = "";
+  try { running = (await (await fetch("version.txt")).text()).trim(); } catch {}
+  if (running && running === rec.from) { showToast(TOO_NEW_COPY.stuck); return; }
+  const session = rec.kind === "session";
+  showActionToast(
+    "dingbat updated — " + (session ? "your session" : "that save state") + " can load now",
+    session ? "Resume" : "Load", () => retryStateLoad(rec), 20000);
+};
+
+const retryStateLoad = async (rec) => {
+  // The session first: for a slot or an import, it is where the game was
+  // when the load was asked for, so the load's Undo goes back there.
+  await launchRom(rec.name, { resume: true });
+  if (currentOriginalName !== rec.name) return; // failed, or another tap won
+  if (rec.kind === "slot") await loadFromSlot(rec.slot);
+  else if (rec.kind === "bytes" && rec.bytes) applyImportedState(rec.bytes);
 };
 
 // Apply a state image; true when accepted. keepRewind is only for undoing
@@ -7689,8 +8703,10 @@ const loadFromSlot = async (slot) => {
     stateUndoBytes = undo;
     stateUndoName = currentOriginalName;
     showActionToast("State loaded", "Undo", undoStateLoad, 6000, { game: true });
+  } else if (ok) {
+    showToast("State loaded");
   } else {
-    showToast(ok ? "State loaded" : stateRejectMessage(bytes));
+    refuseState(bytes, { kind: "slot", slot });
   }
   return ok;
 };
@@ -7753,27 +8769,63 @@ const deviceWords = (dev) => !dev ? "another device"
 // session another device took since.
 let sessionMoved = true;
 let sessionSnapFor = null;
+// The game whose session no snapshot may replace: a resume this build
+// refused as too new left the core on a fresh boot, and a snapshot of that
+// would put the boot screen over the newer session, here and on Drive. Held
+// until another game loads (loadRom); the battery save still persists.
+var sessionHeldFor = null;
+
+// The newest snapshot taken of each game (its ts), and each game's session
+// epoch, bumped when its session is deleted (deleteKeys). A checkpoint packs
+// in a worker and lands later; it writes the session only while it is still
+// the newest one taken and nothing has deleted the session since - a Main
+// Menu, a switch or a close takes a newer one in the meantime, and a reset
+// wipes it.
+const sessionSnapTs = new Map();
+const sessionEpochs = new Map();
+const sessionEpoch = (name) => sessionEpochs.get(name) || 0;
 
 const persistAutoState = () => {
   if (!currentRomName || !currentOriginalName) return;
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
   if (ndsOffFor()) return; // a DS switched off: its session is over (ndsSyncPower)
   const name = currentOriginalName;
-  if (!sessionMoved && sessionSnapFor === name) return;
+  if (sessionHeldFor === name) return; // see sessionHeldFor
+  // A checkpoint still packing is not yet stored: a closing page takes the
+  // moment itself (and the checkpoint, now older, is dropped when it lands).
+  if (!sessionMoved && sessionSnapFor === name && !ckptInFlight) {
+    // Nothing new to take, but a checkpoint's session may be here unsent
+    // (sendSessionNow): leaving the game sends it.
+    if (sessionUnsent.has(name)) {
+      sessionUnsent.delete(name);
+      const key = autoStateKey(name);
+      return checkpointLanded().then(() => markUpload(key));
+    }
+    return;
+  }
   const bytes = captureStateBytes();
   if (!bytes) return;
   const ts = Date.now();
   const fb = copyFramebuffer();
   sessionMoved = false;
   sessionSnapFor = name;
+  sessionSnapTs.set(name, ts);
+  sessionUnsent.delete(name);
   // liveSaveSig flushes first: the signature is the battery this state carries.
   // The snapshot is written at once and its picture after the encode: a
   // closing page may cut the encode short, which leaves the older picture
   // and its older ts, so it is not taken for this one. Each goes up when it
   // lands (the picture rides in the session's Drive file).
   const key = autoStateKey(name);
-  const put = dbPut(key, { bytes, ts, saveSig: liveSaveSig(), by: deviceId, dev: deviceLabel })
-    .then(() => markUpload(key)).catch(() => {});
+  const rec = { bytes, ts, saveSig: liveSaveSig(), by: deviceId, dev: deviceLabel,
+                play: playClock() };
+  const snap = { name, ...rec };
+  unstoredSnap = snap;
+  const put = dbPut(key, rec)
+    .then(() => {
+      if (unstoredSnap === snap) unstoredSnap = null;
+      markUpload(key);
+    }).catch(() => {});
   if (fb) {
     frameBlobFromFb(fb.heap, fb.w, fb.h)
       .then((blob) => blob && dbPut(sessionPicKey(name), { ts, blob }).then(() => put)
@@ -7782,6 +8834,531 @@ const persistAutoState = () => {
   }
   return put;
 };
+
+// --- Checkpoints ---------------------------------------------------------
+// The session above is taken when the game is left or the page hidden. A
+// browser that crashes, or is killed while the game is on screen, gives no
+// such moment, so the session would be wherever the game was last left -
+// an hour back, or (saved in game since) none. So while a game runs, every
+// CHECKPOINT_PLAY_MS of play takes the session again, and keeps it as a
+// checkpoint: a few earlier moments, kept on this device only, for when the
+// newest one is the thing that crashes (Resume from earlier).
+//
+// The frame's thread only copies: the plain state image, the screen and the
+// battery file (wasm_state_plain_size, ~1 ms; ~4 ms on a phone-speed CPU).
+// ckptworker.js packs the state, signs the battery and encodes the picture
+// - packing on this thread cost ~10 ms there, a dropped frame. Without a
+// worker it all runs here, as persistAutoState does.
+const CHECKPOINT_PLAY_MS = 60 * 1000;
+// How often the battery file is looked at for a fresh in-game save.
+const SAVE_SETTLE_MS = 500;
+
+// The battery stored within about a second of the game writing it, not at
+// the next 5 s autosave: a crash in between lost an in-game save (measured).
+// The core writes the file the frame the game writes its save, and a save
+// is written over many frames (a flash chip's sectors), so it is stored
+// once the file has stopped changing for one look. Every SAVE_SETTLE_MS.
+let savSeen = { name: null, mtime: 0, settled: true };
+const watchBattery = () => {
+  if (linkMode || rollbackMode || netActive() || !currentRomName || !currentOriginalName) return;
+  let mtime = 0;
+  try { mtime = +FS.stat(stripExt(currentRomName) + ".sav").mtime; } catch { return; }
+  if (savSeen.name !== currentOriginalName) {
+    savSeen = { name: currentOriginalName, mtime, settled: true };
+  } else if (mtime !== savSeen.mtime) {
+    savSeen.mtime = mtime;
+    savSeen.settled = false;
+  } else if (!savSeen.settled) {
+    savSeen.settled = true;
+    return persistSave(currentRomName, currentOriginalName);
+  }
+};
+// Taken in a tick that has room for it; a busy one passes it to the next,
+// for up to CKPT_WAIT_MS before one is taken anyway.
+const CKPT_SLACK_MS = 6;
+const CKPT_WAIT_MS = 5000;
+// Drive gets a checkpoint's session at most this often while playing; Main
+// Menu, a hide or a close sends the newest at once (sessionUnsent).
+const SESSION_UPLOAD_MS = 5 * 60 * 1000;
+
+// Play time, the clock checkpoints are spaced on: wall time would put a
+// week-old evening's checkpoints all in one bucket the moment play resumed.
+// Per game and per device, carried in the checkpoint index (`play`): the
+// run's base plus the ms this run has played.
+let runPlayMs = 0;
+let ckptPlayBase = 0;
+let ckptLastAt = 0; // runPlayMs at the last checkpoint
+const playClock = () => ckptPlayBase + runPlayMs;
+
+// Games whose session is a checkpoint's not yet queued for Drive.
+const sessionUnsent = new Set();
+const sessionMarkedAt = new Map();
+let ckptInFlight = null;
+const checkpointLanded = () => ckptInFlight || Promise.resolve();
+
+// One worker, made on first use; null where there is none to make (no
+// Worker, no CompressionStream: iOS 15), and the page does the work.
+let ckptWorker;
+let ckptWorkerSeq = 0;
+const ckptWorkerWaits = new Map();
+const getCkptWorker = () => {
+  if (ckptWorker !== undefined) return ckptWorker;
+  ckptWorker = null;
+  if (typeof Worker !== "function" || typeof CompressionStream !== "function") return null;
+  try {
+    ckptWorker = new Worker("ckptworker.js");
+    ckptWorker.onmessage = (e) => {
+      const wait = ckptWorkerWaits.get(e.data?.id);
+      if (!wait) return;
+      ckptWorkerWaits.delete(e.data.id);
+      wait(e.data);
+    };
+    ckptWorker.onerror = () => {
+      // A worker that cannot load (an old cache without the file): every
+      // checkpoint from here runs on the page.
+      for (const wait of ckptWorkerWaits.values()) wait({ error: "worker failed" });
+      ckptWorkerWaits.clear();
+      ckptWorker = null;
+    };
+  } catch { ckptWorker = null; }
+  return ckptWorker;
+};
+
+// -> { bytes (packed), pic (Blob | null), saveSig }, or null.
+const packCheckpoint = async (plain, fb, sav) => {
+  const worker = getCkptWorker();
+  if (worker) {
+    const id = ++ckptWorkerSeq;
+    const got = await new Promise((resolve) => {
+      ckptWorkerWaits.set(id, resolve);
+      // The state moves; the screen is copied (150 KB), so the page still
+      // has it to draw where the worker cannot (no OffscreenCanvas JPEG).
+      worker.postMessage({ id, state: plain.buffer, fb: fb ? fb.heap.buffer : null,
+                           w: fb?.w, h: fb?.h, scale: FRAME_SCALE, q: FRAME_JPEG_Q,
+                           sav: sav ? sav.buffer : null }, [plain.buffer]);
+    });
+    if (!got.error) {
+      let pic = got.pic || null;
+      if (!pic && fb) pic = await frameBlobFromFb(fb.heap, fb.w, fb.h).catch(() => null);
+      return { bytes: new Uint8Array(got.packed), pic, saveSig: got.saveSig ?? null };
+    }
+    // The buffers went with the message; this one is lost, the next runs here.
+    log("checkpoint worker: " + got.error, "warn");
+    return null;
+  }
+  const bytes = packStateBytes(plain);
+  if (!bytes) return null;
+  const pic = fb ? await frameBlobFromFb(fb.heap, fb.w, fb.h).catch(() => null) : null;
+  return { bytes, pic, saveSig: sigOfSave(sav) };
+};
+
+const capturePlainState = () => {
+  if (typeof Module === "undefined" || !Module._wasm_state_plain_size) return null;
+  const len = Module._wasm_state_plain_size();
+  if (len <= 0) return null;
+  const ptr = Module._wasm_state_data();
+  if (!ptr) return null;
+  return new Uint8Array(Module.memory.buffer, ptr, len).slice();
+};
+
+// From the end of every running tick, after the frame is on screen.
+const maybeCheckpoint = (timestamp) => {
+  if (ckptInFlight || !currentRomName || !currentOriginalName) return;
+  if (linkMode || rollbackMode || netActive() || clipReplayActive || rewindHeld) return;
+  if (sessionHeldFor === currentOriginalName) return; // a boot screen (sessionHeldFor)
+  const due = runPlayMs - ckptLastAt - CHECKPOINT_PLAY_MS;
+  if (due < 0) return;
+  if (performance.now() - timestamp > CKPT_SLACK_MS && due < CKPT_WAIT_MS) return;
+  takeCheckpoint();
+};
+
+const takeCheckpoint = () => {
+  const name = currentOriginalName;
+  ckptLastAt = runPlayMs;
+  flushSoloSave(); // the battery the state carries, into its file
+  const plain = capturePlainState();
+  if (!plain) return null;
+  let sav = null;
+  try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
+  const fb = copyFramebuffer();
+  const ts = Date.now();
+  const play = playClock();
+  const epoch = sessionEpoch(name);
+  sessionMoved = false;
+  sessionSnapFor = name;
+  sessionSnapTs.set(name, ts);
+  const run = packCheckpoint(plain, fb, sav)
+    .then((snap) => snap && storeCheckpoint(name, { ...snap, ts, play, epoch }))
+    .catch((e) => log("checkpoint: " + (e?.message || e), "warn"))
+    .finally(() => { if (ckptInFlight === run) ckptInFlight = null; });
+  ckptInFlight = run;
+  return run;
+};
+
+const storeCheckpoint = async (name, snap) => {
+  // A newer snapshot, or a delete or reset, since this one was taken: it is
+  // history. Held since it was taken: not ours to write.
+  const stale = () => sessionSnapTs.get(name) !== snap.ts ||
+    sessionEpoch(name) !== snap.epoch || sessionHeldFor === name;
+  if (stale()) return;
+  // The battery it carries, stored now if the 5 s autosave has not yet: a
+  // crash before that would leave a session that matches no stored save.
+  if (currentOriginalName === name && currentRomName &&
+      !(lastSaveSigKey === name && lastSaveSig === snap.saveSig)) {
+    await persistSave(currentRomName, name);
+    // Again: a Main Menu, a hide or a reset can land in that await, and
+    // this older session would go over theirs (bug_ckpt_store_over_*).
+    if (stale()) return;
+  }
+  const key = autoStateKey(name);
+  await dbPut(key, { bytes: snap.bytes, ts: snap.ts, saveSig: snap.saveSig, by: deviceId,
+                     dev: deviceLabel, play: snap.play });
+  // A picture is a Blob, which Safari's private browsing will not store: the
+  // session goes on without it (the hero falls back to the library's).
+  if (snap.pic) await dbPut(sessionPicKey(name), { ts: snap.ts, blob: snap.pic }).catch(() => {});
+  if (Date.now() - (sessionMarkedAt.get(name) || 0) >= SESSION_UPLOAD_MS) {
+    sessionMarkedAt.set(name, Date.now());
+    sessionUnsent.delete(name);
+    markUpload(key);
+  } else {
+    sessionUnsent.add(name);
+  }
+  await addCheckpoint(name, snap);
+};
+
+// The kept checkpoints of a game: `ckpts:<game>` is the index ({ play, list:
+// [{ slot, ts, play, saveSig }] }), and `ckpt<slot>:<game>` each one's
+// { bytes, ts, play, saveSig, pic }. Local only: never in a Drive name.
+const CKPT_SLOTS = 9;
+const ckptIndexKey = (name) => "ckpts:" + name;
+const ckptKey = (name, slot) => "ckpt" + slot + ":" + name;
+const ckptKeys = (name) => [ckptIndexKey(name),
+  ...Array.from({ length: CKPT_SLOTS }, (_, i) => ckptKey(name, i))];
+const CKPT_KEY_RE = /^ckpts?\d*:/;
+
+// Which to keep, spread over play time: the newest, and the oldest of each
+// span behind it - up to 3 min, 10 min, 30 min, 2 h, 8 h, and beyond - so
+// there is always one a little way back and one a long way back. Past
+// CKPT_MAX_AGE_MS of real time one goes.
+//
+// After the game stops unexpectedly (crashSince), the ones taken before
+// that are frozen until it has run cleanly again: a checkpoint that crashes
+// the game can be resumed again and again, and what those runs take must
+// not push out the moments from before it. They share CKPT_CRASH_ROOM.
+const CKPT_SPANS = [3, 10, 30, 120, 480].map((m) => m * 60 * 1000);
+const CKPT_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+const CKPT_CRASH_ROOM = 2;
+const newestFirst = (a, b) => (b.play - a.play) || (b.ts - a.ts);
+const spreadCheckpoints = (list) => {
+  if (!list.length) return [];
+  const sorted = [...list].sort(newestFirst);
+  const top = sorted[0];
+  const oldest = new Map(); // span index -> the oldest in it
+  for (const e of sorted.slice(1)) {
+    const age = top.play - e.play;
+    let span = CKPT_SPANS.findIndex((s) => age <= s);
+    if (span < 0) span = CKPT_SPANS.length;
+    oldest.set(span, e); // sorted newest first: the last one seen is the oldest
+  }
+  return [top, ...[...oldest.keys()].sort((a, b) => a - b).map((k) => oldest.get(k))];
+};
+const keepCheckpoints = (list, crashSince = 0, now = Date.now()) => {
+  const live = list.filter((e) => now - e.ts < CKPT_MAX_AGE_MS);
+  if (!crashSince) return spreadCheckpoints(live);
+  const frozen = live.filter((e) => e.ts < crashSince);
+  const since = live.filter((e) => e.ts >= crashSince).sort(newestFirst)
+    .slice(0, CKPT_CRASH_ROOM);
+  return [...since, ...frozen.sort(newestFirst)].slice(0, CKPT_SLOTS);
+};
+
+const readCheckpointIndex = async (name) => {
+  const idx = await dbGet(ckptIndexKey(name)).catch(() => null);
+  return idx && Array.isArray(idx.list) ? idx : { play: 0, list: [] };
+};
+
+const addCheckpoint = async (name, snap) => {
+  const idx = await readCheckpointIndex(name);
+  if (sessionEpoch(name) !== snap.epoch) return; // reset while it was read
+  const entry = { slot: -1, ts: snap.ts, play: snap.play, saveSig: snap.saveSig };
+  const keep = keepCheckpoints([...idx.list, entry], crashInfo(name)?.since || 0);
+  if (!keep.includes(entry)) return;
+  const used = new Set(keep.filter((e) => e !== entry).map((e) => e.slot));
+  entry.slot = [...Array(CKPT_SLOTS).keys()].find((s) => !used.has(s)) ?? -1;
+  if (entry.slot < 0) return;
+  // The record and the index in one transaction: a slot the index names is
+  // always the checkpoint it says. One it no longer names is overwritten
+  // when its slot is next taken.
+  const write = (pic) => dbMoveKeys([], [
+    [ckptKey(name, entry.slot), { bytes: snap.bytes, ts: snap.ts, play: snap.play,
+                                  saveSig: snap.saveSig, pic }],
+    [ckptIndexKey(name), { play: Math.max(idx.play || 0, snap.play), list: keep }],
+  ]);
+  // Without its picture where a Blob will not store (Safari's private
+  // browsing, seen in WebKit): the moment matters, the picture does not.
+  try { await write(snap.pic || null); } catch (e) {
+    if (!snap.pic) throw e;
+    await write(null);
+  }
+};
+
+// A game booted: its clock goes on from where its index left it.
+const startCheckpointClock = (name) => {
+  runPlayMs = 0;
+  ckptLastAt = 0;
+  ckptPlayBase = 0;
+  readCheckpointIndex(name).then((idx) => {
+    if (currentOriginalName !== name) return;
+    ckptPlayBase = Math.max(idx.play || 0, ...idx.list.map((e) => e.play || 0));
+  });
+};
+
+// Storage running out: other games' checkpoints go before any ROM does.
+const evictCheckpoints = async (keep) => {
+  let freed = false;
+  for (const k of await dbKeys()) {
+    if (typeof k !== "string" || !CKPT_KEY_RE.test(k)) continue;
+    if (k.slice(k.indexOf(":") + 1) === keep) continue;
+    await dbDelete(k);
+    freed = true;
+  }
+  return freed;
+};
+
+// --- Crashes -------------------------------------------------------------
+// A page that dies while a game is on screen leaves its mark behind: each
+// page records itself in `playing` ({ <page>: { game, at, long } }) while
+// its game runs in view, and takes itself out when the game pauses, the
+// page is hidden or closed, or the game is left. One found at boot is a run
+// that ended without any of those - a crash, or a kill in the foreground -
+// unless its page is still alive, which that page's Web Lock says.
+//
+// Crashes are counted per game in a row (`crashes`: { games: { <game>:
+// { streak, since } }, seen: [<page>...] }). Two in a row and the game asks
+// before resuming (the sheet's crash form), since the moment it resumes may
+// be the cause. A run counts toward the row only while it is short: one
+// that played CLEAN_RUN_MS (`long`, set once it gets there) starts a new
+// row at one - whatever ended it, what it resumed did not stop it - and one
+// that played that long and ended normally clears the count.
+//
+// The marks and counts are in IndexedDB: Chrome writes localStorage to disk
+// seconds later, so a browser killed soon after a relaunch - a game that
+// crashes as soon as it resumes - lost the count and brought back the mark
+// already counted (seen in a SIGKILL test). `seen` keeps a mark that comes
+// back from being counted twice. But a closing page's IndexedDB writes do
+// not land when the whole browser quits (Chrome and WebKit both, measured),
+// while a synchronous localStorage write made in Chrome's close handlers
+// does: so the end of a run is also said there (`dingbat_clean:<page>`),
+// and a mark with it is not a crash.
+const PLAYING_KEY = "playing";
+const CRASHES_KEY = "crashes";
+const CLEAN_PREFIX = "dingbat_clean:";
+const CLEAN_RUN_MS = 60 * 1000;
+const CRASH_ASK_STREAK = 2;
+const CRASH_SEEN_MAX = 50;
+const pageId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+let playingMarked = false;
+let playingLong = false;
+let coreFaulted = false;
+// Read at boot (noteCrashedRuns) and written through: the tap that asks
+// first reads it synchronously.
+let crashes = { games: {}, seen: [] };
+const crashRecord = (v) => v && typeof v === "object" && v.games && typeof v.games === "object"
+  ? { games: v.games, seen: Array.isArray(v.seen) ? v.seen : [] } : { games: {}, seen: [] };
+const crashInfo = (name) => crashes.games[name] || null;
+const crashStreak = (name) => crashInfo(name)?.streak || 0;
+const storeCrashes = () => dbPut(CRASHES_KEY, crashes).catch(() => {});
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } };
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch {} };
+const lsKeys = () => { try { return Object.keys(localStorage); } catch { return []; } };
+
+// Held for this page's life, so another page can tell a mark of ours from
+// a crashed one's.
+if (typeof navigator !== "undefined" && navigator.locks?.request) {
+  try { navigator.locks.request("dingbat-page:" + pageId, () => new Promise(() => {})); } catch {}
+}
+
+const putMark = (mark) =>
+  dbUpdate(PLAYING_KEY, (v) => ({ ...(v && typeof v === "object" ? v : {}), [pageId]: mark }))
+    .catch(() => {});
+const markPlaying = () => {
+  if (playingMarked || !currentOriginalName) return;
+  playingMarked = true;
+  playingLong = runPlayMs >= CLEAN_RUN_MS;
+  lsDel(CLEAN_PREFIX + pageId);
+  putMark({ game: currentOriginalName, at: Date.now(), long: playingLong });
+};
+// From the tick: the run has played long enough that what it resumed did
+// not stop it.
+const notePlayingLong = () => {
+  if (!playingMarked || playingLong || runPlayMs < CLEAN_RUN_MS || !currentOriginalName) return;
+  playingLong = true;
+  putMark({ game: currentOriginalName, at: Date.now(), long: true });
+};
+// The run ended normally. A core that faulted keeps its mark: the next
+// boot counts it.
+const clearPlaying = () => {
+  if (!playingMarked || coreFaulted) return;
+  playingMarked = false;
+  const name = currentOriginalName;
+  const long = runPlayMs >= CLEAN_RUN_MS;
+  // First, and synchronously: what a quitting browser keeps.
+  lsSet(CLEAN_PREFIX + pageId, JSON.stringify({ game: name, long }));
+  dbUpdate(PLAYING_KEY, (v) => {
+    if (!v || typeof v !== "object" || !(pageId in v)) return undefined;
+    const next = { ...v };
+    delete next[pageId];
+    return next;
+  }).then(() => lsDel(CLEAN_PREFIX + pageId)).catch(() => {});
+  if (name && long && crashStreak(name)) {
+    delete crashes.games[name];
+    storeCrashes();
+  }
+};
+
+// At boot: the marks of pages that are gone, and did not end cleanly, are
+// crashes.
+const noteCrashedRuns = async () => {
+  crashes = crashRecord(await dbGet(CRASHES_KEY).catch(() => null));
+  const stored = await dbGet(PLAYING_KEY).catch(() => null);
+  const marks = stored && typeof stored === "object" ? stored : {};
+  let held = new Set();
+  try {
+    const q = await navigator.locks?.query?.();
+    for (const l of q?.held || []) held.add(l.name);
+  } catch {}
+  const alive = (id) => id === pageId || held.has("dingbat-page:" + id);
+  const gone = Object.keys(marks).filter((id) => !alive(id));
+  const counted = [];
+  let changed = false;
+  for (const id of gone) {
+    const game = marks[id]?.game;
+    if (crashes.seen.includes(id) || typeof game !== "string") continue;
+    const clean = lsGet(CLEAN_PREFIX + id);
+    if (clean !== null) {
+      // Ended normally; only its IndexedDB write was lost.
+      let c = null;
+      try { c = JSON.parse(clean); } catch {}
+      if (c?.long && crashes.games[game]) { delete crashes.games[game]; changed = true; }
+      continue;
+    }
+    const c = crashes.games[game] || { streak: 0, since: 0 };
+    crashes.games[game] = marks[id]?.long
+      ? { streak: 1, since: Date.now() }
+      : { streak: c.streak + 1, since: c.since || Date.now() };
+    log("previous run of " + game + " ended unexpectedly (" + crashes.games[game].streak +
+        " in a row)", "warn");
+    counted.push(game);
+    changed = true;
+  }
+  if (gone.length) {
+    crashes.seen = [...crashes.seen, ...gone].slice(-CRASH_SEEN_MAX);
+    changed = true;
+  }
+  // The count first, with the marks it counted; then the marks go.
+  if (changed) await storeCrashes();
+  if (gone.length) {
+    await dbUpdate(PLAYING_KEY, (v) => {
+      if (!v || typeof v !== "object") return undefined;
+      const next = { ...v };
+      for (const id of gone) delete next[id];
+      return next;
+    }).catch(() => {});
+  }
+  // Clean-end notes of pages that are gone: their marks are dealt with.
+  for (const id of gone) lsDel(CLEAN_PREFIX + id);
+  for (const k of lsKeys()) {
+    if (k.startsWith(CLEAN_PREFIX) && !alive(k.slice(CLEAN_PREFIX.length))) lsDel(k);
+  }
+  // Its last checkpoint may never have been queued for Drive.
+  for (const game of counted) {
+    if (await dbGet(autoStateKey(game)).catch(() => null)) markUpload(autoStateKey(game));
+  }
+};
+
+// --- Last gasp -------------------------------------------------------------
+// A browser that quits with the game on screen runs the page's close
+// handlers, but the IndexedDB writes they start never land (Chrome and
+// WebKit both, measured) - so the session taken there, and a battery the
+// autosave had not stored, were lost, and the next launch went back to the
+// last checkpoint. What does land in Chrome is a synchronous localStorage
+// write: so the close handlers also leave the session there, with the
+// battery when it is not stored yet (`dingbat_lastgasp`), and the next boot
+// takes it in when it is newer than the stored session. `lastgasp` in
+// IndexedDB is the newest one taken in, so one that comes back from
+// localStorage (written to disk late, like the marks) is never taken twice.
+const LAST_GASP_KEY = "dingbat_lastgasp";
+const LAST_GASP_SEEN_KEY = "lastgasp";
+// The newest snapshot of the game, while its IndexedDB write has not landed.
+let unstoredSnap = null;
+
+const bytesToB64 = (u8) => {
+  let s = "";
+  for (let i = 0; i < u8.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+};
+const b64ToBytes = (b64) => {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
+
+// From the close handlers, after persistAutoState and persistSave.
+const leaveLastGasp = () => {
+  const snap = unstoredSnap;
+  if (!snap || snap.name !== currentOriginalName || !currentRomName) return;
+  let sav = null;
+  try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
+  // The battery it was taken with, when the stored one is not that already.
+  const savSig = sigOfSave(sav);
+  const keepSav = !!sav && savSig === snap.saveSig &&
+    !(lastSaveSigKey === snap.name && lastSaveSig === savSig);
+  lsSet(LAST_GASP_KEY, JSON.stringify({
+    game: snap.name, ts: snap.ts, saveSig: snap.saveSig, play: snap.play, page: pageId,
+    state: bytesToB64(snap.bytes), sav: keepSav ? bytesToB64(sav) : null,
+  }));
+};
+
+// At boot, before anything reads the sessions.
+const takeLastGasp = async () => {
+  const raw = lsGet(LAST_GASP_KEY);
+  if (!raw) return;
+  let g = null;
+  try { g = JSON.parse(raw); } catch {}
+  const seen = (await dbGet(LAST_GASP_SEEN_KEY).catch(() => null)) || 0;
+  if (g && typeof g.game === "string" && typeof g.state === "string" && g.ts > seen &&
+      g.page !== pageId) {
+    const cur = await dbGet(autoStateKey(g.game)).catch(() => null);
+    if (!cur || !(cur.ts >= g.ts)) {
+      if (g.sav) {
+        const sav = b64ToBytes(g.sav);
+        if (sigOfSave(sav) === g.saveSig &&
+            sigOfSave(await dbGet("save:" + g.game).catch(() => null)) !== g.saveSig) {
+          await dbPut("save:" + g.game, sav);
+          markUpload("save:" + g.game);
+        }
+      }
+      await dbPut(autoStateKey(g.game), { bytes: b64ToBytes(g.state), ts: g.ts,
+                                          saveSig: g.saveSig, by: deviceId, dev: deviceLabel,
+                                          play: g.play });
+      markUpload(autoStateKey(g.game));
+      log("took in the session " + g.game + " was closed on", "info");
+    }
+    await dbPut(LAST_GASP_SEEN_KEY, g.ts).catch(() => {});
+  }
+  lsDel(LAST_GASP_KEY);
+};
+
+// A trap in the core leaves the page up with the game dead in it: as good
+// as a crash, so its mark stays for the next boot.
+window.addEventListener("error", (e) => {
+  if (typeof WebAssembly !== "undefined" && e?.error instanceof WebAssembly.RuntimeError) {
+    coreFaulted = true;
+  }
+});
 
 // A session as one Drive file: "DGBSESS1", the header's length (u32 LE),
 // the header (JSON: ts, saveSig, by, dev and the two lengths), the state,
@@ -7900,7 +9477,8 @@ const offerAutoResume = async () => {
       showToast("The game has saved since — that session is gone");
       return;
     }
-    showToast(applyStateBytes(auto.bytes) ? "Resumed" : stateRejectMessage(auto.bytes));
+    if (applyStateBytes(auto.bytes)) showToast("Resumed");
+    else refuseState(auto.bytes, { kind: "session" });
   }, 8000, { game: true });
 };
 
@@ -8026,6 +9604,211 @@ statesDeleteBtn.addEventListener("click", async () => {
   await renderStatesGrid();
 });
 
+// --- Resume from earlier ---------------------------------------------------
+// The moments a game can go back into: its session (where it stopped) and
+// its checkpoints, newest first, each with its picture, how much play
+// earlier it is and when. Two ways in, and nothing anywhere else: the
+// game's menu (Resume from earlier), and - after the game has stopped
+// unexpectedly CRASH_ASK_STREAK times in a row - a tap on the game itself,
+// which opens this instead of resuming the moment that may be the cause.
+//
+// A moment from before the game's last in-game save takes its battery back
+// with it (a state carries the cart's RAM). The newer save is kept aside
+// first, as a restored save keeps the one it replaces: Restore old save, on
+// the game's menu, switches back.
+const momentsModal = document.getElementById("moments-modal");
+const momentsGrid = document.getElementById("moments-grid");
+const momentsTitle = document.getElementById("moments-title");
+const momentsHint = document.getElementById("moments-hint");
+const momentsNote = document.getElementById("moments-note");
+const momentsResumeBtn = /** @type {HTMLButtonElement} */ (document.getElementById("moments-resume"));
+const momentsFromSaveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("moments-from-save"));
+let momentsFor = null;
+let momentsList = [];
+let momentsPick = 0;
+let momentsSaveSig = null;
+let momentsUrls = [];
+
+// -> [{ kind: "session" | "checkpoint", slot?, ts, play, saveSig }], newest first.
+const listMoments = async (name) => {
+  const out = [];
+  const auto = await dbGet(autoStateKey(name)).catch(() => null);
+  const idx = await readCheckpointIndex(name);
+  const ckpts = [...idx.list].sort(newestFirst);
+  if (auto?.bytes) {
+    out.push({ kind: "session", ts: auto.ts, play: auto.play ?? ckpts[0]?.play ?? 0,
+               saveSig: auto.saveSig });
+  }
+  for (const e of ckpts) {
+    if (auto?.bytes && e.ts >= auto.ts) continue; // the session is that moment, or newer
+    out.push({ kind: "checkpoint", slot: e.slot, ts: e.ts, play: e.play, saveSig: e.saveSig });
+  }
+  return out;
+};
+const hasEarlierMoments = async (name) => (await readCheckpointIndex(name)).list.length > 0;
+
+const momentRecord = (name, m) =>
+  dbGet(m.kind === "session" ? autoStateKey(name) : ckptKey(name, m.slot)).catch(() => null);
+const momentPicture = async (name, m) => {
+  if (m.kind === "checkpoint") return (await momentRecord(name, m))?.pic || null;
+  const p = await dbGet(sessionPicKey(name)).catch(() => null);
+  return p?.blob && p.ts === m.ts ? p.blob : null;
+};
+
+// "4 min earlier", "2 h earlier": play time, the clock the moments are kept on.
+const fmtPlayGap = (ms) => {
+  const m = Math.round(ms / 60000);
+  if (m < 1) return "Just before";
+  if (m < 60) return m + " min earlier";
+  const h = ms / 3600000;
+  return (h < 10 ? Math.round(h * 2) / 2 : Math.round(h)) + " h earlier";
+};
+const fmtMomentTime = (ts) => {
+  try {
+    const d = new Date(ts);
+    return d.toDateString() === new Date().toDateString()
+      ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : fmtStateTime(ts);
+  } catch { return ""; }
+};
+
+const selectMoment = (i) => {
+  momentsPick = i;
+  for (const el of /** @type {HTMLCollectionOf<HTMLElement>} */ (momentsGrid.children)) {
+    el.classList.toggle("selected", Number(el.dataset.i) === i);
+  }
+  const m = momentsList[i];
+  momentsResumeBtn.disabled = !m;
+  const before = !!m && m.saveSig !== momentsSaveSig && momentsSaveSig !== null;
+  momentsNote.hidden = !before;
+  momentsNote.textContent = before
+    ? "This is from before your last in-game save, which goes back with it. Your newer save " +
+      "is kept: Restore old save, on the game's menu, brings it back." : "";
+};
+
+const renderMoments = async (name) => {
+  for (const u of momentsUrls) URL.revokeObjectURL(u);
+  momentsUrls = [];
+  momentsList = await listMoments(name);
+  momentsSaveSig = sigOfSave(await dbGet("save:" + name).catch(() => null));
+  if (momentsFor !== name) return;
+  momentsGrid.replaceChildren();
+  const top = momentsList[0];
+  for (let i = 0; i < momentsList.length; i++) {
+    const m = momentsList[i];
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "state-slot";
+    cell.dataset.i = /** @type {*} */ (i);
+    const thumb = document.createElement("img");
+    thumb.className = "slot-thumb";
+    thumb.alt = "";
+    const label = document.createElement("div");
+    label.className = "slot-label";
+    const what = document.createElement("span");
+    what.className = "slot-num";
+    what.textContent = i === 0 ? "Latest" : fmtPlayGap(top.play - m.play);
+    const when = document.createElement("span");
+    when.textContent = fmtMomentTime(m.ts);
+    label.append(what, when);
+    cell.append(thumb, label);
+    if (m.saveSig !== momentsSaveSig && momentsSaveSig !== null) {
+      const note = document.createElement("span");
+      note.className = "moment-before-save";
+      note.textContent = "Before your last save";
+      cell.append(note);
+    }
+    cell.addEventListener("click", () => selectMoment(i));
+    cell.addEventListener("dblclick", () => { selectMoment(i); momentsResumeBtn.click(); });
+    momentsGrid.append(cell);
+    momentPicture(name, m).then((blob) => {
+      if (!blob || momentsFor !== name) return;
+      const url = URL.createObjectURL(blob);
+      momentsUrls.push(url);
+      thumb.src = url;
+    }).catch(() => {});
+  }
+  selectMoment(0);
+};
+
+// `crash`: the form a tap on a game that keeps stopping opens.
+const openMomentsModal = (name, { crash = false } = {}) => {
+  closeTileMenu();
+  momentsFor = name;
+  const n = crashStreak(name);
+  momentsTitle.textContent = crash
+    ? displayName(name) + " stopped unexpectedly" : "Resume from earlier";
+  momentsHint.textContent = crash
+    ? "It closed without warning the last " + (n === 2 ? "two" : n) + " times. If the " +
+      "moment it resumes from is what's stopping it, pick an earlier one."
+    : "Moments from your recent play, kept on this device.";
+  momentsFromSaveBtn.hidden = !crash;
+  momentsGrid.replaceChildren();
+  momentsNote.hidden = true;
+  momentsResumeBtn.disabled = true;
+  momentsModal.classList.add("open");
+  trapFocus(momentsModal);
+  return renderMoments(name);
+};
+
+const closeMomentsModal = () => {
+  if (!momentsModal.classList.contains("open")) return;
+  momentsModal.classList.remove("open");
+  releaseFocus(momentsModal);
+  momentsFor = null;
+  for (const u of momentsUrls) URL.revokeObjectURL(u);
+  momentsUrls = [];
+};
+
+// Back into one moment: the game boots on its stored save and the moment
+// goes in during the boot (loadRom's `resume`, forced - the battery comes
+// with it). True when the boot was started.
+const resumeMoment = async (name, m) => {
+  if (isRomLoaded(name) && (linkMode || rollbackMode || netActive())) {
+    showToast("Exit the online session first");
+    return false;
+  }
+  // The running game's save as it is now is the one that may be replaced.
+  if (currentOriginalName === name && currentRomName) await persistSave(currentRomName, name);
+  const rec = await momentRecord(name, m);
+  if (!rec?.bytes) {
+    showToast("That moment is no longer stored");
+    return false;
+  }
+  const cur = await dbGet("save:" + name).catch(() => null);
+  if (cur?.length && rec.saveSig !== sigOfSave(cur)) {
+    const now = Date.now();
+    await keepOldSave(name, { data: new Uint8Array(cur), at: now, del: now, kept: now,
+                              why: "replaced" });
+  }
+  launchRom(name, { session: { bytes: rec.bytes, saveSig: rec.saveSig, force: true } });
+  return true;
+};
+
+// A tap on a game that has stopped unexpectedly twice in a row asks first.
+const crashGate = (name) => {
+  if (crashStreak(name) < CRASH_ASK_STREAK || isRomLoaded(name)) return false;
+  openMomentsModal(name, { crash: true });
+  return true;
+};
+
+momentsResumeBtn.addEventListener("click", async () => {
+  const name = momentsFor;
+  const m = momentsList[momentsPick];
+  if (!name || !m) return;
+  closeMomentsModal();
+  await resumeMoment(name, m);
+});
+momentsFromSaveBtn.addEventListener("click", () => {
+  const name = momentsFor;
+  if (!name) return;
+  closeMomentsModal();
+  launchRom(name, { fresh: true });
+});
+document.getElementById("moments-close").addEventListener("click", closeMomentsModal);
+momentsModal.addEventListener("click", (e) => {
+  if (e.target === momentsModal) closeMomentsModal();
+});
+
 // --- Report a Bug modal ---
 // A downloadable bundle {title, description, diagnostics, save state},
 // client-side only; the state carries RAM/registers + a screenshot, never
@@ -8099,7 +9882,7 @@ reportSlider.addEventListener("input", updateReportPreview);
 
 const openReportModal = () => {
   menuDropdown.hidden = true;
-  reportWasPaused = paused;
+  reportWasPaused = takePlayerPause();
   // Freeze so the strip stays the ring's contents (samples are addressed
   // by snapshot ID, so an evicted one goes blank rather than sliding).
   paused = true;
@@ -8225,6 +10008,7 @@ const STRIP_FRAME_W_FLOOR = 16;
  * @param {number} [opts.frameWMax]      px ceiling on a frame's width
  * @param {number} [opts.fitFrames]      frame pitches that MUST fit the width
  * @param {number} [opts.frameWFloor]    px floor the fit rule may shrink to
+ * @param {boolean} [opts.direct]       a drag carries the marker (else scrolls the film)
  */
 const createFilmStrip = ({
   canvas, wrap, markers, paint, onChange,
@@ -8233,6 +10017,11 @@ const createFilmStrip = ({
   frameWMax = STRIP_FRAME_W_MAX,
   fitFrames = 0,
   frameWFloor = STRIP_FRAME_W_FLOOR,
+  // false: the marker stays put and a drag scrolls the film under it (the
+  // rewind playhead). true: a drag carries the grabbed marker with the
+  // finger over a still film, which scrolls only at the strip's ends (the
+  // clip's two bounds, which are pulled in and out, not scrubbed).
+  direct = false,
 }) => {
   let samples = 0;
   let thumbs = null;      // packed BGR555, copied out of wasm at open
@@ -8243,6 +10032,18 @@ const createFilmStrip = ({
   let pitch = 0;          // px per sample along the strip
   let values = markers.map(() => 0);
   let active = 0;         // which marker the view follows / a drag moves
+  // Direct mode: the film offset a drag holds still (and keeps once the
+  // finger lifts, so nothing jumps); null lets placement() frame the view.
+  let held = null;
+
+  // Layout sizes, not getBoundingClientRect's: the modal opens with a
+  // scale-in, and a strip framed mid-animation was framed for a narrower
+  // strip than the one the finger then lands on. (The test DOM has rects only.)
+  const layoutW = (el) => el.offsetWidth || el.getBoundingClientRect().width;
+  const layoutH = (el) => el.offsetHeight || el.getBoundingClientRect().height;
+  // Where the film is, for a pointer: the canvas's left edge (the markers
+  // are placed in its coordinates) and its width.
+  const filmFrame = () => ({ left: canvas.getBoundingClientRect().left, width: layoutW(canvas) });
 
   const frameSize = (stripW, stripH) => {
     const maxH = Math.max(8, stripH - 6);
@@ -8268,10 +10069,10 @@ const createFilmStrip = ({
   const build = () => {
     stripColor = null;
     stripDim = null;
+    held = null;   // the pitch may change, so a held offset means nothing
     if (!thumbs || samples <= 0) return;
-    const rect = wrap.getBoundingClientRect();
-    const stripH = Math.max(24, Math.round(rect.height) - 2);
-    const { tw, th } = frameSize(Math.max(120, Math.round(rect.width)), stripH);
+    const stripH = Math.max(24, Math.round(layoutH(wrap)) - 2);
+    const { tw, th } = frameSize(Math.max(120, Math.round(layoutW(wrap))), stripH);
     pitch = tw + STRIP_GAP;
     const total = samples * pitch;
 
@@ -8318,22 +10119,32 @@ const createFilmStrip = ({
   // rides the middle and the film scrolls under it until the film runs out
   // of slack; then the markers travel, else half the strip is empty at the
   // "now" end, where these modals open.
+  const offRange = (cssW) => {
+    const filmW = samples * pitch;
+    return filmW <= cssW
+      ? { lo: (cssW - filmW) / 2, hi: (cssW - filmW) / 2 } // short film: centred
+      : { lo: cssW - filmW, hi: 0 };
+  };
+
   const placement = (cssW) => {
     const filmW = samples * pitch;
     const xsFilm = markers.map((m, i) => edgeX(values[i], m.edge));
-    const lo = Math.min(...xsFilm);
-    const hi = Math.max(...xsFilm);
-    const focus = hi - lo <= cssW ? (lo + hi) / 2 : xsFilm[active];
-    const off = filmW <= cssW
-      ? (cssW - filmW) / 2               // short film: centred, markers move
-      : Math.min(0, Math.max(cssW - filmW, cssW / 2 - focus));
+    const { lo: offLo, hi: offHi } = offRange(cssW);
+    let off;
+    if (held !== null) {
+      off = Math.min(offHi, Math.max(offLo, held));
+    } else {
+      const lo = Math.min(...xsFilm);
+      const hi = Math.max(...xsFilm);
+      const focus = hi - lo <= cssW ? (lo + hi) / 2 : xsFilm[active];
+      off = filmW <= cssW ? offLo : Math.min(offHi, Math.max(offLo, cssW / 2 - focus));
+    }
     return { off, xs: xsFilm.map((x) => x + off) };
   };
 
   const draw = () => {
-    const rect = canvas.getBoundingClientRect();
-    const cssW = Math.max(1, Math.round(rect.width));
-    const cssH = Math.max(1, Math.round(rect.height));
+    const cssW = Math.max(1, Math.round(layoutW(canvas)));
+    const cssH = Math.max(1, Math.round(layoutH(canvas)));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
       canvas.width = cssW * dpr;
@@ -8400,11 +10211,15 @@ const createFilmStrip = ({
   let dragging = false;
   let lastX = 0;
   let travel = 0;
+  let grabDX = 0;         // direct: finger x less the grabbed marker's, at the press
+  let edgeTimer = 0;      // direct: the rAF scrolling the film at an end
+  let edgeLast = 0;
+  let heading = 0;        // direct: -1 / +1, the way the finger last moved
 
   // A press grabs the nearest marker on screen.
   const grabNearest = (clientX) => {
     if (markers.length === 1) return 0;
-    const rect = wrap.getBoundingClientRect();
+    const rect = filmFrame();
     const { xs } = placement(rect.width);
     const px = clientX - rect.left;
     let best = 0;
@@ -8431,6 +10246,7 @@ const createFilmStrip = ({
       samples = n;
       stripColor = null;
       stripDim = null;
+      held = null;
     },
     /** Drop everything on close (tens of thumbnails). */
     release() {
@@ -8440,11 +10256,16 @@ const createFilmStrip = ({
       samples = 0;
     },
     setValue(i, v, snap, bounds) {
+      // A move from outside the strip (a knob, a preset) hands the framing
+      // back, so the view goes to the marker that moved.
+      held = null;
       const moved = setValue(i, v, snap, bounds);
       if (moved) onChange(i);
       return moved;
     },
     setActive(i) { active = i; },
+    /** Let placement() frame the view again (a fresh open). */
+    reframe() { held = null; },
     build,
     draw,
     shadeBetween,
@@ -8461,13 +10282,55 @@ const createFilmStrip = ({
     /** Bind the drag/tap gesture. `bounds(i)` returns marker i's clamp. */
     attach(bounds) {
       const boundsFor = (i) => (bounds ? bounds(i) : undefined);
+      // Direct: the grabbed marker goes where the finger is, over a film
+      // held at `held`. The inverse of edgeX.
+      const followFinger = () => {
+        const rect = filmFrame();
+        const filmX = lastX - rect.left - grabDX - held;
+        const v = markers[active].edge === "lead"
+          ? samples - 1 - filmX / pitch
+          : samples - filmX / pitch;
+        if (setValue(active, v, false, boundsFor(active))) onChange(active);
+        else draw();
+      };
+      // A finger held near either end, having moved toward it, scrolls the
+      // film that way, faster the nearer the edge, so a bound can be pulled
+      // past what is on screen. (A bound grabbed near an end and pulled
+      // inward must not set the film creeping.)
+      const EDGE = 28;            // px from each end that scrolls
+      const EDGE_SPEED = 700;     // px/s at the very edge
+      const edgeStep = (now) => {
+        edgeTimer = 0;
+        if (!dragging || held === null) return;
+        const rect = filmFrame();
+        const x = lastX - rect.left;
+        const push = x < EDGE && heading < 0 ? (EDGE - x) / EDGE
+          : x > rect.width - EDGE && heading > 0 ? -(x - (rect.width - EDGE)) / EDGE : 0;
+        if (push === 0) return;
+        const dt = edgeLast ? Math.min(0.05, (now - edgeLast) / 1000) : 1 / 60;
+        edgeLast = now;
+        const { lo, hi } = offRange(rect.width);
+        const next = Math.min(hi, Math.max(lo, held + Math.max(-1, Math.min(1, push)) * EDGE_SPEED * dt));
+        if (next !== held) {
+          held = next;
+          followFinger();
+        }
+        edgeTimer = requestAnimationFrame(edgeStep);
+      };
       wrap.addEventListener("pointerdown", (e) => {
         if (samples <= 0) return;
         e.preventDefault();
         dragging = true;
         travel = 0;
+        heading = 0;
         lastX = e.clientX;
         active = grabNearest(e.clientX);
+        if (direct) {
+          const rect = filmFrame();
+          const { off, xs } = placement(rect.width);
+          held = off;
+          grabDX = e.clientX - rect.left - xs[active];
+        }
         wrap.setPointerCapture(e.pointerId);
         draw();  // the view follows the newly active marker
       });
@@ -8476,23 +10339,32 @@ const createFilmStrip = ({
         const dx = e.clientX - lastX;
         lastX = e.clientX;
         travel += Math.abs(dx);
+        if (dx !== 0) heading = Math.sign(dx);
+        if (direct) {
+          followFinger();
+          if (!edgeTimer) {
+            edgeLast = 0;
+            edgeTimer = requestAnimationFrame(edgeStep);
+          }
+          return;
+        }
         // Dragging right pulls older frames under the marker.
         api.setValue(active, values[active] + dx / pitch, false, boundsFor(active));
       });
       const endDrag = (e) => {
         if (!dragging) return;
         dragging = false;
+        if (edgeTimer) { cancelAnimationFrame(edgeTimer); edgeTimer = 0; }
         if (wrap.hasPointerCapture?.(e.pointerId)) wrap.releasePointerCapture(e.pointerId);
         if (travel <= STRIP_TAP_SLOP && e.type === "pointerup") {
           // A tap moves the nearest marker to the frame under the finger,
           // resolved through the draw's own placement.
-          const rect = wrap.getBoundingClientRect();
+          const rect = filmFrame();
           const { off } = placement(rect.width);
           const filmX = e.clientX - rect.left - off;
-          api.setValue(active, samples - 1 - Math.floor(filmX / pitch), true,
-                       boundsFor(active));
+          setValue(active, samples - 1 - Math.floor(filmX / pitch), true, boundsFor(active));
         } else {
-          api.setValue(active, values[active], true, boundsFor(active)); // settle
+          setValue(active, values[active], true, boundsFor(active)); // settle
         }
         onChange(active);
       };
@@ -8613,7 +10485,7 @@ const openRewindScrubber = () => {
   if (ndsGameLoaded()) return; // nor on the DS core
   if (!currentOriginalName || !speedControlsOk()) return;
   if (typeof Module === "undefined" || !Module._wasm_rewind_scrub_generate) return;
-  rwWasPaused = paused;
+  rwWasPaused = takePlayerPause();
   // Freeze the core so the ring stays what the strip shows.
   paused = true;
   rwStage = 0;
@@ -8736,7 +10608,8 @@ document.getElementById("export-state").addEventListener("click", () => {
 
 // Apply an imported .state to the running game (not persisted).
 const applyImportedState = (bytes) => {
-  showToast(applyStateBytes(bytes) ? "State loaded" : stateRejectMessage(bytes));
+  if (applyStateBytes(bytes)) showToast("State loaded");
+  else refuseState(bytes, { kind: "bytes", bytes });
 };
 
 document.getElementById("import-state").addEventListener("click", () => {
@@ -8754,6 +10627,14 @@ const muteBtn = document.getElementById("mute-btn");
 const menuVolume = document.getElementById("menu-volume");
 
 const effectiveGain = () => (muted ? 0 : volume / 100);
+
+// Nothing audible: the core skips mixing (emulation is unchanged) and
+// pushAudio gets no samples. The core remembers it for later games.
+const applyAudioSilent = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_audio_silent) {
+    Module._wasm_set_audio_silent(effectiveGain() === 0 ? 1 : 0);
+  }
+};
 
 const syncVolumeUI = () => {
   let off = muted || volume === 0;
@@ -8780,13 +10661,14 @@ const saveAudioSettings = () => {
   clearTimeout(audioSaveTimer);
   audioSaveTimer = setTimeout(
     () => dbPut("audio", { rev: AUDIO_REV, volume, muted, pitchCorrectFF, audioLowpass,
-                           mp2kHle, fifoInterp }), 250);
+                           mp2kHle, fifoInterp, playInSilent }), 250);
 };
 
 const setVolume = (v) => {
   volume = Math.max(0, Math.min(100, Math.round(v)));
   if (volume > 0) muted = false;
   syncVolumeUI();
+  applyAudioSilent();
   if (typeof updateGain === "function") updateGain();
   saveAudioSettings();
 };
@@ -8795,6 +10677,7 @@ const toggleMute = () => {
   muted = !muted;
   if (!muted && volume === 0) volume = 50;
   syncVolumeUI();
+  applyAudioSilent();
   if (typeof updateGain === "function") updateGain();
   saveAudioSettings();
 };
@@ -8805,6 +10688,7 @@ const loadAudioSettings = async () => {
     volume = Math.max(0, Math.min(100, s.volume));
     muted = !!s.muted;
     syncVolumeUI();
+    applyAudioSilent();
     if (typeof updateGain === "function") updateGain();
   }
   const current = !!s && s.rev === AUDIO_REV;
@@ -8820,6 +10704,9 @@ const loadAudioSettings = async () => {
   if (s && typeof s.fifoInterp === "boolean") fifoInterp = s.fifoInterp;
   if (fifoInterpToggle) fifoInterpToggle.checked = fifoInterp;
   applyFifoInterp();
+  if (s && typeof s.playInSilent === "boolean") playInSilent = s.playInSilent;
+  if (playInSilentToggle) playInSilentToggle.checked = playInSilent;
+  applyAudioSession();
 };
 
 for (let s of volSliders) {
@@ -8937,6 +10824,50 @@ if (lowpassToggle) {
   lowpassToggle.addEventListener("change", () => {
     audioLowpass = lowpassToggle.checked;
     applyAudioLowpass();
+    saveAudioSettings();
+  });
+}
+
+// --- Play in Silent Mode (iOS/iPadOS) ---
+// Safari's "playback" audio session plays in Silent Mode but pauses other
+// apps' audio (WebKit sets it without mix-with-others); "ambient" mixes
+// with them but is silenced in Silent Mode (not on headphones). No type
+// does both, so the user picks; on by default, as the game sounding
+// broken on a muted phone is the worse surprise. Paused, with no
+// game open, muted or at volume 0 there is nothing to play, so the page
+// never holds the exclusive session then. Only claimed once audio has
+// started (initAudio); the frame loop re-applies it every tick, which
+// catches every pause.
+var playInSilent = true;
+var audioSessionLive = false;
+let audioSessionSet = "";   // the type last given, so most ticks are a compare
+const playInSilentToggle = /** @type {HTMLInputElement} */ (document.getElementById("play-in-silent-toggle"));
+
+const audioSessionType = () =>
+  (!playInSilent || paused || !(currentRomName || linkMode) || muted || volume === 0)
+    ? "ambient" : "playback";
+
+const applyAudioSession = () => {
+  const session = navigator.audioSession;
+  if (!session || !audioSessionLive) return;
+  const t = audioSessionType();
+  if (t === audioSessionSet) return;
+  audioSessionSet = t;
+  session.type = t;
+};
+
+// Only where Silent Mode exists to choose about: iOS/iPadOS (any browser).
+{
+  const row = document.getElementById("play-in-silent-row");
+  const iosLike = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (row) row.hidden = !(navigator.audioSession && iosLike);
+}
+
+if (playInSilentToggle) {
+  playInSilentToggle.addEventListener("change", () => {
+    playInSilent = playInSilentToggle.checked;
+    applyAudioSession();
     saveAudioSettings();
   });
 }
@@ -9063,7 +10994,11 @@ const updateCanvasScaling = () => {
   // glow samples the GB/GBA core.
   const singleCore = running && !linkMode && !rollbackMode && !ndsGameLoaded();
   if (ambientGlow && singleCore) {
-    const c = canvasEl.getBoundingClientRect();
+    // The unzoomed box: the glow sits behind the frame's home, not its zoom.
+    const z = canvasEl.getBoundingClientRect();
+    const zw = z.width / zoomS, zh = z.height / zoomS;
+    const c = { left: z.left + (z.width - zw) / 2 - zoomX,
+                top: z.top + (z.height - zh) / 2 - zoomY, width: zw, height: zh };
     const s = stageEl.getBoundingClientRect();
     glowCanvas.style.left = c.left - s.left + "px";
     glowCanvas.style.top = c.top - s.top + "px";
@@ -9077,6 +11012,7 @@ const updateCanvasScaling = () => {
     }
   }
   glowCanvas.hidden = !(ambientGlow && singleCore);
+  refitFrameZoom();
 };
 
 // Sample a coarse grid from the presented framebuffer at ~10 Hz; the
@@ -9328,6 +11264,228 @@ const watchCanvasBacking = () => {
   }
 };
 
+// --- Frame zoom ---
+// Pinch the picture to zoom it: two fingers on a touch screen, a trackpad
+// pinch on desktop (Chromium and Firefox send that as ctrl+wheel, Safari as
+// gesture events). While zoomed, one finger or a two-finger scroll pans, and
+// a double tap (or double click) puts it back. CSS `scale` and `translate`
+// on #canvas, so nothing about the emulator changes; `transform` stays free
+// for the rumble shake, which composes on top. The stage clips: the picture
+// may spread over the letterbox but never leaves a gap it could fill. A zoom
+// belongs to the game on screen, so leaving or switching games drops it.
+const ZOOM_MAX = 6;
+var zoomS = 1, zoomX = 0, zoomY = 0;
+var zoomRom = null;
+
+// The picture's unzoomed centre and size, and the stage box it may fill,
+// in client px. offset* is the layout box, which no transform touches.
+function frameZoomBox() {
+  const s = stageEl.getBoundingClientRect();
+  return {
+    cx: s.left + stageEl.clientLeft + canvasEl.offsetLeft + canvasEl.offsetWidth / 2,
+    cy: s.top + stageEl.clientTop + canvasEl.offsetTop + canvasEl.offsetHeight / 2,
+    w: canvasEl.offsetWidth, h: canvasEl.offsetHeight,
+    l: s.left, t: s.top, r: s.right, b: s.bottom,
+  };
+}
+
+// One axis of the pan limit: a picture narrower than the stage stays inside
+// it, a wider one keeps covering it.
+const zoomClampAxis = (t, c, half, lo, hi) => {
+  const a = lo - c + half, b = hi - c - half;
+  return Math.min(Math.max(t, Math.min(a, b)), Math.max(a, b));
+};
+
+function setFrameZoom(s, x, y, box = null) {
+  s = Math.min(ZOOM_MAX, Math.max(1, s));
+  if (s < 1.01) {
+    s = 1; x = 0; y = 0;   // fully out is home, not a nudge off-centre
+  } else {
+    const b = box || frameZoomBox();
+    x = zoomClampAxis(x, b.cx, (b.w * s) / 2, b.l, b.r);
+    y = zoomClampAxis(y, b.cy, (b.h * s) / 2, b.t, b.b);
+  }
+  zoomS = s; zoomX = x; zoomY = y;
+  const on = s > 1;
+  canvasEl.style.scale = on ? String(s) : "";
+  canvasEl.style.translate = on ? `${x}px ${y}px` : "";
+  document.body.classList.toggle("frame-zoomed", on);
+}
+
+// Zoom to `s` keeping the picture point under client (px, py) where it is.
+const zoomFrameAt = (s, px, py) => {
+  const b = frameZoomBox();
+  const k = Math.min(ZOOM_MAX, Math.max(1, s)) / zoomS;
+  zoomRom = currentRomName;
+  setFrameZoom(zoomS * k, px - b.cx - k * (px - b.cx - zoomX),
+               py - b.cy - k * (py - b.cy - zoomY), b);
+};
+
+// Glide home (double tap): the one zoom change that is not under a finger.
+const resetFrameZoom = () => {
+  if (zoomS === 1) return;
+  canvasEl.classList.add("zoom-ease");
+  setTimeout(() => canvasEl.classList.remove("zoom-ease"), 250);
+  setFrameZoom(1, 0, 0);
+};
+
+// updateCanvasScaling's last word: the stage changed under the zoom, so
+// re-clamp it, or drop it once its game is no longer the one on screen.
+function refitFrameZoom() {
+  if (zoomS === 1) return;
+  const live = document.body.classList.contains("running") &&
+    !!currentRomName && currentRomName === zoomRom && !linkMode && !rollbackMode;
+  if (live) setFrameZoom(zoomS, zoomX, zoomY);
+  else setFrameZoom(1, 0, 0);
+}
+
+const frameZoomable = () =>
+  document.body.classList.contains("running") && !!currentRomName &&
+  !linkMode && !rollbackMode && !anyModalOpen();
+
+// The picture or the stage around it, never a control drawn over them. On
+// phones in landscape the touch overlay's layout boxes (#main-controls, #lr)
+// span the picture, so a press on one of those, between the buttons and
+// inside the stage, is a press on the picture.
+const ZOOM_NOT_SURFACE = "#dpad, #joystick, #ab, #select-start, .pad-btn, [data-inputs]";
+const onFrameZoomSurface = (/** @type {any} */ t, x, y) => {
+  if (t === canvasEl || t === stageEl) return true;
+  if (!t || typeof t.closest !== "function" || !t.closest("#controls") ||
+      t.closest(ZOOM_NOT_SURFACE)) return false;
+  const s = stageEl.getBoundingClientRect();
+  return x >= s.left && x < s.right && y >= s.top && y < s.bottom;
+};
+
+{
+  const ptrs = new Map();   // touch pointerId -> {x, y}
+  let from = null;          // the gesture so far, rebased on every finger change
+  const ZOOM_TAP_MAX_MS = 250, ZOOM_DBLTAP_MS = 300, ZOOM_TAP_SLOP = 12;
+  let tapDown = null;       // the lone finger that may yet be a tap
+  let lastTap = null;       // the previous tap's release, for the double
+
+  // Fingers come and go mid-gesture; each change starts afresh from the
+  // current zoom, so the picture never jumps.
+  const rebase = () => {
+    const p = [...ptrs.values()];
+    from = !p.length ? null : {
+      box: frameZoomBox(), s: zoomS, x: zoomX, y: zoomY,
+      mx: p.length > 1 ? (p[0].x + p[1].x) / 2 : p[0].x,
+      my: p.length > 1 ? (p[0].y + p[1].y) / 2 : p[0].y,
+      d: p.length > 1 ? Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1 : 0,
+    };
+  };
+
+  // On the document: the touch overlay sits over the stage, not inside it.
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch" || !frameZoomable() ||
+        !onFrameZoomSurface(e.target, e.clientX, e.clientY)) return;
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    zoomRom = currentRomName;
+    rebase();
+    tapDown = ptrs.size === 1 ? { ts: performance.now(), x: e.clientX, y: e.clientY } : null;
+  });
+
+  document.addEventListener("pointermove", (e) => {
+    const p = ptrs.get(e.pointerId);
+    if (!p || !from) return;
+    p.x = e.clientX; p.y = e.clientY;
+    if (tapDown && Math.hypot(p.x - tapDown.x, p.y - tapDown.y) > ZOOM_TAP_SLOP) tapDown = null;
+    const f = from;
+    const pts = [...ptrs.values()];
+    if (pts.length > 1) {
+      const mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
+      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const s = Math.min(ZOOM_MAX, Math.max(1, (f.s * d) / f.d));
+      const k = s / f.s;
+      setFrameZoom(s, mx - f.box.cx - k * (f.mx - f.box.cx - f.x),
+                   my - f.box.cy - k * (f.my - f.box.cy - f.y), f.box);
+    } else if (f.s > 1) {
+      setFrameZoom(f.s, f.x + p.x - f.mx, f.y + p.y - f.my, f.box);
+    }
+  });
+
+  const lift = (/** @type {PointerEvent} */ e) => {
+    if (!ptrs.delete(e.pointerId)) return;
+    rebase();
+    if (ptrs.size || !tapDown) { tapDown = null; return; }
+    const now = performance.now();
+    const tap = e.type === "pointerup" && now - tapDown.ts <= ZOOM_TAP_MAX_MS;
+    if (tap && lastTap && now - lastTap.ts <= ZOOM_DBLTAP_MS &&
+        Math.hypot(lastTap.x - tapDown.x, lastTap.y - tapDown.y) <= 2 * ZOOM_TAP_SLOP) {
+      lastTap = null;
+      resetFrameZoom();
+    } else {
+      lastTap = tap ? { ts: now, x: tapDown.x, y: tapDown.y } : null;
+    }
+    tapDown = null;
+  };
+  document.addEventListener("pointerup", lift);
+  document.addEventListener("pointercancel", lift);
+
+  canvasEl.addEventListener("dblclick", resetFrameZoom);
+
+  // Trackpad pinch arrives as ctrl+wheel; a plain scroll pans a zoomed picture.
+  stageEl.addEventListener("wheel", (e) => {
+    if (!frameZoomable() || !onFrameZoomSurface(e.target, e.clientX, e.clientY)) return;
+    const px = e.deltaMode === 1 ? 16 : 1;   // line-mode wheels count lines
+    if (e.ctrlKey) {
+      e.preventDefault();   // else the browser zooms the whole page
+      const dy = Math.max(-50, Math.min(50, e.deltaY * px));
+      zoomFrameAt(zoomS * Math.exp(-dy * 0.01), e.clientX, e.clientY);
+    } else if (zoomS > 1) {
+      e.preventDefault();
+      setFrameZoom(zoomS, zoomX - e.deltaX * px, zoomY - e.deltaY * px);
+    }
+  }, { passive: false });
+
+  // Safari's trackpad pinch. iOS sends these for a touch pinch too, where the
+  // pointer path above already has it: there they only cancel page zoom.
+  let gestureFrom = 0;
+  document.addEventListener("gesturestart", (e) => {
+    const g = /** @type {any} */ (e);
+    if (!frameZoomable() || !onFrameZoomSurface(e.target, g.clientX, g.clientY)) return;
+    e.preventDefault();
+    gestureFrom = ptrs.size ? 0 : zoomS;
+  });
+  document.addEventListener("gesturechange", (e) => {
+    if (!gestureFrom) return;
+    e.preventDefault();
+    const g = /** @type {any} */ (e);
+    zoomFrameAt(gestureFrom * g.scale, g.clientX, g.clientY);
+  });
+  document.addEventListener("gestureend", (e) => {
+    if (!gestureFrom) return;
+    e.preventDefault();
+    gestureFrom = 0;
+  });
+}
+
+// --- Idle cursor ---
+// A mouse left resting on the picture hides after 3 s and comes back on the
+// next move or press. "On the picture" is a hit test, so it is the frame's
+// exact on-screen box (zoom included, clipped by the stage) minus anything
+// drawn over it: letterbox, bars, menus and toasts keep the pointer.
+const CURSOR_IDLE_MS = 3000;
+{
+  let x = 0, y = 0;
+  let timer = null;
+  const idle = () => {
+    timer = null;
+    document.body.classList.toggle("cursor-idle",
+      document.body.classList.contains("running") &&
+      document.elementFromPoint(x, y) === canvasEl);
+  };
+  const active = (/** @type {PointerEvent} */ e) => {
+    if (e.pointerType !== "mouse") return;
+    x = e.clientX; y = e.clientY;
+    document.body.classList.remove("cursor-idle");
+    clearTimeout(timer);
+    timer = setTimeout(idle, CURSOR_IDLE_MS);
+  };
+  document.addEventListener("pointermove", active);
+  document.addEventListener("pointerdown", active);
+}
+
 // --- Keyboard settings ---
 
 // X and Y (ids 10, 11) are the DS's: bound on every system, live only while
@@ -9516,6 +11674,10 @@ const routeP1Input = (inputId, down) => {
 // Intercepts bound keys before the SDL layer and calls _setInput directly.
 const gameKeyHandler = (e, down) => {
   if (settingsModal.classList.contains("open")) return;
+  // The home screen keeps a loaded game paused behind it: there Enter, Space
+  // and the arrows are the page's (a focused tile), not the hidden core's.
+  // A release still goes through, so a key held across Main Menu lets go.
+  if (down && !document.body.classList.contains("running")) return;
   // Not while typing in a text field.
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
@@ -9631,21 +11793,32 @@ const loadLargeControlsFromStorage = async () => {
   applyLargeControls(!!(await dbGet("large-controls")));
 };
 
-// --- Opaque controls in landscape ---
-const opaqueControlsToggle = /** @type {HTMLInputElement} */ (document.getElementById("opaque-controls-toggle"));
+// --- Buttons in landscape: "outline" | "bold" | "solid" ---
+// Phones held sideways draw the pads over the game (styles.css):
+// body.bold-controls and body.opaque-controls pick the look.
+let landscapeButtons = "bold";
+const landscapeButtonsChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#landscape-buttons-picker .choice-chip")));
 
-const applyOpaqueControls = (on) => {
-  document.body.classList.toggle("opaque-controls", on);
-  opaqueControlsToggle.checked = on;
+const applyLandscapeButtons = (look) => {
+  landscapeButtons = look === "outline" || look === "solid" ? look : "bold";
+  document.body.classList.toggle("bold-controls", landscapeButtons === "bold");
+  document.body.classList.toggle("opaque-controls", landscapeButtons === "solid");
+  syncChipGroup(landscapeButtonsChips, landscapeButtons);
 };
 
-opaqueControlsToggle.addEventListener("change", async () => {
-  applyOpaqueControls(opaqueControlsToggle.checked);
-  await dbPut("opaque-controls", opaqueControlsToggle.checked);
-});
+landscapeButtonsChips.forEach((chip) =>
+  chip.addEventListener("click", async () => {
+    applyLandscapeButtons(chip.dataset.value);
+    await dbPut("landscape-buttons", landscapeButtons);
+  })
+);
 
-const loadOpaqueControlsFromStorage = async () => {
-  applyOpaqueControls(!!(await dbGet("opaque-controls")));
+const loadLandscapeButtonsFromStorage = async () => {
+  let look = await dbGet("landscape-buttons");
+  // Before Bold this was the yes/no "Opaque controls in landscape".
+  if (look == null && (await dbGet("opaque-controls"))) look = "solid";
+  applyLandscapeButtons(look);
 };
 
 // --- Hide touch controls while a game controller is connected ---
@@ -9962,7 +12135,7 @@ themeChips.forEach((chip) =>
 // re-runs each subsystem's apply. No reload.
 const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
-  "keybindings", "large-controls", "opaque-controls",
+  "keybindings", "large-controls", "opaque-controls", "landscape-buttons",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
   "runahead", "gb-palette", "input-display", "library-open", "nds-layout", "nds-display",
 ];
@@ -9978,6 +12151,7 @@ const resetAllSettings = async () => {
 
   volume = 100; muted = false;
   syncVolumeUI();
+  applyAudioSilent();
   if (typeof updateGain === "function") updateGain();
   pitchCorrectFF = true;
   if (pcffToggle) pcffToggle.checked = true;
@@ -9991,6 +12165,9 @@ const resetAllSettings = async () => {
   audioLowpass = true;
   if (lowpassToggle) lowpassToggle.checked = true;
   applyAudioLowpass();
+  playInSilent = true;
+  if (playInSilentToggle) playInSilentToggle.checked = true;
+  applyAudioSession();
 
   colorCorrect = true;
   ccToggle.checked = colorCorrect;
@@ -10012,7 +12189,7 @@ const resetAllSettings = async () => {
   renderKbBindings();
 
   applyLargeControls(false);
-  applyOpaqueControls(false);
+  applyLandscapeButtons("bold");
   applyControlStyle("dpad");
   applyJoystickMode("fixed");
   applyHideTouchOnGamepad(true);
@@ -10219,6 +12396,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   if (typeof netShutdown === "function" && sessionHoldsCore()) await netShutdown();
   if (abandoned()) return;
   if (currentRomName && currentOriginalName) {
+    clearPlaying();
     await persistAutoState(); // where the outgoing game was left
     if (abandoned()) return;
     await storeLastFrame({ force: true }); // the outgoing game's picture
@@ -10280,18 +12458,22 @@ const loadRom = async (romName, originalName, opts = {}) => {
   }
   loadingName = null;
   currentRomName = romName;
+  sessionHeldFor = null; // the held session was the outgoing game's
   currentOriginalName = name;
   applyAudioLowpass(); // the filter follows the machine: GBA in, GB out
   lastFrameSig = null; // a new game: the tick's skip must not carry over
   sessionMoved = true; // and no snapshot of it yet
+  startCheckpointClock(name);
   // The session the home screen chose to go back into, put back in this same
   // synchronous run so no frame of the boot is ever drawn. Checked once more
   // against the battery just installed, as the offer's Resume checks it.
   if (opts.resume) {
-    if (opts.resume.saveSig !== liveSaveSig()) {
+    // `force`: an earlier moment chosen from the sheet, whose battery goes
+    // back with it (resumeMoment kept the newer save aside first).
+    if (!opts.resume.force && opts.resume.saveSig !== liveSaveSig()) {
       showToast("The game has saved since — starting from that save");
     } else if (!applyStateBytes(opts.resume.bytes)) {
-      showToast(stateRejectMessage(opts.resume.bytes));
+      refuseState(opts.resume.bytes, { kind: "session" });
     }
   }
   // Again, for a capture started on the outgoing game during the awaits
@@ -10351,6 +12533,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   if (gen !== loadGen) return; // the next load re-applies all of this to its core
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
+  applyAudioSilent();
   mp2kHleSessionOff = false; // the note-icon A/B belongs to the previous game
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
@@ -10514,6 +12697,21 @@ romWarnModal.addEventListener("click", (e) => {
   if (e.target === romWarnModal) closeRomWarnModal();
 });
 
+// A dingbat export's map of path -> kind, from its info.json; null for any
+// other zip (or an info.json that is not ours).
+const exportKinds = async (zip) => {
+  let e = zip.entries.find((x) => x.name === "info.json");
+  if (!e) return null;
+  try {
+    let info = JSON.parse(new TextDecoder().decode(await zip.extract(e)));
+    if (info?.app !== "dingbat" || !Array.isArray(info.files)) return null;
+    return new Map(info.files.filter((f) => typeof f?.path === "string")
+                             .map((f) => [f.path, f.kind]));
+  } catch {
+    return null;
+  }
+};
+
 const handleZipFile = async (file) => {
   const gen = nextLoadGen(); // a later tap or open supersedes this one (loadGen)
   let zip;
@@ -10523,13 +12721,19 @@ const handleZipFile = async (file) => {
     alert("Couldn't read that zip: " + e.message);
     return;
   }
-  let romEntry = zip.entries.find((e) => usable(e) && ROM_EXTS.includes(extOf(e.name)));
+  // One of our own exports says what each file is (exportPackage's
+  // info.json): its box art is the file it calls box art, or there is none.
+  // Guessing would make the library thumbnail or a printed photo the cover.
+  let kinds = await exportKinds(zip);
+  let ofKind = (k) => kinds && zip.entries.find((e) => kinds.get(e.name) === k);
+  let romEntry = ofKind("rom") ||
+    zip.entries.find((e) => usable(e) && ROM_EXTS.includes(extOf(e.name)));
   if (!romEntry) {
     alert("No .gba, .gb, .gbc or .nds ROM was found inside that zip.");
     return;
   }
-  // The largest embedded image is almost always the box art.
-  let imgEntry = zip.entries
+  // Anyone else's zip: the largest embedded image is almost always the box art.
+  let imgEntry = kinds ? ofKind("art") : zip.entries
     .filter((e) => usable(e) && IMG_EXTS.includes(extOf(e.name)))
     .sort((a, b) => b.uncompSize - a.uncompSize)[0];
 
@@ -10654,6 +12858,13 @@ document.addEventListener("drop", (e) => {
   e.preventDefault();
   dragCounter = 0;
   dropOverlay.classList.remove("visible");
+  // A recording clip owns the machine, as for every other control; a file
+  // check's prompt over its panel lost the focus trap when both closed
+  // (bug_drop_during_clip_export_loses_focus).
+  if (clipReplayActive) {
+    if (e.dataTransfer.files?.length > 0) showToast("Finish or cancel the clip first");
+    return;
+  }
   if (e.dataTransfer.files?.length > 0) handleDroppedFile(e.dataTransfer.files[0]);
 });
 
@@ -10665,7 +12876,7 @@ const showPauseChoice = (on) => {
   document.body.classList.toggle("paused", on);
 };
 const togglePause = (fromRemote) => {
-  paused = !paused;
+  paused = !takePlayerPause();
   if (paused) storeLastFrame({ force: true }); // the paused picture is the library's
   showPauseChoice(paused);
   // Linked online, pause freezes both sides (a one-sided pause stalls the
@@ -10823,18 +13034,107 @@ const frameAdvance = () => {
   drawGame();
 };
 
+// --- The console's own picture and sound, for everything exported ---
+// Clips, recordings and screenshots carry the scene as the console makes
+// it: the core's framebuffer at a whole-number scale (no LCD response,
+// colour correction, DMG shades, SGB border or upscale filter) and its mix
+// without the MP2K HLE, the FIFO smoothing or the channel mutes. Those are
+// ways of playing, not part of the game. The HLE only shadows the game's
+// own mixer (mp2k.nim), so switching it off for a replay changes nothing
+// the replay emulates.
+const NATIVE_SCALE = 4;
+let nativeSmall = null;
+let nativeBig = null;
+
+// Paint the current frame into the export canvas, which is reused (a
+// recorder's captureStream follows it) until the picture's size changes.
+// Null with no core.
+const nativeFrameCanvas = () => {
+  if (ndsGameLoaded()) return ndsNativeCanvas(); // both screens, stacked
+  if (typeof Module === "undefined" || !Module._wasm_native_fb_ptr) return null;
+  const ptr = Module._wasm_native_fb_ptr();
+  if (!ptr) return null;
+  const [w, h] = gameRes();
+  if (!nativeSmall || nativeSmall.width !== w || nativeSmall.height !== h) {
+    nativeSmall = document.createElement("canvas");
+    nativeSmall.width = w;
+    nativeSmall.height = h;
+    nativeBig = document.createElement("canvas");
+    nativeBig.width = w * NATIVE_SCALE;
+    nativeBig.height = h * NATIVE_SCALE;
+  }
+  nativeSmall.getContext("2d").putImageData(
+    bgr555ToImageData(new Uint8Array(Module.memory.buffer, ptr, w * h * 2), 0, w, h), 0, 0);
+  const ctx = nativeBig.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(nativeSmall, 0, 0, nativeBig.width, nativeBig.height);
+  return nativeBig;
+};
+
+// The core's native mix while an export runs (and audible at all, whatever
+// the volume); the player's own settings back after.
+const setNativeAudio = (on) => {
+  if (typeof Module === "undefined") return;
+  if (on) {
+    if (Module._wasm_set_mp2k_hle) Module._wasm_set_mp2k_hle(0);
+    if (Module._wasm_set_fifo_interp) Module._wasm_set_fifo_interp(0);
+    if (Module._wasm_set_channel_mutes) Module._wasm_set_channel_mutes(0);
+    if (Module._wasm_set_audio_silent) Module._wasm_set_audio_silent(0);
+  } else {
+    // Another export still running keeps it (a Record across a clip).
+    if (clipReplayActive || (recRecorder && recRecorder.state === "recording")) return;
+    applyMp2kHle();
+    applyFifoInterp();
+    applyChannelMutes();
+    applyAudioSilent();
+  }
+};
+
 // --- Retroactive clip capture ---
 // The wasm side keeps one state anchor per second plus a per-frame input
 // log (clip_* in dingbat_wasm.nim). clip_begin rewinds to the anchor before
-// the range and re-emulates to its first frame; clip_tick then replays at
-// realtime while a MediaRecorder captures the canvas and the audio tap.
+// the range and re-emulates to its first frame; clip_tick steps one frame of
+// it. The replay is neither shown nor heard: a progress panel covers the
+// screen (the canvas under it is hidden) while the frames and their sound
+// go to an encoder.
+//  - WebCodecs (clipEncode): as fast as the machine allows, each frame and
+//    its samples straight from the core into an MP4 (clipmux.js). Nothing is
+//    timed by a clock, so nothing can stutter, and the sound is the core's.
+//  - Otherwise MediaRecorder over the canvas and a private audio tap (one
+//    that never reaches the speakers), stepped at realtime by the tick.
 var clipReplayActive = false;
+// The WebCodecs path owns the core: the tick keeps off it.
+var clipEncodeActive = false;
+// Bumped per export, so a cancelled encode's tail never ends a later one.
+var clipExportGen = 0;
 // `paused` as the export found it: the replay unpauses the core to run, and
 // the live game comes back to the player's choice, not to the replay's.
 var clipExportWasPaused = false;
 var clipRecorder = null;
 var clipChunks = [];
+var clipTotalFrames = 0;
 const clipLastItem = document.getElementById("clip-last");
+
+// Both consoles run 70224 dots a frame at 4 MiHz (GBA: 280896 at 16 MiHz).
+const CLIP_FPS = 4194304 / 70224;
+const CLIP_SRC_RATE = 32768;           // the core's sample rate
+const CLIP_AUDIO_RATE = 48000;         // what AAC and Opus encoders take
+const CLIP_VIDEO_BPS = 8_000_000;
+const CLIP_AUDIO_BPS = 160_000;
+const CLIP_KEY_EVERY = 120;            // frames between keyframes (~2 s)
+
+const clipProgressModal = document.getElementById("clip-progress-modal");
+const clipProgressLabel = document.getElementById("clip-progress-label");
+const clipProgressBar = document.getElementById("clip-progress-bar");
+const clipProgressFill = document.getElementById("clip-progress-fill");
+const clipProgressPct = document.getElementById("clip-progress-pct");
+
+const setClipProgress = (frac) => {
+  const pct = Math.max(0, Math.min(100, Math.floor(frac * 100)));
+  clipProgressFill.style.width = pct + "%";
+  clipProgressPct.textContent = pct + "%";
+  clipProgressBar.setAttribute("aria-valuenow", String(pct));
+};
 
 const clipMimeType = () => {
   if (typeof MediaRecorder === "undefined") return null;
@@ -10845,17 +13145,75 @@ const clipMimeType = () => {
   return null;
 };
 
-const finishRetroClip = (save) => {
+const clipWebCodecs = () =>
+  typeof VideoEncoder !== "undefined" && typeof AudioEncoder !== "undefined" &&
+  typeof VideoFrame !== "undefined" && typeof AudioData !== "undefined" &&
+  typeof OfflineAudioContext !== "undefined" && typeof ClipMux !== "undefined";
+
+// The first H.264 profile and the first audio codec this browser encodes,
+// or null (then the realtime recorder records the clip).
+const clipCodecConfig = async (w, h) => {
+  if (!clipWebCodecs()) return null;
+  let video = null;
+  // Level 5.1 covers the largest canvas (1440x960 at 60).
+  for (const codec of ["avc1.640033", "avc1.4d0033", "avc1.420033"]) {
+    const c = { codec, width: w, height: h, bitrate: CLIP_VIDEO_BPS, framerate: 60,
+                avc: { format: /** @type {"avc"} */ ("avc") } };
+    try {
+      if ((await VideoEncoder.isConfigSupported(c)).supported) { video = c; break; }
+    } catch {}
+  }
+  if (!video) return null;
+  for (const [kind, codec] of [["aac", "mp4a.40.2"], ["opus", "opus"]]) {
+    const c = { codec, sampleRate: CLIP_AUDIO_RATE, numberOfChannels: 2, bitrate: CLIP_AUDIO_BPS };
+    try {
+      if ((await AudioEncoder.isConfigSupported(c)).supported)
+        return { video, audio: { kind: /** @type {"aac" | "opus"} */ (kind), config: c } };
+    } catch {}
+  }
+  return null;
+};
+
+const clipBytes = (buf) =>
+  buf instanceof ArrayBuffer ? new Uint8Array(buf.slice(0))
+    : new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+
+const saveClipBlob = (blob, slug) => {
+  if (!blob.size) { showToast("The clip came out empty"); return; }
+  const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+  const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${base}-${slug}-${stamp}.${ext}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  showToast("Clip saved");
+};
+
+// Back to the live game, whichever path ran and however it ended. The core
+// is already live again (clip_tick's last step, or clip_abort).
+const endClipExport = () => {
   clipReplayActive = false;
+  clipEncodeActive = false;
   paused = clipExportWasPaused;
   document.body.classList.remove("clip-replaying");
-  clipBanner.hidden = true;
+  if (clipProgressModal.classList.contains("open")) {
+    clipProgressModal.classList.remove("open");
+    releaseFocus(clipProgressModal);
+  }
+  setNativeAudio(false); // the player's mix back
+  drawGame();            // the live picture back on the canvas
+};
+
+const finishRetroClip = (save) => {
   if (clipRecorder && clipRecorder.state !== "inactive") {
     if (save) clipRecorder.stop(); // onstop saves the blob
     else { clipRecorder.ondataavailable = null; clipRecorder.onstop = null;
            clipRecorder.stop(); clipChunks = []; clipRecorder = null;
            if (typeof window.releaseClipAudio === "function") window.releaseClipAudio(); }
   }
+  endClipExport();
 };
 
 const abortRetroClip = () => {
@@ -10864,48 +13222,26 @@ const abortRetroClip = () => {
   finishRetroClip(false);
 };
 
-var clipTotalFrames = 0;
-var clipBannerLabel = "";
-const clipBanner = document.getElementById("clip-banner");
-const updateClipBanner = (left) => {
-  const pct = clipTotalFrames > 0
-    ? Math.min(100, Math.round(100 * (clipTotalFrames - left) / clipTotalFrames)) : 0;
-  clipBanner.textContent = `${clipBannerLabel}… ${pct}%`;
-};
-
-/**
- * Replay [startAgo, endAgo), both in frames before now, into a video file.
- * @param {number} startAgo
- * @param {number} endAgo
- * @param {string} slug   filename infix, e.g. "last10s"
- * @param {string} label  banner wording, e.g. "Capturing the last 10s"
- * @returns {boolean} true once the replay is armed and recording
- */
-const startClipExport = (startAgo, endAgo, slug, label) => {
-  if (clipReplayActive || !currentRomName || !speedControlsOk()) return false;
-  const mime = clipMimeType();
-  if (!mime) { showToast("Video recording isn't supported in this browser"); return false; }
-  const frames = Module._clip_begin ? Module._clip_begin(startAgo, endAgo) : 0;
-  if (frames <= 0) { showToast("Not enough gameplay history yet"); return false; }
-  // The framebuffer now holds the clip's first frame: push it to the canvas
-  // before captureStream attaches, or the recorder opens on the live moment.
-  drawGame();
+// The realtime path: the tick steps clip_tick and pushAudio sends each
+// frame's samples to the private tap. Returns false (nothing armed) on failure.
+const startClipRecorder = (slug, mime) => {
+  // The framebuffer holds the clip's first frame: paint it before
+  // captureStream attaches, or the recorder opens on the live moment.
+  const frame = nativeFrameCanvas();
   let stream;
   try {
-    stream = canvasEl.captureStream(60);
+    stream = frame.captureStream(60);
   } catch {
-    Module._clip_abort();
     showToast("Couldn't capture the game canvas");
     return false;
   }
   const audio = typeof window.acquireClipAudio === "function"
-    ? window.acquireClipAudio() : null;
+    ? window.acquireClipAudio(true) : null;
   if (audio) for (const t of audio.getAudioTracks()) stream.addTrack(t);
   clipChunks = [];
   try {
-    clipRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    clipRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: CLIP_VIDEO_BPS });
   } catch {
-    Module._clip_abort();
     if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
     showToast("Couldn't start the recorder");
     return false;
@@ -10916,28 +13252,194 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
     const blob = new Blob(clipChunks, { type: clipRecorder.mimeType });
     clipRecorder = null;
     clipChunks = [];
-    if (!blob.size) { showToast("The clip came out empty"); return; }
-    const ext = blob.type.includes("mp4") ? "mp4" : "webm";
-    const base = (currentOriginalName || "dingbat").replace(/\.[^.]+$/, "");
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${base}-${slug}-${stamp}.${ext}`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    showToast("Clip saved");
+    saveClipBlob(blob, slug);
   };
   clipRecorder.start(500);
-  clipReplayActive = true;
-  clipTotalFrames = frames;
-  clipBannerLabel = label;
-  document.body.classList.add("clip-replaying");
-  clipBanner.hidden = false;
-  updateClipBanner(frames);
-  clipExportWasPaused = paused;
-  paused = false; // the replay must run even if the game was paused
   return true;
 };
+
+// The whole clip's samples, resampled to the encoder's rate by the browser
+// and encoded. `pcm` is the core's interleaved stereo, one array per frame.
+const clipEncodeAudio = async (pcm, len, acfg) => {
+  const frames = len / 2;
+  const rate = acfg.config.sampleRate;
+  const oc = new OfflineAudioContext(2, Math.max(1, Math.ceil((frames * rate) / CLIP_SRC_RATE)), rate);
+  const src = oc.createBuffer(2, Math.max(1, frames), CLIP_SRC_RATE);
+  const l0 = src.getChannelData(0), r0 = src.getChannelData(1);
+  let o = 0;
+  for (const p of pcm) {
+    for (let k = 0; k < p.length; k += 2) { l0[o] = p[k]; r0[o] = p[k + 1]; o++; }
+  }
+  const node = oc.createBufferSource();
+  node.buffer = src;
+  node.connect(oc.destination);
+  node.start();
+  const out = await oc.startRendering();
+
+  const chunks = [];
+  let description = null;
+  let failure = null;
+  const aenc = new AudioEncoder({
+    output: (c, meta) => {
+      const data = new Uint8Array(c.byteLength);
+      c.copyTo(data);
+      chunks.push({ data, timestamp: c.timestamp, duration: c.duration ?? 0 });
+      if (meta?.decoderConfig?.description) description = clipBytes(meta.decoderConfig.description);
+    },
+    error: (e) => { failure = e; },
+  });
+  try {
+    aenc.configure(acfg.config);
+    const l = out.getChannelData(0), r = out.getChannelData(1);
+    const BLOCK = 4800;
+    for (let s = 0; s < out.length; s += BLOCK) {
+      if (failure) throw failure;
+      const n = Math.min(BLOCK, out.length - s);
+      const data = new Float32Array(n * 2);
+      data.set(l.subarray(s, s + n), 0);
+      data.set(r.subarray(s, s + n), n);
+      const ad = new AudioData({ format: "f32-planar", sampleRate: rate, numberOfFrames: n,
+                                 numberOfChannels: 2, timestamp: Math.round((s * 1e6) / rate), data });
+      aenc.encode(ad);
+      ad.close();
+    }
+    await aenc.flush();
+    if (failure) throw failure;
+  } finally {
+    try { aenc.close(); } catch {}
+  }
+  return { codec: acfg.kind, sampleRate: rate, channels: 2, bitrate: CLIP_AUDIO_BPS,
+           frames: out.length, description, chunks };
+};
+
+// The WebCodecs path, from clip_begin's armed replay to a saved file.
+const clipEncode = async (gen, slug, mime) => {
+  const first = nativeFrameCanvas();
+  const w = first ? first.width : 0, h = first ? first.height : 0;
+  const cfg = await clipCodecConfig(w, h);
+  if (gen !== clipExportGen || !clipReplayActive) return; // cancelled while asking
+  if (!cfg) {
+    // No encoder here: the realtime recorder instead, from the same frame.
+    clipEncodeActive = false;
+    if (!mime || !startClipRecorder(slug, mime)) {
+      if (!mime) showToast("Video recording isn't supported in this browser");
+      abortRetroClip();
+    }
+    return;
+  }
+
+  const vChunks = [];
+  let vDesc = null;
+  let failure = null;
+  const venc = new VideoEncoder({
+    output: (c, meta) => {
+      const data = new Uint8Array(c.byteLength);
+      c.copyTo(data);
+      vChunks.push({ data, timestamp: c.timestamp, duration: c.duration ?? 0, key: c.type === "key" });
+      if (meta?.decoderConfig?.description) vDesc = clipBytes(meta.decoderConfig.description);
+    },
+    error: (e) => { failure = e; },
+  });
+  const pcm = [];
+  let pcmLen = 0;
+  const frameUs = 1e6 / CLIP_FPS;
+  const total = clipTotalFrames;
+  let done = 0;
+  const live = () => gen === clipExportGen && clipReplayActive;
+  try {
+    venc.configure(cfg.video);
+    // Frames in ~12 ms batches, then a yield: the panel repaints and Cancel
+    // is heard. The encoder's queue is the brake on a fast core.
+    for (let left = 0; left >= 0;) {
+      if (!live()) return;            // Cancel or a game switch: already restored
+      if (failure) throw failure;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 12 && venc.encodeQueueSize < 8) {
+        left = Module._clip_tick();
+        if (left < 0) break;          // the live state is back
+        const vf = new VideoFrame(nativeFrameCanvas(), { timestamp: Math.round(done * frameUs),
+                                                         duration: Math.round(frameUs) });
+        venc.encode(vf, { keyFrame: done % CLIP_KEY_EVERY === 0 });
+        vf.close();
+        const n = Module._getAudioBufferLen();
+        if (n > 0) {
+          pcm.push(new Float32Array(Module.memory.buffer, Module._getAudioBufferPtr(), n).slice());
+          pcmLen += n;
+        }
+        Module._clearAudioBuffer();
+        done++;
+      }
+      setClipProgress((0.9 * done) / Math.max(1, total));
+      if (left >= 0) await new Promise((r) => setTimeout(r, 0));
+    }
+    await venc.flush();
+    if (failure) throw failure;
+    if (!live()) return;
+    if (!vDesc) throw new Error("the encoder gave no avcC");
+    const audio = pcmLen > 0 ? await clipEncodeAudio(pcm, pcmLen, cfg.audio) : null;
+    if (!live()) return;
+    setClipProgress(0.98);
+    const bytes = ClipMux.mp4({
+      video: { width: w, height: h, description: vDesc, chunks: vChunks },
+      audio,
+    });
+    setClipProgress(1);
+    saveClipBlob(new Blob([/** @type {Uint8Array<ArrayBuffer>} */ (bytes)], { type: "video/mp4" }), slug);
+  } catch (e) {
+    console.error("clip: encode failed", e);
+    if (live()) showToast("Couldn't record the clip");
+  } finally {
+    try { venc.close(); } catch {}
+    if (live()) {
+      if (Module._clip_abort) Module._clip_abort();  // a no-op once the replay ran out
+      endClipExport();
+    }
+  }
+};
+
+/**
+ * Replay [startAgo, endAgo), both in frames before now, into a video file,
+ * off screen, behind a progress panel.
+ * @param {number} startAgo
+ * @param {number} endAgo
+ * @param {string} slug   filename infix, e.g. "clip10s"
+ * @param {string} label  what is being recorded, e.g. "The last 10s"
+ * @returns {boolean} true once the replay is armed and recording
+ */
+const startClipExport = (startAgo, endAgo, slug, label) => {
+  if (clipReplayActive || !currentRomName || !speedControlsOk()) return false;
+  const webcodecs = clipWebCodecs();
+  const mime = clipMimeType();
+  if (!webcodecs && !mime) { showToast("Video recording isn't supported in this browser"); return false; }
+  const frames = Module._clip_begin ? Module._clip_begin(startAgo, endAgo) : 0;
+  if (frames <= 0) { showToast("Not enough gameplay history yet"); return false; }
+  const gen = ++clipExportGen;
+  clipReplayActive = true;
+  clipEncodeActive = webcodecs;
+  clipTotalFrames = frames;
+  clipExportWasPaused = takePlayerPause();
+  paused = false; // the replay must run even if the game was paused
+  setNativeAudio(true);
+  document.body.classList.add("clip-replaying");
+  clipProgressLabel.textContent = label;
+  setClipProgress(0);
+  clipProgressModal.classList.add("open");
+  trapFocus(clipProgressModal);
+  if (webcodecs) {
+    clipEncode(gen, slug, mime);
+  } else if (!startClipRecorder(slug, /** @type {string} */ (mime))) {
+    abortRetroClip();
+    return false;
+  }
+  return true;
+};
+
+document.getElementById("clip-progress-cancel").addEventListener("click", () => {
+  if (clipReplayActive) {
+    abortRetroClip();
+    showToast("Clip cancelled");
+  }
+});
 
 const CLIP_QUICK_SECONDS = 10;
 
@@ -10984,6 +13486,7 @@ const clipStrip = createFilmStrip({
   frameWMin: 26,
   frameWMax: 40,
   fitFrames: CLIP_QUICK_SECONDS + 1,
+  direct: true,
   markers: [
     { el: document.getElementById("clip-marker-start"), edge: "lead" },
     { el: document.getElementById("clip-marker-end"), edge: "trail" },
@@ -11094,7 +13597,7 @@ const clipRefresh = () => {
   clipEstimate.textContent =
     len > 0
       ? `${seconds.toFixed(1)}s of video, roughly ${Math.max(1, Math.round(seconds))} MB. ` +
-        "The clip is re-played at normal speed while it records, so it takes that long."
+        "It records off screen; you'll see how far along it is."
       : "";
   clipSaveBtn.disabled = len <= 0;
 };
@@ -11191,7 +13694,7 @@ const openClipScrubber = () => {
     return;
   }
   if (clipReplayActive) return;
-  clipWasPaused = paused;
+  clipWasPaused = takePlayerPause();
   // Freeze the core so the anchors cannot age out from under the markers.
   paused = true;
   clipStrip.release();
@@ -11239,8 +13742,8 @@ clipSaveBtn.addEventListener("click", () => {
   const seconds = Math.max(1, Math.round(len / 60));
   closeClipScrubber();
   startClipExport(start, end, `clip${seconds}s`,
-                  end === 0 ? `Capturing the last ${seconds}s`
-                            : `Capturing ${seconds}s of gameplay`);
+                  end === 0 ? `The last ${seconds}s`
+                            : `${seconds}s of gameplay`);
 });
 
 document.getElementById("clip-scrub-close").addEventListener("click", closeClipScrubber);
@@ -11275,13 +13778,17 @@ const stopClipRecording = () => {
   if (recRecorder && recRecorder.state !== "inactive") recRecorder.stop();
 };
 
+// Records the console's own picture and sound (nativeFrameCanvas,
+// setNativeAudio): the HLE and the rest of the player's mix are off, and
+// heard off, while it runs.
 const startClipRecording = () => {
   if (recRecorder || clipReplayActive || !currentRomName || ndsGameLoaded()) return;
   const mime = clipMimeType();
   if (!mime) { showToast("Video recording isn't supported in this browser"); return; }
+  const frame = nativeFrameCanvas();
   let stream;
   try {
-    stream = canvasEl.captureStream(60);
+    stream = frame.captureStream(60);
   } catch {
     showToast("Couldn't capture the game canvas");
     return;
@@ -11297,9 +13804,11 @@ const startClipRecording = () => {
     showToast("Couldn't start the recorder");
     return;
   }
+  setNativeAudio(true);
   recRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
   recRecorder.onstop = () => {
     if (typeof window.releaseClipAudio === "function") window.releaseClipAudio();
+    setNativeAudio(false);
     clearTimeout(recStopTimer);
     const blob = new Blob(recChunks, { type: recRecorder.mimeType });
     recRecorder = null;
@@ -11583,7 +14092,7 @@ const shortcutKeyHandler = (e, down) => {
       // Frame advance: first press pauses, further presses step one frame.
       // Single-core only.
       if (e.shiftKey || !currentRomName || !gameShown || !speedControlsOk()) break;
-      if (!paused) {
+      if (!playerPaused()) {
         if (!e.repeat) pauseButton.click();
       } else {
         frameAdvance();
@@ -11855,6 +14364,7 @@ const launchLinkRom = async (rom) => {
 const showMainMenu = () => {
   menuDropdown.hidden = true;
   if (!currentRomName && !linkMode) return;
+  setFrameZoom(1, 0, 0);   // the flight home starts from the whole picture
   // Where the screen is, before it goes: the picture flies from here.
   const from = !linkMode && document.body.classList.contains("running")
     ? canvasEl.getBoundingClientRect() : null;
@@ -12328,6 +14838,7 @@ const refreshHero = (roms, localRoms, keys) => {
 const heroPrimary = () => {
   if (heroCard.dataset.mode === "paused") { resumeFromHero(); return; }
   if (!heroName) return;
+  if (crashGate(heroName)) return;
   if (heroSession) { launchRom(heroName, { resume: true, flyFrom: heroShot }); return; }
   openLibraryGame(heroName, { ...heroFile, flyFrom: heroShot, resume: true });
 };
@@ -12449,6 +14960,18 @@ const powerOn = (rect) => {
 // Holding the game for a flight, and letting it go. `flightHeld` is only ours:
 // a pause the player makes meanwhile is theirs and is kept.
 let flightHeld = false;
+// Whether the PLAYER has the game paused. While a flight holds the game,
+// `paused` is the flight's, not a choice: it is the pause button that says.
+const playerPaused = () => (flightHeld ? pauseButton.classList.contains("paused") : paused);
+// The same, for a surface that takes the run state over (an overlay that
+// pauses and gives back, a toggle): it takes it from the flight too, so the
+// flight's landing lets go of nothing it no longer holds
+// (bug_overlay_in_flight_*, bug_pause_in_flight_lost, bug_link_modal_in_flight_*).
+const takePlayerPause = () => {
+  const p = playerPaused();
+  flightHeld = false;
+  return p;
+};
 const holdForFlight = () => {
   flightHeld = true;
   paused = true;
@@ -12554,6 +15077,7 @@ const unloadGame = async ({ flushSave = true, picture = true } = {}) => {
   const gen = nextLoadGen();
   const romName = currentRomName;
   const originalName = currentOriginalName;
+  clearPlaying();
   // The closing picture and session, taken while the name is still attached.
   if (flushSave) await persistAutoState();
   if (gen !== loadGen) return false;
@@ -12828,34 +15352,21 @@ thumbsModal.addEventListener("click", (e) => {
 });
 
 // --- Screenshot ---
-// No preserveDrawingBuffer: pixels are only valid within the render task,
-// so captureCanvas() runs from the main loop right after a frame is drawn.
-let pendingShot = false;
-
-const captureCanvas = () => {
-  pendingShot = false;
-  /** @type {HTMLCanvasElement} */ (document.getElementById("canvas")).toBlob((blob) => {
+// The console's own picture (nativeFrameCanvas), read straight from the
+// core: no render task to wait for, and a paused game is not stepped.
+const takeScreenshot = () => {
+  menuDropdown.hidden = true;
+  if (!currentRomName) return;
+  const frame = nativeFrameCanvas();
+  if (!frame || typeof frame.toBlob !== "function") return;
+  frame.toBlob((blob) => {
     if (!blob) return;
     let a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = (currentOriginalName || "dingbat").replace(/\.[^.]*$/, "") + ".png";
     a.click();
-    URL.revokeObjectURL(a.href);
-  });
-};
-
-const takeScreenshot = () => {
-  menuDropdown.hidden = true;
-  if (!currentRomName || typeof Module === "undefined" || !Module._loop_tick) return;
-  if (paused) {
-    // Paused: draw one frame, then grab it in the same task (a DS game's
-    // screens are drawn again from the core as they are).
-    if (!ndsGameLoaded()) Module._loop_tick();
-    drawGame();
-    captureCanvas();
-  } else {
-    pendingShot = true; // grabbed by the running loop after the next render
-  }
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  }, "image/png");
 };
 
 document.getElementById("screenshot").addEventListener("click", takeScreenshot);
@@ -12886,100 +15397,478 @@ if (!requestFs) {
   document.addEventListener("webkitfullscreenchange", onFsChange);
 }
 
-// --- Mobile-landscape top bar handle ---
-document.getElementById("topbar-handle").addEventListener("click", () => {
-  document.body.classList.toggle("topbar-open");
-});
+// --- Mobile-landscape top bar: tap the picture ---
+// On a phone held sideways the bar waits off-screen; a tap on the picture (or
+// the letterbox round it) brings it down and another puts it away. It has to
+// be a deliberate tap, not a thumb that slid off a button mid-game: one
+// finger with no other on the screen, short and still, and a thumb's width
+// clear of the drawn controls. While zoomed, a double tap resets the zoom, so
+// there the bar waits out the double-tap window first.
+const PHONE_LANDSCAPE = "(pointer: coarse) and (orientation: landscape) and (max-height: 500px)";
+{
+  const BAR_TAP_MAX_MS = 250, BAR_TAP_SLOP = 12, BAR_TAP_MARGIN = 20, BAR_DBLTAP_MS = 300;
+  const touches = new Set();   // every touch down, on a control or not
+  let cand = null;             // the lone touch that may yet be a tap
+  let pending = 0;             // zoomed: the toggle waiting out a double tap
+
+  const nearControl = (x, y) => {
+    const m = BAR_TAP_MARGIN;
+    for (const el of document.querySelectorAll("#controls .pad-btn")) {
+      const r = el.getBoundingClientRect();
+      if (r.width && x > r.left - m && x < r.right + m && y > r.top - m && y < r.bottom + m) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // The stage's picture and letterbox, or the touch overlay's layout boxes
+  // between its buttons (they span the picture). Never a control, the bar, a
+  // menu, a toast or a modal.
+  const onPicture = (/** @type {any} */ t) => {
+    if (!t || typeof t.closest !== "function") return false;
+    if (t.closest("#stage")) return !t.closest("#home");
+    return !!t.closest("#controls") && !t.closest(ZOOM_NOT_SURFACE);
+  };
+  const toggleBar = () => document.body.classList.toggle("topbar-open");
+  // Where the bar is folded away: a phone held sideways, and a DS game on a
+  // phone held upright with "Hide the top bar" on (styles.css).
+  const barFolds = () => matchMedia(PHONE_LANDSCAPE).matches ||
+    (ndsGameLoaded() && ndsDisplay.barHide && matchMedia(NDS_PHONE_UPRIGHT).matches);
+
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    touches.add(e.pointerId);
+    cand = touches.size === 1 && document.body.classList.contains("running") &&
+      barFolds() && !anyModalOpen() &&
+      onPicture(e.target) && !nearControl(e.clientX, e.clientY) &&
+      !ndsTapTaken(e.clientX, e.clientY)
+      ? { id: e.pointerId, ts: performance.now(), x: e.clientX, y: e.clientY }
+      : null;
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (cand && e.pointerId === cand.id &&
+        Math.hypot(e.clientX - cand.x, e.clientY - cand.y) > BAR_TAP_SLOP) cand = null;
+  });
+  const lift = (/** @type {PointerEvent} */ e) => {
+    touches.delete(e.pointerId);
+    if (!cand || cand.id !== e.pointerId) return;
+    const c = cand;
+    cand = null;
+    if (e.type !== "pointerup" || performance.now() - c.ts > BAR_TAP_MAX_MS) return;
+    if (pending) {             // the second tap of a double: the zoom's, not ours
+      clearTimeout(pending);
+      pending = 0;
+    } else if (zoomS > 1) {
+      pending = setTimeout(() => { pending = 0; toggleBar(); }, BAR_DBLTAP_MS);
+    } else {
+      toggleBar();
+    }
+  };
+  document.addEventListener("pointerup", lift);
+  document.addEventListener("pointercancel", lift);
+
+  // Nothing on screen says the bar is there, so say it once: the first time a
+  // game runs on a phone held sideways.
+  const BAR_HINT_KEY = "dingbat_bar_tap_hint";
+  const maybeHint = () => {
+    if (!document.body.classList.contains("running") || !barFolds()) return;
+    try {
+      if (localStorage.getItem(BAR_HINT_KEY)) return;
+      localStorage.setItem(BAR_HINT_KEY, "1");
+    } catch { return; }
+    pushToast("Tap the picture to show the bar", 4000, null);
+  };
+  new MutationObserver(maybeHint).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  matchMedia(PHONE_LANDSCAPE).addEventListener?.("change", maybeHint);
+}
 
 // --- Gamepad support (polled each frame) ---
+// A pad drives whatever is on screen. In the game view it plays (A/B/X/Y,
+// shoulders, Back/Start, d-pad and left stick are the console's), with the
+// triggers and stick clicks left for the app: RT holds fast-forward, LT holds
+// rewind, and R3, the Guide button or Select+Start held opens the menu,
+// paused, like a console's own. Everywhere else - the library, the menu,
+// Settings, the other modals - the d-pad and stick move focus, A presses
+// and B backs out (Escape). The Guide button is the OS's on most machines
+// (Launchpad, Game Bar, Steam), hence the stick click and the chord.
 
-const gpPrev = new Array(INPUT_NAMES.length).fill(false);
+// Standard-mapping button indices (w3c Gamepad "standard" layout).
+const PB = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, BACK: 8, START: 9,
+  L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15, GUIDE: 16 };
+const PAD_BUTTONS = 17;
+
+const gpPrev = new Array(INPUT_NAMES.length).fill(false); // the game inputs the core was last sent
 const GP_DEADZONE = 0.4;
+let padNow = new Array(PAD_BUTTONS).fill(false);
+let padPrev = new Array(PAD_BUTTONS).fill(false);
+const padHit = (i) => padNow[i] && !padPrev[i];
+let padCtx = "";              // the surface the pad drove last poll
+const PAD_CHORD_MS = 500;     // Select+Start held this long opens the menu
+let padChordSince = 0;
+let padChordFired = false;
+let padMenuPaused = false;    // the pad's menu paused the game; closing it resumes
+let padMenuBar = false;       // ... and put the phone-landscape bar up for it
+let padFastForward = false;   // RT's hold, as kbFastForward is Tab's
+let padSpeedBeforeHold = "normal";
+let padRewindHeld = false;
+
+// D-pad and stick navigation repeats while held, like a key.
+const PAD_REPEAT_DELAY_MS = 380;
+const PAD_REPEAT_MS = 110;
+let padNavDir = -1, padNavSince = 0, padNavLast = 0;
+// The direction to move this poll (with auto-repeat), or -1.
+const padNavPress = (now) => {
+  const d = [PB.UP, PB.DOWN, PB.LEFT, PB.RIGHT].find((i) => padNow[i]);
+  if (d === undefined) { padNavDir = -1; return -1; }
+  if (d !== padNavDir) { padNavDir = d; padNavSince = padNavLast = now; return d; }
+  if (now - padNavSince >= PAD_REPEAT_DELAY_MS && now - padNavLast >= PAD_REPEAT_MS) {
+    padNavLast = now;
+    return d;
+  }
+  return -1;
+};
+
+// Pad focus is drawn whatever the browser thinks of :focus-visible (a
+// programmatic focus after a mouse click gets none); a pointer or key puts
+// it back to the browser's.
+const padNavOn = () => document.body.classList.add("pad-nav");
+for (const ev of ["pointerdown", "keydown"]) {
+  document.addEventListener(ev, (e) => {
+    // Not the Escape that B dispatches.
+    if (e.isTrusted) document.body.classList.remove("pad-nav");
+  }, true);
+}
+
+const padReachable = (/** @type {HTMLElement} */ el) =>
+  !(/** @type {any} */ (el).disabled) && el.getClientRects().length > 0 &&
+  !el.closest("[inert], [hidden]") && getComputedStyle(el).visibility !== "hidden";
+
+// The nearest of `items` from `from` in direction `dir`: candidates must lie
+// that way, overlap in the cross axis wins, then the shortest gap.
+const padSpatialPick = (items, from, dir) => {
+  const r = from.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  let best = null, bestScore = Infinity;
+  for (const el of items) {
+    if (el === from) continue;
+    const q = el.getBoundingClientRect();
+    const qx = q.left + q.width / 2, qy = q.top + q.height / 2;
+    let main, cross;
+    const gap = (a0, a1, b0, b1) => Math.max(0, b0 - a1, a0 - b1); // 0 when overlapping
+    if (dir === PB.UP || dir === PB.DOWN) {
+      if (dir === PB.UP ? qy >= cy - 1 : qy <= cy + 1) continue;
+      main = dir === PB.UP ? r.top - q.bottom : q.top - r.bottom;
+      cross = gap(r.left, r.right, q.left, q.right);
+      cross = cross * 3 + Math.abs(qx - cx) * 0.05;
+    } else {
+      if (dir === PB.LEFT ? qx >= cx - 1 : qx <= cx + 1) continue;
+      main = dir === PB.LEFT ? r.left - q.right : q.left - r.right;
+      cross = gap(r.top, r.bottom, q.top, q.bottom);
+      cross = cross * 3 + Math.abs(qy - cy) * 0.05;
+    }
+    const score = Math.max(0, main) + cross;
+    if (score < bestScore) { bestScore = score; best = el; }
+  }
+  return best;
+};
+
+const padFocus = (/** @type {HTMLElement} */ el, block = "nearest") => {
+  padNavOn();
+  el.focus({ preventScroll: true });
+  el.scrollIntoView?.({ block: /** @type {ScrollLogicalPosition} */ (block), inline: "nearest" });
+};
+
+// Left/right on a slider or a select changes it rather than leaving it.
+const padAdjust = (/** @type {HTMLElement} */ el, dir) => {
+  const step = dir === PB.RIGHT ? 1 : dir === PB.LEFT ? -1 : 0;
+  if (!step || !el) return false;
+  if (el.tagName === "INPUT" && /** @type {HTMLInputElement} */ (el).type === "range") {
+    const r = /** @type {HTMLInputElement} */ (el);
+    if (step > 0) r.stepUp(); else r.stepDown();
+  } else if (el.tagName === "SELECT") {
+    const sel = /** @type {HTMLSelectElement} */ (el);
+    const i = sel.selectedIndex + step;
+    if (i < 0 || i >= sel.options.length) return true;
+    sel.selectedIndex = i;
+  } else {
+    return false;
+  }
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
+};
+
+// One step of focus navigation over `items`; nothing focused there yet
+// takes `first` (or the first item) without moving.
+const padMove = (items, dir, first = null, block = "nearest") => {
+  if (!items.length) return;
+  const cur = /** @type {HTMLElement} */ (document.activeElement);
+  if (!cur || !items.includes(cur)) { padFocus(first || items[0], block); return; }
+  if (padAdjust(cur, dir)) { padNavOn(); return; }
+  const next = padSpatialPick(items, cur, dir);
+  if (next) padFocus(next, block);
+};
+
+const padPress = () => {
+  const el = /** @type {HTMLElement} */ (document.activeElement);
+  if (!el || el === document.body || el.tagName === "SELECT") return;
+  padNavOn();
+  el.click();
+};
+
+// B: what Escape does where the pad is (close the modal, the menu).
+const padBack = () => {
+  const t = document.activeElement || document.body;
+  t.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+};
 
 // Gamepad inside Settings: shoulders cycle sections, d-pad walks controls,
-// A activates, B goes back. Everything is consumed; nothing reaches the game.
-const settingsGamepadNav = (want) => {
-  const hit = (i) => want[i] && !gpPrev[i];
-  if (hit(8)) selectSettingsTab(settingsStep(settingsSection, -1)); // L
-  if (hit(9)) selectSettingsTab(settingsStep(settingsSection, 1));  // R
-  if (hit(5)) {                                                     // B
+// A activates, B goes back.
+const settingsGamepadNav = (dir) => {
+  if (padHit(PB.LB)) selectSettingsTab(settingsStep(settingsSection, -1));
+  if (padHit(PB.RB)) selectSettingsTab(settingsStep(settingsSection, 1));
+  if (padHit(PB.B)) {
     if (settingsOnDetail) showSettingsList();
     else closeSettingsModal();
     return;
   }
-  if (hit(4)) {                                                     // A
+  if (padHit(PB.A)) {
     const el = /** @type {HTMLElement} */ (document.activeElement);
-    if (el && settingsModal.contains(el) && el.click) el.click();
+    if (el && settingsModal.contains(el) && el.click) { padNavOn(); el.click(); }
   }
-  if (hit(0) || hit(1)) {                                           // d-pad
+  const cur = /** @type {HTMLElement} */ (document.activeElement);
+  if ((dir === PB.LEFT || dir === PB.RIGHT) && cur && settingsModal.contains(cur)) {
+    if (padAdjust(cur, dir)) padNavOn();
+  }
+  if (dir === PB.UP || dir === PB.DOWN) {
     const items = modalFocusables(settingsModal);
     if (!items.length) return;
-    const d = hit(1) ? 1 : -1;
-    let i = items.indexOf(document.activeElement);
+    const d = dir === PB.DOWN ? 1 : -1;
+    let i = items.indexOf(cur);
     if (i < 0) i = d > 0 ? -1 : 0;
-    items[(i + d + items.length) % items.length].focus();
+    padFocus(items[(i + d + items.length) % items.length]);
   }
 };
 
-const pollGamepads = () => {
-  const settingsOpen = settingsModal.classList.contains("open");
-  if (!settingsOpen && (typeof Module === "undefined" || !Module._setInput)) return;
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+// The open modal on top: the trap's owner, else the last one open.
+const padTopModal = () => {
+  if (modalTrapOverlay && modalTrapOverlay.classList.contains("open")) return modalTrapOverlay;
+  const open = document.querySelectorAll(".modal-overlay.open");
+  return /** @type {HTMLElement} */ (open[open.length - 1]);
+};
+
+const padMenuItems = () => /** @type {HTMLElement[]} */ (
+  [...menuDropdown.querySelectorAll("button, input[type=range]")].filter(padReachable));
+
+// The library: the hero, the tiles, the chips and the head's buttons. The
+// search field and the sort select are not the pad's (LT/RT sort; nothing
+// types); a tile's corner buttons are Y's menu.
+const padHomeItems = () => /** @type {HTMLElement[]} */ (
+  [...document.querySelectorAll("#home button, #topbar button")].filter((el) =>
+    el.getAttribute("tabindex") !== "-1" &&
+    !el.matches(".home-tile-more, .home-tile-dl, .home-tile-link, .lib-search-clear") &&
+    padReachable(/** @type {HTMLElement} */ (el))));
+
+const padHomeFirst = (items) =>
+  items.find((el) => el.id === "hero-resume") ||
+  items.find((el) => el.id === "home-resume") ||
+  items.find((el) => el.classList.contains("home-tile-launch")) || items[0];
+
+// The arrow keys walk the grid the way the d-pad does, from a focused tile.
+const PAD_ARROWS = { ArrowUp: PB.UP, ArrowDown: PB.DOWN, ArrowLeft: PB.LEFT, ArrowRight: PB.RIGHT };
+document.addEventListener("keydown", (e) => {
+  const dir = PAD_ARROWS[e.key];
+  if (dir === undefined || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (document.body.classList.contains("running") || anyModalOpen() || tileMenuFor !== null) return;
+  const t = /** @type {HTMLElement} */ (e.target);
+  if (!t || !t.classList || !t.classList.contains("home-tile-launch")) return;
+  const next = padSpatialPick(padHomeItems(), t, dir);
+  e.preventDefault();
+  if (next) {
+    next.focus({ preventScroll: true });
+    next.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }
+});
+
+// LB/RB: the system filter steps All -> each system -> All.
+const padStepSystemFilter = (step) => {
+  const systems = [...libChips.querySelectorAll(".lib-chip-sys")].map(
+    (c) => /** @type {HTMLElement} */ (c).dataset.sys);
+  if (!systems.length) return;
+  const states = ["", ...systems];
+  const cur = libFilter.systems.size === 1 ? [...libFilter.systems][0] : "";
+  const want = states[(states.indexOf(cur) + step + states.length) % states.length];
+  // Each chip click re-renders the chips, so look them up afresh each time.
+  for (let guard = 0; guard < 8; guard++) {
+    const wrong = /** @type {HTMLElement} */ ([...libChips.querySelectorAll(".lib-chip-sys")].find((c) =>
+      (c.getAttribute("aria-pressed") === "true") !== (/** @type {HTMLElement} */ (c).dataset.sys === want)));
+    if (!wrong) break;
+    wrong.click();
+  }
+  padRefocusUntil = performance.now() + PAD_REFOCUS_MS;
+};
+
+const padStepSort = (step) => {
+  const v = LIB_SORTS[(LIB_SORTS.indexOf(romsSort) + step + LIB_SORTS.length) % LIB_SORTS.length];
+  setRomsSort(v);
+  padRefocusUntil = performance.now() + PAD_REFOCUS_MS;
+};
+
+// A filter hides, and a sort rebuilds, the tile that had focus: for a moment
+// after either, focus that went with it lands on the first game shown.
+const PAD_REFOCUS_MS = 1500;
+let padRefocusUntil = 0;
+
+const padHomeNav = (dir) => {
+  const items = padHomeItems();
+  let cur = /** @type {HTMLElement} */ (document.activeElement);
+  // Focus on a tile's corner button (where closing its menu puts it back)
+  // is focus on the tile.
+  const curTile = cur && cur.closest?.(".home-tile");
+  if (curTile && !cur.classList.contains("home-tile-launch")) {
+    const launch = /** @type {HTMLElement} */ (curTile.querySelector(".home-tile-launch"));
+    if (launch && items.includes(launch)) { launch.focus({ preventScroll: true }); cur = launch; }
+  }
+  const onTile = cur && cur.classList.contains("home-tile-launch");
+  if (padRefocusUntil && !(cur && items.includes(cur))) {
+    if (performance.now() > padRefocusUntil) padRefocusUntil = 0;
+    else {
+      const tile = items.find((el) => el.classList.contains("home-tile-launch"));
+      if (tile) { padRefocusUntil = 0; padFocus(tile, "center"); }
+    }
+  }
+  if (dir >= 0) padMove(items, dir, padHomeFirst(items), "center");
+  if (padHit(PB.A)) {
+    if (cur && items.includes(cur)) padPress();
+    else { const f = padHomeFirst(items); if (f) padFocus(f, "center"); }
+  }
+  if (padHit(PB.Y)) {
+    // A tile's (or the hero's) ⋯ menu.
+    const more = onTile ? cur.parentElement?.querySelector(".home-tile-more")
+      : cur && cur.closest("#hero") ? document.getElementById("hero-more") : null;
+    if (more) { padNavOn(); /** @type {HTMLElement} */ (more).click(); }
+  }
+  if (padHit(PB.START)) {
+    // The hero's game: Resume, or Play when it has no session.
+    const go = ["hero-resume", "hero-play", "home-resume"].map((id) => document.getElementById(id))
+      .find((el) => el && padReachable(el));
+    if (go) { padNavOn(); go.click(); }
+  }
+  if (libBar && !libBar.hidden) {
+    if (padHit(PB.LB)) padStepSystemFilter(-1);
+    if (padHit(PB.RB)) padStepSystemFilter(1);
+    if (padHit(PB.LT)) padStepSort(-1);
+    if (padHit(PB.RT)) padStepSort(1);
+  }
+  if (padHit(PB.B)) {
+    // Back to the top of the page, where the game in hand is.
+    const f = padHomeFirst(items);
+    if (f) padFocus(f, "center");
+  }
+};
+
+// The menu, opened from the pad over a running game: paused, the way a
+// console's own menu is; closing it (B, Start, the same button again, or an
+// item that closes it) resumes once nothing else is open.
+const openPadMenu = () => {
+  if (!menuDropdown.hidden) return;
+  if (!playerPaused()) { togglePause(); padMenuPaused = true; }
+  if (!document.body.classList.contains("topbar-open")) {
+    document.body.classList.add("topbar-open"); // phone landscape keeps the bar folded away
+    padMenuBar = true;
+  }
+  menuBtn.click();
+  const items = padMenuItems();
+  const first = items.find((el) => el.id === "save-state") || items[0];
+  if (first) padFocus(first);
+};
+const closePadMenu = () => { menuDropdown.hidden = true; };
+
+const padMenuNav = (dir) => {
+  if (dir >= 0) padMove(padMenuItems(), dir);
+  if (padHit(PB.A)) padPress();
+  if (padHit(PB.B) || padHit(PB.START) || padHit(PB.R3) || padHit(PB.GUIDE)) closePadMenu();
+};
+
+// Back in the game with nothing over it: undo what the pad's menu did.
+const settlePadMenu = () => {
+  if (padMenuBar) { padMenuBar = false; document.body.classList.remove("topbar-open"); }
+  if (padMenuPaused) {
+    padMenuPaused = false;
+    if (playerPaused()) togglePause();
+  }
+};
+
+const endPadHolds = () => {
+  if (padFastForward) {
+    padFastForward = false;
+    if (fastForward) applySpeed(padSpeedBeforeHold);
+  }
+  if (padRewindHeld) { padRewindHeld = false; setRewindHeld(false); }
+};
+
+// The triggers, the stick click, Guide and the chord, over the game view.
+// A pad that does not claim the standard layout numbers its buttons its own
+// way (an SNES-style pad can send Select and Start as 6 and 7, LT and RT
+// here): the trigger holds, R3 and Guide stand down for it, so a button
+// meant for the game never rewinds or fast-forwards it.
+let padStd = true; // every connected pad claims the standard layout
+const padGameSystem = (now) => {
+  if (typeof clipReplayActive !== "undefined" && clipReplayActive) return;
+  if (padNow[PB.RT] && padStd && !padFastForward && speedControlsOk() && currentRomName) {
+    padFastForward = true;
+    padSpeedBeforeHold = fastForward ? "normal" : currentSpeed();
+    setFastForward(true);
+    setSpeed2x(false);
+  } else if (!padNow[PB.RT] && padFastForward) {
+    padFastForward = false;
+    if (fastForward) applySpeed(padSpeedBeforeHold);
+  }
+  if (padNow[PB.LT] && padStd && !padRewindHeld && speedControlsOk() && currentRomName) {
+    padRewindHeld = true;
+    setRewindHeld(true);
+  } else if (!padNow[PB.LT] && padRewindHeld) {
+    padRewindHeld = false;
+    setRewindHeld(false);
+  }
+  let open = padStd && (padHit(PB.R3) || padHit(PB.GUIDE));
+  if (padNow[PB.BACK] && padNow[PB.START]) {
+    if (!padChordSince) padChordSince = now;
+    else if (!padChordFired && now - padChordSince >= PAD_CHORD_MS) { padChordFired = true; open = true; }
+  } else {
+    padChordSince = 0;
+    padChordFired = false;
+  }
+  if (open) openPadMenu();
+};
+
+// The console inputs from the pad, as the core numbers them. A DS game has
+// four face buttons: each by its label on the pad (the standard mapping's
+// 0-3 are A B X Y on an Xbox-style pad).
+const padGameInputs = () => {
   const want = new Array(INPUT_NAMES.length).fill(false);
-  let anyConnected = false;
-  // A DS game has four face buttons: each by its label on the pad (the
-  // standard mapping's 0-3 are A B X Y on an Xbox-style pad).
+  if (ndsGameLoaded()) {
+    if (padNow[PB.A]) want[4] = true;
+    if (padNow[PB.B]) want[5] = true;
+    if (padNow[PB.X]) want[10] = true;
+    if (padNow[PB.Y]) want[11] = true;
+  } else {
+    if (padNow[PB.A] || padNow[PB.Y]) want[4] = true;    // A / Y -> A
+    if (padNow[PB.B] || padNow[PB.X]) want[5] = true;    // B / X -> B
+  }
+  if (padNow[PB.BACK]) want[6] = true;                    // Back -> Select
+  if (padNow[PB.START]) want[7] = true;
+  if (padNow[PB.LB]) want[8] = true;                      // LB -> L
+  if (padNow[PB.RB]) want[9] = true;                      // RB -> R
+  if (padNow[PB.UP]) want[0] = true;                      // d-pad (and the stick)
+  if (padNow[PB.DOWN]) want[1] = true;
+  if (padNow[PB.LEFT]) want[2] = true;
+  if (padNow[PB.RIGHT]) want[3] = true;
+  return want;
+};
+
+const sendGameInputs = (want) => {
   const ds = ndsGameLoaded();
-  for (const pad of pads) {
-    if (!pad) continue;
-    anyConnected = true;
-    const b = (i) => pad.buttons[i] && pad.buttons[i].pressed;
-    if (ds) {
-      if (b(0)) want[4] = true;  // A
-      if (b(1)) want[5] = true;  // B
-      if (b(2)) want[10] = true; // X
-      if (b(3)) want[11] = true; // Y
-    } else {
-      if (b(0) || b(3)) want[4] = true; // A / Y -> A
-      if (b(1) || b(2)) want[5] = true; // B / X -> B
-    }
-    if (b(8)) want[6] = true; // Back -> Select
-    if (b(9)) want[7] = true; // Start
-    if (b(4) || b(6)) want[8] = true; // LB / LT -> L
-    if (b(5) || b(7)) want[9] = true; // RB / RT -> R
-    if (b(12)) want[0] = true; // Dpad
-    if (b(13)) want[1] = true;
-    if (b(14)) want[2] = true;
-    if (b(15)) want[3] = true;
-    const ax = pad.axes[0] || 0;
-    const ay = pad.axes[1] || 0; // Left stick
-    if (ay < -GP_DEADZONE) want[0] = true;
-    if (ay > GP_DEADZONE) want[1] = true;
-    if (ax < -GP_DEADZONE) want[2] = true;
-    if (ax > GP_DEADZONE) want[3] = true;
-    // Tilt cart: the left stick is the accelerometer; claims the target only
-    // while deflected.
-    if (tiltActive && !settingsOpen) {
-      if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
-        padTiltLive = true;
-        tiltTargetX = ax;
-        tiltTargetY = ay;
-      } else if (padTiltLive) {
-        padTiltLive = false;
-        tiltTargetX = 0;
-        tiltTargetY = 0;
-      }
-    }
-  }
-  document.body.classList.toggle(
-    "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
-  if (!anyConnected) return;
-  if (settingsOpen) {
-    settingsGamepadNav(want);
-    // A button held across the close must not arrive as a fresh press.
-    for (let i = 0; i < want.length; i++) gpPrev[i] = want[i];
-    return;
-  }
   for (let i = 0; i < want.length; i++) {
     if (want[i] !== gpPrev[i]) {
       // The gamepad does not pass through routeP1Input, so it notifies the
@@ -12999,6 +15888,114 @@ const pollGamepads = () => {
       }
       gpPrev[i] = want[i];
     }
+  }
+};
+
+const padContext = () => {
+  if (settingsModal.classList.contains("open")) return "settings";
+  if (tileMenuFor !== null) return "tilemenu";
+  if (anyModalOpen()) return "modal";
+  if (!menuDropdown.hidden) return "menu";
+  if (!document.body.classList.contains("running")) return "home";
+  return "game";
+};
+
+const pollGamepads = () => {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let anyConnected = false;
+  for (const pad of pads) if (pad) { anyConnected = true; break; }
+  document.body.classList.toggle(
+    "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
+  if (!anyConnected) {
+    endPadHolds();
+    return;
+  }
+  const now = performance.now();
+  padPrev = padNow;
+  padNow = new Array(PAD_BUTTONS).fill(false);
+  const ctx = padContext();
+  padStd = true;
+  for (const pad of pads) {
+    if (!pad) continue;
+    if (pad.mapping !== "standard") padStd = false;
+    for (let i = 0; i < PAD_BUTTONS; i++) if (pad.buttons[i] && pad.buttons[i].pressed) padNow[i] = true;
+    const ax = pad.axes[0] || 0;
+    const ay = pad.axes[1] || 0; // Left stick: the d-pad
+    if (ay < -GP_DEADZONE) padNow[PB.UP] = true;
+    if (ay > GP_DEADZONE) padNow[PB.DOWN] = true;
+    if (ax < -GP_DEADZONE) padNow[PB.LEFT] = true;
+    if (ax > GP_DEADZONE) padNow[PB.RIGHT] = true;
+    // Tilt cart: the left stick is the accelerometer; claims the target only
+    // while deflected.
+    if (tiltActive && ctx === "game") {
+      if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
+        padTiltLive = true;
+        tiltTargetX = ax;
+        tiltTargetY = ay;
+      } else if (padTiltLive) {
+        padTiltLive = false;
+        tiltTargetX = 0;
+        tiltTargetY = 0;
+      }
+    }
+  }
+  const gameReady = typeof Module !== "undefined" && !!Module._setInput;
+  if (ctx !== padCtx) {
+    // Leaving the game: let go of everything the core and the speed hold
+    // had from the pad. Arriving anywhere: a button held across the switch
+    // is not a press there (padPrev carries it).
+    if (padCtx === "game" && gameReady) sendGameInputs(new Array(INPUT_NAMES.length).fill(false));
+    if (ctx !== "game") endPadHolds();
+    padCtx = ctx;
+  }
+  const dir = ctx === "game" ? -1 : padNavPress(now);
+  const anyPress = padNow.some((p, i) => p && !padPrev[i]);
+  switch (ctx) {
+    case "settings":
+      settingsGamepadNav(dir);
+      break;
+    case "tilemenu": {
+      const items = tileMenuButtons().filter((b) => !b.disabled);
+      if (dir === PB.UP || dir === PB.DOWN) padMove(items, dir);
+      if (padHit(PB.A)) padPress();
+      if (padHit(PB.B) || padHit(PB.Y)) closeTileMenu();
+      break;
+    }
+    case "modal": {
+      const top = padTopModal();
+      if (top && dir >= 0) padMove(modalFocusables(top), dir);
+      if (padHit(PB.A)) padPress();
+      if (padHit(PB.B)) padBack();
+      break;
+    }
+    case "menu":
+      padMenuNav(dir);
+      break;
+    case "home":
+      padMenuPaused = false; // Main Menu from the pad's menu: the game stays paused
+      if (padMenuBar) { padMenuBar = false; document.body.classList.remove("topbar-open"); }
+      // Only on a press: the items cost a style read apiece.
+      if (dir >= 0 || anyPress || padRefocusUntil) padHomeNav(dir);
+      break;
+    case "game":
+      if (!gameReady) break;
+      settlePadMenu();
+      padGameSystem(now);
+      if (padContext() !== "game") {
+        // The menu just opened over it: the game lets go now, not a frame on.
+        sendGameInputs(new Array(INPUT_NAMES.length).fill(false));
+        endPadHolds();
+        padCtx = padContext();
+        break;
+      }
+      sendGameInputs(padGameInputs());
+      break;
+  }
+  // Away from the game, the console inputs track the pad without being
+  // sent, so a button held into the game is not a press there either.
+  if (ctx !== "game") {
+    const want = padGameInputs();
+    for (let i = 0; i < want.length; i++) gpPrev[i] = want[i];
   }
 };
 
@@ -14090,6 +17087,35 @@ const ndsTopRgba = () => {
   return { heap: c.HEAPU8.slice(p, p + NdsUtil.W * NdsUtil.H * 4), w: NdsUtil.W, h: NdsUtil.H };
 };
 
+// The screenshot's picture (nativeFrameCanvas): both screens as the console
+// stacks them, top over bottom, whatever the arrangement on the stage, at
+// the export scale.
+let ndsNativeSmall = null;
+let ndsNativeBig = null;
+const ndsNativeCanvas = () => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null) return null;
+  const t = c._nds_fb_top(), b = c._nds_fb_bottom();
+  if (!t || !b) return null;
+  const W = NdsUtil.W, H = NdsUtil.H, n = W * H * 4;
+  if (!ndsNativeSmall) {
+    ndsNativeSmall = document.createElement("canvas");
+    ndsNativeSmall.width = W;
+    ndsNativeSmall.height = 2 * H;
+    ndsNativeBig = document.createElement("canvas");
+    ndsNativeBig.width = W * NATIVE_SCALE;
+    ndsNativeBig.height = 2 * H * NATIVE_SCALE;
+  }
+  const px = new Uint8ClampedArray(2 * n);
+  px.set(c.HEAPU8.subarray(t, t + n), 0);
+  px.set(c.HEAPU8.subarray(b, b + n), n);
+  ndsNativeSmall.getContext("2d").putImageData(new ImageData(px, W, 2 * H), 0, 0);
+  const ctx = ndsNativeBig.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(ndsNativeSmall, 0, 0, ndsNativeBig.width, ndsNativeBig.height);
+  return ndsNativeBig;
+};
+
 // --- Battery: the cart's save chip, copied out when the game wrote it.
 const ndsSaveDirty = () =>
   !!ndsCore && ndsCoreGame !== null && ndsCore._nds_save_dirty() === 1;
@@ -14265,10 +17291,23 @@ canvasEl.addEventListener("pointerup", (e) => {
 canvasEl.addEventListener("pointercancel", ndsTouchEnd);
 window.addEventListener("blur", () => ndsTouchEnd(null));
 
+// A touch the DS screens keep for themselves, which the bar's tap leaves
+// alone: on the touch screen (the stylus), or on the top screen where a tap
+// swaps them (Focus, One screen).
+const NDS_PHONE_UPRIGHT = "(pointer: coarse) and (orientation: portrait) and (max-width: 699px)";
+const ndsTapTaken = (x, y) => {
+  if (!ndsGameLoaded() || !ndsLay) return false;
+  const rect = canvasEl.getBoundingClientRect();
+  if (NdsUtil.touchPoint(x, y, rect, ndsLay).inside) return true;
+  const one = ndsLay.mode === "focus" || ndsLay.mode === "single";
+  return one && NdsUtil.screenAt(x, y, rect, ndsLay) === "top";
+};
+
 // The room the screens get. On a phone held sideways the touch controls are
 // rails over the stage's sides (styles.css), and the bottom screen under a
 // rail could not be touched: the screens fit between the d-pad (or stick)
-// and the face buttons instead, centred as the stage centres them.
+// and the face buttons instead, and clear of the Select/Start pills just
+// inboard of them, centred as the stage centres them.
 /** @param {[number, number]} wh @returns {[number, number]} */
 const ndsAvail = ([w, h]) => {
   const ctl = document.getElementById("controls");
@@ -14278,10 +17317,14 @@ const ndsAvail = ([w, h]) => {
   const right = document.getElementById("ab");
   const l = left?.getBoundingClientRect(), r = right?.getBoundingClientRect();
   if (!l?.width || !r?.width) return [w, h];
+  const sel = document.getElementById("select")?.getBoundingClientRect();
+  const st = document.getElementById("start")?.getBoundingClientRect();
+  const lEdge = Math.max(l.right, sel?.width ? sel.right : 0);
+  const rEdge = Math.min(r.left, st?.width ? st.left : Infinity);
   const s = stageEl.getBoundingClientRect();
   const mid = s.left + s.width / 2;
   // Symmetric about the stage's centre: the canvas is centred there.
-  const half = Math.min(mid - l.right, r.left - mid) - 8;
+  const half = Math.min(mid - lEdge, rEdge - mid) - 8;
   return half > 0 ? [Math.min(w, 2 * half), h] : [w, h];
 };
 
@@ -14903,7 +17946,7 @@ const initStorage = async () => {
   // runtime and onRuntimeInitialized re-pushes the wasm-side mirrors.
   await loadKeybindingsFromStorage();
   await loadLargeControlsFromStorage();
-  await loadOpaqueControlsFromStorage();
+  await loadLandscapeButtonsFromStorage();
   await loadHideTouchOnGamepadFromStorage();
   await loadInputDisplayFromStorage();
   await loadControlStyleFromStorage();
@@ -14921,6 +17964,9 @@ const initStorage = async () => {
   // driven off the count.
   await loadPrinterPhotos();
   await loadSyncState();
+  // After loadSyncState: a crashed run's session is queued for Drive.
+  await takeLastGasp().catch(() => {});
+  await noteCrashedRuns().catch(() => {});
   await loadRomsSort();
   // After loadSyncState, which reads the tombstones it consults, and before
   // the first render: an adopted game is a library game from the start.
@@ -14979,6 +18025,8 @@ var Module = {
     applySystemSettings();
     applyColorCorrect();
     applyPitchCorrectFF();
+    applyAudioSilent();
+    applyChannelMutes();
     applyMp2kHle();
     applyFifoInterp();
     applyLcdResponse();
@@ -14989,6 +18037,8 @@ var Module = {
     // session (resumeDriveOnBoot) have had a moment to settle, and the
     // first pull has had its say.
     setTimeout(() => { offerThumbnailsAfterBoot().catch(() => {}); }, 1500);
+    setTimeout(() => { packStoredStates().catch(() => {}); }, 4000);
+    offerStateRetry().catch(() => {});
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;
@@ -15046,11 +18096,20 @@ var Module = {
     let lowpassNode = null;
     let playTime = 0;
 
-    // Optional ~12 kHz low-pass (off = no filter node in the path). Clip
-    // recording tap: the master gain also feeds a MediaStreamDestination;
-    // routeOutput re-attaches it across lowpass toggles.
+    // The recorder's audio (Record, and Clip that! where there is no
+    // WebCodecs): every pushed buffer is also played into a MediaStream
+    // destination in a context of its own at 48 kHz. Not a branch of the
+    // 32768 Hz graph: Chrome's MediaRecorder, handed a 32768 Hz track,
+    // drops ~2 % of it and stamps the rest unevenly (a 60 ms hole and
+    // dozens of 2-6 ms gaps and overlaps in 10 s, measured), which players
+    // render as chop; at 48 kHz the same recording is whole.
+    let clipTapCtx = null;
     let clipTapNode = null;
+    let clipTapTime = 0;
     let clipTapActive = false;
+    // A clip replay's sound goes to the tap alone, never to the speakers.
+    let clipTapPrivate = false;
+    const CLIP_TAP_LEAD = 0.05;   // s queued ahead in the tap's context
 
     const routeOutput = () => {
       if (!audioCtx || !gainNode) return;
@@ -15070,20 +18129,47 @@ var Module = {
       } else {
         gainNode.connect(audioCtx.destination);
       }
-      if (clipTapActive && clipTapNode) gainNode.connect(clipTapNode);
     };
     window.updateAudioLowpass = () => routeOutput();
     // Recorder-side hooks; the tap's MediaStream, or null pre-unlock.
-    window.acquireClipAudio = () => {
+    // `priv`: the samples pushed from now on reach the tap and nothing
+    // else (a clip replay); otherwise the tap hears what the speakers do.
+    window.acquireClipAudio = (priv = false) => {
       if (!audioCtx || !gainNode) return null;
-      if (!clipTapNode) clipTapNode = audioCtx.createMediaStreamDestination();
+      if (!clipTapCtx) {
+        try {
+          clipTapCtx = new AudioContext({ sampleRate: 48000 });
+        } catch (e) {
+          clipTapCtx = new AudioContext();
+        }
+        clipTapNode = clipTapCtx.createMediaStreamDestination();
+      }
+      if (clipTapCtx.state !== "running") clipTapCtx.resume().catch(() => {});
+      clipTapPrivate = !!priv;
       clipTapActive = true;
-      routeOutput();
+      clipTapTime = 0;
       return clipTapNode.stream;
     };
     window.releaseClipAudio = () => {
       clipTapActive = false;
-      if (audioCtx && gainNode) routeOutput();
+      clipTapPrivate = false;
+      // Idle, it would hold an output stream open for nothing.
+      if (clipTapCtx) clipTapCtx.suspend().catch(() => {});
+    };
+    // The buffer pushAudio just built, into the tap's context. AudioBuffers
+    // are not tied to a context; this one is resampled there. Its own lead
+    // servo, as pushAudio's: the two contexts' clocks are not one clock.
+    const feedClipTap = (buffer) => {
+      const now = clipTapCtx.currentTime;
+      if (clipTapTime < now + 0.01) clipTapTime = now + CLIP_TAP_LEAD;
+      const src = clipTapCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(clipTapNode);
+      const excess = clipTapTime - now - CLIP_TAP_LEAD;
+      const rate = 1 + Math.max(-0.004, Math.min(0.004, excess * 0.15));
+      src.playbackRate.value = rate;
+      src.start(clipTapTime);
+      clipTapTime += buffer.duration / rate;
     };
     // Under fast-forward, play the frames that fit within this much queued
     // lead and drop the rest (audio can only play at realtime rate).
@@ -15099,10 +18185,10 @@ var Module = {
 
     const initAudio = () => {
       if (audioCtx) return;
-      // "playback" audio session so iOS ignores the silent switch (Safari 17+).
-      if (navigator.audioSession) {
-        navigator.audioSession.type = "playback";
-      }
+      // "playback" audio session so iOS plays in Silent Mode (Safari 17+),
+      // unless the user turned that off or the game is paused or muted.
+      audioSessionLive = true;
+      applyAudioSession();
       try {
         audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       } catch (e) {
@@ -15119,6 +18205,7 @@ var Module = {
 
     window.updateGain = () => {
       if (gainNode) gainNode.gain.value = effectiveGain();
+      applyAudioSession();   // muted or 0 lets go at once, not next tick
     };
     // The DS core's audio joins the graph here, at the master gain (ndsTick).
     window.appAudioOut = () => (audioCtx && gainNode ? { ctx: audioCtx, dest: gainNode } : null);
@@ -15213,6 +18300,10 @@ var Module = {
         right[i] = heap[i * 2 + 1];
       }
       Module._clearAudioBuffer();
+      if (clipTapActive && clipTapCtx) {
+        feedClipTap(buffer);
+        if (clipTapPrivate) return;   // a replay: not for the speakers
+      }
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
       source.connect(gainNode);
@@ -15270,6 +18361,8 @@ var Module = {
       }
     }, 5000);
 
+    setInterval(watchBattery, SAVE_SETTLE_MS);
+
     window.addEventListener("beforeunload", () => {
       // Get the BYE out so the peer sees a clean exit (the sync parts run
       // before the page dies). A rollback session (netMode is false in it)
@@ -15280,8 +18373,14 @@ var Module = {
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
+        // The run's end first: a quitting WebKit lands that small write
+        // and none after it (measured), and a quit counted as a crash would
+        // count toward asking. Chrome lands none of them, and the session
+        // comes back from localStorage (see "Last gasp").
+        clearPlaying();
         persistSave(currentRomName, currentOriginalName);
         persistAutoState();
+        leaveLastGasp();
         // Best-effort (the encode may not finish), and only a screen not yet
         // stored: a paused game's would re-queue a picture Drive may hold a
         // newer one of, from the device that played on.
@@ -15293,7 +18392,13 @@ var Module = {
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) return;
       ndsAudioQuiet(); // rAF stops: a DS game's ring would underrun
+      // As at beforeunload: a quitting browser may run this and no more.
+      clearPlaying(); // hidden is a normal end, whatever happens after
+      if (currentRomName && currentOriginalName && !linkMode) {
+        persistSave(currentRomName, currentOriginalName);
+      }
       persistAutoState();
+      leaveLastGasp();
       storeLastFrame(); // as at beforeunload
     });
 
@@ -15306,8 +18411,11 @@ var Module = {
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
+        // As at beforeunload, in its order.
+        clearPlaying();
         persistSave(currentRomName, currentOriginalName);
         persistAutoState(); // one-tap resume next launch
+        leaveLastGasp();
         storeLastFrame(); // as at beforeunload
       }
       if (audioCtx && audioCtx.state === "running") {
@@ -15402,7 +18510,9 @@ var Module = {
       updateTilt(); // MBC7 carts: ease the tilt vector toward its target
       pollPrinter(); // GB carts: print-intent offer + finished-strip pickup
       syncWakeLock(); // acquire while stepping, release on pause/menu (idempotent)
+      applyAudioSession(); // other apps' audio plays while paused (idempotent)
       if (paused) {
+        clearPlaying(); // a paused game is not a run a crash could end
         updateRumble(timestamp); // drops body.rumbling promptly on pause
         watchCanvasBacking();
         lastFrameTime = 0;
@@ -15415,6 +18525,9 @@ var Module = {
       if (lastFrameTime === 0) lastFrameTime = timestamp;
       const rafIv = timestamp - lastFrameTime;
       if (!fastForward && rafIv > 4 && rafIv < 40) ffVsyncMs += (rafIv - ffVsyncMs) * 0.05;
+      // Play time for the checkpoints: a stall (a hidden tab's) counts as little.
+      runPlayMs += Math.min(rafIv, 250);
+      if (!linkMode && !rollbackMode && !netMode && !document.hidden) markPlaying();
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
       if (ndsGameLoaded()) {
@@ -15476,21 +18589,29 @@ var Module = {
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         blitLinkCanvases();
+      } else if (clipReplayActive && clipEncodeActive) {
+        // clipEncode steps the core itself, off screen and off the clock.
+        accumulator = 0;
+        presentSkip = true;
       } else if (clipReplayActive) {
-        // Capture replay: clip_tick presents each frame and returns -1 when
-        // the log is exhausted (the live state is already restored).
+        // Realtime capture replay (no WebCodecs): clip_tick presents each
+        // frame and returns -1 when the log is exhausted (the live state is
+        // already restored). pushAudio feeds the private tap only.
         let framesRun = 0;
         let done = false;
         while (accumulator >= FRAME_TIME && framesRun < 2) {
           const left = Module._clip_tick();
           if (left < 0) { done = true; break; }
-          if ((left & 15) === 0) updateClipBanner(left);
+          if ((left & 15) === 0)
+            setClipProgress((clipTotalFrames - left) / Math.max(1, clipTotalFrames));
           pushAudio();
           frameCount++;
           accumulator -= FRAME_TIME;
           framesRun++;
         }
-        if (accumulator > FRAME_TIME * 2) accumulator = 0;
+        // As the normal loop: zeroing the debt would delete those frames'
+        // audio, a gap in the recording at every hitch.
+        if (accumulator > FRAME_TIME * 2) accumulator = FRAME_TIME * 2;
         if (done) finishRetroClip(true);
       } else if (rewindHeld) {
         // Pop ~30 snapshots/s (10 frames each, ~5x realtime backward); the
@@ -15593,18 +18714,19 @@ var Module = {
       } else {
         presentSkips++; // diagnostics: ticks that reused the shown frame
       }
-      presentSkip = false;
-      // Screenshot: grab it in this task (no preserveDrawingBuffer).
-      if (pendingShot) {
-        if (!ndsGameLoaded()) Module._loop_tick(); // a DS frame just redraws
-        drawGame();
-        captureCanvas();
+      // A recorder at realtime (Record, or a clip replay without WebCodecs)
+      // films the export canvas, not this one: paint it each new frame.
+      if (!presentSkip && (recRecorder || (clipReplayActive && !clipEncodeActive))) {
+        nativeFrameCanvas();
       }
+      presentSkip = false;
       updateSleepOverlay();
       updateHleIndicator();
       updateGlow();
       updateRumble(timestamp);
       watchCanvasBacking();
+      maybeCheckpoint(timestamp);
+      notePlayingLong();
       tickEnd = performance.now();
       requestAnimationFrame(tick);
     };

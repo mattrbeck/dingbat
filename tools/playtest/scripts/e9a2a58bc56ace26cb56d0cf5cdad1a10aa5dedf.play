@@ -2,31 +2,39 @@
 @file Final Fantasy VI Advance (U).gba
 @game BZ6E
 @chip SRAM
+@frozen dingbat-bios,mgba,nba
 
 # New game through the opening (text crawl, the cliff dialog, the Magitek
 # march into Narshe; nothing here can be skipped) until the menu opens, then
 # Quicksave: "Save game in quicksave slot and quit?" Yes writes the battery
 # save and returns to the title. [load] picks Continue on the title menu,
 # answers "Resume from quicksave data?" Yes and closes the menu in Narshe.
-
 [new]
-until text "Press any button" timeout=1200 every=10
+# until text 'Press any button' timeout=1200 every=10  [reached dingbat-bios+150 mgba+160 nba+160]
+wait 164
 press A after=60
-until text "SQUARE" timeout=900 every=10
-mash A until text "Game" timeout=3000 every=60
+# until text SQUARE timeout=900 every=10  [reached dingbat-bios+220 mgba+220 nba+220]
+wait 224
+# mash A until text Game timeout=3000 every=60  [taps dingbat-bios:8 mgba:8 nba:8]
+tap A times=8 every=60 hold=4
 wait 30
-checkpoint title_menu compare=text
+checkpoint title_menu window=30 compare=text
 press A
-until text "ancient war" timeout=1200 every=10
+# until text 'ancient war' timeout=1200 every=10  [reached dingbat-bios+240 mgba+230 nba+240]
+wait 244
 checkpoint crawl window=0 compare=text
-mash A until text "Biggs" timeout=6000 every=60
+# mash A until text Biggs timeout=6000 every=60  [taps dingbat-bios:83 mgba:83 nba:83]
+tap A times=83 every=60 hold=4
 checkpoint biggs window=0 compare=text
-mash A until text "Relax" timeout=3000 every=60
-# the march to Narshe, then Wedge's orders at the gate
-mash A until text "riffraff" timeout=14000 every=60
+# mash A until text Relax timeout=3000 every=60  [taps dingbat-bios:22 mgba:22 nba:22]
+tap A times=22 every=60 hold=4
+# mash A until text riffraff timeout=14000 every=60  [taps dingbat-bios:28 mgba:28 nba:28]
+tap A times=28 every=60 hold=4
 checkpoint narshe_gate window=0 compare=text
-mash A until notext "riffraff" timeout=600 every=60
-mash START until text "Formation" timeout=3000 every=120
+# mash A until notext riffraff timeout=600 every=60  [taps dingbat-bios:2 mgba:2 nba:2]
+tap A times=2 every=60 hold=4
+# mash START until text Formation timeout=3000 every=120  [taps dingbat-bios:2 mgba:2 nba:2]
+tap START times=2 every=120 hold=4
 wait 30
 checkpoint menu window=10
 press DOWN after=15
@@ -37,31 +45,40 @@ press DOWN after=15
 press DOWN after=15
 press DOWN after=15
 press A after=60
-until text "quicksave slot" timeout=300 every=10
+# until text 'quicksave slot' timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 press UP after=15
 checkpoint quicksave_prompt window=0
 press A after=10
-until text "Saved game data" timeout=900 every=10
+# until text 'Saved game data' timeout=900 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 20
 checkpoint saved window=10
 
 [load]
-until text "Press any button" timeout=1200 every=10
+# until text 'Press any button' timeout=1200 every=10  [reached dingbat-bios+140 mgba+150 nba+140]
+wait 154
 press A after=60
-until text "SQUARE" timeout=900 every=10
-mash A until text "Continue" timeout=3000 every=60
+# until text SQUARE timeout=900 every=10  [reached dingbat-bios+220 mgba+220 nba+220]
+wait 224
+# mash A until text Continue timeout=3000 every=60  [taps dingbat-bios:8 mgba:8 nba:8]
+tap A times=8 every=60 hold=4
 wait 30
-checkpoint title_menu compare=text
+checkpoint title_menu window=30 compare=text
 press A
-until text "erased" timeout=1200 every=10
+# until text erased timeout=1200 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
 wait 30
 checkpoint resume_prompt window=10
 press UP after=15
 press A
-until notext "erased" timeout=600 every=10
-until stable 30 timeout=1200
-checkpoint menu_resumed
+# until notext erased timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+0]
+wait 14
+# until stable 30 timeout=1200 every=4  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
+checkpoint menu_resumed window=30
 press B
-until notext "Formation" timeout=600 every=10
+# until notext Formation timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 checkpoint narshe window=10

@@ -2,83 +2,102 @@
 @file Mario Tennis Advance - Power Tour (U).gba
 @game BTME
 @chip SRAM
+@frozen dingbat-bios,mgba,nba
 
 # First boot asks for the language (saved at once: the header block), then
 # START on the title starts a Power Tour file: the boy (Clay), righty, Normal,
 # keep the name; the file is written on the fade into "Good morning, Clay".
 # [load]: the language screen is skipped, Main Menu > Power Tour shows Slot 1
 # with the play time and "Inside Lodge", and it resumes at the morning scene.
-
 [new]
 wait 600
-until text "Italiano" timeout=600 every=10
+# until text Italiano timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint language window=30
-# English, then Yes (the prompt opens on No)
 press A after=60
 press LEFT after=20
 checkpoint language_yes window=10
 press A
-until text "Press any button" timeout=600 every=10
+# until text 'Press any button' timeout=600 every=10  [reached dingbat-bios+120 mgba+120 nba+120]
+wait 124
 checkpoint health_safety window=30
 press A
 wait 120
-mash START until text "PRESS" timeout=1200 every=30
+# mash START until text PRESS timeout=1200 every=30  [taps dingbat-bios:8 mgba:8 nba:8]
+tap START times=8 every=30 hold=4
 checkpoint title window=0 compare=text
 press START
-until text "Choose the character" timeout=900 every=10
+# until text 'Choose the character' timeout=900 every=10  [reached dingbat-bios+190 mgba+190 nba+190]
+wait 194
 wait 30
 checkpoint choose_character window=10
 press A
-until text "Pick a character" timeout=300 every=10
+# until text 'Pick a character' timeout=300 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
 wait 30
 checkpoint pick_character window=0 compare=text
 press A
-until text "Play as the boy" timeout=300 every=10
+# until text 'Play as the boy' timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press A
-until text "righty or a lefty" timeout=300 every=10
+# until text 'righty or a lefty' timeout=300 every=10  [reached dingbat-bios+90 mgba+90 nba+90]
+wait 94
 wait 30
 press A
-until text "want to be a righty" timeout=300 every=10
+# until text 'want to be a righty' timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press A
-until text "difficulty level" timeout=300 every=10
+# until text 'difficulty level' timeout=300 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 30
 press A
-until text "normal mode" timeout=300 every=10
+# until text 'normal mode' timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press A
-until text "the name" timeout=300 every=10
+# until text 'the name' timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press RIGHT after=30
 checkpoint keep_name window=0 compare=text
 press A
-until text "OK" timeout=300 every=10
+# until text OK timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press A
-until blank timeout=600 every=4
-until text "Good morning" timeout=900 every=10
+# until blank timeout=600 every=4  [reached dingbat-bios+88 mgba+88 nba+88]
+wait 92
+# until text 'Good morning' timeout=900 every=10  [reached dingbat-bios+260 mgba+250 nba+260]
+wait 264
 wait 60
 checkpoint saved window=30
 
 [load]
 wait 600
-until text "Press any button" timeout=600 every=10
+# until text 'Press any button' timeout=600 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
 checkpoint health_safety_loaded window=30
 press A
 wait 120
-mash START until text "PRESS" timeout=1200 every=30
+# mash START until text PRESS timeout=1200 every=30  [taps dingbat-bios:8 mgba:8 nba:8]
+tap START times=8 every=30 hold=4
 press START
-until text "best player" timeout=600 every=10
+# until text 'best player' timeout=600 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
 wait 60
 checkpoint main_menu window=30
 press A
-until text "Select File" timeout=600 every=10
+# until text 'Select File' timeout=600 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
 wait 60
 checkpoint select_file window=30
 press A
-until blank timeout=600 every=4
-until text "Good morning" timeout=900 every=10
+# until blank timeout=600 every=4  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
+# until text 'Good morning' timeout=900 every=10  [reached dingbat-bios+190 mgba+190 nba+190]
+wait 194
 wait 60
 checkpoint resumed window=30

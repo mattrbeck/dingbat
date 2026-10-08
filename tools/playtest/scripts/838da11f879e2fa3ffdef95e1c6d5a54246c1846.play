@@ -2,33 +2,37 @@
 @file Classic NES Series - Metroid (U).gba
 @game FMRE
 @chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
 
 # The GBA release saves on the game-over password screen: "SAVE YOUR
 # PROGRESS TO THE MEMORY?". Start a game, run right into the corridor and
 # stand still until the zoomers drain Samus's 30 energy, then save.
 # [load]: with a save the title menu opens on CONTINUE and the password
 # screen comes up pre-filled with the saved password.
-
 [new]
 wait 400
-until text "START" timeout=600 every=10
-checkpoint title
+# until text START timeout=600 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
+checkpoint title window=30
 press START after=90
 checkpoint title_menu window=0
 press START after=400
 checkpoint samus window=10
 press RIGHT hold=1200
-until text "MEMORY" timeout=9000 every=20
+# until text MEMORY timeout=9000 every=20  [reached dingbat-bios+1300 mgba+1300 nba+1300]
+wait 1304
 wait 30
 checkpoint save_prompt window=0
 press A
-until text "PROGRESS HAS" timeout=300 every=5
+# until text 'PROGRESS HAS' timeout=300 every=5  [reached dingbat-bios+15 mgba+15 nba+15]
+wait 19
 wait 30
 checkpoint saved window=0
 
 [load]
 wait 400
-until text "START" timeout=600 every=10
+# until text START timeout=600 every=10  [reached dingbat-bios+0 mgba+40 nba+0]
+wait 44
 press START after=90
 checkpoint title_menu_loaded window=0
 press START after=120

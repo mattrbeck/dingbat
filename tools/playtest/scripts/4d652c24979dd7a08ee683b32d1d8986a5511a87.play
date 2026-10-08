@@ -2,34 +2,40 @@
 @file Astro Boy - Omega Factor (U) (M6).gba
 @game BTAE
 @chip EEPROM
+@frozen dingbat-bios,mgba,nba
 
 # English (the language screen shows on every boot; picking it writes the
 # EEPROM layout), title START, SELECT DATA: slot 1, confirm the default name
 # AAA letter by letter; the file is written as the opening cutscene starts.
 # [load]: SELECT DATA shows slot 1 as AAA / NORMAL, and picking it starts the
 # story ("Tobio... my son").
-
 [new]
 wait 600
-until text "ESPANOL" timeout=600 every=10
+# until text ESPANOL timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint language window=30
 press A after=120
-until text "SEGA" timeout=900 every=10
+# until text SEGA timeout=900 every=10  [reached dingbat-bios+300 mgba+300 nba+300]
+wait 304
 wait 20
-mash START until text "OMEGA" timeout=900 every=90
+# mash START until text OMEGA timeout=900 every=90  [taps dingbat-bios:3 mgba:3 nba:3]
+tap START times=3 every=90 hold=4
 wait 60
 checkpoint title window=30
 press START
-until text "OPT" timeout=300 every=10
+# until text OPT timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint title_menu window=10
 press START
-until text "SELECT DATA" timeout=900 every=10
+# until text 'SELECT DATA' timeout=900 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
 wait 30
 checkpoint select_data window=10
 press A
-until text "NAME" timeout=300 every=10
+# until text NAME timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint name_entry window=10
 press A after=40
@@ -40,22 +46,29 @@ checkpoint saved window=10
 
 [load]
 wait 600
-until text "ESPANOL" timeout=600 every=10
+# until text ESPANOL timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press A after=120
-until text "SEGA" timeout=900 every=10
+# until text SEGA timeout=900 every=10  [reached dingbat-bios+300 mgba+300 nba+300]
+wait 304
 wait 20
-mash START until text "OMEGA" timeout=900 every=90
+# mash START until text OMEGA timeout=900 every=90  [taps dingbat-bios:3 mgba:3 nba:3]
+tap START times=3 every=90 hold=4
 wait 60
 press START
-until text "OPT" timeout=300 every=10
+# until text OPT timeout=300 every=10  [reached dingbat-bios+30 mgba+30 nba+0]
+wait 34
 wait 30
 press START
-until text "SELECT DATA" timeout=900 every=10
-until text "AAA" timeout=300 every=10
+# until text 'SELECT DATA' timeout=900 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
+# until text AAA timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint select_data_loaded window=10
 press A
-until text "Tobio" timeout=600 every=10
+# until text Tobio timeout=600 every=10  [reached dingbat-bios+100 mgba+100 nba+100]
+wait 104
 wait 30
 checkpoint resumed window=10

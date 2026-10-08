@@ -1,0 +1,80 @@
+@title Mario Pinball Land (USA)
+@file Mario Pinball Land (U).gba
+@game BMVE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# With no save, Start on the title starts a new game on the fairground table.
+# Launch, flip, the ball drops into the cannon and flies to the Grassland
+# table; play a few flips there, then Start > SAVE & QUIT (back to the title).
+# [load]: title > LOAD GAME resumes on the Grassland table.
+# Seen while authoring: nba runs the ball physics a few frames behind from the
+# first table on (f1338 title ball, f2150 onwards) and lags fades (f3116);
+# dingbat-bios and mgba stay identical. nba writes an 8192-byte file for this
+# 4 Kbit EEPROM (first bytes as dingbat-bios/mgba) and on [load] does not see
+# it: no LOAD GAME, it starts a new game (f1278).
+
+[new]
+wait 600
+wait 300
+press START
+wait 120
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 120
+wait 200
+wait 300
+press START
+wait 120
+press A
+wait 30
+checkpoint table window=30
+press R hold=30
+wait 60
+press A hold=30
+wait 40
+press L hold=10
+wait 10
+press DOWN hold=30
+wait 40
+tap L+R times=15 every=20 hold=8
+wait 10
+tap L+R times=20 every=15 hold=6
+wait 10
+checkpoint play window=30
+press A
+wait 120
+wait 120
+checkpoint world_select window=30
+press A
+wait 300
+checkpoint grassland window=30
+press L hold=10
+wait 10
+press DOWN hold=30
+tap L+R times=25 every=16 hold=6
+wait 10
+press START
+wait 60
+press DOWN after=20
+checkpoint pause_save window=10 compare=text
+press A
+wait 300
+checkpoint title_after_save window=0 compare=text
+
+[load]
+wait 900
+press START
+wait 120
+press START
+wait 120
+press START
+wait 120
+checkpoint load_menu window=30
+press A
+wait 300
+checkpoint resumed window=30
+press START
+wait 60
+checkpoint resumed_pause window=10 compare=text

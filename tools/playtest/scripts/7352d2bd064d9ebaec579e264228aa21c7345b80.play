@@ -2,27 +2,89 @@
 @file Super Mario Advance 3 - Yoshi's Island (U) [!].gba
 @game A3AE
 @chip EEPROM
-@status wip: stops at the first page of the stork story on FILE A (mashing A on from there drops Yoshi into 1-1, Make Eggs, Throw Eggs); the cart only gets its boot-time initialisation records until a stage is cleared, so the first save needs 1-1 played to the goal ring (the game saves on returning to the map). Holding RIGHT with flutter jumps stalls at the first tall hill, and enemy positions already differ between emulators at the stage start (the story is mashed through), so a human should record: Single Player, Yoshi's Island, FILE A, story, clear 1-1, back on the map after the save; [load] picks FILE A and shows the map with 1-1 cleared.
+@frozen mgba,nba
+@save skip: the cart gets only its boot-time records until a stage is cleared; the first save needs 1-1 played to the goal ring (saved on the return to the map). Not reached: after the first bush column (cleared by a flutter jump from the white rock) and the egg-block bridge, a white rock overhangs the next mound and the flutter from the column top lands below it (below_white_block); the log bridge with the up arrow on top of that mound was not reached
 
-# Title -> Single Player -> Yoshi's Island -> FILE A -> story -> stage 1-1.
+# Single Player > Yoshi's Island > FILE A > story (A every 40) > 1-1: the
+# message block, eat the two Shy Guys on the log bridge (B, DOWN for eggs),
+# over the bush hill, onto the white rock, jump + flutter onto the first bush
+# column (column_top), flutter right.
+# Frozen on mgba and nba only: dingbat-bios leaves them at stage_start. With
+# the same inputs (a three-emulator session) dingbat-bios already shows pink
+# tulip buds on the first bush where mgba/nba show white puffs at f4304, has a
+# Shy Guy standing at the bush at f4790 when mgba/nba have none there yet, and
+# at f4900 that Shy Guy has hit Yoshi (Baby Mario in the bubble, timer)
+# while on mgba/nba both Shy Guys still walk the log bridge and Yoshi is fine.
+# (shy_guys checkpoint: f4790.)
+# Why (docs/playtest-bugs.md, "Super Mario Advance 3: the cart's EEPROM
+# decides 1-1"): the first boot formats the blank EEPROM with 196 block
+# writes polled to ready, so the EEPROM's programming time sets the frame
+# phase 1-1's bushes and Shy Guy are seeded from. dingbat uses GBATEK's
+# 108368 cycles, mgba ~115000, the second reference ~101000; the bush flips
+# every 1-3 % of that time, so stage_start onwards is not diagnostic on a
+# fresh cart (dingbat built with -d:EEPROM_SETTLE_CYCLES=115005 matches mgba
+# throughout).
 
 [new]
-mash START until text "Single Player" timeout=1500 every=60
+tap START times=5 every=60 hold=4
 wait 30
-checkpoint title_menu compare=text
+checkpoint title_menu window=30 compare=text
 press A after=90
-until text "Choose a" timeout=600 every=10
+wait 4
 wait 30
-checkpoint choose_game compare=text
+checkpoint choose_game window=30 compare=text
 press A after=120
-until text "Nintendo" timeout=1200 every=10
+wait 664
 wait 30
-checkpoint yi_title compare=text
+checkpoint yi_title window=30 compare=text
 press START after=120
-until text "FILE MENU" timeout=600 every=10
-until stable 20 timeout=300
-checkpoint file_menu
+wait 4
+wait 24
+checkpoint file_menu window=30
 press A after=180
-until text "Welcome" timeout=1200 every=10
+wait 604
 wait 20
 checkpoint story window=10
+tap A times=20 every=40 hold=6
+tap A times=20 every=40 hold=6
+wait 200
+checkpoint stage_start window=0
+press RIGHT hold=90 after=5
+press A after=60
+press RIGHT hold=90 after=5
+press A after=40
+press A after=40
+press A after=40
+press A after=40
+press A after=40
+checkpoint shy_guys window=0
+wait 30
+press RIGHT hold=30 after=5
+press RIGHT hold=40 after=5
+wait 10
+wait 10
+press B after=25
+press DOWN hold=10 after=30
+press RIGHT hold=20 after=2
+press B after=25
+press DOWN hold=10 after=30
+press RIGHT hold=60 after=2
+press RIGHT hold=90 after=2
+hold RIGHT+A
+wait 40
+hold RIGHT
+wait 30
+release
+hold RIGHT+A
+wait 45
+hold RIGHT
+wait 12
+release
+checkpoint column_top window=0
+hold RIGHT+A
+wait 70
+hold RIGHT
+wait 20
+release
+checkpoint below_white_block window=0
+

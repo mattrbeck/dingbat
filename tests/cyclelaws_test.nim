@@ -70,7 +70,8 @@ proc run(bios: string) =
 
 run("")
 var bios = getEnv("DINGBAT_GBA_BIOS", "tests/roms/gba_bios.bin")
-if fileExists(bios): run(bios)
+if fileExists(bios):
+  run(bios)
 else: echo "real BIOS: not here, skipped"
 
 if failures == 0: echo "ALL CYCLE LAWS HOLD"

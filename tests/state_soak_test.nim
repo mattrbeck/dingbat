@@ -10,6 +10,10 @@
 ## noise). No committed ROM kept the noise running across a frame boundary
 ## and then rewrote NR43, so nothing caught it for six weeks.
 ##
+## Built with -d:gba_quirky=false: the optimised GBA core is quirky (gba.nim),
+## which goes on past a failed check and reports it later, if at all (a wild
+## index is a SIGSEGV); this test wants the Defect where it is raised.
+##
 ## This drives each core the way the rewind ring does, but every frame: a
 ## payload built and pushed into a real Rewind ring (interval 1) after each
 ## frame, and now and then a rewind (pop, apply) followed by a replay of the

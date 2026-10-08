@@ -1,0 +1,179 @@
+@title Ninja Five-0 (USA)
+@file Ninja Five-0 (U).gba
+@game ANXE
+@chip EEPROM
+@save skip: the game only writes a 12-byte signature at boot (LOAD GAME stays greyed out on the next boot); the first real save is after clearing Mission 1-1 (bank robbery), and its exit was not found in budget (the ground-floor door leads to a closed two-storey room; the balcony door, reached by grappling under the balcony and grabbing its edge, leads to a room split by a pillar with a gunman and a solid red bag on each side)
+@frozen dingbat-bios,mgba
+
+# New Game > Normal > Mission 1 (bank): briefing, then the street: slash
+# the gunmen, hop the crates, jump the locker, shuriken the gunman, enter
+# the ground-floor door, kill the knife man, grapple up to the upper floor
+# and cut down the green gunman (2000 pts).
+# Frozen on dingbat-bios + mgba only: nba runs the briefing text a frame
+# behind (f1830, f2430: the TARGET/NINPO captions not yet drawn) and stays
+# one frame off for the rest of the mission. In the three-emulator session
+# that one frame changed the fight on a first try at the green gunman: at
+# f4078 the ninja was still in the air on nba but had landed on the
+# others, and at f4175 nba had killed the gunman (1000 pts) while on
+# dingbat-bios/mgba he shot the ninja. On this final route a replay keeps
+# nba on track (checkpoints SLIP by 1 frame). dingbat-bios and mgba stayed
+# identical throughout.
+# The ninja blinks while invulnerable, so some frames show no player.
+# EEPROM size: dingbat-bios and mgba write a 512-byte file, nba 8 KB.
+
+[new]
+wait 600
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 60
+checkpoint main_menu window=30
+press A
+wait 120
+press A
+wait 180
+checkpoint mission_select window=30
+press A
+wait 240
+tap A times=6 every=30 hold=4
+wait 120
+tap A times=4 every=30 hold=4
+wait 180
+tap A times=6 every=30 hold=4
+wait 200
+checkpoint mission_start window=30
+press RIGHT hold=40
+tap B times=6 every=12 hold=4
+hold RIGHT+A
+wait 20
+hold RIGHT
+wait 60
+release
+tap B times=6 every=12 hold=4
+press LEFT hold=30
+press A hold=3
+wait 8
+hold RIGHT+A
+wait 25
+hold RIGHT
+wait 60
+release
+press LEFT hold=20
+press A hold=3
+press RIGHT hold=50
+wait 10
+press A hold=3
+press RIGHT hold=60
+wait 10
+press RIGHT hold=20
+tap B times=5 every=12 hold=4
+press RIGHT hold=60
+tap B times=3 every=12 hold=4
+press RIGHT hold=60
+tap B times=3 every=12 hold=4
+press LEFT hold=10
+press A hold=3
+press RIGHT hold=40
+press A hold=3
+press RIGHT hold=60
+tap B times=3 every=12 hold=4
+tap B times=5 every=12 hold=4
+press RIGHT hold=60
+tap B times=3 every=12 hold=4
+press LEFT hold=20
+press A hold=12
+press RIGHT hold=50
+wait 10
+press A hold=8
+press RIGHT hold=25
+tap B times=6 every=10 hold=4
+wait 15
+press RIGHT hold=4
+tap B times=6 every=10 hold=4
+wait 8
+tap DOWN+B times=5 every=10 hold=4
+press LEFT hold=20
+wait 10
+tap B times=5 every=10 hold=4
+tap B times=8 every=10 hold=4
+press RIGHT hold=90
+tap B times=3 every=10 hold=4
+press LEFT hold=10
+press A hold=12
+press RIGHT hold=80
+wait 10
+wait 20
+press A hold=12
+press RIGHT hold=60
+wait 10
+press A hold=12
+press RIGHT hold=120
+wait 10
+wait 1
+press LEFT hold=3
+tap B times=6 every=10 hold=4
+wait 1
+press RIGHT hold=150
+wait 1
+press LEFT hold=15
+wait 10
+press A hold=12
+press RIGHT hold=120
+wait 1
+tap B times=4 every=10 hold=4
+press RIGHT hold=40
+tap B times=6 every=10 hold=4
+wait 1
+press LEFT hold=3
+tap B times=6 every=10 hold=4
+wait 1
+wait 10
+press A hold=12
+press RIGHT hold=60
+tap B times=4 every=10 hold=4
+wait 1
+tap B times=8 every=10 hold=4
+wait 1
+press LEFT hold=25
+wait 15
+press A hold=12
+press RIGHT hold=40
+wait 1
+press RIGHT hold=15
+tap B times=8 every=10 hold=4
+wait 1
+press RIGHT hold=22
+press UP hold=10
+wait 90
+wait 90
+checkpoint inside window=30
+press RIGHT hold=3
+tap B times=8 every=10 hold=4
+wait 1
+press RIGHT hold=60
+wait 10
+press A hold=15
+wait 30
+wait 1
+press R hold=10
+wait 20
+wait 20
+press L hold=30
+wait 20
+press RIGHT hold=45
+wait 10
+press A hold=4
+wait 8
+press A hold=4
+wait 20
+press UP hold=60
+wait 5
+press LEFT hold=20
+press A hold=4
+press LEFT hold=40
+wait 10
+tap B times=8 every=10 hold=4
+wait 1
+checkpoint upper_floor window=30

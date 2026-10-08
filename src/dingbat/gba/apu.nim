@@ -295,7 +295,87 @@ proc tick_frame_sequencer*(apu: APU) =
   psg_seq_step(apu, apu.gba)
   apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
+when not defined(test_harness) and not defined(emscripten):
+  proc queue_frame(apu: APU; out_l, out_r: int16) =
+    ## One stereo frame into the SDL buffer; a full buffer is volume-scaled,
+    ## reduced for 2x and queued. Silent frames still queue (as zeros): SDL's
+    ## queue depth paces emulation.
+    apu.buffer[apu.buffer_pos]     = out_l
+    apu.buffer[apu.buffer_pos + 1] = out_r
+    apu.buffer_pos += 2
+    if apu.buffer_pos >= APU_BUFFER_SIZE:
+      # Master volume at the queue point. Muting still queues zeroed samples:
+      # pacing is driven by the SDL queue depth
+      if apu.master_muted:
+        for i in 0 ..< APU_BUFFER_SIZE:
+          apu.buffer[i] = 0'i16
+      elif apu.master_volume_factor != 256:
+        let vf = apu.master_volume_factor
+        for i in 0 ..< APU_BUFFER_SIZE:
+          apu.buffer[i] = int16(int32(apu.buffer[i]) * vf shr 8)
+      # 2x speed: emit half the frames so audio-driven pacing runs emulation
+      # twice as fast — WSOLA (pitch_correct_ff) or every other frame; both
+      # emit exactly APU_BUFFER_SIZE/2 int16
+      var queue_len = APU_BUFFER_SIZE
+      if apu.turbo:
+        if apu.pitch_correct_ff and not apu.silent:
+          apu.ensure_stretch()
+          var i = 0
+          while i < APU_BUFFER_SIZE:
+            apu.stretch.push(float32(apu.buffer[i]), float32(apu.buffer[i + 1]))
+            i += 2
+          var o = 0
+          for f in 0 ..< (APU_BUFFER_SIZE div 4):   # 256 frames = half
+            let (l, r) = apu.stretch.pull()
+            apu.buffer[o]     = int16(clamp(l, -32768.0'f32, 32767.0'f32))
+            apu.buffer[o + 1] = int16(clamp(r, -32768.0'f32, 32767.0'f32))
+            o += 2
+          queue_len = o
+        else:
+          apu.stretch_engaged = false
+          var o = 0
+          var i = 0
+          while i < APU_BUFFER_SIZE:
+            apu.buffer[o]     = apu.buffer[i]
+            apu.buffer[o + 1] = apu.buffer[i + 1]
+            o += 2
+            i += 4
+          queue_len = o
+      else:
+        apu.stretch_engaged = false
+      let dump = audio_dump_dest()
+      if dump != nil:
+        discard dump.writeBuffer(addr apu.buffer[0],
+                                 queue_len * sizeof(int16))
+        dump.flushFile()
+      if apu.audio_dev != 0:
+        if not apu.sync:
+          sdl_clear_queued_audio(apu.audio_dev)
+        # Block until the queue drains below the backstop to stay in sync
+        while sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_BACKSTOP_BYTES:
+          sdl_delay(1)
+        discard sdl_queue_audio(apu.audio_dev,
+                                 cast[pointer](addr apu.buffer[0]),
+                                 uint32(queue_len * sizeof(int16)))
+      apu.buffer_pos = 0
+
 proc get_sample*(apu: APU) =
+  if apu.silent:
+    # Nobody hears it: skip the catch-up and the mix. Neither is observable
+    # (every reader of a channel catches it up first, and the FIFO latches
+    # move on the timers), so the machine runs exactly as it would with sound.
+    # Except while channel 1's shift-0 stop is in flight: ch1_settle switches
+    # the channel off without catching it up, freezing the duty phase wherever
+    # the last observer left it, so observe it here as a mixing sample would.
+    if apu.channel1.kill_at != GBA_NO_STEP:
+      ch1_settle(apu.channel1, apu.gba)
+      if apu.channel1.enabled:
+        ch1_catchup_at(apu.channel1, apu.gba, uint32(APU_SAMPLE_PERIOD))
+    apu.stretch_engaged = false
+    when not defined(test_harness) and not defined(emscripten):
+      apu.queue_frame(0, 0)
+    apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
+    return
   # Gated on `enabled`: a disabled channel's amplitude is 0 regardless of
   # phase and the closed form replays the skipped steps later. NOT gated on
   # channel_mask (a debug mute): CH4's shift loop relies on the once-a-frame
@@ -313,16 +393,28 @@ proc get_sample*(apu: APU) =
   # PSG volume, GBATEK SOUNDCNT_H bits 0-1: "0=25%, 1=50%, 2=100%,
   # 3=Prohibited". Value 3 is modelled as silence: Assumed (prohibited value).
   let psg_muted = apu.soundcnt_h.sound_volume == 3
-  let psg_sound =
+  # Each side sums its own channels, GBATEK SOUNDCNT_L: "8-11 Sound 1-4
+  # Enable Flags (each Bit 8-11, 0=Disable, 1=Enable) Right" and "12-15 ...
+  # Left", then scales by its own master volume (bits 0-2 right, 4-6 left).
+  let l = apu.soundcnt_l
+  let psg_sound_left =
     if psg_muted: 0'i16
     else:
-      ch1 * int16(apu.soundcnt_l.channel_1_left) +
-      ch2 * int16(apu.soundcnt_l.channel_2_left) +
-      ch3 * int16(apu.soundcnt_l.channel_3_left) +
-      ch4 * int16(apu.soundcnt_l.channel_4_left)
+      ch1 * int16(l.channel_1_left) + ch2 * int16(l.channel_2_left) +
+      ch3 * int16(l.channel_3_left) + ch4 * int16(l.channel_4_left)
+  let psg_sound_right =
+    if psg_muted: 0'i16
+    else:
+      ch1 * int16(l.channel_1_right) + ch2 * int16(l.channel_2_right) +
+      ch3 * int16(l.channel_3_right) + ch4 * int16(l.channel_4_right)
+  # The master volume is the PSG block's own NR50 (the GBA's SOUNDCNT_L
+  # bits 0-2 / 4-6 are that register): (V + 1) / 8, so 0 is an eighth, not
+  # silence -- Pan Docs, and the GB core's mix (gb/apu.nim). The GBA follows
+  # the GB where the SP has not measured otherwise; this one is not measured
+  # yet (tests/roms/payloads/psgvol.s, by microphone). It was V / 8 here.
   let shift = if psg_muted: 5 else: 5 - int(apu.soundcnt_h.sound_volume)
-  let psg_left  = int32(psg_sound) * int32(apu.soundcnt_l.left_volume) shr shift
-  let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
+  let psg_left  = int32(psg_sound_left)  * (int32(l.left_volume) + 1)  shr shift
+  let psg_right = int32(psg_sound_right) * (int32(l.right_volume) + 1) shr shift
   var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
   # MP2K HLE (mp2k.nim): substitute the shadow render for the FIFO A/B
   # latches (L->A, R->B) while the engine mixer is live and owns the stream;
@@ -397,7 +489,12 @@ proc get_sample*(apu: APU) =
   let fine_gb = (if apu.channel_mask[5]: float32(int32(1) shl int(apu.soundcnt_h.dma_sound_b_volume)) else: 0'f32)
   let fine_left  = fine_a * fine_ga * float32(apu.soundcnt_h.dma_sound_a_left)  + fine_b * fine_gb * float32(apu.soundcnt_h.dma_sound_b_left)
   let fine_right = fine_a * fine_ga * float32(apu.soundcnt_h.dma_sound_a_right) + fine_b * fine_gb * float32(apu.soundcnt_h.dma_sound_b_right)
-  let bias = int32(apu.soundbias.bias_level)
+  # The level field is bits 1-9 (GBATEK: "Bias Level (Default=100h)", the
+  # register's 200h), so in the 10-bit sum it counts twice: 200h centres the
+  # DAC's 0..3FFh on a DMA channel's full swing (an 8-bit sample x4 at
+  # 100%). Taken as 100h, the sum clipped at -256 below and 767 above: the
+  # negative half of every DirectSound peak past -64 x4 was cut off.
+  let bias = int32(apu.soundbias.bias_level) shl 1
   # SOUNDBIAS bits 14-15 "Amplitude Resolution/Sampling Cycle" (GBATEK):
   # "0 9bit/32.768kHz, 1 8bit/65.536kHz, 2 7bit/131.072kHz, 3 6bit/262.144kHz".
   # Modelled by masking the low `res` bits of the biased 10-bit sum (res=0
@@ -457,64 +554,7 @@ proc get_sample*(apu: APU) =
       apu.lp_right += AUDIO_LOWPASS_ALPHA * (float32(out_r) - apu.lp_right)
       out_l = int16(clamp(apu.lp_left,  -32768.0'f32, 32767.0'f32))
       out_r = int16(clamp(apu.lp_right, -32768.0'f32, 32767.0'f32))
-    apu.buffer[apu.buffer_pos]     = out_l
-    apu.buffer[apu.buffer_pos + 1] = out_r
-    apu.buffer_pos += 2
-    if apu.buffer_pos >= APU_BUFFER_SIZE:
-      # Master volume at the queue point. Muting still queues zeroed samples:
-      # pacing is driven by the SDL queue depth
-      if apu.master_muted:
-        for i in 0 ..< APU_BUFFER_SIZE:
-          apu.buffer[i] = 0'i16
-      elif apu.master_volume_factor != 256:
-        let vf = apu.master_volume_factor
-        for i in 0 ..< APU_BUFFER_SIZE:
-          apu.buffer[i] = int16(int32(apu.buffer[i]) * vf shr 8)
-      # 2x speed: emit half the frames so audio-driven pacing runs emulation
-      # twice as fast — WSOLA (pitch_correct_ff) or every other frame; both
-      # emit exactly APU_BUFFER_SIZE/2 int16
-      var queue_len = APU_BUFFER_SIZE
-      if apu.turbo:
-        if apu.pitch_correct_ff:
-          apu.ensure_stretch()
-          var i = 0
-          while i < APU_BUFFER_SIZE:
-            apu.stretch.push(float32(apu.buffer[i]), float32(apu.buffer[i + 1]))
-            i += 2
-          var o = 0
-          for f in 0 ..< (APU_BUFFER_SIZE div 4):   # 256 frames = half
-            let (l, r) = apu.stretch.pull()
-            apu.buffer[o]     = int16(clamp(l, -32768.0'f32, 32767.0'f32))
-            apu.buffer[o + 1] = int16(clamp(r, -32768.0'f32, 32767.0'f32))
-            o += 2
-          queue_len = o
-        else:
-          apu.stretch_engaged = false
-          var o = 0
-          var i = 0
-          while i < APU_BUFFER_SIZE:
-            apu.buffer[o]     = apu.buffer[i]
-            apu.buffer[o + 1] = apu.buffer[i + 1]
-            o += 2
-            i += 4
-          queue_len = o
-      else:
-        apu.stretch_engaged = false
-      let dump = audio_dump_dest()
-      if dump != nil:
-        discard dump.writeBuffer(addr apu.buffer[0],
-                                 queue_len * sizeof(int16))
-        dump.flushFile()
-      if apu.audio_dev != 0:
-        if not apu.sync:
-          sdl_clear_queued_audio(apu.audio_dev)
-        # Block until the queue drains below the backstop to stay in sync
-        while sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_BACKSTOP_BYTES:
-          sdl_delay(1)
-        discard sdl_queue_audio(apu.audio_dev,
-                                 cast[pointer](addr apu.buffer[0]),
-                                 uint32(queue_len * sizeof(int16)))
-      apu.buffer_pos = 0
+    apu.queue_frame(out_l, out_r)
   apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
 
 proc gba_psg_read(gba: GBA; address: uint32): uint8 =
@@ -585,8 +625,8 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
       apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0xFF00'u16) or (uint16(value) and 0x0F'u16))  # bits 4-7 unused
     of 0x83:
       # Bits 3,7 (= register bits 11,15) are write-only FIFO reset triggers
-      if bit(value, 3): apu.dma_channels.fifo_reset(0)  # FIFO A reset
-      if bit(value, 7): apu.dma_channels.fifo_reset(1)  # FIFO B reset
+      if bit(value, 3): apu.dma_channels.fifo_reset(0, by_bit = true)  # FIFO A reset
+      if bit(value, 7): apu.dma_channels.fifo_reset(1, by_bit = true)  # FIFO B reset
       apu.soundcnt_h = cast[SOUNDCNT_H]((uint16(apu.soundcnt_h) and 0x00FF'u16) or ((uint16(value) and 0x77'u16) shl 8))
     of 0x84:
       if (value and 0x80) == 0 and apu.sound_enabled:

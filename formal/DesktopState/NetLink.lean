@@ -9,6 +9,16 @@
 
 Written against a2e038f82. Line numbers are `src/dingbat.nim` unless marked.
 
+**Re-audited at 03f88d6c** (2026-10-05): of the procs modelled here only
+netcore.nim `new_net_core` changed since the last stamp (919-940
+@03f88d6c). It now sets `gba.cpu.wl_cross_events = false` (938), so the
+idle-loop skip stops at every scheduler event while the core is stepped in
+lockstep with the peer (cpu.nim 793); emulation is the same either way, only
+host time differs. It still runs inside `begin_net_link` (netlink.nim
+199-217) with `attach = false`, after `begin_handshake` has refused a nil
+core (link_cable.nim 183-196), so the fixed step (`finishLinkF`, `helloF`)
+is unchanged; the 910 citation in `finishLink` is the a2e038f82 crash site.
+
 The desktop app is one thread. `main`'s `while app.running` loop (2426) runs
 the same phases in the same order every iteration:
 
@@ -152,6 +162,13 @@ close drain on Disconnect is recorded, not fixed.
   hosting port and send a valid HELLO can do it.
 * `app.link_client` (450) is never assigned; `link_cancel_setup`'s
   lsConnecting branch closes nothing.
+* (@03f88d6c) `new_net_core` turns the core's `wl_cross_events` off when a
+  handshake begins (netcore.nim 938) and nothing turns it back on: after a
+  link ends, or a handshake fails or is cancelled, the same core keeps the
+  narrower idle-loop skip until a game is loaded again. Emulation is
+  identical (5284f983 checked byte-identical frames, state and audio); the
+  cost is host time only (that commit's -3.5 % FireRed instructions given
+  back). Not a state-machine property, so not modelled.
 -/
 namespace DesktopState.NetLink
 

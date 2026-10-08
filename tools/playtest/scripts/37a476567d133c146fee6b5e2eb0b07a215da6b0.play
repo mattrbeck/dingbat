@@ -2,38 +2,47 @@
 @file Kirby - Nightmare in Dreamland (U) [!].gba
 @game A7KE
 @chip SRAM
+@frozen dingbat-bios,mgba,nba
 
 # Pick FILE1 (creates the file), start the one-player adventure, arrive in the
 # Vegetable Valley hub. The file select then shows FILE1 as "Water Drop".
-
 [new]
-mash START until text "FILE SELECT" timeout=1800 every=30
+# mash START until text 'FILE SELECT' timeout=1800 every=30  [taps dingbat-bios:10 mgba:10 nba:10]
+tap START times=10 every=30 hold=4
 wait 60
 checkpoint file_select_empty window=0
 press A
-until text "START GAME" timeout=300 every=5
+# until text 'START GAME' timeout=300 every=5  [reached dingbat-bios+15 mgba+15 nba+20]
+wait 24
 wait 30
 checkpoint game_select window=0
 press A
-until text "PLAYER" timeout=300 every=5
+# until text PLAYER timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press A
-until text "00000000" timeout=900 every=10
+# until text 00000000 timeout=900 every=10  [reached dingbat-bios+330 mgba+330 nba+340]
+wait 344
 wait 120
 checkpoint hub window=0
 
 [load]
-mash START until text "FILE SELECT" timeout=1800 every=30
-until text "Drop" timeout=300 every=5
+# mash START until text 'FILE SELECT' timeout=1800 every=30  [taps dingbat-bios:10 mgba:10 nba:10]
+tap START times=10 every=30 hold=4
+# until text Drop timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 checkpoint file_select_saved window=0
 press A
-until text "START GAME" timeout=300 every=5
+# until text 'START GAME' timeout=300 every=5  [reached dingbat-bios+15 mgba+15 nba+20]
+wait 24
 wait 30
 press A
-until text "PLAYER" timeout=300 every=5
+# until text PLAYER timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press A
-until text "00000000" timeout=900 every=10
+# until text 00000000 timeout=900 every=10  [reached dingbat-bios+330 mgba+330 nba+340]
+wait 344
 wait 120
 checkpoint hub window=0

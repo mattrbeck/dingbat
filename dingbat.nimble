@@ -37,6 +37,9 @@ task test_ppucomposite, "Run the GBA PPU compositor invariant tests":
 task test_ppubgunpack, "Run the 4bpp BG tile-unpack equivalence tests":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_ppubgunpack_test tests/ppubgunpack_test.nim"
+task test_renderskip, "Run the GBA whole-frame render skip against a never-skipping twin":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_renderskip_test tests/render_skip_test.nim"
+
 task test_mp2kpass, "Run the MP2K HLE pass-detection and level-control tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_mp2kpass_test tests/mp2k_pass_test.nim"
 
@@ -100,7 +103,7 @@ task test_desktop, "Run the desktop frontend tests (input, settings, link, saves
 task statefuzz_build, "Build the hostile-input save-state fuzzer":
   # Run by hand, not in the suite (minutes per core): `./statefuzz <rom>
   # sweep 255` exits non-zero on any uncontained Defect.
-  exec "nim c -d:test_harness -d:release --path:src -o:statefuzz tools/statefuzz.nim"
+  exec "nim c -d:test_harness -d:release -d:gba_quirky=false --path:src -o:statefuzz tools/statefuzz.nim"
 
 task test_rewind, "Run the rewind-ring property tests (IDs, eviction, keyframes)":
   exec "nim c -r -d:test_harness -d:release --path:src " &
@@ -119,8 +122,12 @@ task test_ndscpu, "Run the DS CPU interpreter's one-instruction checks (ARM9 and
        "-o:dingbat_ndscpu_test tests/nds_cpu_test.nim"
 
 task test_statesoak, "Run the range-checked serialize-while-running soak (both cores)":
-  exec "nim c -r -d:test_harness -d:release --path:src " &
+  exec "nim c -r -d:test_harness -d:release -d:gba_quirky=false --path:src " &
        "-o:dingbat_state_soak_test tests/state_soak_test.nim"
+
+task test_silentaudio, "Check a core that skips mixing (muted) runs exactly as one that mixes":
+  exec "nim c -r -d:test_harness -d:release -d:soak_lib --path:src --path:tests " &
+       "-o:dingbat_silent_audio_test tests/silent_audio_test.nim"
 
 task test_cyclelaws,"Hold the core to the cycle laws recorded from an AGB SP":
   exec "nim c -r -d:test_harness -d:release --path:src " &

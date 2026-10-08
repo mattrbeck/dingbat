@@ -91,16 +91,30 @@ const makeSession = (attach) => ({
   ptr: 0,
   started: false,       // wasm core linked, game ticking
   rtcConnected: false,  // DataChannel open
+  sdpIn: false,         // the friend's description arrived for this pairing
+  strikes: 0,           // pairings whose descriptions crossed and still never opened
+  rewaited: false,      // a pairing ended and we went back to waiting on the code
   helloDone: false,     // wire handshake validated (first successful tick)
   rxQueue: [],
   stallSince: 0,
 });
 let netAttach = true;   // attach mode of the current/last pending session (for retry)
 // Switches the modal to the manual code exchange when the server has not
-// answered a rendezvous in time; disarmed by any server reply (a lone peer
-// on "waiting" is healthy).
+// answered in time: the dial gets the liveness probe's budget, then the
+// rendezvous its own 2 s from the socket opening (a cold cellular TLS dial can
+// eat most of 2 s by itself). Disarmed by any server reply (a lone peer on
+// "waiting" is healthy).
 let manualFallbackTimer = 0;
 const MANUAL_FALLBACK_DELAY = 2000;
+const SIG_DIAL_TIMEOUT = 4000;
+// Sent with every rendezvous, the same across redials: the server drops this
+// page's stale seat (a socket that died without it hearing, e.g. iOS suspended
+// the tab) instead of pairing us with it or calling the code in use.
+const NET_PAGE_ID = (() => {
+  const a = new Uint32Array(4);
+  crypto.getRandomValues(a);
+  return Array.from(a, (x) => x.toString(16).padStart(8, "0")).join("");
+})();
 // Redial schedule for a server socket that drops after answering at least
 // once; then give up into the manual exchange. Any server reply refills it.
 const SIG_REDIAL_DELAYS = [1000, 2000, 4000];
@@ -202,7 +216,8 @@ const openNetConnect = async (attach) => {
   // Freeze the game for the whole of code entry, pairing and transfer: left
   // running, its own link handshake times out before the peer connects.
   // Thawed by netShutdown or when the session starts.
-  netFrozeGame = !!currentRomName && !paused;
+  // The player's choice, not a flight's hold (takePlayerPause, index.js).
+  netFrozeGame = !!currentRomName && !takePlayerPause();
   if (netFrozeGame) {
     paused = true;
     document.body.classList.add("paused");
@@ -253,7 +268,9 @@ const netFail = (msg) => {
   }
 };
 
-const sigConnect = () =>
+// `redial`: a failed dial lands back in the redial ladder (via onclose)
+// rather than ending the session.
+const sigConnect = (redial = false) =>
   new Promise((resolve) => {
     let ws;
     try {
@@ -276,7 +293,7 @@ const sigConnect = () =>
       if (opened) return; // an established socket's failure is onclose's to handle
       sigServerUp = false;
       log("netplay: dial " + NET_SIGNAL_URL + " errored before opening", "warn");
-      if (hasAltPath()) {
+      if (hasAltPath() || redial) {
         if (net.bc && !net.dc) {
           netSetStatus("Server unavailable — a second tab of this browser can still link");
         }
@@ -307,15 +324,77 @@ const sigConnect = () =>
     };
   });
 
-// Response deadline for a just-sent rendezvous; any server reply disarms it.
-const armManualFallback = (session) => {
+// Response deadline for a dial or a just-sent rendezvous; any server reply
+// disarms it.
+const armManualFallback = (session, ms = MANUAL_FALLBACK_DELAY) => {
   clearTimeout(manualFallbackTimer);
   manualFallbackTimer = setTimeout(() => {
     if (net === session && !net.dc && !net.rtcConnected && !net.started) {
       sigServerUp = false;
       manualEnter(true);
     }
-  }, MANUAL_FALLBACK_DELAY);
+  }, ms);
+};
+
+const sigRendezvous = (session) => {
+  sigSend({ t: "rendezvous", code: session.code, id: NET_PAGE_ID });
+  armManualFallback(session);
+};
+
+// A dial after the first (a redial, or back to waiting): rendezvous again on
+// the same code once it opens.
+const sigDialAgain = async (session) => {
+  armManualFallback(session, SIG_DIAL_TIMEOUT);
+  if (await sigConnect(true)) {
+    if (net !== session || session.dc) return;
+    sigRendezvous(session);
+  }
+  // else: that dial's onclose lands back in sigRedial
+};
+
+// This pairing is over before linking, but the friend may still come: they
+// left the server or were suspended (a phone in the background) before the
+// descriptions crossed, or the channel never opened. Drop the peer connection
+// and the socket and rendezvous again on the same code, as if Connect had just
+// been pressed (formal/WebState/LinkPairing.lean, `rewait`).
+const sigRewait = (why) => {
+  const session = net;
+  if (!session || !session.code || session.rtcConnected || session.started) return;
+  log("netplay: " + why + " — back to waiting on the code", "warn");
+  clearTimeout(session.rtcDeadline);
+  clearTimeout(session.redialTimer);
+  try { session.pc?.close(); } catch {}
+  session.pc = null;
+  session.dc = null; // a host's channel belonged to that pc
+  session.isHost = null;
+  session.sdpIn = false;
+  session.rewaited = true;
+  const ws = session.ws;
+  session.ws = null;
+  if (ws) {
+    try { ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null; ws.close(); } catch {}
+  }
+  // The dial counts against the redial ladder: a server that dies under it
+  // gets the ladder's remaining steps, then the manual exchange.
+  if (session.redials++ >= SIG_REDIAL_DELAYS.length) {
+    sigServerUp = false;
+    manualEnter(true);
+    return;
+  }
+  netSetStatus("Waiting for your friend…");
+  sigDialAgain(session);
+};
+
+// The pairing deadline, or ICE giving up: a pairing whose descriptions crossed
+// and still never opened is a strike, and two in a row are the NAT verdict;
+// otherwise the friend stopped answering, so wait for them again.
+const rtcGaveUp = (session, pc, why) => {
+  if (net !== session || session.pc !== pc || session.rtcConnected || session.started) return;
+  if (session.sdpIn && ++session.strikes >= 2) {
+    netFail("Could not connect peer-to-peer (a strict NAT on one side may be blocking it)");
+    return;
+  }
+  sigRewait(why);
 };
 
 // The server socket died mid-wait; the room died with it, so reconnect and
@@ -337,54 +416,69 @@ const sigRedial = () => {
   netSetStatus("Reconnecting to the linking server…");
   log("netplay: signaling socket dropped — redial " + (attempt + 1) + "/" +
       SIG_REDIAL_DELAYS.length + " in " + SIG_REDIAL_DELAYS[attempt] + "ms", "warn");
-  session.redialTimer = setTimeout(async () => {
+  session.redialTimer = setTimeout(() => {
     if (net !== session || session.dc || session.rtcConnected || session.started) return;
-    if (await sigConnect()) {
-      if (net !== session || session.dc) return;
-      sigSend({ t: "rendezvous", code: session.code });
-      armManualFallback(session);
-    }
-    // else: that dial's onclose lands back in sigRedial
+    sigDialAgain(session);
   }, SIG_REDIAL_DELAYS[attempt]);
 };
 
 const onSigMessage = async (msg) => {
   if (!net) return;
+  const session = net;
   // Any reply is proof of life: disarm the fallback, refill the redial budget.
   clearTimeout(manualFallbackTimer);
-  net.redials = 0;
+  session.redials = 0;
   sigServerUp = true;
+  if (msg.t !== "sdp" && msg.t !== "ice") {
+    log("netplay: server: " + msg.t + (msg.role ? " " + msg.role : "") +
+        (msg.msg ? " " + msg.msg : ""));
+  }
+  // The pc this message is about: an await can outlive it (back to waiting
+  // closes it), and its errors are then nobody's business.
+  const pc = session.pc;
   try {
     switch (msg.t) {
       case "waiting":
-        netSetStatus("");
+        netSetStatus(session.rewaited ? "Waiting for your friend…" : "");
         break;
       case "paired":
         // host = WebRTC offerer = unit 0.
-        net.isHost = msg.role === "host";
+        session.isHost = msg.role === "host";
         netSetStatus("Friend found — connecting…");
-        await startRtc(net.isHost);
+        await startRtc(session.isHost);
         break;
       case "sdp":
-        if (!net.pc) return;
-        await net.pc.setRemoteDescription(msg.d);
+        if (!pc) return;
+        session.sdpIn = true; // the friend is alive and paired with us
+        await pc.setRemoteDescription(msg.d);
         if (msg.d.type === "offer") {
-          const answer = await net.pc.createAnswer();
-          await net.pc.setLocalDescription(answer);
-          sigSend({ t: "sdp", d: net.pc.localDescription });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (net !== session || session.pc !== pc) return;
+          sigSend({ t: "sdp", d: pc.localDescription });
         }
         break;
       case "ice":
-        if (net.pc && msg.c) await net.pc.addIceCandidate(msg.c).catch(() => {});
+        if (pc && msg.c) await pc.addIceCandidate(msg.c).catch(() => {});
         break;
       case "peer-closed":
-        if (!net.rtcConnected) netFail("The other side left");
+        if (session.rtcConnected) break;
+        // The friend left the server. With the descriptions crossed it has
+        // most likely linked and released the room a round trip before our
+        // channel opens: leave it to our channel, or the deadline. Otherwise
+        // it left before pairing: wait for it again.
+        if (session.sdpIn) {
+          log("netplay: friend left the server mid-pairing — waiting on the channel");
+          break;
+        }
+        sigRewait("friend left before pairing");
         break;
       case "error":
         netFail(msg.msg || "Connection error");
         break;
     }
   } catch (e) {
+    if (net !== session || (pc && session.pc !== pc)) return; // superseded
     netFail("Connection setup failed: " + e.message);
   }
 };
@@ -393,36 +487,41 @@ const startRtc = async (isOfferer) => {
   const session = net;
   const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
   session.pc = pc;
+  session.sdpIn = false;
   // A checking phase that never starts never reaches 'failed' on its own.
   clearTimeout(session.rtcDeadline);
-  session.rtcDeadline = setTimeout(() => {
-    if (net === session && !net.rtcConnected && !net.started) {
-      netFail("Could not connect peer-to-peer (a strict NAT on one side may be blocking it)");
-    }
-  }, RTC_CONNECT_DEADLINE);
+  session.rtcDeadline = setTimeout(
+    () => rtcGaveUp(session, pc, "no link " + RTC_CONNECT_DEADLINE / 1000 + " s after pairing"),
+    RTC_CONNECT_DEADLINE
+  );
   pc.onicecandidate = (e) => {
-    if (e.candidate) sigSend({ t: "ice", c: e.candidate });
+    if (e.candidate && net === session && session.pc === pc) sigSend({ t: "ice", c: e.candidate });
   };
   pc.onconnectionstatechange = () => {
     if (!net || net.pc !== pc) return;
     const st = pc.connectionState;
     if (st === "failed") {
-      netFail(
-        net.rtcConnected
-          ? "Peer connection lost"
-          : "Could not connect peer-to-peer (a strict NAT on one side may be blocking it)"
-      );
+      if (net.rtcConnected) netFail("Peer connection lost");
+      else rtcGaveUp(session, pc, "ICE failed");
     } else if ((st === "disconnected" || st === "closed") && net.started) {
       netPeerGone("Peer connection lost");
     }
   };
   if (isOfferer) {
     wireChannel(pc.createDataChannel("link", { ordered: true }));
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+    } catch (e) {
+      if (net !== session || session.pc !== pc) return; // back to waiting meanwhile
+      throw e;
+    }
+    if (net !== session || session.pc !== pc) return;
     sigSend({ t: "sdp", d: pc.localDescription });
   } else {
-    pc.ondatachannel = (e) => wireChannel(e.channel);
+    pc.ondatachannel = (e) => {
+      if (net === session && session.pc === pc) wireChannel(e.channel);
+    };
   }
 };
 
@@ -990,7 +1089,10 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 );
 
 // Input-rollback wire protocol over the DataChannel (first byte = kind):
-//   0 hello        : [0][epoch u32][romHash u32]  (host's epoch is the shared clock)
+//   0 hello        : [0][epoch u32][romHash u32][len u32][crc32 u32][fnv u32]
+//                    (host's epoch is the shared clock; romHash covers the
+//                    first 1 MB, the rest identify the whole ROM; builds
+//                    before the whole-ROM fields send the first 9 bytes)
 //   1 input        : [1][frame i32][bits u16]      (this peer's buttons for a frame)
 //   2 state-begin  : [2][len u32]                  (full save-state, chunked)
 //   3 state-chunk  : [3][bytes…]
@@ -999,15 +1101,22 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 //   6 ready        : [6]                           (cores built + states loaded)
 //   7 speed        : [7][on u8]                     (2x fast-forward toggle — both cores)
 //   8 pause        : [8][on u8]
+//   9 have-rom     : [9]                           (your ROM is in my library: don't send it)
+//  10 need-rom     : [10]                          (send me your ROM)
 // Both peers run both cores (core 0 = host's game, core 1 = guest's): each
 // side's save-state is exchanged and loaded into the matching core, then only
 // inputs cross the network. When the hello hashes differ (cross-game trade)
-// each peer also streams its ROM so both hold the same {host, guest} pair.
+// each peer also streams its ROM so both hold the same {host, guest} pair,
+// unless the friend already has it: a peer whose hello names the whole ROM
+// looks the friend's up in its library and answers have-rom or need-rom, and
+// a ROM goes over the wire only on need-rom (to an older build, which never
+// answers, it goes at once, as before).
 // The "ready" barrier keeps either peer from ticking until both have booted.
 
 const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
 const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
-const RB_PAUSE = 8;
+const RB_PAUSE = 8, RB_HAVE_ROM = 9, RB_NEED_ROM = 10;
+const RB_HELLO_LEN = 21; // with the whole-ROM identity
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
 // cap, past which send() throws and the dropped chunk corrupts the ROM.
@@ -1022,6 +1131,78 @@ const rbHash = (bytes) => {
   const n = Math.min(bytes.length, 1 << 20);
   for (let i = 0; i < n; i++) h = Math.imul(h ^ bytes[i], 0x01000193) >>> 0;
   return h >>> 0;
+};
+
+// The whole ROM's identity: its length, CRC-32 and FNV-1a over every byte.
+// What a library copy must match exactly before it stands in for the
+// friend's (no crypto.subtle: it is missing on plain-http LAN pages).
+let rbCrcTable = null;
+const rbRomId = (bytes) => {
+  if (!rbCrcTable) {
+    rbCrcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      rbCrcTable[n] = c >>> 0;
+    }
+  }
+  let crc = 0xffffffff, h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    crc = rbCrcTable[(crc ^ b) & 0xff] ^ (crc >>> 8);
+    h = Math.imul(h ^ b, 0x01000193);
+  }
+  return { len: bytes.length, crc: (crc ^ 0xffffffff) >>> 0, fnv: h >>> 0 };
+};
+const rbSameRom = (a, b) => !!a && !!b && a.len === b.len && a.crc === b.crc && a.fnv === b.fnv;
+
+// Library games' identities, so a later link reads only the likely match.
+// A hint, never trusted: the bytes are measured again before use.
+const RB_ROM_IDS_KEY = "linkromids";
+
+// A library game whose bytes are exactly the ROM `want` names, or null.
+const rbFindLocalRom = async (want) => {
+  await loadRomSizes();
+  const ids = (await dbGet(RB_ROM_IDS_KEY)) || {};
+  const names = (await getRecentMeta()).map((r) => r?.name).filter(Boolean);
+  // Games already known to be it first, then any of that size (or of no
+  // recorded size) not measured yet.
+  const known = names.filter((n) => rbSameRom(ids[n], want));
+  const fresh = names.filter((n) => !known.includes(n) &&
+    (!ids[n] || ids[n].len !== romSizeOf(n)) && [0, want.len].includes(romSizeOf(n)));
+  // Measuring a big library the first time is cut off after a few seconds
+  // (the friend is waiting on the answer); what was measured is kept, so a
+  // later link goes further.
+  const until = Date.now() + 4000;
+  let changed = false, found = null;
+  for (const n of [...known, ...fresh]) {
+    if (!known.includes(n) && Date.now() > until) break;
+    const bytes = await getRomBytes(n);
+    if (!bytes) continue;
+    ids[n] = rbRomId(bytes);
+    changed = true;
+    if (rbSameRom(ids[n], want)) { found = bytes; break; }
+  }
+  if (changed) await dbPut(RB_ROM_IDS_KEY, ids).catch(() => {});
+  return found;
+};
+
+// The friend named its whole ROM: answer whether it needs to come over.
+const rbAnswerRom = async (rb, want) => {
+  let bytes = null;
+  try { bytes = await rbFindLocalRom(want); } catch {}
+  if (net?.rb !== rb) return;
+  if (bytes) {
+    rb.remoteRom = bytes;
+    rb.remoteRomLen = rb.remoteRomGot = bytes.length;
+    rb.romFromLibrary = true;
+    log("netplay: your friend's game is in the library — not transferred");
+    rbSend(new Uint8Array([RB_HAVE_ROM]));
+  } else {
+    rbSend(new Uint8Array([RB_NEED_ROM]));
+  }
+  rbShowXferProgress();
+  rbTryInit();
 };
 
 const rbSend = (buf) => {
@@ -1150,10 +1331,15 @@ const rbConnect = async () => {
   // unfreezes into the session.
   paused = true;
   const romBytes = FS.readFile(currentRomName);
+  const romId = rbRomId(romBytes);
   net.rb = {
     localPlayer: net.isHost ? 0 : 1,
     epoch: net.isHost ? Math.floor(Date.now() / 1000) : 0,
     romHash: rbHash(romBytes),
+    romId,
+    remoteRomId: null,
+    romFromLibrary: false,
+    friendHasRom: false,
     romBytes,
     romLen: romBytes.length,
     localState,
@@ -1176,11 +1362,14 @@ const rbConnect = async () => {
     inited: false,
   };
   netSetStatus("Syncing…");
-  const h = new ArrayBuffer(9);
+  const h = new ArrayBuffer(RB_HELLO_LEN);
   const hv = new DataView(h);
   hv.setUint8(0, RB_HELLO);
   hv.setUint32(1, net.rb.epoch);
   hv.setUint32(5, net.rb.romHash);
+  hv.setUint32(9, romId.len);
+  hv.setUint32(13, romId.crc);
+  hv.setUint32(17, romId.fnv);
   rbSend(h);
   rbSendState(localState);
 };
@@ -1210,14 +1399,31 @@ const rbMessage = (data) => {
     window.applyRemotePause?.(v.getUint8(1) === 1);
     return;
   }
+  if (kind === RB_HAVE_ROM) {
+    // Our ROM is already on the friend's side.
+    rb.friendHasRom = true;
+    rb.romSendStarted = true;
+    rb.romSent = rb.romLen;
+    rbShowXferProgress();
+    return;
+  }
+  if (kind === RB_NEED_ROM) {
+    rbSendOurRom();
+    return;
+  }
   if (kind === RB_HELLO) {
     rb.remoteRomHash = v.getUint32(5);
     if (!net.isHost) rb.epoch = v.getUint32(1); // guest adopts the host's clock
     rb.remoteHello = true;
-    if (rb.remoteRomHash !== rb.romHash) {
+    // A friend that names its whole ROM also answers for ours; both sides
+    // then compare whole ROMs, an older build only the first 1 MB.
+    const answers = data.byteLength >= RB_HELLO_LEN;
+    if (answers) rb.remoteRomId = { len: v.getUint32(9), crc: v.getUint32(13), fnv: v.getUint32(17) };
+    if (answers ? !rbSameRom(rb.remoteRomId, rb.romId) : rb.remoteRomHash !== rb.romHash) {
       rb.needRom = true;
       rbShowXferProgress();
-      rbSendOurRom();
+      if (answers) rbAnswerRom(rb, rb.remoteRomId);
+      else rbSendOurRom();
     }
   } else if (kind === RB_STATE_BEGIN) {
     rb.stateBuf = new Uint8Array(v.getUint32(1));
@@ -1245,7 +1451,8 @@ const rbMessage = (data) => {
     rbShowXferProgress();
     if (rb.romGot >= rb.romBuf.length) {
       // The channel is reliable+ordered, so this only guards a real mismatch.
-      if (rbHash(rb.romBuf) !== rb.remoteRomHash) {
+      if (rbHash(rb.romBuf) !== rb.remoteRomHash ||
+          (rb.remoteRomId && !rbSameRom(rbRomId(rb.romBuf), rb.remoteRomId))) {
         netFail("Game transfer was corrupted — try again");
         return;
       }
@@ -1408,13 +1615,13 @@ netJoinGo.addEventListener("click", async () => {
   session.code = code;
   netSetConnecting(true);
   netSetStatus("Connecting…");
-  armManualFallback(session);
+  armManualFallback(session, SIG_DIAL_TIMEOUT);
   // Same-browser BroadcastChannel and signaling server race; the first to
   // connect wins (wireChannel tears the loser down).
   startLocalLink(code);
   if (await sigConnect()) {
     if (net !== session || net.dc) return; // paired locally or cancelled
-    sigSend({ t: "rendezvous", code });
+    sigRendezvous(session);
   } else if (net === session && !net.dc && !net.rtcConnected) {
     clearTimeout(manualFallbackTimer);
     manualEnter(true);

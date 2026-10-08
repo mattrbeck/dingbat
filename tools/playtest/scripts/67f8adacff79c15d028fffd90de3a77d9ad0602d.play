@@ -1,0 +1,95 @@
+@title Rhythm Tengoku (Japan)
+@file Rhythm Tengoku (J).gba
+@game BRIJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+# A new save opens with the three-part rhythm check: tap A along with the
+# beat, press A when the hidden countdown reaches zero, keep the beat after
+# the sound stops (score 0.0 here). After the score the game saves and opens
+# the stage select at Stage 1 (Karate). [load]: with a save the title leads to
+# the main menu instead of the rhythm check; Rhythm Game opens the stage select.
+# Seen while authoring: the timing graph after test 1 (f3870) plots slightly
+# different points on each emulator for the same inputs; the stage-select
+# background colour cycle is in a different phase on each emulator at the
+# same frame (f14898); nba scrolls the result paper a frame late (f13746).
+# All three saves byte-identical.
+
+[new]
+wait 600
+checkpoint health window=30
+press A
+wait 300
+checkpoint title window=30
+press A
+wait 300
+tap A times=8 every=40 hold=4
+wait 60
+checkpoint rhythm_test_intro window=30
+press A
+wait 120
+press A
+wait 120
+press A
+wait 90
+checkpoint test1 window=10
+tap A times=20 every=30 hold=4
+wait 30
+wait 180
+wait 240
+tap A times=16 every=30 hold=4
+wait 60
+checkpoint test1_result window=10
+wait 120
+checkpoint timing_graph1 window=0 compare=none
+press A
+wait 120
+press A
+wait 90
+tap A times=20 every=30 hold=4
+wait 400
+wait 30
+wait 25
+press A
+wait 60
+wait 53
+tap A times=6 every=121 hold=4
+wait 60
+tap A times=8 every=121 hold=4
+wait 60
+wait 40
+tap A times=30 every=20 hold=4
+wait 30
+wait 600
+press A
+wait 60
+wait 300
+tap A times=10 every=150 hold=4
+wait 30
+checkpoint test3 window=10
+tap A times=36 every=30 hold=4
+wait 120
+tap A times=30 every=30 hold=4
+wait 120
+tap A times=40 every=30 hold=4
+wait 60
+wait 180
+press A
+wait 180
+checkpoint score window=30
+press A
+wait 240
+tap A times=6 every=60 hold=4
+wait 120
+wait 60
+checkpoint game_select window=30 compare=text
+
+[load]
+wait 600
+press A
+wait 300
+press A
+wait 300
+checkpoint main_menu window=30
+press A
+wait 240
+checkpoint game_select_resumed window=30 compare=text

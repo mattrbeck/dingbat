@@ -1,0 +1,142 @@
+@title The Urbz - Sims in the City (USA, Europe)
+@file Urbz, The - Sims in the City (UE) (M6).gba
+@game BOCE
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+# English, Create-an-Urb named "AA" (default body and threads, first answer to
+# every question, Streeties), the Miniopolis intro, Kris Thistle's squeegee
+# job, then SELECT -> Save Game -> Slot 1. [load]: Load-an-Urb -> Slot 1 - AA
+# (Day 1 10:17 am) -> back on the street.
+# At f600 the language screen's flag animation is at a different phase on all
+# three emulators (each boots in a different number of frames), hence
+# compare=text there. Rain puddles on the street come and go differently per
+# emulator (game state, not rendering), so street checkpoints use compare=none.
+
+[new]
+wait 600
+checkpoint language window=30 compare=text
+press A
+wait 300
+wait 600
+checkpoint title window=30 compare=text
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 150
+checkpoint name_entry window=30 compare=text
+press A after=20
+press A after=20
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press A
+wait 150
+checkpoint create_urb window=30 compare=text
+press A
+wait 150
+checkpoint threads window=30 compare=text
+press A
+wait 150
+checkpoint questions window=30 compare=text
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+wait 120
+checkpoint rep_group window=30 compare=text
+press A
+wait 150
+press A
+wait 200
+press A
+wait 60
+press LEFT after=20
+checkpoint confirm_urb window=30 compare=text
+press A
+wait 200
+checkpoint behold window=30 compare=text
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+wait 200
+wait 300
+wait 30
+checkpoint gameplay window=30 compare=none
+press SELECT after=60
+wait 300
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press DOWN after=60
+tap DOWN times=6 every=40 hold=4
+press A after=90
+press SELECT after=60
+wait 300
+press START after=60
+checkpoint goals window=30 compare=text
+press B after=60
+press SELECT after=60
+checkpoint select_menu window=30 compare=text
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press A
+wait 90
+checkpoint save_slots window=30 compare=text
+press A
+wait 60
+# until text saved timeout=1200 every=5  [reached dingbat-bios+0 mgba+5 nba+0]
+wait 9
+wait 60
+wait 30
+checkpoint after_save window=30 compare=text
+press B after=60
+
+[load]
+wait 600
+press A
+wait 900
+press START
+wait 120
+press RIGHT after=40
+press RIGHT after=40
+press RIGHT after=40
+wait 20
+# compare=none: the graffiti/rat animation behind this menu runs at a phase set
+# by how many frames each emulator took to boot (see [new] language/main_menu),
+# and its OCR noise fails compare=text even though every emulator shows
+# Load-an-Urb; load_slots below is the screen that proves the save was read.
+checkpoint load_menu window=30 compare=none
+press A
+wait 120
+checkpoint load_slots window=30 compare=text
+press A
+wait 300
+checkpoint resumed window=30 compare=none
+press START after=60
+checkpoint resumed_goals window=30 compare=text

@@ -93,12 +93,24 @@ on the other and back, for every way the second device can be opened and
 with and without an in-game save; "the same place" is the whole
 framebuffer, exactly). `DINGBAT_E2E_PAIRS=iphone+mac` narrows the device pairs (kinds: `iphone`,
 `iphone-private`, `mac`, `mac-webkit`); `DINGBAT_E2E_NO_CHROMIUM=1` makes
-the Mac WebKit too (CI does: its runners draw Chromium's WebGL in software
-at about three frames a second - `node e2e/speed-probe.mjs` measures it);
-`DINGBAT_E2E_SLOW=4` slows the Chromium devices' CPU; `DINGBAT_WEB=<dir>` serves another
+the Mac WebKit too (the Linux CI job does: those runners draw Chromium's
+WebGL in software at about three frames a second - `node e2e/speed-probe.mjs`
+measures it); `DINGBAT_E2E_CHROMIUM_CHANNEL=chromium` runs full Chromium
+instead of the headless shell (the macOS CI job does: ~40 frames a second
+there, the shell ~15); `DINGBAT_E2E_SLOW=4` slows the Chromium devices' CPU; `DINGBAT_WEB=<dir>` serves another
 copy of web/, e.g. one with an older index.js, to see a test fail on the
 code it guards. Two WebKit quirks the rig works around: it does not show
 Playwright a Blob request body (the rig reads bodies bound for Google into
 bytes first), and a context with no profile on disk keeps no Blob in
 IndexedDB, as Safari's private browsing does (so `iphone` has a profile and
-`iphone-private` does not). CI runs it as the `web-e2e` job.
+`iphone-private` does not). CI runs it as the `web-e2e` job (Linux, every
+device WebKit) and the `web-e2e-macos` job (Apple's WebKit as the iPhone,
+Chromium as the Mac).
+
+`DINGBAT_E2E_DRIVE_MS=150 node e2e/sync-bench.mjs [games] [kind]` times
+syncs on the same rig (not a test, not in CI): a seeded library of 20 games,
+then Sync now with nothing changed, with one save changed, and a second
+device's first pull, each with its Drive requests counted by kind. At 150 ms
+a request on 2026-10-01: 0.64 s / 4 requests, 0.79 s, 2.8 s (were 1.46 s /
+7, 1.63 s, 13.6 s before requests ran in parallel and unchanged libraries
+went unwritten).

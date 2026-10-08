@@ -54,15 +54,35 @@ def _live(path):
         return False
 
 
+AUTHORING = ['dingbat-bios', 'mgba', 'nba']   # the official-BIOS emulators
+SLACK = 4      # frames past the slowest emulator before the next input
+
+
+def restore_keys(emu, held):
+    """After a state load: the keys held when the state was saved, sent
+    unconditionally (the driver's own idea of what is held may differ).
+    Resetting them to none instead would part the live emulators from the
+    recorded script whenever a `hold` was in effect."""
+    emu.held = -1
+    emu.set_keys(held)
+
+
 class Session:
-    def __init__(self, name, rom, emus, outroot, save=None, rtc=None):
+    def __init__(self, name, rom, emus, outroot, save=None, rtc=None, lockstep=True):
+        """`save`: one battery file for every emulator, or {emu: file} so
+        each [load] boots the save that emulator wrote itself. With
+        `lockstep`, every `until` / `mash` ends with all emulators on the same
+        frame after the same inputs, and is recorded as a frozen `wait` /
+        `tap` (see script.py)."""
         self.name = name
         self.dir = os.path.join(outroot, 'sessions', name)
         os.makedirs(self.dir, exist_ok=True)
         self.reader = screen.ScreenReader()
         self.execs = {}
+        self.lockstep = lockstep
         for n in emus:
-            e = emulib.Emulator(n, rom, os.path.join(self.dir, 'env', n), rtc_epoch=rtc, save_in=save)
+            seed = save.get(n) if isinstance(save, dict) else save
+            e = emulib.Emulator(n, rom, os.path.join(self.dir, 'env', n), rtc_epoch=rtc, save_in=seed)
             self.execs[n] = runner.Executor(e, os.path.join(self.dir, 'shots', n), self.reader)
         self.section = 'load' if save else 'new'
         self.recorded = []            # (section, line)
@@ -95,8 +115,12 @@ class Session:
             info[n] = {'frame': ex.emu.frame, 'hash': h, 'selected': r['selected'],
                        'lines': [(l['text'], l['box']) for l in r['lines']]}
         png = os.path.join(self.dir, tag + '.png')
-        img.write_png(png, img.composite(frames, labels, scale=2))
         hashes = {v['hash'] for v in info.values()}
+        if len(hashes) == 1:
+            # every emulator shows the same frame: one copy is enough
+            img.write_png(png, img.composite(frames[:1], ['all identical ' + labels[0].split()[-1]], scale=2))
+        else:
+            img.write_png(png, img.composite(frames, labels, scale=2))
         return {'png': png, 'identical': len(hashes) == 1, 'emus': info}
 
     def command(self, line):
@@ -114,7 +138,10 @@ class Session:
         if op == 'mark':
             label = words[1]
             res = self.each(lambda ex: ex.emu.state_save(os.path.join(self.dir, f'mark-{label}-{ex.emu.name}.state')))
-            self.marks[label] = (len(self.recorded), self.section, {n: ex.emu.frame for n, ex in self.execs.items()})
+            # marks stay in creation order: a rewind forgets every later one
+            self.marks.pop(label, None)
+            self.marks[label] = (len(self.recorded), self.section,
+                                 {n: (ex.emu.frame, ex.emu.held) for n, ex in self.execs.items()})
             return {'mark': label, 'results': res}
         if op == 'rewind':
             label = words[1]
@@ -122,16 +149,22 @@ class Session:
 
             def restore(ex):
                 ex.emu.state_load(os.path.join(self.dir, f'mark-{label}-{ex.emu.name}.state'))
-                ex.emu.frame = frames[ex.emu.name]
-                ex.emu.set_keys(0)
+                ex.emu.frame, held = frames[ex.emu.name]
+                restore_keys(ex.emu, held)
             res = self.each(restore)
             del self.recorded[pos:]
             self.section = section
-            return {'rewound': label, 'results': res}
+            # marks made after this one belong to the timeline just abandoned:
+            # rewinding to one would replay the emulators to that timeline but
+            # keep this one's recorded steps
+            later = list(self.marks)[list(self.marks).index(label) + 1:]
+            for m in later:
+                del self.marks[m]
+            return {'rewound': label, 'results': res, 'forgotten_marks': later}
         step = script.parse_step(line)
         # snapshot first so a step that fails anywhere can be undone everywhere:
         # the recorded script then always reproduces the emulators' state
-        before = {n: ex.emu.frame for n, ex in self.execs.items()}
+        before = {n: (ex.emu.frame, ex.emu.held) for n, ex in self.execs.items()}
         self.each(lambda ex: ex.emu.state_save(os.path.join(self.dir, f'undo-{ex.emu.name}.state')))
         res = self.each(lambda ex: ex.do(step))
         ok = all(r[0] == 'ok' for r in res.values())
@@ -139,20 +172,67 @@ class Session:
                  'results': {n: (r[0], r[1] if r[0] == 'fail' else None, self.execs[n].emu.frame)
                              for n, r in res.items()}}
         if ok:
-            self.recorded.append((self.section, script.format_step(step)))
+            recorded = script.format_step(step)
+            if self.lockstep and step['op'] in ('until', 'mash'):
+                recorded, warn = self.freeze(step)
+                if warn:
+                    reply['warning'] = warn
+                reply['results'] = {n: ('ok', None, ex.emu.frame) for n, ex in self.execs.items()}
+            reply['frozen'] = recorded
+            self.recorded.append((self.section, recorded))
         else:
             # keep a look at the failure, then roll every emulator back
             reply['failed_look'] = self.look()['png']
 
             def undo(ex):
                 ex.emu.state_load(os.path.join(self.dir, f'undo-{ex.emu.name}.state'))
-                ex.emu.frame = before[ex.emu.name]
-                ex.emu.set_keys(0)
+                ex.emu.frame, held = before[ex.emu.name]
+                restore_keys(ex.emu, held)
             bad = {n: r[1] for n, r in self.each(undo).items() if r[0] != 'ok'}
             if bad:
                 # an emulator that could not roll back is on another timeline now
                 reply['rollback_failed'] = bad
         return reply
+
+    def freeze(self, step):
+        """Brings every emulator to where the slowest one got, by giving the
+        faster ones the same inputs it had (more frames held, more taps), and
+        returns the step as a pure input timeline plus the condition as a
+        comment with each emulator's own count."""
+        execs = self.execs
+        cond = script.format_step(step)
+        if step['op'] == 'until':
+            spent = {n: ex.spent for n, ex in execs.items()}
+            target = max(spent.values()) + SLACK
+            self.each(lambda ex: ex.emu.run(target - ex.spent))
+            note = ' '.join(f'{n}+{f}' for n, f in spent.items())
+            return f'# {cond}  [reached {note}]\nwait {target}', None
+        taps = {n: ex.taps for n, ex in execs.items()}
+        most = max(taps.values())
+
+        def more(ex):
+            for _ in range(most - ex.taps):
+                ex.tap(step['keys'], step['hold'], step['every'])
+        self.each(more)
+        note = ' '.join(f'{n}:{t}' for n, t in taps.items())
+        line = f'# {cond}  [taps {note}]'
+        if most:
+            line += f"\ntap {'+'.join(step['keys'])} times={most} every={step['every']} hold={step['hold']}"
+        warn = None
+        if step['cond']['kind'] != 'stable':
+            # the extra taps may have carried a faster emulator past the screen
+            lost = [n for n, ex in execs.items() if taps[n] < most and not ex.check(step['cond'], {})]
+            if lost:
+                warn = (f'after the extra taps (to match the slowest emulator) {", ".join(lost)} no longer '
+                        f'satisfies the condition: tap less often (every=), or wait for a screen instead')
+        return line, warn
+
+    def drop(self, name, why):
+        """Stop following one emulator (it cannot take the route); the
+        script records where and why."""
+        ex = self.execs.pop(name)
+        ex.emu.kill()
+        self.recorded.append((self.section, f'# {name} could not follow from here: {why}'))
 
     def render(self):
         out = []
@@ -178,13 +258,13 @@ class Session:
         self.reader.close()
 
 
-def serve(name, rom, emus, outroot, save=None, rtc=None):
+def serve(name, rom, emus, outroot, save=None, rtc=None, lockstep=True):
     path = sock_path(outroot, name)
     if os.path.exists(path):
         if _live(path):
             raise SystemExit(f'session {name!r} is already running; pick another name or stop it')
         os.unlink(path)
-    sess = Session(name, rom, emus, outroot, save=save, rtc=rtc)
+    sess = Session(name, rom, emus, outroot, save=save, rtc=rtc, lockstep=lockstep)
     print(f'session {name} ready: {path}', flush=True)
     with Listener(path, family='AF_UNIX', authkey=AUTH) as listener:
         while True:

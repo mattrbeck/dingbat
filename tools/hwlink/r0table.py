@@ -30,6 +30,9 @@ TABLE = {
     # and a timer stopped as the handler's first act
     'wakeirq': [0x00, 0x10, 0x20, 0x28, 0x60, 0x24, 0x2C, 0x64, 0x22, 0x26],
     'tmrw': [0x00, 0x01, 0x02, 0x10, 0x11, 0x20, 0x21, 0x30],
+    # a prescaled timer polled for ~38 frames: reads never jump (prescaler
+    # 64, 256, 1024)
+    'tmjump': [1, 2, 3],
     'lycwrite': [0],
     # tests/roms/payloads/probe.inc held to the console: dmaphase's controls,
     # a multiply period and three NOP phases, rebuilt from the kit
@@ -88,8 +91,10 @@ TABLE = {
     # bursts, last start and last unit from the first, burst 1's gap; one
     # channel of 0.5 to 3.5 lines, near the V-blank edge, about a line, and
     # with nothing else armed; the V-blank arming's first start; two
-    # channels' burst counts. Not the configurations 23-30, whose second
-    # channel starts two cycles late here (the payload's header)
+    # channels' burst counts; DMA3 behind DMA1 on each H-blank across the
+    # drop edge (23-28 and 30, recorded 2026-10-02 once DMA_PENDING_CHAIN
+    # started the second channel on the console's cycle). Not 29: the core
+    # runs 18 bursts there, the console 20
     # the first sound-FIFO bursts against a TM1 read, k = 20 and 33 cycles to
     # TM0's overflow, n NOPs, and an EWRAM load in flight (variant 1 << 16).
     # Recorded by tests/roms/dbsuite/record.py (sp-agb.json, same code), run
@@ -103,10 +108,16 @@ TABLE = {
     # fifodma's k = 20 staircase after w = 0, 4, 6, 7, 8 words stored to the
     # FIFO: the eighth word leaves it reading empty (payloads/fifomap.s)
     'fifomap': [w << 26 | 20 << 8 | n for w in (0, 4, 6, 7, 8) for n in (17, 40)],
+    # a FIFO reset k = 0..8 samples into four words, by SOUNDCNT_H (v = 0)
+    # and by the master enable (v = 1): does the word being played survive?
+    # (payloads/fiforeset.s; Kingdom Hearts - Chain of Memories)
+    'fiforeset': [v << 8 | k for v in (0, 1) for k in range(9)],
     'hdmalag': ([c << 8 | w for c in list(range(0, 12)) + [15, 16, 17, 18, 19, 20, 31, 32, 33, 34]
                  for w in (1, 10, 11, 14)]
                 + [8 << 8 | 2, 22 << 8 | 1, 22 << 8 | 11]
-                + [c << 8 | w for c in (12, 13, 14) for w in (1, 6)]),
+                + [c << 8 | w for c in (12, 13, 14) for w in (1, 6)]
+                + [c << 8 | w for c in (23, 24, 25, 26, 27, 28, 30) for w in (1, 10, 11, 14)]
+                + [29 << 8 | w for w in (1, 10, 11, 14)]),
     # renderer contention, one access at k (dot k + 37 of this core's line):
     # (scene, access, first k, count) -- text BGs, 8bpp, fine scroll 7 and
     # 5 at the line's end, mode 2's lock-out, mode 1, the bitmap, palette
@@ -186,7 +197,60 @@ TABLE = {
     's0write': ([w << 8 | k for w in range(4) for k in range(16)]
                 + [0x400 | 1 << 4 | w << 8 | k for w in range(4) for k in range(16)]
                 + [0x400 | w << 8 | k for w in range(4) for k in range(16)]),
+    # two H-blank DMAs on one line, the second reading write-only BG1VOFS:
+    # writer first / reader first, the CPU in a NOP sled / halted, lines
+    # 40..47 (Phantasy Star Collection). The sled's rows from line 42 race
+    # the VCOUNT poll and answer several ways (not in the frozen laws)
+    'hdmaobus': [v << 8 | k for v in range(4) for k in range(8)],
+    # hdmaobus's halted half taken apart (payloads/hdmaphase.s): the poll
+    # loop's phase on line 46 walked by n = 0..6 NOPs after the wake, read on
+    # lines 46, 47 and 48, with the writer behind the reader and without;
+    # then which lanes an ldrh / ldrb / ldr of VCOUNT leaves for a reader of
+    # a word's upper and lower half (line 46); then the reader alone under
+    # the halt, keeping its own word
+    'hdmaphase': ([w << 8 | n << 4 | k for w in (0, 1) for n in range(7) for k in (6, 7, 8)]
+                  + [kind << 12 | src << 9 | n << 4 | 6 for kind in (0, 1, 2)
+                     for src in (0, 1) for n in range(7) if kind or src]
+                  + [0x101, 0x103, 0x105]),
+    # a timer interrupt raised k cycles into a DMA3 burst, an idle sound DMA
+    # armed or not, TM0 acknowledged after the burst or not (Boktai 2): the
+    # console answers each (not armed, armed) pair alike
+    'dmairqarm': [(ack << 17) | (armed << 16) | (0x10000 - k) for ack in (0, 1)
+                  for k in (4, 20, 40, 60, 80, 100, 120, 140, 160, 180, 190, 200, 210, 220, 240)
+                  for armed in (0, 1)],
+    # the cartridge EEPROM's block-programming time (Super Mario Advance 3's
+    # first boot, 196 block writes): the block as read, the DMA's length,
+    # an unchanged write-back, a changed write. Needs a 64 Kbit EEPROM cart in
+    # the slot, the console booted holding SELECT+START (payloads/eesettle.s);
+    # without a cart every cell answers DEAD0001. A chip's analog time, not a
+    # console law: keep it out of the frozen cyclelaws ROMs.
+    'eesettle': [3, 2, 0, 1],
+    # the same four cells on a 4 Kbit EEPROM cart (bit 8: 6-bit addresses),
+    # e.g. Klonoa - Empire of Dreams, whose 15 block writes on entering
+    # Vision 1-1 set the frame the level starts on (payloads/eesettle4k.s).
+    # Never with a 64 Kbit cart in the slot.
+    'eesettle4k': [0x103, 0x102, 0x100, 0x101],
+    # an S-bit write to r15 in System mode (no SPSR): movs / subs / ldm^,
+    # then the same after leaving a Thumb SPSR in IRQ mode
+    # (payloads/sysmovs.s; Colin McRae Rally 2.0's ARM library returns)
+    'sysmovs': [0, 1, 2, 0x10, 0x11, 0x12],
+    # the SRAM region on an EEPROM cart (nothing on /CS2): byte, halfword and
+    # word at five addresses, then the word reads after a gamepak load that
+    # left 0x5A on A16-A23 (payloads/sramfloat.s; Justice League Chronicles'
+    # boot walk). Needs an EEPROM cart in the slot, booted holding
+    # SELECT+START; without a cart every cell answers DEAD0001.
+    'sramfloat': ([w | a << 4 for a in range(5) for w in range(3)]
+                  + [0x100 | 2 | a << 4 for a in range(5)]),
+    # the keypad interrupt with nothing held: KEYCNT stores that match
+    # (vacuous AND, a rewrite of a matching value, the enable bit), and IF
+    # re-read after an acknowledge 0 / 16 / 4096 loop turns later (a level?)
+    # (payloads/keyirq.s; Ghost Rider and Catwoman never wake from their
+    # second Stop in dingbat). Its Stop cell (arg bit 31) is ad hoc only.
+    'keyirq': [0, 16, 4096],
 }
+
+# rows that touch a cartridge: recorded only when named on the command line
+NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat'}
 
 
 def source(name):
@@ -213,7 +277,7 @@ def main(argv):
     table = json.load(open(TABLE_FILE)) if os.path.exists(TABLE_FILE) else {}
 
     if '--record' in flags:
-        for name in words or list(TABLE):
+        for name in words or [n for n in TABLE if n not in NEEDS_CART]:
             args = TABLE[name]
             table[name] = dict(zip((f'{a:#x}' for a in args), on_console(name, args, runs)))
             print(name, table[name], flush=True)

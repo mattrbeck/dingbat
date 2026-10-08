@@ -1,20 +1,89 @@
 # playtest — cross-emulator gameplay and save-file harness
 
-Plays a game from a recorded script in dingbat and two reference emulators,
-compares the screens at named checkpoints, saves in-game in each, compares the
-battery files, then boots every emulator's save in every emulator.
+Plays a game from a recorded input timeline in dingbat and two reference
+emulators, compares the screens at named checkpoints and the audio throughout,
+saves in-game in each, compares the battery files, then boots every
+emulator's save in every emulator.
+
+dingbat runs four ways, so a difference can be pinned on one feature:
+
+| name | BIOS | waitloop skipping |
+|---|---|---|
+| `dingbat` | HLE (the shipped default) | on |
+| `dingbat-nowl` | HLE | off |
+| `dingbat-bios` | official | on |
+| `dingbat-bios-nowl` | official | off |
+
+The references (`mgba`, `nba`) always run the official BIOS.
 
 ```
 tools/playtest/build.sh                                  # drivers + OCR tool -> bin/
 tools/playtest/playtest.py run  ~/roms/game.gba          # needs scripts/<sha1>.play
 tools/playtest/playtest.py run  f3ae088181bf583e55daf962a92bb46f4f1d07b7   # by sha1
-tools/playtest/playtest.py suite [emerald ...]           # every script (or a filter)
+tools/playtest/playtest.py suite [emerald ...] --jobs 2  # every script (or a filter)
+tools/playtest/report.py out/suites/<tag>                # findings.json: who stands alone where
 ```
 
 Output lands in `out/runs/<title>-<sha1>/<timestamp>/` (`latest` symlink):
 `results.json`, `report.html`, `cmp/*.png` side-by-side composites, every
-emulator's environment directory and battery file. Exit status is 0 when every
-dingbat variant passes.
+emulator's environment directory and battery file, `audio/*.wav` clips of
+differing audio. Exit status is 0 when every dingbat variant passes. A suite
+writes `out/suites/<tag>/index.json` (one row per game, logs beside it); a
+second suite with the same `--tag` extends it.
+
+## Testing a change against the corpus: the train
+
+When several changes (or several agents) want the whole corpus, don't run a
+full suite each: submit to the train, which merges every pending candidate
+onto `origin/main`, plays the corpus once in the dingbat configurations and
+replays the games that changed on each candidate alone to say whose change
+it was (the `playtest-train` skill in `.claude/skills/` is the how-to).
+
+```
+tools/playtest/train.py submit HEAD --name what --wait   # exit 0 clean, 1 changes, 2 conflict/build
+tools/playtest/train.py status                           # queue, running train, recent verdicts
+tools/playtest/train.py show ID                          # a verdict / a run's report
+tools/playtest/train.py show noise                       # the noise ledger, most often seen first
+```
+
+A game counts as changed when any dingbat configuration differs from the
+baseline in pass/fail or in any hash: a checkpoint or its frame window, the
+audio dump, the battery file, a `[load]` cell. Verdicts: fixed, regressed,
+mixed, neutral (hashes moved, verdicts did not), interaction (only the
+combination does it), conflict, build-failed; `tests/test_train.py` covers
+the comparison. State lives in `~/.cache/dingbat-train`. Whoever waits when
+no train is running drives it, under a machine-wide lock that a full
+`suite` also waits for (`--no-lock` to bypass; subsets never wait).
+
+Not every cell is deterministic: the second reference reads the host clock
+where it plays live (loading dingbat's save), and OCR can come back empty
+under heavy load. So when the combined run changed anything, the train plays
+those games once more on base itself (base's driver is cached with the
+baseline) before attributing. A cell that differs between the two runs of
+base is noise: left out of every verdict, listed in the report's "Noise"
+section, and counted in `noise.json` under the train home (game, config,
+cell, times seen, example values). On a later train of the same base, a
+combined value that base already produced is noise without a rerun; on
+another base the ledger only marks a surviving change "known noisy".
+Checkpoint OCR that reads no text from a picture that is not blank is read
+once more before it is scored.
+
+Two pieces of the harness make it cheap: every phase keeps its whole result
+(`<phase>/result.json`, hash windows included), and `run`/`suite
+--refs-from` replays the references from an earlier run of the same script
+instead of playing them (their output does not depend on dingbat; a
+reference reading dingbat's save is replayed only when that save is
+byte-identical). `build.sh [TARGET...]` builds a subset, `NIMCACHE=` gives a
+build its own nimcache.
+
+## Findings
+
+`report.py` reduces a suite to findings: at each checkpoint the six emulators
+fall into groups that show the same screen, and a finding is a grouping
+(reported where it first appears) with the group that stands alone named as
+the suspect: `dingbat`, `dingbat:hle-bios`, `dingbat:waitloop`, `mgba`,
+`nba`, or `unclear`. Audio, save files and each save's readers are grouped the
+same way.
 
 ## What a run checks
 
@@ -33,21 +102,38 @@ dingbat variant passes.
    games with a decoder in `saves.py`, structural validity and the decoded
    player-chosen fields (Pokémon Gen 3: section checksums, name, gender).
 4. **Cross-load** — `[load]` runs with each emulator's save seeded into each
-   emulator. A cell passes when its checkpoints match that emulator's run with
-   its own save, and booting must leave the battery file byte-identical.
+   emulator (once per distinct save file: the dingbat configurations usually
+   write identical ones). A cell passes when its checkpoints match that
+   emulator's run with its own save, and booting must leave the battery file
+   byte-identical.
+5. **Audio** — every driver dumps its output (`--audio`, s16le stereo at
+   32768 Hz) for the whole `[new]` run; `audio.py` compares quarter-second
+   windows aligned by emulated frame (level after each emulator's own gain,
+   band shape, stereo width) and counts a window against dingbat only where
+   the references agree. Only features and clips of differing spans are kept.
 
 ## Scripts
 
 `scripts/<rom sha1>.play` — the ROM itself is never committed; `@file` names
 the file it was recorded on so `run <sha1>` can find it in the library
 (`PLAYTEST_LIBRARY`, colon-separated; default `~/Documents/emu/gba` and its
-`archive/roms`). The language is documented in `script.py`. Steps wait on
-screen conditions (`until text "CONTINUE"`, `until stable 20`, `mash A until
-text "GIRL"`) rather than fixed frame counts wherever pacing can differ between
-emulators, so one script replays on all of them.
+`archive/roms`). The language is documented in `script.py`.
+
+Scripts are **frozen**: a fixed input timeline (`wait`, `press`, `hold`,
+`tap`, `checkpoint`) that reads no screen, so every emulator gets the same
+keys on the same frames and a screen that differs at a checkpoint is a
+finding. They are written by playing in a live session (below; AUTHORING.md is
+the full how-to), where conditions such as `until text "CONTINUE"` or `mash A
+until text "GIRL"` are resolved on the slowest emulator and recorded as frames,
+the condition kept as a comment. `playtest.py freeze` converts an older
+condition script the same way (`freeze_all.py` for every one), keeping the
+original in `scripts/source/`.
 
 `@status` other than `ready` (e.g. `@status wip: stuck at intro`) makes
-`suite` skip the script.
+`suite` skip the script. `@save none` marks a game with no battery save,
+`@save skip: why` a script that stops before the first save (play and audio
+are still compared). `@frozen` names the emulators the timeline was resolved
+on.
 
 ## Writing a script: live sessions
 
@@ -60,11 +146,17 @@ playtest.py do emerald log                               # the recorded script s
 playtest.py do emerald stop                              # quits emulators, keeps saves
 ```
 
-`look` writes a side-by-side PNG and prints each emulator's OCR text and the
-guessed selected menu entry. A step that fails on any emulator is rolled back
-everywhere (and a failure screenshot kept), so the recorded script always
-reproduces the emulators' state. `serve --save FILE` seeds a battery file to
-develop the `[load]` section.
+`serve` runs the official-BIOS emulators (`dingbat-bios`, `mgba`, `nba`) in
+lockstep: every step ends with all of them on the same frame after the same
+input. `look` writes a PNG (one frame when they all agree, side by side when
+not) and prints each emulator's OCR text and the guessed selected menu entry.
+A step that fails on any emulator is rolled back everywhere, held keys
+included (and a failure screenshot kept), so the recorded script always
+reproduces the emulators' state; rewinding to a mark forgets the marks made
+after it. `serve --save-dir DIR` boots each emulator with the save it wrote
+itself (a stopped session's `saves/`) to develop the `[load]` section.
+`saveinfo` says whether a battery file holds data. `statecheck.py` checks that
+saving (and loading) a state changes nothing in any emulator.
 
 ## Writing a script: recording a human
 
@@ -117,11 +209,38 @@ found in the ROM.
 | `saves.py` | battery-file description, comparison, game decoders |
 | `pipeline.py` | `run`: the whole flow and report |
 | `library.py` | ROM lookup by SHA-1 |
+| `freeze.py` / `freeze_all.py` | condition script -> frozen input timeline |
+| `audio.py` | audio features, comparison, WAV clips |
+| `report.py` | suite -> findings (who stands alone at each difference) |
+| `train.py` | the test train: batched corpus runs with per-candidate attribution (`tests/test_train.py`) |
+| `hlecmp.py` | every script's `[new]` timeline in two dingbat configurations (`dingbat` and `dingbat-bios` by default), every frame's hash compared: where the HLE BIOS first draws what the official one does not |
+| `statecheck.py` | save-state round-trip check per emulator |
+| `bootsweep.py` | the library with no input: frames dingbat draws that no reference does |
+| `inputsweep.py` | the library with START/A on a beat: crashes, hangs, blank screens, silence, a CPU off the rails |
+
+## Library sweeps
+
+`inputsweep.py sweep --list roms.json --jobs 5 --tag NAME` plays each ROM
+(a JSON list of library file names) for 3000 frames in dingbat and mGBA:
+nothing for 300 frames, then START and A alternately once a second, which
+gets most games past the title into a menu or the first level. Each game
+gets every frame's hash, five screenshots, the audio level per second and
+the battery file, and is flagged only for gross failures against the
+reference (`hang`, `blank`, `few` distinct frames, `silent`, `crash`, a save
+unwritten or of another size). With `PLAYTEST_DINGBAT_DRIVER=bin/dingbat_driver_trace`
+it also flags `wild-pc`: an instruction executed where no code lives.
+`recheck --tag NAME --emus dingbat-bios,nba` runs the flagged games again in
+more emulators (results merge per game); `report --tag NAME` lists them and
+writes `out/inputsweep/NAME/games/<title>/compare.png`. Timing slips fork a
+game's path (an emulator a frame behind takes a press on another screen), so
+a flag is a lead for the screenshots, not a verdict.
 
 ## Driver protocol
 
-Each driver is started as `<driver> <rom> <bios.bin|hle> [--run-bios] [--rtc EPOCH]`,
-prints `ready ...`, then answers one line per command with `ok [...]` or `err ...`:
+Each driver is started as `<driver> <rom> <bios.bin|hle> [--run-bios] [--rtc EPOCH] [--audio PATH]`
+(dingbat also `--no-waitloop`, `--mp2k-hle` for the apps' Enhanced audio setting,
+`--no-fifo-interp` for the raw FIFO latches), prints `ready ...`, then answers one line per
+command with `ok [...]` or `err ...`:
 
 | command | effect |
 |---|---|
@@ -131,11 +250,27 @@ prints `ready ...`, then answers one line per command with `ok [...]` or `err ..
 | `hash` | FNV-1a of the 15-bit framebuffer (identical frames hash identically in every driver) |
 | `shot PATH` | write the framebuffer as a binary PPM |
 | `state_save PATH` / `state_load PATH` | emulator-native save state |
-| `savedata PATH` / `flush` / `peek ADDR LEN` | where supported |
+| `savedata PATH` / `flush` | where supported (not the second reference) |
+| `peek ADDR LEN` | LEN bytes as hex: any address (dingbat, mGBA); work RAM, IWRAM and I/O only (the second reference, through its save-state copy and I/O peek calls) |
 | `rtc_get` | read the cartridge RTC over the GPIO port as a game does: DATE_TIME register bytes and the status byte, hex (dingbat, mGBA) |
 | `rtc_set YYMMDDWWHHMMSS` | DATE_TIME write of those register bytes (dingbat, mGBA — mGBA ignores clock writes) |
 | `poke8 ADDR VAL` | bus write, e.g. a flash command that dirties the save (mGBA) |
+| `chmask N` | output-only channel mutes, bits 0-3 PSG 1-4, 4 FIFO A, 5 FIFO B, a set bit plays (dingbat: `APU.channel_mask`; mGBA: its public `enableAudioChannel`); the frames are unaffected |
+| `apulog PATH` / `apulog off` | log every byte written to 0x04000060-0x0400008F as `FRAME CYCLE_IN_FRAME ADDR VALUE` (dingbat: `bin/dingbat_driver_trace`, built with the core's passive `-d:biosdrvtrace` I/O hook, selected with `PLAYTEST_DINGBAT_DRIVER`; mGBA: the CPU's stores, wrapped) |
+| `trace N PATH` | N single instruction steps, one line each to PATH: `PC CYCLES VCOUNT T/A` (r15 before the step, master-clock cycles it took), `FRAME` at each frame end (dingbat, mGBA). dingbat's r15 leads the instruction by 4 (Thumb), mGBA's by 2; dingbat adds the absolute cycle the step started on and `R` on a step that only paid a parked HLE BIOS routine's remainder |
+| `rundigest N` | run N frames; per frame `FBHASH:COUNT:PCHASH:TIMEHASH` over the instructions run outside the BIOS (how many, which PCs, which PCs on which cycle of the frame): two configurations agree on all four while their game code runs identically (dingbat built with `-d:biosdrvtrace`) |
+| `runto PC` | step until r15 == PC; replies r0..r15 (dingbat) |
+| `runwild F` / `runpc F LO HI` / `runpct F LO HI` / `watchw F ADDR` | step for up to F frames until the CPU executes where no code lives / the PC is in [LO, HI) (`runpct`: in Thumb state) / the word at ADDR changes; replies `hit` or `none`, the frame, the last 48 jumps as `FROM>TO` with T/A and r13, then r0..r15 (dingbat) |
+| `cpu` | `HALTED STOPPED PC`: whether the CPU sits in Halt or Stop (SWI 2/3) and r15; a game asleep in Stop mode waits for its wake keys (dingbat) |
+| `pcwatch on` / `pcwatch` | count instructions executed where no code lives (above the BIOS, I/O, the save chip, above the address space); replies `COUNT FIRST_PC FIRST_FRAME` (dingbat trace build) |
+| `pft PC N PATH` | run to r15 == PC, then N steps with the `-d:pftrace` prefetch log to PATH (dingbat built with `-d:pftrace`) |
 | `quit` | flush the battery file and exit |
+
+`peek` in dingbat is untimed (it used to charge wait states, so peeking every
+frame moved the game's own timing); the second reference's leaves its audio
+byte-identical with a peek every frame. Comparing two emulators' instruction
+traces of the same code is how docs/playtest-bugs.md section 29 found
+which loops cost what.
 
 `rtc_crosscheck.py [rom]` uses these to prove the battery-save RTC trailer
 carries a cart clock between dingbat and mGBA in both directions, on frozen

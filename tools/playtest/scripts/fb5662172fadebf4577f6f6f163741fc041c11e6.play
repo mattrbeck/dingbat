@@ -1,0 +1,112 @@
+@title The Sims - Bustin' Out (USA, Europe)
+@file Sims, The - Bustin' Out (U) (M6).gba
+@game ASIE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# English, Create-a-Sim named "AA", default looks, 5 personality points in each
+# trait, read Uncle Hayseed's letter, arrive at the farm, peek at the START
+# tabs (Goals/Pockets/Sim), then SELECT -> Save Game -> Slot 1.
+# [load]: Load-a-Sim -> Slot 1 - AA (Day 1 10:15 am) -> back at the farm.
+# The "Game saved successfully" screen is left at different frames on each
+# emulator (nba first), so the checkpoint is taken back on the pause menu.
+
+[new]
+wait 600
+wait 2
+checkpoint language window=30 compare=text
+press A
+wait 200
+wait 600
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 150
+checkpoint name_entry window=30 compare=text
+press A after=20
+press A after=20
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press A
+wait 120
+checkpoint create_sim window=30 compare=text
+tap DOWN times=7 every=15 hold=4
+wait 10
+press A
+wait 120
+wait 30
+checkpoint personality window=30 compare=text
+press A
+wait 120
+tap RIGHT times=5 every=20 hold=4
+wait 10
+press DOWN after=20
+tap RIGHT times=5 every=20 hold=4
+press DOWN after=20
+tap RIGHT times=5 every=20 hold=4
+press DOWN after=20
+tap RIGHT times=5 every=20 hold=4
+press DOWN after=20
+tap RIGHT times=5 every=20 hold=4
+wait 10
+checkpoint personality_set window=30 compare=text
+press A
+wait 150
+checkpoint confirm_sim window=30 compare=text
+press A
+wait 200
+checkpoint letter window=30 compare=text
+press A
+wait 200
+wait 200
+checkpoint gameplay window=30 compare=none
+press START
+wait 90
+wait 300
+press START
+wait 60
+checkpoint goals_menu window=30 compare=text
+press L after=40
+press L after=40
+press L after=40
+press R after=40
+press R after=40
+press B after=60
+press SELECT after=60
+checkpoint select_menu window=30 compare=text
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press A
+wait 90
+checkpoint save_slots window=30 compare=text
+press A
+wait 60
+checkpoint saving window=10 compare=text
+# until notext Saving timeout=1200 every=10  [reached dingbat-bios+0 mgba+70 nba+60]
+wait 74
+wait 30
+wait 30
+wait 60
+checkpoint after_save window=30 compare=text
+
+[load]
+wait 602
+press A
+wait 800
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press DOWN after=20
+press A
+wait 120
+checkpoint load_slots window=30 compare=text
+press A
+wait 300
+checkpoint resumed window=30 compare=none
+press START
+wait 60
+checkpoint resumed_goals window=30 compare=text

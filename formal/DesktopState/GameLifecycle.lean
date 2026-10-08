@@ -14,6 +14,18 @@
 Models the native frontend (`src/dingbat.nim`, SDL2 + Dear ImGui) at commit
 a2e038f82 (branch lean-desktop-state); line numbers are at that commit.
 
+**Re-audited at 03f88d6c** (2026-10-05): of the procs modelled here only
+gba.nim `new_storage` changed since the last stamp (1847-1883 @03f88d6c).
+It still reads `<rom path>.changeFileExt(".sav")` once, when the core is
+built; what is new is that an EEPROM game keeps the file's bytes past 0x200
+(`eeprom_file_tail`, 1881-1883) and `write_save` puts them back after a
+4 Kbit chip's 512 bytes. A `Sav` is (game, version), not bytes, and the file
+name, the read and the write's timing are as before, so nothing here moves.
+netcore.nim `new_net_core` (919-940 @03f88d6c) now also clears
+`gba.cpu.wl_cross_events` (938) before attaching; called only from
+`begin_net_link` behind `begin_handshake`'s `gba == nil` refusal, so the
+fixed step is unchanged (the 893-910 row below is the a2e038f82 crash site).
+
 | Nim                                                          | lines       |
 |--------------------------------------------------------------|-------------|
 | `flush_gb_save` (GB core only)                               | 477-481     |
@@ -44,7 +56,8 @@ a2e038f82 (branch lean-desktop-state); line numbers are at that commit.
 | Save States widget callbacks                                 | 2269-2280   |
 | save_states_widget.nim `render` (opens: `on_open`; Save,     | 69-205      |
 |   Delete, Load act on `w.selected` of the grid as last filled) |           |
-| gba.nim `new_storage` (`<rom path minus ext>.sav`)           | 1357-1385   |
+| gba.nim `new_storage` (`<rom path minus ext>.sav`;           | 1357-1385   |
+|   @03f88d6c 1847-1883, `changeFileExt`, EEPROM file tail)    |             |
 | gba.nim `handle_saves` (every 280896 cycles) / storage.nim   | 1530-1532,  |
 |   `write_save` (no try: writeFile's IOError propagates)      | 90-95       |
 | gb.nim `mbc_save` (catches IOError/OSError) / `handle_saves` | 3228-3244,  |

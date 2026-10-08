@@ -1,0 +1,95 @@
+@title Battle Network Rockman EXE 4.5 - Real Operation (Japan)
+@file Battle Network Rockman EXE 4.5 - Real Operation (J).gba
+@game BR4J
+@chip FLASH512 + RTC
+
+# New game (はじめから): the PET asks for the date and time first. The year is
+# raised 2000 -> 2006 so the game-set clock (kept by dingbat) matches the
+# harness epoch mGBA runs at (2006-01-01 00:00, frozen; mGBA ignores clock
+# writes): menus and PET dialogue depend on the date (a トーナメント entry
+# appears at the top of the PET menu, New Year greetings). The second
+# reference always runs on the host clock, so from the PET menu on it shows
+# other dialogue and its inputs go elsewhere; its checkpoints there are not
+# diagnostic. Then owner profile (name あ, male, 0, first occupation), Navi
+# Rockman; decline the tournament, UP wraps to セーブ, save.
+# [load]: title shows つづきから, NAVI SELECT, the PET menu on the saved date.
+# Japanese text does not OCR, so steps are fixed waits (menus here do not lag).
+
+[new]
+wait 600
+until text "RESERVED" timeout=900 every=10
+wait 120
+checkpoint title window=0 compare=text
+press START after=120
+checkpoint title_menu window=10
+press A after=120
+checkpoint clock_set window=10
+press UP after=20
+press UP after=20
+press UP after=20
+press UP after=20
+press UP after=20
+press UP after=20
+press A after=30
+checkpoint clock_2006 window=10
+press A after=30
+press A after=30
+press A after=30
+press A after=60
+press A after=60
+wait 240
+press A after=90
+checkpoint owner_name window=10
+press A after=30
+press START after=30
+press A after=150
+checkpoint name_confirm window=10
+press A after=240
+checkpoint gender window=10
+press A after=180
+checkpoint age window=10
+press A after=120
+checkpoint occupation window=10
+press A after=120
+checkpoint profile_confirm window=10
+press A after=150
+checkpoint navi_select window=10
+press A after=150
+checkpoint navi_confirm window=10
+press A after=420
+checkpoint pet_greeting window=10
+# greeting and mail dialogue; the last A opens the tournament prompt
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+press A after=90
+wait 200
+press A after=90
+press A after=90
+press RIGHT after=20
+press A after=90
+checkpoint pet_menu window=10
+press UP after=30
+press A after=120
+checkpoint save_prompt window=10
+press A after=150
+checkpoint save_screen window=10
+press A after=240
+wait 900
+checkpoint saved window=10
+press A after=120
+
+[load]
+wait 600
+until text "RESERVED" timeout=900 every=10
+wait 120
+press START after=120
+checkpoint title_menu_loaded window=10
+press A after=240
+checkpoint navi_select_loaded window=10
+press A after=150
+press A after=420
+wait 120
+checkpoint resumed_pet window=10

@@ -46,10 +46,18 @@ class ScreenReader:
             self.cache[key] = lines
         return lines
 
-    def read(self, ppm_path, key=None):
-        """{'lines': [...], 'text': joined, 'selected': text or None}"""
-        lines = [dict(l) for l in self.ocr(ppm_path, key)]
+    def read(self, ppm_path, key=None, retry_empty=False):
+        """{'lines': [...], 'text': joined, 'selected': text or None}
+
+        retry_empty: a picture that is not blank but reads as no text at all
+        is read once more before that is believed (Vision returns nothing
+        when a request fails, as it can under heavy load)."""
+        lines = self.ocr(ppm_path, key)
         rgb = img.read_ppm(ppm_path)
+        if not lines and retry_empty and not img.is_blank(rgb):
+            self.cache.pop(key, None)
+            lines = self.ocr(ppm_path, key)
+        lines = [dict(l) for l in lines]
         sel = guess_selected(rgb, lines)
         for i, l in enumerate(lines):
             l['selected'] = (i == sel)

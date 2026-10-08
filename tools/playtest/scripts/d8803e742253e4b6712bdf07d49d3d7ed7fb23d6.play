@@ -1,0 +1,73 @@
+@title Sabre Wulf (USA)
+@file Sabre Wulf (U).gba
+@game AWUE
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Rare logo, title, first portrait slot > START, A through the story with
+# Sabreman's butler, START skips the rest, the campsite: walk around, then
+# pause > Save Game > Yes > SAVE COMPLETE. [load]: the first slot reads 0.9%,
+# START resumes at the campsite, pause menu.
+# The EEPROM files of dingbat-bios and nba are byte-identical; mgba's
+# differs (same 1187 non-blank bytes, different content: the saved game
+# time). Pause-menu screens differ a frame between emulators (cursor blink).
+[new]
+wait 600
+press START
+wait 200
+wait 300
+wait 120
+checkpoint title window=30
+press START
+wait 120
+wait 120
+checkpoint slots window=30
+press A
+wait 120
+press A
+wait 180
+press A hold=10
+wait 240
+tap A times=10 every=40 hold=4
+tap A times=20 every=40 hold=4
+press START
+wait 120
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+checkpoint camp window=30
+press START
+wait 60
+press START
+wait 30
+press DOWN hold=40
+press RIGHT hold=40
+wait 20
+checkpoint walking window=30 compare=none
+press START
+wait 60
+press DOWN after=15
+press DOWN after=15
+checkpoint pause_menu window=30 compare=text
+press A
+wait 120
+press LEFT after=15
+checkpoint save_prompt window=30 compare=text
+press A
+wait 180
+checkpoint saved window=30 compare=text
+
+[load]
+wait 600
+press START
+wait 680
+press START
+wait 240
+checkpoint slots window=30
+press A
+wait 186
+press A hold=10
+wait 400
+checkpoint resumed_camp window=30
+press START
+wait 60
+checkpoint resumed_menu window=30 compare=text

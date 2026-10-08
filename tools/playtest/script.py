@@ -12,6 +12,9 @@ Steps (keys: A B SELECT START RIGHT LEFT UP DOWN R L, combined with +):
 
   wait N                         run N frames
   press KEYS [hold=6] [after=0]  hold KEYS for `hold` frames, then run `after`
+  tap KEYS times=N [every=20] [hold=4]
+                                 N presses of KEYS, one every `every` frames
+                                 (what a frozen `mash` becomes)
   hold KEYS / release            change held keys without running
   until COND [timeout=600] [every=4]
                                  run `every` frames at a time until COND holds;
@@ -34,9 +37,12 @@ Conditions:
   changed         framebuffer differs from when the step started
   blank / notblank  single-colour screen or not
 
-Everything waits on conditions rather than fixed frame counts where the
-game's pacing can drift between emulators (lag frames, load times): a script
-recorded on one emulator then replays on all of them.
+Frozen scripts: a live session (session.py) runs its emulators in lockstep,
+so `until` and `mash` are recorded as what they took on the slowest of them
+(`wait N`, `tap ... times=N`) with the condition kept as a comment. A frozen
+script is a pure input timeline: every emulator gets the same keys on the
+same frames and nothing reads the screen until a checkpoint, so a screen
+that differs there is a finding, not something the script waited out.
 """
 import re
 import shlex
@@ -93,6 +99,10 @@ def parse_step(line):
         opts, rest = _opts(args, {'hold', 'after'})
         return {'op': 'press', 'keys': parse_keys(rest[0]), 'hold': opts.get('hold', 6),
                 'after': opts.get('after', 0)}
+    if op == 'tap':
+        opts, rest = _opts(args, {'times', 'every', 'hold'})
+        return {'op': 'tap', 'keys': parse_keys(rest[0]), 'times': opts.get('times', 1),
+                'every': opts.get('every', 20), 'hold': opts.get('hold', 4)}
     if op == 'hold':
         return {'op': 'hold', 'keys': parse_keys(args[0])}
     if op == 'release':
@@ -131,6 +141,8 @@ def format_step(step):
         if step['after']:
             s += f" after={step['after']}"
         return s
+    if op == 'tap':
+        return f"tap {'+'.join(step['keys'])} times={step['times']} every={step['every']} hold={step['hold']}"
     if op == 'hold':
         return f"hold {'+'.join(step['keys'])}" if step['keys'] else 'release'
     cond = ''
@@ -140,7 +152,8 @@ def format_step(step):
     if op == 'until':
         return f"until {cond} timeout={step['timeout']} every={step['every']}"
     if op == 'mash':
-        return f"mash {'+'.join(step['keys'])} until {cond} timeout={step['timeout']} every={step['every']}"
+        return (f"mash {'+'.join(step['keys'])} until {cond} timeout={step['timeout']} every={step['every']}"
+                + (f" hold={step['hold']}" if step.get('hold', 4) != 4 else ''))
     if op == 'checkpoint':
         return f"checkpoint {step['name']} window={step['window']}" + \
             (f" compare={step['compare']}" if step.get('compare', 'pixels') != 'pixels' else '')

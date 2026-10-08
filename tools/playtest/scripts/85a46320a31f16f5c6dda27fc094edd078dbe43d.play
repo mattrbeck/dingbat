@@ -2,35 +2,54 @@
 @file Tactics Ogre - The Knight of Lodis (U) [!].gba
 @game ATOE
 @chip FLASH
-@status wip: reaches the first (tutorial) battle after the name "AA", the default birthday, the tarot questions (default answers) and the prologue; nothing is written to flash before it. The battle has to be won, and with A-mashing the three emulators already diverge on the first turn (an out-of-range warning in one). A human should record: name, birthday, tarot answers, win the first battle, then save at the first save prompt / world-map menu and quit after the save message. [load]: title > Load/Continue > the slot > resume.
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing is written to flash before the first (tutorial) battle, which has to be won before the first save prompt; it cannot be frozen because the three emulators run different random numbers in it (the rain differs from BATTLE START on, and after Rictor's line the AI turns differ on all three), so the same inputs play a different battle on each
 
-# The opening scene runs until START skips it to the name entry.
+# Opening skipped by START > name "AA" > default birthday > tarot questions
+# and the prologue by A every 30 frames > BATTLE START.
+# Finding (first_turns, f21505, one A press after Rictor's "Don't worry about
+# them all. Just defeat the leader!"): mgba shows the blond ally done (END)
+# next to the green soldier, nba shows him far to the right, dingbat-bios is
+# on another unit's turn; the rain particles already differ at battle_start
+# (f20939), and mgba's BATTLE START banner is on a different fade step.
 
 [new]
 wait 1200
-mash A until text "sound" timeout=2400 every=30
+# mash A until text sound timeout=2400 every=30  [taps dingbat-bios:39 mgba:39 nba:39]
+tap A times=39 every=30 hold=4
 press START
-until text "Enter name" timeout=600 every=10
+# until text 'Enter name' timeout=600 every=10  [reached dingbat-bios+70 mgba+70 nba+70]
+wait 74
 wait 30
 checkpoint enter_name window=0
 press A after=20
-until text "Select letter" timeout=300 every=5
+# until text 'Select letter' timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 press A after=30
-# type "AA", START to finish
 press A after=20
 press A after=20
 press START
-until text "OK?" timeout=300 every=5
+# until text 'OK?' timeout=300 every=5  [reached dingbat-bios+10 mgba+10 nba+5]
+wait 14
 wait 20
 checkpoint name_ok window=0
 press A
-until text "birthdate" timeout=300 every=5
+# until text birthdate timeout=300 every=5  [reached dingbat-bios+15 mgba+15 nba+15]
+wait 19
 wait 30
 checkpoint birthday window=0
 press A
-until text "Yes" timeout=300 every=5
+# until text Yes timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 20
 press A
-# tarot questions, then the prologue narration (default answers everywhere)
-mash A until text "BATTLE START" timeout=20000 every=30
+# mash A until text 'BATTLE START' timeout=20000 every=30  [taps dingbat-bios:603 mgba:602 nba:603]
+tap A times=603 every=30 hold=4
 checkpoint battle_start window=0 compare=none
+wait 120
+wait 200
+checkpoint rictor window=0
+press A after=60
+wait 300
+checkpoint first_turns window=0 compare=none
+

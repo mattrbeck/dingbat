@@ -112,7 +112,11 @@ iterator events*(s: Scheduler): Event =
     yield s.evbuf[i]
 
 proc schedule*(s: Scheduler; cycles: int; kind: EventType) =
-  assert s.nevents < MAX_EVENTS
+  # Only a corrupt save state fills the buffer: one that loads with an event
+  # chain duplicated doubles it every line. The event is dropped rather than
+  # written past evbuf (an assert is gone in -d:danger, and in a quirky core
+  # the write would go ahead anyway).
+  if s.nevents >= MAX_EVENTS: return
   let target = s.cycles + CycleCount(cycles)
   # Ties keep the newest event at the higher index so it pops first
   var i = s.nevents

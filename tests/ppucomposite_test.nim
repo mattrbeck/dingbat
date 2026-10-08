@@ -2,10 +2,13 @@
 ## inner loops: opaque / alpha / brighten-darken). Not a golden-hash test: a
 ## hash would have to match on every CI architecture and be regenerated for
 ## every intentional fix. Each test renders two configurations that must
-## agree for a stated reason. Run with: nimble test_ppucomposite
+## agree for a stated reason, except test 10, which checks every pixel
+## against a plain per-pixel model of the colour-effect rules (a rule wrong
+## in every path passes the others). Run with: nimble test_ppucomposite
 
 import std/[os, strutils]
 import dingbat/gba/gba
+import dingbat/common/util
 
 var failures = 0
 
@@ -864,6 +867,175 @@ proc test_uniform_window_frames(emu: GBA) =
   check(count_fast(0, 120, 0x1F, 0x00) == 0,
         "half-width WIN0 with differing bits takes it on none")
 
+# 10. A per-pixel reference model. Every test above compares the span
+# compositor with itself under two configurations that must agree, so a rule
+# encoded wrongly in both passes them all: a semi-transparent OBJ pixel under
+# a window whose colour-effect bit is clear was drawn opaque by every path
+# and every test here stayed green (docs/playtest-bugs.md, "Semi-transparent
+# OBJ under an effects-off window"). This model recomputes each pixel from
+# the line's layer buffers with none of the span machinery: window by
+# priority (WIN0, WIN1, OBJ window, outside), layers sorted by priority with
+# OBJ in front of an equal-priority BG, then GBATEK's colour effects plus the
+# rule the references and tests/roms/semiobjwin.gba pin down: a
+# semi-transparent OBJ top over a 2nd-target bottom alpha-blends whatever the
+# window's effect bit and BLDCNT's mode; everything else needs the bit.
+proc in_winh(h: WINH; col: int): bool =
+  let x1 = int(h.x1)
+  let x2 = int(h.x2)
+  if x1 <= x2: col >= x1 and col < x2
+  else: col < x2 or col >= x1
+
+proc ref_window(ppu: PPU; col: int): tuple[bits: uint16, eff: bool] =
+  let dbg = ppu.debug_layer_mask
+  let d = ppu.dispcnt
+  if not (d.window_0_display or d.window_1_display or d.obj_window_display):
+    return (uint16(d.default_enable_bits) and dbg, true)
+  if d.window_0_display and ppu.win0_inside and in_winh(ppu.win0h, col):
+    return (uint16(ppu.winin.window_0_enable_bits) and dbg,
+            ppu.winin.window_0_color_special_effect)
+  if d.window_1_display and ppu.win1_inside and in_winh(ppu.win1h, col):
+    return (uint16(ppu.winin.window_1_enable_bits) and dbg,
+            ppu.winin.window_1_color_special_effect)
+  if d.obj_window_display and ppu.sprite_pixels[col].window:
+    return (uint16(ppu.winout.obj_window_enable_bits) and dbg,
+            ppu.winout.obj_window_color_special_effect)
+  (uint16(ppu.winout.outside_enable_bits) and dbg,
+   ppu.winout.outside_color_special_effect)
+
+type RefLayer = object
+  key:    int     # sort key: priority * 8, then OBJ (0) before BG n (1 + n)
+  color:  uint16
+  target: int     # BLDCNT bit: BG n = n, OBJ = 4, backdrop = 5
+  semi:   bool
+
+type RefPath = enum rpPlain, rpSemiAlpha, rpAlpha, rpShade
+
+proc ref_pixel(ppu: PPU; col: int; path: var RefPath): uint16 =
+  let pram = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
+  let (bits, eff) = ref_window(ppu, col)
+  var ls: seq[RefLayer]
+  for bg in 0 .. 3:
+    if not (bit(ppu.line_bg_enables, bg) and bit(bits, bg)): continue
+    let k = int(ppu.bgcnt[bg].priority) * 8 + 1 + bg
+    if ppu.bitmap_direct and bg == 2:
+      if ppu.bg2_direct_opaque[col]:
+        ls.add RefLayer(key: k, color: ppu.bg2_direct[col], target: bg)
+    elif ppu.layer_palettes[bg][col] != 0:
+      ls.add RefLayer(key: k, color: pram[int(ppu.layer_palettes[bg][col])], target: bg)
+  let sp = ppu.sprite_pixels[col]
+  if bit(bits, 4) and sp.palette != 0:
+    ls.add RefLayer(key: int(sp.priority) * 8, color: pram[0x100 + int(sp.palette)],
+                    target: 4, semi: sp.blends)
+  # The backdrop closes the list, twice: the layer under a backdrop top is
+  # the backdrop again, so a backdrop that is both a 1st and a 2nd target
+  # alpha-blends with itself
+  ls.add RefLayer(key: 1000, color: pram[0], target: 5)
+  ls.add RefLayer(key: 1001, color: pram[0], target: 5)
+  # insertion sort: at most six entries, keys distinct
+  for i in 1 ..< ls.len:
+    var j = i
+    while j > 0 and ls[j - 1].key > ls[j].key:
+      swap(ls[j - 1], ls[j])
+      dec j
+  let top = ls[0]
+  let bld = uint16(ppu.bldcnt)
+  let bot_second = bit(bld, ls[1].target + 8)
+  let top_first = bit(bld, top.target)
+  let mode = int(ppu.bldcnt.blend_mode)
+  path = rpPlain
+  if top.semi and bot_second:
+    path = rpSemiAlpha
+    return ppu.blend_colors(top.color, ls[1].color, 1)
+  if eff and top_first:
+    if mode == 1 and bot_second:
+      path = rpAlpha
+      return ppu.blend_colors(top.color, ls[1].color, 1)
+    if mode == 2 or mode == 3:
+      path = rpShade
+      return ppu.blend_colors(top.color, 0, mode)
+  top.color
+
+proc test_reference_model(emu: GBA) =
+  echo "every pixel matches the per-pixel reference model"
+  let ppu = emu.ppu
+  # `directed`: every window's effect bit clear, OBJ enabled everywhere,
+  # semi-transparent sprites and 2nd targets guaranteed (the fog case);
+  # otherwise windows, effect bits, BLDCNT and OBJ modes are all random.
+  proc setup(seed: uint64; bg_mode: uint8; directed: bool) =
+    reseed(seed)
+    seed_memory(ppu, transparent_bias = true)
+    for a in 0x000'u32 .. 0x055'u32: ppu[a] = 0
+    ppu[0x000] = bg_mode
+    ppu[0x001] = 0x1F
+    ppu.debug_layer_mask = if (nxt() and 7) == 0: uint16(nxt() and 0x1F) else: 0x1F
+    for bg in 0'u32 .. 3'u32:
+      ppu[0x008 + 2 * bg] = uint8(nxt() and 0x03) or uint8(nxt() and 0x0C)
+    ppu[0x050] = uint8(nxt() and 0xFF)      # BLDCNT: random targets and mode
+    ppu[0x051] = uint8(nxt() and 0x3F)
+    ppu[0x052] = uint8(nxt() and 0x1F)      # EVA
+    ppu[0x053] = uint8(nxt() and 0x1F)      # EVB
+    ppu[0x054] = uint8(nxt() and 0x1F)      # EVY
+    if directed: ppu[0x051] = ppu[0x051] or 0x0F   # BG0-3 2nd targets
+    let spr = ppu.sprites_ptr()
+    for i in 0 ..< 128:
+      spr[i].attr0 = (spr[i].attr0 and not 0x0300'u16) and 0xFCFF'u16
+      spr[i].attr0 = spr[i].attr0 or uint16((nxt() mod 160) and 0xFF)
+      if directed and (i and 1) == 0:       # half the sprites semi-transparent
+        spr[i].attr0 = (spr[i].attr0 and not (0b11'u16 shl 10)) or (0b01'u16 shl 10)
+      elif (i and 7) == 0:
+        spr[i].attr0 = (spr[i].attr0 and not (0b11'u16 shl 10)) or (0b10'u16 shl 10)
+    ppu.win0h = winh(int(nxt() and 0xFF), int(nxt() and 0xFF))
+    ppu.win1h = winh(int(nxt() and 0xFF), int(nxt() and 0xFF))
+    ppu.win0_inside = (nxt() and 1) == 0
+    ppu.win1_inside = (nxt() and 1) == 0
+    ppu.winin  = cast[WININ](uint16(nxt() and 0xFFFF))
+    ppu.winout = cast[WINOUT](uint16(nxt() and 0xFFFF))
+    if directed:
+      ppu.winin  = cast[WININ]((uint16(ppu.winin) and 0x1F1F'u16) or 0x1010'u16)
+      ppu.winout = cast[WINOUT]((uint16(ppu.winout) and 0x1F1F'u16) or 0x1010'u16)
+    ppu.set_dispcnt_windows((nxt() and 1) == 0, (nxt() and 1) == 0,
+                            directed or (nxt() and 1) == 0)
+
+  var cases = 0
+  var bad = 0
+  var first_bad = ""
+  var hits: array[RefPath, int]
+  var semi_off_hits = 0     # semi-transparent alpha where the effect bit is clear
+  for directed in [false, true]:
+    for bg_mode in [0'u8, 1'u8, 2'u8, 3'u8, 4'u8, 5'u8]:
+      for trial in 0 ..< 8:
+        let seed = 0xD1B54A32D192ED03'u64 * uint64(trial + 1) +
+                   uint64(bg_mode) * 0x2545F491 + (if directed: 0x9E37 else: 0)
+        setup(seed, bg_mode, directed)
+        inc cases
+        for row in 0'u16 .. 159'u16:
+          ppu.vcount = row
+          ppu.render_dirty = true
+          ppu.skip_render = false
+          ppu.scanline()
+          for col in 0 ..< 240:
+            var path: RefPath
+            let want = ppu.ref_pixel(col, path)
+            inc hits[path]
+            if path == rpSemiAlpha and not ref_window(ppu, col).eff:
+              inc semi_off_hits
+            let got = ppu.framebuffer[int(row) * 240 + col]
+            if (got and 0x7FFF) != (want and 0x7FFF):
+              inc bad
+              if first_bad.len == 0:
+                first_bad = "mode " & $bg_mode & " directed=" & $directed &
+                            " trial=" & $trial & " row " & $row & " col " & $col &
+                            ": got " & toHex(got and 0x7FFF) & " want " &
+                            toHex(want and 0x7FFF) & " (" & $path & ")"
+  check(bad == 0, $cases & " randomized frames match the model pixel for pixel",
+        $bad & " pixels differ; first: " & first_bad)
+  echo "    paths: plain ", hits[rpPlain], ", semi alpha ", hits[rpSemiAlpha],
+       " (", semi_off_hits, " with the effect bit clear), alpha ", hits[rpAlpha],
+       ", shade ", hits[rpShade]
+  check(semi_off_hits > 1000 and hits[rpAlpha] > 1000 and hits[rpShade] > 1000,
+        "the fuzz reaches every colour-effect path, including a semi-transparent " &
+        "OBJ blending where the window's effect bit is clear")
+
 when isMainModule:
   test_pack_domain()
   let emu = make_emu()
@@ -880,6 +1052,7 @@ when isMainModule:
   test_bg_enable_delay(emu)
   test_uniform_window_fuzz(emu)
   test_uniform_window_frames(emu)
+  test_reference_model(emu)
   echo ""
   if failures == 0:
     echo "ppucomposite: all checks passed"

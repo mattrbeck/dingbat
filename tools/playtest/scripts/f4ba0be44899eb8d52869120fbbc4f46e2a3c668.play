@@ -1,0 +1,74 @@
+@title Tony Hawk's Pro Skater 4 (USA)
+@file Tony Hawk's Pro Skater 4 (U).gba
+@game AT6E
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# START past the logos, save slot 1 "new", keep the default name "player":
+# the game shows SAVING and writes the new save to EEPROM. Then Career in
+# CA College: dismiss the welcome (L), skate a few seconds, pause > Main Menu.
+# [load]: START now skips slot select and opens the main menu with
+# "active game: player"; START puts the skater back in CA College.
+# Findings: all three write byte-identical 8 KB saves (1198 data bytes).
+# The menus sit over an animated skater, so they are compare=text; in the
+# live session nba's camera in CA College drifted from the others by the
+# pause (f4200).
+
+[new]
+wait 900
+wait 400
+wait 400
+press START
+wait 200
+checkpoint save_slots window=30 compare=text
+press A
+wait 150
+checkpoint save_name window=30 compare=text
+press START
+wait 150
+press A
+wait 150
+checkpoint saving window=0
+wait 200
+checkpoint save_notice window=30 compare=text
+press A
+wait 150
+checkpoint main_menu window=30 compare=text
+press START
+wait 400
+checkpoint welcome window=30 compare=text
+press L
+wait 60
+hold UP
+wait 60
+release
+press A
+wait 60
+hold RIGHT
+wait 40
+release
+press A
+press B hold=20
+wait 100
+hold UP
+wait 90
+release
+wait 60
+checkpoint skating window=30 compare=none
+press START
+wait 60
+checkpoint paused window=30 compare=text
+tap DOWN times=4 every=15 hold=4
+wait 10
+press A
+wait 200
+checkpoint back_to_menu window=30 compare=text
+
+[load]
+wait 1700
+press START
+wait 200
+checkpoint main_menu_loaded window=30 compare=text
+press START
+wait 400
+checkpoint resumed window=30 compare=none

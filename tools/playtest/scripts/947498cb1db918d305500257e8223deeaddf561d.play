@@ -2,6 +2,7 @@
 @file Yoshi Topsy-Turvy (U).gba
 @game KYGE
 @chip EEPROM + tilt sensor
+@frozen dingbat-bios,mgba,nba
 
 # With no save the game makes you calibrate the tilt sensor before the title.
 # The drivers cannot tilt, so every step is confirmed at the resting reading;
@@ -9,61 +10,85 @@
 # calibration to EEPROM (the stored readings are whatever each emulator's
 # idle sensor returns). With a save the game skips calibration and asks which
 # system you are using instead.
-
+# Idle readings: dingbat X 0x392 / Y 0x3A0 (GBATEK's level); mgba 0x3A0 on
+# both (the driver attaches a level rotation source; without one it read
+# 0xFFF); the second reference has no tilt sensor and reads 0xFFF. None of
+# that decides `confirm`: with right = left = the resting X the game's
+# direction state freezes at the frame parity it had, and dingbat reaches
+# the screen one frame after the references (console-measured VRAM
+# contention in the IWRAM decompressor at f723-727, which neither reference
+# models), so its ball stays still where theirs rolls right
+# (docs/playtest-bugs.md, "Yoshi Topsy-Turvy: the calibration ball is frame
+# parity, not the sensor").
 [new]
 wait 600
 checkpoint warning window=0
 press A
-until text "Caution" timeout=600 every=10
+# until text Caution timeout=600 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
 wait 60
 checkpoint caution window=0
 press A
-until text "slight angle" timeout=600 every=10
+# until text 'slight angle' timeout=600 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 60
 press A
-until text "tilt techniques" timeout=600 every=10
+# until text 'tilt techniques' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 press A
-until text "Step One" timeout=600 every=10
+# until text 'Step One' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 checkpoint step_one window=0
 press A
-until text "stand up straight" timeout=600 every=10
+# until text 'stand up straight' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 press A
-until text "Tilt until" timeout=600 every=10
+# until text 'Tilt until' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 checkpoint tilt_right window=0
 press A
-until text "Step Two" timeout=600 every=10
+# until text 'Step Two' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 press A
-until text "stand up straight" timeout=600 every=10
+# until text 'stand up straight' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 press A
-until text "Tilt until" timeout=600 every=10
+# until text 'Tilt until' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 press A
-until text "the way you want" timeout=600 every=10
+# until text 'the way you want' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 checkpoint confirm window=0
 press A
-until text "Nintendo" timeout=600 every=10
-until text "PRESS STAR" timeout=1500 every=10
+# until text Nintendo timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+# until text 'PRESS STAR' timeout=1500 every=10  [reached dingbat-bios+450 mgba+450 nba+440]
+wait 454
 wait 30
 checkpoint title window=0 compare=text
 
 [load]
 wait 600
 press A
-until text "Choose the system" timeout=600 every=10
+# nba could not follow from here: 'until text "Choose the system" timeout=600 every=10': timed out after 600 frames waiting for text 'Choose the system'
+# until text 'Choose the system' timeout=600 every=10  [reached dingbat-bios+40 mgba+40]
+wait 44
 wait 60
 checkpoint choose_system window=0
 press A
-until text "PRESS STAR" timeout=1500 every=10
+# until text 'PRESS STAR' timeout=1500 every=10  [reached dingbat-bios+490 mgba+490]
+wait 494
 wait 60
 press START
-until text "New Game" timeout=300 every=5
+# until text 'New Game' timeout=300 every=5  [reached dingbat-bios+0 mgba+0]
+wait 4
 wait 60
-# the title art animates behind the menu: recorded, not judged
 checkpoint main_menu window=0 compare=none

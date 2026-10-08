@@ -1,0 +1,60 @@
+@title Mega Man Battle Network 2 (USA)
+@file Megaman Battle Network 2 (U) [!].gba
+@game AE2E
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game, A through the opening scenes to Lan in classroom 5A, then PET menu
+# > Save at 00:00 play time. [load]: the title ignores input until about f840
+# (the first DOWN is not taken), CONTINUE, then the PET menu over the room.
+# Seen while authoring: the title's animated background is on a different
+# phase in mgba (f600, f790); dingbat-bios's save differs from mgba/nba in
+# 2 bytes (0x112B, 0x114C).
+
+[new]
+wait 600
+wait 60
+checkpoint title window=30
+press START hold=10
+wait 60
+checkpoint main_menu window=30
+press A hold=10
+wait 300
+checkpoint intro window=30
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+checkpoint first_control window=30
+press START hold=10
+wait 40
+checkpoint pet_menu window=30
+tap DOWN times=7 every=16 hold=8
+wait 10
+press A hold=8
+wait 40
+checkpoint save_prompt window=30
+press A hold=8
+# until text erase timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+press A hold=8
+# until text 'is saved' timeout=900 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 10
+checkpoint saved window=0
+wait 60
+
+[load]
+wait 660
+press START hold=10
+wait 120
+press DOWN hold=10
+wait 20
+wait 30
+press DOWN hold=10
+wait 20
+checkpoint continue_menu window=30
+press A hold=10
+wait 300
+checkpoint resumed window=30
+press START hold=10
+wait 40
+checkpoint resumed_menu window=30

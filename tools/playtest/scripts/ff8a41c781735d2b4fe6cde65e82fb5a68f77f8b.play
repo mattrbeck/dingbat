@@ -1,0 +1,91 @@
+@title Rayman Advance (USA)
+@file Rayman Advance (U) [!].gba
+@game ARYE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# English, first slot (auto-named AAA), intro, world map, Pink Plant Woods:
+# a few jumps, collect tings, fall in the water once (5 -> 4 lives),
+# respawn, START = "quit the game?" YES: quitting writes the EEPROM slot
+# and returns to the language screen. [load]: the slot shows AAA and
+# START goes straight to the world map (no intro).
+# Menu A presses need hold=10 here; hold=6 presses on the slot screen are
+# ignored on every emulator.
+# Finding: nba does not read back its own 8 KB battery file: on [load] its
+# slot list is EMPTY (f1512) and it starts a fresh AAA, while dingbat-bios
+# and mgba (512-byte EEPROM file) show the saved slot and resume on the map.
+# Small in-level differences: nba's Rayman/camera is a frame off at f4476
+# and f4556; identical again at f4816.
+[new]
+wait 600
+checkpoint title_logo window=30
+wait 300
+checkpoint language window=30
+press A
+wait 300
+press START
+wait 300
+checkpoint choose_game window=30
+press A
+wait 120
+checkpoint slot_aaa window=30
+press A
+wait 300
+press A
+wait 300
+press START
+wait 300
+press A hold=10
+wait 30
+wait 200
+checkpoint intro window=30
+press START hold=10
+wait 200
+checkpoint world_map window=30
+press START hold=10
+wait 60
+press B hold=10
+wait 60
+press SELECT hold=10
+wait 60
+press A hold=10
+wait 300
+wait 200
+press A hold=10
+wait 200
+checkpoint level_start window=30
+press RIGHT hold=120
+hold RIGHT
+press A hold=20
+wait 60
+release
+checkpoint tings window=30
+hold RIGHT
+wait 60
+press A hold=20
+wait 60
+press A hold=20
+wait 40
+release
+wait 240
+wait 120
+checkpoint respawn window=30
+press START hold=10
+wait 60
+checkpoint quit_prompt window=30
+press LEFT hold=10
+wait 30
+press A hold=10
+wait 300
+checkpoint after_quit window=30
+
+[load]
+wait 900
+press A
+wait 300
+press START
+wait 300
+checkpoint choose_game window=30
+press A hold=10
+wait 400
+checkpoint resumed_map window=30

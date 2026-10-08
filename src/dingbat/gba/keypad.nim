@@ -20,6 +20,22 @@ proc check_keypad_irq(kp: Keypad) =
     kp.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
   kp.prev_irq_condition = cond
 
+proc stop_key_condition(kp: Keypad): bool =
+  ## What ends Stop mode from the keypad: KEYCNT's key condition (AND: every
+  ## selected key held, vacuously true with none selected; OR: any), with
+  ## its IRQ enable (bit 14) ignored, as a level. Retail sleep routines need
+  ## both halves: Cabbage Patch Kids - The Patch Puppy Rescue, Puyo Pop
+  ## Fever and The Santa Clause 3 sleep with KEYCNT 0x8304 (L+R+SELECT, AND,
+  ## enable clear) and wake on that combination; Ghost Rider, Catwoman and
+  ## Action Man - Robot Atack wake from KEYCNT 0xC304, write 0xC000 (enable,
+  ## AND, no key) and Stop again, which must return although their handler
+  ## acknowledged the first wake's IF and the condition has not changed.
+  ## tests/roms/payloads/keyirq.s asks the console (its Stop cells).
+  let mask    = toU16(kp.keycnt) and 0x03FF'u16
+  let pressed = not toU16(kp.keyinput) and 0x03FF'u16
+  if kp.keycnt.irq_condition: (pressed and mask) == mask
+  else: (pressed and mask) != 0
+
 when defined(test_harness):
   # Latency-probe instrumentation: records every KEYINPUT read (low byte)
   var keyinput_reads*: int = 0
@@ -72,3 +88,5 @@ proc handle_input*(kp: Keypad; input: Input; pressed: bool) =
   of L:      kp.keyinput.l      = not pressed
   of R:      kp.keyinput.r      = not pressed
   kp.check_keypad_irq()
+  if kp.gba.cpu.stopped:
+    kp.gba.interrupts.schedule_interrupt_check()  # stop_key_condition

@@ -13,8 +13,8 @@ import { loadApp, jsonRes, bytesRes, u8, eq, settle } from "./helpers.mjs";
 const GLOBAL_KEYS = [
   "recent", "roms_sort", "gdrive_sync", "prints", "bios:gba", "bios:gbc",
   "system", "audio", "colorCorrect", "video", "keybindings", "large-controls",
-  "opaque-controls", "control-style", "joystick-mode", "hide-touch-on-gamepad",
-  "runahead", "gb-palette", "thumbs_offered",
+  "opaque-controls", "landscape-buttons", "control-style", "joystick-mode", "hide-touch-on-gamepad",
+  "runahead", "gb-palette", "thumbs_offered", "playing", "crashes", "lastgasp",
 ];
 
 // Every IndexedDB key web/index.js writes for one game. Spelled out, not
@@ -29,6 +29,9 @@ const perGameKeys = (n) => [
   "sessionpic:" + n,          // the snapshot's own picture, for its flight
   "cheats:" + n,              // this game's cheat list
   "oldsave:" + n,             // a save kept from before the game was deleted
+  // Earlier moments (checkpoints): their index and nine slots. This device only.
+  "ckpts:" + n,
+  ...[0, 1, 2, 3, 4, 5, 6, 7, 8].map((s) => "ckpt" + s + ":" + n),
   // Nine save-state slots; slot 0 is the legacy un-suffixed key pair.
   "state:" + n, "statemeta:" + n,
   ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((s) =>
@@ -39,7 +42,7 @@ const perGameKeys = (n) => [
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
     !k.startsWith("art:") && !k.startsWith("sessionpic:") &&
-    !k.startsWith("cheats:"));
+    !k.startsWith("cheats:") && !/^ckpts?\d*:/.test(k));
 // ...of which the save data: everything mirrored but the ROM, its picture,
 // a kept save (a way back, which a save reset leaves) and the session (its
 // own group, mirrored too).
@@ -53,6 +56,8 @@ const seedValue = (key, name) => {
   if (key.startsWith("statemeta:")) return { thumb: "data:image/png;base64,AA==", ts: 1000 };
   if (key.startsWith("stateauto:")) return { bytes: u8(5, 5, 5, 5), ts: 1000 };
   if (key.startsWith("sessionpic:")) return { ts: 1000, blob: u8(9, 9) };
+  if (key.startsWith("ckpts:")) return { play: 60000, list: [{ slot: 0, ts: 1000, play: 60000, saveSig: null }] };
+  if (/^ckpt\d+:/.test(key)) return { bytes: u8(5, 5), ts: 1000, play: 60000, saveSig: null, pic: null };
   if (key.startsWith("cheats:")) return "[x] Infinite HP\n01ABCD01\n";
   // Deleted just now: within its 30 days, so no pull expires it.
   if (key.startsWith("oldsave:")) return { data: u8(6, 6), at: 900, del: Date.now(), kept: 900, why: "deleted" };
@@ -124,6 +129,9 @@ test("index.js's perGameKeys is exactly the per-game inventory this file pins", 
   eq(sorted(groups.bytes), ["art:A.gba", "frame:A.gba", "rom:A.gba"]);
   eq(groups.session, ["stateauto:A.gba", "sessionpic:A.gba"],
     "the resume snapshot and its picture are their own group");
+  eq(groups.checkpoints, ["ckpts:A.gba",
+    ...[0, 1, 2, 3, 4, 5, 6, 7, 8].map((s) => "ckpt" + s + ":A.gba")],
+    "the earlier moments are their own group");
   eq(groups.prefs, ["cheats:A.gba"]);
   eq(groups.kept, ["oldsave:A.gba"], "a kept save is its own group");
   eq(sorted(groups.saves), sorted(saveKeys("A.gba")));
@@ -275,7 +283,8 @@ test("Remove from device frees the ROM-shaped data and keeps every save", async 
   await settle();
 
   // The picture stays: it is on Drive, and the Drive-only tile keeps its face.
-  const freed = ["rom:A.gba", "art:A.gba", "stateauto:A.gba", "sessionpic:A.gba"];
+  const freed = ["rom:A.gba", "art:A.gba", "stateauto:A.gba", "sessionpic:A.gba",
+                 ...perGameKeys("A.gba").filter((k) => /^ckpts?\d*:/.test(k))];
   const kept = perGameKeys("A.gba").filter((k) => !freed.includes(k));
   eq(keysLeft(app),
     sorted([...GLOBAL_KEYS, ...kept, ...perGameKeys("B.gb")]),

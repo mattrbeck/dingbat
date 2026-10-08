@@ -7,6 +7,9 @@ The full feature list for both front-ends and both emulated systems.
 - Installable offline-capable PWA; the home screen opens on the library, and the game
   you are playing heads it when you step out (see [home-screen.md](home-screen.md))
 - Touch controls (phone and tablet layouts, both orientations); gamepad support
+- Controller-only use: the d-pad and A/B walk the library, menus and modals (Y opens a
+  game's options, LB/RB filter, LT/RT sort, Start resumes); in a game RT holds fast
+  forward, LT holds rewind, and R3, Guide or a held Select+Start opens the menu paused
 - Save states: nine per-ROM slots with thumbnails, Quick Save / Quick Load, and a session
   saved on exit that a game picks up again from the library (or, by setting, offers after
   booting from the in-game save); Undo for state loads and Reset
@@ -14,7 +17,11 @@ The full feature list for both front-ends and both emulated systems.
   (menu, or double-tap the rewind button) that warns before rolling back an in-game save
 - Run-ahead (opt-in, 1–2 frames); disabled while linked
 - "Clip that!": retroactive capture of the last minute of play, replayed deterministically
-  from state anchors plus the input log, trimmed in the same film-strip scrubber
+  from state anchors plus the input log, trimmed in the same film-strip scrubber, and
+  encoded off screen (WebCodecs to MP4, faster than realtime; MediaRecorder elsewhere).
+  Clips, Record and screenshots carry the console's own picture (the framebuffer at 4x,
+  no filters, colour correction, LCD response, DMG shades or SGB border) and sound
+  (no MP2K HLE, FIFO smoothing or channel mutes)
 - Cheats: Game Genie, GameShark, Action Replay / CodeBreaker
 - Per-ROM saves in IndexedDB; "Manage ROMs and Saves" resets or deletes a game
 - Online link play with room codes; local 2P on one machine

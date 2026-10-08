@@ -1,54 +1,87 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
 -- @models web/index.js: dbPutRoomy loadRom netActive persistSave
--- @models web/netplay.js: armManualFallback launchNetRom makeSession manualConfirmGo manualEnter manualPrepare netDismissModal netFail netHoldsCore netShutdown onSigMessage openNetConnect rbConnect rbStartIfReady rbTeardown rbTryInit sigConnect sigRedial startLocalLink startRtc wireChannel
+-- @models web/netplay.js: armManualFallback launchNetRom makeSession manualConfirmGo manualEnter manualPrepare netDismissModal netFail netHoldsCore netShutdown onSigMessage openNetConnect rbConnect rbStartIfReady rbTeardown rbTryInit sigConnect sigRedial startLocalLink startRtc wireChannel sigRewait sigDialAgain sigRendezvous rtcGaveUp
 
 /-
-# Online link play: connection lifecycle (web/netplay.js, web/index.js @ dd7ba741f)
+# Online link play: connection lifecycle (web/netplay.js, web/index.js @ 5ea4d552)
 
 netplay.js keeps one module global `net` (39), the pending/active session
-built by `makeSession` (66). Paths to a transport:
+built by `makeSession` (75). Paths to a transport:
 
-* signaling socket (`sigConnect` 251) + WebRTC DataChannel (`startRtc` 387,
-  `wireChannel` 424), with a response deadline (`armManualFallback` 306),
-  a redial ladder (`sigRedial` 318, `SIG_REDIAL_DELAYS` 101) and a
-  "paired"-to-open deadline (`rtcDeadline`, 393);
-* a same-browser BroadcastChannel (`startLocalLink` 540 / `LocalChannel` 478)
+* signaling socket (`sigConnect` 257) + WebRTC DataChannel (`startRtc` 393,
+  `wireChannel` 430), with a response deadline (`armManualFallback` 312),
+  a redial ladder (`sigRedial` 324, `SIG_REDIAL_DELAYS` 106) and a
+  "paired"-to-open deadline (`rtcDeadline`, 399);
+* a same-browser BroadcastChannel (`startLocalLink` 546 / `LocalChannel` 484)
   racing the socket; `wireChannel` keeps the first channel and closes later
-  ones ("the loser is torn down here", 425);
-* the manual code exchange (`manualEnter` 759, `manualPrepare` 700,
-  `manualConfirmGo` 816), entered when the server is (or was last seen) down.
+  ones ("the loser is torn down here", 431);
+* the manual code exchange (`manualEnter` 765, `manualPrepare` 706,
+  `manualConfirmGo` 822), entered when the server is (or was last seen) down.
 
-`netShutdown` (1539) tears a session down; `netFail` (235) is a setup failure
+`netShutdown` (1557) tears a session down; `netFail` (241) is a setup failure
 that shuts down with the modal kept and re-arms a fresh session.
 
-index.js side: `rollbackMode` (7154) is set by `enterRollbackMode` (9250) from
-`rbStartIfReady` (netplay.js 1294), which also sets `netMode = false`; the rAF
-`tick` runs exactly one branch: rollback, else netMode (SIO), else linkMode,
-else the solo core (11321-11400). The `pagehide` / `beforeunload` handlers
-tear the session down `if (netActive() || rollbackMode)`; `loadRom` (8012)
-also for a rollback session set up and not yet started (`netHoldsCore`,
-netplay.js 44: its cores have replaced the solo one), and returns without
-naming its game when any such session took the core during its awaits.
-Those, and loadRom's dismissal of an open Link Cable modal where it names the
-new game, model the code as fixed on this branch ("web: a rollback session
-ends before a launch or a page close", "web: a game loaded under Report a Bug
-or the Link Cable modal does not run behind it", "web: a load ends a rollback
-session that is set up but not started"; line numbers, of index.js and of
-netplay.js's rollback functions, are at the last; the rest of this file is
-still at dd7ba741f). At dd7ba741f they tore down only `if (netMode)`, and
-`netMode` is false in a rollback session.
+index.js side: `rollbackMode` (10936) is set by `enterRollbackMode` (13500) from
+`rbStartIfReady` (netplay.js 1306), which also sets `netMode = false`; the rAF
+`tick` runs exactly one branch: rollback (16239), else netMode (16276), else
+linkMode (16280), else the solo core. The `pagehide` (16116) / `beforeunload`
+(16075) handlers tear the session down `if (netActive() || rollbackMode)`;
+`loadRom` (11725) also for a rollback session set up and not yet started
+(`sessionHoldsCore` 11730, `netHoldsCore`, netplay.js 44: its cores have
+replaced the solo one), and returns without naming its game when any such
+session took the core during its awaits (`abandoned` 11734).
+Those, and loadRom's dismissal of an open Link Cable modal (11804) where it
+names the new game, model the code as fixed by "web: a rollback session ends
+before a launch or a page close", "web: a game loaded under Report a Bug or
+the Link Cable modal does not run behind it" and "web: a load ends a rollback
+session that is set up but not started" (ba3f2261). Modelled at 03f88d6c
+and caught up to 5ea4d552 (see below); every line number is at 5ea4d552
+(web/netplay.js, web/index.js and src/dingbat_wasm.nim). At dd7ba741f they tore down only `if (netMode)`, and `netMode` is
+false in a rollback session.
+
+The signaling half follows the fixed pairing code of
+formal/WebState/LinkPairing.lean (web/netplay.js sigRewait/rtcGaveUp; line
+numbers below at that commit): the pairing deadline (`rtcDeadline` 493, and
+ICE 'failed' before the channel opens) runs `rtcGaveUp` (391), which either
+gives the NAT verdict (`netFail`) or goes back to waiting (`sigRewait` 360:
+pc, dc and both timers dropped, the socket detached and closed, then a
+reconnect dial that counts as a step on the redial ladder); a `peer-closed`
+before any description from the friend (464) goes back to waiting too. Every
+dial after the first (`sigDialAgain` 346, the redial timer's and the
+rewait's) arms the manual fallback at the dial and again at the rendezvous
+(`sigRendezvous` 339); a failed one never `netFail`s (`sigConnect(true)`,
+273) but lands back in `sigRedial` (402) through its `onclose`. Two-strike
+bookkeeping lives in LinkPairing; here the deadline's verdict is a free Bool.
+
+What changed in index.js since, and why the model is unchanged by it:
+`loadRom`'s commit may now apply a session to the solo core it just booted
+(`opts.resume`, 11781-11789: the hero's Resume, or an earlier moment
+chosen from the sheet); that state is the same game's, so the solo core
+still holds its own game's battery (`solo.1 = game`), which is all the save
+properties here read, and the rollback session never sees it (a resume
+runs only in the solo commit, after any session was ended). `dbPutRoomy`
+(6235) now frees other games' checkpoints before ROM files on a quota error;
+quota errors are not modelled here (the first put is issued synchronously,
+6248, which is what rbTeardown's ordering rests on), and the retry's check
+(`retried`, 6238-6252: since 87eea59f any retry asks `superseded()` first) is
+SavePersistence's (`regress_ckpt_evict_*`). `persistSave` also
+posts the stored save to the save webhook (7538), which touches no state
+here. `openNetConnect` (netplay.js 181) now takes the run state from a
+picture flight's hold (`netFrozeGame = !!currentRomName &&
+!takePlayerPause()`, 206, fbdb7975); whether the game runs under the modal
+is RunPause's, and this model has no pause state.
 
 ## What is modelled
 
 * Sessions are numbered; `cur` is `net` (none = null). Sockets are numbered
   with the WebSocket readyState, whether `onopen` ran (`opened`, the closure
-  variable in sigConnect 264), whether the handlers were nulled
-  (`manualEnter` 776), and the queued `error`/`close` events. Per the
+  variable in sigConnect 270), whether the handlers were nulled
+  (`manualEnter` 782), and the queued `error`/`close` events. Per the
   WHATWG spec, `close()` on a CONNECTING socket *fails* it: `error` then
   `close` are queued; on an OPEN socket only `close` is queued; a socket not
   OPEN delivers no messages.
-* The awaiting caller of each `sigConnect` promise (the Connect button 1384 or
-  a redial timer 335) is a pending continuation on the socket, resumed by
+* The awaiting caller of each `sigConnect` promise (the Connect button 1396 or
+  a redial timer 341) is a pending continuation on the socket, resumed by
   `resume` at any later point.
 * Channels: `local sid` (the LocalChannel of session sid), `rtc p` (the
   DataChannel of peer connection p), `manual p` (the pre-created manual-exchange
@@ -57,23 +90,23 @@ still at dd7ba741f). At dd7ba741f they tore down only `if (netMode)`, and
 * Saves: `store g` is the IndexedDB `save:<g>` record as (whose battery data,
   version). The solo core holds `solo`; the rollback session's own core
   (`rollback_init` builds fresh cores; `rollback_exit_to_single` promotes
-  ours and writes its .sav, dingbat_wasm.nim 1509) holds `(sessGame, rbV)`.
+  ours and writes its .sav, dingbat_wasm.nim 1558) holds `(sessGame, rbV)`.
 
 ## Abstractions
 
-* rbConnect / the hello-state exchange / `rbTryInit` (netplay.js 1270:
+* rbConnect / the hello-state exchange / `rbTryInit` (netplay.js 1271:
   `rollback_init` boots the session's cores in place of the solo one,
   `rb.inited`) are one event `rbInit` (enabled once the channel is open);
-  the READY exchange / `rbStartIfReady` (1305: `net.started`, rollback mode)
+  the READY exchange / `rbStartIfReady` (1306: `net.started`, rollback mode)
   is `rbStart`. Between them the session holds the core but has not started:
   "Ready — waiting for your friend…", which can last a whole cross-game ROM
   transfer. The SIO path (`?rollback=0`, `launchNetRom`) is not modelled.
 * `netShutdown`'s tail after `await rbTeardown()` (closing dc/pc/ws) is folded
   into its first segment. rbTeardown's `persistSave(currentRomName,
   currentOriginalName)` evaluates its arguments, reads the FS and issues the
-  IndexedDB put synchronously (dbPutRoomy -> dbPut, index.js 4260/537), so the
+  IndexedDB put synchronously (dbPutRoomy -> dbPut, index.js 6248/568), so the
   write's key is fixed at teardown time and is modelled there.
-* `loadRom`'s awaits before its commit (8024-8048) are `launch`/`loadCommit`.
+* `loadRom`'s awaits before its commit (11738-11762) are `launch`/`loadCommit`.
 * One "waiting"/"paired" reply stands for any server message; SDP/ICE
   contents are not modelled (a pc either yields its channel or not).
 * `navigator.onLine` is true; BroadcastChannel exists.
@@ -117,10 +150,15 @@ inductive Waiter where
   | none | join (sid : Nat) | redial (sid : Nat)
   deriving DecidableEq, Repr
 
+/-- A dial after the first (`sigConnect(true)`). -/
+def Waiter.isRedial : Waiter → Bool
+  | .redial _ => true
+  | _ => false
+
 structure Sock where
   st       : SSt := .none
-  opened   : Bool := false       -- sigConnect's `opened` (264)
-  detached : Bool := false       -- handlers nulled by manualEnter (776)
+  opened   : Bool := false       -- sigConnect's `opened` (270)
+  detached : Bool := false       -- handlers nulled by manualEnter (782)
   errQ     : Bool := false       -- an `error` event queued
   closeQ   : Bool := false       -- a `close` event queued
   res      : Option Bool := none -- sigConnect's promise resolved with
@@ -149,7 +187,7 @@ structure State where
   nextSid    : Nat
   modal      : Bool                -- netModal "open"
   manualView : Bool                -- netManualView visible
-  sigUp      : Option Bool         -- sigServerUp (119)
+  sigUp      : Option Bool         -- sigServerUp (124)
   fallback   : Option Nat          -- manualFallbackTimer, armed for that session
   sess       : Nat → Sess
   socks      : Nat → Sock
@@ -221,11 +259,11 @@ def closeWsOpt : Option Nat → State → State
   | some k, s => closeSock k s
   | none, s => s
 
-/-- A fresh session (makeSession 66). -/
+/-- A fresh session (makeSession 75). -/
 def newSession (s : State) : State :=
   { s with cur := some s.nextSid, nextSid := s.nextSid + 1 }
 
-/-- manualPrepare (700), first segment: close the old pc, mint a new pc and its
+/-- manualPrepare (706), first segment: close the old pc, mint a new pc and its
     unwired channel; the code is ready after `manualReady`. -/
 def manualPrepare (s : State) : State :=
   match s.cur with
@@ -234,7 +272,7 @@ def manualPrepare (s : State) : State :=
     let p := s.nextPc
     updS sid (fun x => { x with pc := some p, manualReady := false }) { s with nextPc := p + 1 }
 
-/-- manualEnter (759): clear the three timers, null the socket's handlers and
+/-- manualEnter (765): clear the three timers, null the socket's handlers and
     close it, drop the BroadcastChannel, show the manual view, then
     manualPrepare (a new pc). Written as one record update. -/
 def manualEnter (s : State) : State :=
@@ -272,7 +310,7 @@ def curWs (s : State) : Option Nat :=
 def shutSock (s : State) (j : Nat) : Sock :=
   if curWs s = some j then closeF (s.socks j) else s.socks j
 
-/-- netShutdown (1556). `keep` = `{ keepModal: true }`. rbTeardown (1328), when
+/-- netShutdown (1557). `keep` = `{ keepModal: true }`. rbTeardown (1329), when
     the session's rollback cores exist (`rb.inited`, started or not), promotes
     ours to the solo core, leaves rollback mode and persists it under
     `currentOriginalName`. -/
@@ -290,13 +328,13 @@ def shutdown (keep : Bool) (s : State) : State :=
     store := if rb then put s.game (s.sessGame, s.rbV) s.store else s.store,
     modal := keep && s.modal, manualView := keep && s.manualView }
 
-/-- netDismissModal (1605), as loadRom calls it when the modal is open: a
+/-- netDismissModal (1626), as loadRom calls it when the modal is open: a
     session still pairing is shut down; otherwise the modal just closes. (The
     Dismiss event below is the same code.) -/
 def dismissModal (s : State) : State :=
   if (curSess s).started || s.cur.isNone then { s with modal := false } else shutdown false s
 
-/-- netFail (235): setup failure (or peer gone once started). -/
+/-- netFail (241): setup failure (or peer gone once started). -/
 def netFail (s : State) : State :=
   match s.cur with
   | some sid => if (s.sess sid).started then shutdown false s else
@@ -306,13 +344,13 @@ def netFail (s : State) : State :=
       let s := shutdown true s
       if s.modal then newSession s else s
 
-/-- sigConnect (251): a new CONNECTING socket becomes net.ws. -/
+/-- sigConnect (257): a new CONNECTING socket becomes net.ws. -/
 def sigConnect (sid : Nat) (w : Waiter) (s : State) : State :=
   let k := s.nextSock
   let s := updK k (fun _ => { st := .connecting, waiter := w }) { s with nextSock := k + 1 }
   updS sid (fun x => { x with ws := some k }) s
 
-/-- sigRedial (318). -/
+/-- sigRedial (324). -/
 def sigRedial (sid : Nat) (s : State) : State :=
   let x := s.sess sid
   if !x.code then s else
@@ -322,7 +360,31 @@ def sigRedial (sid : Nat) (s : State) : State :=
   if attempt ≥ 3 then manualEnter { s with sigUp := some false }
   else updS sid (fun x => { x with redialT := true }) s
 
-/-- wireChannel (424): keep the first channel, close any later one. -/
+/-- sigRewait (360), first part: the pairing's pc and dc dropped, both timers
+    cleared, the socket's handlers nulled and the socket closed. -/
+def rewaitClose (sid : Nat) (s : State) : State :=
+  let x := s.sess sid
+  { s with
+    sess := fun j => if j = sid then
+        { s.sess j with redialT := false, deadline := false, ws := none, pc := none, dc := none }
+      else s.sess j,
+    socks := fun k => if x.ws = some k then closeF { s.socks k with detached := true }
+      else s.socks k }
+
+/-- sigRewait (360): back to waiting on the same code. The reconnect counts
+    against the redial ladder (`session.redials++`); with the ladder spent it
+    gives up into the manual exchange, else sigDialAgain (346) arms the
+    fallback and dials (`sigConnect(true)`, awaited by the redial waiter). -/
+def rewait (sid : Nat) (s : State) : State :=
+  let x := s.sess sid
+  if !x.code || x.rtcConnected || x.started then s else
+  let s := rewaitClose sid s
+  if x.redials ≥ 3 then manualEnter { s with sigUp := some false }
+  else sigConnect sid (.redial sid)
+    (updS sid (fun y => { y with redials := y.redials + 1, rdials := y.rdials + 1 })
+      { s with fallback := some sid })
+
+/-- wireChannel (430): keep the first channel, close any later one. -/
 def wireChannel (c : Chan) (s : State) : State :=
   match s.cur with
   | none => s
@@ -337,7 +399,7 @@ def wireChannel (c : Chan) (s : State) : State :=
       | .local _ => s
       | _ => updS sid (fun x => { x with bc := false }) s
 
-/-- dc.onopen (436): linked; close the signaling socket and forget it. -/
+/-- dc.onopen (442): linked; close the signaling socket and forget it. -/
 def dcOnOpen (s : State) : State :=
   match s.cur with
   | none => s
@@ -347,16 +409,16 @@ def dcOnOpen (s : State) : State :=
     let s := closeWsOpt x.ws s
     updS sid (fun x => { x with ws := none }) s
 
-/-- hasAltPath (263). -/
+/-- hasAltPath (269). -/
 def hasAltPath (s : State) : Bool :=
   match s.cur with
   | none => false
   | some sid => let x := s.sess sid; x.bc || x.dc.isSome || x.rtcConnected || x.started
 
 inductive Event where
-  | openModal                 -- Link Cable menu item -> openNetConnect (176)
-  | joinClick                 -- Connect / Cancel (1384)
-  | dismiss                   -- x, backdrop, Escape -> netDismissModal (1605)
+  | openModal                 -- Link Cable menu item -> openNetConnect (181)
+  | joinClick                 -- Connect / Cancel (1396)
+  | dismiss                   -- x, backdrop, Escape -> netDismissModal (1626)
   | sockOpen (k : Nat)        -- the server accepts
   | sockRefused (k : Nat)     -- the dial fails (server down)
   | sockDrop (k : Nat)        -- an open socket drops
@@ -364,23 +426,26 @@ inductive Event where
   | sockClose (k : Nat)       -- its queued `close` event is dispatched
   | sockMsg (k : Nat) (paired : Bool)  -- a server message ("waiting" / "paired")
   | resume (k : Nat)          -- the `await sigConnect()` continuation runs
-  | fallbackFire             -- manualFallbackTimer (306)
-  | redialFire (sid : Nat)    -- a redial timer (335)
-  | deadlineFire (sid : Nat)  -- rtcDeadline (393 / 881)
-  | localPair                 -- another tab answers on the BroadcastChannel (540-590)
+  | fallbackFire             -- manualFallbackTimer (312)
+  | redialFire (sid : Nat)    -- a redial timer (341)
+  | deadlineFire (sid : Nat) (verdict : Bool)
+                              -- rtcDeadline (493 / 985) or ICE 'failed'; verdict = rtcGaveUp's
+                              -- second strike (the NAT verdict) vs back to waiting
+  | peerLeft (k : Nat)        -- "peer-closed" before any description from the friend (464)
+  | localPair                 -- another tab answers on the BroadcastChannel (546-596)
   | rtcChannel                -- the pc's DataChannel appears (createDataChannel / ondatachannel)
   | dcOpen                    -- the wired RTC/manual channel opens
-  | toManual                  -- "use codes instead" (1672)
+  | toManual                  -- "use codes instead" (1693)
   | manualReady               -- manualPrepare's awaits finish: the code is minted
-  | remint                    -- manualPrepare again (45 s timer / return to foreground, 748/952)
-  | confirmHost (srdOk : Bool) -- manualConfirmGo as the host (816); setRemoteDescription ok?
+  | remint                    -- manualPrepare again (45 s timer / return to foreground, 754/964)
+  | confirmHost (srdOk : Bool) -- manualConfirmGo as the host (822); setRemoteDescription ok?
   | rbInit                    -- rbConnect .. rbTryInit: the session's cores hold the core
   | rbStart                   -- rbStartIfReady: the rollback session runs
   | rbProgress                -- the linked game writes its battery (e.g. a trade)
   | disconnect                -- Disconnect (two-step), idle timeout, peer gone
   | launch (g : Nat)          -- tile tap / file drop -> loadRom, first segment
-  | loadCommit                -- loadRom's commit (7893-7921)
-  | pagehide                  -- tab closed / navigated (11226)
+  | loadCommit                -- loadRom's commit (11767-11805)
+  | pagehide                  -- tab closed / navigated (16116)
   deriving DecidableEq, Repr
 
 def en (s : State) : Event → Bool
@@ -396,7 +461,8 @@ def en (s : State) : Event → Bool
   | .resume k => !s.dead && (s.socks k).res.isSome && (s.socks k).waiter != .none
   | .fallbackFire => !s.dead && s.fallback.isSome
   | .redialFire sid => !s.dead && (s.sess sid).redialT
-  | .deadlineFire sid => !s.dead && (s.sess sid).deadline
+  | .deadlineFire sid _ => !s.dead && (s.sess sid).deadline
+  | .peerLeft k => !s.dead && (s.socks k).st == .opn && !(s.socks k).detached
   | .localPair => !s.dead && (curSess s).bc && (curSess s).dc.isNone
   | .rtcChannel => !s.dead && (match (curSess s).pc with
       | some p => !s.offered (.rtc p) && !s.manualView | none => false)
@@ -417,11 +483,11 @@ def en (s : State) : Event → Bool
   | .pagehide => !s.dead
 
 def step (s : State) : Event → State
-  -- openNetConnect (176): net = makeSession; open; if sigServerUp === false -> manualEnter()
+  -- openNetConnect (181): net = makeSession; open; if sigServerUp === false -> manualEnter()
   | .openModal =>
     let s := { newSession s with modal := true, manualView := false }
     if s.sigUp == some false then manualEnter s else s
-  -- netJoinGo (1384): Cancel while dialing/listening, else rendezvous
+  -- netJoinGo (1396): Cancel while dialing/listening, else rendezvous
   | .joinClick =>
     match s.cur with
     | none => s
@@ -432,7 +498,7 @@ def step (s : State) : Event → State
       else
         let s := updS sid (fun x => { x with code := true, bc := true }) { s with fallback := some sid }
         sigConnect sid (.join sid) s
-  -- netDismissModal (1605)
+  -- netDismissModal (1626)
   | .dismiss =>
     if (curSess s).started || s.cur.isNone then { s with modal := false } else shutdown false s
   | .sockOpen k =>
@@ -442,16 +508,17 @@ def step (s : State) : Event → State
     else updK k (fun y => { y with opened := true, res := some true }) { s with sigUp := some true }
   | .sockRefused k => updK k (fun y => { y with st := .closed, errQ := true, closeQ := true }) s
   | .sockDrop k => updK k (fun y => { y with st := .closed, closeQ := true }) s
-  -- ws.onerror (270)
+  -- ws.onerror (292): a reconnect dial's failure (`sigConnect(true)`) is
+  -- sigRedial's, through its onclose, never netFail's
   | .sockErr k =>
     let y := s.socks k
     let s := updK k (fun y => { y with errQ := false }) s
     if y.detached || y.opened then s
     else
       let s := { s with sigUp := some false }
-      let s := if hasAltPath s then s else netFail s
+      let s := if hasAltPath s || y.waiter.isRedial then s else netFail s
       updK k (fun y => { y with res := some false }) s
-  -- ws.onclose (284)
+  -- ws.onclose (290)
   | .sockClose k =>
     let y := s.socks k
     let s := updK k (fun y => { y with closeQ := false }) s
@@ -462,14 +529,14 @@ def step (s : State) : Event → State
       let x := s.sess sid
       if x.ws != some k || x.rtcConnected || x.started || x.pc.isSome then s
       else sigRedial sid s
-  -- onSigMessage (346): uses the global `net`, not the socket's session
+  -- onSigMessage (352): uses the global `net`, not the socket's session
   | .sockMsg _ paired =>
     match s.cur with
     | none => s
     | some sid =>
       let s := updS sid (fun x => { x with redials := 0, rdials := 0 }) { s with fallback := none, sigUp := some true }
       if paired && (s.sess sid).pc.isNone then
-        -- startRtc (387): new pc, deadline armed
+        -- startRtc (393): new pc, deadline armed
         let p := s.nextPc
         updS sid (fun x => { x with pc := some p, deadline := true }) { s with nextPc := p + 1 }
       else s
@@ -479,7 +546,8 @@ def step (s : State) : Event → State
     let s := updK k (fun y => { y with waiter := .none }) s
     match y.waiter, y.res with
     | .join sid, some ok =>
-      if ok then s   -- (1406) rendezvous sent if still ours; nothing modelled changes
+      -- (1511) sigRendezvous if still ours: the fallback re-armed for the reply
+      if ok then (if s.cur == some sid && (s.sess sid).dc.isNone then { s with fallback := some sid } else s)
       else if s.cur == some sid && (s.sess sid).dc.isNone && !(s.sess sid).rtcConnected then
         manualEnter { s with fallback := none }
       else s
@@ -499,12 +567,27 @@ def step (s : State) : Event → State
     let s := updS sid (fun x => { x with redialT := false }) s
     let x := s.sess sid
     if s.cur != some sid || x.dc.isSome || x.rtcConnected || x.started then s
-    else sigConnect sid (.redial sid) (updS sid (fun x => { x with rdials := x.rdials + 1 }) s)
-  | .deadlineFire sid =>
+    -- sigDialAgain (346): the fallback armed for the dial
+    else sigConnect sid (.redial sid)
+      (updS sid (fun x => { x with rdials := x.rdials + 1 }) { s with fallback := some sid })
+  -- rtcGaveUp (391) on the server path; the manual exchange's own deadline
+  -- (985) always fails ("Couldn't connect with those codes").
+  | .deadlineFire sid verdict =>
     let s := updS sid (fun x => { x with deadline := false }) s
     let x := s.sess sid
-    if s.cur == some sid && !x.rtcConnected && !x.started then netFail s else s
-  -- pair (568): LocalChannel wired, then chan.onopen() synchronously
+    if s.cur == some sid && !x.rtcConnected && !x.started then
+      (if verdict || s.manualView then netFail s else rewait sid s)
+    else s
+  -- onSigMessage (425): any reply resets the ladder and the fallback; then
+  -- "peer-closed" (464) with no description from the friend goes back to waiting
+  | .peerLeft _ =>
+    match s.cur with
+    | none => s
+    | some sid =>
+      let s := updS sid (fun x => { x with redials := 0, rdials := 0 })
+        { s with fallback := none, sigUp := some true }
+      rewait sid s
+  -- pair (574): LocalChannel wired, then chan.onopen() synchronously
   | .localPair =>
     match s.cur with
     | none => s
@@ -520,7 +603,7 @@ def step (s : State) : Event → State
     | some sid => updS sid (fun x => { x with manualReady := true }) s
     | none => s
   | .remint => manualPrepare s
-  -- manualConfirmGo (816), host side: wireChannel(session.manualChan) BEFORE
+  -- manualConfirmGo (822), host side: wireChannel(session.manualChan) BEFORE
   -- `await setRemoteDescription`; on failure it returns with the input editable.
   | .confirmHost ok =>
     match s.cur, (curSess s).pc with
@@ -528,7 +611,7 @@ def step (s : State) : Event → State
       let s := wireChannel (.manual p) s
       if ok then updS sid (fun x => { x with confirmed := true, deadline := true }) s else s
     | _, _ => s
-  -- rbTryInit (1270): rollback_init boots the session's cores from the named
+  -- rbTryInit (1271): rollback_init boots the session's cores from the named
   -- game's state (its battery included) in place of the solo core.
   | .rbInit =>
     match s.cur with
@@ -536,7 +619,7 @@ def step (s : State) : Event → State
     | some sid =>
       let s := updS sid (fun x => { x with inited := true }) s
       { s with sessGame := s.game, rbV := s.solo.2 }
-  -- rbStartIfReady (1305) + enterRollbackMode (9445)
+  -- rbStartIfReady (1306) + enterRollbackMode (13500)
   | .rbStart =>
     match s.cur with
     | none => s
@@ -545,7 +628,7 @@ def step (s : State) : Event → State
       { s with netMode := false, rollbackMode := true, modal := false, manualView := false }
   | .rbProgress => { s with rbV := s.rbV + 1 }
   | .disconnect => shutdown false s
-  -- loadRom (8012-8030): `if (sessionHoldsCore()) await netShutdown()`, i.e.
+  -- loadRom (11725-11744): `if (sessionHoldsCore()) await netShutdown()`, i.e.
   -- netMode, rollbackMode, or a rollback session set up and not yet started
   -- (netHoldsCore): the session ends while currentOriginalName still names
   -- its game, before anything boots.
@@ -553,8 +636,8 @@ def step (s : State) : Event → State
     let s := if s.netMode || s.rollbackMode || (curSess s).inited then shutdown false s else s
     { s with loadPending := some g }
   -- persistSave(outgoing) ... then one segment: initFromEmscripten,
-  -- currentOriginalName = g, and (8070) an open Link Cable modal dismissed.
-  -- 8031-8048 (`abandoned`): a session that took the core during the awaits
+  -- currentOriginalName = g (11767-11773), and (11804) an open Link Cable modal
+  -- dismissed. 11744-11762 (`abandoned`): a session that took the core during the awaits
   -- owns it: the load returns without naming its game.
   | .loadCommit =>
     match s.loadPending with
@@ -564,7 +647,7 @@ def step (s : State) : Event → State
       let s := { s with store := put s.game s.solo s.store }
       let s := { s with game := g, solo := s.store g, loadPending := none }
       if s.modal then dismissModal s else s
-  -- pagehide (11429) / beforeunload (11403): `if (netActive() || rollbackMode)
+  -- pagehide (16116) / beforeunload (16075): `if (netActive() || rollbackMode)
   -- netShutdown()` (its put is issued synchronously), then
   -- persistSave(currentRomName, ...). `lostProgress`: the page died in a
   -- session whose progress is not in the store.
@@ -775,6 +858,31 @@ theorem ninv_sigRedial {s : State} (h : NInv s) (sid k : Nat) (hc : s.cur = some
       exact ninv_congr h1 ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
     · clear h1; ninv_tac []
 
+theorem ninv_rewaitClose {s : State} (h : NInv s) (sid : Nat) (hc : s.cur = some sid) :
+    NInv (rewaitClose sid s) := by
+  unfold rewaitClose; ninv_tac [hc]
+
+/-- Back to waiting keeps every socket / timer / ladder fact: the old socket is
+    closed before the new one is dialed, and the reconnect is a ladder step. -/
+theorem ninv_rewait {s : State} (h : NInv s) (sid : Nat) (hc : s.cur = some sid)
+    (hmv : s.manualView = false) : NInv (rewait sid s) := by
+  unfold rewait
+  simp only
+  split
+  · exact h
+  · have h1 := ninv_rewaitClose h sid hc
+    split
+    · exact ninv_manualEnter (ninv_congr h1 ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩)
+    · rename_i hlt
+      have hle := h.ladderLe sid
+      have h2 : NInv (updS sid (fun y => { y with redials := y.redials + 1, rdials := y.rdials + 1 })
+          { rewaitClose sid s with fallback := some sid }) := by
+        clear h; unfold rewaitClose at h1 ⊢; ninv_tac [hc]
+      apply ninv_sigConnect h2 sid _ (by simpa [rewaitClose] using hc)
+      · intro k hk; simp [rewaitClose] at hk
+      · simp [rewaitClose]
+      · simpa [rewaitClose] using hmv
+
 theorem ninv_wireChannel {s : State} (h : NInv s) (c : Chan)
     (hpc : ∀ p, (c = .rtc p ∨ c = .manual p) → (curSess s).pc = some p) : NInv (wireChannel c s) := by
   unfold wireChannel
@@ -912,15 +1020,15 @@ theorem ninv_ev_sockErr {s : State} (k : Nat) (h : NInv s) (he : en s (.sockErr 
     · have := h.freshK k h'; simp [en, this] at he
   have h1 : NInv (updK k (fun y => { y with errQ := false }) s) :=
     ninv_updK_keep h k hk _ (fun _ => rfl) (fun _ => rfl)
+  have h2 : NInv { (updK k (fun y => { y with errQ := false }) s) with sigUp := some false } :=
+    ninv_congr h1 ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  have h3 := ninv_netFail h2
   simp only [step]
-  split
-  · exact h1
-  · have h2 : NInv { (updK k (fun y => { y with errQ := false }) s) with sigUp := some false } :=
-      ninv_congr h1 ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
-    split
-    · exact ninv_updK_keep h2 k hk _ (fun _ => rfl) (fun _ => rfl)
-    · have h3 := ninv_netFail h2
-      exact ninv_updK_keep h3 k (by rw [netFail_nextSock]; exact hk) _ (fun _ => rfl) (fun _ => rfl)
+  repeat' split
+  all_goals first
+    | exact h1
+    | exact ninv_updK_keep h2 k hk _ (fun _ => rfl) (fun _ => rfl)
+    | exact ninv_updK_keep h3 k (by rw [netFail_nextSock]; exact hk) _ (fun _ => rfl) (fun _ => rfl)
 
 theorem ninv_ev_sockClose {s : State} (k : Nat) (h : NInv s) (he' : en s (.sockClose k) = true) :
     NInv (step s (.sockClose k)) := by
@@ -977,7 +1085,9 @@ theorem ninv_ev_resume {s : State} (k : Nat) (h : NInv s) (he : en s (.resume k)
   have h1 : NInv (updK k (fun y => { y with waiter := .none }) s) := by ninv_tac []
   split
   · split
-    · exact h1
+    · split
+      · clear h1; ninv_tac []
+      · exact h1
     · split
       · apply ninv_manualEnter; clear h1; ninv_tac []
       · exact h1
@@ -1013,23 +1123,50 @@ theorem ninv_ev_redialFire {s : State} (sid : Nat) (h : NInv s) (he' : en s (.re
       · rfl
       · have := h.manualNoRedial sid hm; rw [he] at this; cases this
     have h2 : NInv (updS sid (fun x => { x with rdials := x.rdials + 1 })
-        (updS sid (fun x => { x with redialT := false }) s)) := by
+        { updS sid (fun x => { x with redialT := false }) s with fallback := some sid }) := by
       clear h1
       have := h.ladder sid he; have := h.ladderCap sid he
-      ninv_tac []
+      ninv_tac [hc]
     apply ninv_sigConnect h2 sid _ (by simpa using hc)
     · intro k hk; simp at hk; simpa [live] using h.redialDead sid k he hk
     · simp
     · simpa using hmv
 
-theorem ninv_ev_deadlineFire {s : State} (sid : Nat) (h : NInv s) (he : en s (.deadlineFire sid) = true) :
-    NInv (step s (.deadlineFire sid)) := by
+theorem ninv_ev_deadlineFire {s : State} (sid : Nat) (v : Bool) (h : NInv s)
+    (he : en s (.deadlineFire sid v) = true) : NInv (step s (.deadlineFire sid v)) := by
   have obs := fun (t : State) (o : Obs s t) => ninv_congr h o
   simp only [step]
   have h1 : NInv (updS sid (fun x => { x with deadline := false }) s) := by ninv_tac []
   split
-  · exact ninv_netFail h1
+  · rename_i hcond
+    split
+    · exact ninv_netFail h1
+    · rename_i hv
+      simp at hcond hv
+      exact ninv_rewait h1 sid (by simpa using hcond.1.1) (by simpa using hv.2)
   · exact h1
+
+theorem ninv_ev_peerLeft {s : State} (k : Nat) (h : NInv s) (he : en s (.peerLeft k) = true) :
+    NInv (step s (.peerLeft k)) := by
+  have hst : (s.socks k).st = .opn := by simp [en] at he; grind
+  have hl : live s k := Or.inr hst
+  obtain ⟨sid, hc, hw⟩ := h.liveOwned k hl
+  have hr : (s.sess sid).redialT = false := by
+    cases hh : (s.sess sid).redialT
+    · rfl
+    · exact absurd hl (h.redialDead sid k hh hw)
+  have hmv : s.manualView = false := by
+    cases hm : s.manualView
+    · rfl
+    · have := h.manualNoWs sid hm hc; rw [hw] at this; cases this
+  have h1 : NInv (updS sid (fun x => { x with redials := 0, rdials := 0 })
+      { s with fallback := none, sigUp := some true }) := by ninv_tac [hc]
+  simp only [step]
+  split
+  · rename_i hn; rw [hc] at hn; cases hn
+  · rename_i sid' hc'
+    rw [hc] at hc'; cases hc'
+    exact ninv_rewait h1 sid (by simpa using hc) (by simpa using hmv)
 
 theorem ninv_ev_localPair {s : State}  (h : NInv s) (he : en s (.localPair) = true) :
     NInv (step s (.localPair)) := by
@@ -1176,7 +1313,8 @@ theorem ninv_step {s : State} {e : Event} (h : NInv s) (he : en s e = true) : NI
   | resume k => exact ninv_ev_resume k h he
   | fallbackFire => exact ninv_ev_fallbackFire  h he
   | redialFire sid => exact ninv_ev_redialFire sid h he
-  | deadlineFire sid => exact ninv_ev_deadlineFire sid h he
+  | deadlineFire sid v => exact ninv_ev_deadlineFire sid v h he
+  | peerLeft k => exact ninv_ev_peerLeft k h he
   | localPair => exact ninv_ev_localPair  h he
   | rtcChannel => exact ninv_ev_rtcChannel  h he
   | dcOpen => exact ninv_ev_dcOpen  h he
@@ -1278,6 +1416,13 @@ variable (s : State)
   · split
     · rw [tr_manualEnter]; rfl
     · rfl
+@[simp] theorem tr_rewaitClose (sid : Nat) : Tr (rewaitClose sid s) = Tr s := rfl
+@[simp] theorem tr_rewait (sid : Nat) : Tr (rewait sid s) = Tr s := by
+  unfold rewait; simp only; split
+  · rfl
+  · split
+    · rw [tr_manualEnter]; rfl
+    · rfl
 @[simp] theorem tr_dcOnOpen : Tr (dcOnOpen s) = Tr s := by
   unfold dcOnOpen; split
   · rfl
@@ -1343,9 +1488,9 @@ theorem linv_step {s : State} (h : LInv s) (e : Event) : LInv (step s e) := by
       first
         | rfl
         | (simp only [tr_updS, tr_updK, tr_shutdown, tr_newSession, tr_closeWsOpt, tr_netFail,
-            tr_manualEnter, tr_manualPrepare, tr_sigConnect, tr_sigRedial, tr_dcOnOpen, tr_dismissModal]; done)
+            tr_manualEnter, tr_manualPrepare, tr_sigConnect, tr_sigRedial, tr_dcOnOpen, tr_dismissModal, tr_rewait]; done)
         | (simp only [tr_updS, tr_updK, tr_shutdown, tr_newSession, tr_closeWsOpt, tr_netFail,
-            tr_manualEnter, tr_manualPrepare, tr_sigConnect, tr_sigRedial, tr_dcOnOpen, tr_dismissModal]; rfl)
+            tr_manualEnter, tr_manualPrepare, tr_sigConnect, tr_sigRedial, tr_dcOnOpen, tr_dismissModal, tr_rewait]; rfl)
 
 /-- Every channel ever handed to wireChannel is either installed as a
     session's `net.dc` or was closed by the race: the loser is always torn down.
@@ -1425,6 +1570,16 @@ theorem sv_sigRedial (sid : Nat) : Sv (sigRedial sid s) = Sv s := by
     · rw [sv_manualEnter]; exact a
     · rw [sv_updS]
       · exact a
+      · intro _; exact ⟨rfl, rfl⟩
+theorem sv_rewaitClose (sid : Nat) : Sv (rewaitClose sid s) = Sv s := by
+  unfold rewaitClose Sv curSess; simp only; split <;> (try split) <;> rfl
+theorem sv_rewait (sid : Nat) : Sv (rewait sid s) = Sv s := by
+  unfold rewait; simp only; split
+  · rfl
+  · split
+    · rw [sv_manualEnter]; exact sv_rewaitClose s sid
+    · rw [sv_sigConnect, sv_updS]
+      · exact sv_rewaitClose s sid
       · intro _; exact ⟨rfl, rfl⟩
 theorem sv_dcOnOpen : Sv (dcOnOpen s) = Sv s := by
   unfold dcOnOpen; split
@@ -1554,13 +1709,15 @@ theorem sinv_step {s : State} {e : Event} (hn : NInv s) (h : SInv s) (he : en s 
   | sockRefused k => exact sinv_sv h rfl
   | sockDrop k => exact sinv_sv h rfl
   | sockErr k =>
-    simp only [step]; split
-    · exact sinv_sv h rfl
-    · have a : SInv { (updK k (fun y => { y with errQ := false }) s) with sigUp := some false } :=
-        sinv_sv h rfl
-      split
-      · exact sinv_sv a rfl
-      · exact sinv_sv (sinv_netFail a (fun j hj => freshInit_of_ninv hn j hj)) rfl
+    have a : SInv { (updK k (fun y => { y with errQ := false }) s) with sigUp := some false } :=
+      sinv_sv h rfl
+    have b := sinv_netFail a (fun j hj => freshInit_of_ninv hn j hj)
+    simp only [step]
+    repeat' split
+    all_goals first
+      | exact sinv_sv h rfl
+      | exact sinv_sv a rfl
+      | exact sinv_sv b rfl
   | sockClose k =>
     simp only [step]; split
     · exact sinv_sv h rfl
@@ -1576,16 +1733,11 @@ theorem sinv_step {s : State} {e : Event} (hn : NInv s) (h : SInv s) (he : en s 
       · exact sinv_sv h (by simp only [Sv, curSess, updS_cur]; split <;> simp only [updS_sess, apply_ite Sess.started] <;> (repeat' split) <;> simp [updS])
       · exact sinv_sv h (by simp only [Sv, curSess, updS_cur]; split <;> simp only [updS_sess, apply_ite Sess.started] <;> (repeat' split) <;> simp [updS])
   | resume k =>
-    simp only [step]; split
-    · split
-      · exact sinv_sv h rfl
-      · split
-        · exact sinv_sv h (by rw [sv_manualEnter]; rfl)
-        · exact sinv_sv h rfl
-    · split
-      · exact sinv_sv h rfl
-      · exact sinv_sv h rfl
-    · exact sinv_sv h rfl
+    simp only [step]
+    repeat' split
+    all_goals first
+      | exact sinv_sv h rfl
+      | exact sinv_sv h (by rw [sv_manualEnter]; rfl)
   | fallbackFire =>
     simp only [step]; split
     · exact h
@@ -1595,13 +1747,26 @@ theorem sinv_step {s : State} {e : Event} (hn : NInv s) (h : SInv s) (he : en s 
   | redialFire sid =>
     simp only [step]; split
     · exact sinv_sv h (by sv_tac)
-    · exact sinv_sv h (by rw [sv_sigConnect]; sv_tac)
-  | deadlineFire sid =>
+    · exact sinv_sv h (by
+        rw [sv_sigConnect, sv_updS]
+        · exact sv_updS s sid (fun x => { x with redialT := false }) (fun _ => ⟨rfl, rfl⟩)
+        · intro _; exact ⟨rfl, rfl⟩)
+  | deadlineFire sid v =>
     simp only [step]
     have a : SInv (updS sid (fun x => { x with deadline := false }) s) := sinv_sv h (by sv_tac)
     split
-    · exact sinv_netFail a (freshInit_updS (freshInit_of_ninv hn) sid _ (fun _ => rfl))
+    · split
+      · exact sinv_netFail a (freshInit_updS (freshInit_of_ninv hn) sid _ (fun _ => rfl))
+      · exact sinv_sv a (sv_rewait _ _)
     · exact a
+  | peerLeft k =>
+    simp only [step]; split
+    · exact h
+    · rename_i sid _
+      have a : SInv (updS sid (fun x => { x with redials := 0, rdials := 0 })
+          { s with fallback := none, sigUp := some true }) :=
+        sinv_sv h (sv_updS _ _ _ (fun _ => ⟨rfl, rfl⟩))
+      exact sinv_sv a (sv_rewait _ _)
   | localPair =>
     simp only [step]; split
     · exact h
@@ -1839,7 +2004,7 @@ theorem regress_launch_during_rollback_splits_identity :
 
 /-- A session that is set up and starts while a load is between its first
     segment and its commit: the load names nothing (loadRom's `abandoned`,
-    8045), and ending the session later persists it under its own game. -/
+    11759), and ending the session later persists it under its own game. -/
 theorem regress_session_starts_mid_load :
     witnesses [.openModal, .joinClick, .localPair, .launch 1, .rbInit, .rbStart, .rbProgress,
                .loadCommit, .disconnect]
@@ -1866,7 +2031,7 @@ theorem load_dismisses_pairing_modal :
     netDismissModal ran the teardown after the new game was named and booted,
     and rbTeardown promoted the session's core (game 0's) and persisted it
     under game 1's name. The load now ends the session first (sessionHoldsCore,
-    loadRom 8017-8030): game 0's core is stored under game 0, game 1's save
+    loadRom 11730-11744): game 0's core is stored under game 0, game 1's save
     is untouched, and game 1 runs. -/
 theorem regress_load_during_rollback_setup :
     witnesses [.openModal, .joinClick, .localPair, .rbInit, .launch 1, .loadCommit]
@@ -1877,5 +2042,40 @@ theorem regress_load_during_rollback_setup :
 theorem regress_rollback_setup_mid_load :
     witnesses [.openModal, .joinClick, .localPair, .launch 1, .rbInit, .loadCommit]
       (fun s => s.game == 0 && (curSess s).inited && s.loadPending.isNone) = true := by decide
+
+/-! ### Back to waiting (LinkPairing's fixed pairing code)
+
+A pairing that ends before linking keeps the session and the modal: the old
+socket is closed and a fresh one dialed on the same code, with the fallback
+armed for it. -/
+
+def rewaitGood (s : State) : Bool :=
+  s.cur == some 0 && s.modal && !s.manualView && (curSess s).pc.isNone &&
+    (s.socks 0).st == .closing && (s.socks 1).st == .connecting && s.fallback == some 0
+
+/-- The pairing deadline with no NAT verdict (the friend never answered). -/
+theorem rewait_on_deadline :
+    witnesses [.openModal, .joinClick, .sockOpen 0, .resume 0, .sockMsg 0 true,
+               .deadlineFire 0 false] rewaitGood = true := by decide
+
+/-- "peer-closed" before any description from the friend. -/
+theorem rewait_on_peer_left :
+    witnesses [.openModal, .joinClick, .sockOpen 0, .resume 0, .sockMsg 0 true, .peerLeft 0]
+      rewaitGood = true := by decide
+
+/-- A reconnect dial that fails does not end the session (`sigConnect(true)`):
+    its onclose lands in the redial ladder. -/
+theorem rewait_dial_failure_redials :
+    witnesses [.openModal, .joinClick, .sockOpen 0, .resume 0, .sockMsg 0 true,
+               .deadlineFire 0 false, .sockRefused 1, .sockErr 1, .sockClose 1]
+      (fun s => s.cur == some 0 && s.modal && (curSess s).redialT && (curSess s).redials == 2)
+      = true := by decide
+
+/-- The second strike: the NAT verdict ends the session with the modal up and
+    a fresh one re-armed for Connect. -/
+theorem nat_verdict_fails :
+    witnesses [.openModal, .joinClick, .sockOpen 0, .resume 0, .sockMsg 0 true,
+               .deadlineFire 0 true]
+      (fun s => s.cur == some 1 && s.modal && (s.socks 0).st == .closing) = true := by decide
 
 end WebState.Netplay

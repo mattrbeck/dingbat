@@ -1,0 +1,51 @@
+@title Mega Man Battle Network 3 Blue (USA)
+@file Megaman Battle Network 3 - Blue Version (U) [!].gba
+@game A3XE
+@chip SRAM
+
+# New game: mash through the opening and the Virus Lab scene until Lan can
+# move, open the PET and save there. [load] continues into the Virus Lab and
+# opens the PET again.
+
+[new]
+until text "PRESS START" timeout=900 every=10
+wait 30
+checkpoint title window=30
+press START
+until text "NEW GAME" timeout=300 every=5
+press A
+until text "year is 200" timeout=600 every=5
+wait 30
+checkpoint intro window=30
+mash A until text "Lan" timeout=3000 every=20
+mash A until text "Look!" timeout=600 every=20
+press A after=30
+# START is ignored until Lan can move; the menu slides in slowly, so tap
+# slowly enough that a second START never closes it again
+mash START until text "Chipfol" timeout=1500 every=80
+wait 30
+checkpoint pet_menu window=30
+# UP wraps from Chip Folder to Save
+press UP after=20
+press A
+until text "Save your" timeout=300 every=5
+wait 20
+checkpoint save_prompt window=30
+press A
+until text "complete" timeout=600 every=5
+wait 30
+checkpoint saved window=30
+
+[load]
+until text "PRESS START" timeout=900 every=10
+wait 30
+press START
+until text "CONTINUE" timeout=300 every=5
+wait 20
+checkpoint continue_menu window=30
+press A
+wait 200
+checkpoint resumed window=30
+mash START until text "Chipfol" timeout=900 every=80
+wait 30
+checkpoint pet_menu window=30

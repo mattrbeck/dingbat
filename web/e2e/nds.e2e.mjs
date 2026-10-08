@@ -264,9 +264,9 @@ const boxes = (page) => page.evaluate(() => {
   const g = (el) => { const r = el.getBoundingClientRect();
                       return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
   return { canvas: g(canvasEl), stage: g(stageEl), bar: g(document.getElementById("topbar")),
-           handle: g(document.getElementById("topbar-handle")),
            controls: g(document.getElementById("controls")),
-           dpad: g(document.getElementById("dpad")), ab: g(document.getElementById("ab")) };
+           dpad: g(document.getElementById("dpad")), ab: g(document.getElementById("ab")),
+           select: g(document.getElementById("select")), start: g(document.getElementById("start")) };
 });
 
 for (const vp of [{ width: 375, height: 812 }, { width: 390, height: 844 }]) {
@@ -287,9 +287,7 @@ for (const vp of [{ width: 375, height: 812 }, { width: 390, height: 844 }]) {
       await sleep(400);
       const hidden = await boxes(page);
       assert.ok(hidden.bar.b <= 0.5, "the bar went off the top: " + hidden.bar.b);
-      assert.ok(hidden.handle.h > 10 && hidden.handle.t >= 0, "the handle is there to bring it back");
       assert.ok(hidden.canvas.h > shown.canvas.h + 20, `the screens grew: ${shown.canvas.h} -> ${hidden.canvas.h}`);
-      assert.ok(hidden.canvas.t >= hidden.handle.b - 0.5, "the handle covers no screen");
       for (const m of MODES) {
         await setMode(page, m);
         assert.deepEqual(await ctlRects(page), ref, `${tag(m)}: the controls stay put`);
@@ -297,13 +295,22 @@ for (const vp of [{ width: 375, height: 812 }, { width: 390, height: 844 }]) {
         assert.ok(b.canvas.b <= b.controls.t + 0.5 && b.canvas.t >= b.stage.t - 0.5 &&
                   b.canvas.l >= -0.5 && b.canvas.r <= vp.width + 0.5, `${tag(m)}: the screens fit the stage`);
       }
-      // The handle brings the bar back over the stage, and takes it away.
-      await page.locator("#topbar-handle").click();
-      await sleep(350);
+      // A tap on the top screen brings the bar back over the stage, and
+      // another takes it away; a tap on the touch screen is the game's.
+      await setMode(page, { layout: "stack", swap: false, rot: 0, gap: "hinge" });
+      await sleep(300);
+      const tapAt = async (screen) => {
+        const at = await page.evaluate((sc) => NdsUtil.clientPoint(sc, 128, 96,
+          canvasEl.getBoundingClientRect(), ndsLay), screen);
+        await page.touchscreen.tap(at[0], at[1]);
+        await sleep(350);
+      };
+      await tapAt("bottom");
+      assert.ok((await boxes(page)).bar.b <= 0.5, "the touch screen leaves the bar alone");
+      await tapAt("top");
       assert.ok((await boxes(page)).bar.t >= -0.5, "pulled down");
       assert.deepEqual(await ctlRects(page), ref);
-      await page.locator("#topbar-handle").click();
-      await sleep(350);
+      await tapAt("top");
       assert.ok((await boxes(page)).bar.b <= 0.5, "and away");
       assert.deepEqual(errors, []);
       await ctx.close();
@@ -323,6 +330,8 @@ test("phone sideways: every arrangement stays clear of the control rails", { ski
     const b = await boxes(page);
     assert.ok(b.canvas.l >= b.dpad.r - 0.5 && b.canvas.r <= b.ab.l + 0.5,
               `${tag(m)}: between the d-pad and the face buttons`);
+    assert.ok(b.canvas.l >= b.select.r - 0.5 && b.canvas.r <= b.start.l + 0.5,
+              `${tag(m)}: clear of Select and Start`);
   }
   assert.deepEqual(errors, []);
   await ctx.close();

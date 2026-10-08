@@ -2,33 +2,116 @@
 @file Castlevania - Aria of Sorrow (U) [!].gba
 @game A2CE
 @chip SRAM_F (FRAM)
-@status wip: reaches gameplay in Castle Corridor (a few rooms in, after picking up the Short Sword); the game writes only its header at boot and nothing at New Game/name entry, so the first real save needs Soma to reach the first save room. Explored live: holding RIGHT with A taps walks through the first corridor rooms, then a stone pillar blocks the ledge (paths go up/down stairs on the left). A human should record: New Game, name, skip dialog, walk to the first save room, touch the save statue, quit after "saved". [load]: Select Data shows the file; pick it to resume in the save room.
+@frozen dingbat-bios,mgba,nba
+# New Game, name "AA", A taps through the opening while holding RIGHT into
+# Castle Corridor; right past the zombies and the wall skull, Short Sword,
+# down the stairs, through the merman pool and right into the first save
+# room; UP at the statue, Yes. [load]: Select Data shows AA in Castle
+# Corridor; A resumes in the save room.
+# The three saves differ only at 0x1B8 (play-time frames: dingbat-bios 0x57,
+# mgba 0x67, nba 0x59). The wall skull's and the candles' flicker runs out of
+# phase on dingbat-bios (f6421, f6431, f6701, f8078: dark skull / no candle
+# halo where mgba and nba show it, and the reverse).
 
 [new]
 wait 600
 press START
-until text "GAME START" timeout=600 every=10
+wait 4
 wait 60
-checkpoint title
+checkpoint title window=30
 press A
-until text "Select Data" timeout=300 every=5
+wait 54
 wait 60
 press A
-until text "NEW GAME" timeout=300 every=5
+wait 19
 wait 60
-checkpoint select_data
+checkpoint select_data window=30
 press A
-until text "DEL" timeout=300 every=5
+wait 19
 wait 30
-checkpoint name_entry
+checkpoint name_entry window=30
 press A after=20
 press A after=20
 press START after=20
-until text "2035" timeout=1200 every=10
-checkpoint intro
-# the opening scene: taps of A advance the dialog; RIGHT held walks Soma out
-# of the courtyard once play starts
+wait 84
+checkpoint intro window=30
 hold RIGHT
-mash A until text "Corridor" timeout=9000 every=47
+tap A times=97 every=47 hold=4
 release
 checkpoint castle_corridor window=10
+hold RIGHT
+tap B times=10 every=15 hold=4
+release
+press RIGHT hold=90
+tap B times=8 every=15 hold=4
+press RIGHT hold=60
+tap B times=6 every=15 hold=4
+wait 10
+press RIGHT hold=120
+press RIGHT hold=150
+press RIGHT hold=200
+press RIGHT hold=200
+press RIGHT hold=200
+hold RIGHT
+tap B times=8 every=15 hold=4
+release
+press RIGHT hold=40
+wait 30
+press SELECT
+wait 40
+press SELECT
+wait 30
+press LEFT hold=20
+hold DOWN+LEFT
+wait 80
+release
+press LEFT hold=90
+hold RIGHT
+press A hold=15 after=60
+wait 120
+release
+press LEFT hold=100
+wait 20
+press RIGHT hold=25
+wait 40
+press RIGHT hold=30
+wait 20
+hold RIGHT
+press A hold=20 after=10
+tap B times=6 every=12 hold=4
+release
+hold RIGHT
+tap B times=10 every=15 hold=4
+release
+hold RIGHT
+press A hold=20 after=60
+press A hold=20 after=100
+release
+press LEFT hold=22
+wait 90
+press UP hold=10 after=120
+checkpoint save_prompt window=0
+press A
+wait 120
+wait 200
+checkpoint saved window=30
+
+[load]
+wait 600
+press START
+# until text 'GAME START' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+10]
+wait 14
+wait 60
+press A
+# until text 'Select Data' timeout=300 every=5  [reached dingbat-bios+45 mgba+45 nba+45]
+wait 49
+wait 60
+press A
+wait 60
+wait 30
+checkpoint select_data_saved window=0 compare=text
+press A
+wait 400
+wait 60
+checkpoint resumed window=30
+

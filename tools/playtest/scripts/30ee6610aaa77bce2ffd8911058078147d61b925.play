@@ -1,0 +1,88 @@
+@title Riviera - The Promised Land (USA)
+@file Riviera - The Promised Land (U).gba
+@game BREE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# Game Start, page through the Asgard prologue text (A only once the screen
+# is stable on every emulator), the Heaven's Gate map, then on the first
+# Stage Start screen (1-1 Angels' Memorial) pick Save > DATA 1.
+# Finding: blind A taps every 20 frames through the prologue make the
+# emulators drift apart (an earlier attempt: at f3968 mgba was one dialogue
+# line ahead in the first battle; by f6968 the battle state differed on all
+# three, Over Drive Lv 2 / Lv 1 / Lv 2 with nba already past the enemy, and
+# by f8768 dingbat-bios was in MOVE mode while mgba and nba were in LOOK
+# mode), so this route waits for a still screen before every press.
+# On the Heaven's Gate map (~f2700) dingbat-bios and mgba go still while
+# nba keeps animating (an `until stable 15` held on two and timed out on
+# nba). The three saves differ (253/254/253 non-blank bytes).
+[new]
+wait 1000
+press START
+wait 550
+checkpoint title window=30
+press START
+wait 180
+checkpoint main_menu window=30 compare=text
+press A
+wait 300
+# until stable 15 timeout=900 every=2  [reached dingbat-bios+135 mgba+135 nba+135]
+wait 139
+press A
+# until stable 15 timeout=900 every=2  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
+press A
+# until stable 15 timeout=900 every=2  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
+press A
+# until stable 15 timeout=900 every=2  [reached dingbat-bios+15 mgba+15 nba+15]
+wait 19
+press A
+# until stable 15 timeout=900 every=2  [reached dingbat-bios+15 mgba+15 nba+15]
+wait 19
+press A
+# until stable 15 timeout=900 every=2  [reached dingbat-bios+90 mgba+90 nba+90]
+wait 94
+press A
+# until stable 15 timeout=900 every=2  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
+press A
+wait 200
+wait 500
+press A
+wait 200
+wait 100
+checkpoint stage_start window=30 compare=text
+press DOWN
+wait 20
+press A
+wait 90
+checkpoint save_slots window=30 compare=text
+press A
+wait 90
+checkpoint saved window=30 compare=text
+
+[load]
+wait 1000
+press START
+wait 550
+press START
+wait 180
+press DOWN
+wait 20
+press UP
+wait 30
+checkpoint continue_menu window=30 compare=text
+press A
+wait 120
+wait 30
+checkpoint load_file window=30 compare=text
+press A
+wait 300
+press A
+wait 300
+checkpoint resumed window=30 compare=text
+press A
+wait 400
+wait 60
+checkpoint next_area window=30 compare=text

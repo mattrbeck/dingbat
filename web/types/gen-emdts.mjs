@@ -127,6 +127,7 @@ declare var FS: {
   close(stream: object): void;
   readFile(path: string): Uint8Array;
   unlink(path: string): void;
+  stat(path: string): { mtime: Date | number; size: number };
 };
 `;
 

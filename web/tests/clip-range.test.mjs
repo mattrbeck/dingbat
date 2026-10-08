@@ -16,7 +16,8 @@ const withRing = (app, n) =>
   app.runIn(`
     globalThis.clipBeginCalls = [];
     globalThis.Module = {
-      memory: { buffer: new ArrayBuffer(64 * 1024) },
+      memory: { buffer: new ArrayBuffer(256 * 1024) },
+      _wasm_native_fb_ptr: () => 16,
       _clip_scrub_generate: () => ${n},
       _clip_scrub_thumb_w: () => 4,
       _clip_scrub_thumb_h: () => 3,
@@ -363,4 +364,125 @@ test("no selector repeats `body.<mode>` inside itself", () => {
     }
   }
   assert.deepEqual(dead, [], "dead selectors (a body inside a body matches nothing)");
+});
+
+// --- Dragging a bound on the film ------------------------------------------
+// The two bounds are pulled in and out: a press grabs the nearer one and it
+// goes where the finger goes, over a film that holds still. (The rewind
+// strip is the other kind: its playhead stays put and the film scrolls.)
+
+const film = (app) => {
+  const wrap = app.document.getElementById("clip-strip-wrap");
+  wrap.setPointerCapture = () => {};
+  wrap.hasPointerCapture = () => true;
+  wrap.releasePointerCapture = () => {};
+  return wrap;
+};
+const leftOf = (app, which) =>
+  parseFloat(app.document.getElementById("clip-marker-" + which).style.left);
+
+test("dragging the in point to the right moves it right, toward now", async () => {
+  const app = await open(40, 277);
+  const wrap = film(app);
+  const pitch = app.runIn("clipStrip.pitch");
+  const x0 = leftOf(app, "start");
+  const endX = leftOf(app, "end");
+  await wrap.dispatch("pointerdown", { clientX: x0 + 2, pointerId: 1 });
+  await wrap.dispatch("pointermove", { clientX: x0 + 2 + 3 * pitch, pointerId: 1 });
+  assert.ok(Math.abs(leftOf(app, "start") - (x0 + 3 * pitch)) < 1,
+            "the bound stays under the finger");
+  assert.equal(leftOf(app, "end"), endX, "the film (and the other bound) hold still");
+  await wrap.dispatch("pointerup", { clientX: x0 + 2 + 3 * pitch, pointerId: 1 });
+  assert.deepEqual(markers(app), [7, 0], "three seconds shorter, from the old end");
+  assert.equal(following(app), "start");
+});
+
+test("dragging the out point to the left pulls it back from now", async () => {
+  const app = await open(40, 277);
+  const wrap = film(app);
+  const pitch = app.runIn("clipStrip.pitch");
+  const x0 = leftOf(app, "end");
+  await wrap.dispatch("pointerdown", { clientX: x0 - 1, pointerId: 1 });
+  await wrap.dispatch("pointermove", { clientX: x0 - 1 - 2 * pitch, pointerId: 1 });
+  await wrap.dispatch("pointerup", { clientX: x0 - 1 - 2 * pitch, pointerId: 1 });
+  assert.deepEqual(markers(app), [10, 2]);
+  assert.equal(following(app), "end");
+});
+
+test("a bound dragged into the other stops a frame short", async () => {
+  const app = await open(40, 277);
+  const wrap = film(app);
+  const x0 = leftOf(app, "start");
+  await wrap.dispatch("pointerdown", { clientX: x0, pointerId: 1 });
+  await wrap.dispatch("pointermove", { clientX: x0 + 1000, pointerId: 1 });
+  await wrap.dispatch("pointerup", { clientX: x0 + 1000, pointerId: 1 });
+  assert.deepEqual(markers(app), [1, 0]);
+});
+
+test("the view stays where the drag left it, until a knob moves a bound", async () => {
+  const app = await open(40, 277);
+  const wrap = film(app);
+  const pitch = app.runIn("clipStrip.pitch");
+  const x0 = leftOf(app, "start");
+  await wrap.dispatch("pointerdown", { clientX: x0, pointerId: 1 });
+  await wrap.dispatch("pointermove", { clientX: x0 + 4 * pitch, pointerId: 1 });
+  await wrap.dispatch("pointerup", { clientX: x0 + 4 * pitch, pointerId: 1 });
+  assert.ok(Math.abs(leftOf(app, "start") - (x0 + 4 * pitch)) < 1,
+            "letting go must not re-centre the film under the finger");
+  const slider = knob(app, "start");
+  slider.value = "9";                       // sample 30: off this view
+  await slider.dispatch("input");
+  assert.equal(offscreen(app, "start"), false, "the knob brings the view to its bound");
+});
+
+// --- Recording --------------------------------------------------------------
+
+test("recording shows progress over a hidden replay, and Cancel gives the game back",
+  async () => {
+    const app = await open();
+    app.runIn(`
+      globalThis.__aborts = 0;
+      Module._clip_abort = () => { __aborts++; };
+      globalThis.__tapPrivate = [];
+      window.acquireClipAudio = (priv) => { __tapPrivate.push(priv); return null; };
+      window.releaseClipAudio = () => {};
+      0`);
+    await app.document.getElementById("clip-save").dispatch("click");
+    const panel = app.document.getElementById("clip-progress-modal");
+    assert.equal(panel.classList.contains("open"), true, "the progress panel is up");
+    assert.equal(app.document.body.classList.contains("clip-replaying"), true);
+    assert.equal(app.document.getElementById("clip-progress-pct").textContent, "0%");
+    eq(app.runIn("__tapPrivate"), [true], "the replay's sound goes to the recorder alone");
+    app.runIn("setClipProgress(0.42)");
+    assert.equal(app.document.getElementById("clip-progress-pct").textContent, "42%");
+    assert.equal(app.document.getElementById("clip-progress-bar")
+                    .getAttribute("aria-valuenow"), "42");
+    await app.document.getElementById("clip-progress-cancel").dispatch("click");
+    assert.equal(app.runIn("__aborts"), 1, "the live state is restored");
+    assert.equal(app.runIn("clipReplayActive"), false);
+    assert.equal(panel.classList.contains("open"), false);
+    assert.equal(app.document.body.classList.contains("clip-replaying"), false);
+  });
+
+// Exports carry the console's own sound: the HLE, the FIFO smoothing and
+// any channel mutes are the player's way of listening, off while a clip
+// records and back as it ends.
+test("a clip records the native mix and gives the player's back after", async () => {
+  const app = await open();
+  app.runIn(`
+    globalThis.__mix = [];
+    for (const k of ["mp2k_hle", "fifo_interp", "channel_mutes", "audio_silent"])
+      Module["_wasm_set_" + k] = (v) => __mix.push(k + "=" + v);
+    mp2kHle = true; fifoInterp = true; channelMutes = 0b100; muted = true;
+    window.acquireClipAudio = () => null;
+    window.releaseClipAudio = () => {};
+    0`);
+  await app.document.getElementById("clip-save").dispatch("click");
+  eq(app.runIn("__mix.splice(0)"),
+     ["mp2k_hle=0", "fifo_interp=0", "channel_mutes=0", "audio_silent=0"],
+     "native while it records");
+  await app.document.getElementById("clip-progress-cancel").dispatch("click");
+  eq(app.runIn("__mix.splice(0)"),
+     ["mp2k_hle=1", "fifo_interp=1", "channel_mutes=4", "audio_silent=1"],
+     "the player's mix (and mute) back afterwards");
 });

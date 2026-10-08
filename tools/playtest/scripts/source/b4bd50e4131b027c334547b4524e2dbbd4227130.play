@@ -1,0 +1,50 @@
+@title The Legend of Zelda - The Minish Cap (USA)
+@file Legend of Zelda, The - The Minish Cap (U).gba
+@game BZME
+@chip EEPROM
+
+# File 1 named AA: the game writes the new file as soon as the name is
+# confirmed ("Saving file..."), then returns to the file select.
+
+[new]
+until text "Minish" timeout=1800 every=10
+until text "PRESS START" timeout=900 every=5
+wait 20
+checkpoint title window=0
+press START
+until text "CHOOSE A FILE" timeout=600 every=10
+wait 60
+checkpoint file_select_empty window=0
+press A
+until text "ENTER A NAME" timeout=600 every=10
+wait 60
+checkpoint naming window=0
+press A after=20
+press A after=20
+press START after=20
+checkpoint name_typed window=0
+press A
+until text "Saving file" timeout=300 every=5
+checkpoint saving window=0
+until notext "Saving" timeout=900 every=5
+until text "CHOOSE A FILE" timeout=600 every=10
+wait 60
+checkpoint saved window=0
+
+[load]
+until text "Minish" timeout=1800 every=10
+until text "PRESS START" timeout=900 every=5
+wait 20
+press START
+until text "CHOOSE A FILE" timeout=600 every=10
+until text "AA" timeout=300 every=5
+wait 60
+checkpoint file_select_saved window=0
+press A
+until text "START" timeout=300 every=5
+wait 30
+checkpoint file_menu window=0
+press A
+until text "long" timeout=900 every=10
+wait 60
+checkpoint story_intro window=0

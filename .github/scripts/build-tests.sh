@@ -35,6 +35,7 @@ build runner          dingbat_test_runner           tests/dingbat_test_runner.ni
 build ppucomposite    dingbat_ppucomposite_test     tests/ppucomposite_test.nim
 build ppubgunpack     dingbat_ppubgunpack_test      tests/ppubgunpack_test.nim
 build ppuobjlist      dingbat_ppuobjlist_test       tests/ppuobjlist_test.nim
+build renderskip      dingbat_renderskip_test       tests/render_skip_test.nim
 build savestatecompat dingbat_savestate_compat_test tests/savestate_compat_test.nim
 build rewind          dingbat_rewind_test           tests/rewind_test.nim
 build lcdresponse     dingbat_lcdresponse_test      tests/lcdresponse_test.nim
@@ -51,7 +52,8 @@ build cyclelaws       dingbat_cyclelaws_test        tests/cyclelaws_test.nim
 build mgbavideo       dingbat_mgba_video            tests/mgba_video.nim
 build gbapurebase     dingbat_gbapurebase_test      tests/gbapu_rebase_test.nim
 build psgagb         dingbat_psgagb_test           tests/psg_agb_test.nim
-build statesoak       dingbat_state_soak_test       tests/state_soak_test.nim
+build statesoak       dingbat_state_soak_test       tests/state_soak_test.nim -d:gba_quirky=false
+build silentaudio     dingbat_silent_audio_test     tests/silent_audio_test.nim --path:tests -d:soak_lib
 # Dear ImGui through imguin, which compiles its C++ in the same build. Skipped
 # only where install-test-deps.sh could not install imguin (Windows).
 if [ "${DINGBAT_NO_IMGUIN:-}" != 1 ]; then

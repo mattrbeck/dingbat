@@ -4,6 +4,15 @@ proc exception_return_restore*(cpu: CPU) =
   ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
   ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
   ## ran, so the pipeline offset is corrected when returning to thumb.
+  # User and System mode have no SPSR, and the CPSR is what reads in its
+  # place (MRS, alyosha psr): restoring it changes nothing, and the S-bit
+  # write is a plain branch (a data-processing one first puts back the flags
+  # it set, arm_data_processing; the AGB SP agrees, payloads/sysmovs.s). `cpu.spsr` in those modes is whatever another
+  # mode's switch left there -- a Thumb CPSR, say -- and restoring that sent
+  # Colin McRae Rally 2.0's `movs pc, lr` returns (ARM library code, System
+  # mode) back into ARM code in Thumb state.
+  if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0:
+    cpu.spsr = cpu.cpsr
   # An IRQ return costs what the instruction costs. The arithmetic below is
   # that, written against IRQ_ENTRY_EXTRA so the old uneven split
   # (-d:IRQ_ENTRY_EXTRA=2: a cycle more going in, a cycle given back here)
@@ -631,6 +640,7 @@ proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
   inc cpu.swi_count
   let use_hle = cpu.gba.use_hle or (cpu.gba.hle_after_bios and cpu.r[15] >= 0x08000000'u32)
   let swi_num = bits_range(instr, 16, 23)
+  when defined(switrace): cpu.swt_swi(swi_num)
   when defined(biosdrvtrace):
     if bdSwiHook != nil: bdSwiHook(swi_num)
   if use_hle and cpu.hle_takes(swi_num):
@@ -758,6 +768,8 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
     cpu.r[15] += 4
     cpu.idle(1)  # register-specified shift costs one internal cycle
   var barrel_carry = cpu.cpsr.carry
+  when set_cond:
+    let pre_cpsr = cpu.cpsr   # what an S-bit r15 write restores in User/System
   let rn {.used.} = int(bits_range(instr, 16, 19))  # MOV/MVN instantiations never read rn
   let rd = int(bits_range(instr, 12, 15))
   let operand_2 =
@@ -834,5 +846,12 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
       cpu.cpsr.carry = barrel_carry
     if rd != 15: cpu.step_arm()
   when pc_reads_12_ahead: cpu.r[15] -= 4
-  if rd == 15 and set_cond:
-    cpu.exception_return_restore()
+  when set_cond:
+    if rd == 15:
+      # User and System mode: the flags the ALU just set do not stick. The
+      # CPSR stands in for the missing SPSR as it was before the instruction
+      # (tests/roms/payloads/sysmovs.s on an AGB SP: movs pc, lr and subs pc,
+      # lr, #0 with Z and C set keep them, 0x6000029F in every cell).
+      if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0:
+        cpu.cpsr = pre_cpsr
+      cpu.exception_return_restore()

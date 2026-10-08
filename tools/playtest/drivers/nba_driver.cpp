@@ -2,7 +2,9 @@
  * static libs as a black box). Speaks the line protocol in
  * tools/playtest/README.md.
  *
- * Usage: nba_driver <rom.gba> <bios.bin> [--run-bios]
+ * Usage: nba_driver <rom.gba> <bios.bin> [--run-bios] [--audio PATH]
+ *   --audio writes the core's output, s16le stereo at 32768 Hz: the capture
+ *   device pulls one frame's worth of samples after every frame.
  *   The battery save is <rom minus extension>.sav, as its frontend names it.
  *   It has no RTC override: run with TZ=UTC. `savedata` is unsupported (the
  *   core exposes no backup accessor); the harness reads the file written at
@@ -35,6 +37,34 @@ static const nba::Key KEY_ORDER[10] = {
 struct CaptureVideo final : nba::VideoDevice {
   u32 frame[W * H] = {};
   void Draw(u32* buffer) override { memcpy(frame, buffer, sizeof frame); }
+};
+
+// Audio is pulled, not pushed: the core hands its device a callback that
+// fills a buffer; calling it after each frame for exactly the samples that
+// frame produced keeps the stream in step with emulated time.
+struct CaptureAudio final : nba::AudioDevice {
+  void* userdata = nullptr;
+  Callback callback = nullptr;
+  FILE* file = nullptr;
+  double owed = 0;
+  auto GetSampleRate() -> int override { return 32768; }
+  auto GetBlockSize() -> int override { return 4096; }
+  bool Open(void* ud, Callback cb) override { userdata = ud; callback = cb; return true; }
+  void SetPause(bool) override {}
+  void Close() override {}
+  void Frame() {
+    if (!callback || !file) return;
+    owed += 32768.0 * nba::CoreBase::kCyclesPerFrame / 16777216.0;
+    int n = int(owed);
+    owed -= n;
+    static s16 buf[4096 * 2];
+    while (n > 0) {
+      int k = n > 4096 ? 4096 : n;
+      callback(userdata, buf, k * 4);
+      fwrite(buf, 4, k, file);
+      n -= k;
+    }
+  }
 };
 
 static u16 px555(u32 c) {
@@ -74,9 +104,11 @@ int main(int argc, char** argv) {
   std::string pos[2];
   int npos = 0;
   bool run_bios = false;
+  const char* audio_path = nullptr;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--run-bios")) run_bios = true;
     else if (!strcmp(argv[i], "--rtc") && i + 1 < argc) ++i;
+    else if (!strcmp(argv[i], "--audio") && i + 1 < argc) audio_path = argv[++i];
     else if (npos < 2) pos[npos++] = argv[i];
   }
   if (npos != 2) {
@@ -96,6 +128,9 @@ int main(int argc, char** argv) {
   auto config = std::make_shared<nba::Config>();
   auto video = std::make_shared<CaptureVideo>();
   config->video_dev = video;
+  auto audio = std::make_shared<CaptureAudio>();
+  if (audio_path) audio->file = fopen(audio_path, "wb");
+  config->audio_dev = audio;
   config->skip_bios = !run_bios;
   auto core = nba::CreateCore(config);
   if (nba::BIOSLoader::Load(core, pos[1]) != nba::BIOSLoader::Result::Success) {
@@ -125,12 +160,12 @@ int main(int argc, char** argv) {
       held = mask;
       reply("ok");
     } else if (cmd == "run") {
-      for (int k = atoi(arg.c_str()); k > 0; --k) { core->Run(nba::CoreBase::kCyclesPerFrame); ++frame; }
+      for (int k = atoi(arg.c_str()); k > 0; --k) { core->Run(nba::CoreBase::kCyclesPerFrame); audio->Frame(); ++frame; }
       reply("ok " + std::to_string(frame));
     } else if (cmd == "runhash") {
       std::string out = "ok";
       for (int k = atoi(arg.c_str()); k > 0; --k) {
-        core->Run(nba::CoreBase::kCyclesPerFrame); ++frame;
+        core->Run(nba::CoreBase::kCyclesPerFrame); audio->Frame(); ++frame;
         out += " " + fb_hash(video->frame);
       }
       reply(out);
@@ -140,7 +175,34 @@ int main(int argc, char** argv) {
       reply("ok " + std::to_string(frame));
     } else if (cmd == "shot") {
       reply(write_ppm(arg, video->frame) ? "ok" : "err cannot write");
-    } else if (cmd == "savedata" || cmd == "flush" || cmd == "peek") {
+    } else if (cmd == "peek") {
+      // work RAM through the core's save-state copy (no timed bus access,
+      // nothing moved), I/O through its peek calls; other regions unsupported
+      std::istringstream a(arg);
+      std::string hex;
+      unsigned long len = 0;
+      a >> hex >> len;
+      u32 addr = u32(strtoul(hex.c_str(), nullptr, 16));
+      static nba::SaveState state;
+      bool need_state = (addr >> 24) == 2 || (addr >> 24) == 3;
+      if (need_state) core->CopyState(state);
+      std::string out = "ok ";
+      bool ok = true;
+      for (unsigned long k = 0; k < len && ok; ++k) {
+        u32 x = addr + u32(k);
+        u8 v = 0;
+        switch (x >> 24) {
+          case 2: v = state.bus.memory.wram[x & 0x3FFFF]; break;
+          case 3: v = state.bus.memory.iram[x & 0x7FFF]; break;
+          case 4: v = core->PeekByteIO(x); break;
+          default: ok = false;
+        }
+        char b[3];
+        snprintf(b, sizeof b, "%02X", v);
+        out += b;
+      }
+      reply(ok ? out : "err unsupported region");
+    } else if (cmd == "savedata" || cmd == "flush") {
       reply("err unsupported");
     } else if (cmd == "state_save") {
       // The core's own writer leaves fields of absent hardware (the RTC on
@@ -165,6 +227,8 @@ int main(int argc, char** argv) {
       if (ok) core->LoadState(*state);
       reply(ok ? "ok" : "err state_load failed");
     } else if (cmd == "quit") {
+      if (audio->file) fclose(audio->file);
+      audio->file = nullptr;
       core.reset();
       reply("ok");
       return 0;

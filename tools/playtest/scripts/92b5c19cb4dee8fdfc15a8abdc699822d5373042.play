@@ -2,20 +2,22 @@
 @file Sonic Pinball Party (U) (M6).gba
 @game A3SE
 @chip FLASH512
+@frozen dingbat-bios,mgba,nba
 
 # First boot asks for a language; picking one writes the "SONIC_PB" save.
 # Pick Deutsch so the save is visible: [load] boots without the language
 # screen, straight to the intro and a German menu.
-
 [new]
 wait 400
-until text "LANGUAGE" timeout=900 every=10
+# until text LANGUAGE timeout=900 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 checkpoint language window=0
-press DOWN hold=6 after=40
+press DOWN after=40
 checkpoint deutsch window=0
 press A hold=10 after=300
-until text "SEGA" timeout=2400 every=20
+# until text SEGA timeout=2400 every=20  [reached dingbat-bios+540 mgba+540 nba+540]
+wait 544
 wait 30
 checkpoint title window=10
 press START hold=10 after=180
@@ -26,7 +28,8 @@ checkpoint saved window=0
 [load]
 wait 400
 checkpoint boot_loaded window=0
-until text "SEGA" timeout=2400 every=20
+# until text SEGA timeout=2400 every=20  [reached dingbat-bios+400 mgba+400 nba+400]
+wait 404
 wait 30
 checkpoint title_loaded window=10
 press START hold=10 after=180

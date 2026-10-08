@@ -3,23 +3,27 @@
 @game B86E
 @save none
 @chip none (password game: no library ID string, main menu offers Password)
+@frozen dingbat-bios,mgba,nba
 
 # The cart has no battery save: progress is a password. [new] only proves
 # the game boots and plays with no backup chip; the save check then shows
 # what file each emulator leaves behind (none is correct). No [load].
-
 [new]
-until text "Webfoot" timeout=1500 every=10
+# until text Webfoot timeout=1500 every=10  [reached dingbat-bios+510 mgba+520 nba+510]
+wait 524
 wait 30
 press START
-until text "party pals" timeout=900 every=10
+# until text 'party pals' timeout=900 every=10  [reached dingbat-bios+140 mgba+140 nba+140]
+wait 144
 wait 60
-checkpoint title
+checkpoint title window=30
 press A
-until text "Password" timeout=600 every=10
+# until text Password timeout=600 every=10  [reached dingbat-bios+80 mgba+80 nba+80]
+wait 84
 wait 30
-checkpoint main_menu
+checkpoint main_menu window=30
 press A
-until text "Hostess" timeout=900 every=10
+# until text Hostess timeout=900 every=10  [reached dingbat-bios+160 mgba+160 nba+160]
+wait 164
 wait 30
-checkpoint level_intro
+checkpoint level_intro window=30

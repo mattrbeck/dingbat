@@ -14,6 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jiro4989/setup-nim-action@v2
+        with:
+          # Pinned, as test.yml's NIM_VERSION (the Windows image pins its own).
+          nim-version: "2.2.12"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install SDL2 and OpenGL headers
         run: |
           sudo apt-get update
@@ -85,6 +89,9 @@ jobs:
           test -f /opt/homebrew/lib/libSDL2.a
           test -f /opt/homebrew/include/SDL2/SDL.h
       - name: Install Nim
+        env:
+          # Pinned, as test.yml's NIM_VERSION.
+          CHOOSENIM_CHOOSE_VERSION: "2.2.12"
         run: |
           set -eo pipefail
           .github/scripts/retry.sh 3 bash -c \

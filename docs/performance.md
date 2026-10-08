@@ -219,6 +219,97 @@ out of line anyway, natively and in wasm: now `always_inline` under clang
 framebuffer a halfword at a time into a buffer grown from empty; one copy
 into a pre-sized buffer halves rewind's cost.
 
+## Carried over from the DS core (2026-10-03)
+
+The DS core's caching round (branch `worktree-nds-skeleton`) proposed six
+items for the GBA. What each came to, measured on six gameplay states and
+six intros, retired instructions (min of 4), per-frame hashes identical:
+
+* **Same-value stores don't dirty the frame** (the cheap half of "per-line
+  reuse"). The whole-frame render skip never fired in gameplay: every game
+  rewrites its PPU registers from a shadow copy each V-blank and DMAs the
+  same OAM, and any store set `render_dirty`. Now a PRAM/VRAM/OAM store
+  dirties only if it changes the memory, a register write only if it
+  changes a field it writes (`dirty_if_changed` in ppu.nim: DISPCNT with
+  the BG-enable latches, the affine reference points with the internal
+  point a write reloads), and `latch_oam` only if the view it copies
+  differs. Kirby -30 %, F-Zero GPL intro -27 %, Emerald walking -25 %,
+  Minish Cap -22 %, FireRed -11 %, Emerald -10 %, GS TLA -8 %; Golden Sun
+  and Mario Kart redraw every frame (0 %). Web: Kirby +29 %, Emerald +10 %.
+  Guarded by `tests/render_skip_test.nim` (a never-skipping twin; breaking
+  the reference-point, VRAM or OAM check makes it fail).
+* **One test before each opcode** (the DS's interrupt-check item, made exact
+  by construction instead): the five CPU fields `tick` tests go through
+  setters that keep `cpu_slow`. -1.5..-2.5 %; the DS's attention flag, set
+  from every event that could change them, was not built.
+* **No error-flag test after calls (`quirky`)**: every optimised build
+  (`gba_quirky`, gba.nim), +3-4 % on the web, -9.4..-13.7 % host
+  instructions on the desktop (MKSC -9.4 %, Emerald walking -13.7 %;
+  frame hashes identical, and all 7,899 library ROMs end in the same frames
+  and state). Quirky, an out-of-range access goes ahead before
+  anything tests the flag, so it waited on the save-state loader:
+  `tools/statefuzz.nim kirby.gba 3000 777` found two hostile states that
+  faulted while running (a FIFO position), an audit of every loaded field
+  found the rest (pipeline, PSG duty/shift/period/bank/clock shift, RTC
+  bit count and clock, Flash bank and type, EEPROM size and counters, a
+  duplicated PPU event chain that overflowed the scheduler, the prefetch
+  stamp, the affine reference points), and the loader now refuses all of
+  them (`run_hostile_fields`, tests/savestate_compat_test.nim; main loads
+  all seventeen). statefuzz builds with `-d:gba_quirky=false` so it still
+  sees a fault where it happens. `--panics:on` instead recovered only ~2-3 %
+  (3674 of 6658 flag tests remain), and would make the state loaders'
+  Defect backstops fatal. The same push over `common/scheduler.nim`
+  measured -0.1 %.
+
+What is left of per-line reuse: after the change above, Emerald still draws
+59 % of its lines, FireRed 52 %, GS TLA 64 %, though 99 % of them come out
+identical to the previous frame's. Those frames change only VRAM (BG tiles
+at 0x3400-0x3FFF, OBJ tiles at 0x10000) and OAM, so reusing their lines
+needs the DS's full machinery: per-1 KB VRAM blocks marked as each line
+reads them, and per-sprite line coverage. Ceiling about 11-15 % on those
+titles (~20k host instructions a line), ~0 on Kirby and Minish Cap.
+
+Not pursued, from the profile: the sequential fetch already tests the
+fetch key, page, hot flag and next address (a few instructions of ~250 per
+opcode); folding them is worth 1-2 % at most, inside the inlining-cliff
+noise. Thumb already has its 1024-entry specialised table; a decoded-block
+cache stays rejected (see above).
+
+## OAM stores and the OBJ contention map (2026-10-07)
+
+Varooom 3D (a Butano homebrew) was the slowest GBA game seen: ~140 fps
+uncapped, 176 fps native from an in-race state against 600+ for typical
+games. `sample` put 70 % of the time in `cont_build_obj`: the game rewrites
+OAM ~14,500 halfwords a frame (H-blank DMA), every OAM store cleared the
+OBJ layer's contention map (`oam_touched`), and the next OAM/OBJ-VRAM
+access, the DMA's own next store included, rebuilt it with a scan of all
+128 entries -- 14,390 rebuilds a frame.
+
+The map reads only attr0's Y, affine, double-size and shape bits and
+attr1's size bits, and an entry off the map's line costs the scan the same
+two dots wherever it sits. So `oam_store16/32` (bus.nim) now clear the key
+only when a store changes those bits for an entry on the map's line
+before or after (`cont_obj_entry_moved`); `oam_view_stale` is still set on
+every store. Rebuilds 14,390 -> ~690 a frame.
+
+* Varooom 3D race: 75.6M -> 27.5M host instructions a frame (-64 %),
+  **176 -> 616 fps** native (3.5x; hwcycles -71 %).
+* The 140-game playtest corpus, each script's `[new]` timeline replayed
+  under the real BIOS: Yu-Gi-Oh! The Sacred Cards -10.8 % instructions (+12 % fps-equivalent),
+  Classic NES Zelda, Sword of Mana, Donkey Kong Country 3, Super Puzzle
+  Fighter II and Mario vs. Donkey Kong -1.3 to -2.6 %, the rest flat
+  within noise (median 0.0 %, none slower beyond 0.3 %).
+* Exact, not approximate: frame and state hashes identical over 6,000
+  frames of Varooom 3D, mGBA suite output byte-identical, and
+  `-d:contObjVerify` (rebuild on every kept map and compare) ran the whole
+  corpus plus Varooom 3D with no stale map (73.7M checks on Varooom alone).
+
+What is left there is ordinary: `tick`, `arm_execute`, `render_sprites`,
+`cont_build_obj` at ~12 % (rebuilds for sprites that really move on the
+line, and ~156 a frame from accesses at dots 0-39 swapping between a
+line's map and the previous one's -- a two-line cache would take the
+latter, ~2-3 %).
+
 ## Game Boy / Game Boy Color (2026-09-29)
 
 Where the time went (native, `sample`, 11 GBC titles and one DMG): the FIFO

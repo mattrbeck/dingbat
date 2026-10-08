@@ -1,0 +1,35 @@
+@title Sonic Advance (USA)
+@file Sonic Advance (U) [!].gba
+@game ASOE
+@chip FLASH
+
+# A blank cart asks for the language first; picking ENGLISH writes the save
+# (the "PIRO" header block). With a save the game skips the language screen
+# and boots to the SEGA logo, so [load] reaching PRESENTED BY without it is the
+# proof the save was read.
+#
+# Recorded on mGBA alone: dingbat (HLE and real BIOS) and the second reference
+# both sit on a screen of empty grey bars from boot and never reach the
+# language screen, with or without a battery file.
+
+[new]
+until text "LANGUAGE" timeout=1200 every=10
+until stable 20 timeout=300
+checkpoint language
+press A
+until text "PRESENTED" timeout=900 every=10
+checkpoint presented
+mash START until text "OPTION" timeout=1500 every=40
+until stable 20 timeout=300
+checkpoint main_menu compare=text
+
+[load]
+until text "PRESENTED" timeout=900 every=10
+checkpoint presented
+mash START until text "OPTION" timeout=1500 every=40
+until stable 20 timeout=300
+checkpoint main_menu compare=text
+press A
+until text "HEDGEHOG" timeout=300 every=5
+wait 30
+checkpoint character_select compare=text

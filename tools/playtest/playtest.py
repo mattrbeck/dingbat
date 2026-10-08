@@ -4,9 +4,11 @@ dingbat and the reference emulators, compare screens at checkpoints, save in
 each, compare the battery files, then cross-load every save into every
 emulator. See README.md.
 
-  playtest.py run ROM|SHA1 [--emus dingbat,mgba,nba] [--out DIR]
-  playtest.py serve NAME --rom ROM [--emus ...] [--save FILE]
+  playtest.py run ROM|SHA1 [--emus dingbat,...,mgba,nba] [--out DIR]
+  playtest.py suite [FILTER...] [--jobs N]
+  playtest.py serve NAME --rom ROM [--emus ...] [--save FILE | --save-dir DIR]
   playtest.py do NAME STEP...
+  playtest.py freeze SHA1|SCRIPT [--rom ROM] [--write]
   playtest.py sha1 ROM
 """
 import argparse
@@ -19,6 +21,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import emu as emulib  # noqa: E402
 import session  # noqa: E402
 
 DEFAULT_OUT = os.environ.get('PLAYTEST_OUT', os.path.join(HERE, 'out'))
@@ -41,9 +44,19 @@ def main():
     p = sub.add_parser('serve')
     p.add_argument('name')
     p.add_argument('--rom', required=True)
-    p.add_argument('--emus', default='dingbat,mgba,nba')
-    p.add_argument('--save')
+    p.add_argument('--emus', default=','.join(session.AUTHORING))
+    p.add_argument('--save', help='one battery file seeded into every emulator')
+    p.add_argument('--save-dir', help='<emu>.sav per emulator (a stopped session\'s saves/ directory)')
     p.add_argument('--rtc', type=int, default=DEFAULT_RTC)
+    p.add_argument('--no-lockstep', action='store_true',
+                   help='record until/mash as conditions instead of frozen input frames')
+
+    p = sub.add_parser('freeze', help='condition script -> frozen input timeline (lockstep on the authoring emulators)')
+    p.add_argument('script', help='script path, or the sha1 of scripts/<sha1>.play')
+    p.add_argument('--rom')
+    p.add_argument('--rtc', type=int, default=DEFAULT_RTC)
+    p.add_argument('--write', action='store_true',
+                   help='move the condition script to scripts/source/ and write the frozen one in its place')
 
     p = sub.add_parser('do')
     p.add_argument('name')
@@ -52,6 +65,9 @@ def main():
 
     p = sub.add_parser('sha1')
     p.add_argument('rom')
+
+    p = sub.add_parser('saveinfo', help='size, blankness and hash of battery files')
+    p.add_argument('files', nargs='+')
 
     p = sub.add_parser('record', help='play a game in the desktop app with input recording')
     p.add_argument('rom', help='ROM path, or the sha1 of a ROM in the library')
@@ -74,16 +90,34 @@ def main():
         if name == 'run':
             p.add_argument('rom', help='ROM path, or the sha1 of a scripted ROM in the library')
             p.add_argument('--script', help='default: scripts/<sha1>.play')
+            p.add_argument('--outdir-file', help=argparse.SUPPRESS)
         else:
             p.add_argument('only', nargs='*', help='sha1 prefixes or title substrings (default: every script)')
             p.add_argument('--script', default=None, help=argparse.SUPPRESS)
-        p.add_argument('--emus', default='dingbat,mgba,nba')
+        p.add_argument('--emus', default=','.join(emulib.ALL))
         p.add_argument('--rtc', type=int, default=DEFAULT_RTC)
         p.add_argument('--no-cross', action='store_true', help='skip the cross-load matrix')
+        p.add_argument('--no-audio', action='store_true', help='skip audio capture and comparison')
+        p.add_argument('--refs-from', default=None,
+                       help='replay the references (mgba, nba) from an earlier run instead of playing them: '
+                            'a run directory (run) or a suite directory (suite); a game whose script changed '
+                            'since runs them live')
+        if name == 'suite':
+            p.add_argument('--jobs', type=int, default=1, help='games run in parallel')
+            p.add_argument('--tag', default=None, help='suite output directory name (default: a timestamp)')
+            p.add_argument('--no-lock', action='store_true',
+                           help='a full suite waits for the machine-wide playtest lock (train.py) unless this')
 
     args = ap.parse_args()
     if args.cmd == 'serve':
-        session.serve(args.name, args.rom, args.emus.split(','), args.out, save=args.save, rtc=args.rtc)
+        save = args.save
+        if args.save_dir:
+            save = {n: os.path.join(args.save_dir, n + '.sav') for n in args.emus.split(',')
+                    if os.path.exists(os.path.join(args.save_dir, n + '.sav'))}
+        session.serve(args.name, args.rom, args.emus.split(','), args.out, save=save, rtc=args.rtc,
+                      lockstep=not args.no_lockstep)
+    elif args.cmd == 'freeze':
+        sys.exit(freeze_cmd(args))
     elif args.cmd == 'do':
         replies = session.send(args.name, args.steps, args.out)
         if args.json:
@@ -93,6 +127,15 @@ def main():
                 print(render_reply(line, r))
     elif args.cmd == 'sha1':
         print(sha1_of(args.rom))
+    elif args.cmd == 'saveinfo':
+        for f in args.files:
+            data = open(f, 'rb').read() if os.path.exists(f) else None
+            if data is None:
+                print(f'{f}: missing')
+                continue
+            used = sum(1 for b in data if b not in (0x00, 0xFF))
+            print(f'{f}: {len(data)} bytes, {used} bytes not 00/FF'
+                  f"{' (BLANK)' if not used else ''}, sha1 {hashlib.sha1(data).hexdigest()[:12]}")
     elif args.cmd == 'record':
         sys.exit(record(args))
     elif args.cmd == 'convert':
@@ -103,7 +146,10 @@ def main():
         import pipeline
         if not os.path.exists(args.rom) and re.fullmatch(r'[0-9a-f]{40}', args.rom):
             args.rom = resolve(args.out, args.rom)
-        sys.exit(pipeline.run(args))
+        rc = pipeline.run(args)
+        if args.outdir_file and pipeline.last_outdir:
+            open(args.outdir_file, 'w').write(pipeline.last_outdir)
+        sys.exit(rc)
     elif args.cmd == 'suite':
         sys.exit(suite(args))
 
@@ -173,10 +219,21 @@ def resolve(outroot, sha1):
 
 
 def suite(args):
-    """Run every script (or a filtered subset); one summary table."""
-    import pipeline
+    """Run every script (or a filtered subset), `--jobs` games at a time,
+    each in its own process with its log in the suite directory
+    (out/suites/<tag>/): index.json maps every game to its run directory."""
+    import concurrent.futures as cf
+    import datetime
+    import subprocess
     import script
-    rows = []
+    tag = args.tag or datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    sdir = os.path.join(args.out, 'suites', tag)
+    os.makedirs(os.path.join(sdir, 'logs'), exist_ok=True)
+    refs = {}
+    if args.refs_from:
+        refs = {g['sha1']: g['outdir'] for g in json.load(open(os.path.join(args.refs_from, 'index.json')))['games']
+                if g.get('outdir')}
+    rows, todo = [], []
     for fn in sorted(os.listdir(os.path.join(HERE, 'scripts'))):
         if not fn.endswith('.play'):
             continue
@@ -185,24 +242,91 @@ def suite(args):
             meta = script.parse(open(os.path.join(HERE, 'scripts', fn)).read())['meta']
         except script.ScriptError as e:
             if not args.only or any(sha1.startswith(o) for o in args.only):
-                rows.append((fn, 'ERROR', str(e)))
+                rows.append({'sha1': sha1, 'title': fn, 'status': 'ERROR', 'detail': str(e)})
             continue
         title = meta.get('title', sha1)
         if args.only and not any(sha1.startswith(o) or o.lower() in title.lower() for o in args.only):
             continue
         if meta.get('status', 'ready') != 'ready':
-            rows.append((title, 'SKIPPED', meta['status']))
+            rows.append({'sha1': sha1, 'title': title, 'status': 'SKIPPED', 'detail': meta['status']})
             continue
-        args.rom = resolve(args.out, sha1)
-        rc = pipeline.run(args)
-        report = json.load(open(os.path.join(pipeline.last_outdir, 'results.json')))
-        for s, v in report['verdicts'].items():
-            rows.append((title, 'PASS' if v['pass'] else 'FAIL',
-                         f"{s} play={v['play']} " + '; '.join(v['problems'][:3])))
-    print('\n== suite')
-    for title, status, detail in rows:
-        print(f'{status:8} {title[:48]:48} {detail}')
-    return 0 if all(r[1] != 'FAIL' for r in rows) else 1
+        todo.append((sha1, title))
+
+    def one(item):
+        sha1, title = item
+        log = os.path.join(sdir, 'logs', f'{sha1[:12]}.log')
+        link = os.path.join(sdir, 'logs', f'{sha1[:12]}.outdir')
+        cmd = [sys.executable, os.path.join(HERE, 'playtest.py'), '--out', args.out, 'run', sha1,
+               '--emus', args.emus, '--rtc', str(args.rtc), '--outdir-file', link]
+        cmd += ['--no-cross'] if args.no_cross else []
+        cmd += ['--no-audio'] if args.no_audio else []
+        cmd += ['--refs-from', refs[sha1]] if sha1 in refs else []
+        with open(log, 'w') as fh:
+            rc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode
+        row = {'sha1': sha1, 'title': title, 'rc': rc, 'log': log}
+        if os.path.exists(link):
+            row['outdir'] = open(link).read().strip()
+            report = json.load(open(os.path.join(row['outdir'], 'results.json')))
+            row['status'] = 'PASS' if all(v['pass'] for v in report['verdicts'].values()) else 'FAIL'
+            row['detail'] = {s: {'pass': v['pass'], 'play': v['play'], 'problems': v['problems'][:4]}
+                             for s, v in report['verdicts'].items()}
+        else:
+            row['status'] = 'ERROR'
+            row['detail'] = open(log).read()[-600:]
+        print(f"{row['status']:8} {title[:56]}", flush=True)
+        return row
+
+    # an existing suite of the same tag is extended: its games stay unless
+    # this run replaces them
+    index_path = os.path.join(sdir, 'index.json')
+    if os.path.exists(index_path):
+        mine = {sha1 for sha1, _ in todo} | {r['sha1'] for r in rows}
+        rows = [r for r in json.load(open(index_path))['games'] if r['sha1'] not in mine] + rows
+    # a whole-corpus suite is the machine's big job: one at a time with the
+    # train (train.py holds the same lock while it runs)
+    lock = None
+    if not args.only and not args.no_lock and not os.environ.get('DINGBAT_TRAIN_INSIDE'):
+        import train
+        lock = train.machine_lock(wait=True, what=f'playtest.py suite {tag}')
+    print(f'== suite {tag}: {len(todo)} games, {args.jobs} at a time -> {sdir}', flush=True)
+    with cf.ThreadPoolExecutor(max(1, args.jobs)) as pool:
+        for row in pool.map(one, todo):
+            rows.append(row)
+            json.dump({'tag': tag, 'emus': args.emus.split(','), 'games': rows},
+                      open(os.path.join(sdir, 'index.json'), 'w'), indent=1)
+    if lock:
+        lock.release()
+    print(f'\n== suite {tag}')
+    for r in rows:
+        print(f"{r['status']:8} {r['title'][:56]}")
+    return 0 if all(r['status'] != 'FAIL' for r in rows) else 1
+
+
+def freeze_cmd(args):
+    import freeze
+    path = args.script
+    if not os.path.exists(path) and re.fullmatch(r'[0-9a-f]{40}', path):
+        path = os.path.join(HERE, 'scripts', path + '.play')
+    text = open(path).read()
+    if freeze.is_frozen(text):
+        print(f'{path} is already frozen')
+        return 0
+    sha1 = os.path.basename(path)[:-5]
+    rom = args.rom or resolve(args.out, sha1)
+    try:
+        frozen = freeze.freeze(path, rom, args.out, args.rtc)
+    except freeze.FreezeFailed as e:
+        print(f'FREEZE FAILED: {e}')
+        return 1
+    if args.write:
+        src = os.path.join(HERE, 'scripts', 'source')
+        os.makedirs(src, exist_ok=True)
+        os.replace(path, os.path.join(src, os.path.basename(path)))
+        open(path, 'w').write(frozen)
+        print(f'frozen: {path} (condition script kept in scripts/source/)')
+    else:
+        print(frozen)
+    return 0
 
 
 def render_reply(line, r):

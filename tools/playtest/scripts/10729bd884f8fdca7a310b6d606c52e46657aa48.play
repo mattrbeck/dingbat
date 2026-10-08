@@ -2,34 +2,78 @@
 @file Kingdom Hearts - Chain of Memories (U).gba
 @game B8CE
 @chip SRAM
-@status wip: the script replays to the card-cycling step of Marluxia's tutorial battle; explored live to Sora free in the first Traverse Town room after New Game, file 1, the opening, Marluxia's card-battle tutorial (jump, reload, card cycling, category change) and the town intro; nothing is written to SRAM along the way and there is no save point in that room or on START. The first save needs map cards used on the doors to reach a save point. A human should record: New Game, file 1, the tutorial, walk Traverse Town to the first save point (or a Moment's Reprieve room), save, quit after the save message. [load]: title > Continue > file 1 > resume.
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing is written to SRAM through New Game, the Marluxia card-battle tutorial and the Castle Oblivion intro; the first save needs map cards used on Traverse Town doors to reach a save point (Moment's Reprieve), and the town rooms come out different on each emulator (see below), so no frozen walk through them exists
 
-# Dialogue only advances on a firm press: mash with hold=8 every 60 frames.
+# Dialogue only advances on a firm press: A with hold=8. New Game > file 1 >
+# opening > Marluxia's tutorial (jump, dodge roll, reload by holding A on the
+# reload icon; "Selecting Cards" ends after cycling with R; the "Changing
+# Categories" prompt wants SELECT twice) > Castle Oblivion intro and the
+# first memory door > Traverse Town.
+# Finding (traverse_town, f31927, Sora standing in the entrance door of the
+# first Traverse Town room on all three): the room is furnished differently on
+# each emulator: a street lamp and a crate box on dingbat-bios, a two-storey
+# building with a Heartless symbol on mgba, a crate box and paved circles on
+# nba. Everything up to the memory door (memory_door, f31127) is identical.
 
 [new]
-until text "PRESS" timeout=1500 every=10
+# until text PRESS timeout=1500 every=10  [reached dingbat-bios+990 mgba+990 nba+980]
+wait 994
 wait 150
 checkpoint title window=0 compare=text
 press START
-until text "NEW GAME" timeout=300 every=5
+# until text 'NEW GAME' timeout=300 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 150
 press A
-until text "Select a file" timeout=600 every=5
+# until text 'Select a file' timeout=600 every=5  [reached dingbat-bios+95 mgba+95 nba+95]
+wait 99
 wait 30
 checkpoint file_select window=0
 press A
-mash A until text "Castle" timeout=12000 every=60 hold=8
-mash A until text "Dodge Roll" timeout=12000 every=30 hold=8
+# mash A until text Castle timeout=12000 every=60 hold=8  [taps dingbat-bios:141 mgba:141 nba:141]
+tap A times=141 every=60 hold=8
+# mash A until text 'Dodge Roll' timeout=12000 every=30 hold=8  [taps dingbat-bios:341 mgba:341 nba:341]
+tap A times=341 every=30 hold=8
 checkpoint tutorial window=0 compare=text
 press B after=60
 press RIGHT hold=4 after=4
 press RIGHT hold=4 after=60
-mash A until text "Reloading" timeout=3000 every=30 hold=8
-# out of cards: hold A on the reload icon
+# mash A until text Reloading timeout=3000 every=30 hold=8  [taps dingbat-bios:70 mgba:70 nba:70]
+tap A times=70 every=30 hold=8
 press A hold=90 after=10
-mash A until text "Selecting Cards" timeout=3000 every=30 hold=8
+# mash A until text 'Selecting Cards' timeout=3000 every=30 hold=8  [taps dingbat-bios:20 mgba:20 nba:20]
+tap A times=20 every=30 hold=8
 checkpoint selecting_cards window=0 compare=text
-# Explored live but not yet replay-stable (the category-change prompt was not
-# reached on replay): R, A, L, A, hold A 90 frames, then the Changing
-# Categories prompt wants SELECT; after it, A-mashing (hold=8 every=60) runs
-# the town intro until Sora is free in the first Traverse Town room.
+press R hold=4 after=16
+press R hold=4 after=16
+press A hold=8 after=60
+tap R times=10 every=16 hold=4
+tap L times=10 every=16 hold=4
+press A hold=8 after=50
+press A hold=8 after=50
+press A hold=8 after=50
+press A hold=8 after=50
+press A hold=8 after=50
+press A hold=8 after=50
+press A hold=8 after=50
+press A hold=8 after=50
+press A hold=8 after=50
+press A hold=8 after=50
+checkpoint changing_categories window=0 compare=text
+press SELECT hold=8 after=60
+press A hold=8 after=60
+press SELECT hold=8 after=60
+press A hold=8 after=60
+tap A times=8 every=58 hold=8
+tap A times=30 every=60 hold=8
+tap A times=30 every=60 hold=8
+tap A times=30 every=60 hold=8
+tap A times=10 every=60 hold=8
+tap A times=5 every=60 hold=8
+checkpoint memory_door window=0
+tap A times=5 every=60 hold=8
+wait 200
+wait 300
+checkpoint traverse_town window=0 compare=none
+

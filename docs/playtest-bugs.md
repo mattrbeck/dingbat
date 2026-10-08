@@ -2791,3 +2791,1668 @@ re-run on this tree.
 Method, again: a row that passes is evidence about a SUM. The timer rows
 had always passed on entry + stop, and each term was a cycle out.
 
+## 27. Boktai 2: the REGION SETTING screen ignores every key, at some clock times, 2026-10-01
+
+**FIXED** (dma.nim, interrupts.nim). Boktai 2 - Solar Boy Django (U) drew the
+region list after the time setting and then took no key, under the HLE and
+Nintendo's BIOS alike, with the cart clock frozen at 00:00, 00:01, 01:00 or
+06:00 but not at 00:30 or 12:00; the references went on to the KONAMI logo.
+
+**It was not the solar sensor.** The game had crashed. Its IRQ handler
+(IWRAM 0x03002D00) dispatches on IE & IF in a fixed order -- V-count,
+serial, timer 3, H-blank, V-blank, timers 0-2, DMA, keypad -- through a
+table at 0x03002CB0, with a game-pak entry that stops the sound and loops.
+Entered with IE & IF zero it falls through all of them to the fourteenth
+slot, which is null, and jumps to address 0. The timer interrupts kept
+running afterwards: timer 3 is the solar sensor's clock (each overflow
+writes one clock edge to the GPIO port at 0x08247F36 and reads the
+comparator), so the port kept being clocked with the main loop gone, which
+is why the sensor readback looked different from mgba's.
+
+**The interrupt with no source.** Timer 3 overflowed inside a 196-cycle
+DMA3 copy. The game has sound DMA armed, so DMA3's burst is preemptible and
+its transfer loop dispatches due events at transfer boundaries: the raise
+ran before the burst's stall span was known, got a plain 3-cycle
+synchroniser delay, and the burst's end then pushed it back by the whole
+burst (`pipe_due += held`). Meanwhile the CPU took a pending H-blank
+interrupt the moment it had the bus back; the handler served timer 3 first
+and acknowledged it, a nested entry acknowledged H-blank, and 180 cycles
+later the synchroniser delivered its stale IE & IF sample as a fresh
+interrupt. Which DMA3 copy a timer 3 overflow lands
+in depends on what the game does that frame, and the clock changes that,
+hence the clock times.
+
+**The law already in the core, applied to this path.** A timer interrupt
+raised while a burst holds the CPU off the bus counts from the burst's end
+(raise_synced: `stall_to + IRQ_SYNC_DELAY - UNDER_BURST_CREDIT`, measured
+with `irqstorm.s` on the AGB SP). A raise the burst's own loop dispatched now
+gets the same at the burst's end, and a check dispatched inside the burst no
+longer recognises what the stopped synchroniser holds. Arming an idle
+channel the console never sees fire can no longer move a timer interrupt.
+
+**Evidence.** `tests/roms/payloads/dmairqarm.s`: TM0's interrupt raised k
+cycles into a DMA3 burst, with an idle sound DMA armed (sound master off, so
+it never requests) or not. Before: armed, every raise inside the burst was
+taken 2 cycles early, and at k = 4 twice (`010200DC`); after: armed answers
+equal unarmed at all 30 pairs (then held by `cyclelaws_test` as
+console-free invariants). The rig was not connected on 2026-10-01, so the
+absolute entry cycle waited for the console (below); mgba takes it 5 cycles
+earlier than dingbat throughout, armed or not.
+
+**Console, 2026-10-02.** `r0table.py --record dmairqarm` on the AGB SP: the
+console answers every (not armed, armed) pair alike, and every cell's entry
+cycle is dingbat's -- dingbat and dingbat-bios 60/60, mgba 16/60. The 60
+cells are console laws now (`tests/roms/cyclelaws/dmairqarm.gba`, both
+BIOSes), which hold the pairs equal and the absolute cycle besides;
+`tests/roms/invariants/` is gone.
+
+| clock (2006-01-01, UTC) | 00:00 | 00:01 | 00:30 | 01:00 | 06:00 | 12:00 | 23:59 | host |
+|---|---|---|---|---|---|---|---|---|
+| dingbat-bios before | stall | stall | ok | stall | stall | ok | ok | ok |
+| dingbat (HLE) before | ok | ok | ok | ok | ok | ok | stall | stall |
+| both, after | ok | ok | ok | ok | ok | ok | ok | ok |
+
+Every 37 minutes through the day (39 clock times, dingbat-bios): 17 stalled
+before, none after.
+
+The script (`cd10d8ed....play`) now replays on dingbat and dingbat-bios with
+the references' screens at all eleven checkpoints. Runner, both mGBA suite
+BIOS modes (6998 / 6998), cycle laws, RTC, save-state and soak tests:
+unchanged.
+
+## 28. Phantasy Star Collection: every Master System window drawn with shifted scanlines, 2026-10-02
+
+**FIXED** (dma.nim, `DMA_BUS_BACK_TO_BACK` in gba.nim). In Phantasy Star
+(the first game of Phantasy Star Collection (U)), from about frame 3800 --
+B opens the command menu in Camineet -- every window the game draws (the
+command menu, the status box, messages, the save slot and continue screens)
+showed repeated or shifted scanlines and struck-through text, in all four
+dingbat configurations. mgba and the second reference draw them clean and
+agree pixel for pixel. The game itself went on; its save was byte-identical
+on all six.
+
+**How the collection draws a Master System screen.** Its player puts the
+picture on BG1 and a high-priority copy of the window rows on BG0, and
+scrolls both per line from one table: DMA1 (H-blank, repeat, 16-bit, CNT_H
+0xA240) moves a halfword a line from a ROM table at 0x08770E5B/0x08770E5F
+to BG1VOFS; DMA2 (H-blank, repeat, source FIXED at 0x04000016) moves
+BG1VOFS to BG0VOFS. BG1VOFS is write-only, so DMA2's read is open bus: it
+gets whatever is on the data bus, and the design works only if that is the
+word DMA1 drove there a moment earlier. Then BG0 scrolls with BG1 and the
+window rows sit over the picture rows they belong to.
+
+**What dingbat gave it.** `DMA_READS_CPU_BUS` (gba.nim; dmaobus.s on the
+AGB SP, 2026-09-24) says a burst's first unmapped read gets
+the CPU's last bus transaction -- its data load if it came after its last
+fetch, else the fetched opcode -- and every non-nested burst marked itself
+`dma_bus_fresh` to take that path. DMA2 is not nested (both channels are
+requested on the same H-blank and `run_pending` grants them one after the
+other), so each line's BG0VOFS was a halfword of whatever the SMS
+emulator's code had last fetched or loaded (`0C03`, `19A1`, ... where DMA1
+had written `0000`, `0001`, ...). BG0's rows landed at arbitrary heights:
+the shifted lines and the strike-throughs.
+
+**Why the CPU's word is wrong there.** The CPU never had the bus between
+the two bursts. `tests/roms/payloads/hdmalag.s` measured that on the AGB SP
+on 2026-09-24: of two channels granted on the same H-blank, the second
+makes its first read the cycle after the first's last write. The bus goes
+from DMA1 to DMA2 with DMA1's last word still on it, as it does inside a
+burst and for a nested one, which the core already modelled. Both
+references draw the game accordingly. (dingbat then still started the
+second burst two cycles later than the console, hdmalag's known offset; the
+word on the bus does not depend on it. Fixed the same day, below.)
+
+**The change.** `run_pending` notes when the grant it is making follows a
+burst it ran itself, with no CPU access between, and `run_channel` then
+leaves `dma_bus_fresh` clear: the burst's first unmapped read returns the
+last word the bus carried (`dma_open_bus`). That covers two channels on one
+H-blank (or V-blank) and a chained immediate pair (`DMA_CHAIN`). A burst
+granted after the CPU had the bus still reads the CPU's word, so every
+dmaobus/alyosha Bus cell stands.
+
+**Probe: `tests/roms/payloads/hdmaobus.s`** (as predicted before the console
+answered; its answers follow the table).
+DMA1 writes X_k = `A500 | 11k` to BG1VOFS on line 40 + k; a second channel
+reads BG1VOFS (fixed) into EWRAM on the same H-blank, eight lines. Writer
+first (reader DMA2) or reader first (reader DMA0); the CPU in a Thumb NOP
+sled (`46C0`) or halted through SWI 2. Answer: the halfword read on line
+40 + k, with the number of reader bursts (8) in bits 16-23.
+
+| cells | dingbat before | dingbat after | mGBA | predicted for the SP |
+|---|---|---|---|---|
+| writer first, sled, k = 0, 1 | `46C0` (the CPU's NOP) | X_k | X_k | X_k |
+| writer first, sled, k = 2..7 | `1AFF` / `E1C6` (the VCOUNT poll) | X_k | X_k | X_k |
+| writer first, halted, k = 0..5 | `0000` HLE / `0300` BIOS | X_k | X_k | X_k |
+| reader first, sled, k = 0, 1 | `46C0` | `46C0` | `46C0` | `46C0` |
+| reader first, halted, k = 1..5 | `0000` / `0300` | `0000` / `0300` | `7F00` | open |
+
+The last row is the open question the probe adds: a halted CPU drives
+nothing, so the reader granted first may find the writer's word from the
+line before (X_(k-1)) still on the bus. dingbat answers what the CPU last
+fetched in the BIOS's Halt; no test holds that row. The other 18 cells are
+held by `cyclelaws_test` from `tests/roms/invariants/hdmaobus.gba`, marked
+predicted, until the console answered.
+
+**Console, 2026-10-02.** `r0table.py --record hdmaobus` on the AGB SP.
+Writer first: X_k in every cell, sled or halt -- `DMA_BUS_BACK_TO_BACK` is
+the console's, and so is the game's design. Reader first in the sled: `46C0`
+at k = 0, 1, and from k = 2 several answers a cell (the poll loop's opcodes
+or the line number it loaded): where the arming leaves the sled is not
+fixed, so the H-blank lands anywhere in a 7-cycle loop; ten runs of 0x102
+gave six different words. Those six cells are no law (`lawrom.py` leaves a
+cell with two answers out). Reader first under the halt, the open row:
+**X_(k-1)**, the writer's word from the line before, k = 1..5; the BIOS's
+last fetch (`0300`) at k = 0; after the wake on line 46, `002E`, the line
+number the CPU's VCOUNT `ldrh` had just loaded; on line 47, `E150`, the
+poll loop's `cmp`. dingbat answered the CPU's last fetch for all of these
+(`0300` / `0000`, `1AFF`, `E1C6`).
+
+`tests/roms/payloads/hdmaphase.s` took the halted half apart (80 cells,
+every one unanimous): the poll loop's phase on line 46 walked one cycle at a
+time by NOPs after the wake and read on lines 46-48, the reader alone and
+with the writer, and VCOUNT loaded as a byte, halfword and word read back
+through either half of the I/O word. Four rules came out of it, each a knob
+in gba.nim:
+
+| knob | what the console showed |
+|---|---|
+| `DMA_BUS_WHILE_HALTED` | a halted CPU drives nothing: a burst granted with the CPU halted since the last one ended reads that burst's last word (hdmaobus X_(k-1); the reader alone keeps its own `0300` every line) |
+| `DMA_READS_IO_LOAD` | the CPU's last data load counts when it was an I/O register too, and the I/O bus is 32 bits wide: an `ldrh` or `ldrb` of VCOUNT leaves DISPSTAT (`2E26`) on the lower half as well. The load's value stays through its internal cycle |
+| `DMA_SEES_REFILL_FETCH` | a request between a branch's two refill fetches finds the first (the loop's own first opcode); the core charges the refill as one block, so r15 alone answered the second |
+| `DMA_PENDING_CHAIN` | a request latched together with a burst's (two channels on one H-blank) follows it with no hand-back and no lead: the one-halfword reader holds the CPU 6 cycles, reader plus writer 10, not 12 -- hdmalag's "the second channel starts two cycles late here", from the CPU's side. Requests arriving during a burst are not chained: unmeasured, and a first version that chained them too moved Pokemon Mystery Dungeon - Red Rescue Team's timing-seeded personality quiz under the official BIOS (other questions, the script desynced; all four configs pass with the narrower rule) |
+
+The last one also brings hdmalag's configurations 23-28 and 30 (DMA3 behind
+DMA1 across the drop edge) onto the console: recorded the same day and
+frozen; 29 still differs (18 bursts here, 20 on the console). The HLE's stub
+BIOS gained the two stack literals after Halt's `bx lr` (the default user
+and IRQ stack tops), so the halted fetch reads the same word under either
+BIOS.
+
+| table | dingbat before | after | Nintendo's BIOS before | after | mGBA |
+|---|---|---|---|---|---|
+| hdmaobus (32; 6 racing) | 18 | 26 | 19 | 26 | 18 |
+| hdmaphase (80) | 38 | 80 | 41 | 80 | 9 |
+| hdmalag 23-28, 30 (28) | 21 | 28 | 21 | 28 | 6 |
+
+Every other recorded cell holds (`r0table.py --check`: 1893/1898 dingbat and
+Nintendo's BIOS, the five misses racing cells; cycle laws 2072/2072 under
+both BIOSes).
+
+**ps1_title's rows 7k+2/7k+3 are not a second DMA effect.** The evaluator
+also saw BG1 row pairs one table step early at checkpoint ps1_title
+(f1982). The game alternates DMA1's table start between 0x08770E5B and
+0x08770E5F (two entries apart) every frame: a two-field line-drop pattern
+for squeezing the Master System picture. dingbat's frame 1983 is pixel-
+identical to the second reference's frame 1982 (mgba differs from both only
+by the blinking cursor), so dingbat is one field out of phase at that frame
+-- the same thing as the starfield twinkle the script notes -- and the
+harness already rates that checkpoint as the references' own spread.
+
+**Evidence.** The script (`9f2dc591....play`): FAIL (field_menu, save_slot,
+saved MAJOR) before on all four dingbat configs, PASS after on all four,
+every checkpoint on the references' screens. A build that logs every burst
+whose first read takes the new path ran all 135 scripted games (dingbat,
+HLE): Phantasy Star Collection is the only one that ever reaches it, so
+every other script's emulation is unchanged; the six-emulator scripts of
+Golden Sun, F-Zero - Maximum Velocity, Mario Kart Super Circuit, Castlevania
+- Aria of Sorrow, Pokemon Emerald and Iridion II still PASS. Runner 1433/1443, mGBA suite
+6998/6998 (HLE and Nintendo's BIOS), dbsuite unchanged (dma 261/262, bus
+76/79, both BIOSes), cycle laws 1860/1860 and invariants 30/30 under both
+BIOSes.
+
+## 29. Final Fight One: a frame late after a load, and why that is the references, 2026-10-02
+
+The playtest evaluator flagged dingbat (every config) a frame behind mGBA,
+with the second reference agreeing with mGBA, in Final Fight One (fade-in
+after the black loading screen at f315), The Sims - Bustin' Out (first ~40
+frames), Harvest Moon - Friends of Mineral Town, Yu-Gi-Oh! The Eternal
+Duelist Soul, Lunar Legend and Yoshi's Island. **No emulator change: in the
+three traced, every cycle dingbat spends that the references do not is a
+cost silicon has already measured or a hardware-verified test requires.**
+
+### How it was found
+
+`tools/playtest/drivers`: dingbat's `peek` was a *timed* bus read (it
+charged wait states), so peeking RAM every frame moved the game; it is now
+untimed. New debug commands (README, "Driver protocol"): `trace N PATH` in
+dingbat and mGBA (PC and master-clock cycles per instruction, black-box
+from mGBA's public step and timing calls), `runto PC`, `pft PC N PATH`.
+With them: replay the frozen script, diff RAM per frame, then trace both
+emulators across the frames where RAM first diverges and compare the cost of
+the same loop.
+
+### Final Fight One
+
+* RAM diverges at **f280**, not f315: from there dingbat's EWRAM at frame
+  f+1 equals mGBA's at f (2 bytes differ) all the way to the fade-in.
+* f272-f280 is a loading thread: an LZ decompressor in Thumb ROM code
+  (0x08045CD0, WAITCNT 0x4314, prefetch on) unpacking straight into VRAM
+  with read-modify-write halfwords, then a pass at 0x0803DECC and an EWRAM
+  memset (0x0806B838). Both emulators give the thread the same ~279k cycles
+  a frame (the main thread and interrupts differ by ~80 cycles a frame).
+* mGBA reaches the idle loop **17.6k cycles before** the f280 V-blank;
+  dingbat **26.2k cycles after** it, so the game's next step slips a frame.
+  The 44k gap:
+
+| | cycles | evidence |
+|---|---|---|
+| renderer contention on the decompressor's VRAM reads/writes (mode 0, BG1-3 on, palette black) | 16.4k | console-measured (`contmap.s`, CONTEND2: +1 per CPU VRAM read in mode 0); neither reference models it |
+| a branch waits out a committed prefetch halfword (`clear_pipeline`) -- the decompressor's `ldrb` from VRAM then `b` pays it on every other byte | 9.7k | needed by alyosha prefetcher_full_arm, _branch_thumb, _thumb_3, _boundary_1/_3 (hardware-verified; WS0 4/2 like this game) |
+| everything else: mGBA prices data accesses under the prefetcher below the bus floor | ~18k | the memset loop (4 `stmia` of one word to EWRAM, `subs`, `cmp`, `bhi`) is 38 cycles in dingbat and **26 in mGBA**, though four EWRAM word stores alone are 24 bus cycles and the taken branch's nonsequential refill another 6; `slotexec.s` on the AGB SP: EWRAM load/store from gamepak code with the prefetcher on = dingbat, mGBA 4-5 short |
+
+  `-d:CONTENTION=false` lands 9.8k late, `-d:BRANCH_COMMIT_WAIT=false`
+  16.6k late, both off **still 2.5k late** -- f315 either way. Turning off
+  measured behaviour does not reach the references' frame.
+* The alyosha prefetcher ROMs, 120 frames each in the playtest drivers:
+  dingbat passes all nine tried; mGBA fails 8 (passes _branch_thumb_6);
+  the second reference fails 5 (_branch_thumb_2/_3/_4/_6, _full_arm). Both
+  references' prefetchers are fast in ways hardware is not.
+
+### The others traced
+
+* **The Sims - Bustin' Out**: boot clears 40 KB of EWRAM with
+  `stmia r0!,{r1}; adds; cmp; bcc` from ROM at WAITCNT 0x4314: **18 cycles
+  an iteration in dingbat, 14 in mGBA** (one EWRAM word store is 6 bus
+  cycles and the taken branch's refill 4 + 2). The references do not agree
+  either: the second reference shows the 30 Hz animation a frame *ahead* of
+  mGBA, dingbat a frame behind, three phases from f33.
+* **Harvest Moon - Friends of Mineral Town**: the boot Huffman decoder
+  (0x080D1186, WAITCNT 0x4017) loads its bit stream from the cartridge
+  with `ldmia r0!,{r2}`; dingbat charges the fetch after a gamepak data load
+  nonsequential and the load's I cycle no prefetch (alyosha
+  prefetcher_branch_thumb_2, failed by both references): 4 cycles a word
+  more than mGBA. mGBA's frame-10 work ends with 46k idle; dingbat's spills
+  just past the V-blank and loses frame 11 -- the farm layout seed follows.
+* Not traced (and `-d:CONTENTION=false` / `-d:BRANCH_COMMIT_WAIT=false`
+  change none of their first divergent frames, nor The Sims' or Harvest
+  Moon's): Yu-Gi-Oh! EDS (first difference f32, where the second reference
+  also leaves mGBA), Yoshi's Island (dingbat briefly *ahead* at f93, f191),
+  Lunar Legend (both dingbat configs match mGBA f2-f560; the second
+  reference already differs from mGBA every fourth frame from f33), MMBN2/4.
+
+### Hardware check
+
+`tests/roms/payloads/slotbranch.s` + `tools/hwlink/slotbranch.py` (empty
+slot, WAITCNT 0x4000 only): one load fetched from the slot, then the BL
+suffix branching either home (control) or to `bx r6` at 0x08008E60 in the
+slot. The rom-home difference per load is the gamepak branch target's cost:
+
+| load (d = data + I cycles) | dingbat home/rom/diff | mGBA home/rom/diff |
+|---|---|---|
+| `ands` (no data) | 18 / 29 / 11 | 18 / 29 / 11 |
+| `ldr` IWRAM, d=2 | 18 / 29 / 11 | 18 / 29 / 11 |
+| `ldmia` IWRAM 2 regs, d=3 | 19 / 30 / 11 | 18 / 29 / 11 |
+| `ldmia` IWRAM 3 regs, d=4 | 20 / 32 / **12** | 18 / 29 / 11 |
+| `ldrh` EWRAM, d=4 | 20 / 32 / **12** | 18 / 29 / 11 |
+| `ldmia` VRAM 2 regs, d=5 | 21 / 32 / 11 | 18 / 29 / 11 |
+| `ldmia` VRAM 3 regs, d=7 | 23 / 35 / **12** | 18 / 29 / 11 |
+| `ldr` EWRAM, d=7 | 23 / 35 / **12** | 18 / 29 / 11 |
+| `ldr` VRAM, d=3 | 19 / 30 / 11 | 18 / 29 / 11 |
+
+The commit wait shows as diff 12 at d = 4 and 7 (d mod 3 = 1 at S = 3);
+the home column re-asks section 22's question for more loads (mGBA charges
+none of them). A console that reads 11 everywhere refutes the commit wait at
+a branch and makes Final Fight 9.7k cycles faster -- still a frame behind
+the references.
+
+**Console, 2026-10-02.** `slotbranch.py` on the AGB SP (empty slot): every
+single-load row is dingbat's, home, rom and diff, including the d = 4 and
+d = 7 cells' diff 12 -- the commit wait at a gamepak branch target
+(`BRANCH_COMMIT_WAIT`) is the console's, and the references' 11 is an
+under-charge (mGBA is wrong on rows 2-8). Rows 3 and 6, the 3-register
+`ldmia` from IWRAM and from VRAM, vary between runs; over six runs the
+console's home path read 22 and 25 where dingbat says 20 and 23 (rom 32 and
+35, as dingbat). So multi-register loads in slot code may cost more still on
+hardware than dingbat charges, which only widens the gap to the references;
+no rule yet fits those two rows and the slotexec/alyosha prefetcher data, so
+nothing changed. Final Fight One's frame stays the references' error.
+
+## 30. Kingdom Hearts - Chain of Memories: DirectSound near-mono after the movie, 2026-10-02
+
+**Symptom.** After the opening movie both references play FIFO B (left) 29
+output samples (14 FIFO samples at 15768 Hz) behind FIFO A (right) for the
+rest of the run; dingbat keeps them sample-aligned, so its wide passages are
+near-mono (L/R correlation from the first music on: dingbat 0.90, mgba 0.42,
+the second reference 0.44) and the audio check fails in all four configs
+(12.3 % of the run). The m4a mixer writes the same position into both
+buffers, so any constant offset is the FIFOs', not the music's.
+
+**The register sequence** (dingbat trace, cycle frames; the script's frames
+are the same within a frame). The game runs m4a stereo (SOUNDCNT_H 0xA90E:
+A right, B left, both TM0) from f3, then for the movie (f1566) switches to
+FIFO A alone to both sides (0x0B04: A reset, B unrouted, DMA1 only, TM0
+period 532). At f8009 it stops TM0 and DMA1 with FIFO A three bytes short
+of a word boundary (15 bytes queued), then m4a's SoundInit: DMA1/DMA2 CNT_H
+0x0400, SOUNDCNT_X 0x8F, SOUNDCNT_H 0xA90E (both FIFOs reset), DMA1/DMA2
+0xB600, TM0 1254 on V-count 159, SoundMode's TM0 stop / VSyncOff / TM0 1064.
+From then on the only writes are m4a's resync every sixth frame (DMA1CNT
+0x84400004, DMA2CNT likewise, both CNT_H 0x0400, both 0xB600), which
+reloads both sources together and so keeps whatever offset the FIFOs hold.
+The boot-time init (f3) is the same sequence from empty FIFOs, and there
+all three emulators stay aligned.
+
+**Mechanism.** Both references keep playing the rest of the word a FIFO is
+on through a reset; only the queued words go. FIFO A therefore comes out of
+the f8009 reset with three stale samples ahead of the new stream and FIFO B
+with none, and that difference survives every resync. Black-box evidence:
+`tests/roms/payloads/fiforeset.s` (four words, k samples played, reset,
+four more words, then the overflow at which each refill DMA first asks)
+reads 2 5 4 3 2 5 4 3 for k = 0..7 on both references and 2 everywhere on
+dingbat; a FIFO played audibly (pattern words, reset after k samples) shows
+the 4 - k mod 4 leftover samples before the new pattern on the second
+reference. Built with `-d:FIFO_RESET_KEEPS_WORD=true`, dingbat reads the
+references' 2 5 4 3 and its Kingdom Hearts left channel lands 29 samples
+behind the right, as on both (L/R correlation 0.44); the playtest goes from
+FAIL (12.3 %) to PASS (0.1 %, dingbat and dingbat-bios).
+
+**The master enable is already answered, by the console.** A first version
+of the knob kept the word through every reset, including SOUNDCNT_X going
+off (the second reference does; fiforeset.s v = 1; mgba clears nothing
+there at all). The recorded laws refuse it: two console cells of fifomap
+(`r0-agb.json`, 0x1428 and 0x20001428, run straight after a cell that
+stops TM0 part-way through a word and exits with the master off) read one
+refill burst more than that model gives (0x6A, model 0x4C), and dbsuite's
+three fifodma "spike" cells fail. With the word kept through the reset bit
+only, every cycle law holds (1860/1860) and the runner is unchanged, so
+the knob now covers SOUNDCNT_H's bits alone: whatever the bits do, powering
+the sound off empties the FIFO, word and all, as `FIFO_MASTER_RESET`
+already has it. Also seen: mgba does not drain a FIFO routed to neither
+side (the second reference does, as dingbat does).
+
+**Console, 2026-10-02: the references are wrong.** `r0table.py --record
+fiforeset` on the AGB SP reads `00020202` in all 18 cells, by SOUNDCNT_H's
+reset bit and by the master enable alike: a FIFO reset drops the word being
+played with the rest, as dingbat does. dingbat 18/18, mgba 3/18. Kingdom
+Hearts - Chain of Memories' near-mono after the movie is the console's
+sound; the wide stereo both references play there comes from their FIFO
+reset. `FIFO_RESET_KEEPS_WORD` stays off, documented as the references'
+behaviour (kept to reproduce them), and the cells are console laws
+(`tests/roms/cyclelaws/fiforeset.gba`). The audio check's FAIL on this
+script is the references' spread, not a dingbat bug.
+
+**Status before the console (kept for the record).** No measurement said
+what the AGB does there, so the knob shipped off (`dma_channels.nim`
+FIFO_RESET_KEEPS_WORD). Run `python3 tools/hwlink/r0table.py --record
+fiforeset` with the SP on the link. dingbat predicts 2 for every cell as
+shipped and, with the knob, 2 5 4 3 2 5 4 3 2 for v = 0 and 2 throughout
+for v = 1; the references read 2 5 4 3 2 5 4 3 2 for v = 0. 2 5 4 3 in A
+and B for v = 0 means flip the knob to true (Kingdom Hearts then passes);
+2 throughout means the references are wrong and this game is right as it
+is. v = 1 should read 2 throughout on the console (fifomap says so); if it
+does not, the fifomap reading above needs another look.
+
+## 31. Castlevania HoD: thunder at different frames is the lightning's randomness, not the APU, 2026-10-02
+
+**Symptom.** All four dingbat configs play IDENTICAL to both references at
+every checkpoint but fail audio: "differs from both references in 2.4 % of
+the run, longest 2.26 s from f6960 (silence/presence ...)". The references
+agree with each other. **No emulator change: the difference is which frames
+the game chooses for its lightning, and the thunder that comes with it.**
+
+**What the sound is.** On the bridge the game plays everything through FIFO
+A (SOUNDCNT_H 0x030E: A to both sides at 100 %, B unrouted; DMA1 on TM0)
+plus the noise channel, from its own software mixer; the MP2K HLE is off in
+the playtest driver (`gba.mp2k_hle` is set only by the frontends). Per-frame
+I/O snapshots (SOUNDCNT_L/H/X, NRxx, DMA1/2 CNT_H, TM0/1) from f6900 to
+f7300 show the same register traffic in all three emulators, and the last
+NR41/NR44 writes at f6906. What differs is the mix the game writes: the
+dialogue's ambience ends around f6978, and a thunder clap of ~160 frames
+plays at
+
+| | thunder from | lightning flashes (screen mean > 170) |
+|---|---|---|
+| dingbat (all four) | f6960, f7240, f7470, f7720, ... | f6968, f7248, f7307, f7482, f7738, f7994, ... |
+| mGBA | f7140, f7460, f7720, ... | f7149, f7206, f7465, f7721, f7977, f8072, ... |
+| second reference | f7150, f7480, f7740, ... | f7152, f7235, f7493, f7749, f8005, f8034, ... |
+
+Each flash repeats 256 game frames later (a new flash starts a new cycle),
+and new ones arrive at random. The references' first flash after the
+dialogue lands three frames apart by coincidence: every later flash differs
+between them (f7206 / f7235, f8072 / f8034, ...), as the script's notes
+already recorded for the screen (f7220/f7480 white in mGBA only). The
+audio check compares those first claps and flags dingbat, whose clap is
+180 frames earlier.
+
+**Why the randomness differs.** EWRAM 0x02000000 counts the game's frames
+(the main loop's passes) and 0x02000008 is its random seed, stepped every
+pass. Read every frame of the replay in all three (the second reference's
+driver now has `peek` for work RAM and I/O, below):
+
+| lag frames (V-blanks without a pass) | f1-f6264 | f6264-f6913 (dialogue) |
+|---|---|---|
+| mGBA | 74 | 18 |
+| second reference | 76 | 24 |
+| dingbat, all four configs | 78 | 25 |
+| dingbat `-d:CONTENTION=false` | 77 | 24 |
+| dingbat `-d:BRANCH_COMMIT_WAIT=false` | 77 | 25 |
+| dingbat, both off | 77 | 23 |
+
+Every second A press in the dialogue opens a new text box, and that pass
+overruns a frame in all three; in dingbat and the second reference it
+overruns by one more. So the seed (and the frame count the lightning cycle
+is keyed to) falls out of step in all three emulators, and the seeds at
+f6900 are three different values. dingbat is with the second reference
+here, not the outlier.
+
+**Where the cycles go** (dingbat-bios-nowl vs mGBA traces, the two frames
+of the text box at f6429-f6430): mGBA ends the second frame with 15.4k
+cycles idle, dingbat spills ~16k into the next. The largest items:
+
+| | dingbat | mGBA | evidence |
+|---|---|---|---|
+| a 0x800-halfword DMA3 to VRAM 0x0600D000 in active display (V-count 84-93) | 11752 | 8202 | 8204 with `-d:CONTENTION=false`: the renderer's VRAM contention, console-mapped (`contmap.s`, section 29); neither reference models it |
+| 0x080015BC -> 0x08001528 (a tile lookup, 1033 calls), per call | 198 | 190 | the difference is all in the returns: `pop {r4-r7}; pop {r1}; bx r1` with the stack in IWRAM (sp 0x03007DD4) is 18 cycles in dingbat, 12 in mGBA, though five IWRAM loads, two internal cycles and the 4 + 2 refill of the branch to ROM are 13 on the bus alone (WAITCNT 0x4017) |
+| other Thumb ROM code with data accesses (0x08013Bxx, 0x0802B6xx, 0x08000Axx) | ~+12k together | | the same class: section 29's "mGBA prices data accesses under the prefetcher below the bus floor" |
+
+**Who is right.** The audio itself is not in question: the register writes
+match and the difference follows the flash. On the lag, the console has
+answered the mechanisms dingbat charges more for: `slotexec.s` (section 22)
+with the prefetcher on, hardware = dingbat on all twenty single gamepak
+opcodes (loads and stores to IWRAM/EWRAM among them), mGBA misses nine; the
+VRAM contention is `contmap.s`'s map. The multi-register load case (the
+`pop` above) is the pending `slotbranch.s` question of section 29 (rows
+`ldmia IWRAM 2 regs` / `3 regs`: dingbat 19 / 20, mGBA 18 / 18); running
+`python3 tools/hwlink/slotbranch.py` with the SP on the link settles it, and
+no new probe is needed for this game. Even if it came out mGBA's way, the
+lightning would still not be reproducible: the second reference, which
+lags like dingbat, flashes at frames of its own.
+
+**How it was found.** Replay the frozen script with a per-frame `peek`
+(play the steps, hook every frame), diff RAM to find the frame counter and
+seed, compare lag per span, then `trace` both emulators across one text
+box and sum cycles per routine. The second reference's `peek` reads work
+RAM and IWRAM from the core's save-state copy and I/O through its peek
+calls; with a peek every frame its audio stays byte-identical to a run
+without. The knob variants (`CONTENTION`, `BRANCH_COMMIT_WAIT`, both) also
+show how chaotic the schedule is: their thunder lands at f7000, f7000 and
+f7140 (the last one matching the references by chance), from lag changes
+of one or two frames.
+
+## 32. Lunar Legend: the load screen reads differently, and it is not the save, 2026-10-02
+
+**Symptom.** All four dingbat configs fail the cross-load check: "mgba save
+in dingbat: checkpoint load_file differs from the references reading the
+same save (mgba=MAJOR, nba=MAJOR)", the same for the second reference's
+save. Play is IDENTICAL; dingbat's and mGBA's battery files are
+byte-identical (EEPROM 8 KB), the second reference's differs in 23 bytes.
+
+**Not the save.** Every reader shows every save the same way: at
+load_file the four dingbat configs hash 3FD1E88F for all three files,
+mGBA ABA41A9B for all, the second reference F4EADD89 for all. The
+difference is the [load] run, not the file. The checkpoint is
+`compare=text` over the rotating globe of the file menu, and OCR reads
+dingbat as "LOAD | Burg | 10:000 | DATA | 2:HO" and both references as
+"LOAD | 01:LV | Burg | 000:01 | 2:HO DATA" (similarity 0.66 = MAJOR). The
+pixels are the same menu with the same text (LV 1 Burg, 000:01, NO DATA);
+the globe and Nall's cursor are one animation step apart.
+
+**Why one step.** With a battery file present the game reads the whole
+EEPROM at boot (f6-f21: ~1030 calls of the read routine at 0x080567F0,
+each a 17-halfword address DMA and a 68-halfword read DMA, from Thumb ROM
+code at WAITCNT 0x4314, prefetch on). A call costs 4167 cycles in dingbat
+and 4096 in mGBA; the last one ends 170.5k cycles into f21 in dingbat and
+88.1k in mGBA, and from there the game is a frame behind: its post-load
+burst runs at f27 (mGBA f26), the title's 4-frame animation steps at f35,
+f39, ... (mGBA f34, f38, ...), the globe's 8-frame steps likewise. In
+[new] (no battery file, no EEPROM read) dingbat matches mGBA frame for
+frame to f560 and after that differs only by one 5-bit step on the fading
+globe (colour-effect rounding; the second reference rounds differently
+again: its background is 1,2,5 where both others have 0,2,5).
+
+**Where the 71 cycles go** (per call, dingbat minus mGBA, from `trace`;
+the interrupt path in between costs a few cycles less in dingbat):
+
+| | per call | rule |
+|---|---|---|
+| six PC-relative literal loads (`ldr rX,[pc,#n]`, e.g. 0x08056776, 0x08056780, 0x08056788, 0x08001292) in the DMA helper, run twice | ~+44 | the opcode fetch after a gamepak data load is nonsequential (N 4 vs S 2) and the load's I cycle fills nothing: alyosha prefetcher_branch_thumb_2, hardware-verified, failed by both references (the Harvest Moon rule of section 29) |
+| the address-bit loop 0x08056826-0x08056838, 14 iterations, an `ldrb` from a cartridge table each | ~+28 | the same rule, +2 an iteration |
+| the two EEPROM DMAs | +4 | 176 and 686 cycles in dingbat, 174 and 684 in mGBA |
+
+The 64-bit assembly loop (0x0805686C-0x08056880, IWRAM `ldrh`) costs the
+same in both. `-d:BRANCH_COMMIT_WAIT=false -d:CONTENTION=false` leaves the
+first divergence at f34.
+
+**Status: no change.** The references' prefetcher, as in section 29; a
+user importing an mGBA or second-reference save into dingbat gets the
+same file menu as from dingbat's own. The script's note says so.
+
+## 33. Yu-Gi-Oh! - The Eternal Duelist Soul: the title a frame late after the boot load, 2026-10-02
+
+**Symptom.** `title` ([new]) and `continue_title` ([load]) are DIFFERENT in
+all four configs; the references are pixel-identical there. The script's
+note had dingbat's green grid "offset by about one pixel and differing on
+every row". Section 29 left it untraced ("first difference f32").
+
+**f32 is not where play parts.** The fades from f32 (f32-43, f166-177,
+f215-229, f352-366, f400-414, f537-551) differ from mGBA by at most one
+5-bit step (452 px; blend rounding), and the second reference leaves mGBA
+there by 2-3 steps (1323 px) and a frame early. f552-f643 are identical
+again. Play parts at **f582**: from there dingbat's IWRAM at frame f+1 equals
+mGBA's at f (the RNG word at 0x03000040 and the frame counters at
+0x03004890, one step behind) with nothing different before. HLE and
+official BIOS are identical for 1000 frames.
+
+**The loop.** f575-582 is a boot load whose hot loop (0x0807517A-0x080751DA,
+Thumb ROM, WAITCNT 0x4014, prefetch on, 8192 iterations) stores a halfword
+to OBJ VRAM (DISPCNT 0: no contention) and then tests four bytes loaded
+from EWRAM, each `ldrb`, `cmp`, mostly-taken `beq`. **72.6 cycles an
+iteration in dingbat, 64.8 in mGBA**, 65.6k cycles over the loop: an EWRAM
+`ldrb` plus its `cmp` is 6-7 cycles against mGBA's 4, though the EWRAM
+byte read alone is 3 plus the load's I cycle -- the `slotexec.s` rule of
+section 29 (EWRAM data access from gamepak code with the prefetcher on,
+console = dingbat). mGBA reaches the idle loop (0x08075D8E) 55k cycles
+before the f582 V-blank; dingbat 21k cycles after it.
+
+**On the title** dingbat[f] = mGBA[f-1] except 304 px: the grid scrolls a
+pixel a frame (a one-frame lag is ~13k px), and the emblem's flame, which
+wobbles during the logo, comes to rest on another frame of its animation
+(2 px right; x centre 120.1 against 118.1 on both references), so no
+offset matches exactly. [load] boots the same way with any save (mGBA's
+included: f728-f918 differ, f919 on identical), so `continue_title` is the
+same lag, not the save. **Status: no change**; the references' cost of the
+loop is below the console's.
+
+## 34. Mario & Luigi - Superstar Saga: Bowser on another idle pose, five main-loop counts behind, 2026-10-02
+
+**Symptom.** `07_mark` (f20257, a battle with Bowser) is DIFFERENT in all
+four configs: the same battle on every emulator, with Bowser and Mario on
+other idle-animation poses (diff box 54..209 x 48..155, 1298 px against
+mGBA). The references themselves disagree at 06, 11 and 15-19; at 07 their
+difference happened to fall under MINOR.
+
+**The counter.** Counting only pixels more than one 5-bit step apart,
+dingbat matches mGBA to f17826; the poses part from the battle flash at
+f17828 (the second reference is a frame behind mGBA there and on its own
+pose phase). The battle animations run off the game's main-loop counter
+(IWRAM 0x03000368), not its V-blank count (0x0300036C). At f17600, screens
+still identical, the V-blank counts agree and the main-loop counter and
+the task timers tagged TIME/FLDM/BEVS/EVTS (0x03002150, 0x03002210,
+0x03002548, 0x0300257C) are all exactly **5** lower in dingbat. Loading
+mGBA's f17700 state and poking only 0x03000368 to dingbat's value makes mGBA
+draw the battle exactly as dingbat for the next 239 frames (0 of 239 frames
+more than a step apart; 163 of 239 without the poke).
+
+**Where the five went.** dingbat's main loop misses a V-blank that mGBA's
+makes at f3829, f3964, f5025, f5054 and f10335, all scene loads. At f3828
+(traced from both emulators' states; no input in the stretch) dingbat runs
+86,733 instructions, mGBA 88,451, and in f3829 mGBA finishes the iteration
+before the V-blank and dingbat does not: over f3827-3828 dingbat spends
+28.5k cycles more in gamepak code (net 14.6k behind once its 12.6k fewer
+halted cycles are counted). The gap is spread over many ROM functions, not
+one loop; e.g. the first 24 instructions of 0x0801E68C cost 78 cycles in
+dingbat and 60 in mGBA, which charges its register pushes to the IWRAM
+stack and `ldr`s below the bus floor -- section 29's pricing again.
+
+**Status: no change.** A checkpoint on a battle's idle animation judges the
+main-loop phase, which here follows the references' cheaper gamepak code;
+the script's note says so (a still screen would be a steadier checkpoint).
+
+## 35. Advance Wars: first-boot flash writes finish instantly, and the menu scroll is a frame out of phase, 2026-10-02
+
+**Symptom.** At `02_mark` (f3932, the Field Training menu) dingbat's
+scrolling emblem background is one scroll step ahead of both references
+(~4.4k px more than a step apart, all on the background; dingbat[f] =
+mGBA[f+1..f+2] there). The references differ from each other only at the
+cursor arrows (~250 px) plus blend rounding. All four configs alike;
+`-d:CONTENTION=false` / `-d:BRANCH_COMMIT_WAIT=false` change nothing. **Not
+section 29: dingbat is early, and the cause is the flash chip.**
+
+**Mechanism.** On first boot (no save) the game fills a 4 KB flash sector
+(0xF000) one byte at a time from f28, polling the chip after each byte
+through its status routine in IWRAM (0x03007A4C). dingbat's flash
+(`storage/flash.nim`, Panasonic 0x1B32) has no busy state: a program lands
+at once, so the first status read already returns the written byte --
+~885 cycles a byte, done at f41. mGBA keeps the chip busy for three more
+calls of the status routine: ~1119 cycles a byte, done at f45; the second
+reference finishes between the two. The game's frame counter (0x03004358,
++1 a frame) therefore starts at f53 on dingbat and f56 on mGBA (3748 on
+dingbat, 3745 on mGBA at f3800), and the menu background (scroll at 0x03001E44/0x03001E50)
+steps every second frame on that counter's parity: a frame after mGBA's
+until the screen change at f3727 zeroes the scroll, a frame before after it,
+which the diagonal wipe shows from f3736. The save and the play are
+otherwise the same.
+
+**Check.** A scratch build where status reads after each byte program
+report busy for T cycles (DQ7 inverted, DQ6 toggling, **DQ5 = 0**: the game
+reads DQ5 as "time limit exceeded", and a DQ7-only model hangs it on a white
+screen; first poll ~418 cycles after the write, then every 127): T = 500
+gives counter start f55, 560-650 f57 (still the opposite parity), **700
+gives f58 = mGBA's parity**, the scroll matches mGBA frame for frame
+(f3725-3734) and `02_mark` differs only at the cursor arrows, as the
+references do from each other. So mGBA behaves as if a byte program takes
+roughly 670-800 cycles (40-48 us).
+
+**Status: needs a measurement.** Byte-program and sector-erase times are
+unmeasured in dingbat; both references model a busy time and disagree on
+how long. A busy model (program, and probably erase and chip erase, with
+the DQ7/DQ6/DQ5 status above) belongs in `flash.nim` with the value from a
+real flash cart (time a byte program by polling DQ7 from IWRAM with a
+timer, per chip ID), not from a reference. Until then Advance Wars stays a
+frame out of phase; any game that writes flash on first boot or while
+saving and paces itself by the poll count can shift the same way.
+
+**Datasheet search (2026-10-02): no usable timing, core unchanged.** dingbat
+identifies as Panasonic MN63F805MNP (ID 1B32h, 64K; Advance Wars is a 64K
+cart) and Sanyo LE26FV10N1TS (ID 1362h, 128K). Neither part has a public
+datasheet: no hit on alldatasheet, datasheetarchive, onsemi (Sanyo's
+successor) or a general search; the only sources name the parts and IDs
+(<https://reinerziegler.de.mirrors.gg8.se/GBA/gba.htm>, gbhwdb cart
+entries). GBATEK's "GBA Cart Backup Flash ROM" table
+(<https://problemkaputt.de/gbatek.htm>, same in the mgba-emu/gbatek
+markdown) leaves the average timings "?,?,?" for both and gives only
+timeouts, 1B32h: write 10 ms, sector erase 500 ms, chip erase 500 ms; 1362h:
+all "?". Timeouts bound a busy model from above but do not set it. Public
+datasheets exist only for chips dingbat does not report: SST's SST39VF0x0
+family (DS20005023B,
+<https://ww1.microchip.com/downloads/en/DeviceDoc/20005023B.pdf>) gives
+byte program 14 us typical / 20 us max (~235 / 336 cycles), sector erase
+18 ms / 25 ms, chip erase 70 ms / 100 ms, with Data# polling (DQ7) and
+Toggle Bit (DQ6) only, no DQ5 -- while Advance Wars' poll reads DQ5 as a
+timeout, so the Panasonic part polls like an AMD-style chip, not an SST one.
+Borrowing another maker's timing would be a guess dressed as a spec, so the
+value still has to come from a real Panasonic (and Sanyo) cart, as above.
+
+## 36. Super Mario Advance 3: the cart's EEPROM decides 1-1, 2026-10-02
+
+**Symptom.** On the frozen script every dingbat config reaches 1-1 with pink
+tulip buds on the first bush where both references show white puffs
+(stage_start, f4304), then a Shy Guy at the bush that hits Yoshi (shy_guys,
+column_top, below_white_block). The HLE configs fail at stage_start, the
+BIOS ones from shy_guys; the references agree with each other. Section 29's
+"a frame late" is not the mechanism here.
+
+**Where it starts.** Per-frame hashes plus EWRAM/IWRAM dumps every 50
+frames (`peek`) on dingbat-bios and mgba: EWRAM is identical up to the file
+menu, and from 1-1's load (f3950-4000) a block of map data at 0x020006C8
+holds different decoration tiles, as does a 32-bit word at 0x03006B5C
+written during the load. The cause is far earlier: from f89 the boot shows
+each screen **5 frames before mgba** (the second reference 5 before
+dingbat), and two IWRAM frame counters (0x030000DD, 0x03006B01) carry that
+offset for the rest of the run.
+
+**Mechanism.** On a blank cart the game formats its 64 Kbit EEPROM at first
+boot: **196 block writes**, each followed by the library's ready poll
+(`ldrh 0x0D000000; bit 0`, loop at 0x0812FA68, with a timer-IRQ timeout
+flag that never fires here). Instruction traces of the first 90 frames
+(`trace`) time every poll from its start to the ready read:
+
+| | cycles a block | x 196 |
+|---|---|---|
+| dingbat (`EEPROM_SETTLE_CYCLES` 108368 from the last data bit) | 108116 | 21.19M |
+| mgba | 114753 (as if 115000) | 22.49M |
+| the second reference | ~101000 (boot 5 frames ahead of dingbat) | ~19.8M |
+
+1.30M cycles is 4.6 frames: the frame on which the format ends, and with it
+the phase of the counters the game later seeds 1-1's decorations and enemy
+from, is the EEPROM's programming time. Built with
+`-d:EEPROM_SETTLE_CYCLES=115005` (mgba's figure seen from the poll),
+**all four dingbat configs PASS**, pixel-identical to mgba through
+below_white_block; nothing else in the run differs that matters.
+
+**Who is right: nobody, for a blank cart.** Sweeping the settle time from
+100000 to 118000 in steps of 1000 (stage_start's bush, dingbat-bios):
+
+    100k P  101k P  102k P  103k B  104k B  105k B  106k P  107k P  108k B
+    109k B  110k B  111k B  112k P  113k B  114k B  115k P  116k B  117k B  118k B
+
+(P white puffs as the references, B tulip buds as dingbat). The outcome
+flips every 1000-3000 cycles a block -- 1-3 % of the programming time, well
+inside what an EEPROM's erase/program time varies by between chips and with
+temperature and supply. On real carts 1-1's first bush on a fresh save is
+not a fixed fact, and the references agree only because 101k and 115k both
+happen to land on P. dingbat keeps GBATEK's "ca. 108368 clock cycles (ca.
+6.5ms)" (re-derived 2026-09-01, docs/oracles.md); a cart with a save skips
+the format and none of this applies.
+
+**Status: no change; a probe for the cart.** `EEPROM_SETTLE_CYCLES` is now
+an `{.intdefine.}`, so a measured value can be tried without an edit.
+`tests/roms/payloads/eesettle.s` (r0table row `eesettle`, recorded only
+when named) times one block write-back on the cart in the SP's slot: boot
+the SP holding SELECT+START with Super Mario Advance 3 inserted (multiboot
+with a cartridge), install the monitor, `python3 tools/hwlink/r0table.py
+--record eesettle`. dingbat predicts n = 0 and 1 108362, n = 2 (the DMA)
+848, n = 3 FFFFFFFF on a blank last block. A stable console value near one
+of the sweep's P or B bands says what this cart does; a spread across runs
+confirms the checkpoint can never be diagnostic. Either way the script
+needs a route that does not depend on it (a soft reset after the first
+boot's format, or a seeded formatted save), not an emulator change.
+
+## 37. Yoshi Topsy-Turvy: the calibration ball is frame parity, not the sensor, 2026-10-02
+
+**Symptom.** All four dingbat configs fail `confirm` (f1360, "Is the ball
+moving the way you want?"): the ball sits still in the middle on dingbat
+and has rolled to the right on both references. The tracker blamed the tilt
+sensor's resting value; the saves differ in the calibration words (dingbat
+0x3A0/0x392/0x392, the references 0xFFF three times).
+
+**The sensor values are not it.** dingbat answers GBATEK's level reading
+(X 0x392, Y 0x3A0, bus.nim). mgba with no rotation source reads 0xFFF on
+both axes (a sensor pinned at full tilt); the second reference has no tilt
+sensor at all and reads the 0xFF of an empty SRAM window, also 0xFFF. The
+mgba driver now attaches a level rotation source (mgba's public
+`mPERIPH_ROTATION`, zero tilt), so mgba calibrates at its level reading
+(0x3A0 on both axes); the second reference cannot be fed one. Neither that,
+nor dingbat with X centred at 0x3A0, nor a 0xFFF power-on latch changes the
+checkpoint. (Koro Koro Puzzle, the other tilt script, still passes with the
+level mgba.)
+
+**Mechanism.** The game's tilt-direction state (0x03001DE0, updated by
+0x08001E9C once a logic frame) compares the live X with the right and left
+calibrations +-10. Until they are written (zero) it flips 1 <-> 2 every
+frame; the drivers cannot tilt, so the calibration stores right = left =
+the resting X, the live X sits on both thresholds, and the state freezes at
+whatever it was: the references at 1 (the ball rolls), dingbat at 2. RAM
+dumps every 5 frames put the flip out of phase between f725 and f730. There
+the game unpacks the next screen with an LZ77 decompressor in IWRAM
+(0x030000D0-0x030001A6) writing VRAM halfwords and reading its back
+references from VRAM, mode 0 with the display on, over four frames:
+dingbat spends **12.9k cycles more** than mgba in that code (0.1-0.2 cycles
+on each VRAM `ldrb`/`strh`), finishes just after the V-blank where mgba
+finishes just before, and starts the next screen one frame later.
+
+**Who is right: dingbat.** The extra cycles are renderer contention, the
+console-measured map in contention.nim (contmap.s cells in r0-agb.json;
+gbaedge p41 CONTEND2: "+1 per CPU halfword read" in mode 0), which neither
+reference models. With `-d:CONTENTION=false` dingbat matches mgba at
+confirm and PASSES -- the same shape as section 29's Final Fight One.
+
+**Status: no emulator change; harness input fixed for mgba.** The confirm
+checkpoint stays a reference artifact (their missing contention); the tilt
+sensor's resting value is not involved. Open on hardware, not needed here:
+the ready bit's conversion time and the latch before the first conversion
+(dingbat 0, mgba 0xFFF) -- tests/roms/mbprobe payload_tilt.
+
+## 38. Mario Party Advance: the HLE BIOS's copies ignored an EWRAM stack, 2026-10-02
+
+**FIXED** (hle_bios.nim, cpu.nim). Mario Party Advance (U) failed under the
+HLE BIOS (`dingbat`, `dingbat-nowl`: `checkpoint comment: MAJOR`) and passed
+under Nintendo's (`dingbat-bios`, `dingbat-bios-nowl`). All six emulators
+show the same menus at every checkpoint; what differs is the sparkles under
+the host's star, which drift across the text field the OCR compares.
+
+**A timer-seeded random number.** Replayed per frame, HLE and official BIOS
+hash identically until f938, when the star's sparkle particles come out in
+different places, and then for 7359 of the run's 8522 frames. The game's
+LCG (0x08072AD0: `x * 0x41C64E6D + 0x3039`, state at 0x0203A4B8) is seeded
+at f884 by 0x0800B7F8 from TM0's counter: 0xFEB9 under the official BIOS,
+0xFEAF under the HLE. TM0 is m4a's sample clock (prescaler 1, period 1254,
+which divides the frame), restarted at f871 by the music player's V-sync-on
+routine (0x0806FC4C), which polls VCOUNT until it reads 159 and then starts
+the timer. The poll loop samples VCOUNT once an iteration, so where it sees
+the edge depends on the loop's phase, and that phase was set by everything
+the main loop did earlier in the frame: under the HLE it reached the poll
+350 cycles early, a V-count interrupt later caught it 2 cycles out of
+phase, the edge fell one iteration later, and TM0 started 10 cycles late.
+
+**Where the 350 cycles went.** Instruction traces of f871 under both BIOSes
+(game code zipped, the time offset printed wherever it changes) move only
+across SWIs: one CpuFastSet to OAM costs the same, then each CpuSet comes
+back 50 cycles early and each CpuFastSet 100. The game runs its tasks on
+stacks in EWRAM (0x02036Exx), and the BIOS dispatcher switches to System
+mode and pushes {r2, lr} on that stack before every routine, the routines
+push their own frames there, and a few spill inside their loops. The HLE's
+routine models were fitted with the stack in IWRAM, one cycle a word; in
+EWRAM a word costs six. CpuSet's frame is push {r4, r5, lr} (with the
+dispatcher's pair, 10 words: 50 cycles), CpuFastSet's push {r4-r10, lr}
+(20 words: 100). The OAM copy runs on the IWRAM stack, which is why it
+matched.
+
+**The fix: price the stack's region.** `tools/biosdrv/swisp.c` and
+`swisp2.c` call every timed SWI from a cartridge Thumb caller with the
+System stack in IWRAM and then in EWRAM, at several sizes and stream shapes
+and through the validation-skip paths, on the HLE and on the official BIOS
+in this core. Counting the official BIOS's stack accesses in each call
+(`BD_MEMTRACE`/`BD_MEMREAD`, `tests/biosdrv_probe.nim`) and charging the
+EWRAM premium for each reproduces every EWRAM-minus-IWRAM difference to the
+cycle. The HLE now charges each stack word's region (`swi_frame`,
+`swi_stack_entry`/`swi_stack_exit`; nothing changes for an IWRAM stack):
+
+* the dispatcher's push and pop, 2 words each, for every SWI from Halt to
+  SoundBias and MidiKey2Freq (Halt's push in `hle_halt`, its pop at the
+  0x170 trap; IntrWait's and Stop's pops after the wake);
+* the routine frames, pushed / popped: Sqrt 1/1, ArcTan2, RLUnCompWram,
+  RLUnCompVram, Diff8bitUnFilterVram and MidiKey2Freq 5/4+1, CpuSet 3/2+1,
+  CpuFastSet, BgAffineSet and LZ77UnCompVram 8/8, ObjAffineSet and
+  LZ77UnCompWram 4/4, BitUnPack and HuffUnComp 9/9, Diff8bitUnFilterWram
+  and Diff16bitUnFilter 2/1+1, IntrWait 2/2; Div, DivArm, ArcTan,
+  GetBiosChecksum and SoundBias none;
+* the loop spills: BitUnPack and HuffUnComp spill one word after the check,
+  then reload it for every unit the offset is added to (BitUnPack) or every
+  leaf (HuffUnComp); RLUnCompVram stores one word and loads two per flag
+  byte, stores one per run and loads one per run byte.
+
+After it the HLE equals the official BIOS on all 80 EWRAM-stack calls of
+the two probes, as it already did on the IWRAM ones; it does not model the
+sound-driver SWIs' own frames (not measured). Mario Party Advance now
+hashes identically under both BIOSes on every frame but the first (the
+frame the boot skip hands over; Pokemon Mystery Dungeon's differs the same
+way), and all four configurations pass, the audio note gone too. Runner
+(1433/1443, no row changed) and cycle laws (HLE and official BIOS,
+1860/1860) unchanged; `dingbat` replays the Legacy of Goku I and II, Top
+Gun - Combat Zones, Pokemon Mystery Dungeon, Fire Emblem: The Sacred
+Stones, Circle of the Moon and Banjo-Kazooie scripts frame for frame as it
+did before (every frame hash equal; their stacks are in IWRAM), so their
+remaining HLE-vs-official differences (Circle of the Moon f5318, Banjo
+f1194) are something else.
+
+Also seen, not changed: the validation-skip paths (zero length, or a source
+below 0x02000000) run 4-17 cycles short of the official BIOS on every stack,
+by routine (CpuSet 6, CpuFastSet 8, BitUnPack 15, LZ77UnCompWram 4,
+LZ77UnCompVram 14, HuffUnComp 13, RLUnCompWram 14, RLUnCompVram 17,
+Diff8bitUnFilterWram 7, Diff8bitUnFilterVram 14, Diff16bitUnFilter 7): one
+`BIOS_CHECK_SKIP_COST` stands for all of them (swisp2.c cases 42-52). And
+SoundBias(0) with the level already at 0 is 2 cycles short (swisp.c).
+
+## 39. Rockman EXE 4.5: Mega Man's mosaic is the install bar's dice, and the dice are the boot's EWRAM cycles, 2026-10-02
+
+**Symptom.** At `pet_greeting` (f3624) all four dingbat configs show Mega
+Man fully drawn while mGBA and the second reference still show his mosaic
+fade-in (the second reference runs on the host clock, so from the PET menu
+on its screens are not diagnostic anyway, per the script). Asked: is
+dingbat ahead in time, or is MOSAIC latched or applied wrongly?
+
+**Not the mosaic.** dingbat *is* ahead -- mGBA shows at f what dingbat
+showed ten frames earlier (f3551-3604) -- but not because anything runs
+faster. Copying dingbat's two RNG words into mGBA at f3200 (`poke8` of
+0x02003F6C, 8 bytes, and 0x02003C84, 4 bytes) makes mGBA follow dingbat
+frame for frame through the install screen and show Mega Man fully drawn
+at f3624; VRAM, palette RAM and OAM are then byte-identical at f3502 and
+f3600. What is left (an 8-line step of the opening wipe at f3502, one
+5-bit step on ~1.2k pixels of the blended PET at f3600-3624) is the game's
+frame counter (0x02004B80), one behind mGBA's since f9 -- below.
+
+**Mechanism.** After NAVI SELECT the "NOW INSTALLING..." bar (f3274 on)
+advances with random pauses: mGBA's bar holds at 0x20 for nine frames
+(countdown at 0x0200F55E), dingbat's does not, and dingbat leaves the
+install ten frames early; the PET's mosaic fade-in follows. The pauses come
+from a per-frame LCG at 0x02003F6C. It is zeroed when the title loads and
+starts stepping at **f476 on mGBA, f477 on the second reference, f478 on
+dingbat** (all four configs alike). The script's keys arrive on fixed
+frames, so at NAVI SELECT dingbat's LCG holds mGBA's value of two frames
+before and throws other dice.
+
+**Where the two frames go** (instruction traces, `trace`, dingbat-bios-nowl
+against mGBA):
+
+1. *Boot RAM clear* (0x08000188: `subs; str r2,[r0,r1]; bne`, ARM from ROM
+   under WAITCNT 0x45B4 = WS0 3/1, prefetch on). Over IWRAM both take 22
+   cycles an iteration; over the 256 KB of EWRAM dingbat takes **26**,
+   mGBA still **22** -- the 6-cycle EWRAM word store costs mGBA nothing.
+   65536 x 4 = 262k cycles, 0.93 frame: the game's frame counter starts
+   f9 on dingbat, f8 on mGBA and the second reference.
+2. *Title load*. An XOR pass over EWRAM 0x02000000-0x0200A3F6 (0x08005C80:
+   `ldrb; eors; strb; subs; bge`) is **20** cycles an iteration in dingbat,
+   **16** in mGBA; a checksum over 0xC7A8 bytes (0x0804AB5C: `ldrb; adds;
+   subs; bge`) **16** against **14**. ~270k cycles, the second frame. (The
+   sound driver's V-blank code in ROM is ~1.1k cycles a frame dearer too.)
+
+**Who is right: dingbat, as far as the console has been asked.** Section
+22's `slotexec.s` on the AGB SP (section 29 leans on it the same way):
+EWRAM loads and stores from gamepak code with the prefetcher on cost what
+dingbat charges, and mGBA is 4-5 cycles short -- the same gap as both
+loops here. And mGBA's 16 for the XOR loop
+is under the 18 the ARM7TDMI's own counts give with every fetch served
+from a full prefetch buffer (two 3-cycle EWRAM byte accesses, the load's
+internal cycle, the taken branch's 4 + 2 refill, one cycle for each other
+instruction). The exact cells (3/1 waits) are not in the recorded tables:
+an empty-slot probe is only safe at WAITCNT 0 (section 22's rules), so
+this game's timing cannot be re-run on the rig as is. **No emulator
+change.** `pet_greeting` and everything after it in this script follow
+the install's dice; the script notes say so.
+
+## 40. Klonoa: the clouds are the darken rounding, the Vision 1-1 card is the cart's EEPROM, 2026-10-02
+
+**Symptom (curated, from an earlier evaluation).** The New Game screen's
+clouds and the Vision 1-1 title card differ on dingbat. The current suite
+no longer shows dingbat alone anywhere in this script (every checkpoint
+has all six emulators in one group, but the second reference alone at
+`vision_map` and `back_to_map`; `new_game` is compare=none, `level_start`
+a slip of +3 to mGBA and -2 to the second reference). Both reproduce
+frame by frame, as two mechanisms.
+
+**The clouds (f861-1070): rounding, not scroll.** The screen is under a
+brightness decrease (mGBA's registers: BLDCNT 0x00D6, BLDY 5). dingbat and
+mGBA have the clouds in the same place: all 30k pixels that differ are
+dingbat **one 5-bit step darker**, and every differing pair is exactly
+`t*11 >> 4` (dingbat) against `t - (t*5 >> 4)` (mGBA) for some t -- the
+darken rounding dingbat takes from the SP photographs of `blendprobe.gba`
+(`ppu.nim` `blend_colors`, docs/hwprobe-questions.md; an exact capture is
+still wanted there). The second reference differs from both by -3..+3 on
+~14k pixels (its clouds sit elsewhere). The Vision 1-1 card's fades show
+the same one-step darkening (f3230).
+
+**The Vision 1-1 card (f3213 on): the EEPROM's programming time.** From
+f3213 dingbat runs two frames ahead of both references (they agree with
+each other) through the title card and into the level. Entering Vision
+1-1 the game writes 15 blocks of its 4 Kbit EEPROM (f3204-3209), polling
+each to ready (0x08051798, `ldrh 0x0D000000; bit 0`, 32 cycles a poll in
+both): **108141 cycles a block in dingbat** (`EEPROM_SETTLE_CYCLES`,
+GBATEK's 108368 from the last data bit), **114776 in mGBA**. Built with
+`-d:EEPROM_SETTLE_CYCLES=115005` (section 36's mGBA figure), dingbat-bios
+equals mGBA frame for frame from f3167 and is pixel-identical to *both*
+references at f3320 and f3500; the frames that still differ are fade
+frames, i.e. the darken rounding above.
+
+**Who is right: the cart.** As in section 36: a block's programming time
+is the chip's, varies between parts, and is unmeasured; GBATEK's "ca.
+108368" stays. A 4 Kbit cart is a different chip from Super Mario Advance
+3's 64 Kbit one, so it gets its own row: `tests/roms/payloads/eesettle4k.s`
+(eesettle.s with 6-bit addresses; r0table row `eesettle4k`, cart rows are
+recorded only when named). With Klonoa in the SP's slot, booted holding
+SELECT+START: `python3 tools/hwlink/r0table.py --record eesettle4k`.
+dingbat predicts 0x103 FFFFFFFF (blank last block) or the block, 0x102
+00000300, 0x100 / 0x101 0001A74A (108362); mGBA 00000301 and 0001C130
+(114992). Never with a 64 Kbit cart inserted. **No emulator change.**
+
+## 41. The PSG envelope restart and master volume: probes built, the SP not heard, 2026-10-02
+
+**Not settled on the console: the Mac's microphone could not be opened.**
+Every capture hung without a frame; `AVCaptureDevice.authorizationStatus`
+for audio reads *not determined* for this session's process, i.e. macOS is
+waiting for someone to answer the microphone prompt. Both probes and their
+listeners are ready for the next session that has the microphone (the user
+grants it once):
+
+    python3 tools/hwlink/envrestart_listen.py record   # ~30 s
+    python3 tools/hwlink/psgvol_listen.py record       # ~20 s
+
+and both dry-run in the emulators (`... emu dingbat mgba nba`).
+
+**1. Does an NRx2 write's extra envelope clock survive a trigger?**
+`common/psg_channels.nim` arms `env_extra_tick` when NRx2 takes a running
+channel's period from 0 to non-zero (SameSuite `nrx2_speed_change`, CGB) and
+`psg_trigger_envelope` does not clear it. The music engine most games use
+ends a note with NRx2 = 0x08 and a trigger, then starts the next by writing
+an increasing envelope and triggering at once, so in dingbat the new note's
+first step comes about 2 ms after the trigger instead of a period later.
+`tests/roms/payloads/envrestart.s` plays, on channels 2, 1 and 4, at four
+phases of the 64 Hz envelope clock (slots timed on TM2 so every slot starts
+at the same frame-sequencer phase): A, NRx2 = 0x09 written to a stopped
+channel and triggered; B0, the engine's sequence (0x08 + trigger, 62 ms
+later 0x09 and a trigger back to back); B20, the write 20 ms before the
+trigger. 6.5 envelope clocks after the trigger a period-0 write of the same
+direction freezes the level (nrx2table.s C7 showed that holds on the AGB),
+and each note ends in a 203 ms steady tone read against period-0 references
+(volumes 4 / 6 / 8 / 10) in the same take. Emulators: dingbat B0 = A + 1 at
+every period-1 cell of all three channels, mGBA and the second reference
+B0 = A; B20 = A everywhere. **Nothing changed**: the proposed
+`ch.env_extra_tick = false` in `psg_trigger_envelope` stays unapplied until
+the console answers (if the SP says B0 = A and the CGB is unknown, the AGB
+switch is `when PSG_AGB` in that template).
+
+**2. SOUNDCNT_L master volume, V / 8 or (V + 1) / 8, and the PSG : DMA
+ratio.** `tests/roms/payloads/psgvol.s` plays 1024 Hz tones only (one
+microphone response for all): channel 2 at volume 15 under master 7, 3, 0,
+1, 5, 7, then DirectSound A at 100% and 50% fed a full-swing square (16 x
+0x7F, 16 x 0x80) at 32768 Hz, twice over. Its dry run found a dingbat bug the
+console is not needed for:
+
+* **SOUNDBIAS was taken at half its level.** The bias field is bits 1-9
+  (GBATEK: "Bias Level (Default=100h)", the register's 200h), so in the
+  10-bit sum it counts twice; dingbat added the field (100h). The DAC's
+  0..3FFh was then centred 256 below the sum's zero: a DirectSound channel
+  at 100% (an 8-bit sample x4, +-512) clipped below -256, the negative half
+  of every peak past -64. The 50% / 100% ratio of the square read 0.67
+  instead of 0.50. Games hit it: 30 s of Kirby & The Amazing Mirror's intro
+  put 506 output samples on the floor (-256) and none above +364;
+  LeafGreen's 722. **FIXED** (`gba/apu.nim`): the bias is the field x2.
+* **(V + 1) / 8, unmeasured, applied.** The master volume is the PSG
+  block's own NR50, and the GB core scales by (V + 1) / 8 (Pan Docs: 0 is
+  an eighth, not silence); the GBA mixer used V / 8. The project's rule is
+  that the GBA follows the GB where the SP has not measured otherwise, and
+  both references agree with Pan Docs. **CHANGED** (`gba/apu.nim`), marked
+  unmeasured in the code; psgvol.s will settle it.
+
+After both, dingbat's DirectSound-100% : PSG ratio (one channel, volume 15,
+master 7, PSG 100%) is 4.23 against the second reference's 4.25 (mGBA about
+4.1, with a blip resampler's 50% / 100% of 0.60); before, 3.64 with V / 8
+and the clip. Predictions for the console: V / 8 gives P3 / P7 0.43, P1 / P7
+0.14, P0 silent; (V + 1) / 8 gives 0.50, 0.25, 0.125.
+
+**Found on the way: a prescaled timer read 0 once every 16 frames.**
+envrestart.s's first emulator run had its waits on TM2 (prescaler 256)
+return early. `end_frame` rebases the scheduler keeping the clock's low 10
+bits; a timer whose anchor predated the base had its ticks folded into the
+counter, but its anchor kept its offset within the prescaler period, which
+could land after the rebased clock. A read in the frame's first few cycles
+below that offset took the "not started yet" path and answered the reload.
+The frame's length walks the clock's low bits through a 16-frame cycle, so
+it came back once every 16 frames, at prescalers 64, 256 and 1024 (games
+reading a slow timer right at the start of V-blank). **FIXED** (`gba.nim`
+`end_frame`: the anchor goes to cycle 0, the same prescaler period).
+`tests/roms/payloads/tmjump.s` polls TM2 across the start of V-blank for 16
+frames: the SP reads no jump at any prescaler; the old core 6 at 256 and 30
+at 1024. Recorded and frozen (`tests/roms/cyclelaws/tmjump.gba`).
+
+Gates. Timer fix: runner 1433/1443 row-identical; cycle laws 2075/2075 HLE
+and Nintendo's BIOS; 22 playtest scripts (Harry Potter CoS to Kirby NiDL,
+dingbat and dingbat-bios against mGBA and the second reference) give the
+same verdict per game and config as before. Mixer (bias and master volume):
+`nimble test_psgagb`, `test_mp2kpass`, `test_silentaudio` pass; runner
+1433/1443 row-identical; eight audio scripts (Mother 3, LeafGreen, Golden
+Sun, Metroid Zero Mission, Aria of Sorrow, Breath of Fire, Minish Cap,
+Metroid Fusion) pass on all four emulators as before, every audio verdict
+the same (the two MINOR windows that were there stay one each: LeafGreen
+f6390 spectrum 0.38 -> 0.42, Metroid Fusion f23385 level 7 -> 6 dB).
+
+## 42. hdmalag configuration 29: the request that lands in a refill, 2026-10-02
+
+**FIXED** (`REFILL_WINDOW_SPLIT`, cpu.nim `window_refill`, ppu.nim
+`start_hblank`). Configuration 29 of `tests/roms/payloads/hdmalag.s` arms
+DMA1 (3 words, EWRAM scratch) and DMA3 (302 halfwords of TM0 stamps) on
+every H-blank: DMA3's burst ends 3 cycles before the next H-blank's grant,
+so the CPU, polling VCOUNT in a `ldrh / cmp / blo` loop from IWRAM, runs 3
+cycles a line. The console starts every burst on its H-blank's cycle (first
+read at 981 + 1232k, 20 bursts); dingbat started line 143's 2 cycles late,
+and the next H-blank found DMA3 still running and dropped it (18).
+
+A trace (`-d:itrace`) showed line 143's request landing at the second cycle
+of the `blo`'s refill -- a `blo` whose own fetch the line-142 burst had been
+granted at, so its refill ran after both bursts. dingbat charged that refill
+as one 2-cycle block with no access end, so the request waited for the next
+opcode fetch to end (grant at +3, not +1). Two changes:
+
+* with the DMA access window open, a refill outside the gamepak is two
+  fetches, each synced to its end (`window_refill`). r15 moves on after
+  each sync, so a burst granted between them still finds the first fetch on
+  the bus -- the hdmaphase/hdmaobus cells that pinned
+  `DMA_SEES_REFILL_FETCH` all hold (moving r15 first broke 23 of them);
+* the window it needed was line 143's, opened by `start_hblank` while the
+  bursts ran -- and the line-142 request's `window_closing`, still set
+  because no fetch had come between that request and the new window, shut
+  it at the `blo`'s fetch. Opening a window now clears it.
+
+Configuration 29's four cells recorded and frozen. hdmalag's other
+configurations, slotexec/slotbranch/slotdma (prefetch on and off) and the
+alyosha prefetcher ROMs unchanged. Runner 1433/1443 row-identical; cycle
+laws 2079/2079 HLE and Nintendo's BIOS; the 22 playtest scripts give the
+same verdict per game and config.
+
+## 43. Slot-code ldm and slotdma k = 4-8: the console runs something else, 2026-10-02
+
+No change. Two leftovers from §29 and §26, chased on the SP.
+
+**slotbranch rows 3 and 6** (a 3-register `ldmia` fetched from the empty
+slot, home path 22 / 25 on the console where dingbat says 20 / 23): not a
+per-run phase. `tests/roms/payloads/slotldm.s` (`python3
+tools/hwlink/slotbranch.py --tally --source=tests/roms/payloads/slotldm.s`)
+runs the home trial for 2- to 6-register `ldmia` from IWRAM, EWRAM and VRAM
+at four one-cycle sled offsets, 24 trials a row:
+
+| registers | IWRAM (dingbat / console) | EWRAM | VRAM |
+|---|---|---|---|
+| 2 | 19 / 19 x24 | 29 / 29 x24 | 21 / 21 x24 |
+| 3 | 20 / 20 x23, 22 x1 | 35 / 35 x7, 37 x17 | 23 / 23 x18, 25 x6 |
+| 4 | 21 / 21 x8, 23 x16 | 41 / 41 x9, 43 x15 | 25 / 25 x18, 27 x6 |
+| 5 | 22 / 22 x14, 24 x10 | 47 / 47 x4, 49 x20 | 27 / 27 x5, 29 x19 |
+| 6 | 23 / 23 x1, 25 x23 | 53 / 53 x11, 55 x13 | 29 / 29 x24 |
+
+Two registers never vary; three and more read dingbat's time or 2 more,
+trial by trial (both passes of one run disagree), in proportions that
+change between sessions (3-register IWRAM was high in about half its
+trials in a session with sled offsets 0-15) and do not follow the sled. A halt to line 100
+before each trial (a fixed PPU phase) spreads them wider (5-register EWRAM
+47-56). The same loads from IWRAM code (`tests/roms/payloads/ldmvar.s`) cost
+the same every time in every region (32 / 7 / 12, as both emulators say),
+so it is the empty slot's code fetches, not the loads, and no phase a
+payload can set (sled, PPU line) decides it. In
+a later session the 6-register EWRAM row read times of 0 and 1 with the
+right return address, unexplained. Without a cartridge this is not an
+instrument for multi-register loads; no rule, nothing to fit.
+
+**slotdma k = 4-8** (prefetcher off: console 1052, dingbat 1049): at those
+phases the H-blank DMA lands in the hop's 5-cycle nonsequential fetch, and
+the console's return address reads 08008009 where dingbat's and the
+console's own other phases read 08008007 (raw `r0`/`lr` columns of the
+payload's block): the forced-nonsequential fetch after the burst floated
+`addr >> 1` instead of the `0xFFFF` suffix and the console executed one more
+hop -- §22's "chain's raw +5 rows". The emulator image cannot float two
+values at one address, so the column compares different programs; the cost
+itself (DMA + 2) is §22's and dingbat's. With the prefetcher on the three
+one-cycle cells of §26 (k = 0, 12, 13: 1046 vs 1045) are unchanged.
+
+## 44. The HLE BIOS against Nintendo's, frame by frame: RegisterRamReset, frame ends, copies, 2026-10-03
+
+**PARTLY FIXED** (hle_bios.nim, hle_copy.nim, cpu.nim, bus.nim, gba.nim).
+Section 38 left Castlevania - Circle of the Moon (`dingbat` and
+`dingbat-bios` part at f5318) and Banjo-Kazooie - Grunty's Revenge (f1194)
+as HLE-vs-official differences of another kind, and three small gaps.
+
+**A frame-by-frame comparison.** `tools/playtest/hlecmp.py` replays every
+ready script's `[new]` timeline in two dingbat configurations (default
+`dingbat` against `dingbat-bios`) and compares every frame's hash: per game
+the first differing frame, with frame 0 told apart (it is the frame the
+boot skip hands over on). Before this section 66 of the 135 scripts hashed
+identically under both BIOSes on every frame (88 apart from frame 0).
+To find where a game first sees a BIOS call take another time, the
+playtest driver gained `rundigest` (per frame: how many instructions ran
+outside the BIOS, which PCs in order, and which PCs at which cycle of the
+frame; built with `-d:biosdrvtrace`), its `trace` prints each step's
+absolute cycle (`gba.rebased`, what end_frame has subtracted since power-on;
+tests/biosdrv_probe.nim now uses it too, where its rebuild from frame
+lengths went wrong by 1024s after an HLE routine longer than a frame) and
+marks the steps that only paid a parked HLE remainder (`R`), and the probe
+takes `BD_IOALL=1` to log every I/O store.
+
+**Banjo-Kazooie: RegisterRamReset was 826 cycles long.** Banjo's digests
+part at f2: its boot calls RegisterRamReset(0xFD), and the HLE returned 826
+cycles after the official BIOS. tools/biosdrv/rrr.c, rrr2.c (every flag
+alone, combinations, none, the IWRAM flag; WAITCNT 0 and 0x4317): the
+routine always forces blank first, then runs the groups in the order other
+I/O, SIO, sound, EWRAM, VRAM, OAM, palette, IWRAM, each a fixed time, and
+the times add -- a fixed 135 cycles plus 410, 154, 203, 434240, 64576, 480,
+736 and 13168 per group. The old model charged each group the whole call's
+overhead (two groups paid it twice, no group not at all: 135 short). It is
+now a timeline: each store at the cycle the console makes it (BD_IOALL),
+the RAM clears ascending between their first and last store, groups later
+by those before them. The stores go through the bus as the routine's do,
+which also fixes what it leaves: DISPCNT forced blank even with no flags;
+IE, IF, WAITCNT and IME cleared first; KEYCNT untouched; RCNT 0x8000 and
+JOYCNT acknowledged; SOUNDBIAS 0x200, SOUNDCNT_H 0x880E, both wave RAM
+banks cleared; without the SIO flag the routine's two SIO stores 0x20 low
+(0x8000 to 0x04000114, 7 to 0x04000120); r0, r1 and r3 as the routine
+leaves them (rrrregs.c). Exact on all of rrr*.c's calls but one: with the
+prefetch buffer on at the call, the other-I/O group's call returns a cycle
+late. Banjo then hashes identically under both BIOSes on all 16369 frames.
+
+**Frame ends inside a routine.** An HLE routine is one instruction, so a
+routine running past the end of a frame carried `step_frame` on with it:
+the frame's hash was taken after it, with the next frame's first lines
+drawn into it when it ran that far (a boot RegisterRamReset is 1.8 frames:
+the frame-0 differences of most games), and the keys for the next frame
+came in late. The routine bodies now stop at a frame's end
+(`hle_frame_ended`), parked as for an interrupt: the decompressors and
+math routines on the halt-resume charge (`hle_park_frame_extra` nets out
+the handler-return refill the resume takes back, since no handler ran),
+RegisterRamReset on its r0 continuation (bit 30; the resume takes the
+second dispatch back, measured from the PPU's line-160 start where the stop
+came), the copies in BIOS code (below). rrr4.c, rrr5.c: frame-end resumes
+from ARM and Thumb callers in IWRAM, EWRAM and the cartridge, exact.
+
+**The small gaps.** The validation-skip paths now cost each routine's own
+time (`bios_check_skip_cost`: CpuSet 32, CpuFastSet 34, BitUnPack 41,
+LZ77UnCompWram 30, LZ77UnCompVram 40, HuffUnComp 39, RLUnCompWram 40,
+RLUnCompVram 43, the Diff filters 33/40/33; swisp2.c cases 42-52 exact).
+SoundBias(0) pays the falling path's 2 cycles with the level already 0
+(swisp.c exact). The 4-bit HuffUnComp per-leaf stack reload was right:
+tools/biosdrv/huff4.c (4- and 8-bit symbols, two- and four-leaf trees,
+IWRAM and EWRAM stacks) is exact on all 16 calls. And the registers the
+routines leave, which a game can read after the SWI, now match swisp.c,
+swisp2.c and the new swiregs.c: r0/r1 past the source and destination for
+the decompressors, filters, BitUnPack and affine sets (the Vram forms count
+whole halfwords), r3 = 0x170 where the routine's exit pops it, the last
+halfword read for Diff16bitUnFilter, the last output word for HuffUnComp,
+the last entry's pa for BgAffineSet, the multiplier for MidiKey2Freq,
+0x04000088 and the level for SoundBias, 1 and 0x4000 for
+GetBiosChecksum, CpuFastSet's r3 the last burst's second word; r0 past the
+header on the skip paths. Diff8bitUnFilterVram with an odd length was 2
+cycles long (swiregs.c lengths 1-9).
+
+**Copies taken by an interrupt between instructions.** Contra Advance's
+H-blank interrupts fall inside its copies (the merged SWI / interrupt
+entry logs of the two runs: entries 23 to 124 cycles apart): an interrupt
+inside a CpuSet or CpuFastSet was taken at the end of the whole unit (a
+transfer, or an 8-word burst -- up to ~120 cycles late in a CpuFastSet to
+VRAM), and
+from the caller's code after rewinding onto the SWI, with a fitted
+constant for the rest (cpusi.c: a Thumb caller in the cartridge 2 cycles a
+preemption short at WAITCNT 0x4317, 2 long at 0x0000; every interrupt's
+entry -4 to +7 cycles from the console's). `hle_copy.nim` now runs each
+unit as the routine's own instructions with their times (the driver's
+`trace` of the official BIOS, a step per instruction: CpuSet's halfword
+copy is test, branch, ldrh, strh, add, branch back; CpuFastSet's subs,
+ldmia, stmia, branch back), the loads and stores in their instruction, the
+boundaries after the loop up to the dispatcher's `msr`, and the loop placed
+where the console's starts against the swi (the comment read in the
+caller's region moves it: `routine_phase`). A preempted copy parks in BIOS
+code with the SWI's frames on the SVC and System stacks, its state in
+registers and the PC on a stub-BIOS trap (`COPY_TRAP`) the interrupt
+returns to, so the entry and return are the console's by construction and
+a save state taken meanwhile resumes it. On cpusi.c (and its WAITCNT 0x0317
+and 0x0000 rebuilds), the new cpusi4.c (four caller kinds) and fastsi.c
+(CpuFastSet copies and fills to EWRAM and VRAM) every call's time is the
+console's and every interrupt is entered on the console's cycle, but for
+4 of 3300 entries a cycle or three out. A store to I/O lands a cycle early,
+so the DMA it arms starts on the console's cycle (alyosha
+timing/dma_from_bios).
+
+**What is left.** `hlecmp.py` over all 135 scripts: the HLE and the
+official BIOS now hash identically on every frame, frame 0 included, in
+104 games (before: 66, and 88 leaving frame 0 aside; no game that matched
+before stopped matching). The 31 left, by first differing frame (frames
+differing / compared): Super Mario Advance 3 f171 (2775/5455), Sword of Mana
+f222 (36), Rayman Advance f256 (9), Kirby - Nightmare in Dream Land f368
+(1), Fire Emblem f389 (1), Super Mario Advance 2 f546 (3), Doom f589
+(34), Phantasy Star Collection f635 (1), Medabots AX f996 (2), Final
+Fantasy V Advance f1000 (2), Final Fantasy IV Advance f1005 (445), Contra
+Advance f1192 (1), Super Puzzle Fighter II Turbo f1276 (6), Fire Emblem:
+The Sacred Stones f1313 (8), Top Gun - Combat Zones f1328 (1), F-Zero -
+Maximum Velocity f1508 (28), Onimusha Tactics f1863 (2), Kingdom Hearts -
+Chain of Memories f1973 (91), Sabre Wulf f2679 (2), Dragon Ball Z -
+Supersonic Warriors f2813 (1), Advance Guardian Heroes f3098 (212), Mortal
+Kombat - Deadly Alliance f3685 (8), Dragon Ball Z - The Legacy of Goku f3827
+(1), Sonic Advance 3 f5189 (2), Castlevania - Circle of the Moon f5318
+(700), Street Fighter Alpha 3 f5712 (1), Advance Wars f7865 (2), Advance
+Wars 2 f8786 (4), Final Fantasy Tactics Advance f10983 (1), Tactics Ogre
+f11428 (1), Castlevania - Harmony of Dissonance f13346 (1). Most surface
+in a frame or a few: cycle-level differences that resync.
+
+The ones traced are the decompressors' and the other routine bodies'
+(Contra Advance's first difference is still to be traced): they still write their output up front and charge a cost model
+that stops on the cycle an interrupt line rises (the console takes it at
+the end of the BIOS instruction in progress, 0-5 cycles later), and a DMA
+burst inside one stalls the whole model where the console grants it at the
+routine's access boundaries and runs part of it under internal cycles.
+Castlevania - Circle of the Moon is the second: its f324 LZ77UnCompWram
+(5120 bytes from the cartridge, sound FIFO DMA running) returns a cycle
+after the HLE's, which moves the phase of its busy-wait loop from there on
+(the same stream in a probe: exact without DMA, 1 and 2 cycles long with a
+FIFO DMA every 1254 / 777 cycles); the frames part at f5318. Mortal Kombat
+- Deadly Alliance's RLUnCompWrams run under DMA too (a few hundred cycles
+apart per call). Top Gun - Combat Zones is the first: its fade at f1328
+draws tiles a long LZ77UnCompVram has not written yet on the console. The
+fix is the copies' treatment for each routine (their instructions' times
+from the trace, progressive stores, a BIOS-resident park), with the DMA
+grant and internal-cycle overlap inside each instruction on top; an
+interrupt arriving in the dispatcher's window before a routine, or in the
+return path of the routines other than the copies, is also still taken
+after the SWI.
+
+Gates: runner 1433/1443, no row changed (alyosha timing/dma_from_bios
+holds through the I/O store's early cycle); cycle laws all hold under the
+HLE and the official BIOS (2072/2072 each); every biosdrv probe as before
+or better (cpusi.c from 12 off-cycle calls to none); playtest PASS in all
+four dingbat configurations for Circle of the Moon, Banjo-Kazooie, the
+Legacy of Goku I and II, Top Gun - Combat Zones, Pokemon Mystery Dungeon,
+Fire Emblem: The Sacred Stones, Mario Party Advance, Golden Sun and The Lost
+Age, Pokemon Emerald and FireRed.
+
+## 45. Gradius Galaxies: black at the first stage, an interrupt return two bytes early, 2026-10-02
+
+**FIXED** (cpu.nim `refill_from_head`). Found by `tools/playtest/inputsweep.py`
+(START/A on a fixed beat, ~1600 library titles, dingbat against mGBA): in
+Gradius Galaxies (U) the stage fades in, START pauses it, and in both dingbat
+configurations (HLE and official BIOS) the screen goes black at f1021 and
+never changes again; mGBA and the second reference play on. Regressed with
+671d1162 (2026-09-24, the prefetcher running on while the CPU is off the
+gamepak).
+
+**Where the CPU went.** From f810 the game's main thread executes the open
+bus above the BIOS (Thumb, 0x0000B1F6 upwards to 0xC000, where an undefined
+instruction traps to 0x04 and returns there forever); interrupts still run,
+so the music driver and the V-blank handler keep going over a black screen.
+The way in: a Thumb `bx r0` at 0x080596D8 returns to 0x080003DB (`pop {r0};
+bx r0` in a veneer at 0x080003D4), a V-blank interrupt is taken on the very
+next boundary, and the handler's `subs pc, lr, #4` lands at 0x080003D8 --
+the second half of the `bl` before the veneer's pop -- which jumps to LR +
+0x2F6 in the BIOS's unused space.
+
+**Why two bytes early.** An exception return refills from the prefetcher's
+buffer when it lands exactly on the head the prefetcher went on at when the
+CPU left the gamepak (`refill_from_head`). The return runs in ARM state and
+its CPSR is restored afterwards, so the target was aligned as an ARM address
+(`and not 3`) unless it matched the head as a halfword. Here the head was
+0x080003D8 and the target 0x080003DA: word-aligned it matched, and the
+refill took ARM width at 0x080003D8. A return from an exception mode whose
+SPSR is Thumb, to an address with bit 1 set that is not the head, can only
+be a Thumb return; it now takes the ordinary refill. Every case the change
+touches was a wrong address before it, so no timing moves elsewhere: runner
+1433/1443 (no row changed), cycle laws hold (HLE and official BIOS,
+2072/2072), Gradius Galaxies plays through to the stage with both BIOSes.
+
+Also seen, not changed: the interrupt was taken with r15 still odd
+(0x080003DF: `bx` leaves bit 0 in r15 until the next fetch masks it), so
+LR_irq was odd; the console's LR is always the halfword address plus 4. Only
+a handler that inspects LR could tell.
+
+## 46. Colin McRae Rally 2.0, TOCA, Starsky & Hutch: `movs pc, lr` in System mode restored a stale SPSR, 2026-10-02
+
+**FIXED** (arm.nim `exception_return_restore`). Found by the same input sweep.
+Colin McRae Rally 2.0 (U): after the difficulty menu the HLE configuration
+soft-resets to the Spellbound logo and the official-BIOS one crashes into a
+pale garbage screen, where both references show the Rally Finland stage
+screen. TOCA World Touring Cars (E) and Starsky & Hutch (E) hang the same
+way. Broken at least since 2026-08-01 (not a recent regression).
+
+**The way in.** The three link an ARM run-time library whose routines
+return with `movs pc, lr` -- 26-bit-era style, restoring the flags -- and
+the games call them from System mode. Colin McRae's unsigned divide
+(0x08000534) returns that way from 0x080007F4 into its signed wrapper at
+0x0800081C, and dingbat came back in **Thumb** state: it ran the wrapper's
+ARM words as Thumb, reached a Thumb veneer region with the stack one frame
+off, and a function returned to a pointer in a data table (0x082B3BB0).
+The official-BIOS run then executed that table, whose stores overwrote the
+IRQ handler in IWRAM, and jumped to 0x01A4903C; the HLE run reached a soft
+reset.
+
+**Why Thumb.** User and System mode have no SPSR. An S-bit write to r15
+(`movs pc, lr`, `subs pc, lr, #n`, `ldm {..., pc}^`) restores CPSR from
+`cpu.spsr`, and in those modes that field held whatever `switch_mode` last
+copied there: a snapshot of some earlier CPSR, here a Thumb one. MRS already
+reads the CPSR in place of the SPSR in User and System mode (alyosha psr);
+the restore now does the same, so the S bit changes nothing there and the
+write is a plain branch. The payload `tests/roms/payloads/sysmovs.s`
+(r0table `sysmovs`, six cells: `movs pc, lr`, `subs pc, lr, #0` and
+`ldmfd sp!, {pc}^` in System mode with Z and C set, with and without a
+Thumb SPSR left in IRQ mode) asked the AGB SP, which answers 0x6000029F in
+every cell: ARM state, System mode, and the flags as they were before the
+instruction -- a movs or subs result's own flags do not stick either. So a
+data-processing S-bit write to r15 in User or System mode now puts back the
+pre-instruction CPSR before the restore (`arm_data_processing`). dingbat
+(both BIOSes) matches all six cells; mGBA keeps the ALU's flags on the
+movs/subs cells (0x2000029F); dingbat answered 0x0000021F in every cell
+before the fix. The row is frozen as a cycle law (tests/roms/cyclelaws/
+sysmovs.gba).
+
+All three games now play on with both BIOSes, matching mGBA at every
+screenshot of the sweep's 3000 frames.
+
+## 47. Semi-transparent OBJ under an effects-off window
+
+**FIXED** (ppu.nim `composite_span`). Reported on Pokémon MurfGreen, a
+minimal hack of the FireRed decomp: the overworld fog was fully opaque,
+where on hardware it is see-through and the ground shows. At that point
+DISPCNT = 7F60 (mode 0, BG0-3 and OBJ, WIN0 and WIN1 on), WININ = 1F1F (all
+layers, colour-effect bit clear in both windows), WINOUT = 0101, BLDCNT =
+1E40 (alpha, no 1st targets, 2nd targets BG1-3 and OBJ), BLDALPHA = 080C.
+The fog is OAM sprites in OBJ mode 1 (semi-transparent), priority 2.
+
+**What was wrong.** A semi-transparent OBJ pixel alpha-blends with a
+2nd-target layer below it even where the window's colour-special-effect bit
+is clear. Everything else still needs the bit: BLDCNT 1st-target alpha,
+brighten and darken, and the semi-transparent OBJ's own fallback to
+brighten/darken when the layer below is not a 2nd target. The span
+compositor sent every span whose window had the bit clear to the opaque
+loop (`can_blend = effects and ...`), so a semi-transparent OBJ there never
+blended. Now an effects-off span clears its 1st-target selections and, when
+the line has a semi-transparent OBJ pixel and BLDCNT names any 2nd target,
+runs the blend loop, which then searches for a bottom layer only under a
+semi-transparent top. Spans with no semi-transparent OBJ pixel (nearly all)
+still take the opaque loop.
+
+`tests/roms/semiobjwin.gba` (source `semiobjwin.s`) asks the question
+directly: one BG as the 2nd target, striped with the backdrop (not a
+target); WIN0 over the middle third with the effect bit clear, effects on
+outside; in each of three bands (BLDCNT alpha, darken, none) a
+semi-transparent OBJ straddles WIN0's left edge and a normal OBJ, with OBJ
+as a 1st target, its right edge. Both reference emulators draw the same
+frame, pixel for pixel in 5-bit colour:
+
+| cell | alpha band | darken band | none band |
+|---|---|---|---|
+| semi OBJ, effect bit clear, over the 2nd target | **alpha** | **alpha** | **alpha** |
+| semi OBJ, effect bit clear, over the backdrop | plain | plain | plain |
+| semi OBJ, effect bit set, over the 2nd target | alpha | alpha | alpha |
+| semi OBJ, effect bit set, over the backdrop | plain | darkened | plain |
+| normal OBJ (1st target), effect bit clear | plain | plain | plain |
+| normal OBJ (1st target), effect bit set, over the 2nd target | alpha | darkened | plain |
+| normal OBJ (1st target), effect bit set, over the backdrop | plain | darkened | plain |
+
+dingbat drew plain in the three bold cells (1536 pixels) and matched
+everywhere else; it now matches the references on every pixel.
+
+In the 135-game suite one checkpoint moved, in all four dingbat
+configurations: Castlevania - Aria of Sorrow's `castle_corridor`, where nine
+pixels of a semi-transparent sprite went from (11,9,17) to within one step
+of both references' (28,22,27) (the one-step differences left are alpha
+rounding, where dingbat follows the SP-measured blendprobe values). Every other dingbat checkpoint hash
+is unchanged; pass counts are unchanged.
+
+**Lineage.** The rule was known and fixed once: Crab, dingbat's
+predecessor, gained it on 2021-02-03 (805e860, "sprite blending overrides
+effects being disabled, fixes emerald cave/fog/underwater"). Crab's
+2022-08-11 blending rewrite (a353dce) dropped it; that rewrite was matched
+against tonc's `bld_demo`, which uses no windows, so nothing it was checked
+against could notice. The Nim port (bf71c126, 2026-02-24) inherited the
+rewrite's rule, and the span compositor (cfa15a42, 2026-07-27) kept it,
+faithfully specialising the wrong behaviour.
+
+**Why nothing caught it.** No test ROM or suite case dingbat runs combines
+a window with its effect bit clear and a semi-transparent OBJ (no runner
+row changed with the fix). `tests/ppucomposite_test.nim` compared
+the compositor with itself under configurations that must agree (fast path
+against general path, one loop against another), so a rule wrong in every
+path passed all of it. And the 135-game playtest has no fog, cave or
+underwater scene among its checkpoints; the references only cross-check
+dingbat where the scripts go.
+
+**Prevention.**
+- `dingbat/semiobjwin` in the test runner ("GBA - Other test ROMs") scores
+  the probe's frame against `tests/roms/semiobjwin_expected.png`, the frame
+  both references draw.
+- `tests/ppucomposite_test.nim` test 10 checks every pixel of 96 fuzzed
+  frames (BG modes 0-5, random windows, effect bits, BLDCNT, coefficients,
+  OBJ modes, debug masks; half of them with every effect bit clear and
+  semi-transparent sprites over 2nd targets) against a plain per-pixel model
+  of the colour-effect rules with none of the span machinery, and requires
+  the semi-transparent-under-a-clear-bit path to be hit. Against the old
+  compositor it fails (65613 pixels differ); against the fixed one it
+  passes.
+
+## 48. The HLE BIOS's routines as stub-BIOS code, step by step: decompressors, copies, IntrWait, the math, RegisterRamReset, 2026-10-03
+
+**FIXED** for the routines below (hle_unc.nim, new; hle_bios.nim, hle_copy.nim,
+bus.nim, gba.nim). Section 44 left the decompressors writing their output up
+front and charging a cost model: a DMA burst inside one stalled the whole
+model where the console grants it between the routine's own accesses and
+runs part of it under the internal cycles (Castlevania - Circle of the
+Moon's sound FIFO inside its cartridge LZ77UnCompWrams, a cycle or two a
+call), an interrupt was taken on the cycle the line rose rather than at the
+end of the BIOS instruction in progress, and a frame drawn mid-call showed
+output the console had not written yet (Top Gun - Combat Zones' fade). The
+copies ran instruction by instruction but charged constants (no DMA
+overlap), and every SWI took an interrupt arriving between the dispatcher's
+`msr` and the routine after the SWI.
+
+**The routines run as BIOS code.** The stub BIOS now holds one `swi 0` per
+step of each routine (0x0C00-0x152F ARM, 0x3A00-0x3FFF Thumb), and the HLE
+executes a step by its address: the CPU fetches it (one BIOS cycle) and its
+body makes the console instruction's accesses and internal cycles through
+the bus calls the core's ARM and Thumb handlers make, in their order -- a
+load its access then an internal cycle, a store its access, a register
+shift or a multiply its internal cycles, a taken branch the refill -- then
+steps or branches to the next. So the CPU's own loop runs the routine:
+interrupts are taken at its instruction boundaries and return into it, DMA
+requests are granted between its accesses and run under its internal
+cycles, renderer contention meets each access when it is made, the frame
+loop stops between two steps, and a save state holds a routine in progress
+in its registers, its stack frames and r15. The SWI's exception entry, the
+dispatcher (its pushes on the SVC and System stacks, its read of the swi's
+comment byte in the caller's region, the `msr` into System mode with the
+caller's I bit) and its return (the pops, `movs pc, lr`) are steps too, so
+an interrupt in the dispatcher's window is taken there. Each routine's step
+sequence is the console's: tools/biosdrv/steptrace.nim logs every
+instruction the official BIOS executes in this core inside a probe's calls
+(its cycles, its accesses and their cycle in the step, the DMA in it), and
+the HLE's steps follow those kinds and that order; the comparison is
+tools/biosdrv/stepcmp.py, which lines the two traces up step by step,
+ignoring only the BIOS addresses. Nothing of the console's code is in the
+stub; the labels are hle_unc.nim's own.
+
+Covered: IntrWait and VBlankIntrWait, Div, DivArm, Sqrt, ArcTan, ArcTan2,
+CpuSet, CpuFastSet, GetBiosChecksum, BgAffineSet, ObjAffineSet, BitUnPack,
+LZ77UnCompWram/Vram, HuffUnComp, RLUnCompWram/Vram, the Diff filters,
+SoundBias, MidiKey2Freq and RegisterRamReset (which clears each group
+through a tail call into CpuFastSet, as the console's does). Halt and Stop
+keep their models (Halt already parked in stub code and took the window's
+interrupt), the sound driver too. With a BIOS image mapped (hle_after_bios)
+these SWIs now run the image's own routines.
+
+**What the console does that the HLE did not.** The probes for the step
+order also compare output and registers, and found:
+
+- LZ77 and RL runs are copied whole: a header length that ends inside a
+  back-reference or a run still writes all of it (up to 17 or 129 bytes
+  past the end; r1 ends past them) -- tools/biosdrv/uncedge.c.
+- LZ77UnCompVram reads a back-reference's byte from the destination with a
+  halfword load at an even distance from the destination pointer, so a
+  distance-1 reference at an odd position reads VRAM the routine has not
+  stored yet, and from an odd destination the loads rotate (uncedge.c,
+  uncalign.c). The HLE decompressed into a buffer and gave the "right"
+  bytes.
+- The Thumb routines (RLUnComp, the Diff filters, CpuSet's word path) take
+  their header with a load that does not rotate: a stream at an odd
+  halfword reads its header from the word below. Mortal Kombat - Deadly
+  Alliance keeps its RLUnCompWram streams there; the HLE's rotated header
+  gave it a length of 0 (a skip) or 0x1F00 where the console reads 0x3000
+  (its frames had parted at f463 with the first build of this section).
+  The ARM routines' header loads do rotate (uncalign.c).
+- HuffUnComp: the bitstream is read where the tree size puts it, off a word
+  boundary if so, with rotating loads (the HLE aligned it); each symbol is
+  shifted in at the top of the output word (a 4-bit leaf keeps its low
+  four bits), the word starts at 0, and it is stored and kept shifting
+  every (size & 7) + 4 leaves -- the count the routine spills and reloads
+  at every leaf; the HLE assumed 32 / size (tools/biosdrv/huffsz.c, every
+  size nibble).
+- BitUnPack does not mask a unit plus the offset to the destination width:
+  an overflow carries into the next unit (uncedge.c).
+- HuffUnComp and BitUnPack keep their spilled word above sp (sp moved down
+  two words), RLUnCompVram its two words above sp too (three words): a
+  handler pushing on the System stack cannot clobber them. The first build
+  of this section spilled below sp, and Dragon Ball Z - The Legacy of
+  Goku's first HuffUnComp ran ~10 times too long once its handler's push
+  overwrote the count (found by tools/biosdrv/uncregs.c, which logs the
+  registers each interrupt finds: steptrace.nim BD_IRQREGS=1).
+- RegisterRamReset's sound group keeps SOUNDBIAS's level bits and clears
+  the amplitude resolution (it reads the register first; the HLE wrote
+  0x200) -- tools/biosdrv/rrrsb.c; its wave RAM clears are eight words from
+  0x04000090, FIFO A and B included; the other-I/O group also stores 0xFF to
+  0x04000410.
+- IntrWait halts at least once even with the flag already set; without the
+  discard its first HALTCNT store goes through the dispatcher's r12 into
+  the BIOS (no halt); r12 = 0x04000000, r4 = 1, r2 the mirror and lr the
+  console's 0x344/0x34C are there while it waits; a nested IntrWait nests
+  through the stack -- all by construction now (tools/biosdrv/iwait.c).
+- The registers each routine leaves are the console's (uncfin.c, swiregs.c,
+  swisp2.c): LZ77UnCompVram leaves its pending halfword in r3, which Mortal
+  Kombat's next SWI found there; LZ77UnCompWram and LZ77UnCompVram keep the
+  console's own register for every value (uncregs.c: the registers an
+  interrupt finds match), the other routines their own within the ones the
+  console uses.
+- The affine sets' multiplies take the scales (x, x, y, y) and, in
+  BgAffineSet, -cx, cy, -cx, -cy as the multiplier, the last four
+  multiply-accumulates (tools/biosdrv/affset.c); MidiKey2Freq's two long
+  multiplies take the fine pitch in the top byte and the interpolated
+  multiplier (m2ftime.c).
+
+**Probes.** Every step of every call equal, HLE against the official BIOS
+(stepcmp.py; the IRQ frame's register values and the System stack's
+pushed return addresses aside): unct.c, uncfin.c (registers), uncdma.c
+(LZ77/RL/Huffman/Diff with the sound FIFO's DMA at 1254 and 777 cycles a
+sample, and a Timer 1 interrupt every 3000 cycles on top), uncedge.c,
+uncalign.c, uncregs.c, huffsz.c, iwait.c, affset.c, sbias.c, mathset.c
+(Div, DivArm, Sqrt and ArcTan over 50 inputs), atan2.c (every ArcTan2 path),
+rrrsb.c, and the existing cpusi4.c, fastsi.c, lz77t.c, lz77i.c, huff4.c,
+m2ftime.c, midikey.c, rrr.c, rrr2.c, rrr4.c, rrr5.c, rrrregs.c, swisp.c,
+swisp2.c, swiregs.c. compare.py over all 88 probes: every one as before or
+better -- lz77t.c from 11 marks and 484 cycles off to none, rrr.c from 3
+calls a cycle off to none, swiregs.c from 1 to none.
+
+**Games.** `hlecmp.py` over all 135 scripts, HLE against the official BIOS
+on every frame: 135 of 135 equal on every
+frame after f0, from 104 before this section (118 with the decompressors
+alone; Mortal Kombat - Deadly Alliance and Final Fantasy IV Advance, a
+frame each, came equal with the later rounds -- LZ77 in the console's registers
+(Mortal Kombat's next SWI read LZ77UnCompVram's r3), then the affine sets,
+the math routines and RegisterRamReset on the engine; Contra Advance's one difference was RegisterRamReset, two
+cycles short at frame 2, now exact).
+
+Tools: tools/biosdrv/steptrace.nim (step traces; BD_SWIWIN=1 brackets a
+game's SWIs, BD_IRQREGS=1 the registers each interrupt finds, BD_WATCHREG
+one register's writers), stepcmp.py, the playtest driver's `swilog` (each
+SWI's start, length and arguments) with tools/playtest/swicmp.py (the first
+call that differs between the two configurations) and
+tools/playtest/digcmp.py (`rundigest` compared: the first frame the game's
+code ran on other cycles).
+
+Gates: the runner 1433 of 1443 as before; the cycle laws 2085 of 2085
+under the HLE and under the official BIOS; the save-state compatibility
+guards; the playtest suite 122 of 135 with the same 13 failures as before
+(Pokemon Mystery Dungeon - Red Rescue Team, Pokemon Pinball: Ruby &
+Sapphire and Breath of Fire II failed once with the machine's load near
+250 -- empty screen reads, the official-BIOS configurations as well -- and
+passed on a rerun).
+
+## 49. Harry Potter CoS, Starsky & Hutch: an 8 KB save for a 4 Kbit EEPROM came back 512 bytes, 2026-10-03
+
+**FIXED** (gba.nim `new_storage`, storage.nim `battery_file_bytes`). The
+cross-load step of Harry Potter and the Chamber of Secrets (a known FAIL
+since the suite began) and of the new Starsky & Hutch (E) script booted the
+second reference's save -- an 8192-byte file, the size it writes for every
+EEPROM -- in each dingbat configuration, and the game's own write during
+`[load]` made dingbat rewrite the file at 512 bytes: the chip bytes intact,
+the file shortened. mGBA left the same file 8192 bytes long; the harness
+counts a shortened battery file as a dingbat problem (an extended one is
+fine).
+
+dingbat sizes an EEPROM from the game's first command (the DMA length), not
+from the file, because emulators write 8 KB files for 4 Kbit chips; the
+buffer starts at 8 KB and shrinks to 512 bytes on a 4 Kbit command. The
+file's bytes past 0x200 are now kept as loaded (`eeprom_file_tail`) and
+written back after the chip's, so a 4 Kbit game never shortens a file it was
+given; a 512-byte file stays 512 bytes and a 64 Kbit game is unchanged. With
+an RTC trailer the trailer still follows the chip data (8192 + 16). Guards:
+`nimble test_gbartc` (the "4Kbit part" cases now expect the file's own
+length). Starsky & Hutch and Harry Potter pass their cross-load matrices on
+all four configurations.
+
+## 50. Sleep mode: six games never woke from Stop, 2026-10-03
+
+**FIXED, hardware row pending** (interrupts.nim `check_interrupts`,
+keypad.nim `stop_key_condition`). Found by the deep input sweep
+(`inputsweep.py --pattern deep`: its save attempts open the pause menu and
+pick entries, and many pause menus end in Sleep). dingbat went black and
+silent for good where both references played on:
+
+| game | sleep routine | dingbat before |
+|---|---|---|
+| Ghost Rider (U), Catwoman (U), Action Man - Robot Atack (E) | KEYCNT 0xC304 (IRQ, AND, L+R+SELECT), Stop; on waking KEYCNT 0xC000 (IRQ, AND, no key) and Stop again | woke on L+R+SELECT, then stayed in the second Stop |
+| Cabbage Patch Kids - The Patch Puppy Rescue (U), Puyo Pop Fever (E), The Santa Clause 3 (U) | IE = keypad + gamepak, KEYCNT 0x8304 (AND, L+R+SELECT, **IRQ enable clear**), Stop, then wait for every key released | never woke |
+| Powerpuff Girls - Him and Seek (U) | KEYCNT 0xC304, one Stop | woke on L+R+SELECT (correct) |
+
+The references are no guide: both treat SWI 3 as a halt that the next
+interrupt ends, so they never sleep at all (the sweep's flags were the
+references playing on under a sleeping console). GBATEK: Stop "can be
+terminated by ... Joypad, Game Pak, or General-Purpose-SIO" interrupts, as
+far as enabled in IE -- it does not say whether the wake needs KEYCNT's IRQ
+enable or a fresh edge.
+
+The games say what the console does. The 0x8304 sleepers (three publishers)
+can only wake if the key condition ends Stop without bit 14; Ghost Rider's
+second Stop can only return if the condition ends Stop as a level: its
+IRQ handler acknowledged the first wake's IF before the 0xC000 store
+(traced: IF 0x0018 at the store), and nothing about the condition changes.
+dingbat now ends Stop while IE's keypad bit is set and KEYCNT's key
+condition holds (AND over the selected keys, vacuously true with none; OR:
+any), ignoring bit 14 and raising nothing; the keypad IRQ itself stays as
+it was (an edge of the condition with bit 14 set). Key changes during Stop
+re-check. All seven games now sleep, wake on L+R+SELECT and return to their
+menus; none wakes before the keys (checked by replaying each to its
+sleep, 60 frames idle, then L+R+SELECT).
+
+Probe: `tests/roms/payloads/keyirq.s`, r0table row `keyirq` (KEYCNT stores
+with nothing held: the vacuous AND, a rewrite of a matching value, the
+enable bit, a level after the acknowledge; emulators answer dingbat
+03FF0309, mgba 03FF0101/0100, the second reference 03FF030D). Its ad hoc
+Stop cells (arguments 0x80000000, 0x80000001: Stop under KEYCNT 0xC000 /
+0x8000 with IE = keypad) settle the model directly -- dingbat returns
+0x57000000 from both; a console that disagrees hangs and needs a power
+cycle. Runner 1433/1443, cycle laws hold with both BIOSes.
+
+## §51. Sonic Advance: a reference that never boots is no witness for the save, 2026-10-03
+
+**Symptom.** All four dingbat configs failed the save cross-load: "nba save
+in dingbat: battery file changed by booting, nba left it unchanged" (the
+first 4 KB of 64 KB).
+
+**Cause: the harness.** The second reference never gets past the grey bars
+of section 1 in this game, so its [new] run writes nothing and its save is
+blank (64 KB of 0xFF). A blank FLASH sends the game to the language screen,
+and picking a language writes the "PIRO" header block -- in dingbat and in
+mGBA alike, byte for byte (both write the same 4086 non-0xFF bytes). The
+second reference "left it unchanged" only because it was still on grey
+bars. `cross_load_verdict` now counts a reference as keeping a save only
+when that reference shows its own save the way another emulator does (the
+`healthy` test it already used for the reverse direction); otherwise the
+rewrite is the game's own and is a note. Sonic Advance passes in all four
+configs; no other game in the corpus had this problem.

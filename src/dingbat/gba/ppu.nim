@@ -114,10 +114,13 @@ const BG_ENABLE_LATCH_CYCLE = 34
 proc latch_oam*(ppu: PPU) {.inline.} =
   ## Take the OAM the next line's sprites are drawn from (see `oam_view`).
   if ppu.oam_view_stale:
+    # Only a view that changes dirties the frame: OAM rewritten with what
+    # it held (a shadow copy DMAd in every V-blank) draws the same sprites
+    if not equalMem(addr ppu.oam_view[0], addr ppu.oam[0], 0x400):
+      ppu.render_dirty = true
     copyMem(addr ppu.oam_view[0], addr ppu.oam[0], 0x400)
     ppu.oam_view_stale = false
     ppu.obj_list_dirty = true
-    ppu.render_dirty = true
 
 proc latch_line_start*(ppu: PPU) {.inline.} =
   ## The latches every line start updates, VBlank lines included.
@@ -210,6 +213,12 @@ proc start_hblank*(ppu: PPU) =
       when WL_QUIET_EVENTS:
         if (ppu.gba.bus.sync_bits and 2) == 0: ppu.gba.wl_unsafe = true
       ppu.gba.bus.sync_bits = ppu.gba.bus.sync_bits or 2
+      when REFILL_WINDOW_SPLIT:
+        # A new window: the last line's request may still be waiting for
+        # the fetch that closes its window, when a burst has held the bus
+        # from that request to here (hdmalag.s configuration 29). That fetch
+        # must not close this one before its own request.
+        ppu.gba.bus.window_closing = false
       ppu.gba.bus.fetch_page = 0xFFFFFFFF'u32
       ppu.gba.bus.fetch_key = 0xFFFFFFFF'u32
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
@@ -627,9 +636,10 @@ proc rebuild_obj_lines*(ppu: PPU) =
 proc oam_touched*(ppu: PPU) {.inline.} =
   ## Mark `oam_view` stale, which rebuilds the per-line OBJ candidate list
   ## when the next line start copies it. MUST be called by every path
-  ## that mutates ppu.oam: bus.write_half_internal / write_word_internal
-  ## (byte writes to OAM are discarded; DMA and cheats funnel through these),
-  ## load_ppu_state (covers rewind, rollback and link restores), and the HLE
+  ## that mutates ppu.oam: bus.oam_store16 / oam_store32 inline it, setting
+  ## oam_view_stale on every store but clearing the contention key only for
+  ## one that changes that map (byte writes to OAM are discarded; DMA and
+  ## cheats funnel through these), load_ppu_state (covers rewind, rollback and link restores), and the HLE
   ## RegisterRamReset OAM clear. Test code seeding ppu.oam must call it and
   ## then latch_oam.
   ## Backstops: scanline() force-rebuilds once per frame, and -d:objListVerify
@@ -998,7 +1008,7 @@ type SpanWalk = object
   prio:   array[4, int32]
   layer:  array[4, int32]
   direct: array[4, bool]                        # bitmap direct-colour BG2
-  sel1:   array[4, bool]                        # BLDCNT 1st-target
+  sel1:   array[4, bool]                        # BLDCNT 1st-target; false if effects are off
   sel2:   array[4, bool]                        # BLDCNT 2nd-target
   row:    array[4, ptr UncheckedArray[uint8]]   # layer_palettes[bg] for this line
 
@@ -1139,7 +1149,7 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       w.prio[k]   = int32(ppu.walk_prios[i])
       w.layer[k]  = int32(bg)
       w.direct[k] = ppu.bitmap_direct and bg == 2
-      w.sel1[k]   = bit(uint16(ppu.bldcnt), bg)
+      w.sel1[k]   = effects and bit(uint16(ppu.bldcnt), bg)
       w.sel2[k]   = bit(uint16(ppu.bldcnt), bg + 8)
       w.row[k]    = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
       appear = appear or (1'u16 shl bg)
@@ -1147,17 +1157,29 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
 
   # Colour math needs the top layer to be a BLDCNT 1st target, or a
   # semi-transparent OBJ pixel (which forces alpha regardless of mode); if
-  # neither is reachable the effects apparatus is dead for this span
-  let can_blend = effects and
-    ((obj_enable and ppu.line_sprite_blend) or
-     (ppu.bldcnt.blend_mode != 0 and
-      (uint16(ppu.bldcnt) and 0x3F'u16 and appear) != 0))
+  # neither is reachable the effects apparatus is dead for this span. A
+  # semi-transparent OBJ pixel alpha-blends with a 2nd-target layer below it
+  # even where the window's colour-effect bit is clear; everything else (1st
+  # targets, brighten/darken, the semi-transparent fallback to them) needs
+  # the bit. So an effects-off span keeps only that blend: its 1st-target
+  # selections are cleared (w.sel1 above, sel1_obj/sel1_bd below) and the
+  # blend loop then reaches the bottom search only from a semi-transparent
+  # top. docs/playtest-bugs.md, "Semi-transparent OBJ under an effects-off
+  # window".
+  let semi_obj = obj_enable and ppu.line_sprite_blend
+  let can_blend =
+    if effects:
+      semi_obj or
+        (ppu.bldcnt.blend_mode != 0 and
+         (uint16(ppu.bldcnt) and 0x3F'u16 and appear) != 0)
+    else:
+      semi_obj and (uint16(ppu.bldcnt) and 0x3F00'u16) != 0
   if not can_blend:
     ppu.composite_span_opaque(w, row_base, lo, hi, obj_enable)
     return
   # Brighten/darken with no semi-transparent OBJ pixel never needs the layer
   # below the top one
-  if ppu.bldcnt.blend_mode != 1 and not (obj_enable and ppu.line_sprite_blend):
+  if ppu.bldcnt.blend_mode != 1 and not semi_obj:
     ppu.composite_span_shade(w, row_base, lo, hi, obj_enable)
     return
 
@@ -1192,8 +1214,8 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
     elif blend_mode == 3: bgr16_pack(((s * (16'u64 - evy)) shr 4) and BGR_LANE_MASK)
     else:                 top_u16
 
-  let sel1_obj = bit(bld, 4)
-  let sel1_bd  = bit(bld, 5)
+  let sel1_obj = effects and bit(bld, 4)
+  let sel1_bd  = effects and bit(bld, 5)
   let sel2_obj = bit(bld, 4 + 8)
   let sel2_bd  = bit(bld, 5 + 8)
 
@@ -1485,32 +1507,30 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
   of 0x052..0x053: read(ppu.bldalpha, io_addr and 1) and 0x1F'u8
   else: ppu.gba.bus.read_open_bus_value(io_addr)
 
-proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
-  ppu.render_dirty = true
-  case io_addr
-  of 0x000..0x001:
-    let before = (uint16(ppu.dispcnt) shr 8) and 0xF
-    write(ppu.dispcnt, value, io_addr and 1)
-    ppu.contend_mask_update()
-    ppu.cont_regs_stale = true
-    let rose = ((uint16(ppu.dispcnt) shr 8) and 0xF) and not before
-    if rose != 0:
-      let t = int32(int64(ppu.gba.scheduler.cycles) + int64(ppu.gba.bus.cycles) -
-                    ppu.line_start_cycle)
-      for b in 0..3:
-        if bit(rose, b): ppu.bg_enable_cycle[b] = t
-    if int64(ppu.gba.scheduler.cycles) - ppu.line_start_cycle < BG_ENABLE_LATCH_CYCLE:
-      # Still ahead of this line's sample: it takes the new enables
-      ppu.bg_enable_hist = (ppu.bg_enable_hist and 0xFF0'u16) or
-                           ((uint16(ppu.dispcnt) shr 8) and 0xF)
-  of 0x002..0x003: discard  # green swap
-  of 0x004:
+proc write_dispcnt(ppu: PPU; io_addr: uint32; value: uint8) =
+  let before = (uint16(ppu.dispcnt) shr 8) and 0xF
+  write(ppu.dispcnt, value, io_addr and 1)
+  ppu.contend_mask_update()
+  ppu.cont_regs_stale = true
+  let rose = ((uint16(ppu.dispcnt) shr 8) and 0xF) and not before
+  if rose != 0:
+    let t = int32(int64(ppu.gba.scheduler.cycles) + int64(ppu.gba.bus.cycles) -
+                  ppu.line_start_cycle)
+    for b in 0..3:
+      if bit(rose, b): ppu.bg_enable_cycle[b] = t
+  if int64(ppu.gba.scheduler.cycles) - ppu.line_start_cycle < BG_ENABLE_LATCH_CYCLE:
+    # Still ahead of this line's sample: it takes the new enables
+    ppu.bg_enable_hist = (ppu.bg_enable_hist and 0xFF0'u16) or
+                         ((uint16(ppu.dispcnt) shr 8) and 0xF)
+
+proc write_dispstat(ppu: PPU; io_addr: uint32; value: uint8) =
+  if io_addr == 0x004:
     # Writable low-byte bits are 3-5 (the IRQ enables): bits 0-2 are the
     # live flags and bits 6-7 do not latch (gbaedge IOBYTE page: strb 0x44
     # reads back as just the flags)
     let preserved = uint8(toU16(ppu.dispstat)) and 0x07'u8
     write(ppu.dispstat, (value and 0x38'u8) or preserved, 0)
-  of 0x005:
+  else:
     # The match is an edge of a live compare, so a write that moves the
     # setting ONTO the current line raises the interrupt there and then.
     # tests/roms/payloads/lycwrite.s, AGB SP, parked on line 100 with IF
@@ -1523,36 +1543,81 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
        ppu.dispstat.vcounter_irq_enable:
       ppu.gba.interrupts.reg_if.vcounter = true
       ppu.gba.interrupts.schedule_interrupt_check(PPU_IRQ_SYNC_DELAY)
+
+template dirty_if_changed(ppu: PPU; field: typed; body: untyped) =
+  ## Run `body`, a register write, and dirty the frame (render_dirty, the
+  ## whole-frame render skip) only if it changed `field`: games rewrite their
+  ## whole register set from a shadow copy every frame, mostly unchanged.
+  let before = field
+  body
+  if field != before: ppu.render_dirty = true
+
+proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
+  # Each branch dirties the frame only through what it changes; a write that
+  # leaves every one of them as it was draws the same picture.
+  case io_addr
+  of 0x000..0x001:
+    ppu.dirty_if_changed((ppu.dispcnt, ppu.bg_enable_cycle, ppu.bg_enable_hist)):
+      ppu.write_dispcnt(io_addr, value)
+  of 0x002..0x003: discard  # green swap
+  of 0x004..0x005:
+    ppu.dirty_if_changed(ppu.dispstat):
+      ppu.write_dispstat(io_addr, value)
   of 0x006..0x007: discard  # vcount
   of 0x008..0x00F:
-    write(ppu.bgcnt[int((io_addr - 0x008) shr 1)], value, io_addr and 1)
+    let i = int((io_addr - 0x008) shr 1)
+    ppu.dirty_if_changed(ppu.bgcnt[i]):
+      write(ppu.bgcnt[i], value, io_addr and 1)
     ppu.cont_regs_stale = true
   of 0x010..0x01F:
     let bg_num = int((io_addr - 0x010) shr 2)
     ppu.cont_regs_stale = true
     if bit(io_addr, 1):
-      write(ppu.bgvofs[bg_num], value, io_addr and 1)
+      ppu.dirty_if_changed(ppu.bgvofs[bg_num]):
+        write(ppu.bgvofs[bg_num], value, io_addr and 1)
     else:
-      write(ppu.bghofs[bg_num], value, io_addr and 1)
+      ppu.dirty_if_changed(ppu.bghofs[bg_num]):
+        write(ppu.bghofs[bg_num], value, io_addr and 1)
   of 0x020..0x03F:
     let bg_num = int((io_addr and 0x10) shr 4)
     let offs   = int(io_addr and 0xF)
     if offs >= 8:
       let o = offs - 8
-      write(ppu.bgref[bg_num][o shr 2], value, o and 3)
-      ppu.bgref_int[bg_num][o shr 2] = ppu.bgref[bg_num][o shr 2].num
+      ppu.dirty_if_changed((ppu.bgref[bg_num][o shr 2], ppu.bgref_int[bg_num][o shr 2])):
+        write(ppu.bgref[bg_num][o shr 2], value, o and 3)
+        ppu.bgref_int[bg_num][o shr 2] = ppu.bgref[bg_num][o shr 2].num
     else:
-      write(ppu.bgaff[bg_num][offs shr 1], value, offs and 1)
-  of 0x040..0x041: write(ppu.win0h, value, io_addr and 1)
-  of 0x042..0x043: write(ppu.win1h, value, io_addr and 1)
-  of 0x044..0x045: write(ppu.win0v, value, io_addr and 1)
-  of 0x046..0x047: write(ppu.win1v, value, io_addr and 1)
-  of 0x048..0x049: write(ppu.winin, value, io_addr and 1)
-  of 0x04A..0x04B: write(ppu.winout, value, io_addr and 1)
-  of 0x04C..0x04D: write(ppu.mosaic, value, io_addr and 1)
+      ppu.dirty_if_changed(ppu.bgaff[bg_num][offs shr 1]):
+        write(ppu.bgaff[bg_num][offs shr 1], value, offs and 1)
+  of 0x040..0x041:
+    ppu.dirty_if_changed(ppu.win0h):
+      write(ppu.win0h, value, io_addr and 1)
+  of 0x042..0x043:
+    ppu.dirty_if_changed(ppu.win1h):
+      write(ppu.win1h, value, io_addr and 1)
+  of 0x044..0x045:
+    ppu.dirty_if_changed(ppu.win0v):
+      write(ppu.win0v, value, io_addr and 1)
+  of 0x046..0x047:
+    ppu.dirty_if_changed(ppu.win1v):
+      write(ppu.win1v, value, io_addr and 1)
+  of 0x048..0x049:
+    ppu.dirty_if_changed(ppu.winin):
+      write(ppu.winin, value, io_addr and 1)
+  of 0x04A..0x04B:
+    ppu.dirty_if_changed(ppu.winout):
+      write(ppu.winout, value, io_addr and 1)
+  of 0x04C..0x04D:
+    ppu.dirty_if_changed(ppu.mosaic):
+      write(ppu.mosaic, value, io_addr and 1)
   of 0x050..0x051:
-    write(ppu.bldcnt, value, io_addr and 1)
+    ppu.dirty_if_changed(ppu.bldcnt):
+      write(ppu.bldcnt, value, io_addr and 1)
     ppu.cont_regs_stale = true
-  of 0x052..0x053: write(ppu.bldalpha, value, io_addr and 1)
-  of 0x054..0x055: write(ppu.bldy, value, io_addr and 1)
+  of 0x052..0x053:
+    ppu.dirty_if_changed(ppu.bldalpha):
+      write(ppu.bldalpha, value, io_addr and 1)
+  of 0x054..0x055:
+    ppu.dirty_if_changed(ppu.bldy):
+      write(ppu.bldy, value, io_addr and 1)
   else: discard

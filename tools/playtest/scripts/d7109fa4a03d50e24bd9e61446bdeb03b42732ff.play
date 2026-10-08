@@ -1,0 +1,90 @@
+@title Lunar Legend (USA)
+@file Lunar Legend (U) [!].gba
+@game ALNE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# New game, A through the cliff-top opening with Nall and Ramus, walk down
+# the path outside Burg, then START > System > Save > slot 1 > YES.
+# Findings: the "Saving!" message stays up for different times (the
+# recorded wait covers the slowest): nba +30, dingbat-bios +40, mgba +50
+# frames after f8429. The nba save differs from dingbat-bios/mgba (893 vs
+# 890 non-blank bytes; dingbat-bios and mgba are byte-identical).
+# [load] load_file (compare=text, over the rotating globe) reads differently
+# on dingbat for every save, its own included: each emulator shows all
+# three saves identically. With a save present the boot EEPROM read
+# (f6-f21) costs dingbat ~71 cycles a block more (gamepak-load prefetch
+# rule, hardware-verified; both references fail it), so [load] runs a frame
+# behind from f34 and OCR reads the globe one step apart. Not the save:
+# docs/playtest-bugs.md, "Lunar Legend: the load screen reads differently".
+[new]
+wait 600
+press START
+wait 200
+checkpoint title window=30 compare=text
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 400
+tap A times=60 every=20 hold=4
+tap A times=90 every=20 hold=4
+tap A times=90 every=20 hold=4
+press START
+wait 40
+tap A times=60 every=20 hold=4
+press START
+wait 40
+tap RIGHT times=3 every=15 hold=4
+wait 20
+press RIGHT
+wait 20
+press A
+wait 40
+press B
+wait 30
+press B
+wait 30
+checkpoint field window=30
+press DOWN hold=60
+press RIGHT hold=20
+press DOWN hold=60
+wait 20
+press START
+wait 40
+press A
+wait 40
+checkpoint system_menu window=30 compare=text
+press A
+wait 60
+press A
+wait 40
+press A
+wait 60
+wait 120
+# until notext Saving timeout=1200 every=10  [reached dingbat-bios+40 mgba+50 nba+30]
+wait 54
+wait 30
+checkpoint saved window=0
+
+[load]
+wait 600
+press START
+wait 200
+press START
+wait 120
+checkpoint continue_menu window=30 compare=text
+press A
+wait 90
+wait 60
+checkpoint load_file window=30 compare=text
+press A
+wait 300
+press LEFT
+wait 20
+press A
+wait 300
+checkpoint resumed window=30
+press START
+wait 40
+checkpoint resumed_menu window=30

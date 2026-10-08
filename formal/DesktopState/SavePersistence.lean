@@ -22,13 +22,35 @@
 Written against a2e038f82 (branch lean-desktop-state). Line numbers are
 `src/dingbat.nim` unless a file is named.
 
+**Re-audited at 03f88d6c** (2026-10-05) for the procs that changed since the
+last stamp; their citations say `@03f88d6c`, every other line number is
+still a2e038f82's. Neither change moves a property here:
+* `write_state_file` (serialize.nim 401-419 @03f88d6c) writes
+  `pack_state(make_state_bytes(..))` (pack_state 442-455): the header as
+  before, flagged `STATE_FLAG_DEFLATED`, then the rest zlib-deflated; still
+  through `write_file_atomic`. `parse_state_payload` (527-589 @03f88d6c)
+  first `unpack_state`s it (457-475): a body that does not inflate is
+  refused (`srkCorrupt`, or `srkTruncated` with nothing after the header),
+  and the inflated image meets the same version, core, identity,
+  `payload_len` and hash checks as an unpacked one, which still loads. A cut
+  packed file is refused by the inflate or by those checks, so it is a
+  `StF` with `whole = false`, and `loads_ok` holds as proved.
+* `new_storage` (gba.nim 1847-1883 @03f88d6c): an EEPROM game keeps the
+  battery file's bytes past 0x200 as loaded (`eeprom_file_tail`, 1881-1883),
+  and `battery_file_bytes` (storage.nim 75-92) writes them back after a
+  4 Kbit chip's 512 bytes, so playing never shortens an 8 KB file. Those
+  bytes are never chip data; `Bat` is the chip's bytes, and the file is
+  still rewritten whole (or torn) in one write, so nothing here changes.
+
 Everything the desktop persists for a game, and the frame-loop phases that
 write or read it:
 
 * **Battery save** `<rom dir>/<rom name minus extension>.sav` (gba.nim 1358
   `new_storage`, gb mbc.nim 156). The core reads it once, when it is built
   (`new_storage` 1377-1385, gb `mbc_load` 3247; both accept a file of any
-  length and take `min(len, chip size)` bytes). A running core rewrites the
+  length and take `min(len, chip size)` bytes; @03f88d6c `new_storage`
+  1847-1883 also keeps an EEPROM file's bytes past 0x200, written back after
+  a 4 Kbit chip's). A running core rewrites the
   whole file with `writeFile` from its `etSaves` event, once per emulated frame
   while the RAM is dirty: GBA `handle_saves` (gba.nim 1530) ->
   `storage.write_save` (storage.nim 90-95), which is **not** in a try; GB
@@ -217,7 +239,8 @@ deriving DecidableEq, Repr
 structure StF where
   ident : Nat    -- header rom_checksum (serialize.nim 377)
   core  : Core   -- the payload
-  whole : Bool   -- false: shorter than its payload_len (srkTruncated) / hash mismatch
+  whole : Bool   -- false: shorter than its payload_len (srkTruncated) / hash mismatch /
+                 -- @03f88d6c a packed body that does not inflate (unpack_state, srkCorrupt)
 deriving DecidableEq, Repr
 
 /-- `Config` (config.nim), the two fields that matter here. -/
@@ -509,7 +532,7 @@ def loadRom (fx : Fix) (s0 : St) (i : Bool) (r : Rom) : St :=
   let s := flushOut fx s0 i                                    -- 702 flush_gb_save
   if fx.lock && holds s i conflict r then s else
   let a := s.app i
-  -- new_storage 1377-1385 / mbc_load 3247: whatever .sav is there, any length
+  -- new_storage 1377-1385 (@03f88d6c 1847-1883) / mbc_load 3247: whatever .sav is there, any length
   let disk := s.sav (savPath r)
   let s := noteBoot s r disk                                   -- 735 load_cheats
   let a' := { a with cur := some r, core := some ⟨r.game, s.clock, disk, false⟩,
@@ -536,7 +559,9 @@ def launch (fx : Fix) (s : St) (i : Bool) (cli : Bool) (ro : Option Rom) : St :=
   | none => s
 
 /-- `save_state_slot` (833-842) -> core `save_state` -> `write_state_file`
-    (serialize.nim 305-319): `writeFile`, every error caught (returns false). -/
+    (serialize.nim 305-319): `writeFile`, every error caught (returns false).
+    @03f88d6c (serialize.nim 401-419) the image is packed (`pack_state`)
+    before the write; the file is still one write of one image. -/
 def saveSlot (fx : Fix) (s : St) (i : Bool) (k : Nat) (io : Io) : St :=
   let a := s.app i
   match a.cur, a.core with

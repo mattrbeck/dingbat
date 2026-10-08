@@ -2,7 +2,15 @@
 ## protocol documented in tools/playtest/README.md on stdin/stdout.
 ##
 ## Usage: dingbat_driver <rom.gba> <bios.bin|hle> [--run-bios] [--rtc EPOCH]
+##                       [--no-waitloop] [--audio PATH] [--mp2k-hle]
+##                       [--no-fifo-interp]
 ##   Without --rtc the cartridge RTC runs from the host clock.
+##   --no-waitloop turns off idle-loop fast-forwarding (the shipped default
+##   is on). --audio writes every mixed sample, s16le stereo at 32768 Hz.
+##   --mp2k-hle arms the MP2K sound-engine HLE (the apps' "Enhanced audio"
+##   setting, gba.mp2k_hle; off by default there and here). --no-fifo-interp
+##   emits the raw FIFO latches instead of the apps' default cubic
+##   reconstruction (apu.set_fifo_interp).
 ##   The battery save is <rom minus extension>.sav, exactly as the desktop
 ##   app places it; run the driver on a ROM symlink inside a private
 ##   directory so saves never touch the library.
@@ -74,6 +82,9 @@ proc main() =
   var positional: seq[string]
   var run_bios = false
   var rtc_epoch = -1'i64
+  var waitloop = true
+  var mp2k_hle = false
+  var fifo_interp = true
   let args = commandLineParams()
   var i = 0
   while i < args.len:
@@ -82,10 +93,17 @@ proc main() =
     of "--rtc":
       inc i
       rtc_epoch = parseBiggestInt(args[i])
+    of "--no-waitloop": waitloop = false
+    of "--mp2k-hle": mp2k_hle = true
+    of "--no-fifo-interp": fifo_interp = false
+    of "--audio":
+      # the APU's own dump (apu.nim), claimed when the core is created
+      inc i
+      putEnv("DINGBAT_GBA_AUDIO_DUMP", args[i])
     else: positional.add(args[i])
     inc i
   if positional.len != 2:
-    stderr.writeLine "Usage: dingbat_driver <rom> <bios|hle> [--run-bios] [--rtc EPOCH]"
+    stderr.writeLine "Usage: dingbat_driver <rom> <bios|hle> [--run-bios] [--rtc EPOCH] [--no-waitloop] [--audio PATH] [--mp2k-hle] [--no-fifo-interp]"
     quit(2)
   let rom_path = positional[0]
   let use_hle = positional[1] == "hle"
@@ -93,11 +111,42 @@ proc main() =
                     run_bios = run_bios and not use_hle, use_hle = use_hle)
   emu.test_output = new_test_output()
   emu.post_init()
+  emu.cpu.attempt_waitloop_detection = waitloop
+  emu.mp2k_hle = mp2k_hle
+  emu.apu.set_fifo_interp(fifo_interp)
   if rtc_epoch >= 0:
     emu.enable_deterministic_rtc(rtc_epoch)
 
   var frame = 0
   var held = 0
+  when defined(biosdrvtrace):
+    # apulog: every byte the CPU or DMA writes to the sound registers
+    # 0x04000060-0x0400008F (FIFO data excluded), one line each:
+    # FRAME CYCLE_IN_FRAME ADDR VALUE (mgba_driver's apulog writes the same)
+    var apulog: File = nil
+    var swilog: File = nil
+    proc log_io(address: uint32; value: uint8) {.closure.} =
+      let a = address and 0xFFFFFF'u32
+      if apulog != nil and a >= 0x60'u32 and a <= 0x8F'u32:
+        let now = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+        apulog.writeLine(&"{frame} {now - int64(emu.frame_start_cycles)} " &
+                         &"{(0x04000000'u32 or a).toHex(8)} {value.toHex(2)}")
+    bdIoHook = log_io
+    # pcwatch: instructions executed where no game keeps code -- the unused
+    # space above the BIOS, the I/O registers, the save chip, above the
+    # address space -- counted with the first one's address and frame. A
+    # count above zero is a CPU that has run off the rails.
+    var wild_count = 0
+    var wild_first = 0'u32
+    var wild_frame = -1
+    proc watch_pc(pc: uint32) {.closure.} =
+      let region = pc shr 24
+      if (pc >= 0x4000'u32 and region <= 0x01'u32) or region == 0x04'u32 or
+         region >= 0x0E'u32:
+        if wild_count == 0:
+          wild_first = pc
+          wild_frame = frame
+        inc wild_count
   reply &"ready dingbat save={emu.storage.save_path} size={emu.storage.memory.len}"
   var line: string
   while stdin.readLine(line):
@@ -126,6 +175,38 @@ proc main() =
           inc frame
           hashes.add(fb_hash(emu.ppu.framebuffer).toHex)
         reply "ok " & hashes.join(" ")
+      of "rundigest":
+        # rundigest N (driver built with -d:biosdrvtrace): run N frames,
+        # replying per frame FBHASH:COUNT:PCHASH:TIMEHASH over the
+        # instructions executed outside the BIOS region -- how many, which
+        # PCs in order, and which PCs at which cycle of the frame. Two
+        # configurations whose game code runs the same instructions on the
+        # same cycles agree on all four; HLE against official BIOS, the
+        # first frame where TIMEHASH differs is where the game first saw a
+        # BIOS call take a different time. (debug)
+        when defined(biosdrvtrace):
+          var cnt = 0
+          var ph, th: uint64
+          bdPcHook = proc(pc: uint32) {.closure.} =
+            if pc >= 0x4000'u32:
+              inc cnt
+              ph = (ph xor uint64(pc)) * 0x100000001b3'u64
+              let t = int64(emu.scheduler.cycles) + int64(emu.bus.cycles) -
+                      int64(emu.frame_start_cycles)
+              th = (th xor (uint64(pc) shl 24) xor uint64(t)) * 0x100000001b3'u64
+          var outs: seq[string]
+          for _ in 1 .. parseInt(parts[1]):
+            cnt = 0
+            ph = 0xcbf29ce484222325'u64
+            th = ph
+            emu.step_frame()
+            inc frame
+            outs.add(fb_hash(emu.ppu.framebuffer).toHex & ":" & $cnt & ":" &
+                     ph.toHex & ":" & th.toHex)
+          bdPcHook = nil
+          reply "ok " & outs.join(" ")
+        else:
+          reply "err build with -d:biosdrvtrace"
       of "hash":
         reply "ok " & fb_hash(emu.ppu.framebuffer).toHex
       of "frame":
@@ -143,16 +224,196 @@ proc main() =
         reply(if emu.save_state(parts[1]): "ok" else: "err state_save failed")
       of "state_load":
         reply(if emu.load_state(parts[1]): "ok" else: "err state_load failed")
+      of "chmask":
+        # chmask N: output mutes, APU.channel_mask (the apps' channel mutes;
+        # emulation is unaffected). Bits 0-3 PSG 1-4, 4 FIFO A, 5 FIFO B;
+        # a set bit plays.
+        let m = parseInt(parts[1])
+        for ch in 0 .. 5: emu.apu.channel_mask[ch] = (m shr ch and 1) == 1
+        reply "ok"
+      of "apulog":
+        # apulog PATH | apulog off (driver built with -d:biosdrvtrace)
+        when defined(biosdrvtrace):
+          if apulog != nil: apulog.close()
+          apulog = nil
+          if parts[1] != "off": apulog = open(parts[1], fmWrite)
+          reply "ok"
+        else:
+          reply "err build with -d:biosdrvtrace"
+      of "swilog":
+        # swilog PATH | swilog off (-d:biosdrvtrace): one line per SWI from
+        # code outside the BIOS -- FRAME NUM RETURN_ADDR ABS_START CYCLES R0-R3
+        # -- the cycles from the swi to its return, so two configurations'
+        # logs show the first call that took another time (debug)
+        when defined(biosdrvtrace):
+          if swilog != nil: swilog.close()
+          swilog = nil
+          bdSwiHook = nil
+          bdPcHook = nil
+          if parts[1] != "off":
+            swilog = open(parts[1], fmWrite)
+            var ret = 0'u32
+            var t0 = 0'i64
+            var num = 0'u32
+            var regs = ""
+            proc absnow(): int64 =
+              emu.rebased + int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+            bdSwiHook = proc(n: uint32) {.closure.} =
+              let th = emu.cpu.cpsr.thumb
+              let pc = emu.cpu.r[15] - (if th: 4'u32 else: 8'u32)
+              if pc >= 0x4000'u32 and ret == 0:
+                ret = pc + (if th: 2'u32 else: 4'u32)
+                t0 = absnow()
+                num = n
+                regs = ""
+                for k in 0 .. 3: regs.add(" " & emu.cpu.r[k].toHex(8))
+            bdPcHook = proc(pc: uint32) {.closure.} =
+              if ret != 0 and pc == ret:
+                swilog.writeLine(&"{frame} {num.toHex(2)} {ret.toHex(8)} {t0} {absnow() - t0}{regs}")
+                ret = 0
+          reply "ok"
+        else:
+          reply "err build with -d:biosdrvtrace"
+      of "pcwatch":
+        # pcwatch on | pcwatch -> "COUNT FIRST_PC FIRST_FRAME" (-d:biosdrvtrace)
+        when defined(biosdrvtrace):
+          if parts.len > 1 and parts[1] == "on":
+            bdPcHook = watch_pc
+            reply "ok"
+          else:
+            reply &"ok {wild_count} {wild_first.toHex(8)} {wild_frame}"
+        else:
+          reply "err build with -d:biosdrvtrace"
+      of "cpu":
+        # cpu -> "HALTED STOPPED PC": whether the CPU sits in Halt or Stop
+        # (SWI 2/3, HALTCNT) and r15 -- a game asleep in Stop mode waits
+        # for its wake keys (L+R+SELECT, as a rule), not a hang
+        reply &"ok {int(emu.cpu.halted)} {int(emu.cpu.stopped)} {emu.cpu.r[15].toHex(8)}"
       of "layers":
         # debug visibility: bits 0-3 BG0-3, bit 4 OBJ
         emu.ppu.debug_layer_mask = uint8(parseHexInt(parts[1]))
         reply "ok"
       of "peek":
+        # untimed: a timed bus read (`emu.bus[a]`) charges wait states to
+        # the CPU, so peeking every frame shifted the game's own timing
         let a = uint32(parseHexInt(parts[1]))
         var s = ""
         for k in 0'u32 ..< uint32(parseInt(parts[2])):
-          s.add(emu.bus[a + k].toHex(2))
+          s.add(emu.bus.read_byte_internal(a + k).toHex(2))
         reply "ok " & s
+      of "trace":
+        # trace N PATH: N instruction steps, "PC CYCLES VCOUNT T/A ABS [R]"
+        # per step to PATH (PC as r15 before the step, cycles the step took,
+        # the absolute master-clock cycle it started on, R on a step that
+        # paid a parked HLE routine remainder instead of executing) (debug)
+        var f = open(parts[2], fmWrite)
+        var prev = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+        for _ in 1 .. parseInt(parts[1]):
+          let pc = emu.cpu.r[15]
+          let th = emu.cpu.cpsr.thumb
+          let start = emu.rebased + prev
+          # a step that only pays an HLE routine's parked remainder at the
+          # instruction after its SWI (cpu.tick) executes no instruction: R
+          let parked = emu.cpu.halt_resume_charge != 0 and
+                       pc - (if th: 4'u32 else: 8'u32) == emu.cpu.halt_resume_addr
+          emu.cpu.tick()
+          let now = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+          f.writeLine(pc.toHex(8) & " " & $(now - prev) & " " & $emu.ppu.vcount &
+                      (if th: " T " else: " A ") & $start & (if parked: " R" else: ""))
+          prev = now
+          if emu.ppu.frame != 0:
+            emu.end_frame()
+            inc frame
+            prev = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
+            emu.frame_start_cycles = emu.scheduler.cycles
+            f.writeLine("FRAME")
+        f.close()
+        reply "ok"
+      of "pft":
+        # pft PC N PATH: run to r15 == PC, then N steps with -d:pftrace on
+        when defined(pftrace):
+          let target = uint32(parseHexInt(parts[1]))
+          while emu.cpu.r[15] != target:
+            emu.cpu.tick()
+            if emu.ppu.frame != 0:
+              emu.end_frame()
+              inc frame
+              emu.frame_start_cycles = emu.scheduler.cycles
+          pft_on = true
+          pft_lines.setLen(0)
+          for _ in 1 .. parseInt(parts[2]):
+            emu.cpu.tick()
+            if emu.ppu.frame != 0:
+              emu.end_frame()
+              inc frame
+              emu.frame_start_cycles = emu.scheduler.cycles
+          pft_on = false
+          writeFile(parts[3], pft_lines.join("\n"))
+          reply "ok"
+        else:
+          reply "err build with -d:pftrace"
+      of "runto":
+        # runto PC: step until r15 == PC (debug), then print r0-r15
+        let target = uint32(parseHexInt(parts[1]))
+        while emu.cpu.r[15] != target:
+          emu.cpu.tick()
+          if emu.ppu.frame != 0:
+            emu.end_frame()
+            inc frame
+            emu.frame_start_cycles = emu.scheduler.cycles
+        var s: seq[string]
+        for k in 0 .. 15: s.add(emu.cpu.r[k].toHex(8))
+        reply "ok " & s.join(" ")
+      of "runwild", "watchw", "runpc", "runpct":
+        # runwild FRAMES: step until the CPU executes where no code lives
+        # (pcwatch's regions) or FRAMES frames pass; watchw FRAMES ADDR: until
+        # the word at ADDR changes. Then the last 48 jumps (FROM>TO, oldest
+        # first, T = Thumb) and r0-r15 (debug). runpc FRAMES LO HI: until the
+        # PC is in [LO, HI); runpct the same in Thumb state only.
+        let limit = frame + parseInt(parts[1])
+        let watch = parts[0] == "watchw"
+        let ranged = parts[0] in ["runpc", "runpct"]
+        let thumb_only = parts[0] == "runpct"
+        let lo = if ranged: uint32(parseHexInt(parts[2])) else: 0'u32
+        let hi = if ranged: uint32(parseHexInt(parts[3])) else: 0'u32
+        let waddr = if watch: uint32(parseHexInt(parts[2])) else: 0'u32
+        let wold = if watch: emu.bus.read_word_internal(waddr) else: 0'u32
+        var ring: array[48, string]
+        var prev = 0'u32
+        var n = 0
+        var hit = false
+        while frame < limit:
+          let pc = emu.cpu.r[15] - (if emu.cpu.cpsr.thumb: 4'u32 else: 8'u32)
+          let region = pc shr 24
+          if ranged:
+            if pc >= lo and pc < hi and (emu.cpu.cpsr.thumb or not thumb_only):
+              hit = true
+              break
+          elif watch:
+            if emu.bus.read_word_internal(waddr) != wold:
+              hit = true
+              break
+          elif (pc >= 0x4000'u32 and region <= 0x01'u32) or region == 0x04'u32 or
+               region >= 0x0E'u32:
+            hit = true
+            break
+          if pc != prev + 2 and pc != prev + 4:
+            # jumps only: from>to, T = Thumb, and the stack pointer
+            ring[n mod ring.len] = prev.toHex(8) & ">" & pc.toHex(8) &
+              (if emu.cpu.cpsr.thumb: "T" else: "A") & "@" & emu.cpu.r[13].toHex(8)
+            inc n
+          prev = pc
+          emu.cpu.tick()
+          if emu.ppu.frame != 0:
+            emu.end_frame()
+            inc frame
+            emu.frame_start_cycles = emu.scheduler.cycles
+        var s: seq[string]
+        for k in max(0, n - ring.len) ..< n: s.add(ring[k mod ring.len])
+        var regs: seq[string]
+        for k in 0 .. 15: regs.add(emu.cpu.r[k].toHex(8))
+        reply &"ok {(if hit: \"hit\" else: \"none\")} frame={frame} vcount={emu.ppu.vcount} " &
+              s.join(",") & " | " & regs.join(" ")
       of "rtc_get":
         # DATE_TIME register bytes (year month day weekday hour minute second)
         # and the status register, hex
@@ -168,6 +429,8 @@ proc main() =
         discard emu.rtc_xfer(0x64, b, 0)
         reply "ok"
       of "quit":
+        when defined(biosdrvtrace):
+          if apulog != nil: apulog.close()
         emu.storage.write_save()
         reply "ok"
         quit(0)

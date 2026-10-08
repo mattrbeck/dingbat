@@ -79,6 +79,7 @@ const loadRom = (romName, originalName) => {
   updatePauseIcon();
   fastForwardButton.classList.remove("active");
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  applyAudioSilent();
   // The core is up, so nativeRes() is right: size and present immediately.
   resizeCanvas();
   drawGame();
@@ -170,6 +171,14 @@ const volIconBtn = document.getElementById("vol-icon");
 const iconMuted = document.getElementById("icon-muted");
 const iconVol = document.getElementById("icon-vol");
 
+// At volume 0 the core skips mixing (emulation is unchanged); it remembers
+// the setting for later games.
+const applyAudioSilent = () => {
+  if (typeof Module !== "undefined" && Module._wasm_set_audio_silent) {
+    Module._wasm_set_audio_silent(volume === 0 ? 1 : 0);
+  }
+};
+
 const updateVolumeUI = () => {
   let pct = volume + "%";
   volFill.style.width = pct;
@@ -178,6 +187,7 @@ const updateVolumeUI = () => {
   iconVol.style.display = volume === 0 ? "none" : "";
   volTrack.setAttribute("aria-valuenow", String(volume));
   volIconBtn.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
+  applyAudioSilent();
   if (typeof updateGain === "function") updateGain();
 };
 
@@ -306,11 +316,18 @@ var Module = {
     let gainNode = null;
     let playTime = 0;
 
+    // "playback" plays through the iOS silent switch but pauses other apps'
+    // audio; at volume 0 (the embed's default) "ambient" leaves it playing.
+    const claimAudioSession = () => {
+      const session = navigator.audioSession;
+      if (!session) return;
+      const t = volume === 0 ? "ambient" : "playback";
+      if (session.type !== t) session.type = t;
+    };
+
     const initAudio = () => {
       if (audioCtx) return;
-      if (navigator.audioSession) {
-        navigator.audioSession.type = "playback";
-      }
+      claimAudioSession();
       audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       gainNode = audioCtx.createGain();
       gainNode.gain.value = volume / 100;
@@ -320,6 +337,7 @@ var Module = {
 
     window.updateGain = () => {
       if (gainNode) gainNode.gain.value = volume / 100;
+      if (audioCtx) claimAudioSession();
     };
 
     let audioUnlocked = false;

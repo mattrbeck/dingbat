@@ -1,0 +1,85 @@
+@title Sonic Advance 3 (USA)
+@file Sonic Advance 3 (U) (M6).gba
+@game B3SE
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+
+# Language English, profile name "AA" (both written to flash at once),
+# Main Game > Single Player > Sonic + Tails, opening story, Route 99 hub.
+# [load]: language/name are skipped, the opening story too (goes straight
+# to the hub), which proves the flash was read.
+# Session notes: the emulators' game states drift apart after the
+# flash writes. f966 (name entry, right after the language write): nba's
+# frame differs from dingbat-bios/mgba; f1252 (SEGA logo after the name
+# write) all three differ; menus and the intro attract run a few frames
+# out of phase on nba (until PRESS: nba +70 vs +60). At the hub (f6004)
+# Sonic/Tails positions differ on all three, and jumping on the
+# breakable block right of the start (f6264) breaks it on nba only, so a
+# lockstep route into Act 1 is not reproducible; the route stays in the
+# hub. nba's flash differs from the others in a 32-bit value at 0x08
+# (and its checksum), likely a timer-seeded ID.
+
+[new]
+wait 600
+checkpoint language window=30
+press A
+wait 300
+checkpoint name_entry window=30
+press DOWN after=10
+press RIGHT after=10
+press A after=10
+press A after=10
+press START after=30
+press A
+wait 120
+wait 400
+press START
+wait 120
+# until text PRESS timeout=600 every=10  [reached dingbat-bios+60 mgba+60 nba+70]
+wait 74
+checkpoint title window=30
+press START
+wait 90
+wait 30
+checkpoint main_menu window=30
+press A
+wait 120
+wait 60
+press A
+wait 150
+checkpoint char_select window=30
+press A
+wait 120
+press A
+wait 300
+press START
+wait 300
+press A
+wait 600
+wait 600
+wait 600
+wait 900
+checkpoint hub window=30
+press LEFT hold=300
+wait 30
+checkpoint hub_walk window=30
+
+[load]
+wait 300
+# mash START until text PRESS timeout=1200 every=20  [taps dingbat-bios:11 mgba:11 nba:11]
+tap START times=11 every=20 hold=4
+checkpoint title window=30
+press START
+wait 120
+press A
+wait 180
+press A
+wait 150
+press A
+wait 120
+press A
+wait 400
+checkpoint resumed_hub window=30
+press LEFT hold=300
+wait 30
+checkpoint resumed_walk window=30

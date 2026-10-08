@@ -1,0 +1,120 @@
+@title Gunstar Super Heroes (USA)
+@file Gunstar Super Heroes (U).gba
+@game BHGE
+@chip EEPROM
+@save skip: nothing is written before a stage is cleared (checked: GAME START > RED > NORMAL > NEW DATA up to stage select, and changing OPTIONS, both leave a blank EEPROM); the first save is after clearing Earth / Sky Port, whose ship interior (fiery-blended sprites, no score for minutes of shooting) could not be finished in budget
+@frozen dingbat-bios,mgba,nba
+
+# Red, Normal, New Data, Earth stage: shoot through the soldiers, kill the
+# big grunt mini-boss (score 3000), go left into the ship's hall and fight.
+# Session notes: title/menus have animated backgrounds out of phase on all
+# three (compare=text). In the stage nba draws shot sparks and enemy
+# positions slightly differently (f2706, f3546, f3706). In the ship hall
+# (f5122 onward) nba shows thin white horizontal lines across the
+# background at about scanlines 50 and 90 and draws the centre pillar
+# without its perspective taper (f6096), where dingbat-bios and mgba agree.
+
+[new]
+wait 600
+wait 300
+press START
+wait 90
+wait 60
+checkpoint title window=30 compare=text
+press START
+wait 90
+checkpoint main_menu window=30 compare=text
+press A
+wait 90
+checkpoint difficulty window=30 compare=text
+press A
+wait 120
+checkpoint new_data window=30 compare=text
+press A
+wait 180
+checkpoint stage_select window=30
+press A
+wait 240
+tap A times=30 every=20 hold=4
+wait 120
+checkpoint stage_start window=30
+hold RIGHT+B
+wait 300
+release
+press LEFT hold=120
+tap B times=10 every=6 hold=3
+press LEFT hold=60
+tap B times=10 every=6 hold=3
+press LEFT hold=60
+tap LEFT+B times=20 every=8 hold=6
+press LEFT hold=4
+hold B
+wait 120
+release
+hold B
+wait 180
+release
+press LEFT hold=60
+press LEFT hold=4
+hold B
+wait 120
+release
+press LEFT hold=60
+press LEFT hold=4
+hold B
+wait 120
+release
+hold B
+wait 300
+release
+wait 20
+press LEFT hold=4
+hold B
+wait 120
+release
+press LEFT hold=30
+hold B
+wait 120
+release
+press LEFT hold=30
+hold B
+wait 120
+release
+press LEFT hold=30
+press LEFT hold=4
+hold B
+wait 120
+release
+press LEFT hold=30
+hold B
+wait 120
+release
+press LEFT hold=30
+hold B
+wait 120
+release
+hold B
+wait 400
+release
+press LEFT hold=120
+checkpoint hall window=30
+press LEFT hold=200
+press RIGHT hold=4
+hold B
+wait 200
+release
+hold B
+wait 400
+release
+press LEFT hold=200
+press LEFT hold=4
+hold B
+wait 300
+release
+press LEFT hold=150
+press LEFT hold=4
+hold B
+wait 600
+release
+press LEFT hold=400
+checkpoint bridge window=30

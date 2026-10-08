@@ -1,0 +1,44 @@
+@title Wario Land 4 (USA, Europe)
+@file Wario Land 4 (UE) [!].gba
+@game AWAE
+@chip SRAM
+
+# New game in slot A on Normal: the game writes the slot as soon as the
+# difficulty is chosen ("Entry Passage" then shows on the file select).
+# Play on through the intro cutscene into the first room.
+
+[new]
+wait 600
+press START
+until text "tendo" timeout=600 every=10
+wait 30
+checkpoint title
+press START
+until text "DELETE DATA" timeout=600 every=10
+wait 60
+checkpoint file_select
+press A
+until text "Hard" timeout=300 every=5
+wait 30
+checkpoint difficulty
+press A
+until notext "DELETE DATA" timeout=600 every=10
+wait 1800
+until notblank timeout=600 every=10
+wait 120
+checkpoint in_game window=10
+
+[load]
+wait 600
+press START
+until text "tendo" timeout=600 every=10
+wait 30
+press START
+until text "Passage" timeout=600 every=10
+wait 60
+checkpoint file_select
+press A
+until notext "DELETE DATA" timeout=600 every=10
+until text "Entry" timeout=600 every=10
+wait 60
+checkpoint pyramid

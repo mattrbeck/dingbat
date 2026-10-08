@@ -1,0 +1,97 @@
+@title Harvest Moon - More Friends of Mineral Town (USA)
+@file Harvest Moon - More Friends of Mineral Town (U).gba
+@game BFGE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game: name AA, birthday Spring 1, farm AA, dog AA; A through the
+# intro (Mayor Thomas, the farm tour) into the house on Spring 2, walk to
+# the diary on the nightstand and Save to Data 1. [load]: START opens the
+# diary, Load Data 1, the house on Spring 2 6:00.
+# Findings: in the live session the debris on the farm field was laid out
+# differently on nba (f6200: big boulder and stumps where dingbat-bios and
+# mgba had small rocks and branches); the frozen replay showed all three
+# identical there. The three SRAM files differ in a few bytes (3906 / 3905
+# / 3904 non-blank bytes; dingbat-bios~mgba 76 bytes): random state.
+# Mosaic transitions are at a different strength on each emulator
+# (f5400, f8526, [load] f1026).
+[new]
+wait 600
+wait 300
+checkpoint title window=30
+press START
+wait 120
+press A
+wait 120
+press A after=20
+press START after=20
+checkpoint name_entry window=30
+press A
+wait 90
+press A
+wait 90
+checkpoint birthday window=30
+press A after=30
+press A
+wait 90
+press A
+wait 90
+press A after=20
+press A after=20
+press START after=20
+press A
+wait 90
+press A
+wait 90
+checkpoint dog_name window=30
+press A after=20
+press A after=20
+press START after=20
+press A
+wait 90
+press A
+wait 120
+checkpoint summary window=30
+press A
+wait 240
+checkpoint intro_home window=30
+tap A times=30 every=20 hold=4
+tap A times=40 every=20 hold=4
+tap A times=60 every=20 hold=4
+tap A times=40 every=20 hold=4
+checkpoint farm_field window=30 compare=none
+tap A times=20 every=20 hold=4
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+press B
+wait 30
+press RIGHT hold=30
+press UP hold=30
+wait 10
+checkpoint house window=30 compare=none
+press RIGHT hold=14
+press UP hold=10
+wait 10
+press A
+wait 60
+wait 60
+checkpoint diary window=30
+press A
+wait 60
+press A
+wait 60
+checkpoint saved window=30
+press B
+wait 90
+
+[load]
+wait 900
+press START
+wait 120
+wait 60
+checkpoint load_menu window=30
+press A
+wait 240
+press A
+wait 300
+checkpoint resumed window=30

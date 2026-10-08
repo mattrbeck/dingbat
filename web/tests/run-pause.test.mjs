@@ -71,7 +71,8 @@ test("Space and Period still work in the game view", async () => {
 // clip-range tests' stubs).
 const CLIP_STUBS = `
   globalThis.Module = {
-    memory: { buffer: new ArrayBuffer(64 * 1024) },
+    memory: { buffer: new ArrayBuffer(256 * 1024) },
+    _wasm_native_fb_ptr: () => 16,
     _clip_scrub_generate: () => 40,
     _clip_scrub_thumb_w: () => 4,
     _clip_scrub_thumb_h: () => 3,
@@ -231,9 +232,11 @@ test("in the game view the same keys act", async () => {
   assert.equal(app.runIn("__saves"), 1, "F5 saves a state");
   assert.equal(await press(app, "F8"), true);
   assert.equal(app.runIn("__loads"), 1, "F8 loads one");
-  app.runIn("paused = true");
+  app.runIn("paused = true; globalThis.__fbReads = 0; " +
+            "Module._wasm_native_fb_ptr = () => { __fbReads++; return 0; }");
   assert.equal(await press(app, "F9"), true);
-  assert.equal(app.runIn("__ticks"), 1, "F9 renders the paused frame to grab it");
+  assert.equal(app.runIn("__fbReads"), 1, "F9 reads the console's own picture");
+  assert.equal(app.runIn("__ticks"), 0, "...without stepping the paused game to get one");
 });
 
 // The SDL runtime's window key grab preventDefaults Tab page-wide from the
@@ -253,3 +256,55 @@ test("Tab on the home screen is the page's, before the runtime's key grab", asyn
   app.document.body.classList.add("running");
   assert.equal(await tab(), false, "in the game view Tab stays the game's (fast-forward)");
 });
+
+// --- A picture flight's hold -------------------------------------------------
+// A hero Resume or a launch from home holds the game (`paused`) for the
+// ~460 ms its picture flies; that hold is not the player's pause, so a
+// surface opened or a pause pressed during it must not take it for one.
+
+const flying = async (extra = "") => {
+  const app = await inGame(extra);
+  app.runIn("holdForFlight()");
+  assert.equal(paused(app), true, "the flight holds the game");
+  return app;
+};
+
+test("Report a Bug opened mid-flight keeps the game frozen, and closing it runs it " +
+     "(bug_overlay_in_flight_runs_behind, bug_overlay_in_flight_sticks_paused)", async () => {
+  const app = await flying();
+  app.runIn("openReportModal()");
+  app.runIn("releaseFlight()");                      // the picture lands
+  assert.equal(paused(app), true, "the game must not run behind the report");
+  app.runIn("closeReportModal()");
+  assert.equal(paused(app), false, "closing it gives back the player's choice: running");
+  assert.equal(icon(app), "Pause");
+});
+
+test("Pause pressed mid-flight pauses, and the landing keeps it (bug_pause_in_flight_lost)",
+  async () => {
+    const app = await flying();
+    await key(app, "Space");
+    app.runIn("releaseFlight()");
+    assert.equal(paused(app), true, "the player paused");
+    assert.equal(icon(app), "Resume");
+  });
+
+test("Period mid-flight pauses rather than stepping the held game", async () => {
+  const app = await flying(`
+    globalThis.__ticks = 0;
+    globalThis.Module = { _loop_tick: () => { __ticks++; } };
+  `);
+  await key(app, "Period");
+  assert.equal(app.runIn("__ticks"), 0, "the first press is a pause, not a step");
+  app.runIn("releaseFlight()");
+  assert.equal(paused(app), true);
+  assert.equal(icon(app), "Resume");
+});
+
+test("a file dropped while a clip records is refused (bug_drop_during_clip_export_loses_focus)",
+  async () => {
+    const app = await inGame("clipReplayActive = true;");
+    await app.dispatchDoc("drop", { dataTransfer: { files: [{ name: "x.sav" }] } });
+    assert.ok(app.toasts.includes("Finish or cancel the clip first"));
+    assert.deepEqual(app.alerts, [], "no import (or its prompts) starts over the panel");
+  });

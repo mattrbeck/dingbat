@@ -45,6 +45,7 @@ read within 0.1 % on FireRed.
 | GB palette | default | one shader uniform | nothing measurable | | |
 | GB rumble | **on** | one wasm call per frame | nothing measurable | | |
 | Input display, large / opaque controls, hide touch on gamepad (**on**), theme, volume | | DOM / CSS | nothing per frame | | |
+| Muted or volume 0 (2026-10-02) | | emulator CPU | saves: the cores skip the APU catch-up and mix (`APU.silent`) | **−2.6 %** native; **−6.1 %** with Enhanced music on | **−1.75 %** native |
 
 ### The same on one scale
 
@@ -122,6 +123,13 @@ Decided on the numbers above; every other default stayed.
   history length (rewind_codecs.nim has the bake-off).
 
 ## Still worth knowing
+
+* **Muted or at volume 0, the cores do not mix** (`APU.silent`, web and
+  desktop; also a 2P link's player 2, an online peer's core and run-ahead's
+  lookahead frames). The sample event still fires and the state is
+  byte-identical to a mixing core's (`tests/silent_audio_test.nim`, every
+  frame; a 2,512-ROM library sweep); unmuting re-latches the MP2K HLE as a
+  state load does. Retired instructions against main, sound on: +0.02 %.
 
 * **Pitch-correct fast-forward now costs ~1 % of fast-forward speed on
   FireRed and ~3 % on Silver, and nothing at normal speed** (both APUs

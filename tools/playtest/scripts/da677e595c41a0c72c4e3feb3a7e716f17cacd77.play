@@ -1,0 +1,122 @@
+@title Mario vs. Donkey Kong (USA)
+@file Mario vs. Donkey Kong (U) [!].gba
+@game BM5E
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+# File A new game, skip the 1-1 demo, clear level 1-1 (blue switch, red switch,
+# spring, carry key to door; then side-somersault onto the girder and grab the
+# Mini-Mario bubble). The game saves on level clear; [load] picks file A (MAIN 1-2)
+# and starts 1-2.
+# Seen while authoring: the title/menus and the clear tally differ in animation
+# phase between emulators on the same frame; nba lagged the 1-1 door fade-out
+# (f5510: still fading on nba, black on dingbat-bios and mgba) and its level
+# timer read one second lower at f5814. All three wrote byte-identical saves.
+
+[new]
+wait 600
+press START
+wait 120
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint select_data window=30
+press A
+wait 180
+# mash A until changed timeout=1200 every=30  [taps dingbat-bios:6 mgba:6 nba:6]
+tap A times=6 every=30 hold=4
+wait 120
+press START
+wait 180
+wait 300
+checkpoint world1_start window=30
+wait 300
+press A
+wait 200
+checkpoint level_select window=30 compare=text
+press A
+wait 240
+press B
+wait 240
+wait 120
+wait 400
+press RIGHT hold=40
+wait 20
+press RIGHT hold=60
+wait 30
+press A
+wait 40
+press RIGHT hold=1
+press A+LEFT hold=12
+wait 40
+press LEFT hold=45
+press UP hold=90
+wait 10
+press LEFT hold=12
+press UP hold=120
+wait 10
+press DOWN hold=120
+press RIGHT hold=70
+wait 10
+press RIGHT hold=25
+press A+RIGHT hold=12
+wait 40
+press RIGHT hold=20
+press A+RIGHT hold=20
+press RIGHT hold=30
+wait 30
+press A+RIGHT hold=15
+press RIGHT hold=30
+wait 20
+press A hold=20
+wait 40
+wait 20
+press LEFT hold=40
+wait 20
+press LEFT hold=4
+press B
+wait 40
+press LEFT hold=25
+wait 20
+press A+LEFT hold=20
+press LEFT hold=30
+wait 10
+press A hold=15
+press LEFT hold=30
+wait 10
+wait 300
+wait 200
+checkpoint part2 window=30
+press RIGHT hold=20
+press LEFT hold=3
+press RIGHT+A hold=20
+wait 4
+wait 30
+wait 60
+press RIGHT hold=4
+wait 10
+press B
+wait 40
+wait 90
+wait 300
+wait 300
+wait 400
+checkpoint level_clear window=30
+press A
+wait 200
+wait 60
+checkpoint level_select_after window=30 compare=text
+
+[load]
+wait 600
+press START
+wait 420
+press START
+wait 120
+checkpoint select_data_saved window=30
+press A
+wait 240
+checkpoint level_select_resumed window=30 compare=text
+press A
+wait 240
+checkpoint level_1_2 window=30

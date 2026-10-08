@@ -8,12 +8,13 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 
-// glpresent.js (createGlRenderer), saveimport.js and the DS helpers
-// (nds/ndsutil.js, nds/ndsaudio.js) load before index.js in index.html, so
-// they are prepended here too.
+// glpresent.js (createGlRenderer), saveimport.js, zipwrite.js and the DS
+// helpers (nds/ndsutil.js, nds/ndsaudio.js) load before index.js in
+// index.html, so they are prepended here too.
 const SOURCE =
   readFileSync(new URL("../glpresent.js", import.meta.url), "utf8") + "\n" +
   readFileSync(new URL("../saveimport.js", import.meta.url), "utf8") + "\n" +
+  readFileSync(new URL("../zipwrite.js", import.meta.url), "utf8") + "\n" +
   readFileSync(new URL("../nds/ndsutil.js", import.meta.url), "utf8") + "\n" +
   readFileSync(new URL("../nds/ndsaudio.js", import.meta.url), "utf8") + "\n" +
   readFileSync(new URL("../index.js", import.meta.url), "utf8");
@@ -140,6 +141,8 @@ class FakeElement {
   getAnimations() {
     return (this._anims || []).filter((a) => a.playState !== "idle");
   }
+  // A recorder's view of a canvas (clip export, Record).
+  captureStream() { return { addTrack() {}, getAudioTracks: () => [] }; }
   getContext() {
     // 2D-context stand-in: every method is a no-op except the two that are
     // read from (getImageData().data would otherwise be `undefined.data`).
@@ -579,6 +582,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     }
     throw e;
   }
+
+  // A refused Drive request is tried again after 0.5-2 s (driveRetryWait).
+  // Here 1 ms: a wait past PIN_TIMER_MS does not hold the event loop, and a
+  // test waiting on one could see node exit under it.
+  vm.runInContext("driveRetryMs = 1", context);
 
   // Scripts run in the same context share the global lexical environment,
   // so index.js's const/let bindings are visible here.

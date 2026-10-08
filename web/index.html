@@ -250,6 +250,13 @@
            a button in the bar's sense, but tapping it turns the HLE off and
            on for this game only — a debugging A/B against the hardware mix
            that is never saved and resets on the next load. -->
+      <!-- Shown while Settings › Audio › Channels has anything muted, so missing
+           sound always has a visible cause; opens that section. -->
+      <button type="button" id="channels-indicator" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>
+        <span id="channels-indicator-label"></span><span class="channels-indicator-word">&nbsp;off</span>
+      </button>
+
       <button type="button" id="hle-indicator" hidden
               title="Enhanced audio on — tap to hear the hardware mix"
               aria-label="Enhanced audio" aria-pressed="true">
@@ -380,16 +387,6 @@
         <span class="switch"><input type="checkbox" data-nds-toggle="barHide" /><span class="switch-track"></span></span>
       </label>
     </div>
-
-    <!-- Capture banner. A sibling of #topbar, not a child: mobile landscape
-         transforms the bar, and a transformed ancestor is the containing block
-         of its position:fixed descendants. -->
-    <div id="clip-banner" hidden>Capturing…</div>
-
-    <!-- Mobile-landscape handle: slides the (off-screen) top bar in/out -->
-    <button type="button" id="topbar-handle" aria-label="Show controls">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10l6 5 6-5"/></svg>
-    </button>
 
     <!-- ============================= Stage ============================= -->
     <main id="stage">
@@ -749,6 +746,25 @@
       </div>
     </div>
 
+    <!-- Resume from earlier: the game's session and its checkpoints (index.js
+         "Checkpoints"), in the Save States grid. Opened from the game's menu,
+         or in its crash form when the game has stopped unexpectedly twice. -->
+    <div id="moments-modal" class="modal-overlay">
+      <div class="modal modal-states" role="dialog" aria-modal="true" aria-labelledby="moments-title">
+        <button type="button" class="modal-close" id="moments-close" aria-label="Close">&times;</button>
+        <h2 id="moments-title">Resume from earlier</h2>
+        <p id="moments-hint" class="modal-hint"></p>
+        <div id="moments-grid" class="states-grid moments-grid"></div>
+        <p id="moments-note" class="modal-hint moments-note" hidden></p>
+        <div class="states-actions states-actions-split">
+          <button type="button" class="button button-sm" id="moments-from-save">Start from in-game save</button>
+          <div class="states-actions-right">
+            <button type="button" class="button button-sm button-primary" id="moments-resume" disabled>Resume</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Rewind scrubber: the Report-a-Bug scrubber's box (.report-scrub etc.)
          with a film strip added. The strip is one canvas drawn from the
          thumbnails the rewind ring captured at push time. -->
@@ -832,6 +848,25 @@
         <div class="states-actions rewind-actions">
           <button type="button" class="button button-sm" id="clip-scrub-cancel">Cancel</button>
           <button type="button" class="button button-sm button-primary" id="clip-save">Save this clip</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- A clip being recorded. The replay is neither shown (the canvas is
+         hidden under this) nor heard; this says how far along it is. -->
+    <div id="clip-progress-modal" class="modal-overlay">
+      <div class="modal modal-clip-progress" role="dialog" aria-modal="true" aria-labelledby="clip-progress-title" aria-describedby="clip-progress-label">
+        <img src="flap.png" alt="" class="clip-progress-flap" width="112" height="80" />
+        <h2 id="clip-progress-title">Recording clip</h2>
+        <p class="modal-hint" id="clip-progress-label">The last 10s</p>
+        <div class="clip-progress-row">
+          <div class="clip-progress-bar" id="clip-progress-bar" role="progressbar" aria-labelledby="clip-progress-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span class="clip-progress-fill" id="clip-progress-fill"></span>
+          </div>
+          <span class="clip-progress-pct" id="clip-progress-pct" aria-hidden="true">0%</span>
+        </div>
+        <div class="states-actions">
+          <button type="button" class="button button-sm" id="clip-progress-cancel">Cancel</button>
         </div>
       </div>
     </div>
@@ -981,15 +1016,14 @@
                     <span class="switch-track"></span>
                   </label>
                 </div>
-                <div class="modal-toggle-row">
-                  <div>
-                    <span class="modal-row-label">Opaque controls in landscape</span>
-                    <span class="modal-toggle-sub">Solid touch buttons instead of see-through outlines</span>
+                <div class="modal-toggle-row row-flow" id="landscape-buttons-row">
+                  <span class="modal-row-label">Buttons in landscape</span>
+                  <div id="landscape-buttons-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Buttons in landscape">
+                    <button type="button" class="choice-chip" data-value="outline" role="radio" aria-checked="false">Outline</button>
+                    <button type="button" class="choice-chip selected" data-value="bold" role="radio" aria-checked="true">Bold</button>
+                    <button type="button" class="choice-chip" data-value="solid" role="radio" aria-checked="false">Solid</button>
                   </div>
-                  <label class="switch">
-                    <input type="checkbox" id="opaque-controls-toggle" />
-                    <span class="switch-track"></span>
-                  </label>
+                  <span class="modal-toggle-sub">Bold shows up on any picture</span>
                 </div>
                 <div class="modal-toggle-row">
                   <div>
@@ -1068,6 +1102,7 @@
                     <div class="kb-shortcut" id="kb-shortcut-rewind"><span>Rewind (hold)</span><kbd>`</kbd></div>
                     <div class="kb-shortcut"><span>Pause &amp; step one frame</span><kbd>.</kbd></div>
                     <div class="kb-shortcut"><span>Fullscreen</span><kbd>F</kbd></div>
+                    <div class="kb-shortcut"><span>Zoom the screen (double-click resets)</span><kbd>Ctrl+Scroll</kbd></div>
                     <div class="kb-shortcut"><span>Mute</span><kbd>M</kbd></div>
                     <div class="kb-shortcut"><span>Show inputs on screen</span><kbd>I</kbd></div>
                     <div class="kb-shortcut"><span>Save state</span><kbd>F5</kbd></div>
@@ -1080,6 +1115,21 @@
                     <div class="kb-shortcut"><span>DS: blow into the microphone (hold)</span><kbd>H</kbd></div>
                   </div>
                   <p class="modal-hint">If a game key and a shortcut share a key, the game wins.</p>
+                </div>
+                <!-- Outside #kb-section, which touch devices hide: a tablet with
+                     a controller needs this too. -->
+                <div id="pad-section">
+                  <div class="modal-subhead">Controller</div>
+                  <div id="pad-shortcuts">
+                    <div class="kb-shortcut"><span>Fast forward (hold)</span><kbd>RT</kbd></div>
+                    <div class="kb-shortcut"><span>Rewind (hold)</span><kbd>LT</kbd></div>
+                    <div class="kb-shortcut"><span>Menu, paused</span><kbd>R3 / Guide / hold Select+Start</kbd></div>
+                    <div class="kb-shortcut"><span>Move / press</span><kbd>D-pad / A</kbd></div>
+                    <div class="kb-shortcut"><span>Back / close</span><kbd>B</kbd></div>
+                    <div class="kb-shortcut"><span>Library: game options</span><kbd>Y</kbd></div>
+                    <div class="kb-shortcut"><span>Library: resume the game</span><kbd>Start</kbd></div>
+                    <div class="kb-shortcut"><span>Library: filter / sort</span><kbd>LB RB / LT RT</kbd></div>
+                  </div>
                 </div>
               </div>
 
@@ -1368,6 +1418,59 @@
                     <span class="switch-track"></span>
                   </label>
                 </div>
+                <div class="modal-toggle-row" id="play-in-silent-row" hidden>
+                  <div>
+                    <span class="modal-row-label">Play in Silent Mode</span>
+                    <span class="modal-toggle-sub">Pauses audio from other apps while a game is playing.</span>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="play-in-silent-toggle" checked />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
+                <!-- Per-channel mutes (APU.channel_mask), with or without a game:
+                     folded on every open unless something is muted, held across
+                     game loads, never saved. aria-pressed = the channel plays. -->
+                <button type="button" class="settings-disclosure" id="channels-toggle"
+                        aria-expanded="false" aria-controls="channels-sub">
+                  Channels
+                  <svg class="settings-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+                </button>
+                <div id="channels-sub" hidden>
+                  <p class="channels-note" id="channels-note">Mute parts of the sound to hear the rest on its own. Stays until you turn it back on or reload the app.</p>
+                  <div class="channel-group" id="channels-tone" role="group" aria-labelledby="channels-tone-label">
+                    <div class="channel-group-head">
+                      <div>
+                        <span class="modal-row-label" id="channels-tone-label">Tone channels</span>
+                        <span class="modal-toggle-sub">The square, wave and noise voices every Game Boy and GBA game uses (PSG)</span>
+                      </div>
+                      <button type="button" class="channel-all" id="channels-all-tone">Mute all</button>
+                    </div>
+                    <div class="channel-grid channel-grid-4">
+                      <button type="button" class="channel-chip" id="channel-chip-0" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Square 1</span></button>
+                      <button type="button" class="channel-chip" id="channel-chip-1" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Square 2</span></button>
+                      <button type="button" class="channel-chip" id="channel-chip-2" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Wave</span></button>
+                      <button type="button" class="channel-chip" id="channel-chip-3" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Noise</span></button>
+                    </div>
+                  </div>
+                  <div class="channel-group" id="channels-sample" role="group" aria-labelledby="channels-sample-label">
+                    <div class="channel-group-head">
+                      <div>
+                        <span class="modal-row-label" id="channels-sample-label">Sample channels</span>
+                        <span class="modal-toggle-sub">Recorded sound and most music in GBA games (Direct Sound); Game Boy games have none</span>
+                      </div>
+                      <button type="button" class="channel-all" id="channels-all-sample">Mute all</button>
+                    </div>
+                    <div class="channel-grid channel-grid-2">
+                      <button type="button" class="channel-chip" id="channel-chip-4" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Sample A</span></button>
+                      <button type="button" class="channel-chip" id="channel-chip-5" aria-pressed="true"><svg class="ch-ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg><svg class="ch-ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/></svg><span>Sample B</span></button>
+                    </div>
+                  </div>
+                  <div class="channels-foot" id="channels-foot" hidden>
+                    <span id="channels-summary"></span>
+                    <button type="button" class="button button-sm" id="channels-reset">All channels on</button>
+                  </div>
+                </div>
               </div>
 
               <div class="settings-pane" id="settings-pane-general" role="tabpanel" aria-labelledby="settings-tab-general" hidden>
@@ -1555,19 +1658,13 @@
 
     <script src="glpresent.js"></script>
     <script src="saveimport.js"></script>
+    <script src="clipmux.js"></script>
+    <script src="zipwrite.js"></script>
     <script src="nds/ndsutil.js"></script>
     <script src="nds/ndsaudio.js"></script>
     <script src="index.js"></script>
     <script src="sdputil.js"></script>
     <script src="netplay.js"></script>
     <script src="em.js"></script>
-    <!-- Diagnostic pacing probe: loads only with ?probe in the URL; no effect otherwise. -->
-    <script>
-      if (/[?&]probe(=|&|$)/.test(location.search)) {
-        var pp = document.createElement("script");
-        pp.src = "pacing-probe.js";
-        document.body.appendChild(pp);
-      }
-    </script>
   </body>
 </html>

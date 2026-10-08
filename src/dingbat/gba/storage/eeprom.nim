@@ -1,9 +1,15 @@
 # EEPROM storage implementation (included by gba.nim)
 
-const EEPROM_SETTLE_CYCLES = 108368
+const EEPROM_SETTLE_CYCLES {.intdefine.} = 108368
   ## Programming time after a write, GBATEK "GBA Cart Backup EEPROM": "it'll
   ## take ca. 108368 clock cycles (ca. 6.5ms) until the old data is erased and
   ## new data is programmed". The ready poll reads 0 while settling.
+  ## A chip's analog time, not a console constant: a game that formats a
+  ## blank cart (Super Mario Advance 3: 196 block writes at first boot)
+  ## carries it into its frame phase, so the playtest references' outcomes
+  ## follow theirs (mgba as if 115000, the second reference ~101000;
+  ## docs/playtest-bugs.md). The define lets a build try a measured value
+  ## (tests/roms/payloads/eesettle.s on the cart) without an edit.
 
 proc eeprom_now(ep: EEPROM): CycleCount {.inline.} =
   # Same expression as bus_now (bus.nim is included after this file)

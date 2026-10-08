@@ -1,0 +1,87 @@
+@title Dr. Mario & Puzzle League (USA)
+@file Dr. Mario & Puzzle League (U).gba
+@game BZPE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Dr. Mario > 1P > VS. CPU (level 10, MED), top out three rounds in a row so
+# the CPU wins the match, Quit. The match result is the first thing the game
+# saves (classic settings are not kept). [load] opens Options > Records:
+# Win/Loss shows VS. CPU 000:001, then the high-score page.
+# Seen while authoring: the first VS. CPU (and the first Classic) bottle on
+# mgba gets a different virus layout and capsule colours than on dingbat-bios
+# and nba, which agree (f2768); after a Classic retry all three agreed.
+# The pill throw animation on nba runs a few frames late. nba writes an
+# 8192-byte file for this 4 Kbit EEPROM and on [load] shows 000:000 (f1956):
+# it does not read its own save back.
+
+[new]
+wait 600
+checkpoint health window=30
+press A
+wait 600
+checkpoint title window=30
+press START
+wait 120
+press START
+wait 120
+checkpoint drmario_title window=30
+press START
+wait 150
+checkpoint pick_mode window=30
+press A
+wait 120
+press DOWN after=20
+press A
+wait 150
+checkpoint vs_cpu_setup window=30
+tap START times=4 every=30 hold=4
+wait 120
+press START
+wait 300
+checkpoint vs_start window=10
+hold DOWN
+wait 900
+release
+checkpoint lose_round1 window=10
+press A
+wait 300
+hold DOWN
+wait 900
+release
+press A
+wait 300
+hold DOWN
+wait 900
+release
+wait 120
+checkpoint match_lost window=10
+press DOWN after=10
+press A
+wait 180
+press B
+wait 90
+press B
+wait 90
+checkpoint back_menu window=30
+
+[load]
+wait 600
+press A
+wait 600
+press START
+wait 120
+press START
+wait 120
+press START
+wait 150
+tap DOWN times=2 every=12 hold=4
+press A
+wait 120
+press A
+wait 120
+press RIGHT
+wait 60
+checkpoint records_winloss window=30
+press LEFT
+wait 60
+checkpoint records_highscore window=30

@@ -184,6 +184,21 @@ proc chain_next(dma: DMA; channel: int): bool =
     else:
       bus.sync_bits = bus.sync_bits and not 1'u8
 
+proc grant_follows(dma: DMA; channel: int): bool =
+  ## DMA_PENDING_CHAIN: at the end of `channel`'s burst, whether run_pending
+  ## grants next another request that was already latched when this burst
+  ## was granted (its own tests, in its order). A request that arrived
+  ## during the burst is not chained: unmeasured, and Pokemon Mystery
+  ## Dungeon's quiz (official BIOS) moved when its FIFO refills were.
+  var p = dma.pending and dma.pending_at_grant and not uint8(1 shl channel)
+  while p != 0:
+    let ch = countTrailingZeroBits(p)
+    p = p and not uint8(1 shl ch)
+    if not dma.dmacnt_h[ch].enable: continue
+    if (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3 and
+       dma.gba.apu.dma_channels.sizes[ch - 1] >= 16: continue
+    return true
+
 proc armed*(dma: DMA; timing: int): bool =
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and int(dma.dmacnt_h[channel].start_timing) == timing:
@@ -311,6 +326,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.gba.bus.dma_bus_req =
       if start_timing == 0 and IMM_IDLE_GRANT: min(dma.gba.bus.dma_request_at, dma.gba.bus.imm_at)
       else: dma.gba.bus.dma_request_at
+    when DMA_SEES_REFILL_FETCH:
+      dma.gba.bus.dma_bus_tail =
+        if nested or dma.gba.bus.in_catch_up: 0 else: int(dma.gba.scheduler.tick_left)
     # and one the CPU has moved on from (its internal cycle is the most a
     # load leaves between its data and the next fetch) is not on the bus
     if not nested and dma.gba.bus.load_size != 0 and
@@ -332,8 +350,12 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   dma.gba.bus.dma_active = true
   dma.busy_until[channel] = high(CycleCount)
   when DMA_READS_CPU_BUS:
-    # A nested burst finds the outer one's word on the bus
-    if not nested: dma.gba.bus.dma_bus_fresh = true
+    # A nested burst finds the outer one's word on the bus, and so does one
+    # that follows another with the CPU kept off the bus between them
+    # (DMA_BUS_BACK_TO_BACK) or halted since (DMA_BUS_WHILE_HALTED)
+    if not nested:
+      dma.gba.bus.dma_bus_fresh =
+        not ((DMA_BUS_BACK_TO_BACK or DMA_BUS_WHILE_HALTED) and dma.gba.bus.dma_bus_kept)
   dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold
   dma.gba.bus.rom_next_addr2 = 1
 
@@ -413,7 +435,10 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
 
   if not nested and DMA_LEAD_CYCLES < 2:
     if not (DMA_CHAIN and dma.chain_next(channel)):
-      dma.gba.bus.add_cycles(2 - DMA_LEAD_CYCLES)   # the hand-back
+      if DMA_PENDING_CHAIN and dma.grant_follows(channel):
+        dma.chained = true
+      else:
+        dma.gba.bus.add_cycles(2 - DMA_LEAD_CYCLES)   # the hand-back
   dma.busy_until[channel] = dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
 
   if start_timing == 3 and (channel == 1 or channel == 2):
@@ -449,6 +474,9 @@ proc run_pending*(dma: DMA) =
   ## event dispatch (no burst running) or from a burst's transfer loop after
   ## its drain (nested preemption). A request for a channel >= the burst in
   ## progress waits for the level that granted that burst.
+  # DMA_BUS_BACK_TO_BACK: a burst this loop has already run kept the CPU
+  # off the bus until the next grant here
+  var bus_driven = false
   while dma.pending != 0:
     let ch = countTrailingZeroBits(dma.pending)
     if ch >= dma.current_priority:
@@ -477,7 +505,18 @@ proc run_pending*(dma: DMA) =
       if saved == 4: bus.rom_cool()
       let cpu_stream = bus.rom_next_addr
       let cpu_free = bus.rom_free_since
+    when DMA_BUS_BACK_TO_BACK or DMA_BUS_WHILE_HALTED:
+      # ... or nothing has used the bus since the last burst, the CPU
+      # having stayed halted (DMA_BUS_WHILE_HALTED)
+      bus.dma_bus_kept = (DMA_BUS_BACK_TO_BACK and bus_driven) or
+                         (DMA_BUS_WHILE_HALTED and saved == 4 and bus.dma_bus_left and
+                          dma.gba.cpu.halted)
+      bus_driven = true
+    when DMA_PENDING_CHAIN:
+      if saved == 4: dma.pending_at_grant = dma.pending
     dma.run_channel(ch, nested = saved < 4)
+    when DMA_BUS_WHILE_HALTED:
+      if saved == 4: bus.dma_bus_left = dma.gba.cpu.halted
     dma.current_priority = saved
     when DMA_STALLS_IRQ_SYNC:
       # The CPU's interrupt synchroniser runs on the CPU's clock, and that
@@ -530,7 +569,24 @@ proc run_pending*(dma: DMA) =
         # last internal cycle, is taken after that multiply).
         let stall_start = if DMA_STALL_FROM_CPU_STOP: intr.stall_from else: granted_at
         intr.stall_pushed = bus.sched.delay_pending(etInterrupts, stall_start, held)
-        if intr.pipe_raised != 0 and intr.pipe_due > stall_start:
+        if intr.pipe_raised != 0 and intr.pipe_at >= stall_start:
+          # Raised under this burst: the burst's transfer loop drains due
+          # events at transfer boundaries, so the raise ran before this span
+          # was known and raise_synced booked a plain IRQ_SYNC_DELAY. Like a
+          # raise it does see under a burst, it counts from the burst's end.
+          # Pushing it back by the whole burst instead held a stale IE & IF
+          # sample in the synchroniser for as long as the burst had run
+          # before the raise. Any other interrupt the CPU took meanwhile
+          # acknowledged the bits, and the late sample then delivered an IRQ
+          # with IE & IF zero (Boktai 2 - Solar Boy Django: its solar-sensor
+          # timer overflowing inside a DMA3 copy, then an H-blank IRQ; its
+          # handler, finding no source, called a null vector).
+          let due = max(intr.pipe_at + CycleCount(IRQ_SYNC_DELAY),
+                        intr.stall_to + CycleCount(IRQ_SYNC_DELAY - UNDER_BURST_CREDIT))
+          intr.pipe_due = due
+          intr.schedule_interrupt_check(
+            if due > bus.sched.cycles: int(due - bus.sched.cycles) else: 0)
+        elif intr.pipe_raised != 0 and intr.pipe_due > stall_start:
           intr.pipe_due += held
         when DMA_IRQ_FROM_BUS_END:
           if dma.irq_after_burst:
@@ -541,6 +597,8 @@ proc run_pending*(dma: DMA) =
       if dma.irq_after_burst:
         dma.irq_after_burst = false
         dma.gba.interrupts.schedule_raise_check(dma.irq_was_set, IRQ_SYNC_DELAY)
+    if saved == 4:
+      bus.dma_stall_total += int64(bus.sched.cycles + CycleCount(bus.cycles) - granted_at)
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
     when defined(itrace):

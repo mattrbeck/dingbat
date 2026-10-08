@@ -8,22 +8,27 @@ whenever something lands that needs the same treatment.
 ## "Clip that!" — range-based clip export
 
 Gated: replay determinism (`tests/clip_replay_test.nim`), range arithmetic
-(`web/tests/clip-range.test.mjs`). Not gated: the FILE, the strip as touch.
+and the strip drag (`web/tests/clip-range.test.mjs`), the MP4 writer
+(`web/tests/clipmux.test.mjs`). Measured headless (Chromium + WebKit,
+2026-10-05): a 10 s clip encodes in ~2.7 s, audio sample-aligned to the
+picture after the AAC priming edit list, and bit-for-bit the game's own
+samples up to the codec. Not gated: real devices.
 
 - [ ] **The file is the range.** Pick a range around a level transition;
-      the .webm starts on the in marker's frame and ends on the out marker's,
+      the .mp4 starts on the in marker's frame and ends on the out marker's,
       no leading live frames, no tail to "now".
-- [ ] **Audio in sync** through a 60 s export; **a full minute exports**
-      (banner to 100 %, controls inert, game resumes where it was).
-- [ ] **Phone (LAN https).** Markers never swap, no momentum after lift, a
-      tap moves the NEARER marker; portrait, landscape, rotate with the
-      picker open.
-- [ ] **Safari** produces .mp4; confirm it plays with audio.
+- [ ] **Nothing plays while it records**: no picture, no sound, just the
+      "Recording clip" panel counting to 100 %; Cancel gives the game back
+      where it was; a full minute exports.
+- [ ] **The .mp4 plays** in QuickTime / Photos (iPhone), with sound, in sync.
+- [ ] **Phone (LAN https).** Each bound follows the finger; a bound held at
+      the strip's end scrolls the film; no momentum after lift; portrait,
+      landscape, rotate with the picker open.
 - [ ] **Rewind off**: the picker still shows a full strip.
 - [ ] **iOS memory**: several minutes with the 6 MB clip cap, no reload or
       JIT demotion; oldest frame still ~a minute back on a GB game.
-- [ ] **Rewind scrubber** (shared film-strip component): drag, tap,
-      two-stage confirm, save-loss warning.
+- [ ] **Rewind scrubber** (shared film-strip component, the scrolling kind):
+      drag, tap, two-stage confirm, save-loss warning.
 
 ## Input display overlay
 
@@ -163,6 +168,38 @@ phone's tab really being suspended.
       lands: the toast offers Switch, and Switch brings the Mac's moment in.
       Ignore it instead and keep playing: nothing is lost on the phone,
       and its session is the one the Mac picks up next.
+
+## A game that keeps stopping (checkpoints)
+
+Gated: `web/tests/checkpoints.test.mjs` (retention, the crash count, the
+clean-exit note, the last gasp, late results, pictures that will not store,
+the battery watcher, going back past a save); `web/e2e/crash-recovery.e2e.mjs`
+(the browser SIGKILLed or closed with the test ROM on screen, in Chromium
+and WebKit: where each relaunch resumes, what counts as a crash, the sheet
+after two); `web/e2e/sw-updates.e2e.mjs` (the worker and page stay one build
+across deploys, Force update, no network, an old sw.js). Both run locally
+with the rest (`node --test e2e/*.e2e.mjs`); the crash suite also gates CI
+in its own shard (test.yml "crash recovery"), while the update suite runs
+on CI only when asked (`DINGBAT_E2E_UPDATES=1`: its no-network steps still
+hang WebKit's next install there now and then). Run it before landing a
+change to sw.js or the update flow.
+Not gated: a real
+Android Chrome crash, Safari's own Cmd-Q, a phone's frame pacing.
+
+- [ ] **Crash, pick up.** On the phone play a few minutes without saving in
+      game, then kill the browser from the app switcher *with the game on
+      screen*. Reopen and tap the game: it resumes within about a minute of
+      where it was.
+- [ ] **No hitch.** Play a slow-phone GBA game for a few minutes with the
+      log open: no audible or visible stutter on the minute.
+- [ ] **Twice and it asks.** Kill it twice in a row just after it resumes:
+      the third tap opens *“Game” stopped unexpectedly*. Pick an earlier
+      moment: it resumes there. Kill it again and the earlier moments are
+      still listed.
+- [ ] **Resume from earlier, past a save.** Save in game, play a minute, then
+      the game's menu → Resume from earlier → a moment marked *Before your
+      last save*: it resumes there, and the menu offers Restore old save
+      (*The save you replaced*), which brings the newer save back.
 
 ## State-machine fix round (formal/FINDINGS.md)
 

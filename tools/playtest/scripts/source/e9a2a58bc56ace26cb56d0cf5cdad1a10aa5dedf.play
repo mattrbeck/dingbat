@@ -1,0 +1,67 @@
+@title Final Fantasy VI Advance (USA)
+@file Final Fantasy VI Advance (U).gba
+@game BZ6E
+@chip SRAM
+
+# New game through the opening (text crawl, the cliff dialog, the Magitek
+# march into Narshe; nothing here can be skipped) until the menu opens, then
+# Quicksave: "Save game in quicksave slot and quit?" Yes writes the battery
+# save and returns to the title. [load] picks Continue on the title menu,
+# answers "Resume from quicksave data?" Yes and closes the menu in Narshe.
+
+[new]
+until text "Press any button" timeout=1200 every=10
+press A after=60
+until text "SQUARE" timeout=900 every=10
+mash A until text "Game" timeout=3000 every=60
+wait 30
+checkpoint title_menu compare=text
+press A
+until text "ancient war" timeout=1200 every=10
+checkpoint crawl window=0 compare=text
+mash A until text "Biggs" timeout=6000 every=60
+checkpoint biggs window=0 compare=text
+mash A until text "Relax" timeout=3000 every=60
+# the march to Narshe, then Wedge's orders at the gate
+mash A until text "riffraff" timeout=14000 every=60
+checkpoint narshe_gate window=0 compare=text
+mash A until notext "riffraff" timeout=600 every=60
+mash START until text "Formation" timeout=3000 every=120
+wait 30
+checkpoint menu window=10
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press A after=60
+until text "quicksave slot" timeout=300 every=10
+press UP after=15
+checkpoint quicksave_prompt window=0
+press A after=10
+until text "Saved game data" timeout=900 every=10
+wait 20
+checkpoint saved window=10
+
+[load]
+until text "Press any button" timeout=1200 every=10
+press A after=60
+until text "SQUARE" timeout=900 every=10
+mash A until text "Continue" timeout=3000 every=60
+wait 30
+checkpoint title_menu compare=text
+press A
+until text "erased" timeout=1200 every=10
+wait 30
+checkpoint resume_prompt window=10
+press UP after=15
+press A
+until notext "erased" timeout=600 every=10
+until stable 30 timeout=1200
+checkpoint menu_resumed
+press B
+until notext "Formation" timeout=600 every=10
+wait 60
+checkpoint narshe window=10

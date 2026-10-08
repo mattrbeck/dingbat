@@ -1,57 +1,70 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/index.js: applyUpdate checkForUpdate fullResetReload maybeCheckForUpdate showUpdateButton on:visibilitychange
+-- @models web/index.js: applyUpdate checkForUpdate fullResetReload maybeCheckForUpdate probeBuilds refuseState showUpdateButton updateForNewerState on:visibilitychange
 -- @models web/sw.js: fetchAndCache installAssets probeVersion reinstall on:activate on:fetch on:install on:message
 
 /-
 # Service worker, update check and update flow (web/sw.js, web/index.js)
 
-Written against dd7ba741f. `step` now models the code as fixed by the commit
+Written against dd7ba741f. `step` models the code as fixed by the commit
 that turned the `bug_*` theorems below into `regress_*` ones ("web: an update
-never reloads another tab's game, and never caches two builds";
-`git log -- formal/WebState/ServiceWorker.lean`); line numbers are at that
-commit.
+never reloads another tab's game, and never caches two builds",
+5901c517), with the update a too-new save state asks for (df47a452) added;
+line numbers are at 03f88d6c.
 
-sw.js: `install` (69) runs `installAssets` (55) into the cache
-`dingbat-<CACHE_VERSION>`: a version probe (`probeVersion`, 39: version.txt
+sw.js: `install` (74) runs `installAssets` (60) into the cache
+`dingbat-<CACHE_VERSION>`: a version probe (`probeVersion`, 44: version.txt
 under a URL no edge has seen), every asset fetched once under
 `?v=<CACHE_VERSION>` with `cache: "reload"`, then the cached version.txt and a
 second probe; unless the first probe named CACHE_VERSION and all three agree,
 it throws and the install fails. The worker then waits until a page posts
-`skipWaiting` (110). `activate` (78) deletes every other `dingbat-*` cache
-and `clients.claim()`s every tab. `fetch` (128) answers from *its own* cache
+`skipWaiting` (115). `activate` (83) deletes every other `dingbat-*` cache
+and `clients.claim()`s every tab. `fetch` (133) answers from *its own* cache
 only (so an installed-but-waiting build is never mixed in), falling back to
 the network. The `reinstall` message (the menu's Force update) runs
-`reinstall` (97): the same bracketed download into a staging cache, then one
+`reinstall` (102): the same bracketed download into a staging cache, then one
 put per asset into the *live* cache.
 
-index.js: `register` (55) shows the Update button if a worker is already
+index.js: `register` (58) shows the Update button if a worker is already
 waiting, and on `updatefound` shows it when the new worker's `statechange`
-finds it `installed` while the page has a controller (61-66).
-`controllerchange` (83) acts when `hadController || appUpdating`, once
+finds it `installed` while the page has a controller (64-69).
+`controllerchange` (86) acts when `hadController || appUpdating`, once
 (`refreshing`): it reloads if this tab asked for the update (`appUpdating`)
 or has no game in progress (`currentRomName || linkMode || rollbackMode ||
-netActive()`); otherwise it sets `updateActivated` (177) and shows the
-button, relabelled "Reload". `checkForUpdate` (117) awaits three fetches
-(the cached version.txt through the worker, a no-store version.txt, a
-no-store sw.js) and shows the button when the first two differ and sw.js's
-CACHE_VERSION equals the fresh version.txt. `maybeCheckForUpdate` (144) runs
-at load and on `visibilitychange`. The button (224) opens the confirm modal
-when a game is loaded, else runs `applyUpdate` (179): `appUpdating = true`;
-with `updateActivated`, `location.reload()`; else `await
-swRegistration.update()`, then `skipWaiting` to the waiting worker, or wait
-for the installing one to reach `installed` (then `skipWaiting`) or
-`redundant` (then `fullResetReload`, 160), or with neither, `fullResetReload`.
+netActive()`); otherwise it sets `updateActivated` (190) and shows the
+button, relabelled "Reload". `checkForUpdate` (142) awaits `probeBuilds`
+(124: three fetches, the cached version.txt through the worker, a no-store
+version.txt, a no-store sw.js; null if any fails) and shows the button when
+the first two differ and sw.js's CACHE_VERSION equals the fresh version.txt.
+`maybeCheckForUpdate` (157) runs at load and on `visibilitychange`. The
+button (237) opens the confirm modal when a game is loaded, else runs
+`applyUpdate` (192): `appUpdating = true`; with `updateActivated`,
+`location.reload()`; else `await swRegistration.update()`, then
+`skipWaiting` to the waiting worker, or wait for the installing one to reach
+`installed` (then `skipWaiting`) or `redundant` (then `fullResetReload`,
+173), or with neither, `fullResetReload`.
+
+A save state from a newer dingbat is the other way in: loading one in a game
+(`refuseState` 7856, only with `currentOriginalName` and no link or netplay)
+runs `updateForNewerState` (7868), which awaits `probeBuilds` and, when a
+newer build is deployed and fetchable and `!appUpdating` (7876), pauses the
+game, awaits `persistSave`, `persistAutoState` and a `dbPut` of the retry
+record, then calls `applyUpdate` (7890) with the game still loaded and no
+confirm modal: the player asked for it by loading the state.
 
 ## What is modelled
 
 * A build is a version number; `dep` is what the origin serves now. A deploy
-  bumps it (deploys only move forward). Two assets stand for all of them:
-  index.js (with version.txt, fetched alongside) and em.wasm. A cache holds,
+  bumps it (deploys only move forward). Two assets stand for all of them
+  (`ASSETS`, sw.js 5, which since gained clipmux.js, flap.png and
+  ckptworker.js: every asset is fetched, staged and put the same way, so more
+  of them only lengthen the windows the two already have): index.js (with
+  version.txt, fetched alongside) and em.wasm. A cache holds,
   per asset, the build its bytes came from. A version probe reads `dep`.
 * Two tabs of the app (`Bool`-indexed). Each tab is the current page instance:
   the build it booted (`running`, per asset), whether it is controlled and by
   which worker version, the index.js flags, and its in-flight continuations
-  (applyUpdate between awaits, one checkForUpdate's three fetches).
+  (applyUpdate between awaits, one checkForUpdate's three fetches, an
+  updateForNewerState between its probe and its applyUpdate).
 * The registration: active / waiting / installing worker versions, the
   installing worker's first probe and per-asset fetches, a posted
   `skipWaiting`.
@@ -76,9 +89,18 @@ for the installing one to reach `installed` (then `skipWaiting`) or
   `fullResetReload`; only the success paths are modelled for Force update.
   Two tabs' Force updates share one download (`rProbe`, `rsJs`, ...), as the
   one live worker's reinstalls would race on the one live cache.
+* `updateForNewerState` is two events: `newerStart` (the load refused,
+  the probe passed, the `appUpdating` check) and `newerApply` (its
+  `applyUpdate`, after the three awaits). The probe's outcome is not
+  modelled: `newerStart` may fire whenever a game is loaded and no update
+  is under way in that tab, a superset of the JS. The awaits in between
+  touch nothing this model tracks (the save flush is SavePersistence's);
+  other events may run in them, which is why `newerApply` is separate.
+  At most one is in flight per tab (a second refused load meanwhile only
+  repeats the same `applyUpdate`).
 * The page's own boot from the network is taken as consistent (`(dep, dep)`):
   a site without a worker has the same exposure, so it is not the worker's.
-* Save flushing on reload is `pagehide`'s (index.js 11226, a synchronous IDB
+* Save flushing on reload is `pagehide`'s (index.js 15972, a synchronous IDB
   put); this file only tracks whether a tab was reloaded mid-game without its
   own user having agreed (`forcedMidGame`). What pagehide does *not* flush in a
   rollback session is Netplay.lean's `bug_pagehide_in_rollback_loses_progress`.
@@ -89,8 +111,9 @@ for the installing one to reach `installed` (then `skipWaiting`) or
 ## Results
 
 Proved: no tab is ever reloaded mid-game unless its own user clicked Update
-or Force update in it (`no_forced_midgame`, every interleaving); with no
-Update / Force update accepted, no tab is ever reloaded by the app
+or Force update in it, or loaded a save state that needs a newer build
+(`no_forced_midgame`, every interleaving); with none of those accepted, no
+tab is ever reloaded by the app
 (`no_reload_without_a_click`: no reload loop exists without a click); the
 button is shown at most once per page (`shows_at_most_once`); without Force
 update, no page ever boots a mixed index.js/em.wasm pair, whatever deploys
@@ -107,7 +130,7 @@ namespace WebState.ServiceWorker
 inductive AK where
   | idle
   | awaitUpdate          -- applyUpdate suspended at `await swRegistration.update()`
-  | watch (v : Nat)      -- statechange listener on installing worker v (202)
+  | watch (v : Nat)      -- statechange listener on installing worker v (215)
   | resetting            -- in fullResetReload
   | done                 -- skipWaiting posted; waiting for controllerchange
   deriving DecidableEq, Repr
@@ -122,11 +145,11 @@ structure Tab where
   running     : Nat × Nat := (0, 0)  -- (index.js, em.wasm) builds this page booted with
   controlled  : Bool := true         -- navigator.serviceWorker.controller
   ctrlV       : Nat := 0             -- the controller's CACHE_VERSION
-  hadController : Bool := true       -- (81)
-  appUpdating : Bool := false        -- (174)
-  refreshing  : Bool := false        -- (82)
-  ready       : Bool := false        -- updateActivated (177)
-  updAvail    : Bool := false        -- updateAvailable / button shown (109)
+  hadController : Bool := true       -- (84)
+  appUpdating : Bool := false        -- (187)
+  refreshing  : Bool := false        -- (85)
+  ready       : Bool := false        -- updateActivated (190)
+  updAvail    : Bool := false        -- updateAvailable / button shown (113)
   shows       : Nat := 0             -- ghost: hidden -> shown transitions this page
   promptV     : Option Nat := none   -- ghost: build the button was last shown for
   game        : Bool := false        -- currentRomName || linkMode (|| rollbackMode || netMode)
@@ -137,6 +160,7 @@ structure Tab where
   instQ       : Option Nat := none   -- an `installed` statechange queued for worker v
   chk         : Option Chk := none   -- a checkForUpdate in flight
   force       : Bool := false        -- Force update in flight (waiting for "reinstalled")
+  newer       : Bool := false        -- updateForNewerState between its probe and applyUpdate (7868-7890)
   deriving DecidableEq, Repr
 
 structure State where
@@ -156,7 +180,7 @@ structure State where
   rJs        : Bool                   -- a reinstall has put index.js into the live cache
   rWasm      : Bool                   -- ... and em.wasm
   tabs       : Bool → Tab
-  intents    : Nat                    -- ghost: Update / Force update accepted
+  intents    : Nat                    -- ghost: Update / Force update / a newer build's state accepted
   autoReloads : Nat                   -- ghost: reloads the app itself triggered
   forcedMidGame : Bool                -- ghost: a tab reloaded mid-game its user never agreed to
   mixedBoot  : Bool                   -- ghost: a page booted index.js and em.wasm of different builds
@@ -189,7 +213,7 @@ def init : State where
 def updT (t : Bool) (f : Tab → Tab) (s : State) : State :=
   { s with tabs := fun u => if u = t then f (s.tabs u) else s.tabs u }
 
-/-- showUpdateButton (112). -/
+/-- showUpdateButton (115). -/
 def showBtn (t : Bool) (v : Nat) (s : State) : State :=
   let x := s.tabs t
   let s := { s with badPrompt := s.badPrompt || v == x.running.1 }
@@ -202,7 +226,7 @@ def serve (s : State) : Option Nat × Nat × Nat :=
   | some v => match s.cache v with
     | some p => (some v, p)
     | none => (some v, (s.dep, s.dep))
-    -- network fallback (sw.js 163)
+    -- network fallback (sw.js 168)
   | none => (none, (s.dep, s.dep))
 
 /-- A page (re)load of tab t. `auto`: the app called location.reload(). -/
@@ -221,19 +245,19 @@ def reload (t : Bool) (auto : Bool) (s : State) : State :=
 def claim (v : Nat) (x : Tab) : Tab := { x with controlled := true, ctrlV := v, ccQ := true }
 
 /-- The `installed` statechange reaches a page that attached the listener; an
-    applyUpdate watching worker v then posts skipWaiting (204). -/
+    applyUpdate watching worker v then posts skipWaiting (217). -/
 def onInstalled (v : Nat) (x : Tab) : Tab :=
   let x := if x.regd then { x with instQ := some v } else x
   if x.applyK == .watch v then { x with applyK := .done } else x
 
 /-- The `redundant` statechange: an applyUpdate watching worker v falls back to
-    fullResetReload (208). -/
+    fullResetReload (221). -/
 def onRedundant (v : Nat) (x : Tab) : Tab :=
   if x.applyK == .watch v then { x with applyK := .resetting } else x
 
 def mapTabs (g : Tab → Tab) (s : State) : State := { s with tabs := fun u => g (s.tabs u) }
 
-/-- activate (sw.js 78): delete the other caches, claim every tab. -/
+/-- activate (sw.js 83): delete the other caches, claim every tab. -/
 def activate (v : Nat) (s : State) : State :=
   mapTabs (claim v)
     { s with active := some v,
@@ -256,32 +280,34 @@ def installFailed (v : Nat) (s : State) : State :=
 inductive Event where
   | deploy
   | browserCheck                 -- the browser re-fetches sw.js
-  | probeFirst                   -- installAssets's first probeVersion() lands (sw.js 56)
+  | probeFirst                   -- installAssets's first probeVersion() lands (sw.js 61)
   | fetchJs                      -- the installing worker's index.js?v= fetch completes
   | fetchWasm                    -- ... em.wasm?v=
-  | installEnd                   -- installAssets's tail: version.txt check, second probe (61-65)
+  | installEnd                   -- installAssets's tail: version.txt check, second probe (66-70)
   | installFail                  -- one asset fetch failed: worker redundant
-  | regResolve (t : Bool)        -- register().then (55)
-  | instFire (t : Bool)          -- the queued `installed` statechange (63)
+  | regResolve (t : Bool)        -- register().then (58)
+  | instFire (t : Bool)          -- the queued `installed` statechange (66)
   | skipDeliver                  -- the waiting worker handles skipWaiting and activates
-  | ccFire (t : Bool)            -- controllerchange handler (83)
+  | ccFire (t : Bool)            -- controllerchange handler (86)
   | userReload (t : Bool)        -- the user reloads / reopens the tab
   | gameOn (t : Bool) | gameOff (t : Bool)
-  | updClick (t : Bool)          -- #update-btn (224)
-  | confirm (t : Bool)           -- #update-confirm (233)
+  | updClick (t : Bool)          -- #update-btn (237)
+  | confirm (t : Bool)           -- #update-confirm (246)
   | notNow (t : Bool)
-  | applyResume (t : Bool)       -- applyUpdate after `await update()` (193)
-  | resetFire (t : Bool)         -- fullResetReload (160)
-  | checkStart (t : Bool)        -- maybeCheckForUpdate at load / visibilitychange (144)
+  | applyResume (t : Bool)       -- applyUpdate after `await update()` (206)
+  | resetFire (t : Bool)         -- fullResetReload (173)
+  | checkStart (t : Bool)        -- maybeCheckForUpdate at load / visibilitychange (157)
   | chkCur (t : Bool) | chkLatest (t : Bool) | chkSw (t : Bool)  -- the three fetches land
   | chkEval (t : Bool)           -- the rest of checkForUpdate
-  | forceStart (t : Bool)        -- Force update, confirmed (268)
+  | forceStart (t : Bool)        -- Force update, confirmed (281)
   | rProbe0                      -- reinstall: installAssets's first probe
   | rFetchJs | rFetchWasm        -- reinstall: one asset into the staging cache
   | rVerify                      -- reinstall: installAssets's check passes (the failure path
                                  --   replies ok:false -> fullResetReload, not modelled)
-  | rPutJs | rPutWasm            -- reinstall: one put into the live cache (sw.js 104)
-  | forceDone (t : Bool)         -- "reinstalled" ok: location.reload() (261)
+  | rPutJs | rPutWasm            -- reinstall: one put into the live cache (sw.js 109)
+  | forceDone (t : Bool)         -- "reinstalled" ok: location.reload() (274)
+  | newerStart (t : Bool)        -- a too-new state refused; updateForNewerState passes 7869-7876
+  | newerApply (t : Bool)        -- ...its awaits done: applyUpdate() (7890)
   deriving DecidableEq, Repr
 
 def anyForce (s : State) : Bool := (s.tabs true).force || (s.tabs false).force
@@ -323,9 +349,11 @@ def en (s : State) : Event → Bool
   | .rPutJs => anyForce s && s.rOk && !s.rJs
   | .rPutWasm => anyForce s && s.rOk && !s.rWasm
   | .forceDone t => (s.tabs t).force && s.rJs && s.rWasm
+  | .newerStart t => (s.tabs t).game && !(s.tabs t).appUpdating && !(s.tabs t).newer
+  | .newerApply t => (s.tabs t).newer
 
-/-- applyUpdate (179), first segment: flags, close the modal; then either the
-    reload another tab's update left waiting (187), or `update()`. -/
+/-- applyUpdate (192), first segment: flags, close the modal; then either the
+    reload another tab's update left waiting (200), or `update()`. -/
 def applyStart (t : Bool) (s : State) : State :=
   let x := s.tabs t
   let s := { s with intents := s.intents + 1 }
@@ -363,7 +391,7 @@ def step (s : State) : Event → State
     match s.installing with
     | some v => installFailed v s
     | none => s
-  -- register().then (55): if (reg.waiting) showUpdateButton(); a missing
+  -- register().then (58): if (reg.waiting) showUpdateButton(); a missing
   -- registration is created and installs
   | .regResolve t =>
     let s := updT t (fun x => { x with regd := true }) s
@@ -373,7 +401,7 @@ def step (s : State) : Event → State
       if s.active.isNone && s.installing.isNone then
         { s with installing := some s.dep, probe0 := none, stageJs := none, stageWasm := none }
       else s
-  -- statechange (63): sw.state === "installed" (still waiting) && controller
+  -- statechange (66): sw.state === "installed" (still waiting) && controller
   | .instFire t =>
     let x := s.tabs t
     let s := updT t (fun x => { x with instQ := none }) s
@@ -385,8 +413,8 @@ def step (s : State) : Event → State
     | some v => let s := { s with skipQ := none }
                 if s.waiting == some v then activate v s else s
     | none => s
-  -- controllerchange (83): reload only this tab's own update, or a tab with no
-  -- game in progress; else updateActivated + the button (89-92)
+  -- controllerchange (86): reload only this tab's own update, or a tab with no
+  -- game in progress; else updateActivated + the button (92-95)
   | .ccFire t =>
     let x := s.tabs t
     let s := updT t (fun x => { x with ccQ := false }) s
@@ -400,38 +428,38 @@ def step (s : State) : Event → State
   | .userReload t => reload t false s
   | .gameOn t => updT t (fun x => { x with game := true }) s
   | .gameOff t => updT t (fun x => { x with game := false }) s
-  -- #update-btn (224): a game loaded -> confirm modal, else applyUpdate
+  -- #update-btn (237): a game loaded -> confirm modal, else applyUpdate
   | .updClick t =>
     if (s.tabs t).game then updT t (fun x => { x with modal := true }) s else applyStart t s
   | .confirm t => applyStart t s
   | .notNow t => updT t (fun x => { x with modal := false }) s
-  -- after `await swRegistration.update()` (193-216)
+  -- after `await swRegistration.update()` (206-229)
   | .applyResume t =>
     match s.waiting, s.installing with
     | some v, _ => updT t (fun x => { x with applyK := .done }) { s with skipQ := some v }
     | none, some v => updT t (fun x => { x with applyK := .watch v }) s
     | none, none => updT t (fun x => { x with applyK := .resetting }) s
-  -- fullResetReload (160): delete every cache, unregister, reload
+  -- fullResetReload (173): delete every cache, unregister, reload
   | .resetFire t =>
     reload t true { s with cache := fun _ => none, active := none, waiting := none,
                            installing := none, probe0 := none, stageJs := none,
                            stageWasm := none, skipQ := none }
   | .checkStart t => updT t (fun x => { x with chk := some {} }) s
-  -- fetch("version.txt"): the controller's own cache (sw.js 159-163), else network
+  -- fetch("version.txt"): the controller's own cache (sw.js 164-168), else network
   | .chkCur t =>
     let x := s.tabs t
     let v := if x.controlled then (match s.cache x.ctrlV with | some p => p.1 | none => s.dep) else s.dep
     updT t (fun x => { x with chk := x.chk.map (fun c => { c with cur := some v }) }) s
   | .chkLatest t => updT t (fun x => { x with chk := x.chk.map (fun c => { c with latest := some s.dep }) }) s
   | .chkSw t => updT t (fun x => { x with chk := x.chk.map (fun c => { c with sw := some s.dep }) }) s
-  -- 132-138: current && latest && latest !== current && deployed === latest -> button
+  -- checkForUpdate 146-148: current && latest && latest !== current && deployed === latest -> button
   | .chkEval t =>
     match (s.tabs t).chk with
     | some { cur := some c, latest := some l, sw := some d } =>
       let s := updT t (fun x => { x with chk := none }) s
       if c != l && d == l then showBtn t l s else s
     | _ => s
-  -- Force update (268): appUpdating; the live worker re-downloads
+  -- Force update (281): appUpdating; the live worker re-downloads
   | .forceStart t =>
     updT t (fun x => { x with force := true, appUpdating := true })
       { s with intents := s.intents + 1, rProbe := none, rsJs := none, rsWasm := none,
@@ -441,7 +469,7 @@ def step (s : State) : Event → State
   | .rFetchJs => { s with rsJs := some s.dep }
   | .rFetchWasm => { s with rsWasm := some s.dep }
   | .rVerify => { s with rOk := true }
-  -- reinstall's commit (sw.js 103-104): one cache.put per asset into CACHE_NAME
+  -- reinstall's commit (sw.js 108-109): one cache.put per asset into CACHE_NAME
   | .rPutJs =>
     match s.active with
     | some v =>
@@ -457,6 +485,14 @@ def step (s : State) : Event → State
       { s with rWasm := true, cache := c }
     | none => s
   | .forceDone t => reload t true (updT t (fun x => { x with force := false }) s)
+  -- refuseState (7856): a game loaded (currentOriginalName); updateForNewerState
+  -- (7868): the probe found a newer fetchable build, `if (appUpdating) return`
+  -- (7876); the player's own load is the intent
+  | .newerStart t =>
+    updT t (fun x => { x with newer := true }) { s with intents := s.intents + 1 }
+  -- after `await persistSave`, `await persistAutoState`, `await dbPut` (7881-7889):
+  -- applyUpdate, with the game still loaded and no modal (7890)
+  | .newerApply t => applyStart t (updT t (fun x => { x with newer := false }) s)
 
 inductive Reachable : State → Prop
   | init : Reachable init
@@ -544,6 +580,19 @@ theorem bug_force_update_serves_half_written_cache :
     witnesses [.deploy, .forceStart false, .rProbe0, .rFetchJs, .rFetchWasm, .rVerify,
                .rPutJs, .userReload true]
       (fun s => s.mixedBoot) = true := by decide
+
+/-- A save state from a newer build (df47a452), loaded in tab B's game while
+    tab A has a game too: B's `updateForNewerState` runs `applyUpdate` with
+    no confirm, B reloads onto the new build, and A keeps its game, its
+    button relabelled Reload. Neither reload is forced: B's player asked by
+    loading the state. -/
+theorem newer_state_update_reloads_only_its_tab :
+    witnesses [.gameOn true, .gameOn false, .regResolve true, .regResolve false, .deploy,
+               .browserCheck, .probeFirst, .fetchJs, .fetchWasm, .installEnd,
+               .newerStart true, .newerApply true, .applyResume true, .skipDeliver,
+               .ccFire true, .ccFire false]
+      (fun s => !s.forcedMidGame && (s.tabs true).running == (1, 1) &&
+                (s.tabs false).ready && (s.tabs false).running == (0, 0)) = true := by decide
 
 /-- A Force update whose download straddles a deploy cannot pass its check. -/
 theorem regress_force_update_straddle_not_verified :
@@ -733,6 +782,8 @@ theorem i0_step {s : State} {e : Event} (h : I0 s) (he : en s e = true) : I0 (st
   | rProbe0 | rFetchJs | rFetchWasm | rVerify | rPutJs | rPutWasm =>
     have := (a5 true).2.2.2; have := (a5 false).2.2.2; simp_all [en, anyForce]
   | forceDone t => have := (a5 t).2.2.2; simp [en, this] at he
+  | newerStart t => simp [step] at hz
+  | newerApply t => simp only [step, applyStart_intents, updT_intents] at hz; omega
 
 theorem i0_reachable {s : State} (h : Reachable s) : I0 s := by
   induction h with
@@ -896,6 +947,8 @@ theorem p_step {s : State} (h : P s) (e : Event) : P (step s e) := by
   | rPutJs => simp only [step]; split <;> exact h
   | rPutWasm => simp only [step]; split <;> exact h
   | forceDone t => exact p_reload (p_updT h t (fun x => { x with force := false }) (by pt_triv)) t true
+  | newerStart t => exact p_updT (s := { s with intents := s.intents + 1 }) h t (fun x => { x with newer := true }) (by pt_triv)
+  | newerApply t => exact p_applyStart (p_updT h t (fun x => { x with newer := false }) (by pt_triv)) t
 
 /-- The Update button is shown at most once per page (it is never hidden again,
     and `shows` counts hidden -> shown transitions), however many checks,
@@ -1135,6 +1188,8 @@ theorem fi_step {s : State} {e : Event} (h : FI s) (he : en s e = true) : FI (st
     apply fi_reload (fi_updT hs t (fun x => { x with force := false }) ?_) t true
     · right; left; simp [hu]
     · intro x hx; exact ⟨hx.1, fun h => by cases h⟩
+  | newerStart t => exact fi_updT (s := { s with intents := s.intents + 1 }) ⟨a, b⟩ t (fun x => { x with newer := true }) (by ti_triv)
+  | newerApply t => exact fi_applyStart (fi_updT hs t (fun x => { x with newer := false }) (by ti_triv)) t
 
 theorem fi_reachable {s : State} (h : Reachable s) : FI s := by
   induction h with
@@ -1412,6 +1467,9 @@ theorem cinv_step {s : State} {e : Event} (h : CInv s) (he : en s e = true) (hb 
   | rProbe0 | rFetchJs | rFetchWasm | rVerify | rPutJs | rPutWasm =>
     simp [en, anyForce, b] at he
   | forceDone t => simp [en, b] at he
+  | newerStart t => exact cinv_updT (s := { s with intents := s.intents + 1 }) hs t (fun x => { x with newer := true }) (fun _ => rfl)
+  | newerApply t =>
+    exact cinv_applyStart (cinv_updT hs t (fun x => { x with newer := false }) (fun _ => rfl)) t
 
 theorem cinv_reach3 {s : State} (h : Reach3 s) : CInv s := by
   induction h with

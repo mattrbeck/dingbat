@@ -1,0 +1,124 @@
+@title Mega Man Battle Network (USA)
+@file Megaman Battle Network (U) [!].gba
+@game AREE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# New game; in Lan's room pick up the PET from the bedside table (Mom calls),
+# then PET menu > Save at 00:01 play time. [load] picks CONTINUE (the 6-frame
+# DOWN on the title is not taken, the hold=10 one is) and opens the PET menu.
+# Seen while authoring: nba's frame hash differs from dingbat-bios/mgba on many
+# frames of the opening (text one glyph behind, fade step different at f1872);
+# mgba's save differs from the other two in 2 bytes (0x1001, 0x1009).
+
+[new]
+wait 600
+checkpoint title window=30
+press START
+wait 60
+checkpoint main_menu window=30
+press A
+wait 300
+checkpoint wake_up window=30
+# mash A until changed timeout=600 every=20  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=20 hold=4
+wait 100
+tap A times=30 every=20 hold=4
+wait 120
+checkpoint lans_room window=30
+press START
+wait 60
+press RIGHT hold=30
+press UP hold=12
+press A
+wait 60
+press RIGHT hold=20
+press A
+wait 60
+tap A times=4 every=20 hold=4
+press DOWN hold=10
+press RIGHT hold=30
+press A
+wait 60
+press DOWN hold=30
+wait 10
+press RIGHT hold=25
+press UP hold=8
+press A
+wait 40
+press START
+wait 60
+press LEFT hold=40
+press DOWN hold=30
+wait 10
+press LEFT hold=40
+wait 10
+press DOWN hold=40
+wait 60
+press LEFT hold=80
+wait 60
+press LEFT hold=60
+wait 60
+tap A times=3 every=20 hold=4
+press RIGHT hold=110
+press DOWN hold=60
+wait 20
+press RIGHT hold=40
+wait 10
+press RIGHT hold=30
+press A
+wait 40
+press UP hold=20
+press A
+wait 40
+tap A times=6 every=20 hold=4
+press LEFT hold=12
+press UP hold=20
+press A
+wait 40
+tap A times=3 every=20 hold=4
+press RIGHT hold=10
+press UP hold=20
+press A
+wait 40
+tap A times=3 every=20 hold=4
+press RIGHT
+press A
+wait 40
+tap A times=10 every=20 hold=4
+press START
+wait 60
+tap A times=20 every=20 hold=4
+press START
+wait 40
+checkpoint pet_menu window=30
+tap DOWN times=6 every=12 hold=4
+wait 10
+press A
+wait 40
+checkpoint save_prompt window=30
+press A
+wait 120
+press A
+press A
+# until text complete timeout=600 every=5  [reached dingbat-bios+30 mgba+30 nba+35]
+wait 39
+wait 10
+checkpoint saved window=0
+
+[load]
+wait 600
+press START
+wait 120
+press DOWN
+wait 20
+wait 30
+press DOWN hold=10
+wait 20
+checkpoint continue_menu window=30
+press A hold=10
+wait 240
+checkpoint resumed window=30
+press START hold=10
+wait 40
+checkpoint resumed_menu window=30
