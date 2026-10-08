@@ -108,8 +108,7 @@ not in CI (usage in the file).
 
 ## Nintendo DS (core and C API)
 
-The core side is done; the Swift side is not (no Swift file plays a DS
-game yet). `libdingbat.a` carries the DS core (`src/dingbat/nds/`) behind
+`libdingbat.a` carries the DS core (`src/dingbat/nds/`) behind
 the same C API as the GB/GBA cores, mirroring the web's DS front end
 (`src/dingbat_nds_wasm.nim`, index.js "Nintendo DS", docs/nds/web.md).
 `ios/include/dingbat.h` is the contract; in short:
@@ -141,6 +140,60 @@ simulator slice of `libdingbat.a` driven through the C API from a small C
 program (`simctl spawn`), which also checked the picture and the ring's
 32728 Hz there. No device measurement yet. The DS core adds ~2.8 MB to
 each slice (2.07 MB to 4.86 MB).
+
+## Nintendo DS in the app
+
+The Swift side plays DS games as the web app does (docs/nds/web.md is the
+reference; this follows it piece by piece). Everything is gated on the
+running game being a DS game (`GameSession.isNDS`, the web's
+body.nds-mode): Game Boy and GBA games keep every layout, control and
+menu exactly as before.
+
+| Web | iOS |
+|---|---|
+| `.nds` in the file picker, a `.zip`, the library; the header check (`NdsUtil.looksLikeNdsRom`) | `RomLibrary.romExtensions`, the `com.mattrb.dingbat.nds` imported type (project.yml / Info.plist, Open in), `ZipReader`, `NdsUtil.looksLikeNdsRom` (Swift port) |
+| System "DS": its chip, filter and sort (after GB), the small grey card with a corner cut, the library and hero picture = the top screen | `RomEntry.system`/`isNDS`, `Palette.badgeDs*`/`cartDs*`, `CartridgeView` / `CartShape(ds:)`, `GameSession.currentImage` (`dingbat_nds_top_rgba`; the state-slot thumbnails too) |
+| BIOS / firmware dumps optional (HLE + synthesized firmware), the console's flash one per device | Settings › Nintendo DS (ARM9 BIOS 4 KB, ARM7 BIOS 16 KB, firmware 128/256/512 KB, sizes checked), stored beside the GBA BIOS; `NdsState.prepareLoad` sets them and the flash (`Application Support/dingbat/bios/nds_flash.bin`) before each DS load |
+| DS games stay local (`driveExcluded`, `driveLibraryOf`); "this device only" in the game's menu; the once-a-session toast | `driveExcluded` / `DriveLibrary.forDrive` in `DriveSync` (uploads, deletes, full sync, the library file), `TileMenu`, `AppModel.launch` |
+| The screens: `NdsUtil.layout/compose/views` (Automatic, Stacked, Side by side, Focus, One screen; swap; gap none / hinge 8 / console 90; turn upright / book left / book right), integer scaling, the filters and looks; no colour correction, palette, LCD response or glow | `NdsUtil.swift` (the math line for line), `GameStage.ndsLayout`, `GameRenderer.drawNds` + `nds_vertex` in `PresentShader` (each screen a quad of the 256x384 texture, turned, its own texels and grid / subpixel pitch, the gaps in the stage's colour) |
+| The stylus: a touch that starts on the bottom screen, clamped while it drags, lifted with the finger, one at a time; in Focus / One screen a tap on the top screen (< 500 ms, < 12 px) swaps | `NdsStylus` / `NdsStylusView` over the picture (`NdsUtil.touchPoint`, `screenAt`); touches elsewhere fall through to the stage and the touch controls keep theirs |
+| X/Y: the diamond (X top, Y left, A right, B bottom, 0.75 of a button from the centre); controller X/Y by label; keys X = D, Y = C (home row I, U), only while a DS game runs; V / B / O / N / H | `PlayGeometry.placeDiamond`, `Controllers`, `Keyboard` (12 bindings; a saved 10-key profile gains them), Settings › Controls › Keyboard |
+| Phone held upright (docs/nds/web.md "Phone held upright"): the bar folded off the top ("Hide the top bar", on), a tap on the picture away from the touch screen brings it down over the top screen; the top screen up to the notch / Dynamic Island (safe top less 14, or 11 at 54 and over); L/R 120x28 at the strip's corners (hit 6 above and below); Select/Start 28 pt circles labelled underneath, between the d-pad and B (hit 8 past and on the label); the clusters' row the d-pad's height on max(10, safe bottom - 12); room left over below the screens | `PlayGeometry.ndsPortrait`, `PlayLayout.barLayer` (the fold), `GameStage.toggleBar` + `NdsState.tapTaken`, `CirclePillKey`, `ShoulderKey(short:)`. The status bar is hidden in play (as for every game), the island / notch keeps the same offset |
+| Phone held sideways: Select/Start the same circles under R (18 below it, 22 apart); the screens fit between the d-pad and the face buttons (`ndsAvail`), full height | `PlayGeometry.phoneLandscape` (`ndsMaxWidth`) |
+| Tablets: the GBA layout plus X/Y | `PlayGeometry.portrait` / `tabletLandscape` with the diamond |
+| The Screens panel (screens button in the bar, beside the swap button): arrangement, gap, turn, Swap, Close the lid, Microphone, Blow (held), Hide the top bar; it does not pause | `NdsBarButtons`, `NdsPanel` (an overlay under the bar, a tap outside closes it), Settings › Nintendo DS for the same choices (UserDefaults `nds-layout`, `nds-display` as the web's records; Reset all settings clears both) |
+| The lid: dims the screens, "Lid closed · tap to open", every boot open, a state load keeps the app's lid | `NdsState.setLid`, `NdsStageLayers` |
+| Blow: one frame of ~60% white noise at 16 kHz before each frame while held; the microphone: asked for only when turned on, pushed at its own rate, nothing while paused or blowing, never stored | `NdsState.blowFrame`, `NdsMic` (an `AVAudioEngine` input tap; the session is play-and-record while it listens; `NSMicrophoneUsageDescription`) |
+| Sound at 32728 Hz; pacing by the display clock as for GB/GBA (the reader's rate control absorbs 59.83 vs 60) | `AudioOutput.syncRate` rebuilds the source node when a load changes `dingbat_audio_sample_rate()`; `GameSession.framesOwed` |
+| Save states, slots, sessions / Resume, checkpoints, Quick Save/Load; error kind 8's wording | the same paths (`dingbat_state_*`); `GameSession.rejectCopy` |
+| Power-off: "The game turned the DS off" with Restart and Library; the battery stored, the resume snapshot deleted, no picture of the black screens, no state of an off console | `NdsState.syncPower`, `GameSession.ndsPoweredOff` / `ndsRestart`, `NdsStageLayers` |
+| Gated off: rewind (button, scrubber, Rewind to a Moment, Report a Bug's timeline), Clip that! and Record, Link Cable and 2P, Cheats, run-ahead, the batch of library pictures, tilt / camera / printer / rumble / SGB / enhanced-music UI (their calls are 0 for a DS game) | `PlaybackCluster`, `GameMenu`, `ReportBugView`, `LibraryGrid` (2P), `AddPictures`, `GameSession.setRewinding` / run-ahead |
+| Save import: `.sav` / `.dsv` stored whole (no GBA container sniffing) | `ManageSavesView.importSave`, `.dsv` in the save type and Open in |
+
+Dev hooks (DEBUG, `DingbatApp.autoplay`): `-nds-layout auto|stack|side|focus|single`,
+`-nds-swap`, `-nds-gap none|hinge|console`, `-nds-rot 0|1|3`, `-topbar-open`
+(the folded bar brought down), `-nds-panel`, `-nds-lid`, and `-nds-touch
+X,Y[,seconds]` with `-nds-touch-after S`: the stylus on the bottom
+screen's pixel (X, Y), aimed by `NdsUtil.clientPoint` through the current
+layout and sent through the same mapping a finger takes (logged to
+tmp/ndstouch.txt).
+
+Checked on headless simulators (iPhone 17, iPhone 17 Pro Max, iOS 26.2),
+muted: SoulSilver from a save state upright (bar folded and brought down),
+sideways, in Focus, and on the Pro Max; Golden Sun: Dark Dawn to its title
+upright and sideways; the library with a DS tile and a DS card; a homebrew
+touch test with the stylus self-test; Kirby (GBA) upright, unchanged from
+main. SoulSilver ran at 60 fps paced in the simulator; Golden Sun's 3D
+intro ran at 38-46 fps there on a heavily loaded Mac (load average 400-700
+from other jobs), then 60 at its title and name entry: judge speed on a
+device.
+
+Left off on the DS: the firmware's Console settings editor (name,
+birthday, language: the web's Settings rows; the flash a game writes is
+kept, only the editor is missing), the input display's X/Y, and Drive sync
+of DS saves (as on the web). Not verified on a device: touch routing and
+the stylus feel, the microphone's audio session, the folded bar's tap, and
+performance.
 
 ## Left off, and why
 
