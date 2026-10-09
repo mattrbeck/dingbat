@@ -215,14 +215,19 @@ void main() {
   // lp: where this fragment is in the picture's own pixels (the grid and the
   // subpixel look key off it).
   vec2 lp = v_uv * vec2(u_scan_width, u_scan_height);
+  // Where the texture is read. A view only moves it: shade(upscale()) keeps
+  // the call sites it has without views, since the compiler inlines the
+  // filters at each one (a third doubled the shader's compile time).
+  vec2 uv = v_uv;
   if (u_view) {
     vec2 s = u_rot == 1 ? vec2(v_uv.y, 1.0 - v_uv.x)
            : u_rot == 3 ? vec2(1.0 - v_uv.y, v_uv.x) : v_uv;
     g_min = ivec2(u_src.xy);
     g_max = ivec2(u_src.xy + u_src.zw) - ivec2(1);
     lp = s * u_src.zw;
-    rgb = shade(upscale((u_src.xy + lp) / u_tex_size));
-  } else if (u_sgb_border) {
+    uv = (u_src.xy + lp) / u_tex_size;
+  }
+  if (u_sgb_border && !u_view) {
     ivec2 bp = clamp(ivec2(v_uv * vec2(256.0, 224.0)), ivec2(0), ivec2(255, 223));
     uint bw = texelFetch(u_border, bp, 0).r;
     if ((bw & 0x8000u) != 0u) {
@@ -235,7 +240,7 @@ void main() {
             ? shade(upscale(guv)) : u_sgb_backdrop;
     }
   } else {
-    rgb = shade(upscale(v_uv));
+    rgb = shade(upscale(uv));
   }
   // "LCD grid": a thin dark seam between every pixel, on BOTH axes — the
   // pixel matrix a reflective Game Boy LCD really shows (scanlines were a CRT
