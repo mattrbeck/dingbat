@@ -431,8 +431,9 @@ final class GameSession: NSObject, ObservableObject {
                 // Not drawn if another frame fits after it (docs/frame-skip.md);
                 // a wrong guess shows a frame or two back, never a broken one
                 let f0 = CACurrentMediaTime()
-                unseen = !drawAll && ran + 1 < 40 && f0 - t0 + ffSkipTime + ffDrawTime < budget
-                if unseen { dingbat_unseen_next(1) }
+                // Only one the core will really leave undrawn counts (not under the SGB)
+                unseen = !drawAll && ran + 1 < 40 && f0 - t0 + ffSkipTime + ffDrawTime < budget &&
+                    dingbat_unseen_next(1) != 0
                 dingbat_run_frame()
                 let took = min(CACurrentMediaTime() - f0, 0.05)
                 if unseen { ffSkipTime += (took - ffSkipTime) * 0.1 }
