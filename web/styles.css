@@ -9036,7 +9036,8 @@ body.nds-side #nds-layout-btn svg {
 }
 
 /* DS Beta off (index.js "DS Beta"): nothing of the DS shows. */
-body:not(.ds-beta) .ds-beta-only {
+body:not(.ds-beta) .ds-beta-only,
+body.ds-beta .ds-beta-off {
   display: none !important;
 }
 
