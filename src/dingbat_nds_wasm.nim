@@ -9,6 +9,7 @@
 ## (moved, not copied: a 128 MB ROM must not exist twice in the heap).
 
 import dingbat/nds/[nds, savestate, cheats, rewinding]
+import dingbat/nds/gpu/gpu
 import dingbat/common/rewind
 from std/strutils import toHex
 
@@ -106,6 +107,7 @@ proc nds_powered_off(): cint {.exportc.} =
 # Run-ahead's screens (nds_runahead, below): what the page shows instead of
 # the machine's own until the next frame runs.
 var aheadTop, aheadBottom: seq[uint16]
+var aheadHdTop, aheadHdBottom: seq[uint16]   ## ...and its HD ones (HD 3D on)
 var aheadValid = false
 
 proc nds_fb555_top(): pointer {.exportc.} =
@@ -130,10 +132,14 @@ proc nds_hd_scale(): cint {.exportc.} =
   if core == nil: cint(hdScale) else: cint(core.hd_scale())
 
 proc nds_hd_fb555_top(): pointer {.exportc.} =
-  if core == nil or core.gpu.hd_top.len == 0: nil else: addr core.gpu.hd_top[0]
+  if core == nil or core.gpu.hd_top.len == 0: nil
+  elif aheadValid and aheadHdTop.len == core.gpu.hd_top.len: addr aheadHdTop[0]
+  else: addr core.gpu.hd_top[0]
 
 proc nds_hd_fb555_bottom(): pointer {.exportc.} =
-  if core == nil or core.gpu.hd_bottom.len == 0: nil else: addr core.gpu.hd_bottom[0]
+  if core == nil or core.gpu.hd_bottom.len == 0: nil
+  elif aheadValid and aheadHdBottom.len == core.gpu.hd_bottom.len: addr aheadHdBottom[0]
+  else: addr core.gpu.hd_bottom[0]
 
 proc nds_fb_top(): pointer {.exportc.} =
   fbTop.setLen(256 * 192)
@@ -470,6 +476,10 @@ proc nds_runahead(n: cint): cint {.exportc.} =
   if core == nil or n <= 0 or core.powered_off(): return 0
   let snap = core.state_payload()
   let fw_dirty = core.spi.firmware_dirty
+  # HD 3D's history (not in the snapshot) goes back too, so the timeline's
+  # own HD frames are the ones a run without run-ahead draws.
+  let hd = core.gpu.hd > 1
+  var side = if hd: core.gpu.hd_side() else: HdSide()
   for _ in 0 ..< int(n):
     core.run_frame()
     if cheatList.active(): cheatList.run(core.cheat_mem())
@@ -477,7 +487,12 @@ proc nds_runahead(n: cint): cint {.exportc.} =
   aheadBottom.setLen(256 * 192)
   copyMem(addr aheadTop[0], addr core.gpu.top[0], 256 * 192 * 2)
   copyMem(addr aheadBottom[0], addr core.gpu.bottom[0], 256 * 192 * 2)
+  if hd:
+    # the look ahead's HD screens are shown; the timeline's come back
+    aheadHdTop = move(core.gpu.hd_top)
+    aheadHdBottom = move(core.gpu.hd_bottom)
   if not core.load_own_payload(snap, as_new = false): return 0
+  if hd: core.gpu.set_hd_side(move(side))
   core.spi.firmware_dirty = fw_dirty
   aheadValid = true
   1

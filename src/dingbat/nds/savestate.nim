@@ -92,7 +92,7 @@ const
                 "last_is_cur",
                 # HD rendering: the frontend's display setting and its pictures
                 # (docs/nds/hd3d.md)
-                "hd_scale", "hpos", "hd_verts", "hd2", "hd3", "hd4", "hd_frame"]
+                "hd_scale", "hpos", "hd_verts", "hd2", "hd3", "hd4", "hd_frame", "last_hpos"]
   GEO_SKIP = ["hd_on", "hpos"]   # HD rendering's vertex positions (docs/nds/hd3d.md)
   # Per-frame scratch: render_frame's clear() rewrites each dot's `px`
   # (depth, IDs, flags, coverage and the layer behind) before anything
@@ -1010,11 +1010,14 @@ proc apply_payload(n: NDS; payload: string) =
   if l.pos != l.len: raise state_error("DS state payload has trailing bytes")
   n.after_load()
 
-proc apply_new(n: NDS; payload: string) =
+proc apply_new(n: NDS; payload: string; restart_hd = true) =
   ## A state replacing the running game: its sound queue goes (the samples
   ## were the old timeline's), and the save chip it carries is marked for
   ## the frontend to write out, as if the game had (as the GB/GBA cores do).
+  ## HD 3D starts over from it (Gpu.hd_restart) unless the caller keeps
+  ## HD's history itself (run-ahead: Gpu.hd_side).
   n.apply_payload(payload)
+  if restart_hd: n.gpu.hd_restart()
   n.spu.clear_samples()
   n.cart.backup.dirty = true
   if n.slot2.save.len > 0: n.slot2.dirty = true
@@ -1100,14 +1103,15 @@ proc load_own_payload*(n: NDS; payload: string; as_new = true): bool =
   ## that a payload of this build and game never meets -- half the cost.
   ## False (the machine part-applied) only if it does anyway. `as_new` =
   ## false keeps the save chips' dirty flags as they are: run-ahead going
-  ## back to its snapshot is the same timeline, not a state loaded.
+  ## back to its snapshot is the same timeline, not a state loaded; it also
+  ## leaves HD 3D's history alone, for the caller to put back (hd_side).
   last_state_reject_kind = srkNone
   last_state_error = ""
   if payload.len == 0: return false
   let dirty = n.cart.backup.dirty
   let dirty2 = n.slot2.dirty
   try:
-    n.apply_new(payload)
+    n.apply_new(payload, restart_hd = as_new)
   except CatchableError, Defect:
     last_state_error = getCurrentExceptionMsg()
     last_state_reject_kind = srkCorrupt

@@ -19,6 +19,7 @@ import dingbat/nds/air
 import dingbat/nds/io/[dma, rtc, cart, slot2, wifi]
 import dingbat/gba/rtc_calendar
 import dingbat/nds/gpu3d/[gpu3d, geometry]
+import dingbat/nds/gpu/gpu
 import dingbat/nds/[sched, timing]
 import dingbat/gba/storage_chip
 import dingbat/common/serialize
@@ -233,6 +234,71 @@ proc rewind_payloads() =
   for b in c.state_blocks(1):
     if b.name == "frame" and not mid[b.lo ..< b.hi].allIt(it == '\0'): inc live
   check(live == 1, "mid-frame the 3D frame handed to the display is saved")
+
+proc hd_history() =
+  ## HD 3D (docs/nds/hd3d.md) keeps pictures and positions the state leaves
+  ## out. A state applied over a running HD machine (a load, a rewind) draws
+  ## from then on what turning HD on at that state draws; run-ahead keeps
+  ## HD's history across its look ahead (hd_side), so its own HD frames and
+  ## the ones it shows are a plain run's; and reusing an unchanged 3D frame
+  ## draws what drawing it again would, a vertex moving within its dot
+  ## included.
+  echo "HD 3D history"
+  for name in ["homebrew-ex/2Dplus3D.nds", "built/Simple_Quad.nds"]:
+    let path = rom_dir / name
+    if not fileExists(path):
+      check(false, "missing " & path)
+      continue
+    for k in [2, 4]:
+      proc hd(n: NDS): uint32 =
+        result = fnv1a_more(0x811C9DC5'u32, cast[ptr UncheckedArray[byte]](addr n.gpu.hd_top[0]).toOpenArray(0, n.gpu.hd_top.len * 2 - 1))
+        result = fnv1a_more(result, cast[ptr UncheckedArray[byte]](addr n.gpu.hd_bottom[0]).toOpenArray(0, n.gpu.hd_bottom.len * 2 - 1))
+      const N = 90
+      var plain, fresh: seq[uint32]
+      var img: string
+      block:
+        let n = machine(path)
+        n.set_hd_scale(k)
+        n.gpu3d.reuse_on = false
+        for f in 0 ..< N:
+          if f == 40: img = n.state_bytes()
+          n.run_frame(); plain.add n.hd()
+      block:
+        let n = machine(path)
+        n.set_hd_scale(k)
+        var reused: seq[uint32]
+        for f in 0 ..< N:
+          n.run_frame(); reused.add n.hd()
+        check(reused == plain, name & " " & $k & "x: a reused 3D frame is the one drawn again")
+      block:
+        let n = machine(path)
+        check(n.load_state_bytes(img), "load")
+        n.set_hd_scale(k)
+        for f in 40 ..< N:
+          n.run_frame(); fresh.add n.hd()
+      block:
+        let n = machine(path)
+        n.set_hd_scale(k)
+        for f in 0 ..< 60: n.run_frame()
+        check(n.load_state_bytes(img), "load")
+        var got: seq[uint32]
+        for f in 40 ..< N:
+          n.run_frame(); got.add n.hd()
+        check(got == fresh, name & " " & $k & "x: after a load, HD is HD turned on there")
+      block:
+        let n = machine(path)
+        n.set_hd_scale(k)
+        var own, shown: seq[uint32]
+        for f in 0 ..< N - 2:
+          n.run_frame(); own.add n.hd()
+          let snap = n.state_payload()
+          let side = n.gpu.hd_side()
+          n.run_frame(); n.run_frame()
+          shown.add n.hd()
+          check(n.load_own_payload(snap, as_new = false), "run-ahead load")
+          n.gpu.set_hd_side(side)
+        check(own == plain[0 ..< N - 2] and shown == plain[2 ..< N],
+              name & " " & $k & "x: run-ahead's own and shown HD frames are a plain run's")
 
 proc wifi_pair() =
   ## Two machines on one Air with the wifi_link ROM, saved while frames are
@@ -489,6 +555,7 @@ when isMainModule:
   ]
   for c in cases: round_trip(c)
   rewind_payloads()
+  hd_history()
   wifi_pair()
   refusals()
   hostile_fields()

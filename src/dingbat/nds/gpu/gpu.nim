@@ -186,6 +186,53 @@ proc set_hd*(g: Gpu; scale: int) =
     g.hd_top = newSeq[uint16](256 * k * 192 * k)
     g.hd_bottom = newSeq[uint16](256 * k * 192 * k)
 
+proc hd_restart*(g: Gpu) =
+  ## A state applied over the running machine (a load, a rewind pop, a
+  ## scrubber commit): HD's history (the captures' HD copies, the rows
+  ## already holding a line, the 3D side's) was the old timeline's, so HD
+  ## starts over from the loaded machine, as set_hd does: what follows is
+  ## exactly what turning HD on at that moment draws.
+  if g.hd <= 1: return
+  for b in 0..3:
+    g.cap_hd[b] = @[]
+    g.cap_1x[b] = @[]
+  for s in 0..1:
+    g.hd_rep_ok[s] = @[]
+    g.hd_rep[s] = @[]
+  # Until the next frame draws them, the screens show the loaded 1x ones
+  # scaled up (a rewind shows each step it lands on).
+  let k = g.hd
+  for y in 0 ..< 192 * k:
+    for x in 0 ..< 256 * k:
+      g.hd_top[y * 256 * k + x] = g.top[(y div k) * 256 + x div k]
+      g.hd_bottom[y * 256 * k + x] = g.bottom[(y div k) * 256 + x div k]
+  if g.gpu3d != nil: g.gpu3d.hd_restart()
+
+type HdSide* = object
+  ## Everything HD carries from frame to frame besides the machine: run-ahead
+  ## takes it before looking ahead and puts it back after, so the timeline's
+  ## own HD frames are the ones a run without run-ahead draws.
+  top, bottom: seq[uint16]
+  cap_hd: array[4, seq[uint16]]
+  cap_1x: array[4, seq[uint32]]
+  rep_ok: array[2, seq[bool]]
+  rep: array[2, seq[array[256, uint16]]]
+  g3: Hd3dSide
+
+proc hd_side*(g: Gpu): HdSide =
+  HdSide(top: g.hd_top, bottom: g.hd_bottom, cap_hd: g.cap_hd, cap_1x: g.cap_1x,
+         rep_ok: g.hd_rep_ok, rep: g.hd_rep,
+         g3: (if g.gpu3d != nil: g.gpu3d.hd_side() else: Hd3dSide()))
+
+proc set_hd_side*(g: Gpu; s: sink HdSide) =
+  g.hd_top = s.top
+  g.hd_bottom = s.bottom
+  g.cap_hd = s.cap_hd
+  g.cap_1x = s.cap_1x
+  g.hd_rep_ok = s.rep_ok
+  g.hd_rep = s.rep
+  if g.gpu3d != nil: g.gpu3d.set_hd_side(s.g3)
+
 template hd_rows(g: Gpu; buf: var seq[uint16]; j: int): ptr UncheckedArray[uint16] =
   cast[ptr UncheckedArray[uint16]](addr buf[j * 256 * g.hd])
 

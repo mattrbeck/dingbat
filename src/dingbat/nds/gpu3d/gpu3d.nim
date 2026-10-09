@@ -97,6 +97,7 @@ type
     last_polys: seq[Polygon]
     last_verts: seq[Vertex]
     last_is_cur: bool             ## polys/verts are the very lists the last render drew
+    last_hpos: seq[array[2, int32]]  ## HD: the drawn list's sub-dot positions (as last_verts)
                                   ## (last_polys/verts hold them only from the next swap)
     rdlines: uint32               ## RDLINES_COUNT of the last frame
     underflow_next: bool          ## the frame being shown runs out of lines
@@ -429,6 +430,7 @@ proc on_vblank*(g: Gpu3d) =
       # buffers, not copying), and their old buffers go to the geometry side
       swap(g.last_polys, g.polys)
       swap(g.last_verts, g.verts)
+      swap(g.last_hpos, g.hpos)
       g.last_is_cur = false
     swap(g.polys, g.geo.polys)
     swap(g.verts, g.geo.verts)
@@ -505,6 +507,42 @@ proc set_hd*(g: Gpu3d; scale: int) =
   g.reuse_ok = false
   g.scratch_ok = false
 
+proc hd_restart*(g: Gpu3d) =
+  ## A state applied over the running machine (a load, a rewind): HD starts
+  ## over from it as set_hd does, so what follows is what turning HD on at
+  ## that moment draws. Its vertex positions were the old timeline's.
+  if g.hd_scale <= 1: return
+  let k = g.hd_scale
+  g.geo.hpos.setLen(0)
+  g.hpos.setLen(0)
+  for y in 0 ..< 192 * k:
+    for x in 0 ..< 256 * k:
+      g.hd_frame[y * 256 * k + x] = g.frame[(y div k) * 256 + x div k]
+  g.reuse_ok = false
+  # A render the rest of this frame's lines come from (scratch_ok, saved
+  # with the 1x colour buffer): drawn again at HD from the loaded lists.
+  if g.scratch_ok: g.render_hd()
+
+type Hd3dSide* = object
+  ## What HD carries from frame to frame besides the machine (run-ahead
+  ## keeps it across its look ahead: Gpu.hd_side): the vertex positions,
+  ## the frame so far and the render its next lines come from.
+  geo_hpos, hpos: seq[array[2, int32]]
+  frame, color: seq[uint32]
+
+proc hd_side*(g: Gpu3d): Hd3dSide =
+  result = Hd3dSide(geo_hpos: g.geo.hpos, hpos: g.hpos, frame: g.hd_frame)
+  if g.hd_scale > 1:
+    result.color = newSeqUninit[uint32](g.hd_frame.len)
+    copyMem(addr result.color[0], g.hd_color(), g.hd_frame.len * sizeof(uint32))
+
+proc set_hd_side*(g: Gpu3d; s: sink Hd3dSide) =
+  g.geo.hpos = s.geo_hpos
+  g.hpos = s.hpos
+  g.hd_frame = s.frame
+  if g.hd_scale > 1 and s.color.len == g.hd_frame.len:
+    copyMem(g.hd_color(), addr s.color[0], s.color.len * sizeof(uint32))
+
 proc render_frame*(g: Gpu3d) =
   ## The renderer reads nothing but the swapped Polygon/Vertex buffers,
   ## DISP3DCNT, the swap parameter, the render registers and the texture
@@ -517,7 +555,10 @@ proc render_frame*(g: Gpu3d) =
   if g.reuse_ok and g.reuse_on and g.last_gen == g.vram.tex_gen and
      g.last_disp3dcnt == g.disp3dcnt and g.last_param == g.ren_param and
      g.last_regs == g.ren.regs and
-     (g.last_is_cur or g.last_polys == g.polys and g.last_verts == g.verts):
+     (g.last_is_cur or g.last_polys == g.polys and g.last_verts == g.verts and
+      # at HD a vertex can move within its dot: the 1x lists match, the
+      # HD frame would not
+      (g.hd_scale <= 1 or g.last_hpos == g.hpos)):
     g.rendered = true
     inc g.reused
     return
