@@ -11,7 +11,8 @@ came from did, native or wasm.
 |---|---|
 | `state_bytes(n, thumbnail = false): string` / `save_state(n): seq[uint8]` | plain image: header, payload, optional thumbnail |
 | `load_state_bytes(n, data): bool` / `load_state(n, data)` | plain or packed image; on refusal the machine is untouched |
-| `state_payload(n)` / `load_state_payload(n, payload)` | bare payload for rewind / run-ahead (no header, ROM check or hash) |
+| `state_payload(n, aligned = false)` / `load_state_payload(n, payload)` | bare payload for rewind / run-ahead (no header, ROM check or hash); `aligned`: rewind's form (below), in memory only |
+| `load_own_payload(n, payload, as_new = true)` | a payload this machine took itself (rewind, run-ahead): no backup walk first, half the cost |
 | `state_is_for(n, data)` | the image names this game (slot lists); never raises |
 | `state_layout(n)` | the field walk as text (`ndsrun --state-layout`) |
 | `pack_state` / `unpack_state` (common/serialize.nim) | the storage form: header plain, rest zlib |
@@ -29,7 +30,9 @@ must match), or another device in the GBA slot. Firmware is not checked.
 Wasm (`src/dingbat_nds_wasm.nim`): `nds_state_size(thumbnail)` serializes
 and packs into a retained buffer and returns its length, `nds_state_data()`
 points at it, `nds_state_load(ptr, len)` applies one (1 = ok),
-`nds_state_error_kind()` / `nds_state_error()` say why not. The main app
+`nds_state_error_kind()` / `nds_state_error()` say why not;
+`nds_state_plain_size()` leaves the image plain (the checkpoint worker
+packs it, and a load's undo keeps it so). The main app
 uses them through `ndsCaptureState` / `ndsApplyState` (web/index.js,
 "Nintendo DS"): quick save/load, slots and resume; its reject toasts read
 the DS core's kind and detail while a DS game runs.
@@ -112,6 +115,8 @@ wifi frame in flight (`AirFrame`, a ref) as a present flag and its fields.
 | `rtc.fixed` | whether the clock follows emulated time is the frontend's choice (`ndsrun --rtc`); offsets, fixed start and the tick state are saved. On the host clock a resumed game reads the host's time, as on the GB/GBA cores |
 | wifi `air`, `station`, `air_offset`, firmware copy, write masks | the Air is the frontend's link between machines, not one machine's state (a linked session saves each machine and links them again; the test does); masks are constant |
 | debug switches (traces, profiles, I/O and card logs) | not machine state |
+| the renderer's `color` and `line_cost`, the 3D engine's `frame` (saved as zeros, not left out) | at a frame boundary -- from V-blank until the next frame's first 3D line is drawn (`dead_3d_frame`: `done_lines` 0, no render since `on_vblank`) -- every one is rewritten before it is read, and RDLINES and the underflow flag were latched at V-blank. Mid-frame they are saved as they are. Zeros keep the layout (and every older state) as it was, and cost a stored state nothing and a rewind delta nothing |
+| `NDS.state_rooms` | the aligned payloads' rooms (below): bookkeeping |
 
 The `*_SKIP` tables in savestate.nim are this list. A new field is saved
 without touching savestate.nim; a new field of reference or pointer type
@@ -136,6 +141,25 @@ leaves). Any other change makes older DS states unloadable; once states
 must survive those too, bump the revision and read the old layout in a
 migration, as the GB/GBA loaders do. nds_savestate_test writes an older
 build's payload (`state_payload_older`) and loads it.
+
+### Rewind's aligned payloads
+
+A payload's seqs that change length while a game runs (the 3D lists, the
+GX FIFO, the event queue, the IPC FIFOs) come last, but a length change
+still shifts every byte after it, and a rewind delta (the XOR of two
+payloads) is noise from there on: the polygon/vertex lists change length
+every frame in a moving 3D scene. `state_payload(aligned = true)` follows
+each such seq with its *room* (u32, in elements) and zeros up to it, so its
+end stays put while its length moves within the room. The room is the
+most this machine has had that seq hold (`NDS.state_rooms`; seqs sharing a
+name share it), rounded up to 64, padding at most 1 MB a seq. A seq of
+objects (the polygons, vertices) is also written as byte planes -- byte 0
+of every element, then byte 1, ... -- so a coordinate whose high bytes hold
+still is zeros in the delta when its low byte moves (a camera pan moves
+every vertex). The preamble's magic says which form a payload is ("NDSA"
+for aligned), and both loaders read either. Aligned payloads are never
+stored: `state_bytes` writes the plain form. Run-ahead takes plain ones
+(it never compares two).
 
 ### Range guards
 
@@ -290,11 +314,36 @@ for one payload alone. A ring of one-frame deltas at 60 Hz is then about
 apart cost about the same each, since most of the change is the 3D frame,
 the screens and the polygon RAM.
 
+### Rewind and saves, 2026-10-09
+
+Native (Apple Silicon, release, `-d:danger`), a push every 10 frames for
+30 pushes, the same frames both ways, the RTC on emulated time:
+
+| Scene | Push before -> after | Per 10 s of history | Push time (take + XOR + zlib) |
+|---|---|---|---|
+| Golden Sun: Dark Dawn, field, walking (frame 28000 on) | 386 -> 163 KB | 23 -> 9.8 MB | 4.8 -> 3.0 ms |
+| Pokemon SoulSilver, walking out of the house (frame 9700 on) | 59 -> 33 KB | 3.5 -> 2.0 MB | 1.6 -> 1.3 ms |
+
+Zeroing the 3D frame buffers alone gives 386 -> 267 KB and 59 -> 40 KB
+(the hand-off frame sits behind the 3D lists, so it was misaligned noise
+too); the aligned, byte-planed lists the rest. What is left in Golden Sun's push: the 3D
+lists 51 %, both screens 25 % (they are what a rewind step shows), main
+RAM 13 %. zlib level 6 would take 12 % more off for 3.5x the time; it
+stays at BestSpeed. In the browser, from frame 1500 of each game's intro
+(`DINGBAT_NDS_BENCH=<rom> node --test e2e/nds.e2e.mjs`): history per 10 s
+3.8 -> 2.3 MB (SoulSilver), 6.7 -> 5.6 MB (Golden Sun), 1.0 MB either way
+(Mystery Dungeon); the intros move mostly main RAM.
+
+A stored state (slot, resume, checkpoint) is 1.2-2.1 MB packed for those
+three intros. Packing it costs the page 22-29 ms in wasm; a slot is now
+packed in the checkpoint worker, which leaves 8.6-9.2 ms on the page (the
+plain image out of the core, most of it the container's fnv1a over 6 MB),
+and the undo a load or reset keeps is held plain (no packing at all).
+
 ## Left
 
-- Rewind and run-ahead in a frontend (`state_payload` /
-  `load_state_payload` are the hooks; main's `common/rewind.nim` takes
-  payload strings).
+- Rewind and run-ahead in the native and iOS front ends (the web app has
+  them: docs/nds/features.md, on `state_payload` / `load_own_payload`).
 - Migrations once DS states must outlive a build (see Compatibility).
 - Firmware writes (user settings saved through SPI) are not in the state:
   they persist in the firmware image the frontend keeps, if any.

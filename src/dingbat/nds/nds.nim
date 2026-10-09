@@ -62,6 +62,7 @@ type
     bios9*: seq[uint8]          ## 4 KB at 0xFFFF0000
     bios7*: seq[uint8]          ## 16 KB at 0x00000000
     hle_bios9*, hle_bios7*: bool  ## synthesized BIOS + HLE SWIs (hle_bios.nim)
+    state_rooms*: seq[(string, int)]  ## aligned payloads' seq rooms (savestate.nim): bookkeeping, not saved
     wramcnt*: uint8
     exmemcnt*: uint16           ## ARM9 EXMEMCNT; bits 7-15 are shared
     exmem7_lo*: uint16          ## ARM7 EXMEMSTAT bits 0-6 (its own copy)
@@ -731,6 +732,50 @@ proc set_touch*(n: NDS; x, y: int; down: bool) =
   n.input.touching = down
   n.input.touch_x = clamp(x, 0, 255)
   n.input.touch_y = clamp(y, 0, 191)
+
+# --- A cheat device's view of memory (nds/cheats.nim) --------------------
+# Outside the CPUs' timelines: no cycles charged, no I/O side effects. Reads
+# give what the game sees (main RAM through the ARM9's data cache, which
+# `main_ram` is); a store reaches memory's side the way an ARM7 store does
+# (write7: instruction-cache copies kept, a data-cache line's memory side)
+# and the ARM9's cached copy as well, so a value poked into a line the data
+# cache holds is not lost when that line is evicted clean. WRAM is the
+# ARM7's view (a cheat device runs its list on the ARM7). Of the I/O ports
+# only the keypad reads (KEYINPUT, EXTKEYIN: the button activators); the
+# rest of I/O, VRAM, the TCMs and slot 2 read 0 and ignore stores.
+
+proc cheat_read*(n: NDS; a: uint32; width: static int): uint32 =
+  let a = a and not uint32(width div 8 - 1)
+  case a shr 24
+  of 0x02:
+    let i = int(a and 0x3FFFFF)
+    when width == 32: rd32(n.main_ram, i)
+    elif width == 16: rd16(n.main_ram, i)
+    else: uint32(n.main_ram[i])
+  of 0x03: n.read7(a, width)
+  of 0x04:
+    let w = case a and 0xFFFFFC
+            of 0x130: uint32(n.input.keyinput()) or (uint32(n.input.keycnt9) shl 16)
+            of 0x134: uint32(n.input.extkeyin()) shl 16
+            else: 0'u32
+    when width == 32: w
+    elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
+    else: (w shr ((a and 3) * 8)) and 0xFF
+  else: 0'u32
+
+proc cheat_write*(n: NDS; a: uint32; v: uint32; width: static int) =
+  let a = a and not uint32(width div 8 - 1)
+  case a shr 24
+  of 0x02:
+    let i = int(a and 0x3FFFFF)
+    n.write7(a, v, width)
+    if (n.tm.slot_of[i shr 5] and 0xFF) != 0:
+      # the ARM9's copy of a line its data cache holds
+      when width == 32: wr32(n.main_ram, i, v)
+      elif width == 16: wr16(n.main_ram, i, v)
+      else: n.main_ram[i] = uint8(v)
+  of 0x03: n.write7(a, v, width)
+  else: discard
 
 proc bgr555_to_rgba*(c: uint16): uint32 {.inline.} =
   ## Little-endian RGBA8888 (R in the low byte), alpha opaque.

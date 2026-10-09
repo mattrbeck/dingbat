@@ -1438,6 +1438,7 @@ const parseCheats = (text) => {
 };
 
 const pushCheatsToCore = (text) => {
+  if (ndsGameLoaded()) return ndsLoadCheats(text);
   if (typeof Module === "undefined" || !Module.ccall) return "";
   return Module.ccall("load_cheats", "string", ["string"], [text]) || "";
 };
@@ -1469,7 +1470,9 @@ const renderCheatList = () => {
   cheatHelpEl.hidden = !hasGame;
   if (cheatFormatHintEl) {
     const gba = hasGame && extOf(currentOriginalName) === ".gba";
-    cheatFormatHintEl.textContent = gba
+    cheatFormatHintEl.textContent = ndsGameLoaded()
+      ? "Action Replay DS: XXXXXXXX YYYYYYYY   ·   CodeBreaker DS: its 8000.... header line first"
+      : gba
       ? "GameShark/AR v3: XXXXXXXX YYYYYYYY   ·   CodeBreaker: 82XXXXXX YYYY"
       : "Game Genie: ABC-DEF-GHI    ·    GameShark: 011234C0";
   }
@@ -1543,7 +1546,7 @@ const restoreCheats = async () => {
 
 const openCheatsModal = () => {
   menuDropdown.hidden = true;
-  if (ndsGameLoaded()) return; // the cheat engines are the GB/GBA core's
+  if (ndsGameLoaded() && !ndsHasCheats()) return; // a DS core without its engine
   showCheatError("");
   renderCheatList();
   cheatsModal.classList.add("open");
@@ -6391,6 +6394,7 @@ const applySystemSettings = () => {
   if (Module._wasm_sgb_border_show) Module._wasm_sgb_border_show(sgbBorder ? 1 : 0);
   // Live in both directions.
   if (Module._setRewindEnabled) Module._setRewindEnabled(rewindOn ? 1 : 0);
+  ndsApplyRewind();
 };
 
 const syncSystemSettingsUI = () => {
@@ -7271,7 +7275,7 @@ const sessionMenuEntries = () => {
   // No Screenshot and no Clip that!: both are about the frame in front of
   // you, and the frame in front of you here is the card's own picture of a
   // game that stopped. They stay in the menu over a running game.
-  // A DS session has no link cable or cheats, nor save states until its
+  // A DS session has no link cable, nor save states or cheats until its
   // core has them (body.nds-mode in the bar's menu, the same here).
   const ds = ndsGameLoaded();
   let items = [
@@ -7292,9 +7296,11 @@ const sessionMenuEntries = () => {
         icon: MENU_ICONS.link,
         run: () => document.getElementById("net-connect").click(),
       }),
-      tileMenuItem({ label: "Cheats", icon: MENU_ICONS.cheats,
-                     run: () => openCheatsModal() }),
     );
+  }
+  if (!ds || ndsHasCheats()) {
+    items.push(tileMenuItem({ label: "Cheats", icon: MENU_ICONS.cheats,
+                              run: () => openCheatsModal() }));
   }
   items.push(
     tileMenuItem({ label: "Report a bug", icon: MENU_ICONS.bug,
@@ -8642,12 +8648,13 @@ const saveToSlot = async (slot) => {
     showToast("The DS is switched off - restart it first");
     return false;
   }
-  const bytes = captureStateBytes();
+  const pending = captureStateBytesAsync();
+  const thumb = captureThumbnail();
+  const bytes = await pending;
   if (!bytes) {
     showToast("Couldn't capture the emulator state");
     return false;
   }
-  const thumb = captureThumbnail();
   storeLastFrame({ force: true }); // a save is a moment worth a picture
   try {
     if (!(await dbPutRoomy(slotStateKey(currentOriginalName, slot), bytes,
@@ -8697,7 +8704,7 @@ const loadFromSlot = async (slot) => {
     showToast(slot === 0 ? "No saved state for this game" : "Slot " + (slot + 1) + " is empty");
     return false;
   }
-  const undo = captureStateBytes(); // where the game is NOW, pre-load
+  const undo = captureUndoBytes(); // where the game is NOW, pre-load
   const ok = applyStateBytes(bytes);
   if (ok && undo) {
     stateUndoBytes = undo;
@@ -8952,7 +8959,25 @@ const packCheckpoint = async (plain, fb, sav) => {
   return { bytes, pic, saveSig: sigOfSave(sav) };
 };
 
+// captureStateBytes, a DS game's packed in the checkpoint worker: the page
+// copies the plain image out (~1 ms) and the worker deflates it, which on
+// the page costs a DS game 20-30 ms (a GB/GBA state packs in well under a
+// frame, and goes as before). The moment is the call's: the image is taken
+// before the first await.
+const captureStateBytesAsync = async () => {
+  const plain = ndsGameLoaded() && getCkptWorker() ? ndsCapturePlainState() : null;
+  if (!plain) return captureStateBytes();
+  const got = await packCheckpoint(plain, null, null);
+  return got?.bytes || captureStateBytes(); // a worker failure: packed here
+};
+// The undo a load or reset keeps in memory: a DS game's left plain (it
+// loads as a packed one does), 6-7 MB for the 20-30 ms packing it saves.
+const captureUndoBytes = () => (ndsGameLoaded() && ndsCapturePlainState()) || captureStateBytes();
+
 const capturePlainState = () => {
+  // A DS game's own core: the GB/GBA one may still hold a game played
+  // before it, whose state is not this game's.
+  if (ndsGameLoaded()) return ndsCapturePlainState();
   if (typeof Module === "undefined" || !Module._wasm_state_plain_size) return null;
   const len = Module._wasm_state_plain_size();
   if (len <= 0) return null;
@@ -8979,7 +9004,8 @@ const takeCheckpoint = () => {
   const plain = capturePlainState();
   if (!plain) return null;
   let sav = null;
-  try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
+  if (ndsGameLoaded()) sav = ndsSaveBytes(); // the battery liveSaveSig signs
+  else try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
   const fb = copyFramebuffer();
   const ts = Date.now();
   const play = playClock();
@@ -12549,6 +12575,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
     updateCanvasScaling();
     if (!opts.skipResumeOffer && ndsHasStates()) offerAutoResume();
     setTimeout(() => logViewportDiag("romload"), 500);
+    if (ndsHasCheats()) await restoreCheats(); // the DS core's own engine
     return;
   }
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
@@ -12954,7 +12981,7 @@ resetButton.addEventListener("click", async () => {
   if (!currentRomName) return;
   // Snapshot the state being thrown away and offer it on a toast; the
   // auto-resume offer is suppressed for this reload.
-  const undo = captureStateBytes();
+  const undo = captureUndoBytes();
   const name = currentOriginalName;
   await loadRom(currentRomName, currentOriginalName, { skipResumeOffer: true });
   if (undo) {
@@ -13916,7 +13943,7 @@ const frameStepButton = document.getElementById("frame-step");
 // Hold-to-rewind. Gated here for every caller: with rewind off there is no
 // ring to pop. Only turning it on is refused.
 const setRewindHeld = (on) => {
-  rewindHeld = on && rewindOn && !ndsGameLoaded(); // no rewind ring on the DS core
+  rewindHeld = on && rewindOn && (!ndsGameLoaded() || ndsHasRewind());
   rewindButton.classList.toggle("active", rewindHeld);
 };
 
@@ -16833,9 +16860,10 @@ const updateRumble = (timestamp) => {
 // GB/GBA session never pays for it. It is the loaded game like any other
 // (currentRomName "rom.nds"): the library, battery saves, pause, the home
 // screen and the WebGL presenter all serve it. What the DS core does not
-// have yet is gated off under body.nds-mode: save states (with them resume
-// snapshots, slots, rewind, run-ahead and retroactive clips), the link cable
-// and cheats. docs/nds/web.md has the list and the reasons.
+// have yet is gated off under body.nds-mode: retroactive clips and Record,
+// the rewind scrubber and the link cable; save states, rewind and cheats
+// come back as the core exports them (body.nds-states, .nds-rewind,
+// .nds-cheats). docs/nds/web.md and docs/nds/features.md have the reasons.
 //
 // DS games are local-only: no ROM, save, picture or library entry of one
 // goes to Google Drive (driveExcluded). The app on the account's other
@@ -17011,6 +17039,11 @@ const ndsTickFrames = (timestamp) => {
       n++;
     }
     if (ndsAcc > 2 * step) ndsAcc = 2 * step;
+  }
+  // Run-ahead at normal speed, as on the GB/GBA core: only the frame this
+  // tick shows is looked ahead from (its sound is already taken).
+  if (n > 0 && speed === 1 && runaheadFrames > 0 && ndsHasRunahead()) {
+    c._nds_runahead(runaheadFrames);
   }
   return n;
 };
@@ -17241,6 +17274,16 @@ const ndsCaptureState = () => {
   const p = n > 0 ? c._nds_state_data() : 0;
   return p ? c.HEAPU8.slice(p, p + n) : null;
 };
+// The image left plain: about a millisecond, where packing takes 20-30. For
+// the checkpoint worker to pack, and for an in-memory undo (a plain image
+// loads as a packed one does). Null where the core has no such export.
+const ndsCapturePlainState = () => {
+  const c = ndsCore;
+  if (!ndsHasStates() || !c._nds_state_plain_size || ndsCoreGame === null || ndsOff) return null;
+  const n = c._nds_state_plain_size();
+  const p = n > 0 ? c._nds_state_data() : 0;
+  return p ? c.HEAPU8.slice(p, p + n) : null;
+};
 const ndsApplyState = (bytes) => {
   const c = ndsCore;
   if (!ndsHasStates() || ndsCoreGame === null || !bytes?.length) return false;
@@ -17252,6 +17295,41 @@ const ndsApplyState = (bytes) => {
   if (ok) ndsSetLid(ndsLidClosed); // the lid is where the page has it, not the state
   ndsSyncPower(); // a state taken switched off is off, and one taken running is on
   return ok;
+};
+
+// --- Rewind, run-ahead and cheats (docs/nds/features.md). The DS core keeps
+// its own rewind ring (nds_rewind_*: a payload every 10 frames, as the
+// GB/GBA ring), runs n frames ahead and back (nds_runahead) and holds its own
+// cheat list (nds_load_cheats: Action Replay DS, unencrypted CodeBreaker DS),
+// so the app's Rewind switch, Run-ahead choice and Cheats list reach a DS game
+// through these.
+const ndsHasRewind = () => !!(ndsCore && ndsCore._nds_rewind_pop && ndsCore._nds_rewind_enable);
+const ndsHasRunahead = () => !!(ndsCore && ndsCore._nds_runahead);
+const ndsHasCheats = () => !!(ndsCore && ndsCore._nds_load_cheats);
+// The ring's cap: iOS's as the GB/GBA one's (memory pressure demotes the JIT).
+const ndsRewindCap = () => (IS_IOS ? 16 * 1024 * 1024 : 0);
+const ndsApplyRewind = () => {
+  if (!ndsHasRewind() || ndsCoreGame === null) return;
+  ndsCore._nds_rewind_enable(rewindOn ? 1 : 0, ndsRewindCap());
+};
+// One step back (10 frames): the screens are the snapshot's; nothing plays.
+const ndsRewindStep = () => {
+  if (!ndsHasRewind() || ndsCoreGame === null) return false;
+  const ok = ndsCore._nds_rewind_pop() === 1;
+  ndsAudioQuiet();
+  ndsSyncPower(); // a moment from before the game turned the DS off is on
+  return ok;
+};
+const ndsLoadCheats = (text) => {
+  const c = ndsCore;
+  if (!c || !ndsHasCheats()) return "";
+  const bytes = new TextEncoder().encode(text);
+  const p = c._malloc(bytes.length + 1);
+  if (!p) return "";
+  c.HEAPU8.set(bytes, p);
+  const r = c._nds_load_cheats(p, bytes.length);
+  c._free(p);
+  return r ? c.UTF8ToString(r) : "";
 };
 
 // --- Input: the app's ids (INPUT_NAMES) to the core's buttons.
@@ -17362,6 +17440,7 @@ const ndsStart = (name, rom, save, bios) => {
   ndsAudioQuiet();
   ndsSetLid(false); // every boot starts with the lid open
   ndsSyncPower();
+  ndsApplyRewind();
   return true;
 };
 // The core and its ROM go (a GB/GBA game took over, or the game was closed).
@@ -17428,6 +17507,8 @@ const ndsApplyModeClasses = () => {
   const on = ndsGameLoaded();
   document.body.classList.toggle("nds-mode", on);
   document.body.classList.toggle("nds-states", on && ndsHasStates());
+  document.body.classList.toggle("nds-rewind", on && ndsHasRewind());
+  document.body.classList.toggle("nds-cheats", on && ndsHasCheats());
   if (!on) {
     document.body.classList.remove("nds-side");
     closeNdsPanel();
@@ -18547,7 +18628,16 @@ var Module = {
       if (!linkMode && !rollbackMode && !netMode && !document.hidden) markPlaying();
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
-      if (ndsGameLoaded()) {
+      if (ndsGameLoaded() && rewindHeld) {
+        // Pop ~30 snapshots/s, as below for the GB/GBA core.
+        if (timestamp - lastRewindPop >= 33) {
+          lastRewindPop = timestamp;
+          ndsRewindStep();
+          presentDirty = true;
+        }
+        accumulator = 0;
+        presentSkip = !presentDirty;
+      } else if (ndsGameLoaded()) {
         // A DS game: its own core, paced by its own audio ring (ndsTick).
         const n = ndsTick(timestamp);
         frameCount += n;

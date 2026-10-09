@@ -74,6 +74,9 @@ task test_nds3d, "Run the DS 3D engine tests (command scenes + the 3d_* test ROM
 task test_ndssavestate, "Run the DS save-state tests (round trips at awkward moments, refusals)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndssavestate_test tests/nds_savestate_test.nim"
 
+task test_ndscheats, "Run the DS cheat-code engine tests (Action Replay DS, CodeBreaker DS)":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndscheats_test tests/nds_cheats_test.nim"
+
 task test_ndscompat, "Run the DS homebrew-sweep fix checks (docs/nds/compat.md)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndscompat_test tests/nds_compat_test.nim"
 
