@@ -80,6 +80,8 @@ final class Settings: ObservableObject {
     static let dsBetaKey = "dsBeta"
     /// For code off the main actor (the library's file scans).
     static var dsBetaOn: Bool { UserDefaults.standard.bool(forKey: dsBetaKey) }
+    /// Draw frames that are never shown too (docs/frame-skip.md): to compare.
+    @Published var drawAll: Bool { didSet { d.set(drawAll, forKey: "drawAll") } }
     @Published var saveWebhook: String {
         didSet {
             d.set(saveWebhook, forKey: "save-hook")
@@ -133,6 +135,7 @@ final class Settings: ObservableObject {
         rewind = bool("rewindOn", true)
         dsBeta = bool(Self.dsBetaKey, false)
         runahead = d.integer(forKey: "runahead")
+        drawAll = d.bool(forKey: "drawAll")
         saveWebhook = str("save-hook") ?? ""
     }
 
@@ -207,7 +210,7 @@ final class Settings: ObservableObject {
                   "video.integerScale", "video.lcdResponse", "video.ambientGlow",
                   "audio.fifoInterp", "audio.mp2kHle", "audio.pitchCorrectFF", "audio.audioLowpass",
                   "audio.playInSilent", "audio.volume", "audio.muted", "dingbat_theme",
-                  "rewindOn", "runahead", "save-hook"] {
+                  "rewindOn", "runahead", "drawAll", "save-hook"] {
             d.removeObject(forKey: k)
         }
         let fresh = Settings()
@@ -245,6 +248,7 @@ final class Settings: ObservableObject {
         rewind = fresh.rewind
         dsBeta = fresh.dsBeta
         runahead = fresh.runahead
+        drawAll = fresh.drawAll
         saveWebhook = fresh.saveWebhook
         apply()
     }
