@@ -63,7 +63,8 @@ block:
   let path = dir / "off.yml"
   save_config_file(cfg, path)
   let text = readFile(path)
-  check "nds" notin text, "a default file names nothing of the DS"
+  # The key, quoted: a path in the file (the checkout's own) may hold "nds".
+  check "\"nds\"" notin text, "a default file names nothing of the DS"
   check text.endsWith("  sgb_border: true\n"), "and ends where it always did"
   # Keys a build without DS Beta never wrote are still not written when
   # the DS's own settings are at their defaults
@@ -123,7 +124,7 @@ block:
   save_config_file(new_config(), dir / "default.yml")
   let a = readFile(path).splitLines()
   let b = readFile(dir / "default.yml").splitLines()
-  check "nds" notin readFile(path) and a.len == b.len, "off again: no DS section"
+  check "\"nds\"" notin readFile(path) and a.len == b.len, "off again: no DS section"
   # A second window's DS Beta survives this one's save
   let other = load_config_file(path)
   other.ds_beta = true
