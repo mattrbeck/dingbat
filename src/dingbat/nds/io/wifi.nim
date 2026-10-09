@@ -52,10 +52,18 @@ type
     bytes*: seq[uint8]              ## IEEE header + body as received (no FCS)
 
   Air* = ref object
-    ## The radio medium shared by the consoles of one process.
-    stations*: seq[Wifi]
+    ## The radio medium shared by the consoles of one process. A process
+    ## linked to others (tools/ndsnet.nim) holds its own consoles here and
+    ## sees the rest through `on_post` / `on_ack` and `post_remote` /
+    ## `ack_remote`.
+    stations*: seq[Wifi]            ## this process's consoles, numbered from `base`
+    base*: int                      ## station number of stations[0]
     frames*: int                    ## frames put on the air
     late*: int                      ## frames that reached a receiver already past them
+    on_post*: proc (f: AirFrame) {.closure, gcsafe, raises: [].}
+      ## a console here started a frame (nil: no other process)
+    on_ack*: proc (sender, serial: int) {.closure, gcsafe, raises: [].}
+      ## a console here ACKed a frame of a console elsewhere
 
   RxSlot = object
     f: AirFrame
@@ -393,15 +401,20 @@ proc attach*(w: Wifi; air: Air; firmware: seq[uint8]; offset = 0'i64) =
   ## Put this console on `air`. `firmware` gives the RF channel table;
   ## `offset` maps its master clock to the air clock.
   w.air = air
-  w.station = air.stations.len
+  w.station = air.base + air.stations.len
   w.air_offset = offset
   w.firmware = firmware
   air.stations.add w
 
+proc on_channel(w: Wifi; f: AirFrame): bool =
+  f.channel == 0 or w.channel == 0 or f.channel == w.channel
+
 proc queue_rx(w: Wifi; f: AirFrame) =
-  ## A frame starts on the air: if this console is on its channel, its
-  ## preamble end and its end become receiver events.
-  if f.channel != 0 and w.channel != 0 and f.channel != w.channel: return
+  ## A frame starts on the air: its preamble end and its end become receiver
+  ## events. Whether this console is on the frame's channel is asked at
+  ## those times (on_event), not now: when the sender posts a frame, the
+  ## receiver may be up to a lockstep quantum behind or ahead of it, and a
+  ## scan changes channels every few milliseconds.
   var s = RxSlot(f: f, start_at: f.data_at - w.air_offset, end_at: f.stop - w.air_offset)
   if s.start_at < w.sched.now:
     inc w.air.late
@@ -414,9 +427,22 @@ proc post(air: Air; f: AirFrame) =
   inc air.frames
   for s in air.stations:
     if s.station != f.sender: s.queue_rx(f)
+  if air.on_post != nil: air.on_post(f)
+
+proc post_remote*(air: Air; f: AirFrame) =
+  ## A console in another process started `f` (its times on this Air's
+  ## clock): every console here that hears it gets it.
+  inc air.frames
+  for s in air.stations:
+    if s.station != f.sender: s.queue_rx(f)
 
 proc got_ack(w: Wifi; serial: int) =
   if w.tx_frame != nil and w.tx_frame.serial == serial: w.tx_acked = true
+
+proc ack_remote*(air: Air; sender, serial: int) =
+  ## A console in another process ACKed frame `serial` of console `sender`.
+  let k = sender - air.base
+  if k >= 0 and k < air.stations.len: air.stations[k].got_ack(serial)
 
 # ---------------------------------------------------------------------------
 # Transmit
@@ -685,6 +711,12 @@ proc rx_on(w: Wifi): bool =
   ## Receiving: RF on in RX mode (W_RF_PINS RX.ON) with W_RXCNT bit 15.
   (w.reg(0x19C) and 0x80) != 0 and (w.reg(0x030) and 0x8000) != 0
 
+proc radio_quiet*(w: Wifi): bool =
+  ## Neither listening (RX.ON with W_RXCNT bit 15) nor sending, nor due to
+  ## send a multiplay reply: no frame on the air changes this console, and
+  ## it puts none there until something here turns the radio on.
+  not w.rx_on() and w.tx_src < 0 and w.reply_at < 0
+
 proc rx_store(w: Wifi; f: AirFrame; flags: uint16): bool =
   ## Write RX header + frame at W_RXBUF_WRCSR, wrapping END -> BEGIN, then
   ## move WRCSR past it (4-byte aligned). A frame that would reach
@@ -818,10 +850,11 @@ proc deliver(w: Wifi; f: AirFrame; at: int64) =
     for i in 0..2: w.ram[0xFB8 + i] = get16(b, 10 + 2 * i)
     w.ram[0xFBB] = get16(b, 22)
   w.set_if(1'u16 shl 0)
-  if own and ftype != 1 and t notin [0xC'u16, 0xD, 0xE, 0xF] and w.air != nil and
-     f.sender < w.air.stations.len:
+  if own and ftype != 1 and t notin [0xC'u16, 0xD, 0xE, 0xF] and w.air != nil:
     # the hardware ACKs a station frame by itself
-    w.air.stations[f.sender].got_ack(f.serial)
+    let k = f.sender - w.air.base
+    if k >= 0 and k < w.air.stations.len: w.air.stations[k].got_ack(f.serial)
+    elif w.air.on_ack != nil: w.air.on_ack(f.sender, f.serial)
 
 # ---------------------------------------------------------------------------
 # Events
@@ -833,12 +866,15 @@ proc on_event*(w: Wifi) =
   var i = 0
   while i < w.rx.len:
     if not w.rx[i].started and w.rx[i].start_at <= now:
+      if not w.on_channel(w.rx[i].f):
+        w.rx.delete(i)                         # tuned elsewhere: not heard
+        continue
       w.rx[i].started = true
       if w.rx_on(): w.set_if(1'u16 shl 6)      # IRQ06: receive starts
     if w.rx[i].started and w.rx[i].end_at <= now:
       let s = w.rx[i]
       w.rx.delete(i)
-      w.deliver(s.f, s.end_at)
+      if w.on_channel(s.f): w.deliver(s.f, s.end_at)   # retuned mid-frame: lost
     else:
       inc i
   if w.reply_at >= 0 and w.reply_at <= now: w.send_reply()

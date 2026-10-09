@@ -15,22 +15,22 @@
 ## prints each console's wifi frame counts. Build with -d:wifilog for the
 ## register trace (station number in each line) from --trace-from on.
 
-import std/[os, strutils, parseopt]
+import std/[os, strutils, parseopt, md5]
 import dingbat/nds/[nds, air]
 import dingbat/nds/io/[rtc, wifi]
 import dingbat/gba/rtc_calendar
 import ndsrun
 
 type
-  Hold = object
-    button: NdsButton
-    touch: bool
-    x, y, first, last: int
+  Hold* = object
+    button*: NdsButton
+    touch*: bool
+    x*, y*, first*, last*: int
   Machine = object
     rom, save: string
     holds: seq[Hold]
 
-proc parse_holds(spec: string): seq[Hold] =
+proc parse_holds*(spec: string): seq[Hold] =
   for item in spec.split(','):
     if item.len == 0: continue
     let at = item.split('@')
@@ -54,9 +54,25 @@ proc parse_holds(spec: string): seq[Hold] =
       h.button = NdsButton(i)
     result.add h
 
-proc readbytes(p: string): seq[uint8] =
+proc readbytes*(p: string): seq[uint8] =
   if p.len == 0 or not fileExists(p): return @[]
   cast[seq[uint8]](readFile(p))
+
+proc digest*(n: NDS): string =
+  ## md5 of main RAM and of both screens: two runs that did the same thing
+  ## print the same line.
+  var scr = newString(256 * 384 * 4)
+  let px = n.screens_rgba()
+  copyMem(scr[0].addr, px[0].unsafeAddr, scr.len)
+  "ram " & $toMD5(cast[string](n.main_ram)) & " screens " & $toMD5(scr)
+
+proc res_words*(n: NDS): string =
+  ## The wifi_link test ROM's result words (0x02200000, 16 words).
+  for i in 0 ..< 16:
+    let o = 0x200000 + 4 * i
+    let v = uint32(n.main_ram[o]) or (uint32(n.main_ram[o + 1]) shl 8) or
+            (uint32(n.main_ram[o + 2]) shl 16) or (uint32(n.main_ram[o + 3]) shl 24)
+    result.add (if i > 0: " " else: "") & toHex(v, 8)
 
 when isMainModule:
   var frames = 60
@@ -116,6 +132,8 @@ when isMainModule:
     write_png(base & "_m" & $i & ".png", 256, 384, n.screens_rgba())
     echo "m", i, " ", ms[i].rom.extractFilename, ": channel ", n.wifi.channel,
          ", frames sent ", n.wifi.tx_frames, ", received ", n.wifi.rx_frames
+    echo "m", i, " ", n.digest()
+    echo "m", i, " res ", n.res_words()
     if ms[i].save.len > 0 and n.cart.backup.dirty:
       writeFile(ms[i].save, cast[string](n.cart.backup.data))
   echo "air: ", link.air.frames, " frames, ", link.air.late, " late"

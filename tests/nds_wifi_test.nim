@@ -313,6 +313,46 @@ else:
       if host2.res(i) != host.res(i) or client2.res(i) != client.res(i): same = false
     check same and host2.main_ram == host.main_ram and client2.main_ram == client.main_ram,
           "machine order inside a quantum does not change anything"
+    # each machine on an Air of its own, the two bridged the way two
+    # processes are (tools/ndsnet.nim): frames and ACKs handed over only
+    # between quanta, through on_post / on_ack -> post_remote / ack_remote
+    let host3 = machine(fw, true)
+    let client3 = machine(firmware_with_mac(fw, mac2), false)
+    let airs = [new_air(), new_air()]
+    airs[1].base = 1
+    let start = max(host3.sched.now, client3.sched.now)
+    host3.wifi.attach(airs[0], host3.spi.firmware, start - host3.sched.now)
+    client3.wifi.attach(airs[1], client3.spi.firmware, start - client3.sched.now)
+    var frames_to: array[2, seq[AirFrame]]
+    var acks_to: array[2, seq[(int, int)]]
+    for i in 0..1:
+      closureScope:
+        let other = 1 - i
+        airs[i].on_post = proc (f: AirFrame) {.closure, gcsafe, raises: [].} =
+          {.cast(gcsafe).}: frames_to[other].add f
+        airs[i].on_ack = proc (sender, serial: int) {.closure, gcsafe, raises: [].} =
+          {.cast(gcsafe).}: acks_to[other].add (sender, serial)
+    let pair = [host3, client3]
+    var now = start
+    for g in 0 ..< f:
+      for m in pair: m.frame_done = false
+      let frame_end = now + FRAME_CYCLES
+      while now < frame_end:
+        let q = min(frame_end, now + AIR_QUANTUM)
+        for i in 0..1:
+          pair[i].run_until(q - pair[i].wifi.air_offset)
+        for i in 0..1:
+          for fr in frames_to[i]: airs[i].post_remote(fr)
+          for a in acks_to[i]: airs[i].ack_remote(a[0], a[1])
+          frames_to[i].setLen(0)
+          acks_to[i].setLen(0)
+        now = q
+      if g + 1 == 10: host3.set_button(nbA, false)
+    check airs[0].frames + airs[1].frames == 2 * link.air.frames and
+          airs[0].late + airs[1].late == 0 and
+          host3.main_ram == host.main_ram and client3.main_ram == client.main_ram,
+          "two Airs bridged between quanta: the one-Air result",
+          $airs[0].frames & "+" & $airs[1].frames & " frames, " & $(airs[0].late + airs[1].late) & " late"
 
   block host_alone:
     echo "wifi_link: host alone"
