@@ -174,31 +174,7 @@ each HD screen every 5 frames) over SoulSilver New Bark Town (p12 frames
 
 ### Checked
 
-- SoulSilver p12 (HLE BA 393-pt-wide iPhone shows each screen ~374 pt = ~1122 px at 3x, so 4x
-internal (1024 px) is about native and 2x is half of it, scaled up.
-
-- **Hook-up** (0.5-1 agent-day): the core already has it
-  (`set_hd_scale`, `gpu.hd_top/hd_bottom`); the C API needs
-  `dingbat_nds_set_hd` and the HD screen pointers, the Swift presenter a
-  256N x 384N texture, Settings a picker. No JIT question: the app runs
-  the core as native code, and a GPU path would be Metal.
-- **Budget**: a recent iPhone's performance core is in this Mac's class
-  for single-thread work, but it throttles under a sustained load, and
-  the 1x core must fit first. From the numbers above, 2x is plausible for
-  SoulSilver-class games on an A15-A17; 4x and anything in Golden Sun
-  need the HD work off the emulation thread.
-- **Threads** (3-5 agent-days, native): HD is display-only, so it can run
-  beside the emulation with no determinism risk: the HD rasteriser on a
-  worker (it needs the frame's lists, render registers and the texture /
-  palette slots: < 1 MB a frame, or the decoded-texel cache by tex_gen),
-  or split into row bands over 2-4 cores (bands overlap one row for edge
-  marking); the per-sub-dot composite on the GPU (a fragment shader over
-  the 1x 2D layers and the HD 3D texture) or on another core. On the web
-  the same split needs a second wasm instance in a worker fed by
-  postMessage, since SharedArrayBuffer threads need cross-origin
-  isolation, which the Drive sign-in popup rules out.
-- **Metal renderer** (2-4 weeks for HD only): GPU cost is trivial at 4x;
-  what it gives up is listed under option (b).): shots 3000/5000/6000/6600/8000 e4b66d68 /
+- SoulSilver p12 (the regression anchor): shots 3000/5000/6000/6600/8000 e4b66d68 /
   6cf51b7e / 61fad7f8 / dfb2fd6c / 8971b401 and the state + screen
   hashes every 500 frames identical to the branch head, with HD off and
   with `--hd 2` (the 1x screens and the whole state). Golden Sun title
