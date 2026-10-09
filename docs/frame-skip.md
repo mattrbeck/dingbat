@@ -9,7 +9,8 @@ Status: prototype on branch `frame-skip`, for Matt to try. Not on main.
   with `?draw=all` to draw every frame and compare. Fast-forward's log line
   (every ~5 s of it, in the console) ends with how many frames went undrawn.
 - **iOS**: `ios/build-core.sh && (cd ios && xcodegen generate)`, then build.
-  Settings › Emulation › Advanced › **Draw every frame** turns it off.
+  Settings › Emulation › Advanced › **Draw every frame** turns it off;
+  **Start frames late** (off by default) tries the lower-latency pacing.
 - What to look for: fast-forward fps (the counter), battery and heat at 2x
   or with run-ahead, and any picture that looks a frame behind or wrong
   after fast-forward, rewind, a clip, a state load or pausing.
@@ -75,13 +76,50 @@ step the LCD panel. Desktop batches the same way in its unpaced modes.
 
 ## Proof
 
-`tests/render_skip_test.nim`: on every ROM a third machine skips drawing
-runs of up to six frames; after every frame its state must equal a machine
-that draws everything (but the two fields above), and every frame it draws
-must match. Passes on all of tests/roms plus FireRed and LeafGreen for 1500
-frames from boot (`DINGBAT_RENDER_SKIP_ROMS`, `DINGBAT_RENDER_SKIP_FRAMES`).
+`tests/render_skip_test.nim` (CI): on every ROM a machine that skips drawing
+runs of up to six frames must, after every frame, hold the same state as one
+that draws everything (but the framebuffer and the GBA mosaic latch), and
+every frame it draws must match; its rewind snapshots, taken only on drawn
+frames, must each hold their own frame's picture at the age `frames_back`
+gives. GBA test ROMs and the GB ones in CI; locally also FireRed, LeafGreen,
+Kirby, Metroid, Emerald, Advance Wars, Golden Sun (2000 frames) and Crystal,
+Blue, Link's Awakening DX (1500). Synthetic: a raster effect (a palette
+change mid-frame every frame) across undrawn frames; the redraw after an
+undrawn changed frame. `ios_api_test`: unseen frames show the same pictures
+and end on the same machine, with run-ahead too; the online-link 6-frame
+rollback replay (now drawing only the shown frames) stays bit-identical.
 
-## Measured (core alone)
+## Performance review (instructions, vs main)
+
+The machine was under heavy load from other jobs (load average 270-650), so
+wall-clock numbers this round are noise; these are CPU instruction counts
+(`DINGBAT_BENCH_COUNTERS=1`, repeatable to ~0.2%), branch against main built
+the same way, 600 frames, best of 3.
+
+| scene | every frame drawn | 1 in 2 | 1 in 4 | 1 in 40 |
+|---|---|---|---|---|
+| Kirby NiDL | -0.1% | -18.7% | -28.0% | -36.2% |
+| Metroid Fusion | -0.1% | -20.3% | -30.9% | -40.2% |
+| Super Mario World | -0.3% | -20.1% | -29.9% | -38.9% |
+| Emerald | -0.1% | -20.1% | -30.2% | -39.2% |
+| Advance Wars | +0.2% | -8.8% | -14.0% | -18.5% |
+| Pokémon Crystal (GBC) | -0.1% | -5.0% | | -9.6% |
+| Pokémon Blue (GB) | +0.1% | -7.3% | | -14.3% |
+| Link's Awakening DX (GBC) | -0.1% | -4.8% | | -9.2% |
+
+Every frame drawn costs nothing. The first GB version checked `no_draw` per
+pixel (+0.3-0.5% on drawn frames); undrawn frames now take their own copy of
+the span path. GB drawing is a smaller share of a frame than GBA's, so its
+gain is smaller. Rewind snapshots on drawn frames only: forced draws had cost
+~5% of fast-forward, and the snapshots themselves another 2-9%.
+
+iOS late start, simulator (loaded machine), tonc m7_demo, 30 presses, press
+to the refresh its picture lands on, two rounds each: at 30 Hz 23.7 / 29.6 ms
+average off, 9.2 / 9.4 ms on; at 60 Hz inconclusive (15.1 / 9.2 off, 8.9 /
+10.5 on). The simulator's refresh timing is approximate (some readings come
+out negative); a device decides it.
+
+## Measured (core alone, first prototype, quiet machine)
 
 `tests/dingbat_bench.nim` with `DINGBAT_BENCH_DRAW_EVERY=n`, 600 frames,
 best of 5, interleaved; Apple M-series, native release build. Moving scenes
@@ -100,7 +138,7 @@ its frames static) as the case the render skip already covers.
 1 in 2 is 2x on a 60 Hz display or 1x on a 30 Hz one; 1 in 40 is about
 fast-forward. Most of Advance Wars' frame time is outside drawing here.
 
-## Measured (in the frontends)
+## Measured (in the frontends, first prototype, quiet machine)
 
 - Headless Chromium, Super Mario World attract, `frame-skip-probe.mjs`,
   best of 2: fast-forward 231 fps vs 180 with `?draw=all` (+28%); 2x 107 ms
@@ -121,6 +159,11 @@ fast-forward. Most of Advance Wars' frame time is outside drawing here.
       rewind-doubletap, clip-range, run-pause, wasm-exports, lcd-response,
       gb-palette, game-delete, render pass; tsc + em.d.ts check clean; iOS
       device Release build compiles
-- [ ] Matt's test at home (web on his devices, iOS on the phone)
+- [x] edge-case mitigations (table above), GB, rollback, desktop, iOS late
+      start; perf review (instructions); all tests above, web tests, tsc,
+      desktop and iOS builds
+- [ ] Matt's test at home (web on his devices, iOS on the phone): fast-
+      forward, 2x, run-ahead, link play, Low Power Mode with late start
+- [ ] desktop: compiled, not run here (driving the GUI needs asking)
 - [ ] if kept: drop the switches or keep `?draw=all` as a diagnostic; the
       iOS setting is a prototype toggle
