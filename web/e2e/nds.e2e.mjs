@@ -535,6 +535,70 @@ test("a save state taken in the app resumes the same frames and sound", { skip }
   await ctx.close();
 });
 
+// A slot and a checkpoint (the moments a crash leaves, and the session) are
+// packed by the checkpoint worker, off the frame's thread; the undo a load
+// keeps stays plain. And a checkpoint taken while a DS game runs is that
+// game's: the GB/GBA core still holds the game played before it, whose
+// state once went in as the DS game's checkpoint and session.
+test("a DS game's slot, undo and checkpoint are its own states, packed off the page", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  const gba = join(WEB, "..", "tests/roms/bootio.gba");
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click(),
+  ]);
+  await chooser.setFiles(gba);
+  await page.waitForFunction(() => document.body.classList.contains("running") &&
+    currentOriginalName === "bootio.gba" && !paused, null, { timeout: 60000 });
+  await page.evaluate(() => document.getElementById("main-menu").click());
+  await addGame(page, rom("snd_tone.nds"));
+  await framesPast(page, 60);
+  const r = await page.evaluate(async () => {
+    paused = true;
+    const name = currentOriginalName;
+    const run = () => {
+      for (let i = 0; i < 20; i++) { ndsCore._nds_run_frame(); ndsCore._nds_audio_clear(); }
+      const t = ndsCore._nds_fb_top(), b = ndsCore._nds_fb_bottom();
+      return ndsCore._nds_frame_count() + ":" +
+        Array.from(ndsCore.HEAPU8.subarray(t, t + 256 * 192 * 4)).join() +
+        Array.from(ndsCore.HEAPU8.subarray(b, b + 256 * 192 * 4)).join();
+    };
+    const saved = await saveToSlot(1);
+    const slot = await dbGet(slotStateKey(name, 1));
+    const first = run();
+    const loaded = await loadFromSlot(1);
+    const again = run();
+    const undo = stateUndoBytes;
+    undoStateLoad();
+    const undone = ndsCore._nds_frame_count();
+    takeCheckpoint();
+    await checkpointLanded();
+    const ck = await dbGet(ckptKey(name, 0));
+    const session = await dbGet(autoStateKey(name));
+    return { saved, loaded, same: first === again, firstFrame: +first.split(":")[0], undone,
+             slotCore: slot?.[12], slotPacked: !!(slot?.[15] & 0x80),
+             undoPacked: !!(undo?.[15] & 0x80), undoCore: undo?.[12],
+             ckCore: ck?.bytes?.[12], ckPacked: !!(ck?.bytes?.[15] & 0x80),
+             ckLoads: !!ck?.bytes && applyStateBytes(ck.bytes),
+             sessionCore: session?.bytes?.[12] };
+  });
+  assert.equal(r.saved, true, "slot 1 saved");
+  assert.equal(r.slotCore, 2, "the slot holds a DS state");
+  assert.equal(r.slotPacked, true, "packed (by the worker)");
+  assert.equal(r.loaded, true, "slot 1 loaded");
+  assert.ok(r.same, "the same 20 frames after the load");
+  assert.equal(r.undoCore, 2);
+  assert.equal(r.undoPacked, false, "the undo is kept plain");
+  assert.equal(r.undone, r.firstFrame, "Undo goes back to before the load");
+  assert.equal(r.ckCore, 2, "the checkpoint is the DS game's state, not the GBA game's");
+  assert.equal(r.ckPacked, true);
+  assert.equal(r.ckLoads, true, "and it loads");
+  assert.equal(r.sessionCore, 2, "so is the session it leaves");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 // --- Power-off and the firmware (fw_power: tests/nds/tools/build_fw_power.sh).
 // Each boot the ROM writes the firmware's nickname "FWTEST<n>" (n one more
 // than the one it finds) and paints the top screen green (n = 1), blue
@@ -940,7 +1004,12 @@ test("run-ahead and rewind leave DINGBAT_NDS_BENCH's frames as they were, and wh
       applyStateBytes(state);
       const cost = { payloadMB: c._nds_payload_take() / 1048576,
                      take: med(time(() => c._nds_payload_take(), 60)),
-                     restore: med(time(() => c._nds_payload_restore(), 60)) };
+                     restore: med(time(() => c._nds_payload_restore(), 60)),
+                     stateMB: state.length / 1048576,
+                     stateSave: med(time(() => captureStateBytes(), 10)),
+                     // a slot's save on the page: the plain image out, the
+                     // packing in the checkpoint worker
+                     slotSaveOnPage: med(time(() => captureStateBytesAsync(), 10)) };
       // The same frame each time: plain, right after a restore, and with
       // run-ahead 1 after it.
       const warm = [], cold = [], ahead = [];

@@ -236,6 +236,13 @@ proc nds_state_size(thumbnail: cint): cint {.exportc.} =
   stateImage = if core == nil: "" else: pack_state(core.state_bytes(thumbnail != 0))
   cint(stateImage.len)
 
+proc nds_state_plain_size(): cint {.exportc.} =
+  ## As nds_state_size, the image left plain (about a millisecond, where
+  ## packing takes 20-30): the page deflates it in a worker
+  ## (web/ckptworker.js) or keeps it in memory as an undo.
+  stateImage = if core == nil: "" else: core.state_bytes()
+  cint(stateImage.len)
+
 proc nds_state_data(): pointer {.exportc.} =
   if stateImage.len > 0: addr stateImage[0] else: nil
 
@@ -343,7 +350,7 @@ proc step_frame() =
   core.run_frame()
   if cheatList.active(): cheatList.run(core.cheat_mem())
   if rewindRing != nil and not core.powered_off():
-    discard rewindRing.maybe_push(proc(): string = core.state_payload())
+    discard rewindRing.maybe_push(proc(): string = core.state_payload(aligned = true))
 
 # --- Run-ahead: after a frame is run (and its sound taken by the page),
 # nds_runahead(n) snapshots the machine, runs n more frames with the same

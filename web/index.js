@@ -8648,12 +8648,13 @@ const saveToSlot = async (slot) => {
     showToast("The DS is switched off - restart it first");
     return false;
   }
-  const bytes = captureStateBytes();
+  const pending = captureStateBytesAsync();
+  const thumb = captureThumbnail();
+  const bytes = await pending;
   if (!bytes) {
     showToast("Couldn't capture the emulator state");
     return false;
   }
-  const thumb = captureThumbnail();
   storeLastFrame({ force: true }); // a save is a moment worth a picture
   try {
     if (!(await dbPutRoomy(slotStateKey(currentOriginalName, slot), bytes,
@@ -8703,7 +8704,7 @@ const loadFromSlot = async (slot) => {
     showToast(slot === 0 ? "No saved state for this game" : "Slot " + (slot + 1) + " is empty");
     return false;
   }
-  const undo = captureStateBytes(); // where the game is NOW, pre-load
+  const undo = captureUndoBytes(); // where the game is NOW, pre-load
   const ok = applyStateBytes(bytes);
   if (ok && undo) {
     stateUndoBytes = undo;
@@ -8958,7 +8959,25 @@ const packCheckpoint = async (plain, fb, sav) => {
   return { bytes, pic, saveSig: sigOfSave(sav) };
 };
 
+// captureStateBytes, a DS game's packed in the checkpoint worker: the page
+// copies the plain image out (~1 ms) and the worker deflates it, which on
+// the page costs a DS game 20-30 ms (a GB/GBA state packs in well under a
+// frame, and goes as before). The moment is the call's: the image is taken
+// before the first await.
+const captureStateBytesAsync = async () => {
+  const plain = ndsGameLoaded() && getCkptWorker() ? ndsCapturePlainState() : null;
+  if (!plain) return captureStateBytes();
+  const got = await packCheckpoint(plain, null, null);
+  return got?.bytes || captureStateBytes(); // a worker failure: packed here
+};
+// The undo a load or reset keeps in memory: a DS game's left plain (it
+// loads as a packed one does), 6-7 MB for the 20-30 ms packing it saves.
+const captureUndoBytes = () => (ndsGameLoaded() && ndsCapturePlainState()) || captureStateBytes();
+
 const capturePlainState = () => {
+  // A DS game's own core: the GB/GBA one may still hold a game played
+  // before it, whose state is not this game's.
+  if (ndsGameLoaded()) return ndsCapturePlainState();
   if (typeof Module === "undefined" || !Module._wasm_state_plain_size) return null;
   const len = Module._wasm_state_plain_size();
   if (len <= 0) return null;
@@ -8985,7 +9004,8 @@ const takeCheckpoint = () => {
   const plain = capturePlainState();
   if (!plain) return null;
   let sav = null;
-  try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
+  if (ndsGameLoaded()) sav = ndsSaveBytes(); // the battery liveSaveSig signs
+  else try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
   const fb = copyFramebuffer();
   const ts = Date.now();
   const play = playClock();
@@ -12940,7 +12960,7 @@ resetButton.addEventListener("click", async () => {
   if (!currentRomName) return;
   // Snapshot the state being thrown away and offer it on a toast; the
   // auto-resume offer is suppressed for this reload.
-  const undo = captureStateBytes();
+  const undo = captureUndoBytes();
   const name = currentOriginalName;
   await loadRom(currentRomName, currentOriginalName, { skipResumeOffer: true });
   if (undo) {
@@ -17230,6 +17250,16 @@ const ndsCaptureState = () => {
   // Switched off: nothing to come back to (ndsSyncPower).
   if (!ndsHasStates() || ndsCoreGame === null || ndsOff) return null;
   const n = c._nds_state_size();
+  const p = n > 0 ? c._nds_state_data() : 0;
+  return p ? c.HEAPU8.slice(p, p + n) : null;
+};
+// The image left plain: about a millisecond, where packing takes 20-30. For
+// the checkpoint worker to pack, and for an in-memory undo (a plain image
+// loads as a packed one does). Null where the core has no such export.
+const ndsCapturePlainState = () => {
+  const c = ndsCore;
+  if (!ndsHasStates() || !c._nds_state_plain_size || ndsCoreGame === null || ndsOff) return null;
+  const n = c._nds_state_plain_size();
   const p = n > 0 ? c._nds_state_data() : 0;
   return p ? c.HEAPU8.slice(p, p + n) : null;
 };

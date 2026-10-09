@@ -12,7 +12,7 @@
 ##
 ## Run with: nimble test_ndssavestate
 
-import std/[os, strutils, monotimes, times]
+import std/[os, strutils, monotimes, times, sequtils]
 import dingbat/nds/[nds, savestate]
 import std/importutils
 import dingbat/nds/air
@@ -173,6 +173,66 @@ proc round_trip(c: Case) =
         c.name & ": the packed state does the same")
   echo "    state ", image.len, " bytes, packed ", packed.len, "; save ", t_save,
        " us, load ", t_load, " us"
+
+proc rewind_payloads() =
+  ## The in-memory payloads of rewind (aligned: each run-time-length seq
+  ## padded to its room) load back to the same machine as the plain ones;
+  ## their length holds while the 3D lists change length; and at a frame
+  ## boundary the 3D frame buffers, redrawn before they are read, are saved
+  ## as zeros without changing what the machine does next.
+  echo "rewind payloads"
+  let path = rom_dir / "homebrew-ex/dual_screen.nds"
+  if not fileExists(path):
+    check(false, "missing " & path)
+    return
+  let a = machine(path)
+  for _ in 0 ..< 40: a.run_frame()
+  var plain_lens, aligned_lens: seq[int]
+  for _ in 0 ..< 30:
+    a.run_frame()
+    plain_lens.add a.state_payload().len
+    aligned_lens.add a.state_payload(aligned = true).len
+  check(min(plain_lens) != max(plain_lens), "the plain payload's length moves (the 3D lists)")
+  check(aligned_lens[10 .. ^1].allIt(it == aligned_lens[10]),
+        "an aligned payload keeps its length while the game runs",
+        $aligned_lens[10 .. ^1])
+  echo "    plain lengths ", min(plain_lens), "..", max(plain_lens),
+       ", aligned ", aligned_lens[10]
+
+  # at a frame boundary: the 3D frame buffers are zeros in the payload
+  let plain = a.state_payload()
+  var zeros, sized = 0
+  for b in a.state_blocks(1):
+    if b.name in ["color", "frame", "line_cost"]:
+      inc sized
+      if plain[b.lo ..< b.hi].allIt(it == '\0'): inc zeros
+  check(sized == 3 and zeros == 3, "at V-blank the 3D frame buffers are saved as zeros",
+        $zeros & " of " & $sized)
+  let aligned = a.state_payload(aligned = true)
+  a.spu.clear_samples()
+  let want = a.run_hash(60)
+  let want_after = a.state_payload()
+
+  for (label, own) in [("load_own_payload", true), ("load_state_payload", false)]:
+    let b = machine(path)
+    b.run_frame()
+    let ok = if own: b.load_own_payload(aligned) else: b.load_state_payload(aligned)
+    check(ok, "an aligned payload loads (" & label & ")", last_state_error)
+    if not ok: continue
+    check(b.state_payload() == plain, "into the same machine as the plain one (" & label & ")")
+    b.spu.clear_samples()
+    check(b.run_hash(60) == want and b.state_payload() == want_after,
+          "and 60 frames on, screens, sound and every field match (" & label & ")")
+
+  # mid-frame the 3D buffers are live and saved as they are
+  let c = machine(path)
+  for _ in 0 ..< 40: c.run_frame()
+  c.run_until(c.sched.now + 517_331)
+  let mid = c.state_payload()
+  var live = 0
+  for b in c.state_blocks(1):
+    if b.name == "frame" and not mid[b.lo ..< b.hi].allIt(it == '\0'): inc live
+  check(live == 1, "mid-frame the 3D frame handed to the display is saved")
 
 proc wifi_pair() =
   ## Two machines on one Air with the wifi_link ROM, saved while frames are
@@ -428,6 +488,7 @@ when isMainModule:
          boot: nbFirmware),
   ]
   for c in cases: round_trip(c)
+  rewind_payloads()
   wifi_pair()
   refusals()
   hostile_fields()

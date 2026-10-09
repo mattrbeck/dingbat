@@ -62,6 +62,7 @@ type
     bios9*: seq[uint8]          ## 4 KB at 0xFFFF0000
     bios7*: seq[uint8]          ## 16 KB at 0x00000000
     hle_bios9*, hle_bios7*: bool  ## synthesized BIOS + HLE SWIs (hle_bios.nim)
+    state_rooms*: seq[(string, int)]  ## aligned payloads' seq rooms (savestate.nim): bookkeeping, not saved
     wramcnt*: uint8
     exmemcnt*: uint16           ## ARM9 EXMEMCNT; bits 7-15 are shared
     exmem7_lo*: uint16          ## ARM7 EXMEMSTAT bits 0-6 (its own copy)

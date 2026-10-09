@@ -54,6 +54,8 @@ interface NdsCoreModule {
   // machine into a retained buffer (a 128x192 thumbnail trailer when
   // thumbnail != 0) and returns its length; nds_state_load returns 1 or 0.
   _nds_state_size?: (thumbnail?: number) => number;
+  // The same image left plain (no thumbnail), for a worker to pack.
+  _nds_state_plain_size?: () => number;
   _nds_state_data?: () => number;
   _nds_state_load?: (ptr: number, len: number) => number;
   _nds_state_error_kind?: () => number;

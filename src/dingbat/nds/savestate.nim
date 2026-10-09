@@ -52,6 +52,7 @@ const
     "slot2", "tm",                        # its own section, without the derived tables
     "bios9", "bios7",            # supplied on load
     "hle_bios9", "hle_bios7",    # checked against the loading machine (preamble)
+    "state_rooms",               # aligned payloads' bookkeeping (io_room)
     "unmapped_log", "iolog", "watch", "io_last", "io_repeat",   # debug logging
     "idle_epoch", "idle_epoch9", "idle_epoch7", "ev_epoch", "dev9", "dev7",   # idle-loop skipping (arm/cpu.nim), re-proved after a load
     "fline9", "fptr9", "fitcm9", "fpage7", "fptr7", "fseq7", "fjump7",   # fetch fast paths, off after a load
@@ -155,13 +156,16 @@ type
     buf: string
     pos: int
     missing: seq[string]   ## test only: write an older layout (state_payload_older)
-
+    aligned: bool          ## each run-time-length seq padded to its room (below)
+    rooms: ptr seq[(string, int)]   ## the machine's rooms (NDS.state_rooms)
+    dead3d: bool           ## the 3D frame buffers are redrawn before they are read
     min_block: int      ## record blocks this long or longer (0: none; state_blocks)
     blocks: seq[tuple[name: string; lo, hi: int]]
   Loader = object
     data: ptr UncheckedArray[char]
     len, pos: int
     missing: seq[string]   ## ADDED_FIELDS the state's older layout lacks
+    aligned: bool          ## the payload's seqs are padded to their room
   Layout = object
     text: string
     depth: int
@@ -243,6 +247,108 @@ proc io_seq_len[S](s: var S; cur: int; name: static string): int =
     else:
       check_range(int(n), 0, maxlen, name)
     int(n)
+
+# Aligned payloads (`state_payload(aligned = true)`: the rewind ring's, in
+# memory only). A seq whose length changes while a game runs shifts every
+# byte after it, and a rewind delta (the XOR of two payloads) is then noise
+# from there on: the 3D lists alone change length every frame. In an
+# aligned payload each such seq is followed by its room (u32, in elements)
+# and zero bytes up to it, so its end stays put while its length moves
+# within the room. The room is the most this machine has had that seq hold
+# (NDS.state_rooms; seqs sharing a name share it), rounded up to ROOM_STEP:
+# it grows rarely, and a delta across a growth is just the old size. The
+# padding stops at ROOM_PAD_MAX bytes, so a seq that once ran long (a GX
+# FIFO piled up behind a swap) does not pad every payload after it.
+
+const
+  ROOM_STEP = 64
+  ROOM_PAD_MAX = 1 shl 20
+
+proc room_for(rooms: var seq[(string, int)]; name: string; n, maxlen, size: int): int =
+  let want = min(maxlen, (n + ROOM_STEP - 1) div ROOM_STEP * ROOM_STEP)
+  var room = want
+  block find:
+    for i in 0 ..< rooms.len:
+      if rooms[i][0] == name:
+        rooms[i][1] = max(rooms[i][1], want)
+        room = rooms[i][1]
+        break find
+    rooms.add (name, want)
+  clamp(room, n, max(want, n + ROOM_PAD_MAX div max(size, 1)))
+
+proc elem_bytes[S, E](s: S; e: typedesc[E]): int =
+  ## Bytes one element of E takes (every seq element type here has a fixed
+  ## size: numbers and objects of numbers).
+  var cached {.global.} = -1
+  if cached < 0:
+    var t = Saver(buf: newString(64))
+    var one: E
+    io(t, one, "[]")
+    cached = t.pos
+  cached
+
+proc io_room[S, E](s: var S; n: int; e: typedesc[E]; name: static string) =
+  ## After a run-time-length seq's elements in an aligned payload: its room
+  ## and the zeros up to it.
+  const maxlen = var_seq_max(name)
+  let size = elem_bytes(s, E)
+  when S is Saver:
+    var room = uint32(room_for(s.rooms[], name, n, maxlen, size))
+    s.put(addr room, 4)
+    let pad = (int(room) - n) * size
+    if pad > 0:
+      if s.pos + pad > s.buf.len: s.buf.setLen(max(2 * s.buf.len, s.pos + pad))
+      zeroMem(addr s.buf[s.pos], pad)
+      s.pos += pad
+  else:
+    var room: uint32
+    s.get(addr room, 4)
+    check_range(int(room), n, maxlen, name & " room")
+    let pad = (int(room) - n) * size
+    if s.len - s.pos < pad: raise state_error("truncated DS state data", srkTruncated)
+    s.pos += pad
+
+proc io_planes[S, E](s: var S; x: var seq[E]; n: int; name: static string) =
+  ## A run-time-length seq of objects in an aligned payload (the 3D lists):
+  ## its room, then the elements padded to the room as byte planes -- byte
+  ## 0 of every element, then byte 1, ... -- so a coordinate whose high
+  ## bytes hold still from one snapshot to the next is zeros in the delta
+  ## even when its low byte moves (a camera pan moves every vertex).
+  const maxlen = var_seq_max(name)
+  let size = elem_bytes(s, E)
+  when S is Saver:
+    let room = room_for(s.rooms[], name, n, maxlen, size)
+    var r32 = uint32(room)
+    s.put(addr r32, 4)
+    var t = Saver(buf: newString(max(n * size, 1)))
+    for i in 0 ..< n: io(t, x[i], name)
+    let total = room * size
+    if s.pos + total > s.buf.len: s.buf.setLen(max(2 * s.buf.len, s.pos + total))
+    let src = cast[ptr UncheckedArray[uint8]](addr t.buf[0])
+    let dst = cast[ptr UncheckedArray[uint8]](addr s.buf[s.pos])
+    for i in 0 ..< n:          # past n both sides are zeros
+      let row = i * size
+      for k in 0 ..< size: dst[k * room + i] = src[row + k]
+    if room > n:
+      for k in 0 ..< size: zeroMem(addr dst[k * room + n], room - n)
+    s.pos += total
+  else:
+    var r32: uint32
+    s.get(addr r32, 4)
+    check_range(int(r32), n, maxlen, name & " room")
+    let room = int(r32)
+    let total = room * size
+    if s.len - s.pos < total: raise state_error("truncated DS state data", srkTruncated)
+    var rows = newString(max(n * size, 1))
+    let src = cast[ptr UncheckedArray[uint8]](addr s.data[s.pos])
+    let dst = cast[ptr UncheckedArray[uint8]](addr rows[0])
+    for i in 0 ..< n:
+      let row = i * size
+      for k in 0 ..< size: dst[row + k] = src[k * room + i]
+    s.pos += total
+    var t = Loader(data: cast[ptr UncheckedArray[char]](addr rows[0]), len: n * size,
+                   missing: s.missing)
+    for i in 0 ..< n: io(t, x[i], name)
 
 proc io[S, T](s: var S; x: var T; name: static string) =
   const leaf = not (T is (array or seq or Deque or object or tuple or AirFrame))
@@ -333,7 +439,16 @@ proc io[S, T](s: var S; x: var T; name: static string) =
     elif is_block(E):
       when S is Saver:
         s.note_block(name, s.pos, sizeof(x))
-        s.put(addr x, sizeof(x))
+        when name in ["color", "frame", "line_cost"]:
+          # the renderer's frame and line costs and the 3D frame handed to
+          # the display: zeros when the next frame redraws them before any
+          # read (dead_3d_frame), which is every V-blank
+          if s.dead3d:
+            if s.pos + sizeof(x) > s.buf.len: s.buf.setLen(max(2 * s.buf.len, s.pos + sizeof(x)))
+            zeroMem(addr s.buf[s.pos], sizeof(x))
+            s.pos += sizeof(x)
+          else: s.put(addr x, sizeof(x))
+        else: s.put(addr x, sizeof(x))
       else: s.get(addr x, sizeof(x))
     else:
       for i in low(x) .. high(x): io(s, x[i], name)
@@ -354,7 +469,13 @@ proc io[S, T](s: var S; x: var T; name: static string) =
             s.put(addr x[0], n * sizeof(E))
           else: s.get(addr x[0], n * sizeof(E))
       else:
+        when var_seq_max(name) >= 0:
+          if s.aligned:
+            io_planes(s, x, n, name)
+            return
         for i in 0 ..< n: io(s, x[i], name)
+      when var_seq_max(name) >= 0:
+        if s.aligned: io_room(s, n, E, name)
   elif T is Deque:
     type E = typeof(x.peekFirst)
     when S is Layout:
@@ -367,6 +488,8 @@ proc io[S, T](s: var S; x: var T; name: static string) =
       for i in 0 ..< x.len:
         var v = x[i]
         io(s, v, name)
+      when var_seq_max(name) >= 0:
+        if s.aligned: io_room(s, x.len, E, name)
     else:
       let n = io_seq_len(s, x.len, name)
       x.clear()
@@ -374,6 +497,8 @@ proc io[S, T](s: var S; x: var T; name: static string) =
         var v: E
         io(s, v, name)
         x.addLast(v)
+      when var_seq_max(name) >= 0:
+        if s.aligned: io_room(s, n, E, name)
   elif T is (object or tuple):
     when S is Layout:
       inc s.depth
@@ -514,7 +639,9 @@ proc older_layout_fields(n: NDS; hash: uint32): int =
 proc bios_identity(n: NDS; arm9: bool): uint32 =
   if arm9: fnv1a(n.bios9) else: fnv1a(n.bios7)
 
-const PREAMBLE_MAGIC = 0x5344_534E'u32   ## "NDSS"
+const
+  PREAMBLE_MAGIC = 0x5344_534E'u32     ## "NDSS"
+  PREAMBLE_ALIGNED = 0x4144_534E'u32   ## "NDSA": an aligned payload (rewind)
 
 proc slot2_identity(n: NDS): uint32 =
   ## What is in the GBA slot: the device, and for a GBA cart fnv1a over its
@@ -525,7 +652,7 @@ proc slot2_identity(n: NDS): uint32 =
   result = (result xor uint32(r.len)) * 0x01000193'u32
 
 proc write_preamble(s: var Saver; n: NDS) =
-  var w = [PREAMBLE_MAGIC,
+  var w = [(if s.aligned: PREAMBLE_ALIGNED else: PREAMBLE_MAGIC),
            (if s.missing.len > 0: n.older_layout_hash(s.missing.len) else: n.layout_hash()),
            uint32(ord(n.hle_bios9)) or (uint32(ord(n.hle_bios7)) shl 1),
            n.bios_identity(true), n.bios_identity(false),
@@ -535,8 +662,9 @@ proc write_preamble(s: var Saver; n: NDS) =
 proc check_preamble(l: var Loader; n: NDS) =
   var w: array[7, uint32]
   l.get(addr w[0], sizeof(w))
-  if w[0] != PREAMBLE_MAGIC:
+  if w[0] != PREAMBLE_MAGIC and w[0] != PREAMBLE_ALIGNED:
     raise state_error("DS state payload has no preamble")
+  l.aligned = w[0] == PREAMBLE_ALIGNED
   if w[1] != n.layout_hash():
     let k = n.older_layout_fields(w[1])
     if k < 0:
@@ -561,9 +689,23 @@ proc check_preamble(l: var Loader; n: NDS) =
 # ---------------------------------------------------------------------------
 # Payload
 
-proc state_payload*(n: NDS): string =
+proc dead_3d_frame(n: NDS): bool =
+  ## The renderer's frame and line costs and the 3D frame handed to the
+  ## display are redrawn before anything reads them: true from V-blank
+  ## (on_vblank) until the first line of the next frame is drawn, so at
+  ## every frame boundary, where states, rewind and run-ahead take theirs.
+  ## RDLINES and the underflow flag were latched at V-blank.
+  privateAccess(Gpu3d)
+  let g = n.gpu3d
+  g.done_lines == 0 and not g.scratch_ok and not g.rendered
+
+proc state_payload*(n: NDS; aligned = false): string =
   ## The machine as payload bytes (no header): what rewind deltas compare.
-  var s = Saver(buf: newString(8 * 1024 * 1024))
+  ## `aligned`: each run-time-length seq padded to its room, so a delta
+  ## between two such payloads lines up (the rewind ring; in memory only,
+  ## never stored: `state_bytes` writes the plain form).
+  var s = Saver(buf: newString(8 * 1024 * 1024), aligned: aligned,
+                rooms: addr n.state_rooms, dead3d: n.dead_3d_frame())
   s.write_preamble(n)
   io_machine(s, n)
   s.buf.setLen(s.pos)
@@ -580,14 +722,16 @@ when defined(test_harness):
     s.buf.setLen(s.pos)
     move(s.buf)
 
-proc state_blocks*(n: NDS; min_bytes: int): seq[tuple[name: string; lo, hi: int]] =
+proc state_blocks*(n: NDS; min_bytes: int; aligned = false): seq[tuple[name: string; lo, hi: int]] =
   ## The payload ranges (`state_payload` offsets) of the numeric arrays and
   ## seqs and the single fields of at least `min_bytes`, by field name: with
   ## 256 the memories (RAM, VRAM, palettes, OAM, the save chip) and the
   ## large tables, which tools/statefuzz.nim leaves out of a sweep; with 1
   ## every field, to name the one at an offset. Each section starts with an
-  ## empty range named "[its title]".
-  var s = Saver(buf: newString(8 * 1024 * 1024), min_block: max(min_bytes, 1))
+  ## empty range named "[its title]". `aligned`: the offsets of an aligned
+  ## payload (state_payload).
+  var s = Saver(buf: newString(8 * 1024 * 1024), min_block: max(min_bytes, 1),
+                aligned: aligned, rooms: addr n.state_rooms, dead3d: n.dead_3d_frame())
   s.write_preamble(n)
   io_machine(s, n)
   s.blocks

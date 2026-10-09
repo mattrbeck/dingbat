@@ -9,7 +9,8 @@ batch are still off. The iOS app still gates all of them for DS games.
 
 | Feature | Before | Why it was off | Now / what it would take |
 |---|---|---|---|
-| Save states, slots, resume | on | -- | (docs/nds/savestate.md) |
+| Save states, slots, resume | on | -- | (docs/nds/savestate.md). A slot is packed in the checkpoint worker (8.6-9.2 ms on the page, was 22-29); the undo a load or reset keeps is held plain. |
+| Crash checkpoints (the moments, the session a crash leaves) | **wrong** | the 60 s checkpoint read the GB/GBA core, which still held any GB/GBA game played earlier: its state went in as the DS game's checkpoint *and* session (a page that died then resumed nothing) | **fixed**: the DS core's plain image, packed in the worker, signed with the DS battery (`nds.e2e.mjs`, "slot, undo and checkpoint"). |
 | Fast-forward, 2x, slow motion, frame step | on | -- | unchanged. Fast-forward runs 12 ms of frames a tick (~3-4x on SoulSilver). Skipping the drawing of frames nobody sees would roughly double it, but display capture writes drawn frames into VRAM, so a skipped frame changes the machine unless capture is off: 1-2 agent-days, careful. |
 | **Rewind** (hold) | off | not wired: the core had the hooks (`state_payload` / `load_state_payload`) but no ring in either front end | **on** (web). The GB/GBA ring (`common/rewind.nim`) fed every 10 frames; the Rewind switch, the button and the backquote key reach it. iOS: the same ring is gated for `ekNDS` in `dingbat_ios.nim`; about half a day to lift. |
 | Rewind scrubber, Report a Bug's timeline | off | needs thumbnails in the ring and the scrub exports | still off. ~1 agent-day (thumbnails of both screens at push time, the `*_scrub_*` exports, the JS side already exists). |
@@ -154,6 +155,19 @@ frames (sparse XOR scan of 6 MB + zlib of what changed), affordable
 everywhere the game runs. Ring growth was 4-7 MB per 10 s of history in
 these scenes, so the 64 MB cap holds roughly 1.5-2.5 minutes and iOS's
 16 MB roughly 15-25 s.
+
+**2026-10-09, after the rewind polish** (docs/nds/savestate.md, "Rewind's
+aligned payloads"; same bench, an unloaded machine, before and after on the
+same build otherwise): ring after 10 s 9.94 -> 8.47 MB (SoulSilver), 13.11
+-> 11.97 MB (Golden Sun), 7.16 -> 7.13 MB (Mystery Dungeon), each with
+the 6.2-6.4 MB newest payload; a stored state 1.59 -> 1.59, 2.14 -> 2.06 and
+1.25 -> 1.24 MB; frames, pops and pushes otherwise unchanged (push frame 2.2 / 5.2 /
+2.4 ms). In gameplay rather than intros the cut is larger: natively, a
+Golden Sun field push 386 -> 163 KB (23 -> 9.8 MB per 10 s), SoulSilver
+walking 59 -> 33 KB (3.5 -> 2.0 MB per 10 s). So in a moving 3D scene the
+web's 64 MB holds about a minute of Golden Sun and five of SoulSilver, and
+a 16 MB cap (the newest payload alone is 6-7 MB of it) about 10 s and 50 s:
+iOS wants a larger DS cap when rewind is lifted there.
 
 ## Bigger ideas (not prototyped)
 
