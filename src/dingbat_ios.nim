@@ -775,7 +775,9 @@ proc dingbat_unseen_next(fastForward: cint): cint {.exportc, cdecl.} =
   ## Only such a frame is marked, so a frame that will be drawn is never
   ## treated as undrawn. The DS draws every frame: none is marked.
   let sgb = stateKind == ekGB and stateGb != nil and stateGb.sgb_active()
-  unseenNext = not drawAllFrames and not sgb and stateKind != ekNDS and
+  # A rewind snapshot due on it would wait ~20 frames under fast-forward
+  let snap = fastForward != 0 and rewindHistory != nil and rewindHistory.snapshot_due()
+  unseenNext = not drawAllFrames and not sgb and not snap and stateKind != ekNDS and
     (not lcdOn or fastForward != 0)
   cint(unseenNext)
 

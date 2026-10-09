@@ -350,6 +350,12 @@ proc maybe_push*(rw: Rewind; payload: proc(): string;
     return true
   false
 
+proc snapshot_due*(rw: Rewind): bool =
+  ## The next frame takes a snapshot (when drawn). Fast-forward draws it,
+  ## so its snapshots stay `interval` apart and rewinding through it plays
+  ## at the rate of the rest.
+  rw.frame_count + 1 >= rw.interval
+
 proc pop*(rw: Rewind): string =
   ## The next snapshot to apply when stepping backward ("" when exhausted).
   ## Each call rewinds history by one snapshot (`interval` frames).
