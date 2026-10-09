@@ -2366,6 +2366,10 @@ proc main() =
     of ekGBA: discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload(), ready = false)
     of ekGB: discard app.rewind.maybe_push(proc(): string = app.gb_emu.state_payload(), ready = false)
     of ekNone: discard
+  proc rewind_due(): bool =
+    ## The next frame takes a rewind snapshot: it is drawn, so snapshots
+    ## stay their interval apart under fast-forward too.
+    app.cfg.rewind and app.netlink == nil and app.rewind.snapshot_due()
   # Normal play: fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216
   # MHz; the GB frame is the same period); the audio queue is a bounds check
   # only. Turbo and fast-forward keep pure audio pacing.
@@ -2511,7 +2515,8 @@ proc main() =
             let unpaced = not stepping and not app.gba_emu.apu.sync and not input_log_open
             if unpaced:
               var n = 0
-              while n < 64 and unseen_fits() and gba_frame_due() and not input_pending():
+              while n < 64 and unseen_fits() and gba_frame_due() and not rewind_due() and
+                  not input_pending():
                 let t0 = getPerformanceCounter()
                 app.gba_emu.ppu.no_draw = true
                 input_log_frame_start()
@@ -2532,7 +2537,8 @@ proc main() =
           let unpaced = not stepping and not app.gb_emu.apu.sync and not app.gb_emu.sgb_active()
           if unpaced:
             var n = 0
-            while n < 64 and unseen_fits() and gb_frame_due() and not input_pending():
+            while n < 64 and unseen_fits() and gb_frame_due() and not rewind_due() and
+                not input_pending():
               let t0 = getPerformanceCounter()
               app.gb_emu.ppu.no_draw = true
               app.gb_emu.run_until_frame()

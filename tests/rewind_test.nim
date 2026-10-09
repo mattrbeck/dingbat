@@ -402,6 +402,17 @@ block:
   check "committed-away IDs stay gone", dropped.allIt(rw.snapshot_by_id(it).len == 0)
   verify_all(rw, "after commit + resume")
 
+block:
+  # Fast-forward draws only the frames a snapshot is due on
+  # (snapshot_due): snapshots stay `interval` apart.
+  let rw = new_rewind(interval = 10)
+  var pushes: seq[int]
+  for f in 1 .. 100:
+    if rw.maybe_push(proc(): string = "frame " & $f, ready = rw.snapshot_due()):
+      pushes.add f
+  check "a drawn snapshot-due frame keeps snapshots interval apart",
+        pushes == toSeq(1 .. 10).mapIt(it * 10)
+
 echo ""
 if failures == 0:
   echo "ALL REWIND TESTS PASSED"

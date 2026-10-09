@@ -16731,6 +16731,7 @@ var Module = {
     // goes undrawn only with room after it for a drawn one, so a tick never
     // ends on an undrawn frame.
     let ffSkipMs = 3, ffDrawMs = 4;
+    let ffSkipping = false; // the last fast-forward tick left frames undrawn
     let ffVsyncMs = 1000 / 60; // running mean of the rAF interval at play
     let ffOverMs = 2;       // running mean of the tick's own work after them
     let ffReserveMs = 2;    // and of the browser's, learnt from late ticks
@@ -17326,9 +17327,18 @@ var Module = {
           ffAimed = 0;
           deadline = t + 16 + ffFrameMs; // frames start until 16 ms in
         } else {
+          // Four frames, as they will run: three undrawn and a drawn one
+          // when skipping. ffFrameMs mixes the two by how many a tick ran,
+          // and so by the aim itself: a short aim raised it, a long one
+          // lowered it, and the aim flapped between them. Nor does it fall
+          // back by a vsync unless clear of the boundary by a quarter of one,
+          // or noise near it flaps the aim (and the cadence) all the same.
           const after = ffOverMs + ffReserveMs;
-          ffAimed = Math.min(6, Math.max(1, Math.ceil(
-            (Math.max(0, t - timestamp) + 4 * ffFrameMs + after) / ffVsyncMs)));
+          const span = ffSkipping ? 3 * ffSkipMs + ffDrawMs : 4 * ffFrameMs;
+          const need = (Math.max(0, t - timestamp) + span + after) / ffVsyncMs;
+          let aim = Math.ceil(need);
+          if (ffAimed > aim && need > ffAimed - 1.25) aim = ffAimed;
+          ffAimed = Math.min(6, Math.max(1, aim));
           deadline = timestamp + ffAimed * ffVsyncMs - after;
           if (--ffProbeIn <= 0) {
             // Frames until the vsync itself: the last ends past it
@@ -17337,7 +17347,7 @@ var Module = {
           }
         }
         const t0 = t;
-        let n = 0;
+        let n = 0, skipped = 0;
         let unseen = false;
         do {
           unseen = t + ffSkipMs + ffDrawMs < deadline && unseenNext(true);
@@ -17352,11 +17362,12 @@ var Module = {
           const now = performance.now();
           const took = Math.min(now - t, 50);
           ffFrameMs += (took - ffFrameMs) * 0.1;
-          if (unseen) ffSkipMs += (took - ffSkipMs) * 0.1;
+          if (unseen) { ffSkipMs += (took - ffSkipMs) * 0.1; skipped++; }
           else ffDrawMs += (took - ffDrawMs) * 0.1;
           t = now;
           n++;
         } while (unseen || t + ffDrawMs < deadline);
+        ffSkipping = skipped > 0;
         ffEmuEnd = t;
         ffStatNote(timestamp, n, t - t0, late);
         accumulator = 0;

@@ -122,7 +122,10 @@ lose), when the wait would be under 1 ms, at fast-forward (it fills the
 whole interval anyway), and in link play or 2P (their pacing is the link's).
 If a late run has not started when the next refresh's callback arrives (the
 main thread was busy), that callback cancels it, counts a miss and runs its
-frames itself, so a refresh is never skipped waiting for it.
+frames itself, so a refresh is never skipped waiting for it. A real miss
+also turns late start off for 10 s: a hitch is a break in the cadence, more
+noticeable than the latency saved, so late start causes at most one in any
+10 s, whatever the load.
 
 Not yet known: whether the on-screen buttons gain at all. UIKit may deliver
 touches once per refresh, just before the display link's callback; if so a
@@ -139,6 +142,66 @@ calls back about 0.5 ms after its own target refresh, so late start rightly
 never arms there (and earlier 60 Hz numbers were noise). The simulator has
 no presented-time API and approximate refresh timing: the phone decides
 whether it ships.
+
+## Frame pacing
+
+Cadence (each picture shown for the same number of refreshes) matters as
+much as latency. Frame skip does not touch it: how many frames a tick runs
+still comes from the display's timestamps alone, and the picture shown is
+the same one main shows (600 tick-shaped groups on GBA and GB, unseen
+against draw-all from one state: 0 picture hashes differ). The probe
+(`web/e2e/pacing-probe.mjs`) runs main, this branch and `?draw=all` side by
+side; on its virtual clock the game loop's own code decides and only time
+is modelled (a cost per drawn and undrawn frame, present, tick, noise and
+spikes), so a loaded machine does not move the result.
+
+- 1x, 2x, slow motion, run-ahead 1 and 2, on 30, 48, 50, 60, 75, 90, 120
+  and 144 Hz and variable-rate displays: frames per callback identical to
+  main in every case.
+- Slower devices (costs x4 and x6, an iPhone SE-class profile): the branch
+  misses fewer refreshes. 2x at 60 Hz on the phone profile: 52 uneven
+  refreshes a minute against main's 1700; run-ahead 2 no longer slows the
+  game (main 39.5-44 fps, the branch 59.9). One borderline case reads both
+  ways: 2x where a refresh just does not fit, main settles into an even
+  30 Hz, the branch shows 60 Hz with occasional hitches.
+- Fast-forward: the branch's tick aimed its frames at a number of refreshes
+  from the mean of all its frames, drawn and undrawn. Each tick draws one,
+  so the mean depended on how many the tick ran, and so on the aim itself:
+  near 5 ms a frame (an iPhone SE) the aim flapped between 1 and 2
+  refreshes and presents came 1 and 2 refreshes apart, mixed. Main flaps
+  the same way at other speeds (3.6-3.8 and 7.6-8.0 ms at 60 Hz). Now four
+  frames are estimated as they will run (three undrawn and one drawn), and
+  the aim drops a refresh only clear of the boundary by a quarter of one.
+  A sweep of the loop at 1-10 ms a frame leaves no flapping speed at 30, 50
+  or 60 Hz (main: 6-10), one at 120 Hz (main: 31) and 14 at 144 Hz (main:
+  44: a drawn frame there takes longer than a refresh, so its noise alone
+  moves presents). The probe, phone profile, 60 Hz: 8.1 +/- 0.5 frames per
+  present, every present 2 refreshes, 242 fps (was 6.0 +/- 2.6, mixed; main
+  5.9 +/- 0.3 at 176 fps); 120 Hz: 5.7 +/- 0.5, every present 3 refreshes.
+- Rewind: a snapshot due on an undrawn frame waited for a drawn one, about
+  20 frames on under fast-forward, so rewinding through fast-forwarded
+  history went at twice the rate, unevenly. Fast-forward now draws the frame
+  a snapshot is due on (`snapshot_due`), one more drawn frame in 10.
+- iOS (simulator, under heavy load from other jobs, 20 s runs, DEBUG
+  `-pacing-test 20`): frames per refresh exactly 1 at 1x and 2 at 2x, as
+  without frame skip; late start at 30 Hz added about one hitch a run (1-2
+  misses in 312-428 late runs), now capped by the 10 s pause after a miss.
+  At 60 Hz late start does not arm in the simulator; the phone decides.
+  iOS fast-forward fills a fixed share of the refresh, not an aim, so it
+  has no flapping.
+- Desktop (code and a model; not run): batching only under fast-forward,
+  presenting on the same clock as main, and it fixes main's stale picture
+  at turbo and fast-forward. Holding fast-forward on an analog trigger ends
+  each batch after a frame (axis events count as input): throughput, not
+  cadence.
+
+Found on main, not changed here: web timestamps jittered by 2 ms skip ~125
+frames a minute at 1x (the accumulator has no tolerance; Chrome's
+vsync-aligned timestamps avoid most of it); web fast-forward learns the
+refresh rate only at normal speed. Desktop has vsync off, paces 1x on a
+16.743 ms counter slot (at 60 Hz, ~36 frames a minute never shown, each
+with one doubled), paces turbo by the audio queue with a whole-millisecond
+present interval, and reads the refresh rate once, from display 0.
 
 ## Where else it could apply (survey, not done)
 
@@ -276,6 +339,10 @@ fast-forward. Most of Advance Wars' frame time is outside drawing here.
       after every frame again; `*_unseen_next` marks only frames that
       really go undrawn. iOS link e2e 6/6 and the FireRed/LeafGreen trade
       e2e (2% loss) pass with native and wasm states identical
+- [x] round 6 (frame pacing, above): web fast-forward's aim no longer
+      flaps; fast-forward draws rewind-due frames; iOS late start pauses
+      10 s after a miss. render_skip, rewind (new spacing case), ios_api,
+      rollback tests; web tests as above; tsc; wasm, desktop, iOS builds
 - [ ] desktop: compiled, not run here (driving the GUI needs asking)
 - [ ] if kept: drop the switches or keep `?draw=all` as a diagnostic; the
       iOS setting is a prototype toggle
