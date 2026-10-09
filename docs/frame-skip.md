@@ -72,7 +72,52 @@ step the LCD panel. Desktop batches the same way in its unpaced modes.
 | desktop fast-forward / turbo | it presents once per display interval: the frames before are run undrawn in a batch, then one drawn, then the present |
 | 120 Hz screens | at 1x a tick runs at most one frame: nothing to skip, nothing changes |
 | 2P (local link), lockstep netlink, clip replay, frame advance | draw every frame as before |
-| input latency at 30 Hz | the skip adds none; iOS can now run a refresh's frames late (Settings › Advanced › Start frames late, a prototype), reading input most of a refresh later; the web cannot (the picture must be handed over inside the refresh callback) |
+| link desync dumps compared across peers (`rollback_dump_size`, iOS LINKDUMP, the link e2e tests) | each peer draws only its own core, so the dump blanks the picture and the mosaic latch (`peer_state_bytes`); web/e2e/link-rom-skip passes |
+| the A/B switch (`?draw=all`, Draw every frame) | one core switch (`wasm_set_draw_all` / `dingbat_set_draw_all`): also rollback, Add pictures and the clip pre-roll |
+| Add pictures (web, iOS): ~600 frames a game for one picture | each 30-frame chunk draws only its last (a deadline can end the run between chunks) |
+| a clip's silent pre-roll | only its last frame, the one presented, is drawn |
+| desktop input log (playtest recordings) | no batching under it: its every-60-frames hash reads the previous frame's picture |
+| desktop turbo/fast-forward: a changed frame left unpresented, then a static one presented | the texture is uploaded if any frame changed since the last upload (on main too; iOS had it fixed in dc1b85d0) |
+| playtest driver `run N` | draws only the last frame, the one read (hashes and shots unchanged) |
+| the SGB or the LCD response refusing a skip | `*_unseen_next` returns whether the frame will really go undrawn, so fast-forward's timing and the log count only real skips |
+| input latency at 30 Hz | the skip adds none; iOS can now run a refresh's frames late (Start frames late, below); the web cannot (the picture must be handed over inside the refresh callback) |
+
+Not done (each draws every frame, as before): rollback's ticks per refresh
+(1-2 at 1x, up to 4 at 2x, each also converted to RGBA), local 2P (both
+cores shown, up to 4 frames per refresh at 2x on iOS) and the lockstep
+netlink's catch-up. A stall can end any of them early, so the last frame is
+not known up front; rollback's stall test could be asked before each tick.
+
+## Start frames late (iOS, prototype, off by default)
+
+Settings › Emulation › Advanced. The display link wakes the app right after
+a refresh; normally the app runs the frames it owes at once and hands the
+picture over, and the system shows it at the next refresh. Everything
+pressed after that moment waits for the following run, so a press is read on
+average half a refresh after it happens and shown a whole refresh after it is
+read: about 1.5 refreshes, ~25 ms at 60 Hz and ~50 ms at 30 Hz (Low Power
+Mode), before the game's own frames of delay.
+
+With it on, the app waits until just before the next refresh, `lateWork` (a
+running mean of how long a run takes) plus `lateMargin` (time for the GPU
+and the compositor) ahead of it, and runs then. Input is read later in the
+same refresh, so it reaches the screen up to most of a refresh sooner: ~10 ms
+at 60 Hz, ~25 ms at 30 Hz. The frames, their count and the audio are the
+same; only when they run moves.
+
+The risk is missing the refresh: if the run, the GPU or the compositor runs
+long, the picture lands a refresh late (a hitch, and that frame later than
+without the setting). So the margin learns: a run that ends within 2 ms of
+its refresh, or (on a device) a picture the system reports shown after its
+refresh or never shown, widens it by 2 ms up to 12; each on-time one narrows
+it by 0.1 ms back towards 3. A device or a scene that cannot keep up backs
+off to running nearly as early as before. Not at fast-forward (it fills the
+whole interval anyway), nor in link play or 2P (their pacing is the link's).
+
+Simulator, tonc m7_demo, press to the refresh its picture is aimed at: at 30
+Hz 23.7 / 29.6 ms off against 9.2 / 9.4 ms on; at 60 Hz inconclusive on a
+loaded machine. The simulator has no presented-time API and its refresh
+timing is approximate, so the phone decides whether it ships.
 
 ## Proof
 
@@ -164,6 +209,11 @@ fast-forward. Most of Advance Wars' frame time is outside drawing here.
       desktop and iOS builds
 - [ ] Matt's test at home (web on his devices, iOS on the phone): fast-
       forward, 2x, run-ahead, link play, Low Power Mode with late start
+- [x] round 4 (independent review): link dumps, the one A/B switch, Add
+      pictures, clip pre-roll, desktop input log and stale texture, late
+      start on real present times, playtest driver; tools/ci_local.py 32/32,
+      web link-rom-skip e2e 4/4, the browser tests, tsc
+- [ ] the playtest train (whole corpus): see the commit after it reports
 - [ ] desktop: compiled, not run here (driving the GUI needs asking)
 - [ ] if kept: drop the switches or keep `?draw=all` as a diagnostic; the
       iOS setting is a prototype toggle
