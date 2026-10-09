@@ -96,10 +96,10 @@ task ndsref_build, "Build the DS reference tools (tools/ndsref: a headless libre
   exec "sh tools/ndsref/build.sh"
   exec "nim c -d:test_harness -d:release --hints:off --path:src -o:tools/ndsref/ndsrun tools/ndsrun.nim"
 
-task test_desktop, "Run the desktop frontend tests (input, settings, link, saves, game loading, modals)":
+task test_desktop, "Run the desktop frontend tests (input, settings, link, saves, game loading, modals, DS Beta)":
   # modal drives Dear ImGui headless, so it needs imguin (CI's test job
   # installs it: .github/scripts/install-test-deps.sh).
-  for t in ["input", "settings", "netlink", "persist", "lifecycle", "modal"]:
+  for t in ["input", "settings", "netlink", "persist", "lifecycle", "modal", "nds"]:
     exec "nim c -r -d:test_harness -d:release --path:src " &
          "-o:dingbat_desktop_" & t & "_test tests/desktop_" & t & "_test.nim"
 

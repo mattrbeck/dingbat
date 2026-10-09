@@ -214,6 +214,11 @@ proc default_controller_bindings*(): Table[cint, Input] =
   for (btn, inp) in DEFAULT_CONTROLLER_MAPPING:
     result[btn] = inp
 
+proc default_ds_controller_bindings*(): Table[cint, DsInput] =
+  ## The pad's X and Y (by label, as the web maps a standard pad) are the
+  ## DS's X and Y. They also hold A and B above; in a DS game these win.
+  {cint(2): dsX, cint(3): dsY}.toTable
+
 # Windows: %APPDATA%\dingbat (the native location); elsewhere: ~/.config/dingbat
 let CONFIG_DIR  = when defined(windows): getConfigDir() / "dingbat"
                   else: "~/.config/dingbat"
@@ -250,6 +255,14 @@ proc homerow_keybindings*(): Table[cint, Input] =
   result[key_name_to_code("semicolon")] = Input.START
   result[key_name_to_code("w")]         = Input.L
   result[key_name_to_code("r")]         = Input.R
+
+# The DS's X and Y on the keyboard: free keys in each preset, the web's
+# choice (D and C beside Z/X; I and U beside the home-row J/K)
+proc default_ds_keybindings*(): Table[cint, DsInput] =
+  {key_name_to_code("d"): dsX, key_name_to_code("c"): dsY}.toTable
+
+proc homerow_ds_keybindings*(): Table[cint, DsInput] =
+  {key_name_to_code("i"): dsX, key_name_to_code("u"): dsY}.toTable
 
 type
   VideoFilter* = enum
@@ -298,6 +311,15 @@ type
     # The window was fullscreen when dingbat last quit (or last toggled it);
     # window_restore.nim decides whether the next start honours it.
     fullscreen*:        bool
+    # DS Beta (Settings > General > Advanced): .nds games load. Off, the app
+    # is what it was before the DS core; the "nds" keys below are written
+    # only when they differ from their defaults, so a file stays as it was.
+    ds_beta*:           bool
+    nds_bios9_path*:    string   # DS ARM9 BIOS dump ("" = HLE)
+    nds_bios7_path*:    string   # DS ARM7 BIOS dump ("" = HLE)
+    nds_firmware_path*: string   # DS firmware dump ("" = built-in)
+    nds_keybindings*:   Table[cint, DsInput]  # keycode -> DS X/Y
+    nds_controller_bindings*: Table[cint, DsInput]  # pad button -> DS X/Y
     # Each file key's text as this process last read or wrote it. save_config
     # writes only the keys whose value differs and takes the rest from the
     # file as it is now, so a second dingbat window's changes survive.
@@ -336,6 +358,9 @@ proc new_config*(): Config =
     mp2k_hle:        false,
     frame_size:      3,
     fullscreen:      false,
+    ds_beta:         false,
+    nds_keybindings: default_ds_keybindings(),
+    nds_controller_bindings: default_ds_controller_bindings(),
   )
 
 proc reset_to_defaults*(cfg: Config) =
@@ -347,6 +372,9 @@ proc reset_to_defaults*(cfg: Config) =
   d.recents         = cfg.recents
   d.bios_path       = cfg.bios_path
   d.gb_bootrom_path = cfg.gb_bootrom_path
+  d.nds_bios9_path  = cfg.nds_bios9_path
+  d.nds_bios7_path  = cfg.nds_bios7_path
+  d.nds_firmware_path = cfg.nds_firmware_path
   d.headless        = cfg.headless
   d.fullscreen      = cfg.fullscreen  # where the window is, not a setting
   d.file_entries    = cfg.file_entries
@@ -505,6 +533,29 @@ proc parse_config(j: JsonNode): Config =
       cfg.sgb_enable = gb["sgb"].getBool(false)
     if gb.hasKey("sgb_border") and gb["sgb_border"].kind == JBool:
       cfg.sgb_border = gb["sgb_border"].getBool(true)
+  if j.hasKey("nds") and j["nds"].kind == JObject:
+    let nds = j["nds"]
+    if nds.hasKey("beta") and nds["beta"].kind == JBool:
+      cfg.ds_beta = nds["beta"].getBool(false)
+    for (key, field) in [("bios9", addr cfg.nds_bios9_path),
+                         ("bios7", addr cfg.nds_bios7_path),
+                         ("firmware", addr cfg.nds_firmware_path)]:
+      if nds.hasKey(key) and nds[key].kind == JString:
+        field[] = nds[key].getStr("")
+    if nds.hasKey("keybindings") and nds["keybindings"].kind == JObject:
+      cfg.nds_keybindings = initTable[cint, DsInput]()
+      for k, v in nds["keybindings"].pairs:
+        try:
+          let keycode = keycode_from_file_name(k)
+          if keycode >= 0: cfg.nds_keybindings[keycode] = parseEnum[DsInput](v.getStr())
+        except ValueError: discard
+    if nds.hasKey("controller_bindings") and nds["controller_bindings"].kind == JObject:
+      cfg.nds_controller_bindings = initTable[cint, DsInput]()
+      for k, v in nds["controller_bindings"].pairs:
+        try:
+          let button = controller_button_from_name(k)
+          if button >= 0: cfg.nds_controller_bindings[button] = parseEnum[DsInput](v.getStr())
+        except ValueError: discard
   if j.hasKey("keybindings") and j["keybindings"].kind == JObject:
     cfg.keybindings = initTable[cint, Input]()
     for k, v in j["keybindings"].pairs:
@@ -589,6 +640,21 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
   for r in cfg.recents: recents_text &= "\n- " & yaml_str(r)
   let bios = if cfg.bios_path.len > 0: " " & yaml_str(cfg.bios_path) else: ""
   let bootrom = if cfg.gb_bootrom_path.len > 0: " " & yaml_str(cfg.gb_bootrom_path) else: ""
+  # The DS keys: "" (not written) at their defaults, so a file written with
+  # DS Beta never touched is the file a build without it writes.
+  proc nds_path(name, path: string): string =
+    if path.len > 0: "  " & name & ": " & yaml_str(path) else: ""
+  proc nds_bindings(name: string; t, defaults: Table[cint, DsInput];
+                    key_name: proc(k: cint): string): string =
+    if t == defaults: return ""
+    var lines: seq[(int, string)]
+    for k, v in t.pairs:
+      let n = key_name(k)
+      if n.len > 0: lines.add((ord(v), "    " & n & ": " & $v))
+    lines.sort()
+    if lines.len == 0: return "  " & name & ": {}"
+    result = "  " & name & ":"
+    for (_, line) in lines: result &= "\n" & line
   @[
     ("defaults_rev",       "defaults_rev: " & $CONFIG_DEFAULTS_REV),
     ("explorer_dir",       "explorer_dir: " & yaml_str(cfg.explorer_dir)),
@@ -616,6 +682,16 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
     ("gb.rumble",          "  rumble: " & $cfg.gb_rumble),
     ("gb.sgb",             "  sgb: " & $cfg.sgb_enable),
     ("gb.sgb_border",      "  sgb_border: " & $cfg.sgb_border),
+    ("nds.beta",           if cfg.ds_beta: "  beta: true" else: ""),
+    ("nds.bios9",          nds_path("bios9", cfg.nds_bios9_path)),
+    ("nds.bios7",          nds_path("bios7", cfg.nds_bios7_path)),
+    ("nds.firmware",       nds_path("firmware", cfg.nds_firmware_path)),
+    ("nds.keybindings",    nds_bindings("keybindings", cfg.nds_keybindings,
+                                        default_ds_keybindings(), keycode_file_name)),
+    ("nds.controller_bindings",
+                           nds_bindings("controller_bindings", cfg.nds_controller_bindings,
+                                        default_ds_controller_bindings(),
+                                        controller_button_name)),
   ]
 
 proc entry_table(entries: seq[ConfigEntry]): Table[string, string] =
@@ -630,6 +706,7 @@ proc render_entries(entries: seq[ConfigEntry]): string =
   var lines = @["---"]
   var section = ""
   for (key, text) in entries:
+    if text.len == 0: continue   # a key written only when set (the DS's)
     let dot = key.find('.')
     let sec = if dot > 0: key[0 ..< dot] else: ""
     if sec != section and sec.len > 0: lines.add(sec & ":")

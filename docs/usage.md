@@ -12,6 +12,9 @@ the window.
 
 Zipped ROMs work in both: the first `.gba` / `.gb` / `.gbc` in the archive is loaded.
 
+Nintendo DS games (`.nds`) load in the native app only with Settings > General >
+Advanced > DS Beta ticked (off by default): see [nds/desktop.md](nds/desktop.md).
+
 ## BIOS
 
 No GBA BIOS file is needed; the built-in HLE BIOS is the default. To use a real dump,

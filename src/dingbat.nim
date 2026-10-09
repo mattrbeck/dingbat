@@ -29,6 +29,7 @@ import dingbat/frontend/persist
 import dingbat/frontend/game_load
 import dingbat/frontend/game_lock
 import dingbat/frontend/window_restore
+import dingbat/frontend/nds_game
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -398,13 +399,14 @@ proc setup_vao() =
 
 # ──────────────────────────── App State ────────────────────────────
 
-type EmuKind = enum ekNone, ekGBA, ekGB
+type EmuKind = enum ekNone, ekGBA, ekGB, ekNDS  # ekNDS: DS Beta only
 
 type AppState = ref object
   cfg:             Config
   cur_path:        string  # what load_rom last loaded (a zip: the zip); Reset reloads it
   gba_emu:         GBA
   gb_emu:          GB
+  nds:             NdsGame   # a DS game (DS Beta; frontend/nds_game.nim)
   emu_kind:        EmuKind
   window:          WindowPtr
   gl_ctx:          GlContextPtr
@@ -449,6 +451,7 @@ type AppState = ref object
   # state_notice is clear (poll_battery_notice).
   battery:           BatteryNotice
   rewind:          Rewind
+  rewind_ds:       bool    # `rewind` is a DS game's ring (no keyframes)
   rewinding:       bool    # true while the rewind key is held
   last_rewind_pop: uint32
   # Active 2-player network link (nil = single-player). While non-nil the
@@ -482,6 +485,11 @@ var rumble_on         = false
 var rumble_flip       = false
 var rumble_last_pulse = 0'u32
 
+# The running core's frame period in performance-counter ticks, which the
+# main loop's frame scheduler paces by: the GB/GBA's 280896 cycles at
+# 16.777216 MHz, or the DS's. Set in main; load_rom picks the core's.
+var gbx_frame_ticks, nds_frame_ticks, frame_ticks: uint64
+
 # ──────────────────────────── ROM Loading ────────────────────────────
 
 proc flush_saves() =
@@ -489,11 +497,14 @@ proc flush_saves() =
   ## frame's battery write, or a state loaded while paused, is on disk. A
   ## failure is the core's to log (once) and poll_battery_notice's to show.
   discard flush_batteries(app.gba_emu, app.gb_emu)
+  if app.nds != nil: discard app.nds.flush()
 
 proc apply_color_correction() =
+  ## The correction models the GBA and GBC panels: never on a DS's own.
   glUseProgram(app.game_shader)
   let loc = glGetUniformLocation(app.game_shader, "color_correct")
-  glUniform1i(loc, GLint(if app.cfg.color_correction: 1 else: 0))
+  glUniform1i(loc, GLint(if app.cfg.color_correction and app.emu_kind != ekNDS: 1
+                         else: 0))
 
 proc sgb_border_active(): bool =
   ## The last condition keeps the window from resizing for a cart that
@@ -508,7 +519,21 @@ proc output_size(): (int, int) =
   case app.emu_kind
   of ekGBA: (GBA_W, GBA_H)
   of ekGB:  (if sgb_border_active(): (SGB_BORDER_W, SGB_BORDER_H) else: (GB_W, GB_H))
+  of ekNDS: (NDS_W, NDS_H)
   of ekNone: (GBA_W, GBA_H)
+
+proc sdl_get_display_usable_bounds(index: cint; rect: var Rect): cint
+  {.importc: "SDL_GetDisplayUsableBounds", cdecl.}
+
+proc window_scale(): int =
+  ## The window's multiple of the picture: Frame size, except that a DS
+  ## picture (twice as tall as it is wide) takes the largest multiple that
+  ## still fits the screen's usable height, title bar allowed for.
+  if app.emu_kind != ekNDS: return app.scale
+  var r: Rect
+  if sdl_get_display_usable_bounds(getDisplayIndex(app.window), r) != 0:
+    return app.scale
+  clamp((int(r.h) - 40) div NDS_H, 1, app.scale)
 
 proc resize_to_output() =
   ## Size the window to an integer multiple of the native picture. In
@@ -518,7 +543,8 @@ proc resize_to_output() =
     app.fs_track.refit = true
     return
   let (w, h) = output_size()
-  setSize(app.window, cint(w * app.scale), cint(h * app.scale))
+  let s = window_scale()
+  setSize(app.window, cint(w * s), cint(h * s))
 
 proc remember_fullscreen(on: bool) =
   ## The menu's checkmark, and saved, so the next start can come back this
@@ -579,12 +605,13 @@ proc apply_panel_uniforms() =
   ## is (re)loaded rather than per frame.
   glUseProgram(app.game_shader)
   let gbc = app.emu_kind == ekGB
+  let ds = app.emu_kind == ekNDS
   glUniform1i(glGetUniformLocation(app.game_shader, "panel_gbc"),
               GLint(if gbc: 1 else: 0))
   glUniform1f(glGetUniformLocation(app.game_shader, "tex_height"),
-              if gbc: GLfloat(GB_H) else: GLfloat(GBA_H))
+              if gbc: GLfloat(GB_H) elif ds: GLfloat(NDS_H) else: GLfloat(GBA_H))
   glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"),
-              if gbc: GLfloat(GB_W) else: GLfloat(GBA_W))
+              if gbc: GLfloat(GB_W) elif ds: GLfloat(NDS_W) else: GLfloat(GBA_W))
   # Bind the two samplers to their texture units once. Without this the border
   # sampler defaults to unit 0 and samples the Game Boy texture as its own
   # border, which reads as "the border is a smeared copy of the game".
@@ -711,19 +738,31 @@ proc load_notice(text, hint: string) =
   app.load_notice = text
   app.load_notice_hint = hint
 
-proc load_rom(path: string) =
+proc nds_paths(): NdsPaths =
+  ## The DS's dumps from Settings > BIOS, and where this computer's DS keeps
+  ## its firmware settings (one console's flash, shared by every DS game)
+  NdsPaths(bios9: app.cfg.nds_bios9_path, bios7: app.cfg.nds_bios7_path,
+           firmware: app.cfg.nds_firmware_path,
+           flash: config_dir() / "nds" / "flash.bin")
+
+proc load_rom(path: string; keep_ds = false) =
   ## Every failure leaves the running game (or the home screen) as it was and
-  ## says why.
+  ## says why. A DS game loads only with DS Beta on (`keep_ds`: a Reset of
+  ## the DS game running, whatever the setting says now).
   if not fileExists(path):
     load_notice(&"{path.extractFilename()} isn't there any more.", path)
     return
+  let ds_beta = app.cfg.ds_beta or keep_ds
   # Zips: load the first ROM inside; recents keep the zip path itself
   var rom_path = path
   if path.splitFile().ext.toLowerAscii() == ".zip":
-    rom_path = extract_zip_rom(config_dir() / "zip-cache", path)
+    rom_path = if ds_beta: extract_zip_rom(config_dir() / "zip-cache", path, ROM_EXTS_DS)
+               else: extract_zip_rom(config_dir() / "zip-cache", path)
     if rom_path == "":
-      load_notice(&"No Game Boy or GBA ROM could be read from {path.extractFilename()}.", "")
+      let systems = if ds_beta: "Game Boy, GBA or DS" else: "Game Boy or GBA"
+      load_notice(&"No {systems} ROM could be read from {path.extractFilename()}.", "")
       return
+  let as_ds = ds_beta and is_nds_file(rom_path)
   # Before the new core reads the .sav: a Reset reloads the same file
   flush_saves()
   # A game another dingbat window has open is refused before its .sav is
@@ -736,20 +775,30 @@ proc load_rom(path: string) =
     load_notice(text, hint)
     return
   # The new core is built and checked before anything of the old one goes
-  let boot = boot_settings(app.cfg, app.boot_overrides)
-  if boot.note.len > 0 and not is_gb_rom(rom_path): echo boot.note
-  let built = build_core(rom_path, CoreOptions(
-    gb_bootrom: app.cfg.gb_bootrom_path,
-    headless: app.cfg.headless, gb_run_bios: boot.gb_run_bios,
-    sgb: app.cfg.sgb_enable, bios_path: boot.bios_path,
-    run_bios: boot.run_bios, use_hle: boot.use_hle,
-    hle_after_bios: boot.hle_after_bios))
-  if built.error.len > 0:
-    claim.abandon()
-    load_notice(built.error, built.detail)
-    return
+  var built: BuiltCore
+  var built_ds: BuiltNds
+  if as_ds:
+    built_ds = build_nds(rom_path, nds_paths())
+    if built_ds.error.len > 0:
+      claim.abandon()
+      load_notice(built_ds.error, built_ds.detail)
+      return
+  else:
+    let boot = boot_settings(app.cfg, app.boot_overrides)
+    if boot.note.len > 0 and not is_gb_rom(rom_path): echo boot.note
+    built = build_core(rom_path, CoreOptions(
+      gb_bootrom: app.cfg.gb_bootrom_path,
+      headless: app.cfg.headless, gb_run_bios: boot.gb_run_bios,
+      sgb: app.cfg.sgb_enable, bios_path: boot.bios_path,
+      run_bios: boot.run_bios, use_hle: boot.use_hle,
+      hle_after_bios: boot.hle_after_bios))
+    if built.error.len > 0:
+      claim.abandon()
+      load_notice(built.error, built.detail)
+      return
   # A copy of this game under the same file name shares its save-state slots
-  let identity = if built.gb != nil: built.gb.state_rom_identity()
+  let identity = if as_ds: built_ds.game.state_identity()
+                 elif built.gb != nil: built.gb.state_rom_identity()
                  else: built.gba.state_rom_identity()
   if not app.game_lock.claim_states(lock_dir, rom_path, identity, claim):
     claim.abandon()
@@ -777,7 +826,22 @@ proc load_rom(path: string) =
   flush_saves()
   # The old game's files are written out; its locks go to the new game
   app.game_lock.commit(claim)
-  if built.gb != nil:
+  let was_ds = app.emu_kind == ekNDS
+  if as_ds:
+    app.nds = built_ds.game
+    app.gba_emu = nil
+    app.gb_emu = nil
+    app.emu_kind = ekNDS
+    app.border_shown = false
+    app.nds.open_audio()
+    let s = window_scale()
+    setSize(app.window, cint(NDS_W * s), cint(NDS_H * s))
+    app.dbg = nil
+    app.gb_dbg = nil
+    # The cheat window edits GB/GBA codes; a DS game has none to take
+    app.cheats.window = false
+  elif built.gb != nil:
+    app.nds = nil
     app.gb_emu = built.gb
     app.gba_emu = nil
     app.emu_kind = ekGB
@@ -787,6 +851,7 @@ proc load_rom(path: string) =
     app.dbg = nil
     app.gb_dbg = new_gb_debug(app.gb_emu)
   else:
+    app.nds = nil
     app.gba_emu = built.gba
     input_log_start(rom_path)
     app.gb_emu = nil
@@ -805,8 +870,20 @@ proc load_rom(path: string) =
   apply_fifo_interp()
   apply_mp2k_hle()
   apply_panel_uniforms()
+  if was_ds or as_ds:
+    apply_color_correction()
+    frame_ticks = if as_ds: nds_frame_ticks else: gbx_frame_ticks
   lcd_resp.reset()  # fresh core: don't ghost the previous game's frame
-  app.rewind.clear()
+  # A DS payload is ~6 MB: its ring keeps no keyframes (each a 2 MB zlib, a
+  # stall every few seconds), as the web's does; the 64 MB cap is the same
+  if as_ds:
+    app.rewind = new_rewind(REWIND_CAP_BYTES, key_every = 0)
+    app.rewind_ds = true
+  elif app.rewind_ds:
+    app.rewind = new_rewind()
+    app.rewind_ds = false
+  else:
+    app.rewind.clear()
   app.rewinding = false
   glDisable(GL_BLEND)
   glUseProgram(app.game_shader)
@@ -814,7 +891,9 @@ proc load_rom(path: string) =
   # Allocate the texture storage once here; per-frame uploads use
   # glTexSubImage2D, which avoids a driver-side reallocation every frame
   # (glTexImage2D each frame cost ~0.4 ms on macOS's GL-on-Metal stack)
-  let (tw, th) = if app.emu_kind == ekGBA: (GBA_W, GBA_H) else: (GB_W, GB_H)
+  let (tw, th) = if app.emu_kind == ekGBA: (GBA_W, GBA_H)
+                 elif app.emu_kind == ekNDS: (NDS_W, NDS_H)
+                 else: (GB_W, GB_H)
   glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
                GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
   app.cur_path = path
@@ -837,7 +916,7 @@ proc load_rom(path: string) =
 proc reset_game() =
   ## Restart the running game: the file it was loaded from, whatever became
   ## of the Recent list since.
-  if app.cur_path.len > 0: load_rom(app.cur_path)
+  if app.cur_path.len > 0: load_rom(app.cur_path, keep_ds = app.emu_kind == ekNDS)
 
 # ──────────────────────────── Save States ────────────────────────────
 
@@ -845,6 +924,7 @@ proc current_rom_path(): string =
   case app.emu_kind
   of ekGBA: (if app.gba_emu != nil: app.gba_emu.rom_path else: "")
   of ekGB:  (if app.gb_emu != nil: app.gb_emu.rom_path else: "")
+  of ekNDS: (if app.nds != nil: app.nds.rom_path else: "")
   of ekNone: ""
 
 # ──────────────────────────── Cheats ────────────────────────────
@@ -859,13 +939,13 @@ proc current_cheat_engine(): CheatEngine =
   case app.emu_kind
   of ekGBA: (if app.gba_emu != nil: app.gba_emu.cheats else: nil)
   of ekGB:  (if app.gb_emu != nil: app.gb_emu.cheats else: nil)
-  of ekNone: nil
+  of ekNDS, ekNone: nil   # no DS cheats on the desktop yet
 
 proc refresh_cheat_rom_patches() =
   case app.emu_kind
   of ekGBA: (if app.gba_emu != nil: app.gba_emu.refresh_cheat_rom_patches())
   of ekGB:  (if app.gb_emu != nil: app.gb_emu.refresh_cheat_rom_patches())
-  of ekNone: discard
+  of ekNDS, ekNone: discard
 
 proc save_cheats() =
   let eng = current_cheat_engine()
@@ -901,6 +981,7 @@ proc state_identity(): uint32 =
   case app.emu_kind
   of ekGBA: app.gba_emu.state_rom_identity()
   of ekGB:  app.gb_emu.state_rom_identity()
+  of ekNDS: app.nds.state_identity()
   of ekNone: 0'u32
 
 proc state_prior_identity(): uint32 =
@@ -908,6 +989,7 @@ proc state_prior_identity(): uint32 =
   case app.emu_kind
   of ekGBA: app.gba_emu.state_prior_rom_identity()
   of ekGB:  app.gb_emu.state_prior_rom_identity()
+  of ekNDS: app.nds.state_identity()   # no older DS slot names
   of ekNone: 0'u32
 
 proc state_is_ours(data: string): bool =
@@ -916,6 +998,7 @@ proc state_is_ours(data: string): bool =
   case app.emu_kind
   of ekGBA: app.gba_emu.state_is_for(data)
   of ekGB:  app.gb_emu.state_is_for(data)
+  of ekNDS: app.nds.state_is_for(data)
   of ekNone: false
 
 proc state_file_path(slot = 0): string =
@@ -942,6 +1025,7 @@ proc save_state_slot(slot: int): bool =
   result = case app.emu_kind
     of ekGBA: app.gba_emu.save_state(path, thumbnail = true)
     of ekGB:  app.gb_emu.save_state(path, thumbnail = true)
+    of ekNDS: app.nds.save_state_file(path)
     of ekNone: false
   if result: echo "State saved: ", path
 
@@ -957,6 +1041,7 @@ proc load_state_slot(slot: int): bool =
   result = case app.emu_kind
     of ekGBA: app.gba_emu.load_state(path)
     of ekGB:  app.gb_emu.load_state(path)
+    of ekNDS: app.nds.load_state_file(path)
     of ekNone: false
   if result:
     echo "State loaded: ", path
@@ -976,8 +1061,11 @@ proc state_reject_sentence(): string =
   of srkNotAState:
     "That file isn't a dingbat save state."
   of srkWrongCore:
-    "That save state is for the other system - a Game Boy state can't load " &
-    "into a GBA game, or the reverse."
+    if app.emu_kind == ekNDS:
+      "That save state is for another system: only a DS state loads into a DS game."
+    else:
+      "That save state is for the other system - a Game Boy state can't load " &
+      "into a GBA game, or the reverse."
   of srkWrongRom:
     "That save state belongs to a different game. Load the game it was made " &
     "in, then try again."
@@ -1129,6 +1217,11 @@ proc save_screenshot() =
     case app.emu_kind
     of ekGBA: convert(app.gba_emu.ppu.framebuffer)
     of ekGB:  convert(app.gb_emu.ppu.framebuffer)
+    of ekNDS:
+      # Both screens, top above bottom; the DS's own LCDs, so no correction
+      var pic: seq[uint16]
+      app.nds.compose(pic)
+      for i in 0 ..< w * h: put(i, pic[i], false)
     of ekNone: return
   let dir = config_dir() / "screenshots"
   try:
@@ -1331,6 +1424,22 @@ proc render_game() =
       glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
     else:
       glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+  of ekNDS:
+    if app.nds == nil:
+      glViewport(0, 0, GLsizei(win_w), GLsizei(win_h)); return
+    glUniform1i(glGetUniformLocation(app.game_shader, "sgb_border"), 0)
+    glUniform1f(glGetUniformLocation(app.game_shader, "scan_height"),
+                GLfloat(NDS_H))
+    glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
+                GLfloat(NDS_W))
+    # The two screens straight into the texture's halves, top above bottom.
+    # No LCD response model: it models the GB/GBA panels, not the DS's.
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(NDS_W), GLsizei(NDS_SCREEN_H),
+                    GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, app.nds.top_screen())
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, GLint(NDS_SCREEN_H), GLsizei(NDS_W),
+                    GLsizei(NDS_SCREEN_H), GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
+                    app.nds.bottom_screen())
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
   of ekNone:
     render_logo()
   glViewport(0, 0, GLsizei(win_w), GLsizei(win_h))
@@ -1360,6 +1469,9 @@ proc poll_battery_notice() =
     if app.gb_emu != nil:
       let cart = app.gb_emu.cartridge
       app.battery.poll(cart.sav_path, cart.save_error, cart.save_error_new)
+  of ekNDS:
+    if app.nds != nil:
+      app.battery.poll(app.nds.save_path, app.nds.save_error, app.nds.save_error_new)
   of ekNone: app.battery.poll("", "", none)
 
 proc render_state_notice() =
@@ -1504,12 +1616,25 @@ proc render_imgui() =
                                 addr fast_forward, true):
             app.gb_emu.apu.sync = not fast_forward
             if fast_forward: app.gb_emu.apu.turbo = false
+        elif app.emu_kind == ekNDS and app.nds != nil:
+          if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
+                                addr app.nds.turbo, true):
+            if app.nds.turbo: app.nds.sync = true
+          var fast_forward = not app.nds.sync
+          if igMenuItem_BoolPtr("Fast Forward", "Tab",
+                                addr fast_forward, true):
+            app.nds.sync = not fast_forward
+            if fast_forward: app.nds.turbo = false
+          igSeparator()
+          # The hinge: closed, a game typically sleeps until it opens
+          if igMenuItem_Bool("Close Lid", nil, app.nds.lid_closed, true):
+            app.nds.set_lid(not app.nds.lid_closed)
         if should_reset: reset_game()
         igSeparator()
         # Cheats live here, not under Debug: a first-class feature, next to
         # the other things that change a running game.
         discard igMenuItem_BoolPtr("Cheats", nil, addr app.cheats.window,
-                                   app.emu_kind != ekNone)
+                                   app.emu_kind in {ekGBA, ekGB})
         if igMenuItem_Bool("Link Cable...", nil, app.link_window,
                            app.emu_kind == ekGBA):
           app.link_window = not app.link_window
@@ -1551,7 +1676,8 @@ proc render_imgui() =
           save_config(app.cfg)
         igSeparator()
         if igMenuItem_BoolPtr("LCD Color Correction", nil,
-                              addr app.cfg.color_correction, true):
+                              addr app.cfg.color_correction,
+                              app.emu_kind != ekNDS):
           apply_color_correction()
           save_config(app.cfg)
         let have_gba_ch = app.emu_kind == ekGBA and app.gba_emu != nil
@@ -1602,8 +1728,9 @@ proc render_imgui() =
       overlay_h += win_size.y
       igEndMainMenuBar()
 
-  app.fe.render("ROM", open_rom, ROM_DIALOG_EXTS, proc(path: string) =
-    load_rom(path))
+  app.fe.render("ROM", open_rom,
+                if app.cfg.ds_beta: ROM_DIALOG_EXTS_DS else: ROM_DIALOG_EXTS,
+                proc(path: string) = load_rom(path))
 
   render_state_notice()
   render_config_notice()
@@ -1667,7 +1794,9 @@ proc render_imgui() =
                        cint(ImGui_WindowFlags_NoInputs) or
                        cint(ImGui_WindowFlags_NoSavedSettings)
       if igBegin("##drop_hint", nil, hint_flags):
-        igTextDisabled("Drop a ROM here to play (.gba, .gb, .gbc, .zip)")
+        igTextDisabled(if app.cfg.ds_beta:
+                         cstring"Drop a ROM here to play (.gba, .gb, .gbc, .nds, .zip)"
+                       else: cstring"Drop a ROM here to play (.gba, .gb, .gbc, .zip)")
       igEnd()
 
   # Paused/rewinding badge: without it a paused game with the menu bar
@@ -1707,12 +1836,17 @@ const TRIGGER_THRESHOLD  = 8000'i16
 # (frontend/held_input.nim)
 var held: HeldInput
 
+# What a key binds to the DS's X and Y outside a DS game: nothing
+var no_ds_keys: Table[cint, DsInput]
+
 proc emu_pad_input(inp: Input; pressed: bool) =
   case app.emu_kind
   of ekGBA:
     if app.gba_emu != nil: app.gba_emu.handle_input(inp, pressed)
   of ekGB:
     if app.gb_emu != nil: app.gb_emu.handle_input(inp, pressed)
+  of ekNDS:
+    if app.nds != nil: app.nds.press(inp, pressed)
   of ekNone: discard
 
 proc push_held_input() =
@@ -1720,6 +1854,10 @@ proc push_held_input() =
   let (pressed, released) = held.take_changes()
   for inp in released: emu_pad_input(inp, false)
   for inp in pressed: emu_pad_input(inp, true)
+  if app.emu_kind == ekNDS and app.nds != nil:
+    let (ds_pressed, ds_released) = held.take_ds_changes()
+    for inp in ds_released: app.nds.press(inp, false)
+    for inp in ds_pressed: app.nds.press(inp, true)
 
 proc apply_trigger() =
   ## The right trigger's fast forward, onto the running core's speed toggles
@@ -1733,6 +1871,8 @@ proc apply_trigger() =
     if app.gba_emu != nil: onto(app.gba_emu.apu)
   of ekGB:
     if app.gb_emu != nil: onto(app.gb_emu.apu)
+  of ekNDS:
+    if app.nds != nil: onto(app.nds)
   of ekNone: discard
 
 proc new_core_takes_held_input() =
@@ -1751,7 +1891,7 @@ proc update_rumble() =
     case app.emu_kind
     of ekGB:  app.gb_emu != nil and app.gb_emu.cartridge.mbc_rumble()
     of ekGBA: app.gba_emu != nil and app.gba_emu.bus.gpio.gpio_rumble()
-    of ekNone: false
+    of ekNDS, ekNone: false
   rumble_on = app.cfg.gb_rumble and not app.paused and motor_on
   if rumble_on:
     let now = getTicks()
@@ -1767,9 +1907,18 @@ proc update_rumble() =
 # ──────────────────────────── Input ────────────────────────────
 
 proc open_dropped(path: string) =
-  ## A file dropped on the window: a ROM or a zip loads, anything else is ignored
-  if is_rom_file(path):
+  ## A file dropped on the window: a ROM or a zip loads (a DS game too with
+  ## DS Beta on), anything else is ignored
+  if is_rom_file(path) or (app.cfg.ds_beta and is_nds_file(path)):
     load_rom(path)
+
+proc nds_view_top_left(): (int, int, int, int) =
+  ## The picture's rect in window coordinates (top-left origin), for the
+  ## stylus: game_viewport's is GL's, from the bottom.
+  var ww, wh: cint
+  getSize(app.window, ww, wh)
+  let (vx, vy, vw, vh) = game_viewport()
+  (int(vx), int(wh) - int(vy) - int(vh), int(vw), int(vh))
 
 proc handle_input() =
   when defined(gui_driver):
@@ -1795,7 +1944,10 @@ proc handle_input() =
                                  shortcut_mod = (mods and MOD_KEY_MASK) != 0,
                                  imgui_keyboard = app.io != nil and
                                                   app.io[].WantCaptureKeyboard,
-                                 capturing = app.ce.capturing_keys())
+                                 capturing = app.ce.capturing_keys(),
+                                 ds_bindings = if app.emu_kind == ekNDS:
+                                                 app.cfg.nds_keybindings
+                                               else: no_ds_keys)
       push_held_input()
       case route
       of krNone: discard
@@ -1847,6 +1999,8 @@ proc handle_input() =
           toggle(app.gba_emu.apu)
         elif app.emu_kind == ekGB and app.gb_emu != nil:
           toggle(app.gb_emu.apu)
+        elif app.emu_kind == ekNDS and app.nds != nil:
+          toggle(app.nds)
       of krChannel:
         # Feedback is visible in the Audio/Video > Channels submenu
         let ch = int(sym) - int(K_1)
@@ -1879,10 +2033,17 @@ proc handle_input() =
     of ControllerButtonDown, ControllerButtonUp:
       let pressed = evt.kind == ControllerButtonDown
       let button  = cint(cbutton(evt).button)
-      let bound   = app.cfg.controller_bindings.hasKey(button)
-      held.pad_button(cbutton(evt).which, button, bound,
-                      if bound: app.cfg.controller_bindings[button] else: Input.low,
-                      pressed)
+      if pressed and app.emu_kind == ekNDS and
+         app.cfg.nds_controller_bindings.hasKey(button):
+        # A DS game's X or Y, ahead of the button's GB/GBA input
+        held.pad_ds_button(cbutton(evt).which, button,
+                           app.cfg.nds_controller_bindings[button], true)
+      else:
+        let bound   = app.cfg.controller_bindings.hasKey(button)
+        held.pad_button(cbutton(evt).which, button, bound,
+                        if bound: app.cfg.controller_bindings[button] else: Input.low,
+                        pressed)
+        if not pressed: held.pad_ds_button(cbutton(evt).which, button, dsX, false)
       push_held_input()
       if not pressed and app.ce.capturing_buttons():
         app.ce.controller.button_released(button)
@@ -1912,6 +2073,27 @@ proc handle_input() =
 
     of MouseMotion:
       app.last_mouse_tick = motion(evt).timestamp
+      # A DS game's stylus follows the mouse while it is down, clamped to
+      # the bottom screen
+      if app.emu_kind == ekNDS and app.nds != nil and app.nds.stylus:
+        let t = touch_point(int(motion(evt).x), int(motion(evt).y),
+                            nds_view_top_left())
+        app.nds.set_touch(t.x, t.y, true)
+
+    of MouseButtonDown:
+      # A DS game's stylus: a left click that lands on the bottom screen
+      # (not on the menu bar or a window over it)
+      if app.emu_kind == ekNDS and app.nds != nil and
+         button(evt).button == BUTTON_LEFT and
+         not (app.io != nil and app.io[].WantCaptureMouse):
+        let t = touch_point(int(button(evt).x), int(button(evt).y),
+                            nds_view_top_left())
+        if t.bottom: app.nds.set_touch(t.x, t.y, true)
+
+    of MouseButtonUp:
+      if app.emu_kind == ekNDS and app.nds != nil and app.nds.stylus and
+         button(evt).button == BUTTON_LEFT:
+        app.nds.lift_stylus()
 
     of DropFile:
       let dropped = drop(evt)
@@ -1946,6 +2128,8 @@ proc update_fps_title(emulated: bool) =
                 elif app.paused: "dingbat - PAUSED"
                 elif app.emu_kind == ekGBA and app.gba_emu != nil and
                      app.gba_emu.cpu.stopped: "dingbat - SLEEPING"
+                elif app.emu_kind == ekNDS and app.nds != nil and
+                     app.nds.asleep(): "dingbat - SLEEPING"
                 else: fmt"dingbat - {fps:.1f} fps"
     setTitle(app.window, cstring(title))
     fps_frames = 0
@@ -2342,7 +2526,10 @@ proc main() =
   # MHz; the GB frame is the same period); the audio queue is a bounds check
   # only. Turbo and fast-forward keep pure audio pacing.
   let sched_freq = getPerformanceFrequency()
-  let frame_ticks = sched_freq * 280896'u64 div 16777216'u64
+  gbx_frame_ticks = sched_freq * 280896'u64 div 16777216'u64
+  # A DS frame is a little shorter: 1120380 cycles at 67.027964 MHz
+  nds_frame_ticks = sched_freq * uint64(NDS_FRAME_CYCLES) div uint64(NDS_MASTER_HZ)
+  frame_ticks = if app.emu_kind == ekNDS: nds_frame_ticks else: gbx_frame_ticks
   var next_frame_due = getPerformanceCounter()
 
   var sched_refilling = true  # start with an empty queue: fill to target
@@ -2377,6 +2564,7 @@ proc main() =
               not app.gba_emu.apu.turbo
     of ekGB:  app.gb_emu != nil and app.gb_emu.apu.sync and
               not app.gb_emu.apu.turbo
+    of ekNDS: app.nds != nil and app.nds.sync and not app.nds.turbo
     of ekNone: false
 
   proc gba_frame_due(): bool =
@@ -2390,6 +2578,12 @@ proc main() =
     if not apu.sync or apu.turbo: return not apu.audio_ahead()
     # f32 stereo is 8 B/frame: the same time bounds are 2048/6144/16384 B
     scheduler_frame_due(apu.audio_queued_bytes(), 2048, 6144, 16384)
+
+  proc nds_frame_due(): bool =
+    let g = app.nds
+    if not g.sync or g.turbo: return not g.audio_ahead()
+    # f32 stereo as the GB's, on the DS's own frame period
+    scheduler_frame_due(g.audio_queued_bytes(), 2048, 6144, 16384)
 
   # DINGBAT_PACING_LOG=1: one line per second with emulated-frame counts and
   # audio queue depth bounds (qmin=0 would mean an underrun)
@@ -2457,6 +2651,9 @@ proc main() =
             case app.emu_kind
             of ekGBA: app.gba_emu.apply_state_payload(snap)
             of ekGB:  app.gb_emu.apply_state_payload(snap)
+            of ekNDS:
+              if not app.nds.rewind_apply(snap):
+                raise newException(CatchableError, last_state_error)
             of ekNone: discard
             emulated = true
           except CatchableError:
@@ -2485,6 +2682,10 @@ proc main() =
         if app.gb_emu != nil and (stepping or gb_frame_due()):
           app.gb_emu.run_until_frame()
           emulated = true
+      of ekNDS:
+        if app.nds != nil and (stepping or nds_frame_due()):
+          app.nds.run_frame(app.cfg.volume, app.cfg.mute, app.cfg.pitch_correct_ff)
+          emulated = true
       of ekNone: discard
       if emulated and is_paced():
         scheduler_frame_ran()
@@ -2494,6 +2695,10 @@ proc main() =
           discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload())
         of ekGB:
           discard app.rewind.maybe_push(proc(): string = app.gb_emu.state_payload())
+        of ekNDS:
+          # A DS switched off has nothing to come back to
+          if not app.nds.powered_off():
+            discard app.rewind.maybe_push(proc(): string = app.nds.rewind_payload())
         of ekNone: discard
     if lat_trials > 0 and app.emu_kind == ekGBA and app.gba_emu != nil and
        not app.paused:
