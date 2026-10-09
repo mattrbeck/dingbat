@@ -667,6 +667,221 @@ test("firmware settings a game wrote come back after a reload, and Settings edit
   await ctx.close();
 });
 
+// --- Rewind, run-ahead and cheats (docs/nds/features.md) ----------------------
+// Double_Buffer (libnds example) changes its screens every other frame.
+// cheat_probe (tests/nds/tools/build_fb.sh) fills its top screen with the
+// halfword at 0x02100000 every V-blank: red until a cheat writes it.
+const MOVER = rom("built/Double_Buffer.nds");
+const PROBE = rom("cheat_probe.nds");
+const featSkip = skip || ([MOVER, PROBE].filter((p) => !existsSync(p)).map((p) => "missing: " + p)[0] ?? false);
+
+// In the page: the frame counter, an FNV-1a of both screens as the presenter
+// reads them (nds_fb555_*) and one of the sound the last frame made.
+const HASHERS = () => {
+  window.e2eSig = () => {
+    const c = ndsCore;
+    const fnv = (a, h = 0x811c9dc5) => {
+      for (let i = 0; i < a.length; i++) h = Math.imul(h ^ a[i], 16777619);
+      return h >>> 0;
+    };
+    let scr = 0x811c9dc5;
+    for (const p of [c._nds_fb555_top(), c._nds_fb555_bottom()]) {
+      scr = fnv(new Uint16Array(c.HEAPU8.buffer, p, 256 * 192), scr);
+    }
+    const n = c._nds_audio_frames();
+    const snd = n > 0 ? fnv(new Uint32Array(c.HEAPU8.buffer, c._nds_audio_ptr(), n * 2)) : 0;
+    return { f: c._nds_frame_count(), scr, snd };
+  };
+};
+
+test("rewind on a DS game: held, it steps back through moments that happened", { skip: featSkip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, MOVER);
+  await framesPast(page, 30);
+  assert.equal(await page.evaluate(() => document.body.classList.contains("nds-rewind")), true);
+  assert.equal(await page.locator("#rewind").isVisible(), true, "the rewind button is shown");
+  await page.evaluate(HASHERS);
+  const r = await page.evaluate(() => {
+    paused = true;
+    const c = ndsCore;
+    c._nds_rewind_enable(0, 0);
+    c._nds_rewind_enable(1, 0); // an empty ring from here
+    const seen = {};
+    for (let i = 0; i < 100; i++) {
+      c._nds_run_frame();
+      const s = e2eSig();
+      seen[s.f] = s;
+      c._nds_audio_clear();
+    }
+    const last = c._nds_frame_count();
+    const depth = c._nds_rewind_depth();
+    for (let i = 0; i < 3; i++) c._nds_rewind_pop();
+    const back = e2eSig(); // the screens of the frame the snapshot followed
+    const again = [];      // and on from there: the frames that were
+    for (let i = 0; i < 15; i++) {
+      c._nds_run_frame();
+      again.push([e2eSig(), seen[c._nds_frame_count()]]);
+      c._nds_audio_clear();
+    }
+    return { last, depth, back, was: seen[back.f], again };
+  });
+  assert.ok(r.depth >= 9, "about one snapshot every 10 frames: " + r.depth);
+  assert.ok(r.back.f <= r.last - 20, `three pops went back 20+ frames: ${r.back.f} from ${r.last}`);
+  assert.equal(r.back.scr, r.was.scr, `the screens are frame ${r.back.f}'s`);
+  for (const [now, was] of r.again) assert.deepEqual(now, was, `frame ${now.f} replays as it was`);
+  // Through the app: held, the frame counter runs backwards.
+  await page.evaluate(() => { paused = false; });
+  await framesPast(page, (await page.evaluate(() => ndsCore._nds_frame_count())) + 60);
+  const before = await page.evaluate(() => ndsCore._nds_frame_count());
+  const box = await page.locator("#rewind").boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await sleep(500);
+  const during = await page.evaluate(() => ndsCore._nds_frame_count());
+  await page.mouse.up();
+  assert.ok(during < before - 20, `held for 0.5 s it went back: ${during} from ${before}`);
+  await framesPast(page, during + 20);
+  // Off in Settings: the ring goes, the button with it.
+  await page.evaluate(() => { rewindToggle.checked = false; rewindToggle.dispatchEvent(new Event("change")); });
+  await page.waitForFunction(() => ndsCore._nds_rewind_depth() === 0, null, { timeout: 5000 });
+  assert.equal(await page.locator("#rewind").isVisible(), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// Run from a state with and without run-ahead n: [plain, ahead] frames.
+const aheadRuns = (page, n) => page.evaluate((n) => {
+  paused = true;
+  const c = ndsCore;
+  c._nds_rewind_enable(0, 0);
+  const state = captureStateBytes();
+  const play = (ahead) => {
+    applyStateBytes(state);
+    c._nds_audio_clear();
+    const own = [], shown = [];
+    for (let i = 0; i < 90; i++) {
+      c._nds_run_frame();
+      own.push(e2eSig());
+      c._nds_audio_clear();
+      if (ahead) {
+        c._nds_runahead(ahead);
+        shown.push(e2eSig());
+      }
+    }
+    return { own, shown };
+  };
+  return { plain: play(0), ahead: play(n) };
+}, n);
+
+test("run-ahead shows the frame n on, and leaves the game's own frames and sound as they were",
+     { skip: featSkip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  // Double_Buffer: the screens change every other frame.
+  await addGame(page, MOVER);
+  await framesPast(page, 30);
+  await page.evaluate(HASHERS);
+  let r = await aheadRuns(page, 2);
+  assert.ok(new Set(r.plain.own.map((s) => s.scr)).size > 40, "the screens change as it runs");
+  assert.deepEqual(r.ahead.own, r.plain.own, "every frame as without run-ahead");
+  for (let i = 0; i + 2 < 90; i++) {
+    assert.equal(r.ahead.shown[i].scr, r.plain.own[i + 2].scr, `step ${i} shows frame ${i + 2}'s screens`);
+    assert.equal(r.ahead.shown[i].f, r.plain.own[i].f, "the machine is back where it was");
+  }
+  // The tone: the sound is the sound there was, none of the lookahead's.
+  // The app's Run-ahead choice reaches a DS game.
+  await page.evaluate(() => { applyRunahead(1); paused = false; });
+  await framesPast(page, (await page.evaluate(() => ndsCore._nds_frame_count())) + 30);
+  await page.evaluate(() => applyRunahead(0));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  const ctx2 = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const tone = await newPage(ctx2);
+  await addGame(tone.page, rom("snd_tone.nds"));
+  await framesPast(tone.page, 30);
+  await tone.page.evaluate(HASHERS);
+  r = await aheadRuns(tone.page, 3);
+  assert.ok(r.plain.own.every((s) => s.snd !== 0), "the tone sounds every frame");
+  assert.deepEqual(r.ahead.own, r.plain.own, "every frame and its sound as without run-ahead");
+  assert.deepEqual(tone.errors, []);
+  await ctx2.close();
+});
+
+const fillCheat = async (page, name, codes) => {
+  await page.locator("#cheat-name").fill(name);
+  await page.locator("#cheat-codes").fill(codes);
+  await page.locator("#cheat-add").click();
+};
+const openCheats = (page) => page.evaluate(() => openCheatsModal());
+const closeCheats = (page) => page.locator("#cheats-close").click();
+const RED = [255, 0, 0], WHITE = [255, 255, 255], MAGENTA = [255, 0, 255];
+
+test("Action Replay DS and CodeBreaker DS codes change the game, and stay with it", { skip: featSkip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, PROBE);
+  await page.evaluate(() => setNdsLayout("stack"));
+  await screensAre(page, RED, MAGENTA);
+  assert.equal(await page.evaluate(() => document.body.classList.contains("nds-cheats")), true);
+  await page.locator("#menu-btn").click();
+  await page.locator("#open-cheats").click();
+  await page.waitForFunction(() => document.getElementById("cheats-modal").classList.contains("open"));
+  assert.match(await page.locator("#cheat-format-hint").innerText(), /Action Replay DS/);
+  // What the engine refuses says why and is not added.
+  await fillCheat(page, "self", "C4000000 00000000");
+  assert.match(await page.locator("#cheat-error").innerText(), /C4/);
+  await fillCheat(page, "junk", "0210000 1234");
+  assert.match(await page.locator("#cheat-error").innerText(), /hex/);
+  // AR: a word write. Blue.
+  await fillCheat(page, "Blue", "02100000 00007C00");
+  await closeCheats(page);
+  await screensAre(page, BLUE, MAGENTA);
+  // AR: IF A held (KEYINPUT bit 0 clear) THEN green ENDIF; later in the
+  // list, so it wins while A is down.
+  await openCheats(page);
+  await fillCheat(page, "Green on A", "94000130 FFFE0000\n12100000 000003E0\nD0000000 00000000");
+  await closeCheats(page);
+  await page.evaluate(() => ndsCore._nds_set_button(0, 1));
+  await screensAre(page, GREEN, MAGENTA);
+  await page.evaluate(() => ndsCore._nds_set_button(0, 0));
+  await screensAre(page, BLUE, MAGENTA);
+  // AR: the data register summed in a loop (7 x 1249h = 7FFFh), then
+  // written at the offset register. White.
+  await openCheats(page);
+  await fillCheat(page, "White by loop", "D5000000 00000000\nC0000000 00000006\n" +
+    "D4000000 00001249\nD1000000 00000000\nD3000000 02100000\nD7000000 00000000");
+  await closeCheats(page);
+  await screensAre(page, WHITE, MAGENTA);
+  // CodeBreaker DS: the unencrypted header (the header CRC, the game code),
+  // then a halfword write. Last in the list: yellow.
+  const hdr = readFileSync(PROBE);
+  const crc = hdr.readUInt16LE(0x15E).toString(16).toUpperCase().padStart(4, "0");
+  const code = hdr.readUInt32BE(0x0C).toString(16).toUpperCase().padStart(8, "0");
+  await openCheats(page);
+  await fillCheat(page, "CB yellow", `8000${crc} ${code}\n12100000 000003FF`);
+  assert.equal(await page.locator("#cheat-error").isVisible(), false, "the CodeBreaker list parsed");
+  await closeCheats(page);
+  await screensAre(page, YELLOW, MAGENTA);
+  // Switched off in the list: the white is on top again.
+  await openCheats(page);
+  await page.locator("#cheats-list .cheat-row input[type=checkbox]").nth(3).uncheck();
+  await closeCheats(page);
+  await screensAre(page, WHITE, MAGENTA);
+  // The list is the game's: after a reload it is back, and running.
+  await page.reload();
+  await page.waitForFunction(() => document.body.classList.contains("runtime-ready"), null, { timeout: 30000 });
+  await page.evaluate(() => dbDelete(autoStateKey("cheat_probe.nds")));
+  await page.locator(".home-tile, #hero-shot").locator("visible=true").first().click();
+  await running(page);
+  await page.evaluate(() => setNdsLayout("stack"));
+  await screensAre(page, WHITE, MAGENTA);
+  assert.equal(await page.evaluate(() => cheatList.length), 4);
+  await shot(page, "nds-cheats.png");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 const BENCH = process.env.DINGBAT_NDS_BENCH;
 test("unpaced frame time of DINGBAT_NDS_BENCH", { skip: skip || !BENCH || !existsSync(BENCH || "") },
   async () => {

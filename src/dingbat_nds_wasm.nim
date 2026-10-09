@@ -8,7 +8,8 @@
 ## page writes the ROM there once, then nds_boot(...) builds the core on it
 ## (moved, not copied: a 128 MB ROM must not exist twice in the heap).
 
-import dingbat/nds/[nds, savestate]
+import dingbat/nds/[nds, savestate, cheats]
+import dingbat/common/rewind
 from std/strutils import toHex
 
 var core: NDS
@@ -30,9 +31,14 @@ proc nds_rom_alloc(len: cint): pointer {.exportc.} =
 
 var lastBios9, lastBios7, lastFirmware: seq[uint8]  ## what nds_reboot reuses
 
+proc rewind_reset()
+proc cheats_follow_game()
+
 proc boot_with(rom: sink seq[uint8]; save: pointer; save_len: cint) =
   core = new_nds(rom, lastBios9, lastBios7, lastFirmware)
   if save_len > 0: core.cart.backup.set_data(copy_in(save, save_len))
+  rewind_reset()
+  cheats_follow_game()
 
 proc nds_boot(b9: pointer; b9_len: cint; b7: pointer; b7_len: cint;
               fw: pointer; fw_len: cint; save: pointer; save_len: cint): cint {.exportc.} =
@@ -74,8 +80,12 @@ proc nds_load(rom: pointer; rom_len: cint; b9: pointer; b9_len: cint;
   romBuf = copy_in(rom, rom_len)
   nds_boot(b9, b9_len, b7, b7_len, fw, fw_len, nil, 0)
 
+proc step_frame()
+
 proc nds_run_frame() {.exportc.} =
-  if core != nil: core.run_frame()
+  ## One frame (to the next V-blank), the cheats after it, and a rewind
+  ## snapshot when one is due.
+  if core != nil: step_frame()
 
 proc nds_frame_count(): cint {.exportc.} =
   if core == nil: 0 else: cint(core.gpu.frame_count)
@@ -90,11 +100,20 @@ proc nds_powered_off(): cint {.exportc.} =
 # app's WebGL presenter (web/glpresent.js). nds_fb_top/nds_fb_bottom convert
 # to RGBA8888 on demand for 2D-canvas pages.
 
+# Run-ahead's screens (nds_runahead, below): what the page shows instead of
+# the machine's own until the next frame runs.
+var aheadTop, aheadBottom: seq[uint16]
+var aheadValid = false
+
 proc nds_fb555_top(): pointer {.exportc.} =
-  if core == nil: nil else: addr core.gpu.top[0]
+  if core == nil: nil
+  elif aheadValid: addr aheadTop[0]
+  else: addr core.gpu.top[0]
 
 proc nds_fb555_bottom(): pointer {.exportc.} =
-  if core == nil: nil else: addr core.gpu.bottom[0]
+  if core == nil: nil
+  elif aheadValid: addr aheadBottom[0]
+  else: addr core.gpu.bottom[0]
 
 proc nds_fb_top(): pointer {.exportc.} =
   fbTop.setLen(256 * 192)
@@ -227,7 +246,10 @@ proc nds_state_load(data: pointer; len: cint): cint {.exportc.} =
   if core == nil or data == nil or len <= 0: return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
-  if core.load_state_bytes(image): 1 else: 0
+  if core.load_state_bytes(image):
+    rewind_reset()   # rewinding from here must not walk into the old timeline
+    1
+  else: 0
 
 proc nds_state_error_kind(): cint {.exportc.} =
   ## The last refusal as a StateRejectKind ordinal (common/serialize.nim).
@@ -235,6 +257,135 @@ proc nds_state_error_kind(): cint {.exportc.} =
 
 proc nds_state_error(): cstring {.exportc.} =
   cstring(last_state_error)
+
+# --- Cheats (nds/cheats.nim: Action Replay DS, unencrypted CodeBreaker DS).
+# The list lives here, not in the core: a reset (nds_reboot) keeps it. Run
+# after every frame while one is on; with none on nothing runs, so frames,
+# sound and states are what they are without cheats.
+
+var cheatList: DsCheats = nil   # made on first use: a heap global set at
+                                 # module scope dangles once main() returns
+var cheatErr: string
+
+proc the_cheats(): DsCheats =
+  if cheatList == nil: cheatList = DsCheats()
+  cheatList
+
+proc cheat_mem(n: NDS): DsCheatMem =
+  DsCheatMem(
+    read8: proc(a: uint32): uint32 = n.cheat_read(a, 8),
+    read16: proc(a: uint32): uint32 = n.cheat_read(a, 16),
+    read32: proc(a: uint32): uint32 = n.cheat_read(a, 32),
+    write8: proc(a: uint32; v: uint32) = n.cheat_write(a, v, 8),
+    write16: proc(a: uint32; v: uint32) = n.cheat_write(a, v, 16),
+    write32: proc(a: uint32; v: uint32) = n.cheat_write(a, v, 32))
+
+proc cheats_follow_game() =
+  ## The CodeBreaker header check needs this game's code and header CRC.
+  let rom = core.cart.rom
+  if rom.len >= 0x160:
+    discard the_cheats()
+    cheatList.gamecode = uint32(rom[0x0C]) or (uint32(rom[0x0D]) shl 8) or
+      (uint32(rom[0x0E]) shl 16) or (uint32(rom[0x0F]) shl 24)
+    cheatList.crc16 = uint32(rom[0x15E]) or (uint32(rom[0x15F]) shl 8)
+
+proc nds_load_cheats(text: pointer; len: cint): cstring {.exportc.} =
+  ## Replace the cheat list with `.cht` text (UTF-8, `len` bytes): the
+  ## refused cheats as "name: why" lines, "" when every one parsed.
+  var t = newString(max(0, int(len)))
+  if len > 0: copyMem(addr t[0], text, int(len))
+  the_cheats().load(t)
+  cheatErr = cheatList.errors()
+  cstring(cheatErr)
+
+# --- Rewind (common/rewind.nim): a payload every REWIND_INTERVAL frames
+# into a ring of XOR deltas, popped while the rewind button is held. A DS
+# payload is ~5.5-6 MB raw; the ring keeps the newest whole and the rest
+# as sparse zlib'd deltas. No keyframes (each would be a 2 MB zlib of the
+# whole payload, a visible stall every few seconds) and no thumbnails (no
+# scrubber here yet).
+
+var rewindWanted = false
+var rewindCap = REWIND_CAP_BYTES
+var rewindRing: Rewind = nil
+
+proc rewind_reset() =
+  aheadValid = false
+  rewindRing = if rewindWanted and core != nil: new_rewind(rewindCap, key_every = 0) else: nil
+
+proc nds_rewind_enable(on: cint; cap_bytes: cint) {.exportc.} =
+  ## Rewind on (1) or off (0), its memory cap in bytes (0: the default).
+  ## Off drops the ring and its cost; turning it on starts an empty one.
+  rewindCap = if cap_bytes > 0: int(cap_bytes) else: REWIND_CAP_BYTES
+  let was = rewindWanted
+  rewindWanted = on != 0
+  if not rewindWanted: rewindRing = nil
+  elif not was or rewindRing == nil: rewind_reset()
+
+proc nds_rewind_pop(): cint {.exportc.} =
+  ## Step back one snapshot (REWIND_INTERVAL frames). 1 when applied, 0
+  ## when the history is used up.
+  if core == nil or rewindRing == nil: return 0
+  let snap = rewindRing.pop()
+  if snap.len == 0: return 0
+  aheadValid = false
+  if core.load_own_payload(snap): 1 else: 0
+
+proc nds_rewind_depth(): cint {.exportc.} =
+  ## Snapshots held (tests, the debug overlay).
+  if rewindRing == nil: 0 else: cint(rewindRing.len)
+
+proc nds_rewind_bytes(): cint {.exportc.} =
+  if rewindRing == nil: 0 else: cint(rewindRing.mem_used)
+
+proc step_frame() =
+  aheadValid = false
+  core.run_frame()
+  if cheatList.active(): cheatList.run(core.cheat_mem())
+  if rewindRing != nil and not core.powered_off():
+    discard rewindRing.maybe_push(proc(): string = core.state_payload())
+
+# --- Run-ahead: after a frame is run (and its sound taken by the page),
+# nds_runahead(n) snapshots the machine, runs n more frames with the same
+# input, keeps their screens for the presenter, drops their sound and goes
+# back to the snapshot. The page shows the future frame, so a press shows n
+# frames sooner. The canonical timeline is untouched: the snapshot holds
+# every saved field, and the save chips' dirty flags are kept as they were.
+
+proc nds_runahead(n: cint): cint {.exportc.} =
+  ## 1 when the screens now come from n frames ahead (nds_fb555_* point
+  ## at them until the next frame), 0 when nothing was done.
+  aheadValid = false
+  if core == nil or n <= 0 or core.powered_off(): return 0
+  let snap = core.state_payload()
+  let fw_dirty = core.spi.firmware_dirty
+  for _ in 0 ..< int(n):
+    core.run_frame()
+    if cheatList.active(): cheatList.run(core.cheat_mem())
+  aheadTop.setLen(256 * 192)
+  aheadBottom.setLen(256 * 192)
+  copyMem(addr aheadTop[0], addr core.gpu.top[0], 256 * 192 * 2)
+  copyMem(addr aheadBottom[0], addr core.gpu.bottom[0], 256 * 192 * 2)
+  if not core.load_own_payload(snap, as_new = false): return 0
+  core.spi.firmware_dirty = fw_dirty
+  aheadValid = true
+  1
+
+# --- Payload timing (the page's bench: what rewind and run-ahead cost).
+var benchPayload: string
+proc nds_payload_take(): cint {.exportc.} =
+  ## state_payload into a buffer; its length.
+  if core == nil: return 0
+  benchPayload = core.state_payload()
+  cint(benchPayload.len)
+proc nds_payload_restore(): cint {.exportc.} =
+  ## The buffer back into the machine (load_own_payload); 1 = ok.
+  if core == nil or benchPayload.len == 0: return 0
+  if core.load_own_payload(benchPayload, as_new = false): 1 else: 0
+proc nds_payload_restore_checked(): cint {.exportc.} =
+  ## The same through load_state_payload (with its backup walk).
+  if core == nil or benchPayload.len == 0: return 0
+  if core.load_state_payload(benchPayload): 1 else: 0
 
 when isMainModule:
   discard

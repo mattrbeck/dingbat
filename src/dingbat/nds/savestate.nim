@@ -941,6 +941,30 @@ proc load_state_payload*(n: NDS; payload: string): bool =
     return false
   n.apply_checked(payload)
 
+proc load_own_payload*(n: NDS; payload: string; as_new = true): bool =
+  ## A payload this machine took itself (a rewind ring's, run-ahead's
+  ## snapshot from a frame ago): applied without first walking the machine
+  ## for a backup, which `load_state_payload` takes in case of a refusal
+  ## that a payload of this build and game never meets -- half the cost.
+  ## False (the machine part-applied) only if it does anyway. `as_new` =
+  ## false keeps the save chips' dirty flags as they are: run-ahead going
+  ## back to its snapshot is the same timeline, not a state loaded.
+  last_state_reject_kind = srkNone
+  last_state_error = ""
+  if payload.len == 0: return false
+  let dirty = n.cart.backup.dirty
+  let dirty2 = n.slot2.dirty
+  try:
+    n.apply_new(payload)
+  except CatchableError, Defect:
+    last_state_error = getCurrentExceptionMsg()
+    last_state_reject_kind = srkCorrupt
+    return false
+  if not as_new:
+    n.cart.backup.dirty = dirty
+    n.slot2.dirty = dirty2
+  true
+
 proc load_state_bytes*(n: NDS; data: string): bool =
   ## Validate and apply a state image (plain or packed). False on refusal,
   ## the machine untouched; `last_state_reject_kind` says why and
