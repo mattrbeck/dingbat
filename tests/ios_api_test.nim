@@ -19,6 +19,7 @@ proc dingbat_is_gb(): cint {.importc, cdecl.}
 proc dingbat_set_sgb(on: cint) {.importc, cdecl.}
 proc dingbat_run_frame() {.importc, cdecl.}
 proc dingbat_run_frame_ahead(n: cint) {.importc, cdecl.}
+proc dingbat_unseen_next() {.importc, cdecl.}
 proc dingbat_game_fb(): ptr uint16 {.importc, cdecl.}
 proc dingbat_framebuffer(): ptr uint16 {.importc, cdecl.}
 proc dingbat_fb_width(): cint {.importc, cdecl.}
@@ -123,6 +124,36 @@ block:
   # The state header carries no wall clock, so equal images mean the same
   # emulated machine.
   check plain == ahead, "30 frames with run-ahead 2 = 30 plain frames"
+
+echo "GBA: frames nobody sees are not drawn, and run the same"
+block:
+  # Three in four frames marked unseen (docs/frame-skip.md), as a tick that
+  # runs four shows one: the shown frames and the machine must be those of
+  # 60 frames all drawn.
+  let s = takeState()
+  var shown: seq[uint64] = @[]
+  for f in 0 ..< 60:
+    dingbat_set_input(4, cint((f div 7) mod 2))
+    dingbat_run_frame()
+    if f mod 4 == 3: shown.add frameHash()
+  let plain = takeState()
+  check applyState(s), "back to the start"
+  var same = true
+  for f in 0 ..< 60:
+    dingbat_set_input(4, cint((f div 7) mod 2))
+    if f mod 4 != 3: dingbat_unseen_next()
+    dingbat_run_frame()
+    if f mod 4 == 3 and frameHash() != shown[f div 4]: same = false
+  dingbat_set_input(4, 0)
+  check same, "every shown frame matches"
+  check takeState() == plain, "the same machine after 60 frames"
+  check applyState(s), "back to the start"
+  for f in 0 ..< 60:
+    dingbat_set_input(4, cint((f div 7) mod 2))
+    if f mod 4 != 3: dingbat_unseen_next()
+    dingbat_run_frame_ahead(2)
+  dingbat_set_input(4, 0)
+  check takeState() == plain, "with run-ahead 2 too (lookahead skipped when unseen)"
 
 echo "GBA: a clip replays the frames the player saw"
 block:

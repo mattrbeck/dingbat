@@ -792,6 +792,9 @@ private struct GeneralPane: View {
         }
         SheetDisclosure(title: "Advanced", open: $advancedOpen)
         if advancedOpen {
+            SheetToggleRow(label: "Draw every frame",
+                           sub: "Off, frames that are never on screen (fast-forward, 2×, run-ahead) are not drawn, which makes them cheaper. On draws them all, to compare.",
+                           isOn: $s.drawAll)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Save webhook").font(.system(size: 14.5, weight: .medium))
                 Text("Every time a game writes its save, also send the save file to this address as an HTTP POST (form field “save”). Leave empty to turn off. Synced to your other devices when signed in.")

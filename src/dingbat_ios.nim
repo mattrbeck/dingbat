@@ -380,10 +380,36 @@ proc push_rewind() =
 
 proc clip_note_frame()
 
-proc step_canonical() =
+# --- Frames nobody sees (docs/frame-skip.md) ---
+# The shell runs several frames per display refresh at 2x, fast-forward or
+# after a missed refresh, and shows only the last; dingbat_unseen_next says
+# the next dingbat_run_frame(_ahead) frame is one of the others. The GBA PPU
+# then draws nothing for it (ppu.no_draw), and run-ahead runs no lookahead.
+# Drawn anyway: a frame whose picture something keeps (a rewind snapshot, a
+# clip anchor's thumbnail), and every frame while the LCD response is on.
+var unseenNext = false
+
+proc dingbat_unseen_next() {.exportc, cdecl.} =
+  unseenNext = true
+
+proc take_unseen(): bool =
+  ## This call's frame will not be shown (one-shot).
+  result = unseenNext and not lcdOn
+  unseenNext = false
+
+proc picture_kept(): bool =
+  ## Something keeps the picture the coming frame leaves (after
+  ## clip_note_frame, which counts it): draw it.
+  (rewindHistory != nil and rewindHistory.push_due()) or
+    clipFrameIndex mod CLIP_SNAP_INTERVAL == 0
+
+proc step_canonical(hidden = false) =
   clip_note_frame()
   case stateKind
-  of ekGBA: stateGba.step_frame()
+  of ekGBA:
+    stateGba.ppu.no_draw = hidden and not picture_kept()
+    stateGba.step_frame()
+    stateGba.ppu.no_draw = false
   of ekGB:
     stateGb.step_frame()
     if statePrinter != nil: statePrinter.tick_frame()
@@ -392,8 +418,9 @@ proc step_canonical() =
 
 proc dingbat_run_frame() {.exportc, cdecl.} =
   ## One emulated frame; its picture is then at dingbat_game_fb().
+  let unseen = take_unseen()
   if stateKind == ekNone or core_shared(): return
-  step_canonical()
+  step_canonical(unseen)
   present_live()
 
 var runaheadFrame: seq[uint16] = @[]
@@ -402,9 +429,11 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
   ## dingbat_run_frame with N frames of run-ahead: one canonical frame (its
   ## audio played), then N silent lookahead frames whose picture is shown,
   ## then the canonical state restored (docs/run-ahead.md).
+  let unseen = take_unseen()
   if stateKind == ekNone or core_shared(): return
-  step_canonical()
-  if n <= 0:
+  # The canonical frame is shown only without run-ahead
+  step_canonical(n > 0 or unseen)
+  if n <= 0 or unseen:
     present_live()
     return
   let pixels = game_pixels()
@@ -412,7 +441,10 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
   of ekGBA:
     let snap = stateGba.state_payload()
     stateGba.apu.silent = true
-    for _ in 0 ..< int(n): stateGba.step_frame()
+    for i in 0 ..< int(n):
+      stateGba.ppu.no_draw = i < int(n) - 1  # only the last is shown
+      stateGba.step_frame()
+    stateGba.ppu.no_draw = false
     stateGba.apu.silent = optSilent
     if runaheadFrame.len != pixels: runaheadFrame.setLen(pixels)
     copyMem(addr runaheadFrame[0], addr stateGba.ppu.framebuffer[0], pixels * 2)

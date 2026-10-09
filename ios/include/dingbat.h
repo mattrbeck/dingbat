@@ -60,6 +60,12 @@ void dingbat_run_frame(void);
 /* One frame with n frames of run-ahead (n <= 0 = dingbat_run_frame). */
 void dingbat_run_frame_ahead(int n);
 
+/* The next dingbat_run_frame(_ahead) frame will not be shown (another runs
+ * before the next present): it is not drawn unless its picture is kept
+ * (a rewind snapshot, a clip anchor) or the LCD response is on, and it runs
+ * no run-ahead lookahead. One-shot. docs/frame-skip.md. */
+void dingbat_unseen_next(void);
+
 /* The picture to present: raw BGR555 (mask 0x7FFF), after the LCD response
  * when that is on. dingbat_fb_width() x dingbat_fb_height(). NULL with no
  * core. */

@@ -352,6 +352,9 @@ final class GameSession: NSObject, ObservableObject {
         if !on { lastTick = 0 }
     }
 
+    /// Running mean of one fast-forward frame, to guess which is a tick's last.
+    private var ffFrameTime: CFTimeInterval = 0.004
+
     @objc private func tick(_ link: CADisplayLink) {
         guard game != nil, !clipHold, !flightHold else { return }
         let now = link.timestamp
@@ -400,15 +403,24 @@ final class GameSession: NSObject, ObservableObject {
             // As many frames as fit in most of this display interval.
             let budget = max(0.004, link.targetTimestamp - CACurrentMediaTime() - 0.003)
             let t0 = CACurrentMediaTime()
+            let drawAll = Settings.shared.drawAll
             repeat {
+                // Not drawn if another frame fits after it (docs/frame-skip.md);
+                // a wrong guess shows a frame or two back, never a broken one
+                let f0 = CACurrentMediaTime()
+                if !drawAll && ran + 1 < 40 && f0 - t0 + 2 * ffFrameTime < budget { dingbat_unseen_next() }
                 dingbat_run_frame()
+                ffFrameTime += (CACurrentMediaTime() - f0 - ffFrameTime) * 0.1
                 ran += 1
                 if dingbat_frame_static() == 0 { changed = true }
             } while CACurrentMediaTime() - t0 < budget && ran < 40
         case .normal, .double, .slow:
             let ahead = speed == .normal ? Settings.shared.runahead : 0
             let owed = framesOwed(link, dt: dt)
-            for _ in 0..<owed {
+            let drawAll = Settings.shared.drawAll
+            for i in 0..<owed {
+                // Only the last is shown (docs/frame-skip.md)
+                if !drawAll && !twoPlayer && i < owed - 1 { dingbat_unseen_next() }
                 if twoPlayer { dingbat_link_tick() }
                 else if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
                 ran += 1
