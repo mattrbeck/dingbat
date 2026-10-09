@@ -42,6 +42,8 @@ type
     hd_out, hd_out2: array[256, uint16]
     hd_clear_gfx, hd_clear_line: array[256, uint16]  ## engine A's line with no 3D (hd_line)
     hd_paint: HdPaint                 ## engine A's line painted with opaque 3D (hd_line)
+    hd_rep_ok: array[2, seq[bool]]    ## hd_line, per screen (0 top) and line: the HD rows
+    hd_rep: array[2, seq[array[256, uint16]]]  ## hold this 1x line, each dot repeated
     hd_lp: array[256, uint32]         ## hd_line: per dot the last 3D pixel composited...
     hd_lg, hd_ld: array[256, uint16]  ## ...and its composite and display results
     hd_a_gfx, hd_a_line: seq[uint16]  ## scratch: engine A's line at HD (hd rows)
@@ -174,6 +176,9 @@ proc set_hd*(g: Gpu; scale: int) =
   for b in 0..3:
     g.cap_hd[b] = @[]
     g.cap_1x[b] = @[]
+  for s in 0..1:
+    g.hd_rep_ok[s] = @[]
+    g.hd_rep[s] = @[]
   if k == 1:
     g.hd_top = @[]
     g.hd_bottom = @[]
@@ -220,13 +225,27 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   let a = g.engine_a
   let g3 = g.gpu3d
   let (ta, tb) = if a_top: (addr g.hd_top, addr g.hd_bottom) else: (addr g.hd_bottom, addr g.hd_top)
-  template scaled(dst: ptr seq[uint16]; src: array[256, uint16]) =
-    for j in 0 ..< k:
-      let row = (y * k + j) * wk
-      for x in 0 ..< 256:
-        let c = if lcd_on: src[x] else: 0'u16
-        for i in 0 ..< k: dst[][row + x * k + i] = c
-  scaled(tb, g.engine_b.line)
+  # which screen is which; a line drawn by repeating dots is skipped when
+  # the screen's rows already hold that 1x line repeated (`hd_rep`)
+  let (sa, sb) = if a_top: (0, 1) else: (1, 0)
+  if g.hd_rep_ok[0].len != 192:
+    for s in 0..1:
+      g.hd_rep_ok[s] = newSeq[bool](192)
+      g.hd_rep[s] = newSeq[array[256, uint16]](192)
+  template scaled(dst: ptr seq[uint16]; scr: int; src: array[256, uint16]) =
+    block:
+      var line {.noinit.}: array[256, uint16]
+      if lcd_on: line = src
+      else: zeroMem(addr line[0], 512)
+      if not (g.hd_rep_ok[scr][y] and g.hd_rep[scr][y] == line):
+        let row0 = y * k * wk
+        for x in 0 ..< 256:
+          let c = line[x]
+          for i in 0 ..< k: dst[][row0 + x * k + i] = c
+        for j in 1 ..< k: copyMem(addr dst[][row0 + j * wk], addr dst[][row0], wk * 2)
+        g.hd_rep_ok[scr][y] = true
+        g.hd_rep[scr][y] = line
+  scaled(tb, sb, g.engine_b.line)
   let dm = a.display_mode
   let capc = a.dispcapcnt
   let (cw, ch) = CAPTURE_SIZE[(capc shr 20) and 3]
@@ -263,10 +282,13 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
       g.hd_lg[x] = a.gfx[x]
       g.hd_ld[x] = a.line[x]
     # WG / WL: the composite (capture) and display results are wanted
+    let direct = lcd_on and a.enabled and dm == 1
     template sub_dots(WG, WL: static bool) =
       for j in 0 ..< k:
         let og = g.hd_rows(g.hd_a_gfx, j)
-        let ol = g.hd_rows(g.hd_a_line, j)
+        # (shown: straight into the screen's rows)
+        let ol = if direct: cast[ptr UncheckedArray[uint16]](addr ta[][(y * k + j) * wk])
+                 else: g.hd_rows(g.hd_a_line, j)
         let hf = cast[ptr UncheckedArray[uint32]](addr g3.hd_frame[(y * k + j) * wk])
         for x in 0 ..< 256:
           var lp = g.hd_lp[x]
@@ -310,9 +332,9 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
     elif cap_gfx: sub_dots(true, true)
     else: sub_dots(false, true)
   # the display
+  if lcd_on and a.enabled and (dm == 1 and has3d or dm == 2): g.hd_rep_ok[sa][y] = false
   if lcd_on and a.enabled and dm == 1 and has3d:
-    for j in 0 ..< k:
-      copyMem(addr ta[][(y * k + j) * wk], addr g.hd_a_line[j * wk], wk * 2)
+    discard   # sub_dots wrote the rows
   elif lcd_on and a.enabled and dm == 2 and
        ((a.master_bright shr 14) in [0'u16, 3'u16] or (a.master_bright and 0x1F) == 0):
     # VRAM display, no master brightness: each dot's HD sub-dots straight
@@ -344,7 +366,7 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
         a.hd_bright(g.hd_out)
         for x in 0 ..< 256: ta[][row + x * k + i] = g.hd_out[x]
   else:
-    scaled(ta, a.line)
+    scaled(ta, sa, a.line)
   # display capture at HD, as capture_line (which has written the 1x line)
   if not cap_line: return
   let dst_bank = int((capc shr 16) and 3)
