@@ -49,6 +49,7 @@ type
 
   Delta = object
     id: int         # absolute ID of the snapshot this body reconstructs
+    frame: int      # that snapshot's emulated frame (Rewind.clock)
     packed: string  # zlib XOR delta against the next-newer snapshot
 
   KeyFrame = object
@@ -66,6 +67,9 @@ type
     keys: Deque[KeyFrame]       # oldest first, sparse (one per key_every)
     latest: string              # newest snapshot payload, uncompressed
     latest_id: int              # ID of `latest` (-1 when empty)
+    latest_frame: int           # its emulated frame (clock)
+    clock: int                  # emulated frames maybe_push has seen; a pop
+                                # or commit winds it back with the core
     next_id: int                # never reset, never reused
     total: int                  # compressed bytes retained across deltas
     thumb_total: int
@@ -111,6 +115,7 @@ proc clear*(rw: Rewind) =
   rw.keys.clear()
   rw.latest = ""
   rw.latest_id = -1
+  rw.latest_frame = 0
   rw.total = 0
   rw.thumb_total = 0
   rw.key_total = 0
@@ -293,10 +298,11 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
   inc rw.next_id
   if rw.latest.len > 0:
     let packed = encode_delta(rw.latest, payload)
-    rw.deltas.addLast(Delta(id: rw.latest_id, packed: packed))
+    rw.deltas.addLast(Delta(id: rw.latest_id, frame: rw.latest_frame, packed: packed))
     rw.total += packed.len
   rw.latest = payload
   rw.latest_id = id
+  rw.latest_frame = rw.clock
   if rw.thumb_every > 0 and thumb != nil:
     if rw.thumb_due <= 0:
       rw.thumb_due = rw.thumb_every - 1
@@ -325,17 +331,16 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
     while rw.mem_used > rw.cap and rw.deltas.len > 0:
       rw.evict_oldest()
 
-proc push_due*(rw: Rewind): bool =
-  ## The next maybe_push takes a snapshot (and its picture), so the frame
-  ## before it should be drawn (docs/frame-skip.md).
-  rw.frame_count + 1 >= rw.interval
-
 proc maybe_push*(rw: Rewind; payload: proc(): string;
-                 thumb: proc(): RewindThumb = nil): bool =
+                 thumb: proc(): RewindThumb = nil; ready = true): bool =
   ## Call once per emulated frame; serializes every `interval` frames.
-  ## Returns true when a snapshot was taken.
+  ## Returns true when a snapshot was taken. A frame that is not `ready`
+  ## (its picture was not drawn, docs/frame-skip.md: a snapshot keeps the
+  ## framebuffer and a thumbnail of it) puts a due snapshot off to the next
+  ## that is; frames_back keeps the ages exact.
+  inc rw.clock
   inc rw.frame_count
-  if rw.frame_count >= rw.interval:
+  if rw.frame_count >= rw.interval and ready:
     rw.frame_count = 0
     rp(7):
       var p: string
@@ -351,11 +356,14 @@ proc pop*(rw: Rewind): string =
   if rw.latest.len == 0:
     return ""
   result = rw.latest
+  rw.clock = rw.latest_frame   # the core goes back to it
+  rw.frame_count = 0
   if rw.deltas.len > 0:
     let d = rw.deltas.popLast()
     rw.total -= d.packed.len
     rw.latest = decode_delta(rw.latest, d.packed)
     rw.latest_id = d.id
+    rw.latest_frame = d.frame
   else:
     rw.latest = ""
     rw.latest_id = -1
@@ -369,6 +377,13 @@ proc pop*(rw: Rewind): string =
 # without disturbing the ring or the live core.
 
 proc snapshot_interval*(rw: Rewind): int = rw.interval
+
+proc frames_back*(rw: Rewind; index: int): int =
+  ## Emulated frames between the newest snapshot and the one `index` steps
+  ## back (snapshots are `interval` apart but for those put off to a drawn
+  ## frame); -1 when out of range.
+  if rw.latest.len == 0 or index < 0 or index > rw.deltas.len: return -1
+  if index == 0: 0 else: rw.latest_frame - rw.deltas[rw.deltas.len - index].frame
 
 iterator snapshots_newest_first*(rw: Rewind): string =
   ## Every retained snapshot, newest to oldest, without mutating the ring.
@@ -458,12 +473,17 @@ proc rewind_to_id*(rw: Rewind; id: int): string =
   ## deltas are dropped unread.
   let payload = rw.snapshot_by_id(id)
   if payload.len == 0: return ""
+  let pos = rw.find_delta_pos(id)
+  let frame = if pos >= 0: rw.deltas[pos].frame else: rw.latest_frame
   # Deltas are keyed by the snapshot they reconstruct: `id`'s own is redundant
   # once its payload is `latest`, and the newer ones are the future.
   while rw.deltas.len > 0 and rw.deltas.peekLast.id >= id:
     rw.total -= rw.deltas.popLast().packed.len
   rw.latest = payload
   rw.latest_id = id
+  rw.latest_frame = frame
+  rw.clock = frame
+  rw.frame_count = 0
   rw.drop_stale_sides()
   # Same re-anchoring as pop().
   rw.key_due = 0

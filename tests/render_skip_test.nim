@@ -16,11 +16,13 @@
 ## And the frontend's skip (`ppu.no_draw`, a frame it will not show): a
 ## third machine on each ROM draws only some frames; it must run exactly as
 ## the others (the same state after every frame) and, on a frame it draws,
-## show the same picture.
+## show the same picture. Its rewind snapshots wait for a drawn frame, and
+## each must hold its own frame's picture at the age frames_back gives.
 ## Run with: nimble test_renderskip
 
 import std/[os, strutils]
 import dingbat/gba/gba
+import dingbat/common/rewind
 
 var failures = 0
 
@@ -49,6 +51,10 @@ proc frame(g: GBA; force: bool; line = -1; poke: proc(g: GBA) = nil) =
       poked = true
     g.cpu.tick()
   g.end_frame()
+
+proc fb_hash(g: GBA): uint64 =
+  result = 0xCBF29CE484222325'u64
+  for v in g.ppu.framebuffer: result = (result xor uint64(v)) * 0x100000001B3'u64
 
 proc runs_as(c, b: GBA): bool =
   ## c's state is b's but for what only drawing writes: the picture, and
@@ -82,12 +88,18 @@ proc run_rom(src: string; frames: int) =
   var ran_off = -1
   var drew_off = -1
   var drawn = 0
+  let rw = new_rewind()
+  var pictures: seq[uint64] = @[]   # b's picture after each frame
+  var newest = -1                   # the frame of c's newest snapshot
   for f in 0 ..< frames:
     a.frame(force = false)
     b.frame(force = true)
+    pictures.add b.fb_hash()
     # c: runs of up to six undrawn frames, as fast-forward makes
     c.ppu.no_draw = not (f mod 4 == 3 or f mod 7 == 0)
     c.frame(force = false)
+    if rw.maybe_push(proc(): string = c.state_payload(), ready = not c.ppu.no_draw):
+      newest = f
     if a.ppu.frame_static: inc static_frames
     if bad < 0 and first_diff(a, b) >= 0: bad = f
     if ran_off < 0 and not c.runs_as(b): ran_off = f
@@ -101,6 +113,15 @@ proc run_rom(src: string; frames: int) =
   check(drew_off < 0, path.extractFilename & ": drawn frames (" & $drawn & "/" &
         $frames & ") show the same picture",
         if drew_off >= 0: "first differs at frame " & $drew_off else: "")
+  # Every snapshot, applied, shows its own frame's picture (c is done with)
+  var snap_off = -1
+  for i in 0 ..< rw.len:
+    let f = newest - rw.frames_back(i)
+    c.apply_state_payload(rw.snapshot_at(i))
+    if snap_off < 0 and (f < 0 or c.fb_hash() != pictures[f]): snap_off = f
+  check(snap_off < 0 and rw.len > frames div 12, path.extractFilename & ": " & $rw.len &
+        " rewind snapshots, each with its frame's picture",
+        if snap_off >= 0: "first wrong at frame " & $snap_off else: "")
 
 # ---- 2. Synthetic scene -------------------------------------------------------
 
@@ -227,6 +248,26 @@ proc synthetic() =
   for i in 0 ..< 3:
     k = uint16(i + 1)
     same_frames(a, b, 1, 120, pal, "palette change mid-frame #" & $i, expect_static = false)
+  # A raster effect (a palette change at line 120 every frame) across
+  # undrawn frames: each drawn frame shows it as a machine that draws all
+  var raster_bad = -1
+  for f in 0 ..< 12:
+    k = uint16(f + 20)
+    a.ppu.no_draw = f mod 3 != 2
+    a.frame(false, 120, pal)
+    b.frame(true, 120, pal)
+    if not a.ppu.no_draw and raster_bad < 0 and first_diff(a, b) >= 0: raster_bad = f
+  a.ppu.no_draw = false
+  check(raster_bad < 0, "undrawn frames around a mid-frame palette change: drawn frames match",
+        if raster_bad >= 0: "frame " & $raster_bad else: "")
+  # ...and once it stops, an undrawn changed frame then static ones
+  a.ppu.no_draw = true
+  a.frame(false); b.frame(true)
+  a.ppu.no_draw = false
+  same_frames(a, b, 1, -1, nil, "after an undrawn changed frame, the next is drawn whole",
+              expect_static = false)
+  same_frames(a, b, 1, -1, nil, "and the one after skips as static again",
+              expect_static = true)
   var x = 60'u16
   let obj = proc(g: GBA) = g.bus.write_half_internal(0x07000002, 0x4000'u16 or x)
   for i in 0 ..< 3:
