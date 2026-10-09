@@ -682,6 +682,36 @@ var clipLiveStash = ""                 # live state while a replay runs
 var clipCursor = 0
 var clipEnd = 0
 var clipReplaying = false
+# The player's 2x / slow motion while a replay runs. Both reshape the core's
+# sample stream (half / twice the samples a frame) and neither is in a state,
+# so a replay would inherit them: the clip's sound would run at half or
+# double the length of its pictures. A replay is a recording at 1x.
+var clipHeldTurbo = false
+var clipHeldSlowmo = false
+
+proc clip_core_turbo(): bool =
+  case stateKind
+  of ekGBA: stateGba.apu.turbo
+  of ekGB:  stateGb.apu.turbo
+  of ekNone: false
+
+proc clip_set_core_turbo(on: bool) =
+  case stateKind
+  of ekGBA: stateGba.apu.turbo = on
+  of ekGB:  stateGb.apu.turbo = on
+  of ekNone: discard
+
+proc clip_speed_1x() =
+  clipHeldTurbo = clip_core_turbo()
+  clipHeldSlowmo = slowmoStretch
+  clip_set_core_turbo(false)
+  slowmoStretch = false
+
+proc clip_speed_restore() =
+  clip_set_core_turbo(clipHeldTurbo)
+  slowmoStretch = clipHeldSlowmo
+  clipHeldTurbo = false
+  clipHeldSlowmo = false
 
 proc setClipCapBytes(n: cint) {.exportc.} =
   ## Takes effect at the next anchor, when the ring trims to the new cap.
@@ -695,6 +725,9 @@ proc clip_reset() =
   clipFrameIndex = 0
   clipCurButtons = 0
   clipLiveStash = ""
+  # A new core gets its speed from JS; slow motion is global and must not
+  # stay off for it.
+  if clipReplaying: slowmoStretch = clipHeldSlowmo
   clipReplaying = false
 
 proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
@@ -859,6 +892,7 @@ proc clip_begin(startAgo, endAgo: cint): cint {.exportc.} =
   clipCursor = clipAnchors[pick].frame
   clipEnd = endFrame
   clipReplaying = true
+  clip_speed_1x()
   # A replay re-sends serial bytes the printer already processed; mute it.
   if statePrinter != nil: statePrinter.muted = true
   # Silent pre-roll (at most CLIP_SNAP_INTERVAL-1 frames, audio dropped,
@@ -893,6 +927,7 @@ proc clip_tick(): cint {.exportc.} =
     discard clip_apply_payload(clipLiveStash)
     clipLiveStash = ""
     clipReplaying = false
+    clip_speed_restore()
     if statePrinter != nil: statePrinter.muted = false
     clip_set_buttons(clipCurButtons)   # re-apply what the player holds NOW
     return -1
@@ -918,6 +953,7 @@ proc clip_abort() {.exportc.} =
   discard clip_apply_payload(clipLiveStash)
   clipLiveStash = ""
   clipReplaying = false
+  clip_speed_restore()
   if statePrinter != nil: statePrinter.muted = false
   clip_set_buttons(clipCurButtons)
 

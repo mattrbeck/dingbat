@@ -1091,6 +1091,16 @@ proc dingbat_clip_scrub_frames_ago(sample: cint): cint {.exportc, cdecl.} =
   if sample < 0 or sample >= clipStripAgo.len: return 0
   cint(clipStripAgo[int(sample)])
 
+proc clip_set_turbo(on: bool) =
+  ## 2x halves the samples a frame and is not in a state, so a replay would
+  ## inherit it: a clip with half the sound of its pictures. A replay runs
+  ## at 1x; the player's 2x (optTurbo) comes back with the live state.
+  ## (Slow motion is the ring's, after the capture tap.)
+  case stateKind
+  of ekGBA: stateGba.apu.turbo = on
+  of ekGB:  stateGb.apu.turbo = on
+  of ekNone: discard
+
 proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   ## Arm a replay of [start_ago, end_ago) frames before now: stash the live
   ## state, restore the anchor at or before the start, silently re-emulate
@@ -1117,6 +1127,7 @@ proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   clipCursor = clipAnchors[pick].frame
   clipEnd = endFrame
   clipReplaying = true
+  clip_set_turbo(false)
   if statePrinter != nil: statePrinter.muted = true
   # Silent pre-roll to exactly the chosen frame: its sound is dropped.
   let mode = dingbat_audio_get_mode()
@@ -1141,6 +1152,7 @@ proc dingbat_clip_tick(): cint {.exportc, cdecl.} =
     discard clip_apply_payload(clipLiveStash)
     clipLiveStash = ""
     clipReplaying = false
+    clip_set_turbo(optTurbo)
     if statePrinter != nil: statePrinter.muted = false
     clip_set_buttons(clipCurButtons)
     present_live()
@@ -1160,6 +1172,7 @@ proc dingbat_clip_abort() {.exportc, cdecl.} =
   discard clip_apply_payload(clipLiveStash)
   clipLiveStash = ""
   clipReplaying = false
+  clip_set_turbo(optTurbo)
   if statePrinter != nil: statePrinter.muted = false
   clip_set_buttons(clipCurButtons)
   present_live()
