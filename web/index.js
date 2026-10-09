@@ -16705,6 +16705,15 @@ var Module = {
     // (an iPhone SE) a tick ran 4 frames per 33 ms, and 3 once a frame took
     // over 16/3 ms: 120 fps to 90 on a few percent of frame cost.
     let ffFrameMs = 4;      // running mean of one fast-forward frame
+    // Frames nobody sees (docs/frame-skip.md): of the frames a tick runs
+    // only the last is shown, so the others are not drawn (and run-ahead
+    // looks ahead only for the shown one). `?draw=all` draws every frame,
+    // to compare.
+    const drawAll = new URLSearchParams(location.search).get("draw") === "all";
+    let unseenFrames = 0;   // diagnostics: frames run undrawn (the ff log)
+    const unseenNext = () => {
+      if (!drawAll && Module._wasm_unseen_next) { Module._wasm_unseen_next(); unseenFrames++; }
+    };
     let ffVsyncMs = 1000 / 60; // running mean of the rAF interval at play
     let ffOverMs = 2;       // running mean of the tick's own work after them
     let ffReserveMs = 2;    // and of the browser's, learnt from late ticks
@@ -16729,6 +16738,7 @@ var Module = {
       const st = ffStat;
       if (st.since === 0 || timestamp - st.since > 10000) {
         ffStat = { since: timestamp, frames: 0, ticks: 0, emuMs: 0, late: 0 };
+        unseenFrames = 0;
         return;
       }
       st.frames += frames; st.ticks++; st.emuMs += emuMs; if (late) st.late++;
@@ -16738,8 +16748,10 @@ var Module = {
         `${(st.emuMs / st.frames).toFixed(2)} ms/frame, ${(st.frames / st.ticks).toFixed(1)} frames/tick, ` +
         `${(span / st.ticks).toFixed(1)} ms/tick (vsync ${ffVsyncMs.toFixed(1)}), ` +
         `${st.late} late of ${st.ticks}, after ${ffOverMs.toFixed(1)} + ${ffReserveMs.toFixed(1)} ms, ` +
-        `${ffFree ? "free (16 ms budget)" : "aimed"}`);
+        `${ffFree ? "free (16 ms budget)" : "aimed"}, ` +
+        (drawAll ? "every frame drawn (draw=all)" : `${unseenFrames} not drawn`));
       ffStat = { since: timestamp, frames: 0, ticks: 0, emuMs: 0, late: 0 };
+      unseenFrames = 0;
     };
 
     // Push-based Web Audio playback: samples at SAMPLE_RATE scheduled at
@@ -17310,6 +17322,9 @@ var Module = {
         const t0 = t;
         let n = 0;
         do {
+          // Not the last if another fits after it; a wrong guess shows a
+          // frame or two back, never a broken one
+          if (t + 2 * ffFrameMs < deadline) unseenNext();
           Module._loop_tick();
           if (audioCtx && audioCtx.state === "running" &&
               playTime - audioCtx.currentTime < FF_MAX_AUDIO_LEAD) {
@@ -17335,6 +17350,7 @@ var Module = {
           typeof Module._runahead_tick === "function";
         let framesRun = 0;
         while (accumulator >= step && framesRun < maxFrames) {
+          if (accumulator - step >= step && framesRun + 1 < maxFrames) unseenNext();
           if (useRunahead) Module._runahead_tick(runaheadFrames);
           else Module._loop_tick();
           pushAudio();

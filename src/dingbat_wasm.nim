@@ -1077,7 +1077,32 @@ proc gb_rewind_thumb(g: GB): RewindThumb =
               pixels: downscale_bgr555(g.ppu.framebuffer, GB_W, GB_H,
                                        SCRUB_THUMB_W, GB_SCRUB_THUMB_H))
 
+# --- Frames nobody sees (docs/frame-skip.md) ---
+# At 2x, fast-forward, or on a display slower than the game JS runs several
+# frames per refresh and shows only the last; wasm_unseen_next says the next
+# tick's frame is one of the others. The GBA PPU then draws nothing for it
+# (ppu.no_draw), and run-ahead runs no lookahead (its frames exist only to be
+# shown). Drawn anyway: a frame whose picture something keeps (a rewind
+# snapshot, a clip anchor's thumbnail), and every frame while the LCD
+# response is on (its panel takes them all).
+var unseenNext = false
+
+proc wasm_unseen_next() {.exportc.} =
+  unseenNext = true
+
+proc take_unseen(): bool =
+  ## This tick's frame will not be shown (one-shot).
+  result = unseenNext and not lcdOn
+  unseenNext = false
+
+proc picture_kept(): bool =
+  ## Something keeps the picture the coming frame leaves (after
+  ## clip_note_frame, which counts it): draw it.
+  (rewindHistory != nil and rewindHistory.push_due()) or
+    clipFrameIndex mod CLIP_SNAP_INTERVAL == 0
+
 proc loop_tick() {.exportc.} =
+  let unseen = take_unseen()
   if stateRenderer == nil: return
   if stateNet != nil: return  # online link mode: netlink_tick drives frames
   if clipReplaying: return    # clip_tick owns the core during a replay
@@ -1088,7 +1113,9 @@ proc loop_tick() {.exportc.} =
   case stateKind
   of ekGBA:
     if stateTexture == nil: return
+    stateGba.ppu.no_draw = unseen and not picture_kept()
     stateGba.step_frame()
+    stateGba.ppu.no_draw = false
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(
         proc(): string = stateGba.state_payload(),
@@ -1122,6 +1149,7 @@ proc runahead_tick(n: cint) {.exportc.} =
   ## Single-core only: linked modes are frame-synced with a peer, 2P already
   ## runs two cores per frame, and stateGba/stateGb may be stale there; the
   ## guards make a mistimed JS call a no-op.
+  let unseen = take_unseen()
   if stateRenderer == nil: return
   if stateNet != nil: return
   if stateLink != nil or stateGbLink != nil: return
@@ -1133,12 +1161,15 @@ proc runahead_tick(n: cint) {.exportc.} =
   case stateKind
   of ekGBA:
     if stateTexture == nil: return
+    # The canonical frame is shown only without run-ahead
+    stateGba.ppu.no_draw = (n > 0 or unseen) and not picture_kept()
     stateGba.step_frame()  # canonical frame; its audio is played
+    stateGba.ppu.no_draw = false
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(
         proc(): string = stateGba.state_payload(),
         proc(): RewindThumb = gba_rewind_thumb(stateGba))
-    if n <= 0:
+    if n <= 0 or unseen:
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                          GBA_W * GBA_H)
       return
@@ -1146,7 +1177,10 @@ proc runahead_tick(n: cint) {.exportc.} =
     # Lookahead audio is thrown away: don't mix it. The field is set
     # directly: the restore below re-latches the sound HLEs anyway.
     stateGba.apu.silent = true
-    for _ in 0 ..< int(n): stateGba.step_frame()
+    for i in 0 ..< int(n):
+      stateGba.ppu.no_draw = i < int(n) - 1  # only the last is shown
+      stateGba.step_frame()
+    stateGba.ppu.no_draw = false
     stateGba.apu.silent = optSilent
     if runaheadFrame.len != GBA_W * GBA_H: runaheadFrame.setLen(GBA_W * GBA_H)
     copyMem(addr runaheadFrame[0], addr stateGba.ppu.framebuffer[0], GBA_W * GBA_H * 2)
@@ -1164,7 +1198,7 @@ proc runahead_tick(n: cint) {.exportc.} =
       discard rewindHistory.maybe_push(
         proc(): string = stateGb.state_payload(),
         proc(): RewindThumb = gb_rewind_thumb(stateGb))
-    if n <= 0:
+    if n <= 0 or unseen:
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
                          GB_W * GB_H)
       return
