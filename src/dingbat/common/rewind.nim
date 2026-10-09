@@ -325,6 +325,11 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
     while rw.mem_used > rw.cap and rw.deltas.len > 0:
       rw.evict_oldest()
 
+proc push_due*(rw: Rewind): bool =
+  ## The next maybe_push takes a snapshot (and its picture), so the frame
+  ## before it should be drawn (docs/frame-skip.md).
+  rw.frame_count + 1 >= rw.interval
+
 proc maybe_push*(rw: Rewind; payload: proc(): string;
                  thumb: proc(): RewindThumb = nil): bool =
   ## Call once per emulated frame; serializes every `interval` frames.
