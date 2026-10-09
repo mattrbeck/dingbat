@@ -282,17 +282,24 @@ proc main() =
                                                    SCRUB_THUMB_W, GBA_SCRUB_THUMB_H)))
         else:
           discard rw.maybe_push(proc(): string = emu.state_payload())
+    # DINGBAT_BENCH_DRAW_EVERY=<n>: draw only every nth frame, as a frontend
+    # showing one picture per n frames does (ppu.no_draw, docs/frame-skip.md)
+    let draw_every = parseInt(getEnv("DINGBAT_BENCH_DRAW_EVERY", "1"))
+    var static_frames = 0
     let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
     for i in 0 ..< frames:
+      emu.ppu.no_draw = draw_every > 1 and i mod draw_every != draw_every - 1
       run_scripted(warmup + i)
+      if emu.ppu.frame_static: inc static_frames
       rewind_tick()
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
     let (ins1, cyc1) = hw_counters()
     echo rom_path.splitFile().name, ": ", frames, " frames in ",
          formatFloat(elapsed, ffDecimal, 3), "s = ",
          formatFloat(frames.float / elapsed, ffDecimal, 1), " fps (",
-         formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime)"
+         formatFloat(frames.float / elapsed / 59.7275, ffDecimal, 2), "x realtime), ",
+         static_frames, " frames static"
     if getEnv("DINGBAT_BENCH_COUNTERS") == "1":
       echo "  instructions=", ins1 - ins0, " hwcycles=", cyc1 - cyc0
     report_rewind(rw, frames, elapsed)

@@ -1394,9 +1394,11 @@ proc scanline*(ppu: PPU) =
     ppu.obj_list_rebuilds = 0
     ppu.obj_list_dirty = true
   if ppu.no_draw:
-    # Not shown, so not drawn; the framebuffer no longer holds this frame,
-    # so the next drawn one is drawn whole
-    ppu.render_dirty = true
+    # Not shown, so not drawn. A frame that changed leaves the framebuffer
+    # behind, so the next drawn one is drawn whole (a change from inside
+    # this frame already left render_dirty set for it); an unchanged one
+    # leaves it holding the picture, as the render skip does
+    if not ppu.skip_render: ppu.render_dirty = true
     return
   if ppu.skip_render:
     if ppu.render_dirty:

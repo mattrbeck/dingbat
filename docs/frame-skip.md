@@ -21,8 +21,10 @@ existing whole-frame render skip never fires in gameplay.
 ## How
 
 `ppu.no_draw` (gba.nim): set by the frontend between frames for a frame it
-will not show. `scanline` returns at once and marks the frame dirty, so the
-next drawn frame is drawn whole. It is never serialized: drawing changes no
+will not show. `scanline` returns at once. A frame that changed marks the
+next one dirty, so it is drawn whole; one that changed nothing leaves the
+framebuffer holding the picture, as the existing render skip does (without
+that, a mostly static scene drew more than before: -3% at 1 in 2). It is never serialized: drawing changes no
 emulated state (the OAM and line latches live in `latch_oam` and
 `latch_line_start`, outside `scanline`), so a skipped frame runs exactly as a
 drawn one. Two things only drawing writes do go stale in a skipped frame:
@@ -40,9 +42,30 @@ that draws everything (but the two fields above), and every frame it draws
 must match. Passes on all of tests/roms plus FireRed and LeafGreen for 1500
 frames from boot (`DINGBAT_RENDER_SKIP_ROMS`, `DINGBAT_RENDER_SKIP_FRAMES`).
 
+## Measured (core alone)
+
+`tests/dingbat_bench.nim` with `DINGBAT_BENCH_DRAW_EVERY=n`, 600 frames,
+best of 5, interleaved; Apple M-series, native release build. Moving scenes
+from boot at the given warmup; FireRed at the Pokémon Center counter (65% of
+its frames static) as the case the render skip already covers.
+
+| scene | all drawn | 1 in 2 | 1 in 4 | 1 in 40 |
+|---|---|---|---|---|
+| Kirby NiDL (600) | 1932 fps | +21% | +36% | +50% |
+| Metroid Fusion (600) | 2348 | +23% | +36% | +55% |
+| Super Mario World (1500) | 1156 | +21% | +36% | +51% |
+| Emerald (1500) | 1124 | +22% | +37% | +54% |
+| Advance Wars (1200) | 757 | +9% | +14% | +20% |
+| FireRed counter (state) | 1382 | +0% | +5% | +8% |
+
+1 in 2 is 2x on a 60 Hz display or 1x on a 30 Hz one; 1 in 40 is about
+fast-forward. Advance Wars spends its time elsewhere (CPU-heavy attract AI).
+
 ## Progress
 
-- [x] core flag + test
+- [x] core flag + test (all tests/roms + FR, LG, Kirby, Metroid, Emerald,
+      Advance Wars, Golden Sun for 2000 frames)
+- [x] bench `DINGBAT_BENCH_DRAW_EVERY`, numbers above
 - [ ] web: tick loops (normal/2x/slow, fast-forward), run-ahead in wasm
 - [ ] iOS: GameSession tick, dingbat_run_frame_ahead
 - [ ] A/B switch for testing (web `?draw=all`, iOS setting)
