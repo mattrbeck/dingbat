@@ -55,11 +55,11 @@ address moves) and runs `web/serve.py --dev --https` on port 8443 (`PORT=`).
 
 | Feature | Why |
 |---|---|
-| Save states: Quick save/load, slots, Save States, resume snapshots and the hand-off | The core exports `nds_state_size`/`nds_state_data`/`nds_state_load` (+ `nds_state_error_kind`/`nds_state_error`; docs/nds/savestate.md). `ndsCaptureState`/`ndsApplyState` in index.js "Nintendo DS" call them, so `captureStateBytes`/`applyStateBytes` work, `body.nds-states` brings back quick save/load and Save States, the library offers the session, and a refused state's toast reads the DS core's reason. Rewind and run-ahead need more than that and stay off. |
-| Rewind, the rewind scrubber, Report a Bug's timeline | No rewind ring on the DS core (Report a Bug attaches the moment, when states exist). |
-| Clip that! and Record | Clip that! replays the GB/GBA core's history; Record is kept with it as in every other mode (it would likely work: canvas + audio tap). |
+| Save states: Quick save/load, slots, Save States, resume snapshots and the hand-off | The core exports `nds_state_size`/`nds_state_data`/`nds_state_load` (+ `nds_state_error_kind`/`nds_state_error`; docs/nds/savestate.md). `ndsCaptureState`/`ndsApplyState` in index.js "Nintendo DS" call them, so `captureStateBytes`/`applyStateBytes` work, `body.nds-states` brings back quick save/load and Save States, the library offers the session, and a refused state's toast reads the DS core's reason. |
+| Rewind (hold), run-ahead, cheats | **On** when the core exports them (`body.nds-rewind`, `body.nds-cheats`; run-ahead follows the app's choice): docs/nds/features.md. |
+| The rewind scrubber, Report a Bug's timeline | No thumbnails in the DS ring (Report a Bug attaches the moment, when states exist). |
+| Clip that! and Record | Clip that! replays the GB/GBA core's history; Record is kept with it as in every other mode (the DS sound does not reach the clip tap yet). |
 | Link cable, 2P link | No DS wireless/link. |
-| Cheats | The cheat engines are the GB/GBA cores'. |
 | Library pictures batch | It boots games on the GB/GBA core; DS games get their picture by being played. |
 
 None of the GB/GBA core's per-cart work runs for a DS game (tilt, camera,
@@ -278,8 +278,8 @@ it in step with the `.nims` export list), `styles.css` "Nintendo DS",
 - Hiding the bar for GB/GBA too (portrait GB/GBA is width-bound, so it
   would only add letterbox); the size of Focus's small screen (a third) as
   a choice.
-- Rewind and run-ahead on the DS (`state_payload` / `load_state_payload`
-  are the core's hooks; docs/nds/savestate.md has the sizes and costs).
+- The rest of docs/nds/features.md: the rewind scrubber, Record and Clip
+  that!, encrypted CodeBreaker codes, the same features on iOS.
 - The GBA slot, wireless.
 - Drive sync of DS saves once main plays DS games (the firmware record
   stays local even then: it is one device's console).

@@ -889,3 +889,89 @@ test("unpaced frame time of DINGBAT_NDS_BENCH", { skip: skip || !BENCH || !exist
                 `wasm heap ${r.heapMB.toFixed(0)} MB`);
     await ctx.close();
   });
+
+// The same game (local only: commercial ROMs never go in the repo): from
+// frame 1500, 300 frames plain, with run-ahead 1 and with run-ahead 3 plus
+// the rewind ring must be the same frames and sound; the run-ahead frame
+// shown is the next one; after 5 rewind pops the next 40 frames replay as
+// they were. Then what rewind and run-ahead cost (docs/nds/features.md).
+test("run-ahead and rewind leave DINGBAT_NDS_BENCH's frames as they were, and what they cost",
+  { skip: skip || !BENCH || !existsSync(BENCH || "") }, async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, serviceWorkers: "block" });
+    const { page, errors } = await newPage(ctx);
+    await addGame(page, BENCH, BENCH.split("/").pop());
+    await page.evaluate(HASHERS);
+    const r = await page.evaluate(() => {
+      paused = true;
+      const c = ndsCore;
+      c._nds_rewind_enable(0, 0);
+      for (let i = 0; i < 1500; i++) { c._nds_run_frame(); c._nds_audio_clear(); }
+      const key = (s) => `${s.f}:${s.scr}:${s.snd}`;
+      const state = captureStateBytes();
+      const play = (ahead, ring) => {
+        applyStateBytes(state);
+        c._nds_rewind_enable(ring ? 1 : 0, 0);
+        c._nds_audio_clear();
+        const own = [], shown = [];
+        for (let i = 0; i < 300; i++) {
+          c._nds_run_frame();
+          own.push(key(e2eSig()));
+          c._nds_audio_clear();
+          if (ahead) { c._nds_runahead(ahead); shown.push(e2eSig().scr); }
+        }
+        return { own, shown };
+      };
+      const plain = play(0, false), a1 = play(1, false), a3 = play(3, true);
+      const seen = Object.fromEntries(a3.own.map((k) => [k.split(":")[0], k]));
+      for (let i = 0; i < 5; i++) c._nds_rewind_pop();
+      const replay = [];
+      for (let i = 0; i < 40; i++) {
+        c._nds_run_frame();
+        const k = key(e2eSig());
+        replay.push([k, seen[k.split(":")[0]]]);
+        c._nds_audio_clear();
+      }
+      // Cost: the fastest of N (the machine may be shared: the minimum resists
+      // load), the same-frame A/B alternated in one loop.
+      const med = (a) => Math.min(...a);
+      const time = (f, n) => Array.from({ length: n }, () => { const t = performance.now(); f(); return performance.now() - t; });
+      const run = () => { c._nds_run_frame(); c._nds_audio_clear(); };
+      c._nds_rewind_enable(0, 0);
+      applyStateBytes(state);
+      const cost = { payloadMB: c._nds_payload_take() / 1048576,
+                     take: med(time(() => c._nds_payload_take(), 60)),
+                     restore: med(time(() => c._nds_payload_restore(), 60)) };
+      // The same frame each time: plain, right after a restore, and with
+      // run-ahead 1 after it.
+      const warm = [], cold = [], ahead = [];
+      for (let i = 0; i < 90; i++) {
+        applyStateBytes(state); run(); run();
+        const k = i % 3;
+        if (k === 1) { c._nds_payload_take(); c._nds_payload_restore(); }
+        const t = performance.now();
+        run();
+        if (k === 2) c._nds_runahead(1);
+        [warm, cold, ahead][k].push(performance.now() - t);
+      }
+      cost.frame = med(warm); cost.frameAfterRestore = med(cold); cost.frameAndAhead1 = med(ahead);
+      c._nds_rewind_enable(1, 0);
+      const ft = time(run, 600);
+      cost.pushFrame = med(ft.filter((_, i) => i % 10 === 9));
+      cost.plainFrame = med(ft.filter((_, i) => i % 10 !== 9));
+      cost.ringMBper10s = c._nds_rewind_bytes() / 1048576;
+      cost.pop = med(time(() => c._nds_rewind_pop(), 30));
+      return { plain, a1, a3, replay, cost,
+               distinct: new Set(plain.own.map((k) => k.split(":")[1])).size,
+               sounding: plain.own.filter((k) => !k.endsWith(":0")).length };
+    });
+    assert.ok(r.distinct > 20 && r.sounding > 200, `a moving, sounding stretch: ${r.distinct} screens, ${r.sounding} frames of sound`);
+    assert.deepEqual(r.a1.own, r.plain.own, "run-ahead 1: the same frames and sound");
+    assert.deepEqual(r.a3.own, r.plain.own, "run-ahead 3 and the ring: the same frames and sound");
+    for (let i = 0; i + 1 < 300; i++) assert.equal(String(r.a1.shown[i]), r.plain.own[i + 1].split(":")[1]);
+    for (const [now, was] of r.replay) if (was) assert.equal(now, was, "after a rewind the frames replay");
+    const f = (x) => (typeof x === "number" ? x.toFixed(2) : x);
+    console.log("  " + BENCH.split("/").pop() + ": " +
+                Object.entries(r.cost).map(([k, v]) => `${k} ${f(v)}`).join(", ") + " (ms, MB)");
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
