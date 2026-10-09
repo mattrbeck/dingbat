@@ -368,7 +368,7 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   else:
     scaled(ta, sa, a.line)
   # display capture at HD, as capture_line (which has written the 1x line)
-  if not cap_line: return
+  if not cap_line or defined(hd_nocapture): return   # (the cost split, docs/nds/hd3d.md)
   let dst_bank = int((capc shr 16) and 3)
   if not g.vram.lcdc_mapped(VramBank(dst_bank)): return
   let kk = k * k

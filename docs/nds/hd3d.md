@@ -83,13 +83,13 @@ Nintendo DS > 3D resolution).
   the 1x Y-sort keys (same drawing order) and the 1x render registers;
   it renders whenever the 1x one does (frame reuse included) and its lines
   are handed off with the 1x ones (mid-frame register changes split both).
-- **Composite** (`Gpu.hd_line`): after the 1x line, engine A's composite is
-  run again N x N times with a sub-dot column of the HD 3D frame as BG0
-  (`render_hd_sub`): BGs, OBJs, windows and effects are the line's own,
-  so priorities, 3D alpha blending, colour effects and master brightness
-  are the hardware's rules per HD dot. Everything else (engine B, 2D
-  lines) repeats each dot N x N. A line showing 3D is not reused by the
-  2D line cache while HD is on (its scratch is needed).
+- **Composite** (`Gpu.hd_line`): engine A's composite per HD dot, by the
+  hardware's rules (priorities, windows, 3D alpha blending, colour effects,
+  master brightness), computed per 1x dot rather than per sub-dot column
+  (see "Why the fast composite is exact" below). Everything else (engine
+  B, 2D lines) repeats each dot N x N, and a repeated line the screen's
+  rows already hold is not written again. A line showing 3D is not reused
+  by the 2D line cache while HD is on (its scratch is needed).
 - **Capture**: each captured halfword gets N x N HD sub-dots
   (`cap_hd`, from the HD composite or HD 3D layer, blended with source B's
   HD copy) and a note of the 1x value written (`cap_1x`). VRAM display and
@@ -99,6 +99,38 @@ Nintendo DS > 3D resolution).
 - Not machine state: every new field is in the save state's skip lists
   (the layout is unchanged), and a state loads into an HD machine (the
   first frame after places vertices by their whole dots).
+
+### Why the fast composite is exact
+
+The first prototype (08b4eb78) composited every sub-dot column of a line
+whole: engine A's composite and master brightness N x N times per line
+with that column of the HD 3D frame as BG0. That is the definition; the
+fast path computes the same thing per dot:
+
+- Within a line, a dot's result depends on the 3D pixel it shows and on
+  nothing else that differs between its sub-dots (BGs, OBJs, windows,
+  effect registers, BG0HOFS are the line's). So a sub-dot whose HD 3D
+  pixel equals the 1x pixel at that dot gets the 1x dot's result, and one
+  equal to the dot's previous sub-dot gets that one's (`hd_lp/lg/ld`).
+- A transparent 3D pixel never shows: every transparent value gives the
+  dot of the line composited with no 3D (one more composite, only on
+  lines where a sub-dot needs it).
+- An opaque one: the line is painted once with the 3D layer opaque
+  wherever BG0HOFS lets it show (`hd_prepare`, the same paint as the line
+  composite). Where the 3D layer is then the top or second layer, the dot
+  is the effect rules on p's colour (`hd_dot`); `effect_dot` and
+  `bright_dot` are the very templates the line composite and master
+  brightness expand, not copies. Where it is under two other layers, the
+  top two are the same as with no 3D, so the dot is the 1x one.
+- VRAM display and capture copy the captured HD sub-dots with one
+  validity test per 1x dot instead of per sub-dot.
+
+Checked against 08b4eb78 as the oracle: `ndsrun --hd-hash 5` (a CRC-32 of
+each HD screen every 5 frames) over SoulSilver New Bark Town (p12 frames
+9001-10000: walking, the house exit, a fade), Golden Sun's first field
+(28001-28300) and title (1001-1300, dual-screen 3D through capture), at
+2x, 3x and 4x: all 960 hashes identical. SoulSilver p12's HD shots at 2x
+(3000-8000) are identical too.
 
 ### Checked
 
@@ -142,30 +174,33 @@ internal (1024 px) is about native and 2x is half of it, scaled up.
 
 Host instructions per emulated frame (`ndsrun --perf-from`, macOS
 retired-instruction counter: exact, unlike wall time on this shared Mac),
-from save states with the scripts' presses; "composite" is the difference
-to a `-d:hd_nocomposite` build (no per-sub-dot composite, no HD capture):
+from save states with the scripts' presses. "Before" is 08b4eb78 (every
+sub-dot column composited whole), "after" the per-dot composite. The
+split comes from builds with `-d:hd_nocomposite` (no HD composite) and
+`-d:hd_nocapture` (no HD capture).
 
 | scene | 1x | 2x | 3x | 4x |
 |---|---|---|---|---|
-| SoulSilver, New Bark Town walk (p12 9001-10400) | 40.4 M | 80.3 M (x2.0) | 121.1 M (x3.0) | 177.2 M (x4.4) |
-| ... of which HD rasteriser | | 22.7 M | 41.3 M | 66.4 M |
-| ... of which HD composite | | 17.2 M | 39.4 M | 70.3 M |
-| Golden Sun DD, first field (28001-28600) | 121.0 M | 183.9 M (x1.5) | 251.7 M (x2.1) | 344.1 M (x2.8) |
-| ... of which HD rasteriser + capture | | 44.9 M | 89.1 M | 148.0 M |
-| ... of which HD composite | | 18.0 M | 41.6 M | 75.0 M |
-| Golden Sun DD, title (1330 polygons, 1001-1600) | 133.6 M | 264.0 M (x2.0) | 412.8 M (x3.1) | 615.3 M (x4.6) |
+| SoulSilver, New Bark Town walk (p12 9001-10400), before | 40.4 M | 80.3 M | 121.1 M | 177.2 M |
+| ... after | 40.3 M | 67.6 M | 86.8 M | 111.9 M |
+| ... after: HD composite (before) | | 7.6 M (17.2) | 11.6 M (39.4) | 15.9 M (70.3) |
+| ... after: HD rasteriser and hand-off | | 19.7 M | 34.9 M | 55.7 M |
+| Golden Sun DD, first field (28001-28600), before | 121.0 M | 183.9 M | 251.7 M | 344.1 M |
+| ... after | 120.7 M | 172.0 M | 219.3 M | 281.2 M |
+| ... after: HD composite (before) | | 9.3 M (18.0) | 15.7 M (41.6) | 22.7 M (75.0) |
+| ... after: HD rasteriser and hand-off | | 42.0 M | 82.9 M | 137.8 M |
+| Golden Sun DD, title (1330 polygons, 1001-1600), before | 133.6 M | 264.0 M | 412.8 M | 615.3 M |
+| ... after | 132.8 M | 243.5 M | 360.9 M | 518.1 M |
+| ... after: HD composite | | 12.0 M | 20.7 M | 29.9 M |
 
-Wall time, best of two back-to-back runs (SoulSilver walking out of the
-house, 300 frames, one M-series core): 1x 4.7 ms/frame, 2x 8.4 ms, 4x
-20.2 ms. So on this Mac 2x and 3x keep 60 fps in SoulSilver, 4x does not
-single-threaded; Golden Sun, already ~2.5x SoulSilver's work at 1x, has
-no room for any HD step on one core.
-
-The rasteriser grows less than N^2 (polygon setup, sorting and the
-geometry are paid once). The composite grows as N^2: each sub-dot column
-re-runs engine A's whole composite (every BG/OBJ pass, effects, master
-brightness) for one changed layer. Fixed with HD off: +0.1 % host
-instructions on SoulSilver p12 (two scale tests per line).
+The HD composite is 2.3-4.4x cheaper than before; HD capture and VRAM
+display are within measurement noise of none (Golden Sun field, nocapture
+build). What is left of the HD cost is the rasteriser drawing N^2 as
+many dots (the span loops, `fill_k`, are the top of the profile; then
+`clear` and `edge_mark` over the whole HD frame), 78 % of it in
+SoulSilver at 4x and 86-92 % in Golden Sun. HD off: SoulSilver p12 host
+instructions -0.4 % against the branch head (the templates the composite
+now shares inline a little better).
 
 ## iOS
 
@@ -197,9 +232,10 @@ internal (1024 px) is about native and 2x is half of it, scaled up.
 
 ## What is left
 
-- Faster composite (about a day): paint the non-3D layers once per line
-  and run only the 3D layer's insertion and the effect pass per sub-dot;
-  the HD composite is half the HD cost at 3x-4x.
+- The rasteriser is now nearly all of the HD cost. Its per-dot work is
+  the 1x rasteriser's (already tuned); what HD alone could still trim is
+  the whole-frame passes (`clear`, edge marking, fog, AA) at N^2 dots, a
+  few percent. Beyond that it is threads (row bands) or a GPU renderer.
 - Captures read back as 2D bitmap BGs, bitmap OBJs or textures stay 1x
   (the HD copy is only used by VRAM display and capture source B). Games
   that show the second 3D screen through engine B's bitmap BG need the
