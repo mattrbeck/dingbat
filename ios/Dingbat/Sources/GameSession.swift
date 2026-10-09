@@ -549,9 +549,9 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     private func checkPresented() {
-        guard let fb = dingbat_game_fb() else { return }
+        guard let pic = GameRenderer.picture() else { return }
         pcTicks += 1
-        if Self.hash16(fb, Int(dingbat_fb_width() * dingbat_fb_height())) != GameRenderer.shared.uploadedHash {
+        if Self.hash16(pic.ptr, pic.w * pic.h) != GameRenderer.shared.uploadedHash {
             pcStale += 1
             pcRun += 1
             pcLongest = max(pcLongest, pcRun)

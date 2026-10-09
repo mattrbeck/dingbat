@@ -139,6 +139,25 @@ const uint32_t *dingbat_framebuffer_rgba(void);
  * valid until the next call; NULL unless a DS game is loaded. */
 const uint32_t *dingbat_nds_top_rgba(void);
 
+/* DS HD 3D (docs/nds/hd3d.md, the web's Settings > Nintendo DS > 3D
+ * resolution): k = 2..4 also draws both screens at 256k x 192k, the 3D
+ * scene rendered at that resolution and the 2D layers scaled up; 1 = off
+ * (the default). Display only: the 1x picture, the machine and its states
+ * are unchanged. Kept for every DS boot from the call on (a load, a reset)
+ * and applied to a running DS game at once; a state load, rewind or
+ * scrubber commit keeps it. dingbat_nds_hd_scale: the running game's (1 =
+ * none), or with no DS game the one the next boot gets. */
+void dingbat_nds_set_hd(int k);
+int dingbat_nds_hd_scale(void);
+/* The HD picture for the presenter alone: both HD screens stacked like
+ * dingbat_game_fb's (top rows 0..192k-1, bottom 192k..384k-1), raw BGR555,
+ * dingbat_nds_hd_fb_width() x dingbat_nds_hd_fb_height() (256k x 384k),
+ * copied when dingbat_game_fb is. NULL (and 0 x 0) with HD off or no DS
+ * game. Thumbnails, the glow and screenshots keep the 1x picture. */
+const uint16_t *dingbat_nds_hd_fb(void);
+int dingbat_nds_hd_fb_width(void);
+int dingbat_nds_hd_fb_height(void);
+
 int dingbat_fb_width(void);   /* 240 (GBA), 160 (GB/GBC) or 256 (DS) */
 int dingbat_fb_height(void);  /* 160 (GBA), 144 (GB/GBC) or 384 (DS: both screens) */
 /* Ambient glow: the composited picture point-sampled into gw x gh RGBA8888

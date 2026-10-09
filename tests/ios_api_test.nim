@@ -375,6 +375,72 @@ if ndsHave("fb_both.nds"):
   check glow != nil and glow[7 * 4] == 0xFFFF00FF'u32, "the glow samples the composite"
   check dingbat_frame_static() == 0, "frame_static: always 0 on the DS"
 
+echo "DS: HD 3D"
+proc dingbat_nds_set_hd(k: cint) {.importc, cdecl.}
+proc dingbat_nds_hd_scale(): cint {.importc, cdecl.}
+proc dingbat_nds_hd_fb(): ptr uint16 {.importc, cdecl.}
+proc dingbat_nds_hd_fb_width(): cint {.importc, cdecl.}
+proc dingbat_nds_hd_fb_height(): cint {.importc, cdecl.}
+
+proc hdAsUpscale(k: int): tuple[same, differs: int] =
+  ## The HD picture against the 1x one scaled up k x (nearest): how many
+  ## HD pixels match and how many do not.
+  let lo = cast[ptr UncheckedArray[uint16]](dingbat_game_fb())
+  let hd = cast[ptr UncheckedArray[uint16]](dingbat_nds_hd_fb())
+  let w = 256 * k
+  for y in 0 ..< 384 * k:
+    for x in 0 ..< w:
+      if (hd[y * w + x] and 0x7FFF) == (lo[(y div k) * 256 + x div k] and 0x7FFF): inc result.same
+      else: inc result.differs
+
+if ndsHave("fb_both.nds"):
+  check dingbat_load_rom(cstring(ndsStaged("fb_both.nds")), nil) == 0, "loads"
+  for _ in 0 ..< 10: dingbat_run_frame()
+  check dingbat_nds_hd_scale() == 1 and dingbat_nds_hd_fb() == nil and
+        dingbat_nds_hd_fb_width() == 0, "HD off by default: no HD picture"
+  let lo = frameHash()
+  dingbat_nds_set_hd(2)
+  check dingbat_nds_hd_scale() == 2 and dingbat_nds_hd_fb() != nil and
+        dingbat_nds_hd_fb_width() == 512 and dingbat_nds_hd_fb_height() == 768,
+        "2x: a 512x768 HD picture at once"
+  check hdAsUpscale(2).differs == 0, "until a frame runs, the 1x picture scaled up"
+  for _ in 0 ..< 5: dingbat_run_frame()
+  check dingbat_fb_width() == 256 and dingbat_fb_height() == 384 and frameHash() == lo,
+        "the 1x picture is unchanged"
+  check hdAsUpscale(2).differs == 0, "no 3D: every 2x2 block is the 1x pixel"
+  let s = takeState()
+  for _ in 0 ..< 5: dingbat_run_frame()
+  check applyState(s) and dingbat_nds_hd_scale() == 2 and hdAsUpscale(2).differs == 0,
+        "a state load keeps HD"
+  check dingbat_reset() == 0 and dingbat_nds_hd_scale() == 2, "a reset keeps HD"
+  for _ in 0 ..< 5: dingbat_run_frame()
+  check dingbat_nds_hd_fb_width() == 512 and hdAsUpscale(2).differs == 0, "and draws it"
+  dingbat_nds_set_hd(1)
+  check dingbat_nds_hd_scale() == 1 and dingbat_nds_hd_fb() == nil and
+        dingbat_fb_width() == 256 and dingbat_fb_height() == 384, "1: back to 256x384 alone"
+
+if ndsHave("built/Simple_Quad.nds"):
+  let rom = ndsStaged("built/Simple_Quad.nds")
+  check dingbat_load_rom(cstring(rom), nil) == 0, "a 3D game loads"
+  for _ in 0 ..< 60: dingbat_run_frame()
+  let plain = frameHash()
+  dingbat_nds_set_hd(3)
+  check dingbat_load_rom(cstring(rom), nil) == 0 and dingbat_nds_hd_scale() == 3,
+        "a scale set before a load is the next game's"
+  for _ in 0 ..< 60: dingbat_run_frame()
+  check frameHash() == plain, "the 1x picture is the one HD off draws"
+  let up = hdAsUpscale(3)
+  check dingbat_nds_hd_fb_width() == 768 and up.differs > 0 and up.same > up.differs,
+        "3x: the 3D drawn sharper than the 1x scaled up: " & $up.differs & " of " & $(up.same + up.differs)
+  dingbat_set_rewind(1, 0)
+  for _ in 0 ..< 120: dingbat_run_frame()
+  check dingbat_rewind_pop() == 1 and dingbat_nds_hd_scale() == 3 and
+        dingbat_nds_hd_fb_width() == 768, "a rewind keeps HD"
+  dingbat_run_frame()
+  check hdAsUpscale(3).differs > 0, "and draws 3D in HD again"
+  dingbat_nds_set_hd(1)
+  check dingbat_nds_hd_fb() == nil, "off"
+
 echo "DS: things the DS core lacks refuse cleanly"
 if ndsHave("fb_both.nds"):
   let rom = ndsStaged("fb_both.nds")

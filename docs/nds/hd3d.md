@@ -225,11 +225,19 @@ now shares inline a little better).
 A 393-pt-wide iPhone shows each screen ~374 pt = ~1122 px at 3x, so 4x
 internal (1024 px) is about native and 2x is half of it, scaled up.
 
-- **Hook-up** (0.5-1 agent-day): the core already has it
-  (`set_hd_scale`, `gpu.hd_top/hd_bottom`); the C API needs
-  `dingbat_nds_set_hd` and the HD screen pointers, the Swift presenter a
-  256N x 384N texture, Settings a picker. No JIT question: the app runs
-  the core as native code, and a GPU path would be Metal.
+- **Hook-up** (done): `dingbat_nds_set_hd(k)` (kept across DS boots,
+  applied live), `dingbat_nds_hd_scale`, and `dingbat_nds_hd_fb` with its
+  width/height: the HD screens stacked 256k x 384k, copied beside the 1x
+  composite after every frame, load, reset and rewind. `GameRenderer`
+  uploads it in place of the 1x one and draws each view from it (texels,
+  filters, grid and subpixel pitch all k x, as the web's `ndsFrame`
+  views); thumbnails, the glow and states keep the 1x picture. Settings >
+  Nintendo DS > 3D resolution (`NdsState.hd`, the `nds-display` record's
+  `hd`). No JIT question: the app runs the core as native code, and a GPU
+  path would be Metal. Checked: `tests/ios_api_test.nim` (no 3D: every
+  k x k block is the 1x pixel; a 3D ROM differs from the 1x scaled up; a
+  state load, reset and rewind keep the scale) and simulator shots of
+  Simple_Tri at Native, 2x and 4x. Not yet measured on a device.
 - **Budget**: a recent iPhone's performance core is in this Mac's class
   for single-thread work, but it throttles under a sustained load, and
   the 1x core must fit first. From the numbers above, 2x is plausible for

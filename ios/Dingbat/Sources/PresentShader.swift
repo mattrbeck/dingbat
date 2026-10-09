@@ -5,10 +5,11 @@
 // no Metal toolchain.
 //
 // A DS game is drawn view by view (web glpresent.js frame.out views): each
-// screen of the 256x384 composite into its own rect of the picture, turned,
-// through the same fragment shader, which reads that screen's texels only
-// (texOrigin) and lays the grid / subpixel looks on the screen's own pixels,
-// so a turned screen turns its stripes as the real panel would.
+// screen of the 256x384 composite (256k x 384k with HD 3D at k x) into its
+// own rect of the picture, turned, through the same fragment shader, which
+// reads that screen's texels only (texOrigin) and lays the grid / subpixel
+// looks on the screen's own pixels, so a turned screen turns its stripes as
+// the real panel would.
 
 let presentShaderSource = #"""
 #include <metal_stdlib>
@@ -42,7 +43,7 @@ struct PresentUniforms {
   int pad0;
   float4 sgbBackdrop;
   float4 dmgPal[4];    // sRGB 0..1, shade 0 (lightest) -> 3
-  float2 texOrigin;    // DS: the screen's first texel in the composite (0 or 192 down)
+  float2 texOrigin;    // DS: the screen's first texel in the composite (0 or 192k down)
   float2 pad2;
 };
 

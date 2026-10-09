@@ -12,7 +12,7 @@ final class NdsState: ObservableObject {
 
     private let d = UserDefaults.standard
 
-    // MARK: display choices (web nds-layout, nds-display { swap, gap, rot, barHide })
+    // MARK: display choices (web nds-layout, nds-display { swap, gap, rot, barHide, hd })
 
     @Published var arrangement: NdsUtil.Arrangement {
         didSet { d.set(arrangement.rawValue, forKey: "nds-layout"); displayChanged() }
@@ -23,6 +23,11 @@ final class NdsState: ObservableObject {
     @Published var rot: Int { didSet { saveDisplay() } }
     /// "Hide the top bar" on a phone held upright (default on).
     @Published var barHide: Bool { didSet { saveDisplay() } }
+    /// "3D resolution" (docs/nds/hd3d.md): the 3D scene drawn at hd x the
+    /// DS's resolution, 1 (Native) to 4. Applied live and kept for every
+    /// DS boot (dingbat_nds_set_hd).
+    @Published var hd: Int { didSet { saveDisplay(); applyHd() } }
+    static let hdScales = [1, 2, 3, 4]
 
     // MARK: the console
 
@@ -53,10 +58,13 @@ final class NdsState: ObservableObject {
         let r = (o["rot"] as? NSNumber)?.intValue ?? 0
         rot = NdsUtil.rotations.contains(r) ? r : 0
         barHide = o["barHide"] as? Bool ?? true
+        let k = (o["hd"] as? NSNumber)?.intValue ?? 1
+        hd = Self.hdScales.contains(k) ? k : 1
+        dingbat_nds_set_hd(Int32(hd))
     }
 
     private func saveDisplay() {
-        let o: [String: Any] = ["swap": swap, "gap": gap.rawValue, "rot": rot, "barHide": barHide]
+        let o: [String: Any] = ["swap": swap, "gap": gap.rawValue, "rot": rot, "barHide": barHide, "hd": hd]
         if let data = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) {
             d.set(String(decoding: data, as: UTF8.self), forKey: "nds-display")
         }
@@ -68,6 +76,13 @@ final class NdsState: ObservableObject {
         NdsStylusView.current?.lift()
     }
 
+    /// The scale onto the core (web ndsApplyHd); a DS game in front shows it
+    /// at once, paused or not (its 1x picture scaled up until a frame runs).
+    private func applyHd() {
+        dingbat_nds_set_hd(Int32(hd))
+        if dingbat_is_nds() != 0 { GameRenderer.shared.present() }
+    }
+
     /// Settings › General › Reset all settings clears both records.
     func resetDisplay() {
         d.removeObject(forKey: "nds-layout")
@@ -77,6 +92,7 @@ final class NdsState: ObservableObject {
         gap = .hinge
         rot = 0
         barHide = true
+        hd = 1
     }
 
     func swapScreens() { swap.toggle() }
@@ -172,6 +188,7 @@ final class NdsState: ObservableObject {
             return FileManager.default.fileExists(atPath: u.path) ? u.path : nil
         }
         dingbat_set_nds_flash_path(flashURL.path)
+        dingbat_nds_set_hd(Int32(shared.hd))
         dingbat_set_nds_bios(path(.bios9), path(.bios7), path(.firmware))
     }
 

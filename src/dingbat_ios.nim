@@ -44,6 +44,7 @@ import dingbat/nds/nds except Input  # the DS core's Input object, not ours
 import dingbat/nds/savestate
 import dingbat/nds/io/backup
 import dingbat/nds/rewinding
+from dingbat/nds/gpu/gpu import hd_restart
 
 {.compile: "dingbat_ios_audio.c".}
 
@@ -213,11 +214,29 @@ var gamePtr: pointer = nil
 # core once per presented frame so the shell uploads one 256x384 texture.
 var ndsComposite: seq[uint16] = @[]
 
+# HD 3D (docs/nds/hd3d.md): with dingbat_nds_set_hd(k), k = 2..4, the core
+# also draws both screens at 256k x 192k (the 3D scene at that resolution,
+# the 2D layers scaled up); they are stacked the same way into a second
+# composite, 256k x 384k, which only the presenter reads. Everything else
+# (thumbnails, the glow, states) keeps the 1x one.
+var ndsHdScale = 1                  # kept across DS boots, a display setting
+var ndsHdComposite: seq[uint16] = @[]
+var ndsHdK = 1                      # the scale ndsHdComposite was built at
+
 proc nds_compose() =
   if ndsComposite.len != NDS_W * NDS_H: ndsComposite.setLen(NDS_W * NDS_H)
   const SCREEN = NDS_W * NDS_SCREEN_H
   copyMem(addr ndsComposite[0], addr stateNds.gpu.top[0], SCREEN * 2)
   copyMem(addr ndsComposite[SCREEN], addr stateNds.gpu.bottom[0], SCREEN * 2)
+  let hd = stateNds.gpu.hd_top.len
+  if hd > 0 and stateNds.gpu.hd_bottom.len == hd:
+    ndsHdK = stateNds.hd_scale()
+    if ndsHdComposite.len != 2 * hd: ndsHdComposite.setLen(2 * hd)
+    copyMem(addr ndsHdComposite[0], addr stateNds.gpu.hd_top[0], hd * 2)
+    copyMem(addr ndsHdComposite[hd], addr stateNds.gpu.hd_bottom[0], hd * 2)
+  else:
+    ndsHdComposite = @[]
+    ndsHdK = 1
 
 proc sync_lcd_panel() =
   let gb = stateKind == ekGB and stateGb != nil
@@ -539,6 +558,7 @@ proc nds_build(rom: sink seq[uint8]; save: seq[uint8]; firmware: seq[uint8]) =
   ## core's set_data rules, docs/nds/saves.md). Every boot starts with the
   ## lid open.
   stateNds = new_nds(rom, ndsBios9, ndsBios7, firmware)
+  if ndsHdScale > 1: stateNds.set_hd_scale(ndsHdScale)
   if save.len > 0: stateNds.cart.backup.set_data(save)
   ndsLidClosed = false
   stateNds.set_lid(false)
@@ -832,6 +852,34 @@ proc dingbat_nds_top_rgba(): ptr uint32 {.exportc, cdecl.} =
   if ndsTopRgba.len != n: ndsTopRgba.setLen(n)
   for i in 0 ..< n: ndsTopRgba[i] = bgr555_to_rgba(stateNds.gpu.top[i] and 0x7FFF)
   addr ndsTopRgba[0]
+
+proc dingbat_nds_set_hd(k: cint) {.exportc, cdecl.} =
+  ## HD 3D at k x (1 = off, 2..4; the web's nds_set_hd): kept for every DS
+  ## boot from here on, and applied to the running game. Until its next
+  ## frame the HD picture is the 1x one scaled up (Gpu.hd_restart), not
+  ## black.
+  ndsHdScale = clamp(int(k), 1, 4)
+  if stateKind != ekNDS or stateNds.hd_scale() == ndsHdScale: return
+  stateNds.set_hd_scale(ndsHdScale)
+  stateNds.gpu.hd_restart()
+  present_live()
+
+proc dingbat_nds_hd_scale(): cint {.exportc, cdecl.} =
+  ## The HD scale the running DS game draws at (1 = none); with no DS game,
+  ## the one the next boots get.
+  if stateKind == ekNDS: cint(stateNds.hd_scale()) else: cint(ndsHdScale)
+
+proc dingbat_nds_hd_fb(): ptr uint16 {.exportc, cdecl.} =
+  ## The HD composite (top over bottom, BGR555), dingbat_nds_hd_fb_width x
+  ## dingbat_nds_hd_fb_height; nil with HD off or no DS game.
+  if stateKind != ekNDS or ndsHdComposite.len == 0: nil
+  else: addr ndsHdComposite[0]
+
+proc dingbat_nds_hd_fb_width(): cint {.exportc, cdecl.} =
+  if stateKind != ekNDS or ndsHdComposite.len == 0: 0 else: cint(NDS_W * ndsHdK)
+
+proc dingbat_nds_hd_fb_height(): cint {.exportc, cdecl.} =
+  if stateKind != ekNDS or ndsHdComposite.len == 0: 0 else: cint(NDS_H * ndsHdK)
 
 proc dingbat_fb_width(): cint {.exportc, cdecl.} =
   case stateKind
