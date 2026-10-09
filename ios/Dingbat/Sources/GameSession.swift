@@ -232,6 +232,12 @@ final class GameSession: NSObject, ObservableObject {
         guard link == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
+        #if DEBUG
+        // `-display-30`: a 30 Hz display (Low Power Mode), for the latency test.
+        if ProcessInfo.processInfo.arguments.contains("-display-30") {
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
+        }
+        #endif
         link.add(to: .main, forMode: .common)
         self.link = link
     }
