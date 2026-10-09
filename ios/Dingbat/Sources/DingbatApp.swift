@@ -188,11 +188,12 @@ struct DingbatApp: App {
         // panel), `-nds-lid` (closed), `-nds-touch X,Y[,seconds held]` (the
         // stylus self-test: the bottom screen's pixel aimed through the
         // layout and sent through the finger's mapping, `-nds-touch-after S`
-        // seconds in, default 6).
+        // seconds in, default 6), `-nds-hd 1|2|3|4` (3D resolution, saved).
         if let l = value("-nds-layout").flatMap(NdsUtil.Arrangement.init(rawValue:)) { NdsState.shared.arrangement = l }
         if args.contains("-nds-swap") { NdsState.shared.swap = true }
         if let g = value("-nds-gap").flatMap(NdsUtil.Gap.init(rawValue:)) { NdsState.shared.gap = g }
         if let r = value("-nds-rot").flatMap(Int.init) { NdsState.shared.rot = r }
+        if let k = value("-nds-hd").flatMap(Int.init), NdsState.hdScales.contains(k) { NdsState.shared.hd = k }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             if args.contains("-topbar-open") { model.topbarOpen = true }
             if args.contains("-nds-panel") { NdsState.shared.panelOpen = true }

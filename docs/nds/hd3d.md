@@ -134,31 +134,7 @@ each HD screen every 5 frames) over SoulSilver New Bark Town (p12 frames
 
 ### Checked
 
-- SoulSilver p12 (HLE BA 393-pt-wide iPhone shows each screen ~374 pt = ~1122 px at 3x, so 4x
-internal (1024 px) is about native and 2x is half of it, scaled up.
-
-- **Hook-up** (0.5-1 agent-day): the core already has it
-  (`set_hd_scale`, `gpu.hd_top/hd_bottom`); the C API needs
-  `dingbat_nds_set_hd` and the HD screen pointers, the Swift presenter a
-  256N x 384N texture, Settings a picker. No JIT question: the app runs
-  the core as native code, and a GPU path would be Metal.
-- **Budget**: a recent iPhone's performance core is in this Mac's class
-  for single-thread work, but it throttles under a sustained load, and
-  the 1x core must fit first. From the numbers above, 2x is plausible for
-  SoulSilver-class games on an A15-A17; 4x and anything in Golden Sun
-  need the HD work off the emulation thread.
-- **Threads** (3-5 agent-days, native): HD is display-only, so it can run
-  beside the emulation with no determinism risk: the HD rasteriser on a
-  worker (it needs the frame's lists, render registers and the texture /
-  palette slots: < 1 MB a frame, or the decoded-texel cache by tex_gen),
-  or split into row bands over 2-4 cores (bands overlap one row for edge
-  marking); the per-sub-dot composite on the GPU (a fragment shader over
-  the 1x 2D layers and the HD 3D texture) or on another core. On the web
-  the same split needs a second wasm instance in a worker fed by
-  postMessage, since SharedArrayBuffer threads need cross-origin
-  isolation, which the Drive sign-in popup rules out.
-- **Metal renderer** (2-4 weeks for HD only): GPU cost is trivial at 4x;
-  what it gives up is listed under option (b).): shots 3000/5000/6000/6600/8000 e4b66d68 /
+- SoulSilver p12 (HLE BIOS): shots 3000/5000/6000/6600/8000 e4b66d68 /
   6cf51b7e / 61fad7f8 / dfb2fd6c / 8971b401 and the state + screen
   hashes every 500 frames identical to the branch head, with HD off and
   with `--hd 2` (the 1x screens and the whole state). Golden Sun title
@@ -207,11 +183,19 @@ now shares inline a little better).
 A 393-pt-wide iPhone shows each screen ~374 pt = ~1122 px at 3x, so 4x
 internal (1024 px) is about native and 2x is half of it, scaled up.
 
-- **Hook-up** (0.5-1 agent-day): the core already has it
-  (`set_hd_scale`, `gpu.hd_top/hd_bottom`); the C API needs
-  `dingbat_nds_set_hd` and the HD screen pointers, the Swift presenter a
-  256N x 384N texture, Settings a picker. No JIT question: the app runs
-  the core as native code, and a GPU path would be Metal.
+- **Hook-up** (done): `dingbat_nds_set_hd(k)` (kept across DS boots,
+  applied live), `dingbat_nds_hd_scale`, and `dingbat_nds_hd_fb` with its
+  width/height: the HD screens stacked 256k x 384k, copied beside the 1x
+  composite after every frame, load, reset and rewind. `GameRenderer`
+  uploads it in place of the 1x one and draws each view from it (texels,
+  filters, grid and subpixel pitch all k x, as the web's `ndsFrame`
+  views); thumbnails, the glow and states keep the 1x picture. Settings >
+  Nintendo DS > 3D resolution (`NdsState.hd`, the `nds-display` record's
+  `hd`). No JIT question: the app runs the core as native code, and a GPU
+  path would be Metal. Checked: `tests/ios_api_test.nim` (no 3D: every
+  k x k block is the 1x pixel; a 3D ROM differs from the 1x scaled up; a
+  state load, reset and rewind keep the scale) and simulator shots of
+  Simple_Tri at Native, 2x and 4x. Not yet measured on a device.
 - **Budget**: a recent iPhone's performance core is in this Mac's class
   for single-thread work, but it throttles under a sustained load, and
   the 1x core must fit first. From the numbers above, 2x is plausible for

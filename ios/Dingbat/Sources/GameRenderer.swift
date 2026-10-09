@@ -113,9 +113,19 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         view?.draw()
     }
 
+    /// The picture to upload: a DS game's HD composite while HD 3D is on
+    /// (256k x 384k, the web's ndsFrame), else dingbat_game_fb.
+    static func picture() -> (ptr: UnsafePointer<UInt16>, w: Int, h: Int)? {
+        if dingbat_is_nds() != 0, let hd = dingbat_nds_hd_fb() {
+            return (hd, Int(dingbat_nds_hd_fb_width()), Int(dingbat_nds_hd_fb_height()))
+        }
+        guard let ptr = dingbat_game_fb() else { return nil }
+        return (ptr, Int(dingbat_fb_width()), Int(dingbat_fb_height()))
+    }
+
     private func uploadGame() {
-        guard let device, let ptr = dingbat_game_fb() else { return }
-        let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
+        guard let device, let pic = Self.picture() else { return }
+        let (ptr, w, h) = pic
         if gameTex == nil || gameTex!.width != w || gameTex!.height != h {
             let d = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: .r16Uint, width: w, height: h, mipmapped: false)
@@ -188,7 +198,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
     /// A DS frame: the stage's colour, then each shown screen into its rect,
     /// turned, filtered as the web filters DS screens (no colour correction,
-    /// no palette: the DS's own panels).
+    /// no palette: the DS's own panels). With HD 3D the texture is k x the
+    /// composite and each screen's texels are k x too: the filters, the
+    /// grid and the subpixel look work on the HD pixels, as the web's do.
     private func drawNds(in view: MTKView) {
         view.clearColor = ndsClear
         guard let ndsPipeline, let queue, let gameTex, let borderTex,
@@ -200,15 +212,17 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         enc.setFragmentTexture(gameTex, index: 0)
         enc.setFragmentTexture(borderTex, index: 1)
         let lw = Float(max(1, ndsSize.width)), lh = Float(max(1, ndsSize.height))
-        for v in ndsViews where gameTex.height >= 384 {
+        let k = max(1, gameTex.width / 256)
+        let sw = Float(256 * k), sh = Float(192 * k)
+        for v in ndsViews where gameTex.height >= 384 * k {
             var u = PresentUniforms()
-            u.texSize = SIMD2(256, 192)
-            u.scanWidth = 256
-            u.scanHeight = 192
+            u.texSize = SIMD2(sw, sh)
+            u.scanWidth = sw
+            u.scanHeight = sh
             u.filter = Int32(options.filter)
             u.grid = options.grid ? 1 : 0
             u.subpixel = options.subpixel ? 1 : 0
-            u.texOrigin = SIMD2(0, v.screen == .top ? 0 : 192)
+            u.texOrigin = SIMD2(0, v.screen == .top ? 0 : sh)
             var vu = ViewUniforms()
             let r = v.dst
             vu.dst = SIMD4(Float(r.minX) / lw * 2 - 1, 1 - Float(r.minY) / lh * 2,
