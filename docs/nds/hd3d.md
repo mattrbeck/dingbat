@@ -7,6 +7,46 @@ composited with the 2D layers per sub-dot, display capture included.
 Display only: with HD on, the 1x screens, the machine and its save state
 are byte for byte what they are with it off.
 
+On main (2026-10-09) behind Settings > Nintendo DS > 3D resolution
+(Native, 2x, 3x, 4x; Native by default), which shows only with DS Beta on
+(docs/nds/beta.md).
+
+## HD's history across loads, rewind and run-ahead
+
+HD keeps what no state carries: the vertices' sub-dot positions
+(`geometry.hpos`, `Gpu3d.hpos`), the HD 3D frame and the HD render its next
+lines come from, display capture's HD copies (`cap_hd`/`cap_1x`) and the
+rows already holding a line (`hd_rep`). So:
+
+- **A state applied over a running HD machine** (a load, a rewind pop, a
+  scrubber commit) restarts HD from it (`Gpu.hd_restart`, from
+  `apply_new`): the frames after it are exactly what turning HD on at that
+  state draws, and the screens meanwhile show the loaded 1x ones scaled up.
+- **Run-ahead** looks ahead and comes back to the same timeline, so it
+  takes HD's history first (`Gpu.hd_side`) and puts it back after
+  (`load_own_payload(as_new = false)` leaves HD alone); the page is shown
+  the look ahead's HD screens (`nds_hd_fb555_*`). Its own HD frames and the
+  ones it shows are a plain run's.
+- **3D frame reuse** at HD also compares the HD positions (`last_hpos`): a
+  vertex moving within its dot keeps the 1x lists equal while the HD frame
+  changes (SoulSilver walking left every reused frame stale).
+
+Checked at 2x and 4x on Golden Sun's field and SoulSilver (80-118 frames,
+0 differences) and in `tests/nds_savestate_test.nim` "HD 3D history".
+
+## Cost in the browser
+
+Chromium on this Mac (M-series), ms a frame unpaced (`ndsBench`, 16.7 is
+full speed):
+
+| | Native | 2x | 3x | 4x |
+|---|---|---|---|---|
+| Golden Sun field | 11.4 | 16.3 | 20.9 | 26.5 |
+| SoulSilver walking | 3.4 | 5.2 | 5.6 | 6.0 |
+
+2x holds full speed in SoulSilver-class games; Golden Sun-class 3D is at
+the edge at 2x on a fast desktop and below it on phones.
+
 ## How a DS frame is made today
 
 - **Geometry** (`gpu3d/geometry.nim`): commands to clip-space vertices,
