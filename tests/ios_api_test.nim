@@ -50,6 +50,9 @@ proc dingbat_set_input(id, pressed: cint) {.importc, cdecl.}
 proc dingbat_clip_begin(startAgo, endAgo: cint): cint {.importc, cdecl.}
 proc dingbat_clip_tick(): cint {.importc, cdecl.}
 proc dingbat_clip_scrub_generate(n: cint): cint {.importc, cdecl.}
+proc dingbat_clip_abort() {.importc, cdecl.}
+proc dingbat_set_turbo(on: cint) {.importc, cdecl.}
+proc dingbat_set_volume(volume, mute: cint) {.importc, cdecl.}
 proc dingbat_rollback_init(rom0, rom1: cstring; local: cint; epoch: cdouble): cint {.importc, cdecl.}
 proc dingbat_rollback_load_state(player: cint; data: pointer; len: cint): cint {.importc, cdecl.}
 proc dingbat_rollback_tick(bits: cint): cint {.importc, cdecl.}
@@ -155,6 +158,28 @@ block:
   check dingbat_clip_tick() == -1, "the replay ends"
   check takeState() == live, "the live game is back, untouched"
   check dingbat_clip_scrub_generate(16) >= 3, "the clip strip has a thumbnail per second"
+
+echo "GBA: a clip replays at 1x whatever the player's speed"
+block:
+  # 2x halves the samples a frame and is not in a state: a replay that kept
+  # it gave a clip half the sound of its pictures. ClipExporter sets the
+  # volume (apply_audio) after clip_begin, so that must not bring 2x back.
+  dingbat_set_turbo(1)
+  for _ in 0 ..< 120: dingbat_run_frame()
+  check core_turbo(), "2x is on the live core"
+  var n = dingbat_clip_begin(90, 0)
+  check n > 0 and not core_turbo(), "the replay runs at 1x"
+  dingbat_set_volume(100, 0)
+  check not core_turbo(), "and stays at 1x when the exporter sets its volume"
+  for _ in 0 ..< int(n): discard dingbat_clip_tick()
+  check dingbat_clip_tick() == -1 and core_turbo(), "2x is back once it ends"
+  dingbat_set_turbo(0)
+  n = dingbat_clip_begin(90, 0)
+  dingbat_set_turbo(1)
+  check n > 0 and not core_turbo(), "2x picked during a replay waits for its end"
+  dingbat_clip_abort()
+  check core_turbo(), "a cancelled replay leaves the speed picked during it"
+  dingbat_set_turbo(0)
 
 echo "GBA: cheats"
 block:
@@ -280,8 +305,6 @@ proc dingbat_flush_save() {.importc, cdecl.}
 proc dingbat_is_stopped(): cint {.importc, cdecl.}
 proc dingbat_rumble(): cint {.importc, cdecl.}
 proc dingbat_set_fast_forward(on: cint) {.importc, cdecl.}
-proc dingbat_set_turbo(on: cint) {.importc, cdecl.}
-proc dingbat_set_volume(volume, mute: cint) {.importc, cdecl.}
 proc dingbat_set_channel_mutes(bits: cint) {.importc, cdecl.}
 proc dingbat_audio_ahead(): cint {.importc, cdecl.}
 proc dingbat_audio_read(dst: ptr float32; max: cint): cint {.importc, cdecl.}

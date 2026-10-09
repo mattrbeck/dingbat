@@ -436,8 +436,9 @@ jobs:
           - { shard: "fourteen-steps mac+iphone", files: e2e/fourteen-steps.e2e.mjs, pairs: "mac+iphone" }
           - { shard: "handoff iphone+mac", files: e2e/handoff.e2e.mjs, pairs: "iphone+mac" }
           - { shard: "handoff mac+mac", files: e2e/handoff.e2e.mjs, pairs: "mac+mac" }
-          # The controller walk (~45 s) rides along: a runner of its own costs more than it takes.
-          - { shard: "crash recovery + gamepad", files: "e2e/crash-recovery.e2e.mjs e2e/gamepad.e2e.mjs", pairs: "" }
+          # The controller walk (~45 s) and the clip speed check (~15 s) ride
+          # along: a runner of their own costs more than they take.
+          - { shard: "crash recovery + gamepad", files: "e2e/crash-recovery.e2e.mjs e2e/gamepad.e2e.mjs e2e/clip-speed.e2e.mjs", pairs: "" }
     name: web-e2e (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4

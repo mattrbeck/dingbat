@@ -266,18 +266,21 @@ proc apply_channel_mutes() =
 
 proc apply_audio() =
   ## Every output-side option onto the live core; called after each build.
+  ## A clip replay runs at 1x whatever the player's speed: 2x halves the
+  ## samples a frame and is not in a state, so the clip would get half the
+  ## sound of its pictures. (Slow motion is the ring's, after the capture tap.)
   optSilent = optMute or optVolume <= 0
   case stateKind
   of ekGBA:
     stateGba.apu.set_master_volume(int(optVolume), optMute)
     stateGba.set_audio_silent(optSilent)
-    stateGba.apu.turbo = optTurbo
+    stateGba.apu.turbo = optTurbo and not clipReplaying
     stateGba.apu.set_pitch_correct_ff(optPitchCorrect)
     stateGba.apu.sync = not optFastForward
   of ekGB:
     stateGb.apu.set_master_volume(int(optVolume), optMute)
     stateGb.apu.silent = optSilent
-    stateGb.apu.turbo = optTurbo
+    stateGb.apu.turbo = optTurbo and not clipReplaying
     stateGb.apu.set_pitch_correct_ff(optPitchCorrect)
     stateGb.apu.sync = not optFastForward
   of ekNDS, ekNone: discard  # the DS's output path reads the options per frame
@@ -1547,6 +1550,15 @@ proc dingbat_clip_scrub_frames_ago(sample: cint): cint {.exportc, cdecl.} =
   if sample < 0 or sample >= clipStripAgo.len: return 0
   cint(clipStripAgo[int(sample)])
 
+when defined(test_harness):
+  proc core_turbo*(): bool =
+    ## For tests/ios_api_test.nim: the harness drops samples, so 2x is read
+    ## off the APU rather than counted.
+    case stateKind
+    of ekGBA: stateGba.apu.turbo
+    of ekGB:  stateGb.apu.turbo
+    of ekNDS, ekNone: false
+
 proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   ## Arm a replay of [start_ago, end_ago) frames before now: stash the live
   ## state, restore the anchor at or before the start, silently re-emulate
@@ -1573,6 +1585,7 @@ proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   clipCursor = clipAnchors[pick].frame
   clipEnd = endFrame
   clipReplaying = true
+  apply_audio()
   if statePrinter != nil: statePrinter.muted = true
   # Silent pre-roll to exactly the chosen frame: its sound is dropped.
   let mode = dingbat_audio_get_mode()
@@ -1597,6 +1610,7 @@ proc dingbat_clip_tick(): cint {.exportc, cdecl.} =
     discard clip_apply_payload(clipLiveStash)
     clipLiveStash = ""
     clipReplaying = false
+    apply_audio()
     if statePrinter != nil: statePrinter.muted = false
     clip_set_buttons(clipCurButtons)
     present_live()
@@ -1616,6 +1630,7 @@ proc dingbat_clip_abort() {.exportc, cdecl.} =
   discard clip_apply_payload(clipLiveStash)
   clipLiveStash = ""
   clipReplaying = false
+  apply_audio()
   if statePrinter != nil: statePrinter.muted = false
   clip_set_buttons(clipCurButtons)
   present_live()
