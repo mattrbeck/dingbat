@@ -412,6 +412,7 @@ type AppState = ref object
   gl_ctx:          GlContextPtr
   io:              ptr ImGuiIO
   game_texture:    GLuint
+  nds_tex_scale:   int      # a DS game's texture: 256x384 times this (HD 3D)
   # SGB border layer, 256x224 RGB5_A1. Allocated once; only uploaded (and only
   # sampled) while the loaded cart is running as a Super Game Boy and has
   # actually transferred a border.
@@ -829,6 +830,7 @@ proc load_rom(path: string; keep_ds = false) =
   let was_ds = app.emu_kind == ekNDS
   if as_ds:
     app.nds = built_ds.game
+    app.nds.set_hd(app.cfg.nds_hd)
     app.gba_emu = nil
     app.gb_emu = nil
     app.emu_kind = ekNDS
@@ -896,6 +898,7 @@ proc load_rom(path: string; keep_ds = false) =
                  else: (GB_W, GB_H)
   glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
                GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
+  app.nds_tex_scale = 1   # a DS game's HD size is taken at its first present
   app.cur_path = path
   var recs = app.cfg.recents
   let idx = recs.find(path)
@@ -1189,7 +1192,8 @@ proc save_screenshot() =
   ## colour-corrected when the setting is on so it matches the screen.
   if app.emu_kind == ekNone: return
   let border = sgb_border_active()
-  let (w, h) = output_size()
+  # A DS game's picture as shown: with HD 3D on, the HD screens
+  let (w, h) = if app.emu_kind == ekNDS: app.nds.screen_size() else: output_size()
   let correct = app.cfg.color_correction
   let gbc = app.emu_kind == ekGB
   var rgb = newSeq[byte](w * h * 3)
@@ -1220,7 +1224,7 @@ proc save_screenshot() =
     of ekNDS:
       # Both screens, top above bottom; the DS's own LCDs, so no correction
       var pic: seq[uint16]
-      app.nds.compose(pic)
+      app.nds.compose(pic, hd = true)
       for i in 0 ..< w * h: put(i, pic[i], false)
     of ekNone: return
   let dir = config_dir() / "screenshots"
@@ -1432,12 +1436,24 @@ proc render_game() =
                 GLfloat(NDS_H))
     glUniform1f(glGetUniformLocation(app.game_shader, "scan_width"),
                 GLfloat(NDS_W))
+    # HD 3D follows the setting live, between frames. The texture is the
+    # shown screens' size (256k x 384k at k); the filters read its texels,
+    # while the window, the viewport and the LCD looks' pitch (scan_*) stay
+    # the 1x picture's: HD only sharpens it.
+    app.nds.set_hd(app.cfg.nds_hd)
+    let (tw, th) = app.nds.screen_size()
+    if app.nds.hd_scale != app.nds_tex_scale:
+      app.nds_tex_scale = app.nds.hd_scale
+      glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
+                   GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
+      glUniform1f(glGetUniformLocation(app.game_shader, "tex_width"), GLfloat(tw))
+      glUniform1f(glGetUniformLocation(app.game_shader, "tex_height"), GLfloat(th))
     # The two screens straight into the texture's halves, top above bottom.
     # No LCD response model: it models the GB/GBA panels, not the DS's.
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(NDS_W), GLsizei(NDS_SCREEN_H),
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GLsizei(tw), GLsizei(th div 2),
                     GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, app.nds.top_screen())
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, GLint(NDS_SCREEN_H), GLsizei(NDS_W),
-                    GLsizei(NDS_SCREEN_H), GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, GLint(th div 2), GLsizei(tw),
+                    GLsizei(th div 2), GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV,
                     app.nds.bottom_screen())
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
   of ekNone:

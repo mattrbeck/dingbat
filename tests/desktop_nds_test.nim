@@ -4,7 +4,8 @@
 ## bindings hold nothing, and the settings file is byte for byte the one a
 ## build without the setting writes. On, a DS game builds, runs and keeps
 ## its battery, firmware settings, states and rewind
-## (src/dingbat/frontend/nds_game.nim). The game checks need a homebrew ROM
+## (src/dingbat/frontend/nds_game.nim), and draws its 3D at the 3D
+## resolution set (HD 3D). The game checks need a homebrew ROM
 ## from ~/.cache/dingbat-nds/roms (never in the repo) and are skipped
 ## without one (CI).
 
@@ -114,6 +115,7 @@ block:
         back.nds_firmware_path == "/b/firmware.bin", "the dumps"
   check back.nds_keybindings == cfg.nds_keybindings, "the keys"
   check back.nds_controller_bindings.len == 0, "no pad buttons (unbound stays unbound)"
+  check back.nds_hd == 1, "the 3D resolution stays native"
   check same_file(back, cfg), "the same file"
   # Turned off again, the section goes and the file is a default one
   back.ds_beta = false
@@ -138,6 +140,30 @@ block:
   merged.reset_to_defaults()
   check not merged.ds_beta and merged.nds_bios9_path == "/b/bios9.bin",
         "Reset to Defaults: DS Beta off, the dumps kept"
+
+echo "The DS 3D resolution is in the file only when it is not native"
+block:
+  let cfg = new_config()
+  check cfg.nds_hd == 1, "native by default"
+  let path = dir / "hd.yml"
+  cfg.nds_hd = 3
+  save_config_file(cfg, path)
+  let text = readFile(path)
+  check "\nnds:\n  hd: 3\n" in text, "3x is written under nds: hd"
+  check "beta" notin text, "on its own (DS Beta is not written with it)"
+  let back = load_config_file(path)
+  check back.nds_hd == 3 and same_file(back, cfg), "and reads back"
+  back.nds_hd = 1
+  save_config_file(back, path)
+  save_config_file(new_config(), dir / "hd_default.yml")
+  check readFile(path).splitLines().len == readFile(dir / "hd_default.yml").splitLines().len and
+        "\"nds\"" notin readFile(path) and "hd:" notin readFile(path),
+        "native again: the line goes"
+  writeFile(path, readFile(dir / "hd_default.yml") & "nds:\n  hd: 9\n")
+  check load_config_file(path).nds_hd == 4, "a value past 4x reads as 4x"
+  let r = load_config_file(path)
+  r.reset_to_defaults()
+  check r.nds_hd == 1, "Reset to Defaults: native"
 
 echo "On: .nds files open"
 block:
@@ -244,6 +270,70 @@ else:
         again.core.cart.backup.data[3] == 0x5A, "the next boot starts from it"
   check again.core.spi.firmware[0x3FE00 + 6] == 0x41,
         "and from the flash the last game wrote"
+
+echo "On: HD 3D (the 3D resolution)"
+if not fileExists(ndsRoms / "built/Simple_Quad.nds"):
+  echo "  skip (no ", ndsRoms / "built/Simple_Quad.nds", ")"
+else:
+  let rom = staged("built/Simple_Quad.nds")
+  let plain = build_nds(rom, NdsPaths()).game
+  let g = build_nds(rom, NdsPaths()).game
+  check plain != nil and g != nil, "builds"
+  check g.hd_scale == 1 and g.screen_size() == (256, 384), "native: 256x384"
+  check g.top_screen() == (addr g.core.gpu.top[0]) and
+        g.bottom_screen() == (addr g.core.gpu.bottom[0]), "the presenter uploads the 1x screens"
+  for _ in 0 ..< 30:
+    plain.run_frame(100, true, true)
+    g.run_frame(100, true, true)
+  g.set_hd(2)
+  check g.hd_scale == 2 and g.screen_size() == (512, 768), "2x: a 512x768 picture"
+  check g.core.gpu.hd_top.len == 512 * 384 and g.core.gpu.hd_bottom.len == 512 * 384 and
+        g.top_screen() == (addr g.core.gpu.hd_top[0]) and
+        g.bottom_screen() == (addr g.core.gpu.hd_bottom[0]),
+        "the presenter uploads the HD screens, 512x384 each"
+  var pic, hd: seq[uint16]
+  g.compose(pic)
+  g.compose(hd, hd = true)
+  var scaled_up = true
+  for y in 0 ..< 768:
+    for x in 0 ..< 512:
+      if hd[y * 512 + x] != pic[(y div 2) * 256 + x div 2]: scaled_up = false
+  check hd.len == 512 * 768 and scaled_up,
+        "turned on, the HD picture is the 1x one scaled up until a frame draws"
+  for _ in 0 ..< 30:
+    plain.run_frame(100, true, true)
+    g.run_frame(100, true, true)
+  var want: seq[uint16]
+  plain.compose(want)
+  g.compose(pic)
+  # (Not the whole state: two boots differ by the wall clock's RTC)
+  check pic == want, "the 1x screens are what they are without HD"
+  g.compose(hd, hd = true)
+  var sharper, lit = 0
+  for y in 0 ..< 768:
+    for x in 0 ..< 512:
+      let v = hd[y * 512 + x]
+      if (v and 0x7FFF) != 0: inc lit
+      if v != pic[(y div 2) * 256 + x div 2]: inc sharper
+  check lit > 0 and sharper > 0, "the 3D is drawn at 2x: " & $sharper & " dots finer than 1x"
+  # States, rewind: the scale is kept
+  let slot = dir / "states" / "Simple_Quad.state"
+  check g.save_state_file(slot), "a state is written"
+  for _ in 0 ..< 5: g.run_frame(100, true, true)
+  check g.load_state_file(slot) and g.hd_scale == 2 and g.screen_size() == (512, 768) and
+        g.core.gpu.hd_top.len == 512 * 384, "a state load keeps 2x"
+  let snap = g.rewind_payload()
+  for _ in 0 ..< 5: g.run_frame(100, true, true)
+  check g.rewind_apply(snap) and g.hd_scale == 2, "a rewind keeps 2x"
+  g.run_frame(100, true, true)
+  check g.core.gpu.hd_top.len == 512 * 384, "and the next frame draws at 2x"
+  g.set_hd(1)
+  check g.hd_scale == 1 and g.screen_size() == (256, 384) and
+        g.top_screen() == (addr g.core.gpu.top[0]), "back to native: 256x384"
+  g.compose(hd, hd = true)
+  check hd.len == 256 * 384, "and the screenshot is 1x"
+  g.set_hd(7)
+  check g.hd_scale == 4 and g.screen_size() == (1024, 1536), "past 4x is 4x"
 
 removeDir(dir)
 if failures > 0:

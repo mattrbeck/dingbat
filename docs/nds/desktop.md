@@ -20,7 +20,7 @@ game is the old code with the setting false:
 | A zip | only `ROM_EXTS` are looked for: a zip holding just a `.nds` says "No Game Boy or GBA ROM could be read". |
 | Command line, Recent | `load_rom` builds a GB/GBA core as before (a `.nds` named on the command line goes to the GBA core, as it always did). |
 | Settings file | the `nds:` section is written only for values that differ from their defaults, so the file is byte for byte the one a build without DS Beta writes. |
-| Menus, settings | nothing of the DS: the BIOS tab's DS rows and the X/Y (DS) binding rows show only while the DS Beta box is ticked. The one new thing is the General tab with its folded Advanced section. |
+| Menus, settings | nothing of the DS: the BIOS tab's DS rows, the Video tab's Nintendo DS group and the X/Y (DS) binding rows show only while the DS Beta box is ticked. The one new thing is the General tab with its folded Advanced section. |
 | Frame loop | no work added for GB/GBA: each `case app.emu_kind` gained an `ekNDS` branch, the frame scheduler reads its period from a variable `load_rom` sets (the same value as before for GB/GBA). |
 
 Turning DS Beta off while a DS game runs leaves it running; Reset reboots it
@@ -32,6 +32,7 @@ as a DS game. The next game opened follows the setting.
 |---|---|
 | Opening | `.nds` in the dialog, a drop, the command line and Recent, and inside a zip (the first `.gb/.gbc/.gba/.nds...` entry). A file of another name whose header passes GBATEK's checks (logo CRC CF56h at 15Ch, or the header CRC16) opens as a DS game too. A `.nds` that fails them is refused with the running game kept ("x.nds isn't a DS ROM."). |
 | Screens | One 256x384 texture, the top screen above the bottom, through the GB/GBA presenter: the window is Frame size x 256x384, except that a DS window takes the largest multiple that fits the display's usable height (a 3x DS is 1152 px tall). Preserve aspect letterboxes as for GB/GBA; the filters and screen looks apply; colour correction and the LCD response model do not (they model the GBA and GBC panels; the menu item is greyed for a DS game). |
+| 3D resolution (HD 3D) | Settings > Video > Nintendo DS: Native / 2x / 3x / 4x, the web's "3D resolution" (docs/nds/hd3d.md), stored as `nds: hd` only when not Native. On Apply the running game takes it at the next present (`NdsGame.set_hd`; until a frame draws, the HD screens are the 1x ones scaled up, so a paused game shows its picture); every boot and Reset set it; state loads and rewinds keep it (the core restarts HD's history itself). At k the texture is the HD screens, 256k x 384k, top above bottom, and the filters read its texels; the window size, the letterbox, the touch screen and the LCD looks' pitch stay the 1x picture's. The 1x screens, the machine, states and thumbnails are the same with it on or off. |
 | Buttons | The GB/GBA bindings for the d-pad, A, B, L, R, Select and Start. X and Y have their own: keyboard D and C (the Home-row preset: I and U), pad X and Y (by label, as the web maps a standard pad). In a DS game they come before the GB/GBA bindings of the same key or button (pad X/Y are also A/B for GB/GBA by default). Rebindable in Settings > Keybindings / Controller as "X (DS)" and "Y (DS)", stored under `nds: keybindings` / `controller_bindings`. |
 | Touch screen | The left mouse button on the bottom screen: a touch starts only there (and not on the menu bar or an ImGui window over it), then follows the mouse, clamped to the screen, until the button comes up (`touch_point`). |
 | Lid | Emulation > Close Lid (a toggle). Closed, no touch lands, and a game typically sleeps (the title says SLEEPING) until it opens. Every boot starts open; a state load keeps the lid where the menu has it. |
@@ -41,7 +42,7 @@ as a DS game. The next game opened follows the setting.
 | BIOS / firmware dumps | Settings > BIOS, below the GBA BIOS: DS ARM9 BIOS (`bios9.bin`), DS ARM7 BIOS (`bios7.bin`), DS firmware (`firmware.bin`), each optional (HLE BIOS, built-in firmware without). Used from the next DS game loaded; stored as `nds: bios9/bios7/firmware` and kept by Reset to Defaults. Direct boot only (no firmware menu boot). |
 | Save states | The nine slots, Quick Save / Quick Load and the Save States window, in the same slot files (named by the ROM file and `rom_identity`), with a 128x192 thumbnail of both screens. A DS switched off by its game has no state to save. A refused state says why with the usual sentences (a state made with the other BIOS, HLE or a dump, is `srkIncompatible`). |
 | Rewind | The backquote key while Rewind is on: a ring of `state_payload(aligned = true)` snapshots every 10 frames, capped at 64 MB, without keyframes (the web's choice: each would be a 2 MB zlib), applied with `load_own_payload`. Dropped on a state load. |
-| Screenshot | F12: both screens, 256x384, no colour correction. |
+| Screenshot | F12: both screens as shown (256x384, or 256k x 384k with HD 3D at k), no colour correction. |
 
 ## Not on the desktop (yet)
 

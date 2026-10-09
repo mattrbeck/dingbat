@@ -13,7 +13,8 @@
 ##   the config folder, shared by every DS game;
 ## - the sound, queued to SDL's legacy audio device as the GB/GBA APUs queue
 ##   theirs (not under -d:test_harness: no SDL there);
-## - save states in the desktop's slot files.
+## - save states in the desktop's slot files;
+## - HD 3D: the screens the presenter shows at the 3D resolution set.
 
 import std/[os, strformat, strutils]
 import ../common/[atomicfile, input, rom_exts, serialize, timestretch]
@@ -340,15 +341,50 @@ proc rewind_apply*(g: NdsGame; snap: string): bool =
   if g.core.input.touching:
     g.core.set_touch(g.core.input.touch_x, g.core.input.touch_y, false)
 
-proc top_screen*(g: NdsGame): ptr uint16 = addr g.core.gpu.top[0]
-proc bottom_screen*(g: NdsGame): ptr uint16 = addr g.core.gpu.bottom[0]
+# ──────────────────────────── The screens ────────────────────────────
+# HD 3D (Settings > Video > 3D resolution, docs/nds/hd3d.md): at 2..4 the
+# core also draws both screens at that multiple of 256x192, the 3D scene
+# rendered at that resolution, and those are what is shown. Display only:
+# the 1x screens, the machine and its states are the same either way, and
+# the window and the touch screen keep to the 1x picture.
 
-proc compose*(g: NdsGame; dst: var seq[uint16]) =
-  ## Both screens as one 256x384 BGR555 picture, top above bottom.
-  const SCREEN = NDS_W * NDS_SCREEN_H
-  if dst.len != NDS_W * NDS_H: dst.setLen(NDS_W * NDS_H)
-  copyMem(addr dst[0], addr g.core.gpu.top[0], SCREEN * 2)
-  copyMem(addr dst[SCREEN], addr g.core.gpu.bottom[0], SCREEN * 2)
+proc hd_scale*(g: NdsGame): int = g.core.hd_scale
+
+proc set_hd*(g: NdsGame; scale: int) =
+  ## 1 = off, 2..4; nothing when unchanged (the presenter asks every frame).
+  ## The HD screens show the 1x ones scaled up until the next frame draws
+  ## them (Gpu.hd_restart: what follows is what turning HD on draws), so a
+  ## paused game changed shows its picture, not black. The core keeps the
+  ## scale through state loads and rewinds; a reboot is a new core, set
+  ## again by the frontend.
+  let k = clamp(scale, 1, 4)
+  if k == g.core.hd_scale: return
+  g.core.set_hd_scale(k)
+  g.core.gpu.hd_restart()
+
+proc screen_size*(g: NdsGame): (int, int) =
+  ## The picture shown, top screen above bottom: 256x384, or 256k x 384k
+  ## with HD 3D at k (the presenter's texture).
+  let k = g.core.hd_scale
+  (NDS_W * k, NDS_H * k)
+
+proc top_screen*(g: NdsGame): ptr uint16 =
+  ## The top screen as shown (screen_size's width, half its height).
+  if g.core.hd_scale > 1: addr g.core.gpu.hd_top[0] else: addr g.core.gpu.top[0]
+
+proc bottom_screen*(g: NdsGame): ptr uint16 =
+  if g.core.hd_scale > 1: addr g.core.gpu.hd_bottom[0] else: addr g.core.gpu.bottom[0]
+
+proc compose*(g: NdsGame; dst: var seq[uint16]; hd = false) =
+  ## Both screens as one BGR555 picture, top above bottom: 256x384, or with
+  ## `hd` the picture shown (screen_size).
+  let (w, h) = if hd: g.screen_size() else: (NDS_W, NDS_H)
+  let screen = w * (h div 2)
+  if dst.len != w * h: dst.setLen(w * h)
+  let (t, b) = if hd: (g.top_screen(), g.bottom_screen())
+               else: (addr g.core.gpu.top[0], addr g.core.gpu.bottom[0])
+  copyMem(addr dst[0], t, screen * 2)
+  copyMem(addr dst[screen], b, screen * 2)
 
 # ──────────────────────────── Sound ────────────────────────────
 # The SPU's interleaved float32 stereo at 33513982 / 1024 Hz (io/spu.nim),

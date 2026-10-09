@@ -110,7 +110,9 @@ in order).
 
 `ndsrun ROM --hd N` (2..4) writes PNGs at 256N x 384N; the core setter is
 `NDS.set_hd_scale(n)`, the web build's `nds_set_hd(k)` (Settings >
-Nintendo DS > 3D resolution).
+Nintendo DS > 3D resolution); in the desktop app (DS Beta) Settings >
+Video > Nintendo DS > 3D resolution, `NdsGame.set_hd`, the presenter's
+texture the HD screens (docs/nds/desktop.md).
 
 - **Geometry** keeps each vertex's screen position in 1/192 dots
   (`hd_screen`, alongside Polygon/Vertex RAM, only while HD is on; exact
