@@ -143,18 +143,23 @@ struct PlayGeometry: Equatable {
     private mutating func ndsPortrait(_ i: Inputs) {
         let w = size.width, h = size.height
         let padTop: CGFloat = 8, gap: CGFloat = 8, shoulderH: CGFloat = 28
-        let padBottom = max(10, safe.bottom - 12)
+        // web --nds-pad-b: the home indicator's inset less 12, plus a 16pt
+        // lift off the bottom edge on a phone that has one (the screens give
+        // up that height).
+        let padBottom = max(10, safe.bottom - 12) + (safe.bottom > 0 ? 16 : 0)
         let padL = 16 + safe.leading, padR = 16 + safe.trailing
         let cw = w - padL - padR
         let mainH = i.large ? min(cw * 0.62, 330) : min(cw * 0.46, 240)
         let stripH = padTop + shoulderH + gap + mainH + padBottom
         ndsTop = true
         bar = CGRect(x: safe.leading, y: safe.top, width: w - safe.leading - safe.trailing, height: Self.barHeight)
-        // --nds-top: the status-bar inset less what lies beside the cut-out,
-        // 14pt on a notched phone and 11pt on a Dynamic Island one (an inset
-        // of 54pt or more), so the screen's top edge meets it; a plain 20pt
+        // --nds-top: where the notch or Dynamic Island ends on a model
+        // PhoneCutout knows; otherwise the status-bar inset less what
+        // usually lies beside the cut-out, 14pt on a notched phone and 11pt
+        // on a Dynamic Island one (an inset of 54pt or more); a plain 20pt
         // status bar keeps the whole inset.
-        let ndsTopY = safe.top > 53 ? safe.top - 11 : safe.top > 20 ? safe.top - 14 : safe.top
+        let ndsTopY = PhoneCutout.bottom(screen: size, safeTop: safe.top)
+            ?? (safe.top > 53 ? safe.top - 11 : safe.top > 20 ? safe.top - 14 : safe.top)
         barFolds = i.ndsBarHide
         let stageTop = barFolds ? ndsTopY : bar.maxY
         guard !i.hidden else {

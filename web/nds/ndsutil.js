@@ -119,6 +119,35 @@ const NdsUtil = (() => {
     }
   };
 
+  // Where the notch or Dynamic Island ends on an iPhone held upright, in CSS
+  // px from the screen's top, by the screen's size and the status bar's
+  // inset (which tells the notched sizes apart, and says the page's top is
+  // the screen's: a Safari tab below its own bar has no inset). Measured
+  // from each model's simulator: the screen masks for the notches (iOS's
+  // own figure is up to 1.7 px short of the drawn notch) and the system's
+  // exclusion area for the islands (docs/nds/web.md "Phone held upright").
+  // Where two models share a key the deeper cut-out wins: a sliver of
+  // background beats a row of the game under the notch.
+  // ios/Dingbat/Sources/PhoneCutout.swift keeps the same numbers.
+  const CUTOUTS = {
+    "375x812@44": 30, // X, XS, 11 Pro
+    "414x896@44": 30, // XS Max, 11 Pro Max
+    "414x896@48": 33, // XR, 11
+    "375x812@50": 37.5, // 12 mini 34.3, 13 mini 37.5
+    "390x844@47": 33.67, // 12, 12 Pro 32; 13, 13 Pro, 14, 16e, 17e 33.67
+    "428x926@47": 33.67, // 12 Pro Max 32; 13 Pro Max, 14 Plus 33.67
+    "393x852@59": 48, // 14 Pro, 15, 15 Pro, 16
+    "430x932@59": 48, // 14 Pro Max, 15 Plus, 15 Pro Max, 16 Plus
+    "402x874@62": 50.67, // 16 Pro, 17, 17 Pro, 18 Pro
+    "440x956@62": 50.67, // 16 Pro Max, 17 Pro Max, 18 Pro Max
+    "420x912@68": 56.67, // Air
+  };
+  const cutoutBottom = (screenW, screenH, safeTop) => {
+    const w = Math.round(Math.min(screenW, screenH)), h = Math.round(Math.max(screenW, screenH));
+    const v = CUTOUTS[`${w}x${h}@${Math.round(safeTop)}`];
+    return v === undefined ? null : v;
+  };
+
   // Integer scaling where it fits: whole multiples from 1x up, and a box
   // too small for 1x gets the plain fit (never a picture bigger than it).
   const fitScale = (availW, availH, w, h, integer) => {
@@ -370,6 +399,7 @@ const NdsUtil = (() => {
   return {
     W, H, FPS, AUDIO_RATE, BTN, FROM_APP, fromAppInput, isNdsName, crc16,
     looksLikeNdsRom, headerInfo, ARRANGEMENTS, SMALL, GAPS, ROTATIONS, compose, layout,
+    CUTOUTS, cutoutBottom,
     turnRect, views, screenAt, touchPoint, clientPoint,
     micInt16, BLOW_LEVEL, blowNoise, speedAudio, BIOS_KINDS, biosKindOf, biosSizeOk,
     FW_LANGS, fwUserOffset, fwCurrentUser, fwReadUser, fwWithUser, fwUserArea, fwOverlayUser,

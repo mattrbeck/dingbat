@@ -10943,10 +10943,31 @@ const stageAvail = () => {
   ];
 };
 
+// A DS game's top screen on a phone held upright starts where the notch or
+// Dynamic Island ends (styles.css --nds-top): --nds-cut is that edge when
+// NdsUtil knows the phone, else the stylesheet's estimate from the inset.
+const ndsApplyCutout = () => {
+  const root = document.documentElement;
+  let safeTop = parseFloat(getComputedStyle(root).getPropertyValue("--safe-t"));
+  if (!Number.isFinite(safeTop)) {
+    // A browser that keeps env() unresolved in a custom property: measure it.
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;visibility:hidden;padding-top:var(--safe-t)";
+    document.body.append(probe);
+    safeTop = parseFloat(getComputedStyle(probe).paddingTop);
+    probe.remove();
+  }
+  const cut = Number.isFinite(safeTop) && safeTop > 0
+    ? NdsUtil.cutoutBottom(screen.width, screen.height, safeTop) : null;
+  if (cut === null) root.style.removeProperty("--nds-cut");
+  else root.style.setProperty("--nds-cut", cut + "px");
+};
+
 const updateCanvasScaling = () => {
   // Backing store = native * glScale(). Only assign on change: assigning
   // canvas.width/height resets the GL drawing buffer.
   presentDirty = true; // resize can wipe the backing — repaint on the next tick
+  ndsApplyCutout();
   const running0 =
     document.body.classList.contains("running") && !!currentRomName;
   // A DS game picks its screens' arrangement from the room there is first

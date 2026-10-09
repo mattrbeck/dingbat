@@ -94,14 +94,33 @@ wide) has its own controls strip; Game Boy and GBA games keep theirs.
 
 | | |
 |---|---|
-| Top screen | With the bar folded, as high as the phone allows: `--nds-top` is the status-bar inset less what lies beside the cut-out, 14 px on a notched phone and 11 px on a Dynamic Island one (an inset of 54 px or more), so the screen's top edge meets the notch or island. A plain 20 px status bar, or a browser tab (no inset), keeps the whole inset. Room the screens do not fill goes below them. |
+| Top screen | With the bar folded, as high as the phone allows: `--nds-top` is where the notch or Dynamic Island ends (`--nds-cut`, from `NdsUtil.cutoutBottom` by screen size and status-bar inset, table below). A phone the table doesn't know gets the estimate: the inset less 14 px on a notched phone, 11 px on an island one (an inset of 54 px or more). A plain 20 px status bar, or a browser tab (no inset), keeps the whole inset. Room the screens do not fill goes below them. |
 | L, R | 120 x 28 at the strip's top corners (were the full-width 46 px row), hit 6 px above and below. |
 | Select, Start | 28 px circles labelled underneath, at the bottom between the d-pad and B (were a 150 x 34 row of pills under the clusters). Each is hit 8 px past its circle and on its label. |
-| D-pad, face buttons | Their size as before; the row they sit in is exactly the d-pad's height, on the strip's bottom padding (the home indicator's inset less 12 px, at least 10). |
+| D-pad, face buttons | Their size as before; the row they sit in is exactly the d-pad's height, on the strip's bottom padding `--nds-pad-b`: the home indicator's inset less 12 px (at least 10), plus a 16 px lift (`--nds-lift`) on a phone that has the indicator. The lift comes out of the screens: 383.5 -> 373 px wide on a 402 x 874. |
 
-On a 393 x 852 iPhone (59 / 34 insets) the stacked screens are 374 px wide,
-from 267; a 13 mini (375 x 812) 361 from 253, a Pro Max (430 x 932) 415
-from 306. The first iPhone SE is not a target for DS games (too slow).
+On a 402 x 874 iPhone 17 (62 / 34 insets) the stacked screens are 373 px
+wide (267 before the DS layout). The first iPhone SE is not a target for DS
+games (too slow).
+
+Where the cut-outs end (CSS px = points), measured per model on its
+simulator: for the islands, the system's own exclusion area (the iOS app's
+`-probe-cutout`); for the notches, the simulator's screen mask, which draws
+the notch up to 1.7 px deeper than iOS's exclusion area says.
+
+| Screen @ inset | Phones | Cut-out ends |
+|---|---|---|
+| 375 x 812 @ 44, 414 x 896 @ 44 | X, XS, XS Max, 11 Pro, 11 Pro Max | 30 |
+| 414 x 896 @ 48 | XR, 11 | 33 |
+| 375 x 812 @ 50 | 12 mini (34.33), 13 mini | 37.5 |
+| 390 x 844 @ 47, 428 x 926 @ 47 | 12 series (32); 13, 13 Pro, 13 Pro Max, 14, 14 Plus, 16e, 17e | 33.67 |
+| 393 x 852 @ 59, 430 x 932 @ 59 | 14 Pro, 14 Pro Max, 15, 15 Plus, 15 Pro, 15 Pro Max, 16, 16 Plus (island 11.33 to 48) | 48 |
+| 402 x 874 @ 62, 440 x 956 @ 62 | 16 Pro, 16 Pro Max, 17, 17 Pro, 17 Pro Max, 18 Pro, 18 Pro Max (island 14 to 50.67; 18 Pro's 94.67 wide, the others 125) | 50.67 |
+| 420 x 912 @ 68 | Air (island 20 to 56.67) | 56.67 |
+
+Where one key covers two models the deeper cut-out is used. The old
+estimate was exact on the 59-inset islands, a third of a pixel low on the
+62 and 68 ones, and 0.67 px (13 / 14) or 1.5 px (13 mini) under the notch.
 
 The touch controls never change: only the stage gives or takes room (the
 e2e checks every control's box is identical in every mode, with the bar

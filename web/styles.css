@@ -9299,7 +9299,9 @@ body:not(.running) #nds-off {
      screen brings it down over the top screen (index.js "Mobile-landscape
      top bar").
    - With it folded, the top screen goes up to the notch or the Dynamic
-     Island: --nds-top is the status-bar inset less what lies beside the
+     Island: --nds-top is where the cut-out ends (--nds-cut, set by
+     index.js ndsApplyCutout from NdsUtil's measured table), or for a phone
+     the table doesn't know the status-bar inset less what lies beside the
      cut-out (14 px on a notched phone, 11 px on an island one, where the
      inset is 54 px or more); a phone with a plain 20 px status bar, or a
      browser tab (no inset), keeps the whole inset. Any room the screens
@@ -9308,12 +9310,17 @@ body:not(.running) #nds-off {
      Start are small circles (28 px) labelled underneath, at the bottom
      between the d-pad and B, each hit 8 px past its circle; the d-pad and
      the face buttons keep their size and sit at the bottom, the cluster's
-     row exactly the d-pad's height.
+     row exactly the d-pad's height, lifted 16 px off the bottom padding.
    Game Boy and GBA games keep their own layout. */
 @media (pointer: coarse) and (orientation: portrait) and (max-width: 699px) {
   :root {
-    --nds-top: calc(var(--safe-t) - clamp(0px, (var(--safe-t) - 20px) * 100, 14px)
-      + clamp(0px, (var(--safe-t) - 53px) * 100, 3px));
+    --nds-top: var(--nds-cut, calc(var(--safe-t) - clamp(0px, (var(--safe-t) - 20px) * 100, 14px)
+      + clamp(0px, (var(--safe-t) - 53px) * 100, 3px)));
+    /* The strip's bottom padding: the home indicator's inset less 12 px,
+       plus a 16 px lift off the bottom edge on a phone that has one (the
+       screens give up that height: 374 -> 363 px wide on a 393 x 852). */
+    --nds-lift: clamp(0px, var(--safe-b) * 100, 16px);
+    --nds-pad-b: calc(max(10px, calc(var(--safe-b) - 12px)) + var(--nds-lift));
   }
   body.running.nds-mode.nds-bar-hide #topbar {
     position: fixed;
@@ -9339,14 +9346,14 @@ body:not(.running) #nds-off {
     grid-template-rows: auto 1fr;
     gap: 8px;
     padding-top: 8px;
-    padding-bottom: max(10px, calc(var(--safe-b) - 12px));
+    padding-bottom: var(--nds-pad-b);
     /* The pinstripes through the bottom of the clusters, which now sit on
        the strip's bottom padding. */
     background:
       linear-gradient(var(--panel-stripe), var(--panel-stripe)) 0
-        calc(100% - max(10px, calc(var(--safe-b) - 12px)) - 48px) / 100% 4px no-repeat,
+        calc(100% - var(--nds-pad-b) - 48px) / 100% 4px no-repeat,
       linear-gradient(var(--panel-stripe), var(--panel-stripe)) 0
-        calc(100% - max(10px, calc(var(--safe-b) - 12px)) - 36px) / 100% 4px no-repeat,
+        calc(100% - var(--nds-pad-b) - 36px) / 100% 4px no-repeat,
       linear-gradient(180deg, var(--control-strip-top), var(--control-strip-bottom));
   }
   body.nds-mode #lr {
@@ -9376,7 +9383,7 @@ body:not(.running) #nds-off {
     position: absolute;
     left: 0;
     right: 0;
-    bottom: calc(max(10px, calc(var(--safe-b) - 12px)) + 12px);
+    bottom: calc(var(--nds-pad-b) + 12px);
     gap: 22px;
     pointer-events: none;
   }

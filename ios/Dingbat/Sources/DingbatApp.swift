@@ -154,6 +154,24 @@ struct DingbatApp: App {
             Settings.shared.theme = theme
         }
         #if DEBUG
+        // `-probe-cutout`: what the system says about the notch / Dynamic
+        // Island on this model, to tmp/cutout.txt (the table in
+        // PhoneCutout.swift is built from these; the shipped app never asks).
+        if args.contains("-probe-cutout") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                let screen = UIScreen.main
+                var line = "model \(PhoneCutout.modelIdentifier) bounds \(screen.bounds.size) scale \(screen.scale)"
+                if let w = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first {
+                    line += " safe \(w.safeAreaInsets)"
+                }
+                for key in ["_exclusionArea", "_displayCornerRadius", "_peripheryInsets", "_sensorRegion"]
+                    where screen.responds(to: NSSelectorFromString(key)) {
+                    line += " \(key) \(String(describing: screen.value(forKey: key) ?? "nil"))"
+                }
+                try? (line + "\n").write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cutout.txt"),
+                                         atomically: true, encoding: .utf8)
+            }
+        }
         if let keys = value("-keys") {
             for (i, name) in keys.split(separator: " ").enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(i) * 0.6) {

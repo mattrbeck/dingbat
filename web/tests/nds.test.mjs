@@ -158,6 +158,24 @@ test("the stylus lands on the same pixel in every arrangement, swap, gap and tur
   assert.ok(checked > 300, "every shape with a bottom screen was tried: " + checked);
 });
 
+test("the notch or island's edge is known by screen size and status-bar inset", () => {
+  // Measured per model (docs/nds/web.md "Phone held upright").
+  assert.equal(NdsUtil.cutoutBottom(402, 874, 62), 50.67);
+  assert.equal(NdsUtil.cutoutBottom(874, 402, 62), 50.67); // either way round
+  assert.equal(NdsUtil.cutoutBottom(390, 844, 47), 33.67);
+  assert.equal(NdsUtil.cutoutBottom(375, 812, 44), 30);
+  assert.equal(NdsUtil.cutoutBottom(375, 812, 50), 37.5);
+  // A Safari tab under its own bar (no inset), an unknown phone, a desktop.
+  assert.equal(NdsUtil.cutoutBottom(402, 874, 0), null);
+  assert.equal(NdsUtil.cutoutBottom(400, 900, 60), null);
+  assert.equal(NdsUtil.cutoutBottom(1440, 900, 0), null);
+  // Every edge lies inside its status bar's inset.
+  for (const [key, v] of Object.entries(NdsUtil.CUTOUTS)) {
+    const inset = Number(key.split("@")[1]);
+    assert.ok(v > 0 && v < inset, key);
+  }
+});
+
 test("microphone samples become clamped int16; Blow is loud noise", () => {
   eq([...NdsUtil.micInt16(new Float32Array([0, 1, -1, 2, -3, 0.5]))],
      [0, 32767, -32767, 32767, -32767, 16384]);
