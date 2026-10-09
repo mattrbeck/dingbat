@@ -146,7 +146,8 @@ src/dingbat/nds/
                    output with render registers sampled per line (docs/nds/accuracy.md)
   gpu3d/geometry.nim matrices, lighting, polygon assembly, clipping, tests
   gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges,
-                   anti-aliasing, line budget (RDLINES); docs/nds/3d-edges.md
+                   anti-aliasing, line budget (RDLINES); docs/nds/3d-edges.md;
+                   generic over a resolution multiplier for HD 3D (docs/nds/hd3d.md)
   io/irq.nim       IME/IE/IF per CPU
   io/timers.nim    4 timers per CPU
   io/dma.nim       4 channels per CPU (+ ARM9 fill regs); ARM9 bus time per
