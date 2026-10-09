@@ -61,6 +61,11 @@ type
     # viewport (x1, y1 bottom-left; x2, y2 top-right, inclusive)
     vp_x1, vp_y1, vp_x2, vp_y2: int32
     one_dot_depth*: uint32      ## DISP_1DOT_DEPTH (12.3 w)
+    # HD rendering (docs/nds/hd3d.md; not machine state): each vertex's
+    # screen position in 1/HD_SUB dots, alongside `verts`, kept only while
+    # `hd_on`
+    hd_on*: bool
+    hpos*: seq[array[2, int32]]
     # Polygon/Vertex RAM being filled
     polys*: seq[Polygon]
     verts*: seq[Vertex]
@@ -72,6 +77,7 @@ type
     box_result*: bool
 
 const
+  HD_SUB* = 192   ## hd_screen's sub-dot steps: exact at 2x, 3x, 4x, 6x, 8x
   # Texcoord transform modes 2 and 3: (N or V, 1.0) * texture matrix, the
   # sum shifted right by these. GBATEK's parts table (N 1.9, V 4.12, matrix
   # 20.12, S/T 12.4) would give 17 and 20; the 3d_texcoord ROM on the
@@ -118,6 +124,7 @@ proc reset_ram*(g: Geometry) =
   ## SWAP_BUFFERS hands the RAM over and the geometry side starts empty.
   g.polys.setLen(0)
   g.verts.setLen(0)
+  g.hpos.setLen(0)
   g.vram_count = 0
 
 # ---------------------------------------------------------------------------
@@ -382,6 +389,17 @@ proc to_screen(g: Geometry; v: var Vertex) =
   v.sy = lo32((w - int64(v.y)) * vh div (2 * w) + (191 - g.vp_y2))
   v.z24 = lo32(clamp(((int64(v.z) shl 14) div w + 0x3FFF) * 0x200, 0'i64, 0xFF_FFFF'i64))
 
+proc hd_screen(g: Geometry; v: Vertex): array[2, int32] =
+  ## to_screen's position in 1/HD_SUB dots: the sub-dot fraction that the
+  ## hardware's whole-dot position drops, for rendering at a multiple of
+  ## the resolution (floor(p * N / HD_SUB) is the position at N times; its
+  ## floor over N is v.sx, v.sy).
+  let w = max(1'i64, int64(v.w))
+  let vw = int64(g.vp_x2 - g.vp_x1 + 1)
+  let vh = int64(g.vp_y2 - g.vp_y1 + 1)
+  [lo32((int64(v.x) + w) * vw * HD_SUB div (2 * w) + int64(g.vp_x1) * HD_SUB),
+   lo32((w - int64(v.y)) * vh * HD_SUB div (2 * w) + int64(191 - g.vp_y2) * HD_SUB)]
+
 # ---------------------------------------------------------------------------
 # Polygon assembly
 
@@ -444,6 +462,10 @@ proc emit_polygon(g: Geometry; src: openArray[Vertex]; in_strip: bool) =
                   tex: g.teximage, pltt: g.pltt_base, ymin: ymin, ymax: ymax)
   p.translucent = (alpha in 1'u32..30'u32) or fmt == 1 or fmt == 6
   for i in 0 ..< n: g.verts.add cv[i]
+  # (turned on mid-frame, the lists stay apart until the next swap: the
+  # renderer then places this frame's vertices by their whole dots)
+  if g.hd_on and g.hpos.len == g.verts.len - n:
+    for i in 0 ..< n: g.hpos.add g.hd_screen(cv[i])
   g.polys.add p
 
 proc add_vertex(g: Geometry; v: Vertex) =

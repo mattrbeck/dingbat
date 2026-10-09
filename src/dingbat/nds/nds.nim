@@ -706,6 +706,15 @@ proc slot2_rumble*(n: NDS): int =
   ## GPIO motor); 0 with nothing rumbling.
   n.slot2.rumble()
 
+proc set_hd_scale*(n: NDS; scale: int) =
+  ## HD 3D (docs/nds/hd3d.md): 1 = off (the default); 2..4 also draw the
+  ## screens at that multiple of 256x192 into n.gpu.hd_top / hd_bottom,
+  ## the 3D scene rendered at that resolution. Display only: the 1x
+  ## screens, the machine and its state are unchanged.
+  n.gpu.set_hd(scale)
+
+proc hd_scale*(n: NDS): int = n.gpu.hd
+
 proc set_button*(n: NDS; b: NdsButton; pressed: bool) =
   if pressed: n.input.held.incl(b) else: n.input.held.excl(b)
   n.input.check_keypad_irq(n.input.keycnt9, n.irq9)

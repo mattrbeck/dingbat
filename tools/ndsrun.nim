@@ -66,6 +66,9 @@
 ## (DINGBAT_NDS_NO_SKIP=1 turns idle-loop skipping and 3D frame reuse off: docs/nds/perf.md).
 ## --screen-hash N prints a CRC-32 of each screen every N frames (the 2D/3D
 ## output itself, which the state leaves out).
+## --hd N draws the 3D scene at N times the resolution (2..4) and writes
+## the PNGs (main and --shots) at 256N x 384N (docs/nds/hd3d.md); the 1x
+## screens, --screen-hash and --state-hash are unaffected.
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
@@ -135,6 +138,15 @@ proc write_png*(path: string; w, h: int; rgba: seq[uint32]) =
   png.chunk("IDAT", cast[seq[uint8]](z))
   png.chunk("IEND", @[])
   writeFile(path, cast[string](png))
+
+proc screens_rgba_hd*(n: NDS): seq[uint32] =
+  ## Both HD screens (n.gpu.hd x the size), top above bottom.
+  let k = n.gpu.hd
+  let half = 256 * k * 192 * k
+  result = newSeq[uint32](2 * half)
+  for i in 0 ..< half:
+    result[i] = bgr555_to_rgba(n.gpu.hd_top[i])
+    result[half + i] = bgr555_to_rgba(n.gpu.hd_bottom[i])
 
 proc screens_rgba*(n: NDS): seq[uint32] =
   result = newSeq[uint32](256 * 384)
@@ -297,6 +309,7 @@ when isMainModule:
   var perf_i0 = 0'u64
   var state_saves: seq[(string, int)]
   var state_load = ""
+  var hd = 1
   var state_load_frame = -1
   var state_layout = false
   var state_hash = 0
@@ -327,6 +340,7 @@ when isMainModule:
       of "slot2": slot2 = val
       of "rumble-log": rumble_log = true
       of "rtc": rtc_at = val
+      of "hd": hd = parseInt(val)
       of "mic":
         let m = val.split('@')
         mic_path = m[0]
@@ -419,6 +433,7 @@ when isMainModule:
     # keys and stylus held at the state's frame are in the state (input)
     echo "state: ", state_load, " -> frame ", first_frame
     perf_from = max(perf_from, first_frame)
+  if hd > 1: n.set_hd_scale(hd)
   var last_rumble = 0
   var was_off = false
   var audio: seq[float32]
@@ -508,7 +523,10 @@ when isMainModule:
       writeFile(outp.changeFileExt("") & "_ram_" & $(f + 1) & ".bin", bytes)
     if f + 1 in shots:
       let px = n.screens_rgba()
-      write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)
+      if hd > 1:
+        write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256 * hd, 384 * hd, n.screens_rgba_hd())
+      else:
+        write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)
       tops.add px[0 ..< 256 * 192]
       if text_shots:
         for spec in text.split(','):
@@ -550,7 +568,8 @@ when isMainModule:
     # --bgshot A0: that BG replaces the top half of the PNG
     let px = n.bg_shot(shot[0] == 'B', ord(shot[1]) - ord('0'))
     for i in 0 ..< 256 * 192: n.gpu.top[i] = px[i]
-  write_png(outp, 256, 384, n.screens_rgba())
+  if hd > 1: write_png(outp, 256 * hd, 384 * hd, n.screens_rgba_hd())
+  else: write_png(outp, 256, 384, n.screens_rgba())
   echo "frames=", frames, " arm9 instrs=", n.arm9.instr_count, " pc=0x",
        toHex(n.arm9.next_pc, 8), " arm7 instrs=", n.arm7.instr_count, " pc=0x",
        toHex(n.arm7.next_pc, 8), " -> ", outp

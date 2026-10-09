@@ -66,7 +66,10 @@ const
   # cachability by address and the cache enables: update_regions(cp15)
   TIMING_SKIP = ["ic_on", "dc_on", "icode", "idata", "ibuf", "mcode", "mdata", "mbuf"]
   # mmem_req/mmem_ctx: the machine's DMA mode 4 hook, set at construction
-  GPU_SKIP = ["vram", "engine_a", "engine_b", "gpu3d", "mmem_req", "mmem_ctx"]
+  GPU_SKIP = ["vram", "engine_a", "engine_b", "gpu3d", "mmem_req", "mmem_ctx",
+              # HD 3D: the frontend's setting and its pictures (docs/nds/hd3d.md)
+              "hd", "hd_top", "hd_bottom", "hd_sub", "hd_out", "hd_out2", "hd_a_gfx", "hd_a_line",
+              "cap_hd", "cap_1x", "hd_vline", "hd_bline"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
   # vgen/remap_gen/pbase: the 2D engines' line reuse (engine2d.nim); remap()
@@ -79,12 +82,16 @@ const
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d", "line", "gfx", "lsb", "lsb_on", "bgpix", "objpix",
                  "objprio", "objattr", "winmask", "line_semi", "line_objwin", "obj_prios",
                  "lc_on", "mem_gen", "lgen", "touch", "lc_valid", "lc_key", "lc_touch", "lc_vsum",
-                 "lc_line", "lc_3d", "lc_reused"]
+                 "lc_line", "lc_3d", "lc_reused", "hd_on"]
   # reuse_*/last_*: what the last real render drew (render_frame); the
   # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh
   GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",
                 "last_disp3dcnt", "last_param", "last_regs", "last_polys", "last_verts",
-                "last_is_cur"]
+                "last_is_cur",
+                # HD rendering: the frontend's display setting and its pictures
+                # (docs/nds/hd3d.md)
+                "hd_scale", "hpos", "hd_verts", "hd2", "hd3", "hd4", "hd_frame"]
+  GEO_SKIP = ["hd_on", "hpos"]   # HD rendering's vertex positions (docs/nds/hd3d.md)
   # Per-frame scratch: render_frame's clear() rewrites each dot's `px`
   # (depth, IDs, flags, coverage and the layer behind) before anything
   # reads them, the page pointers and `order` are rebuilt
@@ -449,7 +456,7 @@ proc io_machine[S](s: var S; n: NDS) =
   obj_section(s, 30, "microphone queue", n.spi.mic[], MIC_SKIP)
   obj_section(s, 2, "scheduler", n.sched[], NO_SKIP)
   obj_section(s, 10, "3D engine (Gpu3d)", n.gpu3d[], GPU3D_SKIP)
-  obj_section(s, 11, "3D geometry", n.gpu3d.geo[], NO_SKIP)
+  obj_section(s, 11, "3D geometry", n.gpu3d.geo[], GEO_SKIP)
   section(s, 0xFF'u8, "end")
 
 # ---------------------------------------------------------------------------

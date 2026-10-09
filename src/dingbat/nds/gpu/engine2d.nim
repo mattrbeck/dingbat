@@ -91,6 +91,7 @@ type
     lc_line: array[192, array[256, uint16]]
     lc_3d: seq[array[256, uint32]]        ## engine A: the 3D line each was drawn with
     lc_reused*: int                       ## lines reused so far (a statistic)
+    hd_on*: bool                          ## HD 3D (gpu.nim): 3D lines keep their scratch, not reused
 
   LineKey = object
     ## Everything a visible line's pixels depend on besides the VRAM it
@@ -1006,6 +1007,49 @@ proc render_bg_line*(e: Engine2D; y: int) =
   e.line = e.gfx
 
 # ---------------------------------------------------------------------------
+# HD 3D (docs/nds/hd3d.md)
+
+proc hd_gfx_3d*(e: Engine2D): bool =
+  ## The graphics composite of the line just drawn holds the 3D layer
+  ## (whether the display shows it, display mode 1, or capture reads it).
+  e.enabled and (e.dispcnt and 0x80) == 0 and e.line3d != nil and
+    e.bg0_is_3d and (e.shown_bgs() and 1) != 0
+
+proc render_hd_sub*(e: Engine2D; sub3d: ptr array[256, uint32];
+                    gfx_out, line_out: var array[256, uint16]) =
+  ## The line just drawn (render_line with its graphics composite,
+  ## hd_gfx_3d) composited again with another 3D line in place of the
+  ## hardware's: one sub-dot of each of its dots at a higher resolution.
+  ## The BGs, OBJs and windows are the line's own, so every rule
+  ## (priorities, windows, blending, 3D alpha, master brightness) applies
+  ## to the HD dot as to the 1x one. `gfx_out`: the composite (capture
+  ## source A), `line_out`: after master brightness (display mode 1).
+  ## Leaves e.line and e.gfx as they were.
+  let keep3d = e.line3d
+  let keep_line = e.line
+  let keep_gfx = e.gfx
+  e.line3d = sub3d
+  let windows = e.compute_windows()
+  e.render_3d()
+  e.composite(e.shown_bgs(), windows)
+  gfx_out = e.gfx
+  e.line = e.gfx
+  e.apply_master_brightness(e.lsb_on)
+  line_out = e.line
+  e.line = keep_line
+  e.gfx = keep_gfx
+  e.line3d = keep3d
+
+proc hd_bright*(e: Engine2D; line: var array[256, uint16]) =
+  ## Master brightness on a line of 15-bit pixels (VRAM display), as
+  ## render_line applies it.
+  let keep_line = e.line
+  e.line = line
+  e.apply_master_brightness(false)
+  line = e.line
+  e.line = keep_line
+
+# ---------------------------------------------------------------------------
 # Line reuse
 #
 # A graphics line (display mode 1) reads the engine's registers and line
@@ -1088,7 +1132,9 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
     for x in 0 ..< 256: e.line[x] = 0
     return
   let dm = e.display_mode
-  let cache = e.lc_on and dm == 1 and not need_gfx and y < 192
+  # (with HD 3D a line showing 3D is composited again after this, from the
+  # scratch a reused line would not have: gpu.nim hd_line)
+  let cache = e.lc_on and dm == 1 and not need_gfx and y < 192 and not (e.hd_on and e.line3d != nil)
   var key: LineKey
   if cache:
     key = e.line_key(y)
