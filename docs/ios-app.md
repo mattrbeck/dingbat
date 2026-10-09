@@ -153,7 +153,10 @@ The Swift side plays DS games as the web app does (docs/nds/web.md is the
 reference; this follows it piece by piece). Everything is gated on the
 running game being a DS game (`GameSession.isNDS`, the web's
 body.nds-mode): Game Boy and GBA games keep every layout, control and
-menu exactly as before.
+menu exactly as before. DS games load only with Settings › General ›
+Advanced › DS Beta on (`Settings.dsBeta`, off by default; docs/nds/beta.md):
+off, `.nds` is refused, DS games leave the library and nothing of the DS
+shows in Settings.
 
 | Web | iOS |
 |---|---|
@@ -173,7 +176,8 @@ menu exactly as before.
 | Sound at 32728 Hz; pacing by the display clock as for GB/GBA (the reader's rate control absorbs 59.83 vs 60) | `AudioOutput.syncRate` rebuilds the source node when a load changes `dingbat_audio_sample_rate()`; `GameSession.framesOwed` |
 | Save states, slots, sessions / Resume, checkpoints, Quick Save/Load; error kind 8's wording | the same paths (`dingbat_state_*`); `GameSession.rejectCopy` |
 | Power-off: "The game turned the DS off" with Restart and Library; the battery stored, the resume snapshot deleted, no picture of the black screens, no state of an off console | `NdsState.syncPower`, `GameSession.ndsPoweredOff` / `ndsRestart`, `NdsStageLayers` |
-| Gated off: rewind (button, scrubber, Rewind to a Moment, Report a Bug's timeline), Clip that! and Record, Link Cable and 2P, Cheats, run-ahead, the batch of library pictures, tilt / camera / printer / rumble / SGB / enhanced-music UI (their calls are 0 for a DS game) | `PlaybackCluster`, `GameMenu`, `ReportBugView`, `LibraryGrid` (2P), `AddPictures`, `GameSession.setRewinding` / run-ahead |
+| Rewind: the button, hold, Rewind to a Moment and Report a Bug's timeline, as for GB/GBA (the DS ring, `nds/rewinding.nim`, 64 MB) | `dingbat_ios.nim` `new_ring` / `push_rewind` / the `dingbat_rewind_scrub_*` DS branches; `RewindScrubberView` (the upright preview held to 260 pt) |
+| Gated off: Clip that! and Record, Link Cable and 2P, Cheats, run-ahead, the batch of library pictures, tilt / camera / printer / rumble / SGB / enhanced-music UI (their calls are 0 for a DS game) | `PlaybackCluster`, `GameMenu`, `ReportBugView`, `LibraryGrid` (2P), `AddPictures`, run-ahead |
 | Save import: `.sav` / `.dsv` stored whole (no GBA container sniffing) | `ManageSavesView.importSave`, `.dsv` in the save type and Open in |
 
 Dev hooks (DEBUG, `DingbatApp.autoplay`): `-nds-layout auto|stack|side|focus|single`,

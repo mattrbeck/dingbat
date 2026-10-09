@@ -1,8 +1,9 @@
 # DS games in the web app
 
-On this branch (not main) the main app (`web/index.html` + `web/index.js`)
-plays `.nds` games on the DS core. The standalone dev page (`web/nds.html`)
-stays as it was, on the same core build.
+The main app (`web/index.html` + `web/index.js`) plays `.nds` games on the
+DS core while DS Beta is on (Settings > General > Advanced; off by default:
+docs/nds/beta.md). The standalone dev page (`web/nds.html`) stays as it
+was, on the same core build; the Pages deploy leaves it out.
 
 ## Trying it on a phone or another Mac
 
@@ -57,7 +58,7 @@ address moves) and runs `web/serve.py --dev --https` on port 8443 (`PORT=`).
 |---|---|
 | Save states: Quick save/load, slots, Save States, resume snapshots and the hand-off | The core exports `nds_state_size`/`nds_state_data`/`nds_state_load` (+ `nds_state_error_kind`/`nds_state_error`; docs/nds/savestate.md). `ndsCaptureState`/`ndsApplyState` in index.js "Nintendo DS" call them, so `captureStateBytes`/`applyStateBytes` work, `body.nds-states` brings back quick save/load and Save States, the library offers the session, and a refused state's toast reads the DS core's reason. |
 | Rewind (hold), run-ahead, cheats | **On** when the core exports them (`body.nds-rewind`, `body.nds-cheats`; run-ahead follows the app's choice): docs/nds/features.md. |
-| The rewind scrubber, Report a Bug's timeline | No thumbnails in the DS ring (Report a Bug attaches the moment, when states exist). |
+| The rewind scrubber, Report a Bug's timeline | **On**: the DS ring keeps thumbnails of both screens (`scrubApi` in index.js serves either core; docs/nds/features.md). |
 | Clip that! and Record | Clip that! replays the GB/GBA core's history; Record is kept with it as in every other mode (the DS sound does not reach the clip tap yet). |
 | Link cable, 2P link | No DS wireless/link. |
 | Library pictures batch | It boots games on the GB/GBA core; DS games get their picture by being played. |

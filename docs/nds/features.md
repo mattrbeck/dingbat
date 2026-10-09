@@ -1,9 +1,11 @@
 # DS games: the app features that were off, and cheap wins
 
-Status (2026-10-08, branch `nds-features`): **rewind, run-ahead and cheats
-(Action Replay DS, unencrypted CodeBreaker DS) work for DS games in the web
-app**. Clips, the rewind scrubber, the link cable and the library-pictures
-batch are still off. The iOS app still gates all of them for DS games.
+Status (2026-10-09): **rewind, the rewind scrubber, Report a Bug's
+timeline, run-ahead and cheats (Action Replay DS, unencrypted CodeBreaker
+DS) work for DS games in the web app; rewind, the scrubber and the timeline
+in the iOS app too**. Clips, the link cable and the library-pictures batch
+are still off; iOS still gates run-ahead and cheats for DS games. DS games
+load only with DS Beta on (docs/nds/beta.md).
 
 ## Where each one stands
 
@@ -12,8 +14,8 @@ batch are still off. The iOS app still gates all of them for DS games.
 | Save states, slots, resume | on | -- | (docs/nds/savestate.md). A slot is packed in the checkpoint worker (8.6-9.2 ms on the page, was 22-29); the undo a load or reset keeps is held plain. |
 | Crash checkpoints (the moments, the session a crash leaves) | **wrong** | the 60 s checkpoint read the GB/GBA core, which still held any GB/GBA game played earlier: its state went in as the DS game's checkpoint *and* session (a page that died then resumed nothing) | **fixed**: the DS core's plain image, packed in the worker, signed with the DS battery (`nds.e2e.mjs`, "slot, undo and checkpoint"). |
 | Fast-forward, 2x, slow motion, frame step | on | -- | unchanged. Fast-forward runs 12 ms of frames a tick (~3-4x on SoulSilver). Skipping the drawing of frames nobody sees would roughly double it, but display capture writes drawn frames into VRAM, so a skipped frame changes the machine unless capture is off: 1-2 agent-days, careful. |
-| **Rewind** (hold) | off | not wired: the core had the hooks (`state_payload` / `load_state_payload`) but no ring in either front end | **on** (web). The GB/GBA ring (`common/rewind.nim`) fed every 10 frames; the Rewind switch, the button and the backquote key reach it. iOS: the same ring is gated for `ekNDS` in `dingbat_ios.nim`; about half a day to lift. |
-| Rewind scrubber, Report a Bug's timeline | off | needs thumbnails in the ring and the scrub exports | still off. ~1 agent-day (thumbnails of both screens at push time, the `*_scrub_*` exports, the JS side already exists). |
+| **Rewind** (hold) | off | not wired: the core had the hooks (`state_payload` / `load_state_payload`) but no ring in either front end | **on** (web, iOS, desktop). The GB/GBA ring (`common/rewind.nim`) fed every 10 frames (`nds/rewinding.nim`); the Rewind switch, the button and the backquote key reach it. |
+| Rewind scrubber, Report a Bug's timeline | off | needs thumbnails in the ring and the scrub exports | **on** (web, iOS): an 80x120 thumbnail of both screens once a second; `nds_rewind_scrub_*` / `nds_rewind_commit` (web) and the iOS C API's `dingbat_rewind_scrub_*` answer as for GB/GBA. A seek inflates back from the newest snapshot (no keyframes): ~1.3 ms a snapshot natively, 0.46 s to the far end of a full 64 MB Golden Sun ring. |
 | **Run-ahead** | off | not wired; a DS snapshot was assumed too dear (it is not: under a millisecond each way) | **on** (web, opt-in as for GB/GBA). Run-ahead n costs n + 1 frames: see "Cost". iOS: gated in `dingbat_ios.nim` `runahead_tick`; ~half a day. |
 | **Cheats** | off | no DS engine (the GB/GBA engines are the other cores') | **on** (web): `nds/cheats.nim`. iOS: the cheat list UI is shared; wiring the DS engine is ~half a day. |
 | Encrypted CodeBreaker DS | -- | needs the game's *encrypted* secure area (the core has the KEY1 code to make it) | ~1 agent-day on top of the engine (GBATEK gives the whole cipher). |
@@ -28,11 +30,14 @@ batch are still off. The iOS app still gates all of them for DS games.
 **Rewind.** `src/dingbat_nds_wasm.nim`: `nds_rewind_enable(on, cap)`,
 `nds_rewind_pop()`, `nds_rewind_depth()`, `nds_rewind_bytes()`. After each
 frame (`step_frame`) the ring takes a payload when one is due (every 10
-frames, as GB/GBA). No keyframes (each would be a 2 MB zlib of the whole
-payload, a visible stall every 10 seconds; they only speed up scrubber
-seeks, and there is no DS scrubber) and no thumbnails. A pop applies the
+frames, as GB/GBA), and once a second an 80x120 thumbnail of both screens
+for the scrubber (`nds/rewinding.nim`). No keyframes (each would be a 2 MB
+zlib of the whole payload, a visible stall every 10 seconds; they only
+speed up scrubber seeks, which take under half a second without). A pop applies the
 snapshot with `load_own_payload` (below). The ring starts empty at every
-boot, reboot and state load. Cap: 64 MB, 16 MB on iOS (as GB/GBA).
+boot, reboot and state load. Cap: 64 MB (the iOS app too); 32 MB in iOS
+Safari, twice the GB/GBA ring's 16 MB there (Safari demotes the wasm JIT
+under memory pressure; the newest DS snapshot alone is 6-7 MB).
 `index.js`: `ndsApplyRewind` follows the Rewind switch, `ndsRewindStep`
 pops ~30 snapshots a second while rewind is held (5x speed backwards, as
 GB/GBA), `body.nds-rewind` shows the button.
