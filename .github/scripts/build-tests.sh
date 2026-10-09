@@ -20,10 +20,18 @@ mkdir -p "$log_dir"
 names=()
 pids=()
 
+# At most this many at once. Unbounded, the ~27 builds (several now with the
+# DS core in them) ran a 4-core Linux runner out of memory: the step was
+# killed with no compiler error (exit 143). Finished ones stay unreaped, so
+# the waits below still read each one's status.
+cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+max_jobs=${DINGBAT_BUILD_JOBS:-$((cores + 2))}
+
 # build <name> <output binary> <source> [extra nim flags...]
 build() {
   local name=$1 out=$2 src=$3
   shift 3
+  while [ "$(jobs -rp | wc -l)" -ge "$max_jobs" ]; do sleep 1; done
   nim c --nimcache:"$nimcache_root/$name" -d:test_harness -d:release --path:src \
     "$@" -o:"$out" "$src" >"$log_dir/$name.log" 2>&1 &
   names+=("$name")
