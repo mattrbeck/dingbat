@@ -682,12 +682,16 @@ var clipLiveStash = ""                 # live state while a replay runs
 var clipCursor = 0
 var clipEnd = 0
 var clipReplaying = false
+# Whether the last frame was drawn (docs/frame-skip.md): an anchor's
+# thumbnail is the picture the frame before it left, so one waits for it.
+var lastFrameDrawn = true
 
 proc setClipCapBytes(n: cint) {.exportc.} =
   ## Takes effect at the next anchor, when the ring trims to the new cap.
   if n > 0: clipCapBytes = int(n)
 
 proc clip_reset() =
+  lastFrameDrawn = true
   clipAnchors.setLen(0)
   clipAnchorBytes = 0
   clipInputs.setLen(0)
@@ -716,7 +720,8 @@ proc clip_note_frame() =
   ## Once per canonical frame before it steps: log the held buttons and
   ## evict history outside the window or the budget.
   if clipReplaying: return
-  if clipFrameIndex mod CLIP_SNAP_INTERVAL == 0:
+  if lastFrameDrawn and (clipAnchors.len == 0 or
+     clipFrameIndex - clipAnchors[^1].frame >= CLIP_SNAP_INTERVAL):
     let payload = case stateKind
       of ekGBA: stateGba.state_payload()
       of ekGB:  stateGb.state_payload()
@@ -1081,25 +1086,25 @@ proc gb_rewind_thumb(g: GB): RewindThumb =
 # At 2x, fast-forward, or on a display slower than the game JS runs several
 # frames per refresh and shows only the last; wasm_unseen_next says the next
 # tick's frame is one of the others. The GBA PPU then draws nothing for it
-# (ppu.no_draw), and run-ahead runs no lookahead (its frames exist only to be
-# shown). Drawn anyway: a frame whose picture something keeps (a rewind
-# snapshot, a clip anchor's thumbnail), and every frame while the LCD
-# response is on (its panel takes them all).
+# (ppu.no_draw), it runs no run-ahead lookahead (those frames exist only to
+# be shown), and the LCD panel does not step on it. JS never marks a tick's
+# last frame, so after every tick the core holds its frame's picture, for
+# whatever reads it (screenshots, recordings, states, thumbnails). A rewind
+# snapshot or clip anchor falling on an undrawn frame waits for the next
+# drawn one. Under the LCD response only fast-forward skips: at 2x or on a
+# slow display its panel blends the frames the display never shows (a
+# sprite drawn on alternate frames), which is what it is for.
 var unseenNext = false
+var unseenAtFF = false
 
-proc wasm_unseen_next() {.exportc.} =
+proc wasm_unseen_next(fastForward: cint) {.exportc.} =
   unseenNext = true
+  unseenAtFF = fastForward != 0
 
 proc take_unseen(): bool =
   ## This tick's frame will not be shown (one-shot).
-  result = unseenNext and not lcdOn
+  result = unseenNext and (not lcdOn or unseenAtFF)
   unseenNext = false
-
-proc picture_kept(): bool =
-  ## Something keeps the picture the coming frame leaves (after
-  ## clip_note_frame, which counts it): draw it.
-  (rewindHistory != nil and rewindHistory.push_due()) or
-    clipFrameIndex mod CLIP_SNAP_INTERVAL == 0
 
 proc loop_tick() {.exportc.} =
   let unseen = take_unseen()
@@ -1113,17 +1118,19 @@ proc loop_tick() {.exportc.} =
   case stateKind
   of ekGBA:
     if stateTexture == nil: return
-    stateGba.ppu.no_draw = unseen and not picture_kept()
+    stateGba.ppu.no_draw = unseen
     stateGba.step_frame()
     stateGba.ppu.no_draw = false
+    lastFrameDrawn = not unseen
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(
         proc(): string = stateGba.state_payload(),
-        proc(): RewindThumb = gba_rewind_thumb(stateGba))
-    # gamePtr is refreshed every frame (even static ones) so the uploader
-    # always has a valid pointer and the LCD response keeps decaying.
-    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
-                       GBA_W * GBA_H)
+        proc(): RewindThumb = gba_rewind_thumb(stateGba), ready = not unseen)
+    # gamePtr is refreshed every shown frame (even static ones) so the
+    # uploader always has a valid pointer and the LCD response keeps decaying.
+    if not unseen:
+      prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
+                         GBA_W * GBA_H)
   of ekGB:
     if stateTexture == nil: return
     stateGb.step_frame()
@@ -1161,15 +1168,18 @@ proc runahead_tick(n: cint) {.exportc.} =
   case stateKind
   of ekGBA:
     if stateTexture == nil: return
-    # The canonical frame is shown only without run-ahead
-    stateGba.ppu.no_draw = (n > 0 or unseen) and not picture_kept()
+    # Drawn though run-ahead shows a lookahead frame: screenshots,
+    # recordings, states and thumbnails read the canonical picture
+    stateGba.ppu.no_draw = unseen
     stateGba.step_frame()  # canonical frame; its audio is played
     stateGba.ppu.no_draw = false
+    lastFrameDrawn = not unseen
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(
         proc(): string = stateGba.state_payload(),
-        proc(): RewindThumb = gba_rewind_thumb(stateGba))
-    if n <= 0 or unseen:
+        proc(): RewindThumb = gba_rewind_thumb(stateGba), ready = not unseen)
+    if unseen: return
+    if n <= 0:
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                          GBA_W * GBA_H)
       return
@@ -1198,7 +1208,8 @@ proc runahead_tick(n: cint) {.exportc.} =
       discard rewindHistory.maybe_push(
         proc(): string = stateGb.state_payload(),
         proc(): RewindThumb = gb_rewind_thumb(stateGb))
-    if n <= 0 or unseen:
+    if unseen: return
+    if n <= 0:
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
                          GB_W * GB_H)
       return
@@ -1298,7 +1309,7 @@ proc wasm_rewind_scrub_seconds_ago(sample: cint): cint {.exportc.} =
   if sample < 0 or sample >= scrubIds.len or rewindHistory == nil: return 0
   let index = rewindHistory.index_of_id(scrubIds[sample])
   if index < 0: return 0
-  let frames = index * rewindHistory.snapshot_interval
+  let frames = max(0, rewindHistory.frames_back(index))
   cint(frames * 10 div 60)
 
 proc wasm_rewind_scrub_state_size(sample: cint): cint {.exportc.} =

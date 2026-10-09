@@ -70,6 +70,9 @@ var clipLiveStash = ""                 # live state while a replay runs
 var clipCursor = 0
 var clipEnd = 0
 var clipReplaying = false
+# Whether the last frame was drawn (docs/frame-skip.md): an anchor's
+# thumbnail is the picture the frame before it left, so one waits for it.
+var lastFrameDrawn = true
 
 # Online link (input rollback, web rollback_*): both players' cores run here
 # and only inputs cross the network. While a session runs, its local core is
@@ -363,14 +366,17 @@ proc dingbat_is_cgb(): cint {.exportc, cdecl.} =
 
 # --- Frames ---
 
-proc push_rewind() =
+proc push_rewind(drawn = true) =
+  ## A snapshot due on an undrawn frame waits for the next drawn one (it
+  ## keeps the picture; docs/frame-skip.md).
   if rewindHistory == nil: return
   case stateKind
   of ekGBA:
     discard rewindHistory.maybe_push(
       proc(): string = stateGba.state_payload(),
       proc(): RewindThumb = RewindThumb(w: 120, h: 80,
-        pixels: downscale_bgr555(stateGba.ppu.framebuffer, GBA_W, GBA_H, 120, 80)))
+        pixels: downscale_bgr555(stateGba.ppu.framebuffer, GBA_W, GBA_H, 120, 80)),
+      ready = drawn)
   of ekGB:
     discard rewindHistory.maybe_push(
       proc(): string = stateGb.state_payload(),
@@ -384,44 +390,47 @@ proc clip_note_frame()
 # The shell runs several frames per display refresh at 2x, fast-forward or
 # after a missed refresh, and shows only the last; dingbat_unseen_next says
 # the next dingbat_run_frame(_ahead) frame is one of the others. The GBA PPU
-# then draws nothing for it (ppu.no_draw), and run-ahead runs no lookahead.
-# Drawn anyway: a frame whose picture something keeps (a rewind snapshot, a
-# clip anchor's thumbnail), and every frame while the LCD response is on.
+# then draws nothing for it (ppu.no_draw), it runs no run-ahead lookahead,
+# and the LCD panel does not step on it. The shell never marks a tick's
+# last frame, so after every tick the core holds its frame's picture, for
+# whatever reads it (thumbnails, states, the library picture). A rewind
+# snapshot or clip anchor falling on an undrawn frame waits for the next
+# drawn one. Under the LCD response only fast-forward skips: at 2x its
+# panel blends the frames the display never shows (a sprite drawn on
+# alternate frames), which is what it is for.
 var unseenNext = false
+var unseenAtFF = false
 
-proc dingbat_unseen_next() {.exportc, cdecl.} =
+proc dingbat_unseen_next(fastForward: cint) {.exportc, cdecl.} =
   unseenNext = true
+  unseenAtFF = fastForward != 0
 
 proc take_unseen(): bool =
   ## This call's frame will not be shown (one-shot).
-  result = unseenNext and not lcdOn
+  result = unseenNext and (not lcdOn or unseenAtFF)
   unseenNext = false
-
-proc picture_kept(): bool =
-  ## Something keeps the picture the coming frame leaves (after
-  ## clip_note_frame, which counts it): draw it.
-  (rewindHistory != nil and rewindHistory.push_due()) or
-    clipFrameIndex mod CLIP_SNAP_INTERVAL == 0
 
 proc step_canonical(hidden = false) =
   clip_note_frame()
   case stateKind
   of ekGBA:
-    stateGba.ppu.no_draw = hidden and not picture_kept()
+    stateGba.ppu.no_draw = hidden
     stateGba.step_frame()
     stateGba.ppu.no_draw = false
+    lastFrameDrawn = not hidden
   of ekGB:
     stateGb.step_frame()
     if statePrinter != nil: statePrinter.tick_frame()
+    lastFrameDrawn = true
   of ekNone: discard
-  push_rewind()
+  push_rewind(lastFrameDrawn)
 
 proc dingbat_run_frame() {.exportc, cdecl.} =
   ## One emulated frame; its picture is then at dingbat_game_fb().
   let unseen = take_unseen()
   if stateKind == ekNone or core_shared(): return
   step_canonical(unseen)
-  present_live()
+  if not unseen: present_live()
 
 var runaheadFrame: seq[uint16] = @[]
 
@@ -431,9 +440,11 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
   ## then the canonical state restored (docs/run-ahead.md).
   let unseen = take_unseen()
   if stateKind == ekNone or core_shared(): return
-  # The canonical frame is shown only without run-ahead
-  step_canonical(n > 0 or unseen)
-  if n <= 0 or unseen:
+  # Drawn though run-ahead shows a lookahead frame: thumbnails, states and
+  # the library picture read the canonical picture
+  step_canonical(unseen)
+  if unseen: return
+  if n <= 0:
     present_live()
     return
   let pixels = game_pixels()
@@ -916,7 +927,7 @@ proc dingbat_rewind_scrub_seconds_ago(sample: cint): cint {.exportc, cdecl.} =
   if sample < 0 or sample >= scrubIds.len or rewindHistory == nil: return 0
   let index = rewindHistory.index_of_id(scrubIds[sample])
   if index < 0: return 0
-  cint(index * rewindHistory.snapshot_interval * 10 div 60)
+  cint(max(0, rewindHistory.frames_back(index)) * 10 div 60)
 
 proc cart_save_bytes(): seq[byte] =
   case stateKind
@@ -1021,6 +1032,7 @@ proc dingbat_load_cheats(text: cstring): cstring {.exportc, cdecl.} =
 # wall clock, so a replayed clock can differ by the clip's length.
 
 proc clip_reset() =
+  lastFrameDrawn = true
   clipAnchors.setLen(0)
   clipAnchorBytes = 0
   clipInputs.setLen(0)
@@ -1036,7 +1048,8 @@ proc clip_note_frame() =
   ## Once per canonical frame before it steps: an anchor every second, the
   ## held buttons every frame, and eviction past the window or the budget.
   if clipReplaying or stateKind == ekNone: return
-  if clipFrameIndex mod CLIP_SNAP_INTERVAL == 0:
+  if lastFrameDrawn and (clipAnchors.len == 0 or
+     clipFrameIndex - clipAnchors[^1].frame >= CLIP_SNAP_INTERVAL):
     let payload = current_payload()
     if payload.len > 0:
       var a = ClipAnchor(frame: clipFrameIndex, packed: compress(payload, BestSpeed, dfZlib))

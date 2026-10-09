@@ -16711,9 +16711,18 @@ var Module = {
     // to compare.
     const drawAll = new URLSearchParams(location.search).get("draw") === "all";
     let unseenFrames = 0;   // diagnostics: frames run undrawn (the ff log)
-    const unseenNext = () => {
-      if (!drawAll && Module._wasm_unseen_next) { Module._wasm_unseen_next(); unseenFrames++; }
+    // Marks the next frame unseen; whether it did. `ff`: fast-forward, where
+    // the LCD response does not hold the frames back (wasm take_unseen).
+    const unseenNext = (ff) => {
+      if (drawAll || !Module._wasm_unseen_next) return false;
+      Module._wasm_unseen_next(ff ? 1 : 0);
+      unseenFrames++;
+      return true;
     };
+    // Running means of an undrawn and a drawn fast-forward frame: a frame
+    // goes undrawn only with room after it for a drawn one, so a tick never
+    // ends on an undrawn frame.
+    let ffSkipMs = 3, ffDrawMs = 4;
     let ffVsyncMs = 1000 / 60; // running mean of the rAF interval at play
     let ffOverMs = 2;       // running mean of the tick's own work after them
     let ffReserveMs = 2;    // and of the browser's, learnt from late ticks
@@ -17321,10 +17330,9 @@ var Module = {
         }
         const t0 = t;
         let n = 0;
+        let unseen = false;
         do {
-          // Not the last if another fits after it; a wrong guess shows a
-          // frame or two back, never a broken one
-          if (t + 2 * ffFrameMs < deadline) unseenNext();
+          unseen = t + ffSkipMs + ffDrawMs < deadline && unseenNext(true);
           Module._loop_tick();
           if (audioCtx && audioCtx.state === "running" &&
               playTime - audioCtx.currentTime < FF_MAX_AUDIO_LEAD) {
@@ -17334,10 +17342,13 @@ var Module = {
           }
           frameCount++;
           const now = performance.now();
-          ffFrameMs += (Math.min(now - t, 50) - ffFrameMs) * 0.1;
+          const took = Math.min(now - t, 50);
+          ffFrameMs += (took - ffFrameMs) * 0.1;
+          if (unseen) ffSkipMs += (took - ffSkipMs) * 0.1;
+          else ffDrawMs += (took - ffDrawMs) * 0.1;
           t = now;
           n++;
-        } while (t + ffFrameMs < deadline);
+        } while (unseen || t + ffDrawMs < deadline);
         ffEmuEnd = t;
         ffStatNote(timestamp, n, t - t0, late);
         accumulator = 0;
@@ -17350,7 +17361,7 @@ var Module = {
           typeof Module._runahead_tick === "function";
         let framesRun = 0;
         while (accumulator >= step && framesRun < maxFrames) {
-          if (accumulator - step >= step && framesRun + 1 < maxFrames) unseenNext();
+          if (accumulator - step >= step && framesRun + 1 < maxFrames) unseenNext(false);
           if (useRunahead) Module._runahead_tick(runaheadFrames);
           else Module._loop_tick();
           pushAudio();

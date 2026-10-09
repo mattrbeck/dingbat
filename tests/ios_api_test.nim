@@ -19,7 +19,7 @@ proc dingbat_is_gb(): cint {.importc, cdecl.}
 proc dingbat_set_sgb(on: cint) {.importc, cdecl.}
 proc dingbat_run_frame() {.importc, cdecl.}
 proc dingbat_run_frame_ahead(n: cint) {.importc, cdecl.}
-proc dingbat_unseen_next() {.importc, cdecl.}
+proc dingbat_unseen_next(fastForward: cint) {.importc, cdecl.}
 proc dingbat_game_fb(): ptr uint16 {.importc, cdecl.}
 proc dingbat_framebuffer(): ptr uint16 {.importc, cdecl.}
 proc dingbat_fb_width(): cint {.importc, cdecl.}
@@ -141,7 +141,7 @@ block:
   var same = true
   for f in 0 ..< 60:
     dingbat_set_input(4, cint((f div 7) mod 2))
-    if f mod 4 != 3: dingbat_unseen_next()
+    if f mod 4 != 3: dingbat_unseen_next(0)
     dingbat_run_frame()
     if f mod 4 == 3 and frameHash() != shown[f div 4]: same = false
   dingbat_set_input(4, 0)
@@ -150,7 +150,7 @@ block:
   check applyState(s), "back to the start"
   for f in 0 ..< 60:
     dingbat_set_input(4, cint((f div 7) mod 2))
-    if f mod 4 != 3: dingbat_unseen_next()
+    if f mod 4 != 3: dingbat_unseen_next(0)
     dingbat_run_frame_ahead(2)
   dingbat_set_input(4, 0)
   check takeState() == plain, "with run-ahead 2 too (lookahead skipped when unseen)"
