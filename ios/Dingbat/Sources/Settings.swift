@@ -146,7 +146,6 @@ final class Settings: ObservableObject {
         }
     }
 
-    /// Push every option into the core (options read at construction and
     private func dsBetaChanged(was: Bool) {
         guard dsBeta != was else { return }
         // A DS game running when it goes off goes too (its save flushed).
@@ -157,6 +156,7 @@ final class Settings: ObservableObject {
         RomLibrary.shared.refresh()
     }
 
+    /// Push every option into the core (options read at construction and
     /// live ones alike) and the presenter. Call once after dingbat_init().
     func apply() {
         dingbat_set_sgb(sgbEnable ? 1 : 0)
