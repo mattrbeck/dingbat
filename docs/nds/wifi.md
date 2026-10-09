@@ -4,7 +4,10 @@ Status: **prototype**. Two or more DS in one process share a radio (`Air`):
 beacons, data frames with ACKs and retries, and the multiplay CMD -> REPLY
 -> ACK round go from one console's wifi hardware to the other's at their air
 times. Our test ROM runs host and client end to end; SoulSilver's main-menu
-scan receives another console's beacons. Nothing crosses a network yet.
+scan receives another console's beacons. Two processes share one Air over
+a socket with the same result (`tools/ndsnet.nim`); docs/nds/netwifi.md has
+that prototype, its speed against network latency and the network-play,
+Download Play and online plan.
 
 Sources: GBATEK "DS Wifi" chapters (I/O map, control, interrupts, power,
 RX/TX buffers and control, timers, Multiplay Master/Slave, hardware
@@ -78,8 +81,10 @@ power, timers, BB/RF) and adds:
   BEGIN.
 - **Air**: `AirFrame`s carry the IEEE frame (no FCS), rate, channel and
   air times. A frame is posted when its carrier starts; each other station
-  on the channel books IRQ06 at the frame's data start and delivery at its
-  end. The channel is matched from the RF writes against the firmware's
+  books IRQ06 at the frame's data start and delivery at its end, and is
+  heard only if the receiver is on its channel at both (asked then, not at
+  posting: a scanning receiver's channel at posting time depended on the
+  stepping, docs/nds/netwifi.md). The channel is matched from the RF writes against the firmware's
   table (0 = unknown, hears everything; the synthesized firmware has a
   table derived from GBATEK, docs/nds/saves.md). W_RF_PINS: 0044h preamble, 0046h data, 0084h listening.
 - **Lockstep** (`nds/air.nim`): `AirLink` runs every machine to the same
@@ -136,6 +141,10 @@ machine): about 65 frames/s for the pair.
 ## Plan
 
 ### (a) Two consoles over dingbat's WebRTC transport
+
+Superseded in detail by docs/nds/netwifi.md, which measures the
+radio-level link across processes (exact, but bounded by lead / (RTT/2))
+and keeps the recommendation below.
 
 The GBA link (`gba/netcore.nim`) lets each side run ahead of the newest peer
 clock by a bounded lead and stalls the emulated clock otherwise; a SIO

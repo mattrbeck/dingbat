@@ -175,6 +175,7 @@ src/dingbat/nds/
 src/dingbat_nds_wasm.nim(+.nims)  wasm exports (createNdsCore) for the app and web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 tools/ndsair.nim                   the same for N machines on one Air
+tools/ndsnet.nim                   one machine per process, the Air over a socket (docs/nds/netwifi.md)
 web/nds.html, web/nds/             dev page (two canvases, keys, touch); ndsutil.js,
                                    ndsaudio.js for the main app (docs/nds/web.md)
 tools/ndssweep.nim                 compatibility sweep against tools/ndsref (docs/nds/compat.md)
@@ -230,7 +231,7 @@ the later finds and their results: docs/nds/test-roms.md).
 | Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
 | GBA slot | `slot2_probe` under each device; SoulSilver's MIGRATE FROM <GBA game> with a Generation 3 cart (docs/nds/slot2.md) |
 | Card + backup | a commercial ROM's B7 reads + save detection; the KEY1/KEY2 boot handshake (docs/nds/boot.md) |
-| Wireless | two machines on one Air: wifi_link's beacon scan, data frames and multiplay rounds (tests/nds_wifi_test.nim); network play is a plan (docs/nds/wifi.md) |
+| Wireless | two machines on one Air: wifi_link's beacon scan, data frames and multiplay rounds (tests/nds_wifi_test.nim); two processes on one Air over a socket, bit-identical (tools/ndsnet.nim); network play is a plan (docs/nds/netwifi.md) |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
 | Frontend | desktop SDL target with both screens; main web UI integration (first cut: docs/nds/web.md) |
 
