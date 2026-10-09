@@ -685,6 +685,12 @@ var clipReplaying = false
 # Whether the last frame was drawn (docs/frame-skip.md): an anchor's
 # thumbnail is the picture the frame before it left, so one waits for it.
 var lastFrameDrawn = true
+# Every frame drawn (the A/B switch: web ?draw=all, iOS Draw every frame):
+# no unseen frame, rollback draws both cores, a clip pre-roll draws all.
+var drawAllFrames = false
+
+proc wasm_set_draw_all(on: cint) {.exportc.} =
+  drawAllFrames = on != 0
 
 proc setClipCapBytes(n: cint) {.exportc.} =
   ## Takes effect at the next anchor, when the ring trims to the new cap.
@@ -874,7 +880,7 @@ proc clip_begin(startAgo, endAgo: cint): cint {.exportc.} =
   while clipCursor < startFrame:
     let idx = clipCursor - clipInputsStart
     if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
-    let hide = clipCursor < startFrame - 1
+    let hide = clipCursor < startFrame - 1 and not drawAllFrames
     case stateKind
     of ekGBA:
       stateGba.ppu.no_draw = hide
@@ -1113,11 +1119,11 @@ proc wasm_unseen_next(fastForward: cint): cint {.exportc.} =
   unseenNext = true
   unseenAtFF = fastForward != 0
   let sgb = stateKind == ekGB and stateGb != nil and stateGb.sgb_active()
-  cint(not sgb and (not lcdOn or unseenAtFF))
+  cint(not drawAllFrames and not sgb and (not lcdOn or unseenAtFF))
 
 proc take_unseen(): bool =
   ## This tick's frame will not be shown (one-shot).
-  result = unseenNext and (not lcdOn or unseenAtFF)
+  result = unseenNext and not drawAllFrames and (not lcdOn or unseenAtFF)
   unseenNext = false
 
 proc loop_tick() {.exportc.} =
@@ -1158,7 +1164,7 @@ proc loop_tick() {.exportc.} =
       discard rewindHistory.maybe_push(
         proc(): string = stateGb.state_payload(),
         proc(): RewindThumb = gb_rewind_thumb(stateGb), ready = not hide)
-    if not unseen:
+    if not hide:
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
                          GB_W * GB_H)
   of ekNone:
@@ -1612,7 +1618,7 @@ proc gb_rollback_init(rom1_path, rom2_path: string; epoch: int64): cint =
     cores.add(core)
   wrap_gb_rollback_audio(cores[rbLocal])
   stateGbRollback = gbrb.new_gb_rollback_session(new_gb_link(cores), rbLocal, 12)
-  stateGbRollback.drawOnlyShown = true  # only this peer's newest frame is shown
+  stateGbRollback.drawOnlyShown = not drawAllFrames  # only this peer's newest frame is shown
   apply_audio_silent()
   for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GB_W * GB_H)
   frameCount = 0
@@ -1701,7 +1707,7 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
     cores.add(core)
   wrap_rollback_audio(cores[rbLocal])
   stateRollback = new_rollback_session(new_link(cores), rbLocal, 12)
-  stateRollback.drawOnlyShown = true  # only this peer's newest frame is shown
+  stateRollback.drawOnlyShown = not drawAllFrames  # only this peer's newest frame is shown
   apply_audio_silent()
   for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GBA_W * GBA_H)
   frameCount = 0
@@ -1772,11 +1778,12 @@ proc rollback_dump_size(player: cint): cint {.exportc.} =
   ## and return its length (0 if no session). Pair with rollback_dump_data;
   ## captures a live desync for offline reproduction.
   if player < 0 or player > 1: return 0
+  # Pictures blanked: each peer draws only its own core (peer_state_bytes)
   if stateGbRollback != nil:
-    rbDumpImage = stateGbRollback.link.cores[player].state_bytes()
+    rbDumpImage = gbrb.peer_state_bytes(stateGbRollback, int(player))
     return cint(rbDumpImage.len)
   if stateRollback != nil:
-    rbDumpImage = stateRollback.link.cores[player].state_bytes()
+    rbDumpImage = stateRollback.peer_state_bytes(int(player))
     return cint(rbDumpImage.len)
   0
 

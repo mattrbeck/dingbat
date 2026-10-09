@@ -74,7 +74,7 @@ final class Settings: ObservableObject {
     @Published var rewind: Bool { didSet { d.set(rewind, forKey: "rewindOn"); dingbat_set_rewind(rewind ? 1 : 0, 0) } }
     @Published var runahead: Int { didSet { d.set(runahead, forKey: "runahead") } }
     /// Draw frames that are never shown too (docs/frame-skip.md): to compare.
-    @Published var drawAll: Bool { didSet { d.set(drawAll, forKey: "drawAll") } }
+    @Published var drawAll: Bool { didSet { d.set(drawAll, forKey: "drawAll"); dingbat_set_draw_all(drawAll ? 1 : 0) } }
     /// Run a refresh's frames just before it is shown, not just after the
     /// last one (GameSession.tick): input is read later. A prototype.
     @Published var lateStart: Bool { didSet { d.set(lateStart, forKey: "lateStart") } }
@@ -154,6 +154,7 @@ final class Settings: ObservableObject {
         dingbat_set_gba_bios_mode(Int32(gbaBiosMode))
         dingbat_set_color_correction(colorCorrect ? 1 : 0)
         dingbat_set_lcd_response(lcdResponse ? 1 : 0)
+        dingbat_set_draw_all(drawAll ? 1 : 0)
         dingbat_set_fifo_interp(fifoInterp ? 1 : 0)
         dingbat_set_mp2k_hle(mp2kHle ? 1 : 0)
         dingbat_set_pitch_correct_ff(pitchCorrectFF ? 1 : 0)

@@ -1236,6 +1236,11 @@ when defined(gputime):
         of 8: app.cfg.lcd_response = false
         else: echo "GPUTIME sweep done"; app.running = false
 
+# A GBA frame changed since the last upload. Unpaced (fast-forward, turbo)
+# not every frame is presented: a changed frame left unpresented, then a
+# static one presented, would otherwise keep the old texture on screen
+var gba_changed_unuploaded = false
+
 proc render_game() =
   if app.emu_kind != ekNone:
     glUseProgram(app.game_shader)
@@ -1270,8 +1275,9 @@ proc render_game() =
                 GLfloat(GBA_W))
     # The panel model must be fed static frames too, or a cell still on its
     # way to its target would freeze part-settled instead of finishing
-    if app.cfg.lcd_response or not app.gba_emu.ppu.frame_static:
+    if app.cfg.lcd_response or gba_changed_unuploaded or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
+      gba_changed_unuploaded = false
     when defined(gputime): gpu_begin()
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
     when defined(gputime): gpu_end()
@@ -2491,7 +2497,9 @@ proc main() =
               echo "NETLINK: link lost: ", e.msg, " — continuing single-player"
               teardown_netlink(e.msg)
           else:
-            let unpaced = not stepping and not is_paced()
+            # Not under an input log: its every-60-frames hash reads the
+            # picture the frame before left (input_log_frame_start)
+            let unpaced = not stepping and not is_paced() and not input_log_open
             if unpaced:
               var n = 0
               while n < 64 and unseen_fits() and gba_frame_due():
@@ -2531,6 +2539,9 @@ proc main() =
       of ekNone: discard
       if emulated and is_paced():
         scheduler_frame_ran()
+      if emulated and app.emu_kind == ekGBA and app.gba_emu != nil and
+         not app.gba_emu.ppu.frame_static:
+        gba_changed_unuploaded = true
       if emulated and app.cfg.rewind and app.netlink == nil:
         case app.emu_kind
         of ekGBA:

@@ -119,6 +119,14 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
+    /// Late start (GameSession): the refresh the next draw aims at, and
+    /// whether it made it, reported on the main queue. On a device, from
+    /// when the drawable reached the screen (no presented time: dropped); in
+    /// the simulator, whose SDK has no presented handler, from when the GPU
+    /// finished. Each draw captures its own target.
+    var presentTarget: CFTimeInterval = 0
+    var onLateResult: ((Bool) -> Void)?
+
     func draw(in view: MTKView) {
         guard let pipeline, let queue, let gameTex, let borderTex,
               let pass = view.currentRenderPassDescriptor,
@@ -156,6 +164,21 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         enc.setFragmentBytes(&u, length: MemoryLayout<PresentUniforms>.stride, index: 0)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         enc.endEncoding()
+        let target = presentTarget
+        presentTarget = 0
+        if target > 0, let report = onLateResult {
+            #if targetEnvironment(simulator)
+            cmd.addCompletedHandler { c in
+                let end = c.gpuEndTime
+                DispatchQueue.main.async { report(end > target - 0.001) }
+            }
+            #else
+            drawable.addPresentedHandler { d in
+                let shown = d.presentedTime
+                DispatchQueue.main.async { report(shown == 0 || shown > target + 0.002) }
+            }
+            #endif
+        }
         cmd.present(drawable)
         cmd.commit()
     }

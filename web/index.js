@@ -16715,6 +16715,8 @@ var Module = {
     // looks ahead only for the shown one). `?draw=all` draws every frame,
     // to compare.
     const drawAll = new URLSearchParams(location.search).get("draw") === "all";
+    // ...and the core, for rollback, Add pictures and a clip's pre-roll
+    if (drawAll && Module._wasm_set_draw_all) Module._wasm_set_draw_all(1);
     let unseenFrames = 0;   // diagnostics: frames run undrawn (the ff log)
     // Marks the next frame unseen; whether the core will leave it undrawn
     // (not under the LCD response short of fast-forward, nor the Super Game

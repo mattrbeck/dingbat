@@ -402,6 +402,12 @@ proc clip_note_frame()
 # alternate frames), which is what it is for.
 var unseenNext = false
 var unseenAtFF = false
+# Every frame drawn (the A/B switch: web ?draw=all, iOS Draw every frame):
+# no unseen frame, rollback draws both cores, a clip pre-roll draws all.
+var drawAllFrames = false
+
+proc dingbat_set_draw_all(on: cint) {.exportc, cdecl.} =
+  drawAllFrames = on != 0
 
 proc dingbat_unseen_next(fastForward: cint): cint {.exportc, cdecl.} =
   ## 1 when the frame will go undrawn (not under the LCD response short of
@@ -409,11 +415,11 @@ proc dingbat_unseen_next(fastForward: cint): cint {.exportc, cdecl.} =
   unseenNext = true
   unseenAtFF = fastForward != 0
   let sgb = stateKind == ekGB and stateGb != nil and stateGb.sgb_active()
-  cint(not sgb and (not lcdOn or unseenAtFF))
+  cint(not drawAllFrames and not sgb and (not lcdOn or unseenAtFF))
 
 proc take_unseen(): bool =
   ## This call's frame will not be shown (one-shot).
-  result = unseenNext and (not lcdOn or unseenAtFF)
+  result = unseenNext and not drawAllFrames and (not lcdOn or unseenAtFF)
   unseenNext = false
 
 proc step_canonical(hidden = false) =
@@ -1183,7 +1189,7 @@ proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   while clipCursor < startFrame:
     let idx = clipCursor - clipInputsStart
     if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
-    let hide = clipCursor < startFrame - 1
+    let hide = clipCursor < startFrame - 1 and not drawAllFrames
     case stateKind
     of ekGBA:
       stateGba.ppu.no_draw = hide
@@ -1319,7 +1325,7 @@ proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
         cores.add(core)
       rb_mute_replays(cores[rbLocal])
       rbGb = gbrb.new_gb_rollback_session(new_gb_link(cores), rbLocal, 12)
-      rbGb.drawOnlyShown = true  # only this peer's newest frame is shown
+      rbGb.drawOnlyShown = not drawAllFrames  # only this peer's newest frame is shown
     else:
       let haveBios = biosPath.len > 0 and fileExists(biosPath)
       let mode = if haveBios: optGbaBiosMode else: 0
@@ -1337,7 +1343,7 @@ proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
         cores.add(core)
       rb_mute_replays(cores[rbLocal])
       rbGba = gbarb.new_rollback_session(new_link(cores), rbLocal, 12)
-      rbGba.drawOnlyShown = true  # only this peer's newest frame is shown
+      rbGba.drawOnlyShown = not drawAllFrames  # only this peer's newest frame is shown
   except CatchableError:
     rbGba = nil
     rbGb = nil
@@ -1461,8 +1467,9 @@ proc dingbat_rollback_dump_size(player: cint): cint {.exportc, cdecl.} =
   ## both sides at the same confirmed frame, or the link has desynced.
   rbDumpImage = ""
   if player < 0 or player > 1: return 0
-  if rbGb != nil: rbDumpImage = rbGb.link.cores[player].state_bytes()
-  elif rbGba != nil: rbDumpImage = rbGba.link.cores[player].state_bytes()
+  # Pictures blanked: each peer draws only its own core (peer_state_bytes)
+  if rbGb != nil: rbDumpImage = gbrb.peer_state_bytes(rbGb, int(player))
+  elif rbGba != nil: rbDumpImage = gbarb.peer_state_bytes(rbGba, int(player))
   cint(rbDumpImage.len)
 
 proc dingbat_rollback_dump_data(): pointer {.exportc, cdecl.} =

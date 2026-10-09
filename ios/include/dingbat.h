@@ -66,6 +66,9 @@ void dingbat_run_frame_ahead(int n);
  * fast-forward one (fastForward = 1) is skipped. One-shot.
  * docs/frame-skip.md. */
 int dingbat_unseen_next(int fastForward);   /* 1: it will go undrawn */
+/* 1: draw every frame anyway (the Draw every frame setting): no unseen
+ * frame, rollback draws both cores, a clip pre-roll draws all. */
+void dingbat_set_draw_all(int on);
 
 /* The picture to present: raw BGR555 (mask 0x7FFF), after the LCD response
  * when that is on. dingbat_fb_width() x dingbat_fb_height(). NULL with no

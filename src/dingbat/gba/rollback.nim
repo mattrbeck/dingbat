@@ -147,6 +147,19 @@ proc tick*(sess: RollbackSession; localBits: uint16): RollbackStatus =
   sess.reconcile()
   rbAdvanced
 
+proc peer_state_bytes*(sess: RollbackSession; player: int): string =
+  ## Core `player`'s full state as both peers hold it: the picture and the
+  ## mosaic latch, which only drawing writes, are blanked, since each peer
+  ## draws only its own core (drawOnlyShown). Desync dumps compare these.
+  let c = sess.link.cores[player]
+  let fb = c.ppu.framebuffer
+  let mosaic = c.ppu.mosaic_bgref_int
+  c.ppu.framebuffer = newSeq[uint16](fb.len)
+  reset(c.ppu.mosaic_bgref_int)
+  result = c.state_bytes()
+  c.ppu.framebuffer = fb
+  c.ppu.mosaic_bgref_int = mosaic
+
 proc checksum*(sess: RollbackSession): uint64 =
   ## Desync-detection fingerprint; compare only at a confirmed frame.
   sess.link.state_checksum()

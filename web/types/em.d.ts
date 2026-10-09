@@ -78,6 +78,7 @@ interface EmscriptenModule {
   _wasm_rumble?(): number;
   _wasm_set_tilt?(x: number, y: number): void;
   _wasm_cart_has_tilt?(): number;
+  _wasm_set_draw_all?(on: number): void;
   _setClipCapBytes?(n: number): void;
   _clip_history_frames?(): number;
   _clip_scrub_generate?(maxSamples: number): number;

@@ -372,12 +372,16 @@ final class GameSession: NSObject, ObservableObject {
     private var lateWork: CFTimeInterval = 0.002
     private var lateArmed = false
     private var lateRunning = false
-    /// Time left for the GPU and the compositor after a late run. A run
-    /// that ends within 2 ms of its refresh (main-thread work held it, or the
-    /// frames ran long) has likely missed it: the margin widens by 2 ms (up
-    /// to 12); one that ends in time narrows it slowly back towards 3, so a
-    /// device or a scene that cannot keep up backs off on its own.
+    /// Time left for the GPU and the compositor after a late run. A miss
+    /// (the run ended within 2 ms of its refresh, or its picture reached the
+    /// screen after it: GameRenderer.onLateResult) widens the margin by 2 ms
+    /// (up to 12); one in time narrows it slowly back towards 3, so a device
+    /// or a scene that cannot keep up backs off on its own.
     private var lateMargin: CFTimeInterval = 0.004
+
+    private func lateResult(missed: Bool) {
+        lateMargin = missed ? min(lateMargin + 0.002, 0.012) : max(lateMargin - 0.0001, 0.003)
+    }
     #if DEBUG
     private var shownAt: CFTimeInterval = 0   // the refresh the newest present lands on
     #endif
@@ -390,17 +394,22 @@ final class GameSession: NSObject, ObservableObject {
             let wait = link.targetTimestamp - CACurrentMediaTime() - lateWork - lateMargin
             if wait > 0.001 {
                 lateArmed = true
+                if GameRenderer.shared.onLateResult == nil {
+                    GameRenderer.shared.onLateResult = { [weak self] missed in self?.lateResult(missed: missed) }
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
                     guard let self else { return }
                     self.lateArmed = false
+                    // A game closed (and maybe another opened) meanwhile: its own link runs it
+                    guard link === self.link else { return }
                     self.lateRunning = true
+                    GameRenderer.shared.presentTarget = link.targetTimestamp
                     let t0 = CACurrentMediaTime()
                     self.tick(link)
                     let t1 = CACurrentMediaTime()
+                    GameRenderer.shared.presentTarget = 0   // no present this time
                     self.lateWork += (min(t1 - t0, 0.02) - self.lateWork) * 0.1
-                    self.lateMargin = t1 > link.targetTimestamp - 0.002
-                        ? min(self.lateMargin + 0.002, 0.012)
-                        : max(self.lateMargin - 0.0001, 0.003)
+                    if t1 > link.targetTimestamp - 0.002 { self.lateResult(missed: true) }
                     self.lateRunning = false
                 }
                 return
