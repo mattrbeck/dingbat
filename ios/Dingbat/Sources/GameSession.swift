@@ -365,59 +365,99 @@ final class GameSession: NSObject, ObservableObject {
     private var ffDrawTime: CFTimeInterval = 0.004
 
     /// Late start (Settings › Advanced › Start frames late): a refresh's
-    /// frames run just before the refresh is shown, `lateWork` (a running
-    /// mean of that run) plus a margin ahead of it, instead of right after the
-    /// last one, so they read input that much later. Not at fast-forward
-    /// (it fills the whole interval), nor linked or in 2P (paced elsewhere).
-    private var lateWork: CFTimeInterval = 0.002
-    private var lateArmed = false
+    /// frames run just before the refresh is shown, their expected time
+    /// (`lateFrame` per frame owed) plus a margin ahead of it, instead of right
+    /// after the last one, so they read input that much later. Not at
+    /// fast-forward (it fills the whole interval), nor linked or in 2P (paced
+    /// elsewhere); at once when nothing is owed or after a hitch (a catch-up
+    /// owes more than one refresh's frames and has no time to lose).
+    private var lateFrame: CFTimeInterval = 0.002   // running mean per frame, every tick that ran any
+    private var lateTimer: DispatchSourceTimer?
     private var lateRunning = false
-    /// Time left for the GPU and the compositor after a late run. A miss
-    /// (the run ended within 2 ms of its refresh, or its picture reached the
-    /// screen after it: GameRenderer.onLateResult) widens the margin by 2 ms
-    /// (up to 12); one in time narrows it slowly back towards 3, so a device
-    /// or a scene that cannot keep up backs off on its own.
+    private var lateWorkEnd: CFTimeInterval = 0     // when the last tick's present was handed over
+    /// Time left for the GPU and the compositor after a late run. A picture
+    /// that reached the screen after its refresh, or never (GameRenderer.
+    /// onLateResult), or a late run not started by the next refresh widens it
+    /// by 3 ms; a run that merely ended within 2 ms of its refresh, by 1 (up
+    /// to 12). Only 120 on time in a row narrow it, by 0.5 ms (down to 3), so
+    /// it settles where misses are rare (well under 1 in 500), not where
+    /// widening and narrowing balance.
     private var lateMargin: CFTimeInterval = 0.004
+    private var lateOnTime = 0
 
-    private func lateResult(missed: Bool) {
-        lateMargin = missed ? min(lateMargin + 0.002, 0.012) : max(lateMargin - 0.0001, 0.003)
+    #if DEBUG
+    private var lateRuns = 0, lateMissed = 0, lateNear = 0   // the latency test's report
+    #endif
+
+    private func lateResult(missed: Bool, near: Bool = false) {
+        #if DEBUG
+        if missed { lateMissed += 1 } else if near { lateNear += 1 }
+        #endif
+        if missed || near {
+            lateOnTime = 0
+            lateMargin = min(lateMargin + (missed ? 0.003 : 0.001), 0.012)
+        } else {
+            lateOnTime += 1
+            if lateOnTime >= 120 {
+                lateOnTime = 0
+                lateMargin = max(lateMargin - 0.0005, 0.003)
+            }
+        }
     }
     #if DEBUG
     private var shownAt: CFTimeInterval = 0   // the refresh the newest present lands on
     #endif
 
     @objc private func tick(_ link: CADisplayLink) {
+        if let timer = lateTimer {
+            // The last refresh's late run has not started by this one (the main
+            // thread was busy): it missed; run its frames now, with this one's.
+            timer.cancel()
+            lateTimer = nil
+            if game != nil { lateResult(missed: true) }
+        }
         guard game != nil, !clipHold, !flightHold else { return }
-        if lateArmed { return }   // the delayed run of the last refresh is still pending
         if !lateRunning && Settings.shared.lateStart && !paused && !rewinding &&
-            speed != .fastForward && !NetLink.shared.linked && !twoPlayer {
-            let wait = link.targetTimestamp - CACurrentMediaTime() - lateWork - lateMargin
-            if wait > 0.001 {
-                lateArmed = true
+            speed != .fastForward && !NetLink.shared.linked && !twoPlayer && lastTick > 0 {
+            let period = link.targetTimestamp - link.timestamp
+            let dt = link.timestamp - lastTick
+            let owed = frameStep(link, dt: min(dt, 0.25)).n
+            let target = link.targetTimestamp
+            let wait = target - CACurrentMediaTime() - lateFrame * Double(owed) - lateMargin
+            if owed > 0 && dt < period * 1.5 && wait > 0.001 {
                 if GameRenderer.shared.onLateResult == nil {
                     GameRenderer.shared.onLateResult = { [weak self] missed in self?.lateResult(missed: missed) }
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
-                    guard let self else { return }
-                    self.lateArmed = false
+                // Strict and without leeway: a timer the system may fire late
+                // or coalesce (Low Power Mode) would eat the margin.
+                let timer = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
+                timer.schedule(deadline: .now() + wait, leeway: .nanoseconds(0))
+                timer.setEventHandler { [weak self] in
+                    timer.cancel()
+                    guard let self, self.lateTimer === timer else { return }
+                    self.lateTimer = nil
                     // A game closed (and maybe another opened) meanwhile: its own link runs it
                     guard link === self.link else { return }
                     self.lateRunning = true
-                    GameRenderer.shared.presentTarget = link.targetTimestamp
-                    let t0 = CACurrentMediaTime()
+                    self.lateWorkEnd = 0
+                    #if DEBUG
+                    self.lateRuns += 1
+                    #endif
+                    GameRenderer.shared.presentTarget = target
                     self.tick(link)
-                    let t1 = CACurrentMediaTime()
                     GameRenderer.shared.presentTarget = 0   // no present this time
-                    self.lateWork += (min(t1 - t0, 0.02) - self.lateWork) * 0.1
-                    if t1 > link.targetTimestamp - 0.002 { self.lateResult(missed: true) }
+                    if self.lateWorkEnd > target - 0.002 { self.lateResult(missed: false, near: true) }
                     self.lateRunning = false
                 }
+                lateTimer = timer
+                timer.resume()
                 return
             }
         }
         #if DEBUG
         shownAt = link.targetTimestamp
         #endif
+        let workStart = CACurrentMediaTime()
         let now = link.timestamp
         let dt = lastTick == 0 ? 0 : min(now - lastTick, 0.25)
         lastTick = now
@@ -500,6 +540,10 @@ final class GameSession: NSObject, ObservableObject {
             if let g = game { CrashWatch.playing(g.fileName, played: runPlay) }
             saveCheckTime += dt
             if changed || twoPlayer { present() }
+            if speed != .fastForward && !twoPlayer {
+                lateWorkEnd = CACurrentMediaTime()
+                lateFrame += (min((lateWorkEnd - workStart) / Double(ran), 0.02) - lateFrame) * 0.1
+            }
             if twoPlayer { TwoPlayer.refresh() }
             #if DEBUG
             latencyCheck()
@@ -532,6 +576,13 @@ final class GameSession: NSObject, ObservableObject {
     /// not floored, so a refresh that lands a hair early or late still runs
     /// its one frame; a missed refresh is made up on the next.
     private func framesOwed(_ link: CADisplayLink, dt: CFTimeInterval) -> Int {
+        let step = frameStep(link, dt: dt)
+        frameDebt = step.debt
+        return step.n
+    }
+
+    /// framesOwed without taking them (late start asks ahead of the run).
+    private func frameStep(_ link: CADisplayLink, dt: CFTimeInterval) -> (n: Int, debt: Double) {
         let period = link.targetTimestamp - link.timestamp
         let hz = period > 0 ? 1 / period : 60
         let k = (hz / 60).rounded()
@@ -539,10 +590,9 @@ final class GameSession: NSObject, ObservableObject {
         let base = k >= 1 && abs(hz / 60 - k) < 0.03 ? 60.0 : 59.7275
         let mult = speed == .double ? 2.0 : speed == .slow ? 0.5 : 1.0
         let cap = speed == .double ? 8 : 4
-        frameDebt += dt * base * mult
-        let n = max(0, min(cap, Int(frameDebt.rounded())))
-        frameDebt = min(1, max(-1, frameDebt - Double(n)))
-        return n
+        let debt = frameDebt + dt * base * mult
+        let n = max(0, min(cap, Int(debt.rounded())))
+        return (n, min(1, max(-1, debt - Double(n))))
     }
 
     /// No audio engine to drain the ring (stopped by an interruption that
@@ -632,12 +682,14 @@ final class GameSession: NSObject, ObservableObject {
             press->shown ms (the refresh the present lands on): min %.1f p50 %.1f avg %.1f max %.1f
             ring ms: min %.1f p50 %.1f avg %.1f max %.1f
             ioBuffer ms %.1f outputLatency ms %.1f sampleRate %.0f
+            late runs %d missed %d near %d margin ms %.1f per frame ms %.2f
 
             """, t.count, t.first ?? 0, t[t.count / 2],
             t.reduce(0, +) / Double(t.count), t.last ?? 0,
             sh.first ?? 0, sh[sh.count / 2], sh.reduce(0, +) / Double(sh.count), sh.last ?? 0,
             r.first ?? 0, r[r.count / 2], r.reduce(0, +) / Double(r.count), r.last ?? 0,
-            av.ioBufferDuration * 1000, av.outputLatency * 1000, av.sampleRate)
+            av.ioBufferDuration * 1000, av.outputLatency * 1000, av.sampleRate,
+            lateRuns, lateMissed, lateNear, lateMargin * 1000, lateFrame * 1000)
         try? out.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("latency.txt"),
                        atomically: true, encoding: .utf8)
     }

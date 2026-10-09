@@ -2341,15 +2341,24 @@ proc main() =
      display_mode.refresh_rate > 0:
     present_interval = uint32(1000 div display_mode.refresh_rate)
   var last_present = getTicks()
-  # Fast-forward and turbo (not paced) present once per display interval:
-  # the frames before the one presented are run undrawn, as many as fit,
-  # then one drawn, so the present always shows a drawn frame
-  # (docs/frame-skip.md). Running means of an undrawn and a drawn frame.
+  # Fast-forward (uncapped) presents once per display interval: the frames
+  # before the one presented are run undrawn, as many as fit, then one drawn,
+  # so the present always shows a drawn frame (docs/frame-skip.md). Not
+  # turbo: it is paced by the audio queue, and a frame run undrawn there
+  # would pull the drawn one after it ahead of its turn. Running means of an
+  # undrawn and a drawn frame.
   var ff_skip_ms = 1.0
   var ff_draw_ms = 1.5
   let perf_ms = 1000.0 / float(getPerformanceFrequency())
   proc unseen_fits(): bool =
     float(getTicks() - last_present) + ff_skip_ms + ff_draw_ms < float(present_interval)
+  proc input_pending(): bool =
+    ## A key, button, click or quit waiting: the batch stops so it is read
+    ## after this frame, as it would be without batching.
+    pumpEvents()
+    hasEvent(0x100'u32) or hasEvents(0x300'u32, 0x3FF'u32) or
+      hasEvents(0x401'u32, 0x4FF'u32) or hasEvents(0x600'u32, 0x6FF'u32) or
+      hasEvents(0x1000'u32, 0x10FF'u32)
   proc rewind_undrawn() =
     ## Counts an undrawn frame; a snapshot due on it waits for a drawn one.
     if not app.cfg.rewind or app.netlink != nil: return
@@ -2499,10 +2508,10 @@ proc main() =
           else:
             # Not under an input log: its every-60-frames hash reads the
             # picture the frame before left (input_log_frame_start)
-            let unpaced = not stepping and not is_paced() and not input_log_open
+            let unpaced = not stepping and not app.gba_emu.apu.sync and not input_log_open
             if unpaced:
               var n = 0
-              while n < 64 and unseen_fits() and gba_frame_due():
+              while n < 64 and unseen_fits() and gba_frame_due() and not input_pending():
                 let t0 = getPerformanceCounter()
                 app.gba_emu.ppu.no_draw = true
                 input_log_frame_start()
@@ -2520,10 +2529,10 @@ proc main() =
       of ekGB:
         if app.gb_emu != nil and (stepping or gb_frame_due()):
           # The Super Game Boy's freeze copies the picture: always drawn
-          let unpaced = not stepping and not is_paced() and not app.gb_emu.sgb_active()
+          let unpaced = not stepping and not app.gb_emu.apu.sync and not app.gb_emu.sgb_active()
           if unpaced:
             var n = 0
-            while n < 64 and unseen_fits() and gb_frame_due():
+            while n < 64 and unseen_fits() and gb_frame_due() and not input_pending():
               let t0 = getPerformanceCounter()
               app.gb_emu.ppu.no_draw = true
               app.gb_emu.run_until_frame()

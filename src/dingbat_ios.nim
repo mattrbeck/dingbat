@@ -401,7 +401,6 @@ proc clip_note_frame()
 # panel blends the frames the display never shows (a sprite drawn on
 # alternate frames), which is what it is for.
 var unseenNext = false
-var unseenAtFF = false
 # Every frame drawn (the A/B switch: web ?draw=all, iOS Draw every frame):
 # no unseen frame, rollback draws both cores, a clip pre-roll draws all.
 var drawAllFrames = false
@@ -412,14 +411,15 @@ proc dingbat_set_draw_all(on: cint) {.exportc, cdecl.} =
 proc dingbat_unseen_next(fastForward: cint): cint {.exportc, cdecl.} =
   ## 1 when the frame will go undrawn (not under the LCD response short of
   ## fast-forward, nor the Super Game Boy): the shell times the two apart.
-  unseenNext = true
-  unseenAtFF = fastForward != 0
+  ## Only such a frame is marked, so a frame that will be drawn is never
+  ## treated as undrawn.
   let sgb = stateKind == ekGB and stateGb != nil and stateGb.sgb_active()
-  cint(not drawAllFrames and not sgb and (not lcdOn or unseenAtFF))
+  unseenNext = not drawAllFrames and not sgb and (not lcdOn or fastForward != 0)
+  cint(unseenNext)
 
 proc take_unseen(): bool =
   ## This call's frame will not be shown (one-shot).
-  result = unseenNext and not drawAllFrames and (not lcdOn or unseenAtFF)
+  result = unseenNext
   unseenNext = false
 
 proc step_canonical(hidden = false) =
