@@ -84,14 +84,14 @@ struct HomeView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { AddPictures.shared.maybeOffer() }
         }
         .fileImporter(isPresented: $importing,
-                      allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .ndsRom, .zip, .data],
+                      allowedContentTypes: [.gbaRom, .gbRom, .gbcRom] + (Settings.dsBetaOn ? [.ndsRom] : []) + [.zip, .data],
                       allowsMultipleSelection: false) { result in
             importPicked(result)
         }
         .onChange(of: sort) { s in LibFilter.Sort.saved = s }
         .background(EmptyView().fileImporter(isPresented: Binding(get: { model.relinking != nil },
                                                                   set: { if !$0 { model.relinking = nil } }),
-                                             allowedContentTypes: [.gbaRom, .gbRom, .gbcRom, .ndsRom, .data],
+                                             allowedContentTypes: [.gbaRom, .gbRom, .gbcRom] + (Settings.dsBetaOn ? [.ndsRom] : []) + [.data],
                                              allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let url = urls.first, let e = model.relinking {
                 model.relink(e, to: url)

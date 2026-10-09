@@ -19,7 +19,6 @@
 				<string>com.mattrb.dingbat.gb</string>
 				<string>com.mattrb.dingbat.gbc</string>
 				<string>com.mattrb.dingbat.sgb</string>
-				<string>com.mattrb.dingbat.nds</string>
 				<string>public.zip-archive</string>
 			</array>
 		</dict>
@@ -193,7 +192,6 @@
 					<string>sps</string>
 					<string>xps</string>
 					<string>gsv</string>
-					<string>dsv</string>
 				</array>
 			</dict>
 		</dict>

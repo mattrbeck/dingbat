@@ -93,8 +93,10 @@ struct GameStage: View {
                 }
                 GameScreenView()
                     .frame(width: size.width, height: size.height)
-                    // The lid closed: the screens dim (web nds-lid-closed).
-                    .brightness(session.isNDS && nds.lidClosed ? -0.55 : 0)
+                    // The lid closed: the screens dim, as the web's brightness(0.35)
+                    // (web nds-lid-closed). Only an overlay, so a GB/GBA game's
+                    // view carries no effect at all.
+                    .overlay { if session.isNDS && nds.lidClosed { Color.black.opacity(0.65).allowsHitTesting(false) } }
                     .overlay { if session.isNDS { NdsStylus() } }
                     .flightAnchor("screen")
                     .flightHidden(.screen)

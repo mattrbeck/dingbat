@@ -103,7 +103,10 @@ final class NdsState: ObservableObject {
     }
 
     func blow(_ who: String, _ on: Bool) {
-        if on { blowers.insert(who) } else { blowers.remove(who) }
+        // Only on a change: an H let go in a GB/GBA game publishes nothing.
+        if on != blowers.contains(who) {
+            if on { blowers.insert(who) } else { blowers.remove(who) }
+        }
     }
 
     /// Blow: one emulated frame of noise before each frame, at 16 kHz (web
@@ -125,9 +128,10 @@ final class NdsState: ObservableObject {
 
     /// The game is gone (closed, or another game took the core).
     func left() {
-        lidClosed = false
-        blowers = []
-        panelOpen = false
+        // Only on a change: closing a GB/GBA game publishes nothing here.
+        if lidClosed { lidClosed = false }
+        if !blowers.isEmpty { blowers = [] }
+        if panelOpen { panelOpen = false }
         NdsMic.shared.stop()
         if poweredOff { poweredOff = false }
         NdsStylusView.current?.lift()

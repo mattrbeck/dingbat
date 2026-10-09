@@ -158,7 +158,10 @@ final class RomLibrary: ObservableObject {
     static let gbaBiosURL = biosDir.appendingPathComponent("gba_bios.bin")
     static let gbcBootromURL = biosDir.appendingPathComponent("gbc_bootrom.bin")
 
-    static let romExtensions: Set<String> = ["gba", "gb", "gbc", "cgb", "sgb", "nds"]
+    /// .nds only with DS Beta on (Settings.dsBetaOn).
+    static var romExtensions: Set<String> {
+        Settings.dsBetaOn ? ["gba", "gb", "gbc", "cgb", "sgb", "nds"] : ["gba", "gb", "gbc", "cgb", "sgb"]
+    }
 
     /// web NdsUtil.isNdsName.
     static func isNdsName(_ name: String) -> Bool {
@@ -220,7 +223,10 @@ final class RomLibrary: ObservableObject {
     }
 
     private func publish() {
+        // DS games only with DS Beta on; off, they wait in the index.
+        let ds = Settings.dsBetaOn
         entries = recents.compactMap { $0.string("name") }.map { RomEntry(fileName: $0) }
+            .filter { ds || !$0.isNDS }
     }
 
     private func saveRecents() {
@@ -318,8 +324,12 @@ final class RomLibrary: ObservableObject {
         case unsupported, noRomInZip, unreadable(String), declined
         var errorDescription: String? {
             switch self {
-            case .unsupported: return "Unsupported file — pick a .gba, .gb, .gbc, .nds or a .zip"
-            case .noRomInZip: return "No .gba, .gb, .gbc or .nds file inside that zip"
+            case .unsupported:
+                return Settings.dsBetaOn ? "Unsupported file — pick a .gba, .gb, .gbc, .nds or a .zip"
+                    : "Unsupported file — pick a .gba, .gb, .gbc or a .zip"
+            case .noRomInZip:
+                return Settings.dsBetaOn ? "No .gba, .gb, .gbc or .nds file inside that zip"
+                    : "No .gba, .gb or .gbc file inside that zip"
             case .unreadable(let m): return m
             case .declined: return nil
             }

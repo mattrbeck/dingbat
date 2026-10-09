@@ -60,6 +60,9 @@ targets:
             UTTypeConformsTo: [public.data]
             UTTypeTagSpecification:
               public.filename-extension: [gbc, cgb]
+          # Not a document type (CFBundleDocumentTypes below): Files offers
+          # this app for a .nds only once DS Beta ships. The in-app picker
+          # takes one while DS Beta is on.
           - UTTypeIdentifier: com.mattrb.dingbat.nds
             UTTypeDescription: Nintendo DS ROM
             UTTypeConformsTo: [public.data]
@@ -74,7 +77,7 @@ targets:
             UTTypeDescription: Game save
             UTTypeConformsTo: [public.data]
             UTTypeTagSpecification:
-              public.filename-extension: [sav, srm, sps, xps, gsv, dsv]
+              public.filename-extension: [sav, srm, sps, xps, gsv]
           - UTTypeIdentifier: com.mattrb.dingbat.state
             UTTypeDescription: dingbat save state
             UTTypeConformsTo: [public.data]
@@ -88,7 +91,6 @@ targets:
               - com.mattrb.dingbat.gb
               - com.mattrb.dingbat.gbc
               - com.mattrb.dingbat.sgb
-              - com.mattrb.dingbat.nds
               - public.zip-archive
           # A save or state opened from Files goes into the running game.
           - CFBundleTypeName: Game save or state

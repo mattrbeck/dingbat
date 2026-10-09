@@ -73,6 +73,13 @@ final class Settings: ObservableObject {
     @Published var theme: ThemeName { didSet { d.set(theme.rawValue, forKey: "dingbat_theme"); applyVideo() } }
     @Published var rewind: Bool { didSet { d.set(rewind, forKey: "rewindOn"); dingbat_set_rewind(rewind ? 1 : 0, 0) } }
     @Published var runahead: Int { didSet { d.set(runahead, forKey: "runahead") } }
+    /// General › Advanced › DS Beta (web dsBetaOn): off, the app is what it
+    /// was before the DS core; .nds files are refused and DS games leave the
+    /// library (their files and saves are kept).
+    @Published var dsBeta: Bool { didSet { d.set(dsBeta, forKey: Self.dsBetaKey); dsBetaChanged(was: oldValue) } }
+    static let dsBetaKey = "dsBeta"
+    /// For code off the main actor (the library's file scans).
+    static var dsBetaOn: Bool { UserDefaults.standard.bool(forKey: dsBetaKey) }
     @Published var saveWebhook: String {
         didSet {
             d.set(saveWebhook, forKey: "save-hook")
@@ -124,6 +131,7 @@ final class Settings: ObservableObject {
         muted = bool("audio.muted", false)
         theme = ThemeName(rawValue: str("dingbat_theme") ?? "") ?? .amber
         rewind = bool("rewindOn", true)
+        dsBeta = bool(Self.dsBetaKey, false)
         runahead = d.integer(forKey: "runahead")
         saveWebhook = str("save-hook") ?? ""
     }
@@ -139,6 +147,16 @@ final class Settings: ObservableObject {
     }
 
     /// Push every option into the core (options read at construction and
+    private func dsBetaChanged(was: Bool) {
+        guard dsBeta != was else { return }
+        // A DS game running when it goes off goes too (its save flushed).
+        if !dsBeta && GameSession.shared.isNDS {
+            AppModel.shared.showMainMenu()
+            AppModel.shared.closeGame()
+        }
+        RomLibrary.shared.refresh()
+    }
+
     /// live ones alike) and the presenter. Call once after dingbat_init().
     func apply() {
         dingbat_set_sgb(sgbEnable ? 1 : 0)
@@ -225,6 +243,7 @@ final class Settings: ObservableObject {
         channelMutes = 0
         theme = fresh.theme
         rewind = fresh.rewind
+        dsBeta = fresh.dsBeta
         runahead = fresh.runahead
         saveWebhook = fresh.saveWebhook
         apply()

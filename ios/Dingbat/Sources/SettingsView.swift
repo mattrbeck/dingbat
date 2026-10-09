@@ -45,6 +45,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
 
     static let storageKey = "settings-section"
+
+    /// The sections shown: Nintendo DS only with DS Beta on.
+    static var shown: [SettingsSection] { allCases.filter { $0 != .ds || Settings.shared.dsBeta } }
 }
 
 /// Settings (web #settings-modal). One tree, two layouts as on the web: a
@@ -54,6 +57,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     var initialSection: String?
     @Environment(\.palette) private var palette
+    /// DS Beta changes the sections (SettingsSection.shown).
+    @ObservedObject private var settings = Settings.shared
     @State private var current: SettingsSection = .controls
     @State private var pushed = false
     @State private var ready = false
@@ -78,7 +83,8 @@ struct SettingsView: View {
                 current = s
                 pushed = true
             } else {
-                current = stored.flatMap(SettingsSection.init(rawValue:)) ?? .controls
+                current = stored.flatMap(SettingsSection.init(rawValue:))
+                    .flatMap { SettingsSection.shown.contains($0) ? $0 : nil } ?? .controls
             }
         }
         .onChange(of: current) { s in UserDefaults.standard.set(s.rawValue, forKey: SettingsSection.storageKey) }
@@ -100,7 +106,7 @@ struct SettingsView: View {
                 SheetHeader(title: "Settings", onClose: nil)
                 ScrollView {
                     VStack(spacing: 2) {
-                        ForEach(SettingsSection.allCases) { s in
+                        ForEach(SettingsSection.shown) { s in
                             sectionRow(s, selected: s == current, chevron: false) { current = s }
                         }
                         versionText.padding(.vertical, 16)
@@ -131,7 +137,7 @@ struct SettingsView: View {
                     SheetHeader(title: "Settings", onClose: SheetNav.close)
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(SettingsSection.allCases) { s in
+                            ForEach(SettingsSection.shown) { s in
                                 sectionRow(s, selected: false) {
                                     current = s
                                     withAnimation(.easeOut(duration: 0.22)) { pushed = true }
@@ -184,7 +190,7 @@ struct SettingsView: View {
 
     /// Previous / next section (web .settings-stepper).
     private var stepper: some View {
-        let all = SettingsSection.allCases
+        let all = SettingsSection.shown
         let i = all.firstIndex(of: current) ?? 0
         return HStack(spacing: 0) {
             stepButton("chevron.up", "Previous section", enabled: i > 0) { current = all[i - 1] }
@@ -315,7 +321,7 @@ private struct ControlsPane: View {
             ("A", "A or Y"),
             ("B", "B or X"),
             ("Select / Start", "Options / Menu"),
-            ("X / Y (DS games)", "X / Y"),
+        ] + (s.dsBeta ? [("X / Y (DS games)", "X / Y")] : []) + [
             ("L / R", "LB / RB"),
             ("D-pad", "D-pad or left stick"),
             ("Fast forward (hold)", "RT"),
@@ -334,6 +340,7 @@ private struct ControlsPane: View {
 /// key), and the shortcuts.
 private struct KeyboardBlock: View {
     @ObservedObject private var kb = Keyboard.shared
+    @ObservedObject private var settings = Settings.shared
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -345,7 +352,8 @@ private struct KeyboardBlock: View {
         }
         SheetHint("Tap a key, then press its replacement. Saved automatically.")
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], alignment: .leading, spacing: 8) {
-            ForEach(0..<Keyboard.inputNames.count, id: \.self) { i in
+            // X (DS) and Y (DS) only with DS Beta on.
+            ForEach(0..<(settings.dsBeta ? Keyboard.inputNames.count : 10), id: \.self) { i in
                 HStack(spacing: 10) {
                     let on = kb.capturing == i
                     Button { kb.capturing = on ? nil : i } label: {
@@ -382,13 +390,16 @@ private struct KeyboardBlock: View {
             ("Load state", "F8"),
             ("Screenshot", "F9"),
             ("Menu, paused", "Escape"),
+        ] + (settings.dsBeta ? [
             ("DS: next screen arrangement", "V"),
             ("DS: swap the screens", "B"),
             ("DS: turn the screens", "O"),
             ("DS: close / open the lid", "N"),
             ("DS: blow (hold)", "H"),
-        ])
-        SheetHint("If a game key and a shortcut share a key, the game wins. X (DS) and Y (DS) count only while a DS game runs.")
+        ] : []))
+        SheetHint(settings.dsBeta
+                  ? "If a game key and a shortcut share a key, the game wins. X (DS) and Y (DS) count only while a DS game runs."
+                  : "If a game key and a shortcut share a key, the game wins.")
     }
 }
 
@@ -827,6 +838,9 @@ private struct GeneralPane: View {
             }
             .padding(.bottom, 18)
             .onDisappear(perform: commitHook)
+            SheetToggleRow(label: "DS Beta",
+                           sub: "Lets Nintendo DS games load. An early, incomplete DS core: some games won't run. Turned off, DS games leave the library until it is on again; their saves are kept.",
+                           isOn: $s.dsBeta)
         }
         Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 14)
         SheetFlowRow(label: "Reset all settings",
