@@ -45,7 +45,7 @@
 ## The renderer's per-line budget (RDLINES_COUNT, DISP3DCNT.12) comes from
 ## render.nim's line costs at each frame's render, latched at V-blank.
 
-import std/deques
+import std/[deques, math]
 import ../mem/vram
 import ../io/irq
 import ../sched
@@ -105,6 +105,16 @@ type
     done_lines*: int              ## lines 0 ..< done_lines of `frame` are drawn
     scratch_ok: bool              ## ren.color is a full render with the current registers + lists
     frame*: array[256 * 192, uint32]  ## the frame as drawn line by line (what BG0 shows)
+    # HD rendering (docs/nds/hd3d.md): the same scene drawn again at a
+    # multiple of the resolution, for the display only; none of it is
+    # machine state, and with hd_scale 1 none of it runs
+    hd_scale*: int                ## 1 = off; 2..4: also draw at 256N x 192N
+    hpos: seq[array[2, int32]]    ## the drawn list's positions in 1/HD_SUB dots (geometry.hpos)
+    hd_verts: seq[Vertex]         ## verts placed at hd_scale
+    hd2: RendererOf[2]
+    hd3: RendererOf[3]
+    hd4: RendererOf[4]
+    hd_frame*: seq[uint32]        ## `frame` at hd_scale (256N x 192N), drawn line by line
 
 const
   RENDER_START_LINE = 214   ## GBATEK "RDLINES_COUNT": rendering starts in scanline 214
@@ -113,7 +123,7 @@ const
 proc new_gpu3d*(vram: Vram; irq: IrqCtl): Gpu3d =
   # at power-on (line 0) the first frame counts as started 49 lines ago
   Gpu3d(geo: new_geometry(), ren: new_renderer(), vram: vram, irq: irq,
-        fifo: initDeque[FifoEntry](512), rdlines: 46,
+        fifo: initDeque[FifoEntry](512), rdlines: 46, hd_scale: 1,
         render_t0: -int64(LINES - RENDER_START_LINE) * LINE_CYCLES)
 
 proc to_bgr555*(p: uint32): uint16 {.inline.} =
@@ -341,6 +351,12 @@ proc due_lines(g: Gpu3d; t: int64): int =
   if t < first_take: return CACHE_LINES
   min(192, CACHE_LINES + 1 + int((t - first_take) div LINE_CYCLES))
 
+template hd_color(g: Gpu3d): ptr UncheckedArray[uint32] =
+  case g.hd_scale
+  of 2: cast[ptr UncheckedArray[uint32]](addr g.hd2.color[0])
+  of 3: cast[ptr UncheckedArray[uint32]](addr g.hd3.color[0])
+  else: cast[ptr UncheckedArray[uint32]](addr g.hd4.color[0])
+
 proc draw_lines(g: Gpu3d; n: int) =
   ## Lines done_lines ..< n get their pixels, from a full render with the
   ## registers as they are now (re-rendered when something changed since).
@@ -350,6 +366,11 @@ proc draw_lines(g: Gpu3d; n: int) =
     g.scratch_ok = true
   copyMem(addr g.frame[g.done_lines * 256], addr g.ren.color[g.done_lines * 256],
           (n - g.done_lines) * 256 * sizeof(uint32))
+  if g.hd_scale > 1:
+    let k = g.hd_scale
+    let row = 256 * k * k     # one 1x line's worth of HD rows
+    copyMem(addr g.hd_frame[g.done_lines * row], addr g.hd_color()[g.done_lines * row],
+            (n - g.done_lines) * row * sizeof(uint32))
   g.done_lines = n
 
 proc render_reg_changing(g: Gpu3d) =
@@ -411,6 +432,7 @@ proc on_vblank*(g: Gpu3d) =
       g.last_is_cur = false
     swap(g.polys, g.geo.polys)
     swap(g.verts, g.geo.verts)
+    swap(g.hpos, g.geo.hpos)
     g.geo.reset_ram()
     # SWAP_BUFFERS' bits apply to the commands after it
     g.ren_param = g.geo_param
@@ -426,6 +448,61 @@ proc on_vblank*(g: Gpu3d) =
   # the next frame renders from line 214 on, from the lists just swapped in
   g.render_t0 = t + int64(RENDER_START_LINE - 192) * LINE_CYCLES
   g.done_lines = 0
+  g.scratch_ok = false
+
+proc render_hd(g: Gpu3d) =
+  ## The swapped lists again at hd_scale: each vertex placed by its
+  ## sub-dot position (geometry.hd_screen), polygons in the hardware's
+  ## order (the Y-sort keys are the 1x ones the lists carry).
+  let k = g.hd_scale
+  let exact = g.hpos.len == g.verts.len
+  g.hd_verts.setLen(g.verts.len)
+  for i in 0 ..< g.verts.len:
+    var v = g.verts[i]
+    if exact:
+      v.sx = int32(floorDiv(int64(g.hpos[i][0]) * k, HD_SUB))
+      v.sy = int32(floorDiv(int64(g.hpos[i][1]) * k, HD_SUB))
+    else:
+      # lists drawn before HD was turned on (or a state just loaded): the
+      # middle of each vertex's dot
+      v.sx = v.sx * int32(k) + int32(k div 2)
+      v.sy = v.sy * int32(k) + int32(k div 2)
+    g.hd_verts[i] = v
+  # the render registers (rear plane, toon, edge, fog) are the hardware renderer's
+  case k
+  of 2: g.hd2.regs = g.ren.regs
+  of 3: g.hd3.regs = g.ren.regs
+  else: g.hd4.regs = g.ren.regs
+  case k
+  of 2: g.hd2.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
+  of 3: g.hd3.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
+  else: g.hd4.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
+
+proc set_hd*(g: Gpu3d; scale: int) =
+  ## Draw the 3D scene at `scale` times the resolution as well (1 = off,
+  ## 2..4), into hd_frame. The 1x frame, and everything the machine sees,
+  ## is unchanged; this frame's lines already drawn are scaled up.
+  let k = clamp(scale, 1, 4)
+  if k == g.hd_scale: return
+  g.hd_scale = k
+  g.geo.hd_on = k > 1
+  g.geo.hpos.setLen(0)
+  g.hpos.setLen(0)
+  g.hd2 = nil; g.hd3 = nil; g.hd4 = nil
+  case k
+  of 2: g.hd2 = new_renderer_hd[2]()
+  of 3: g.hd3 = new_renderer_hd[3]()
+  of 4: g.hd4 = new_renderer_hd[4]()
+  else: discard
+  if k == 1:
+    g.hd_frame = @[]
+    return
+  g.hd_frame = newSeq[uint32](256 * k * 192 * k)
+  for y in 0 ..< 192 * k:
+    for x in 0 ..< 256 * k:
+      g.hd_frame[y * 256 * k + x] = g.frame[(y div k) * 256 + x div k]
+  # the next lines come from a render that includes the HD one
+  g.reuse_ok = false
   g.scratch_ok = false
 
 proc render_frame*(g: Gpu3d) =
@@ -446,6 +523,7 @@ proc render_frame*(g: Gpu3d) =
     return
   g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
   g.rendered = true
+  if g.hd_scale > 1: g.render_hd()
   if g.reuse_on:
     g.reuse_ok = true
     g.last_gen = g.vram.tex_gen

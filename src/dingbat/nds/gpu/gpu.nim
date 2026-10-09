@@ -33,9 +33,27 @@ type
     stat9*, stat7*: DispStat
     top*, bottom*: array[256 * 192, uint16]  ## output, BGR555
     frame_count*: int
+    # HD 3D (docs/nds/hd3d.md; the frontend's setting, not machine state):
+    # with hd > 1 the screens are also drawn at 256*hd x 192*hd, the 3D
+    # layer from the HD renderer, everything else scaled up from 1x
+    hd*: int                          ## 1 = off
+    hd_top*, hd_bottom*: seq[uint16]  ## BGR555, (256*hd) x (192*hd)
+    hd_sub: array[256, uint32]        ## scratch: one sub-dot column of a 3D line
+    hd_out, hd_out2: array[256, uint16]
+    hd_clear_gfx, hd_clear_line: array[256, uint16]  ## engine A's line with no 3D (hd_line)
+    hd_paint: HdPaint                 ## engine A's line painted with opaque 3D (hd_line)
+    hd_rep_ok: array[2, seq[bool]]    ## hd_line, per screen (0 top) and line: the HD rows
+    hd_rep: array[2, seq[array[256, uint16]]]  ## hold this 1x line, each dot repeated
+    hd_lp: array[256, uint32]         ## hd_line: per dot the last 3D pixel composited...
+    hd_lg, hd_ld: array[256, uint16]  ## ...and its composite and display results
+    hd_a_gfx, hd_a_line: seq[uint16]  ## scratch: engine A's line at HD (hd rows)
+    hd_vline, hd_bline: array[256, uint16]  ## VRAM display's and capture source B's 1x
+                                      ## halfwords, read before the capture writes
+    cap_hd: array[4, seq[uint16]]     ## per bank A-D: display capture's HD sub-dots, hd*hd per halfword
+    cap_1x: array[4, seq[uint32]]     ## ... and the halfword it wrote there (bit 16 = captured)
 
 proc new_gpu*(): Gpu =
-  result = Gpu(vram: new_vram())
+  result = Gpu(vram: new_vram(), hd: 1)
   result.engine_a = new_engine2d(engA, result.vram, addr result.palette[0], addr result.oam[0])
   result.engine_b = new_engine2d(engB, result.vram, addr result.palette[512], addr result.oam[512])
 
@@ -147,6 +165,270 @@ proc mmem_fetch(g: Gpu) =
         g.mmem_need -= 8
     a.mmem_take(x0)
 
+proc set_hd*(g: Gpu; scale: int) =
+  ## HD 3D output at `scale` (1 = off, 2..4): hd_top/hd_bottom, with the
+  ## 3D layer drawn at that resolution (gpu3d.set_hd) and the 2D layers
+  ## scaled up whole dots. The 1x screens are unchanged.
+  let k = clamp(scale, 1, 4)
+  g.hd = k
+  g.engine_a.hd_on = k > 1
+  if g.gpu3d != nil: g.gpu3d.set_hd(k)
+  for b in 0..3:
+    g.cap_hd[b] = @[]
+    g.cap_1x[b] = @[]
+  for s in 0..1:
+    g.hd_rep_ok[s] = @[]
+    g.hd_rep[s] = @[]
+  if k == 1:
+    g.hd_top = @[]
+    g.hd_bottom = @[]
+  else:
+    g.hd_top = newSeq[uint16](256 * k * 192 * k)
+    g.hd_bottom = newSeq[uint16](256 * k * 192 * k)
+
+template hd_rows(g: Gpu; buf: var seq[uint16]; j: int): ptr UncheckedArray[uint16] =
+  cast[ptr UncheckedArray[uint16]](addr buf[j * 256 * g.hd])
+
+proc shadow(g: Gpu; bank, dot, sub: int; v1: uint16): uint16 {.inline.} =
+  ## Sub-dot `sub` of VRAM halfword `dot` in bank A-D: the HD capture's
+  ## when the halfword still holds what that capture wrote, else v1 itself.
+  if g.cap_1x[bank].len > 0 and g.cap_1x[bank][dot] == (uint32(v1) or 0x10000'u32):
+    g.cap_hd[bank][dot * g.hd * g.hd + sub]
+  else: v1
+
+proc hd_pre(g: Gpu; y: int) =
+  ## Before display capture writes line y: the halfwords VRAM display and
+  ## capture source B read (they may be the very ones it overwrites).
+  let a = g.engine_a
+  let capc = a.dispcapcnt
+  let vb = g.vram.bank_ptr(VramBank((a.dispcnt shr 18) and 3))
+  if a.display_mode == 2:
+    for x in 0 ..< 256:
+      let d = y * 256 + x
+      g.hd_vline[x] = uint16(vb[d * 2]) or (uint16(vb[d * 2 + 1]) shl 8)
+  let (cw, _) = CAPTURE_SIZE[(capc shr 20) and 3]
+  let roff = if a.display_mode == 2: 0 else: int((capc shr 26) and 3) * 0x8000
+  let rbase = roff + y * cw * 2
+  for x in 0 ..< cw:
+    let rd = ((rbase + x * 2) and 0x1FFFF) shr 1
+    g.hd_bline[x] = uint16(vb[rd * 2]) or (uint16(vb[rd * 2 + 1]) shl 8)
+
+proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
+  ## Line y of the HD screens (docs/nds/hd3d.md). Engine A's graphics
+  ## composite is drawn again per sub-dot over the HD 3D frame when it
+  ## holds the 3D layer; VRAM display shows a bank's HD capture where the
+  ## bank still holds what was captured; display capture keeps an HD copy
+  ## of what it writes (`cap_hd`). Everything else (engine B, 2D-only
+  ## lines) repeats each dot hd x hd.
+  let k = g.hd
+  let wk = 256 * k
+  let a = g.engine_a
+  let g3 = g.gpu3d
+  let (ta, tb) = if a_top: (addr g.hd_top, addr g.hd_bottom) else: (addr g.hd_bottom, addr g.hd_top)
+  # which screen is which; a line drawn by repeating dots is skipped when
+  # the screen's rows already hold that 1x line repeated (`hd_rep`)
+  let (sa, sb) = if a_top: (0, 1) else: (1, 0)
+  if g.hd_rep_ok[0].len != 192:
+    for s in 0..1:
+      g.hd_rep_ok[s] = newSeq[bool](192)
+      g.hd_rep[s] = newSeq[array[256, uint16]](192)
+  template scaled(dst: ptr seq[uint16]; scr: int; src: array[256, uint16]) =
+    block:
+      var line {.noinit.}: array[256, uint16]
+      if lcd_on: line = src
+      else: zeroMem(addr line[0], 512)
+      if not (g.hd_rep_ok[scr][y] and g.hd_rep[scr][y] == line):
+        let row0 = y * k * wk
+        for x in 0 ..< 256:
+          let c = line[x]
+          for i in 0 ..< k: dst[][row0 + x * k + i] = c
+        for j in 1 ..< k: copyMem(addr dst[][row0 + j * wk], addr dst[][row0], wk * 2)
+        g.hd_rep_ok[scr][y] = true
+        g.hd_rep[scr][y] = line
+  scaled(tb, sb, g.engine_b.line)
+  let dm = a.display_mode
+  let capc = a.dispcapcnt
+  let (cw, ch) = CAPTURE_SIZE[(capc shr 20) and 3]
+  let csrc = (capc shr 29) and 3
+  let a_3d = (capc and (1'u32 shl 24)) != 0
+  let cap_line = cap and y < ch
+  let cap_gfx = cap_line and csrc != 1 and not a_3d
+  let hd3 = g3 != nil and g3.hd_scale == k
+  let has3d = hd3 and a.hd_gfx_3d() and not defined(hd_nocomposite)   # (the cost split, docs/nds/hd3d.md)
+  if g.hd_a_gfx.len != k * wk: g.hd_a_gfx.setLen(k * wk)
+  if g.hd_a_line.len != k * wk: g.hd_a_line.setLen(k * wk)
+  # engine A's composite at HD (only where it holds 3D: else the 1x one)
+  #
+  # Each dot's result is a function of the 3D pixel it shows and nothing
+  # else that varies between sub-dots, so a sub-dot whose 3D pixel equals
+  # the 1x one takes the 1x dot's result (a.gfx, a.line: drawn this line,
+  # never reused while HD is on). The others: a transparent 3D pixel
+  # gives the line composited with no 3D at all (one more composite, only
+  # on lines that need it), an opaque one `hd_dot` (the line painted once
+  # with the 3D layer opaque, then the effect and master brightness rules
+  # on that dot alone). Equal to compositing every sub-dot column whole
+  # (`render_hd_sub`, which 08b4eb78 did): docs/nds/hd3d.md.
+  if has3d and (dm == 1 or cap_gfx):
+    let l1x = addr g3.line
+    let hofs = int(a.bghofs[0])
+    var prepared, clear_done = false
+    # per dot, the last 3D pixel composited and its results (first the 1x
+    # pixel's): a sub-dot repeating it (a texel magnified, a flat colour)
+    # costs a compare
+    for x in 0 ..< 256:
+      let sx = (x + hofs) and 511
+      # (BG0HOFS moving the 3D layer off a dot: every sub-dot is the 1x one)
+      g.hd_lp[x] = if sx < 256: l1x[sx] else: 0'u32
+      g.hd_lg[x] = a.gfx[x]
+      g.hd_ld[x] = a.line[x]
+    # WG / WL: the composite (capture) and display results are wanted
+    let direct = lcd_on and a.enabled and dm == 1
+    template sub_dots(WG, WL: static bool) =
+      for j in 0 ..< k:
+        let og = g.hd_rows(g.hd_a_gfx, j)
+        # (shown: straight into the screen's rows)
+        let ol = if direct: cast[ptr UncheckedArray[uint16]](addr ta[][(y * k + j) * wk])
+                 else: g.hd_rows(g.hd_a_line, j)
+        let hf = cast[ptr UncheckedArray[uint32]](addr g3.hd_frame[(y * k + j) * wk])
+        for x in 0 ..< 256:
+          var lp = g.hd_lp[x]
+          var lg = g.hd_lg[x]
+          var ld = g.hd_ld[x]
+          let sx = (x + hofs) and 511
+          if sx >= 256:
+            for i in 0 ..< k:
+              when WG: og[x * k + i] = lg
+              when WL: ol[x * k + i] = ld
+            continue
+          let p1 = l1x[sx]
+          for i in 0 ..< k:
+            let p = hf[sx * k + i]
+            if p != lp:
+              var gg = a.gfx[x]
+              var dd = a.line[x]
+              if p == p1: discard
+              elif alpha5(p) == 0:
+                if alpha5(p1) != 0:
+                  if not clear_done:
+                    for q in 0 ..< 256: g.hd_sub[q] = 0
+                    a.render_hd_sub(addr g.hd_sub, g.hd_clear_gfx, g.hd_clear_line)
+                    clear_done = true
+                  gg = g.hd_clear_gfx[x]
+                  dd = g.hd_clear_line[x]
+              else:
+                if not prepared:
+                  a.hd_prepare(g.hd_paint)
+                  prepared = true
+                a.hd_dot(g.hd_paint, x, p, gg, dd)
+              lp = p
+              lg = gg
+              ld = dd
+            when WG: og[x * k + i] = lg
+            when WL: ol[x * k + i] = ld
+          g.hd_lp[x] = lp
+          g.hd_lg[x] = lg
+          g.hd_ld[x] = ld
+    if dm != 1: sub_dots(true, false)
+    elif cap_gfx: sub_dots(true, true)
+    else: sub_dots(false, true)
+  # the display
+  if lcd_on and a.enabled and (dm == 1 and has3d or dm == 2): g.hd_rep_ok[sa][y] = false
+  if lcd_on and a.enabled and dm == 1 and has3d:
+    discard   # sub_dots wrote the rows
+  elif lcd_on and a.enabled and dm == 2 and
+       ((a.master_bright shr 14) in [0'u16, 3'u16] or (a.master_bright and 0x1F) == 0):
+    # VRAM display, no master brightness: each dot's HD sub-dots straight
+    # from the capture's copy while the bank holds what it wrote (`shadow`
+    # once per dot)
+    let bank = int((a.dispcnt shr 18) and 3)
+    let have = g.cap_1x[bank].len > 0
+    let kk = k * k
+    for x in 0 ..< 256:
+      let v1 = g.hd_vline[x]
+      let d = y * 256 + x
+      if have and g.cap_1x[bank][d] == (uint32(v1) or 0x10000'u32):
+        let base = d * kk
+        for j in 0 ..< k:
+          let row = (y * k + j) * wk + x * k
+          for i in 0 ..< k: ta[][row + i] = g.cap_hd[bank][base + j * k + i] and 0x7FFF
+      else:
+        let c = v1 and 0x7FFF
+        for j in 0 ..< k:
+          let row = (y * k + j) * wk + x * k
+          for i in 0 ..< k: ta[][row + i] = c
+  elif lcd_on and a.enabled and dm == 2:
+    let bank = int((a.dispcnt shr 18) and 3)
+    for j in 0 ..< k:
+      let row = (y * k + j) * wk
+      for i in 0 ..< k:
+        for x in 0 ..< 256:
+          g.hd_out[x] = g.shadow(bank, y * 256 + x, j * k + i, g.hd_vline[x]) and 0x7FFF
+        a.hd_bright(g.hd_out)
+        for x in 0 ..< 256: ta[][row + x * k + i] = g.hd_out[x]
+  else:
+    scaled(ta, sa, a.line)
+  # display capture at HD, as capture_line (which has written the 1x line)
+  if not cap_line or defined(hd_nocapture): return   # (the cost split, docs/nds/hd3d.md)
+  let dst_bank = int((capc shr 16) and 3)
+  if not g.vram.lcdc_mapped(VramBank(dst_bank)): return
+  let kk = k * k
+  if g.cap_1x[dst_bank].len == 0:
+    g.cap_1x[dst_bank] = newSeq[uint32](65536)
+  if g.cap_hd[dst_bank].len != 65536 * kk:
+    g.cap_hd[dst_bank] = newSeq[uint16](65536 * kk)
+    for v in g.cap_1x[dst_bank].mitems: v = 0
+  let dst = g.vram.bank_ptr(VramBank(dst_bank))
+  let eva = min(16'u32, capc and 0x1F)
+  let evb = min(16'u32, (capc shr 8) and 0x1F)
+  let b_fifo = (capc and (1'u32 shl 25)) != 0
+  let wbase = int((capc shr 18) and 3) * 0x8000 + y * cw * 2
+  let rb = int((a.dispcnt shr 18) and 3)
+  let roff = if dm == 2: 0 else: int((capc shr 26) and 3) * 0x8000
+  let rbase = roff + y * cw * 2
+  let l3 = if g3 != nil: addr g3.line else: nil
+  if csrc == 0 and not a_3d:
+    # the composite alone (the common case): its HD sub-dots, opaque
+    for x in 0 ..< cw:
+      let wd = ((wbase + x * 2) and 0x1FFFF) shr 1
+      for j in 0 ..< k:
+        for i in 0 ..< k:
+          g.cap_hd[dst_bank][wd * kk + j * k + i] =
+            (if has3d: g.hd_a_gfx[j * wk + x * k + i] else: a.gfx[x]) or 0x8000
+      g.cap_1x[dst_bank][wd] = uint32(uint16(dst[wd * 2]) or (uint16(dst[wd * 2 + 1]) shl 8)) or 0x10000'u32
+    return
+  for x in 0 ..< cw:
+    let wd = ((wbase + x * 2) and 0x1FFFF) shr 1
+    let rd = ((rbase + x * 2) and 0x1FFFF) shr 1
+    let rv1 = g.hd_bline[x]
+    for j in 0 ..< k:
+      for i in 0 ..< k:
+        var ca, cb: uint16
+        if csrc != 1:
+          if a_3d:
+            if hd3:
+              let p = g3.hd_frame[(y * k + j) * wk + x * k + i]
+              ca = to_bgr555(p) or (if alpha5(p) != 0: 0x8000'u16 else: 0)
+            elif l3 != nil:
+              ca = to_bgr555(l3[x]) or (if alpha5(l3[x]) != 0: 0x8000'u16 else: 0)
+          else:
+            ca = (if has3d: g.hd_a_gfx[j * wk + x * k + i] else: a.gfx[x]) or 0x8000
+        if csrc != 0:
+          cb = if b_fifo: a.mmem_line[x] else: g.shadow(rb, rd, j * k + i, rv1)
+        var c: uint16
+        case csrc
+        of 0: c = ca
+        of 1: c = cb
+        else:
+          let aa = if (ca and 0x8000) != 0: eva else: 0
+          let ab = if (cb and 0x8000) != 0: evb else: 0
+          template mix(sh: int): uint32 =
+            min(31'u32, ((uint32(ca shr sh) and 0x1F) * aa + (uint32(cb shr sh) and 0x1F) * ab) shr 4)
+          c = uint16(mix(0) or (mix(5) shl 5) or (mix(10) shl 10))
+          if (aa > 0) or (ab > 0): c = c or 0x8000
+        g.cap_hd[dst_bank][wd * kk + j * k + i] = c
+    # what the 1x capture left there: the HD copy stands for it while it stays
+    g.cap_1x[dst_bank][wd] = uint32(uint16(dst[wd * 2]) or (uint16(dst[wd * 2 + 1]) shl 8)) or 0x10000'u32
+
 proc render_line*(g: Gpu; y: int) =
   ## Called at H-blank of a visible line: both engines, display capture,
   ## then routed to the screens. POWCNT1 bit 15: 1 = engine A on the top
@@ -168,6 +450,7 @@ proc render_line*(g: Gpu; y: int) =
                  (a.dispcapcnt and (1'u32 shl 24)) == 0
   a.render_line(y, need_gfx)
   g.engine_b.render_line(y)
+  if g.hd > 1: g.hd_pre(y)
   if cap: g.capture_line(y)
   a.end_line()
   g.engine_b.end_line()
@@ -182,5 +465,6 @@ proc render_line*(g: Gpu; y: int) =
   else:
     zeroMem(ta, 512)
     zeroMem(tb, 512)
+  if g.hd > 1: g.hd_line(y, a_top, lcd_on, cap)
 
 {.pop.}

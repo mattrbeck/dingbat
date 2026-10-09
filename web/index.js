@@ -16999,7 +16999,7 @@ const loadNdsCore = () => {
       document.head.appendChild(s);
     })
       .then(() => createNdsCore({ locateFile: (p) => "nds/" + p + ndsAssetQuery() }))
-      .then((m) => { ndsCore = m; log("DS core loaded"); return m; })
+      .then((m) => { ndsCore = m; log("DS core loaded"); ndsApplyHd(); return m; })
       .catch((e) => { ndsCorePromise = null; throw e; });
   }
   return ndsCorePromise;
@@ -17173,9 +17173,18 @@ let ndsLayoutPref = "auto";
 // The other display choices (Settings > Nintendo DS and the Screens panel),
 // stored together as "nds-display". barHide: phones held upright give the
 // top bar's room to the screens (styles.css "DS: the top bar").
-/** @typedef {{ swap: boolean, gap: string, rot: number, barHide: boolean }} NdsDisplay */
+/** @typedef {{ swap: boolean, gap: string, rot: number, barHide: boolean, hd: number }} NdsDisplay */
 /** @type {Readonly<NdsDisplay>} */
-const NDS_DISPLAY_DEFAULTS = Object.freeze({ swap: false, gap: "hinge", rot: 0, barHide: true });
+const NDS_DISPLAY_DEFAULTS = Object.freeze({ swap: false, gap: "hinge", rot: 0, barHide: true, hd: 1 });
+// HD 3D (docs/nds/hd3d.md): the 3D scene drawn at hd x the DS's resolution.
+const NDS_HD_SCALES = [1, 2, 3, 4];
+const ndsApplyHd = () => { ndsCore?._nds_set_hd?.(ndsDisplay.hd); };
+// The HD scale the core draws at (1: none, or a core without HD).
+const ndsHdNow = () => {
+  const c = ndsCore;
+  if (!c || !c._nds_hd_scale || ndsCoreGame === null) return 1;
+  return c._nds_hd_fb555_top() && c._nds_hd_fb555_bottom() ? c._nds_hd_scale() : 1;
+};
 /** @type {NdsDisplay} */
 let ndsDisplay = { ...NDS_DISPLAY_DEFAULTS };
 let ndsLay = NdsUtil.layout(0, 0, "stack", { gap: NdsUtil.GAPS.hinge });
@@ -17204,7 +17213,8 @@ const ndsBackingScale = () => {
   const full = glScale();
   if (upscaleFilter === "grid" || upscaleFilter === "rgb") return full;
   const dpr = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? devicePixelRatio : 1;
-  return Math.min(full, Math.max(2, Math.ceil((ndsLay.scale || 1) * dpr)));
+  // HD 3D: at least a backing pixel per HD dot (up to glScale's 4)
+  return Math.min(full, Math.max(2, ndsHdNow(), Math.ceil((ndsLay.scale || 1) * dpr)));
 };
 
 const ndsStageRgb = () => {
@@ -17220,6 +17230,18 @@ const ndsStageRgb = () => {
 const ndsFrame = () => {
   const c = ndsCore;
   if (!c || ndsCoreGame === null) return null;
+  const k = ndsHdNow();
+  if (k > 1) {
+    // HD 3D: the core's HD screens, the views' sources scaled to them
+    const t = c._nds_hd_fb555_top(), b = c._nds_hd_fb555_bottom();
+    const W = NdsUtil.W * k, H = NdsUtil.H * k, buf = c.HEAPU8.buffer, n = W * H;
+    const views = ndsViews.map((v) => ({
+      ...v, src: { x: v.src.x * k, y: v.src.y * k, w: v.src.w * k, h: v.src.h * k } }));
+    return { w: W, h: 2 * H, parts: [
+      { view: new Uint16Array(buf, t, n), x: 0, y: 0, w: W, h: H },
+      { view: new Uint16Array(buf, b, n), x: 0, y: H, w: W, h: H },
+    ], out: { w: ndsLay.w, h: ndsLay.h, clear: ndsStageRgb(), views } };
+  }
   const t = c._nds_fb555_top(), b = c._nds_fb555_bottom();
   if (!t || !b) return null;
   const W = NdsUtil.W, H = NdsUtil.H, buf = c.HEAPU8.buffer, n = W * H;
@@ -17658,6 +17680,7 @@ const ndsSyncDisplayUI = () => {
   syncChipGroup(ndsChips("layout"), ndsLayoutPref);
   syncChipGroup(ndsChips("gap"), ndsDisplay.gap);
   syncChipGroup(ndsChips("rot"), String(ndsDisplay.rot));
+  syncChipGroup(ndsChips("hd"), String(ndsDisplay.hd));
   for (const t of ndsToggles("swap")) t.checked = ndsDisplay.swap;
   for (const t of ndsToggles("barHide")) t.checked = ndsDisplay.barHide;
   if (ndsLayoutBtn) {
@@ -17687,7 +17710,9 @@ const applyNdsDisplay = (d) => {
     gap: Object.hasOwn(NdsUtil.GAPS, v.gap) ? v.gap : NDS_DISPLAY_DEFAULTS.gap,
     rot: NdsUtil.ROTATIONS.includes(v.rot) ? v.rot : NDS_DISPLAY_DEFAULTS.rot,
     barHide: typeof v.barHide === "boolean" ? v.barHide : NDS_DISPLAY_DEFAULTS.barHide,
+    hd: NDS_HD_SCALES.includes(v.hd) ? v.hd : NDS_DISPLAY_DEFAULTS.hd,
   };
+  ndsApplyHd();
   ndsTouchEnd(null);
   ndsSyncDisplayUI();
   updateCanvasScaling();
@@ -17706,6 +17731,9 @@ for (const chip of ndsChips("gap")) {
 }
 for (const chip of ndsChips("rot")) {
   chip.addEventListener("click", () => setNdsDisplay({ rot: Number(chip.dataset.value) }));
+}
+for (const chip of ndsChips("hd")) {
+  chip.addEventListener("click", () => setNdsDisplay({ hd: Number(chip.dataset.value) }));
 }
 for (const name of ["swap", "barHide"]) {
   for (const t of ndsToggles(name)) {

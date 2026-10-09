@@ -19,6 +19,12 @@ interface NdsCoreModule {
   _nds_frame_count(): number;
   _nds_fb555_top(): number;
   _nds_fb555_bottom(): number;
+  // HD 3D (docs/nds/hd3d.md): k = 1 (off) .. 4; the HD screens are
+  // (256k x 192k) BGR555, 0 while off. Optional: an older core lacks them.
+  _nds_set_hd?: (k: number) => void;
+  _nds_hd_scale?: () => number;
+  _nds_hd_fb555_top?: () => number;
+  _nds_hd_fb555_bottom?: () => number;
   _nds_fb_top(): number;
   _nds_fb_bottom(): number;
   _nds_set_button(id: number, pressed: number): void;

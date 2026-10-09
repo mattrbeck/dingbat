@@ -31,11 +31,14 @@ proc nds_rom_alloc(len: cint): pointer {.exportc.} =
 
 var lastBios9, lastBios7, lastFirmware: seq[uint8]  ## what nds_reboot reuses
 
+var hdScale = 1   ## HD 3D (docs/nds/hd3d.md): kept across boots, a display setting
+
 proc rewind_reset()
 proc cheats_follow_game()
 
 proc boot_with(rom: sink seq[uint8]; save: pointer; save_len: cint) =
   core = new_nds(rom, lastBios9, lastBios7, lastFirmware)
+  if hdScale > 1: core.set_hd_scale(hdScale)
   if save_len > 0: core.cart.backup.set_data(copy_in(save, save_len))
   rewind_reset()
   cheats_follow_game()
@@ -114,6 +117,23 @@ proc nds_fb555_bottom(): pointer {.exportc.} =
   if core == nil: nil
   elif aheadValid: addr aheadBottom[0]
   else: addr core.gpu.bottom[0]
+
+# HD 3D (docs/nds/hd3d.md): with nds_set_hd(k), k = 2..4, the screens are
+# also drawn at 256k x 192k (the 3D scene rendered at that resolution, the
+# 2D layers scaled up), BGR555 like the 1x ones; 1 turns it off.
+
+proc nds_set_hd(k: cint) {.exportc.} =
+  hdScale = clamp(int(k), 1, 4)
+  if core != nil: core.set_hd_scale(hdScale)
+
+proc nds_hd_scale(): cint {.exportc.} =
+  if core == nil: cint(hdScale) else: cint(core.hd_scale())
+
+proc nds_hd_fb555_top(): pointer {.exportc.} =
+  if core == nil or core.gpu.hd_top.len == 0: nil else: addr core.gpu.hd_top[0]
+
+proc nds_hd_fb555_bottom(): pointer {.exportc.} =
+  if core == nil or core.gpu.hd_bottom.len == 0: nil else: addr core.gpu.hd_bottom[0]
 
 proc nds_fb_top(): pointer {.exportc.} =
   fbTop.setLen(256 * 192)

@@ -185,6 +185,55 @@ test("the stylus lands on the bottom-screen pixel under the pointer", { skip }, 
   await ctx.close();
 });
 
+// --- HD 3D (docs/nds/hd3d.md) -------------------------------------------------
+
+test("HD 3D draws the screens at the chosen multiple and leaves the 1x ones alone", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1000, height: 800 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, rom("built/Simple_Tri.nds"));
+  await page.evaluate(() => setNdsLayout("stack"));
+  await framesPast(page, 20);
+  const grab = () => page.evaluate(() => {
+    const c = ndsCore;
+    const one = Array.from(new Uint16Array(c.HEAPU8.buffer, c._nds_fb555_top(), 256 * 192));
+    const k = c._nds_hd_scale();
+    const p = c._nds_hd_fb555_top();
+    const hd = p ? Array.from(new Uint16Array(c.HEAPU8.buffer, p, 256 * k * 192 * k)) : [];
+    updateCanvasScaling();
+    return { one, k, hd, backing: canvasEl.width };
+  });
+  const off = await grab();
+  assert.equal(off.k, 1);
+  assert.equal(off.hd.length, 0, "no HD screens while off");
+  await page.evaluate(() => setNdsDisplay({ hd: 2 }));
+  await framesPast(page, (await page.evaluate(() => ndsCore._nds_frame_count())) + 4);
+  const on = await grab();
+  assert.equal(on.k, 2);
+  assert.equal(on.hd.length, 512 * 384);
+  // a still scene: the 1x screen is what it was without HD
+  assert.deepEqual(on.one, off.one, "the 1x top screen is unchanged by HD");
+  // the HD screen is the 1x one at 2x except along the triangle's edges
+  let differ = 0, lit = 0;
+  for (let y = 0; y < 384; y++) {
+    for (let x = 0; x < 512; x++) {
+      const v = on.hd[y * 512 + x];
+      if (v !== on.one[(y >> 1) * 256 + (x >> 1)]) differ++;
+      if (v & 0x7FFF) lit++;
+    }
+  }
+  assert.ok(differ > 0 && differ < 0.1 * 512 * 384, "HD differs from 1x only at edges: " + differ);
+  assert.ok(lit > 1000, "the triangle is drawn: " + lit);
+  const layW = await page.evaluate(() => ndsLay.w);
+  assert.ok(on.backing >= 2 * layW, "the canvas has a backing pixel per HD dot: " + on.backing);
+  const [mid] = await canvasAt(page, [[0.5, 0.25]]);
+  assert.ok(mid.some((c) => c > 0), "the presenter draws the HD frame: " + mid);
+  // the setting is kept and turned off again
+  assert.equal(await page.evaluate(() => dbGet("nds-display").then((d) => d.hd)), 2);
+  await page.evaluate(() => setNdsDisplay({ hd: 1 }));
+  assert.equal(await page.evaluate(() => ndsCore._nds_hd_scale()), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
 // --- Display modes (docs/nds/web.md "Screens") ---------------------------------
 
 // Every arrangement, swap, gap and turn the Screens panel offers.
