@@ -195,10 +195,20 @@ spikes), so a loaded machine does not move the result.
   each batch after a frame (axis events count as input): throughput, not
   cadence.
 
-Found on main, not changed here: web timestamps jittered by 2 ms skip ~125
-frames a minute at 1x (the accumulator has no tolerance; Chrome's
-vsync-aligned timestamps avoid most of it); web fast-forward learns the
-refresh rate only at normal speed. Desktop has vsync off, paces 1x on a
+- Web timestamp jitter (on main too): a browser that stamps callbacks when
+  they run rather than at the refresh puts frames on the wrong refresh, the
+  accumulator near a frame's step deciding 0 frames or 2 on +/-2 ms. The
+  loop now locks timestamps to a learnt grid of refreshes (a callback
+  within jitter of a whole number of them counts as exactly that many,
+  nudged 5% toward its own time; anything else restarts the grid), so game
+  time stays within ~5 ms of real time. +/-2 ms at 60 Hz, uneven refreshes
+  a minute: 1x 127 to 0, 2x 261 to 7.4 (a clean display's), run-ahead 2 89
+  to 0; 30, 60, 75, 120, 144 Hz and variable-rate displays as before; real
+  Chrome unchanged. Snapping intervals instead of timestamps only halved
+  it: an interval carries two timestamps' jitter.
+
+Found on main, not changed here: web fast-forward learns the refresh rate
+only at normal speed. Desktop has vsync off, paces 1x on a
 16.743 ms counter slot (at 60 Hz, ~36 frames a minute never shown, each
 with one doubled), paces turbo by the audio queue with a whole-millisecond
 present interval, and reads the refresh rate once, from display 0.
@@ -341,7 +351,8 @@ fast-forward. Most of Advance Wars' frame time is outside drawing here.
       e2e (2% loss) pass with native and wasm states identical
 - [x] round 6 (frame pacing, above): web fast-forward's aim no longer
       flaps; fast-forward draws rewind-due frames; iOS late start pauses
-      10 s after a miss. render_skip, rewind (new spacing case), ios_api,
+      10 s after a miss; web timestamps locked to the refresh grid
+      (jitter). render_skip, rewind (new spacing case), ios_api,
       rollback tests; web tests as above; tsc; wasm, desktop, iOS builds
 - [ ] desktop: compiled, not run here (driving the GUI needs asking)
 - [ ] if kept: drop the switches or keep `?draw=all` as a diagnostic; the
