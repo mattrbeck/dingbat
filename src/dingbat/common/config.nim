@@ -320,6 +320,7 @@ type
     nds_firmware_path*: string   # DS firmware dump ("" = built-in)
     nds_keybindings*:   Table[cint, DsInput]  # keycode -> DS X/Y
     nds_controller_bindings*: Table[cint, DsInput]  # pad button -> DS X/Y
+    nds_hd*:            int      # DS 3D resolution: 1 = native, 2..4 (HD 3D)
     # Each file key's text as this process last read or wrote it. save_config
     # writes only the keys whose value differs and takes the rest from the
     # file as it is now, so a second dingbat window's changes survive.
@@ -361,6 +362,7 @@ proc new_config*(): Config =
     ds_beta:         false,
     nds_keybindings: default_ds_keybindings(),
     nds_controller_bindings: default_ds_controller_bindings(),
+    nds_hd:          1,
   )
 
 proc reset_to_defaults*(cfg: Config) =
@@ -542,6 +544,8 @@ proc parse_config(j: JsonNode): Config =
                          ("firmware", addr cfg.nds_firmware_path)]:
       if nds.hasKey(key) and nds[key].kind == JString:
         field[] = nds[key].getStr("")
+    if nds.hasKey("hd") and nds["hd"].kind == JInt:
+      cfg.nds_hd = clamp(nds["hd"].getInt(1), 1, 4)
     if nds.hasKey("keybindings") and nds["keybindings"].kind == JObject:
       cfg.nds_keybindings = initTable[cint, DsInput]()
       for k, v in nds["keybindings"].pairs:
@@ -686,6 +690,7 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
     ("nds.bios9",          nds_path("bios9", cfg.nds_bios9_path)),
     ("nds.bios7",          nds_path("bios7", cfg.nds_bios7_path)),
     ("nds.firmware",       nds_path("firmware", cfg.nds_firmware_path)),
+    ("nds.hd",             if cfg.nds_hd != 1: "  hd: " & $cfg.nds_hd else: ""),
     ("nds.keybindings",    nds_bindings("keybindings", cfg.nds_keybindings,
                                         default_ds_keybindings(), keycode_file_name)),
     ("nds.controller_bindings",

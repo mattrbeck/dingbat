@@ -10,6 +10,8 @@ type
     preserve_aspect*: bool
     sgb_enable*:  bool
     sgb_border*:  bool
+    nds_hd*:      cint   # DS 3D resolution, 1..4 (shown only with DS Beta on)
+    show_ds*:     bool
     visible*:     bool
 
 proc new_video_widget*(cfg: Config): VideoWidget =
@@ -72,6 +74,20 @@ proc render*(v: VideoWidget) =
               "immediately — it only hides a layer the core already has." &
               (if not v.sgb_enable: " (Super Game Boy mode is off.)" else: ""))
   igUnindent(106)
+  if v.show_ds:
+    igSeparator()
+    igText("Nintendo DS:")
+    igIndent(106)
+    igText("3D resolution:")
+    igSameLine(0, -1)
+    help_marker("Draws the 3D scenes at a higher resolution: sharper edges " &
+                "and models, the same textures. 2D stays as it is. Each step " &
+                "costs a lot more work a frame, so a slower computer may not " &
+                "keep full speed.")
+    for (label, k) in [("Native", 1'i32), ("2x", 2'i32), ("3x", 3'i32), ("4x", 4'i32)]:
+      if k > 1: igSameLine(0, -1)
+      discard igRadioButton_IntPtr(cstring(label & "##nds_hd"), addr v.nds_hd, k)
+    igUnindent(106)
 
 proc reset*(v: VideoWidget) =
   v.filter      = cint(ord(v.cfg.video_filter))
@@ -79,6 +95,7 @@ proc reset*(v: VideoWidget) =
   v.preserve_aspect = v.cfg.preserve_aspect
   v.sgb_enable  = v.cfg.sgb_enable
   v.sgb_border  = v.cfg.sgb_border
+  v.nds_hd      = cint(v.cfg.nds_hd)
 
 proc apply_to*(v: VideoWidget; cfg: Config) =
   cfg.video_filter = VideoFilter(v.filter)
@@ -86,5 +103,6 @@ proc apply_to*(v: VideoWidget; cfg: Config) =
   cfg.preserve_aspect = v.preserve_aspect
   cfg.sgb_enable  = v.sgb_enable
   cfg.sgb_border  = v.sgb_border
+  cfg.nds_hd      = int(v.nds_hd)
 
 proc apply*(v: VideoWidget) = v.apply_to(v.cfg)

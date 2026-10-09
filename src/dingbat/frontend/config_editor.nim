@@ -97,6 +97,7 @@ proc render*(ed: ConfigEditor) =
   ed.keybindings.show_ds = ds
   ed.controller.show_ds = ds
   ed.bios.show_ds = ds
+  ed.video.show_ds = ds
 
   # Only the tab bar below says a tab is on screen: closed, or collapsed
   # (igBegin false), none is, so no capture keeps taking keys.
