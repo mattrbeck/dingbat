@@ -2063,6 +2063,10 @@ type
     sgb_attr*:      ptr UncheckedArray[uint8]
     # output
     framebuffer*:   seq[uint16]   # 160×144 BGR555
+    # The frontend will not show this frame (docs/frame-skip.md): no pixel
+    # is mixed or stored. Every FIFO, fetcher and timing step still runs;
+    # the stores are output only. Set between frames, never serialized.
+    no_draw*:       bool
     frame*:         bool
     ran_bios*:      bool
 

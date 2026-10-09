@@ -2335,6 +2335,22 @@ proc main() =
      display_mode.refresh_rate > 0:
     present_interval = uint32(1000 div display_mode.refresh_rate)
   var last_present = getTicks()
+  # Fast-forward and turbo (not paced) present once per display interval:
+  # the frames before the one presented are run undrawn, as many as fit,
+  # then one drawn, so the present always shows a drawn frame
+  # (docs/frame-skip.md). Running means of an undrawn and a drawn frame.
+  var ff_skip_ms = 1.0
+  var ff_draw_ms = 1.5
+  let perf_ms = 1000.0 / float(getPerformanceFrequency())
+  proc unseen_fits(): bool =
+    float(getTicks() - last_present) + ff_skip_ms + ff_draw_ms < float(present_interval)
+  proc rewind_undrawn() =
+    ## Counts an undrawn frame; a snapshot due on it waits for a drawn one.
+    if not app.cfg.rewind or app.netlink != nil: return
+    case app.emu_kind
+    of ekGBA: discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload(), ready = false)
+    of ekGB: discard app.rewind.maybe_push(proc(): string = app.gb_emu.state_payload(), ready = false)
+    of ekNone: discard
   # Normal play: fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216
   # MHz; the GB frame is the same period); the audio queue is a bounds check
   # only. Turbo and fast-forward keep pure audio pacing.
@@ -2475,12 +2491,42 @@ proc main() =
               echo "NETLINK: link lost: ", e.msg, " — continuing single-player"
               teardown_netlink(e.msg)
           else:
+            let unpaced = not stepping and not is_paced()
+            if unpaced:
+              var n = 0
+              while n < 64 and unseen_fits() and gba_frame_due():
+                let t0 = getPerformanceCounter()
+                app.gba_emu.ppu.no_draw = true
+                input_log_frame_start()
+                app.gba_emu.run_until_frame()
+                app.gba_emu.ppu.no_draw = false
+                ff_skip_ms += (float(getPerformanceCounter() - t0) * perf_ms - ff_skip_ms) * 0.1
+                rewind_undrawn()
+                inc n
+            let t0 = getPerformanceCounter()
             input_log_frame_start()
             app.gba_emu.run_until_frame()
+            if unpaced:
+              ff_draw_ms += (float(getPerformanceCounter() - t0) * perf_ms - ff_draw_ms) * 0.1
             emulated = true
       of ekGB:
         if app.gb_emu != nil and (stepping or gb_frame_due()):
+          # The Super Game Boy's freeze copies the picture: always drawn
+          let unpaced = not stepping and not is_paced() and not app.gb_emu.sgb_active()
+          if unpaced:
+            var n = 0
+            while n < 64 and unseen_fits() and gb_frame_due():
+              let t0 = getPerformanceCounter()
+              app.gb_emu.ppu.no_draw = true
+              app.gb_emu.run_until_frame()
+              app.gb_emu.ppu.no_draw = false
+              ff_skip_ms += (float(getPerformanceCounter() - t0) * perf_ms - ff_skip_ms) * 0.1
+              rewind_undrawn()
+              inc n
+          let t0 = getPerformanceCounter()
           app.gb_emu.run_until_frame()
+          if unpaced:
+            ff_draw_ms += (float(getPerformanceCounter() - t0) * perf_ms - ff_draw_ms) * 0.1
           emulated = true
       of ekNone: discard
       if emulated and is_paced():

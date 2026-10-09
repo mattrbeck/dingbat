@@ -795,6 +795,9 @@ private struct GeneralPane: View {
             SheetToggleRow(label: "Draw every frame",
                            sub: "Off, frames that are never on screen (fast-forward, 2×, run-ahead) are not drawn, which makes them cheaper. On draws them all, to compare.",
                            isOn: $s.drawAll)
+            SheetToggleRow(label: "Start frames late",
+                           sub: "Runs each screen refresh's frames just before it is shown instead of just after the last one, so a press shows up sooner (most of a refresh: ~10 ms at 60 Hz, ~25 ms at 30 Hz). A frame that runs long can miss its refresh.",
+                           isOn: $s.lateStart)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Save webhook").font(.system(size: 14.5, weight: .medium))
                 Text("Every time a game writes its save, also send the save file to this address as an HTTP POST (form field “save”). Leave empty to turn off. Synced to your other devices when signed in.")

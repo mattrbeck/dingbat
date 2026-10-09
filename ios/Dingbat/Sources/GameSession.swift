@@ -358,8 +358,42 @@ final class GameSession: NSObject, ObservableObject {
     private var ffSkipTime: CFTimeInterval = 0.003
     private var ffDrawTime: CFTimeInterval = 0.004
 
+    /// Late start (Settings › Advanced › Start frames late): a refresh's
+    /// frames run just before the refresh is shown, `lateWork` (a running
+    /// mean of that run) plus a margin ahead of it, instead of right after the
+    /// last one, so they read input that much later. Not at fast-forward
+    /// (it fills the whole interval), nor linked or in 2P (paced elsewhere).
+    private var lateWork: CFTimeInterval = 0.002
+    private var lateArmed = false
+    private var lateRunning = false
+    private static let lateMargin: CFTimeInterval = 0.004
+    #if DEBUG
+    private var shownAt: CFTimeInterval = 0   // the refresh the newest present lands on
+    #endif
+
     @objc private func tick(_ link: CADisplayLink) {
         guard game != nil, !clipHold, !flightHold else { return }
+        if lateArmed { return }   // the delayed run of the last refresh is still pending
+        if !lateRunning && Settings.shared.lateStart && !paused && !rewinding &&
+            speed != .fastForward && !NetLink.shared.linked && !twoPlayer {
+            let wait = link.targetTimestamp - CACurrentMediaTime() - lateWork - Self.lateMargin
+            if wait > 0.001 {
+                lateArmed = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+                    guard let self else { return }
+                    self.lateArmed = false
+                    self.lateRunning = true
+                    let t0 = CACurrentMediaTime()
+                    self.tick(link)
+                    self.lateWork += (min(CACurrentMediaTime() - t0, 0.02) - self.lateWork) * 0.1
+                    self.lateRunning = false
+                }
+                return
+            }
+        }
+        #if DEBUG
+        shownAt = link.targetTimestamp
+        #endif
         let now = link.timestamp
         let dt = lastTick == 0 ? 0 : min(now - lastTick, 0.25)
         lastTick = now
@@ -506,6 +540,7 @@ final class GameSession: NSObject, ObservableObject {
     private var latPress: CFTimeInterval = 0
     private var latBase: UInt64 = 0
     private var latTimes: [Double] = []
+    private var latShown: [Double] = []
     private var latRing: [Double] = []
     private var latLeft = 0
 
@@ -560,19 +595,22 @@ final class GameSession: NSObject, ObservableObject {
         latRing.append(Double(dingbat_audio_queued_frames()) / 32.768)
         guard latPress > 0, fbHash() != latBase else { return }
         latTimes.append((CACurrentMediaTime() - latPress) * 1000)
+        latShown.append((shownAt - latPress) * 1000)
         latPress = 0
         setInput(0, false, source: "test")
         latLeft -= 1
         if latLeft > 0 { scheduleLatencyPress(); return }
-        let t = latTimes.sorted(), r = latRing.sorted()
+        let t = latTimes.sorted(), r = latRing.sorted(), sh = latShown.sorted()
         let av = AVAudioSession.sharedInstance()
         let out = String(format: """
             presses=%d press->present ms: min %.1f p50 %.1f avg %.1f max %.1f
+            press->shown ms (the refresh the present lands on): min %.1f p50 %.1f avg %.1f max %.1f
             ring ms: min %.1f p50 %.1f avg %.1f max %.1f
             ioBuffer ms %.1f outputLatency ms %.1f sampleRate %.0f
 
             """, t.count, t.first ?? 0, t[t.count / 2],
             t.reduce(0, +) / Double(t.count), t.last ?? 0,
+            sh.first ?? 0, sh[sh.count / 2], sh.reduce(0, +) / Double(sh.count), sh.last ?? 0,
             r.first ?? 0, r[r.count / 2], r.reduce(0, +) / Double(r.count), r.last ?? 0,
             av.ioBufferDuration * 1000, av.outputLatency * 1000, av.sampleRate)
         try? out.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("latency.txt"),

@@ -34,31 +34,44 @@ existing whole-frame render skip never fires in gameplay.
 
 ## How
 
-Core: `ppu.no_draw` (gba.nim): set by the frontend between frames for a frame it
-will not show. `scanline` returns at once. A frame that changed marks the
-next one dirty, so it is drawn whole; one that changed nothing leaves the
-framebuffer holding the picture, as the existing render skip does (without
-that, a mostly static scene drew more than before: -3% at 1 in 2). It is never serialized: drawing changes no
-emulated state (the OAM and line latches live in `latch_oam` and
-`latch_line_start`, outside `scanline`), so a skipped frame runs exactly as a
-drawn one. Two things only drawing writes do go stale in a skipped frame:
-the framebuffer itself (also saved in a state) and the mosaic's latched
+Core: `ppu.no_draw` (gba.nim, and on the GB's PPU in gb.nim), set by the
+frontend between frames for a frame it will not show. The GBA's `scanline`
+returns at once; the GB's FIFO runs every fetch, shift and timing step but
+mixes and stores no pixel. A GBA frame that changed marks the next one dirty,
+so it is drawn whole; one that changed nothing leaves the framebuffer holding
+the picture, as the existing render skip does (without that, a mostly static
+scene drew more than before: -3% at 1 in 2). The flag is never serialized:
+drawing changes no emulated state (the GBA's OAM and line latches live in
+`latch_oam` and `latch_line_start`, outside `scanline`; its contention model
+reads only registers, OAM and line timing), so a skipped frame runs exactly
+as a drawn one. Two things only drawing writes go stale in a skipped frame:
+the framebuffer itself (also saved in a state) and the GBA mosaic's latched
 affine point (latched again on line 0 of every drawn frame).
 
-GBA only: the GB PPU draws as part of its timing. Off while the LCD response
-is on (its panel model takes every frame).
+Frontends: `wasm_unseen_next(ff)` / `dingbat_unseen_next(ff)` mark the next
+frame (loop_tick / runahead_tick, dingbat_run_frame / _ahead) as one the tick
+will not show. The tick loops never mark a tick's last frame, so **after
+every tick the core holds that tick's own picture**, whatever reads it next
+(screenshots, recordings, save states and their thumbnails, the library
+picture, a pause). An unseen frame runs no run-ahead lookahead and does not
+step the LCD panel. Desktop batches the same way in its unpaced modes.
 
-Frontends: `wasm_unseen_next` / `dingbat_unseen_next` mark the next frame
-(loop_tick / runahead_tick, dingbat_run_frame / _ahead) as one the tick will
-not show. The core then leaves it undrawn unless its picture is kept: the
-frame before a rewind snapshot (`Rewind.push_due`) or a clip anchor (whose
-thumbnail is the previous frame's). An unseen frame with run-ahead runs no
-lookahead at all (GB too); with run-ahead the canonical frame is never drawn,
-only the last lookahead frame. The tick loops mark every frame but the last
-at 1x/2x/slow (the count is known up front), and at fast-forward each frame
-after which another is predicted to fit (running mean of a frame's time);
-a wrong guess shows a frame or two back, never a broken one. Link, rollback,
-2P, clip replay and frame advance draw every frame as before.
+## Edge cases, and what handles each
+
+| case | handling |
+|---|---|
+| fast-forward guesses which frame is a tick's last | a frame goes undrawn only with room after it for a drawn one (running means of each kind); a tick never ends on an undrawn frame |
+| pausing, a state saved or a screenshot right after fast-forward | the invariant above: the core always holds the last frame's picture |
+| run-ahead's canonical frame | drawn (only the hidden lookahead frames are not): the picture states, recordings and thumbnails read |
+| rewind snapshots and clip anchors keep a picture | one due on an undrawn frame waits for the next drawn one; `Rewind.frames_back` stamps each snapshot's frame so the scrubber's ages stay exact; no forced draws (they cost ~5% of fast-forward) |
+| raster effects (mid-frame register changes) | each drawn frame is built line by line from its own registers; test below |
+| LCD response | its panel steps per shown picture; skips at fast-forward, but at 1x/2x every frame is drawn (it is what blends a sprite drawn on alternate frames, which 2x on a 60 Hz screen would otherwise drop) |
+| Game Boy / Game Boy Color | skipped too (`no_draw` on the FIFO PPU), except under the Super Game Boy, whose freeze copies the picture |
+| online link (rollback) | only this peer's core is shown: the friend's core never draws, nor do replayed frames but the newest (`drawOnlyShown`; peers never exchange state checksums, which tests alone compare) |
+| desktop fast-forward / turbo | it presents once per display interval: the frames before are run undrawn in a batch, then one drawn, then the present |
+| 120 Hz screens | at 1x a tick runs at most one frame: nothing to skip, nothing changes |
+| 2P (local link), lockstep netlink, clip replay, frame advance | draw every frame as before |
+| input latency at 30 Hz | the skip adds none; iOS can now run a refresh's frames late (Settings › Advanced › Start frames late, a prototype), reading input most of a refresh later; the web cannot (the picture must be handed over inside the refresh callback) |
 
 ## Proof
 

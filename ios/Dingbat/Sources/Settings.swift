@@ -75,6 +75,9 @@ final class Settings: ObservableObject {
     @Published var runahead: Int { didSet { d.set(runahead, forKey: "runahead") } }
     /// Draw frames that are never shown too (docs/frame-skip.md): to compare.
     @Published var drawAll: Bool { didSet { d.set(drawAll, forKey: "drawAll") } }
+    /// Run a refresh's frames just before it is shown, not just after the
+    /// last one (GameSession.tick): input is read later. A prototype.
+    @Published var lateStart: Bool { didSet { d.set(lateStart, forKey: "lateStart") } }
     @Published var saveWebhook: String {
         didSet {
             d.set(saveWebhook, forKey: "save-hook")
@@ -128,6 +131,7 @@ final class Settings: ObservableObject {
         rewind = bool("rewindOn", true)
         runahead = d.integer(forKey: "runahead")
         drawAll = d.bool(forKey: "drawAll")
+        lateStart = d.bool(forKey: "lateStart")
         saveWebhook = str("save-hook") ?? ""
     }
 
@@ -192,7 +196,7 @@ final class Settings: ObservableObject {
                   "video.integerScale", "video.lcdResponse", "video.ambientGlow",
                   "audio.fifoInterp", "audio.mp2kHle", "audio.pitchCorrectFF", "audio.audioLowpass",
                   "audio.playInSilent", "audio.volume", "audio.muted", "dingbat_theme",
-                  "rewindOn", "runahead", "drawAll", "save-hook"] {
+                  "rewindOn", "runahead", "drawAll", "lateStart", "save-hook"] {
             d.removeObject(forKey: k)
         }
         let fresh = Settings()
@@ -229,6 +233,7 @@ final class Settings: ObservableObject {
         rewind = fresh.rewind
         runahead = fresh.runahead
         drawAll = fresh.drawAll
+        lateStart = fresh.lateStart
         saveWebhook = fresh.saveWebhook
         apply()
     }

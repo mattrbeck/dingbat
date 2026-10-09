@@ -18,10 +18,14 @@
 ## the others (the same state after every frame) and, on a frame it draws,
 ## show the same picture. Its rewind snapshots wait for a drawn frame, and
 ## each must hold its own frame's picture at the age frames_back gives.
+##   3. the same frontend skip on the Game Boy (`no_draw` on its PPU): the
+##      GB/GBC ROMs under tests/roms (and DINGBAT_RENDER_SKIP_GB_ROMS), a
+##      machine skipping runs of frames against one drawing every frame.
 ## Run with: nimble test_renderskip
 
 import std/[os, strutils]
 import dingbat/gba/gba
+import dingbat/gb/gb
 import dingbat/common/rewind
 
 var failures = 0
@@ -296,6 +300,48 @@ proc synthetic() =
   a.frame(false); b.frame(true)
   same_frames(a, b, 3, 200, refy, "same-value BG2Y in V-blank", expect_static = true)
 
+# ---- 3. Game Boy ---------------------------------------------------------------
+
+proc gb_hash(g: GB): uint64 =
+  result = 0xCBF29CE484222325'u64
+  for v in g.ppu.framebuffer: result = (result xor uint64(v)) * 0x100000001B3'u64
+
+proc gb_runs_as(c, b: GB): bool =
+  ## c's state is b's but for the picture.
+  let fb = c.ppu.framebuffer
+  c.ppu.framebuffer = b.ppu.framebuffer
+  result = c.state_payload() == b.state_payload()
+  c.ppu.framebuffer = fb
+
+proc run_gb_rom(src: string; frames: int) =
+  var g: array[2, GB]
+  for i in 0 .. 1:
+    let dir = getTempDir() / "dingbat_render_skip_gb" / $i
+    createDir(dir)
+    let path = dir / src.extractFilename
+    copyFile(src, path)
+    removeFile(path.changeFileExt(".sav"))
+    g[i] = new_gb("", path, headless = true, run_bios = false)
+    g[i].post_init()
+  let (b, c) = (g[0], g[1])
+  var ran_off = -1
+  var drew_off = -1
+  var drawn = 0
+  for f in 0 ..< frames:
+    b.step_frame()
+    c.ppu.no_draw = not (f mod 4 == 3 or f mod 7 == 0)
+    c.step_frame()
+    if ran_off < 0 and not c.gb_runs_as(b): ran_off = f
+    if not c.ppu.no_draw:
+      inc drawn
+      if drew_off < 0 and c.gb_hash() != b.gb_hash(): drew_off = f
+  c.ppu.no_draw = false
+  check(ran_off < 0, src.extractFilename & ": undrawn frames run the same",
+        if ran_off >= 0: "state first differs after frame " & $ran_off else: "")
+  check(drew_off < 0, src.extractFilename & ": drawn frames (" & $drawn & "/" &
+        $frames & ") show the same picture",
+        if drew_off >= 0: "first differs at frame " & $drew_off else: "")
+
 when isMainModule:
   echo "ROMs"
   var roms: seq[string]
@@ -309,6 +355,13 @@ when isMainModule:
   let frames = parseInt(getEnv("DINGBAT_RENDER_SKIP_FRAMES", "300"))
   for r in roms: run_rom(r, frames)
   synthetic()
+  echo "Game Boy"
+  var gb_roms: seq[string]
+  for pat in ["*.gb", "*.gbc"]:
+    for f in walkFiles(currentSourcePath.parentDir / "roms" / pat): gb_roms.add f
+  for item in getEnv("DINGBAT_RENDER_SKIP_GB_ROMS").split(':'):
+    if item.len > 0: gb_roms.add item
+  for r in gb_roms: run_gb_rom(r, frames)
   if failures == 0:
     echo "render_skip: all passed"
     quit(0)

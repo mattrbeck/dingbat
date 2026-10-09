@@ -381,7 +381,8 @@ proc push_rewind(drawn = true) =
     discard rewindHistory.maybe_push(
       proc(): string = stateGb.state_payload(),
       proc(): RewindThumb = RewindThumb(w: 120, h: 108,
-        pixels: downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H, 120, 108)))
+        pixels: downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H, 120, 108)),
+      ready = drawn)
   of ekNone: discard
 
 proc clip_note_frame()
@@ -389,9 +390,10 @@ proc clip_note_frame()
 # --- Frames nobody sees (docs/frame-skip.md) ---
 # The shell runs several frames per display refresh at 2x, fast-forward or
 # after a missed refresh, and shows only the last; dingbat_unseen_next says
-# the next dingbat_run_frame(_ahead) frame is one of the others. The GBA PPU
-# then draws nothing for it (ppu.no_draw), it runs no run-ahead lookahead,
-# and the LCD panel does not step on it. The shell never marks a tick's
+# the next dingbat_run_frame(_ahead) frame is one of the others. The PPU
+# (GBA, or GB but under the Super Game Boy) then draws nothing for it
+# (ppu.no_draw), it runs no run-ahead lookahead, and the LCD panel does not
+# step on it. The shell never marks a tick's
 # last frame, so after every tick the core holds its frame's picture, for
 # whatever reads it (thumbnails, states, the library picture). A rewind
 # snapshot or clip anchor falling on an undrawn frame waits for the next
@@ -419,9 +421,12 @@ proc step_canonical(hidden = false) =
     stateGba.ppu.no_draw = false
     lastFrameDrawn = not hidden
   of ekGB:
+    # The Super Game Boy's freeze copies the picture: it is always drawn
+    stateGb.ppu.no_draw = hidden and not stateGb.sgb_active()
     stateGb.step_frame()
+    lastFrameDrawn = not stateGb.ppu.no_draw
+    stateGb.ppu.no_draw = false
     if statePrinter != nil: statePrinter.tick_frame()
-    lastFrameDrawn = true
   of ekNone: discard
   push_rewind(lastFrameDrawn)
 
@@ -465,7 +470,11 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
     let snap = stateGb.state_payload()
     let prnSnap = if statePrinter != nil: statePrinter.clone() else: nil
     stateGb.apu.silent = true
-    for _ in 0 ..< int(n): stateGb.step_frame()
+    let sgb = stateGb.sgb_active()
+    for i in 0 ..< int(n):
+      stateGb.ppu.no_draw = i < int(n) - 1 and not sgb  # only the last is shown
+      stateGb.step_frame()
+    stateGb.ppu.no_draw = false
     stateGb.apu.silent = optSilent
     if prnSnap != nil: copy_into(prnSnap, statePrinter)
     if runaheadFrame.len != pixels: runaheadFrame.setLen(pixels)
@@ -1298,6 +1307,7 @@ proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
         cores.add(core)
       rb_mute_replays(cores[rbLocal])
       rbGb = gbrb.new_gb_rollback_session(new_gb_link(cores), rbLocal, 12)
+      rbGb.drawOnlyShown = true  # only this peer's newest frame is shown
     else:
       let haveBios = biosPath.len > 0 and fileExists(biosPath)
       let mode = if haveBios: optGbaBiosMode else: 0
@@ -1315,6 +1325,7 @@ proc dingbat_rollback_init(rom0, rom1: cstring; local_player: cint;
         cores.add(core)
       rb_mute_replays(cores[rbLocal])
       rbGba = gbarb.new_rollback_session(new_link(cores), rbLocal, 12)
+      rbGba.drawOnlyShown = true  # only this peer's newest frame is shown
   except CatchableError:
     rbGba = nil
     rbGb = nil
@@ -1394,6 +1405,7 @@ proc dingbat_rollback_exit_to_single(): cint {.exportc, cdecl.} =
   ## its printer back); the friend's core goes. Returns 1, 0 with no session.
   if rbGb != nil:
     let core = rbGb.link.cores[rbLocal]
+    core.ppu.no_draw = false
     core.cartridge.mbc_save()
     rbGb = nil
     gbRtcNowOverride = -1
@@ -1404,6 +1416,7 @@ proc dingbat_rollback_exit_to_single(): cint {.exportc, cdecl.} =
     core.set_serial_driver(GbPrinterDriver(printer: statePrinter))
   elif rbGba != nil:
     let core = rbGba.link.cores[rbLocal]
+    core.ppu.no_draw = false
     core.storage.write_save()
     core.set_sio_driver(NullSioDriver())
     rbGba = nil
