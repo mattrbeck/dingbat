@@ -69,7 +69,8 @@ step the LCD panel. Desktop batches the same way in its unpaced modes.
 | LCD response | its panel steps per shown picture; skips at fast-forward, but at 1x/2x every frame is drawn (it is what blends a sprite drawn on alternate frames, which 2x on a 60 Hz screen would otherwise drop) |
 | Game Boy / Game Boy Color | skipped too (`no_draw` on the FIFO PPU), except under the Super Game Boy, whose freeze copies the picture |
 | online link (rollback) | only this peer's core is shown: the friend's core never draws, nor do replayed frames but the newest (`drawOnlyShown`; peers never exchange state checksums, which tests alone compare) |
-| desktop fast-forward / turbo | it presents once per display interval: the frames before are run undrawn in a batch, then one drawn, then the present |
+| desktop fast-forward (uncapped) | it presents once per display interval: the frames before are run undrawn in a batch, then one drawn, then the present; the batch stops at once for a pending key, button, click or quit, so input is read after every frame as before |
+| desktop turbo (2x, paced by the audio queue) | no batching: a frame run undrawn would pull the drawn one after it ahead of the queue (a two-frame jump, input read up to a frame early) |
 | 120 Hz screens | at 1x a tick runs at most one frame: nothing to skip, nothing changes |
 | 2P (local link), lockstep netlink, clip replay, frame advance | draw every frame as before |
 | link desync dumps compared across peers (`rollback_dump_size`, iOS LINKDUMP, the link e2e tests) | each peer draws only its own core, so the dump blanks the picture and the mosaic latch (`peer_state_bytes`); web/e2e/link-rom-skip passes |
@@ -98,26 +99,75 @@ average half a refresh after it happens and shown a whole refresh after it is
 read: about 1.5 refreshes, ~25 ms at 60 Hz and ~50 ms at 30 Hz (Low Power
 Mode), before the game's own frames of delay.
 
-With it on, the app waits until just before the next refresh, `lateWork` (a
-running mean of how long a run takes) plus `lateMargin` (time for the GPU
-and the compositor) ahead of it, and runs then. Input is read later in the
+With it on, the app waits until just before the next refresh, the run's
+expected time (`lateFrame`, a running mean per frame, times the frames
+owed) plus `lateMargin` (time for the GPU and the compositor) ahead of it,
+and runs then, on a strict timer with no leeway (a coalesced timer would
+eat the margin). Input is read later in the
 same refresh, so it reaches the screen up to most of a refresh sooner: ~10 ms
 at 60 Hz, ~25 ms at 30 Hz. The frames, their count and the audio are the
 same; only when they run moves.
 
 The risk is missing the refresh: if the run, the GPU or the compositor runs
 long, the picture lands a refresh late (a hitch, and that frame later than
-without the setting). So the margin learns: a run that ends within 2 ms of
-its refresh, or (on a device) a picture the system reports shown after its
-refresh or never shown, widens it by 2 ms up to 12; each on-time one narrows
-it by 0.1 ms back towards 3. A device or a scene that cannot keep up backs
-off to running nearly as early as before. Not at fast-forward (it fills the
-whole interval anyway), nor in link play or 2P (their pacing is the link's).
+without the setting). So the margin learns, aiming for misses well under 1
+in 500: a picture the system reports shown after its refresh or never (on a
+device; in the simulator, the GPU finishing within 1 ms of it), or a late run
+not started by the next refresh, widens it by 3 ms; a run that merely ends
+within 2 ms of its refresh, by 1 (up to 12); only 120 on time in a row
+narrow it, by 0.5 ms (down to 3). It runs at once, as without the setting:
+when nothing is owed (a 120 Hz screen at 1x, every other refresh), after a
+hitch (a catch-up owes more than a refresh's frames and has no time to
+lose), when the wait would be under 1 ms, at fast-forward (it fills the
+whole interval anyway), and in link play or 2P (their pacing is the link's).
+If a late run has not started when the next refresh's callback arrives (the
+main thread was busy), that callback cancels it, counts a miss and runs its
+frames itself, so a refresh is never skipped waiting for it.
 
-Simulator, tonc m7_demo, press to the refresh its picture is aimed at: at 30
-Hz 23.7 / 29.6 ms off against 9.2 / 9.4 ms on; at 60 Hz inconclusive on a
-loaded machine. The simulator has no presented-time API and its refresh
-timing is approximate, so the phone decides whether it ships.
+Not yet known: whether the on-screen buttons gain at all. UIKit may deliver
+touches once per refresh, just before the display link's callback; if so a
+run at the start of a refresh already sees every touch a late one would.
+Controllers and keyboards deliver as they happen and do gain. The phone
+test (or a high-speed camera) decides.
+
+Simulator, tonc m7_demo, 40 presses, press to the refresh its picture is
+aimed at, average: at 30 Hz 30.4 / 28.0 ms off against 14.7 / 15.6 ms on,
+with 2 and 4 misses in 542 and 495 late runs (the margin settled at 9-11.5
+ms on the simulator's jittery timing; the first controller, which settled
+near 5% misses, measured 9.2 / 9.4). At 60 Hz the simulator's display link
+calls back about 0.5 ms after its own target refresh, so late start rightly
+never arms there (and earlier 60 Hz numbers were noise). The simulator has
+no presented-time API and approximate refresh timing: the phone decides
+whether it ships.
+
+## Where else it could apply (survey, not done)
+
+An agent surveyed every place frames run unseen; ranked by value against
+risk:
+
+- Developer tools that read a few frames of thousands (romfuzz and gbfuzz
+  nav, filtershot, gbprobe shots, mp2k sweep and probe, audio dumps,
+  trade_repro, the bench warmups): ~20% GBA, 5-14% GB, no product risk.
+  Final pictures identical on 3524 gambatte, 986 other GB, 244 GBA test
+  ROMs and 20 library titles. Keep drawing: the bench's per-frame hash
+  (the library A/B sweep), playtest runhash/stable, bootsweep, inputsweep,
+  state_soak and statefuzz (they exist to exercise drawing code).
+- tests/dingbat_test.nim modes that never read the picture (GB serial,
+  sram, mooneye, microtest; gambatte's 15 frames; GBA mgba/jsmolka): ~10-12%
+  of GB rows. Catches: `--screen-check` must draw the verdict frame; GB
+  screenshot mode ends early on `LD B,B`, so it keeps drawing.
+- Local 2P: the last frame of a tick is known up front (a link step always
+  completes a frame); ~20% of both cores, only at iOS 2x or 30 Hz.
+- Rollback ticks per refresh: nothing feeds the session between two ticks
+  of one refresh, so whether the next tick will stall is exactly
+  predictable from the buffered remote inputs; worth 5-9% of rollback CPU
+  at 2x or 30 Hz only.
+- DS: `render_line` could skip the 2D engines when no capture uses them
+  (5-10%); skipping the 3D rasteriser changes game-readable state
+  (RDLINES_COUNT, underflow), so only for fast-forward and run-ahead.
+- Not worth it: lockstep netlink catch-up (a frame can park mid-frame on
+  the peer), run-ahead's canonical frame (rewind, states and thumbnails
+  read it).
 
 ## Proof
 
@@ -161,7 +211,7 @@ gain is smaller. Rewind snapshots on drawn frames only: forced draws had cost
 iOS late start, simulator (loaded machine), tonc m7_demo, 30 presses, press
 to the refresh its picture lands on, two rounds each: at 30 Hz 23.7 / 29.6 ms
 average off, 9.2 / 9.4 ms on; at 60 Hz inconclusive (15.1 / 9.2 off, 8.9 /
-10.5 on). The simulator's refresh timing is approximate (some readings come
+10.5 on), with the first margin controller (round 5 numbers under Start frames late). The simulator's refresh timing is approximate (some readings come
 out negative); a device decides it.
 
 ## Measured (core alone, first prototype, quiet machine)
@@ -218,6 +268,14 @@ fast-forward. Most of Advance Wars' frame time is outside drawing here.
       frames, audio, battery files, load cells) in any of the four dingbat
       configurations; the corpus played in 25.7 min against the baseline's
       27.5 (the driver's `run N` now draws only its last frame)
+- [x] round 5 (adversarial latency review): late start's margin settled
+      near 5% misses (now aims under 0.2%), a catch-up tick started late,
+      a slipped late run swallowed the next refresh and counted as on time,
+      timer leeway, the work estimate (now per frame, from every tick);
+      desktop turbo no longer batches, desktop fast-forward reads input
+      after every frame again; `*_unseen_next` marks only frames that
+      really go undrawn. iOS link e2e 6/6 and the FireRed/LeafGreen trade
+      e2e (2% loss) pass with native and wasm states identical
 - [ ] desktop: compiled, not run here (driving the GUI needs asking)
 - [ ] if kept: drop the switches or keep `?draw=all` as a diagnostic; the
       iOS setting is a prototype toggle
