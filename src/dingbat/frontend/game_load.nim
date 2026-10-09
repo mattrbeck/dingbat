@@ -18,6 +18,12 @@ const ROM_DIALOG_EXTS* = block:
   exts.add "zip"
   exts
 
+# With DS Beta on: DS games too (`.nds`, alone or inside a zip).
+const
+  NDS_ROM_EXT* = ".nds"
+  ROM_EXTS_DS* = @ROM_EXTS & @[NDS_ROM_EXT]
+  ROM_DIALOG_EXTS_DS* = @ROM_DIALOG_EXTS & @[NDS_ROM_EXT[1 .. ^1]]
+
 # The smallest file taken as a ROM. Both cores run any length (the GB core
 # pads to a whole cartridge with $FF, the GBA core reads open bus past the
 # file), so this is only what is too short to be a game: a Game Boy file
@@ -118,17 +124,19 @@ proc legacy_zip_cache_dir(cache_root, zip_path: string): string =
   ## Where earlier builds put it: keyed by the path as given.
   cache_root / &"{zip_path.splitFile().name}-{cast[uint32](hash(zip_path)):08x}"
 
-proc extract_zip_rom*(cache_root, zip_path: string): string =
-  ## Extract the first ROM (`ROM_EXTS`) in a zip into its cache folder and
-  ## return its path ("" if none / unreadable). Re-opening the same zip
-  ## reuses the folder, which keeps the emulator's .sav (written next to the
-  ## ROM) persistent across sessions.
+proc extract_zip_rom*(cache_root, zip_path: string;
+                      exts: openArray[string] = ROM_EXTS): string =
+  ## Extract the first ROM (`exts`: `ROM_EXTS`, or `ROM_EXTS_DS` with DS
+  ## Beta on) in a zip into its cache folder and return its path ("" if
+  ## none / unreadable). Re-opening the same zip reuses the folder, which
+  ## keeps the emulator's .sav (written next to the ROM) persistent across
+  ## sessions.
   try:
     let reader = openZipArchive(zip_path)
     defer: reader.close()
     var entry = ""
     for name in reader.walkFiles:
-      if name.splitFile().ext.toLowerAscii() in ROM_EXTS:
+      if name.splitFile().ext.toLowerAscii() in exts:
         entry = name
         break
     if entry == "":

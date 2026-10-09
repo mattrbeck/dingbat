@@ -220,6 +220,14 @@ jobs:
         # ROMs.
         shell: bash
         run: ./dingbat_desktop_lifecycle_test
+      - name: Desktop DS Beta
+        # Off (the default): a .nds is no ROM to the dialog, a drop or a zip,
+        # the DS's X/Y bindings hold nothing, and the settings file is the
+        # one a build without the setting writes. On: the settings round
+        # trip, .nds opens. The DS game checks need a homebrew ROM that is
+        # never in the repo, so they skip here.
+        shell: bash
+        run: ./dingbat_desktop_nds_test
       - name: Desktop modal notices (Dear ImGui, headless)
         # notice.nim in a real ImGui context with no window: Return, keypad
         # Enter and Escape close a notice as OK does; the press it appears

@@ -31,13 +31,16 @@ else:
 type
   PadHolds = object
     buttons: Table[cint, Input]  # held button -> the input its press meant
+    ds_buttons: Table[cint, DsInput]  # held button -> the DS X/Y it meant
     stick:   set[Input]          # left-stick directions past the deadzone
     trigger: bool                # right trigger past the threshold
 
   HeldInput* = object
     keys:          Table[cint, Input]    # held key -> the input its press meant
+    ds_keys:       Table[cint, DsInput]  # held key -> the DS X/Y its press meant
     pads:          Table[int32, PadHolds]  # by joystick instance id
     told:          set[Input]            # what the core was last told is held
+    ds_told:       set[DsInput]          # the same for a DS game's X and Y
     trigger_seen:  bool                  # some pad's trigger, as last applied
     trigger_ff:    bool                  # that pull turned fast forward on
     turbo_before:  bool                  # 2x Speed before that pull
@@ -76,11 +79,24 @@ proc take_changes*(h: var HeldInput): tuple[pressed, released: set[Input]] =
   result = (now - h.told, h.told - now)
   h.told = now
 
+proc ds_held*(h: HeldInput): set[DsInput] =
+  ## The DS's X and Y as some key or pad button holds them (only while a DS
+  ## game runs does anything bind them: `route_key`, `pad_ds_button`)
+  for inp in h.ds_keys.values: result.incl inp
+  for pad in h.pads.values:
+    for inp in pad.ds_buttons.values: result.incl inp
+
+proc take_ds_changes*(h: var HeldInput): tuple[pressed, released: set[DsInput]] =
+  let now = h.ds_held()
+  result = (now - h.ds_told, h.ds_told - now)
+  h.ds_told = now
+
 proc core_replaced*(h: var HeldInput) =
   ## A fresh core holds nothing and runs at normal speed: the next
   ## take_changes presses what is still held, and a trigger still held
   ## engages fast forward again.
   h.told = {}
+  h.ds_told = {}
   h.trigger_seen = false
   h.trigger_ff = false
 
@@ -91,7 +107,8 @@ proc bindable_key*(key: cint): bool =
 
 proc route_key*(h: var HeldInput; bindings: Table[cint, Input]; key: cint;
                 pressed, repeat, shortcut_mod, imgui_keyboard,
-                capturing: bool): KeyRoute =
+                capturing: bool;
+                ds_bindings: Table[cint, DsInput] = initTable[cint, DsInput]()): KeyRoute =
   ## One KeyDown (`pressed`) or KeyUp. A release lets go of what its press
   ## held before anything filters the keyboard: whatever has the keyboard now
   ## (an ImGui text field or modal, a binding capture, Cmd/Ctrl held) got it
@@ -99,8 +116,10 @@ proc route_key*(h: var HeldInput; bindings: Table[cint, Input]; key: cint;
   ## button, or rewind, held with nobody holding it. Everything else acts on
   ## the press, so letting go of a key while Cmd/Ctrl is down, or SDL
   ## releasing every held key when the window loses focus, fires nothing.
+  ## `ds_bindings` (a DS game's X and Y; empty otherwise) come first.
   if not pressed:
     h.keys.del(key)
+    h.ds_keys.del(key)
     if key == KEY_BACKQUOTE: return krRewind
   if imgui_keyboard: return krNone
   if capturing: return (if pressed: krNone else: krCapture)
@@ -109,6 +128,9 @@ proc route_key*(h: var HeldInput; bindings: Table[cint, Input]; key: cint;
   if key == KEY_F9: return (if repeat: krNone else: krMark)
   if key == KEY_F12: return (if repeat: krNone else: krScreenshot)
   if key == KEY_BACKQUOTE: return krRewind
+  if ds_bindings.hasKey(key):
+    h.ds_keys[key] = ds_bindings[key]
+    return krNone
   if bindings.hasKey(key):
     h.keys[key] = bindings[key]
     return krNone
@@ -145,6 +167,15 @@ proc pad_button*(h: var HeldInput; pad: int32; button: cint; bound: bool;
   if pad notin h.pads: return
   if not pressed: h.pads[pad].buttons.del(button)
   elif bound: h.pads[pad].buttons[button] = inp
+
+proc pad_ds_button*(h: var HeldInput; pad: int32; button: cint;
+                    inp: DsInput; pressed: bool) =
+  ## A DS game's X or Y on a pad button (bound by `nds_controller_bindings`,
+  ## ahead of that button's `Input`). Its release goes to `pad_button` as
+  ## well as here: each lets go of what its own press held.
+  if pad notin h.pads: return
+  if pressed: h.pads[pad].ds_buttons[button] = inp
+  else: h.pads[pad].ds_buttons.del(button)
 
 proc pad_stick*(h: var HeldInput; pad: int32; dir: Input; active: bool) =
   ## One direction of this pad's left stick, past the deadzone or not

@@ -7,6 +7,7 @@ import bios_selection
 import video_widget
 import keybindings_widget
 import controller_widget
+import general_widget
 
 type
   ConfigEditor* = ref object
@@ -16,6 +17,7 @@ type
     video*:       VideoWidget
     keybindings*: KeybindingsWidget
     controller*:  ControllerWidget
+    general*:     GeneralWidget
     open*:        bool
     prev_open:    bool
     # Pushes settings no widget owns (color-correction uniform, master volume,
@@ -31,6 +33,7 @@ proc new_config_editor*(cfg: Config; fe: FileExplorer): ConfigEditor =
     video:       new_video_widget(cfg),
     keybindings: new_keybindings_widget(cfg),
     controller:  new_controller_widget(cfg),
+    general:     new_general_widget(cfg),
     open:        false,
     prev_open:   false,
   )
@@ -40,12 +43,14 @@ proc do_reset(ed: ConfigEditor) =
   ed.video.reset()
   ed.keybindings.reset()
   ed.controller.reset()
+  ed.general.reset()
 
 proc do_apply(ed: ConfigEditor) =
   ed.bios.apply()
   ed.video.apply()
   ed.keybindings.apply()
   ed.controller.apply()
+  ed.general.apply()
   save_config(ed.cfg)
 
 proc has_unapplied_edits*(ed: ConfigEditor): bool =
@@ -56,11 +61,14 @@ proc has_unapplied_edits*(ed: ConfigEditor): bool =
   ed.video.apply_to(pending)
   ed.keybindings.apply_to(pending)
   ed.controller.apply_to(pending)
+  ed.general.apply_to(pending)
   not same_file(pending, ed.cfg)
 
 proc end_captures(ed: ConfigEditor) =
   ed.keybindings.selection = none(Input)
   ed.controller.selection = none(Input)
+  ed.keybindings.ds_selection = none(DsInput)
+  ed.controller.ds_selection = none(DsInput)
 
 # Restore every setting to its default while keeping the user's data (file
 # paths, recents, explorer directory, the runtime headless flag); the list of
@@ -84,6 +92,11 @@ proc render*(ed: ConfigEditor) =
   if ed.open and not ed.prev_open:
     ed.do_reset()
   ed.prev_open = ed.open
+  # The DS's rows follow the DS Beta box as it is ticked, before Apply
+  let ds = ed.general.ds_beta
+  ed.keybindings.show_ds = ds
+  ed.controller.show_ds = ds
+  ed.bios.show_ds = ds
 
   # Only the tab bar below says a tab is on screen: closed, or collapsed
   # (igBegin false), none is, so no capture keeps taking keys.
@@ -139,6 +152,13 @@ proc render*(ed: ConfigEditor) =
       if ed.bios.visible:
         igBeginGroup()
         ed.bios.render()
+        igEndGroup()
+        igEndTabItem()
+
+      ed.general.visible = igBeginTabItem("General", nil, 0)
+      if ed.general.visible:
+        igBeginGroup()
+        ed.general.render()
         igEndGroup()
         igEndTabItem()
 
