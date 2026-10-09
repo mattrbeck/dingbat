@@ -40,6 +40,8 @@ type
     hd_top*, hd_bottom*: seq[uint16]  ## BGR555, (256*hd) x (192*hd)
     hd_sub: array[256, uint32]        ## scratch: one sub-dot column of a 3D line
     hd_out, hd_out2: array[256, uint16]
+    hd_clear_gfx, hd_clear_line: array[256, uint16]  ## engine A's line with no 3D (hd_line)
+    hd_paint: HdPaint                 ## engine A's line painted with opaque 3D (hd_line)
     hd_a_gfx, hd_a_line: seq[uint16]  ## scratch: engine A's line at HD (hd rows)
     hd_vline, hd_bline: array[256, uint16]  ## VRAM display's and capture source B's 1x
                                       ## halfwords, read before the capture writes
@@ -235,17 +237,56 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   if g.hd_a_gfx.len != k * wk: g.hd_a_gfx.setLen(k * wk)
   if g.hd_a_line.len != k * wk: g.hd_a_line.setLen(k * wk)
   # engine A's composite at HD (only where it holds 3D: else the 1x one)
+  #
+  # Each dot's result is a function of the 3D pixel it shows and nothing
+  # else that varies between sub-dots, so a sub-dot whose 3D pixel equals
+  # the 1x one takes the 1x dot's result (a.gfx, a.line: drawn this line,
+  # never reused while HD is on). The others: a transparent 3D pixel
+  # gives the line composited with no 3D at all (one more composite, only
+  # on lines that need it), an opaque one `hd_dot` (the line painted once
+  # with the 3D layer opaque, then the effect and master brightness rules
+  # on that dot alone). Equal to compositing every sub-dot column whole
+  # (`render_hd_sub`, which 08b4eb78 did): docs/nds/hd3d.md.
   if has3d and (dm == 1 or cap_gfx):
+    let l1x = addr g3.line
+    let hofs = int(a.bghofs[0])
+    var prepared, clear_done = false
     for j in 0 ..< k:
       let row = (y * k + j) * wk
       let og = g.hd_rows(g.hd_a_gfx, j)
       let ol = g.hd_rows(g.hd_a_line, j)
-      for i in 0 ..< k:
-        for x in 0 ..< 256: g.hd_sub[x] = g3.hd_frame[row + x * k + i]
-        a.render_hd_sub(addr g.hd_sub, g.hd_out, g.hd_out2)
-        for x in 0 ..< 256:
-          og[x * k + i] = g.hd_out[x]
-          ol[x * k + i] = g.hd_out2[x]
+      for x in 0 ..< 256:
+        let g1 = a.gfx[x]
+        let d1 = a.line[x]
+        let sx = (x + hofs) and 511
+        if sx >= 256:
+          # BG0HOFS moves the 3D layer off this dot
+          for i in 0 ..< k:
+            og[x * k + i] = g1
+            ol[x * k + i] = d1
+          continue
+        let p1 = l1x[sx]
+        let src = row + sx * k
+        for i in 0 ..< k:
+          let p = g3.hd_frame[src + i]
+          var gg = g1
+          var dd = d1
+          if p != p1:
+            if alpha5(p) == 0:
+              if alpha5(p1) != 0:
+                if not clear_done:
+                  for q in 0 ..< 256: g.hd_sub[q] = 0
+                  a.render_hd_sub(addr g.hd_sub, g.hd_clear_gfx, g.hd_clear_line)
+                  clear_done = true
+                gg = g.hd_clear_gfx[x]
+                dd = g.hd_clear_line[x]
+            else:
+              if not prepared:
+                a.hd_prepare(g.hd_paint)
+                prepared = true
+              a.hd_dot(g.hd_paint, x, p, gg, dd)
+          og[x * k + i] = gg
+          ol[x * k + i] = dd
   # the display
   if lcd_on and a.enabled and dm == 1 and has3d:
     for j in 0 ..< k:

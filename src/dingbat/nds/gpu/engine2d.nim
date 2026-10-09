@@ -708,7 +708,54 @@ proc compute_windows(e: Engine2D): bool =
 # ---------------------------------------------------------------------------
 # Compositing
 
-proc composite(e: Engine2D; bgs: uint32; windows: bool) =
+const NO_LAYER = 0xFF'u8
+
+template effect_dot(e: Engine2D; x: int; m: uint32; l0, l1: int; p3: uint32; is3d: bool;
+                    bld, mode, eva, evb, evy: uint32; ctop, csec: untyped; SEC: static bool;
+                    cout, lo: untyped) =
+  ## The colour effect on one dot whose top two layers are l0 (colour
+  ## `ctop`) and l1 (`csec`), `p3` the 3D pixel when either is layer 0:
+  ## `cout` the result (left alone outside the effect window), `lo` the
+  ## result's 6-bit low bits. `composite`'s effect pass and the HD dots
+  ## (`hd_dot`) are this one body.
+  # the layers' 6-bit low bits (as composite_search)
+  let lo0 = if is3d and l0 == 0: lsb3d(p3) else: 0'u8
+  let lo1 = if is3d and l1 == 0: lsb3d(p3) else: 0'u8
+  lo = lo0
+  if (m and 0x20) != 0:
+    var c = ctop
+    let bot_second = when SEC: l1 != int(NO_LAYER) and (bld and (0x100'u32 shl l1)) != 0
+                     else: false
+    let attr = e.objattr[x]
+    if l0 == LAYER_OBJ and (attr and (OBJ_SEMI or OBJ_BITMAP)) != 0 and bot_second:
+      if (attr and OBJ_BITMAP) != 0:
+        let a = uint32(attr and 0xF)
+        c = blend_alpha(c, lo0, csec, lo1, a + 1, 15 - a, lo)
+      else:
+        c = blend_alpha(c, lo0, csec, lo1, eva, evb, lo)
+    elif l0 == 0 and is3d and bot_second:
+      c = blend_3d(p3, csec, lo1, lo)
+    elif (bld and (1'u32 shl l0)) != 0:
+      case mode
+      of 1:
+        if bot_second: c = blend_alpha(c, lo0, csec, lo1, eva, evb, lo)
+      of 2: c = brighten(c, lo0, evy, lo)
+      of 3: c = darken(c, lo0, evy, lo)
+      else: discard
+    cout = c
+
+type
+  HdPaint* = object
+    ## A line painted as `composite` paints it with the 3D layer opaque
+    ## wherever it can show (`hd_prepare`), and the line's effect settings:
+    ## what `hd_dot` needs to composite one dot over any opaque 3D pixel.
+    top, sec: array[256, uint16]
+    topl, secl: array[256, uint8]
+    windows: bool
+    bld, mode, eva, evb, evy: uint32
+    bmode, bfactor: uint32        ## master brightness (bmode 0: none)
+
+proc composite_k[EXPORT: static bool](e: Engine2D; bgs: uint32; windows: bool; hp: ptr HdPaint) =
   ## Top two layers per pixel in priority order (OBJ before BGs of equal
   ## priority, lower BG number first), then the colour effect.
   ##
@@ -742,7 +789,6 @@ proc composite(e: Engine2D; bgs: uint32; windows: bool) =
   let want2 = mode == 1 or e.line_semi or is3d
   let obj_on = (e.dispcnt and 0x1000) != 0 and e.obj_prios != 0
   let effects = (mode != 0 and (bld and 0x3F) != 0) or e.line_semi or is3d
-  const NO_LAYER = 0xFF'u8
   e.lsb_on = effects
   # locals, so the C compiler sees the passes' stores alias nothing they read
   var top {.noinit.}: array[256, uint16]   # the top layer's colour
@@ -788,35 +834,21 @@ proc composite(e: Engine2D; bgs: uint32; windows: bool) =
       let m = when WIN: uint32(win[x]) else: 0x3F'u32
       let l0 = int(topl[x])
       let l1 = when SEC: int(secl[x]) else: int(NO_LAYER)
-      # the 3D pixel (if layer 0 is the top or second layer) and the
-      # layers' 6-bit low bits (as composite_search)
+      # the 3D pixel, if layer 0 is the top or second layer
       let p3 = if is3d and (l0 == 0 or l1 == 0):
                  e.line3d[(x + int(e.bghofs[0])) and 511] else: 0'u32
-      let lo0 = if is3d and l0 == 0: lsb3d(p3) else: 0'u8
-      let lo1 = if is3d and l1 == 0: lsb3d(p3) else: 0'u8
-      var lo = lo0
-      if (m and 0x20) != 0:
-        var c = top[x]
-        let bot_second = when SEC: l1 != int(NO_LAYER) and (bld and (0x100'u32 shl l1)) != 0
-                         else: false
-        let attr = e.objattr[x]
-        if l0 == LAYER_OBJ and (attr and (OBJ_SEMI or OBJ_BITMAP)) != 0 and bot_second:
-          if (attr and OBJ_BITMAP) != 0:
-            let a = uint32(attr and 0xF)
-            c = blend_alpha(c, lo0, sec[x], lo1, a + 1, 15 - a, lo)
-          else:
-            c = blend_alpha(c, lo0, sec[x], lo1, eva, evb, lo)
-        elif l0 == 0 and is3d and bot_second:
-          c = blend_3d(p3, sec[x], lo1, lo)
-        elif (bld and (1'u32 shl l0)) != 0:
-          case mode
-          of 1:
-            if bot_second: c = blend_alpha(c, lo0, sec[x], lo1, eva, evb, lo)
-          of 2: c = brighten(c, lo0, evy, lo)
-          of 3: c = darken(c, lo0, evy, lo)
-          else: discard
-        top[x] = c
+      var lo: uint8
+      effect_dot(e, x, m, l0, l1, p3, is3d, bld, mode, eva, evb, evy, top[x], sec[x], SEC,
+                 top[x], lo)
       e.lsb[x] = lo
+
+  template export_paint() =
+    # hd_prepare: the painted layers and the effect settings, no effects
+    when EXPORT:
+      hp.top = top; hp.sec = sec; hp.topl = topl; hp.secl = secl
+      hp.windows = windows
+      hp.bld = bld; hp.mode = mode; hp.eva = eva; hp.evb = evb; hp.evy = evy
+      return
 
   if not effects:
     if windows: paint(true, false, false) else: paint(false, false, false)
@@ -830,10 +862,13 @@ proc composite(e: Engine2D; bgs: uint32; windows: bool) =
       paint(false, true, false); effect_pass(false, false)
   else:
     if windows:
-      paint(true, true, true); effect_pass(true, true)
+      paint(true, true, true); export_paint(); effect_pass(true, true)
     else:
-      paint(false, true, true); effect_pass(false, true)
+      paint(false, true, true); export_paint(); effect_pass(false, true)
   e.gfx = top
+
+template composite(e: Engine2D; bgs: uint32; windows: bool) =
+  composite_k[false](e, bgs, windows, nil)
 
 when defined(test_harness):
   var composite_by_search* = false
@@ -976,6 +1011,21 @@ proc end_line*(e: Engine2D) =
 # ---------------------------------------------------------------------------
 # Display output
 
+template bright_dot(c: var uint16; lo: uint8; mode, factor: uint32) =
+  ## MASTER_BRIGHT on one dot (mode 1 up, 2 down; apply_master_brightness).
+  var r = ch6(c, lo, 0)
+  var g = ch6(c, lo, 1)
+  var b = ch6(c, lo, 2)
+  if mode == 1:
+    r = (r * 16 + (63 - r) * factor) shr 4
+    g = (g * 16 + (63 - g) * factor) shr 4
+    b = (b * 16 + (63 - b) * factor) shr 4
+  else:
+    r = (r * (16 - factor)) shr 4
+    g = (g * (16 - factor)) shr 4
+    b = (b * (16 - factor)) shr 4
+  c = uint16((r shr 1) or ((g shr 1) shl 5) or ((b shr 1) shl 10))
+
 proc apply_master_brightness(e: Engine2D; lsb: bool) =
   ## MASTER_BRIGHT on 6-bit channels (GBATEK: "New = Old + (63-Old) *
   ## Factor/16", "New = Old - Old * Factor/16"), the result truncated (the
@@ -988,18 +1038,7 @@ proc apply_master_brightness(e: Engine2D; lsb: bool) =
   if mode == 0 or mode == 3 or factor == 0: return
   for i, c in e.line.mpairs:
     let lo = if lsb: e.lsb[i] else: 0'u8
-    var r = ch6(c, lo, 0)
-    var g = ch6(c, lo, 1)
-    var b = ch6(c, lo, 2)
-    if mode == 1:
-      r = (r * 16 + (63 - r) * factor) shr 4
-      g = (g * 16 + (63 - g) * factor) shr 4
-      b = (b * 16 + (63 - b) * factor) shr 4
-    else:
-      r = (r * (16 - factor)) shr 4
-      g = (g * (16 - factor)) shr 4
-      b = (b * (16 - factor)) shr 4
-    c = uint16((r shr 1) or ((g shr 1) shl 5) or ((b shr 1) shl 10))
+    bright_dot(c, lo, mode, factor)
 
 proc render_bg_line*(e: Engine2D; y: int) =
   ## The graphics line straight to the display line (display mode 1).
@@ -1039,6 +1078,42 @@ proc render_hd_sub*(e: Engine2D; sub3d: ptr array[256, uint32];
   e.line = keep_line
   e.gfx = keep_gfx
   e.line3d = keep3d
+
+proc hd_prepare*(e: Engine2D; hp: var HdPaint) =
+  ## For `hd_dot`: the line just drawn (hd_gfx_3d) painted again with the
+  ## 3D layer opaque wherever BG0HOFS lets it show. Overwrites the 3D
+  ## layer's scratch.
+  let dst = cast[ptr UncheckedArray[uint16]](addr e.bgpix[0][0])
+  let hofs = int(e.bghofs[0])
+  for x in 0 ..< 256:
+    dst[x] = if ((x + hofs) and 511) < 256: OPAQUE else: 0'u16
+  let windows = e.compute_windows()
+  composite_k[true](e, e.shown_bgs(), windows, addr hp)
+  let bm = uint32(e.master_bright shr 14)
+  let bf = min(16'u32, uint32(e.master_bright and 0x1F))
+  hp.bmode = if bm == 0 or bm == 3 or bf == 0: 0'u32 else: bm
+  hp.bfactor = bf
+
+proc hd_dot*(e: Engine2D; hp: HdPaint; x: int; p: uint32; gfx_out, line_out: var uint16) =
+  ## Dot x of the line just drawn as `render_hd_sub` would composite it
+  ## over the opaque 3D pixel `p`: when the opaque 3D layer is the top or
+  ## second layer there (hd_prepare), the same effect and master
+  ## brightness rules (effect_dot, bright_dot) on p's colour; else the 3D
+  ## layer is under two others and the dot is what any 3D pixel there gives
+  ## (outputs left alone).
+  let l0 = int(hp.topl[x])
+  let l1 = int(hp.secl[x])
+  if l0 != 0 and l1 != 0: return
+  let c3 = to_bgr555(p)
+  let ctop = if l0 == 0: c3 else: hp.top[x]
+  let m = if hp.windows: uint32(e.winmask[x]) else: 0x3F'u32
+  var c = ctop
+  var lo: uint8
+  effect_dot(e, x, m, l0, l1, p, true, hp.bld, hp.mode, hp.eva, hp.evb, hp.evy, ctop,
+             (if l1 == 0: c3 else: hp.sec[x]), true, c, lo)
+  gfx_out = c
+  if hp.bmode != 0: bright_dot(c, lo, hp.bmode, hp.bfactor)
+  line_out = c
 
 proc hd_bright*(e: Engine2D; line: var array[256, uint16]) =
   ## Master brightness on a line of 15-bit pixels (VRAM display), as
