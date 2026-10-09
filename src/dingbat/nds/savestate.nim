@@ -69,7 +69,8 @@ const
   GPU_SKIP = ["vram", "engine_a", "engine_b", "gpu3d", "mmem_req", "mmem_ctx",
               # HD 3D: the frontend's setting and its pictures (docs/nds/hd3d.md)
               "hd", "hd_top", "hd_bottom", "hd_sub", "hd_out", "hd_out2", "hd_a_gfx", "hd_a_line",
-              "cap_hd", "cap_1x", "hd_vline", "hd_bline", "hd_clear_gfx", "hd_clear_line", "hd_paint"]
+              "cap_hd", "cap_1x", "hd_vline", "hd_bline", "hd_clear_gfx", "hd_clear_line", "hd_paint",
+              "hd_lp", "hd_lg", "hd_ld"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
   # vgen/remap_gen/pbase: the 2D engines' line reuse (engine2d.nim); remap()

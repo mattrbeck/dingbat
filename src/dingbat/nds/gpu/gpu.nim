@@ -42,6 +42,8 @@ type
     hd_out, hd_out2: array[256, uint16]
     hd_clear_gfx, hd_clear_line: array[256, uint16]  ## engine A's line with no 3D (hd_line)
     hd_paint: HdPaint                 ## engine A's line painted with opaque 3D (hd_line)
+    hd_lp: array[256, uint32]         ## hd_line: per dot the last 3D pixel composited...
+    hd_lg, hd_ld: array[256, uint16]  ## ...and its composite and display results
     hd_a_gfx, hd_a_line: seq[uint16]  ## scratch: engine A's line at HD (hd rows)
     hd_vline, hd_bline: array[256, uint16]  ## VRAM display's and capture source B's 1x
                                       ## halfwords, read before the capture writes
@@ -251,28 +253,35 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
     let l1x = addr g3.line
     let hofs = int(a.bghofs[0])
     var prepared, clear_done = false
+    # per dot, the last 3D pixel composited and its results (first the 1x
+    # pixel's): a sub-dot repeating it (a texel magnified, a flat colour)
+    # costs a compare
+    for x in 0 ..< 256:
+      let sx = (x + hofs) and 511
+      # (BG0HOFS moving the 3D layer off a dot: every sub-dot is the 1x one)
+      g.hd_lp[x] = if sx < 256: l1x[sx] else: 0'u32
+      g.hd_lg[x] = a.gfx[x]
+      g.hd_ld[x] = a.line[x]
     for j in 0 ..< k:
       let row = (y * k + j) * wk
       let og = g.hd_rows(g.hd_a_gfx, j)
       let ol = g.hd_rows(g.hd_a_line, j)
       for x in 0 ..< 256:
-        let g1 = a.gfx[x]
-        let d1 = a.line[x]
         let sx = (x + hofs) and 511
         if sx >= 256:
-          # BG0HOFS moves the 3D layer off this dot
           for i in 0 ..< k:
-            og[x * k + i] = g1
-            ol[x * k + i] = d1
+            og[x * k + i] = g.hd_lg[x]
+            ol[x * k + i] = g.hd_ld[x]
           continue
         let p1 = l1x[sx]
         let src = row + sx * k
         for i in 0 ..< k:
           let p = g3.hd_frame[src + i]
-          var gg = g1
-          var dd = d1
-          if p != p1:
-            if alpha5(p) == 0:
+          if p != g.hd_lp[x]:
+            var gg = a.gfx[x]
+            var dd = a.line[x]
+            if p == p1: discard
+            elif alpha5(p) == 0:
               if alpha5(p1) != 0:
                 if not clear_done:
                   for q in 0 ..< 256: g.hd_sub[q] = 0
@@ -285,12 +294,36 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
                 a.hd_prepare(g.hd_paint)
                 prepared = true
               a.hd_dot(g.hd_paint, x, p, gg, dd)
-          og[x * k + i] = gg
-          ol[x * k + i] = dd
+            g.hd_lp[x] = p
+            g.hd_lg[x] = gg
+            g.hd_ld[x] = dd
+          og[x * k + i] = g.hd_lg[x]
+          ol[x * k + i] = g.hd_ld[x]
   # the display
   if lcd_on and a.enabled and dm == 1 and has3d:
     for j in 0 ..< k:
       copyMem(addr ta[][(y * k + j) * wk], addr g.hd_a_line[j * wk], wk * 2)
+  elif lcd_on and a.enabled and dm == 2 and
+       ((a.master_bright shr 14) in [0'u16, 3'u16] or (a.master_bright and 0x1F) == 0):
+    # VRAM display, no master brightness: each dot's HD sub-dots straight
+    # from the capture's copy while the bank holds what it wrote (`shadow`
+    # once per dot)
+    let bank = int((a.dispcnt shr 18) and 3)
+    let have = g.cap_1x[bank].len > 0
+    let kk = k * k
+    for x in 0 ..< 256:
+      let v1 = g.hd_vline[x]
+      let d = y * 256 + x
+      if have and g.cap_1x[bank][d] == (uint32(v1) or 0x10000'u32):
+        let base = d * kk
+        for j in 0 ..< k:
+          let row = (y * k + j) * wk + x * k
+          for i in 0 ..< k: ta[][row + i] = g.cap_hd[bank][base + j * k + i] and 0x7FFF
+      else:
+        let c = v1 and 0x7FFF
+        for j in 0 ..< k:
+          let row = (y * k + j) * wk + x * k
+          for i in 0 ..< k: ta[][row + i] = c
   elif lcd_on and a.enabled and dm == 2:
     let bank = int((a.dispcnt shr 18) and 3)
     for j in 0 ..< k:
@@ -321,6 +354,16 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   let roff = if dm == 2: 0 else: int((capc shr 26) and 3) * 0x8000
   let rbase = roff + y * cw * 2
   let l3 = if g3 != nil: addr g3.line else: nil
+  if csrc == 0 and not a_3d:
+    # the composite alone (the common case): its HD sub-dots, opaque
+    for x in 0 ..< cw:
+      let wd = ((wbase + x * 2) and 0x1FFFF) shr 1
+      for j in 0 ..< k:
+        for i in 0 ..< k:
+          g.cap_hd[dst_bank][wd * kk + j * k + i] =
+            (if has3d: g.hd_a_gfx[j * wk + x * k + i] else: a.gfx[x]) or 0x8000
+      g.cap_1x[dst_bank][wd] = uint32(uint16(dst[wd * 2]) or (uint16(dst[wd * 2 + 1]) shl 8)) or 0x10000'u32
+    return
   for x in 0 ..< cw:
     let wd = ((wbase + x * 2) and 0x1FFFF) shr 1
     let rd = ((rbase + x * 2) and 0x1FFFF) shr 1
