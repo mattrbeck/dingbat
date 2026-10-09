@@ -292,9 +292,8 @@ the screens and the polygon RAM.
 
 ## Left
 
-- Rewind and run-ahead in a frontend (`state_payload` /
-  `load_state_payload` are the hooks; main's `common/rewind.nim` takes
-  payload strings).
+- Rewind and run-ahead in the native and iOS front ends (the web app has
+  them: docs/nds/features.md, on `state_payload` / `load_own_payload`).
 - Migrations once DS states must outlive a build (see Compatibility).
 - Firmware writes (user settings saved through SPI) are not in the state:
   they persist in the firmware image the frontend keeps, if any.

@@ -16819,9 +16819,10 @@ const updateRumble = (timestamp) => {
 // GB/GBA session never pays for it. It is the loaded game like any other
 // (currentRomName "rom.nds"): the library, battery saves, pause, the home
 // screen and the WebGL presenter all serve it. What the DS core does not
-// have yet is gated off under body.nds-mode: save states (with them resume
-// snapshots, slots, rewind, run-ahead and retroactive clips), the link cable
-// and cheats. docs/nds/web.md has the list and the reasons.
+// have yet is gated off under body.nds-mode: retroactive clips and Record,
+// the rewind scrubber and the link cable; save states, rewind and cheats
+// come back as the core exports them (body.nds-states, .nds-rewind,
+// .nds-cheats). docs/nds/web.md and docs/nds/features.md have the reasons.
 //
 // DS games are local-only: no ROM, save, picture or library entry of one
 // goes to Google Drive (driveExcluded). The app on the account's other
