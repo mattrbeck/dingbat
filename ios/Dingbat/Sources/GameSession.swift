@@ -381,9 +381,13 @@ final class GameSession: NSObject, ObservableObject {
     /// by 3 ms; a run that merely ended within 2 ms of its refresh, by 1 (up
     /// to 12). Only 120 on time in a row narrow it, by 0.5 ms (down to 3), so
     /// it settles where misses are rare (well under 1 in 500), not where
-    /// widening and narrowing balance.
+    /// widening and narrowing balance. A real miss is a hitch (a picture held
+    /// for two refreshes), worse than the latency saved, so after one the
+    /// frames run at once for 10 s: at most one hitch in 10 s is ever late
+    /// start's doing.
     private var lateMargin: CFTimeInterval = 0.004
     private var lateOnTime = 0
+    private var lateCooldownUntil: CFTimeInterval = 0
 
     #if DEBUG
     private var lateRuns = 0, lateMissed = 0, lateNear = 0   // the latency test's report
@@ -393,6 +397,7 @@ final class GameSession: NSObject, ObservableObject {
         #if DEBUG
         if missed { lateMissed += 1 } else if near { lateNear += 1 }
         #endif
+        if missed { lateCooldownUntil = CACurrentMediaTime() + 10 }
         if missed || near {
             lateOnTime = 0
             lateMargin = min(lateMargin + (missed ? 0.003 : 0.001), 0.012)
@@ -418,7 +423,8 @@ final class GameSession: NSObject, ObservableObject {
         }
         guard game != nil, !clipHold, !flightHold else { return }
         if !lateRunning && Settings.shared.lateStart && !paused && !rewinding &&
-            speed != .fastForward && !NetLink.shared.linked && !twoPlayer && lastTick > 0 {
+            speed != .fastForward && !NetLink.shared.linked && !twoPlayer && lastTick > 0 &&
+            CACurrentMediaTime() > lateCooldownUntil {
             let period = link.targetTimestamp - link.timestamp
             let dt = link.timestamp - lastTick
             let owed = frameStep(link, dt: min(dt, 0.25)).n
@@ -539,6 +545,12 @@ final class GameSession: NSObject, ObservableObject {
             runPlay += min(dt, 0.25)
             if let g = game { CrashWatch.playing(g.fileName, played: runPlay) }
             saveCheckTime += dt
+            #if DEBUG
+            if pacingUntil > 0 {
+                pacingTick(link, ran: ran, presented: changed || twoPlayer)
+                if changed || twoPlayer { GameRenderer.shared.pacingTarget = link.targetTimestamp }
+            }
+            #endif
             if changed || twoPlayer { present() }
             if speed != .fastForward && !twoPlayer {
                 lateWorkEnd = CACurrentMediaTime()
@@ -622,6 +634,82 @@ final class GameSession: NSObject, ObservableObject {
     func startLatencyTest(_ n: Int) {
         latLeft = n
         scheduleLatencyPress()
+    }
+
+    /// `-pacing-test S`: S seconds of play (a game whose picture moves every
+    /// frame); per refresh the frames run, per present the refresh it aims at
+    /// and when it reached the screen (GameRenderer.onPacing). An even
+    /// cadence shows every present on its own refresh, one after another; a
+    /// late one repeats the picture before it, then jumps. tmp/pacing.txt.
+    private var pacingUntil: CFTimeInterval = 0
+    private var pacingTicks: [(t: CFTimeInterval, period: CFTimeInterval, ran: Int, presented: Bool)] = []
+    private var pacingShown: [(target: CFTimeInterval, shown: CFTimeInterval)] = []
+
+    func startPacingTest(_ seconds: Double) {
+        pacingTicks = []
+        pacingShown = []
+        pacingUntil = CACurrentMediaTime() + seconds
+        GameRenderer.shared.onPacing = { [weak self] target, shown in
+            self?.pacingShown.append((target, shown))
+        }
+    }
+
+    private func pacingTick(_ link: CADisplayLink, ran: Int, presented: Bool) {
+        pacingTicks.append((link.timestamp, link.targetTimestamp - link.timestamp, ran, presented))
+        guard CACurrentMediaTime() > pacingUntil else { return }
+        pacingUntil = 0
+        // The last presents' reports are still on their way
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.pacingReport() }
+    }
+
+    private func pacingReport() {
+        GameRenderer.shared.onPacing = nil
+        let periods = pacingTicks.map(\.period).sorted()
+        let period = periods.isEmpty ? 1.0 / 60 : periods[periods.count / 2]
+        var ranHist: [Int: Int] = [:]
+        for t in pacingTicks { ranHist[t.ran, default: 0] += 1 }
+        // Refreshes between callbacks: >1 is a callback the app missed
+        var gapHist: [Int: Int] = [:]
+        for i in 1..<max(1, pacingTicks.count) {
+            gapHist[Int(((pacingTicks[i].t - pacingTicks[i - 1].t) / period).rounded()), default: 0] += 1
+        }
+        // Each present's lateness in refreshes and the refresh it landed on
+        var lateHist: [Int: Int] = [:]
+        var dropped = 0
+        var landed: [Int] = []
+        let t0 = pacingShown.first?.target ?? 0
+        for p in pacingShown {
+            #if targetEnvironment(simulator)
+            // GPU done less than 1 ms before its refresh: counted as missed (as late start does)
+            let late = p.shown <= p.target - 0.001 ? 0 : Int(((p.shown - p.target + 0.001) / period).rounded(.up))
+            #else
+            if p.shown == 0 { dropped += 1; continue }
+            let late = max(0, Int(((p.shown - p.target) / period).rounded()))
+            #endif
+            lateHist[late, default: 0] += 1
+            landed.append(Int(((p.target - t0) / period).rounded()) + late)
+        }
+        // Refreshes from one shown picture to the next: 1 is even; 2+ held a
+        // picture (a repeat); 0 replaced one before it was ever seen
+        var stepHist: [Int: Int] = [:]
+        for i in 1..<max(1, landed.count) { stepHist[landed[i] - landed[i - 1], default: 0] += 1 }
+        func fmt(_ h: [Int: Int]) -> String {
+            h.keys.sorted().map { "\($0):\(h[$0]!)" }.joined(separator: " ")
+        }
+        let out = String(format: """
+            pacing period ms %.2f refreshes %d presents %d (reported %d) dropped %d
+            frames per refresh %@
+            callback gap (refreshes) %@
+            present lateness (refreshes) %@
+            shown-to-shown step (refreshes) %@
+            late runs %d missed %d near %d margin ms %.1f per frame ms %.2f
+
+            """, period * 1000, pacingTicks.count, pacingTicks.filter(\.presented).count,
+            pacingShown.count, dropped, fmt(ranHist) as NSString, fmt(gapHist) as NSString,
+            fmt(lateHist) as NSString, fmt(stepHist) as NSString,
+            lateRuns, lateMissed, lateNear, lateMargin * 1000, lateFrame * 1000)
+        try? out.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pacing.txt"),
+                       atomically: true, encoding: .utf8)
     }
 
     private func fbHash() -> UInt64 {

@@ -126,6 +126,14 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     /// finished. Each draw captures its own target.
     var presentTarget: CFTimeInterval = 0
     var onLateResult: ((Bool) -> Void)?
+    #if DEBUG
+    /// The pacing test (GameSession `-pacing-test`): the refresh the next
+    /// draw aims at, and (target, when it reached the screen) reported on the
+    /// main queue: on a device the presented time (0: never shown), in the
+    /// simulator the GPU's end.
+    var pacingTarget: CFTimeInterval = 0
+    var onPacing: ((CFTimeInterval, CFTimeInterval) -> Void)?
+    #endif
 
     func draw(in view: MTKView) {
         guard let pipeline, let queue, let gameTex, let borderTex,
@@ -179,6 +187,23 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             }
             #endif
         }
+        #if DEBUG
+        let pt = pacingTarget
+        pacingTarget = 0
+        if pt > 0, let rec = onPacing {
+            #if targetEnvironment(simulator)
+            cmd.addCompletedHandler { c in
+                let end = c.gpuEndTime
+                DispatchQueue.main.async { rec(pt, end) }
+            }
+            #else
+            drawable.addPresentedHandler { d in
+                let shown = d.presentedTime
+                DispatchQueue.main.async { rec(pt, shown) }
+            }
+            #endif
+        }
+        #endif
         cmd.present(drawable)
         cmd.commit()
     }

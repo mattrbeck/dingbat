@@ -116,6 +116,10 @@ struct DingbatApp: App {
                     if let n = value("-latency-test").flatMap(Int.init) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.session.startLatencyTest(n) }
                     }
+                    // `-pacing-test S`: S seconds of pacing records (GameSession).
+                    if let s = value("-pacing-test").flatMap(Double.init) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { model.session.startPacingTest(s) }
+                    }
                     #endif
                     // `-speed 2x|slow|ff`: that speed once the game runs.
                     if let sp = value("-speed") {
