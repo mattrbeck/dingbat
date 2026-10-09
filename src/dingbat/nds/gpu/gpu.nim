@@ -262,43 +262,53 @@ proc hd_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
       g.hd_lp[x] = if sx < 256: l1x[sx] else: 0'u32
       g.hd_lg[x] = a.gfx[x]
       g.hd_ld[x] = a.line[x]
-    for j in 0 ..< k:
-      let row = (y * k + j) * wk
-      let og = g.hd_rows(g.hd_a_gfx, j)
-      let ol = g.hd_rows(g.hd_a_line, j)
-      for x in 0 ..< 256:
-        let sx = (x + hofs) and 511
-        if sx >= 256:
+    # WG / WL: the composite (capture) and display results are wanted
+    template sub_dots(WG, WL: static bool) =
+      for j in 0 ..< k:
+        let og = g.hd_rows(g.hd_a_gfx, j)
+        let ol = g.hd_rows(g.hd_a_line, j)
+        let hf = cast[ptr UncheckedArray[uint32]](addr g3.hd_frame[(y * k + j) * wk])
+        for x in 0 ..< 256:
+          var lp = g.hd_lp[x]
+          var lg = g.hd_lg[x]
+          var ld = g.hd_ld[x]
+          let sx = (x + hofs) and 511
+          if sx >= 256:
+            for i in 0 ..< k:
+              when WG: og[x * k + i] = lg
+              when WL: ol[x * k + i] = ld
+            continue
+          let p1 = l1x[sx]
           for i in 0 ..< k:
-            og[x * k + i] = g.hd_lg[x]
-            ol[x * k + i] = g.hd_ld[x]
-          continue
-        let p1 = l1x[sx]
-        let src = row + sx * k
-        for i in 0 ..< k:
-          let p = g3.hd_frame[src + i]
-          if p != g.hd_lp[x]:
-            var gg = a.gfx[x]
-            var dd = a.line[x]
-            if p == p1: discard
-            elif alpha5(p) == 0:
-              if alpha5(p1) != 0:
-                if not clear_done:
-                  for q in 0 ..< 256: g.hd_sub[q] = 0
-                  a.render_hd_sub(addr g.hd_sub, g.hd_clear_gfx, g.hd_clear_line)
-                  clear_done = true
-                gg = g.hd_clear_gfx[x]
-                dd = g.hd_clear_line[x]
-            else:
-              if not prepared:
-                a.hd_prepare(g.hd_paint)
-                prepared = true
-              a.hd_dot(g.hd_paint, x, p, gg, dd)
-            g.hd_lp[x] = p
-            g.hd_lg[x] = gg
-            g.hd_ld[x] = dd
-          og[x * k + i] = g.hd_lg[x]
-          ol[x * k + i] = g.hd_ld[x]
+            let p = hf[sx * k + i]
+            if p != lp:
+              var gg = a.gfx[x]
+              var dd = a.line[x]
+              if p == p1: discard
+              elif alpha5(p) == 0:
+                if alpha5(p1) != 0:
+                  if not clear_done:
+                    for q in 0 ..< 256: g.hd_sub[q] = 0
+                    a.render_hd_sub(addr g.hd_sub, g.hd_clear_gfx, g.hd_clear_line)
+                    clear_done = true
+                  gg = g.hd_clear_gfx[x]
+                  dd = g.hd_clear_line[x]
+              else:
+                if not prepared:
+                  a.hd_prepare(g.hd_paint)
+                  prepared = true
+                a.hd_dot(g.hd_paint, x, p, gg, dd)
+              lp = p
+              lg = gg
+              ld = dd
+            when WG: og[x * k + i] = lg
+            when WL: ol[x * k + i] = ld
+          g.hd_lp[x] = lp
+          g.hd_lg[x] = lg
+          g.hd_ld[x] = ld
+    if dm != 1: sub_dots(true, false)
+    elif cap_gfx: sub_dots(true, true)
+    else: sub_dots(false, true)
   # the display
   if lcd_on and a.enabled and dm == 1 and has3d:
     for j in 0 ..< k:
