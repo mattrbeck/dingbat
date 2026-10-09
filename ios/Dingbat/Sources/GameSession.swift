@@ -372,7 +372,12 @@ final class GameSession: NSObject, ObservableObject {
     private var lateWork: CFTimeInterval = 0.002
     private var lateArmed = false
     private var lateRunning = false
-    private static let lateMargin: CFTimeInterval = 0.004
+    /// Time left for the GPU and the compositor after a late run. A run
+    /// that ends within 2 ms of its refresh (main-thread work held it, or the
+    /// frames ran long) has likely missed it: the margin widens by 2 ms (up
+    /// to 12); one that ends in time narrows it slowly back towards 3, so a
+    /// device or a scene that cannot keep up backs off on its own.
+    private var lateMargin: CFTimeInterval = 0.004
     #if DEBUG
     private var shownAt: CFTimeInterval = 0   // the refresh the newest present lands on
     #endif
@@ -382,7 +387,7 @@ final class GameSession: NSObject, ObservableObject {
         if lateArmed { return }   // the delayed run of the last refresh is still pending
         if !lateRunning && Settings.shared.lateStart && !paused && !rewinding &&
             speed != .fastForward && !NetLink.shared.linked && !twoPlayer {
-            let wait = link.targetTimestamp - CACurrentMediaTime() - lateWork - Self.lateMargin
+            let wait = link.targetTimestamp - CACurrentMediaTime() - lateWork - lateMargin
             if wait > 0.001 {
                 lateArmed = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
@@ -391,7 +396,11 @@ final class GameSession: NSObject, ObservableObject {
                     self.lateRunning = true
                     let t0 = CACurrentMediaTime()
                     self.tick(link)
-                    self.lateWork += (min(CACurrentMediaTime() - t0, 0.02) - self.lateWork) * 0.1
+                    let t1 = CACurrentMediaTime()
+                    self.lateWork += (min(t1 - t0, 0.02) - self.lateWork) * 0.1
+                    self.lateMargin = t1 > link.targetTimestamp - 0.002
+                        ? min(self.lateMargin + 0.002, 0.012)
+                        : max(self.lateMargin - 0.0001, 0.003)
                     self.lateRunning = false
                 }
                 return
@@ -450,8 +459,9 @@ final class GameSession: NSObject, ObservableObject {
             var unseen = false
             repeat {
                 let f0 = CACurrentMediaTime()
-                unseen = !drawAll && ran + 1 < 40 && f0 - t0 + ffSkipTime + ffDrawTime < budget
-                if unseen { dingbat_unseen_next(1) }
+                // Only one the core will really leave undrawn counts (not under the SGB)
+                unseen = !drawAll && ran + 1 < 40 && f0 - t0 + ffSkipTime + ffDrawTime < budget &&
+                    dingbat_unseen_next(1) != 0
                 dingbat_run_frame()
                 let took = min(CACurrentMediaTime() - f0, 0.05)
                 if unseen { ffSkipTime += (took - ffSkipTime) * 0.1 }

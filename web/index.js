@@ -15056,7 +15056,12 @@ const thumbsPictureOne = async (cand, run, remote) => {
   for (let done = 0; done < frames && performance.now() < deadline;) {
     if (run.cancelled || currentRomName) return false; // a launch took the core
     let n = Math.min(THUMBS_CHUNK, frames - done);
-    for (let i = 0; i < n; i++) Module._loop_tick();
+    // Only the picture after the last is kept (docs/frame-skip.md); each chunk
+    // ends on a drawn frame, as the deadline can end the run there
+    for (let i = 0; i < n; i++) {
+      if (i < n - 1 && Module._wasm_unseen_next) Module._wasm_unseen_next(1);
+      Module._loop_tick();
+    }
     done += n;
     if (Module._clearAudioBuffer) Module._clearAudioBuffer(); // nobody plays it
     await new Promise((r) => setTimeout(r, 0));
@@ -16711,11 +16716,12 @@ var Module = {
     // to compare.
     const drawAll = new URLSearchParams(location.search).get("draw") === "all";
     let unseenFrames = 0;   // diagnostics: frames run undrawn (the ff log)
-    // Marks the next frame unseen; whether it did. `ff`: fast-forward, where
-    // the LCD response does not hold the frames back (wasm take_unseen).
+    // Marks the next frame unseen; whether the core will leave it undrawn
+    // (not under the LCD response short of fast-forward, nor the Super Game
+    // Boy). `ff`: fast-forward.
     const unseenNext = (ff) => {
       if (drawAll || !Module._wasm_unseen_next) return false;
-      Module._wasm_unseen_next(ff ? 1 : 0);
+      if (Module._wasm_unseen_next(ff ? 1 : 0) !== 1) return false;
       unseenFrames++;
       return true;
     };

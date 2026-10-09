@@ -403,9 +403,13 @@ proc clip_note_frame()
 var unseenNext = false
 var unseenAtFF = false
 
-proc dingbat_unseen_next(fastForward: cint) {.exportc, cdecl.} =
+proc dingbat_unseen_next(fastForward: cint): cint {.exportc, cdecl.} =
+  ## 1 when the frame will go undrawn (not under the LCD response short of
+  ## fast-forward, nor the Super Game Boy): the shell times the two apart.
   unseenNext = true
   unseenAtFF = fastForward != 0
+  let sgb = stateKind == ekGB and stateGb != nil and stateGb.sgb_active()
+  cint(not sgb and (not lcdOn or unseenAtFF))
 
 proc take_unseen(): bool =
   ## This call's frame will not be shown (one-shot).
@@ -1172,15 +1176,23 @@ proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   clipEnd = endFrame
   clipReplaying = true
   if statePrinter != nil: statePrinter.muted = true
-  # Silent pre-roll to exactly the chosen frame: its sound is dropped.
+  # Silent pre-roll to exactly the chosen frame: its sound is dropped, and
+  # only its last frame is drawn, as only it is presented (docs/frame-skip.md).
   let mode = dingbat_audio_get_mode()
   dingbat_audio_set_mode(2)
   while clipCursor < startFrame:
     let idx = clipCursor - clipInputsStart
     if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
+    let hide = clipCursor < startFrame - 1
     case stateKind
-    of ekGBA: stateGba.step_frame()
-    of ekGB:  stateGb.step_frame()
+    of ekGBA:
+      stateGba.ppu.no_draw = hide
+      stateGba.step_frame()
+      stateGba.ppu.no_draw = false
+    of ekGB:
+      stateGb.ppu.no_draw = hide and not stateGb.sgb_active()
+      stateGb.step_frame()
+      stateGb.ppu.no_draw = false
     of ekNone: break
     inc clipCursor
   dingbat_audio_set_mode(mode)

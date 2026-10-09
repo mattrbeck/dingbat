@@ -65,7 +65,7 @@ void dingbat_run_frame_ahead(int n);
  * drawn and runs no run-ahead lookahead. Under the LCD response only a
  * fast-forward one (fastForward = 1) is skipped. One-shot.
  * docs/frame-skip.md. */
-void dingbat_unseen_next(int fastForward);
+int dingbat_unseen_next(int fastForward);   /* 1: it will go undrawn */
 
 /* The picture to present: raw BGR555 (mask 0x7FFF), after the LCD response
  * when that is on. dingbat_fb_width() x dingbat_fb_height(). NULL with no

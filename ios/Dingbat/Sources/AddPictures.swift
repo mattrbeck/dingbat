@@ -137,7 +137,13 @@ final class AddPictures: ObservableObject {
         while ran < frames && CACurrentMediaTime() < deadline {
             // A launch takes the core: this one gives way.
             guard !cancelled, GameSession.shared.game == nil else { return false }
-            for _ in 0..<min(Self.chunk, frames - ran) { dingbat_run_frame() }
+            // Only the picture after the last is kept (docs/frame-skip.md); each
+            // chunk ends on a drawn frame, as the deadline can end the run there
+            let n = min(Self.chunk, frames - ran)
+            for i in 0..<n {
+                if i < n - 1 { dingbat_unseen_next(1) }
+                dingbat_run_frame()
+            }
             ran += Self.chunk
             dingbat_audio_clear()
             await Task.yield()

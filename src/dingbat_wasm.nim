@@ -866,15 +866,24 @@ proc clip_begin(startAgo, endAgo: cint): cint {.exportc.} =
   clipReplaying = true
   # A replay re-sends serial bytes the printer already processed; mute it.
   if statePrinter != nil: statePrinter.muted = true
-  # Silent pre-roll (at most CLIP_SNAP_INTERVAL-1 frames, audio dropped,
-  # nothing presented) so the range starts on exactly the chosen frame.
+  # Silent pre-roll (up to about CLIP_SNAP_INTERVAL frames, more after
+  # fast-forward, whose anchors wait for drawn frames; audio dropped, only
+  # the last drawn, as only it is presented) so the range starts on exactly
+  # the chosen frame.
   audioSuppressed = true
   while clipCursor < startFrame:
     let idx = clipCursor - clipInputsStart
     if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
+    let hide = clipCursor < startFrame - 1
     case stateKind
-    of ekGBA: stateGba.step_frame()
-    of ekGB:  stateGb.step_frame()
+    of ekGBA:
+      stateGba.ppu.no_draw = hide
+      stateGba.step_frame()
+      stateGba.ppu.no_draw = false
+    of ekGB:
+      stateGb.ppu.no_draw = hide and not stateGb.sgb_active()
+      stateGb.step_frame()
+      stateGb.ppu.no_draw = false
     of ekNone: break
     inc clipCursor
   audioSuppressed = false
@@ -1098,9 +1107,13 @@ proc gb_rewind_thumb(g: GB): RewindThumb =
 var unseenNext = false
 var unseenAtFF = false
 
-proc wasm_unseen_next(fastForward: cint) {.exportc.} =
+proc wasm_unseen_next(fastForward: cint): cint {.exportc.} =
+  ## 1 when the frame will go undrawn (not under the LCD response short of
+  ## fast-forward, nor the Super Game Boy): JS times the two kinds apart.
   unseenNext = true
   unseenAtFF = fastForward != 0
+  let sgb = stateKind == ekGB and stateGb != nil and stateGb.sgb_active()
+  cint(not sgb and (not lcdOn or unseenAtFF))
 
 proc take_unseen(): bool =
   ## This tick's frame will not be shown (one-shot).
