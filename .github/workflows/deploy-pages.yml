@@ -58,6 +58,15 @@ jobs:
       - name: Build WASM
         run: nim c -d:emscripten src/dingbat_wasm.nim
 
+      - name: Build the DS core's WASM
+        # web/nds/nds.{js,wasm}: fetched only when a DS game loads, which
+        # needs DS Beta on (Settings > General > Advanced).
+        run: nim c -d:emscripten src/dingbat_nds_wasm.nim
+
+      - name: Leave out the DS dev page
+        # tools/serve_nds_dev.sh's standalone core page and its probes.
+        run: rm -f web/nds.html web/nds/nds-page.js web/nds/audio-probe.mjs web/nds/shot.mjs
+
       - name: Stamp service worker version
         run: |
           sed -i "s/CACHE_VERSION = \"dev\"/CACHE_VERSION = \"${GITHUB_SHA::7}\"/" web/sw.js
@@ -78,7 +87,7 @@ jobs:
         run: |
           set -eo pipefail
           .github/scripts/retry.sh 3 npm install --no-save --no-audit --no-fund esbuild@0.28.1
-          for f in index.js netplay.js glpresent.js sdputil.js embed.js; do
+          for f in index.js netplay.js glpresent.js sdputil.js embed.js nds/ndsutil.js nds/ndsaudio.js; do
             npx esbuild "web/$f" --minify-whitespace --minify-syntax \
               --outfile="web/$f" --allow-overwrite
           done

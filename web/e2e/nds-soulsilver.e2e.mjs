@@ -56,6 +56,8 @@ const ready = (page) => page.waitForFunction(
   () => document.body.classList.contains("runtime-ready"), null, { timeout: 30000 });
 const newPage = async (ctx) => {
   const page = await ctx.newPage();
+  // DS games load only with DS Beta on (Settings > General > Advanced).
+  await page.addInitScript(() => localStorage.setItem("ds-beta", "1"));
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("dialog", (d) => d.accept()); // the import's "overwrite?" questions

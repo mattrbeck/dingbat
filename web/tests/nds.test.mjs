@@ -341,9 +341,14 @@ const fakeCore = () => {
   return c;
 };
 
+// These are DS Beta's (Settings > General > Advanced): on in every app here
+// (ds-beta.test.mjs has the app with it off).
+const dsApp = (opts = {}) =>
+  loadApp({ ...opts, localStorageSeed: { "ds-beta": "1", ...(opts.localStorageSeed || {}) } });
+
 // An app with the stand-in core already fetched (loadNdsCore resolves it).
 const appWithCore = async (opts) => {
-  const app = await loadApp(opts);
+  const app = await dsApp(opts);
   const core = fakeCore();
   app.context.__core = core;
   app.runIn("ndsCore = __core");
@@ -467,10 +472,15 @@ test("X and Y keys are game keys only while a DS game runs", async () => {
 });
 
 test("a 10-key profile from before X/Y keeps its keys and gains the defaults", async () => {
-  const app = await loadApp();
+  const app = await dsApp();
+  // Home row stays Home row: its own X/Y (I, U).
   app.idb.set("keybindings", [101, 100, 115, 102, 107, 106, 108, 59, 119, 114]);
   await app.runIn("loadKeybindingsFromStorage()");
-  // D is that profile's Down, so X gets no key; C is free for Y.
+  eq(app.runIn("activeBindings.slice(10)"), [105, 117]);
+  assert.equal(app.runIn("detectPreset(activeBindings)"), "homerow");
+  // A custom one with D as Down: X gets no key; C is free for Y.
+  app.idb.set("keybindings", [101, 100, 115, 102, 107, 106, 108, 59, 119, 113]);
+  await app.runIn("loadKeybindingsFromStorage()");
   eq(app.runIn("activeBindings.slice(10)"), [-1, 99]);
 });
 
@@ -535,7 +545,7 @@ test("the display choices are stored, come back, and anything unknown falls back
   eq(app.idb.get("nds-display"), { swap: true, gap: "console", rot: 3, barHide: false });
   assert.equal(app.document.body.classList.contains("nds-bar-hide"), false);
   // A fresh page reads them back.
-  const app2 = await loadApp();
+  const app2 = await dsApp();
   for (const [k, v] of app.idb) app2.idb.set(k, v);
   await app2.runIn("loadNdsLayoutFromStorage()");
   assert.equal(app2.runIn("ndsLayoutPref"), "focus");
@@ -833,4 +843,55 @@ test("a state taken switched off loads switched off; Library closes the game", a
   assert.equal(app.api.currentRomName, null);
   assert.equal(core.booted.at(-1).how, "unload");
   assert.equal(app.document.body.classList.contains("nds-off"), false);
+});
+
+// --- DS Beta (Settings > General > Advanced): off by default, and off the
+// app is what it was before the DS core.
+
+test("DS Beta off: a .nds or .dsv is refused as any unknown file, and nothing of the DS shows", async () => {
+  const app = await loadApp();
+  assert.equal(app.runIn("dsBetaOn"), false, "off by default");
+  assert.equal(app.document.body.classList.contains("ds-beta"), false);
+  await app.api.handleRomFile(fakeFile("Hello.nds", ROM));
+  await settle();
+  eq(app.alerts, ["Unsupported file. Load a .gba, .gb, or .gbc ROM (or a .zip containing one)."]);
+  assert.equal(app.idb.get("rom:Hello.nds"), undefined, "not kept");
+  assert.equal(app.api.currentRomName, null);
+  eq(app.runIn("ROM_EXTS"), [".gba", ".gb", ".gbc", ".cgb", ".sgb"]);
+  eq(app.runIn("[...SAVE_IMPORT_EXTS]"), [".sav", ".srm", ".sps", ".xps", ".gsv"]);
+  eq(app.runIn("SETTINGS_SECTIONS"), ["controls", "gb", "gba", "video", "audio", "general"]);
+  app.runIn("renderKbBindings()");
+  assert.equal(app.runIn("kbBindingsDiv.children.length"), 10, "no X/Y key rows");
+});
+
+test("DS Beta off: DS games leave the library; on, they come back", async () => {
+  const app = await loadApp();
+  app.idb.set("recent", [{ name: "A.nds", ts: 3 }, { name: "B.gba", ts: 2 }, { name: "C.gb", ts: 1 }]);
+  for (const n of ["A.nds", "B.gba", "C.gb"]) app.idb.set("rom:" + n, { name: n, data: u8(1) });
+  await app.api.refreshHomeRecent();
+  await settle();
+  eq(app.runIn("libNames"), ["B.gba", "C.gb"]);
+  assert.ok(app.idb.get("rom:A.nds"), "its file is kept");
+  app.runIn("setDsBeta(true)");
+  await settle();
+  eq(app.runIn("libNames"), ["A.nds", "B.gba", "C.gb"]);
+  eq(app.lsMap.get("ds-beta"), "1", "remembered");
+  assert.equal(app.document.body.classList.contains("ds-beta"), true);
+  eq(app.runIn("SETTINGS_SECTIONS"), ["controls", "gb", "gba", "ds", "video", "audio", "general"]);
+  app.runIn("setDsBeta(false)");
+  await settle();
+  eq(app.runIn("libNames"), ["B.gba", "C.gb"]);
+  assert.equal(app.lsMap.has("ds-beta"), false);
+});
+
+test("DS Beta turned off while a DS game runs closes the game, its save kept", async () => {
+  const { app, core } = await appWithCore();
+  await app.api.handleRomFile(fakeFile("Saver.nds", ROM));
+  for (let i = 0; i < 20 && !core.booted.length; i++) await settle();
+  core.save = u8(1, 2, 3, 4);
+  core.dirty = 1;
+  app.runIn("setDsBeta(false)");
+  for (let i = 0; i < 20 && app.api.currentRomName; i++) await settle();
+  assert.equal(app.api.currentRomName, null, "the game is closed");
+  eq([...app.idb.get("save:Saver.nds")], [1, 2, 3, 4]);
 });

@@ -522,7 +522,7 @@
               <svg class="home-drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0 4 4m-4-4-4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
               <p class="home-drop-title">Drop a game file anywhere on the page</p>
               <button type="button" id="home-load" class="button button-primary">Add a game</button>
-              <p class="home-drop-hint">.gba, .gb, .gbc, .nds or a .zip</p>
+              <p class="home-drop-hint">.gba, .gb, .gbc<span class="ds-beta-only">, .nds</span> or a .zip</p>
             </div>
             <!-- Signed out: Google's own button, per its branding rules.
                  Signed in with nothing here yet: a plain Sync. -->
@@ -961,7 +961,7 @@
                   <span class="settings-tab-desc">BIOS file, BIOS calls, intro</span>
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                 </button>
-                <button type="button" class="settings-tab" id="settings-tab-ds" data-tab="ds" data-name="Nintendo DS" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-ds">
+                <button type="button" class="settings-tab ds-beta-only" id="settings-tab-ds" data-tab="ds" data-name="Nintendo DS" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-ds">
                   <span class="settings-tab-name">Nintendo DS</span>
                   <span class="settings-tab-desc">Screen layout, BIOS and firmware</span>
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
@@ -1108,11 +1108,11 @@
                     <div class="kb-shortcut"><span>Save state</span><kbd>F5</kbd></div>
                     <div class="kb-shortcut"><span>Load state</span><kbd>F8</kbd></div>
                     <div class="kb-shortcut"><span>Screenshot</span><kbd>F9</kbd></div>
-                    <div class="kb-shortcut"><span>DS: next screen arrangement</span><kbd>V</kbd></div>
-                    <div class="kb-shortcut"><span>DS: swap the screens</span><kbd>B</kbd></div>
-                    <div class="kb-shortcut"><span>DS: turn the screens (book)</span><kbd>O</kbd></div>
-                    <div class="kb-shortcut"><span>DS: close / open the lid</span><kbd>N</kbd></div>
-                    <div class="kb-shortcut"><span>DS: blow into the microphone (hold)</span><kbd>H</kbd></div>
+                    <div class="kb-shortcut ds-beta-only"><span>DS: next screen arrangement</span><kbd>V</kbd></div>
+                    <div class="kb-shortcut ds-beta-only"><span>DS: swap the screens</span><kbd>B</kbd></div>
+                    <div class="kb-shortcut ds-beta-only"><span>DS: turn the screens (book)</span><kbd>O</kbd></div>
+                    <div class="kb-shortcut ds-beta-only"><span>DS: close / open the lid</span><kbd>N</kbd></div>
+                    <div class="kb-shortcut ds-beta-only"><span>DS: blow into the microphone (hold)</span><kbd>H</kbd></div>
                   </div>
                   <p class="modal-hint">If a game key and a shortcut share a key, the game wins.</p>
                 </div>
@@ -1543,6 +1543,18 @@
                            spellcheck="false" placeholder="https://example.com/saves"
                            aria-describedby="save-hook-status" />
                     <span class="save-hook-status" id="save-hook-status" aria-live="polite"></span>
+                  </div>
+                  <!-- DS Beta (index.js "DS Beta"): off, the app is what it
+                       was before the DS core; on, .nds games load and show. -->
+                  <div class="modal-toggle-row">
+                    <div>
+                      <span class="modal-row-label">DS Beta</span>
+                      <span class="modal-toggle-sub">Lets Nintendo DS games load. An early, incomplete DS core: some games won't run. Turned off, DS games leave the library until it is on again; their saves are kept.</span>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" id="ds-beta-toggle" />
+                      <span class="switch-track"></span>
+                    </label>
                   </div>
                 </div>
                 <div class="settings-reset-row row-flow">

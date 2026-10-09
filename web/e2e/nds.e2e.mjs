@@ -50,6 +50,8 @@ after(async () => { await browser?.close(); web?.close(); });
 
 const newPage = async (ctx) => {
   const page = await ctx.newPage();
+  // DS games load only with DS Beta on (Settings > General > Advanced).
+  await page.addInitScript(() => localStorage.setItem("ds-beta", "1"));
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(web.url);
@@ -85,6 +87,42 @@ const canvasAt = (page, points) => page.evaluate((points) => {
   return points.map(([fx, fy]) =>
     [...ctx.getImageData(Math.floor(fx * c.width), Math.floor(fy * c.height), 1, 1).data].slice(0, 3));
 }, points);
+
+test("DS Beta off (the default): a .nds is refused and nothing of the DS shows; on, it plays", { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(web.url);
+  await page.waitForFunction(() => document.body.classList.contains("runtime-ready"), null, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => document.body.classList.contains("ds-beta")), false);
+  assert.equal(await page.locator(".home-drop-hint").first().innerText(), ".gba, .gb, .gbc or a .zip");
+  const dialogs = [];
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.dismiss(); });
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click(),
+  ]);
+  await chooser.setFiles(rom("fb_both.nds"));
+  await sleep(500);
+  assert.deepEqual(dialogs, ["Unsupported file. Load a .gba, .gb, or .gbc ROM (or a .zip containing one)."]);
+  assert.equal(await page.evaluate(() => currentRomName), null);
+  assert.equal(await page.evaluate(() => typeof ndsCore === "undefined" || ndsCore === null), true,
+               "the DS core was never fetched");
+  // Settings: no Nintendo DS section; General > Advanced has the switch.
+  await page.evaluate(() => openSettingsModal());
+  assert.equal(await page.locator("#settings-tab-ds").isVisible(), false);
+  await page.evaluate(() => selectSettingsTab("general"));
+  await page.locator("#advanced-toggle").click();
+  await page.locator("label.switch:has(#ds-beta-toggle)").click();
+  assert.equal(await page.evaluate(() => localStorage.getItem("ds-beta")), "1");
+  assert.equal(await page.locator("#settings-tab-ds").isVisible(), true);
+  await page.evaluate(() => closeSettingsModal());
+  await addGame(page, rom("fb_both.nds"));
+  assert.equal(await page.evaluate(() => ndsGameLoaded()), true, "on: the DS game plays");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
 
 test("a DS game draws both screens through the presenter", { skip }, async () => {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });

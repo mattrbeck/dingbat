@@ -890,7 +890,13 @@ const pickFile = (accept, callback) => {
 // Layout is CSS's (styles.css "Settings surface"); this owns which section
 // shows, which screen the sheet is on, and the sheet-only navigation
 // (push/pop, stepper, hardware back). Section order is fixed.
-const SETTINGS_SECTIONS = ["controls", "gb", "gba", "ds", "video", "audio", "general"];
+// DS Beta (Settings > General > Advanced; "DS Beta" below has the rest).
+const DS_BETA_KEY = "ds-beta";
+let dsBetaOn = (() => {
+  try { return localStorage.getItem(DS_BETA_KEY) === "1"; } catch { return false; }
+})();
+
+const SETTINGS_SECTIONS = ["controls", "gb", "gba", "ds", "video", "audio", "general"];  // "ds": DS Beta (applyDsBeta)
 const SETTINGS_LAST_KEY = "settings-section";
 
 const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
@@ -1183,7 +1189,7 @@ const openSettingsModal = () => {
     })
     .catch(() => {});
   updateBiosStatusText();
-  updateNdsBiosStatus();
+  if (dsBetaOn) updateNdsBiosStatus();
   // The Drive controls live under General now; nothing else paints them.
   renderGdriveSection();
   kbSelection = -1;
@@ -7798,7 +7804,8 @@ const LIB_BAR_MIN = 9;
 // scrollHeight so the browser clamps scrollTop to 0.
 const refreshHomeRecent = async () => {
   if (!db) return;
-  let roms = await getRecentMeta(); // metadata only — no ROM bytes
+  // Metadata only, no ROM bytes. DS games only while DS Beta is on.
+  let roms = (await getRecentMeta()).filter((r) => dsBetaOn || !isNdsRomName(r?.name || ""));
   let gen = ++homeRenderGen;
   // Art URLs minted by this render become homeArtUrls only on commit.
   let artUrls = [];
@@ -8248,7 +8255,7 @@ document.getElementById("load-save").addEventListener("click", () => {
   }
   // pickFile() must run synchronously in the tap: on iOS Safari a preceding
   // confirm() consumes the activation and input.click() no longer opens.
-  pickFile(".sav,.srm,.sps,.xps,.gsv,.dsv", (bytes, fileName) => applyImportedSave(bytes, fileName));
+  pickFile([...SAVE_IMPORT_EXTS].join(","), (bytes, fileName) => applyImportedSave(bytes, fileName));
 });
 
 // --- Save states ---
@@ -11035,7 +11042,7 @@ const updateCanvasScaling = () => {
   // Backing store = native * glScale(). Only assign on change: assigning
   // canvas.width/height resets the GL drawing buffer.
   presentDirty = true; // resize can wipe the backing — repaint on the next tick
-  ndsApplyCutout();
+  if (ndsGameLoaded()) ndsApplyCutout();
   const running0 =
     document.body.classList.contains("running") && !!currentRomName;
   // A DS game picks its screens' arrangement from the room there is first
@@ -11795,7 +11802,8 @@ const detectPreset = (bindings) => {
 
 const renderKbBindings = () => {
   kbBindingsDiv.innerHTML = "";
-  for (let i = 0; i < INPUT_NAMES.length; i++) {
+  // X/Y (DS) only while DS Beta is on.
+  for (let i = 0; i < (dsBetaOn ? INPUT_NAMES.length : DS_ONLY_INPUTS); i++) {
     let row = document.createElement("div");
     row.className = "kb-row";
     let btn = document.createElement("button");
@@ -11854,10 +11862,12 @@ const kbKeyHandler = (e) => {
 
 const loadKeybindingsFromStorage = async () => {
   let stored = await dbGet("keybindings");
-  // A profile from before X/Y (10 keys) takes the defaults for them, unless
-  // one of its keys already is one.
+  // A profile from before X/Y (10 keys) takes its preset's X/Y (so Home row
+  // stays Home row), else the defaults, unless one of its keys already is one.
   if (stored && stored.length === 10) {
-    stored = stored.concat(PRESET_DEFAULT.slice(10).map((k) => (stored.includes(k) ? -1 : k)));
+    const same = (p) => stored.every((k, i) => k === p[i]);
+    stored = stored.concat(same(PRESET_HOMEROW) ? PRESET_HOMEROW.slice(10)
+      : PRESET_DEFAULT.slice(10).map((k) => (stored.includes(k) ? -1 : k)));
   }
   if (stored && stored.length === INPUT_NAMES.length) {
     // Heal profiles saved before Escape became unbindable.
@@ -12284,6 +12294,7 @@ const resetAllSettings = async () => {
   applyHideTouchOnGamepad(true);
   applyInputDisplay(false);
   applyLibraryOpen("resume");
+  setDsBeta(false);
 
   applyRunahead(0);
   applyNdsLayout("auto");
@@ -12642,10 +12653,10 @@ const loadRom = async (romName, originalName, opts = {}) => {
 // --- File type helpers ---
 
 // The same list as src/dingbat/common/rom_exts.nim, which picks the core,
-// plus .nds for the DS core ("Nintendo DS"; this branch only).
+// plus .nds for the DS core while DS Beta is on (applyDsBeta).
 // .cgb/.sgb are Color-only and Super Game Boy carts some ROM sets name so;
 // the core reads the mode from the header. Not .dmg: a macOS disk image.
-const ROM_EXTS = [".gba", ".gb", ".gbc", ".cgb", ".sgb", ".nds"];
+const ROM_EXTS = [".gba", ".gb", ".gbc", ".cgb", ".sgb"];
 const IMG_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
 
 const extOf = (n) => {
@@ -12819,7 +12830,8 @@ const handleZipFile = async (file) => {
   let romEntry = ofKind("rom") ||
     zip.entries.find((e) => usable(e) && ROM_EXTS.includes(extOf(e.name)));
   if (!romEntry) {
-    alert("No .gba, .gb, .gbc or .nds ROM was found inside that zip.");
+    alert(dsBetaOn ? "No .gba, .gb, .gbc or .nds ROM was found inside that zip."
+      : "No .gba, .gb or .gbc ROM was found inside that zip.");
     return;
   }
   // Anyone else's zip: the largest embedded image is almost always the box art.
@@ -12857,7 +12869,8 @@ let handleRomFile = (file) => {
   let ext = extOf(file.name);
   if (ext === ".zip") return handleZipFile(file);
   if (!ROM_EXTS.includes(ext)) {
-    alert("Unsupported file. Load a .gba, .gb, .gbc or .nds ROM (or a .zip containing one).");
+    alert(dsBetaOn ? "Unsupported file. Load a .gba, .gb, .gbc or .nds ROM (or a .zip containing one)."
+      : "Unsupported file. Load a .gba, .gb, or .gbc ROM (or a .zip containing one).");
     return;
   }
   let romName = "rom" + ext;
@@ -12878,7 +12891,48 @@ let handleRomFile = (file) => {
 
 // A dropped save (.sav/.srm/.dsv or a GameShark container) or .state is imported
 // into the running single-player game; anything else is a ROM/zip to load.
-const SAVE_IMPORT_EXTS = new Set([".sav", ".srm", ".sps", ".xps", ".gsv", ".dsv"]);
+const SAVE_IMPORT_EXTS = new Set([".sav", ".srm", ".sps", ".xps", ".gsv"]); // + .dsv: DS Beta
+// --- DS Beta (Settings > General > Advanced) ---
+// Off (the default), the app is what it was before the DS core: .nds and
+// .dsv files are refused as any other unknown file, DS games already in the
+// library leave the grid (their files and saves are kept), and nothing of
+// the DS shows (body:not(.ds-beta) .ds-beta-only: the Nintendo DS settings
+// section, its shortcut rows, the drop hint's .nds; the X/Y key rows).
+// Per device, in localStorage (DS_BETA_KEY, dsBetaOn: up top, so it is
+// known before anything renders).
+const dsBetaToggle = /** @type {HTMLInputElement} */ (document.getElementById("ds-beta-toggle"));
+const applyDsBeta = () => {
+  const has = (a, x) => a.includes(x);
+  if (dsBetaOn && !has(ROM_EXTS, ".nds")) ROM_EXTS.push(".nds");
+  if (!dsBetaOn && has(ROM_EXTS, ".nds")) ROM_EXTS.splice(ROM_EXTS.indexOf(".nds"), 1);
+  if (dsBetaOn) SAVE_IMPORT_EXTS.add(".dsv");
+  else SAVE_IMPORT_EXTS.delete(".dsv");
+  if (dsBetaOn && !has(SETTINGS_SECTIONS, "ds")) {
+    SETTINGS_SECTIONS.splice(SETTINGS_SECTIONS.indexOf("gba") + 1, 0, "ds");
+  }
+  if (!dsBetaOn && has(SETTINGS_SECTIONS, "ds")) {
+    SETTINGS_SECTIONS.splice(SETTINGS_SECTIONS.indexOf("ds"), 1);
+  }
+  document.body.classList.toggle("ds-beta", dsBetaOn);
+  if (dsBetaToggle) dsBetaToggle.checked = dsBetaOn;
+};
+const setDsBeta = (on) => {
+  if (on === dsBetaOn) return;
+  dsBetaOn = on;
+  try {
+    if (on) localStorage.setItem(DS_BETA_KEY, "1");
+    else localStorage.removeItem(DS_BETA_KEY);
+  } catch {}
+  applyDsBeta();
+  // A DS game running when it goes off goes too (its save is flushed).
+  if (!on && ndsGameLoaded()) unloadGame();
+  if (on) loadNdsLayoutFromStorage();
+  renderKbBindings();
+  refreshHomeRecent();
+};
+applyDsBeta();
+dsBetaToggle?.addEventListener("change", () => setDsBeta(dsBetaToggle.checked));
+
 const handleDroppedFile = (file) => {
   let ext = extOf(file.name);
   if (SAVE_IMPORT_EXTS.has(ext) || ext === ".state") {
@@ -18108,7 +18162,7 @@ const initStorage = async () => {
   await loadHideTouchOnGamepadFromStorage();
   await loadInputDisplayFromStorage();
   await loadControlStyleFromStorage();
-  await loadNdsLayoutFromStorage();
+  if (dsBetaOn) await loadNdsLayoutFromStorage();
   await loadLibraryOpenFromStorage();
   await loadRunaheadFromStorage();
   await loadAudioSettings();

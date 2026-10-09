@@ -9035,6 +9035,11 @@ body.nds-side #nds-layout-btn svg {
   transform: rotate(90deg);
 }
 
+/* DS Beta off (index.js "DS Beta"): nothing of the DS shows. */
+body:not(.ds-beta) .ds-beta-only {
+  display: none !important;
+}
+
 /* The two screens stand upright in the scrubber's and Report a Bug's
    previews: held to a height rather than the GB/GBA width. */
 body.nds-mode .report-preview {
