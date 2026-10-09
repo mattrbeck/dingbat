@@ -13805,13 +13805,12 @@ const releaseKbHolds = () => {
 window.addEventListener("blur", releaseKbHolds);
 
 const shortcutKeyHandler = (e, down) => {
-  // A capture replay owns the machine: no state loads, speed changes or
-  // pauses (game keys still pass as the post-replay held state).
-  if (typeof clipReplayActive !== "undefined" && clipReplayActive) return;
   if (codeLookup[e.code] !== undefined) return; // game bindings always win
   if (e.ctrlKey || e.metaKey || e.altKey) return; // browser/OS chords
 
-  // Releases skip the modal/typing guards so a hold cannot stick.
+  // Releases skip the modal/typing guards (and a capture replay's) so a
+  // hold cannot stick; a speed set during a replay waits in the core for
+  // its end (wasm_set_turbo).
   if (!down) {
     if ((e.code === "Tab" && kbFastForward) ||
         (e.code === "Backquote" && kbRewindHeld)) {
@@ -13827,6 +13826,9 @@ const shortcutKeyHandler = (e, down) => {
     return;
   }
 
+  // A capture replay owns the machine: no state loads, speed changes or
+  // pauses (game keys still pass as the post-replay held state).
+  if (typeof clipReplayActive !== "undefined" && clipReplayActive) return;
   if (anyModalOpen()) return;
   // Not while typing in a text field.
   const t = e.target;

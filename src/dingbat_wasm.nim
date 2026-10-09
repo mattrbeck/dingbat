@@ -408,6 +408,16 @@ var audioSuppressed = false
 # octave down.
 var slowmoStretch = false
 
+# A clip replay (clip_begin .. clip_tick / clip_abort) is running.
+var clipReplaying = false
+# The player's 2x / slow motion while a replay runs. Both reshape the core's
+# sample stream (half / twice the samples a frame) and neither is in a state,
+# so a replay would inherit them: the clip's sound would run at half or
+# double the length of its pictures. A replay is a recording at 1x; a speed
+# set meanwhile lands here and reaches the core when the replay ends.
+var clipHeldTurbo = false
+var clipHeldSlowmo = false
+
 proc appendAudioSample(left, right: float32) {.exportc.} =
   if audioSuppressed: return
   audioBuffer.add(left)
@@ -490,6 +500,8 @@ proc wasm_set_turbo(on: cint) {.exportc.} =
     for core in stateRollback.link.cores: core.apu.turbo = t
   elif stateGbRollback != nil:
     for core in stateGbRollback.link.cores: core.apu.turbo = t
+  elif clipReplaying:
+    clipHeldTurbo = t
   else:
     case stateKind
     of ekGBA: stateGba.apu.turbo = t
@@ -498,7 +510,8 @@ proc wasm_set_turbo(on: cint) {.exportc.} =
 
 proc wasm_set_slowmo(on: cint) {.exportc.} =
   ## Single-core only (the linked modes gate it off in JS).
-  slowmoStretch = on != 0
+  if clipReplaying: clipHeldSlowmo = on != 0
+  else: slowmoStretch = on != 0
 
 proc wasm_set_pitch_correct_ff(on: cint) {.exportc.} =
   ## When on, 2x speed uses a WSOLA time-stretch to keep pitch. Local-only:
@@ -681,13 +694,6 @@ var clipCurButtons: uint16 = 0         # live mask, mirrored from setInput
 var clipLiveStash = ""                 # live state while a replay runs
 var clipCursor = 0
 var clipEnd = 0
-var clipReplaying = false
-# The player's 2x / slow motion while a replay runs. Both reshape the core's
-# sample stream (half / twice the samples a frame) and neither is in a state,
-# so a replay would inherit them: the clip's sound would run at half or
-# double the length of its pictures. A replay is a recording at 1x.
-var clipHeldTurbo = false
-var clipHeldSlowmo = false
 
 proc clip_core_turbo(): bool =
   case stateKind
