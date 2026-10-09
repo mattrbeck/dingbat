@@ -213,7 +213,11 @@ fast-forward. Most of Advance Wars' frame time is outside drawing here.
       pictures, clip pre-roll, desktop input log and stale texture, late
       start on real present times, playtest driver; tools/ci_local.py 32/32,
       web link-rom-skip e2e 4/4, the browser tests, tsc
-- [ ] the playtest train (whole corpus): see the commit after it reports
+- [x] the playtest train (79ea2262 on origin/main dc1b85d0): CLEAN — none
+      of the 140 games differs from the baseline in any hash (checkpoint
+      frames, audio, battery files, load cells) in any of the four dingbat
+      configurations; the corpus played in 25.7 min against the baseline's
+      27.5 (the driver's `run N` now draws only its last frame)
 - [ ] desktop: compiled, not run here (driving the GUI needs asking)
 - [ ] if kept: drop the switches or keep `?draw=all` as a diagnostic; the
       iOS setting is a prototype toggle
