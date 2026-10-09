@@ -25,6 +25,8 @@ type
     rollbacks*: int              ## telemetry: rollbacks performed
     stalls*: int                 ## telemetry: ticks that stalled on the window
     replaying*: bool             ## true while re-simulating rolled-back frames
+    drawOnlyShown*: bool         ## as the GBA session's: the peer's core and older
+                                 ## replayed frames go undrawn (docs/frame-skip.md)
     localIn: seq[uint16]         ## local player's input per frame
     remoteIn: seq[uint16]        ## remote player's input per frame (valid iff remoteKnown)
     remoteKnown: seq[bool]
@@ -84,6 +86,11 @@ proc sim(sess: GbRollbackSession; f: int) =
   # Snapshot the state entering frame f, apply its inputs, advance one frame.
   sess.store_ckpt(f)
   sess.apply_inputs(f)
+  if sess.drawOnlyShown:
+    for i, c in sess.link.cores:
+      # The Super Game Boy's freeze copies the picture: always drawn
+      c.ppu.no_draw = (i != sess.local or (sess.replaying and f < sess.head - 1)) and
+                      not c.sgb_active()
   sess.link.step_frame()
 
 proc reconcile(sess: GbRollbackSession) =

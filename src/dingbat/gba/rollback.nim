@@ -29,6 +29,10 @@ type
     rollbacks*: int              ## telemetry: rollbacks performed
     stalls*: int                 ## telemetry: ticks that stalled on the window
     replaying*: bool             ## re-simulating rolled-back frames (transport mutes audio/render)
+    drawOnlyShown*: bool         ## the transport shows only the local core's newest frame:
+                                 ## the peer's core and older replayed frames go undrawn
+                                 ## (ppu.no_draw, docs/frame-skip.md); off, every frame is
+                                 ## drawn (the checksum tests compare whole states)
     localIn: seq[uint16]         ## local player's input per frame
     remoteIn: seq[uint16]        ## remote player's input per frame (valid iff remoteKnown)
     remoteKnown: seq[bool]
@@ -89,6 +93,9 @@ proc sim(sess: RollbackSession; f: int) =
   # Checkpoint the state entering frame f, then apply its inputs and step.
   sess.store_ckpt(f)
   sess.apply_inputs(f)
+  if sess.drawOnlyShown:
+    for i, c in sess.link.cores:
+      c.ppu.no_draw = i != sess.local or (sess.replaying and f < sess.head - 1)
   sess.link.step_frame()
 
 proc reconcile(sess: RollbackSession) =

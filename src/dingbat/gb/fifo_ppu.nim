@@ -1469,7 +1469,7 @@ proc fifo_recompose_span(ppu: GbFifoPpu; gb: GB; front, back, top, run: int32) =
   ## register's depth in the tail.
   var x = max(max(front - back, ppu.lx - MIX_HOLD), run)
   if x < 0: x = 0
-  let hi = min(top, ppu.lx - 1)
+  let hi = if ppu.no_draw: -1'i32 else: min(top, ppu.lx - 1)
   while x <= hi:
     let h = ppu.mix[x and (MIX_HOLD - 1)]
     ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] = fifo_mix(ppu, gb, h.bg, h.sp, x)
@@ -1575,8 +1575,9 @@ proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
           if owns or (held.sp.color == 0 and color != 0):
             held.sp = (if color != 0: px else: clear)
             ppu.mix[x and (MIX_HOLD - 1)] = held
-            ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] =
-              fifo_mix(ppu, gb, held.bg, held.sp, x)
+            if not ppu.no_draw:
+              ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(x)] =
+                fifo_mix(ppu, gb, held.bg, held.sp, x)
 
 template fifo_emit_pixel(ppu: GbFifoPpu; gb: GB) =
   ## One pixel out of the shifter. A template, not an inline proc: with two
@@ -1599,8 +1600,9 @@ template fifo_emit_pixel(ppu: GbFifoPpu; gb: GB) =
     when MIXER_DOT_LAG != 0:
       # Indexed by the pixel's low bits so MIX_HOLD dots cost one store.
       ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
-    ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
-      fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
+    if not ppu.no_draw:
+      ppu.framebuffer[GB_WIDTH * int(ppu.ly) + int(ppu.lx)] =
+        fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
   inc ppu.lx
 
 proc fifo_obj_walked_past(ppu: GbFifoPpu): bool {.noinline.} =
@@ -2254,7 +2256,8 @@ proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
     if ppu.lx >= 0:
       when MIXER_DOT_LAG != 0:
         ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
-      if has_sp:
+      if ppu.no_draw: discard
+      elif has_sp:
         ppu.framebuffer[row + int(ppu.lx)] =
           fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
       else:

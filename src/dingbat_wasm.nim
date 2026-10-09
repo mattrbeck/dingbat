@@ -1083,9 +1083,10 @@ proc gb_rewind_thumb(g: GB): RewindThumb =
 # --- Frames nobody sees (docs/frame-skip.md) ---
 # At 2x, fast-forward, or on a display slower than the game JS runs several
 # frames per refresh and shows only the last; wasm_unseen_next says the next
-# tick's frame is one of the others. The GBA PPU then draws nothing for it
-# (ppu.no_draw), it runs no run-ahead lookahead (those frames exist only to
-# be shown), and the LCD panel does not step on it. JS never marks a tick's
+# tick's frame is one of the others. The PPU (GBA, or GB but under the
+# Super Game Boy) then draws nothing for it (ppu.no_draw), it runs no
+# run-ahead lookahead (those frames exist only to be shown), and the LCD
+# panel does not step on it. JS never marks a tick's
 # last frame, so after every tick the core holds its frame's picture, for
 # whatever reads it (screenshots, recordings, states, thumbnails). A rewind
 # snapshot or clip anchor falling on an undrawn frame waits for the next
@@ -1126,14 +1127,20 @@ proc loop_tick() {.exportc.} =
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                          GBA_W * GBA_H)
   of ekGB:
+    # The Super Game Boy's freeze copies the picture: it is always drawn
+    let hide = unseen and not stateGb.sgb_active()
+    stateGb.ppu.no_draw = hide
     stateGb.step_frame()
+    stateGb.ppu.no_draw = false
+    lastFrameDrawn = not hide
     if statePrinter != nil: statePrinter.tick_frame()
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(
         proc(): string = stateGb.state_payload(),
-        proc(): RewindThumb = gb_rewind_thumb(stateGb))
-    prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
-                       GB_W * GB_H)
+        proc(): RewindThumb = gb_rewind_thumb(stateGb), ready = not hide)
+    if not unseen:
+      prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
+                         GB_W * GB_H)
   of ekNone:
     return
 
@@ -1191,12 +1198,17 @@ proc runahead_tick(n: cint) {.exportc.} =
     prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr runaheadFrame[0]),
                        GBA_W * GBA_H)
   of ekGB:
+    let sgb = stateGb.sgb_active()
+    let hide = unseen and not sgb
+    stateGb.ppu.no_draw = hide
     stateGb.step_frame()
+    stateGb.ppu.no_draw = false
+    lastFrameDrawn = not hide
     if statePrinter != nil: statePrinter.tick_frame()
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(
         proc(): string = stateGb.state_payload(),
-        proc(): RewindThumb = gb_rewind_thumb(stateGb))
+        proc(): RewindThumb = gb_rewind_thumb(stateGb), ready = not hide)
     if unseen: return
     if n <= 0:
       prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGb.ppu.framebuffer[0]),
@@ -1207,7 +1219,10 @@ proc runahead_tick(n: cint) {.exportc.} =
     # sent yet; snapshot around them so no phantom print survives.
     let prnSnap = if statePrinter != nil: statePrinter.clone() else: nil
     stateGb.apu.silent = true  # lookahead audio is thrown away
-    for _ in 0 ..< int(n): stateGb.step_frame()
+    for i in 0 ..< int(n):
+      stateGb.ppu.no_draw = i < int(n) - 1 and not sgb  # only the last is shown
+      stateGb.step_frame()
+    stateGb.ppu.no_draw = false
     stateGb.apu.silent = optSilent
     if prnSnap != nil: copy_into(prnSnap, statePrinter)
     if runaheadFrame.len != GB_W * GB_H: runaheadFrame.setLen(GB_W * GB_H)
@@ -1564,6 +1579,7 @@ proc gb_rollback_init(rom1_path, rom2_path: string; epoch: int64): cint =
     cores.add(core)
   wrap_gb_rollback_audio(cores[rbLocal])
   stateGbRollback = gbrb.new_gb_rollback_session(new_gb_link(cores), rbLocal, 12)
+  stateGbRollback.drawOnlyShown = true  # only this peer's newest frame is shown
   apply_audio_silent()
   for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GB_W * GB_H)
   frameCount = 0
@@ -1586,6 +1602,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
   ## the link. Returns 1; JS then clears rollback mode.
   if stateGbRollback != nil:
     let gcore = stateGbRollback.link.cores[rbLocal]
+    gcore.ppu.no_draw = false
     gcore.cartridge.mbc_save()
     stateGbRollback = nil
     audioSuppressed = false
@@ -1599,6 +1616,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
     return 1
   if stateRollback == nil: return 0
   let core = stateRollback.link.cores[rbLocal]
+  core.ppu.no_draw = false
   core.storage.write_save()
   core.set_sio_driver(NullSioDriver())  # cable unplugged
   stateRollback = nil
@@ -1637,6 +1655,7 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
     cores.add(core)
   wrap_rollback_audio(cores[rbLocal])
   stateRollback = new_rollback_session(new_link(cores), rbLocal, 12)
+  stateRollback.drawOnlyShown = true  # only this peer's newest frame is shown
   apply_audio_silent()
   for p in 0 .. 1: linkRgba[p] = newSeq[uint32](GBA_W * GBA_H)
   frameCount = 0

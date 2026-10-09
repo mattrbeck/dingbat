@@ -442,9 +442,11 @@ proc main() =
         else:
           discard rw.maybe_push(proc(): string = emu.state_payload())
     total_cycles = 0
+    let draw_every = parseInt(getEnv("DINGBAT_BENCH_DRAW_EVERY", "1"))
     let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
     for i in 0 ..< frames:
+      emu.ppu.no_draw = draw_every > 1 and i mod draw_every != draw_every - 1
       run_scripted(warmup + i)
       rewind_tick()
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
