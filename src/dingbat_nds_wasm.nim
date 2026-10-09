@@ -8,7 +8,7 @@
 ## page writes the ROM there once, then nds_boot(...) builds the core on it
 ## (moved, not copied: a 128 MB ROM must not exist twice in the heap).
 
-import dingbat/nds/[nds, savestate, cheats]
+import dingbat/nds/[nds, savestate, cheats, rewinding]
 import dingbat/common/rewind
 from std/strutils import toHex
 
@@ -246,17 +246,23 @@ proc nds_state_plain_size(): cint {.exportc.} =
 proc nds_state_data(): pointer {.exportc.} =
   if stateImage.len > 0: addr stateImage[0] else: nil
 
-proc nds_state_load(data: pointer; len: cint): cint {.exportc.} =
+proc nds_state_load_keep(data: pointer; len: cint; keep_rewind: cint): cint {.exportc.} =
   ## Apply a state (packed or plain). 1 on success; 0 on refusal with the
   ## machine untouched (nds_state_error_kind / nds_state_error say why).
+  ## Success empties the rewind ring unless keep_rewind (undoing a
+  ## scrubber commit, whose ring is this state's past).
   last_state_error = ""
   if core == nil or data == nil or len <= 0: return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
   if core.load_state_bytes(image):
-    rewind_reset()   # rewinding from here must not walk into the old timeline
+    # Rewinding from here must not walk into the old timeline.
+    if keep_rewind == 0: rewind_reset()
     1
   else: 0
+
+proc nds_state_load(data: pointer; len: cint): cint {.exportc.} =
+  nds_state_load_keep(data, len, 0)
 
 proc nds_state_error_kind(): cint {.exportc.} =
   ## The last refusal as a StateRejectKind ordinal (common/serialize.nim).
@@ -305,12 +311,11 @@ proc nds_load_cheats(text: pointer; len: cint): cstring {.exportc.} =
   cheatErr = cheatList.errors()
   cstring(cheatErr)
 
-# --- Rewind (common/rewind.nim): a payload every REWIND_INTERVAL frames
-# into a ring of XOR deltas, popped while the rewind button is held. A DS
-# payload is ~5.5-6 MB raw; the ring keeps the newest whole and the rest
-# as sparse zlib'd deltas. No keyframes (each would be a 2 MB zlib of the
-# whole payload, a visible stall every few seconds) and no thumbnails (no
-# scrubber here yet).
+# --- Rewind (common/rewind.nim, nds/rewinding.nim): a payload every
+# REWIND_INTERVAL frames into a ring of XOR deltas, popped while the rewind
+# button is held, with a thumbnail of both screens once a second for the
+# scrubber and Report a Bug's timeline. A DS payload is ~6-7 MB raw; the
+# ring keeps the newest whole and the rest as sparse zlib'd deltas.
 
 var rewindWanted = false
 var rewindCap = REWIND_CAP_BYTES
@@ -318,7 +323,7 @@ var rewindRing: Rewind = nil
 
 proc rewind_reset() =
   aheadValid = false
-  rewindRing = if rewindWanted and core != nil: new_rewind(rewindCap, key_every = 0) else: nil
+  rewindRing = if rewindWanted and core != nil: new_nds_rewind(rewindCap) else: nil
 
 proc nds_rewind_enable(on: cint; cap_bytes: cint) {.exportc.} =
   ## Rewind on (1) or off (0), its memory cap in bytes (0: the default).
@@ -345,12 +350,91 @@ proc nds_rewind_depth(): cint {.exportc.} =
 proc nds_rewind_bytes(): cint {.exportc.} =
   if rewindRing == nil: 0 else: cint(rewindRing.mem_used)
 
+# --- The rewind scrubber and Report a Bug's timeline: the GB/GBA core's
+# wasm_rewind_scrub_* (src/dingbat_wasm.nim) for the DS ring. Samples are
+# held by snapshot ID, so one evicted since the strip was drawn is gone
+# rather than another moment. A look at a sample and straight back keeps
+# the save chips' dirty flags (as_new = false): the same timeline.
+
+var scrubThumbs: seq[byte]
+var scrubIds: seq[int]
+
+proc nds_rewind_scrub_generate(max_samples: cint): cint {.exportc.} =
+  ## Up to max_samples thumbnails spread evenly across the history, newest
+  ## first; how many.
+  scrubThumbs = @[]
+  scrubIds = @[]
+  if core == nil or rewindRing == nil: return 0
+  let count = rewindRing.thumb_count
+  if count == 0: return 0
+  let n = min(max(1, int(max_samples)), count)
+  for s in 0 ..< n:
+    let i = if n == 1: 0 else: s * (count - 1) div (n - 1)
+    let t = rewindRing.thumb_at(i)
+    if t.pixels.len == 0: continue
+    scrubThumbs.add t.pixels
+    scrubIds.add rewindRing.thumb_id(i)
+  cint(scrubIds.len)
+
+proc nds_rewind_scrub_thumb_w(): cint {.exportc.} = NDS_RW_THUMB_W
+proc nds_rewind_scrub_thumb_h(): cint {.exportc.} = NDS_RW_THUMB_H
+proc nds_rewind_scrub_thumbs_ptr(): pointer {.exportc.} =
+  ## Packed little-endian BGR555, w*h*2 bytes each, in sample order.
+  if scrubThumbs.len > 0: addr scrubThumbs[0] else: nil
+
+proc scrub_snap(sample: cint): string =
+  if sample < 0 or sample >= scrubIds.len or rewindRing == nil: ""
+  else: rewindRing.snapshot_by_id(scrubIds[sample])
+
+proc nds_rewind_scrub_seconds_ago(sample: cint): cint {.exportc.} =
+  ## Age in tenths of a second, counted in snapshots back from the newest.
+  if sample < 0 or sample >= scrubIds.len or rewindRing == nil: return 0
+  let index = rewindRing.index_of_id(scrubIds[sample])
+  if index < 0: return 0
+  cint(index * rewindRing.snapshot_interval * 10 div 60)
+
+proc nds_rewind_scrub_state_size(sample: cint): cint {.exportc.} =
+  ## The sample's whole .state image (packed, with its thumbnail) into the
+  ## nds_state_data() buffer, the live machine put back; its size (0 when
+  ## the sample is gone). Report a Bug attaches it.
+  stateImage = ""
+  let snap = scrub_snap(sample)
+  if snap.len == 0: return 0
+  let stash = core.state_payload()
+  if core.load_own_payload(snap, as_new = false):
+    stateImage = pack_state(core.state_bytes(thumbnail = true))
+  discard core.load_own_payload(stash, as_new = false)
+  cint(stateImage.len)
+
+proc nds_rewind_scrub_save_differs(sample: cint): cint {.exportc.} =
+  ## 1 when committing to `sample` would change the cart's save chip: the
+  ## scrubber's second confirmation, as for GB/GBA.
+  let snap = scrub_snap(sample)
+  if snap.len == 0: return 0
+  let now = core.nds_save_chip()
+  if now.len == 0: return 0
+  let stash = core.state_payload()
+  var differs = false
+  if core.load_own_payload(snap, as_new = false):
+    differs = core.nds_save_chip() != now
+  discard core.load_own_payload(stash, as_new = false)
+  if differs: 1 else: 0
+
+proc nds_rewind_commit(sample: cint): cint {.exportc.} =
+  ## Rewind the machine to `sample` and drop every newer snapshot (the
+  ## page keeps its own state from before, for Undo). 1 when applied.
+  if core == nil or rewindRing == nil: return 0
+  if sample < 0 or sample >= scrubIds.len: return 0
+  let snap = rewindRing.rewind_to_id(scrubIds[sample])
+  if snap.len == 0: return 0
+  aheadValid = false
+  if core.load_own_payload(snap): 1 else: 0
+
 proc step_frame() =
   aheadValid = false
   core.run_frame()
   if cheatList.active(): cheatList.run(core.cheat_mem())
-  if rewindRing != nil and not core.powered_off():
-    discard rewindRing.maybe_push(proc(): string = core.state_payload(aligned = true))
+  rewindRing.nds_rewind_tick(core)
 
 # --- Run-ahead: after a frame is run (and its sound taken by the page),
 # nds_runahead(n) snapshots the machine, runs n more frames with the same

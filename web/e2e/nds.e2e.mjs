@@ -814,6 +814,70 @@ test("rewind on a DS game: held, it steps back through moments that happened", {
   await ctx.close();
 });
 
+test("the rewind scrubber and Report a Bug's timeline show a DS game's moments", { skip: featSkip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 }, serviceWorkers: "block" });
+  const { page, errors } = await newPage(ctx);
+  await addGame(page, MOVER);
+  await framesPast(page, 30);
+  // Five seconds of moments, a thumbnail of both screens each second.
+  const at = await page.evaluate(() => {
+    paused = true;
+    const c = ndsCore;
+    c._nds_rewind_enable(0, 0);
+    c._nds_rewind_enable(1, 0);
+    for (let i = 0; i < 300; i++) { c._nds_run_frame(); c._nds_audio_clear(); }
+    return c._nds_frame_count();
+  });
+  await page.evaluate(() => { paused = false; openRewindScrubber(); });
+  assert.equal(await page.locator("#rewind-modal").evaluate((m) => m.classList.contains("open")), true,
+               "the scrubber opens for a DS game");
+  const strip = await page.evaluate(() => {
+    rwStrip.setValue(0, rwStrip.samples - 1, true);
+    const pv = document.getElementById("rewind-preview");
+    return { n: rwStrip.samples, w: pv.width, h: pv.height, when: rwWhen.textContent,
+             frames: ndsCore._nds_frame_count() };
+  });
+  assert.ok(strip.n >= 4, "a strip of moments: " + strip.n);
+  assert.deepEqual([strip.w, strip.h], [80, 120], "each one both screens, upright");
+  assert.match(strip.when, /s ago$/);
+  assert.equal(strip.frames, at, "the game held still while the strip was open");
+  await page.locator("#rewind-commit").click();
+  await page.locator("#rewind-commit").click();
+  const back = await page.evaluate(() => ndsCore._nds_frame_count());
+  assert.ok(back <= at - 180, `committed to the oldest moment: frame ${back} from ${at}`);
+  assert.equal(await page.locator("#rewind-modal").evaluate((m) => m.classList.contains("open")), false);
+  const undone = await page.evaluate(() => {
+    paused = true;
+    rwUndoCommit();
+    return ndsCore._nds_frame_count();
+  });
+  assert.equal(undone, at, "Undo puts the game back where it was");
+  // Report a Bug: the same history, and the state of the moment picked.
+  const report = await page.evaluate(() => {
+    const c = ndsCore;
+    for (let i = 0; i < 120; i++) { c._nds_run_frame(); c._nds_audio_clear(); }
+    openReportModal();
+    reportSlider.value = "0";
+    reportSlider.dispatchEvent(new Event("input"));
+    const n = reportSamples;
+    const bytes = scrubApi().stateBytes(n - 1);
+    const live = c._nds_frame_count();
+    const head = bytes ? String.fromCharCode(...bytes.slice(0, 8)) : "";
+    const ok = applyStateBytes(bytes);
+    const was = c._nds_frame_count();
+    closeReportModal();
+    return { n, w: reportPreview.width, h: reportPreview.height, when: reportWhen.textContent,
+             head, ok, live, was };
+  });
+  assert.ok(report.n >= 2, "the timeline has moments: " + report.n);
+  assert.deepEqual([report.w, report.h], [80, 120]);
+  assert.match(report.when, /s ago$/);
+  assert.equal(report.head, "DGBSTATE", "the moment's state attaches");
+  assert.ok(report.ok && report.was < report.live - 60, `and it is that moment: ${report.was} vs ${report.live}`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 // Run from a state with and without run-ahead n: [plain, ahead] frames.
 const aheadRuns = (page, n) => page.evaluate((n) => {
   paused = true;

@@ -18,8 +18,9 @@
 # dingbat_nds_wasm.nim is its other front end), behind the same calls: one
 # 256x384 picture (top screen over bottom), the same audio ring at the DS's
 # own rate, the same states and battery files. "Nintendo DS" below has the
-# DS-only parts; everything the DS core lacks (rewind, clips, cheats,
-# run-ahead, link, SGB and the cart peripherals) is a no-op or a refusal.
+# DS-only parts; everything the DS core lacks (clips, cheats, run-ahead,
+# link, SGB and the cart peripherals) is a no-op or a refusal. Rewind is
+# the GB/GBA ring fed the DS's aligned payloads (nds/rewinding.nim).
 
 import std/[os, strutils, math]
 import zippy  # clip anchors and their thumbnails are stored deflated
@@ -42,6 +43,7 @@ import dingbat/gb/printer
 import dingbat/nds/nds except Input  # the DS core's Input object, not ours
 import dingbat/nds/savestate
 import dingbat/nds/io/backup
+import dingbat/nds/rewinding
 
 {.compile: "dingbat_ios_audio.c".}
 
@@ -190,6 +192,17 @@ var optPitchCorrect = true
 var optFastForward = false
 var rewindEnabled = true
 var rewindCapBytes = REWIND_CAP_BYTES
+
+proc new_ring(): Rewind =
+  ## The ring for the core that just loaded, nil when rewind is off or no
+  ## core runs. A DS's has no keyframes and its own thumbnails
+  ## (nds/rewinding.nim).
+  if not rewindEnabled: nil
+  else:
+    case stateKind
+    of ekGBA, ekGB: new_rewind(rewindCapBytes)
+    of ekNDS: new_nds_rewind(rewindCapBytes)
+    of ekNone: nil
 
 # LCD response (common/lcd_response.nim): presentation only.
 var lcdOn = false
@@ -540,6 +553,8 @@ proc nds_reboot() =
   stateNds = nil
   nds_build(move(rom), read_bytes(ndsSavePath), fw)
   stateNds.spi.firmware_dirty = fw_dirty
+  # A power cycle is not a moment to rewind across.
+  if rewindHistory != nil: rewindHistory.clear()
 
 proc dingbat_set_nds_bios(bios9, bios7, firmware: cstring) {.exportc, cdecl.} =
   ## Paths of the user's dumps (NULL = the HLE BIOS / the synthesized
@@ -613,9 +628,7 @@ proc load_rom_impl(path, bios: string): cint =
     biosPath = bios
     clip_reset()
     lcdResp.reset()
-    # No rewind ring on the DS core (docs/nds/web.md "Gated off").
-    rewindHistory = if rewindEnabled and stateKind != ekNDS: new_rewind(rewindCapBytes)
-                    else: nil
+    rewindHistory = new_ring()
     apply_audio()
     present_live()
     return 0
@@ -718,7 +731,8 @@ proc push_rewind() =
       proc(): string = stateGb.state_payload(),
       proc(): RewindThumb = RewindThumb(w: 120, h: 108,
         pixels: downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H, 120, 108)))
-  of ekNDS, ekNone: discard
+  of ekNDS: rewindHistory.nds_rewind_tick(stateNds)
+  of ekNone: discard
 
 proc clip_note_frame()
 
@@ -1251,20 +1265,31 @@ proc dingbat_set_rewind(on: cint; cap_bytes: cint) {.exportc, cdecl.} =
   rewindEnabled = on != 0
   if not rewindEnabled:
     rewindHistory = nil
-  elif rewindHistory == nil and stateKind notin {ekNone, ekNDS}:
-    rewindHistory = new_rewind(rewindCapBytes)
+  elif rewindHistory == nil:
+    rewindHistory = new_ring()
 
 proc current_payload(): string =
   case stateKind
   of ekGBA: (if stateGba != nil: stateGba.state_payload() else: "")
   of ekGB:  (if stateGb  != nil: stateGb.state_payload()  else: "")
-  of ekNDS, ekNone: ""
+  of ekNDS: (if stateNds != nil: stateNds.state_payload() else: "")
+  of ekNone: ""
 
-proc apply_payload(payload: string) =
+proc apply_payload(payload: string; as_new = true) =
+  ## `as_new` = false: a look at another moment and straight back (the
+  ## scrubber's save check, Report a Bug's state), which leaves the DS save
+  ## chips' dirty flags as they were.
   case stateKind
   of ekGBA: stateGba.apply_state_payload(payload)
   of ekGB:  stateGb.apply_state_payload(payload)
-  of ekNDS, ekNone: discard
+  of ekNDS:
+    if not stateNds.load_own_payload(payload, as_new):
+      raise newException(ValueError, last_state_error)
+    # The lid is where the app has it, not where the snapshot had it.
+    stateNds.set_lid(ndsLidClosed)
+    if ndsLidClosed: stateNds.set_touch(0, 0, false)
+    stateNds.spu.clear_samples()
+  of ekNone: discard
 
 proc dingbat_rewind_pop(): cint {.exportc, cdecl.} =
   ## Step back one snapshot (REWIND_INTERVAL frames) and present it. Returns
@@ -1324,7 +1349,8 @@ proc cart_save_bytes(): seq[byte] =
     if stateGb != nil and stateGb.cartridge != nil and stateGb.cartridge.has_battery:
       stateGb.cartridge.ram
     else: @[]
-  of ekNDS, ekNone: @[]
+  of ekNDS: (if stateNds != nil: stateNds.nds_save_chip() else: @[])
+  of ekNone: @[]
 
 proc dingbat_rewind_scrub_save_differs(sample: cint): cint {.exportc, cdecl.} =
   ## 1 when committing to `sample` would change the cartridge save data.
@@ -1337,11 +1363,11 @@ proc dingbat_rewind_scrub_save_differs(sample: cint): cint {.exportc, cdecl.} =
   if stash.len == 0: return 0
   var differs = false
   try:
-    apply_payload(snap)
+    apply_payload(snap, as_new = false)
     differs = cart_save_bytes() != now
   except CatchableError:
     differs = false
-  try: apply_payload(stash)
+  try: apply_payload(stash, as_new = false)
   except CatchableError: discard
   if differs: 1 else: 0
 
@@ -1359,15 +1385,16 @@ proc dingbat_rewind_scrub_state_size(sample: cint): cint {.exportc, cdecl.} =
   let stash = current_payload()
   stateImage = ""
   try:
-    apply_payload(snap)
+    apply_payload(snap, as_new = false)
     stateImage = case stateKind
       of ekGBA: pack_state(stateGba.state_bytes(thumbnail = true))
       of ekGB:  pack_state(stateGb.state_bytes(thumbnail = true))
-      of ekNDS, ekNone: ""
+      of ekNDS: pack_state(stateNds.state_bytes(thumbnail = true))
+      of ekNone: ""
   except CatchableError:
     stateImage = ""
   if stash.len > 0:
-    try: apply_payload(stash)
+    try: apply_payload(stash, as_new = false)
     except CatchableError: discard
   cint(stateImage.len)
 

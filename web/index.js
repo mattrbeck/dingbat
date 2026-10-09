@@ -8575,7 +8575,7 @@ const retryStateLoad = async (rec) => {
 // drops the ring.
 const applyStateBytes = (bytes, keepRewind = false) => {
   if (ndsGameLoaded()) {
-    const ok = ndsApplyState(bytes);
+    const ok = ndsApplyState(bytes, keepRewind);
     if (ok) sessionMoved = true;
     return ok;
   }
@@ -9847,6 +9847,55 @@ const reportWhen = document.getElementById("report-when");
 const reportPreview = /** @type {HTMLCanvasElement} */ (document.getElementById("report-preview"));
 const reportScrub = document.getElementById("report-scrub");
 const reportScrubHint = document.getElementById("report-scrub-hint");
+// The rewind ring's scrubber exports, of whichever core holds the game: the
+// GB/GBA module's wasm_rewind_scrub_* or the DS core's nds_rewind_scrub_*
+// (one shape, nds/rewinding.nim). null when there is no ring to read.
+const scrubApi = () => {
+  if (ndsGameLoaded()) {
+    const c = ndsCore;
+    if (!c || !c._nds_rewind_scrub_generate || ndsCoreGame === null) return null;
+    return {
+      generate: (n) => c._nds_rewind_scrub_generate(n),
+      thumbW: () => c._nds_rewind_scrub_thumb_w(),
+      thumbH: () => c._nds_rewind_scrub_thumb_h(),
+      thumbs: (len) => c.HEAPU8.slice(c._nds_rewind_scrub_thumbs_ptr(),
+                                      c._nds_rewind_scrub_thumbs_ptr() + len),
+      tenthsAgo: (sample) => c._nds_rewind_scrub_seconds_ago(sample),
+      stateBytes: (sample) => {
+        const sz = c._nds_rewind_scrub_state_size(sample);
+        return sz > 0 ? c.HEAPU8.slice(c._nds_state_data(), c._nds_state_data() + sz) : null;
+      },
+      saveDiffers: (sample) => c._nds_rewind_scrub_save_differs(sample) === 1,
+      commit: (sample) => {
+        const ok = c._nds_rewind_commit(sample) === 1;
+        if (ok) {
+          ndsSetLid(ndsLidClosed); // the lid is where the page has it
+          ndsAudioQuiet();
+          ndsSyncPower();
+        }
+        return ok;
+      },
+    };
+  }
+  if (typeof Module === "undefined" || !Module._wasm_rewind_scrub_generate) return null;
+  return {
+    generate: (n) => Module._wasm_rewind_scrub_generate(n),
+    thumbW: () => Module._wasm_rewind_scrub_thumb_w(),
+    thumbH: () => Module._wasm_rewind_scrub_thumb_h(),
+    thumbs: (len) => new Uint8Array(Module.memory.buffer,
+                                    Module._wasm_rewind_scrub_thumbs_ptr(), len).slice(),
+    tenthsAgo: (sample) => Module._wasm_rewind_scrub_seconds_ago(sample),
+    stateBytes: (sample) => {
+      const sz = Module._wasm_rewind_scrub_state_size(sample);
+      return sz > 0 ? new Uint8Array(Module.memory.buffer, Module._wasm_state_data(), sz).slice() : null;
+    },
+    saveDiffers: (sample) =>
+      !!Module._wasm_rewind_scrub_save_differs &&
+      Module._wasm_rewind_scrub_save_differs(sample) === 1,
+    commit: (sample) => Module._wasm_rewind_commit(sample) === 1,
+  };
+};
+
 let reportWasPaused = false;
 let reportSamples = 0;
 let reportThumbs = null; // packed BGR555 thumbnails copied out of wasm
@@ -9866,7 +9915,8 @@ const bgr555ToImageData = (src, off, w, h) => {
 };
 
 const drawReportLivePreview = () => {
-  const fb = copyFramebuffer(); // a DS game's top screen
+  // A DS game's two screens, as its timeline's thumbnails show them.
+  const fb = ndsGameLoaded() ? ndsBothRgba() : copyFramebuffer();
   if (!fb) return;
   const { heap, w, h } = fb;
   reportPreview.width = w;
@@ -9898,7 +9948,7 @@ const updateReportPreview = () => {
     drawReportLivePreview();
   } else {
     const sample = back - 1;
-    const tenths = Module._wasm_rewind_scrub_seconds_ago(sample);
+    const tenths = scrubApi()?.tenthsAgo(sample) ?? 0;
     reportWhen.textContent = (tenths / 10).toFixed(1) + "s ago";
     drawReportSamplePreview(sample);
   }
@@ -9914,15 +9964,13 @@ const openReportModal = () => {
   paused = true;
   reportSamples = 0;
   reportThumbs = null;
-  // A DS game has no rewind ring: this moment only (its timeline is hidden).
-  if (currentOriginalName && !ndsGameLoaded() && Module._wasm_rewind_scrub_generate) {
-    reportSamples = Module._wasm_rewind_scrub_generate(48);
+  const scrub = currentOriginalName ? scrubApi() : null;
+  if (scrub) {
+    reportSamples = scrub.generate(48);
     if (reportSamples > 0) {
-      reportThumbW = Module._wasm_rewind_scrub_thumb_w();
-      reportThumbH = Module._wasm_rewind_scrub_thumb_h();
-      const ptr = Module._wasm_rewind_scrub_thumbs_ptr();
-      const len = reportSamples * reportThumbW * reportThumbH * 2;
-      reportThumbs = new Uint8Array(Module.memory.buffer, ptr, len).slice();
+      reportThumbW = scrub.thumbW();
+      reportThumbH = scrub.thumbH();
+      reportThumbs = scrub.thumbs(reportSamples * reportThumbW * reportThumbH * 2);
     }
   }
   reportSlider.max = String(reportSamples); // 0..N; right end (max) = now
@@ -9974,10 +10022,10 @@ document.getElementById("report-download").addEventListener("click", async () =>
     stateBytes = captureStateBytes();
   } else {
     const sample = back - 1;
-    const sz = Module._wasm_rewind_scrub_state_size(sample);
-    if (sz > 0) {
-      stateBytes = new Uint8Array(Module.memory.buffer, Module._wasm_state_data(), sz).slice();
-      savedFrom = (Module._wasm_rewind_scrub_seconds_ago(sample) / 10).toFixed(1) + "s before report";
+    const scrub = scrubApi();
+    stateBytes = scrub ? scrub.stateBytes(sample) : null;
+    if (stateBytes) {
+      savedFrom = (scrub.tenthsAgo(sample) / 10).toFixed(1) + "s before report";
     }
   }
   const report = {
@@ -10438,10 +10486,7 @@ const fmtDuration = (tenths) => {
   return m + "m " + Math.round(s - m * 60) + "s";
 };
 
-const rwTenthsAt = (sample) =>
-  sample > 0 && Module._wasm_rewind_scrub_seconds_ago
-    ? Module._wasm_rewind_scrub_seconds_ago(sample)
-    : 0;
+const rwTenthsAt = (sample) => (sample > 0 && scrubApi()?.tenthsAgo(sample)) || 0;
 
 const rwStrip = createFilmStrip({
   canvas: rwStripCanvas,
@@ -10508,21 +10553,20 @@ rwSlider.addEventListener("input", () => {
 const openRewindScrubber = () => {
   menuDropdown.hidden = true;
   if (!rewindOn) return;   // no ring, so the strip would only ever be empty
-  if (ndsGameLoaded()) return; // nor on the DS core
   if (!currentOriginalName || !speedControlsOk()) return;
-  if (typeof Module === "undefined" || !Module._wasm_rewind_scrub_generate) return;
+  const scrub = scrubApi();
+  if (!scrub) return;
   rwWasPaused = takePlayerPause();
   // Freeze the core so the ring stays what the strip shows.
   paused = true;
   rwStage = 0;
   rwStrip.release();
   rwStrip.values[0] = 0;
-  const n = Module._wasm_rewind_scrub_generate(RW_MAX_SAMPLES);
+  const n = scrub.generate(RW_MAX_SAMPLES);
   if (n > 0) {
-    const w = Module._wasm_rewind_scrub_thumb_w();
-    const h = Module._wasm_rewind_scrub_thumb_h();
-    const ptr = Module._wasm_rewind_scrub_thumbs_ptr();
-    rwStrip.load(new Uint8Array(Module.memory.buffer, ptr, n * w * h * 2).slice(), w, h, n);
+    const w = scrub.thumbW();
+    const h = scrub.thumbH();
+    rwStrip.load(scrub.thumbs(n * w * h * 2), w, h, n);
   }
   rwSlider.max = String(Math.max(0, n - 1));
   rwSlider.value = String(Math.max(0, n - 1));
@@ -10561,8 +10605,8 @@ const rwCommit = () => {
   const sel = rwSelected();
   if (sel <= 0) return;
   const cost = fmtDuration(rwTenthsAt(sel));
-  const undo = captureStateBytes(); // where the game is NOW, pre-commit
-  if (Module._wasm_rewind_commit(sel) !== 1) {
+  const undo = captureUndoBytes(); // where the game is NOW, pre-commit
+  if (!scrubApi()?.commit(sel)) {
     showToast("That moment is no longer in the rewind history");
     closeRewindScrubber();
     return;
@@ -10588,9 +10632,7 @@ rwCommitBtn.addEventListener("click", () => {
     return;
   }
   if (rwStage === 1) {
-    const differs =
-      Module._wasm_rewind_scrub_save_differs &&
-      Module._wasm_rewind_scrub_save_differs(sel) === 1;
+    const differs = !!scrubApi()?.saveDiffers(sel);
     if (differs) {
       rwStage = 2;
       rwRefreshActions();
@@ -17141,6 +17183,20 @@ const ndsTopRgba = () => {
   return { heap: c.HEAPU8.slice(p, p + NdsUtil.W * NdsUtil.H * 4), w: NdsUtil.W, h: NdsUtil.H };
 };
 
+// Both screens stacked, top over bottom (Report a Bug's live preview).
+const ndsBothRgba = () => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null) return null;
+  const top = c._nds_fb_top();
+  const bottom = c._nds_fb_bottom();
+  if (!top || !bottom) return null;
+  const n = NdsUtil.W * NdsUtil.H * 4;
+  const heap = new Uint8Array(n * 2);
+  heap.set(c.HEAPU8.subarray(top, top + n), 0);
+  heap.set(c.HEAPU8.subarray(bottom, bottom + n), n);
+  return { heap, w: NdsUtil.W, h: NdsUtil.H * 2 };
+};
+
 // The screenshot's picture (nativeFrameCanvas): both screens as the console
 // stacks them, top over bottom, whatever the arrangement on the stage, at
 // the export scale.
@@ -17284,13 +17340,15 @@ const ndsCapturePlainState = () => {
   const p = n > 0 ? c._nds_state_data() : 0;
   return p ? c.HEAPU8.slice(p, p + n) : null;
 };
-const ndsApplyState = (bytes) => {
+const ndsApplyState = (bytes, keepRewind = false) => {
   const c = ndsCore;
   if (!ndsHasStates() || ndsCoreGame === null || !bytes?.length) return false;
   const p = c._malloc(bytes.length);
   if (!p) return false;
   c.HEAPU8.set(bytes, p);
-  const ok = c._nds_state_load(p, bytes.length) === 1;
+  const ok = (c._nds_state_load_keep
+    ? c._nds_state_load_keep(p, bytes.length, keepRewind ? 1 : 0)
+    : c._nds_state_load(p, bytes.length)) === 1;
   c._free(p);
   if (ok) ndsSetLid(ndsLidClosed); // the lid is where the page has it, not the state
   ndsSyncPower(); // a state taken switched off is off, and one taken running is on
@@ -17306,8 +17364,10 @@ const ndsApplyState = (bytes) => {
 const ndsHasRewind = () => !!(ndsCore && ndsCore._nds_rewind_pop && ndsCore._nds_rewind_enable);
 const ndsHasRunahead = () => !!(ndsCore && ndsCore._nds_runahead);
 const ndsHasCheats = () => !!(ndsCore && ndsCore._nds_load_cheats);
-// The ring's cap: iOS's as the GB/GBA one's (memory pressure demotes the JIT).
-const ndsRewindCap = () => (IS_IOS ? 16 * 1024 * 1024 : 0);
+// The ring's cap: smaller in iOS Safari, where memory pressure demotes the
+// wasm JIT (the GB/GBA ring keeps 16 MB there). Twice that for the DS, whose
+// newest snapshot alone is 6-7 MB: about 25 s of a busy 3D scene.
+const ndsRewindCap = () => (IS_IOS ? 32 * 1024 * 1024 : 0);
 const ndsApplyRewind = () => {
   if (!ndsHasRewind() || ndsCoreGame === null) return;
   ndsCore._nds_rewind_enable(rewindOn ? 1 : 0, ndsRewindCap());

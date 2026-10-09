@@ -58,6 +58,7 @@ interface NdsCoreModule {
   _nds_state_plain_size?: () => number;
   _nds_state_data?: () => number;
   _nds_state_load?: (ptr: number, len: number) => number;
+  _nds_state_load_keep?: (ptr: number, len: number, keepRewind: number) => number;
   _nds_state_error_kind?: () => number;
   _nds_state_error?: () => number;
   // Rewind, run-ahead and cheats (docs/nds/features.md); optional like the
@@ -71,6 +72,16 @@ interface NdsCoreModule {
   _nds_rewind_pop?: () => number;
   _nds_rewind_depth?: () => number;
   _nds_rewind_bytes?: () => number;
+  // The scrubber and Report a Bug's timeline: the GB/GBA core's
+  // wasm_rewind_scrub_* / wasm_rewind_commit for the DS ring.
+  _nds_rewind_scrub_generate?: (maxSamples: number) => number;
+  _nds_rewind_scrub_thumb_w?: () => number;
+  _nds_rewind_scrub_thumb_h?: () => number;
+  _nds_rewind_scrub_thumbs_ptr?: () => number;
+  _nds_rewind_scrub_seconds_ago?: (sample: number) => number;
+  _nds_rewind_scrub_state_size?: (sample: number) => number;
+  _nds_rewind_scrub_save_differs?: (sample: number) => number;
+  _nds_rewind_commit?: (sample: number) => number;
   _nds_runahead?: (n: number) => number;
   _nds_load_cheats?: (ptr: number, len: number) => number;
   // The bare payload into a buffer and back (benches: what rewind and

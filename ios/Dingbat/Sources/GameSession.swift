@@ -939,8 +939,7 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     func setRewinding(_ r: Bool) {
-        // No rewind ring on the DS core.
-        guard game != nil, Settings.shared.rewind, !isNDS, !NetLink.shared.linked, !twoPlayer else {
+        guard game != nil, Settings.shared.rewind, !NetLink.shared.linked, !twoPlayer else {
             rewinding = false
             return
         }

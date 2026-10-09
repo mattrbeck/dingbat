@@ -96,6 +96,8 @@ struct RewindScrubberView: View {
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(palette.border, lineWidth: 1))
     }
 
+    private var portrait: Bool { thumbs.first.map { $0.size.height > $0.size.width } ?? false }
+
     private var preview: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6).fill(palette.stage)
@@ -107,7 +109,8 @@ struct RewindScrubberView: View {
             }
         }
         .aspectRatio(thumbs.first.map { $0.size.width / max(1, $0.size.height) } ?? 1.5, contentMode: .fit)
-        .frame(maxWidth: .infinity)
+        // A DS's two screens stand upright: held to a height, not the width.
+        .frame(maxWidth: .infinity, maxHeight: portrait ? 260 : .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .accessibilityHidden(true)
     }

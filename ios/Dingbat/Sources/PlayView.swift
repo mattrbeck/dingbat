@@ -615,8 +615,7 @@ struct PlaybackCluster: View {
             if !(link.linked || session.twoPlayer) {
                 BarIconButton(system: "arrow.counterclockwise", label: "Reset", width: w) { session.reset() }
             }
-            // No rewind ring on the DS core (web body.nds-mode #rewind).
-            if settings.rewind && !session.isNDS && !(link.linked || session.twoPlayer) {
+            if settings.rewind && !(link.linked || session.twoPlayer) {
                 rewindButton(width: w)
             }
             BarIconButton(system: session.paused ? "play.fill" : "pause.fill",
@@ -960,7 +959,7 @@ struct GameMenu: View {
                 session.loadState(slot: 0)
                 model.closeMenu()
             }
-            if settings.rewind && !session.isNDS {
+            if settings.rewind {
                 quick("film", "Rewind to a Moment") { model.openSheet(.rewind) }
             }
             quick("tortoise", "Slow Motion", active: session.speed == .slow) {

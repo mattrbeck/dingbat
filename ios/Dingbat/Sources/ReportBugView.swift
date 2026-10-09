@@ -104,15 +104,13 @@ struct ReportBugView: View {
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .accessibilityHidden(true)
-            if settings.rewind && !session.isNDS && samples > 0 {
+            if settings.rewind && samples > 0 {
                 Slider(value: $slider, in: 0...Double(samples), step: 1)
                     .tint(palette.accent)
                     .accessibilityLabel("Rewind timeline")
                     .accessibilityValue(whenText)
             } else {
-                Text(session.isNDS
-                     ? "DS games have no rewind yet, so only this moment can be attached."
-                     : settings.rewind
+                Text(settings.rewind
                      ? "Slide left to go further back in time. Enable Rewind in Settings to capture a longer timeline."
                      : "Rewind is off, so only this moment can be attached. Turn Rewind on in Settings to pick an earlier one.")
                     .font(.system(size: 12))
@@ -130,8 +128,7 @@ struct ReportBugView: View {
         live = session.currentImage()
         samples = 0
         thumbs = []
-        // No rewind ring on the DS core (web body.nds-mode #report-slider).
-        if session.game != nil && settings.rewind && !session.isNDS {
+        if session.game != nil && settings.rewind {
             let n = Int(dingbat_rewind_scrub_generate(48))
             if n > 0, let base = dingbat_rewind_scrub_thumbs() {
                 let w = Int(dingbat_rewind_scrub_thumb_w()), h = Int(dingbat_rewind_scrub_thumb_h())

@@ -42,6 +42,9 @@ proc dingbat_rewind_scrub_generate(n: cint): cint {.importc, cdecl.}
 proc dingbat_rewind_scrub_thumb_w(): cint {.importc, cdecl.}
 proc dingbat_rewind_scrub_seconds_ago(s: cint): cint {.importc, cdecl.}
 proc dingbat_rewind_commit(s: cint): cint {.importc, cdecl.}
+proc dingbat_rewind_scrub_thumb_h(): cint {.importc, cdecl.}
+proc dingbat_rewind_scrub_state_size(s: cint): cint {.importc, cdecl.}
+proc dingbat_rewind_scrub_save_differs(s: cint): cint {.importc, cdecl.}
 proc dingbat_load_cheats(text: cstring): cstring {.importc, cdecl.}
 proc dingbat_set_input(id, pressed: cint) {.importc, cdecl.}
 proc dingbat_clip_begin(startAgo, endAgo: cint): cint {.importc, cdecl.}
@@ -357,7 +360,6 @@ if ndsHave("fb_both.nds"):
   let f0 = ndsFrames()
   for _ in 0 ..< 200: dingbat_run_frame_ahead(2)
   check ndsFrames() == f0 + 200, "run-ahead runs plain frames"
-  check dingbat_rewind_pop() == 0 and dingbat_rewind_scrub_generate(16) == 0, "no rewind"
   check dingbat_clip_history_frames() == 0 and dingbat_clip_begin(60, 0) == 0 and
         dingbat_clip_tick() == -1, "no clips"
   check $dingbat_load_cheats("[x] Good\n82000000 0001\n\n") == "", "cheats: nothing to load into"
@@ -379,6 +381,37 @@ if ndsHave("fb_both.nds"):
   check applyState(s) and frameHash() == stamp, "the state loads after the reset"
   var junk = "not a state at all"
   check not applyState(junk) and dingbat_state_error_kind() == 1, "junk refused as not a state"
+
+echo "DS: hold-to-rewind, the scrubber and Report a Bug's timeline"
+if ndsHave("fb_both.nds"):
+  dingbat_set_rewind(1, 0)
+  check dingbat_load_rom(cstring(ndsStaged("fb_both.nds")), nil) == 0, "loads"
+  for _ in 0 ..< 300: dingbat_run_frame()
+  let f1 = ndsFrames()
+  check dingbat_rewind_pop() == 1 and dingbat_rewind_pop() == 1 and ndsFrames() < f1,
+        "rewind pops snapshots: an earlier frame"
+  let n = dingbat_rewind_scrub_generate(16)
+  check n > 1 and dingbat_rewind_scrub_thumb_w() == 80 and dingbat_rewind_scrub_thumb_h() == 120,
+        "a strip of 80x120 thumbs (both screens): " & $n
+  let oldest = n - 1
+  check dingbat_rewind_scrub_seconds_ago(oldest) > 0, "the oldest sample is in the past"
+  let live = takeState()
+  let at = ndsFrames()
+  let size = dingbat_rewind_scrub_state_size(oldest)
+  var old = newString(size)
+  if size > 0: copyMem(addr old[0], dingbat_state_data(), size)
+  check old.startsWith("DGBSTATE") and ndsFrames() == at, "a sample's state, the live core put back"
+  check dingbat_rewind_scrub_save_differs(oldest) == 0 and ndsFrames() == at,
+        "the save chip is unchanged across it"
+  check dingbat_rewind_commit(oldest) == 1 and ndsFrames() < at - 100, "commit to the oldest moment"
+  let back = frameHash()
+  check dingbat_rewind_scrub_generate(16) <= 2, "commit drops the newer history"
+  check applyState(live, keep = true) and ndsFrames() == at, "undo: the state from before"
+  check applyState(old) and frameHash() == back, "the sample's state is that moment"
+  dingbat_set_rewind(0, 0)
+  for _ in 0 ..< 20: dingbat_run_frame()
+  check dingbat_rewind_pop() == 0 and dingbat_rewind_scrub_generate(16) == 0, "rewind off: no ring"
+  dingbat_set_rewind(1, 0)
 
 echo "DS: the stylus, X and Y, the lid"
 if ndsHave("built/touch_test.nds"):
