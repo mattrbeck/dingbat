@@ -58,6 +58,24 @@ interface NdsCoreModule {
   _nds_state_load?: (ptr: number, len: number) => number;
   _nds_state_error_kind?: () => number;
   _nds_state_error?: () => number;
+  // Rewind, run-ahead and cheats (docs/nds/features.md); optional like the
+  // states. nds_rewind_enable(on, capBytes; 0 = default) keeps a ring the
+  // frames feed; nds_rewind_pop steps back 10 frames (1 = applied).
+  // nds_runahead(n) runs n frames ahead of the last frame run and back,
+  // and the screens show the future until the next frame (1 = done).
+  // nds_load_cheats(utf8Ptr, len) replaces the list from .cht text and
+  // returns the refused cheats as "name: why" lines.
+  _nds_rewind_enable?: (on: number, capBytes: number) => void;
+  _nds_rewind_pop?: () => number;
+  _nds_rewind_depth?: () => number;
+  _nds_rewind_bytes?: () => number;
+  _nds_runahead?: (n: number) => number;
+  _nds_load_cheats?: (ptr: number, len: number) => number;
+  // The bare payload into a buffer and back (benches: what rewind and
+  // run-ahead cost). take returns its length; restore 1 = ok.
+  _nds_payload_take?: () => number;
+  _nds_payload_restore?: () => number;
+  _nds_payload_restore_checked?: () => number;
 }
 
 declare function createNdsCore(moduleArg?: {

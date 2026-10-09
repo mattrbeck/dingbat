@@ -9035,18 +9035,19 @@ body.nds-side #nds-layout-btn svg {
   transform: rotate(90deg);
 }
 
-/* Not on the DS core yet: rewind, the link cable, cheats, clips (the
-   retroactive one needs the rewind ring; recording goes with it, as every
-   mode keeps the two together), and save states until the core has them
-   (body.nds-states). */
-body.nds-mode #rewind,
+/* Not on the DS core yet: the rewind scrubber, the link cable, clips (the
+   retroactive one replays the GB/GBA core's history; recording goes with
+   it, as every mode keeps the two together); and hold-to-rewind, cheats and
+   save states until the core has them (body.nds-rewind, .nds-cheats,
+   .nds-states). */
+body.nds-mode:not(.nds-rewind) #rewind,
+body.nds-mode:not(.nds-rewind) #kb-shortcut-rewind,
 body.nds-mode #open-rewind-scrub,
-body.nds-mode #kb-shortcut-rewind,
 body.nds-mode #report-slider,
 body.nds-mode #clip-last,
 body.nds-mode #record-clip,
 body.nds-mode #net-connect,
-body.nds-mode #open-cheats,
+body.nds-mode:not(.nds-cheats) #open-cheats,
 body.nds-mode:not(.nds-states) #save-state,
 body.nds-mode:not(.nds-states) #load-state,
 body.nds-mode:not(.nds-states) #open-states {
