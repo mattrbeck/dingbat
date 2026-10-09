@@ -2883,7 +2883,9 @@ proc main() =
               echo "NETLINK: link lost: ", e.msg, " — continuing single-player"
               teardown_netlink(e.msg)
           else:
-            let unpaced = not stepping and not is_paced()
+            # Not under an input log: its every-60-frames hash reads the
+            # picture the frame before left (input_log_frame_start)
+            let unpaced = not stepping and not is_paced() and not input_log_open
             if unpaced:
               var n = 0
               while n < 64 and unseen_fits() and gba_frame_due():

@@ -81,7 +81,7 @@ final class Settings: ObservableObject {
     /// For code off the main actor (the library's file scans).
     static var dsBetaOn: Bool { UserDefaults.standard.bool(forKey: dsBetaKey) }
     /// Draw frames that are never shown too (docs/frame-skip.md): to compare.
-    @Published var drawAll: Bool { didSet { d.set(drawAll, forKey: "drawAll") } }
+    @Published var drawAll: Bool { didSet { d.set(drawAll, forKey: "drawAll"); dingbat_set_draw_all(drawAll ? 1 : 0) } }
     @Published var saveWebhook: String {
         didSet {
             d.set(saveWebhook, forKey: "save-hook")
@@ -168,6 +168,7 @@ final class Settings: ObservableObject {
         dingbat_set_gba_bios_mode(Int32(gbaBiosMode))
         dingbat_set_color_correction(colorCorrect ? 1 : 0)
         dingbat_set_lcd_response(lcdResponse ? 1 : 0)
+        dingbat_set_draw_all(drawAll ? 1 : 0)
         dingbat_set_fifo_interp(fifoInterp ? 1 : 0)
         dingbat_set_mp2k_hle(mp2kHle ? 1 : 0)
         dingbat_set_pitch_correct_ff(pitchCorrectFF ? 1 : 0)

@@ -163,9 +163,14 @@ proc main() =
         held = mask
         reply "ok"
       of "run":
-        for _ in 1 .. parseInt(parts[1]):
+        # Only the picture after the last is read (hash, shot): the rest
+        # go undrawn, running exactly as drawn ones (docs/frame-skip.md)
+        let n = parseInt(parts[1])
+        for i in 1 .. n:
+          emu.ppu.no_draw = i < n
           emu.step_frame()
           inc frame
+        emu.ppu.no_draw = false
         reply &"ok {frame}"
       of "runhash":
         # run N frames, reporting the framebuffer hash after each

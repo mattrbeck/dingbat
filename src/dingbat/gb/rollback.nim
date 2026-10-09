@@ -112,6 +112,16 @@ proc reconcile(sess: GbRollbackSession) =
     for k in base + 1 ..< sess.head: sess.sim(k)
     sess.replaying = false
 
+proc peer_state_bytes*(sess: GbRollbackSession; player: int): string =
+  ## Core `player`'s full state as both peers hold it: the picture, which
+  ## only drawing writes, is blanked, since each peer draws only its own
+  ## core (drawOnlyShown). Desync dumps compare these.
+  let c = sess.link.cores[player]
+  let fb = c.ppu.framebuffer
+  c.ppu.framebuffer = newSeq[uint16](fb.len)
+  result = c.state_bytes()
+  c.ppu.framebuffer = fb
+
 proc feed_remote*(sess: GbRollbackSession; frame: int; bits: uint16) =
   ## Ingest a remote player's input for `frame`. May reconcile/rollback a
   ## predicted frame or buffer a future one. Duplicates ignored.
