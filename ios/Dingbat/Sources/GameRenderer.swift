@@ -50,6 +50,10 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     private var gameTex: MTLTexture?
     private var borderTex: MTLTexture?
     private var lastBorderGen: Int32 = -1
+    #if DEBUG
+    /// The last picture sent to the screen (`-present-check`).
+    private(set) var uploadedHash: UInt64 = 0
+    #endif
     private(set) weak var view: MTKView?
 
     var options = PresentOptions()
@@ -120,6 +124,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         }
         gameTex?.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0,
                          withBytes: ptr, bytesPerRow: w * 2)
+        #if DEBUG
+        if GameSession.presentCheck { uploadedHash = GameSession.hash16(ptr, w * h) }
+        #endif
         if dingbat_sgb_border() != 0, let bptr = dingbat_sgb_border_ptr() {
             let gen = dingbat_sgb_border_gen()
             if gen != lastBorderGen {

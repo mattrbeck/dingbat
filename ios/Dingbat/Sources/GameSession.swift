@@ -409,6 +409,10 @@ final class GameSession: NSObject, ObservableObject {
             onTick?()
             return
         }
+        // Whether any frame this tick changed the picture: the last of several
+        // can be unchanged (a fade that has just settled) while the screen
+        // still shows the one before them.
+        var changed = false
         switch speed {
         case .fastForward:
             // As many frames as fit in most of this display interval.
@@ -418,6 +422,7 @@ final class GameSession: NSObject, ObservableObject {
                 if isNDS { NdsState.shared.blowFrame() }
                 dingbat_run_frame()
                 ran += 1
+                if dingbat_frame_static() == 0 { changed = true }
             } while CACurrentMediaTime() - t0 < budget && ran < 40
         case .normal, .double, .slow:
             // Run-ahead is the GB/GBA cores' (a DS frame is a plain one).
@@ -428,6 +433,7 @@ final class GameSession: NSObject, ObservableObject {
                 if twoPlayer { dingbat_link_tick() }
                 else if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
                 ran += 1
+                if dingbat_frame_static() == 0 { changed = true }
             }
             keepAudioAlive()
         }
@@ -439,10 +445,11 @@ final class GameSession: NSObject, ObservableObject {
             runPlay += min(dt, 0.25)
             if let g = game { CrashWatch.playing(g.fileName, played: runPlay) }
             saveCheckTime += dt
-            if dingbat_frame_static() == 0 || twoPlayer { present() }
+            if changed || twoPlayer { present() }
             if twoPlayer { TwoPlayer.refresh() }
             #if DEBUG
             latencyCheck()
+            if Self.presentCheck { checkPresented() }
             #endif
             ClipExporter.shared.recordTick()
             pollPeripherals()
@@ -527,6 +534,32 @@ final class GameSession: NSObject, ObservableObject {
             self.latPress = CACurrentMediaTime()
             self.setInput(0, true, source: "test")
         }
+    }
+
+    /// `-present-check`: after every display tick that ran frames, is the
+    /// picture on the screen the game's current one? Ticks where it is not,
+    /// and the longest run of them, into tmp/present.txt.
+    static let presentCheck = ProcessInfo.processInfo.arguments.contains("-present-check")
+    private var pcTicks = 0, pcStale = 0, pcRun = 0, pcLongest = 0
+
+    static func hash16(_ p: UnsafePointer<UInt16>, _ n: Int) -> UInt64 {
+        var h: UInt64 = 1469598103934665603
+        for i in 0 ..< n { h = (h ^ UInt64(p[i] & 0x7FFF)) &* 1099511628211 }
+        return h
+    }
+
+    private func checkPresented() {
+        guard let fb = dingbat_game_fb() else { return }
+        pcTicks += 1
+        if Self.hash16(fb, Int(dingbat_fb_width() * dingbat_fb_height())) != GameRenderer.shared.uploadedHash {
+            pcStale += 1
+            pcRun += 1
+            pcLongest = max(pcLongest, pcRun)
+        } else { pcRun = 0 }
+        guard pcTicks % 30 == 0 else { return }
+        let dir = FileManager.default.temporaryDirectory
+        try? "ticks \(pcTicks) stale \(pcStale) longest \(pcLongest) now \(pcRun)\n"
+            .write(to: dir.appendingPathComponent("present.txt"), atomically: true, encoding: .utf8)
     }
 
     private func latencyCheck() {

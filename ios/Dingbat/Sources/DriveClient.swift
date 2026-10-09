@@ -171,32 +171,90 @@ final class DriveClient {
         return stamp(d)
     }
 
-    /// `onBytes` hears the bytes as they land (a tile's progress bar).
+    /// `onBytes` hears the bytes as they land (a tile's progress bar), on the
+    /// main queue.
     func download(_ id: String, onBytes: ((Int) -> Void)? = nil) async throws -> Data {
         let url = URL(string: Self.files + "/" + id + "?alt=media")!
         guard let onBytes else { return try await fetch(url).0 }
         // Streamed, for progress. Renewal and retries as fetch().
         var req = URLRequest(url: url)
         if let t = token() { req.setValue("Bearer " + t, forHTTPHeaderField: "Authorization") }
-        var (stream, res) = try await session.bytes(for: req)
+        var (out, res) = try await Streamed.get(req, timeout: session.configuration.timeoutIntervalForRequest, onBytes: onBytes)
         if (res as? HTTPURLResponse)?.statusCode == 401 {
             guard await renew() else { throw HTTPError(status: 401) }
             try live()
             if let t = token() { req.setValue("Bearer " + t, forHTTPHeaderField: "Authorization") }
-            (stream, res) = try await session.bytes(for: req)
+            (out, res) = try await Streamed.get(req, timeout: session.configuration.timeoutIntervalForRequest, onBytes: onBytes)
         }
         guard let http = res as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             return try await fetch(url).0
         }
-        var out = Data()
-        var pending = 0
-        for try await b in stream {
-            out.append(b)
-            pending += 1
-            if pending >= 65536 { onBytes(pending); pending = 0 }
-        }
-        if pending > 0 { onBytes(pending) }
         return out
+    }
+
+    /// One streamed GET: URLSession hands the body over in the chunks it
+    /// arrives in, on a queue of its own, into a buffer sized from
+    /// Content-Length; progress reaches the main queue every 256 KB. (Reading
+    /// a 32 MB ROM a byte at a time through AsyncBytes, on the main actor,
+    /// hung the app while the network piled up behind it.)
+    private final class Streamed: NSObject, URLSessionDataDelegate {
+        private var data = Data()
+        private var pending = 0
+        private var response: URLResponse?
+        private let onBytes: (Int) -> Void
+        private var done: CheckedContinuation<(Data, URLResponse), Error>?
+
+        private init(_ onBytes: @escaping (Int) -> Void) { self.onBytes = onBytes }
+
+        static func get(_ req: URLRequest, timeout: TimeInterval,
+                        onBytes: @escaping (Int) -> Void) async throws -> (Data, URLResponse) {
+            let me = Streamed(onBytes)
+            let c = URLSessionConfiguration.default
+            c.timeoutIntervalForRequest = timeout
+            c.waitsForConnectivity = false
+            let q = OperationQueue()
+            q.maxConcurrentOperationCount = 1
+            let s = URLSession(configuration: c, delegate: me, delegateQueue: q)
+            defer { s.finishTasksAndInvalidate() }
+            let task = s.dataTask(with: req)
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { cont in
+                    q.addOperation {
+                        me.done = cont
+                        task.resume()
+                    }
+                }
+            } onCancel: { task.cancel() }
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+            self.response = response
+            let n = response.expectedContentLength
+            if n > 0 && n <= 64 << 20 { data.reserveCapacity(Int(n)) }
+            completionHandler(.allow)
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+            data.append(chunk)
+            pending += chunk.count
+            if pending >= 256 << 10 { flush() }
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            flush()
+            if let error { done?.resume(throwing: error) }
+            else if let response { done?.resume(returning: (data, response)) }
+            else { done?.resume(throwing: URLError(.badServerResponse)) }
+            done = nil
+        }
+
+        private func flush() {
+            guard pending > 0 else { return }
+            let n = pending, cb = onBytes
+            pending = 0
+            DispatchQueue.main.async { cb(n) }
+        }
     }
 
     func delete(_ id: String) async throws {
