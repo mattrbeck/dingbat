@@ -59,6 +59,7 @@ const
     "long_on", "long_slice", "long_h9", "slice_from", "long_next", "cut_at",   # run_until's long slices
     "ovl9", "ovlx9", "ovl_top9"]   # one opcode's data overlap (bus9.nim), stale between opcodes
   CPU_SKIP = ["bus", "trace", "profiling", "profile", "cprofile", "attn",
+              "jit_on",   # translated blocks (arm/blocks.nim): a run setting
               # idle-loop skipping: a fresh detector proves the same loops again
               "wl_on", "wl_until", "wl_bump", "wl_head", "wl_other", "wl_epoch", "wl_have",
               "wl_tries", "wl_idle", "wl_cycles", "wl_instrs", "wl_fails", "wl_skipped",

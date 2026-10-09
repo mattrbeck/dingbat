@@ -442,6 +442,58 @@ proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     return uint32(cast[ptr uint16](addr n.fptr7[a and 0xFFF])[])
   n.fetch_slow7(a, 16)
 
+# Translated blocks (arm/blocks.nim, -d:nds_jit): a pure opcode's fetch when
+# the translator knows it is the next one in the page `fetch_page7` set up.
+proc fetch_seq_ok*(b: Arm7Bus; a: uint32; size: static uint32): bool {.inline.} =
+  ## After a fetch at a - size: fetch32/16's sequential case holds for `a`.
+  (a shr 12) == b.nds.fpage7 and a == b.nds.last_fetch7 + size
+proc fetch_seq32*(b: Arm7Bus; a: uint32; cost: var int64): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  ## fetch32's sequential case, its conditions known to hold; the cost goes
+  ## to the caller's clock instead of `wait7` (the same sum).
+  let n {.cursor.} = b.nds
+  n.last_data7 = NO_ADDR
+  n.last_fetch7 = a
+  cost += n.fseq7[1]
+  cast[ptr uint32](addr n.fptr7[a and 0xFFF])[]
+proc fetch_seq16*(b: Arm7Bus; a: uint32; cost: var int64): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  let n {.cursor.} = b.nds
+  n.last_data7 = NO_ADDR
+  n.last_fetch7 = a
+  cost += n.fseq7[0]
+  uint32(cast[ptr uint16](addr n.fptr7[a and 0xFFF])[])
+
+proc fetch32_outline(b: Arm7Bus; a: uint32): uint32 {.noinline.} = fetch32(b, a)
+proc fetch16_outline(b: Arm7Bus; a: uint32): uint32 {.noinline.} = fetch16(b, a)
+proc jit_fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  ## fetch32 for a translated opcode: the sequential case inline, the rest
+  ## out of line, to keep blocks small.
+  let n {.cursor.} = b.nds
+  if likely((a shr 12) == n.fpage7 and a == n.last_fetch7 + 4):
+    n.last_data7 = NO_ADDR
+    n.last_fetch7 = a
+    n.wait7 += n.fseq7[1]
+    return cast[ptr uint32](addr n.fptr7[a and 0xFFF])[]
+  fetch32_outline(b, a)
+proc jit_fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  if likely((a shr 12) == n.fpage7 and a == n.last_fetch7 + 2):
+    n.last_data7 = NO_ADDR
+    n.last_fetch7 = a
+    n.wait7 += n.fseq7[0]
+    return uint32(cast[ptr uint16](addr n.fptr7[a and 0xFFF])[])
+  fetch16_outline(b, a)
+proc fetch_peek32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  ## The word fetch_seq32 would read, nothing changed.
+  cast[ptr uint32](addr b.nds.fptr7[a and 0xFFF])[]
+proc fetch_peek16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  uint32(cast[ptr uint16](addr b.nds.fptr7[a and 0xFFF])[])
+proc fetch_seq_cost*(b: Arm7Bus; size: static uint32): int64 {.inline.} =
+  b.nds.fseq7[when size == 4: 1 else: 0]
+proc fetch_seq_commit*(b: Arm7Bus; last: uint32; size: static uint32) {.inline.} =
+  let n {.cursor.} = b.nds
+  n.last_data7 = NO_ADDR
+  n.last_fetch7 = last
+
 # Sound: channel sample fetch and capture stores (io/spu.nim). No CPU clock
 # sync -- they run inside the evSpuSample dispatch.
 proc spu_read32*(b: Arm7Bus; a: uint32): uint32 = b.nds.read7(a, 32)
@@ -466,3 +518,4 @@ proc swi_hook*(b: Arm7Bus; comment: uint32): bool =
 
 # The dispatch tables (arm/cpu.nim): after every mixin their handlers use.
 dispatch_tables(Arm7Bus)
+when defined(nds_jit): jit_tables(Arm7Bus, jit_blocks7(Arm7Bus))

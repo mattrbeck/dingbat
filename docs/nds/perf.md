@@ -640,6 +640,9 @@ or a per-block check of the opcodes, which is the fetch it saves. The GBA
 core's cached-interpreter study (2026-07, since dropped from docs/)
 reached the same ceiling, +8-12 %, for the same reason: the timing
 model's per-access work, not decode, is what is left. Not built.
+(Branch `nds-jit` built the next step, translated blocks with registers
+in host registers, as a measurement: 1.28x on Golden Sun's ARM9-bound
+intro, 1.03-1.08x on SoulSilver, none on wasm; docs/nds/jit.md.)
 
 ## Numbers: round 2 (`nds-cache-perf`)
 

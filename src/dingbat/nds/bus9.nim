@@ -975,6 +975,58 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     return uint32(cast[ptr uint16](addr n.fptr9[a and 31])[])
   n.fetch_slow9(a, 2)
 
+# Translated blocks (arm/blocks.nim, -d:nds_jit): a pure opcode's fetch when
+# the translator knows it is the next one in the line `fetch_line9` set up.
+proc fetch_seq_ok*(b: Arm9Bus; a: uint32; size: static uint32): bool {.inline.} =
+  ## After a fetch at a - size: `fetch_fast9` holds for `a`.
+  (a shr 5) == b.nds.fline9 and a == b.nds.last_pc9 + size
+proc fetch_seq32*(b: Arm9Bus; a: uint32; cost: var int64): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  ## fetch32's fast path, its conditions known to hold: no cost.
+  let n {.cursor.} = b.nds
+  n.last_data9 = NO_ADDR
+  n.last_pc9 = a
+  n.last_fetch9 = a
+  cast[ptr uint32](addr n.fptr9[a and 31])[]
+proc fetch_seq16*(b: Arm9Bus; a: uint32; cost: var int64): uint32 {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  let n {.cursor.} = b.nds
+  n.last_data9 = NO_ADDR
+  n.last_pc9 = a
+  n.last_fetch9 = a and not 3'u32
+  uint32(cast[ptr uint16](addr n.fptr9[a and 31])[])
+
+proc fetch32_outline(b: Arm9Bus; a: uint32): uint32 {.noinline.} = fetch32(b, a)
+proc fetch16_outline(b: Arm9Bus; a: uint32): uint32 {.noinline.} = fetch16(b, a)
+proc jit_fetch32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  ## fetch32 for a translated opcode: the sequential case inline, the rest
+  ## (jumps, line changes, misses) out of line, to keep blocks small.
+  let n {.cursor.} = b.nds
+  if likely(n.fetch_fast9(a, 4)):
+    n.last_data9 = NO_ADDR
+    n.last_pc9 = a
+    n.last_fetch9 = a
+    return cast[ptr uint32](addr n.fptr9[a and 31])[]
+  fetch32_outline(b, a)
+proc jit_fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  let n {.cursor.} = b.nds
+  if likely(n.fetch_fast9(a, 2)):
+    n.last_data9 = NO_ADDR
+    n.last_pc9 = a
+    n.last_fetch9 = a and not 3'u32
+    return uint32(cast[ptr uint16](addr n.fptr9[a and 31])[])
+  fetch16_outline(b, a)
+proc fetch_peek32*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  ## The word fetch_seq32 would read, nothing changed.
+  cast[ptr uint32](addr b.nds.fptr9[a and 31])[]
+proc fetch_peek16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
+  uint32(cast[ptr uint16](addr b.nds.fptr9[a and 31])[])
+proc fetch_seq_cost*(b: Arm9Bus; size: static uint32): int64 {.inline.} = 0
+proc fetch_seq_commit*(b: Arm9Bus; last: uint32; size: static uint32) {.inline.} =
+  ## The trackers after sequential fetches ending at `last`.
+  let n {.cursor.} = b.nds
+  n.last_data9 = NO_ADDR
+  n.last_pc9 = last
+  n.last_fetch9 = when size == 4: last else: last and not 3'u32
+
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()
 proc irq_wake*(b: Arm9Bus): bool {.inline.} =
   ## The ARM9 halts through CP15 (wait for interrupt), which only the IRQ
@@ -1071,3 +1123,4 @@ proc swi_hook*(b: Arm9Bus; comment: uint32): bool =
 
 # The dispatch tables (arm/cpu.nim): after every mixin their handlers use.
 dispatch_tables(Arm9Bus)
+when defined(nds_jit): jit_tables(Arm9Bus, jit_blocks9(Arm9Bus))

@@ -82,6 +82,7 @@ import zippy
 import dingbat/nds/[nds, savestate]
 import dingbat/nds/io/rtc
 import dingbat/gba/rtc_calendar
+when defined(nds_jitprof) or defined(nds_jitstats): import dingbat/nds/arm/cpu
 
 when defined(macosx):
   # host instructions retired so far (macOS proc_pid_rusage): --perf-from
@@ -92,10 +93,17 @@ static unsigned long long ndsrun_host_instructions(void) {
   struct rusage_info_v4 ri;
   if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4, (rusage_info_t *)&ri) != 0) return 0;
   return ri.ri_instructions;
+}
+static unsigned long long ndsrun_host_cycles(void) {
+  struct rusage_info_v4 ri;
+  if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4, (rusage_info_t *)&ri) != 0) return 0;
+  return ri.ri_cycles;
 }""".}
   proc host_instructions(): uint64 {.importc: "ndsrun_host_instructions", nodecl.}
+  proc host_cycles(): uint64 {.importc: "ndsrun_host_cycles", nodecl.}
 else:
   proc host_instructions(): uint64 = 0
+  proc host_cycles(): uint64 = 0
 
 proc crc32(data: openArray[uint8]): uint32 =
   var table {.global.}: array[256, uint32]
@@ -262,6 +270,43 @@ proc bg_shot*(n: NDS; engine_b: bool; bg: int): seq[uint16] =
         if c != 0: c += (e shr 12) * 16
       result[y * 256 + x] = uint16(bus.read16(pal + c * 2))
 
+when defined(pcsample) and defined(macosx):
+  # -d:pcsample: a SIGPROF sampler of the interrupted pc (every 100 us of CPU
+  # time) over the --perf-from frames, written to $DINGBAT_PCSAMPLE as
+  # "LOADADDR" then "PC COUNT" lines, for `atos -i` (docs/nds/jit.md)
+  {.emit: """#include <signal.h>
+#include <sys/time.h>
+#include <stdio.h>
+#include <mach-o/dyld.h>
+#define PCS_N (1 << 20)
+static unsigned long long pcs_key[PCS_N];
+static unsigned int pcs_cnt[PCS_N];
+static void pcs_handler(int sig, siginfo_t *si, void *uc_) {
+  ucontext_t *uc = (ucontext_t *)uc_;
+  unsigned long long pc = uc->uc_mcontext->__ss.__pc;
+  unsigned long long h = (pc * 0x9E3779B97F4A7C15ull) >> 44;
+  for (int i = 0; i < 64; i++) {
+    unsigned long long j = (h + i) & (PCS_N - 1);
+    if (pcs_key[j] == pc) { pcs_cnt[j]++; return; }
+    if (pcs_key[j] == 0) { pcs_key[j] = pc; pcs_cnt[j] = 1; return; }
+  }
+}
+static void pcs_start(void) {
+  struct sigaction sa; sa.sa_sigaction = pcs_handler; sa.sa_flags = SA_SIGINFO | SA_RESTART;
+  sigemptyset(&sa.sa_mask); sigaction(SIGPROF, &sa, 0);
+  struct itimerval it; it.it_interval.tv_sec = 0; it.it_interval.tv_usec = 100;
+  it.it_value = it.it_interval; setitimer(ITIMER_PROF, &it, 0);
+}
+static void pcs_dump(const char *path) {
+  struct itimerval it = {{0, 0}, {0, 0}}; setitimer(ITIMER_PROF, &it, 0);
+  FILE *f = fopen(path, "w"); if (!f) return;
+  fprintf(f, "%llx\n", (unsigned long long)(0x100000000ull + _dyld_get_image_vmaddr_slide(0)));
+  for (int j = 0; j < PCS_N; j++) if (pcs_key[j]) fprintf(f, "%llx %u\n", pcs_key[j], pcs_cnt[j]);
+  fclose(f);
+}""".}
+  proc pcs_start() {.importc, nodecl.}
+  proc pcs_dump(path: cstring) {.importc, nodecl.}
+
 when isMainModule:
   var rom = ""
   var frames = 60
@@ -295,6 +340,7 @@ when isMainModule:
   var mic_at = 0
   var perf_from = 0
   var perf_i0 = 0'u64
+  var perf_c0 = 0'u64
   var state_saves: seq[(string, int)]
   var state_load = ""
   var state_load_frame = -1
@@ -429,6 +475,9 @@ when isMainModule:
     if f == perf_from:
       perf_t0 = getMonoTime()
       perf_i0 = host_instructions()
+      perf_c0 = host_cycles()
+      when defined(pcsample) and defined(macosx):
+        if getEnv("DINGBAT_PCSAMPLE").len > 0: pcs_start()
     if f == trace_at:
       n.arm9.trace = trace9
       n.arm7.trace = trace7
@@ -521,6 +570,10 @@ when isMainModule:
          formatFloat(float(frames - perf_from) / secs, ffDecimal, 1), " fps"
     let ins = host_instructions()
     if ins > 0: echo "host instructions: frames ", perf_from, "-", frames, " ", ins - perf_i0
+    when defined(pcsample) and defined(macosx):
+      if getEnv("DINGBAT_PCSAMPLE").len > 0: pcs_dump(cstring(getEnv("DINGBAT_PCSAMPLE")))
+    let cyc = host_cycles()
+    if cyc > 0: echo "host cycles: frames ", perf_from, "-", frames, " ", cyc - perf_c0
   if tops.len > 0:
     let cols = min(tops.len, 4)
     let rows = (tops.len + cols - 1) div cols
@@ -555,6 +608,12 @@ when isMainModule:
        toHex(n.arm9.next_pc, 8), " arm7 instrs=", n.arm7.instr_count, " pc=0x",
        toHex(n.arm7.next_pc, 8), " -> ", outp
   # speed-up statistics (docs/nds/perf.md)
+  when defined(nds_jitprof):
+    if getEnv("DINGBAT_JITPROF").len > 0: jit_prof_dump(getEnv("DINGBAT_JITPROF"))
+  when defined(nds_jitstats):
+    echo "jit: arm9 ", jit_in_block9, " opcodes in blocks of ", n.arm9.instr_count, " (", jit_entries9,
+         " entries), arm7 ", jit_in_block7, " of ", n.arm7.instr_count, " (", jit_entries7,
+         " entries), ", jit_mismatch, " opcodes changed since translation"
   echo "skipped: arm9 ", n.arm9.wl_skipped, " arm7 ", n.arm7.wl_skipped,
        " cycles; reused: 3d frames ", n.gpu3d.reused, ", 2d lines A ",
        n.gpu.engine_a.lc_reused, " B ", n.gpu.engine_b.lc_reused

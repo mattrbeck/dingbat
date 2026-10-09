@@ -479,6 +479,11 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   let skip = getEnv("DINGBAT_NDS_NO_SKIP") != "1"
   n.arm9.wl_on = skip
   n.arm7.wl_on = skip
+  when defined(nds_jit):
+    # translated blocks (arm/blocks.nim); DINGBAT_NDS_NO_JIT=1 runs without
+    let jit = getEnv("DINGBAT_NDS_NO_JIT") != "1"
+    n.arm9.jit_on = jit
+    n.arm7.jit_on = jit
   n.gpu3d.reuse_on = skip
   n.gpu.engine_a.lc_on = skip
   n.gpu.engine_b.lc_on = skip

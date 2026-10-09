@@ -114,6 +114,7 @@ type
     wl_fails: int32         ## visits in a row that found the loop doing work
     wl_skipped*: int64      ## master cycles skipped so far (a statistic)
     wl_cold*: int32         ## backward branches the bus lets pass unwatched
+    jit_on*: bool           ## run translated blocks (-d:nds_jit; DINGBAT_NDS_NO_JIT=1 clears it)
     wl_regs: array[15, uint32]
     wl_cpsr, wl_spsr: uint32
     wl_sig: IdleSig
@@ -1177,6 +1178,8 @@ proc take_abort[B](cpu: ArmCpu[B]; a: uint32) {.noinline.} =
   else: cpu.exception(mABT, 0x10, a + 8)
   cpu.abort = 0
 
+include blocks
+
 proc exec_one[B](cpu: ArmCpu[B]; traced: static bool) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
   ## Fetch, execute and time the opcode at next_pc.
   mixin fetch16, fetch32, access_cycles, armv5
@@ -1186,6 +1189,7 @@ proc exec_one[B](cpu: ArmCpu[B]; traced: static bool) {.inline, codegenDecl: "st
     if cpu.profiling: cpu.profile.inc(a and not 63'u32)
   if cpu.thumb:
     let instr = fetch16(cpu.bus, a)
+    when defined(nds_jitprof): cpu.jit_prof_note(a, instr)
     when traced:
       if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 2
@@ -1195,6 +1199,7 @@ proc exec_one[B](cpu: ArmCpu[B]; traced: static bool) {.inline, codegenDecl: "st
     else: cpu.execute_thumb(instr)
   else:
     let instr = fetch32(cpu.bus, a)
+    when defined(nds_jitprof): cpu.jit_prof_note(a, instr)
     when traced:
       if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 4
@@ -1356,7 +1361,7 @@ proc run*[B](cpu: ArmCpu[B]; until: int64) =
   ## (`set_cpsr`: MSR, a mode return), a SWI (HLE SWIs halt and write I/O)
   ## and a CP15 write (wait for interrupt). Taking an exception only sets
   ## CPSR.I. Between calls anything may have changed: `attn` starts set.
-  mixin irq_wake, irq_line, slice_cut
+  mixin irq_wake, irq_line, slice_cut, jit_table, armv5
   var until = until
   cpu.wl_until = until
   if unlikely(cpu.trace > 0):
@@ -1387,6 +1392,18 @@ proc run*[B](cpu: ArmCpu[B]; until: int64) =
           return
       if irq_line(cpu.bus) and (cpu.cpsr and FLAG_I) == 0:
         cpu.exception(mIRQ, 0x18, cpu.next_pc + 4)
+    when defined(nds_jit):
+      # a translated block at next_pc runs the opcodes this loop would
+      # (arm/blocks.nim), returning wherever the loop must look again
+      if cpu.jit_on:
+        let key = jit_key(cpu.next_pc, cpu.thumb)
+        let e = addr jit_table(B)[jit_slot(key)]
+        if e.key == key:
+          when defined(nds_jitstats):
+            when armv5(B): inc jit_entries9
+            else: inc jit_entries7
+          e.fn(cpu, until)
+          continue
     cpu.exec_one(false)
 
 proc reg_dump*(cpu: ArmCpu): string =
