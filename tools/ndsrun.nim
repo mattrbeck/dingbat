@@ -68,7 +68,8 @@
 ## output itself, which the state leaves out).
 ## --hd N draws the 3D scene at N times the resolution (2..4) and writes
 ## the PNGs (main and --shots) at 256N x 384N (docs/nds/hd3d.md); the 1x
-## screens, --screen-hash and --state-hash are unaffected.
+## screens, --screen-hash and --state-hash are unaffected. --hd-hash K
+## prints a CRC-32 of each HD screen every K frames (the HD output itself).
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
@@ -310,6 +311,7 @@ when isMainModule:
   var state_saves: seq[(string, int)]
   var state_load = ""
   var hd = 1
+  var hd_hash = 0
   var state_load_frame = -1
   var state_layout = false
   var state_hash = 0
@@ -341,6 +343,7 @@ when isMainModule:
       of "rumble-log": rumble_log = true
       of "rtc": rtc_at = val
       of "hd": hd = parseInt(val)
+      of "hd-hash": hd_hash = parseInt(val)
       of "mic":
         let m = val.split('@')
         mic_path = m[0]
@@ -503,6 +506,12 @@ when isMainModule:
       let bb = cast[ptr UncheckedArray[uint8]](addr n.gpu.bottom[0])
       echo "screenhash ", f + 1, " ", toHex(crc32(tb.toOpenArray(0, 256 * 192 * 2 - 1)), 8),
            " ", toHex(crc32(bb.toOpenArray(0, 256 * 192 * 2 - 1)), 8)
+    if hd_hash > 0 and hd > 1 and (f + 1) mod hd_hash == 0:
+      let n2 = n.gpu.hd_top.len * 2
+      let tb = cast[ptr UncheckedArray[uint8]](addr n.gpu.hd_top[0])
+      let bb = cast[ptr UncheckedArray[uint8]](addr n.gpu.hd_bottom[0])
+      echo "hdhash ", f + 1, " ", toHex(crc32(tb.toOpenArray(0, n2 - 1)), 8),
+           " ", toHex(crc32(bb.toOpenArray(0, n2 - 1)), 8)
     for (file, at) in state_saves:
       if f + 1 == at:
         let image = n.state_bytes(thumbnail = true)
