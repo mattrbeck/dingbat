@@ -2227,7 +2227,7 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
     result = result and cc > ppu.tdsel_dot
 
 proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
-                        win, spr, sgb: static bool) =
+                        win, spr, sgb: static bool; draw: static bool = true) =
   ## `n` dots of tick_bg_fetcher + tick_shifter under fifo_plain_ok, fetching
   ## the window (`win`) or the background, with an object's pixels still in
   ## the OBJ FIFO (`spr`) or none, colouring through the SGB (`sgb`) or not:
@@ -2256,7 +2256,7 @@ proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
     if ppu.lx >= 0:
       when MIXER_DOT_LAG != 0:
         ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
-      if ppu.no_draw: discard
+      if not draw: discard   # an undrawn frame (ppu.no_draw): its own copy
       elif has_sp:
         ppu.framebuffer[row + int(ppu.lx)] =
           fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
@@ -2344,8 +2344,19 @@ proc fifo_plain_span_sgb(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool) {.noinlin
   elif ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, false, true)
   else: fifo_plain_span_of(ppu, gb, n, blocks, false, false, true)
 
+proc fifo_plain_span_undrawn(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool) {.noinline.} =
+  ## A frame the frontend will not show (ppu.no_draw, docs/frame-skip.md):
+  ## copies that store no pixel, out of line so drawn frames pay no branch
+  ## per pixel. Never under the SGB (its freeze copies the picture).
+  if ppu.fifo_sprite.size > 0:
+    if ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, true, false, false)
+    else: fifo_plain_span_of(ppu, gb, n, blocks, false, true, false, false)
+  elif ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, false, false, false)
+  else: fifo_plain_span_of(ppu, gb, n, blocks, false, false, false, false)
+
 proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) {.inline.} =
   if ppu.sgb_attr != nil: fifo_plain_span_sgb(ppu, gb, n, blocks)
+  elif ppu.no_draw: fifo_plain_span_undrawn(ppu, gb, n, blocks)
   elif ppu.fifo_sprite.size > 0:
     if ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, true, false)
     else: fifo_plain_span_of(ppu, gb, n, blocks, false, true, false)
