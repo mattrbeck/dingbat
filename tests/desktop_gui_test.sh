@@ -6,6 +6,8 @@
 #             press the button bound to z (GBA A), read from the input log
 #   gamepad   a virtual SDL gamepad: plugged in mid-game, a button, the left
 #             stick, Start, then unplugged while held (everything lets go)
+#   pixels    the game picture fills the whole back buffer, which on a
+#             Retina display is twice the window's size in points
 #   rumble    an MBC5 rumble cart (generated: it switches its motor on and
 #             spins) buzzes the pad
 #   fullscreen (GUI_TEST_FULLSCREEN=1, macOS) a VISIBLE window taken
@@ -84,6 +86,43 @@ run tests/roms/inputrec.gba "" "1 frames 60
 check "z, Shift+Z, Caps Lock Z press A; pad B, stick left, Start; unplug lets go" \
       "$(masks)" "1 0 1 0 1 0 2 0 32 40 0"
 check "virtual pad plugged in" "$(ack 14 | cut -c1-5)" "ok id"
+
+echo "picture fills the back buffer (pixels, not points)"
+# A hwverified ROM paints a verdict block in its bottom-right corner over a
+# white screen. On a Retina display the back buffer is 2x the window; a
+# viewport set in points would draw the picture into its bottom-left
+# quarter, leaving the shot's bottom-right corner the black clear colour.
+run tests/roms/hwverified/psrmask.gba "" "1 frames 120
+2 shot $work/fill.png
+3 quit"
+echo "  ($(ack 2))"
+lit=$(python3 -I - "$work/fill.png" <<'EOF'
+import struct, sys, zlib
+data = open(sys.argv[1], 'rb').read()
+pos, idat = 8, b''
+while pos < len(data):
+    n, kind = struct.unpack('>I4s', data[pos:pos + 8])
+    body = data[pos + 8:pos + 8 + n]
+    if kind == b'IHDR': w, h = struct.unpack('>II', body[:8])
+    if kind == b'IDAT': idat += body
+    pos += 12 + n
+raw, stride, prev, rows, i = zlib.decompress(idat), w * 3, bytearray(w * 3), [], 0
+for _ in range(h):     # undo the PNG row filters (8-bit RGB)
+    f, line = raw[i], bytearray(raw[i + 1:i + 1 + stride]); i += 1 + stride
+    for x in range(stride):
+        a = line[x - 3] if x >= 3 else 0; b = prev[x]; c = prev[x - 3] if x >= 3 else 0
+        if f == 1: line[x] = (line[x] + a) & 255
+        elif f == 2: line[x] = (line[x] + b) & 255
+        elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
+        elif f == 4:
+            p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+            line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+    rows.append(line); prev = line
+px = rows[h - 2][(w - 2) * 3:(w - 1) * 3]
+print('lit' if sum(px) > 0 else 'black')
+EOF
+)
+check "the bottom-right corner of the shot is the picture's" "$lit" "lit"
 
 echo "rumble (generated MBC5 rumble cart)"
 python3 -I - "$work/rumble.gb" <<'EOF'

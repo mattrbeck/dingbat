@@ -373,9 +373,10 @@ Dear ImGui context with no window, which needs imguin). The link-acceptance batt
 under Xvfb, test.yml's `desktop-gui` job) drives the desktop app itself through
 its SDL 3 event loop with `-d:gui_driver`, hidden and muted: keys as SDL 3
 reports them under Shift and Caps Lock, a virtual SDL gamepad (hotplug,
-buttons, stick, unplugged mid-press) and a generated MBC5 rumble cart buzzing
-it. `GUI_TEST_FULLSCREEN=1` adds a visible macOS window taken fullscreen by
-AppKit's own toggle, as the green button does.
+buttons, stick, unplugged mid-press), the game picture filling the back buffer
+(twice the window's points on a Retina display) and a generated MBC5 rumble
+cart buzzing it. `GUI_TEST_FULLSCREEN=1` adds a visible macOS window taken
+fullscreen by AppKit's own toggle, as the green button does.
 
 `.github/scripts/smoke-desktop.sh` runs each release binary on its own OS
 before the Build and Release workflows can publish it (Linux under Xvfb,
@@ -386,6 +387,8 @@ renders it exactly; the present shader's float math rounds 1-2 levels apart on
 Apple's GL). Regenerate that file only for a deliberate change to the picture,
 from the Linux job's capture (default settings, muted):
 `xvfb-run dingbat --capture=600:tests/golden/desktop-blendprobe.png tests/roms/blendprobe.gba`.
+`--capture` is in device pixels, so on a Retina display it is twice the
+golden's size and the compare fails there; CI's runners are 1x.
 
 `tests/roms/hwverified/`: twelve GBA ROMs (this repo's own, committed with their `.s`)
 carrying the values an AGS-001 gave, each painting a verdict pixel at (239,159): green if

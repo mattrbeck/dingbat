@@ -280,7 +280,8 @@ proc print_help() =
   echo ""
   echo "Verification:"
   echo "  --capture N:PATH    After N presented frames, write the GL back buffer"
-  echo "                      (the real composited picture, letterbox excluded)"
+  echo "                      (the real composited picture, letterbox excluded,"
+  echo "                      in device pixels: 2x the window on a Retina display)"
   echo "                      to PATH as a PNG and exit"
 
 proc compile_shader(src: string; shader_type: GLenum): GLuint =
@@ -525,6 +526,19 @@ proc window_scale(): int =
     return app.scale
   clamp((int(r.h) - 40) div NDS_H, 1, app.scale)
 
+proc set_window_to(w, h, s: int) =
+  ## Size the window to s times a native w x h picture. The multiple is
+  ## kept whole in back-buffer pixels, which is what keeps every native
+  ## pixel the same size: with a fractional pixel density (Wayland at 125%
+  ## or 150%) 3x in window units would be 3.75x or 4.5x in pixels, so it
+  ## becomes the nearest whole multiple there. At a density of 1 or 2 (every
+  ## Windows and X11 window, a macOS one) this is exactly s times.
+  var d = float(getWindowPixelDensity(app.window))
+  if d <= 0: d = 1.0
+  let m = max(1.0, round(float(s) * d))
+  discard setWindowSize(app.window, cint(round(float(w) * m / d)),
+                        cint(round(float(h) * m / d)))
+
 proc resize_to_output() =
   ## Size the window to an integer multiple of the native picture. In
   ## fullscreen the letterbox does the work, and the window is sized once
@@ -533,8 +547,7 @@ proc resize_to_output() =
     app.fs_track.refit = true
     return
   let (w, h) = output_size()
-  let s = window_scale()
-  discard setWindowSize(app.window, cint(w * s), cint(h * s))
+  set_window_to(w, h, window_scale())
 
 proc remember_fullscreen(on: bool) =
   ## The menu's checkmark, and saved, so the next start can come back this
@@ -566,11 +579,10 @@ proc track_fullscreen() =
     remember_fullscreen(real)
   if app.fs_track.take_refit(real): resize_to_output()
 
-proc game_viewport(): (GLint, GLint, GLint, GLint) =
-  ## The letterboxed rect the game quad is drawn into. An SGB border switches
-  ## the picture from 10:9 to 8:7 mid-session, so one window must fit both.
-  var ww, wh: cint
-  discard getWindowSize(app.window, ww, wh)
+proc letterbox(ww, wh: cint): (GLint, GLint, GLint, GLint) =
+  ## The letterboxed rect the picture fills in a ww x wh area, in that
+  ## area's units. An SGB border switches the picture from 10:9 to 8:7
+  ## mid-session, so one window must fit both.
   let (ow, oh) = output_size()
   if not app.cfg.preserve_aspect or ow <= 0 or oh <= 0:
     return (0.GLint, 0.GLint, GLint(ww), GLint(wh))
@@ -578,6 +590,13 @@ proc game_viewport(): (GLint, GLint, GLint, GLint) =
   let vw = GLint(float(ow) * scale)
   let vh = GLint(float(oh) * scale)
   ((GLint(ww) - vw) div 2, (GLint(wh) - vh) div 2, vw, vh)
+
+proc game_viewport(): (GLint, GLint, GLint, GLint) =
+  ## The rect the game quad is drawn into, in back-buffer pixels: twice the
+  ## window's size on a Retina display (WINDOW_HIGH_PIXEL_DENSITY).
+  var pw, ph: cint
+  discard getWindowSizeInPixels(app.window, pw, ph)
+  letterbox(pw, ph)
 
 proc apply_panel_uniforms() =
   ## Select the panel's color-correction model and pixel-row height for the
@@ -815,8 +834,7 @@ proc load_rom(path: string; keep_ds = false) =
     app.emu_kind = ekNDS
     app.border_shown = false
     app.nds.open_audio()
-    let s = window_scale()
-    discard setWindowSize(app.window, cint(NDS_W * s), cint(NDS_H * s))
+    set_window_to(NDS_W, NDS_H, window_scale())
     app.dbg = nil
     app.gb_dbg = nil
     # The cheat window edits GB/GBA codes; a DS game has none to take
@@ -828,7 +846,7 @@ proc load_rom(path: string; keep_ds = false) =
     app.emu_kind = ekGB
     app.border_shown = false
     app.border_gen = 0
-    discard setWindowSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
+    set_window_to(GB_W, GB_H, app.scale)
     app.dbg = nil
     app.gb_dbg = new_gb_debug(app.gb_emu)
   else:
@@ -838,7 +856,7 @@ proc load_rom(path: string; keep_ds = false) =
     app.gb_emu = nil
     app.emu_kind = ekGBA
     app.border_shown = false
-    discard setWindowSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
+    set_window_to(GBA_W, GBA_H, app.scale)
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
   app.cheats.attach(current_cheat_engine(),
@@ -1289,7 +1307,7 @@ when defined(gputime):
       var v = gpu_samples
       v.sort()
       var w, h: cint
-      discard getWindowSize(app.window, w, h)
+      discard getWindowSizeInPixels(app.window, w, h)
       echo "GPUTIME viewport=", w, "x", h,
            " filter=", $app.cfg.video_filter,
            " colorcorrect=", app.cfg.color_correction,
@@ -1334,7 +1352,7 @@ proc render_game() =
   # both cores share it, and restored to the full window afterwards so ImGui
   # is not clipped by it.
   var win_w, win_h: cint
-  discard getWindowSize(app.window, win_w, win_h)
+  discard getWindowSizeInPixels(app.window, win_w, win_h)
   let (vx, vy, vw, vh) = game_viewport()
   if app.emu_kind != ekNone:
     glViewport(vx, vy, GLsizei(vw), GLsizei(vh))
@@ -1393,15 +1411,17 @@ proc render_game() =
     if border != app.border_shown:
       app.border_shown = border
       resize_to_output()
-      discard getWindowSize(app.window, win_w, win_h)
+      discard getWindowSizeInPixels(app.window, win_w, win_h)
       let (nx, ny, nw, nh) = game_viewport()
       glViewport(nx, ny, GLsizei(nw), GLsizei(nh))
     upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
     if rumble_on:
-      # ±1 px viewport jitter, alternating per present; restored right after
-      # the draw so ImGui renders unshaken.
+      # ±1 window-unit viewport jitter (2 px on a Retina display, so it
+      # shakes as far as at 1x), alternating per present; restored right
+      # after the draw so ImGui renders unshaken.
       rumble_flip = not rumble_flip
-      let off: GLint = if rumble_flip: 1 else: -1
+      let px = GLint(max(1.0, round(getWindowPixelDensity(app.window))))
+      let off: GLint = if rumble_flip: px else: -px
       let (jx, jy, jw, jh) = game_viewport()
       glViewport(jx + off, jy - off, GLsizei(jw), GLsizei(jh))
       glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
@@ -1944,10 +1964,11 @@ proc open_dropped(path: string) =
 
 proc nds_view_top_left(): (int, int, int, int) =
   ## The picture's rect in window coordinates (top-left origin), for the
-  ## stylus: game_viewport's is GL's, from the bottom.
+  ## stylus: game_viewport's is GL's, from the bottom, and in pixels where
+  ## the mouse is in window units (points on a Retina display).
   var ww, wh: cint
   discard getWindowSize(app.window, ww, wh)
-  let (vx, vy, vw, vh) = game_viewport()
+  let (vx, vy, vw, vh) = letterbox(ww, wh)
   (int(vx), int(wh) - int(vy) - int(vh), int(vw), int(vh))
 
 proc handle_input() =
@@ -2094,11 +2115,14 @@ proc handle_input() =
       push_held_input()
       apply_trigger()
 
-    of EVENT_WINDOW_RESIZED:
+    of EVENT_WINDOW_RESIZED, EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+      # GL draws in back-buffer pixels. A move between a 1x and a Retina
+      # display changes those alone (the window keeps its size in points);
+      # ImGui follows by itself, re-rasterising its font at the new density.
       var w, h: cint
-      discard getWindowSize(app.window, w, h)
+      discard getWindowSizeInPixels(app.window, w, h)
       glViewport(0, 0, w, h)
-      track_fullscreen()
+      if evt.type == EVENT_WINDOW_RESIZED: track_fullscreen()
 
     of EVENT_WINDOW_ENTER_FULLSCREEN, EVENT_WINDOW_LEAVE_FULLSCREEN:
       # Sent once the transition is over (macOS animates into and out of a
@@ -2412,7 +2436,17 @@ proc main() =
   discard glSetAttribute(GL_DEPTH_SIZE, 24)
   discard glSetAttribute(GL_STENCIL_SIZE, 8)
 
-  # Created hidden and centred, then shown: SDL_CreateWindow takes no position
+  # Created hidden and centred, then shown: SDL_CreateWindow takes no position.
+  # HIGH_PIXEL_DENSITY: on a Retina display the back buffer is the display's
+  # own pixels (2x the window's size in points), so the picture, menus and
+  # text are drawn at full resolution instead of at 1x and pixel-doubled by
+  # the compositor. That shows in the smoothing filters and LCD looks, the
+  # DS's HD 3D, a picture scaled by a fraction (fullscreen, a dragged window
+  # edge) and ImGui's lines and shapes. Window sizes, positions and the mouse
+  # stay in points; GL and captures use getWindowSizeInPixels. Wayland the
+  # same, its density being the desktop scale (1.25, 1.5...). Windows and X11
+  # windows are sized in pixels already (SDL 3 makes the process per-monitor
+  # DPI aware), so there the flag changes nothing.
   var hidden = false
   when defined(gui_driver):
     driver_init()
@@ -2420,7 +2454,7 @@ proc main() =
   let window = createWindow("dingbat",
     cint(GBA_W * cfg.frame_size), cint(GBA_H * cfg.frame_size),
     WINDOW_OPENGL or WINDOW_RESIZABLE or WINDOW_HIDDEN or
-    (if start_fs: WINDOW_FULLSCREEN else: 0'u64))
+    WINDOW_HIGH_PIXEL_DENSITY or (if start_fs: WINDOW_FULLSCREEN else: 0'u64))
   if window == nil:
     echo "Failed to create window: ", $getError(); system.quit(1)
   defer: destroyWindow(window)
@@ -2450,6 +2484,12 @@ proc main() =
   discard igCreateContext(nil)
   igStyleColorsDark(nil)
   let io_ptr = igGetIO_Nil()
+  # Nothing to do here for a Retina display: the SDL 3 backend reads the
+  # window's density into io.DisplayFramebufferScale every frame, and ImGui
+  # (1.92) rasterises the font at it, so text is drawn in device pixels.
+  # The default font is a pixel font, drawn on a 13 px grid: at 2x its glyphs
+  # come out the same shapes, each pixel 2x2, so only a vector font would
+  # gain detail from the density.
   discard ImGui_ImplSDL3_InitForOpenGL(window, gl_ctx)
   discard ImGui_Impl_opengl3_Init("#version 330")
 
