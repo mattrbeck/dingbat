@@ -16703,36 +16703,8 @@ var Module = {
     const FRAME_TIME = 1000.0 / TARGET_FPS;
     let lastFrameTime = 0;
     let accumulator = 0;
-    // Callback timestamps that jitter (a browser that stamps when the
-    // callback runs, not the refresh) put frames on the wrong refresh: with
-    // the accumulator near a frame's step, +/-2 ms decides 0 frames or 2.
-    // So the timestamps are locked to a grid of the display's refreshes,
-    // learnt from them: a callback within jitter of a whole number of
-    // refreshes after the last counts as exactly that many, nudged 5% of
-    // the way to its own time, so game time stays within a few ms of real
-    // time. Anything else (a new or variable refresh rate, a stall) is taken
-    // as it comes and restarts the grid there.
-    let rafPeriod = 0;      // the display's refresh interval, learnt
-    let rafSamples = 0;
-    let rafOdd = 0;         // callbacks in a row off the grid
-    let rafClock = 0;       // the grid time of the last callback
-    const steadyInterval = (timestamp, iv) => {
-      if (!(iv > 0 && iv < 100) || rafClock === 0) { rafClock = timestamp; return iv; }
-      const since = timestamp - rafClock;
-      if (rafPeriod === 0) { rafPeriod = since; rafSamples = 1; rafClock = timestamp; return since; }
-      const k = Math.round(since / rafPeriod);
-      const err = since - k * rafPeriod;
-      if (k < 1 || k > 4 || Math.abs(err) > Math.min(3, rafPeriod * 0.4)) {
-        if (++rafOdd >= 8) { rafPeriod = 0; rafOdd = 0; }
-        rafClock = timestamp;
-        return since;
-      }
-      rafOdd = 0;
-      rafPeriod += (err / k) * Math.max(0.01, 1 / ++rafSamples);
-      const step = k * rafPeriod + err * 0.05;
-      rafClock += step;
-      return step;
-    };
+    // Timestamps locked to the display's refreshes (framegrid.js)
+    const frameClock = FrameGrid.create();
     // Fast-forward pacing. A tick's frames have to end before the vsync
     // they aim at: where rAF keeps to the display, one that overruns it
     // waits for the next and the time between idles. A fixed 16 ms budget
@@ -17236,7 +17208,7 @@ var Module = {
       // Play time for the checkpoints: a stall (a hidden tab's) counts as little.
       runPlayMs += Math.min(rafIv, 250);
       if (!linkMode && !rollbackMode && !netMode && !document.hidden) markPlaying();
-      accumulator += steadyInterval(timestamp, timestamp - lastFrameTime);
+      accumulator += frameClock.next(timestamp, timestamp - lastFrameTime);
       lastFrameTime = timestamp;
       if (rollbackMode) {
         // Rollback: rollback_tick returns the frame just simulated (ship it)

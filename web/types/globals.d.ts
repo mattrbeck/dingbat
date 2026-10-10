@@ -46,6 +46,11 @@ declare var ZipWrite: {
   crc32(bytes: Uint8Array): number;
 };
 
+// framegrid.js (classic script, sets window.FrameGrid; checked by its node test)
+declare var FrameGrid: {
+  create(): { next(timestamp: number, iv: number): number; period(): number };
+};
+
 declare var SaveImport: {
   unwrap(bytes: Uint8Array, fileName: string): {
     ok: boolean;

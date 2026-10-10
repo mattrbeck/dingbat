@@ -195,17 +195,33 @@ spikes), so a loaded machine does not move the result.
   each batch after a frame (axis events count as input): throughput, not
   cadence.
 
-- Web timestamp jitter (on main too): a browser that stamps callbacks when
-  they run rather than at the refresh puts frames on the wrong refresh, the
-  accumulator near a frame's step deciding 0 frames or 2 on +/-2 ms. The
-  loop now locks timestamps to a learnt grid of refreshes (a callback
-  within jitter of a whole number of them counts as exactly that many,
-  nudged 5% toward its own time; anything else restarts the grid), so game
-  time stays within ~5 ms of real time. +/-2 ms at 60 Hz, uneven refreshes
-  a minute: 1x 127 to 0, 2x 261 to 7.4 (a clean display's), run-ahead 2 89
-  to 0; 30, 60, 75, 120, 144 Hz and variable-rate displays as before; real
-  Chrome unchanged. Snapping intervals instead of timestamps only halved
-  it: an interval carries two timestamps' jitter.
+- Web timestamp jitter (on main too): browsers do not stamp animation
+  frames exactly at the refresh. Measured on Matt's devices (20 s each,
+  replayed through the loop's accumulator): Safari rounds to whole
+  milliseconds (16 and 17 ms intervals at 60 Hz), Chrome to 0.1 ms with
+  +/-0.4 ms of spread; headless Chromium, which the probe uses, stamps
+  exactly. With the accumulator near a frame's step that decides 0 frames
+  or 2. The loops (index.js and embed.js) now take time from
+  `framegrid.js`: timestamps locked to a learnt grid of refreshes (a
+  callback within jitter of a whole number of them counts as exactly that
+  many, nudged 5% toward its own time; anything else restarts the grid), so
+  game time stays within ~5 ms of real time. Uneven refreshes a minute,
+  before / after:
+
+  | browser, 60 Hz | 1x | 2x |
+  |---|---|---|
+  | iPhone Safari (iOS 18.7) | 60 / 0 | 102 / 6 |
+  | Mac Safari 26.6 | 42 / 3 | 90 / 6 |
+  | Mac Chrome 154 | 33 / 0 | 60 / 0 |
+  | probe, +/-2 ms | 127 / 0 | 261 / 7-22 |
+
+  At 30 Hz (iPhone Low Power Mode) 0 either way: a refresh runs two frames
+  and the 1x cap is two. 30, 60, 75, 120, 144 Hz without jitter and
+  variable-rate displays are as before. Snapping intervals instead of
+  timestamps only halved it: an interval carries two timestamps' jitter.
+  `web/tests/framegrid.test.mjs` covers clean, jittered and whole-ms
+  timestamps, a missed refresh, a pause, a stall, a rate change (60 to 48
+  Hz, 120 to 60) and a variable rate (no time gained or lost).
 
 Found on main, not changed here: web fast-forward learns the refresh rate
 only at normal speed. Desktop has vsync off, paces 1x on a
@@ -352,7 +368,7 @@ fast-forward. Most of Advance Wars' frame time is outside drawing here.
 - [x] round 6 (frame pacing, above): web fast-forward's aim no longer
       flaps; fast-forward draws rewind-due frames; iOS late start pauses
       10 s after a miss; web timestamps locked to the refresh grid
-      (jitter). render_skip, rewind (new spacing case), ios_api,
+      (jitter; framegrid.js, measured on iPhone/Mac Safari and Chrome). render_skip, rewind (new spacing case), ios_api,
       rollback tests; web tests as above; tsc; wasm, desktop, iOS builds
 - [ ] desktop: compiled, not run here (driving the GUI needs asking)
 - [ ] if kept: drop the switches or keep `?draw=all` as a diagnostic; the

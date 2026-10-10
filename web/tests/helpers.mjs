@@ -8,12 +8,13 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 
-// glpresent.js (createGlRenderer), saveimport.js and zipwrite.js load before index.js in
+// glpresent.js (createGlRenderer), saveimport.js, zipwrite.js and framegrid.js load before index.js in
 // index.html, so they are prepended here too.
 const SOURCE =
   readFileSync(new URL("../glpresent.js", import.meta.url), "utf8") + "\n" +
   readFileSync(new URL("../saveimport.js", import.meta.url), "utf8") + "\n" +
   readFileSync(new URL("../zipwrite.js", import.meta.url), "utf8") + "\n" +
+  readFileSync(new URL("../framegrid.js", import.meta.url), "utf8") + "\n" +
   readFileSync(new URL("../index.js", import.meta.url), "utf8");
 
 // --- Fake DOM ---------------------------------------------------------------
