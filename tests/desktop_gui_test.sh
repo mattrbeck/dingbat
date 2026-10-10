@@ -13,24 +13,25 @@
 #             Boy game loaded meanwhile, and back: the app's fullscreen flag
 #             follows, and the window comes back Game Boy-shaped
 #
-# Needs SDL 3 and a display; not run in CI. From the repo root:
+# Needs SDL 3 and a display: macOS, or Linux under X (CI runs it in Xvfb,
+# test.yml's desktop-gui job; there SDL_AUDIO_DRIVER=dummy). From the repo
+# root:
 #   tests/desktop_gui_test.sh            (builds ./dingbat_gui_test)
 #   DINGBAT_GUI_BIN=path tests/desktop_gui_test.sh
 set -u
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root" || exit 1
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
 bin=${DINGBAT_GUI_BIN:-}
 if [ -z "$bin" ]; then
   bin="$root/dingbat_gui_test"
   echo "building $bin ..."
   nim c -d:release -d:gui_driver --hints:off -o:"$bin" src/dingbat.nim \
-    > /tmp/dingbat_gui_test_build.log 2>&1 \
-    || { tail -20 /tmp/dingbat_gui_test_build.log; exit 1; }
+    > "$work/build.log" 2>&1 \
+    || { tail -20 "$work/build.log"; exit 1; }
 fi
-
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
 fails=0
 check() {  # check <what> <got> <want>
   if [ "$2" = "$3" ]; then echo "  ok    $1"
