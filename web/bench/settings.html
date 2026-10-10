@@ -11,9 +11,8 @@
 </head>
 <body>
 <h3>dingbat settings cost</h3>
-<!-- SDL renders to its own hidden canvas; the presenter owns the visible one,
-     at the app's backing size (native x 4, or x 6 for RGB subpixels). -->
-<canvas id="sdl-canvas" width="960" height="640" hidden aria-hidden="true"></canvas>
+<!-- The presenter's canvas, at the app's backing size (native x 4, or x 6
+     for RGB subpixels). -->
 <canvas id="gl-canvas" width="960" height="640"></canvas>
 <pre id="out">booting…</pre>
 <script>
@@ -36,7 +35,6 @@ const STATE_NAME = Q.get("state") || ROM_NAME.replace(/\.\w+$/, ".state");
 const IS_GBA = /\.gba$/i.test(ROM_NAME);
 
 var Module = {
-  canvas: document.getElementById("sdl-canvas"),
   onRuntimeInitialized: () => { window.benchRuntimeUp = true; },
 };
 const romP = fetch(ROM_NAME).then((r) => r.arrayBuffer());

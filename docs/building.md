@@ -37,8 +37,9 @@ on macOS; CI's Linux and Windows builds have only `libSDL3.a` to link).
 `nimble install --depsOnly` fails inside the checkout on nimble 0.22 ("Couldnt find a
 solution for the packages"); install from another directory instead, as CI does:
 `cd /tmp && nimble install -y "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy`
-(the registry's `sdl3` is an older, unofficial binding, so the official one is named by URL;
-`sdl2` too for the web build).
+(the registry's `sdl3` is an older, unofficial binding, so the official one is named by URL).
+The web build needs only Emscripten and `zippy`: no SDL (JS presents the picture, plays the
+sound and reads the keys).
 
 ## Windows (cross-compiled)
 

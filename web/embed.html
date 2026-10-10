@@ -11,11 +11,7 @@
   </head>
   <body>
     <div id="wrapper">
-      <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
-
-      <!-- SDL's window init owns a WebGL context here (Module.canvas) so
-           #canvas is free for the WebGL2 presenter. Nothing is shown on it. -->
-      <canvas id="sdl-canvas" width="960" height="640" hidden aria-hidden="true"></canvas>
+      <canvas id="canvas" width="960" height="640" oncontextmenu="event.preventDefault()"></canvas>
 
       <div id="overlay">
         <div id="controls">

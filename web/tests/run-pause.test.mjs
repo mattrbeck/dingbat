@@ -239,10 +239,10 @@ test("in the game view the same keys act", async () => {
   assert.equal(app.runIn("__ticks"), 0, "...without stepping the paused game to get one");
 });
 
-// The SDL runtime's window key grab preventDefaults Tab page-wide from the
-// moment the runtime starts; the window-capture escape hatch stops Tab before
-// it when the home screen is up, so Tab walks the library as on any page.
-test("Tab on the home screen is the page's, before the runtime's key grab", async () => {
+// Tab is the fast-forward key in the game view, and the key grab
+// preventDefaults it; the window-capture escape hatch stops Tab before both
+// when the home screen is up, so Tab walks the library as on any page.
+test("Tab on the home screen is the page's, before the key grab", async () => {
   const app = await loadApp();
   const tab = async () => {
     let stopped = false;
@@ -255,6 +255,40 @@ test("Tab on the home screen is the page's, before the runtime's key grab", asyn
   assert.equal(await tab(), true, "home screen: the grab never sees Tab");
   app.document.body.classList.add("running");
   assert.equal(await tab(), false, "in the game view Tab stays the game's (fast-forward)");
+});
+
+// A key no handler claimed still must not act on the page: go back a page
+// (Backspace), reload it (F5, Ctrl+R), scroll or move focus, or press the
+// control that has focus; a plain keydown of a printable key is let be.
+test("the key grab: what a key left to the page may not do", async () => {
+  const app = await loadApp();
+  const target = { tagName: "BODY", closest: () => null };
+  // The harness calls every window listener; a stopped event reaches no more.
+  const prevented = async (type, code, extra = {}) => {
+    let p = false, stopped = false;
+    await app.dispatchWin(type, { code, target, ...extra,
+                                  stopImmediatePropagation: () => { stopped = true; },
+                                  preventDefault: () => { if (!stopped) p = true; } });
+    return p;
+  };
+  const sample = async () => ({
+    arrow: await prevented("keydown", "ArrowDown"),
+    backspace: await prevented("keydown", "Backspace"),
+    f2: await prevented("keydown", "F2"),
+    ctrlChord: await prevented("keydown", "KeyR", { ctrlKey: true }),
+    letterDown: await prevented("keydown", "KeyQ"),
+    letterPress: await prevented("keypress", "KeyQ"),
+    letterUp: await prevented("keyup", "KeyQ"),
+    // A keyup whose keydown a handler before the grab took is let be.
+    unseenUp: await prevented("keyup", "KeyW"),
+  });
+  const grabbed = { arrow: true, backspace: true, f2: true, ctrlChord: true,
+                    letterDown: false, letterPress: true, letterUp: true, unseenUp: false };
+  app.document.body.classList.add("running");
+  assert.deepEqual(await sample(), grabbed, "the game view");
+  app.document.body.classList.remove("running");
+  assert.deepEqual(await sample(), { ...grabbed, ctrlChord: false },
+                   "the home screen (Backspace would leave it), less the browser's chords");
 });
 
 // --- A picture flight's hold -------------------------------------------------

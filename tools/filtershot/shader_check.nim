@@ -7,7 +7,7 @@
 ## Exit 0 = compiled + linked; nonzero prints the GL info log.
 
 import std/[os, strutils]
-import sdl2 except init, quit
+import sdl3
 import imguin/glad/gl
 
 proc extract(src, marker: string): string =
@@ -16,6 +16,8 @@ proc extract(src, marker: string): string =
   let a = src.find("\"\"\"", start) + 3
   let b = src.find("\"\"\"", a)
   src[a ..< b]
+
+proc gl_loader(name: cstring): pointer = cast[pointer](glGetProcAddress(name))
 
 proc compile(kind: GLenum; src: string): GLuint =
   result = glCreateShader(kind)
@@ -37,19 +39,20 @@ proc main() =
   let dingbat_src = readFile(getAppDir() / ".." / ".." / "src" / "dingbat.nim")
   let frag = extract(dingbat_src, "const FRAG_SRC")
   let vert = extract(dingbat_src, "const VERT_SRC")
-  if sdl2.init(INIT_VIDEO) != SdlSuccess:
+  if not sdl3.init(INIT_VIDEO):
     stderr.writeLine "SDL init failed: " & $getError(); system.quit(2)
-  discard glSetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)
-  discard glSetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3)
-  discard glSetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE)
-  let win = createWindow("shader_check", 0, 0, 64, 64,
-                         SDL_WINDOW_OPENGL or SDL_WINDOW_HIDDEN)
+  when defined(macosx):
+    discard glSetAttribute(GL_CONTEXT_FLAGS, GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
+  discard glSetAttribute(GL_CONTEXT_MAJOR_VERSION, 3)
+  discard glSetAttribute(GL_CONTEXT_MINOR_VERSION, 3)
+  discard glSetAttribute(GL_CONTEXT_PROFILE_MASK, GL_CONTEXT_PROFILE_CORE)
+  let win = createWindow("shader_check", 64, 64, WINDOW_OPENGL or WINDOW_HIDDEN)
   if win == nil:
     stderr.writeLine "window failed: " & $getError(); system.quit(2)
   let ctx = glCreateContext(win)
   if ctx == nil:
     stderr.writeLine "GL context failed: " & $getError(); system.quit(2)
-  discard gladLoadGL(glGetProcAddress)
+  discard gladLoadGL(gl_loader)
   let fs = compile(GL_FRAGMENT_SHADER, frag)
   let vs = compile(GL_VERTEX_SHADER, vert)
   let prog = glCreateProgram()
@@ -66,8 +69,8 @@ proc main() =
     stderr.writeLine "link failed:\n" & log
     system.quit(1)
   echo "FRAG_SRC + VERT_SRC compile and link OK"
-  glDeleteContext(ctx)
-  destroy(win)
-  sdl2.quit()
+  discard glDestroyContext(ctx)
+  destroyWindow(win)
+  sdl3.quit()
 
 main()

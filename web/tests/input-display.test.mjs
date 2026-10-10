@@ -149,7 +149,7 @@ test("the I shortcut toggles the setting and persists it", async () => {
 
 test("a game key bound to I still wins over the shortcut", async () => {
   const app = await boot({ on: false });
-  // 105 == SDL keycode for 'i'. A bound game key must never be eaten by a
+  // 105 == the SDL keycode bindings are stored as, for 'i'. A bound game key must never be eaten by a
   // shortcut.
   const bindings = app.runIn("activeBindings.slice()");
   bindings[A] = 105;

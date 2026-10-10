@@ -9,7 +9,6 @@ bin    = @["dingbat"]
 
 # Dependencies
 requires "nim >= 2.0.0"
-requires "sdl2 >= 2.0.4"  # the web build (emscripten's SDL 2 port)
 # The desktop app. The registry's "sdl3" is an older, unofficial binding
 # (nim-lang/sdl3 issue #11), so the official one is named by URL.
 requires "https://github.com/nim-lang/sdl3#bb137829ff619b0a27a473628cb28fc1c86f3fe5"

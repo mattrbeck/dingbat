@@ -93,7 +93,6 @@ const header = `// GENERATED FILE — do not edit by hand.
  */
 interface EmscriptenModule {
   // --- emscripten runtime members used by the front-end ---
-  canvas?: HTMLCanvasElement | null;
   memory?: WebAssembly.Memory;
   HEAPU8?: Uint8Array;
   calledRun?: boolean;

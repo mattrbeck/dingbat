@@ -18,9 +18,9 @@ licence asks to be kept.
 
 | Component | Licence | Copyright |
 |---|---|---|
-| nim-lang/sdl2 bindings | MIT | the nim-lang/sdl2 contributors |
-| SDL2 (static on macOS and Windows) | zlib | Sam Lantinga |
-| imguin, cimgui, Dear ImGui and its SDL2/OpenGL3 backends | MIT | the imguin authors; Stephan Dilly; Omar Cornut |
+| nim-lang/sdl3 bindings | MIT | the nim-lang/sdl3 contributors |
+| SDL 3 (static in the release builds) | zlib | Sam Lantinga |
+| imguin, cimgui, Dear ImGui and its SDL 3/OpenGL3 backends | MIT | the imguin authors; Stephan Dilly; Omar Cornut |
 | glad OpenGL loader | public domain / CC0 | David Herberth |
 | NimYAML | MIT | Felix Krause |
 | stb_image, stb_image_write | public domain / MIT | Sean Barrett |

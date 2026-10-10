@@ -395,17 +395,21 @@ jobs:
         # Installs on a cache miss only (~45 s); the script says why this is
         # not mymindstorm/setup-emsdk.
         run: .github/scripts/install-emsdk.sh 4.0.23
-      - name: Cache nimble's sdl2
+      - name: Cache nimble's zippy
         id: nimble-cache
         uses: actions/cache@v4
         with:
           path: ~/.nimble/pkgs2
-          key: nimble-wasm-${{ runner.os }}-nim${{ env.NIM_VERSION }}-sdl2-2.0.6
+          key: nimble-wasm-${{ runner.os }}-nim${{ env.NIM_VERSION }}-zippy-0.10.20
       - name: Install nimble dependencies
-        # A network fetch (nimble asks the package's git remote for tags),
-        # ~50 s; pinned, so the cache above is exactly what it would install.
+        # The web build's one package (clip anchors are stored deflated). A
+        # network fetch (nimble asks the package's git remote for tags);
+        # pinned, so the cache above is exactly what it would install. From
+        # outside the checkout: inside it nimble resolves the whole project
+        # graph, the desktop's packages with it.
         if: steps.nimble-cache.outputs.cache-hit != 'true'
-        run: .github/scripts/retry.sh 3 nimble install -y sdl2@2.0.6
+        working-directory: ${{ runner.temp }}
+        run: ${{ github.workspace }}/.github/scripts/retry.sh 3 nimble install -y zippy@0.10.20
       - name: Build WASM
         run: nim c -d:emscripten src/dingbat_wasm.nim
       - uses: actions/upload-artifact@v4
