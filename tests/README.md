@@ -377,6 +377,16 @@ buttons, stick, unplugged mid-press) and a generated MBC5 rumble cart buzzing
 it. `GUI_TEST_FULLSCREEN=1` adds a visible macOS window taken fullscreen by
 AppKit's own toggle, as the green button does.
 
+`.github/scripts/smoke-desktop.sh` runs each release binary on its own OS
+before the Build and Release workflows can publish it (Linux under Xvfb,
+Windows with Mesa's llvmpipe `opengl32.dll`): 600 frames of
+`tests/roms/blendprobe.gba`, then `--capture` must write
+`tests/golden/desktop-blendprobe.png` to within 4 levels a channel (Mesa
+renders it exactly; the present shader's float math rounds 1-2 levels apart on
+Apple's GL). Regenerate that file only for a deliberate change to the picture,
+from the Linux job's capture (default settings, muted):
+`xvfb-run dingbat --capture=600:tests/golden/desktop-blendprobe.png tests/roms/blendprobe.gba`.
+
 `tests/roms/hwverified/`: twelve GBA ROMs (this repo's own, committed with their `.s`)
 carrying the values an AGS-001 gave, each painting a verdict pixel at (239,159): green if
 every checked cell matched, red otherwise, white if it never finished. The runner scores

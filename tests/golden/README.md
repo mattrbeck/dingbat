@@ -29,3 +29,10 @@ Known HLE↔LLE differences that are not model bugs: `I/O read #106 DMA3CNT_HI` 
 immediate-DMA margin test whose verdict is print-length-coupled) and `Misc #4/#7/#8
 H-blank bit start` (the suite's own expected values shift with log length). Regenerate
 the goldens only after confirming every new row diff is intended.
+
+## Desktop smoke frame
+
+`desktop-blendprobe.png` is the game frame every desktop release binary must
+read back after 600 frames of `tests/roms/blendprobe.gba` (default settings,
+3x, Mesa's llvmpipe): `.github/scripts/smoke-desktop.sh`, run by
+`.github/workflows/build-artifacts.yml`. See `tests/README.md`.
