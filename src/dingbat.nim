@@ -2524,6 +2524,23 @@ proc main() =
   # Within this of a paced frame's slot the idle wait sleeps to the slot
   # precisely instead of in 1 ms steps, which overshoot by up to a few ms
   let precise_wait = sched_freq * 4 div 1000
+  # A paced frame's swap is held to a steady offset from its release, so a
+  # frame that emulates quickly and one that takes longer reach the display
+  # at the same point in the refresh: without it, emulation time (which
+  # varies frame to frame) moves frames across refreshes. The offset is the
+  # 90th percentile of the last two seconds' release-to-ready times, so it
+  # follows the game and core; a slower frame goes out as soon as it's ready.
+  var frame_start: uint64
+  var ready_ring: array[120, uint64]
+  var ready_next = 0
+  var present_hold = 0'u64
+  proc hold_learn(ready: uint64) =
+    ready_ring[ready_next] = ready
+    ready_next = (ready_next + 1) mod ready_ring.len
+    var sorted = ready_ring
+    sorted.sort()
+    present_hold = min(sorted[ready_ring.len * 9 div 10] + sched_freq div 4000,
+                       frame_ticks div 2)
 
   var sched_refilling = true  # start with an empty queue: fill to target
 
@@ -2592,8 +2609,8 @@ proc main() =
   # emulation began and ended, and when the swap was issued and returned
   # (performance-counter ticks; due is 0 for a present with no new frame)
   let trace_path = getEnv("DINGBAT_FRAME_TRACE")
-  var trace: seq[array[5, uint64]]
-  var trace_due, trace_start, trace_end, trace_swap: uint64
+  var trace: seq[array[6, uint64]]
+  var trace_due, trace_end, trace_ready, trace_swap: uint64
   # DINGBAT_LATENCY_TEST=<trials>: inject a synthetic UP press where polled
   # SDL keys are applied and measure wall-clock time until (a) the framebuffer
   # first differs and (b) that frame reaches glSwapWindow. Needs a GBA ROM
@@ -2672,8 +2689,7 @@ proc main() =
             echo "Rewind failed: ", getCurrentExceptionMsg()
             app.rewinding = false
     elif not app.paused or stepping:
-      if trace_path.len > 0:
-        trace_start = getPerformanceCounter()
+      frame_start = getPerformanceCounter()
       case app.emu_kind
       of ekGBA:
         if app.gba_emu != nil and (stepping or gba_frame_due()):
@@ -2818,12 +2834,19 @@ proc main() =
         app.running = false
       render_imgui()
       when defined(gui_driver): driver_frame(window)
+      if emulated and is_paced() and not app.rewinding:
+        let ready = getPerformanceCounter()
+        if trace_path.len > 0: trace_ready = ready
+        let present_at = frame_start + present_hold
+        if ready < present_at:
+          delayPrecise((present_at - ready) * 1_000_000_000'u64 div sched_freq)
+        hold_learn(ready - frame_start)
       if trace_path.len > 0: trace_swap = getPerformanceCounter()
       discard glSwapWindow(window)
       presented = true
       if trace_path.len > 0:
-        trace.add([(if emulated: trace_due else: 0'u64), trace_start,
-                   trace_end, trace_swap, getPerformanceCounter()])
+        trace.add([(if emulated: trace_due else: 0'u64), frame_start,
+                   trace_end, trace_ready, trace_swap, getPerformanceCounter()])
       if lat_trials > 0 and lat_state == 2:
         let t2 = getPerformanceCounter()
         lat_change_ms.add(lat_ms(lat_t0, lat_t1))
@@ -2855,7 +2878,7 @@ proc main() =
         delay(1)
   if trace_path.len > 0:
     var csv = &"# freq={getPerformanceFrequency()} " &
-              &"frame_ticks={frame_ticks}\ndue,start,emulated,swap,swapped\n"
+              &"frame_ticks={frame_ticks}\ndue,start,emulated,ready,swap,swapped\n"
     for r in trace: csv.add r.join(",") & "\n"
     writeFile(trace_path, csv)
   # The peer hears BYE (a pulled cable) instead of waiting out its timeout
