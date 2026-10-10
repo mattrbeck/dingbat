@@ -1,6 +1,6 @@
-// Tab escape hatch: the SDL runtime preventDefaults keydown app-wide once
-// it initializes. Window capture phase, registered before em.js, so it runs
-// first; stopping propagation leaves the browser's focus traversal intact.
+// Tab escape hatch: the key grab (gameKey, below) preventDefaults Tab.
+// Window capture phase, so it runs first; stopping propagation leaves the
+// browser's focus traversal intact.
 window.addEventListener("keydown", (e) => {
   if (e.code === "Tab") e.stopImmediatePropagation();
 }, true);
@@ -14,6 +14,15 @@ if (!integerScaling) {
   canvasEl.classList.add("fill");
 }
 
+// A touch on the picture is the game's: no double-tap zoom, callout or
+// mouse events and click after it (the overlay shows from the touchstart
+// below). A wheel over it never scrolls or zooms the page.
+for (const type of ["touchstart", "touchend", "touchcancel"]) {
+  canvasEl.addEventListener(type, (e) => { if (e.cancelable) e.preventDefault(); },
+                            { passive: false });
+}
+canvasEl.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
+
 var volume = 0;
 var paused = false;
 var fastForward = false;
@@ -21,9 +30,9 @@ var currentRomName = null;
 var currentOriginalName = null;
 
 // Presentation: the core hands over a raw BGR555 framebuffer and JS uploads
-// it to WebGL2 (web/glpresent.js) on the visible #canvas; SDL paints the
-// hidden #sdl-canvas. No video toggles here, so uniforms are index.js's
-// defaults (LCD color correction on, no screen look, no filter).
+// it to WebGL2 (web/glpresent.js) on #canvas. No video toggles here, so
+// uniforms are index.js's defaults (LCD color correction on, no screen look,
+// no filter).
 const GL_SCALE = 4; // #canvas backing store = native resolution * GL_SCALE
 
 const isGbc = () =>
@@ -222,8 +231,8 @@ volTrack.addEventListener("touchmove", (e) => {
   setVolumeFromTrack(e.touches[0].clientX);
 });
 
-// Slider keys: window capture, registered before em.js, so arrows adjust
-// volume instead of reaching the SDL runtime as game input.
+// Slider keys: window capture, so arrows adjust volume instead of reaching
+// gameKey (below) as game input.
 window.addEventListener("keydown", (e) => {
   if (document.activeElement !== volTrack) return;
   let v;
@@ -261,6 +270,43 @@ volIconBtn.addEventListener("click", () => {
 });
 
 updateVolumeUI();
+
+// Keyboard: the main app's default bindings (index.js PRESET_DEFAULT), by
+// physical key: arrows, Z = A, X = B, Backspace = Select, Return = Start,
+// A = L, S = R. The page is the game, so no key acts on the page around it
+// either: no scrolling or focus moves (arrows, Backspace; Tab has its hatch
+// above), no browser shortcut on an F-key or a Ctrl chord, and no Enter or
+// Space pressing a focused button (keypress, and the keyup of a keydown
+// seen here). Window bubble, after the Tab and slider hooks.
+const KEY_INPUTS = { ArrowUp: 0, ArrowDown: 1, ArrowLeft: 2, ArrowRight: 3,
+  KeyZ: 4, KeyX: 5, Backspace: 6, Enter: 7, KeyA: 8, KeyS: 9 };
+const GRAB_KEYDOWN = /^(Arrow(Up|Down|Left|Right)|Backspace|Tab|F([1-9]|1[0-9]|2[0-4]))$/;
+const keysDown = new Set();
+const heldInputs = new Set();
+const setGameInput = (id, down) => {
+  if (down) heldInputs.add(id);
+  else heldInputs.delete(id);
+  if (typeof Module !== "undefined" && Module._setInput) Module._setInput(id, down ? 1 : 0);
+};
+const gameKey = (/** @type {KeyboardEvent} */ e) => {
+  if (e.type === "keydown") {
+    keysDown.add(e.code);
+    if (e.ctrlKey || GRAB_KEYDOWN.test(e.code)) e.preventDefault();
+  } else if (e.type === "keypress" || keysDown.delete(e.code)) {
+    e.preventDefault();
+  }
+  if (e.type === "keypress" || e.repeat) return;
+  const id = KEY_INPUTS[e.code];
+  if (id !== undefined) setGameInput(id, e.type === "keydown");
+};
+for (const type of ["keydown", "keypress", "keyup"]) {
+  window.addEventListener(type, gameKey, false);
+}
+// A key let go while the frame had no focus sends no keyup.
+window.addEventListener("blur", () => {
+  keysDown.clear();
+  for (const id of [...heldInputs]) setGameInput(id, false);
+});
 
 const wrapper = document.getElementById("wrapper");
 
@@ -303,7 +349,6 @@ const resetOverlayTimer = () => {
 
 /** @type {EmscriptenModule} */
 var Module = {
-  canvas: /** @type {HTMLCanvasElement} */ ((() => document.getElementById("sdl-canvas"))()),
   onRuntimeInitialized: () => {
     const SAMPLE_RATE = 32768;
     const TARGET_FPS = 59.7275;

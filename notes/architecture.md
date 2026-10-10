@@ -6,10 +6,10 @@ A map, not an essay. Trust the tree over this file.
 
 | Target | Entry | Build | Links |
 |---|---|---|---|
-| Native GUI | `src/dingbat.nim` | `nim c -d:release src/dingbat.nim` | SDL2 + OpenGL + Dear ImGui (imguin); per-OS link flags in `nim.cfg` (`-d:macdist` static on macOS, `-lGL` on Linux, static mingw on Windows) |
-| Browser (wasm) | `src/dingbat_wasm.nim` | `nimble wasm` (`-d:emscripten`; flags in `src/dingbat_wasm.nims`) | Emscripten + `USE_SDL=2`; emits `web/em.js` + `web/em.wasm`; the exported `_wasm_*`/`_link_*`/`_rollback_*`/`_netlink_*` C ABI is what `web/index.js` calls (typed by the generated `web/types/em.d.ts`) |
+| Native GUI | `src/dingbat.nim` | `nim c -d:release src/dingbat.nim` | SDL 3 + OpenGL + Dear ImGui (imguin); per-OS link flags in `nim.cfg` (`-d:macdist` static on macOS, `-lGL` on Linux, static mingw on Windows) |
+| Browser (wasm) | `src/dingbat_wasm.nim` | `nimble wasm` (`-d:emscripten`; flags in `src/dingbat_wasm.nims`) | Emscripten, no SDL (JS presents the picture, plays the sound and reads the keys); emits `web/em.js` + `web/em.wasm`; the exported `_wasm_*`/`_link_*`/`_rollback_*`/`_netlink_*` C ABI is what `web/index.js` calls (typed by the generated `web/types/em.d.ts`) |
 | iOS | `src/dingbat_ios.nim` + `src/dingbat_ios_audio.c` | `ios/build-core.sh` → static libs in `ios/lib/` | No SDL; Swift shell in `ios/Dingbat/`, header `ios/include/dingbat.h` |
-| Test harness | `tests/dingbat_test.nim` (+ `dingbat_test_runner.nim`, `dingbat_bench.nim`) | `nimble test_build` / `bench_build`, always `-d:test_harness` | `-d:test_harness` makes `nim.cfg` skip the SDL2/GL link flags, which is why headless binaries link on machines without SDL |
+| Test harness | `tests/dingbat_test.nim` (+ `dingbat_test_runner.nim`, `dingbat_bench.nim`) | `nimble test_build` / `bench_build`, always `-d:test_harness` | `-d:test_harness` makes `nim.cfg` skip the SDL 3/GL link flags, which is why headless binaries link on machines without SDL |
 
 `nim.cfg` sets the perf-critical globals: `threads:off`, `mm:arc` (component→parent
 back-refs must be `{.cursor.}` or they leak), `opt:speed`, `-mno-outline` on arm64

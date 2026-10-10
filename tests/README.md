@@ -7,8 +7,8 @@ the authority.
 
 Every headless binary builds with `-d:test_harness`. Besides gating harness-only code
 (APU capture, `common/test_output.nim`, savestate hooks) it stops `nim.cfg` from
-appending the GUI's SDL2/OpenGL link flags (`@if not test_harness:`). Without it a
-headless binary links on a dev Mac with Homebrew SDL2 and fails on every CI runner.
+appending the GUI's SDL 3/OpenGL link flags (`@if not test_harness:`). Without it a
+headless binary links on a dev Mac with Homebrew SDL 3 and fails on every CI runner.
 
 ```
 nimble test_build    # -> ./dingbat_test  ./dingbat_test_runner

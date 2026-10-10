@@ -1,9 +1,9 @@
 // Tab escape hatch: with focus in the chrome or a modal, or anywhere on the
-// home screen, Tab keeps moving focus. Window capture phase, registered before em.js, so it outranks the
-// SDL runtime's key grab (which preventDefaults Tab app-wide once a game
-// runs) and the fast-forward shortcut. keydown only, so a held fast-forward
-// always gets its keyup. Stopping at window capture also hides the event
-// from the modal's own Tab trap, so that handler is invoked directly.
+// home screen, Tab keeps moving focus. Window capture phase, so it outranks
+// the key grab (below) and the fast-forward shortcut. keydown only, so a
+// held fast-forward always gets its keyup. Stopping at window capture also
+// hides the event from the modal's own Tab trap, so that handler is invoked
+// directly.
 window.addEventListener("keydown", (e) => {
   if (e.code !== "Tab" || !e.target || !(/** @type {Element} */ (e.target).closest)) return;
   const t = /** @type {Element} */ (e.target);
@@ -18,15 +18,14 @@ window.addEventListener("keydown", (e) => {
   }
 }, true);
 
-// Typing escape hatch: the SDL runtime's window-bubble key handlers
-// preventDefault page-wide once a core runs. This sits at window-bubble too,
-// registered before em.js so it runs first, and stops text-field events
-// there. Bubble, not capture: the fields' own listeners must still see the
-// target phase. Tab belongs to the hook above; Escape must keep flowing to
-// the close-all-modals handler. On the home screen the same goes for a
-// focused button or select: Enter and Space must press it (a library tile,
-// from the keyboard or after the pad put focus there), not be swallowed for
-// the core paused behind the page.
+// Typing escape hatch: the key grab (below) preventDefaults at window
+// bubble. This sits at window bubble too, registered first so it runs
+// first, and stops text-field events there. Bubble, not capture: the fields'
+// own listeners must still see the target phase. Tab belongs to the hook
+// above; Escape must keep flowing to the close-all-modals handler. On the
+// home screen the same goes for a focused button or select: Enter and Space
+// must press it (a library tile, from the keyboard or after the pad put
+// focus there), not be swallowed for the core paused behind the page.
 {
   const typingGuard = (e) => {
     if (e.code === "Tab" || e.code === "Escape") return;
@@ -44,10 +43,10 @@ window.addEventListener("keydown", (e) => {
 }
 
 // Browser-chord escape hatch: on the home screen modifier chords belong to
-// the browser (Cmd/Ctrl+R, Alt+Left), which SDL's app-wide preventDefault
-// and gameKeyHandler would otherwise swallow. Window capture hides the chord
-// from every app handler while the default action still fires. Stands down
-// in the running-game view: swallowing chords there is deliberate.
+// the browser (Cmd/Ctrl+R, Alt+Left). Window capture hides the chord from
+// every app handler while the default action still fires. Stands down in
+// the running-game view: swallowing chords there is deliberate (the key
+// grab, below).
 window.addEventListener("keydown", (e) => {
   if (!e.metaKey && !e.ctrlKey && !e.altKey) return;
   if (document.body.classList.contains("running")) return;
@@ -55,6 +54,31 @@ window.addEventListener("keydown", (e) => {
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   e.stopImmediatePropagation();
 }, true);
+
+// Key grab: a key that every other handler left alone still must not act on
+// the page. Backspace would go back a page (WebKit) and F5 or Ctrl+R reload
+// it, with a game paused behind a modal or the home screen; the arrows and
+// Tab move nothing, no other F-key or Ctrl chord reaches the browser, and
+// Enter and Space press no control (keypress, and the keyup of a keydown
+// seen here). The hooks above carve out Tab, text fields, the home screen's
+// buttons and its browser chords; the bound game keys and the shortcuts take
+// theirs at document capture. Window bubble, after typingGuard.
+{
+  const GRAB_KEYDOWN = /^(Arrow(Up|Down|Left|Right)|Backspace|Tab|F([1-9]|1[0-9]|2[0-4]))$/;
+  const down = new Set();
+  const keyGrab = (e) => {
+    if (e.type === "keydown") {
+      down.add(e.code);
+      if (e.ctrlKey || GRAB_KEYDOWN.test(e.code)) e.preventDefault();
+    } else if (e.type === "keypress" || down.delete(e.code)) {
+      e.preventDefault();
+    }
+  };
+  for (const type of ["keydown", "keypress", "keyup"]) {
+    window.addEventListener(type, keyGrab, false);
+  }
+  window.addEventListener("blur", () => down.clear());
+}
 
 // --- Service Worker ---
 
@@ -11348,17 +11372,14 @@ window.addEventListener("resize", updateCanvasScaling);
 }
 new ResizeObserver(updateCanvasScaling).observe(stageEl);
 
-// WebKit applies the SDL window resize to the canvas a beat after
-// initFromEmscripten returns (Chromium is synchronous); re-fit when it lands.
-let seenCanvasW = 0;
-let seenCanvasH = 0;
-const watchCanvasBacking = () => {
-  if (canvasEl.width !== seenCanvasW || canvasEl.height !== seenCanvasH) {
-    seenCanvasW = canvasEl.width;
-    seenCanvasH = canvasEl.height;
-    updateCanvasScaling();
-  }
-};
+// A touch on the picture is the game's, or frame zoom's through pointer
+// events (below): no mouse events or click follow it. A wheel over it never
+// scrolls or zooms the page; frame zoom takes ctrl+wheel and the pan first.
+for (const type of ["touchstart", "touchend", "touchcancel"]) {
+  canvasEl.addEventListener(type, (e) => { if (e.cancelable) e.preventDefault(); },
+                            { passive: false });
+}
+canvasEl.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
 
 // --- Frame zoom ---
 // Pinch the picture to zoom it: two fingers on a touch screen, a trackpad
@@ -11590,7 +11611,8 @@ const INPUT_NAMES = ["Up", "Down", "Left", "Right", "A", "B", "Select", "Start",
                      "X", "Y"];
 const DS_ONLY_INPUTS = 10;
 
-// event.code -> SDL keycode mapping.
+// event.code -> SDL keycode: the numbering the stored bindings
+// ("keybindings") are kept in.
 const JS_TO_SDL = (() => {
   const m = {
     ArrowUp: 0x40000052, ArrowDown: 0x40000051,
@@ -11767,7 +11789,8 @@ const routeP1Input = (inputId, down) => {
   }
 };
 
-// Intercepts bound keys before the SDL layer and calls _setInput directly.
+// Bound keys are the game's: document capture, ahead of every other key
+// handler, straight to the core.
 const gameKeyHandler = (e, down) => {
   if (settingsModal.classList.contains("open")) return;
   // The home screen keeps a loaded game paused behind it: there Enter, Space
@@ -18244,9 +18267,6 @@ if (document.readyState === "loading") {
 
 /** @type {EmscriptenModule} */
 var Module = {
-  // SDL renders to a hidden canvas: a canvas holds one context type, and
-  // the visible #canvas carries our WebGL2 context.
-  canvas: /** @type {HTMLCanvasElement} */ ((() => document.getElementById("sdl-canvas"))()),
   onRuntimeInitialized: async () => {
     // iOS Safari kills or JIT-demotes tabs under memory pressure: shrink the
     // rewind ring's cap before any core exists.
@@ -18758,7 +18778,6 @@ var Module = {
       if (paused) {
         clearPlaying(); // a paused game is not a run a crash could end
         updateRumble(timestamp); // drops body.rumbling promptly on pause
-        watchCanvasBacking();
         lastFrameTime = 0;
         accumulator = 0;
         ndsAudioQuiet(); // a DS game's queued audio goes silently
@@ -18977,7 +18996,6 @@ var Module = {
       updateHleIndicator();
       updateGlow();
       updateRumble(timestamp);
-      watchCanvasBacking();
       maybeCheckpoint(timestamp);
       notePlayingLong();
       tickEnd = performance.now();

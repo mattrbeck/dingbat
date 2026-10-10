@@ -4,8 +4,8 @@
 // cannot lag the main renderer.
 //
 // Deps are injected so this file has no DOM/globals of its own beyond the
-// wasm Module: canvasEl is the VISIBLE canvas we own a WebGL2 context on
-// (SDL must render to a different, hidden canvas); nativeRes() -> [w,h] gives
+// wasm Module: canvasEl is the visible canvas we own a WebGL2 context on;
+// nativeRes() -> [w,h] gives
 // the core's native pixel size; log(msg) reports GL errors.
 function createGlRenderer(canvasEl, nativeRes, log) {
   let gl = null, prog = null, tex = null, btex = null, lost = false;

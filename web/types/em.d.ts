@@ -12,7 +12,6 @@
  */
 interface EmscriptenModule {
   // --- emscripten runtime members used by the front-end ---
-  canvas?: HTMLCanvasElement | null;
   memory?: WebAssembly.Memory;
   HEAPU8?: Uint8Array;
   calledRun?: boolean;
@@ -99,7 +98,6 @@ interface EmscriptenModule {
   _wasm_camera_attach?(): number;
   _wasm_camera_frame_ptr?(): number;
   _setInput?(inputId: number, pressed: number): void;
-  _setKeybindingForInput?(inputId: number, keycode: number): void;
   _setRewindCapBytes?(n: number): void;
   _setRewindEnabled?(on: number): void;
   _loop_tick?(): void;

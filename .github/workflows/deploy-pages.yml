@@ -42,18 +42,20 @@ jobs:
         # As test.yml's wasm job (the two share the cache above).
         run: .github/scripts/install-emsdk.sh 4.0.23
 
-      - name: Cache nimble's sdl2
+      - name: Cache nimble's zippy
         id: nimble-cache
         uses: actions/cache@v4
         with:
           path: ~/.nimble/pkgs2
-          key: nimble-wasm-${{ runner.os }}-nim2.2.12-sdl2-2.0.6
+          key: nimble-wasm-${{ runner.os }}-nim2.2.12-zippy-0.10.20
 
       - name: Install nimble dependencies
         # nimble queries the package's git remote for tags: a network fetch.
-        # Pinned, as test.yml's wasm job (the two share the cache above).
+        # Pinned, and from outside the checkout, as test.yml's wasm job (the
+        # two share the cache above).
         if: steps.nimble-cache.outputs.cache-hit != 'true'
-        run: .github/scripts/retry.sh 3 nimble install -y sdl2@2.0.6
+        working-directory: ${{ runner.temp }}
+        run: ${{ github.workspace }}/.github/scripts/retry.sh 3 nimble install -y zippy@0.10.20
 
       - name: Build WASM
         run: nim c -d:emscripten src/dingbat_wasm.nim

@@ -1078,8 +1078,8 @@ document.addEventListener("visibilitychange", () => {
     manualSetStatus("Away a while — your code was refreshed, share the new one");
   }
 });
-// Stop propagation so the SDL key handlers never see the field; that also
-// hides Escape from the document handler, so dismiss here directly.
+// Stop propagation so the page's key handlers never see the field; that
+// also hides Escape from the document handler, so dismiss here directly.
 manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
   manualIn.addEventListener(t, (/** @type {KeyboardEvent} */ e) => {
     if (t === "keydown" && e.key === "Enter" && !manualConfirm.disabled) manualConfirmGo();
@@ -1628,8 +1628,9 @@ netJoinGo.addEventListener("click", async () => {
   }
 });
 
-// Stop propagation at the field so SDL's window-level handlers (which
-// preventDefault keypress) never see it; Escape is then dismissed here.
+// Stop propagation at the field so the page's window-level handlers (the
+// key grab preventDefaults keypress) never see it; Escape is then dismissed
+// here.
 ["keydown", "keypress", "keyup"].forEach((type) =>
   netCodeInput.addEventListener(type, (/** @type {KeyboardEvent} */ e) => {
     if (type === "keydown" && e.key === "Enter") netJoinGo.click();

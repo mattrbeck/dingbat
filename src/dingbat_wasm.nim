@@ -1,5 +1,4 @@
 import std/[os, strutils, math]
-import sdl2 except init, quit
 import zippy  # clip anchors + their strip thumbnails are stored deflated
 import dingbat/common/input
 import dingbat/common/rewind
@@ -22,33 +21,11 @@ const GBA_H = 160
 const GB_W  = 160
 const GB_H  = 144
 
-# SDL keycodes for non-printable keys are scancode | SDLK_SCANCODE_MASK.
-const SDLK_SCANCODE_MASK = cint(1 shl 30)
-const SC_RIGHT = cint(79); const SC_LEFT = cint(80)
-const SC_DOWN  = cint(81); const SC_UP   = cint(82)
-
-# Default keybindings; mutable so JS can rebind via setKeybindingForInput().
-var KEYBINDINGS: array[10, (cint, Input)] = [
-  (SC_UP    or SDLK_SCANCODE_MASK, Input.UP),
-  (SC_DOWN  or SDLK_SCANCODE_MASK, Input.DOWN),
-  (SC_LEFT  or SDLK_SCANCODE_MASK, Input.LEFT),
-  (SC_RIGHT or SDLK_SCANCODE_MASK, Input.RIGHT),
-  (cint(122), Input.A),      # z
-  (cint(120), Input.B),      # x
-  (cint(8),   Input.SELECT), # backspace
-  (cint(13),  Input.START),  # return
-  (cint(97),  Input.L),      # a
-  (cint(115), Input.R),      # s
-]
-
 type EmuKind = enum ekNone, ekGBA, ekGB
 
 var stateKind:     EmuKind     = ekNone
 var stateGba:      GBA         = nil
 var stateGb:       GB          = nil
-var stateWindow:   WindowPtr   = nil
-var stateRenderer: RendererPtr = nil
-var stateTexture:  TexturePtr  = nil
 var frameCount {.exportc.}: cint = 0
 
 # Session handles, hoisted above their blocks because earlier procs guard on
@@ -1062,27 +1039,6 @@ proc setInput(inputId: cint; pressed: cint) {.exportc.} =
   of ekGB:  stateGb.handle_input(inp, down)
   of ekNone: discard
 
-proc setKeybindingForInput(inputId: cint; keycode: cint) {.exportc.} =
-  if inputId < 0 or inputId > ord(Input.high): return
-  let inp = Input(inputId)
-  for i in 0..<KEYBINDINGS.len:
-    if KEYBINDINGS[i][1] == inp:
-      KEYBINDINGS[i] = (keycode, inp)
-      return
-
-proc checkInput() =
-  var evt = defaultEvent
-  while pollEvent(evt):
-    case evt.kind
-    of KeyDown, KeyUp:
-      let pressed = evt.kind == KeyDown
-      let sym = key(evt).keysym.sym
-      for (code, inp) in KEYBINDINGS:
-        if sym == code:
-          setInput(cint(ord(inp)), cint(pressed))
-          break
-    else: discard
-
 # Rewind history (common/rewind.nim, declared up top): pushed every
 # REWIND_INTERVAL frames from loop_tick, popped by JS while the rewind button
 # is held, cleared when a new core is created.
@@ -1120,16 +1076,12 @@ proc gb_rewind_thumb(g: GB): RewindThumb =
                                        SCRUB_THUMB_W, GB_SCRUB_THUMB_H))
 
 proc loop_tick() {.exportc.} =
-  if stateRenderer == nil: return
   if stateNet != nil: return  # online link mode: netlink_tick drives frames
   if clipReplaying: return    # clip_tick owns the core during a replay
   inc frameCount
-  # Drain SDL events before stepping so keyboard input lands in this frame.
-  checkInput()
   clip_note_frame()
   case stateKind
   of ekGBA:
-    if stateTexture == nil: return
     stateGba.step_frame()
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(
@@ -1140,7 +1092,6 @@ proc loop_tick() {.exportc.} =
     prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                        GBA_W * GBA_H)
   of ekGB:
-    if stateTexture == nil: return
     stateGb.step_frame()
     if statePrinter != nil: statePrinter.tick_frame()
     if rewindHistory != nil:
@@ -1164,17 +1115,14 @@ proc runahead_tick(n: cint) {.exportc.} =
   ## Single-core only: linked modes are frame-synced with a peer, 2P already
   ## runs two cores per frame, and stateGba/stateGb may be stale there; the
   ## guards make a mistimed JS call a no-op.
-  if stateRenderer == nil: return
   if stateNet != nil: return
   if stateLink != nil or stateGbLink != nil: return
   if stateRollback != nil or stateGbRollback != nil: return
   if clipReplaying: return
   inc frameCount
-  checkInput()
   clip_note_frame()  # canonical frames only; lookahead steps are not history
   case stateKind
   of ekGBA:
-    if stateTexture == nil: return
     stateGba.step_frame()  # canonical frame; its audio is played
     if rewindHistory != nil:
       discard rewindHistory.maybe_push(
@@ -1199,7 +1147,6 @@ proc runahead_tick(n: cint) {.exportc.} =
     prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr runaheadFrame[0]),
                        GBA_W * GBA_H)
   of ekGB:
-    if stateTexture == nil: return
     stateGb.step_frame()
     if statePrinter != nil: statePrinter.tick_frame()
     if rewindHistory != nil:
@@ -1232,7 +1179,7 @@ proc runahead_tick(n: cint) {.exportc.} =
 proc wasm_rewind_pop(): cint {.exportc.} =
   ## Step back one snapshot (REWIND_INTERVAL frames) and present it. Frame
   ## boundary only. Returns 1 when applied, 0 when exhausted.
-  if stateRenderer == nil or stateTexture == nil or rewindHistory == nil:
+  if stateKind == ekNone or rewindHistory == nil:
     return 0
   let snap = rewindHistory.pop()
   if snap.len == 0: return 0
@@ -1383,7 +1330,7 @@ proc wasm_rewind_commit(sample: cint): cint {.exportc.} =
   ## Returns 1, or 0 when the sample is gone or a linked mode owns the core.
   ## JS keeps its own pre-commit image for the Undo toast; nothing here
   ## preserves the discarded snapshots.
-  if stateRenderer == nil or rewindHistory == nil: return 0
+  if rewindHistory == nil: return 0
   if stateNet != nil or stateLink != nil or stateGbLink != nil: return 0
   if stateRollback != nil or stateGbRollback != nil: return 0
   if clipReplaying: return 0
@@ -1457,9 +1404,6 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
   stateGba = nil
   stateGb = nil
   rewindHistory = nil  # rewinding one core would desync the pair
-  if stateTexture != nil:
-    destroyTexture(stateTexture)
-    stateTexture = nil
   if ($rom1_path).splitFile().ext.toLowerAscii() in GB_ROM_EXTS:
     return gb_link_init($rom1_path, $rom2_path)
   var cores: seq[GBA] = @[]
@@ -1488,8 +1432,6 @@ proc link_tick() {.exportc.} =
         addr stateGbLink.cores[p].ppu.framebuffer[0])
       for i in 0 ..< GB_W * GB_H:
         linkRgba[p][i] = colorLutGbc[fb[i] and 0x7FFF]
-    var gevt = defaultEvent
-    while pollEvent(gevt): discard
     return
   if stateLink == nil: return
   inc frameCount
@@ -1500,10 +1442,6 @@ proc link_tick() {.exportc.} =
     let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
     for i in 0 ..< GBA_W * GBA_H:
       linkRgba[p][i] = colorLutGba[fb[i] and 0x7FFF]
-  # Drain the SDL queue: JS handles link input via link_input, but
-  # emscripten's SDL layer still queues keys the JS handler doesn't intercept.
-  var evt = defaultEvent
-  while pollEvent(evt): discard
 
 proc link_fb_ptr(player: cint): pointer {.exportc.} =
   ## `player`'s (0 or 1) RGBA8888 framebuffer; JS picks the copy length from
@@ -1611,12 +1549,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
     apply_audio_silent()
     # Back to solo play: plug the printer in (every solo GB core has one).
     printer_attach()
-    if stateTexture != nil: destroyTexture(stateTexture)
-    stateTexture = stateRenderer.createTexture(
-      SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
     rgbaBuffer.setLen(GB_W * GB_H)
-    stateWindow.setSize(cint(GB_W * 4), cint(GB_H * 4))
-    discard stateRenderer.setLogicalSize(GB_W, GB_H)
     lcdResp.reset()
     return 1
   if stateRollback == nil: return 0
@@ -1628,13 +1561,7 @@ proc rollback_exit_to_single(): cint {.exportc.} =
   stateGba = core
   stateKind = ekGBA
   apply_audio_silent()
-  # Recreate the texture rollback_init destroyed: loop_tick bails without it.
-  if stateTexture != nil: destroyTexture(stateTexture)
-  stateTexture = stateRenderer.createTexture(
-    SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
   rgbaBuffer.setLen(GBA_W * GBA_H)
-  stateWindow.setSize(cint(GBA_W * 4), cint(GBA_H * 4))
-  discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
   lcdResp.reset()
   1
 
@@ -1651,8 +1578,6 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
   stateKind = ekNone
   stateGba = nil; stateGb = nil
   rewindHistory = nil
-  if stateTexture != nil:
-    destroyTexture(stateTexture); stateTexture = nil
   if localPlayer < 0 or localPlayer > 1: return 0
   rbLocal = int(localPlayer)
   rbEpoch = int64(epoch)
@@ -1680,16 +1605,12 @@ proc rollback_tick(localBits: cint): cint {.exportc.} =
     if gbrb.tick(stateGbRollback, uint16(localBits)) == gbrb.grbStalled: return -1
     inc frameCount
     gb_rollback_render()
-    var gevt = defaultEvent
-    while pollEvent(gevt): discard
     return cint(stateGbRollback.head - 1)
   if stateRollback == nil: return -1
   let st = stateRollback.tick(uint16(localBits))
   if st == rbStalled: return -1
   inc frameCount
   rollback_render()
-  var evt = defaultEvent
-  while pollEvent(evt): discard
   cint(stateRollback.head - 1)
 
 proc rollback_feed(frame, bits: cint) {.exportc.} =
@@ -1808,9 +1729,6 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   # game's save.
   let path = $rom_path
   let ext = path.splitFile().ext.toLowerAscii()
-  if stateTexture != nil:
-    destroyTexture(stateTexture)
-    stateTexture = nil
   if ext in GB_ROM_EXTS:
     stateKind = ekGB
     curRomCrcValid = false  # the cached CRC belongs to a GBA cart
@@ -1819,14 +1737,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     stateGb.sgb_requested = sgbRequested
     stateGb.post_init()
     printer_attach()  # a printer is always plugged in on solo GB
-    stateTexture = stateRenderer.createTexture(
-      SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GB_W, GB_H)
     rgbaBuffer.setLen(GB_W * GB_H)
-    # Match the canvas backing store to the panel's aspect ratio: at the
-    # GBA's 3:2, GB content letterboxes at a fractional scale, defeating
-    # integer display scaling.
-    stateWindow.setSize(cint(GB_W * 4), cint(GB_H * 4))
-    discard stateRenderer.setLogicalSize(GB_W, GB_H)
   else:
     stateKind = ekGBA
     curRomPath = path  # remembered so netlink_attach can re-derive the ROM CRC
@@ -1838,11 +1749,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     curRomCrc = crc32(cast[ptr UncheckedArray[char]](addr cart.rom[0])
                         .toOpenArray(0, cart.rom_size - 1))
     curRomCrcValid = true
-    stateTexture = stateRenderer.createTexture(
-      SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, GBA_W, GBA_H)
     rgbaBuffer.setLen(GBA_W * GBA_H)
-    stateWindow.setSize(cint(GBA_W * 4), cint(GBA_H * 4))
-    discard stateRenderer.setLogicalSize(GBA_W, GBA_H)
     frameCount = 0
   lcdResp.reset()  # panel state is per-core (and per-resolution)
   rewindHistory = if rewindEnabled: new_rewind(rewindCapBytes) else: nil
@@ -1974,7 +1881,6 @@ proc netlink_tick(): cint {.exportc.} =
     inc frameCount
     prepare_game_frame(cast[ptr UncheckedArray[uint16]](addr stateGba.ppu.framebuffer[0]),
                        GBA_W * GBA_H)
-    checkInput()
     1
   of naProgress:
     1  # unreachable: the loop above only exits on the other results
@@ -2010,20 +1916,4 @@ proc wasm_ew16(offset: cint): cint {.exportc.} =
   cint(uint16(stateGba.bus.wram_board[offset]) or
        (uint16(stateGba.bus.wram_board[offset + 1]) shl 8))
 
-when defined(emscripten):
-  # A dummy main loop so SDL2's emscripten backend can call
-  # emscripten_set_main_loop_timing during SDL_Init without warning.
-  type em_callback_func = proc() {.cdecl.}
-  proc emscripten_set_main_loop(fun: em_callback_func, fps, sim: cint) {.header: "<emscripten.h>".}
-  proc emscripten_cancel_main_loop() {.header: "<emscripten.h>".}
-  proc dummyLoop() {.cdecl.} = discard
-  emscripten_set_main_loop(dummyLoop, 0, 0)
-
 build_color_luts(colorCorrect)
-discard sdl2.init(INIT_VIDEO or INIT_AUDIO)
-stateWindow = createWindow("dingbat", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-                            GBA_W * 4, GBA_H * 4, SDL_WINDOW_SHOWN)
-stateRenderer = stateWindow.createRenderer(-1, Renderer_Accelerated)
-
-when defined(emscripten):
-  emscripten_cancel_main_loop()  # cancel dummy; JS drives loop via RAF
