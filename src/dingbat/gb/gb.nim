@@ -6,6 +6,8 @@ import ../common/[input, scheduler, emu, resampler, serialize, timestretch, chea
 import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
+elif not defined(emscripten):
+  import ../common/audio_out
 
 const LY_BLIND_SCOPE* {.intdefine.} = 2
   ## Which LY advances open the LY=LYC comparator's blind window (see
@@ -2329,7 +2331,7 @@ type
     pitch_correct_ff*:    bool
     stretch:              TimeStretch
     stretch_engaged:      bool
-    audio_dev*:           uint32
+    owns_audio*:          bool  # this core holds the audio queue (audio_out)
     channel1*:            GbChannel1
     channel2*:            GbChannel2
     channel3*:            GbChannel3

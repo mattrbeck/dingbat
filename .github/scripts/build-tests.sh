@@ -6,7 +6,7 @@
 # project name, and concurrent builds sharing one interleave writes.
 # Do NOT add --parallelBuild:N — starving the C stage costs more than the
 # oversubscription it avoids.
-# -d:test_harness keeps nim.cfg from adding the GUI SDL2/OpenGL link flags,
+# -d:test_harness keeps nim.cfg from adding the GUI SDL3/OpenGL link flags,
 # which resolve on a dev Mac but not on a runner. See tests/README.md.
 set -uo pipefail
 

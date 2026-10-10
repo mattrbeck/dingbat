@@ -1,8 +1,6 @@
 import std/[os, hashes, math, options, parseopt, strformat, strutils, tables, times, algorithm]
-import sdl2 except init, quit, glBindTexture, glUnbindTexture
-import sdl2/joystick
-import sdl2/gamecontroller
-import imguin/[cimgui, impl_opengl, impl_sdl2]
+import sdl3
+import imguin/[cimgui, impl_opengl]
 import imguin/glad/gl
 import stb_image/read as stbi
 import stb_image/write as stbiw
@@ -30,6 +28,7 @@ import dingbat/frontend/game_load
 import dingbat/frontend/game_lock
 import dingbat/frontend/window_restore
 import dingbat/frontend/nds_game
+import dingbat/frontend/imgui_sdl3
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -41,26 +40,18 @@ const GBA_H   = 160
 const GB_W    = 160
 const GB_H    = 144
 
-const KMOD_SHIFT_MASK = int16(0x0003)  # LSHIFT | RSHIFT
-
-# Mod key mask for keyboard shortcuts (raw int16 from modstate)
+# Mod key for keyboard shortcuts
 when defined(macosx):
-  const MOD_KEY_MASK = int16(0x0C00)  # LGUI | RGUI
+  const MOD_KEY_MASK = KMOD_GUI
   const MOD_KEY_STR  = "Cmd"
 else:
-  const MOD_KEY_MASK = int16(0x00C0)  # LCTRL | RCTRL
+  const MOD_KEY_MASK = KMOD_CTRL
   const MOD_KEY_STR  = "Ctrl"
 
 const LOGO_PNG_DATA = staticRead("../README/dingbat.png")
 
-# The sdl2 wrapper doesn't expose SDL_free (needed for drop-event filenames)
-proc sdl_free(mem: pointer) {.importc: "SDL_free", cdecl.}
-# ...nor SDL_GameControllerRumble (SDL >= 2.0.9; the linked SDL2 is newer).
-# Magnitudes are 0..0xFFFF; the effect auto-stops after duration_ms.
-proc game_controller_rumble(pad: GameControllerPtr;
-                            low_freq, high_freq: uint16;
-                            duration_ms: uint32): cint
-  {.importc: "SDL_GameControllerRumble", cdecl.}
+# The sdl3 package types SDL_WINDOWPOS_CENTERED as uint; positions are cint
+const WINDOW_CENTERED = cint(WINDOWPOS_CENTERED)
 
 # ──────────────────────────── Shaders ────────────────────────────
 
@@ -305,7 +296,7 @@ proc compile_shader(src: string; shader_type: GLenum): GLuint =
     var log_buf = newString(log_len + 1)
     glGetShaderInfoLog(result, log_len, nil, cstring(log_buf))
     echo "Shader compile error: ", log_buf
-    sdl2.quit(); system.quit(1)
+    sdl3.quit(); system.quit(1)
 
 proc create_shader_program(): GLuint =
   let vert = compile_shader(VERT_SRC, GL_VERTEX_SHADER)
@@ -322,7 +313,7 @@ proc create_shader_program(): GLuint =
     var log_buf = newString(log_len + 1)
     glGetProgramInfoLog(result, log_len, nil, cstring(log_buf))
     echo "Shader link error: ", log_buf
-    sdl2.quit(); system.quit(1)
+    sdl3.quit(); system.quit(1)
   glDeleteShader(vert)
   glDeleteShader(frag)
 
@@ -341,7 +332,7 @@ proc create_logo_shader_program(): GLuint =
     var log_buf = newString(log_len + 1)
     glGetProgramInfoLog(result, log_len, nil, cstring(log_buf))
     echo "Logo shader link error: ", log_buf
-    sdl2.quit(); system.quit(1)
+    sdl3.quit(); system.quit(1)
   glDeleteShader(vert)
   glDeleteShader(frag)
 
@@ -408,8 +399,8 @@ type AppState = ref object
   gb_emu:          GB
   nds:             NdsGame   # a DS game (DS Beta; frontend/nds_game.nim)
   emu_kind:        EmuKind
-  window:          WindowPtr
-  gl_ctx:          GlContextPtr
+  window:          Window
+  gl_ctx:          GLContext
   io:              ptr ImGuiIO
   game_texture:    GLuint
   nds_tex_scale:   int      # a DS game's texture: 256x384 times this (HD 3D)
@@ -454,7 +445,7 @@ type AppState = ref object
   rewind:          Rewind
   rewind_ds:       bool    # `rewind` is a DS game's ring (no keyframes)
   rewinding:       bool    # true while the rewind key is held
-  last_rewind_pop: uint32
+  last_rewind_pop: uint64
   # Active 2-player network link (nil = single-player). While non-nil the
   # local GBA core is driven by netlink.step_frame instead of run_until_frame
   # so the socket stays pumped and the two sides stay in sync; rewind, frame
@@ -468,7 +459,7 @@ type AppState = ref object
   fullscreen:      bool
   fs_track:        FullscreenTrack  # the window's real state (window_restore.nim)
   enable_overlay:  bool
-  last_mouse_tick: uint32
+  last_mouse_tick: uint64
 
 var app: AppState
 
@@ -484,7 +475,7 @@ var lcd_resp: LcdResponse
 # the viewport shake; rumble_flip alternates the jitter direction per present.
 var rumble_on         = false
 var rumble_flip       = false
-var rumble_last_pulse = 0'u32
+var rumble_last_pulse = 0'u64
 
 # The running core's frame period in performance-counter ticks, which the
 # main loop's frame scheduler paces by: the GB/GBA's 280896 cycles at
@@ -523,16 +514,13 @@ proc output_size(): (int, int) =
   of ekNDS: (NDS_W, NDS_H)
   of ekNone: (GBA_W, GBA_H)
 
-proc sdl_get_display_usable_bounds(index: cint; rect: var Rect): cint
-  {.importc: "SDL_GetDisplayUsableBounds", cdecl.}
-
 proc window_scale(): int =
   ## The window's multiple of the picture: Frame size, except that a DS
   ## picture (twice as tall as it is wide) takes the largest multiple that
   ## still fits the screen's usable height, title bar allowed for.
   if app.emu_kind != ekNDS: return app.scale
   var r: Rect
-  if sdl_get_display_usable_bounds(getDisplayIndex(app.window), r) != 0:
+  if not getDisplayUsableBounds(getDisplayForWindow(app.window), r):
     return app.scale
   clamp((int(r.h) - 40) div NDS_H, 1, app.scale)
 
@@ -545,7 +533,7 @@ proc resize_to_output() =
     return
   let (w, h) = output_size()
   let s = window_scale()
-  setSize(app.window, cint(w * s), cint(h * s))
+  discard setWindowSize(app.window, cint(w * s), cint(h * s))
 
 proc remember_fullscreen(on: bool) =
   ## The menu's checkmark, and saved, so the next start can come back this
@@ -558,18 +546,12 @@ proc remember_fullscreen(on: bool) =
 proc set_fullscreen(on: bool) =
   ## Menu and Cmd/Ctrl+F.
   remember_fullscreen(on)
-  discard setFullscreen(app.window, if on: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32)
+  discard setWindowFullscreen(app.window, on)
 
 proc window_is_fullscreen(): bool =
-  ## What the window really is. On macOS AppKit is asked: a fullscreen Space
-  ## entered from the green button or Ctrl+Cmd+F sets no SDL 2 flag.
-  when defined(macosx):
-    var info: WMinfo
-    getVersion(info.version)
-    if getWMInfo(app.window, info) and info.subsystem == SysWM_Cocoa:
-      # SDL_SysWMinfo.info.cocoa.window, the union's first member
-      return ns_window_fullscreen(cast[ptr pointer](addr info.padding[0])[])
-  (getFlags(app.window) and SDL_WINDOW_FULLSCREEN) != 0
+  ## What the window really is, whoever put it there: SDL 3 also flags a
+  ## macOS fullscreen Space entered from the green button or Ctrl+Cmd+F.
+  (getWindowFlags(app.window) and WINDOW_FULLSCREEN) != 0
 
 proc track_fullscreen() =
   ## On a window resize: take up a fullscreen the OS entered or left for the
@@ -581,17 +563,13 @@ proc track_fullscreen() =
   of fcNone: discard
   of fcEntered, fcLeft:
     remember_fullscreen(real)
-    # SDL 2 on macOS adopts a Space it did not make ("already there"), so
-    # the menu's toggle can leave it; where SDL already agrees, a no-op.
-    discard setFullscreen(app.window,
-                          if real: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32)
   if app.fs_track.take_refit(real): resize_to_output()
 
 proc game_viewport(): (GLint, GLint, GLint, GLint) =
   ## The letterboxed rect the game quad is drawn into. An SGB border switches
   ## the picture from 10:9 to 8:7 mid-session, so one window must fit both.
   var ww, wh: cint
-  getSize(app.window, ww, wh)
+  discard getWindowSize(app.window, ww, wh)
   let (ow, oh) = output_size()
   if not app.cfg.preserve_aspect or ow <= 0 or oh <= 0:
     return (0.GLint, 0.GLint, GLint(ww), GLint(wh))
@@ -837,7 +815,7 @@ proc load_rom(path: string; keep_ds = false) =
     app.border_shown = false
     app.nds.open_audio()
     let s = window_scale()
-    setSize(app.window, cint(NDS_W * s), cint(NDS_H * s))
+    discard setWindowSize(app.window, cint(NDS_W * s), cint(NDS_H * s))
     app.dbg = nil
     app.gb_dbg = nil
     # The cheat window edits GB/GBA codes; a DS game has none to take
@@ -849,7 +827,7 @@ proc load_rom(path: string; keep_ds = false) =
     app.emu_kind = ekGB
     app.border_shown = false
     app.border_gen = 0
-    setSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
+    discard setWindowSize(app.window, cint(GB_W * app.scale), cint(GB_H * app.scale))
     app.dbg = nil
     app.gb_dbg = new_gb_debug(app.gb_emu)
   else:
@@ -859,7 +837,7 @@ proc load_rom(path: string; keep_ds = false) =
     app.gb_emu = nil
     app.emu_kind = ekGBA
     app.border_shown = false
-    setSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
+    discard setWindowSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
   app.cheats.attach(current_cheat_engine(),
@@ -907,7 +885,7 @@ proc load_rom(path: string; keep_ds = false) =
   while recs.len > 8: recs.setLen(8)
   app.cfg.recents = recs
   save_config(app.cfg)
-  setPosition(app.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED)
+  discard setWindowPosition(app.window, WINDOW_CENTERED, WINDOW_CENTERED)
   app.paused = false
   app.pending_save = false
   app.pending_load = false
@@ -1248,7 +1226,7 @@ proc render_logo() =
   glUseProgram(app.logo_shader)
   glBindTexture(GL_TEXTURE_2D, app.logo_texture)
   var w, h: cint
-  getSize(app.window, w, h)
+  discard getWindowSize(app.window, w, h)
   let window_aspect = float32(w) / float32(h)
   let aspect_loc = glGetUniformLocation(app.logo_shader, "aspect")
   let scale_loc  = glGetUniformLocation(app.logo_shader, "scale")
@@ -1310,7 +1288,7 @@ when defined(gputime):
       var v = gpu_samples
       v.sort()
       var w, h: cint
-      getSize(app.window, w, h)
+      discard getWindowSize(app.window, w, h)
       echo "GPUTIME viewport=", w, "x", h,
            " filter=", $app.cfg.video_filter,
            " colorcorrect=", app.cfg.color_correction,
@@ -1355,7 +1333,7 @@ proc render_game() =
   # both cores share it, and restored to the full window afterwards so ImGui
   # is not clipped by it.
   var win_w, win_h: cint
-  getSize(app.window, win_w, win_h)
+  discard getWindowSize(app.window, win_w, win_h)
   let (vx, vy, vw, vh) = game_viewport()
   if app.emu_kind != ekNone:
     glViewport(vx, vy, GLsizei(vw), GLsizei(vh))
@@ -1414,7 +1392,7 @@ proc render_game() =
     if border != app.border_shown:
       app.border_shown = border
       resize_to_output()
-      getSize(app.window, win_w, win_h)
+      discard getWindowSize(app.window, win_w, win_h)
       let (nx, ny, nw, nh) = game_viewport()
       glViewport(nx, ny, GLsizei(nw), GLsizei(nh))
     upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
@@ -1465,9 +1443,9 @@ proc show_menu_bar(): bool =
   var focused    = getMouseFocus() == app.window
   when defined(gui_driver):
     focused = focused or gui_driver.mouse_in
-  let mouse_idle = getTicks() - app.last_mouse_tick > 3000'u32
+  let mouse_idle = getTicks() - app.last_mouse_tick > 3000'u64
   result = focused and not mouse_idle
-  discard showCursor(result)
+  discard (if result: showCursor() else: hideCursor())
 
 proc render_link_window()  # defined below, near the network-link procs
 
@@ -1552,7 +1530,7 @@ proc render_imgui() =
   imgui_skipped = false
 
   ImGui_Impl_OpenGL3_NewFrame()
-  ImGui_ImplSDL2_NewFrame()
+  ImGui_ImplSDL3_NewFrame()
   igNewFrame()
 
   var overlay_h: cfloat = 10.0
@@ -1838,10 +1816,10 @@ proc render_imgui() =
 
 # ──────────────────────────── Controllers ────────────────────────────
 
-# Open game controllers, keyed by joystick instance id. SDL2 emits
-# ControllerDeviceAdded for controllers already attached at init, so hotplug
-# handling below covers startup too. Every opened controller feeds player 1.
-var controllers: Table[int32, GameControllerPtr]
+# Open gamepads, keyed by joystick instance id. SDL emits EVENT_GAMEPAD_ADDED
+# for gamepads already attached at init, so hotplug handling below covers
+# startup too. Every opened gamepad feeds player 1.
+var controllers: Table[JoystickID, Gamepad]
 
 # Left-stick-as-dpad and right-trigger fast-forward thresholds (hardcoded,
 # not part of the rebindable button table)
@@ -1915,10 +1893,10 @@ proc update_rumble() =
       rumble_last_pulse = now
       for pad in controllers.values:
         # 0.6 strong (low-freq) / 0.4 weak (high-freq), matching the web UI
-        discard pad.game_controller_rumble(0x9999'u16, 0x6666'u16, 80)
+        discard pad.rumbleGamepad(0x9999'u16, 0x6666'u16, 80)
   elif was_on:
     for pad in controllers.values:
-      discard pad.game_controller_rumble(0, 0, 0)
+      discard pad.rumbleGamepad(0, 0, 0)
 
 # ──────────────────────────── Input ────────────────────────────
 
@@ -1932,7 +1910,7 @@ proc nds_view_top_left(): (int, int, int, int) =
   ## The picture's rect in window coordinates (top-left origin), for the
   ## stylus: game_viewport's is GL's, from the bottom.
   var ww, wh: cint
-  getSize(app.window, ww, wh)
+  discard getWindowSize(app.window, ww, wh)
   let (vx, vy, vw, vh) = game_viewport()
   (int(vx), int(wh) - int(vy) - int(vh), int(vw), int(vh))
 
@@ -1944,16 +1922,20 @@ proc handle_input() =
       let path = gui_driver.dropped
       gui_driver.dropped = ""
       open_dropped(path)
-  var evt = defaultEvent
+  var evt: Event
   while pollEvent(evt):
-    discard ImGui_ImplSDL2_ProcessEvent(cast[ptr SDL_Event](addr evt))
+    discard ImGui_ImplSDL3_ProcessEvent(addr evt)
 
-    case evt.kind
-    of KeyDown, KeyUp:
-      let pressed = evt.kind == KeyDown
-      let kev     = key(evt)
-      let sym     = kev.keysym.sym
-      let mods    = kev.keysym.modstate
+    case evt.type
+    of EVENT_KEY_DOWN, EVENT_KEY_UP:
+      let pressed = evt.key.down
+      let kev     = evt.key
+      # The key without its modifiers, as SDL 2 reported it: SDL 3's event
+      # keycode is shifted (Shift or Caps Lock turn 'z' into 'Z'), which no
+      # binding in a settings file names
+      let sym     = if kev.scancode == SCANCODE_UNKNOWN: cint(kev.key)
+                    else: cint(getKeyFromScancode(kev.scancode, 0, true))
+      let mods    = uint32(kev.mod)
 
       # Releases are applied before any of these filters (held_input.nim)
       let route = held.route_key(app.cfg.keybindings, sym, pressed, kev.repeat,
@@ -1971,23 +1953,23 @@ proc handle_input() =
         app.ce.keybindings.key_released(sym)
       of krShortcut:
         case sym
-        of K_r:
+        of cint(SDLK_R):
           reset_game()
-        of K_p:
+        of cint(SDLK_P):
           app.paused = not app.paused
-        of K_n:
+        of cint(SDLK_N):
           # Frame advance would desync a live link; suppress it there.
           if app.paused and app.emu_kind != ekNone and app.netlink == nil:
             app.pending_step = true
-        of K_s:
+        of cint(SDLK_S):
           if app.emu_kind != ekNone: app.pending_save = true
-        of K_l:
+        of cint(SDLK_L):
           # Loading a save state mid-link would desync the pair.
           if app.emu_kind != ekNone and app.netlink == nil:
             app.pending_load = true
-        of K_f:
+        of cint(SDLK_F):
           set_fullscreen(not app.fullscreen)
-        of K_q:
+        of cint(SDLK_Q):
           app.running = false
         else: discard
       of krMark:
@@ -2004,7 +1986,7 @@ proc handle_input() =
         # Shift+Tab = 2x, Tab = unbounded; mutually exclusive, since fast
         # forward would silently dominate 2x
         template toggle(apu: untyped) =
-          if (mods and KMOD_SHIFT_MASK) != 0:
+          if (mods and KMOD_SHIFT) != 0:
             apu.turbo = not apu.turbo
             if apu.turbo: apu.sync = true
           else:
@@ -2019,105 +2001,102 @@ proc handle_input() =
           toggle(app.nds)
       of krChannel:
         # Feedback is visible in the Audio/Video > Channels submenu
-        let ch = int(sym) - int(K_1)
+        let ch = int(sym) - int(SDLK_1)
         if app.emu_kind == ekGBA and app.gba_emu != nil:
           app.gba_emu.apu.channel_mask[ch] = not app.gba_emu.apu.channel_mask[ch]
         elif app.emu_kind == ekGB and app.gb_emu != nil and ch < 4:
           app.gb_emu.apu.channel_mask[ch] = not app.gb_emu.apu.channel_mask[ch]
 
-    of ControllerDeviceAdded:
-      # `which` is a device index for the Added event
-      let idx = cdevice(evt).which
-      if isGameController(cint(idx)):
-        let pad = gameControllerOpen(cint(idx))
+    of EVENT_GAMEPAD_ADDED:
+      let id = evt.gdevice.which
+      if not controllers.hasKey(id):
+        let pad = openGamepad(id)
         if pad != nil:
-          let id = pad.getJoystick().instanceID()
           controllers[id] = pad
-          held.pad_added(id)
+          held.pad_added(int32(id))
 
-    of ControllerDeviceRemoved:
-      # `which` is a joystick instance id for the Removed event
-      let id = cdevice(evt).which
+    of EVENT_GAMEPAD_REMOVED:
+      let id = evt.gdevice.which
       if controllers.hasKey(id):
-        controllers[id].close()
+        closeGamepad(controllers[id])
         controllers.del(id)
       # Unplugged mid-press: let go of what this pad held, and only that
-      held.pad_removed(id)
+      held.pad_removed(int32(id))
       push_held_input()
       apply_trigger()
 
-    of ControllerButtonDown, ControllerButtonUp:
-      let pressed = evt.kind == ControllerButtonDown
-      let button  = cint(cbutton(evt).button)
+    of EVENT_GAMEPAD_BUTTON_DOWN, EVENT_GAMEPAD_BUTTON_UP:
+      let pressed = evt.gbutton.down
+      let button  = cint(evt.gbutton.button)
+      let pad     = int32(evt.gbutton.which)
       if pressed and app.emu_kind == ekNDS and
          app.cfg.nds_controller_bindings.hasKey(button):
         # A DS game's X or Y, ahead of the button's GB/GBA input
-        held.pad_ds_button(cbutton(evt).which, button,
+        held.pad_ds_button(pad, button,
                            app.cfg.nds_controller_bindings[button], true)
       else:
         let bound   = app.cfg.controller_bindings.hasKey(button)
-        held.pad_button(cbutton(evt).which, button, bound,
+        held.pad_button(pad, button, bound,
                         if bound: app.cfg.controller_bindings[button] else: Input.low,
                         pressed)
-        if not pressed: held.pad_ds_button(cbutton(evt).which, button, dsX, false)
+        if not pressed: held.pad_ds_button(pad, button, dsX, false)
       push_held_input()
       if not pressed and app.ce.capturing_buttons():
         app.ce.controller.button_released(button)
 
-    of ControllerAxisMotion:
-      let ax = caxis(evt)
-      if ax.axis == uint8(SDL_CONTROLLER_AXIS_LEFTX):
-        held.pad_stick(ax.which, Input.LEFT,  ax.value < -STICK_DEADZONE)
-        held.pad_stick(ax.which, Input.RIGHT, ax.value > STICK_DEADZONE)
-      elif ax.axis == uint8(SDL_CONTROLLER_AXIS_LEFTY):
-        held.pad_stick(ax.which, Input.UP,   ax.value < -STICK_DEADZONE)
-        held.pad_stick(ax.which, Input.DOWN, ax.value > STICK_DEADZONE)
-      elif ax.axis == uint8(SDL_CONTROLLER_AXIS_TRIGGERRIGHT):
-        held.pad_trigger(ax.which, ax.value > TRIGGER_THRESHOLD)
+    of EVENT_GAMEPAD_AXIS_MOTION:
+      let ax = evt.gaxis
+      let pad = int32(ax.which)
+      if ax.axis == uint8(GAMEPAD_AXIS_LEFTX):
+        held.pad_stick(pad, Input.LEFT,  ax.value < -STICK_DEADZONE)
+        held.pad_stick(pad, Input.RIGHT, ax.value > STICK_DEADZONE)
+      elif ax.axis == uint8(GAMEPAD_AXIS_LEFTY):
+        held.pad_stick(pad, Input.UP,   ax.value < -STICK_DEADZONE)
+        held.pad_stick(pad, Input.DOWN, ax.value > STICK_DEADZONE)
+      elif ax.axis == uint8(GAMEPAD_AXIS_RIGHT_TRIGGER):
+        held.pad_trigger(pad, ax.value > TRIGGER_THRESHOLD)
       push_held_input()
       apply_trigger()
 
-    of WindowEvent:
-      let wev = window(evt)
-      if wev.event == WindowEvent_SizeChanged:
-        var w, h: cint
-        getSize(app.window, w, h)
-        glViewport(0, 0, w, h)
-        # Every fullscreen change resizes; SDL 2 on macOS sends it once the
-        # transition is over, when the window is where it will stay
-        track_fullscreen()
+    of EVENT_WINDOW_RESIZED:
+      var w, h: cint
+      discard getWindowSize(app.window, w, h)
+      glViewport(0, 0, w, h)
+      track_fullscreen()
 
-    of MouseMotion:
-      app.last_mouse_tick = motion(evt).timestamp
+    of EVENT_WINDOW_ENTER_FULLSCREEN, EVENT_WINDOW_LEAVE_FULLSCREEN:
+      # Sent once the transition is over (macOS animates into and out of a
+      # Space), whoever started it
+      track_fullscreen()
+
+    of EVENT_MOUSE_MOTION:
+      app.last_mouse_tick = getTicks()
       # A DS game's stylus follows the mouse while it is down, clamped to
       # the bottom screen
       if app.emu_kind == ekNDS and app.nds != nil and app.nds.stylus:
-        let t = touch_point(int(motion(evt).x), int(motion(evt).y),
+        let t = touch_point(int(evt.motion.x), int(evt.motion.y),
                             nds_view_top_left())
         app.nds.set_touch(t.x, t.y, true)
 
-    of MouseButtonDown:
+    of EVENT_MOUSE_BUTTON_DOWN:
       # A DS game's stylus: a left click that lands on the bottom screen
       # (not on the menu bar or a window over it)
       if app.emu_kind == ekNDS and app.nds != nil and
-         button(evt).button == BUTTON_LEFT and
+         evt.button.button == BUTTON_LEFT and
          not (app.io != nil and app.io[].WantCaptureMouse):
-        let t = touch_point(int(button(evt).x), int(button(evt).y),
+        let t = touch_point(int(evt.button.x), int(evt.button.y),
                             nds_view_top_left())
         if t.bottom: app.nds.set_touch(t.x, t.y, true)
 
-    of MouseButtonUp:
+    of EVENT_MOUSE_BUTTON_UP:
       if app.emu_kind == ekNDS and app.nds != nil and app.nds.stylus and
-         button(evt).button == BUTTON_LEFT:
+         evt.button.button == BUTTON_LEFT:
         app.nds.lift_stylus()
 
-    of DropFile:
-      let dropped = drop(evt)
-      let path = $dropped.file
-      sdl_free(dropped.file)
-      open_dropped(path)
+    of EVENT_DROP_FILE:
+      open_dropped($evt.drop.data)   # SDL owns the string
 
-    of QuitEvent:
+    of EVENT_QUIT:
       app.running = false
 
     else: discard
@@ -2147,12 +2126,12 @@ proc update_fps_title(emulated: bool) =
                 elif app.emu_kind == ekNDS and app.nds != nil and
                      app.nds.asleep(): "dingbat - SLEEPING"
                 else: fmt"dingbat - {fps:.1f} fps"
-    setTitle(app.window, cstring(title))
+    discard setWindowTitle(app.window, cstring(title))
     fps_frames = 0
     fps_us     = 0
     fps_second = cur_sec
 
-proc gl_loader(name: cstring): pointer = glGetProcAddress(name)
+proc gl_loader(name: cstring): pointer = cast[pointer](glGetProcAddress(name))
 
 # ──────────────────────────── Network link ────────────────────────────
 
@@ -2378,41 +2357,38 @@ proc main() =
     cfg.fullscreen = start_fs
     save_config(cfg)
 
-  when defined(windows):
-    # Per-monitor DPI awareness (SDL >= 2.24): render at native pixels
-    # instead of letting DWM bitmap-stretch the window on scaled displays
-    discard setHint("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2")
-  if sdl2.init(INIT_VIDEO or INIT_AUDIO or INIT_JOYSTICK or INIT_GAMECONTROLLER) != SdlSuccess:
-    echo "SDL2 init failed: ", $sdl2.getError(); system.quit(1)
-  defer: sdl2.quit()
+  if not sdl3.init(INIT_VIDEO or INIT_AUDIO or INIT_GAMEPAD):
+    echo "SDL init failed: ", $getError(); system.quit(1)
+  defer: sdl3.quit()
 
   when defined(macosx):
-    discard glSetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
-  discard glSetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE)
-  discard glSetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)
-  discard glSetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3)
-  discard glSetAttribute(SDL_GL_DOUBLEBUFFER, 1)
-  discard glSetAttribute(SDL_GL_DEPTH_SIZE, 24)
-  discard glSetAttribute(SDL_GL_STENCIL_SIZE, 8)
+    discard glSetAttribute(GL_CONTEXT_FLAGS, GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
+  discard glSetAttribute(GL_CONTEXT_PROFILE_MASK, GL_CONTEXT_PROFILE_CORE)
+  discard glSetAttribute(GL_CONTEXT_MAJOR_VERSION, 3)
+  discard glSetAttribute(GL_CONTEXT_MINOR_VERSION, 3)
+  discard glSetAttribute(GL_DOUBLEBUFFER, 1)
+  discard glSetAttribute(GL_DEPTH_SIZE, 24)
+  discard glSetAttribute(GL_STENCIL_SIZE, 8)
 
-  var window_flags = SDL_WINDOW_OPENGL or SDL_WINDOW_RESIZABLE
+  # Created hidden and centred, then shown: SDL_CreateWindow takes no position
+  var hidden = false
   when defined(gui_driver):
     driver_init()
-    if driver_enabled(): window_flags = window_flags or SDL_WINDOW_HIDDEN
-  let window = createWindow(
-    "dingbat",
-    SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+    hidden = driver_enabled()
+  let window = createWindow("dingbat",
     cint(GBA_W * cfg.frame_size), cint(GBA_H * cfg.frame_size),
-    window_flags or (if start_fs: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32)
-  )
+    WINDOW_OPENGL or WINDOW_RESIZABLE or WINDOW_HIDDEN or
+    (if start_fs: WINDOW_FULLSCREEN else: 0'u64))
   if window == nil:
-    echo "Failed to create window: ", $sdl2.getError(); system.quit(1)
+    echo "Failed to create window: ", $getError(); system.quit(1)
   defer: destroyWindow(window)
+  discard setWindowPosition(window, WINDOW_CENTERED, WINDOW_CENTERED)
+  if not hidden: discard showWindow(window)
 
   let gl_ctx = glCreateContext(window)
   if gl_ctx == nil:
-    echo "Failed to create OpenGL context: ", $sdl2.getError(); system.quit(1)
-  defer: glDeleteContext(gl_ctx)
+    echo "Failed to create OpenGL context: ", $getError(); system.quit(1)
+  defer: discard glDestroyContext(gl_ctx)
   discard glSetSwapInterval(0)  # disable vsync
 
   if not gladLoadGL(gl_loader):
@@ -2432,8 +2408,7 @@ proc main() =
   discard igCreateContext(nil)
   igStyleColorsDark(nil)
   let io_ptr = igGetIO_Nil()
-  discard ImGui_ImplSDL2_InitForOpenGL(cast[ptr SDL_Window](window),
-                                        cast[pointer](gl_ctx))
+  discard ImGui_ImplSDL3_InitForOpenGL(window, gl_ctx)
   discard ImGui_Impl_opengl3_Init("#version 330")
 
   let fe = new_file_explorer(cfg)
@@ -2532,11 +2507,10 @@ proc main() =
   #    120 Hz display): audio pacing happens here — skip emulation while the
   #    audio queue is ahead — so the loop keeps servicing the UI instead of
   #    blocking inside the APU's queue-drain wait.
-  var display_mode: DisplayMode
-  var present_interval = 8'u32
-  if getDesktopDisplayMode(0, display_mode) == SdlSuccess and
-     display_mode.refresh_rate > 0:
-    present_interval = uint32(1000 div display_mode.refresh_rate)
+  var present_interval = 8'u64
+  let display_mode = getDesktopDisplayMode(getPrimaryDisplay())
+  if display_mode != nil and display_mode.refresh_rate > 0:
+    present_interval = uint64(1000'f32 / display_mode.refresh_rate)
   var last_present = getTicks()
   # Normal play: fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216
   # MHz; the GB frame is the same period); the audio queue is a bounds check
@@ -2608,8 +2582,8 @@ proc main() =
   var pace_total  = 0
   var pace_min_q  = uint32.high
   var pace_max_q  = 0'u32
-  var pace_start  = 0'u32
-  var pace_last   = 0'u32
+  var pace_start  = 0'u64
+  var pace_last   = 0'u64
   # DINGBAT_LATENCY_TEST=<trials>: inject a synthetic UP press where polled
   # SDL keys are applied and measure wall-clock time until (a) the framebuffer
   # first differs and (b) that frame reaches glSwapWindow. Needs a GBA ROM
@@ -2820,7 +2794,7 @@ proc main() =
         app.running = false
       render_imgui()
       when defined(gui_driver): driver_frame(window)
-      glSwapWindow(window)
+      discard glSwapWindow(window)
       presented = true
       if lat_trials > 0 and lat_state == 2:
         let t2 = getPerformanceCounter()

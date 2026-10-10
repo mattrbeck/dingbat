@@ -32,8 +32,8 @@ build_slice() {
   # $1 = sdk path, $2 = target triple, $3 = output subdir, $4 = extra cflags
   # Flags pinned explicitly (mm/threads also live in nim.cfg, but that file
   # is not picked up when compiling from outside the repo — keep them here).
-  # No -d:test_harness: the APUs take their SDL2-queue audio path, and the
-  # SDL2 symbols are satisfied by src/dingbat_ios_audio.c inside the lib.
+  # No -d:test_harness: the APUs take their audio-queue path, and
+  # common/audio_out.nim's iOS calls are src/dingbat_ios_audio.c inside the lib.
   mkdir -p "$OUT/$3"
   nim c --app:staticlib --noMain --os:ios --cpu:arm64 --cc:clang \
     -d:release -d:noSignalHandler --mm:arc --threads:off \

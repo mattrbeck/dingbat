@@ -20,33 +20,39 @@ implementations live in `web/signaling/`.
 
 ## Native
 
-Requires [SDL2](https://www.libsdl.org/) and [Dear ImGui](https://github.com/ocornut/imgui)
-via [imguin](https://github.com/dinau/imguin).
+Requires [SDL 3](https://www.libsdl.org/) (through the official
+[nim-lang/sdl3](https://github.com/nim-lang/sdl3) binding) and
+[Dear ImGui](https://github.com/ocornut/imgui) via [imguin](https://github.com/dinau/imguin).
 
 ```sh
 nimble build -d:release   # -> ./dingbat
 ```
 
-Linux: install `libsdl2-dev libgl1-mesa-dev` (Debian) or `SDL2-devel mesa-libGL-devel`
-(Fedora). `nim.cfg` adds `-I/usr/include/SDL2` for the imgui backend; change that line if
-your distro differs. SDL2 is loaded dynamically on Linux, statically on macOS and Windows.
+macOS: `brew install sdl3`. Linux: `libsdl3-dev libgl1-mesa-dev` (Ubuntu 25.04+, Debian
+13+), `SDL3-devel mesa-libGL-devel` (Fedora 42+), `sdl3` (Arch); older distros build it
+with `.github/scripts/build-sdl3.sh /usr/local` (as root). SDL 3 is linked at build time
+everywhere: dynamically for a dev build, statically for the release builds (`-d:macdist`
+on macOS; CI's Linux and Windows builds have only `libSDL3.a` to link).
 
 `nimble install --depsOnly` fails inside the checkout on nimble 0.22 ("Couldnt find a
 solution for the packages"); install from another directory instead, as CI does:
-`cd /tmp && nimble install -y sdl2 imguin yaml stb_image zippy`.
+`cd /tmp && nimble install -y "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy`
+(the registry's `sdl3` is an older, unofficial binding, so the official one is named by URL;
+`sdl2` too for the web build).
 
 ## Windows (cross-compiled)
 
 ```sh
-docker build --platform linux/amd64 -t dingbat-win-cross docker/windows-cross
+docker build --platform linux/amd64 -t dingbat-win-cross \
+  -f docker/windows-cross/Dockerfile .github/scripts
 docker run --rm --platform linux/amd64 \
   -v "$PWD":/src -v dingbat-nimble:/root/.nimble -w /src \
   dingbat-win-cross ./docker/windows-cross/build.sh
 ```
 
-Produces a self-contained `dist/windows/dingbat.exe` (SDL2 and the mingw C++ runtime
-linked statically). A different SDL2 build can be substituted at runtime with
-`SDL_DYNAMIC_API=C:\path\to\SDL2.dll`.
+Produces a self-contained `dist/windows/dingbat.exe` (SDL 3 and the mingw C++ runtime
+linked statically). A different SDL 3 build can be substituted at runtime with
+`SDL_DYNAMIC_API=C:\path\to\SDL3.dll`.
 
 ## CI
 
@@ -54,5 +60,6 @@ linked statically). A different SDL2 build can be substituted at runtime with
 `deploy-pages.yml` (wasm build to GitHub Pages on push to main), `build-artifacts.yml`
 (the three desktop builds, `workflow_call` only), `build.yml` (calls it on every push and
 PR), `release.yml` (on `v*` tags: same builds, checksummed and published). Linux builds on
-`ubuntu-22.04` for the glibc 2.34 floor. The macOS job builds SDL2 from source because
-Homebrew's `sdl2` now resolves to `sdl2-compat`, which ships no `libSDL2.a`.
+`ubuntu-22.04` for the glibc 2.34 floor. All three jobs build a static SDL 3 from source
+(`.github/scripts/build-sdl3.sh`, cached): Homebrew's `sdl3` and SDL's mingw devel package
+ship no `libSDL3.a`, and Ubuntu 22.04 has no SDL 3 package.

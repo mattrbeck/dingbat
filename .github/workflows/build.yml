@@ -59,7 +59,7 @@ jobs:
 
             All binaries are **unsigned**: macOS needs *System Settings →
             Privacy & Security → Open Anyway*, Windows needs *More info → Run
-            anyway*, once each. The Linux build needs SDL2 installed
-            (`apt install libsdl2-2.0-0`) and is built against glibc 2.34.
+            anyway*, once each. The Linux build links SDL 3 statically
+            and is built against glibc 2.34.
 
             Verify with `shasum -a 256 -c SHA256SUMS.txt`.

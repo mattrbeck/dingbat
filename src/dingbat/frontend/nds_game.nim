@@ -20,6 +20,8 @@ import std/[os, strformat, strutils]
 import ../common/[atomicfile, input, rom_exts, serialize, timestretch]
 import ../nds/nds except Input  # the DS core's Input object, not common/input's
 import ../nds/savestate
+when not defined(test_harness):
+  import ../common/audio_out
 
 const
   NDS_W* = 256                    ## the picture: top screen over bottom
@@ -388,10 +390,10 @@ proc compose*(g: NdsGame; dst: var seq[uint16]; hd = false) =
 
 # ──────────────────────────── Sound ────────────────────────────
 # The SPU's interleaved float32 stereo at 33513982 / 1024 Hz (io/spu.nim),
-# queued after each frame to SDL's legacy device, which each core opens for
-# itself (the GB/GBA APUs close it and open their own), at the DS rate
-# rounded to a whole Hz. Pacing is the GB APU's in sample frames: ahead past
-# 512 queued, the blocking backstop past 4096.
+# queued after each frame to the audio queue (common/audio_out.nim), which
+# each core opens for itself (the GB/GBA APUs replace it with their own), at
+# the DS rate rounded to a whole Hz. Pacing is the GB APU's in sample frames:
+# ahead past 512 queued, the blocking backstop past 4096.
 
 const
   NDS_AUDIO_RATE* = int(SAMPLE_RATE + 0.5)                    # 32728 (32728.498)
@@ -399,40 +401,16 @@ const
   NDS_SYNC_AHEAD_BYTES = 512'u32 * 8
   NDS_SYNC_BACKSTOP_BYTES = 4096'u32 * 8
 
-when not defined(test_harness):
-  type DsAudioSpec = object   # SDL_AudioSpec
-    freq: cint
-    format: uint16
-    channels: uint8
-    silence: uint8
-    samples: uint16
-    padding: uint16
-    size: uint32
-    callback: pointer
-    userdata: pointer
-
-  proc ds_open_audio(desired, obtained: ptr DsAudioSpec): cint {.importc: "SDL_OpenAudio", cdecl.}
-  proc ds_close_audio() {.importc: "SDL_CloseAudio", cdecl.}
-  proc ds_pause_audio(pause_on: cint) {.importc: "SDL_PauseAudio", cdecl.}
-  proc ds_queue_audio(dev: uint32; data: pointer; len: uint32): cint {.importc: "SDL_QueueAudio", cdecl.}
-  proc ds_queued_bytes(dev: uint32): uint32 {.importc: "SDL_GetQueuedAudioSize", cdecl.}
-  proc ds_clear_audio(dev: uint32) {.importc: "SDL_ClearQueuedAudio", cdecl.}
-  proc ds_delay(ms: uint32) {.importc: "SDL_Delay", cdecl.}
-
 proc open_audio*(g: NdsGame) =
-  ## Take SDL's audio device for the DS's rate (when the game takes over
+  ## Take the audio queue for the DS's rate (when the game takes over
   ## from the one before: a core built and refused must not have taken it).
   when not defined(test_harness):
-    var spec = DsAudioSpec(freq: cint(NDS_AUDIO_RATE), format: 0x8120'u16,  # AUDIO_F32LSB
-                           channels: 2, samples: 128)
-    ds_close_audio()
-    # obtained nil: SDL converts to exactly this spec (the APUs' reason)
-    if ds_open_audio(addr spec, nil) == 0: ds_pause_audio(0)
-    else: echo "Warning: DS failed to open audio device"
+    if not audio_open(sfF32, NDS_AUDIO_RATE):
+      echo "Warning: DS failed to open audio device"
 
 proc audio_queued_bytes*(g: NdsGame): uint32 =
   when defined(test_harness): 0'u32
-  else: ds_queued_bytes(1)
+  else: audio_queued()
 
 proc audio_ahead*(g: NdsGame): bool =
   ## Synced sound buffered comfortably ahead of playback: the frontend's
@@ -488,10 +466,10 @@ proc queue_audio*(g: NdsGame; volume: int; mute, pitch_correct: bool) =
   if frames == 0: return
   when not defined(test_harness):
     if not g.sync:
-      ds_clear_audio(1)   # keep only the freshest, as the APUs do unsynced
+      audio_clear()   # keep only the freshest, as the APUs do unsynced
     else:
-      while ds_queued_bytes(1) > NDS_SYNC_BACKSTOP_BYTES: ds_delay(1)
-    discard ds_queue_audio(1, addr g.out_buf[0], uint32(frames * 8))
+      while audio_queued() > NDS_SYNC_BACKSTOP_BYTES: audio_wait(1)
+    audio_put(addr g.out_buf[0], frames * 8)
 
 proc run_frame*(g: NdsGame; volume: int; mute, pitch_correct: bool) =
   ## One frame (to the next V-blank), its sound queued, the battery followed.

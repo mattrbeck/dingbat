@@ -1,6 +1,6 @@
 import std/[tables, options, strutils]
-import sdl2 except init, quit
-import imguin/[cimgui, impl_opengl, impl_sdl2]
+import sdl3
+import imguin/[cimgui, impl_opengl]
 import ../common/[input, config]
 import held_input
 
@@ -75,8 +75,8 @@ proc key_label(keycode: cint): string =
   # getKeyName yields the keyboard map's printable character.
   if keycode < 0: "---"
   elif (keycode and 0x40000000) != 0:
-    $getKeyName(getKeyFromScancode(cast[ScanCode](keycode xor 0x40000000)))
-  else: $getKeyName(keycode)
+    $getKeyName(getKeyFromScancode(cast[Scancode](keycode xor 0x40000000), 0, false))
+  else: $getKeyName(Keycode(keycode))
 
 proc render*(w: KeybindingsWidget) =
   if igBeginCombo("Preset", "Select preset...", 0):

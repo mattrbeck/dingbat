@@ -7,10 +7,12 @@
 ## is `<id> <command> [args]`, run in order, one step per loop iteration,
 ## and acknowledged as `<id> ok` (or `<id> error <why>`) in <dir>/ack:
 ##
-##   key <name> down|up [cmd] [ctrl] [shift] [alt] [repeat]
+##   key <name> down|up [cmd] [ctrl] [shift] [alt] [caps] [repeat]
 ##                                     name as SDL_GetKeyFromName ("S", "Left",
 ##                                     "Return", "Tab", "`", "F12"), `_` for a
-##                                     space, or a raw keycode (0x400000E3 = LGUI)
+##                                     space, or a raw keycode (0x400000E3 = LGUI;
+##                                     0x5A = 'Z', the key SDL 3 reports for z
+##                                     under Shift or Caps Lock)
 ##   text <utf-8>                      text typed into a focused field
 ##   move <x> <y>                      mouse to window point (x, y)
 ##   down <x> <y> [right] / up <x> <y> [right]
@@ -22,6 +24,17 @@
 ##   frames <n>                        let n loop iterations run
 ##   sleep <ms>
 ##   shot <path.png>                   the next presented frame, whole window
+##   state                             acked `ok fullscreen=0|1 window=WxH`
+##   show                              show the window (fullscreen needs it)
+##   fullscreen os                     macOS: AppKit's own toggle, what the
+##                                     green button and Ctrl+Cmd+F do
+##   pad attach                        plug in a virtual SDL gamepad
+##   pad button <n> down|up            press/release its button n (SDL order)
+##   pad axis <n> <value>              move its axis n (-32768..32767)
+##   pad rumble                        acked `ok rumbles=<n> on=0|1`: rumble
+##                                     requests it took, and whether the last
+##                                     one was a buzz (not a stop)
+##   pad detach                        unplug it
 ##
 ## The window is created hidden, so the user's real mouse and keyboard never
 ## reach it and it never takes focus from what they are doing; the menu bar,
@@ -29,7 +42,7 @@
 ## the driver's mouse is in it.
 
 import std/[os, strutils]
-import sdl2
+import sdl3
 import imguin/glad/gl
 import stb_image/write as stbiw
 
@@ -44,13 +57,71 @@ var
   cmd_pos = 0
   pending: seq[Step]
   wait_frames = 0
-  wait_until = 0'u32
+  wait_until = 0'u64
   shot_path = ""
   shot_id = ""
   mouse_x, mouse_y: cint
   mouse_in* = false
   dropped* = ""       # a `drop` path for handle_input (a pushed SDL drop
-                      # event cannot own its path under sdl2-compat)
+                      # event cannot own its path)
+  texts: seq[string]  # `text` strings, alive until handle_input has read them
+  pad_id: JoystickID  # the virtual gamepad (0 = none)
+  pad_joy: Joystick
+  pad_rumbles = 0     # rumble requests it took
+  pad_rumble_on = false
+
+proc pad_rumble_cb(userdata: pointer; low, high: uint16): bool {.cdecl.} =
+  inc pad_rumbles
+  pad_rumble_on = low != 0 or high != 0
+  true
+
+when defined(macosx):
+  proc sel_registerName(name: cstring): pointer
+    {.importc, header: "<objc/runtime.h>".}
+  proc objc_msgSend() {.importc, header: "<objc/message.h>".}
+
+  proc ns_toggle_fullscreen(window: Window) =
+    ## `[nswindow toggleFullScreen:nil]`: the green button's own action.
+    type Send = proc (self, op, arg: pointer) {.cdecl.}
+    let ns = getPointerProperty(getWindowProperties(window),
+                                PROP_WINDOW_COCOA_WINDOW_POINTER, nil)
+    if ns == nil: raise newException(IOError, "no NSWindow")
+    cast[Send](objc_msgSend)(ns, sel_registerName("toggleFullScreen:"), nil)
+
+proc pad_cmd(w: seq[string]): string =
+  ## A virtual gamepad, so hotplug, buttons, sticks and rumble go through
+  ## SDL's own gamepad events. Returns the ack text.
+  case w[1]
+  of "attach":
+    if pad_id != 0: raise newException(ValueError, "pad already attached")
+    var desc = VirtualJoystickDesc(version: uint32(sizeof(VirtualJoystickDesc)),
+                                   `type`: uint16(JOYSTICK_TYPE_GAMEPAD),
+                                   naxes: 6, nbuttons: 15,
+                                   button_mask: (1u32 shl 15) - 1, axis_mask: (1u32 shl 6) - 1,
+                                   name: "dingbat virtual pad",
+                                   Rumble: pad_rumble_cb)
+    pad_id = attachVirtualJoystick(addr desc)
+    if pad_id == 0: raise newException(IOError, "attach: " & $getError())
+    pad_joy = openJoystick(pad_id)
+    pad_rumbles = 0
+    pad_rumble_on = false
+    "ok id=" & $pad_id
+  of "button":
+    if not setJoystickVirtualButton(pad_joy, cint(parseInt(w[2])), w[3] == "down"):
+      raise newException(IOError, $getError())
+    "ok"
+  of "axis":
+    if not setJoystickVirtualAxis(pad_joy, cint(parseInt(w[2])), int16(parseInt(w[3]))):
+      raise newException(IOError, $getError())
+    "ok"
+  of "rumble":
+    "ok rumbles=" & $pad_rumbles & " on=" & $ord(pad_rumble_on)
+  of "detach":
+    closeJoystick(pad_joy)
+    discard detachVirtualJoystick(pad_id)
+    pad_id = 0
+    "ok"
+  else: raise newException(ValueError, "unknown pad command " & w[1])
 
 proc driver_enabled*(): bool = drive_dir.len > 0
 
@@ -60,6 +131,9 @@ proc driver_init*() =
     createDir(drive_dir)
     writeFile(drive_dir / "ack", "")
     if not fileExists(drive_dir / "cmd"): writeFile(drive_dir / "cmd", "")
+    # The hidden window never has keyboard focus, and without it SDL drops
+    # gamepad presses (releases still pass)
+    discard setHint(HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1")
 
 proc ack(id, msg: string) =
   let f = open(drive_dir / "ack", fmAppend)
@@ -85,85 +159,80 @@ proc read_new_lines() =
   cmd_pos = last_nl + 1
 
 proc push(e: var Event) =
-  if pushEvent(addr e) < 0:
+  if not pushEvent(e):
     raise newException(IOError, "SDL_PushEvent: " & $getError())
 
-proc push_key(window: WindowPtr; w: seq[string]) =
+proc push_key(window: Window; w: seq[string]) =
   if w.len < 3: raise newException(ValueError, "key <name> down|up")
-  let sym = if w[1].startsWith("0x"): cint(parseHexInt(w[1]))   # raw SDL keycode
+  let sym = if w[1].startsWith("0x"): Keycode(parseHexInt(w[1]))   # raw SDL keycode
             else: getKeyFromName(cstring(w[1].replace('_', ' ')))  # Left_Shift
   if sym == 0: raise newException(ValueError, "unknown key " & w[1])
-  var mods = 0'i16
+  var mods = Keymod(0)
   var repeat = false
   for m in w[3 .. ^1]:
     case m
-    of "cmd": mods = mods or 0x0400'i16      # KMOD_LGUI
-    of "ctrl": mods = mods or 0x0040'i16     # KMOD_LCTRL
-    of "shift": mods = mods or 0x0001'i16    # KMOD_LSHIFT
-    of "alt": mods = mods or 0x0100'i16      # KMOD_LALT
+    of "cmd": mods = mods or Keymod(KMOD_LGUI)
+    of "ctrl": mods = mods or Keymod(KMOD_LCTRL)
+    of "shift": mods = mods or Keymod(KMOD_LSHIFT)
+    of "alt": mods = mods or Keymod(KMOD_LALT)
+    of "caps": mods = mods or Keymod(KMOD_CAPS)
     of "repeat": repeat = true
     else: raise newException(ValueError, "unknown modifier " & m)
   var e: Event
-  let k = cast[KeyboardEventPtr](addr e)
   let down = w[2] == "down"
-  k.kind = if down: KeyDown else: KeyUp
-  k.windowID = window.getID()
-  k.state = if down: 1 else: 0
-  k.repeat = repeat
-  k.keysym.sym = sym
-  k.keysym.scancode = getScancodeFromKey(sym)
-  k.keysym.modstate = mods
+  e.key.type = if down: EVENT_KEY_DOWN else: EVENT_KEY_UP
+  e.key.windowID = window.getWindowID()
+  e.key.down = down
+  e.key.repeat = repeat
+  e.key.key = sym
+  var no_mods = Keymod(0)
+  e.key.scancode = getScancodeFromKey(sym, no_mods)
+  e.key.mod = mods
   push(e)
 
-proc push_text(window: WindowPtr; s: string) =
+proc push_text(window: Window; s: string) =
+  texts.add s
   var e: Event
-  let t = cast[TextInputEventPtr](addr e)
-  t.kind = TextInput
-  t.windowID = window.getID()
-  for i, c in s:
-    if i >= t.text.len - 1: break
-    t.text[i] = c
+  e.text.type = EVENT_TEXT_INPUT
+  e.text.windowID = window.getWindowID()
+  e.text.text = cstring(texts[^1])
   push(e)
 
-proc push_motion(window: WindowPtr; x, y: cint) =
+proc push_motion(window: Window; x, y: cint) =
   var e: Event
-  let m = cast[MouseMotionEventPtr](addr e)
-  m.kind = MouseMotion
-  m.windowID = window.getID()
-  m.x = x
-  m.y = y
-  m.xrel = x - mouse_x
-  m.yrel = y - mouse_y
+  e.motion.type = EVENT_MOUSE_MOTION
+  e.motion.windowID = window.getWindowID()
+  e.motion.x = cfloat(x)
+  e.motion.y = cfloat(y)
+  e.motion.xrel = cfloat(x - mouse_x)
+  e.motion.yrel = cfloat(y - mouse_y)
   mouse_x = x
   mouse_y = y
   mouse_in = true
   push(e)
 
-proc push_button(window: WindowPtr; x, y: cint; down, right: bool) =
+proc push_button(window: Window; x, y: cint; down, right: bool) =
   var e: Event
-  let b = cast[MouseButtonEventPtr](addr e)
-  b.kind = if down: MouseButtonDown else: MouseButtonUp
-  b.windowID = window.getID()
-  b.button = if right: 3 else: 1
-  b.state = if down: 1 else: 0
-  b.clicks = 1
-  b.x = x
-  b.y = y
+  e.button.type = if down: EVENT_MOUSE_BUTTON_DOWN else: EVENT_MOUSE_BUTTON_UP
+  e.button.windowID = window.getWindowID()
+  e.button.button = if right: 3 else: 1
+  e.button.down = down
+  e.button.clicks = 1
+  e.button.x = cfloat(x)
+  e.button.y = cfloat(y)
   push(e)
 
-proc push_window(window: WindowPtr; what: string) =
+proc push_window(window: Window; what: string) =
   var e: Event
-  let w = cast[WindowEventPtr](addr e)
-  w.kind = WindowEvent
-  w.windowID = window.getID()
-  w.event = case what
-    of "focus_lost": WindowEvent_FocusLost
-    of "focus_gained": WindowEvent_FocusGained
-    of "close": WindowEvent_Close
+  e.window.type = case what
+    of "focus_lost": EVENT_WINDOW_FOCUS_LOST
+    of "focus_gained": EVENT_WINDOW_FOCUS_GAINED
+    of "close": EVENT_WINDOW_CLOSE_REQUESTED
     else: raise newException(ValueError, "unknown window event " & what)
+  e.window.windowID = window.getWindowID()
   push(e)
 
-proc run(window: WindowPtr; s: Step): bool =
+proc run(window: Window; s: Step): bool =
   ## One step. False when it must wait (the ack comes later).
   let w = s.words
   case w[0]
@@ -190,37 +259,51 @@ proc run(window: WindowPtr; s: Step): bool =
     return true
   of "wheel":
     var e: Event
-    let m = cast[MouseWheelEventPtr](addr e)
-    m.kind = MouseWheel
-    m.windowID = window.getID()
-    m.y = cint(parseInt(w[1]))
+    e.wheel.type = EVENT_MOUSE_WHEEL
+    e.wheel.windowID = window.getWindowID()
+    e.wheel.y = cfloat(parseInt(w[1]))
     push(e)
   of "drop":
     dropped = s.rest  # handle_input takes it where SDL's drop would arrive
   of "window": push_window(window, w[1])
   of "quit":
     var e: Event
-    e.kind = QuitEvent
+    e.quit.type = EVENT_QUIT
     push(e)
   of "frames":
     wait_frames = parseInt(w[1])
     return false
   of "sleep":
-    wait_until = getTicks() + uint32(parseInt(w[1]))
+    wait_until = getTicks() + uint64(parseInt(w[1]))
     return false
   of "shot":
     shot_path = w[1]
     shot_id = s.id
     return false
+  of "state":
+    var ww, wh: cint
+    discard window.getWindowSize(ww, wh)
+    let fs = (getWindowFlags(window) and WINDOW_FULLSCREEN) != 0
+    ack(s.id, "ok fullscreen=" & $ord(fs) & " window=" & $ww & "x" & $wh)
+    return true
+  of "show":
+    discard showWindow(window)
+  of "fullscreen":
+    when defined(macosx): ns_toggle_fullscreen(window)
+    else: raise newException(ValueError, "fullscreen os: macOS only")
+  of "pad":
+    ack(s.id, pad_cmd(w))
+    return true
   else: raise newException(ValueError, "unknown command " & w[0])
   true
 
 var waiting: Step
 var is_waiting = false
 
-proc driver_poll*(window: WindowPtr) =
+proc driver_poll*(window: Window) =
   ## Top of every loop iteration: run steps until one has to wait.
   if drive_dir.len == 0: return
+  texts.setLen(0)   # last iteration's handle_input has read them
   if is_waiting:
     if waiting.words[0] == "frames":
       if wait_frames > 0: dec wait_frames
@@ -237,7 +320,7 @@ proc driver_poll*(window: WindowPtr) =
     pending.delete(0)
     try:
       if run(window, s):
-        if s.id.len > 0 and s.words[0] != "click": ack(s.id, "ok")
+        if s.id.len > 0 and s.words[0] notin ["click", "state", "pad"]: ack(s.id, "ok")
       else:
         waiting = s
         is_waiting = true
@@ -245,11 +328,11 @@ proc driver_poll*(window: WindowPtr) =
     except CatchableError as e:
       if s.id.len > 0: ack(s.id, "error " & e.msg)
 
-proc driver_frame*(window: WindowPtr) =
+proc driver_frame*(window: Window) =
   ## After the UI is drawn, before the swap: take a pending screenshot.
   if shot_path.len == 0: return
   var w, h: cint
-  window.glGetDrawableSize(w, h)
+  discard window.getWindowSizeInPixels(w, h)
   var pix = newSeq[byte](int(w) * int(h) * 3)
   glPixelStorei(GL_PACK_ALIGNMENT, 1)
   glReadPixels(0, 0, GLsizei(w), GLsizei(h), GL_RGB, GL_UNSIGNED_BYTE, addr pix[0])
@@ -258,7 +341,7 @@ proc driver_frame*(window: WindowPtr) =
   for row in 0 ..< int(h):
     copyMem(addr flipped[row * stride], addr pix[(int(h) - 1 - row) * stride], stride)
   var ww, wh: cint
-  window.getSize(ww, wh)
+  discard window.getWindowSize(ww, wh)
   if stbiw.writePNG(shot_path, int(w), int(h), 3, flipped):
     ack(shot_id, "ok " & $w & "x" & $h & " px, window " & $ww & "x" & $wh & " pt")
   else:

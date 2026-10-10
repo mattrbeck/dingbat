@@ -18,10 +18,33 @@ jobs:
           # Pinned, as test.yml's NIM_VERSION.
           nim-version: "2.2.12"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install SDL2 and OpenGL headers
+      - name: Install SDL 3's build dependencies and OpenGL headers
+        # Headers only: SDL loads X11, Wayland, ALSA, PulseAudio, PipeWire
+        # and udev at run time, so these just switch its backends on.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libsdl2-dev libgl1-mesa-dev
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+            libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols \
+            libdecor-0-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev
+      - name: Cache the static SDL 3 build
+        id: sdl3-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl3-prefix
+          # Keyed on build-sdl3.sh's version: bump both together.
+          key: sdl3-static-${{ runner.os }}-22.04-3.4.16-nocamera
+      - name: Build SDL 3 (static, from source)
+        # Ubuntu 22.04 has no SDL 3 package, and a static libSDL3.a means the
+        # release needs none on the player's machine either.
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-sdl3.sh "$HOME/sdl3-prefix"
+      - name: Install SDL 3 where the compiler looks
+        run: |
+          sudo cp -R "$HOME/sdl3-prefix/lib/." /usr/local/lib/
+          sudo cp -R "$HOME/sdl3-prefix/include/." /usr/local/include/
       - name: Install dependencies
         # One at a time from outside the checkout: inside it nimble resolves
         # the whole project graph and `--depsOnly` fails to solve. Each is
@@ -30,7 +53,7 @@ jobs:
         run: |
           set -e
           cd "$RUNNER_TEMP"
-          for p in sdl2 imguin yaml stb_image zippy; do
+          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
       - name: Build
@@ -50,44 +73,32 @@ jobs:
           if-no-files-found: error
 
   macos:
-    # Native build with -d:macdist, which statically links SDL2 so the .app has
+    # Native build with -d:macdist, which statically links SDL3 so the .app has
     # no Homebrew dependency, then bundled into a .app inside a .dmg.
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       # Every fetch below is retried.
-      - name: Cache the static SDL2 build
-        id: sdl2-cache
+      - name: Cache the static SDL 3 build
+        id: sdl3-cache
         uses: actions/cache@v4
         with:
-          path: ~/sdl2-prefix
-          # Keyed on the pinned version below — bump both together.
-          key: sdl2-static-${{ runner.os }}-${{ runner.arch }}-2.32.10
-      - name: Build SDL2 (static, from source)
-        # Not `brew install sdl2`: that name now resolves to sdl2-compat (SDL2
-        # on SDL3, dylibs only, no libSDL2.a), and -d:macdist links
-        # /opt/homebrew/lib/libSDL2.a explicitly. Installed under /opt/homebrew
+          path: ~/sdl3-prefix
+          # Keyed on build-sdl3.sh's version: bump both together.
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-3.4.16-nocamera
+      - name: Build SDL 3 (static, from source)
+        # Not `brew install sdl3`: it ships dylibs only, and -d:macdist links
+        # /opt/homebrew/lib/libSDL3.a explicitly. Installed under /opt/homebrew
         # because that is where nim.cfg looks.
-        if: steps.sdl2-cache.outputs.cache-hit != 'true'
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-sdl3.sh "$HOME/sdl3-prefix"
+      - name: Install SDL 3 where nim.cfg looks
         run: |
           set -e
-          VER=2.32.10
-          .github/scripts/retry.sh 3 curl -fsSL -o sdl2.tar.gz \
-            "https://github.com/libsdl-org/SDL/releases/download/release-$VER/SDL2-$VER.tar.gz"
-          tar xzf "sdl2.tar.gz"
-          cmake -S "SDL2-$VER" -B sdl2-build \
-            -DCMAKE_INSTALL_PREFIX="$HOME/sdl2-prefix" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSDL_STATIC=ON -DSDL_SHARED=OFF -DSDL_TEST=OFF
-          cmake --build sdl2-build --parallel
-          cmake --install sdl2-build
-      - name: Install SDL2 where nim.cfg looks
-        run: |
-          set -e
-          cp -R "$HOME/sdl2-prefix/lib/." /opt/homebrew/lib/
-          cp -R "$HOME/sdl2-prefix/include/." /opt/homebrew/include/
-          test -f /opt/homebrew/lib/libSDL2.a
-          test -f /opt/homebrew/include/SDL2/SDL.h
+          cp -R "$HOME/sdl3-prefix/lib/." /opt/homebrew/lib/
+          cp -R "$HOME/sdl3-prefix/include/." /opt/homebrew/include/
+          test -f /opt/homebrew/lib/libSDL3.a
+          test -f /opt/homebrew/include/SDL3/SDL.h
       - name: Install Nim
         env:
           # Pinned, as test.yml's NIM_VERSION.
@@ -104,16 +115,16 @@ jobs:
         run: |
           set -e
           cd "$RUNNER_TEMP"
-          for p in sdl2 imguin yaml stb_image zippy; do
+          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
       - name: Build (self-contained)
         run: nim c -d:release -d:macdist -o:dingbat_dist src/dingbat.nim
       - name: Verify no Homebrew dependency
-        # If SDL2 slipped back to a dynamic link the .dmg would work on this
+        # If SDL slipped back to a dynamic link the .dmg would work on this
         # runner and fail on every machine without Homebrew.
         run: |
-          if otool -L dingbat_dist | tail -n +2 | grep -qiE '/opt/homebrew|libSDL2'; then
+          if otool -L dingbat_dist | tail -n +2 | grep -qiE '/opt/homebrew|libSDL'; then
             echo "::error::binary still links a non-system dylib — not self-contained"
             otool -L dingbat_dist; exit 1
           fi
@@ -134,7 +145,7 @@ jobs:
           if-no-files-found: error
 
   windows:
-    # Cross-compiled from Linux with mingw-w64 (static SDL2, single .exe), so
+    # Cross-compiled from Linux with mingw-w64 (static SDL3, single .exe), so
     # this needs no Windows runner. Natively on the runner rather than via
     # docker/windows-cross: that image's base comes from Docker Hub, whose
     # anonymous pulls from runner IPs fail with 429/504 for hours at a time.
@@ -151,27 +162,33 @@ jobs:
         run: |
           sudo apt-get -o Acquire::Retries=5 update
           sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends mingw-w64
-      - name: Install SDL2 into the mingw sysroot
+      - name: Cache the static SDL 3 build
+        id: sdl3-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl3-mingw
+          # Keyed on build-sdl3.sh's version: bump both together.
+          key: sdl3-static-mingw64-3.4.16-nocamera
+      - name: Build SDL 3 for the mingw sysroot (static, from source)
+        # SDL 3's mingw devel package has the DLL and its import lib only.
+        # The Dockerfile builds it the same way.
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
+        run: .github/scripts/build-sdl3.sh "$HOME/sdl3-mingw" --mingw
+      - name: Install SDL 3 into the mingw sysroot
         # nim.cfg's mingw section reads /usr/x86_64-w64-mingw32/{include,lib}.
-        # Version as the Dockerfile's SDL2_VERSION.
-        env:
-          SDL2_VERSION: "2.32.8"
         run: |
-          set -eo pipefail
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 \
-            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-mingw.tar.gz" \
-            | tar xz -C "$RUNNER_TEMP"
-          sudo cp -r "$RUNNER_TEMP/SDL2-${SDL2_VERSION}/x86_64-w64-mingw32/include/." /usr/x86_64-w64-mingw32/include/
-          sudo cp -r "$RUNNER_TEMP/SDL2-${SDL2_VERSION}/x86_64-w64-mingw32/lib/." /usr/x86_64-w64-mingw32/lib/
-          test -f /usr/x86_64-w64-mingw32/lib/libSDL2.a
-          test -f /usr/x86_64-w64-mingw32/include/SDL2/SDL.h
+          set -e
+          sudo cp -r "$HOME/sdl3-mingw/include/." /usr/x86_64-w64-mingw32/include/
+          sudo cp -r "$HOME/sdl3-mingw/lib/." /usr/x86_64-w64-mingw32/lib/
+          test -f /usr/x86_64-w64-mingw32/lib/libSDL3.a
+          test -f /usr/x86_64-w64-mingw32/include/SDL3/SDL.h
       - name: Install dependencies
         # See the Linux job: one at a time, from outside the checkout.
         shell: bash
         run: |
           set -e
           cd "$RUNNER_TEMP"
-          for p in sdl2 imguin yaml stb_image zippy; do
+          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
             "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
           done
       - name: Build dingbat.exe
@@ -179,6 +196,15 @@ jobs:
         env:
           DINGBAT_DEPS_INSTALLED: "1"
         run: ./docker/windows-cross/build.sh
+      - name: Verify dingbat.exe ships alone
+        # Only Windows' own DLLs: an SDL3 or mingw runtime DLL import would
+        # work here and fail on a player's machine.
+        run: |
+          if x86_64-w64-mingw32-objdump -p dist/windows/dingbat.exe | grep 'DLL Name' \
+               | grep -qiE 'sdl|libwinpthread|libgcc|libstdc'; then
+            echo "::error::dingbat.exe imports a DLL that does not ship with Windows"
+            x86_64-w64-mingw32-objdump -p dist/windows/dingbat.exe | grep 'DLL Name'; exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: dingbat-windows-x64

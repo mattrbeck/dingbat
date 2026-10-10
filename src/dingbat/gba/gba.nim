@@ -6,6 +6,8 @@ from std/bitops import countLeadingZeroBits, countTrailingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats, atomicfile, psg]
 when defined(test_harness):
   import ../common/test_output
+elif not defined(emscripten):
+  import ../common/audio_out
 import ../common/lut_macros
 import rtc_calendar
 export rtc_calendar
@@ -986,7 +988,7 @@ type
     pitch_correct_ff*:  bool
     stretch:            TimeStretch
     stretch_engaged:    bool  # tracks the stretch-path rising edge (auto-reset)
-    audio_dev*:         uint32  # SDL2 AudioDeviceID (0 = not open)
+    owns_audio*:        bool  # this core holds the audio queue (audio_out)
     # Optional analog-output low-pass: one-pole IIR on the native mix (web
     # uses a BiquadFilter node). Off by default; presentation-only.
     audio_lowpass*:     bool

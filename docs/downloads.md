@@ -22,5 +22,5 @@ page. For one specific commit, open its run under
 The binaries are unsigned: on macOS use **System Settings → Privacy & Security → Open
 Anyway**, on Windows **More info → Run anyway**, once.
 
-Linux needs SDL2 at runtime (`apt install libsdl2-2.0-0` / `dnf install SDL2`) and glibc
-2.34+ (Ubuntu 22.04+, Debian 12+, Fedora 35+). macOS and Windows link SDL2 statically.
+All three link SDL 3 statically. Linux needs glibc 2.34+ (Ubuntu 22.04+, Debian 12+,
+Fedora 35+).

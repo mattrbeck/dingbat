@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bundle the self-contained dingbat binary into a distributable .app and .dmg.
 # Requires macOS tools: sips, iconutil, hdiutil (all built in). The binary must
-# already be a -d:macdist build (static SDL2, no Homebrew dependency).
+# already be a -d:macdist build (static SDL3, no Homebrew dependency).
 #
 # Usage: ci/make-macos-app.sh <binary> <version> <out_dir>
 set -euo pipefail

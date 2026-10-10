@@ -659,11 +659,11 @@ proc load_apu_state(apu: APU; r: var Reader) =
       check_range(dc.positions[f], 0, 31, "fifo.position")
       check_range(dc.sizes[f], 0, 32, "fifo.size")
       dc.latches[f] = r.read_i16()
-  # Drop the half-filled sample buffer and the pre-load SDL queue backlog
+  # Drop the half-filled sample buffer and the pre-load audio queue backlog
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
-    if apu.audio_dev != 0:
-      sdl_clear_queued_audio(apu.audio_dev)
+    if apu.owns_audio:
+      audio_clear()
 
 # ---- Backup storage ----
 

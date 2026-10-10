@@ -19,38 +19,6 @@ const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
 when defined(emscripten):
   proc appendAudioSample(left, right: float32) {.importc, cdecl.}
 
-# SDL2 audio bindings
-when not defined(test_harness):
-  when not declared(SDL_AudioSpec):
-    type
-      SDL_AudioSpec = object
-        freq:      cint
-        format:    uint16
-        channels:  uint8
-        silence:   uint8
-        samples:   uint16
-        padding:   uint16
-        size:      uint32
-        callback:  pointer
-        userdata:  pointer
-
-    const AUDIO_F32LSB = 0x8120'u16  # 32-bit float, little-endian (native on x86/ARM)
-
-    proc sdl_open_audio_gb(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
-      {.importc: "SDL_OpenAudio", cdecl.}
-    proc sdl_close_audio_gb()
-      {.importc: "SDL_CloseAudio", cdecl.}
-    proc sdl_pause_audio_gb(pause_on: cint)
-      {.importc: "SDL_PauseAudio", cdecl.}
-    proc sdl_queue_audio_gb(dev: uint32; data: pointer; len: uint32): cint
-      {.importc: "SDL_QueueAudio", cdecl.}
-    proc sdl_get_queued_audio_size_gb(dev: uint32): uint32
-      {.importc: "SDL_GetQueuedAudioSize", cdecl.}
-    proc sdl_clear_queued_audio_gb(dev: uint32)
-      {.importc: "SDL_ClearQueuedAudio", cdecl.}
-    proc sdl_delay_gb(ms: uint32)
-      {.importc: "SDL_Delay", cdecl.}
-
 when not defined(emscripten):
   # DINGBAT_GB_AUDIO_DUMP=<path>: every mixed sample as raw s16le stereo at
   # GB_SAMPLE_RATE, tapped before the output path so the test build dumps too.
@@ -99,16 +67,15 @@ proc ensure_stretch(apu: GbApu) {.inline, used.} =  # audio emit paths only, com
 
 proc audio_ahead*(apu: GbApu): bool =
   ## Lets the frontend pace synced emulation without blocking in the callback.
-  when defined(test_harness):
+  when defined(test_harness) or defined(emscripten):
     false
   else:
-    apu.sync and apu.audio_dev != 0 and
-      sdl_get_queued_audio_size_gb(apu.audio_dev) > GB_SYNC_AHEAD_BYTES
+    apu.sync and apu.owns_audio and audio_queued() > GB_SYNC_AHEAD_BYTES
 
-when not defined(test_harness):
+when not defined(test_harness) and not defined(emscripten):
   proc audio_queued_bytes*(apu: GbApu): uint32 =
-    ## Bytes currently queued to the SDL audio device (frame-scheduler input)
-    if apu.audio_dev != 0: sdl_get_queued_audio_size_gb(apu.audio_dev) else: 0
+    ## Bytes currently queued to the audio device (frame-scheduler input)
+    if apu.owns_audio: audio_queued() else: 0
 
 # Lazy waveform catch-up: no channel schedules a per-period event. Each carries
 # an absolute `next_step` deadline and is advanced in closed form (duty
@@ -317,12 +284,10 @@ when not defined(test_harness) and not defined(emscripten):
           queue_len = o
       else:
         apu.stretch_engaged = false
-      if apu.audio_dev != 0:
-        if not apu.sync: sdl_clear_queued_audio_gb(apu.audio_dev)
-        while sdl_get_queued_audio_size_gb(apu.audio_dev) >
-              GB_SYNC_BACKSTOP_BYTES: sdl_delay_gb(1)
-        discard sdl_queue_audio_gb(apu.audio_dev,
-          addr apu.buffer[0], uint32(queue_len * 4))
+      if apu.owns_audio:
+        if not apu.sync: audio_clear()
+        while audio_queued() > GB_SYNC_BACKSTOP_BYTES: audio_wait(1)
+        audio_put(addr apu.buffer[0], queue_len * 4)
       apu.buffer_pos = 0
 
 proc get_sample*(apu: GbApu; gb: GB) =
@@ -440,25 +405,15 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
   when not defined(emscripten):
     gb_audio_dump_claim()
   when defined(test_harness):
-    result.audio_dev = 0
+    result.owns_audio = false
   elif defined(emscripten):
-    result.audio_dev = 0  # JS handles playback via Web Audio API
+    result.owns_audio = false  # JS handles playback via Web Audio API
   else:
-    # samples: small device buffer so audio-sync pacing has a fine drain clock.
-    var desired = SDL_AudioSpec(
-      freq:     cint(GB_SAMPLE_RATE), format: AUDIO_F32LSB,
-      channels: 2'u8, samples: 128,
-      callback: nil, userdata: nil,
-    )
-    sdl_close_audio_gb()
-    # obtained must be nil so SDL converts to exactly this spec (Windows WASAPI
-    # otherwise changes it and audio-sync paces emulation at ~2x).
-    if sdl_open_audio_gb(addr desired, nil) == 0:
-      result.audio_dev = 1
-      if not headless: sdl_pause_audio_gb(0)
+    if audio_open(sfF32, GB_SAMPLE_RATE, play = not headless):
+      result.owns_audio = true
     else:
       echo "Warning: GB failed to open audio device"
-      result.audio_dev = 0
+      result.owns_audio = false
   let apu = result
   # The frame-sequencer event is primed in post_init: it taps the divider,
   # whose phase skip_boot seeds per model only after every component exists.

@@ -1,7 +1,5 @@
 import std/[tables, options, strutils]
-import sdl2 except init, quit
-import sdl2/joystick
-import sdl2/gamecontroller
+import sdl3
 import imguin/cimgui
 import ../common/[input, config]
 import util
@@ -63,10 +61,7 @@ proc find_button_for_input(w: ControllerWidget; inp: Input): cint =
     if v == inp: return k
   return -1
 
-proc controller_connected(): bool =
-  for i in 0 ..< numJoysticks():
-    if isGameController(cint(i)): return true
-  false
+proc controller_connected(): bool = hasGamepad()
 
 proc render*(w: ControllerWidget) =
   # Rumble also drives the viewport shake, so it sits above the

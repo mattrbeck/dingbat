@@ -1,7 +1,7 @@
 #!/bin/sh
 # Cross-compile dingbat for Windows inside the dingbat-win-cross container
 # (CI runs it on an Ubuntu runner set up the same way).
-# Output is a single self-contained dist/windows/dingbat.exe (SDL2 and the
+# Output is a single self-contained dist/windows/dingbat.exe (SDL3 and the
 # C++ runtime are statically linked).
 set -eu
 

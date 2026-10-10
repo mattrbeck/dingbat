@@ -9,7 +9,7 @@
 ## Run standalone: nimble test_iosapi   (or ./dingbat_ios_api_test)
 ##
 ## Built with -d:test_harness like every test, so the GB/GBA APUs skip the
-## SDL queue the iOS audio ring stands in for. The DS's sound is queued by
+## audio queue the iOS audio ring stands in for. The DS's sound is queued by
 ## dingbat_ios.nim itself, so its part of the ring is covered.
 
 import std/[os, strutils, monotimes, times]

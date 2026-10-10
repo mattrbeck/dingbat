@@ -9,7 +9,10 @@ bin    = @["dingbat"]
 
 # Dependencies
 requires "nim >= 2.0.0"
-requires "sdl2 >= 2.0.4"
+requires "sdl2 >= 2.0.4"  # the web build (emscripten's SDL 2 port)
+# The desktop app. The registry's "sdl3" is an older, unofficial binding
+# (nim-lang/sdl3 issue #11), so the official one is named by URL.
+requires "https://github.com/nim-lang/sdl3#bb137829ff619b0a27a473628cb28fc1c86f3fe5"
 requires "imguin"
 requires "yaml"
 requires "stb_image"
@@ -26,8 +29,8 @@ task bench_build, "Build the headless benchmark harness":
   exec "nim c -d:test_harness -d:release --path:src -o:dingbat_bench tests/dingbat_bench.nim"
 
 # Every test task builds with -d:test_harness: it stops nim.cfg from adding
-# the GUI SDL2/OpenGL link flags, which only resolve on a machine with the
-# SDL2/GL dev libraries installed. Keep it on when adding a task.
+# the GUI SDL3/OpenGL link flags, which only resolve on a machine with the
+# SDL3/GL dev libraries installed. Keep it on when adding a task.
 task test_timestretch, "Run the WSOLA time-stretch unit test":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ts_test tests/timestretch_test.nim"
 

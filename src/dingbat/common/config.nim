@@ -280,7 +280,7 @@ type
   Config* = ref object
     explorer_dir*:      string
     keybindings*:       Table[cint, Input]
-    controller_bindings*: Table[cint, Input]  # SDL_GameControllerButton ordinal → Input
+    controller_bindings*: Table[cint, Input]  # SDL_GamepadButton ordinal (SDL 2's numbers) → Input
     recents*:           seq[string]
     run_bios*:          bool
     bios_path*:         string   # GBA BIOS path

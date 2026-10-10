@@ -369,6 +369,13 @@ Dear ImGui context with no window, which needs imguin). The link-acceptance batt
 `netlink`, `rollback` modes over `tests/roms/*.gba`) is invoked directly in
 `.github/workflows/test.yml`.
 
+`tests/desktop_gui_test.sh` (not in CI: it needs SDL 3 and a display) drives the
+desktop app itself through its SDL 3 event loop with `-d:gui_driver`, hidden and
+muted: keys as SDL 3 reports them under Shift and Caps Lock, a virtual SDL
+gamepad (hotplug, buttons, stick, unplugged mid-press) and a generated MBC5
+rumble cart buzzing it. `GUI_TEST_FULLSCREEN=1` adds a visible macOS window
+taken fullscreen by AppKit's own toggle, as the green button does.
+
 `tests/roms/hwverified/`: twelve GBA ROMs (this repo's own, committed with their `.s`)
 carrying the values an AGS-001 gave, each painting a verdict pixel at (239,159): green if
 every checked cell matched, red otherwise, white if it never finished. The runner scores

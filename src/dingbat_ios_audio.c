@@ -1,22 +1,22 @@
 /*
- * iOS audio backend, compiled in by src/dingbat_ios.nim. The APUs reach audio
- * only through SDL2 functions declared with `importc` (link-time
- * dependencies); there is no SDL2 on iOS, so this file provides those symbols
- * over a mutex-guarded ring buffer, keeping the APU sources identical to the
- * desktop build.
+ * iOS audio backend, compiled in by src/dingbat_ios.nim. The cores reach
+ * audio only through common/audio_out.nim, which on iOS imports the
+ * dingbat_audio_open/put/queued/clear/wait functions below (link-time
+ * dependencies) instead of SDL: a mutex-guarded ring buffer, keeping the APU
+ * sources identical to the desktop build.
  *
- * Producer: the emulator thread, via SDL_QueueAudio (GBA int16 stereo, GB
- * float32 stereo, both 32768 Hz; the DS float32 stereo at 32728 Hz, queued
- * by dingbat_ios.nim itself after each frame; the format is whatever the
- * last SDL_OpenAudio() asked for). Consumer: the CoreAudio render thread calls
- * dingbat_audio_read(), which converts to float32 and never touches the Nim
- * runtime. The shell paces emulation by the display clock (as the web does
- * by requestAnimationFrame); the two clocks drift, so the reader resamples
- * by a hair (dynamic rate control, at most 1.5%) to hold the ring at a
- * target depth: no gaps when the consumer briefly outpaces the producer, no
- * creeping latency when it lags. If the audio engine stops mid-frame
- * (interruption, route change), SDL_Delay() drops the queue after ~250 ms so
- * emulation never deadlocks.
+ * Producer: the emulator thread, via dingbat_audio_put (GBA int16 stereo, GB
+ * float32 stereo, both 32768 Hz; the DS float32 stereo at 32728 Hz; the
+ * format is whatever the last dingbat_audio_open() asked for). Consumer: the
+ * CoreAudio render thread calls dingbat_audio_read(), which converts to
+ * float32 and never touches the Nim runtime. The shell paces emulation by
+ * the display clock (as the web does by requestAnimationFrame); the two
+ * clocks drift, so the reader resamples by a hair (dynamic rate control, at
+ * most 1.5%) to hold the ring at a target depth: no gaps when the consumer
+ * briefly outpaces the producer, no creeping latency when it lags. If the
+ * audio engine stops mid-frame (interruption, route change),
+ * dingbat_audio_wait() drops the queue after ~250 ms so emulation never
+ * deadlocks.
  */
 
 #include <stdint.h>
@@ -25,21 +25,9 @@
 #include <pthread.h>
 #include <unistd.h>
 
-/* Matches the SDL_AudioSpec mirror declared in the APU modules. */
-typedef struct {
-  int      freq;
-  uint16_t format;
-  uint8_t  channels;
-  uint8_t  silence;
-  uint16_t samples;
-  uint16_t padding;
-  uint32_t size;
-  void    *callback;
-  void    *userdata;
-} DINGBAT_SDL_AudioSpec;
-
-#define AUDIO_S16LSB 0x8010
-#define AUDIO_F32LSB 0x8120
+/* audio_out.nim's SampleFormat */
+#define FMT_S16 0
+#define FMT_F32 1
 
 /* 256 KiB ring: ~2 s of s16 stereo or ~1 s of f32 stereo at 32768 Hz. Pacing
  * keeps occupancy near two APU buffers; overflow drops the oldest bytes. */
@@ -50,10 +38,10 @@ static size_t   g_head = 0;      /* read position  */
 static size_t   g_size = 0;      /* bytes queued   */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static uint16_t g_format = AUDIO_S16LSB;
+static int      g_format = FMT_S16;
 static int      g_freq   = 32768;
 static int      g_paused = 1;
-static int      g_stall_ms = 0;  /* consecutive SDL_Delay ms without a drain */
+static int      g_stall_ms = 0;  /* consecutive waited ms without a drain */
 static int      g_stretch = 0;   /* slow motion: every frame queued twice */
 
 /* Where queued samples go: 0 the speakers (the ring), 1 the capture buffer
@@ -67,7 +55,7 @@ static size_t   g_cap_frames = 0;    /* frames held */
 static size_t   g_cap_alloc = 0;     /* frames allocated */
 
 static size_t bytes_per_frame(void) {
-  return g_format == AUDIO_F32LSB ? 8 : 4; /* stereo */
+  return g_format == FMT_F32 ? 8 : 4; /* stereo */
 }
 
 /* Dynamic rate control, reader side (render thread only, under g_lock).
@@ -96,7 +84,7 @@ static int pop_frame(float out[2]) {
   size_t bpf = bytes_per_frame();
   if (g_size < bpf) return 0;
   for (int c = 0; c < 2; c++) {
-    if (g_format == AUDIO_F32LSB) {
+    if (g_format == FMT_F32) {
       uint8_t b[4];
       for (int i = 0; i < 4; i++) b[i] = g_ring[(g_head + i) % RING_CAP];
       memcpy(&out[c], b, 4);
@@ -120,51 +108,22 @@ static void drop_frames(size_t n) {
   g_size -= bytes;
 }
 
-/* ---- SDL2 audio symbols the core links against ---- */
+/* ---- The audio_out.nim calls the cores make ---- */
 
-int SDL_OpenAudio(DINGBAT_SDL_AudioSpec *desired, DINGBAT_SDL_AudioSpec *obtained) {
-  (void)obtained;
+void dingbat_audio_open(int format, int freq, int play) {
   pthread_mutex_lock(&g_lock);
-  if (desired) {
-    g_format = desired->format;
-    g_freq   = desired->freq;
-  }
+  g_format = format;
+  g_freq   = freq;
   g_head = 0;
   g_size = 0;
-  g_paused = 1;
+  g_paused = !play;
   pthread_mutex_unlock(&g_lock);
-  return 0;
-}
-
-uint32_t SDL_OpenAudioDevice(void *device, int iscapture,
-                             DINGBAT_SDL_AudioSpec *desired,
-                             DINGBAT_SDL_AudioSpec *obtained,
-                             int allowed_changes) {
-  (void)device; (void)iscapture; (void)allowed_changes;
-  return SDL_OpenAudio(desired, obtained) == 0 ? 1 : 0;
-}
-
-void SDL_CloseAudio(void) {
-  pthread_mutex_lock(&g_lock);
-  g_head = 0;
-  g_size = 0;
-  g_paused = 1;
-  pthread_mutex_unlock(&g_lock);
-}
-
-void SDL_CloseAudioDevice(uint32_t dev) { (void)dev; SDL_CloseAudio(); }
-
-void SDL_PauseAudio(int pause_on) { g_paused = pause_on; }
-
-void SDL_PauseAudioDevice(uint32_t dev, int pause_on) {
-  (void)dev;
-  SDL_PauseAudio(pause_on);
 }
 
 static void queue_locked(const void *data, uint32_t len);
 
 static void capture(const void *data, uint32_t len) {
-  size_t bpf = g_format == AUDIO_F32LSB ? 8 : 4;
+  size_t bpf = g_format == FMT_F32 ? 8 : 4;
   size_t n = len / bpf;
   if (g_cap_frames + n > g_cap_alloc) {
     size_t want = g_cap_alloc ? g_cap_alloc * 2 : 32768;
@@ -175,7 +134,7 @@ static void capture(const void *data, uint32_t len) {
     g_cap_alloc = want;
   }
   float *dst = g_cap + g_cap_frames * 2;
-  if (g_format == AUDIO_F32LSB) {
+  if (g_format == FMT_F32) {
     memcpy(dst, data, n * 8);
   } else {
     const int16_t *src = data;
@@ -184,12 +143,11 @@ static void capture(const void *data, uint32_t len) {
   g_cap_frames += n;
 }
 
-int SDL_QueueAudio(uint32_t dev, const void *data, uint32_t len) {
-  (void)dev;
-  if (data == NULL || len == 0 || len > RING_CAP / 2) return 0;
-  if (g_mode == 2) return 0;
+void dingbat_audio_put(const void *data, uint32_t len) {
+  if (data == NULL || len == 0 || len > RING_CAP / 2) return;
+  if (g_mode == 2) return;
   if (g_mode == 1 || g_mode == 3) capture(data, len);
-  if (g_mode == 1) return 0;
+  if (g_mode == 1) return;
   pthread_mutex_lock(&g_lock);
   if (g_stretch) {
     /* Each stereo frame twice: the ring fills twice as fast, so audio-sync
@@ -205,7 +163,6 @@ int SDL_QueueAudio(uint32_t dev, const void *data, uint32_t len) {
     queue_locked(data, len);
   }
   pthread_mutex_unlock(&g_lock);
-  return 0;
 }
 
 static void queue_locked(const void *data, uint32_t len) {
@@ -222,29 +179,29 @@ static void queue_locked(const void *data, uint32_t len) {
   g_size += len;
 }
 
-uint32_t SDL_GetQueuedAudioSize(uint32_t dev) {
-  (void)dev;
+uint32_t dingbat_audio_queued(void) {
   pthread_mutex_lock(&g_lock);
   uint32_t s = (uint32_t)g_size;
   pthread_mutex_unlock(&g_lock);
   return s;
 }
 
-void SDL_ClearQueuedAudio(uint32_t dev) {
-  (void)dev;
+/* Drop whatever is queued (unsynced play keeps only the freshest; a frame
+ * stepped while paused plays nothing). */
+void dingbat_audio_clear(void) {
   pthread_mutex_lock(&g_lock);
   g_head = 0;
   g_size = 0;
   pthread_mutex_unlock(&g_lock);
 }
 
-void SDL_Delay(uint32_t ms) {
-  /* Only reached from the APUs' audio-sync backstop loops. Drop the queue
+void dingbat_audio_wait(uint32_t ms) {
+  /* Only reached from the cores' audio-sync backstop loops. Drop the queue
    * after 250 ms without a drain so the emulator thread cannot spin forever. */
   usleep(ms * 1000);
   g_stall_ms += (int)ms;
   if (g_stall_ms >= 250) {
-    SDL_ClearQueuedAudio(0);
+    dingbat_audio_clear();
     g_stall_ms = 0;
   }
 }
@@ -360,9 +317,6 @@ void dingbat_audio_set_stretch(int on) {
   g_stretch = on != 0;
   pthread_mutex_unlock(&g_lock);
 }
-
-/* Drop whatever is queued (a frame stepped while paused plays nothing). */
-void dingbat_audio_clear(void) { SDL_ClearQueuedAudio(0); }
 
 void dingbat_audio_set_mode(int mode) { g_mode = mode; }
 int dingbat_audio_get_mode(void) { return g_mode; }

@@ -59,8 +59,7 @@ type
     ## What the window really is, as window events read it, next to what
     ## the app believes (`app.fullscreen`: the menu's checkmark and the
     ## saved flag). macOS puts a window in a fullscreen Space from its green
-    ## button or Ctrl+Cmd+F without the app asking, and SDL 2 does not
-    ## report that (no flag, only the resize).
+    ## button or Ctrl+Cmd+F without the app asking.
     seen:   bool   ## the real state at the last reading
     refit*: bool   ## the window was to be sized to the picture while it
                    ## was fullscreen: do it once it is a window again
@@ -90,19 +89,3 @@ proc take_refit*(t: var FullscreenTrack; real: bool): bool =
     t.refit = false
     return true
   false
-
-when defined(macosx):
-  {.passL: "-lobjc".}
-  proc sel_registerName(name: cstring): pointer
-    {.importc, header: "<objc/runtime.h>".}
-  proc objc_msgSend() {.importc, header: "<objc/message.h>".}
-
-  proc ns_window_fullscreen*(nswindow: pointer): bool =
-    ## `[nswindow styleMask] & NSWindowStyleMaskFullScreen`: AppKit's own
-    ## answer, whoever put the window there.
-    type StyleMask = proc (self, op: pointer): uint {.cdecl.}
-    const NSWindowStyleMaskFullScreen = 1'u shl 14
-    if nswindow == nil: return false
-    let send = cast[StyleMask](objc_msgSend)
-    (send(nswindow, sel_registerName("styleMask")) and
-      NSWindowStyleMaskFullScreen) != 0

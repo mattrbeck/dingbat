@@ -16,40 +16,6 @@ const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
 # alpha = 1 - exp(-2*pi*fc/fs) with fc ~= 12 kHz, fs = 32768 Hz
 const AUDIO_LOWPASS_ALPHA* = 0.90'f32
 
-# Minimal SDL2 audio C bindings (SDL2 is already linked via nim.cfg)
-when not defined(test_harness):
-  type
-    SDL_AudioDeviceID = uint32
-    SDL_AudioSpec = object
-      freq:      cint
-      format:    uint16
-      channels:  uint8
-      silence:   uint8
-      samples:   uint16
-      padding:   uint16
-      size:      uint32
-      callback:  pointer
-      userdata:  pointer
-
-  const AUDIO_S16LSB  = 0x8010'u16
-
-  # Legacy (default-device) SDL audio API; apu.audio_dev is its implicit
-  # device
-  proc sdl_open_audio(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
-    {.importc: "SDL_OpenAudio", cdecl.}
-  proc sdl_close_audio()
-    {.importc: "SDL_CloseAudio", cdecl.}
-  proc sdl_pause_audio(pause_on: cint)
-    {.importc: "SDL_PauseAudio", cdecl.}
-  proc sdl_queue_audio(dev: SDL_AudioDeviceID; data: pointer; len: uint32): cint
-    {.importc: "SDL_QueueAudio", cdecl.}
-  proc sdl_get_queued_audio_size(dev: SDL_AudioDeviceID): uint32
-    {.importc: "SDL_GetQueuedAudioSize", cdecl.}
-  proc sdl_clear_queued_audio(dev: SDL_AudioDeviceID)
-    {.importc: "SDL_ClearQueuedAudio", cdecl.}
-  proc sdl_delay(ms: uint32)
-    {.importc: "SDL_Delay", cdecl.}
-
 when defined(emscripten):
   # Emscripten: float32 samples go to a global buffer (dingbat_wasm.nim)
   # that JS consumes via the Web Audio API
@@ -114,31 +80,15 @@ proc new_apu*(gba: GBA): APU =
   when not defined(emscripten):
     gba_audio_dump_claim()
   when defined(test_harness):
-    result.audio_dev = 0
+    result.owns_audio = false
   elif defined(emscripten):
-    result.audio_dev = 0
+    result.owns_audio = false
   else:
-    var desired = SDL_AudioSpec(
-      freq:     APU_SAMPLE_RATE.cint,
-      format:   AUDIO_S16LSB,
-      channels: APU_CHANNELS.uint8,
-      # Device buffer much smaller than the push block: audio-sync pacing
-      # (audio_ahead) can only release the next frame on a device drain step,
-      # and 128 frames (3.9 ms) keeps the cadence within ~4 ms
-      samples:  128,
-      callback: nil,
-      userdata: nil,
-    )
-    sdl_close_audio()
-    # obtained must be nil: non-nil means SDL_AUDIO_ALLOW_ANY_CHANGE, and
-    # Windows WASAPI then hands back float32 44.1/48 kHz with no conversion,
-    # draining ~2x faster than queued and pacing emulation at ~2x
-    if sdl_open_audio(addr desired, nil) == 0:
-      result.audio_dev = 1
-      sdl_pause_audio(0)
+    if audio_open(sfS16, APU_SAMPLE_RATE):
+      result.owns_audio = true
     else:
       echo "Warning: failed to open audio device"
-      result.audio_dev = 0
+      result.owns_audio = false
   result.tick_frame_sequencer()
   result.get_sample()
 
@@ -180,11 +130,10 @@ proc ensure_stretch(apu: APU) {.inline, used.} =  # audio emit paths only, compi
 proc audio_ahead*(apu: APU): bool =
   ## True when synced audio is buffered comfortably ahead of playback; the
   ## frontend paces emulation on this instead of blocking in get_sample.
-  when defined(test_harness):
+  when defined(test_harness) or defined(emscripten):
     false
   else:
-    apu.sync and apu.audio_dev != 0 and
-      sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_AHEAD_BYTES
+    apu.sync and apu.owns_audio and audio_queued() > APU_SYNC_AHEAD_BYTES
 
 when not defined(test_harness) and not defined(emscripten):
   # DINGBAT_AUDIO_DUMP=<path>: exactly the bytes queued to SDL, raw s16le
@@ -201,8 +150,8 @@ when not defined(test_harness) and not defined(emscripten):
     audio_dump_file
 
   proc audio_queued_bytes*(apu: APU): uint32 =
-    ## Bytes currently queued to the SDL audio device (pacing diagnostics)
-    if apu.audio_dev != 0: sdl_get_queued_audio_size(apu.audio_dev) else: 0
+    ## Bytes currently queued to the audio device (pacing diagnostics)
+    if apu.owns_audio: audio_queued() else: 0
 
 # Lazy waveform catch-up (the four PSG channels): no per-period scheduler
 # events; each channel carries a `next_step` deadline advanced in closed form
@@ -348,15 +297,13 @@ when not defined(test_harness) and not defined(emscripten):
         discard dump.writeBuffer(addr apu.buffer[0],
                                  queue_len * sizeof(int16))
         dump.flushFile()
-      if apu.audio_dev != 0:
+      if apu.owns_audio:
         if not apu.sync:
-          sdl_clear_queued_audio(apu.audio_dev)
+          audio_clear()
         # Block until the queue drains below the backstop to stay in sync
-        while sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_BACKSTOP_BYTES:
-          sdl_delay(1)
-        discard sdl_queue_audio(apu.audio_dev,
-                                 cast[pointer](addr apu.buffer[0]),
-                                 uint32(queue_len * sizeof(int16)))
+        while audio_queued() > APU_SYNC_BACKSTOP_BYTES:
+          audio_wait(1)
+        audio_put(addr apu.buffer[0], queue_len * sizeof(int16))
       apu.buffer_pos = 0
 
 proc get_sample*(apu: APU) =

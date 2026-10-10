@@ -374,8 +374,6 @@ block:
   var t2: FullscreenTrack
   check t2.observe(false, true) == fcNone and t2.observe(true, true) == fcNone,
         "starting fullscreen is not undone by the first resize"
-  when defined(macosx):
-    check not ns_window_fullscreen(nil), "no window: not fullscreen"
 
 block:
   # Defaults rev 2 turned pitch_correct_ff and audio_lowpass on. A file from

@@ -3,10 +3,11 @@
 # features the web build exports, under dingbat_* names.
 #
 # Audio is pull-based: the build omits -d:test_harness/-d:emscripten so the
-# APUs take their desktop SDL2-queue path, and src/dingbat_ios_audio.c provides
-# those SDL2 symbols as a ring buffer drained from an AVAudioSourceNode render
-# block. Pacing is the desktop model: the shell runs frames only while
-# dingbat_audio_ahead() is 0, so the 32768 Hz audio clock paces emulation; the
+# APUs take their desktop audio-queue path (common/audio_out.nim), and
+# src/dingbat_ios_audio.c provides its calls as a ring buffer drained from an
+# AVAudioSourceNode render block. Pacing is the desktop model: the shell runs
+# frames only while dingbat_audio_ahead() is 0, so the 32768 Hz audio clock
+# paces emulation; the
 # C file breaks get_sample()'s blocking backstop after ~250 ms of stalled
 # playback so the shell cannot deadlock.
 #
@@ -33,6 +34,7 @@ import dingbat/common/rom_exts
 import dingbat/common/scheduler
 import dingbat/common/atomicfile
 import dingbat/common/timestretch
+import dingbat/common/audio_out
 import dingbat/gba/gba
 import dingbat/gba/link as gbalink
 import dingbat/gba/rollback as gbarb
@@ -307,17 +309,17 @@ proc apply_audio() =
   if rbGba != nil:
     let rc = rbGba.link.cores[1 - rbLocal]
     rc.set_audio_silent(true)
-    rc.apu.audio_dev = 0
+    rc.apu.owns_audio = false
   if rbGb != nil:
     let rc = rbGb.link.cores[1 - rbLocal]
     rc.apu.silent = true
-    rc.apu.audio_dev = 0
+    rc.apu.owns_audio = false
   if lkGba != nil:
     lkGba.cores[1].set_audio_silent(true)
-    lkGba.cores[1].apu.audio_dev = 0
+    lkGba.cores[1].apu.owns_audio = false
   if lkGb != nil:
     lkGb.cores[1].apu.silent = true
-    lkGb.cores[1].apu.audio_dev = 0
+    lkGb.cores[1].apu.owns_audio = false
   apply_channel_mutes()
 
 # --- Nintendo DS ---
@@ -456,29 +458,11 @@ proc nds_flush() =
     except CatchableError: discard
 
 # Sound: the SPU's interleaved float32 stereo at 33513982 / 1024 Hz
-# (io/spu.nim), queued after each frame through the SDL symbols
-# dingbat_ios_audio.c provides, as float32 like the GB APU's, at the DS rate
+# (io/spu.nim), queued after each frame to the same ring (audio_out.nim,
+# dingbat_ios_audio.c), as float32 like the GB APU's, at the DS rate
 # rounded to a whole Hz (the ring's reader resamples by more than that
 # difference anyway). The pacing thresholds are the GB APU's in frames:
 # ahead past 512 queued, the blocking backstop past 4096.
-
-type DsAudioSpec = object   # SDL_AudioSpec's layout (dingbat_ios_audio.c)
-  freq: cint
-  format: uint16
-  channels: uint8
-  silence: uint8
-  samples: uint16
-  padding: uint16
-  size: uint32
-  callback: pointer
-  userdata: pointer
-
-proc ds_open_audio(desired, obtained: ptr DsAudioSpec): cint {.importc: "SDL_OpenAudio", cdecl.}
-proc ds_pause_audio(pause_on: cint) {.importc: "SDL_PauseAudio", cdecl.}
-proc ds_queue_audio(dev: uint32; data: pointer; len: uint32): cint {.importc: "SDL_QueueAudio", cdecl.}
-proc ds_queued_bytes(dev: uint32): uint32 {.importc: "SDL_GetQueuedAudioSize", cdecl.}
-proc ds_clear_audio(dev: uint32) {.importc: "SDL_ClearQueuedAudio", cdecl.}
-proc ds_delay(ms: uint32) {.importc: "SDL_Delay", cdecl.}
 
 const NDS_AUDIO_RATE = int(SAMPLE_RATE + 0.5)                # 32728 (32728.498)
 const NDS_FRAME_SAMPLES = int(FRAME_CYCLES div SPU_TICK_CYCLES)  # 547 a frame
@@ -492,9 +476,7 @@ var ndsStretchIn, ndsStretchOut = 0   # frames pushed / pulled since it engaged
 var ndsTurboParity = false
 
 proc nds_audio_open() =
-  var spec = DsAudioSpec(freq: cint(NDS_AUDIO_RATE), format: 0x8120'u16,  # AUDIO_F32LSB
-                         channels: 2, samples: 128)
-  if ds_open_audio(addr spec, nil) == 0: ds_pause_audio(0)
+  discard audio_open(sfF32, NDS_AUDIO_RATE)
 
 proc nds_queue_audio() =
   ## This frame's samples into the ring, after volume and 2x. Asleep or
@@ -544,13 +526,13 @@ proc nds_queue_audio() =
     ndsStretchOn = false
   if frames == 0: return
   if optFastForward:
-    ds_clear_audio(1)   # keep only the freshest, as the APUs do unsynced
+    audio_clear()   # keep only the freshest, as the APUs do unsynced
   else:
-    while ds_queued_bytes(1) > NDS_SYNC_BACKSTOP_BYTES: ds_delay(1)
-  discard ds_queue_audio(1, addr ndsOut[0], uint32(frames * 8))
+    while audio_queued() > NDS_SYNC_BACKSTOP_BYTES: audio_wait(1)
+  audio_put(addr ndsOut[0], frames * 8)
 
 proc nds_audio_ahead(): bool =
-  not optFastForward and ds_queued_bytes(1) > NDS_SYNC_AHEAD_BYTES
+  not optFastForward and audio_queued() > NDS_SYNC_AHEAD_BYTES
 
 proc nds_build(rom: sink seq[uint8]; save: seq[uint8]; firmware: seq[uint8]) =
   ## A DS on `rom`, the BIOS in ndsBios9/ndsBios7 (empty = HLE) and
@@ -1695,16 +1677,16 @@ var rbRomPaths: array[2, string]
 
 proc rb_mute_replays(core: GBA) =
   ## A rolled-back frame was already heard: its re-simulation queues nothing
-  ## (the device is closed for the sample; the mix itself still runs, so the
-  ## core stays bit-identical).
+  ## (the core lets go of the queue for the sample; the mix itself still
+  ## runs, so the core stays bit-identical).
   let orig = core.scheduler.dispatch
   core.scheduler.dispatch = proc(kind: scheduler.EventType) =
     if kind == etAPUSample and rbGba != nil and rbGba.replaying:
       let apu = rbGba.link.cores[rbLocal].apu
-      let dev = apu.audio_dev
-      apu.audio_dev = 0
+      let owned = apu.owns_audio
+      apu.owns_audio = false
       orig(kind)
-      apu.audio_dev = dev
+      apu.owns_audio = owned
     else:
       orig(kind)
 
@@ -1713,10 +1695,10 @@ proc rb_mute_replays(core: GB) =
   core.scheduler.dispatch = proc(kind: scheduler.EventType) =
     if kind == etAPUSample and rbGb != nil and rbGb.replaying:
       let apu = rbGb.link.cores[rbLocal].apu
-      let dev = apu.audio_dev
-      apu.audio_dev = 0
+      let owned = apu.owns_audio
+      apu.owns_audio = false
       orig(kind)
-      apu.audio_dev = dev
+      apu.owns_audio = owned
     else:
       orig(kind)
 
