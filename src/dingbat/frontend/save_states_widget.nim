@@ -51,7 +51,7 @@ proc thumb_bg(): ImVec4 = ImVec4(x: 0.09, y: 0.10, z: 0.12, w: 1.0)
 
 # imguin's igCalcTextSize changed from an out-pointer to returning ImVec2;
 # CI and dev machines hold different pins, so exactly one branch compiles.
-proc calc_text_size(text: string): ImVec2 =
+proc calc_text_size*(text: string): ImVec2 =
   when compiles(igCalcTextSize(cstring(text), nil, false, -1.0'f32)):
     let s = igCalcTextSize(cstring(text), nil, false, -1.0'f32)
     ImVec2(x: s.x, y: s.y)
