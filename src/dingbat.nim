@@ -2624,6 +2624,18 @@ proc main() =
       mx = max(mx, x)
       s += x
     (mn, s / float(xs.len), mx)
+  proc lat_poll_input() =
+    # The synthetic press lands where SDL's input is read, and counts from
+    # the moment it was due, as a real key's wait for the next read would
+    if lat_trials > 0 and lat_state == 0 and lat_inject_at != 0 and
+       app.gba_emu != nil and getPerformanceCounter() >= lat_inject_at:
+      lat_t0 = lat_inject_at
+      lat_inject_at = 0
+      lat_settle = 0
+      lat_base = lat_fb_hash()
+      app.gba_emu.handle_input(UP, true)
+      lat_wait = 0
+      lat_state = 1
   if lat_trials > 0:
     echo "LATENCY: present_interval=", present_interval, " ms, ",
          "display refresh=", display_mode.refresh_rate, " Hz"
@@ -2715,14 +2727,6 @@ proc main() =
             lat_rng = lat_rng * 6364136223846793005'u64 + 1442695040888963407'u64
             lat_inject_at = getPerformanceCounter() +
                             (lat_rng shr 33) mod frame_ticks
-          elif getPerformanceCounter() >= lat_inject_at:
-            lat_inject_at = 0
-            lat_settle = 0
-            lat_base = lat_fb_hash()
-            app.gba_emu.handle_input(UP, true)
-            lat_t0 = getPerformanceCounter()
-            lat_wait = 0
-            lat_state = 1
       of 1:
         if emulated:
           if lat_fb_hash() != lat_base:
@@ -2766,6 +2770,7 @@ proc main() =
           pace_min_q = uint32.high
           pace_max_q = 0
     handle_input()
+    lat_poll_input()
     update_rumble()
     update_link_auto()
     service_link_setup()
