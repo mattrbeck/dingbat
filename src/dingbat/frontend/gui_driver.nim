@@ -19,6 +19,7 @@
 ##   click <x> <y> [right]             move, down, a few frames, up
 ##   wheel <dy>
 ##   drop <path>                       a file dropped on the window
+##   drag over|leave                   a file dragged over the window, or away
 ##   window focus_lost|focus_gained|close
 ##   quit                              the window's close box / Cmd+Q path
 ##   frames <n>                        let n loop iterations run
@@ -265,6 +266,11 @@ proc run(window: Window; s: Step): bool =
     push(e)
   of "drop":
     dropped = s.rest  # handle_input takes it where SDL's drop would arrive
+  of "drag":          # drag over | drag leave: a file hovering, or gone
+    var e: Event
+    e.drop.type = if w[1] == "over": EVENT_DROP_POSITION else: EVENT_DROP_COMPLETE
+    e.drop.windowID = window.getWindowID()
+    push(e)
   of "window": push_window(window, w[1])
   of "quit":
     var e: Event

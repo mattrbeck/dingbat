@@ -460,6 +460,7 @@ type AppState = ref object
   fs_track:        FullscreenTrack  # the window's real state (window_restore.nim)
   enable_overlay:  bool
   last_mouse_tick: uint64
+  drag_hover:      bool  # a file is being dragged over the window
 
 var app: AppState
 
@@ -1511,7 +1512,7 @@ proc render_imgui() =
       not (app.dbg.video_window or app.dbg.sched_window or app.dbg.exp_window)) and
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
-     not app.save_states.window and
+     not app.save_states.window and not app.drag_hover and
      # The menu bar hides after three idle seconds, exactly the state a Quick
      # Load keypress lands in; the notice must still be drawn then.
      app.state_notice.len == 0 and app.cfg.notice.len == 0 and
@@ -1772,10 +1773,47 @@ proc render_imgui() =
 
   render_link_window()
 
-  # Home screen: point out that ROMs can be dragged onto the window (SDL2
-  # has no drag-hover event, so a live "release to load" prompt isn't
-  # possible until SDL3)
-  if app.emu_kind == ekNone:
+  let rom_types = if app.cfg.ds_beta: ".gba, .gb, .gbc, .nds, .zip"
+                  else: ".gba, .gb, .gbc, .zip"
+  # A file dragged over the window: say what letting go does. SDL reports
+  # the hover on macOS, X11 and Wayland; Windows only reports the drop.
+  if app.drag_hover:
+    let vp = igGetMainViewport()
+    if vp != nil:
+      igSetNextWindowPos(vp[].Pos, cint(ImGui_Cond_Always), ImVec2(x: 0, y: 0))
+      igSetNextWindowSize(vp[].Size, cint(ImGui_Cond_Always))
+      igSetNextWindowBgAlpha(0.85'f32)
+      let drop_flags = cint(ImGui_WindowFlags_NoDecoration) or
+                       cint(ImGui_WindowFlags_NoMove) or
+                       cint(ImGui_WindowFlags_NoInputs) or
+                       cint(ImGui_WindowFlags_NoSavedSettings)
+      if igBegin("##drop_target", nil, drop_flags):
+        # A drop zone's outline, inset from the window's edges
+        let (p0, p1) = (ImVec2(x: vp[].Pos.x + 16, y: vp[].Pos.y + 16),
+                        ImVec2(x: vp[].Pos.x + vp[].Size.x - 16,
+                               y: vp[].Pos.y + vp[].Size.y - 16))
+        let dl = igGetWindowDrawList()
+        when compiles(ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, 12, 0, 3.0)):
+          ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, 12, 0, 3.0)
+        else:
+          ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, 12, 3.0, 0)
+        let title = "Release to load"
+        igPushFont(nil, igGetFontSize() * 2)
+        let t_size = calc_text_size(title)
+        let t_h = igGetTextLineHeightWithSpacing()
+        igPopFont()
+        let d_size = calc_text_size(rom_types)
+        let top = (vp[].Size.y - t_h - d_size.y) * 0.5'f32
+        igSetCursorPos(ImVec2(x: (vp[].Size.x - t_size.x) * 0.5'f32, y: top))
+        igPushFont(nil, igGetFontSize() * 2)
+        igTextUnformatted(cstring(title), nil)
+        igPopFont()
+        igSetCursorPos(ImVec2(x: (vp[].Size.x - d_size.x) * 0.5'f32, y: top + t_h))
+        igTextDisabled(cstring(rom_types))
+      igEnd()
+
+  # Home screen: point out that ROMs can be dragged onto the window
+  if app.emu_kind == ekNone and not app.drag_hover:
     let vp = igGetMainViewport()
     if vp != nil:
       let (vpos, vsize) = (vp[].Pos, vp[].Size)
@@ -1788,9 +1826,7 @@ proc render_imgui() =
                        cint(ImGui_WindowFlags_NoInputs) or
                        cint(ImGui_WindowFlags_NoSavedSettings)
       if igBegin("##drop_hint", nil, hint_flags):
-        igTextDisabled(if app.cfg.ds_beta:
-                         cstring"Drop a ROM here to play (.gba, .gb, .gbc, .nds, .zip)"
-                       else: cstring"Drop a ROM here to play (.gba, .gb, .gbc, .zip)")
+        igTextDisabled(cstring("Drop a ROM here to play (" & rom_types & ")"))
       igEnd()
 
   # Paused/rewinding badge: without it a paused game with the menu bar
@@ -2092,6 +2128,12 @@ proc handle_input() =
       if app.emu_kind == ekNDS and app.nds != nil and app.nds.stylus and
          evt.button.button == BUTTON_LEFT:
         app.nds.lift_stylus()
+
+    of EVENT_DROP_POSITION:
+      app.drag_hover = true
+
+    of EVENT_DROP_COMPLETE:   # dropped, or dragged back out
+      app.drag_hover = false
 
     of EVENT_DROP_FILE:
       open_dropped($evt.drop.data)   # SDL owns the string
