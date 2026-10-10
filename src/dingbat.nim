@@ -2584,6 +2584,13 @@ proc main() =
   var pace_max_q  = 0'u32
   var pace_start  = 0'u64
   var pace_last   = 0'u64
+  # DINGBAT_FRAME_TRACE=<path>: one CSV row per present, written at quit, for
+  # measuring frame jitter: the paced slot the frame was due in, when its
+  # emulation began and ended, and when the swap was issued and returned
+  # (performance-counter ticks; due is 0 for a present with no new frame)
+  let trace_path = getEnv("DINGBAT_FRAME_TRACE")
+  var trace: seq[array[5, uint64]]
+  var trace_due, trace_start, trace_end, trace_swap: uint64
   # DINGBAT_LATENCY_TEST=<trials>: inject a synthetic UP press where polled
   # SDL keys are applied and measure wall-clock time until (a) the framebuffer
   # first differs and (b) that frame reaches glSwapWindow. Needs a GBA ROM
@@ -2650,6 +2657,8 @@ proc main() =
             echo "Rewind failed: ", getCurrentExceptionMsg()
             app.rewinding = false
     elif not app.paused or stepping:
+      if trace_path.len > 0:
+        trace_start = getPerformanceCounter()
       case app.emu_kind
       of ekGBA:
         if app.gba_emu != nil and (stepping or gba_frame_due()):
@@ -2678,6 +2687,8 @@ proc main() =
           emulated = true
       of ekNone: discard
       if emulated and is_paced():
+        trace_due = next_frame_due
+        if trace_path.len > 0: trace_end = getPerformanceCounter()
         scheduler_frame_ran()
       if emulated and app.cfg.rewind and app.netlink == nil:
         case app.emu_kind
@@ -2794,8 +2805,12 @@ proc main() =
         app.running = false
       render_imgui()
       when defined(gui_driver): driver_frame(window)
+      if trace_path.len > 0: trace_swap = getPerformanceCounter()
       discard glSwapWindow(window)
       presented = true
+      if trace_path.len > 0:
+        trace.add([(if emulated: trace_due else: 0'u64), trace_start,
+                   trace_end, trace_swap, getPerformanceCounter()])
       if lat_trials > 0 and lat_state == 2:
         let t2 = getPerformanceCounter()
         lat_change_ms.add(lat_ms(lat_t0, lat_t1))
@@ -2815,6 +2830,11 @@ proc main() =
     if not emulated and not presented:
       # Idle until audio drains or the next present slot; don't busy-spin
       delay(1)
+  if trace_path.len > 0:
+    var csv = &"# freq={getPerformanceFrequency()} " &
+              &"frame_ticks={frame_ticks}\ndue,start,emulated,swap,swapped\n"
+    for r in trace: csv.add r.join(",") & "\n"
+    writeFile(trace_path, csv)
   # The peer hears BYE (a pulled cable) instead of waiting out its timeout
   link_auto_stop()
   link_cancel_setup()
