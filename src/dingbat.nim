@@ -2521,6 +2521,9 @@ proc main() =
   nds_frame_ticks = sched_freq * uint64(NDS_FRAME_CYCLES) div uint64(NDS_MASTER_HZ)
   frame_ticks = if app.emu_kind == ekNDS: nds_frame_ticks else: gbx_frame_ticks
   var next_frame_due = getPerformanceCounter()
+  # Within this of a paced frame's slot the idle wait sleeps to the slot
+  # precisely instead of in 1 ms steps, which overshoot by up to a few ms
+  let precise_wait = sched_freq * 4 div 1000
 
   var sched_refilling = true  # start with an empty queue: fill to target
 
@@ -2833,8 +2836,18 @@ proc main() =
           app.running = false
     update_fps_title(emulated)
     if not emulated and not presented:
-      # Idle until audio drains or the next present slot; don't busy-spin
-      delay(1)
+      # Idle until audio drains or the next present slot; don't busy-spin.
+      # Close to a paced frame's slot, wake on it exactly: a late release
+      # moves the frame across a display refresh (a repeated frame, then a
+      # dropped one). Input is read again on waking, so the frame about to
+      # run sees it as of its slot.
+      let wait = next_frame_due - min(next_frame_due, getPerformanceCounter())
+      if is_paced() and not app.paused and wait > 0 and wait <= precise_wait:
+        delayPrecise(wait * 1_000_000_000'u64 div sched_freq)
+        handle_input()
+        lat_poll_input()
+      else:
+        delay(1)
   if trace_path.len > 0:
     var csv = &"# freq={getPerformanceFrequency()} " &
               &"frame_ticks={frame_ticks}\ndue,start,emulated,swap,swapped\n"
