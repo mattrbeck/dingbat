@@ -375,6 +375,87 @@ jobs:
             tests/results_mgba_suite.md
             tests/results_gambatte.md
 
+  desktop-gui:
+    # tests/desktop_gui_test.sh: the real desktop app (-d:gui_driver), its
+    # SDL 3 event loop driven in a hidden, muted window under Xvfb - keys as
+    # SDL 3 reports them under Shift and Caps Lock, a virtual SDL gamepad
+    # plugged in and out mid-press, a generated MBC5 rumble cart buzzing it.
+    # (Its AppKit fullscreen part is macOS-only.) A job of its own beside the
+    # test matrix, which takes three times as long, so it adds no wall time.
+    # ubuntu-22.04, as the Linux release build, whose cached static SDL 3 it
+    # links.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: ${{ env.NIM_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache the static SDL 3 build
+        id: sdl3-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl3-prefix
+          # build-artifacts.yml's Linux key: the same build, whichever job
+          # misses it first makes it.
+          key: sdl3-static-${{ runner.os }}-22.04-3.4.16-nocamera
+      - name: Build SDL 3 (static, from source)
+        # Only when neither workflow has cached it yet; the package list is
+        # build-artifacts.yml's.
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+            libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols \
+            libdecor-0-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev
+          .github/scripts/build-sdl3.sh "$HOME/sdl3-prefix"
+      - name: Install SDL 3, OpenGL and Xvfb
+        run: |
+          set -e
+          sudo cp -R "$HOME/sdl3-prefix/lib/." /usr/local/lib/
+          sudo cp -R "$HOME/sdl3-prefix/include/." /usr/local/include/
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+            libgl1-mesa-dev xvfb xauth libgl1-mesa-dri
+      - name: Install dependencies
+        # As build-artifacts.yml: one at a time from outside the checkout,
+        # each retried.
+        shell: bash
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          for p in "https://github.com/nim-lang/sdl3@#bb137829ff619b0a27a473628cb28fc1c86f3fe5" imguin yaml stb_image zippy; do
+            "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
+          done
+      - name: Restore the GUI build's nimcache
+        # main's latest, as the test job's.
+        id: nimcache
+        uses: actions/cache/restore@v4
+        with:
+          path: .nimcache-gui
+          key: nimcache-gui-${{ runner.os }}-nim${{ env.NIM_VERSION }}-${{ hashFiles('src/**/*.nim', 'src/**/*.c', 'src/**/*.h', 'nim.cfg') }}
+          restore-keys: nimcache-gui-${{ runner.os }}-nim${{ env.NIM_VERSION }}-
+      - name: Build (-d:gui_driver)
+        run: nim c -d:release -d:gui_driver --hints:off --nimcache:.nimcache-gui -o:dingbat_gui_test src/dingbat.nim
+      - name: Save the nimcache for the next run
+        if: github.ref == 'refs/heads/main' && steps.nimcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .nimcache-gui
+          key: nimcache-gui-${{ runner.os }}-nim${{ env.NIM_VERSION }}-${{ hashFiles('src/**/*.nim', 'src/**/*.c', 'src/**/*.h', 'nim.cfg') }}
+      - name: Desktop app driven through SDL 3 (Xvfb)
+        timeout-minutes: 5
+        env:
+          DINGBAT_GUI_BIN: ${{ github.workspace }}/dingbat_gui_test
+          # A runner has no sound device; the dummy driver still paces.
+          SDL_AUDIO_DRIVER: dummy
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" tests/desktop_gui_test.sh
+
   wasm:
     # The web build, made once for the end-to-end jobs (the test job never
     # makes it).

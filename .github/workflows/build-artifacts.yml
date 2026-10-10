@@ -1,8 +1,10 @@
 name: Build artifacts
 
 # The three desktop builds, defined once and called by both the per-push
-# Build workflow and Release so the two cannot drift. Every job uploads an
-# artifact, so any commit's binaries can be pulled from its run page.
+# Build workflow and Release so the two cannot drift. Every build job uploads
+# an artifact, so any commit's binaries can be pulled from its run page. Each
+# binary is also run on its own OS (.github/scripts/smoke-desktop.sh) before
+# either workflow can publish it.
 on:
   workflow_call:
 
@@ -18,9 +20,10 @@ jobs:
           # Pinned, as test.yml's NIM_VERSION.
           nim-version: "2.2.12"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install SDL 3's build dependencies and OpenGL headers
+      - name: Install SDL 3's build dependencies, OpenGL headers and Xvfb
         # Headers only: SDL loads X11, Wayland, ALSA, PulseAudio, PipeWire
-        # and udev at run time, so these just switch its backends on.
+        # and udev at run time, so these just switch its backends on. Xvfb
+        # and Mesa's software OpenGL are for the smoke test.
         run: |
           sudo apt-get -o Acquire::Retries=5 update
           sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
@@ -28,7 +31,8 @@ jobs:
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
             libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols \
             libdecor-0-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
-            libdbus-1-dev libibus-1.0-dev libudev-dev
+            libdbus-1-dev libibus-1.0-dev libudev-dev \
+            xvfb xauth libgl1-mesa-dri
       - name: Cache the static SDL 3 build
         id: sdl3-cache
         uses: actions/cache@v4
@@ -58,6 +62,15 @@ jobs:
           done
       - name: Build
         run: nim c -d:release -o:dingbat src/dingbat.nim
+      - name: Smoke test (Xvfb, Mesa's software OpenGL)
+        timeout-minutes: 5
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" .github/scripts/smoke-desktop.sh ./dingbat
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-linux
+          path: smoke-blendprobe.png
+          if-no-files-found: ignore
       - name: Package
         # Tarred: upload-artifact's zip drops the executable bit; the tar
         # inside it preserves the mode.
@@ -128,6 +141,15 @@ jobs:
             echo "::error::binary still links a non-system dylib — not self-contained"
             otool -L dingbat_dist; exit 1
           fi
+      - name: Smoke test
+        timeout-minutes: 5
+        run: .github/scripts/smoke-desktop.sh ./dingbat_dist
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-macos
+          path: smoke-blendprobe.png
+          if-no-files-found: ignore
       - name: Bundle .app + .dmg
         # Tag builds carry the tag as the bundle version; branch builds are not
         # releases and get 0.0.0 rather than a fake version number.
@@ -210,3 +232,39 @@ jobs:
           name: dingbat-windows-x64
           path: dist/windows/dingbat.exe
           if-no-files-found: error
+
+  windows-smoke:
+    # The cross-built dingbat.exe on a real Windows, which has no OpenGL
+    # beyond 1.1 without a GPU driver: Mesa's llvmpipe opengl32.dll beside
+    # the exe stands in for one (the exe ships alone; this is the runner's).
+    needs: windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dingbat-windows-x64
+          path: smoke
+      - name: Mesa (software OpenGL) beside the exe
+        shell: bash
+        run: |
+          set -e
+          .github/scripts/retry.sh 3 curl -fsSL -o mesa.7z \
+            https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z
+          7z x mesa.7z -omesa > /dev/null
+          cp mesa/x64/*.dll smoke/
+      - name: Smoke test (Mesa llvmpipe)
+        # A GUI-subsystem exe: its stdout goes nowhere, and an error it
+        # reports in a message box would wait forever (the script's limit).
+        timeout-minutes: 5
+        shell: bash
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: .github/scripts/smoke-desktop.sh smoke/dingbat.exe
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-windows
+          path: smoke-blendprobe.png
+          if-no-files-found: ignore
