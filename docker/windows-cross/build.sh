@@ -1,5 +1,6 @@
 #!/bin/sh
-# Cross-compile dingbat for Windows inside the dingbat-win-cross container.
+# Cross-compile dingbat for Windows inside the dingbat-win-cross container
+# (CI runs it on an Ubuntu runner set up the same way).
 # Output is a single self-contained dist/windows/dingbat.exe (SDL2 and the
 # C++ runtime are statically linked).
 set -eu
@@ -9,18 +10,21 @@ set -eu
 git config --global --add safe.directory /src 2>/dev/null || true
 
 # nimble resolves deps by querying git remotes (github.com and gitlab.com);
-# the resolve is idempotent, so retry it.
-i=1
-while :; do
-  nimble install --depsOnly -y && break
-  if [ "$i" -ge 3 ]; then
-    echo "nimble install --depsOnly failed after $i attempts" >&2
-    exit 1
-  fi
-  echo "nimble install --depsOnly failed (attempt $i), retrying in 15s..." >&2
-  sleep 15
-  i=$((i + 1))
-done
+# the resolve is idempotent, so retry it. CI's Windows job (no container)
+# installs them itself and sets DINGBAT_DEPS_INSTALLED.
+if [ "${DINGBAT_DEPS_INSTALLED:-}" != 1 ]; then
+  i=1
+  while :; do
+    nimble install --depsOnly -y && break
+    if [ "$i" -ge 3 ]; then
+      echo "nimble install --depsOnly failed after $i attempts" >&2
+      exit 1
+    fi
+    echo "nimble install --depsOnly failed (attempt $i), retrying in 15s..." >&2
+    sleep 15
+    i=$((i + 1))
+  done
+fi
 
 mkdir -p dist/windows
 

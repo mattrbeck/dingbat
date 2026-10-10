@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: jiro4989/setup-nim-action@v2
         with:
-          # Pinned, as test.yml's NIM_VERSION (the Windows image pins its own).
+          # Pinned, as test.yml's NIM_VERSION.
           nim-version: "2.2.12"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install SDL2 and OpenGL headers
@@ -135,18 +135,50 @@ jobs:
 
   windows:
     # Cross-compiled from Linux with mingw-w64 (static SDL2, single .exe), so
-    # this needs no Windows runner.
-    runs-on: ubuntu-latest
+    # this needs no Windows runner. Natively on the runner rather than via
+    # docker/windows-cross: that image's base comes from Docker Hub, whose
+    # anonymous pulls from runner IPs fail with 429/504 for hours at a time.
+    # Same toolchain and steps as the image, which stays for local builds.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Build cross-compile image
-        # No layer cache on the runner: the base image and SDL2 are fetched
-        # every run, so retry network blips.
-        run: .github/scripts/retry.sh 3 docker build -t dingbat-win-cross docker/windows-cross
-      - name: Build dingbat.exe
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          # Pinned, as test.yml's NIM_VERSION.
+          nim-version: "2.2.12"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install mingw-w64
         run: |
-          docker run --rm -v "$PWD":/src -w /src \
-            dingbat-win-cross ./docker/windows-cross/build.sh
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends mingw-w64
+      - name: Install SDL2 into the mingw sysroot
+        # nim.cfg's mingw section reads /usr/x86_64-w64-mingw32/{include,lib}.
+        # Version as the Dockerfile's SDL2_VERSION.
+        env:
+          SDL2_VERSION: "2.32.8"
+        run: |
+          set -eo pipefail
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 \
+            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-mingw.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP"
+          sudo cp -r "$RUNNER_TEMP/SDL2-${SDL2_VERSION}/x86_64-w64-mingw32/include/." /usr/x86_64-w64-mingw32/include/
+          sudo cp -r "$RUNNER_TEMP/SDL2-${SDL2_VERSION}/x86_64-w64-mingw32/lib/." /usr/x86_64-w64-mingw32/lib/
+          test -f /usr/x86_64-w64-mingw32/lib/libSDL2.a
+          test -f /usr/x86_64-w64-mingw32/include/SDL2/SDL.h
+      - name: Install dependencies
+        # See the Linux job: one at a time, from outside the checkout.
+        shell: bash
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          for p in sdl2 imguin yaml stb_image zippy; do
+            "$GITHUB_WORKSPACE/.github/scripts/retry.sh" 3 nimble install -y "$p"
+          done
+      - name: Build dingbat.exe
+        # build.sh's own nimble step is the image's; the deps are in already.
+        env:
+          DINGBAT_DEPS_INSTALLED: "1"
+        run: ./docker/windows-cross/build.sh
       - uses: actions/upload-artifact@v4
         with:
           name: dingbat-windows-x64

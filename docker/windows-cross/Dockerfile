@@ -18,9 +18,10 @@ RUN apt-get -o Acquire::Retries=5 update \
 # SDL2 development files for the mingw sysroot. Headers/libs go into the
 # cross-gcc's default search path; nim.cfg references the SDL2 include dir
 # and links libSDL2.a statically.
-ARG SDL2_VERSION=2.32.8
-# No layer cache in CI, so this re-downloads every build; --retry-all-errors
+# CI's Windows job (build-artifacts.yml) repeats these steps on the runner
+# without Docker; keep SDL2_VERSION in step with it. --retry-all-errors
 # covers connection failures too.
+ARG SDL2_VERSION=2.32.8
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 \
         "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-mingw.tar.gz" \
         | tar xz -C /tmp \
