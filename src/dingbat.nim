@@ -2782,8 +2782,13 @@ proc main() =
     # A paced frame is presented immediately: holding it for the next interval
     # slot would add up to a display period of input latency. The interval
     # throttle bounds present rate under turbo and keeps the UI refreshing
-    # when nothing was emulated.
-    if (emulated and is_paced()) or now - last_present >= present_interval:
+    # when nothing was emulated. While paced frames are arriving they refresh
+    # the UI too: an extra present between two of them only competes with the
+    # next frame's swap.
+    let ui_interval = if is_paced() and not app.paused:
+                        max(present_interval, 2 * frame_ticks * 1000 div sched_freq)
+                      else: present_interval
+    if (emulated and is_paced()) or now - last_present >= ui_interval:
       last_present = now
       # Black behind a game so the letterbox bars read as bezel; the brand
       # purple is the empty-app backdrop and stays that way.
