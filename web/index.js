@@ -18287,6 +18287,8 @@ var Module = {
     const FRAME_TIME = 1000.0 / TARGET_FPS;
     let lastFrameTime = 0;
     let accumulator = 0;
+    // Timestamps locked to the display's refreshes (framegrid.js)
+    const frameClock = FrameGrid.create();
     // Fast-forward pacing. A tick's frames have to end before the vsync
     // they aim at: where rAF keeps to the display, one that overruns it
     // waits for the next and the time between idles. A fixed 16 ms budget
@@ -18770,7 +18772,7 @@ var Module = {
       // Play time for the checkpoints: a stall (a hidden tab's) counts as little.
       runPlayMs += Math.min(rafIv, 250);
       if (!linkMode && !rollbackMode && !netMode && !document.hidden) markPlaying();
-      accumulator += timestamp - lastFrameTime;
+      accumulator += frameClock.next(timestamp, timestamp - lastFrameTime);
       lastFrameTime = timestamp;
       if (ndsGameLoaded() && rewindHeld) {
         // Pop ~30 snapshots/s, as below for the GB/GBA core.

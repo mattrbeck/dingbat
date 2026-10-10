@@ -310,6 +310,7 @@ var Module = {
     const FRAME_TIME = 1000.0 / TARGET_FPS;
     let lastFrameTime = 0;
     let accumulator = 0;
+    const frameClock = FrameGrid.create(); // timestamps on the refresh grid
     let frameCount = 0;
 
     let audioCtx = null;
@@ -431,7 +432,7 @@ var Module = {
         return;
       }
       if (lastFrameTime === 0) lastFrameTime = timestamp;
-      accumulator += timestamp - lastFrameTime;
+      accumulator += frameClock.next(timestamp, timestamp - lastFrameTime);
       lastFrameTime = timestamp;
       if (fastForward) {
         if (audioCtx) playTime = audioCtx.currentTime;

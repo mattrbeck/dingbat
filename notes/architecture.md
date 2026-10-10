@@ -55,7 +55,8 @@ base), `fifo_ppu`, `memory`, `cb_opcodes`, `opcodes`, `cpu`, `savestate`.
 
 ## Web front-end (`web/`)
 
-Script-tag, no-build: `index.html` loads `glpresent.js`, `index.js` (the whole app),
+Script-tag, no-build: `index.html` loads `glpresent.js`, `framegrid.js` (the game loop's
+clock, shared with the embed), `index.js` (the whole app),
 `sdputil.js`, `netplay.js`, `em.js` as plain scripts in one global scope. `embed.html` +
 `embed.js` is the 2P pane.
 
