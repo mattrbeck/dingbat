@@ -29,6 +29,8 @@ if [ "$1" != "--no-build" ]; then
   nim c -d:emscripten --hints:off --warnings:off --nimcache:"$NIMCACHE/em" src/dingbat_wasm.nim
   echo "building web/nds/nds.{js,wasm} (DS)..."
   nim c -d:emscripten --hints:off --warnings:off --nimcache:"$NIMCACHE/nds" src/dingbat_nds_wasm.nim
+  echo "building web/nds/nds-simd.{js,wasm} (DS, wasm SIMD)..."
+  nim c -d:emscripten -d:nds_simd --hints:off --warnings:off --nimcache:"$NIMCACHE/nds-simd" src/dingbat_nds_wasm.nim
 fi
 
 mkdir -p "$CERTS"

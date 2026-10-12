@@ -17010,19 +17010,30 @@ const ndsAssetQuery = () => {
   const v = window.DINGBAT_ASSET_V?.nds;
   return v ? "?v=" + encodeURIComponent(v) : "";
 };
+// Wasm SIMD (Chrome 91, Firefox 89, Safari 16.4): the DS core built with it
+// (nds/nds-simd.{js,wasm}, -d:nds_simd) vectorises the 2D compositing; older
+// browsers (iOS 15 to 16.3) get nds/nds.{js,wasm}. The probe is a module
+// whose one function uses i8x16.splat and i8x16.popcnt.
+const ndsSimd = (() => {
+  try {
+    return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123,
+      3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]));
+  } catch { return false; }
+})();
+const ndsCoreName = ndsSimd ? "nds-simd" : "nds";
 const loadNdsCore = () => {
   if (ndsCore) return Promise.resolve(ndsCore);
   if (!ndsCorePromise) {
     ndsCorePromise = new Promise((resolve, reject) => {
       if (typeof createNdsCore === "function") { resolve(undefined); return; }
       const s = document.createElement("script");
-      s.src = "nds/nds.js" + ndsAssetQuery();
+      s.src = "nds/" + ndsCoreName + ".js" + ndsAssetQuery();
       s.onload = () => resolve(undefined);
       s.onerror = () => reject(new Error("the DS core did not load"));
       document.head.appendChild(s);
     })
       .then(() => createNdsCore({ locateFile: (p) => "nds/" + p + ndsAssetQuery() }))
-      .then((m) => { ndsCore = m; log("DS core loaded"); ndsApplyHd(); return m; })
+      .then((m) => { ndsCore = m; log("DS core loaded" + (ndsSimd ? " (SIMD)" : "")); ndsApplyHd(); return m; })
       .catch((e) => { ndsCorePromise = null; throw e; });
   }
   return ndsCorePromise;

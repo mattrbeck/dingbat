@@ -165,10 +165,11 @@ self.addEventListener("fetch", (/** @type {FetchEvent} */ event) => {
   }
   // Match only this version's cache: caches.match() searches every cache,
   // and an installed-but-waiting version's assets would skew with ours.
-  // The DS core (nds/nds.js + nds.wasm, fetched only when a DS game starts)
-  // is not precached; its first fetch is kept in this version's cache, so a
-  // DS game also plays offline after it has once played online.
-  const lazy = /\/nds\/nds\.(js|wasm)$/.test(new URL(event.request.url).pathname);
+  // The DS core (nds/nds.js + nds.wasm, or nds-simd.js + nds-simd.wasm
+  // where the browser has wasm SIMD; fetched only when a DS game starts) is
+  // not precached; its first fetch is kept in this version's cache, so a DS
+  // game also plays offline after it has once played online.
+  const lazy = /\/nds\/nds(-simd)?\.(js|wasm)$/.test(new URL(event.request.url).pathname);
   event.respondWith(
     caches
       .open(CACHE_NAME)

@@ -5,6 +5,8 @@
 //
 //   nim c -d:emscripten src/dingbat_wasm.nim       # web/em.{js,wasm}
 //   nim c -d:emscripten src/dingbat_nds_wasm.nim   # web/nds/nds.{js,wasm}
+//   nim c -d:emscripten -d:nds_simd src/dingbat_nds_wasm.nim   # nds-simd.{js,wasm}
+//                                                  # (what Chromium loads)
 //   tests/nds/tools/build_fb.sh && tests/nds/tools/build_save.sh
 //   (built/touch_test.nds: tests/nds/README.md)
 //   node --test e2e/nds.e2e.mjs                    # from web/
@@ -29,6 +31,7 @@ const NEED = ["fb_both.nds", "snd_tone.nds", "save_write.nds", "built/touch_test
 const missing = [
   ...(builtWeb() ? [] : ["web/em.wasm"]),
   ...(existsSync(join(WEB, "nds/nds.wasm")) ? [] : ["web/nds/nds.wasm"]),
+  ...(existsSync(join(WEB, "nds/nds-simd.wasm")) ? [] : ["web/nds/nds-simd.wasm"]),
   ...NEED.filter((p) => !existsSync(rom(p))),
 ];
 const skip = missing.length ? "missing: " + missing.join(", ") : false;

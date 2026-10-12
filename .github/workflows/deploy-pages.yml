@@ -62,8 +62,12 @@ jobs:
 
       - name: Build the DS core's WASM
         # web/nds/nds.{js,wasm}: fetched only when a DS game loads, which
-        # needs DS Beta on (Settings > General > Advanced).
-        run: nim c -d:emscripten src/dingbat_nds_wasm.nim
+        # needs DS Beta on (Settings > General > Advanced); with wasm SIMD
+        # the page fetches web/nds/nds-simd.{js,wasm} instead (index.js
+        # loadNdsCore, docs/nds/perf.md round 4).
+        run: |
+          nim c -d:emscripten src/dingbat_nds_wasm.nim
+          nim c -d:emscripten -d:nds_simd src/dingbat_nds_wasm.nim
 
       - name: Leave out the DS dev page
         # tools/serve_nds_dev.sh's standalone core page and its probes.
