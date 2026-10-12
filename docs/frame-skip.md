@@ -1,6 +1,9 @@
 # Frame skip: frames nobody sees are not drawn
 
-Status: prototype on branch `frame-skip`, for Matt to try. Not on main.
+Status: prototype, for Matt to try. Not on main. Branch `frame-skip-2` is
+`frame-skip` rebased onto main b98294aa (2026-10-12) without iOS's Start
+frames late; its fresh measurements are in **Rebased onto main b98294aa**
+below, and the older sections describe the original branch.
 
 ## Trying it
 
@@ -9,13 +12,160 @@ Status: prototype on branch `frame-skip`, for Matt to try. Not on main.
   with `?draw=all` to draw every frame and compare. Fast-forward's log line
   (every ~5 s of it, in the console) ends with how many frames went undrawn.
 - **iOS**: `ios/build-core.sh && (cd ios && xcodegen generate)`, then build.
-  Settings › Emulation › Advanced › **Draw every frame** turns it off;
-  **Start frames late** (off by default) tries the lower-latency pacing.
+  Settings › Emulation › Advanced › **Draw every frame** turns it off.
+- **Desktop**: fast-forward (Tab) batches undrawn frames before each
+  present; `DINGBAT_DRAW_ALL=1` turns that off, `DINGBAT_FPS_LOG=1` prints
+  the frames run each second.
 - What to look for: fast-forward fps (the counter), battery and heat at 2x
   or with run-ahead, and any picture that looks a frame behind or wrong
   after fast-forward, rewind, a clip, a state load or pausing.
-- `node web/e2e/frame-skip-probe.mjs <game.gba> [warmup]` (from `web/`)
-  measures fast-forward, 2x and run-ahead both ways in headless Chromium.
+- `node web/e2e/frame-skip-probe.mjs <game> [warmup]` (from `web/`)
+  measures fast-forward, 1x, 2x and run-ahead 1 and 2 both ways (GPU=1,
+  ENGINE=webkit, STATE=, WALK=, HOLD=: see its header).
+
+## Rebased onto main b98294aa (2026-10-12)
+
+Branch `frame-skip-2`: `frame-skip` (e62140e0) replayed onto main b98294aa.
+Left out: iOS's Start frames late and its DEBUG pieces (the late-start
+controller, GameRenderer's presented-time reporting, `-display-30`, the
+cooldown and `-pacing-test`), and the branch's web jitter commits (main has
+its own `web/framegrid.js`, 6f10bccc; only pacing-probe's comma-separated
+ONLY= came across). Reconciled: the desktop stale texture (main's
+`gba_changed_unuploaded` / `note_gba_frame`, a14908b1, kept; the branch's
+copy dropped); the desktop batch on SDL 3 (main's loop and scheduler kept,
+turbo does not batch, the batch's pending-input check names SDL 3's event
+types and leaves out the controller update-complete and sensor events a
+connected pad sends every poll); the DS (never marked unseen, run-ahead
+and clips as main has them). New: the draw-all switch also draws
+run-ahead's lookahead frames (it did not, so an A/B of run-ahead compared
+skipping with skipping), desktop `DINGBAT_DRAW_ALL` / `DINGBAT_FPS_LOG`,
+bench `DINGBAT_BENCH_RUNAHEAD`, and the web probe's scenes and A/B slices.
+
+Every number below is one binary with the skip on against the same binary
+drawing every frame, at the same commit; Apple M-series, load average 3-5.
+
+### Core: host instructions per emulated frame
+
+`dingbat_bench`, `DINGBAT_BENCH_COUNTERS=1`, 600 frames, minimum of 5 runs
+interleaved, `DINGBAT_BENCH_DRAW_EVERY=n` (frames drawn 1 in n). Static:
+the share of frames main's whole-frame render skip already leaves undrawn
+(`frame_static`, every frame drawn). Scenes from save states, with input:
+
+| scene | M instr/frame, all drawn | static | 1 in 2 | 1 in 4 | 1 in 8 | 1 in 40 |
+|---|---|---|---|---|---|---|
+| Emerald, walking in Littleroot | 13.15 | 2% | -13.1% | -19.7% | -23.0% | -25.7% |
+| FireRed, walking in a Pokémon Center | 14.26 | 7% | -11.5% | -17.7% | -21.0% | -23.6% |
+| FireRed, start menu open (static) | 11.23 | 64% | -5.2% | -5.6% | -7.2% | -10.3% |
+| F-Zero Maximum Velocity, racing (mode 7) | 21.37 | 0% | -22.0% | -32.1% | -37.2% | -41.3% |
+| Metroid Fusion, intro (scrolling) | 7.89 | 1% | -19.6% | -29.7% | -34.8% | -38.8% |
+| Kirby NiDL, story text | 5.27 | 88% | -0.3% | -5.7% | -8.4% | -10.4% |
+| Pokémon Blue (GB), walking | 4.88 | | -6.7% | -10.0% | -11.7% | -13.0% |
+| Pokémon Silver (GBC), walking | 6.94 | | -3.8% | -5.8% | -6.7% | -7.5% |
+
+1 in 2 is 2x on a 60 Hz display (or 1x at 30 Hz); fast-forward is near
+1 in 8 to 1 in 40 but with rewind on draws at least 1 frame in 10 (the
+rewind-due frame). Main's render skip covers what is static; the gain left
+is in moving scenes. GB/GBC gain less (drawing is a smaller share of a
+frame, and the FIFO's timing work runs undrawn too). The wasm core under
+Node (V8, wall clock, best of 5, ±5%) gains less than native: Emerald
++8/+13/+18% frames a second at 1 in 2/4/40, F-Zero +15/+22/+32%, Blue and
+Silver +2 to +6%.
+
+### Fast-forward (uncapped), frames a second
+
+| scene | desktop | Chromium (GPU) | WebKit | iOS simulator |
+|---|---|---|---|---|
+| Emerald walking | 1338 vs 1103 (+21%) | 896 vs 802 (+12%) | 1095 vs 928 (+18%) | 300 vs 276 (+9%) |
+| FireRed walking | 1250 vs 1044 (+20%) | 832 vs 738 (+13%) | 1005 vs 852 (+18%) | |
+| FireRed menu | 1404 vs 1316 (+7%) | 922 vs 890 (+4%) | 1152 vs 1109 (+4%) | 302 vs 260 (+16%) |
+| F-Zero racing | 1385 vs 871 (+59%) | 690 vs 572 (+21%) | 818 vs 637 (+29%) | 199 vs 178 (+12%) |
+| Metroid intro | 1040 vs 858 (+21%) | 1483 vs 1255 (+18%) | 1648 vs 1329 (+24%) | |
+| Kirby text | 2753 vs 2554 (+8%) | 1948 vs 1813 (+7%) | 2327 vs 2064 (+13%) | |
+| Blue walking | 3716 vs 3440 (+8%) | 3526 vs 3307 (+7%) | 3825 vs 3597 (+6%) | 743 vs 654 (+14%) |
+| Silver walking | 2328 vs 2225 (+5%) | 2212 vs 2132 (+4%) | 2295 vs 2208 (+4%) | |
+
+- Desktop: the app hidden (GUI driver), scratch HOME, muted, Tab
+  fast-forward from the state, `DINGBAT_FPS_LOG`, median of 3 runs of 8 s
+  per arm, `DINGBAT_DRAW_ALL=1` the other arm. (F-Zero's race ends within
+  the 8 s at fast-forward; the rest of the run is the crash replay, still
+  mode 7.)
+- Web: `web/e2e/frame-skip-probe.mjs` with `AB=1`: both arms in one page in
+  alternating 1 s slices from the state (separate headless pages differ by
+  ±15% at 1x, where nothing is skipped), 2 pages x 4 slices per arm.
+  Chromium headless with `--use-angle=metal --enable-gpu`; WebKit
+  Playwright headless. 83-88% of fast-forward frames went undrawn (a tick's
+  last frame and every rewind-due frame are drawn).
+- iOS: simulator (iPhone 17, iOS 26.2), Debug app with the release core,
+  a local bench hook (not committed) loading the state and setting the
+  speed, `-drawAll YES` the other arm, mean of 2 runs of 10 s. The
+  simulator's fast-forward is far below the desktop's (its budget per
+  refresh and the simulator's own costs), so the share saved is smaller.
+
+### 2x and 1x
+
+Emulation share of one core at 2x (120 frames a second), skip vs draw-all:
+
+| scene | native core (instructions x native time) | wasm, Node | Chromium (measured) | WebKit (measured) | iOS simulator, whole app |
+|---|---|---|---|---|---|
+| Emerald walking | 8.3% vs 9.5% | 12.0% vs 12.9% | 24.2% vs 23.8% | 18.9% vs 20.3% | 40.2% vs 39.1% |
+| F-Zero racing | 11.9% vs 15.3% | 15.7% vs 18.0% | 23.5% vs 26.3% | 20.7% vs 22.2% | 43.6% vs 46.6% |
+| FireRed menu | 7.8% vs 8.2% | 11.3% vs 11.7% | 23.3% vs 23.3% | 17.4% vs 18.2% | 38.5% vs 33.9% |
+| Blue walking | 2.9% vs 3.1% | 3.4% vs 3.5% | 8.2% vs 8.6% | 8.5% vs 8.5% | 36.5% vs 37.9% |
+
+The browsers' and the simulator's own clocks are noisier than the effect
+(the 1x control, where nothing is skipped, read -7% to +7% in Chromium);
+the instruction counts are the reliable column. In the simulator the app's
+own work (Metal, SwiftUI) is most of a core either way.
+
+At 1x nothing is marked: 0% of frames undrawn in every web run at 1x, and
+the iOS and web loops mark only frames before a tick's last. Chromium's
+1x A/B read -7% to +7% (noise around 0); the pacing probe's frames per
+callback match main's (below).
+
+### Run-ahead
+
+Per emulated frame, `DINGBAT_BENCH_RUNAHEAD=n` (the frontends' sequence:
+the frame, a snapshot, n silent lookahead frames, the restore), M host
+instructions, minimum of 5:
+
+| scene | no run-ahead | run-ahead 1 (skip = all) | run-ahead 2, skip vs all |
+|---|---|---|---|
+| Emerald walking | 13.15 | 26.54 | 35.88 vs 39.34 (-8.8%) |
+| FireRed walking | 14.27 | 29.01 | 39.60 vs 42.97 (-7.8%) |
+| FireRed menu | 11.23 | 24.89 | 34.84 vs 35.76 (-2.6%) |
+| F-Zero racing | 21.37 | 42.77 | 54.73 vs 63.76 (-14.2%) |
+| Metroid intro | 7.89 | 15.88 | 20.32 vs 23.41 (-13.2%) |
+| Kirby text | 5.27 | 15.24 | 20.13 vs 20.15 (-0.1%) |
+| Blue walking | 4.88 | 9.86 | 13.96 vs 14.61 (-4.4%) |
+| Silver walking | 6.94 | 13.97 | 20.24 vs 20.78 (-2.6%) |
+
+Run-ahead 1 gains nothing: its canonical frame is drawn (states,
+thumbnails and the library picture read it) and its one lookahead frame is
+the one shown. In the browsers run-ahead 2 read -1% to -10% of emulation
+time (WebKit), -1% to -4% (Chromium), noise-level; iOS simulator 0-3%.
+
+### What it buys over today's main
+
+- Fast-forward: +20% on moving GBA scenes on the desktop (+59% on a mode-7
+  racer), +12-29% in the browsers, +9-16% in the simulator; +4-8% on static
+  scenes (main's render skip has them) and on GB/GBC.
+- 2x: about a tenth less emulation work on moving GBA scenes (a fifth on
+  mode 7), a few percent on GB/GBC and static scenes. At 120 frames a
+  second on an M-series that is about 1 point of one core; on a phone
+  ~6x slower (an iPhone SE-class device) about 7 points of a core on
+  Emerald, ~20 on F-Zero, ~1 on Blue. Too small to see
+  in a browser's or the simulator's own clock here.
+- Run-ahead 2: 3-14% per frame (moving GBA scenes), none at run-ahead 1.
+- 1x on a 60 Hz or faster display: nothing (by design).
+
+Cost: the diff against main (see the report with the branch) touches the
+GBA and GB PPUs (an early return; three stores guarded on the GB FIFO),
+rewind (frame stamps, put-off snapshots), both rollback sessions
+(drawOnlyShown, peer_state_bytes for desync dumps), and every frame loop
+(web, iOS, desktop, wasm/iOS clip pre-roll, Add pictures, the playtest
+driver), with the edge-case table above as its surface: the tick's last
+frame always drawn, rewind/clip anchors waiting for a drawn frame, the
+LCD response, the SGB, link dumps, input-log and turbo exclusions.
 
 ## Why
 
@@ -31,7 +181,9 @@ and thrown away:
 
 Drawing (the GBA PPU's `scanline`) is about 30% of a GBA frame on real
 gameplay (stubbing it out is +44%, docs/research_ppu_hotspots.md), and the
-existing whole-frame render skip never fires in gameplay.
+existing whole-frame render skip never fires in gameplay. (Since then main's
+render skip fires on far more frames, a4a2824d: a same-value store no
+longer dirties the frame. The measurements above include it.)
 
 ## How
 
@@ -74,74 +226,20 @@ step the LCD panel. Desktop batches the same way in its unpaced modes.
 | 120 Hz screens | at 1x a tick runs at most one frame: nothing to skip, nothing changes |
 | 2P (local link), lockstep netlink, clip replay, frame advance | draw every frame as before |
 | link desync dumps compared across peers (`rollback_dump_size`, iOS LINKDUMP, the link e2e tests) | each peer draws only its own core, so the dump blanks the picture and the mosaic latch (`peer_state_bytes`); web/e2e/link-rom-skip passes |
-| the A/B switch (`?draw=all`, Draw every frame) | one core switch (`wasm_set_draw_all` / `dingbat_set_draw_all`): also rollback, Add pictures and the clip pre-roll |
+| the A/B switch (`?draw=all`, Draw every frame, desktop `DINGBAT_DRAW_ALL=1`) | one core switch (`wasm_set_draw_all` / `dingbat_set_draw_all`): also run-ahead's lookahead frames, rollback, Add pictures and the clip pre-roll; the desktop's turns its batch off |
 | Add pictures (web, iOS): ~600 frames a game for one picture | each 30-frame chunk draws only its last (a deadline can end the run between chunks) |
 | a clip's silent pre-roll | only its last frame, the one presented, is drawn |
 | desktop input log (playtest recordings) | no batching under it: its every-60-frames hash reads the previous frame's picture |
 | desktop turbo/fast-forward: a changed frame left unpresented, then a static one presented | the texture is uploaded if any frame changed since the last upload (on main too; iOS had it fixed in dc1b85d0) |
 | playtest driver `run N` | draws only the last frame, the one read (hashes and shots unchanged) |
 | the SGB or the LCD response refusing a skip | `*_unseen_next` returns whether the frame will really go undrawn, so fast-forward's timing and the log count only real skips |
-| input latency at 30 Hz | the skip adds none; iOS can now run a refresh's frames late (Start frames late, below); the web cannot (the picture must be handed over inside the refresh callback) |
+| input latency | the skip adds none: the same frames run at the same moments and read input as before (iOS's Start frames late, a latency experiment on the original branch, is not on frame-skip-2) |
 
 Not done (each draws every frame, as before): rollback's ticks per refresh
 (1-2 at 1x, up to 4 at 2x, each also converted to RGBA), local 2P (both
 cores shown, up to 4 frames per refresh at 2x on iOS) and the lockstep
 netlink's catch-up. A stall can end any of them early, so the last frame is
 not known up front; rollback's stall test could be asked before each tick.
-
-## Start frames late (iOS, prototype, off by default)
-
-Settings › Emulation › Advanced. The display link wakes the app right after
-a refresh; normally the app runs the frames it owes at once and hands the
-picture over, and the system shows it at the next refresh. Everything
-pressed after that moment waits for the following run, so a press is read on
-average half a refresh after it happens and shown a whole refresh after it is
-read: about 1.5 refreshes, ~25 ms at 60 Hz and ~50 ms at 30 Hz (Low Power
-Mode), before the game's own frames of delay.
-
-With it on, the app waits until just before the next refresh, the run's
-expected time (`lateFrame`, a running mean per frame, times the frames
-owed) plus `lateMargin` (time for the GPU and the compositor) ahead of it,
-and runs then, on a strict timer with no leeway (a coalesced timer would
-eat the margin). Input is read later in the
-same refresh, so it reaches the screen up to most of a refresh sooner: ~10 ms
-at 60 Hz, ~25 ms at 30 Hz. The frames, their count and the audio are the
-same; only when they run moves.
-
-The risk is missing the refresh: if the run, the GPU or the compositor runs
-long, the picture lands a refresh late (a hitch, and that frame later than
-without the setting). So the margin learns, aiming for misses well under 1
-in 500: a picture the system reports shown after its refresh or never (on a
-device; in the simulator, the GPU finishing within 1 ms of it), or a late run
-not started by the next refresh, widens it by 3 ms; a run that merely ends
-within 2 ms of its refresh, by 1 (up to 12); only 120 on time in a row
-narrow it, by 0.5 ms (down to 3). It runs at once, as without the setting:
-when nothing is owed (a 120 Hz screen at 1x, every other refresh), after a
-hitch (a catch-up owes more than a refresh's frames and has no time to
-lose), when the wait would be under 1 ms, at fast-forward (it fills the
-whole interval anyway), and in link play or 2P (their pacing is the link's).
-If a late run has not started when the next refresh's callback arrives (the
-main thread was busy), that callback cancels it, counts a miss and runs its
-frames itself, so a refresh is never skipped waiting for it. A real miss
-also turns late start off for 10 s: a hitch is a break in the cadence, more
-noticeable than the latency saved, so late start causes at most one in any
-10 s, whatever the load.
-
-Not yet known: whether the on-screen buttons gain at all. UIKit may deliver
-touches once per refresh, just before the display link's callback; if so a
-run at the start of a refresh already sees every touch a late one would.
-Controllers and keyboards deliver as they happen and do gain. The phone
-test (or a high-speed camera) decides.
-
-Simulator, tonc m7_demo, 40 presses, press to the refresh its picture is
-aimed at, average: at 30 Hz 30.4 / 28.0 ms off against 14.7 / 15.6 ms on,
-with 2 and 4 misses in 542 and 495 late runs (the margin settled at 9-11.5
-ms on the simulator's jittery timing; the first controller, which settled
-near 5% misses, measured 9.2 / 9.4). At 60 Hz the simulator's display link
-calls back about 0.5 ms after its own target refresh, so late start rightly
-never arms there (and earlier 60 Hz numbers were noise). The simulator has
-no presented-time API and approximate refresh timing: the phone decides
-whether it ships.
 
 ## Frame pacing
 
@@ -182,22 +280,17 @@ spikes), so a loaded machine does not move the result.
   20 frames on under fast-forward, so rewinding through fast-forwarded
   history went at twice the rate, unevenly. Fast-forward now draws the frame
   a snapshot is due on (`snapshot_due`), one more drawn frame in 10.
-- iOS (simulator, under heavy load from other jobs, 20 s runs, DEBUG
-  `-pacing-test 20`): frames per refresh exactly 1 at 1x and 2 at 2x, as
-  without frame skip; late start at 30 Hz added about one hitch a run (1-2
-  misses in 312-428 late runs), now capped by the 10 s pause after a miss.
-  At 60 Hz late start does not arm in the simulator; the phone decides.
-  iOS fast-forward fills a fixed share of the refresh, not an aim, so it
+- iOS (simulator, under heavy load from other jobs, 20 s runs, a DEBUG
+  pacing test not carried to frame-skip-2): frames per refresh exactly 1
+  at 1x and 2 at 2x, as without frame skip. iOS fast-forward fills a fixed share of the refresh, not an aim, so it
   has no flapping.
-- Desktop (code and a model; not run): batching only under fast-forward,
-  presenting on the same clock as main, and it fixes main's stale picture
-  at turbo and fast-forward. Holding fast-forward on an analog trigger ends
+- Desktop: batching only under fast-forward, presenting on the same clock
+  as main (main has since fixed its stale picture at turbo and
+  fast-forward itself, a14908b1). Holding fast-forward on an analog trigger ends
   each batch after a frame (axis events count as input): throughput, not
   cadence.
 
-Found on main, not changed here: web timestamps jittered by 2 ms skip ~125
-frames a minute at 1x (the accumulator has no tolerance; Chrome's
-vsync-aligned timestamps avoid most of it); web fast-forward learns the
+Found on main, not changed here: web fast-forward learns the
 refresh rate only at normal speed. Desktop has vsync off, paces 1x on a
 16.743 ms counter slot (at 60 Hz, ~36 frames a minute never shown, each
 with one doubled), paces turbo by the audio queue with a whole-millisecond
@@ -271,12 +364,6 @@ the span path. GB drawing is a smaller share of a frame than GBA's, so its
 gain is smaller. Rewind snapshots on drawn frames only: forced draws had cost
 ~5% of fast-forward, and the snapshots themselves another 2-9%.
 
-iOS late start, simulator (loaded machine), tonc m7_demo, 30 presses, press
-to the refresh its picture lands on, two rounds each: at 30 Hz 23.7 / 29.6 ms
-average off, 9.2 / 9.4 ms on; at 60 Hz inconclusive (15.1 / 9.2 off, 8.9 /
-10.5 on), with the first margin controller (round 5 numbers under Start frames late). The simulator's refresh timing is approximate (some readings come
-out negative); a device decides it.
-
 ## Measured (core alone, first prototype, quiet machine)
 
 `tests/dingbat_bench.nim` with `DINGBAT_BENCH_DRAW_EVERY=n`, 600 frames,
@@ -317,32 +404,27 @@ fast-forward. Most of Advance Wars' frame time is outside drawing here.
       rewind-doubletap, clip-range, run-pause, wasm-exports, lcd-response,
       gb-palette, game-delete, render pass; tsc + em.d.ts check clean; iOS
       device Release build compiles
-- [x] edge-case mitigations (table above), GB, rollback, desktop, iOS late
-      start; perf review (instructions); all tests above, web tests, tsc,
+- [x] edge-case mitigations (table above), GB, rollback, desktop; perf
+      review (instructions); all tests above, web tests, tsc,
       desktop and iOS builds
 - [ ] Matt's test at home (web on his devices, iOS on the phone): fast-
-      forward, 2x, run-ahead, link play, Low Power Mode with late start
+      forward, 2x, run-ahead, link play, Low Power Mode
 - [x] round 4 (independent review): link dumps, the one A/B switch, Add
-      pictures, clip pre-roll, desktop input log and stale texture, late
-      start on real present times, playtest driver; tools/ci_local.py 32/32,
+      pictures, clip pre-roll, desktop input log and stale texture,
+      playtest driver; tools/ci_local.py 32/32,
       web link-rom-skip e2e 4/4, the browser tests, tsc
 - [x] the playtest train (79ea2262 on origin/main dc1b85d0): CLEAN — none
       of the 140 games differs from the baseline in any hash (checkpoint
       frames, audio, battery files, load cells) in any of the four dingbat
       configurations; the corpus played in 25.7 min against the baseline's
       27.5 (the driver's `run N` now draws only its last frame)
-- [x] round 5 (adversarial latency review): late start's margin settled
-      near 5% misses (now aims under 0.2%), a catch-up tick started late,
-      a slipped late run swallowed the next refresh and counted as on time,
-      timer leeway, the work estimate (now per frame, from every tick);
-      desktop turbo no longer batches, desktop fast-forward reads input
+- [x] round 5 (adversarial latency review): desktop turbo no longer batches, desktop fast-forward reads input
       after every frame again; `*_unseen_next` marks only frames that
       really go undrawn. iOS link e2e 6/6 and the FireRed/LeafGreen trade
       e2e (2% loss) pass with native and wasm states identical
 - [x] round 6 (frame pacing, above): web fast-forward's aim no longer
-      flaps; fast-forward draws rewind-due frames; iOS late start pauses
-      10 s after a miss. render_skip, rewind (new spacing case), ios_api,
+      flaps; fast-forward draws rewind-due frames. render_skip, rewind (new spacing case), ios_api,
       rollback tests; web tests as above; tsc; wasm, desktop, iOS builds
-- [ ] desktop: compiled, not run here (driving the GUI needs asking)
+- [x] desktop: run hidden with the GUI driver (frame-skip-2, below)
 - [ ] if kept: drop the switches or keep `?draw=all` as a diagnostic; the
       iOS setting is a prototype toggle
