@@ -442,6 +442,47 @@ proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     return uint32(cast[ptr uint16](addr n.fptr7[a and 0xFFF])[])
   n.fetch_slow7(a, 16)
 
+# Decoded blocks (arm/blockcache.nim): after a fetch through fetch32/fetch16
+# at `a` in the page `fetch_page7` set up, the next opcodes of the page are
+# sequential fetches at the page's fixed cost (until a data access breaks
+# the sequence: break_fetch7).
+template blk_mask*(_: typedesc[Arm7Bus]): uint32 = 0xFFF'u32
+proc blk_ptr*(b: Arm7Bus): ptr UncheckedArray[uint8] {.inline.} = b.nds.fptr7
+proc blk_fast_ok*(b: Arm7Bus; a: uint32): bool {.inline.} =
+  (a shr 12) == b.nds.fpage7 and b.nds.last_fetch7 == a
+template blk_breaks*(_: typedesc[Arm7Bus]): bool = true
+  ## a data access breaks the sequence (break_fetch7): the next opcode is
+  ## fetched through fetch32/fetch16 (fetch_jump7's case after data)
+proc blk_seq_cost*(b: Arm7Bus; size: static uint32): int64 {.inline.} =
+  b.nds.fseq7[when size == 4: 1 else: 0]
+proc blk_bound*(b: Arm7Bus; size: static uint32): int64 {.inline.} =
+  ## what a block's fetch other than its first may cost at most: the
+  ## page's sequential one, or the one after a data access
+  let n {.cursor.} = b.nds
+  max(n.fseq7[when size == 4: 1 else: 0],
+      n.fjump7[when size == 4: 1 else: 0] - n.fseq7[when size == 4: 1 else: 0])
+template blk_lines*(_: typedesc[Arm7Bus]): bool = false
+proc blk_next_line*(b: Arm7Bus; a: uint32): bool {.inline.} = false
+proc blk_commit*(b: Arm7Bus; a: uint32; size: static uint32) {.inline.} =
+  ## The trackers after sequential fetches ending at `a`.
+  b.nds.last_data7 = NO_ADDR
+  b.nds.last_fetch7 = a
+proc blk_peek*(b: Arm7Bus; a: uint32; thumb: bool; ok: var bool): uint32 =
+  ## The opcode at `a` for decoding, nothing changed (bus9.nim blk_peek).
+  let n {.cursor.} = b.nds
+  template rd(s: seq[uint8]; i: int): uint32 =
+    (if thumb: rd16(s, i) else: rd32(s, i))
+  case a shr 24
+  of 0x00:
+    if a < 0x4000: return rd(n.bios7, int(a))
+  of 0x02: return rd(n.main_ram, int(a and 0x3FFFFF))
+  of 0x03:
+    var shared: bool
+    let i = n.wram7(a, shared)
+    return if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
+  else: discard
+  ok = false
+
 # Sound: channel sample fetch and capture stores (io/spu.nim). No CPU clock
 # sync -- they run inside the evSpuSample dispatch.
 proc spu_read32*(b: Arm7Bus; a: uint32): uint32 = b.nds.read7(a, 32)

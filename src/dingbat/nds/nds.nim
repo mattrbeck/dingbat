@@ -480,6 +480,12 @@ proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
   let skip = getEnv("DINGBAT_NDS_NO_SKIP") != "1"
   n.arm9.wl_on = skip
   n.arm7.wl_on = skip
+  # decoded blocks (arm/blockcache.nim, docs/nds/blockcache.md):
+  # DINGBAT_NDS_NO_BLOCKS=1 runs the plain interpreter, =9 / =7 only the
+  # other CPU's blocks
+  let nb = getEnv("DINGBAT_NDS_NO_BLOCKS")
+  n.arm9.blk_on = nb != "1" and nb != "9"
+  n.arm7.blk_on = nb != "1" and nb != "7"
   n.gpu3d.reuse_on = skip
   n.gpu.engine_a.lc_on = skip
   n.gpu.engine_b.lc_on = skip

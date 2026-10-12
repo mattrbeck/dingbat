@@ -975,6 +975,57 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline, codegenDecl: "static inli
     return uint32(cast[ptr uint16](addr n.fptr9[a and 31])[])
   n.fetch_slow9(a, 2)
 
+# Decoded blocks (arm/blockcache.nim): after a fetch through fetch32/fetch16
+# at `a` whose line `fetch_line9` set up, the next opcodes of the line are
+# `fetch_fast9` fetches: no cost, no tag change, only the trackers move.
+template blk_mask*(_: typedesc[Arm9Bus]): uint32 = 31'u32
+proc blk_ptr*(b: Arm9Bus): ptr UncheckedArray[uint8] {.inline.} = b.nds.fptr9
+proc blk_fast_ok*(b: Arm9Bus; a: uint32): bool {.inline.} =
+  ## After a fetch at `a`: the rest of its line is fetch_fast9's.
+  (a shr 5) == b.nds.fline9
+template blk_breaks*(_: typedesc[Arm9Bus]): bool = false
+  ## a data access leaves the next fetch sequential
+proc blk_after_data*(b: Arm9Bus; a: uint32): bool {.inline.} =
+  ## After the data accesses of the opcode at `a`: the next fetch is still
+  ## fetch_fast9's (or the next line's) -- nothing turned the line's fast
+  ## path off (a page going apart, WRAMCNT, CP15).
+  (a shr 5) == b.nds.fline9
+proc blk_seq_cost*(b: Arm9Bus; size: static uint32): int64 {.inline.} = 0
+proc blk_bound*(b: Arm9Bus; size: static uint32): int64 {.inline.} = 0
+  ## what a block's fetch other than its first may cost at most
+template blk_lines*(_: typedesc[Arm9Bus]): bool = true
+proc blk_next_line*(b: Arm9Bus; a: uint32): bool {.inline.} =
+  ## A sequential fetch at `a`, the first word of the line after
+  ## `fline9`'s: fetch_next9's case (an instruction-cache hit or ITCM, the
+  ## same page, bytes as memory has them), whose effects but the trackers
+  ## are done here; false: the run loop fetches it.
+  let n {.cursor.} = b.nds
+  if (a shr 5) == n.fline9 + 1 and (a and 0xFFF'u32) != 0 and
+     (n.fitcm9 or (n.tm.icache.hit_line(a) and
+      ((a shr 24) != 0x02 or n.tm.page_apart[(a and 0x3FFFFF) shr 12] == 0 or n.line_clean9(a)))):
+    n.fline9 = a shr 5
+    n.fptr9 = cast[ptr UncheckedArray[uint8]](addr n.fptr9[32])
+    return true
+  false
+proc blk_commit*(b: Arm9Bus; a: uint32; size: static uint32) {.inline.} =
+  ## The trackers after fetch_fast9 fetches ending at `a`.
+  let n {.cursor.} = b.nds
+  n.last_data9 = NO_ADDR
+  n.last_pc9 = a
+  n.last_fetch9 = when size == 4: a else: a and not 3'u32
+proc blk_peek*(b: Arm9Bus; a: uint32; thumb: bool; ok: var bool): uint32 =
+  ## The opcode at `a` for decoding, nothing changed: ITCM, main RAM or the
+  ## BIOS (code elsewhere is not decoded). Every decoded opcode is compared
+  ## with the one fetched when it runs, so this need not be what a fetch
+  ## would read (a kept instruction-cache line).
+  let n {.cursor.} = b.nds
+  template rd(s: seq[uint8]; i: int): uint32 =
+    (if thumb: rd16(s, i) else: rd32(s, i))
+  if n.cp15.itcm_enabled and a < n.cp15.itcm_size: return rd(n.itcm, int(a and 0x7FFF))
+  if (a shr 24) == 0x02: return rd(n.main_ram, int(a and 0x3FFFFF))
+  if a >= 0xFFFF0000'u32: return rd(n.bios9, int(a and 0xFFF))
+  ok = false
+
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()
 proc irq_wake*(b: Arm9Bus): bool {.inline.} =
   ## The ARM9 halts through CP15 (wait for interrupt), which only the IRQ

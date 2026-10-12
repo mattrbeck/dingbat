@@ -68,6 +68,29 @@ type
     ## tracking, cache fast paths, protection-unit pages): equal at two heads
     ## means equal access costs in the pass that follows.
 
+  ArmExec*[B] = proc (cpu: ArmCpu[B]; instr: uint32) {.nimcall.}
+    ## A dispatch table entry (`arm_lut`, `thumb_lut`)
+
+  BlkOp[B] = object
+    ## One opcode of a decoded block (arm/blockcache.nim)
+    fn: ArmExec[B]          ## its dispatch table entry
+    instr: uint32           ## the opcode it was decoded from
+    code: uint8             ## OC_*: what the block runner does around it
+    sub: uint8              ## under OC_LINE: its own code
+    ahead_n: uint8          ## opcodes after it up to the next memory one or
+                            ## the block's end (exclusive)
+    ahead_ic: uint8         ## and a bound on their internal cycles
+  BlkEntry = object
+    key: uint32             ## pc, or pc + 1 in Thumb state; BLK_EMPTY
+    start: int32            ## its first opcode in `ops` (an OC_END follows the last)
+    n: int16                ## opcodes; 0 = no block can start here
+    retry: int16            ## lookups left before a 0-opcode entry is tried again
+  BlockCache[B] = ref object
+    table: seq[BlkEntry]
+    ops: seq[BlkOp[B]]
+    used: int               ## opcodes of `ops` in use
+    stats*: array[8, uint64]  ## -d:nds_blkstats counters
+
   ArmCpu*[B] = ref object
     r*: array[16, uint32]
     cpsr*: uint32
@@ -114,6 +137,10 @@ type
     wl_fails: int32         ## visits in a row that found the loop doing work
     wl_skipped*: int64      ## master cycles skipped so far (a statistic)
     wl_cold*: int32         ## backward branches the bus lets pass unwatched
+    blk_on*: bool           ## run decoded blocks (arm/blockcache.nim);
+                            ## DINGBAT_NDS_NO_BLOCKS=1 clears it
+    blk_seek: bool          ## the last opcode jumped: look a block up at next_pc
+    blk: BlockCache[B]      ## the decoded blocks (not machine state)
     wl_regs: array[15, uint32]
     wl_cpsr, wl_spsr: uint32
     wl_sig: IdleSig
@@ -845,9 +872,6 @@ proc exec_arm_k*[B; K, M: static uint32](cpu: ArmCpu[B]; instr: uint32) {.nimcal
   ## K for every opcode it is given, so they are compile-time constants.
   cpu.arm_dispatch((instr and not M) or K)
 
-type
-  ArmExec*[B] = proc (cpu: ArmCpu[B]; instr: uint32) {.nimcall.}
-
 proc arm_fixed(i: uint32): uint32 =
   ## The index bits an entry fixes: all of them, except bits nothing
   ## decodes there (entries that differ only in those share one proc).
@@ -1177,26 +1201,17 @@ proc take_abort[B](cpu: ArmCpu[B]; a: uint32) {.noinline.} =
   else: cpu.exception(mABT, 0x10, a + 8)
   cpu.abort = 0
 
-proc exec_one[B](cpu: ArmCpu[B]; traced: static bool) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
-  ## Fetch, execute and time the opcode at next_pc.
-  mixin fetch16, fetch32, access_cycles, armv5
-  let a = cpu.next_pc
-  cpu.cur_pc = a
-  when defined(ndsdebug):
-    if cpu.profiling: cpu.profile.inc(a and not 63'u32)
-  if cpu.thumb:
-    let instr = fetch16(cpu.bus, a)
-    when traced:
-      if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
+proc exec_fetched[B](cpu: ArmCpu[B]; a, instr: uint32; thumb: static bool) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  ## Execute and time the opcode `instr` just fetched from `a` (exec_one;
+  ## also arm/blockcache.nim, for an opcode that changed since decoding).
+  mixin access_cycles, armv5
+  when thumb:
     cpu.next_pc = a + 2
     cpu.r[15] = a + 4
     when armv5(B):
       if likely(cpu.abort == 0): cpu.execute_thumb(instr)
     else: cpu.execute_thumb(instr)
   else:
-    let instr = fetch32(cpu.bus, a)
-    when traced:
-      if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 4
     cpu.r[15] = a + 8
     when armv5(B):
@@ -1212,6 +1227,26 @@ proc exec_one[B](cpu: ArmCpu[B]; traced: static bool) {.inline, codegenDecl: "st
   cpu.cycles += spent
   when defined(ndsdebug):
     if cpu.profiling: cpu.cprofile.inc(a and not 63'u32, int(spent))
+
+proc exec_one[B](cpu: ArmCpu[B]; traced: static bool) {.inline, codegenDecl: "static inline __attribute__((always_inline)) $# $#$#".} =
+  ## Fetch, execute and time the opcode at next_pc.
+  mixin fetch16, fetch32
+  let a = cpu.next_pc
+  cpu.cur_pc = a
+  when defined(ndsdebug):
+    if cpu.profiling: cpu.profile.inc(a and not 63'u32)
+  if cpu.thumb:
+    let instr = fetch16(cpu.bus, a)
+    when traced:
+      if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
+    cpu.exec_fetched(a, instr, true)
+  else:
+    let instr = fetch32(cpu.bus, a)
+    when traced:
+      if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
+    cpu.exec_fetched(a, instr, false)
+
+include blockcache
 
 proc step*[B](cpu: ArmCpu[B]) {.inline.} =
   ## One opcode, the IRQ line checked first.
@@ -1370,6 +1405,7 @@ proc run*[B](cpu: ArmCpu[B]; until: int64) =
       cpu.step()
     return
   cpu.attn = true
+  cpu.blk_seek = true         # (a slice may end anywhere: a block starts here too)
   while cpu.cycles < until:
     if unlikely(cpu.attn):
       cpu.attn = false
@@ -1387,7 +1423,17 @@ proc run*[B](cpu: ArmCpu[B]; until: int64) =
           return
       if irq_line(cpu.bus) and (cpu.cpsr and FLAG_I) == 0:
         cpu.exception(mIRQ, 0x18, cpu.next_pc + 4)
-    cpu.exec_one(false)
+        cpu.blk_seek = true
+    if cpu.blk_on:
+      # decoded blocks (arm/blockcache.nim): looked up where the last
+      # opcode jumped or a block ended; they run the opcodes this loop
+      # would, and return wherever it must look again
+      if cpu.blk_seek and cpu.blk_try(until): continue
+      let a = cpu.next_pc
+      cpu.exec_one(false)
+      cpu.blk_seek = cpu.next_pc - a > 4'u32
+    else:
+      cpu.exec_one(false)
 
 proc reg_dump*(cpu: ArmCpu): string =
   for i in 0..15:

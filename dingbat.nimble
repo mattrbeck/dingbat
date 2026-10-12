@@ -85,6 +85,9 @@ task test_ndscompat, "Run the DS homebrew-sweep fix checks (docs/nds/compat.md)"
 task test_ndsperf, "Run the DS speed-up checks: idle-loop skipping and 3D frame reuse change nothing (docs/nds/perf.md)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndsperf_test tests/nds_perf_test.nim"
 
+task test_ndsblockcache, "Run the DS decoded-block checks: blocks change nothing (docs/nds/blockcache.md)":
+  exec "nim c -r -d:test_harness -d:release -d:nds_blkstats --path:src -o:dingbat_ndsblockcache_test tests/nds_blockcache_test.nim"
+
 task test_ndstestroms, "Run the DS hardware test-ROM fix checks (docs/nds/test-roms.md)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndstestroms_test tests/nds_testroms_test.nim"
 
