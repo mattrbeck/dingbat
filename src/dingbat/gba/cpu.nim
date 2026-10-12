@@ -71,9 +71,15 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
   let new_high  = if new_bank == UNDEF_BANK: 0 else: new_bank
   let old_high  = if old_bank == UNDEF_BANK: 0 else: old_bank
   if new_mode == modeFIQ or old_mode == modeFIQ:
+    # r8-r12 have two copies, FIQ's and the one every other mode shares
+    # (GBATEK, "ARM CPU Register Set"), kept in banks 1 and 0. Keyed on the
+    # leaving or entering mode's own bank, FIQ left for a mode other than
+    # the one it was entered from brought back that mode's stale copy.
+    let old_fiq = if old_mode == modeFIQ: 1 else: 0
+    let new_fiq = if new_mode == modeFIQ: 1 else: 0
     for idx in 0..4:
-      cpu.reg_banks[old_high][idx] = cpu.r[8 + idx]
-      cpu.r[8 + idx] = cpu.reg_banks[new_high][idx]
+      cpu.reg_banks[old_fiq][idx] = cpu.r[8 + idx]
+      cpu.r[8 + idx] = cpu.reg_banks[new_fiq][idx]
   cpu.reg_banks[old_bank][5] = cpu.r[13]
   cpu.reg_banks[old_bank][6] = cpu.r[14]
   cpu.spsr_banks[old_high]   = uint32(cpu.spsr)

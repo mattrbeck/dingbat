@@ -783,8 +783,11 @@ proc mem_read_word*(mem: GbMemory; gb: GB; idx: int): uint16 =
     (uint16(mem_read(mem, gb, (idx + 1) and 0xFFFF)) shl 8)
 
 proc mem_write_word*(mem: GbMemory; gb: GB; idx: int; val: uint16) =
-  mem_write(mem, gb, (idx + 1) and 0xFFFF, uint8(val shr 8))
+  # LD (nn),SP, its only caller: the low byte to nn on M4, then the high byte
+  # to nn+1 on M5 (Game Boy: Complete Technical Reference, "LD (nn), SP",
+  # mem <- SPL then mem <- SPH). Pushes go high byte first, but do their own.
   mem_write(mem, gb, idx,                  uint8(val and 0xFF))
+  mem_write(mem, gb, (idx + 1) and 0xFFFF, uint8(val shr 8))
 
 proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8) =
   ## The OAM DMA unit's write port driven by a VRAM DMA: an in-flight OAM

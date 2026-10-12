@@ -356,9 +356,10 @@ proc arm_halfword_data_transfer*[pre, add, immediate, write_back, load: static b
       cpu.idle(1)
       discard cpu.set_reg(rd, value)
     else:
-      cpu.gba.bus.write_half(address, uint16(cpu.r[rd] and 0xFFFF'u32))
-      if rd == 15:
-        cpu.gba.bus.write_half(address, uint16(cpu.gba.bus.read_half(address)) + 4)
+      # r15 stores its address + 12 (GBATEK, "ARM Opcodes: Memory: Single
+      # Data Transfer"): one store, no read-back.
+      let v = if rd == 15: cpu.r[15] + 4 else: cpu.r[rd]
+      cpu.gba.bus.write_half(address, uint16(v and 0xFFFF'u32))
   elif sh == 0b10:  # ldrsb
     let value = uint32(cast[int32](cast[int8](cpu.gba.bus[address])))
     cpu.idle(1)
@@ -407,12 +408,15 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
     else:
       discard cpu.set_reg(rd, value)
   else:
+    # r15 stores its address + 12 (GBATEK, "ARM Opcodes: Memory: Single
+    # Data Transfer"). One store of that value: storing r15 and patching it
+    # with a read and a second word store cost two accesses the console does
+    # not make, and widened STRB to a word.
+    let v = if rd == 15: cpu.r[15] + 4 else: cpu.r[rd]
     when byte_quantity:
-      cpu.gba.bus[address] = uint8(cpu.r[rd])
+      cpu.gba.bus[address] = uint8(v)
     else:
-      cpu.gba.bus.write_word(address, cpu.r[rd])
-    if rd == 15:
-      cpu.gba.bus.write_word(address, cpu.gba.bus.read_word(address) + 4)
+      cpu.gba.bus.write_word(address, v)
   when not pre_addressing:
     when add_offset: address += offset
     else:            address -= offset
@@ -603,9 +607,9 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
         if idx == 15: cpu.idle(1)  # the I cycle precedes the pipeline refill
         discard cpu.set_reg(idx, value)
       else:
-        cpu.gba.bus.write_word(address, cpu.r[idx])
-        if idx == 15:
-          cpu.gba.bus.write_word(address, cpu.gba.bus.read_word(address) + 4)
+        # r15 stores its address + 12, in the one store (as STR above)
+        cpu.gba.bus.write_word(address,
+          if idx == 15: cpu.r[15] + 4 else: cpu.r[idx])
       address += 4
       when write_back:
         # Block transfers with base r15 perform no writeback in either direction
@@ -667,6 +671,12 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
     if bit(instr, 18): mask = mask or 0x00FF0000'u32
     if bit(instr, 17): mask = mask or 0x0000FF00'u32
     if bit(instr, 16): mask = mask or 0x000000FF'u32
+    when not spsr:
+      # User mode writes the flags and nothing else (GBATEK, "ARM Opcodes:
+      # PSR Transfer (MRS, MSR)": "In non-privileged mode (user mode): only
+      # condition code bits of CPSR can be changed, control bits can't"): an
+      # msr there cannot leave User mode or touch I, F or T.
+      if mode == modeUSR: mask = mask and 0xFF000000'u32
     var carry_out {.used.} = false  # written only in the `imm_flag` instantiations
     let value =
       when imm_flag:
@@ -845,7 +855,13 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
       cpu.set_neg_and_zero_flags(cpu.r[rd])
       cpu.cpsr.carry = barrel_carry
     if rd != 15: cpu.step_arm()
-  when pc_reads_12_ahead: cpu.r[15] -= 4
+  when pc_reads_12_ahead:
+    # Undo the operand's +4 unless the result went to r15: that write
+    # refilled at the target, and r15 is the target's now (`mov pc, r0, lsl
+    # r1` landed 4 bytes short of r0).
+    when opcode in {TST, TEQ, CMP, CMN}: cpu.r[15] -= 4
+    else:
+      if rd != 15: cpu.r[15] -= 4
   when set_cond:
     if rd == 15:
       # User and System mode: the flags the ALU just set do not stick. The

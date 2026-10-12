@@ -119,15 +119,18 @@ proc thumb_push_pop_registers*[pop, pclr: static bool](cpu: CPU; instr: uint32) 
     else:
       cpu.idle(1)  # I cycle after the last transfer
   else:
-    when pclr:
-      address -= 4
-      cpu.gba.bus.write_word(address, cpu.r[14])
-    var idx = 7
-    while idx >= 0:
+    # PUSH is STMDB: the lowest register goes to the lowest address and the
+    # stores run upward from there, lr last (GBATEK, "THUMB Opcodes: Memory:
+    # Multiple Load/Store (PUSH/POP and LDM/STM)"). Same memory either way;
+    # the order is what an I/O target or a DMA sees.
+    address -= 4'u32 * uint32(count_set_bits(list) + (when pclr: 1 else: 0))
+    var a = address
+    for idx in 0..7:
       if bit(list, idx):
-        address -= 4
-        cpu.gba.bus.write_word(address, cpu.r[idx])
-      dec idx
+        cpu.gba.bus.write_word(a, cpu.r[idx])
+        a += 4
+    when pclr:
+      cpu.gba.bus.write_word(a, cpu.r[14])
   discard cpu.set_reg(13, address)
   if not (pop and pclr): cpu.step_thumb()
 
@@ -300,26 +303,28 @@ proc thumb_alu_operations*[op: static uint32](cpu: CPU; instr: uint32) =
   let rs = int(bits_range(instr, 3, 5))
   let rd = int(bits_range(instr, 0, 2))
   var barrel_carry {.used.} = cpu.cpsr.carry  # read/written only by the shift ops
+  # The shifts take Rs's bottom byte, as ARM's register-specified shift does
+  # (GBATEK, "THUMB Opcodes: ALU Operations": Rd = Rd << (Rs AND 0FFh)).
   var res: uint32
   when op == 0b0000: res = cpu.set_reg(rd, cpu.r[rd] and cpu.r[rs])
   elif op == 0b0001: res = cpu.set_reg(rd, cpu.r[rd] xor cpu.r[rs])
   elif op == 0b0010:
     cpu.idle(1)  # register-specified shift
-    res = cpu.set_reg(rd, cpu.lsl(cpu.r[rd], cpu.r[rs], addr barrel_carry))
+    res = cpu.set_reg(rd, cpu.lsl(cpu.r[rd], cpu.r[rs] and 0xFF'u32, addr barrel_carry))
     cpu.cpsr.carry = barrel_carry
   elif op == 0b0011:
     cpu.idle(1)  # register-specified shift
-    res = cpu.set_reg(rd, cpu.lsr(cpu.r[rd], cpu.r[rs], false, addr barrel_carry))
+    res = cpu.set_reg(rd, cpu.lsr(cpu.r[rd], cpu.r[rs] and 0xFF'u32, false, addr barrel_carry))
     cpu.cpsr.carry = barrel_carry
   elif op == 0b0100:
     cpu.idle(1)  # register-specified shift
-    res = cpu.set_reg(rd, cpu.asr(cpu.r[rd], cpu.r[rs], false, addr barrel_carry))
+    res = cpu.set_reg(rd, cpu.asr(cpu.r[rd], cpu.r[rs] and 0xFF'u32, false, addr barrel_carry))
     cpu.cpsr.carry = barrel_carry
   elif op == 0b0101: res = cpu.set_reg(rd, cpu.adc(cpu.r[rd], cpu.r[rs], set_conditions = true))
   elif op == 0b0110: res = cpu.set_reg(rd, cpu.sbc(cpu.r[rd], cpu.r[rs], set_conditions = true))
   elif op == 0b0111:
     cpu.idle(1)  # register-specified shift
-    res = cpu.set_reg(rd, cpu.ror(cpu.r[rd], cpu.r[rs], false, addr barrel_carry))
+    res = cpu.set_reg(rd, cpu.ror(cpu.r[rd], cpu.r[rs] and 0xFF'u32, false, addr barrel_carry))
     cpu.cpsr.carry = barrel_carry
   elif op == 0b1000: res = cpu.r[rd] and cpu.r[rs]
   elif op == 0b1001: res = cpu.set_reg(rd, cpu.sub(0'u32, cpu.r[rs], set_conditions = true))
