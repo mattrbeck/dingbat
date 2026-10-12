@@ -640,6 +640,9 @@ or a per-block check of the opcodes, which is the fetch it saves. The GBA
 core's cached-interpreter study (2026-07, since dropped from docs/)
 reached the same ceiling, +8-12 %, for the same reason: the timing
 model's per-access work, not decode, is what is left. Not built.
+(Branch `nds-blockcache` built it in 2026-10 with the timing bookkeeping
+moved to block granularity, exact: 4-7 % more host cycles natively, 7-12 %
+in V8 and JavaScriptCore; docs/nds/blockcache.md.)
 
 ## Numbers: round 2 (`nds-cache-perf`)
 

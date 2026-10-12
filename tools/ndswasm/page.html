@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ndsrun wasm</title>
+<script>
+// page.html?js=ndsrun_blk.js&wl=gs&blocks=1&extra=--state-hash,100
+// Runs the wasm ndsrun as drive.mjs does, in this engine; console lines out,
+// "DONE" at the end. Host counters through the server's /rusage.
+const q = new URLSearchParams(location.search);
+const W = {
+  gs: ['f/gs.nds', 'f/gs3000.st', 3600, 'f/gs_press.txt'],
+  ss7: ['f/ss.nds', 'f/ss7100.st', 7700, 'f/ss_press.txt'],
+  ss10: ['f/ss.nds', 'f/ss10000.st', 10600, 'f/ss_press.txt'],
+};
+async function bytes(u) { return new Uint8Array(await (await fetch(u)).arrayBuffer()); }
+function rusage() {
+  const x = new XMLHttpRequest();
+  x.open('GET', '/rusage', false);
+  x.send();
+  return x.responseText.trim().split(' ').map(Number);
+}
+(async () => {
+  try {
+    const s = document.createElement('script');
+    s.src = q.get('js');
+    await new Promise((ok) => { s.onload = ok; document.head.appendChild(s); });
+    const [rom, st, to, press] = W[q.get('wl')];
+    let cyc = 0;
+    const M = await createNdsrun({
+      // the environment is read as the runtime starts: set it before that
+      preRun: [(m) => { if (q.get('blocks') === '0') m.ENV.DINGBAT_NDS_NO_BLOCKS = '1'; }],
+      print: (t) => console.log(t),
+      printErr: (t) => console.log(t),
+      ndsrunHost: (k) => { if (k === 1) return cyc; const [i, c] = rusage(); cyc = c; return i; },
+    });
+    M.FS.mkdir('/bios');
+    for (const f of ['bios9.bin', 'bios7.bin', 'firmware.bin']) M.FS.writeFile('/bios/' + f, await bytes('f/' + f));
+    M.FS.writeFile('/rom.nds', await bytes(rom));
+    M.FS.writeFile('/st', await bytes(st));
+    const pr = (await (await fetch(press)).text()).trim();
+    const extra = q.get('extra') ? q.get('extra').split(',') : [];
+    M.callMain(['/rom.nds', '--bios', '/bios', '--rtc', '2004-01-01', '--press', pr,
+      '--state-load', '/st', '--frames', String(to), '--out', '/out.png', ...extra]);
+  } catch (e) {
+    console.log('ERROR ' + e + ' ' + (e.stack || ''));
+  }
+  console.log('DONE');
+})();
+</script>
