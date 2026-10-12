@@ -1333,6 +1333,15 @@ when defined(gputime):
         of 8: app.cfg.lcd_response = false
         else: echo "GPUTIME sweep done"; app.running = false
 
+# A GBA frame changed since the last upload. Unpaced (fast-forward, turbo)
+# not every frame is presented: a changed frame left unpresented, then a
+# static one presented, would otherwise keep the old texture on screen
+var gba_changed_unuploaded = false
+
+proc note_gba_frame() =
+  ## After a GBA frame has run outside a present.
+  if not app.gba_emu.ppu.frame_static: gba_changed_unuploaded = true
+
 proc render_game() =
   if app.emu_kind != ekNone:
     glUseProgram(app.game_shader)
@@ -1367,8 +1376,9 @@ proc render_game() =
                 GLfloat(GBA_W))
     # The panel model must be fed static frames too, or a cell still on its
     # way to its target would freeze part-settled instead of finishing
-    if app.cfg.lcd_response or not app.gba_emu.ppu.frame_static:
+    if app.cfg.lcd_response or gba_changed_unuploaded or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
+      gba_changed_unuploaded = false
     when defined(gputime): gpu_begin()
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
     when defined(gputime): gpu_end()
@@ -2221,6 +2231,7 @@ proc teardown_netlink(why = "") =
   app.link.teardown(app.netlink, why)
   if torn and app.gba_emu != nil:
     app.gba_emu.run_until_frame()
+    note_gba_frame()
 
 proc linked_now(nl: NetLink): bool =
   ## Bind a new link to the app; drops rewind history, which would desync.
@@ -2803,6 +2814,8 @@ proc main() =
         trace_due = next_frame_due
         if trace_path.len > 0: trace_end = getPerformanceCounter()
         scheduler_frame_ran()
+      if emulated and app.emu_kind == ekGBA and app.gba_emu != nil:
+        note_gba_frame()
       if emulated and app.cfg.rewind and app.netlink == nil:
         case app.emu_kind
         of ekGBA:

@@ -8,6 +8,8 @@
 #             stick, Start, then unplugged while held (everything lets go)
 #   pixels    the game picture fills the whole back buffer, which on a
 #             Retina display is twice the window's size in points
+#   fast-forward  a picture changed between presents and never again is
+#             still the one on screen (generated GBA ROM)
 #   rumble    an MBC5 rumble cart (generated: it switches its motor on and
 #             spins) buzzes the pad
 #   fullscreen (GUI_TEST_FULLSCREEN=1, macOS) a VISIBLE window taken
@@ -54,6 +56,36 @@ masks() {  # the GBA keypad masks the input log recorded, in order
   grep -E '^[0-9]+ [0-9]+$' "$work/input.log" | cut -d' ' -f2 | tr '\n' ' ' | sed 's/ $//'
 }
 
+# pixel <png> <fx> <fy>: "r g b" of the shot's pixel at fractions (0..1) of
+# its width and height
+pixel() {
+  python3 -I - "$@" <<'EOF'
+import struct, sys, zlib
+data = open(sys.argv[1], 'rb').read()
+pos, idat = 8, b''
+while pos < len(data):
+    n, kind = struct.unpack('>I4s', data[pos:pos + 8])
+    body = data[pos + 8:pos + 8 + n]
+    if kind == b'IHDR': w, h = struct.unpack('>II', body[:8])
+    if kind == b'IDAT': idat += body
+    pos += 12 + n
+raw, stride, prev, rows, i = zlib.decompress(idat), w * 3, bytearray(w * 3), [], 0
+for _ in range(h):     # undo the PNG row filters (8-bit RGB)
+    f, line = raw[i], bytearray(raw[i + 1:i + 1 + stride]); i += 1 + stride
+    for x in range(stride):
+        a = line[x - 3] if x >= 3 else 0; b = prev[x]; c = prev[x - 3] if x >= 3 else 0
+        if f == 1: line[x] = (line[x] + a) & 255
+        elif f == 2: line[x] = (line[x] + b) & 255
+        elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
+        elif f == 4:
+            p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+            line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+    rows.append(line); prev = line
+x, y = int((w - 1) * float(sys.argv[2])), int((h - 1) * float(sys.argv[3]))
+print(*rows[y][x * 3:x * 3 + 3])
+EOF
+}
+
 echo "keys and gamepad (GBA, input log)"
 rm -f "$work/input.log"
 # KEYINPUT bits: A 1, B 2, Start 8, Left 32
@@ -96,33 +128,50 @@ run tests/roms/hwverified/psrmask.gba "" "1 frames 120
 2 shot $work/fill.png
 3 quit"
 echo "  ($(ack 2))"
-lit=$(python3 -I - "$work/fill.png" <<'EOF'
-import struct, sys, zlib
-data = open(sys.argv[1], 'rb').read()
-pos, idat = 8, b''
-while pos < len(data):
-    n, kind = struct.unpack('>I4s', data[pos:pos + 8])
-    body = data[pos + 8:pos + 8 + n]
-    if kind == b'IHDR': w, h = struct.unpack('>II', body[:8])
-    if kind == b'IDAT': idat += body
-    pos += 12 + n
-raw, stride, prev, rows, i = zlib.decompress(idat), w * 3, bytearray(w * 3), [], 0
-for _ in range(h):     # undo the PNG row filters (8-bit RGB)
-    f, line = raw[i], bytearray(raw[i + 1:i + 1 + stride]); i += 1 + stride
-    for x in range(stride):
-        a = line[x - 3] if x >= 3 else 0; b = prev[x]; c = prev[x - 3] if x >= 3 else 0
-        if f == 1: line[x] = (line[x] + a) & 255
-        elif f == 2: line[x] = (line[x] + b) & 255
-        elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
-        elif f == 4:
-            p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-            line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-    rows.append(line); prev = line
-px = rows[h - 2][(w - 2) * 3:(w - 1) * 3]
-print('lit' if sum(px) > 0 else 'black')
-EOF
-)
+lit=$(pixel "$work/fill.png" 0.999 0.999 | sed 's/^0 0 0$/black/; s/^[0-9].*/lit/')
 check "the bottom-right corner of the shot is the picture's" "$lit" "lit"
+
+echo "fast-forward shows a frame that changed between presents"
+# Fast-forward runs many frames per present. This one's backdrop turns from
+# black to red in the frames after A is pressed, then never changes again:
+# the frames presented after it are all unchanged, and the texture must
+# still be the red one (a desktop that uploaded only a presented frame
+# that changed itself kept the black picture on screen).
+python3 -I - "$work/onechange.gba" <<'EOF'
+import struct, sys
+code = [
+  0xE3A00301,  # mov  r0, #0x04000000
+  0xE3A01000,  # mov  r1, #0
+  0xE1C010B0,  # strh r1, [r0]         DISPCNT 0: the backdrop only
+  0xE3A02405,  # mov  r2, #0x05000000
+  0xE1C210B0,  # strh r1, [r2]         backdrop black
+  0xE2804E13,  # add  r4, r0, #0x130   KEYINPUT
+  0xE1D430B0,  # loop: ldrh r3, [r4]
+  0xE3130001,  # tst  r3, #1           A (active low)
+  0x1AFFFFFC,  # bne  loop
+  0xE3A0101F,  # mov  r1, #0x1F
+  0xE1C210B0,  # strh r1, [r2]         backdrop red
+  0xEAFFFFFE,  # b    .
+]
+open(sys.argv[1], 'wb').write(struct.pack('<%dI' % len(code), *code).ljust(0x8000, b'\0'))
+EOF
+run "$work/onechange.gba" "" "1 sleep 300
+2 key Tab down
+3 frames 2
+4 key Tab up
+5 sleep 300
+6 key z down
+7 sleep 150
+8 key z up
+9 sleep 700
+10 shot $work/onechange.png
+11 quit"
+# Red through the default colour correction (248 59 122 on macOS), black
+# when the change never reached the screen
+hue=$(pixel "$work/onechange.png" 0.5 0.5 |
+      awk '{ if ($1 > 160 && $1 > 2 * $2) print "red"
+             else if ($1 + $2 + $3 == 0) print "black"; else print }')
+check "the backdrop is red after A in fast-forward" "$hue" "red"
 
 echo "rumble (generated MBC5 rumble cart)"
 python3 -I - "$work/rumble.gb" <<'EOF'
