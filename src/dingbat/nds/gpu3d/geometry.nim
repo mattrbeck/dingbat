@@ -354,29 +354,42 @@ proc clip_polygon*(src: openArray[Vertex]; dst: var array[MAX_CLIP, Vertex]): in
           if plane_dist(v, plane) < 0: break inside
       for i in 0 ..< src.len: dst[i] = src[i]
       return src.len
-  var a, b: array[MAX_CLIP, Vertex]
+  # Two buffers used in turn (`cur` holds the polygon, `nxt` takes a pass's
+  # output); only the first `n` entries of either are ever read, so they
+  # need no clearing and a pass hands over by swapping the two.
+  var a {.noinit.}, b {.noinit.}: array[MAX_CLIP, Vertex]
+  var cur = addr a
+  var nxt = addr b
   var n = src.len
   for i in 0 ..< n: a[i] = src[i]
+  var d {.noinit.}: array[MAX_CLIP, int64]
   # near/far first, then y, then x: vertices cut by two planes (a corner)
   # come out as the reference core has them (3d_vcolor, 3d_clip)
   const ORDER = [4, 5, 2, 3, 0, 1]
   for plane in ORDER:
+    # A pass with every vertex inside its plane keeps each one and adds
+    # none, so it changes nothing -- unless it is cut short at MAX_CLIP - 1,
+    # which needs n = MAX_CLIP vertices (n < MAX_CLIP here: skipped)
+    var outside = false
+    for i in 0 ..< n:
+      d[i] = plane_dist(cur[i], plane)
+      if d[i] < 0: outside = true
+    if not outside and n < MAX_CLIP: continue
     var m = 0
     for i in 0 ..< n:
-      let cur = a[i]
-      let nxt = a[(i + 1) mod n]
-      let dc = plane_dist(cur, plane)
-      let dn = plane_dist(nxt, plane)
+      let j = if i + 1 == n: 0 else: i + 1
+      let dc = d[i]
+      let dn = d[j]
       if dc >= 0:
-        b[m] = cur; inc m
-        if dn < 0: (b[m] = intersect(cur, nxt, dc, dn, plane); inc m)
+        nxt[m] = cur[i]; inc m
+        if dn < 0: (nxt[m] = intersect(cur[i], cur[j], dc, dn, plane); inc m)
       elif dn >= 0:
-        b[m] = intersect(nxt, cur, dn, dc, plane); inc m
+        nxt[m] = intersect(cur[j], cur[i], dn, dc, plane); inc m
       if m >= MAX_CLIP - 1: break
     n = m
-    a = b
+    swap(cur, nxt)
     if n == 0: return 0
-  for i in 0 ..< n: dst[i] = a[i]
+  for i in 0 ..< n: dst[i] = cur[i]
   n
 
 proc to_screen(g: Geometry; v: var Vertex) =
@@ -409,7 +422,7 @@ proc emit_polygon(g: Geometry; src: openArray[Vertex]; in_strip: bool) =
   if (attr and 0x1000) == 0:
     for v in src:
       if v.z > v.w: (g.strip_shared = false; return)
-  var cv: array[MAX_CLIP, Vertex]
+  var cv {.noinit.}: array[MAX_CLIP, Vertex]   # (clip_polygon fills cv[0 ..< n])
   let n = clip_polygon(src, cv)
   if n == 0:
     g.strip_shared = false
