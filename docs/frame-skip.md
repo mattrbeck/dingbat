@@ -144,6 +144,30 @@ thumbnails and the library picture read it) and its one lookahead frame is
 the one shown. In the browsers run-ahead 2 read -1% to -10% of emulation
 time (WebKit), -1% to -4% (Chromium), noise-level; iOS simulator 0-3%.
 
+### Cadence (pacing probe, against main's build)
+
+`web/e2e/pacing-probe.mjs`, virtual clock, Emerald, main b98294aa's web
+build against this one and `?draw=all`. Frames per callback match main's
+in every configuration run (30, 48, 50, 60 and 60 Hz with 2 ms jitter;
+1x, 2x, run-ahead 2; 17 of the 52 in the `virt` set, the rest cut for
+time): the skip changes no cadence on a fast machine. On the virtual
+clock, fast-forward's frame rate is the cost model's, not a measurement.
+
+On a slow device (the `phone` profile, ~5 ms a drawn GBA frame, 60 Hz),
+the result depends on what an undrawn frame costs there. The model's 0.66
+of a drawn frame (from the first prototype's browser numbers) gives the
+original doc's picture; the wasm core measured above is nearer 0.84 on
+Emerald, and with that:
+
+| phone profile, 60 Hz | main | skip (undrawn 0.84) | skip (0.66, the model) |
+|---|---|---|---|
+| 2x: uneven refreshes a minute | 1934 | 1334 | 52 |
+| run-ahead 2: game frame rate held (error sd, frames) | no (27.9) | yes (0.64) | yes (0.59) |
+
+Run-ahead 2 on a device too slow for it is the one place it changes what
+the player sees: when a refresh owes two frames the first is unseen and
+runs no lookahead at all, so the device keeps up where main falls behind.
+
 ### What it buys over today's main
 
 - Fast-forward: +20% on moving GBA scenes on the desktop (+59% on a mode-7
@@ -157,6 +181,9 @@ time (WebKit), -1% to -4% (Chromium), noise-level; iOS simulator 0-3%.
   in a browser's or the simulator's own clock here.
 - Run-ahead 2: 3-14% per frame (moving GBA scenes), none at run-ahead 1.
 - 1x on a 60 Hz or faster display: nothing (by design).
+- A slow device (phone profile): run-ahead 2 keeps 60 fps where main
+  slows; 2x has fewer uneven refreshes (1334 against 1934 a minute), not
+  the near-perfect cadence the first prototype's model suggested.
 
 Cost: the diff against main (see the report with the branch) touches the
 GBA and GB PPUs (an early return; three stores guarded on the GB FIFO),
