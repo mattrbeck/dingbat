@@ -328,8 +328,8 @@
   "dingbat-bios": "600003DF"
  },
  "u.rs15_lsr": {
-  "dingbat": "000FFFFF",
-  "dingbat-bios": "000FFFFF"
+  "dingbat": "00FFFFFF",
+  "dingbat-bios": "00FFFFFF"
  },
  "u.rn15_regshift": {
   "dingbat": "0000000C",
@@ -408,7 +408,7 @@
   "dingbat-bios": "603F0204"
  },
  "x.mrs_r15": {
-  "dingbat": "00100020",
+  "dingbat": "00101030",
   "dingbat-bios": "00101030"
  }
 }

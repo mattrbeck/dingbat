@@ -120,6 +120,16 @@ proc rotate_register*(cpu: CPU; instr: uint32; carry_out: ptr bool; allow_regist
   of 0b11: cpu.ror(cpu.r[reg], shift_amount, immediate, carry_out)
   else: raise newException(Exception, "Impossible shift type: " & hex_str(uint8(shift_type)))
 
+proc register_shift(cpu: CPU; instr: uint32; amount: uint32; carry_out: ptr bool): uint32 {.inline.} =
+  ## Rm shifted by a register's bottom byte, `amount`, which the caller read
+  ## (arm_data_processing reads Rs before r15 moves on to PC+12).
+  let rm = cpu.r[int(bits_range(instr, 0, 3))]
+  case bits_range(instr, 5, 6)
+  of 0b00: cpu.lsl(rm, amount, carry_out)
+  of 0b01: cpu.lsr(rm, amount, false, carry_out)
+  of 0b10: cpu.asr(rm, amount, false, carry_out)
+  else:    cpu.ror(rm, amount, false, carry_out)
+
 proc immediate_offset*(cpu: CPU; instr: uint32; carry_out: ptr bool): uint32 =
   let rotate = bits_range(instr, 8, 11)
   let imm    = bits_range(instr, 0, 7)
@@ -775,6 +785,10 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
                             set_cond, bit4: static bool](cpu: CPU; instr: uint32) =
   const pc_reads_12_ahead = not imm_flag and bit4
   when pc_reads_12_ahead:
+    # Rs is read first, while r15 is still PC+8; Rn and Rm read PC+12
+    # (GBATEK). AGB SP: `mov r0, r1, lsr pc` at an address ending 00 shifts
+    # by 8 (docs/hwprobe-sst.md, u.rs15_lsr).
+    let rs_amount = cpu.r[int(bits_range(instr, 8, 11))] and 0xFF'u32
     cpu.r[15] += 4
     cpu.idle(1)  # register-specified shift costs one internal cycle
   var barrel_carry = cpu.cpsr.carry
@@ -785,8 +799,10 @@ proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
   let operand_2 =
     when imm_flag:
       cpu.immediate_offset(bits_range(instr, 0, 11), addr barrel_carry)
+    elif pc_reads_12_ahead:
+      cpu.register_shift(instr, rs_amount, addr barrel_carry)
     else:
-      cpu.rotate_register(bits_range(instr, 0, 11), addr barrel_carry, allow_register_shifts = true)
+      cpu.rotate_register(bits_range(instr, 0, 11), addr barrel_carry, allow_register_shifts = false)
   when opcode == AND:
     discard cpu.set_reg(rd, cpu.r[rn] and operand_2)
     when set_cond:

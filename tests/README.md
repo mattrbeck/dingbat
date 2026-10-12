@@ -415,19 +415,22 @@ page; `results_singlestep.md` has every row's checks and divergences.
 |---|---|---|---|
 | SM83 `10` STOP | two bytes and STOP mode with no interrupt pending | one byte, three M-cycles | Pan Docs, "Reducing Power Consumption" (STOP chart) |
 | SM83 `76` HALT | the HALT's fetch M-cycle; halted M-cycles are later ticks | three M-cycles | convention only: registers and PC agree |
-| ARM S-bit data processing to r15 in User/System | NZCV kept (no SPSR to restore) | flags from the ALU | `tests/roms/payloads/sysmovs.s` on an AGB SP |
-| ARM TST/TEQ/CMP/CMN with Rd = r15 (ARMv2 `TSTP`) | treated as an S-bit r15 write (exception return) | a plain compare | UNPREDICTABLE on ARMv4 (GBATEK: the P forms are ARMv2 only) |
-| ARM register-specified shift by r15 | its own reading of r15 | another | UNPREDICTABLE (GBATEK: Rs is R0-R14) |
-| ARM LDR/STR with base r15 and writeback | PC := writeback address (+4 for a load, load suppressed) | another | gbaedge THUMBPC2/PCWB2 on an AGB SP (docs/hwprobe-results-agb.md) |
-| ARM LDM/STM with base r15 and writeback | no writeback | writes back and branches | gbaedge PCWB2 on an AGB SP |
-| ARM MRC/MCR to coprocessor 14 | answers (MRC reads the prefetch, MCR is ignored) | Undefined Instruction trap | alyosha `arm/Coprocessor_14` (verified on hardware) |
-| ARM MRS to r15 | a branch | r15 written without a refill | UNPREDICTABLE |
-| ARM MSR: PSR bits 8-27, SPSR bit 4 | bits 8-27 read 0; SPSR bit 4 reads 1 | latched as written | gbaedge CPSRBITS on an AGB SP |
-| ARM MUL/MLA/UMULL.. with a destination of r15 | result dropped, no branch | writes r15 and branches | png183 `arm/multiply` (verified on hardware) |
-| ARM multiply with r15 as an operand | r15 = PC+8 | PC+12 | UNPREDICTABLE |
-| ARM SWP with r15 as an operand | its own reading | another | UNPREDICTABLE |
-| Thumb `CMP` hi-register with Rd = r15 | CPSR := SPSR, no compare | a plain compare | gbaedge THUMBPC/THUMBPC2 on an AGB SP |
-| Thumb `Bcc` with cond 1110 (`DExx`) | Undefined Instruction trap | a branch | GBATEK THUMB.16 (cond 1110 is undefined) |
+| ARM S-bit data processing to r15 in User/System | NZCV kept (no SPSR to restore) | flags from the ALU | AGB SP: `sysmovs.s`; hwprobe-sst r.sysmovs.\*, r.usermovs.\* |
+| ARM TST/TEQ/CMP/CMN with Rd = r15 (ARMv2 `TSTP`), User/System | NZCV kept, as the S-bit write above | the compare's flags (in the exception modes both restore CPSR from SPSR) | AGB SP: hwprobe-sst u.tstp.sys etc. |
+| ARM LDR/STR with base r15 and writeback | PC := writeback address (+4 for a load, load suppressed) | writeback + 4, the load done | AGB SP: gbaedge THUMBPC2/PCWB2; hwprobe-sst r.ldr_pc_\*, r.str_pc_\* |
+| ARM LDM/STM with base r15 and writeback | no writeback | writes back and branches | AGB SP: gbaedge PCWB2; hwprobe-sst r.ldmia_pc!, r.stmia_pc! |
+| ARM MRC/MCR to coprocessor 14 | answers (MRC reads the prefetch, MCR is ignored) | Undefined Instruction trap | AGB SP: hwprobe-sst x.mrc14_\*, x.mcr14_c1; GBATEK; alyosha `arm/Coprocessor_14` |
+| ARM MRS to r15 | a branch | r15 written without a refill | AGB SP: hwprobe-sst x.mrs_r15 |
+| ARM MSR: PSR bits 8-27, SPSR bit 4 | bits 8-27 read 0; SPSR bit 4 reads 1 | latched as written | AGB SP: gbaedge CPSRBITS; hwprobe-sst r.cpsr_\*, r.spsr_\* |
+| ARM MUL/MLA/UMULL.. with a destination of r15 | result dropped, no branch | writes r15 and branches | AGB SP: hwprobe-sst u.mul_rd15 etc.; png183 `arm/multiply` |
+| ARM multiply with r15 as an operand | r15 = PC+8 | PC+12 | AGB SP: hwprobe-sst u.mul_rm15, u.mul_rs15, u.mla_rn15, u.umull_rm15 |
+| ARM SWP with a base of r15 | the address is PC+8 | PC+12 | AGB SP: hwprobe-sst u.swp_rn15 |
+| Thumb `CMP` hi-register with Rd = r15 | CPSR := SPSR, no compare | a plain compare | AGB SP: gbaedge THUMBPC/THUMBPC2; hwprobe-sst r.thumb_cmp_pc.\* |
+| Thumb `Bcc` with cond 1110 (`DExx`) | Undefined Instruction trap | a branch | AGB SP: hwprobe-sst x.thumb_dexx; GBATEK THUMB.16 |
+
+Every ARM7TDMI row is settled on an AGB SP by `docs/hwprobe-sst.md` (the
+cell named). It also settled one the other way: a register-specified shift
+by r15 reads PC+8, the vectors' answer, which dingbat now follows.
 
 Not covered: interrupts and their dispatch (the vectors take none), the GBA's
 waitstates and prefetcher (the vectors' bus is flat), and ARMv5 forms.

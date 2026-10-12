@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-11 23:11:10 · commit 28ce4a0e · game-boy-test-roms v7.0*
+*Generated: 2026-10-12 10:56:55 · commit 2311e38d · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
@@ -371,7 +371,7 @@ One row per vector file (ARM7TDMI) or opcode block (SM83), green when every fail
 | arm7tdmi/arm_cdp | — | 👌 5042/5042 passed |
 | arm7tdmi/arm_data_proc_immediate | — | 👌 5192/5334 passed (142 known divergences) |
 | arm7tdmi/arm_data_proc_immediate_shift | — | 👌 5195/5334 passed (139 known divergences) |
-| arm7tdmi/arm_data_proc_register_shift | — | 👌 5117/5331 passed (214 known divergences) |
+| arm7tdmi/arm_data_proc_register_shift | — | 👌 5168/5331 passed (163 known divergences) |
 | arm7tdmi/arm_ldm_stm | — | 👌 4196/4249 passed (53 known divergences) |
 | arm7tdmi/arm_ldr_str_immediate_offset | — | 👌 5042/5167 passed (125 known divergences) |
 | arm7tdmi/arm_ldr_str_register_offset | — | 👌 5054/5167 passed (113 known divergences) |

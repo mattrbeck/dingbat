@@ -491,6 +491,14 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # BIOS variables, written by nothing else) and sp_und, neither of which a
     # game can see while it hangs — the stub keeps only subs pc, lr, #4.
     write_stub_u32(result.bios, 0x004, 0xEA000004'u32)
+    # The prefetch-abort, data-abort and reserved vectors branch to the same
+    # handler, as in the real BIOS. Nothing on a GBA raises those; a write
+    # of 0x10 to r15 reaches one (docs/hwprobe-sst.md, x.mrs_r15: the AGB SP
+    # comes back through the handler, where the stub without these words ran
+    # on into the IRQ vector)
+    write_stub_u32(result.bios, 0x00C, 0xEA000002'u32)  # b 0x1C
+    write_stub_u32(result.bios, 0x010, 0xEA000001'u32)  # b 0x1C
+    write_stub_u32(result.bios, 0x014, 0xEA000000'u32)  # b 0x1C
     write_stub_u32(result.bios, 0x01C, 0xE25EF004'u32)
     write_stub_u32(result.bios, 0x018, 0xEA000042'u32)
     write_stub_u32(result.bios, 0x128, 0xE92D500F'u32)

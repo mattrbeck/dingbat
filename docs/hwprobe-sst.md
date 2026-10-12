@@ -13,8 +13,8 @@ whole table is one self-contained probe that anyone can rerun:
 | `tests/roms/payloads/sstrisk.s` | group C: 7 cells where an undefined-instruction trap or a jump into the BIOS is a possible answer; uploaded on its own and run last |
 | `tests/roms/payloads/sst.inc` | the frame both share: saves and restores every bank, SPSR, IME, IE, the timers and the IRQ vector; the watchdog |
 | `tools/hwlink/sst.py` | runs the cells in dingbat (`emulators`), on the console (`console`), prints them side by side (`show`), builds cartridge ROMs of both payloads (`rom`) |
-| `tools/hwlink/sst-dingbat.json` | dingbat's answers (HLE BIOS and the real BIOS), main `716b7589` |
-| `tools/hwlink/sst-agb.json` | the console's, once run: every answer with its count over three runs |
+| `tools/hwlink/sst-dingbat.json` | dingbat's answers (HLE BIOS and the real BIOS) |
+| `tools/hwlink/sst-agb.json` | the console's, recorded 2026-10-12: every answer with its count over three runs |
 
 `python3 tools/hwlink/sst.py rom DIR` builds `sst.gba` and `sstrisk.gba`,
 cartridge ROMs that run every cell of a payload once, in order, and store
@@ -90,15 +90,16 @@ to that cell is already in the file. To carry on with the cells after it:
 - The worst case for any cell is a wedged console: a power cycle and a
   reinstall, no damage.
 
-## The cells and the three answers so far
+## The cells and the four answers
 
-Columns: **dingbat** is main `716b7589` with the real BIOS (`sst.py
-emulators`; the HLE BIOS answers the same except where noted). **Vectors**
+Columns: **dingbat** is this branch with the real BIOS (`sst.py
+emulators`; the HLE BIOS answers the same), after the two fixes the
+console asked for (u.rs15_lsr, x.mrs_r15 on the HLE BIOS; below). **Vectors**
 is what the SingleStepTests ARM7TDMI vectors (rev `e3097d8`) do for the same
 instruction, read from the vector files (`~/.cache/dingbat-singlestep`) or
 the known-divergence bucket in `tests/singlestep_arm7.nim`, and applied to
 the cell. **GBATEK** is what GBATEK states, or "-" where it states nothing
-for ARMv4. **AGB SP** is the console, to be filled from `sst-agb.json`.
+for ARMv4. **AGB SP** is the console (`sst-agb.json`, 2026-10-12): three runs a cell, every cell answered the same each time.
 A = the address of the instruction tested.
 
 ### 1. r15 stores: timing and the value stored
@@ -115,36 +116,36 @@ apart.
 
 | Cell | dingbat raw | dingbat /insn | dingbat before /insn | Vectors | GBATEK /insn | AGB SP |
 |---|---|---|---|---|---|---|
-| t.ctrl | 0000 | - | - | - | - | |
-| t.str_r0.iw | 0008 | 2 | 2 | 1 store | 2N = 2 | |
-| t.str_pc.iw | 0008 | 2 | 4 | 1 store | 2N = 2 | |
-| t.strb_r0.iw | 0008 | 2 | 2 | 1 store | 2 | |
-| t.strb_pc.iw | 0008 | 2 | 4 | 1 byte store | 2 | |
-| t.strh_r0.iw | 0008 | 2 | 2 | 1 store | 2 | |
-| t.strh_pc.iw | 0008 | 2 | 4 | 1 halfword store | 2 | |
-| t.stm_r0-r3.iw | 0014 | 5 | 5 | 4 stores | (n-1)S+2N = 5 | |
-| t.stm_r0-r2_pc.iw | 0014 | 5 | 7 | 4 stores | 5 | |
-| t.stmdb_r0_r4_r11_r12_lr.iw | 0018 | 6 | 6 | 5 stores | 6 | |
-| t.stmdb_r4_r11_r12_lr_pc.iw | 0018 | 6 | 8 | 5 stores | 6 | |
-| t.str_r0.ew | 001C | 7 | 7 | 1 store | 1 + 6 = 7 | |
-| t.str_pc.ew | 001C | 7 | 19 | 1 store | 7 | |
-| t.strb_r0.ew | 0010 | 4 | 4 | 1 store | 1 + 3 = 4 | |
-| t.strb_pc.ew | 0010 | 4 | 16 | 1 byte store | 4 | |
-| t.strh_r0.ew | 0010 | 4 | 4 | 1 store | 4 | |
-| t.strh_pc.ew | 0010 | 4 | 10 | 1 halfword store | 4 | |
-| t.stm_r0-r3.ew | 0064 | 25 | 25 | 4 stores | 1 + 4×6 = 25 | |
-| t.stm_r0-r2_pc.ew | 0064 | 25 | 37 | 4 stores | 25 | |
-| t.stmdb_r0_r4_r11_r12_lr.ew | 007C | 31 | 31 | 5 stores | 31 | |
-| t.stmdb_r4_r11_r12_lr_pc.ew | 007C | 31 | 43 | 5 stores | 31 | |
-| t.thumb_ctrl | 0006 | - | - | - | - | |
-| t.push_r0.iw | 000E | 2 | 2 | 1 store | 2 | |
-| t.push_lr.iw | 000E | 2 | 2 | 1 store | 2 | |
-| t.push_r3-r7.iw | 001E | 6 | 6 | 5 stores | 6 | |
-| t.push_r4-r7_lr.iw | 001E | 6 | 6 | 5 stores | 6 | |
-| t.push_r0.ew | 0022 | 7 | 7 | 1 store | 7 | |
-| t.push_lr.ew | 0022 | 7 | 7 | 1 store | 7 | |
-| t.push_r3-r7.ew | 0082 | 31 | 31 | 5 stores | 31 | |
-| t.push_r4-r7_lr.ew | 0082 | 31 | 31 | 5 stores | 31 | |
+| t.ctrl | 0000 | - | - | - | - | **0000** |
+| t.str_r0.iw | 0008 | 2 | 2 | 1 store | 2N = 2 | **0008, 2/insn** |
+| t.str_pc.iw | 0008 | 2 | 4 | 1 store | 2N = 2 | **0008, 2/insn** |
+| t.strb_r0.iw | 0008 | 2 | 2 | 1 store | 2 | **0008, 2/insn** |
+| t.strb_pc.iw | 0008 | 2 | 4 | 1 byte store | 2 | **0008, 2/insn** |
+| t.strh_r0.iw | 0008 | 2 | 2 | 1 store | 2 | **0008, 2/insn** |
+| t.strh_pc.iw | 0008 | 2 | 4 | 1 halfword store | 2 | **0008, 2/insn** |
+| t.stm_r0-r3.iw | 0014 | 5 | 5 | 4 stores | (n-1)S+2N = 5 | **0014, 5/insn** |
+| t.stm_r0-r2_pc.iw | 0014 | 5 | 7 | 4 stores | 5 | **0014, 5/insn** |
+| t.stmdb_r0_r4_r11_r12_lr.iw | 0018 | 6 | 6 | 5 stores | 6 | **0018, 6/insn** |
+| t.stmdb_r4_r11_r12_lr_pc.iw | 0018 | 6 | 8 | 5 stores | 6 | **0018, 6/insn** |
+| t.str_r0.ew | 001C | 7 | 7 | 1 store | 1 + 6 = 7 | **001C, 7/insn** |
+| t.str_pc.ew | 001C | 7 | 19 | 1 store | 7 | **001C, 7/insn** |
+| t.strb_r0.ew | 0010 | 4 | 4 | 1 store | 1 + 3 = 4 | **0010, 4/insn** |
+| t.strb_pc.ew | 0010 | 4 | 16 | 1 byte store | 4 | **0010, 4/insn** |
+| t.strh_r0.ew | 0010 | 4 | 4 | 1 store | 4 | **0010, 4/insn** |
+| t.strh_pc.ew | 0010 | 4 | 10 | 1 halfword store | 4 | **0010, 4/insn** |
+| t.stm_r0-r3.ew | 0064 | 25 | 25 | 4 stores | 1 + 4×6 = 25 | **0064, 25/insn** |
+| t.stm_r0-r2_pc.ew | 0064 | 25 | 37 | 4 stores | 25 | **0064, 25/insn** |
+| t.stmdb_r0_r4_r11_r12_lr.ew | 007C | 31 | 31 | 5 stores | 31 | **007C, 31/insn** |
+| t.stmdb_r4_r11_r12_lr_pc.ew | 007C | 31 | 43 | 5 stores | 31 | **007C, 31/insn** |
+| t.thumb_ctrl | 0006 | - | - | - | - | **0006** |
+| t.push_r0.iw | 000E | 2 | 2 | 1 store | 2 | **000E, 2/insn** |
+| t.push_lr.iw | 000E | 2 | 2 | 1 store | 2 | **000E, 2/insn** |
+| t.push_r3-r7.iw | 001E | 6 | 6 | 5 stores | 6 | **001E, 6/insn** |
+| t.push_r4-r7_lr.iw | 001E | 6 | 6 | 5 stores | 6 | **001E, 6/insn** |
+| t.push_r0.ew | 0022 | 7 | 7 | 1 store | 7 | **0022, 7/insn** |
+| t.push_lr.ew | 0022 | 7 | 7 | 1 store | 7 | **0022, 7/insn** |
+| t.push_r3-r7.ew | 0082 | 31 | 31 | 5 stores | 31 | **0082, 31/insn** |
+| t.push_r4-r7_lr.ew | 0082 | 31 | 31 | 5 stores | 31 | **0082, 31/insn** |
 
 The vectors' bus is flat (no wait states) and their cycle numbers are
 documented upstream as unreliable, so their answer is the access count; it
@@ -157,11 +158,11 @@ A; the other lanes as read back):
 
 | Cell | Instruction | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| v.str_pc | `str pc, [r9]` | 0000000C | 0000000C | PC+12 | |
-| v.strb_pc | `strb pc, [r9]` | AAAAAA0C | AAAAAA0C | PC+12, low byte | |
-| v.strh_pc | `strh pc, [r9]` | AAAA000C | AAAA000C | PC+12 | |
-| v.stm_pc | `stmia r9, {r0-r2, pc}`, the pc slot | 0000000C | 0000000C | - | |
-| v.stmdb_pc | `stmdb r9, {r4, r11, r12, lr, pc}`, the pc slot | 0000000C | 0000000C | - | |
+| v.str_pc | `str pc, [r9]` | 0000000C | 0000000C | PC+12 | **0000000C** |
+| v.strb_pc | `strb pc, [r9]` | AAAAAA0C | AAAAAA0C | PC+12, low byte | **AAAAAA0C** |
+| v.strh_pc | `strh pc, [r9]` | AAAA000C | AAAA000C | PC+12 | **AAAA000C** |
+| v.stm_pc | `stmia r9, {r0-r2, pc}`, the pc slot | 0000000C | 0000000C | - | **0000000C** |
+| v.stmdb_pc | `stmdb r9, {r4, r11, r12, lr, pc}`, the pc slot | 0000000C | 0000000C | - | **0000000C** |
 
 Store order (the Thumb PUSH fix in `28ce4a0e`), read off the timers: two
 words that start TM0 (at the lower address) and TM1 are stored by one
@@ -170,15 +171,15 @@ instruction; the answer is TM0's count << 16 | TM1's, read by one `ldmia`
 
 | Cell | Instruction | dingbat | dingbat before | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|---|
-| v.push_order.thumb_push | `push {r0, r1}`, sp = TM0CNT + 8 | 00040004 (ascending) | 00030005 (descending) | ascending | lowest register to lowest address, ascending | |
-| v.push_order.arm_stmia | `stmia r10, {r0, r1}` | 00040004 | 00040004 | ascending | ascending | |
-| v.push_order.arm_str_desc | `str r1, [r10, #4]; str r0, [r10]` | 00030006 | 00030006 | - | - | |
+| v.push_order.thumb_push | `push {r0, r1}`, sp = TM0CNT + 8 | 00040004 (ascending) | 00030005 (descending) | ascending | lowest register to lowest address, ascending | **00040004** |
+| v.push_order.arm_stmia | `stmia r10, {r0, r1}` | 00040004 | 00040004 | ascending | ascending | **00040004** |
+| v.push_order.arm_str_desc | `str r1, [r10, #4]; str r0, [r10]` | 00030006 | 00030006 | - | - | **00030006** |
 
 ### 2. Thumb `DExx` (Bcc with cond 1110): group C
 
 | Cell | Instruction | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| x.thumb_dexx | `DE02` at A (target A+8), System mode, Z C set | 603F0204: trapped (4), returned to A-2; R14_und - A = 2; SPSR_und 0x6000003F | 00000001: a branch to A+8 | "E: Undefined, should not be used" (THUMB.16) | |
+| x.thumb_dexx | `DE02` at A (target A+8), System mode, Z C set | 603F0204: trapped (4), returned to A-2; R14_und - A = 2; SPSR_und 0x6000003F | 00000001: a branch to A+8 | "E: Undefined, should not be used" (THUMB.16) | **603F0204** |
 
 Answer: bits 0-7 how it left (1 branched, 2 fell through, 4 trapped and
 came back before it, 8 the watchdog); bits 8-15 R14_und - A (0 before, and
@@ -195,18 +196,18 @@ A+4, A+8 ran, i.e. no branch).
 
 | Cell | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|
-| u.tstp.svc | 900003DF | 900003DF | P forms "ARMv2 and below only"; nothing for ARMv4 | |
-| u.teqp.svc | 900003DF | 900003DF | - | |
-| u.cmpp.svc | 900003DF | 900003DF | - | |
-| u.cmnp.svc | 900003DF | 900003DF | - | |
-| u.tstp.irq | 300003D7 | 300003D7 | - | |
-| u.teqp.irq | 300003D7 | 300003D7 | - | |
-| u.cmpp.irq | 300003D7 | 300003D7 | - | |
-| u.cmnp.irq | 300003D7 | 300003D7 | - | |
-| u.tstp.sys | 600003DF | 200003DF | - | |
-| u.teqp.sys | 600003DF | 200003DF | - | |
-| u.cmpp.sys | 600003DF | 200003DF | - | |
-| u.cmnp.sys | 600003DF | 000003DF | - | |
+| u.tstp.svc | 900003DF | 900003DF | P forms "ARMv2 and below only"; nothing for ARMv4 | **900003DF** |
+| u.teqp.svc | 900003DF | 900003DF | - | **900003DF** |
+| u.cmpp.svc | 900003DF | 900003DF | - | **900003DF** |
+| u.cmnp.svc | 900003DF | 900003DF | - | **900003DF** |
+| u.tstp.irq | 300003D7 | 300003D7 | - | **300003D7** |
+| u.teqp.irq | 300003D7 | 300003D7 | - | **300003D7** |
+| u.cmpp.irq | 300003D7 | 300003D7 | - | **300003D7** |
+| u.cmnp.irq | 300003D7 | 300003D7 | - | **300003D7** |
+| u.tstp.sys | 600003DF | 200003DF | - | **600003DF** |
+| u.teqp.sys | 600003DF | 200003DF | - | **600003DF** |
+| u.cmpp.sys | 600003DF | 200003DF | - | **600003DF** |
+| u.cmnp.sys | 600003DF | 000003DF | - | **600003DF** |
 
 In the exception modes the vectors restore the SPSR too (CPSR := SPSR, no
 branch, as dingbat does); their disagreement with dingbat is only in User
@@ -220,9 +221,9 @@ Register-shifted data processing reading r15 (group B):
 
 | Cell | Instruction | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| u.rs15_lsr | `mov r0, r1, lsr pc`, r1 = 0xFFFFFFFF, A = xx00: 0xFFFFFFFF >> (r15's low byte) | 000FFFFF (Rs = A+12) | 00FFFFFF (Rs = A+8) | "Rs (R0-R14)" | |
-| u.rn15_regshift | `add r0, pc, r1, lsl r2` (0, 0); r0 - A | 0000000C | 0000000C | PC+12 (shift by register) | |
-| u.rm15_regshift | `mov r0, pc, lsl r2` (0); r0 - A | 0000000C | 0000000C | PC+12 | |
+| u.rs15_lsr | `mov r0, r1, lsr pc`, r1 = 0xFFFFFFFF, A = xx00: 0xFFFFFFFF >> (r15's low byte) | 00FFFFFF (Rs = A+8; 000FFFFF, A+12, until this probe) | 00FFFFFF (Rs = A+8) | "Rs (R0-R14)" | **00FFFFFF** |
+| u.rn15_regshift | `add r0, pc, r1, lsl r2` (0, 0); r0 - A | 0000000C | 0000000C | PC+12 (shift by register) | **0000000C** |
+| u.rm15_regshift | `mov r0, pc, lsl r2` (0); r0 - A | 0000000C | 0000000C | PC+12 | **0000000C** |
 
 Multiplies (group B). The first four write r15 with the address of a pad
 (markers: 1, 2 = A+4, A+8 ran; 0x10 = went to the product); the rest read
@@ -230,14 +231,14 @@ r15 (r0 - A):
 
 | Cell | Instruction | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| u.mul_rd15 | `mul pc, r0, r1` | 00000003 (no write) | 00000010 (branch) | "Rd,Rn,Rs,Rm may not be R15" | |
-| u.mla_rd15 | `mla pc, r0, r1, r2` | 00000003 | 00000010 | same | |
-| u.umull_rdlo15 | `umull pc, r3, r0, r1` | 00000003 | 00000010 | "R15 may not be used" | |
-| u.umull_rdhi15 | `umull r3, pc, r0, r1` | 00000003 | 00000010 | same | |
-| u.mul_rm15 | `mul r0, pc, r1` (r1 = 1) | 00000008 | 0000000C | may not be R15 | |
-| u.mul_rs15 | `mul r0, r1, pc` (r1 = 1) | 00000008 | 0000000C | same | |
-| u.mla_rn15 | `mla r0, r1, r2, pc` (0, 0) | 00000008 | 0000000C | same | |
-| u.umull_rm15 | `umull r0, r3, pc, r1` (r1 = 1) | 00000008 | 0000000C | same | |
+| u.mul_rd15 | `mul pc, r0, r1` | 00000003 (no write) | 00000010 (branch) | "Rd,Rn,Rs,Rm may not be R15" | **00000003** |
+| u.mla_rd15 | `mla pc, r0, r1, r2` | 00000003 | 00000010 | same | **00000003** |
+| u.umull_rdlo15 | `umull pc, r3, r0, r1` | 00000003 | 00000010 | "R15 may not be used" | **00000003** |
+| u.umull_rdhi15 | `umull r3, pc, r0, r1` | 00000003 | 00000010 | same | **00000003** |
+| u.mul_rm15 | `mul r0, pc, r1` (r1 = 1) | 00000008 | 0000000C | may not be R15 | **00000008** |
+| u.mul_rs15 | `mul r0, r1, pc` (r1 = 1) | 00000008 | 0000000C | same | **00000008** |
+| u.mla_rn15 | `mla r0, r1, r2, pc` (0, 0) | 00000008 | 0000000C | same | **00000008** |
+| u.umull_rm15 | `umull r0, r3, pc, r1` (r1 = 1) | 00000008 | 0000000C | same | **00000008** |
 
 dingbat's no-write rows rest on png183 `arm/multiply` (verified on hardware).
 
@@ -245,20 +246,20 @@ SWP with r15 (group B):
 
 | Cell | Instruction | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| u.swp_rm15 | `swp r0, pc, [r1]`: stored word - A | 0000000C | 0000000C | "R15 may not be used for either Rn,Rd,Rm" | |
-| u.swp_rd15 | `swp pc, r0, [r1]`, [r1] = a pad: markers \| 0x100 if r0 was stored | 00000110 (branch, stored) | 00000110 | same | |
-| u.swp_rn15 | `swp r0, r1, [pc]`, r1 = `orr r6, r6, #0x40`: r0's low byte (which marker word it read) \| markers << 8 (1, 2, 4: A+4, A+8, A+12 ran; 0x40 the stored word ran) \| words changed << 16 (1 A+4, 2 A+8, 4 A+12) | 00020702 (address A+8; the old A+8 word ran, already fetched) | 00044304 (address A+12; the stored word ran) | same | |
+| u.swp_rm15 | `swp r0, pc, [r1]`: stored word - A | 0000000C | 0000000C | "R15 may not be used for either Rn,Rd,Rm" | **0000000C** |
+| u.swp_rd15 | `swp pc, r0, [r1]`, [r1] = a pad: markers \| 0x100 if r0 was stored | 00000110 (branch, stored) | 00000110 | same | **00000110** |
+| u.swp_rn15 | `swp r0, r1, [pc]`, r1 = `orr r6, r6, #0x40`: r0's low byte (which marker word it read) \| markers << 8 (1, 2, 4: A+4, A+8, A+12 ran; 0x40 the stored word ran) \| words changed << 16 (1 A+4, 2 A+8, 4 A+12) | 00020702 (address A+8; the old A+8 word ran, already fetched) | 00044304 (address A+12; the stored word ran) | same | **00020702** |
 
 MRS into r15 and CP14 (group C):
 
 | Cell | Instruction | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| x.mrc14_c0 | `mrc p14, 0, r0, c0, c0, 0`; A+8 holds 0xC0DE1400 | C0DE1400 | 7A700004 (trap; R14_und = A+4) | no exception; reads "the prefetched opcode value from [$+8]" ("ARM CP14 ICEbreaker") | |
-| x.mrc14_c1 | `mrc p14, 0, r0, c1, c0, 0` | C0DE1401 | 7A700004 | same | |
-| x.mrc14_c2 | `mrc p14, 0, r0, c2, c0, 0` | C0DE1402 | 7A700004 | same | |
-| x.mcr14_c1 | `mcr p14, 0, r0, c1, c0, 0`: 0x14 if it fell through | 00000014 | 7A700004 | no exception | |
-| x.mrc14_r15 | `mrc p14, 0, pc, c0, c0, 0`, A+8 = 0xA0DE14F0, flags clear: CPSR flags << 24 \| low byte | A000001F | 7A700004 | "Bit 31-28 of data are copied to ... N,Z,C,V" | |
-| x.mrs_r15 | `mrs pc, spsr` in SVC, SPSR_svc = 0x10. Bits 0-7 markers (1, 2, 4: A+4, A+8, A+12 ran; 0x10 came back through the BIOS; 0x20 the watchdog), 8-15 the CPSR's low byte where it came out, 16-23 the interrupted CPSR as the watchdog found it, 24-31 flags | 00101030: a branch to 0x10 and back through the BIOS handler (HLE BIOS: 00100020) | r15 written without a refill (their final r15 is the value + 4, no refill fetch), so A+4 and A+8 would run first: 00101033 if the rest goes as dingbat's | "Rd (R0-R14)" | |
+| x.mrc14_c0 | `mrc p14, 0, r0, c0, c0, 0`; A+8 holds 0xC0DE1400 | C0DE1400 | 7A700004 (trap; R14_und = A+4) | no exception; reads "the prefetched opcode value from [$+8]" ("ARM CP14 ICEbreaker") | **C0DE1400** |
+| x.mrc14_c1 | `mrc p14, 0, r0, c1, c0, 0` | C0DE1401 | 7A700004 | same | **C0DE1401** |
+| x.mrc14_c2 | `mrc p14, 0, r0, c2, c0, 0` | C0DE1402 | 7A700004 | same | **C0DE1402** |
+| x.mcr14_c1 | `mcr p14, 0, r0, c1, c0, 0`: 0x14 if it fell through | 00000014 | 7A700004 | no exception | **00000014** |
+| x.mrc14_r15 | `mrc p14, 0, pc, c0, c0, 0`, A+8 = 0xA0DE14F0, flags clear: CPSR flags << 24 \| low byte | A000001F | 7A700004 | "Bit 31-28 of data are copied to ... N,Z,C,V" | **A000001F** |
+| x.mrs_r15 | `mrs pc, spsr` in SVC, SPSR_svc = 0x10. Bits 0-7 markers (1, 2, 4: A+4, A+8, A+12 ran; 0x10 came back through the BIOS; 0x20 the watchdog), 8-15 the CPSR's low byte where it came out, 16-23 the interrupted CPSR as the watchdog found it, 24-31 flags | 00101030: a branch to 0x10 and back through the BIOS handler (the HLE BIOS's stub answered 00100020 until it got the abort vectors) | r15 written without a refill (their final r15 is the value + 4, no refill fetch), so A+4 and A+8 would run first: 00101033 if the rest goes as dingbat's | "Rd (R0-R14)" | **00101030** |
 
 dingbat's CP14 answer rests on alyosha `arm/Coprocessor_14` (verified on
 hardware) as well as GBATEK. Its MRS-into-r15 does not align r15: with the
@@ -276,15 +277,15 @@ Z and C set before.
 
 | Cell | Instruction | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| r.sysmovs.movs | `movs pc, lr` (System) | 6000029F | 2000029F (the MOV's flags) | "should not be used in user mode" | 6000029F on 2026-10-03 (sysmovs.s) |
-| r.sysmovs.subs | `subs pc, lr, #0` | 6000029F | 2000029F | same | 6000029F on 2026-10-03 |
-| r.sysmovs.ldm^ | `ldmfd sp!, {pc}^` | 6000029F | 6000029F | - | 6000029F on 2026-10-03 |
-| r.sysmovs.movs.thumbspsr | the same after a Thumb SPSR in IRQ mode | 6000029F | 2000029F | same | 6000029F on 2026-10-03 |
-| r.sysmovs.subs.thumbspsr | | 6000029F | 2000029F | same | 6000029F on 2026-10-03 |
-| r.sysmovs.ldm^.thumbspsr | | 6000029F | 6000029F | - | 6000029F on 2026-10-03 |
-| r.usermovs.movs | `movs pc, lr` (User) | 60000210 | 20000210 | same | |
-| r.usermovs.subs | `subs pc, lr, #0` (User) | 60000210 | 20000210 | same | |
-| r.usermovs.ldm^ | `ldmfd sp!, {pc}^` (User) | 60000210 | 60000210 | - | |
+| r.sysmovs.movs | `movs pc, lr` (System) | 6000029F | 2000029F (the MOV's flags) | "should not be used in user mode" | **6000029F** (also 2026-10-03, sysmovs.s) |
+| r.sysmovs.subs | `subs pc, lr, #0` | 6000029F | 2000029F | same | **6000029F** (also 2026-10-03) |
+| r.sysmovs.ldm^ | `ldmfd sp!, {pc}^` | 6000029F | 6000029F | - | **6000029F** (also 2026-10-03) |
+| r.sysmovs.movs.thumbspsr | the same after a Thumb SPSR in IRQ mode | 6000029F | 2000029F | same | **6000029F** (also 2026-10-03) |
+| r.sysmovs.subs.thumbspsr | | 6000029F | 2000029F | same | **6000029F** (also 2026-10-03) |
+| r.sysmovs.ldm^.thumbspsr | | 6000029F | 6000029F | - | **6000029F** (also 2026-10-03) |
+| r.usermovs.movs | `movs pc, lr` (User) | 60000210 | 20000210 | same | **60000210** |
+| r.usermovs.subs | `subs pc, lr, #0` (User) | 60000210 | 20000210 | same | **60000210** |
+| r.usermovs.ldm^ | `ldmfd sp!, {pc}^` (User) | 60000210 | 60000210 | - | **60000210** |
 
 r15 as a base with writeback. A+4 .. A+16 are markers 1, 2, 4, 8; a store
 writes `orr r6, r6, #0x40`, so marker 0x40 means the stored word ran.
@@ -293,21 +294,21 @@ gives its n; 0x40 for the stores) | words changed << 16 (1 A+8, 2 A+12).
 
 | Cell | Instruction | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| r.ldmia_pc! | `ldmia pc!, {r1}` | 0000020F (no writeback) | 0000020C (writes back, branches to A+12) | "Rn (R0-R14)" | no writeback (gbaedge PCWB2) |
-| r.str_pc_post | `str r1, [pc], #4` | 0001400C (PC := writeback, A+12) | 00014008 (PC := writeback + 4) | - | PC = base+4 = A+12 (THUMBPC2) |
-| r.ldr_pc_post | `ldr r1, [pc], #4` | 00005E08 (PC := writeback + 4, load suppressed) | 00000208 (PC := writeback + 4, load done) | - | PC = base+8, load suppressed (THUMBPC2) |
-| r.ldr_pc_pre! | `ldr r1, [pc, #4]!` | 00005E08 | 00000408 | - | |
-| r.str_pc_pre! | `str r1, [pc, #4]!` | 00024048 (PC := A+12, the stored word ran) | 00024008 | - | |
-| r.stmia_pc! | `stmia pc!, {r1}` | 0001400F (no writeback; the A+8 word ran as fetched before the store) | 0001400C | "Rn (R0-R14)" | no writeback (PCWB2) |
+| r.ldmia_pc! | `ldmia pc!, {r1}` | 0000020F (no writeback) | 0000020C (writes back, branches to A+12) | "Rn (R0-R14)" | **0000020F** (earlier: no writeback (gbaedge PCWB2)) |
+| r.str_pc_post | `str r1, [pc], #4` | 0001400C (PC := writeback, A+12) | 00014008 (PC := writeback + 4) | - | **0001400C** (earlier: PC = base+4 = A+12 (THUMBPC2)) |
+| r.ldr_pc_post | `ldr r1, [pc], #4` | 00005E08 (PC := writeback + 4, load suppressed) | 00000208 (PC := writeback + 4, load done) | - | **00005E08** (earlier: PC = base+8, load suppressed (THUMBPC2)) |
+| r.ldr_pc_pre! | `ldr r1, [pc, #4]!` | 00005E08 | 00000408 | - | **00005E08** |
+| r.str_pc_pre! | `str r1, [pc, #4]!` | 00024048 (PC := A+12, the stored word ran) | 00024008 | - | **00024048** |
+| r.stmia_pc! | `stmia pc!, {r1}` | 0001400F (no writeback; the A+8 word ran as fetched before the store) | 0001400C | "Rn (R0-R14)" | **0001400F** (earlier: no writeback (PCWB2)) |
 
 PSR bits 8-27 and SPSR bit 4 (gbaedge CPSRBITS). Answer: the PSR read back.
 
 | Cell | Write | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| r.cpsr_0FFFFFDF | CPSR (System) = 0x0FFFFFDF | 000000DF | 0FFFFFDF | reserved bits "should never be changed" | only NZCV latch (CPSRBITS) |
-| r.spsr_0FFFFF00 | SPSR_irq = 0x0FFFFF00 | 00000010 | 0FFFFF00 | same | SPSR holds F00000FF, bit 4 high |
-| r.spsr_FFFFFFEF | SPSR_irq = 0xFFFFFFEF | F00000FF | FFFFFFEF | same | |
-| r.spsr_00000000 | SPSR_irq = 0 | 00000010 | 00000000 | same | 0 reads 0x10 (CPSRBITS) |
+| r.cpsr_0FFFFFDF | CPSR (System) = 0x0FFFFFDF | 000000DF | 0FFFFFDF | reserved bits "should never be changed" | **000000DF** (earlier: only NZCV latch (CPSRBITS)) |
+| r.spsr_0FFFFF00 | SPSR_irq = 0x0FFFFF00 | 00000010 | 0FFFFF00 | same | **00000010** (earlier: SPSR holds F00000FF, bit 4 high) |
+| r.spsr_FFFFFFEF | SPSR_irq = 0xFFFFFFEF | F00000FF | FFFFFFEF | same | **F00000FF** |
+| r.spsr_00000000 | SPSR_irq = 0 | 00000010 | 00000000 | same | **00000010** (earlier: 0 reads 0x10 (CPSRBITS)) |
 
 Thumb `cmp pc, r0` (hi-register CMP with Rd = r15) at a word boundary, r0
 = 0, Z and C set before; the halfword after it is `bx r5` to ARM, so the
@@ -315,8 +316,8 @@ answer is the CPSR at the escape (T clear):
 
 | Cell | Mode | dingbat | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|
-| r.thumb_cmp_pc.irq | IRQ, SPSR 0x900000BF | 9000009F (CPSR := SPSR) | 20000092 (a compare: C) | a compare with PC = $+4 (THUMB.5) | CPSR := SPSR, mode too (THUMBPC/THUMBPC2) |
-| r.thumb_cmp_pc.sys | System | 6000009F (no change) | 2000009F | same | no-op restore (THUMBPC3 b) |
+| r.thumb_cmp_pc.irq | IRQ, SPSR 0x900000BF | 9000009F (CPSR := SPSR) | 20000092 (a compare: C) | a compare with PC = $+4 (THUMB.5) | **9000009F** (earlier: CPSR := SPSR, mode too (THUMBPC/THUMBPC2)) |
+| r.thumb_cmp_pc.sys | System | 6000009F (no change) | 2000009F | same | **6000009F** (earlier: no-op restore (THUMBPC3 b)) |
 
 ### 6. The other fixes of 28ce4a0e
 
@@ -325,17 +326,17 @@ and GBATEK, and the console has not been asked.
 
 | Cell | Question | dingbat | dingbat before | Vectors | GBATEK | AGB SP |
 |---|---|---|---|---|---|---|
-| c.thumb_lsl_0x101 | Thumb `lsl r0, r1`, r0 = 1, r1 = 0x101 | 00000002 | 00000000 | 00000002 | Rd SHL (Rs AND 0FFh) | |
-| c.thumb_lsr_0x101 | `lsr`, r0 = 0x80000000 | 40000000 | 00000000 | 40000000 | same | |
-| c.thumb_asr_0x101 | `asr`, r0 = 0x80000000 | C0000000 | FFFFFFFF | C0000000 | same | |
-| c.mov_pc_lsl_reg | `mov pc, r0, lsl r1` to T; markers T-8 1, T-4 2, T 4, T+4 8 | 0000000C | 0000000E (4 short) | 0000000C | PC = result | |
-| c.fiq.svc_view | r8-r12 in SVC after System (tag 1) -> IRQ (2) -> FIQ (3) -> SVC; a nibble a register | 00022222 | 00000000 | 00022222 | r8-r12 banked for FIQ only | |
-| c.fiq.fiq_view | then FIQ again | 00033333 | 00033333 | 00033333 | same | |
-| c.fiq.sys_view | then System | 00022222 | 3198003F | 00022222 | same | |
-| c.user_msr_c_1F | User: `msr cpsr_c, #0x1F`, the CPSR after | 00000010 | 0000001F | 00000010 | "only condition code bits of CPSR can be changed" | |
-| c.user_msr_fc_F000001F | User: `msr cpsr_fc, r2` (0xF000001F) | F0000010 | F000001F | F0000010 | same | |
-| c.user_msr_c_13 | User: `msr cpsr_c, #0x13` | 00000010 | 00000013 | 00000010 | same | |
-| c.sys_msr_c_D3 | control: System `msr cpsr_c, #0xD3` | 000000D3 | 000000D3 | 000000D3 | changes mode | |
+| c.thumb_lsl_0x101 | Thumb `lsl r0, r1`, r0 = 1, r1 = 0x101 | 00000002 | 00000000 | 00000002 | Rd SHL (Rs AND 0FFh) | **00000002** |
+| c.thumb_lsr_0x101 | `lsr`, r0 = 0x80000000 | 40000000 | 00000000 | 40000000 | same | **40000000** |
+| c.thumb_asr_0x101 | `asr`, r0 = 0x80000000 | C0000000 | FFFFFFFF | C0000000 | same | **C0000000** |
+| c.mov_pc_lsl_reg | `mov pc, r0, lsl r1` to T; markers T-8 1, T-4 2, T 4, T+4 8 | 0000000C | 0000000E (4 short) | 0000000C | PC = result | **0000000C** |
+| c.fiq.svc_view | r8-r12 in SVC after System (tag 1) -> IRQ (2) -> FIQ (3) -> SVC; a nibble a register | 00022222 | 00000000 | 00022222 | r8-r12 banked for FIQ only | **00022222** |
+| c.fiq.fiq_view | then FIQ again | 00033333 | 00033333 | 00033333 | same | **00033333** |
+| c.fiq.sys_view | then System | 00022222 | 3198003F | 00022222 | same | **00022222** |
+| c.user_msr_c_1F | User: `msr cpsr_c, #0x1F`, the CPSR after | 00000010 | 0000001F | 00000010 | "only condition code bits of CPSR can be changed" | **00000010** |
+| c.user_msr_fc_F000001F | User: `msr cpsr_fc, r2` (0xF000001F) | F0000010 | F000001F | F0000010 | same | **F0000010** |
+| c.user_msr_c_13 | User: `msr cpsr_c, #0x13` | 00000010 | 00000013 | 00000010 | same | **00000010** |
+| c.sys_msr_c_D3 | control: System `msr cpsr_c, #0xD3` | 000000D3 | 000000D3 | 000000D3 | changes mode | **000000D3** |
 
 ## Where dingbat and GBATEK disagree
 
@@ -353,5 +354,49 @@ and GBATEK, and the console has not been asked.
 
 ## Answers
 
-The AGB SP column is filled from `sst-agb.json` (`python3 sst.py show`)
-once the run is made.
+The AGB SP answered all 103 cells on 2026-10-12, three runs each, every
+cell the same each time (`sst-agb.json`; `python3 sst.py show` sets it
+beside dingbat).
+
+**Against dingbat** (main `716b7589` with the real BIOS): 102 of 103 the
+same. The one difference was dingbat's:
+
+- **u.rs15_lsr**: a register-specified shift by r15 reads PC+8 (the
+  console: 00FFFFFF), where dingbat read PC+12 (000FFFFF). Rs is read in
+  the instruction's first cycle, Rn and Rm in its second, as GBATEK's
+  PC+12 for Rn and Rm implies. Fixed in `arm_data_processing` (the shift
+  amount is read before r15 moves on, in the register-shift
+  specialisation only). This was the vectors' answer.
+
+With the HLE BIOS, x.mrs_r15 also differed (00100020): the stub BIOS had
+no words at 0x0C-0x14, where the real BIOS's abort vectors branch to the
+undefined-instruction handler, so a jump to 0x10 ran on into the IRQ
+vector. The stub now has the three branches. After both fixes dingbat
+answers all 103 cells as the console does, with either BIOS.
+
+**Against the vectors**: the console agrees with dingbat and not the
+vectors on 38 cells, and with the vectors and not dingbat on 1
+(u.rs15_lsr). The other 64 cells (the store timings and values, PUSH's
+order, the smaller 28ce4a0e fixes, TSTP-style ops in exception modes,
+r15 as Rn or Rm in a register shift, SWP with r15 as Rm or Rd, `ldm^` in
+User/System) all three answer alike. The 38, where the vectors' model is
+not the console:
+
+| Cells | The console | The vectors |
+|---|---|---|
+| x.thumb_dexx | an undefined-instruction trap | a branch |
+| u.tstp.sys, u.teqp.sys, u.cmpp.sys, u.cmnp.sys | NZCV kept | the compare's flags |
+| r.sysmovs.movs, .subs and their .thumbspsr runs, r.usermovs.movs, .subs | NZCV kept | the ALU's flags |
+| u.mul_rd15, u.mla_rd15, u.umull_rdlo15, u.umull_rdhi15 | r15 not written | written, a branch |
+| u.mul_rm15, u.mul_rs15, u.mla_rn15, u.umull_rm15 | r15 reads PC+8 | PC+12 |
+| u.swp_rn15 | the address is PC+8 | PC+12 |
+| x.mrc14_c0, _c1, _c2, x.mcr14_c1, x.mrc14_r15 | no trap; MRC reads the opcode at $+8 (GBATEK) | an undefined-instruction trap |
+| x.mrs_r15 | a branch: the two words behind it do not run | r15 written without a refill (derived from their bus: the two words behind it would run) |
+| r.ldmia_pc!, r.stmia_pc! | no writeback | writes back and branches |
+| r.str_pc_post, r.str_pc_pre! | PC := the writeback address | the writeback address + 4 |
+| r.ldr_pc_post, r.ldr_pc_pre! | PC := writeback + 4, the load suppressed | writeback + 4, the load done |
+| r.cpsr_0FFFFFDF, r.spsr_0FFFFF00, _FFFFFFEF, _00000000 | PSR bits 8-27 read 0, SPSR bit 4 reads 1 | latched as written |
+| r.thumb_cmp_pc.irq, .sys | CPSR := SPSR (a no-op in System) | a compare |
+
+`tests/singlestep_arm7.nim` cites each of these cells in its
+known-divergence buckets; the Rs = r15 cases now pass.

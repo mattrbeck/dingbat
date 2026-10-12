@@ -418,12 +418,12 @@ proc run_case*(gba: GBA; c: var ArmCase): CaseResult =
 # ---- known divergences ----
 #
 # Every failing case is put in one of these buckets or reported as
-# unexplained. Each bucket is a place where dingbat follows the console (a
-# measurement on an AGB SP: docs/hwprobe-results-agb.md, tests/roms/payloads,
-# or a hardware-verified test ROM) or the documentation (GBATEK) and the
-# vectors' model does something else, or an encoding the ARM7TDMI leaves
-# UNPREDICTABLE, where there is nothing to be right about. tests/README.md
-# ("SingleStepTests") has the table.
+# unexplained. Each bucket is a place where dingbat follows the console and
+# the vectors' model does something else -- measured on an AGB SP, cited by
+# the cell in docs/hwprobe-sst.md (the probe made for these divergences,
+# tests/roms/payloads/sst.s and sstrisk.s) or docs/hwprobe-results-agb.md --
+# or an encoding the ARM7TDMI leaves UNPREDICTABLE that the probe did not
+# reach. tests/README.md ("SingleStepTests") has the table.
 
 proc known_divergence*(stem: string; c: ArmCase; r: CaseResult): string =
   let op = c.opcode
@@ -437,39 +437,47 @@ proc known_divergence*(stem: string; c: ArmCase; r: CaseResult): string =
   let p_bit = ((op shr 24) and 1) != 0
   if stem.startsWith("arm_data_proc"):
     let opc = (op shr 21) and 15
-    let regshift = ((op shr 25) and 1) == 0 and ((op shr 4) and 1) != 0
-    if regshift and rs == 15: return "unpredictable: r15 as the shift register"
-    if rd == 15 and s_bit and opc in 8'u32 .. 11'u32:
-      return "unpredictable: test op with Rd = r15 (ARMv2 TSTP-style)"
     if rd == 15 and s_bit and mode in [0x10'u32, 0x1F'u32]:
-      return "hardware: S-bit write to r15 in User/System keeps NZCV"
+      if opc in 8'u32 .. 11'u32:
+        return "hardware (sst u.tstp.sys): test op with Rd = r15 in User/System keeps NZCV"
+      return "hardware (sst r.sysmovs, r.usermovs): S-bit write to r15 in User/System keeps NZCV"
+    # In the exception modes the vectors restore CPSR from SPSR for a test
+    # op with Rd = r15 as dingbat does (and the console: sst u.tstp.svc,
+    # u.tstp.irq). A register-specified shift by r15 reads PC+8 on both
+    # sides since the console's u.rs15_lsr.
   elif stem == "arm_ldm_stm":
-    if rn == 15 and w_bit: return "hardware: no writeback to a base of r15"
+    if rn == 15 and w_bit:
+      return "hardware (sst r.ldmia_pc!, r.stmia_pc!): no writeback to a base of r15"
   elif stem.startsWith("arm_ldr_str"):
-    if rn == 15 and (w_bit or not p_bit): return "hardware: r15 base writeback"
+    if rn == 15 and (w_bit or not p_bit):
+      return "hardware (sst r.ldr_pc_*, r.str_pc_*): r15 base writeback"
   elif stem == "arm_mcr_mrc":
-    if rs == 14: return "hardware: CP14 answers MRC/MCR"
+    if rs == 14: return "hardware (sst x.mrc14_*, x.mcr14_c1): CP14 answers MRC/MCR"
   elif stem == "arm_mrs":
-    if rd == 15: return "unpredictable: MRS to r15"
+    if rd == 15: return "hardware (sst x.mrs_r15): MRS to r15 is a branch"
   elif stem.startsWith("arm_msr"):
     # Bits 8-27 do not latch; SPSR bit 4 is wired high.
     if not r.regs_differ and r.bus_ok and (r.psr_xor and not 0x0FFFFF10'u32) == 0:
-      return "hardware: PSR bits 8-27 read 0, SPSR bit 4 reads 1"
+      return "hardware (sst r.cpsr_*, r.spsr_*): PSR bits 8-27 read 0, SPSR bit 4 reads 1"
   elif stem == "arm_mul_mla":
     let rdm = int((op shr 16) and 15)
     let acc = ((op shr 21) and 1) != 0
-    if rdm == 15: return "hardware: a multiply does not write r15"
+    if rdm == 15: return "hardware (sst u.mul_rd15, u.mla_rd15): a multiply does not write r15"
     if rs == 15 or rm == 15 or (acc and rd == 15):
-      return "unpredictable: r15 as a multiply operand"
+      return "hardware (sst u.mul_rm15, u.mul_rs15, u.mla_rn15): r15 as a multiply operand reads PC+8"
   elif stem == "arm_mull_mlal":
     let hi = int((op shr 16) and 15)
-    if hi == 15 or rd == 15: return "hardware: a multiply does not write r15"
-    if rs == 15 or rm == 15: return "unpredictable: r15 as a multiply operand"
+    if hi == 15 or rd == 15:
+      return "hardware (sst u.umull_rdlo15, u.umull_rdhi15): a multiply does not write r15"
+    if rs == 15 or rm == 15:
+      return "hardware (sst u.umull_rm15): r15 as a multiply operand reads PC+8"
   elif stem == "arm_swp":
-    if rn == 15 or rm == 15 or rd == 15: return "unpredictable: r15 in SWP"
+    # (r15 as Rm or Rd: the vectors, dingbat and the console agree, sst
+    # u.swp_rm15 and u.swp_rd15)
+    if rn == 15: return "hardware (sst u.swp_rn15): SWP with a base of r15 uses PC+8"
   elif stem == "thumb_add_cmp_mov_hi":
     if ((op shr 8) and 3) == 1 and (op and 0x80) != 0 and (op and 7) == 7:
-      return "hardware: Thumb CMP r15 restores CPSR from SPSR"
+      return "hardware (sst r.thumb_cmp_pc.*): Thumb CMP r15 restores CPSR from SPSR"
   elif stem == "thumb_undefined_bcc":
-    return "documented: Thumb Bcc with cond 1110 is undefined"
+    return "hardware (sst x.thumb_dexx): Thumb Bcc with cond 1110 is undefined"
   ""
