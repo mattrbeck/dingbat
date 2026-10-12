@@ -11,7 +11,7 @@ was, on the same core build; the Pages deploy leaves it out.
     tools/serve_nds_dev.sh               # builds both cores, serves https://<LAN IP>:8443/
 
 The script builds `web/em.{js,wasm}` (GB/GBA, `src/dingbat_wasm.nim`) and
-`web/nds/nds.{js,wasm}` (DS, `src/dingbat_nds_wasm.nim`), makes a
+`web/nds/nds.{js,wasm}` and `nds-simd.{js,wasm}` (DS, `src/dingbat_nds_wasm.nim`), makes a
 self-signed certificate for the current address of `en0` (`IFACE=` for
 another interface; kept in `~/.cache/dingbat-dev-certs`, remade when the
 address moves) and runs `web/serve.py --dev --https` on port 8443 (`PORT=`).
@@ -38,7 +38,7 @@ address moves) and runs `web/serve.py --dev --https` on port 8443 (`PORT=`).
 | | |
 |---|---|
 | Opening | `.nds` in the file picker, drag and drop, inside a `.zip`, the library (tile, hero, Resume). The header check is GBATEK's: header CRC16 at 15Eh, or the logo CRC CF56h at 15Ch (`NdsUtil.looksLikeNdsRom`); a failed check asks, as for GB/GBA. |
-| Core loading | `nds/nds.js` + `nds.wasm` (~16 KB + ~220 KB) are fetched the first time a DS game starts (`loadNdsCore`); GB/GBA sessions never load them. The build is MODULARIZE'd (`createNdsCore`) so it never meets `em.js`'s global `Module`. The service worker caches them on that first fetch (not precached), so DS games play offline after one online start. |
+| Core loading | `nds/nds.js` + `nds.wasm` (~16 KB + ~220 KB) are fetched the first time a DS game starts (`loadNdsCore`); GB/GBA sessions never load them. Where the browser has wasm SIMD (Chrome 91, Firefox 89, Safari 16.4) it fetches `nds/nds-simd.js` + `nds-simd.wasm` instead (`-d:nds_simd`, the same core with `-msimd128`: docs/nds/perf.md round 4). The build is MODULARIZE'd (`createNdsCore`) so it never meets `em.js`'s global `Module`. The service worker caches them on that first fetch (not precached), so DS games play offline after one online start. |
 | ROM in memory | `nds_rom_alloc` hands out the ROM's buffer inside the core and the page writes it once; `new_nds`/`new_cart` take it as a `sink`. SoulSilver (128 MB) leaves a 272 MB wasm heap. Reset, a save import and a save reset reboot in place (`nds_reboot`: same ROM, same BIOS) instead of reading the ROM from IndexedDB again. Loading a GB/GBA game drops the DS core (`nds_unload`). |
 | Screens | Stacked, side by side, Focus (one large, one small), one screen; swap, gap, a quarter turn for book games; the top bar hides on phones held upright. "Screens" below. Integer scaling and the filters/screen looks apply; colour correction and the GB palette do not (the DS's own LCDs). |
 | Stylus | Pointer events on the canvas (mouse, pen, finger): a touch starts only on the bottom screen and then follows the pointer, clamped to its edges, until it lifts (`NdsUtil.touchPoint`: client point to 256x192, exact at any scale, arrangement and turn). |

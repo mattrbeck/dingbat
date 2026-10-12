@@ -1,12 +1,14 @@
 # DS performance: the cheap, exact wins, then caching and the interpreter
 
-Four rounds: low-hanging fruit (branch `nds-perf`: idle loops, 3D frame
+Five rounds: low-hanging fruit (branch `nds-perf`: idle loops, 3D frame
 reuse), a measured one on caching and the interpreter (branch
 `nds-cache-perf`: where the host instructions go, 2D line reuse, and the
 CPU's per-opcode overhead), one on what that left outside the 3D
 renderer (branch `nds-perf3`: the ARM9 data path, branch fetches, 2D
-compositing, slices and events; "Round 3" below) and one on the 3D engine
-(branch `nds-3d-perf`, "3D renderer speed" below).
+compositing, slices and events; "Round 3" below), one on the 3D engine
+(branch `nds-3d-perf`, "3D renderer speed" below) and one on what is left
+outside the CPU dispatch, measured natively and in both browsers' wasm
+engines (branch `nds-perf4`, "Round 4" below).
 One rule over everything: **a speed-up may not
 change any output** -- frames, sound, the whole machine state (save-state
 payload), opcode counts, the sweep's statuses. The skips (idle loops, 3D
@@ -567,6 +569,336 @@ counts, the bus's wait accumulator), LDM/STM (a generic proc with a load
 or store per register) and the handlers themselves; the ARM7's share rose
 because the rest fell.
 
+## Round 4 (`nds-perf4`): what is left outside the CPU dispatch, natively and in wasm
+
+The question: where does a DS frame's time go now, outside the ARM9
+interpreter loop and its per-opcode timing bookkeeping (a block cache is
+another branch's work), why does the wasm build cost ~1.8 times the host
+instructions of the native one, and which levers help both builds. Same
+rule as every round: a change may not move any output.
+
+### Method
+
+Five stretches, 600 frames each from a state the base build saved, real
+BIOS and firmware, `--rtc 2004-01-01`, the scripts in docs/nds/commercial.md
+(p12 for SoulSilver): SoulSilver's walk downstairs (frames 7101-7700) and
+New Bark overworld (10001-10600), Golden Sun: Dark Dawn's intro pages
+(3001-3600) and its field on the cliff (40001-40600, the 3D field with
+dialogue: Matt's 11.4 ms/frame browser figure), and Pokemon Mystery Dungeon:
+Explorers of Darkness in Beach Cave (30001-30600; 2D). The measured
+window is frames 61-600 of each (the first 60 let V8 and JSC tier up).
+
+- **Native**: `ndsrun --perf-from` prints the timed frames' host
+  instructions and now host cycles (`proc_pid_rusage`); minimum of four
+  interleaved runs. `-d:pcsample` (ported from branch `nds-jit`) samples
+  the interrupted pc every 100 us of CPU time; `atos -i` symbolises each
+  sample with its inline frames and a script sorts it into components by
+  the innermost recognisable frame (ARM9 or ARM7 by the bus type in the
+  stack; "data" = loads/stores and everything under them, "fetch" = the
+  opcode fetch, "core" = the run loop, decode and handlers).
+- **V8**: node 24 running `ndsrun` built as wasm with the web build's flags
+  (emcc 4.0.23 -O3, `ENVIRONMENT=node`, `NODERAWFS`), and the web module
+  itself (`src/dingbat_nds_wasm.nim`) under a small node harness; host
+  instructions and cycles of a 600-frame run minus a 60-frame run
+  (`/usr/bin/time -l`). Profiles: macOS `sample` (1 ms) on the node process
+  with V8's perf map (`--perf-basic-prof`) to name the JIT code (V8's own
+  `--cpu-prof` over-weights the ARM7 by a third), each wasm function
+  mapped to its Nim source by the C file's `#line` directives
+  (`--lineDir:on`, which leaves the wasm byte-identical).
+- **JSC**: the system `jsc` shell (macOS 26.6, Safari 26's JavaScriptCore)
+  running the same web module and harness, measured the same way; and
+  Playwright's WebKit, headless and muted, for wall-clock ms/frame (its
+  numbers swing 10 % from run to run: headless renderers get background
+  QoS, web/bench/README.md).
+
+The machine had other agents' benchmarks on it; the load average is
+quoted per table (instructions stay within 0.5 % under load, cycles do not).
+
+### Where the time goes now
+
+Native, share of the sampled time (base, 5100-20500 samples per stretch):
+
+| component | SS walk 7101 | SS New Bark 10001 | GS intro 3001 | GS field 40001 | PMD dungeon 30001 |
+|---|---|---|---|---|---|
+| ARM9 core (run loop, decode, handlers) | 39.5 % | 29.5 % | 52.8 % | 39.7 % | 35.6 % |
+| ARM9 data (loads, stores, I/O, cache tags) | 15.8 % | 12.5 % | 16.3 % | 14.7 % | 11.9 % |
+| ARM9 fetch | 11.8 % | 8.7 % | 16.3 % | 10.9 % | 9.2 % |
+| ARM7 (and CPU frames of either bus not told apart: ~2 %) | 13.3 % | 10.7 % | 6.4 % | 5.6 % | 10.6 % |
+| 3D rasteriser (render.nim) | 4.0 % | 16.4 % | 0.4 % | 7.6 % | -- |
+| 3D geometry and GX FIFO (geometry.nim, gpu3d.nim) | 3.7 % | 9.3 % | 0.1 % | 5.3 % | 0.8 % |
+| 2D (engine2d.nim, gpu.nim, vram.nim) | 1.9 % | 3.7 % | 3.9 % | 10.7 % | 23.3 % |
+| SPU | 2.5 % | 1.7 % | 0.9 % | 0.7 % | 3.9 % |
+| slice loop, events, timers, DMA, libc copies, other | 7.7 % | 7.6 % | 2.7 % | 4.6 % | 4.6 % |
+| host instructions (G), 540 frames | 17.58 | 31.98 | 58.77 | 64.48 | 19.73 |
+| host cycles (G) | 3.84 | 7.07 | 11.55 | 13.06 | 4.41 |
+
+In V8 (macOS `sample`, the same frames; fewer samples, so +-2 %):
+
+| component | SS walk | SS New Bark | GS intro | GS field | PMD |
+|---|---|---|---|---|---|
+| ARM9 (all) | 79.7 % | 57.5 % | 88.3 % | 69.9 % | 47.7 % |
+| ARM7 | 14.5 % | 11.2 % | 9.0 % | 8.0 % | 13.2 % |
+| 3D rasteriser | -- | 11.5 % | -- | 2.4 % | -- |
+| 3D geometry and GX FIFO | -- | 6.5 % | -- | 3.3 % | -- |
+| 2D | 2.0 % | 4.4 % | 1.5 % | 11.9 % | 33.5 % |
+| memory.copy / memory.fill (calls out of the module) | 1.6 % | 6.0 % | 0.3 % | 2.8 % | 3.2 % |
+| other | 2.2 % | 2.9 % | 0.9 % | 1.7 % | 2.4 % |
+
+(TurboFan inlines across what native code keeps as separate frames, so
+the wasm split is by function: the ARM9's data path, fetch and the SPU
+mostly land inside the run loop's function.)
+
+### Why wasm costs 1.7-1.8 times the instructions
+
+Base build, frames 61-600 of each stretch: host instructions and cycles
+(G), and the multiple of native. V8 instructions are `ndsrun` as wasm (the
+same presses as native); V8 and JSC cycles and JSC instructions are the web
+module under node and `jsc` (no presses), load average 2-8:
+
+| stretch | native instr / cycles | V8 instr | V8 cycles | JSC instr | JSC cycles |
+|---|---|---|---|---|---|
+| SoulSilver walk | 17.58 / 3.84 | 31.77 (1.81x) | 5.79 (1.51x) | 26.99 (1.54x) | 4.98 (1.30x) |
+| SoulSilver New Bark | 31.98 / 7.07 | 53.77 (1.68x) | 10.21 (1.44x) | 47.77 (1.49x) | 9.15 (1.29x) |
+| Golden Sun intro | 58.77 / 11.55 | 102.10 (1.74x) | 16.18 (1.40x) | 90.44 (1.54x) | 14.46 (1.25x) |
+| Golden Sun field | 64.48 / 13.06 | 109.65 (1.70x) | 18.55 (1.42x) | 97.38 (1.51x) | 16.45 (1.26x) |
+| Mystery Dungeon | 19.73 / 4.41 | 36.43 (1.85x) | 6.52 (1.48x) | 32.25 (1.63x) | 6.12 (1.39x) |
+
+So the 1.8x is V8's instruction count; in time it is 1.4-1.5x, and JSC
+(what every iPhone runs, Safari or the app's WKWebView) needs 6-14 % fewer
+cycles than V8 for the same module: 1.25-1.4x native.
+
+Per component, V8's cycles against native's (each one's share of the
+sampled time times the stretch's cycles; the wasm shares come from
+~1000-3800 samples, so these are +-15 %):
+
+- **The CPUs, 1.25-2x**: the ARM9 1.25x (Mystery Dungeon) to 1.65x (New
+  Bark), the ARM7 with the SPU 1.3-2x. TurboFan and JSC's OMG execute more instructions than
+  clang's arm64 for the same C (every linear-memory access is a 32-bit
+  index added to the memory base, locals spill around the many calls the
+  interpreter makes, per-function stack checks, `call_indirect` checks the
+  table bounds and signature before each opcode's handler), at a higher
+  IPC, so the 1.7-1.8x in instructions is 1.4-1.5x in cycles in V8 and
+  1.25-1.4x in JSC. In TurboFan's code for one handler (dumped with
+  `--print-wasm-code`) the memory accesses are trap-handler protected
+  (no bounds-check instructions); the overhead is the frame and stack-limit
+  check on entry and spills around calls.
+- **The 3D engine runs at about native speed** (V8: the rasteriser 11.5 %
+  of a 1.44x longer New Bark frame against 16.4 % natively, 1.0x; the
+  whole 3D engine 0.6-1.0x across the stretches): tight int64 loops,
+  bound by the per-dot division and the depth test's mispredicts, which
+  cost the same in both.
+- **No vector instructions**: clang vectorises the 2D compositing's paint
+  passes (round 3) natively; the wasm build has no SIMD (-msimd128 needs
+  Safari 16.4), so they run scalar: the 2D engines cost 1.6-2.1x native's
+  cycles (Mystery Dungeon: 33.5 % of the wasm frame against 23.3 %).
+- **Bulk memory is a call**: with bulk memory on (emcc's default), a
+  memcpy/memset the C compiler cannot unroll becomes `memory.copy` /
+  `memory.fill`, which both engines run as a call into the runtime
+  (V8's `memory_copy_wrapper` -> `memmove`): 6 % of New Bark's wasm frame,
+  3.7 % from `clip_polygon`'s 832-byte array copies alone (natively the
+  same copies were ~1 %). The rest is spread (2D line hand-offs, `render_text`'s
+  zeroing of transparent tile rows, Nim's zero-initialised locals); turning
+  `render_text`'s fills into fixed-size stores measured nothing and was
+  dropped.
+- **The ARM7 in the Golden Sun intro, 2x**: 9 % of V8's frame for 14 M
+  ARM7 opcodes against 6.4 % (with the SPU 7.3 %) natively. One handler
+  stands out: the ARM7's CMP-immediate (one `exec_arm_k` table entry, 70
+  arm64 instructions in TurboFan's code) took 3 % of the frame, ~180 ns
+  per execution by a trace's opcode mix, its samples piled on the
+  function's entry and on the CPSR store. Not the number of `run` calls
+  (the ARM7 runs ~16 opcodes per 64-cycle slice; 4x longer slices,
+  measured and not kept since they are not exact, saved 0.5 % in both
+  builds) and not Liftoff (TurboFan code; `--no-liftoff` changes nothing).
+  (V8's own `--cpu-prof` put the ARM7 at 12.8 %, which first made this
+  look like 3x.) Left to the interpreter's owner: the run loop and
+  dispatch were out of this round.
+- **Not the cause**: bounds checks (both engines use guard regions for a
+  4 GB-max memory on 64-bit hosts: none in the code), 64-bit arithmetic
+  (i64 is native on arm64), the -O level (-O3 at compile and link in
+  both), Nim's runtime checks (-d:danger and `quirky` in both). Link-time
+  optimisation (whole-program inlining across the Nim modules' C files)
+  measured -3 to -5 % instructions natively and -1.3 % in V8, but not
+  cycles ("What is left"). Liftoff code that
+  never tiers up costs ~1 % (V8's `WasmLiftoffFrameSetup` in New Bark).
+
+### What changed
+
+Every change keeps the frames, sound and whole machine state: the
+stretches' whole-state hashes every 25 frames and screen hashes every frame
+equal the base's (native, V8 scalar and V8 SIMD builds), all 15 DS suites
+pass, and the 152 homebrew ROMs (`homebrew*/` in the ROM cache: 600 frames, the
+sweep's default presses, real BIOS) give the base's whole-state and screen
+hashes every 30 frames and opcode counts, natively; twelve of them (the 3D
+and 2D-heavy ones: 2Dplus3D, 3D_Both_Screens, sd4k, Our First Time,
+portalds, NitroGrafx, Space Impakto, Cave Story, MAXMXDS, The Strongest
+Demo, blimpchicken, dscraft) also on the SIMD wasm build under node.
+
+**Clipping without copies (geometry.nim `clip_polygon`).** A polygon
+crossing one plane of the view volume ran all six Sutherland-Hodgman
+passes, each copying a 16-vertex array (832 bytes) after the two buffers
+were zeroed, and emit_polygon zeroed its own. Now a pass whose plane no
+vertex is outside is skipped (it would keep every vertex and add none; a
+pass at 16 vertices still runs, for its cut at 15), the plane distances
+are taken once per pass, the two buffers are swapped by pointer, and
+nothing is cleared (only entries written are read). In wasm the copies
+were `memory.copy` calls: the larger win is there.
+
+**The GX FIFO's next start (gpu3d.nim `catch_up`, `ready_at`).** Every
+FIFO word (6.4 M in New Bark's 600 frames, mostly DMA bursts of 112) called
+`catch_up` two or three times, nearly always to find the head command's
+start still ahead (16.9 M calls, 19 M loop passes for 5.5 M commands).
+`catch_up_from` leaves that start in `ready_at` (NEVER for an empty FIFO,
+a head command missing parameters, or a pending swap) and the inline
+`catch_up` compares one number. Only gpu3d.nim moves the start: commands
+leaving, a write completing the head command (`push`), V-blank ending a
+swap (`on_vblank`); a state load forgets it (`after_load`: not machine
+state, GPU3D_SKIP). Dropping the push update or the V-blank reset fails
+`nds_3d_test`; dropping the load reset fails `nds_savestate_test`
+(3d_timing_fifo's round trip). The Geometry and Gpu3d refs taken in
+`run_command`, `gxstat`, `read_reg`, `gx_service` and the line events
+became cursors: ARC counted them per command (0.85 % of New Bark).
+
+**The colour effects as a formula (engine2d.nim `composite_k`).** The
+effect pass ran `effect_dot` per dot with its branches. Every case is now
+one formula per 6-bit channel, `min(63, (A wa + B wb + 16) >> 5)`: A the
+top layer, B the second layer (alpha, semi-transparent and bitmap OBJs,
+3D), 63 (brighten) or 0 (darken, none), the 4-bit weights doubled to share
+the 5-bit shift, 32 and 0 for no effect; 3D's own (a + 1, 31 - a) fit as
+they are, and a 3D top dot's A is its 6-bit channel because the paint laid
+its colour and low bits. The weights come from selects, and the paint lays
+each layer's BLDCNT target bits beside its number (`topf`, `secf`) so no
+dot shifts by a layer number (wasm SIMD has no per-lane shift). clang
+vectorises it (NEON, 8-16 dots). `nds_2d_test`'s 400 random scenes
+against `composite_search` pass; changing the 3D, brighten or bitmap-OBJ
+weights or the second layer's target bits fails them. It is a native-only
+change, and a small one in time: 3.6-4.4 % fewer instructions on Golden
+Sun's field and Mystery Dungeon but ~1 % and ~0.3 % fewer cycles (the
+branches it replaces were well predicted). In wasm the formula lost:
+without SIMD it is 10-12 % slower on Mystery Dungeon in V8 and JSC (77 % of
+its dots have no effect, which the branches skip cheaply; a two-pass form,
+classify then blend only lines with a changing dot, was no better), and
+with SIMD it gained nothing over the branches (Mystery Dungeon 2-3 % more
+cycles, the others within 1 %). So `FX_DOTS` (every emscripten build, or
+`-d:nds_fx_dots`) keeps the per-dot pass there and the paint lays no target
+bits. `nds_2d_test` passes both ways.
+
+**A SIMD build of the web DS core (src/dingbat_nds_wasm.nims, web/index.js
+`loadNdsCore`).** `-d:nds_simd` builds `web/nds/nds-simd.{js,wasm}` with
+`-msimd128`: clang vectorises the paint passes (round 3's masks), as it
+does natively; nothing in the source changes. The page
+validates a one-function SIMD module (i8x16.splat, i8x16.popcnt) and
+fetches `nds-simd.js` where it passes (Chrome 91, Firefox 89, Safari 16.4)
+and `nds.js` elsewhere. Neither is precached (the DS core never was), so
+the offline cache holds only the one a device fetched; deploy-pages and
+`tools/serve_nds_dev.sh` build both. The DS e2e passes on the SIMD core
+(22 of 22, with `nds.js` removed). Sizes: `nds.wasm` 1 208 487 bytes
+(284 608 gzipped; the base's 1 207 908 / 284 458), `nds-simd.wasm`
+1 239 734 (282 565).
+
+### Numbers: round 4
+
+Native, `ndsrun` -d:danger, frames 61-600, minimum of 4 interleaved runs
+(load average 2.5-5 for all but a few runs; one spike to 23). Each column
+adds the commits before it: clipping; the FIFO shortcut and cursors; the
+effect formula. Instructions / cycles in G:
+
+| stretch | base | clipping | + GX FIFO | + effects (this branch) | change, instructions / cycles |
+|---|---|---|---|---|---|
+| SoulSilver walk | 17.58 / 3.84 | 17.55 / 3.83 | 17.39 / 3.81 | 17.39 / 3.82 | -1.1 % / -0.7 % |
+| SoulSilver New Bark | 31.98 / 7.07 | 31.23 / 6.91 | 30.55 / 6.81 | 30.47 / 6.85 | -4.7 % / -3.2 % |
+| Golden Sun intro | 58.77 / 11.55 | 58.77 / 11.55 | 58.74 / 11.55 | 58.24 / 11.49 | -0.9 % / -0.6 % |
+| Golden Sun field | 64.48 / 13.06 | 63.72 / 12.92 | 63.06 / 12.83 | 60.66 / 12.70 | -5.9 % / -2.7 % |
+| Mystery Dungeon | 19.73 / 4.41 | 19.73 / 4.39 | 19.68 / 4.39 | 18.85 / 4.38 | -4.4 % / -0.7 % |
+
+Wasm, the web module, frames 61-600, minimum of 2 interleaved runs (load
+2.4-4.6), cycles in G and the change against the base build's (scalar)
+core: the scalar core is what iOS 15.0-16.3 gets, the SIMD core what
+everything newer gets.
+
+| stretch | V8 base | V8 scalar | V8 SIMD | JSC base | JSC scalar | JSC SIMD |
+|---|---|---|---|---|---|---|
+| SoulSilver walk | 5.77 | -0.3 % | -2.9 % | 4.99 | -1.1 % | -1.3 % |
+| SoulSilver New Bark | 10.17 | -3.4 % | -5.5 % | 9.11 | -4.8 % | -6.1 % |
+| Golden Sun intro | 16.58 | -0.9 % | -3.3 % | 14.71 | -0.9 % | -1.8 % |
+| Golden Sun field | 18.69 | -2.2 % | -6.2 % | 16.51 | -2.5 % | -5.5 % |
+| Mystery Dungeon | 6.48 | +0.7 % | -8.2 % | 6.08 | +0.6 % | -9.5 % |
+
+(Instructions: V8 SIMD -2.4 / -7.2 / -1.0 / -5.8 / -11.1 %, JSC SIMD
+-2.3 / -7.7 / -0.9 / -6.4 / -12.9 %. Of the SIMD core's gain, the build
+flag alone, on the base source, gave Mystery Dungeon -8 to -9 % cycles,
+Golden Sun's field -3 %, New Bark -0.7 to -1.2 %.)
+
+Headless browsers, wall clock (Playwright, `web/nds/nds{,-simd}.js` driven
+by `nds_run_frame` with the audio drained and nothing presented, best of 3;
+headless timings run slower than a visible window and swing ~10 %):
+
+| ms/frame | WebKit base | WebKit SIMD core | Chromium base | Chromium SIMD core |
+|---|---|---|---|---|
+| Golden Sun field | 8.88 | 8.31 (-6.4 %) | 9.99 | 9.49 (-5.0 %) |
+| SoulSilver New Bark | 4.91 | 4.62 (-6.0 %) | 5.52 | 5.22 (-5.5 %) |
+| Mystery Dungeon | 3.32 | 2.97 (-10.5 %) | 3.46 | 3.18 (-8.2 %) |
+
+### iOS 15 and SIMD
+
+The DS core is a separate, lazily fetched module, so a second build costs
+the offline precache nothing (unlike `em.wasm`, docs/performance.md:
+-msimd128 was not shipped for GB/GBA because a second bundle would double
+the precache). iOS 15.0-16.3 (Safari without wasm SIMD) keeps the scalar
+core with the per-dot effect pass: it gains only the clipping and FIFO
+changes, as its outputs are the same either way. On those devices the DS
+core is in any case far below full speed (an iPhone SE 1st gen runs GB/GBA
+games); the SIMD build is what current iPhones (iOS 16.4+), Android and
+desktop browsers run. The same probe-and-pick could serve `em.wasm` later
+if its precache were split the same way.
+
+### What is left (ranked by expected gain)
+
+Each with the expected gain on the stretches above and an effort
+estimate in agent-days.
+
+1. **The 3D rasteriser's span dots, several at a time** (portable SIMD:
+   clang vector extensions, which lower to NEON and to wasm SIMD, with the
+   scalar instances kept for everything that is not the common kind).
+   The span dots are ~8 % of New Bark natively and the whole rasteriser
+   16 % (11.5 % in V8, which runs it at native speed). The perspective
+   factor can be a double division per lane: floor(a / b) of the correctly
+   rounded quotient equals the integer one whenever a < 2^53, and here
+   a = n w0 2^8 < 2^43 even at 4x HD; Z steps by 32x32->64 multiplies.
+   Expected -4 to -5 % on New Bark (native and the SIMD web core), -2 % on
+   Golden Sun's field; 2-3 days, with the 3D suite, polyrastertest and the
+   hardware line captures as the exactness net.
+2. **The ARM9 data path's slow cases** (14-16 % of native time in every
+   stretch, mostly the timing model's own per-access work): the protection
+   unit's one-page memory per kind (`pu_ok`) misses whenever a loop
+   alternates I/O, VRAM and ITCM (`pu_refuse9` + `allowed`: 1.4 % of Golden
+   Sun's field), and CPU stores to VRAM and ITCM data still take the
+   general path (~1.3 % of the field). A 2-4 entry PU memory and TLB kinds
+   for VRAM and ITCM: -1.5 to -2.5 % on the field, 1 day; it shares bus9.nim
+   with the block-cache work (the fetch side), so after it.
+3. **2D tile BGs** (`render_text`: 10 % of Mystery Dungeon natively,
+   7.8 % in V8): decode a tile row's 8 dots at once (a 32-bit 4bpp word or
+   8 bytes of 8bpp through the palette); -3 % on Mystery Dungeon, ~0.5 %
+   elsewhere; 1 day.
+4. **The GX FIFO's DMA bursts**: each of a burst's 112 words still walks
+   write9, io9_write, gx_write, write_reg, write_gxfifo and push; a burst
+   path into the FIFO with the same side effects (epoch, `attn`, the clock)
+   would save ~1-2 % of New Bark; 1 day.
+5. **The ARM7's CMP-immediate handler in wasm** (above): if the Golden Sun
+   intro's ARM7 came down to the ARM9's 1.45x, -2 to -3 % of that wasm
+   frame; 1 day to find; in the run loop and dispatch tables (left to the
+   block-cache work).
+6. **Bulk memory left in wasm** (~2 % of New Bark in V8 after this round:
+   2D line hand-offs, `gfx = top`, Nim's zeroed locals): fixed-size copies
+   the compiler unrolls, or SIMD stores in the SIMD core; ~1-2 % of wasm
+   frames; 0.5 day. (The one tried, transparent tile rows, measured
+   nothing.)
+7. **Link-time optimisation**: -2.7 to -5.1 % instructions natively, but
+   cycles -1 % to +1.9 % (Golden Sun intro: the machine outliner, which
+   `-mno-outline` keeps off at compile time, runs at the LTO link unless
+   told otherwise), -1.3 % instructions in V8. Worth a second look only
+   with the link flags settled; 0.5 day plus every platform's build.
+8. **The SPU mixer** (1.7-3.9 % natively; round 3's notes).
+
 ## Where the host instructions go (round 2, `nds-cache-perf`)
 
 Measured on `ndsrun` -d:danger (the web build's mode) with
@@ -969,9 +1301,9 @@ counts are identical. Host instructions over the 505 fell from 3968.9 G to
   points, shifts) could be derived when SOUNDxCNT is written, silent
   channels skipped in the mix, and PCM samples inside the current word
   stepped without the call.
-- **The effect pass for alpha, 3D and semi-transparent OBJs** is still
-  per pixel with branches (engine A in SoulSilver: BG0 is 3D, so every
-  line); with the second layer's number per pixel it could be masks too.
+- **The effect pass for alpha, 3D and semi-transparent OBJs** is a
+  branch-free formula natively since round 4 (wasm keeps the per-dot
+  branches, which it runs faster: "Round 4").
 - **CPU stores to VRAM** (MAXMXDS: 16.8 M in 600 frames, a frame buffer
   drawn by the CPU) take the whole write path; a TLB kind for VRAM pages
   (the bank's host pointer, the 1 KB change counts, PU-checked per
