@@ -2687,18 +2687,22 @@ proc main() =
     float(getTicks() - last_present) + ff_skip_ms + ff_draw_ms < float(present_interval)
   proc input_pending(): bool =
     ## A key, button, click or quit waiting: the batch stops so it is read
-    ## after this frame, as it would be without batching.
+    ## after this frame, as it would be without batching. SDL 3 event types:
+    ## quit; key down/up; mouse button down/up and wheel; joystick axis,
+    ## ball, hat and button; gamepad axis and button; a dropped file. Not
+    ## the joystick/gamepad update-complete or sensor events, which a
+    ## connected controller can send every poll.
     pumpEvents()
-    hasEvent(0x100'u32) or hasEvents(0x300'u32, 0x3FF'u32) or
-      hasEvents(0x401'u32, 0x4FF'u32) or hasEvents(0x600'u32, 0x6FF'u32) or
-      hasEvents(0x1000'u32, 0x10FF'u32)
+    hasEvent(0x100'u32) or hasEvents(0x300'u32, 0x301'u32) or
+      hasEvents(0x401'u32, 0x403'u32) or hasEvents(0x600'u32, 0x604'u32) or
+      hasEvents(0x650'u32, 0x652'u32) or hasEvent(0x1000'u32)
   proc rewind_undrawn() =
     ## Counts an undrawn frame; a snapshot due on it waits for a drawn one.
     if not app.cfg.rewind or app.netlink != nil: return
     case app.emu_kind
     of ekGBA: discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload(), ready = false)
     of ekGB: discard app.rewind.maybe_push(proc(): string = app.gb_emu.state_payload(), ready = false)
-    of ekNone: discard
+    of ekNDS, ekNone: discard  # the DS draws every frame
   proc rewind_due(): bool =
     ## The next frame takes a rewind snapshot: it is drawn, so snapshots
     ## stay their interval apart under fast-forward too.
