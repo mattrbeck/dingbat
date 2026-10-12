@@ -763,7 +763,8 @@ proc clip_note_frame()
 # alternate frames), which is what it is for.
 var unseenNext = false
 # Every frame drawn (the A/B switch: web ?draw=all, iOS Draw every frame):
-# no unseen frame, rollback draws both cores, a clip pre-roll draws all.
+# no unseen frame, every run-ahead lookahead frame drawn, rollback draws
+# both cores, a clip pre-roll draws all.
 var drawAllFrames = false
 
 proc dingbat_set_draw_all(on: cint) {.exportc, cdecl.} =
@@ -836,7 +837,7 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
     let snap = stateGba.state_payload()
     stateGba.apu.silent = true
     for i in 0 ..< int(n):
-      stateGba.ppu.no_draw = i < int(n) - 1  # only the last is shown
+      stateGba.ppu.no_draw = i < int(n) - 1 and not drawAllFrames  # only the last is shown
       stateGba.step_frame()
     stateGba.ppu.no_draw = false
     stateGba.apu.silent = optSilent
@@ -850,7 +851,7 @@ proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
     stateGb.apu.silent = true
     let sgb = stateGb.sgb_active()
     for i in 0 ..< int(n):
-      stateGb.ppu.no_draw = i < int(n) - 1 and not sgb  # only the last is shown
+      stateGb.ppu.no_draw = i < int(n) - 1 and not sgb and not drawAllFrames  # only the last is shown
       stateGb.step_frame()
     stateGb.ppu.no_draw = false
     stateGb.apu.silent = optSilent

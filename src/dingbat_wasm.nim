@@ -700,7 +700,8 @@ proc clip_speed_restore() =
 # thumbnail is the picture the frame before it left, so one waits for it.
 var lastFrameDrawn = true
 # Every frame drawn (the A/B switch: web ?draw=all, iOS Draw every frame):
-# no unseen frame, rollback draws both cores, a clip pre-roll draws all.
+# no unseen frame, every run-ahead lookahead frame drawn, rollback draws
+# both cores, a clip pre-roll draws all.
 var drawAllFrames = false
 
 proc wasm_set_draw_all(on: cint) {.exportc.} =
@@ -1208,7 +1209,7 @@ proc runahead_tick(n: cint) {.exportc.} =
     # directly: the restore below re-latches the sound HLEs anyway.
     stateGba.apu.silent = true
     for i in 0 ..< int(n):
-      stateGba.ppu.no_draw = i < int(n) - 1  # only the last is shown
+      stateGba.ppu.no_draw = i < int(n) - 1 and not drawAllFrames  # only the last is shown
       stateGba.step_frame()
     stateGba.ppu.no_draw = false
     stateGba.apu.silent = optSilent
@@ -1243,7 +1244,7 @@ proc runahead_tick(n: cint) {.exportc.} =
     let prnSnap = if statePrinter != nil: statePrinter.clone() else: nil
     stateGb.apu.silent = true  # lookahead audio is thrown away
     for i in 0 ..< int(n):
-      stateGb.ppu.no_draw = i < int(n) - 1 and not sgb  # only the last is shown
+      stateGb.ppu.no_draw = i < int(n) - 1 and not sgb and not drawAllFrames  # only the last is shown
       stateGb.step_frame()
     stateGb.ppu.no_draw = false
     stateGb.apu.silent = optSilent
