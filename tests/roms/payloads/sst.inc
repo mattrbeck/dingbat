@@ -42,6 +42,18 @@
 .equ V_WDSPSR, 44
 .equ V_WDLR,   48
 .equ V_BANKS,  64         @ fiq r8-r14 + spsr (8), irq/svc/abt/und r13 r14 spsr (3 each)
+.equ V_SIZE,   V_BANKS + 4 * (8 + 4 * 3)
+@ The variables live in scratch IWRAM, not in the image. The monitor puts
+@ its trampoline straight after the image (monitor.run_payload, sst.py's
+@ Session) and calls through it again without uploading anew, so the image
+@ must not change under a call: the first console run (2026-10-12) kept
+@ them in a 128-byte block at the image's end, save_banks wrote 144 bytes
+@ into it, the overflow broke the trampoline's first four words, and the
+@ second cell's call never came back.
+.equ vars,     0x03006000
+.if V_SIZE > 0x400
+.error "sst.inc: vars runs into SCR_IW"
+.endif
 
     @ `orr r6, r6, #n`: a breadcrumb. Its encoding is 0xE3866000 | n, which
     @ the r15-as-base cells read back to tell which word they loaded.
@@ -244,8 +256,5 @@ wd_handler:
     .ltorg
     .endm
 
-    .macro sst_vars
-    .align 2
-vars:
-    .space 128
+    .macro sst_vars                @ (vars is in scratch IWRAM: nothing here)
     .endm

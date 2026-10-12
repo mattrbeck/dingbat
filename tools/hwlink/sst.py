@@ -7,6 +7,10 @@ asked of the console (docs/hwprobe-sst.md has the questions and answers).
     python3 sst.py console --groups=C --keep --skip=x.mrs_r15
                                     # after a power cycle: the risky cells again,
                                     # kept with the answers already in the file
+    python3 sst.py monitor-sim [--mode=0x1F]
+                                    # the console run's exact traffic through the
+                                    # monitor's own code in dingbat (monsim.py),
+                                    # checked against sst-dingbat.json
     python3 sst.py show             # the cells side by side, decoded
     python3 sst.py rom DIR          # cartridge ROMs of both payloads (results
                                     # at 0x02000000, one word a cell, in order)
@@ -24,7 +28,18 @@ answer. The JSON is written after every cell, so what was answered is kept.
 Each payload is uploaded once and read back; each cell's argument is
 written and read back, the cell called through a trampoline, and its answer
 read until two reads agree (as monitor.run_payload does, without uploading
-the code again for every cell). The code is read back after every pass.
+the code again for every cell). Because the code is not uploaded again,
+the run guards against a payload that changes its own image:
+  - first a smoke test, a two-instruction payload called twice through one
+    upload, before anything of the probe's is sent;
+  - after a group's first cell, the whole image read back;
+  - before every call, the trampoline read back (a call through a damaged
+    one never returns, which is how the first console run ended: the
+    payload's variables overran the end of the image, see sst.inc);
+  - after every pass, the whole image again.
+A damaged image stops the run with the console still answering.
+`monitor-sim` plays the same traffic into the monitor's own code in dingbat;
+run it after any change to the payloads or to this file.
 """
 import json
 import os
@@ -109,6 +124,92 @@ def run_emulators():
     print(f'{len(out)} cells -> {os.path.relpath(DINGBAT_FILE)}')
 
 
+def sim_session(src, names, idx, mode=0x1F, emulators=EMULATORS):
+    """The console runner's exact traffic for these cells, played into the
+    monitor's own code in the emulators (monsim.py): {emulator: {cell:
+    answer}}, 'hung' for a call that never came back and '-' after it."""
+    import monsim
+    from monitor import ANS_PONG, ANS_DONE, assemble
+    h = monsim.Host()
+    h.connect()
+    pong = h.ping()
+    sessions = []                      # (label, words, upload readback, [(cell, ...)], readback after the first)
+
+    def session(code, cells):
+        words, tramp, arg_at, result_at = Session.layout(code)
+        h.write_mem(Session.BASE, words)
+        back = h.read_mem(Session.BASE, len(words))
+        plan, after_first = [], None
+        for k, (name, arg) in enumerate(cells):
+            trampback = h.read_mem(tramp, 7)            # Session.tramp_intact
+            h.write_mem(arg_at, [arg, 0x5A5A5A5A])
+            argback = h.read_mem(arg_at, 2)
+            done, _ = h.call(tramp, 0)
+            res = h.read_mem(result_at, 1)[0]
+            h.read_mem(result_at, 1)
+            plan.append((name, arg, trampback, argback, done, res))
+            if k == 0:                                  # Session.intact after the first call
+                after_first = h.read_mem(Session.BASE, len(words) - 9)
+        sessions.append((words, back, plan, after_first))
+
+    # what run_console sends: the smoke test, then the probe
+    session(SMOKE_CODE, [('smoke 0x1234', 0x1234), ('smoke 0x5678', 0x5678)])
+    session(assemble(src, out_dir=payloadcmp.SCRATCH), [(names[i], i) for i in idx])
+    got = monsim.run(h, mode=mode, names=emulators, frames=60 + 4 * len(idx))
+    out = {}
+    for e in emulators:
+        log = got[e]
+        cells = out[e] = {}
+        if log[pong] != ANS_PONG:
+            cells['(ping)'] = 'failed'
+            continue
+        for words, back, plan, after_first in sessions:
+            if [log[k] for k in back] != words:
+                cells['(upload)'] = 'failed'
+                break
+            stop = False
+            for k, (name, arg, trampback, argback, done, res) in enumerate(plan):
+                if [log[t] for t in trampback] != words[-9:-2]:
+                    cells[name] = 'corrupt'                # run_console stops here
+                    stop = True
+                    break
+                if log[done] is None:
+                    cells[name] = 'hung'
+                    stop = True
+                    break
+                if [log[t] for t in argback] != [arg, 0x5A5A5A5A] or log[done] != ANS_DONE:
+                    cells[name] = 'link'
+                    continue
+                cells[name] = f'{log[res]:08X}'
+                if k == 0 and [log[t] for t in after_first] != words[:-9]:
+                    cells[name] += ' corrupt'              # the image changed: run_console stops
+                    stop = True
+                    break
+            if stop:
+                break
+    return out
+
+
+def run_sim(mode):
+    emu = load(DINGBAT_FILE)
+    bad = 0
+    for src, names in ((SAFE_SRC, CELLS), (RISK_SRC, RISK_CELLS)):
+        got = sim_session(src, names, range(len(names)), mode=mode)
+        for e, cells in got.items():
+            smoke = [cells.get('smoke 0x1234'), cells.get('smoke 0x5678')]
+            if smoke != ['00001235', '00005679']:
+                bad += 1
+                print(f'  {e:<13}smoke test answered {smoke}')
+            for n in names:
+                a = cells.get(n, '-')
+                if a != emu.get(n, {}).get(e):
+                    bad += 1
+                    print(f'  {e:<13}{n:<30}{a}  (wrapper {emu.get(n, {}).get(e)})')
+            print(f'{e:<13} {os.path.basename(src)}: {sum(1 for n in names if cells.get(n) == emu.get(n, {}).get(e))}'
+                  f'/{len(names)} cells as the wrapper ROM answers them (mode {mode:#x})')
+    return 1 if bad else 0
+
+
 def build_roms(dest):
     import shutil
     os.makedirs(dest, exist_ok=True)
@@ -124,19 +225,29 @@ class Wedged(RuntimeError):
     pass
 
 
+class Corrupt(RuntimeError):
+    """The payload's image changed under it: stop before calling it again."""
+
+
+# `add r0, r0, #1; bx lr`: the smoke test's whole payload
+SMOKE_CODE = bytes.fromhex('010080E2') + bytes.fromhex('1EFF2FE1')
+
+
 class Session:
     """One payload resident in IWRAM, called once per cell."""
 
-    def __init__(self, m, code):
-        from monitor import PAYLOAD_ADDRESS
-        self.m = m
+    BASE = 0x03000000                      # monitor.PAYLOAD_ADDRESS
+
+    @staticmethod
+    def layout(code):
+        """(the words uploaded, the trampoline, its argument and result
+        slots): monitor.run_payload's layout, code then trampoline."""
         data = bytearray(code)
         while len(data) % 4:
             data.append(0)
         words = [int.from_bytes(data[i:i + 4], 'little') for i in range(0, len(data), 4)]
-        self.ncode = len(words)
-        tramp = PAYLOAD_ADDRESS + 4 * len(words)
-        branch = ((PAYLOAD_ADDRESS - (tramp + 12 + 8)) >> 2) & 0xFFFFFF
+        tramp = Session.BASE + 4 * len(words)
+        branch = ((Session.BASE - (tramp + 12 + 8)) >> 2) & 0xFFFFFF
         words += [0xE92D4010,              # stmfd sp!, {r4, lr}
                   0xE28F4010,              # adr r4, slots
                   0xE5940000,              # ldr r0, [r4]
@@ -145,11 +256,15 @@ class Session:
                   0xE8BD4010,              # ldmfd sp!, {r4, lr}
                   0xE12FFF1E,              # bx lr
                   0, 0x5A5A5A5A]
-        self.words = words
-        self.base = PAYLOAD_ADDRESS
-        self.tramp = tramp
-        self.arg_at = tramp + 28
-        self.result_at = tramp + 32
+        return words, tramp, tramp + 28, tramp + 32
+
+    def __init__(self, m, code):
+        from monitor import PAYLOAD_ADDRESS
+        assert PAYLOAD_ADDRESS == Session.BASE
+        self.m = m
+        self.words, self.tramp, self.arg_at, self.result_at = Session.layout(code)
+        self.ncode = len(self.words) - 9
+        self.base = Session.BASE
         self.upload()
 
     def upload(self, tries=3):
@@ -163,8 +278,23 @@ class Session:
     def intact(self):
         return self.m.read_mem(self.base, self.ncode) == self.words[:self.ncode]
 
+    def tramp_intact(self):
+        n = (self.arg_at - self.tramp) // 4
+        want = self.words[self.ncode:self.ncode + n]
+        for _ in range(2):
+            if self.m.read_mem(self.tramp, n) == want:
+                return True
+            self.m.resync()
+        return False
+
     def ask(self, arg, tries=3):
         from monitor import MonitorError
+        # A payload that writes past its own end lands on the trampoline,
+        # and a call through a broken trampoline never comes back: check it
+        # before every call rather than find out by wedging the console.
+        if not self.tramp_intact():
+            raise Corrupt('the trampoline after the payload has changed: the payload wrote '
+                          'past its own end on an earlier call')
         for _ in range(tries):
             self.m.write_mem(self.arg_at, [arg, 0x5A5A5A5A])
             if self.m.read_mem(self.arg_at, 2) != [arg, 0x5A5A5A5A]:
@@ -207,6 +337,26 @@ def run_console(runs, groups, keep, skip):
             ('sst', SAFE_SRC, CELLS, range(GROUP_B, len(CELLS)), 'B', runs),
             ('sstrisk', RISK_SRC, RISK_CELLS, range(len(RISK_CELLS)), 'C', None)]
     plan = [p for p in plan if p[4] in groups]
+
+    # Smoke test: a two-instruction payload, called twice through the same
+    # upload, before anything of the probe's goes near the console
+    with Monitor() as m:
+        m.ping()
+        try:
+            s = Session(m, SMOKE_CODE)
+            got = [s.ask(0x1234), s.ask(0x5678)]
+            ok = got == [0x1235, 0x5679] and s.intact()
+        except (Wedged, Corrupt, RuntimeError) as e:
+            got, ok = str(e), False
+        if not ok:
+            state['stopped_at'] = 'smoke test'
+            save()
+            print(f'STOPPED: the smoke test (r0 + 1, called twice) answered {got}, not '
+                  '[0x1235, 0x5679]. Nothing of the probe was sent. Check the link and the '
+                  'monitor (`monitor.py ping`); after a wedge, power-cycle and `monitor.py install`.')
+            return 2
+        print('smoke test: a payload called twice through one upload came back both times', flush=True)
+
     for stem, src, names, idx, group, passes in plan:
         idx = [i for i in idx if names[i] not in skip]
         if not idx:
@@ -218,10 +368,20 @@ def run_console(runs, groups, keep, skip):
             print(f'group {group}: {stem}.s, {len(s.words)} words, {len(idx)} cells', flush=True)
             for i in idx:
                 tallies.pop(names[i], None)       # this run's answers replace a kept file's
+            i = idx[0]
             try:
+                # the first cell once, then the whole image read back: a
+                # payload that damages itself stops here, before a second call
+                record(tallies, names[i], s.ask(i))
+                save()
+                if not s.intact():
+                    raise Corrupt(f'the payload image changed after its first call ({names[i]})')
+                first = idx[0]                    # its first run is the one above
                 if passes:
                     for p in range(passes):
                         for i in idx:
+                            if p == 0 and i == first:
+                                continue
                             record(tallies, names[i], s.ask(i))
                             save()
                         if not s.intact():
@@ -231,12 +391,18 @@ def run_console(runs, groups, keep, skip):
                 else:
                     # one cell at a time, three runs each, so a wedge names its cell
                     for i in idx:
-                        for _ in range(runs):
+                        for _ in range(runs - (i == first)):
                             record(tallies, names[i], s.ask(i))
                             save()
                         print(f'  {names[i]:<20} {" | ".join(tallies[names[i]])}', flush=True)
                         if not s.intact():
                             s.upload()
+            except Corrupt as e:
+                state['stopped_at'] = names[i]
+                save()
+                print(f'STOPPED at {names[i]} ({stem}.s #{i}), before calling anything more: {e}. '
+                      'The console is still answering; this is a payload bug, not a console answer.')
+                return 3
             except Wedged as e:
                 state['stopped_at'] = names[i]
                 save()
@@ -304,6 +470,9 @@ def main(argv):
         groups = 'AB' if '--safe' in argv else opt('groups', 'ABC')
         skip = set(filter(None, opt('skip', '').split(',')))
         return run_console(int(opt('runs', '3')), groups, '--keep' in argv, skip)
+    elif what == 'monitor-sim':
+        mode = next((int(a.split('=')[1], 0) for a in argv if a.startswith('--mode=')), 0x1F)
+        return run_sim(mode)
     elif what == 'show':
         show()
     elif what == 'rom':

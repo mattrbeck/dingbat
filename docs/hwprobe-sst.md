@@ -23,12 +23,34 @@ draw nothing; they are for running the same code in an emulator.
 
 ## Running it on the console
 
+Before a console run, after any change to the payloads or to `sst.py`:
+`python3 tools/hwlink/sst.py monitor-sim` plays the run's exact link
+traffic into the monitor's own code (`tests/roms/gbamon.s` with only its
+serial routine replaced by a scripted host, `tools/hwlink/monsim.py`) in
+dingbat with the HLE and the real BIOS, and checks every cell answers as
+the cartridge wrapper does. `--mode=` picks the CPU mode it starts the
+monitor in (System by default; the multiboot entry's mode is not pinned).
+
 1. Power the SP on with **no cartridge** in the slot. Connect the GB-Link.
 2. `cd tools/hwlink && python3 monitor.py install` (the screen turns green),
    then `python3 monitor.py ping` should print `PONG`.
-3. `python3 sst.py console`. It runs group A (three passes), group B (three
-   passes), then group C one cell at a time, three runs each, least risky
-   first, writing `sst-agb.json` after every answer. It takes a few minutes.
+3. `python3 sst.py console`. It first runs a smoke test (a two-instruction
+   payload called twice through one upload) and stops if that fails. Then
+   group A (three passes), group B (three passes), then group C one cell at
+   a time, three runs each, least risky first, writing `sst-agb.json` after
+   every answer. It reads the trampoline back before every call and the
+   whole image back after a group's first call and after every pass, and
+   stops, with the console still answering, if the payload has changed
+   itself. It takes a few minutes.
+
+The first console run (2026-10-12) stopped at the second cell,
+`t.str_r0.iw`, with the console wedged. The cause was the harness: the
+variables block at the end of the image was 128 bytes, `save_banks` wrote
+144, and the overflow overwrote the first four words of the trampoline
+the runner puts after the image and calls through without uploading
+again. `monitor-sim` reproduces that run (cell 1 never comes back) and
+passes every cell since the variables moved to scratch IWRAM; the guards
+above stop that kind of run before its second call.
 4. `python3 sst.py show` prints every cell with dingbat's answer beside the
    console's (`<<<` where they differ).
 
