@@ -12,9 +12,9 @@ when defined(emscripten):
   # -d:nds_simd builds web/nds/nds-simd.{js,wasm}: the same core with wasm
   # SIMD (-msimd128), which index.js loads where the browser has it (Chrome
   # 91, Firefox 89, Safari 16.4); web/nds/nds.{js,wasm} stays for the rest
-  # (iOS 15 to 16.3). The C compiler vectorises the 2D compositing's loops
-  # with it, and engine2d.nim's effect pass takes its vector form
-  # (docs/nds/perf.md, round 4). Same exports, same createNdsCore.
+  # (iOS 15 to 16.3). The C compiler vectorises the 2D compositing's paint
+  # loops with it (docs/nds/perf.md, round 4). Same exports, same
+  # createNdsCore.
   const simd = defined(nds_simd)
   if simd: switch("passC", "-msimd128")
 

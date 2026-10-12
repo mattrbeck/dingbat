@@ -710,12 +710,13 @@ proc compute_windows(e: Engine2D): bool =
 
 const NO_LAYER = 0xFF'u8
 
-const FX_DOTS = defined(nds_fx_dots) or (defined(emscripten) and not defined(nds_simd))
+const FX_DOTS = defined(nds_fx_dots) or defined(emscripten)
   ## The colour effects dot by dot with branches (`effect_dot`), not as the
-  ## branch-free line formula (`composite_k`'s effect pass), in builds
-  ## without vector instructions: wasm without SIMD (the DS module for
-  ## browsers before Safari 16.4) runs the formula 10-12 % slower on
-  ## 2D-heavy scenes, vector builds 3-4 % faster (docs/nds/perf.md, round 4).
+  ## branch-free line formula (`composite_k`'s effect pass), in the wasm
+  ## builds: without SIMD the formula runs 10-12 % slower on 2D-heavy
+  ## scenes (V8 and JSC), and with SIMD it gains nothing over the branches
+  ## (Mystery Dungeon 2 % slower, Golden Sun's field even); natively (NEON)
+  ## it is 3-4 % fewer instructions (docs/nds/perf.md, round 4).
   ## -d:nds_fx_dots picks it natively (nds_2d_test checks both).
 
 template effect_dot(e: Engine2D; x: int; m: uint32; l0, l1: int; p3: uint32; is3d: bool;
