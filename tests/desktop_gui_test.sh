@@ -8,6 +8,8 @@
 #             stick, Start, then unplugged while held (everything lets go)
 #   pixels    the game picture fills the whole back buffer, which on a
 #             Retina display is twice the window's size in points
+#   ui scale  DINGBAT_UI_SCALE=1.5 (a Windows display at 150%) makes the
+#             menu bar and the window half as big again
 #   rumble    an MBC5 rumble cart (generated: it switches its motor on and
 #             spins) buzzes the pad
 #   fullscreen (GUI_TEST_FULLSCREEN=1, macOS) a VISIBLE window taken
@@ -87,16 +89,9 @@ check "z, Shift+Z, Caps Lock Z press A; pad B, stick left, Start; unplug lets go
       "$(masks)" "1 0 1 0 1 0 2 0 32 40 0"
 check "virtual pad plugged in" "$(ack 14 | cut -c1-5)" "ok id"
 
-echo "picture fills the back buffer (pixels, not points)"
-# A hwverified ROM paints a verdict block in its bottom-right corner over a
-# white screen. On a Retina display the back buffer is 2x the window; a
-# viewport set in points would draw the picture into its bottom-left
-# quarter, leaving the shot's bottom-right corner the black clear colour.
-run tests/roms/hwverified/psrmask.gba "" "1 frames 120
-2 shot $work/fill.png
-3 quit"
-echo "  ($(ack 2))"
-lit=$(python3 -I - "$work/fill.png" <<'EOF'
+# shot.py <png> corner|bar: whether the bottom-right pixel is lit, or how
+# many rows down the right edge are dark (the menu bar, over a white game)
+cat > "$work/shot.py" <<'EOF'
 import struct, sys, zlib
 data = open(sys.argv[1], 'rb').read()
 pos, idat = 8, b''
@@ -118,11 +113,55 @@ for _ in range(h):     # undo the PNG row filters (8-bit RGB)
             p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
             line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
     rows.append(line); prev = line
-px = rows[h - 2][(w - 2) * 3:(w - 1) * 3]
-print('lit' if sum(px) > 0 else 'black')
+x = (w - 2) * 3
+if sys.argv[2] == 'corner':
+    print('lit' if sum(rows[h - 2][x:x + 3]) > 0 else 'black')
+else:
+    n = 0
+    while n < h and sum(rows[n][x:x + 3]) < 300: n += 1
+    print(n)
 EOF
-)
+
+echo "picture fills the back buffer (pixels, not points)"
+# A hwverified ROM paints a verdict block in its bottom-right corner over a
+# white screen. On a Retina display the back buffer is 2x the window; a
+# viewport set in points would draw the picture into its bottom-left
+# quarter, leaving the shot's bottom-right corner the black clear colour.
+run tests/roms/hwverified/psrmask.gba "" "1 frames 120
+2 shot $work/fill.png
+3 quit"
+echo "  ($(ack 2))"
+lit=$(python3 -I "$work/shot.py" "$work/fill.png" corner)
 check "the bottom-right corner of the shot is the picture's" "$lit" "lit"
+
+echo "UI scale (DINGBAT_UI_SCALE=1.5, as a Windows display at 150%)"
+# The menu bar over the same white screen, at 100% and at 150%: the bar
+# (font and padding) half as tall again, and the window 3x scaled by
+# 1.5, made a whole number of back-buffer pixels: 5x at a density of 1
+# (the app rounds halves up), 4.5x at 2.
+bar() {  # bar <tag> <scale>: one session's menu bar height, in pixels
+  export DINGBAT_UI_SCALE=$2
+  run tests/roms/hwverified/psrmask.gba "" "1 frames 60
+2 move 200 200
+3 frames 10
+4 shot $work/$1.png
+5 quit"
+  unset DINGBAT_UI_SCALE
+  ack 4 > "$work/$1.ack"
+  python3 -I "$work/shot.py" "$work/$1.png" bar
+}
+bar1=$(bar ui1 1)
+bar15=$(bar ui15 1.5)
+echo "  (menu bar ${bar1} px, then ${bar15} px; $(cat "$work/ui15.ack"))"
+check "the menu bar is 1.4-1.6x as tall" \
+      "$(python3 -I -c "print(1.4 <= $bar15 / max($bar1, 1) <= 1.6)")" "True"
+sizes=$(sed 's/^ok \([0-9]*\)x[0-9]* px, window \([0-9]*\)x\([0-9]*\) pt$/\1 \2 \3/' \
+        "$work/ui15.ack")
+check "the window is 3x scaled by 1.5, whole in pixels" "$(python3 -I -c "
+px, w, h = map(int, '$sizes'.split())
+d = px / w
+k = int(3 * 1.5 * d + 0.5) / d
+print(w == int(240 * k + 0.5) and h == int(160 * k + 0.5))")" "True"
 
 echo "rumble (generated MBC5 rumble cart)"
 python3 -I - "$work/rumble.gb" <<'EOF'

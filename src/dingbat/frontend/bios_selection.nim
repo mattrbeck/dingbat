@@ -51,14 +51,14 @@ proc render_ds(b: BiosSelection) =
   igSeparator()
   for i, (label, help) in DS_FILES:
     igText(cstring(label))
-    igSameLine(110, -1)
+    igSameLine(ui_px(110), -1)
     help_marker(help)
     igSameLine(0, -1)
     let path = b.ds_bufs[i].buf_str()
     let valid = path.len == 0 or fileExists(path)
     if not valid:
       igPushStyleColor_Vec4(cint(ImGui_Col_Text), RED_TEXT_COL)
-    igSetNextItemWidth(280)
+    igSetNextItemWidth(ui_px(280))
     discard igInputTextWithHint(cstring("##nds_file" & $i),
       "optional", cast[cstring](addr b.ds_bufs[i][0]), BUF_SIZE.csize_t, 0, nil, nil)
     if not valid:
@@ -94,7 +94,7 @@ proc render*(b: BiosSelection) =
   igSameLine(0, -1)
   let browse = igButton("Browse##gba_bios", ImVec2(x: 0, y: 0))
 
-  igIndent(106)
+  igIndent(ui_px(106))
   # The intro and the real-BIOS modes need an image: without one the core
   # has only a stub that answers interrupts, and load_rom boots HLE instead.
   let have_file = gba_bios_file_ok(b.bios_buf_str())
@@ -115,7 +115,7 @@ proc render*(b: BiosSelection) =
     igTextDisabled("No BIOS file: GBA games use HLE and skip the intro.")
   if b.overrides.len > 0:
     igTextDisabled("This run only, from the command line: %s", cstring(b.overrides))
-  igUnindent(106)
+  igUnindent(ui_px(106))
 
   b.fe.render("GBA BIOS", browse, [], proc(path: string) =
     zeroMem(addr b.bios_buf[0], BUF_SIZE)

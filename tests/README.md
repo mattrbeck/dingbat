@@ -374,8 +374,10 @@ under Xvfb, test.yml's `desktop-gui` job) drives the desktop app itself through
 its SDL 3 event loop with `-d:gui_driver`, hidden and muted: keys as SDL 3
 reports them under Shift and Caps Lock, a virtual SDL gamepad (hotplug,
 buttons, stick, unplugged mid-press), the game picture filling the back buffer
-(twice the window's points on a Retina display) and a generated MBC5 rumble
-cart buzzing it. `GUI_TEST_FULLSCREEN=1` adds a visible macOS window taken
+(twice the window's points on a Retina display), the menus and window under
+`DINGBAT_UI_SCALE=1.5` (the app's stand-in for a Windows or X11 display at
+150%: the menu bar and the window half as big again) and a generated MBC5
+rumble cart buzzing it. `GUI_TEST_FULLSCREEN=1` adds a visible macOS window taken
 fullscreen by AppKit's own toggle, as the green button does.
 
 `.github/scripts/smoke-desktop.sh` runs each release binary on its own OS

@@ -29,6 +29,7 @@ import dingbat/frontend/game_lock
 import dingbat/frontend/window_restore
 import dingbat/frontend/nds_game
 import dingbat/frontend/imgui_sdl3
+import dingbat/frontend/util
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -516,6 +517,20 @@ proc output_size(): (int, int) =
   of ekNDS: (NDS_W, NDS_H)
   of ekNone: (GBA_W, GBA_H)
 
+proc window_units(window: Window; s: int): float =
+  ## Window units per native pixel at Frame size s: s times the UI scale,
+  ## kept a whole number of back-buffer pixels, which is what keeps every
+  ## native pixel the same size. Windows and X11 size windows in pixels, so
+  ## there the UI scale is what makes 3x the size it was when Windows
+  ## stretched the window itself (SDL 2): 3.75x at 125%, made 4x, and 4.5x
+  ## at 150%, made 5x. With a fractional pixel density (Wayland at 125% or
+  ## 150%) 3x in window units would be 3.75x or 4.5x in pixels, made whole
+  ## the same way. At a density of 1 or 2 and a UI scale of 1 (a macOS
+  ## window, a Windows one at 100%) this is exactly s.
+  var d = float(getWindowPixelDensity(window))
+  if d <= 0: d = 1.0
+  max(1.0, round(float(s) * float(ui_scale) * d)) / d
+
 proc window_scale(): int =
   ## The window's multiple of the picture: Frame size, except that a DS
   ## picture (twice as tall as it is wide) takes the largest multiple that
@@ -524,20 +539,45 @@ proc window_scale(): int =
   var r: Rect
   if not getDisplayUsableBounds(getDisplayForWindow(app.window), r):
     return app.scale
-  clamp((int(r.h) - 40) div NDS_H, 1, app.scale)
+  result = app.scale
+  while result > 1 and float(NDS_H) * window_units(app.window, result) +
+                       40 * float(ui_scale) > float(r.h):
+    dec result
 
 proc set_window_to(w, h, s: int) =
-  ## Size the window to s times a native w x h picture. The multiple is
-  ## kept whole in back-buffer pixels, which is what keeps every native
-  ## pixel the same size: with a fractional pixel density (Wayland at 125%
-  ## or 150%) 3x in window units would be 3.75x or 4.5x in pixels, so it
-  ## becomes the nearest whole multiple there. At a density of 1 or 2 (every
-  ## Windows and X11 window, a macOS one) this is exactly s times.
-  var d = float(getWindowPixelDensity(app.window))
-  if d <= 0: d = 1.0
-  let m = max(1.0, round(float(s) * d))
-  discard setWindowSize(app.window, cint(round(float(w) * m / d)),
-                        cint(round(float(h) * m / d)))
+  ## Size the window to s times a native w x h picture (window_units).
+  let k = window_units(app.window, s)
+  discard setWindowSize(app.window, cint(round(float(w) * k)),
+                        cint(round(float(h) * k)))
+
+var ui_base_style: ImGuiStyle  # ImGui's dark style at 100%, scaled from afresh
+
+proc display_ui_scale(window: Window): float32 =
+  ## The display's content scale, less what the pixel density covers: the
+  ## 125% or 150% of a Windows display, X11's Xft.dpi, and 1 on a Mac or
+  ## Wayland, whose density is the whole scale (a window there is sized in
+  ## points and drawn at its density). DINGBAT_UI_SCALE=<x> sets it instead,
+  ## to try a scaled UI where the display has none.
+  try:
+    let forced = parseFloat(getEnv("DINGBAT_UI_SCALE", "0"))
+    if forced > 0: return clamp(float32(forced), 0.5, 4)
+  except ValueError: discard
+  let d = getWindowPixelDensity(window)
+  let s = getWindowDisplayScale(window)
+  if d <= 0 or s <= 0: 1'f32 else: s / d
+
+proc apply_ui_scale(s: float32) =
+  ## Size ImGui's padding, spacing, rounding and scrollbars, its font and the
+  ## sizes the UI code spells in pixels (ui_px) by s. Scaled from the 100%
+  ## style each time, as ScaleAllSizes rounds down. The font is the built-in
+  ## 13 px pixel font, sized to a whole pixel (16 px at 125%, 20 at 150%):
+  ## only 26 px would draw its pixels whole again, and that is a 200% size,
+  ## so this keeps the size asked for, its edges softened a little.
+  ui_scale = s
+  let style = igGetStyle()
+  style[] = ui_base_style
+  ImGuiStyle_ScaleAllSizes(style, s)
+  style.FontScaleDpi = round(13 * s) / 13
 
 proc resize_to_output() =
   ## Size the window to an integer multiple of the native picture. In
@@ -1417,10 +1457,11 @@ proc render_game() =
     upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
     if rumble_on:
       # ±1 window-unit viewport jitter (2 px on a Retina display, so it
-      # shakes as far as at 1x), alternating per present; restored right
-      # after the draw so ImGui renders unshaken.
+      # shakes as far as at 1x; scaled with the UI on Windows and X11),
+      # alternating per present; restored right after the draw so ImGui
+      # renders unshaken.
       rumble_flip = not rumble_flip
-      let px = GLint(max(1.0, round(getWindowPixelDensity(app.window))))
+      let px = GLint(max(1.0, round(getWindowPixelDensity(app.window) * ui_scale)))
       let off: GLint = if rumble_flip: px else: -px
       let (jx, jy, jw, jh) = game_viewport()
       glViewport(jx + off, jy - off, GLsizei(jw), GLsizei(jh))
@@ -1554,7 +1595,7 @@ proc render_imgui() =
   ImGui_ImplSDL3_NewFrame()
   igNewFrame()
 
-  var overlay_h: cfloat = 10.0
+  var overlay_h: cfloat = ui_px(10)
   var open_rom = false
 
   if menu_visible:
@@ -1657,7 +1698,7 @@ proc render_imgui() =
 
       if igBeginMenu("Audio/Video", true):
         var vol = cint(app.cfg.volume)
-        igSetNextItemWidth(120.0)
+        igSetNextItemWidth(ui_px(120))
         if igSliderInt("Volume", addr vol, 0, 100, "%d%%", 0):
           app.cfg.volume = int(vol)
           apply_master_volume()
@@ -1755,7 +1796,7 @@ proc render_imgui() =
   app.ce.render()
 
   if app.enable_overlay:
-    igSetNextWindowPos(ImVec2(x: 10, y: overlay_h), cint(ImGui_Cond_Always),
+    igSetNextWindowPos(ImVec2(x: ui_px(10), y: overlay_h), cint(ImGui_Cond_Always),
                        ImVec2(x: 0, y: 0))
     igSetNextWindowBgAlpha(0.5'f32)
     let ov_flags = cint(ImGui_WindowFlags_NoDecoration) or
@@ -1809,23 +1850,27 @@ proc render_imgui() =
                        cint(ImGui_WindowFlags_NoSavedSettings)
       if igBegin("##drop_target", nil, drop_flags):
         # A drop zone's outline, inset from the window's edges
-        let (p0, p1) = (ImVec2(x: vp[].Pos.x + 16, y: vp[].Pos.y + 16),
-                        ImVec2(x: vp[].Pos.x + vp[].Size.x - 16,
-                               y: vp[].Pos.y + vp[].Size.y - 16))
+        let inset = ui_px(16)
+        let (p0, p1) = (ImVec2(x: vp[].Pos.x + inset, y: vp[].Pos.y + inset),
+                        ImVec2(x: vp[].Pos.x + vp[].Size.x - inset,
+                               y: vp[].Pos.y + vp[].Size.y - inset))
         let dl = igGetWindowDrawList()
-        when compiles(ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, 12, 0, 3.0)):
-          ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, 12, 0, 3.0)
+        let (rounding, thick) = (ui_px(12), ui_px(3))
+        when compiles(ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, rounding, 0, thick)):
+          ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, rounding, 0, thick)
         else:
-          ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, 12, 3.0, 0)
+          ImDrawList_AddRect(dl, p0, p1, 0x99FFFFFF'u32, rounding, thick, 0)
         let title = "Release to load"
-        igPushFont(nil, igGetFontSize() * 2)
+        # Twice the font's size before the UI scale (PushFont takes that one)
+        let big = igGetStyle().FontSizeBase * 2
+        igPushFont(nil, big)
         let t_size = calc_text_size(title)
         let t_h = igGetTextLineHeightWithSpacing()
         igPopFont()
         let d_size = calc_text_size(rom_types)
         let top = (vp[].Size.y - t_h - d_size.y) * 0.5'f32
         igSetCursorPos(ImVec2(x: (vp[].Size.x - t_size.x) * 0.5'f32, y: top))
-        igPushFont(nil, igGetFontSize() * 2)
+        igPushFont(nil, big)
         igTextUnformatted(cstring(title), nil)
         igPopFont()
         igSetCursorPos(ImVec2(x: (vp[].Size.x - d_size.x) * 0.5'f32, y: top + t_h))
@@ -1838,7 +1883,7 @@ proc render_imgui() =
     if vp != nil:
       let (vpos, vsize) = (vp[].Pos, vp[].Size)
       igSetNextWindowPos(ImVec2(x: vpos.x + vsize.x * 0.5'f32,
-                                y: vpos.y + vsize.y - 16),
+                                y: vpos.y + vsize.y - ui_px(16)),
                          cint(ImGui_Cond_Always), ImVec2(x: 0.5, y: 1.0))
       igSetNextWindowBgAlpha(0.0'f32)
       let hint_flags = cint(ImGui_WindowFlags_NoDecoration) or
@@ -1855,8 +1900,8 @@ proc render_imgui() =
     let vp = igGetMainViewport()
     if vp != nil:
       let (vpos, vsize) = (vp[].Pos, vp[].Size)
-      igSetNextWindowPos(ImVec2(x: vpos.x + vsize.x - 10,
-                                y: vpos.y + overlay_h + 4),
+      igSetNextWindowPos(ImVec2(x: vpos.x + vsize.x - ui_px(10),
+                                y: vpos.y + overlay_h + ui_px(4)),
                          cint(ImGui_Cond_Always), ImVec2(x: 1.0, y: 0.0))
       igSetNextWindowBgAlpha(0.5'f32)
       let badge_flags = cint(ImGui_WindowFlags_NoDecoration) or
@@ -2124,6 +2169,17 @@ proc handle_input() =
       glViewport(0, 0, w, h)
       if evt.type == EVENT_WINDOW_RESIZED: track_fullscreen()
 
+    of EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+      # Moved to a display with another scale, or the setting changed. SDL
+      # keeps a Windows or X11 window's size in pixels, so the menus are
+      # rescaled and the window resized to the picture's multiple at the new
+      # scale, the size it would have opened at there. A Mac's moves between
+      # 1x and Retina leave the UI scale at 1 and change nothing here.
+      let s = display_ui_scale(app.window)
+      if s != ui_scale:
+        apply_ui_scale(s)
+        resize_to_output()
+
     of EVENT_WINDOW_ENTER_FULLSCREEN, EVENT_WINDOW_LEAVE_FULLSCREEN:
       # Sent once the transition is over (macOS animates into and out of a
       # Space), whoever started it
@@ -2276,7 +2332,7 @@ proc render_link_advanced() =
   ## Manual Host/Join behind a collapsed "Advanced" header; either button
   ## first cancels auto-pairing.
   if igCollapsingHeader_TreeNodeFlags("Advanced", 0):
-    igSetNextItemWidth(120)
+    igSetNextItemWidth(ui_px(120))
     discard igInputInt("Port", addr app.link.port, 1, 100, 0)
     igSeparator()
     igText("Host — share your address + port with a friend:")
@@ -2284,7 +2340,7 @@ proc render_link_advanced() =
       link_auto_stop(); link_cancel_setup(); app.link.start_host(link_ready())
     igSeparator()
     igText("Join — enter the host's address:")
-    igSetNextItemWidth(200)
+    igSetNextItemWidth(ui_px(200))
     discard igInputTextWithHint("##link_host", "127.0.0.1",
       cast[cstring](addr app.link.host_buf[0]), csize_t(app.link.host_buf.len),
       0, nil, nil)
@@ -2297,7 +2353,7 @@ proc render_link_window() =
   ## localhost and shows only a status line. Manual Host/Join live under
   ## "Advanced" for cross-machine / custom-port play.
   if not app.link_window: return
-  igSetNextWindowSize(ImVec2(x: 340, y: 0), cint(ImGui_Cond_FirstUseEver))
+  igSetNextWindowSize(ImVec2(x: ui_px(340), y: 0), cint(ImGui_Cond_FirstUseEver))
   # Never shorter than last frame's content, so the wrapped two-windows hint
   # and an opened Advanced do not scroll, whatever height imgui.ini kept;
   # the user can still make it wider or taller.
@@ -2446,7 +2502,9 @@ proc main() =
   # stay in points; GL and captures use getWindowSizeInPixels. Wayland the
   # same, its density being the desktop scale (1.25, 1.5...). Windows and X11
   # windows are sized in pixels already (SDL 3 makes the process per-monitor
-  # DPI aware), so there the flag changes nothing.
+  # DPI aware), so there the flag changes nothing; the display's scale is
+  # the UI scale instead (display_ui_scale), which the window is made that
+  # much bigger by, before it is centred and shown, and the menus too.
   var hidden = false
   when defined(gui_driver):
     driver_init()
@@ -2458,6 +2516,11 @@ proc main() =
   if window == nil:
     echo "Failed to create window: ", $getError(); system.quit(1)
   defer: destroyWindow(window)
+  ui_scale = display_ui_scale(window)
+  if not start_fs:
+    let k = window_units(window, cfg.frame_size)
+    discard setWindowSize(window, cint(round(float(GBA_W) * k)),
+                          cint(round(float(GBA_H) * k)))
   discard setWindowPosition(window, WINDOW_CENTERED, WINDOW_CENTERED)
   if not hidden: discard showWindow(window)
 
@@ -2483,13 +2546,16 @@ proc main() =
 
   discard igCreateContext(nil)
   igStyleColorsDark(nil)
+  ui_base_style = igGetStyle()[]
+  apply_ui_scale(ui_scale)
   let io_ptr = igGetIO_Nil()
   # Nothing to do here for a Retina display: the SDL 3 backend reads the
   # window's density into io.DisplayFramebufferScale every frame, and ImGui
   # (1.92) rasterises the font at it, so text is drawn in device pixels.
   # The default font is a pixel font, drawn on a 13 px grid: at 2x its glyphs
   # come out the same shapes, each pixel 2x2, so only a vector font would
-  # gain detail from the density.
+  # gain detail from the density. A Windows or X11 display's own scale is
+  # the UI scale (apply_ui_scale), the font then drawn bigger in pixels.
   discard ImGui_ImplSDL3_InitForOpenGL(window, gl_ctx)
   discard ImGui_Impl_opengl3_Init("#version 330")
 
@@ -2538,6 +2604,9 @@ proc main() =
     boot_overrides:  boot_ov,
   )
   ce.bios.overrides = describe(boot_ov)
+  # Started fullscreen, the window was left at its 100% size: scaled once
+  # it is a window again.
+  if start_fs and ui_scale != 1: app.fs_track.refit = true
   # Save States widget: the app owns the files, textures and core, so the
   # widget just calls back. Save/Load run synchronously here — render_imgui is
   # always reached at a frame boundary (right after process_pending_state).

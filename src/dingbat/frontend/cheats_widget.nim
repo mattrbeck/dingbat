@@ -5,6 +5,7 @@
 import std/strutils
 import imguin/cimgui
 import ../common/cheats
+import util
 
 type
   CheatsWidget* = ref object
@@ -61,7 +62,7 @@ proc do_add(w: CheatsWidget) =
 
 proc render*(w: CheatsWidget) =
   if not w.window: return
-  igSetNextWindowSize(ImVec2(x: 420, y: 380), cint(ImGui_Cond_FirstUseEver))
+  igSetNextWindowSize(ImVec2(x: ui_px(420), y: ui_px(380)), cint(ImGui_Cond_FirstUseEver))
   if igBegin("Cheats", addr w.window, 0):
     if w.engine == nil:
       igTextColored(dim(), "Load a game to manage cheats.")
@@ -107,7 +108,7 @@ proc render*(w: CheatsWidget) =
     let hint = if w.platform == cpGBA: HINT_GBA else: HINT_GB
     discard igInputTextMultiline("##codes",
       cast[cstring](addr w.code_buf[0]), csize_t(w.code_buf.len),
-      ImVec2(x: -1, y: 60), 0, nil, nil)
+      ImVec2(x: -1, y: ui_px(60)), 0, nil, nil)
     igTextColored(dim(), "%s", cstring(hint))
     if igButton("Add", ImVec2(x: 0, y: 0)):
       w.do_add()

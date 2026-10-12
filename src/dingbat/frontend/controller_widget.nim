@@ -83,7 +83,7 @@ proc render*(w: ControllerWidget) =
     w.ds_selection = none(DsInput)
     if w.show_ds: w.ds_editing = default_ds_controller_bindings()
 
-  let btn_size = ImVec2(x: 96, y: 0)
+  let btn_size = ImVec2(x: ui_px(96), y: 0)
   for inp in Input:
     let selected = w.selection.isSome() and w.selection.get() == inp
     let button   = w.find_button_for_input(inp)

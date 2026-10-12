@@ -3,6 +3,7 @@ import sdl3
 import imguin/[cimgui, impl_opengl]
 import ../common/[input, config]
 import held_input
+import util
 
 type
   KeybindingsWidget* = ref object
@@ -86,7 +87,7 @@ proc render*(w: KeybindingsWidget) =
       w.load_preset(homerow_keybindings(), homerow_ds_keybindings())
     igEndCombo()
 
-  let btn_size = ImVec2(x: 48, y: 0)
+  let btn_size = ImVec2(x: ui_px(48), y: 0)
   for inp in Input:
     let selected = w.selection.isSome() and w.selection.get() == inp
     let btn_text = key_label(w.find_key_for_input(inp))

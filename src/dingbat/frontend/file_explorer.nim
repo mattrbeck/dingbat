@@ -1,6 +1,7 @@
 import std/[os, algorithm, strutils]
 import imguin/[cimgui, impl_opengl]
 import ../common/config
+import util
 
 type
   FileEntry = object
@@ -96,8 +97,8 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
     let vp2 = igGetMainViewport()
     if vp2 != nil:
       disp_size = vp2[].Size
-    let width  = min(disp_size.x - 40, 600'f32)
-    let height = min(disp_size.y - 40, 16'f32 * igGetTextLineHeightWithSpacing())
+    let width  = min(disp_size.x - ui_px(40), ui_px(600))
+    let height = min(disp_size.y - ui_px(40), 16'f32 * igGetTextLineHeightWithSpacing())
 
     var navigate_to = ""
     if igBeginListBox("##files", ImVec2(x: width, y: height)):
@@ -141,7 +142,7 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
     igSameLine(0, -1)
     if igButton("Cancel", ImVec2(x: 0, y: 0)):
       fe.close()
-    igSameLine(0, 10)
+    igSameLine(0, ui_px(10))
     discard igCheckbox("Show hidden files?", addr fe.show_hidden)
     igEndGroup()
 

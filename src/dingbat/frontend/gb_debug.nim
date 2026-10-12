@@ -1,6 +1,8 @@
+import std/math
 import imguin/cimgui
 import imguin/glad/gl
 import ../gb/gb
+import util
 
 type
   GbDebug* = ref object
@@ -43,16 +45,16 @@ proc swatch(c: uint16; id: cint) =
                    w: 1.0'f32)
   # An empty desc_id hashes to the window's own ID and trips an ImGui assert.
   igPushID_Int(id)
-  discard igColorButton("##swatch", col, SWATCH_FLAGS, ImVec2(x: 18, y: 18))
+  discard igColorButton("##swatch", col, SWATCH_FLAGS, ImVec2(x: ui_px(18), y: ui_px(18)))
   igPopID()
 
 proc dmg_palette_row(label: cstring; reg: array[4, uint8];
                      pram: array[64, uint8]; id_base: cint) =
   igTextUnformatted(label, nil)
-  igSameLine(56, -1)
+  igSameLine(ui_px(56), -1)
   for i in 0 .. 3:
     swatch(pram_color(pram, int(reg[i])), id_base + cint(i))
-    igSameLine(0, 2)
+    igSameLine(0, ui_px(2))
   igText("= %02X", cuint(ppu_palette_from_array(reg)))
 
 proc cgb_palette_grid(title: cstring; pram: array[64, uint8]; id_base: cint) =
@@ -60,10 +62,10 @@ proc cgb_palette_grid(title: cstring; pram: array[64, uint8]; id_base: cint) =
   igTextUnformatted(title, nil)
   for p in 0 .. 7:
     igText("%d", cint(p))
-    igSameLine(24, -1)
+    igSameLine(ui_px(24), -1)
     for c in 0 .. 3:
       swatch(pram_color(pram, p * 4 + c), id_base + cint(p * 4 + c))
-      if c < 3: igSameLine(0, 2)
+      if c < 3: igSameLine(0, ui_px(2))
   igEndGroup()
 
 proc render_palette_window(d: GbDebug) =
@@ -72,7 +74,7 @@ proc render_palette_window(d: GbDebug) =
     let ppu = d.gb.ppu
     if d.gb.cgb_enabled:
       cgb_palette_grid("Background", ppu.pram, 0)
-      igSameLine(0, 24)
+      igSameLine(0, ui_px(24))
       cgb_palette_grid("Objects", ppu.obj_pram, 32)
     else:
       dmg_palette_row("BGP", ppu.bgp, ppu.pram, 0)
@@ -115,7 +117,11 @@ proc shade_rgba(d: GbDebug; color: uint8): uint32 =
 
 const TILE_COLS = 16
 const TILE_ROWS = 24  # 384 tiles per bank
-const TILES_SCALE = 2.0'f32
+
+proc zoom(): float32 =
+  ## The tile and map views' magnification: 2x at 100%, kept a whole number
+  ## at other UI scales so every pixel stays the same size.
+  max(1'f32, round(2 * ui_scale))
 
 proc build_tiles(d: GbDebug): (int, int) =
   let ppu = d.gb.ppu
@@ -143,13 +149,12 @@ proc render_tiles_window(d: GbDebug) =
     upload_texture(d.tiles_tex, addr d.tiles_buf[0], w, h)
     if d.gb.cgb_enabled:
       igTextUnformatted("Bank 0", nil)
-      igSameLine(cfloat(TILE_COLS * 8) * TILES_SCALE + 8, -1)
+      igSameLine(cfloat(TILE_COLS * 8) * zoom() + ui_px(8), -1)
       igTextUnformatted("Bank 1", nil)
-    debug_image(d.tiles_tex, float32(w) * TILES_SCALE, float32(h) * TILES_SCALE)
+    debug_image(d.tiles_tex, float32(w) * zoom(), float32(h) * zoom())
   igEnd()
 
 const MAP_PX = 256
-const MAP_SCALE = 2.0'f32
 
 proc build_bg_map(d: GbDebug; map_base: int) =
   let ppu = d.gb.ppu
@@ -183,23 +188,23 @@ proc outline_scroll_viewport(d: GbDebug; img_pos: ImVec2) =
   # SCX/SCY viewport drawn wrapped: stamp the rect at the four wrap offsets
   # so the parts crossing the map edge reappear.
   let ppu = d.gb.ppu
-  let side = cfloat(MAP_PX) * MAP_SCALE
+  let side = cfloat(MAP_PX) * zoom()
   let img_max = ImVec2(x: img_pos.x + side, y: img_pos.y + side)
   let dl = igGetWindowDrawList()
   let col = igGetColorU32_Vec4(ImVec4(x: 1.0, y: 0.2, z: 0.2, w: 1.0))
   ImDrawList_PushClipRect(dl, img_pos, img_max, true)
   for wx in 0 .. 1:
     for wy in 0 .. 1:
-      let x0 = img_pos.x + (cfloat(ppu.scx) - cfloat(wx * MAP_PX)) * MAP_SCALE
-      let y0 = img_pos.y + (cfloat(ppu.scy) - cfloat(wy * MAP_PX)) * MAP_SCALE
+      let x0 = img_pos.x + (cfloat(ppu.scx) - cfloat(wx * MAP_PX)) * zoom()
+      let y0 = img_pos.y + (cfloat(ppu.scy) - cfloat(wy * MAP_PX)) * zoom()
       let p0 = ImVec2(x: x0, y: y0)
-      let p1 = ImVec2(x: x0 + 160 * MAP_SCALE, y: y0 + 144 * MAP_SCALE)
+      let p1 = ImVec2(x: x0 + 160 * zoom(), y: y0 + 144 * zoom())
       # imguin <= 1.92.4 orders AddRect params (rounding, flags, thickness);
       # later versions (rounding, thickness, flags).
-      when compiles(ImDrawList_AddRect(dl, p0, p1, col, 0, 0, 2.0)):
-        ImDrawList_AddRect(dl, p0, p1, col, 0, 0, 2.0)
+      when compiles(ImDrawList_AddRect(dl, p0, p1, col, 0, 0, ui_px(2))):
+        ImDrawList_AddRect(dl, p0, p1, col, 0, 0, ui_px(2))
       else:
-        ImDrawList_AddRect(dl, p0, p1, col, 0, 2.0, 0)
+        ImDrawList_AddRect(dl, p0, p1, col, 0, ui_px(2), 0)
   ImDrawList_PopClipRect(dl)
 
 proc render_bg_map_tab(d: GbDebug; label: cstring; map_base: int;
@@ -214,7 +219,7 @@ proc render_bg_map_tab(d: GbDebug; label: cstring; map_base: int;
     else:
       let p = igGetCursorScreenPos()
       img_pos = ImVec2(x: p.x, y: p.y)
-    debug_image(d.bgmap_tex, cfloat(MAP_PX) * MAP_SCALE, cfloat(MAP_PX) * MAP_SCALE)
+    debug_image(d.bgmap_tex, cfloat(MAP_PX) * zoom(), cfloat(MAP_PX) * zoom())
     if is_bg_map:
       d.outline_scroll_viewport(img_pos)
     igEndTabItem()

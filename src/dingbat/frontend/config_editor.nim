@@ -8,6 +8,7 @@ import video_widget
 import keybindings_widget
 import controller_widget
 import general_widget
+import util
 
 type
   ConfigEditor* = ref object
@@ -109,9 +110,9 @@ proc render*(ed: ConfigEditor) =
   # and cannot host the negative-sized footer child below. Height clamps to
   # the viewport so the pinned action row never falls off a small window.
   let work_h = igGetMainViewport().WorkSize.y
-  igSetNextWindowPos(ImVec2(x: 60, y: 28), cint(ImGui_Cond_FirstUseEver),
-                     ImVec2(x: 0, y: 0))
-  igSetNextWindowSize(ImVec2(x: 560, y: min(460.0'f32, work_h - 56.0'f32)),
+  igSetNextWindowPos(ImVec2(x: ui_px(60), y: ui_px(28)),
+                     cint(ImGui_Cond_FirstUseEver), ImVec2(x: 0, y: 0))
+  igSetNextWindowSize(ImVec2(x: ui_px(560), y: min(ui_px(460), work_h - ui_px(56))),
                       cint(ImGui_Cond_FirstUseEver))
   let shown = igBegin("Settings", addr ed.open, 0)
   # The X: a capture in progress ends with it; edits Apply would save are
@@ -124,7 +125,7 @@ proc render*(ed: ConfigEditor) =
   if shown:
     # The tab pane reserves room for the action row: a too-short window
     # scrolls the pane, never the buttons.
-    let footer = igGetFrameHeightWithSpacing() + 10.0'f32
+    let footer = igGetFrameHeightWithSpacing() + ui_px(10)
     discard igBeginChild_Str("##settings_tabs", ImVec2(x: 0, y: -footer),
                              ImGuiChildFlags(0), ImGuiWindowFlags(0))
     if igBeginTabBar("SettingsTabBar", 0):
@@ -184,12 +185,12 @@ proc render*(ed: ConfigEditor) =
       igText("Restore all settings to their defaults?")
       igText("Your ROMs, saves, recents and BIOS paths are kept.")
       igSeparator()
-      if igButton("Reset", ImVec2(x: 120, y: 0)):
+      if igButton("Reset", ImVec2(x: ui_px(120), y: 0)):
         ed.do_factory_reset()
         igCloseCurrentPopup()
       igSameLine(0, -1)
       # Escape cancels; Return does nothing here (Reset is not undoable)
-      if igButton("Cancel", ImVec2(x: 120, y: 0)) or modal_key() == mkCancel:
+      if igButton("Cancel", ImVec2(x: ui_px(120), y: 0)) or modal_key() == mkCancel:
         igCloseCurrentPopup()
       igEndPopup()
 
@@ -198,18 +199,18 @@ proc render*(ed: ConfigEditor) =
                        cint(ImGui_WindowFlags_AlwaysAutoResize)):
     igText("These settings have not been applied.")
     igSeparator()
-    if igButton("Apply", ImVec2(x: 100, y: 0)):
+    if igButton("Apply", ImVec2(x: ui_px(100), y: 0)):
       ed.do_apply()
       ed.open = false
       igCloseCurrentPopup()
     igSameLine(0, -1)
-    if igButton("Discard", ImVec2(x: 100, y: 0)):
+    if igButton("Discard", ImVec2(x: ui_px(100), y: 0)):
       ed.open = false
       igCloseCurrentPopup()
     igSameLine(0, -1)
     # Escape cancels. Return does nothing: Apply and Discard each act on
     # edits the player may not have looked at.
-    if igButton("Cancel", ImVec2(x: 100, y: 0)) or modal_key() == mkCancel:
+    if igButton("Cancel", ImVec2(x: ui_px(100), y: 0)) or modal_key() == mkCancel:
       igCloseCurrentPopup()
     igEndPopup()
 

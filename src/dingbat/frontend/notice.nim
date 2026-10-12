@@ -7,6 +7,7 @@
 
 import imguin/cimgui
 import held_input
+import util
 export ModalKey
 
 proc modal_key*(): ModalKey =
@@ -41,8 +42,8 @@ proc render_notice*(popup: string; text, hint: var string) =
       let c = ImGuiViewport_GetCenter(vp)
       center = ImVec2(x: c.x, y: c.y)
   igSetNextWindowPos(center, cint(ImGui_Cond_Appearing), ImVec2(x: 0.5, y: 0.5))
-  igSetNextWindowSizeConstraints(ImVec2(x: 380, y: 0), ImVec2(x: 560, y: 400),
-                                 nil, nil)
+  igSetNextWindowSizeConstraints(ImVec2(x: ui_px(380), y: 0),
+                                 ImVec2(x: ui_px(560), y: ui_px(400)), nil, nil)
   var stay_open = true
   if igBeginPopupModal(cstring(popup), addr stay_open,
                        cint(ImGui_WindowFlags_AlwaysAutoResize)):
@@ -57,7 +58,7 @@ proc render_notice*(popup: string; text, hint: var string) =
     igPopTextWrapPos()
     igSpacing()
     # OK is the only button: Return and Escape both mean it
-    if igButton("OK", ImVec2(x: 120, y: 0)) or modal_key() != mkNone:
+    if igButton("OK", ImVec2(x: ui_px(120), y: 0)) or modal_key() != mkNone:
       text = ""
       hint = ""
       igCloseCurrentPopup()
