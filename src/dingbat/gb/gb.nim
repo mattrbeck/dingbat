@@ -3290,6 +3290,15 @@ const GB_APU_EVENTS* = {etAPUFrameSeq, etAPUSample, etAPUChannel1,
 
 include ppu
 include fifo_ppu
+when defined(cpu_testbus):
+  # The single-instruction test build (tests/singlestep_test.nim): the CPU's
+  # reads and writes go to a flat 64 KB test bus instead of the memory map.
+  # The M-cycle is still ticked, so the driver can place each access in it.
+  # Compiled out of every other build: nothing on the shipping path tests
+  # for them.
+  var gb_testbus_read*: proc(address: int): uint8 {.nimcall.}
+  var gb_testbus_write*: proc(address: int; value: uint8) {.nimcall.}
+
 # Memory bus (mem_read/mem_write dispatch, DMA/HDMA, I/O registers)
 include memory
 # CPU decode/execute. One hard ordering constraint: cb_opcodes before

@@ -755,6 +755,7 @@ proc rom_read32(bus: Bus; address: uint32): uint32 {.inline.} =
 # ---- internal read implementations ----
 
 proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
+  when defined(cpu_testbus): return uint8(gba_testbus_peek(1, address))
   if bits_range(address, 28, 31) > 0:
     # 10000000-FFFFFFFF is not decoded: open bus, never a mirror. Minish Cap
     # walks an animation script through a NULL entry into the BIOS open-bus
@@ -798,6 +799,7 @@ proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
   else: raise newException(Exception, "Unmapped bus read: " & hex_str(address))
 
 proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
+  when defined(cpu_testbus): return uint16(gba_testbus_peek(2, address))
   let orig = address
   let address = address and not 1'u32
   if bits_range(address, 28, 31) > 0:  # unmapped: open bus, not a mirror
@@ -838,6 +840,7 @@ proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
   else: raise newException(Exception, "Unmapped bus read_half: " & hex_str(address))
 
 proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
+  when defined(cpu_testbus): return gba_testbus_peek(4, address)
   let orig = address
   let address = address and not 3'u32
   if bits_range(address, 28, 31) > 0:  # unmapped: open bus, not a mirror
@@ -1283,6 +1286,7 @@ proc fetch_half_cached(bus: Bus; address: uint32; page: uint32): uint16 {.fetch_
   read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
 
 proc fetch_half*(bus: Bus; address: uint32): uint16 {.fetch_inline.} =
+  when defined(cpu_testbus): return uint16(gba_testbus_read(0, 2, address))
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_key or bus.install_fetch_cache(page):
     bus.fetch_half_cached(address, page)
@@ -1314,6 +1318,7 @@ proc fetch_word_cached(bus: Bus; address: uint32; page: uint32): uint32 {.fetch_
   read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)
 
 proc fetch_word*(bus: Bus; address: uint32): uint32 {.fetch_inline.} =
+  when defined(cpu_testbus): return gba_testbus_read(0, 4, address)
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_key or bus.install_fetch_cache(page):
     bus.fetch_word_cached(address, page)
@@ -1501,6 +1506,7 @@ proc io_loaded[T: uint8 | uint16 | uint32](bus: Bus; address: uint32; v: T): T {
   v
 
 proc `[]`*(bus: Bus; address: uint32): uint8 =
+  when defined(cpu_testbus): return uint8(gba_testbus_read(1, 1, address))
   bdWatchRead(address, 1)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
@@ -1517,6 +1523,7 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
+  when defined(cpu_testbus): return uint16(gba_testbus_read(1, 2, address))
   bdWatchRead(address, 2)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
@@ -1584,6 +1591,7 @@ proc sd_tw_word*(bus: Bus; address: uint32; word: uint32): uint32 =
     result = (result and not (0xFF'u32 shl (8 * k))) or (uint32(v) shl (8 * k))
 
 proc read_word*(bus: Bus; address: uint32): uint32 =
+  when defined(cpu_testbus): return gba_testbus_read(1, 4, address)
   bdWatchRead(address, 4)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
@@ -1742,6 +1750,9 @@ proc note_store(bus: Bus; address: uint32; width: int; value: uint32) {.noinline
   inc bus.dyn_changes
 
 proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
+  when defined(cpu_testbus):
+    gba_testbus_write(1, address, uint32(value))
+    return
   bdWatch(address, 1, uint32(value))
   if bus.track_changes: bus.note_store(address, 1, uint32(value))
   bus.rom_cool()
@@ -1767,6 +1778,9 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   bus.byte_io_write = false
 
 proc write_half*(bus: Bus; address: uint32; value: uint16) =
+  when defined(cpu_testbus):
+    gba_testbus_write(2, address, uint32(value))
+    return
   bdWatch(address, 2, uint32(value))
   if bus.track_changes: bus.note_store(address, 2, uint32(value))
   bus.rom_cool()
@@ -1786,6 +1800,9 @@ proc write_half*(bus: Bus; address: uint32; value: uint16) =
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
+  when defined(cpu_testbus):
+    gba_testbus_write(4, address, value)
+    return
   bdWatch(address, 4, value)
   if bus.track_changes: bus.note_store(address, 4, value)
   bus.rom_cool()

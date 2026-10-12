@@ -1,13 +1,13 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-03 09:01:50 · commit 18e163a7 · game-boy-test-roms v7.0*
+*Generated: 2026-10-11 23:11:10 · commit 28ce4a0e · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
-- **Total:** 1444
-- **Pass:** 1434
+- **Total:** 1509
+- **Pass:** 1499
 - **Fail:** 10
 
 | Suite | Pass | Total |
@@ -35,6 +35,8 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Shootout ROMs | 15 | 15 |
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 |
 | Game Boy - gambatte | 45 | 48 |
+| Game Boy - SingleStepTests SM83 | 20 | 20 |
+| GBA - SingleStepTests ARM7TDMI | 45 | 45 |
 
 ## Game Boy - Blargg (28/28)
 
@@ -332,6 +334,85 @@ One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](resul
 | gambatte/window | per-ROM | 👌 476/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
+
+## Game Boy - SingleStepTests SM83 (20/20)
+
+| Test | Device | Result |
+|------|--------|--------|
+| sm83/00-0F | — | 👌 16000/16000 passed |
+| sm83/10-1F | — | 👌 15000/16000 passed (1000 known divergences) |
+| sm83/20-2F | — | 👌 16000/16000 passed |
+| sm83/30-3F | — | 👌 16000/16000 passed |
+| sm83/40-4F | — | 👌 16000/16000 passed |
+| sm83/50-5F | — | 👌 16000/16000 passed |
+| sm83/60-6F | — | 👌 16000/16000 passed |
+| sm83/70-7F | — | 👌 15000/16000 passed (1000 known divergences) |
+| sm83/80-8F | — | 👌 16000/16000 passed |
+| sm83/90-9F | — | 👌 16000/16000 passed |
+| sm83/A0-AF | — | 👌 16000/16000 passed |
+| sm83/B0-BF | — | 👌 16000/16000 passed |
+| sm83/C0-CF | — | 👌 15000/15000 passed |
+| sm83/CB 00-3F (rotate, shift, SWAP) | — | 👌 64000/64000 passed |
+| sm83/CB 40-7F (BIT) | — | 👌 64000/64000 passed |
+| sm83/CB 80-BF (RES) | — | 👌 64000/64000 passed |
+| sm83/CB C0-FF (SET) | — | 👌 64000/64000 passed |
+| sm83/D0-DF | — | 👌 13000/13000 passed |
+| sm83/E0-EF | — | 👌 11000/11000 passed |
+| sm83/F0-FF | — | 👌 13000/13000 passed |
+
+One row per vector file (ARM7TDMI) or opcode block (SM83), green when every failure is a known divergence. See [detailed results](results_singlestep.md) for the checks and the divergences per row, tests/README.md for the evidence.
+
+## GBA - SingleStepTests ARM7TDMI (45/45)
+
+| Test | Device | Result |
+|------|--------|--------|
+| arm7tdmi/arm_b_bl | — | 👌 5035/5035 passed |
+| arm7tdmi/arm_bx | — | 👌 5044/5044 passed |
+| arm7tdmi/arm_cdp | — | 👌 5042/5042 passed |
+| arm7tdmi/arm_data_proc_immediate | — | 👌 5192/5334 passed (142 known divergences) |
+| arm7tdmi/arm_data_proc_immediate_shift | — | 👌 5195/5334 passed (139 known divergences) |
+| arm7tdmi/arm_data_proc_register_shift | — | 👌 5117/5331 passed (214 known divergences) |
+| arm7tdmi/arm_ldm_stm | — | 👌 4196/4249 passed (53 known divergences) |
+| arm7tdmi/arm_ldr_str_immediate_offset | — | 👌 5042/5167 passed (125 known divergences) |
+| arm7tdmi/arm_ldr_str_register_offset | — | 👌 5054/5167 passed (113 known divergences) |
+| arm7tdmi/arm_ldrh_strh | — | 👌 5163/5163 passed |
+| arm7tdmi/arm_ldrsb_ldrsh | — | 👌 5159/5159 passed |
+| arm7tdmi/arm_mcr_mrc | — | 👌 4861/5039 passed (178 known divergences) |
+| arm7tdmi/arm_mrs | — | 👌 5179/5349 passed (170 known divergences) |
+| arm7tdmi/arm_msr_imm | — | 👌 4891/5349 passed (458 known divergences) |
+| arm7tdmi/arm_msr_reg | — | 👌 3612/5349 passed (1737 known divergences) |
+| arm7tdmi/arm_mul_mla | — | 👌 4764/5327 passed (563 known divergences) |
+| arm7tdmi/arm_mull_mlal | — | 👌 4748/5311 passed (563 known divergences) |
+| arm7tdmi/arm_stc_ldc | — | 👌 5039/5039 passed |
+| arm7tdmi/arm_swi | — | 👌 5037/5037 passed |
+| arm7tdmi/arm_swp | — | 👌 4822/5016 passed (194 known divergences) |
+| arm7tdmi/thumb_add_cmp_mov_hi | — | 👌 5220/5322 passed (102 known divergences) |
+| arm7tdmi/thumb_add_sp_or_pc | — | 👌 5349/5349 passed |
+| arm7tdmi/thumb_add_sub | — | 👌 5349/5349 passed |
+| arm7tdmi/thumb_add_sub_sp | — | 👌 5349/5349 passed |
+| arm7tdmi/thumb_b | — | 👌 4766/4766 passed |
+| arm7tdmi/thumb_bcc | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_bl_blx_prefix | — | 👌 5349/5349 passed |
+| arm7tdmi/thumb_bl_suffix | — | 👌 4766/4766 passed |
+| arm7tdmi/thumb_bx | — | 👌 4766/4766 passed |
+| arm7tdmi/thumb_data_proc | — | 👌 5349/5349 passed |
+| arm7tdmi/thumb_ldm_stm | — | 👌 4296/4296 passed |
+| arm7tdmi/thumb_ldr_pc_rel | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_ldr_str_imm_offset | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_ldr_str_reg_offset | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_ldr_str_sp_rel | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_ldrb_strb_imm_offset | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_ldrh_strh_imm_offset | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_ldrh_strh_reg_offset | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_ldrsb_strb_reg_offset | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_ldrsh_ldrsb_reg_offset | — | 👌 5041/5041 passed |
+| arm7tdmi/thumb_lsl_lsr_asr | — | 👌 5349/5349 passed |
+| arm7tdmi/thumb_mov_cmp_add_sub | — | 👌 5349/5349 passed |
+| arm7tdmi/thumb_push_pop | — | 👌 4098/4098 passed |
+| arm7tdmi/thumb_swi | — | 👌 4766/4766 passed |
+| arm7tdmi/thumb_undefined_bcc | — | 👌 0/4766 passed (4766 known divergences) |
+
+One row per vector file (ARM7TDMI) or opcode block (SM83), green when every failure is a known divergence. See [detailed results](results_singlestep.md) for the checks and the divergences per row, tests/README.md for the evidence.
 
 ## Deliberately not scored
 

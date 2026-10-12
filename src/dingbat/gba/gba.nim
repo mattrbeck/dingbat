@@ -1742,6 +1742,20 @@ template note_waits*(bus: Bus; cost: int) =
   # has no wait states to note either way, and a state carries 0..1023.
   bus.lw_waits = max(cost - 1, 0)
 
+when defined(cpu_testbus):
+  # The single-instruction test build (tests/singlestep_test.nim): every CPU
+  # access goes to these instead of the memory map, which a test vector's
+  # flat 32-bit space has nothing to do with. `kind` is 0 for an opcode
+  # fetch, 1 for a load. `peek` serves the untimed reads some instructions
+  # make of the bus (read_*_internal). `refill` is clear_pipeline, which
+  # charges the two refill fetches without making them. Compiled out of
+  # every other build: nothing on the shipping path tests for them.
+  var gba_testbus_read*: proc(kind, size: int; address: uint32): uint32 {.nimcall.}
+  var gba_testbus_write*: proc(size: int; address, value: uint32) {.nimcall.}
+  var gba_testbus_peek*: proc(size: int; address: uint32): uint32 {.nimcall.}
+  var gba_testbus_idle*: proc(n: int) {.nimcall.}
+  var gba_testbus_refill*: proc() {.nimcall.}
+
 include pipeline
 # Cartridge: ROM image, save memory, GPIO-attached RTC
 {.push quirky: off.}

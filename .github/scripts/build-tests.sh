@@ -40,6 +40,9 @@ build() {
 
 build harness         dingbat_test                  tests/dingbat_test.nim
 build runner          dingbat_test_runner           tests/dingbat_test_runner.nim --path:tests
+# SingleStepTests: the CPU cores on a flat test bus (-d:cpu_testbus swaps the
+# memory map out for the driver's; nothing else is built that way).
+build singlestep      singlestep_test               tests/singlestep_test.nim --path:tests -d:cpu_testbus --warning:UnreachableCode:off
 build ppucomposite    dingbat_ppucomposite_test     tests/ppucomposite_test.nim
 build ppubgunpack     dingbat_ppubgunpack_test      tests/ppubgunpack_test.nim
 build ppuobjlist      dingbat_ppuobjlist_test       tests/ppuobjlist_test.nim

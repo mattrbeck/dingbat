@@ -521,6 +521,9 @@ when IF_READ_SAMPLE_T < 4:
       serial_if_latch_fixup(gb)
 
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
+  when defined(cpu_testbus):
+    mem_tick_components(mem, gb, 4)
+    return gb_testbus_read(idx)
   when IF_READ_SAMPLE_T < 4:
     if idx == 0xFF0F: mem_tick_if_read(mem, gb)
     else:             mem_tick_components(mem, gb, 4)
@@ -708,6 +711,14 @@ proc mem_write_split*(mem: GbMemory; gb: GB; idx: int; val: uint8; pre: int) {.n
   ## A CPU write whose M-cycle is left open `pre` T-cycles after its byte;
   ## the caller finishes it with mem_write_finish (IRQ_PUSH_T's low push,
   ## which the dispatch's IF clear falls inside).
+  when defined(cpu_testbus):
+    mem.cycle_tick_count += 4
+    if pre > 0:
+      gb.scheduler.tick(pre)
+      timer_tick(gb.timer, gb, pre)
+      mem_tick_ppu(mem, gb, pre)
+    gb_testbus_write(idx, val)
+    return
   # The DMA unit's M-cycle whole (the byte meets its slot); the scheduler
   # and timer only up to the split, the rest in mem_write_finish.
   mem.cycle_tick_count += 4
@@ -734,6 +745,10 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
   ## its own lock (M3_PIPE_MCYCLES in fifo_ppu). Reads are not reordered;
   ## their sample point is the read_mode latch. The bus half runs first
   ## because dma_busy selects the write path.
+  when defined(cpu_testbus):
+    mem_tick_components(mem, gb, 4)
+    gb_testbus_write(idx, val)
+    return
   when HDMA_STEAL_LEAD_DOTS >= 0:
     mem_tick_bus(mem, gb, 4, defer_hdma = HDMA_WRITE_DEFER_LO <= idx and
                                           idx <= HDMA_WRITE_DEFER_HI)

@@ -371,6 +371,14 @@ proc refill_from_head(cpu: CPU; page: int; noting: bool): bool {.noinline.} =
   true
 
 proc clear_pipeline*(cpu: CPU) =
+  when defined(cpu_testbus):
+    # The test bus has no regions, prefetcher or waits to charge: note the
+    # refill where it falls and move r15 as the refill does.
+    gba_testbus_refill()
+    cpu.pipeline.clear()
+    cpu.refill_pending = true
+    cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+    return
   when IMM_FETCH_WAIT:
     if cpu.gba.bus.imm_pre: cpu.gba.bus.imm_refill_handover()
   cpu.pipeline.clear()
@@ -633,6 +641,7 @@ proc idle_synced(cpu: CPU; n: int) {.noinline.} =
 
 proc idle*(cpu: CPU; n: int) {.inline.} =
   ## Internal (I) cycles: no bus access.
+  when defined(cpu_testbus): gba_testbus_idle(n)
   if cpu.gba.bus.sync_bits != 0:
     cpu.idle_synced(n)
     return
@@ -1149,3 +1158,13 @@ proc tick*(cpu: CPU) =
         cpu.gba.scheduler.tick(pending - 1)
         if cpu.halted:
           cpu.gba.scheduler.tick(1)
+
+when defined(cpu_testbus):
+  proc testbus_step*(cpu: CPU) =
+    ## One instruction, nothing else (tests/singlestep_arm7.nim): no
+    ## interrupt, halt or waitloop checks, no scheduler tick. Here because
+    ## the fetches are C `inline` and have no definition another module
+    ## could link to.
+    let instr = cpu.read_instr()
+    if cpu.cpsr.thumb: cpu.thumb_execute(instr)
+    else: cpu.arm_execute(instr)

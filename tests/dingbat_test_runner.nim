@@ -106,13 +106,15 @@ proc tree_intact(dir: string): bool =
     if rel.len > 0 and not fileExists(dir / rel): return false
   true
 
-proc download_file(url, path: string) =
+proc download_file(url, path: string; first_bytes = 0) =
   ## Fetch `url` to `path`. curl retries transient failures itself
   ## (--retry-all-errors covers connection errors, not just HTTP 5xx); --fail
-  ## keeps an error page from being saved as a ROM.
+  ## keeps an error page from being saved as a ROM. `first_bytes` > 0 fetches
+  ## only that much of the file (an HTTP range).
+  let range = if first_bytes > 0: &"-r 0-{first_bytes - 1} " else: ""
   let cmd = "curl -L --fail --show-error --silent " &
     "--retry 5 --retry-all-errors --retry-delay 3 " &
-    "--connect-timeout 30 --max-time 600 " &
+    "--connect-timeout 30 --max-time 600 " & range &
     &"-o {path.quoteShell} {url.quoteShell}"
   let (output, code) = execCmdEx(cmd)
   if code != 0:
@@ -1492,15 +1494,16 @@ proc ensure_jsmolka_test_roms(): string =
 const AlyoshaRev = "66f5f1d60cd7030b600606886c76f5c821ecaf9d"
 const Png183Rev = "87937453b780e7fafc64eef80b89293ead9c636c"
 
-proc ensure_github_tree(repo, rev, prefix: string): string =
+proc ensure_github_tree(repo, rev, prefix: string;
+                        cache_dir = RomCacheDir): string =
   ## Fetch (and cache) a GitHub repo at a commit; returns the extracted tree.
-  let dir = RomCacheDir / prefix & "-" & rev[0 ..< 7]
+  let dir = cache_dir / prefix & "-" & rev[0 ..< 7]
   let inner = dir / repo.split('/')[1] & "-" & rev
   if tree_intact(dir): return inner
   if dirExists(dir): removeDir(dir)
   echo &"Downloading {repo}..."
-  createDir(RomCacheDir)
-  let zipfile = RomCacheDir / prefix & ".zip"
+  createDir(cache_dir)
+  let zipfile = cache_dir / prefix & ".zip"
   download_file(&"https://github.com/{repo}/archive/{rev}.zip", zipfile)
   try:
     extractAll(zipfile, dir)
@@ -1796,6 +1799,7 @@ proc build_magen_tests(): seq[TestDef] =
   tests
 
 # A seq, not a fixed-size array, so an added entry needs no bound edit.
+
 const NotScored: seq[(string, string)] = @[
   # Every deliberate skip, so "why isn't X here?" is answerable from the
   # results page. Keep in sync with the skip sites (each names its builder).
@@ -1952,8 +1956,11 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     # An all-pass section collapses to one line. The gate loses nothing:
     # load_previous_results records the `(<pass>/<total>)` header under
     # suite_allpass_key and was_passing treats absence there as "was green";
-    # aggregated rows only pass at 100%, so any drop flips the boolean.
-    if suite.results.len > 0 and p == suite.results.len:
+    # aggregated rows only pass at 100%, so any drop flips the boolean. The
+    # SingleStepTests rows are green below 100% (known divergences), so
+    # their counts are the gate and the rows stay (load_previous_counts).
+    if suite.results.len > 0 and p == suite.results.len and
+       not suite.suite_name.contains("SingleStepTests"):
       lines.add("**All " & $p & " tests passed.**")
     else:
       lines.add("| Test | Device | Result |")
@@ -1972,6 +1979,12 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
       lines.add("")
       lines.add("One row per dbsuite sub-suite (tests/roms/dbsuite). See " &
         "[detailed results](results_dbsuite.md) for every case that is not a pass.")
+    elif suite.suite_name.contains("SingleStepTests"):
+      lines.add("")
+      lines.add("One row per vector file (ARM7TDMI) or opcode block (SM83), " &
+        "green when every failure is a known divergence. See " &
+        "[detailed results](results_singlestep.md) for the checks and the " &
+        "divergences per row, tests/README.md for the evidence.")
     elif suite.suite_name == "Game Boy - gambatte":
       lines.add("")
       lines.add("Each row is one gambatte subdirectory. See " &
@@ -2308,6 +2321,178 @@ proc generate_dbsuite_detail_md(groups: seq[DbsuiteGroup]): string =
       lines.add("|------|--------|----------------|")
       for c in bad:
         lines.add(&"| {c.name} | {c.status} | {c.detail.replace(\"|\", \"/\")} |")
+    lines.add("")
+  lines.join("\n")
+
+# ---- SingleStepTests: per-instruction CPU vectors ----
+#
+# SingleStepTests/sm83 and SingleStepTests/ARM7TDMI (MIT), run by
+# ./singlestep_test (tests/singlestep_test.nim, built with -d:cpu_testbus)
+# straight against the CPU cores on a flat test bus. Downloaded, never
+# committed, into DINGBAT_SINGLESTEP_CACHE (default ~/.cache/dingbat-singlestep;
+# CI points it into the cached rom-cache). Pinned to commits: bumping either
+# is a re-baseline. The SM83 set is whole (500 files x 1,000 cases, 31 MB
+# zipped). The ARM7TDMI set is 45 files of 50,000 cases, 20 MB each; the
+# runner takes the first Arm7tdmiPrefixBytes of each (the cases are random,
+# so a prefix is a random sample, ~5,000 a file), which keeps CI's download
+# and cache at 90 MB. `./singlestep_test arm7tdmi <dir of whole files>` runs
+# all 2.25 M. tests/README.md, "SingleStepTests", has the scoring rules and
+# the known divergences.
+const Sm83TestsRev = "f9c30210245dd691661db39f5ace022c465ecc2f"
+const Arm7tdmiTestsRev = "e3097d88d428752736b949d94c094d5da50f0db6"
+const Arm7tdmiPrefixBytes = 2 * 1024 * 1024
+const Arm7tdmiFiles = [
+  "arm_b_bl", "arm_bx", "arm_cdp", "arm_data_proc_immediate",
+  "arm_data_proc_immediate_shift", "arm_data_proc_register_shift",
+  "arm_ldm_stm", "arm_ldr_str_immediate_offset", "arm_ldr_str_register_offset",
+  "arm_ldrh_strh", "arm_ldrsb_ldrsh", "arm_mcr_mrc", "arm_mrs", "arm_msr_imm",
+  "arm_msr_reg", "arm_mul_mla", "arm_mull_mlal", "arm_stc_ldc", "arm_swi",
+  "arm_swp", "thumb_add_cmp_mov_hi", "thumb_add_sp_or_pc", "thumb_add_sub",
+  "thumb_add_sub_sp", "thumb_b", "thumb_bcc", "thumb_bl_blx_prefix",
+  "thumb_bl_suffix", "thumb_bx", "thumb_data_proc", "thumb_ldm_stm",
+  "thumb_ldr_pc_rel", "thumb_ldr_str_imm_offset", "thumb_ldr_str_reg_offset",
+  "thumb_ldr_str_sp_rel", "thumb_ldrb_strb_imm_offset",
+  "thumb_ldrh_strh_imm_offset", "thumb_ldrh_strh_reg_offset",
+  "thumb_ldrsb_strb_reg_offset", "thumb_ldrsh_ldrsb_reg_offset",
+  "thumb_lsl_lsr_asr", "thumb_mov_cmp_add_sub", "thumb_push_pop", "thumb_swi",
+  "thumb_undefined_bcc"]
+
+let SingleStepCacheDir =
+  block:
+    let env = getEnv("DINGBAT_SINGLESTEP_CACHE")
+    if env.len > 0: env else: getHomeDir() / ".cache" / "dingbat-singlestep"
+
+proc ensure_sm83_vectors(): string =
+  ensure_github_tree("SingleStepTests/sm83", Sm83TestsRev, "sm83",
+                     SingleStepCacheDir) / "v1"
+
+proc ensure_arm7tdmi_vectors(): string =
+  result = SingleStepCacheDir / "arm7tdmi-" & Arm7tdmiTestsRev[0 ..< 7] & "-" &
+           $(Arm7tdmiPrefixBytes div (1024 * 1024)) & "m"
+  createDir(result)
+  var announced = false
+  for f in Arm7tdmiFiles:
+    let path = result / f & ".json.bin"
+    if fileExists(path) and getFileSize(path) == Arm7tdmiPrefixBytes: continue
+    if not announced:
+      echo "Downloading SingleStepTests/ARM7TDMI (first ",
+           Arm7tdmiPrefixBytes div (1024 * 1024), " MB of each file)..."
+      announced = true
+    download_file("https://raw.githubusercontent.com/SingleStepTests/ARM7TDMI/" &
+                  Arm7tdmiTestsRev & "/v1/" & f & ".json.bin", path & ".part",
+                  Arm7tdmiPrefixBytes)
+    moveFile(path & ".part", path)
+
+type
+  SstRow = object
+    name: string
+    cases, pass, state, bus, access: int
+    known: seq[(int, string)]
+
+proc sst_group(suite, stem: string): string =
+  ## The results.md row a vector file belongs to: one per ARM7TDMI file; the
+  ## SM83's 500 files fold into one row per unprefixed high nibble and four
+  ## for the CB page.
+  if suite == "arm7tdmi": return "arm7tdmi/" & stem
+  if stem.startsWith("cb_"):
+    let op = parseHexInt(stem[3 .. ^1])
+    return "sm83/" & (case op shr 6
+      of 0: "CB 00-3F (rotate, shift, SWAP)"
+      of 1: "CB 40-7F (BIT)"
+      of 2: "CB 80-BF (RES)"
+      else: "CB C0-FF (SET)")
+  "sm83/" & stem[0].toUpperAscii & "0-" & stem[0].toUpperAscii & "F"
+
+proc run_singlestep_suite(suite, title, vector_dir: string;
+                          previous: Table[string, bool];
+                          previous_counts: Table[string, int];
+                          regressions: var seq[string];
+                          detail: var seq[(string, seq[SstRow])]): SuiteResults =
+  echo &"\n=== {title} ==="
+  let exe = getCurrentDir() / (when defined(windows): "singlestep_test.exe"
+                               else: "singlestep_test")
+  if not fileExists(exe):
+    echo "Error: singlestep_test not found. Run 'nimble test_build' first."
+    quit(1)
+  let (output, code) = execCmdEx(&"{exe.quoteShell} {suite} {vector_dir.quoteShell}")
+  if code != 0:
+    echo &"singlestep_test {suite} exited {code}:\n", output
+    quit(1)
+  var rows: seq[SstRow]
+  var index = initTable[string, int]()
+  for line in output.splitLines():
+    let w = line.splitWhitespace()
+    if w.len >= 8 and w[0] == "SST":
+      let g = sst_group(suite, w[2])
+      if g notin index:
+        index[g] = rows.len
+        rows.add SstRow(name: g)
+      let r = addr rows[index[g]]
+      r.cases += parseInt(w[3]); r.pass += parseInt(w[4])
+      r.state += parseInt(w[5]); r.bus += parseInt(w[6]); r.access += parseInt(w[7])
+    elif w.len >= 5 and w[0] == "KNOWN":
+      let g = sst_group(suite, w[2])
+      let n = parseInt(w[3])
+      let why = w[4 .. ^1].join(" ")
+      let r = addr rows[index[g]]
+      var merged = false
+      for k in r.known.mitems:
+        if k[1] == why:
+          k[0] += n
+          merged = true
+      if not merged: r.known.add((n, why))
+  if rows.len == 0:
+    echo "singlestep_test reported nothing:\n", output
+    quit(1)
+  var results: seq[TestResult]
+  for r in rows:
+    var known = 0
+    for k in r.known: known += k[0]
+    # Green when every failure is a known divergence; the pass count is
+    # gated as well (load_previous_counts), so a case moving into a
+    # known bucket still counts as a regression.
+    let ok = r.pass + known == r.cases
+    let unexplained = r.cases - r.pass - known
+    # "<pass>/<cases> passed" stands alone: load_previous_counts reads the
+    # word before a bare "passed".
+    var txt = &"{r.pass}/{r.cases} passed"
+    var notes: seq[string]
+    if known > 0: notes.add &"{known} known divergence" & (if known == 1: "" else: "s")
+    if unexplained > 0: notes.add &"{unexplained} unexplained"
+    if notes.len > 0: txt.add " (" & notes.join(", ") & ")"
+    echo &"  [{(if ok: \"PASS\" else: \"FAIL\")}] {r.name} - {txt}"
+    results.add TestResult(name: r.name, passed: ok, output: txt, always_detail: true)
+    if was_passing(previous, title, r.name) and not ok:
+      regressions.add(r.name)
+    elif previous_counts.hasKey(r.name) and r.pass < previous_counts[r.name]:
+      regressions.add(&"{r.name} ({previous_counts[r.name]} -> {r.pass} passing)")
+  detail.add((title, rows))
+  SuiteResults(suite_name: title, results: results)
+
+proc generate_singlestep_detail_md(detail: seq[(string, seq[SstRow])]): string =
+  var lines: seq[string]
+  lines.add("# SingleStepTests - Detailed Results")
+  lines.add("")
+  lines.add(&"SingleStepTests/sm83 at `{Sm83TestsRev[0 ..< 7]}` (every case) and " &
+    &"SingleStepTests/ARM7TDMI at `{Arm7tdmiTestsRev[0 ..< 7]}` (the first " &
+    &"{Arm7tdmiPrefixBytes div (1024 * 1024)} MB of each file), run by " &
+    "`singlestep_test` on the CPU cores. A case passes when the final " &
+    "registers and memory and the bus sequence all agree; ARM7TDMI also " &
+    "scores each access's N/S type. Known divergences are failures where " &
+    "dingbat follows the console or the documentation, or the encoding is " &
+    "UNPREDICTABLE; tests/README.md, \"SingleStepTests\", gives the evidence " &
+    "for each.")
+  lines.add("")
+  for (title, rows) in detail:
+    lines.add("## " & title)
+    lines.add("")
+    lines.add("| Row | Cases | Pass | State | Bus | Access | Known divergences |")
+    lines.add("|-----|-------|------|-------|-----|--------|-------------------|")
+    for r in rows:
+      var ks: seq[string]
+      for k in r.known: ks.add &"{k[0]} {k[1]}"
+      lines.add(&"| {r.name} | {r.cases} | {r.pass} | {r.state} | {r.bus} | " &
+                &"{r.access} | {ks.join(\"; \")} |")
     lines.add("")
   lines.join("\n")
 
@@ -2658,6 +2843,7 @@ proc main() =
   var bios_path = ""
   var apu_only = false
   var gba_only = false
+  var sst_only = false
   var p = initOptParser(commandLineParams())
   while true:
     p.next()
@@ -2678,8 +2864,9 @@ proc main() =
         if v.len == 0: p.next(); v = p.key
         if v == "apu": apu_only = true
         elif v == "gba": gba_only = true
+        elif v == "singlestep": sst_only = true
         else:
-          echo "Unknown suite: ", v, " (only 'apu' or 'gba' can be selected)"
+          echo "Unknown suite: ", v, " (only 'apu', 'gba' or 'singlestep' can be selected)"
           quit(1)
       else: discard
 
@@ -2710,6 +2897,24 @@ proc main() =
     echo &"\nAPU total: {apu_total}, Pass: {apu_pass}, Fail: {apu_total - apu_pass}"
     quit(0)
 
+  # --suite=singlestep: run ONLY the SingleStepTests CPU vectors (both
+  # cores) and print tallies without touching any results file.
+  if sst_only:
+    let no_previous = initTable[string, bool]()
+    var sst_regressions: seq[string]
+    var sst_detail: seq[(string, seq[SstRow])]
+    var sst_suites: seq[SuiteResults]
+    sst_suites.add(run_singlestep_suite("sm83", "Game Boy - SingleStepTests SM83",
+      ensure_sm83_vectors(), no_previous, initTable[string, int](),
+      sst_regressions, sst_detail))
+    sst_suites.add(run_singlestep_suite("arm7tdmi", "GBA - SingleStepTests ARM7TDMI",
+      ensure_arm7tdmi_vectors(), no_previous, initTable[string, int](),
+      sst_regressions, sst_detail))
+    echo ""
+    for suite in sst_suites:
+      echo &"{suite.suite_name}: {suite.results.countIt(it.passed)}/{suite.results.len} pass"
+    quit(0)
+
   # --suite=gba: run ONLY the GBA suites and print tallies without touching
   # any results file.
   if gba_only:
@@ -2738,6 +2943,10 @@ proc main() =
     var dbsuite_groups: seq[DbsuiteGroup]
     gba_suites.add(run_dbsuite(harness, no_previous, initTable[string, int](),
                                gba_regressions, dbsuite_groups, bios_path))
+    var sst_detail: seq[(string, seq[SstRow])]
+    gba_suites.add(run_singlestep_suite("arm7tdmi", "GBA - SingleStepTests ARM7TDMI",
+      ensure_arm7tdmi_vectors(), no_previous, initTable[string, int](),
+      gba_regressions, sst_detail))
     echo ""
     for suite in gba_suites:
       echo &"{suite.suite_name}: {suite.results.countIt(it.passed)}/{suite.results.len} pass"
@@ -2836,6 +3045,12 @@ proc main() =
                                     regressions, gambatte_groups,
                                     gb_test_roms_dir))
 
+  var sst_detail: seq[(string, seq[SstRow])]
+  all_suites.add(run_singlestep_suite("sm83", "Game Boy - SingleStepTests SM83",
+    ensure_sm83_vectors(), previous, previous_counts, regressions, sst_detail))
+  all_suites.add(run_singlestep_suite("arm7tdmi", "GBA - SingleStepTests ARM7TDMI",
+    ensure_arm7tdmi_vectors(), previous, previous_counts, regressions, sst_detail))
+
   createDir(getCurrentDir() / "tests")
   writeFile(results_path, generate_results_md(all_suites))
   let mgba_detail_path = getCurrentDir() / "tests" / "results_mgba_suite.md"
@@ -2843,6 +3058,8 @@ proc main() =
   let dbsuite_detail_path = getCurrentDir() / "tests" / "results_dbsuite.md"
   writeFile(dbsuite_detail_path, generate_dbsuite_detail_md(dbsuite_groups))
   let gambatte_detail_path = getCurrentDir() / "tests" / "results_gambatte.md"
+  let sst_detail_path = getCurrentDir() / "tests" / "results_singlestep.md"
+  writeFile(sst_detail_path, generate_singlestep_detail_md(sst_detail))
   if gambatte_groups.len > 0:
     writeFile(gambatte_detail_path, generate_gambatte_detail_md(gambatte_groups))
   echo &"\nResults written to {results_path}"

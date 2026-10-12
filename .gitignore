@@ -60,6 +60,8 @@ web/rom.gbc
 /rewind_codec
 /rewind_codec_nopad
 /dingbat_test_runner
+/singlestep_test
+/singlestep_test.exe
 /dingbat_bench
 /dingbat_desktop_netlink_test
 /dingbat_desktop_persist_test
