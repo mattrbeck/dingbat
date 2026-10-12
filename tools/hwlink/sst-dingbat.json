@@ -1,0 +1,414 @@
+{
+ "t.ctrl": {
+  "dingbat": "00000000",
+  "dingbat-bios": "00000000"
+ },
+ "t.str_r0.iw": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "t.str_pc.iw": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "t.strb_r0.iw": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "t.strb_pc.iw": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "t.strh_r0.iw": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "t.strh_pc.iw": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "t.stm_r0-r3.iw": {
+  "dingbat": "00000014",
+  "dingbat-bios": "00000014"
+ },
+ "t.stm_r0-r2_pc.iw": {
+  "dingbat": "00000014",
+  "dingbat-bios": "00000014"
+ },
+ "t.stmdb_r0_r4_r11_r12_lr.iw": {
+  "dingbat": "00000018",
+  "dingbat-bios": "00000018"
+ },
+ "t.stmdb_r4_r11_r12_lr_pc.iw": {
+  "dingbat": "00000018",
+  "dingbat-bios": "00000018"
+ },
+ "t.str_r0.ew": {
+  "dingbat": "0000001C",
+  "dingbat-bios": "0000001C"
+ },
+ "t.str_pc.ew": {
+  "dingbat": "0000001C",
+  "dingbat-bios": "0000001C"
+ },
+ "t.strb_r0.ew": {
+  "dingbat": "00000010",
+  "dingbat-bios": "00000010"
+ },
+ "t.strb_pc.ew": {
+  "dingbat": "00000010",
+  "dingbat-bios": "00000010"
+ },
+ "t.strh_r0.ew": {
+  "dingbat": "00000010",
+  "dingbat-bios": "00000010"
+ },
+ "t.strh_pc.ew": {
+  "dingbat": "00000010",
+  "dingbat-bios": "00000010"
+ },
+ "t.stm_r0-r3.ew": {
+  "dingbat": "00000064",
+  "dingbat-bios": "00000064"
+ },
+ "t.stm_r0-r2_pc.ew": {
+  "dingbat": "00000064",
+  "dingbat-bios": "00000064"
+ },
+ "t.stmdb_r0_r4_r11_r12_lr.ew": {
+  "dingbat": "0000007C",
+  "dingbat-bios": "0000007C"
+ },
+ "t.stmdb_r4_r11_r12_lr_pc.ew": {
+  "dingbat": "0000007C",
+  "dingbat-bios": "0000007C"
+ },
+ "t.thumb_ctrl": {
+  "dingbat": "00000006",
+  "dingbat-bios": "00000006"
+ },
+ "t.push_r0.iw": {
+  "dingbat": "0000000E",
+  "dingbat-bios": "0000000E"
+ },
+ "t.push_lr.iw": {
+  "dingbat": "0000000E",
+  "dingbat-bios": "0000000E"
+ },
+ "t.push_r3-r7.iw": {
+  "dingbat": "0000001E",
+  "dingbat-bios": "0000001E"
+ },
+ "t.push_r4-r7_lr.iw": {
+  "dingbat": "0000001E",
+  "dingbat-bios": "0000001E"
+ },
+ "t.push_r0.ew": {
+  "dingbat": "00000022",
+  "dingbat-bios": "00000022"
+ },
+ "t.push_lr.ew": {
+  "dingbat": "00000022",
+  "dingbat-bios": "00000022"
+ },
+ "t.push_r3-r7.ew": {
+  "dingbat": "00000082",
+  "dingbat-bios": "00000082"
+ },
+ "t.push_r4-r7_lr.ew": {
+  "dingbat": "00000082",
+  "dingbat-bios": "00000082"
+ },
+ "v.str_pc": {
+  "dingbat": "0000000C",
+  "dingbat-bios": "0000000C"
+ },
+ "v.strb_pc": {
+  "dingbat": "AAAAAA0C",
+  "dingbat-bios": "AAAAAA0C"
+ },
+ "v.strh_pc": {
+  "dingbat": "AAAA000C",
+  "dingbat-bios": "AAAA000C"
+ },
+ "v.stm_pc": {
+  "dingbat": "0000000C",
+  "dingbat-bios": "0000000C"
+ },
+ "v.stmdb_pc": {
+  "dingbat": "0000000C",
+  "dingbat-bios": "0000000C"
+ },
+ "v.push_order.thumb_push": {
+  "dingbat": "00040004",
+  "dingbat-bios": "00040004"
+ },
+ "v.push_order.arm_stmia": {
+  "dingbat": "00040004",
+  "dingbat-bios": "00040004"
+ },
+ "v.push_order.arm_str_desc": {
+  "dingbat": "00030006",
+  "dingbat-bios": "00030006"
+ },
+ "c.thumb_lsl_0x101": {
+  "dingbat": "00000002",
+  "dingbat-bios": "00000002"
+ },
+ "c.thumb_lsr_0x101": {
+  "dingbat": "40000000",
+  "dingbat-bios": "40000000"
+ },
+ "c.thumb_asr_0x101": {
+  "dingbat": "C0000000",
+  "dingbat-bios": "C0000000"
+ },
+ "c.mov_pc_lsl_reg": {
+  "dingbat": "0000000C",
+  "dingbat-bios": "0000000C"
+ },
+ "c.fiq.svc_view": {
+  "dingbat": "00022222",
+  "dingbat-bios": "00022222"
+ },
+ "c.fiq.fiq_view": {
+  "dingbat": "00033333",
+  "dingbat-bios": "00033333"
+ },
+ "c.fiq.sys_view": {
+  "dingbat": "00022222",
+  "dingbat-bios": "00022222"
+ },
+ "c.user_msr_c_1F": {
+  "dingbat": "00000010",
+  "dingbat-bios": "00000010"
+ },
+ "c.user_msr_fc_F000001F": {
+  "dingbat": "F0000010",
+  "dingbat-bios": "F0000010"
+ },
+ "c.user_msr_c_13": {
+  "dingbat": "00000010",
+  "dingbat-bios": "00000010"
+ },
+ "c.sys_msr_c_D3": {
+  "dingbat": "000000D3",
+  "dingbat-bios": "000000D3"
+ },
+ "r.sysmovs.movs": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "r.sysmovs.subs": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "r.sysmovs.ldm^": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "r.sysmovs.movs.thumbspsr": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "r.sysmovs.subs.thumbspsr": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "r.sysmovs.ldm^.thumbspsr": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "r.usermovs.movs": {
+  "dingbat": "60000210",
+  "dingbat-bios": "60000210"
+ },
+ "r.usermovs.subs": {
+  "dingbat": "60000210",
+  "dingbat-bios": "60000210"
+ },
+ "r.usermovs.ldm^": {
+  "dingbat": "60000210",
+  "dingbat-bios": "60000210"
+ },
+ "r.ldmia_pc!": {
+  "dingbat": "0000020F",
+  "dingbat-bios": "0000020F"
+ },
+ "r.str_pc_post": {
+  "dingbat": "0001400C",
+  "dingbat-bios": "0001400C"
+ },
+ "r.ldr_pc_post": {
+  "dingbat": "00005E08",
+  "dingbat-bios": "00005E08"
+ },
+ "r.ldr_pc_pre!": {
+  "dingbat": "00005E08",
+  "dingbat-bios": "00005E08"
+ },
+ "r.str_pc_pre!": {
+  "dingbat": "00024048",
+  "dingbat-bios": "00024048"
+ },
+ "r.stmia_pc!": {
+  "dingbat": "0001400F",
+  "dingbat-bios": "0001400F"
+ },
+ "r.cpsr_0FFFFFDF": {
+  "dingbat": "000000DF",
+  "dingbat-bios": "000000DF"
+ },
+ "r.spsr_0FFFFF00": {
+  "dingbat": "00000010",
+  "dingbat-bios": "00000010"
+ },
+ "r.spsr_FFFFFFEF": {
+  "dingbat": "F00000FF",
+  "dingbat-bios": "F00000FF"
+ },
+ "r.spsr_00000000": {
+  "dingbat": "00000010",
+  "dingbat-bios": "00000010"
+ },
+ "r.thumb_cmp_pc.irq": {
+  "dingbat": "9000009F",
+  "dingbat-bios": "9000009F"
+ },
+ "r.thumb_cmp_pc.sys": {
+  "dingbat": "6000009F",
+  "dingbat-bios": "6000009F"
+ },
+ "u.tstp.svc": {
+  "dingbat": "900003DF",
+  "dingbat-bios": "900003DF"
+ },
+ "u.teqp.svc": {
+  "dingbat": "900003DF",
+  "dingbat-bios": "900003DF"
+ },
+ "u.cmpp.svc": {
+  "dingbat": "900003DF",
+  "dingbat-bios": "900003DF"
+ },
+ "u.cmnp.svc": {
+  "dingbat": "900003DF",
+  "dingbat-bios": "900003DF"
+ },
+ "u.tstp.irq": {
+  "dingbat": "300003D7",
+  "dingbat-bios": "300003D7"
+ },
+ "u.teqp.irq": {
+  "dingbat": "300003D7",
+  "dingbat-bios": "300003D7"
+ },
+ "u.cmpp.irq": {
+  "dingbat": "300003D7",
+  "dingbat-bios": "300003D7"
+ },
+ "u.cmnp.irq": {
+  "dingbat": "300003D7",
+  "dingbat-bios": "300003D7"
+ },
+ "u.tstp.sys": {
+  "dingbat": "600003DF",
+  "dingbat-bios": "600003DF"
+ },
+ "u.teqp.sys": {
+  "dingbat": "600003DF",
+  "dingbat-bios": "600003DF"
+ },
+ "u.cmpp.sys": {
+  "dingbat": "600003DF",
+  "dingbat-bios": "600003DF"
+ },
+ "u.cmnp.sys": {
+  "dingbat": "600003DF",
+  "dingbat-bios": "600003DF"
+ },
+ "u.rs15_lsr": {
+  "dingbat": "000FFFFF",
+  "dingbat-bios": "000FFFFF"
+ },
+ "u.rn15_regshift": {
+  "dingbat": "0000000C",
+  "dingbat-bios": "0000000C"
+ },
+ "u.rm15_regshift": {
+  "dingbat": "0000000C",
+  "dingbat-bios": "0000000C"
+ },
+ "u.mul_rd15": {
+  "dingbat": "00000003",
+  "dingbat-bios": "00000003"
+ },
+ "u.mla_rd15": {
+  "dingbat": "00000003",
+  "dingbat-bios": "00000003"
+ },
+ "u.umull_rdlo15": {
+  "dingbat": "00000003",
+  "dingbat-bios": "00000003"
+ },
+ "u.umull_rdhi15": {
+  "dingbat": "00000003",
+  "dingbat-bios": "00000003"
+ },
+ "u.mul_rm15": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "u.mul_rs15": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "u.mla_rn15": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "u.umull_rm15": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "u.swp_rm15": {
+  "dingbat": "0000000C",
+  "dingbat-bios": "0000000C"
+ },
+ "u.swp_rd15": {
+  "dingbat": "00000110",
+  "dingbat-bios": "00000110"
+ },
+ "u.swp_rn15": {
+  "dingbat": "00020702",
+  "dingbat-bios": "00020702"
+ },
+ "x.mrc14_c0": {
+  "dingbat": "C0DE1400",
+  "dingbat-bios": "C0DE1400"
+ },
+ "x.mrc14_c1": {
+  "dingbat": "C0DE1401",
+  "dingbat-bios": "C0DE1401"
+ },
+ "x.mrc14_c2": {
+  "dingbat": "C0DE1402",
+  "dingbat-bios": "C0DE1402"
+ },
+ "x.mcr14_c1": {
+  "dingbat": "00000014",
+  "dingbat-bios": "00000014"
+ },
+ "x.mrc14_r15": {
+  "dingbat": "A000001F",
+  "dingbat-bios": "A000001F"
+ },
+ "x.thumb_dexx": {
+  "dingbat": "603F0204",
+  "dingbat-bios": "603F0204"
+ },
+ "x.mrs_r15": {
+  "dingbat": "00100020",
+  "dingbat-bios": "00101030"
+ }
+}
