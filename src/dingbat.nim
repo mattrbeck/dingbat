@@ -2682,6 +2682,13 @@ proc main() =
   # undrawn and a drawn frame.
   var ff_skip_ms = 1.0
   var ff_draw_ms = 1.5
+  # DINGBAT_DRAW_ALL=1 draws every frame (no batch), to compare, as the
+  # web's ?draw=all; DINGBAT_FPS_LOG=1 prints the frames run each second,
+  # drawn or not
+  let draw_all = getEnv("DINGBAT_DRAW_ALL") == "1"
+  let fps_log = getEnv("DINGBAT_FPS_LOG").len > 0
+  var fps_frames = 0
+  var fps_since = 0'u64
   let perf_ms = 1000.0 / float(getPerformanceFrequency())
   proc unseen_fits(): bool =
     float(getTicks() - last_present) + ff_skip_ms + ff_draw_ms < float(present_interval)
@@ -2902,7 +2909,8 @@ proc main() =
           else:
             # Not under an input log: its every-60-frames hash reads the
             # picture the frame before left (input_log_frame_start)
-            let unpaced = not stepping and not app.gba_emu.apu.sync and not input_log_open
+            let unpaced = not stepping and not app.gba_emu.apu.sync and not input_log_open and
+                          not draw_all
             if unpaced:
               var n = 0
               while n < 64 and unseen_fits() and gba_frame_due() and not rewind_due() and
@@ -2915,6 +2923,7 @@ proc main() =
                 ff_skip_ms += (float(getPerformanceCounter() - t0) * perf_ms - ff_skip_ms) * 0.1
                 rewind_undrawn()
                 inc n
+                inc fps_frames
             let t0 = getPerformanceCounter()
             input_log_frame_start()
             app.gba_emu.run_until_frame()
@@ -2924,7 +2933,8 @@ proc main() =
       of ekGB:
         if app.gb_emu != nil and (stepping or gb_frame_due()):
           # The Super Game Boy's freeze copies the picture: always drawn
-          let unpaced = not stepping and not app.gb_emu.apu.sync and not app.gb_emu.sgb_active()
+          let unpaced = not stepping and not app.gb_emu.apu.sync and not app.gb_emu.sgb_active() and
+                        not draw_all
           if unpaced:
             var n = 0
             while n < 64 and unseen_fits() and gb_frame_due() and not rewind_due() and
@@ -2936,6 +2946,7 @@ proc main() =
               ff_skip_ms += (float(getPerformanceCounter() - t0) * perf_ms - ff_skip_ms) * 0.1
               rewind_undrawn()
               inc n
+              inc fps_frames
           let t0 = getPerformanceCounter()
           app.gb_emu.run_until_frame()
           if unpaced:
@@ -3019,6 +3030,14 @@ proc main() =
           pace_frames = 0
           pace_min_q = uint32.high
           pace_max_q = 0
+    if fps_log:
+      if emulated: inc fps_frames
+      let t = getTicks()
+      if fps_since == 0: fps_since = t
+      elif t - fps_since >= 1000:
+        echo "fps ", fps_frames * 1000 div int(t - fps_since)
+        fps_since = t
+        fps_frames = 0
     handle_input()
     lat_poll_input()
     update_rumble()
