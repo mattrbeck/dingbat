@@ -710,6 +710,14 @@ proc compute_windows(e: Engine2D): bool =
 
 const NO_LAYER = 0xFF'u8
 
+const FX_DOTS = defined(nds_fx_dots) or (defined(emscripten) and not defined(nds_simd))
+  ## The colour effects dot by dot with branches (`effect_dot`), not as the
+  ## branch-free line formula (`composite_k`'s effect pass), in builds
+  ## without vector instructions: wasm without SIMD (the DS module for
+  ## browsers before Safari 16.4) runs the formula 10-12 % slower on
+  ## 2D-heavy scenes, vector builds 3-4 % faster (docs/nds/perf.md, round 4).
+  ## -d:nds_fx_dots picks it natively (nds_2d_test checks both).
+
 template effect_dot(e: Engine2D; x: int; m: uint32; l0, l1: int; p3: uint32; is3d: bool;
                     bld, mode, eva, evb, evy: uint32; ctop, csec: untyped; SEC: static bool;
                     cout, lo: untyped) =
@@ -795,9 +803,16 @@ proc composite_k[EXPORT: static bool](e: Engine2D; bgs: uint32; windows: bool; h
   var topl {.noinit.}: array[256, uint8]   # the top layer's number
   var sec {.noinit.}: array[256, uint16]   # the layer under it (SEC)
   var secl {.noinit.}: array[256, uint8]
+  # the top and second layers' BLDCNT targets (bit 0: first target, bit 1:
+  # second target), laid with them so the effect pass needs no per-dot
+  # shift by a layer number (TOPL, SEC)
+  var topf {.noinit.}: array[256, uint8]
+  var secf {.noinit.}: array[256, uint8]
   let win = cast[ptr UncheckedArray[uint8]](addr e.winmask[0])
+  template targets(layer: int): uint8 =
+    uint8(((bld shr layer) and 1) or (((bld shr (8 + layer)) and 1) shl 1))
 
-  template lay(x: int; vis: uint16; c: uint16; layer: uint8; TOPL, SEC: static bool) =
+  template lay(x: int; vis: uint16; c: uint16; layer, flags: uint8; TOPL, SEC: static bool) =
     # one pixel of a pass; `vis` is 1 where the layer shows: masks, not
     # branches, so the loop vectorises
     let m16 = 0'u16 - vis
@@ -805,31 +820,44 @@ proc composite_k[EXPORT: static bool](e: Engine2D; bgs: uint32; windows: bool; h
     when SEC:
       sec[x] = (top[x] and m16) or (sec[x] and not m16)
       secl[x] = (topl[x] and m8) or (secl[x] and not m8)
+      when not FX_DOTS: secf[x] = (topf[x] and m8) or (secf[x] and not m8)
     when TOPL:
       topl[x] = (layer and m8) or (topl[x] and not m8)
+      when not FX_DOTS: topf[x] = (flags and m8) or (topf[x] and not m8)
     top[x] = (c and m16) or (top[x] and not m16)
 
   template paint(WIN, TOPL, SEC: static bool) =
+    let bdf = targets(LAYER_BD)
     for x in 0 ..< 256:
       top[x] = backdrop
-      when TOPL: topl[x] = uint8(LAYER_BD)
-      when SEC: secl[x] = NO_LAYER
+      when TOPL:
+        topl[x] = uint8(LAYER_BD)
+        when not FX_DOTS: topf[x] = bdf
+      when SEC:
+        secl[x] = NO_LAYER
+        when not FX_DOTS:
+          sec[x] = 0
+          secf[x] = 0
     for p in countdown(3, 0):
       for i in countdown(n - 1, 0):
         if walk_prio[i] == p:
           let bg = walk[i]
+          let bgf = targets(bg)
           let src = cast[ptr UncheckedArray[uint16]](addr e.bgpix[bg][0])
           for x in 0 ..< 256:
             let c = src[x]
             lay(x, (c shr 15) and (when WIN: uint16(win[x] shr bg) and 1 else: 1'u16),
-                c and 0x7FFF, uint8(bg), TOPL, SEC)
+                c and 0x7FFF, uint8(bg), bgf, TOPL, SEC)
       if obj_on and (e.obj_prios and (1'u8 shl p)) != 0:
         let op = uint8(p)
+        let objf = targets(LAYER_OBJ)
         for x in 0 ..< 256:
           lay(x, uint16(e.objprio[x] == op) and (when WIN: uint16(win[x] shr 4) and 1 else: 1'u16),
-              e.objpix[x], uint8(LAYER_OBJ), TOPL, SEC)
+              e.objpix[x], uint8(LAYER_OBJ), objf, TOPL, SEC)
 
-  template effect_pass(WIN, SEC: static bool) =
+  template effect_pass_dots(WIN, SEC: static bool) =
+    # effect_dot per dot, with its branches: what a build without vector
+    # instructions runs (FX_DOTS)
     for x in 0 ..< 256:
       let m = when WIN: uint32(win[x]) else: 0x3F'u32
       let l0 = int(topl[x])
@@ -841,6 +869,85 @@ proc composite_k[EXPORT: static bool](e: Engine2D; bgs: uint32; windows: bool; h
       effect_dot(e, x, m, l0, l1, p3, is3d, bld, mode, eva, evb, evy, top[x], sec[x], SEC,
                  top[x], lo)
       e.lsb[x] = lo
+
+  template effect_pass(WIN, SEC: static bool) =
+    when FX_DOTS:
+      effect_pass_dots(WIN, SEC)
+    else:
+      # effect_dot's rules for the whole line as one formula per dot, without
+      # branches, so that the C compiler vectorises the loop: every 6-bit
+      # channel comes out as min(63, (A * wa + B * wb + 16) >> 5), A the top
+      # layer's channel, B the second layer's (alpha, 3D), 63 (brighten) or 0,
+      # and wa, wb the case's weights: 2 EVA and 2 EVB (alpha: the 4-bit
+      # weights doubled for the common shift), 2 (a + 1) and 2 (15 - a) (a
+      # bitmap OBJ's alpha), a + 1 and 31 - a (3D, a its alpha), 2 (16 - EVY)
+      # and 2 EVY (brighten), 2 (16 - EVY) and 0 (darken), 32 and 0 (no
+      # effect: A again). For a 3D top dot A is the 3D pixel's channel (its
+      # colour and low bits are what the paint laid), and the ranges keep
+      # A * wa + B * wb + 16 below 2^12. composite_search is the reference
+      # (nds_2d_test); effect_dot stays the HD path's.
+      var p3l {.noinit.}: array[256, uint32]     # the 3D pixel under each dot (0: none)
+      if is3d and e.line3d != nil:
+        let hofs = int(e.bghofs[0])
+        for x in 0 ..< 256:
+          let sx = (x + hofs) and 511
+          p3l[x] = if sx < 256: e.line3d[sx] else: 0'u32
+      else:
+        zeroMem(addr p3l[0], sizeof(p3l))
+      var attrs {.noinit.}: array[256, uint8]
+      copyMem(addr attrs[0], addr e.objattr[0], 256)
+      var lsbs {.noinit.}: array[256, uint8]
+      let k2a = 2 * eva
+      let k2b = 2 * evb
+      let kdim = 2 * (16 - evy)
+      let kbr = 2 * evy
+      for x in 0 ..< 256:
+        let eff = when WIN: (win[x] and 0x20) != 0 else: true
+        let l0 = topl[x]
+        let p = p3l[x]
+        let lsbp = lsb3d(p)
+        let z0 = is3d and l0 == 0
+        let lo0 = if z0: lsbp else: 0'u8
+        let attr = attrs[x]
+        when SEC:
+          let lo1 = if is3d and secl[x] == 0: lsbp else: 0'u8
+          let second = eff and (secf[x] and 2) != 0
+          let semi = second and l0 == LAYER_OBJ and (attr and (OBJ_SEMI or OBJ_BITMAP)) != 0
+          let d3 = second and not semi and z0
+        else:
+          const semi = false
+          const d3 = false
+        # (semi and d3 come first in every choice below, so `rest` need not exclude them)
+        let rest = eff and (topf[x] and 1) != 0
+        let alph = when SEC: rest and mode == 1 and second else: false
+        let brt = rest and mode == 2
+        let drk = rest and mode == 3
+        let oa = uint32(attr and 0xF)
+        let a3 = (p shr 24) and 31
+        let bmp = (attr and OBJ_BITMAP) != 0
+        let wa = if semi: (if bmp: 2 * oa + 2 else: k2a)
+                 elif d3: a3 + 1
+                 elif alph: k2a
+                 elif brt or drk: kdim
+                 else: 32'u32
+        let wb = if semi: (if bmp: 30 - 2 * oa else: k2b)
+                 elif d3: 31 - a3
+                 elif alph: k2b
+                 elif brt: kbr
+                 else: 0'u32
+        let usesec = semi or d3 or alph
+        let ctop = top[x]
+        template chan(i: static int): uint32 =
+          let a = ch6(ctop, lo0, i)
+          let b = when SEC: (if usesec: ch6(sec[x], lo1, i) elif brt: 63'u32 else: 0'u32)
+                  else: (if brt: 63'u32 else: 0'u32)
+          min(63'u32, (a * wa + b * wb + 16) shr 5)
+        let r = chan(0)
+        let g = chan(1)
+        let b = chan(2)
+        top[x] = uint16((r shr 1) or ((g shr 1) shl 5) or ((b shr 1) shl 10))
+        lsbs[x] = uint8((r and 1) or ((g and 1) shl 1) or ((b and 1) shl 2))
+      copyMem(addr e.lsb[0], addr lsbs[0], 256)
 
   template export_paint() =
     # hd_prepare: the painted layers and the effect settings, no effects
