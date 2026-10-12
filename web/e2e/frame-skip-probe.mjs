@@ -14,6 +14,12 @@
 // scene to load after boot; the warmup then runs from it), WALK=LEFT,RIGHT
 // (input held in turn, 250 ms each) or HOLD=A (held throughout),
 // MODES=ff,1x,2x,ra1,ra2 (all), OUT=<file.json> (every round's numbers).
+// With STATE, each mode restarts from the state (and the input from its
+// start), so both arms measure the same scene. AB=1 runs both arms in one
+// page, alternated in 1 s slices (SLICES=<n>, 8, per mode), which a
+// headless browser's drifting clock speed needs: separate pages differ by
+// +/-15% at 1x, where nothing is skipped. Each mode also reports the
+// share of its frames that went undrawn.
 
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -37,6 +43,8 @@ const playwright = require("playwright");
 const web = await serveWeb();
 const rom = readFileSync(ROM);
 const state = process.env.STATE ? [...readFileSync(process.env.STATE)] : null;
+const AB = process.env.AB === "1";
+const SLICES = Number(process.env.SLICES || 8);
 
 // One page: the game loaded, run uncapped to the scene, then each mode.
 const run = async (browser, drawAll) => {
@@ -56,14 +64,7 @@ const run = async (browser, drawAll) => {
   // Game frames run, and the milliseconds they took, counted here (the
   // page's own count is its fps readout's, reset every second)
   await page.evaluate(([state, walk, hold]) => {
-    if (state) {
-      const p = Module._malloc(state.length);
-      Module.HEAPU8.set(state, p);
-      const ok = Module._wasm_load_state(p, state.length, 0);
-      Module._free(p);
-      if (ok !== 1) throw new Error("state refused");
-    }
-    window.__probe = { frames: 0, ms: 0 };
+    window.__probe = { frames: 0, ms: 0, unseen: 0 };
     for (const name of ["_loop_tick", "_runahead_tick"]) {
       const f = Module[name];
       Module[name] = (...a) => {
@@ -71,32 +72,73 @@ const run = async (browser, drawAll) => {
         try { return f(...a); } finally { __probe.frames++; __probe.ms += performance.now() - s; }
       };
     }
-    for (const k of hold) Module._setInput(k, 1);
-    if (walk.length) {
-      let i = 0;
-      Module._setInput(walk[0], 1);
-      setInterval(() => {
-        Module._setInput(walk[i % walk.length], 0);
-        i++;
-        Module._setInput(walk[i % walk.length], 1);
-      }, 250);
-    }
+    const un = Module._wasm_unseen_next;
+    Module._wasm_unseen_next = (ff) => { const r = un(ff); if (r === 1) __probe.unseen++; return r; };
+    // Each mode starts from the same scene: the state again, the input
+    // pattern from its start
+    let walkTimer = 0;
+    window.__restart = () => {
+      if (state && !applyStateBytes(new Uint8Array(state))) throw new Error("state refused");
+      for (const k of hold) Module._setInput(k, 1);
+      if (walk.length) {
+        clearInterval(walkTimer);
+        for (const k of walk) Module._setInput(k, 0);
+        let i = 0;
+        Module._setInput(walk[0], 1);
+        walkTimer = setInterval(() => {
+          Module._setInput(walk[i % walk.length], 0);
+          i++;
+          Module._setInput(walk[i % walk.length], 1);
+        }, 250);
+      }
+    };
+    __restart();
     if (!muted) toggleMute();   // nothing to hear
     setFastForward(true);
   }, [state, WALK, HOLD]);
   await page.waitForFunction((w) => __probe.frames >= w, WARMUP, { timeout: 120000, polling: 200 });
-  const measure = (mode) => page.evaluate(async ([mode, seconds]) => {
+  const measure = (mode) => page.evaluate(async ([mode, seconds, scene]) => {
     setFastForward(mode === "ff");
     setSpeed2x(mode === "2x");
     runaheadFrames = mode === "ra1" ? 1 : mode === "ra2" ? 2 : 0;
+    if (scene) __restart();
     await new Promise((r) => setTimeout(r, 1000));
-    const f0 = __probe.frames, m0 = __probe.ms, t0 = performance.now();
+    const f0 = __probe.frames, m0 = __probe.ms, u0 = __probe.unseen, t0 = performance.now();
     await new Promise((r) => setTimeout(r, seconds * 1000));
     const s = (performance.now() - t0) / 1000;
-    return { fps: (__probe.frames - f0) / s, emuMsPerS: (__probe.ms - m0) / s };
-  }, [mode, SECONDS]);
+    const frames = __probe.frames - f0;
+    return { fps: frames / s, emuMsPerS: (__probe.ms - m0) / s, unseen: (__probe.unseen - u0) / Math.max(1, frames) };
+  }, [mode, SECONDS, !!state]);
+  // AB=1: both arms in this one page, alternated in 1 s slices (ABBA), the
+  // core's switch flipped between them, each slice from the scene's start:
+  // what the browser does to the clock (power state, efficiency cores)
+  // lands on both arms alike.
+  const measureAB = (mode) => page.evaluate(async ([mode, slices, scene]) => {
+    setFastForward(mode === "ff");
+    setSpeed2x(mode === "2x");
+    runaheadFrames = mode === "ra1" ? 1 : mode === "ra2" ? 2 : 0;
+    const sum = { skip: { s: 0, frames: 0, ms: 0, unseen: 0 }, all: { s: 0, frames: 0, ms: 0, unseen: 0 } };
+    for (let k = 0; k < slices; k++) {
+      const arm = (k % 4 === 0 || k % 4 === 3) ? "skip" : "all";
+      Module._wasm_set_draw_all(arm === "all" ? 1 : 0);
+      if (scene) __restart();
+      await new Promise((r) => setTimeout(r, 400));
+      const f0 = __probe.frames, m0 = __probe.ms, u0 = __probe.unseen, t0 = performance.now();
+      await new Promise((r) => setTimeout(r, 1000));
+      const a = sum[arm];
+      a.s += (performance.now() - t0) / 1000;
+      a.frames += __probe.frames - f0; a.ms += __probe.ms - m0; a.unseen += __probe.unseen - u0;
+    }
+    Module._wasm_set_draw_all(0);
+    const o = {};
+    for (const arm of ["skip", "all"]) {
+      const a = sum[arm];
+      o[arm] = { fps: a.frames / a.s, emuMsPerS: a.ms / a.s, unseen: a.unseen / Math.max(1, a.frames) };
+    }
+    return o;
+  }, [mode, SLICES, !!state]);
   const out = {};
-  for (const m of MODES) out[m] = await measure(m);
+  for (const m of MODES) out[m] = AB ? await measureAB(m) : await measure(m);
   await ctx.close();
   if (errors.length) throw new Error("page errors: " + errors.join("; "));
   return out;
@@ -105,10 +147,22 @@ const run = async (browser, drawAll) => {
 const args = process.env.GPU === "1" && ENGINE === "chromium" ? ["--use-angle=metal", "--enable-gpu"] : [];
 const browser = await playwright[ENGINE].launch({ headless: true, args });
 const results = { skip: [], all: [] };
-const show = (o) => MODES.map((m) => m === "ff" ? `ff ${o.ff.fps.toFixed(0)} fps`
-  : `${m} ${o[m].emuMsPerS.toFixed(0)} ms/s (${o[m].fps.toFixed(0)} fps)`).join(", ");
+const show = (o) => MODES.map((m) => (m === "ff" ? `ff ${o.ff.fps.toFixed(0)} fps`
+  : `${m} ${o[m].emuMsPerS.toFixed(0)} ms/s (${o[m].fps.toFixed(0)} fps)`) +
+  ` ${(o[m].unseen * 100).toFixed(0)}% undrawn`).join(", ");
 try {
   for (let r = 0; r < ROUNDS; r++) {
+    if (AB) {
+      const o = await run(browser, false);
+      for (const arm of ["skip", "all"]) {
+        const x = {};
+        for (const m of MODES) x[m] = o[m][arm];
+        results[arm].push(x);
+      }
+      console.log(`round ${r + 1} skip    : ${show(results.skip.at(-1))}`);
+      console.log(`round ${r + 1} draw=all: ${show(results.all.at(-1))}`);
+      continue;
+    }
     for (const drawAll of r % 2 ? [true, false] : [false, true]) {
       const o = await run(browser, drawAll);
       results[drawAll ? "all" : "skip"].push(o);
@@ -120,9 +174,11 @@ try {
   web.close();
 }
 if (process.env.OUT) writeFileSync(process.env.OUT, JSON.stringify(results, null, 1));
-const best = (k, f, pick) => pick(...results[k].map(f));
+// Separate pages: the best of the rounds. AB: the mean over every slice.
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+const best = (k, f, pick) => AB ? mean(results[k].map(f)) : pick(...results[k].map(f));
 const pct = (a, b) => `${a / b - 1 >= 0 ? "+" : ""}${((a / b - 1) * 100).toFixed(0)}%`;
-console.log(`\n${basename(ROM)} on ${ENGINE}${args.length ? " (GPU)" : ""}, best of ${ROUNDS}:`);
+console.log(`\n${basename(ROM)} on ${ENGINE}${args.length ? " (GPU)" : ""}, ${AB ? "A/B slices, mean" : "best"} of ${ROUNDS}:`);
 for (const m of MODES) {
   if (m === "ff") {
     const s = best("skip", (o) => o.ff.fps, Math.max), a = best("all", (o) => o.ff.fps, Math.max);

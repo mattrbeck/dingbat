@@ -285,6 +285,12 @@ proc main() =
     # DINGBAT_BENCH_DRAW_EVERY=<n>: draw only every nth frame, as a frontend
     # showing one picture per n frames does (ppu.no_draw, docs/frame-skip.md)
     let draw_every = parseInt(getEnv("DINGBAT_BENCH_DRAW_EVERY", "1"))
+    # DINGBAT_BENCH_RUNAHEAD=<n>: after each frame, n silent lookahead frames
+    # from a snapshot, then the snapshot restored, as the frontends' run-ahead
+    # does; all but the last lookahead frame undrawn unless
+    # DINGBAT_BENCH_RUNAHEAD_DRAW_ALL=1
+    let runahead = parseInt(getEnv("DINGBAT_BENCH_RUNAHEAD", "0"))
+    let ra_draw_all = getEnv("DINGBAT_BENCH_RUNAHEAD_DRAW_ALL") == "1"
     var static_frames = 0
     let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
@@ -293,6 +299,16 @@ proc main() =
       run_scripted(warmup + i)
       if emu.ppu.frame_static: inc static_frames
       rewind_tick()
+      if runahead > 0:
+        let snap = emu.state_payload()
+        let was_silent = emu.apu.silent
+        emu.apu.silent = true
+        for k in 0 ..< runahead:
+          emu.ppu.no_draw = not ra_draw_all and k < runahead - 1
+          emu.step_frame()
+        emu.ppu.no_draw = false
+        emu.apu.silent = was_silent
+        emu.apply_state_payload(snap)
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
     let (ins1, cyc1) = hw_counters()
     echo rom_path.splitFile().name, ": ", frames, " frames in ",
@@ -443,12 +459,24 @@ proc main() =
           discard rw.maybe_push(proc(): string = emu.state_payload())
     total_cycles = 0
     let draw_every = parseInt(getEnv("DINGBAT_BENCH_DRAW_EVERY", "1"))
+    let runahead = parseInt(getEnv("DINGBAT_BENCH_RUNAHEAD", "0"))  # as on the GBA path
+    let ra_draw_all = getEnv("DINGBAT_BENCH_RUNAHEAD_DRAW_ALL") == "1"
     let (ins0, cyc0) = hw_counters()
     let start = getMonoTime()
     for i in 0 ..< frames:
       emu.ppu.no_draw = draw_every > 1 and i mod draw_every != draw_every - 1
       run_scripted(warmup + i)
       rewind_tick()
+      if runahead > 0:
+        let snap = emu.state_payload()
+        let was_silent = emu.apu.silent
+        emu.apu.silent = true
+        for k in 0 ..< runahead:
+          emu.ppu.no_draw = not ra_draw_all and k < runahead - 1
+          emu.step_frame()
+        emu.ppu.no_draw = false
+        emu.apu.silent = was_silent
+        emu.apply_state_payload(snap)
     let elapsed = (getMonoTime() - start).inNanoseconds.float / 1e9
     let (ins1, cyc1) = hw_counters()
     echo rom_path.splitFile().name, ": ", frames, " frames in ",

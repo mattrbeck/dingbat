@@ -695,6 +695,7 @@ proc clip_speed_restore() =
   slowmoStretch = clipHeldSlowmo
   clipHeldTurbo = false
   clipHeldSlowmo = false
+
 # Whether the last frame was drawn (docs/frame-skip.md): an anchor's
 # thumbnail is the picture the frame before it left, so one waits for it.
 var lastFrameDrawn = true
