@@ -22,7 +22,7 @@
 //
 // MAIN_WEB=<dir>, SECONDS=<s> (12), SETTLE=<s> (1.5), SET=<name> (gba-virt),
 // GB=1 (Game Boy cost model), OUT=<file.json> (raw records),
-// ONLY=<substring of a config name>.
+// ONLY=<substrings of config names, comma-separated>.
 
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -297,7 +297,7 @@ const SETS = {
 };
 let configs = SETS[SET];
 const nameOf = (c) => `${c.clk}/${c.d}/${c.m}${c.scale > 1 ? (c.clk === "virt" ? "/cost" : "/cpu") + c.scale + "x" : ""}${c.prof !== BASE ? "/" + c.prof : ""}`;
-if (process.env.ONLY) configs = configs.filter((c) => nameOf(c).includes(process.env.ONLY));
+if (process.env.ONLY) configs = configs.filter((c) => process.env.ONLY.split(",").some((o) => nameOf(c).includes(o)));
 if (process.env.DISP) { const ds = process.env.DISP.split(","); configs = configs.filter((c) => ds.includes(c.d)); }
 
 // --- analysis -----------------------------------------------------------
