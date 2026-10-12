@@ -99,7 +99,7 @@ proc capture_line(g: Gpu; y: int) =
   ## VRAM bank or the main-memory FIFO), one of them or their EVA/EVB blend,
   ## written as 15-bit + alpha into an LCDC-mapped bank. Offsets wrap in
   ## the bank's 128K. Busy (bit 31) clears at line 192 (`start_line`).
-  let e = g.engine_a
+  let e {.cursor.} = g.engine_a
   let cap = e.dispcapcnt
   let (w, h) = CAPTURE_SIZE[(cap shr 20) and 3]
   if y >= h: return

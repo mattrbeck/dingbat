@@ -90,6 +90,8 @@ const
   GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",
                 "last_disp3dcnt", "last_param", "last_regs", "last_polys", "last_verts",
                 "last_is_cur",
+                # catch_up's shortcut, forgotten by after_load
+                "ready_at",
                 # HD rendering: the frontend's display setting and its pictures
                 # (docs/nds/hd3d.md)
                 "hd_scale", "hpos", "hd_verts", "hd2", "hd3", "hd4", "hd_frame", "last_hpos"]
@@ -902,6 +904,7 @@ proc after_load(n: NDS) =
   n.fetch_paths_off()
   inc n.idle_epoch            # every idle-loop proof starts over
   n.tm.update_regions(n.cp15)
+  n.gpu3d.forget_ready()
   privateAccess(Geometry)
   privateAccess(Gpu3d)
   privateAccess(Cart)

@@ -314,7 +314,7 @@ proc gx_service(n: NDS; appended = false) =
   ## empties (IRQ mode 2). With nothing listening the engine just runs
   ## lazily. `appended`: only writes happened since the last booking, which
   ## can only push the crossing later, so a booked wake-up stands.
-  let g = n.gpu3d
+  let g {.cursor.} = n.gpu3d
   let mode = g.fifo_irq_mode
   let want_dma = n.dma9.waiting(dtGxFifo)
   if mode == 0 and not want_dma: return
@@ -352,7 +352,7 @@ proc dispstat_irqs(n: NDS; s: DispStat; c: IrqCtl; src: IrqSource) =
   else: discard
 
 proc on_hblank(n: NDS) =
-  let g = n.gpu
+  let g {.cursor.} = n.gpu
   g.in_hblank = true
   if g.vcount < VISIBLE_LINES:
     g.render_line(g.vcount)
@@ -361,7 +361,7 @@ proc on_hblank(n: NDS) =
   n.dispstat_irqs(g.stat7, n.irq7, irqHBlank)
 
 proc on_line_end(n: NDS) =
-  let g = n.gpu
+  let g {.cursor.} = n.gpu
   g.in_hblank = false
   if n.vcount_write >= 0:
     g.vcount = n.vcount_write

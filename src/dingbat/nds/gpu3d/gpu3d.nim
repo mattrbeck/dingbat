@@ -79,6 +79,10 @@ type
     ex_params: array[32, uint32]
     cur_cmd: uint8                ## the command started last...
     cur_end*: int64               ## ...and when the engine is free again
+    ready_at: int64               ## no command starts before this master cycle
+                                  ## (`catch_up`'s shortcut, not machine state:
+                                  ## NEVER until a write or V-blank, low(int64)
+                                  ## when not known)
     stall_until*: int64           ## a full FIFO holds its writer until then
     next_vblank*: int64           ## start of the next line 192 (set by the machine)
     swap_pending*: bool           ## SWAP_BUFFERS waiting for V-blank
@@ -124,7 +128,7 @@ const
 proc new_gpu3d*(vram: Vram; irq: IrqCtl): Gpu3d =
   # at power-on (line 0) the first frame counts as started 49 lines ago
   Gpu3d(geo: new_geometry(), ren: new_renderer(), vram: vram, irq: irq,
-        fifo: initDeque[FifoEntry](512), rdlines: 46, hd_scale: 1,
+        fifo: initDeque[FifoEntry](512), ready_at: low(int64), rdlines: 46, hd_scale: 1,
         render_t0: -int64(LINES - RENDER_START_LINE) * LINE_CYCLES)
 
 proc to_bgr555*(p: uint32): uint16 {.inline.} =
@@ -197,7 +201,7 @@ proc fifo_wants_dma*(g: Gpu3d): bool {.inline.} = g.fifo_level < 128
 proc fifo_irq_mode*(g: Gpu3d): uint32 {.inline.} = g.irq_mode   ## GXSTAT 30-31
 
 proc run_command(g: Gpu3d; cmd: uint8; start: int64) =
-  let geo = g.geo
+  let geo {.cursor.} = g.geo
   g.cur_cmd = cmd
   g.cur_end = start + g.cmd_cycles(cmd, geo.mode, geo.attr)
   if cmd == 0x50:
@@ -208,17 +212,40 @@ proc run_command(g: Gpu3d; cmd: uint8; start: int64) =
   else:
     geo.execute(cmd, g.ex_params.toOpenArray(0, max(0, int(CMD_PARAMS[cmd]) - 1)))
 
-proc catch_up*(g: Gpu3d; t: int64) =
-  ## Start every command whose start time is at or before `t`: the engine
-  ## is free and its last parameter has arrived.
-  while not g.swap_pending and g.fifo.len > 0:
+proc catch_up_from(g: Gpu3d; t: int64) {.noinline.} =
+  while true:
+    if g.swap_pending or g.fifo.len == 0:
+      g.ready_at = NEVER
+      return
     let cmd = g.fifo[0].cmd
     let n = max(1, int(CMD_PARAMS[cmd]))
-    if g.fifo.len < n: return
+    if g.fifo.len < n:
+      g.ready_at = NEVER
+      return
     let start = max(g.cur_end, g.fifo[n - 1].at)
-    if start > t: return
+    if start > t:
+      g.ready_at = start
+      return
     for i in 0 ..< n: g.ex_params[i] = g.fifo.popFirst().param
     g.run_command(cmd, start)
+
+proc catch_up*(g: Gpu3d; t: int64) {.inline.} =
+  ## Start every command whose start time is at or before `t`: the engine
+  ## is free and its last parameter has arrived.
+  ##
+  ## `ready_at` is when the first command waiting can start, kept by
+  ## `catch_up_from` as it stops: the head command's start (the engine free
+  ## and its last parameter in), or NEVER (an empty FIFO, a head command
+  ## still missing parameters, a swap pending). What moves that time is
+  ## only what this file does: commands leaving (catch_up_from), a write
+  ## completing the head command (push), V-blank ending a swap (on_vblank);
+  ## a state load forgets it (`forget_ready`). Writers and register reads
+  ## call this per word, mostly with the engine busy.
+  if t >= g.ready_at: g.catch_up_from(t)
+
+proc forget_ready*(g: Gpu3d) =
+  ## After a state load: `ready_at` is not in the state.
+  g.ready_at = low(int64)
 
 proc wake_at*(g: Gpu3d; below: int): int64 =
   ## When the FIFO count next drops below `below`, assuming no more writes
@@ -268,6 +295,11 @@ proc push(g: Gpu3d; cmd: uint8; param: uint32) =
     g.stall_until = t
     g.catch_up(t)
   g.fifo.addLast(FifoEntry(cmd: cmd, param: param, at: t))
+  if g.ready_at == NEVER and not g.swap_pending:
+    # this word may complete the command at the head (one further back
+    # does not move its start)
+    let n = max(1, int(CMD_PARAMS[g.fifo[0].cmd]))
+    if g.fifo.len >= n: g.ready_at = max(g.cur_end, g.fifo[n - 1].at)
   g.catch_up(t)
   # update_irq, whose catch_up to now (<= t) would find nothing to start
   g.raise_level_irq()
@@ -300,7 +332,7 @@ proc write_gxfifo(g: Gpu3d; v: uint32) =
 # Registers (offset = address - 0x4000000, aligned words with a byte mask)
 
 proc gxstat(g: Gpu3d): uint32 =
-  let geo = g.geo
+  let geo {.cursor.} = g.geo
   let t = g.now()
   g.catch_up(t)
   let running = t < g.cur_end
@@ -320,7 +352,7 @@ proc gxstat(g: Gpu3d): uint32 =
            (if busy: 1'u32 shl 27 else: 0) or (g.irq_mode shl 30)
 
 proc read_reg*(g: Gpu3d; offset: uint32): uint32 =
-  let geo = g.geo
+  let geo {.cursor.} = g.geo
   if offset >= 0x600: g.catch_up(g.now())
   case offset
   of 0x060:
@@ -441,6 +473,7 @@ proc on_vblank*(g: Gpu3d) =
     g.geo_param = g.swap_req
     g.swap_pending = false
     g.cur_end = t + (if g.sched == nil: 0'i64 else: 2 * SWAP_CYCLES)
+    g.ready_at = low(int64)
     g.catch_up(t)
     g.update_irq()
   if g.rendered:
