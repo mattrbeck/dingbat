@@ -4,6 +4,7 @@
 ## `on_open`, and saves/loads in the callbacks.
 
 import imguin/cimgui
+import util
 
 const NUM_SLOTS* = 9
 
@@ -84,11 +85,11 @@ proc render*(w: SaveStatesWidget) =
   # Position is pinned too: imgui's cascading default y=60 pushed even a
   # height-clamped window past the bottom edge.
   let work_h = igGetMainViewport().WorkSize.y
-  igSetNextWindowPos(ImVec2(x: 60, y: 28), cint(ImGui_Cond_FirstUseEver),
-                     ImVec2(x: 0, y: 0))
+  igSetNextWindowPos(ImVec2(x: ui_px(60), y: ui_px(28)),
+                     cint(ImGui_Cond_FirstUseEver), ImVec2(x: 0, y: 0))
   # Width 470: 3 x 136px cells + 2 x 10 spacing + padding + room for the grid
   # child's scrollbar, which otherwise eats the third column's captions.
-  igSetNextWindowSize(ImVec2(x: 470, y: min(500.0'f32, work_h - 56.0'f32)),
+  igSetNextWindowSize(ImVec2(x: ui_px(470), y: min(ui_px(500), work_h - ui_px(56))),
                       cint(ImGui_Cond_FirstUseEver))
   if igBegin("Save States", addr w.window, 0):
     if not w.have_rom:
@@ -100,16 +101,16 @@ proc render*(w: SaveStatesWidget) =
 
       # The grid child reserves room for the action row: a too-small window
       # scrolls the grid, never the buttons.
-      let footer = igGetFrameHeightWithSpacing() + 10.0'f32
+      let footer = igGetFrameHeightWithSpacing() + ui_px(10)
       discard igBeginChild_Str("##slots", ImVec2(x: 0, y: -footer),
                                ImGuiChildFlags(0), ImGuiWindowFlags(0))
       # Every cell is the same fixed-size button, thumbnail or not (sizing to
       # the thumbnail misaligned the rows). Thumbnails are letterboxed inside
       # it; the inset leaves a ring of button color so the selected state
       # still reads.
-      const CELL_W = 136.0'f32
-      const CELL_H = 90.0'f32   # 3:2 like the GBA screen; GB (10:9) letterboxes
-      const THUMB_INSET = 3.0'f32
+      let cell_w = ui_px(136)
+      let cell_h = ui_px(90)   # 3:2 like the GBA screen; GB (10:9) letterboxes
+      let thumb_inset = ui_px(3)
       for i in 0 ..< NUM_SLOTS:
         igPushID_Int(cint(i))
         let selected = i == w.selected
@@ -123,7 +124,7 @@ proc render*(w: SaveStatesWidget) =
         let slot = w.slots[i]
         var clicked = false
         if has_thumb:
-          clicked = igButton("##thumb", ImVec2(x: CELL_W, y: CELL_H))
+          clicked = igButton("##thumb", ImVec2(x: cell_w, y: cell_h))
           var rmin, rmax: ImVec2
           # imguin <= 1.92.4 uses a pOut out-param; later versions return by
           # value (the same drift calc_text_size absorbs).
@@ -135,8 +136,8 @@ proc render*(w: SaveStatesWidget) =
             let pmax = igGetItemRectMax()
             rmin = ImVec2(x: pmin.x, y: pmin.y)
             rmax = ImVec2(x: pmax.x, y: pmax.y)
-          let fit_w = CELL_W - THUMB_INSET * 2
-          let fit_h = CELL_H - THUMB_INSET * 2
+          let fit_w = cell_w - thumb_inset * 2
+          let fit_h = cell_h - thumb_inset * 2
           let scale = min(fit_w / max(slot.w, 1.0'f32),
                           fit_h / max(slot.h, 1.0'f32))
           let dw = slot.w * scale
@@ -152,19 +153,19 @@ proc render*(w: SaveStatesWidget) =
                               0xFFFFFFFF'u32)
         elif slot.used:
           # State file with no embedded thumbnail (older format).
-          clicked = igButton("No preview", ImVec2(x: CELL_W, y: CELL_H))
+          clicked = igButton("No preview", ImVec2(x: cell_w, y: cell_h))
         else:
-          clicked = igButton("Empty", ImVec2(x: CELL_W, y: CELL_H))
+          clicked = igButton("Empty", ImVec2(x: cell_w, y: cell_h))
         # One caption line per slot, right-aligned to the cell edge. It must
-        # never exceed CELL_W (that widens the group and misaligns the
+        # never exceed cell_w (that widens the group and misaligns the
         # columns), so the timestamp truncates to the space the tag leaves.
         let tag = $(i + 1) & (if i == 0: " · Quick" else: "")
         igTextColored(dim(), cstring(tag))
         igSameLine(0, 0)
-        let avail = cell_x + CELL_W - igGetCursorPosX() - 8.0'f32
+        let avail = cell_x + cell_w - igGetCursorPosX() - ui_px(8)
         let cap = fit_caption(if slot.label.len > 0: slot.label else: "empty",
                               avail)
-        igSetCursorPosX(cell_x + CELL_W - calc_text_size(cap).x)
+        igSetCursorPosX(cell_x + cell_w - calc_text_size(cap).x)
         if slot.label.len > 0:
           igTextUnformatted(cstring(cap), nil)
         else:
@@ -175,32 +176,32 @@ proc render*(w: SaveStatesWidget) =
         if clicked: w.selected = i
         igPopID()
         if i mod 3 != 2:
-          igSameLine(0, 10)
+          igSameLine(0, ui_px(10))
       igEndChild()
 
       igSeparator()
       let sel = w.slots[w.selected]
-      const BTN_W = 90.0'f32
-      const GAP = 10.0'f32
+      let btn_w = ui_px(90)
+      let gap = ui_px(10)
       if not sel.used: igBeginDisabled(true)
-      if igButton("Delete", ImVec2(x: BTN_W, y: 0)):
+      if igButton("Delete", ImVec2(x: btn_w, y: 0)):
         if w.on_delete != nil: w.on_delete(w.selected)
         if w.on_open != nil: w.on_open()
       if not sel.used: igEndDisabled()
       # Right-aligned from the window width, not igGetContentRegionAvail,
       # whose return signature differs across imguin versions.
-      const PAD = 8.0'f32
+      let pad = ui_px(8)
       igSameLine(0, 0)
       igSetCursorPosX(max(igGetCursorPosX(),
-                          igGetWindowWidth() - (BTN_W * 2 + GAP + PAD)))
-      if igButton("Save", ImVec2(x: BTN_W, y: 0)):
+                          igGetWindowWidth() - (btn_w * 2 + gap + pad)))
+      if igButton("Save", ImVec2(x: btn_w, y: 0)):
         w.notice = ""
         if w.on_save != nil: w.on_save(w.selected)
         if w.on_open != nil: w.on_open()
-      igSameLine(0, GAP)
+      igSameLine(0, gap)
       let no_load = not sel.used or w.load_blocked.len > 0
       if no_load: igBeginDisabled(true)
-      if igButton("Load", ImVec2(x: BTN_W, y: 0)):
+      if igButton("Load", ImVec2(x: btn_w, y: 0)):
         w.notice = ""
         if w.on_load != nil: w.on_load(w.selected)
       if no_load: igEndDisabled()

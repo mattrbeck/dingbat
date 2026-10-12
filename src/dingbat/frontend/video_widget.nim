@@ -28,13 +28,13 @@ proc render*(v: VideoWidget) =
               "the GBC/GBA TFT's stripe triads — a DMG panel has no " &
               "subpixels, so there it is a stylised look). None keeps crisp " &
               "nearest-neighbor pixels. Color correction still applies on top.")
-  igIndent(106)
+  igIndent(ui_px(106))
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
   discard igRadioButton_IntPtr("hq4x", addr v.filter, 1)
   discard igRadioButton_IntPtr("xBR", addr v.filter, 2)
   discard igRadioButton_IntPtr("LCD grid", addr v.filter, 3)
   discard igRadioButton_IntPtr("RGB subpixels", addr v.filter, 4)
-  igUnindent(106)
+  igUnindent(ui_px(106))
   igSeparator()
   discard igCheckbox("Preserve aspect ratio", addr v.preserve_aspect)
   igSameLine(0, -1)
@@ -60,7 +60,7 @@ proc render*(v: VideoWidget) =
               "header bits are unaffected, and a Game Boy Color cart always " &
               "runs as a Game Boy Color even if it is also SGB-enhanced. " &
               "Off by default — stock Game Boy behaviour until you ask for it.")
-  igIndent(106)
+  igIndent(ui_px(106))
   discard igCheckbox("Super Game Boy mode", addr v.sgb_enable)
   # Kept visible: the adapter is chosen at cartridge insertion, so ticking
   # this changes nothing about the running game.
@@ -73,11 +73,11 @@ proc render*(v: VideoWidget) =
               "the window resizes when one appears. This one takes effect " &
               "immediately — it only hides a layer the core already has." &
               (if not v.sgb_enable: " (Super Game Boy mode is off.)" else: ""))
-  igUnindent(106)
+  igUnindent(ui_px(106))
   if v.show_ds:
     igSeparator()
     igText("Nintendo DS:")
-    igIndent(106)
+    igIndent(ui_px(106))
     igText("3D resolution:")
     igSameLine(0, -1)
     help_marker("Draws the 3D scenes at a higher resolution: sharper edges " &
@@ -87,7 +87,7 @@ proc render*(v: VideoWidget) =
     for (label, k) in [("Native", 1'i32), ("2x", 2'i32), ("3x", 3'i32), ("4x", 4'i32)]:
       if k > 1: igSameLine(0, -1)
       discard igRadioButton_IntPtr(cstring(label & "##nds_hd"), addr v.nds_hd, k)
-    igUnindent(106)
+    igUnindent(ui_px(106))
 
 proc reset*(v: VideoWidget) =
   v.filter      = cint(ord(v.cfg.video_filter))

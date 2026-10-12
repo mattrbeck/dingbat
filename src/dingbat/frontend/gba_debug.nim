@@ -2,6 +2,7 @@ import std/strformat
 import imguin/[cimgui, impl_opengl]
 import ../common/scheduler
 import ../gba/gba
+import util
 
 type
   GbaDebug* = ref object
@@ -41,12 +42,12 @@ proc render_palettes(d: GbaDebug) =
           let g = cfloat((c shr 5) and 0x1F'u16) / 31.0'f32
           let b = cfloat((c shr 10) and 0x1F'u16) / 31.0'f32
           let col_vec = ImVec4(x: r, y: g, z: b, w: 1.0'f32)
-          discard igColorButton("", col_vec, flags, ImVec2(x: 10, y: 10))
+          discard igColorButton("", col_vec, flags, ImVec2(x: ui_px(10), y: ui_px(10)))
           if col < 15:
             igSameLine(0, -1)
       igEndGroup()
       if palette_set == 0:
-        igSameLine(0, 4)
+        igSameLine(0, ui_px(4))
     igPopStyleVar(1)
     igEndTabItem()
 
