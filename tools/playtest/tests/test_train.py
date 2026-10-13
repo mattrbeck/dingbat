@@ -55,6 +55,16 @@ class Fingerprint(unittest.TestCase):
     def test_identical_runs_do_not_differ(self):
         self.assertEqual(train.diff_fp(fp(), fp()), {})
 
+    def test_a_configuration_new_to_the_harness_is_not_a_change(self):
+        # a baseline from before dingbat-hleimg existed: the new column has
+        # nothing to be compared with, the old ones still are
+        old = train.fingerprint({'status': 'PASS', 'outdir': '/runs/x'},
+                                results(configs=CONFIGS[:4]), {})
+        new = train.fingerprint({'status': 'PASS', 'outdir': '/runs/x'}, results(), {})
+        self.assertEqual(train.diff_fp(old, new), {})
+        moved = train.fingerprint({'status': 'PASS', 'outdir': '/runs/x'}, results(audio='au9'), {})
+        self.assertEqual(sorted(train.diff_fp(old, moved)), sorted(CONFIGS[:4]))
+
     def test_one_pixel_change_in_one_config_is_neutral(self):
         after = fp(cps={'title': 'h-title', 'menu': {'*': 'h-menu', 'dingbat-bios': 'h-menu2'}})
         d = train.diff_fp(fp(), after)
@@ -172,7 +182,7 @@ class Attribution(unittest.TestCase):
         self.assertIn('audio', text)
         self.assertIn('load self-in-mgba', text)
         # every configuration changing the same way is one entry
-        self.assertIn(' | all four: FAIL->PASS', train.describe(d))
+        self.assertIn(f' | all {len(CONFIGS)}: FAIL->PASS', train.describe(d))
 
 
 class Noise(unittest.TestCase):
@@ -267,7 +277,7 @@ class Noise(unittest.TestCase):
             cell = ledger['cells']['g dingbat load:dingbat-in-mgba']
             self.assertEqual((cell['seen'], cell['title'], cell['last_seen']), (1, 'Game', 't1'))
             self.assertEqual(len(cell['examples']), 2)
-            self.assertEqual(len(train.chronic(ledger)), 4)
+            self.assertEqual(len(train.chronic(ledger)), len(CONFIGS))
             # the next train on the same base: the combined value base already
             # produced is unchanged without a rerun
             C, changed, noise2, reran = train.denoise(base, comb, self.BASE, ledger, self.rerun({}))

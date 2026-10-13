@@ -5,14 +5,20 @@ emulators, compares the screens at named checkpoints and the audio throughout,
 saves in-game in each, compares the battery files, then boots every
 emulator's save in every emulator.
 
-dingbat runs four ways, so a difference can be pinned on one feature:
+dingbat runs five ways, so a difference can be pinned on one feature:
 
 | name | BIOS | waitloop skipping |
 |---|---|---|
-| `dingbat` | HLE (the shipped default) | on |
+| `dingbat` | HLE (the shipped default, no BIOS file) | on |
 | `dingbat-nowl` | HLE | off |
 | `dingbat-bios` | official | on |
 | `dingbat-bios-nowl` | official | off |
+| `dingbat-hleimg` | HLE with Nintendo's image mapped (a BIOS file installed) | on |
+
+`dingbat-hleimg` is what a player with a BIOS file installed and the HLE on
+runs: every frontend passes the file when it exists, and the SWIs the HLE
+leaves to the image then run Nintendo's code. Metroid Fusion hung at boot
+there and nowhere else (docs/playtest-bugs.md §55, §60).
 
 The references (`mgba`, `nba`) always run the official BIOS.
 

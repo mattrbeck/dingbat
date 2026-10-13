@@ -28,6 +28,11 @@ EMULATORS = {
     'dingbat-nowl':      ('dingbat_driver', False, ('--no-waitloop',)),
     'dingbat-bios':      ('dingbat_driver', True, ()),
     'dingbat-bios-nowl': ('dingbat_driver', True, ('--no-waitloop',)),
+    # the HLE BIOS with Nintendo's image mapped: what a player with a BIOS
+    # file installed and the HLE on runs (every frontend passes the file
+    # when it exists). The SWIs the HLE leaves to the image run the image's
+    # own code; Metroid Fusion hung here and nowhere else (§55)
+    'dingbat-hleimg':    ('dingbat_driver', True, ('--hle',)),
     'mgba':              ('mgba_driver', True, ()),
     'nba':               ('nba_driver', True, ()),
 }

@@ -5,11 +5,11 @@ description: Validate a dingbat core change against the 135-game playtest corpus
 
 # The playtest train
 
-A full playtest suite is 135 frozen-input game scripts in six emulator
+A full playtest suite is 164 frozen-input game scripts in seven emulator
 configurations: 40-60 minutes at `--jobs 6`, and the whole machine. Several
 agents each running one at once thrash it and all of them crawl. The train
 runs the corpus **once** for everyone: every pending candidate is merged onto
-one build, the four dingbat configurations play every game (the two
+one build, the five dingbat configurations play every game (the two
 reference emulators are replayed from the cached baseline, not played), and
 only the games that changed are replayed on each candidate alone to say
 whose change it was.

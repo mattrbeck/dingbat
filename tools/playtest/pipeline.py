@@ -32,9 +32,10 @@ SUBJECT_PREFIX = 'dingbat'
 last_outdir = None
 OK_LOAD = ('IDENTICAL', 'SLIP', 'MINOR')
 # what each pair isolates: the BIOS (with waitloop on and off), then waitloop
-# skipping (with each BIOS)
+# skipping (with each BIOS), then the HLE with Nintendo's image mapped
 VARIANT_PAIRS = [('dingbat', 'dingbat-bios'), ('dingbat-nowl', 'dingbat-bios-nowl'),
-                 ('dingbat', 'dingbat-nowl'), ('dingbat-bios', 'dingbat-bios-nowl')]
+                 ('dingbat', 'dingbat-nowl'), ('dingbat-bios', 'dingbat-bios-nowl'),
+                 ('dingbat', 'dingbat-hleimg')]
 
 
 def sha1_of(path):

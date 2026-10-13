@@ -10,7 +10,9 @@
 ##   --mp2k-hle arms the MP2K sound-engine HLE (the apps' "Enhanced audio"
 ##   setting, gba.mp2k_hle; off by default there and here). --no-fifo-interp
 ##   emits the raw FIFO latches instead of the apps' default cubic
-##   reconstruction (apu.set_fifo_interp).
+##   reconstruction (apu.set_fifo_interp). --hle with a BIOS file runs the
+##   HLE BIOS with that image mapped, as every frontend does when a BIOS file
+##   is installed and the HLE is on (docs/playtest-bugs.md §55).
 ##   The battery save is <rom minus extension>.sav, exactly as the desktop
 ##   app places it; run the driver on a ROM symlink inside a private
 ##   directory so saves never touch the library.
@@ -85,6 +87,7 @@ proc main() =
   var waitloop = true
   var mp2k_hle = false
   var fifo_interp = true
+  var hle_over_image = false
   let args = commandLineParams()
   var i = 0
   while i < args.len:
@@ -96,6 +99,7 @@ proc main() =
     of "--no-waitloop": waitloop = false
     of "--mp2k-hle": mp2k_hle = true
     of "--no-fifo-interp": fifo_interp = false
+    of "--hle": hle_over_image = true
     of "--audio":
       # the APU's own dump (apu.nim), claimed when the core is created
       inc i
@@ -103,11 +107,12 @@ proc main() =
     else: positional.add(args[i])
     inc i
   if positional.len != 2:
-    stderr.writeLine "Usage: dingbat_driver <rom> <bios|hle> [--run-bios] [--rtc EPOCH] [--no-waitloop] [--audio PATH] [--mp2k-hle] [--no-fifo-interp]"
+    stderr.writeLine "Usage: dingbat_driver <rom> <bios|hle> [--run-bios] [--rtc EPOCH] [--no-waitloop] [--audio PATH] [--mp2k-hle] [--no-fifo-interp] [--hle]"
     quit(2)
   let rom_path = positional[0]
-  let use_hle = positional[1] == "hle"
-  let emu = new_gba(if use_hle: "" else: positional[1], rom_path,
+  let stub = positional[1] == "hle"
+  let use_hle = stub or hle_over_image
+  let emu = new_gba(if stub: "" else: positional[1], rom_path,
                     run_bios = run_bios and not use_hle, use_hle = use_hle)
   emu.test_output = new_test_output()
   emu.post_init()

@@ -4992,3 +4992,24 @@ Also seen, not chased: f7035-f7041 and f7048-f7054, the white flash
 mGBA in the red channel only, one 5-bit step, with RAM and palette RAM
 identical: a brighten-rounding question (section 40 measured darken), not
 a game-state difference.
+
+## §60. The corpus plays the HLE over Nintendo's image too (dingbat-hleimg), 2026-10-13
+
+§55's Metroid Fusion hang lived in a configuration the harness never ran:
+the HLE BIOS with a real image mapped, which is what every frontend runs
+for a player who installed a BIOS file and kept the HLE on. The four
+dingbat configurations were the HLE over the stub (no file) and Nintendo's
+BIOS alone, so routing between the two (`hle_takes`) was never exercised by
+a game.
+
+`dingbat-hleimg` is the fifth: the driver's `--hle` keeps the BIOS file
+mapped under the HLE (`new_gba(bios, rom, use_hle = true)`, as
+game_load.nim, the wasm and iOS cores do), waitloop skipping on. Its
+variant pair is (`dingbat`, `dingbat-hleimg`): a difference there is the
+image's own code running where the stub's would. The train compares it
+from the first baseline that has it (a configuration the baseline did not
+play is skipped, not reported as a change).
+
+Checked on Metroid Fusion: on main both `dingbat` and `dingbat-hleimg` PASS
+(IDENTICAL); with §55's fix reverted `dingbat` still passes and
+`dingbat-hleimg` fails every checkpoint MAJOR.

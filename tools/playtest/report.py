@@ -29,13 +29,14 @@ import json
 import os
 import shutil
 
-DINGBAT = ['dingbat', 'dingbat-nowl', 'dingbat-bios', 'dingbat-bios-nowl']
+DINGBAT = ['dingbat', 'dingbat-nowl', 'dingbat-bios', 'dingbat-bios-nowl', 'dingbat-hleimg']
 REFS = ['mgba', 'nba']
 CONFIG_LABEL = {
     'dingbat': 'HLE BIOS, waitloop on (shipped default)',
     'dingbat-nowl': 'HLE BIOS, waitloop off',
     'dingbat-bios': 'official BIOS, waitloop on',
     'dingbat-bios-nowl': 'official BIOS, waitloop off',
+    'dingbat-hleimg': "HLE BIOS over Nintendo's image (a BIOS file installed), waitloop on",
     'mgba': 'mGBA 0.10.5, official BIOS',
     'nba': 'second reference, official BIOS',
 }
@@ -49,6 +50,8 @@ def suspect_of(odd):
     if s <= set(DINGBAT):
         if s == {'dingbat', 'dingbat-nowl'}:
             return 'dingbat:hle-bios'
+        if s == {'dingbat-hleimg'}:
+            return 'dingbat:hle-over-image'
         if s == {'dingbat-bios', 'dingbat-bios-nowl'}:
             return 'dingbat:official-bios'
         if s == {'dingbat', 'dingbat-bios'}:

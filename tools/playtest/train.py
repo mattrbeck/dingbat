@@ -63,7 +63,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.expanduser(os.environ.get('DINGBAT_TRAIN_HOME', '~/.cache/dingbat-train'))
-DINGBAT = ['dingbat', 'dingbat-nowl', 'dingbat-bios', 'dingbat-bios-nowl']
+DINGBAT = ['dingbat', 'dingbat-nowl', 'dingbat-bios', 'dingbat-bios-nowl', 'dingbat-hleimg']
 REF_FILES = ['tools/playtest/drivers/mgba_driver.c', 'tools/playtest/drivers/nba_driver.cpp',
              'tools/playtest/screenread.swift', 'tools/playtest/build.sh']
 # what a reference emulator's replayed phase depends on besides its script:
@@ -135,6 +135,10 @@ def diff_fp(before, after):
     out = {}
     order = ['*'] + DINGBAT
     for c in sorted(set(before) | set(after), key=lambda k: (order.index(k) if k in order else len(order), k)):
+        if c not in before and before.get('*', {}).get('status') not in (None, 'ERROR'):
+            # a configuration the baseline did not play at all (added to
+            # the harness since): nothing to compare it with yet
+            continue
         b, a = before.get(c, {}), after.get(c, {})
         d = {k: [b.get(k), a.get(k)] for k in sorted(set(b) | set(a)) if not same(k, b.get(k), a.get(k))}
         if d:
@@ -244,7 +248,7 @@ def describe(aspects):
     grouped = {}
     for cfg, text in parts:
         grouped.setdefault(text, []).append(cfg)
-    return ' | '.join(f"{'all four' if len(cs) == 4 and '*' not in cs else ', '.join(cs)}: {text}"
+    return ' | '.join(f"{'all ' + str(len(cs)) if len(cs) == len(DINGBAT) and '*' not in cs else ', '.join(cs)}: {text}"
                       for text, cs in grouped.items())
 
 
