@@ -81,8 +81,12 @@ def _db(x):
 
 
 def audible(f):
-    if f is None or f['peak'] <= 0:
+    if f is None:
         return np.zeros(0, bool)
+    if f['peak'] <= 0:
+        # silent all through (a reference hung at boot): every window
+        # inaudible, not none (window_diff ANDs it with the other side's)
+        return np.zeros(len(f['rms']), bool)
     return _db(f['rms']) - _db(f['peak']) > SILENT_DB
 
 
