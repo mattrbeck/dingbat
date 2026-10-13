@@ -1,0 +1,103 @@
+@title Bomberman Jetters (Japan)
+@file Bomberman Jetters (J).gba
+@game AJZJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+# The opening (A through Shout and Mighty's talk), title, ノーマルゲーム >
+# はじめから, A through the first scene, one bomb by the crashed jet, up the
+# path to the village; SELECT opens データセーブ: ファイル 1, はい (LEFT, A),
+# ファイル1に セーブしました (32 KB SRAM, 1827 bytes, byte-identical on all
+# three). [load]: ノーマルゲーム > つづきから, the データロード list showing
+# file 1 (にしアクア, three hearts), はい, ファイル1を ロードしました, A,
+# back in the village.
+# Seen while authoring: nba draws the dialogue text a letter behind and its
+# camera trails a few pixels on the walk into the village (f4366); the other
+# screens agree. In the replay nba shows the title 23 frames before the
+# others (title SLIP -23 after the A-tapped opening) and the save screens a
+# frame late (+1); every dingbat configuration matches mgba throughout.
+
+[new]
+wait 300
+wait 300
+press START
+wait 120
+wait 300
+press START
+wait 90
+tap START times=10 every=30 hold=4
+tap A times=20 every=30 hold=4
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press A
+wait 120
+press A
+wait 150
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+checkpoint first_gameplay window=30
+hold RIGHT
+wait 40
+release
+press A
+wait 20
+hold LEFT
+wait 40
+release
+wait 80
+wait 60
+hold RIGHT
+wait 10
+hold UP
+wait 150
+release
+hold RIGHT
+wait 60
+hold UP
+wait 120
+release
+hold UP
+wait 40
+release
+wait 30
+checkpoint village window=30
+press SELECT
+wait 60
+checkpoint save_menu window=30
+press A
+wait 60
+press LEFT
+wait 20
+press A
+wait 30
+wait 60
+checkpoint save_done window=30
+
+[load]
+wait 300
+wait 300
+press START
+wait 120
+wait 300
+press START
+wait 90
+tap START times=10 every=30 hold=4
+tap A times=20 every=30 hold=4
+checkpoint title window=30
+press START
+wait 90
+press A
+wait 120
+press A
+wait 90
+wait 30
+checkpoint load_menu window=30
+press A
+wait 60
+press A
+wait 180
+wait 120
+press A
+wait 150
+checkpoint resumed window=30
