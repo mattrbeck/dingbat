@@ -1,0 +1,169 @@
+@title Dragon Quest Monsters - Caravan Heart (Japan)
+@file Dragon Quest Monsters Caravan Heart (J).gba
+@game A9HJ
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# さいしょからはじめる, the default name キーファ (START to おわる, A, はい).
+# The prologue and the throne-room scolding; walk right, down off the dais
+# and left to the stairs, which sets off the king's にげるか キーファ! and
+# puts Kiefer in his room. Walk down to the door (a warning), talk to the
+# maid, hide in the タンス; the king comes in, the sorceress' scene, the
+# swirl appears: walk into it. On the other side the game asks ここまでの
+# おはなしを ぼうけんのしょに きろくしますか?: UP to はい, A; about ten
+# seconds later ぼうけんのしょに きろくしました. [load]: つづきからはじめる,
+# the save's summary (リーダー キーファ, 0:03:02), the 1章 少年の旅立ち card,
+# the forest clearing with the swirl. (The prologue and king-enters
+# checkpoints were turned into the 60-frame waits they took, to keep eight.)
+# Seen while authoring: in the throne room (from f4364, right after the first
+# talk ends) the wandering girl in pink goes another way in dingbat-bios than
+# in mgba and nba: she steps down at once in dingbat-bios and stays by the
+# right-hand throne in the references (throne_room, f4724). All four dingbat
+# configurations replay that alike, so neither the BIOS nor waitloop skipping
+# is the cause. Work RAM already differs between all three emulators from
+# the title's START press on (from f1600: some 650 bytes from 0x02000EBA in
+# EWRAM, IWRAM around 0x03000700 and 0x03001E20), mgba against nba as well,
+# so the references' agreement on the girl may be luck; the route avoids
+# her in all three. The EEPROM save takes a different time on each emulator:
+# its message changes nba+400, dingbat-bios+430, mgba+450 frames after はい.
+# Several fades and the arrow blink are a step apart on one emulator or
+# another (f2040 mgba darker; f3494 mgba; f6287 mgba a frame late). In the
+# replay nba reaches Kiefer's room and the save prompt 29 frames before the
+# others (kiefer_room, save_prompt SLIP -29); the three saves differ from
+# each other in some 700 bytes.
+
+[new]
+wait 600
+wait 300
+wait 300
+wait 120
+checkpoint title window=30
+press START
+wait 90
+wait 60
+checkpoint new_game_menu window=30
+press A
+wait 120
+checkpoint name_entry window=30
+press START
+wait 30
+press A
+wait 90
+press A
+wait 120
+wait 120
+wait 14
+wait 60
+wait 60
+tap A times=20 every=60 hold=4
+tap A times=10 every=60 hold=4
+tap A times=4 every=60 hold=4
+hold A
+wait 4
+release
+wait 6
+wait 10
+wait 10
+wait 10
+wait 10
+wait 10
+tap A times=5 every=60 hold=4
+checkpoint throne_room window=30
+hold RIGHT
+wait 100
+release
+wait 5
+hold RIGHT
+wait 30
+release
+wait 5
+wait 60
+wait 60
+wait 60
+wait 90
+wait 90
+wait 90
+hold DOWN
+wait 64
+release
+wait 5
+hold LEFT
+wait 48
+hold DOWN
+wait 40
+release
+wait 60
+tap A times=10 every=60 hold=4
+checkpoint kiefer_room window=30
+press A
+wait 60
+wait 30
+press A
+wait 40
+hold DOWN
+wait 16
+release
+wait 10
+tap A times=4 every=60 hold=4
+hold UP
+wait 40
+release
+wait 10
+hold UP
+wait 48
+hold LEFT
+wait 24
+release
+wait 10
+press A
+wait 60
+tap A times=8 every=60 hold=4
+tap A times=4 every=60 hold=4
+hold RIGHT
+wait 40
+hold UP
+wait 8
+release
+wait 10
+press A
+wait 60
+tap A times=4 every=60 hold=4
+wait 60
+tap A times=20 every=60 hold=4
+tap A times=20 every=60 hold=4
+tap A times=20 every=60 hold=4
+checkpoint portal window=30
+hold DOWN
+wait 40
+release
+wait 60
+wait 120
+tap A times=10 every=60 hold=4
+checkpoint save_prompt window=30
+press UP
+wait 20
+wait 12
+press A
+wait 60
+# until changed timeout=1500 every=10  [reached dingbat-bios+430 mgba+450 nba+400]
+wait 454
+wait 60
+checkpoint save_done window=30
+
+[load]
+wait 600
+wait 300
+wait 300
+wait 120
+checkpoint title window=30
+press START
+wait 150
+checkpoint continue_menu window=30
+press A
+wait 120
+checkpoint save_summary window=30
+press A
+wait 200
+checkpoint chapter_card window=30
+wait 300
+checkpoint resumed_forest window=30
+
