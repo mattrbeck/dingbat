@@ -1,0 +1,80 @@
+@title Fire Emblem - Fuuin no Tsurugi (Japan)
+@file Fire Emblem - Fuuin no Tsurugi (J) [!].gba
+@game AFEJ
+@chip SRAM_F (FRAM)
+@frozen dingbat-bios,mgba,nba
+
+# New game (最初から始める) in the first slot, START through the opening and
+# the Chapter 1 scenes to the first Player Phase, then the map menu on an
+# empty tile: 中断 (suspend), はい. The game writes the suspend data and returns
+# to the title; the main menu now opens on 中断から始める. [load] takes that
+# entry, picks the Chapter 1 slot and resumes on the map with the cursor where
+# it was. (The intro and first main-menu checkpoints were turned into the
+# 60-frame waits they took, to keep eight.)
+# Seen while authoring: the menus' animated backgrounds and the map sprites'
+# idle animations are in a different phase on each emulator at most
+# checkpoints; as the 中断 text box fades in (f2762) dingbat-bios' box is a
+# step more opaque than mgba's and nba's. Saves: in the replay dingbat-bios
+# and mgba write byte-identical files and nba differs in 25 bytes (in the
+# live session, after rewinds, mgba had put the suspend into the other of the
+# game's two alternating blocks). Resuming rewrites part of the save in all
+# three.
+[new]
+wait 600
+press START
+wait 200
+checkpoint title window=30
+press START
+wait 120
+wait 60
+press A
+wait 90
+checkpoint slots_empty window=30
+press A
+wait 120
+wait 200
+wait 60
+press START
+wait 200
+press START
+wait 200
+wait 150
+checkpoint chapter1 window=30
+# mash START until text ASE timeout=1500 every=10  [taps dingbat-bios:15 mgba:15 nba:15]
+tap START times=15 every=10 hold=4
+wait 60
+checkpoint player_phase window=30
+tap RIGHT times=4 every=12 hold=4
+wait 20
+press A
+wait 40
+checkpoint map_menu window=30
+tap DOWN times=3 every=12 hold=4
+wait 20
+press A
+wait 40
+wait 60
+checkpoint suspend_prompt window=30
+press A
+wait 120
+wait 60
+checkpoint suspended window=30
+press A
+wait 200
+press START
+wait 120
+checkpoint main_menu_resume window=30
+
+[load]
+wait 600
+press START
+wait 200
+press START
+wait 120
+checkpoint main_menu window=30
+press A
+wait 90
+checkpoint slot_chapter1 window=30
+press A
+wait 200
+checkpoint resumed_map window=30
