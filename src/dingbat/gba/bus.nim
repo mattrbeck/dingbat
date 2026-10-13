@@ -508,10 +508,23 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x138, 0xE8BD500F'u32)
     write_stub_u32(result.bios, 0x13C, 0xE25EF004'u32)
     # Halt parks on the `bx lr` after its HALTCNT write (hle_halt), which
-    # goes to the dispatcher's return at 0x170: a trap into the HLE
-    # (cpu.hle_halt_return).
+    # goes to the dispatcher's return at 0x170, run as instructions so a DMA
+    # burst or an interrupt meets it between the same accesses as the
+    # console's. The SVC-stack pops are of the HLE's three-word frame
+    # {caller CPSR, r12, return} (hle_bios push_halt_svc_frame): the
+    # console's pops {r11, r12, lr} after the SPSR, so 0x184 is a trap that
+    # makes its three reads (cpu.hle_halt_return).
     write_stub_u32(result.bios, 0x1B4, 0xE12FFF1E'u32)  # bx lr
-    write_stub_u32(result.bios, 0x170, 0xEF000000'u32)  # swi 0 (halt return)
+    write_stub_u32(result.bios, 0x170, 0xE8BD4004'u32)  # pop  {r2, lr}
+    write_stub_u32(result.bios, 0x174, 0xE3A0C0D3'u32)  # mov  ip, #0xD3
+    write_stub_u32(result.bios, 0x178, 0xE129F00C'u32)  # msr  cpsr_fc, ip
+    write_stub_u32(result.bios, 0x17C, 0xE8BD4000'u32)  # pop  {lr}
+    write_stub_u32(result.bios, 0x180, 0xE169F00E'u32)  # msr  spsr_fc, lr
+    write_stub_u32(result.bios, 0x184, 0xEF000000'u32)  # swi 0 (pop {ip, lr})
+    write_stub_u32(result.bios, 0x188, 0xE1B0F00E'u32)  # movs pc, lr
+    # Never executed: the word the `movs` leaves in the BIOS latch (two
+    # ahead), as every HLE return leaves it
+    write_stub_u32(result.bios, 0x190, 0xE3A02004'u32)
     # The rest of the dispatcher after its `msr` and the Halt routine, as the
     # real BIOS has them: a Halt entered with an interrupt already pending
     # takes it at 0x164 and runs on from there (hle_bios halt_from_dispatcher)

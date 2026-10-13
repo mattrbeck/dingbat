@@ -231,7 +231,7 @@ proc check_intr_wait*(cpu: CPU) =
 # charged per region in hle_swi. mGBA suite BIOS timing rows (IWRAM column).
 const SWI_HLE_BASE = 48
 # The part of it after the routine: the return path from 0x170, refill
-# excluded (official BIOS in this core, as HALT_BIOS_RETURN)
+# excluded (official BIOS in this core: the code Halt's return runs, bus.nim)
 const SWI_HLE_EXIT = 16
 
 # The part of a Halt/Stop SWI the BIOS executes after the wake IRQ is
@@ -387,32 +387,40 @@ proc hle_cont_ahead(cpu: CPU; c: var HleCont; clk: int; address: uint32;
 # with the BIOS address the console's handlers find on the IRQ stack
 # (alyosha irq/halt_pc, Interactions/Halt_IRQ, Halt_DMA_IRQ read it: lr 0x174
 # after a sleep, 0x1B8 when the interrupt was recognised by the write). The
-# return is a trap at 0x170 (cpu.hle_halt_return) that pops what this pushed:
-# every piece of the halt is architectural, nothing rides in HLE fields.
+# return is the dispatcher's, run as stub-BIOS instructions that pop what
+# this pushed (bus.nim; one of them the trap cpu.hle_halt_return): every
+# piece of the halt is architectural, nothing rides in HLE fields.
 #
 # Cycles, measured against Nintendo's BIOS in this core (halt from ROM ARM,
 # ROM Thumb and IWRAM, woken by a timer with and without IME, and ending at
 # once on a pending flag): the dispatcher reads the swi's comment byte in the
 # caller's region HALT_COMMENT_READ_AT cycles after the swi's dispatch
-# starts, and the HALTCNT write lands HALT_WRITE_AT cycles after that read;
-# after the wake, `bx lr` (3), then HALT_BIOS_RETURN cycles of BIOS code
-# before the return's refill.
+# starts, and its `msr` (0x160), which hands back the caller's I bit, is
+# fetched HALT_MSR_START cycles after that read. From the `msr` on the Halt
+# runs the stub's copy of the console's code, so the HALTCNT write lands 15
+# cycles after the `msr` starts (with the System stack in IWRAM), an interrupt recognised on the way is taken at the
+# instruction boundary the console takes it at, and the return after the
+# wake is the console's access for access (16 cycles before the refill with
+# both stacks in IWRAM).
+#
+# Until 2026-10-12 two pieces of that were modelled instead: the routine
+# went from the `msr` straight to the write, sampling the interrupt line
+# once between (HALT_MSR_AT = 18 cycles after the read, then HALT_WRITE_AT =
+# 25), and the return was a constant charged as internal cycles. Zelda II
+# (Classic NES Series) met both: a sound FIFO burst granted inside the
+# return ran under those internal cycles where the console's pops wait for
+# it (its Halt came back 9 cycles early), and a timer interrupt recognised
+# at the boundary after the routine's `bx ip`, past the one sample, was
+# taken after the write without sleeping where the console takes it first
+# and sleeps after (docs/playtest-bugs.md).
 const HALT_COMMENT_READ_AT {.intdefine.} = 10
-const HALT_WRITE_AT {.intdefine.} = 25
-const HALT_BIOS_RETURN {.intdefine.} = 16
-
-# Cycles from the comment read to the interrupt check after the dispatcher's
-# `msr`. Measured against Nintendo's BIOS in this core: a Halt from IWRAM
-# Thumb with an H-blank IRQ pending (the mGBA suite's `H-blank bit start`
-# re-run from its results page) enters the vector 32 cycles after the swi,
-# wakes 855 after it and is back 98 after the wake, on both.
-const HALT_MSR_AT {.intdefine.} = 18
+const HALT_MSR_START {.intdefine.} = 10
 
 proc push_halt_svc_frame(cpu: CPU; ret: uint32) =
   ## The SWI's own state, on the SVC stack where each halt keeps its own:
   ## {caller CPSR, r12, return address} (r12 at [sp_svc - 8] as the
-  ## console's dispatcher leaves it); hle_halt_return pops it. Leaves the CPU
-  ## in the dispatcher's System mode with the caller's I bit.
+  ## console's dispatcher leaves it); the stub's return pops it. Leaves the
+  ## CPU in the dispatcher's System mode with the caller's I bit.
   let bus = cpu.gba.bus
   let caller = cpu.cpsr
   cpu.switch_mode(modeSVC)
@@ -424,14 +432,23 @@ proc push_halt_svc_frame(cpu: CPU; ret: uint32) =
   cpu.cpsr = cast[PSR](uint32(modeSYS) or (uint32(caller) and 0x80'u32))
 
 proc halt_from_dispatcher(cpu: CPU; ret, isa_step: uint32) =
-  ## Hands a Halt over to the stub BIOS at 0x164, the instruction after the
-  ## dispatcher's `msr`: push {r2, lr}; lr = 0x170; bx ip (ip = the table's
-  ## 0x1A0); mov r2, #0; mov ip, #0x04000000; strb r2, [ip, #0x301]; bx lr.
+  ## The dispatcher's `msr` (0x160), reached at its fetch, then the Halt
+  ## handed over to the stub BIOS at 0x164, the instruction after it: push
+  ## {r2, lr}; lr = 0x170; bx ip (ip = the table's 0x1A0); mov r2, #0; b;
+  ## mov ip, #0x04000000; strb r2, [ip, #0x301] (mmio.nim: the halt); bx lr.
   ## The {r2, lr} frame is the stub's own push, so sp stays where hle_swi
-  ## left it.
+  ## left it. The `msr` opens the gate as arm_psr_transfer does, from the
+  ## clock as the CPU's loop leaves it there (its own fetch charged, not yet
+  ## ticked): an interrupt already pending is recognised again
+  ## IRQ_GATE_DELAY cycles out.
   let bus = cpu.gba.bus
   cpu.push_halt_svc_frame(ret)
   cpu.r[12] = 0x1A0'u32
+  bus.catch_up()
+  bus.add_cycles(1)
+  if not cpu.cpsr.irq_disable:
+    if cpu.gba.interrupts.irq_deliverable: cpu.gba.interrupts.gate_opened()
+    else: cpu.gba.interrupts.schedule_interrupt_check()
   let before = bus.cycles
   discard cpu.set_reg(15, 0x164'u32 - isa_step)  # the SWI handler steps isa_step
   bus.cycles = before
@@ -440,7 +457,6 @@ proc hle_halt(cpu: CPU; t_entry: int64; rfs_entry: CycleCount) =
   let bus = cpu.gba.bus
   let isa_step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
   let ret = cpu.r[15] - isa_step               # the instruction after the swi
-  let caller_i = cpu.cpsr.irq_disable
   # Back to the dispatch start (hle_swi's generic charge is not this
   # routine's), then the dispatcher's own gamepak access: `ldrb [lr, #-2]`,
   # which the prefetcher and the burst see as the console's does.
@@ -450,48 +466,14 @@ proc hle_halt(cpu: CPU; t_entry: int64; rfs_entry: CycleCount) =
     bus.rom_free_since = rfs_entry
     bus.add_cycles(HALT_COMMENT_READ_AT)
     discard bus[ret - 2]
-    bus.add_cycles(HALT_MSR_AT)
-    bus.catch_up()
-    if cpu.irq_line and not caller_i:
-      # The dispatcher's `msr` (0x160) has just handed back the caller's I
-      # bit with an interrupt already recognised: the console takes it
-      # there, before the routine, and the routine's HALTCNT write then
-      # sleeps. Park on the stub's copy of the code after the `msr` so the
-      # interrupt, the write and the halt all run architecturally.
-      cpu.halt_from_dispatcher(ret, isa_step)
-      return
-    # (the dispatcher's push {r2, lr} at 0x164 comes between: its stack
-    # region's waits, swi_stack_entry)
-    bus.add_cycles(HALT_WRITE_AT - HALT_MSR_AT + cpu.sys_stack_waits().stack_block(2))
+    bus.add_cycles(HALT_MSR_START)
   else:
     # Part of the dispatch already reached the scheduler (an armed DMA's
-    # access window): keep it, and land on the write as near as it allows
+    # access window): keep it, and land on the `msr` as near as it allows
     let page = int(bits_range(ret, 24, 27))
-    let adj = HALT_COMMENT_READ_AT + int(bus.wait16_n[page]) + HALT_WRITE_AT +
-              cpu.sys_stack_waits().stack_block(2) - charged
+    let adj = HALT_COMMENT_READ_AT + int(bus.wait16_n[page]) + HALT_MSR_START - charged
     bus.add_cycles(max(adj, -bus.cycles))
-  bus.catch_up()
-  # The write (mmio.nim, HALTCNT): an interrupt already recognised is taken
-  # after the stall at the `bx lr`, without halting
-  let seen = cpu.irq_line
-  bus.add_cycles(HALT_ENTRY_STALL)
-  # The SWI's frame, then the routine's handler-visible registers: ip =
-  # 0x04000000, r2 = 0, lr = 0x170, the {r2, lr} frame hle_swi wrote live
-  # below sp.
-  cpu.push_halt_svc_frame(ret)
-  cpu.r[12] = 0x04000000'u32
-  cpu.r[2] = 0
-  cpu.r[14] = 0x170'u32
-  cpu.r[13] -= 8
-  # PC on the `bx lr`. The pipeline the HALTCNT store left is already paid
-  # for: take back the refill set_reg charges.
-  let before = bus.cycles
-  discard cpu.set_reg(15, 0x1B4'u32 - isa_step)  # the SWI handler steps isa_step
-  bus.cycles = before
-  if seen: return
-  cpu.halted = true
-  # Halt exits on IE & IF != 0 regardless of IME, including already-pending
-  cpu.gba.interrupts.schedule_interrupt_check()
+  cpu.halt_from_dispatcher(ret, isa_step)
 include hle_sound
 
 when defined(biosdrvtrace):
@@ -539,8 +521,8 @@ include hle_copy
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS SWI dispatch; used when no BIOS image is provided.
-  if cpu.r[15] == 0x178'u32 and swi_num == 0 and not cpu.cpsr.thumb:
-    cpu.hle_halt_return()   # the stub's trap at 0x170 (ARM)
+  if cpu.r[15] == 0x18C'u32 and swi_num == 0 and not cpu.cpsr.thumb:
+    cpu.hle_halt_return()   # the stub's trap at 0x184 (ARM)
     return
   if cpu.r[15] == COPY_TRAP + 8 and swi_num == 0 and not cpu.cpsr.thumb and
      cpu.gba.bus.stub_bios:
@@ -587,8 +569,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   # caller's refill above -- is charged up front for what is left here (the
   # routines with timed effects run as stub-BIOS code: hle_unc.nim).
   # The System stack's wait states (swi_stack_entry): the pushes before the
-  # routine, the pops with the return path. Halt prices its own (hle_halt,
-  # hle_halt_return); the sound-driver routines' frames are not modeled.
+  # routine, the pops with the return path. Halt's run as stub-BIOS code
+  # (hle_halt); the sound-driver routines' frames are not modeled.
   let stk_on = swi_num == 0x03
   let stk_exit = if stk_on: cpu.swi_stack_exit(swi_num) else: 0
   if stk_on:

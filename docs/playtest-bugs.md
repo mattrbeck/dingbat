@@ -4615,3 +4615,51 @@ All PASS; harness unit tests 36/36. The train keys the reference binaries
 on the drivers' sources, so its next baseline plays the references live once.
 Scripts' comments updated (Boktai 2, Boktai 3, Rockman EXE 4.5), and
 the README's driver notes.
+## §54. Zelda II: the HLE Halt came back 9 cycles early, and once slept through an interrupt, 2026-10-12
+
+**Symptom.** Classic NES Series: Zelda II was the last corpus game whose
+HLE (`dingbat`) and official-BIOS (`dingbat-bios`) runs differed: video,
+saves and checkpoints equal, audio off by up to 172/32768 around f2346 and
+f2900-2908. `swicmp.py` put the first differing BIOS call at #101 (f53): a
+Halt from IWRAM (ARM, IRQs on), woken by timer 1, 81913 cycles on HLE
+against 81922; the HLE then gained an extra Halt call about every 45
+frames.
+
+**Cause 1: the return path.** Per-instruction traces of both runs agree up
+to the dispatcher's return at 0x170. There a DMA0 burst (5 cycles) and the
+sound FIFO's DMA2 burst (4) were granted, and the official BIOS's `pop
+{r2, lr}` waited for both (0x170 -> 0x174 took 13 cycles, not 4). The HLE's
+return was a trap at 0x170 that charged the 16-cycle path as internal
+cycles and read the frames untimed; a burst runs under internal cycles, so
+both were free. It happens whenever the game's FIFO request lands in those
+16 cycles.
+
+**Cause 2: one interrupt sample.** With the return fixed, call #4517
+(f1582) parted: the HLE's Halt lasted 4622 cycles, the BIOS's 79077. Timer
+1's interrupt was recognised at the boundary after the routine's `bx ip`
+(0x16C), after the dispatcher's `msr` and before the HALTCNT write. The
+console takes it there and its write then sleeps; the HLE sampled the line
+once, 18 cycles after the comment read (`HALT_MSR_AT`), missed it, and at
+the write took it as "recognised by the write" (no sleep), coming straight
+back.
+
+**Fix.** The Halt runs the console's code from the dispatcher's `msr` on.
+`hle_halt` charges the dispatch to the `msr` (`HALT_MSR_START` = 10 cycles
+after the comment read; the official BIOS's trace: read ends 114, `msr`
+fetched 124), opens the interrupt gate as `msr` does, and parks at 0x164 on
+the stub's copy of the routine (push, `bx ip`, the HALTCNT `strb` that
+halts in mmio.nim); the stub's 0x170-0x188 now hold the dispatcher's
+return as instructions, with a trap at 0x184 (`cpu.hle_halt_return`) for
+the one pop that differs because the HLE's SVC frame is three words where
+the console's is four (it makes the console's three reads). The modelled
+`HALT_MSR_AT`, `HALT_WRITE_AT` and `HALT_BIOS_RETURN` are gone: the write
+still lands 25 cycles after the read and the return still costs 16, now
+because the instructions do. Zelda II: all 8015 Halt calls of its script
+start and last the same on both, and the audio streams are identical. A
+scratch probe (a Halt from IWRAM with a timer interrupt landing k = 1..89,
+120, 200, 400 cycles after the timer starts, a handler stamping TM0, TM0
+read after the return) differed in 7 of 92 cells before (k = 23-24: a
+pending interrupt's handler entered 3-4 cycles late; k = 28-32: Zelda II's
+case, no sleep) and in none after. No console measurement here: the
+official BIOS running in this core is the reference, and the cycle laws
+(2085/2085 under both BIOSes) still hold.

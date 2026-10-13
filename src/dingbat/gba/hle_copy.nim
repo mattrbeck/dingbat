@@ -175,9 +175,9 @@ proc copy_park(cpu: CPU; run: CopyRun; framed: bool) =
 
 proc copy_return(cpu: CPU; swi_num: uint32; extra: int) =
   ## A parked copy's end: the dispatcher's return through the frames
-  ## copy_park pushed, as cpu.hle_halt_return takes a Halt's, priced as an
-  ## unparked call's return (swi_exit_cost, the refill in the caller's
-  ## region included) once the caller's state is back.
+  ## copy_park pushed (a Halt's, popped as the stub's 0x170 pops them),
+  ## priced as an unparked call's return (swi_exit_cost, the refill in the
+  ## caller's region included) once the caller's state is back.
   let bus = cpu.gba.bus
   # System stack: the dispatcher's {r2, lr}
   cpu.r[2] = bus.read_word_internal(cpu.r[13])
@@ -215,7 +215,7 @@ proc copy_return(cpu: CPU; swi_num: uint32; extra: int) =
 
 proc copy_finish(cpu: CPU; run: CopyRun; framed: bool; tail, exit_cost, stepped: int) =
   ## The routine's end: the registers it leaves, and from a parked copy the
-  ## frames' pops and the return to the caller (cpu.hle_halt_return's path).
+  ## frames' pops and the return to the caller (copy_return).
   let bus = cpu.gba.bus
   let w = run.kind.copy_unit_bytes
   # (CpuSet's word fill pops its fill word with ldmia r0!; CpuFastSet's

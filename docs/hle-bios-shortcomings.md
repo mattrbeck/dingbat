@@ -93,12 +93,21 @@ it deliberately does not model:
     output seen mid-call); one saved in an interrupted RegisterRamReset
     (r0 bit 31, the old continuation) runs the routine again from its
     start on the flags in r0's low byte.
-* **Halt and Stop** keep their models. Halt parks in the stub BIOS on the
-  `bx lr` after its HALTCNT write, keeps its return on the SVC and System
-  stacks, and returns through a trap at 0x170 (`hle_halt`), so it nests,
-  and an interrupt taken during it pushes the BIOS address the console's
-  does. Its SVC frame holds the caller's CPSR where the console's
-  dispatcher keeps r11.
+* **Halt** runs the console's code from the dispatcher's `msr` on: the
+  stub BIOS holds the routine after it and the dispatcher's return
+  (0x164-0x1B4, 0x170-0x188), so the HALTCNT write, every interrupt
+  boundary and every access a DMA burst can wait on are the console's, and
+  it nests. What stays modelled is the dispatch up to the `msr` (the
+  comment read and the `msr` at measured offsets, `hle_halt`) and the SVC
+  frame: three words, the caller's CPSR where the console's dispatcher
+  keeps r11 and nothing where it keeps the SPSR, popped by a trap at 0x184
+  that reads the console's three words (`cpu.hle_halt_return`). With
+  Nintendo's BIOS mapped (`--hle-after-bios`), a Halt from the cartridge
+  still takes the HLE path and parks in that image, whose return pops four
+  words from the three-word frame (found reading the code on 2026-10-12,
+  not reproduced or fixed; Zelda II's Halts are from IWRAM and run the
+  image's own).
+* **Stop** keeps its model (the halt-resume fields).
 * **The reset vector (a jump to 0) re-runs an HLE boot** that waits out the
   real duration (270 vblanks plus the tail to scanline 126, measured against
   real-BIOS execution) with the display force-blanked and hands over the

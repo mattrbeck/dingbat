@@ -928,32 +928,22 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
   if s.cycles == s.next_event: s.call_current()
 
 proc hle_halt_return*(cpu: CPU) =
-  ## The stub BIOS's trap at 0x170 (an ARM `swi 0`), where a Halt parked by
-  ## hle_halt goes on after its `bx lr`, woken directly or back from the
-  ## interrupt it woke for: the dispatcher's return, from the frames hle_halt
-  ## pushed (so nested halts and anything parked meanwhile keep their own).
-  ## Cycles: HALT_BIOS_RETURN from reaching 0x170 to the return's refill, of
-  ## which the trap's own fetch is one.
+  ## The stub BIOS's trap at 0x184 (an ARM `swi 0`) in the dispatcher's
+  ## return a Halt goes on through after its `bx lr` (bus.nim): the
+  ## console's `pop {r11, r12, lr}` off the SVC stack, here the last two
+  ## words of the frame hle_halt pushed (its first, the caller's CPSR, went
+  ## to the SPSR at 0x17C). Three reads all the same, at the console's
+  ## addresses: the first the word 0x17C popped, where the console's frame
+  ## has r11 (the console's is a word deeper, with the SPSR below it). Then
+  ## the internal cycle. A DMA burst granted in the return waits for each
+  ## access as on the console (Zelda II's sound FIFO, docs/playtest-bugs.md).
   let bus = cpu.gba.bus
-  cpu.idle(HALT_BIOS_RETURN - 1)
-  # System stack: the dispatcher's {r2, lr}, a pop that pays the stack's
-  # region (hle_bios.nim swi_stack_exit; IWRAM is in HALT_BIOS_RETURN)
-  bus.add_cycles(cpu.sys_stack_waits().stack_block(2))
-  cpu.r[2] = bus.read_word_internal(cpu.r[13])
-  cpu.r[14] = bus.read_word_internal(cpu.r[13] + 4)
-  cpu.r[13] += 8
-  # SVC stack: {caller CPSR, r12, return address}, then `movs pc, lr`
-  cpu.switch_mode(modeSVC)
-  cpu.cpsr = cast[PSR](uint32(modeSVC) or 0xC0'u32)
   let sp = cpu.r[13]
-  cpu.spsr = cast[PSR](bus.read_word_internal(sp))
-  cpu.r[12] = bus.read_word_internal(sp + 4)
-  cpu.r[14] = bus.read_word_internal(sp + 8)
-  cpu.r[13] = sp + 12
-  discard cpu.set_reg(15, cpu.r[14])     # refills in the caller's region
-  cpu.exception_return_restore()
-  cpu.r[15] -= 4                         # arm_software_interrupt steps past the swi
-  bus.bios_latch = 0xE3A02004'u32        # as every HLE return leaves it
+  discard bus.read_word(sp - 4)
+  cpu.r[12] = bus.read_word(sp)
+  cpu.r[14] = bus.read_word(sp + 4)
+  cpu.r[13] = sp + 8
+  cpu.idle(1)
 
 proc irq_in_last_waits(cpu: CPU): bool {.inline.} =
   ## IRQ_LAST_WAITS: recognised inside the wait states of the access that
