@@ -4712,3 +4712,29 @@ there (not in CI). Before: every image mode with the HLE failed all 8 calls
 8/8. Ten games over Nintendo's image, 600 frames: Metroid Fusion was the
 only one to Halt from ROM; its f600 picture is now the same in modes 0, 1
 and 2, and the other nine are unchanged.
+
+## §56. The deep input sweep on the whole pool: no title fails in dingbat alone, 2026-10-13
+
+`inputsweep.py sweep --pattern deep --frames 12000` over the 1625-title pool
+(one dump per title not covered by a script: 774 USA, 24 multi-region, 157
+Europe, 670 Japan), dingbat against mGBA, then every flagged title rechecked
+with the second reference as well. 25 flags:
+
+- **13 sleep**: the game's own sleep option (Stop) reached by the deep
+  pattern's menu blocks; the references do not model Stop.
+- **12 others, none dingbat's alone.** Rechecked, every one is dingbat
+  against mGBA only, the second reference agreeing with dingbat, except
+  Pitfall - The Lost Expedition (`garbage` against both: dense jungle
+  foliage, the screenshots show normal play). Most are timing forks: the
+  same press lands on another frame and the run goes elsewhere (Tiger Woods
+  2004, Super Robot Taisen OG, Total Soccer Manager, Extreme Ghostbusters,
+  three Yu-Gi-Oh!s, Naruto Ninjutsu Zenkai 2, Pro Mahjong Tsuwamono, which
+  dingbat and the second reference play frame for frame). Code Breaker is a
+  cheat device with no game behind it. CROSS CHANGE (J): dingbat and the
+  second reference reach the story; mGBA alone asks for the "verification
+  button" three times after the save-format wait and stays black.
+
+The earlier deep sweep (2026-10-02, USA and part of Europe) had covered
+1142 titles; this one ran the whole pool on main 346c741d (the last ~240 on
+b7c1e32e). Detectors that cried wolf: `garbage` on busy screens (city
+traffic, foliage, football crowds).
