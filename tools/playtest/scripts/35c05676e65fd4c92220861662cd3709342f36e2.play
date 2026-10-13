@@ -1,0 +1,114 @@
+@title Klonoa 2 - Dream Champ Tournament (USA)
+@file Klonoa 2 - Dream Champ Tournament (U).gba
+@game AN6E
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# NEW GAME, file 1, YES (the game writes the file to its 4Kbit EEPROM as soon
+# as it is created, and again on entering Vision 1-1), skip the intro, world
+# map west to Western Jungle, skip the story, Vision 1-1: Nagapoko's hint,
+# grab a Moo, collect a gem, jump up the ledges, pause, Select Vision back to
+# the vision map. [load]: the title adds CONTINUE, file 1 shows World 1
+# Western Jungle, YES resumes on the Vision 1-1 map.
+# Findings (per-frame hashes of the frozen timeline, the three official-BIOS
+# emulators): on the title (f721-f1200) dingbat's spinning logo star runs one
+# frame ahead of mgba and nba, which agree, and on the world map (f2041-f2400)
+# two frames off them; the checkpoint windows absorb both. Entering Vision 1-1, the frames are identical up
+# to f4453 (the black between the hint and the level); from f4454, the white
+# mosaic fade-in, dingbat's frames never again match either reference at any
+# lag within 20 frames while mgba and nba agree frame for frame through the
+# card (to f4800; they drift apart later in the level): dingbat's
+# fade is a step further on (f4454, f4470), the VISION 1-1 card a few pixels
+# further along and the HUD hearts at another phase (f4500), and Klonoa about
+# 3 px left of where the references have him at the gameplay checkpoint
+# (f5178), so level_start and gameplay fail in every dingbat configuration.
+# dingbat's own saves still load in mgba and nba. A driver built with
+# -d:EEPROM_SETTLE_CYCLES=115005 (the Klonoa - Empire of Dreams fix) changes
+# nothing here. Elsewhere the references disagree with each other
+# (backgrounds scroll at different phases on the file select and vision map).
+# nba does not read back its own 8 KB battery file: on [load] its title has
+# no CONTINUE (f1226) and its file 1 is NO DATA, so it starts a new game.
+[new]
+wait 600
+wait 300
+wait 200
+checkpoint title window=30
+press START
+wait 120
+wait 60
+press A
+wait 180
+checkpoint save_file window=30
+press A
+wait 180
+press A
+wait 180
+press START
+wait 240
+checkpoint world_map window=30
+press A
+wait 180
+press LEFT
+wait 120
+press A
+wait 180
+wait 60
+wait 60
+press START
+wait 240
+wait 60
+wait 180
+press A
+wait 180
+checkpoint vision_map window=30
+press A
+wait 240
+wait 60
+press A
+wait 120
+# mash A until notext Hint timeout=1500 every=30  [taps dingbat-bios:11 mgba:11 nba:11]
+tap A times=11 every=30 hold=4
+wait 120
+wait 120
+wait 120
+checkpoint level_start window=30
+press RIGHT hold=60
+press B
+wait 30
+press LEFT hold=40
+press RIGHT hold=120
+hold RIGHT
+press A hold=20
+wait 40
+release
+wait 30
+checkpoint gameplay window=30
+press RIGHT hold=60
+hold RIGHT
+press A hold=25
+wait 50
+release
+wait 30
+press START
+wait 40
+checkpoint pause window=30 compare=text
+press DOWN after=10
+press DOWN after=10
+press A
+wait 300
+checkpoint back_to_map window=30
+
+[load]
+wait 1100
+press START
+wait 120
+checkpoint continue_menu window=30 compare=text
+press DOWN after=10
+press A
+wait 180
+checkpoint save_file window=30 compare=text
+press A
+wait 180
+press A
+wait 300
+checkpoint resumed_map window=30
