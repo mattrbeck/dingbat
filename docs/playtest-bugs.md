@@ -4837,9 +4837,13 @@ the HLE BIOS's routines make the same bus calls so they follow.
   1); the old rule: 2 less with the prefetcher on (S 3 for N 5). Bit 6 reads
   the halfword back: with the slot empty the float witnesses the access
   itself (`addr >> 1` = 0x2001 for N, 0xFFFF for S; WAITCNT 0 and 0x4000 are
-  the safe settings, section 22). Not run on the console yet:
-  `python3 tools/hwlink/r0table.py --record romdataseq`, then `lawrom.py`,
-  puts it in the cycle-law gate.
+  the safe settings, section 22). **The AGB SP agrees (recorded
+  2026-10-13, slot empty):** all 32 timing cells equal their controls,
+  0x19..0x1C at k = 0..3 with the prefetcher off and on, and the four float
+  cells read 0x2001 / 0x2080 (`addr >> 1`: an N access, never 0xFFFF).
+  dingbat and dingbat-bios match 36/36, mGBA 32/36. The row is in
+  r0-agb.json and the cycle-law gate (`tests/roms/cyclelaws/romdataseq.gba`;
+  2121/2121 cells under the HLE and the real BIOS).
 
 **The train** (`klonoa2`, 161 games): Klonoa 2 fixed (FAIL -> PASS in all
 four); 99 games neutral, nearly all on the audio dump's hash alone (any

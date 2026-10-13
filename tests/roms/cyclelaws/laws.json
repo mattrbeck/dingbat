@@ -10743,5 +10743,193 @@
     "want": "6000029F"
    }
   ]
+ },
+ {
+  "payload": "romdataseq",
+  "rom": "romdataseq.gba",
+  "sha1": "a4bbc9f483759c864eeb908d003a602bbbdff426",
+  "frames": 348,
+  "cells": [
+   {
+    "id": "romdataseq 0x0",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "romdataseq 0x1",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "romdataseq 0x2",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "romdataseq 0x3",
+    "kind": "hex",
+    "want": "0000001C"
+   },
+   {
+    "id": "romdataseq 0x20",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "romdataseq 0x21",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "romdataseq 0x22",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "romdataseq 0x23",
+    "kind": "hex",
+    "want": "0000001C"
+   },
+   {
+    "id": "romdataseq 0x10",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "romdataseq 0x11",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "romdataseq 0x12",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "romdataseq 0x13",
+    "kind": "hex",
+    "want": "0000001C"
+   },
+   {
+    "id": "romdataseq 0x30",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "romdataseq 0x31",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "romdataseq 0x32",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "romdataseq 0x33",
+    "kind": "hex",
+    "want": "0000001C"
+   },
+   {
+    "id": "romdataseq 0x80",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "romdataseq 0x81",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "romdataseq 0x82",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "romdataseq 0x83",
+    "kind": "hex",
+    "want": "0000001C"
+   },
+   {
+    "id": "romdataseq 0xa0",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "romdataseq 0xa1",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "romdataseq 0xa2",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "romdataseq 0xa3",
+    "kind": "hex",
+    "want": "0000001C"
+   },
+   {
+    "id": "romdataseq 0x90",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "romdataseq 0x91",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "romdataseq 0x92",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "romdataseq 0x93",
+    "kind": "hex",
+    "want": "0000001C"
+   },
+   {
+    "id": "romdataseq 0xb0",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "romdataseq 0xb1",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "romdataseq 0xb2",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "romdataseq 0xb3",
+    "kind": "hex",
+    "want": "0000001C"
+   },
+   {
+    "id": "romdataseq 0x40",
+    "kind": "hex",
+    "want": "00002001"
+   },
+   {
+    "id": "romdataseq 0x50",
+    "kind": "hex",
+    "want": "00002001"
+   },
+   {
+    "id": "romdataseq 0x60",
+    "kind": "hex",
+    "want": "00002080"
+   },
+   {
+    "id": "romdataseq 0x70",
+    "kind": "hex",
+    "want": "00002080"
+   }
+  ]
  }
 ]
