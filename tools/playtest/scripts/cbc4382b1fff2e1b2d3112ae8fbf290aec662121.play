@@ -1,0 +1,302 @@
+@title Summon Night - Swordcraft Story 2 (USA)
+@file Summon Night - Swordcraft Story 2 (U).gba
+@game BSKE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# New Game, Edgar, keep the name, the opening on Cliff Road, the first battle
+# (the Rampage Rabbit, won by mashing A towards it), Exeld named by default,
+# back to Master's house, down to the workshop for Blaire's scene; the
+# workshop's save crystal prompts "I should save the game": Save data? Yes,
+# DATA 1 (Lv 2 Edgar, Workshop, 9:26). [load]: Continue, DATA 1, Load data?
+# Yes, resumes beside the crystal in the workshop.
+# Findings: the battle's random numbers differ in all three emulators: the
+# three frames are identical at f13848 as it opens, yet by f13980 the rabbit
+# stands somewhere else in each (small animations already differ before:
+# mgba's sparkles at f4554, nba's dialogue text a few frames behind the
+# other two from the character select on). The fight plays out differently
+# in each: per-frame hashes match nowhere between any two emulators from
+# f14401 to f26400, the rabbit falls at a different time in each and the
+# following dialogue runs out of step (mashed A: the default name Exeld is
+# confirmed in every emulator however many presses land on it). They
+# re-converge in Master's house (f27000) and match again through the save,
+# except for what the fight left: Edgar's HP (117/120/123 of 126 in
+# dingbat/mgba/nba), so the three battery files differ in 6 bytes. dingbat's
+# four configurations write byte-identical saves, and every save loads in
+# every emulator. The audio check flags dingbat in 4% of windows: ten runs
+# inside that out-of-step stretch (f14565-f26220, where it compares
+# different moments of the game) and two short ones in the house
+# (f29055, f29310), after a fight that ended at a different time in each.
+[new]
+wait 600
+# until text START timeout=1800 every=15  [reached dingbat-bios+1800 mgba+1800 nba+1800]
+wait 1804
+wait 60
+checkpoint title window=30
+press START
+wait 120
+wait 60
+press A
+wait 180
+wait 120
+checkpoint character_select window=30
+press A
+wait 120
+wait 30
+checkpoint name_entry window=30
+press START
+wait 90
+press A
+wait 180
+wait 120
+wait 60
+tap A times=5 every=40 hold=4
+tap A times=20 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+checkpoint control window=30
+press START
+wait 60
+checkpoint menu window=30
+press UP after=10
+press A
+wait 40
+press B
+wait 20
+press B
+wait 40
+press DOWN hold=60
+wait 20
+press DOWN hold=120
+wait 30
+press DOWN hold=180
+wait 60
+tap A times=3 every=30 hold=4
+wait 60
+press UP hold=400
+wait 30
+tap A times=10 every=30 hold=4
+wait 30
+tap A times=30 every=30 hold=4
+wait 30
+tap A times=30 every=30 hold=4
+wait 30
+tap A times=40 every=30 hold=4
+wait 30
+press UP hold=200
+wait 30
+press UP hold=120
+wait 30
+tap A times=20 every=30 hold=4
+wait 30
+tap A times=15 every=30 hold=4
+wait 30
+# until text Edgar timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+tap A times=10 every=40 hold=4
+wait 20
+wait 120
+wait 60
+wait 30
+press RIGHT hold=30
+press A
+wait 30
+press A
+wait 30
+hold RIGHT
+tap A times=20 every=15 hold=4
+release
+hold RIGHT
+tap A times=20 every=15 hold=4
+release
+hold RIGHT
+tap A times=40 every=15 hold=4
+release
+hold RIGHT
+tap A times=40 every=15 hold=4
+release
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+wait 30
+tap A times=30 every=30 hold=4
+wait 30
+tap A times=30 every=30 hold=4
+wait 30
+tap A times=40 every=30 hold=4
+wait 30
+tap A times=40 every=30 hold=4
+wait 30
+tap A times=40 every=30 hold=4
+wait 30
+wait 60
+wait 60
+press UP hold=30
+wait 20
+press START
+wait 40
+press UP after=10
+press A
+wait 40
+press B
+wait 20
+press B
+wait 30
+press LEFT hold=40
+press DOWN hold=60
+wait 30
+press DOWN hold=30
+press LEFT hold=60
+press UP hold=120
+wait 40
+press RIGHT hold=80
+wait 20
+press DOWN hold=40
+press RIGHT hold=60
+wait 20
+press DOWN hold=30
+press RIGHT hold=90
+wait 10
+press LEFT hold=12
+press UP hold=60
+wait 20
+press LEFT hold=20
+press A
+wait 40
+press RIGHT hold=16
+press DOWN hold=50
+wait 20
+press DOWN hold=20
+press LEFT hold=60
+press DOWN hold=60
+wait 20
+press RIGHT hold=20
+press DOWN hold=60
+wait 20
+press RIGHT hold=60
+press A
+wait 40
+press START
+wait 40
+press UP after=10
+press A
+wait 40
+press UP after=10
+press A
+wait 40
+press B
+wait 20
+press B
+wait 20
+press B
+wait 30
+press B
+wait 30
+press LEFT hold=40
+press UP hold=40
+wait 10
+press LEFT hold=28
+press UP hold=50
+press LEFT hold=100
+wait 10
+press UP hold=60
+wait 10
+press UP hold=15
+press LEFT hold=40
+press DOWN hold=150
+wait 30
+press RIGHT hold=55
+press DOWN hold=60
+wait 60
+press RIGHT hold=30
+press DOWN hold=60
+wait 60
+press A
+wait 40
+press UP hold=20
+press RIGHT hold=110
+wait 10
+press LEFT hold=12
+press UP hold=120
+wait 60
+tap A times=40 every=30 hold=4
+wait 30
+tap A times=40 every=30 hold=4
+wait 30
+tap A times=40 every=30 hold=4
+wait 30
+tap A times=40 every=30 hold=4
+wait 30
+wait 30
+checkpoint workshop window=30
+press DOWN hold=50
+press RIGHT hold=60
+wait 10
+press RIGHT hold=4
+press A
+wait 40
+press UP hold=10
+press RIGHT hold=10
+press DOWN hold=4
+press A
+wait 40
+press UP hold=20
+press LEFT hold=150
+press A
+wait 40
+wait 120
+press A
+wait 60
+press RIGHT hold=20
+wait 20
+press DOWN hold=60
+press RIGHT hold=110
+wait 10
+press A
+wait 60
+wait 30
+wait 60
+wait 60
+press A
+wait 60
+press A
+wait 60
+press RIGHT hold=4
+press A
+wait 60
+checkpoint save_prompt window=30 compare=text
+press A
+wait 60
+wait 20
+press A
+wait 60
+wait 120
+# until notext power timeout=1800 every=10  [reached dingbat-bios+190 mgba+190 nba+190]
+wait 194
+wait 30
+checkpoint save_done window=30 compare=text
+
+[load]
+# until text START timeout=3000 every=15  [reached dingbat-bios+2400 mgba+2400 nba+2400]
+wait 2404
+wait 60
+press START
+wait 120
+wait 30
+press DOWN after=10
+wait 20
+checkpoint continue_menu window=30 compare=text
+press A
+wait 120
+wait 30
+checkpoint load_file window=30 compare=text
+press A
+wait 180
+press A
+wait 240
+press A
+wait 240
+checkpoint resumed window=30
