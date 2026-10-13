@@ -1,0 +1,131 @@
+@title Tomato Adventure (Japan)
+@file Tomato Adventure (J).gba
+@game AGLJ
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# Japanese text: OCR reads none of it, so the route was found from
+# screenshots and is fixed waits and A taps.
+# AlphaDream logo and the attract intro, START to the title (はじめから), keep
+# the name デミル (START jumps to おわる, A, LEFT to はい, A). A through the
+# opening news and the king's scene to Demille's house: the TV breaks, A
+# through his lines, then the "mash A to fix the TV" prompt (the TV blows
+# up anyway), A through the scene outside in コポレーむら. START opens the menu
+# (アイテム ... セーブ ... もどる): DOWN x4 to セーブ, slot 1, "セーブちゅう!",
+# the slot then shows デミル / レベル 1 / コポレーむら / 00:02.
+# [load]: the title offers セーブから; ロード slot 1 resumes outside the house.
+# Seen while authoring: the scrolling tomato background on the title is in a
+# different phase on each emulator; nba types dialogue a character behind
+# the others and its TV flicker and fades run in a different phase; the
+# orange-haired villager outside wanders to a different spot on mgba
+# (f9596-10026, before the menu opens; no checkpoint shows it). The title
+# checkpoint is MINOR between all three (the scroll phase). The dingbat
+# configurations and nba write byte-identical saves; mgba's differs in two
+# bytes (0x0F and 0x5CA, both 2 higher); every save loads everywhere.
+[new]
+wait 300
+wait 300
+wait 300
+wait 300
+press START
+wait 120
+wait 60
+checkpoint title window=30
+press A
+wait 120
+checkpoint name_entry window=30
+press START
+wait 30
+press A
+wait 120
+press LEFT
+wait 20
+press A
+wait 120
+wait 300
+wait 300
+tap A times=10 every=40 hold=6
+wait 30
+wait 400
+wait 400
+tap A times=15 every=40 hold=6
+wait 30
+tap A times=15 every=40 hold=6
+wait 30
+tap A times=30 every=40 hold=6
+wait 30
+wait 60
+wait 60
+wait 60
+wait 60
+wait 60
+wait 60
+wait 60
+wait 60
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+wait 60
+wait 60
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+wait 40
+wait 40
+wait 40
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+tap A times=40 every=6 hold=3
+wait 60
+wait 90
+wait 90
+wait 90
+tap A times=10 every=40 hold=6
+wait 30
+tap A times=20 every=40 hold=6
+wait 30
+tap A times=10 every=40 hold=6
+wait 30
+press START
+wait 40
+checkpoint pause_menu window=30
+tap DOWN times=4 every=12 hold=4
+wait 20
+press A
+wait 60
+checkpoint save_slots window=30
+press A
+wait 30
+checkpoint saving window=0
+# until changed timeout=1500 every=5  [reached dingbat-bios+55 mgba+60 nba+50]
+wait 64
+wait 30
+wait 90
+checkpoint saved window=30
+
+[load]
+wait 1200
+press START
+wait 120
+wait 60
+checkpoint title window=30
+press A
+wait 90
+checkpoint load_slots window=30
+press A
+wait 180
+checkpoint resumed window=30
