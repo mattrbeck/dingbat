@@ -4,6 +4,7 @@
 @chip SRAM
 @frozen dingbat-bios,mgba,nba
 @save skip: nothing is written to SRAM through New Game, the Marluxia card-battle tutorial and the Castle Oblivion intro; the first save needs map cards used on Traverse Town doors to reach a save point (Moment's Reprieve), and the town rooms come out different on each emulator (see below), so no frozen walk through them exists
+@known * audio differs from both references -- §30: the console drops the playing word on a FIFO reset (SP fiforeset, dingbat 18/18); both references keep it
 
 # Dialogue only advances on a firm press: A with hold=8. New Game > file 1 >
 # opening > Marluxia's tutorial (jump, dodge roll, reload by holding A on the

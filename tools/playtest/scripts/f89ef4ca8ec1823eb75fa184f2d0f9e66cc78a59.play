@@ -3,6 +3,7 @@
 @game BR4J
 @chip FLASH512 + RTC
 @frozen dingbat-bios,mgba,nba
+@known * checkpoint pet_greeting: -- §39: the install bar's dice follow the boot's EWRAM cycles (§29 pricing)
 
 # New game (はじめから): the PET asks for the date and time first. The year is
 # raised 2000 -> 2006 so the game-set clock (kept by dingbat) matches the

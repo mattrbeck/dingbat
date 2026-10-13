@@ -3,6 +3,7 @@
 @game ALNE
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
+@known * ~checkpoint load_file differs from the references -- §32: the load screen reads differently; the save is the same
 
 # New game, A through the cliff-top opening with Nall and Ramus, walk down
 # the path outside Burg, then START > System > Save > slot 1 > YES.

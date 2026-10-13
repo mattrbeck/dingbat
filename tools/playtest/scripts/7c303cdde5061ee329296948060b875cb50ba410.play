@@ -3,6 +3,7 @@
 @game A88E
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
+@known * checkpoint 07_mark: -- §34, §29: Bowser's idle pose follows main-loop counts the references under-charge
 
 # Recorded by hand in the desktop app (2026-09-16): new file, the opening in
 # Mario's house and Peach's Castle, to the first Save Album; [load] continues.

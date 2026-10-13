@@ -3,6 +3,7 @@
 @game KYGE
 @chip EEPROM + tilt sensor
 @frozen dingbat-bios,mgba,nba
+@known * checkpoint confirm: -- §37: frame parity from the OBJ/VRAM contention the references omit
 
 # With no save the game makes you calibrate the tilt sensor before the title.
 # The drivers cannot tilt, so every step is confirmed at the resting reading;

@@ -135,6 +135,17 @@ original in `scripts/source/`.
 are still compared). `@frozen` names the emulators the timeline was resolved
 on.
 
+`@known CONFIGS PROBLEM -- WHY` (any number of them) sets aside a problem
+the evidence puts on the references or on nobody: CONFIGS is `*` or a comma
+list of dingbat configurations, PROBLEM the start of the verdict's problem
+text (`checkpoint title:`) or, after a `~`, any part of it, WHY the
+docs/playtest-bugs.md section. A covered problem is listed as `known` and no
+longer fails its configuration; a game whose only problems are covered is
+`KNOWN` in the suite, so a new failure stands out as `FAIL`. An entry that
+matched nothing is reported as a note (`@known ... no longer seen`): remove
+it once the game passes on its own. Reserve it for settled cases; an open
+question (a cart nobody has measured) stays a FAIL.
+
 ## Writing a script: live sessions
 
 ```

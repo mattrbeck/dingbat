@@ -267,8 +267,11 @@ def suite(args):
         if os.path.exists(link):
             row['outdir'] = open(link).read().strip()
             report = json.load(open(os.path.join(row['outdir'], 'results.json')))
-            row['status'] = 'PASS' if all(v['pass'] for v in report['verdicts'].values()) else 'FAIL'
-            row['detail'] = {s: {'pass': v['pass'], 'play': v['play'], 'problems': v['problems'][:4]}
+            # KNOWN: passing once the script's @known problems are set aside
+            row['status'] = ('FAIL' if not all(v['pass'] for v in report['verdicts'].values()) else
+                             'KNOWN' if any(v.get('known') for v in report['verdicts'].values()) else 'PASS')
+            row['detail'] = {s: {'pass': v['pass'], 'play': v['play'], 'problems': v['problems'][:4],
+                                 'known': v.get('known', [])[:4]}
                              for s, v in report['verdicts'].items()}
         else:
             row['status'] = 'ERROR'

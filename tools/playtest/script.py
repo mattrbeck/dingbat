@@ -160,6 +160,26 @@ def format_step(step):
     raise ScriptError(op)
 
 
+def parse_known(value):
+    """`@known CONFIGS PROBLEM -- WHY`: a problem the evidence puts on the
+    references (or on nobody), not on dingbat. CONFIGS is `*` or a comma
+    list of dingbat configurations; PROBLEM is the start of the verdict's
+    problem text (`checkpoint title:`), or any part of it after a `~`
+    (`~checkpoint load_file differs`); WHY names the docs section."""
+    body, sep, why = value.partition(' -- ')
+    configs, _, problem = body.strip().partition(' ')
+    if not sep or not why.strip() or not problem.strip():
+        raise ScriptError('@known needs CONFIGS PROBLEM -- WHY')
+    return {'configs': configs.split(','), 'problem': problem.strip(), 'why': why.strip()}
+
+
+def known_match(entry, config, problem):
+    if entry['configs'] != ['*'] and config not in entry['configs']:
+        return False
+    p = entry['problem']
+    return p[1:] in problem if p.startswith('~') else problem.startswith(p)
+
+
 def parse(text):
     """-> {'meta': {...}, 'new': [steps], 'load': [steps]}"""
     out = {'meta': {}, 'new': [], 'load': []}
@@ -171,7 +191,10 @@ def parse(text):
         try:
             if line.startswith('@'):
                 key, _, value = line[1:].partition(' ')
-                out['meta'][key] = value.strip()
+                if key == 'known':
+                    out['meta'].setdefault('known', []).append(parse_known(value))
+                else:
+                    out['meta'][key] = value.strip()
             elif line.startswith('['):
                 section = line.strip('[]').strip()
                 if section not in SECTIONS:

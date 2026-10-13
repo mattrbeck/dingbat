@@ -709,9 +709,28 @@ def verdicts(report, names):
         # cross-load
         if 'load' in report:
             v['notes'] += cross_load_verdict(report, s, refs, v['problems'])
+        apply_known(v, s, report.get('meta', {}).get('known') or [])
         v['pass'] = not v['problems']
         out[s] = v
     return out
+
+
+def apply_known(v, s, known):
+    """Move the problems a script's @known entries cover from v['problems']
+    to v['known'] (they no longer fail the configuration); an entry that
+    matched nothing becomes a note, so a stale one gets noticed."""
+    if not known:
+        return
+    v['known'], used = [], set()
+    for p in list(v['problems']):
+        hit = [i for i, k in enumerate(known) if script.known_match(k, s, p)]
+        if hit:
+            v['problems'].remove(p)
+            v['known'].append(f"{p} [{known[hit[0]]['why']}]")
+            used.update(hit)
+    for i, k in enumerate(known):
+        if i not in used and (k['configs'] == ['*'] or s in k['configs']):
+            v['notes'].append(f"@known {k['problem']!r} no longer seen ({k['why']})")
 
 
 def print_summary(report):
@@ -755,6 +774,8 @@ def print_summary(report):
         print(f"   VERDICT {s}: {'PASS' if v['pass'] else 'FAIL'} (play={v['play']})")
         for p in v['problems']:
             print(f'     problem: {p}')
+        for p in v.get('known', []):
+            print(f'     known: {p}')
         for n in v['notes']:
             print(f'     note: {n}')
 
@@ -771,6 +792,7 @@ def write_html(report, outdir):
     for s, v in report['verdicts'].items():
         parts.append(f"<h2 class={'PASS' if v['pass'] else 'FAIL'}>{e(s)}: {'PASS' if v['pass'] else 'FAIL'} (play {v['play']})</h2><ul>")
         parts += [f'<li class=FAIL>{e(p)}</li>' for p in v['problems']]
+        parts += [f'<li>known: {e(p)}</li>' for p in v.get('known', [])]
         parts += [f'<li>{e(n)}</li>' for n in v['notes']]
         parts.append('</ul>')
     parts.append('<h2>New game</h2>')

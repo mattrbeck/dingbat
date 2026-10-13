@@ -3,6 +3,8 @@
 @game AY5E
 @chip SRAM
 @frozen dingbat-bios,mgba,nba
+@known * checkpoint title: -- §33, §29: the references under-charge the boot load, so their title lands a frame early
+@known * ~checkpoint continue_title differs from the references -- §33, §29: the same boot-load frame after a load
 # New Game, Tea's intro, pick the red starter deck. The game writes its SRAM save right
 # after the intro (before the first duel), so [new] ends on the first duel's field and
 # [load] Continues into the main menu (Campaign / Link Battle / Deck Edit ...) and opens Deck Edit.
