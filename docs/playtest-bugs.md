@@ -4758,7 +4758,7 @@ loads in every emulator. The audio windows count against dingbat only where
 the two references agree, and the music they share keeps agreeing while each
 emulator's fight sounds differ. The script carries `@known` for the audio.
 
-## §NEXT. Klonoa 2: Nintendo's HuffUnComp ran fast, a lone gamepak byte load priced sequential, 2026-10-13
+## §58. Klonoa 2: Nintendo's HuffUnComp ran fast, a lone gamepak byte load priced sequential, 2026-10-13
 
 **Symptom.** The new Klonoa 2 - Dream Champ Tournament script
 (`35c05676....play`) failed `level_start` and `gameplay` MAJOR in all four
@@ -4883,7 +4883,7 @@ elsewhere in the shaft. The f7306 divergence predates this change and is
 not explained here; no `@known` added. (Settled in the next section: the
 skeletons' throws are random draws no two emulators share.)
 
-## §NEXT. Castlevania - Circle of the Moon: the skeletons' bones are an idle-loop RNG, and no two emulators share it, 2026-10-13
+## §59. Castlevania - Circle of the Moon: the skeletons' bones are an idle-loop RNG, and no two emulators share it, 2026-10-13
 
 **Symptom.** With `ROM_DATA_NONSEQ` (the section above) `shaft_bottom`
 went MINOR -> MAJOR in all four dingbat configurations: Nathan knocked
