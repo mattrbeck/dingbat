@@ -1,0 +1,144 @@
+@title Shining Force - Resurrection of the Dark Dragon (USA)
+@file Shining Force - Resurrection of the Dark Dragon (U).gba
+@game AF5E
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+# START skips the intro; Simone's storybook frame, hero name left at "Max",
+# the sparring scene with Varios by A every 40 frames, Max's room, Lowe,
+# Varios's farewell, the Chapter 1 card, then the Guardiana priest's RECORD
+# (Yes) writes the file.
+# [load]: Cont. > read from where you left off > Chapter 1 Max, resume in
+# the church, walk out of the front door.
+# Seen while recording: the wandering NPCs in the church and outside it
+# stand in different places on each emulator (mgba most often alone), and
+# portrait mouths, idle poses and text typing are a frame or a few
+# characters apart (mgba usually ahead, nba behind), so many screens differ
+# slightly. The three saves differ (6094/6109/6102 non-blank bytes).
+
+[new]
+wait 300
+wait 600
+press START
+wait 120
+wait 120
+checkpoint title window=30
+press START
+wait 90
+wait 120
+press A
+wait 90
+tap A times=26 every=30 hold=4
+wait 30
+press A
+# until text END timeout=300 every=5  [reached dingbat-bios+25 mgba+20 nba+25]
+wait 29
+wait 20
+wait 20
+checkpoint name_entry window=30
+press START
+wait 60
+tap A times=4 every=40 hold=4
+# until notblank timeout=1500 every=10  [reached dingbat-bios+70 mgba+70 nba+70]
+wait 74
+wait 60
+wait 120
+wait 300
+press A
+wait 90
+press A
+wait 90
+press A
+wait 200
+tap A times=10 every=40 hold=4
+tap A times=5 every=40 hold=4
+tap A times=3 every=40 hold=4
+tap A times=2 every=40 hold=4
+tap A times=2 every=40 hold=4
+wait 60
+checkpoint first_control window=30
+press RIGHT hold=12
+press UP hold=90
+wait 30
+press RIGHT hold=60
+wait 10
+press A
+wait 60
+tap A times=6 every=40 hold=4
+press DOWN hold=60
+wait 20
+press LEFT hold=14
+press DOWN hold=80
+wait 20
+tap A times=4 every=40 hold=4
+wait 30
+tap A times=4 every=40 hold=4
+wait 30
+tap A times=6 every=40 hold=4
+wait 30
+tap A times=10 every=40 hold=4
+wait 30
+tap A times=10 every=40 hold=4
+wait 30
+press UP hold=60
+wait 20
+press RIGHT hold=20
+press A
+wait 60
+tap A times=8 every=40 hold=4
+wait 60
+checkpoint chapter1 window=30
+tap A times=10 every=40 hold=4
+wait 30
+tap A times=10 every=40 hold=4
+wait 30
+tap A times=10 every=40 hold=4
+wait 30
+tap A times=10 every=40 hold=4
+wait 30
+tap A times=5 every=40 hold=4
+wait 30
+checkpoint church_menu window=30
+press A
+wait 60
+wait 60
+press A
+wait 60
+wait 20
+press A
+wait 60
+wait 90
+press A
+wait 60
+wait 60
+checkpoint recorded window=30
+press A
+wait 60
+
+[load]
+wait 300
+wait 600
+press START
+wait 120
+wait 120
+press START
+wait 90
+wait 120
+wait 30
+checkpoint continue_menu window=30
+press A
+wait 60
+press A
+wait 60
+checkpoint load_file window=30
+press A
+wait 120
+press A
+wait 60
+# until notblank timeout=1200 every=10  [reached dingbat-bios+50 mgba+40 nba+50]
+wait 54
+wait 120
+checkpoint resumed window=30
+press DOWN hold=120
+wait 30
+checkpoint outside_church window=30
+
