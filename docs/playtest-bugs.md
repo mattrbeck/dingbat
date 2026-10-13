@@ -4939,9 +4939,9 @@ second reference 3065, mGBA 3398; in the shaft (f6990): 2543, 2550, 2875.
 Until the first draw the word is a pure count. At f5316, the frame before
 it: dingbat 11,584,412 passes; the second reference 11,478 more (0.1%: it
 starts counting a frame earlier, 879 passes in its first counting frame
-where dingbat and mGBA count 1289 and 1292 at f7, and runs a few passes a
-frame more here and there, 2235 against 2164 at f4000); mGBA 1,413,981
-more (12%). One pass of difference already gives the Dracula scene's 130
+where dingbat and mGBA count 1289 and 1292 at f7, and around loads its
+frames fall a frame off dingbat's either way; two passes a frame more on
+average); mGBA 1,413,981 more (12%). One pass of difference already gives the Dracula scene's 130
 draws, and everything after, other values. 0x0202534C records when each
 frame's work ends (VCOUNT, read just before the idle wait): 0xB0 in all three
 early on, in the shaft 0xD0 in dingbat and the second reference and 0xCC
@@ -4975,8 +4975,8 @@ gamepak loads cost at 1 instead of 4, the prefetcher_branch_thumb_2 law
 passes a frame. The second reference's equal
 count on the boot screen (3065 a frame, ending its work on the same line)
 says it charges this loop what dingbat does; its RNG still differs from its
-first counting frame, and its count in the shaft by a few passes a frame
-(other code, not traced: it has no `trace`).
+first counting frame, and its later frames by a few passes on average
+(other code, not traced: its driver has no `trace`).
 
 **Settled, no core change.** A checkpoint after the skeletons' first draw
 compares where one-in-61 throws land, seeded by the exact cycle count of
