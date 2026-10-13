@@ -241,6 +241,20 @@ class Noise(unittest.TestCase):
         self.assertEqual(noise, {})
         self.assertIn('g', changed)
 
+    def test_rerun_whose_driver_refused_teaches_nothing(self):
+        # the references replay, so the row has results, but every dingbat
+        # configuration ended in an error before playing
+        res = results()
+        for c in CONFIGS:
+            res['new'][c] = {'ok': False, 'error': 'DriverError: stale', 'checkpoints': {}}
+            res['verdicts'][c] = {'pass': False, 'play': 'FAILED'}
+        refused = train.fingerprint({'status': 'FAIL', 'outdir': '/runs/x'}, res, {})
+        comb = {'g': fp(audio='x')}
+        C, changed, noise, reran = train.denoise({'g': fp()}, comb, self.BASE, {}, self.rerun({'g': refused}))
+        self.assertEqual(noise, {})
+        self.assertEqual(set(changed['g']), set(CONFIGS))
+        self.assertEqual(train.classify(fp(), C['g'])['kind'], 'neutral')
+
     def test_ledger_written_read_and_accepted_on_the_same_base(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, 'noise.json')

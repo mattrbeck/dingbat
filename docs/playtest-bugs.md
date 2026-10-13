@@ -4456,3 +4456,31 @@ when that reference shows its own save the way another emulator does (the
 `healthy` test it already used for the reverse direction); otherwise the
 rewrite is the game's own and is a note. Sonic Advance passes in all four
 configs; no other game in the corpus had this problem.
+
+## §52. The stale-driver check refused the train's second run of base, 2026-10-12
+
+**Symptom.** The train's verdict on the SingleStepTests CPU fixes
+(716b7589) listed ten games as noise: on the second run of base every
+dingbat configuration was "play FAILED", status PASS->FAIL. Mario Party
+Advance appeared only there, so its change was never reported.
+
+**Cause: the harness (1239267b).** The stale-driver check compared the
+driver's modification time with the newest source file. The second run of
+base copies base's cached driver (`copy2`, old mtime) into a fresh
+checkout of base, whose files all carry the checkout's time, so every
+driver was refused. The references still replayed, the rows had results,
+and `denoise` took the failures for base's own nondeterminism; all 849
+cells of the noise ledger came from that run.
+
+**Fix.** build.sh stamps each dingbat driver with a sum of the sources it
+is built from (`<binary>.srcsum`: src/dingbat/gba, src/dingbat/common, the
+driver, nim.cfg, build.sh -- the GBA core imports nothing else, so a DS
+commit no longer makes bin/ stale); emu.py refuses a driver whose stamp is
+not the checkout's, and the train copies the stamp with a cached driver
+(a cached driver without one is rebuilt). `denoise` no longer learns
+anything from a configuration the rerun could not play where the baseline
+did. The ledger's poisoned cells were removed. Diffing the two baselines
+directly (7dc82b46 -> b98294aa) shows what was hidden: ten games changed,
+all neutral (nine audio; Doom and Starsky & Hutch checkpoints too; Mario
+Party Advance's self-load cells), no pass/fail flip. The corpus stands at
+129/140 in every dingbat configuration.

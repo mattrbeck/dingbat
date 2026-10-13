@@ -6,9 +6,11 @@ whatever battery file (game.sav) the emulator itself writes beside it. No
 emulator ever sees another's directory, so saves cannot cross-pollinate
 unless the harness copies one across deliberately.
 """
+import hashlib
 import os
 import shutil
 import subprocess
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(HERE, 'bin')
@@ -46,27 +48,48 @@ class DriverError(RuntimeError):
 
 
 _fresh_checked = set()
+ROOT = os.path.dirname(os.path.dirname(HERE))
+# What the dingbat driver is built from: the GBA core imports nothing
+# outside gba/ and common/ (the DS core and the frontends are not in it)
+DRIVER_SOURCES = ('src/dingbat/gba', 'src/dingbat/common', 'tools/playtest/drivers/dingbat_driver.nim',
+                  'nim.cfg', 'tools/playtest/build.sh')
+
+
+def source_sum(root=ROOT):
+    """sha1 over the dingbat driver's sources, by path and content."""
+    h = hashlib.sha1()
+    files = []
+    for rel in DRIVER_SOURCES:
+        p = os.path.join(root, rel)
+        if os.path.isfile(p):
+            files.append(rel)
+        for d, dirs, fs in os.walk(p):
+            dirs.sort()
+            files += [os.path.relpath(os.path.join(d, f), root) for f in sorted(fs) if not f.startswith('.')]
+    for rel in files:
+        h.update(rel.encode() + b'\0')
+        with open(os.path.join(root, rel), 'rb') as f:
+            h.update(hashlib.sha1(f.read()).digest())
+    return h.hexdigest()
 
 
 def check_driver_fresh(path):
-    """Refuse a dingbat driver older than the core it is built from: a run on
-    a stale bin/ silently tests old code (an HLE comparison on 2026-10-03 ran
-    a driver from before the commit it was checking)."""
+    """Refuse a dingbat driver built from other sources than this checkout's:
+    a run on a stale bin/ silently tests old code (an HLE comparison on
+    2026-10-03 ran a driver from before the commit it was checking). build.sh
+    writes the sources' sum beside the binary (<binary>.srcsum); a copy of a
+    driver that keeps its stamp stays valid in a checkout of the same
+    sources, which modification times could not say (the train's second run
+    of base, 2026-10-12, refused every game)."""
     if path in _fresh_checked:
         return
-    root = os.path.dirname(os.path.dirname(HERE))
-    newest, newest_file = 0.0, None
-    for top in (os.path.join(root, 'src'), os.path.join(HERE, 'drivers')):
-        for d, _, files in os.walk(top):
-            for f in files:
-                if f.endswith('.nim'):
-                    p = os.path.join(d, f)
-                    m = os.path.getmtime(p)
-                    if m > newest:
-                        newest, newest_file = m, p
-    if os.path.getmtime(path) < newest:
-        raise DriverError(f'{path} is older than {os.path.relpath(newest_file, root)}: rebuild it with '
-                          f'`bash tools/playtest/build.sh dingbat_driver dingbat_driver_trace`')
+    rebuild = 'rebuild it with `bash tools/playtest/build.sh dingbat_driver dingbat_driver_trace`'
+    try:
+        built = open(path + '.srcsum').read().strip()
+    except OSError:
+        raise DriverError(f'{path} has no {os.path.basename(path)}.srcsum: {rebuild}')
+    if built != source_sum():
+        raise DriverError(f'{path} was built from other sources than this checkout: {rebuild}')
     _fresh_checked.add(path)
 
 
@@ -183,3 +206,9 @@ class Emulator:
         if self.alive:
             self.proc.kill()
             self.proc.wait()
+
+
+if __name__ == '__main__':
+    # build.sh: `emu.py srcsum` prints the driver sources' sum for the stamp
+    if sys.argv[1:] == ['srcsum']:
+        print(source_sum())

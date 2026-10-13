@@ -44,11 +44,17 @@ c++ -O2 -std=c++17 \
    -lz -o "$OUT/nba_driver"
 fi
 
+# Each dingbat driver gets <binary>.srcsum, the sum of the sources it was
+# built from (taken before the build): emu.py refuses a driver whose stamp
+# is not this checkout's
+SRCSUM=$(python3 tools/playtest/emu.py srcsum)
+
 if want dingbat_driver; then
 echo "== dingbat_driver"
 nim c -d:test_harness -d:release --path:src --hints:off \
    --nimcache:"$NIMCACHE" \
    -o:"$OUT/dingbat_driver" tools/playtest/drivers/dingbat_driver.nim
+echo "$SRCSUM" > "$OUT/dingbat_driver.srcsum"
 fi
 
 # The same driver with the core's passive I/O write hooks compiled in, for
@@ -58,6 +64,7 @@ echo "== dingbat_driver_trace"
 nim c -d:test_harness -d:release -d:biosdrvtrace --path:src --hints:off \
    --nimcache:"$NIMCACHE-trace" \
    -o:"$OUT/dingbat_driver_trace" tools/playtest/drivers/dingbat_driver.nim
+echo "$SRCSUM" > "$OUT/dingbat_driver_trace.srcsum"
 fi
 
 if want screenread; then

@@ -304,8 +304,14 @@ def denoise(B, C, base, ledger, rerun):
     for s in todo:
         if s not in R or not _usable(R[s]) or not _usable(B[s]):
             continue        # the rerun did not play it: nothing to learn
+        # A configuration the rerun could not play where the baseline did
+        # (its [new] phase ended in an error) says nothing about noise: the
+        # second run of base on 2026-10-12 refused every driver, and its
+        # failures hid ten games' changes as noise
+        broke = {cfg for cfg, a in R[s].items() if cfg != '*' and (a.get('new') or [True])[0] is False
+                 and (B[s].get(cfg, {}).get('new') or [False])[0] is True}
         for cfg, aspects in diff_fp(B[s], R[s]).items():
-            if cfg != '*' and cfg not in R[s]:
+            if cfg != '*' and cfg not in R[s] or cfg in broke or cfg == '*' and broke:
                 continue
             for k, (bv, rv) in aspects.items():
                 note(s, cfg, k, how='rerun', baseline=bv, rerun=rv, combined=C[s].get(cfg, {}).get(k))
@@ -846,7 +852,10 @@ def ensure_baseline(base, games, refkey, refdir, trees, opts, log, runner):
 def keep_driver(wt, bdir):
     """Cache base's dingbat_driver with its baseline for the noise rerun."""
     os.makedirs(os.path.join(bdir, 'bin'), exist_ok=True)
-    shutil.copy2(os.path.join(wt, 'tools/playtest/bin/dingbat_driver'), os.path.join(bdir, 'bin', 'dingbat_driver'))
+    # the .srcsum stamp with it: emu.py refuses a driver without one
+    for f in ('dingbat_driver', 'dingbat_driver.srcsum'):
+        if os.path.exists(os.path.join(wt, 'tools/playtest/bin', f)):
+            shutil.copy2(os.path.join(wt, 'tools/playtest/bin', f), os.path.join(bdir, 'bin', f))
 
 
 def rerun_base(base, refkey, refdir, subset, refs_from, trees, opts, log, runner, rd):
@@ -856,12 +865,14 @@ def rerun_base(base, refkey, refdir, subset, refs_from, trees, opts, log, runner
     bdir = baseline_for(base, refkey)
     cached = os.path.join(bdir, 'bin', 'dingbat_driver')
     wt = trees.add('base-again', base)
-    if os.path.exists(cached):
+    # a driver cached before the .srcsum stamps has none: built again
+    if os.path.exists(cached) and os.path.exists(cached + '.srcsum'):
         bindir = os.path.join(wt, 'tools/playtest/bin')
         os.makedirs(bindir, exist_ok=True)
         for b in REF_BINS:
             shutil.copy2(os.path.join(refdir, b), os.path.join(bindir, b))
-        shutil.copy2(cached, os.path.join(bindir, 'dingbat_driver'))
+        for f in ('dingbat_driver', 'dingbat_driver.srcsum'):
+            shutil.copy2(os.path.join(os.path.dirname(cached), f), os.path.join(bindir, f))
         log(f'  base driver: cached ({cached})')
     elif build(wt, refdir, trees, 'base-again', log):
         keep_driver(wt, bdir)
