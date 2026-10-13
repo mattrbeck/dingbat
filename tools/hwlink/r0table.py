@@ -255,10 +255,19 @@ TABLE = {
     # (payloads/keyirq.s; Ghost Rider and Catwoman never wake from their
     # second Stop in dingbat). Its Stop cell (arg bit 31) is ad hoc only.
     'keyirq': [0, 16, 4096],
+    # keyirq's console row set IF in no immediate sample, only after a delay:
+    # the cycles from a KEYCNT store to IF bit 12 (vacuous AND x3, the enable
+    # clear, re-set after an acknowledge = a level, OR empty, the byte path),
+    # and true pulses of 0..64 delay turns: caught or not (payloads/keyirq2.s)
+    'keyirq2': [0, 0x10, 0x20, 1, 2, 3, 4, 5, 0x105, 0x205, 0x405, 0x805, 0x1005, 0x2005, 0x4005],
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
 NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat'}
+
+# rows the console has answered and no dingbat model matches yet: kept out of
+# lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61)
+OPEN_ROWS = {'keyirq', 'keyirq2'}
 
 
 def source(name):

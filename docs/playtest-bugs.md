@@ -5017,3 +5017,51 @@ play is skipped, not reported as a change).
 Checked on Metroid Fusion: on main both `dingbat` and `dingbat-hleimg` PASS
 (IDENTICAL); with §55's fix reverted `dingbat` still passes and
 `dingbat-hleimg` fails every checkpoint MAJOR.
+
+## §61. The keypad interrupt reaches IF late on the console: keyirq recorded, 2026-10-13
+
+**OPEN, a timing probe built** (`tests/roms/payloads/keyirq2.s`, r0table
+row `keyirq2`). §50's row `keyirq`, recorded on the SP with nothing held
+(three runs a cell, all alike):
+
+| argument (bit 1's delay) | console | dingbat, dingbat-bios | mgba |
+|---|---|---|---|
+| 0 | 03FF0000 | 03FF0309 | 03FF0101 |
+| 0x10 | 03FF0002 | 03FF0309 | 03FF0100 |
+| 0x1000 | 03FF0002 | 03FF0309 | 03FF0100 |
+
+No emulator has a cell (dingbat 0/3, mgba 0/3; the second reference was
+predicted 03FF030D). Every sample `keyirq` takes a few cycles after its
+KEYCNT store reads IF bit 12 clear on the console: the vacuous AND (bit 0),
+the false -> true write (bit 3), the byte path (bit 8), the enable turned on
+over a holding condition (bit 9). dingbat sets IF on the store itself, so
+it answers 1 in all four. The bit is set only in bit 1, the re-read after
+an acknowledge and 16 or 4096 delay turns, not after 0. So the keypad
+condition reaches IF somewhere between about 30 and 100 cycles after the
+store (bit 0's store, then its sample, the acknowledge, then the delay).
+
+What the row cannot say:
+
+- **Edge or level.** Bit 1's IF could be bit 0's edge landing after the
+  acknowledge or a level setting it again.
+- **IF without KEYCNT's IRQ enable.** Bit 4 (0x8000) samples too soon to
+  answer. That is the Cabbage Patch Kids question in §50.
+
+`keyirq2` times all of this. TM0 cascaded into TM1 runs from the store
+until IF bit 12 is seen (8 cycles a poll, a 2M-cycle timeout). It covers:
+
+- the vacuous AND, three times;
+- the enable clear;
+- a second wait after an acknowledge, which is a level if it comes again;
+- the OR with nothing selected;
+- the byte path;
+- true pulses of 0 to 64 delay turns, to see whether a short condition is
+  caught.
+
+dingbat answers 0x10 (the probe's own overhead: IF on the store), never
+again after an acknowledge, and catches every pulse.
+
+The §50 Stop rule stands until this is answered. A late IF may also
+change what Ghost Rider's second Stop needs: if the vacuous condition
+sets IF late, or as a level, that Stop ends on an ordinary keypad
+interrupt.
