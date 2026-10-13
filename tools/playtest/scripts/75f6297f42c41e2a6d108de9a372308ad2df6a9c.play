@@ -1,0 +1,190 @@
+@title Densetsu no Stafy (Japan)
+@file Densetsu no Sutafi (J) [!].gba
+@game ASTJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+# New game on ファイル1 (A to pick it, A again to start). After the opening
+# talk with ロブじいさん the game writes File 1 as it enters the first stage
+# (the file select then reads ロブのどうくつ はじめから); no prompt, no
+# confirmation. [new] plays on through ロブのどうくつ: swim right past the
+# ダッシュで押せる blocks, round the block column, slip over the pushed
+# diagonal blocks, leap out (上+A) to ロブじいさん and talk, then jump onto the
+# floating barrel. (The door on the far ledge that ロブじいさん points to was
+# out of reach while authoring: the best water leap stalls on the ledge's
+# corner.) [load]: File 1, A A, the stage card, the cave's start.
+# Seen while authoring: the cave's bubbles and pearl sparkles are in a
+# different phase or place on each emulator at most frames (the gameplay
+# checkpoints are rarely pixel-identical even between the references); nba's
+# fade out of the pause screen is a step behind at f7276. In attempts that
+# were rewound, nba also typed the hint text one character behind (f7588)
+# and, after jumps from the barrel, scrolled the camera a few pixels apart
+# and entered the water later than dingbat-bios and mgba (f7818, f7850); at
+# f5235 only dingbat-bios drew a sparkle at the top right. SRAM: the game
+# also keeps live data at 0x1000 that changes during play.
+
+[new]
+wait 600
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press A
+wait 120
+wait 200
+press A
+wait 150
+checkpoint intro_dialogue window=30
+tap A times=10 every=40 hold=4
+tap A times=10 every=40 hold=4
+tap A times=20 every=40 hold=4
+checkpoint first_gameplay window=30
+press START
+wait 60
+checkpoint pause_menu window=30
+press START
+wait 30
+hold RIGHT
+wait 120
+release
+hold RIGHT
+wait 300
+release
+hold UP+RIGHT
+wait 90
+release
+hold RIGHT
+wait 150
+release
+hold DOWN+RIGHT
+wait 60
+hold RIGHT
+wait 120
+release
+hold RIGHT
+wait 10
+hold RIGHT+A
+wait 60
+hold RIGHT
+wait 60
+hold UP
+wait 150
+hold RIGHT
+wait 30
+hold UP
+wait 150
+hold LEFT
+wait 60
+release
+hold UP
+wait 30
+hold UP+LEFT+A
+wait 60
+release
+hold RIGHT
+wait 30
+hold DOWN
+wait 12
+release
+wait 5
+hold LEFT+A
+wait 50
+release
+hold RIGHT
+wait 25
+release
+wait 5
+hold LEFT+A
+wait 50
+release
+hold UP
+wait 15
+hold UP+LEFT
+wait 60
+hold LEFT
+wait 60
+release
+hold DOWN+LEFT
+wait 60
+hold LEFT
+wait 60
+release
+hold LEFT
+wait 10
+hold UP
+wait 90
+release
+hold UP+A
+wait 30
+wait 30
+release
+wait 30
+hold DOWN
+wait 70
+hold DOWN+LEFT
+wait 30
+hold LEFT
+wait 90
+release
+hold UP+LEFT
+wait 90
+release
+hold UP
+wait 20
+hold UP+RIGHT+A
+wait 40
+hold RIGHT
+wait 40
+release
+wait 60
+wait 60
+checkpoint lobu_dialogue window=30
+tap A times=20 every=40 hold=4
+press START
+wait 60
+press START
+wait 30
+hold LEFT
+wait 60
+release
+press START
+wait 40
+wait 30
+hold LEFT
+wait 60
+hold UP+LEFT
+wait 60
+hold LEFT
+wait 60
+release
+hold RIGHT
+wait 6
+hold UP+A
+wait 12
+hold UP+A+LEFT
+wait 20
+hold LEFT
+wait 10
+release
+wait 30
+checkpoint on_barrel window=30
+
+[load]
+wait 900
+press START
+wait 120
+press START
+wait 120
+checkpoint file_select_saved window=30
+press A
+wait 120
+wait 200
+press A
+wait 200
+checkpoint stage_card window=30
+press A
+wait 200
+checkpoint resumed_cave window=30
+
