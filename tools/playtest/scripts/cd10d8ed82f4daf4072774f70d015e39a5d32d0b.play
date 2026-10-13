@@ -15,11 +15,14 @@
 # time with no source, and the game's handler jumped to a null vector
 # (docs/playtest-bugs.md section 27). Since that fix dingbat and
 # dingbat-bios replay this timeline on the references' screens at every
-# checkpoint (title: 4 frames behind mgba, 7 ahead of nba), so with
-# dingbat-bios in the lockstep the slowest emulator, and the 604 resolved
-# for 'PUSH START', stay nba's.
-# nba's RTC is the host clock (time setting shows the real date, status
-# screen TIME differs from mgba), so screens with the clock differ.
+# checkpoint (title: 4 frames behind mgba), so with dingbat-bios in the
+# lockstep the slowest emulator, and the 604 resolved for 'PUSH START',
+# stay nba's (authored with nba on the host clock, when dingbat's title
+# was 7 frames ahead of nba's; now identical).
+# nba's RTC was the host clock until 2026-10-12 (time setting showed the
+# real date); its driver now freezes it at the epoch like the others, and
+# nba matches dingbat-bios at every checkpoint but gameplay, where it alone
+# reaches the frame 23 frames early (mgba agrees with dingbat there).
 [new]
 wait 600
 checkpoint solar_notice window=30 compare=text

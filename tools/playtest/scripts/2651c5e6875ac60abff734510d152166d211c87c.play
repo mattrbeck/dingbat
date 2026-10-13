@@ -19,12 +19,16 @@
 # [load]: the title leads straight to GAME START with the file (00:04,
 # LV.01, B4F); continuing replays Otenko's talk and resumes in the same room.
 # Seen while authoring:
-# - solar_notice (f400): the gauge/sun animation on the sensor notice is in a
-#   different phase on dingbat from f300 on (the run scores it SLIP: the
-#   references' frames turn up 15-16 frames away in dingbat's window); mgba
-#   and nba are identical. All converge on the sensor-setting screen.
+# - solar_notice (f400): mgba reaches the notice's sun animation 8 frames
+#   before dingbat and nba (f169 against f177), SLIP: the boot's soft-float
+#   and EWRAM loading code from ROM is cheaper in mgba than the bus allows.
+#   nba used to look identical to mgba there only because it ran on the host
+#   clock, which shortens the boot's clock-dependent work; with its driver
+#   honouring --rtc it matches dingbat frame for frame (docs/playtest-bugs.md,
+#   "Shin Bokura no Taiyou: the sensor notice"). All converge on the
+#   sensor-setting screen.
 # - Saves: the dingbat configurations write identical files; against nba
-#   34 bytes differ (plus dingbat's 16-byte RTC trailer), against mgba 4511;
+#   12 bytes differ (plus dingbat's 16-byte RTC trailer), against mgba 4511;
 #   every save loads in every emulator.
 # - The white flash before the prologue fight (~f10120) lasts a different
 #   time on each emulator and differs between sessions too (this route: mgba
@@ -34,9 +38,6 @@
 #   advance on different A taps; all three are back on the same screens by
 #   the title card (f21082). In an earlier route mgba lost this fight
 #   (GAME OVER at f12812); in this one all three survive.
-# - nba's RTC is the host clock: the clock-setting screen and the pause
-#   menu's ジカン / status 日の出 show the host time there (time_setting is not
-#   a checkpoint; first_gameplay and save_menu do not show the clock).
 [new]
 wait 400
 checkpoint solar_notice window=30

@@ -55,9 +55,9 @@ the comparison. State lives in `~/.cache/dingbat-train`. Whoever waits when
 no train is running drives it, under a machine-wide lock that a full
 `suite` also waits for (`--no-lock` to bypass; subsets never wait).
 
-Not every cell is deterministic: the second reference reads the host clock
-where it plays live (loading dingbat's save), and OCR can come back empty
-under heavy load. So when the combined run changed anything, the train plays
+Not every cell is deterministic: OCR can come back empty under heavy load
+(and until 2026-10-12 the second reference read the host clock wherever it
+played live, loading dingbat's save among them). So when the combined run changed anything, the train plays
 those games once more on base itself (base's driver is cached with the
 baseline) before attributing. A cell that differs between the two runs of
 base is noise: left out of every verdict, listed in the report's "Noise"
@@ -289,4 +289,6 @@ and wall clocks (see `src/dingbat/gba/rtc_calendar.nim` for the format).
 
 Every driver skips the BIOS intro by default, so frame 0 is the first game
 frame everywhere. Drivers run with `TZ=UTC`; the RTC is frozen at the script's
-`@rtc` epoch where the emulator allows it (dingbat, mGBA).
+`@rtc` epoch in all three (the second reference has no clock setting: its
+driver answers the core's `time()` calls with the epoch). Game-set clocks
+still differ: mGBA ignores clock writes.

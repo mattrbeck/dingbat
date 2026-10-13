@@ -4484,3 +4484,134 @@ directly (7dc82b46 -> b98294aa) shows what was hidden: ten games changed,
 all neutral (nine audio; Doom and Starsky & Hutch checkpoints too; Mario
 Party Advance's self-load cells), no pass/fail flip. The corpus stands at
 129/140 in every dingbat configuration.
+
+## §53. Shin Bokura no Taiyou: the sensor notice a phase behind, the second reference on the host clock, 2026-10-12
+
+**Symptom.** Boktai 3's new script (`2651c5e6....play`): at `solar_notice`
+(f400, compared at f430) every dingbat configuration is SLIP against both
+references (mGBA -16, the second reference -15) while the references are
+IDENTICAL to each other. The sun and gauge animation on the boot's sensor
+notice runs out of phase; everything meets again at `sensor_setting`.
+The sign: dingbat is late. The animation holds each picture for up to ten
+frames and the classifier reports the first matching frame of the
+reference's window, so -16 is a hold that starts 8 frames earlier in mGBA.
+
+**Two causes, neither in dingbat's core.**
+
+1. **The second reference ran on the host clock (harness, fixed).** The boot
+   does a clock-dependent computation behind a black screen before the notice
+   fades in. In dingbat-bios that black hold lasts 60 frames at the harness
+   epoch (2006-01-01 00:00), 59 at 2006-06-11 and 53 at the host time of the
+   run (2026-10-12 22:00), and the second reference, which ignored `--rtc`,
+   showed 53. With `--rtc` set to the host time, dingbat-bios and the second
+   reference draw the same picture on 448 of the first 450 frames (frames 0
+   and 4, below, differ); at the epoch dingbat is 7 frames behind it. Its
+   driver now honours `--rtc`: the core has no clock setting and its static
+   library imports only `time` and `localtime` for a clock, so the driver
+   defines `time()`, which the linker binds ahead of the C library's, and
+   answers the frozen epoch (the host clock without `--rtc`, as before).
+   At the epoch the second reference's black hold is 60 frames and it
+   matches dingbat-bios on 448/450 frames again. It was also
+   the train's main source of noise (a reference playing a `[load]` cell
+   live read the wall clock); scripts that wrote "the second reference runs
+   on the host clock, its screens there are not diagnostic" (Boktai 2,
+   Rockman EXE 4.5) no longer need to.
+2. **mGBA under-charges the boot (no change).** At the same epoch mGBA
+   reaches the sun animation 8 frames before dingbat (f169 against f177):
+   the black hold is 58 frames against 60, the grey hold that follows 84
+   against 86, the fade-in 22 against 26 -- the second reference, on the
+   same clock, is 60 / 86 / 26 like dingbat. All three holds are CPU-bound
+   loading code in Thumb ROM with the prefetcher on (WAITCNT 0x4014, then
+   0x4314: WS0 3/1, so N = 4 and S = 2 cycles a halfword); per frame both
+   emulators spend the same ~280.9k cycles and the same ~148 cycles per
+   interrupt, but dingbat runs 3.7% fewer main-thread instructions. Traced
+   in both (`trace`, main thread only, cycles per loop iteration):
+
+| loop | dingbat | mGBA | floor |
+|---|---|---|---|
+| `__muldi3` (0x0824AC74, libgcc soft-float, 4 calls per double multiply from 0x08249B3C; stack in IWRAM), call + return | 155-159 | 145 | 155 |
+| soft-float `unpack_d` (0x082496A0), call + return | 156-161 | 150 | -- |
+| EWRAM table scan (0x08218CEE: `ldr` from 0x0203xxxx, two taken branches) | 34 | 30 | 33 |
+| EWRAM scan (0x08218D72) | 26 | 22 | 26 |
+| byte copy IWRAM -> EWRAM, 8 x `ldrb`/`strb` unrolled (0x08219EC4) | 73 | 48 | 67 |
+
+   The floors use nothing but GBATEK's wait states (EWRAM at 0x0D000020:
+   3 cycles a byte or halfword, 6 a word) and the ARM7TDMI's own cycle
+   counts (LDR 1S+1N+1I, STR 2N, STM n+1, LDM-with-PC n+1 plus the refill
+   N+S), with every opcode fetch the prefetcher could have buffered taken
+   at one cycle:
+   * `__muldi3`, from entry to the taken `bcs`: `push {r4-r7,lr}`, four
+     `str` and an `ldr` from the stack are 19 cycles of the CPU's own before
+     the literal `ldr r0,[pc,#92]` can be fetched (the ROM alone would have
+     it at 16); the literal is a 32-bit ROM read (6) and an internal cycle,
+     the opcode after it nonsequential (4), then 20 halfwords at S and the
+     branch refill (6): at least 77, dingbat's figure; mGBA's is 73. From
+     the branch target to the return: the gamepak delivers no halfword
+     faster than S = 2 cycles, the 22
+     halfwords up to the `pop {r4-r7,pc}` take 44, the pop's five loads and
+     internal cycle 6, the refill 6: at least 56 (dingbat 58, mGBA **50**,
+     under the bus's own bandwidth). The caller's 8 instructions: 22 in
+     both.
+   * The byte copy: eight `ldrb` from IWRAM (3 each) and eight `strb` to
+     EWRAM (1 + 3 each), four ALU instructions and the taken `bgt` (1 + 4 +
+     2): 67 with every fetch from a full buffer. mGBA charges 48. dingbat's
+     73 adds the prefetcher stopping at eight halfwords and the fetch after
+     the drained buffer being nonsequential (alyosha prefetcher_full_*,
+     which dingbat passes and mGBA fails, section 29) and the S-rate fetches
+     right after each refill.
+   * The scans: an EWRAM word load is 1 + 6 + 1 whatever the prefetcher
+     does, and the fetches right after a refill come at S; mGBA's 30 and 22
+     are the ROM fetches alone, as if the load were free. dingbat's extra
+     cycle in the first is the taken branch waiting out the halfword in its
+     final cycle (`BRANCH_COMMIT_WAIT`, console-measured with
+     `slotbranch.s`, section 29).
+
+   This is section 29's "mGBA prices data accesses under the prefetcher
+   below the bus floor", in the class the console has answered for dingbat
+   (`slotexec.s`: EWRAM loads and stores from gamepak code with the
+   prefetcher on, console = dingbat, mGBA 4-5 short; multi-register loads
+   from the slot cost dingbat's time or 2 more, section 43). Weighted by how
+   often each runs over frames 6-30, the soft-float routines account for
+   the whole 224k-cycle gap of the black hold (`__muldi3` 75k, the
+   0x08249500-0x082497FF fp-bit code 100k, the rest of 0x08249xxx 48k).
+   fp-bit calls `__muldi3` with both high words zero (0x08249B20-0x08249B6C),
+   so each of its two multiplies with a 32-bit operand has a zero on the
+   other side: which Thumb register sets the early termination (dingbat:
+   Rd, the data sheet's `MULS Rd, Rs, Rd`) only moves internal cycles from
+   one multiply to the other.
+
+**Not the sensor, not the RTC protocol.** The notice's animation is the same
+sequence of pictures with the same hold lengths in all three emulators; only
+its start moves. The sensor calibration screen is IDENTICAL in all three, as
+in the Boktai 1 and 2 scripts. Before the black hold, frame 4 carries a tear
+(white above, black below) at line 95 in mGBA, 99 in dingbat and 102 in the
+second reference: the boot's first writes, where the references disagree
+with each other too; frame 0 is the frame the BIOS skip starts in (at line
+126), drawn differently above that line by each driver.
+
+**After the fix** (dingbat-bios, mgba, second reference; the RTC scripts
+before -> after):
+
+* Shin Bokura no Taiyou: `solar_notice` against the second reference
+  SLIP(-15) -> IDENTICAL; against mGBA SLIP(-16) as before (mGBA against
+  the second reference is now SLIP(+2), so mGBA stands alone); play SLIP ->
+  IDENTICAL; the second reference's save differs from dingbat's in 12
+  bytes, was 34; its cross-loads of every save now show `title` and
+  `data_select` as dingbat does. Its `first_gameplay` stays 29 frames off
+  both dingbat and mGBA, as before (not chased).
+* Boktai: `solar_setting` SLIP(+6) -> IDENTICAL, `time_setting` MAJOR (the
+  host date on screen) -> IDENTICAL; save 23 -> 8 bytes apart.
+* Boktai 2: `solar_notice` MINOR -> IDENTICAL, `region` SLIP(-12) and
+  `title` SLIP(+7) -> IDENTICAL; `gameplay` IDENTICAL -> SLIP(-23), the
+  second reference alone (mGBA agrees with dingbat). With the old driver on
+  the same build: `region` SLIP(-26), `title` SLIP(-8), `valley_path`
+  MAJOR, `gameplay` IDENTICAL -- three host-clock differences for one.
+* Rockman EXE 4.5: from the PET menu on the second reference now sides
+  with mGBA (`save_screen` identical to mGBA's, was MAJOR against both);
+  `pet_greeting` is still the `@known` of section 39.
+* Pokemon Ruby, Sapphire, Emerald: every checkpoint verdict as before.
+
+All PASS; harness unit tests 36/36. The train keys the reference binaries
+on the drivers' sources, so its next baseline plays the references live once.
+Scripts' comments updated (Boktai 2, Boktai 3, Rockman EXE 4.5), and
+the README's driver notes.

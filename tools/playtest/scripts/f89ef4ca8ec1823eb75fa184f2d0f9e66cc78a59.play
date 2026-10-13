@@ -10,9 +10,10 @@
 # harness epoch mGBA runs at (2006-01-01 00:00, frozen; mGBA ignores clock
 # writes): menus and PET dialogue depend on the date (a トーナメント entry
 # appears at the top of the PET menu, New Year greetings). The second
-# reference always runs on the host clock, so from the PET menu on it shows
-# other dialogue and its inputs go elsewhere; its checkpoints there are not
-# diagnostic. Then owner profile (name あ, male, 0, first occupation), Navi
+# reference ran on the host clock until 2026-10-12 (its screens from the PET
+# menu on were not diagnostic); its driver now freezes it at the epoch too,
+# and from the PET menu on it sides with mGBA (save_screen identical to
+# mGBA's). Then owner profile (name あ, male, 0, first occupation), Navi
 # Rockman; decline the tournament, UP wraps to セーブ, save.
 # [load]: title shows つづきから, NAVI SELECT, the PET menu on the saved date.
 # Japanese text does not OCR, so steps are fixed waits (menus here do not lag).

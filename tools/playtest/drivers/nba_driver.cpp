@@ -2,13 +2,14 @@
  * static libs as a black box). Speaks the line protocol in
  * tools/playtest/README.md.
  *
- * Usage: nba_driver <rom.gba> <bios.bin> [--run-bios] [--audio PATH]
+ * Usage: nba_driver <rom.gba> <bios.bin> [--run-bios] [--rtc EPOCH] [--audio PATH]
  *   --audio writes the core's output, s16le stereo at 32768 Hz: the capture
  *   device pulls one frame's worth of samples after every frame.
+ *   --rtc freezes the cartridge clock at that unix epoch, as the other
+ *   drivers do (run with TZ=UTC); without it the clock is the host's.
  *   The battery save is <rom minus extension>.sav, as its frontend names it.
- *   It has no RTC override: run with TZ=UTC. `savedata` is unsupported (the
- *   core exposes no backup accessor); the harness reads the file written at
- *   `quit` instead.
+ *   `savedata` is unsupported (the core exposes no backup accessor); the
+ *   harness reads the file written at `quit` instead.
  *
  * Build: tools/playtest/build.sh
  */
@@ -21,10 +22,35 @@
 #include <unistd.h>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <sys/time.h>
+
+// --rtc. The core has no clock setting: its cartridge RTC reads the C
+// library's time() (the only clock its static library imports, with
+// localtime). This definition is linked ahead of the C library's, so the
+// core's calls land here and read the frozen epoch, as dingbat and mGBA
+// do with --rtc; without --rtc it answers the host clock as before. Left on
+// the host clock, Shin Bokura no Taiyou's boot (a date-dependent soft-float
+// computation) took 53 frames instead of 60 and its first screens ran 7
+// frames ahead of dingbat's (docs/playtest-bugs.md, "Shin Bokura no Taiyou:
+// the sensor notice").
+static long long g_rtc_epoch = -1;
+extern "C" time_t time(time_t* out) {
+  time_t now;
+  if (g_rtc_epoch >= 0) {
+    now = time_t(g_rtc_epoch);
+  } else {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    now = tv.tv_sec;
+  }
+  if (out) *out = now;
+  return now;
+}
 
 static constexpr int W = 240;
 static constexpr int H = 160;
@@ -107,7 +133,7 @@ int main(int argc, char** argv) {
   const char* audio_path = nullptr;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--run-bios")) run_bios = true;
-    else if (!strcmp(argv[i], "--rtc") && i + 1 < argc) ++i;
+    else if (!strcmp(argv[i], "--rtc") && i + 1 < argc) g_rtc_epoch = atoll(argv[++i]);
     else if (!strcmp(argv[i], "--audio") && i + 1 < argc) audio_path = argv[++i];
     else if (npos < 2) pos[npos++] = argv[i];
   }
