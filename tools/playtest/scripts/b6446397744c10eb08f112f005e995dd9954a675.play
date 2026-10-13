@@ -1,0 +1,86 @@
+@title Hamtaro - Rainbow Rescue (Europe) (En,Fr,De,Es,It)
+@file Hamtaro - Rainbow Rescue (E) (M5).gba
+@game A84P
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# Language English (the first entry, A). START at the attract intro shows
+# the title (New), A: the opening on the hilltop ("Wow! The view's so
+# pretty from here!"), the rainbow and Rainbow Ham, A through the scenes
+# until Bijou stands on the hill under player control. START opens the Menu
+# (Items / Stickers / Coloring / Quit): RIGHT x3 to Quit, A, "Quit
+# playing?" (the cursor starts on No-P) LEFT to Yep-P, A: "Bye-Q" over the
+# clubhouse, then the game resets itself to the boot logos (no language
+# screen this time) and START at the intro shows the title with Continue:
+# the battery save is written by then. [load]: START at the intro, Continue
+# resumes Bijou on the hill (the same frame as before quitting), START
+# opens the Menu.
+# Seen while authoring: nba runs the attract intro's sprites and the
+# opening's fades a few frames apart from the others (the title, the
+# rainbow's blend and the Menu fade-in); the rainbow's blend is in a
+# different phase on each emulator at f3308. All three write byte-identical
+# saves.
+[new]
+wait 200
+wait 200
+wait 200
+checkpoint language window=30
+press A
+wait 120
+wait 200
+wait 300
+wait 300
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press A
+wait 120
+wait 120
+wait 200
+wait 300
+checkpoint first_dialogue window=30
+tap A times=10 every=40 hold=6
+wait 30
+tap A times=15 every=40 hold=6
+wait 30
+tap A times=20 every=40 hold=6
+wait 30
+tap A times=20 every=40 hold=6
+wait 30
+checkpoint hill window=30
+press START
+wait 60
+checkpoint menu window=30
+tap RIGHT times=3 every=15 hold=4
+wait 20
+press A
+wait 60
+checkpoint quit_prompt window=30
+press LEFT
+wait 15
+press A
+wait 180
+checkpoint bye window=30
+# until text 'GAME BOY' timeout=900 every=10  [reached dingbat-bios+420 mgba+420 nba+420]
+wait 424
+wait 600
+press START
+wait 120
+press START
+wait 120
+checkpoint title_continue window=30
+
+[load]
+wait 400
+wait 300
+press START
+wait 120
+checkpoint title_continue window=30
+press A
+wait 180
+checkpoint resumed_hill window=30
+press START
+wait 60
+checkpoint resumed_menu window=30
+
