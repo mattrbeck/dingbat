@@ -744,7 +744,8 @@ final class TouchRouterView: UIView {
         for id in sent.subtracting(want) { session.setInput(id, false, source: "touch") }
         if tick || !pressed.isEmpty { Peripherals.shared.tap() }
         sent = want
-        if state.lit != want { state.lit = want }
+        let state = state
+        session.uiSoon { if state.lit != want { state.lit = want } }
     }
 
     func releaseAll() {

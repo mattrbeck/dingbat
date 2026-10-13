@@ -327,11 +327,11 @@ struct GlowView: View {
 /// Game Boy games have no shoulder row.
 struct InputOverlay: View {
     let gb: Bool
-    @EnvironmentObject var session: GameSession
+    @ObservedObject private var inputs = HeldInputs.shared
     @Environment(\.palette) var palette
     private let u: CGFloat = 11
 
-    private func on(_ id: Int) -> Bool { session.held.contains(id) }
+    private func on(_ id: Int) -> Bool { inputs.held.contains(id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: u * 0.55) {

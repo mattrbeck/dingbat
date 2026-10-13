@@ -105,8 +105,17 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     func present() {
         guard let view, dingbat_loaded() != 0 else { return }
         uploadGame()
+        #if DEBUG
+        drawableWait = 0
+        #endif
         view.draw()
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.afterPresent(wait: drawableWait) }
+        #endif
     }
+    #if DEBUG
+    private var drawableWait = 0.0
+    #endif
 
     /// Redraw without new pixels (an options change while paused).
     func redraw() {
@@ -156,11 +165,18 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             drawNds(in: view)
             return
         }
+        #if DEBUG
+        let w0 = CACurrentMediaTime()
+        #endif
         guard let pipeline, let queue, let gameTex, let borderTex,
               let pass = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
               let cmd = queue.makeCommandBuffer(),
               let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        #if DEBUG
+        drawableWait = CACurrentMediaTime() - w0
+        if FFTrace.on { FFTrace.shared.drawable(drawable, cmd) }
+        #endif
         var u = PresentUniforms()
         let border = dingbat_sgb_border() != 0
         u.texSize = SIMD2(Float(gameTex.width), Float(gameTex.height))

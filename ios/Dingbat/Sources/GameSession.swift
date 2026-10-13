@@ -47,8 +47,19 @@ final class GameSession: NSObject, ObservableObject {
     /// here would rebuild every view observing the session 60 times a second.
     @Published private(set) var outSize = CGSize(width: 240, height: 160)
     /// Inputs currently held, by id (touch, controller and hardware keys
-    /// merged), for the input display.
-    @Published private(set) var held: Set<Int> = []
+    /// merged). Not published here: every view observing the session would
+    /// rebuild on each press, milliseconds the fast-forward loop leaves no
+    /// room for (the press's refresh was missed and the picture before it
+    /// held). The input display observes HeldInputs instead.
+    private(set) var held: Set<Int> = [] {
+        didSet {
+            let now = held
+            uiSoon { if HeldInputs.shared.held != now { HeldInputs.shared.held = now } }
+            #if DEBUG
+            if Self.ffOldPublish { objectWillChange.send() }
+            #endif
+        }
+    }
     /// Local 2P: both players' cores run (TwoPlayer).
     @Published private(set) var twoPlayer = false
     /// The player the touch controls (and keyboard) drive in 2P.
@@ -370,7 +381,39 @@ final class GameSession: NSObject, ObservableObject {
         if !on { lastTick = 0 }
     }
 
+    /// Screen changes made while fast-forward holds the main thread, kept
+    /// for the next tick's start (uiSoon).
+    private var uiPending: [() -> Void] = []
+
+    /// A change to what the app shows (a lit pad, a readout). Fast-forward
+    /// runs frames until ~3 ms before each refresh, so a press or a readout
+    /// lands in those last ms, and a Core Animation commit that close to
+    /// the refresh costs the next display-link callback: the picture before
+    /// it stays a refresh longer. In fast-forward the change waits for the
+    /// next tick's start and commits there, a whole interval before the
+    /// next refresh; otherwise it happens at once.
+    func uiSoon(_ change: @escaping () -> Void) {
+        #if DEBUG
+        if Self.ffNoDefer { change(); return }
+        #endif
+        if speed == .fastForward && link != nil && game != nil && !paused {
+            uiPending.append(change)
+        } else {
+            applyPendingUI(flush: false)  // in order: none may land late over it
+            change()
+        }
+    }
+
+    private func applyPendingUI(flush: Bool) {
+        guard !uiPending.isEmpty else { return }
+        let changes = uiPending
+        uiPending = []
+        for c in changes { c() }
+        if flush { CATransaction.flush() }
+    }
+
     @objc private func tick(_ link: CADisplayLink) {
+        applyPendingUI(flush: true)
         guard game != nil, !clipHold, !flightHold else { return }
         let now = link.timestamp
         let dt = lastTick == 0 ? 0 : min(now - lastTick, 0.25)
@@ -413,16 +456,38 @@ final class GameSession: NSObject, ObservableObject {
         // can be unchanged (a fade that has just settled) while the screen
         // still shows the one before them.
         var changed = false
+        #if DEBUG
+        let trace = FFTrace.on
+        if trace { FFTrace.shared.tickBegin(link) }
+        #endif
         switch speed {
         case .fastForward:
             // As many frames as fit in most of this display interval.
-            let budget = max(0.004, link.targetTimestamp - CACurrentMediaTime() - 0.003)
+            var target = link.targetTimestamp
+            var reserve = 0.003
+            #if DEBUG
+            // `-ff-grid-target`: a callback that runs after its own target
+            // (the simulator's link always does) aims at the next refresh on
+            // the link's grid, as a device's callback does, instead of 4 ms.
+            let nowG = CACurrentMediaTime(), periodG = link.targetTimestamp - link.timestamp
+            if Self.ffGridTarget && periodG > 0 && target < nowG {
+                target += periodG * ((nowG - target) / periodG).rounded(.up)
+            }
+            if let r = Self.ffReserve { reserve = r }
+            #endif
+            let budget = max(0.004, target - CACurrentMediaTime() - reserve)
+            #if DEBUG
+            if trace { FFTrace.shared.budget(budget, target: target) }
+            #endif
             let t0 = CACurrentMediaTime()
             repeat {
                 if isNDS { NdsState.shared.blowFrame() }
                 dingbat_run_frame()
                 ran += 1
                 if dingbat_frame_static() == 0 { changed = true }
+                #if DEBUG
+                if trace { FFTrace.shared.frame(changed: dingbat_frame_static() == 0) }
+                #endif
             } while CACurrentMediaTime() - t0 < budget && ran < 40
         case .normal, .double, .slow:
             // Run-ahead is the GB/GBA cores' (a DS frame is a plain one).
@@ -434,6 +499,9 @@ final class GameSession: NSObject, ObservableObject {
                 else if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
                 ran += 1
                 if dingbat_frame_static() == 0 { changed = true }
+                #if DEBUG
+                if trace { FFTrace.shared.frame(changed: dingbat_frame_static() == 0) }
+                #endif
             }
             keepAudioAlive()
         }
@@ -469,9 +537,18 @@ final class GameSession: NSObject, ObservableObject {
                 checkSaveChanged()
             }
         }
-        sleeping = dingbat_is_stopped() != 0
+        // Only a change: assigning a @Published, even the same value, rebuilds
+        // every view observing the session (milliseconds, every tick).
+        let stopped = dingbat_is_stopped() != 0
+        #if DEBUG
+        if Self.ffOldPublish { sleeping = stopped }
+        #endif
+        if stopped != sleeping { sleeping = stopped }
         fpsAccount(now, ran: ran)
         onTick?()
+        #if DEBUG
+        if trace { FFTrace.shared.tickEnd(ran: ran, speed: speed) }
+        #endif
     }
 
     /// Frames this display tick owes (web: the RAF accumulator). Rounded,
@@ -502,6 +579,17 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     #if DEBUG
+    static let ffGridTarget = ProcessInfo.processInfo.arguments.contains("-ff-grid-target")
+    /// `-ff-old-publish`: the session republishes every tick and on every
+    /// input edge, as it did before (A/B for the fast-forward hold).
+    static let ffOldPublish = ProcessInfo.processInfo.arguments.contains("-ff-old-publish")
+    /// `-ff-no-defer`: screen changes at once in fast-forward too (uiSoon).
+    static let ffNoDefer = ProcessInfo.processInfo.arguments.contains("-ff-no-defer")
+    static let ffReserve: Double? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-ff-reserve"), i + 1 < a.count, let ms = Double(a[i + 1]) else { return nil }
+        return ms / 1000
+    }()
     static let audioStats = ProcessInfo.processInfo.arguments.contains("-audio-stats")
 
     /// `-latency-test N` (with tonc's m7_demo, where Up moves the view the
@@ -779,6 +867,9 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     private func present() {
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.beforePresent() }
+        #endif
         GameRenderer.shared.present()
         let size = CGSize(width: Int(dingbat_out_width()), height: Int(dingbat_out_height()))
         if size != outSize { outSize = size }
@@ -800,7 +891,7 @@ final class GameSession: NSObject, ObservableObject {
         default: expected = 59.7
         }
         let rounded = Int(f + 0.5)
-        if fps != rounded { fps = rounded }
+        uiSoon { [self] in if fps != rounded { fps = rounded } }
         #if DEBUG
         // `-audio-stats`: a line a second (fps, ring depth, reader underruns)
         // into tmp/audiostats.txt, for checking pacing in the simulator.
@@ -816,7 +907,7 @@ final class GameSession: NSObject, ObservableObject {
         }
         #endif
         let unusual = expected < 0 || abs(f - expected) > max(3, expected * 0.05)
-        if fpsUnusual != unusual { fpsUnusual = unusual }
+        uiSoon { [self] in if fpsUnusual != unusual { fpsUnusual = unusual } }
         let hle = dingbat_hle_audio_active() != 0
         if hleActive != hle { hleActive = hle }
         let avail = dingbat_mp2k_available() != 0
@@ -865,6 +956,9 @@ final class GameSession: NSObject, ObservableObject {
         let wasHeld = held.contains(id)
         let nowHeld = sources.values.contains { $0.contains(id) }
         if wasHeld != nowHeld {
+            #if DEBUG
+            if FFTrace.on { FFTrace.shared.input(id, nowHeld, source) }
+            #endif
             dingbat_set_input(Int32(id), nowHeld ? 1 : 0)
             if nowHeld { held.insert(id) } else { held.remove(id) }
         }
@@ -881,6 +975,7 @@ final class GameSession: NSObject, ObservableObject {
     func setPaused(_ p: Bool, relay: Bool = true) {
         guard game != nil, paused != p else { return }
         paused = p
+        applyPendingUI(flush: false)
         if relay && NetLink.shared.linked { NetLink.shared.sendPause(p) }
         pausedForBackground = false
         // The screen stays awake while a game runs (web: Screen Wake Lock).
@@ -910,6 +1005,7 @@ final class GameSession: NSObject, ObservableObject {
             if relay && s != speed { NetLink.shared.sendSpeed(s == .double) }
         }
         speed = s
+        applyPendingUI(flush: false)
         dingbat_set_fast_forward(s == .fastForward ? 1 : 0)
         dingbat_set_turbo(s == .double ? 1 : 0)
         dingbat_set_slowmo(s == .slow ? 1 : 0)
@@ -1281,6 +1377,12 @@ final class GameSession: NSObject, ObservableObject {
                                intent: .defaultIntent) else { return nil }
         return UIImage(cgImage: cg)
     }
+}
+
+/// The held inputs, published for the input display alone.
+final class HeldInputs: ObservableObject {
+    static let shared = HeldInputs()
+    @Published var held: Set<Int> = []
 }
 
 /// Cheats per game, as .cht text (web cheats:<name>), re-applied on load.
