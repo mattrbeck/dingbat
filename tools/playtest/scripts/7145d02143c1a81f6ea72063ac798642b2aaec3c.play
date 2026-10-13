@@ -1,0 +1,89 @@
+@title Asterix & Obelix XXL (Europe) (En,Fr,De,Es,It,Nl)
+@file Asterix & Obelix - XXL (E) (M6).gba
+@game BLXP
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba
+
+# Language ENGLISH; CREATE A GAME > GAME 1, name "A" (the default letter,
+# confirmed with A): creating the game writes the 512-byte EEPROM (22 bytes
+# of data) and GAME 1 A appears under LOAD GAME. That is the first save; the
+# next one is at the end of a stage, not reached (stage I is a free-roaming
+# pseudo-3D forest with 0/2 laurels to find). [new] carries on into XXL
+# ADVENTURE: the opening cutscene (A through the text), the first stage, the
+# pause menu (CONTINUE) and a short walk to the "B TALK" sign. [load]:
+# ENGLISH, LOAD GAME > GAME 1 A, YES, "LOADING THE GAME", main menu.
+# Frozen on dingbat-bios + mgba only: nba hangs at boot. Between f32 (all
+# three on the same black frame) and f92 it stops on a near-black frame
+# (hash 131299D6) where dingbat-bios and mgba fade in the Atari logo, and
+# that frame never changes again (the same at f1100, when the others are on
+# the language menu); it plays no sound at all. Its battery file comes out 8192 bytes (a 64Kbit EEPROM) where dingbat-bios
+# and mgba write 512 (4Kbit), so it likely sized the empty EEPROM wrongly and
+# the game's boot-time EEPROM check never finishes.
+# Seen while authoring: after the cutscene's last A the stage fades in out of
+# black 24 frames earlier on dingbat-bios than on mgba (until changed:
+# dingbat-bios+6, mgba+30), with no third emulator to say which is right; the
+# cutscene smoke and Asterix's idle frames differ by a frame here and there,
+# and the tutorial sign's text types one letter behind on dingbat-bios.
+# Both saves byte-identical.
+[new]
+wait 200
+checkpoint atari window=30
+# until text ENGLISH timeout=1500 every=10  [reached dingbat-bios+370 mgba+370]
+wait 374
+wait 30
+checkpoint language window=30
+press DOWN
+wait 30
+press A
+wait 120
+checkpoint game_select window=30
+press A
+wait 120
+press A
+wait 60
+wait 120
+checkpoint main_menu window=30
+press A
+wait 180
+checkpoint cutscene window=30
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=40 every=20 hold=4
+tap A times=6 every=20 hold=4
+# until changed timeout=200 every=1  [reached dingbat-bios+6 mgba+30]
+wait 34
+wait 90
+checkpoint level1 window=30
+press START
+wait 60
+checkpoint pause_menu window=30
+press A
+wait 60
+hold UP
+wait 120
+release
+wait 30
+checkpoint walked window=30
+
+[load]
+wait 200
+# until text ENGLISH timeout=1500 every=10  [reached dingbat-bios+430 mgba+430]
+wait 434
+wait 30
+press DOWN
+wait 30
+press A
+wait 120
+checkpoint load_game window=30
+press A
+wait 180
+press UP
+wait 20
+press A
+wait 180
+checkpoint loading window=30
+# until changed timeout=600 every=5  [reached dingbat-bios+60 mgba+60]
+wait 64
+wait 120
+checkpoint main_menu window=30
