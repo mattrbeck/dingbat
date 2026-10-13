@@ -253,6 +253,14 @@ jobs:
         # cancelling errors. HLE only here (no BIOS in CI). Committed ROMs.
         shell: bash
         run: ./dingbat_cyclelaws_test
+      - name: GBA Halt and Stop from the cartridge, every BIOS mode
+        # tests/roms/swihalt.s: each call comes back to the next instruction
+        # with both stacks and the dispatcher's saved registers intact. The
+        # HLE took a cartridge Halt into Nintendo's image with a frame only
+        # its stub pops (hle_after_bios). HLE and a stand-in image made by
+        # the test here; Nintendo's image only where it exists (not in CI).
+        shell: bash
+        run: ./dingbat_swihalt_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms HBlank HDMA forever; the block copy ticks the
         # PPU inside the mode 3->0 transition, which recurses to stack overflow

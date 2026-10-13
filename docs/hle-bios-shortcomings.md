@@ -101,13 +101,17 @@ it deliberately does not model:
   comment read and the `msr` at measured offsets, `hle_halt`) and the SVC
   frame: three words, the caller's CPSR where the console's dispatcher
   keeps r11 and nothing where it keeps the SPSR, popped by a trap at 0x184
-  that reads the console's three words (`cpu.hle_halt_return`). With
-  Nintendo's BIOS mapped (`--hle-after-bios`), a Halt from the cartridge
-  still takes the HLE path and parks in that image, whose return pops four
-  words from the three-word frame (found reading the code on 2026-10-12,
-  not reproduced or fixed; Zelda II's Halts are from IWRAM and run the
-  image's own).
-* **Stop** keeps its model (the halt-resume fields).
+  that reads the console's three words (`cpu.hle_halt_return`). So it
+  only runs over the stub: with Nintendo's BIOS mapped (`--hle-after-bios`,
+  or the HLE with a BIOS file given) the image runs its own Halt
+  (`hle_takes`), since the image's return pops four words. Until
+  2026-10-13 a Halt there took the HLE path, parked in the image and came
+  back through a word that was never pushed, to 0 (docs/playtest-bugs.md,
+  "Metroid Fusion hung at boot over Nintendo's BIOS";
+  `tests/swihalt_test.nim`).
+* **Stop** keeps its model (the halt-resume fields), under the stub and
+  with an image mapped alike: it parks on the caller's own instruction and
+  runs no BIOS code, so the image's return never sees its frame.
 * **The reset vector (a jump to 0) re-runs an HLE boot** that waits out the
   real duration (270 vblanks plus the tail to scanline 126, measured against
   real-BIOS execution) with the display force-blanked and hands over the

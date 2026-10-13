@@ -509,12 +509,19 @@ when defined(switrace):
 include hle_unc
 
 proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
-  ## With a real BIOS image mapped (hle_after_bios) the sound-driver SWIs run
+  ## With a real BIOS image mapped (hle_after_bios, or the HLE with a BIOS
+  ## file given: the frontends pass one when it exists) the sound-driver SWIs run
   ## the image's own driver: their HLE continues through stub-BIOS code. The
   ## routines hle_unc.nim runs as stub-BIOS code run as the image's own.
+  ## So does Halt: the HLE's parks in BIOS code at 0x164 over a three-word
+  ## SVC frame that only the stub's return pops (hle_halt), and the image's
+  ## return there pops four -- a Halt from the cartridge came back with r11
+  ## and r12 clobbered and jumped through the word above the frame, to 0
+  ## (Metroid Fusion hung at boot, docs/playtest-bugs.md). Stop keeps
+  ## its model: it parks on the caller's own instruction, in no BIOS code.
   if cpu.gba.bus.stub_bios: return true
   case swi_num
-  of 0x1A'u32..0x1E'u32, 0x20'u32..0x24'u32, 0x28'u32, 0x29'u32: false
+  of 0x02'u32, 0x1A'u32..0x1E'u32, 0x20'u32..0x24'u32, 0x28'u32, 0x29'u32: false
   else: not unc_takes(swi_num)
 
 include hle_copy

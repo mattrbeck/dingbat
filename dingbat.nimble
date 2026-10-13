@@ -145,6 +145,10 @@ task test_cyclelaws,"Hold the core to the cycle laws recorded from an AGB SP":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_cyclelaws_test tests/cyclelaws_test.nim"
 
+task test_swihalt, "Run Halt and Stop from the cartridge in every GBA BIOS mode":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_swihalt_test tests/swihalt_test.nim"
+
 task test_clipreplay, "Run the clip-capture replay determinism tests":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_clipreplay_test tests/clip_replay_test.nim"

@@ -462,7 +462,9 @@ random register-writing program per core; known core issues print `[KNOWN]`,
 mixing twin's payload every frame: committed ROMs, the soak's random programs and
 channel-1 stop storms), `test_printer`,
 `test_lcdresponse`, `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
-battery-save RTC trailer), `test_desktop` (the desktop frontend's logic that
+battery-save RTC trailer), `test_swihalt` (Halt and Stop from the cartridge
+return intact in every GBA BIOS mode, over the stub, a stand-in image the test
+writes, and Nintendo's image where it exists), `test_desktop` (the desktop frontend's logic that
 builds without SDL: held input and key routing, the config file, the
 Link Cable over loopback sockets, battery/state/cheat writes, game loading,
 each replaying a `formal/DesktopState` trace, and the modal notices in a real

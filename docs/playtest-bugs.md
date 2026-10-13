@@ -4663,3 +4663,52 @@ pending interrupt's handler entered 3-4 cycles late; k = 28-32: Zelda II's
 case, no sleep) and in none after. No console measurement here: the
 official BIOS running in this core is the reference, and the cycle laws
 (2085/2085 under both BIOSes) still hold.
+
+## §55. Metroid Fusion hung at boot over Nintendo's BIOS: the HLE Halt parked in the image, 2026-10-13
+
+**Symptom.** With Nintendo's BIOS image mapped and the HLE taking SWIs --
+`hle_after_bios` (the apps' "HLE after BIOS", mode 2), or the HLE mode
+with a BIOS file given, which every frontend passes when one exists --
+Metroid Fusion hung in its 13th frame (f12) and stayed on a dead screen
+(PC looping at 0x64 in Undefined mode at f600). Found reading the code
+after §54; not in the corpus, which runs the HLE over the stub BIOS or
+Nintendo's BIOS without the HLE.
+
+**Cause.** `hle_takes(2)` was true over a real image. Since 45ec2b82
+(2026-09-23) the HLE Halt parks in BIOS code -- since §54 at 0x164, after
+pushing its own three-word SVC frame {caller CPSR, r12, return}, which
+only the stub's return pops (a trap at 0x184 makes the console's reads).
+Over Nintendo's image those addresses are the image's own routine and
+return, which pops four words: the SPSR from the frame's CPSR word, then
+r11 from r12's, r12 from the return address, and lr from the word above
+the frame. Metroid Fusion's Halt is a Thumb `swi 2` at 0x0800075A: at the
+image's `movs pc, lr` lr_svc = 0, r11 = 0x000001FF, r12 = 0x0800075C (the
+return address), sp_svc 0x03007FE4 (its top is 0x03007FE0), and the CPU
+went to the reset vector. The routines that hle_unc.nim runs as stub code,
+and the sound driver's, already went to the image (`hle_takes` false);
+Halt was the one parked routine left out.
+
+**Fix.** `hle_takes` is false for Halt over a real image, so the image's
+own dispatcher and Halt run, as they already did for a Halt from IWRAM in
+mode 2. Stop keeps the HLE: it parks on the caller's own instruction with
+the halt-resume fields and runs no BIOS code (lr_sys = 0x170 is only the
+register the console leaves), and its returns came back intact over the
+image as over the stub. Over the stub `hle_takes` answers true before it
+gets to the change, and mode 1 never asks, so the corpus is unaffected (no
+train run). No state
+migration: a state parked in the HLE Halt over an image was already on the
+path to the bad return.
+
+**Test.** `tests/swihalt_test.nim` (`nimble test_swihalt`, CI) runs
+`tests/roms/swihalt.s`: three Halts from ARM ROM and three from Thumb, each
+woken by V-blank, then a Stop from each woken by A, checking that each
+returns to the next instruction with sp, r10, r11 and the SVC sp intact.
+It runs over the stub (HLE), over a 16 KB stand-in image the test writes
+(our own SWI and IRQ vectors with a four-word frame, no Nintendo code) in
+every mode, and over Nintendo's image in modes 0, 1 and 2 when the file is
+there (not in CI). Before: every image mode with the HLE failed all 8 calls
+(Nintendo's image: the first Halt went to 0 and the image's boot, SVC sp
+0x03007FFC at the end; the stand-in: 0x02CBD5D4). After: all 7 configs
+8/8. Ten games over Nintendo's image, 600 frames: Metroid Fusion was the
+only one to Halt from ROM; its f600 picture is now the same in modes 0, 1
+and 2, and the other nine are unchanged.
