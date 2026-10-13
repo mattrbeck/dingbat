@@ -1,0 +1,104 @@
+@title Mr. Driller 2 (USA)
+@file Mr. Driller 2 (U).gba
+@game BR2E
+@chip SRAM (no save library string; every emulator writes 32 KB)
+@frozen dingbat-bios,mgba,nba
+# START skips the intro; the first boot asks for a name: "AAA" (the name is
+# saved straight away), then 1P Driller > Endless Driller > Hard (one life),
+# drilling straight down (DOWN+A) until the air runs out at 180 ft: the
+# results screen records the best result in the save; Quit back to the title.
+# [load]: the title goes straight to the main menu (no name prompt), Records >
+# 1P Driller > Endless > Hard shows 1 game, best result 180 ft.
+# Seen while recording: on the "IS THIS NAME OK?" dialog (name_confirm) the
+# dimmed name grid behind it is one 5-bit step darker in dingbat-bios than in
+# mgba and nba (which agree) on rows 16-143, e.g. the orange background
+# 31,20,16 vs 31,21,16 and the grid keys 23,24,28 vs 24,24,29 (9421 pixels);
+# the other screens match. nba draws the title logo shine and the results and
+# records slide-ins a frame or so behind. dingbat-bios and mgba write
+# byte-identical saves (178 non-blank bytes); nba's differs.
+
+[new]
+wait 300
+wait 200
+press START
+wait 120
+wait 60
+checkpoint title window=30
+press START
+wait 90
+press DOWN
+wait 10
+press A
+wait 10
+press A
+wait 10
+press A
+wait 20
+checkpoint name_entry window=30
+press A
+wait 90
+checkpoint name_confirm window=30
+press A
+wait 120
+checkpoint main_menu window=30
+press A
+wait 90
+press DOWN
+wait 20
+press A
+wait 90
+press DOWN
+wait 15
+press DOWN
+wait 15
+checkpoint difficulty window=30
+press A
+wait 120
+wait 60
+tap DOWN+A times=20 every=15 hold=4
+checkpoint drilling window=30
+tap DOWN+A times=40 every=15 hold=4
+wait 180
+wait 90
+wait 30
+checkpoint results window=30
+press A
+wait 120
+press DOWN
+wait 15
+press DOWN
+wait 15
+press A
+wait 120
+
+
+[load]
+wait 300
+wait 200
+press START
+wait 120
+wait 60
+press START
+wait 120
+checkpoint main_menu window=30
+press DOWN
+wait 15
+press DOWN
+wait 15
+press A
+wait 90
+press A
+wait 90
+press DOWN
+wait 15
+press A
+wait 90
+press RIGHT
+wait 30
+press RIGHT
+wait 30
+press RIGHT
+wait 40
+wait 60
+checkpoint hard_record window=30
+
