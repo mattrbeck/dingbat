@@ -1,0 +1,127 @@
+@title Kururin Paradise (Japan)
+@file Kururin Paradise (J).gba
+@game A9QJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# Japanese text: OCR reads little of it, so the route was found from
+# screenshots and is fixed waits.
+# START through the opening story to the title, ひとりであそぶ, file 1
+# (あたらしくはじめる), name "ああ" (A A, START to けってい, A), ぼうけん with
+# the compact helirin (DOWN), START skips the story, Training 1 from the
+# Training Room map: three A presses through the hint box, then fly the
+# stick right, a little up, past the floor bump, down-right with A (speed
+# up) through the gap between the two bumps with no wall hit, into the goal
+# (2"10, no misses, NEW RECORD). The clear is written to SRAM; the map
+# moves on to Training 2.
+# [load]: the file screen shows "ああ コンパクト"; ぼうけん opens the map with
+# Training 1 starred and ああ 00'02"10 in its records.
+# Seen while authoring: nba runs the stage one frame behind the others (its
+# timer reads 1-2 hundredths lower all the way, the hit on an earlier try
+# landed a frame later) and the goal and result screens flash their palette
+# in a different phase there; it still finishes in 2"10. mgba's spiral
+# backgrounds on the menus are in a different phase from dingbat-bios and
+# nba (file_select / name_entry: mgba SLIP 2-3 frames from the other two);
+# mode_select and stage_map are DIFFERENT on nba against both others.
+# All three SRAM files are byte-identical.
+[new]
+wait 300
+wait 300
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 120
+press A
+wait 120
+checkpoint file_select window=30
+press A
+wait 120
+press A
+wait 20
+press A
+wait 20
+press START
+wait 30
+checkpoint name_entry window=30
+press A
+wait 120
+checkpoint mode_select window=30
+press A
+wait 120
+press DOWN
+wait 30
+press A
+wait 120
+press START
+wait 120
+checkpoint stage_map window=30
+press A
+wait 120
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+wait 120
+wait 120
+hold RIGHT
+wait 20
+release
+hold RIGHT
+wait 30
+release
+hold UP
+wait 10
+release
+hold RIGHT
+wait 25
+release
+hold RIGHT
+wait 15
+release
+hold RIGHT+A
+wait 10
+release
+hold DOWN+RIGHT+A
+wait 6
+hold RIGHT+A
+wait 6
+release
+hold DOWN+RIGHT+A
+wait 5
+hold RIGHT+A
+wait 13
+wait 18
+release
+hold RIGHT+A
+wait 15
+release
+wait 60
+checkpoint goal window=10
+wait 120
+wait 120
+wait 120
+checkpoint result window=30
+press A
+wait 60
+wait 60
+checkpoint map_after_clear window=30
+
+[load]
+wait 900
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 120
+press A
+wait 120
+checkpoint file_select window=30
+press A
+wait 120
+press A
+wait 150
+checkpoint stage_map window=30
