@@ -1,0 +1,417 @@
+@title Kessakusen! Ganbare Goemon 1+2 - Yuki-hime to Magginesu (Japan)
+@file Kessakusen Ganbare! Goemon 1 and 2 (J).gba
+@game BG2J
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing reaches the EEPROM through Goemon 2's whole first stage, the area map, Satsuma village (the old man, the Oedo Tourist teleport desk, the meshiya) or a game over given up with まいった; the diary (たびにっき) slots fill later in the game, and enemy hits and town NPCs come out different on each emulator (see below), so no frozen walk reaches it
+# The cart holds both SNES games. Goemon 2 (マッギネスをあそぶ): たびにっき 1
+# はじめから, ゴエモン, START past the intro, Area 1: the beach stage on foot
+# (B pipe, A jump), the fish mech (hit it, jump on: B shoots, A flies) over
+# the water to the tanuki statue, whose coins end the stage. The map
+# (りゅうきゅう りぞーと, 175両 on all three), up to さつま むら: the old man's
+# house (dialogue), the 旅 shop (大江戸ツーリスト さつまむら支店, a teleport
+# service at 50両; いいえ).
+# Goemon 1 (ゆきひめをあそぶ) was tried first and left: its overhead town has
+# enemies that walk differently on each emulator within the first half
+# minute of play (mgba's samurai at f3328, then nba's ghost from f5300 and
+# all three apart by f5868), and its diary keeper is only met past stage 1.
+# Findings while authoring Goemon 2:
+# - nba runs the player's animations a frame or two behind the other two
+#   (attack swings, f4240 on), and its camera trails vertically by a few
+#   pixels during jumps (f4314, f9330); the game outcome stays the same.
+# - f6544, riding the fish over the water: dingbat-bios and nba kill the
+#   bunny that jumps out at the right edge with the first shot, mgba's shot
+#   misses it and it lands (explosions differ from then until f6580). The
+#   route here waits for the bunny to land and shoots it point blank, which
+#   all three agree on.
+# - The じかん timer ticks a unit earlier on mgba (f6748: 67 on mgba, 68 on
+#   the others; Goemon 1 the same at f4175), so mgba runs a logic frame
+#   ahead somewhere: the game drops frames on load.
+# - Translucent text boxes blend one 5-bit step apart: dingbat-bios one step
+#   darker than both references where they agree (Goemon 1's kuchiire-ya
+#   box, 2683 pixels, stable for 130 frames), the 5-bit alpha rounding the
+#   SP photographs gave (docs/hwprobe-questions.md; Trick Star's script has
+#   the arithmetic). mgba and nba also differ from each other by a step in
+#   places (the player-select portrait, the beach stage's last scanline).
+# - Town villagers walk differently on all three (Satsuma, f7810 mgba, then
+#   f11240 all three); harmless here.
+# - The blank EEPROM comes out 512 bytes on mgba and 8192 on nba.
+# In the replay all four dingbat configurations draw what mgba draws up to
+# first_gameplay; nba is a frame behind there (area_card, first_gameplay
+# SLIP +1) and its player_select portrait blends differently; the map is
+# MINOR between all three, old_man a frame apart each way; tourist identical.
+
+[new]
+wait 300
+wait 300
+wait 300
+checkpoint title window=30
+press RIGHT
+wait 30
+press A
+wait 300
+wait 240
+wait 60
+press START
+wait 140
+checkpoint file_select window=30
+press A
+wait 90
+checkpoint player_select window=30
+press A
+wait 200
+press START
+wait 140
+checkpoint area_card window=30
+wait 240
+checkpoint first_gameplay window=30
+hold RIGHT
+wait 90
+release
+tap B times=4 every=10 hold=4
+press A
+wait 6
+wait 30
+press B
+wait 8
+hold RIGHT
+tap B times=6 every=20 hold=4
+release
+hold RIGHT
+wait 30
+release
+tap B times=3 every=12 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=12 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=12 hold=4
+hold RIGHT
+wait 30
+release
+tap B times=2 every=12 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=12 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=12 hold=4
+wait 20
+hold RIGHT
+press A hold=15
+wait 40
+release
+hold RIGHT
+wait 30
+press A hold=15
+wait 20
+release
+tap B times=3 every=10 hold=4
+wait 10
+hold RIGHT
+wait 40
+release
+tap B times=2 every=10 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=10 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=10 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=10 hold=4
+tap B times=6 every=10 hold=4
+press A hold=10
+press B
+wait 4
+hold RIGHT
+wait 50
+release
+tap B times=2 every=10 hold=4
+hold RIGHT
+wait 10
+release
+tap B times=3 every=10 hold=4
+tap B times=4 every=10 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=10 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=10 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=2 every=10 hold=4
+hold RIGHT
+wait 12
+release
+tap B times=4 every=16 hold=8
+wait 30
+hold RIGHT
+wait 14
+release
+wait 10
+press B hold=8
+wait 8
+hold RIGHT
+wait 12
+release
+press B hold=8
+wait 8
+press B hold=8
+wait 8
+hold RIGHT
+wait 8
+release
+press B
+wait 2
+wait 10
+hold RIGHT
+press A hold=20
+wait 30
+release
+hold RIGHT
+wait 20
+press A hold=20
+wait 10
+release
+press B
+wait 2
+hold RIGHT
+wait 20
+release
+press B
+wait 2
+hold RIGHT
+wait 30
+release
+press B
+wait 2
+wait 10
+press B
+wait 2
+wait 10
+hold RIGHT
+wait 40
+release
+press B
+wait 2
+hold RIGHT
+press A hold=24
+wait 30
+release
+hold RIGHT
+wait 30
+release
+press B
+wait 2
+wait 10
+hold RIGHT
+wait 25
+release
+press B
+wait 2
+wait 10
+hold RIGHT
+wait 40
+release
+press B
+wait 2
+wait 10
+hold RIGHT
+wait 40
+release
+press B
+wait 2
+wait 30
+hold RIGHT
+wait 15
+release
+press B
+wait 2
+press A hold=8
+press B
+wait 4
+wait 30
+hold RIGHT
+wait 10
+release
+press A hold=8
+press B
+wait 4
+wait 20
+wait 10
+hold RIGHT
+press A hold=16
+wait 20
+release
+wait 30
+press B
+wait 10
+hold UP
+tap B times=3 every=12 hold=6
+release
+press A hold=10
+tap B times=3 every=8 hold=4
+tap B times=4 every=12 hold=6
+hold RIGHT
+tap B times=5 every=12 hold=6
+release
+hold A
+wait 6
+tap B times=4 every=10 hold=5
+release
+hold RIGHT
+tap B times=5 every=12 hold=6
+release
+hold A+RIGHT
+wait 15
+hold RIGHT
+tap B times=4 every=12 hold=6
+release
+hold A+RIGHT
+wait 15
+hold RIGHT
+tap B times=3 every=12 hold=6
+release
+hold A+RIGHT
+wait 20
+hold RIGHT
+tap B times=3 every=12 hold=6
+release
+hold RIGHT
+tap B times=6 every=12 hold=6
+release
+hold RIGHT
+tap B times=8 every=12 hold=6
+release
+hold RIGHT
+tap B times=8 every=12 hold=6
+release
+hold RIGHT
+tap B times=8 every=12 hold=6
+release
+hold RIGHT
+tap B times=8 every=12 hold=6
+release
+hold RIGHT
+tap B times=8 every=12 hold=6
+release
+hold RIGHT
+tap B times=8 every=12 hold=6
+release
+hold A+RIGHT
+wait 20
+hold RIGHT
+tap B times=6 every=12 hold=6
+release
+wait 20
+hold RIGHT
+wait 40
+release
+hold RIGHT
+tap B times=8 every=12 hold=6
+release
+hold RIGHT
+tap B times=1 every=12 hold=6
+wait 24
+release
+hold RIGHT
+wait 16
+release
+press B
+wait 12
+wait 10
+hold RIGHT
+tap B times=5 every=12 hold=6
+release
+hold RIGHT
+tap B times=6 every=12 hold=6
+release
+hold RIGHT
+wait 60
+release
+hold LEFT
+wait 4
+release
+tap B times=20 every=12 hold=6
+tap B times=20 every=12 hold=6
+checkpoint map window=30
+press START
+wait 60
+press START
+wait 120
+hold UP
+wait 60
+release
+wait 30
+hold UP
+wait 60
+release
+wait 30
+press A
+wait 120
+hold RIGHT
+wait 90
+release
+checkpoint old_man window=30
+wait 120
+tap A times=10 every=40 hold=4
+tap A times=15 every=40 hold=4
+press DOWN
+wait 90
+hold RIGHT
+wait 60
+release
+hold RIGHT
+wait 50
+release
+hold RIGHT
+press A hold=14
+wait 30
+release
+wait 20
+hold RIGHT
+wait 10
+release
+press UP
+wait 90
+wait 60
+checkpoint tourist window=30
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+wait 60
+press RIGHT
+wait 20
+press A
+wait 120
