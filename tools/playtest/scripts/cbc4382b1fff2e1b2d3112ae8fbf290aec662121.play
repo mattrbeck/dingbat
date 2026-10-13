@@ -3,6 +3,7 @@
 @game BSKE
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
+@known * audio differs from both references -- §57: the Rampage Rabbit fight's random numbers part all three emulators (no two share a frame f14401-f26400); the flagged audio is that stretch and its aftermath
 
 # New Game, Edgar, keep the name, the opening on Cliff Road, the first battle
 # (the Rampage Rabbit, won by mashing A towards it), Exeld named by default,

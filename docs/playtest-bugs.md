@@ -4738,3 +4738,22 @@ The earlier deep sweep (2026-10-02, USA and part of Europe) had covered
 1142 titles; this one ran the whole pool on main 346c741d (the last ~240 on
 b7c1e32e). Detectors that cried wolf: `garbage` on busy screens (city
 traffic, foliage, football crowds).
+
+## §57. Summon Night - Swordcraft Story 2: the first battle's random numbers part all three emulators, 2026-10-13
+
+**Symptom.** All four dingbat configurations fail on audio alone: "audio
+differs from both references in 4.0% of the run, longest 2.76 s from
+f24450". Every checkpoint is IDENTICAL, SLIP or MINOR, and the four dingbat
+configurations write byte-identical saves.
+
+**Cause: nobody's.** The first battle (the Rampage Rabbit, won by mashing A
+towards it) draws on timing-seeded random numbers: the frames are identical
+in all three emulators at f13848, and by f13980 the rabbit stands somewhere
+else in each. No two emulators share a frame from f14401 to f26400; they
+meet again in Master's house about f27000. Ten of the twelve flagged audio
+runs fall in that stretch and the other two in the house just after (f29055,
+f29310), behind a fight that ended at a different moment in each. Edgar's HP
+after it differs (117/120/123), so the saves differ in 6 bytes; every save
+loads in every emulator. The audio windows count against dingbat only where
+the two references agree, and the music they share keeps agreeing while each
+emulator's fight sounds differ. The script carries `@known` for the audio.
