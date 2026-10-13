@@ -1,0 +1,100 @@
+@title Rayman 10th Anniversary - Rayman Advance & Rayman 3 (USA)
+@file Rayman 10th Anniversary - Rayman Advance & Rayman 3 (U).gba
+@game BX5E
+@chip EEPROM (64 Kbit; every emulator writes 8 KB)
+@frozen dingbat-bios,mgba,nba
+# The compilation's Rayman Advance: title, game select (left portrait),
+# English, sound screen (START), first slot (auto-named AAA; three A presses
+# step through the name and start the intro), intro skipped, world map, Pink
+# Plant Woods: a few jumps, collect tings, fall in the water once (5 -> 4
+# lives), respawn, START = "quit the game?" YES: quitting writes the EEPROM
+# slot and returns to the language screen. [load]: game select, English,
+# sound, the slot shows AAA, A goes straight to the world map (no intro).
+# Seen while recording: the game-select portraits pulse on another step in
+# each emulator (game_select differs on all three); nba's Rayman is a frame
+# off on the tings jump. All three write byte-identical saves (13 non-blank
+# bytes) and all three read their own back.
+
+[new]
+wait 300
+wait 94
+wait 60
+wait 30
+checkpoint title window=30
+press START hold=10
+wait 120
+checkpoint game_select window=30
+press A hold=10
+wait 300
+wait 60
+press A hold=10
+wait 300
+press START hold=10
+wait 300
+checkpoint choose_game window=30
+press A hold=10
+wait 120
+press A hold=10
+wait 300
+wait 60
+press A hold=10
+wait 40
+press A hold=10
+wait 60
+press A hold=10
+wait 120
+wait 60
+press START hold=10
+wait 200
+checkpoint world_map window=30
+press A hold=10
+wait 300
+press A hold=10
+wait 200
+checkpoint level_start window=30
+press RIGHT hold=120
+hold RIGHT
+press A hold=20
+wait 60
+release
+checkpoint tings window=30
+hold RIGHT
+wait 60
+press A hold=20
+wait 60
+press A hold=20
+wait 40
+release
+wait 120
+# until notblank timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 60
+wait 60
+press START hold=10
+wait 60
+checkpoint quit_prompt window=30
+press LEFT hold=10
+wait 30
+press A hold=10
+wait 300
+checkpoint after_quit window=30
+
+
+[load]
+wait 300
+wait 94
+wait 60
+wait 30
+press START hold=10
+wait 120
+press A hold=10
+wait 300
+press A hold=10
+wait 300
+press START hold=10
+wait 300
+checkpoint choose_game window=30
+press A hold=10
+wait 400
+checkpoint resumed_map window=30
+
