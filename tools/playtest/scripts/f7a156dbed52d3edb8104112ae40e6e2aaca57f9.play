@@ -1,0 +1,80 @@
+@title Gyakuten Saiban 2 (Japan)
+@file Gyakuten Saiban 2 (J).gba
+@game A3GJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+# はじめから, episode 失われた逆転. A through the opening nightmare, the
+# 被告人第1控え室 scenes with マコ and on into court, to 亜内's 検察側、準備完了
+# しております. There START opens 記録 (現在の状況を保存してゲームを中断します
+# か): LEFT to はい, A; ゲームを中断します, the game saves and returns to the
+# title, which now offers つづきから. [load]: つづきから (the cursor starts on
+# it; the two DOWN presses go round and back), the 記録 card (失われた逆転
+# 第一回 法廷・前編), 中断したところから, back in court on the same line.
+# (The START and SELECT presses during the opening were tries for a menu;
+# outside court they only advance the text.)
+# Seen while authoring: nba types the dialogue a character behind dingbat-bios
+# and mgba (f3224, f5024) and its white flash after the SELECT press came at
+# a different frame (f1868: dingbat-bios and mgba white, nba still on the
+# text); all three agree again a few frames later. In the replay nba is back
+# on the title 11 frames before the others (title_continue SLIP -11), and
+# dingbat-bios and mgba write byte-identical saves while nba's differs in 9
+# bytes.
+
+[new]
+wait 600
+checkpoint title window=30
+press A
+wait 120
+checkpoint episode_select window=30
+press A
+wait 200
+# until notblank timeout=1500 every=10  [reached dingbat-bios+200 mgba+200 nba+200]
+wait 204
+wait 60
+checkpoint first_dialogue window=30
+press START
+wait 60
+tap A times=5 every=60 hold=4
+wait 60
+press SELECT
+wait 60
+wait 30
+wait 60
+press START
+wait 60
+tap A times=20 every=60 hold=4
+tap A times=30 every=60 hold=4
+wait 60
+press START
+wait 60
+tap A times=30 every=60 hold=4
+tap A times=30 every=60 hold=4
+checkpoint maggey window=30
+tap A times=40 every=60 hold=4
+tap A times=60 every=50 hold=4
+tap A times=40 every=50 hold=4
+checkpoint courtroom window=30
+press START
+wait 120
+checkpoint save_prompt window=30
+press LEFT
+wait 20
+press A
+wait 60
+wait 120
+checkpoint title_continue window=30
+
+[load]
+wait 600
+checkpoint title_continue window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press A
+wait 150
+checkpoint save_record window=30
+press A
+wait 200
+checkpoint resumed_court window=30
+
