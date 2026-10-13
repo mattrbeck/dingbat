@@ -1,0 +1,206 @@
+@title Car Battler Joe (USA)
+@file Car Battler Joe (U) [!].gba
+@game ACBE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+@save skip: no save found up to Takah's figure-8 driving practice, which ends only when every item on the course has been picked up in real time (nba already loads it late, so its drive would differ); the first save lies somewhere beyond it. The field menu (Item, LRG cargo, Overdrive, Switch WPN, Status, Settings) has no Save and the title Settings write nothing; the only EEPROM write is the 58-byte header at first boot (identical in all three)
+# Begin New Game, name "Joe", the intro by A every 30 frames, the practice
+# battle lost by standing still, G-COM named "Pal", the next morning, then
+# on foot past the water tower to the JOB office, Takah's briefing, and the
+# first seconds of the figure-8 practice.
+# Seen while recording: the shadows under sprites are drawn on alternate
+# frames, and which frames differs between the three (a frame of game-loop
+# phase); the name-entry backdrop is pink on dingbat-bios and mgba and green
+# on nba (and the other way round on G-COM's naming screen); the town's
+# wandering NPCs stand in different places on each emulator. nba runs the
+# loading into the practice late: at practice_prompt (f24760) it is still
+# typing Takah's "Are you ready" while the others show the Yes / Tell me
+# once more choice, and it reached "OK, start!" 28 frames after them. At
+# field_menu the two references agree and every dingbat configuration is
+# the same picture 7 (mgba) / 5 (nba) frames off (shadow phase and Pal's
+# step), within the hash window.
+
+[new]
+wait 300
+wait 300
+checkpoint title window=30
+press START
+wait 60
+wait 90
+checkpoint main_menu window=30
+press A
+wait 90
+wait 60
+wait 120
+checkpoint name_entry window=30
+press START
+wait 60
+press A
+wait 90
+wait 30
+wait 15
+press RIGHT
+wait 10
+press A
+wait 90
+# until notblank timeout=1200 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
+wait 60
+tap A times=20 every=30 hold=4
+# until notblank timeout=1200 every=10  [reached dingbat-bios+100 mgba+100 nba+100]
+wait 104
+wait 60
+tap A times=20 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=30 every=30 hold=4
+wait 150
+wait 900
+wait 1200
+tap A times=10 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+wait 120
+press A
+wait 60
+# until notblank timeout=1200 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
+wait 60
+wait 60
+wait 60
+wait 200
+tap A times=20 every=30 hold=4
+wait 300
+tap A times=40 every=30 hold=4
+tap A times=21 every=30 hold=4
+wait 30
+wait 60
+press A
+wait 90
+press A
+# until text name timeout=300 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 90
+checkpoint gcom_name window=30
+press START
+wait 30
+press A
+wait 60
+press RIGHT
+wait 10
+press A
+wait 60
+tap A times=10 every=30 hold=4
+tap A times=10 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+# until changed timeout=1200 every=10  [reached dingbat-bios+120 mgba+120 nba+120]
+wait 124
+wait 90
+tap A times=20 every=30 hold=4
+# until text O timeout=200 every=1  [reached dingbat-bios+36 mgba+36 nba+37]
+wait 41
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=10 every=30 hold=4
+wait 60
+press A
+wait 60
+press A
+wait 60
+wait 30
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+tap A times=30 every=30 hold=4
+# until notblank timeout=1500 every=10  [reached dingbat-bios+10 mgba+0 nba+10]
+wait 14
+wait 60
+tap A times=10 every=30 hold=4
+press START
+wait 40
+wait 30
+checkpoint field_menu window=30
+press B
+wait 30
+press UP hold=40
+wait 30
+wait 40
+press A
+wait 60
+press A
+wait 60
+press DOWN hold=60
+wait 10
+press LEFT hold=8
+press DOWN hold=80
+wait 10
+press LEFT hold=90
+wait 10
+press UP hold=40
+press RIGHT hold=20
+press UP hold=40
+wait 40
+press UP hold=40
+wait 10
+press DOWN hold=36
+press RIGHT hold=56
+press UP hold=70
+wait 10
+press UP hold=80
+wait 10
+press LEFT hold=20
+press UP hold=60
+wait 40
+press UP hold=20
+wait 60
+press LEFT hold=8
+press UP hold=20
+wait 60
+tap A times=10 every=30 hold=4
+checkpoint takah window=30
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=10 every=30 hold=4
+tap A times=10 every=30 hold=4
+tap A times=10 every=30 hold=4
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+wait 40
+press A
+wait 40
+checkpoint practice_prompt window=30
+press A
+wait 30
+tap A times=2 every=30 hold=4
+# until text start timeout=600 every=2  [reached dingbat-bios+0 mgba+0 nba+28]
+wait 32
+wait 10
+press A
+# until text GO timeout=600 every=1  [reached dingbat-bios+125 mgba+125 nba+124]
+wait 129
+hold A
+wait 200
+release
+checkpoint practice_course window=30
