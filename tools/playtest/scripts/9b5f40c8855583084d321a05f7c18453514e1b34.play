@@ -1,0 +1,97 @@
+@title Trick Star (Europe) (En,Fr,De,Es,It)
+@file Trickstar (E) (M5).gba
+@game B9SP
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+# Language select: English (the default, A; the choice is written to the
+# EEPROM at once, 87 bytes), title, new game, slot 1, main menu, League Mode,
+# Sam Kisake, the ibex fk 10 bike: reaching the Ibex League screen writes the
+# slot (byte 7 and the checksum at 117 change). Egyptron, Now up..., the
+# grid; A is held only from 300 frames after the start (a held A through the
+# countdown gives mgba a boost start alone) and the race is left 300 frames
+# later. [load]: language, title, game select with load game lit, A, the
+# slot list (1: Ibex League - Egyptron, Sam with the red bike), A, main menu.
+# [load] was resolved on dingbat-bios and mgba only: nba does not recognise
+# the save it wrote itself. It writes the 4 Kbit EEPROM's data into an
+# 8192-byte file (the first 512 bytes equal the other two's 512-byte files),
+# and booted with that file it shows load game greyed out and the slot list
+# as New game / slot is empty (f1662, f1848), so its own-save [load] cell
+# follows a new game, and booting changes its file (load nba-in-nba
+# unchanged=False). dingbat and mgba read nba's 8192-byte file as the save
+# (their nba-save cells match their own-save runs).
+# Seen while authoring:
+# - Language select (f900 on, static): the unselected names are OBJ-mode-1
+#   letters (palette 14, colour 0x0017) over BG3's box (palette 44, 0x62F2),
+#   BLDCNT 0x1840, BLDALPHA 0x0808. dingbat draws (23,0,0)+(18,23,24) as
+#   (20,11,12) and the white 0x7FFF letters as (24,27,27), the 5-bit
+#   min(31,(a*8+b*8)>>4); both references draw (21,11,12) and (25,27,28),
+#   which is that sum taken on 8-bit expanded channels (x<<3|x>>2). 1700
+#   pixels; dingbat's rounding is the one docs/hwprobe-questions.md has from
+#   the SP photographs (colour special effects rounding).
+# - The race clock starts at a different frame on each emulator: at f3654
+#   dingbat-bios reads 0:04:68, mgba 0:04:80, nba 0:04:64, so the countdown
+#   ends about 7 frames earlier on mgba and 2 later on nba than on dingbat;
+#   with A held through the countdown only mgba gets the boost start (167
+#   kph against 80 and 78). With A held from f3654 the bike's speed and line
+#   agree on dingbat-bios and mgba; nba's speed reads 2-3 kph apart (f3804
+#   146 against 149) and the three drift apart once the bike touches a wall.
+
+[new]
+wait 300
+wait 300
+wait 300
+wait 300
+checkpoint language window=30
+press A
+wait 120
+wait 120
+checkpoint title window=30
+press START
+wait 90
+wait 60
+press A
+wait 120
+checkpoint slot_select window=30
+press A
+wait 120
+checkpoint main_menu window=30
+press A
+wait 120
+checkpoint character_select window=30
+press A
+wait 120
+press A
+wait 150
+checkpoint league window=30
+press A
+wait 200
+wait 200
+wait 60
+press A
+wait 200
+checkpoint race_start window=30
+wait 300
+hold A
+wait 300
+checkpoint racing window=30
+release
+
+[load]
+wait 300
+wait 300
+wait 300
+wait 300
+wait 60
+press A
+wait 120
+wait 120
+wait 60
+press START
+wait 90
+checkpoint game_select window=30
+press A
+wait 120
+checkpoint load_slots window=30
+press A
+wait 120
+checkpoint main_menu window=30
