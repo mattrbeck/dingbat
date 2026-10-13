@@ -1,0 +1,80 @@
+@title Sonic The Hedgehog - Genesis (USA)
+@file Sonic The Hedgehog - Genesis (U).gba
+@game BIJE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# Health screen, title, Original Mode, Green Hill Act 1: run right, jump the
+# first Motobug, pause on the slope, Quit back to the title. The game writes
+# its 4Kbit EEPROM on its own: a 5-byte header block on the first boot, the
+# whole 512 bytes when the act starts, and again on Quit (header, 0x0F=1,
+# 0x2D=3). Nothing in that save shows on screen: zone progress (the zone
+# select's "2 ???") is the first visible save and needs Green Hill's three
+# acts and the boss, which a frozen timeline cannot carry here (below), and
+# the SE/BGM options are not saved at all (tried: both OFF, back to ON after
+# a reboot). [load]: title, Original Mode, the zone select; dingbat and mgba
+# boot their save without touching it.
+# Findings (per-frame hashes): dingbat and mgba draw the same frames through
+# the menus and the act's start; landing from the Motobug jump dingbat
+# falls one frame behind mgba (f2481; f2482-f2494 dingbat shows mgba's
+# previous frame), so the pause checkpoint (f2529) has the camera a few
+# pixels apart (MINOR). The port runs the game below 60 fps, presumably with
+# repeated frames set by the CPU time each takes. nba falls behind both from
+# the act's title card (f2101) on and stays several frames off. Playing on
+# (dingbat and mgba only, not kept) dingbat had picked up 3 rings to mgba's
+# 2 by f2593 crossing the Chopper bridge, which is why the script stops here.
+# nba does not read back its own 8 KB battery file: it re-initialises the
+# header block on every boot (its nba-in-nba [load] cell rewrites the save).
+[new]
+wait 300
+wait 60
+press A
+wait 300
+# until text PRESS timeout=1800 every=15  [reached dingbat-bios+735 mgba+735 nba+735]
+wait 739
+wait 30
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press A
+wait 90
+checkpoint zone_select window=30
+press A
+wait 200
+wait 120
+wait 60
+checkpoint act1_start window=30
+hold RIGHT
+wait 160
+press RIGHT+A hold=20
+hold RIGHT
+wait 60
+release
+press START
+wait 30
+checkpoint pause window=30 compare=text
+press DOWN after=10
+press A
+wait 120
+# until text PRESS timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 30
+press START
+wait 90
+checkpoint main_menu_again window=30
+
+[load]
+wait 300
+wait 60
+press A
+wait 300
+wait 739
+wait 30
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press A
+wait 90
+checkpoint zone_select window=30
