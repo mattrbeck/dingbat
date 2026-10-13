@@ -4880,4 +4880,115 @@ references where they agree at the same frame, f7306 (a bone at Nathan's
 feet); from there the runs fork, and where the old build's fork happened
 to rejoin the references at f7990 (MINOR), the new one has Nathan
 elsewhere in the shaft. The f7306 divergence predates this change and is
-not explained here; no `@known` added.
+not explained here; no `@known` added. (Settled in the next section: the
+skeletons' throws are random draws no two emulators share.)
+
+## §NEXT. Castlevania - Circle of the Moon: the skeletons' bones are an idle-loop RNG, and no two emulators share it, 2026-10-13
+
+**Symptom.** With `ROM_DATA_NONSEQ` (the section above) `shaft_bottom`
+went MINOR -> MAJOR in all four dingbat configurations: Nathan knocked
+elsewhere in the shaft by a bone, where both references (MINOR to each
+other) have him on the bottom ledge. Old and new builds alike first differ
+from both references, where those agree, at f7306: a bone at Nathan's feet
+in dingbat, none in view in mGBA or the second reference.
+
+**Cause: nobody's; the checkpoint compares random draws.** The f7306
+"agreement" is a single frame. Every frame hash f7000-f7989: mGBA and the
+second reference agree on 86 of 990 frames (they part off and on from the
+first frames, and on nearly every frame from f6879); the old build met
+mGBA on 391, the new one on 292. At f7306 the two references happen to
+show no bone at all.
+
+**The RNG.** RAM read every frame in dingbat-bios and mGBA, from f0: past
+the stack, the one word that differs from f7 on is 0x0200A260. `watchw`
+finds its writer:
+
+* 0x080057D4 (Thumb, ROM): unless the pause byte 0x02025FFA is set,
+  `[0x0200A260] += 1` (0 skipped). The main loop at 0x080003C8-0x080003D2
+  calls it in a loop until the V-blank handler clears the halfword at
+  0x02021EA2: once per idle iteration, so the word counts idle loop passes
+  since boot.
+* 0x080057F8, rand(): `t = s ^ (s >> 16); s += ((s * 0x499602D2) ^ (t <<
+  8)) - t`. 0x08005820, rand(n): `(rand() * n) >> 32` through the 64-bit
+  multiply at 0x080C37B4.
+
+A Python model of rand() reproduces every jump in the word between two
+frames as `R^k(s + a) + b` (a + b = the idle passes on either side of the
+work), so each rand call can be read off the per-frame peeks of all three
+emulators. On the script's path: 130 calls at f5317-f5329 (the Dracula
+scene), five rand(0x1F) at f7043 and the skeletons' rand(0x3D) from f7094:
+
+| | state fed at the skeletons' draws | draws (`rand*61>>32`) | frames |
+|---|---|---|---|
+| dingbat-bios | 0x5B227822, 0x3F0338D0, 0x53F33F1F | 15, 20, 23 | f7094, f7135, f7177 |
+| old build (`-d:ROM_DATA_NONSEQ=false`) | 0x7375BFE2, 0xF751104D, 0x555B3317 | 58, 20, 23 | f7094, f7146, f7188 |
+| mGBA | 0x9215FD7D, 0x3B2F502B, 0x08CA3414 | 14, 2, 48 | f7094, f7135, f7173 |
+| second reference (its peek, a frame late) | 0x2822870C, 0x9CC90147, 0xE4E2DC0A | 37, 54, 41 | f7095, f7141, f7192 |
+
+Every draw differs between the two references (and between each of them
+and both dingbat builds); a draw is one of 61, so any difference in the
+state gives another throw. The old build's MINOR was a draw that happened
+not to hit Nathan. The change moves the idle count from f401 on (by f5316
+the old build counts 765 passes more: its gamepak loads from RAM and BIOS
+code were cheaper), so the Dracula scene's draws already differ (old and new
+frames first differ at f5318), and every later one.
+
+**Why the states differ: every cycle since boot counts.** Idle passes per
+frame (the word's increments) on the boot screen, f9-f40: dingbat 3065, the
+second reference 3065, mGBA 3398; in the shaft (f6990): 2543, 2550, 2875.
+Until the first draw the word is a pure count. At f5316, the frame before
+it: dingbat 11,584,412 passes; the second reference 11,478 more (0.1%: it
+starts counting a frame earlier, 879 passes in its first counting frame
+where dingbat and mGBA count 1289 and 1292 at f7, and runs a few passes a
+frame more here and there, 2235 against 2164 at f4000); mGBA 1,413,981
+more (12%). One pass of difference already gives the Dracula scene's 130
+draws, and everything after, other values. 0x0202534C records when each
+frame's work ends (VCOUNT, read just before the idle wait): 0xB0 in all three
+early on, in the shaft 0xD0 in dingbat and the second reference and 0xCC
+in mGBA.
+
+**The idle loop's cost**, WAITCNT 0x45B7 (WS0 N 4, S 2, prefetcher on),
+`trace` / `pft` of one pass: dingbat 84 cycles, mGBA 76. The bus floor,
+instruction by instruction (fetch + data + I; a fetch is 1 cycle only
+when the prefetcher had free gamepak cycles to read it ahead):
+
+| instruction | floor | dingbat | why |
+|---|---|---|---|
+| `bl` (first half) 0x080003C8 | 2 | 2 | the refill before it kept the bus busy: S |
+| `bl` (second half) | 8 | 8 | S, then N+S at 0x080057D4 |
+| `ldr r0,[pc]` | 9 | 9 | S fetch (right after the refill), gamepak word N+S 6, I |
+| `ldrb r0,[r0,#10]` (EWRAM) | 8 | 8 | fetch N 4: after a gamepak load the prefetcher stays stopped through the I cycle (alyosha prefetcher_branch_thumb_2, hardware-verified; section 29), EWRAM 3, I |
+| `cmp`, `bne` (not taken) | 2 | 2 | prefetched |
+| `ldr r1,[pc]` | 8 | 9 | +1: the prefetcher's halfword in its final cycle has committed and the load waits it out (mGBA suite Timing, ROM prefetch columns) |
+| `ldr r0,[r1]` (EWRAM word) | 11 | 11 | fetch N 4 (as above), 6, I |
+| `adds`, `str r0,[r1]`, `cmp` | 9 | 9 | EWRAM word store 6 |
+| `bne` (taken, +6) | 3 | 3 | the target is the prefetcher's next halfword: the buffer is kept (alyosha prefetcher_branch_thumb) |
+| `bx lr` | 7 | 7 | N+S at 0x080003CC |
+| `ldrh r0,[r5,#18]` (EWRAM) | 6 | 6 | S fetch after the refill, 3, I |
+| `lsls`, `cmp` | 2 | 2 | |
+| `blt` (taken) | 7 | 8 | +1: a branch waits out a committed prefetch halfword (`BRANCH_COMMIT_WAIT`, console-measured, section 29 `slotbranch`) |
+| **pass** | **82** | **84** | |
+
+mGBA's 76 is 6 under that floor, exactly what the two fetches after the
+gamepak loads cost at 1 instead of 4, the prefetcher_branch_thumb_2 law
+(a test both references fail, section 29); so mGBA runs 11-13% more idle
+passes a frame. The second reference's equal
+count on the boot screen (3065 a frame, ending its work on the same line)
+says it charges this loop what dingbat does; its RNG still differs from its
+first counting frame, and its count in the shaft by a few passes a frame
+(other code, not traced: it has no `trace`).
+
+**Settled, no core change.** A checkpoint after the skeletons' first draw
+compares where one-in-61 throws land, seeded by the exact cycle count of
+every frame since boot. No emulator is known to match the console's count;
+the two references do not match each other's at any frame. The script
+carries `@known * checkpoint shaft_bottom:` citing this section; all four
+dingbat configurations PASS with it (the other checkpoints unchanged:
+`plank_shaft` IDENTICAL to mGBA, `map` MINOR where the references are MINOR
+to each other).
+
+Also seen, not chased: f7035-f7041 and f7048-f7054, the white flash
+(BLDCNT 0xFF00, BLDY ramping 2..16..2 in mGBA), differ between dingbat and
+mGBA in the red channel only, one 5-bit step, with RAM and palette RAM
+identical: a brighten-rounding question (section 40 measured darken), not
+a game-state difference.

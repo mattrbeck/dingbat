@@ -4,6 +4,7 @@
 @chip SRAM
 @frozen dingbat-bios,mgba,nba
 @save skip: the first save room is further into the Catacombs (past the bone-throwing skeletons, down the plank shaft and along to the Dash Boots area); the skeletons' bone throws run on different frames in each emulator, so the first hit lands differently and the three runs drift apart
+@known * checkpoint shaft_bottom: -- §NEXT Circle of the Moon: the skeletons draw (rand*61)>>32 from an RNG the idle loop bumps once an iteration, so it counts every cycle since boot; no two emulators share a state from f7 on (mGBA's idle loop 6 cycles under its bus floor), and the references meet at f7306 only on a frame with no bone in view
 # DATA SELECT > empty file > name AA > opening dialog (A taps) > Nathan lands
 # in the Catacombs; walk to the left wall, then right and down the shaft of
 # wooden planks past the skeletons to the bottom ledge.
@@ -16,6 +17,10 @@
 #   different places at f7790 in all three. After the hit at ~f8058 the
 #   knockback differs and by f8178 dingbat-bios and mgba show different
 #   camera positions.
+# - 2026-10-13 (docs/playtest-bugs.md, Circle of the Moon section): the RNG
+#   word at 0x0200A260 is bumped once per idle-loop iteration
+#   (0x080003C8-0x080003D2 calling 0x080057D4) and stepped by rand() at
+#   0x080057F8; the skeletons' throws are rand(61) draws, f7094 on.
 
 [new]
 wait 600
