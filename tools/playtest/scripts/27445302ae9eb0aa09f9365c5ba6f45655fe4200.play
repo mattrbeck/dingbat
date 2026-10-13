@@ -1,0 +1,77 @@
+@title Super Robot Taisen J (Japan)
+@file Super Robot Taisen J (J).gba
+@game B6JJ
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+
+# START past the opening movie, START on the title; new game with the
+# default protagonist (紫雲統夜) and machine (ベルゼルート), 決定 on the
+# settings, favourites オリジナル + the next two to the right (Gガンダム,
+# ガンダムSEED), はい. In the first story scene START brings up
+# セーブしますか?; はい writes the scene save (the title then offers CONTINUE;
+# LOAD stays empty) and the scene carries on. [load]: CONTINUE resumes in that
+# scene; one more line of dialogue.
+# Seen while authoring: in the opening movie (f900) mgba draws the moon's halo
+# much darker than dingbat-bios and nba, which agree; the story scene's
+# gradient/text-box blend differs by a step in a few rows on all three, and
+# the menus' animated hex backgrounds are in different phases. Saves:
+# dingbat-bios and nba byte-identical, mgba differs in 10 bytes (a counter at
+# 0xC00C and the checksums).
+[new]
+wait 600
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+press A
+wait 120
+press START
+wait 120
+checkpoint protagonist window=30
+press A
+wait 90
+checkpoint mecha window=30
+press A
+wait 90
+checkpoint confirm window=30
+press A
+wait 120
+checkpoint favorites window=30
+press A
+wait 30
+press RIGHT
+wait 30
+press A
+wait 30
+press RIGHT
+wait 30
+press A
+wait 60
+press A
+wait 120
+checkpoint story window=30
+press START
+wait 60
+checkpoint save_prompt window=30
+press LEFT
+wait 20
+press A
+wait 90
+wait 60
+checkpoint saved window=30
+
+[load]
+wait 900
+press START
+wait 120
+press START
+wait 90
+checkpoint title_menu window=30
+press A
+wait 120
+checkpoint resumed window=30
+press A
+wait 90
+checkpoint next_line window=30
