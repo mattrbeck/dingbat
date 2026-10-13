@@ -1,0 +1,210 @@
+@title Shining Soul II (USA)
+@file Shining Soul II (U).gba
+@game AU2E
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+# Single Player > file 1 > New Game, Warrior "Eric" (default name), START
+# skips the book intro; the first slime by the tutorial NPC (level up), the
+# colosseum and throne-room scenes, then out to the castle-town plaza: the
+# START ring menu > Window (down) > A explains suspend saves, Yes writes the
+# file and returns to the title. [load]: file 1 > Continue resumes asleep in
+# Eric's bed in the castle's west room; RIGHT wakes him.
+# Seen while recording: nba types dialogue and bobs the file-select cursor a
+# frame behind dingbat-bios/mgba (the screens agree a frame later); the world
+# map's drifting clouds differ in all three. dingbat-bios and mgba write
+# byte-identical saves (380 non-blank bytes); nba's differs (399).
+
+[new]
+wait 300
+# until text START timeout=2000 every=10  [reached dingbat-bios+240 mgba+240 nba+240]
+wait 244
+wait 60
+checkpoint title window=30
+press START
+wait 90
+press A
+wait 120
+wait 30
+checkpoint file_select window=30
+press A
+wait 90
+press A
+wait 120
+# until notblank timeout=1500 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 60
+press A
+wait 60
+wait 60
+checkpoint char_select window=30
+press A
+wait 90
+press A
+wait 90
+checkpoint name_entry window=30
+press START
+wait 90
+press A
+wait 120
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+press START
+wait 120
+# until notblank timeout=1500 every=10  [reached dingbat-bios+200 mgba+200 nba+200]
+wait 204
+wait 60
+tap A times=20 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=60 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=10 every=20 hold=4
+press RIGHT hold=20
+wait 10
+tap A times=5 every=20 hold=4
+press RIGHT hold=10
+tap A times=8 every=15 hold=4
+press RIGHT hold=10
+tap A times=8 every=15 hold=4
+checkpoint level_up window=30
+tap A times=40 every=30 hold=4
+wait 60
+press LEFT hold=40
+tap A times=3 every=30 hold=4
+wait 30
+tap A times=4 every=30 hold=4
+press UP hold=120
+wait 20
+tap A times=6 every=30 hold=4
+wait 60
+press A
+wait 30
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press RIGHT hold=20
+press UP hold=180
+wait 20
+tap A times=3 every=30 hold=4
+wait 60
+# until notblank timeout=1500 every=10  [reached dingbat-bios+190 mgba+190 nba+190]
+wait 194
+wait 60
+tap A times=60 every=30 hold=4
+tap A times=60 every=30 hold=4
+tap A times=60 every=30 hold=4
+tap A times=60 every=30 hold=4
+tap A times=60 every=30 hold=4
+# until notblank timeout=2000 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
+wait 60
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+press DOWN hold=200
+wait 30
+press DOWN hold=240
+wait 30
+press DOWN hold=200
+wait 30
+press START
+wait 30
+press DOWN
+wait 20
+press A
+wait 40
+press DOWN
+wait 30
+wait 60
+press A
+wait 40
+wait 40
+wait 40
+press A
+wait 40
+wait 40
+press A
+wait 40
+wait 40
+press A
+wait 40
+wait 40
+press A
+wait 40
+wait 40
+press A
+wait 40
+wait 40
+press A
+wait 40
+wait 40
+press A
+wait 40
+wait 40
+press A
+wait 40
+wait 40
+checkpoint save_prompt window=30
+press A
+wait 60
+# until changed timeout=1200 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 30
+wait 20
+checkpoint saved window=30
+press A
+wait 120
+wait 60
+
+
+[load]
+wait 300
+# until text START timeout=2000 every=10  [reached dingbat-bios+240 mgba+240 nba+240]
+wait 244
+wait 60
+press START
+wait 90
+press A
+wait 150
+wait 30
+checkpoint file_select window=30
+press A
+wait 90
+press A
+wait 120
+# until notblank timeout=1500 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
+wait 60
+checkpoint resumed window=30
+tap A times=4 every=40 hold=4
+press DOWN hold=60
+wait 30
+press RIGHT hold=60
+wait 30
+wait 60
+press RIGHT hold=40
+press UP hold=40
+wait 60
+checkpoint walking window=30
+
