@@ -1,0 +1,132 @@
+@title Derby Stallion Advance (Japan)
+@file Derby Stallion Advance (J).gba
+@game A8PJ
+@chip FLASH512
+@frozen dingbat-bios,mgba
+
+# Japanese text: OCR reads none of it, so the route was found from
+# screenshots and is fixed waits and presses.
+# Title (START, GAME START): the first boot with a blank flash shows black
+# while the game formats it. Main menu: 新しい牧場 (new ranch), name "ああ"
+# (A A, START to END, A), the first silks and blinkers (決定, なし), はい, and
+# overwrite the first of the two preset ranches (ダビスタ牧場). On the ranch,
+# A on the mare in the paddock, A through the trainer's lines, the first
+# stallion on the Fee list (アンバーシャダイ, 2000万円), はい: she is bred. Cursor
+# to the house (記録室 / 展示室 / 顕彰馬 menu), B, START puts the cursor on the
+# ranch sign (終了), A, はい ("もうお帰り?"): "データをセーブ中です", then
+# "データをセーブしました 本体の電源を切ってください". [load]: the main menu
+# lists "ああ 牧場" first; A resumes the ranch, A on the mare shows 種付済.
+# Frozen on dingbat-bios + mgba only: nba rolls different random numbers.
+# The blank-flash boot (after GAME START) stays black for 96 frames on
+# dingbat-bios, 119 on mgba and 240 on nba (with a save present it is 25 on
+# both); on nba the same inputs then create the ranch with a different mare
+# (in the first session ハナノミヤコ where dingbat-bios and mgba both had
+# ナミノマニマニ, f3256), and the trainer's lines and the stallion list's
+# colours differ from there on. The mare's name depends on the frame the
+# inputs land on (a second session with other waits gave ステージママ in both
+# dingbat-bios and mgba). Replaying this script nba gets キラメクスタイル but
+# its menus follow the same route to the save, and every save loads
+# everywhere.
+# Seen while authoring: the title's scroll is a frame apart on mgba; the
+# name-entry cursor blink and the mare's paddock walk differ by a frame here
+# and there. The final save: dingbat-bios leaves "セーブ中" about 70 frames
+# after mgba does (until changed from f4275: dingbat-bios+30, mgba+2; on an
+# earlier, smaller save without the breeding dingbat-bios was 25 frames
+# faster). dingbat-bios's and mgba's saves (the same files live and in the
+# replay) differ in 9 bytes, 0x04-0x07, 0x10-0x13 and 0x22F3 (the run
+# reports 17 bytes / 2 ranges); nba's (another mare) in 54.
+[new]
+wait 300
+wait 300
+wait 300
+wait 300
+wait 300
+wait 200
+checkpoint title window=30
+press START
+wait 120
+press START
+# until blank timeout=600 every=1  [reached dingbat-bios+13 mgba+13]
+wait 17
+# until notblank timeout=600 every=1  [reached dingbat-bios+96 mgba+119]
+wait 123
+wait 120
+checkpoint main_menu window=30
+tap DOWN times=2 every=12 hold=4
+wait 20
+press A
+wait 120
+checkpoint ranch_name window=30
+press A
+wait 20
+press A
+wait 20
+press START
+wait 30
+press A
+wait 90
+press A
+wait 90
+press A
+wait 90
+press A
+wait 90
+press A
+wait 120
+checkpoint overwrite_slot window=30
+press A
+wait 90
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+wait 60
+checkpoint stallion_fee window=30
+press A
+wait 90
+wait 60
+tap UP times=3 every=12 hold=4
+wait 20
+press A
+wait 90
+checkpoint house_menu window=30
+press B
+wait 40
+press START
+wait 40
+press A
+wait 60
+press A
+# until blank timeout=600 every=1  [reached dingbat-bios+38 mgba+37]
+wait 42
+# until notblank timeout=600 every=1  [reached dingbat-bios+3 mgba+3]
+wait 7
+wait 20
+checkpoint saving window=0
+# until stable 60 timeout=900 every=2  [reached dingbat-bios+120 mgba+240]
+wait 244
+checkpoint saved window=30
+
+[load]
+wait 1700
+press START
+wait 120
+press START
+# until blank timeout=600 every=1  [reached dingbat-bios+13 mgba+13]
+wait 17
+# until notblank timeout=600 every=1  [reached dingbat-bios+25 mgba+25]
+wait 29
+wait 120
+checkpoint main_menu_saved window=30
+press A
+wait 120
+checkpoint ranch_resumed window=30
+press A
+wait 60
+wait 30
+checkpoint mare_bred window=30
+
