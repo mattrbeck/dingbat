@@ -1,0 +1,142 @@
+@title Lufia - The Ruins of Lore (USA)
+@file Lufia - The Ruins of Lore (U) [!].gba
+@game AGDE
+@chip SRAM (no save library string; every emulator writes 32 KB)
+@frozen dingbat-bios,mgba,nba
+# New Game, the prologue and the Parcelyte opening by A every 30 frames, the
+# field menu (SELECT), the inn (stay; it does not save), then up the stairs
+# north of the inn to the church: the priest's Save writes the file.
+# [load]: Continue > Continue from Save, resume in the church, walk out.
+# Seen while recording: the church candle flames flicker differently on all
+# three at the same frame (church_menu backdrop, resumed), mgba's chimney
+# smoke over the inn is on another step (field_menu), and nba types the
+# prologue text and opens the Continue box a frame behind. The three saves
+# differ (304 non-blank bytes each).
+
+[new]
+wait 600
+# until notblank timeout=1500 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
+wait 60
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press A
+wait 120
+# until notblank timeout=1500 every=10  [reached dingbat-bios+70 mgba+70 nba+80]
+wait 84
+wait 60
+# until stable 30 timeout=900 every=5  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
+press A
+wait 120
+# until changed timeout=1200 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 120
+press START
+wait 120
+wait 600
+wait 600
+tap A times=100 every=30 hold=4
+tap A times=50 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=40 every=30 hold=4
+wait 60
+wait 120
+tap A times=40 every=30 hold=4
+wait 120
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+press LEFT hold=24
+wait 10
+press SELECT
+wait 40
+checkpoint field_menu window=30
+press B
+wait 30
+press LEFT hold=64
+press DOWN hold=40
+wait 10
+press DOWN hold=8
+press RIGHT hold=40
+wait 10
+press DOWN hold=10
+press RIGHT hold=16
+press UP hold=30
+wait 60
+press UP hold=24
+press LEFT hold=4
+press UP hold=4
+press A
+wait 60
+press A
+wait 60
+press UP hold=10
+press A
+wait 60
+wait 60
+press A
+wait 60
+wait 20
+press A
+wait 60
+tap A times=6 every=40 hold=4
+# until notblank timeout=1200 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 60
+press A
+wait 60
+press RIGHT hold=4
+press DOWN hold=60
+wait 60
+press DOWN hold=30
+wait 10
+press LEFT hold=50
+press UP hold=150
+wait 10
+press RIGHT hold=10
+press UP hold=120
+wait 10
+# until notblank timeout=600 every=5  [reached dingbat-bios+25 mgba+25 nba+30]
+wait 34
+wait 40
+press UP hold=150
+wait 10
+press A
+wait 90
+wait 60
+press A
+wait 60
+checkpoint church_menu window=30
+press A
+wait 60
+checkpoint saved window=30
+wait 60
+
+[load]
+wait 600
+wait 34
+wait 60
+press START
+wait 120
+press START
+wait 90
+checkpoint continue_menu window=30
+press A
+wait 90
+checkpoint load_file window=30
+press A
+wait 60
+checkpoint resumed window=30
+press DOWN hold=150
+wait 10
+# until notblank timeout=600 every=5  [reached dingbat-bios+5 mgba+0 nba+5]
+wait 9
+wait 40
+checkpoint outside_church window=30
