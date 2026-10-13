@@ -10,21 +10,18 @@
 # grab a Moo, collect a gem, jump up the ledges, pause, Select Vision back to
 # the vision map. [load]: the title adds CONTINUE, file 1 shows World 1
 # Western Jungle, YES resumes on the Vision 1-1 map.
-# Findings (per-frame hashes of the frozen timeline, the three official-BIOS
-# emulators): on the title (f721-f1200) dingbat's spinning logo star runs one
-# frame ahead of mgba and nba, which agree, and on the world map (f2041-f2400)
-# two frames off them; the checkpoint windows absorb both. Entering Vision 1-1, the frames are identical up
-# to f4453 (the black between the hint and the level); from f4454, the white
-# mosaic fade-in, dingbat's frames never again match either reference at any
-# lag within 20 frames while mgba and nba agree frame for frame through the
-# card (to f4800; they drift apart later in the level): dingbat's
-# fade is a step further on (f4454, f4470), the VISION 1-1 card a few pixels
-# further along and the HUD hearts at another phase (f4500), and Klonoa about
-# 3 px left of where the references have him at the gameplay checkpoint
-# (f5178), so level_start and gameplay fail in every dingbat configuration.
-# dingbat's own saves still load in mgba and nba. A driver built with
-# -d:EEPROM_SETTLE_CYCLES=115005 (the Klonoa - Empire of Dreams fix) changes
-# nothing here. Elsewhere the references disagree with each other
+# Findings: dingbat used to run the game's loads fast -- the title's star
+# a frame ahead of mgba and nba, the world map two, then from f4454 (the
+# white mosaic fade-in to Vision 1-1) never matching either reference again
+# (the fade a step on, the HUD hearts at another phase, Klonoa ~3 px left at
+# gameplay), so level_start and gameplay failed in every dingbat
+# configuration. The loads are Nintendo's HuffUnComp with the tree in the
+# cartridge, and dingbat priced a lone byte load from the gamepak S when it
+# read the halfword after the previous one, under the prefetcher; GBATEK and
+# the ARM7TDMI make it N. Fixed (docs/playtest-bugs.md, "Klonoa 2"):
+# dingbat-bios now differs from mgba on no frame where mgba and nba agree
+# (f700-f5300). dingbat's own saves load in mgba and nba.
+# Elsewhere the references disagree with each other
 # (backgrounds scroll at different phases on the file select and vision map).
 # nba does not read back its own 8 KB battery file: on [load] its title has
 # no CONTINUE (f1226) and its file 1 is NO DATA, so it starts a new game.

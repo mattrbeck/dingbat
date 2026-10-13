@@ -37,6 +37,14 @@ TABLE = {
     # tests/roms/payloads/probe.inc held to the console: dmaphase's controls,
     # a multiply period and three NOP phases, rebuilt from the kit
     'kitdemo': [0x80, 0xB0] + list(range(0x00, 0x07)) + [0x30, 0x31, 0x32],
+    # a lone gamepak load from IWRAM two NOPs after one at the halfword
+    # before it (ldrh, then ldrb at odd addresses), at k = 0..3 phases,
+    # prefetcher off / on, against a load of another address; then (bit 6,
+    # slot empty) the halfword read: addr >> 1 for an N access, 0xFFFF for
+    # an S one (docs/playtest-bugs.md, "Klonoa 2")
+    'romdataseq': ([b | p | c | k for b in (0, 0x80) for p in (0, 0x10) for c in (0, 0x20)
+                    for k in range(4)]
+                   + [0x40, 0x50, 0x60, 0x70]),
     # alyosha timer_reset's DMA race: k = 0..7 NOPs, DMA1 alone, DMA0 alone
     'tmrdma': list(range(0, 8)) + [0x10, 0x20],
     # the instruction after an immediate DMA's enable, ARM then Thumb

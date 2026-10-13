@@ -203,11 +203,26 @@ proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inlin
       return max(1, need - int(gap))  # a full buffer serves even a 32-bit fetch in one cycle
   bus.pf_serve_stopped(now, page, halves)
 
+# A CPU data access is a nonsequential bus cycle: in the ARM7TDMI data sheet
+# a single load's or store's data cycle (and an LDM/STM's first transfer) has
+# SEQ low; only the later transfers of an LDM/STM, back to back, are
+# sequential. The prefetch bit does not change that -- GBATEK, "GamePak
+# Prefetch": the feature works only with opcodes fetched from the gamepak,
+# and code in RAM or the BIOS reading data from it is not affected. With
+# -d:ROM_DATA_NONSEQ=false (the rule before), a data access that continued
+# the previous ROM access's address was sequential under the prefetcher
+# however long the CPU had been off the ROM bus: Nintendo's HuffUnComp,
+# walking a tree in the cartridge, took S for a node read after its
+# neighbour, and Klonoa 2's loads ended a frame early (docs/playtest-bugs.md,
+# "Klonoa 2").
+const ROM_DATA_NONSEQ {.booldefine.} = true
+
 proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
   ## Cycle cost of a ROM-region (pages 8-D) access, tracking burst
   ## sequentiality and the prefetch buffer. Sequential = the address
-  ## continues the previous ROM access; with the prefetch buffer off the
-  ## burst additionally breaks whenever the CPU spent cycles off the ROM bus.
+  ## continues the previous ROM access; a CPU data access, and with the
+  ## prefetch buffer off a fetch too, additionally breaks the burst whenever
+  ## the CPU spent cycles off the ROM bus (ROM_DATA_NONSEQ).
   let page = int(bits_range(address, 24, 27))
   let now = bus.bus_now()
   let contiguous = now == bus.rom_free_since
@@ -234,9 +249,11 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       seq = false
       bus.rom_next_addr2 = bus.rom_next_addr
       bus.rom_next_addr = address
-  else:
+  elif fetch or not ROM_DATA_NONSEQ:
     seq = address == bus.rom_next_addr and
           (bus.prefetch_on or contiguous or (fetch and bus.pf_paused))
+  else:
+    seq = address == bus.rom_next_addr and contiguous
   when defined(fetchprof):
     fetchprof[if fetch: 4 else: 5].inc
   var cost: int

@@ -4757,3 +4757,127 @@ after it differs (117/120/123), so the saves differ in 6 bytes; every save
 loads in every emulator. The audio windows count against dingbat only where
 the two references agree, and the music they share keeps agreeing while each
 emulator's fight sounds differ. The script carries `@known` for the audio.
+
+## §NEXT. Klonoa 2: Nintendo's HuffUnComp ran fast, a lone gamepak byte load priced sequential, 2026-10-13
+
+**Symptom.** The new Klonoa 2 - Dream Champ Tournament script
+(`35c05676....play`) failed `level_start` and `gameplay` MAJOR in all four
+dingbat configurations while mGBA and the second reference agreed frame for
+frame: from f4454, the white mosaic fade-in to Vision 1-1, dingbat's fade
+was a step on, the HUD hearts at another phase and Klonoa ~3 px left of the
+references at f5178. Earlier, the title's spinning star ran a frame ahead
+and the world map two; the checkpoint windows had absorbed those.
+
+**dingbat was early, by whole frames of the game's own counter.** RAM read
+every frame in dingbat-bios and mGBA (the second reference's `peek` lands a
+frame off theirs, so it served as a cross-check only): the first
+difference that is not the stack is a loader's EWRAM buffers at f738-f789,
+filled further in dingbat at every frame end. The game keeps a frame counter
+at 0x03004CA4 that stops during loads; it restarts at f789 in dingbat and
+f790 in mGBA (the title load), and dingbat is two counts ahead from f1842 on
+-- and so is everything phased on it (a 15-step cycle at 0x03005D1A, the
+star, the hearts). Entering Vision 1-1 both stop it on the same frame
+(f4404, the button press) and restart it on the same frame (f4454), so the
+two-count lead shows only from the fade on; Klonoa's position follows,
+since the input timeline meets the level's start two game frames later in
+the references.
+
+**The loop.** `trace` of f737-f860 in both (dingbat r15 leads by 8 in ARM,
+mGBA by 4): the load frames are almost all Nintendo's BIOS, 0x1064-0x10E8,
+HuffUnComp's tree walk (ARM, from the BIOS), with the tree and bit stream
+in the cartridge; WAITCNT 0x4314 (WS0 N 4, S 2, prefetcher on). Frames
+739-746: the same 2,185,8xx cycles each, 1,192,035 instructions in dingbat
+against 1,183,313 in mGBA (+0.74%). Every instruction costs the same in
+both except the two node reads, `ldrb r6, [r2]` (0x1084) and
+`ldrb r10, [r2]` (0x10B4): mGBA 6 cycles every time; dingbat 4 cycles on
+34,581 of 305,806 (11%) and 14,058 of 86,296 (16%).
+
+**The floor.** A lone `ldrb` from the gamepak executed from the BIOS:
+the BIOS fetch (1), the data cycle, and the internal cycle (1). The ARM7TDMI
+data sheet gives a single load's data cycle SEQ low -- a nonsequential
+cycle -- and GBATEK's "GamePak Prefetch" says the prefetcher works only with
+opcodes fetched from the gamepak: code in RAM or the BIOS that reads data
+from it is not affected. So N = 4 at WS0 3 waits, 6 in all, every time:
+both references' figure. dingbat's 4 is an S (2).
+
+**Why dingbat took S.** `rom_access_cycles` called a CPU access sequential
+when it read `rom_next_addr` (the previous gamepak access + 2, or + 4) and
+the prefetch bit was set, however long the CPU had been off the gamepak
+bus. A branch out of the gamepak forgets an even `rom_next_addr` -- but an
+odd one is how `leave_rom` keeps the prefetcher's head, so it survives:
+a byte load at an odd address leaves exactly that. The tree walk's next
+node is often the halfword after the last one, two branches later, and
+then it went S. Section 20 had already called this rule modelling rather
+than measurement.
+
+**Fix.** `bus.nim` `ROM_DATA_NONSEQ` (on): a CPU data access is sequential
+only back to back with the previous gamepak access (an LDM/STM's later
+transfers), whatever the prefetch bit; opcode fetches keep their rules, and
+the HLE BIOS's routines make the same bus calls so they follow.
+`-d:ROM_DATA_NONSEQ=false` restores the old rule.
+
+**Evidence and gates.**
+
+* The script, all four dingbat configurations: PASS; `level_start` and
+  `gameplay` IDENTICAL to both references (were MAJOR), `title` IDENTICAL.
+  dingbat-bios's frames f700-f5300 never differ from mGBA where mGBA and the
+  second reference agree (before: from f788 on, and every frame from f4453);
+  the HuffUnComp frames now run 1,183,194 instructions against mGBA's
+  1,183,313, every instruction of the loop at mGBA's cost, and the game's
+  frame counter at 0x03004CA4 equals mGBA's on every frame f1-f4459.
+* `tools/knobsweep.py --suite`, the new rule against the old as a knob:
+  console cells 4170/4182 and the mGBA suite 0/13996 FAIL under both
+  BIOSes for both, nothing moved -- no recorded console cell and no suite row rests on the
+  old rule. `test_cyclelaws` (HLE, and real BIOS 2085/2085), `ci_local.py`
+  34/34.
+* `tests/roms/payloads/romdataseq.s` (r0table row `romdataseq`): from
+  IWRAM, `ldrh A`, two NOPs, `ldrh A+2` against `ldrh A+0x100`, and the same
+  as `ldrb` at odd addresses, prefetcher off and on. dingbat, mGBA and the
+  second reference: every A+2 cell equals its control (0x19, 0x1A at k = 0,
+  1); the old rule: 2 less with the prefetcher on (S 3 for N 5). Bit 6 reads
+  the halfword back: with the slot empty the float witnesses the access
+  itself (`addr >> 1` = 0x2001 for N, 0xFFFF for S; WAITCNT 0 and 0x4000 are
+  the safe settings, section 22). Not run on the console yet:
+  `python3 tools/hwlink/r0table.py --record romdataseq`, then `lawrom.py`,
+  puts it in the cycle-law gate.
+
+**The train** (`klonoa2`, 161 games): Klonoa 2 fixed (FAIL -> PASS in all
+four); 99 games neutral, nearly all on the audio dump's hash alone (any
+game whose code in RAM or the BIOS reads the cartridge moves by cycles);
+one regression, Castlevania - Circle of the Moon. Two of the neutral ones
+looked at:
+
+* **Donkey Kong Country**: `kongo_jungle_map` IDENTICAL -> SLIP(+1) against
+  both references (they agree). The old build never differed from them
+  where they agree through f4000; the new one from f2753. Split by where
+  the code runs, the whole move is the BIOS half of the rule (the other
+  half -- DKC's own sample mixer in IWRAM, `ldrsb r1,[r0]; ldrsb
+  r2,[r0,#1]` at 0x030039A0, which mGBA charges 6 every time, as dingbat
+  now does -- changes no frame). The f2400-f2421 load is two
+  LZ77UnCompWram and three HuffUnComp calls; the old rule took S on 8,355
+  node reads there, 16.7k cycles under the floor, and finished ~2.5k cycles
+  before mGBA. Now every instruction of both loops costs what mGBA charges,
+  and the last call returns 7,133 cycles after mGBA's (f2420, line 84
+  against 78), a frame late. By region, f2398 to that return: BIOS code
+  +4.8k, of which +2.7k is renderer contention on HuffUnComp's word stores
+  into VRAM (`streq r3,[r1],#4`: mGBA 3 cycles every time, dingbat 4-8 on
+  1,140 of them; console-measured, `contmap.s`), the game's Thumb ROM code
+  +1.9k (dingbat's prefetcher rules; the alyosha prefetcher ROMs both
+  references fail, section 29), IWRAM code +0.4k; 2.1k of the total had
+  accrued before the first call (the same in the old build). So the old
+  build matched the references by an under-charge cancelling charges they
+  do not make -- section 29's case again; nothing changed for it.
+* **Klonoa - Empire of Dreams** (same engine): `level_start` SLIP(+3) ->
+  IDENTICAL to mGBA; `vision_map` IDENTICAL -> SLIP(+2), where the
+  references disagree with each other (section 40's EEPROM programming time
+  still stands between them).
+
+**Castlevania - Circle of the Moon** (`shaft_bottom` MINOR -> MAJOR, all
+four): not settled. Its script already records the skeletons' bone
+throws parting the emulators (RAM differs from mGBA's from f8 in both
+builds; the RNG looks timing-fed). Both builds first differ from both
+references where they agree at the same frame, f7306 (a bone at Nathan's
+feet); from there the runs fork, and where the old build's fork happened
+to rejoin the references at f7990 (MINOR), the new one has Nathan
+elsewhere in the shaft. The f7306 divergence predates this change and is
+not explained here; no `@known` added.
