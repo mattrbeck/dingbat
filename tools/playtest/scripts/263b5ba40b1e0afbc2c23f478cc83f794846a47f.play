@@ -1,0 +1,97 @@
+@title Tales of the World - Narikiri Dungeon 3 (Japan)
+@file Tales of the World - Narikiri Dungeon 3 (J).gba
+@game B3TJ
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# Japanese text: OCR reads none of it, so the route was found from
+# screenshots and is fixed waits and A taps.
+# Title (PRESS START, はじめから), the prologue over the map of ミナクル (it
+# scrolls on its own; A and START do not skip it) to Brown's first line by
+# his machine, A through the scene to the name entry: keep フリオ and キャロ
+# (START jumps to けってい, A). A through the scenes at home and in town to
+# the town map (あすなろ園, INFO ボーラ). B opens the menu (へんせい ... セーブ):
+# DOWN x8 to セーブ, A, "セーブデータはありません セーブします よろしいですか?"
+# はい: "セーブ中です" then "セーブが終わりました" (フリオ / キャロ なりきりし
+# LV 1, ミナクル の まち, 0:03). [load]: the title offers つづきから, which
+# resumes on the town map; B opens the menu.
+# Seen while authoring: the name-entry cursor and the text cursor blink in
+# a different phase on mgba; nba types dialogue a character behind the
+# others; the prologue's scroll is a frame apart here and there. The
+# dingbat-bios and nba saves are byte-identical; mgba's differs in two bytes
+# (0x0B and 0x9DB, both 1 higher).
+[new]
+wait 300
+wait 300
+wait 300
+checkpoint title window=30
+press START
+wait 90
+press A
+wait 120
+# until notblank timeout=1200 every=5  [reached dingbat-bios+20 mgba+15 nba+20]
+wait 24
+wait 60
+wait 300
+wait 600
+wait 600
+wait 600
+wait 600
+wait 600
+wait 600
+wait 600
+wait 600
+checkpoint first_dialogue window=30
+tap A times=20 every=40 hold=6
+wait 30
+checkpoint name_entry window=30
+press START
+wait 30
+press A
+wait 60
+press START
+wait 30
+press A
+wait 60
+tap A times=20 every=40 hold=6
+wait 30
+tap A times=20 every=40 hold=6
+wait 30
+tap A times=30 every=40 hold=6
+wait 30
+tap A times=40 every=40 hold=6
+wait 30
+checkpoint town_map window=30
+press B
+wait 60
+checkpoint field_menu window=30
+tap DOWN times=8 every=12 hold=4
+wait 20
+press A
+wait 60
+checkpoint save_prompt window=30
+press A
+wait 10
+wait 30
+# until changed timeout=1500 every=2  [reached dingbat-bios+260 mgba+258 nba+262]
+wait 266
+wait 30
+checkpoint saved window=30
+
+[load]
+wait 300
+wait 300
+wait 300
+press START
+wait 90
+checkpoint title_continue window=30
+press A
+wait 90
+# until notblank timeout=600 every=2  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 60
+checkpoint resumed_town window=30
+press B
+wait 60
+checkpoint resumed_menu window=30
+
