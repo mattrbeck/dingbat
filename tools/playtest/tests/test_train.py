@@ -396,6 +396,27 @@ class Store(unittest.TestCase):
             self.assertEqual(sorted(train.fresh_rows(d, blobs)), ['g'])
             self.assertEqual(train.fresh_rows(os.path.join(d, 'nothing'), blobs), {})
 
+    def test_a_script_that_comes_back_finds_its_displaced_row(self):
+        with tempfile.TemporaryDirectory() as d:
+            def run(name, text):
+                od = os.path.join(d, 'runs', name)
+                os.makedirs(od)
+                with open(os.path.join(od, 'script.play'), 'w') as f:
+                    f.write(text)
+                return {'sha1': 'g', 'title': 'G', 'status': 'PASS', 'outdir': od}
+            main, cand = run('main', '@title G\nwait 60\n'), run('cand', '@title G\nwait 30\n')
+            dump({'games': [main]}, os.path.join(d, 'index.json'))
+            before = [main]
+            # a candidate that changed only g's script plays into the same store
+            dump({'games': [cand]}, os.path.join(d, 'index.json'))
+            train.keep_displaced(d, before)
+            blob = lambda r: train.blob_of(os.path.join(r['outdir'], 'script.play'))
+            self.assertEqual(train.fresh_rows(d, {'g': blob(cand)})['g']['outdir'], cand['outdir'])
+            self.assertEqual(train.fresh_rows(d, {'g': blob(main)})['g']['outdir'], main['outdir'])
+            # replaying the same set again keeps one displaced row per run
+            train.keep_displaced(d, before)
+            self.assertEqual(len(json.load(open(os.path.join(d, 'displaced.json')))), 1)
+
 
 class Suites(unittest.TestCase):
     def test_load_suite_reads_windows_from_phase_results(self):

@@ -935,13 +935,28 @@ def store_suite(key, refkey):
 
 
 def fresh_rows(sdir, blobs):
-    """{sha1: row} of a suite's rows that played the script `blobs` names."""
+    """{sha1: row} of a suite's rows that played the script `blobs` names
+    (the index first, then rows a later script displaced from it)."""
     out = {}
-    for row in (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', []):
+    rows = (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', [])
+    for row in rows + (read_json(os.path.join(sdir, 'displaced.json'), []) or []):
         od = row.get('outdir')
-        if od and blobs.get(row['sha1']) and blob_of(os.path.join(od, 'script.play')) == blobs[row['sha1']]:
+        if row['sha1'] not in out and od and blobs.get(row['sha1']) \
+                and blob_of(os.path.join(od, 'script.play')) == blobs[row['sha1']]:
             out[row['sha1']] = row
     return out
+
+
+def keep_displaced(sdir, before):
+    """Rows of `before` (the index before a suite played into `sdir`) that
+    the suite replaced: kept, so a script that comes back (a candidate that
+    changed only scripts and did not land) finds its results again."""
+    now = {r['sha1']: r.get('outdir') for r in (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', [])}
+    old = read_json(os.path.join(sdir, 'displaced.json'), []) or []
+    gone = [r for r in before if r.get('outdir') and now.get(r['sha1']) != r['outdir']]
+    if gone:
+        seen = {r['outdir'] for r in gone}
+        write_json(os.path.join(sdir, 'displaced.json'), gone + [r for r in old if r.get('outdir') not in seen])
 
 
 def write_view(sdir, rows, tag):
@@ -981,7 +996,9 @@ def ensure_results(key, refkey, games, blobs, tree, opts, log, runner, label, re
         + (f', references from {refs_from}' if refs_from else ', every configuration'))
     wt = tree()
     keep_driver(wt, sroot)
+    before = (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', [])
     run_suite(wt, os.path.join(sroot, 'out'), 'baseline', missing, refs_from, opts.jobs, log, runner, label)
+    keep_displaced(sdir, before)
     write_json(os.path.join(sroot, 'baseline.json'), {'key': key, 'refkey': refkey, 'updated': time.time()})
     # every row just played counts, an ERROR without a run directory too (a
     # game that stopped running is a change); only a later train skips it
