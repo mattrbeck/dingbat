@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 15:18:42 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-14 16:30:07 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**7061/9227 passed.**
+**7065/9227 passed.**
 
 ## docboy/dmg/cpu (10/12 passed)
 
@@ -831,16 +831,9 @@ All 17 tests passed (CGB cgbE).
 
 All 1 tests passed (CGB cgbE).
 
-## docboy/cgb/mode (2/6 passed)
+## docboy/cgb/mode
 
-2/6 tests passed on CGB cgbE, 4 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/mode/mode_cgb_flag_81 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/mode/mode_cgb_flag_82 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/mode/mode_cgb_flag_83 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/mode/mode_cgb_flag_90 | $FFF0=$02 = fail value (tick 100000) |
+All 6 tests passed (CGB cgbE).
 
 ## docboy/cgb/undocumented
 

@@ -3410,18 +3410,28 @@ proc new_gb*(bootrom_path: string; rom_path: string; headless: bool; run_bios: b
   )
   result.cartridge = load_cartridge(rom_path)
   result.cheats = new_cheat_engine(cpGB)
+  # Pan Docs, "0143 — CGB flag" and "Power Up Sequence": the CGB boot ROM
+  # tests bit 7 alone. Clear: it writes $04 to KEY0 (DMG compatibility mode).
+  # Set: it copies the whole byte to KEY0, whose bit 2 is DMG compatibility
+  # mode ("FF4C — KEY0"), so $81-$83, $90, $C0 ... are CGB carts and $84-$87
+  # are not; bit 6 is ignored ($C0 runs as $80). Bit 3 is the "PGB" mode
+  # ($88-$8F), which Pan Docs leaves unresearched and dingbat does not model:
+  # those carts stay on the compatibility path.
   let cgb_byte = result.cartridge.rom[0x0143]
-  result.cgb_flag = case cgb_byte
-    of 0x80'u8: cgbSupport
-    of 0xC0'u8: cgbExclusive
-    else:       cgbNone
+  let cgb_device = (cgb_byte and 0x80'u8) != 0   # the cart asks for a CGB
+  result.cgb_flag =
+    if (cgb_byte and 0x8C'u8) != 0x80'u8: cgbNone
+    elif (cgb_byte and 0x40'u8) != 0:     cgbExclusive
+    else:                                 cgbSupport
   # A boot ROM only implies CGB mode when it *is* a CGB boot ROM: the DMG one
   # is 256 bytes, the CGB one 0x900. Sizing it (rather than assuming CGB for
   # any boot ROM) lets a DMG boot ROM boot a DMG cart as a DMG.
   let cgb_bootrom = bootrom_path.len > 0 and run_bios and
                     fileExists(bootrom_path) and getFileSize(bootrom_path) > 0x100
+  # Any bit-7 cart picks the CGB console, a KEY0 bit 2/3 one in compatibility
+  # mode there (cgb_native, gb_sync_cgb_native).
   result.cgb_enabled = force_cgb or
-    ((cgb_bootrom or result.cgb_flag != cgbNone) and not force_dmg)
+    ((cgb_bootrom or cgb_device) and not force_dmg)
   # Default revision: the one the references are scored against. CGB C --
   # mealybug's `_cgb_c` set (`m3_bgp_change` exact at CGB_MIXER_LATENCY = 1),
   # `cgb-acid-hell`'s `$FEA0` branch. DMG ABC -- mooneye `boot_regs-dmgABC`,

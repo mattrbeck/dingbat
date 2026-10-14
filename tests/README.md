@@ -295,7 +295,7 @@ authority on device, exit condition and verdict.
 | SingleStepTests SM83, ARM7TDMI | per-instruction state and bus vs the vectors | `./singlestep_test`; see "SingleStepTests" below |
 
 **The device each suite is scored on** (`Device` column in `results.md`): `cart` = the
-cart header picks (DMG-ABC for `$0143 = $00`, CPU CGB C for `$80`/`$C0`); a trailing
+cart header picks (DMG-ABC when `$0143` bit 7 is clear, CPU CGB C when it is set); a trailing
 token is a specific `--model`. A ROM whose name declares several machines (AGE's
 `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` pair, mooneye's `-GS` family) gets one
 row per revision. SameSuite APU rows default to **cgbE** (its README states CGB-E passes

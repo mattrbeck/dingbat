@@ -1063,7 +1063,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 7,061 / 9,227 at `DocboyRev`, every
+(`tests/README.md`, "The DocBoy suite"): 7,065 / 9,227 at `DocboyRev`, every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1128,11 +1128,14 @@ question. Families, largest first:
   address byte twice, writes are dropped: `urNibbleEcho`). SameBoy fails too.
   A conflict with the spec: a hardware question, not a fix. The other two
   are DMG reads during OAM scan / pixel transfer, which SameBoy passes.
-* **I11. CGB header modes (19).** `mode_cgb_flag_{81,82,83,90}`: dingbat
-  takes only `$80`/`$C0` as a CGB cart, where the boot ROM copies any bit-7
-  value to KEY0 and only bits 2/3 leave CGB mode (Pan Docs, "CGB flag");
-  SameBoy passes all four, dingbat's. The 15 red `cgb_dmg_ext_mode` rows are
-  PGB mode (`$0143 = $88..$8F`, KEY0 bit 3), which dingbat does not model.
+* **I11. CGB header modes (15).** Closed 2026-10-14: `mode_cgb_flag_{81,82,83,90}`
+  now pass, the header read follows Pan Docs ("0143 — CGB flag", "Power Up
+  Sequence", "FF4C — KEY0"): bit 7 picks the CGB and copies the byte to KEY0,
+  so CGB mode unless KEY0 bit 2 or 3 is set. The 15 red `cgb_dmg_ext_mode` rows
+  are PGB mode (`$0143 = $88..$8F`, KEY0 bit 3), which Pan Docs leaves
+  unresearched and dingbat does not model (those carts stay on the
+  compatibility path); DocBoy's "DMG ext mode" (SVBK works, BCPD does not) is
+  its own model.
 * **I12. CGB pictures (46).** About 25 are the LCD panel model:
   `ppu/visual/turn_off_y*_*`, `stop_*`: DocBoy models the CGB panel keeping already-drawn rows, and
   stalling, when the LCD is switched off mid-frame (its own slow-motion
