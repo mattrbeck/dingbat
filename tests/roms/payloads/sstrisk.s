@@ -198,6 +198,99 @@ mr_out:
     orr r0, r0, r1
     b   finish
 
+@ ---------------------------------------------------------------- more CP14
+@ The CRn values the first run left out (docs/hwprobe-sst.md, section 7)
+    CPMRC x_mrc14_c3, 0xEE130E10, 0xC0DE1403  @ mrc p14, 0, r0, c3, c0, 0
+    CPMRC x_mrc14_c5, 0xEE150E10, 0xC0DE1405
+    CPMRC x_mrc14_c8, 0xEE180E10, 0xC0DE1408
+    CPMRC x_mrc14_c15, 0xEE1F0E10, 0xC0DE140F
+
+    .macro CPMCR name, word
+\name:
+    adr r4, 1f
+    bl  cp_setup
+1:  .word \word
+    mov r0, #0x14
+    b   cp_done
+    .endm
+    CPMCR x_mcr14_c0, 0xEE000E10              @ mcr p14, 0, r0, c0, c0, 0
+    CPMCR x_mcr14_c2, 0xEE020E10
+
+@ ---------------------------------------------------------------- MRS r15, unaligned
+@ Does a write of an unaligned value to r15 keep its low bits (GBATEK:
+@ "R15 is forcibly aligned")? `mrs pc, spsr` with SPSR_svc = 0x18 + k
+@ sends execution to the BIOS's IRQ vector at 0x18: `b 0x128`, then at
+@ 0x128 `stmfd sp!, {r0-r3, r12, lr}; mov r0, #0x04000000; add lr, pc,
+@ #0; ldr pc, [r0, #-4]`, which calls the handler at 0x03007FFC with lr =
+@ 0x138 + whatever low bits r15 kept. (0x18 is the only vector that reads
+@ r15 as a value without a PC-relative load; 0x1C's `ldr sp, [pc, #..]`
+@ would load a rotated word.) SVC mode with I clear, so a wild jump still
+@ ends in the watchdog, which arrives at the same handler in IRQ mode.
+@ Answer: bits 0-7 lr - 0x138; 8-15 the CPSR's low byte in the handler
+@ (0x13 SVC, 0x1B Undefined, 0x92 the watchdog); 16-23 markers (1, 2, 4:
+@ A+4, A+8, A+12 ran; 0x10 the handler ran).
+mu_run:                                       @ r8 = the SPSR (or CPSR) value; r10 = the mode
+    mov r9, #0
+    mov r7, #0
+    adr r0, mu_out
+    bl  wd_arm
+    ldr r3, =IRQVEC
+    adr r2, mu_handler
+    str r2, [r3]
+    cmp r10, #0x1B
+    beq mu_und
+    msr cpsr_c, #0xD3                         @ SVC, I and F set while it is set up
+    ldr sp, =0x03006F00                       @ for the BIOS's stmfd
+    msr spsr_cxsf, r8
+    msr cpsr_c, #0x13                         @ I clear
+1:  .word 0xE14FF000                          @ A: mrs pc, spsr
+    MK  1
+    MK  2
+    MK  4
+    mrs r7, cpsr
+    msr cpsr_c, #0xDF
+    bl  wd_disarm
+    b   mu_out
+mu_und:                                       @ `mrs pc, cpsr` in Undefined mode, CPSR = 0x0000001B
+    msr cpsr_c, #0xDB
+    ldr sp, =0x03006F00
+    msr cpsr_f, #0
+    msr cpsr_c, #0x1B                         @ I and F clear: the CPSR reads 0x0000001B
+1:  .word 0xE10FF000                          @ A: mrs pc, cpsr
+    MK  1
+    MK  2
+    MK  4
+    mrs r7, cpsr
+    msr cpsr_c, #0xDF
+    bl  wd_disarm
+    b   mu_out
+mu_handler:                                   @ from the BIOS's `ldr pc, [r0, #-4]`
+    mov r9, lr
+    mrs r7, cpsr
+    MK  0x10
+    msr cpsr_c, #0xDF
+    bl  wd_disarm
+mu_out:
+    sub r0, r9, #0x138
+    and r0, r0, #0xFF
+    and r1, r7, #0xFF
+    orr r0, r0, r1, lsl #8
+    and r1, r6, #0xFF
+    orr r0, r0, r1, lsl #16
+    b   finish
+
+    .macro MU name, value, mode=0x13
+\name:
+    mov r8, #\value
+    mov r10, #\mode
+    b   mu_run
+    .endm
+    MU  x_mrsu_18, 0x18                       @ the control: word-aligned
+    MU  x_mrsu_19, 0x19
+    MU  x_mrsu_1A, 0x1A
+    MU  x_mrsu_1B, 0x1B
+    MU  x_mrsu_cpsr_und, 0, 0x1B
+
     .ltorg
     sst_frame
 
@@ -207,6 +300,8 @@ cells:
     .word x_mrc14_c0, x_mrc14_c1, x_mrc14_c2, x_mcr14_c1, x_mrc14_r15
     .word x_thumb_dexx
     .word x_mrs_r15
+    .word x_mrc14_c3, x_mrc14_c5, x_mrc14_c8, x_mrc14_c15, x_mcr14_c0, x_mcr14_c2
+    .word x_mrsu_18, x_mrsu_19, x_mrsu_1A, x_mrsu_1B, x_mrsu_cpsr_und
 cells_end:
 .equ NCELLS, (cells_end - cells) / 4
 

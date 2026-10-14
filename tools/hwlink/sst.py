@@ -52,6 +52,7 @@ import payloadcmp   # noqa: E402
 
 SAFE_SRC = os.path.join(payloadcmp.ROMS, 'payloads', 'sst.s')
 RISK_SRC = os.path.join(payloadcmp.ROMS, 'payloads', 'sstrisk.s')
+GAP_SRC = os.path.join(payloadcmp.ROMS, 'payloads', 'sstgap.s')
 DINGBAT_FILE = os.path.join(HERE, 'sst-dingbat.json')
 CONSOLE_FILE = os.path.join(HERE, 'sst-agb.json')
 EMULATORS = ('dingbat', 'dingbat-bios')
@@ -85,7 +86,25 @@ CELLS = TIMING + [
 GROUP_B = CELLS.index('u.tstp.svc')
 # sstrisk.s's table, least risky first: GBATEK says CP14 does not trap
 RISK_CELLS = ['x.mrc14_c0', 'x.mrc14_c1', 'x.mrc14_c2', 'x.mcr14_c1', 'x.mrc14_r15',
-              'x.thumb_dexx', 'x.mrs_r15']
+              'x.thumb_dexx', 'x.mrs_r15',
+              # the forms the first run left out (2026-10-14)
+              'x.mrc14_c3', 'x.mrc14_c5', 'x.mrc14_c8', 'x.mrc14_c15', 'x.mcr14_c0', 'x.mcr14_c2',
+              'x.mrsu_18', 'x.mrsu_19', 'x.mrsu_1A', 'x.mrsu_1B', 'x.mrsu_cpsr_und']
+# sstgap.s's table (group D): the forms of each known divergence the first
+# run's cells left out (docs/hwprobe-sst.md, section 7)
+GAP_CELLS = ([f'ut.{op}p.usr' for op in ('tst', 'teq', 'cmp', 'cmn')]
+             + [f'sa.{op}s_pc.sys' for op in ('add', 'and', 'orr', 'eor', 'bic', 'mvn', 'rsb')]
+             + ['wb.ldrb_pc_post', 'wb.strb_pc_post', 'wb.ldrt_pc_post', 'wb.strt_pc_post',
+                'wb.ldrbt_pc_post', 'wb.strbt_pc_post', 'wb.ldr_pc_post_reg', 'wb.ldr_pc_pre!_reg',
+                'wb.ldrb_pc_pre!', 'wb.strb_pc_pre!',
+                'wb.ldr_pc_[pc]_post', 'wb.ldr_pc_[pc]_pre!', 'wb.str_pc_[pc]_post',
+                'wb.ldmib_pc!', 'wb.ldmda_pc!', 'wb.ldmdb_pc!', 'wb.stmdb_pc!',
+                'wb.ldmia_pc!^', 'wb.stmia_pc!^', 'wb.ldmia_pc!_r1pc', 'wb.stmia_pc!_r1pc',
+                'um.smull_rdlo15', 'um.umlal_rdlo15',
+                'ur.umull_rs15', 'ur.smull_rm15', 'ur.smlal_rm15', 'ur.umlal_rs15',
+                'u.swpb_rn15']
+             + [f'tc.thumb_cmp_pc.{m}' for m in ('svc', 'fiq', 'abt', 'und')]
+             + ['tc.thumb_cmp_pc_pc.irq', 'tc.thumb_cmp_pc.usr'])
 
 
 def frames_for(count):
@@ -115,6 +134,9 @@ def run_emulators():
     out = {}
     got = _in_emulators(SAFE_SRC, list(range(len(CELLS))))
     for i, name in enumerate(CELLS):
+        out[name] = {n: got[n][i] for n in EMULATORS}
+    got = _in_emulators(GAP_SRC, list(range(len(GAP_CELLS))))
+    for i, name in enumerate(GAP_CELLS):
         out[name] = {n: got[n][i] for n in EMULATORS}
     # one ROM a risky cell: a core that hangs on one keeps the others
     for i, name in enumerate(RISK_CELLS):
@@ -193,7 +215,7 @@ def sim_session(src, names, idx, mode=0x1F, emulators=EMULATORS):
 def run_sim(mode):
     emu = load(DINGBAT_FILE)
     bad = 0
-    for src, names in ((SAFE_SRC, CELLS), (RISK_SRC, RISK_CELLS)):
+    for src, names in ((SAFE_SRC, CELLS), (GAP_SRC, GAP_CELLS), (RISK_SRC, RISK_CELLS)):
         got = sim_session(src, names, range(len(names)), mode=mode)
         for e, cells in got.items():
             smoke = [cells.get('smoke 0x1234'), cells.get('smoke 0x5678')]
@@ -213,7 +235,8 @@ def run_sim(mode):
 def build_roms(dest):
     import shutil
     os.makedirs(dest, exist_ok=True)
-    for src, cells, stem in ((SAFE_SRC, CELLS, 'sst'), (RISK_SRC, RISK_CELLS, 'sstrisk')):
+    for src, cells, stem in ((SAFE_SRC, CELLS, 'sst'), (GAP_SRC, GAP_CELLS, 'sstgap'),
+                             (RISK_SRC, RISK_CELLS, 'sstrisk')):
         rom = payloadcmp.build_wrapper(src, list(range(len(cells))))
         shutil.copyfile(rom, os.path.join(dest, stem + '.gba'))
         print(f'{dest}/{stem}.gba: {len(cells)} cells, answers at 0x02000000 in order')
@@ -335,6 +358,7 @@ def run_console(runs, groups, keep, skip):
 
     plan = [('sst', SAFE_SRC, CELLS, range(0, GROUP_B), 'A', runs),
             ('sst', SAFE_SRC, CELLS, range(GROUP_B, len(CELLS)), 'B', runs),
+            ('sstgap', GAP_SRC, GAP_CELLS, range(len(GAP_CELLS)), 'D', runs),
             ('sstrisk', RISK_SRC, RISK_CELLS, range(len(RISK_CELLS)), 'C', None)]
     plan = [p for p in plan if p[4] in groups]
 
@@ -439,7 +463,7 @@ def decode(name, word, ctrl=None, tctrl=None):
 def show():
     emu = load(DINGBAT_FILE)
     con = load(CONSOLE_FILE).get('cells', {})
-    names = CELLS + RISK_CELLS
+    names = CELLS + GAP_CELLS + RISK_CELLS
 
     def first(n, src):
         if src == 'agb':
@@ -467,7 +491,7 @@ def main(argv):
         run_emulators()
     elif what == 'console':
         opt = lambda k, d: next((a.split('=', 1)[1] for a in argv if a.startswith(f'--{k}=')), d)  # noqa: E731
-        groups = 'AB' if '--safe' in argv else opt('groups', 'ABC')
+        groups = 'ABD' if '--safe' in argv else opt('groups', 'ABDC')
         skip = set(filter(None, opt('skip', '').split(',')))
         return run_console(int(opt('runs', '3')), groups, '--keep' in argv, skip)
     elif what == 'monitor-sim':

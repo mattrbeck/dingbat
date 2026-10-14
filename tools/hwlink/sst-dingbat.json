@@ -383,6 +383,186 @@
   "dingbat": "00020702",
   "dingbat-bios": "00020702"
  },
+ "ut.tstp.usr": {
+  "dingbat": "60000310",
+  "dingbat-bios": "60000310"
+ },
+ "ut.teqp.usr": {
+  "dingbat": "60000310",
+  "dingbat-bios": "60000310"
+ },
+ "ut.cmpp.usr": {
+  "dingbat": "60000310",
+  "dingbat-bios": "60000310"
+ },
+ "ut.cmnp.usr": {
+  "dingbat": "60000310",
+  "dingbat-bios": "60000310"
+ },
+ "sa.adds_pc.sys": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "sa.ands_pc.sys": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "sa.orrs_pc.sys": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "sa.eors_pc.sys": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "sa.bics_pc.sys": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "sa.mvns_pc.sys": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "sa.rsbs_pc.sys": {
+  "dingbat": "6000029F",
+  "dingbat-bios": "6000029F"
+ },
+ "wb.ldrb_pc_post": {
+  "dingbat": "72005E08",
+  "dingbat-bios": "72005E08"
+ },
+ "wb.strb_pc_post": {
+  "dingbat": "7C02400C",
+  "dingbat-bios": "7C02400C"
+ },
+ "wb.ldrt_pc_post": {
+  "dingbat": "0A005E08",
+  "dingbat-bios": "0A005E08"
+ },
+ "wb.strt_pc_post": {
+  "dingbat": "1402400C",
+  "dingbat-bios": "1402400C"
+ },
+ "wb.ldrbt_pc_post": {
+  "dingbat": "A2005E08",
+  "dingbat-bios": "A2005E08"
+ },
+ "wb.strbt_pc_post": {
+  "dingbat": "AC02400C",
+  "dingbat-bios": "AC02400C"
+ },
+ "wb.ldr_pc_post_reg": {
+  "dingbat": "3A005E08",
+  "dingbat-bios": "3A005E08"
+ },
+ "wb.ldr_pc_pre!_reg": {
+  "dingbat": "06005E08",
+  "dingbat-bios": "06005E08"
+ },
+ "wb.ldrb_pc_pre!": {
+  "dingbat": "D2005E08",
+  "dingbat-bios": "D2005E08"
+ },
+ "wb.strb_pc_pre!": {
+  "dingbat": "9E044048",
+  "dingbat-bios": "9E044048"
+ },
+ "wb.ldr_pc_[pc]_post": {
+  "dingbat": "A0005E08",
+  "dingbat-bios": "A0005E08"
+ },
+ "wb.ldr_pc_[pc]_pre!": {
+  "dingbat": "36005E08",
+  "dingbat-bios": "36005E08"
+ },
+ "wb.str_pc_[pc]_post": {
+  "dingbat": "0C02400C",
+  "dingbat-bios": "0C02400C"
+ },
+ "wb.ldmib_pc!": {
+  "dingbat": "CE00040F",
+  "dingbat-bios": "CE00040F"
+ },
+ "wb.ldmda_pc!": {
+  "dingbat": "9A00020F",
+  "dingbat-bios": "9A00020F"
+ },
+ "wb.ldmdb_pc!": {
+  "dingbat": "6600010F",
+  "dingbat-bios": "6600010F"
+ },
+ "wb.stmdb_pc!": {
+  "dingbat": "3201400F",
+  "dingbat-bios": "3201400F"
+ },
+ "wb.ldmia_pc!^": {
+  "dingbat": "FE00020F",
+  "dingbat-bios": "FE00020F"
+ },
+ "wb.stmia_pc!^": {
+  "dingbat": "0802400F",
+  "dingbat-bios": "0802400F"
+ },
+ "wb.ldmia_pc!_r1pc": {
+  "dingbat": "96000210",
+  "dingbat-bios": "96000210"
+ },
+ "wb.stmia_pc!_r1pc": {
+  "dingbat": "A006400B",
+  "dingbat-bios": "A006400B"
+ },
+ "um.smull_rdlo15": {
+  "dingbat": "00000003",
+  "dingbat-bios": "00000003"
+ },
+ "um.umlal_rdlo15": {
+  "dingbat": "00000103",
+  "dingbat-bios": "00000103"
+ },
+ "ur.umull_rs15": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "ur.smull_rm15": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "ur.smlal_rm15": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "ur.umlal_rs15": {
+  "dingbat": "00000008",
+  "dingbat-bios": "00000008"
+ },
+ "u.swpb_rn15": {
+  "dingbat": "00020702",
+  "dingbat-bios": "00020702"
+ },
+ "tc.thumb_cmp_pc.svc": {
+  "dingbat": "9000009F",
+  "dingbat-bios": "9000009F"
+ },
+ "tc.thumb_cmp_pc.fiq": {
+  "dingbat": "9000009F",
+  "dingbat-bios": "9000009F"
+ },
+ "tc.thumb_cmp_pc.abt": {
+  "dingbat": "9000009F",
+  "dingbat-bios": "9000009F"
+ },
+ "tc.thumb_cmp_pc.und": {
+  "dingbat": "9000009F",
+  "dingbat-bios": "9000009F"
+ },
+ "tc.thumb_cmp_pc_pc.irq": {
+  "dingbat": "9000009F",
+  "dingbat-bios": "9000009F"
+ },
+ "tc.thumb_cmp_pc.usr": {
+  "dingbat": "60000010",
+  "dingbat-bios": "60000010"
+ },
  "x.mrc14_c0": {
   "dingbat": "C0DE1400",
   "dingbat-bios": "C0DE1400"
@@ -410,5 +590,49 @@
  "x.mrs_r15": {
   "dingbat": "00101030",
   "dingbat-bios": "00101030"
+ },
+ "x.mrc14_c3": {
+  "dingbat": "C0DE1403",
+  "dingbat-bios": "C0DE1403"
+ },
+ "x.mrc14_c5": {
+  "dingbat": "C0DE1405",
+  "dingbat-bios": "C0DE1405"
+ },
+ "x.mrc14_c8": {
+  "dingbat": "C0DE1408",
+  "dingbat-bios": "C0DE1408"
+ },
+ "x.mrc14_c15": {
+  "dingbat": "C0DE140F",
+  "dingbat-bios": "C0DE140F"
+ },
+ "x.mcr14_c0": {
+  "dingbat": "00000014",
+  "dingbat-bios": "00000014"
+ },
+ "x.mcr14_c2": {
+  "dingbat": "00000014",
+  "dingbat-bios": "00000014"
+ },
+ "x.mrsu_18": {
+  "dingbat": "00101300",
+  "dingbat-bios": "00101300"
+ },
+ "x.mrsu_19": {
+  "dingbat": "00101300",
+  "dingbat-bios": "00101300"
+ },
+ "x.mrsu_1A": {
+  "dingbat": "00101302",
+  "dingbat-bios": "00101302"
+ },
+ "x.mrsu_1B": {
+  "dingbat": "00101302",
+  "dingbat-bios": "00101302"
+ },
+ "x.mrsu_cpsr_und": {
+  "dingbat": "00101B02",
+  "dingbat-bios": "00101B02"
  }
 }

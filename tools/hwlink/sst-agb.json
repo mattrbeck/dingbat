@@ -308,10 +308,178 @@
   },
   "x.mrs_r15": {
    "00101030": 3
+  },
+  "ut.tstp.usr": {
+   "60000310": 3
+  },
+  "ut.teqp.usr": {
+   "60000310": 3
+  },
+  "ut.cmpp.usr": {
+   "60000310": 3
+  },
+  "ut.cmnp.usr": {
+   "60000310": 3
+  },
+  "sa.adds_pc.sys": {
+   "6000029F": 3
+  },
+  "sa.ands_pc.sys": {
+   "6000029F": 3
+  },
+  "sa.orrs_pc.sys": {
+   "6000029F": 3
+  },
+  "sa.eors_pc.sys": {
+   "6000029F": 3
+  },
+  "sa.bics_pc.sys": {
+   "6000029F": 3
+  },
+  "sa.mvns_pc.sys": {
+   "6000029F": 3
+  },
+  "sa.rsbs_pc.sys": {
+   "6000029F": 3
+  },
+  "wb.ldrb_pc_post": {
+   "72005E08": 3
+  },
+  "wb.strb_pc_post": {
+   "7C02400C": 3
+  },
+  "wb.ldrt_pc_post": {
+   "0A005E08": 3
+  },
+  "wb.strt_pc_post": {
+   "1402400C": 3
+  },
+  "wb.ldrbt_pc_post": {
+   "A2005E08": 3
+  },
+  "wb.strbt_pc_post": {
+   "AC02400C": 3
+  },
+  "wb.ldr_pc_post_reg": {
+   "3A005E08": 3
+  },
+  "wb.ldr_pc_pre!_reg": {
+   "06005E08": 3
+  },
+  "wb.ldrb_pc_pre!": {
+   "D2005E08": 3
+  },
+  "wb.strb_pc_pre!": {
+   "9E044048": 3
+  },
+  "wb.ldr_pc_[pc]_post": {
+   "A0005E08": 3
+  },
+  "wb.ldr_pc_[pc]_pre!": {
+   "36005E08": 3
+  },
+  "wb.str_pc_[pc]_post": {
+   "0C02400C": 3
+  },
+  "wb.ldmib_pc!": {
+   "CE00040F": 3
+  },
+  "wb.ldmda_pc!": {
+   "9A00020F": 3
+  },
+  "wb.ldmdb_pc!": {
+   "6600010F": 3
+  },
+  "wb.stmdb_pc!": {
+   "3201400F": 3
+  },
+  "wb.ldmia_pc!^": {
+   "FE00020F": 3
+  },
+  "wb.stmia_pc!^": {
+   "0802400F": 3
+  },
+  "wb.ldmia_pc!_r1pc": {
+   "96000210": 3
+  },
+  "wb.stmia_pc!_r1pc": {
+   "A006400B": 3
+  },
+  "um.smull_rdlo15": {
+   "00000003": 3
+  },
+  "um.umlal_rdlo15": {
+   "00000103": 3
+  },
+  "ur.umull_rs15": {
+   "00000008": 3
+  },
+  "ur.smull_rm15": {
+   "00000008": 3
+  },
+  "ur.smlal_rm15": {
+   "00000008": 3
+  },
+  "ur.umlal_rs15": {
+   "00000008": 3
+  },
+  "u.swpb_rn15": {
+   "00020702": 3
+  },
+  "tc.thumb_cmp_pc.svc": {
+   "9000009F": 3
+  },
+  "tc.thumb_cmp_pc.fiq": {
+   "9000009F": 3
+  },
+  "tc.thumb_cmp_pc.abt": {
+   "9000009F": 3
+  },
+  "tc.thumb_cmp_pc.und": {
+   "9000009F": 3
+  },
+  "tc.thumb_cmp_pc_pc.irq": {
+   "9000009F": 3
+  },
+  "tc.thumb_cmp_pc.usr": {
+   "60000010": 3
+  },
+  "x.mrc14_c3": {
+   "C0DE1403": 3
+  },
+  "x.mrc14_c5": {
+   "C0DE1405": 3
+  },
+  "x.mrc14_c8": {
+   "C0DE1408": 3
+  },
+  "x.mrc14_c15": {
+   "C0DE140F": 3
+  },
+  "x.mcr14_c0": {
+   "00000014": 3
+  },
+  "x.mcr14_c2": {
+   "00000014": 3
+  },
+  "x.mrsu_18": {
+   "00101300": 3
+  },
+  "x.mrsu_19": {
+   "00101300": 3
+  },
+  "x.mrsu_1A": {
+   "00101302": 3
+  },
+  "x.mrsu_1B": {
+   "00101302": 3
+  },
+  "x.mrsu_cpsr_und": {
+   "00101B02": 3
   }
  },
  "runs": 3,
- "started": "2026-10-12 10:44:26",
+ "started": "2026-10-14 14:30:35",
  "stopped_at": null,
- "finished": "2026-10-12 10:44:47"
+ "finished": "2026-10-14 14:30:41"
 }

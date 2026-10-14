@@ -10,7 +10,8 @@ whole table is one self-contained probe that anyone can rerun:
 | File | What it is |
 |---|---|
 | `tests/roms/payloads/sst.s` | groups A and B: 96 cells that always come back, by themselves or through the watchdog |
-| `tests/roms/payloads/sstrisk.s` | group C: 7 cells where an undefined-instruction trap or a jump into the BIOS is a possible answer; uploaded on its own and run last |
+| `tests/roms/payloads/sstrisk.s` | group C: 18 cells where an undefined-instruction trap or a jump into the BIOS is a possible answer; uploaded on its own and run last |
+| `tests/roms/payloads/sstgap.s` | group D: 45 cells, the forms of each known divergence the first run's cells left out (section 7) |
 | `tests/roms/payloads/sst.inc` | the frame both share: saves and restores every bank, SPSR, IME, IE, the timers and the IRQ vector; the watchdog |
 | `tools/hwlink/sst.py` | runs the cells in dingbat (`emulators`), on the console (`console`), prints them side by side (`show`), builds cartridge ROMs of both payloads (`rom`) |
 | `tools/hwlink/sst-dingbat.json` | dingbat's answers (HLE BIOS and the real BIOS) |
@@ -262,11 +263,9 @@ MRS into r15 and CP14 (group C):
 | x.mrs_r15 | `mrs pc, spsr` in SVC, SPSR_svc = 0x10. Bits 0-7 markers (1, 2, 4: A+4, A+8, A+12 ran; 0x10 came back through the BIOS; 0x20 the watchdog), 8-15 the CPSR's low byte where it came out, 16-23 the interrupted CPSR as the watchdog found it, 24-31 flags | 00101030: a branch to 0x10 and back through the BIOS handler (the HLE BIOS's stub answered 00100020 until it got the abort vectors) | r15 written without a refill (their final r15 is the value + 4, no refill fetch), so A+4 and A+8 would run first: 00101033 if the rest goes as dingbat's | "Rd (R0-R14)" | **00101030** |
 
 dingbat's CP14 answer rests on alyosha `arm/Coprocessor_14` (verified on
-hardware) as well as GBATEK. Its MRS-into-r15 does not align r15: with the
-CPSR (0x...13) as the source it fetches from 0x13 and runs the BIOS out of
-step, where GBATEK says "R15 is forcibly aligned" for every write to it;
-the cell reads a word-aligned SPSR so that question stays out of the
-answer.
+hardware) as well as GBATEK. The cell reads a word-aligned SPSR so that
+how r15's low bits are taken stays out of the answer; section 7's x.mrsu
+cells ask that (bit 1 survives, bit 0 does not, as dingbat has it).
 
 ### 5. The four known contradictions, again
 
@@ -343,9 +342,10 @@ and GBATEK, and the console has not been asked.
 - **Thumb `cmp pc, r0`** (r.thumb_cmp_pc.\*): GBATEK describes a compare;
   dingbat restores the CPSR from the SPSR, as the AGB SP did (THUMBPC,
   THUMBPC2, THUMBPC3).
-- **MRS into r15**: GBATEK says every write to r15 is forcibly aligned;
-  dingbat's MRS path writes r15 unaligned (an UNPREDICTABLE encoding, and
-  only seen with a CPSR source; x.mrs_r15 avoids it).
+- **MRS into r15**: GBATEK says every write to r15 is forcibly aligned.
+  The console keeps bit 1 of an unaligned value and drops bit 0, as
+  dingbat does (section 7, x.mrsu\_\*), so GBATEK is the one that is wrong
+  here.
 - Everywhere else GBATEK is silent (the encodings it calls not allowed:
   TSTP-style with Rd = r15, r15 as Rs, a multiply or SWP operand or an MRS
   destination, r15-base writeback, User/System S-bit returns, reserved PSR
@@ -400,3 +400,50 @@ not the console:
 
 `tests/singlestep_arm7.nim` cites each of these cells in its
 known-divergence buckets; the Rs = r15 cases now pass.
+
+## 7. The second run: the forms the first left out (2026-10-14)
+
+`tests/singlestep_arm7.nim` excuses a known divergence by its encoding,
+so one or two cells above stood for every vector case of that shape. A
+census of the excused cases (9,466 at the time, vectors `e3097d8`, the
+first 2 MB of each file) found 1,483 in forms no cell had run. These
+cells run one or more of each such form: group D (`sstgap.s`, 45 cells,
+three passes) and eleven more in group C (`sstrisk.s`, three runs each).
+The console answered every one the same each time, and **every answer is
+dingbat's** (with both BIOSes, `sst-dingbat.json`); answer formats are in
+each payload's header.
+
+| Form | Cells | What the console did |
+|---|---|---|
+| TST/TEQ/CMP/CMN with Rd = r15, User mode | ut.tstp.usr, teqp, cmpp, cmnp | NZCV kept, no branch (60000310), as in System |
+| S-bit ALU ops other than MOV/SUB writing r15, System | sa.adds_pc.sys, ands, orrs, eors, bics, mvns, rsbs | NZCV kept, went on as ARM (6000029F), as MOVS/SUBS |
+| LDR/STR base r15 + writeback, byte, T and register-offset forms | wb.ldrb_pc_post, strb, ldrt, strt, ldrbt, strbt, ldr_pc_post_reg, ldr_pc_pre!\_reg, ldrb_pc_pre!, strb_pc_pre! | as the word forms: a load is suppressed and PC := writeback + 4; a store lands and PC := the writeback address |
+| ... with Rd = r15 too | wb.ldr_pc_[pc]\_post, \_pre!, wb.str_pc_[pc]\_post | `ldr pc, [pc], #4`: the load is suppressed (the loaded address is not taken) and PC := writeback + 4 = A+16; `ldr pc, [pc, #4]!`: suppressed too, PC lands at A+12 or A+16 (the cell cannot tell them apart); `str pc, [pc], #4` stores A+12 and PC := A+12 |
+| LDM/STM base r15 + writeback: IB, DA, DB, `^`, r15 in the list | wb.ldmib_pc!, ldmda, ldmdb, stmdb, ldmia_pc!^, stmia_pc!^, ldmia_pc!\_r1pc, stmia_pc!\_r1pc | no writeback in any; `ldmia pc!, {r1, pc}` loads both and branches to the loaded r15 |
+| Long multiplies writing r15 (SMULL, UMLAL) | um.smull_rdlo15, um.umlal_rdlo15 | not written, no branch |
+| Long multiplies reading r15 as Rs, signed and accumulating | ur.umull_rs15, smull_rm15, smlal_rm15, umlal_rs15 | PC+8 |
+| SWPB with a base of r15 | u.swpb_rn15 | address PC+8, the old A+8 word ran (as SWP) |
+| Thumb `cmp pc, r0` in SVC, FIQ, Abort, Undefined; `cmp pc, pc` in IRQ; User | tc.thumb_cmp_pc.\*, tc.thumb_cmp_pc_pc.irq | CPSR := SPSR in every exception mode (9000009F), also for `cmp pc, pc`; no change in User (60000010) |
+| MRC/MCR p14 at CRn c3, c5, c8, c15; MCR c0, c2 | x.mrc14_c3 .. x.mcr14_c2 | no trap; MRC reads the opcode at $+8, MCR does nothing, as c0-c2 |
+| `mrs pc, spsr` with SPSR = 0x18 + k; `mrs pc, cpsr` in Undefined (0x1B) | x.mrsu_18, \_19, \_1A, \_1B, x.mrsu_cpsr_und | below |
+
+The x.mrsu cells ask how r15 takes an unaligned value. 0x18 is the BIOS's
+IRQ vector, `b 0x128`, and at 0x130 the BIOS reads r15 as a value (`add
+lr, pc, #0`) before calling the handler at 0x03007FFC; the handler reads
+lr - 0x138. (The other low vectors are no use: 0x0C-0x14 go to 0x1C, whose
+`ldr sp, [pc, #..]` would load a rotated word from an unaligned r15.) The
+console answered lr - 0x138 = 0, 0, 2, 2 for k = 0, 1, 2, 3, and 2 for the
+CPSR source 0x1B, every time; markers 0, so the words after the MRS never
+ran (a branch, as x.mrs_r15). So in ARM state **bit 1 of r15 survives and
+bit 0 does not**, where GBATEK says every write to r15 is forcibly
+aligned. This path cannot tell whether bit 0 goes at the MRS's write or at
+the BIOS's `b`; dingbat clears it at the refill (`read_instr` in
+`src/dingbat/gba/cpu.nim`, already there for `bx` to an address with bit 1
+set) and answers the same. The vectors' MRS-to-r15 cases keep both bits
+(value + 4, no refill).
+
+Not measured: the value of a long multiply's accumulator when RdLo or
+RdHi is r15 (um.umlal_rdlo15's carry does not separate PC+8 from PC+12,
+and a cell that did would branch to address 2 or 0xFFFFFFFE if the write
+were not dropped), STMIB/STMDA with r15 base, and the CP14 CRn values not
+listed.
