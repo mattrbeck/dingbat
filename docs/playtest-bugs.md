@@ -5244,3 +5244,187 @@ and EWRAM dumps (`peek`) at f1616-f3550, which found the field flag and
 its first frame with a `peek` every frame. Last, `trace` of f1684 on in
 dingbat and mGBA, cycles summed per routine, with the `CONTENTION` knob
 toggled on the driver (`-d:CONTENTION=false`, built outside bin/).
+
+## §63. Metal Slug Advance: the landing a frame late, a load that pays EWRAM's wait states, 2026-10-14
+
+**Symptom.** `landing` (f1322, window 30) is SLIP -2 against both references
+in all five dingbat configurations. The references agree there (IDENTICAL).
+
+**Where play parts.** The landing scene runs at 30 Hz. From f1212 dingbat's
+odd frames show mGBA's picture of the frame before, and the even frames
+match. The game's main loop is one V-blank behind; the SLIP -2 is that
+phase seen through the 30 Hz picture. Up to f1209 dingbat's EWRAM is
+byte-identical to mGBA's every frame, and IWRAM differs only in two stack
+bytes. The main loop (wait at 0x08000290, polling a V-blank flag at
+0x03000204 that the handler sets, with a missed-V-blank count at
+0x03000200) leaves its wait 190 cycles into f1210 and runs a load in Thumb
+ROM code (WAITCNT 0x4314: WS0 3/1, prefetch on; EWRAM 3/6, MEMCNT
+0x0D000020). Traced from both emulators' f1206 states:
+
+| | dingbat | mGBA |
+|---|---|---|
+| load ends | f1212, 15,159 cycles after the V-blank | f1211, 8,165 cycles before it |
+| cycles / instructions | 576,728 / 178,561 | 553,441 / 175,408 |
+| main threads identical for | 174,532 instructions | |
+| behind mGBA where they part | 14,610 cycles | |
+
+They part where the late core is already past the V-blank. The main loop's
+check at 0x080002E8 sees the V-blank flag in dingbat only, and runs the
+sound mixer one more time (8.7k cycles). To be on time, dingbat would have
+to charge at most 8.1k more than mGBA over the identical stretch. It
+charges 14.6k more.
+
+**What the 14.6k is.** Variant builds, from the same state:
+
+- `-d:CONTENTION=false`: no change.
+- `-d:ROM_DATA_NONSEQ=false`: no change.
+- `-d:BRANCH_COMMIT_WAIT=false`: 1.3k sooner, still 13.9k late.
+- EWRAM at 2 cycles a halfword (scratch): still late, 9.7k.
+- EWRAM at 1 cycle a halfword (scratch): on time, 2.5k before the V-blank.
+  Nothing else gets there.
+
+dingbat's EWRAM time over the identical stretch is 9.0k cycles. Of that,
+2.8k is IWRAM code (block 0x03002700), which mGBA prices the same as
+dingbat. The rest, ~6.1k, is EWRAM accessed from the ROM code under the
+prefetcher. A typical case is 0x08002ECC's loop: a ROM table, then an
+EWRAM pointer load (`ldr r0, [r1]` with r1 = 0x0200E1D0), then `cmp`.
+mGBA charges 4.1 cycles for the EWRAM word load and the `cmp` together,
+though the word alone is 6 bus cycles. The remaining drift is spread over
+ROM functions (pushes and pops to the IWRAM stack, loads under the
+prefetcher), as in §29 and §34.
+
+**Who is right: dingbat.** `slotexec.s` (§22; console = dingbat on all
+twenty rows at 4/2 with the prefetcher on) in all three emulators:
+
+| row | console = dingbat | second reference | mGBA |
+|---|---|---|---|
+| 6 `ldmia` EWRAM | 22 | 22 | **17** |
+| 9 `ldr` EWRAM | 22 | 22 | **17** |
+| 12 `str` EWRAM | 21 | 21 | **17** |
+
+The console pays 5, 5 and 4 cycles over the IWRAM rows. mGBA pays nothing.
+
+An emulator-only timing ROM (Thumb blocks from ROM at 0x4314, TM0 per
+block; scratch, not committed) agrees:
+
+- 16 EWRAM word loads: dingbat 131, second reference 128, mGBA **90**.
+  The 16-bit EWRAM bus alone needs 16 x 6 = 96 cycles for them.
+- 16 `push {r4-r6}` / `pop {r4-r6}` pairs: 150 / 144 / **74**, below their
+  96 data cycles.
+
+mGBA's frame rests on prices below the bus floor.
+
+**The second reference is no witness.** Its EWRAM is not mGBA's before the
+load. 0x02004640 reads 4A against 4B on every frame from f1040 (the first
+peeked) to the load, and 0x0200CEC9 reads 09 against 07 from f1191. Its
+pictures part from mGBA's at f604-911 and f1157-1193. So it reaches the
+landing's phase by another path, not by a cheaper run of the same load.
+On the same timing ROM it prices 15 of 30 shapes exactly as dingbat does.
+Fourteen are 3 to 12 cycles a block cheaper, where its full prefetch buffer
+keeps refilling. One (0x2ECC's loop rebuilt) is 26 cycles dearer than
+dingbat. A scratch dingbat whose buffer keeps refilling matches it on 29 of
+the 30.
+
+alyosha prefetcher_full_* and _branch_thumb_4 (hardware-verified; the
+second reference fails _full_arm and _branch_thumb_4, §29) say the buffer
+stops until the CPU drains it, as dingbat does. In this load the rule is
+worth 55 cycles. dingbat-bios slips identically; the HLE is not involved.
+
+**Status: (b), no core change.** The references' frame needs EWRAM data
+accesses from gamepak code to be cheaper than the console makes them.
+
+## §64. Mario vs. Donkey Kong: the level-clear tally two frames early, the flash chip's program time, 2026-10-14
+
+**Symptom.** `level_clear` (f7087) is SLIP +2 against mGBA and +1 against
+the second reference in all five configurations, with the references
+IDENTICAL.
+
+**The references do not agree.** They only show the same picture at the
+checkpoint's centre. The tally holds each picture for four frames. Frame
+by frame from f6286 every emulator is one frame from the next: dingbat
+leads the second reference by one, and the second reference leads mGBA by
+one. The game parts the emulators wherever it writes flash:
+
+| when | what is written |
+|---|---|
+| f0-90 | boot: 6,796 bytes of three sectors |
+| f1100-1300 and f1300-1800 | the file |
+| f6243 | the level-clear save |
+
+The first frame difference is f99. dingbat and mGBA draw the level itself
+frame-identically (f5600-6202). The second reference plays it differently
+(its level timer a second lower, per the script).
+
+**The loop.** From f6243 the game programs one 4 KB sector a byte at a
+time, under WAITCNT 0x0000 (the countdown at 0x03001F40 runs from 0x1000
+to 0). After each byte it calls a status routine it copied to the stack
+(0x03007E40: `ldrb r0, [r0]; bx lr`) until the byte reads back. Traced
+from both emulators' f6235 states:
+
+| | dingbat | mGBA |
+|---|---|---|
+| first byte | f6243, cycle 276,114 | f6243, cycle 275,228 |
+| last byte | f6264, cycle 239,456 | f6266, cycle 179,640 |
+| status calls | 4,096 (one a byte) | 7,972 (1.95 a byte) |
+| cycles a byte | 1,427 | 1,552 |
+| sector total | 5,862,156 | 6,365,019 |
+
+mGBA's sector takes 503k cycles (1.8 frames) longer. The tally (0x03000C14)
+starts at f6265 in dingbat and at f6267 in mGBA. The second reference
+identifies its flash as SST (ID D4BF), so the game runs its routines for
+that chip there. It writes at dingbat's rate (~197 bytes a frame, against
+dingbat's 197 and mGBA's 184) but starts ~0.4 frame later, from its own
+level. All five dingbat configurations, Nintendo's BIOS included, write
+and slip alike.
+
+**Why: §35's open question again.** dingbat's flash (`storage/flash.nim`)
+has no busy state, so a program lands at once. mGBA holds a byte program
+~640 cycles once a sector erase has run (below), which costs this game one
+more status call a byte. The console's time belongs to the cart's chip, and
+nobody has measured it. dingbat's sector ends 41k cycles before its frame
+does, so ~10 cycles a byte decide a frame. Each further status call a byte
+(~125 cycles) costs about 1.8 frames.
+
+**Probe (designed, not run): `tests/roms/payloads/flashprog.s`**, row
+`flashprog` in `r0table.py` (`NEEDS_CART`; kept out of the cyclelaws
+gate). Run from IWRAM over the link, with a FLASH cart in the slot, booted
+holding SELECT+START as for `eesettle`. It answers:
+
+- the chip ID;
+- the bare poll;
+- a byte program of the last byte with the value it already holds, so no
+  bit can change, at SRAM 8 waits, at WAITCNT 0 (the game's), and with the
+  first poll late;
+- and, only if sector 15 is blank, a real 0xFF -> 0xFE program followed
+  by an erase that restores the sector, plus an erase of the blank sector.
+
+Each answer is in cycles from the store that starts the chip to the read
+that returns the data. The emulators' cells:
+
+| cell | dingbat | mGBA | second reference |
+|---|---|---|---|
+| 0 ID | 1B32 | 1B32 | D4BF |
+| 4 / 0x104 poll floor | 34 / 30 | 34 / 30 | 34 / 30 |
+| 1 same-value program, 8 waits | 51 | 51 (678 after an erase) | 51 |
+| 0x101 same, WAITCNT 0 | 43 | 43 (673 after an erase) | 43 |
+| 0x201 / 0x301 first poll late | 147 / 139 | 147 / 139 (679 after an erase) | 147 / 139 |
+| 2 / 0x102 real program | 51 / 43 | 51 / 673 (after cell 2's erase) | 51 / 43 |
+| 3 / 0x103 erase blank sector 15 | 45 / 37 | 30,046 / 30,037 | 45 / 37 |
+
+On the console, a cell less the floor is the chip's busy time. mGBA's 640
+costs the game exactly one more status call a byte, so its first status
+read comes 510-640 cycles after the data store, and the checkpoint
+follows from the busy time:
+
+| console busy | level_clear frame |
+|---|---|
+| under ~510 cycles | dingbat's |
+| ~640 | mGBA's |
+| each further ~125 | about 2 frames later |
+
+SST's datasheet program time, 14 us (235 cycles), would be dingbat's frame.
+The Panasonic and Sanyo parts dingbat reports have no public timing (§35).
+A measured time per chip ID belongs in `storage/flash.nim`, with Advance
+Wars (§35) as its second check.
+
+**Status: (c), no core change.**

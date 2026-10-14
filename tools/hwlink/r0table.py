@@ -238,6 +238,15 @@ TABLE = {
     # Vision 1-1 set the frame the level starts on (payloads/eesettle4k.s).
     # Never with a 64 Kbit cart in the slot.
     'eesettle4k': [0x103, 0x102, 0x100, 0x101],
+    # the cartridge flash chip's byte-program and sector-erase times (Mario
+    # vs. Donkey Kong's level-clear save, Advance Wars' first boot): the ID,
+    # the bare poll, a same-value program at SRAM 8 waits / WAITCNT 0 / with
+    # the first poll late, then (sector 15 blank only) a real program and an
+    # erase of the blank sector. Needs a FLASH cart in the slot, booted
+    # holding SELECT+START (payloads/flashprog.s); without a cart every cell
+    # answers DEAD0001. A chip's analog time, not a console law: keep it out
+    # of the frozen cyclelaws ROMs.
+    'flashprog': [0, 4, 1, 0x104, 0x101, 0x201, 0x301, 2, 0x102, 3, 0x103],
     # an S-bit write to r15 in System mode (no SPSR): movs / subs / ldm^,
     # then the same after leaving a Thumb SPSR in IRQ mode
     # (payloads/sysmovs.s; Colin McRae Rally 2.0's ARM library returns)
@@ -267,7 +276,7 @@ TABLE = {
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
-NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat'}
+NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat', 'flashprog'}
 
 # rows the console has answered and no dingbat model matches yet: kept out of
 # lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61)
