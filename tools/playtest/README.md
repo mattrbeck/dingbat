@@ -307,9 +307,14 @@ then holds the frame. Its frames used to be `kCyclesPerFrame` cycles a call,
 ending at a drifting line before 160 with the previous frame's picture
 (docs/playtest-bugs.md §65).
 
-Its frames now line up with the other two, but its own timing can still
-run a boot a V-blank ahead of both. Donkey Kong Country leads by one frame
-to about f1300, and its own start state does not explain that (§65).
+Its frames now line up with the other two. The core runs a DMA burst
+whole, so a burst across line 160 used to make one harness frame of two or
+three V-blanks. Super Mario Advance 3's crt0 clears EWRAM with one 1.6-frame
+DMA, and many boots do the same. The driver now counts the presentations a
+frame ran through, and ends the next frames at once, one per V-blank start
+the frame swallowed (docs/playtest-bugs.md §82, "Super Mario Advance 3: 1-1
+after a soft reset"). Donkey Kong Country's boot still leads by one frame
+of its own (§65).
 
 `peek` in dingbat is untimed (it used to charge wait states, so peeking every
 frame moved the game's own timing); the second reference's leaves its audio

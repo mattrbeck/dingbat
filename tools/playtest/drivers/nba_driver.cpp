@@ -70,7 +70,9 @@ struct CaptureVideo final : nba::VideoDevice {
   u32 frame[W * H] = {};
   u32* shown = nullptr;   // the buffer last presented
   u32* drawing = nullptr; // the other one: the frame being drawn
+  long presented = 0;     // presentations so far: one per V-blank's end
   void Draw(u32* buffer) override {
+    ++presented;
     if (buffer != shown) { drawing = shown; shown = buffer; }
     if (!drawing) memcpy(frame, buffer, sizeof frame);  // before the second presentation
   }
@@ -190,14 +192,43 @@ int main(int argc, char** argv) {
   // at a drifting line before 160 (142-159), so the picture shown was the
   // previous frame's (docs/playtest-bugs.md, "The second reference's pictures
   // are a frame stale"). Whole lines to line 159, then 4-cycle steps.
+  //
+  // The core runs a DMA burst whole: a Run that starts one runs to its end,
+  // however far past the requested cycles. Super Mario Advance 3's crt0
+  // clears EWRAM with one 65536-word DMA (458,761 cycles, 1.6 frames); from
+  // line 131 it ended at line 47 two frames later, the 4-cycle steps went on
+  // to the next line 160, and the one harness frame held three V-blank
+  // starts. Every later frame was then two frames ahead of dingbat's and
+  // mGBA's, whose frames end at the V-blank start inside the burst
+  // (docs/playtest-bugs.md §82, "Super Mario Advance 3: 1-1 after a soft
+  // reset"). The V-blank ends a frame covered are counted (one presentation
+  // each); the starts it swallowed are owed, and the next harness frames end
+  // at once, one per start, so frame n is the n-th V-blank start again.
+  // Their picture and RAM are the burst's end.
+  long owed = 0;
   auto run_frame = [&]() {
+    if (owed > 0) {
+      --owed;
+      video->Capture();
+      audio->Frame(280896);
+      return;
+    }
     long ran = 0;
     int v = core->PeekByteIO(0x04000006);
     int lines = (160 - v + 228) % 228;
     if (lines == 0) lines = 228;
+    // a frame from line 160-227 holds one V-blank end (227 -> 0), from
+    // below 160 none
+    long expected = v >= 160 ? 1 : 0;
+    long before = video->presented;
     if (lines > 1) { core->Run((lines - 1) * 1232); ran += (lines - 1) * 1232; }
     while (core->PeekByteIO(0x04000006) != 160 && ran < 2 * 280896) { core->Run(4); ran += 4; }
+    long extra = video->presented - before - expected;
     video->Capture();
+    if (extra > 0) {
+      owed = extra;
+      ran = lines * 1232L;  // this frame's own share of the audio; the owed frames take theirs
+    }
     audio->Frame(ran);
   };
   reply("ready nba save=" + save);
@@ -279,7 +310,7 @@ int main(int argc, char** argv) {
       bool ok = f && fread(state.get(), sizeof(nba::SaveState), 1, f) == 1 &&
                 fread(video->frame, sizeof video->frame, 1, f) == 1;
       if (f) fclose(f);
-      if (ok) core->LoadState(*state);
+      if (ok) { core->LoadState(*state); owed = 0; }
       reply(ok ? "ok" : "err state_load failed");
     } else if (cmd == "quit") {
       if (audio->file) fclose(audio->file);

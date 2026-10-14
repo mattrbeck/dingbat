@@ -7084,3 +7084,197 @@ it gets no `@known`. The script's notes say what the +3 is. `saved` (f6258)
 reads SLIP -3 against mGBA through the classifier's inverted shared-frame
 path (the section above), so it is dingbat ahead there too, +3 with the
 fix. It was not chased.
+
+## §82. Super Mario Advance 3: 1-1 after a soft reset, 2026-10-14
+
+**Why.** §36 left the script's 1-1 checkpoints (`shy_guys`, `column_top`,
+`below_white_block`, the corpus's last FAIL) undiagnostic. On a blank cart
+the first boot formats the 64 Kbit EEPROM (196 polled block writes), the
+frame the boot ends on is the chip's programming time, and a settle sweep
+flips 1-1 every 1-3 % of it. §36 asked for a route that does not depend on
+it.
+
+**The route: a soft reset after the format.** The script now holds
+A+B+SELECT+START for frames 151-160. Every emulator's format is over by
+then: the boot's first screens are at dingbat f89, mGBA f94 and the second
+reference f84. The game's reset path is
+`swi 1` (RegisterRamReset, r0 = 0xFF: all of EWRAM, IWRAM, palette, VRAM,
+OAM and the I/O), `swi 0` (SoftReset), and in the crt0 a DMA3 fill of all
+of EWRAM (0x85010000, 65,536 words, 458,761 cycles). The reboot finds a
+formatted chip and does not format again. Held, the combination resets the
+game again about 8.5 frames later, still inside the hold; the last reset
+decides.
+
+Evidence that the format no longer matters, dingbat-bios built at three
+programming times:
+
+| `EEPROM_SETTLE_CYCLES` | counters 0x030000DD / 0x03006B01 at f151 | frames f152-f560 equal to the 108368 build |
+|---|---|---|
+| 101000 | 0F 44 | all |
+| 108368 (GBATEK) | 0A 3F | - |
+| 115005 | 05 3A | all |
+
+The same three builds reset at `yi_title` (f1460) instead: 910 of 910
+frames equal. After the reset mGBA's counters equal dingbat's on all 409
+frames, and 371 of its pictures are identical (the rest are fades); before
+the reset its counters were 5 frames behind.
+
+The rest of the script is the old timeline, 72 frames later: the reboot's
+first screen is f166, the first boot's was mGBA's f94. The two START taps
+that fell in the format are gone.
+
+**The second reference came out two frames ahead: its driver.** After the
+reset its RAM at f152 was dingbat's at f154, 4 bytes apart, and it stayed
+two frames ahead. Its costs are not the cause. A payload run in all four
+emulators (`payloadcmp` wrapper, emulators only) times each piece the same
+to the cycle:
+
+| | dingbat, dingbat-bios, mGBA, the second reference |
+|---|---|
+| the crt0's DMA3 fill (0x8500/0x8501, count 0, IWRAM -> EWRAM) | 458,761 |
+| the same after RegisterRamReset(0x80) | 458,758 |
+| DMA3 count 0, fixed source and destination in IWRAM | 131,081 |
+| RegisterRamReset, EWRAM only / VRAM only / palette only | 434,431 / 64,767 / 927 |
+
+With the reset at `yi_title`, the reset's EWRAM clear had reached the
+same address in all three emulators at the end of f1461
+(0x02024CDF-0x02024DBF).
+
+The driver is the cause. Its `run_frame` runs whole lines to 159, then
+4-cycle steps until VCOUNT reads 160. The core runs a DMA burst whole, so
+a `Run` that starts one returns at the burst's end, however far past the
+requested cycles. Logged at f152: the bulk `Run` started on line 160 and
+returned on line 47. The 458,761-cycle fill had begun on line 131 and
+crossed two V-blank starts. The steps then went on to the next line 160,
+so one harness frame held three V-blank starts. The first boot loses one
+the same way: its frame 1 starts on line 225 with the crt0's fill.
+
+**Fixed in the driver** (its `run_frame`, `tools/playtest/drivers/`). The
+video device counts presentations, one per V-blank end. A frame that
+starts on lines 160-227 holds one, a frame from below 160 none. Any extra
+is a V-blank start the frame swallowed. That many following harness frames
+are owed: they end at once, each with one frame's audio, so harness frame
+n is the n-th V-blank start again. A `state_load` clears the debt.
+
+After the fix the second reference's counters equal dingbat's and
+mGBA's on every frame checked, from the reset to the story pages
+(f152-f351, f2400-f3026). Its first boot shows its
+first screen on f84, the 101000 build's frame (§36's "~101000" is its
+programming time alone).
+
+Frames 1-1500 with no input, old driver against new:
+
+| | frames that differ | from |
+|---|---|---|
+| Metal Slug Advance | 0 | - |
+| Super Mario Advance | 940 | f18 |
+| Donkey Kong Country | 1,332 | f109 |
+| Megaman Zero | 813 | f4 |
+| Final Fight One | 1,232 | f4 |
+| Super Mario Advance 3 | 701 | f81 |
+
+The same 1,300 frames placed against dingbat-bios's (the offset of the
+one dingbat frame within 3 that has the same hash; negative is the second
+reference ahead):
+
+| | old driver | new driver |
+|---|---|---|
+| Megaman Zero | 444 frames at -2 | 444 at 0 |
+| Final Fight One | 365 at -2, 59 at -1 | 88 at -1, 59 at 0 |
+| Donkey Kong Country | 718 at -3 | 560 at -1 |
+
+So much of the boot lead that §65 measured for the second reference in
+Donkey Kong Country is this accounting, not its timing. One frame of it
+stays, and that frame is its own. §73's Koro Koro Puzzle boot lead was not
+re-measured. The fix moves the second reference's frames in most of the
+corpus, so the train's reference results need a fresh baseline.
+
+**Verdicts** (all seven configurations, with audio):
+
+| checkpoint | dingbat configs ~ mGBA | ~ the second reference | mGBA ~ the second reference |
+|---|---|---|---|
+| title_menu | IDENTICAL | IDENTICAL | IDENTICAL |
+| choose_game | MINOR | MINOR | MINOR |
+| yi_title | MINOR | IDENTICAL | MINOR |
+| file_menu | IDENTICAL | IDENTICAL | IDENTICAL |
+| story | IDENTICAL | IDENTICAL | IDENTICAL |
+| stage_start | MINOR | MINOR | MINOR |
+| shy_guys | MINOR | MINOR | MINOR |
+| column_top | MAJOR | MAJOR | MAJOR |
+| below_white_block | MAJOR | MAJOR | MAJOR |
+
+All five dingbat configurations PASS. `choose_game` and the last four
+checkpoints are noted "not diagnostic", because the references disagree
+with each other there. At
+`stage_start` all four show §36's white puffs on the first bush, and only
+Yoshi's pose differs. At `shy_guys` the dingbat configurations are
+pixel-identical to each other, and the 232-234 pixels that differ are a
+Shy Guy that mGBA and the second reference have in view and dingbat does not.
+By `column_top` both references have been hit (the 8-second timer), and
+dingbat has not.
+
+**What 1-1 now depends on: an RNG that adds VCOUNT.** At f4325, the frame
+before the first Shy Guy (object at 0x03003430) moves, dingbat-bios's and
+the second reference's IWRAM differ only in:
+
+* bytes that also differ between dingbat's two BIOS configurations;
+* 24 bytes of old stack below 0x03007CA8.
+
+The Shy Guy then walks right in dingbat (target speed +0x59 at
+0x03003448) and left in both references (-0x59, from f4326 in mGBA and
+f4327 in the second reference).
+
+Its walk is set by 0x08090070 (Thumb). That routine reads the halfword at
+`[0x03007240] + 0x29CC` = 0x03004BD8. If its low two bits are 0, it turns
+the Shy Guy to the facing stored at +0x9F. Then it takes the target speed
+and a distance of `(rng & 31) + 32` from that.
+
+0x08035648 writes the word:
+
+    rng += ((VCOUNT + b) ^ b) ^ h
+
+where b is a byte and h a halfword of game state at 0x03002200 + n, and
+VCOUNT is read live from 0x04000006. It is called ten times a frame: once
+on line 219, then once a line on lines 6-13 while the main loop waits.
+Which line comes twice depends on the cycle the wait starts on.
+
+**The decisive test.** Load mGBA to f4324, `poke8` the RNG's low byte with
+its low two bits set to K, and change nothing else. For K = 1 the Shy Guy
+walks left, as in mGBA's own run. For K = 0, 2 and 3 it walks right, as in
+dingbat. The direction is a one-in-four draw.
+
+The word is 0 until the game proper starts. It first counts at f1884, and
+there all three emulators already differ: 0x1073 in dingbat, 0x1074 in the
+second reference, 0x104D in mGBA. dingbat's own two BIOS configurations
+part at f1943 (0x6ECE against 0x6ECF). Every later draw is a function of
+every frame's sub-line timing since f1884. Like Castlevania's idle count
+(§59), no two emulators share it, so a checkpoint showing a Shy Guy
+compares random draws.
+
+**Two smaller findings on the way:**
+
+* *dingbat's HLE SoftReset is 812 cycles short* (class (a), not fixed
+  here). `rundigest` (TIMEHASH) first parts dingbat from dingbat-bios at
+  f152, the reset. RegisterRamReset(0xFF) returns on the same cycle in
+  both. From the `swi 0` (0x0812F6F0) to the crt0's first instruction,
+  Nintendo's BIOS takes 875 cycles and the HLE 63. `hle_bios.nim`'s plain
+  SoftReset branch zeroes 0x03007E00-0x03007FFF and resets the banks, and
+  charges no time for the clear. Fixing it would leave the RNG split above in
+  place: the RNG would still differ from the references from f1884.
+* *mGBA's logic-frame counter.* 0x03006B01 counts one ahead in mGBA at
+  f3027, f3067 and f3107 (11 frames after each story A) and at f4036. The
+  second reference keeps dingbat's count. In the page turn traced at f3022,
+  mGBA runs 88k instructions a frame where dingbat runs 68k. This is the
+  cheap-load pattern of §66 and §68. It was not traced to a law, and it
+  does not change the classification above.
+
+**Classification.** The EEPROM's programming time is out of the script
+(the route). The second reference's two-frame lead was the harness's (d),
+now fixed. The remaining 1-1 difference is the game's VCOUNT-fed RNG:
+(d), as §59. dingbat's HLE SoftReset is (a), recorded.
+
+**Status: script and driver changed, no core change.** The script
+(`7352d2bd...play`) carries the reset, the shifted timeline, and a header
+saying why its last three checkpoints compare draws. The game's verdict is
+PASS. No `@known` is needed while the references disagree there. If they
+ever agree by chance, this section is the reason to add one.
