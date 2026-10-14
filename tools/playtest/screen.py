@@ -8,6 +8,7 @@ Selection is inferred from pixels around each OCR line, two ways:
     siblings' -- a highlighted box or inverted row.
 Both are heuristics; `selected` is None when neither singles out one line.
 """
+import hashlib
 import json
 import os
 import subprocess
@@ -21,6 +22,60 @@ import img
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+class DiskCache:
+    """OCR readings by the sha1 of the picture's bytes, per screenread
+    binary, shared by every run on the machine ($PLAYTEST_OCR_CACHE,
+    default ~/.cache/dingbat-playtest/ocr; empty to turn it off). Vision is
+    most of a checkpoint's cost and the corpus shows the same pictures run
+    after run; a cached reading also cannot come back different, so the same
+    frames always score the same."""
+
+    def __init__(self):
+        self.root = None
+        self.ready = False
+
+    def _dir(self):
+        if not self.ready:
+            self.ready = True
+            base = os.environ.get('PLAYTEST_OCR_CACHE', os.path.expanduser('~/.cache/dingbat-playtest/ocr'))
+            try:
+                with open(os.path.join(HERE, 'bin', 'screenread'), 'rb') as f:
+                    tool = hashlib.sha1(f.read()).hexdigest()[:12]
+            except OSError:
+                tool = None
+            self.root = os.path.join(base, tool) if base and tool else None
+        return self.root
+
+    def _path(self, data):
+        k = hashlib.sha1(data).hexdigest()
+        return os.path.join(self._dir(), k[:2], k + '.json')
+
+    def get(self, data):
+        if not self._dir():
+            return None
+        try:
+            with open(self._path(data)) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def put(self, data, lines):
+        if not self._dir():
+            return
+        p = self._path(data)
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            tmp = f'{p}.{os.getpid()}.{threading.get_ident()}'
+            with open(tmp, 'w') as f:
+                json.dump(lines, f)
+            os.replace(tmp, p)
+        except OSError:
+            pass
+
+
+DISK = DiskCache()
+
+
 class ScreenReader:
     def __init__(self):
         self.proc = None
@@ -31,17 +86,30 @@ class ScreenReader:
         self.proc = subprocess.Popen([os.path.join(HERE, 'bin', 'screenread'), '--serve'],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
 
-    def ocr(self, ppm_path, key=None):
-        """OCR lines for a PPM. `key` (e.g. the frame hash) enables caching."""
+    def ocr(self, ppm_path, key=None, confirmed=False):
+        """OCR lines for a PPM. `key` (e.g. the frame hash) enables caching
+        in this reader; every reading is also kept on disk by the picture's
+        bytes (DiskCache), so a picture any run has read before is not read
+        again -- and reads the same. No text on a picture with ink is kept
+        only when `confirmed` (the second reading read() asks for)."""
         if key is not None and key in self.cache:
             return self.cache[key]
-        with self.lock:
-            if self.proc is None or self.proc.poll() is not None:
-                self._start()
-            self.proc.stdin.write(os.path.abspath(ppm_path) + '\n')
-            self.proc.stdin.flush()
-            out = json.loads(self.proc.stdout.readline())
-        lines = out.get('lines', [])
+        with open(ppm_path, 'rb') as f:
+            data = f.read()
+        lines = DISK.get(data)
+        if lines is None:
+            with self.lock:
+                if self.proc is None or self.proc.poll() is not None:
+                    self._start()
+                self.proc.stdin.write(os.path.abspath(ppm_path) + '\n')
+                self.proc.stdin.flush()
+                out = json.loads(self.proc.stdout.readline())
+            lines = out.get('lines', [])
+            # no text on a picture with ink is not believed at once (Vision
+            # returns nothing when a request fails under load): kept once a
+            # second reading agrees -- most game screens have no text
+            if lines or confirmed or img.is_blank(img.read_ppm(ppm_path)):
+                DISK.put(data, lines)
         if key is not None:
             self.cache[key] = lines
         return lines
@@ -56,7 +124,7 @@ class ScreenReader:
         rgb = img.read_ppm(ppm_path)
         if not lines and retry_empty and not img.is_blank(rgb):
             self.cache.pop(key, None)
-            lines = self.ocr(ppm_path, key)
+            lines = self.ocr(ppm_path, key, confirmed=True)
         lines = [dict(l) for l in lines]
         sel = guess_selected(rgb, lines)
         for i, l in enumerate(lines):

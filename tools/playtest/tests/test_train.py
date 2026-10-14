@@ -202,13 +202,39 @@ class Noise(unittest.TestCase):
         self.assertIsNone(self.asked)
         self.assertEqual((changed, noise, reran), ({}, {}, []))
 
+    def test_moved_hash_is_never_replayed(self):
+        # a dingbat frame, audio, save or [load] hash cannot move between two
+        # runs of the same build: no second run of base for it
+        base = {'g': fp(), 'h': fp()}
+        comb = {'g': fp(audio='au1', passed={'*': True, 'dingbat': False}, status='FAIL'),
+                'h': fp(cps={'title': 'h-title', 'menu': 'h-menu2'})}
+        C, changed, noise, reran = train.denoise(base, comb, self.BASE, {}, self.rerun({}))
+        self.assertIsNone(self.asked)
+        self.assertEqual((sorted(changed), noise, reran), (['g', 'h'], {}, []))
+
+    def test_reference_cell_is_replayed_only_when_references_play_live(self):
+        comb = {'g': fp(load_hash='ld9')}
+        C, changed, noise, reran = train.denoise({'g': fp()}, comb, self.BASE, {}, self.rerun({'g': fp()}))
+        self.assertIsNone(self.asked)
+        self.assertIn('g', changed)
+        train.denoise({'g': fp()}, comb, self.BASE, {}, self.rerun({'g': fp()}), live=True)
+        self.assertEqual(self.asked, ['g'])
+
+    def test_could_be_noise(self):
+        self.assertTrue(train.could_be_noise({'dingbat': {'pass': [True, False], 'play': ['A', 'B']}}))
+        self.assertTrue(train.could_be_noise({'*': {'status': ['PASS', 'ERROR']}}))
+        self.assertFalse(train.could_be_noise({'dingbat': {'pass': [True, False], 'cp:menu': [1, 2]}}))
+        self.assertFalse(train.could_be_noise({'dingbat': {'load:dingbat-in-dingbat-bios': [1, 2]}}, live=True))
+        self.assertTrue(train.could_be_noise({'dingbat': {'load:dingbat-in-nba': [1, 2]}}, live=True))
+        self.assertFalse(train.could_be_noise({'dingbat': {'load:dingbat-in-nba': [1, 2]}}))
+
     def test_noisy_cell_excluded_real_change_kept(self):
         # the second reference reading dingbat's save plays live: its cell
         # moves on base too; the audio change is the candidate's
         base = {'g': fp(), 'h': fp()}
         comb = {'g': fp(audio='au1', load_hash={'*': 'ld0', 'dingbat': 'ld5'}), 'h': fp()}
         again = {'g': fp(load_hash={'*': 'ld0', 'dingbat': 'ld6'})}
-        C, changed, noise, reran = train.denoise(base, comb, self.BASE, {}, self.rerun(again))
+        C, changed, noise, reran = train.denoise(base, comb, self.BASE, {}, self.rerun(again), live=True)
         self.assertEqual(self.asked, ['g'])     # only the changed game is replayed
         self.assertEqual(list(noise['g']), ['dingbat'])
         self.assertEqual(list(noise['g']['dingbat']), ['load:dingbat-in-mgba'])
@@ -220,7 +246,7 @@ class Noise(unittest.TestCase):
 
     def test_change_that_is_only_noise_drops_out(self):
         comb = {'g': fp(load_hash='ld9')}
-        C, changed, noise, reran = train.denoise({'g': fp()}, comb, self.BASE, {}, self.rerun({'g': fp(load_hash='ld7')}))
+        C, changed, noise, reran = train.denoise({'g': fp()}, comb, self.BASE, {}, self.rerun({'g': fp(load_hash='ld7')}), live=True)
         self.assertEqual(changed, {})
         self.assertEqual(set(noise['g']), set(CONFIGS))
         # nothing left for the candidates: attribution sees no change
@@ -269,7 +295,7 @@ class Noise(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, 'noise.json')
             base, comb = {'g': fp()}, {'g': fp(load_hash='ld9')}
-            _, _, noise, _ = train.denoise(base, comb, self.BASE, {}, self.rerun({'g': fp(load_hash='ld9')}))
+            _, _, noise, _ = train.denoise(base, comb, self.BASE, {}, self.rerun({'g': fp(load_hash='ld9')}), live=True)
             fresh = {}      # what the train reads from a missing noise.json
             train.update_ledger(fresh, noise, self.BASE, {'g': 'Game'}, now='t1')
             train.write_json(p, fresh)
@@ -288,7 +314,7 @@ class Noise(unittest.TestCase):
             self.assertEqual(ledger['cells']['g dingbat load:dingbat-in-mgba']['seen'], 2)
             # on another base the value is only informative: rerun, and a
             # surviving change is flagged as a known noisy cell
-            C, changed, noise3, reran = train.denoise(base, comb, 'c' * 40, ledger, self.rerun({'g': fp()}))
+            C, changed, noise3, reran = train.denoise(base, comb, 'c' * 40, ledger, self.rerun({'g': fp()}), live=True)
             self.assertEqual(self.asked, ['g'])
             self.assertIn('g', changed)
             self.assertIn('dingbat load:dingbat-in-mgba (noise seen 2x)', train.known_noisy(ledger, 'g', changed['g']))
@@ -319,6 +345,56 @@ class Relevance(unittest.TestCase):
         self.assertTrue(train.relevant(['docs/x.md', 'nim.cfg']))
         self.assertFalse(train.relevant(['docs/playtest-bugs.md', 'web/index.html', 'tools/romdiff.py']))
         self.assertFalse(train.relevant(['tools/playtest/README.md', 'tools/playtest/tests/test_train.py']))
+        # the driver is built from the GBA core and common/ only
+        self.assertFalse(train.relevant(['src/dingbat/nds/arm9.nim', 'src/dingbat/frontend/ui.nim',
+                                         'src/dingbat_wasm.nim', 'dingbat.nimble']))
+        self.assertTrue(train.relevant(['src/dingbat/common/input.nim']))
+
+    def test_results_key_follows_only_what_results_depend_on(self):
+        tree = {'src/dingbat/gba/ppu.nim': 'a1', 'src/dingbat/nds/gpu.nim': 'b1', 'web/index.html': 'c1',
+                'tools/playtest/runner.py': 'd1', 'tools/playtest/scripts/g.play': 'e1',
+                'tools/playtest/tests/test_train.py': 'f1', 'docs/x.md': '01'}
+
+        def key(**changes):
+            t = dict(tree, **{k.replace('__', '/').replace('_DOT_', '.'): v for k, v in changes.items()})
+            lines = '\n'.join(f'100644 blob {b}\t{f}' for f, b in sorted(t.items()))
+            real, train.git = train.git, lambda *a, **k: lines
+            try:
+                return train.results_key('HEAD')
+            finally:
+                train.git = real
+        k0 = key()
+        self.assertEqual(key(src__dingbat__nds__gpu_DOT_nim='b2'), k0)
+        self.assertEqual(key(web__index_DOT_html='c2'), k0)
+        self.assertEqual(key(tools__playtest__scripts__g_DOT_play='e2'), k0)
+        self.assertEqual(key(tools__playtest__tests__test_train_DOT_py='f2'), k0)
+        self.assertNotEqual(key(src__dingbat__gba__ppu_DOT_nim='a2'), k0)
+        self.assertNotEqual(key(tools__playtest__runner_DOT_py='d2'), k0)
+
+
+class Store(unittest.TestCase):
+    def test_blob_of_is_gits(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, 'f')
+            with open(p, 'w') as f:
+                f.write('hello\n')
+            self.assertEqual(train.blob_of(p), 'ce013625030ba8dba906f756967f9e9ca394464a')
+            self.assertIsNone(train.blob_of(os.path.join(d, 'missing')))
+
+    def test_fresh_rows_need_the_same_script(self):
+        with tempfile.TemporaryDirectory() as d:
+            rows = []
+            for g, text in (('g', '@title G\n'), ('h', '@title H\n')):
+                od = os.path.join(d, 'runs', g)
+                os.makedirs(od)
+                with open(os.path.join(od, 'script.play'), 'w') as f:
+                    f.write(text)
+                rows.append({'sha1': g, 'title': g, 'status': 'PASS', 'outdir': od})
+            rows.append({'sha1': 'x', 'title': 'x', 'status': 'ERROR', 'detail': 'no ROM'})
+            dump({'games': rows}, os.path.join(d, 'index.json'))
+            blobs = {'g': train.blob_of(os.path.join(d, 'runs', 'g', 'script.play')), 'h': 'other', 'x': 'any'}
+            self.assertEqual(sorted(train.fresh_rows(d, blobs)), ['g'])
+            self.assertEqual(train.fresh_rows(os.path.join(d, 'nothing'), blobs), {})
 
 
 class Suites(unittest.TestCase):

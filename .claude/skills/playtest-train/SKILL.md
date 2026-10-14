@@ -66,10 +66,13 @@ python3 tools/playtest/train.py show <id>    # a verdict again (any part of the 
 ```
 
 A train takes about as long as one dingbat-only suite (roughly two thirds of
-a full one) plus a few minutes per candidate when games changed; the first
-train on a new `origin/main` also refreshes the baseline (dingbat only, the
-references replayed). Don't resubmit while waiting: a new submission is a
-new candidate.
+a full one) plus a few minutes per candidate when games changed. Results
+are stored by content (the GBA core, the driver, the harness, each game's
+script), not by commit: a new `origin/main` that only moved elsewhere, or
+that is a candidate landed as it was tested, needs no new baseline; a
+candidate that changes only scripts plays only those games; a resubmission
+of the same change plays nothing. Don't resubmit while waiting: a new
+submission is a new candidate.
 
 ## Reading a verdict
 
@@ -99,8 +102,10 @@ changed game, the baseline run, the combined run and your candidate's own
 run directories: compare their `report.html` and `cmp/*.png`. Fixed games
 show the problems they had; regressed ones the problems they have now.
 
-Before attribution, the games that changed are played once more on base
-itself. Whatever differs between the cached baseline and that second run of
+Before attribution, the games whose change could be noise (a pass/fail flip
+with no frame hash moved; while references play live, a reference reading
+a save) are played once more on base itself -- a moved dingbat hash never
+is. Whatever differs between the cached baseline and that second run of
 base is the base's own nondeterminism -- typically the second reference
 reading the host clock in a `[load]` cell it plays live, or OCR coming back
 empty under load (a pass/fail flip with every frame hash identical, marked

@@ -61,18 +61,34 @@ the comparison. State lives in `~/.cache/dingbat-train`. Whoever waits when
 no train is running drives it, under a machine-wide lock that a full
 `suite` also waits for (`--no-lock` to bypass; subsets never wait).
 
+Results are stored by what they depend on, not by commit: the key is the
+content of the driver's sources (`emu.DRIVER_SOURCES`), the harness and the
+toolchain, and each game's row is valid for the script it played. A main
+that moved only elsewhere (docs, web, the DS core, frontends) reuses its
+predecessor's baseline; a combined build that lands as it was tested is the
+next train's baseline already; a candidate that changes only scripts plays
+only those games.
+
 Not every cell is deterministic: OCR can come back empty under heavy load
 (and until 2026-10-12 the second reference read the host clock wherever it
-played live, loading dingbat's save among them). So when the combined run changed anything, the train plays
-those games once more on base itself (base's driver is cached with the
-baseline) before attributing. A cell that differs between the two runs of
+played live, loading dingbat's save among them). So when the combined run
+changed a game in a way that could be noise -- a pass/fail flip with no
+frame hash moved, or, while the references play live, a reference reading
+dingbat's save -- the train plays it once more on base itself (base's
+driver is cached with the baseline) before attributing. A moved dingbat
+hash is never noise (the second run of base over 101-131 changed games found
+none, three trains running). A cell that differs between the two runs of
 base is noise: left out of every verdict, listed in the report's "Noise"
 section, and counted in `noise.json` under the train home (game, config,
 cell, times seen, example values). On a later train of the same base, a
 combined value that base already produced is noise without a rerun; on
 another base the ledger only marks a surviving change "known noisy".
 Checkpoint OCR that reads no text from a picture that is not blank is read
-once more before it is scored.
+once more before it is scored. Every reading is kept on disk by the
+picture's bytes and the OCR tool (`~/.cache/dingbat-playtest/ocr`,
+`PLAYTEST_OCR_CACHE=` to move it, empty to turn it off): a picture read
+before is not read again, and reads the same (an empty reading of a picture
+with ink is never kept).
 
 Two pieces of the harness make it cheap: every phase keeps its whole result
 (`<phase>/result.json`, hash windows included), and `run`/`suite

@@ -11,17 +11,23 @@ candidate alone to say whose change it was.
 
 A train, holding the machine-wide lock (one train or full suite at a time):
 
-  1. base = origin/main (fetched). Its baseline (every game in all six
-     configurations) is cached by commit; the reference emulators' phases are
-     replayed from the previous baseline when the scripts and reference
-     binaries are unchanged, so a new baseline only plays dingbat.
+  1. base = origin/main (fetched). Its baseline (every game in every
+     configuration) is stored by results key: the content of what a result
+     depends on (the driver's sources, the harness, the toolchain), each
+     game's row valid for the script it played. A main that moved elsewhere
+     (docs, web, DS, frontends) reuses the stored results; a combined build
+     that later lands as tested is its own next baseline. The reference
+     emulators' phases are replayed from another store when the scripts and
+     reference binaries are unchanged, so a new baseline only plays dingbat.
   2. Candidates that touch nothing the corpus builds from (docs, web, other
      tools) are clean without running. The rest are squash-merged onto base
      in queue order in a temporary worktree; one that conflicts with an
      earlier one rides the next train first, one that does not apply to base
      at all is rejected.
-  3. The combined build plays the corpus in the four dingbat configurations,
-     the references replayed from the baseline.
+  3. The combined build plays the corpus in the dingbat configurations, the
+     references replayed from the baseline -- only the games its results
+     key's store lacks: none when it was played before, only the changed
+     scripts when the candidates change nothing else.
   4. Every game is compared with the baseline per configuration: pass/fail
      and every hash (each checkpoint and its frame window, the [new] audio,
      the battery file, every [load] cell the configuration writes or reads).
@@ -30,12 +36,14 @@ A train, holding the machine-wide lock (one train or full suite at a time):
      each changed hash is credited to the candidate that reproduces it. A
      change no candidate reproduces alone (or one a candidate makes that the
      combined build does not show) is an interaction, for a human.
-  6. Before attribution, the changed games are played once more on base
-     itself (its driver cached with the baseline). A cell that differs
-     between the two runs of base is noise: it is left out of every verdict,
-     listed in the report's noise section and counted in noise.json (the
-     noise ledger). A combined value an earlier run of the same base already
-     produced is noise without a rerun. Nothing changed: no rerun.
+  6. Before attribution, the changed games whose changes could be noise
+     (could_be_noise: a verdict flip with no hash moved, a reference reading
+     a save live) are played once more on base itself (its driver cached
+     with the baseline). A cell that differs between the two runs of base is
+     noise: it is left out of every verdict, listed in the report's noise
+     section and counted in noise.json (the noise ledger). A combined value
+     an earlier run of the same base already produced is noise without a
+     rerun. A moved dingbat hash is never noise: no rerun.
 
 The scripts are frozen input timelines and every configuration is
 deterministic, so a game identical to the baseline on the combined build is
@@ -62,6 +70,9 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import emu as emulib  # noqa: E402
 HOME = os.path.expanduser(os.environ.get('DINGBAT_TRAIN_HOME', '~/.cache/dingbat-train'))
 DINGBAT = ['dingbat', 'dingbat-nowl', 'dingbat-bios', 'dingbat-bios-nowl', 'dingbat-hleimg']
 REF_FILES = ['tools/playtest/drivers/mgba_driver.c', 'tools/playtest/drivers/nba_driver.cpp',
@@ -74,6 +85,7 @@ REF_BINS = ['mgba_driver', 'nba_driver', 'screenread']
 # aspects where a missing value (an older run that did not record it) means
 # "unknown", not "different"
 LENIENT = ('audio', 'win:')
+NICE = 10      # --nice: what a train's suites run at
 EXIT = {'clean': 0, 'landed': 0, 'skipped': 0, 'changed': 1, 'conflict': 2, 'build-failed': 2}
 
 
@@ -276,16 +288,45 @@ def known_values(ledger, base, sha1, cfg, aspect):
     return e.get('base_values', {}).get(base[:12], [])
 
 
-def denoise(B, C, base, ledger, rerun):
+REFERENCES = ('mgba', 'nba')
+
+
+def could_be_noise(d, live=False):
+    """Whether one game's changes ({config: {aspect: [before, after]}}) could
+    be the base's own nondeterminism rather than the candidates' doing.
+
+    dingbat plays frozen inputs deterministically, so a moved frame, audio,
+    battery or [load] hash is a change, never noise (the second run of base
+    over 101, 103 and 131 changed games on 2026-10-13 found not one noisy
+    cell, at 27-84 minutes each). What can differ between two runs of the
+    same build: a verdict whose frame hashes all stayed put (OCR, read under
+    load), a game that stopped running at all, and -- only when the
+    references play live (`live`) -- a reference reading dingbat's save,
+    which may read the host clock."""
+    if '*' in d and len(d) == 1:
+        return True
+    for cfg, aspects in d.items():
+        if cfg == '*':
+            continue
+        if not set(aspects) - {'pass', 'play'}:
+            return True
+        if live and any(k.startswith('load:') and k.split('-in-')[-1] in REFERENCES for k in aspects):
+            return True
+    return False
+
+
+def denoise(B, C, base, ledger, rerun, live=False):
     """Take the base's own nondeterminism out of the combined run.
 
     B, C: {sha1: fingerprint} of the baseline and the combined run;
     ledger: the noise ledger; rerun(sha1s) -> {sha1: fingerprint} plays
-    those games on base again (called only when something changed after the
-    ledger's known values). -> (C masked, changed, noise, rerun_sha1s) where
-    noise is {sha1: {config: {aspect: {how, baseline, combined[, rerun]}}}}:
-    'known' a combined value an earlier run of this base produced, 'rerun' a
-    cell that differs between the baseline and the second run of base."""
+    those games on base again (called only for games whose changes, after
+    the ledger's known values, could_be_noise). -> (C masked, changed,
+    noise, rerun_sha1s) where noise is {sha1: {config: {aspect: {how,
+    baseline, combined[, rerun]}}}}: 'known' a combined value an earlier run
+    of this base produced, 'rerun' a cell that differs between the baseline
+    and the second run of base. `base` names the base in the ledger (its
+    results key)."""
     noise = {}
 
     def note(s, cfg, k, **kw):
@@ -303,7 +344,8 @@ def denoise(B, C, base, ledger, rerun):
                 if cv in known_values(ledger, base, s, cfg, k):
                     note(s, cfg, k, how='known', baseline=bv, combined=cv)
     C = dict(C, **{s: mask(C[s], B[s], cells(s)) for s in noise})
-    todo = sorted(diff_suites({s: B[s] for s in changed}, {s: C[s] for s in changed})[0])
+    left = diff_suites({s: B[s] for s in changed}, {s: C[s] for s in changed})[0]
+    todo = sorted(s for s, d in left.items() if could_be_noise(d, live))
     R = rerun(todo) if todo else {}
     for s in todo:
         if s not in R or not _usable(R[s]) or not _usable(B[s]):
@@ -387,11 +429,13 @@ def known_noisy(ledger, sha1, aspects):
 
 def load_suite(suite_dir):
     """{sha1: (row, fingerprint)} for a suite directory."""
+    return load_rows((read_json(os.path.join(suite_dir, 'index.json'), {}) or {}).get('games', []))
+
+
+def load_rows(rows):
+    """{sha1: (row, fingerprint)} for suite index rows."""
     out = {}
-    index = os.path.join(suite_dir, 'index.json')
-    if not os.path.exists(index):
-        return out
-    for row in read_json(index, {}).get('games', []):
+    for row in rows:
         results, windows = None, {}
         od = row.get('outdir')
         if od and os.path.exists(os.path.join(od, 'results.json')):
@@ -726,16 +770,15 @@ def build(wt, refdir, trees, name, log):
 
 
 def relevant(files):
-    """Whether a change can move a playtest result: the core, the harness
-    and its scripts, the build configuration."""
-    for f in files:
-        if f.endswith('.md'):
-            continue
-        if f.startswith(('src/', 'tools/playtest/')) and not f.startswith('tools/playtest/tests/'):
-            return True
-        if '/' not in f and (f.endswith(('.nims', '.cfg', '.nimble'))):
-            return True
-    return False
+    """Whether a change can move a playtest result: what the results key is
+    made of (the GBA core and the driver, the harness, the build
+    configuration) and the scripts."""
+    return any(keyed_path(f) or (f.startswith('tools/playtest/scripts/') and f.endswith('.play'))
+               for f in files)
+
+
+class NoBuild(Exception):
+    pass
 
 
 def ready_games(wt, only):
@@ -803,7 +846,9 @@ def run_suite(wt, outroot, tag, games, refs_from, jobs, log, runner, label):
     t0 = time.time()
     runner.stage(runner.state['stage'], label, suite_dir=sdir, total=len(games))
     with open(slog, 'a') as fh:
-        p = subprocess.Popen(cmd, cwd=wt, env=env, stdout=fh, stderr=subprocess.STDOUT)
+        # niced: the machine stays usable while a train runs
+        p = subprocess.Popen(cmd, cwd=wt, env=env, stdout=fh, stderr=subprocess.STDOUT,
+                             preexec_fn=lambda: os.nice(NICE) if NICE else None)
         try:
             while p.poll() is None:
                 time.sleep(5)
@@ -816,45 +861,156 @@ def run_suite(wt, outroot, tag, games, refs_from, jobs, log, runner, label):
     return sdir
 
 
-# ============================================================ baselines
+# ============================================================ results by key
+#
+# A game's outcome depends on its script, the dingbat driver's sources, the
+# harness that plays and judges it, the reference binaries and the
+# toolchain -- not on the commit they came from. Results are stored by that
+# key (baselines/<key>-<refkey>, one row per game, valid for the script it
+# played), so a main that moved only in docs, the web or the DS core reuses
+# its predecessor's results, a candidate that lands as it was tested hands
+# its combined run to the next train as that train's baseline, and a
+# candidate that changes only scripts plays only those games.
 
-def baseline_for(base, refkey):
-    return path('baselines', f'{base[:12]}-{refkey}', 'x')[:-2]
+# the driver's sources (emu.DRIVER_SOURCES) and the harness around it
+KEY_PATHS = tuple(emulib.DRIVER_SOURCES) + ('tools/playtest',)
+STORES_KEPT = 4
+_toolchain = []
 
 
-def ensure_baseline(base, games, refkey, refdir, trees, opts, log, runner):
-    """The suite directory holding base's results for `games` (sha1s that
-    exist in base), playing whatever is missing."""
-    if opts.baseline_suite:
-        return os.path.abspath(opts.baseline_suite)
-    bdir = baseline_for(base, refkey)
-    sdir = os.path.join(bdir, 'out', 'suites', 'baseline')
-    have = {r['sha1'] for r in (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', [])}
-    missing = [g for g in games if g[0] not in have]
-    if not missing:
-        log(f'baseline {base[:12]}: cached ({len(have)} games) {sdir}')
-        return sdir
-    runner.stage('baseline', f'{len(missing)} games')
-    # the references are replayed from the newest other baseline with the
-    # same reference binaries (per game, when its script is unchanged)
-    donors = sorted((d for d in os.listdir(os.path.dirname(bdir))
-                     if d.endswith(refkey) and os.path.join(os.path.dirname(bdir), d) != bdir
-                     and os.path.exists(os.path.join(os.path.dirname(bdir), d, 'out', 'suites', 'baseline', 'index.json'))),
-                    key=lambda d: os.path.getmtime(os.path.join(os.path.dirname(bdir), d)), reverse=True)
-    donor = os.path.join(os.path.dirname(bdir), donors[0], 'out', 'suites', 'baseline') if donors else None
-    log(f'baseline {base[:12]}: playing {len(missing)} games' + (f', references from {donor}' if donor else ', all six configurations'))
-    wt = trees.add('base', base)
-    if not build(wt, refdir, trees, 'base', log):
-        raise SystemExit(f'base {base[:12]} does not build: see {trees.logdir}/build-base.log')
-    keep_driver(wt, bdir)
-    run_suite(wt, os.path.join(bdir, 'out'), 'baseline', missing, donor, opts.jobs, log, runner, 'baseline')
-    write_json(os.path.join(bdir, 'baseline.json'), {'base': base, 'refkey': refkey, 'updated': time.time()})
-    trees.remove(wt)
+def keyed_path(f):
+    """Whether a file is part of the results key (scripts count per game)."""
+    if f.endswith('.md') or f.startswith(('tools/playtest/scripts/', 'tools/playtest/tests/')):
+        return False
+    return any(f == p or f.startswith(p + '/') for p in KEY_PATHS)
+
+
+def toolchain():
+    if not _toolchain:
+        for cmd in (['nim', '--version'], ['cc', '--version']):
+            try:
+                _toolchain.append(sh(cmd, check=False).splitlines()[0])
+            except (OSError, IndexError):
+                _toolchain.append(f'{cmd[0]}: none')
+    return ' / '.join(_toolchain)
+
+
+def results_key(commit):
+    """The key of everything at `commit` a game's result depends on besides
+    its own script and the reference binaries."""
+    h = hashlib.sha1(toolchain().encode())
+    for line in git('ls-tree', '-r', '--full-tree', commit).splitlines():
+        meta, f = line.split('\t', 1)
+        if keyed_path(f):
+            h.update(f'{meta}\t{f}\n'.encode())
+    return h.hexdigest()[:12]
+
+
+def script_blobs(commit):
+    """{game sha1: blob id of its script} at `commit`."""
+    out = {}
+    for line in git('ls-tree', '--full-tree', commit, 'tools/playtest/scripts/').splitlines():
+        meta, f = line.split('\t', 1)
+        if f.endswith('.play'):
+            out[os.path.basename(f)[:-5]] = meta.split()[2]
+    return out
+
+
+def blob_of(p):
+    """git's blob id of a file's content (None when it cannot be read)."""
+    try:
+        with open(p, 'rb') as f:
+            data = f.read()
+    except OSError:
+        return None
+    return hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+
+
+def store_dir(key, refkey):
+    return path('baselines', f'{key}-{refkey}', 'x')[:-2]
+
+
+def store_suite(key, refkey):
+    return os.path.join(store_dir(key, refkey), 'out', 'suites', 'baseline')
+
+
+def fresh_rows(sdir, blobs):
+    """{sha1: row} of a suite's rows that played the script `blobs` names."""
+    out = {}
+    for row in (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', []):
+        od = row.get('outdir')
+        if od and blobs.get(row['sha1']) and blob_of(os.path.join(od, 'script.play')) == blobs[row['sha1']]:
+            out[row['sha1']] = row
+    return out
+
+
+def write_view(sdir, rows, tag):
+    """A suite index over rows played elsewhere, for the record."""
+    os.makedirs(sdir, exist_ok=True)
+    write_json(os.path.join(sdir, 'index.json'), {'tag': tag, 'games': list(rows.values())})
     return sdir
 
 
+def donor_for(refkey, exclude):
+    """The newest other store with these reference binaries: its reference
+    phases are replayed (per game, when its script is the same)."""
+    root = os.path.dirname(path('baselines', 'x'))
+    ds = sorted((d for d in os.listdir(root) if d.endswith(refkey) and os.path.join(root, d) != exclude
+                 and os.path.exists(os.path.join(root, d, 'out', 'suites', 'baseline', 'index.json'))),
+                key=lambda d: os.path.getmtime(os.path.join(root, d)), reverse=True)
+    return os.path.join(root, ds[0], 'out', 'suites', 'baseline') if ds else None
+
+
+def ensure_results(key, refkey, games, blobs, tree, opts, log, runner, label, refs_from=None):
+    """{sha1: row} for every game in `games` with the script `blobs` names,
+    from the store of `key`, playing (into the store) only the games it
+    lacks. tree() -> a worktree with the driver built, called only when a
+    game must play; refs_from: the suite the references replay from
+    (default: the newest other store with these reference binaries)."""
+    sroot = store_dir(key, refkey)
+    sdir = store_suite(key, refkey)
+    have = fresh_rows(sdir, blobs)
+    missing = [g for g in games if g[0] not in have]
+    os.makedirs(sroot, exist_ok=True)
+    os.utime(sroot)     # most recently used: pruned last
+    if not missing:
+        log(f'{label} {key}: stored ({len(games)} games) {sdir}')
+        return {g[0]: have[g[0]] for g in games}
+    refs_from = refs_from or donor_for(refkey, sroot)
+    log(f'{label} {key}: playing {len(missing)} of {len(games)} games'
+        + (f', references from {refs_from}' if refs_from else ', every configuration'))
+    wt = tree()
+    keep_driver(wt, sroot)
+    run_suite(wt, os.path.join(sroot, 'out'), 'baseline', missing, refs_from, opts.jobs, log, runner, label)
+    write_json(os.path.join(sroot, 'baseline.json'), {'key': key, 'refkey': refkey, 'updated': time.time()})
+    # every row just played counts, an ERROR without a run directory too (a
+    # game that stopped running is a change); only a later train skips it
+    want = {g[0] for g in missing}
+    played = {r['sha1']: r for r in (read_json(os.path.join(sdir, 'index.json'), {}) or {}).get('games', [])
+              if r['sha1'] in want}
+    have.update(played)
+    return {g[0]: have[g[0]] for g in games if g[0] in have}
+
+
+def ensure_baseline(base, bkey, games, refkey, refdir, trees, opts, log, runner):
+    """{sha1: row} of base's results for `games` (sha1s that exist in
+    base), playing whatever the store of its key lacks."""
+    if opts.baseline_suite:
+        rows = (read_json(os.path.join(opts.baseline_suite, 'index.json'), {}) or {}).get('games', [])
+        return {r['sha1']: r for r in rows}
+
+    def tree():
+        wt = trees.add('base', base)
+        if not build(wt, refdir, trees, 'base', log):
+            raise SystemExit(f'base {base[:12]} does not build: see {trees.logdir}/build-base.log')
+        return wt
+    runner.stage('baseline')
+    return ensure_results(bkey, refkey, games, script_blobs(base), tree, opts, log, runner, 'baseline')
+
+
 def keep_driver(wt, bdir):
-    """Cache base's dingbat_driver with its baseline for the noise rerun."""
+    """Cache a tree's dingbat_driver with its stored results (the noise
+    rerun plays base's again)."""
     os.makedirs(os.path.join(bdir, 'bin'), exist_ok=True)
     # the .srcsum stamp with it: emu.py refuses a driver without one
     for f in ('dingbat_driver', 'dingbat_driver.srcsum'):
@@ -862,11 +1018,10 @@ def keep_driver(wt, bdir):
             shutil.copy2(os.path.join(wt, 'tools/playtest/bin', f), os.path.join(bdir, 'bin', f))
 
 
-def rerun_base(base, refkey, refdir, subset, refs_from, trees, opts, log, runner, rd):
-    """Play `subset` on base again (its cached driver, or built now), the
-    references replayed the way the combined run replayed them. -> suite
-    directory, or None when base does not build."""
-    bdir = baseline_for(base, refkey)
+def rerun_base(base, bdir, refdir, subset, refs_from, trees, opts, log, runner, rd):
+    """Play `subset` on base again (the driver cached in its store `bdir`,
+    or built now), the references replayed the way the combined run
+    replayed them. -> suite directory, or None when base does not build."""
     cached = os.path.join(bdir, 'bin', 'dingbat_driver')
     wt = trees.add('base-again', base)
     # a driver cached before the .srcsum stamps has none: built again
@@ -899,21 +1054,21 @@ def baseline_cmd(args):
         base = git('rev-parse', '--verify', f"{args.commit or args.base}^{{commit}}")
         runner.stage('refs')
         refkey, refdir = ref_bins(base, trees, args, log)
+        bkey = results_key(base)
         if args.suite:
             # adopt an existing suite of this commit as its baseline
-            bdir = baseline_for(base, refkey)
-            dst = os.path.join(bdir, 'out', 'suites', 'baseline')
+            dst = store_suite(bkey, refkey)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             if not os.path.lexists(dst):
                 os.symlink(os.path.abspath(args.suite), dst)
-            log(f'baseline {base[:12]}: adopted {args.suite}')
+            log(f'baseline {base[:12]} ({bkey}): adopted {args.suite}')
             return 0
         names = git('ls-tree', '--name-only', f'{base}:tools/playtest/scripts').split()
         wt = trees.add('scan', base)
         games = ready_games(wt, args.only)
         trees.remove(wt)
         games = [g for g in games if f'{g[0]}.play' in names]
-        ensure_baseline(base, games, refkey, refdir, trees, args, log, runner)
+        ensure_baseline(base, bkey, games, refkey, refdir, trees, args, log, runner)
         return 0
     finally:
         trees.cleanup()
@@ -1021,59 +1176,87 @@ def _train(car, opts, run_id, rd, log, runner, trees, run):
     games = ready_games(comb, opts.only)
     in_base = set(git('ls-tree', '--name-only', f'{base}:tools/playtest/scripts').split())
     base_games = [g for g in games if f'{g[0]}.play' in in_base]
-    bsuite = ensure_baseline(base, base_games, refkey, refdir, trees, opts, log, runner)
+    bkey = results_key(base)
+    run['base_key'] = bkey
+    brows = ensure_baseline(base, bkey, base_games, refkey, refdir, trees, opts, log, runner)
+    bsuite = os.path.abspath(opts.baseline_suite) if opts.baseline_suite else store_suite(bkey, refkey)
     run['baseline'] = bsuite
+    # read now: a candidate that changes only scripts shares base's store,
+    # and its runs of those scripts replace base's rows there
+    B = load_rows(brows.values())
 
-    runner.stage('build', 'combined')
+    head = git('rev-parse', 'HEAD', cwd=comb)
+    ckey, cblobs = results_key(head), script_blobs(head)
+    live = [c['name'] for c in aboard if set(c['files']) & set(REF_INPUTS)]
+    # a candidate changing what the references play has them play live,
+    # from its own reference inputs: stored under their key, which is the
+    # key of main once it lands (--ref-bin keys the binaries alone: not
+    # stored then)
+    crefkey, crefdir = ref_bins(head, trees, opts, log) if live else (refkey, refdir)
+    keep = not live or crefkey != refkey
+    stored = fresh_rows(store_suite(ckey, crefkey), cblobs) if keep else {}
+    must_play = any(g[0] not in stored for g in games)
     solo_trees = {}
-    if not build(comb, refdir, trees, 'combined', log):
-        if len(aboard) == 1:
-            verdicts[aboard[0]['id']] = set_verdict(aboard[0], 'build-failed', run_id,
-                                                    f'does not build on {base[:12]}', log=f'{trees.logdir}/build-combined.log')
+    if must_play:
+        runner.stage('build', 'combined')
+        if not build(comb, crefdir, trees, 'combined', log):
+            if len(aboard) == 1:
+                verdicts[aboard[0]['id']] = set_verdict(aboard[0], 'build-failed', run_id,
+                                                        f'does not build on {base[:12]}',
+                                                        log=f'{trees.logdir}/build-combined.log')
+                return finish(run, rd, log, verdicts, car)
+            # who breaks it: each alone (kept for attribution)
+            ok = []
+            for c in aboard:
+                wt = trees.add(f"c{len(solo_trees)}", base)
+                trees.merge(wt, c)
+                if build(wt, refdir, trees, f"c{len(solo_trees)}", log):
+                    solo_trees[c['id']] = wt
+                    ok.append(c)
+                else:
+                    verdicts[c['id']] = set_verdict(c, 'build-failed', run_id, f'does not build on {base[:12]}')
+            for c in ok:
+                # builds alone, not together: each rides a train of its own
+                defer(c, run_id, 'the batch did not build together', solo=True)
+            run['build_split'] = [c['name'] for c in ok]
             return finish(run, rd, log, verdicts, car)
-        # who breaks it: each alone (kept for attribution)
-        ok = []
-        for c in aboard:
-            wt = trees.add(f"c{len(solo_trees)}", base)
-            trees.merge(wt, c)
-            if build(wt, refdir, trees, f"c{len(solo_trees)}", log):
-                solo_trees[c['id']] = wt
-                ok.append(c)
-            else:
-                verdicts[c['id']] = set_verdict(c, 'build-failed', run_id, f'does not build on {base[:12]}')
-        for c in ok:
-            # builds alone, not together: each rides a train of its own
-            defer(c, run_id, 'the batch did not build together', solo=True)
-        run['build_split'] = [c['name'] for c in ok]
-        return finish(run, rd, log, verdicts, car)
 
     # ---- the corpus on the combined build
     runner.stage('combined')
-    live = [c['name'] for c in aboard if set(c['files']) & set(REF_INPUTS)]
     if live:
         log(f"  {', '.join(live)} changes what the references play: references run live")
-    csuite = run_suite(comb, os.path.join(rd, 'out-combined'), 'combined', games, None if live else bsuite,
-                       opts.jobs, log, runner, 'combined')
-    B, C = load_suite(bsuite), load_suite(csuite)
+    if not keep:
+        csuite = run_suite(comb, os.path.join(rd, 'out-combined'), 'combined', games, None,
+                           opts.jobs, log, runner, 'combined')
+        C = load_suite(csuite)
+    else:
+        if ckey == bkey and crefkey == refkey:
+            log(f'  combined: the same results key as base ({ckey}): only changed scripts play')
+        crows = ensure_results(ckey, crefkey, games, cblobs, lambda: comb, opts, log, runner, 'combined',
+                               refs_from=None if live else bsuite)
+        csuite = write_view(os.path.join(rd, 'out-combined', 'suites', 'combined'), crows, 'combined')
+        C = load_rows(crows.values())
+    run['combined_key'] = ckey
     Bf, Cf = {s: f for s, (r, f) in B.items()}, {s: f for s, (r, f) in C.items()}
     raw, added, removed = diff_suites(Bf, Cf)
     log(f'  diff vs baseline: {len(raw)} changed, {len(added)} added, {len(removed)} not run')
 
-    # ---- noise: the changed games once more on base itself
+    # ---- noise: the changed games once more on base itself, where a
+    # change could be noise at all (could_be_noise)
     ledger = read_json(path('noise.json'), {}) or {}
 
     def rerun(subset):
         runner.stage('noise', f'{len(subset)} games on base again')
-        sd = rerun_base(base, refkey, refdir, [(s, C[s][0]['title']) for s in subset],
+        sd = rerun_base(base, store_dir(bkey, refkey), refdir, [(s, C[s][0]['title']) for s in subset],
                         None if live else bsuite, trees, opts, log, runner, rd)
         if not sd:
             log('  base does not build again: no noise check')
             return {}
         run['base_again'] = sd
         return {s: f for s, (r, f) in load_suite(sd).items()}
-    Cf, changed, noise, reran = denoise(Bf, Cf, base, ledger, rerun)
+    Cf, changed, noise, reran = denoise(Bf, Cf, bkey, ledger, rerun, live=bool(live))
     if noise:
-        ledger = update_ledger(ledger, noise, base, {s: (C.get(s) or B.get(s))[0]['title'] for s in noise})
+        ledger = update_ledger(ledger, noise, bkey, {s: (C.get(s) or B.get(s))[0]['title'] for s in noise})
         write_json(path('noise.json'), ledger)
     log(f'  noise: {len(noise)} game(s) with cells that differ between runs of base'
         + (f' ({len(reran)} replayed on base)' if reran else '') + f'; {len(changed)} changed after it')
@@ -1092,14 +1275,32 @@ def _train(car, opts, run_id, rd, log, runner, trees, run):
             if not wt:
                 wt = trees.add(f'c{i}', base)
                 trees.merge(wt, c)
-                if not build(wt, refdir, trees, f'c{i}', log):
-                    # built in the batch but not alone: it needs another candidate
-                    cand_fps[c['id']] = {}
-                    run.setdefault('alone_build_failed', []).append(c['name'])
-                    continue
-            s = run_suite(wt, os.path.join(rd, f'out-c{i}'), f'c{i}', subset,
-                          None if c['name'] in live else bsuite, opts.jobs, log, runner, f"alone: {c['name']}")
-            got = load_suite(s)
+            built = [bool(solo_trees.get(c['id']))]
+
+            def tree(wt=wt, i=i, built=built):
+                if not built[0] and not build(wt, refdir, trees, f'c{i}', log):
+                    raise NoBuild()
+                built[0] = True
+                return wt
+            label = f"alone: {c['name']}"
+            try:
+                if c['name'] in live:
+                    tree()
+                    s = run_suite(wt, os.path.join(rd, f'out-c{i}'), f'c{i}', subset, None, opts.jobs, log,
+                                  runner, label)
+                    got = load_suite(s)
+                else:
+                    ahead = git('rev-parse', 'HEAD', cwd=wt)
+                    arows = ensure_results(results_key(ahead), refkey, subset, script_blobs(ahead), tree, opts,
+                                           log, runner, label, refs_from=bsuite)
+                    s = write_view(os.path.join(rd, f'out-c{i}', 'suites', f'c{i}'), arows, f'c{i}')
+                    got = load_rows(arows.values())
+            except NoBuild:
+                # built in the batch but not alone: it needs another candidate
+                cand_fps[c['id']] = {}
+                run.setdefault('alone_build_failed', []).append(c['name'])
+                trees.remove(wt)
+                continue
             cand_fps[c['id']] = {k: mask(f, Bf[k], {cfg: list(d) for cfg, d in noise.get(k, {}).items()})
                                  for k, (r, f) in got.items() if k in Bf}
             cand_rows[c['id']] = {k: r for k, (r, f) in got.items()}
@@ -1240,7 +1441,7 @@ def render_report(run, car):
 
 def prune(keep, log):
     """Keep the newest `keep` runs' suite outputs (reports always) and the
-    newest three baselines."""
+    STORES_KEPT most recently used result stores."""
     rd = os.path.dirname(path('runs', 'x'))
     runs = sorted(os.listdir(rd))
     for r in runs[:-keep] if keep else []:
@@ -1249,7 +1450,7 @@ def prune(keep, log):
                 shutil.rmtree(os.path.join(rd, r, d), ignore_errors=True)
     bd = os.path.dirname(path('baselines', 'x'))
     bs = sorted(os.listdir(bd), key=lambda d: os.path.getmtime(os.path.join(bd, d)))
-    for b in bs[:-3]:
+    for b in bs[:-STORES_KEPT]:
         shutil.rmtree(os.path.join(bd, b), ignore_errors=True)
     work = os.path.dirname(path('work', 'x'))
     for w in os.listdir(work):
@@ -1331,6 +1532,8 @@ def main(argv=None):
 
     def train_opts(p):
         p.add_argument('--jobs', type=int, default=6, help='games at a time in each suite (default 6)')
+        p.add_argument('--nice', type=int, default=NICE,
+                       help=f'niceness of the suites a train runs (default {NICE}; 0 for none)')
         p.add_argument('--base', default=None, help='what candidates go on top of (default: origin/main, fetched)')
         p.add_argument('--only', nargs='+', default=None,
                        help='sha1 prefixes or title substrings: a subset of the corpus (testing the train)')
@@ -1364,6 +1567,9 @@ def main(argv=None):
     if hasattr(args, 'base'):
         args.base_given = args.base is not None
         args.base = args.base or 'origin/main'
+    if hasattr(args, 'nice'):
+        global NICE
+        NICE = args.nice
     os.makedirs(HOME, exist_ok=True)
     if args.cmd == 'submit':
         return submit(args)

@@ -279,6 +279,11 @@ def suite(args):
         print(f"{row['status']:8} {title[:56]}", flush=True)
         return row
 
+    # longest first (by what each game cost in the run the references come
+    # from; a game not timed there leads): a long game started last is a
+    # tail with the rest of the machine idle
+    todo.sort(key=lambda g: -cost(refs.get(g[0])))
+
     # an existing suite of the same tag is extended: its games stay unless
     # this run replaces them
     index_path = os.path.join(sdir, 'index.json')
@@ -303,6 +308,16 @@ def suite(args):
     for r in rows:
         print(f"{r['status']:8} {r['title'][:56]}")
     return 0 if all(r['status'] != 'FAIL' for r in rows) else 1
+
+
+def cost(outdir):
+    """Seconds a run's emulator phases took in all (inf when unknown)."""
+    try:
+        r = json.load(open(os.path.join(outdir, 'results.json')))
+    except (OSError, TypeError, ValueError):
+        return float('inf')
+    phases = list(r.get('new', {}).values()) + list(r.get('load', {}).values())
+    return sum(p.get('seconds') or 0 for p in phases if not p.get('replayed_from'))
 
 
 def freeze_cmd(args):
