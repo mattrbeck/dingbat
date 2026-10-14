@@ -130,21 +130,40 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   apu.tick_phase = (apu.tick_phase + tick - (base mod tick)) mod tick
   apu.noise_phase = (apu.noise_phase + 2 * tick - (base mod (2 * tick))) mod (2 * tick)
 
-const APU_SPSW_EXTRA_DOTS* {.intdefine.} = 10
-const APU_SPSW_EXTRA_DOTS_SINGLE* {.intdefine.} = 7
+const APU_SPSW_EXTRA_DOTS* {.intdefine.} = 8
+const APU_SPSW_EXTRA_DOTS_SINGLE* {.intdefine.} = 3
+  ## T-cycles the APU's 4 MHz domain runs across the KEY1 stall beyond what
+  ## the CPU clock counts, for a switch ending in double / single speed: the
+  ## same oscillator restart the PPU sees (SPEED_SWITCH_PPU_EXTRA_DOTS = 8 /
+  ## _SINGLE = 3). With the one-time re-phase below, the gambatte duty ladder
+  ## speedchange{,2,3,4,5}*_ch1_duty0_pos6_to_pos7_timing_* [cgb] (36 rows,
+  ## one to five switches, both directions first) is additive in these:
+  ## 7 / 9 and 2 / 4 each lose rows. Refused: 10 / 7 (without the re-phase;
+  ## the two- to five-switch rows want sums no constant pair gives),
+  ## 5 / 1 (APU_CLOCK_CARRY's shares).
 const APU_SPSW_EXTRA_DOTS_CARRY* {.intdefine.} = 5
 const APU_SPSW_EXTRA_DOTS_CARRY_SINGLE* {.intdefine.} = 1
-  ## The same shares under APU_CLOCK_CARRY (apu/psg_host.nim).
-  ## T-cycles the APU's 4 MHz domain runs across the KEY1 stall beyond what
-  ## the CPU clock counts, for a switch ending in double / single speed (the
-  ## PPU's SPEED_SWITCH_PPU_EXTRA_DOTS = 8 / 3). Pinned by the single-switch
-  ## gambatte audio rows, which watch channel 1's duty pointer reach its
-  ## seventh step against a retrigger one NOP apart: to double,
-  ## speedchange_ch1_duty0_pos6_to_pos7_timing_{1,2} and _nop_{1,2} say 8 is
-  ## late and 12 early; to single (the `_ds_` members, which switch up before
-  ## the trigger and down after it), 5 is late and 9 early. The two-, three-
-  ## and five-switch ladders are NOT additive in these (docs/gb-failure-
-  ## triage.md H2), so the multi-switch rows stay red.
+  ## The same shares under APU_CLOCK_CARRY (apu/psg_host.nim), which is
+  ## refuted (docs/gb-failure-triage.md H2).
+
+const APU_SPSW_REPHASE_LEAD_T* {.intdefine.} = 3
+const APU_SPSW_REPHASE_GRID_T* {.intdefine.} = 1
+  ## The first KEY1 switch after an APU power-on re-phases the APU clock: its
+  ## tick grids (the 1 MHz square grid and APU_DS_TRIGGER_SNAP's 2 us grid)
+  ## come out GRID_T T-cycles later than real time plus the stall's
+  ## APU_SPSW_EXTRA_DOTS, and a running square's next step LEAD_T earlier --
+  ## onto the re-phased grid's previous edge. Later switches move the APU by
+  ## the extras alone. The grid half is pinned by speedchange_ch1_nr4init_
+  ## duty0_pos6_to_pos7_timing_{1,2} [cgb] (power-on, switch, then the first
+  ## trigger): 0 and 3 lose, 2 also passes. The lead by every ladder row
+  ## whose channel runs across a switch, one switch or five, triggered before
+  ## the first switch or after a power-on that followed one (the `_ds_`
+  ## members): 2 and 4 lose; tying it to the boot rather than the power-on
+  ## loses the five `_ds_2` rows. A trigger after a power-on with no switch
+  ## since sees no re-phase: SameSuite channel_1_freq_change_timing-cgb0BC
+  ## and the no-switch sound/ rows. Measured on channel 1; channel 2 is the
+  ## same hardware (assumed), channels 3 and 4 are untested and left alone.
+  ## docs/gb-failure-triage.md H2. 0 / 0 disables.
 
 proc apu_stall_extra*(apu: GbApu; gb: GB; dots: int) =
   ## Advance every channel deadline by `dots` T-cycles of real time: the
@@ -167,6 +186,23 @@ proc apu_stall_extra*(apu: GbApu; gb: GB; dots: int) =
   let tick = gb_apu_tick(gb)
   apu.tick_phase  = (apu.tick_phase + tick - (d mod tick)) mod tick
   apu.noise_phase = (apu.noise_phase + 2 * tick - (d mod (2 * tick))) mod (2 * tick)
+  # APU_DS_TRIGGER_SNAP's grid runs with the APU too.
+  gb.apu_power_on_at -= int64(d)
+
+proc apu_spsw_rephase*(apu: GbApu; gb: GB) =
+  ## APU_SPSW_REPHASE_*: once per APU power-on, at the first KEY1 switch's
+  ## stall (after apu_stall_extra, at the new speed).
+  if not apu.spsw_rephase_pending: return
+  apu.spsw_rephase_pending = false
+  apu_catchup_all(apu, gb)
+  let sh = gb.scheduler.speed
+  let lead = CycleCount(APU_SPSW_REPHASE_LEAD_T) shl sh
+  for ch in [apu.channel1, apu.channel2]:
+    if ch.next_step != GB_NO_STEP and ch.next_step >= lead: ch.next_step -= lead
+  let g = CycleCount(APU_SPSW_REPHASE_GRID_T) shl sh
+  let tick = gb_apu_tick(gb)
+  apu.tick_phase = (apu.tick_phase + (g mod tick)) mod tick
+  gb.apu_power_on_at += int64(g)
 
 proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ## CGB speed switch: remaining delays are in CPU cycles, so entering double
@@ -206,6 +242,16 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   # power-on that sets it).
   apu.tick_phase  = gb.scheduler.cycles mod (CycleCount(4) shl new_speed)
   apu.noise_phase = gb.scheduler.cycles mod (CycleCount(8) shl new_speed)
+  # APU_DS_TRIGGER_SNAP's 2 us grid keeps its real-time phase, re-expressed in
+  # the new speed's cycles (a power-on before the switch still anchors a
+  # double-speed trigger after it: speedchange_ch1_nr4init_*). Only the
+  # phase is kept, so the stamp stays near the clock.
+  block:
+    let g_old = 8'i64 shl int64(old_speed)
+    let ph = floorMod(int64(now) - gb.apu_power_on_at, g_old)
+    gb.apu_power_on_at = int64(base_new) -
+      (if new_speed > old_speed: ph shl int64(new_speed - old_speed)
+       else: ph shr int64(old_speed - new_speed))
 
 proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ## Frame-boundary scheduler rebase. Catching the channels up first keeps every
@@ -527,6 +573,7 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
     elif (val and 0x80) != 0 and not apu.sound_enabled:
       when APU_DS_TRIGGER_SNAP != 0: gb.apu_power_on_at = int64(gb.scheduler.cycles)
       when APU_CLOCK_CARRY != 0: apu_sh_power_on(gb)
+      apu.spsw_rephase_pending = true
       apu.sound_enabled = true
       apu.frame_sequencer_stage = 0
       apu_drop_spsw_lag(apu, gb)

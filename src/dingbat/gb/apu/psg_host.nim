@@ -52,19 +52,18 @@ proc gb_apu_edge_before*(gb: GB): CycleCount =
   now - ((now + tick - (gb.apu.tick_phase mod tick)) mod tick)
 
 const APU_CLOCK_CARRY* {.intdefine.} = 0
-  ## Ships 0. 1: on CPU CGB C and older (GbQuirks.apu_clock_carry) the square
-  ## channels count their start-up from the 1 MHz edge at or BEFORE the write
-  ## on a 2 MHz APU clock whose phase is carried through APU power-on, DIV
-  ## resets and speed switches (the apu_sh_* shadow below, the rules
-  ## gambatte-core's PSG uses), and a switch carries every APU deadline across
-  ## by its distance in 2 MHz cycles (apu_rescale_speed), with
+  ## Refuted; ships 0. 1: on CPU CGB C and older (GbQuirks.apu_clock_carry) the
+  ## square channels count their start-up from the 1 MHz edge at or BEFORE
+  ## the write on a 2 MHz APU clock whose phase is carried through APU
+  ## power-on, DIV resets and speed switches (the apu_sh_* shadow below, the
+  ## rules gambatte-core's PSG uses), and a switch carries every APU deadline
+  ## across by its distance in 2 MHz cycles (apu_rescale_speed), with
   ## APU_SPSW_EXTRA_DOTS_CARRY{,_SINGLE} = 5 / 1 for the stall. It takes the
-  ## thirteen red gambatte speed-switch audio rows (speedchange{2..5}*_ch1_
-  ## duty0_pos6_to_pos7_timing_*, speedchange_ch1_nr4init_*_2; peak bracketed
-  ## on both extras) and loses SameSuite channel_1_freq_change_timing-cgb0BC,
-  ## whose single-speed triggers after an APU power-on want the grid anchored
-  ## at the write (gambatte's clock puts the edge 3 cycles earlier there).
-  ## docs/gb-failure-triage.md H2.
+  ## gambatte speed-switch duty ladder and loses SameSuite channel_1_freq_
+  ## change_timing-cgb0BC one NOP early in both halves: it charges the first
+  ## switch's re-phase (APU_SPSW_REPHASE_*, apu.nim, which takes both) to
+  ## the trigger after a power-on instead. gambatte-core fails that SameSuite
+  ## row too. docs/gb-failure-triage.md H2.
 
 when APU_CLOCK_CARRY != 0:
   template sh_now(gb: GB): int64 = int64(gb.scheduler.cycles)

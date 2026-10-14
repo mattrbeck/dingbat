@@ -1009,6 +1009,7 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
                                   (if carry: APU_SPSW_EXTRA_DOTS_CARRY else: APU_SPSW_EXTRA_DOTS)
                                 else:
                                   (if carry: APU_SPSW_EXTRA_DOTS_CARRY_SINGLE else: APU_SPSW_EXTRA_DOTS_SINGLE)))
+    if not carry: gb.apu.apu_spsw_rephase(gb)
   when CGB_LYC_EDGE_DEFER and CGB_LYC_EDGE_POLL:
     # As in mem_tick_ppu.
     if unlikely(mem.lyc_edge_owed):

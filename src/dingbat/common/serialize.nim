@@ -75,11 +75,12 @@ const
   #        power-on stamp), $FEA0-$FEFF / RP / SVBK readback, the APU tick
   #        grids and per-channel latches, the PPU's LCD-on frame flag and
   #        pending STAT drop; mode-2 states load
+  #      · 7 the APU's pending KEY1 re-phase (spsw_rephase_pending)
   #      · 10 the PSG section: the shift-0 check's four fields as real ones
   #        (they had ridden in spare bits of channel 1's sweep fields),
   #        apu.power_on_at, and the shared PSG's per-channel latches
   GBA_PAYLOAD_VERSION* = 10'u32
-  GB_PAYLOAD_VERSION*  = 6'u32
+  GB_PAYLOAD_VERSION*  = 7'u32
   # NDS: 1 initial (docs/nds/savestate.md). The payload also carries a hash
   #      of its field layout, checked on load, so a layout change that
   #      forgets this bump is still refused rather than misread.

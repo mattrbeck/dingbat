@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-10-14 09:58:32*
+*Generated: 2026-10-14 11:20:57*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5200/5213 passed.**
+**5213/5213 passed.**
 
 ## bgen
 
@@ -173,25 +173,9 @@ All 82 tests passed.
 
 All 300 tests passed.
 
-## speedchange (231/244 passed)
+## speedchange
 
-231/244 tests passed, 13 failed:
-
-| Test | Result |
-|------|--------|
-| speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange2_nop_ch1_duty0_pos6_to_pos7_timing_ds_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange3_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange3_ch1_duty0_pos6_to_pos7_timing_nop_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange3_nop_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_nop_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange5_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange5_ch1_duty0_pos6_to_pos7_timing_nop_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange5_nop_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1 [cgb, audio] | audio0 (mix constant over 35112 samples), expected audio1 |
+All 244 tests passed.
 
 ## sprites
 

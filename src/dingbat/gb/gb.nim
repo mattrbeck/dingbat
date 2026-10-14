@@ -1,7 +1,7 @@
 # GB/GBC emulator main file
 # All types are declared here; implementation files are `include`d.
 
-import std/[bitops, os, strutils, times]
+import std/[bitops, math, os, strutils, times]
 import ../common/[input, scheduler, emu, resampler, serialize, timestretch, cheats, atomicfile, psg]
 import ../common/lut_macros
 when defined(test_harness):
@@ -2309,6 +2309,11 @@ type
     # double speed, cleared by an APU power-off. Serialized from GB payload
     # rev 6.
     spsw_fs_lag*:         bool
+    # Set by an APU power-on (and the boot hand-off), consumed by the next KEY1
+    # switch: the first oscillator restart after a power-on re-phases the
+    # APU's tick grid (apu_spsw_rephase, APU_SPSW_REPHASE_*). Serialized from
+    # GB payload rev 7.
+    spsw_rephase_pending*: bool
     left_enable*:         bool
     left_volume*:         uint8
     right_enable*:        bool
@@ -3446,6 +3451,8 @@ proc gb_skip_boot(gb: GB) =
   gb.ppu.skip_boot(gb)
   gb.timer.skip_boot(gb)
   when APU_CLOCK_CARRY != 0: apu_sh_boot(gb)
+  # The boot ROM powered the APU on and switched no speed.
+  gb.apu.spsw_rephase_pending = true
 
 proc handle_saves*(gb: GB) =
   ## Flush battery-backed cart RAM once per frame (when dirty) so progress

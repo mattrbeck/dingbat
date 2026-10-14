@@ -951,7 +951,8 @@ reproduces the rule with a probe on the mixer (`GbApu.probe_*`, armed by
 `--mode=gambatte` for the last frame; `tests/README.md`). The ROMs are
 one-NOP ladders around a square channel's duty pointer, envelope or sweep, so
 they read the APU at a resolution nothing else in the tree does. Scored since
-2026-09-21: 207 of 220 (`sound` 184/184, `speedchange` 23/36).
+2026-09-21; all 220 green since 2026-10-14 (`sound` 184/184, `speedchange`
+36/36).
 
 **Closed by them (all knobs two-sided, comments carry the brackets).**
 `BOOT_CH1_PHASE_{DMG,CGB}_T` (memory.nim): the boot beep's second note is
@@ -964,8 +965,10 @@ sequencer step before the envelope clock, taken 4 T early, misses that clock.
 `SWEEP_TRIGGER_LEAD_T_{DMG,CGB}` = 4 / 8: a trigger that close before a sweep
 clock misses it. `APU_POWERON_TAP_LEAD` = 4 (apu.nim): the tap bit that
 decides the skipped first DIV-APU edge is sampled 4 counts ahead of the NR52
-write. `APU_SPSW_EXTRA_DOTS` = 10 / `_SINGLE` = 7: the APU's share of the
-KEY1 stall's oscillator restart, the PPU's 8 / 3 by another clock.
+write. `APU_SPSW_EXTRA_DOTS` = 8 / `_SINGLE` = 3: the APU's share of the
+KEY1 stall's oscillator restart, the PPU's 8 / 3 exactly, with
+`APU_SPSW_REPHASE_{LEAD,GRID}_T` = 3 / 1 at the first switch after an APU
+power-on (H2).
 
 ### H1. A double-speed trigger's grid edge
 
@@ -980,61 +983,80 @@ snap there), which the SameSuite README's C/E split allows. SameSuite covers
 all four divider phases with one answer, so the anchor is the power-on write,
 not DIV; SameBoy passes SameSuite on C and E but not this gambatte ladder.
 
-### H2. The switch ladder is not additive
+### H2. The switch ladder: one re-phase per power-on
 
-**Rows (13).** `speedchange{2,3,4,5}*_ch1_duty0_pos6_to_pos7_timing_*` (12)
-and `speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2`.
+Closed 2026-10-14. **Rows (13).** `speedchange{2,3,4,5}*_ch1_duty0_pos6_to_
+pos7_timing_*` (12) and `speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2`,
+red from 2026-09-21 to 2026-10-14 (from 2026-09-23 by decision, SameSuite
+over gambatte).
 
-**Status (2026-09-23): red by decision.** Where gambatte and SameSuite
-disagree here, dingbat follows SameSuite until hardware experiment (e) runs
-on a CPU CGB C, so `APU_CLOCK_CARRY` stays 0 and these rows stay red.
+**The model (apu.nim, all CPU CGB revisions).** The APU runs through the KEY1
+stall on the same oscillator restart as the PPU: `APU_SPSW_EXTRA_DOTS` = 8
+going up, `_SINGLE` = 3 going down, the PPU's `SPEED_SWITCH_PPU_EXTRA_DOTS`
+pair exactly. On top of that, the FIRST switch after an APU power-on
+re-phases the APU clock once (`apu_spsw_rephase`): its tick grids (the 1 MHz
+square grid and `APU_DS_TRIGGER_SNAP`'s 2 us grid) come out
+`APU_SPSW_REPHASE_GRID_T` = 1 T later, and a running square's next step
+`APU_SPSW_REPHASE_LEAD_T` = 3 T earlier, i.e. onto the re-phased grid's
+previous edge. Later switches move the APU by the extras alone. The snap
+grid's anchor is now carried across a switch in real time (it used to be
+compared against the new speed's cycles in the old speed's units, which only
+`nr4init` reads).
 
-**Measured.** With the single-switch values pinned (to double 10, back 7, each
-two-sided at a NOP), the multi-switch ROMs want sums no constant pair gives:
-two switches (up, down) 14..16; three (up, down, up) exactly 24; four 22..26;
-five about 32. A fourth switch adds nothing where a second added 5, so the
-extra depends on the state the switch finds (divider phase after its reset,
-most likely); the PPU's `lcd_offset` rows turned out to be single-dot
-sampling rules, not a switch residual (closed 2026-09-22).
-(8, 6) scores three more rows than (10, 7) and is two-sided on nothing; it is
-not shipped.
+**Why it is the unified rule.** Pinning the extras to the PPU's 8 / 3 and
+sweeping a one-off shift showed that every ladder row whose channel runs
+across a switch (one switch or five, up-first or down-first, triggered before
+the first switch or after a power-on that followed one) wants the same 3 T
+on top, once, and the grid-only row (`nr4init`: power-on, switch, then the
+first trigger) wants the grid 1..2 T later. The non-additive sums the
+2026-09-22 pass measured (two switches 14..16, three 24, four 22..26, five
+~32 against 10 / 7) are 8 / 3 per switch plus that one-off, read through the
+shipping model's re-anchored grid. A trigger after a power-on with no switch
+since sees no re-phase, so SameSuite `channel_1_freq_change_timing-cgb0BC`
+(both halves: single speed after the boot, double speed after a switch AND
+a power-on) and the no-switch `sound/` rows keep the shipping trigger rule.
+Brackets (each a full 220-row run): `EXTRA_DOTS` 7 / 9 lose 11 / 10 rows,
+`_SINGLE` 2 / 4 lose 12 / 4, `LEAD_T` 2 / 4 lose 8 / 6, `GRID_T` 0 / 3 lose
+`nr4init_2` (2 also passes; 1 is the value that puts the step on the
+re-phased grid's edge), both 0 lose 17. Tying the one-off to the boot hand-off
+instead of the power-on loses the five `_ds_2` rows, whose power-on follows
+a switch. With all of it, SameSuite APU 70/70 and blargg `dmg_sound` /
+`cgb_sound` stay green, and `freq_change_timing-cgb0BC` passes on CPU CGB C.
 
-**Mechanism and a working model (2026-09-22).** gambatte-core's PSG counts
-2 MHz cycles as `(cpu_cc - last) >> (1 + ds)` with the remainder carried;
-APU power-on keeps the counter's low bits and re-aligns `last` to four
-cycles, a DIV reset re-aligns the counter to 4096, a switch re-reads the
-carried remainder at the new speed, and a square trigger starts from the
-1 MHz edge at or BEFORE the write, the edge picked by the counter's parity.
-`APU_CLOCK_CARRY = 1` (gb/apu/psg_host.nim) shadows that clock, takes the
-trigger edge from it and carries every APU deadline across a switch by its
-2 MHz distance (stall extras 5 / 1): all fourteen red rows of H1 and H2 go
-green, nothing else in gambatte moves, and SameSuite
-`channel_1_freq_change_timing-cgb0BC` goes red. That row wants the shipping
-rule, the grid anchored at the power-on write with the edge at or after the
-write; both are CPU CGB C records, so the knob is gated to CGB C and older
-(`GbQuirks.apu_clock_carry`; applied to D/E it loses nine more SameSuite
-rows) and ships 0. Refuted on the way (each tops out at 211-213/220): the
-shipping trigger rule with the grid's real-time phase carried across the
-switch; a divider-locked grid (K = 4 reproduces today's results exactly, and
-no extras pair then closes H2); gambatte's rule only after a switch; the
-carried clock with its grid re-aligned to the power-on write. Hardware
-experiment (e) would settle which record the model should follow.
+**The 2026-09-22/23 conflict, for the record.** `APU_CLOCK_CARRY = 1`
+(psg_host.nim, still in the tree, ships 0) shadows gambatte-core's 2 MHz PSG
+counter (carried remainder, DIV-reset re-alignment, power-on keeping the
+counter's low bits, the 1 MHz trigger edge at or before the write by counter
+parity) with stall extras 5 / 1; it greens all 13 and turns
+`freq_change_timing-cgb0BC` red, one NOP early in BOTH halves. It fits the
+ladder to the dot (moving the first trigger by one T either way loses a
+row) because it puts the first trigger after a single-speed power-on 3 T
+early, which is the re-phase's 3 T charged to the trigger instead of the
+switch. gambatte-core itself (built 2026-10-14 from
+pokemon-speedrunning/gambatte-core master, headless driver over
+libgambatte) passes all 36 `speedchange` audio rows and FAILS the SameSuite
+row: `00 00 0F 0F FF FF F0 F0` / `0F 0F 0F 0F 0F FF FF FF` against
+`00 00 00 0F 0F FF FF F0` / `00 00 0F 0F 0F 0F 0F 0F`, with the real CGB
+boot ROM and from its post-boot state alike. Its PSG model is not the
+unified one; it is the ladder's fit. The boot hand-off is not a hidden
+variable either: at single speed the APU's grids are locked to the M-cycle
+grid (a 1 MHz edge is one M-cycle), so SameSuite's first half and every
+ladder's first trigger (both 25 M-cycles after a single-speed power-on)
+see the same edge, and flipping the carried counter's boot parity moves
+ten ladder rows and no SameSuite digit. Refuted under the carried clock:
+the shipping trigger rule with the grid's real-time phase carried across
+the switch; a divider-locked grid (K = 4 reproduces the shipping results
+exactly, and no extras pair then closes the ladder); gambatte's trigger rule
+only after a switch (29/36 at best over the extras); the carried clock with
+its grid re-aligned to the power-on write; real-time grids with constant
+extras and no one-off (28/36 at best); the snap anchored at the switch
+(29/36). The measurement and revision checks of 2026-09-23 stand: the audio
+verdict is gambatte's runner rule verbatim, the PCM12/34 sample point is
+pinned by 48 SameSuite rows, and both records are CPU CGB C.
 
-**Both-right checks (2026-09-23).** Measurement: our audio verdict is
-gambatte's runner rule verbatim (all 35,112 samples of the scored frame
-equal), and moving the PCM12/34 read's sample point inside its M-cycle loses
-48 SameSuite rows, so neither instrument is the offset. Revision: the runner
-scores `freq_change_timing-cgb0BC` on CGB C, the revision gambatte's `cgb04c`
-rows are scored on. SameBoy: on CGB C it passes the SameSuite row and 32/46
-of gambatte's duty ladder (all fourteen misses are `audio1` members,
-including the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image
-(22/46). The double-speed half of the conflict was a 2 us trigger grid (H1,
-closed); what remains is the single-speed trigger after a power-on inside
-the switch ladder, where gambatte's clock parity and SameSuite's power-on
-anchor still differ by 3 cycles. Switch-rule variants (up-switch delay,
-down-switch re-read, double-speed parity reference), a power-on parity
-re-alignment with +1 calibration, and a C-gated grid anchor with a start-up
-constant all fail to satisfy both.
+SameBoy (2026-09-23): on CGB C it passes the SameSuite row and 32/46 of
+gambatte's duty ladder (its fourteen misses are `audio1` members, including
+the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 
 ---
 
@@ -1065,11 +1087,14 @@ hardware question with its priority is `docs/hwprobe-questions.md`.
   already shows one unit disagreeing with itself between line bands. The
   decisive instrument is a logic-analyser capture of LD0/LD1 against CP on
   the LCD ribbon around the write: it shows the race directly.
-* **(e)** On a CPU CGB C: the gambatte `speedchange2_ch1_duty0_pos6_to_pos7_
-  timing_{1,2}` pair and SameSuite `channel_1_freq_change_timing-cgb0BC` on
-  the same console. If both pass, the square trigger's 1 MHz edge depends on
-  history neither model captures; if one fails, `APU_CLOCK_CARRY` (H2)
-  follows the other. Needs a CGB C, which the kit does not have.
+* **(e)** On a CPU CGB C, a check of H2's re-phase rather than a decider:
+  the shipped model passes both gambatte's `speedchange2_ch1_duty0_pos6_to_
+  pos7_timing_{1,2}` and SameSuite `channel_1_freq_change_timing-cgb0BC`.
+  It predicts that a ladder whose APU is powered on BEFORE an initial
+  up/down switch pair (so the re-phase is spent before the trigger) moves
+  its threshold 3 T later than the same ladder powered on after the pair;
+  a ROM pair one NOP apart around that threshold settles it. Needs a CGB C,
+  which the kit does not have.
 
 ---
 

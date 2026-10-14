@@ -100,6 +100,7 @@ The reader migrates older revisions instead of refusing:
 | GBA 7→8 | bus `pf_paused=false`, `pf_running=false`, `pf_count=0` | rev ≤ 7 had no pause state; a full buffer re-pauses on the next fetch, and a running prefetcher with credit is running again at once, so at most one branch's refill differs |
 | GB 5→6 | below | the batched carry |
 | GBA 8→9 | no `GBA_SEC_INFLIGHT` section: `irq_line` recomputed (low with a check pending), fetch page dropped, as rev 8 did; memory control and POSTFLG keep the running game's value, as rev 8 did; every other field a new machine's value (sync bits 0-2 clear, stamps 0, no synchroniser raise or stall, capture latch clear, `tm_pre = tm`, PSG `arm_delay` = the current period) | rev 8 dropped these or kept whatever the machine held before the load; the fresh values are what it did when loading into a just-booted game, and they make the load independent of what ran before it |
+| GB 6→7 | `apu.spsw_rephase_pending=false` (one trailing byte in the APU section) | rev ≤ 6 had no KEY1 re-phase (`APU_SPSW_REPHASE_*`); none pending is what such a build did, whatever the running machine held |
 
 **GB rev 6, the batched carry.** Every field the GB core had been holding
 back for one revision, plus what the state soak (`tests/state_soak_test.nim`)

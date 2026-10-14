@@ -598,6 +598,9 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
   # that moves the shift reads bits the deadline says nothing about).
   w.write_u16(apu.channel4.div_counter)
   w.write_deadline(apu.channel4.div_next, now)
+  # rev 7: the first KEY1 switch after a power-on re-phases the APU clock
+  # (APU_SPSW_REPHASE_*); pending from the power-on until that switch.
+  w.write_bool(apu.spsw_rephase_pending)
 
 proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_APU)
@@ -681,6 +684,9 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     apu.channel4.env_extra_tick = r.read_bool()
     apu.channel4.div_counter = r.read_u16()
     apu.channel4.div_next = r.read_deadline(now, "ch4.div_next")
+    # Before rev 7 nothing re-phased at a switch; such a state resumes with
+    # none pending, whatever the running machine held.
+    apu.spsw_rephase_pending = if rev >= 7: r.read_bool() else: false
   else:
     # Before rev 6: the grids' phases and the KEY1 lag stayed whatever the
     # running machine had, as those builds did; the rest is live for a few
@@ -691,6 +697,7 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     apu.channel1.sweep_check_at = GB_NO_STEP
     apu.channel1.sweep_stop_at  = GB_NO_STEP
     apu.channel1.sweep_load_at  = GB_NO_STEP
+    apu.spsw_rephase_pending = false
   # Restart audio pacing cleanly (see GBA load_apu_state)
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
