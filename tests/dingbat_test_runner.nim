@@ -14,7 +14,8 @@ let RomCacheDir =
 type
   TestMode = enum
     tmSerial, tmSram, tmMooneye, tmMgba, tmMgbaSuite, tmScreenshot, tmJsmolka,
-    tmFuzzArm, tmMagenGreen, tmMagenNoRed, tmMicrotest
+    tmFuzzArm, tmMagenGreen, tmMagenNoRed, tmMicrotest,
+    tmMbc30Test
 
   TestDef = object
     name: string
@@ -51,6 +52,9 @@ type
                           # `AGBEEG <this> PASS` (the cartridge's CI port)
     ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
     bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
+    mbc30_screen: string  # mbc30test mode: which of the ROM's screens, rom|sram
+    serial_pass: string   # serial mode: the ROM's own pass text ("" = blargg's
+    serial_fail: string   # "Passed"); its failure text ends the run early
     screen_check: bool    # after the verdict, require the panel to have settled
                           # and to show more than one shade. Deliberately NOT a
                           # glyph check — see tests/README.md, "blargg's
@@ -298,6 +302,7 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     of tmMagenGreen: "magen-green"
     of tmMagenNoRed: "magen-nored"
     of tmMicrotest: "microtest"
+    of tmMbc30Test: "mbc30test"
   if test.mode == tmScreenshot:
     let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name &
                   "-" & $getCurrentProcessId() & ".ppm"
@@ -462,6 +467,12 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --bb-breakpoint")
     if test.screen_check:
       cmd.add(" --screen-check")
+    if test.mbc30_screen.len > 0:
+      cmd.add(" --mbc30-screen=" & test.mbc30_screen)
+    if test.serial_pass.len > 0:
+      cmd.add(" --serial-pass=" & test.serial_pass.quoteShell)
+    if test.serial_fail.len > 0:
+      cmd.add(" --serial-fail=" & test.serial_fail.quoteShell)
     # fuzzarm writes its triage to stderr. execCmdEx reads only stdout, so
     # stderr must be merged: unread, it is lost and deadlocks once the triage
     # outgrows the pipe buffer (500 failures is ~100 KB).
@@ -489,6 +500,12 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       for line in text.splitLines():
         if line.startsWith("MICROTEST actual"):
           text = line[len("MICROTEST ") .. ^1]
+          break
+    if test.mode == tmMbc30Test:
+      # The one verdict line (the harness's screen dump goes to stderr).
+      for line in text.splitLines():
+        if line.startsWith("MBC30TEST: "):
+          text = line[len("MBC30TEST: ") .. ^1]
           break
     return TestResult(
       name: test.name,
@@ -1796,6 +1813,46 @@ proc build_magen_tests(): seq[TestDef] =
       # Every one of them settles by frame 60; 300 is slack, not a wait.
       timeout: 300,
     ))
+  tests
+
+# MBC30 (Pan Docs, "MBC3": the MBC30 of Japanese Pokemon Crystal drives 8
+# ROM-bank bits for 4 MiB and 3 RAM-bank bits for 64 KiB). Two self-checking
+# ROMs, each a release asset pinned by SHA-1:
+#   ZoomTen/mbc30test v1.1 (WTFPL; source at commit 16571ba1) -- the screen it
+#   draws is the verdict, read by --mode=mbc30test (see dingbat_test.nim).
+#   deltabeard/simple-mbc3O-test v1.0.3 (permissive; source at 9a5f841c) --
+#   prints "All banks OK" or "Bank check fail" over serial.
+const Mbc30TestRelease = "v1.1"
+const Mbc30TestSha = "ea2061146246ec251aeec11a8822a6d4f677c471"
+const Mbc3oTestRelease = "v1.0.3"
+const Mbc3oTestSha = "482bb40be9220c1fdd77cc9e469a0c22422664b9"
+
+proc build_mbc_tests(): seq[TestDef] =
+  ## Both carts are CGB-enhanced ($0143 = $80) and the mapper is on the cart,
+  ## so each runs on the header's device (CGB) and forced DMG. mbc30test's
+  ## ROM screen settles at frame ~271 and its SRAM screen at ~545 (two
+  ## screens of one run, one row each); simple-mbc3O-test reports within a
+  ## frame. 1200 / 300 are slack, not waits.
+  let zoomten = ensure_rom_download(
+    "https://github.com/ZoomTen/mbc30test/releases/download/" &
+      Mbc30TestRelease & "/MBC3_Test.gbc",
+    "zoomten-mbc30test-" & Mbc30TestRelease & "-MBC3_Test.gbc", Mbc30TestSha)
+  let deltabeard = ensure_rom_download(
+    "https://github.com/deltabeard/simple-mbc3O-test/releases/download/" &
+      Mbc3oTestRelease & "/mbc3Otest.gb",
+    "deltabeard-simple-mbc3O-test-" & Mbc3oTestRelease & "-mbc3Otest.gb",
+    Mbc3oTestSha)
+  var tests: seq[TestDef]
+  for dmg in [false, true]:
+    let suffix = if dmg: "-dmg" else: ""
+    for screen in ["rom", "sram"]:
+      tests.add(TestDef(name: "mbc30test/" & screen & suffix, rom_path: zoomten,
+                        mode: tmMbc30Test, mbc30_screen: screen, dmg: dmg,
+                        timeout: 1200))
+    tests.add(TestDef(name: "simple-mbc3O-test" & suffix, rom_path: deltabeard,
+                      mode: tmSerial, serial_pass: "All banks OK",
+                      serial_fail: "Bank check fail", no_save: true, dmg: dmg,
+                      timeout: 300))
   tests
 
 # A seq, not a fixed-size array, so an added entry needs no bound edit.
@@ -3107,6 +3164,9 @@ proc main() =
 
   let mealybug_tests = build_mealybug_tests(gb_test_roms_dir / "mealybug-tearoom-tests")
   all_suites.add(run_suite("Game Boy - Mealybug Tearoom", mealybug_tests, harness, previous, regressions))
+
+  all_suites.add(run_suite("Game Boy - MBC", build_mbc_tests(), harness,
+                           previous, regressions))
 
   all_suites.add(run_microtest_suite("Game Boy - GBMicrotest",
     build_gbmicrotest_tests(gb_test_roms_dir / "gbmicrotest"),

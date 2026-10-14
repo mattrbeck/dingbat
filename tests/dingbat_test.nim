@@ -17,7 +17,8 @@ type
     tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
-    tmMagenGreen, tmMagenNoRed, tmGambatte, tmMicrotest
+    tmMagenGreen, tmMagenNoRed, tmGambatte, tmMicrotest,
+    tmMbc30Test
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -1602,6 +1603,124 @@ proc microtest_batch(list_path, out_path: string): int =
     if to_file: out_file.writeLine(line) else: echo line
   0
 
+# --- ZoomTen mbc30test (github.com/ZoomTen/mbc30test, WTFPL) ---
+#
+# The ROM's own verdict is the screen it draws (README: "No X's are to be
+# seen"). src/main.s.z80: the ROM screen marks bank $XY at map row 2+X,
+# column 3+Y with tile $00 (".", bank $4000 byte == bank number) or tile $01
+# ("X"), then overwrites the "ROM TEST" header with "MBC30 ROM OK!" (all 256
+# banks right), "MBC3 ROM OK!" (exactly 128) or "UNKNOWN ROM FAIL", and holds
+# that screen for 240 frames. The SRAM screen does the same for RAM banks 0-7
+# on row 2 ("MBC30 SRAM OK!" / "MBC3 SRAM OK!" / "UNKNOWN SRAM FAIL"), then the
+# ROM loops back to the ROM test. The font is ASCII at tile $20 + the two
+# state tiles at $00/$01, BG map $9800, SCX = SCY = 0.
+#
+# Scored from the displayed frame, not from VRAM bytes: each 8x8 cell's lit
+# pixels are matched against the ROM's own tiles as it loaded them into VRAM
+# (1bpp doubled into both planes, so a pixel is ink iff its colour index is
+# non-zero; palette entry 0 is the paper on both DMG BGP %11100100 and the CGB
+# palette the ROM writes). The verdict is taken once the header names an
+# outcome and the frame has held still for 10 frames (the ROM's own completion
+# point: it only writes the header after the last mark).
+
+const Mbc30Verdicts = ["MBC30 ROM OK!", "MBC3 ROM OK!", "UNKNOWN ROM FAIL",
+                       "MBC30 SRAM OK!", "MBC3 SRAM OK!", "UNKNOWN SRAM FAIL"]
+
+proc mbc30_screen_text(emu: GB): seq[string] =
+  ## The 20x18 visible cells as characters in the ROM's font: ' ' blank,
+  ## '.' tile $00, 'X' tile $01, ASCII for $21-$7F, '?' anything else.
+  let fb = emu.ppu.framebuffer
+  # Paper = the frame's most common colour (most of either screen is blank).
+  var counts = initCountTable[uint16]()
+  for px in fb: counts.inc(px)
+  let paper = counts.largest[0]
+  var glyphs: seq[(char, array[8, uint8])]
+  proc tile_mask(t: int): array[8, uint8] =
+    for y in 0 ..< 8:
+      let lo = emu.ppu.vram[0][t * 16 + y * 2]
+      let hi = emu.ppu.vram[0][t * 16 + y * 2 + 1]
+      result[y] = lo or hi
+  glyphs.add(('.', tile_mask(0)))
+  glyphs.add(('X', tile_mask(1)))
+  for t in 0x21 .. 0x7F: glyphs.add((char(t), tile_mask(t)))
+  for cy in 0 ..< GB_HEIGHT div 8:
+    var line = ""
+    for cx in 0 ..< GB_WIDTH div 8:
+      var cell: array[8, uint8]
+      for y in 0 ..< 8:
+        var bits = 0'u8
+        for x in 0 ..< 8:
+          if fb[(cy * 8 + y) * GB_WIDTH + cx * 8 + x] != paper:
+            bits = bits or (0x80'u8 shr x)
+        cell[y] = bits
+      var ch = '?'
+      if cell == default(array[8, uint8]): ch = ' '
+      else:
+        for (c, g) in glyphs:
+          if g == cell:
+            ch = c
+            break
+      line.add ch
+    result.add line
+
+proc mbc30_ranges(banks: seq[int]): string =
+  ## "01-7F 81" style list of bank numbers.
+  var i = 0
+  while i < banks.len:
+    var j = i
+    while j + 1 < banks.len and banks[j + 1] == banks[j] + 1: inc j
+    if result.len > 0: result.add ' '
+    result.add toHex(banks[i], 2)
+    if j > i: result.add "-" & toHex(banks[j], 2)
+    i = j + 1
+
+proc mbc30test_run(rom_path, screen: string; force_dmg: bool;
+                   timeout_frames: int): int =
+  ## `screen` = "rom" (256 ROM banks) or "sram" (8 SRAM banks). Prints one
+  ## `MBC30TEST: ...` line; exit 0 = the ROM drew its full-MBC30 verdict with
+  ## every bank marked "." and no "X".
+  let want_sram = screen == "sram"
+  let emu = new_gb("", rom_path, headless = true, run_bios = false,
+                   force_dmg = force_dmg)
+  emu.test_output = new_test_output()
+  emu.post_init()
+  # A fresh chip, and no .sav written beside the cached ROM.
+  for i in 0 ..< emu.cartridge.ram.len: emu.cartridge.ram[i] = 0
+  emu.cartridge.sav_path = ""
+  var prev: seq[string]
+  var still = 0
+  for frame in 0 ..< timeout_frames:
+    emu.step_frame()
+    let text = emu.mbc30_screen_text()
+    if text == prev: inc still else: still = 0
+    prev = text
+    let header = text[0].strip()
+    let idx = Mbc30Verdicts.find(header)
+    if idx < 0 or (idx >= 3) != want_sram or still < 10: continue
+    var dots, xs: int
+    var failed, unmarked: seq[int]
+    let banks = if want_sram: 8 else: 256
+    for b in 0 ..< banks:
+      case text[2 + b div 16][3 + b mod 16]
+      of '.': inc dots
+      of 'X':
+        inc xs
+        failed.add b
+      else: unmarked.add b
+    var detail = header & " (frame " & $frame & "): " & $dots & "/" & $banks &
+                 " banks '.'"
+    if failed.len > 0: detail.add ", 'X' at " & mbc30_ranges(failed)
+    if unmarked.len > 0: detail.add ", unmarked " & mbc30_ranges(unmarked)
+    let ok = idx in [0, 3] and dots == banks
+    echo "MBC30TEST: ", (if ok: "PASS " else: "FAIL "), detail
+    if not ok:
+      for line in text: stderr.writeLine("  |" & line & "|")
+    return (if ok: 0 else: 1)
+  echo "MBC30TEST: FAIL no ", screen, " verdict on screen within ",
+       timeout_frames, " frames (TIMEOUT)"
+  for line in prev: stderr.writeLine("  |" & line & "|")
+  1
+
 proc main() =
   var rom_path = ""
   var rom_path2 = ""
@@ -1631,6 +1750,9 @@ proc main() =
   var gambatte_frames = GambatteFrames
   var dump_tiles = 0       # gambatte mode: dump the first N top-row tiles
   var presses: seq[(int, Input, bool)]  # --press: (frame, button, down) on the GB frame loop
+  var mbc30_screen = "rom"  # mbc30test mode: which of the ROM's two screens (rom|sram)
+  var serial_pass = ""      # serial mode: the ROM's own pass text (default blargg's "Passed")
+  var serial_fail = ""      # serial mode: the ROM's own failure text, ends the run early
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -1675,6 +1797,7 @@ proc main() =
         of "magen-nored": mode = tmMagenNoRed
         of "gambatte": mode = tmGambatte
         of "microtest": mode = tmMicrotest
+        of "mbc30test": mode = tmMbc30Test
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1801,6 +1924,18 @@ proc main() =
                 quit(1)
             presses.add((f, inp, true))
             presses.add((f + 6, inp, false))
+      of "mbc30-screen":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        mbc30_screen = v.toLowerAscii()
+      of "serial-pass":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        serial_pass = v
+      of "serial-fail":
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        serial_fail = v
       of "dump-tiles":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1821,6 +1956,8 @@ proc main() =
     echo "Usage: dingbat_test <rom_path> --mode <serial|sram|mooneye|mgba|mgba-suite|jsmolka|fuzzarm|microtest|screenshot|stateroundtrip> [--timeout <frames>] [--frames <warmup>] [--screenshot <path.ppm>] [--max-fails <n>] [--nosave] [--screen-check] [--cgb|--dmg|--sgb] [--cgb-rev <0|A|B|C|D|E>] [--model <token>]"
     quit(1)
 
+  if mode == tmMbc30Test:
+    quit(mbc30test_run(rom_path, mbc30_screen, force_dmg, timeout_frames))
   if mode == tmStateRoundtrip:
     quit(state_roundtrip(rom_path, bios_path, warmup_frames))
   if mode == tmRewindTest:
@@ -1976,7 +2113,13 @@ proc main() =
       for (f, inp, down) in presses:
         if f == frame: emu.handle_input(inp, down)
       emu.step_frame()
-      if mode == tmSerial and test_out.serial_buffer.len > 0:
+      if mode == tmSerial and serial_pass.len > 0:
+        # A ROM with its own verdict text (deltabeard's simple-mbc3O-test:
+        # "All banks OK" / "Bank check fail").
+        if test_out.serial_buffer.contains(serial_pass) or
+           (serial_fail.len > 0 and test_out.serial_buffer.contains(serial_fail)):
+          test_out.finished = true
+      elif mode == tmSerial and test_out.serial_buffer.len > 0:
         if test_out.serial_buffer.contains("Passed") or
            test_out.serial_buffer.contains("Failed"):
           test_out.finished = true
@@ -2054,7 +2197,11 @@ proc main() =
   case mode
   of tmSerial:
     output = test_out.serial_buffer
-    passed = output.contains("Passed")
+    passed =
+      if serial_pass.len > 0:
+        output.contains(serial_pass) and
+          not (serial_fail.len > 0 and output.contains(serial_fail))
+      else: output.contains("Passed")
   of tmSram:
     output = test_out.sram_text
     # `finished` says the ROM actually reported: sram_status is only latched
@@ -2080,7 +2227,7 @@ proc main() =
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
      tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
-     tmMagenGreen, tmMagenNoRed, tmGambatte:
+     tmMagenGreen, tmMagenNoRed, tmGambatte, tmMbc30Test:
     discard  # handled (and exited) above
 
   if output.len > 0:

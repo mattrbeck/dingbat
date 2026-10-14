@@ -25,6 +25,8 @@ APU and cart models are built on. Pass counts live in `tests/results*.md`.
 | strikethrough | `Ashiepaws/strikethrough.gb` | `7cd01bf916` | `src/main.asm` (README is one sentence) | see upstream |
 | acid | `mattcurrie/{dmg,cgb}-acid2`, `cgb-acid-hell` | `8a98ce731f` / `04c6ca40cf` / `107b7c5a87` | `README.md` feature maps | MIT |
 | CasualPokePlayer | `CasualPokePlayer/test-roms` | per-test branches | branch `README.md` (`# Conclusion` where present) | see upstream |
+| mbc30test | `ZoomTen/mbc30test` | release `v1.1` asset `MBC3_Test.gbc` (SHA-1 `ea206114`), source `16571ba` | `README.md` "Test results", `src/main.s.z80` | WTFPL |
+| simple-mbc3O-test | `deltabeard/simple-mbc3O-test` | release `v1.0.3` asset `mbc3Otest.gb` (SHA-1 `482bb40b`), source `9a5f841` | `mbc3Otest.asm` | permissive (README) |
 
 The c-sp bundle (`/tmp/dingbat-test-roms/game-boy-test-roms/`, version
 `GbBundleVersion` in `tests/dingbat_test_runner.nim`) ships a
@@ -58,6 +60,7 @@ From each suite's `game-boy-test-roms-howto.md` and README:
 | strikethrough | no statement; the bundler's DMG-C and CGB B/C/E all pass |
 | BullyGB | "most test cases are compatible to all Game Boy devices"; fails on the bundler's DMG-C with `Bad Echo RAM Reads`, CGB passes |
 | rtc3test, cpp, mbc3-tester | cartridge tests, device-independent |
+| mbc30test, simple-mbc3O-test | cartridge tests, no hardware statement; both scored on the header's CGB and on `--dmg` |
 | dmg-acid2 / cgb-acid2 | "does not require any T-cycle accurate timing and thus *probably* works on any" |
 | cgb-acid-hell | no compatibility statement; hardware photo in `img/photo.jpg` |
 | mooneye | encoded in the file name (below) |
@@ -341,6 +344,33 @@ Sub-second (tolerance 1.5 ms): writing seconds resets the sub-second divider;
 minutes, hours, day-low and control (halt bit unchanged) do not; the sub-second
 remainder is frozen across a halt. There is no "512-cycle latch" claim anywhere
 in rtc3test.
+
+## MBC30 (mbc30test, simple-mbc3O-test)
+
+Pan Docs, "MBC3": the MBC30 of Japanese Pokemon Crystal drives 8 ROM-bank bits
+(256 banks, 4 MiB) and 3 RAM-bank bits (64 KiB; header RAM-size code `$05`); the
+cart-type byte is MBC3's, so dingbat tells them apart by size
+(`mbc3_rom_mask`: image over 2 MiB; `mbc3_ram_bank_top`: 64 KiB of RAM).
+
+`ZoomTen/mbc30test` README: "No X's are to be seen" on either screen. Its ROM
+loop (`src/main.s.z80`) reads the byte at `$4000` of banks `$01-$FF` (the
+build stamps each bank with its number; bank 0 is read at `$0000`) and draws
+`.` or `X` per bank; the header becomes `MBC30 ROM OK!` only with 256 matches
+and no failures, `MBC3 ROM OK!` at exactly 128 ("the ROM can be accessed only
+up to 2MB"). The SRAM loop writes each bank's number to `$A000` of banks 0-7
+(enabling RAM and latching the clock around every access), then reads them
+back: `MBC30 SRAM OK!` at 8, `MBC3 SRAM OK!` at 4 ("only up to 32KB SRAM is
+supported"). The header is written after the last mark and held 240 frames,
+which is where `--mode=mbc30test` reads it. DocBoy's suite carries the same
+v1.1 build with DMG reference frames at T-cycle 19,044,673 (frame 271.2) and
+41,257,572 (frame 587.5), inside the two holds; dingbat's verdicts land at
+frames 271 and 545, and its DMG frames after 272 and 588 frames match both
+references' ink pixel for pixel (palette aside; a cross-check, not the score).
+
+`deltabeard/simple-mbc3O-test` (`mbc3Otest.asm`): banks `$01-$FF` checked at
+`$4000`, then RAM banks 0-7 written and read back at `$A000`; serial
+`All banks OK` or `Bank check fail` (scored with `--serial-pass` /
+`--serial-fail`), and the same word drawn on screen.
 
 ## bully, strikethrough, acid
 

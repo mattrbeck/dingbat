@@ -1,13 +1,13 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 13:06:55 · commit d42835c6 · game-boy-test-roms v7.0*
+*Generated: 2026-10-14 13:59:46 · commit b2d4cec3 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
-- **Total:** 1509
-- **Pass:** 1502
+- **Total:** 1515
+- **Pass:** 1508
 - **Fail:** 7
 
 | Suite | Pass | Total | Status |
@@ -20,6 +20,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
+| Game Boy - MBC | 6 | 6 | 👌 |
 | Game Boy - Mealybug Tearoom | 74 | 74 | 👌 |
 | Game Boy - Mooneye | 152 | 152 | 👌 |
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 | 👌 |

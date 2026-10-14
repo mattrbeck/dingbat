@@ -25,7 +25,7 @@ Modes (authority: the arg parsing at the bottom of `dingbat_test.nim`): `serial`
 `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `fuzzarm`, `magen-green`,
 `magen-nored`, `gambatte`, `microtest`, `screenshot`, `stateroundtrip`, `rewindtest`,
 `linktest`, `normlinktest`, `norm32linktest`, `attachtest`, `netlink`, `speclink`,
-`speclinkbench`, `rollback`, `rollbacknet`, `gblinktest`.
+`speclinkbench`, `rollback`, `rollbacknet`, `gblinktest`, `mbc30test`.
 
 Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 `--max-fails=<n>` (fuzzarm), `--color`, `--dmg`, `--cgb`, `--sgb`, `--cgb-rev=<0|A|B|C|D|E>`,
@@ -33,6 +33,8 @@ Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 `--ed-breakpoint`, `--bb-breakpoint`, `--screen-check`, `--bios=<path>`,
 `--press=<frame>:<btn>[+<btn>],...` (GB: hold the buttons from that frame for six frames,
 for ROMs with a menu; applied between frames, as the frontend does),
+`--serial-pass=<text>` / `--serial-fail=<text>` (serial mode: a ROM's own verdict text in
+place of blargg's `Passed`/`Failed`), `--mbc30-screen=rom|sram` (mbc30test mode),
 `--sio=null|loopback`, and for the link modes `--listen`, `--connect`,
 `--netlink-delay-ms`, `--link-contract=multi|normal|normal32`, `--attach-after`.
 
@@ -65,6 +67,17 @@ to convert from.
 `--mode=microtest` runs `--timeout` frames then reads HRAM `$FF82` (`$01` pass / `$FF`
 fail; `$FF80`/`$FF81` are actual/expected but the howto says only `$FF82` is reliable).
 The ROMs never stop, so the frame count is the exit condition.
+
+`--mode=mbc30test` scores ZoomTen's mbc30test on the screen it draws, the ROM's own
+verdict ("No X's are to be seen"). The ROM marks each bank with tile `$00` (`.`, the
+bank's byte at `$4000`/`$A000` matched) or `$01` (`X`) in a 16x16 table, then replaces its
+header with `MBC30 ROM OK!` / `MBC3 ROM OK!` / `UNKNOWN ROM FAIL` and holds the screen
+for 240 frames; the SRAM screen does the same for banks 0-7. The mode reads the displayed
+frame cell by cell against the ROM's own tiles as loaded in VRAM, takes the verdict once
+the header names an outcome and the frame has held for 10 frames (ROM screen frame ~271,
+SRAM ~545), and passes on the `MBC30 ... OK!` header with every bank marked `.`. One
+`MBC30TEST: PASS|FAIL <header>: n/256 banks '.', 'X' at <ranges>` line on stdout; a
+failing run dumps the decoded screen to stderr. Always a fresh chip, no `.sav`.
 
 ### mGBA suite
 
@@ -199,6 +212,7 @@ authority on device, exit condition and verdict.
 | SameSuite `dma`, `ppu`, `interrupt`, `sgb`, `apu` | `LD B,B` + Fibonacci regs | `--cgb` except `sgb/` (`--sgb`); `apu/` alone via `--apu` |
 | rtc3test, CasualPokePlayer MBC3, daid | framebuffer vs shootout PNG | scored with the shootout's tolerance, see below |
 | MagenTests | screen colour | see above |
+| MBC (ZoomTen mbc30test, deltabeard simple-mbc3O-test) | on-screen bank table (`tmMbc30Test`); serial `All banks OK` | release assets pinned by SHA-1; header device (CGB) and `--dmg` |
 | gambatte | glyph OCR of the on-screen result | batched; one row per subdirectory |
 | mGBA suite, jsmolka, FuzzARM | GBA | see above |
 | SingleStepTests SM83, ARM7TDMI | per-instruction state and bus vs the vectors | `./singlestep_test`; see "SingleStepTests" below |
@@ -470,7 +484,8 @@ random register-writing program per core; known core issues print `[KNOWN]`,
 `test_silentaudio` (a core toggling `APU.silent`, the muted no-mix path, must match a
 mixing twin's payload every frame: committed ROMs, the soak's random programs and
 channel-1 stop storms), `test_printer`,
-`test_lcdresponse`, `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
+`test_lcdresponse`, `test_mbc3` (MBC3/MBC30 bank registers, 64 KiB RAM, `.sav` and
+save-state round trips on synthetic carts), `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
 battery-save RTC trailer), `test_swihalt` (Halt and Stop from the cartridge
 return intact in every GBA BIOS mode, over the stub, a stand-in image the test
 writes, and Nintendo's image where it exists), `test_desktop` (the desktop frontend's logic that
