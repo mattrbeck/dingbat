@@ -3,16 +3,19 @@
 @game A88E
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
-@known * checkpoint 07_mark: -- §34, §29: Bowser's idle pose follows main-loop counts the references under-charge
+@known * checkpoint 06_f19428: -- §71, §34: Bowser's idle pose follows the main-loop count mGBA under-charges; the second reference keeps dingbat's count +1, which lands on mGBA's pose
+@known * checkpoint 07_mark: -- §71, §34, §29: Bowser's idle pose follows the main-loop count mGBA under-charges; the second reference keeps dingbat's count +1, which lands on mGBA's pose
 
 # Recorded by hand in the desktop app (2026-09-16): new file, the opening in
 # Mario's house and Peach's Castle, to the first Save Album; [load] continues.
 # converted from input.log: 192 keypad changes, 839 sync hashes checked in dingbat
 # 07_mark (battle, Bowser's idle pose) follows the game's main-loop counter
 # (0x03000368), which dingbat's slower-priced gamepak code leaves 5 behind mgba
-# after scene loads at f3829-f10335; the references disagree on the poses too
-# (06, 11, 15-19). docs/playtest-bugs.md, "Mario & Luigi". A still screen
-# would be a steadier checkpoint.
+# after scene loads at f3829-f10335. 06 is the same battle. The second
+# reference takes those loads as dingbat does (its count is dingbat's +1 from
+# a boot V-blank lead), and +1 draws the pose mGBA's +5 does (§71).
+# docs/playtest-bugs.md, "Mario & Luigi". A still screen would be a steadier
+# checkpoint.
 [new]
 wait 1102
 hold A

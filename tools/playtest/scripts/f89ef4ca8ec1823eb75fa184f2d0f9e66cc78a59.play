@@ -4,6 +4,7 @@
 @chip FLASH512 + RTC
 @frozen dingbat-bios,mgba,nba
 @known * checkpoint pet_greeting: -- §39: the install bar's dice follow the boot's EWRAM cycles (§29 pricing)
+@known * checkpoint pet_menu: -- §70, §39: the install bar's dice again; the second reference throws its own and ends the install on mGBA's frame
 
 # New game (はじめから): the PET asks for the date and time first. The year is
 # raised 2000 -> 2006 so the game-set clock (kept by dingbat) matches the
@@ -12,9 +13,9 @@
 # appears at the top of the PET menu, New Year greetings). The second
 # reference ran on the host clock until 2026-10-12 (its screens from the PET
 # menu on were not diagnostic); its driver now freezes it at the epoch too,
-# and from the PET menu on it sides with mGBA (save_screen identical to
-# mGBA's). Then owner profile (name あ, male, 0, first occupation), Navi
-# Rockman; decline the tournament, UP wraps to セーブ, save.
+# and from the PET menu on its picture sides with mGBA's: its own install
+# dice end the install on mGBA's frame (§70), its frame counter is dingbat's.
+# Then owner profile (name あ, male, 0, first occupation), Navi Rockman; decline the tournament, UP wraps to セーブ, save.
 # [load]: title shows つづきから, NAVI SELECT, the PET menu on the saved date.
 # Japanese text does not OCR, so steps are fixed waits (menus here do not lag).
 # pet_greeting on: the NOW INSTALLING bar after NAVI SELECT pauses at random

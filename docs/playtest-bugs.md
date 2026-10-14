@@ -5892,3 +5892,107 @@ What the console answers decides it:
 * near 114.7k: mGBA is right on this game's menus, and dingbat moves;
 * near 108k: dingbat stays as it is;
 * a spread between runs: these checkpoints can never be diagnostic.
+
+## §70. Rockman EXE 4.5: the PET menu is the install bar's dice again, and the second reference threw its own, 2026-10-14
+
+**Symptom.** Since §65's driver fix, `pet_menu` (f4734) is DIFFERENT against
+both references in all five dingbat configurations, and the references are
+MINOR to each other. The screen is the same menu in all three. dingbat's
+background scroll, the menu's arrows and Mega Man's pose are on other
+frames (2,632 px against mGBA, box 0,12-239,148). The references differ only
+in the glow around Mega Man (856 px, every one a single 5-bit step).
+
+**The same cause as §39, carried forward.** Load mGBA's f3200 state and
+`poke8` only dingbat's two RNG words (0x02003F6C, 8 bytes, and 0x02003C84,
+4 bytes). mGBA then shows dingbat's install bar frame for frame, f3503-f3594
+at offset 0 where it was +10. At `pet_menu` it differs from dingbat in 1,186
+px, the glow only (box 0,30-67,159, mean error 0.013, MINOR). That glow is
+the game's frame counter 0x02004B80, one behind mGBA's since the boot (§39).
+
+**Whose state the second reference shares: neither, exactly.** Peeked every
+frame from f470, and every two frames over the install:
+
+| | dingbat | mGBA | second reference |
+|---|---|---|---|
+| the LCG at 0x02003F6C starts stepping | f478 | f476 | f477 |
+| frame counter 0x02004B80 at f3200 / f4734 | 0x08D8 / 0x0ED4 | 0x08D9 / 0x0ED5 | 0x08D8 / 0x0ED4 |
+| the install's last frame (hash-matched) | 10 frames before mGBA | | mGBA's |
+| IWRAM bytes differing from mGBA at f4734 (below the stacks) | 3,871 | | 33 |
+
+Its LCG runs one step from each emulator, so it throws its own dice. Its
+install pictures part from mGBA's over f3274-f3289, f3298-f3337, f3345-f3361
+and f3386-f3409, and then its last pause ends on mGBA's frame. The PET
+scene's state (sprite tables at 0x0200DAxx-0x0200E6xx, the IWRAM buffers at
+0x03001873-0x030047D7) follows the install's end, so from there it has
+mGBA's. Its frame counter is dingbat's, which is why the glow differs from
+mGBA's. The references agree at `pet_menu` because two different dice
+sequences happened to end the install on the same frame. That is not a
+timing witness.
+
+**Status: (b), no core change.** As §39: the dice follow the boot's EWRAM
+clear and the title's EWRAM passes, where dingbat's price is the console's
+(`slotexec.s`, AGB SP) and mGBA's is 4-5 cycles short. The script gets
+`@known * checkpoint pet_menu:` for this section. `save_prompt` (MINOR
+against both, the references MINOR to each other) and `save_screen` (SLIP)
+need nothing.
+
+**How it was found.** `peek` of the RNG words, the frame counter, the
+install countdown, and full EWRAM/IWRAM at f3200, f3624, f4000 and f4734 in
+dingbat-bios-nowl, mGBA and the second reference over the frozen `[new]`
+timeline. Then `runhash` f3201-f4760 in all three, matched by hash within
+±20 frames. Then the mGBA run from its f3200 state with the poke.
+
+## §71. Mario & Luigi: the battle at 06 is §34's main-loop count, and the second reference keeps dingbat's count, 2026-10-14
+
+**Symptom.** Since §65's driver fix, `06_f19428` (f19758, the Bowser battle's
+Solo Attack prompt) is MAJOR against both references in all five dingbat
+configurations, and the references are MINOR to each other. It is the same
+battle on every emulator. dingbat has Bowser and Peach's fountain on other
+frames of their idle animations (box 50,50-160,106, about 1.9k px). The
+references differ in 100 px, three of them more than a 5-bit step. `07_mark`,
+499 frames later, is the same picture (§34, already `@known`).
+
+**The main-loop counter decides it, as in §34.** Load mGBA's f17700 state
+(before the battle flash) and `poke8` only the main-loop counter at
+0x03000368:
+
+| mGBA's counter set to | at 06 (f19758), against | px |
+|---|---|---|
+| dingbat's (0x44D6) | dingbat | 96, box 50,66-188,155 |
+| dingbat's + 1 (0x44D7) | mGBA unpoked | **0** |
+| dingbat's + 4 (0x44DA) | dingbat / mGBA | 1,616 / 2,040 |
+| dingbat's + 5 (0x44DB, its own) | mGBA unpoked | 0 |
+
+`07_mark` (f20257) behaves the same way: 93 px from dingbat with dingbat's
+count, and 0 from mGBA with dingbat's + 1. A poke at f19000, inside the
+battle, changes nothing at either checkpoint. So the poses are set from the
+counter early in the battle, and +1 and +5 land on the same phase.
+
+**Whose state the second reference shares: dingbat's.** Counters peeked
+every frame to f400, then every 10 to f3800, and around each load:
+
+| | dingbat | mGBA | second reference |
+|---|---|---|---|
+| main-loop counter 0x03000368 starts | f24 | f24 | f23 |
+| V-blank count 0x0300036C against dingbat | | +0 | +1 from f23 |
+| main-loop counter against dingbat after f3829, f3964, f5025, f5054, f10335 | | +1, +2, +3, +4, +5 | +1 throughout (0 for a frame or two inside two boot loads) |
+| task timers 0x03002150, 0x03002210, 0x03002548, 0x0300257C at f17550-f19758 | | +5 each | **equal to dingbat's** |
+
+The second reference takes every one of §34's five scene loads in dingbat's
+number of frames. Its only difference is a V-blank of boot lead, the one §65
+measured in Donkey Kong Country. That lead puts its counter at dingbat's + 1,
+which draws the same battle frame as mGBA's + 5. The references' agreement
+at 06 and 07 is therefore a phase coincidence. On the loads that moved the
+counter, the second reference is with dingbat, and mGBA alone is cheap.
+
+**Status: (b), no core change.** This is §34's cause: mGBA under-charges
+gamepak code at the scene loads (§29's prefetcher pricing, where the console
+sides with dingbat). The script gets `@known * checkpoint 06_f19428:` for
+this section. The `07_mark` entry now cites §71 as well, because the second
+reference does not under-charge those loads.
+
+**How it was found.** `peek` of the two counters and the four task timers in
+dingbat-bios-nowl, mGBA and the second reference over the frozen `[new]`
+timeline, `runhash` f19650-f19800 (no frame matches between any two at any
+offset within ±20), and the mGBA runs from its f17700 and f19000 states
+with the poke.
