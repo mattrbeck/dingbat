@@ -1843,6 +1843,17 @@ const NotScored: seq[(string, string)] = @[
     "rig, not hardware. The non-colliding members of the same family " &
     "(`busyread8000`, `busyreadFF4B`) and every CGB arm ARE scored. " &
     "(build_gambatte_rows / gambatte_row_reads_powerup_wram)"),
+  ("gambatte `scx_during_m3_spx2{,_ds}`, `scx_attrib_during_m3_spx2_ds` " &
+    "CGB rows (3)", "their only disagreement is x = 0 on lines 0-7, the " &
+    "object's column 6 in OBJ palette 0 colour 2, which the ROM never " &
+    "writes (no OCPS/OCPD store in any of the three). Pan Docs: in CGB mode " &
+    "the boot ROM leaves object colours uninitialised apart from byte 0, " &
+    "and the CGB boot ROM disassembly agrees. The reference colour is the " &
+    "word gambatte-core's power-on table holds there; with that one word " &
+    "in place dingbat matches all three frames, and SameBoy draws the same " &
+    "pixel in its own random word. The DMG halves, `spx0`/`spx1` and the " &
+    "other scx_during_m3 rows ARE scored. " &
+    "(build_gambatte_rows / gambatte_row_reads_powerup_objpal)"),
   ("gambatte's AGB column", "gambatte's runner marks it `FIXME: Actual AGB " &
     "results` and feeds it the CGB expectations, so it asserts nothing " &
     "about AGB. (build_gambatte_rows)"),
@@ -2677,6 +2688,17 @@ proc gambatte_row_reads_powerup_wram(stem: string): bool =
     if target in stem: return true
   false
 
+proc gambatte_row_reads_powerup_objpal(stem: string): bool =
+  ## gambatte `scx_during_m3` rows whose CGB picture shows a colour the ROM
+  ## never writes: the object at OAM X = 2 puts its column 6 (colour 2) at
+  ## x = 0, and no OCPS/OCPD store exists, so the pixel is OBJ palette 0
+  ## colour 2's power-on SRAM word. Pan Docs ("Palettes"): in CGB mode the
+  ## boot ROM leaves object colours uninitialised apart from byte 0. The DMG
+  ## halves (through OBP0) and `spx0`/`spx1` (no visible object pixel) are
+  ## scored.
+  stem in ["scx_during_m3_spx2", "scx_during_m3_spx2_ds",
+           "scx_attrib_during_m3_spx2_ds"]
+
 proc build_gambatte_rows(gambatte_dir: string): seq[GambatteRow] =
   var rows: seq[GambatteRow]
   var roms: seq[string]
@@ -2728,6 +2750,8 @@ proc build_gambatte_rows(gambatte_dir: string): seq[GambatteRow] =
       if fileExists(base & "_dmg08.png"): png_for.add(("dmg", base & "_dmg08.png"))
       if fileExists(base & "_cgb04c.png"): png_for.add(("cgb", base & "_cgb04c.png"))
     for (dev, png) in png_for:
+      if dev == "cgb" and gambatte_row_reads_powerup_objpal(stem):
+        continue  # pixel 0 is uninitialised OBJ palette RAM; in NotScored
       rows.add(GambatteRow(
         dev: dev, kind: "png", expected: png, rom: rom, group: group,
         name: rel.changeFileExt("") & " [" & dev & ", png]",

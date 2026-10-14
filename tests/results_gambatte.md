@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-25 09:15:48*
+*Generated: 2026-10-14 09:37:40*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5192/5216 passed.**
+**5192/5213 passed.**
 
 ## bgen
 
@@ -168,15 +168,9 @@ All 69 tests passed.
 
 All 802 tests passed.
 
-## scx_during_m3 (138/141 passed)
+## scx_during_m3
 
-138/141 tests passed, 3 failed:
-
-| Test | Result |
-|------|--------|
-| scx_during_m3/scx_attrib_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx2 [cgb, png] | 8/23040 pixels differ |
-| scx_during_m3/scx_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
+All 138 tests passed.
 
 ## scy
 

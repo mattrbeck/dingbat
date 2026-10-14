@@ -501,7 +501,8 @@ the window start on the last pixel too, where the DMG charges it first
 ### C3. Mid-line SCX stores
 
 **Rows (3).** `scx_during_m3_spx2{,_ds}`, `scx_attrib_during_m3_spx2_ds`
-(8 px each, CGB; not timing, see below). The seven `scx_0761c0` rows closed
+(8 px each, CGB; not timing, see below; moved to NotScored 2026-10-14 by
+`gambatte_row_reads_powerup_objpal`). The seven `scx_0761c0` rows closed
 2026-09-22 with `SCX_BORROW_DISCARD_END`: after a mid-discard store wraps the
 discard, the map column borrows against where the discard ended, one tile
 back per wrap (gambatte-core restarts its pixel position at the discard's
