@@ -9968,6 +9968,490 @@
   ]
  },
  {
+  "payload": "hdmarace",
+  "rom": "hdmarace.gba",
+  "sha1": "3ddeda082fcc39bba63869d8bde46a859064ac8e",
+  "frames": 396,
+  "cells": [
+   {
+    "id": "hdmaobus 0x102 @0",
+    "kind": "hex",
+    "race": "hdmaobus 0x102",
+    "console": [
+     "0008002A",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E1D4",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x102 @1",
+    "kind": "hex",
+    "race": "hdmaobus 0x102",
+    "console": [
+     "0008002A",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E1D4",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x102 @2",
+    "kind": "hex",
+    "race": "hdmaobus 0x102",
+    "console": [
+     "0008002A",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E1D4",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x102 @3",
+    "kind": "hex",
+    "race": "hdmaobus 0x102",
+    "console": [
+     "0008002A",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E1D4",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x102 @4",
+    "kind": "hex",
+    "race": "hdmaobus 0x102",
+    "console": [
+     "0008002A",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E1D4",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x102 @5",
+    "kind": "hex",
+    "race": "hdmaobus 0x102",
+    "console": [
+     "0008002A",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E1D4",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x102 @6",
+    "kind": "hex",
+    "race": "hdmaobus 0x102",
+    "console": [
+     "0008002A",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E1D4",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x103 @0",
+    "kind": "hex",
+    "race": "hdmaobus 0x103",
+    "console": [
+     "0008002B",
+     "00081AFF",
+     "0008E150"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x103 @1",
+    "kind": "hex",
+    "race": "hdmaobus 0x103",
+    "console": [
+     "0008002B",
+     "00081AFF",
+     "0008E150"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x103 @2",
+    "kind": "hex",
+    "race": "hdmaobus 0x103",
+    "console": [
+     "0008002B",
+     "00081AFF",
+     "0008E150"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x103 @3",
+    "kind": "hex",
+    "race": "hdmaobus 0x103",
+    "console": [
+     "0008002B",
+     "00081AFF",
+     "0008E150"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x103 @4",
+    "kind": "hex",
+    "race": "hdmaobus 0x103",
+    "console": [
+     "0008002B",
+     "00081AFF",
+     "0008E150"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x103 @5",
+    "kind": "hex",
+    "race": "hdmaobus 0x103",
+    "console": [
+     "0008002B",
+     "00081AFF",
+     "0008E150"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x103 @6",
+    "kind": "hex",
+    "race": "hdmaobus 0x103",
+    "console": [
+     "0008002B",
+     "00081AFF",
+     "0008E150"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x104 @0",
+    "kind": "hex",
+    "race": "hdmaobus 0x104",
+    "console": [
+     "0008002C",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x104 @1",
+    "kind": "hex",
+    "race": "hdmaobus 0x104",
+    "console": [
+     "0008002C",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x104 @2",
+    "kind": "hex",
+    "race": "hdmaobus 0x104",
+    "console": [
+     "0008002C",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x104 @3",
+    "kind": "hex",
+    "race": "hdmaobus 0x104",
+    "console": [
+     "0008002C",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x104 @4",
+    "kind": "hex",
+    "race": "hdmaobus 0x104",
+    "console": [
+     "0008002C",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x104 @5",
+    "kind": "hex",
+    "race": "hdmaobus 0x104",
+    "console": [
+     "0008002C",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x104 @6",
+    "kind": "hex",
+    "race": "hdmaobus 0x104",
+    "console": [
+     "0008002C",
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x105 @0",
+    "kind": "hex",
+    "race": "hdmaobus 0x105",
+    "console": [
+     "0008002D",
+     "00081AFF",
+     "0008E150",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x105 @1",
+    "kind": "hex",
+    "race": "hdmaobus 0x105",
+    "console": [
+     "0008002D",
+     "00081AFF",
+     "0008E150",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x105 @2",
+    "kind": "hex",
+    "race": "hdmaobus 0x105",
+    "console": [
+     "0008002D",
+     "00081AFF",
+     "0008E150",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x105 @3",
+    "kind": "hex",
+    "race": "hdmaobus 0x105",
+    "console": [
+     "0008002D",
+     "00081AFF",
+     "0008E150",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x105 @4",
+    "kind": "hex",
+    "race": "hdmaobus 0x105",
+    "console": [
+     "0008002D",
+     "00081AFF",
+     "0008E150",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x105 @5",
+    "kind": "hex",
+    "race": "hdmaobus 0x105",
+    "console": [
+     "0008002D",
+     "00081AFF",
+     "0008E150",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x105 @6",
+    "kind": "hex",
+    "race": "hdmaobus 0x105",
+    "console": [
+     "0008002D",
+     "00081AFF",
+     "0008E150",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x106 @0",
+    "kind": "hex",
+    "race": "hdmaobus 0x106",
+    "console": [
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x106 @1",
+    "kind": "hex",
+    "race": "hdmaobus 0x106",
+    "console": [
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x106 @2",
+    "kind": "hex",
+    "race": "hdmaobus 0x106",
+    "console": [
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x106 @3",
+    "kind": "hex",
+    "race": "hdmaobus 0x106",
+    "console": [
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x106 @4",
+    "kind": "hex",
+    "race": "hdmaobus 0x106",
+    "console": [
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x106 @5",
+    "kind": "hex",
+    "race": "hdmaobus 0x106",
+    "console": [
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x106 @6",
+    "kind": "hex",
+    "race": "hdmaobus 0x106",
+    "console": [
+     "00081AFF",
+     "0008E150",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x107 @0",
+    "kind": "hex",
+    "race": "hdmaobus 0x107",
+    "console": [
+     "0008002F",
+     "00081AFF",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x107 @1",
+    "kind": "hex",
+    "race": "hdmaobus 0x107",
+    "console": [
+     "0008002F",
+     "00081AFF",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x107 @2",
+    "kind": "hex",
+    "race": "hdmaobus 0x107",
+    "console": [
+     "0008002F",
+     "00081AFF",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x107 @3",
+    "kind": "hex",
+    "race": "hdmaobus 0x107",
+    "console": [
+     "0008002F",
+     "00081AFF",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x107 @4",
+    "kind": "hex",
+    "race": "hdmaobus 0x107",
+    "console": [
+     "0008002F",
+     "00081AFF",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x107 @5",
+    "kind": "hex",
+    "race": "hdmaobus 0x107",
+    "console": [
+     "0008002F",
+     "00081AFF",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   },
+   {
+    "id": "hdmaobus 0x107 @6",
+    "kind": "hex",
+    "race": "hdmaobus 0x107",
+    "console": [
+     "0008002F",
+     "00081AFF",
+     "0008E1C6",
+     "0008E3A0"
+    ]
+   }
+  ]
+ },
+ {
   "payload": "dmairqarm",
   "rom": "dmairqarm.gba",
   "sha1": "04a5850377c388896a4964e098b224f6a231cbb7",

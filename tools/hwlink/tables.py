@@ -91,17 +91,58 @@ def wanted(rs):
     return {cid: w for r in rs for cid, w in zip(r.cell_ids(), r.want)}
 
 
+def racing(want):
+    """{cell id: the console's words} for the cells it answered more than one
+    way."""
+    return {cid: set(w.split(' | ')) for cid, w in want.items() if ' | ' in w}
+
+
+def race_sets(rs, cells, names=EMULATORS):
+    """{emulator: {cell id: the words it answers over every phase}} for those
+    of `cells` whose payload has a phase variant (r0table.RACES)."""
+    from r0table import RACES
+    out = {n: {} for n in names}
+    for r in rs:
+        if r.payload not in RACES:
+            continue
+        variant, shift, phases = RACES[r.payload]
+        todo = [(cid, a) for cid, a in zip(r.cell_ids(), r.args) if cid in cells]
+        if not todo:
+            continue
+        args = [a | d << shift for _, a in todo for d in range(phases)]
+        rom = payloadcmp.build_wrapper(source(variant), args)
+        words = payloadcmp.in_emulators(rom, len(args), names=names, frames=frames_for(len(args)))
+        for n in names:
+            for i, (cid, _) in enumerate(todo):
+                out[n][cid] = {r.show(w) for w in words[n][i * phases:(i + 1) * phases]}
+    return out
+
+
 def check(rs, names=EMULATORS, quiet=('mgba',)):
     """Print each emulator's score against the console; return the mismatching
-    cell ids per emulator."""
+    cell ids per emulator. A racing cell (several console answers) matches
+    when its payload has a phase variant (r0table.RACES) and every console
+    word is among the emulator's answers over the phases; an emulator word
+    the console has not shown yet is allowed (a handful of runs a cell). With
+    no variant a racing cell cannot match."""
     want = wanted(rs)
     got = in_emulators(rs, names)
-    wrong = {n: [c for c in want if got[n][c] != want[c]] for n in names}
+    races = racing(want)
+    sets = race_sets(rs, races, names)
+
+    def ok(n, c):
+        if c in races:
+            return c in sets[n] and races[c] <= sets[n][c]
+        return got[n][c] == want[c]
+    wrong = {n: [c for c in want if not ok(n, c)] for n in names}
     for n in names:
         if n in quiet:
             continue
         for c in wrong[n]:
-            print(f'  {n:<13}{c:<48} {got[n][c]}  (console {want[c]})')
+            shown = (' | '.join(sorted(sets[n][c])) + ' over the phases') if c in sets[n] else got[n][c]
+            print(f'  {n:<13}{c:<48} {shown}  (console {want[c]})')
     for n in names:
-        print(f'{n:<13} {len(want) - len(wrong[n])}/{len(want)} cells match the console')
+        swept = [c for c in sets[n] if c not in wrong[n]]
+        print(f'{n:<13} {len(want) - len(wrong[n])}/{len(want)} cells match the console'
+              + (f' ({len(swept)} racing, by phase sweep)' if swept else ''))
     return wrong

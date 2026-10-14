@@ -5,7 +5,10 @@
     python3 r0table.py dmaphase 0x10 0x11    # ad hoc, console and emulators
 
 A cell the console answers two ways is recorded with both answers and can
-never match; that is the point of keeping it.
+never match one emulator answer; that is the point of keeping it. Where the
+spread is a phase the rig does not fix, RACES names a variant payload that
+takes the phase as an argument, and `--check` scores the cell by walking the
+emulators through every phase (tables.check).
 """
 import json
 import os
@@ -281,6 +284,14 @@ NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat', 'flashprog'}
 # rows the console has answered and no dingbat model matches yet: kept out of
 # lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61)
 OPEN_ROWS = {'keyirq2', 'keyirq3'}
+
+# racing cells: payload -> (variant, shift, phases). The variant is the same
+# probe with its entry phase fixed and walked by `phase << shift` in the
+# argument; a racing cell of the payload matches when every word the console
+# answered is one the emulator answers at some phase. hdmaobus's reader-first
+# sled cells race the arming's 7-cycle VCOUNT poll (docs/playtest-bugs.md,
+# "hdmaobus's racing cells are the poll's phase").
+RACES = {'hdmaobus': ('hdmarace', 12, 7)}
 
 
 def source(name):

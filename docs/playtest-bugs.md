@@ -6590,3 +6590,350 @@ hashes, a state every 500 frames, and a RAM dump of each state.
 5. The object counters across the states found mGBA's lead. `trace` of
    f14263 and f14441 found the two frames where it comes from.
 6. The `poke8` run closed it.
+
+## §79. The console cells nobody reproduces, worked from the recorded data alone, 2026-10-14
+
+Seven items had been filed as "the console answers, no emulator does":
+- hdmaobus's six racing cells
+- the post-DMA open-bus window
+- the halted H-blank wake +19
+- the ÷64 timer phase
+- the HLE's call costs
+- the sound FIFO at timer periods 1-3
+- dbsuite's six reds (878/884)
+
+No console run was made. Each item was put against every recorded cell of
+its kind, not only the missed ones. The outcome:
+- one is a checker fix;
+- four were already matched and their entries are stale;
+- the FIFO and PSG ones have no law.
+
+Their probes are designed. Each probe's predictions are written down below
+and in its payload header, before any console run.
+
+### 1. hdmaobus's racing cells are the arming poll's phase
+
+**Why `0x104` scored a miss with dingbat's `0008E150` in the console's
+set.** `rig.ask` stores a cell with several answers as one joined string:
+`0008002C | 00081AFF | 0008E150 | ...`. `tables.check` compared strings, so
+such a cell could never match, by design (rig.py: "it can never match an
+emulator, which is the point"). That is right for a rig fault. It is wrong
+for a race the payload builds in.
+
+Scoring "dingbat's word is in the set" would be wrong in both directions:
+- five of dingbat's six words are in their sets, but `0x103`'s `E1C6` is
+  not (the console's runs showed `002B 1AFF E150`);
+- a different entry cycle would pass or fail other cells by luck.
+
+**The phase.** The reader-first sled rows arm on line 40 after a VCOUNT
+poll. The poll is ARM code in IWRAM: `ldrh` 3 + `cmp` 1 + `bne` 3 = 7
+cycles, and the 1232-cycle line is 176 of them. So the poll phase at which
+line 40 starts carries through every line change, and the link rig's entry
+makes that phase random.
+
+`tests/roms/payloads/hdmarace.s` is hdmaobus with a `probe_park` on line 37,
+then d one-cycle NOPs ahead of the poll. In the emulators, d is the phase:
+- d and d + 7 answer alike;
+- every non-racing cell (k = 0, 1, writer first, halted) answers as in
+  hdmaobus at every d.
+
+dingbat (both BIOSes), the reader's halfword at k = 2..7:
+
+| d | k=2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|
+| 0 | E150 | E3A0 | 1AFF | E1C6 | 002E | E150 |
+| 1 | E1D4 | 002B | E150 | E3A0 | 1AFF | E1C6 |
+| 2 | E1C6 | 002B | E150 | E3A0 | 1AFF | E1C6 |
+| 3 | E3A0 | 1AFF | E1C6 | 002D | E150 | E3A0 |
+| 4 | 002A | E150 | E3A0 | 1AFF | E1C6 | 002F |
+| 5 | 002A | E150 | E3A0 | 1AFF | E1C6 | 002F |
+| 6 | 1AFF | E1C6 | 002C | E150 | E3A0 | 1AFF |
+
+The words are the poll's bus words:
+
+| word | what it is |
+|---|---|
+| `00LL` | the line number the `ldrh` loaded (DMA_READS_IO_LOAD) |
+| `E150` | `cmp` |
+| `1AFF` | `bne` |
+| `E3A0`, `E1C6` | the two opcodes the taken branch's refill fetched past it |
+| `E1D4` | the `ldrh` itself; reached only at k = 2 |
+
+| cell | console (3-9 runs) | dingbat over d = 0..6 | mGBA over d |
+|---|---|---|---|
+| 0x102 | 002A 1AFF E150 E1C6 E1D4 E3A0 | the same six | 0000 0001 FFFC |
+| 0x103 | 002B 1AFF E150 | + E1C6 E3A0 | same three |
+| 0x104 | 002C 1AFF E150 E1C6 E3A0 | the same five | same three |
+| 0x105 | 002D 1AFF E150 E3A0 | + E1C6 | same three |
+| 0x106 | 1AFF E150 E1C6 E3A0 | + 002E | same three |
+| 0x107 | 002F 1AFF E1C6 E3A0 | + E150 | same three |
+
+In all six cells, every word the console gave is one of dingbat's:
+- two cells match exactly;
+- four have one or two words more. A cell asked 3 to 9 times will miss
+  those, since each phase comes up at weight 1/7 or 2/7.
+
+The test that could have failed is `E1D4`. dingbat gives it at one phase in
+seven at k = 2 and never after, because the DMA's 10 cycles a line move the
+phase off it. The console showed it at `0x102` and in none of the five
+later cells. mGBA's words share nothing with the console's in any cell.
+
+No model was touched. The race is four existing laws seen at random phases:
+DMA_READS_CPU_BUS, DMA_READS_IO_LOAD, DMA_SEES_REFILL_FETCH and
+DMA_PENDING_CHAIN. So these cells are now evidence for those laws, and
+nothing was fitted to them.
+
+**The change (tools only):**
+- `r0table.RACES` maps a payload to its phase variant
+  (`'hdmaobus': ('hdmarace', 12, 7)`).
+- `tables.check` scores a racing cell of such a payload as a match when
+  every console word is among the emulator's answers over the phases. A
+  racing cell without a variant still cannot match (keyirq2 0x0).
+- `lawrom.py` freezes those cells into `tests/roms/cyclelaws/hdmarace.gba`:
+  42 words, each marked with its cell and the console's set.
+- `cyclelaws_test` holds each set as one cell.
+- The hdmaobus ROM and every other frozen ROM are byte-identical.
+- Control: writing `0008DEAD` into 0x103's console set makes the test fail,
+  as it should.
+
+| | before | after |
+|---|---|---|
+| `r0table.py --check`, dingbat / dingbat-bios | 2001 / 2001 of 2025 | **2007 / 2007** (6 racing, by phase sweep) |
+| `nimble test_cyclelaws`, HLE / Nintendo's BIOS | 2124 / 2124 | 2130 / 2130 |
+
+The 18 misses left are keyirq2's 2 and keyirq3's 16 (§61, OPEN_ROWS).
+
+**Predicted for a console run of hdmarace.s (none made).** The console
+wakes from the park on the same cycle as the core (hdmaphase, halthb). If
+so, each cell should be unanimous and equal to the table above. If the
+wake differs by c cycles, the console's table should be this one with its
+rows rotated by c. Either way, the prediction includes:
+- the duplicate rows (d = 1 and 2 at k = 3..7; d = 4 and 5 everywhere);
+- `E1D4` at only one (d, k).
+
+The table is also in the payload's header.
+
+### 2. The halted H-blank wake +19 was a row that never halted
+
+The +19 is gbaedge p40 IRQDECOMP's hblank-haltcnt row (`agb-sp-5.txt`;
+console `03DD`, dingbat `03CA` at the time).
+- Its HALTCNT write is cartridge code, which the console ignores
+  (haltprobe.s, §18). So the row is a running-CPU row anchored by a ROM
+  poll of the H-blank flag, and dbsuite checks it ±32 for that reason.
+- dingbat now reads it exactly (`03DD`, irqlat-hblank-haltcnt).
+- The halted H-blank wake itself is pinned and matched under both BIOSes
+  by halthb (sp-agb.json W `03EC`, D `03D4` at every k), breakram
+  `--hblank` and wakeirq.
+- irqlat-hblank and irqlat-vblank-haltcnt read +15, against photographs of
+  a different ROM's layout, inside one poll quantum. That is not cycle
+  evidence.
+
+What has never been measured is a running CPU's H-blank interrupt timed
+from a controlled cycle. `tests/roms/payloads/wakehb.s` is wakeirq.s plus
+bit 7, which makes the source line 100's own H-blank (DISPSTAT bit 4, IE
+bit 1). It is still entered from the V-count halt. Predicted, also in the
+header:
+
+| arg | dingbat, both BIOSes | mGBA | console, if the running rows were 15 early |
+|---|---|---|---|
+| 0x80 | 017003EF | 01B403F3 | |
+| 0x90 | 000003EB | 000003F3 | |
+| 0xA0 | 041903EC | 042003F3 | 040A03DD |
+| 0xA8 | 03A803EC | 03B003F3 | 039903DD |
+| 0xE0 | 0B3603EC | 0B3403F3 | |
+| 0xA2 | 03EC0000 | 03F40000 | |
+
+- Every bit-7 cell is its V-count twin less 0x5B2 (line 102 + 5, against
+  1007 + 4).
+- The exception is 0xE0, whose sled also takes line 101's H-blank.
+- With bit 7 clear the cells are wakeirq's, with the sled shifted by the 4
+  added cycles: 0x28 reads `095B` and 0x60 `0AFE` (recorded `095F` /
+  `0AFA`).
+
+### 3. The ÷64 phase is matched
+
+The recorded cells are §19's timergeo (the console reads 19 19 19 18 19 19
+19 18 on lines 100-107, where dingbat once read 19 everywhere) and
+sp-agb.json's 24 timergeo cells.
+- dingbat matches all 24 under both BIOSes; mGBA matches 7.
+- The fix was 80a88cd2: the skip-BIOS entry at prescaler phase 776. That
+  phase was pinned by alyosha timer/timer, where only phase 8 mod 64
+  passes, not by timergeo.
+- The LLE boot gives the same 24 cells.
+- The law: one divider runs free from power-on, at a fixed phase against
+  the video grid.
+- ÷256 and ÷1024 still move with the frame (§19).
+
+The console only brackets the line-103 edge, between e = 4 and e = 8.
+These timergeo cells would pin it to the cycle. Predicted:
+
+| arg | 0x46701 | 0x56701 | 0x66701 | 0x76701 | 0x86701 | 0x366401 | 0x376401 |
+|---|---|---|---|---|---|---|---|
+| dingbat | 001204BD | 001204BE | 001204BF | 001304C0 | 001304C1 | 001304EF | 001404F0 |
+| mGBA | 001304BD | 001304BE | 001304BF | 001304C0 | 001304C1 | 001304EF | 001304F0 |
+
+dingbat's edge is at e = 7 on line 103, and 16 cycles later for each line
+earlier. Line 100's edge is at e = 55, which the last two cells test.
+
+### 4. The HLE's call costs are matched
+
+- SWITIME and SWIREGION (gbaedge 03, 0D) are byte-identical to the console
+  under both the HLE and Nintendo's BIOS (`hwprobe_capture.py`: crc EF34,
+  65E6).
+- dbsuite bios is 47/47.
+- No `--check` cell misses under the HLE alone.
+- The old Sqrt and CpuFastSet gaps went with ccb964c5, e6a453d1 and
+  df656c3e.
+
+IWCYCLE +10 (`0A64` against `0A55`) is not a cost:
+- every SWI 4/5 row of that page waits from a ROM VCOUNT poll;
+- +14 and +28 use the same anchor and match;
+- the console's +10 minus +28 is -8 cycles and dingbat's is +7, both
+  inside one poll iteration;
+- so the difference is the anchor's phase, and it is the same under both
+  BIOSes.
+
+### 5. The post-DMA open bus is matched
+
+These recorded cells have all matched the console since 6f0ac75f and
+83aa0391:
+- obusprobe (8), obuswin (10) and obuswint (4, including `DEAD6019`);
+- gbaedge 05 DMALATCH and 39 DMAOPENBUS;
+- the dbsuite bus cases built from them.
+
+The law: the DMA's word stays until the CPU's next bus access, per halfword
+lane. §11's "still open" and the comment above the latch in bus.nim are
+out of date.
+
+One thing has never been measured: what a 16-bit DMA leaves in the lanes.
+dma.nim puts the halfword in both. `tests/roms/payloads/obusdma16.s`
+(`payloadcmp.py --block=0x02008000:13`) does a 16-bit DMA, one NOP, then a
+read of 0x10000000, for IWRAM and EWRAM sources and both destination
+lanes. The hypotheses, with predictions in its header:
+
+| hypothesis | prediction |
+|---|---|
+| H1 | the halfword on both lanes (dingbat and mGBA, every row) |
+| H2 | the source address's lane |
+| H3 | the destination's lane |
+| H4 | the bus width decides: IWRAM rows as H2, EWRAM rows as H1 |
+
+The 32-bit control (+44) reads `DEADBEE3` under all four.
+
+### 6. The FIFO at timer periods 1-3: no law
+
+fifoffff's 264 cells (open-agb.json) measure the extra cycles the refills
+cost a read, against n NOPs. On the console the refills come in groups:
+
+| k | extras |
+|---|---|
+| 1 | 26 / 44 / 62 |
+| 2 | 20, then 30 from n = 21 |
+| 3 | 11 / 19 / 29 |
+| 4 | 0 / 10 / 10 / 20 |
+
+dingbat makes single 10-cycle bursts and scores 76/264 (fifospk 107/107).
+
+A four-rule cycle model fits every k = 1, 2 and 4 cell, plus the tm /
+tm_w0 / tm_ff / ob / ob_ff sets: 224/264 in all.
+- A request lands 4 cycles after its overflow.
+- The level is counted as each of the burst's words lands.
+- A request in the burst's last cycle chains the next burst at 8 cycles.
+- A request earlier in the burst is dropped.
+
+It misses all 40 k = 3 cells. Their extras are odd, and every burst in
+this family is 10 or 8 cycles, so no sum of bursts reaches them. A wider
+rule grid reached k = 3 only by breaking k = 1 (best 144/184). It was not
+prototyped in the core: a rule that fits three periods out of four is the
+table tuning this round guards against.
+
+`tests/roms/payloads/fifolog.s` is fifoffff with its one TM1 read replaced
+by ten reads 3 cycles apart.
+- A gap of 3 + L between samples is an L-cycle burst, so one run logs the
+  whole refill stream.
+- Sample 0 is fifoffff's own read and must reproduce the recorded cells.
+  dingbat's sample 0 already equals its fifoffff answers.
+- Keep to k <= 4 and the IWRAM source (the header says why).
+- `tests/roms/payloads/fifolog-predicted.txt` has, for k 1-4 × w 0/3 × n 0,
+  1, 11, 12, 20, 28, 29: the toy's answers, the k = 3 timeline's, dingbat's
+  and mGBA's.
+
+The deciding cells:
+
+| cell | toy | k = 3 timeline | dingbat | mGBA |
+|---|---|---|---|---|
+| k = 3, w = 0, n = 0 | 24, flat gaps | 17, with a gap of 10 (an 8-cycle burst between samples 0 and 1) | 26, flat | 20 |
+| k = 1, w = 3, n = 0 | 32 | – | 16 | 29 |
+
+The w = 3 rows test the toy's chain rule against dingbat's rule of
+counting the level after the whole burst.
+
+### 7. dbsuite's six reds: four are the page's phase, two are the PSG
+
+`tests/roms/dbsuite/run.py` on this tree scores 878/884: the same six reds
+as results_dbsuite.md.
+
+**dma/dmatime-burst-vram-mode3, bus/contend-pram-mode0,
+contend-vram-mode0, contend-vram-mode2-locked-out.** These have the same
+shape as §1, on a larger scale.
+- The expected values are gbaedge photographs, and nothing in dbsuite
+  fixes the dot each page starts on.
+- Sweeping run_contend2's entry, the core reads all sixteen photographed
+  CONTEND2 values at exactly one of 36 phases (72008a06). That fits sixteen
+  values with one free parameter, not one parameter per value.
+- The branch `worktree-agent-aa8ff0fb965ceea0e` parks those pages at that
+  phase (865 at the time, bus 79/79). It is held for Matt's decision and a
+  cartridge run.
+
+**apu/psg-ch1-after-ch2-lives and sweeptrig-shift0-400-after-rows-d33.**
+`tests/roms/payloads/psgrace.s` is the psgfirst page entered from a
+V-count halt, then d NOPs (0..15) and c × 256 spin cycles (0..127, across
+the 512 Hz sequencer). It sweeps 256 phases, against sp-agb.json's nine
+psgfirst runs:
+
+| row | console, 9 runs | dingbat over 256 phases |
+|---|---|---|
+| +0: first trigger missed | 3/9 | 64/256: fits |
+| +16: the discarded first trigger missed | 3/9 | 66/256: fits |
+| +8 (NR10 = 0 first): lives | 5/9 | 27/256 (P(>= 5 of 9) ~ 0.001) |
+| +12 (after ch2's note): lives, the dbsuite case | 2/9, plus the photograph | **0/256** |
+
+- +0 and +16 are a phase lottery, and dingbat's sets cover them.
+- +12 is not a lottery. The trigger's distance from the master-on is fixed
+  mod 16 there, so its position against the 2 MHz edge is 1, 2 or 4, never
+  the 0 that escapes. dingbat lacks a rule here.
+- d33 reads 0 on every console run, and both of dingbat's rules stop too
+  late: C2 gives 1, and C3 stops two reads later still. Moving C2 would
+  break the s0trig bit-14 laws it is fitted to.
+- s0mode and s0path (138/216 missed, C2 everywhere) fall into about ten
+  classes. These move with the master-on's phase, the distance from the
+  wake, the cell before, and an NR10 write. No single rule anchored on the
+  master-on fits them.
+
+`tests/roms/payloads/s0age.s` asks what ends the slow timing. It is
+s0long's no-halt path, with:
+- k: a 16-phase sled;
+- m: spins of 262144..1572864 cycles;
+- bit 8: a ch2 length-16 note;
+- bit 9: an NR10 = 0 write.
+
+Predicted, the low byte at k = 0..15 (L = lives):
+
+| hypothesis | prediction |
+|---|---|
+| H0, dingbat today (all 512 cells, both BIOSes) | every row `1 0 L F 7 7 7 3 3 3 L 3 3 3 1 1` |
+| H1, the slow timing runs out by itself | rows with m >= 1 turn to C2 (`1 3 1 1` repeating, no L) or C3 (one L in four) |
+| H2, a note ending by length ends it | only bit-8 rows with m >= 4 leave H0 |
+| H3, an NR10 write ends it | bit-9 rows leave H0 at every m |
+| mGBA | L everywhere |
+
+Suggested console cells: 16 k × m ∈ {0, 2, 5, 7} × bits 8/9 = 256.
+
+**Status: no core change.** What this round changed:
+- tools/hwlink: RACES and the phase-swept check;
+- lawrom.py and cyclelaws_test.nim;
+- the cyclelaws freeze of hdmarace.
+
+It also added the probes hdmarace, wakehb, obusdma16, fifolog and s0age,
+plus the psgrace sweep, each run in the emulators only. With no src/
+change, the train and the mGBA suite were not run.

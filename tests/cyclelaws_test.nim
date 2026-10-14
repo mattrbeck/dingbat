@@ -13,7 +13,7 @@
 ## Runs under the HLE BIOS always, and under Nintendo's as well when
 ## DINGBAT_GBA_BIOS (or tests/roms/gba_bios.bin) is there -- it never is in CI.
 
-import std/[json, os, sha1, strformat, strutils]
+import std/[json, os, sequtils, sha1, strformat, strutils, tables]
 import dingbat/gba/gba
 
 const Dir = "tests/roms/cyclelaws"
@@ -55,16 +55,32 @@ proc run(bios: string) =
       echo &"  FAIL {label} {rom} never finished"
       inc failures
       continue
+    # a racing cell (lawrom.py, r0table.RACES) is one word per phase: it holds
+    # when every word the console answered is among the core's
+    var races: OrderedTable[string, (seq[string], seq[string])]
     var i = 0'u32
     for cell in law["cells"]:
       let got = show(cell["kind"].getStr, emu.word(Results + 4 * i))
+      inc i
+      if cell.hasKey("race"):
+        let id = cell["race"].getStr
+        if id notin races:
+          var console: seq[string]
+          for w in cell["console"]: console.add w.getStr
+          races[id] = (console, newSeq[string]())
+        races[id][1].add got
+        continue
       let want = if bios.len == 0 and cell.hasKey("hle_want"): cell["hle_want"].getStr
                  else: cell["want"].getStr
       inc total
       if got != want:
         inc bad
         echo &"  FAIL {label} {cell[\"id\"].getStr}: {got}, console {want}"
-      inc i
+    for id, (console, got) in races:
+      inc total
+      if console.anyIt(it notin got):
+        inc bad
+        echo &"  FAIL {label} {id}: {got.deduplicate.join(\" | \")} over the phases, console {console.join(\" | \")}"
   echo &"{label}: {total - bad}/{total} cells are the console's"
   failures += bad
 

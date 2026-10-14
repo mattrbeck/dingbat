@@ -20,8 +20,12 @@ the reason and pinned to what the HLE does answer; under the real BIOS it is
 held to the console like any other.
 
 A cell the console answered more than one way (`A | B`, a race by design:
-hdmaobus's NOP-sled rows from line 42 on) is no law and is left out of the
-ROM; the table keeps it, and `r0table.py --check` still shows it.
+hdmaobus's NOP-sled rows from line 42 on) is no law by itself and is left out
+of its payload's ROM. When r0table.RACES names a variant that takes the
+race's phase as an argument, the cell is frozen there instead: one word per
+phase, each marked with the cell it belongs to (`race`) and every word the
+console answered (`console`); the test holds that each console word is among
+the core's answers over the phases.
 """
 import hashlib
 import json
@@ -40,7 +44,7 @@ OUT = os.path.join(payloadcmp.ROMS, 'cyclelaws')
 # 0x0's return address used to be the one exception.
 HLE_EXCEPTIONS = {}
 
-from r0table import NEEDS_CART, OPEN_ROWS   # noqa: E402
+from r0table import NEEDS_CART, OPEN_ROWS, RACES   # noqa: E402
 
 
 def kind_of(row, arg):
@@ -57,6 +61,41 @@ def settled(row):
                       [row.want[i] for i in keep])
 
 
+def frozen(source, args):
+    data = bytearray(open(payloadcmp.build_wrapper(source, args), 'rb').read())
+    # build_wrapper stamps the header logo so a console or another emulator's
+    # BIOS will boot the ROM. That is Nintendo's data and stays out of git;
+    # the core boots these past the BIOS and never reads it.
+    data[0x04:0xA0] = bytes(0x9C)
+    return bytes(data)
+
+
+def entry(payload, data, frames, cells):
+    return {'payload': payload, 'rom': payload + '.gba',
+            'sha1': hashlib.sha1(data).hexdigest(), 'frames': frames, 'cells': cells}
+
+
+def race_rom(payload, rows):
+    """The racing cells of `payload`'s rows frozen into its RACES variant, or
+    None: (variant, ROM bytes, laws.json entry)."""
+    if payload not in RACES:
+        return None
+    variant, shift, phases = RACES[payload]
+    args, cells = [], []
+    for r in rows:
+        for cid, arg, want in zip(r.cell_ids(), r.args, r.want):
+            if ' | ' not in want:
+                continue
+            for d in range(phases):
+                args.append(arg | d << shift)
+                cells.append({'id': f'{cid} @{d}', 'kind': 'hex', 'race': cid,
+                              'console': want.split(' | ')})
+    if not args:
+        return None
+    data = frozen(tables.source(variant), args)
+    return variant, data, entry(variant, data, tables.frames_for(len(args)), cells)
+
+
 def build():
     """[(payload, ROM bytes, its laws.json entry)]"""
     out = []
@@ -68,14 +107,10 @@ def build():
         # answered by the console, not yet matched by dingbat
         if payload in OPEN_ROWS:
             continue
+        race = race_rom(payload, group)
         group = [settled(r) for r in group]
         args = [a for r in group for a in r.args]
-        data = bytearray(open(payloadcmp.build_wrapper(tables.source(payload), args), 'rb').read())
-        # build_wrapper stamps the header logo so a console or another
-        # emulator's BIOS will boot the ROM. That is Nintendo's data and stays
-        # out of git; the core boots these past the BIOS and never reads it.
-        data[0x04:0xA0] = bytes(0x9C)
-        data = bytes(data)
+        data = frozen(tables.source(payload), args)
         cells = []
         for r in group:
             for cid, arg, want in zip(r.cell_ids(), r.args, r.want):
@@ -83,9 +118,9 @@ def build():
                 if cid in HLE_EXCEPTIONS:
                     cell['hle_want'], cell['hle_why'] = HLE_EXCEPTIONS[cid]
                 cells.append(cell)
-        out.append((payload, data, {'payload': payload, 'rom': payload + '.gba',
-                                    'sha1': hashlib.sha1(data).hexdigest(),
-                                    'frames': tables.frames_for(len(args)), 'cells': cells}))
+        out.append((payload, data, entry(payload, data, tables.frames_for(len(args)), cells)))
+        if race:
+            out.append(race)
     return out
 
 

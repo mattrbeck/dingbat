@@ -36,7 +36,9 @@
 @     (DMA_READS_CPU_BUS); mGBA the same. From k = 2 the bursts race the
 @     VCOUNT poll (where the arming left the sled is not fixed): every cell
 @     answers several of the poll loop's bus words (its opcodes, or the line
-@     number it loaded) and is no law
+@     number it loaded) and is no law by itself; hdmarace.s fixes that phase
+@     and walks it, and every word the console gave is one of the core's
+@     over the seven phases (r0table.RACES, frozen in tests/roms/cyclelaws)
 @   reader first, halt, k = 0:  00080300, the BIOS's last fetch (the stack
 @     literal after Halt's `bx lr`; the HLE's stub BIOS has the same word)
 @   reader first, halt, k = 1..5:  X_(k-1), the writer's word from the line
