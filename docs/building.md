@@ -58,9 +58,10 @@ linked statically). A different SDL 3 build can be substituted at runtime with
 ## CI
 
 `.github/workflows/`: `test.yml` (all test suites, see `tests/README.md`),
-`deploy-pages.yml` (wasm build to GitHub Pages on push to main), `build-artifacts.yml`
-(the three desktop builds, `workflow_call` only), `build.yml` (calls it on every push and
-PR), `release.yml` (on `v*` tags: same builds, checksummed and published). Linux builds on
+`deploy-pages.yml` (wasm build to GitHub Pages on push to main; the version, and so
+the web app's Update offer, moves only when a hash of what the app runs does),
+`build-artifacts.yml` (the three desktop builds, `workflow_call` only), `build.yml`
+(calls it on every push and PR), `release.yml` (on `v*` tags: same builds, checksummed and published). Linux builds on
 `ubuntu-22.04` for the glibc 2.34 floor. All three jobs build a static SDL 3 from source
 (`.github/scripts/build-sdl3.sh`, cached): Homebrew's `sdl3` and SDL's mingw devel package
 ship no `libSDL3.a`, and Ubuntu 22.04 has no SDL 3 package.

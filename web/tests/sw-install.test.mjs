@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-// CI stamps the commit into CACHE_VERSION (deploy-pages.yml); so do we.
+// CI stamps a commit into CACHE_VERSION (deploy-pages.yml: the last one
+// that changed what the app runs); so do we.
 const BUILD_A = "aaaaaaa";
 const SOURCE = readFileSync(new URL("../sw.js", import.meta.url), "utf8")
   .replace('CACHE_VERSION = "dev"', `CACHE_VERSION = "${BUILD_A}"`);
