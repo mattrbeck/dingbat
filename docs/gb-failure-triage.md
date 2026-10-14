@@ -532,6 +532,51 @@ gambatte-core seeds it from one console's power-on dump, so the reference
 encodes that unit's garbage (the same class as the `oamdma_src{FE00,FF00}`
 WRAM rows in NotScored).
 
+Verified link by link 2026-10-14:
+- *ROM.* Source and binary agree: one object (OAM 0: Y `$10`, X `$02`,
+  tile 0, attribute `$00` = CGB palette 0, VRAM bank 0, no flip). Tile 0
+  rows are `$00,$7E`, so column 6 is colour 2 and column 7 colour 0; X = 2
+  puts column 6 at screen x = 0 on lines 0-7 (8 px). The only palette writes
+  are BCPS `$80` and eight BCPD bytes (BG palette 0 = `$0000 $5294 $2108
+  $7FFF`); no OCPS/OCPD store exists in any of the three binaries. `spx1`
+  (column 7, transparent) and `spx0` show no object pixel and pass. The
+  `attrib` twin leaves VBK = 1, which moves the BG map writes, not the object.
+- *Frames.* The 8 differing pixels are exactly x = 0, y = 0..7. The
+  reference has (33,146,108), which is `$4261` (r1 g19 b16) through
+  gambatte's test-runner colour LUT and is no BG colour (all four are grey).
+  `$4261` is the word gambatte-core's power-on table holds at OBJ palette 0
+  colour 2 (bytes 4-5, `$61 $C2`); that table is copied in regardless of
+  whether its runner executes a boot ROM.
+- *Geometry.* A scratch build that put `$4261` in that one word passes all
+  three rows (9/9 of the spx family), so dingbat's object/SCX timing already
+  matches the reference pixel for pixel. SameBoy (CGB C, its own boot ROM)
+  draws x = 0 in its seeded-random OBJ palette 0 colour 2; forcing that word
+  to `$7FFF` makes its frame identical to dingbat's on all three. Three cores
+  agree on everything but the uninitialised word.
+- *Boot ROM.* The CGB boot ROM disassembly (ISSOtm gb-bootroms `cgb.asm`)
+  writes OBJ palette RAM only in two places: `CommitBGPalettes` writes byte 0
+  alone (its own comment: the rest stay random on hardware), and the DMG-
+  compat branch writes OBP0/OBP1's 16 bytes. These carts are CGB (`$143` =
+  `$80`/`$C0`), so bytes 4-5 are untouched. Pan Docs, "Palettes": "In CGB
+  mode, the boot ROM leaves all object colors uninitialized (and thus
+  somewhat random/unreliable), aside from setting the first byte of OBJ0
+  color #0 to $00". SameBoy's reimplemented boot ROM writes OBJ palettes
+  only on its DMG-compat path, and its core randomises them at power-on.
+- *dingbat.* gambatte rows run skip-boot (`run_bios = false`); the CGB
+  hand-off fills all 64 OBJ bytes with `$FF` (`ppu.nim:148`, CGB-native branch of
+  the boot phase). Byte 0 should be `$00` per the boot ROM; it is colour 0,
+  never displayed, so no row can see it except through an OCPD read.
+- *DMG half.* Its x = 0 pixel is the same object through OBP0, which no
+  boot ROM writes either (Pan Docs lists OBP0/OBP1 as uninitialised, "most
+  often $00 or $FF"). dingbat's DMG `$FF` (`memory.nim` skip-boot; see
+  docs/oracles.md) gives black, as the reference does, so that half passes;
+  it leans on the same kind of byte, but one with a common value, where the
+  CGB word is 15 bits of SRAM noise.
+
+Settling it needs a hardware capture, and even then only for that unit: the
+word is power-on SRAM content, so a second console would give a different
+colour. The rows are recorded in NotScored instead of seeding the table.
+
 **To close.** Hardware experiment (b) below measures the extension law
 directly. `tools/gbppu/m3len.sh` / `-d:gb_m3_len` give dingbat's side.
 
