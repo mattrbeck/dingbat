@@ -35,6 +35,8 @@ Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 for ROMs with a menu; applied between frames, as the frontend does),
 `--serial-pass=<text>` / `--serial-fail=<text>` (serial mode: a ROM's own verdict text in
 place of blargg's `Passed`/`Failed`), `--mbc30-screen=rom|sram` (mbc30test mode),
+`--input=<when>:<btn>[+<btn>]:press|release,...` (GB: key changes at an exact machine
+time; see "Timed joypad input" below),
 `--sio=null|loopback`, and for the link modes `--listen`, `--connect`,
 `--netlink-delay-ms`, `--link-contract=multi|normal|normal32`, `--attach-after`.
 
@@ -78,6 +80,79 @@ the header names an outcome and the frame has held for 10 frames (ROM screen fra
 SRAM ~545), and passes on the `MBC30 ... OK!` header with every bank marked `.`. One
 `MBC30TEST: PASS|FAIL <header>: n/256 banks '.', 'X' at <ranges>` line on stdout; a
 failing run dumps the decoded screen to stderr. Always a fresh chip, no `.sav`.
+
+### Timed joypad input (`--input`)
+
+`--press` applies keys between frames, so every press lands at the same point of the
+frame. ROMs that measure when the joypad interrupt fires (tellinglys, DocBoy's
+`joypad/` and `stop_*` ROMs) need the key change at a chosen machine time. `--input`
+(GB only; `tests/gb_timed_input.nim`) does that:
+
+```
+--input=WHEN:KEY[+KEY]:ACTION[,WHEN:KEY[+KEY]:ACTION...]
+  WHEN    N    dots (4.194304 MHz) after the hand-off; dot 0 is the first dot of the
+               M-cycle that fetches the opcode at $0100
+          @HH  when opcode HH (hex) is fetched
+  KEY     a b select start up down left right; `+` changes several in one event
+  ACTION  press | pressed | release | released
+```
+
+Semantics, which are DocBoy's test runner's (`tests/testutils/testutils/runners.h`):
+
+- Time advances in 4-dot steps. A timed event is applied on the first step at or after
+  its time at which it is the first due event in list order, and at most one event is
+  applied per step. So `0:a:press,0:right:press` presses A on dot 0 and Right on dot 4,
+  and a backlog drains one per step. Order of the list, not of the times, breaks ties.
+- An event applied on step `s` is in place before anything else in the M-cycle that
+  starts on dot `s`: a P1 read, an IF read or the interrupt check in that M-cycle sees
+  it, and none earlier does.
+- `@HH` is applied when the opcode is fetched, before the next M-cycle, i.e. on the
+  M-cycle after the one that read the opcode byte (DocBoy compares the CPU's latched
+  opcode at the top of each 4-tick cycle, and latches it at the end of the fetch). The
+  first pending `@HH` event for that opcode in list order is the one applied. `@HH`
+  events are not part of the step queue: one due on the same step as a timed event
+  does not delay it.
+- Time keeps running in STOP mode (one step of STOP is the 4 cycles of the M-cycle it
+  stands for), so a press can end STOP. Across a CGB speed switch it is real time: in
+  double speed a step is two M-cycles.
+- Events never applied by the end of the run are reported on stderr (`INPUT: n of m
+  --input event(s) never applied`).
+
+Granularity: every event lands on an M-cycle boundary, a step is 4 dots. That is one
+M-cycle at single speed — the finest a program can observe a key change, since the CPU
+sees P1 and IF only through M-cycle bus reads and checks interrupts at M-cycle
+boundaries, and the core raises the joypad interrupt on the falling P10-P13 edge the
+moment the line changes (Pan Docs, "Joypad Input"; `joypad_update` in
+`src/dingbat/gb/joypad.nim`). In double speed a step is two M-cycles, which is also
+DocBoy's resolution, so a DocBoy expectation never depends on the odd M-cycle.
+
+Mechanism, zero cost to shipping builds (every hook is `when defined(test_harness)`):
+the module books one scheduler event at a time, `etHandleInput` (an ordinal the GB core
+never books, so no save-state ordinal moves), in real time with `schedule_gb`. The
+scheduler carries it through the per-frame rebase and rescales it at a speed switch, and
+every fast path stops on it (the idle-loop and HALT skips, the speed-switch stall).
+`mem_tick_stopped` hands STOP's steps to the module; `cpu_exec_fetched` tests the
+fetched opcode against a set (`gb_harness_ops`) for `@HH`. `tests/gb_timed_input_test.nim`
+(`nimble test_gbtimedinput`) pins all of this on programs assembled in the test: the
+P1/IF boundary at every dot of a 600-M-cycle window for press and release (and no IRQ
+on release), the step queue and ties, `@40` against the equivalent time, frame
+crossings, double speed, an idle poll loop against a busy one, HALT, and STOP.
+
+**DocBoy manifest mapping** (`tests/config/*.json`, `"inputs"` of an entry), 1:1 in list
+order, joined with `,`:
+
+| DocBoy | dingbat |
+|---|---|
+| `"trigger_at_tick": N` | `N`. DocBoy's ticks are dots counted from `Core::reset`; its CI builds without `ENABLE_BOOTROM`, so `BOOT_DURATION` is 0 and the reset CPU stands on the last micro-op of the boot ROM's `LDH ($50),A`, the one that fetches $0100 (`Cpu::reset`): tick 0 is this harness's dot 0. |
+| `"trigger_at_instruction": "ld b,b"` / `"ld c,c"` / a number | `@40` / `@49` / `@` + the number in hex (an `LD r,r'` mnemonic is `$40 + 8*r + r'`, B=0 C=1 D=2 E=3 H=4 L=5 A=7) |
+| `"key": "a"` (`b`, `select`, `start`, `up`, `down`, `left`, `right`) | the same word |
+| `"state": "pressed"` / `"released"` | `pressed` / `released` (or `press` / `release`) |
+
+Example: `{"trigger_at_tick": 0, "key": "a", "state": "pressed"}, {"trigger_at_tick":
+131072, "key": "a", "state": "released"}` is `--input=0:a:pressed,131072:a:released`.
+One DocBoy model difference to expect when triaging: DocBoy raises the joypad interrupt
+on a release as well as a press (it models switch bounce, `joypad.cpp`); dingbat raises it
+on the falling edge only, as Pan Docs specifies.
 
 ### mGBA suite
 
@@ -262,8 +337,12 @@ Screenshot notes:
   set as its own arm. Two daid "GBC" rows are really compat mode and are skipped.
 - `strikethrough` and `bully` are `$80` carts; `--mode=screenshot` reads the absence of
   `--cgb` as "run on a DMG", so their `-dmg` references are scored too.
-- Not integrated: `little-things-gb/tellinglys` (needs a scripted button press);
-  `scribbltests` `fairylake`/`winpos` and Mooneye's `logic-analysis/` (no reference).
+- `little-things-gb/tellinglys` runs DocBoy's timed schedule for it (`--input`, eight
+  presses 1310720 dots apart, which is not a whole number of frames) and is scored against
+  the bundle's pass screens on DMG and in CGB compatibility mode. With `--press` it fails,
+  as it should: every press lands on the same line.
+- Not integrated: `scribbltests` `fairylake`/`winpos` and Mooneye's `logic-analysis/` (no
+  reference).
 
 #### The gbdev shootout's ROMs and its tolerance
 
@@ -483,7 +562,8 @@ random register-writing program per core; known core issues print `[KNOWN]`,
 `DINGBAT_SOAK_STRICT=1` fails on them; an argument filters the cases),
 `test_silentaudio` (a core toggling `APU.silent`, the muted no-mix path, must match a
 mixing twin's payload every frame: committed ROMs, the soak's random programs and
-channel-1 stop storms), `test_printer`,
+channel-1 stop storms), `test_gbtimedinput` (`--input` lands on its M-cycle; see
+"Timed joypad input"), `test_printer`,
 `test_lcdresponse`, `test_mbc3` (MBC3/MBC30 bank registers, 64 KiB RAM, `.sav` and
 save-state round trips on synthetic carts), `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
 battery-save RTC trailer), `test_swihalt` (Halt and Stop from the cartridge

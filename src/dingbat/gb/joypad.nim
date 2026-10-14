@@ -61,3 +61,15 @@ proc handle_input*(j: GbJoypad; gb: GB; inp: Input; pressed: bool) =
   of Input.START:  j.start  = pressed
   else: discard
   joypad_update(j, gb)
+
+when defined(test_harness):
+  # Timed input for the test harness (tests/gb_timed_input.nim, dingbat_test
+  # --input): key changes placed on an exact M-cycle rather than between
+  # frames. Nothing here exists in a shipping build.
+  var gb_harness_input*: proc(gb: GB; stopped: bool) {.nimcall.}
+    ## Run from the scheduler's etHandleInput (gb_dispatch; the GB core never
+    ## books that event itself) and, with `stopped`, once per step of STOP
+    ## mode, where the scheduler does not advance (mem_tick_stopped).
+  var gb_harness_ops*: set[uint8]
+    ## Opcodes whose fetch calls gb_harness_op (cpu_exec_fetched).
+  var gb_harness_op*: proc(gb: GB; opcode: uint8) {.nimcall.}

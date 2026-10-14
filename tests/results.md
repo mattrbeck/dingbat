@@ -6,8 +6,8 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 ## Summary
 
-- **Total:** 1515
-- **Pass:** 1508
+- **Total:** 1517
+- **Pass:** 1510
 - **Fail:** 7
 
 | Suite | Pass | Total | Status |
@@ -26,7 +26,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 | 👌 |
 | Game Boy - SameSuite | 8 | 8 | 👌 |
 | Game Boy - SameSuite APU | 70 | 70 | 👌 |
-| Game Boy - Screenshot suites | 19 | 19 | 👌 |
+| Game Boy - Screenshot suites | 21 | 21 | 👌 |
 | Game Boy - Shootout ROMs | 15 | 15 | 👌 |
 | [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
 | GBA - alyosha gba-tests | 123 | 126 | 👀 |
@@ -219,7 +219,8 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **gbmicrotest: 31 ROMs that never write the $FF82 verdict byte** — scanned all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one and these 31 contain neither, so the harness would be scoring uninitialised HRAM rather than a result. The upstream sources agree (none of the 31 .s files calls a test_finish macro) and GateBoy's own test list never runs them. All 31 were failing rows before the skip. The honest suite denominator is 482. (build_gbmicrotest_tests)
 - **gbmicrotest: 2 ROMs whose expected byte is unreachable** — `halt_op_dupe_delay` wants DIV = $55 about 62 M-cycles after resetting DIV, which needs a 5,440 M-cycle HALT its own HBlank-every-line setup rules out ($55 is the suite's scratch marker; its sibling `halt_op_dupe` is correctly written and passes). `stat_write_glitch_l154_d` is missing the `xor a ; ldh ($FF0F),a` its three siblings have, so it asserts IF = $E0 across a whole frame of LCD-on time it never cleared VBlank in -- restore that clear and it passes, strip it from `_c` at identical timing and `_c` produces `_d`'s byte. Both are ROM defects, not verdicts. The honest suite denominator is 480. (build_gbmicrotest_tests)
 - **scribbltests/fairylake, scribbltests/winpos** — ship no reference image: the bundle's howto says so and upstream has only animated GIFs; fairylake is a WIP demo and winpos is a joypad-driven WX/WY explorer. (build_small_screenshot_tests)
-- **little-things-gb/tellinglys** — needs scripted joypad input mid-run (all eight buttons, one after another), which the GB side of the harness has no way to inject. (build_small_screenshot_tests)
+- **gambatte/jpadirq_1, gambatte/jpadirq_2** — interactive observation ROMs with no expected result: each shows a running hex count of joypad interrupts (jpadirq_2 also the live P1 nibble while it flips the selected group) for a person pressing buttons on hardware. The filenames carry no `_out` verdict, gambatte's testrunner does not run them, and gambatte's own note on them (test/hwtests/jpadirq.txt) says a real press bounces several times on DMG and CGB, so the count for a press has no single right value. (build_gambatte_rows)
+- **gambatte root: cgb_bgp_dumper, cgb_objp_dumper, fexx_ffxx_dumper, fexx_read_reset_set_dumper, ioregs_reset_dumper, vram_dumper, wram_dumper, sram** — tools, not tests: the dumpers copy palette, $FExx/$FFxx, I/O, VRAM or WRAM contents into cart RAM for study on hardware, and sram writes four bytes to cart RAM and shows $00. No `_out` verdict, no reference beside them in the bundle, and gambatte's testrunner does not run them. (gambatte-core's test/hwtests keeps hardware cart-RAM dumps for five of the seven dumpers; the bundle does not ship them.) (build_gambatte_rows)
 - **mbc3-tester CGB reference** — a CGB compatibility-mode capture the harness can run (--cgb) and matches pixel-for-pixel in layout at every CGB revision, except that its green is #7BFF4A where the howto beside it, every mealybug `_cgb_c` capture and the boot ROM's default compat palette ($1BEF) give #7BFF31 -- a colour no compat palette produces. An exact row fails on those 3,825 pixels alone, so only the DMG row is scored. (build_small_screenshot_tests)
 - **mooneye/utils/ (bootrom_dumper, dump_boot_hwio)** — tools, not pass/fail tests. bootrom_dumper waits for a boot ROM to dump and can only time out (docs/gb-failure-triage.md calls it unrecoverable); dump_boot_hwio ends in quit_dump_mem, which sets the success byte unconditionally, so its green row was a gate that could not fail. (build_mooneye_tests)
 - **mooneye-wilbertpol utils/, logic-analysis/** — tools and analysis captures, not pass/fail tests. (build_wilbertpol_tests)

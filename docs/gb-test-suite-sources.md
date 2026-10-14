@@ -421,6 +421,26 @@ photographed against an AGS-101 and is hardware-correct
 screen … If you get text, your emulator needs to be fixed and probably shows
 1-frame glitches in Pokémon Pinball." The reference is 23040 white pixels.
 
+`little-things-gb/tellinglys` (source `tellinglys/src/main.z80`, pinobatch's
+little-things-gb at 3fea6a7): the joypad handler records LY at each interrupt
+for eight distinct keys; the ROM ORs and ANDs the eight LYs and draws its pass
+screen when they differ in at least 5 bits, its "Incorrect behavior: Emulator
+fires joypad interrupt at same line each time" screen otherwise. README: DMG,
+MGB, CGB and the Game Boy Player pass, the Super Game Boys pass with a slowly
+creeping arrow. The bundle's `tellinglys-dmg.png` / `-cgb.png` are that pass
+screen; the rows feed it DocBoy's manifest schedule through `--input`
+(tests/README.md, "Timed joypad input").
+
+gambatte's root files (`jpadirq_1/2`, seven `*_dumper`, `sram`) carry no `_out`
+verdict; their sources are in gambatte-core `test/hwtests` (5a41a68). The
+jpadirq pair counts joypad interrupts on screen for a person pressing buttons,
+and `jpadirq.txt` beside them records the hardware observations: the interrupt
+fires when the low nibble goes from all high to at least one low, not on a
+further line going low, and real presses bounce several times on DMG and CGB.
+The dumpers copy palette, $FExx/$FFxx, I/O, VRAM or WRAM state into cart RAM;
+hwtests keeps hardware dumps (`*_dmg08.bin`, `*_cgb.bin`) for five of them.
+All are in the NotScored ledger.
+
 ## Source quirks worth knowing
 
 - `channel_4_align.asm` and `channel_4_volume_div.asm` headers name the wrong

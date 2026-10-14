@@ -44,6 +44,7 @@ type
     model: string         # mooneye per-model boot table (--model=...); "" = default
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
     press: string         # screenshot mode: --press schedule (F:BTN[+BTN],...)
+    input: string         # --input schedule: exact-time key changes (tests/gb_timed_input.nim)
     pass_rgb: string      # screenshot mode: pass iff the bottom-right pixel is
                           # this RRGGBB (ROMs whose verdict is the backdrop)
     verdict_glyphs: string # screenshot mode: the suite's font source; the row
@@ -321,6 +322,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --nosave")
     if test.press.len > 0:
       cmd.add(" --press=" & test.press)
+    if test.input.len > 0:
+      cmd.add(" --input=" & test.input.quoteShell)
     if screenshot_bios.len > 0 and test.rom_path.endsWith(".gba"):
       cmd.add(" --bios=" & screenshot_bios.quoteShell)
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
@@ -473,6 +476,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --serial-pass=" & test.serial_pass.quoteShell)
     if test.serial_fail.len > 0:
       cmd.add(" --serial-fail=" & test.serial_fail.quoteShell)
+    if test.input.len > 0:
+      cmd.add(" --input=" & test.input.quoteShell)
     # fuzzarm writes its triage to stderr. execCmdEx reads only stdout, so
     # stderr must be merged: unread, it is lost and deadlocks once the triage
     # outgrows the pipe buffer (500 failures is ~100 KB).
@@ -1034,13 +1039,39 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   add_if("cgb-acid-hell/cgb-acid-hell", hell / "cgb-acid-hell.gbc",
          hell / "cgb-acid-hell.png", 120, color = true, cgb = true)
 
-  # little-things-gb (pinobatch). tellinglys is not scored: it checks that
-  # the joypad interrupt lands on varying lines, and dingbat_test's --press
-  # applies input between frames exactly as the frontend does, so it reads
-  # "same line each time" -- a frontend input-timing question, not the core's.
+  # little-things-gb (pinobatch).
   let little = roms_dir / "little-things-gb"
   add_if("little-things-gb/firstwhite", little / "firstwhite.gb",
          little / "firstwhite-dmg-cgb.png", 60)
+  # tellinglys: the eight keys pressed one after another; the joypad handler
+  # records LY at each interrupt, and the ROM draws its pass screen when the
+  # recorded LYs differ in at least 5 bits (its README: hardware passes with
+  # an essentially random arrow), its fail screen otherwise. The references
+  # are that pass screen. Input between frames (--press) lands on the same
+  # line every time and fails, so the presses are timed (--input). The
+  # schedule is DocBoy's manifest entry for this ROM (tests/config/dmg.json):
+  # 1310720 dots apart, which is not a whole number of frames. The howto's
+  # exit condition is 5 emulated seconds after the last press; 720 frames is
+  # about 6 after the last release.
+  const TellinglysInput =
+    "2621440:a:press,3932160:a:release,6553600:b:press,7864320:b:release," &
+    "9175040:start:press,10485760:start:release," &
+    "11796480:select:press,13107200:select:release," &
+    "14417920:left:press,15728640:left:release," &
+    "17039360:right:press,19660800:right:release," &
+    "22282240:up:press,23592960:up:release," &
+    "24903680:down:press,26214400:down:release"
+  let tl_rom = little / "tellinglys.gb"
+  if fileExists(tl_rom) and fileExists(little / "tellinglys-dmg.png"):
+    var t = shot("little-things-gb/tellinglys-dmg", tl_rom,
+                 little / "tellinglys-dmg.png", 720)
+    t.input = TellinglysInput
+    tests.add(t)
+  if fileExists(tl_rom) and fileExists(little / "tellinglys-cgb.png"):
+    var t = shot("little-things-gb/tellinglys-cgb", tl_rom,
+                 little / "tellinglys-cgb.png", 720, color = true, cgb = true)
+    t.input = TellinglysInput
+    tests.add(t)
 
   # MBC3 bank tester: device-independent (the howto: untested on hardware,
   # "should work on all revisions since it tests a cartridge"). The CGB
@@ -1936,9 +1967,23 @@ const NotScored: seq[(string, string)] = @[
     "image: the bundle's howto says so and upstream has only animated " &
     "GIFs; fairylake is a WIP demo and winpos is a joypad-driven WX/WY " &
     "explorer. (build_small_screenshot_tests)"),
-  ("little-things-gb/tellinglys", "needs scripted joypad input mid-run " &
-    "(all eight buttons, one after another), which the GB side of the " &
-    "harness has no way to inject. (build_small_screenshot_tests)"),
+  ("gambatte/jpadirq_1, gambatte/jpadirq_2", "interactive observation ROMs " &
+    "with no expected result: each shows a running hex count of joypad " &
+    "interrupts (jpadirq_2 also the live P1 nibble while it flips the " &
+    "selected group) for a person pressing buttons on hardware. The " &
+    "filenames carry no `_out` verdict, gambatte's testrunner does not run " &
+    "them, and gambatte's own note on them (test/hwtests/jpadirq.txt) says " &
+    "a real press bounces several times on DMG and CGB, so the count for a " &
+    "press has no single right value. (build_gambatte_rows)"),
+  ("gambatte root: cgb_bgp_dumper, cgb_objp_dumper, fexx_ffxx_dumper, " &
+    "fexx_read_reset_set_dumper, ioregs_reset_dumper, vram_dumper, " &
+    "wram_dumper, sram", "tools, not tests: the dumpers copy palette, " &
+    "$FExx/$FFxx, I/O, VRAM or WRAM contents into cart RAM for study on " &
+    "hardware, and sram writes four bytes to cart RAM and shows $00. No " &
+    "`_out` verdict, no reference beside them in the bundle, and gambatte's " &
+    "testrunner does not run them. (gambatte-core's test/hwtests keeps " &
+    "hardware cart-RAM dumps for five of the seven dumpers; the bundle does " &
+    "not ship them.) (build_gambatte_rows)"),
   ("mbc3-tester CGB reference", "a CGB compatibility-mode capture the " &
     "harness can run (--cgb) and matches pixel-for-pixel in layout at every " &
     "CGB revision, except that its green is #7BFF4A where the howto beside " &

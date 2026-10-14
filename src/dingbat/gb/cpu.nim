@@ -522,6 +522,9 @@ when defined(gbfuzz_trace):
 template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
   ## Everything after the opcode fetch: shared by `tick` and the STOP operand
   ## latch's run (cpu_run_latched).
+  when defined(test_harness):
+    # Timed input keyed on an opcode fetch (joypad.nim, gb_harness_op).
+    if unlikely(opcode in gb_harness_ops): gb_harness_op(gb, opcode)
   when HDMA_GRANT_FETCH_DOTS >= 0:
     # Hand-over point 1: an owed block takes the bus at the end of the opcode
     # fetch, never on the operand or data M-cycles (the gambatte two-M-cycle

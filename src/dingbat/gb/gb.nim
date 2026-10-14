@@ -3510,6 +3510,11 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
           else: ppu_handle_stat_interrupt(gb.ppu, gb)
         else:
           ppu_handle_stat_interrupt(gb.ppu, gb)
+    of etHandleInput:
+      # Booked only by the test harness's timed input (joypad.nim).
+      when defined(test_harness):
+        if gb_harness_input != nil: gb_harness_input(gb, false)
+      else: discard
     else: discard
 
 proc post_init*(gb: GB) =

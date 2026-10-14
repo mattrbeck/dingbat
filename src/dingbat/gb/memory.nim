@@ -1050,6 +1050,9 @@ proc mem_tick_stopped*(mem: GbMemory; gb: GB) =
   if ppu.dots_since_frame >= DOTS_PER_FRAME:
     ppu.dots_since_frame = 0
     ppu.frame = true
+  when defined(test_harness):
+    # The harness's timed input keeps its clock running in STOP (joypad.nim).
+    if gb_harness_input != nil: gb_harness_input(gb, true)
 
 proc stop_panel(mem: GbMemory; gb: GB) =
   ## The panel during STOP (Pan Docs, "Using the STOP Instruction"; daid

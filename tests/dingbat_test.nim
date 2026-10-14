@@ -1,5 +1,6 @@
 import std/[os, strutils, parseopt, net, nativesockets, monotimes, times, tables]
 import png_reader
+import gb_timed_input
 import dingbat/gb/gb
 import dingbat/gb/link as gblink
 import dingbat/gba/gba
@@ -1753,6 +1754,7 @@ proc main() =
   var mbc30_screen = "rom"  # mbc30test mode: which of the ROM's two screens (rom|sram)
   var serial_pass = ""      # serial mode: the ROM's own pass text (default blargg's "Passed")
   var serial_fail = ""      # serial mode: the ROM's own failure text, ends the run early
+  var timed_inputs: seq[TimedInput]     # --input: exact-time key changes (gb_timed_input.nim)
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -1936,6 +1938,17 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         serial_fail = v
+      of "input":
+        # --input=WHEN:KEY[+KEY]:press|release,... places each key change at
+        # an exact machine time (tests/gb_timed_input.nim; README "Timed
+        # joypad input"). GB only; --press stays the between-frames form.
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        try:
+          timed_inputs.add(parse_timed_inputs(v))
+        except ValueError:
+          echo "Bad --input: ", getCurrentExceptionMsg(), " (", TimedInputSyntax, ")"
+          quit(1)
       of "dump-tiles":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -2006,6 +2019,9 @@ proc main() =
   test_out.ed_breakpoint = ed_breakpoint
   test_out.bb_breakpoint = bb_breakpoint
 
+  if is_gba and timed_inputs.len > 0:
+    echo "--input is Game Boy only"
+    quit(1)
   if is_gba:
     let is_hle = bios_path == "hle" or bios_path == ""
     let actual_bios = if is_hle: "" else: bios_path
@@ -2108,6 +2124,7 @@ proc main() =
       # byte would be read as this run's verdict.
       for i in 0 ..< emu.cartridge.ram.len: emu.cartridge.ram[i] = 0
       emu.cartridge.sav_path = ""
+    if timed_inputs.len > 0: arm_timed_inputs(emu, timed_inputs)
     for frame in 0 ..< timeout_frames:
       if test_out.finished: break
       for (f, inp, down) in presses:
@@ -2140,6 +2157,9 @@ proc main() =
             text.add(char(b))
           test_out.sram_text = text
           test_out.finished = true
+    if timed_inputs.len > 0 and timed_inputs_left() > 0:
+      stderr.writeLine("INPUT: " & $timed_inputs_left() & " of " &
+                       $timed_inputs.len & " --input event(s) never applied")
     # --screen-check: the panel settles and shows more than one shade. No
     # glyph comparison: which of blargg's console cells land depends on
     # sub-scanline phase (tests/README.md, "blargg's on-screen text is NOT

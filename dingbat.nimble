@@ -121,6 +121,10 @@ task test_gbapurebase, "Run the GB APU deadline checks across the per-frame sche
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_gbapurebase_test tests/gbapu_rebase_test.nim"
 
+task test_gbtimedinput, "Run the GB harness's timed joypad input checks (--input lands on its M-cycle)":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_gbtimedinput_test tests/gb_timed_input_test.nim"
+
 task test_psgagb, "Run the PSG's AGB-only checks (the SP's answers) on both cores":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_psgagb_test tests/psg_agb_test.nim"
