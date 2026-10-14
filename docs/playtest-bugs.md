@@ -6184,3 +6184,290 @@ sooner, by its own timing (§65).
 
 **Status: no core change.** `@known * checkpoint title:` is added to the
 script.
+
+## §74. The checkpoints where all three emulators differ, 2026-10-14
+
+**The set.** In the baseline `e9739f858dc3-src-baecd9352478` (164 games),
+72 `[new]` checkpoints in 53 games have all three pairs outside
+IDENTICAL/MINOR: dingbat-bios against mGBA, dingbat-bios against the second
+reference, and mGBA against the second reference. Nobody judges them: the
+references do not agree, so no verdict counts against dingbat.
+
+**Method.** For each checkpoint:
+
+* the three centre frames compared in 15-bit colour: pixels, pixels more
+  than one 5-bit step apart, the box;
+* the three 61-frame windows matched by hash at every offset;
+* the script's notes and the ledger;
+* BLDCNT, BLDALPHA, BLDY, the window registers and DISPCNT peeked at the
+  checkpoint frame in all three (mGBA's `peek` also returns the write-only
+  registers).
+
+A scratch replay of the frozen `[new]` timeline did the peeks. It reproduced
+the baseline's hash at all 69 checkpoint frames checked.
+
+| bucket | checkpoints |
+|---|---|
+| render (same state, the picture differs) | 22 |
+| other deterministic (same state, a CPU-timing race in the visible frame) | 2 |
+| downstream (an earlier, classified divergence) | 15 |
+| RNG/phase (timing-seeded randomness or an animation phase) | 25 |
+| harness (window 0 on an animated screen, mid-fade, a reference that never boots) | 8 |
+
+**The render rows.** Every render row but one is colour-effect rounding,
+with the effect's registers equal in all three emulators. These rows split
+three ways:
+
+* 14 alpha blends: every differing pixel is within one 5-bit step, dingbat
+  the lower. This is §72's truncation, which the SP photographs confirm.
+* 5 darkens: §40's rule, also photographed.
+* 2 brightens: the brighten section below.
+
+The other render row is Klonoa 2's world map, where mGBA alone draws seven
+pixels in a window column, and the second reference matches dingbat bit for
+bit (the Klonoa 2 section below).
+
+Most of the rounding rows read SLIP 0, not MINOR. `classify` tests "the
+windows share a frame" before its one-step rule. An unblended frame at the
+window's edge is shared, so a rounding difference at the centre is reported
+as a slip. None of them hides a dingbat bug.
+
+| game | checkpoint | bucket | reason | § |
+|---|---|---|---|---|
+| Advance Guardian Heroes | stage1 | RNG/phase | the first fight runs differently in all three (script note) | |
+| Advance Wars | 02_mark | downstream | first-boot flash writes, menu scroll phase | §35 |
+| Asterix & Obelix XXL | main_menu | harness | the second reference hangs at boot (blank); dingbat~mGBA SLIP +2 | |
+| Asterix & Obelix XXL | level1 | harness | the same; dingbat~mGBA SLIP -14 (the stage fade, script note) | |
+| Rockman EXE 4.5 | saved | downstream | the install bar's dice | §39, §70 |
+| Boktai | solar_setting | harness | the first screen's fade-in at -2/-1/+1, every pixel within a step | |
+| Breath of Fire | title | render | darken EVY 1 (text compare) | §40 |
+| Breath of Fire | downstairs | render | darken EVY 1 (text compare) | §40 |
+| Breath of Fire II | title | render | darken EVY 1 (text compare) | §40 |
+| Castlevania: Aria of Sorrow | title | downstream | a frame or two apart after the boot loads; within a step | §72 |
+| Castlevania: Aria of Sorrow | intro | render | darken EVY 3 | §40 |
+| Castlevania: HoD | story | render | alpha 9/7 on the clouds (text compare) | §72 |
+| Contra Advance | level_intro | render | darken EVY 15 | §40 |
+| Crash Nitro Kart | name_entry | RNG/phase | animated keyboard, text compare; windows match at -1/-3/-2 | |
+| Deadly Skies | save_slots | render | alpha, dingbat~second reference within a step; mGBA a fade step behind (EVA 12 against 13) | §72 |
+| Derby Stallion Advance | title | RNG/phase | animated title at -6/-2/+4; the second reference rolls other numbers (script) | |
+| Doom | e1m1_east_room | RNG/phase | the player drifts with the game's tic rate (script) | |
+| DQ Monsters Caravan Heart | kiefer_room | RNG/phase | RAM parts from the title; the second reference 29 frames ahead (script) | |
+| Final Fantasy V | title | render | alpha on the semi-transparent PRESS ANY BUTTON | §72 |
+| Final Fight One | intro_story | downstream | the load a frame late | §29 |
+| Fire Emblem: Sacred Stones | slots_empty | render | alpha 6/16 over an animated background; dingbat~second reference within a step but 84 px; mGBA's background on another frame | §72 |
+| Fire Emblem: Sacred Stones | intro | harness | the text fading in at -2/+1/+3 | |
+| Fire Emblem: Sacred Stones | prologue | render | alpha 3/16 (text compare) | §72 |
+| Gradius Galaxies | stage1 | render | alpha 15/16 | §72 |
+| Gunstar Super Heroes | hall | render | dingbat~mGBA alpha only; the second reference's own lines and pillar (script note) | §72 |
+| Gunstar Super Heroes | bridge | render | the same | §72 |
+| Klonoa - Empire of Dreams | vision_map | downstream | the EEPROM's programming time | §40 |
+| Klonoa - Empire of Dreams | holding_moo | downstream | the same | §40 |
+| Klonoa 2 | world_map | render | mGBA alone on 7 px of a window column; the second reference = dingbat | Klonoa 2 below |
+| Klonoa 2 | vision_map | other deterministic | 1 px of cloud edge, a race in the visible frame, mGBA a line early | Klonoa 2 below, §58 |
+| Klonoa 2 | back_to_map | RNG/phase | dingbat~mGBA one frame (59 of 60 at -1); the second reference elsewhere | §58 |
+| Koro Koro Puzzle | warning | RNG/phase | the scrolling background at three positions, the boot's counts | §73 |
+| Lufia: Ruins of Lore | title | render | alpha 9/6, 3 px | §72 |
+| Mario & Luigi | 16_f48916 | downstream | the main-loop count | §34, §71 |
+| Mario Golf: Advance Tour | title | render | alpha 9/7 on PRESS START | §72 |
+| Mario Party Advance | hobby, dream, secret | RNG/phase | ~100 px of the star's sparkles (text compare) | |
+| Mario Pinball Land | title | render | alpha 9/7 | §72 |
+| Mario vs. Donkey Kong | select_data | render | dingbat~mGBA alpha; the second reference at EVB 7 against 9 (its own phase) | §72, §64 |
+| Mega Man & Bass | title | RNG/phase | the menu slide at +5/-8/-13 (script) | |
+| Mega Man Zero 4 | title | render | brighten EVY 5 | brighten below |
+| Medabots AX | intro | other deterministic | a palette write in the visible frame lands on three lines | Medabots below |
+| Pokemon Mystery Dungeon | tiny_woods, dungeon_menu, quicksave_prompt, saved | RNG | the quiz and the dungeon are timing-seeded (script) | |
+| Phantasy Star Collection | saved | downstream | the field parity | §62 |
+| Rayman 10th Anniversary | game_select | render | brighten EVY 5 on OBJ | brighten below |
+| Rhythm Tengoku | title | RNG/phase | the logo's bounce phase | |
+| Rhythm Tengoku | game_select | RNG/phase | the colour cycle's phase (script) | |
+| Shining Force | recorded | RNG/phase | the wandering NPCs (script) | |
+| Sonic Advance 2 | presented | RNG/phase | the ripple's phase; the second reference on another screen | §65 |
+| Sonic Advance 3 | hub | RNG/phase | Sonic and Tails elsewhere (script) | |
+| Sonic Battle | title | RNG/phase | the animated background's phase (script) | |
+| Sonic Pinball Party | language | harness | window 0 on a scrolling checkerboard | |
+| Sonic Pinball Party | deutsch | harness | the same | |
+| Street Fighter Alpha 3 | title | RNG | the attract-mode fight (script) | |
+| Super Mario Advance 3 | column_top | downstream | the cart's EEPROM decides 1-1 | §36 |
+| Super Mario Advance 3 | below_white_block | downstream | the same | §36 |
+| Spyro 2 | intro | harness | mid-fade; the fade starts on window frames 19, 23 and 14 | |
+| Starsky & Hutch | chase | downstream | the race loop's pricing | §69 |
+| Super Ghouls 'N Ghosts | graveyard | RNG/phase | the zombies and Arthur's hit (script) | |
+| Super Puzzle Fighter II | menu_after_save | RNG/phase | the animated menu ±1-2 frames after the save | |
+| Super Puzzle Fighter II | stage1_vs | RNG | the random opponent: Chun-Li, Ryu, Felicia (script) | |
+| Super Puzzle Fighter II | puzzle_play | downstream | the opponent and gems of stage1_vs | |
+| Swordcraft Story 2 | workshop | downstream | the first battle's random numbers | §57 |
+| Zelda: The Minish Cap | saved | harness | window 0; Link's idle and the background animate | |
+| The Sims - Bustin' Out | language | downstream | the boot's three phases | §29, §65 |
+| Tony Hawk's Pro Skater 4 | back_to_menu | render | alpha 15/1 (text compare) | §72 |
+| Yu-Gi-Oh! Eternal Duelist Soul | title | downstream | `@known` | §33 |
+| Yu-Gi-Oh! Sacred Cards | title | render | dingbat~mGBA alpha; the second reference a fade step on (EVA 2 against 1) | §72 |
+
+**Status: no core change.** No row hides a dingbat bug. The four rows that
+looked most likely to are chased in the next three sections.
+
+## §75. Mega Man Zero 4 and Rayman 10th Anniversary: the brighten is truncated in every channel, as the SP photographs say, 2026-10-14
+
+**Symptom.** Mega Man Zero 4 `title` (f690) and Rayman 10th Anniversary
+`game_select` (f704) are SLIP 0 or -1 between every pair. Every differing
+pixel is one 5-bit step. All three emulators have the same registers:
+
+* Mega Man Zero 4: brighten (BLDCNT 0x3F82, BG1), BLDY 5, on PRESS START.
+* Rayman: brighten (BLDCNT 0x0090, OBJ), BLDY 5.
+
+These are the only brighten rows of the set.
+
+**The top colours.** mGBA ran from its f689 (f703) state for 30,000 trace
+steps, past its V-blank handler. Then `poke8 0x04000050` cleared the effect
+bits, and `run 1` drew the checkpoint frame with the effect off. BLDCNT read
+back unchanged. With the true top value t of every pixel the effect changes,
+each emulator's channel value was compared with dingbat's
+`t + ((31 - t) * 5 >> 4)`:
+
+| | pixels | dingbat | mGBA +1 (R / G / B) | second reference +1 (R / G / B) |
+|---|---|---|---|---|
+| MMZ4, exact fraction < 0.8125 | 1,255 | truncation on every value | 305 / 386 / 813 | 285 / 20 / 793 |
+| MMZ4, fraction >= 0.8125 | | truncation | R 25, G 25 (all) | R 25, G 25 (all) |
+| Rayman, fraction < 0.8125 | 2,818 | truncation on every value | 403 / 1,295 / 378 | 375 / 572 / 1,809 |
+| Rayman, fraction >= 0.8125 | | truncation | R 405, G 386, B 184 (all) | the same |
+
+A reference is never more than one step from truncation. It is truncation or
+one step higher, depending on the pixel.
+
+**Who is right: dingbat, except for green at high fractions, which is open.**
+The SP's `blendprobe` photographs (`tests/roms/expected/blendprobe-agb-sp-1.txt`)
+show truncation in R, G and B together at fractions 0.5625 to 0.75. Examples:
+
+* EVY 3 T11: exact 14.75, the console shows 14.
+* EVY 7 T02: 14.6875, the console shows 14.
+* EVY 11 T01: 21.625, the console shows 21.
+
+Every value here where a reference adds a step below 0.8125 has a fraction
+of 0.25 to 0.75. Those rows cover that range, and below 0.5 rounding would
+not add a step either. So the references' +1 there is wrong in all three
+channels.
+
+At 0.8125 and above, R and B truncate on the SP, so the references are wrong
+there too. Green is not settled: on those photo rows it nulls a step higher
+or at no 5-bit value ("Brighten green anomaly", docs/hwprobe-questions.md).
+That leaves 25 and 386 green values here, in a direction the references
+happen to take. If the console's green is the step higher, both checkpoints
+still differ from both references in R, B and low-fraction green.
+
+**Status: (b), no core change.** For the green rows the classification is
+(c): a capture of the video signal, or the single-channel photo probe that
+docs/hwprobe-questions.md already asks for. The CPU cannot read a blend
+result back, so an r0table probe cannot answer it.
+
+## §76. Medabots AX: a palette write during the visible frame lands on three lines, 2026-10-14
+
+**Symptom.** `intro` (f958, the island map) is SLIP 0 between every pair.
+The only pixels that differ are a green strip, rows 39-45, x 0-15 and
+224-239. dingbat has (7,26,7) and (4,27,7) there; mGBA has (7,25,7) and
+(4,26,7) on every row. The second reference differs from dingbat only on row
+45, x 224-239.
+
+**Same state.** At f957 all three pictures are equal. Palette RAM and OAM
+are byte-identical in dingbat and mGBA at f957 and f958. The two colours are
+palette entries 0x050001F8 and 0x050001FA. The game rewrites them while the
+screen is drawn (`watchw` in dingbat catches the store at line 45), so each
+line of the strip shows whichever value it read.
+The emulators differ only in the line each one writes them on:
+
+| | where the new colour starts |
+|---|---|
+| mGBA | before line 39 |
+| dingbat built with `-d:CONTENTION=false` | line 42 |
+| the second reference | line 45, about dot 224 |
+| dingbat as built (`watchw`) | line 46: the store lands at line 45, ~cycle 1,200, in the H-blank |
+
+**Where the cycles go.** Traces from the f957 frame end (VCOUNT 160) to the
+palette loop's first instruction (0x08025F70), dingbat-bios-nowl against
+mGBA:
+
+| | cycles | steps | line |
+|---|---|---|---|
+| dingbat | 138,007 | 43,739 | 44 |
+| mGBA | 129,417 | 43,483 | 37 |
+
+Of the +8,590:
+
+* **+4.3k is Nintendo's CpuSet** (the halfword loop at 0x0B8x). It copies
+  into BG VRAM through lines 0-39 in mode 0 with four BGs. Its store costs 5
+  cycles on 4,223 of its passes in dingbat and 2 in mGBA. Outside the drawn
+  lines a pass costs the same in both.
+* **+1.6k is ROM code at 0x080564xx.** Four of its instructions
+  (0x0805645C-0x08056468) cost 5 cycles against 2, the same pattern.
+* The rest is spread over gamepak code, §29's prefetch pricing.
+
+The renderer's contention on CPU VRAM accesses is console-measured
+(`contmap.s` cells in r0-agb.json; `dmavram.s`, §62, §69). Neither reference
+models it.
+
+**Status: (b), no core change.** The contention-off build puts the write
+three lines after mGBA's. The remaining three lines are §29's class, where
+`slotexec.s` on the SP sides with dingbat. The second reference lands within
+about 300 cycles of dingbat's write, so on this frame its timing is
+dingbat's.
+
+## §77. Klonoa 2: the world map's window column is mGBA's alone, the Vision map's cloud is a one-line race, 2026-10-14
+
+**`world_map` (f2240): render, mGBA alone.** dingbat and mGBA hash equal on
+59 of the window's 61 frames. The two that differ are f2239 (2 px) and f2240
+(7 px). Every differing pixel is at x 106-107, lines 103-107. The second
+reference runs this stretch three frames ahead. Its f2236 and f2237 hash
+exactly as dingbat's f2239 and f2240 (87F2F715172CA1D1, 2959FA049447AD5B).
+At the same game state it draws dingbat's picture bit for bit.
+
+* *Same state, no race.* IWRAM and EWRAM are identical at f2238-f2240,
+  except the stack and two bytes (0x03004244 and 0x03005210, 00 against
+  40). Palette RAM and OAM are identical. IE is 0x0001, so only the V-blank
+  interrupt is on. The trace runs no instruction between VCOUNT 0 and 159:
+  the game writes everything during the V-blank.
+* *The registers (mGBA's peek).* Mode 0 with BG0-3, OBJ, WIN0 and WIN1
+  (DISPCNT 0x7F40).
+  * WIN1H opens one column at a time: X1 108, 107, 106, 104 at f2238-f2241,
+    X2 108. WIN1V covers lines 80-160.
+  * WIN0 covers x 0-108, lines 108-160.
+  * WININ 0x3F3F, WINOUT 0x003D: BG1 shows only inside the windows.
+* *The pixels.* Rendered one layer at a time (`layers`), dingbat's
+  differing pixels are BG0:
+  * BG1 and OBJ draw nothing there.
+  * BG2 covers the column above line 103.
+  * WIN0 starts at line 108.
+
+  Inside WIN1's one- or two-pixel column, mGBA draws BG0 colours that
+  dingbat's BG0 has 2-4 px further right. For example, (16,31,17) is at
+  (106,104) in mGBA and from x=108 in dingbat. Outside the column the three
+  agree.
+
+Two independent renderers agree bit for bit at equal state. This is not a
+dingbat question, and no console rule is needed (a photograph would settle
+it if it were ever wanted).
+
+**`vision_map` (f3590): other deterministic, a race in the visible frame.**
+dingbat and mGBA differ on three of the 61 frames, at a cloud's top edge, x
+74-88:
+
+* f3565: 20 px, lines 38-39.
+* f3577: 14 px, line 40.
+* f3590: 1 px at (87,37).
+
+At the f3564 and f3565 frame ends, RAM, palette RAM and OAM equal mGBA's,
+apart from the same two bytes and the stack. Here the CPU runs through the visible frame: IE is
+0x0003, with H-blank interrupts. A costly stretch at 0x0802F4xx runs while
+lines 37-45 are drawn in dingbat and lines 36-44 in mGBA.
+
+From the f3564 frame end to its first instruction, dingbat takes 130,770
+cycles (line 38) and mGBA 129,079 (line 36). Of the +1,691:
+
+* +802 is gamepak code at 0x080011xx;
+* +240 is code running from EWRAM at 0x020000xx.
+
+That is §29's and §63's class, where the SP sides with dingbat
+(`slotexec.s`). `-d:CONTENTION=false` leaves all three frames' hashes
+unchanged. The second reference is no witness: at this checkpoint it shares
+no frame with either within ±30 (its own timing, §58).
+
+**Status: no core change** (`world_map`: mGBA alone; `vision_map`: (b),
+§29's class). Both checkpoints are SLIP 0 between dingbat and mGBA, so no
+`@known` is needed.
