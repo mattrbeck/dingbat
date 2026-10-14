@@ -681,6 +681,48 @@ takes all eight and loses mealybug `m3_bgp_change{,_sprites}` [dmg] and AGE
 `m3-bg-bgp-dmgC`; SameBoy on a DMG-B draws dingbat's frame to the pixel).
 Hardware experiment (d) below.
 
+**Re-tested 2026-10-14: no selector exists in the data.** Every write in
+the four suites is opcode `E2` on the same dot grid (dot = 1 mod 4). In all
+of gambatte's rows the falling write (FF -> 00) is the first write of the
+line, at dots 93/97/101, and its transition pixel is at x <= 9. The rising
+writes there are OR = new, so they show nothing.
+* Position/phase (T1) is refuted by identical configurations. AGE line 8
+  and gambatte `_4` lines >= 1 are both dot 93, SCX 0, x = 1, colour 0
+  3 -> 0. AGE line 16 and `_5` are both dot 97, SCX 0, x = 5. AGE's
+  reference has `old or new` at both and gambatte's has the new value.
+* Bitwise rules (T2) are refuted too. An ordered per-bit latch cannot give
+  mealybug's 3 for both 01 -> 10 and 10 -> 01. "Only writes with a rising
+  bit blend" is refused by mealybug's no-rise restores (01 -> 00 at dot
+  105) and by AGE's FF -> E4.
+* The one-pixel rows (T3) are the same pixel on line 0, whose pipeline runs
+  4 dots ahead: `_3` (x = 1), `scx1_4` (x = 4), `scx3/_4` (x = 2). On
+  lines >= 1 the pixel is off screen, or at x = 0 under
+  MIXER_PALETTE_OR_HEAD.
+* Provenance (T4): no DMG reference here is a capture. gambatte's
+  `_dmg08.png` were committed in svn r246 (git 9dc2f7ec, 2011-07-23), a
+  commit whose own log says gambatte then passed all 2755 tests. They are
+  framebuffer dumps compared exactly by `testrunner.cpp`. mealybug's
+  `expected/` are "screenshots from my Game Boy emulator", with blurry
+  photos of a DMG-blob alongside. AGE's are its own renders, checked
+  against a photo of a DMG-CPU-08 with a CPU C. daid's `_0`/`_1`/`_2` are
+  bgb, SameBoy and gambatte behaviour (shootout e999f89d; gbdev
+  GBEmulatorShootout issue #9). In that issue daid writes that his own DMG
+  gives old or OR "depending on the position in the scanline", and the
+  new-value case is reported from a GB Player in CGB-DMG mode.
+* The photos settle the pixel-level question. In mealybug's DMG-blob photo
+  (about 16 px per pixel), every mid-line transition at dots 105-237 reads
+  as OR. At dot 93, x = 1 (gambatte `_4`'s configuration), 11 -> 00 reads
+  as 3 on all 32 lines. 01 -> 10 at the same dot reads as 2 (new) on lines
+  16-30 and 3 (OR) on lines 80-95: one unit, one frame, different
+  outcomes. The AGE photo (about 7 px per pixel) reads OR mid-line and is
+  ambiguous for x <= 9.
+
+The pixel behaves like a timing race at the falling bits, not a rule.
+The one deterministic selector that fits all references — blend only when
+the old value was written within N dots, 60 < N < 316 — is contradicted by
+mealybug's own photo, which shows lines 16-30, 16 dots after the previous
+write. It was not implemented.
+
 ### C8. AGE `m3-bg-bgp-dmgC`, 2 pixels
 
 **Closed 2026-09-21.** Both pixels were x = 0 on a line whose BGP pulse's
@@ -1002,7 +1044,13 @@ hardware question with its priority is `docs/hwprobe-questions.md`.
   "g1, GBA SP") read the frame on a GBA SP.
 * **(d)** The DMG BGP transition pixel on as many DMGs as can be borrowed,
   with mainboard/CPU markings per unit — C7. The sample size is the
-  experiment; no single unit can answer it.
+  experiment; no single unit can answer it. Per unit, run gambatte
+  `dmgpalette_during_m3_4` and mealybug `m3_bgp_change` on the same unit.
+  Photograph x = 1 on every line at 10 or more px per pixel, over several
+  short exposures, to catch frame-to-frame flicker. The mealybug photo
+  already shows one unit disagreeing with itself between line bands. The
+  decisive instrument is a logic-analyser capture of LD0/LD1 against CP on
+  the LCD ribbon around the write: it shows the race directly.
 * **(e)** On a CPU CGB C: the gambatte `speedchange2_ch1_duty0_pos6_to_pos7_
   timing_{1,2}` pair and SameSuite `channel_1_freq_change_timing-cgb0BC` on
   the same console. If both pass, the square trigger's 1 MHz edge depends on
