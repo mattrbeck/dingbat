@@ -5620,3 +5620,215 @@ says the checkpoint's frame can never be diagnostic.
 
 **Status: no change.** The script passes (a SLIP is a pass). Its later
 `[new]` checkpoints (`saved`, the file select) are still screens.
+
+## §68. Car Battler Joe: the shadows' flicker phase, moved by mGBA's cheap map loads, 2026-10-14
+
+**Symptom.** At `field_menu` (f20454) every dingbat configuration shows
+the same picture as both references: SLIP -7 against mGBA, -5 against
+the second reference. At `takah` (f22100) it is SLIP -1 against mGBA
+and DIFFERENT against the second reference, with the references MINOR
+to each other. The five dingbat configurations are identical at both,
+so neither BIOS nor idle-loop skipping is involved.
+
+**What differs on screen.** The game draws the sprites' shadows on
+alternate frames (the script's note says so). At `field_menu` mGBA and
+the second reference are pixel-identical. dingbat differs from both only
+in the shadows under Joe and Pal (0.6% of pixels, box 112,62 28x26), so
+the SLIP offsets are just the first frame in the window with the other
+flicker phase. At `takah` dingbat again lacks the shadows that both
+references draw (box 90,45 102x43 against mGBA). The second reference
+also has Takah on another frame of his idle animation, which is its
+MINOR against mGBA (box 94,16 40x26). Its DIFFERENT against dingbat is
+that pose plus the shadows.
+
+**Two clocks part, at loads.** The game keeps a frame counter at
+0x030019D4 that stops during loads; it was peeked every frame in all
+three emulators.
+
+* *First boot.* On a blank cart the game writes 148 blocks of its
+  64 Kbit EEPROM. Each block is polled to ready (`ldrh 0x0D000000`,
+  bit 0; the library loop at 0x0806004C, §36's shape). A block takes
+  108,068-108,075 cycles in dingbat (15,995,014 in all) and
+  114,735-114,741 in mGBA (16,981,662 in all), 3.5 frames more.
+  So mGBA's counter starts at f72 where dingbat's starts at f69, and
+  mGBA's intro transitions come 3 frames late. The second reference's
+  counter starts at f64, yet its intro pictures fall on dingbat's frames
+  (f134-f2317, outside the fades). **None of this reaches the
+  checkpoints.** Built with `-d:EEPROM_SETTLE_CYCLES=115005`,
+  dingbat-bios moves its frames f78-f658 onto mGBA's, and every frame
+  from f659 on hashes as in the shipped build: the START press at f660
+  waits the difference out.
+* *Scene loads.* After the boot, mGBA gains one count on dingbat at each
+  of eight loads by `takah`: f415, f4477, f4877, f8056, f14903, f17485,
+  f19973 and f21844. That leaves dingbat -4 at `field_menu` and -5 at
+  `takah`. The second reference's counter stays exactly 5 ahead of
+  dingbat's from f77 to f23086, so it takes every one of these loads in
+  dingbat's number of frames. (f23086 is the practice load, which the
+  script notes it runs late.)
+
+**The loop.** Traced with `trace` over f4460-f4480 and f19958-f19975,
+dingbat-bios-nowl against mGBA. Every scene load builds a 128x64 map in
+a Thumb ROM loop at 0x08013190-0x08013250: 8192 iterations under WAITCNT
+0x4314 (WS0 N 4, S 2, prefetcher on), with word and byte loads and
+stores to EWRAM tables at 0x0202xxxx. Both emulators run the same
+402,884 instructions: **1,277,643 cycles in dingbat, 1,101,525 in mGBA**
+(156.0 against 134.5 an iteration). The 176k cycles (0.63 frame) carry
+the load's end past a V-blank on the loads listed. Per instruction it
+is section 29's pattern:
+
+* `ldr r0, [r6, #16]` (an EWRAM word) costs 9 cycles in dingbat and 2
+  in mGBA;
+* each EWRAM store costs 4 against 2;
+* the ALU op after a load costs 1 (prefetched) against 2.
+
+The load and the op after it come to 10 against 4, though the EWRAM
+word alone is 6 bus cycles and the load's I cycle one more. `slotexec.s`
+on the AGB SP (section 22, used in §29, §33 and §39) says what EWRAM data
+from gamepak code costs with the prefetcher on: dingbat's figure, with
+mGBA 4-5 short. The second reference agrees with dingbat on every load
+here.
+
+**The flicker byte.** 0x03002A6C toggles every frame in play.
+
+* dingbat and mGBA hold it in phase until f4477, the first scene load
+  mGBA finishes a frame early. Over the next loads the two change phase
+  against each other, and from f17485 on they stay opposite, through
+  `field_menu` and `takah`.
+* The second reference is in the opposite phase from the first scene
+  that draws shadows (f2346, after the f2318-f2345 fade) and never
+  changes against dingbat afterwards. Where that phase comes from is
+  not chased: its driver has no `trace`, and its peeks fall off
+  dingbat's frame phase (§58).
+
+So the two references show the same shadows at both checkpoints by
+different routes, and dingbat shows the other phase.
+
+**Status: no core change.**
+
+* Against mGBA, the slip is mGBA's under-charge of EWRAM data from
+  gamepak code. The console's figure is dingbat's.
+* Against the second reference, it is a frame-parity phase set before
+  f2346, plus that emulator's own idle pose for Takah.
+* The first-boot EEPROM writes are unmeasured cart time (below), and
+  they do not reach either checkpoint.
+
+Both verdicts are SLIP or not diagnostic, so no `@known` is added.
+
+**Probe, for the record.** The cart's real block time is measured by
+`tests/roms/payloads/eesettle.s` (r0table row `eesettle`, 64 Kbit
+addressing), with Car Battler Joe in the slot and the console booted
+holding SELECT+START. `python3 tools/hwlink/r0table.py eesettle 3 2 0 1
+--emulators-only` predicts:
+
+| cell | dingbat / dingbat-bios | mgba |
+|---|---|---|
+| 0x3 | FFFFFFFF (blank last block) | FFFFFFFF |
+| 0x2 | 00000350 | 00000351 |
+| 0x0 | 0001A74A (108362) | 00000026 |
+| 0x1 | 0001A74A | 00000026 |
+
+## §69. Starsky & Hutch: the menus are the EEPROM's programming time, the chase is the race loop's pricing, 2026-10-14
+
+**Symptom.** At `chase` (f5140, the car at full throttle) every dingbat
+configuration is SLIP -1 against mGBA and DIFFERENT against the second
+reference (5.8% of pixels, box 35,0 197x160). The references are MINOR
+to each other. All five configurations are identical. Section 46's
+`movs pc, lr` fix was a different symptom of this game.
+
+**Where play parts.** RAM was dumped every 50 frames, then every frame,
+in dingbat-bios and mGBA. EWRAM and IWRAM agree, past the stack, up to
+f2494, the frame after the title's START. From f2525 one frame in four
+differs: the menus update at 15 Hz, and dingbat's updates land a frame
+before mGBA's. The game's V-blank counter (0x030057B0) stops while it
+writes the EEPROM:
+
+| write | dingbat | mGBA | second reference |
+|---|---|---|---|
+| f2494, title to main menu (55 blocks) | 21 frames | 23 | 21 |
+| f3602, the save slot | 21 | 22 | 21 |
+| f3657, into the episode | 21 | 22 | 21 |
+
+The cart has a 4 Kbit EEPROM, polled to ready at 0x080B7700 (`ldrh
+0x0D000000`, bit 0, with a timer-flag timeout; 32 cycles a poll in both).
+The first write's 55 blocks take **108,095 cycles a block in dingbat
+and 114,733 in mGBA**. That is 6.6k a block, or 1.3 frames a write.
+After the three writes, dingbat's main-loop counter (0x030057B4) is 3
+counts ahead of mGBA's. Built with `-d:EEPROM_SETTLE_CYCLES=115005`,
+dingbat-bios hashes as mGBA on every frame f1-f4599, and the menu slips
+go.
+
+**The chase does not follow from that.** The race load (A at f4504)
+ends at f4534 in all three emulators. From there the race state agrees
+apart from the counters and the sound buffer's phase. The build with
+115005 shows the shipped build's chase frames exactly.
+
+The race runs a 12 fps loop. Its wait (0x08007094) halts until a V-blank
+count is reached, and an iteration's work is 4.0-4.6 frames. So an
+iteration takes 5 frames unless its work ends before the fourth V-blank.
+Over f4535-f5170 every dingbat iteration takes 5 frames. Two of mGBA's
+take 4 (f4604-f4607 and f4623-f4626). From then on mGBA flips each
+picture 2 frames before dingbat, and the hash window finds the centre
+picture there (SLIP -1).
+
+Iteration f4604, measured from the wait's exit to its next entry:
+
+| | dingbat | mGBA |
+|---|---|---|
+| instructions | 391,161 | 390,168 |
+| cycles | **1,138,886** | **1,120,677** |
+| wait entered | 17,742 cycles after line 160 | 1,919 cycles before line 160 |
+
+The 18.2k-cycle difference:
+
+| | cycles | evidence |
+|---|---|---|
+| renderer contention on the frame copy in IWRAM (`ldm` from an EWRAM buffer, `stmia r2!, {r8-r11}` into BG VRAM; mode 1, BG2 affine on) | ~9.7k | the store costs 9 in both during V-blank; on lines 0-159 it costs 10-33 in dingbat against 9 in mGBA. Console-measured (`contmap.s`: affine BG2 holds dots 33+4n and 34+4n); neither reference models it |
+| other IWRAM code | ~2.1k | more H-blank interrupts fall in the longer iteration |
+| gamepak code | ~5.9k | §29's prefetcher pricing, spread thin |
+| BIOS | ~0.5k | |
+
+With `-d:CONTENTION=false`, 54 frames of the run change, and dingbat
+still gets neither of mGBA's 4-frame iterations.
+
+Separately, every iteration's V-blank wait ends 1,465 cycles later in
+dingbat. The line-159 H-blank handler returns from Halt just as line
+160 begins. dingbat runs the wait loop's `ldrh` of the interrupt flag
+before it takes the V-blank interrupt, so the loop halts once more,
+until line 161's H-blank. mGBA takes the interrupt one instruction
+sooner. No frame here depends on it: no iteration in f4535-f4634 enters
+its wait less than 17.7k cycles after the V-blank it misses. It is not
+chased further. The halted-wake half of that timing is console law
+(`wakeirq`, section 26), and mGBA misses those cells.
+
+**Against the second reference the race is not diagnostic.** From
+f4800 no frame of the second reference equals any frame of mGBA's or
+dingbat's within ±12 frames. The references' MINOR at the centre is two
+different race frames that happen to share 98.8% of their pixels.
+
+**Status: no core change.**
+
+* The menus follow the cart's block programming time, which is
+  unmeasured. dingbat keeps GBATEK's ca. 108368 (§36, §40).
+* The chase follows the race loop's cost, and dingbat's extra cycles
+  there are console-measured contention and prefetcher rules.
+
+Both are SLIP against mGBA, so no `@known` is added.
+
+**Probe, for the record.** `tests/roms/payloads/eesettle4k.s` (r0table
+row `eesettle4k`, 6-bit addressing) times one block on a 4 Kbit cart.
+Starsky & Hutch is one, as is §40's Klonoa. Put it in the slot and boot
+holding SELECT+START. `python3 tools/hwlink/r0table.py eesettle4k 0x103
+0x102 0x100 0x101 --emulators-only` predicts:
+
+| cell | dingbat / dingbat-bios | mgba |
+|---|---|---|
+| 0x103 | FFFFFFFF (blank) or the block | FFFFFFFF |
+| 0x102 | 00000300 | 00000301 |
+| 0x100 | 0001A74A (108362) | 0001C130 (114992) |
+| 0x101 | 0001A74A | 0001C130 |
+
+What the console answers decides it:
+
+* near 114.7k: mGBA is right on this game's menus, and dingbat moves;
+* near 108k: dingbat stays as it is;
+* a spread between runs: these checkpoints can never be diagnostic.
