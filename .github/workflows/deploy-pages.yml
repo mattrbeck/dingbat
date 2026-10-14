@@ -3,8 +3,9 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
-    # Nothing under these ships (the site is web/ plus the wasm build), and a
-    # deploy re-stamps the service worker: every open copy offers an update.
+    # Nothing under these ships (the site is web/ plus the wasm build). Other
+    # pushes deploy, but only a change to what the app runs moves the version
+    # (see "Pick the version"): a new one makes every open copy offer an update.
     paths-ignore: ["docs/**", "tools/**", "notes/**", "README.md", "README/**", ".claude/**"]
   workflow_dispatch:
 
@@ -69,18 +70,9 @@ jobs:
         # tools/serve_nds_dev.sh's standalone core page and its probes.
         run: rm -f web/nds.html web/nds/nds-page.js web/nds/audio-probe.mjs web/nds/shot.mjs
 
-      - name: Stamp service worker version
-        run: |
-          sed -i "s/CACHE_VERSION = \"dev\"/CACHE_VERSION = \"${GITHUB_SHA::7}\"/" web/sw.js
-          grep -q "CACHE_VERSION = \"${GITHUB_SHA::7}\"" web/sw.js || {
-            echo "::error::CACHE_VERSION stamping failed - sed pattern did not match in web/sw.js"
-            exit 1
-          }
-          echo -n "${GITHUB_SHA::7}" > web/version.txt
-
       - name: Minify web assets
-        # Runs AFTER the sw.js stamp, and sw.js is never minified: index.js's
-        # update checker regex-matches the literal `CACHE_VERSION = "..."`.
+        # sw.js is never minified: index.js's update checker regex-matches the
+        # literal `CACHE_VERSION = "..."` the stamp below writes.
         # JS gets --minify-whitespace --minify-syntax only, never
         # --minify-identifiers: these are classic <script> files sharing one
         # global scope (createGlRenderer, SDPCodec, window.* hooks, `Module`)
@@ -96,11 +88,49 @@ jobs:
           for f in styles.css embed.css; do
             npx esbuild "web/$f" --minify --outfile="web/$f" --allow-overwrite
           done
-          # The stamp must have survived (sw.js untouched by the loops above)
-          grep -q "CACHE_VERSION = \"${GITHUB_SHA::7}\"" web/sw.js || {
-            echo "::error::sw.js was altered by minification - update check would break"
+
+      - name: Find the live site
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Pick the version
+        # A new version is an update offer in every open copy, so it moves
+        # only when what the app runs does: a hash of every file under web/
+        # (sw.js still saying "dev") but the development-only ones. The build
+        # is reproducible, so a commit that leaves those bytes alone (desktop,
+        # iOS, tests, formal) hashes as the live site does and redeploys under
+        # the live version: the same sw.js and version.txt, no update. The
+        # probe busts the edge cache as sw.js's probeVersion does; on any
+        # failure (the first deploy, an outage) the commit is the version.
+        run: |
+          set -eo pipefail
+          content=$(cd web && find . -type f \
+              ! -path './bench/*' ! -path './e2e/*' ! -path './tests/*' \
+              ! -path './types/*' ! -path './signaling/*' ! -path './node_modules/*' \
+              ! -name '*.test.mjs' ! -name 'package.json' ! -name 'package-lock.json' \
+              ! -name 'serve.py' ! -name 'lattest.html' -print0 \
+            | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+          live=$(curl -fsS --max-time 30 \
+            "${{ steps.pages.outputs.base_url }}/build-id.txt?probe=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)
+          read -r live_content live_version <<< "$live" || true
+          version=${GITHUB_SHA::7}
+          if [ "$live_content" = "$content" ] && [[ "$live_version" =~ ^[0-9a-f]{7}$ ]]; then
+            version=$live_version
+            echo "::notice::The app is unchanged ($content): staying on $version"
+          else
+            echo "::notice::The app changed (${live_content:-none} -> $content): version $version"
+          fi
+          echo "$content $version" > web/build-id.txt
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Stamp service worker version
+        run: |
+          sed -i "s/CACHE_VERSION = \"dev\"/CACHE_VERSION = \"${VERSION}\"/" web/sw.js
+          grep -q "CACHE_VERSION = \"${VERSION}\"" web/sw.js || {
+            echo "::error::CACHE_VERSION stamping failed - sed pattern did not match in web/sw.js"
             exit 1
           }
+          echo -n "${VERSION}" > web/version.txt
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
