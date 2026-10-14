@@ -5121,3 +5121,36 @@ free-running clock.
 The rest of the console tables are unchanged: 1985/1993 cells for both
 dingbat and dingbat-bios. The 8 misses are hdmaobus's six race cells and
 keyirq2's two phase cells.
+
+### keyirq3 answered: the phase is not the last KEYCNT write's
+
+The console, three runs a cell, every cell answered one way. The store is
+moved n cycles:
+
+| n | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| set A (vs the quiet KEYCNT 0) | 46 | 46 | 4F | 46 | 4F | 46 | 4F | 4F | 4F | 46 | 4F | 4F | 46 | 46 | 4F | 46 |
+| set B (everything moved) | 46 | 46 | 4F | 46 | 4F | 46 | 4F | 4F | 4F | 46 | 4F | 4F | 46 | 46 | 4F | 46 |
+
+Set A and set B agree cell for cell, so the quiet KEYCNT 0 store does not
+set the phase. It is the store's cycle position counted from the payload's
+entry, and it repeats run after run. So something the monitor's call
+lands on at a fixed offset clocks the keypad condition.
+
+The early cells (0x46) do not form one run of residues under any period up
+to 16. That rules out a single divided clock with a fixed hold. Two
+candidates would explain an irregular pattern:
+
+- a slower clock (for example the PPU's dot or line clock), anchored to
+  something the payload does not control;
+- a sampler whose rate is not a whole number of CPU cycles.
+
+dingbat (a fixed 64-cycle hold) has 16 of 32 cells, the most a fixed hold
+can have, since it answers all early or all late. mgba has 0 of 32.
+
+The phase spans one 9-cycle poll. No game can see it, because a keypad
+interrupt raised 9 cycles earlier or later changes nothing a frame-based
+input routine reads. The model stays as it is. `keyirq2` and `keyirq3`
+stay out of the cycle-law gate (`OPEN_ROWS`). If the clock is ever wanted,
+the next probe would anchor the store to the H-blank flag edge (as
+`halthb.s` does) instead of to the payload's entry.
