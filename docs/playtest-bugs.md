@@ -5996,3 +5996,191 @@ dingbat-bios-nowl, mGBA and the second reference over the frozen `[new]`
 timeline, `runhash` f19650-f19800 (no frame matches between any two at any
 offset within ±20), and the mGBA runs from its f17700 and f19000 states
 with the poke.
+
+## §72. Castlevania: Aria of Sorrow: Select Data is the alpha blend's rounding, 2026-10-14
+
+**Symptom.** `select_data` (f965, the file select over the castle
+picture): every dingbat configuration is DIFFERENT against both
+references, and the references are MINOR to each other. The five
+configurations are identical. This checkpoint became diagnostic with §65's
+driver fix.
+
+**Whose state.** IWRAM and EWRAM were peeked every frame from f0 to f999 in
+dingbat-bios, mGBA and the second reference. At f965, leaving out the stack
+and the sound buffer at 0x03005840-0x03005E6F, dingbat and mGBA differ in
+seven bytes. The ones that matter:
+
+| | dingbat | mGBA | second reference |
+|---|---|---|---|
+| 0x0300519B, the screen's frame count | 0x9E | 0xA0 | 0xA1 |
+| 0x03000072, the cursor's bob | 2 frames behind mGBA | | 1 frame ahead of mGBA |
+| 0x030023F1, the title's scroll cycle, frozen since the title | 15 | 14 | 13 |
+| 0x030054F4, a 9-step cycle | in phase with mGBA | | 2 steps off |
+
+The second reference shares neither emulator's state. Its counts run a
+frame ahead of mGBA's and three ahead of dingbat's.
+
+**Where the counts part.**
+
+* *Boot.* From f11 the second reference counts early. By f16 it is three
+  frames ahead of both, drawing each picture three frames before they do.
+  This is §65's boot lead.
+* *Two loads.* The count at 0x0300519B holds while the game loads.
+
+  | load | dingbat | mGBA | second reference |
+  |---|---|---|---|
+  | f155 | 3 frames | 2 | 3 |
+  | f432 | 9 frames | 8 | 9 |
+
+  mGBA gains a frame at each load. The second reference takes both in
+  dingbat's number of frames.
+
+The f432 load, traced from f426 in dingbat-bios-nowl and mGBA:
+
+| | busy cycles | instructions | ends on line |
+|---|---|---|---|
+| dingbat | **2,330,257** | 719,363 | 227, after the V-blank |
+| mGBA | **2,231,156** | 697,580 | 147, 13 lines before it |
+
+Where the 99.1k-cycle difference falls:
+
+* About 60k is gamepak code. Under WAITCNT 0x4017 (WS0 3/1, prefetcher on)
+  the same instructions cost more in dingbat. The largest share is the
+  tile-lookup routine at 0x08001800-0x080019FF, called 2048 times: the same
+  instructions take 580,526 cycles against 557,018. It loads from the
+  cartridge (`ldrb r3, [r0]`, `ldr r0, [r0, #0xC]`, `ldrh r2, [r1]` with r0
+  and r1 at 0x080E8xxx) and from its literal pool, and stores into IWRAM.
+  Next come its caller at 0x0803F7xx (+8.2k), 0x08000Dxx (+5.9k) and
+  0x08000Axx (+5.0k). Nintendo's BIOS at 0x0Bxx adds +3.1k on the same
+  4,122 instructions.
+* About 35k is the V-blank sound mixer in IWRAM (0x030028xx-0x03002Bxx),
+  with 17.5k more instructions. It runs 9 times in dingbat's load against 8
+  in mGBA's, and mixes 19 voice passes against 12. This follows from the
+  longer load, not from the mixer's pricing: per instruction its cycles are
+  the same.
+
+**The picture is the blend.** At f965 dingbat and mGBA hold the same
+palette RAM, VRAM and video registers. dingbat's registers were read
+through a scratch driver's register dump, mGBA's through `peek`. OAM
+differs in one byte, the cursor's x. BLDCNT 0x0844 blends BG2 (the panels)
+over BG3 (the castle), and BLDALPHA 0x0A06 gives EVA 6, EVB 10.
+
+Rendering dingbat's frame one layer at a time (`layers`) finds 22,290
+blended pixels:
+
+* **mGBA:** all 22,290 equal min(31, ((w(t)·6 + w(b)·10) >> 4) >> 3),
+  where w(c) = c<<3 | c>>2 widens the 5-bit colour to 8 bits.
+* **The second reference:** 21,753 equal the rounded (t·6 + b·10 + 8) >> 4.
+  The other 537 are one green step below that.
+* **dingbat:** (t·6 + b·10) >> 4, truncated.
+
+For example, the panel's (3,3,3) over the castle's (1,1,22) is exactly
+(1.75, 1.75, 14.875). dingbat draws (1,1,14), mGBA (1,1,15) and the second
+reference (2,2,15).
+
+mGBA is a step higher than dingbat on 17,680 pixels and the second
+reference on 21,794. Of the 16,110 unblended pixels, the second reference
+matches dingbat on every one. mGBA matches on all but 52, the cursor's bob.
+
+**The decisive test.** A scratch dingbat build with mGBA's blend formula
+(not kept) puts 41 of the window's 61 frames on an mGBA frame. For 38 of
+them it is mGBA's frame from two frames earlier, the cursor's lag. The
+other frames combine the cursor's phase with the 9-step cycle, which runs
+in phase with mGBA, so no single offset matches them all. With the
+rounding form, no frame equals the second reference's, because of its
+green.
+
+**Who is right: dingbat, on the blend.** The SP's `blendprobe.gba`
+photographs (`tests/roms/expected/blendprobe-agb-sp-1.txt`) fit truncation
+on all 16 alpha cells:
+
+* rounding misses five, for example T02B28 at EVA 7, EVB 9: 17, where the
+  console shows 16;
+* mGBA's widened form also misses five, for example T00B28 at EVA 7, EVB 9:
+  16, where the console shows 15.
+
+A photograph only picks a 5-bit candidate. A capture of the digital video
+signal is still wanted (docs/hwprobe-questions.md).
+
+The loads are §29's and §66's class: mGBA's cheaper data accesses from
+gamepak code under the prefetcher. `slotexec.s` measured that class on the
+console at 4/2 and found dingbat's figure. This game runs at 3/1 (§39's
+caveat). The second reference takes the loads in dingbat's frames.
+
+**Status: no core change.** `@known * checkpoint select_data:` is added to
+the script: no reference can draw the console's panels here.
+
+## §73. Koro Koro Puzzle: the title is the alpha blend's rounding, read by the text comparison, 2026-10-14
+
+**Symptom.** `title` (f940, `compare=text`): every dingbat configuration
+is MAJOR against both references, at text similarity 0.77 and 0.74. The
+references are MINOR to each other (0.95). The faded second PUSH START row
+reads "PUBH $TART" in dingbat and "PUGH BTRRT" in both references, and the
+logo's Japanese reads as noise everywhere. §37 noted that this script
+"still passes"; the second reference's stale picture (§65) had hidden this
+checkpoint.
+
+**The picture is the blend.** At f940 dingbat and mGBA differ on 2,924
+pixels, and the second reference and dingbat on 2,932. Every one is a
+single 5-bit step, with dingbat the lower, in the logo and the faded row.
+The two emulators' registers match: BLDCNT 0x3A45 (BG0 and BG2 over BG1,
+BG3, OBJ and the backdrop) and BLDALPHA 0x0C04 (EVA 4, EVB 12).
+
+The scratch builds of the section above settle it:
+
+* **mGBA's blend:** dingbat's f940 equals mGBA's on every pixel. Its
+  frames hash as mGBA's on every frame from f831 to f959, the window
+  included, and on f790-f805.
+* **Rounding:** dingbat differs from the second reference only in green,
+  by one step on 1,928 pixels. That is the green rule of the section
+  above.
+
+**Whose state.** The title's picture is the same game state in all three.
+RAM differs in:
+
+| | dingbat | mGBA | second reference |
+|---|---|---|---|
+| tilt samples (0x030009DC on, 8 of them) | X 0x392, Y 0x3A0 | 0x3A0, 0x3A0 | 0xFFF, 0xFFF |
+| 0x03000A18, the frame count | 0x383 | 0x384 | 0x386 |
+| 0x03000A20, a random word, frozen from f792 | 0x338B1A91 | 0x452BD7B1 | 0x452BD7B1 |
+
+* *The tilt sensor.* Each driver feeds it differently. dingbat answers its
+  level reading (bus.nim `TILT_X/Y_CENTER`). The mGBA driver attaches a
+  level rotation source (§37). The second reference has no sensor and reads
+  the 0xFF of the empty SRAM window. The title samples the sensor, but
+  nothing on it follows the sensor: the frames above match with X 0x392
+  against 0x3A0, and the second reference's title, read at 0xFFF, differs
+  from the rounding build only in green.
+* *The counts are the boot.* On the blank cart, the boot runs from frame 0
+  to its first halt:
+
+  | | busy cycles | instructions | count starts |
+  |---|---|---|---|
+  | dingbat-bios-nowl | **9,265,791** | 2,962,174 | f34 |
+  | mGBA | **9,011,814** | 2,929,754 | f33 |
+  | second reference | | | f31, §65's lead |
+
+  Of the 254k-cycle difference:
+
+  * +58k is IWRAM code at 0x030016xx, with more instructions.
+  * +33.5k is gamepak code at 0x08018Bxx.
+  * +30.4k is a list walk at 0x0805BD6E-0x0805BD78: 4,830 passes of
+    `adds; cmp; beq; ldr r0, [r2, #0x38]; cmp; bne`, with r2 in EWRAM at
+    0x020356xx. A pass costs 23.6 cycles in dingbat and 17.8 in mGBA. mGBA
+    charges the EWRAM word load and the `cmp` after it 4 cycles together,
+    though the word alone is 6 bus cycles. This is `slotexec.s` row 9
+    (EWRAM `ldr` from gamepak code, prefetcher on): the console and dingbat
+    take 22, mGBA 17 (§63).
+* *The random word.* It advances with the frame count and stops on the
+  same frames in all three (f790-f792, 30 frames after the A at f760). The
+  references' counts are ahead, so they stop one step further on. The
+  second reference shares mGBA's word but not its counts. Whether a later
+  checkpoint follows the word was not chased.
+
+**Who is right: dingbat, on both.** The blend follows the SP's blendprobe
+photographs, as in the section above. The boot is the console-measured
+EWRAM pricing of §63 and §68, and the second reference takes the boot even
+sooner, by its own timing (§65).
+
+**Status: no core change.** `@known * checkpoint title:` is added to the
+script.

@@ -3,6 +3,7 @@
 @game A2CE
 @chip SRAM_F (FRAM)
 @frozen dingbat-bios,mgba,nba
+@known * checkpoint select_data: -- playtest-bugs.md "Castlevania: Aria of Sorrow: Select Data": the panels are BG2 over BG3 at EVA 6, EVB 10; dingbat truncates the blend as the SP's blendprobe photographs do, mGBA blends 8-bit-widened colours and the second reference rounds; with the same registers, palette and VRAM both references are a step higher on 17,680 and 21,794 pixels
 # New Game, name "AA", A taps through the opening while holding RIGHT into
 # Castle Corridor; right past the zombies and the wall skull, Short Sword,
 # down the stairs, through the merman pool and right into the first save

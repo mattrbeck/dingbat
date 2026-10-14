@@ -3,6 +3,7 @@
 @game KHPJ
 @chip EEPROM (4K) + tilt sensor
 @frozen dingbat-bios,mgba,nba
+@known * checkpoint title: -- playtest-bugs.md "Koro Koro Puzzle: the title": the logo and the faded PUSH START are alpha blends (EVA 4, EVB 12) that dingbat truncates as the SP's blendprobe photographs do; both references come out a step higher on ~2,900 pixels and the text comparison reads the faded row differently. Built with mGBA's blend, dingbat draws mGBA's title on every frame from f831; the tilt readings do not reach it
 
 # Japanese text: OCR reads little of it, so this script leans on fixed waits
 # (every emulator reaches each screen on the same frame here).
