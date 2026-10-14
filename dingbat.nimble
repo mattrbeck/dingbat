@@ -159,6 +159,9 @@ task test_printer, "Run the Game Boy Printer protocol unit tests":
 task test_lcdresponse, "Run the LCD panel-response model invariants":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_lcdresponse_test tests/lcdresponse_test.nim"
 
+task test_mbc3, "Run the MBC3/MBC30 banking checks (8-bit ROM bank, 64 KiB RAM, .sav, states)":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_mbc3_test tests/mbc3_test.nim"
+
 task test_cheats, "Run the cheat-engine unit + integration tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_test tests/cheats_test.nim"
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_cheat_int_test tests/cheats_integration_test.nim"

@@ -48,6 +48,7 @@ web/rom.gbc
 /dingbat_rewind_test
 /dingbat_lcdresponse_test
 /dingbat_savefooter_test
+/dingbat_mbc3_test
 /dingbat_gbartc_test
 /dingbat_ndshlebios_test
 /dingbat_nds3d_test

@@ -179,6 +179,12 @@ jobs:
         # not parse as a clock. Synthetic ROMs/saves.
         shell: bash
         run: ./dingbat_savefooter_test
+      - name: GB MBC3/MBC30 banking
+        # 8-bit ROM bank register on a 4 MiB cart, RAM banks 0-7 on a 64 KiB
+        # one, MBC3's narrower registers otherwise; the 64 KiB .sav and a save
+        # state keep the high banks. Synthetic ROMs.
+        shell: bash
+        run: ./dingbat_mbc3_test
       - name: Desktop Link Cable over loopback sockets
         # frontend/link_cable.nim + gba/netlink.nim against a scripted peer: a
         # bad frame, a paused peer, a lost peer mid-exchange, a GB core or a
