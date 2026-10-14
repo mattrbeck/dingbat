@@ -25,7 +25,9 @@
 # says), so dingbat leaves the install ~10 frames early and Mega Man's mosaic
 # fade-in ends early; with mGBA's LCG set to dingbat's the two match
 # (docs/playtest-bugs.md, "Rockman EXE 4.5: Mega Man's mosaic is the install
-# bar's dice").
+# bar's dice"). save_screen's SLIP(+3) is the same lead: the PET scene runs
+# 10 frames ahead of mGBA's from the install on, and the +3 is the menu
+# cursor's 17-frame blink (docs/playtest-bugs.md §81, Rockman EXE 4.5).
 [new]
 wait 600
 # until text RESERVED timeout=900 every=10  [reached dingbat-bios+0 mgba+0 nba+0]

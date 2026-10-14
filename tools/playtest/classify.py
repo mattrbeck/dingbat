@@ -61,8 +61,12 @@ def classify(a, b):
     # be rendering the same sequence a few frames apart without either centre
     # landing in the other's window. Rendering the same frame at all is a slip,
     # so compare the windows against each other and report the smallest shift.
+    # The sign is the centre match's: negative when a shows a picture b
+    # showed earlier (a behind). It was inverted here until 2026-10-14, so
+    # a one-frame lag read +1 on this path and -1 on the one above
+    # (docs/playtest-bugs.md §80, Gradius Galaxies).
     elsewhere = {h: k for k, h in enumerate(b['hashes'])}
-    offsets = [(k - a['center']) - (elsewhere[h] - b['center'])
+    offsets = [(elsewhere[h] - b['center']) - (k - a['center'])
                for k, h in enumerate(a['hashes']) if h in elsewhere]
     if offsets:
         return {'verdict': 'SLIP', 'offset': min(offsets, key=abs),

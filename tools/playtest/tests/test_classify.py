@@ -34,6 +34,25 @@ class SlipOffset(unittest.TestCase):
         self.assertEqual(classify.classify(a, b), {'verdict': 'SLIP', 'offset': -2})
         self.assertEqual(classify.classify(b, a), {'verdict': 'SLIP', 'offset': 2})
 
+    def test_a_shared_frame_off_centre_keeps_the_same_sign(self):
+        # neither centre is in the other's window (each side's frames are
+        # unique to it near the centre), but the windows share frames: the
+        # offset must read as the centre match would, b ahead -> negative
+        frames = [f'f{k}' for k in range(100)]
+        a = side(frames[10:71])
+        b = side(frames[11:72])     # b runs one frame ahead of a
+        a['hashes'] = a['hashes'][:]
+        b['hashes'] = b['hashes'][:]
+        # blank out what would let either centre match directly
+        a['hashes'][CENTER + 1] = 'a-only'
+        b['hashes'][CENTER - 1] = 'b-only'
+        a['hash'], b['hash'] = 'a-centre', 'b-centre'
+        r = classify.classify(a, b)
+        self.assertEqual(r['verdict'], 'SLIP')
+        self.assertIn('windows share a frame', r.get('why', ''))
+        self.assertEqual(r['offset'], -1)
+        self.assertEqual(classify.classify(b, a)['offset'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

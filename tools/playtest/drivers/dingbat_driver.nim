@@ -311,9 +311,14 @@ proc main() =
         # per step to PATH (PC as r15 before the step, cycles the step took,
         # the absolute master-clock cycle it started on, R on a step that
         # paid a parked HLE routine remainder instead of executing) (debug)
-        var f = open(parts[2], fmWrite)
+        # (N <= 0: append to PATH until -N frames have ended)
+        let want = parseInt(parts[1])
+        var f = open(parts[2], if want <= 0: fmAppend else: fmWrite)
         var prev = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
-        for _ in 1 .. parseInt(parts[1]):
+        var ends = 0
+        var steps = 0
+        while (if want > 0: steps < want else: ends < -want):
+          inc steps
           let pc = emu.cpu.r[15]
           let th = emu.cpu.cpsr.thumb
           let start = emu.rebased + prev
@@ -332,6 +337,7 @@ proc main() =
             prev = int64(emu.scheduler.cycles) + int64(emu.bus.cycles)
             emu.frame_start_cycles = emu.scheduler.cycles
             f.writeLine("FRAME")
+            inc ends
         f.close()
         reply "ok"
       of "pft":

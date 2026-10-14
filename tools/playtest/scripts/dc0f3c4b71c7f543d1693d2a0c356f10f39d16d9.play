@@ -54,8 +54,10 @@ tap A times=60 every=10 hold=4
 press START
 wait 40
 # no checkpoint: this pause freezes a different game frame on dingbat than
-# on the references (which agree), and play is identical again after it --
-# most likely START read a frame apart, the lag-frame phase (docs section 29)
+# on the references (which agree). From f3768 dingbat runs one game frame
+# behind both: the stage's load queue is serviced in another order, set by
+# where the loader's slot scan stood at one V-blank (docs/playtest-bugs.md
+# §80, Gradius Galaxies); stage1_enemies and stage1_late are that SLIP(-1)
 wait 60
 press START
 tap A times=30 every=10 hold=4

@@ -343,10 +343,12 @@ int main(int argc, char** argv) {
       char path[400] = {0};
       sscanf(arg, "%ld %399s", &want, path);
       struct GBA* gba = core->board;
-      FILE* f = fopen(path, "w");
+      /* N <= 0: append to PATH until -N frames have ended */
+      FILE* f = fopen(path, want <= 0 ? "a" : "w");
       unsigned long long prev = mTimingGlobalTime(&gba->timing);
       unsigned startframe = gba->video.frameCounter;
-      for (long k = 0; k < want && f; ++k) {
+      long ends = 0;
+      for (long k = 0; (want > 0 ? k < want : ends < -want) && f; ++k) {
         unsigned pc = gba->cpu->gprs[15];
         int th = gba->cpu->cpsr.t;
         core->step(core);
@@ -356,6 +358,7 @@ int main(int argc, char** argv) {
         if (gba->video.frameCounter != startframe) {
           startframe = gba->video.frameCounter;
           ++frame;
+          ++ends;
           fprintf(f, "FRAME\n");
         }
       }

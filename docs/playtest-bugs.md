@@ -6937,3 +6937,150 @@ Suggested console cells: 16 k × m ∈ {0, 2, 5, 7} × bits 8/9 = 256.
 It also added the probes hdmarace, wakehb, obusdma16, fifolog and s0age,
 plus the psgrace sweep, each run in the emulators only. With no src/
 change, the train and the mGBA suite were not run.
+
+## §80. Gradius Galaxies: stage 1 a frame behind is the load queue's service order, a phase race at one V-blank; the +1 was the classifier's sign, 2026-10-14
+
+**Symptom.** In the baseline (main, 164 games) every dingbat configuration
+is SLIP +1 at `stage1_enemies` (f4400) and SLIP -1 at `stage1_late` (f5472)
+against both references, which are IDENTICAL to each other.
+
+**One lag, not two.** Frame hashes over the frozen `[new]` timeline in
+dingbat, dingbat-bios-nowl, mGBA and the second reference. dingbat and
+dingbat-bios-nowl hash alike on every frame, so neither BIOS nor idle-loop
+skipping is involved. dingbat is at offset 0 to both references from f3631
+to f3768. From f3773 to f5600 every frame that places uniquely has
+dingbat[f] = reference[f-1]: one frame behind, at both checkpoints. (About
+half the stage's frames match no other emulator at any offset, and mGBA and
+the second reference share only half theirs; the stage has some per-frame
+rendering difference between all three.)
+
+The opposite sign was `classify`'s. At `stage1_enemies` neither centre frame
+is in the other's window, so it took the shared-frame path, which computed
+`(k - a.centre) - (k' - b.centre)`: the negative of the centre match's
+convention. A lag read -1 on one path and +1 on the other. In the baseline
+this path decided 42 `[new]` checkpoints in 31 games (280 dingbat pairs, 29
+reference pairs), so every shared-frame offset recorded before this section
+has its sign inverted. **Fixed** (tools/playtest/classify.py, a case in
+tests/test_classify.py). No verdict changes; only the sign of those offsets.
+
+**What the game does.** The main thread is a background loader
+(0x080136F4): it scans a 16-slot request queue at 0x03000028 (12 bytes a
+slot: source, destination, a done-flag pointer), slot 0 to 15, calls the
+LZ decompressor at 0x0800DE74 for each pending slot, sets its flag and
+scans again. The game itself runs in the V-blank interrupt, with an
+H-blank interrupt every line. Idle, a scan costs about 1,210 cycles of wall
+time in dingbat and 1,195 in mGBA, interrupts included.
+
+At the V-blank that ends f3755 the game queues seven requests, in slots 0
+to 6. `peek` of the queue a frame later:
+
+| | slot 0 (source 0x0826F8B0) | slots 1-6 |
+|---|---|---|
+| mGBA, second reference | already done | pending |
+| dingbat | pending, done last (f3767) | slot 1 being decompressed |
+
+**Where the scan stood** (`trace` of f3680-f3775 with the script's keys,
+dingbat-bios-nowl against mGBA). When the V-blank interrupt came, mGBA's
+scan had just loaded slot 14's word, so after the handler returned it
+wrapped and found slot 0 first. dingbat's scan had loaded slot 0's word 16
+cycles before line 160 (the scan began 46 cycles before it), found it empty,
+and the interrupt was taken 11 cycles into the V-blank. After the handler it
+went on at slot 1, so slot 0 waited for the other six.
+
+**How the order becomes a frame.** The completions gate what the V-blank
+handler starts next:
+
+| | 65,629-cycle DMA from the V-blank handler | the 0x0801B job (~159k cycles) |
+|---|---|---|
+| mGBA | in f3769's V-blank | f3768, line 177 to line 106, 36k cycles to spare |
+| dingbat | in f3768's V-blank | f3768 from line 2, still running at line 160 |
+
+dingbat loses the f3768 game frame. Its V-blank count at 0x030007A8 holds
+for one frame (0xEB4 at f3769, where the references read 0xEB5). From there
+the stage runs a frame behind.
+
+**The decisive test.** A scratch driver command stalls dingbat's CPU K
+internal cycles at f3740 and changes nothing else (dingbat-bios-nowl, run on
+to f5500). The results:
+
+| K | first slot serviced | `stage1_enemies` / `stage1_late` against mGBA |
+|---|---|---|
+| 0, 40 | 1 | -1 (as shipped) |
+| 80 to 400 | 0 (the references' order) | **0**: 30 of 60 frames and 58 of 60 match at offset 0, the rest nowhere |
+| 440 | 3 | -3 |
+| 480 | 2 | -2 |
+| 520, 560 | 1 | -1 |
+| 600 | 0 | 0 |
+
+The outcome repeats every ~530 cycles of CPU time, one idle scan. The
+order, and with it the lag (0 to -3 frames), is set by where the scan
+stands, to within ~28 cycles (one slot's check), when one interrupt lands.
+About seven phases in ten give the references' order, which is why two
+emulators with different timing agree.
+
+**Who is right: nobody can say.** The scan's own code costs the same in both
+emulators slot for slot: 27.8 cycles (`ldr` from IWRAM, `cmp`, `beq`, four
+ALU ops, `bge`). The loop around it costs 85.5 in dingbat and 79.2 in mGBA.
+The difference is the pushes and pops to the IWRAM stack from ROM code:
+`pop {r4-r7}` is 6 cycles in dingbat and 2 in mGBA, under the 5 cycles its
+four data cycles and one internal cycle need (as §66). But the phase at
+f3755 integrates every cycle the CPU spent since the main thread went idle,
+76 frames earlier (about 170 scans a frame), plus every interrupt. A
+one-cycle change to any of that moves the phase by ~170 cycles a frame. No
+single console-measured rule decides it, and the console's own phase, with
+its own history, would pick one of these orders as arbitrarily.
+
+**Status: (d), no core change.** The race is the game's (an idle scan read
+against an interrupt-time enqueue). Both checkpoints are SLIP, which passes.
+The script's note on the unscored second pause now cites this section.
+
+**How it was found.** `runhash` over the timeline in all four, matched within
+±6 frames. Then `peek` of all IWRAM and EWRAM every frame f3750-f3790, which
+found the V-blank count and the queue. Then `trace` from f3680 in dingbat
+and mGBA, one frame per call so the script's keys stay on their frames: the
+drivers' `trace` now takes N <= 0 as "append until -N frames have ended".
+Last, the stall sweep, with a `stall N` command (`cpu.idle(N)`) in a scratch
+copy of the driver.
+
+## §81. Rockman EXE 4.5: save_screen's SLIP(+3) is the install's ten-frame lead, read through the cursor's blink, 2026-10-14
+
+**Symptom.** `save_screen` (f5092, window 10) is SLIP +3 against both
+references in all five dingbat configurations, and the references are
+IDENTICAL. §70 left it alone ("SLIP need nothing"). Asked: is this
+downstream of §39's install dice, or something separate?
+
+**What the +3 is.** While the game waits on the save screen, the only
+motion is the menu cursor's blink: three pictures held 5, 6 and 6 frames, a
+17-frame cycle. The cycle runs in step in dingbat and mGBA, hash for hash,
+from f5037 to f5088. At f5089 dingbat starts the screen's next animation,
+and every frame after that differs from mGBA's within ±12. mGBA starts the
+same animation at f5099. dingbat's centre frame is in neither reference's
+run. mGBA's centre is a blink picture that dingbat showed at f5088-f5089,
+three frames before its centre, so `classify` reports +3. The real gap is
+ten frames, and dingbat is ahead.
+
+**The ten frames are §70's.** EWRAM was peeked every frame from f4900 to
+f5110 in all three. Every byte that varies follows one of two clocks:
+
+- the bytes that follow the script's presses are at offset 0 in all three;
+- the PET scene's sprite tables (0x0200DAC0-0x0200DB1F, §70's "sprite
+  tables at 0x0200DAxx") have dingbat[f] = mGBA[f+10], at no other offset.
+
+Peeked from f3400, that +10 holds unbroken from f3420 to f5090. It is the
+install's end, ten frames early (§39), and no press since has resynchronised
+it. The second reference's tables are at mGBA's offset, because its install
+ends on mGBA's frame (§70). So the references agree here for §70's reason.
+
+**The decisive test (§70's).** Run mGBA to f3200 and `poke8` dingbat's two
+RNG words (0x02003F6C = 6F EA 25 47 91 8C 30 AC, 0x02003C84 = C1 B0 5D DF),
+changing nothing else. mGBA then hashes as dingbat on every frame from
+f4948 to f5272, the whole `save_screen` window included.
+
+**Status: (b), no core change.** It is the same cause as `pet_greeting` and
+`pet_menu`. The dice follow the boot's EWRAM clear and the title's EWRAM
+passes, where dingbat's price is the console's (`slotexec.s`, AGB SP) and
+mGBA's is 4-5 cycles short (§39). The checkpoint is SLIP, which passes, so
+it gets no `@known`. The script's notes say what the +3 is. `saved` (f6258)
+reads SLIP -3 against mGBA through the classifier's inverted shared-frame
+path (the section above), so it is dingbat ahead there too, +3 with the
+fix. It was not chased.
