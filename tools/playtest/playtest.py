@@ -4,7 +4,7 @@ dingbat and the reference emulators, compare screens at checkpoints, save in
 each, compare the battery files, then cross-load every save into every
 emulator. See README.md.
 
-  playtest.py run ROM|SHA1 [--emus dingbat,...,mgba,nba] [--out DIR]
+  playtest.py run ROM|SHA1 [--emus dingbat,...,mgba,nba|all] [--out DIR]
   playtest.py suite [FILTER...] [--jobs N]
   playtest.py serve NAME --rom ROM [--emus ...] [--save FILE | --save-dir DIR]
   playtest.py do NAME STEP...
@@ -94,7 +94,8 @@ def main():
         else:
             p.add_argument('only', nargs='*', help='sha1 prefixes or title substrings (default: every script)')
             p.add_argument('--script', default=None, help=argparse.SUPPRESS)
-        p.add_argument('--emus', default=','.join(emulib.ALL))
+        p.add_argument('--emus', default=','.join(emulib.DEFAULT),
+                       help='comma list, or `all` (adds the occasional configurations, emu.OCCASIONAL)')
         p.add_argument('--rtc', type=int, default=DEFAULT_RTC)
         p.add_argument('--no-cross', action='store_true', help='skip the cross-load matrix')
         p.add_argument('--no-audio', action='store_true', help='skip audio capture and comparison')
@@ -109,6 +110,8 @@ def main():
                            help='a full suite waits for the machine-wide playtest lock (train.py) unless this')
 
     args = ap.parse_args()
+    if getattr(args, 'emus', None):
+        args.emus = ','.join(emulib.parse_emus(args.emus))
     if args.cmd == 'serve':
         save = args.save
         if args.save_dir:

@@ -65,6 +65,15 @@ class Fingerprint(unittest.TestCase):
         moved = train.fingerprint({'status': 'PASS', 'outdir': '/runs/x'}, results(audio='au9'), {})
         self.assertEqual(sorted(train.diff_fp(old, moved)), sorted(CONFIGS[:4]))
 
+    def test_an_occasional_configuration_the_candidate_skips_is_not_a_change(self):
+        # a nightly baseline played dingbat-bios-nowl; a train's candidate does not
+        played = [c for c in CONFIGS if c not in train.emulib.OCCASIONAL]
+        nightly = train.fingerprint({'status': 'PASS', 'outdir': '/runs/x'}, results(), {})
+        train_run = train.fingerprint({'status': 'PASS', 'outdir': '/runs/x'}, results(configs=played), {})
+        self.assertEqual(train.diff_fp(nightly, train_run), {})
+        moved = train.fingerprint({'status': 'PASS', 'outdir': '/runs/x'}, results(audio='au9', configs=played), {})
+        self.assertEqual(sorted(train.diff_fp(nightly, moved)), sorted(played))
+
     def test_one_pixel_change_in_one_config_is_neutral(self):
         after = fp(cps={'title': 'h-title', 'menu': {'*': 'h-menu', 'dingbat-bios': 'h-menu2'}})
         d = train.diff_fp(fp(), after)

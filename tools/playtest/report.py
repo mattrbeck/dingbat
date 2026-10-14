@@ -42,10 +42,10 @@ CONFIG_LABEL = {
 }
 
 
-def suspect_of(odd):
-    """Who a group that stands alone implicates."""
+def suspect_of(odd, emus=DINGBAT):
+    """Who a group that stands alone implicates (`emus`: who played)."""
     s = set(odd)
-    if s == set(DINGBAT):
+    if s == set(DINGBAT) & set(emus):
         return 'dingbat'
     if s <= set(DINGBAT):
         if s == {'dingbat', 'dingbat-nowl'}:
@@ -66,7 +66,7 @@ def suspect_of(odd):
     return 'unclear'
 
 
-def odd_group(clusters):
+def odd_group(clusters, emus=DINGBAT):
     """The group standing alone, or None when it is not one group against
     the rest (three-way splits)."""
     if len(clusters) < 2:
@@ -82,7 +82,7 @@ def odd_group(clusters):
         # configuration sided with the other one
         for r in REFS:
             for g, h in ((a, b), (b, a)):
-                if g == [r] and set(DINGBAT) <= set(h):
+                if g == [r] and set(DINGBAT) & set(emus) <= set(h):
                     return g
         return None
     # three or more groups: one reference alone and everything else together
@@ -105,7 +105,7 @@ def game_findings(game, rep, base):
     # run failures
     failed = [n for n in emus if not rep['new'][n]['ok']]
     if failed and len(failed) < len(emus):
-        add('run', suspect_of(failed) if suspect_of(failed) != 'unclear' else 'unclear',
+        add('run', suspect_of(failed, emus) if suspect_of(failed, emus) != 'unclear' else 'unclear',
             f"{', '.join(failed)} did not complete [new]",
             details={n: rep['new'][n]['error'] for n in failed},
             images=[os.path.join(base, 'new', n, 'shots', 'FAILED.png') for n in failed
@@ -121,8 +121,8 @@ def game_findings(game, rep, base):
         if key in seen:
             seen[key]['persists'].append(cp)
             continue
-        odd = odd_group(clusters)
-        suspect = suspect_of(odd) if odd else 'unclear'
+        odd = odd_group(clusters, emus)
+        suspect = suspect_of(odd, emus) if odd else 'unclear'
         frames = e.get('frames', {})
         detail = {k: {kk: vv for kk, vv in p.items() if kk in ('verdict', 'offset', 'similarity', 'diff_pixels',
                                                                   'mae', 'max_channel_delta', 'why')}
@@ -142,7 +142,7 @@ def game_findings(game, rep, base):
     if bad:
         first = subj[bad[0]]
         run0 = (first.get('runs') or [{}])[0]
-        add('audio', suspect_of(bad),
+        add('audio', suspect_of(bad, emus),
             f"audio differs from both references ({', '.join(bad)}): {first['flagged_fraction'] * 100:.1f}% of "
             f"the run, longest {first['longest_seconds']}s from f{run0.get('start_frame')} ({run0.get('kind')})",
             audio={s: {k: v for k, v in subj[s].items() if k != 'vs'} for s in bad},
@@ -167,7 +167,7 @@ def game_findings(game, rep, base):
             probs.setdefault(norm, []).append((s, p))
     for norm, hits in probs.items():
         who = [s for s, _ in hits]
-        add('save', suspect_of(who), hits[0][1], configs=who)
+        add('save', suspect_of(who, emus), hits[0][1], configs=who)
     # reading saves: per writer, the readers that show its save the same way
     lc = rep.get('load_checkpoints') or {}
     groups = rep.get('save_groups') or [[w] for w in {k.split('-in-')[0] for k in lc}]
@@ -190,12 +190,12 @@ def game_findings(game, rep, base):
             clusters = _clusters(have, same) + [[r] for r in readers if r not in have]
             if len(clusters) < 2:
                 continue
-            odd = odd_group(clusters)
+            odd = odd_group(clusters, emus)
             key = (tuple(group), json.dumps(clusters))
             if key in seen_load:
                 continue
             seen_load.add(key)
-            who = suspect_of(odd) if odd else 'unclear'
+            who = suspect_of(odd, emus) if odd else 'unclear'
             own = odd and set(odd) & set(group)
             add('load', who,
                 f"[load] of the save written by {'/'.join(group)}, checkpoint {cp}: "
@@ -272,12 +272,14 @@ def write_html(data, outdir, judgements=None):
              'dingbat:no-waitloop': 'dingbat with waitloop skipping off only',
              'mgba': 'mGBA alone', 'nba': 'the second reference alone', 'unclear': 'no single odd one out'}
     parts = []
+    # the configurations this suite played (the occasional ones only nightly)
+    cols = [n for n in DINGBAT if any(n in g.get('verdicts', {}) for g in data['games'])] or DINGBAT
     parts.append('<h2>Games</h2><table class=games><tr><th>game</th><th>save</th><th>checkpoints</th>'
-                 + ''.join(f'<th>{e(n)}</th>' for n in DINGBAT) + '<th>findings</th></tr>')
+                 + ''.join(f'<th>{e(n)}</th>' for n in cols) + '<th>findings</th></tr>')
     for g in data['games']:
         cells = ''.join(f"<td class={'ok' if g.get('verdicts', {}).get(n) else 'bad'}>"
                         f"{'pass' if g.get('verdicts', {}).get(n) else 'FAIL' if 'verdicts' in g else '-'}</td>"
-                        for n in DINGBAT)
+                        for n in cols)
         parts.append(f"<tr><td>{e(g['title'])}</td><td>{e(g.get('save', '-'))}</td><td>{g.get('checkpoints', '-')}</td>"
                      f"{cells}<td>{' '.join(f'<a href=#{i}>{i[-2:]}</a>' for i in g.get('findings', []))}</td></tr>")
     parts.append('</table>')

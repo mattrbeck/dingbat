@@ -588,6 +588,36 @@ def cross_load_verdict(report, s, refs, problems):
     return notes
 
 
+def waitloop_diffs(report, on, off):
+    """What waitloop skipping changed: configuration `on` (skipping) against
+    `off`, the same configuration without it. The skip must be exact, so any
+    difference -- a checkpoint picture or frame, the audio, the battery file,
+    a [load] cell -- is listed; empty when the two runs are the same."""
+    a, b = report['new'][on], report['new'][off]
+
+    def cps(r):
+        return {n: (c.get('hash'), c.get('frame')) for n, c in (r.get('checkpoints') or {}).items()}
+    out = []
+    if (a.get('ok'), a.get('frame')) != (b.get('ok'), b.get('frame')):
+        out.append('[new] outcome')
+    bad = sorted(n for n in set(cps(a)) | set(cps(b)) if cps(a).get(n) != cps(b).get(n))
+    if bad:
+        out.append('checkpoints ' + ', '.join(bad))
+    if a.get('audio_sha1') != b.get('audio_sha1'):
+        out.append('audio')
+    if report['saves'].get(on, {}).get('sha1') != report['saves'].get(off, {}).get('sha1'):
+        out.append('battery file')
+    cells = report.get('load') or {}
+    for key in sorted(cells):
+        w, r = key.split('-in-')
+        twin = f"{off if w == on else w}-in-{off}"
+        if r != on or w == off or twin not in cells:
+            continue
+        if (cells[key].get('ok'), cps(cells[key])) != (cells[twin].get('ok'), cps(cells[twin])):
+            out.append(f'load {key}')
+    return out
+
+
 def cell_ok(v):
     """A load-checkpoint verdict that counts as the save having loaded."""
     if v['verdict'] not in OK_LOAD:
@@ -710,6 +740,12 @@ def verdicts(report, names):
         # cross-load
         if 'load' in report:
             v['notes'] += cross_load_verdict(report, s, refs, v['problems'])
+        # waitloop skipping must change nothing: s against its -nowl twin
+        if s + '-nowl' in names:
+            diffs = waitloop_diffs(report, s, s + '-nowl')
+            if diffs:
+                v['problems'].append(f"waitloop skipping changes the run: differs from {s}-nowl in "
+                                     + '; '.join(diffs))
         apply_known(v, s, report.get('meta', {}).get('known') or [])
         v['pass'] = not v['problems']
         out[s] = v

@@ -151,6 +151,10 @@ def diff_fp(before, after):
             # a configuration the baseline did not play at all (added to
             # the harness since): nothing to compare it with yet
             continue
+        if c not in after and after.get('*', {}).get('status') not in (None, 'ERROR'):
+            # one the candidate did not play (an occasional configuration,
+            # emu.OCCASIONAL, that a nightly baseline played): not a change
+            continue
         b, a = before.get(c, {}), after.get(c, {})
         d = {k: [b.get(k), a.get(k)] for k in sorted(set(b) | set(a)) if not same(k, b.get(k), a.get(k))}
         if d:
@@ -260,7 +264,7 @@ def describe(aspects):
     grouped = {}
     for cfg, text in parts:
         grouped.setdefault(text, []).append(cfg)
-    return ' | '.join(f"{'all ' + str(len(cs)) if len(cs) == len(DINGBAT) and '*' not in cs else ', '.join(cs)}: {text}"
+    return ' | '.join(f"{'all ' + str(len(cs)) if set(cs) >= set(DINGBAT) & set(emulib.DEFAULT) and '*' not in cs else ', '.join(cs)}: {text}"
                       for text, cs in grouped.items())
 
 

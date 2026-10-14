@@ -39,6 +39,18 @@ EMULATORS = {
 DINGBAT_CONFIGS = [n for n in EMULATORS if n.startswith('dingbat')]
 REFERENCES = ['mgba', 'nba']
 ALL = DINGBAT_CONFIGS + REFERENCES
+# Played only when asked (`--emus all`, the nightly suite): dingbat-bios-nowl
+# checks that waitloop skipping is exact under the official BIOS. It matched
+# dingbat-bios in every stored run (2,259 games to 2026-10-14), the skip has
+# no BIOS-specific path, and dingbat-nowl keeps the check on the shipped
+# default in every run; it cost a sixth of a train.
+OCCASIONAL = ['dingbat-bios-nowl']
+DEFAULT = [n for n in ALL if n not in OCCASIONAL]
+
+
+def parse_emus(spec):
+    """--emus: a comma list, or `all` for every configuration."""
+    return list(ALL) if spec == 'all' else spec.split(',')
 
 
 def key_mask(keys):

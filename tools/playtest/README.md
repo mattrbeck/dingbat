@@ -5,15 +5,24 @@ emulators, compares the screens at named checkpoints and the audio throughout,
 saves in-game in each, compares the battery files, then boots every
 emulator's save in every emulator.
 
-dingbat runs five ways, so a difference can be pinned on one feature:
+dingbat runs four ways (five with `--emus all`), so a difference can be
+pinned on one feature:
 
 | name | BIOS | waitloop skipping |
 |---|---|---|
 | `dingbat` | HLE (the shipped default, no BIOS file) | on |
 | `dingbat-nowl` | HLE | off |
 | `dingbat-bios` | official | on |
-| `dingbat-bios-nowl` | official | off |
+| `dingbat-bios-nowl` | official | off (occasional: `--emus all`) |
 | `dingbat-hleimg` | HLE with Nintendo's image mapped (a BIOS file installed) | on |
+
+Waitloop skipping must change nothing: a configuration that differs from its
+`-nowl` twin in a checkpoint, the audio, the battery file or a `[load]` cell
+fails with `waitloop skipping changes the run`. `dingbat-bios-nowl` plays only
+when asked (`--emus all`, meant for a nightly suite): it matched
+`dingbat-bios` in every stored run (2,259 games to 2026-10-14), the skip has
+no BIOS-specific path, and it cost a sixth of a train; `dingbat-nowl` keeps
+the check on the shipped default in every run.
 
 `dingbat-hleimg` is what a player with a BIOS file installed and the HLE on
 runs: every frontend passes the file when it exists, and the SWIs the HLE
@@ -27,6 +36,7 @@ tools/playtest/build.sh                                  # drivers + OCR tool ->
 tools/playtest/playtest.py run  ~/roms/game.gba          # needs scripts/<sha1>.play
 tools/playtest/playtest.py run  f3ae088181bf583e55daf962a92bb46f4f1d07b7   # by sha1
 tools/playtest/playtest.py suite [emerald ...] --jobs 2  # every script (or a filter)
+tools/playtest/playtest.py suite --emus all --jobs 6     # nightly: every configuration
 tools/playtest/report.py out/suites/<tag>                # findings.json: who stands alone where
 ```
 
