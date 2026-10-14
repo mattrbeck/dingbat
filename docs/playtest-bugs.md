@@ -5154,3 +5154,93 @@ input routine reads. The model stays as it is. `keyirq2` and `keyirq3`
 stay out of the cycle-law gate (`OPEN_ROWS`). If the clock is ever wanted,
 the next probe would anchor the store to the H-blank flag edge (as
 `halthb.s` does) instead of to the payload's entry.
+
+## §62. Phantasy Star Collection: SLIP(-29) is one field of a two-field screen, and the field is set by a VRAM fill under contention, 2026-10-14
+
+**Symptom.** In the train run 20261013-173431-1c, all five dingbat configs
+SLIP at `camineet`, `field_menu`, `save_slot` and `save_name` (mGBA -29 /
+-21, the second reference -29). The references are IDENTICAL to each other
+there. dingbat-bios shows the gap too, so the BIOS and the HLE are not
+involved.
+
+**The 29 frames are a classifier artefact.** From the Master System
+emulator's start, the game draws every screen as two fields that alternate
+every frame (the line-drop table at 0x08770E5B / 0x08770E5F of section
+28). On a still screen the hash sequence is A B A B. A centre frame on the
+other field first appears at k = 1 of the reference's 61-frame window, and
+`classify` reports the first match, k - 30 = -29. The real offset is odd:
+dingbat's frames match mGBA's at offsets ±1, ±3, ... from f2014 to f5170.
+At f3550 IWRAM and EWRAM are byte-identical to mGBA's except the stack and
+a field flag (0x02020FF0, with 0x02020FFC and 0x0202101E). That flag
+alternates 01/00 every frame from **f1692 in mGBA and f1693 in dingbat**
+(all configs), and it never holds a frame in either emulator through
+f5170. The whole difference is this one field of phase, set at f1693.
+
+**The references only agree on parity.** Matched by frame hash over the
+Phantasy Star intro (f1757-f1788), dingbat runs at odd offsets from mGBA
+(-3..-7). The second reference runs at even offsets from mGBA (-2..-8) and
+odd ones from dingbat (±1). The second reference is several frames from
+mGBA here too, but by an even number, so on these screens it looks
+IDENTICAL. The checkpoints test the field parity and nothing else.
+
+**What moves f1692 to f1693** (`trace` from f1684, dingbat-bios-nowl
+against mGBA, the same instructions in both). Starting Phantasy Star runs
+its init in Thumb ROM code with WAITCNT 0x4014 (WS0 3/1, prefetcher on).
+The init has two parts dingbat charges more for.
+
+1. *The EEPROM read, f1686-f1690.* The init reads the whole 64 Kbit EEPROM
+   (a blank cart): 256 calls of the read routine at 0x0876CC14, each with
+   two DMA3 transfers through 0x0876CB94. A call costs **3860 cycles in
+   dingbat and 3722 in mGBA**: +138 a call, 35.3k cycles in all. Of that,
+   +84 is the 14-iteration address-bit loop at 0x0876CC4A-0x0876CC5C, at
+   39 cycles an iteration against 33. The loop body is `strh` to the IWRAM
+   stack, five ALU ops, `ldr r0,[r6]` (EWRAM 0x02021418), `ldrb
+   r0,[r0,#8]` (gamepak 0x087F2700), `cmp` and `bcc`. mGBA charges the
+   `ldr` and the `ldrb` 11 cycles together, fetches included. Their data
+   and internal cycles alone are 12 (an EWRAM word is 6, a gamepak N read
+   is 4, plus two I cycles). This is section 29's class: dingbat's price
+   follows `slotexec.s` (rows 9 and 10, EWRAM and gamepak `ldr` from slot
+   code with the prefetcher on, AGB SP = dingbat) and alyosha
+   prefetcher_branch_thumb_2 (hardware-verified, mGBA fails it).
+2. *A 96 KB VRAM clear in active display.* At 0x0873871C, DMA3 with CNT
+   0x85006000 (24576 words, fixed source on the IWRAM stack, into
+   0x06000000). DISPCNT is 0x1741 (mode 1, BG0-2 and OBJ, palette RAM all
+   black, so the screen shows black). The burst costs **110,465 cycles in
+   dingbat and 74,168 in mGBA**. With `-d:CONTENTION=false` it costs
+   74,160 in dingbat. The extra 36.3k is the renderer's BG VRAM
+   contention. The burst starts at V-count 81 in dingbat (50 in mGBA,
+   which reached it earlier) and runs across 79 drawn lines, where affine
+   BG2 holds dots 33+4n and 34+4n. The map is console-measured: `contmap.s`
+   cells for this scene (0x0D, mode 1 BG0-2) are in r0-agb.json, and
+   `dmavram.s` on the SP shows that a DMA burst pays the renderer's dots
+   at the model's phases. Neither reference models contention.
+
+mGBA reaches the Master System loop (the first 0x0873C7xx instruction) at
+V-count 128, 39.7k cycles before the V-blank. dingbat without contention
+reaches it at V-count 159, 1.1k cycles before. dingbat as built reaches it
+at V-count 188 of the next frame, so the field flag starts one V-blank
+later. Built with `-d:CONTENTION=false`, dingbat-bios-nowl starts the flag
+at f1692, and `camineet`, `field_menu` and `save_slot` hash-match both
+references. Taking out a measured mechanism matches the references; that
+is section 29's pattern.
+
+**Status: no emulator change** (class: the references under-charge per
+console-measured rules). Both costs that move the frame are ones the
+console has answered: contention for the VRAM clear, and the
+slotexec/alyosha prefetcher pricing for the EEPROM loop. Each alone uses up
+most of mGBA's 39.7k-cycle margin, and together they cross the V-blank.
+The second reference's own even offset from mGBA shows its boot timing is
+not mGBA's either, so the two agreeing at these checkpoints is a parity
+coincidence, not a timing witness. Two things would make these checkpoints
+diagnostic: a script that reaches Camineet from a seeded save, or a
+checkpoint that takes both fields (`window` covering an even and an odd
+frame and judged as a pair). Both are harness/script work, not core work.
+No probe is proposed; no new SP cell is needed for the mechanism.
+
+**How it was found.** First, every frame's hash in dingbat-bios-nowl, mGBA
+and the second reference over the frozen `[new]` timeline, matched at
+offsets in a ±8 window, which showed the parity pattern. Then full IWRAM
+and EWRAM dumps (`peek`) at f1616-f3550, which found the field flag and
+its first frame with a `peek` every frame. Last, `trace` of f1684 on in
+dingbat and mGBA, cycles summed per routine, with the `CONTENTION` knob
+toggled on the driver (`-d:CONTENTION=false`, built outside bin/).
