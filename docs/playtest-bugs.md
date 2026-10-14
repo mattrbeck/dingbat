@@ -6471,3 +6471,122 @@ no frame with either within ±30 (its own timing, §58).
 **Status: no core change** (`world_map`: mGBA alone; `vision_map`: (b),
 §29's class). Both checkpoints are SLIP 0 between dingbat and mGBA, so no
 `@known` is needed.
+
+## §78. Dragon Ball Z - Buu's Fury: Grand Kai's planet ten frames off is one lost frame and a blink seeded from the RNG, 2026-10-14
+
+**Symptom.** `grand_kai_planet` (f19934) is SLIP +10 against mGBA and +11
+against the second reference in all five dingbat configurations. The
+references are IDENTICAL to each other. Ten frames is too many for one
+frame-boundary race.
+
+**Nothing accumulates.** Over the `[new]` timeline, dingbat-bios-nowl and
+mGBA hash frame for frame at offset 0 through f19908 and again from f19943.
+They differ only in f19909-f19942, inside the checkpoint's window, and
+there only on Goku's face (box 118,67 5x3). Goku blinks for 15 frames out
+of every 256. dingbat blinks at f19653 and f19909, mGBA at f19672 and
+f19928, the second reference at f19673 and f19929. The checkpoint's centre
+frame is eyes open in dingbat and eyes shut in both references, and the
+classifier's nearest match is ten frames away. The HLE (`dingbat`) hashes
+as dingbat-bios-nowl on all 20,000 frames.
+
+**The blink counter is a random number.** The counter is the halfword at
+0x02031366 (Goku's object at 0x02031354, +18). A routine at 0x0800DFD4
+adds one to it every frame, and the eyes are shut while its low byte is
+above 0xF0. The scene's load seeds it at f17852 with the game's
+`random(255)` (`bl 0x0803FACC`, state word at 0x03004A5C). The draw is
+**0x92 in dingbat and 0x7E in both references**: 20 counts. The second
+reference's load ends four frames earlier and its later pauses differ by a
+frame, so it lands one frame from mGBA.
+
+**The random state is one step behind.** The RNG word steps once per
+main-loop iteration. It is equal in all three at every frame up to f15800.
+At f15801 dingbat repeats a frame (its picture holds) and does not step. The
+references step. dingbat's sequence then runs one step behind theirs to the
+f17852 draw.
+
+**f15800: a sprite frame that does not fit.** An NPC's blink starts there
+(object 0x02032E64, counter low byte 0xF1). The new sprite frames (the
+0x0800F38C path, three of them this frame) are unpacked by IWRAM code at
+0x03000100-0x030002FF. With the mixer and the frame's game code, that
+fills the whole frame: 0 cycles halted
+(WAITCNT 0x4314, DISPCNT 0x1F40). The main thread reaches its V-blank wait
+(Halt at 0x0803F422) in the next frame:
+
+| from the f15800 V-blank to the wait | cycles | against the V-blank at 280,896 |
+|---|---|---|
+| dingbat-bios-nowl, dingbat (HLE, identical) | 287,222 | 6,326 late |
+| mGBA, given dingbat's counters (below) | 281,681 | **785 late** |
+| mGBA as run | blinks this NPC at f15798, 251k busy | 28.7k early |
+
+mGBA does not reach f15800 in dingbat's state. Its object counters run
+**two ahead** from f14442 (below), so its NPC blinks at f15798 and its
+f15800 is an ordinary frame.
+
+**The decisive test.** Load mGBA's f15500 state and `poke8` only dingbat's
+values into the low bytes of the four object counters (0x0202FE52,
+0x02032E76, 0x02033626, 0x02033A0A, each 2 lower). mGBA then unpacks the
+sprite at f15800 too, misses the same V-blank by 785 cycles, holds its RNG
+word over f15801, and draws the checkpoint as dingbat does. The centre
+frame matches, and 56 of the window's 61 frames. The other 5 are the
+background tile's 20-frame toggle, which mGBA shows one frame early through
+the whole scene.
+
+**Where mGBA's two counts come from.** These are two more frames of the
+same kind. Each time, mGBA reaches the wait before the V-blank and dingbat
+after it (the same game state in both):
+
+| frame | what | dingbat to the wait | mGBA to the wait | ROM main thread, dingbat - mGBA |
+|---|---|---|---|---|
+| f14266 | a new sprite frame (the 0x0800F38C path) | 1,652 late | 3,055 early | +4,342 (+4,233 over 12,235 executions of PCs run equally often) |
+| f14441 | the work after the A press at f14441 | 12,072 late | 777 early | +7,289 (+4,520 over equal-count PCs); IWRAM +4.9k is the mixer, which mixes more the later it runs |
+| f15800 | the NPC blink, same state | 6,326 late | 785 late | +3,808 (+4,341 over equal-count PCs) |
+
+The IWRAM unpacker costs the same in both, cycle for cycle (0x03000200
+region: 108,567 against 108,689 at the same instruction count). The gap is
+gamepak code. It is §68's pattern again, instruction for instruction: an
+EWRAM word load from ROM code (`ldr r1, [r5, #16]` at 0x08007DCE,
+0x08007DFA, 0x08007E20, 0x08007E4C; `ldr r0, [r1, #80]` at 0x0800DFD6)
+costs 8-9 cycles in dingbat and 2 in mGBA. `slotexec.s` on the AGB SP
+(row 9, §63) gives the console's price as dingbat's, with mGBA 5 short.
+
+**The second reference** keeps dingbat's counters. At f14500, f15000 and
+f15500, every object counter checked (eight objects) equals dingbat's. Its dialogue pauses fall
+on other frames, but they net to dingbat's count. So it reaches f15800 in
+dingbat's state and still makes the frame: its RNG steps at f15801, and its
+f15799-f15800 pictures equal dingbat's. To do that it must run this frame
+at least 785 cycles cheaper than mGBA, whose price for it is already below
+the console's. It has no `trace`, so where it saves was not measured. §63
+measured the likeliest place: on gamepak code its prefetch buffer keeps
+refilling, which alyosha prefetcher_full_arm and _branch_thumb_4
+(hardware-verified) refute.
+
+**Status: (b), no core change.**
+
+* The ten frames are one lost main-loop iteration at f15800, carried by the
+  RNG into a 256-frame blink phase. They are not ten frames of load time.
+* mGBA's frame rests on EWRAM data accesses from gamepak code priced below
+  the console's (§29, §63, §68), at f14266 and f14441. It loses f15800
+  itself when it is put in dingbat's state.
+* The second reference's frame needs that frame cheaper still than mGBA's.
+* The exact cells are at WAITCNT 0x4314, which an empty-slot probe cannot
+  run (§39, §66). The rule that decides it (`slotexec.s` row 9) is already
+  measured, so no new probe is proposed.
+* The HLE and Nintendo's BIOS run the f15800 iteration in identical cycles,
+  so the HLE is not involved.
+* A SLIP passes, so no `@known` is added. The checkpoint judges Goku's
+  blink phase. A frame outside the blink, or a still NPC-free view, would
+  make it diagnostic.
+
+**How it was found.** The script was replayed to f20000 in
+dingbat-bios-nowl, the HLE, mGBA and the second reference: per-frame
+hashes, a state every 500 frames, and a RAM dump of each state.
+
+1. Matching per-frame hashes put the difference only on the blink.
+2. Dumps at f19600-f19602 found the per-frame counter that is 19 / 20
+   apart. `watchw` on it found the `random(255)` store at f17852.
+3. The RNG word, peeked every frame, parts at f15801.
+4. `trace` from f15797, split into the main thread and interrupts, found
+   the f15800 overrun.
+5. The object counters across the states found mGBA's lead. `trace` of
+   f14263 and f14441 found the two frames where it comes from.
+6. The `poke8` run closed it.
