@@ -233,6 +233,10 @@ const SWI_HLE_BASE = 48
 # The part of it after the routine: the return path from 0x170, refill
 # excluded (official BIOS in this core: the code Halt's return runs, bus.nim)
 const SWI_HLE_EXIT = 16
+# SoftReset's body over the base: Nintendo's BIOS in this core, swi 0 to the
+# end of the ROM's first instruction (895), less what the HLE charged
+# without it (85)
+const SOFTRESET_BODY {.intdefine.} = 810
 
 # The part of a Halt/Stop SWI the BIOS executes after the wake IRQ is
 # serviced (bx lr, pop {r2, lr}, mode restore, pop {fp, ip, lr}, movs pc, lr
@@ -665,6 +669,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let return_flag = cpu.gba.bus.wram_chip[0x7FFA]
       for i in 0x7E00 ..< 0x8000:
         cpu.gba.bus.wram_chip[i] = 0
+      # The routine's own time, mostly the 0x200-byte clear: from the swi to
+      # the ROM's first instruction Nintendo's BIOS takes 875 cycles and the
+      # dispatch and return charges alone 63 (Super Mario Advance 3's swi 0,
+      # docs/playtest-bugs.md §82)
+      cpu.hle_busy(SOFTRESET_BODY)
       # switch_mode so the live r13/r14 rebank (a direct CPSR write would not)
       cpu.switch_mode(modeSYS)
       cpu.cpsr = cast[PSR](uint32(modeSYS))

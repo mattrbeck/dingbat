@@ -7261,6 +7261,15 @@ compares random draws.
   SoftReset branch zeroes 0x03007E00-0x03007FFF and resets the banks, and
   charges no time for the clear. Fixing it would leave the RNG split above in
   place: the RNG would still differ from the references from f1884.
+  **Fixed the same day:** the branch now charges `SOFTRESET_BODY` = 810.
+  That is 812 less 2, because the HLE's first ROM instruction takes 22
+  cycles where the BIOS's takes 20 (the refill is charged on the other
+  side of the jump). The swi and the end of the crt0's first instruction
+  now land on the same cycles in both, 42420537 and 42421432. The
+  `rundigest` frames that differ from dingbat-bios in the 310 frames from
+  f150 fall from 299 to 2. Both are reset frames (the keys are held, so
+  the game resets twice), where only the entry instruction's start cycle
+  differs.
 * *mGBA's logic-frame counter.* 0x03006B01 counts one ahead in mGBA at
   f3027, f3067 and f3107 (11 frames after each story A) and at f4036. The
   second reference keeps dingbat's count. In the page turn traced at f3022,
@@ -7271,7 +7280,7 @@ compares random draws.
 **Classification.** The EEPROM's programming time is out of the script
 (the route). The second reference's two-frame lead was the harness's (d),
 now fixed. The remaining 1-1 difference is the game's VCOUNT-fed RNG:
-(d), as §59. dingbat's HLE SoftReset is (a), recorded.
+(d), as §59. dingbat's HLE SoftReset is (a), fixed (`SOFTRESET_BODY`).
 
 **Status: script and driver changed, no core change.** The script
 (`7352d2bd...play`) carries the reset, the shifted timeline, and a header
