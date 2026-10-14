@@ -299,6 +299,15 @@ command with `ok [...]` or `err ...`:
 | `pft PC N PATH` | run to r15 == PC, then N steps with the `-d:pftrace` prefetch log to PATH (dingbat built with `-d:pftrace`) |
 | `quit` | flush the battery file and exit |
 
+A frame ends at the V-blank start (VCOUNT 160) in dingbat and mGBA. The
+second reference's driver runs `kCyclesPerFrame` cycles a call, so its frames
+end a few lines before line 160, at a phase that drifts (142-159 seen). Its
+`hash`/`shot` after frame f is therefore the picture the other two showed at
+the end of f-1, and its RAM peeks come from a few lines earlier than theirs.
+On an animated screen, references that agree can be mGBA a frame behind in
+game state against the second reference's stale picture
+(docs/playtest-bugs.md, "The second reference's pictures are a frame stale").
+
 `peek` in dingbat is untimed (it used to charge wait states, so peeking every
 frame moved the game's own timing); the second reference's leaves its audio
 byte-identical with a peek every frame. Comparing two emulators' instruction

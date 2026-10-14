@@ -5428,3 +5428,195 @@ A measured time per chip ID belongs in `storage/flash.nim`, with Advance
 Wars (§35) as its second check.
 
 **Status: (c), no core change.**
+
+## §65. The second reference's pictures are a frame stale: its frames end before the V-blank, 2026-10-14
+
+**Found chasing** Donkey Kong Country's `kongo_jungle_map` and Super Mario
+Advance's `quit_to_title` (the next two sections). Both are SLIP +1 against
+both references, and the references are IDENTICAL. In both games the
+second reference's game state agrees with dingbat's, not mGBA's. Only its
+picture agrees with mGBA's.
+
+**Where its frames end.** `peek 4000006` after each `run 1`:
+
+| | frame 0 | frames 1.. |
+|---|---|---|
+| dingbat, mGBA | VCOUNT 126 | 160, the V-blank start, every frame |
+| the second reference, Donkey Kong Country | 225 | 155 at f1-f105, 156 to f1800, 157 to f4100, then 158, 159 by f4700 |
+| the second reference, Super Mario Advance | 225 | 142 at f100, drifting to 146 by f2500 |
+
+Its driver runs `kCyclesPerFrame` cycles a call, and the call stops a few
+lines before line 160 at a phase that drifts. The core presents its picture
+at the V-blank, so after harness frame f the second reference holds the
+picture that dingbat and mGBA presented at the end of f-1. Its RAM peeks
+are taken 1-18 lines earlier than theirs. For most game code, which has
+finished its frame by then, the two read the same.
+
+**Measured.** In Donkey Kong Country, over f1852-2421, f2424-2999 and
+f3192-3355 dingbat's and the second reference's IWRAM match byte for byte
+at offset 0. In those stretches every frame whose hash places it uniquely
+(387 frames) has dingbat[f] = second reference[f+1]; none has offset 0.
+The rest are blend-rounding frames that match nowhere.
+
+Across the corpus (train 20261013-173431-1c, 1263 `[new]` checkpoints):
+
+| pair | SLIP +1 | SLIP -1 |
+|---|---|---|
+| dingbat-bios ~ second reference | 107 (62 games) | 10 |
+| mGBA ~ second reference | 97 | 14 |
+| dingbat-bios ~ mGBA | 9 | 9 |
+
+**What it changes.** The harness treats a SLIP as a pass, so none of these
+fails a game. But IDENTICAL references on an animated screen can mean
+"mGBA a frame behind in game state, the second reference at dingbat's frame
+with a stale picture". That is the case in both sections below. A
+reference pair's agreement is evidence only on still screens, or after a
+RAM comparison.
+
+**Status: driver unchanged.** The fix would end each of the second
+reference's harness frames on its V-blank presentation without delaying
+input. It changes every one of its cached results, so it belongs in its own
+change. One thing was tried here with a temporary driver command that called
+`Run(500)`: from line 155 the core came back at line 7, so the boundary
+cannot be nudged with small runs.
+
+## §66. Donkey Kong Country: the Kongo Jungle map a frame ahead is mGBA's cheap load, 2026-10-14
+
+**Symptom.** `kongo_jungle_map` (f4626): every dingbat configuration,
+dingbat-bios included, shows the map one frame ahead of both references,
+which are IDENTICAL.
+
+**The second reference is with dingbat.** EWRAM matches byte for byte in
+dingbat-bios-nowl and the second reference at every frame from f2601 to
+f2800. The V-blank count at 0x03000058 matches from f1802 to f4700. Its
+matching picture is the stale capture of the section above. mGBA is the
+one that parts.
+
+**Where mGBA parts: the end of a 37-frame load.** From f2386 (after a
+98,348-cycle DMA) the game builds the next scene without halting:
+
+- a BIOS routine at 0x10xx;
+- a 650-iteration tile loop at 0x08001FE0-0x08002092 (Thumb, ROM, WAITCNT
+  0x4314 = WS0 3/1 with the prefetcher on). Each iteration calls SWI 7
+  twice through `push {lr}; bl; svc 7; bx lr; pop {r1}; bx r1` wrappers,
+  loads tile data from EWRAM (`ldrh`, `ldrb`), stores to EWRAM and BG
+  VRAM (`strh`), and counts in IWRAM 0x030012CC.
+
+Traced from f2380 in both, the load's instructions are the same and its
+cost is not:
+
+| | busy cycles, f2386 to the first halt | load ends |
+|---|---|---|
+| dingbat-bios-nowl | 10,575,212 | 10,350 cycles **after** the f2423 V-blank |
+| mGBA | 10,556,746 | 8,469 cycles **before** it |
+
+The 18,466-cycle gap, by region:
+
+| region | dingbat minus mGBA |
+|---|---|
+| the tile loop at 0x080020xx | +4.3k |
+| Nintendo's BIOS routine at 0x10xx | +3.0k |
+| the SWI wrappers at 0x08000Axx | +2.8k |
+| 0x080329xx | +1.6k |
+| 0x080065xx | +1.3k |
+| the rest | scattered |
+
+One tile-loop iteration of the same instructions costs exactly 10 cycles
+more in dingbat (482 against 472, 430 against 420). The extra cycles fall
+on:
+
+- the EWRAM loads and stores;
+- the `pop {r1}` from the IWRAM stack straight after a `bx lr` refill into
+  ROM: 4 cycles in dingbat against 2 in mGBA, where the fetch, the data
+  cycle and the internal cycle alone are 4.
+
+The second reference does even fewer iterations a frame than dingbat (353
+against 360, and 376 in mGBA) and ends the load on dingbat's frame.
+
+**Why that is the checkpoint.** mGBA's V-blank count 0x03000058 resumes one
+V-blank sooner (f2424: 556 against 555) and stays one ahead. The cutscene's
+animations and fades follow it:
+
+- f2736-f2752: mGBA's Diddy animation byte (0x0200B9B5) is a frame early.
+- From f2755: its BG palette buffer (0x02000410, copied to palette RAM by
+  DMA3 at line 161) is a frame late.
+- At f4407: the map transition starts a frame late (0x03000058 is reset at
+  f4408 in dingbat, f4409 in mGBA).
+
+**The decisive test.** Load mGBA to f2500, `poke8` 0x03000058 from 632 to
+dingbat's 631, and change nothing else. mGBA then draws the checkpoint as
+dingbat does: the centre frame and 60 of the window's 61 frames match.
+
+Builds with `-d:CONTENTION=false -d:BRANCH_COMMIT_WAIT=false` still end
+the load 3,632 cycles after the V-blank, and the window does not move.
+
+**Who is right: dingbat, as far as the console has been asked.** This is
+the class in §29, §33, §34 and §39. On the AGB SP, `slotexec.s` gives EWRAM
+loads and stores from gamepak code with the prefetcher on dingbat's cost,
+and mGBA's 4-5 cycles less. The second reference independently lands on
+dingbat's frame. As in §39, the exact cells are at 3/1 waits, which an
+empty-slot probe cannot run (§22: only WAITCNT 0 is safe).
+
+**Status: no change.** The script passes (a SLIP is a pass). `kongo_jungle_map`
+judges the cutscene's V-blank-count phase, which a 0.18 % cheaper load
+moves by a frame.
+
+## §67. Super Mario Advance: the title a frame ahead is the first boot's EEPROM format, 2026-10-14
+
+**Symptom.** `quit_to_title` (f2400, the animated title after SAVE AND
+QUIT): every dingbat configuration, dingbat-bios included, is one frame
+ahead of both references, which are IDENTICAL.
+
+**The second reference is with dingbat again.** On the title (f2365-2415)
+there are 3,303 IWRAM bytes that change. Every one of them in dingbat at f
+equals the second reference at f and mGBA at f+1. The references' matching
+picture is the stale capture of the first section above (here its frames
+end at VCOUNT 142-146).
+
+**Where mGBA parts: the boot.** On a blank cart the game formats its
+4 Kbit EEPROM. It writes 36 blocks, each polled to ready (0x080B69AC:
+`ldrh 0x0D000000`, bit 0, with a timer-flag timeout that never fires).
+Each block's poll lasts:
+
+| | cycles a block | x 36 |
+|---|---|---|
+| dingbat (`EEPROM_SETTLE_CYCLES` 108368) | 108,432 | 3.90M |
+| mGBA | 115,091 | 4.14M |
+
+After the format, a wait for VCOUNT 159 (0x080B5710) turns the 240k-cycle
+difference into a whole frame. To the boot's first main-loop poll mGBA runs
+280,330 cycles and 64,101 instructions more. From there every step of the
+boot comes one frame later in mGBA: the V-blank handler's busy flag and
+counter at 0x03001990-0x03001993 first count at f21 in dingbat, f22 in mGBA
+and f18 in the second reference.
+
+SAVE AND QUIT (A at f2270) shifts all of IWRAM by a frame in mGBA against
+dingbat between f2271 and f2272: mGBA takes the press a frame later, still a
+frame behind. dingbat and the second reference reach the title on the same
+frame and run it in step.
+
+**The decisive test.** Built with `-d:EEPROM_SETTLE_CYCLES=115005` (§36's
+mGBA figure), dingbat, dingbat-bios and dingbat-bios-nowl match both
+references on all 61 frames of the checkpoint's window.
+
+**Who is right: the cart, unmeasured.** This is §36 and §40 again. A
+block's programming time belongs to the chip, varies between parts, and
+GBATEK's "ca. 108368" stays.
+
+**The probe.** It exists: `tests/roms/payloads/eesettle4k.s`, r0table row
+`eesettle4k`, run with this game's 4 Kbit cart (AMZE) in the SP's slot,
+booted holding SELECT+START: `python3 tools/hwlink/r0table.py --record
+eesettle4k`. Predicted cells (`--emulators-only`):
+
+| cell | dingbat, dingbat-bios | mGBA |
+|---|---|---|
+| 0x100, 0x101 (programming time) | 0001A74A (108,362) | 0001C130 (114,992) |
+| 0x102 (DMA length) | 00000300 | 00000301 |
+| 0x103 | FFFFFFFF on a blank last block | FFFFFFFF on a blank last block |
+
+A console value within a few hundred cycles of 108k says the cart sides
+with dingbat. One near 115k says it sides with mGBA. A spread across runs
+says the checkpoint's frame can never be diagnostic.
+
+**Status: no change.** The script passes (a SLIP is a pass). Its later
+`[new]` checkpoints (`saved`, the file select) are still screens.
