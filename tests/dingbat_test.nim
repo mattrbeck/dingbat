@@ -1391,7 +1391,13 @@ proc gambatte_run(rom: string; cgb: bool; frames: int; audio = false): GB =
   # a frame runs, or it becomes the next run's power-on state.
   result.cartridge.sav_path = ""
   if not audio:
-    for _ in 0 ..< frames: result.step_frame()
+    for _ in 0 ..< frames - 1: result.step_frame()
+    # The scored frame's palette transition pixels only (GbRacePx).
+    gb_race_px.setLen(0)
+    gb_race_open = false
+    gb_race_on = true
+    result.step_frame()
+    gb_race_on = false
     return
   # Audio rows: the probe cadence is engaged two frames early so the sample
   # event is already on the 2 MHz grid, then the comparison window is one
@@ -1486,15 +1492,31 @@ proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
         if img.width != GB_WIDTH or img.height != GB_HEIGHT or img.channels != 3:
           detail = "bad reference image " & expected
         else:
-          var diff = 0
+          # A DMG palette write's transition pixel is a race on hardware
+          # (docs/gb-failure-triage.md C7: one DMG photographed shows both
+          # outcomes in one frame), and gambatte's DMG references are its own
+          # framebuffer dumps, which draw a clean edge there. On a DMG row the
+          # reference may hold either clean colour at a pixel dingbat painted
+          # as a transition (GbRacePx); every other pixel is exact.
+          var race = initTable[int, (uint32, uint32)]()
+          if not cgb:
+            for r in gb_race_px:
+              race[int(r.idx)] = (gambatte_pixel(r.clean_old, false),
+                                  gambatte_pixel(r.clean_new, false))
+          var diff, raced = 0
           for i in 0 ..< GB_WIDTH * GB_HEIGHT:
             let want = ((uint32(img.pixels[i * 3]) shl 16) or
                         (uint32(img.pixels[i * 3 + 1]) shl 8) or
                          uint32(img.pixels[i * 3 + 2])) and 0xF8F8F8'u32
-            if gambatte_pixel(fb[i], cgb) != want: inc diff
+            if gambatte_pixel(fb[i], cgb) != want:
+              if i in race and want in [race[i][0], race[i][1]]: inc raced
+              else: inc diff
           ok = diff == 0
-          detail = if ok: "png match"
-                   else: $diff & "/" & $(GB_WIDTH * GB_HEIGHT) & " pixels differ"
+          detail = if not ok:
+                     $diff & "/" & $(GB_WIDTH * GB_HEIGHT) & " pixels differ"
+                   elif raced > 0:
+                     "png match (" & $raced & " transition pixels at the clean edge)"
+                   else: "png match"
       of "audio":
         let constant = emu.apu.probe_constant
         let got = if constant: "0" else: "1"

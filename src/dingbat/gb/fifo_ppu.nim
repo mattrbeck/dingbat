@@ -1529,8 +1529,29 @@ proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32): bool {.noinline.} 
          " tail0=", ppu.tail_dot0, " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite
   when MIXER_PALETTE_OR_HEAD == 0:
     if front - back == 0'i32 and run == 0'i32: return false
+  when defined(test_harness):
+    # The span below paints exactly x = front - back when it is in reach.
+    let x = front - back
+    if gb_race_on and x >= 0 and x >= ppu.lx - MIX_HOLD and x >= run and
+       x <= top and x <= ppu.lx - 1:
+      let i = int32(GB_WIDTH) * int32(ppu.ly) + x
+      gb_race_px.add(GbRacePx(idx: i, clean_old: ppu.framebuffer[i],
+                              clean_new: ppu.framebuffer[i]))
+      gb_race_open = true
   fifo_recompose_span(ppu, gb, front, back, min(top, front - back), run)
   true
+
+when defined(test_harness):
+  proc fifo_race_close*(ppu: GbFifoPpu; gb: GB) =
+    ## The palette write has landed: give the pixel fifo_recompose_at just
+    ## recorded its new-palette colour.
+    if not gb_race_open: return
+    gb_race_open = false
+    let r = addr gb_race_px[^1]
+    let x = r.idx - int32(GB_WIDTH) * int32(ppu.ly)
+    if x < 0 or x >= int32(GB_WIDTH): return
+    let h = ppu.mix[x and (MIX_HOLD - 1)]
+    r.clean_new = fifo_mix(ppu, gb, h.bg, h.sp, x)
 
 proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## LCDC.2 written after an object merged and before its high plane was

@@ -303,6 +303,10 @@ mechanism per the bundle's howto and gambatte-core's `test/testrunner.cpp`:
   a test".
 - Some ROMs ship a reference PNG (`<rom>_dmg08.png` etc.), scored on the whole frame,
   masked to 0xF8F8F8, in the integer CGB colour conversion the reference PNGs are encoded in.
+  One exception on DMG rows: at a pixel dingbat painted as a palette write's transition
+  pixel, the reference may hold either clean colour. The pixel is a race on hardware, and
+  gambatte's DMG PNGs are its own framebuffer dumps (docs/gb-failure-triage.md C7). The
+  verdict counts the pixels accepted this way.
 
 `GambatteGlyphs` was harvested, not vendored (gambatte-core is GPL-2.0): `--dump-tiles=N`
 prints the top-row tiles, and a few hundred ROMs whose names state their digits resolve

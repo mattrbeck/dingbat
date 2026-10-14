@@ -249,6 +249,21 @@ proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32;
                           skip: int32 = 0) {.noinline.}
 proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32): bool {.noinline.}
 
+when defined(test_harness):
+  # Test harness only: every DMG palette transition pixel (MIXER_PALETTE_OR)
+  # painted since the list was last cleared, with the two clean colours it
+  # would have had. The pixel is a race on hardware (docs/gb-failure-triage.md
+  # C7), so the gambatte scorer accepts either clean value there -- its DMG
+  # references are framebuffer dumps of an emulator without the race.
+  type GbRacePx* = object
+    idx*:       int32    # framebuffer index
+    clean_old*: uint16   # the pixel as the old palette drew it
+    clean_new*: uint16   # ... and as the new one draws it
+  var gb_race_px*: seq[GbRacePx]
+  var gb_race_open*: bool   # the last entry still wants its clean_new
+  var gb_race_on*: bool     # recording at all; set by the gambatte scorer only
+  proc fifo_race_close*(ppu: GbFifoPpu; gb: GB)
+
 proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.}
 when WIN_REVOKE_DS_PUSH != 0:
   proc win_revoke_ds_push*(ppu: GbFifoPpu; gb: GB) {.noinline.}
@@ -2819,6 +2834,8 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     else:      ppu_update_palette(ppu.obp1, val)
     mixer_write_repaint(gb, int32(MIXER_PALETTE_BACK), gb_mixer_latency(gb),
                         if or_pixel: 1'i32 else: 0'i32)
+    when defined(test_harness):
+      if or_pixel: fifo_race_close(gb.fifo_ppu, gb)
 
   of 0xFF4A:
     when defined(gb_win_trace):

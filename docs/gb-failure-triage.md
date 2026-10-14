@@ -660,9 +660,23 @@ dot 85 counts one window line too many on the first reactivated line only
 
 ### C7. The DMG BGP transition pixel
 
-**Rows (8).** `dmgpalette_during_m3/dmgpalette_during_m3_{3,4,5,scx1_4}`,
+**Rows (0; scored with the race rule since 2026-10-14).** Were 8:
+`dmgpalette_during_m3/dmgpalette_during_m3_{3,4,5,scx1_4}`,
 `lycint_dmgpalette_during_m3_{3,4}`, `scx3/dmgpalette_during_m3_{4,5}` —
-144 wrong pixels = one per line, or 1.
+144 wrong pixels = one per line, or 1. Every one of those pixels was a
+transition pixel holding a clean colour in gambatte's reference.
+
+**Scoring (2026-10-14).** The model is unchanged and mealybug/AGE/daid stay
+exact. On gambatte's DMG png rows only, the scorer accepts the reference's
+clean old or clean new colour at a pixel dingbat painted as a transition
+(test-harness-only `GbRacePx` list, ppu.nim; `gambatte_batch` in
+tests/dingbat_test.nim). Every other pixel of the frame is still compared
+exactly. Why: gambatte's DMG references are framebuffer dumps of an
+emulator without the race (below), and a hardware photo shows the OR
+outcome at the exact configuration of `_4`. So the reference's clean edge
+is one emulator's choice at a pixel where the hardware races, not a
+hardware result. The verdict line reports how many pixels it accepted
+(`png match (144 transition pixels at the clean edge)`).
 
 **Behaviour.** A DMG BGP write reaches the pixel two dots back as
 `old or new` for one pixel (hardware photographs in SameBoy issue #65,

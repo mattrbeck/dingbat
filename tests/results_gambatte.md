@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-10-14 09:37:40*
+*Generated: 2026-10-14 09:58:32*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5192/5213 passed.**
+**5200/5213 passed.**
 
 ## bgen
 
@@ -37,20 +37,9 @@ All 8 tests passed.
 
 All 229 tests passed.
 
-## dmgpalette_during_m3 (9/17 passed)
+## dmgpalette_during_m3
 
-9/17 tests passed, 8 failed:
-
-| Test | Result |
-|------|--------|
-| dmgpalette_during_m3/dmgpalette_during_m3_3 [dmg, png] | 1/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_4 [dmg, png] | 144/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
-| dmgpalette_during_m3/dmgpalette_during_m3_scx1_4 [dmg, png] | 1/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_3 [dmg, png] | 143/23040 pixels differ |
-| dmgpalette_during_m3/lycint_dmgpalette_during_m3_4 [dmg, png] | 143/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
-| dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
+All 17 tests passed.
 
 ## enable_display
 

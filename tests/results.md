@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 09:37:40 · commit b739163f · game-boy-test-roms v7.0*
+*Generated: 2026-10-14 09:58:32 · commit 7c91790f · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1509
-- **Pass:** 1500
-- **Fail:** 9
+- **Pass:** 1501
+- **Fail:** 8
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -34,7 +34,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 15 | 15 |
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 |
-| Game Boy - gambatte | 46 | 48 |
+| Game Boy - gambatte | 47 | 48 |
 | Game Boy - SingleStepTests SM83 | 20 | 20 |
 | GBA - SingleStepTests ARM7TDMI | 45 | 45 |
 
@@ -280,7 +280,7 @@ One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](resul
 
 **All 184 tests passed.**
 
-## Game Boy - gambatte (46/48)
+## Game Boy - gambatte (47/48)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -291,7 +291,7 @@ One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](resul
 | gambatte/display_startstate | per-ROM | 👌 14/14 passed |
 | gambatte/div | per-ROM | 👌 8/8 passed |
 | gambatte/dma | per-ROM | 👌 229/229 passed |
-| gambatte/dmgpalette_during_m3 | per-ROM | 👀 9/17 passed |
+| gambatte/dmgpalette_during_m3 | per-ROM | 👌 17/17 passed |
 | gambatte/enable_display | per-ROM | 👌 184/184 passed |
 | gambatte/halt | per-ROM | 👌 158/158 passed |
 | gambatte/irq_precedence | per-ROM | 👌 64/64 passed |
