@@ -1925,7 +1925,42 @@ proc row_detail(r: TestResult): string =
     d = d[0 ..< 157] & "..."
   " " & d
 
-proc generate_results_md(suites: seq[SuiteResults]): string =
+const DbsuiteSuiteName = "GBA - dbsuite (AGS-001)"
+
+const ResultsOrder = [
+  # results.md lists every Game Boy suite before every GBA one, and within a
+  # console the suites people know and quote first. A suite missing here
+  # goes after the listed ones of its console.
+  "Game Boy - Blargg", "Game Boy - Blargg dmg_sound",
+  "Game Boy - Blargg cgb_sound", "Game Boy - Mooneye",
+  "Game Boy - Mealybug Tearoom", "Game Boy - Acid2", "Game Boy - SameSuite",
+  "Game Boy - SameSuite APU", "Game Boy - gambatte", "Game Boy - AGE",
+  "Game Boy - Mooneye (wilbertpol)", "Game Boy - GBMicrotest",
+  "Game Boy - MagenTests", "Game Boy - Screenshot suites",
+  "Game Boy - Shootout ROMs", "Game Boy - SingleStepTests SM83",
+  "GBA - mGBA Test Suite", "GBA - jsmolka gba-tests", DbsuiteSuiteName,
+  "GBA - alyosha gba-tests", "GBA - hwverified (AGS-001)",
+  "GBA - PeterLemon BIOS", "GBA - FuzzARM", "GBA - Other test ROMs",
+  "GBA - SingleStepTests ARM7TDMI"]
+
+proc results_rank(suite_name: string): (int, int) =
+  let console =
+    if suite_name.startsWith("Game Boy"): 0
+    elif suite_name.startsWith("GBA"): 1
+    else: 2
+  let i = ResultsOrder.find(suite_name)
+  (console, if i >= 0: i else: ResultsOrder.len)
+
+proc detail_page(suite_name: string): string =
+  ## The per-test page a suite writes beside results.md, or "".
+  if suite_name == "GBA - mGBA Test Suite": "results_mgba_suite.md"
+  elif suite_name == DbsuiteSuiteName: "results_dbsuite.md"
+  elif suite_name.contains("SingleStepTests"): "results_singlestep.md"
+  elif suite_name == "Game Boy - gambatte": "results_gambatte.md"
+  else: ""
+
+proc generate_results_md(unordered: seq[SuiteResults]): string =
+  let suites = unordered.sortedByIt(results_rank(it.suite_name))
   var lines: seq[string]
   lines.add("# Dingbat Test Results")
   lines.add("")
@@ -1935,7 +1970,7 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     "cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a " &
     "CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific " &
     "boot table/revision (`--model`); `\xE2\x80\x94` = GBA, which has no " &
-    "device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.")
+    "device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.")
   lines.add("")
 
   var total = 0
@@ -1951,55 +1986,62 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
   lines.add("- **Pass:** " & $pass_count)
   lines.add("- **Fail:** " & $(total - pass_count))
   lines.add("")
-  lines.add("| Suite | Pass | Total |")
-  lines.add("|-------|------|-------|")
+  # The suite name links to its detail page; load_previous_results reads an
+  # all-pass row here as "every row of this suite was green".
+  lines.add("| Suite | Pass | Total | Status |")
+  lines.add("|-------|------|-------|--------|")
   for suite in suites:
     let p = suite.results.countIt(it.passed)
-    lines.add("| " & suite.suite_name & " | " & $p & " | " &
-      $suite.results.len & " |")
+    let page = detail_page(suite.suite_name)
+    let name = if page.len > 0: "[" & suite.suite_name & "](" & page & ")"
+               else: suite.suite_name
+    let status = if suite.results.len > 0 and p == suite.results.len:
+                   "\xF0\x9F\x91\x8D" else: "\xF0\x9F\x91\x80"
+    lines.add("| " & name & " | " & $p & " | " & $suite.results.len &
+      " | " & status & " |")
   lines.add("")
 
   for suite in suites:
     let p = suite.results.countIt(it.passed)
-    lines.add("## " & suite.suite_name & " (" & $p & "/" &
-      $suite.results.len & ")")
-    lines.add("")
-    # An all-pass section collapses to one line. The gate loses nothing:
-    # load_previous_results records the `(<pass>/<total>)` header under
+    # An all-pass suite gets no section; its summary row says it all. The
+    # gate loses nothing: load_previous_results records that row under
     # suite_allpass_key and was_passing treats absence there as "was green";
     # aggregated rows only pass at 100%, so any drop flips the boolean. The
     # SingleStepTests rows are green below 100% (known divergences), so
     # their counts are the gate and the rows stay (load_previous_counts).
     if suite.results.len > 0 and p == suite.results.len and
        not suite.suite_name.contains("SingleStepTests"):
-      lines.add("**All " & $p & " tests passed.**")
-    else:
-      lines.add("| Test | Device | Result |")
-      lines.add("|------|--------|--------|")
-      for r in suite.results:
-        let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
-        let dev = if r.device.len > 0: r.device else: "\xE2\x80\x94"
-        # The FULL test name, suite prefix included: it is the key the gate
-        # reads back, and forks of suites (mooneye vs mooneye-wilbertpol)
-        # would collide on anything shorter.
-        lines.add("| " & r.name & " | " & dev & " | " & emoji & row_detail(r) & " |")
-    if suite.suite_name == "GBA - mGBA Test Suite":
-      lines.add("")
-      lines.add("See [detailed results](results_mgba_suite.md) for individual test outcomes.")
-    elif suite.suite_name == "GBA - dbsuite (AGS-001)":
+      continue
+    lines.add("## " & suite.suite_name & " (" & $p & "/" &
+      $suite.results.len & ")")
+    lines.add("")
+    lines.add("| Test | Device | Result |")
+    lines.add("|------|--------|--------|")
+    for r in suite.results:
+      let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
+      let dev = if r.device.len > 0: r.device else: "\xE2\x80\x94"
+      # The FULL test name, suite prefix included: it is the key the gate
+      # reads back, and forks of suites (mooneye vs mooneye-wilbertpol)
+      # would collide on anything shorter.
+      lines.add("| " & r.name & " | " & dev & " | " & emoji & row_detail(r) & " |")
+    let page = detail_page(suite.suite_name)
+    if suite.suite_name == DbsuiteSuiteName:
       lines.add("")
       lines.add("One row per dbsuite sub-suite (tests/roms/dbsuite). See " &
-        "[detailed results](results_dbsuite.md) for every case that is not a pass.")
+        "[detailed results](" & page & ") for every case that is not a pass.")
     elif suite.suite_name.contains("SingleStepTests"):
       lines.add("")
       lines.add("One row per vector file (ARM7TDMI) or opcode block (SM83), " &
         "green when every failure is a known divergence. See " &
-        "[detailed results](results_singlestep.md) for the checks and the " &
+        "[detailed results](" & page & ") for the checks and the " &
         "divergences per row, tests/README.md for the evidence.")
     elif suite.suite_name == "Game Boy - gambatte":
       lines.add("")
       lines.add("Each row is one gambatte subdirectory. See " &
-        "[detailed results](results_gambatte.md) for individual test outcomes.")
+        "[detailed results](" & page & ") for individual test outcomes.")
+    elif page.len > 0:
+      lines.add("")
+      lines.add("See [detailed results](" & page & ") for individual test outcomes.")
     lines.add("")
 
   # Bullets, not a table: the baseline parsers treat every "| x | y |" line
@@ -2033,13 +2075,35 @@ proc was_passing(previous: Table[string, bool];
 proc load_previous_results(path: string): Table[string, bool] =
   ## The committed baseline keyed by full test name as generate_results_md
   ## writes it; a name not present is not gated, so the baseline must be
-  ## regenerated when suites are added. Collapsed all-green sections have no
-  ## rows, so their `## <name> (<pass>/<total>)` header is recorded instead.
+  ## regenerated when suites are added. An all-green suite has no rows, so
+  ## its Summary row (`| <name> | <pass> | <total> | ...`, the name possibly
+  ## a link) is recorded instead; a `## <name> (<pass>/<total>)` header, the
+  ## older collapsed form, counts the same.
   result = initTable[string, bool]()
   if not fileExists(path):
     return
   let content = readFile(path)
+  var in_summary = false
   for line in content.splitLines():
+    if line.startsWith("| Suite |"):
+      in_summary = true
+      continue
+    if in_summary:
+      if not line.startsWith("|"):
+        in_summary = false
+      elif not line.startsWith("|---"):
+        let parts = line.split("|").mapIt(it.strip())
+        if parts.len >= 4:
+          var name = parts[1]
+          if name.startsWith("[") and "](" in name:
+            name = name[1 ..< name.find("](")]
+          try:
+            let p = parseInt(parts[2])
+            let t = parseInt(parts[3])
+            if t > 0 and p == t:
+              result[suite_allpass_key(name)] = true
+          except ValueError: discard
+      continue
     if line.startsWith("## ") and line.endsWith(")"):
       let open = line.rfind('(')
       if open > 3:
@@ -2240,7 +2304,6 @@ type
     total: int
     cases: seq[DbsuiteCase]
 
-const DbsuiteSuiteName = "GBA - dbsuite (AGS-001)"
 
 proc run_dbsuite(harness: string; previous: Table[string, bool];
                  previous_counts: Table[string, int];

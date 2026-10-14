@@ -283,8 +283,11 @@ scores them INFO).
   change has no business touching.
 - `results.md`, `results_mgba_suite.md` and `results_gambatte.md` are committed baselines
   and every run rewrites all three; `git checkout -- tests/results*.md` after a local run
-  unless you mean to update them. `results.md` ends with a "Deliberately not scored"
-  section listing each intentional skip with its reason.
+  unless you mean to update them. `results.md` lists Game Boy suites before GBA ones,
+  best-known first (`ResultsOrder`); a suite with every row green has only its Summary
+  row (the gate reads that row as "all green"), and a suite with a detail page links it
+  from its Summary name. It ends with a "Deliberately not scored" section listing each
+  intentional skip with its reason.
 - `tests/golden/` holds per-row mGBA-suite captures for diff-based timing work
   (`tests/golden/README.md`).
 
