@@ -284,9 +284,9 @@ scores them INFO).
 - `results.md`, `results_mgba_suite.md` and `results_gambatte.md` are committed baselines
   and every run rewrites all three; `git checkout -- tests/results*.md` after a local run
   unless you mean to update them. `results.md` lists Game Boy suites before GBA ones,
-  best-known first (`ResultsOrder`); a suite with every row green has only its Summary
-  row (the gate reads that row as "all green"), and a suite with a detail page links it
-  from its Summary name. It ends with a "Deliberately not scored" section listing each
+  each console alphabetical; a suite with every row green has only its Summary row (the
+  gate reads that row as "all green"), and a suite with a detail page links it from its
+  Summary name. It ends with a "Deliberately not scored" section listing each
   intentional skip with its reason.
 - `tests/golden/` holds per-row mGBA-suite captures for diff-based timing work
   (`tests/golden/README.md`).
@@ -412,7 +412,9 @@ is the probe that puts each ARM7TDMI divergence to the AGB SP
 A case passes when every check agrees. Each failure is classified
 (`known_divergence` in `singlestep_sm83.nim` / `singlestep_arm7.nim`) or reported as
 unexplained. A results.md row is green when nothing is unexplained, and its pass
-count is gated like gambatte's (`load_previous_counts`). The ARM7TDMI rows are one
+count is gated from `results_singlestep.md` (`load_singlestep_counts`), so a case
+sliding into a known bucket is still a regression; with every row green the suite
+shows only its Summary row in results.md. The ARM7TDMI rows are one
 per vector file, the SM83 rows one per unprefixed high nibble plus four for the CB
 page; `results_singlestep.md` has every row's checks and divergences.
 

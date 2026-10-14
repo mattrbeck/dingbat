@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 12:34:32 · commit 7cfa714f · game-boy-test-roms v7.0*
+*Generated: 2026-10-14 13:06:55 · commit d42835c6 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
@@ -12,73 +12,31 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
-| Game Boy - Blargg | 28 | 28 | 👍 |
-| Game Boy - Blargg dmg_sound | 12 | 12 | 👍 |
-| Game Boy - Blargg cgb_sound | 12 | 12 | 👍 |
-| Game Boy - Mooneye | 152 | 152 | 👍 |
-| Game Boy - Mealybug Tearoom | 74 | 74 | 👍 |
-| Game Boy - Acid2 | 2 | 2 | 👍 |
-| Game Boy - SameSuite | 8 | 8 | 👍 |
-| Game Boy - SameSuite APU | 70 | 70 | 👍 |
-| [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👍 |
-| Game Boy - AGE | 118 | 118 | 👍 |
-| Game Boy - Mooneye (wilbertpol) | 184 | 184 | 👍 |
-| Game Boy - GBMicrotest | 480 | 480 | 👍 |
-| Game Boy - MagenTests | 7 | 7 | 👍 |
-| Game Boy - Screenshot suites | 19 | 19 | 👍 |
-| Game Boy - Shootout ROMs | 15 | 15 | 👍 |
-| [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👍 |
-| [GBA - mGBA Test Suite](results_mgba_suite.md) | 13 | 13 | 👍 |
-| GBA - jsmolka gba-tests | 13 | 13 | 👍 |
-| [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 5 | 8 | 👀 |
+| Game Boy - Acid2 | 2 | 2 | 👌 |
+| Game Boy - AGE | 118 | 118 | 👌 |
+| Game Boy - Blargg | 28 | 28 | 👌 |
+| Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
+| Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
+| [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
+| Game Boy - GBMicrotest | 480 | 480 | 👌 |
+| Game Boy - MagenTests | 7 | 7 | 👌 |
+| Game Boy - Mealybug Tearoom | 74 | 74 | 👌 |
+| Game Boy - Mooneye | 152 | 152 | 👌 |
+| Game Boy - Mooneye (wilbertpol) | 184 | 184 | 👌 |
+| Game Boy - SameSuite | 8 | 8 | 👌 |
+| Game Boy - SameSuite APU | 70 | 70 | 👌 |
+| Game Boy - Screenshot suites | 19 | 19 | 👌 |
+| Game Boy - Shootout ROMs | 15 | 15 | 👌 |
+| [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
 | GBA - alyosha gba-tests | 123 | 126 | 👀 |
-| GBA - hwverified (AGS-001) | 12 | 12 | 👍 |
-| GBA - PeterLemon BIOS | 25 | 25 | 👍 |
-| GBA - FuzzARM | 5 | 5 | 👍 |
+| [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 5 | 8 | 👀 |
+| GBA - FuzzARM | 5 | 5 | 👌 |
+| GBA - hwverified (AGS-001) | 12 | 12 | 👌 |
+| GBA - jsmolka gba-tests | 13 | 13 | 👌 |
+| [GBA - mGBA Test Suite](results_mgba_suite.md) | 13 | 13 | 👌 |
 | GBA - Other test ROMs | 12 | 13 | 👀 |
-| [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👍 |
-
-## Game Boy - SingleStepTests SM83 (20/20)
-
-| Test | Device | Result |
-|------|--------|--------|
-| sm83/00-0F | — | 👌 16000/16000 passed |
-| sm83/10-1F | — | 👌 15000/16000 passed (1000 known divergences) |
-| sm83/20-2F | — | 👌 16000/16000 passed |
-| sm83/30-3F | — | 👌 16000/16000 passed |
-| sm83/40-4F | — | 👌 16000/16000 passed |
-| sm83/50-5F | — | 👌 16000/16000 passed |
-| sm83/60-6F | — | 👌 16000/16000 passed |
-| sm83/70-7F | — | 👌 15000/16000 passed (1000 known divergences) |
-| sm83/80-8F | — | 👌 16000/16000 passed |
-| sm83/90-9F | — | 👌 16000/16000 passed |
-| sm83/A0-AF | — | 👌 16000/16000 passed |
-| sm83/B0-BF | — | 👌 16000/16000 passed |
-| sm83/C0-CF | — | 👌 15000/15000 passed |
-| sm83/CB 00-3F (rotate, shift, SWAP) | — | 👌 64000/64000 passed |
-| sm83/CB 40-7F (BIT) | — | 👌 64000/64000 passed |
-| sm83/CB 80-BF (RES) | — | 👌 64000/64000 passed |
-| sm83/CB C0-FF (SET) | — | 👌 64000/64000 passed |
-| sm83/D0-DF | — | 👌 13000/13000 passed |
-| sm83/E0-EF | — | 👌 11000/11000 passed |
-| sm83/F0-FF | — | 👌 13000/13000 passed |
-
-One row per vector file (ARM7TDMI) or opcode block (SM83), green when every failure is a known divergence. See [detailed results](results_singlestep.md) for the checks and the divergences per row, tests/README.md for the evidence.
-
-## GBA - dbsuite (AGS-001) (5/8)
-
-| Test | Device | Result |
-|------|--------|--------|
-| dbsuite/cpu | — | 👌 117/117 passed |
-| dbsuite/irq | — | 👌 145/145 passed |
-| dbsuite/timer | — | 👌 26/26 passed |
-| dbsuite/dma | — | 👀 261/262 passed |
-| dbsuite/bus | — | 👀 76/79 passed |
-| dbsuite/ppu | — | 👌 156/156 passed |
-| dbsuite/apu | — | 👀 50/52 passed |
-| dbsuite/bios | — | 👌 47/47 passed |
-
-One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](results_dbsuite.md) for every case that is not a pass.
+| GBA - PeterLemon BIOS | 25 | 25 | 👌 |
+| [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
 ## GBA - alyosha gba-tests (123/126)
 
@@ -211,6 +169,21 @@ One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](resul
 | png183/psr/psr2 | — | 👌 |
 | png183/timer/timer_check_count_up_presence | — | 👌 |
 
+## GBA - dbsuite (AGS-001) (5/8)
+
+| Test | Device | Result |
+|------|--------|--------|
+| dbsuite/cpu | — | 👌 117/117 passed |
+| dbsuite/irq | — | 👌 145/145 passed |
+| dbsuite/timer | — | 👌 26/26 passed |
+| dbsuite/dma | — | 👀 261/262 passed |
+| dbsuite/bus | — | 👀 76/79 passed |
+| dbsuite/ppu | — | 👌 156/156 passed |
+| dbsuite/apu | — | 👀 50/52 passed |
+| dbsuite/bios | — | 👌 47/47 passed |
+
+One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](results_dbsuite.md) for every case that is not a pass.
+
 ## GBA - Other test ROMs (12/13)
 
 | Test | Device | Result |
@@ -228,58 +201,6 @@ One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](resul
 | agbeeg/stm_does_not_lock_bus | — | 👌 |
 | agbeeg/cpu_runs_idles_during_dma | — | 👌 |
 | dingbat/semiobjwin | — | 👌 |
-
-## GBA - SingleStepTests ARM7TDMI (45/45)
-
-| Test | Device | Result |
-|------|--------|--------|
-| arm7tdmi/arm_b_bl | — | 👌 5035/5035 passed |
-| arm7tdmi/arm_bx | — | 👌 5044/5044 passed |
-| arm7tdmi/arm_cdp | — | 👌 5042/5042 passed |
-| arm7tdmi/arm_data_proc_immediate | — | 👌 5192/5334 passed (142 known divergences) |
-| arm7tdmi/arm_data_proc_immediate_shift | — | 👌 5195/5334 passed (139 known divergences) |
-| arm7tdmi/arm_data_proc_register_shift | — | 👌 5168/5331 passed (163 known divergences) |
-| arm7tdmi/arm_ldm_stm | — | 👌 4196/4249 passed (53 known divergences) |
-| arm7tdmi/arm_ldr_str_immediate_offset | — | 👌 5042/5167 passed (125 known divergences) |
-| arm7tdmi/arm_ldr_str_register_offset | — | 👌 5054/5167 passed (113 known divergences) |
-| arm7tdmi/arm_ldrh_strh | — | 👌 5163/5163 passed |
-| arm7tdmi/arm_ldrsb_ldrsh | — | 👌 5159/5159 passed |
-| arm7tdmi/arm_mcr_mrc | — | 👌 4861/5039 passed (178 known divergences) |
-| arm7tdmi/arm_mrs | — | 👌 5179/5349 passed (170 known divergences) |
-| arm7tdmi/arm_msr_imm | — | 👌 4891/5349 passed (458 known divergences) |
-| arm7tdmi/arm_msr_reg | — | 👌 3612/5349 passed (1737 known divergences) |
-| arm7tdmi/arm_mul_mla | — | 👌 4764/5327 passed (563 known divergences) |
-| arm7tdmi/arm_mull_mlal | — | 👌 4748/5311 passed (563 known divergences) |
-| arm7tdmi/arm_stc_ldc | — | 👌 5039/5039 passed |
-| arm7tdmi/arm_swi | — | 👌 5037/5037 passed |
-| arm7tdmi/arm_swp | — | 👌 4822/5016 passed (194 known divergences) |
-| arm7tdmi/thumb_add_cmp_mov_hi | — | 👌 5220/5322 passed (102 known divergences) |
-| arm7tdmi/thumb_add_sp_or_pc | — | 👌 5349/5349 passed |
-| arm7tdmi/thumb_add_sub | — | 👌 5349/5349 passed |
-| arm7tdmi/thumb_add_sub_sp | — | 👌 5349/5349 passed |
-| arm7tdmi/thumb_b | — | 👌 4766/4766 passed |
-| arm7tdmi/thumb_bcc | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_bl_blx_prefix | — | 👌 5349/5349 passed |
-| arm7tdmi/thumb_bl_suffix | — | 👌 4766/4766 passed |
-| arm7tdmi/thumb_bx | — | 👌 4766/4766 passed |
-| arm7tdmi/thumb_data_proc | — | 👌 5349/5349 passed |
-| arm7tdmi/thumb_ldm_stm | — | 👌 4296/4296 passed |
-| arm7tdmi/thumb_ldr_pc_rel | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_ldr_str_imm_offset | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_ldr_str_reg_offset | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_ldr_str_sp_rel | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_ldrb_strb_imm_offset | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_ldrh_strh_imm_offset | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_ldrh_strh_reg_offset | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_ldrsb_strb_reg_offset | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_ldrsh_ldrsb_reg_offset | — | 👌 5041/5041 passed |
-| arm7tdmi/thumb_lsl_lsr_asr | — | 👌 5349/5349 passed |
-| arm7tdmi/thumb_mov_cmp_add_sub | — | 👌 5349/5349 passed |
-| arm7tdmi/thumb_push_pop | — | 👌 4098/4098 passed |
-| arm7tdmi/thumb_swi | — | 👌 4766/4766 passed |
-| arm7tdmi/thumb_undefined_bcc | — | 👌 0/4766 passed (4766 known divergences) |
-
-One row per vector file (ARM7TDMI) or opcode block (SM83), green when every failure is a known divergence. See [detailed results](results_singlestep.md) for the checks and the divergences per row, tests/README.md for the evidence.
 
 ## Deliberately not scored
 

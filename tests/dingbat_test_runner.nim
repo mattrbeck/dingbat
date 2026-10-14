@@ -1927,29 +1927,14 @@ proc row_detail(r: TestResult): string =
 
 const DbsuiteSuiteName = "GBA - dbsuite (AGS-001)"
 
-const ResultsOrder = [
-  # results.md lists every Game Boy suite before every GBA one, and within a
-  # console the suites people know and quote first. A suite missing here
-  # goes after the listed ones of its console.
-  "Game Boy - Blargg", "Game Boy - Blargg dmg_sound",
-  "Game Boy - Blargg cgb_sound", "Game Boy - Mooneye",
-  "Game Boy - Mealybug Tearoom", "Game Boy - Acid2", "Game Boy - SameSuite",
-  "Game Boy - SameSuite APU", "Game Boy - gambatte", "Game Boy - AGE",
-  "Game Boy - Mooneye (wilbertpol)", "Game Boy - GBMicrotest",
-  "Game Boy - MagenTests", "Game Boy - Screenshot suites",
-  "Game Boy - Shootout ROMs", "Game Boy - SingleStepTests SM83",
-  "GBA - mGBA Test Suite", "GBA - jsmolka gba-tests", DbsuiteSuiteName,
-  "GBA - alyosha gba-tests", "GBA - hwverified (AGS-001)",
-  "GBA - PeterLemon BIOS", "GBA - FuzzARM", "GBA - Other test ROMs",
-  "GBA - SingleStepTests ARM7TDMI"]
-
-proc results_rank(suite_name: string): (int, int) =
+proc results_rank(suite_name: string): (int, string) =
+  ## results.md order: every Game Boy suite before every GBA one, each
+  ## console alphabetical.
   let console =
     if suite_name.startsWith("Game Boy"): 0
     elif suite_name.startsWith("GBA"): 1
     else: 2
-  let i = ResultsOrder.find(suite_name)
-  (console, if i >= 0: i else: ResultsOrder.len)
+  (console, suite_name.toLowerAscii)
 
 proc detail_page(suite_name: string): string =
   ## The per-test page a suite writes beside results.md, or "".
@@ -1996,7 +1981,7 @@ proc generate_results_md(unordered: seq[SuiteResults]): string =
     let name = if page.len > 0: "[" & suite.suite_name & "](" & page & ")"
                else: suite.suite_name
     let status = if suite.results.len > 0 and p == suite.results.len:
-                   "\xF0\x9F\x91\x8D" else: "\xF0\x9F\x91\x80"
+                   "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
     lines.add("| " & name & " | " & $p & " | " & $suite.results.len &
       " | " & status & " |")
   lines.add("")
@@ -2007,10 +1992,10 @@ proc generate_results_md(unordered: seq[SuiteResults]): string =
     # gate loses nothing: load_previous_results records that row under
     # suite_allpass_key and was_passing treats absence there as "was green";
     # aggregated rows only pass at 100%, so any drop flips the boolean. The
-    # SingleStepTests rows are green below 100% (known divergences), so
-    # their counts are the gate and the rows stay (load_previous_counts).
-    if suite.results.len > 0 and p == suite.results.len and
-       not suite.suite_name.contains("SingleStepTests"):
+    # SingleStepTests rows are green below 100% (known divergences); their
+    # pass counts are gated from results_singlestep.md instead
+    # (load_singlestep_counts).
+    if suite.results.len > 0 and p == suite.results.len:
       continue
     lines.add("## " & suite.suite_name & " (" & $p & "/" &
       $suite.results.len & ")")
@@ -2158,6 +2143,25 @@ proc load_previous_counts(path: string): Table[string, int] =
               result[parts[1]] = parseInt(halves[0])
             except ValueError: discard
             break cells
+
+proc load_singlestep_counts(path: string; counts: var Table[string, int]) =
+  ## The SingleStepTests rows' pass counts from results_singlestep.md
+  ## (`| <row> | <cases> | <pass> | ...`). results.md drops an all-green
+  ## suite's rows, but these rows are green below 100% (known divergences),
+  ## so a case sliding into a known bucket is caught by its count alone.
+  if not fileExists(path):
+    return
+  var in_table = false
+  for line in readFile(path).splitLines():
+    if line.startsWith("| Row |"):
+      in_table = true
+    elif not line.startsWith("|"):
+      in_table = false
+    elif in_table and not line.startsWith("|---"):
+      let parts = line.split("|").mapIt(it.strip())
+      if parts.len >= 4:
+        try: counts[parts[1]] = parseInt(parts[3])
+        except ValueError: discard
 
 proc device_label(t: TestDef): string =
   ## The results.md Device column. "cart" = no override, the header picks
@@ -2523,7 +2527,7 @@ proc run_singlestep_suite(suite, title, vector_dir: string;
     var known = 0
     for k in r.known: known += k[0]
     # Green when every failure is a known divergence; the pass count is
-    # gated as well (load_previous_counts), so a case moving into a
+    # gated as well (load_singlestep_counts), so a case moving into a
     # known bucket still counts as a regression.
     let ok = r.pass + known == r.cases
     let unexplained = r.cases - r.pass - known
@@ -3041,7 +3045,9 @@ proc main() =
 
   let results_path = getCurrentDir() / "tests" / "results.md"
   let previous = load_previous_results(results_path)
-  let previous_counts = load_previous_counts(results_path)
+  var previous_counts = load_previous_counts(results_path)
+  load_singlestep_counts(getCurrentDir() / "tests" / "results_singlestep.md",
+                         previous_counts)
 
   var all_suites: seq[SuiteResults]
   var regressions: seq[string]
