@@ -27,6 +27,7 @@ APU and cart models are built on. Pass counts live in `tests/results*.md`.
 | CasualPokePlayer | `CasualPokePlayer/test-roms` | per-test branches | branch `README.md` (`# Conclusion` where present) | see upstream |
 | mbc30test | `ZoomTen/mbc30test` | release `v1.1` asset `MBC3_Test.gbc` (SHA-1 `ea206114`), source `16571ba` | `README.md` "Test results", `src/main.s.z80` | WTFPL |
 | simple-mbc3O-test | `deltabeard/simple-mbc3O-test` | release `v1.0.3` asset `mbc3Otest.gb` (SHA-1 `482bb40b`), source `9a5f841` | `mbc3Otest.asm` | permissive (README) |
+| DocBoy | `Docheinstein/docboy` `tests/` (ROMs, manifests, reference PNGs); sources in `Docheinstein/docboy-test-suite` | `01e04d3d9f` (`DocboyRev`; suite sources `e417e4e7cf`) | `tests/config/*.json` (verdict per ROM), `tests/testutils/testutils/runners.h` (how it is checked), per-test `.asm` headers | MIT |
 
 The c-sp bundle (`/tmp/dingbat-test-roms/game-boy-test-roms/`, version
 `GbBundleVersion` in `tests/dingbat_test_runner.nim`) ships a
@@ -64,6 +65,7 @@ From each suite's `game-boy-test-roms-howto.md` and README:
 | dmg-acid2 / cgb-acid2 | "does not require any T-cycle accurate timing and thus *probably* works on any" |
 | cgb-acid-hell | no compatibility statement; hardware photo in `img/photo.jpg` |
 | mooneye | encoded in the file name (below) |
+| DocBoy | one revision per family: CPU CGB E (maintainer, docboy#42: "I'm supporting only CGB-E at the moment"; `cgb.json` on `cgb-acid-hell`: "does not pass even on real CGB-E"); DMG ABC by its skip-boot state (DIV `$ABCC` "[mooneye/boot_div-dmgABCmgb.gb]", AF `$01B0`). The maintainer tests on his own DMG and CGB (docboy#33, docboy-test-suite#1); the board revision of the DMG is not stated |
 
 Mealybug revision splits, decoded from its own reference sets: `DMG-CPU B` vs
 `DMG-blob` differs on `m3_lcdc_bg_en_change` (228 px) and

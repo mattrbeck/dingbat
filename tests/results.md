@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 13:59:46 · commit b2d4cec3 · game-boy-test-roms v7.0*
+*Generated: 2026-10-14 15:18:42 · commit 8882f698 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
-- **Total:** 1517
-- **Pass:** 1510
-- **Fail:** 7
+- **Total:** 1587
+- **Pass:** 1538
+- **Fail:** 49
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -17,6 +17,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
+| [Game Boy - DocBoy](results_docboy.md) | 28 | 70 | 👀 |
 | [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
@@ -38,6 +39,83 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - Other test ROMs | 12 | 13 | 👀 |
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
+
+## Game Boy - DocBoy (28/70)
+
+| Test | Device | Result |
+|------|--------|--------|
+| docboy/dmg/cpu | DMG dmgABC | 👀 10/12 passed |
+| docboy/dmg/ppu | DMG dmgABC | 👀 1164/1303 passed |
+| docboy/dmg/mbc/mbc1 | DMG dmgABC | 👀 11/12 passed |
+| docboy/dmg/mbc/mbc3 | DMG dmgABC | 👀 17/21 passed |
+| docboy/dmg/mbc/mbc5 | DMG dmgABC | 👌 1/1 passed |
+| docboy/dmg/mbc/huc3 | DMG dmgABC | 👀 2/8 passed |
+| docboy/dmg/boot | DMG dmgABC | 👀 21/23 passed |
+| docboy/dmg/memory | DMG dmgABC | 👀 21/23 passed |
+| docboy/dmg/oam_bug | DMG dmgABC | 👀 97/268 passed |
+| docboy/dmg/stat_write_bug | DMG dmgABC | 👌 29/29 passed |
+| docboy/dmg/timers | DMG dmgABC | 👀 6/10 passed |
+| docboy/dmg/interrupts | DMG dmgABC | 👀 157/158 passed |
+| docboy/dmg/dma | DMG dmgABC | 👀 59/68 passed |
+| docboy/dmg/serial | DMG dmgABC | 👀 74/77 passed |
+| docboy/dmg/joypad | DMG dmgABC | 👀 32/34 passed |
+| docboy/dmg/apu | DMG dmgABC | 👀 236/307 passed |
+| docboy/cgb/boot | CGB cgbE | 👀 29/69 passed |
+| docboy/cgb/banks | CGB cgbE | 👌 2/2 passed |
+| docboy/cgb/memory | CGB cgbE | 👀 18/33 passed |
+| docboy/cgb/oam_bug | CGB cgbE | 👌 5/5 passed |
+| docboy/cgb/stat_write_bug | CGB cgbE | 👌 1/1 passed |
+| docboy/cgb/timers | CGB cgbE | 👀 0/2 passed |
+| docboy/cgb/interrupts | CGB cgbE | 👀 26/27 passed |
+| docboy/cgb/dma | CGB cgbE | 👌 41/41 passed |
+| docboy/cgb/hdma | CGB cgbE | 👀 465/643 passed |
+| docboy/cgb/serial | CGB cgbE | 👌 17/17 passed |
+| docboy/cgb/ir | CGB cgbE | 👌 1/1 passed |
+| docboy/cgb/mode | CGB cgbE | 👀 2/6 passed |
+| docboy/cgb/undocumented | CGB cgbE | 👌 4/4 passed |
+| docboy/cgb/ppu | CGB cgbE | 👀 379/427 passed |
+| docboy/cgb/mbc/mbc7 | CGB cgbE | 👌 17/17 passed |
+| docboy/cgb/apu/ch1 | CGB cgbE | 👀 1009/1134 passed |
+| docboy/cgb/apu/ch2 | CGB cgbE | 👌 26/26 passed |
+| docboy/cgb/apu/ch3 | CGB cgbE | 👀 79/109 passed |
+| docboy/cgb/apu/ch4 | CGB cgbE | 👀 66/69 passed |
+| docboy/cgb/double_speed/apu/ch1 | CGB cgbE | 👀 374/613 passed |
+| docboy/cgb/double_speed/apu/ch2 | CGB cgbE | 👀 52/63 passed |
+| docboy/cgb/double_speed/apu/ch3 | CGB cgbE | 👀 152/169 passed |
+| docboy/cgb/double_speed/apu/ch4 | CGB cgbE | 👀 1249/1925 passed |
+| docboy/cgb/double_speed/core | CGB cgbE | 👌 8/8 passed |
+| docboy/cgb/double_speed/dma | CGB cgbE | 👌 14/14 passed |
+| docboy/cgb/double_speed/hdma | CGB cgbE | 👀 43/50 passed |
+| docboy/cgb/double_speed/interactive | CGB cgbE | 👀 41/75 passed |
+| docboy/cgb/double_speed/interrupts | CGB cgbE | 👀 197/246 passed |
+| docboy/cgb/double_speed/ppu | CGB cgbE | 👀 355/357 passed |
+| docboy/cgb/double_speed/serial | CGB cgbE | 👌 4/4 passed |
+| docboy/cgb/double_speed/timers | CGB cgbE | 👌 76/76 passed |
+| docboy/cgb/double_speed/visual | CGB cgbE | 👌 5/5 passed |
+| docboy/cgb_dmg_mode/apu | CGB cgbE | 👌 2/2 passed |
+| docboy/cgb_dmg_mode/boot | CGB cgbE | 👀 14/19 passed |
+| docboy/cgb_dmg_mode/banks | CGB cgbE | 👌 2/2 passed |
+| docboy/cgb_dmg_mode/hdma | CGB cgbE | 👌 2/2 passed |
+| docboy/cgb_dmg_mode/ir | CGB cgbE | 👌 1/1 passed |
+| docboy/cgb_dmg_mode/key0 | CGB cgbE | 👌 1/1 passed |
+| docboy/cgb_dmg_mode/key1 | CGB cgbE | 👌 1/1 passed |
+| docboy/cgb_dmg_mode/memory | CGB cgbE | 👀 0/15 passed |
+| docboy/cgb_dmg_mode/mode | CGB cgbE | 👌 6/6 passed |
+| docboy/cgb_dmg_mode/ppu | CGB cgbE | 👀 321/554 passed |
+| docboy/cgb_dmg_mode/serial | CGB cgbE | 👌 1/1 passed |
+| docboy/cgb_dmg_mode/stat_write_bug | CGB cgbE | 👌 1/1 passed |
+| docboy/cgb_dmg_mode/undocumented | CGB cgbE | 👌 4/4 passed |
+| docboy/cgb_dmg_ext_mode/apu | CGB cgbE | 👌 2/2 passed |
+| docboy/cgb_dmg_ext_mode/banks | CGB cgbE | 👀 0/2 passed |
+| docboy/cgb_dmg_ext_mode/hdma | CGB cgbE | 👌 2/2 passed |
+| docboy/cgb_dmg_ext_mode/ir | CGB cgbE | 👀 0/1 passed |
+| docboy/cgb_dmg_ext_mode/key1 | CGB cgbE | 👀 0/1 passed |
+| docboy/cgb_dmg_ext_mode/mode | CGB cgbE | 👀 0/8 passed |
+| docboy/cgb_dmg_ext_mode/ppu | CGB cgbE | 👀 4/5 passed |
+| docboy/cgb_dmg_ext_mode/serial | CGB cgbE | 👀 0/1 passed |
+| docboy/cgb_dmg_ext_mode/undocumented | CGB cgbE | 👀 3/4 passed |
+
+Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
 ## GBA - alyosha gba-tests (123/126)
 
@@ -225,3 +303,5 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **mooneye/utils/ (bootrom_dumper, dump_boot_hwio)** — tools, not pass/fail tests. bootrom_dumper waits for a boot ROM to dump and can only time out (docs/gb-failure-triage.md calls it unrecoverable); dump_boot_hwio ends in quit_dump_mem, which sets the success byte unconditionally, so its green row was a gate that could not fail. (build_mooneye_tests)
 - **mooneye-wilbertpol utils/, logic-analysis/** — tools and analysis captures, not pass/fail tests. (build_wilbertpol_tests)
 - **rtc3test upstream single ROM** — needs menu input to select a sub-test; the shootout's three pre-split builds are scored instead. (build_shootout_tests)
+- **DocBoy: 645 rows its own manifests disable** — `"enabled": false`, so DocBoy's runner never runs them and states no verdict for them: 640 `double_speed/apu/ch4` and 2 `double_speed/apu/ch3` CGB rows, `mbc/huc3/huc3_tick` ("takes a long time (1 real minute)") and two `cgb_dmg_mode` `m3_lcdc_win_en_change_multiple_wx_*_signed_addressing_source` rows ("glitch is different, probably uses another memory bus"). (build_docboy_rows)
+- **DocBoy manifests: 725 vendored ROMs of other suites** — everything outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, firstwhite, rtc3test, cpp, zoomten, tepples). Those are scored from their upstream releases in the sections above, each by its own author's verdict; DocBoy's entries re-check them against DocBoy's own frame dumps, and 8 are DocBoy edits (`samesuite/apu/channel_1/*-cgbE`, expectations rewritten for CPU CGB E). (build_docboy_rows)

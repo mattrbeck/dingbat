@@ -1060,6 +1060,118 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 
 ---
 
+## I. DocBoy (`docboy/*`, first scored 2026-10-14)
+
+DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
+(`tests/README.md`, "The DocBoy suite"): 7,061 / 9,227 at `DocboyRev`, every
+failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
+expectations come from one emulator's model of the maintainer's own DMG and
+CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
+SameBoy (DMG B / CGB E, real boot ROMs) on six sampled red rows per section:
+where SameBoy agrees with DocBoy, the family is probably dingbat's; where it
+fails too, the row encodes something only DocBoy models, or a hardware
+question. Families, largest first:
+
+* **I1. CH4 retrigger, mostly double speed (646).** `double_speed/apu/ch4`
+  `retrigger_*` / `double_retrigger_*`, about half of each `round1`/`round2`
+  pair, plus 3 single-speed `ch4_retrigger_*`; the 33 red double-speed
+  `change_{shift,divider}_*` rows are in I8. Theory: the LFSR clock's phase
+  after a retrigger at double speed is one step off. SameBoy passes 4 of 6.
+  DocBoy itself disables 640 neighbouring rows (ledger); scored privately they
+  go 359 / 645. Probably dingbat.
+* **I2. CH1 frequency sweep edges (380).** `period_sweep_*` on DMG, CGB and
+  double speed: sweep timer reload and recalculation against triggers,
+  NR10/NR13/NR14 writes during a recalculation, disable-on-(double/triple)
+  trigger. SameBoy passes 10 of 12. Probably dingbat.
+* **I3. CGB compatibility-mode picture (233).** 63 `palettes_checksum_*`:
+  dingbat's skip-boot hand-off always loads the default compatibility palette,
+  where the boot ROM picks one by the title checksum (Pan Docs, "Power Up
+  Sequence", compatibility palettes); SameBoy, running the boot ROM, passes
+  all three sampled. The rest are mid-mode-3 LCDC writes in compat mode:
+  `m3_lcdc_win_en_change_multiple_wx_*` (104, half of them `$FFF0` timing
+  rows) and `change_{bg,win}_tile_data_glitch_*` (73); SameBoy fails the
+  three sampled pictures and passes 4 of 6 sampled `$FFF0` rows. The palette
+  part is dingbat's skip-boot; the glitch part is contested.
+* **I4. HDMA / GDMA (182, 7 of them double speed).** `gdma_ppu_on_pixel_transfer_
+  conflict_relaxed_*` (82): a GDMA overlapping mode 3; `hdma_remaining_length_
+  ly*_scx*` (40, HDMA5 readback mid-transfer; SameBoy passes 3 of 3, probably
+  dingbat); the `*_source_{vram,wram_dma_source_ram,oam,io,hram,not_usable}`
+  rows (what a block reads from odd sources; SameBoy fails too, contested).
+* **I5. DMG OAM corruption patterns (171).** `oam_bug_{pop,ld_a_hl,ld_hl_a,
+  ld_a_hli}_round*` and their `_fe*` variants: the exact bytes the read and
+  pop corruptions leave, per row of the OAM scan. blargg `oam_bug` is green;
+  SameBoy fails 3 of 6. DocBoy's pattern tables are its DMG's; contested
+  (Pan Docs' formulas are the spec; the per-unit variation is a known open
+  question).
+* **I6. DMG window glitches (120).** `window_retrigger_pixel_glitch_*` (about
+  60; SameBoy passes the sampled ones, probably dingbat) and
+  `window_turn_off_*` (43, 4 to 6 pixels at `ld b,b`; SameBoy also fails, a
+  DocBoy-only model).
+* **I7. Speed-switch interrupt and STOP timing (79).** `double_speed/
+  interrupts/speed_switch_to_{double,single}_interrupt_*` (49) and the
+  non-input `double_speed/interactive/*stop_key*` rows (30): when a STAT,
+  VBlank or serial interrupt lands around the KEY1 switch's stall. SameBoy
+  passes 6 of 6 interrupts and 5 of 6 STOP rows. Probably dingbat (E).
+* **I8. Other APU (146).** CH1/CH2 envelope pace changes
+  (`change_volume_sweep_pace_*`, `volume_sweep_*`, 50), CH3 disable while
+  sampling (39), double-speed CH4 shift/divider changes (33), double-speed
+  CH3 retrigger and length rows. SameBoy passes
+  every sampled one. Probably dingbat.
+* **I9. Boot hand-off state (47).** `cgb/boot/boot_div_title_*` (38): DIV at
+  `$0100` depends on the path the CGB boot ROM took through the header
+  (licensee, title checksum); dingbat hands off one DIV. Plus
+  `boot_regs_video`, `boot_hram`, `boot_ppu_phase`. A skip-boot gap; SameBoy
+  runs its own boot ROM, so it is no witness here.
+* **I10. `$FEA0-$FEFF` (32).** 30 on the CGB: DocBoy's CGB-E rows expect RAM, with
+  `$FEC0-$FEFF` repeating 16 bytes, in CGB and in compat mode. dingbat follows
+  Pan Docs ("FEA0-FEFF range": CGB E reads return the high nibble of the low
+  address byte twice, writes are dropped: `urNibbleEcho`). SameBoy fails too.
+  A conflict with the spec: a hardware question, not a fix. The other two
+  are DMG reads during OAM scan / pixel transfer, which SameBoy passes.
+* **I11. CGB header modes (19).** `mode_cgb_flag_{81,82,83,90}`: dingbat
+  takes only `$80`/`$C0` as a CGB cart, where the boot ROM copies any bit-7
+  value to KEY0 and only bits 2/3 leave CGB mode (Pan Docs, "CGB flag");
+  SameBoy passes all four, dingbat's. The 15 red `cgb_dmg_ext_mode` rows are
+  PGB mode (`$0143 = $88..$8F`, KEY0 bit 3), which dingbat does not model.
+* **I12. CGB pictures (46).** About 25 are the LCD panel model:
+  `ppu/visual/turn_off_y*_*`, `stop_*`: DocBoy models the CGB panel keeping already-drawn rows, and
+  stalling, when the LCD is switched off mid-frame (its own slow-motion
+  camera study); dingbat's frame is the PPU's output. SameBoy fails the
+  sampled `turn_off_*` rows (and passes `stop_ly42_during_hblank`). A
+  DocBoy model, scored but not chased. The rest are window and tile-data
+  glitches (`window_wx0_scx*`, `change_wx_glitch_*`,
+  `change_{bg,win}_tile_data_glitch_*`), which SameBoy also fails.
+* **I13. Rows with scripted input (26 of 71).** Through `--input`; 45 pass,
+  every joypad picture and `stop_joypad*`/`stop_key*` interrupt row among
+  them. Red:
+  * 2 `joypad_{buttons,dpad}_interrupt_release`: DocBoy raises the joypad
+    interrupt when the key is released; Pan Docs ("Joypad Input",
+    "INT $60") and dingbat raise it on the falling P10-P13 edge, a press
+    only. DocBoy's model against the spec: not chased.
+  * 13 DMG rows that leave STOP with a key press and then read LY, STAT or
+    TIMA, or check an interrupt (`ppu/interactive/stop_read_{ly,stat}*`,
+    `stop_trigger_interrupt`, `timers/interactive/stop_read_tima_*`,
+    `dma_stop_during_transfer_timing_round2`): `$FFF0 = 2`, so the wake
+    happens but the PPU/timer phase after STOP disagrees. dingbat freezes
+    the whole clock in STOP (Pan Docs, "Using the STOP Instruction"); the
+    rows encode where DocBoy's DMG resumes. Open: needs the STOP wake's
+    phase on hardware.
+  * 10 rows where a key press never ends the run (`$FFF0` stays 0): the CGB
+    `timers/interactive/stop_read_tima_*`, `double_speed_stop_read_tima_*`
+    and `hdma/interactive/*stop*` rows, and DMG
+    `stop_immediate_exit_joypad_interrupt`. The input is applied (the
+    harness reports none left over), so the ROM is stuck after it: a STOP
+    wake that dingbat does not take, or takes into a state the ROM never
+    leaves. Probably dingbat; first to chase.
+  * `mbc3_rtc_gb_stopped_recover` (1): the RTC across a STOP.
+* **Small (40):** HuC3 commands (6, `$FFF0` never written; SameBoy passes 5
+  of 6, dingbat's), DMG `dma_*_check_stat_*` (8, SameBoy passes all), MBC3
+  RTC latch (3, SameBoy fails too), `write_tima_while_reloading_*` (2,
+  SameBoy fails too), serial (3), DMG ppu `$FFF0` rows (3), six DMG
+  STOP/HALT pictures whose reference is DocBoy's blank-panel colour
+  (`$AD00`, Pan Docs' "whiter than color #0"), which dingbat draws as shade 0
+  or black.
+
 ## Hardware experiments that would close buckets
 
 The ROMs exist in `tools/gbprobe/` (raw values, no baked expectation,

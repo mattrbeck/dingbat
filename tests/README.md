@@ -23,7 +23,7 @@ nimble bench_build   # -> ./dingbat_bench
 
 Modes (authority: the arg parsing at the bottom of `dingbat_test.nim`): `serial`,
 `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `fuzzarm`, `magen-green`,
-`magen-nored`, `gambatte`, `microtest`, `screenshot`, `stateroundtrip`, `rewindtest`,
+`magen-nored`, `gambatte`, `microtest`, `docboy`, `screenshot`, `stateroundtrip`, `rewindtest`,
 `linktest`, `normlinktest`, `norm32linktest`, `attachtest`, `netlink`, `speclink`,
 `speclinkbench`, `rollback`, `rollbacknet`, `gblinktest`, `mbc30test`.
 
@@ -268,7 +268,8 @@ Flags: `--bios=<path>` (the mGBA suite and every GBA screenshot row run on that 
 instead of the HLE), `--apu` (runs only Blargg dmg_sound/cgb_sound + SameSuite APU and prints
 tallies without rewriting results files), `--suite=gba` (the same for every GBA suite: mGBA,
 jsmolka, FuzzARM, alyosha, PeterLemon, Other, SingleStepTests ARM7TDMI; about a
-minute), `--suite=singlestep` (both SingleStepTests sets, see below).
+minute), `--suite=singlestep` (both SingleStepTests sets, see below), `--suite=docboy`
+(the DocBoy suite alone, tallies only).
 
 ### Which suites run, and how each is scored
 
@@ -289,6 +290,7 @@ authority on device, exit condition and verdict.
 | MagenTests | screen colour | see above |
 | MBC (ZoomTen mbc30test, deltabeard simple-mbc3O-test) | on-screen bank table (`tmMbc30Test`); serial `All banks OK` | release assets pinned by SHA-1; header device (CGB) and `--dmg` |
 | gambatte | glyph OCR of the on-screen result | batched; one row per subdirectory |
+| DocBoy | HRAM `$FFF0` (1 pass / 2 fail) or framebuffer vs reference PNG, DocBoy's own runner rules | batched (`--mode=docboy`); one row per manifest section; see "The DocBoy suite" |
 | mGBA suite, jsmolka, FuzzARM | GBA | see above |
 | SingleStepTests SM83, ARM7TDMI | per-instruction state and bus vs the vectors | `./singlestep_test`; see "SingleStepTests" below |
 
@@ -374,8 +376,8 @@ scores them INFO).
   cached path silently changes what later runs score. Use a private cache before
   generating a baseline to commit, and check `git diff tests/results.md` for rows the
   change has no business touching.
-- `results.md`, `results_mgba_suite.md` and `results_gambatte.md` are committed baselines
-  and every run rewrites all three; `git checkout -- tests/results*.md` after a local run
+- `results.md`, `results_mgba_suite.md`, `results_gambatte.md` and `results_docboy.md`
+  are committed baselines and every run rewrites them; `git checkout -- tests/results*.md` after a local run
   unless you mean to update them. `results.md` lists Game Boy suites before GBA ones,
   each console alphabetical; a suite with every row green has only its Summary row (the
   gate reads that row as "all green"), and a suite with a detail page links it from its
@@ -435,6 +437,72 @@ gambatte ROM under SameBoy and prints the same decoded hex (`--rom <dmg|cgb> <ro
 list; `SAMEBOY_CGB_MODEL=0|A|B|C|D|E`, C by default). It plays the real boot ROM where
 dingbat skips it, which is a one-M-cycle post-boot phase offset; use it differentially
 (modify the ROM and ask whether the answer moves as the model predicts).
+
+## The DocBoy suite
+
+Docheinstein/docboy (MIT) keeps its emulator's test ROMs under `tests/` with
+four JSON manifests naming each ROM's verdict: `config/dmg.json`, `cgb.json`,
+`cgb_dmg_mode.json`, `cgb_dmg_ext_mode.json`; ROM sources are in
+Docheinstein/docboy-test-suite. The runner fetches the archive at `DocboyRev`
+(19 MB) and extracts only the manifests, `results/` and the ROMs under
+`roms/*/docboy/` (~355 MB, ~10,000 ROMs). Only `docboy/` is DocBoy's own: the
+manifests also vendor other suites (725 entries), which are scored from
+upstream, and DocBoy disables 645 of its own entries; both are in the
+`NotScored` ledger.
+
+**Device.** DocBoy emulates one revision per family. CGB: the maintainer,
+docboy#42: "I'm supporting only CGB-E at the moment" (and the manifest's
+`cgb-acid-hell` entry: "This does not pass even on real CGB-E!"). DMG: its
+skip-boot state is the DMG ABC/MGB hand-off (`timers.cpp`: DIV `$ABCC`,
+"[mooneye/boot_div-dmgABCmgb.gb]"; `cpu.cpp`: AF `$01B0`), which with `A = $01`
+is DMG ABC. So `dmg` rows run on `--model=dmgABC` (forced DMG) and the three
+CGB manifests on `--cgb-rev=E` with the cart header picking the operating
+mode, as DocBoy's CGB build does: `cgb_dmg_mode` carts are DMG-flagged (compat
+mode), `cgb_dmg_ext_mode` carts carry `$0143 = $88..$8F`, which the CGB boot
+ROM copies to KEY0 and which enters what Pan Docs calls PGB mode (KEY0 bit 3).
+dingbat does not model PGB mode (it reads such a header as a DMG cart), so
+that manifest's rows are scored and red rather than skipped: the hardware they
+assert is a CPU CGB E with that cart, which is what the row runs.
+
+**Verdict** (`tests/testutils/testutils/runners.h` at the pin, reproduced by
+`docboy_batch` in `dingbat_test.nim`). No boot ROM (DocBoy's CI builds
+without `ENABLE_BOOTROM`). A *tick* is one 4,194,304 Hz clock in both speed
+modes; ticks count from the hand-off at `$0100`, the run stops at 100,000,000.
+- `check_at_instruction` (`ld b,b` = `$40`, `ld c,c` = `$49`): one forced
+  check when the CPU reaches that opcode, nothing else.
+- Otherwise every 100,000 ticks: memory rows read their addresses (all of
+  DocBoy's own: `$FFF0`) and pass on `value` (1) or stop failed on
+  `fail_value` (2); framebuffer rows arm a check for the next M-cycle in which
+  the PPU is in mode 1 and pass when the frame matches.
+- Framebuffers compare exactly in RGB565 (the PNG's RGB888 truncated,
+  `r>>3, g>>2, b>>3`). DMG shades are DocBoy's `$84A0 $4B40 $2AA0 $1200`;
+  CGB colours are the raw BGR555 widened (`G6 = G5*2 + G5>>4`), no colour
+  correction. DocBoy also has a blank-panel colour (`$AD00`, Pan Docs'
+  "whiter than color #0" with the LCD off); dingbat draws a blank panel as
+  shade 0, so a reference showing it cannot match.
+- `check_at_tick` appears in the manifests but DocBoy's `RunnerAdapter` never
+  passes it on, so it is ignored here too. `color_tolerance` and `palette`
+  appear only on vendored entries. `limit_speed` only paces RTC rows to the
+  wall clock when DocBoy is built with system time, which its CI is not.
+- The two two-player rows (`serial_two_players_*`) run both carts on the
+  in-process cable and check both screens at frame granularity.
+- 71 rows script joypad input (`inputs`: a key `pressed`/`released` at
+  `trigger_at_tick` N or at `trigger_at_instruction`). The runner turns each
+  list 1:1 into `--input` syntax (`N:key:state`, or `@HH` for the opcode,
+  `ld r,r'` = `$40 + 8r + r'`) and `--mode=docboy` arms it per row through
+  `gb_timed_input`, the same machinery and timing as `--input` (see "Timed
+  joypad input"); the tick and the dot share an origin, the hand-off.
+
+`results.md` carries one row per manifest section
+(`docboy/<manifest>/<section>`, gated on its pass count like gambatte's);
+every failing ROM, with the first differing pixel or the `$FFF0` value, is in
+`results_docboy.md`. Failing framebuffer rows run the full 100M ticks (about
+1,400 frames each): 350 of the suite's ~390 CPU-seconds (8,800 rows cost the
+other 40). CI sets `DINGBAT_DOCBOY_FB_MAX_TICKS=10000000`, which stops
+framebuffer rows at 10M ticks (~35 CPU-s for the red ones); every green
+framebuffer row passes by tick 4.84M, and the committed baseline comes from
+the uncapped local run, so a row that only passes between the two limits
+would show up in CI as a regression rather than hide.
 
 ## SingleStepTests — per-instruction CPU vectors (`tests/singlestep_test.nim`)
 

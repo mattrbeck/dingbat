@@ -2001,6 +2001,21 @@ const NotScored: seq[(string, string)] = @[
   ("rtc3test upstream single ROM", "needs menu input to select a sub-test; " &
     "the shootout's three pre-split builds are scored instead. " &
     "(build_shootout_tests)"),
+  ("DocBoy: 645 rows its own manifests disable", "`\"enabled\": false`, " &
+    "so DocBoy's runner never runs them and states no verdict for them: " &
+    "640 `double_speed/apu/ch4` and 2 `double_speed/apu/ch3` CGB rows, " &
+    "`mbc/huc3/huc3_tick` (\"takes a long time (1 real minute)\") and two " &
+    "`cgb_dmg_mode` `m3_lcdc_win_en_change_multiple_wx_*_signed_addressing_" &
+    "source` rows (\"glitch is different, probably uses another memory " &
+    "bus\"). (build_docboy_rows)"),
+  ("DocBoy manifests: 725 vendored ROMs of other suites", "everything " &
+    "outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, " &
+    "mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, " &
+    "firstwhite, rtc3test, cpp, zoomten, tepples). Those are scored from " &
+    "their upstream releases in the sections above, each by its own " &
+    "author's verdict; DocBoy's entries re-check them against DocBoy's own " &
+    "frame dumps, and 8 are DocBoy edits (`samesuite/apu/channel_1/*-cgbE`, " &
+    "expectations rewritten for CPU CGB E). (build_docboy_rows)"),
 ]
 
 proc provenance_line(): string =
@@ -2044,6 +2059,7 @@ proc detail_page(suite_name: string): string =
   elif suite_name == DbsuiteSuiteName: "results_dbsuite.md"
   elif suite_name.contains("SingleStepTests"): "results_singlestep.md"
   elif suite_name == "Game Boy - gambatte": "results_gambatte.md"
+  elif suite_name == "Game Boy - DocBoy": "results_docboy.md"
   else: ""
 
 proc generate_results_md(unordered: seq[SuiteResults]): string =
@@ -2125,6 +2141,11 @@ proc generate_results_md(unordered: seq[SuiteResults]): string =
     elif suite.suite_name == "Game Boy - gambatte":
       lines.add("")
       lines.add("Each row is one gambatte subdirectory. See " &
+        "[detailed results](" & page & ") for individual test outcomes.")
+    elif suite.suite_name == "Game Boy - DocBoy":
+      lines.add("")
+      lines.add("Each row is one section of a DocBoy manifest " &
+        "(`docboy/<manifest>/<section>`). See " &
         "[detailed results](" & page & ") for individual test outcomes.")
     elif page.len > 0:
       lines.add("")
@@ -3026,6 +3047,252 @@ proc generate_gambatte_detail_md(groups: seq[GambatteGroup]): string =
       lines.add("")
   lines.join("\n")
 
+# ==================== DocBoy ====================
+# Docheinstein/docboy's own test ROMs (MIT; sources in
+# Docheinstein/docboy-test-suite), scored the way its runner scores them:
+# tests/config/{dmg,cgb,cgb_dmg_mode,cgb_dmg_ext_mode}.json name each ROM's
+# verdict, `--mode=docboy` (docboy_batch in dingbat_test.nim) reproduces
+# tests/testutils/testutils/runners.h. One results.md row per manifest
+# section; every row in tests/results_docboy.md. Only the ROMs under
+# `docboy/` are DocBoy's own; the manifests also vendor other suites, which
+# are scored from upstream (NotScored lists every skip).
+
+const DocboyRev = "01e04d3d9fcb4ea28d05f468771127b2f6bd3549"
+const DocboySuiteName = "Game Boy - DocBoy"
+const DocboyManifests = ["dmg", "cgb", "cgb_dmg_mode", "cgb_dmg_ext_mode"]
+
+proc docboy_keep(rel: string): bool =
+  ## The part of the repository the suite needs: the four manifests, the
+  ## reference PNGs and DocBoy's own ROMs. The rest of tests/roms is other
+  ## suites (and most of the 412 MB the archive extracts to).
+  if not rel.startsWith("tests/"): return false
+  let parts = rel.split('/')
+  if parts.len == 3 and parts[1] == "config": return rel.endsWith(".json")
+  if parts.len >= 3 and parts[1] == "results": return true
+  parts.len >= 4 and parts[1] == "roms" and parts[3] == "docboy"
+
+proc ensure_docboy_tests(): string =
+  ## DocBoy's tests/ tree at DocboyRev (a 19 MB GitHub archive), extracted
+  ## selectively: ~355 MB of it, ~10,000 32 KB ROMs.
+  let dir = RomCacheDir / "docboy-" & DocboyRev[0 ..< 7]
+  let tests = dir / "tests"
+  if tree_intact(dir): return tests
+  if dirExists(dir): removeDir(dir)
+  echo "Downloading Docheinstein/docboy..."
+  createDir(RomCacheDir)
+  let pid = $getCurrentProcessId()
+  let zipfile = RomCacheDir / "docboy-" & pid & ".zip"
+  let staging = RomCacheDir / "docboy-" & pid
+  download_file(&"https://github.com/Docheinstein/docboy/archive/{DocboyRev}.zip", zipfile)
+  let prefix = "docboy-" & DocboyRev & "/"
+  try:
+    let reader = openZipArchive(zipfile)
+    try:
+      for path in reader.walkFiles:
+        if not path.startsWith(prefix): continue
+        let rel = path[prefix.len .. ^1]
+        if not docboy_keep(rel): continue
+        let dest = staging / rel
+        createDir(dest.parentDir)
+        writeFile(dest, reader.extractFile(path))
+    finally:
+      reader.close()
+  except ZippyError, IOError, OSError:
+    echo "Failed to extract: ", getCurrentExceptionMsg()
+    if dirExists(staging): removeDir(staging)
+    removeFile(zipfile)
+    quit(1)
+  removeFile(zipfile)
+  stamp_tree(staging)
+  try:
+    moveDir(staging, dir)
+  except OSError:
+    removeDir(staging)  # another runner put its copy in place first
+  tests
+
+type
+  DocboyRow = object
+    dev: string        # "dmg" | "cgb" (CPU CGB E; the header picks the mode)
+    kind: string       # "mem" | "fb" | "fb2"
+    instr: int         # check_at_instruction opcode, -1 = periodic checks
+    expected: string   # see docboy_batch
+    rom, rom2: string
+    input: string      # --input spec from the manifest's `inputs`, or "-"
+    group: string      # "docboy/<manifest>/<section>"
+    name: string
+
+  DocboyGroup = object
+    name: string
+    device: string
+    passes: int
+    total: int
+    failures: seq[(string, string)]
+
+  DocboySkips = object
+    disabled, vendored: int
+
+proc docboy_opcode(n: JsonNode): int =
+  ## runtests.cpp parse_instruction: an opcode number or a mnemonic. DocBoy's
+  ## own rows use `ld b,b` and `ld c,c`; any `ld r,r'` is $40 + 8r + r'
+  ## (r in b c d e h l (hl) a).
+  if n.kind == JInt: return n.getInt
+  const regs = ["b", "c", "d", "e", "h", "l", "(hl)", "a"]
+  let m = n.getStr.toLowerAscii.replace(" ", "")
+  if m.startsWith("ld") and ',' in m:
+    let halves = m[2 .. ^1].split(',')
+    let d = regs.find(halves[0])
+    let r = regs.find(halves[1])
+    if d >= 0 and r >= 0 and not (d == 6 and r == 6):
+      return 0x40 + 8 * d + r
+  raise newException(ValueError, "unknown instruction " & n.getStr)
+
+proc docboy_input_spec(inputs: JsonNode): string =
+  ## A manifest `inputs` list as dingbat_test's --input syntax (README, "Timed
+  ## joypad input"), one item per entry in list order: trigger_at_tick N ->
+  ## `N`, trigger_at_instruction -> `@HH`.
+  var items: seq[string]
+  for e in inputs:
+    let at = if e.hasKey("trigger_at_tick"): $e["trigger_at_tick"].getBiggestInt
+             else: "@" & toHex(docboy_opcode(e["trigger_at_instruction"]), 2)
+    items.add(at & ":" & e["key"].getStr & ":" & e["state"].getStr)
+  items.join(",")
+
+proc build_docboy_rows(tests: string; skips: var DocboySkips): seq[DocboyRow] =
+  var seen = initCountTable[string]()
+  for manifest in DocboyManifests:
+    let doc = parseFile(tests / "config" / manifest & ".json")
+    let dev = if manifest == "dmg": "dmg" else: "cgb"
+    let roms = tests / "roms" / manifest
+    let refs = tests / "results" / manifest
+    for section, entries in doc.pairs:
+      for t in entries:
+        let rom = t["rom"].getStr
+        if not rom.startsWith("docboy/"):
+          inc skips.vendored
+          continue
+        if t.hasKey("enabled") and not t["enabled"].getBool:
+          inc skips.disabled
+          continue
+        var row = DocboyRow(dev: dev, instr: -1, rom: roms / rom, rom2: "-",
+                            input: "-",
+                            group: "docboy/" & manifest & "/" & section)
+        if t.hasKey("inputs"):
+          row.input = docboy_input_spec(t["inputs"])
+        if t.hasKey("check_at_instruction"):
+          row.instr = docboy_opcode(t["check_at_instruction"])
+        if t.hasKey("framebuffer"):
+          if t.hasKey("rom2"):
+            row.kind = "fb2"
+            row.rom2 = roms / t["rom2"].getStr
+            row.expected = refs / t["framebuffer"].getStr & "|" &
+                           refs / t["framebuffer2"].getStr
+          else:
+            row.kind = "fb"
+            row.expected = refs / t["framebuffer"].getStr
+        elif t.hasKey("memory"):
+          row.kind = "mem"
+          var parts: seq[string]
+          for m in t["memory"]:
+            let fail = if m.hasKey("fail_value"): m["fail_value"].getInt else: -1
+            parts.add(&"{m[\"address\"].getInt}:{m[\"value\"].getInt}:{fail}")
+          row.expected = parts.join(",")
+        else:
+          # DocBoy's own rows are memory or framebuffer; anything else would
+          # be a manifest this runner does not understand yet.
+          echo &"  Warning: DocBoy row {manifest}/{rom} has no verdict this runner knows"
+          continue
+        var name = manifest & "/" & rom.changeFileExt("")
+        if row.kind == "fb2": name.add(" + " & t["rom2"].getStr.extractFilename.changeFileExt(""))
+        seen.inc(name)
+        if seen[name] > 1: name.add(" #" & $seen[name])
+        row.name = name
+        result.add(row)
+
+proc run_docboy_suite(harness: string; previous: Table[string, bool];
+                      previous_counts: Table[string, int];
+                      regressions: var seq[string];
+                      groups: var seq[DocboyGroup]): SuiteResults =
+  echo &"\n=== {DocboySuiteName} ==="
+  var skips: DocboySkips
+  let rows = build_docboy_rows(ensure_docboy_tests(), skips)
+  echo &"  {rows.len} rows; not scored: {skips.disabled} disabled upstream, " &
+       &"{skips.vendored} vendored from other suites"
+  var list_lines: seq[string]
+  for r in rows:
+    list_lines.add([r.dev, r.kind, $r.instr, r.expected, r.rom, r.rom2,
+                    r.input].join("\t"))
+  let verdicts = run_sharded_batch(harness, "docboy", "dingbat-docboy", "DOC", list_lines)
+  var order: seq[string]
+  var by_group = initTable[string, DocboyGroup]()
+  for i, row in rows:
+    if row.group notin by_group:
+      order.add(row.group)
+      by_group[row.group] = DocboyGroup(name: row.group,
+        device: if row.dev == "dmg": "DMG dmgABC" else: "CGB cgbE")
+    let (passed, detail) = split_verdict(verdicts[i])
+    by_group.withValue(row.group, g):
+      inc g.total
+      if passed: inc g.passes
+      else: g.failures.add((row.name, detail))
+  var results: seq[TestResult]
+  var total_pass, total_all = 0
+  for name in order:
+    let g = by_group[name]
+    groups.add(g)
+    total_pass += g.passes
+    total_all += g.total
+    let all_pass = g.passes == g.total
+    echo &"  [{(if all_pass: \"PASS\" else: \"FAIL\")}] {name} - {g.passes}/{g.total} passed"
+    results.add(TestResult(name: name, passed: all_pass,
+                           output: &"{g.passes}/{g.total} passed",
+                           always_detail: true, device: g.device))
+    # Gated as gambatte's groups are: all-green going red, or the count dropping.
+    if was_passing(previous, DocboySuiteName, name) and not all_pass:
+      regressions.add(name)
+    elif previous_counts.hasKey(name) and g.passes < previous_counts[name]:
+      regressions.add(&"{name} ({previous_counts[name]} -> {g.passes} passing)")
+  echo &"  DocBoy total: {total_pass}/{total_all} passed"
+  SuiteResults(suite_name: DocboySuiteName, results: results)
+
+proc generate_docboy_detail_md(groups: seq[DocboyGroup]): string =
+  var lines: seq[string]
+  lines.add("# DocBoy Test Suite - Detailed Results")
+  lines.add("")
+  lines.add("*Generated: " & now().format("yyyy-MM-dd HH:mm:ss") &
+            " \xC2\xB7 Docheinstein/docboy " & DocboyRev[0 ..< 8] & "*")
+  lines.add("")
+  lines.add("DocBoy's own ROMs (`docboy/` in its tests/config manifests), each")
+  lines.add("scored by the verdict its manifest names, the way DocBoy's runner")
+  lines.add("checks it: `$FFF0` = 1 pass / 2 fail, polled every 100,000 4 MHz")
+  lines.add("ticks, or an exact RGB565 match with the reference PNG at the next")
+  lines.add("VBlank (or at `ld b,b` / `ld c,c` when the row names one). DMG rows")
+  lines.add("run on a DMG ABC, the three CGB manifests on a CPU CGB E with the")
+  lines.add("cart header picking the mode. See tests/README.md for the mechanism")
+  lines.add("and docs/gb-failure-triage.md for the failing families.")
+  lines.add("")
+  var total_pass, total_all = 0
+  for g in groups:
+    total_pass += g.passes
+    total_all += g.total
+  lines.add(&"**{total_pass}/{total_all} passed.**")
+  lines.add("")
+  for g in groups:
+    let status = if g.passes == g.total: "" else: &" ({g.passes}/{g.total} passed)"
+    lines.add("## " & g.name & status)
+    lines.add("")
+    if g.failures.len == 0:
+      lines.add(&"All {g.total} tests passed ({g.device}).")
+      lines.add("")
+    else:
+      lines.add(&"{g.passes}/{g.total} tests passed on {g.device}, {g.failures.len} failed:")
+      lines.add("")
+      lines.add("| Test | Result |")
+      lines.add("|------|--------|")
+      for (name, det) in g.failures:
+        lines.add("| " & name & " | " & det.replace("|", "/") & " |")
+      lines.add("")
+  lines.join("\n")
+
 proc main() =
   let harness_name = when defined(windows): "dingbat_test.exe" else: "dingbat_test"
   let harness = getCurrentDir() / harness_name
@@ -3037,6 +3304,7 @@ proc main() =
   var apu_only = false
   var gba_only = false
   var sst_only = false
+  var docboy_only = false
   var p = initOptParser(commandLineParams())
   while true:
     p.next()
@@ -3058,8 +3326,9 @@ proc main() =
         if v == "apu": apu_only = true
         elif v == "gba": gba_only = true
         elif v == "singlestep": sst_only = true
+        elif v == "docboy": docboy_only = true
         else:
-          echo "Unknown suite: ", v, " (only 'apu', 'gba' or 'singlestep' can be selected)"
+          echo "Unknown suite: ", v, " (only 'apu', 'gba', 'singlestep' or 'docboy' can be selected)"
           quit(1)
       else: discard
 
@@ -3106,6 +3375,21 @@ proc main() =
     echo ""
     for suite in sst_suites:
       echo &"{suite.suite_name}: {suite.results.countIt(it.passed)}/{suite.results.len} pass"
+    quit(0)
+
+  # --suite=docboy: run ONLY the DocBoy suite and print its tallies without
+  # touching any results file.
+  if docboy_only:
+    var docboy_regressions: seq[string]
+    var docboy_groups: seq[DocboyGroup]
+    let r = run_docboy_suite(harness, initTable[string, bool](),
+                             initTable[string, int](), docboy_regressions,
+                             docboy_groups)
+    var p, t = 0
+    for g in docboy_groups:
+      p += g.passes
+      t += g.total
+    echo &"\n{r.suite_name}: {p}/{t} pass ({r.results.countIt(it.passed)}/{r.results.len} sections green)"
     quit(0)
 
   # --suite=gba: run ONLY the GBA suites and print tallies without touching
@@ -3243,6 +3527,10 @@ proc main() =
                                     regressions, gambatte_groups,
                                     gb_test_roms_dir))
 
+  var docboy_groups: seq[DocboyGroup]
+  all_suites.add(run_docboy_suite(harness, previous, previous_counts,
+                                  regressions, docboy_groups))
+
   var sst_detail: seq[(string, seq[SstRow])]
   all_suites.add(run_singlestep_suite("sm83", "Game Boy - SingleStepTests SM83",
     ensure_sm83_vectors(), previous, previous_counts, regressions, sst_detail))
@@ -3260,6 +3548,9 @@ proc main() =
   writeFile(sst_detail_path, generate_singlestep_detail_md(sst_detail))
   if gambatte_groups.len > 0:
     writeFile(gambatte_detail_path, generate_gambatte_detail_md(gambatte_groups))
+  let docboy_detail_path = getCurrentDir() / "tests" / "results_docboy.md"
+  if docboy_groups.len > 0:
+    writeFile(docboy_detail_path, generate_docboy_detail_md(docboy_groups))
   echo &"\nResults written to {results_path}"
   echo &"mGBA detail written to {mgba_detail_path}"
   echo &"dbsuite detail written to {dbsuite_detail_path}"

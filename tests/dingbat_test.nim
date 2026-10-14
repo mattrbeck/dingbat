@@ -19,7 +19,7 @@ type
     tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
     tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
     tmMagenGreen, tmMagenNoRed, tmGambatte, tmMicrotest,
-    tmMbc30Test
+    tmMbc30Test, tmDocboy
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
 # DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
@@ -1722,6 +1722,249 @@ proc mbc30test_run(rom_path, screen: string; force_dmg: bool;
   for line in prev: stderr.writeLine("  |" & line & "|")
   1
 
+# ==================== DocBoy (batched) ====================
+#
+# Docheinstein/docboy's own runner (tests/testutils/testutils/runners.h),
+# reproduced. A "tick" there is one 4 MHz clock, the PPU dot clock, in both
+# speed modes (Core::cycle runs t0..t3 and adds 4). The run loop is
+# `for (tick = 0; tick <= max_ticks; tick += 4)`, max_ticks 100,000,000; after
+# each M-cycle `should_check_expectation` decides:
+#   - check_at_instruction set (an opcode, `ld b,b` = $40 / `ld c,c` = $49):
+#     check once, forced, at the first M-cycle the CPU's current opcode is it;
+#     no other check runs.
+#   - otherwise every 100,000 ticks (tick > 0, tick % 100000 == 0): memory
+#     rows check then; framebuffer rows set a pending flag and check at the
+#     next M-cycle the PPU reports mode 1 (VBlank).
+# Memory rows pass when every address reads its `value` and stop as failed
+# the first time one reads its `fail_value` (all of DocBoy's own: $FFF0, 1
+# pass / 2 fail). Framebuffer rows pass on an exact RGB565 match with the
+# reference PNG (RGB888 truncated: r>>3, g>>2, b>>3). The manifest's
+# `check_at_tick` is parsed but RunnerAdapter never applies it, so it is
+# ignored here too. No boot ROM (DocBoy's CI builds without ENABLE_BOOTROM).
+#
+# Colours, from DocBoy's lcd/colormap.h: DMG shades 0..3 are RGB565 $84A0,
+# $4B40, $2AA0, $1200; CGB is BGR555 -> R5<<11 | (G5*2 + G5>>4)<<5 | B5, no
+# colour correction.
+
+const DocboyCheckInterval = 100_000'i64
+const DocboyMaxTicks = 100_000_000'i64
+
+proc docboy_fb_max_ticks(): int64 =
+  ## CI only: DINGBAT_DOCBOY_FB_MAX_TICKS caps framebuffer rows below DocBoy's
+  ## 100,000,000 (a red framebuffer row otherwise runs all ~1,400 frames, and
+  ## those are ~90% of the suite's CPU). Every passing framebuffer row passes
+  ## by tick 4.84M; the committed results come from the uncapped local run,
+  ## so a row passing between the cap and 100M would read as a regression in
+  ## CI and show itself. Unset = DocBoy's own limit.
+  result = DocboyMaxTicks
+  let v = getEnv("DINGBAT_DOCBOY_FB_MAX_TICKS")
+  if v.len > 0:
+    try: result = min(DocboyMaxTicks, parseBiggestInt(v).int64)
+    except ValueError: discard
+const DocboyDmgRgb565 = [0x84A0'u32, 0x4B40'u32, 0x2AA0'u32, 0x1200'u32]
+
+proc docboy_rgb565(gb: GB; c: uint16): uint32 =
+  if gb.cgb_enabled:
+    let r = uint32(c and 0x1F)
+    let g = uint32((c shr 5) and 0x1F)
+    let b = uint32((c shr 10) and 0x1F)
+    (r shl 11) or ((g * 2 + (g shr 4)) shl 5) or b
+  else:
+    for i in 0 ..< 4:
+      if DMG_COLORS[i] == c: return DocboyDmgRgb565[i]
+    0x10000'u32 or uint32(c)  # not a DMG shade: matches no reference pixel
+
+proc docboy_load_ref(path: string; cache: var Table[string, seq[uint32]]): seq[uint32] =
+  ## The reference PNG as DocBoy's load_framebuffer_png sees it: RGB888
+  ## truncated to RGB565. Empty if it is not a 160x144 image.
+  if path in cache: return cache[path]
+  let img = read_png(path)
+  if img.width == GB_WIDTH and img.height == GB_HEIGHT:
+    result = newSeq[uint32](GB_WIDTH * GB_HEIGHT)
+    for i in 0 ..< result.len:
+      var r, g, b: uint32
+      if img.channels == 3:
+        r = img.pixels[i * 3]; g = img.pixels[i * 3 + 1]; b = img.pixels[i * 3 + 2]
+      else:
+        r = img.pixels[i]; g = r; b = r
+      result[i] = ((r shr 3) shl 11) or ((g shr 2) shl 5) or (b shr 3)
+  cache[path] = result
+
+proc docboy_fb_diff(gb: GB; want: seq[uint32]): tuple[diff: int; first: string] =
+  for i in 0 ..< GB_WIDTH * GB_HEIGHT:
+    let got = docboy_rgb565(gb, gb.ppu.framebuffer[i])
+    if got != want[i]:
+      if result.diff == 0:
+        result.first = "first at row " & $(i div GB_WIDTH) & " col " &
+          $(i mod GB_WIDTH) & ": got $" & toHex(got and 0xFFFF'u32, 4) &
+          " want $" & toHex(want[i], 4)
+      inc result.diff
+
+proc docboy_new_gb(rom: string; cgb: bool): GB =
+  ## DMG rows run on a DMG ABC, every CGB manifest on a CPU CGB E (the
+  ## maintainer: "I'm supporting only CGB-E", docboy#42); the cart header
+  ## picks the CGB's operating mode, as DocBoy's CGB build does.
+  result = new_gb("", rom, headless = true, run_bios = false,
+                  force_cgb = cgb, force_dmg = not cgb)
+  result.gb_set_revision(if cgb: grCgbE else: grDmgABC)
+  result.test_output = new_test_output()
+  result.post_init()
+  result.cartridge.sav_path = ""
+
+proc docboy_end_frame(gb: GB) {.inline.} =
+  ## step_frame's frame-boundary bookkeeping for a loop that steps the CPU
+  ## itself (the checks are per instruction): finish mode 3, then rebase.
+  if gb.ppu.frame and not ((gb.ppu.lcd_status and 3'u8) == 3'u8 and
+                           gb.ppu.lcd_enabled and not gb.cpu.stopped):
+    gb.ppu.frame = false
+    discard gb.gb_rebase()
+
+proc docboy_opcode_at_pc(gb: GB): int =
+  let pc = int(gb.cpu.pc)
+  if pc < 0x8000 or pc in 0xC000 .. 0xFDFF or pc in 0xFF80 .. 0xFFFE:
+    int(read_byte(gb.memory, gb, pc))
+  else: -1
+
+proc docboy_run_one(dev, kind: string; instr: int; expected, rom: string;
+                    inputs: seq[TimedInput];
+                    refs: var Table[string, seq[uint32]]): tuple[ok: bool; detail: string] =
+  let gb = docboy_new_gb(rom, dev == "cgb")
+  # Armed on every row, empty or not: the module holds one machine's events,
+  # and a previous row's unapplied ones must not reach this GB. Dot 0 here is
+  # tick 0 of the loop below (both start at the hand-off).
+  arm_timed_inputs(gb, inputs)
+  var mem: seq[(int, int, int)]   # address, pass value, fail value (-1 none)
+  var want: seq[uint32]
+  if kind == "mem":
+    for e in expected.split(','):
+      let f = e.split(':')
+      mem.add((parseInt(f[0]), parseInt(f[1]), parseInt(f[2])))
+  else:
+    want = docboy_load_ref(expected, refs)
+    if want.len == 0: return (false, "bad reference image " & expected)
+  proc read_mem(gb: GB; a: int): int =
+    if a in 0xFF80 .. 0xFFFE: int(gb.memory.hram[a - 0xFF80])
+    else: int(read_byte(gb.memory, gb, a))
+  proc mem_state(gb: GB; mem: seq[(int, int, int)]): string =
+    for (a, _, _) in mem:
+      result.add("$" & toHex(a, 4) & "=$" & toHex(read_mem(gb, a), 2) & " ")
+  let max_ticks = if kind == "mem": DocboyMaxTicks else: docboy_fb_max_ticks()
+  var ticks = 0'i64
+  var next_check = DocboyCheckInterval
+  var pending = false
+  var checked = false
+  var last_diff = ""
+  while ticks <= max_ticks:
+    if instr >= 0 and not gb.cpu.halted and docboy_opcode_at_pc(gb) == instr:
+      let (d, first) = docboy_fb_diff(gb, want)
+      if d == 0: return (true, "png match at opcode $" & toHex(instr, 2) & " (tick " & $ticks & ")")
+      return (false, $d & "/" & $(GB_WIDTH * GB_HEIGHT) & " pixels differ at opcode $" &
+                     toHex(instr, 2) & " (tick " & $ticks & "), " & first)
+    let before = gb.scheduler.cycles
+    gb.cpu.tick(gb)
+    let dt = int64((gb.scheduler.cycles - before) shr gb.memory.current_speed)
+    # STOP mode freezes the scheduler (mem_tick_stopped), but DocBoy's clock
+    # keeps counting: one M-cycle per stopped step, as the panel pacing does.
+    ticks += (if dt > 0: dt else: int64(4 shr gb.memory.current_speed))
+    docboy_end_frame(gb)
+    if instr >= 0: continue
+    var crossed = false
+    while ticks >= next_check:
+      crossed = true
+      next_check += DocboyCheckInterval
+    if crossed:
+      if kind == "mem":
+        checked = true
+        var success = true
+        var fatal = false
+        for (a, v, fv) in mem:
+          let got = read_mem(gb, a)
+          if got != v: success = false
+          if fv >= 0 and got == fv: fatal = true
+        if success: return (true, mem_state(gb, mem).strip() & " (tick " & $ticks & ")")
+        if fatal: return (false, mem_state(gb, mem).strip() & " = fail value (tick " & $ticks & ")")
+      else:
+        pending = true
+    if pending and gb.ppu.lcd_enabled and (gb.ppu.lcd_status and 3'u8) == 1'u8:
+      pending = false
+      checked = true
+      let (d, first) = docboy_fb_diff(gb, want)
+      if d == 0: return (true, "png match (tick " & $ticks & ")")
+      last_diff = $d & "/" & $(GB_WIDTH * GB_HEIGHT) & " pixels differ, " & first
+  if not checked: return (false, "expectation never checked in " & $max_ticks & " ticks")
+  if kind == "mem": (false, "timeout: " & mem_state(gb, mem).strip())
+  else: (false, "timeout, last check: " & last_diff)
+
+proc docboy_run_pair(expected, rom, rom2: string;
+                     refs: var Table[string, seq[uint32]]): tuple[ok: bool; detail: string] =
+  ## TwoPlayersFramebufferRunner: two DMGs on one cable, both screens checked
+  ## at the master's VBlank after each 100,000-tick mark. Frame-granular here
+  ## (the link steps whole frames), which is the same VBlank for a reference
+  ## that, like DocBoy's two, is a static picture.
+  let pngs = expected.split('|')
+  let want1 = docboy_load_ref(pngs[0], refs)
+  let want2 = docboy_load_ref(pngs[1], refs)
+  if want1.len == 0 or want2.len == 0: return (false, "bad reference image " & expected)
+  let cores = @[docboy_new_gb(rom, false), docboy_new_gb(rom2, false)]
+  arm_timed_inputs(cores[0], @[])  # clear any previous row's events
+  let lnk = new_gb_link(cores)
+  let max_ticks = docboy_fb_max_ticks()
+  var ticks = 0'i64
+  var next_check = DocboyCheckInterval
+  var last = ""
+  while ticks <= max_ticks:
+    lnk.step_frame()
+    ticks += 70224
+    if ticks >= next_check:
+      while ticks >= next_check: next_check += DocboyCheckInterval
+      let (d1, f1) = docboy_fb_diff(cores[0], want1)
+      let (d2, f2) = docboy_fb_diff(cores[1], want2)
+      if d1 == 0 and d2 == 0: return (true, "both png match (tick " & $ticks & ")")
+      last = "master " & $d1 & " px (" & f1 & "), slave " & $d2 & " px (" & f2 & ")"
+  (false, "timeout, last check: " & last)
+
+proc docboy_batch(list_path, out_path: string): int =
+  ## Scores a list of DocBoy rows in one process. Each line is
+  ## `<dmg|cgb>\t<mem|fb|fb2>\t<opcode or -1>\t<expected>\t<rom>\t<rom2 or ->`
+  ## `[\t<--input spec or ->]`; expected is `addr:value:fail_value[,...]`
+  ## (decimal, fail -1 = none) for mem, the reference PNG for fb, `png1|png2`
+  ## for fb2. The input spec is the manifest's `inputs`, applied through
+  ## gb_timed_input exactly as `--input` does. One
+  ## `DOC <index> <PASS|FAIL> <detail>` line per input; `--out` for the same
+  ## reason gambatte_batch has one.
+  var out_file: File
+  let to_file = out_path.len > 0
+  if to_file and not out_file.open(out_path, fmWrite):
+    echo "DOCBOY: cannot open --out file ", out_path
+    return 1
+  defer:
+    if to_file: out_file.close()
+  var refs = initTable[string, seq[uint32]]()
+  var idx = 0
+  for line in lines(list_path):
+    if line.len == 0: continue
+    let f = line.split('\t')
+    var ok = false
+    var detail = ""
+    if f.len notin 6 .. 7:
+      detail = "malformed list line"
+    else:
+      try:
+        let inputs = if f.len == 7 and f[6] != "-": parse_timed_inputs(f[6])
+                     else: @[]
+        (ok, detail) =
+          if f[1] == "fb2": docboy_run_pair(f[3], f[4], f[5], refs)
+          else: docboy_run_one(f[0], f[1], parseInt(f[2]), f[3], f[4], inputs, refs)
+        if inputs.len > 0 and timed_inputs_left() > 0:
+          detail.add(" [" & $timed_inputs_left() & " of " & $inputs.len &
+                     " inputs never applied]")
+      except CatchableError:
+        detail = "exception: " & getCurrentExceptionMsg()
+    let v = "DOC " & $idx & " " & (if ok: "PASS" else: "FAIL") & " " & detail
+    if to_file: out_file.writeLine(v) else: echo v
+    inc idx
+  0
+
 proc main() =
   var rom_path = ""
   var rom_path2 = ""
@@ -1800,6 +2043,7 @@ proc main() =
         of "gambatte": mode = tmGambatte
         of "microtest": mode = tmMicrotest
         of "mbc30test": mode = tmMbc30Test
+        of "docboy": mode = tmDocboy
         else:
           echo "Unknown mode: ", v
           quit(1)
@@ -1959,6 +2203,12 @@ proc main() =
       echo "gambatte mode wants --list=<file> (see gambatte_batch)"
       quit(1)
     quit(gambatte_batch(list_path, out_path, gambatte_frames, dump_tiles))
+
+  if mode == tmDocboy:
+    if list_path.len == 0:
+      echo "docboy mode wants --list=<file> (see docboy_batch)"
+      quit(1)
+    quit(docboy_batch(list_path, out_path))
 
   # microtest takes EITHER one ROM (the original path, still used by hand) or
   # --list for the batched sweep the runner drives.
@@ -2247,7 +2497,7 @@ proc main() =
   of tmStateRoundtrip, tmRewindTest, tmLinkTest, tmNormLinkTest,
      tmNorm32LinkTest, tmAttachTest, tmNetLink, tmSpecLink, tmSpecLinkBench,
      tmRollback, tmRollbackNet, tmGbLinkTest, tmJsmolka, tmFuzzArm,
-     tmMagenGreen, tmMagenNoRed, tmGambatte, tmMbc30Test:
+     tmMagenGreen, tmMagenNoRed, tmGambatte, tmMbc30Test, tmDocboy:
     discard  # handled (and exited) above
 
   if output.len > 0:
