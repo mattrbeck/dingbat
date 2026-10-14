@@ -10931,5 +10931,28 @@
     "want": "00002080"
    }
   ]
+ },
+ {
+  "payload": "keyirq",
+  "rom": "keyirq.gba",
+  "sha1": "06b7949773857bc60a81aeea431fe314bae83fe1",
+  "frames": 84,
+  "cells": [
+   {
+    "id": "keyirq 0x0",
+    "kind": "hex",
+    "want": "03FF0000"
+   },
+   {
+    "id": "keyirq 0x10",
+    "kind": "hex",
+    "want": "03FF0002"
+   },
+   {
+    "id": "keyirq 0x1000",
+    "kind": "hex",
+    "want": "03FF0002"
+   }
+  ]
  }
 ]

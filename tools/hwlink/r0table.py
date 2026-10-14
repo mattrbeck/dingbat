@@ -260,6 +260,10 @@ TABLE = {
     # clear, re-set after an acknowledge = a level, OR empty, the byte path),
     # and true pulses of 0..64 delay turns: caught or not (payloads/keyirq2.s)
     'keyirq2': [0, 0x10, 0x20, 1, 2, 3, 4, 5, 0x105, 0x205, 0x405, 0x805, 0x1005, 0x2005, 0x4005],
+    # keyirq2's case 0 with the KEYCNT store moved n = 0..15 cycles, against
+    # the last KEYCNT write (set A) or with everything (set B, arg | 0x100):
+    # a latency that cycles with n is a divided clock (payloads/keyirq3.s)
+    'keyirq3': list(range(16)) + [0x100 | n for n in range(16)],
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
@@ -267,7 +271,7 @@ NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat'}
 
 # rows the console has answered and no dingbat model matches yet: kept out of
 # lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61)
-OPEN_ROWS = {'keyirq', 'keyirq2'}
+OPEN_ROWS = {'keyirq2', 'keyirq3'}
 
 
 def source(name):

@@ -2149,6 +2149,9 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etFifoWindow:    discard   # handled above
     of etIrqWindowOpen:  gba.interrupts.window_open_event()
     of etIrqWindowClose: gba.interrupts.window_close_event()
+    of etKeypadIrq:
+      wl_mark()
+      gba.keypad.keypad_irq_event()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: wl_mark()
 
 # Timer prescaler phase at ROM entry when the BIOS boot is skipped. The

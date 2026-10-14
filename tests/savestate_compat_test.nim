@@ -86,7 +86,8 @@ static:
   doAssert ord(etIrqWindowOpen) == 29
   doAssert ord(etIrqWindowClose) == 30
   doAssert ord(etFifoWindow) == 31
-  doAssert ord(high(EventType)) == 31,
+  doAssert ord(etKeypadIrq) == 32
+  doAssert ord(high(EventType)) == 32,
     "an EventType was appended without pinning its ordinal here"
 
   # Every other enum whose ordinal (or `set` bit position) reaches a state

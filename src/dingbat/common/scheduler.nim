@@ -71,6 +71,9 @@ type
     # FIFO_DMA_WINDOW (gba/apu/dma_channels.nim): open the access window
     # ahead of a sound FIFO's refill request.
     etFifoWindow
+    # KEYPAD_IRQ_HOLD (gba/keypad.nim): the KEYCNT condition has held long
+    # enough to raise the keypad interrupt.
+    etKeypadIrq
 
   Event* = object
     cycles*: CycleCount

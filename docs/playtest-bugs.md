@@ -5020,8 +5020,9 @@ Checked on Metroid Fusion: on main both `dingbat` and `dingbat-hleimg` PASS
 
 ## §61. The keypad interrupt reaches IF late on the console: keyirq recorded, 2026-10-13
 
-**OPEN, a timing probe built** (`tests/roms/payloads/keyirq2.s`, r0table
-row `keyirq2`). §50's row `keyirq`, recorded on the SP with nothing held
+**MODELLED, one phase question open** (keypad.nim `KEYPAD_IRQ_HOLD`;
+rows `keyirq` 3/3 in the cycle-law gate, `keyirq2` 16/18 cells with both
+BIOSes, `keyirq3` built). §50's row `keyirq`, recorded on the SP with nothing held
 (three runs a cell, all alike):
 
 | argument (bit 1's delay) | console | dingbat, dingbat-bios | mgba |
@@ -5065,3 +5066,58 @@ The §50 Stop rule stands until this is answered. A late IF may also
 change what Ghost Rider's second Stop needs: if the vacuous condition
 sets IF late, or as a level, that Stop ends on an ordinary keypad
 interrupt.
+
+### keyirq2 answered, and the model
+
+The console, three runs a cell (case 0 nine times):
+
+| case | console | dingbat before | dingbat now |
+|---|---|---|---|
+| 0, the vacuous AND (x3) | 0x4F (0x46 once in nine) | 0x10 | 0x4F |
+| 1, 0x8000: the enable clear | never | never | never |
+| 2, again after an acknowledge | never | never | never |
+| 3, OR with nothing selected | never | never | never |
+| 4, the byte path | 0x46 | 0x10 | 0x4F |
+| 5, true pulses of 0, 1, 2, 4, 8 turns (up to ~40 cycles) | never | caught (0x15..0x35) | never |
+| 5, pulses of 16, 32, 64 turns (~67 cycles and longer) | 0x55, 0x95, 0x115 | the same | the same |
+
+What this shows:
+
+- **A late edge.** The keypad interrupt is a rising edge, so cell 2 never
+  sees it again after the acknowledge. It reaches IF only once the
+  condition has held for about 60 cycles. A true condition shorter than
+  ~40 cycles is never caught, while 67 or more always is.
+- **The cells keyirq could not answer.** keyirq's bit 1 was bit 0's own
+  edge, landing after the acknowledge. Bit 4's question is settled: KEYCNT
+  with bit 14 clear never sets IF. So the 0x8304 sleepers (§50) can only
+  wake through Stop's own key condition, as dingbat already models it.
+- **A transient never fires.** A byte-wise KEYCNT rewrite that passes
+  through a matching value raises nothing on the console, which is what
+  `write_keycnt16` was built to avoid by hand.
+
+dingbat now arms `etKeypadIrq` KEYPAD_IRQ_HOLD = 64 cycles after the
+condition turns true. It raises IF then if the condition never turned false
+in between. A turn to false cancels the hold and ends the edge. Every hold
+from 62 to 68 gives the same cells. With either BIOS, every keyirq cell and
+16 of keyirq2's 18 match. Both misses are phase cells:
+
+- **Case 0** answered both 0x46 and 0x4F, so no single value can match it.
+- **The byte path** answered 0x46 three times in three, against dingbat's
+  0x4F. The code from the store to the poll is the same as case 0's, so no
+  fixed hold gives both. The two cases differ only in the cycles before the
+  store. That points to a condition sampled on a divided clock, with a phase
+  some earlier event sets.
+
+`keyirq3` (r0table row, 32 cells) moves the store one cycle at a time, from
+0 to 15:
+
+- **Set A** moves it against the quiet KEYCNT 0 store.
+- **Set B** moves everything together.
+
+A latency that cycles with n in set A only would show that the phase comes
+from the last KEYCNT write. A latency that cycles in both would show a
+free-running clock.
+
+The rest of the console tables are unchanged: 1985/1993 cells for both
+dingbat and dingbat-bios. The 8 misses are hdmaobus's six race cells and
+keyirq2's two phase cells.

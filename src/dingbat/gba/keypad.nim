@@ -7,18 +7,42 @@ proc new_keypad*(gba: GBA): Keypad =
   result.keyinput = cast[KEYINPUT](0x03FF'u16)
   result.keycnt   = cast[KEYCNT](0x0000'u16)
 
-proc check_keypad_irq(kp: Keypad) =
-  ## Raises the keypad IRQ on a rising edge of the KEYCNT condition only, so a
-  ## held combination does not repeatedly set IF.
+# The KEYCNT condition reaches IF only once it has held for KEYPAD_IRQ_HOLD
+# cycles, and only on its rising edge (tests/roms/payloads/keyirq2.s on the
+# AGB SP, docs/playtest-bugs.md §61): the vacuous AND (0xC000) is seen 0x46
+# or 0x4F timer cycles on where a store-time IF reads 0x10; after an
+# acknowledge it never comes again while the condition holds; a true
+# condition of up to ~40 cycles is never caught, ~68 always is; with the
+# IRQ enable clear (0x8000) it never comes. So a byte-wise KEYCNT rewrite
+# passing through a matching value raises nothing (write_keycnt16 below).
+const KEYPAD_IRQ_HOLD* {.intdefine.} = 64
+
+proc keypad_condition(kp: Keypad): bool =
   let mask    = toU16(kp.keycnt) and 0x03FF'u16
   let pressed = not toU16(kp.keyinput) and 0x03FF'u16
-  let cond = kp.keycnt.irq_enable and
-             (if kp.keycnt.irq_condition: (pressed and mask) == mask  # AND: all selected
-              else: (pressed and mask) != 0)                          # OR: any selected
-  if cond and not kp.prev_irq_condition:
+  kp.keycnt.irq_enable and
+    (if kp.keycnt.irq_condition: (pressed and mask) == mask  # AND: all selected
+     else: (pressed and mask) != 0)                          # OR: any selected
+
+proc check_keypad_irq(kp: Keypad) =
+  ## A change to KEYCNT or the keys: a condition that turns true starts its
+  ## hold (etKeypadIrq), one that turns false ends the hold and the edge.
+  ## `prev_irq_condition` is the held condition: true once IF was raised for
+  ## it, until the condition next turns false.
+  let s = kp.gba.scheduler
+  if not kp.keypad_condition():
+    if s.has_event(etKeypadIrq): s.clear(etKeypadIrq)
+    kp.prev_irq_condition = false
+  elif not kp.prev_irq_condition and not s.has_event(etKeypadIrq):
+    s.schedule(KEYPAD_IRQ_HOLD, etKeypadIrq)
+
+proc keypad_irq_event*(kp: Keypad) =
+  ## The hold is over and the condition never turned false in it (that
+  ## would have cleared this event): raise the keypad IRQ.
+  if kp.keypad_condition() and not kp.prev_irq_condition:
+    kp.prev_irq_condition = true
     kp.gba.interrupts.reg_if.keypad = true
     kp.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
-  kp.prev_irq_condition = cond
 
 proc stop_key_condition(kp: Keypad): bool =
   ## What ends Stop mode from the keypad: KEYCNT's key condition (AND: every
