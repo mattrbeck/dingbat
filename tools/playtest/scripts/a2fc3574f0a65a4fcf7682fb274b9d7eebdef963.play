@@ -3,7 +3,6 @@
 @game A4NE
 @chip SRAM
 @frozen dingbat-bios,mgba,nba
-@known * checkpoint farm_intro: -- §29 (section 4 table): a timing-seeded RNG lays out the farm debris; the timing is the boot loop the references under-charge
 
 # New game: player, farm and dog all named "A", birthday Spring 1. Mash
 # through the opening (Thomas, the flashback) until the player wakes in the

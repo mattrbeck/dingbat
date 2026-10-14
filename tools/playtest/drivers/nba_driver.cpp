@@ -60,9 +60,21 @@ static const nba::Key KEY_ORDER[10] = {
   nba::Key::Left, nba::Key::Up, nba::Key::Down, nba::Key::R, nba::Key::L
 };
 
+// The core presents a frame at the end of its V-blank (line 227 -> 0), 68
+// lines after dingbat and mGBA end theirs, and it double-buffers: the buffer
+// it is drawing into is the one it presented two frames ago, and at line 160
+// it already holds this frame's picture (400 of 400 frames equal to the next
+// presentation, Donkey Kong Country). `frame` is the harness's picture, taken
+// from that buffer when a harness frame ends (run_frame).
 struct CaptureVideo final : nba::VideoDevice {
   u32 frame[W * H] = {};
-  void Draw(u32* buffer) override { memcpy(frame, buffer, sizeof frame); }
+  u32* shown = nullptr;   // the buffer last presented
+  u32* drawing = nullptr; // the other one: the frame being drawn
+  void Draw(u32* buffer) override {
+    if (buffer != shown) { drawing = shown; shown = buffer; }
+    if (!drawing) memcpy(frame, buffer, sizeof frame);  // before the second presentation
+  }
+  void Capture() { if (drawing) memcpy(frame, drawing, sizeof frame); }
 };
 
 // Audio is pulled, not pushed: the core hands its device a callback that
@@ -78,9 +90,9 @@ struct CaptureAudio final : nba::AudioDevice {
   bool Open(void* ud, Callback cb) override { userdata = ud; callback = cb; return true; }
   void SetPause(bool) override {}
   void Close() override {}
-  void Frame() {
+  void Frame(long cycles) {
     if (!callback || !file) return;
-    owed += 32768.0 * nba::CoreBase::kCyclesPerFrame / 16777216.0;
+    owed += 32768.0 * cycles / 16777216.0;
     int n = int(owed);
     owed -= n;
     static s16 buf[4096 * 2];
@@ -171,6 +183,23 @@ int main(int argc, char** argv) {
 
   int frame = 0;
   int held = 0;
+  // A harness frame ends at the V-blank's start (VCOUNT 160), as dingbat's
+  // and mGBA's drivers end theirs: keys set between frames reach a V-blank
+  // handler at the same point, RAM is read at the same point, and the picture
+  // is the frame just drawn. Running kCyclesPerFrame a call instead stopped
+  // at a drifting line before 160 (142-159), so the picture shown was the
+  // previous frame's (docs/playtest-bugs.md, "The second reference's pictures
+  // are a frame stale"). Whole lines to line 159, then 4-cycle steps.
+  auto run_frame = [&]() {
+    long ran = 0;
+    int v = core->PeekByteIO(0x04000006);
+    int lines = (160 - v + 228) % 228;
+    if (lines == 0) lines = 228;
+    if (lines > 1) { core->Run((lines - 1) * 1232); ran += (lines - 1) * 1232; }
+    while (core->PeekByteIO(0x04000006) != 160 && ran < 2 * 280896) { core->Run(4); ran += 4; }
+    video->Capture();
+    audio->Frame(ran);
+  };
   reply("ready nba save=" + save);
   std::string line;
   while (std::getline(std::cin, line)) {
@@ -186,12 +215,12 @@ int main(int argc, char** argv) {
       held = mask;
       reply("ok");
     } else if (cmd == "run") {
-      for (int k = atoi(arg.c_str()); k > 0; --k) { core->Run(nba::CoreBase::kCyclesPerFrame); audio->Frame(); ++frame; }
+      for (int k = atoi(arg.c_str()); k > 0; --k) { run_frame(); ++frame; }
       reply("ok " + std::to_string(frame));
     } else if (cmd == "runhash") {
       std::string out = "ok";
       for (int k = atoi(arg.c_str()); k > 0; --k) {
-        core->Run(nba::CoreBase::kCyclesPerFrame); audio->Frame(); ++frame;
+        run_frame(); ++frame;
         out += " " + fb_hash(video->frame);
       }
       reply(out);

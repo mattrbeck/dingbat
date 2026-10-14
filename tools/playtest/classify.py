@@ -46,12 +46,16 @@ def classify(a, b):
         ok = sim >= 0.8
         return {'verdict': 'MINOR' if ok else 'MAJOR', 'text_similarity': round(sim, 2),
                 'why': 'compared by on-screen text only', 'palette_only': ok}
-    for k, h in enumerate(b['hashes']):
-        if h == a['hash']:
-            return {'verdict': 'SLIP', 'offset': k - b['center']}
-    for k, h in enumerate(a['hashes']):
-        if h == b['hash']:
-            return {'verdict': 'SLIP', 'offset': a['center'] - k}
+    # The match nearest the centre, not the first in the window: a screen
+    # drawn as two alternating fields (A B A B: Phantasy Star Collection's
+    # Master System line drop) matches at every other frame, and the first
+    # match is the window's edge -- a one-field gap read as SLIP(-29)
+    # (docs/playtest-bugs.md §62).
+    offsets = [k - b['center'] for k, h in enumerate(b['hashes']) if h == a['hash']]
+    if not offsets:
+        offsets = [a['center'] - k for k, h in enumerate(a['hashes']) if h == b['hash']]
+    if offsets:
+        return {'verdict': 'SLIP', 'offset': min(offsets, key=abs)}
     # Neither centre frame appears in the other's window, but the two windows
     # may still overlap: on a screen that animates every frame, both sides can
     # be rendering the same sequence a few frames apart without either centre

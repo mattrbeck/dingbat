@@ -4,7 +4,6 @@
 @chip SRAM
 @frozen dingbat-bios,mgba,nba
 @save skip: the first save needs a save room inside the castle; the route found here (bridge chase, Entrance, break the atlas statue, the window hall) ends in the Shrine of the Apostates, where a brick pillar stops Juste and no way on to a save room was found
-@known * audio differs from both references -- §31: the thunder falls on the lightning's random frames, not an APU difference
 # Game Start > DATA1 > name "A" > story > bridge dialogue; climb over the
 # wrecked machine on the bridge, outrun the giant armour (the drawbridge
 # crushes it), Entrance: whip the atlas statue so its beam falls as a ramp,

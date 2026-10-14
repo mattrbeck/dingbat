@@ -5237,6 +5237,11 @@ checkpoint that takes both fields (`window` covering an even and an odd
 frame and judged as a pair). Both are harness/script work, not core work.
 No probe is proposed; no new SP cell is needed for the mechanism.
 
+**Classifier fixed, 2026-10-14.** `classify` now reports the SLIP match
+nearest the window's centre, not the first in the window
+(tools/playtest/tests/test_classify.py). These checkpoints now read SLIP
+±1. They still test only the field parity.
+
 **How it was found.** First, every frame's hash in dingbat-bios-nowl, mGBA
 and the second reference over the frozen `[new]` timeline, matched at
 offsets in a ±8 window, which showed the parity pattern. Then full IWRAM
@@ -5473,12 +5478,67 @@ with a stale picture". That is the case in both sections below. A
 reference pair's agreement is evidence only on still screens, or after a
 RAM comparison.
 
-**Status: driver unchanged.** The fix would end each of the second
-reference's harness frames on its V-blank presentation without delaying
-input. It changes every one of its cached results, so it belongs in its own
-change. One thing was tried here with a temporary driver command that called
-`Run(500)`: from line 155 the core came back at line 7, so the boundary
-cannot be nudged with small runs.
+**Status: FIXED in the driver, 2026-10-14.** Measured with a temporary
+driver command:
+
+- **Small runs work.** `Run(n)` advances n cycles: 500 moves a line in
+  three steps, 1232 one line, and 100,000 from line 181 lands on line 34.
+  The earlier `Run(500)` reading was not reproduced.
+- **The picture comes late.** The core presents a frame at the end of the
+  V-blank, between lines 227 and 0, not at its start.
+- **It double-buffers.** The core alternates two buffers. At line 160 the
+  buffer being drawn already holds the frame it presents 68 lines later:
+  400 of 400 Donkey Kong Country frames are equal.
+
+So `run_frame` (the driver's `run` and `runhash`) now runs whole lines to
+159, then 4-cycle steps to VCOUNT 160. It copies the buffer being drawn as
+the frame's picture and sizes the frame's audio by the cycles it ran.
+
+After the fix, over Donkey Kong Country's `[new]` timeline to f3400, every
+frame ends at VCOUNT 160. In the stretches this section measured (f1852 on),
+every uniquely placed frame of the second reference equals dingbat's at
+offset 0, where it was dingbat[f] = second reference[f+1].
+
+**The boot lead.** Before f1300 the second reference's pictures equal both
+dingbat's and mGBA's one frame later. dingbat-bios and mGBA give the same
+counts, 1148 frames at -1, so the second reference runs a V-blank ahead of
+both through Donkey Kong Country's boot. The stale picture used to cancel
+this, which is why its boot screens looked IDENTICAL to mGBA's.
+
+Its start state does not explain the lead. Its cartridge start is at VCOUNT
+225, where dingbat's and mGBA's are at 126, the line Nintendo's BIOS hands
+over on (§4). But a driver that ran its own boot of Nintendo's BIOS
+instead, starting frame 0 at the hand-over (r15 into the cartridge after
+75,983,824 cycles, at VCOUNT 139), made the lead two frames, not none. The
+lead is therefore the second reference's own timing in that boot. It is not
+corrected, and the experiment was not kept.
+
+**The corpus with the fix** (baseline 20261014, 164 games, against the train
+run 20261013-173431-1c). dingbat's runs are unchanged, so everything below
+comes from the second reference's new results and the classifier:
+
+| | before | after |
+|---|---|---|
+| dingbat-bios ~ second reference SLIP +1 / -1 | 107 / 10 | 7 / 37 |
+| mGBA ~ second reference SLIP +1 / -1 | 97 / 14 | 16 / 35 |
+| checkpoints where all three agree | 814 | 957 |
+| the second reference alone | 256 | 113 |
+
+The verdicts that moved:
+
+- **Six `@known` entries no longer match.** In Harvest Moon `farm_intro`
+  and Yoshi Topsy-Turvy `confirm`, the second reference is now IDENTICAL to
+  dingbat, against mGBA. Its stale picture had hidden that it agrees with
+  dingbat there (§29, §37). In The Sims `language`, the references no longer
+  agree with each other. The audio entries for Harmony of Dissonance, KH
+  Chain of Memories and Swordcraft Story 2 no longer differ from both
+  references. Those `@known` lines are removed.
+- **Advance Wars passes.** Its menu-scroll checkpoint is no longer one where
+  the references agree against dingbat.
+- **Four checkpoints that were not diagnostic now are.** The references now
+  agree against dingbat at Rockman EXE 4.5 `pet_menu`, Castlevania: Aria of
+  Sorrow `select_data`, Koro Koro Puzzle `title` and Mario & Luigi
+  `06_f19428`. Each is chased in its own section.
 
 ## §66. Donkey Kong Country: the Kongo Jungle map a frame ahead is mGBA's cheap load, 2026-10-14
 

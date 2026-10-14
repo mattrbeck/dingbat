@@ -3,7 +3,6 @@
 @game ASIE
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
-@known * checkpoint language: -- §29: the boot EWRAM clear costs 18 cycles an iteration in dingbat, 14 in mGBA; the references under-charge
 # English, Create-a-Sim named "AA", default looks, 5 personality points in each
 # trait, read Uncle Hayseed's letter, arrive at the farm, peek at the START
 # tabs (Goals/Pockets/Sim), then SELECT -> Save Game -> Slot 1.
