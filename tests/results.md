@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-15 00:45:07 · commit 7e3792a4 · game-boy-test-roms v7.0*
+*Generated: 2026-10-15 00:40:53 · commit c794b57e · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1585
-- **Pass:** 1559
-- **Fail:** 26
+- **Pass:** 1560
+- **Fail:** 25
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -17,7 +17,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
-| [Game Boy - DocBoy](results_docboy.md) | 49 | 70 | 👀 |
+| [Game Boy - DocBoy](results_docboy.md) | 50 | 70 | 👀 |
 | [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
@@ -40,7 +40,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
-## Game Boy - DocBoy (49/70)
+## Game Boy - DocBoy (50/70)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -68,7 +68,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/timers | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb/interrupts | CGB cgbE | 👌 27/27 passed |
 | docboy/cgb/dma | CGB cgbE | 👌 41/41 passed |
-| docboy/cgb/hdma | CGB cgbE | 👀 556/643 passed |
+| docboy/cgb/hdma | CGB cgbE | 👀 557/640 passed |
 | docboy/cgb/serial | CGB cgbE | 👌 17/17 passed |
 | docboy/cgb/ir | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb/mode | CGB cgbE | 👌 6/6 passed |
@@ -79,14 +79,14 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/apu/ch2 | CGB cgbE | 👌 26/26 passed |
 | docboy/cgb/apu/ch3 | CGB cgbE | 👌 109/109 passed |
 | docboy/cgb/apu/ch4 | CGB cgbE | 👌 69/69 passed |
-| docboy/cgb/double_speed/apu/ch1 | CGB cgbE | 👀 594/613 passed |
+| docboy/cgb/double_speed/apu/ch1 | CGB cgbE | 👀 608/613 passed |
 | docboy/cgb/double_speed/apu/ch2 | CGB cgbE | 👌 63/63 passed |
 | docboy/cgb/double_speed/apu/ch3 | CGB cgbE | 👌 169/169 passed |
 | docboy/cgb/double_speed/apu/ch4 | CGB cgbE | 👀 1846/1925 passed |
 | docboy/cgb/double_speed/core | CGB cgbE | 👌 8/8 passed |
 | docboy/cgb/double_speed/dma | CGB cgbE | 👌 14/14 passed |
 | docboy/cgb/double_speed/hdma | CGB cgbE | 👌 50/50 passed |
-| docboy/cgb/double_speed/interactive | CGB cgbE | 👀 55/67 passed |
+| docboy/cgb/double_speed/interactive | CGB cgbE | 👌 67/67 passed |
 | docboy/cgb/double_speed/interrupts | CGB cgbE | 👌 246/246 passed |
 | docboy/cgb/double_speed/ppu | CGB cgbE | 👌 357/357 passed |
 | docboy/cgb/double_speed/serial | CGB cgbE | 👌 4/4 passed |
@@ -307,7 +307,7 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **DocBoy manifests: 725 vendored ROMs of other suites** — everything outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, firstwhite, rtc3test, cpp, zoomten, tepples). Those are scored from their upstream releases in the sections above, each by its own author's verdict; DocBoy's entries re-check them against DocBoy's own frame dumps, and 8 are DocBoy edits (`samesuite/apu/channel_1/*-cgbE`, expectations rewritten for CPU CGB E). (build_docboy_rows)
 - **DocBoy: the KEY1 switch's IME-set leaf (8)** — `{,double_speed_}stop_key1_joypad0_interrupt1_ime1_*_div_round1`: `EI; STOP` with a request pending, the leaf Pan Docs' STOP chart calls "The CPU glitches non-deterministically". DocBoy wants the divider held 8 T; c-sp `speed-switch/caution/spsw-interrupts-cgbE`, checked on a CPU CGB E, measures 4 for the same sequence (`spsw_irq_leaf_hold_short`), and SameBoy (CGB E) fails these eight as dingbat does. The IME-clear leaf beside it IS scored. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: a joypad interrupt on key release (3)** — `joypad_{buttons,dpad}_interrupt_release` and `cpu/interactive_visual/stop_immediate_exit_joypad_interrupt` want the interrupt when the key is let go, from switch bounce (DocBoy's own comment), while its `joypad_keep_pressed_interrupt` wants exactly one for a press: a fixed bounce on every release only. Pan Docs ("INT $60") raises it on a high-to-low edge and describes bounce on a press as a mechanical effect, and gambatte's hardware note (test/hwtests/jpadirq.txt) has a real press bounce a varying number of times; a deterministic release model would change every game. SameBoy fails both release rows. (build_docboy_rows, DocboyNotScored)
-- **DocBoy: $FEA0-$FEFF as RAM on the CGB E (26)** — 13 rows in `cgb/memory` and 13 in `cgb_dmg_mode/memory` write the area outside modes 2/3 and read it back as RAM, `$FEC0-$FEFF` repeating 16 bytes (Pan Docs' description of CGB revisions 0-D). Pan Docs ("FEA0-FEFF range") has CGB E, AGB, AGS and GBP return the high nibble of the low address byte twice, and the AGS read exactly that under gbedge p0F (`$FEA0`..`$FEF8` = `AA AA BB BB .. FF FF`, `$FEA5` still `$AA` after writing `$5A`; docs/flashcart-runbook.md). SameBoy (CGB E, either boot ROM) fails all 26. The two read-while-blocked rows per manifest ($FF) ARE scored. (build_docboy_rows, DocboyNotScored)
+- **DocBoy: $FEA0-$FEFF as RAM on the CGB E (29)** — 13 rows in `cgb/memory` and 13 in `cgb_dmg_mode/memory` write the area outside modes 2/3 and read it back as RAM, `$FEC0-$FEFF` repeating 16 bytes (Pan Docs' description of CGB revisions 0-D). Pan Docs ("FEA0-FEFF range") has CGB E, AGB, AGS and GBP return the high nibble of the low address byte twice, and the AGS read exactly that under gbedge p0F (`$FEA0`..`$FEF8` = `AA AA BB BB .. FF FF`, `$FEA5` still `$AA` after writing `$5A`; docs/flashcart-runbook.md). SameBoy (CGB E, either boot ROM) fails all 26. Three `cgb/hdma/gdma_source_wram_dma_source_ram_{160,256,480_bytes_overflow}` rows compare `$FE00-$FEFF` after an OAM DMA beside a GDMA, the area filled with `$EF` first: OAM matches byte for byte and only `$FEA0-$FEFF` differs (SameBoy fails them too). The two read-while-blocked rows per manifest ($FF) ARE scored. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: `boot_hram` (4)** — dmg (two), cgb, cgb_dmg_mode: every byte matches what running Nintendo's boot ROMs leaves (dingbat's skip-boot carries it) except `$FFFE`, which no boot ROM writes and DocBoy fixes ("hardcoded ... even before boot rom"); Pan Docs ("Power Up Sequence") has power-up HRAM random. SameBoy fails all four even through the real boot ROMs. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: MBC3 RTC latch on a $00-then-$01 pair only (3)** — `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}` want no latch unless $00 is followed by $01; CasualPokePlayer's `latch-rtc-test` hardware capture has ANY write to `$6000-$7FFF` latch (51/51 of its cells under that rule, 23/51 under a bit-0 edge rule; mbc3.nim), and SameBoy fails these three as well. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: the window tile under a mid-fetch LCDC.5 clear (43)** — `dmg/ppu/visual/window_turn_off_*`: LCDC.5 cleared during the window's first tile fetch. On 40 rows the write lands between the window map read and its bitplane reads and DocBoy draws that tile from the BACKGROUND's row; mealybug's hardware notes have the disable "take effect at the end of the current window tile", and SameBoy (DMG B) draws dingbat's frame pixel for pixel on all 40; on the other 3 all three emulators differ. Hardware check pending: `window_turn_off_nops22_sprite_x4` on an MGB, line 8, x = 9..16 (docs/gb-failure-triage.md I6). The window retrigger and resume rows ARE scored. (build_docboy_rows, DocboyNotScored)

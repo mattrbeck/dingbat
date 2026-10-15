@@ -263,9 +263,18 @@ proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true;
   if mem.requested_oam_dma or mem.dma_position <= 0xA0:
     mem_dma_tick(mem, gb, cycles)
 
+template mem_mdots*(mem: GbMemory): int =
+  ## One M-cycle's PPU dots: 4, 2 at double speed, none while the PPU sits
+  ## out a leaf switch's restart (GbMemory.ppu_mdot_shift).
+  4 shr mem.ppu_mdot_shift
+
 proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false) {.hot_bus_inline.} =
   ## The PPU half of an M-cycle, in dots (half as many in double speed).
-  let ppu_cycles = if ignore_speed: cycles else: cycles shr mem.current_speed
+  # `ppu_mdot_shift` is the speed, or a shift past any M-cycle while the PPU
+  # sits out a leaf switch's restart (SPEED_SWITCH_LEAF_PPU): every M-cycle
+  # then rounds to no dots. Callers that split an M-cycle into dots take
+  # them from mem_mdots, which rounds the same way.
+  let ppu_cycles = if ignore_speed: cycles else: cycles shr mem.ppu_mdot_shift
   fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   when CGB_LYC_EDGE_DEFER and CGB_LYC_EDGE_POLL:
     # A CGB LYC write's STAT edge, one M-cycle boundary after its byte landed.
@@ -308,7 +317,7 @@ when CGB_WRITE_LATENCY_ANY:
         gb.wy_inflight_dot = gb.ppu.cycle_counter
     # 4 dots per M-cycle, 2 in double speed. A latency past the M-cycle's end
     # saturates at `cap` (CGB_LATENCY_CAP).
-    let mdots = 4 shr mem.current_speed
+    let mdots = mem_mdots(mem)
     let cap = mdots - CGB_LATENCY_CAP
     var done = 0
     template run(upto: int) =
@@ -569,7 +578,7 @@ when IF_READ_SAMPLE_T < 4:
       mem_tick_components(mem, gb, 4)
     else:
       mem_tick_bus(mem, gb, 4)
-      let dots = 4 shr mem.current_speed
+      let dots = mem_mdots(mem)
       var head = min(dots, IF_READ_SAMPLE_T shr mem.current_speed)
       when IF_READ_M2_144_TIE_DS != 0:
         # The line-144 OAM pulse's own dot: an IF read whose M-cycle starts on
@@ -790,7 +799,7 @@ const VRAM_WRITE_M3_END_DOTS_DS* {.intdefine.} = 0
 proc mem_write_vram_m3(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
   ## A VRAM write issued in mode 3 asks the lock VRAM_WRITE_M3_END_DOTS into
   ## its M-cycle, so a mode 3 that ends inside the M-cycle lets it through.
-  let dots = 4 shr int(mem.current_speed)
+  let dots = mem_mdots(mem)
   let pre = min(dots, if mem.current_speed != 0'u8: VRAM_WRITE_M3_END_DOTS_DS
                       else: VRAM_WRITE_M3_END_DOTS)
   if pre > 0: mem_tick_ppu(mem, gb, pre, ignore_speed = true)
@@ -864,9 +873,9 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
   elif IF_WRITE_LAND_DOTS != 0 and idx == 0xFF0F:
     # IF_WRITE_LAND_DOTS: a source rising in the write's first dots is
     # overwritten by it.
-    let dots = 4 shr int(mem.current_speed)
-    let pre = if mem.current_speed != 0'u8: IF_WRITE_LAND_DOTS_DS
-              else: min(IF_WRITE_LAND_DOTS, dots - 1)
+    let dots = mem_mdots(mem)
+    let pre = min(dots, if mem.current_speed != 0'u8: IF_WRITE_LAND_DOTS_DS
+                        else: min(IF_WRITE_LAND_DOTS, dots - 1))
     if pre > 0: mem_tick_ppu(mem, gb, pre, ignore_speed = true)
     mem_write_open(mem, gb, idx, val)
     mem_tick_ppu(mem, gb, dots - pre, ignore_speed = true)
@@ -1328,6 +1337,7 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
                           int64(mem.current_speed))
     let old_speed = mem.current_speed
     mem.current_speed = mem.current_speed xor 1
+    mem.ppu_mdot_shift = int(mem.current_speed)
     # The channels' next_step deadlines live outside the scheduler's events.
     gb.apu.apu_rescale_speed(gb, old_speed, mem.current_speed)
     gb.scheduler.set_speed(mem.current_speed)
@@ -1348,6 +1358,12 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
           elif gb.quirks.spsw_irq_leaf_hold_short: SPEED_SWITCH_IRQ_LEAF_HOLD_T div 2
           else: SPEED_SWITCH_IRQ_LEAF_HOLD_T
         gb.timer.hold_t = hold
+        when SPEED_SWITCH_LEAF_PPU != 0:
+          if hold > 0 and (not gb.cpu.ime or SPEED_SWITCH_LEAF_PPU_IME1 != 0):
+            # The PPU sits out the same restart and then takes the switch's
+            # extra dots, as the stall gives them (SPEED_SWITCH_LEAF_PPU).
+            fifo_tick(gb.fifo_ppu, gb, spsw_extra_dots(mem))
+            mem.ppu_mdot_shift = PPU_SIT_OUT
     if not irq_pending:
       # In cycles of the CPU clock the switch lands in, the scheduler's domain.
       let stall_cycles =

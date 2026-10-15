@@ -18,12 +18,13 @@
 #   psg_tick(h), psg_edge(h)  one 1 MHz APU tick; the grid's next edge
 #   psg_trigger_deadline      a square trigger's first step, on that grid
 #   psg_noise_phase(h)        the 512 kHz grid's phase (noise divisor stage)
-#   psg_q_backstep(h)         GbQuirks.square_freq_backstep_halftick
+#   psg_q_reload_halftick(h)  GbQuirks.square_reload_halftick
 #   psg_fs_next_edge_in(h), psg_fs_next_stage(h)
 #                             scheduler cycles to the frame sequencer's next
 #                             step, and which step it is
 # and the GBA's ch1_settle / ch1_s0_kill_at (its measured shift-0 law), and
-# the GB's psg_cpu_bus_addr(h) (the CPU's next bus address, ch3_write).
+# the GB's psg_cpu_bus_addr(h) (the CPU's next bus address, ch3_write) and
+# psg_trigger_pickup(h) (the edge a square trigger takes effect on).
 #
 # `when PSG_AGB` gates the places the GBA instance runs its own model: the
 # sweep unit's checks, which the AGB SP measured to differ in GBA mode from
@@ -286,54 +287,109 @@ proc sq_catchup_at(ch: PsgSquare; h: PsgHost; observer_period: uint32) {.inline.
   if ch.next_step > psg_now(h): return   # not due (or never triggered)
   sq_catchup_slow(ch, h, observer_period)
 
+proc sq_reload_step(ch: PsgSquare; h: PsgHost): CycleCount {.inline.} =
+  ## The duty step whose timer reload an NR13/NR14 write lands in, or
+  ## PSG_NO_STEP. On every revision a write on the step's own cycle wins the
+  ## reload (SameSuite channel_1_freq_change_timing); one M-cycle later it
+  ## leaves the pending step alone (channel_1_freq_change). next_step alone
+  ## will not do: a trigger's start delay makes a write two M-cycles after it
+  ## look like one. CPU CGB D/E (GbQuirks.square_reload_halftick) reload the
+  ## timer on the 2 MHz half of the tick after the step, so a write half a
+  ## tick after it still sets the period counted from the step: SameSuite
+  ## `channel_1_freq_change_timing-cgbDE` cell 10 (`$00` where CGB 0-C read
+  ## `$0f`: NR14 = 0 half a tick after the sixth step, and the seventh never
+  ## comes), DocBoy `double_speed_apu_ch1_change_period_nr1{3,4}_no_
+  ## retrigger_75_16` (NR13 or NR14 half a tick after a step count the new
+  ## period from that step, the duty position kept, exactly as the write on
+  ## the step does in `_75_15`; one tick after, `_75_17`, does not). Only
+  ## reachable at double speed: at single speed every write is on the grid.
+  let now = psg_now(h)
+  if not ch.enabled or ch.last_step_at == PSG_NO_STEP: return PSG_NO_STEP
+  if ch.last_step_at == now: return now
+  if psg_q_reload_halftick(h) and now > ch.last_step_at and
+     now - ch.last_step_at == psg_tick(h) div 2:
+    return ch.last_step_at
+  PSG_NO_STEP
+
 proc sq_reload_is_now(ch: PsgSquare; h: PsgHost): bool {.inline.} =
-  ## True when a duty step landed on this cycle (the timer is reloading): an
-  ## NR13/NR14 write landing here wins the reload (SameSuite
-  ## channel_1_freq_change_timing); one M-cycle later it leaves the pending
-  ## step alone (channel_1_freq_change). next_step alone will not do: a
-  ## trigger's start delay makes a write two M-cycles after it look like one.
+  ## True when a duty step landed on this cycle: the sweep's write-back races
+  ## the reload as a CPU write on the step does (sq_reload_step), on its own
+  ## 1 MHz edge.
   ch.enabled and ch.last_step_at == psg_now(h)
 
-template sq_reload(ch: PsgSquare; h: PsgHost) =
-  ## The write won the reload: the next step is one new period from now.
-  ch.next_step = psg_now(h) + sq_period(ch, h)
+template sq_reload(ch: PsgSquare; h: PsgHost; at: CycleCount) =
+  ## The write won the reload of the step at `at`: the next step is one new
+  ## period from it.
+  ch.next_step = at + sq_period(ch, h)
   when PSG_AGB: ch.arm_delay = uint32(sq_period(ch, h))
 
 proc sq_write_freq_lo(ch: PsgSquare; h: PsgHost; val: uint8) =
-  let reload_now = sq_reload_is_now(ch, h)
+  let reload_at = sq_reload_step(ch, h)
   ch.frequency = (ch.frequency and 0x0700'u16) or uint16(val)
-  if reload_now: sq_reload(ch, h)
+  if reload_at != PSG_NO_STEP: sq_reload(ch, h, reload_at)
 
 proc sq_write_freq_hi(ch: PsgSquare; h: PsgHost; val: uint8) =
   ## NRx4's frequency bits and length enable; the trigger is the caller's.
-  let reload_now = sq_reload_is_now(ch, h)
-  # CGB D/E (GbQuirks.square_freq_backstep_halftick): a non-triggering write
-  # dropping the frequency high bits out of 7 undoes the duty step it lands
-  # within one 2 MHz tick of. `reload_now` covers the on-the-step half on
-  # every revision; this is D/E's extra half tick. Unreachable at single
-  # speed.
-  if psg_q_backstep(h) and (val and 0x80) == 0 and
-     ch.enabled and (ch.frequency and 0x0700'u16) == 0x0700'u16 and
-     (val and 0x07) != 0x07 and not reload_now and
-     ch.last_step_at != PSG_NO_STEP and
-     psg_now(h) - ch.last_step_at == psg_tick(h) div 2:
-    # Only the position moves; the latched sample stays where the undone
-    # step put it. Assumed; no ROM pins this.
-    ch.wave_duty_position = (ch.wave_duty_position + 7) and 7
+  let reload_at = sq_reload_step(ch, h)
   ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
-  if reload_now: sq_reload(ch, h)
+  if reload_at != PSG_NO_STEP: sq_reload(ch, h, reload_at)
   psg_nrx4_length(ch, h, val, defer_off = false)
 
-proc sq_trigger(ch: PsgSquare; h: PsgHost) =
+const SQ_RETRIGGER_STARTUP* {.intdefine.} = 1
+  ## sq_starting: a trigger in another's start-up starts from off. 0 = off.
+
+proc sq_starting(ch: PsgSquare; h: PsgHost): bool =
+  ## Whether a trigger written now finds the channel still in a trigger's
+  ## start-up: its frequency timer not yet loaded on the edge the trigger is
+  ## picked up on (psg_trigger_pickup). A trigger loads the timer 1 tick after
+  ## its edge on a restart and 2 from off (gb_trigger_deadline), and all of an
+  ## edge's work is decided on the state before that edge, so a trigger on
+  ## the very edge the timer would load on still finds it unloaded. Such a
+  ## channel is not yet counting, so the new trigger starts it as from off.
+  ## DocBoy `double_speed_apu_ch1_retrigger_same_period_75_{0,1}_*`: a
+  ## retrigger 1.5 or 2 ticks after a trigger from off steps a tick later
+  ## than a restart would, exactly as the 2.5- and 3-tick ones (`_75_{2,3}_*`,
+  ## restarts, picked up a tick later) do. SameBoy (CGB E, black box) restarts
+  ## the 1.5- and 2-tick ones too; nothing at single speed reaches the window
+  ## with the `ldh` stores SameSuite and gambatte use (3 ticks apart).
+  when PSG_AGB or SQ_RETRIGGER_STARTUP == 0:
+    false
+  else:
+    let e = psg_trigger_pickup(h)
+    ch.enabled and e != PSG_NO_STEP and ch.start_at != PSG_NO_STEP and
+      e <= ch.start_at
+
+proc sq_trigger(ch: PsgSquare; h: PsgHost; starting = false) =
   ## The duty position carries across a trigger (Pan Docs: only an APU
-  ## power-off resets it).
+  ## power-off resets it). `starting`: sq_starting, taken before the write.
   let was_enabled = ch.enabled
+  when not PSG_AGB:
+    let pickup = psg_trigger_pickup(h)
+    # The trigger takes effect on the edge it is picked up on, so a duty step
+    # due on that edge still happens before the restart: a write half a tick
+    # ahead of a step (double speed) loses nothing that a write on the step
+    # keeps. DocBoy `double_speed_apu_ch1_retrigger_same_period_75_{8,16}_*`
+    # against `_{9,17}_*`, `retrigger_square_wave_duty_75_alt_delay{4,5,8}`
+    # and `_b_delay8` (a retrigger half a tick before the step, periods 4 and
+    # 1); SameBoy (CGB E, black box) drops that step as dingbat did. Double
+    # speed only: at single speed a CPU write is on the edge and the step was
+    # caught up already, and the sub-tick offsets the first KEY1 switch's
+    # re-phase leaves (APU_SPSW_REPHASE_*) were fitted to gambatte's CGB C
+    # ladder with the step dropped (`speedchange{,4}_ch1_duty0_pos6_to_pos7_
+    # timing_nop_{ds_,}1` lose with it).
+    if was_enabled and pickup != PSG_NO_STEP and ch.next_step == pickup and
+       pickup > psg_now(h) and psg_shl(h) != 0:
+      ch.wave_duty_position = (ch.wave_duty_position + 1) and 7
+      ch.sample_bit = PSG_DUTY[ch.duty][ch.wave_duty_position]
   psg_trigger_length(ch, h, 0x40)
   # The latched sample carries too, so a channel that was off stays at 0
   # until its first step.
   if not was_enabled: ch.sample_bit = 0
-  ch.next_step = psg_trigger_deadline(h, sq_period(ch, h),
-                                      if was_enabled: 1 else: 2)
+  let extra = if was_enabled and not starting: 1 else: 2
+  ch.next_step = psg_trigger_deadline(h, sq_period(ch, h), extra)
+  when not PSG_AGB:
+    ch.start_at = if pickup == PSG_NO_STEP: PSG_NO_STEP
+                  else: pickup + CycleCount(extra) * psg_tick(h)
   when PSG_AGB: ch.arm_delay = uint32(ch.next_step - psg_now(h))
   psg_trigger_envelope(ch, h)
 
@@ -565,7 +621,7 @@ when not PSG_AGB:
       let reload_now = sq_reload_is_now(ch, h)
       ch.frequency = 0
       ch.frequency_shadow = 0
-      if reload_now: sq_reload(ch, h)
+      if reload_now: sq_reload(ch, h, psg_now(h))
       if edge > psg_now(h) and not ch1_sweep_trigger_pending(ch):
         # At double speed the 0 reaches NR13/NR14 on the edge after the
         # clock (SWEEP_LOAD_REASSERT; double_speed change_period_nr14_during_
@@ -587,7 +643,7 @@ when not PSG_AGB:
       let reload_now = sq_reload_is_now(ch, h)
       ch.frequency_shadow = uint16(sum)
       ch.frequency        = uint16(sum)
-      if reload_now: sq_reload(ch, h)
+      if reload_now: sq_reload(ch, h, psg_now(h))
       ch.sweep_operand = 0
       ch.sweep_operand_valid = false
       if edge > psg_now(h): latch_at = edge   # SWEEP_LOAD_REASSERT first
@@ -633,7 +689,7 @@ proc sweep_step(ch: PsgSweepSquare; h: PsgHost) =
           let reload_now = sq_reload_is_now(ch, h)
           ch.frequency_shadow = calc
           ch.frequency        = calc
-          if reload_now: sq_reload(ch, h)
+          if reload_now: sq_reload(ch, h, psg_now(h))
           # AGB-native, measured: the second calculation, for its overflow
           # check, runs at once on the new shadow (AGB SP page 1F SWEEP2:
           # 2018/s7 dies at tick 1, the tick check >= 2048). A GB cartridge on
@@ -822,9 +878,10 @@ proc ch1_write(ch: PsgSweepSquare; nr: int; val: uint8; h: PsgHost) =
     sq_write_freq_lo(ch, h, val)
     when not PSG_AGB: ch1_sweep_freq_written(ch, h)
   of NR14:
+    let starting = (val and 0x80) != 0 and sq_starting(ch, h)
     sq_write_freq_hi(ch, h, val)
     if (val and 0x80) != 0:
-      sq_trigger(ch, h)
+      sq_trigger(ch, h, starting)
       ch1_trigger_sweep(ch, h)
     else:
       when not PSG_AGB: ch1_sweep_freq_written(ch, h)
@@ -836,8 +893,9 @@ proc ch2_write(ch: PsgSquare; nr: int; val: uint8; h: PsgHost) =
   of NR22: psg_write_nrx2(ch, h, val)
   of NR23: sq_write_freq_lo(ch, h, val)
   of NR24:
+    let starting = (val and 0x80) != 0 and sq_starting(ch, h)
     sq_write_freq_hi(ch, h, val)
-    if (val and 0x80) != 0: sq_trigger(ch, h)
+    if (val and 0x80) != 0: sq_trigger(ch, h, starting)
   else: discard
 
 # ---- Channel 3 (wave) ----

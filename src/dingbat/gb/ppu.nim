@@ -2253,12 +2253,23 @@ const HDMA_START_CUTOFF_SS* {.intdefine.} = 2
   ## `hdma_late_enable_{1,ds_1}`: SS 1 takes only the double-speed row, 3
   ## loses `hdma_late_enable_1`; DS 1 loses `hdma_late_enable_ds_1`.
 const HDMA_START_CUTOFF_DS* {.intdefine.} = 0
-template ppu_hdma_hblank_level*(ppu: GbPpu): bool =
+const HDMA_M2_DMA_HBLANK* {.intdefine.} = 1
+  ## The OAM scan reads as mode 0 in STAT while an OAM DMA holds OAM
+  ## (STAT_M2_DMA_READS_0), and the VRAM DMA's HBlank input sees that mode 0
+  ## too, as it sees the LCD-enable line's (HDMA_LCDON_LINE0_M0): an HBlank
+  ## transfer armed then starts at once. DocBoy `cgb/hdma/hdma_start_during_
+  ## oam_scan_with_dma_running` (TIMA read after arming it there) and SameBoy
+  ## (CGB E, black box) on the same ROM; hardware question 23 (gbedge p22
+  ## VDMAOAM). An OAM DMA starting or ending inside the scan makes no block
+  ## edge here (no row arms a transfer first). 0 = the mode flag only.
+template ppu_hdma_hblank_level*(ppu: GbPpu; gb: GB): bool =
   ## The mode 0 the VRAM DMA's HBlank input sees: the flag's, plus the
   ## LCD-enable line's would-be OAM scan, which STAT shows as mode 0 too
-  ## (HDMA_LCDON_LINE0_M0, gb.nim).
+  ## (HDMA_LCDON_LINE0_M0, gb.nim), and the OAM scan under an OAM DMA
+  ## (HDMA_M2_DMA_HBLANK).
   ppu.mode_flag == 0 or
-    (HDMA_LCDON_LINE0_M0 != 0 and ppu.first_line and ppu.mode_flag == 2)
+    (HDMA_LCDON_LINE0_M0 != 0 and ppu.first_line and ppu.mode_flag == 2) or
+    (HDMA_M2_DMA_HBLANK != 0 and ppu.mode_flag == 2 and gb.memory.dma_busy)
 proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
   ## A write to FF55. The length register takes the low 7 bits whether the
   ## write starts or stops a transfer (SameSuite dma/hdma_lcd_off reads back
@@ -2276,7 +2287,7 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
     # Arming an HBlank transfer while already in HBlank starts it right away.
     # With the LCD off the mode reads 0 forever, so an armed transfer copies
     # exactly one block and no more (SameSuite dma/hdma_lcd_off).
-    var in_m0 = ppu_hdma_hblank_level(ppu)
+    var in_m0 = ppu_hdma_hblank_level(ppu, gb)
     when HDMA_START_CUTOFF_SS != 0 or HDMA_START_CUTOFF_DS != 0:
       # (DS 0 still excludes the boundary dot.) Too close to the line's end, the arming write misses this HBlank
       # (HDMA_START_CUTOFF_SS/_DS).
@@ -2753,7 +2764,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", toHex(ppu.lcd_control,2), " new=", toHex(val,2)
     let lcd_going_off = (ppu.lcd_control and 0x80'u8) != 0 and (val and 0x80'u8) == 0
-    let hblank_before = ppu_hdma_hblank_level(ppu)
+    let hblank_before = ppu_hdma_hblank_level(ppu, gb)
     # Only the six bits the pipeline reads are late on CGB; the enable bit has
     # already restarted the mode machinery above on this dot.
     when CGB_LCDC_LATENCY_ANY:

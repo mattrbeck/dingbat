@@ -124,7 +124,7 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
     # A request an FF55 write raised in mode 0 stands after mode 0 ends
     # (HDMA_START_GRANT_FETCH).
     let start_req = gb.hdma_start_req
-    let hblank = ppu_hdma_hblank_level(ppu)
+    let hblank = ppu_hdma_hblank_level(ppu, gb)
     if ppu.hdma_active and (hblank or start_req):
       # `high(int32)` = owed to a halted CPU, waiting for its wake. Reaching a
       # fetch or boundary means the CPU is running and that wake has passed

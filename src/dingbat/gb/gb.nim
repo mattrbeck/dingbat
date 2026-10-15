@@ -1636,14 +1636,18 @@ type
       ## where `-A` / `-cgbDE` read `$ff`. Channel 4's arm of the same quirk
       ## (SameSuite apu/README.md) and the double-speed envelope-tick arm
       ## (`channel_{1,2}_nrx2_glitch`, `channel_1_volume`) are not modelled.
-    square_freq_backstep_halftick*: bool
-      ## CGB D / E. When a non-triggering NR14 / NR24 write takes the frequency
-      ## high bits from 7 to anything else, the duty step that just fired is
-      ## undone if the write lands within one 2 MHz tick after it; every other
-      ## revision undoes it only when the write lands on the step. Inert at
-      ## single speed (writes and steps share the 4 T grid); at double speed it
-      ## is cell 10 of SameSuite `channel_1_freq_change_timing` (`-cgbDE` $00
-      ## where `-A` and `-cgb0BC` read $0f).
+    square_reload_halftick*: bool
+      ## CGB D / E. A square channel's frequency timer reloads on the 2 MHz
+      ## half of the tick after a duty step, so an NR13/NR14 write landing
+      ## half a tick after the step still sets the period counted from it;
+      ## every other revision takes only a write on the step itself
+      ## (sq_reload_step). Inert at single speed (writes and steps share the
+      ## 4 T grid); at double speed it is cell 10 of SameSuite
+      ## `channel_1_freq_change_timing` (`-cgbDE` $00 where `-A` and `-cgb0BC`
+      ## read $0f) and DocBoy's `double_speed_apu_ch1_change_period_nr1{3,4}_
+      ## no_retrigger_75_16` rows. Until 2026-10-15 modelled as an undo of the
+      ## step for an NR14 write leaving frequency bits 7, which gives that
+      ## cell too but moves the duty position, which DocBoy's rows see.
     lyc_compare_hold*: bool
       ## CGB D / E / AGB. On the M-cycle in which LY advances, STAT's LY=LYC bit
       ## holds the comparison against the previous LY instead of reading clear
@@ -2574,6 +2578,10 @@ type
     unusable*:             array[0x60, uint8]
     bootrom*:              seq[uint8]
     cycle_tick_count*:     int
+    ppu_mdot_shift*:       int
+      # SPEED_SWITCH_LEAF_PPU: CPU clocks -> PPU dots in mem_tick_ppu, the
+      # speed (`current_speed`), or PPU_SIT_OUT while the PPU sits out a leaf
+      # switch's oscillator restart (the divider's GbTimer.hold_t).
     write_count*:          int   # every write_byte, for the idle-loop verdict
     # A CPU write this M-cycle left something for the M-cycle boundary (an IF
     # store, a STAT interrupt-line edge). The byte lands before the M-cycle's
@@ -3531,7 +3539,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     scy_fetch_latch: rev in {grCgbD, grCgbE, grAgb},
     pcm_read_edge_zero: rev in {grCgb0, grCgbAB, grCgbC},
     apu_clock_carry: rev in {grCgb0, grCgbAB, grCgbC},
-    square_freq_backstep_halftick: rev in {grCgbD, grCgbE},
+    square_reload_halftick: rev in {grCgbD, grCgbE},
     lyc_compare_hold: rev in {grCgbD, grCgbE, grAgb},
     oam_read_open_late: rev == grCgbE,
     spsw_div_mid_taps_slow: rev == grCgbE,

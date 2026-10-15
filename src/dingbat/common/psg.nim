@@ -95,6 +95,10 @@ type
     # reload on this very cycle from a start delay one period away. Not
     # serialized: rewritten by the next duty step.
     last_step_at*:       CycleCount
+    # GB: the 1 MHz edge on which the last trigger loads the frequency timer
+    # (its pickup edge plus the start-up ticks), PSG_NO_STEP if none; only
+    # sq_starting reads it. Serialized from GB payload rev 10.
+    start_at*:           CycleCount
     duty*:               uint8
     length_load*:        uint8
     frequency*:          uint16
@@ -198,12 +202,13 @@ type
 
 proc new_psg_square_sweep*(): PsgSweepSquare =
   PsgSweepSquare(next_step: PSG_NO_STEP, last_step_at: PSG_NO_STEP,
-                 sweep_check_at: PSG_NO_STEP, sweep_stop_at: PSG_NO_STEP,
+                 start_at: PSG_NO_STEP, sweep_check_at: PSG_NO_STEP, sweep_stop_at: PSG_NO_STEP,
                  sweep_load_at: PSG_NO_STEP, sweep_armed: true,
                  kill_at: PSG_NO_STEP)
 
 proc new_psg_square*(): PsgSquare =
-  PsgSquare(next_step: PSG_NO_STEP, last_step_at: PSG_NO_STEP)
+  PsgSquare(next_step: PSG_NO_STEP, last_step_at: PSG_NO_STEP,
+            start_at: PSG_NO_STEP)
 
 proc new_psg_wave*(banks: int): PsgWave =
   ## Wave RAM starts in the GB's power-on pattern, 00 FF 00 FF ..., in every

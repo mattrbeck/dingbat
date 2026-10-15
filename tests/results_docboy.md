@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-15 00:45:07 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-15 00:40:53 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**8635/8990 passed.**
+**8662/8987 passed.**
 
 ## docboy/dmg/cpu
 
@@ -181,9 +181,9 @@ All 27 tests passed (CGB cgbE).
 
 All 41 tests passed (CGB cgbE).
 
-## docboy/cgb/hdma (556/643 passed)
+## docboy/cgb/hdma (557/640 passed)
 
-556/643 tests passed on CGB cgbE, 87 failed:
+557/640 tests passed on CGB cgbE, 83 failed:
 
 | Test | Result |
 |------|--------|
@@ -269,11 +269,7 @@ All 41 tests passed (CGB cgbE).
 | cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x24_x34 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x32 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_80_bytes_sprite_y16_x48 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_160_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_256_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/gdma_source_wram_dma_source_ram_480_bytes_overflow | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/hdma/hdma_source_wram_dma_source_ram_during_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/hdma/hdma_start_during_oam_scan_with_dma_running | $FFF0=$02 = fail value (tick 100008) |
 
 ## docboy/cgb/serial
 
@@ -342,31 +338,17 @@ All 109 tests passed (CGB cgbE).
 
 All 69 tests passed (CGB cgbE).
 
-## docboy/cgb/double_speed/apu/ch1 (594/613 passed)
+## docboy/cgb/double_speed/apu/ch1 (608/613 passed)
 
-594/613 tests passed on CGB cgbE, 19 failed:
+608/613 tests passed on CGB cgbE, 5 failed:
 
 | Test | Result |
 |------|--------|
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_change_period_nr13_no_retrigger_75_16_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_change_period_nr14_no_retrigger_75_16_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_change_period_nr14_no_retrigger_75_17_round2 | $FFF0=$02 = fail value (tick 100002) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_period_round2 | $FFF0=$02 = fail value (tick 300000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_period_round4 | $FFF0=$02 = fail value (tick 300000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_delay16_after_trigger | $FFF0=$02 = fail value (tick 100002) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_2_round1 | $FFF0=$02 = fail value (tick 100006) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_3_round1 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_0_57 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_0_9 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_16_40 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_1_56 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_1_8 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_8_0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_8_48 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_square_wave_duty_75_alt_delay4 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_square_wave_duty_75_alt_delay5 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_square_wave_duty_75_alt_delay8 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_square_wave_duty_75_b_delay8 | $FFF0=$02 = fail value (tick 100000) |
 
 ## docboy/cgb/double_speed/apu/ch2
 
@@ -474,24 +456,9 @@ All 14 tests passed (CGB cgbE).
 
 All 50 tests passed (CGB cgbE).
 
-## docboy/cgb/double_speed/interactive (55/67 passed)
+## docboy/cgb/double_speed/interactive
 
-55/67 tests passed on CGB cgbE, 12 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_ly_b_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_ly_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_scx0_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_scx1_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_scx2_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx0_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx1_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx2_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime0_ly_round2 | $FFF0=$02 = fail value (tick 100000) |
+All 67 tests passed (CGB cgbE).
 
 ## docboy/cgb/double_speed/interrupts
 

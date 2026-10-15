@@ -319,8 +319,10 @@ dying at 4096 with the first event skipped and one count spent at the trigger.
 
 ## Not covered
 
-* **`sq_write_freq_hi`'s own case** — the `square_freq_backstep_halftick`
-  duty-position undo — is only reachable at **CGB double speed**, where a
+* **`sq_reload_step`'s half-tick case** — `square_reload_halftick`, a
+  frequency write half a tick after a duty step still setting the period
+  counted from it (until 2026-10-15 a duty-position undo) — is only reachable
+  at **CGB double speed**, where a
   frequency write can land half an APU tick after a duty step. Page 1C
   measures the sweep writeback's version of that race at single speed, which
   is the same `reload_now` question, but not the D/E half-tick itself; that

@@ -12,7 +12,7 @@ template psg_length_half(h: GB): bool = h.apu.first_half_of_length_period
 template psg_cgb(h: GB): bool = h.cgb_enabled
 template psg_q_length_any(h: GB): bool = h.quirks.length_clock_any_nrx4
 template psg_q_length_defer(h: GB): bool = h.revision == grCgbAB
-template psg_q_backstep(h: GB): bool = h.quirks.square_freq_backstep_halftick
+template psg_q_reload_halftick(h: GB): bool = h.quirks.square_reload_halftick
 template psg_env_late(h: GB): bool =
   ## Step 7's envelope work waits for ENV_CLOCK_DS_LATE_T past the divider's
   ## tap edge (GbQuirks.env_clock_ds_late, apu.nim), unless the KEY1 tap lag
@@ -168,6 +168,23 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
 template psg_trigger_deadline(h: GB; period: CycleCount;
                               extra_ticks: int): CycleCount =
   gb_trigger_deadline(h, period, extra_ticks)
+
+proc gb_trigger_pickup*(gb: GB): CycleCount =
+  ## The 1 MHz edge a square trigger written now takes effect on: the edge at
+  ## or after the write (gb_trigger_deadline's rule). PSG_NO_STEP where
+  ## another rule places the trigger (APU_DS_TRIGGER_SNAP's 2 us grid on CPU
+  ## CGB C and older at double speed, the refuted carried clock, the
+  ## edge-before arm): the pickup rules in sq_trigger are stated on this edge.
+  when APU_TRIGGER_EDGE_BEFORE != 0:
+    return PSG_NO_STEP
+  when APU_DS_TRIGGER_SNAP != 0:
+    if gb.memory.current_speed != 0 and gb.quirks.apu_clock_carry:
+      return PSG_NO_STEP
+  when APU_CLOCK_CARRY != 0:
+    if gb.quirks.apu_clock_carry: return PSG_NO_STEP
+  gb_apu_edge(gb)
+
+template psg_trigger_pickup(h: GB): CycleCount = gb_trigger_pickup(h)
 
 template psg_noise_phase(h: GB): CycleCount = h.apu.noise_phase
   ## The 512 kHz grid channel 4's divisor stage counts on (GbApu.noise_phase).

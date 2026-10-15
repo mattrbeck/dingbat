@@ -2059,14 +2059,18 @@ const NotScored: seq[(string, string)] = @[
     "(test/hwtests/jpadirq.txt) has a real press bounce a varying number of " &
     "times; a deterministic release model would change every game. SameBoy " &
     "fails both release rows. (build_docboy_rows, DocboyNotScored)"),
-  ("DocBoy: $FEA0-$FEFF as RAM on the CGB E (26)", "13 rows in `cgb/memory` " &
+  ("DocBoy: $FEA0-$FEFF as RAM on the CGB E (29)", "13 rows in `cgb/memory` " &
     "and 13 in `cgb_dmg_mode/memory` write the area outside modes 2/3 and read " &
     "it back as RAM, `$FEC0-$FEFF` repeating 16 bytes (Pan Docs' description " &
     "of CGB revisions 0-D). Pan Docs (\"FEA0-FEFF range\") has CGB E, AGB, AGS " &
     "and GBP return the high nibble of the low address byte twice, and the AGS " &
     "read exactly that under gbedge p0F (`$FEA0`..`$FEF8` = `AA AA BB BB .. FF " &
     "FF`, `$FEA5` still `$AA` after writing `$5A`; docs/flashcart-runbook.md). " &
-    "SameBoy (CGB E, either boot ROM) fails all 26. The two read-while-blocked " &
+    "SameBoy (CGB E, either boot ROM) fails all 26. Three `cgb/hdma/gdma_source_" &
+    "wram_dma_source_ram_{160,256,480_bytes_overflow}` rows compare `$FE00-$FEFF` " &
+    "after an OAM DMA beside a GDMA, the area filled with `$EF` first: OAM " &
+    "matches byte for byte and only `$FEA0-$FEFF` differs (SameBoy fails them " &
+    "too). The two read-while-blocked " &
     "rows per manifest ($FF) ARE scored. (build_docboy_rows, DocboyNotScored)"),
   ("DocBoy: `boot_hram` (4)", "dmg (two), cgb, cgb_dmg_mode: every byte " &
     "matches what running Nintendo's boot ROMs leaves (dingbat's skip-boot " &
@@ -3278,7 +3282,10 @@ const DocboyNotScored: seq[string] = @[
   # A joypad interrupt on key release (3).
   "dmg/docboy/joypad/interactive/joypad_*_interrupt_release",
   "dmg/docboy/cpu/interactive_visual/stop_immediate_exit_joypad_interrupt",
-  # $FEA0-$FEFF as RAM on a CPU CGB E (26).
+  # $FEA0-$FEFF as RAM on a CPU CGB E (29).
+  "cgb/docboy/hdma/gdma_source_wram_dma_source_ram_160_bytes",
+  "cgb/docboy/hdma/gdma_source_wram_dma_source_ram_256_bytes",
+  "cgb/docboy/hdma/gdma_source_wram_dma_source_ram_480_bytes_overflow",
   "cgb/docboy/memory/not_usable_area_write*",
   "cgb/docboy/memory/not_usable_read_hblank",
   "cgb/docboy/memory/not_usable_read_ppu_off",

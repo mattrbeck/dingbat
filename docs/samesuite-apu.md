@@ -75,7 +75,7 @@ every test here.
 | `channel_1_stop_div` | like channel 3 with a smaller length range | follows from the DIV-APU work |
 | `channel_1_sweep`, `_sweep_restart`, `_sweep_restart_2` | sweep overflow timing, restarts during sweep | below |
 | `channel_1_extra_length_clocking-cgb0B` | on CGB ≤ B the extra length clock needs only a previously-disabled counter; fixed on CGB C | `GbQuirks.length_clock_any_nrx4`, on `--model=cgb0B` only |
-| `channel_1_freq_change_timing-A/-cgb0BC/-cgbDE` | (no header) three per-revision builds | write-vs-reload rule below; the per-revision cells are `GbQuirks.pcm_read_edge_zero` (CGB 0–C) and `GbQuirks.square_freq_backstep_halftick` (CGB D/E) |
+| `channel_1_freq_change_timing-A/-cgb0BC/-cgbDE` | (no header) three per-revision builds | write-vs-reload rule below; the per-revision cells are `GbQuirks.pcm_read_edge_zero` (CGB 0–C) and `GbQuirks.square_reload_halftick` (CGB D/E) |
 
 **The sweep's calculation takes one APU tick per shift.** Pan Docs ("Frequency
 sweep") describes one indivisible step: compute, disable on overflow, else write back

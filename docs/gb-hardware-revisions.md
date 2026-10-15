@@ -74,7 +74,7 @@ retired-instruction floor (`docs/gb_oam_dma_cost.md` method).
 | `mixer_write_immediate` | CGB D, E | mealybug `m3_bgp_change` `_cgb_c` vs `_cgb_d` (one pixel per write edge = the `CGB_MIXER_LATENCY` dot); LCDC keeps the dot on every revision because the LCDC ROMs' two captures are byte-identical |
 | `scy_fetch_latch` | CGB D, E | mealybug `m3_scy_change`: live-per-read is pixel-exact on `_cgb_c` and 6217 px wrong on `_cgb_d`; a per-fetch latch at the map read is the exact inverse (`docs/gb-mealybug-sources.md` §3.4) |
 | `pcm_read_edge_zero` | CGB 0–C | SameSuite `channel_1_freq_change_timing-{A,cgb0BC,cgbDE}`: cells 4 and 15 put a PCM12 read on a rising duty step and read `$0f` only in the `-cgb0BC` table; `apu/README.md` states the scope (§2.3). The one flag true on the default |
-| `square_freq_backstep_halftick` | CGB D, E | see declaration |
+| `square_reload_halftick` | CGB D, E | see declaration |
 | `lyc_compare_hold` | CGB D, E, AGB | see declaration |
 | `ly_read_edge_late` | CGB D, E, AGB | AGE `ly-*` / STAT rows split at C/D; see declaration |
 | `m1_end_no_mode0` | CGB D, E, AGB | the mode-0 M-cycle at the end of mode 1 is present on CGB ≤ C; see declaration |

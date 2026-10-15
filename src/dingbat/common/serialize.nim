@@ -85,8 +85,11 @@ const
   #      · 9 channel 1's sweep unit: the held operand, the step its
   #        calculation latched, what the pending load is, and whether the
   #        operand is a calculation's result (psg_channels.nim); OPRI's bit
+  #      · 10 the square channels' trigger start-up edge (start_at,
+  #        sq_starting); the divider's hold after a leaf KEY1 switch
+  #        (timer.hold_t) and whether the PPU sits it out
   GBA_PAYLOAD_VERSION* = 11'u32
-  GB_PAYLOAD_VERSION*  = 9'u32
+  GB_PAYLOAD_VERSION*  = 10'u32
   # NDS: 1 initial (docs/nds/savestate.md). The payload also carries a hash
   #      of its field layout, checked on load, so a layout change that
   #      forgets this bump is still refused rather than misread.

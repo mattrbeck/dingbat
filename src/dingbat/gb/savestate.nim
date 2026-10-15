@@ -92,8 +92,11 @@ proc save_timer_state(t: GbTimer; w: var Writer) =
   w.write_i32(int32(t.bit_for_tima))
   w.write_bool(t.previous_bit)
   w.write_i32(int32(t.countdown))
+  # rev 10: the divider's hold after a leaf KEY1 switch (-1: its last M-cycle
+  # has run and the PPU resumes on the next; SPEED_SWITCH_LEAF_PPU).
+  w.write_i32(int32(t.hold_t))
 
-proc load_timer_state(t: GbTimer; r: var Reader) =
+proc load_timer_state(t: GbTimer; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_TIMER)
   t.tdiv = r.read_u16()
   t.tima = r.read_u8()
@@ -103,6 +106,11 @@ proc load_timer_state(t: GbTimer; r: var Reader) =
   t.bit_for_tima = int(r.read_i32())
   t.previous_bit = r.read_bool()
   t.countdown = int(r.read_i32())
+  # Before rev 10 the hold was not carried (a load kept the running
+  # machine's); none is the value a state written outside the 2 M-cycles
+  # after a leaf switch has.
+  t.hold_t = if rev >= 10: int(r.read_i32()) else: 0
+  check_range(t.hold_t, -1, 64, "timer.hold_t")
 
 proc save_serial_state(s: GbSerial; w: var Writer) =
   # The driver (link cable binding) is not serialized; see set_serial_driver
@@ -230,6 +238,8 @@ proc save_mem_state(mem: GbMemory; w: var Writer) =
   w.write_u8(mem.svbk_raw)
   # rev 9: OPRI's bit.
   w.write_u8(mem.opri)
+  # rev 10: whether the PPU is sitting out a leaf switch's restart.
+  w.write_bool(mem.ppu_mdot_shift == PPU_SIT_OUT)
 
 proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_MEM)
@@ -268,6 +278,8 @@ proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   # boots with it clear; in compatibility mode the register reads $FF and
   # the bit is never seen).
   mem.opri = if rev >= 9: r.read_u8() and 0x01'u8 else: 0'u8
+  let sits_out = rev >= 10 and r.read_bool()
+  mem.ppu_mdot_shift = if sits_out: PPU_SIT_OUT else: int(mem.current_speed)
   mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
   # Derived, not payload. dma_bus / dma_drive / dma_latch are re-derived in
   # gb_apply_state once the cartridge and PPU sections have landed.
@@ -621,6 +633,11 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
     w.write_bool(ch.sweep_operand_valid)
     w.write_u8(ch.sweep_frozen)
     w.write_bool(ch.sweep_arrival_after)
+  # rev 10: the edge each square's last trigger loads its timer on, while a
+  # trigger there could still see it (sq_starting); a past one is none.
+  for ch in [PsgSquare(apu.channel1), apu.channel2]:
+    w.write_deadline(if ch.start_at != GB_NO_STEP and ch.start_at >= now:
+                       ch.start_at else: GB_NO_STEP, now)
 
 proc ch1_sweep_from_rev8(ch: GbChannel1) =
   ## A rev <= 8 state's sweep unit: those builds computed each clock's value
@@ -744,6 +761,10 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
       ch1.sweep_arrival_after = r.read_bool()
     else:
       ch1_sweep_from_rev8(ch1)
+    # Before rev 10 no trigger's start-up edge was kept: none ahead, which a
+    # trigger within two APU ticks of the frame boundary would have seen.
+    for ch in [PsgSquare(apu.channel1), apu.channel2]:
+      ch.start_at = if rev >= 10: r.read_deadline(now, "start_at") else: GB_NO_STEP
   else:
     # Before rev 6: the grids' phases and the KEY1 lag stayed whatever the
     # running machine had, as those builds did; the rest is live for a few
@@ -754,6 +775,8 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     ch1_sweep_from_rev8(apu.channel1)
     apu.spsw_rephase_pending = false
     apu.env_late_pending = false
+    apu.channel1.start_at = GB_NO_STEP
+    apu.channel2.start_at = GB_NO_STEP
   # Restart audio pacing cleanly (see GBA load_apu_state)
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
@@ -1172,7 +1195,7 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   var r = Reader(buf: payload)
   load_cpu_state(gb.cpu, r, rev)
   load_irq_state(gb.interrupts, r)
-  load_timer_state(gb.timer, r)
+  load_timer_state(gb.timer, r, rev)
   load_serial_state(gb.serial, r, rev)
   load_joypad_state(gb.joypad, r)
   load_mem_state(gb.memory, r, rev)

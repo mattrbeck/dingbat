@@ -13,7 +13,7 @@ template psg_shl(h: GBA): untyped = 2
 template psg_cgb(h: GBA): bool = true
 template psg_q_length_any(h: GBA): bool = false
 template psg_q_length_defer(h: GBA): bool = false
-template psg_q_backstep(h: GBA): bool = false
+template psg_q_reload_halftick(h: GBA): bool = false
 
 const GBA_NO_STEP* = PSG_NO_STEP
 const GBA_OBS_CPU* = PSG_OBS_CPU

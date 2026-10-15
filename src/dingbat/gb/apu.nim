@@ -151,6 +151,10 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   # unobservable.
   apu.channel1.last_step_at = GB_NO_STEP
   apu.channel2.last_step_at = GB_NO_STEP
+  # A trigger's start-up edge matters only while it is still ahead.
+  for ch in [PsgSquare(apu.channel1), apu.channel2]:
+    if ch.start_at != GB_NO_STEP:
+      ch.start_at = if ch.start_at >= base: ch.start_at - base else: GB_NO_STEP
   adj(apu.channel1)
   adj(apu.channel2)
   adj(apu.channel3)

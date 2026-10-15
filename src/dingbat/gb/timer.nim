@@ -101,6 +101,32 @@ const SPEED_SWITCH_IRQ_LEAF_HOLD_T* {.intdefine.} = 8
   ## IMMEDIATE_INTERRUPT_DIV and _TIMA blocks (CGB B/C and E); spsw-div is
   ## anchored on a divider event and cannot see it.
 
+const SPEED_SWITCH_LEAF_PPU* {.intdefine.} = 1
+  ## A KEY1 switch on the leaf Pan Docs' STOP chart gives as "1 byte, mode
+  ## doesn't change, DIV is reset, CPU speed changes" (a request pending, so
+  ## no HALT) still restarts the oscillator: the divider sits it out
+  ## (SPEED_SWITCH_IME0_LEAF_HOLD_T, two M-cycles of the new speed) and so
+  ## does the PPU, which then takes the switch's extra dots exactly as the
+  ## stall gives them (SPEED_SWITCH_PPU_EXTRA_DOTS 8 / _SINGLE 3): net +4
+  ## dots into double speed (8 less 2 M-cycles of 2), -5 into single (3 less
+  ## 2 of 4); the extra dots run at the switch and the PPU then sits out the
+  ## divider's hold (GbMemory.ppu_mdot_shift = PPU_SIT_OUT, released by
+  ## timer_tick_slow at the M-cycle after the hold ends).
+  ## No new number: DocBoy `double_speed/interactive/stop_key1_joypad0_
+  ## interrupt1_ime0_ly_round2` (into double) and the eleven `double_speed_
+  ## stop_key1_joypad0_interrupt1_ime0_{ly,ly_b,stat,stat_scx0-3,serial_
+  ## scx0-3}_round1` (into single), with their `_round2` partners, pin the
+  ## pair two-sided (+3 / +5 and -4 / -6 each lose rows); SameBoy (CGB E,
+  ## black box) passes 9 of the 12 (not the two LY reads into single, nor
+  ## `serial_scx3`, the row that splits -5 from -4). 0 = the PPU runs
+  ## straight through the leaf, as before 2026-10-15.
+const PPU_SIT_OUT* = 24
+  ## GbMemory.ppu_mdot_shift while the PPU sits out: no tick reaches 2^24.
+const SPEED_SWITCH_LEAF_PPU_IME1* {.intdefine.} = 1
+  ## The same for the IME-set leaf (Pan Docs: "The CPU glitches
+  ## non-deterministically"), with its own divider hold (SPEED_SWITCH_IRQ_
+  ## LEAF_HOLD_T, half on CGB E). No row reads the PPU after it.
+
 proc timer_reload_tima(t: GbTimer; gb: GB) =
   when defined(gb_phase_trace):
     echo "TIMIRQ t=", gb_phase, "/", gb_ticklen
@@ -162,7 +188,15 @@ proc timer_tick_slow(t: GbTimer; gb: GB; cycles: int) =
       let n = min(t.hold_t, cycles)
       t.hold_t -= n
       cycles   -= n
+      when SPEED_SWITCH_LEAF_PPU != 0:
+        # The PPU sits the same span out; it resumes from the next M-cycle
+        # (this one's PPU half is still to come): -1 brings that M-cycle here.
+        if t.hold_t == 0 and gb.memory.ppu_mdot_shift == PPU_SIT_OUT:
+          t.hold_t = -1
       if cycles == 0: return
+    elif t.hold_t < 0:
+      gb.memory.ppu_mdot_shift = int(gb.memory.current_speed)
+      t.hold_t = 0
   when defined(gb_phase_trace):
     gb_phase = -1
     gb_ticklen = int32(cycles)

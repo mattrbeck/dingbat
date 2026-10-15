@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,635 / 8,990 at `DocboyRev` (237 more not scored, `DocboyNotScored`), every
+(`tests/README.md`, "The DocBoy suite"): 8,662 / 8,987 at `DocboyRev` (240 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1197,10 +1197,37 @@ question. Families, largest first:
     sit on opposite sides of DocBoy's edge), `disable_on_triple_trigger_
     step4_delay4_{2,3}_round1`, `change_step_7_to_0_during_recalc_delay16_
     after_trigger` (3); SameBoy fails all five.
-  The 14 double-speed CH1 rows outside the sweep (`retrigger_same_period_75_*`
-  7, `retrigger_square_wave_duty_75_{alt,b}_*` 4, `change_period_nr1{3,4}_
-  no_retrigger_75_*` 3) are a retrigger on a duty step at double speed, the
-  square-trigger grid of H1; SameBoy fails all 14. Not chased.
+  The 14 double-speed CH1 rows outside the sweep closed 2026-10-15
+  (`psg_channels.nim`: `sq_trigger`, `sq_starting`, `sq_reload_step`). Each
+  family walks a write across one APU tick in half-tick steps, so a pair of
+  rows one M-cycle apart that DocBoy answers alike and dingbat did not names
+  the rule. SameBoy (CGB E, black box) fails all 14, so these are DocBoy's
+  rules, each stated on dingbat's own grid (a write takes effect on the next
+  1 MHz edge) and each inert at single speed and on the CGB C snap grid:
+  * A trigger written half a tick before a duty step is picked up on the
+    step's edge, and the step still happens (`retrigger_same_period_75_
+    {8,16}_*` against `_{9,17}_*`; `retrigger_square_wave_duty_75_alt_
+    delay{4,5,8}` and `_b_delay8`, period 1). Double speed only: after a
+    KEY1 switch dingbat's single-speed grid sits a few T off the CPU's
+    (H2's re-phase, fitted to gambatte's CGB C ladder with the step
+    dropped), and `speedchange{,4}_ch1_duty0_pos6_to_pos7_timing_nop_
+    {ds_,}1` lose with the rule there.
+  * A trigger picked up on or before the edge an earlier trigger loads the
+    timer on (2 ticks after its own edge from off, 1 on a restart) starts
+    the channel as from off, 2 ticks: every edge decides on the state
+    before it (`retrigger_same_period_75_{0,1}_*`, 1.5 and 2 ticks after a
+    trigger from off, step where `_75_{2,3}_*` do). `GbApu` keeps the edge
+    (`PsgSquare.start_at`, GB payload rev 10). No `ldh` store pair reaches it.
+  * CGB D/E reload the frequency timer half a tick after a step, so NR13 or
+    NR14 written then sets the period counted from the step, the duty
+    position kept (`change_period_nr1{3,4}_no_retrigger_75_16*`: as the
+    write on the step, `_75_15`; `_75_17`, a tick later, does not). This
+    replaces the old "undo the step" reading of SameSuite `channel_1_freq_
+    change_timing-cgbDE` cell 10, which the reload also gives
+    (`square_reload_halftick`; the undo came from a sweep against SameBoy,
+    which keeps it, docs/oracles.md).
+  blargg, SameSuite APU 70/70, gambatte `sound`/`speedchange` and the GBA PSG
+  rows unchanged.
 * **I3. CGB compatibility-mode picture (66 left of 233; 114 not scored).** 63 `palettes_checksum_*`:
   dingbat's skip-boot hand-off always loads the default compatibility palette,
   where the boot ROM picks one by the title checksum (Pan Docs, "Power Up
@@ -1253,7 +1280,7 @@ question. Families, largest first:
     bug_checksum_d1{,_first_dot}`, whose title "INCREDIBLE" picks a boot
     palette too; SameBoy, through the boot ROM, passes both), which Matt
     keeps red.
-* **I4. HDMA / GDMA (182 -> 87).** Closed 2026-10-14 (95 rows; 89 here, `gb.nim`
+* **I4. HDMA / GDMA (182 -> 83; 3 not scored).** Closed 2026-10-14 (95 rows; 89 here, `gb.nim`
   knobs, and the six double-speed rows with I7):
   the LCD-enable line has no OAM scan, so the VRAM DMA's HBlank input sees
   the mode 0 STAT shows there (`HDMA_LCDON_LINE0_M0`: an HBlank transfer armed
@@ -1288,7 +1315,7 @@ question. Families, largest first:
   for one granted after an opcode fetch (`HDMA_BOUNDARY_ACQUIRE`, the split
   `HDMA_OVERHEAD_LEADS` already records for gambatte `oamdmasrcC000_
   hdmasrc0000`); SameBoy passes 6 of the 16.
-  Open (87): 82 `gdma_ppu_on_pixel_transfer_conflict_relaxed_*`: DocBoy loses
+  Open (83): 82 `gdma_ppu_on_pixel_transfer_conflict_relaxed_*`: DocBoy loses
   three VRAM writes in four while the mode-3 fetcher holds the port (object
   and window fetches move the holes); dingbat lands every byte, Pan Docs only
   says to avoid it. SameBoy fails 69 of the 82 rows, but its VRAM shows
@@ -1302,14 +1329,20 @@ question. Families, largest first:
   0-5) gets the BG phase of all 8 SCX rows, one byte early at mode-3 start
   (the restarted first fetch) and up to one late at its end. Hardware
   question 21 (gbedge p21 bytes 00-0F). 3 `gdma_source_wram_dma_source_ram_{160,256,
-  480_bytes_overflow}`: OAM matches byte for byte; the miss is the
-  `$FEA0-$FEFF` readback, I10. `hdma_start_during_oam_scan_with_dma_running`
-  (DocBoy and SameBoy: armed in mode 2 under an OAM DMA, the block starts at
-  once; "the HBlank input is high unless the PPU scans OAM or draws" would
-  give it, but row 17 of docs/hwprobe-questions.md has the scan running under
-  OAM DMA; one row, not modelled; hardware question 23, gbedge p22
-  `VDMAOAM`) and `..._during_oam_scan` (that start plus a VRAM write
-  pattern; SameBoy fails it). The six double-speed `speed_switch_to_
+  480_bytes_overflow}`: the ROMs `Memcmp` all of `$FE00-$FEFF`; dingbat's
+  OAM matches byte for byte and only the `$FEA0-$FEFF` readback differs
+  (SameBoy fails all three): not scored since 2026-10-15 with I10.
+  `hdma_start_during_oam_scan_with_dma_running` closed 2026-10-15: armed in
+  mode 2 under an OAM DMA, the block starts at once (DocBoy and SameBoy). The
+  OAM scan already reads as mode 0 in STAT while an OAM DMA holds OAM
+  (`STAT_M2_DMA_READS_0`, the DMG `dma_*_check_stat_*` rows, SameBoy on DMG
+  B and CGB E), and the VRAM DMA's HBlank input follows the mode STAT shows,
+  as on the LCD-enable line (`HDMA_LCDON_LINE0_M0`): `HDMA_M2_DMA_HBLANK`,
+  ppu.nim. Hardware question 23 (gbedge p22 `VDMAOAM`) checks it.
+  `..._during_oam_scan` now starts the same way and its OAM bytes match
+  DocBoy's exactly; the VRAM bytes the block loses once mode 3 begins (6-8,
+  10-12, 14-15) are the open mode-3 VRAM-port family above (SameBoy fails
+  it too). The six double-speed `speed_switch_to_
   {double,single}_during_hdma{,_div,_stat}_round2` closed with the
   speed-switch stall's halt model (I7): the HBlank STAT request ends the
   stall, as in `speed_switch_to_double_interrupt_stat_round2` without a DMA.
@@ -1410,7 +1443,7 @@ question. Families, largest first:
     scx{2,3,5}_*`, mealybug `m3_window_timing*`, which SameBoy also matches);
     the picture is not. One untried way: keep the discard's dots, move the window
     tile right by SCX & 7 (a first push of 8 + (SCX and 7) pixels).
-* **I7. Speed-switch interrupt and STOP timing (79; 20 left).** Closed
+* **I7. Speed-switch interrupt and STOP timing (79; 8 left, not scored).** Closed
   2026-10-14: all 49 `double_speed/interrupts/speed_switch_to_*` and
   `*_serial_halted_*` rows and 10 of the non-input `double_speed/interactive/
   *stop_key*` rows. The switch's stall is the CGB HALT of the switch leaf
@@ -1432,8 +1465,8 @@ question. Families, largest first:
   doesn't change, DIV is reset, CPU speed changes" -- holds the divider two
   M-cycles of the new speed (`SPEED_SWITCH_IME0_LEAF_HOLD_T`, [5, 8] T).
   SameBoy (CGB E) passes every closed row but six (five aligned rows and
-  `speed_switch_to_single_interrupt_vblank_d_round2`). Left (20, all
-  `double_speed/interactive`):
+  `speed_switch_to_single_interrupt_vblank_d_round2`). The other 20, all
+  `double_speed/interactive`:
   * 8 `{,double_speed_}stop_key1_joypad0_interrupt1_ime1_*_div_round1`: the
     IME-set leaf, which Pan Docs' chart calls "The CPU glitches
     non-deterministically". DocBoy wants the same 8 T hold as with IME clear;
@@ -1444,14 +1477,27 @@ question. Families, largest first:
     2026-10-14 (`DocboyNotScored`):
     DocBoy's model of a leaf the spec calls non-deterministic, against a
     hardware measurement.
-  * 12 PPU-phase rows of the IME-clear leaf: `stop_key1_joypad0_interrupt1_
-    ime0_ly_round2` (into double speed) and `double_speed_stop_key1_joypad0_
-    interrupt1_ime0_{ly,ly_b,stat,stat_scx*,serial_scx*}_round1` (into
-    single). After a leaf switch DocBoy has the PPU 3-4 dots ahead of dingbat
-    into double speed and 6-7 dots behind into single; SameBoy agrees on the
-    double-speed row and on the single-speed STAT reads but reads LY as
-    dingbat does, so its single-speed answer is not a uniform PPU shift
-    either. No mechanism found that gives both directions; open.
+  * 12 PPU-phase rows of the IME-clear leaf, closed 2026-10-15:
+    `stop_key1_joypad0_interrupt1_ime0_ly_round2` (into double speed) and
+    `double_speed_stop_key1_joypad0_interrupt1_ime0_{ly,ly_b,stat,stat_scx*,
+    serial_scx*}_round1` (into single). Each reads LY or STAT a fixed count
+    of M-cycles after the leaf STOP; sweeping that count on rebuilt ROMs puts
+    every DocBoy edge exactly +4 dots (into double) and -5 dots (into single)
+    from dingbat's, two-sided (a PPU shift of +3/+5 or -4/-6 at the switch
+    loses rows; nothing else in the 3,600 double-speed, STOP and switch rows
+    moves). SameBoy (CGB E) sits on DocBoy's edges into double and for STAT
+    into single, and one M-cycle earlier for LY into single: it passes 9 of
+    the 12 (not the two LY rows nor `serial_scx3`, the row that splits -5
+    from -4). The pair is the
+    leaf's oscillator restart with no new number: the divider already sits
+    out two M-cycles of the new clock there (`SPEED_SWITCH_IME0_LEAF_HOLD_T`,
+    8 T), and the PPU sits out the same two (4 dots into double, 8 into
+    single) after taking the switch's own extra dots, the stall's
+    `SPEED_SWITCH_PPU_EXTRA_DOTS` 8 / `_SINGLE` 3: 8 - 4 = +4, 3 - 8 = -5
+    (`SPEED_SWITCH_LEAF_PPU`, timer.nim; `GbMemory.ppu_mdot_shift`, GB
+    payload rev 10, which also carries the divider's hold). The IME-set
+    leaf takes the same rule with its own hold (`SPEED_SWITCH_LEAF_PPU_IME1`;
+    no row reads the PPU after it).
 * **I8. Other APU (146; 99 closed 2026-10-14).** Each closed against the test
   source, with SameBoy (black box, CGB E) as the second witness and probe
   ROMs run on both where the rows left a rule open:
@@ -1540,7 +1586,7 @@ question. Families, largest first:
   HRAM random and SameBoy fails them too: NotScored since 2026-10-14.
   `cgb/boot/boot_regs_joypad` (P1 = $CF with a CGB cart) closed with I13's P1
   hand-off.
-* **I10. `$FEA0-$FEFF` (26 left of 32).** Closed 2026-10-14: a read while OAM
+* **I10. `$FEA0-$FEFF` (29 not scored; 6 closed).** Closed 2026-10-14: a read while OAM
   is blocked answers $FF on every model (Pan Docs, "FEA0-FEFF range"), the
   six `not_usable_read_{oam_scan,pixel_transfer}` rows (DMG, CGB, compat).
   The 26 left (13 in `cgb/memory`, 13 in `cgb_dmg_mode/memory`) all write the
@@ -1550,7 +1596,9 @@ question. Families, largest first:
   AGS read exactly that under gbedge p0F, `$FEA0`..`$FEF8` = `AA AA BB BB ..
   FF FF` and `$FEA5` still `$AA` after a `$5A` write (docs/flashcart-runbook.md);
   SameBoy (CGB E, either boot ROM) fails all 26. NotScored since 2026-10-14
-  (`DocboyNotScored`); a
+  (`DocboyNotScored`), with the three `hdma/gdma_source_wram_dma_source_ram_
+  {160,256,480_bytes_overflow}` rows (2026-10-15; I4) whose only miss is
+  this readback; a
   CGB E unit would settle the one open point, whether CGB E really groups
   with the AGB here.
 * **I11. CGB header modes (15).** Closed 2026-10-14: `mode_cgb_flag_{81,82,83,90}`
@@ -1699,7 +1747,14 @@ question. Families, largest first:
   has ANY write latch, 51/51 against 28/51, mbc3.nim; SameBoy fails them too:
   NotScored since 2026-10-14), `mbc1_initial_ram` (1: cart RAM read back as $FF
   before any write; Pan Docs is silent, SRAM powers up with whatever it
-  holds; SameBoy passes it, dingbat starts a fresh cart at $00),
+  holds; SameBoy passes it, dingbat starts a fresh cart at $00. Checked
+  2026-10-15: no suite in the tree reads cart RAM it has not written --
+  mooneye `emulator-only/mbc1/ram_*` reads it disabled ($FF, open bus) and
+  clears it before round 2 -- and $FF is an emulator convention (a fresh
+  battery cart holds whatever its SRAM cells settled to; flash-erased $FF is
+  real only for flash and EEPROM saves). Left red: changing it moves every
+  new save's first boot; proposed NotScored, or $FF as a convention after a
+  playtest-train run),
   `write_tima_while_reloading_*` (2; closed 2026-10-15: the TIMA store lands
   in the M-cycle after the overflow, Pan Docs' cycle A, where a write stops
   the IF flag being set; dingbat's model already took the reload back, but
@@ -1714,7 +1769,13 @@ question. Families, largest first:
   `serial_timing_reset_div_during_transfer_stall_alt_round1`, where SameBoy
   through Nintendo's DMG boot ROM agrees; gambatte `serial/*` 82/82 either
   way, serial.nim. Left: the two-player `slave_sc_00` row wants a slave with
-  SC = $00 to shift and interrupt, which Pan Docs does not cover), DMG ppu
+  SC = $00 to shift and interrupt (its source: "Serial transfer should start
+  even with SC = 0"); Pan Docs has the externally clocked side "has to set
+  SC's Bit 7 (that is, SC=$80) to enable the serial port", Gekkio's SCLK
+  experiment (an external-clock shift register counting 8 edges with the
+  main clock stopped) does not say what SC bit 7 = 0 does, and SameBoy's
+  driver here cannot run two-player rows. Proposed NotScored against Pan
+  Docs; the pair of ROMs on two consoles and a cable settles it), DMG ppu
   `$FFF0` rows (2 of 3 left, below), six DMG
   STOP/HALT pictures whose reference is DocBoy's blank-panel colour
   (`$AD00`, Pan Docs' "whiter than color #0"), which dingbat draws as shade 0
@@ -1952,8 +2013,8 @@ One line each; the knob's own comment carries the derivation.
   `lyc_compare_hold`, `CGB_LYC_WRITE_DEFER`; the wilbertpol `ly_lyc*` cluster.
 * A halted OAM DMA drives the OAM bus: `OAMDMA_FREEZE_BUS`; the last mooneye
   row.
-* SameSuite APU: `pcm_read_edge_zero` (CGB <= C), `square_freq_backstep_
-  halftick` (CGB D/E), the suite scored on CGB E as its README says
+* SameSuite APU: `pcm_read_edge_zero` (CGB <= C), `square_reload_halftick`
+  (CGB D/E), the suite scored on CGB E as its README says
   (`docs/samesuite-apu.md`).
 * The mealybug DMG set: `OBJ_BG_RUN = 4` (the object fetch takes a tile
   boundary the object picks), `M3_THROWAWAY_DOTS = 4`, `MIXER_PALETTE_OR`,
