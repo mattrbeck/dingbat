@@ -2917,6 +2917,221 @@ def t_seqreset(a, slot, p):
     apu_off(a)
 
 
+@test("VDMABUS")
+def t_vdmabus(a, slot, p):
+    """CGB VRAM DMA against the PPU's VRAM port and the cartridge bus.
+    (EE at +1F = not a CGB/AGB.)  Destinations are tiles the viewer never
+    shows (bank 0 $8800, bank 1 $8100-$818F); only rows 00-0F and 1D-1E
+    depend on the PPU's timing.
+
+    00-0F  write map of a 128-byte GDMA ($C600 -> $8800) started 110 M
+           after an LCD enable (SCX 0, BG only), the sequence of DocBoy
+           cgb/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_128_bytes_
+           scx0, so it runs from line 1's OAM scan through mode 3 into
+           HBlank: bit 7 of byte 0 = destination byte 0, 1 = it holds the
+           source byte, 0 = the prefilled complement survived (the write
+           was lost).  dingbat (Pan Docs says nothing) lands every byte:
+           16 x FF.  DocBoy's model drops three writes in four while mode 3
+           fetches: FF FF FF FF F1 11 11 11 11 11 11 11 11 11 11 FF (its
+           bytes 0-15 are unchecked; SameBoy fails the row).
+    10-13  GDMA of 2 blocks from HRAM $FFA0 (the DMA cannot reach HRAM),
+           code in ROM, the opcode after the FF55 write SCF ($37):
+           destination bytes 0, 1, 2 and 16 (block 2's first).
+    14-16  the same with the code in WRAM ($C700): bytes 0, 1, 2.
+    17-19  GDMA from VRAM $9C00 (Pan Docs: "garbage"), code in ROM: 0, 1, 2.
+    1A-1C  GDMA from echo $E000, code in ROM: 0, 1, 2.
+    1D-1E  one HBlank block from $FFA0 taken during a NOP sled on line 1:
+           bytes 0, 1.
+    The question for 10-1E is byte 0: whether the first read of a source no
+    bus answers returns what the cartridge bus last carried (dingbat and
+    DocBoy: the opcode fetched in the M-cycle before the hand-over, so
+    37 FF FF FF / FF FF FF / 37 FF FF / 37 FF FF / 00 FF) or plain $FF.
+    gambatte's dma_{hiram,vram,oam}_read rows check bytes 1-7 only.
+    """
+    cgb_gate(a, slot, p)
+    src, dst = SCRATCH, 0x8800
+    a.call("lcd_off_safe")
+    # source: 128 bytes (i * 13 + 7) & FF at $C600
+    a.ld_rr_nn("hl", src)
+    a.ld_r_n("b", 128)
+    a.ld_r_n("a", 7)
+    a.label(f"{p}_fs")
+    a.ld_hli_a()
+    a.add_a_n(13)
+    a.dec_r("b")
+    a.jr(f"{p}_fs", "nz")
+    # destination prefill: the complement of the source
+    a.ld_rr_nn("hl", src)
+    a.ld_rr_nn("de", dst)
+    a.ld_r_n("b", 128)
+    a.label(f"{p}_fd")
+    a.ld_a_hli()
+    a.cpl()
+    a.ld_rr_a("de")
+    a.inc_rr("de")
+    a.dec_r("b")
+    a.jr(f"{p}_fd", "nz")
+    a.xor_r("a")
+    a.ldh_n_a(SCX)
+    for reg, val in ((HDMA1, src >> 8), (HDMA2, src & 0xFF),
+                     (HDMA3, dst >> 8), (HDMA4, dst & 0xFF)):
+        a.ld_r_n("a", val)
+        a.ldh_n_a(reg)
+    a.ld_r_n("a", 0x91)                # LCD on: the line-0 restart
+    a.ldh_n_a(LCDC)
+    a.delay(110)
+    a.ld_r_n("a", 0x07)                # 8 blocks, general purpose
+    a.ldh_n_a(HDMA5)
+    a.call("lcd_off_safe")
+    # map: 16 bytes, MSB first, bit = destination equals source
+    a.ld_rr_nn("hl", dst)
+    a.ld_rr_nn("de", src)
+    for k in range(16):
+        a.ld_r_n("b", 8)
+        a.label(f"{p}_m{k}")
+        a.ld_a_rr("de")
+        a.inc_rr("de")
+        a.cp_r("hl")
+        a.inc_rr("hl")
+        a.scf()
+        a.jr(f"{p}_n{k}", "z")
+        a.db(0x3F)                     # ccf: differs -> 0
+        a.label(f"{p}_n{k}")
+        a.rl_r("c")
+        a.dec_r("b")
+        a.jr(f"{p}_m{k}", "nz")
+        a.ld_r_r("a", "c")
+        a.ld_nn_a(slot + k)
+    # bank 1 for the rest
+    a.ld_r_n("a", 1)
+    a.ldh_n_a(VBK)
+    # HRAM source pattern (never read back by a working DMA path)
+    a.ld_r_n("c", 0xA0)
+    a.ld_r_n("b", 32)
+    a.ld_r_n("a", 0x5A)
+    a.label(f"{p}_fh")
+    a.ldh_c_a()
+    a.inc_r("c")
+    a.dec_r("b")
+    a.jr(f"{p}_fh", "nz")
+    # WRAM copy of the GDMA kick: ld a,1 / ldh (FF55),a / scf / ret
+    for i, byt in enumerate((0x3E, 0x01, 0xE0, 0x55, 0x37, 0xC9)):
+        a.ld_r_n("a", byt)
+        a.ld_nn_a(0xC700 + i)
+
+    def prefill(d, n):
+        a.ld_rr_nn("hl", d)
+        a.ld_r_n("b", n)
+        a.ld_r_n("a", 0xC3)
+        a.label(f"{p}_pf{d:x}")
+        a.ld_hli_a()
+        a.dec_r("b")
+        a.jr(f"{p}_pf{d:x}", "nz")
+
+    def set_regs(s, d):
+        for reg, val in ((HDMA1, s >> 8), (HDMA2, s & 0xFF),
+                         (HDMA3, d >> 8), (HDMA4, d & 0xFF)):
+            a.ld_r_n("a", val)
+            a.ldh_n_a(reg)
+
+    def save(d, offs, at):
+        for i, o in enumerate(offs):
+            a.ld_a_nn(d + o)
+            a.ld_nn_a(slot + at + i)
+
+    # (LCD is off: no mode-3 port conflicts below)
+    rows = ((0xFFA0, 0x8100, "rom", (0, 1, 2, 16), 0x10),
+            (0xFFA0, 0x8120, "wram", (0, 1, 2), 0x14),
+            (0x9C00, 0x8140, "rom", (0, 1, 2), 0x17),
+            (0xE000, 0x8160, "rom", (0, 1, 2), 0x1A))
+    for s, d, where, offs, at in rows:
+        prefill(d, 32)
+        set_regs(s, d)
+        if where == "rom":
+            a.ld_r_n("a", 0x01)        # 2 blocks, general purpose
+            a.ldh_n_a(HDMA5)
+            a.scf()                    # the opcode before the hand-over
+        else:
+            a.call(0xC700)
+        save(d, offs, at)
+    # one HBlank block during a NOP sled on line 1
+    prefill(0x8180, 16)
+    set_regs(0xFFA0, 0x8180)
+    a.ld_r_n("a", 0x91)
+    a.ldh_n_a(LCDC)
+    a.delay(120)                       # into line 1's OAM scan
+    a.ld_r_n("a", 0x80)                # 1 block, HBlank
+    a.ldh_n_a(HDMA5)
+    for _ in range(110):
+        a.nop()
+    a.call("lcd_off_safe")
+    save(0x8180, (0, 1), 0x1D)
+    a.ldh_a_n(HDMA5)                   # still armed (bit 7 clear)?
+    a.bit_r(7, "a")
+    a.jr(f"{p}_na", "nz")
+    a.xor_r("a")
+    a.ldh_n_a(HDMA5)                   # then stop it
+    a.label(f"{p}_na")
+    a.xor_r("a")
+    a.ldh_n_a(VBK)
+    a.ld_r_n("a", 0x91)
+    a.ldh_n_a(LCDC)
+
+
+@test("VDMAOAM")
+def t_vdmaoam(a, slot, p):
+    """CGB: does an HBlank DMA armed during OAM scan start at once while an OAM
+    DMA runs?  (EE at +1F = not a CGB/AGB.)  DocBoy cgb/hdma/
+    hdma_start_during_oam_scan_with_dma_running and SameBoy say yes; dingbat
+    waits for the line's HBlank, as it does with no OAM DMA.
+
+    The DocBoy sequence: LCD enable, 106 M, then from HRAM an OAM DMA (source
+    ROM $2000, the cartridge bus; A12 clear, since a CGB WRAM access under an
+    external-bus OAM DMA takes A12 from its source, OAMDMA_WRAM_A12) and at
+    once a 2-block HBlank DMA (WRAM $C600 -> bank-1 $81A0), both inside line
+    1's OAM scan; HDMA5 read on the very next instruction.
+    00  HDMA5 with the OAM DMA running: 00 = a block already ran (DocBoy,
+        SameBoy), 01 = waiting for HBlank (dingbat)
+    01  control, the same without the OAM DMA: 01 everywhere
+    """
+    cgb_gate(a, slot, p)
+    rt = 0xFF90
+    # HRAM routine: [ld a,$10 / ldh (46),a] ld a,$81 / ldh (55),a /
+    # ld a,(ff55) / ld (slot+k),a / ld a,40 / dec a / jr nz,-3 / ret
+    def routine(with_oam, k):
+        code = []
+        if with_oam:
+            code += [0x3E, 0x20, 0xE0, 0x46]
+        code += [0x3E, 0x81, 0xE0, 0x55, 0xFA, 0x55, 0xFF,
+                 0xEA, (slot + k) & 0xFF, (slot + k) >> 8,
+                 0x3E, 40, 0x3D, 0x20, 0xFD, 0xC9]
+        for i, byt in enumerate(code):
+            a.ld_r_n("a", byt)
+            a.ld_nn_a(rt + i)
+    for k, with_oam in ((0, True), (1, False)):
+        a.call("lcd_off_safe")
+        routine(with_oam, k)
+        a.ld_r_n("a", 1)
+        a.ldh_n_a(VBK)
+        for reg, val in ((HDMA1, 0xC6), (HDMA2, 0x00),
+                         (HDMA3, 0x81), (HDMA4, 0xA0)):
+            a.ld_r_n("a", val)
+            a.ldh_n_a(reg)
+        a.ld_r_n("a", 0x91)
+        a.ldh_n_a(LCDC)
+        a.delay(106)
+        a.call(rt)
+        a.call("wait_vblank")          # let the second block and the DMA end
+        a.ldh_a_n(HDMA5)               # still armed (bit 7 clear)?
+        a.bit_r(7, "a")
+        a.jr(f"{p}_na{k}", "nz")
+        a.xor_r("a")
+        a.ldh_n_a(HDMA5)
+        a.label(f"{p}_na{k}")
+        a.xor_r("a")
+        a.ldh_n_a(VBK)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # program assembly
 # ═══════════════════════════════════════════════════════════════════════════

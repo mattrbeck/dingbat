@@ -71,6 +71,9 @@ once the viewer is alive (`--mode=microtest --list=...`).
 | 18 | CGBWRAM | $D000 banking under every SVBK value with alias sentinels (byte 0A: 77 alias, 5C banking) |
 | 19 | DIVTAPS | serial-completion and APU length-expiry poll counts at 8 DIV-reset phases (staircase periods are the tap bits) |
 | 1A | SWEEP | ch1 trigger overflow at freq 1300/940/1024/1000 shift 1 + divider-0 cap (the AGB second-check question) |
+| 1B-20 | CH2PHASE ... SEQRESET | APU pages (tests/roms/gbedge_apu_notes.md) |
+| 21 | VDMABUS (CGB) | GDMA write map across mode 3 (DocBoy `_conflict_relaxed_128_bytes_scx0` timeline); first byte of GDMA/HDMA from HRAM, VRAM, echo with the kick in ROM or WRAM (questions 21, 22). Pages 21-22 are in gbedge.py only: the committed `gbedge.gb` predates them (a rebuild needs rgbfix) |
+| 22 | VDMAOAM (CGB) | HDMA5 right after arming an HBlank DMA in OAM scan beside an OAM DMA, and without one (question 23) |
 
 CGB-only pages show `EE` at offset 1F on DMG-class hardware.
 
