@@ -36,7 +36,8 @@ tools/playtest/build.sh                                  # drivers + OCR tool ->
 tools/playtest/playtest.py run  ~/roms/game.gba          # needs scripts/<sha1>.play
 tools/playtest/playtest.py run  f3ae088181bf583e55daf962a92bb46f4f1d07b7   # by sha1
 tools/playtest/playtest.py suite [emerald ...] --jobs 2  # every script (or a filter)
-tools/playtest/playtest.py suite --emus all --jobs 6     # nightly: every configuration
+tools/playtest/playtest.py suite --emus all --jobs 6     # every configuration (what the nightly runs)
+tools/playtest/nightly-install.sh                        # launchd: nightly.sh at 03:00 on origin/main
 tools/playtest/report.py out/suites/<tag>                # findings.json: who stands alone where
 ```
 

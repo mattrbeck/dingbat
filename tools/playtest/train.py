@@ -884,7 +884,8 @@ _toolchain = []
 
 def keyed_path(f):
     """Whether a file is part of the results key (scripts count per game)."""
-    if f.endswith('.md') or f.startswith(('tools/playtest/scripts/', 'tools/playtest/tests/')):
+    if f.endswith('.md') or f.startswith(('tools/playtest/scripts/', 'tools/playtest/tests/',
+                                           'tools/playtest/nightly')):
         return False
     return any(f == p or f.startswith(p + '/') for p in KEY_PATHS)
 

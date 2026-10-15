@@ -377,6 +377,7 @@ class Relevance(unittest.TestCase):
         self.assertEqual(key(web__index_DOT_html='c2'), k0)
         self.assertEqual(key(tools__playtest__scripts__g_DOT_play='e2'), k0)
         self.assertEqual(key(tools__playtest__tests__test_train_DOT_py='f2'), k0)
+        self.assertEqual(key(tools__playtest__nightly_DOT_sh='g2'), k0)
         self.assertNotEqual(key(src__dingbat__gba__ppu_DOT_nim='a2'), k0)
         self.assertNotEqual(key(tools__playtest__runner_DOT_py='d2'), k0)
 
