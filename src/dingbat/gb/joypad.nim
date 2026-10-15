@@ -12,8 +12,11 @@ proc joypad_lines*(j: GbJoypad): uint8 =
   (not pressed) and 0x0F'u8
 
 proc new_gb_joypad*(): GbJoypad =
-  # Nothing selected and nothing held, so every line idles high.
-  GbJoypad(prev_lines: 0x0F)
+  # Power-on: both select lines low (P1 reads $CF) and nothing held, so every
+  # input line idles high. The DMG boot ROM never writes P1 and hands off $CF
+  # (mooneye boot_hwio-dmgABCmgb); skip_boot (memory.nim) applies what the
+  # boot ROMs that do write it leave behind.
+  GbJoypad(button_keys: true, direction_keys: true, prev_lines: 0x0F)
 
 proc joypad_sync*(j: GbJoypad) =
   ## Re-seed the edge detector without raising an interrupt (state loads).

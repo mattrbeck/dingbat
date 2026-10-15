@@ -153,13 +153,20 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     # 0xC8, OCPS = 0xD0 (mooneye misc/boot_hwio-C).
     mem.write_byte(gb, 0xFF68, 0xC8)
     mem.write_byte(gb, 0xFF6A, 0xD0)
-  # P1 at handoff: DMG-family boot ROMs never touch it, so it reads $CF; the
-  # CGB, SGB and AGB boot ROMs hand off $FF (mooneye misc/boot_hwio-C covers
-  # cgb+agb). The gbedge p00 probe's $CF on an AGS is a flashcart menu's key
-  # poll, not the boot ROM (docs/flashcart-runbook.md).
-  if gb.boot_model in {bmDmg0, bmDmgABC, bmMgb}:
-    gb.joypad.button_keys = true
-    gb.joypad.direction_keys = true
+  # P1 at handoff. The select lines power up low (new_gb_joypad: $CF), and a
+  # boot ROM that never writes P1 hands that off: the DMG-family ones, and the
+  # CGB/AGB one for a CGB cart (Pan Docs, "Power Up Sequence": P1 = $C7 or
+  # $CF on CGB/AGB; the CGB boot ROM run over a CGB-flagged cart writes P1
+  # nowhere; the AGS read $CF under the CGB-flagged gbedge p00). A cart that leaves P1 alone therefore wakes STOP with a key press (Pan Docs,
+  # "Using the STOP Instruction": STOP ends on a P10-P13 line going low, and
+  # a line only goes low in a selected group; DocBoy's CGB stop/hdma rows).
+  # Two boot ROMs leave both groups deselected ($FF): the SGB's, whose
+  # packets ride on P1, and the CGB/AGB one for a DMG cart, whose
+  # compatibility-palette key poll ends deselected (mooneye misc/boot_hwio-C
+  # and boot_hwio-S, both DMG carts, hardware-verified).
+  if gb.boot_model in {bmSgb, bmSgb2} or (cgb_silicon and gb.cgb_flag == cgbNone):
+    gb.joypad.button_keys = false
+    gb.joypad.direction_keys = false
   mem.write_byte(gb, 0xFFFF, 0x00)
   # None of the writes above is a CPU M-cycle, so nothing else consumes this.
   mem_flush_deferred(mem, gb)

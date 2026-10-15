@@ -1063,7 +1063,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 7,065 / 9,227 at `DocboyRev`, every
+(`tests/README.md`, "The DocBoy suite"): 7,069 / 9,227 at `DocboyRev`, every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1117,11 +1117,12 @@ question. Families, largest first:
   sampling (39), double-speed CH4 shift/divider changes (33), double-speed
   CH3 retrigger and length rows. SameBoy passes
   every sampled one. Probably dingbat.
-* **I9. Boot hand-off state (47).** `cgb/boot/boot_div_title_*` (38): DIV at
+* **I9. Boot hand-off state (46).** `cgb/boot/boot_div_title_*` (38): DIV at
   `$0100` depends on the path the CGB boot ROM took through the header
   (licensee, title checksum); dingbat hands off one DIV. Plus
   `boot_regs_video`, `boot_hram`, `boot_ppu_phase`. A skip-boot gap; SameBoy
-  runs its own boot ROM, so it is no witness here.
+  runs its own boot ROM, so it is no witness here. `cgb/boot/boot_regs_joypad`
+  (P1 = $CF with a CGB cart) closed with I13's P1 hand-off.
 * **I10. `$FEA0-$FEFF` (32).** 30 on the CGB: DocBoy's CGB-E rows expect RAM, with
   `$FEC0-$FEFF` repeating 16 bytes, in CGB and in compat mode. dingbat follows
   Pan Docs ("FEA0-FEFF range": CGB E reads return the high nibble of the low
@@ -1144,7 +1145,7 @@ question. Families, largest first:
   DocBoy model, scored but not chased. The rest are window and tile-data
   glitches (`window_wx0_scx*`, `change_wx_glitch_*`,
   `change_{bg,win}_tile_data_glitch_*`), which SameBoy also fails.
-* **I13. Rows with scripted input (26 of 71).** Through `--input`; 45 pass,
+* **I13. Rows with scripted input (23 of 71).** Through `--input`; 48 pass,
   every joypad picture and `stop_joypad*`/`stop_key*` interrupt row among
   them. Red:
   * 2 `joypad_{buttons,dpad}_interrupt_release`: DocBoy raises the joypad
@@ -1159,13 +1160,29 @@ question. Families, largest first:
     the whole clock in STOP (Pan Docs, "Using the STOP Instruction"); the
     rows encode where DocBoy's DMG resumes. Open: needs the STOP wake's
     phase on hardware.
-  * 10 rows where a key press never ends the run (`$FFF0` stays 0): the CGB
-    `timers/interactive/stop_read_tima_*`, `double_speed_stop_read_tima_*`
-    and `hdma/interactive/*stop*` rows, and DMG
-    `stop_immediate_exit_joypad_interrupt`. The input is applied (the
-    harness reports none left over), so the ROM is stuck after it: a STOP
-    wake that dingbat does not take, or takes into a state the ROM never
-    leaves. Probably dingbat; first to chase.
+  * 6 CGB rows that wake and then read TIMA one count low
+    (`timers/interactive/stop_read_tima_*`,
+    `double_speed/interactive/double_speed_stop_read_tima_*`; dingbat
+    reads $40/$41 where DocBoy wants $41/$42, the same one-count gap as the
+    DMG `stop_read_tima_*` above): the wake-phase question again. Until
+    2026-10-14 these and the three `hdma/interactive/*stop*` rows never
+    woke: dingbat handed a CGB cart P1 = $FF (no group selected), so a key
+    press pulled no P10-P13 line low and STOP (Pan Docs, "Using the STOP
+    Instruction") never ended. The select lines power up low, and the CGB
+    boot ROM writes P1 only in its DMG-cart palette key poll, so a CGB cart
+    gets $CF (Pan Docs, "Power Up Sequence"; the boot ROM run over a
+    CGB-flagged cart writes P1 nowhere; DocBoy's `cgb/boot/boot_regs_joypad`
+    and `cgb_dmg_mode/boot/boot_regs_joypad` split $CF/$FF the same way)
+    and a DMG cart keeps $FF (mooneye `misc/boot_hwio-C`). `skip_boot` in
+    `memory.nim`. The three HDMA rows pass; SameBoy CGB E with the CGB boot
+    ROM file passes all nine, and with its own boot ROM (which writes $FF)
+    hangs on the same nine.
+  * DMG `stop_immediate_exit_joypad_interrupt` (1): the key is held at the
+    STOP with IE.4 set and nothing pending, so STOP is a HALT (Pan Docs'
+    chart; dingbat takes it) and the ROM expects the release to end it
+    (DocBoy's switch-bounce model). Pan Docs raises the joypad interrupt
+    on a high-to-low edge only: the same model as the two `*_release` rows,
+    not chased. A second press wakes it (checked).
   * `mbc3_rtc_gb_stopped_recover` (1): the RTC across a STOP.
 * **Small (40):** HuC3 commands (6, `$FFF0` never written; SameBoy passes 5
   of 6, dingbat's), DMG `dma_*_check_stat_*` (8, SameBoy passes all), MBC3

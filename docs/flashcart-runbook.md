@@ -11,10 +11,11 @@ differ from DMG's — that is data); SGB-only rows stay open.
 
 - **Menu pollution.** A flashcart menu runs before the ROM and restores the
   handoff registers (A/F/B/C/D/E/H/L, per model) but not the I/O ports it
-  used. A menu polling "any key held" leaves P1 = $CF. On the MGB that is also
-  the correct answer, so the contamination is invisible there; on the AGS it
-  is wrong (the AGB boot ROM writes $FF to P1 before handoff; mooneye
-  `misc/boot_hwio-C` asserts $FF for cgb+agb+ags). A byte that (a) is an I/O
+  used. A menu polling "any key held" leaves P1 = $CF. On the MGB, and on a
+  CGB/AGB under a CGB-flagged ROM such as gbedge, that is also the correct
+  answer, so the contamination is invisible there; under a DMG-flagged ROM on
+  a CGB/AGB it is wrong (the boot ROM's compatibility-palette key poll leaves
+  $FF; mooneye `misc/boot_hwio-C` asserts $FF for cgb+agb+ags). A byte that (a) is an I/O
   port, (b) is "untouched since boot" and (c) the menu plausibly used is not
   evidence on its own — cross-check against the boot ROM disassembly. Timing
   pages are unaffected. Use a hard-reset-to-game mode for gbedge p00/p01 if
@@ -106,7 +107,8 @@ P03 TIMARELOAD and P05 IEPUSH match byte-for-byte on both consoles.
 AGS-native values (no dingbat reference: the gbedge viewer white-screens under
 `--model cgb/agb`, a dingbat bug): P00 SC = $7C, SVBK = $F8, RP = $3E (no IR
 window on an SP; dingbat leaves RP unmapped → $FF), VBK $FE, KEY1 $7E, FF75
-$8F, OPRI $FE, DIV $1F, LY $91, STAT $81; **P1 = $CF is menu-contaminated**.
+$8F, OPRI $FE, DIV $1F, LY $91, STAT $81; P1 = $CF (what a CGB-flagged cart
+hands off, though a menu poll would leave the same).
 P18 CGBWRAM byte 0A = **5C — `$D000` banks** (banks 2–7 distinct, SVBK 0→1
 alias only). P1A SWEEP byte-identical to the MGB page — **no second overflow
 check in the GB-slot APU**. Model splits captured for decode: P02 bytes 10–13,

@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 16:30:07 · commit ecbe48ac · game-boy-test-roms v7.0*
+*Generated: 2026-10-14 17:44:34 · commit d62c585c · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
@@ -60,7 +60,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/dmg/serial | DMG dmgABC | 👀 74/77 passed |
 | docboy/dmg/joypad | DMG dmgABC | 👀 32/34 passed |
 | docboy/dmg/apu | DMG dmgABC | 👀 236/307 passed |
-| docboy/cgb/boot | CGB cgbE | 👀 29/69 passed |
+| docboy/cgb/boot | CGB cgbE | 👀 30/69 passed |
 | docboy/cgb/banks | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb/memory | CGB cgbE | 👀 18/33 passed |
 | docboy/cgb/oam_bug | CGB cgbE | 👌 5/5 passed |
@@ -68,7 +68,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/timers | CGB cgbE | 👀 0/2 passed |
 | docboy/cgb/interrupts | CGB cgbE | 👀 26/27 passed |
 | docboy/cgb/dma | CGB cgbE | 👌 41/41 passed |
-| docboy/cgb/hdma | CGB cgbE | 👀 465/643 passed |
+| docboy/cgb/hdma | CGB cgbE | 👀 468/643 passed |
 | docboy/cgb/serial | CGB cgbE | 👌 17/17 passed |
 | docboy/cgb/ir | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb/mode | CGB cgbE | 👌 6/6 passed |

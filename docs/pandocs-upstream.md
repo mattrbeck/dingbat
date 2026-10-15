@@ -36,6 +36,11 @@ needs hardware first.
 11. **Post-boot SC on CGB** (Power_Up_Sequence): $7C on AGS hardware, not $7F
     (gbedge p00, docs/flashcart-runbook.md).
 12. **SVBK readback** (CGB_Registers): write 0 reads back raw $F8 on AGS.
+13. **Post-boot P1 on CGB/AGB depends on the cart** (Power_Up_Sequence):
+    $CF with a CGB cart (the boot ROM never writes P1), $FF with a DMG cart
+    (its compatibility-palette key poll ends with both groups deselected;
+    mooneye `misc/boot_hwio-C`). The table's single "$C7 or $CF" is the
+    CGB-cart case.
 
 ## 2. Validate on hardware first
 
