@@ -166,8 +166,26 @@ build_roms() {
   GBPROBE_OUT=probe_k_winglitch_a1 "$HERE/mk.sh" probe_k_winglitch -DARM=1 -DAXIS=0
   GBPROBE_OUT=probe_k_winglitch_a2 "$HERE/mk.sh" probe_k_winglitch -DARM=2 -DAXIS=0
   GBPROBE_OUT=probe_k_winglitch_scx "$HERE/mk.sh" probe_k_winglitch -DARM=1 -DAXIS=1
+  # probe (m): CH4 restart timing at double speed, one photograph per build
+  # (QUAD); README "probe (m)" lists what each build splits.
+  build_probe_m
   # ... and the same eighteen pages on one cart, for the flashcart.
   build_probes_all
+}
+
+# --------------------------------------------------------------- probe l ----
+build_probe_m() {
+  for entry in "c0_slow:-DNR43V=0x08 -DPRE=0 -DD1=16" \
+               "c0_on:-DNR43V=0x08 -DPRE=2 -DD1=16" \
+               "c0_pend_a:-DNR43V=0x08 -DPRE=0 -DD1=2" \
+               "c0_pend_b:-DNR43V=0x08 -DPRE=2 -DD1=2" \
+               "c1_absorb:-DNR43V=0x09 -DPRE=0 -DD1=0" \
+               "c3_absorb:-DNR43V=0x0B -DPRE=2 -DD1=0" \
+               "c3_defer:-DNR43V=0x0B -DPRE=2 -DD1=2" \
+               "c03_nr43:-DNR43V=0x08 -DNR43B=0x0B -DPRE=0 -DD1=8"; do
+    # shellcheck disable=SC2086
+    GBPROBE_OUT="probe_m_${entry%%:*}" "$HERE/mk.sh" probe_m_ch4 -DQUAD=1 ${entry#*:}
+  done
 }
 
 # ------------------------------------------------------------ probes_all ----
@@ -270,6 +288,7 @@ build_expected() {
 
 case "${1:-all}" in
   roms)    build_roms ;;
+  probe_m) build_probe_m ;;
   probes_all) build_probes_all ;;
   engines) build_dingbat; build_sameboy; build_docboy ;;
   docboy)  build_docboy ;;
@@ -277,6 +296,6 @@ case "${1:-all}" in
   dingbat) build_dingbat ;;
   expected) build_roms; build_expected ;;
   all)     build_roms; build_dingbat; build_sameboy; build_docboy ;;
-  *) echo "usage: build.sh [all|roms|probes_all|engines|dingbat|sameboy|docboy|expected]"; exit 2 ;;
+  *) echo "usage: build.sh [all|roms|probe_m|probes_all|engines|dingbat|sameboy|docboy|expected]"; exit 2 ;;
 esac
 echo "ok"

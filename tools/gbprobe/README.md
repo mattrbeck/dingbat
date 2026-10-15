@@ -51,6 +51,7 @@ compared by structure, and the probes use colours that survive RGB555/RGB565 dis
 | `probe_e_objgrid.gb` | object-penalty grid vs SCX after a STAT/LYC halt wake (see `g1_README.md`) | |
 | `probe_f_winbar.gb` | window re-trigger shape | |
 | `rtcrate*.gb`, `wrambands.gb`, `wramscan.gb`, `probe_cart.gb` | RTC rate, WRAM banks, cart detection | |
+| `probe_m_*.gb` | channel 4's restart timing at double speed: when the LFSR clocks after a retrigger or an NR43 write (below) | CGB-only |
 | `scratch_font.gb` | smoke test for the shared video/readout path | |
 
 Probe (c) carries no CGB flag on purpose: its ruler is BGP, dead on a CGB running a
@@ -270,3 +271,25 @@ mode. `GBPROBE_CGB=0 ./build.sh probes_all` writes `probes_all_compat.gb`, the s
 with no CGB flag — page 33 off that build is pixel-identical on all four models (that is
 what the gate checks), and the other seventeen pages off it measure compatibility mode
 and are not what you want. Burn it as a second cart only if page 33 is on the day's list.
+
+## probe (m): channel 4 restart timing (`roms/probe_m_ch4.asm`)
+
+Copies the prologue of DocBoy's double-speed CH4 rows (DIV reset, APU off,
+KEY1 + STOP, APU on), triggers channel 4 in 7-bit mode at volume 15, makes one
+more write, and reads PCM34 every M-cycle for 320 M-cycles: four runs at
+phases 0..3, one screen (phase p in rows 4p..4p+3, `F` = channel 4 high, row 17
+the parameters). `readout.py` reads it; interleave the four row blocks. Each
+build splits the three engines as below ("lag" = the engine's timeline against
+dingbat's, M-cycles, negative = earlier). The hardware question for each is
+simply which line the console draws (a CGB, or an AGB/AGS in CGB mode).
+
+| build | what it does | DocBoy | SameBoy |
+|---|---|---|---|
+| `probe_m_c0_slow` | divisor 0, retrigger whose 1 MHz edge is off the 512 kHz grid, stage running | = dingbat (restart 28 M late) | -4, and the old LFSR keeps playing until its restart |
+| `probe_m_c0_on` | the same on the grid (control) | = dingbat | -4 |
+| `probe_m_c0_pend_a` | divisor 0, retrigger one tick before the first increment, that increment off the grid | = dingbat (late) | -34 (not late) |
+| `probe_m_c0_pend_b` | the same with the first increment on the grid | = dingbat (not late) | +26 (late) |
+| `probe_m_c1_absorb` | divisor 1, retrigger one tick after the trigger | -4 (stage not restarted) | -4 |
+| `probe_m_c3_absorb` | divisor 3, retrigger one tick after an off-grid trigger | -4 (not restarted) | = dingbat |
+| `probe_m_c3_defer` | divisor 3, retrigger two ticks after an off-grid trigger | +4 (restart one grid step late) | = dingbat |
+| `probe_m_c03_nr43` | NR43 divisor 0 -> 3 two dots before a code-0 increment off the grid | = dingbat (count finishes on the grid) | -2 |
