@@ -387,6 +387,17 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 const SERIAL_TAP_DMG* {.intdefine.} = 4
 const SERIAL_TAP_CGB* {.intdefine.} = 4
 
+# The divider's count at power-on when a boot ROM runs, against the CPU's
+# first fetch at cycle 0. With 0, Nintendo's DMG and CGB boot ROMs hand off
+# 4 T short of mooneye `boot_div-dmgABCmgb` (0xABC8) and `misc/boot_div-
+# cgbABCDE` (0x2674, hardware-verified both) and of every DocBoy `boot_div`
+# row's path, while the PPU phase they hand off with already matches the
+# skip-boot's (gambatte `display_startstate`, mooneye `hblank_ly_scx_timing`):
+# the divider alone starts one M-cycle on. Measured by running the boot ROMs
+# (local instrument): 0 and 8 both lose the two mooneye rows (and 8 also
+# `boot_sclk_align-dmgABCmgb`); the skip-boot hand-off is unaffected.
+const BOOT_ROM_DIV_START_T* {.intdefine.} = 4
+
 # Where in its M-cycle a CPU access meets the serial shifter: 0 = the bus
 # transaction is ordered before the M-cycle's tap edge (ships); 4 = after it,
 # which compiles the capture and rollback out. The tap edge lands on the last
@@ -3599,6 +3610,8 @@ proc post_init*(gb: GB) =
   gb.handle_saves()
   if gb.bootrom_path.len == 0 or not gb.run_bios:
     gb_skip_boot(gb)
+  else:
+    gb.timer.tdiv = uint16(BOOT_ROM_DIV_START_T)
   # Align the frame sequencer to the divider's phase. It models the falling
   # edge of DIV bit 4 (5 in double speed), so where it lands depends on tdiv,
   # which gb_skip_boot has just seeded per hardware model.
