@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 22:13:13 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-14 22:35:15 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**7246/9227 passed.**
+**7276/9227 passed.**
 
 ## docboy/dmg/cpu (11/12 passed)
 
@@ -211,14 +211,9 @@ All 1 tests passed (DMG dmgABC).
 | dmg/docboy/boot/boot_hram | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/boot/boot_hram #2 | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/dmg/memory (21/23 passed)
+## docboy/dmg/memory
 
-21/23 tests passed on DMG dmgABC, 2 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/memory/not_usable_read_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/memory/not_usable_read_pixel_transfer | $FFF0=$02 = fail value (tick 100000) |
+All 23 tests passed (DMG dmgABC).
 
 ## docboy/dmg/oam_bug (97/268 passed)
 
@@ -430,14 +425,12 @@ All 158 tests passed (DMG dmgABC).
 | dmg/docboy/dma/dma_during_vblank_last_line_check_stat_oam_scan | $FFF0=$02 = fail value (tick 100012) |
 | dmg/docboy/dma/dma_during_vblank_last_line_check_stat_oam_scan_next | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/dmg/serial (74/77 passed)
+## docboy/dmg/serial (76/77 passed)
 
-74/77 tests passed on DMG dmgABC, 3 failed:
+76/77 tests passed on DMG dmgABC, 1 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/serial/serial_abort_to_81_sc_round1 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/serial/serial_timing_reset_div_during_transfer_stall_alt_round1 | $FFF0=$02 = fail value (tick 100004) |
 | dmg/docboy/serial/serial_two_players_basic_transfer_master + serial_two_players_basic_transfer_slave_sc_00 | timeout, last check: master 8888 px (first at row 3 col 0: got $84A0 want $1200), slave 8888 px (first at row 3 col 0: got $84A0 want $1200) |
 
 ## docboy/dmg/joypad (32/34 passed)
@@ -525,32 +518,18 @@ All 158 tests passed (DMG dmgABC).
 | dmg/docboy/apu/ch1_period_sweep_write_nr10_overflow_period16_step7_round2 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/apu/ch1_period_sweep_write_nr10_overflow_period32_step6 | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/cgb/boot (30/69 passed)
+## docboy/cgb/boot (48/69 passed)
 
-30/69 tests passed on CGB cgbE, 39 failed:
+48/69 tests passed on CGB cgbE, 21 failed:
 
 | Test | Result |
 |------|--------|
-| cgb/docboy/boot/boot_bg_palettes | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_00_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_00_new_license_3030_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_00_new_license_3031_round2 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_01_new_license_3030_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_01_new_license_3030_round2 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_01_new_license_3031_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_01_new_license_3031_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_00_old_license_33_new_license_3030_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_01_new_license_3030_round1 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_01_new_license_3030_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_01_new_license_3031_round1 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_01_new_license_3031_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_33_new_license_00_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_33_new_license_3030_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/boot/boot_div_title_00_cgb_flag_80_old_license_33_new_license_3031_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_16_cgb_flag_00_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_16_cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_46A_cgb_flag_00_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100000) |
@@ -563,21 +542,17 @@ All 158 tests passed (DMG dmgABC).
 | cgb/docboy/boot/boot_div_title_6F_cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_BF__cgb_flag_00_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_BF__cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_div_title_EA_cgb_flag_00_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/boot/boot_div_title_EA_cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_F4-_cgb_flag_00_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/boot/boot_div_title_F4-_cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_hram | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/boot/boot_regs_cgb | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/boot/boot_regs_video | $FFF0=$02 = fail value (tick 100000) |
+| cgb/docboy/boot/boot_hram | $FFF0=$02 = fail value (tick 100000) |
 
 ## docboy/cgb/banks
 
 All 2 tests passed (CGB cgbE).
 
-## docboy/cgb/memory (18/33 passed)
+## docboy/cgb/memory (20/33 passed)
 
-18/33 tests passed on CGB cgbE, 15 failed:
+20/33 tests passed on CGB cgbE, 13 failed:
 
 | Test | Result |
 |------|--------|
@@ -588,8 +563,6 @@ All 2 tests passed (CGB cgbE).
 | cgb/docboy/memory/not_usable_area_write_fed0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/memory/not_usable_area_write_fee0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/memory/not_usable_read_hblank | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/memory/not_usable_read_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_read_pixel_transfer | $FFF0=$02 = fail value (tick 100008) |
 | cgb/docboy/memory/not_usable_read_ppu_off | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/memory/not_usable_read_vblank | $FFF0=$02 = fail value (tick 100008) |
 | cgb/docboy/memory/not_usable_write_hblank | $FFF0=$02 = fail value (tick 100000) |
@@ -815,14 +788,12 @@ All 6 tests passed (CGB cgbE).
 
 All 4 tests passed (CGB cgbE).
 
-## docboy/cgb/ppu (379/427 passed)
+## docboy/cgb/ppu (381/427 passed)
 
-379/427 tests passed on CGB cgbE, 48 failed:
+381/427 tests passed on CGB cgbE, 46 failed:
 
 | Test | Result |
 |------|--------|
-| cgb/docboy/ppu/opri_write_read | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/ppu/turn_off_read_stat | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops26 | timeout, last check: 688/23040 pixels differ, first at row 2 col 9: got $063F want $000B |
 | cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops27 | timeout, last check: 392/23040 pixels differ, first at row 2 col 9: got $063F want $000B |
 | cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops28 | timeout, last check: 688/23040 pixels differ, first at row 2 col 9: got $063F want $000B |
@@ -1994,15 +1965,13 @@ All 5 tests passed (CGB cgbE).
 
 All 2 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_mode/boot (14/19 passed)
+## docboy/cgb_dmg_mode/boot (16/19 passed)
 
-14/19 tests passed on CGB cgbE, 5 failed:
+16/19 tests passed on CGB cgbE, 3 failed:
 
 | Test | Result |
 |------|--------|
 | cgb_dmg_mode/docboy/boot/boot_hram | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/boot/boot_ppu_phase_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/boot/boot_regs_video | $FFF0=$02 = fail value (tick 100000) |
 | cgb_dmg_mode/docboy/boot/boot_vram_nintendo_logo_checksum_43 | $FFF0=$02 = fail value (tick 100000) |
 | cgb_dmg_mode/docboy/boot/boot_vram_nintendo_logo_checksum_58 | $FFF0=$02 = fail value (tick 100000) |
 
@@ -2026,9 +1995,9 @@ All 1 tests passed (CGB cgbE).
 
 All 1 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_mode/memory (0/15 passed)
+## docboy/cgb_dmg_mode/memory (2/15 passed)
 
-0/15 tests passed on CGB cgbE, 15 failed:
+2/15 tests passed on CGB cgbE, 13 failed:
 
 | Test | Result |
 |------|--------|
@@ -2039,8 +2008,6 @@ All 1 tests passed (CGB cgbE).
 | cgb_dmg_mode/docboy/memory/not_usable_area_write_fed0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
 | cgb_dmg_mode/docboy/memory/not_usable_area_write_fee0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
 | cgb_dmg_mode/docboy/memory/not_usable_read_hblank | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_read_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_read_pixel_transfer | $FFF0=$02 = fail value (tick 100000) |
 | cgb_dmg_mode/docboy/memory/not_usable_read_ppu_off | $FFF0=$02 = fail value (tick 100004) |
 | cgb_dmg_mode/docboy/memory/not_usable_read_vblank | $FFF0=$02 = fail value (tick 100000) |
 | cgb_dmg_mode/docboy/memory/not_usable_write_hblank | $FFF0=$02 = fail value (tick 100000) |

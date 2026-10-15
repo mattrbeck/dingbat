@@ -4,6 +4,38 @@ proc new_gb_timer*(): GbTimer =
   GbTimer(tdiv: 0, tima: 0, tma: 0, enabled: false, clock_select: 0,
           bit_for_tima: 9, previous_bit: false, countdown: -1)
 
+const CGB_BOOT_LICENSED_T* = 4360
+  ## T-cycles a Nintendo-licensed cart adds to the CGB boot ROM's run (old
+  ## licensee $01, or $33 with new licensee "01"), for a title whose checksum
+  ## matches no compatibility-palette entry. Measured by running the CGB boot
+  ## ROM over 256 title checksums: 177 hand off at this one value, the same
+  ## in CGB and in compatibility mode; a title that matches an entry hands off
+  ## at a time set by where it sits in Nintendo's table, which dingbat does not
+  ## carry (its compatibility palette is the no-match default too, I3).
+  ## DocBoy cgb/boot `boot_div_title_00_cgb_flag_80_old_license_01_*` (whose
+  ## checksum, $80 with the CGB flag, matches nothing) and
+  ## `boot_div_title_EA_cgb_flag_00_*` pin it on both sides to the M-cycle.
+
+proc cgb_boot_header_t(rom: seq[uint8]): int =
+  ## T-cycles the CGB boot ROM's licensee checks add to its run, against a
+  ## cart whose old licensee is neither $01 nor $33 (Pan Docs, "Power Up
+  ## Sequence": the run's length, so DIV at hand-off, depends on the header;
+  ## the licensee decides whether the title checksum is looked up). Measured
+  ## by running the CGB boot ROM over every old licensee and a range of new
+  ## ones: all old licensees but $01/$33 hand off at one time; with $33 a new
+  ## licensee whose first byte is not '0' hands off 4 T earlier, '0' then
+  ## anything but '1' 32 T later, and "01" is licensed. DocBoy cgb/boot
+  ## `boot_div_title_00_*` pins each path in CGB and in compatibility mode to
+  ## the M-cycle; mooneye's header ($33, "ZZ") is the -4 path.
+  if rom.len < 0x150: return 0
+  case rom[0x14B]
+  of 0x01: CGB_BOOT_LICENSED_T
+  of 0x33:
+    if rom[0x144] != uint8('0'): -4
+    elif rom[0x145] != uint8('1'): 32
+    else: 32 + CGB_BOOT_LICENSED_T
+  else: 0
+
 proc skip_boot*(t: GbTimer; gb: GB) =
   # Internal 16-bit divider at PC=0x100 per boot model. mooneye boot_div-*
   # reads DIV six times at fixed offsets and pins both bytes of the counter;
@@ -26,7 +58,23 @@ proc skip_boot*(t: GbTimer; gb: GB) =
     of bmCgb0:          0x2880'u16   # misc/boot_div-cgb0
     of bmAgb:           0x2678'u16   # misc/boot_div-A
     of bmCgbABCDE:
-      if native: 0x1E9C'u16 else: 0x2674'u16  # misc/boot_div-cgbABCDE
+      # The header path's own length on top (cgb_boot_header_t): gambatte
+      # div/start_inc (old licensee $00) is the CGB-cart base; mooneye
+      # misc/boot_div-cgbABCDE ($33, "ZZ", 0x2674) the compatibility one, 4 T
+      # under its own. Pinned only for this boot ROM: AGB and CGB0 keep the
+      # one value their mooneye row measures.
+      uint16((if native: 0x1E9C else: 0x2678) + cgb_boot_header_t(gb.cartridge.rom))
+  if gb.boot_model == bmCgbABCDE:
+    # The boot ROM powers the APU on early and every falling edge of the
+    # divider's APU tap since then stepped the sequencer, so a header path
+    # that runs past another 8192 T boundary hands off one step on.
+    # BOOT_FS_STAGE_CGB is the stage at the CGB-cart base (0x1E9C, under the
+    # first boundary); the boot ROM run over a compatibility or a licensed
+    # cart hands off one step later (measured by running it).
+    gb.apu.frame_sequencer_stage =
+      (gb.apu.frame_sequencer_stage + int(t.tdiv) div 8192) and 7
+    # The length gate goes with the step, as memory.skip_boot sets it.
+    gb.apu.first_half_of_length_period = (gb.apu.frame_sequencer_stage and 1) == 1
 
 const TAC_SELECT_LEAD_T* {.intdefine.} = 0
   ## T-cycles before the end of a TAC write's M-cycle at which the newly

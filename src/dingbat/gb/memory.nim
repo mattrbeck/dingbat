@@ -72,6 +72,41 @@ const BOOT_CH1_PHASE_CGB_T* {.intdefine.} = 1612
   ## the sweep over all 504 values four cycles apart (DINGBAT_BOOT_CH1_PHASE,
   ## the test build) passes all eight only at 728 [dmg] and 1612 [cgb], with
   ## both neighbours losing two.
+const BOOT_CH1_PHASE_CGB_COMPAT_T* {.intdefine.} = 1600
+  ## The same for the CGB boot ROM run over a DMG cart (compatibility mode),
+  ## which no gambatte row covers: running the CGB boot ROM puts the hand-off
+  ## 12 T earlier in the duty cycle than over a CGB cart (where the run lands
+  ## exactly on BOOT_CH1_PHASE_CGB_T), on every header path the skip-boot
+  ## models (cgb_boot_header_t).
+
+const BOOT_STACK_RESIDUE_CGB = [0x71'u8, 0x02, 0x4D, 0x01, 0xC1, 0xFF, 0x0D,
+                                0x00, 0xD3, 0x05, 0xF9]
+const BOOT_STACK_RESIDUE_CGB_COMPAT = [0x71'u8, 0x02, 0x4D, 0x01, 0x00, 0xFF,
+                                       0x0D, 0x00, 0xF5, 0x05, 0xF9]
+const BOOT_STACK_RESIDUE_DMG = [0x39'u8, 0x01, 0x2E]
+
+proc skip_boot_hram(mem: GbMemory; gb: GB) =
+  ## What the boot ROM leaves in HRAM, which is otherwise random at power-up
+  ## (Pan Docs, "Power Up Sequence"; dingbat: zero). Measured by running each
+  ## boot ROM; DocBoy's `boot_hram` rows (dmg, cgb, cgb_dmg_mode) read the
+  ## same bytes. They also want one fixed value at $FFFE, which no boot ROM
+  ## writes: that is power-up HRAM, random per Pan Docs, and left at zero.
+  ## * The CGB boot ROM checks the logo from an HRAM buffer (Pan Docs, same
+  ##   page): the cart's header $0104-$0133 at $FF80-$FFAF (the cart's own
+  ##   bytes: a changed byte in the half it does not check lands there too).
+  ## * Its stack leaves $FFF2-$FFFC (CGB cart and DMG cart differ in two
+  ##   bytes), the DMG ABC boot ROM's $FFFA-$FFFC.
+  case gb.boot_model
+  of bmCgbABCDE:
+    for i in 0 ..< 0x30:
+      if 0x104 + i < gb.cartridge.rom.len:
+        mem.hram[i] = gb.cartridge.rom[0x104 + i]
+    let residue = if gb.cgb_flag != cgbNone: BOOT_STACK_RESIDUE_CGB
+                  else: BOOT_STACK_RESIDUE_CGB_COMPAT
+    for i, b in residue: mem.hram[0xFFF2 - 0xFF80 + i] = b
+  of bmDmgABC:
+    for i, b in BOOT_STACK_RESIDUE_DMG: mem.hram[0xFFFA - 0xFF80 + i] = b
+  else: discard
 
 proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.bootrom = @[]
@@ -94,7 +129,9 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     # next step 252 - phase mod 252 away). Per boot ROM: each runs a different
     # length after its second note. Pinned by sound/ch1_init_pos_{1..8} on
     # dmg08 and cgb04c.
-    var phase = (if gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}:
+    var phase = (if gb.boot_model == bmCgbABCDE and gb.cgb_flag == cgbNone:
+                   BOOT_CH1_PHASE_CGB_COMPAT_T
+                 elif gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}:
                    BOOT_CH1_PHASE_CGB_T else: BOOT_CH1_PHASE_DMG_T)
     when defined(test_harness):
       let env = getEnv("DINGBAT_BOOT_CH1_PHASE")
@@ -157,10 +194,18 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.write_byte(gb, 0xFF4A, 0x00)
   mem.write_byte(gb, 0xFF4B, 0x00)
   if gb.cgb_enabled:
-    # The CGB boot ROM leaves the palette-index ports mid-sequence: BCPS =
-    # 0xC8, OCPS = 0xD0 (mooneye misc/boot_hwio-C).
-    mem.write_byte(gb, 0xFF68, 0xC8)
-    mem.write_byte(gb, 0xFF6A, 0xD0)
+    # The CGB boot ROM leaves the palette-index ports where its palette writes
+    # stopped, auto-increment on, and that depends on the cart. Over a DMG
+    # cart (the compatibility palette): BCPS = 0xC8, OCPS = 0xD0 (mooneye
+    # misc/boot_hwio-C, a DMG cart). Over a CGB cart: BCPS = 0xC0, OCPS = 0xC1
+    # (DocBoy cgb/boot/boot_regs_cgb; running the boot ROM leaves the same).
+    let native_cart = gb.cgb_flag != cgbNone
+    mem.write_byte(gb, 0xFF68, if native_cart: 0xC0 else: 0xC8)
+    mem.write_byte(gb, 0xFF6A, if native_cart: 0xC1 else: 0xD0)
+    # SVBK hands off as 0 (bank 1 mapped, reads $F8): the AGS read $F8 under
+    # gbedge p00 (docs/pandocs-audit.md), DocBoy cgb/boot/boot_regs_cgb wants
+    # it, and running the boot ROM leaves it.
+    mem.svbk_raw = 0
   # P1 at handoff. The select lines power up low (new_gb_joypad: $CF), and a
   # boot ROM that never writes P1 hands that off: the DMG-family ones, and the
   # CGB/AGB one for a CGB cart (Pan Docs, "Power Up Sequence": P1 = $C7 or
@@ -176,6 +221,7 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     gb.joypad.button_keys = false
     gb.joypad.direction_keys = false
   mem.write_byte(gb, 0xFFFF, 0x00)
+  skip_boot_hram(mem, gb)
   # None of the writes above is a CPU M-cycle, so nothing else consumes this.
   mem_flush_deferred(mem, gb)
 
@@ -309,9 +355,15 @@ proc unusable_index(gb: GB; idx: int): int {.inline.} =
 
 proc read_unusable(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
   ## `$FEA0..$FEFF`, one model per GbUnusableRegion member (Pan Docs, "FEA0-FEFF
-  ## range"). Pan Docs' "$FF when OAM is blocked" in mode 2/3 is not modelled
-  ## (the OAM lock lives in ppu_read; cgb-acid-hell avoids those modes). The
-  ## OAM-DMA case is: mem_read_busy answers $FF for the whole page.
+  ## range": "This area returns $FF when OAM is blocked, and otherwise the
+  ## behavior depends on the hardware revision"). Blocked is the OAM read lock
+  ## itself (cpu_oam_open), on every model: DocBoy's `not_usable_read_{oam_
+  ## scan,pixel_transfer}` read $FF on DMG, CGB and in compatibility mode. The
+  ## OAM-DMA case: mem_read_busy answers $FF for the whole page.
+  if not cpu_oam_open(gb.ppu, is_write = false,
+                      open_late = gb.quirks.oam_read_open_late,
+                      ds = mem.current_speed != 0):
+    return 0xFF'u8
   case gb.quirks.unusable_region
   of urZero:       0x00'u8
   of urNibbleEcho:
@@ -378,6 +430,10 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
     if gb.cgb_native: (mem.rp and 0xC1'u8) or 0x3E'u8 else: 0xFF'u8
   of 0xFF70:
     if gb.cgb_native: 0xF8'u8 or mem.svbk_raw else: 0xFF'u8
+  of 0xFF6C:
+    # OPRI: bit 0 readable in CGB mode; $FF in compatibility mode (DocBoy
+    # cgb_dmg_mode/ppu/opri_write_read, boot_regs_cgb).
+    if gb.cgb_native: 0xFE'u8 or mem.opri else: 0xFF'u8
   # FF72-FF77 exist on CGB/AGB silicon even in DMG-compat mode, except FF74
   # (mooneye misc/bits/unused_hwio-C); on DMG they read 0xFF
   # (acceptance/bits/unused_hwio-GS).
@@ -633,6 +689,8 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
       mem.svbk_raw = val and 0x7
       mem.wram_bank = val and 0x7
       if mem.wram_bank == 0: mem.wram_bank = 1
+  of 0xFF6C:
+    if gb.cgb_native: mem.opri = val and 0x01
   of 0xFF72: mem.ff72 = val
   of 0xFF73: mem.ff73 = val
   of 0xFF74:

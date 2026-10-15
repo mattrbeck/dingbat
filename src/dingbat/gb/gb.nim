@@ -2420,6 +2420,14 @@ type
     # SVBK readback is the raw written byte; only the mapping aliases 0 -> 1
     # (a written 0 reads back $F8). Both serialized from GB payload rev 6.
     svbk_raw*:             uint8
+    # OPRI ($FF6C) bit 0, readable and writable in CGB mode only (Pan Docs,
+    # "FF6C — OPRI"). Storage only: Pan Docs has a write after the boot ROM
+    # unmaps change nothing (TO BE VERIFIED there), and the priority the
+    # renderer uses stays the one the operating mode picks. 0 at hand-off for
+    # a CGB cart (AGS gbedge p00 reads $FE). NOT serialized: a fresh GB
+    # field, deferred to the next batched GB payload revision; a load keeps
+    # the running machine's value.
+    opri*:                 uint8
     hram*:                 array[0x7F, uint8]
     # $FEA0-$FEFF: real RAM on CGB 0-D (Pan Docs, "FEA0-FEFF range"); which
     # model applies is GbQuirks.unusable_region. Serialized from GB payload

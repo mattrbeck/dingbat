@@ -14,6 +14,13 @@ const LYC_JUST_CHANGED_HOLD_DS* {.intdefine.} = 2
 # Dots past the start of VBlank at which the CGB boot ROM hands off (skip_boot).
 const CGB_BOOT_PHASE* {.intdefine.} = 165
 
+# The same for the CGB boot ROM run over a DMG cart (compatibility mode): LY
+# 148, dot 353, 2012 dots after a CGB cart's hand-off, on every header path
+# the skip-boot models (timer.nim cgb_boot_header_t). Measured by running the
+# boot ROM; DocBoy cgb_dmg_mode/boot/boot_ppu_phase_round{1,2} read mode 1 at
+# 475 M-cycles and the line-153 snapback ($85) one M-cycle later.
+const CGB_COMPAT_BOOT_PHASE* {.intdefine.} = 2177
+
 # Dot of line 153 at which the DMG/MGB boot ROM hands off (skip_boot).
 const DMG_BOOT_PHASE* {.intdefine.} = 397
 
@@ -123,10 +130,15 @@ proc skip_boot*(ppu: GbPpu; gb: GB) =
     # phase == 1 (mod 4), the same PPU-dot-to-M-cycle offset the DMG's
     # LCD_ON_HEAD_START gives. 157/161/165 are otherwise indistinguishable:
     # every other gambatte row resyncs on LY.
-    const phase = CGB_BOOT_PHASE
+    let phase = if gb.cgb_flag == cgbNone and gb.boot_model == bmCgbABCDE:
+                  CGB_COMPAT_BOOT_PHASE
+                else: CGB_BOOT_PHASE
     ppu.ly = uint8(144 + phase div 456)
     ppu.cycle_counter = int32(phase mod 456)
     ppu.lcd_status = (ppu.lcd_status and not 3'u8) or 1'u8  # mode 1
+    # The comparator's bit as the boot ROM leaves it: LYC = 0 against a
+    # vblank line, clear (STAT = $81; DocBoy cgb/boot/boot_regs_video).
+    if ppu.ly != ppu.lyc: ppu.lcd_status = ppu.lcd_status and not 0x04'u8
     when STAT_IRQ_SPLIT:
       ppu.irq_mode = 1
       ppu.irq_ly = ppu.ly
@@ -140,11 +152,13 @@ proc skip_boot*(ppu: GbPpu; gb: GB) =
         cast[ptr uint16](addr ppu.obj_pram[i * 2])[]  = CGB_COMPAT_OBJ_COLORS[i]
         cast[ptr uint16](addr ppu.obj_pram[8 + i * 2])[] = CGB_COMPAT_OBJ_COLORS[i]
     else:
-      # Pan Docs, "Console state after boot ROM hand-off": all BG colours are
-      # white, and $FF bytes are equivalent to $7FFF. OBJ colours are
-      # unspecified on hardware and get the same fill so states reproduce.
-      # BullyGB leans on the boot ROM for BG palette 0 colours 0-2.
-      for i in 0 ..< ppu.pram.len: ppu.pram[i] = 0xFF
+      # Pan Docs, "Power Up Sequence": the boot ROM fades all BG palettes to
+      # white, and running it leaves every colour $7FFF, low byte first (a
+      # BCPD read sees $FF, $7F: DocBoy cgb/boot/boot_bg_palettes). OBJ
+      # colours are unspecified on hardware and get an $FF fill so states
+      # reproduce. BullyGB leans on the boot ROM for BG palette 0 colours 0-2.
+      for i in 0 ..< ppu.pram.len:
+        ppu.pram[i] = if (i and 1) == 0: 0xFF'u8 else: 0x7F'u8
       for i in 0 ..< ppu.obj_pram.len: ppu.obj_pram[i] = 0xFF
   elif gb.boot_model in {bmDmgABC, bmMgb}:
     # Pan Docs, "Console state after boot ROM hand-off": DMG/MGB hand off with

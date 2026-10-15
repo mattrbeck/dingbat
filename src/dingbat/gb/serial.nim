@@ -155,9 +155,15 @@ const SERIAL_DIV_WRITE_LEAD_T* {.intdefine.} = 4
 
 proc serial_div_write_edge*(serial: GbSerial; gb: GB; old_tdiv: uint16) {.inline.} =
   ## The tap's view of a `$FF04` store: `tdiv` is already 0, so the pre-reset
-  ## level is rebuilt from `old_tdiv` less SERIAL_DIV_WRITE_LEAD_T.
+  ## level is rebuilt from `old_tdiv` less SERIAL_DIV_WRITE_LEAD_T. A tap that
+  ## was high there but already fell on its own in the store's M-cycle (the
+  ## bus half ran first) has had its one falling edge: the reset makes no
+  ## second one (DocBoy serial_timing_reset_div_during_transfer_stall_alt_
+  ## round{1,2}, a reset on the tap's own falling T-cycle; SameBoy DMG B run
+  ## through Nintendo's boot ROM, black box, agrees).
   when SERIAL_DIV_WRITE_LEAD_T != 0:
-    let was_high = ((old_tdiv - uint16(SERIAL_DIV_WRITE_LEAD_T) + serial_phase(gb)) and
+    let was_high = (serial.clock_history and 1) != 0 and
+                   ((old_tdiv - uint16(SERIAL_DIV_WRITE_LEAD_T) + serial_phase(gb)) and
                     serial.serial_tap_bit(gb)) != 0
     serial.clock_history = if was_high: 1'u8 else: 0'u8
   serial_tick(serial, gb)
@@ -258,17 +264,19 @@ proc serial_write_commit(serial: GbSerial; gb: GB; idx: int; val: uint8) =
         gb.test_output.serial_buffer.add(char(val))
   of 0xFF02:
     # Any SC write restarts the bit count and the slot sequence. A slot that
-    # is open when the write lands is closed by it, which moves one bit of a
-    # transfer still running under the OLD SC -- but the count was already
-    # restarted, so that bit can never be the completing one (gambatte
-    # serial/start_wait_restart_read_if_* and the _sc80/_stop arms).
+    # is open when the write lands is closed by it, which shifts one bit into
+    # SB for the transfer still running under the OLD SC; the count restarts
+    # after that close, so the restarted byte still takes eight closes (DocBoy
+    # serial_abort_to_81_sc_round{1,2} pin its end to the M-cycle; gambatte
+    # serial/start_wait_restart_read_if_* and the _sc80/_stop arms take either
+    # order).
     let started = (serial.sc and 0x80) == 0 and (val and 0x80) != 0
     let was_master = serial.serial_is_master()
-    serial.bits_remaining = 8
     if serial.slot_open:
       serial.slot_open = false
       if was_master:
-        serial.serial_move_bit(gb)
+        serial.sb = (serial.sb shl 1) or 1'u8
+    serial.bits_remaining = 8
     serial.sc = val and (if gb.cgb_native: 0x83'u8 else: 0x81'u8)
     if (val and 0x80) == 0:
       serial.bits_remaining = 0  # clearing the enable bit aborts a transfer

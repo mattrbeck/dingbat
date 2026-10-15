@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 7,246 / 9,227 at `DocboyRev`, every
+(`tests/README.md`, "The DocBoy suite"): 7,276 / 9,227 at `DocboyRev`, every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1215,26 +1215,67 @@ question. Families, largest first:
     and dingbat agree on.
 
   Left in I8: the 33 double-speed CH4 shift/divider rows (I1's owner).
-* **I9. Boot hand-off state (46).** `cgb/boot/boot_div_title_*` (38): DIV at
-  `$0100` depends on the path the CGB boot ROM took through the header
-  (licensee, title checksum); dingbat hands off one DIV. Plus
-  `boot_regs_video`, `boot_hram`, `boot_ppu_phase`. A skip-boot gap; SameBoy
-  runs its own boot ROM, so it is no witness here. `cgb/boot/boot_regs_joypad`
-  (P1 = $CF with a CGB cart) closed with I13's P1 hand-off.
-* **I10. `$FEA0-$FEFF` (32).** 30 on the CGB: DocBoy's CGB-E rows expect RAM, with
-  `$FEC0-$FEFF` repeating 16 bytes, in CGB and in compat mode. dingbat follows
-  Pan Docs ("FEA0-FEFF range": CGB E reads return the high nibble of the low
-  address byte twice, writes are dropped: `urNibbleEcho`). SameBoy fails too.
-  A conflict with the spec: a hardware question, not a fix. The other two
-  are DMG reads during OAM scan / pixel transfer, which SameBoy passes.
+* **I9. Boot hand-off state (26 left of 46).** Measured by running Matt's
+  CGB and DMG boot ROMs through dingbat (a local instrument, never
+  committed): the hand-off per header path, beside the skip-boot state.
+  Closed 2026-10-14 (+20, and `cgb/ppu/turn_off_read_stat` with the STAT
+  bit): DIV at `$0100` per licensee path
+  (`cgb_boot_header_t`, timer.nim: every old licensee but $01/$33 one time,
+  $33 with a new code not starting '0' 4 T earlier, '0x' 32 T later, a
+  licensed cart 4,360 T later when its title checksum matches no palette
+  entry, the same in CGB and compatibility mode; mooneye's own header is the
+  -4 path, so `boot_div-cgbABCDE` keeps 0x2674); the compatibility-mode PPU
+  phase (LY 148, dot 353: `CGB_COMPAT_BOOT_PHASE`), its frame-sequencer step
+  and CH1 duty phase; STAT's LY=LYC bit at a CGB hand-off ($81); the BG
+  palettes as $7FFF words; BCPS/OCPS $C0/$C1 and SVBK $F8 for a CGB cart
+  (`boot_regs_cgb`, which also needed OPRI, below); the HRAM the boot ROMs
+  leave (the cart's logo at `$FF80`, their stack residue). dingbat's own
+  boot-ROM run handed off 4 T short of mooneye `boot_div-dmgABCmgb` and
+  `boot_div-cgbABCDE` with the PPU phase already right, so the divider starts
+  4 T on when a boot ROM runs (`BOOT_ROM_DIV_START_T`); with Nintendo's boot
+  ROMs the run then passes both mooneye rows and every DocBoy `boot` row, the
+  table-dependent ones included, but `boot_hram` ($FFFE, below). Left on the
+  skip-boot: 20 `boot_div_title_*` rows whose DIV is set by WHERE the
+  title checksum sits in Nintendo's compatibility-palette table (REDUCTIONS,
+  checksum $00, is in it; so are 16/46A/46E/46R/6F/BF/F4), and
+  `cgb_dmg_mode` `boot_vram_nintendo_logo_checksum_{43,58}` (the boot ROM
+  leaves the logo's tile map for those two entries): the table is not
+  carried, as for I3's 63 palette rows. The four `boot_hram` rows match in
+  every byte but `$FFFE`, which no boot ROM writes (DocBoy: "hardcoded to C0"
+  / "4C" "even before boot rom"); Pan Docs ("Power Up Sequence") has power-up
+  HRAM random and SameBoy fails them too: a NotScored candidate.
+  `cgb/boot/boot_regs_joypad` (P1 = $CF with a CGB cart) closed with I13's P1
+  hand-off.
+* **I10. `$FEA0-$FEFF` (26 left of 32).** Closed 2026-10-14: a read while OAM
+  is blocked answers $FF on every model (Pan Docs, "FEA0-FEFF range"), the
+  six `not_usable_read_{oam_scan,pixel_transfer}` rows (DMG, CGB, compat).
+  The 26 left (13 in `cgb/memory`, 13 in `cgb_dmg_mode/memory`) all write the
+  area outside mode 2/3 and read it back, expecting RAM with `$FEC0-$FEFF`
+  repeating 16 bytes. dingbat follows Pan Docs (CGB E, AGB, AGS, GBP return
+  the high nibble of the low address byte twice: `urNibbleEcho`), and the
+  AGS read exactly that under gbedge p0F, `$FEA0`..`$FEF8` = `AA AA BB BB ..
+  FF FF` and `$FEA5` still `$AA` after a `$5A` write (docs/flashcart-runbook.md);
+  SameBoy (CGB E, either boot ROM) fails all 26. A NotScored candidate; a
+  CGB E unit would settle the one open point, whether CGB E really groups
+  with the AGB here.
 * **I11. CGB header modes (15).** Closed 2026-10-14: `mode_cgb_flag_{81,82,83,90}`
   now pass, the header read follows Pan Docs ("0143 — CGB flag", "Power Up
   Sequence", "FF4C — KEY0"): bit 7 picks the CGB and copies the byte to KEY0,
   so CGB mode unless KEY0 bit 2 or 3 is set. The 15 red `cgb_dmg_ext_mode` rows
   are PGB mode (`$0143 = $88..$8F`, KEY0 bit 3), which Pan Docs leaves
   unresearched and dingbat does not model (those carts stay on the
-  compatibility path); DocBoy's "DMG ext mode" (SVBK works, BCPD does not) is
-  its own model.
+  compatibility path); DocBoy's "DMG ext mode" (SVBK, VBK, RP, KEY1, SC.1,
+  FF74 and OPRI answer as in CGB mode, BCPD and HDMA do not) is its own model.
+  Its sources name no hardware run, but these ROMs (and the KEY0 `mode`
+  ones) alone end a failure with a beep, which reads like a verdict meant to
+  be heard on a console whose LCD may be elsewhere. SameBoy CGB E, with its
+  own boot ROM and with Nintendo's, fails the same 14 (it passes
+  `opri_write_read`): a NotScored candidate until a console answers. The
+  ROMs are their own probe: on a CGB or AGS from a flashcart, a beep is a
+  failure, silence a pass (`mode_cgb_flag_88`, with `cgb_dmg_mode/mode/
+  mode_cgb_flag_84` as the silent control). OPRI itself (`$FF6C` bit 0, Pan Docs "FF6C — OPRI")
+  is now a register in CGB mode, $FF in compatibility mode
+  (`cgb/ppu/opri_write_read`, `boot_regs_cgb`; the AGS read $FE at hand-off).
 * **I12. CGB pictures (46).** About 25 are the LCD panel model:
   `ppu/visual/turn_off_y*_*`, `stop_*`: DocBoy models the CGB panel keeping already-drawn rows, and
   stalling, when the LCD is switched off mid-frame (its own slow-motion
@@ -1312,8 +1353,22 @@ question. Families, largest first:
   a TIMA overflow on the HALT's own fetch is pending at it, as SameBoy also
   has it). HuC3 commands (6, `$FFF0` never written; SameBoy passes 5
   of 6, dingbat's), DMG `dma_*_check_stat_*` (8, SameBoy passes all), MBC3
-  RTC latch (3, SameBoy fails too), `write_tima_while_reloading_*` (2,
-  SameBoy fails too), serial (3), DMG ppu `$FFF0` rows (3), six DMG
+  RTC latch (3: `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}` want only a $00 then
+  $01 write to latch; CasualPokePlayer's `latch-rtc-test` hardware capture
+  has ANY write latch, 51/51 against 28/51, mbc3.nim; SameBoy fails them too:
+  a NotScored candidate), `mbc1_initial_ram` (1: cart RAM read back as $FF
+  before any write; Pan Docs is silent, SRAM powers up with whatever it
+  holds; SameBoy passes it, dingbat starts a fresh cart at $00),
+  `write_tima_while_reloading_*` (2, SameBoy fails too), serial (1 of 3; closed
+  2026-10-14: an SC write that closes an open bit slot shifts that bit for
+  the old transfer and the restarted byte still takes eight,
+  `serial_abort_to_81_sc_round1`; a DIV reset in the M-cycle whose bus half
+  already carried the tap's own fall makes no second falling edge,
+  `serial_timing_reset_div_during_transfer_stall_alt_round1`, where SameBoy
+  through Nintendo's DMG boot ROM agrees; gambatte `serial/*` 82/82 either
+  way, serial.nim. Left: the two-player `slave_sc_00` row wants a slave with
+  SC = $00 to shift and interrupt, which Pan Docs does not cover), DMG ppu
+  `$FFF0` rows (3), six DMG
   STOP/HALT pictures whose reference is DocBoy's blank-panel colour
   (`$AD00`, Pan Docs' "whiter than color #0"), which dingbat draws as shade 0
   or black. Those six, and the five CGB `ppu/visual/stop_*` rows in I12, are
