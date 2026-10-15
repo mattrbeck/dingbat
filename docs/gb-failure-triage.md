@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,486 / 9,128 at `DocboyRev` (99 more not scored, `DocboyNotScored`), every
+(`tests/README.md`, "The DocBoy suite"): 8,575 / 9,128 at `DocboyRev` (99 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1210,14 +1210,66 @@ question. Families, largest first:
   rows) and `change_{bg,win}_tile_data_glitch_*` (73); SameBoy fails the
   three sampled pictures and passes 4 of 6 sampled `$FFF0` rows. The palette
   part is dingbat's skip-boot; the glitch part is contested.
-* **I4. HDMA / GDMA (182, 7 of them double speed).** `gdma_ppu_on_pixel_transfer_
-  conflict_relaxed_*` (82): a GDMA overlapping mode 3; `hdma_remaining_length_
-  ly*_scx*` (40, HDMA5 readback mid-transfer; SameBoy passes 3 of 3, probably
-  dingbat); the `*_source_{vram,wram_dma_source_ram,oam,io,hram,not_usable}`
-  rows (what a block reads from odd sources; SameBoy fails too, contested).
-  Six of the seven double-speed rows (`double_speed/hdma/speed_switch_to_
-  {double,single}_during_hdma{,_div,_stat}_round2`) closed 2026-10-14 with
-  the speed-switch stall's halt model (I7).
+* **I4. HDMA / GDMA (182 -> 87).** Closed 2026-10-14 (95 rows; 89 here, `gb.nim`
+  knobs, and the six double-speed rows with I7):
+  the LCD-enable line has no OAM scan, so the VRAM DMA's HBlank input sees
+  the mode 0 STAT shows there (`HDMA_LCDON_LINE0_M0`: an HBlank transfer armed
+  in those 80 dots starts at once) and its mode-3 -> 0 request trails by
+  `LCD_ON_STAT_READ_LAG`, AGE's 2 dots, which the eight ly0 round1/round2
+  rows bracket two-sided (`HDMA_LCDON_LINE0_LAG`): the 40
+  `hdma_remaining_length_ly0_*` and `double_speed_hdma_basic_transfer`.
+  Switching the LCD off makes an HBlank edge only from outside HBlank
+  (`HDMA_LCD_OFF_EDGE`): `hdma_ppu_on_turn_off_during_{ly0_hblank,
+  ly1_oam_scan}` and four `hdma_halt_resume_with_timer_interrupt_*`. SameBoy
+  passes all of those. The 7 `hdma_transfer_write_*` write only some of
+  HDMA1-4: the hand-off leaves the counters at $D430 / $99D0, where the CGB
+  boot ROM's last GDMA ends (the boot ROM run to $0100 in dingbat, every cart
+  alike). 19 `*_source_*` rows (`gdma_source_{vram,vram_corruption,
+  vram_jp_in_ram,hram,io,oam,not_usable,echo_ram,from_vram_to_ram,
+  overflow_source_illegal,wram_dma_source_ram_c000_8000_source_overflow_
+  illegal}`, `hdma_source_vram_scx0-7`): a source no bus answers reads $FF
+  except the transfer's first byte, the cartridge bus's residue from the
+  M-cycle before the hand-over -- the opcode the CPU fetched there from ROM or
+  cartridge RAM (`$AF` after an `xor a`), or a running OAM DMA's byte; after a
+  fetch from WRAM or HRAM, $FF (`VDMA_BUS_RESIDUE`; Pan Docs: separate
+  cartridge and WRAM buses, VRAM source "garbage", the rest untested).
+  SameBoy fails all 19 rows but its VRAM (a black-box dump through its
+  direct-access API) holds the same $AF in byte 0, and in byte 1 too, where
+  DocBoy has $FF: two references on the residue, one on its length.
+  gambatte's CGB-C `dma_*_read` rows check bytes 1-7 only; hardware question
+  22, gbedge p21 `VDMABUS`. 16
+  `hdma_source_wram_dma_source_ram_during_pixel_transfer_*` (an OAM DMA beside
+  an HBlank block): the block's ninth M-cycle does not hold the external bus,
+  so the OAM DMA stores its own byte there (`VDMA_OVERHEAD_FREES_BUS`), and it
+  leads the bytes for a block granted at an instruction boundary, trails them
+  for one granted after an opcode fetch (`HDMA_BOUNDARY_ACQUIRE`, the split
+  `HDMA_OVERHEAD_LEADS` already records for gambatte `oamdmasrcC000_
+  hdmasrc0000`); SameBoy passes 6 of the 16.
+  Open (87): 82 `gdma_ppu_on_pixel_transfer_conflict_relaxed_*`: DocBoy loses
+  three VRAM writes in four while the mode-3 fetcher holds the port (object
+  and window fetches move the holes); dingbat lands every byte, Pan Docs only
+  says to avoid it. SameBoy fails 69 of the 82 rows, but its VRAM shows
+  DocBoy's write map exactly from byte 32 on in 22 of them (all 8 BG-only, all
+  8 window, 6 object rows): its misses are a corruption of the first 32
+  bytes, before mode 3, which DocBoy's "relaxed" rows half ignore, and on the
+  other 61 the two differ only in the free slots around an object fetch. So
+  the port model is probably dingbat's to add; not done here (it is the FIFO
+  fetcher's VRAM schedule): a prototype dropping a write when the BG
+  fetcher's step two dots earlier is a map or bitplane read (`fetch_counter`
+  0-5) gets the BG phase of all 8 SCX rows, one byte early at mode-3 start
+  (the restarted first fetch) and up to one late at its end. Hardware
+  question 21 (gbedge p21 bytes 00-0F). 3 `gdma_source_wram_dma_source_ram_{160,256,
+  480_bytes_overflow}`: OAM matches byte for byte; the miss is the
+  `$FEA0-$FEFF` readback, I10. `hdma_start_during_oam_scan_with_dma_running`
+  (DocBoy and SameBoy: armed in mode 2 under an OAM DMA, the block starts at
+  once; "the HBlank input is high unless the PPU scans OAM or draws" would
+  give it, but row 17 of docs/hwprobe-questions.md has the scan running under
+  OAM DMA; one row, not modelled; hardware question 23, gbedge p22
+  `VDMAOAM`) and `..._during_oam_scan` (that start plus a VRAM write
+  pattern; SameBoy fails it). The six double-speed `speed_switch_to_
+  {double,single}_during_hdma{,_div,_stat}_round2` closed with the
+  speed-switch stall's halt model (I7): the HBlank STAT request ends the
+  stall, as in `speed_switch_to_double_interrupt_stat_round2` without a DMA.
 * **I5. DMG OAM corruption patterns (10 left; 161 closed 2026-10-14).**
   `dmg/oam_bug` 258/268. Each ROM fills OAM with a known pattern, turns the
   LCD on, waits `103 + n` M-cycles so its one OAM access lands on scan row

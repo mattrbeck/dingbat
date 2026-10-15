@@ -829,6 +829,62 @@ const GDMA_AFTER_FETCH* {.intdefine.} = 1
   ## Whether switching the LCD off with an HBlank DMA armed requests a block,
   ## as the LCD-off PPU sits in mode 0 (gambatte-core requests one on the
   ## disable). gambatte dma/hdma_disable_display_1 (+1, none lost).
+const VDMA_OVERHEAD_FREES_BUS* {.intdefine.} = 1
+  ## HDMA_BLOCK_OVERHEAD_BUS's M-cycle (the acquire before, or the release
+  ## after, a block's bytes) does not drive the external bus: an OAM DMA slot
+  ## that falls in it stores its own byte rather than nothing. DocBoy
+  ## `cgb/hdma/hdma_source_wram_dma_source_ram_during_pixel_transfer_*` leave
+  ## eight OAM bytes unwritten under a nine-M-cycle block, not nine. 0 = the
+  ## VRAM DMA holds the bus through it.
+const HDMA_BOUNDARY_ACQUIRE* {.intdefine.} = 1
+  ## Where the overhead M-cycle sits for an HBlank block granted at an
+  ## instruction boundary (hand-over point 2): before the bytes, the bus
+  ## acquire, where a block granted at the end of an opcode fetch has its
+  ## acquire inside that fetch and pays a release after (HDMA_OVERHEAD_LEADS).
+  ## The same split HDMA_OVERHEAD_LEADS records for gambatte
+  ## `oamdma/oamdmasrcC000_hdmasrc0000`. DocBoy `hdma_source_wram_dma_source_
+  ## ram_during_pixel_transfer_*`: the free OAM slot falls after the block on
+  ## the fetch-granted SCX values and before it on the boundary-granted ones.
+const VDMA_BUS_RESIDUE* {.intdefine.} = 1
+  ## The first byte a VRAM DMA reads from a source no bus answers (VRAM, OAM,
+  ## $FEA0-$FFFF, $E000 echo: Pan Docs, "VRAM source copies garbage", the
+  ## rest "untested") is what the cartridge bus still carries from the
+  ## M-cycle before the hand-over: the opcode the CPU fetched there when that
+  ## fetch was from ROM or cartridge RAM. The cartridge bus is the CPU's only
+  ## for those (Pan Docs, OAM DMA: "the cartridge and WRAM are on separate
+  ## buses"), so after a fetch from WRAM or HRAM, and for every later byte,
+  ## nothing drives it and the pull-ups read $FF. DocBoy `cgb/hdma/
+  ## gdma_source_vram_corruption` ($AF, the `xor a` after the FF55 write),
+  ## `gdma_source_{vram,hram,io,oam,not_usable,echo_ram,...}` (byte 0 not $FF,
+  ## the rest $FF) against `gdma_source_vram_{call,jp}_in_hram`/`jp_in_wram*`
+  ## (all $FF). gambatte `dma/dma_{vram,oam,hiram}_read*` (CGB C hardware)
+  ## check bytes 1-7 only and find them $FF. 0 = every such byte $FF.
+const HDMA_LCD_OFF_EDGE* {.intdefine.} = 1
+  ## With HDMA_LCD_OFF_BLOCK: the LCD-off block is an HBlank EDGE, so only a
+  ## PPU not already in HBlank makes one (mode 2, 3 or 1 dropping to the
+  ## LCD-off mode 0); switched off inside HBlank, after that HBlank's block,
+  ## nothing more moves. A block still owed when the write lands is paid.
+  ## DocBoy `cgb/hdma/hdma_ppu_on_turn_off_during_{ly0,ly1}_hblank` (2 and 3
+  ## blocks) against `_ly1_oam_scan` (3: arm, line 0, the switch-off), and
+  ## the four `hdma_halt_resume_with_timer_interrupt_*` rows that switch off
+  ## in HBlank; SameBoy agrees on all of them. 0 = every switch-off moves one.
+const HDMA_LCDON_LINE0_M0* {.intdefine.} = 1
+  ## The LCD-enable line has no OAM scan: STAT reads mode 0 until mode 3
+  ## (mooneye acceptance/ppu/lcdon_timing-GS; dingbat keeps mode 2 internally
+  ## there and masks the read), and the VRAM DMA's HBlank input sees the same
+  ## mode 0. So an
+  ## HBlank transfer armed in those first 80 dots starts at once, exactly as
+  ## one armed inside a real HBlank does, and an LCD switch-off there makes
+  ## no edge (HDMA_LCD_OFF_EDGE). DocBoy `cgb/hdma/hdma_remaining_length_ly0_*`
+  ## (38 of 40 rows), `double_speed_hdma_basic_transfer`; SameBoy passes them.
+const HDMA_LCDON_LINE0_LAG* {.intdefine.} = 1
+  ## On the LCD-enable line the HBlank request follows the mode bits the STAT
+  ## read sees there, LCD_ON_STAT_READ_LAG (ppu.nim, from AGE stat-mode) dots
+  ## behind the mode 3 -> 0 edge the other lines share: no new constant.
+  ## DocBoy `hdma_remaining_length_ly0_scx{0..3}_round{1,2}` bracket the lag
+  ## two-sided: every SCX shares one CPU timeline, whose grant points leave
+  ## the request at dots 258..261, so SCX 0 (edge 252) needs >= 2 and SCX 3
+  ## (edge 255) <= 2. 0 loses `_scx{0,1}_round1`; SameBoy passes both.
 const TIMER_ACK_LOOKAHEAD* {.intdefine.} = 4
   ## T-cycles past its IF clear within which a timer request still to rise is
   ## acknowledged by the same dispatch (gambatte-core acks a flag whose event
@@ -2600,6 +2656,8 @@ type
     timer_irq_acked*:  bool    # TIMER_ACK_LOOKAHEAD: the dispatch acked the reload's request
     hdma_start_req*:   bool    # HDMA_START_GRANT_FETCH: the owed block was raised by FF55
     gdma_owed*:        bool    # GDMA_AFTER_FETCH: a general-purpose DMA waits for the next fetch
+    vdma_residue*:     int16   # VDMA_BUS_RESIDUE: the cartridge bus's byte at the hand-over (+1; 0 = none)
+    hdma_boundary_grant*: bool # HDMA_BOUNDARY_ACQUIRE: the block now granted is at an instruction boundary
     we_off_dot*:       int32   # CGB_WE_DISABLE_LATE: dot a CGB LCDC.5 fall reaches the fetcher
     wd_fifo*:          GbPixelFifo  # WIN_REVOKE_DS_PUSH: the ring at a CGB double-speed window start
     wd_ds_push*:       bool

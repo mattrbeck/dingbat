@@ -144,6 +144,13 @@ proc skip_boot*(ppu: GbPpu; gb: GB) =
       ppu.irq_ly = ppu.ly
     ppu.first_line = false
     when LCD_ON_TRIM_ANY: ppu.lcdon_lines = 0
+    # The VRAM DMA address counters (HDMA1-4 read $FF, so only a transfer that
+    # does not rewrite all four can see them) stand where the boot ROM's last
+    # general-purpose DMA left them: its final block copies $D420-$D42F to
+    # $99C0-$99CF, for every cart (the CGB boot ROM run to $0100 in dingbat).
+    # DocBoy `cgb/hdma/hdma_transfer_write_hdma{5,12,34,...}` write a subset.
+    ppu.hdma_src = 0xD430'u16
+    ppu.hdma_dst = 0x99D0'u16
     if not gb.cgb_native:
       # DMG cart on a CGB: the boot ROM fills palette 0 through BCPD/OCPD before
       # KEY0 locks the ports, and the cart can never write a colour again.
@@ -1781,6 +1788,10 @@ proc ppu_charge_hdma_overhead(ppu: GbPpu; gb: GB) {.inline.} =
   when HDMA_BLOCK_OVERHEAD_BUS != 0:
     mem_tick_components(gb.memory, gb, HDMA_BLOCK_OVERHEAD_BUS, from_cpu = false)
 
+proc ppu_charge_hdma_overhead_cold(ppu: GbPpu; gb: GB) {.noinline.} =
+  ## The same, out of line, for the rarer leading acquire (HDMA_BOUNDARY_ACQUIRE).
+  ppu_charge_hdma_overhead(ppu, gb)
+
 proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
                           charge_overhead = true): bool =
   ## One $10-byte block from where the address counters stand. Returns false
@@ -1804,38 +1815,65 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
   if hold: ppu_flush_hdma_bytes(ppu, gb)
   # The external bus is the VRAM DMA's for the whole copy: an OAM DMA slot
   # inside it stores the VRAM DMA's byte (VDMA_OAM_BUS_CAPTURE, gb.nim).
+  # The acquire M-cycle (HDMA_OVERHEAD_LEADS, or HDMA_BOUNDARY_ACQUIRE for a
+  # block granted at an instruction boundary) leads the bytes; with
+  # VDMA_OVERHEAD_FREES_BUS it is not the VRAM DMA's on the external bus.
+  let lead = HDMA_OVERHEAD_LEADS != 0 or
+             (HDMA_BOUNDARY_ACQUIRE != 0 and gb.hdma_boundary_grant)
+  when VDMA_OVERHEAD_FREES_BUS != 0:
+    if lead and charge_overhead: ppu_charge_hdma_overhead_cold(ppu, gb)
   when VDMA_OAM_BUS_CAPTURE != 0:
     let vdma_bus_was = gb.memory.vdma_bus_hold
     gb.memory.vdma_bus_hold = true
-  when HDMA_OVERHEAD_LEADS != 0:
-    if charge_overhead: ppu_charge_hdma_overhead(ppu, gb)
-  for byte in 0 ..< 0x10:
-    let val = if src_legal: gb.memory.read_byte(gb, src_base + byte) else: 0xFF'u8
-    if hold: ppu.hdma_held[byte] = val
-    else:    gb.memory.write_byte(gb, dst_base + byte, val)
-    # Two dots per byte on the PPU axis at either speed (gambatte
-    # dma/hdma_start_ds_*), i.e. four CPU-clock cycles per byte in double
-    # speed (Pan Docs, CGB Registers): a block stalls 8 M-cycles at normal
-    # speed and 16 fast M-cycles in double.
-    mem_tick_bus(gb.memory, gb, 2 shl int(gb.memory.current_speed),
-                 from_cpu = false)
-    mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
-    # An in-flight OAM DMA latches the external bus at the end of each machine
-    # M-cycle, four scheduler cycles at either speed. Read off the scheduler
-    # because internal_dma_timer stops with the CPU and this does not.
-    when VDMA_OAM_BUS_CAPTURE != 0:
-      if (gb.scheduler.cycles and 3) == 0:
-        mem_vdma_bus_capture(gb.memory, gb, uint8((src_base + byte) and 0xFF),
-                             val)
+  when VDMA_OVERHEAD_FREES_BUS == 0:
+    if lead and charge_overhead: ppu_charge_hdma_overhead_cold(ppu, gb)
+  template copy_bytes(value: untyped) =
+    for byte {.inject.} in 0 ..< 0x10:
+      let val = value
+      if hold: ppu.hdma_held[byte] = val
+      else:    gb.memory.write_byte(gb, dst_base + byte, val)
+      # Two dots per byte on the PPU axis at either speed (gambatte
+      # dma/hdma_start_ds_*), i.e. four CPU-clock cycles per byte in double
+      # speed (Pan Docs, CGB Registers): a block stalls 8 M-cycles at normal
+      # speed and 16 fast M-cycles in double.
+      mem_tick_bus(gb.memory, gb, 2 shl int(gb.memory.current_speed),
+                   from_cpu = false)
+      mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
+      # An in-flight OAM DMA latches the external bus at the end of each
+      # machine M-cycle, four scheduler cycles at either speed. Read off the
+      # scheduler because internal_dma_timer stops with the CPU and this does
+      # not.
+      when VDMA_OAM_BUS_CAPTURE != 0:
+        if (gb.scheduler.cycles and 3) == 0:
+          mem_vdma_bus_capture(gb.memory, gb, uint8((src_base + byte) and 0xFF),
+                               val)
+  if src_legal:
+    when VDMA_BUS_RESIDUE != 0: gb.vdma_residue = 0
+    copy_bytes(gb.memory.read_byte(gb, src_base + byte))
+  else:
+    # No bus answers: $FF, but for the hand-over's byte still on the
+    # cartridge bus in the transfer's first read cycle (VDMA_BUS_RESIDUE).
+    var residue = 0'i16
+    when VDMA_BUS_RESIDUE != 0:
+      residue = gb.vdma_residue
+      gb.vdma_residue = 0
+      when defined(gb_dma_trace):
+        if residue != 0:
+          echo "RESIDUE ", toHex(residue - 1, 2), " pc=", toHex(gb.cpu.pc, 4)
+    copy_bytes(if byte == 0 and residue != 0: uint8(residue - 1) else: 0xFF'u8)
   # The acquire/release overhead is per TRANSFER, charged after the copies so
   # the hold deadline below is measured from the last byte. `charge_overhead`
   # is false for every block of a GDMA burst but its last.
-  when HDMA_OVERHEAD_LEADS == 0:
-    if charge_overhead: ppu_charge_hdma_overhead(ppu, gb)
+  when VDMA_OVERHEAD_FREES_BUS == 0:
+    if not lead and charge_overhead: ppu_charge_hdma_overhead(ppu, gb)
   when VDMA_OAM_BUS_CAPTURE != 0:
-    # Released only after the overhead: that M-cycle is the VRAM DMA's too
-    # (gambatte dma/hdma_transition_oamdma_2 counts the ninth M-cycle).
+    # Released before the release M-cycle under VDMA_OVERHEAD_FREES_BUS (an
+    # OAM DMA slot there stores its own byte), after it otherwise. The OAM
+    # DMA's position steps through it either way (gambatte
+    # dma/hdma_transition_oamdma_2 counts the ninth M-cycle).
     gb.memory.vdma_bus_hold = vdma_bus_was
+  when VDMA_OVERHEAD_FREES_BUS != 0:
+    if not lead and charge_overhead: ppu_charge_hdma_overhead(ppu, gb)
   if hold:
     # Armed only now the block's own dots have run, so the deadline is measured
     # from the last byte. A PPU dot, not a bus M-cycle count: gambatte
@@ -2093,6 +2131,11 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
         ppu.hdma_block_due = true
         ppu.hdma_due_delay = 0
         var dl = ppu.cycle_counter + int32(HDMA_GRANT_FETCH_DOTS)
+        when HDMA_LCDON_LINE0_LAG != 0 and LCD_ON_STAT_READ_LAG != 0:
+          # On the LCD-enable line the HBlank request follows the mode bits
+          # the STAT read sees there, LCD_ON_STAT_READ_LAG dots behind the
+          # edge every other line shares (HDMA_LCDON_LINE0_LAG).
+          if ppu.first_line: dl += LCD_ON_STAT_READ_LAG
         # The counter wraps at the line end and a deadline past it would never
         # be met; clamp so the block is dropped leaving mode 0 instead.
         let le = gb_line_end(ppu)
@@ -2204,6 +2247,12 @@ const HDMA_START_CUTOFF_SS* {.intdefine.} = 2
   ## `hdma_late_enable_{1,ds_1}`: SS 1 takes only the double-speed row, 3
   ## loses `hdma_late_enable_1`; DS 1 loses `hdma_late_enable_ds_1`.
 const HDMA_START_CUTOFF_DS* {.intdefine.} = 0
+template ppu_hdma_hblank_level*(ppu: GbPpu): bool =
+  ## The mode 0 the VRAM DMA's HBlank input sees: the flag's, plus the
+  ## LCD-enable line's would-be OAM scan, which STAT shows as mode 0 too
+  ## (HDMA_LCDON_LINE0_M0, gb.nim).
+  ppu.mode_flag == 0 or
+    (HDMA_LCDON_LINE0_M0 != 0 and ppu.first_line and ppu.mode_flag == 2)
 proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
   ## A write to FF55. The length register takes the low 7 bits whether the
   ## write starts or stops a transfer (SameSuite dma/hdma_lcd_off reads back
@@ -2221,7 +2270,7 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
     # Arming an HBlank transfer while already in HBlank starts it right away.
     # With the LCD off the mode reads 0 forever, so an armed transfer copies
     # exactly one block and no more (SameSuite dma/hdma_lcd_off).
-    var in_m0 = ppu.mode_flag == 0
+    var in_m0 = ppu_hdma_hblank_level(ppu)
     when HDMA_START_CUTOFF_SS != 0 or HDMA_START_CUTOFF_DS != 0:
       # (DS 0 still excludes the boundary dot.) Too close to the line's end, the arming write misses this HBlank
       # (HDMA_START_CUTOFF_SS/_DS).
@@ -2694,6 +2743,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", toHex(ppu.lcd_control,2), " new=", toHex(val,2)
     let lcd_going_off = (ppu.lcd_control and 0x80'u8) != 0 and (val and 0x80'u8) == 0
+    let hblank_before = ppu_hdma_hblank_level(ppu)
     # Only the six bits the pipeline reads are late on CGB; the enable bit has
     # already restarted the mode machinery above on this dot.
     when CGB_LCDC_LATENCY_ANY:
@@ -2705,8 +2755,10 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu_store_lcdc(ppu, gb, val)
     when HDMA_LCD_OFF_BLOCK != 0:
       # Switching the LCD off with an HBlank DMA armed requests a block, as
-      # entering mode 0 does (HDMA_LCD_OFF_BLOCK).
-      if lcd_going_off and ppu.hdma_active and not ppu.hdma_copying:
+      # entering mode 0 does (HDMA_LCD_OFF_BLOCK) -- only as an edge, from
+      # outside HBlank (HDMA_LCD_OFF_EDGE).
+      if lcd_going_off and ppu.hdma_active and not ppu.hdma_copying and
+         (HDMA_LCD_OFF_EDGE == 0 or not hblank_before or ppu.hdma_block_due):
         ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
     # Deferred to the end of this M-cycle (stat_write_pending). LCDC.1 and, in
     # CGB mode, LCDC.0 are mixer reads (mealybug m3_lcdc_obj_en_change; see

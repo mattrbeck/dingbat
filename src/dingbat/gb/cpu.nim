@@ -74,15 +74,58 @@ proc cpu_inc_pc*(cpu: GbCpu) =
     cpu.pc = cpu.pc + 1
 
 when HDMA_GRANT_FETCH_DOTS >= 0:
-  proc hdma_grant(gb: GB; slack: int32) {.noinline.} =
+  const VDMA_ONE_MCYCLE_OPS = block:
+    ## Opcodes whose only M-cycle is their fetch (VDMA_BUS_RESIDUE): NOP, the
+    ## accumulator rotates, DAA/CPL/SCF/CCF, DI/EI, INC/DEC r and LD/ALU r,r'
+    ## without (HL).
+    var ops: set[uint8] = {0x00'u8, 0x07, 0x0F, 0x17, 0x1F, 0x27, 0x2F, 0x37,
+                           0x3F, 0xF3, 0xFB}
+    for r in 0'u8 .. 7'u8:
+      if r != 6:
+        ops.incl(0x04'u8 + 8 * r)
+        ops.incl(0x05'u8 + 8 * r)
+    for op in 0x40 .. 0xBF:
+      let o = uint8(op)
+      if (o and 7) != 6 and not (o >= 0x70'u8 and o <= 0x77'u8): ops.incl(o)
+    ops
+
+  proc vdma_bus_residue(gb: GB; fetch_addr: int; opcode: uint8): int16 =
+    ## What the cartridge bus carried in the M-cycle before a VRAM DMA takes the
+    ## bus (VDMA_BUS_RESIDUE), as `byte + 1`, 0 = undriven: a running OAM DMA's
+    ## byte when its source is on that bus (the CPU's own access there loses to
+    ## it), else the CPU's opcode fetch when `fetch_addr` is on it (-1 = the
+    ## last M-cycle was not a fetch).
+    let mem = gb.memory
+    if mem.dma_busy and mem.dma_bus == uint8(dbExternal):
+      int16(mem.dma_latch) + 1
+    elif fetch_addr >= 0 and (fetch_addr < 0x8000 or fetch_addr in 0xA000 .. 0xBFFF):
+      int16(opcode) + 1
+    else: 0'i16
+
+  proc vdma_hand_over_residue(gb: GB; pc: uint16; opcode: uint8;
+                              point: int): int16 =
+    ## VDMA_BUS_RESIDUE's byte at hand-over point 1 (the fetch just made) or 2
+    ## (after a one-M-cycle instruction the M-cycle before the boundary was
+    ## its opcode fetch; after any other the last M-cycle's bus is not
+    ## tracked and counts as undriven).
+    let fa = if point == 1: int(pc)
+             elif opcode in VDMA_ONE_MCYCLE_OPS: int(pc) - 1
+             else: -1
+    vdma_bus_residue(gb, fa, opcode)
+
+  proc hdma_grant(gb: GB; slack: int32; pc = 0'u16; opcode = 0'u8;
+                  point = 0) {.noinline.} =
     ## An owed HBlank block taking the bus at one of the CPU's three hand-over
-    ## points: the end of an opcode fetch, an instruction boundary, or a HALT.
-    ## `slack` is the dots of allowance the point gets over the request dot.
+    ## points: the end of an opcode fetch (`point` 1, `pc` = that opcode's
+    ## address), an instruction boundary (2, `pc` past the instruction), or a
+    ## HALT (0). `slack` is the dots of allowance the point gets over the
+    ## request dot.
     let ppu = gb.ppu
     # A request an FF55 write raised in mode 0 stands after mode 0 ends
     # (HDMA_START_GRANT_FETCH).
     let start_req = gb.hdma_start_req
-    if ppu.hdma_active and ((ppu.lcd_status and 3'u8) == 0'u8 or start_req):
+    let hblank = ppu_hdma_hblank_level(ppu)
+    if ppu.hdma_active and (hblank or start_req):
       # `high(int32)` = owed to a halted CPU, waiting for its wake. Reaching a
       # fetch or boundary means the CPU is running and that wake has passed
       # (armed by the dispatch's own dots), so the debt is owed now
@@ -92,12 +135,27 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
       when defined(gb_dma_trace):
         echo "GRANT? dot=", ppu.cycle_counter, " slack=", slack, " dl=", ppu.hdma_due_deadline
       if ppu.cycle_counter + slack >= ppu.hdma_due_deadline or
-         (start_req and (ppu.lcd_status and 3'u8) != 0'u8):
+         (start_req and not hblank):
         gb.hdma_start_req = false
+        when VDMA_BUS_RESIDUE != 0:
+          if point != 0: gb.vdma_residue = vdma_hand_over_residue(gb, pc, opcode, point)
+        when HDMA_BOUNDARY_ACQUIRE != 0: gb.hdma_boundary_grant = point == 2
         ppu_step_hdma(ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
+        when HDMA_BOUNDARY_ACQUIRE != 0: gb.hdma_boundary_grant = false
+        when VDMA_BUS_RESIDUE != 0: gb.vdma_residue = 0
     else:
       gb.hdma_start_req = false
       ppu.hdma_block_due = false
+
+  proc gdma_hand_over(gb: GB; pc: uint16; opcode: uint8) {.noinline.} =
+    ## The owed general-purpose burst at the end of an opcode fetch
+    ## (GDMA_AFTER_FETCH), with VDMA_BUS_RESIDUE's byte from that fetch.
+    gb.gdma_owed = false
+    gb.ppu.hdma_block_due = false
+    when VDMA_BUS_RESIDUE != 0:
+      gb.vdma_residue = vdma_hand_over_residue(gb, pc, opcode, 1)
+    ppu_run_gdma(gb.ppu, gb)
+    when VDMA_BUS_RESIDUE != 0: gb.vdma_residue = 0
 
 const HALT_IME_PENDING_REDO* {.intdefine.} = 1
   ## A HALT that finds IME on and IF & IE != 0 does not halt: the opcode after
@@ -569,12 +627,9 @@ template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
     # HDMA_GRANT_FETCH_DOTS in gb.nim).
     if unlikely(gb.ppu.hdma_block_due):
       when GDMA_AFTER_FETCH != 0:
-        if gb.gdma_owed:
-          gb.gdma_owed = false
-          gb.ppu.hdma_block_due = false
-          ppu_run_gdma(gb.ppu, gb)
-        else: hdma_grant(gb, 0)
-      else: hdma_grant(gb, 0)
+        if gb.gdma_owed: gdma_hand_over(gb, cpu.pc, opcode)
+        else: hdma_grant(gb, 0, cpu.pc, opcode, 1)
+      else: hdma_grant(gb, 0, cpu.pc, opcode, 1)
   when STAT_M0_TAIL_MAX_MC != 0:
     # So stat_read_mode can tell a read on its instruction's second M-cycle
     # from one on its third.
@@ -590,7 +645,8 @@ template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
     if unlikely(gb.ppu.hdma_block_due) and
        (HDMA_HALT_DEFERS_DUE == 0 or not cpu.halted) and
        (GDMA_AFTER_FETCH == 0 or not gb.gdma_owed):
-      hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS - HDMA_GRANT_BOUNDARY_DOTS))
+      hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS - HDMA_GRANT_BOUNDARY_DOTS),
+                 cpu.pc, opcode, 2)
   when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS < 0 and
        HDMA_GRANT_FETCH_DOTS < 0:
     # A block due on a mode-0 edge takes the bus at this boundary after
