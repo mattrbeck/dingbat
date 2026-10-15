@@ -224,6 +224,9 @@ proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
     # the stale target and loses a SameSuite row.
     let apu_before = (t.tdiv shr apu_div_bit(gb)) and 1
     let old_tdiv = t.tdiv
+    # A deferred step 7 is dated from the divider about to reset: land it
+    # now, at most ENV_CLOCK_DS_LATE_T early.
+    if gb.apu.env_late_pending: apu_env_late_run(gb.apu)
     t.tdiv = 0
     if apu_before == 1: tick_frame_sequencer(gb.apu, gb)
     gb.scheduler.clear(etAPUFrameSeq)

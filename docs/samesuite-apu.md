@@ -70,7 +70,7 @@ every test here.
 | `channel_1_freq_change` | a frequency change takes effect after the current sample | `next_step` is absolute. Exception: a write on the reload cycle (below) |
 | `channel_1_stop_restart` | stopping keeps the phase; only NR52 off resets it | `ch1_catchup_at` parks `next_step` while disabled |
 | `channel_1_volume_div` | envelope ticks after 8 × (NR12 & 7) DIV-APU ticks | matches |
-| `channel_1_nrx2_speed_change` | envelope speed changes apply after the next tick; enabling the envelope triggers an extra envelope tick on the next **even** DIV-APU tick | `env_extra_tick`. Hardware's "even" is dingbat's odd `frame_sequencer_stage` (the counter increments before the step); the other parity passes tests 3/4/5 and fails 6/7 |
+| `channel_1_nrx2_speed_change` | envelope speed changes apply after the next tick; enabling the envelope triggers an extra envelope tick on the next **even** DIV-APU tick | `env_extra_tick`. "Even" is this test's alignment: the tick lands on the first DIV-APU step after the tap bit next rises (tests 6 and 7 write 5 M-cycles after a rise and after a fall, and both tick on the second step); DocBoy's `ch1_change_volume_sweep_pace_*` rows and SameBoy probes move it with the rise (`psg_write_nrx2`, docs/gb-failure-triage.md I8) |
 | `channel_1_nrx2_glitch`, `channel_1_volume`, `channel_1_restart_nrx2_glitch` | the NRx2 write ("zombie mode") glitch | one three-column table keyed on the value written, at `write_NRx2`; the table and its derivation are in `docs/gb-hardware-revisions.md` §4 |
 | `channel_1_stop_div` | like channel 3 with a smaller length range | follows from the DIV-APU work |
 | `channel_1_sweep`, `_sweep_restart`, `_sweep_restart_2` | sweep overflow timing, restarts during sweep | below |
@@ -118,7 +118,7 @@ it sits one M-cycle early. `sq_reload_is_now` is the discriminator.
 | `channel_3_delay` | (wavelength/32) + 3 ticks from enable until PCM34 changes | the `+6` T-cycles at trigger |
 | `channel_3_first_sample` | skips the first wave sample; a one-tick delay plus one "phantom" sample | trigger sets `wave_ram_position = 0`; the first step advances to 1 (low nibble of byte 0) |
 | `channel_3_restart_delay` | a mid-sample restart uses the same delay; the previous sample keeps playing through the phantom | a plain trigger does NOT clear the sample buffer |
-| `channel_3_restart_stop_delay` | stop then start behaves like a fresh start | with the row above: turning the DAC off (NR30) is what clears the sample buffer |
+| `channel_3_restart_stop_delay` | stop then start behaves like a fresh start | its first trigger runs with NR30 = $00 (its fill loop's last value), so the channel never reads a sample and the buffer is still the power-on 0. The DAC does not clear it (DocBoy `ch3_disable_channel_while_sampling_*`, I8) |
 | `channel_3_freq_change_delay` | a wavelength change applies to the next sample | matches |
 | `channel_3_shift_delay`, `_shift_skip_delay` | the shift applies at once (≤ 2 ticks) and cannot shorten the delay | shift applied at read time |
 | `channel_3_stop_delay` | NR30 stop affects PCM34 instantly | matches |

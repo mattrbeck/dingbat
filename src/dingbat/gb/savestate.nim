@@ -584,15 +584,15 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
   block:
     let ch = apu.channel1
     w.write_u8(ch.sample_bit)
-    w.write_bool(ch.env_extra_tick)
+    w.write_u8(ch.env_extra_tick)
     w.write_deadline(ch.sweep_check_at, now)
     w.write_deadline(ch.sweep_stop_at, now)
     w.write_deadline(ch.sweep_load_at, now)
     w.write_u16(ch.sweep_load_value)
   w.write_u8(apu.channel2.sample_bit)
-  w.write_bool(apu.channel2.env_extra_tick)
+  w.write_u8(apu.channel2.env_extra_tick)
   w.write_bool(apu.channel3.wave_fetched)
-  w.write_bool(apu.channel4.env_extra_tick)
+  w.write_u8(apu.channel4.env_extra_tick)
   # Channel 4's divisor stage: a free-running counter NR43's clock shift picks
   # a bit of, so the LFSR deadline alone cannot rebuild it (a later NR43 write
   # that moves the shift reads bits the deadline says nothing about).
@@ -601,6 +601,9 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
   # rev 7: the first KEY1 switch after a power-on re-phases the APU clock
   # (APU_SPSW_REPHASE_*); pending from the power-on until that switch.
   w.write_bool(apu.spsw_rephase_pending)
+  # rev 8: a double-speed step 7 whose envelope work is still to come
+  # (GbQuirks.env_clock_ds_late); its time is the divider's last tap edge.
+  w.write_bool(apu.env_late_pending)
 
 proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_APU)
@@ -673,31 +676,41 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     block:
       let ch = apu.channel1
       ch.sample_bit = r.read_u8() and 1
-      ch.env_extra_tick = r.read_bool()
+      ch.env_extra_tick = min(r.read_u8(), 2'u8)
       ch.sweep_check_at = r.read_deadline(now, "ch1.sweep_check_at")
       ch.sweep_stop_at  = r.read_deadline(now, "ch1.sweep_stop_at")
       ch.sweep_load_at  = r.read_deadline(now, "ch1.sweep_load_at")
       ch.sweep_load_value = r.read_u16()
     apu.channel2.sample_bit = r.read_u8() and 1
-    apu.channel2.env_extra_tick = r.read_bool()
+    apu.channel2.env_extra_tick = min(r.read_u8(), 2'u8)
     apu.channel3.wave_fetched = r.read_bool()
-    apu.channel4.env_extra_tick = r.read_bool()
+    apu.channel4.env_extra_tick = min(r.read_u8(), 2'u8)
     apu.channel4.div_counter = r.read_u16()
     apu.channel4.div_next = r.read_deadline(now, "ch4.div_next")
     # Before rev 7 nothing re-phased at a switch; such a state resumes with
     # none pending, whatever the running machine held.
     apu.spsw_rephase_pending = if rev >= 7: r.read_bool() else: false
+    apu.env_late_pending = if rev >= 8: r.read_bool() else: false
+    if rev < 8:
+      # Rev 6/7 wrote the envelope-enable glitch as a bool meaning "at the
+      # next odd stage"; rev 8 counts steps (psg_write_nrx2). The same step:
+      # the next one if the stage it will run is odd, else the one after.
+      let odd_next = (apu.frame_sequencer_stage and 1) == 1
+      for ch in [GbVolumeEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
+        if ch.env_extra_tick != 0:
+          ch.env_extra_tick = (if odd_next: 1'u8 else: 2'u8)
   else:
     # Before rev 6: the grids' phases and the KEY1 lag stayed whatever the
     # running machine had, as those builds did; the rest is live for a few
     # M-cycles at most and those builds dropped it, which is idle.
     apu.div_skip = false
     for ch in [GbVolumeEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
-      ch.env_extra_tick = false
+      ch.env_extra_tick = 0
     apu.channel1.sweep_check_at = GB_NO_STEP
     apu.channel1.sweep_stop_at  = GB_NO_STEP
     apu.channel1.sweep_load_at  = GB_NO_STEP
     apu.spsw_rephase_pending = false
+    apu.env_late_pending = false
   # Restart audio pacing cleanly (see GBA load_apu_state)
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):

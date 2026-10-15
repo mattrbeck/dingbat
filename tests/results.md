@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 17:44:34 · commit d62c585c · game-boy-test-roms v7.0*
+*Generated: 2026-10-14 21:17:24 · commit 1322059e · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1587
-- **Pass:** 1539
-- **Fail:** 48
+- **Pass:** 1542
+- **Fail:** 45
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -17,7 +17,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
-| [Game Boy - DocBoy](results_docboy.md) | 29 | 70 | 👀 |
+| [Game Boy - DocBoy](results_docboy.md) | 32 | 70 | 👀 |
 | [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
@@ -40,7 +40,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
-## Game Boy - DocBoy (29/70)
+## Game Boy - DocBoy (32/70)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -59,7 +59,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/dmg/dma | DMG dmgABC | 👀 59/68 passed |
 | docboy/dmg/serial | DMG dmgABC | 👀 74/77 passed |
 | docboy/dmg/joypad | DMG dmgABC | 👀 32/34 passed |
-| docboy/dmg/apu | DMG dmgABC | 👀 236/307 passed |
+| docboy/dmg/apu | DMG dmgABC | 👀 238/307 passed |
 | docboy/cgb/boot | CGB cgbE | 👀 30/69 passed |
 | docboy/cgb/banks | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb/memory | CGB cgbE | 👀 18/33 passed |
@@ -75,13 +75,13 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/undocumented | CGB cgbE | 👌 4/4 passed |
 | docboy/cgb/ppu | CGB cgbE | 👀 379/427 passed |
 | docboy/cgb/mbc/mbc7 | CGB cgbE | 👌 17/17 passed |
-| docboy/cgb/apu/ch1 | CGB cgbE | 👀 1009/1134 passed |
+| docboy/cgb/apu/ch1 | CGB cgbE | 👀 1048/1134 passed |
 | docboy/cgb/apu/ch2 | CGB cgbE | 👌 26/26 passed |
-| docboy/cgb/apu/ch3 | CGB cgbE | 👀 79/109 passed |
+| docboy/cgb/apu/ch3 | CGB cgbE | 👌 109/109 passed |
 | docboy/cgb/apu/ch4 | CGB cgbE | 👀 66/69 passed |
 | docboy/cgb/double_speed/apu/ch1 | CGB cgbE | 👀 374/613 passed |
-| docboy/cgb/double_speed/apu/ch2 | CGB cgbE | 👀 52/63 passed |
-| docboy/cgb/double_speed/apu/ch3 | CGB cgbE | 👀 152/169 passed |
+| docboy/cgb/double_speed/apu/ch2 | CGB cgbE | 👌 63/63 passed |
+| docboy/cgb/double_speed/apu/ch3 | CGB cgbE | 👌 169/169 passed |
 | docboy/cgb/double_speed/apu/ch4 | CGB cgbE | 👀 1249/1925 passed |
 | docboy/cgb/double_speed/core | CGB cgbE | 👌 8/8 passed |
 | docboy/cgb/double_speed/dma | CGB cgbE | 👌 14/14 passed |

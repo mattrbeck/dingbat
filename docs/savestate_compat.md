@@ -101,6 +101,7 @@ The reader migrates older revisions instead of refusing:
 | GB 5→6 | below | the batched carry |
 | GBA 8→9 | no `GBA_SEC_INFLIGHT` section: `irq_line` recomputed (low with a check pending), fetch page dropped, as rev 8 did; memory control and POSTFLG keep the running game's value, as rev 8 did; every other field a new machine's value (sync bits 0-2 clear, stamps 0, no synchroniser raise or stall, capture latch clear, `tm_pre = tm`, PSG `arm_delay` = the current period) | rev 8 dropped these or kept whatever the machine held before the load; the fresh values are what it did when loading into a just-booted game, and they make the load independent of what ran before it |
 | GB 6→7 | `apu.spsw_rephase_pending=false` (one trailing byte in the APU section) | rev ≤ 6 had no KEY1 re-phase (`APU_SPSW_REPHASE_*`); none pending is what such a build did, whatever the running machine held |
+| GB 7→8 | `apu.env_late_pending=false` (one trailing byte in the APU section); `env_extra_tick` 1 → 1 or 2 by the next stage's parity | rev ≤ 7 had no deferred envelope step; the glitch's "next odd stage" named as a step count |
 
 **GB rev 6, the batched carry.** Every field the GB core had been holding
 back for one revision, plus what the state soak (`tests/state_soak_test.nim`)
@@ -116,6 +117,18 @@ live values across one field at a time until nothing diverged):
 | MEM | `$FEA0-$FEFF`, RP, SVBK readback | the running machine's, as before (SVBK readback from the bank) |
 | PPU | `lcd_on_first_frame`, the pending STAT drop (`pending`, `level`, `dot`), FIFO `win_carry`/`win_carry_gap`, the OAM comparator's Y/X latches, the tile-data address latch | LCD-on flag clear, no pending drop, no carry, latches as an undisturbed scan of the loaded OAM leaves them, address latch empty |
 | APU | `tick_phase`, `noise_phase`, `div_skip`, `spsw_fs_lag`, CH1/CH2 `sample_bit` and `env_extra_tick`, CH1's sweep deadlines and `sweep_load_value`, CH3 `wave_fetched`, CH4 `env_extra_tick`, `div_counter`, `div_next` | the running machine's phases, lag and latches (as before); no extra envelope tick or sweep deadline in flight; CH4's divisor stage rebuilt from its LFSR deadline (`ch4_resync_divisor`) |
+
+**GB rev 8** (2026-10-14) appends `env_late_pending` to the APU section (a
+double-speed step 7 whose envelope clock is still to come on CGB E,
+`GbQuirks.env_clock_ds_late`; an older state has none) and turns
+`env_extra_tick`'s byte (CH1, CH2, CH4) from a bool, "at the next odd stage",
+into the number of DIV-APU steps until the envelope-enable glitch lands; the
+loader converts an old `1` into the count that names the same step. One
+change needs no field: a period-0 envelope's timer now counts from 8 instead
+of resting at 0 (`psg_trigger_envelope`). An older state's 0 runs out at the
+next clock, reloads 8 and counts on, so a period written later steps up to
+seven envelope clocks earlier than the machine that wrote the state would
+have; the old build had no count to carry.
 
 Deadlines (the sweep's, CH4's divisor) are written as a signed distance from
 the payload's own `scheduler.cycles` with a pending flag, because

@@ -86,7 +86,8 @@ when not defined(test_harness) and not defined(emscripten):
 # rebase, and save states (savestate.nim converts next_step to and from an
 # etAPUChannel* event). The frequency timer is clocked only while the channel
 # is on: switching it off freezes the phase and only an APU power-off resets it
-# (SameSuite channel_1_stop_restart), so both park next_step at GB_NO_STEP.
+# (SameSuite channel_1_stop_restart), so the squares and the wave channel park
+# next_step at GB_NO_STEP (ch3_catchup_at).
 
 proc apu_catchup_reg(h: GB; nr: int) {.inline.} =
   ## Catch up the channel register `nr` belongs to before it is written.
@@ -97,6 +98,35 @@ proc apu_catchup_reg(h: GB; nr: int) {.inline.} =
   of NR30 .. NR34: ch3_catchup(apu.channel3, h)
   of NR41 .. NR44: ch4_catchup(apu.channel4, h)
   else: discard
+
+const ENV_CLOCK_DS_LATE_T* {.intdefine.} = 2
+  ## T-cycles from the divider's double-speed tap edge to the envelope clock
+  ## of the step it makes, on CGB E (GbQuirks.env_clock_ds_late): one APU
+  ## 2 MHz cycle. DocBoy's `double_speed_apu_ch2_volume_sweep*` pairs read
+  ## the old volume on the step's M-cycle and the new one an M-cycle (2 T)
+  ## later, so 1 and 2 pass, 0 loses `_round1` and 3 loses `_round2`. Not on
+  ## top of the KEY1 tap lag, which already moves the whole step the same
+  ## 2 T: DocBoy's `speed_switch_to_double_apu_ch2_volume_sweep_*` pairs (one
+  ## switch into double speed, the lag on) step between their two reads
+  ## with the lag alone.
+static:
+  doAssert APU_SPSW_TAP_LAG_T == 0 or APU_SPSW_TAP_LAG_T == ENV_CLOCK_DS_LATE_T shl 1,
+    "psg_env_late takes the KEY1 tap lag for the envelope's own 2 T"
+
+proc apu_env_late_run*(apu: GbApu) =
+  ## The envelope work of a deferred step 7 (psg_seq_step), now.
+  apu.env_late_pending = false
+  psg_env_step7(apu)
+
+proc apu_env_late_due*(apu: GbApu; gb: GB) {.inline.} =
+  ## Run a deferred step 7 once ENV_CLOCK_DS_LATE_T has passed since the
+  ## divider's tap edge that made it (a deferred step only exists with no
+  ## KEY1 tap lag, so the step is that edge); every reader of a channel's
+  ## volume (and every APU register write) calls this first.
+  if apu.env_late_pending:
+    let since = int(gb.timer.tdiv) and (apu_div_period(gb) - 1)
+    if since >= (ENV_CLOCK_DS_LATE_T shl int(gb.scheduler.speed)):
+      apu_env_late_run(apu)
 
 proc apu_catchup_all*(apu: GbApu; gb: GB) {.inline.} =
   ## Materialize all four channels at the current cycle.
@@ -162,8 +192,18 @@ const APU_SPSW_REPHASE_GRID_T* {.intdefine.} = 1
   ## loses the five `_ds_2` rows. A trigger after a power-on with no switch
   ## since sees no re-phase: SameSuite channel_1_freq_change_timing-cgb0BC
   ## and the no-switch sound/ rows. Measured on channel 1; channel 2 is the
-  ## same hardware (assumed), channels 3 and 4 are untested and left alone.
-  ## docs/gb-failure-triage.md H2. 0 / 0 disables.
+  ## same hardware (assumed); channel 3 below; channel 4 is untested and left
+  ## alone. docs/gb-failure-triage.md H2. 0 / 0 disables.
+const APU_SPSW_REPHASE_LEAD3_T* {.intdefine.} = 1
+  ## The same one-off for the wave channel, whose sample timer steps on the
+  ## 2 MHz grid: onto that grid's previous edge once it is GRID_T later, i.e.
+  ## 2 - APU_SPSW_REPHASE_GRID_T T-cycles earlier (the squares' LEAD_T is the
+  ## 1 MHz grid's 4 - GRID_T). DocBoy cgb/double_speed/apu/ch3 speed_switch_
+  ## to_single_apu_ch3_period_1 (period 1, a power-on, then the first switch:
+  ## the sample after the stall is one later than without it): over the 171
+  ## double-speed CH3 rows 0 loses that row, 3 loses the three `_b` rows (the
+  ## same switch one double-speed M-cycle later), 2 also passes; SameBoy, CGB
+  ## C and E, passes all four.
 
 proc apu_stall_extra*(apu: GbApu; gb: GB; dots: int) =
   ## Advance every channel deadline by `dots` T-cycles of real time: the
@@ -196,9 +236,13 @@ proc apu_spsw_rephase*(apu: GbApu; gb: GB) =
   apu.spsw_rephase_pending = false
   apu_catchup_all(apu, gb)
   let sh = gb.scheduler.speed
-  let lead = CycleCount(APU_SPSW_REPHASE_LEAD_T) shl sh
+  let lead = CycleCount(if gb.quirks.spsw_apu_rephase_2mhz: APU_SPSW_REPHASE_LEAD3_T
+                        else: APU_SPSW_REPHASE_LEAD_T) shl sh
   for ch in [apu.channel1, apu.channel2]:
     if ch.next_step != GB_NO_STEP and ch.next_step >= lead: ch.next_step -= lead
+  let lead3 = CycleCount(APU_SPSW_REPHASE_LEAD3_T) shl sh
+  let c3 = apu.channel3
+  if c3.next_step != GB_NO_STEP and c3.next_step >= lead3: c3.next_step -= lead3
   let g = CycleCount(APU_SPSW_REPHASE_GRID_T) shl sh
   let tick = gb_apu_tick(gb)
   apu.tick_phase = (apu.tick_phase + (g mod tick)) mod tick
@@ -208,6 +252,9 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ## CGB speed switch: remaining delays are in CPU cycles, so entering double
   ## speed doubles them and leaving halves them (as Scheduler.set_speed).
   apu_catchup_all(apu, gb)
+  # A deferred step 7 lands before the switch (at most ENV_CLOCK_DS_LATE_T
+  # early); its timing is tied to the old speed's divider tap.
+  if apu.env_late_pending: apu_env_late_run(apu)
   var now = gb.scheduler.cycles
   var base_new = now
   when APU_CLOCK_CARRY != 0:
@@ -273,6 +320,7 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   # length_step clears `enabled` and sweep_step rewrites ch1.frequency, so
   # every channel must be current first.
   const OBS = uint32(GB_FRAME_SEQ_PERIOD)
+  if apu.env_late_pending: apu_env_late_run(apu)
   ch1_catchup_at(apu.channel1, gb, OBS)
   ch2_catchup_at(apu.channel2, gb, OBS)
   ch3_catchup_at(apu.channel3, gb, OBS)
@@ -337,6 +385,7 @@ when not defined(test_harness) and not defined(emscripten):
       apu.buffer_pos = 0
 
 proc get_sample*(apu: GbApu; gb: GB) =
+  apu_env_late_due(apu, gb)
   if apu.silent and apu.probe_period == 0:
     # Nobody hears it: skip the catch-up and the mix (unobservable; see the
     # GBA get_sample). The mixer probe always mixes. Channel 1's catch-up
@@ -498,6 +547,7 @@ proc apu_drop_spsw_lag(apu: GbApu; gb: GB) =
       gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
 
 proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
+  apu_env_late_due(apu, gb)
   if not apu.sound_enabled and idx != 0xFF26 and not (idx in 0xFF30..0xFF3F):
     # Pan Docs, Power Control: writes are ignored while the APU is off, except
     # that on DMG the length counters can still be written. Only the length
@@ -559,7 +609,9 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       # ...and stops the frequency timers (an armed deadline would drift the
       # cleared position again).
       apu.channel1.next_step = GB_NO_STEP
-      # Anything in flight inside the sweep unit dies with the power.
+      # Anything in flight inside the sweep unit dies with the power, and so
+      # does a deferred envelope step (env_late_pending).
+      apu.env_late_pending = false
       apu.channel1.sweep_check_at = GB_NO_STEP
       apu.channel1.sweep_stop_at  = GB_NO_STEP
       apu.channel1.sweep_load_at  = GB_NO_STEP
@@ -574,6 +626,7 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       when APU_DS_TRIGGER_SNAP != 0: gb.apu_power_on_at = int64(gb.scheduler.cycles)
       when APU_CLOCK_CARRY != 0: apu_sh_power_on(gb)
       apu.spsw_rephase_pending = true
+      apu.env_late_pending = false
       apu.sound_enabled = true
       apu.frame_sequencer_stage = 0
       apu_drop_spsw_lag(apu, gb)

@@ -1043,9 +1043,9 @@ proc save_psg_state(gba: GBA; w: var Writer) =
   w.write_deadline(apu.power_on_at, now)
   w.write_u8(ch1.sample_bit)
   w.write_u8(apu.channel2.sample_bit)
-  w.write_bool(ch1.env_extra_tick)
-  w.write_bool(apu.channel2.env_extra_tick)
-  w.write_bool(apu.channel4.env_extra_tick)
+  w.write_bool(ch1.env_extra_tick != 0)
+  w.write_bool(apu.channel2.env_extra_tick != 0)
+  w.write_bool(apu.channel4.env_extra_tick != 0)
   w.write_u16(apu.channel4.div_counter)
   w.write_deadline(apu.channel4.div_next, now)
   w.write_u8(apu.channel3.wave_play_bank)
@@ -1063,9 +1063,9 @@ proc load_psg_state(gba: GBA; r: var Reader) =
   apu.power_on_at = r.read_deadline(now, "apu.power_on_at")
   ch1.sample_bit = r.read_u8() and 1
   apu.channel2.sample_bit = r.read_u8() and 1
-  ch1.env_extra_tick = r.read_bool()
-  apu.channel2.env_extra_tick = r.read_bool()
-  apu.channel4.env_extra_tick = r.read_bool()
+  ch1.env_extra_tick = uint8(r.read_bool())
+  apu.channel2.env_extra_tick = uint8(r.read_bool())
+  apu.channel4.env_extra_tick = uint8(r.read_bool())
   apu.channel4.div_counter = r.read_u16()
   apu.channel4.div_next = r.read_deadline(now, "ch4.div_next")
   apu.channel3.wave_play_bank = r.read_u8() and 1
@@ -1084,7 +1084,7 @@ proc default_psg_state(gba: GBA) =
     ch.sample_bit = PSG_DUTY[ch.duty and 3][ch.wave_duty_position and 7]
     ch.last_step_at = GBA_NO_STEP
   for ch in [PsgEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
-    ch.env_extra_tick = false
+    ch.env_extra_tick = 0
   ch4_resync_divisor(apu.channel4)
   # The wave channel held the fetched nibble; it holds the byte now. The
   # byte under the pointer is the one it fetched (wave RAM only changes

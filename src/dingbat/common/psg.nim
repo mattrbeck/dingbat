@@ -71,11 +71,14 @@ type
     volume_envelope_timer*:  uint8
     current_volume*:         uint8
     vol_env_is_updating*:    bool
-    # GB: an NRx2 write taking the envelope period from zero to non-zero makes
-    # the next EVEN DIV-APU tick clock that channel's envelope (SameSuite
-    # channel_1_nrx2_speed_change); see write_nrx2 and psg_seq_step.
-    # Serialized from GB payload rev 6: a 512 Hz step can span a frame edge.
-    env_extra_tick*:         bool
+    # An NRx2 write taking the envelope period from zero to non-zero makes a
+    # later DIV-APU step tick that channel's envelope once more (SameSuite
+    # channel_1_nrx2_speed_change): the number of steps until it lands, 0 for
+    # none. The GBA arms 1 and fires at the next odd stage; the GB arms 1 or 2
+    # by the tap bit's level (psg_write_nrx2). Serialized from GB payload
+    # rev 6 (a bool meaning "the next odd stage" until rev 8, which counts)
+    # and GBA rev 10 (as a bool): a 512 Hz step can span a frame edge.
+    env_extra_tick*:         uint8
 
   PsgSquare* = ref object of PsgEnvChannel
     ## Channel 2, and channel 1 without its sweep unit.

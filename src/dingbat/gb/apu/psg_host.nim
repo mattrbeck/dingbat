@@ -13,6 +13,17 @@ template psg_cgb(h: GB): bool = h.cgb_enabled
 template psg_q_length_any(h: GB): bool = h.quirks.length_clock_any_nrx4
 template psg_q_length_defer(h: GB): bool = h.revision == grCgbAB
 template psg_q_backstep(h: GB): bool = h.quirks.square_freq_backstep_halftick
+template psg_env_late(h: GB): bool =
+  ## Step 7's envelope work waits for ENV_CLOCK_DS_LATE_T past the divider's
+  ## tap edge (GbQuirks.env_clock_ds_late, apu.nim), unless the KEY1 tap lag
+  ## already put the step that far behind it (GbApu.spsw_fs_lag: the same 2 T
+  ## at double speed, asserted in apu.nim).
+  h.quirks.env_clock_ds_late and h.scheduler.speed == 1 and not h.apu.spsw_fs_lag
+template psg_cpu_bus_addr(h: GB): int =
+  ## The address the CPU drives in the M-cycle after a register write: the
+  ## next opcode fetch, PC (every store to an I/O register ends its
+  ## instruction). Wave RAM sees it when CH3 lets go of the port (ch3_write).
+  int(h.cpu.pc)
 
 const GB_NO_STEP* = PSG_NO_STEP
 const GB_OBS_CPU* = PSG_OBS_CPU

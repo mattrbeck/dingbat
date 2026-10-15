@@ -1007,8 +1007,11 @@ compared against the new speed's cycles in the old speed's units, which only
 sweeping a one-off shift showed that every ladder row whose channel runs
 across a switch (one switch or five, up-first or down-first, triggered before
 the first switch or after a power-on that followed one) wants the same 3 T
-on top, once, and the grid-only row (`nr4init`: power-on, switch, then the
-first trigger) wants the grid 1..2 T later. The non-additive sums the
+on top, once (CPU CGB C, the ladder's machine; 2026-10-14: CGB E puts the
+step on the 2 MHz grid's previous edge instead, 1 T, as the wave channel
+does on every revision: `GbQuirks.spsw_apu_rephase_2mhz`,
+`APU_SPSW_REPHASE_LEAD3_T`, from DocBoy's CGB-E speed-switch rows, I8),
+and the grid-only row (`nr4init`: power-on, switch, then the first trigger) wants the grid 1..2 T later. The non-additive sums the
 2026-09-22 pass measured (two switches 14..16, three 24, four 22..26, five
 ~32 against 10 / 7) are 8 / 3 per switch plus that one-off, read through the
 shipping model's re-anchored grid. A trigger after a power-on with no switch
@@ -1112,11 +1115,63 @@ question. Families, largest first:
   non-input `double_speed/interactive/*stop_key*` rows (30): when a STAT,
   VBlank or serial interrupt lands around the KEY1 switch's stall. SameBoy
   passes 6 of 6 interrupts and 5 of 6 STOP rows. Probably dingbat (E).
-* **I8. Other APU (146).** CH1/CH2 envelope pace changes
-  (`change_volume_sweep_pace_*`, `volume_sweep_*`, 50), CH3 disable while
-  sampling (39), double-speed CH4 shift/divider changes (33), double-speed
-  CH3 retrigger and length rows. SameBoy passes
-  every sampled one. Probably dingbat.
+* **I8. Other APU (146; 99 closed 2026-10-14).** Each closed against the test
+  source, with SameBoy (black box, CGB E) as the second witness and probe
+  ROMs run on both where the rows left a rule open:
+  * CH3 stopped by NR30 in the half-cycle before a sample read
+    (`cgb/apu/ch3/ch3_disable_channel_while_sampling_*`, 30, and the 9
+    double-speed `_period_4_round*`). The read is not cancelled, but the
+    channel has let go of wave RAM's address, so the byte latched is the one
+    at the low nibble of the CPU's next opcode fetch: the `_phaseN` rows (one
+    `nop` more before the APU setup) and the `_round0b..g` rows (one more
+    before the stop) move the byte read one per byte of code, and
+    `round0a` changes only the wave byte that address names. Two more rules
+    the family pins: a stopped CH3 reads no samples (its timer freezes, as on
+    the pulse channels), and the DAC does not clear the sample buffer (Pan
+    Docs, NR34: only an APU power-off does). The old clear came from SameSuite
+    `channel_3_restart_stop_delay`, whose first trigger runs with NR30 = $00
+    left by its fill loop, so its channel never read a sample.
+    `ch3_write` NR30, `ch3_catchup_at`.
+  * The CGB restart of a running CH3 in that same half-cycle
+    (`double_speed_apu_ch3_retrigger_period_{4,6}_*`, 7): the read in flight
+    latches byte 0 (the pointer it now holds), the CGB's version of the DMG's
+    restart corruption. `ch3_write` NR34.
+  * The envelope with a period of 0 (`cgb/apu/ch1/ch1_change_volume_sweep_
+    pace_*`, 39). The timer counts a period of 0 as 8 (Pan Docs, "Audio
+    Details") instead of standing still, so `$A8` triggered and `$A9..$AF`
+    written later steps on the trigger's eighth envelope clock; and the
+    enable glitch (SameSuite `nrx2_speed_change`) lands on the first step
+    after the DIV-APU tap bit next rises (next step if the bit is low at the
+    write, else the one after), acts only on a timer that has not counted
+    since a period-0 load, and then stands in for its expiry (step, reload,
+    one more if step 7 is next). Thirteen probe ROMs (writes before and after
+    the first clock, either side of a tap rise, decreasing, at the volume
+    limit, enable/disable/enable) read the same on SameBoy and dingbat.
+    `psg_volume_step`, `psg_write_nrx2`, `psg_seq_step` (GB only; the GBA
+    keeps its model).
+  * `dmg/apu/ch1_length_timer_delay{0,1024}` (2): the boot hand-off's
+    length gate now follows `BOOT_FS_STAGE_DMG` (`skip_boot`), so a length
+    enable before the stage-1 step gets the extra clock.
+  * The CGB E's double-speed envelope clock (`double_speed_apu_ch2_volume_
+    sweep{,_b,_c}_round1`, 3): it lands 2 T after the divider's tap edge,
+    so PCM12 on the step's M-cycle still reads the old volume, while a
+    length clock lands on the edge. Probe ROMs: SameBoy CGB E shows the
+    same with the DIV reset moved against the power-on and a length expiry
+    on another step on time; SameBoy CGB C shows the step at once. Not on
+    top of the KEY1 tap lag, which already makes the step that late.
+    `GbQuirks.env_clock_ds_late`, `ENV_CLOCK_DS_LATE_T`, `apu_env_late_due`
+    (GB payload rev 8 carries the pending step).
+  * The KEY1 re-phase at the 2 MHz grid: `speed_switch_to_single_apu_ch3_
+    period_1` (1; the wave channel lands on the re-phased 2 MHz grid's
+    previous edge, `APU_SPSW_REPHASE_LEAD3_T`, all revisions) and
+    `speed_switch_to_double_apu_ch2_volume_sweep_*_round2` (8; on CGB E the
+    squares do too, `GbQuirks.spsw_apu_rephase_2mhz`, where dingbat read a
+    zero duty sample one M-cycle early; SameBoy CGB E's duty window in a
+    probe of the same code agrees, and CGB C keeps gambatte's 3 T, H2).
+    SameBoy CGB E itself fails four of the `_round1` partners, which DocBoy
+    and dingbat agree on.
+
+  Left in I8: the 33 double-speed CH4 shift/divider rows (I1's owner).
 * **I9. Boot hand-off state (46).** `cgb/boot/boot_div_title_*` (38): DIV at
   `$0100` depends on the path the CGB boot ROM took through the header
   (licensee, title checksum); dingbat hands off one DIV. Plus

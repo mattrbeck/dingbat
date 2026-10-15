@@ -22,7 +22,8 @@
 #   psg_fs_next_edge_in(h), psg_fs_next_stage(h)
 #                             scheduler cycles to the frame sequencer's next
 #                             step, and which step it is
-# and the GBA's ch1_settle / ch1_s0_kill_at (its measured shift-0 law).
+# and the GBA's ch1_settle / ch1_s0_kill_at (its measured shift-0 law), and
+# the GB's psg_cpu_bus_addr(h) (the CPU's next bus address, ch3_write).
 #
 # `when PSG_AGB` gates the places the GBA instance runs its own model: the
 # sweep unit's checks, which the AGB SP measured to differ in GBA mode from
@@ -133,12 +134,13 @@ proc write_nrx2(ch: PsgEnvChannel; value: uint8) =
       ch.current_volume = 0x10'u8 - ch.current_volume
     ch.current_volume = ch.current_volume and 0x0F
   # Envelope-enable glitch: taking the period from zero to non-zero costs one
-  # extra envelope tick at the next odd frame-sequencer stage (psg_seq_step;
-  # SameSuite channel_1_nrx2_speed_change tests 3/4/6/7).
+  # extra envelope tick at a later frame-sequencer step (psg_seq_step;
+  # SameSuite channel_1_nrx2_speed_change tests 3/4/6/7). Armed here as one
+  # step away; the GB's psg_write_nrx2 moves it to the step it lands on.
   if ch.enabled and ch.period == 0 and new_period != 0:
-    ch.env_extra_tick = true
+    ch.env_extra_tick = 1
   elif new_period == 0:
-    ch.env_extra_tick = false
+    ch.env_extra_tick = 0
   ch.starting_volume   = value shr 4
   ch.envelope_add_mode = new_add_mode
   ch.period            = new_period
@@ -170,8 +172,65 @@ when not PSG_AGB:
     if (stage == 2 or stage == 6) and d <= (lead_t shl psg_shl(h)): 1
     else: 0
 
-template psg_trigger_envelope(ch: PsgEnvChannel; h: PsgHost) =
-  init_volume_envelope(ch, psg_env_trigger_extra(h))
+when PSG_AGB:
+  template psg_trigger_envelope(ch: PsgEnvChannel; h: PsgHost) =
+    init_volume_envelope(ch, psg_env_trigger_extra(h))
+
+  template psg_write_nrx2(ch: PsgEnvChannel; h: PsgHost; value: uint8) =
+    write_nrx2(ch, value)
+
+  template psg_volume_step(ch: PsgEnvChannel) = volume_step(ch)
+else:
+  # GB: the envelope timer counts whatever the period, a period of 0 counting
+  # as 8 (Pan Docs, "Audio Details": "The volume envelope and sweep timers
+  # treat a period of 0 as 8"); 0 only stops the volume moving. So a channel
+  # triggered at period 0 and given a period later steps when the 8 clocks
+  # run out, not at the next clock, and the new period loads only then
+  # ("changes apply after the next tick", SameSuite channel_1_nrx2_speed_
+  # change). DocBoy cgb/apu/ch1 ch1_change_volume_sweep_pace_*: a trigger at
+  # $A8 and $A9..$AF written anywhere from 1 to 15 DIV-APU steps later all
+  # step at the trigger's eighth envelope clock; SameBoy agrees.
+  proc gb_env_expire(ch: PsgEnvChannel; extra: int) =
+    ## The timer ran out (or the enable glitch stood in for it): reload, and
+    ## move the volume one step if the period allows.
+    ch.volume_envelope_timer = (if ch.period != 0: ch.period else: 8'u8) +
+                               uint8(extra)
+    if ch.period != 0:
+      if (ch.current_volume < 0xF and ch.envelope_add_mode) or
+         (ch.current_volume > 0 and not ch.envelope_add_mode):
+        if ch.envelope_add_mode: inc ch.current_volume
+        else:                    dec ch.current_volume
+      else:
+        ch.vol_env_is_updating = false
+
+  proc psg_volume_step(ch: PsgEnvChannel) =
+    ## One envelope clock (DIV-APU step 7).
+    if ch.volume_envelope_timer > 0: dec ch.volume_envelope_timer
+    if ch.volume_envelope_timer == 0: gb_env_expire(ch, 0)
+
+  template psg_trigger_envelope(ch: PsgEnvChannel; h: PsgHost) =
+    let extra = psg_env_trigger_extra(h)
+    ch.volume_envelope_timer = (if ch.period != 0: ch.period else: 8'u8) +
+                               uint8(extra)
+    ch.current_volume        = ch.starting_volume
+    ch.vol_env_is_updating   = true
+
+  proc psg_write_nrx2(ch: PsgEnvChannel; h: PsgHost; value: uint8) =
+    write_nrx2(ch, value)
+    if ch.env_extra_tick != 0:
+      # The enable glitch's tick lands on the first DIV-APU step after the
+      # tap bit next rises: the next step if the bit is low now, else the
+      # one after. SameSuite channel_1_nrx2_speed_change tests 6/7 (written
+      # 5 M-cycles after a rise and after a fall) both tick on the second
+      # step, the "next even" its header names; DocBoy ch1_change_volume_
+      # sweep_pace_{1,2}_timer_0_div_apu_4 vs _alt, one M-cycle either side
+      # of a rise, tick on the next step and on the one after (where it
+      # meets the regular clock and is lost); SameBoy agrees, and moves the
+      # tick with the rise in probe ROMs between (docs/gb-failure-triage.md
+      # I8).
+      let d = psg_fs_next_edge_in(h)
+      let half = (2 shl (12 + int(psg_shl(h)))) div 2
+      ch.env_extra_tick = (if d > half: 1'u8 else: 2'u8)
 
 # ---- Square channels (1 and 2) ----
 
@@ -500,7 +559,7 @@ proc ch1_write(ch: PsgSweepSquare; nr: int; val: uint8; h: PsgHost) =
     ch.shift        = val and 0x07
     if not ch.negate and ch.negate_used: ch.enabled = false
   of NR11: sq_write_duty(ch, val)
-  of NR12: write_nrx2(ch, val)
+  of NR12: psg_write_nrx2(ch, h, val)
   of NR13: sq_write_freq_lo(ch, h, val)
   of NR14:
     sq_write_freq_hi(ch, h, val)
@@ -512,7 +571,7 @@ proc ch1_write(ch: PsgSweepSquare; nr: int; val: uint8; h: PsgHost) =
 proc ch2_write(ch: PsgSquare; nr: int; val: uint8; h: PsgHost) =
   case nr
   of NR21: sq_write_duty(ch, val)
-  of NR22: write_nrx2(ch, val)
+  of NR22: psg_write_nrx2(ch, h, val)
   of NR23: sq_write_freq_lo(ch, h, val)
   of NR24:
     sq_write_freq_hi(ch, h, val)
@@ -574,6 +633,17 @@ proc ch3_catchup_slow(ch: PsgWave; h: PsgHost; observer_period: uint32) =
 
 proc ch3_catchup_at(ch: PsgWave; h: PsgHost; observer_period: uint32) {.inline.} =
   ## See sq_catchup_at. The wave pointer is a free-running mod-32 counter.
+  when not PSG_AGB:
+    # GB: a channel that is off reads no samples, so the sample buffer keeps
+    # the last one read before the stop (Pan Docs, NR34: the last sample
+    # read is output after a retrigger) and the phase freezes, as on the
+    # pulse channels (sq_catchup_at). DocBoy cgb/apu/ch3
+    # ch3_disable_channel_while_sampling_period_3_round0 and _4_round0b: off
+    # through NR30 for 1,024 M-cycles, a retrigger still plays the byte read
+    # before the stop. The GBA keeps its free-running pointer (unmeasured).
+    if not ch.enabled:
+      ch.next_step = PSG_NO_STEP
+      return
   if ch.next_step > psg_now(h): return
   ch3_catchup_slow(ch, h, observer_period)
 
@@ -638,15 +708,36 @@ proc ch3_write(ch: PsgWave; nr: int; val: uint8; h: PsgHost) =
   # change below only affects steps from now on.
   case nr
   of NR30:
-    ch.dac_enabled = (val and 0x80) != 0
+    let dac_on = (val and 0x80) != 0
+    when not PSG_AGB:
+      if not dac_on and ch.enabled and psg_cgb(h) and ch3_wave_fetching(ch, h):
+        # CGB: a stop landing in the half-cycle before a sample read does not
+        # cancel the read, but the channel no longer drives wave RAM's
+        # address, the CPU does (Pan Docs, "Wave RAM": a CPU access while CH3
+        # plays lands on the byte CH3 is reading, one address path for
+        # both): the byte latched is the one at the low four bits of the
+        # CPU's next bus address, its opcode fetch (DocBoy cgb/apu/ch3
+        # ch3_disable_channel_while_sampling_*, 30 rows, and its double-speed
+        # twin: the `_phaseN` and `_round0b..g` rows move the stop one byte
+        # of code at a time and the byte read moves with it; SameBoy passes
+        # all of them). The DMG is unmeasured; the AGB (psg_cgb) is assumed
+        # to share the CGB's port.
+        ch.wave_ram_position = (ch.wave_ram_position + 1) and 31
+        ch.wave_ram_sample_buffer = ch.wave_ram[psg_cpu_bus_addr(h) and 0x0F]
+    ch.dac_enabled = dac_on
     if not ch.dac_enabled:
       ch.enabled = false
-      # The sample buffer clears with the DAC: SameSuite
-      # channel_3_restart_stop_delay (restart after an NR30 stop is silent
-      # through the startup delay) vs channel_3_restart_delay (a plain
-      # restart keeps the old sample). Power-off reaches here through
-      # NR30 = 0.
-      ch.wave_ram_sample_buffer = 0
+      when PSG_AGB:
+        # GBA: the sample buffer clears with the DAC (the AGB's buffer is not
+        # visible to a ROM; kept as it was).
+        ch.wave_ram_sample_buffer = 0
+      else:
+        # GB: the buffer survives the DAC (Pan Docs, NR34: only an APU
+        # power-off resets it; apu.nim's power-on clears it). SameSuite
+        # channel_3_restart_stop_delay, which looks like a stop clearing it,
+        # triggers its first note with NR30 = $00 left by its fill loop, so
+        # its channel never read a sample. The timer stops with the channel.
+        ch.next_step = PSG_NO_STEP
     when PSG_AGB:
       ch.wave_ram_dimension = (val and 0x20) != 0
       ch.wave_ram_bank      = (val shr 6) and 1
@@ -678,7 +769,8 @@ proc ch3_write(ch: PsgWave; nr: int; val: uint8; h: PsgHost) =
       # corrupts the first four bytes (byte 0 from the byte being read if it
       # is in the first four, else the aligned group of four). The window is
       # the half-cycle in which the fetch is in flight: ch3_wave_fetching.
-      if ch.enabled and not psg_cgb(h) and ch3_wave_fetching(ch, h):
+      let in_flight = ch.enabled and ch3_wave_fetching(ch, h)
+      if in_flight and not psg_cgb(h):
         # The byte being read is the one the fetch is about to latch (blargg
         # dmg_sound 10).
         let byte_idx = ((int(ch.wave_ram_position) + 1) mod 32) div 2
@@ -687,6 +779,16 @@ proc ch3_write(ch: PsgWave; nr: int; val: uint8; h: PsgHost) =
         else:
           let base = byte_idx and not 3
           for i in 0 ..< 4: ch.wave_ram[i] = ch.wave_ram[base + i]
+      when not PSG_AGB:
+        if in_flight and psg_cgb(h):
+          # CGB: no corruption, but the read in flight finishes after the
+          # restart has cleared the pointer, so it latches byte 0, not the
+          # byte it was fetching (DocBoy cgb/double_speed/apu/ch3
+          # double_speed_apu_ch3_retrigger_period_{4,6}_*: a retrigger one
+          # 2 MHz tick before a read plays byte 0's high nibble through the
+          # start-up delay, two ticks before plays the previous byte;
+          # SameBoy agrees). The DMG's corruption above is the same race.
+          ch.wave_ram_sample_buffer = ch.wave_ram[0]
       psg_trigger_length(ch, h, 0x100)
       # Period plus a 6 T-cycle start-up (SameSuite channel_3_restart_delay,
       # _shift_delay: 5 or 6 pass, nothing else), in the PSG's own clock like
@@ -830,7 +932,7 @@ proc ch4_write(ch: PsgNoise; nr: int; val: uint8; h: PsgHost) =
     ch.length_load    = val and 0x3F
     ch.length_counter = 0x40 - int(ch.length_load)
   of NR42:
-    write_nrx2(ch, val)
+    psg_write_nrx2(ch, h, val)
   of NR43:
     # The caller caught the channel up (no rising edge pending); bring the
     # divisor stage the rest of the way.
@@ -915,6 +1017,35 @@ proc psg_write_reg(h: PsgHost; nr: int; val: uint8) =
 
 # ---- The frame sequencer's step ----
 
+when not PSG_AGB:
+  proc psg_env_glitch(apu: typeof(PsgHost().apu); stage: int) =
+    ## GB: the envelope-enable glitch's tick lands on its step
+    ## (psg_write_nrx2) after any regular clock of that step, and acts only
+    ## on a timer that has not counted since a period-0 load: it stands in
+    ## for that timer running out (step the volume, load the new period, one
+    ## more if step 7 is next, as a trigger's load: Pan Docs, "Audio
+    ## Details"). Once the timer has counted it changes nothing. SameBoy,
+    ## probing DocBoy's trigger-at-$A8 setup: a $A9 write before the first
+    ## envelope clock ticks at the step the rule above picks, one after it
+    ## never does, and a tick on step 6 delays the next by a clock (DocBoy
+    ## ch1_change_volume_sweep_pace_2_timer_0_div_apu_4_round3/4: $D on the
+    ## 24th step, not the 16th).
+    template extra(ch: untyped) =
+      if ch.env_extra_tick != 0:
+        dec ch.env_extra_tick
+        if ch.env_extra_tick == 0 and ch.period != 0 and
+           (ch.volume_envelope_timer == 0 or ch.volume_envelope_timer >= 8):
+          gb_env_expire(ch, if stage == 6: 1 else: 0)
+    extra(apu.channel1)
+    extra(apu.channel2)
+    extra(apu.channel4)
+
+  proc psg_env_step7(apu: typeof(PsgHost().apu)) =
+    ## GB: step 7's envelope work: the regular clock, then the glitch.
+    psg_volume_step(apu.channel1); psg_volume_step(apu.channel2)
+    psg_volume_step(apu.channel4)
+    psg_env_glitch(apu, 7)
+
 proc psg_seq_step(apu: typeof(PsgHost().apu); h: PsgHost) =
   ## One 512 Hz step: length on the even steps, sweep on 2 and 6, the
   ## envelopes on 7. Every channel must be current first: length_step clears
@@ -932,16 +1063,30 @@ proc psg_seq_step(apu: typeof(PsgHost().apu); h: PsgHost) =
     length_step(apu.channel3); length_step(apu.channel4)
     sweep_step(apu.channel1, h)
   of 7:
-    volume_step(apu.channel1); volume_step(apu.channel2); volume_step(apu.channel4)
+    when PSG_AGB:
+      psg_volume_step(apu.channel1); psg_volume_step(apu.channel2)
+      psg_volume_step(apu.channel4)
   else: discard
-  if (apu.frame_sequencer_stage and 1) == 1:
-    # Envelope-enable glitch's extra tick; see PsgEnvChannel.env_extra_tick.
-    template extra(ch: untyped) =
-      if ch.env_extra_tick:
-        ch.env_extra_tick = false
-        volume_step(ch)
-    extra(apu.channel1)
-    extra(apu.channel2)
-    extra(apu.channel4)
+  when PSG_AGB:
+    if (apu.frame_sequencer_stage and 1) == 1:
+      # Envelope-enable glitch's extra tick, at the next odd stage; see
+      # PsgEnvChannel.env_extra_tick.
+      template extra(ch: untyped) =
+        if ch.env_extra_tick != 0:
+          ch.env_extra_tick = 0
+          volume_step(ch)
+      extra(apu.channel1)
+      extra(apu.channel2)
+      extra(apu.channel4)
+  else:
+    # GB: the envelopes' share of the step (psg_env_glitch, psg_env_step7).
+    if apu.frame_sequencer_stage != 7:
+      psg_env_glitch(apu, apu.frame_sequencer_stage)
+    elif psg_env_late(h):
+      # Step 7 reaches the envelopes ENV_CLOCK_DS_LATE_T later
+      # (GbQuirks.env_clock_ds_late); apu_env_late_due runs it.
+      apu.env_late_pending = true
+    else:
+      psg_env_step7(apu)
   apu.frame_sequencer_stage += 1
   if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0

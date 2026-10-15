@@ -113,6 +113,14 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
       let env_stage = getEnv("DINGBAT_BOOT_FS_STAGE")
       if env_stage.len > 0: stage = parseInt(env_stage)
     gb.apu.frame_sequencer_stage = stage and 7
+    # ...and the length gate that goes with it: the step that ran last is
+    # stage - 1, so the next one skips the length counter exactly when the
+    # next stage is odd (Pan Docs, "Obscure Behavior": an NRx4 length enable
+    # then clocks it once). The NR52 write above derived the gate from a
+    # divider skip_boot has not seeded yet. DocBoy dmg/apu ch1_length_timer_
+    # delay{0,1024}: the hand-off triggers before the stage-1 step and get
+    # the extra clock; _delay2048+ trigger after it and do not.
+    gb.apu.first_half_of_length_period = (gb.apu.frame_sequencer_stage and 1) == 1
   mem.write_byte(gb, 0xFF16, 0x3F)
   mem.write_byte(gb, 0xFF17, 0x00)
   mem.write_byte(gb, 0xFF19, 0xBF)
@@ -384,6 +392,7 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF76:
     if gb.cgb_enabled:
       apu_catchup_all(gb.apu, gb)
+      apu_env_late_due(gb.apu, gb)
       var lo = sq_dac_input(gb.apu.channel1)
       var hi = sq_dac_input(gb.apu.channel2)
       # CGB 0/A/B/C: a read on a rising duty step answers 0 for that channel
@@ -396,6 +405,7 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF77:
     if gb.cgb_enabled:
       apu_catchup_all(gb.apu, gb)
+      apu_env_late_due(gb.apu, gb)
       gb.apu.channel3.ch3_dac_input() or (gb.apu.channel4.ch4_dac_input() shl 4)
     else: 0xFF'u8
   of 0xFF80..0xFFFE: mem.hram[idx - 0xFF80]

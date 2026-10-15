@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 17:44:34 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-14 21:17:24 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**7069/9227 passed.**
+**7168/9227 passed.**
 
 ## docboy/dmg/cpu (10/12 passed)
 
@@ -458,14 +458,12 @@ All 29 tests passed (DMG dmgABC).
 | dmg/docboy/joypad/interactive/joypad_buttons_interrupt_release | $FFF0=$02 = fail value (tick 17000004) |
 | dmg/docboy/joypad/interactive/joypad_dpad_interrupt_release | $FFF0=$02 = fail value (tick 17000004) |
 
-## docboy/dmg/apu (236/307 passed)
+## docboy/dmg/apu (238/307 passed)
 
-236/307 tests passed on DMG dmgABC, 71 failed:
+238/307 tests passed on DMG dmgABC, 69 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/apu/ch1_length_timer_delay0 | $FFF0=$02 = fail value (tick 1100000) |
-| dmg/docboy/apu/ch1_length_timer_delay1024 | $FFF0=$02 = fail value (tick 1100008) |
 | dmg/docboy/apu/ch1_period_sweep_change_direction_to_decrease_on_trigger_round1 | $FFF0=$02 = fail value (tick 1100004) |
 | dmg/docboy/apu/ch1_period_sweep_change_direction_to_increase_step6_period256_round1 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/apu/ch1_period_sweep_change_direction_to_increase_step6_round1_1 | $FFF0=$02 = fail value (tick 200012) |
@@ -894,51 +892,12 @@ All 4 tests passed (CGB cgbE).
 
 All 17 tests passed (CGB cgbE).
 
-## docboy/cgb/apu/ch1 (1009/1134 passed)
+## docboy/cgb/apu/ch1 (1048/1134 passed)
 
-1009/1134 tests passed on CGB cgbE, 125 failed:
+1048/1134 tests passed on CGB cgbE, 86 failed:
 
 | Test | Result |
 |------|--------|
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_0_div_apu_4_alt_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_0_div_apu_4_alt_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_0_div_apu_4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_0_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_0_round2 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_1_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_1_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_2_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_2_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_3_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_3_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_4_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_4_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_5_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_5_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_5_round3 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_5_round4 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_6_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_6_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_7_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_1_div_apu_7_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_2_div_apu_0_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_1_timer_2_div_apu_0_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_2_timer_0_div_apu_4_alt_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_2_timer_0_div_apu_4_alt_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_2_timer_0_div_apu_4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_2_timer_0_div_apu_4_round3 | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_2_timer_1_div_apu_4_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_2_timer_1_div_apu_4_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_3_timer_1_div_apu_4_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_3_timer_1_div_apu_4_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_4_timer_1_div_apu_4_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_4_timer_1_div_apu_4_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_5_timer_1_div_apu_4_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_5_timer_1_div_apu_4_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_6_timer_1_div_apu_4_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_6_timer_1_div_apu_4_round2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_7_timer_1_div_apu_4_round1 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_change_volume_sweep_pace_7_timer_1_div_apu_4_round2 | $FFF0=$02 = fail value (tick 600004) |
 | cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_to_decrease_on_trigger_round1 | $FFF0=$02 = fail value (tick 1100004) |
 | cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_to_increase_step6_period256_round1 | $FFF0=$02 = fail value (tick 100008) |
 | cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_to_increase_step6_round1_1 | $FFF0=$02 = fail value (tick 200004) |
@@ -1030,42 +989,9 @@ All 17 tests passed (CGB cgbE).
 
 All 26 tests passed (CGB cgbE).
 
-## docboy/cgb/apu/ch3 (79/109 passed)
+## docboy/cgb/apu/ch3
 
-79/109 tests passed on CGB cgbE, 30 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_off_period_4_round0a | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round0a | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round0a_phase1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round0a_phase2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round0a_phase4 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round0a_phase5 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round0a_phase6 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round0b | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_1_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_2_round0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_2_round0a0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_2_round0a2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_2_round0b | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_2_round0c | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_2_round0d | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_2_round0e | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_2_round0e0 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_3_round0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_3_round0b | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_3_round0c | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_3_round0d | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_3_round0f | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_4_round0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_4_round0b | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_4_round0c | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_4_round0d | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_4_round0e | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_4_round0f | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch3/ch3_disable_channel_while_sampling_period_4_round0g | $FFF0=$02 = fail value (tick 100004) |
+All 109 tests passed (CGB cgbE).
 
 ## docboy/cgb/apu/ch4 (66/69 passed)
 
@@ -1323,47 +1249,13 @@ All 26 tests passed (CGB cgbE).
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_square_wave_duty_75_alt_delay8 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_square_wave_duty_75_b_delay8 | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/cgb/double_speed/apu/ch2 (52/63 passed)
+## docboy/cgb/double_speed/apu/ch2
 
-52/63 tests passed on CGB cgbE, 11 failed:
+All 63 tests passed (CGB cgbE).
 
-| Test | Result |
-|------|--------|
-| cgb/docboy/double_speed/apu/ch2/double_speed_apu_ch2_volume_sweep_b_round1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/double_speed_apu_ch2_volume_sweep_c_round1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/double_speed_apu_ch2_volume_sweep_round1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_divapu2_divbit00_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_divapu2_divbit01_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_divapu2_divbit10_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_divapu2_divbit11_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_divapu3_divbit00_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_divapu3_divbit01_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_divapu3_divbit10_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_divapu3_divbit11_round2 | $FFF0=$02 = fail value (tick 200000) |
+## docboy/cgb/double_speed/apu/ch3
 
-## docboy/cgb/double_speed/apu/ch3 (152/169 passed)
-
-152/169 tests passed on CGB cgbE, 17 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round3 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round4 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round5 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round6 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round7 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_disable_channel_while_sampling_period_4_round8 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_retrigger_period_4_delay11_0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_retrigger_period_4_delay11_3 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_retrigger_period_4_delay15_0 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_retrigger_period_4_delay15_3 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_retrigger_period_4_delay3_3 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_retrigger_period_6_delay5_0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch3/double_speed_apu_ch3_retrigger_period_6_delay5_5 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch3/speed_switch_to_single_apu_ch3_period_1 | $FFF0=$02 = fail value (tick 200000) |
+All 169 tests passed (CGB cgbE).
 
 ## docboy/cgb/double_speed/apu/ch4 (1249/1925 passed)
 

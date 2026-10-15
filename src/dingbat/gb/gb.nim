@@ -1508,6 +1508,34 @@ type
       ## `CGB_E` defined); `vram/vram-read-cgbBCE` says mode 3's length is
       ## revision-flat. See OAM_READ_M0_OPEN_DOTS in ppu.nim. CGB-D is
       ## unmeasured and keeps the C behaviour.
+    spsw_apu_rephase_2mhz*: bool
+      ## CGB E. The first KEY1 switch after an APU power-on puts a running
+      ## square's next step on the re-phased 2 MHz grid's previous edge, as
+      ## it does the wave channel's (`APU_SPSW_REPHASE_LEAD3_T`, 1 T), not
+      ## the 1 MHz grid's (`APU_SPSW_REPHASE_LEAD_T`, 3 T): the square plays
+      ## one double-speed M-cycle later after the switch. DocBoy
+      ## `double_speed/apu/ch2/speed_switch_to_double_apu_ch2_volume_sweep_
+      ## *_round2` (8; its CGB is an E) read a duty sample of 1 where 3 T
+      ## reads 0, and SameBoy CGB E's duty window in a probe of the same code
+      ## sits one M-cycle later than dingbat's 3 T; over the 290 DocBoy
+      ## `speed_switch*` rows 1 T gains those 8 and loses none, 0 T also
+      ## passes, 2 T and 3 T lose them (1 is the 2 MHz grid's edge, the value
+      ## the wave channel needs on its own rows). CGB C keeps 3 T: gambatte's
+      ## `speedchange*` duty ladder (cgb04c) pins it (docs/gb-failure-
+      ## triage.md H2). CGB D and AGB are unmeasured and keep the C rule.
+    env_clock_ds_late*: bool
+      ## CGB E. At double speed the DIV-APU step's envelope clock reaches the
+      ## channels ENV_CLOCK_DS_LATE_T (apu.nim) after the step itself, so a
+      ## PCM12 read on the step's M-cycle still sees the old volume; a length
+      ## clock on a step lands at once. DocBoy `double_speed/apu/ch2/
+      ## double_speed_apu_ch2_volume_sweep{,_b,_c}_round1/2` (its CGB is an
+      ## E); SameBoy CGB E shows the same in probe ROMs that move the DIV
+      ## reset against the power-on (no dependence on the APU's grid) and
+      ## read a length expiry on another step of the same run (on time), and
+      ## SameBoy CGB C shows the step at once. At single speed the read comes
+      ## after it within the M-cycle (SameSuite channel_1_volume_div, DocBoy
+      ## ch1_change_volume_sweep_direction_div_apu_0). CGB D and AGB are
+      ## unmeasured and keep the C rule.
     spsw_irq_leaf_hold_short*: bool
       ## CGB E. Half the oscillator-restart hold on the aborted-halt speed
       ## switch leaf -- one M-cycle where CGB B and C lose two. See
@@ -2314,6 +2342,10 @@ type
     # APU's tick grid (apu_spsw_rephase, APU_SPSW_REPHASE_*). Serialized from
     # GB payload rev 7.
     spsw_rephase_pending*: bool
+    # A double-speed step 7 whose envelope work is still to come
+    # (GbQuirks.env_clock_ds_late, apu_env_late_due). Serialized from GB
+    # payload rev 8.
+    env_late_pending*:    bool
     left_enable*:         bool
     left_volume*:         uint8
     right_enable*:        bool
@@ -3342,6 +3374,8 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     oam_read_open_late: rev == grCgbE,
     spsw_div_mid_taps_slow: rev == grCgbE,
     spsw_irq_leaf_hold_short: rev == grCgbE,
+    spsw_apu_rephase_2mhz: rev == grCgbE,
+    env_clock_ds_late: rev == grCgbE,
     ly_read_edge_late: rev in {grCgbD, grCgbE, grAgb},
     m1_end_no_mode0: rev in {grCgbD, grCgbE, grAgb},
     unusable_region:
