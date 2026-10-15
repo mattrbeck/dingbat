@@ -3,6 +3,7 @@
 @game BRIJ
 @chip SRAM
 @frozen dingbat-bios,mgba,nba
+@known * checkpoint title: -- §85: the five balls fly in on rand() draws from an LCG the V-blank wait loop steps once a pass, so the state counts every idle cycle since f7; dingbat counts 2200 passes a frame, the second reference 2200-2201 (and enters the ROM on line 225, not the console's 126), mGBA 2261, and no two share a state from f7 on. The references' SLIP is their settled logos meeting, not the same draws
 # A new save opens with the three-part rhythm check: tap A along with the
 # beat, press A when the hidden countdown reaches zero, keep the beat after
 # the sound stops (score 0.0 here). After the score the game saves and opens

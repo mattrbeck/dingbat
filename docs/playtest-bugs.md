@@ -7510,3 +7510,138 @@ the train shows the corpus cannot settle it. `sramloop` with the Hamtaro
 cart decides it. If the byte comes back 29 or more, the rule on
 `sram-holds-gamepak-bus` (or its emptying variant, at about 31) is what to
 land. A SLIP is a pass, so no `@known` line is added.
+
+## §85. Rhythm Tengoku: the title's logo balls are drawn from an idle-loop RNG, and the references meet only on the settled logo, 2026-10-14
+
+**Symptom.** In the baseline `f2a983d050ef-src-028dc3a8c6ea` (after §65,
+§82 and §83's driver fixes) `title` (f996) is MAJOR against both
+references in all four dingbat configurations. The references are SLIP 0
+to each other ("the windows share a frame; neither centre does"), so the
+game FAILs. §74 had filed it as "RNG/phase: the logo's bounce phase".
+
+**Stable in every emulator.** dingbat-bios, mGBA and the second reference
+each played the frozen `[new]` timeline twice for 1,100 frames. Each pair of
+runs is identical on every frame, and every run reproduces the baseline's
+`health` and `title` windows hash for hash. dingbat (the HLE) equals
+dingbat-bios on all 1,100 frames.
+
+**Where play parts: f692, five random draws.** EWRAM is identical in all
+three emulators to the end of f691. At f692, 39 bytes in 20 runs differ, and
+all three values differ at each one. They are the five logo balls' records
+(28 bytes apart from 0x02005CDC) and three bytes each at 0x02003BC0 + 0x3C·k.
+`watchw` finds the writer, 0x0801CBAE-0x0801CBCC. It fills each record with
+`rand(20) + 150`, `rand(5) + 238`, `rand(32) - 16`, `rand(12)` and so on.
+`rand(n)` at 0x08001980 is a 16-bit LCG at 0x030000B4, `s = s * 109 + 1021`,
+returning `(n * s) >> 16`. The draws pick each ball's flight in and its
+later bounces. The state going into the draws (end of f691) is 0x2A2F in
+dingbat, 0x45B6 in mGBA and 0x44BA in the second reference.
+
+The pictures are identical in all three from f3 to f854. The balls appear
+at f855 (the second reference) and f856 (dingbat, mGBA). At f870 they are
+in flight in three different places (pixels exact against mGBA: dingbat
+73 %, the second reference 51 %). Over the title's 189 frames
+(f855-f1043) the two references show the same picture on 22, dingbat and
+mGBA on 19 (f940-f957, out of the window), dingbat and the second
+reference on none. In the checkpoint's window the references meet on 22
+frames from f1002 to f1026, once their logos have settled with the same
+ball raised. That
+is the SLIP 0. It is not the same draws.
+
+**The RNG counts every idle cycle since f7.** The game's V-blank wait
+(0x080013BC-0x080013D4, Thumb in ROM) loops on the bare LCG step at
+0x08001964. Each pass also loads a ROM word from
+`0x08000000 + (s << 2 & 0x3FFFC)` into `[sp]`. It stops when the V-blank
+handler sets the halfword at 0x03000098. So the state is stepped once per
+idle pass, and the LCG has full period 65,536. Each frame's steps can be
+read back exactly from the per-frame peeks of 0x030000B4 in all three:
+
+| | f7 (first counting frame) | f8 | a frame, steady screens | f9-f691 | total to the draws |
+|---|---|---|---|---|---|
+| dingbat (all configurations) | 227 | 2,311 | 2,200 | 1,489,941 | 1,492,479 |
+| the second reference | 1,816 | 2,231 | 2,200 or 2,201 | 1,490,223 | 1,494,270 |
+| mGBA | 359 | 2,370 | 2,261 | 1,531,481 | 1,534,210 |
+
+One pass of difference already makes every draw another number. The
+second reference differs from dingbat on 342 of the 683 frames f9-f691,
+by one pass each time (+282 in all). Its first counting frame is 1,589
+passes (≈159k cycles) longer. That is not its timing. It enters the ROM on
+line 225 (VCOUNT 0xE1 before the first frame), where dingbat and mGBA
+enter on line 126. Line 126 is the console's: bootio.gba's VCOUNT word
+photographs it, and dingbat's skip-BIOS entry moved there in 9a3c7b7cd
+(§4). So the
+second reference's first frame runs 129 lines more of the boot before its
+first V-blank. mGBA counts 61 passes a frame more than the other two.
+
+**The pass's price**, WAITCNT 0x45B7 (WS0 N 4, S 2, prefetcher on), traced
+on f25: dingbat 100 cycles, mGBA 98. The ALU ops cost 1-2 cycles in both.
+dingbat's extra is the four fetches after the pass's four gamepak loads
+(the two literal loads, the random ROM word, the flag's literal). It prices
+each at N, 4 cycles: after a gamepak data load the prefetcher stays stopped
+through the I cycle (alyosha prefetcher_branch_thumb_2, hardware-verified,
+failed by both references; §29, §59). Idle time a frame: dingbat
+2,200 × 100 ≈ 220.2k cycles, mGBA 2,261 × 98 ≈ 221.8k. So mGBA's frame
+work is also ~1.6k cycles cheaper, the §29 and §59 kind of under-charge.
+
+**Status: (d), no core change.** The checkpoint compares where five
+balls land, drawn from a state that counts every idle cycle since f7. No
+emulator is known to reproduce the console's count. The two references do
+not share a state on any frame from f7, and the second reference starts
+the count from another line of the frame. A probe could price the pass
+again, but it could not decide 1.49 million passes. The script carries
+`@known * checkpoint title:` citing this section, as §59 did for
+Castlevania's bones. Every later checkpoint is unaffected in the baseline.
+
+## §86. Final Fight One: intro_story a frame behind is §29's load, now that the second reference keeps mGBA's frame, 2026-10-14
+
+**Symptom.** In the same baseline `intro_story` (f630) is SLIP -1 against
+both references in all four dingbat configurations, and the references
+are IDENTICAL. It passes the tolerance. §74 had it under "all three
+differ" ("downstream: the load a frame late", §29). Since §82's driver fix
+the second reference no longer sits elsewhere, so the slip is now
+dingbat's alone.
+
+**Stable.** Each of dingbat-bios, mGBA and the second reference was
+replayed twice for 700 frames, and each pair is identical on every frame.
+Each run reproduces the baseline's `intro_story` window hash for hash.
+dingbat (the HLE) equals dingbat-bios on all 700 frames.
+
+**Where play parts: f280, the same load as §29.** The second reference's
+pictures differ from mGBA's only on f1-f4 (its boot), and its EWRAM equals
+mGBA's at every frame f250-f319. dingbat's EWRAM equals both references'
+to f279. From f281 its EWRAM at frame f is theirs at f-1, two bytes apart.
+The first picture to differ is f315, the fade-in after the black loading
+screen. From there to f700 dingbat's frame f is the references' f-1 on 369
+of 386 frames, and the rest are static frames equal anyway.
+
+**The margin**, traced f271-f282 in dingbat-bios and mGBA. The idle loop is
+at 0x0800B422-0x0800B43A plus 0x0800BC32-0x0800BC3A. mGBA enters it at
+cycle 263,333 of f280, **17,564 cycles before** the V-blank. dingbat enters
+at cycle 26,684 of f281, **26,684 after** it. That is a 44,248-cycle gap.
+§29 measured 17.6k and 26.2k on 2026-10-02, so dingbat's load is 0.5k
+dearer since then. Summed over f272-f281, dingbat minus mGBA:
+
+| code | dingbat − mGBA | per pass | why dingbat is dearer |
+|---|---|---|---|
+| the LZ decompressor into VRAM, 0x08045C90-0x08045D3E | +28,132 | | renderer contention on its VRAM reads and writes (console-measured, `contmap.s`) and the commit wait at its `ldrb`-then-`b` (console-measured, §29 `slotbranch`) |
+| the EWRAM memset, 0x0806B85E-0x0806B86A | +6,308 | 38 / 26 | four EWRAM word stores are 24 bus cycles alone; `slotexec.s` on the SP = dingbat |
+| a 32-byte copy, ROM to VRAM (`ldmia`/`stmia` ×2), 0x08000272 | +4,391 | 74 / 55 | the fetch after each gamepak `ldmia` at N (prefetcher_branch_thumb_2) |
+| a halfword fill of VRAM 0x06008020-0x0600BFFF (`strh; adds; cmp; bne`), 0x0803DED4 | +2,097 | 14.28 / 14.03 | a quarter of its stores pay 5-6 cycles: the renderer's contention (mode 0, BG1-3 and OBJ on; `contmap.s`'s console map) |
+| everything else | +3,320 | | |
+
+Built with `-d:CONTENTION=false -d:BRANCH_COMMIT_WAIT=false`,
+dingbat-bios still enters the idle loop **2,956 cycles after** the f280
+V-blank (§29: 2.5k). That is still f315. Turning off two console-measured
+rules does not reach the references' frame. The rest is the references'
+data accesses under the prefetcher, below the bus floor.
+
+The second reference has no `trace`, so its own margin is unmeasured. It
+reaches the idle loop before the f280 V-blank as mGBA does. Its prefetcher
+fails 5 of the alyosha prefetcher rows dingbat passes (§29).
+
+**Status: (b), no core change.** Every cycle dingbat spends that the
+references do not is a cost the SP has measured or a hardware-verified row
+requires. It is §29 unchanged, now seen against two references instead of
+one. A SLIP is a pass, so no `@known` line is added. The script's session
+note ("dingbat-bios draws the caption box under the map black, mgba and
+nba draw it solid blue") is this frame: dingbat's f+1 is the references'
+f.
