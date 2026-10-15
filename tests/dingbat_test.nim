@@ -1791,6 +1791,30 @@ proc docboy_load_ref(path: string; cache: var Table[string, seq[uint32]]): seq[u
   cache[path] = result
 
 proc docboy_fb_diff(gb: GB; want: seq[uint32]): tuple[diff: int; first: string] =
+  # DINGBAT_DOCBOY_DUMP=<file>: every check writes the frame as shade digits
+  # (0-3, `?` for a non-DMG colour), one line per row, then the reference's,
+  # so a red row shows WHERE it disagrees.
+  let dump = getEnv("DINGBAT_DOCBOY_DUMP")
+  if dump.len > 0:
+    # CGB colours: a letter per distinct reference colour, in order of
+    # appearance (`?` = a colour the reference never uses).
+    var cgb_tbl: seq[uint32]
+    for c in want:
+      if c notin cgb_tbl and cgb_tbl.len < 26: cgb_tbl.add(c)
+    proc shade(c: uint32): char =
+      for k in 0 ..< 4:
+        if DocboyDmgRgb565[k] == c: return char(ord('0') + k)
+      let i = cgb_tbl.find(c)
+      if i >= 0: char(ord('A') + i) else: '?'
+    var s = ""
+    for y in 0 ..< GB_HEIGHT:
+      for x in 0 ..< GB_WIDTH: s.add(shade(docboy_rgb565(gb, gb.ppu.framebuffer[y * GB_WIDTH + x])))
+      s.add('\n')
+    s.add("--\n")
+    for y in 0 ..< GB_HEIGHT:
+      for x in 0 ..< GB_WIDTH: s.add(shade(want[y * GB_WIDTH + x]))
+      s.add('\n')
+    writeFile(dump, s)
   for i in 0 ..< GB_WIDTH * GB_HEIGHT:
     let got = docboy_rgb565(gb, gb.ppu.framebuffer[i])
     if got != want[i]:
@@ -1882,6 +1906,18 @@ proc docboy_run_one(dev, kind: string; instr: int; expected, rom: string;
           if got != v: success = false
           if fv >= 0 and got == fv: fatal = true
         if success: return (true, mem_state(gb, mem).strip() & " (tick " & $ticks & ")")
+        if fatal or success:
+          # DINGBAT_DOCBOY_MEMDUMP=<hex addr>:<len> prints those bytes at the
+          # verdict (what a red memory row compared).
+          let md = getEnv("DINGBAT_DOCBOY_MEMDUMP")
+          if md.len > 0:
+            let p = md.split(':')
+            let a0 = parseHexInt(p[0])
+            var s = "MEM " & p[0] & ":"
+            for k in 0 ..< parseInt(p[1]):
+              if k mod 16 == 0: s.add("\n ")
+              s.add(" " & toHex(read_mem(gb, a0 + k), 2))
+            echo s
         if fatal: return (false, mem_state(gb, mem).strip() & " = fail value (tick " & $ticks & ")")
       else:
         pending = true

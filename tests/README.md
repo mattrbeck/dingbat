@@ -504,6 +504,12 @@ framebuffer row passes by tick 4.84M, and the committed baseline comes from
 the uncapped local run, so a row that only passes between the two limits
 would show up in CI as a regression rather than hide.
 
+Two diagnostics for one red row (`--mode=docboy --list=<one line>`):
+`DINGBAT_DOCBOY_DUMP=<file>` writes each framebuffer check as shade digits
+(`0`-`3`; CGB colours as letters per reference colour), the frame then the
+reference, and `DINGBAT_DOCBOY_MEMDUMP=<hex addr>:<len>` prints those bytes
+when a memory row reaches its verdict.
+
 ## SingleStepTests — per-instruction CPU vectors (`tests/singlestep_test.nim`)
 
 SingleStepTests/sm83 and SingleStepTests/ARM7TDMI (both MIT): each case is one
