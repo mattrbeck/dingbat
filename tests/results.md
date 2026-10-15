@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 23:30:52 · commit 4cb01bc4 · game-boy-test-roms v7.0*
+*Generated: 2026-10-14 23:54:34 · commit d8e8a18e · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1585
-- **Pass:** 1557
-- **Fail:** 28
+- **Pass:** 1558
+- **Fail:** 27
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -17,7 +17,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
-| [Game Boy - DocBoy](results_docboy.md) | 47 | 70 | 👀 |
+| [Game Boy - DocBoy](results_docboy.md) | 48 | 70 | 👀 |
 | [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
@@ -40,7 +40,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
-## Game Boy - DocBoy (47/70)
+## Game Boy - DocBoy (48/70)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -73,7 +73,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/ir | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb/mode | CGB cgbE | 👌 6/6 passed |
 | docboy/cgb/undocumented | CGB cgbE | 👌 4/4 passed |
-| docboy/cgb/ppu | CGB cgbE | 👀 381/427 passed |
+| docboy/cgb/ppu | CGB cgbE | 👀 384/403 passed |
 | docboy/cgb/mbc/mbc7 | CGB cgbE | 👌 17/17 passed |
 | docboy/cgb/apu/ch1 | CGB cgbE | 👀 1130/1132 passed |
 | docboy/cgb/apu/ch2 | CGB cgbE | 👌 26/26 passed |
@@ -88,7 +88,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/double_speed/hdma | CGB cgbE | 👌 50/50 passed |
 | docboy/cgb/double_speed/interactive | CGB cgbE | 👀 55/67 passed |
 | docboy/cgb/double_speed/interrupts | CGB cgbE | 👌 246/246 passed |
-| docboy/cgb/double_speed/ppu | CGB cgbE | 👀 355/357 passed |
+| docboy/cgb/double_speed/ppu | CGB cgbE | 👌 357/357 passed |
 | docboy/cgb/double_speed/serial | CGB cgbE | 👌 4/4 passed |
 | docboy/cgb/double_speed/timers | CGB cgbE | 👌 76/76 passed |
 | docboy/cgb/double_speed/visual | CGB cgbE | 👌 5/5 passed |
@@ -101,7 +101,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb_dmg_mode/key1 | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb_dmg_mode/memory | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb_dmg_mode/mode | CGB cgbE | 👌 6/6 passed |
-| docboy/cgb_dmg_mode/ppu | CGB cgbE | 👀 321/554 passed |
+| docboy/cgb_dmg_mode/ppu | CGB cgbE | 👀 374/440 passed |
 | docboy/cgb_dmg_mode/serial | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb_dmg_mode/stat_write_bug | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb_dmg_mode/undocumented | CGB cgbE | 👌 4/4 passed |
@@ -313,3 +313,7 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **DocBoy: the window tile under a mid-fetch LCDC.5 clear (43)** — `dmg/ppu/visual/window_turn_off_*`: LCDC.5 cleared during the window's first tile fetch. On 40 rows the write lands between the window map read and its bitplane reads and DocBoy draws that tile from the BACKGROUND's row; mealybug's hardware notes have the disable "take effect at the end of the current window tile", and SameBoy (DMG B) draws dingbat's frame pixel for pixel on all 40; on the other 3 all three emulators differ. Hardware check pending: `window_turn_off_nops22_sprite_x4` on an MGB, line 8, x = 9..16 (docs/gb-failure-triage.md I6). The window retrigger and resume rows ARE scored. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: single-unit OAM-bug margins (10)** — `oam_bug_ld_{hl,hli}_a_round3_{fe5c,fe5e_noisy,fe5f}` and `_round23_{fe46,fe47}`: in these truth tables of DocBoy's DMG the written bit as it lands in row 0 depends on row 0's old bits, or a word-3 write also rewrites word 2's low byte, where the sibling tables in the same position on other byte lanes (`fe58`..`fe5b`, `fe5d`) give the written bit, the maintainer marks `fe5b`/`fe5d`/`fe5e` noisy (hardware runs that did not repeat), and SameBoy gives the written bit on all ten. The other 258 rows of the family ARE scored. Hardware check pending: the ten on an MGB (docs/gb-failure-triage.md I5). (build_docboy_rows, DocboyNotScored)
 - **DocBoy: a CGB trigger 2 M-cycles before a sweep clock (2)** — `cgb/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_{delay14284,step0_delay14284_round1}` want the clock 2 M-cycles after a retrigger to take the new frequency, the DMG's 1 M-cycle trigger lead. On the CGB a trigger that close misses the clock: SameSuite `channel_1_sweep_restart_2` (CGB hardware; a restart 3 M-cycles before the clock is seen, 2 is not), gambatte `sound/ch1_init_reset_sweep_counter_timing_10` [cgb04c] (SWEEP_TRIGGER_LEAD_T_CGB = 8 T), and SameBoy (CGB E) fails both. The DMG rows of the same family ARE scored and pass (docs/gb-failure-triage.md I2). (build_docboy_rows, DocboyNotScored)
+- **DocBoy: compat-mode window frames under mid-line LCDC.5 pulses (51)** — `cgb_dmg_mode/ppu/visual/m3_lcdc_win_en_change_multiple_wx_*`: mealybug's ROM (WX = LY, LCDC.5 pulsed low twice in mode 3) with DocBoy's tile data, on a CPU CGB E with a DMG cart. mealybug ships captures of this ROM for the DMG only, so no CGB picture of it was measured. dingbat matches SameBoy (CGB E) on all but 18 of the 7,344 lines; on about 520 DocBoy alone draws other bytes for a window tile cut short by LCDC.5 (cut k <= 4 dots after the WX match: the high plane is the tile index; k = 0: two colour-0 tiles), on 87 SameBoy alone differs. The same ROMs' timing twins (`m3_lcdc_win_en_change_multiple_wx_timing_*`, 90) ARE scored and pass; DocBoy disables two signed-addressing variants itself ("glitch is different"). (docs/gb-failure-triage.md I3; build_docboy_rows, DocboyNotScored)
+- **DocBoy: the CGB LCDC.4 tile-data glitch, DocBoy's variations (73)** — `change_{bg,win}_tile_data_glitch_*` in `cgb_dmg_mode/ppu/visual` (63) and `cgb/ppu/visual` (10): LCDC.4 flipped across a bitplane read with objects and windows at other phases. Per line over the 73 frames: 1,562 lines are DocBoy's alone, 1,831 SameBoy's alone (SameBoy, CGB E, passes none), 954 three-way, 82 dingbat's alone. dingbat's glitch (CGB_TDSEL_GLITCH) is fitted to the hardware captures mealybug ships for CGB C and D (`m3_lcdc_tile_sel_change`, `_change2`, `_win_change`) and to cgb-acid-hell, all of which pass; the family's other 56 rows (26 `mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`) ARE scored and pass. (docs/gb-failure-triage.md I3; build_docboy_rows, DocboyNotScored)
+- **DocBoy: the CGB background column resumed after the window at WX = 25 (1)** — `cgb/ppu/visual/window_bg_reprise_wx25`: the window disabled on the WY line, the background resuming where the fetcher stood. DocBoy differs in 3 pixels on line 12 (x = 26, 32, 33); SameBoy (CGB E) draws dingbat's frame pixel for pixel, and the 17 CGB siblings (`_wx8`..`_wx24`, the same rule at every other WX) ARE scored and pass. (docs/gb-failure-triage.md I12; build_docboy_rows, DocboyNotScored)
+- **DocBoy: the CGB panel across LCD off/on (13)** — `cgb/ppu/visual/turn_off_y*`: "Depending on the timing, the next lines are either kept, rendered, or cleared" (the ROMs' own comment): the references keep on the panel the rows drawn before LCDC.7 went low and show later rows white or redrawn. Pan Docs (LCDC.7): "When the display is disabled the screen is blank", and on re-enabling "the screen will stay blank during the first frame", which dingbat's frames follow. SameBoy (CGB E) fails all 13. The three `_b` partners checked a frame later (`turn_off_y42_turn_on_y148_round2 #2`, `..._y52_wait144 #2`, `..._y52_wait150 #2`) ARE scored and pass. (docs/gb-failure-triage.md I12; build_docboy_rows, DocboyNotScored)

@@ -220,10 +220,23 @@ const LCDON_M0_LAG_DS* {.intdefine.} = 8
   ## ds_1` (+4, none lost); 4 is inert, 12 loses the four `_2` twins.
 const CGB_LYC_RULE_FIRE_T* {.intdefine.} = 4
 const VRAM_WRITE_LINE0_CGB_GRACE* {.intdefine.} = 1
-  ## Whether a CGB VRAM write on the LCD-on line gets the read lock's late
-  ## close edge (cpu_vram_open). gambatte enable_display/ly0_late_vramw_2
-  ## [cgb]; widths 5..8 dots all take it and 10 loses `ly0_late_vramw_3`, so
-  ## the read side's own 7 is reused rather than a new number.
+  ## Whether a CGB VRAM write on the LCD-on line meets a late close edge
+  ## (cpu_vram_open): the lock shuts one CPU M-cycle and a dot past the
+  ## mode-3 flag edge, 5 dots at single speed and 3 at double. gambatte
+  ## enable_display/ly0_late_vramw_2 [cgb] takes widths 5..8 at single speed
+  ## and 10 loses `ly0_late_vramw_3`; DocBoy `double_speed_ppu_vram_write_
+  ## block_timing_ly0_1_out_of_4` (CPU CGB E, writes one double-speed M-cycle
+  ## apart) takes 2..3 and loses 4, and SameBoy (CGB E) passes it. The width
+  ## used to be the read side's 7 (and 5 at double speed, the read lock's
+  ## LCD_ON_LINE0_LOCK_LEAD included), which no single-speed row separates
+  ## from 5.
+const VRAM_WRITE_LINE0_OPEN_LEAD* {.intdefine.} = 1
+  ## Whether a CGB VRAM write on the LCD-on line sees mode 3 end
+  ## LCD_ON_LINE0_LOCK_LEAD dots late, as a read does (lcdon_latched_mode):
+  ## DocBoy `double_speed_ppu_vram_write_block_timing_ly0_3_out_of_4` (the
+  ## open edge, writes one double-speed M-cycle apart) takes 2..3 and loses
+  ## 4 and 0..1; SameBoy (CGB E) passes it. No single-speed row reaches it
+  ## (nothing moves at either value); applied at both speeds, as the lead is.
 const CGB_LYC_EVENT_HOLD_SS* {.intdefine.} = 7
   ## CGB_LYC_EVENT_HOLD_DS at single speed: a CGB LYC write committed in the
   ## last 7 dots of a line (gambatte-core: within 6 cycles of the event, plus
@@ -811,6 +824,35 @@ const CGB_WE_DISABLE_LATE* {.intdefine.} = 2
   ## map read keeps one more window tile); 1 is inert, 3 and 4 lose
   ## `weon_wx18_weoff_weon_wx80` [cgb]. Double speed is unpinned: the
   ## CPU-clock form (1 dot there) scores the same.
+const WIN_TAIL_PASSED_MATCH* {.intdefine.} = 1
+  ## Whether mode 3's tail stops waiting on a window whose WX match the
+  ## shifter has already passed (a match LCDC.5 refused, the bit set again
+  ## later on the line): that window cannot start on this line, so the line
+  ## retires as a plain one (fetch_work_pending). 0 = the old rule, which held
+  ## the tail for any unstarted enabled window with WX <= 166 and so charged
+  ## such a line the whole pipeline lead, two dots. DocBoy `cgb_dmg_mode/ppu/
+  ## m3_lcdc_win_en_change_multiple_wx_timing_ly{10,32,38}_*` and `_nops6_*`
+  ## (WX = LY, the match refused by an LCDC.5 pulse, the bit back on eight
+  ## dots later, an object at X = 79..88 timing the HBlank interrupt): every
+  ## count wants the line two dots shorter, the object's penalty unchanged;
+  ## SameBoy (CGB E) agrees on all of them (+15). Device-neutral: no DMG row
+  ## moves (full runner), a refused DMG match is the same refused match.
+const CGB_WE_ENABLE_FETCH_LATE* {.intdefine.} = 2
+  ## Dots a CGB LCDC.5 rise takes to reach the fetcher's window abort, the
+  ## rise's side of CGB_WE_DISABLE_LATE: a window tile's map read on the
+  ## rise's dot or the next still sees the bit low, so once the fall has
+  ## landed the window ends there (WIN_EN_ABORT). DocBoy `cgb_dmg_mode/ppu/
+  ## visual/m3_lcdc_win_en_change_multiple_wx_*` (mealybug's ROM with other
+  ## tile data; a fall and a rise eight dots apart, twice per line): on the
+  ## lines where the rise lands on the map read after a pushed window tile
+  ## (WX = 2, 3, 22, 23, 30, 31), DocBoy and SameBoy (CGB E) both end the
+  ## window at that tile, where dingbat drew on to the next fall (24 pixels to
+  ## the rest of the line). 286 picture rows across the 51 frames now match
+  ## SameBoy; 1 leaves 177 of them dingbat's alone; 3 moves one row of
+  ## `*_nops6_sprites_x{16,24}` from SameBoy's picture to DocBoy's, which
+  ## disagree there (one-sided: 2 is the fall's value). No row passes on it
+  ## alone (the frames keep DocBoy's glitch pixels, I3); gambatte's `window`
+  ## rows are unmoved by 1..3.
 const HDMA_START_GRANT_FETCH* {.intdefine.} = 2
   ## An FF55 write that arms an HBlank transfer inside mode 0 raises the block's
   ## request at once, but the CPU hands the bus over at the end of its NEXT
@@ -1118,8 +1160,9 @@ const WIN_EN_HOLD_ZERO*       {.intdefine.} = 2
   ## white column.
 const CGB_WIN_EN_DEFER*       {.intdefine.} = 5
   ## Dots a CGB window start stays revocable: LCDC.5 going low inside them
-  ## abandons the restart, restores the BG FIFO and fetcher to the match dot,
-  ## and charges only the dots the restart ran (0 = the start commits on the
+  ## abandons the restart (at single speed keeping its first tile,
+  ## CGB_WIN_REVOKE_KEEP; at double speed restoring the BG FIFO and fetcher
+  ## to the match dot) and charges only the dots the restart ran (0 = the start commits on the
   ## match dot and always costs six). gambatte `window/late_disable*` [cgb]
   ## pairs at the same match/write dots with STAT reads one M-cycle apart
   ## bracket mode 3's length, and with `k = W - D` every pair fits
@@ -1131,6 +1174,23 @@ const CGB_WIN_EN_DEFER*       {.intdefine.} = 5
   ## empty for all five dots: the undo is nine scalars plus one replayed
   ## shifter step, counted in tick_shifter's FIFO-empty arm. Double speed
   ## also revokes k = 6 (WIN_REVOKE_DS_PUSH).
+const CGB_WIN_REVOKE_KEEP*    {.intdefine.} = 1
+  ## What a revoked CGB window start (CGB_WIN_EN_DEFER) leaves at single
+  ## speed: 1 = the restart is cut where the undo lands, its first window
+  ## tile is pushed there (fetched in full) and the line keeps the window's
+  ## tile grid, LCDC.5 low ending the window at the next map read; 0 = the
+  ## old undo, which restored the background FIFO and fetcher of the match
+  ## dot. The charge is the same `W - D` either way, so gambatte's
+  ## `window/late_disable*` rows (length only) are unmoved. DocBoy
+  ## `cgb_dmg_mode/ppu/m3_lcdc_win_en_change_multiple_wx_timing_ly{33..37}_*`
+  ## time the HBlank interrupt with an object at X = 79..88 behind a start
+  ## revoked at k = 5..1: the counts fit exactly one charge per line, W = k
+  ## (gambatte's rule), and only with the object's penalty on the window's
+  ## tile grid (`11 - min(5, (x - (WX - 7)) mod 8)`), never on the
+  ## background's (+38). SameBoy (CGB E) also keeps the window grid but
+  ## charges 6 at every k; both draw the window tile at WX - 7 in the
+  ## `visual/` frames (DocBoy with its glitched bytes for k <= 4). Double
+  ## speed keeps the undo (no row measures it).
 const CGB_WIN_REVOKE_LAG*     {.intdefine.} = 1
   ## Shifter dots between the LCDC.5 write that revokes a CGB window start and
   ## the dot the undo lands on. Not free: the undo restores the match dot's
@@ -2659,6 +2719,7 @@ type
     vdma_residue*:     int16   # VDMA_BUS_RESIDUE: the cartridge bus's byte at the hand-over (+1; 0 = none)
     hdma_boundary_grant*: bool # HDMA_BOUNDARY_ACQUIRE: the block now granted is at an instruction boundary
     we_off_dot*:       int32   # CGB_WE_DISABLE_LATE: dot a CGB LCDC.5 fall reaches the fetcher
+    we_on_dot*:        int32   # CGB_WE_ENABLE_FETCH_LATE: dot a CGB LCDC.5 rise reaches it (per line)
     wd_fifo*:          GbPixelFifo  # WIN_REVOKE_DS_PUSH: the ring at a CGB double-speed window start
     wd_ds_push*:       bool
     wd_ds_ly*:         uint8

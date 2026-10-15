@@ -864,7 +864,13 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       # the current window tile"); the BG column is taken from the screen
       # position this fetch lands at and the fine scroll is not re-paid. On
       # the DMG, the position one pixel right of it (WIN_ABORT_COL_LEAD).
-      if ppu.fetching_window and not window_enabled(ppu) and
+      # On a CGB the fetcher sees LCDC.5 late on both edges: a fall reaches it
+      # CGB_WE_DISABLE_LATE dots on, a rise CGB_WE_ENABLE_FETCH_LATE dots on,
+      # so a rise just before this read does not save the window.
+      if ppu.fetching_window and
+         (not window_enabled(ppu) or
+          (CGB_WE_ENABLE_FETCH_LATE != 0 and ppu.cgb and
+           ppu.cycle_counter < gb.we_on_dot)) and
          (CGB_WE_DISABLE_LATE == 0 or not ppu.cgb or
           ppu.cycle_counter >= gb.we_off_dot):
         fetcher_window_abort(ppu)
@@ -1896,8 +1902,12 @@ proc fetch_work_pending(ppu: GbFifoPpu; for_irq = false): bool {.inline.} =
       if ppu.lx < int32(GB_WIDTH) - 1 or
          (CGB_WIN_TAIL_LAST != 0 and ppu.cgb and not ppu.obj_last_px):
         return true
+  # Only a match still ahead of the shifter: one refused earlier on the line
+  # (LCDC.5 low at it, set again since) starts nothing and owes nothing
+  # (WIN_TAIL_PASSED_MATCH, gb.nim).
   if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
-     int(ppu.wx) <= wx_max: return true
+     int(ppu.wx) <= wx_max and
+     (WIN_TAIL_PASSED_MATCH == 0 or ppu.win_lx >= ppu.lx): return true
   # A DMG line carried out of the previous one (DMG_WIN_LAST_PX_CARRY) owes
   # nothing for its own WX = 166 match: AGE stat-mode-window-dmgC reads the
   # line as 172 + SCX, the same as WX = 167, and gambatte window/m2int_wxA6_*
@@ -1948,15 +1958,47 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
     tick_bg_fetcher(ppu, gb)
   tick_shifter(ppu, gb)
 
+when WIN_EN_REVOKE_ANY and CGB_WIN_REVOKE_KEEP != 0:
+  proc win_revoke_keep(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## CGB_WIN_REVOKE_KEEP: the cut-short restart pushes the window's first
+    ## tile on this dot (its fetch completed here) instead of being undone, so
+    ## the line keeps the window's tile grid and pays only the dots the
+    ## restart ran; LCDC.5 low then ends the window at the next map read
+    ## (WIN_EN_ABORT).
+    let m = if (ppu.lcd_control and 0x40'u8) == 0: 0x1800 else: 0x1C00
+    let o = (ppu.fetcher_x and 0x1F) +
+            (((ppu.current_window_line shr 3) * 32) and 0x3FF)
+    ppu.tile_num   = ppu.vram[0][m + o]
+    ppu.tile_attrs = ppu.vram[1][m + o]
+    let sel = bg_window_tile_data(ppu) != 0
+    let num = if sel: int(ppu.tile_num) else: int(cast[int8](ppu.tile_num))
+    let base = (if sel: 0x0000 else: 0x1000) + 16 * num
+    let bank = int((ppu.tile_attrs and 0b0000_1000) shr 3)
+    var row = ppu.current_window_line and 7
+    if (ppu.tile_attrs and 0b0100_0000) != 0: row = 7 - row
+    ppu.tile_data_low  = ppu.vram[bank][base + row * 2]
+    ppu.tile_data_high = ppu.vram[bank][base + row * 2 + 1]
+    discard try_push_bg_pixels(ppu, gb)
+    ppu.fetch_counter = 0
+    when defined(gb_win_trace):
+      echo "WINKEEP ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+           " num=", toHex(ppu.tile_num, 2)
+    tick_shifter(ppu, gb)
+
 when WIN_EN_REVOKE_ANY:
   proc win_defer_undo(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     ## LCDC.5 went low inside a revocable CGB window start: restore the match
-    ## dot's state and replay its shifter step. The charge is where this
+    ## dot's state and replay its shifter step (a CGB at single speed keeps
+    ## the window's first tile instead, win_revoke_keep). The charge is where this
     ## lands: an undo on dot X leaves the line X - D dots behind
     ## (CGB_WIN_REVOKE_LAG). The BG FIFO is empty for every revocable dot, so
     ## nothing else happened in them.
     ppu.win_defer     = 0'u8          # before the replay: it must not re-enter
     ppu.win_revoking  = false
+    when CGB_WIN_REVOKE_KEEP != 0:
+      if ppu.cgb and gb.memory.current_speed == 0'u8:
+        win_revoke_keep(ppu, gb)
+        return
     ppu.fifo.head     = ppu.wd_head
     ppu.fifo.tail     = ppu.wd_tail
     ppu.fifo.size     = ppu.wd_size
@@ -2263,7 +2305,8 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
     # its own map column and row, the abort at the map read cannot fire, and
     # the retire owes no tail fetch (fetcher_retired).
     (not ppu.fetching_window or
-     (ppu.fetcher_x != 0 and window_enabled(ppu) and not ppu.win_revoking)) and
+     (ppu.fetcher_x != 0 and window_enabled(ppu) and not ppu.win_revoking and
+      (CGB_WE_ENABLE_FETCH_LATE == 0 or cc >= gb.we_on_dot))) and
     ppu.fetch_counter >= 0 and
     lx_end < ppu.m3_retire_lx and
     (ppu.win_lx < ppu.lx or ppu.win_lx > lx_end) and
@@ -2666,6 +2709,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               window_enabled(ppu) and
               ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
           fifo_reset_sprite(ppu)
+          when CGB_WE_ENABLE_FETCH_LATE != 0: gb.we_on_dot = int32.low
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
           when WIN_TAIL_FLAG_LEAD != 0: ppu.win_tail_end = 0
           ppu.lx = 0

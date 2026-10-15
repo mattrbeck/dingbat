@@ -1890,6 +1890,11 @@ proc docboy_run_one(dev, kind: string; instr: int; expected, rom: string;
     # STOP mode freezes the scheduler (mem_tick_stopped), but DocBoy's clock
     # keeps counting: one M-cycle per stopped step, as the panel pacing does.
     ticks += (if dt > 0: dt else: int64(4 shr gb.memory.current_speed))
+    # A frame the panel shows while STOP holds the PPU (stop_panel at the
+    # STOP, then mem_tick_stopped's pacing): DocBoy's PPU runs on and reaches
+    # VBlank, dingbat's is frozen in whatever mode STOP caught it, so this
+    # presentation stands in for that VBlank (the CGB `ppu/visual/stop_*`).
+    let stopped_frame = gb.cpu.stopped and gb.ppu.frame
     docboy_end_frame(gb)
     if instr >= 0: continue
     var crossed = false
@@ -1921,7 +1926,8 @@ proc docboy_run_one(dev, kind: string; instr: int; expected, rom: string;
         if fatal: return (false, mem_state(gb, mem).strip() & " = fail value (tick " & $ticks & ")")
       else:
         pending = true
-    if pending and gb.ppu.lcd_enabled and (gb.ppu.lcd_status and 3'u8) == 1'u8:
+    if pending and (stopped_frame or
+                    (gb.ppu.lcd_enabled and (gb.ppu.lcd_status and 3'u8) == 1'u8)):
       pending = false
       checked = true
       let (d, first) = docboy_fb_diff(gb, want)

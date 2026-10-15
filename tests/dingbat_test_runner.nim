@@ -2111,6 +2111,49 @@ const NotScored: seq[(string, string)] = @[
     "SameBoy (CGB E) fails both. The DMG rows of the same family ARE scored " &
     "and pass (docs/gb-failure-triage.md I2). (build_docboy_rows, " &
     "DocboyNotScored)"),
+  ("DocBoy: compat-mode window frames under mid-line LCDC.5 pulses (51)",
+    "`cgb_dmg_mode/ppu/visual/m3_lcdc_win_en_change_multiple_wx_*`: mealybug's " &
+    "ROM (WX = LY, LCDC.5 pulsed low twice in mode 3) with DocBoy's tile data, " &
+    "on a CPU CGB E with a DMG cart. mealybug ships captures of this ROM for " &
+    "the DMG only, so no CGB picture of it was measured. dingbat matches " &
+    "SameBoy (CGB E) on all but 18 of the 7,344 lines; on about 520 DocBoy " &
+    "alone draws other bytes for a window tile cut short by LCDC.5 (cut k <= 4 " &
+    "dots after the WX match: the high plane is the tile index; k = 0: two " &
+    "colour-0 tiles), on 87 SameBoy alone differs. The same ROMs' timing twins " &
+    "(`m3_lcdc_win_en_change_multiple_wx_timing_*`, 90) ARE scored and pass; " &
+    "DocBoy disables two signed-addressing variants itself (\"glitch is " &
+    "different\"). (docs/gb-failure-triage.md I3; build_docboy_rows, " &
+    "DocboyNotScored)"),
+  ("DocBoy: the CGB LCDC.4 tile-data glitch, DocBoy's variations (73)",
+    "`change_{bg,win}_tile_data_glitch_*` in `cgb_dmg_mode/ppu/visual` (63) and " &
+    "`cgb/ppu/visual` (10): LCDC.4 flipped across a bitplane read with objects " &
+    "and windows at other phases. Per line over the 73 frames: 1,562 lines are " &
+    "DocBoy's alone, 1,831 SameBoy's alone (SameBoy, CGB E, passes none), 954 " &
+    "three-way, 82 dingbat's alone. dingbat's glitch (CGB_TDSEL_GLITCH) is " &
+    "fitted to the hardware captures mealybug ships for CGB C and D " &
+    "(`m3_lcdc_tile_sel_change`, `_change2`, `_win_change`) and to " &
+    "cgb-acid-hell, all of which pass; the family's other 56 rows (26 " &
+    "`mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`) ARE scored and " &
+    "pass. (docs/gb-failure-triage.md I3; build_docboy_rows, " &
+    "DocboyNotScored)"),
+  ("DocBoy: the CGB background column resumed after the window at WX = 25 (1)",
+    "`cgb/ppu/visual/window_bg_reprise_wx25`: the window disabled on the WY " &
+    "line, the background resuming where the fetcher stood. DocBoy differs in " &
+    "3 pixels on line 12 (x = 26, 32, 33); SameBoy (CGB E) draws dingbat's " &
+    "frame pixel for pixel, and the 17 CGB siblings (`_wx8`..`_wx24`, the " &
+    "same rule at every other WX) ARE scored and pass. (docs/gb-failure-" &
+    "triage.md I12; build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: the CGB panel across LCD off/on (13)",
+    "`cgb/ppu/visual/turn_off_y*`: \"Depending on the timing, the next lines " &
+    "are either kept, rendered, or cleared\" (the ROMs' own comment): the " &
+    "references keep on the panel the rows drawn before LCDC.7 went low and " &
+    "show later rows white or redrawn. Pan Docs (LCDC.7): \"When the display " &
+    "is disabled the screen is blank\", and on re-enabling \"the screen will " &
+    "stay blank during the first frame\", which dingbat's frames follow. " &
+    "SameBoy (CGB E) fails all 13. The three `_b` partners checked a frame " &
+    "later (`turn_off_y42_turn_on_y148_round2 #2`, `..._y52_wait144 #2`, " &
+    "`..._y52_wait150 #2`) ARE scored and pass. (docs/gb-failure-triage.md " &
+    "I12; build_docboy_rows, DocboyNotScored)"),
 ]
 
 proc provenance_line(): string =
@@ -3311,6 +3354,148 @@ const DocboyNotScored: seq[string] = @[
   # A CGB trigger 2 M-cycles before a sweep clock (2).
   "cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14284",
   "cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_step0_delay14284_round1",
+  # Compat-mode window frames under mid-line LCDC.5 pulses (51).
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_0000",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_00ff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_ff00",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_0000_win_ffff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_0000",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_00ff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_afff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ff00",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x16",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x16_sources",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources_b",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x17_sources_c",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x18",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x18_sources",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_sources",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_sources_b",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x19_wly",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x20",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x20_sources",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_b",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_c",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x21_sources_d",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x22",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x22_sources",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x23",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x23_sources",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_nops6_sprites_x24",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_00ff_win_ffff_win_tilenum_02",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_0000",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_00ff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_ff00",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ff00_win_ffff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_0000",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_00ff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_ff00",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_bg_ffff_win_ffff",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly10_second_tile_source_both_bytes",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly10_second_tile_source",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly32_to_40_tilenums",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_a",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_b",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_c",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_d",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_e",
+  "cgb_dmg_mode/docboy/ppu/visual/m3_lcdc_win_en_change_multiple_wx_ly38_lx31_extra_pixel_f",
+  # The CGB LCDC.4 tile-data glitch, DocBoy's variations (73).
+  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops26",
+  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops27",
+  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops28",
+  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29",
+  "cgb/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops30",
+  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops26",
+  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops27",
+  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops28",
+  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops29",
+  "cgb/docboy/ppu/visual/change_win_tile_data_glitch_window_nops30",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_shift8_delay0_alt_sprite_data_var4",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var8",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var9",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var10",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var11",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var12",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var13",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var14",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var15",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var16",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var17",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var18",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var19",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var20",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var21",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var24",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var40",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var41",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var42",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43_alt",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43_alt2",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43_alt3",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var43_alt4",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var44",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_mealybug_var44_alt",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops26",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops27",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops28",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_a",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_b",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_c",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_d",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var1",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var2",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var3",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops28",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops29",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops30",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops31",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops32",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops85",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops98",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops99",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops100",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops101",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var4_nops102",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var5_nops30",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var5_nops30_alt",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var6_nops30",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops29_var10",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops30",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops34",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops35",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops36",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops37",
+  "cgb_dmg_mode/docboy/ppu/visual/change_bg_tile_data_glitch_sprites_nops38",
+  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops26",
+  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops27",
+  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops28",
+  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops29",
+  "cgb_dmg_mode/docboy/ppu/visual/change_win_tile_data_glitch_window_nops30",
+  # The CGB background column resumed after the window at WX = 25 (1).
+  "cgb/docboy/ppu/visual/window_bg_reprise_wx25",
+  # The CGB panel across LCD off/on (13).
+  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y148_round1",
+  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y148_round1 #2",
+  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y148_round2",
+  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y52_wait144",
+  "cgb/docboy/ppu/visual/turn_off_y42_turn_on_y52_wait150",
+  "cgb/docboy/ppu/visual/turn_off_y50_skip_y16_stall_nops50",
+  "cgb/docboy/ppu/visual/turn_off_y50_skip_y16_stall_nops51",
+  "cgb/docboy/ppu/visual/turn_off_y50_skip_y16_stall_nops99",
+  "cgb/docboy/ppu/visual/turn_off_y50_skip_y16_stall_nops100",
+  "cgb/docboy/ppu/visual/turn_off_y48_skip_y16_stall_nops50",
+  "cgb/docboy/ppu/visual/turn_off_y48_skip_y16_stall_nops51",
+  "cgb/docboy/ppu/visual/turn_off_y50_stall_nops50",
+  "cgb/docboy/ppu/visual/turn_off_y50_stall_nops51",
 ]
 
 proc docboy_glob(pat, s: string): bool =

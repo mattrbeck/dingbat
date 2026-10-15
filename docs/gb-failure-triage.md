@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,575 / 9,128 at `DocboyRev` (99 more not scored, `DocboyNotScored`), every
+(`tests/README.md`, "The DocBoy suite"): 8,633 / 8,990 at `DocboyRev` (237 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1201,15 +1201,58 @@ question. Families, largest first:
   7, `retrigger_square_wave_duty_75_{alt,b}_*` 4, `change_period_nr1{3,4}_
   no_retrigger_75_*` 3) are a retrigger on a duty step at double speed, the
   square-trigger grid of H1; SameBoy fails all 14. Not chased.
-* **I3. CGB compatibility-mode picture (233).** 63 `palettes_checksum_*`:
+* **I3. CGB compatibility-mode picture (66 left of 233; 114 not scored).** 63 `palettes_checksum_*`:
   dingbat's skip-boot hand-off always loads the default compatibility palette,
   where the boot ROM picks one by the title checksum (Pan Docs, "Power Up
   Sequence", compatibility palettes); SameBoy, running the boot ROM, passes
   all three sampled. The rest are mid-mode-3 LCDC writes in compat mode:
-  `m3_lcdc_win_en_change_multiple_wx_*` (104, half of them `$FFF0` timing
-  rows) and `change_{bg,win}_tile_data_glitch_*` (73); SameBoy fails the
-  three sampled pictures and passes 4 of 6 sampled `$FFF0` rows. The palette
-  part is dingbat's skip-boot; the glitch part is contested.
+  `m3_lcdc_win_en_change_multiple_wx_*` and `change_{bg,win}_tile_data_glitch_*`.
+  * Closed 2026-10-14: all 53 red `m3_lcdc_win_en_change_multiple_wx_timing_*`
+    (90/90). Each ROM writes WX = LY, pulses LCDC.5 low twice in mode 3 (a
+    fall and a rise eight dots apart, three NOPs between the pulses) and times
+    the HBlank interrupt with `inc a`, an object at X = 79..88 moving the
+    count; the counts were fitted per line against the object penalty
+    `11 - min(5, (x - origin) mod 8)` on the window's and on the background's
+    tile grid. Two rules: (1) a WX match LCDC.5 refused earlier on the line
+    no longer holds mode 3's tail for an unstarted window
+    (`WIN_TAIL_PASSED_MATCH`, fetch_work_pending: the line was 2 dots long;
+    ly10/32/38 and nops6, +15, SameBoy CGB E agrees on all); (2) a CGB window
+    start revoked k = 1..5 dots after the match (`CGB_WIN_EN_DEFER`) keeps its
+    first tile and the window's tile grid instead of being undone
+    (`CGB_WIN_REVOKE_KEEP`, single speed): lines 33..37 fit exactly
+    W = k (gambatte's `window/late_disable*` charge) on the window grid and
+    nothing on the background grid (+38). SameBoy keeps the window grid too
+    but charges 6 at every k. Also `CGB_WE_ENABLE_FETCH_LATE` = 2: an LCDC.5
+    rise reaches the fetcher's abort two dots late, as the fall does; in the
+    51 red `visual/m3_lcdc_win_en_change_multiple_wx_*` frames the lines
+    where the rise lands on a window map read (WX = 2, 3, 22, 23, 30, 31)
+    now end the window where DocBoy and SameBoy both end it. Those frames
+    stay red: they differ from SameBoy only on DocBoy's glitch pixels (below).
+  * Not scored since 2026-10-14 (ledger "DocBoy: compat-mode window frames
+    under mid-line LCDC.5 pulses", 51), the `visual/m3_lcdc_win_en_change_multiple_wx_*` frames: per
+    line, dingbat now matches SameBoy (CGB E) on all but 18 of the 51 x 144
+    rows; the rest are where DocBoy alone draws other bytes for a window
+    tile cut short by LCDC.5 (k <= 4: low plane fetched, high plane the tile
+    index; k = 0: two tiles of colour 0) and 87 rows where SameBoy alone
+    differs. mealybug's `m3_lcdc_win_en_change_multiple_wx` has no CGB
+    capture (DMG only), so nothing measured decides those bytes. Seen on
+    the way, no row scores it: on a k = 0 line (the match on the fall's own
+    dot, `ly10`/`ly38` timing: no charge, background grid) DocBoy and SameBoy
+    both still count a window line (the `_wly` frame's window rows run one
+    ahead of dingbat's from line 10), and SameBoy draws one window tile at the
+    next background tile; dingbat refuses the match outright.
+  * Not scored since 2026-10-14 (ledger "DocBoy: the CGB LCDC.4 tile-data
+    glitch, DocBoy's variations", with the 10 `cgb/ppu` twins),
+    `change_{bg,win}_tile_data_glitch_*` (63 compat + 10 CGB): per line,
+    of 73 frames, 1,562 rows are DocBoy's alone, 1,831 SameBoy's alone, 954
+    three-way, 82 dingbat's alone (`mealybug_var42`). dingbat's LCDC.4
+    glitch (`CGB_TDSEL_GLITCH`) is fitted to mealybug's CGB C/D hardware
+    captures of `m3_lcdc_tile_sel_change{,2}` and cgb-acid-hell, which pass.
+  * Left: the 66 palette-table rows (63 `palettes_checksum_*`,
+    `palettes_old_license_33_new_license_01_checksum_01`, and `change_bgp_or_
+    bug_checksum_d1{,_first_dot}`, whose title "INCREDIBLE" picks a boot
+    palette too; SameBoy, through the boot ROM, passes both), which Matt
+    keeps red.
 * **I4. HDMA / GDMA (182 -> 87).** Closed 2026-10-14 (95 rows; 89 here, `gb.nim`
   knobs, and the six double-speed rows with I7):
   the LCD-enable line has no OAM scan, so the VRAM DMA's HBlank input sees
@@ -1528,14 +1571,60 @@ question. Families, largest first:
   mode_cgb_flag_84` as the silent control). OPRI itself (`$FF6C` bit 0, Pan Docs "FF6C — OPRI")
   is now a register in CGB mode, $FF in compatibility mode
   (`cgb/ppu/opri_write_read`, `boot_regs_cgb`; the AGS read $FE at hand-off).
-* **I12. CGB pictures (46).** About 25 are the LCD panel model:
-  `ppu/visual/turn_off_y*_*`, `stop_*`: DocBoy models the CGB panel keeping already-drawn rows, and
-  stalling, when the LCD is switched off mid-frame (its own slow-motion
-  camera study); dingbat's frame is the PPU's output. SameBoy fails the
-  sampled `turn_off_*` rows (and passes `stop_ly42_during_hblank`). A
-  DocBoy model, scored but not chased. The rest are window and tile-data
-  glitches (`window_wx0_scx*`, `change_wx_glitch_*`,
-  `change_{bg,win}_tile_data_glitch_*`), which SameBoy also fails.
+* **I12. CGB pictures (19 left of 46; 24 not scored), and CGB PPU timing.**
+  * Not scored since 2026-10-14 (ledger "DocBoy: the CGB panel across LCD
+    off/on", 13): `ppu/visual/turn_off_y*`. The ROMs' own comment: "Depending
+    on the timing, the next lines are either kept, rendered, or cleared": the
+    references keep rows drawn before LCDC.7 went low, where Pan Docs (LCDC.7)
+    has the screen blank while the LCD is off and through the first frame
+    after it is re-enabled, as dingbat draws; SameBoy (CGB E) fails all 13.
+    The `_b` partners checked a frame later pass and stay scored. The 10
+    `change_{bg,win}_tile_data_glitch_*` CGB-mode rows went with I3's family.
+  * Closed 2026-10-14: `stop_during_hblank`, `stop_during_oam_scan`,
+    `stop_ly42_during_hblank #2` (the `_b` reference). STOP with the LCD on
+    blacks a CGB screen outside mode 3 (Pan Docs, "Using the STOP
+    Instruction"), which stop_panel already drew, but DocBoy's runner checks
+    at the next mode-1 M-cycle and dingbat's PPU stays frozen in STOP; the
+    harness now takes the frame the panel presents during STOP as that VBlank
+    (`docboy_run_one`, tests/README.md), which can only turn red rows green.
+    SameBoy (CGB E) passes all three.
+  * Left, a hardware question: `stop_ly42_during_hblank` (the `_a`
+    reference) and `stop_during_pixel_transfer_alt` STOP inside the first
+    frame after LCDC.7 is set and want that frame's lines on the panel
+    (lines 0..42, then black; the whole picture held for the mode-3 STOP).
+    DocBoy and SameBoy draw the first frame; Pan Docs (LCDC.7) says "the
+    screen will stay blank during the first frame", which dingbat follows.
+    The decider: the same ROM on Matt's GBC, does the top of the screen show
+    the coloured bars?
+  * Left, a hardware question: `window_wx0_scx{1..7}` and
+    `window_wx0_scx1_fancy_tile0` (8), the CGB twins of I6's DMG rows (WX = 0
+    with SCX & 7 = s: DocBoy and SameBoy CGB E shift the window by s + 1,
+    capped at 7, Pan Docs by s, dingbat by s). Same decider on the GBC.
+  * Left: `change_wx_glitch*` (9). WX = 7 at the start of each line and WX =
+    I written ~88 dots later, I = 0..127 over the frame. SameBoy (CGB E)
+    passes `wx6_nops16`, `wx7_nops17`, `wx8_nops17`. Black-box isolation on
+    wx7_nops17 with every mid-line write made a no-op but one (`wxpatch2.py`
+    in the cgb-ppu scratch): WX = 6 written mid-line on a line L (11, 14, 18
+    tried) changes line L on both emulators and, on SameBoy alone, every later
+    line too: the window's rows run one behind from L + 1, as if L had not
+    counted as a window line (DocBoy's reference draws L blank). WX = 0, 4, 5
+    there agree on both, as does WX = 6 written at the line's start as well.
+    dingbat's line L already moves left of the write as dingbat times it
+    (the CGB WX pipeline), so the window-line count is the open question.
+    Not modelled.
+  * Not scored since 2026-10-14 (ledger "DocBoy: the CGB background column
+    resumed after the window at WX = 25"): `window_bg_reprise_wx25`, 3 pixels
+    of DocBoy's (row 12, x = 26 and 32..33) where SameBoy CGB E draws dingbat's
+    frame pixel for pixel; its 17 siblings pass.
+  * Closed 2026-10-14, `double_speed/ppu/double_speed_ppu_vram_write_block_
+    timing_ly0_{1,3}_out_of_4` (2): VRAM writes one double-speed M-cycle apart
+    across the LCD-on line's mode 3. The CGB write lock there now closes one
+    CPU M-cycle and a dot past the mode-3 flag edge (5 dots single speed, in
+    gambatte `ly0_late_vramw_*`'s 5..8 bracket; 3 double, DocBoy brackets
+    2..3) and opens `LCD_ON_LINE0_LOCK_LEAD` dots past the mode-0 edge, as
+    the read lock does (DocBoy brackets 2..3). SameBoy (CGB E) passes both;
+    nothing else moves (`VRAM_WRITE_LINE0_CGB_GRACE`,
+    `VRAM_WRITE_LINE0_OPEN_LEAD`, gb.nim).
 * **I13. Rows with scripted input (23 of 71; 13 left).** Through `--input`; 58 pass,
   every joypad picture and `stop_joypad*`/`stop_key*` interrupt row among
   them. Red:

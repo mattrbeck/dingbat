@@ -451,7 +451,7 @@ Docheinstein/docboy-test-suite. The runner fetches the archive at `DocboyRev`
 `roms/*/docboy/` (~355 MB, ~10,000 ROMs). Only `docboy/` is DocBoy's own: the
 manifests also vendor other suites (725 entries), which are scored from
 upstream, and DocBoy disables 645 of its own entries; both are in the
-`NotScored` ledger. So are 99 of DocBoy's own rows whose expectation is not
+`NotScored` ledger. So are 237 of DocBoy's own rows whose expectation is not
 established hardware behaviour (`DocboyNotScored` in the runner: row-name
 globs, one ledger entry per family with its evidence).
 
@@ -478,7 +478,13 @@ modes; ticks count from the hand-off at `$0100`, the run stops at 100,000,000.
 - Otherwise every 100,000 ticks: memory rows read their addresses (all of
   DocBoy's own: `$FFF0`) and pass on `value` (1) or stop failed on
   `fail_value` (2); framebuffer rows arm a check for the next M-cycle in which
-  the PPU is in mode 1 and pass when the frame matches.
+  the PPU is in mode 1 and pass when the frame matches. In STOP, DocBoy's PPU
+  runs on to that VBlank while dingbat's stays frozen in the mode STOP caught
+  it in, so there the next frame the panel presents (STOP's own, then one per
+  frame time of STOP) stands in for it: on a CGB with the LCD on that frame
+  is black outside mode 3 (Pan Docs, "Using the STOP Instruction"), which the
+  `cgb/ppu/visual/stop_*` references show. More checks can only turn a red
+  framebuffer row green.
 - Framebuffers compare exactly in RGB565 (the PNG's RGB888 truncated,
   `r>>3, g>>2, b>>3`). DMG shades are DocBoy's `$84A0 $4B40 $2AA0 $1200`;
   CGB colours are the raw BGR555 widened (`G6 = G5*2 + G5>>4`), no colour
