@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-15 00:40:53 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-15 02:03:23 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**8662/8987 passed.**
+**8662/8985 passed.**
 
 ## docboy/dmg/cpu
 
@@ -46,13 +46,9 @@ All 11 tests passed (DMG dmgABC).
 | dmg/docboy/ppu/visual/window_wx0_scx5 | timeout, last check: 8/23040 pixels differ, first at row 0 col 3: got $1200 want $84A0 |
 | dmg/docboy/ppu/visual/window_wx0_scx6 | timeout, last check: 8/23040 pixels differ, first at row 0 col 2: got $1200 want $84A0 |
 
-## docboy/dmg/mbc/mbc1 (11/12 passed)
+## docboy/dmg/mbc/mbc1
 
-11/12 tests passed on DMG dmgABC, 1 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/mbc/mbc1/mbc1_initial_ram | $FFF0=$02 = fail value (tick 100004) |
+All 11 tests passed (DMG dmgABC).
 
 ## docboy/dmg/mbc/mbc3
 
@@ -103,13 +99,9 @@ All 158 tests passed (DMG dmgABC).
 
 All 68 tests passed (DMG dmgABC).
 
-## docboy/dmg/serial (76/77 passed)
+## docboy/dmg/serial
 
-76/77 tests passed on DMG dmgABC, 1 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/serial/serial_two_players_basic_transfer_master + serial_two_players_basic_transfer_slave_sc_00 | timeout, last check: master 8888 px (first at row 3 col 0: got $84A0 want $1200), slave 8888 px (first at row 3 col 0: got $84A0 want $1200) |
+All 76 tests passed (DMG dmgABC).
 
 ## docboy/dmg/joypad
 

@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-15 00:40:53 · commit c794b57e · game-boy-test-roms v7.0*
+*Generated: 2026-10-15 02:03:23 · commit be1d3980 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1585
-- **Pass:** 1560
-- **Fail:** 25
+- **Pass:** 1562
+- **Fail:** 23
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -17,7 +17,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
-| [Game Boy - DocBoy](results_docboy.md) | 50 | 70 | 👀 |
+| [Game Boy - DocBoy](results_docboy.md) | 52 | 70 | 👀 |
 | [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
@@ -40,13 +40,13 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
-## Game Boy - DocBoy (50/70)
+## Game Boy - DocBoy (52/70)
 
 | Test | Device | Result |
 |------|--------|--------|
 | docboy/dmg/cpu | DMG dmgABC | 👌 11/11 passed |
 | docboy/dmg/ppu | DMG dmgABC | 👀 1238/1260 passed |
-| docboy/dmg/mbc/mbc1 | DMG dmgABC | 👀 11/12 passed |
+| docboy/dmg/mbc/mbc1 | DMG dmgABC | 👌 11/11 passed |
 | docboy/dmg/mbc/mbc3 | DMG dmgABC | 👌 18/18 passed |
 | docboy/dmg/mbc/mbc5 | DMG dmgABC | 👌 1/1 passed |
 | docboy/dmg/mbc/huc3 | DMG dmgABC | 👀 2/8 passed |
@@ -57,7 +57,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/dmg/timers | DMG dmgABC | 👌 10/10 passed |
 | docboy/dmg/interrupts | DMG dmgABC | 👌 158/158 passed |
 | docboy/dmg/dma | DMG dmgABC | 👌 68/68 passed |
-| docboy/dmg/serial | DMG dmgABC | 👀 76/77 passed |
+| docboy/dmg/serial | DMG dmgABC | 👌 76/76 passed |
 | docboy/dmg/joypad | DMG dmgABC | 👌 32/32 passed |
 | docboy/dmg/apu | DMG dmgABC | 👀 303/307 passed |
 | docboy/cgb/boot | CGB cgbE | 👀 48/68 passed |
@@ -317,3 +317,5 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **DocBoy: the CGB LCDC.4 tile-data glitch, DocBoy's variations (73)** — `change_{bg,win}_tile_data_glitch_*` in `cgb_dmg_mode/ppu/visual` (63) and `cgb/ppu/visual` (10): LCDC.4 flipped across a bitplane read with objects and windows at other phases. Per line over the 73 frames: 1,562 lines are DocBoy's alone, 1,831 SameBoy's alone (SameBoy, CGB E, passes none), 954 three-way, 82 dingbat's alone. dingbat's glitch (CGB_TDSEL_GLITCH) is fitted to the hardware captures mealybug ships for CGB C and D (`m3_lcdc_tile_sel_change`, `_change2`, `_win_change`) and to cgb-acid-hell, all of which pass; the family's other 56 rows (26 `mealybug_shift*`, 24 `mealybug_var*`, 6 `sprites_nops*`) ARE scored and pass. (docs/gb-failure-triage.md I3; build_docboy_rows, DocboyNotScored)
 - **DocBoy: the CGB background column resumed after the window at WX = 25 (1)** — `cgb/ppu/visual/window_bg_reprise_wx25`: the window disabled on the WY line, the background resuming where the fetcher stood. DocBoy differs in 3 pixels on line 12 (x = 26, 32, 33); SameBoy (CGB E) draws dingbat's frame pixel for pixel, and the 17 CGB siblings (`_wx8`..`_wx24`, the same rule at every other WX) ARE scored and pass. (docs/gb-failure-triage.md I12; build_docboy_rows, DocboyNotScored)
 - **DocBoy: the CGB panel across LCD off/on (13)** — `cgb/ppu/visual/turn_off_y*`: "Depending on the timing, the next lines are either kept, rendered, or cleared" (the ROMs' own comment): the references keep on the panel the rows drawn before LCDC.7 went low and show later rows white or redrawn. Pan Docs (LCDC.7): "When the display is disabled the screen is blank", and on re-enabling "the screen will stay blank during the first frame", which dingbat's frames follow. SameBoy (CGB E) fails all 13. The three `_b` partners checked a frame later (`turn_off_y42_turn_on_y148_round2 #2`, `..._y52_wait144 #2`, `..._y52_wait150 #2`) ARE scored and pass. (docs/gb-failure-triage.md I12; build_docboy_rows, DocboyNotScored)
+- **DocBoy: fresh cart RAM reading $FF (1)** — `dmg/mbc/mbc1/mbc1_initial_ram` wants every byte of a new MBC1 cart's RAM to read $FF before anything is written. That is an emulator convention, not hardware: a new battery cart holds whatever its SRAM cells settled to (flash and EEPROM saves erase to $FF; static RAM does not), and Pan Docs says nothing. No suite in the tree reads cart RAM before writing it; mooneye's `emulator-only/mbc1/ram_*` read it disabled ($FF, open bus) and clear it first. dingbat keeps $00 for a cart with no save file; $FF stays a choice open to Matt (it would change every new save's first boot). SameBoy passes it. (docs/gb-failure-triage.md I "Small"; build_docboy_rows, DocboyNotScored)
+- **DocBoy: a serial slave shifting with SC = $00 (1)** — the two-player `dmg/serial/serial_two_players_basic_transfer_master + serial_two_players_basic_transfer_slave_sc_00`: the slave writes SC = $00 and expects the master's byte and the serial interrupt (its source: "Serial transfer should start even with SC = 0"). Pan Docs ("Serial Data Transfer"): the externally clocked side "has to set SC's Bit 7 (that is, SC=$80) to enable the serial port", which dingbat follows; Gekkio's SCLK experiment (8 external edges counted with the main clock stopped) does not say what bit 7 = 0 does. The SC = $80 pair (`..._master + ..._slave`) IS scored and passes. Hardware question row 24 in docs/hwprobe-questions.md (the pair on two consoles and a cable). (build_docboy_rows, DocboyNotScored)

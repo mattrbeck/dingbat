@@ -2158,6 +2158,29 @@ const NotScored: seq[(string, string)] = @[
     "later (`turn_off_y42_turn_on_y148_round2 #2`, `..._y52_wait144 #2`, " &
     "`..._y52_wait150 #2`) ARE scored and pass. (docs/gb-failure-triage.md " &
     "I12; build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: fresh cart RAM reading $FF (1)", "`dmg/mbc/mbc1/mbc1_initial_ram` " &
+    "wants every byte of a new MBC1 cart's RAM to read $FF before anything " &
+    "is written. That is an emulator convention, not hardware: a new battery " &
+    "cart holds whatever its SRAM cells settled to (flash and EEPROM saves " &
+    "erase to $FF; static RAM does not), and Pan Docs says nothing. No suite " &
+    "in the tree reads cart RAM before writing it; mooneye's " &
+    "`emulator-only/mbc1/ram_*` read it disabled ($FF, open bus) and clear " &
+    "it first. dingbat keeps $00 for a cart with no save file; $FF stays a " &
+    "choice open to Matt (it would change every new save's first boot). " &
+    "SameBoy passes it. (docs/gb-failure-triage.md I \"Small\"; " &
+    "build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: a serial slave shifting with SC = $00 (1)", "the two-player " &
+    "`dmg/serial/serial_two_players_basic_transfer_master + " &
+    "serial_two_players_basic_transfer_slave_sc_00`: the slave writes SC = " &
+    "$00 and expects the master's byte and the serial interrupt (its source: " &
+    "\"Serial transfer should start even with SC = 0\"). Pan Docs (\"Serial " &
+    "Data Transfer\"): the externally clocked side \"has to set SC's Bit 7 " &
+    "(that is, SC=$80) to enable the serial port\", which dingbat follows; " &
+    "Gekkio's SCLK experiment (8 external edges counted with the main clock " &
+    "stopped) does not say what bit 7 = 0 does. The SC = $80 pair " &
+    "(`..._master + ..._slave`) IS scored and passes. Hardware question " &
+    "row 24 in docs/hwprobe-questions.md (the pair on two consoles and a " &
+    "cable). (build_docboy_rows, DocboyNotScored)"),
 ]
 
 proc provenance_line(): string =
@@ -3503,6 +3526,10 @@ const DocboyNotScored: seq[string] = @[
   "cgb/docboy/ppu/visual/turn_off_y48_skip_y16_stall_nops51",
   "cgb/docboy/ppu/visual/turn_off_y50_stall_nops50",
   "cgb/docboy/ppu/visual/turn_off_y50_stall_nops51",
+  # Fresh cart RAM reading $FF (1).
+  "dmg/docboy/mbc/mbc1/mbc1_initial_ram",
+  # A serial slave shifting with SC = $00 (1).
+  "dmg/docboy/serial/serial_two_players_basic_transfer_master + serial_two_players_basic_transfer_slave_sc_00",
 ]
 
 proc docboy_glob(pat, s: string): bool =

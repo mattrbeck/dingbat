@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,662 / 8,987 at `DocboyRev` (240 more not scored, `DocboyNotScored`), every
+(`tests/README.md`, "The DocBoy suite"): 8,662 / 8,985 at `DocboyRev` (242 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1752,9 +1752,10 @@ question. Families, largest first:
   mooneye `emulator-only/mbc1/ram_*` reads it disabled ($FF, open bus) and
   clears it before round 2 -- and $FF is an emulator convention (a fresh
   battery cart holds whatever its SRAM cells settled to; flash-erased $FF is
-  real only for flash and EEPROM saves). Left red: changing it moves every
-  new save's first boot; proposed NotScored, or $FF as a convention after a
-  playtest-train run),
+  real only for flash and EEPROM saves). Not scored since 2026-10-15
+  (`DocboyNotScored`, ledger "DocBoy: fresh cart RAM reading $FF"): dingbat
+  keeps $00, and $FF stays Matt's choice of convention, which would move
+  every new save's first boot),
   `write_tima_while_reloading_*` (2; closed 2026-10-15: the TIMA store lands
   in the M-cycle after the overflow, Pan Docs' cycle A, where a write stops
   the IF flag being set; dingbat's model already took the reload back, but
@@ -1774,8 +1775,9 @@ question. Families, largest first:
   SC's Bit 7 (that is, SC=$80) to enable the serial port", Gekkio's SCLK
   experiment (an external-clock shift register counting 8 edges with the
   main clock stopped) does not say what SC bit 7 = 0 does, and SameBoy's
-  driver here cannot run two-player rows. Proposed NotScored against Pan
-  Docs; the pair of ROMs on two consoles and a cable settles it), DMG ppu
+  driver here cannot run two-player rows. Not scored since 2026-10-15
+  (ledger "DocBoy: a serial slave shifting with SC = $00"); the pair of ROMs
+  on two consoles and a cable settles it, hardware question 24), DMG ppu
   `$FFF0` rows (2 of 3 left, below), six DMG
   STOP/HALT pictures whose reference is DocBoy's blank-panel colour
   (`$AD00`, Pan Docs' "whiter than color #0"), which dingbat draws as shade 0
