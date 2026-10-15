@@ -8011,3 +8011,118 @@ train's results key, so the change needs a fresh baseline.
 §72). Klonoa 2's lost frame is (b) (contention, §62). Mario Party's
 sparkles are (d), and (c) for which programming time the cart has. Its
 probe exists. No `@known` is needed: the checkpoints pass.
+
+## §90. The Urbz: goals a frame behind is the street's random load, seeded from the frame the first-boot flash format ended, 2026-10-14
+
+**Symptom.** `goals` (f8643, `compare=text`) is SLIP -1 against both
+references in all four dingbat configurations of the baseline
+`af41e9b5c64e-src-028dc3a8c6ea`. The references are IDENTICAL to each
+other. It passes; it surfaced once a text checkpoint's windows were judged
+(fb7ff522, 53668273). The cart is FLASH512 (library string
+`FLASH512_V131`).
+
+**Stable.** dingbat-bios, mGBA and the second reference each played the
+`[new]` timeline twice (9,417 frames). Each pair of runs is hash-identical
+on every frame, and each reproduces all fifteen of the baseline's
+checkpoint windows. The HLE configurations equal dingbat-bios at every
+checkpoint.
+
+**What the checkpoint sees: the 30 Hz phase.** The street runs its game
+logic every second frame (the counter at 0x03004904). START at f8547 opens
+the goals screen at the next logic tick, and the load stalls the counter
+for 40 frames in all three. From f8139/f8141 both references tick on odd
+frames and enter the load at f8573; dingbat ticks on even frames from f8140
+and enters at f8574. Every later frame of dingbat is the references' frame
+one earlier. The phase is set by two street loads, whose lengths in frames
+are:
+
+| load | dingbat | mGBA | second reference |
+|---|---|---|---|
+| entering the street, from f6396 | 59 | 61 | 62 |
+| back to the street, from f8087 (the second reference f8088) | 53 | 52 | 53 |
+
+Against the second reference the parity parts at the first load, against
+mGBA at the second. The pictures part at f6398. dingbat and the second
+reference are hash-identical on every frame from f4160 to f6397, and
+their logic ticks share every frame from f671 to f6396.
+
+**The loads are random: a Mersenne Twister seeded from the boot's frame
+counter.** The first load generates the street. Its loop at 0x080299DE
+(an `ldr` of a 20-byte ROM table entry per pass, 364 passes a call) runs
+18,202 passes in dingbat and 36,039 in mGBA, so the paths differ, not the
+prices. The generator is seeded once, at f1812-1813 when START leaves the
+main menu (0x0804AF30): the seed at 0x030021CC is built from the V-blank
+counter at 0x0300489C and a flag, then fed to an MT19937-style table
+(0x0804B12C: 623 words, multiplier 69069). The seeds are 0x6EE8D1 in
+dingbat, 0x6EC851 in the second reference and 0x6D1191 in mGBA, from
+counters 1,747, 1,745 and 1,718. The counter counts every V-blank once the
+boot hands over. That is at f58 in dingbat, f60 in the second reference
+and f81 in mGBA. The language screen's save at f660 then costs dingbat and
+the second reference 10 uncounted frames and mGBA 15.
+
+**The decisive test.** dingbat-bios with a `poke8` command (a scratch
+driver, not committed) was given the references' three boot-relative
+counters (0x0300489C, 0x030048A8, 0x030048AC) at f1800, with nothing else
+changed. With the second reference's (each 2 lower), its `goals` window
+equals the second reference's on 60 of 60 frames, against 31 as built.
+With mGBA's, it equals mGBA's on 60 of 60. Poking the seed word alone
+after f1813 changes nothing, because the table is already seeded. A
+sweep of the counter offset from -32 to +6 frames puts `goals` on the
+references' frame for 21 offsets and on dingbat's for 18, with no
+pattern. dingbat's own offset, 0, is one of the 18; the second
+reference's -2 and mGBA's -28 are among the 21. The checkpoint is a coin
+flip on the frame the boot ends in.
+
+**Where the boot's frames go: the first-boot flash format.** On a blank
+cart the game programs ~20,000 bytes from f6, a byte at a time. After each
+byte it calls a status routine copied to IWRAM until the byte reads back
+(the loop at 0x0806B984; a timer-interrupt flag at 0x03006748 is its
+timeout).
+
+* dingbat (ID 1B32, no busy state) passes the loop once a byte, ~50 cycles
+  after the data store: 437 bytes a frame, ~643 cycles a byte. The format
+  ends at f52.
+* mGBA (ID 1B32, busy after an erase, §64) passes it ~6.7 times a byte at
+  61 cycles a pass (1,970 passes in a frame): ~295 bytes a frame, ~952
+  cycles a byte. Its format ends at f75: 23 frames.
+* The second reference identifies as SST (D4BF), and the library runs its
+  SST routines. They add a 4,096-pass loop at every sector (f6, f15, f25,
+  f35, f44). A scratch dingbat reporting D4BF, with no busy state as
+  before, starts the counter at f59, one frame later. Its last
+  boot step (0x03002E84 to 0x0806) lands on line 159, under one scan line
+  (1,232 cycles) before the V-blank, after 16 M cycles of boot. The second
+  reference is a step behind there (0x0429 at the end of its f60, where
+  the scratch build already holds 0x0521) and starts at f60. That frame is a hair's race on the whole boot's
+  pricing. Without a trace of the second reference it is not pinned to a
+  loop.
+
+**Who is right: the cart's chip, unmeasured.** No real flash programs a
+byte in zero time. SST's datasheet gives 14 us typical (~235 cycles,
+§35). GBATEK leaves the Panasonic part's typical times blank. Each ~14
+cycles of busy beyond the ~50-cycle first poll costs ~20,000 × 14 cycles,
+one frame of boot. So the console almost certainly boots later than
+dingbat and the second reference, by an unknown number of frames. Which
+side of the coin `goals` lands on then follows from that count, per the
+sweep. Neither reference's frame is evidence. mGBA's busy time is its own
+model (§64). The second reference's frame is its SST routine plus a
+one-line race.
+
+**The probe: `flashprog`, as it stands** (`tests/roms/payloads/flashprog.s`,
+r0table row `flashprog`, NEEDS_CART), with **this cartridge**, The Urbz
+(BOCE), in the slot and the console booted holding SELECT+START. The cells
+in the emulators are as §64 lists them: cell 0 1B32 in dingbat and mGBA,
+D4BF in the second reference. Cell 4 (the bare poll) is 34. Cell 1 (a
+same-value program) is 51 in dingbat and the second reference, and 678 in
+mGBA after an erase. Cell 3 (erasing a blank sector) is 45, 45 and 30,046.
+Cell 0 says which library path the console runs. Cell 1 less cell 4 is the
+busy time B. The boot then ends about (B - 50) / 14 frames after dingbat's
+f52 on the Panasonic path, plus the erase cells' share. The `goals` frame
+is not predicted by the cell alone: it needs a dingbat build with the
+measured busy model and a replay, because every frame of boot length
+reseeds the street. A measured busy time per chip ID belongs in
+`storage/flash.nim` (§35, §64), with Advance Wars and Mario vs. Donkey
+Kong as its other checks.
+
+**Status: (c), no core change.** The slip is the first boot's flash format,
+carried through the game's random seed: (d) for the coin flip, (c) for the
+chip's time. No `@known` is needed: `goals` is a SLIP and passes.
