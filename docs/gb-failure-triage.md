@@ -1190,6 +1190,16 @@ question. Families, largest first:
     pixel's dot, not which window pixel it is. Spec against two references:
     a hardware question, not changed. The decider: these ROMs on the MGB,
     the length of the black run at the left of line 0 for SCX = 1..6.
+  * Found on the way, no scored row: the same ROM patched to WX = 1..8 x
+    SCX = 0..7. SameBoy shifts the window by SCX only at WX = 0 (Pan Docs'
+    WX = 0 paragraph: the window "is switched to before the initial fine
+    scroll adjustment", so later WX are not); dingbat also shifts every line
+    that starts as a window line (WX = 1..5: the window discard is
+    `7 - WX + (SCX and 7)`, fifo_sample_smooth_scroll) and not WX >= 6. The
+    mode-3 length those lines get is pinned (gambatte `window/m2int_wx03_
+    scx{2,3,5}_*`, mealybug `m3_window_timing*`, which SameBoy also matches);
+    the picture is not. One untried way: keep the discard's dots, move the window
+    tile right by SCX & 7 (a first push of 8 + (SCX and 7) pixels).
 * **I7. Speed-switch interrupt and STOP timing (79; 20 left).** Closed
   2026-10-14: all 49 `double_speed/interrupts/speed_switch_to_*` and
   `*_serial_halted_*` rows and 10 of the non-input `double_speed/interactive/
