@@ -7769,6 +7769,9 @@ Separately, `compare=text` turns a pure one-frame lag into MAJOR, because
 it never asks whether the hash windows share a frame. Testing the windows
 first, as the pixel path does, would make this checkpoint a SLIP. That is a
 harness decision, not made here.
+**Made the same night (53668273):** a text-judged checkpoint whose picture
+appears in the other side's window is now a SLIP. `language` reads SLIP -1
+against both references and passes. The chip question above still stands.
 
 ## §88. Yu-Gi-Oh! - The Eternal Duelist Soul: start_duel forty frames off is a rock-paper-scissors draw, the RNG one step behind since the boot load, 2026-10-14
 
