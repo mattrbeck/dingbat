@@ -12,6 +12,12 @@
 # nothing) instead of typing a few letters. The game saves the profile
 # ("Saving...") and drops into Shroom City. [load] boots straight to "Welcome
 # to Party World" instead of the new-game profile interview.
+# The five keyboards are judged by pixels, not OCR: a star's sparkles (~100 px)
+# cross the prompt's text, and their phase is the first-boot format's EEPROM
+# programming time (dingbat built at 101000 cycles a block draws the second
+# reference's keyboards bit for bit), so OCR read sparkles as letters. The
+# typed profile is checked by the save, byte-identical in all six emulators.
+# playtest-bugs.md, "Gunstar Super Heroes, Klonoa 2, Mario Party Advance".
 [new]
 # until text 'Press any button' timeout=900 every=10  [reached dingbat-bios+140 mgba+140 nba+140]
 wait 144
@@ -70,7 +76,7 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint name window=30 compare=text
+checkpoint name window=30
 press A after=90
 # mash A until text born timeout=900 every=60  [taps dingbat-bios:3 mgba:3 nba:3]
 tap A times=3 every=60 hold=4
@@ -119,7 +125,7 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint hobby window=30 compare=text
+checkpoint hobby window=30
 press A after=90
 # mash A until text 'just enter' timeout=1500 every=90  [taps dingbat-bios:2 mgba:2 nba:2]
 tap A times=2 every=90 hold=4
@@ -164,7 +170,7 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint comment window=30 compare=text
+checkpoint comment window=30
 press A after=90
 # mash A until text dream timeout=1500 every=60  [taps dingbat-bios:10 mgba:10 nba:10]
 tap A times=10 every=60 hold=4
@@ -209,7 +215,7 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint dream window=30 compare=text
+checkpoint dream window=30
 press A after=90
 # mash A until text secret timeout=1500 every=60  [taps dingbat-bios:2 mgba:3 nba:4]
 tap A times=4 every=60 hold=4
@@ -254,7 +260,7 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint secret window=30 compare=text
+checkpoint secret window=30
 press A after=90
 # mash A until text Saving timeout=1500 every=60  [taps dingbat-bios:13 mgba:13 nba:13]
 tap A times=13 every=60 hold=4

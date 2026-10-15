@@ -25,6 +25,12 @@
 # (backgrounds scroll at different phases on the file select and vision map).
 # nba does not read back its own 8 KB battery file: on [load] its title has
 # no CONTINUE (f1226) and its file 1 is NO DATA, so it starts a new game.
+# The pause menu is a still darken (EVY 9) that dingbat truncates as the SP
+# photographs do, one step under both references on ~9k pixels; OCR read the
+# HUD's unchanged "1/30" differently, so `pause` is judged by pixels. The
+# menu's load opens a frame later in dingbat (its VRAM DMAs pay the renderer's
+# contention); the still picture does not show it, back_to_map does (SLIP -1).
+# playtest-bugs.md, "Gunstar Super Heroes, Klonoa 2, Mario Party Advance".
 [new]
 wait 600
 wait 300
@@ -88,7 +94,7 @@ release
 wait 30
 press START
 wait 40
-checkpoint pause window=30 compare=text
+checkpoint pause window=30
 press DOWN after=10
 press DOWN after=10
 press A

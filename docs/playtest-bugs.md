@@ -7840,3 +7840,170 @@ second reference's agreement is its boot lead, not a witness for the load.
 **Status: (b), no core change.** The script now carries two `@known` lines,
 for `duel_field` and the audio (`start_duel` is a SLIP, a pass). Its notes
 say why the duel is not played.
+
+## §89. Gunstar Super Heroes, Klonoa 2, Mario Party Advance: three text comparisons that read rounding and sparkles, 2026-10-14
+
+**Symptom.** In the baseline `f2a983d050ef-src-028dc3a8c6ea` (the second
+reference's driver fixed by §65, §82 and §83), three checkpoints fail in
+every dingbat configuration with the references MINOR to each other:
+Gunstar Super Heroes `new_data` (f1584), Klonoa 2 `pause` (f5449) and
+Mario Party Advance `secret` (f7442). Before the fix the references
+disagreed there too. All three are `compare=text`: the verdict is the OCR
+text's similarity (dingbat 0.56, 0.71 and 0.54/0.58; the references 0.82,
+1.0 and 0.80, exactly on the 0.8 threshold).
+
+**Stable, and only in the OCR.** dingbat-bios, mGBA and the second
+reference were each played twice more on the frozen scripts. In all three
+games the checkpoint hashes, the 61-frame windows and the verdicts were the
+same as the baseline's in every emulator (the OCR is cached by the
+picture's bytes, so equal pictures read alike). But no two emulators show
+the same picture at any of the three checkpoints. The references "agree"
+only in what OCR reads. In pixels they are as far apart from each other as
+from dingbat:
+
+| checkpoint | dingbat ~ mGBA | dingbat ~ second reference | mGBA ~ second reference |
+|---|---|---|---|
+| Gunstar `new_data` | 4,395 px, all one step | 9,473 px, all one step | 7,539 px, all one step |
+| Klonoa 2 `pause` | 8,462 px, all one step | 9,611 px, all one step | 3,342 px, all one step |
+| Mario Party `secret` | 87 px | 50 px | 97 px |
+
+**Gunstar `new_data`: the alpha blend's rounding.** EWRAM, palette RAM, OAM
+and VRAM are identical in all three at f1584. IWRAM differs between dingbat
+and the second reference only on the stack; mGBA alone is 2-3 behind on
+four counters (0x030006AC, 0x030034D2, 0x030034F2, 0x030062D8). DISPCNT is
+0x3741, BLDCNT 0x0264 (BG2 and the backdrop over BG1) and BLDALPHA 0x0510
+(EVA 16, EVB 5) in all three. In every differing channel value dingbat is
+one step lower, against both references: §72's truncation, which the SP's
+blendprobe photographs show. So the second reference draws the same game
+state 9,473 pixels a step brighter, and OCR reads dingbat's "NORMAL" in
+Cyrillic. The windows share two frames at offset 0 in every pair, so the
+menus no longer run out of phase, which was the script's reason for
+`compare=text`.
+
+**Klonoa 2 `pause`: the darken's rounding, over a frame the pause menu's
+load lost.** The pause screen is still (one hash in each window). EWRAM is
+identical in all three at f5449, and palette RAM, OAM and VRAM in dingbat
+and mGBA. BLDCNT is 0x00DE (darken BG1-3 and OBJ), BLDY 9 (mGBA's
+readback), inside WIN0 over lines 0-143. Every differing channel value is
+one step, with dingbat lower: §40's darken rule, also photographed. Lines
+144-159 (the HUD) are identical in all three, yet OCR reads its "1/30" as
+"143o" in dingbat and "1:30" in both references.
+
+IWRAM shows something the picture does not. A frame counter (0x03004CA0,
+with 0x03004C8C and 0x03004CA4) and an RNG word stepped once a frame
+(0x03000DA0) are one step behind in dingbat. They were equal in all three
+at `gameplay` (f5178) and every frame to f5374, where START is pressed. The
+counters then stop while the menu loads: for two frames in both
+references, which resume at f5377, and for three in dingbat, which resumes
+at f5378. Traced from the f5373 V-blank, in dingbat-bios and mGBA:
+
+* f5375 is a BIOS decompression routine (0x1074-0x1130). The two price it
+  to the cycle over 270k instructions.
+* mGBA enters IntrWait (BIOS 0x340) at line 159 of f5376, **47 cycles
+  before the V-blank**. dingbat enters it 7,575 cycles later, after its
+  V-blank handler, and so waits a whole frame.
+
+On the 395k instructions both run, dingbat is **302 cycles dearer**:
+
+| | dingbat - mGBA |
+|---|---|
+| the two DMA3 copies into BG VRAM at lines 137 and 141 (1,024 halfwords IWRAM -> 0x0600E000, 2,572 against 2,052 cycles; 1,536 halfwords EWRAM -> 0x060008C0, 7,713 against 6,157; mode 0, four BGs) | +2,076 |
+| a map loop at 0x080320E0 (`ldrb`, two `ldr`s and an `ldrh` of data, `strh` to VRAM), 540 passes at 48 cycles against 46 | +1,080 |
+| f5374's V-blank handler and game code | +328 |
+| a software divide at 0x08051748, 540 calls: its ALU ops take 1 cycle from a full prefetch buffer where mGBA takes 2; its `push`/`pop` cost more | -3,414 |
+| the rest, spread | +232 |
+
+* The DMAs are the renderer's contention on VRAM in drawn lines. It is
+  console-measured (`contmap.s` cells in r0-agb.json, `dmavram.s`, §62),
+  and neither reference models it.
+* The map loop is §29's class: data accesses from gamepak code under the
+  prefetcher, where `slotexec.s` sides with dingbat.
+* The divide's 1-cycle ALU ops are the prefetcher_full behaviour of the
+  hardware-verified alyosha ROMs, which mGBA fails (§29).
+
+**The decisive test:** dingbat-bios built with `-d:CONTENTION=false` resumes
+the counter at f5377, the references' frame. Its `back_to_map` window
+(f5817-f5877) equals mGBA's on 61 of 61 frames, against 52 as built. That
+SLIP(-1) against mGBA is this frame. The second reference shares no frame
+there with either (its own phase, §77). The HLE configuration equals
+dingbat-bios on all 61.
+
+**Mario Party Advance `secret`: a star's sparkles, phased by the first
+boot's EEPROM format.** Every keyboard checkpoint of the profile interview
+(`name`, `hobby`, `comment`, `dream`, `secret`) has the same signature. 50
+to 307 pixels differ, all in one box of about 25 by 45 pixels that follows
+the star at the prompt, and the references differ from each other as much
+as from dingbat. At `secret` the sparkles cross "Secret?", and OCR reads
+them as letters. No frame matches between any pair from f1674 to f7472.
+
+* *State, not rendering.* mGBA was loaded at f7300 and every IWRAM and
+  EWRAM byte where it differs from dingbat was set to dingbat's (989
+  bytes, `poke8`). It then draws dingbat's frames exactly, 142 of 142, to
+  f7442. Its counter alone, or the 0x030029C8 table of particle timers
+  alone, matches none or 2.
+* *The sparkles' RNG.* The word at 0x0203A4B8 is stepped every 8 frames in
+  the interview. dingbat and the second reference draw the same sequence
+  (0xB9FE0000, 0xFE021F4A, 0x5FDA91D0, ...), dingbat 20 frames later (f884
+  against f864) and later 16. mGBA's sequence is out of step from its
+  second draw.
+* *The 20 frames are the format.* A blank cart formats its 64 Kbit EEPROM
+  at boot ("Saving...", from f484). dingbat built with
+  `-d:EEPROM_SETTLE_CYCLES=101000` equals dingbat as built to f818, the
+  format's end. From there it equals the second reference on every frame of
+  f1152-f3272 and f3362-f7472. All five keyboard checkpoints are then the
+  second reference's pictures bit for bit. A 115005 build matches mGBA on
+  only 755 frames: mGBA also has lag frames of its own (its frame counter,
+  0x03004400, is a frame ahead from f201, a load that dingbat and the
+  second reference both lose).
+* The six emulators' battery files are byte-identical (SHA-1 5082396c...),
+  so the typed profile is the same everywhere.
+
+**Who is right.** Gunstar and Klonoa 2's pictures are dingbat's: truncation,
+photographed on the SP (§40, §72). Klonoa 2's lost frame is the
+console-measured VRAM contention. mGBA makes the V-blank by 47 cycles; it
+would miss by about 2,000 if it paid the contention, where dingbat misses by
+about 255. The second reference was not traced; it resumes on mGBA's
+frame. Mario
+Party's sparkles follow the cart's EEPROM programming time. That is the
+chip's, unmeasured, as in §36, §40 and §82. dingbat keeps GBATEK's 108,368,
+and the second reference's boots place it near 101,000 (§82). The
+existing probe decides it for this cart: `tests/roms/payloads/eesettle.s`
+(r0table row `eesettle`, NEEDS_CART), with Mario Party Advance (B8ME) in
+the slot and the console booted holding SELECT+START. `python3
+tools/hwlink/r0table.py eesettle 3 2 0 1 --emulators-only` predicts:
+
+| cell | dingbat, dingbat-bios | mGBA |
+|---|---|---|
+| 0x3 | FFFFFFFF | FFFFFFFF |
+| 0x2 | 00000350 | 00000351 |
+| 0x0 / 0x1 | 0001A74A (108,362) | 00000026 |
+
+Whatever it says, a checkpoint on the sparkles compares the format's
+time, not the profile.
+
+**What changed: the scripts.** A text comparison is judged before the
+window and one-step rules, so a picture that pixels would call MINOR
+(colour-effect rounding, which the classifier exempts by design) or SLIP
+can fail on what OCR makes of the rounding. §73 was the same. The three
+scripts now judge these screens by pixels:
+
+* Gunstar's `title`, `main_menu`, `difficulty` and `new_data` give SLIP 0
+  (shared frames) or MINOR.
+* Klonoa 2's `pause` gives MINOR (one step).
+* Mario Party's five keyboards give MINOR (at least 98% of pixels equal);
+  the typed text is covered by the save comparison.
+
+Played in all four default configurations with audio and cross-loads, all
+three games PASS. Re-judging the three games' stored baseline runs with the
+harness's own `compare_checkpoints` and the new modes gives the same
+verdicts, and every untouched checkpoint's verdict as stored.
+
+A classifier rule would avoid the class instead: in `compare=text`, accept
+a shared window frame or an every-pixel-within-a-step picture before
+reading text. It is not made here, because `tools/playtest` is part of the
+train's results key, so the change needs a fresh baseline.
+
+**Status: no core change.** Gunstar and Klonoa 2's pictures are (b) (§40,
+§72). Klonoa 2's lost frame is (b) (contention, §62). Mario Party's
+sparkles are (d), and (c) for which programming time the cart has. Its
+probe exists. No `@known` is needed: the checkpoints pass.

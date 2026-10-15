@@ -8,7 +8,13 @@
 # Red, Normal, New Data, Earth stage: shoot through the soldiers, kill the
 # big grunt mini-boss (score 3000), go left into the ship's hall and fight.
 # Session notes: title/menus have animated backgrounds out of phase on all
-# three (compare=text). In the stage nba draws shot sparks and enemy
+# three (they were compare=text). Since the second reference's frames end at
+# the V-blank (playtest-bugs.md §65, §82, §83) all three share frames at
+# offset 0 there, and the menus' panels are alpha blends (EVA 16, EVB 5) that
+# dingbat truncates as the SP photographs do, one step under both references
+# on 4-9k pixels. OCR read those steps as other text ("new_data" MAJOR), so the
+# menus are judged by pixels again (playtest-bugs.md, "Gunstar Super Heroes,
+# Klonoa 2, Mario Party Advance"). In the stage nba draws shot sparks and enemy
 # positions slightly differently (f2706, f3546, f3706). In the ship hall
 # (f5122 onward) nba shows thin white horizontal lines across the
 # background at about scanlines 50 and 90 and draws the centre pillar
@@ -20,16 +26,16 @@ wait 300
 press START
 wait 90
 wait 60
-checkpoint title window=30 compare=text
+checkpoint title window=30
 press START
 wait 90
-checkpoint main_menu window=30 compare=text
+checkpoint main_menu window=30
 press A
 wait 90
-checkpoint difficulty window=30 compare=text
+checkpoint difficulty window=30
 press A
 wait 120
-checkpoint new_data window=30 compare=text
+checkpoint new_data window=30
 press A
 wait 180
 checkpoint stage_select window=30
