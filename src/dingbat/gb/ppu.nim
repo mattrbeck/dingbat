@@ -1774,8 +1774,11 @@ proc ppu_flush_hdma_bytes*(ppu: GbPpu; gb: GB) =
   ## not its dots have run.
   if not ppu.hdma_bytes_held: return
   ppu.hdma_bytes_held = false
+  # Bytes the VRAM bus refused in their own slots stay lost (VDMA_M3_PORT).
+  let lost = when VDMA_M3_PORT != 0: gb.fifo_ppu.vdma_held_lost else: 0'u16
   for byte in 0 ..< 0x10:
-    gb.memory.write_byte(gb, int(ppu.hdma_held_dst) + byte, ppu.hdma_held[byte])
+    if ((lost shr byte) and 1'u16) == 0'u16:
+      gb.memory.write_byte(gb, int(ppu.hdma_held_dst) + byte, ppu.hdma_held[byte])
 
 proc ppu_land_hdma_if_due*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## Land a held block if its dots have run. Checked at the points VRAM can be
@@ -1819,6 +1822,16 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
   let hold = HDMA_VISIBLE_DOTS != 0 and in_cpu_cycle
   # Never two blocks in the buffer at once; defensive only.
   if hold: ppu_flush_hdma_bytes(ppu, gb)
+  # A block that can meet mode 3 asks the VRAM bus before each byte
+  # (VDMA_M3_PORT, gb.nim). 32 dots from mode 0 or 1 reach mode 2 at most, so
+  # only a block starting in mode 2 or 3, or on the LCD-on line (whose first
+  # dots read as mode 0), pays for the question.
+  let fp = gb.fifo_ppu
+  let port = VDMA_M3_PORT != 0 and lcd_enabled(ppu) and
+             (ppu.mode_flag >= 2'u8 or ppu.first_line)
+  when VDMA_M3_PORT != 0:
+    if hold: fp.vdma_held_lost = 0'u16
+    fp.vdma_copying = port
   # The external bus is the VRAM DMA's for the whole copy: an OAM DMA slot
   # inside it stores the VRAM DMA's byte (VDMA_OAM_BUS_CAPTURE, gb.nim).
   # The acquire M-cycle (HDMA_OVERHEAD_LEADS, or HDMA_BOUNDARY_ACQUIRE for a
@@ -1836,15 +1849,37 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
   template copy_bytes(value: untyped) =
     for byte {.inject.} in 0 ..< 0x10:
       let val = value
-      if hold: ppu.hdma_held[byte] = val
-      else:    gb.memory.write_byte(gb, dst_base + byte, val)
+      when VDMA_M3_PORT != 0:
+        # Decided on the dot before the slot (below); a transfer's first byte
+        # has no such dot inside the transfer and asks about its own.
+        let lost = port and
+          (if fp.vdma_lost_dot == ppu.cycle_counter: fp.vdma_lost
+           else: vdma_port_busy(gb))
+        if hold:
+          ppu.hdma_held[byte] = val
+          if lost: fp.vdma_held_lost = fp.vdma_held_lost or (1'u16 shl byte)
+        elif not lost: gb.memory.write_byte(gb, dst_base + byte, val)
+      else:
+        if hold: ppu.hdma_held[byte] = val
+        else:    gb.memory.write_byte(gb, dst_base + byte, val)
       # Two dots per byte on the PPU axis at either speed (gambatte
       # dma/hdma_start_ds_*), i.e. four CPU-clock cycles per byte in double
       # speed (Pan Docs, CGB Registers): a block stalls 8 M-cycles at normal
       # speed and 16 fast M-cycles in double.
       mem_tick_bus(gb.memory, gb, 2 shl int(gb.memory.current_speed),
                    from_cpu = false)
-      mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
+      when VDMA_M3_PORT != 0:
+        if port:
+          # The next byte's slot meets the VRAM bus as it stands on the dot
+          # before the slot: ask with that dot about to run.
+          mem_tick_ppu(gb.memory, gb, 1, ignore_speed = true)
+          fp.vdma_lost = vdma_port_busy(gb)
+          fp.vdma_lost_dot = ppu.cycle_counter + 1
+          mem_tick_ppu(gb.memory, gb, 1, ignore_speed = true)
+        else:
+          mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
+      else:
+        mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
       # An in-flight OAM DMA latches the external bus at the end of each
       # machine M-cycle, four scheduler cycles at either speed. Read off the
       # scheduler because internal_dma_timer stops with the CPU and this does
@@ -1867,6 +1902,11 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
         if residue != 0:
           echo "RESIDUE ", toHex(residue - 1, 2), " pc=", toHex(gb.cpu.pc, 4)
     copy_bytes(if byte == 0 and residue != 0: uint8(residue - 1) else: 0xFF'u8)
+  when VDMA_M3_PORT != 0:
+    fp.vdma_copying = false
+    # The decision for the next slot carries only into the next block of a
+    # GDMA burst (charge_overhead false, ppu_run_gdma ends the burst).
+    if charge_overhead: fp.vdma_lost_dot = -1
   # The acquire/release overhead is per TRANSFER, charged after the copies so
   # the hold deadline below is measured from the last byte. `charge_overhead`
   # is false for every block of a GDMA burst but its last.
@@ -2237,6 +2277,7 @@ proc ppu_run_gdma*(ppu: GbPpu; gb: GB) =
   when HDMA_OVERHEAD_LEADS != 0: ppu_charge_hdma_overhead(ppu, gb)
   for _ in 0 .. int(ppu.hdma5):
     if not ppu_copy_hdma_block(ppu, gb, charge_overhead = false): break
+  when VDMA_M3_PORT != 0: gb.fifo_ppu.vdma_lost_dot = -1
   when HDMA_OVERHEAD_LEADS == 0: ppu_charge_hdma_overhead(ppu, gb)
   # GDMA is short of the hardware by some amount and ships at zero; see
   # GDMA_SETUP_MCYCLES in gb.nim.
@@ -2404,8 +2445,13 @@ proc ppu_store_scx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
 
 proc ppu_store_wx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   fifo_sync(gb)
+  let old = ppu.wx
   ppu.wx = val
   fifo_arm_window(gb.fifo_ppu)
+  when WIN_HEAD_WX_SCAN != 0:
+    # The head's comparator scan has passed some positions (WIN_HEAD_WX_SCAN).
+    if old != val and (ppu.lcd_status and 3'u8) == 3'u8:
+      fifo_wx_store_head(gb.fifo_ppu, old)
 
 template win_check_defer*(gb: GB): int32 =
   ## WIN_CHECK_DEFER_* for this console, in dots of this speed.

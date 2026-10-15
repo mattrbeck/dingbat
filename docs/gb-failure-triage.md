@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,662 / 8,985 at `DocboyRev` (242 more not scored, `DocboyNotScored`), every
+(`tests/README.md`, "The DocBoy suite"): 8,751 / 8,985 at `DocboyRev` (242 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1280,7 +1280,7 @@ question. Families, largest first:
     bug_checksum_d1{,_first_dot}`, whose title "INCREDIBLE" picks a boot
     palette too; SameBoy, through the boot ROM, passes both), which Matt
     keeps red.
-* **I4. HDMA / GDMA (182 -> 83; 3 not scored).** Closed 2026-10-14 (95 rows; 89 here, `gb.nim`
+* **I4. HDMA / GDMA (182 -> 1; 3 not scored).** Closed 2026-10-14 (95 rows; 89 here, `gb.nim`
   knobs, and the six double-speed rows with I7):
   the LCD-enable line has no OAM scan, so the VRAM DMA's HBlank input sees
   the mode 0 STAT shows there (`HDMA_LCDON_LINE0_M0`: an HBlank transfer armed
@@ -1315,20 +1315,38 @@ question. Families, largest first:
   for one granted after an opcode fetch (`HDMA_BOUNDARY_ACQUIRE`, the split
   `HDMA_OVERHEAD_LEADS` already records for gambatte `oamdmasrcC000_
   hdmasrc0000`); SameBoy passes 6 of the 16.
-  Open (83): 82 `gdma_ppu_on_pixel_transfer_conflict_relaxed_*`: DocBoy loses
-  three VRAM writes in four while the mode-3 fetcher holds the port (object
-  and window fetches move the holes); dingbat lands every byte, Pan Docs only
-  says to avoid it. SameBoy fails 69 of the 82 rows, but its VRAM shows
-  DocBoy's write map exactly from byte 32 on in 22 of them (all 8 BG-only, all
-  8 window, 6 object rows): its misses are a corruption of the first 32
-  bytes, before mode 3, which DocBoy's "relaxed" rows half ignore, and on the
-  other 61 the two differ only in the free slots around an object fetch. So
-  the port model is probably dingbat's to add; not done here (it is the FIFO
-  fetcher's VRAM schedule): a prototype dropping a write when the BG
-  fetcher's step two dots earlier is a map or bitplane read (`fetch_counter`
-  0-5) gets the BG phase of all 8 SCX rows, one byte early at mode-3 start
-  (the restarted first fetch) and up to one late at its end. Hardware
-  question 21 (gbedge p21 bytes 00-0F). 3 `gdma_source_wram_dma_source_ram_{160,256,
+  Closed 2026-10-15 (81 of the 82 `gdma_ppu_on_pixel_transfer_conflict_
+  relaxed_*`; `VDMA_M3_PORT`, gb.nim; `vdma_port_busy`, fifo_ppu.nim): a
+  128-byte GDMA (SCX 0..7), or 32..80 bytes beside a window (WX 16..23) or
+  one or two objects (X 1..50), started 110 M-cycles after an LCD enable so
+  it runs from line 1's OAM scan through mode 3; each ROM compares the
+  bytes from 16 on with its own map. The fetcher owns the VRAM bus on its
+  reads and a DMA byte that meets one is lost (Pan Docs: GDMA "blindly
+  attempts to copy the data, even if the LCD controller is currently
+  accessing VRAM", and says no more). Each read holds the bus for its
+  two-dot step, ending on the dot dingbat already reads on: the BG/window
+  fetcher's map, low and high steps (not the head's discarded fetch, and the
+  fetcher steps once more on the dot after the last pixel, which is what
+  ends SCX 2/4/6 a byte later than SCX 1/3/5/7), and an object's two plane
+  reads on the dots their LCDC.2 reads were already pinned to (mealybug
+  `m3_lcdc_obj_size_change`: M and M + 2 on the tail arm;
+  `OBJ_PLANE1_HEAD`, bounded only from above there, is now 4 for the head
+  arm's T + 2 and T + 4, where `_x01`..`_x06` put them). A byte whose slot
+  starts on dot c meets the bus as it stands on pipeline dot c - 1;
+  c - 2 keeps 37 rows (an odd object penalty moves the holes by a dot),
+  c keeps 1. The DMA asks only between the two dots of a byte in a block
+  that can reach mode 3; nothing runs on the dot loop (retired
+  instructions -0.03..-0.16% on Crystal, LADX DX, Shantae, Pokemon Blue,
+  frames and states identical). Three-way from byte 32 on: 22 rows all
+  agree (all 8 SCX, all 8 window, 6 object rows), on 60 object rows
+  SameBoy differs from both around the object fetch, and one row is
+  SameBoy's and dingbat's against DocBoy:
+  `..._64_bytes_sprite_y16_x07` (one left, proposed NotScored): an object
+  at X = 7 has the same 6-dot penalty as X = 5 and 6, and DocBoy puts its
+  plane reads where X = 5, 6 have them at X = 1..6 but two dots later at
+  X = 7 alone; SameBoy (and now dingbat) gives X = 7 the X = 6 map, byte
+  for byte from byte 7. Hardware question 21 (gbedge p21 bytes 00-0F)
+  now has dingbat predicting DocBoy's map. 3 `gdma_source_wram_dma_source_ram_{160,256,
   480_bytes_overflow}`: the ROMs `Memcmp` all of `$FE00-$FEFF`; dingbat's
   OAM matches byte for byte and only the `$FEA0-$FEFF` readback differs
   (SameBoy fails all three): not scored since 2026-10-15 with I10.
@@ -1341,8 +1359,8 @@ question. Families, largest first:
   ppu.nim. Hardware question 23 (gbedge p22 `VDMAOAM`) checks it.
   `..._during_oam_scan` now starts the same way and its OAM bytes match
   DocBoy's exactly; the VRAM bytes the block loses once mode 3 begins (6-8,
-  10-12, 14-15) are the open mode-3 VRAM-port family above (SameBoy fails
-  it too). The six double-speed `speed_switch_to_
+  10-12, 14-15) are the mode-3 VRAM port above (`VDMA_M3_PORT`), and it
+  passes with it (SameBoy fails it). The six double-speed `speed_switch_to_
   {double,single}_during_hdma{,_div,_stat}_round2` closed with the
   speed-switch stall's halt model (I7): the HBlank STAT request ends the
   stall, as in `speed_switch_to_double_interrupt_stat_round2` without a DMA.
@@ -1619,7 +1637,7 @@ question. Families, largest first:
   mode_cgb_flag_84` as the silent control). OPRI itself (`$FF6C` bit 0, Pan Docs "FF6C — OPRI")
   is now a register in CGB mode, $FF in compatibility mode
   (`cgb/ppu/opri_write_read`, `boot_regs_cgb`; the AGS read $FE at hand-off).
-* **I12. CGB pictures (19 left of 46; 24 not scored), and CGB PPU timing.**
+* **I12. CGB pictures (12 left of 46; 24 not scored), and CGB PPU timing.**
   * Not scored since 2026-10-14 (ledger "DocBoy: the CGB panel across LCD
     off/on", 13): `ppu/visual/turn_off_y*`. The ROMs' own comment: "Depending
     on the timing, the next lines are either kept, rendered, or cleared": the
@@ -1648,18 +1666,42 @@ question. Families, largest first:
     `window_wx0_scx1_fancy_tile0` (8), the CGB twins of I6's DMG rows (WX = 0
     with SCX & 7 = s: DocBoy and SameBoy CGB E shift the window by s + 1,
     capped at 7, Pan Docs by s, dingbat by s). Same decider on the GBC.
-  * Left: `change_wx_glitch*` (9). WX = 7 at the start of each line and WX =
-    I written ~88 dots later, I = 0..127 over the frame. SameBoy (CGB E)
-    passes `wx6_nops16`, `wx7_nops17`, `wx8_nops17`. Black-box isolation on
-    wx7_nops17 with every mid-line write made a no-op but one (`wxpatch2.py`
-    in the cgb-ppu scratch): WX = 6 written mid-line on a line L (11, 14, 18
-    tried) changes line L on both emulators and, on SameBoy alone, every later
-    line too: the window's rows run one behind from L + 1, as if L had not
-    counted as a window line (DocBoy's reference draws L blank). WX = 0, 4, 5
-    there agree on both, as does WX = 6 written at the line's start as well.
-    dingbat's line L already moves left of the write as dingbat times it
-    (the CGB WX pipeline), so the window-line count is the open question.
-    Not modelled.
+  * `change_wx_glitch*` (9; 7 closed 2026-10-15). WX = 6, 7 or 8 written in
+    mode 2 of each line and WX = I (0..127 down the frame) stored 85, 89 or
+    93 dots in (`nops16/17/18`; 117 for the plain rows' 24 NOPs): inside or
+    just after the head's first real fetch, where the comparator decides the line,
+    and then re-reached while the window draws, at every fetcher phase in
+    turn down the frame. Two mechanisms, each checked line by line against
+    SameBoy (CGB E, black box), which draws every line they change as
+    DocBoy does:
+    * `WIN_HEAD_WX_SCAN` (gb.nim; `fifo_wx_store_head`): the comparator
+      compares one position per dot through the head's first fetch,
+      position `fetch_counter - SCX & 7`, the pre-pixel slot (WX = 6) on the
+      dot before the first pixel, and a store reaches only the positions not
+      yet compared. At 85 dots (position 3) WX = 3..5 still start the line as
+      a window line and 1..2 do not; at 89 (position 7, the first pixel's
+      dot) a stored 6 has missed its slot (the line drew no window and did
+      not count, which put every later window row one behind), while an old
+      6 replaced there has already matched (`wx6_nops17` line 8). The head
+      latch is that scan seen before its first position: mealybug
+      `m3_window_timing` (stores before it) and `m3_wx_6_change` (after it)
+      decide as before. Closed `wx6_nops16`, `wx7_nops17`, `wx8_nops17`.
+    * `CGB_WIN_RETRIG_LATCH` (gb.nim; `fifo_win_retrig_cgb`), the glitch the
+      ROMs are named for ("depending on the fetcher phase make it either
+      read an old tile data or do not read the tile number"): a CGB
+      re-trigger on the dot of a push makes the next fetch keep the tile
+      number just pushed for both planes; on the dot the tile number is read
+      it leaves the low plane reading the previous tile's; the other six
+      phases change nothing (111 lines across the six rows, every one
+      DocBoy's and SameBoy's alike). Closed `wx6_nops17`, `wx7_nops18`,
+      `change_wx_glitch{,_alt}`.
+    Left (2): `wx8_nops18{,_alt}`, 4 pixels of line 17 each: the re-trigger
+    lands on the window's first push, the startup fetch's (high plane and
+    push on one dot), and both references draw that first tile as colour 0
+    (the next tile already shows its data, by the push-dot rule). One line
+    of one geometry; not modelled. SameBoy differs from DocBoy (and now
+    dingbat) on 6 to 13 other lines of five of the rows. Nothing else moves
+    in the full runner.
   * Not scored since 2026-10-14 (ledger "DocBoy: the CGB background column
     resumed after the window at WX = 25"): `window_bg_reprise_wx25`, 3 pixels
     of DocBoy's (row 12, x = 26 and 32..33) where SameBoy CGB E draws dingbat's

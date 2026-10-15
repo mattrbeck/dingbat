@@ -74,6 +74,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     tdsel_dot: NO_TDSEL_CHANGE,
     tdsel_addr: TDSEL_ADDR_OFF,
     map_dot: NO_MAP_CHANGE,
+    obj_hi_dot: OBJ_HI_DOT_OFF, vdma_lost_dot: -1,
     old_stat_flag: base.old_stat_flag, first_line: base.first_line,
     cycle_counter: base.cycle_counter,
     framebuffer: base.framebuffer, frame: base.frame, ran_bios: base.ran_bios,
@@ -175,6 +176,9 @@ proc reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
   ppu.obj_fix_from = OBJ_FIX_OFF
+  ppu.obj_hi_dot = OBJ_HI_DOT_OFF
+  ppu.vdma_tail_busy = 0'u32
+  ppu.vdma_lost_dot = -1
   ppu.obj_abort_last = OBJ_ABORT_LAST_OFF
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
@@ -696,7 +700,9 @@ proc win_start_reset(ppu: GbFifoPpu) {.inline.} =
         ppu.cycle_counter + 7 - ppu.m3_lead + (int32(GB_WIDTH) - 1 - ppu.lx)
       else: 0
   when WIN_PRE_PX_PHASE != 0:
-    if ppu.win_hold == 0'u8 and int32(ppu.wx) - 7 == ppu.lx - 1:
+    if ppu.win_hold == 0'u8 and
+       (int32(ppu.wx) - 7 == ppu.lx - 1 or ppu.win_pre_old):
+      ppu.win_pre_old = false
       dec ppu.lx
       fifo_reset_bg(ppu, true)
       ppu.fetch_counter = 1
@@ -709,6 +715,12 @@ proc fifo_reset_sprite*(ppu: GbFifoPpu) =
   ppu.obj_penalty = 0
   # The object fetch's LCDC.2 read is per-line (obj_height_at).
   ppu.obj_fix_from = OBJ_FIX_OFF
+  # So is its plane reads' dot, which the VRAM DMA's port reads too
+  # (vdma_dot_busy): the last object of the line before is not on this bus;
+  # nor is that line's tail.
+  ppu.obj_hi_dot = OBJ_HI_DOT_OFF
+  when VDMA_M3_PORT != 0: ppu.vdma_tail_busy = 0'u32
+  ppu.win_pre_old = false          # WIN_HEAD_WX_SCAN, per line
   # `lcdc2_flip` is NOT cleared here: the OAM scan reads it a few statements
   # later on this dot and retires it (fifo_get_sprites). LCDC.4's dot is
   # per-line too; its ADDRESS latch is a bus register and survives
@@ -825,6 +837,43 @@ proc fifo_head_window_late*(ppu: GbFifoPpu) =
   ppu.lx = int32(-max(0, 7 - int(ppu.wx))) - int32(7 and int(ppu.scx))
   when WIN_HEAD_ABSORB != 0:
     ppu.fetch_counter = -int(max(0, int32(ppu.wx) - 1))
+
+proc fifo_wx_store_head*(ppu: GbFifoPpu; old_wx: uint8) {.noinline.} =
+  ## A WX store in mode 3 that changed the value: inside the head's first real
+  ## fetch the comparator has already compared some positions with the old
+  ## value (WIN_HEAD_WX_SCAN, gb.nim). Cold: one call per such store.
+  if ppu.fetching_window or not ppu.window_trigger or not window_enabled(ppu): return
+  if not (ppu.dropped_first_fetch and ppu.head_cycle): return
+  let s = int32(ppu.scx and 7)
+  # The position compared on the dot about to run: one per dot from the first
+  # real fetch's step 0, so the first pixel's dot (step 7) compares 7 - s,
+  # WX - 7 = -s, and the dot before it the pre-pixel slot.
+  let pos = int32(ppu.fetch_counter) - s
+  let w = int32(ppu.wx)
+  let pre = 6'i32 - s
+  when defined(gb_win_trace):
+    echo "WXHEAD ly=", ppu.ly, " dot=", ppu.cycle_counter, " fc=", ppu.fetch_counter,
+         " pos=", pos, " old=", old_wx, " new=", w
+  if int32(old_wx) == pre and pos > pre:
+    # The old value matched on the pre-pixel slot, already compared: the start
+    # stands (fifo_arm_window has just re-armed for the new value) and keeps
+    # the pre-pixel tile phase (win_start_reset).
+    ppu.win_lx = -s
+    ppu.win_pre_old = true
+    return
+  if w < int32(WIN_LINE_START_WX):
+    if w >= pos:
+      # Not compared yet: the line starts as a window line, its startup fetch
+      # as far in as the head's would be by now (fifo_head_window's `WX - 1`
+      # idle steps, from the step-0 dot).
+      fifo_reset_bg(ppu, true)
+      ppu.head_cycle = true
+      ppu.fetch_counter = int(pos + s) - int(max(0, w - 1))
+      if ppu.smooth_scroll_sampled:
+        ppu.lx = int32(-max(0, 7 - int(w))) - s
+  elif w == pre and pos > pre:
+    # The pre-pixel slot was compared before the store, with the old value.
+    ppu.win_lx = WIN_LX_OFF
 
 proc fetcher_window_abort(ppu: GbFifoPpu) {.noinline.} =
   ## WIN_EN_ABORT's switch back to the background (see tick_bg_fetcher). Out
@@ -1081,10 +1130,15 @@ const OBJ_PLANE1_LAG {.intdefine.} = 2'i32
   ## Dots after the merge dot at which the high plane samples LCDC.2 on the
   ## `idx >= 0` arm; the low plane's is OBJ_PLANE_GAP earlier. 2 ships
   ## (mealybug m3_lcdc_obj_size_change, strict optimum).
-const OBJ_PLANE1_HEAD {.intdefine.} = 6'i32
+const OBJ_PLANE1_HEAD {.intdefine.} = 4'i32
   ## The same read on the `idx < 0` arm, in dots after the trigger (the fetch
-  ## sits at the head of the penalty there). 6 is the structural value; the
-  ## ROMs only bound it from above.
+  ## sits at the head of the penalty there). The mealybug ROMs only bound it
+  ## from above (both planes before dot 101). 4: the object owns the VRAM bus
+  ## from the dot after the trigger (tick_sprite_fetcher), so its two plane
+  ## steps end on T + 2 and T + 4, which is where DocBoy's VRAM DMA conflict
+  ## rows find them (`..._sprite_y16_x01`..`x06`: bus held on T + 2 and T + 4,
+  ## free on T + 6; VDMA_M3_PORT, gb.nim). Those rows see even dots only, so
+  ## 5 scores the same there; 6 is refused by them.
 
 # Hardware re-reads an object's tile and attributes from OAM at its mode-3
 # fetch; while an OAM DMA owns OAM that read gets the byte the unit has on its
@@ -1385,6 +1439,34 @@ proc window_reactivate(ppu: GbFifoPpu) =
     GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
   ppu.fifo.head = h
   inc ppu.fifo.size
+
+proc fifo_win_retrig_cgb(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  ## CGB_WIN_RETRIG_LATCH (gb.nim): a CGB window re-trigger cuts the window
+  ## fetcher's tile-number latch for the fetch in flight. Called after this
+  ## dot's fetcher step, so `fetch_counter` 0 is the dot of a push and 2 the
+  ## dot the tile number was read.
+  case ppu.fetch_counter
+  of 0:
+    # The next fetch never latches its number: the one just pushed stays.
+    ppu.fetch_counter = 8
+  of 2:
+    # The low plane reads with the previous tile's number and attributes;
+    # the high plane with the new ones. Read here, two dots early (nothing
+    # else can write VRAM in between but a VRAM DMA).
+    if ppu.fetching_window and ppu.fetcher_x > 0:
+      let m = if (ppu.lcd_control and 0x40'u8) == 0: 0x1800 else: 0x1C00
+      let o = ((ppu.fetcher_x - 1) and 0x1F) +
+              (((ppu.current_window_line shr 3) * 32) and 0x3FF)
+      let num = ppu.vram[0][m + o]
+      let attrs = ppu.vram[1][m + o]
+      let sel = bg_window_tile_data(ppu) != 0
+      let n = if sel: int(num) else: int(cast[int8](num))
+      var row = ppu.current_window_line and 7
+      if (attrs and 0b0100_0000) != 0: row = 7 - row
+      ppu.tile_data_low = ppu.vram[int((attrs and 0b0000_1000) shr 3)][
+        (if sel: 0x0000 else: 0x1000) + 16 * n + row * 2]
+      ppu.fetch_counter = 18
+  else: discard
 
 proc window_refuse_start(ppu: GbFifoPpu) =
   ## The WX comparator matched with LCDC.5 low (WIN_EN_HOLD): the match holds
@@ -1862,6 +1944,9 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
            window_enabled(ppu):
         # The re-trigger edge, sharing the compare above.
         window_reactivate(ppu)
+      elif CGB_WIN_RETRIG_LATCH != 0 and ppu.cgb and window_enabled(ppu):
+        # The CGB's re-trigger cuts the fetcher's tile-number latch instead.
+        fifo_win_retrig_cgb(ppu, gb)
     fifo_emit_pixel(ppu, gb)
   else:
     when WIN_EN_REVOKE_ANY:
@@ -2269,11 +2354,81 @@ when STAT_IRQ_SPLIT:
     if ppu.lx >= int32(GB_WIDTH) - lead: return true
     not fetch_work_pending(ppu, for_irq = true)
 
+# ---- The VRAM DMA's write port in mode 3 (VDMA_M3_PORT, gb.nim) -------------
+#
+# The fetcher owns the VRAM bus for each of its reads, a two-dot step ending on
+# the dot the read is made on, and a VRAM DMA byte that meets it is lost.
+# Nothing here runs on the dot loop: the DMA asks between the two dots of each
+# byte's slot, with the pipeline synced, about the dot about to run.
+proc vdma_dot_busy(ppu: GbFifoPpu; gb: GB; dot: int32): bool {.noinline.} =
+  ## Does the pipeline step about to run on `dot` hold the VRAM bus?
+  # An object's two plane reads, OBJ_PLANE_GAP apart, end on the dots their
+  # LCDC.2 reads sit on (`obj_hi_dot` is the high plane's, less the CGB's
+  # register latency, which is not the fetch's): the tail arm's M and M + 2,
+  # the head arm's T + 2 and T + 4 (OBJ_PLANE1_HEAD). Steps, so the low one
+  # starts a dot before its read.
+  let hi = ppu.obj_hi_dot +
+           (if gb.cgb_enabled: int32(CGB_OBJ_SIZE_LATENCY) else: 0'i32)
+  if dot >= hi - OBJ_PLANE_GAP - 1 and dot <= hi: return true
+  # No fetch: the head delay, and the head's discarded fetch, whose reads the
+  # port does not see (DocBoy's and SameBoy's maps land the bytes on all four
+  # of its dots, every row).
+  if ppu.m3_delay != 0 or not ppu.dropped_first_fetch: return false
+  when SCX_STORE_STALL_DOTS != 0:
+    if ppu.scx_stall > 0: return false
+  # The background fetcher does not step under an object's head-arm fetch,
+  # nor on its tail dot (tick_sprite_fetcher, OBJ_BG_RUN = 4).
+  if ppu.fetching_sprite and
+     (ppu.obj_penalty <= 0 or ppu.obj_tile_fx != int32(ppu.fetcher_x)):
+    return false
+  # Tile map, low plane, high plane: a two-dot step ending on its read, so the
+  # pair (2k, 2k + 1) holds the bus when step 2k + 1 reads (FETCHER_ORDER
+  # 0..5, and a re-trigger's cut fetches at 8.., which skip a read); the
+  # window's idle head (negative steps) and the sleep/push steps leave it.
+  ppu.fetch_counter >= 0 and
+    FETCHER_ORDER[ppu.fetch_counter or 1] in {fsGetTile, fsGetTileDataLow,
+                                              fsGetTileDataHigh}
+
+proc vdma_port_busy*(gb: GB): bool {.noinline.} =
+  ## Is the VRAM bus the fetcher's on the dot about to run? The VRAM DMA asks
+  ## this one dot before each byte's slot (ppu_copy_hdma_block).
+  let ppu = gb.fifo_ppu
+  if not lcd_enabled(ppu) or ppu.mode_flag != 3'u8: return false
+  fifo_sync(gb)
+  let dot = ppu.cycle_counter
+  if ppu.lx >= int32(GB_WIDTH):
+    # Past the retire dot the tail burst has run; it left which of its dots
+    # (and the fetcher's step on the dot after the last pixel) held the bus.
+    let i = dot - ppu.vdma_tail_dot0
+    return i >= 0 and i < 32 and ((ppu.vdma_tail_busy shr i) and 1'u32) != 0
+  vdma_dot_busy(ppu, gb, dot)
+
 when M3_PIPE_LEAD_ANY:
+  proc fifo_burst_tail_vdma(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## fifo_burst_tail under a VRAM DMA copy: the same dots, each asked first
+    ## whether it holds the bus, as is the fetcher's next step, which still
+    ## runs on the dot after the line's last pixel. DocBoy's SCX rows end three
+    ## ways by SCX & 7: that step reads at SCX 2, 4, 6, and one more does not.
+    let dot0 = ppu.cycle_counter
+    var busy = 0'u32
+    var i = 0'i32
+    while ppu.lx < GB_WIDTH and i < 64:
+      if i < 32 and vdma_dot_busy(ppu, gb, dot0 + i): busy = busy or (1'u32 shl i)
+      fifo_pipeline_dot(ppu, gb)
+      inc i
+    if i < 32 and vdma_dot_busy(ppu, gb, dot0 + i): busy = busy or (1'u32 shl i)
+    ppu.vdma_tail_dot0 = dot0
+    ppu.vdma_tail_busy = busy
+
   proc fifo_burst_tail(ppu: GbFifoPpu; gb: GB) {.inline.} =
     ## The last `m3_lead` pixels of a line, emitted on the retire dot rather
     ## than over the first dots of H-Blank. inline (only fifo_tick_slow changes
     ## size, -0.04%); re-run the per-function size diff before changing it.
+    when VDMA_M3_PORT != 0:
+      # The retire dot only: the flag's hold re-enters here with nothing left.
+      if unlikely(ppu.vdma_copying) and ppu.lx < int32(GB_WIDTH):
+        fifo_burst_tail_vdma(ppu, gb)
+        return
     var guard = 0
     while ppu.lx < GB_WIDTH and guard < 64:
       fifo_pipeline_dot(ppu, gb)

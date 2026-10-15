@@ -901,6 +901,29 @@ const VDMA_BUS_RESIDUE* {.intdefine.} = 1
   ## the rest $FF) against `gdma_source_vram_{call,jp}_in_hram`/`jp_in_wram*`
   ## (all $FF). gambatte `dma/dma_{vram,oam,hiram}_read*` (CGB C hardware)
   ## check bytes 1-7 only and find them $FF. 0 = every such byte $FF.
+const VDMA_M3_PORT* {.intdefine.} = 1
+  ## The VRAM DMA's write port while mode 3 draws: the pixel fetcher owns the
+  ## VRAM bus on its reads, and a DMA byte that meets one is lost. Pan Docs
+  ## (CGB Registers, General-Purpose DMA) says only that the transfer "blindly
+  ## attempts to copy the data, even if the LCD controller is currently
+  ## accessing VRAM". Each fetcher access holds the bus for its two-dot step,
+  ## the step ending on the dot the fetcher reads on: the background/window
+  ## fetcher's tile-map, low- and high-plane steps (FETCHER_ORDER 0..5) of every
+  ## fetch but the head's discarded one, the fetcher stepping once more on the
+  ## dot after the line's last pixel; and an object's two plane reads, on the
+  ## dots its LCDC.2 reads already sit on (OBJ_PLANE1_LAG: M and M + 2 on the
+  ## tail arm, M the merge dot; OBJ_PLANE1_HEAD: T + 2 and T + 4 on the head
+  ## arm, T the trigger). A byte whose slot starts on dot c meets the bus as it
+  ## stands on pipeline dot c - 1 (vdma_port_busy, fifo_ppu.nim). DocBoy
+  ## `cgb/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_*` (a GDMA across
+  ## mode 3 of line 1; SCX 0..7, a window at WX 16..23, one or two objects at
+  ## X 1..50) pin every term: 82 of 83 rows match byte for byte; SameBoy (CGB
+  ## E, black box, VRAM dumped) has DocBoy's map from byte 32 on for all 16
+  ## background and window rows, and dingbat's, not DocBoy's, for the one
+  ## left (`_sprite_y16_x07`). The dot is bracketed two-sided (the rows
+  ## replayed from a dot log of the pipeline): c - 2 keeps 37 rows (an odd
+  ## object penalty moves the holes a dot), c keeps 1. Hardware question 21
+  ## (gbedge p21 VDMABUS) photographs the SCX 0 map. 0 = every byte lands.
 const HDMA_LCD_OFF_EDGE* {.intdefine.} = 1
   ## With HDMA_LCD_OFF_BLOCK: the LCD-off block is an HBlank EDGE, so only a
   ## PPU not already in HBlank makes one (mode 2, 3 or 1 dropping to the
@@ -1259,6 +1282,38 @@ const WIN_START_PRE_PIXEL*    {.intdefine.} = 1
   ## different mechanism from WIN_LINE_START_WX: mealybug `m3_wx_6_change`
   ## writes WX = 6 in mode 2 and WX = LY at dot 93 and draws no window on
   ## LY 4 or 5, which refuses WIN_LINE_START_WX = 7 outright.
+const WIN_HEAD_WX_SCAN*       {.intdefine.} = 1
+  ## The WX comparator is not read once at the head: through the head's first
+  ## real fetch it compares one position per dot, `fetch_counter - (SCX & 7)`
+  ## on the step about to run, which reaches the pre-pixel slot
+  ## (WIN_START_PRE_PIXEL, WX = 6 - SCX & 7) on the dot before the first pixel
+  ## leaves the shifter. A WX store there reaches only the positions not yet
+  ## compared (fifo_wx_store_head): a value below WIN_LINE_START_WX at or
+  ## ahead of the position still makes the line a window line, as the head
+  ## would have; the pre-pixel value stored on the first pixel's own dot
+  ## misses its slot; and a pre-pixel match the old value made on the dot
+  ## before stands, the tile keeping its phase. The head latch
+  ## (WIN_LINE_START_LATCH, the throw-away fetch's last dot) is the scan seen
+  ## before its first position, so every store ahead of it decides as before
+  ## (mealybug m3_window_timing, m3_wx_6_change). DocBoy cgb/ppu/visual/
+  ## change_wx_glitch_{wx6_nops16,wx7_nops17,wx8_nops17}: WX = 6, 7 or 8 in
+  ## mode 2 and WX = 0..127 stored on positions 3 and 7 of lines 8..135;
+  ## SameBoy (CGB E, black box) draws all three DocBoy frames pixel for
+  ## pixel. 0 = a store re-arms the comparator as if no position had passed.
+const CGB_WIN_RETRIG_LATCH*   {.intdefine.} = 1
+  ## A CGB's WX re-match while the window is already being drawn (the
+  ## re-trigger; the DMG's colour-0 pixel is window_reactivate) cuts the window
+  ## fetcher's tile-number latch for the fetch in flight, by its phase: on the
+  ## dot of a push the next fetch never latches its tile number, so both
+  ## planes read the tile just pushed; on the dot the tile number is read the
+  ## low plane still reads the previous tile's, the high plane the new one;
+  ## other phases change nothing (fifo_win_retrig_cgb). DocBoy's own ROM
+  ## comment: "depending on the fetcher phase make it either read an old tile
+  ## data or do not read the tile number". DocBoy cgb/ppu/visual/
+  ## change_wx_glitch* (WX re-written 85..117 dots in, then reached at every
+  ## phase down the frame): every line the rule changes matches DocBoy's
+  ## frame, and SameBoy (CGB E, black box) draws each of those lines the
+  ## same. 0 = the re-trigger changes nothing on a CGB.
 const WIN_PRE_PX_PHASE*       {.intdefine.} = 1
   ## What a match on the pre-pixel slot (WIN_START_PRE_PIXEL) does with the
   ## window's tile. 1 (ships): the tile keeps its own first pixel, covering
@@ -1412,6 +1467,9 @@ const NO_LCDC2_FLIP*          = int32.low
   ## began": a dot in the far past, so `flip > dot` is false for every dot an
   ## object fetch can ask about, including a future one.
 const OBJ_FIX_OFF*            = int32.high
+const OBJ_HI_DOT_OFF*         = -(1'i32 shl 20)
+  ## `obj_hi_dot` before the line's first object fetch: far enough in the past
+  ## that no dot of the line is within an object's plane reads of it.
 const OBJ_ABORT_LAST_OFF*     = int32.low div 2
   ## `obj_abort_last` when no object's fetch is abortable (none in flight, or
   ## the `idx < 0` head arm); halved so `+ OBJ_ABORT_LEAD` cannot wrap.
@@ -2450,6 +2508,23 @@ type
       wd_head_cycle*:     bool
       wd_tail_dot0*:      int32
       wd_mix_run*:        int32
+    # The VRAM DMA's write port (VDMA_M3_PORT). `vdma_lost` is whether the byte
+    # due on dot `vdma_lost_dot` meets the fetcher on the bus, decided a dot
+    # before it; `vdma_copying` marks a block copy that may meet mode 3, the
+    # only time the tail burst records which of its dots held the bus
+    # (`vdma_tail_busy`, bit i = dot `vdma_tail_dot0 + i`, the dot after the
+    # last pixel included). `vdma_held_lost`: the bytes of a held block
+    # (HDMA_VISIBLE_DOTS) the port refused. Scratch inside one transfer or one
+    # line; not serialized.
+    vdma_lost*:           bool
+    vdma_copying*:        bool
+    vdma_held_lost*:      uint16
+    vdma_lost_dot*:       int32
+    vdma_tail_dot0*:      int32
+    vdma_tail_busy*:      uint32
+    # A pre-pixel match made by the WX a store just replaced (WIN_HEAD_WX_SCAN):
+    # the start it is served by keeps the pre-pixel tile phase. Per-line.
+    win_pre_old*:         bool
 
   # ---- APU channels: the shared PSG (common/psg.nim) ----
   GbSoundChannel* = PsgChannel
@@ -2745,13 +2820,22 @@ type
       test_output*:  TestOutput
 
 # ==================== FETCHER ORDER ====================
-const FETCHER_ORDER*: array[-5 .. 7, FetchStage] = [
+const FETCHER_ORDER*: array[-5 .. 23, FetchStage] = [
   # Steps -5..-1 are the window startup fetch's idle head, entered only by a
   # line that starts as a window line (WIN_HEAD_ABSORB): the fetcher waits out
   # `WX - 1` dots as negative steps, which costs the dot loop nothing since
   # fsSleep's `inc` walks the counter back to 0. Five entries cover WX < 7.
   fsSleep, fsSleep, fsSleep, fsSleep, fsSleep,
   fsSleep, fsGetTile, fsSleep, fsGetTileDataLow,
+  fsSleep, fsGetTileDataHigh, fsSleep, fsPushPixel,
+  # Steps 8..15 and 16..23 are fetches a CGB window re-trigger cut
+  # (CGB_WIN_RETRIG_LATCH), entered only from fifo_win_retrig_cgb at the
+  # matching step of 0..7 and left by the push like any other: 8..15 never
+  # reads the tile number (the planes use the one still latched), 16..23 had
+  # its low plane read at the re-trigger with the previous number.
+  fsSleep, fsSleep, fsSleep, fsGetTileDataLow,
+  fsSleep, fsGetTileDataHigh, fsSleep, fsPushPixel,
+  fsSleep, fsGetTile, fsSleep, fsSleep,
   fsSleep, fsGetTileDataHigh, fsSleep, fsPushPixel,
 ]
 static: doAssert WIN_LINE_START_WX - 2 <= 5,
@@ -3488,6 +3572,8 @@ proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8)
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
 proc fifo_oam_bus_taken*(ppu: GbFifoPpu; gb: GB)
+proc vdma_port_busy*(gb: GB): bool {.noinline.}
+proc fifo_wx_store_head*(ppu: GbFifoPpu; old_wx: uint8) {.noinline.}
 const GB_IDLE_SKIP* {.intdefine.} = 1
   ## Idle loops and HALT skipped up to the next point they can observe
   ## (cpu.nim, wl_head_check / wl_halt_skip); 0 runs every M-cycle.

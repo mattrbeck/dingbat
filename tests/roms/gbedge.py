@@ -2930,10 +2930,10 @@ def t_vdmabus(a, slot, p):
            scx0, so it runs from line 1's OAM scan through mode 3 into
            HBlank: bit 7 of byte 0 = destination byte 0, 1 = it holds the
            source byte, 0 = the prefilled complement survived (the write
-           was lost).  dingbat (Pan Docs says nothing) lands every byte:
-           16 x FF.  DocBoy's model drops three writes in four while mode 3
-           fetches: FF FF FF FF F1 11 11 11 11 11 11 11 11 11 11 FF (its
-           bytes 0-15 are unchecked; SameBoy fails the row).
+           was lost).  dingbat (VDMA_M3_PORT) and DocBoy drop three writes
+           in four while mode 3 fetches: FF FF FF FF F1 11 11 11 11 11 11
+           11 11 11 11 FF (DocBoy's bytes 0-15 are unchecked; SameBoy fails
+           the row).  Every byte landing (Pan Docs says nothing): 16 x FF.
     10-13  GDMA of 2 blocks from HRAM $FFA0 (the DMA cannot reach HRAM),
            code in ROM, the opcode after the FF55 write SCF ($37):
            destination bytes 0, 1, 2 and 16 (block 2's first).
