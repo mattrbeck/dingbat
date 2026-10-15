@@ -6109,6 +6109,9 @@ caveat). The second reference takes the loads in dingbat's frames.
 
 **Status: no core change.** `@known * checkpoint select_data:` is added to
 the script: no reference can draw the console's panels here.
+**Later the same day:** after the driver fixes of §82 and §83, the second
+reference's checkpoint frame reads one 5-bit step from dingbat's, which is
+MINOR. dingbat is no longer alone there, so the `@known` is removed.
 
 ## §73. Koro Koro Puzzle: the title is the alpha blend's rounding, read by the text comparison, 2026-10-14
 

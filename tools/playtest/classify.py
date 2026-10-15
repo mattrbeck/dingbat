@@ -37,15 +37,6 @@ def classify(a, b):
         return {'verdict': 'IDENTICAL'}
     if a.get('compare') == 'none' or b.get('compare') == 'none':
         return {'verdict': 'IDENTICAL', 'why': 'recorded, not judged'}
-    if a.get('compare') == 'text' or b.get('compare') == 'text':
-        # OCR reads the same screen with small errors and in varying line
-        # order: fuzzy-match the sorted lines
-        la = sorted(screen.normalize(t) for t in a['text'].split(' | '))
-        lb = sorted(screen.normalize(t) for t in b['text'].split(' | '))
-        sim = difflib.SequenceMatcher(None, '\n'.join(la), '\n'.join(lb)).ratio()
-        ok = sim >= 0.8
-        return {'verdict': 'MINOR' if ok else 'MAJOR', 'text_similarity': round(sim, 2),
-                'why': 'compared by on-screen text only', 'palette_only': ok}
     # The match nearest the centre, not the first in the window: a screen
     # drawn as two alternating fields (A B A B: Phantasy Star Collection's
     # Master System line drop) matches at every other frame, and the first
@@ -56,6 +47,7 @@ def classify(a, b):
         offsets = [a['center'] - k for k, h in enumerate(a['hashes']) if h == b['hash']]
     if offsets:
         return {'verdict': 'SLIP', 'offset': min(offsets, key=abs)}
+    text = a.get('compare') == 'text' or b.get('compare') == 'text'
     # Neither centre frame appears in the other's window, but the two windows
     # may still overlap: on a screen that animates every frame, both sides can
     # be rendering the same sequence a few frames apart without either centre
@@ -68,9 +60,25 @@ def classify(a, b):
     elsewhere = {h: k for k, h in enumerate(b['hashes'])}
     offsets = [(elsewhere[h] - b['center']) - (k - a['center'])
                for k, h in enumerate(a['hashes']) if h in elsewhere]
-    if offsets:
+    if offsets and not text:
         return {'verdict': 'SLIP', 'offset': min(offsets, key=abs),
                 'why': 'the windows share a frame; neither centre does'}
+    # A text-judged screen is read by OCR unless one side's checkpoint
+    # picture is in the other's window: the same picture frames apart is a
+    # slip whatever OCR makes of it (The Sims' language screen, a scrolling
+    # flag one frame behind, read MAJOR: docs/playtest-bugs.md §87). Windows
+    # that merely share some other frame do not count here: a screen whose
+    # blend differs at the centre shares its unblended frames (Aria of
+    # Sorrow's Select Data, §72)
+    if text:
+        # OCR reads the same screen with small errors and in varying line
+        # order: fuzzy-match the sorted lines
+        la = sorted(screen.normalize(t) for t in a['text'].split(' | '))
+        lb = sorted(screen.normalize(t) for t in b['text'].split(' | '))
+        sim = difflib.SequenceMatcher(None, '\n'.join(la), '\n'.join(lb)).ratio()
+        ok = sim >= 0.8
+        return {'verdict': 'MINOR' if ok else 'MAJOR', 'text_similarity': round(sim, 2),
+                'why': 'compared by on-screen text only', 'palette_only': ok}
     fa, fb = img.read_ppm(a['ppm']), img.read_ppm(b['ppm'])
     m = img.compare(fa, fb)
     wa, wb = _words(a['text']), _words(b['text'])

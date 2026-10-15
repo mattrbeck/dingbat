@@ -53,6 +53,28 @@ class SlipOffset(unittest.TestCase):
         self.assertEqual(r['offset'], -1)
         self.assertEqual(classify.classify(b, a)['offset'], 1)
 
+    def test_a_text_judged_screen_one_frame_behind_is_a_slip(self):
+        # OCR of a scrolling screen differs frame to frame, but the same
+        # picture one frame apart is a slip (The Sims' language, §87)
+        frames = [f'f{k}' for k in range(100)]
+        a = dict(side(frames[10:71]), compare='text', text='ENGLISH | FRANCAIS')
+        b = dict(side(frames[11:72]), compare='text', text='qx | zz')
+        self.assertEqual(classify.classify(a, b), {'verdict': 'SLIP', 'offset': -1})
+
+    def test_a_text_judged_screen_sharing_only_other_frames_reads_its_text(self):
+        # the centres differ at the same moment (a blend step), the windows
+        # share their unblended frames: not a slip (Aria of Sorrow, §72)
+        a = dict(side([f'f{k}' for k in range(30)] + ['a-centre'] + [f'g{k}' for k in range(30)]),
+                 compare='text', text='ENGLISH | FRANCAIS')
+        b = dict(side([f'f{k}' for k in range(30)] + ['b-centre'] + [f'g{k}' for k in range(30)]),
+                 compare='text', text='qx | zz')
+        self.assertEqual(classify.classify(a, b)['verdict'], 'MAJOR')
+
+    def test_a_text_judged_screen_with_no_shared_frame_reads_its_text(self):
+        a = dict(side([f'a{k}' for k in range(61)]), compare='text', text='ENGLISH | FRANCAIS')
+        b = dict(side([f'b{k}' for k in range(61)]), compare='text', text='ENGLISH | FRANCAIS')
+        self.assertEqual(classify.classify(a, b)['verdict'], 'MINOR')
+
 
 if __name__ == '__main__':
     unittest.main()
