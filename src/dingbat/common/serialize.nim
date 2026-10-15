@@ -68,6 +68,10 @@ const
   #      · 8 bus prefetch buffer pause/run state (pf_paused, pf_running, pf_count)
   #      · 9 in-flight section (irq line, fetch page, sync bits, DMA stamps,
   #        interrupt synchroniser, timer/DMA latches, memory control)
+  #      · 10 the PSG section: the shift-0 check's four fields as real ones
+  #        (they had ridden in spare bits of channel 1's sweep fields),
+  #        apu.power_on_at, and the shared PSG's per-channel latches
+  #      · 11 the DMA section's sound-FIFO hand-back word (DMA.fifo_chain)
   # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
   #      · 4 CPU undefined-opcode lockup flag · 5 Super Game Boy section
   #      · 6 the batched carry (docs/savestate_compat.md): STOP mode, the
@@ -78,10 +82,7 @@ const
   #      · 7 the APU's pending KEY1 re-phase (spsw_rephase_pending)
   #      · 8 the APU's deferred double-speed envelope step (env_late_pending);
   #        env_extra_tick's byte becomes a step count
-  #      · 10 the PSG section: the shift-0 check's four fields as real ones
-  #        (they had ridden in spare bits of channel 1's sweep fields),
-  #        apu.power_on_at, and the shared PSG's per-channel latches
-  GBA_PAYLOAD_VERSION* = 10'u32
+  GBA_PAYLOAD_VERSION* = 11'u32
   GB_PAYLOAD_VERSION*  = 8'u32
   # NDS: 1 initial (docs/nds/savestate.md). The payload also carries a hash
   #      of its field layout, checked on load, so a layout change that

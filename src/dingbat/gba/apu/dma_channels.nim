@@ -10,7 +10,10 @@ const FIFO_MASTER_RESET {.booldefine.} = true
   ## the enable requests a DMA; test 3: the same with the sound cycled off
   ## and on after the writes; without the gate an armed sound DMA refills a
   ## FIFO that cannot fill, every overflow, and the ROM never draws a
-  ## verdict. fifo_2's eight rows each start that way (false: 051).
+  ## verdict. fifo_2's eight rows each start that way (false: 051). AGB SP,
+  ## tests/roms/payloads/fifoslot.s w = 1: six words stored with the master
+  ## off and then the master on, and the first overflow asks for a refill
+  ## exactly as for an empty FIFO (8 cells, n = 20..100).
 const FIFO_REQ_BEFORE_POP {.booldefine.} = true
   ## A FIFO asks for a refill on its timer's overflow when it held fewer than
   ## 16 bytes before the sample was taken, not after: alyosha fifo_dma/fifo_4
@@ -25,15 +28,45 @@ const FIFO_DMA_REQUEST_DELAY {.intdefine.} = 4
   ## from 3 to 5. Bounded: at most one request per overflow per FIFO, and
   ## a grant re-checks the FIFO level (dma.run_pending).
 
-const FIFO_OWN_BURST_NO_REQUEST {.booldefine.} = true
-  ## A timer overflow that lands inside the refill burst of the FIFO it
-  ## drives does not ask for another one. Events only run inside a burst when
-  ## a higher-priority DMA channel is armed on a trigger (dma.run_channel's
-  ## preemption drain); without this the overflow saw the FIFO half filled
-  ## and chained a second burst. tests/roms/payloads/fifospk.s on an AGB SP
-  ## with DMA0 armed on V-blank (idle): k = 20, the first refill costs the
-  ## CPU one burst at every NOP count, as it does with DMA0 off (n = 17
-  ## reads 53, not 83).
+const FIFO_LEVEL_AT_OVERFLOW {.booldefine.} = true
+  ## A timer overflow that lands inside a refill burst of the FIFO it drives
+  ## decides on the words that burst had written by its cycle, not on the
+  ## whole burst (events dispatch after a burst, so the burst's word stamps,
+  ## DMA.fifo_word_at, say which came later; a word written on the
+  ## overflow's own cycle counts). AGB SP, tests/roms/payloads/fifoslot.s
+  ## (2026-10-14, rig.ask, 3 passes, every cell one answer): FIFO A on TM0
+  ## at period k, an empty FIFO, a 4-word burst from EWRAM (30 cycles, its
+  ## words in at +8, +15, +22 and +29 from the grant): the second overflow
+  ## at +28 (k = 32) asks for another refill, at +29 (k = 33) it does not;
+  ## from the gamepak slot (32 cycles, words in at +10 .. +31) the edge is
+  ## between k = 34 and 35. dingbat used to see all four words at every
+  ## overflow inside the burst and never asked.
+const FIFO_DROP_BUSY {.booldefine.} = true
+  ## A refill request that arrives while the channel's own burst still holds
+  ## the bus is lost, as an H-blank one is (dma.nim HDMA_DROP_BUSY); the
+  ## FIFO asks again at its next overflow. fifoslot.s: the second
+  ## overflow's request (4 cycles after it) lands inside the first burst
+  ## for k = 26..28 (EWRAM) and 26..30 (slot) and costs the CPU nothing; on
+  ## or after the burst's end it gets a second burst, back to back at
+  ## k = 30 / 32 and a cycle or two later at k = 31..32 / 33..34; on the
+  ## burst's last cycle see FIFO_HANDBACK_CHAIN. This replaced
+  ## FIFO_OWN_BURST_NO_REQUEST (an overflow during a burst that drains
+  ## events asked for nothing at all), whose console cells (fifospk.s, DMA0
+  ## armed, k = 20) it reproduces.
+const FIFO_HANDBACK_CHAIN {.booldefine.} = true
+  ## A refill request that lands on the burst's last cycle, the hand-back,
+  ## is granted there: the channel keeps the bus for the next burst's first
+  ## read (its write waits), lets the bus go, and holds that word until the
+  ## FIFO's next request, whose burst writes it and reads the other three,
+  ## without a lead cycle. fifoslot.s, EWRAM at k = 29: the first refill
+  ## costs the CPU 36 cycles (the burst less its hand-back, a 6-cycle read,
+  ## the hand-back) and the next one 23 (a write, three transfers, the
+  ## hand-back), where two plain bursts cost 30 and 30; from the slot at
+  ## k = 31, 38 and 25 (the chained read continues the burst's sequential
+  ## gamepak stream; the resumed one starts nonsequential). The older
+  ## fifoffff.s console table (tools/hwlink/open-agb.json, 2026-09-25,
+  ## IWRAM bursts of 10 at k = 3) reads 11 then 19 cycles, this shape, and
+  ## dingbat now does too.
 
 const FIFO_WORD_WRAP {.booldefine.} = true
   ## The FIFO holds eight words, and the eighth written into it leaves it
@@ -177,13 +210,17 @@ proc timer_overflow*(dc: DMAChannels; timer: int): bool =
     else:
       int(dc.gba.apu.soundcnt_h.dma_sound_b_timer)
     if timer == ch_timer:
-      # FIFO_OWN_BURST_NO_REQUEST: an overflow in the middle of this FIFO's
-      # own refill burst (a burst that drains events because a higher DMA
-      # channel is armed) asks for nothing; the burst's words still to come
-      # were counted when it was asked for
-      let want = dc.sizes[channel] < 16 and
-                 not (FIFO_OWN_BURST_NO_REQUEST and
-                      dc.gba.dma.busy_until[channel + 1] == high(CycleCount))
+      var level = dc.sizes[channel]
+      when FIFO_LEVEL_AT_OVERFLOW:
+        # Words of the burst just run that it wrote after this overflow's
+        # cycle were not in the FIFO yet (the count wraps at 32 bytes, as
+        # FIFO_WORD_WRAP has it). A burst's stamps rise, so its last says
+        # whether any did.
+        let now = dc.gba.scheduler.cycles
+        if dc.gba.dma.fifo_word_at[channel][3] > now:
+          for t in dc.gba.dma.fifo_word_at[channel]:
+            if t > now: level = (level + 28) and 31
+      let want = level < 16
       if dc.sizes[channel] > 0:
         when defined(mp2kwav):
           inc dbgFifoServed[channel]

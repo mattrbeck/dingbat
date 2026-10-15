@@ -108,6 +108,7 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
         write(dma.dmacnt_h[channel], value and 0x7F'u8, 0)
         return
     write(dma.dmacnt_h[channel], value, io_addr and 1)
+    if channel == 1 or channel == 2: dma.fifo_chain[channel - 1] = 0
     if dma.dmacnt_h[channel].enable and not enabled:
       # Addresses are force-aligned to the transfer size (GBATEK, "DMA Transfers").
       let align = if dma.dmacnt_h[channel].xfer_type != 0: not 3'u32 else: not 1'u32
@@ -258,6 +259,20 @@ proc trigger_video_capture*(dma: DMA; vcount: uint16) =
 proc trigger_fifo*(dma: DMA; fifo_channel: int) =
   let ch = fifo_channel + 1
   if dma.dmacnt_h[ch].enable and dma.dmacnt_h[ch].start_timing == 3:  # Special
+    # FIFO_DROP_BUSY (apu/dma_channels.nim): a refill request that finds the
+    # channel's own burst still holding the bus is lost. This runs at the
+    # request's own cycle, which can be behind a burst granted in the same
+    # catch-up; busy_until covers that, as for trigger_hdma.
+    when FIFO_DROP_BUSY:
+      let now = dma.gba.scheduler.cycles
+      if now < dma.busy_until[ch]:
+        # FIFO_HANDBACK_CHAIN: one landing in the burst's last cycle, the
+        # hand-back, takes the next burst's first read there
+        when FIFO_HANDBACK_CHAIN:
+          if now + 1 == dma.busy_until[ch] and dma.fifo_chain[fifo_channel] == 0:
+            dma.fifo_chain[fifo_channel] = 1
+            dma.request(ch)
+        return
     dma.request(ch)
 
 proc run_channel(dma: DMA; channel: int; nested: bool) =
@@ -343,9 +358,15 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   # CPU->DMA bus hand-off cost (mGBA suite DMA timing rows). A channel that
   # preempts another mid-burst pays nothing: the bus never returns to the
   # CPU (AGS aging cartridge DMA priority test).
+  # FIFO_HANDBACK_CHAIN: the read taken in the last burst's hand-back cycle,
+  # and the rest of that burst at the next request, start with the bus
+  # already the DMA's
+  let fifo_burst = start_timing == 3 and (channel == 1 or channel == 2)
+  let chain_read = FIFO_HANDBACK_CHAIN and fifo_burst and dma.fifo_chain[channel - 1] == 1
+  let resumed = FIFO_HANDBACK_CHAIN and fifo_burst and dma.fifo_chain[channel - 1] == 2
   if not nested:
     if dma.chained: dma.chained = false
-    else: dma.gba.bus.add_cycles(DMA_LEAD_CYCLES)
+    elif not (chain_read or resumed): dma.gba.bus.add_cycles(DMA_LEAD_CYCLES)
 
   dma.gba.bus.dma_active = true
   dma.busy_until[channel] = high(CycleCount)
@@ -356,8 +377,14 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     if not nested:
       dma.gba.bus.dma_bus_fresh =
         not ((DMA_BUS_BACK_TO_BACK or DMA_BUS_WHILE_HALTED) and dma.gba.bus.dma_bus_kept)
-  dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold
-  dma.gba.bus.rom_next_addr2 = 1
+  # start both burst trackers cold, but for a read chained onto the burst
+  # before, which never let go of the bus (FIFO_HANDBACK_CHAIN)
+  if chain_read:
+    dma.gba.bus.rom_next_addr = dma.fifo_rom_next[channel - 1]
+    dma.gba.bus.rom_next_addr2 = 1
+  else:
+    dma.gba.bus.rom_next_addr = 1
+    dma.gba.bus.rom_next_addr2 = 1
 
   # Mid-burst event drains only when a higher-priority channel is armed on a
   # hardware trigger; otherwise events dispatch after the whole burst (the
@@ -391,47 +418,84 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
                      (source_control == 1 or source_control == 2) and
                      (dma.src[channel] and 0x1FFFF'u32) >= uint32(0x20000 - word_size)
   var first = true
-  for _ in 0 ..< len:
-    when not DMA_PREEMPT_AFTER_READ: preempt_point()
-    if rom_src_held and not first:
-      let bus = dma.gba.bus
-      if bus.rom_next_addr == dma.src[channel]: bus.rom_next_addr = 1
-      elif bus.rom_next_addr2 == dma.src[channel]: bus.rom_next_addr2 = 1
-    first = false
-    # TODO: deny-list; misses unmapped gaps such as 0x00004000-0x01FFFFFF.
-    let src_region = bits_range(dma.src[channel], 24, 27)
-    let src_accessible = src_region != 0x0 and src_region != 0x1 and dma.src[channel] < 0x10000000'u32
-    # Only DMA3 can write the gamepak bus; channels 0-2 drop such writes
-    # (no bus access, no redirect). See DMA_DST_MASK.
-    let dst_writable = channel == 3 or dma.dst[channel] < 0x08000000'u32
-    # A source the DMA cannot read (BIOS, unmapped) still costs its read
-    # cycle; the latch just keeps its value. alyosha Interactions: with 0,
-    # Internal_Cycle_DMA_Mul, _IRQ_br1_IWRAM and _IRQ_nop_IWRAM fail; with 2,
-    # _DMA_Mul and _IRQ_Br_pre_tim.
-    if not src_accessible: dma.gba.bus.add_cycles(1)
-    if word_size == 4:
-      if src_accessible:
-        dma.latch[channel] = dma.gba.bus.read_word(dma.src[channel])
-        if dma.gba.bus.sd_tw_active and start_timing == 3:
-          # a sound FIFO DMA during an HLE SoundDriverMain pass (bus.nim)
-          dma.latch[channel] = dma.gba.bus.sd_tw_word(dma.src[channel], dma.latch[channel])
-      when DMA_PREEMPT_AFTER_READ: preempt_point()
-      if dst_writable:
-        dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
-    else:
-      if src_accessible:
-        let half = uint32(dma.gba.bus.read_half(dma.src[channel]))
-        dma.latch[channel] = half or (half shl 16)
-      when DMA_PREEMPT_AFTER_READ: preempt_point()
-      if dst_writable:
-        dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
-    # The moved word stays on the data bus for open-bus reads (Bus.dma_open_bus).
-    dma.gba.bus.dma_open_bus = dma.latch[channel]
-    when DMA_READS_CPU_BUS:
-      dma.gba.bus.dma_bus_fresh = false
-      if touches_iwram: dma.gba.bus.iwram_latch = dma.latch[channel]
-    dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
-    dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
+  var first_xfer = 0
+  when FIFO_HANDBACK_CHAIN:
+    if chain_read:
+      # The next burst's first read, on the bus the last one kept; its write
+      # waits for the FIFO's next request (the hand-back after it was charged
+      # with the burst before)
+      dma.latch[channel] = dma.gba.bus.read_word(dma.src[channel])
+      if dma.gba.bus.sd_tw_active:
+        dma.latch[channel] = dma.gba.bus.sd_tw_word(dma.src[channel], dma.latch[channel])
+      dma.gba.bus.dma_open_bus = dma.latch[channel]
+      dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
+      dma.fifo_chain[channel - 1] = 2
+      dma.busy_until[channel] = dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
+      return
+    if resumed:
+      # The word read in that hand-back goes first: its write alone
+      dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
+      when FIFO_LEVEL_AT_OVERFLOW:
+        dma.fifo_word_at[channel - 1][0] =
+          dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
+      dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
+      dma.fifo_chain[channel - 1] = 0
+      first_xfer = 1
+  # FIFO_LEVEL_AT_OVERFLOW stamps each word a sound-FIFO burst writes; the
+  # loop is instantiated twice so no other burst pays for the test
+  template transfers(stamp: static bool) =
+    for xfer in first_xfer ..< len:
+      when not DMA_PREEMPT_AFTER_READ: preempt_point()
+      if rom_src_held and not first:
+        let bus = dma.gba.bus
+        if bus.rom_next_addr == dma.src[channel]: bus.rom_next_addr = 1
+        elif bus.rom_next_addr2 == dma.src[channel]: bus.rom_next_addr2 = 1
+      first = false
+      # TODO: deny-list; misses unmapped gaps such as 0x00004000-0x01FFFFFF.
+      let src_region = bits_range(dma.src[channel], 24, 27)
+      let src_accessible = src_region != 0x0 and src_region != 0x1 and dma.src[channel] < 0x10000000'u32
+      # Only DMA3 can write the gamepak bus; channels 0-2 drop such writes
+      # (no bus access, no redirect). See DMA_DST_MASK.
+      let dst_writable = channel == 3 or dma.dst[channel] < 0x08000000'u32
+      # A source the DMA cannot read (BIOS, unmapped) still costs its read
+      # cycle; the latch just keeps its value. alyosha Interactions: with 0,
+      # Internal_Cycle_DMA_Mul, _IRQ_br1_IWRAM and _IRQ_nop_IWRAM fail; with 2,
+      # _DMA_Mul and _IRQ_Br_pre_tim.
+      if not src_accessible: dma.gba.bus.add_cycles(1)
+      if word_size == 4:
+        if src_accessible:
+          dma.latch[channel] = dma.gba.bus.read_word(dma.src[channel])
+          if dma.gba.bus.sd_tw_active and start_timing == 3:
+            # a sound FIFO DMA during an HLE SoundDriverMain pass (bus.nim)
+            dma.latch[channel] = dma.gba.bus.sd_tw_word(dma.src[channel], dma.latch[channel])
+        when DMA_PREEMPT_AFTER_READ: preempt_point()
+        if dst_writable:
+          dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
+        when stamp:
+          dma.fifo_word_at[channel - 1][xfer] =
+            dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
+      else:
+        if src_accessible:
+          let half = uint32(dma.gba.bus.read_half(dma.src[channel]))
+          dma.latch[channel] = half or (half shl 16)
+        when DMA_PREEMPT_AFTER_READ: preempt_point()
+        if dst_writable:
+          dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
+      # The moved word stays on the data bus for open-bus reads (Bus.dma_open_bus).
+      dma.gba.bus.dma_open_bus = dma.latch[channel]
+      when DMA_READS_CPU_BUS:
+        dma.gba.bus.dma_bus_fresh = false
+        if touches_iwram: dma.gba.bus.iwram_latch = dma.latch[channel]
+      dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
+      dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
+  when FIFO_LEVEL_AT_OVERFLOW:
+    if fifo_burst: transfers(true)
+    else: transfers(false)
+  else:
+    transfers(false)
+
+  when FIFO_HANDBACK_CHAIN:
+    if fifo_burst: dma.fifo_rom_next[channel - 1] = dma.gba.bus.rom_next_addr
 
   if not nested and DMA_LEAD_CYCLES < 2:
     if not (DMA_CHAIN and dma.chain_next(channel)):
@@ -496,7 +560,10 @@ proc run_pending*(dma: DMA) =
     # (Densetsu no Sutafi 3 lost ~4% of its stream bytes). Assumed; no ROM
     # pins this.
     if (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3:
-      if dma.gba.apu.dma_channels.sizes[ch - 1] >= 16: continue
+      if dma.gba.apu.dma_channels.sizes[ch - 1] >= 16:
+        # a hand-back read not granted at once is not taken later
+        if dma.fifo_chain[ch - 1] == 1: dma.fifo_chain[ch - 1] = 0
+        continue
     let saved = dma.current_priority
     dma.current_priority = ch
     let bus = dma.gba.bus

@@ -254,6 +254,9 @@ proc save_dma_state(dma: DMA; w: var Writer) =
     w.write_u16(cast[uint16](dma.dmacnt_h[i]))
     w.write_u32(dma.latch[i])
     w.write_u16(dma.count[i])  # v5
+  # rev 11: FIFO_HANDBACK_CHAIN, a word read in a burst's hand-back cycle and
+  # held in the latch for the FIFO's next refill (0 or 2 between instructions)
+  for f in 0 .. 1: w.write_u8(dma.fifo_chain[f])
 
 proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_DMA)
@@ -268,11 +271,15 @@ proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
     # Pre-v5 states have no latched count; the user register is what those
     # builds ran on.
     dma.count[i] = if rev >= 5: r.read_u16() else: dma.dmacnt_l[i]
+  # Rev <= 10 builds took no read in a hand-back cycle: nothing held
+  for f in 0 .. 1: dma.fifo_chain[f] = if rev >= 11: r.read_u8() else: 0'u8
   # Arbitration state is idle at frame boundaries; not serialized
   dma.pending = 0
   dma.current_priority = 4
   # Every burst has let go of the bus by an instruction boundary
   for i in 0 .. 3: dma.busy_until[i] = 0
+  for f in 0 .. 1:
+    for i in 0 .. 3: dma.fifo_word_at[f][i] = 0
 
 # ---- GPIO + RTC ----
 

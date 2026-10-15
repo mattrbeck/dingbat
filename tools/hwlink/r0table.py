@@ -123,6 +123,22 @@ TABLE = {
     # and by the master enable (v = 1): does the word being played survive?
     # (payloads/fiforeset.s; Kingdom Hearts - Chain of Memories)
     'fiforeset': [v << 8 | k for v in (0, 1) for k in range(9)],
+    # alyosha fifo_dma/fifo's refills (FIFO A on TM0 at period k, DMA1 from
+    # EWRAM, the gamepak slot fixed / incrementing, or IWRAM, n NOPs, a TM1
+    # read): the second refill a request after the first burst's last word,
+    # lost inside the burst, chained on its hand-back cycle; six FIFO stores
+    # with the master off; recorded 2026-10-14 (payloads/fifoslot.s)
+    'fifoslot': sorted(set(
+        [s << 16 | 32 << 8 | n for s in (0, 1, 2)
+         for n in (20, 28, 30, 31, 32, 33, 34, 36, 40, 50,
+                   58, 60, 62, 63, 64, 65, 66, 67, 68, 72, 80, 100)]
+        + [1 << 18 | 1 << 16 | 32 << 8 | n for n in (20, 31, 32, 40, 50, 64, 80, 100)]
+        + [s << 16 | k << 8 | n for s in (0, 1) for k in (26, 28, 29, 30, 31, 33, 34, 35, 36)
+           for n in range(k - 2, k + 13)]
+        + [s << 16 | k << 8 | n for s, k in ((0, 29), (1, 31)) for n in range(44, 128, 4)]
+        + [1 << 19 | k << 8 | n for k in range(8, 15) for n in range(k - 3, k + 31)]
+        + [29 << 8 | n for n in range(44, 59)]
+        + [1 << 16 | 31 << 8 | n for n in range(48, 61)])),
     'hdmalag': ([c << 8 | w for c in list(range(0, 12)) + [15, 16, 17, 18, 19, 20, 31, 32, 33, 34]
                  for w in (1, 10, 11, 14)]
                 + [8 << 8 | 2, 22 << 8 | 1, 22 << 8 | 11]

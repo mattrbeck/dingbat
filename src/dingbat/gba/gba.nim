@@ -287,6 +287,17 @@ type
     # H-blank request earlier than this is lost. Never ahead of the clock
     # between instructions, so not serialized: a load clears it.
     busy_until*:       array[4, CycleCount]
+    # FIFO_LEVEL_AT_OVERFLOW: the cycle each word of the last sound-FIFO burst
+    # on channels 1/2 was written (index channel - 1). Only compared with an
+    # overflow inside that burst; not serialized (a load clears it), as
+    # busy_until.
+    fifo_word_at*:     array[2, array[4, CycleCount]]
+    # FIFO_HANDBACK_CHAIN (index channel - 1): 1 = a request landed in the
+    # burst's hand-back cycle and is granted its first read; 2 = that word
+    # is held in the latch, and the next burst writes it, then reads 3 more
+    fifo_chain*:       array[2, uint8]
+    # ... and where the gamepak burst it continues had got to (bus.rom_next_addr)
+    fifo_rom_next*:    array[2, uint32]
     # DMA_CHAIN: the burst that just ended handed the bus straight to the
     # next one, which starts without its lead cycle. Instruction scoped.
     chained*:          bool
@@ -2305,6 +2316,10 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     else: gba.dma.imm_due[ch] = 0
     if gba.dma.busy_until[ch] >= base: gba.dma.busy_until[ch] -= base
     else: gba.dma.busy_until[ch] = 0
+  for f in 0..1:
+    for i in 0..3:
+      if gba.dma.fifo_word_at[f][i] >= base: gba.dma.fifo_word_at[f][i] -= base
+      else: gba.dma.fifo_word_at[f][i] = 0
   if gba.interrupts.gate_open_at >= base:
     gba.interrupts.gate_open_at -= base
   else:

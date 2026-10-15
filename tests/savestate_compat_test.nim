@@ -924,8 +924,11 @@ const
   DMA_TAG      = 0xC9'u8
   GPIO_TAG     = 0xCA'u8
   DMA_CH_LEN   = 4 + 4 + 4 + 4 + 2 + 2 + 4 + 2  # sad dad src dst cnt_l cnt_h latch count
-  DMA_SEC_LEN  = 1 + 4 * DMA_CH_LEN
+  DMA_SEC_LEN  = 1 + 4 * DMA_CH_LEN             # up to rev 10
   DMA_COUNT_AT = DMA_CH_LEN - 2                 # `count` is last in a channel
+  # Rev 11 ends the section with the two sound channels' FIFO hand-back
+  # bytes (DMA.fifo_chain)
+  DMA_FIFO_LEN = 2
 
 # The PPU section (tag GBA_SEC_PPU) gained its line-start latches at rev 6:
 # bg_enable_hist u16, win0/win1 inside, the 0x400-byte OAM view and its
@@ -1052,6 +1055,19 @@ proc strip_ppu_latches(payload: var string): bool =
   payload.delete(at ..< at + PPU_LATCH_LEN)
   true
 
+proc strip_dma_fifo(payload: var string): bool =
+  ## Rewrite a payload this build wrote into the pre-rev-11 DMA layout by
+  ## dropping the FIFO hand-back bytes at the end of the section.
+  var found = -1
+  for i in 0 .. payload.len - DMA_SEC_LEN - DMA_FIFO_LEN - 1:
+    if payload[i] == char(DMA_TAG) and
+       payload[i + DMA_SEC_LEN + DMA_FIFO_LEN] == char(GPIO_TAG):
+      if found >= 0: return false  # ambiguous
+      found = i
+  if found < 0: return false
+  payload.delete(found + DMA_SEC_LEN ..< found + DMA_SEC_LEN + DMA_FIFO_LEN)
+  true
+
 proc strip_dma_count(payload: var string): bool =
   ## Rewrite a payload this build wrote into the pre-rev-5 DMA layout by
   ## dropping each channel's `count`. Returns false if the section could not
@@ -1117,6 +1133,7 @@ proc run_intr_wait_migration() =
   check(rev3.len == rev4.len, "the two parked payloads differ only by the flag")
   rev3.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
   check(strip_inflight(rev3), "rev-9 in-flight section located and removed")
+  check(strip_dma_fifo(rev3), "rev-11 DMA FIFO hand-back bytes located and removed")
   check(strip_dma_count(rev3), "rev-5 DMA count fields located and removed")
   check(strip_ppu_latches(rev3), "rev-6 PPU latch fields located and removed")
   check(strip_rtc_clock(rev3), "rev-7 RTC status/clock fields located and removed")
@@ -1154,6 +1171,7 @@ proc run_intr_wait_migration() =
   var rev3_running = d.state_payload()
   rev3_running.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
   check(strip_inflight(rev3_running), "rev-9 in-flight section located and removed (running)")
+  check(strip_dma_fifo(rev3_running), "rev-11 DMA FIFO hand-back bytes located and removed (running)")
   check(strip_dma_count(rev3_running), "rev-5 DMA count fields located and removed (running)")
   check(strip_ppu_latches(rev3_running), "rev-6 PPU latch fields located and removed (running)")
   check(strip_rtc_clock(rev3_running), "rev-7 RTC status/clock fields located and removed (running)")
@@ -1210,6 +1228,8 @@ proc run_gba_inflight() =
   a.bus.update_waitcnt(a.mmio.waitcnt)
   a.timer.tmd_prev[1] = 0x1234
   a.timer.tmd_write_cycle[1] = now
+  # A sound-FIFO word read in a hand-back cycle, held for DMA1's next refill
+  a.dma.fifo_chain[0] = 2
   let p = a.state_payload()
 
   let b = new_gba_for(GBA_ROMS[0][0])
@@ -1228,6 +1248,8 @@ proc run_gba_inflight() =
   check(b.bus.fetch_page == a.bus.fetch_page and b.bus.fetch_page != 0xFFFFFFFF'u32,
         "the page the CPU fetches from is carried",
         "a " & $a.bus.fetch_page & ", b " & $b.bus.fetch_page)
+  check(b.dma.fifo_chain[0] == 2 and b.dma.fifo_chain[1] == 0,
+        "the sound FIFO's held hand-back word is carried (rev 11)")
   var ran = true
   try:
     for _ in 0 ..< 30: b.step_frame()
@@ -1235,9 +1257,23 @@ proc run_gba_inflight() =
     ran = false
   check(ran, "and the loaded core runs")
 
+  # Rev 10: the same payload without the FIFO bytes loads with nothing held.
+  var p10 = p
+  check(strip_dma_fifo(p10), "rev-11 DMA FIFO hand-back bytes located and removed")
+  let g = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: g.step_frame()
+  var loaded10 = true
+  try: g.apply_state_payload(p10, 10)
+  except CatchableError: loaded10 = false
+  check(loaded10, "a rev-10 payload still loads")
+  if loaded10:
+    check(g.dma.fifo_chain[0] == 0 and g.dma.fifo_chain[1] == 0,
+          "rev 10: no sound-FIFO word is held")
+
   # Rev 8: the same payload without the section loads as that build did.
   var p8 = p
   check(strip_inflight(p8), "rev-9 in-flight section located and removed")
+  check(strip_dma_fifo(p8), "rev-11 DMA FIFO hand-back bytes located and removed")
   let c = new_gba_for(GBA_ROMS[0][0])
   for _ in 0 ..< 30: c.step_frame()
   let c_memctrl = c.mmio.memctrl
@@ -1257,6 +1293,7 @@ proc run_gba_inflight() =
   # Rev 9: the same payload without the PSG section loads as that build did.
   var p9 = p
   check(strip_psg(p9), "rev-10 PSG section located and removed")
+  check(strip_dma_fifo(p9), "rev-11 DMA FIFO hand-back bytes located and removed")
   let e = new_gba_for(GBA_ROMS[0][0])
   for _ in 0 ..< 30: e.step_frame()
   var loaded9 = true

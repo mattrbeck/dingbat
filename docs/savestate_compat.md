@@ -188,6 +188,14 @@ load decodes the spare bits as before, leaves no master-on
 window, and takes each square's latch from its position. Deadlines are
 distances from the payload's clock; the length is pinned in the compat test.
 
+**The sound-FIFO hand-back word (GBA rev 11).** At the end of the DMA
+section, one byte per sound channel (DMA1, DMA2): `DMA.fifo_chain`. A refill
+request that lands in a burst's hand-back cycle takes the next burst's first
+read there and holds the word in the channel's latch until the FIFO's next
+request, whose burst writes it and reads three more
+(`gba/apu/dma_channels.nim` FIFO_HANDBACK_CHAIN). A state can fall between the
+two; rev ≤ 10 builds never held a word, so their states load with none held.
+
 Two states stay refused: GBA rev ≤ 3 taken mid-IntrWait with the handler
 running, and sub-1 MiB GBA carts' states from before the ROM-buffer resize
 (below).

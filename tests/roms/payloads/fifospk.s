@@ -26,7 +26,7 @@
 @ Also: DMA0 armed on V-blank (idle, the guard below) changes nothing on the
 @ console -- k = 20 n = 10..30 read the same with and without it -- where
 @ dingbat ran its events inside the FIFO burst then and chained a second
-@ burst (dma_channels.nim FIFO_OWN_BURST_NO_REQUEST).
+@ burst (then FIFO_OWN_BURST_NO_REQUEST; now dma_channels.nim FIFO_DROP_BUSY).
 @
 @ SAFETY (tmp fifomap.s, the earlier probe, wedged the console on its first
 @ cell three times; cause unknown):

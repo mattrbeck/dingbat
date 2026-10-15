@@ -8126,3 +8126,106 @@ Kong as its other checks.
 **Status: (c), no core change.** The slip is the first boot's flash format,
 carried through the game's random seed: (d) for the coin flip, (c) for the
 chip's time. No `@known` is needed: `goals` is a SLIP and passes.
+
+## §91. alyosha's last three rows: a crash, a retracted model, and the refill that comes right behind the first, 2026-10-14
+
+alyosha gba-tests stood at 123/126. Each red row's source was read
+against its binary, and the FIFO questions went to the AGB SP.
+
+**`unsafe/prefetcher_branch_thumb_arm_2` (Failed test 078): not scored.**
+The suite's own `unsafe/README.md`: it "crashes on console due to the
+prefetcher being misaligned when switching from thumb to arm mode". The
+author moved it out of `prefetcher/`, where its `_arm`, `_arm_3` and
+`_arm_4` siblings are scored. The failing check is that switch: TM0 after
+the Thumb `bx r2` at 0x0800019E (an odd halfword) into ARM code at
+0x080001A4, expected 0x53, read 0x4E. A console never draws a verdict,
+so the 0x53 never came off one. Its first check, the ARM-to-Thumb
+branch, reads the expected 0x3A. Now in the NotScored ledger
+(`build_alyosha_tests` CrashesOnConsole). The README says the same of
+`fifo_dma_disable_jam` and `_2`, which pass here and stay scored.
+
+**`fifo_dma/fifo` (Failed test 002): the expectation is a model the
+author retracted.**
+- The binary (the 2023-09-01 upload, never rebuilt) is not the source.
+  Test 2's second compare is broken in it: `ldr r7, [r5]` overwrites the
+  read, and the `bne` reuses the first compare's flags. So test 2 checks
+  only its first TM1 read, 0x68. dingbat read 0x62.
+- Tests 2, 3 and 4 all expect 0x68 at their first read; test 4 also
+  expects 0xA5 at its second.
+- The upload's comments name the rule behind those numbers: "also tests
+  that fixed source address in ROM uses all non-sequential accesses".
+  That is six cycles more per 4-word burst from the cartridge. Added to
+  dingbat as an experiment, it gives exactly 0x68 in tests 2-4 and 0x98
+  for test 2's never-checked second constant.
+- The next day's commit (3b40bb3, source only) replaced both such
+  comments with "gives unexpected results on hardware" and changed the
+  second constant to 0x8B.
+- On the SP (`payloads/fifoslot.s`, the burst read out of the empty slot
+  at WAITCNT 0, whose waits the memory controller applies), a fixed
+  source bursts exactly as an incrementing one: 32 cycles, sequential
+  after the first word. The rule is not the console's.
+- Test 2's own subject holds on the SP and in dingbat: six words stored
+  to FIFO A with the master off reach nothing, and the first overflow
+  asks for a refill as for an empty FIFO.
+- With the refill rules below, dingbat now reads 0x84 there: the second
+  refill comes right behind the first.
+
+The ROM runs its code from the cartridge, which no ARM payload can do on
+the link rig, so whether a console prints 0x84 is a flashcart question:
+`tests/roms/alyfifo.py` writes five variants that print each read
+(docs/hwprobe-questions.md). Proposed for NotScored with that evidence;
+the row stays scored until then.
+
+**`fifo_dma/fifo_6` (Failed test 156): needs a cartridge.** The DMA1-end
+interrupt's handler reads TM1 = 0x7B before the next refill. dingbat
+reaches that read 3 cycles late (126 with no refill in the way), the
+refill granted at 125 wins, and it reads 0x9C. Its handler, the BIOS
+dispatch and the prefetcher at WAITCNT 0x4014 all run from the cartridge.
+The empty slot's float is not safe at 3/1 waits, so the rig cannot stand
+in. The ROM prints the read's low byte when it fails, so a flashcart run
+of the ROM itself answers it.
+
+**The refill law (in the core).** fifoslot.s, FIFO A on TM0 at period k,
+n NOPs, a TM1 read: 644 cells over k = 8..36, from EWRAM, the slot (fixed
+and incrementing) and IWRAM, every cell one answer in three passes. Now a
+law (`cyclelaws/fifoslot.gba`). The old core disagreed with 242 of the
+696 cells asked. What it had wrong:
+
+| rule | console | dingbat had |
+|---|---|---|
+| `FIFO_LEVEL_AT_OVERFLOW` | an overflow inside a refill burst counts only the words written by its cycle | the whole burst |
+| `FIFO_DROP_BUSY` | a request (4 cycles after its overflow) inside the channel's own burst is lost | no such case reached; `FIFO_OWN_BURST_NO_REQUEST` for a burst that drains events, now removed |
+| `FIFO_HANDBACK_CHAIN` | a request on the burst's hand-back cycle takes the next burst's first read there; the rest (a write, three transfers, no lead) waits for the next request | none |
+
+So from EWRAM (a 30-cycle burst) the second overflow at k = 30..32 brings
+a second burst right behind the first. At k = 29 it splits 36 + 23. At
+k <= 28 or >= 33 there is one burst until the next overflow. The slot
+shows the same edges two cycles later, with a 38 + 25 split at k = 31.
+
+The rules were fitted on the first 430 cells (the old core missed 150).
+Before the confirming run, dingbat's answers were written down for 266 new
+cells (the old core would have missed 92). They were IWRAM
+bursts at k = 8..14 (dropped, chained, back to back, one and two cycles
+apart, none) and the split bursts' second halves. All 266 matched.
+fifoffff's 2026-09-25 table (§79.6), recorded long before and not used
+in fitting, goes from 75 to 111 of 264, replayed in its recorded order. k = 3's odd "11 / 19" is the
+chain's shape and k = 4 is exact; k = 1 and the later steps of k = 2 and
+3 stay open. fifospk (161 cells, the DMA0-armed set behind the removed
+rule included) is unchanged.
+
+Games' sound timers overflow hundreds of cycles apart, far longer than a
+burst, so none of this reaches them. The library A/B sweep (200 frames,
+RTC held, framebuffer and final-state hashes) is identical on 7898 of 7899
+ROMs. The one is `4V4 Arashi Get The Goal (J) [b1]`, a bad dump whose TM0
+drives FIFO A at period 4 (the k = 4 regime fifoffff's table matches); its
+frames are identical and only its state differs. The good dump is
+identical. Cost, retired instructions over 600 frames (min of 6, a second
+build of main as control, within 0.01%): Golden Sun +0.12%, Minish Cap
++0.06%, FireRed +0.07%. Save states: GBA payload revision 11 carries the
+held hand-back word (docs/savestate_compat.md).
+
+Rig note: alyosha's `unsafe/fifo_dma_disable_jam` crashes a console by
+disabling a FIFO DMA in the cycle its request arrives. That is the likely
+cause of the earlier FIFO wedges (docs/hwprobe-questions.md). fifoslot.s
+stops TM0 and waits ~160 cycles before disabling DMA1, with no V-blank
+guard. It ran about 2,100 runs without a hitch.
