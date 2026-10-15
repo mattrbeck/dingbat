@@ -77,20 +77,24 @@ every test here.
 | `channel_1_extra_length_clocking-cgb0B` | on CGB ≤ B the extra length clock needs only a previously-disabled counter; fixed on CGB C | `GbQuirks.length_clock_any_nrx4`, on `--model=cgb0B` only |
 | `channel_1_freq_change_timing-A/-cgb0BC/-cgbDE` | (no header) three per-revision builds | write-vs-reload rule below; the per-revision cells are `GbQuirks.pcm_read_edge_zero` (CGB 0–C) and `GbQuirks.square_freq_backstep_halftick` (CGB D/E) |
 
-**The sweep's second overflow check is 8 M-cycles late and re-reads NR10.** Pan Docs
-("Frequency sweep") describes one indivisible step: compute, disable on overflow, else
-write back and compute again. `channel_1_sweep` annotates the block where its channel
-goes quiet, 8 nops past the sweep tick, "8 cycles after trigger, the APU checks if the
-NEXT trigger overflows the frequency"; `channel_1_sweep_restart` rounds 3–5 each open
-with "the channel should stop after 8 cycles, but we <change NR10> before then", and
-zeroing NR10 cancels the stop (round 3) while changing only the shift does not (4, 5).
-So the gate is the shift read 8 M-cycles later, not the period — which it must be, since
-a trigger arms the check with period 0 (blargg cgb_sound `06-overflow on trigger`). The
-first calculation is not delayed (`channel_1_sweep_restart_2`, shift 0, stops with no
-grace). A trigger's own immediate check gets the delay plus one APU tick: the write is
-latched on a tick edge and the countdown starts on the next (`channel_1_sweep_restart`
-round 2: nine M-cycles, not eight). Code: `GB_SWEEP_CHECK_DELAY`, `ch1_sweep_check_due`,
-the arm in `ch1_write`.
+**The sweep's calculation takes one APU tick per shift.** Pan Docs ("Frequency
+sweep") describes one indivisible step: compute, disable on overflow, else write back
+and compute again. `channel_1_sweep` annotates the block where its channel goes quiet,
+8 nops past the sweep tick; `channel_1_sweep_restart` rounds 3–5 each open with "the
+channel should stop after 8 cycles, but we <change NR10> before then", and zeroing
+NR10 cancels the stop (round 3) while changing only the shift does not (4, 5). Those
+8 M-cycles are the shift of 7 those rows use plus one: DocBoy's `ch1_period_sweep_
+step1..7` and `disable_on_trigger_step1..7` move the stop one M-cycle per step (a
+clock's second calculation stops the channel step + 1 M-cycles after it, a trigger's
+step + 3), so the calculation shifts once per 1 MHz tick and the check reads NR10's
+step as it stands when it ends. A trigger that lands while a calculation runs
+restarts it a tick sooner than a fresh one (`channel_1_sweep_restart` round 2: nine
+M-cycles at shift 7, DocBoy `disable_on_double_trigger_*`). The model, with what
+else DocBoy's rows and SameBoy (black box) pin, is in `psg_channels.nim`, "Channel 1's
+sweep unit"; `channel_1_sweep_restart_2`'s cut-off (a restart 3 M-cycles before the
+clock counts, 2 does not) is the CGB's 8 T trigger lead (`SWEEP_TRIGGER_LEAD_T_CGB`),
+not a shadow-load delay: the DMG takes the restart 2 M-cycles before the clock
+(DocBoy `change_period_nr14_during_recalc_step0_delay14284`).
 
 Trap: a lazily-evaluated check that can clear `enabled` must run on every reader of
 `enabled`. blargg's `sync_sweep` polls NR52 for the overflow disable

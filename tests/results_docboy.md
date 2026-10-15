@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 23:13:12 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-14 23:19:28 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**8119/9130 passed.**
+**8486/9128 passed.**
 
 ## docboy/dmg/cpu
 
@@ -120,81 +120,16 @@ All 68 tests passed (DMG dmgABC).
 
 All 32 tests passed (DMG dmgABC).
 
-## docboy/dmg/apu (238/307 passed)
+## docboy/dmg/apu (303/307 passed)
 
-238/307 tests passed on DMG dmgABC, 69 failed:
+303/307 tests passed on DMG dmgABC, 4 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/apu/ch1_period_sweep_change_direction_to_decrease_on_trigger_round1 | $FFF0=$02 = fail value (tick 1100004) |
-| dmg/docboy/apu/ch1_period_sweep_change_direction_to_increase_step6_period256_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_change_direction_to_increase_step6_round1_1 | $FFF0=$02 = fail value (tick 200012) |
-| dmg/docboy/apu/ch1_period_sweep_change_direction_to_increase_step7_round1_1 | $FFF0=$02 = fail value (tick 400012) |
 | dmg/docboy/apu/ch1_period_sweep_change_direction_twice_period_overflow_round1_2 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/apu/ch1_period_sweep_change_direction_twice_period_overflow_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_change_pace_0_to_2_step0 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_change_pace_0_to_2_step0_delayed_more_round2 | $FFF0=$02 = fail value (tick 300000) |
-| dmg/docboy/apu/ch1_period_sweep_change_pace_0_to_2_step0_delayed_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_change_pace_0_to_2_step6_round2 | $FFF0=$02 = fail value (tick 200000) |
-| dmg/docboy/apu/ch1_period_sweep_change_pace_0_to_4_then_step_0_to_2_round2 | $FFF0=$02 = fail value (tick 400000) |
-| dmg/docboy/apu/ch1_period_sweep_change_pace_1_to_0_during_recalc_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_change_pace_1_to_0_during_recalc_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr13_during_recalc_round1_2 | $FFF0=$02 = fail value (tick 1100004) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr13_during_recalc_round2_1 | $FFF0=$02 = fail value (tick 1200000) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr14_during_recalc_delay14277_round2 | $FFF0=$02 = fail value (tick 300012) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr14_during_recalc_delay14278_round2 | $FFF0=$02 = fail value (tick 300012) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr14_during_recalc_delay14279 | $FFF0=$02 = fail value (tick 4400000) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr14_during_recalc_delay14284 | $FFF0=$02 = fail value (tick 4400000) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr14_during_recalc_delay14285_round2 | $FFF0=$02 = fail value (tick 300000) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr14_during_recalc_delay14286_round2 | $FFF0=$02 = fail value (tick 300012) |
-| dmg/docboy/apu/ch1_period_sweep_change_period_nr14_during_recalc_step0_delay14284_round1 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_0_to_1_pace4_delay16 | $FFF0=$02 = fail value (tick 1100000) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_0_to_1_pace4_delay16384 | $FFF0=$02 = fail value (tick 1200004) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_4_period32_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period128_round2 | $FFF0=$02 = fail value (tick 200012) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period151_round2 | $FFF0=$02 = fail value (tick 200012) |
 | dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period152_round2 | $FFF0=$02 = fail value (tick 200012) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period154_round1 | $FFF0=$02 = fail value (tick 300004) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period155_round1 | $FFF0=$02 = fail value (tick 300004) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period180_round1 | $FFF0=$02 = fail value (tick 300004) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period224_round1 | $FFF0=$02 = fail value (tick 400004) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period32_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period63_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_6_to_5_period96_round1 | $FFF0=$02 = fail value (tick 200008) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delayed_round2 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_round1 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_7_to_0_during_recalc_twice_delayed_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_change_step_7_to_0_during_recalc_twice_round1 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step1_delay0_round2 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step1_delay1_round2 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step1_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step1_delay3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step6_delay0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step6_delay1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step6_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step6_delay3_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_double_trigger_step6_delay4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_trigger_step1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_trigger_step2_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_trigger_step3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_trigger_step4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_trigger_step5_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_trigger_step6_period2016_round1_2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_disable_on_trigger_step7_round1 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/apu/ch1_period_sweep_retrigger_round2 | $FFF0=$02 = fail value (tick 1800004) |
-| dmg/docboy/apu/ch1_period_sweep_step1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_step2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_step3_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_step4_round2 | $FFF0=$02 = fail value (tick 200008) |
-| dmg/docboy/apu/ch1_period_sweep_step5_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/apu/ch1_period_sweep_step6_period92_round2 | $FFF0=$02 = fail value (tick 200000) |
 | dmg/docboy/apu/ch1_period_sweep_step6_period93_round2 | $FFF0=$02 = fail value (tick 200000) |
-| dmg/docboy/apu/ch1_period_sweep_step6_period94_round2 | $FFF0=$02 = fail value (tick 300004) |
-| dmg/docboy/apu/ch1_period_sweep_step6_round2 | $FFF0=$02 = fail value (tick 300004) |
 | dmg/docboy/apu/ch1_period_sweep_step7_period247 | $FFF0=$02 = fail value (tick 600000) |
-| dmg/docboy/apu/ch1_period_sweep_write_nr10_overflow_period16_step7 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_write_nr10_overflow_period16_step7_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/apu/ch1_period_sweep_write_nr10_overflow_period32_step6 | $FFF0=$02 = fail value (tick 100000) |
 
 ## docboy/cgb/boot (48/68 passed)
 
@@ -506,98 +441,14 @@ All 4 tests passed (CGB cgbE).
 
 All 17 tests passed (CGB cgbE).
 
-## docboy/cgb/apu/ch1 (1048/1134 passed)
+## docboy/cgb/apu/ch1 (1130/1132 passed)
 
-1048/1134 tests passed on CGB cgbE, 86 failed:
+1130/1132 tests passed on CGB cgbE, 2 failed:
 
 | Test | Result |
 |------|--------|
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_to_decrease_on_trigger_round1 | $FFF0=$02 = fail value (tick 1100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_to_increase_step6_period256_round1 | $FFF0=$02 = fail value (tick 100008) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_to_increase_step6_round1_1 | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_to_increase_step7_round1_1 | $FFF0=$02 = fail value (tick 400004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_twice_period_overflow_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_direction_twice_round2 | $FFF0=$02 = fail value (tick 600000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_0_to_2_step0 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_0_to_2_step0_delayed_more_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_0_to_2_step0_delayed_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_0_to_2_step6_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_0_to_4_then_step_0_to_2_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_4_to_6_during_recalc_round0_2 | $FFF0=$02 = fail value (tick 1500004) |
 | cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_4_to_6_during_recalc_round1_1 | $FFF0=$02 = fail value (tick 1500000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_4_to_6_during_recalc_round2_2 | $FFF0=$02 = fail value (tick 1500000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_pace_4_to_6_round2 | $FFF0=$02 = fail value (tick 1500004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr13_during_recalc_round1_2 | $FFF0=$02 = fail value (tick 1100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr13_during_recalc_round2_1 | $FFF0=$02 = fail value (tick 1200000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14277_round2 | $FFF0=$02 = fail value (tick 300004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14278_round2 | $FFF0=$02 = fail value (tick 300004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14279 | $FFF0=$02 = fail value (tick 4400000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14279_period_round1 | $FFF0=$02 = fail value (tick 400008) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14279_period_round4 | $FFF0=$02 = fail value (tick 400004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14284 | $FFF0=$02 = fail value (tick 4400008) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14285_round2 | $FFF0=$02 = fail value (tick 300004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_delay14286_round2 | $FFF0=$02 = fail value (tick 300004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_period_nr14_during_recalc_step0_delay14284_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_0_to_1_after_recalc_round2 | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_0_to_1_pace4_delay16 | $FFF0=$02 = fail value (tick 1100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_0_to_1_pace4_delay16384 | $FFF0=$02 = fail value (tick 1200004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_4_period32_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period128_round2 | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period151_round2 | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period152_round1 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period153_round1 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period153_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period180_round1 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period224_round1 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period256_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period32_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period63_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_6_to_5_period96_round1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delayed_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_7_to_0_during_recalc_twice_delayed_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_7_to_0_during_recalc_twice_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_4_alt_round0_2 | $FFF0=$02 = fail value (tick 600004) |
 | cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_4_alt_round1_2 | $FFF0=$02 = fail value (tick 600004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_4_alt_round2_2 | $FFF0=$02 = fail value (tick 700012) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_4_round0 | $FFF0=$02 = fail value (tick 4300004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_4_round0_period_round1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_4_round1 | $FFF0=$02 = fail value (tick 4300000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_4_round1_period_round1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_6_round0 | $FFF0=$02 = fail value (tick 4300004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_0_to_6_round1 | $FFF0=$02 = fail value (tick 4300000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_6_to_4_round0_1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_6_to_4_round1_2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_6_to_4_round2_1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_6_to_5_round0_2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_6_to_5_round1_2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_change_step_during_recalc_6_to_5_round2_1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step1_delay0_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step1_delay1_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step1_delay2_round2 | $FFF0=$02 = fail value (tick 100008) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step1_delay3_round2 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step6_delay0_round2 | $FFF0=$02 = fail value (tick 100008) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step6_delay1_round2 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step6_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step6_delay3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_double_trigger_step6_delay4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_trigger_step1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_trigger_step2_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_trigger_step3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_trigger_step4_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_trigger_step5_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_trigger_step6_period32_round1_2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_disable_on_trigger_step7_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_retrigger_round2 | $FFF0=$02 = fail value (tick 1800000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step1_round2 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step4_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step5_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step6_period92_round2 | $FFF0=$02 = fail value (tick 200008) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step6_period93_round2 | $FFF0=$02 = fail value (tick 300004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step6_period94_round2 | $FFF0=$02 = fail value (tick 300004) |
-| cgb/docboy/apu/ch1/ch1_period_sweep_step6_round2 | $FFF0=$02 = fail value (tick 300004) |
 
 ## docboy/cgb/apu/ch2
 
@@ -611,240 +462,20 @@ All 109 tests passed (CGB cgbE).
 
 All 69 tests passed (CGB cgbE).
 
-## docboy/cgb/double_speed/apu/ch1 (374/613 passed)
+## docboy/cgb/double_speed/apu/ch1 (594/613 passed)
 
-374/613 tests passed on CGB cgbE, 239 failed:
+594/613 tests passed on CGB cgbE, 19 failed:
 
 | Test | Result |
 |------|--------|
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_change_period_nr13_no_retrigger_75_16_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_change_period_nr14_no_retrigger_75_16_round2 | $FFF0=$02 = fail value (tick 100002) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_change_period_nr14_no_retrigger_75_17_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr13_during_recalc_delay12240_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr13_during_recalc_delay12241_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr13_during_recalc_delay12242_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr13_during_recalc_delay12243_reload_increment_round2 | $FFF0=$02 = fail value (tick 1100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr13_during_recalc_delay12243_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr13_during_recalc_delay12244_round1 | $FFF0=$02 = fail value (tick 1300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr13_during_recalc_delay12245_round1 | $FFF0=$02 = fail value (tick 1300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12228_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12229 | $FFF0=$02 = fail value (tick 4500000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12229_period_round2 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12240 | $FFF0=$02 = fail value (tick 4500000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12241_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12242_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_change_pace_round1 | $FFF0=$02 = fail value (tick 2000000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_length_timer_round1 | $FFF0=$02 = fail value (tick 400002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_period_round1 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_period_round3 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_round1 | $FFF0=$02 = fail value (tick 1200004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12244_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay0_12240 | $FFF0=$02 = fail value (tick 4500002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay0_delay12241 | $FFF0=$02 = fail value (tick 4500004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay0_delay12242 | $FFF0=$02 = fail value (tick 4500006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay0_delay12243_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay0_delay12244_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay0_delay12245_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12240 | $FFF0=$02 = fail value (tick 4500002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12241 | $FFF0=$02 = fail value (tick 4500004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12242 | $FFF0=$02 = fail value (tick 4500006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12243 | $FFF0=$02 = fail value (tick 4500000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12244_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12245_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay1_delay12246_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12240 | $FFF0=$02 = fail value (tick 4500002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12241 | $FFF0=$02 = fail value (tick 4500004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12242 | $FFF0=$02 = fail value (tick 4500006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12243 | $FFF0=$02 = fail value (tick 4500000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12244_round1 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12245_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_double_trigger_delay2_delay12246_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_delay12240_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_delay12241_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_delay12242_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_delay12243_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_delay12244_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_delay12245_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_delay12246_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_recalc_delay12242_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_recalc_delay12243_round2 | $FFF0=$02 = fail value (tick 1200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_recalc_delay12244_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_recalc_delay12245_round2 | $FFF0=$02 = fail value (tick 400000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_step0_delay12242_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_step0_delay12243_round1 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_step0_delay12244_round1 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_step0_delay12245_round1 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_no_retrigger_step0_delay12246_round2 | $FFF0=$02 = fail value (tick 300004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_step0_delay12228_round1 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_step0_delay12229_round1 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_step0_delay12240_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_step0_delay12241_round1 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_step0_delay12242_round1 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_step0_delay12243_round1 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_step1_delay12241_shutdown_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_delay15_after_trigger | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_0_delay15_after_trigger_delay256_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_0_then_7_delay2_after_trigger_delay256_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_6_delay2_after_trigger_delayed_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delay0_after_double_trigger | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delay0_after_trigger | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delay1_after_double_trigger_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delay1_after_trigger | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delay2_after_double_trigger_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delay2_after_trigger_delay255_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delay2_after_trigger_delay256_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_then_7_delayed | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_1_during_recalc_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_3_during_recalc_double_trigger_b_delay0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_3_during_recalc_double_trigger_b_delay1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_3_during_recalc_double_trigger_b_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_3_during_recalc_double_trigger_delay0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_3_during_recalc_double_trigger_delay1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_3_during_recalc_double_trigger_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_5_during_recalc_b_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_5_during_recalc_double_trigger_b_delay0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_5_during_recalc_double_trigger_b_delay1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_5_during_recalc_double_trigger_b_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_5_during_recalc_double_trigger_delay0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_5_during_recalc_double_trigger_delay1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_5_during_recalc_double_trigger_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_5_during_recalc_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step1_delay0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step1_delay1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step1_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step1_delay3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step1_delay4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step1_delay5_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step1_delay6_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay1_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay5_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay6_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay7_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step2_delay8_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay0_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay10_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay1_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay2_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay3_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay4_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay5_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay6_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay7_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay8_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step3_delay9_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay10_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay11_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay12_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay2_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay3_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay4_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay5_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay6_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay7_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay8_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step4_delay9_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay10_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay11_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay12_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay13_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay14_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay1_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay5_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay6_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay7_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay8_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step5_delay9_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_b_delay0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_b_delay1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay00_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay10_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay11_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay12_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay13_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay14_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay15_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay16_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay17_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay18_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay1_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay2_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay3_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay4_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay5_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay6_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay7_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay8_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_double_trigger_step6_delay9_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step0_round1 | $FFF0=$02 = fail value (tick 200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_a1_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_a2_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_b1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_b2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_c1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_c2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_d1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_d2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step5_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step6_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_trigger_step7_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step1_delay0_0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step1_delay1_0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step1_delay2_0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step1_delay3_0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step1_delay4_0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay0_0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay10_0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay1_0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay2_0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay3_0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_1_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_4_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_5_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_6_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_7_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_8_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay5_0_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay6_0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay7_0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay8_0_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay9_0_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step0_a_round1 | $FFF0=$02 = fail value (tick 200002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step0_b_round1 | $FFF0=$02 = fail value (tick 200002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step0_c_round1 | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step0_d_round1 | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step0_round1 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step1_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step2_round2 | $FFF0=$02 = fail value (tick 200002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step3_round2 | $FFF0=$02 = fail value (tick 200006) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_a1_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_a2_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_b1_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_b2_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_c1_round2 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_c2_round2 | $FFF0=$02 = fail value (tick 300002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_d1_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_d2_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step4_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step5_round2 | $FFF0=$02 = fail value (tick 200002) |
-| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_step6_round2 | $FFF0=$02 = fail value (tick 400002) |
+| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_period_round2 | $FFF0=$02 = fail value (tick 300000) |
+| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_period_nr14_during_recalc_delay12243_period_round4 | $FFF0=$02 = fail value (tick 300000) |
+| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_change_step_7_to_0_during_recalc_delay16_after_trigger | $FFF0=$02 = fail value (tick 100002) |
+| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_2_round1 | $FFF0=$02 = fail value (tick 100006) |
+| cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_period_sweep_disable_on_triple_trigger_step4_delay4_3_round1 | $FFF0=$02 = fail value (tick 100006) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_0_57 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_0_9 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/apu/ch1/double_speed_apu_ch1_retrigger_same_period_75_16_40 | $FFF0=$02 = fail value (tick 100006) |

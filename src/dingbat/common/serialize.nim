@@ -82,8 +82,11 @@ const
   #      · 7 the APU's pending KEY1 re-phase (spsw_rephase_pending)
   #      · 8 the APU's deferred double-speed envelope step (env_late_pending);
   #        env_extra_tick's byte becomes a step count
+  #      · 9 channel 1's sweep unit: the held operand, the step its
+  #        calculation latched, what the pending load is, and whether the
+  #        operand is a calculation's result (psg_channels.nim); OPRI's bit
   GBA_PAYLOAD_VERSION* = 11'u32
-  GB_PAYLOAD_VERSION*  = 8'u32
+  GB_PAYLOAD_VERSION*  = 9'u32
   # NDS: 1 initial (docs/nds/savestate.md). The payload also carries a hash
   #      of its field layout, checked on load, so a layout change that
   #      forgets this bump is still refused rather than misread.

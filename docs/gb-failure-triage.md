@@ -967,7 +967,7 @@ frame sequencer's step at the hand-off (1 / 0, `ch2_init_env_counter_timing`).
 `ENV_TRIGGER_PRECLOCK_SKIP` (gb/apu/psg_host.nim): a trigger inside the
 sequencer step before the envelope clock, taken 4 T early, misses that clock.
 `SWEEP_TRIGGER_LEAD_T_{DMG,CGB}` = 4 / 8: a trigger that close before a sweep
-clock misses it. `APU_POWERON_TAP_LEAD` = 4 (apu.nim): the tap bit that
+clock misses it (scheduler cycles, so 1 / 2 M-cycles at double speed too: I2). `APU_POWERON_TAP_LEAD` = 4 (apu.nim): the tap bit that
 decides the skipped first DIV-APU edge is sampled 4 counts ahead of the NR52
 write. `APU_SPSW_EXTRA_DOTS` = 8 / `_SINGLE` = 3: the APU's share of the
 KEY1 stall's oscillator restart, the PPU's 8 / 3 exactly, with
@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,119 / 9,130 at `DocboyRev` (97 more not scored, `DocboyNotScored`), every
+(`tests/README.md`, "The DocBoy suite"): 8,486 / 9,128 at `DocboyRev` (99 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1125,10 +1125,82 @@ question. Families, largest first:
   640 `double_retrigger_*` rows (codes 0 and 1); its own build, run as a
   black box, fails 84 of them (SameBoy passes 37 of those 84), so those
   expectations are not DocBoy's output; dingbat passes 484.
-* **I2. CH1 frequency sweep edges (380).** `period_sweep_*` on DMG, CGB and
-  double speed: sweep timer reload and recalculation against triggers,
-  NR10/NR13/NR14 writes during a recalculation, disable-on-(double/triple)
-  trigger. SameBoy passes 10 of 12. Probably dingbat.
+* **I2. CH1 frequency sweep (380; 367 closed 2026-10-14).** `period_sweep_*`
+  on DMG, CGB and double speed. Read against the test sources, with SameBoy
+  (black box, DMG B / CGB E) as the second witness: before the change it
+  passed 301 of the 380 dingbat failed, so the family was dingbat's; probe
+  ROMs built from DocBoy's own code (straight-line writes and one NR52/PCM12
+  read) settled the rules the rows left open on SameBoy. The model is in
+  `psg_channels.nim`, "Channel 1's sweep unit":
+  * The calculation shifts one bit per 1 MHz APU tick. A trigger's check stops
+    the channel step + 3 M-cycles after the NR14 write (`disable_on_trigger_
+    step1..7`), step + 2 when it restarts a calculation already running
+    (`disable_on_double_trigger_*`; SameSuite `channel_1_sweep_restart`
+    round 2's nine M-cycles at step 7); a clock's second check stops it step
+    + 1 after the clock (`step1..7`, SameSuite's eight at step 7). The check
+    lands half a tick past the 1 MHz edge, which double speed's reads see
+    (`double_speed_*_disable_on_trigger_step4_a1..d2`).
+  * The shifted operand is held between calculations and the adder is live:
+    a clock writes back the operand its last calculation made with that
+    calculation's step (`change_step_6_to_5_period154`), the direction is
+    the one NR10 holds at the check (`change_direction_*_during_recalc`), a
+    clock's calculation takes NR10's step and NR13/NR14 as they stand after
+    the clock's M-cycle (`change_step_during_recalc_*_round1`,
+    `change_period_nr13_during_recalc_round2_*`), and a frequency written
+    during a calculation moves the adder's base but not the shifter
+    (`double_speed ... no_retrigger_*`).
+  * A trigger at step 0 runs no calculation (Pan Docs); a clock at a non-zero
+    step with no calculation ended since the trigger writes 0 to the
+    frequency and does nothing else, so the note never stops (`change_step_
+    0_to_1_*`, `change_step_during_recalc_0_to_{4,6}_round0`; the PCM12 row
+    `change_step_0_to_1_after_recalc` shows the 2048-cycle period).
+  * NR10: step 0 written during a calculation freezes its tick counter until
+    a step is given back, whatever step (SameBoy probes: the stop follows the
+    new step 6, 6, 5, 4 M-cycles later for a freeze 0..3 ticks in; `change_
+    step_7_to_0_during_recalc_then_*`, one M-cycle later on the CGB); a pace
+    given while the timer stands at 0 runs an iteration at once (`change_
+    pace_0_to_2_*`; Pan Docs' "reloaded as soon as it's set" holds only
+    there: after a clock the 8-count runs out first, `_delayed_more`); no
+    enabled flag is latched at the trigger; an add-mode write after
+    subtraction (both machines), or any write over a non-zero step (DMG),
+    lets the adder's carry through, so an adder at $7FF stops the channel
+    (`write_nr10_overflow_*`, `change_direction_twice_period_overflow_
+    round2`, `change_step_6_to_{4,5}_period32`, `change_pace_1_to_0_during_
+    recalc`).
+  * Double speed: the clock's own check lands 3 M-cycles after the DIV-APU
+    event whichever 1 MHz phase the APU was powered on in (`step0_a..d`; the
+    envelope's 2 T lag on CGB E, I8, is the same shape); the CGB's trigger
+    lead before a clock is 2 M-cycles, not 8 T (`..._delay12240`); a trigger
+    written while an earlier one's calculation has not started rides on it
+    (`double_trigger_*`); a clock's write-back reaches NR13/NR14 on the
+    1 MHz edge after it, undoing a CPU write in between (`..._delay12243`).
+  * DocBoy-only rules taken with the rest (SameBoy differs; they fall out of
+    the same model): a trigger one tick into a calculation waits a tick, a
+    trigger on its way holds the channel on, and a clock cuts a running
+    calculation short (`change_period_nr14_during_recalc_delay14279..14284`:
+    the frequency becomes 0 and the note plays on).
+  * Left (13, 2 of them not scored): CGB `change_period_nr14_during_
+    recalc{,_step0}_delay14284` (2): a CGB trigger 2 M-cycles before the clock misses it in SameSuite
+    `channel_1_sweep_restart_2` (CGB hardware) and gambatte
+    `ch1_init_reset_sweep_counter_timing_10` [cgb04c]; DocBoy's CGB takes the
+    DMG's 1 M-cycle lead. Not scored (`DocboyNotScored`, ledger "DocBoy: a
+    CGB trigger 2 M-cycles before a sweep clock").
+    DMG `step6_period93_round2`, `step7_period247`, `change_step_6_to_5_
+    period152_round2`, `change_direction_twice_period_overflow_round1_2`
+    (4): DocBoy's DMG stops the channel when a clock's second calculation
+    lands exactly on $7FF; SameBoy does not; one hardware run settles it
+    (DocBoy's own ROMs on the GBP). CGB `change_step_during_recalc_0_to_4_
+    alt_round1_2`, `change_pace_4_to_6_during_recalc_round1_1` (2): an NR10
+    write on the clock's own M-cycle reaching the clock's write-back; SameBoy
+    fails both. Double speed `delay12243_period_round2/4` (2: the duty phase
+    after a trigger the clock's write-back overwrites; dingbat and SameBoy
+    sit on opposite sides of DocBoy's edge), `disable_on_triple_trigger_
+    step4_delay4_{2,3}_round1`, `change_step_7_to_0_during_recalc_delay16_
+    after_trigger` (3); SameBoy fails all five.
+  The 14 double-speed CH1 rows outside the sweep (`retrigger_same_period_75_*`
+  7, `retrigger_square_wave_duty_75_{alt,b}_*` 4, `change_period_nr1{3,4}_
+  no_retrigger_75_*` 3) are a retrigger on a duty step at double speed, the
+  square-trigger grid of H1; SameBoy fails all 14. Not chased.
 * **I3. CGB compatibility-mode picture (233).** 63 `palettes_checksum_*`:
   dingbat's skip-boot hand-off always loads the default compatibility palette,
   where the boot ROM picks one by the title checksum (Pan Docs, "Power Up

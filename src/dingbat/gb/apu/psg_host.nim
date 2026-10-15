@@ -46,6 +46,14 @@ proc gb_apu_edge*(gb: GB): CycleCount =
 
 template psg_edge(h: GB): CycleCount = gb_apu_edge(h)
 
+proc gb_apu_edge_at*(gb: GB; t: CycleCount): CycleCount =
+  ## gb_apu_edge for an arbitrary cycle `t`: the first 1 MHz edge at or after it.
+  let tick = gb_apu_tick(gb)
+  let past = (t + tick - (gb.apu.tick_phase mod tick)) mod tick
+  if past == 0: t else: t + (tick - past)
+
+template psg_edge_at(h: GB; t: CycleCount): CycleCount = gb_apu_edge_at(h, t)
+
 const APU_TRIGGER_EDGE_BEFORE* {.intdefine.} = 0
   ## 1: a square trigger counts its startup from the 1 MHz edge at or BEFORE
   ## the write; 0: from the edge at or after it. Only distinguishable at double

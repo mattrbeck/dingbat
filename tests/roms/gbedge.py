@@ -2556,6 +2556,10 @@ def t_swpphase(a, slot, p):
     in ch1_trigger_sweep that a pending stop does NOT survive a restart
     ("only reachable when the trigger lands on the calculation's cycle").
     Rows 00-0E land a restart on each of the 15 M-cycles that window spans.
+    (Those three constants are gone: the calculation now shifts one bit per
+    APU tick, "Channel 1's sweep unit" in psg_channels.nim; with shift 1 the
+    trailing check here stops the channel 2 M-cycles after the step. The
+    page still measures the restart window.)
 
     Every row: APU power cycle, DIV anchor (cycle 0), NR10 = $11 (pace 1,
     increment, shift 1), duty 2, volume $F, freq 1024 ($400), triggered on

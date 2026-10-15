@@ -169,7 +169,11 @@ when not PSG_AGB:
     if lead_t == 0: return 0
     let d = psg_fs_next_edge_in(h)
     let stage = psg_fs_next_stage(h)
-    if (stage == 2 or stage == 6) and d <= (lead_t shl psg_shl(h)): 1
+    # The lead is CPU cycles (one or two M-cycles), not real time: at double
+    # speed a CGB trigger 3 M-cycles (6 T) before the clock takes it (DocBoy
+    # double_speed change_period_nr14_during_recalc{,_double_trigger_*}_
+    # delay12240, step0_delay12240), so the 8 T lead is 4 T there.
+    if (stage == 2 or stage == 6) and d <= lead_t: 1
     else: 0
 
 when PSG_AGB:
@@ -341,77 +345,175 @@ proc sq_write_duty(ch: PsgSquare; val: uint8) =
 # ---- Channel 1's sweep unit ----
 
 when not PSG_AGB:
-  const GB_SWEEP_STOP_DELAY* = CycleCount(4)
-    ## T-cycles (one APU tick) between a sweep overflow calculation and the
-    ## stop becoming visible in NR52 / PCM12 / the mixer: SameSuite
-    ## channel_1_sweep_restart_2's NR52 read landing on the sweep event still
-    ## sees the channel on. Subtracted from the two delays below, not added.
+  # The GB's sweep unit computes shadow +/- (shadow >> step) one shift per
+  # 1 MHz APU tick, so a calculation takes `step` ticks and its overflow
+  # check lands half a tick after the last. The shifted operand is held
+  # between calculations (`sweep_operand`) and the adder works on it live,
+  # in NR10's current direction: a sweep clock writes back what the adder
+  # shows and checks its overflow, then starts the next calculation on the
+  # value it wrote. Pan Docs ("Frequency Sweep") has both calculations
+  # happen at once and gives no timing; the timing and the corner cases
+  # below are DocBoy's `ch1_period_sweep_*` rows (docs/gb-failure-triage.md
+  # I2), each one SameBoy (black box) also passes unless marked, and
+  # SameSuite's channel_1_sweep* (CGB hardware) fall out of it.
+  const SWEEP_LOAD_ARRIVAL* = 1'u8
+    ## sweep_load_at is a trigger reaching the sweep unit: one APU tick after
+    ## the tick the NR14 write lands on.
+  const SWEEP_LOAD_LATCH* = 2'u8
+    ## sweep_load_at is a sweep clock's calculation latching its inputs, just
+    ## after the clock's 1 MHz edge: a CPU write on that edge's M-cycle
+    ## (NR10's step, NR13/NR14) is in the calculation (DocBoy
+    ## change_step_during_recalc_*_round1, change_period_nr13_during_recalc_
+    ## round2_*, double_speed change_period_nr14_during_recalc_no_retrigger_
+    ## delay12244).
+  const SWEEP_LOAD_REASSERT* = 3'u8
+    ## sweep_load_at is a sweep clock's write-back reaching NR13/NR14 on the
+    ## 1 MHz edge after the clock, at double speed half a tick past it: a CPU
+    ## write in between is lost (double_speed change_period_nr14_during_
+    ## recalc_no_retrigger_delay12243). The latch follows.
+  const SWEEP_LOAD_REASSERT_ONLY* = 4'u8
+    ## As SWEEP_LOAD_REASSERT, for a clock that writes 0 and starts nothing.
+  const SWEEP_LOAD_LATCH_STEP0* = 5'u8
+    ## As SWEEP_LOAD_LATCH, after a clock that wrote nothing back (step 0): a
+    ## step written on the clock's own M-cycle, with no calculation ended
+    ## since the trigger, makes it the clock that writes 0 (ch1_sweep_clock;
+    ## DocBoy change_step_during_recalc_0_to_{4,6}_round1, DocBoy only).
 
-  const GB_SWEEP_CHECK_DELAY* = CycleCount(28)
-    ## T-cycles (7 M-cycles) between a sweep frequency writeback and the
-    ## second overflow check that can stop the channel; plus
-    ## GB_SWEEP_STOP_DELAY = the 8 M-cycles SameSuite channel_1_sweep /
-    ## channel_1_sweep_restart rounds 3-5 measure. Pan Docs puts the second
-    ## calculation in the same event; the check reads NR10 as it stands 7
-    ## M-cycles later. The first calculation is not delayed
-    ## (channel_1_sweep_restart_2); a trigger's check adds one APU tick
-    ## (channel_1_sweep_restart round 2).
+  template sweep_tick_len(h: PsgHost): CycleCount = psg_tick(h)
 
-  const GB_SWEEP_SHADOW_DELAY* = CycleCount(8)
-    ## T-cycles (2 M-cycles) from a trigger reaching the sweep unit to the
-    ## frequency shadow holding NR13/NR14 (SameSuite channel_1_sweep_restart_2:
-    ## a restart leading a sweep event by 3 M-cycles is seen, by 2 is not).
-    ## Only the shadow is deferred; the timer, `sweep_enabled` and
-    ## `negate_used` reload on the write.
+  proc ch1_sweep_sum(ch: PsgSweepSquare): int {.inline.} =
+    ## The adder's output now: the shadow plus or minus the held operand.
+    int(ch.frequency_shadow) +
+      (if ch.negate: -int(ch.sweep_operand) else: int(ch.sweep_operand))
 
-proc ch1_sweep_calc(ch: PsgSweepSquare; h: PsgHost; at: CycleCount): uint16 =
-  ## One sweep calculation, run at cycle `at` -- not always now: the GB's
-  ## trailing check runs lazily, and its stop is dated from the check.
-  let shifted = ch.frequency_shadow shr ch.shift
-  when PSG_AGB:
-    # GBA: an overflow stops the channel on the spot.
-    var calculated = uint32(ch.frequency_shadow) +
-                     uint32(if ch.negate: -int(shifted) else: int(shifted))
-    if ch.negate: ch.negate_used = true
-    if calculated > 0x07FF: ch.enabled = false
-    uint16(calculated)
-  else:
-    var calc = int(ch.frequency_shadow) + (if ch.negate: -int(shifted) else: int(shifted))
-    if ch.negate: ch.negate_used = true
-    if calc > 0x07FF:
-      ch.sweep_stop_at = at + (GB_SWEEP_STOP_DELAY shl psg_shl(h))
-    uint16(calc and 0x7FFF)
+  proc ch1_sweep_start(ch: PsgSweepSquare; h: PsgHost; t0: CycleCount) =
+    ## A calculation starting at tick t0 with the step NR10 holds now. It
+    ## ends `step` ticks later, half a tick past that edge: its stop is
+    ## clocked on the 1 MHz clock's other edge, which double speed's reads,
+    ## two per tick, tell from the next tick (DocBoy double_speed
+    ## disable_on_trigger_step4_a1: off 2N + 5 M-cycles after the 1 MHz
+    ## edge, not 2N + 6), and a CPU write on the edge's own M-cycle lands
+    ## before it (change_direction_to_decrease_during_recalc_round1,
+    ## change_direction_to_increase_step6_round1).
+    ch.sweep_calc_n = ch.shift
+    ch.sweep_load_value = ch.frequency_shadow
+    ch.sweep_check_at = t0 + CycleCount(ch.shift) * sweep_tick_len(h) +
+                        sweep_tick_len(h) div 2
 
-when not PSG_AGB:
-  proc ch1_sweep_run(ch: PsgSweepSquare; h: PsgHost) =
-    ## Not inline: the guard runs on every catch-up, this once per sweep
-    ## period. Load, check and stop apply in deadline order (the check
-    ## consumes the shadow).
-    let now = psg_now(h)
-    template do_load =
-      if ch.sweep_load_at <= now:
-        ch.sweep_load_at    = PSG_NO_STEP
-        ch.frequency_shadow = ch.sweep_load_value
-    template do_check =
-      if ch.sweep_check_at <= now:
-        let at = ch.sweep_check_at
-        ch.sweep_check_at = PSG_NO_STEP
-        # NR10 is re-read here, not captured when the check was armed
-        # (channel_1_sweep_restart rounds 3-5). Gated on the shift, not the
-        # period: a trigger arms this with sweep period 0 (blargg
-        # 06-overflow on trigger).
-        if ch.sweep_enabled and ch.shift > 0:
-          # One calculation whether armed by a trigger or a writeback (blargg
-          # 06-overflow on trigger).
-          discard ch1_sweep_calc(ch, h, at)
-    if ch.sweep_check_at < ch.sweep_load_at:
-      do_check(); do_load()
+  proc ch1_sweep_latch(ch: PsgSweepSquare; h: PsgHost; t0: CycleCount) =
+    ## A sweep clock's calculation takes its inputs: the shadow from
+    ## NR13/NR14 as they stand, the step from NR10.
+    ch.frequency_shadow = ch.frequency
+    ch1_sweep_start(ch, h, t0)
+
+  template ch1_sweep_t0(ch: PsgSweepSquare; h: PsgHost): CycleCount =
+    ## The tick the calculation in flight started on.
+    ch.sweep_check_at - sweep_tick_len(h) div 2 -
+      CycleCount(ch.sweep_calc_n) * sweep_tick_len(h)
+
+  proc ch1_sweep_arrive(ch: PsgSweepSquare; h: PsgHost; at: CycleCount) =
+    ## A trigger reaching the sweep unit at tick `at`: the shadow takes
+    ## NR13/NR14, the operand clears, and the trigger's calculation (Pan
+    ## Docs: the overflow check, which only stops the channel at a non-zero
+    ## step) starts. From idle it starts a tick later (fresh: the stop is
+    ## step + 3 M-cycles after the write, DocBoy disable_on_trigger_step1..7);
+    ## a calculation still running is restarted on this tick (step + 2:
+    ## DocBoy disable_on_double_trigger_*, SameSuite channel_1_sweep_restart
+    ## round 2).
+    let tick = sweep_tick_len(h)
+    if ch.sweep_check_at != PSG_NO_STEP and at == ch1_sweep_t0(ch, h) + tick:
+      # One tick into a calculation the trigger waits a tick
+      # (disable_on_double_trigger_step{1,6}_delay0{0,}; DocBoy only: SameBoy
+      # restarts at once).
+      ch.sweep_load_at = at + tick + 1
+      ch.sweep_load_kind = SWEEP_LOAD_ARRIVAL
+      return
+    ch.frequency_shadow = ch.frequency
+    ch.sweep_operand = 0
+    ch.sweep_operand_valid = false
+    ch.sweep_frozen = 0
+    ch.sweep_stop_at = PSG_NO_STEP
+    if ch.shift == 0:
+      # Step 0: no calculation (Pan Docs), and one in flight is dropped.
+      ch.sweep_check_at = PSG_NO_STEP
+    elif ch.sweep_check_at != PSG_NO_STEP:
+      ch1_sweep_start(ch, h, at)
     else:
-      do_load(); do_check()
-    # Last: either calculation above can arm it.
-    if ch.sweep_stop_at <= now:
-      ch.sweep_stop_at = PSG_NO_STEP
+      ch1_sweep_start(ch, h, at + tick)
+
+  template ch1_sweep_trigger_pending(ch: PsgSweepSquare): bool =
+    ch.sweep_load_at != PSG_NO_STEP and ch.sweep_load_kind == SWEEP_LOAD_ARRIVAL
+
+  proc ch1_sweep_complete(ch: PsgSweepSquare) =
+    ## A calculation's end: the operand is shifted into place and the
+    ## overflow check runs on the adder (in NR10's direction as it is now)
+    ## while NR10's step is non-zero. A check in subtraction mode arms the
+    ## direction-clear stop (Pan Docs, "Obscure Behavior"). A trigger still
+    ## on its way to the sweep unit holds the channel on (DocBoy
+    ## disable_on_double_trigger_step1_delay{0,1}, step6_delay5: the first
+    ## trigger's calculation ends just as the second is written; DocBoy
+    ## only, SameBoy stops the channel).
+    ch.sweep_check_at = PSG_NO_STEP
+    ch.sweep_operand = ch.sweep_load_value shr ch.sweep_calc_n
+    ch.sweep_operand_valid = true
+    if ch1_sweep_trigger_pending(ch) or ch.shift == 0: return
+    if ch.negate: ch.negate_used = true
+    if ch1_sweep_sum(ch) > 0x7FF:
       ch.enabled = false
+
+  proc ch1_sweep_run(ch: PsgSweepSquare; h: PsgHost) =
+    ## Not inline: the guard runs on every catch-up, this a few times per
+    ## sweep period. Everything due runs in time order; on a tie a trigger's
+    ## arrival goes first (it restarts the calculation ending on that tick),
+    ## then a calculation's end, then a sweep clock's stop.
+    let now = psg_now(h)
+    while true:
+      let l = ch.sweep_load_at
+      let c = ch.sweep_check_at
+      let s = ch.sweep_stop_at
+      let m = min(l, min(c, s))
+      if m > now: break
+      if l == m:
+        ch.sweep_load_at = PSG_NO_STEP
+        case ch.sweep_load_kind
+        of SWEEP_LOAD_ARRIVAL:
+          ch1_sweep_arrive(ch, h, l - 1)
+        of SWEEP_LOAD_REASSERT, SWEEP_LOAD_REASSERT_ONLY:
+          ch.frequency = ch.frequency_shadow
+          if ch.sweep_arrival_after:
+            # A trigger written between the clock and this edge: its NR14
+            # write is undone, and it reaches the unit a tick later, on the
+            # value written back (DocBoy double_speed change_period_nr14_
+            # during_recalc_delay12243: the note sweeps on from the clock's
+            # value).
+            ch.sweep_arrival_after = false
+            ch.sweep_load_at = l + sweep_tick_len(h) + 1
+            ch.sweep_load_kind = SWEEP_LOAD_ARRIVAL
+          elif ch.sweep_load_kind == SWEEP_LOAD_REASSERT:
+            ch.sweep_load_at = l + 1
+            ch.sweep_load_kind = SWEEP_LOAD_LATCH
+        of SWEEP_LOAD_LATCH_STEP0:
+          if ch.shift != 0 and not ch.sweep_operand_valid:
+            # A step written on a step-0 clock's own M-cycle with nothing to
+            # write back: the clock becomes the one that writes 0 (below).
+            ch.frequency = 0
+            ch.frequency_shadow = 0
+          else:
+            ch1_sweep_latch(ch, h, psg_edge_at(h, l - 1))
+        else:
+          # The sweep clock's calculation counts from the 1 MHz edge at or
+          # after the clock (at double speed the DIV-APU event sits half a
+          # tick off it).
+          ch1_sweep_latch(ch, h, psg_edge_at(h, l - 1))
+      elif c == m:
+        ch1_sweep_complete(ch)
+      else:
+        # A sweep clock's check on the adder it wrote back: at any step
+        # (Pan Docs), in the direction NR10 holds now.
+        ch.sweep_stop_at = PSG_NO_STEP
+        if ch1_sweep_sum(ch) > 0x7FF and
+           not ch1_sweep_trigger_pending(ch):
+          ch.enabled = false
 
 template ch1_sweep_due(ch: PsgSweepSquare; h: PsgHost) =
   ## Apply whatever the sweep unit has in flight that is due: every reader of
@@ -426,35 +528,122 @@ template ch1_sweep_due(ch: PsgSweepSquare; h: PsgHost) =
        ch.sweep_stop_at <= psg_now(h):
       ch1_sweep_run(ch, h)
 
+when PSG_AGB:
+  proc ch1_sweep_calc(ch: PsgSweepSquare): uint16 =
+    ## One sweep calculation; an overflow stops the channel on the spot.
+    let shifted = ch.frequency_shadow shr ch.shift
+    var calculated = uint32(ch.frequency_shadow) +
+                     uint32(if ch.negate: -int(shifted) else: int(shifted))
+    if ch.negate: ch.negate_used = true
+    if calculated > 0x07FF: ch.enabled = false
+    uint16(calculated)
+
+when not PSG_AGB:
+  proc ch1_sweep_clock(ch: PsgSweepSquare; h: PsgHost) =
+    ## A sweep iteration: the frame sequencer's clock, or an NR10 write
+    ## giving the pace a value while the timer stands at 0 (ch1_write).
+    if ch.negate: ch.negate_used = true
+    let edge = psg_edge(h)
+    ch.sweep_frozen = 0
+    if ch.sweep_check_at != PSG_NO_STEP and ch1_sweep_t0(ch, h) <= edge:
+      # A clock cuts a running calculation short, as of the 1 MHz edge at or
+      # after it (one a trigger has set up to start later runs on; at double
+      # speed one starting on that edge is cut: DocBoy double_speed
+      # change_period_nr14_during_recalc_delay12240).
+      ch.sweep_check_at = PSG_NO_STEP
+    if ch.shift > 0 and not ch.sweep_operand_valid:
+      # No calculation has ended since the trigger (it had step 0, or a
+      # clock cut it short), so the adder holds nothing: the clock
+      # writes 0 to the frequency and checks and starts nothing, and so
+      # does every clock after it until a trigger or a step-0 clock.
+      # DocBoy change_step_0_to_1_pace4_*, change_step_during_recalc_
+      # 0_to_{4,6}_round0 (alive for good; SameBoy agrees), change_step_
+      # 0_to_1_after_recalc (PCM12: the duty steps 2048 M-cycles apart
+      # after the clock), change_period_nr14_during_recalc_delay14279..
+      # 14284 (a trigger 2..7 M-cycles before the clock; DocBoy only:
+      # SameBoy differs).
+      let reload_now = sq_reload_is_now(ch, h)
+      ch.frequency = 0
+      ch.frequency_shadow = 0
+      if reload_now: sq_reload(ch, h)
+      if edge > psg_now(h) and not ch1_sweep_trigger_pending(ch):
+        # At double speed the 0 reaches NR13/NR14 on the edge after the
+        # clock (SWEEP_LOAD_REASSERT; double_speed change_period_nr14_during_
+        # recalc_double_trigger_delay{1,2}_delay12243: a trigger written on
+        # the clock's own M-cycle then sweeps from 0).
+        ch.sweep_load_at = edge
+        ch.sweep_load_kind = SWEEP_LOAD_REASSERT_ONLY
+      return
+    # The adder's output is the new value; its operand was shifted by the
+    # step of its own calculation (DocBoy change_step_6_to_5_period154).
+    let sum = ch1_sweep_sum(ch)
+    var latch_at = edge + 1
+    let wrote_back = sum <= 0x07FF and ch.shift > 0
+    if wrote_back:
+      # The sweep's frequency write races the timer reload like an
+      # NR13/NR14 write (sq_reload_is_now); at $7ff a step lands every
+      # M-cycle, so the sweep tick always coincides (SameSuite
+      # channel_1_sweep_restart round 1).
+      let reload_now = sq_reload_is_now(ch, h)
+      ch.frequency_shadow = uint16(sum)
+      ch.frequency        = uint16(sum)
+      if reload_now: sq_reload(ch, h)
+      ch.sweep_operand = 0
+      ch.sweep_operand_valid = false
+      if edge > psg_now(h): latch_at = edge   # SWEEP_LOAD_REASSERT first
+    # The next calculation starts on the 1 MHz edge, on NR13/NR14 as
+    # they stand just after it (SWEEP_LOAD_LATCH): after a write-back,
+    # on the value written; at step 0, on the frequency as it is (a
+    # frequency written without a trigger just before a step-0 clock
+    # counts: double_speed change_period_nr14_during_recalc_
+    # no_retrigger_step0_*). A trigger on its way supersedes it.
+    if not ch1_sweep_trigger_pending(ch):
+      ch.sweep_load_at = latch_at
+      ch.sweep_load_kind = if latch_at == edge: SWEEP_LOAD_REASSERT
+                           elif wrote_back: SWEEP_LOAD_LATCH
+                           else: SWEEP_LOAD_LATCH_STEP0
+    # The clock's own overflow check stops the channel one tick after the
+    # clock, at double speed one and a half (3 M-cycles: DocBoy double_speed
+    # period_sweep_step0{,_a,_b,_c,_d}, the same whichever 1 MHz phase the
+    # APU was powered on in), on the adder as it stands then: a step-0
+    # calculation ending in that tick counts (change_period_nr14_during_
+    # recalc_step0_delay14284), and after a write-back the adder shows the
+    # value written.
+    ch.sweep_stop_at = psg_now(h) + sweep_tick_len(h) +
+                       (sweep_tick_len(h) div 2) * CycleCount(psg_shl(h))
+
 proc sweep_step(ch: PsgSweepSquare; h: PsgHost) =
   # psg_seq_step has caught the duty counter up: this changes ch.frequency.
   if ch.sweep_timer > 0: dec ch.sweep_timer
   if ch.sweep_timer == 0:
     ch.sweep_timer = if ch.sweep_period > 0: ch.sweep_period else: 8'u8
-    if ch.sweep_enabled and ch.sweep_period > 0:
-      when PSG_AGB: ch.s0_slow = false   # a calculation has run (ch1_s0_kill_at)
-      let calc = ch1_sweep_calc(ch, h, psg_now(h))
-      if calc <= 0x07FF and ch.shift > 0:
-        # The sweep's frequency write races the timer reload like an
-        # NR13/NR14 write (sq_reload_is_now); at $7ff a step lands every
-        # M-cycle, so the sweep tick always coincides (SameSuite
-        # channel_1_sweep_restart round 1).
-        let reload_now = sq_reload_is_now(ch, h)
-        ch.frequency_shadow = calc
-        ch.frequency        = calc
-        if reload_now: sq_reload(ch, h)
-        when PSG_AGB:
+    # GB: no enabled flag latched at the trigger: a pace given later runs the
+    # clocks (DocBoy change_pace_0_to_2_step0_delayed_more: pace and step 0
+    # at the trigger, pace 2 written later, the eighth clock stops the
+    # channel; SameBoy agrees).
+    if (ch.sweep_enabled or not PSG_AGB) and ch.sweep_period > 0:
+      when PSG_AGB:
+        ch.s0_slow = false   # a calculation has run (ch1_s0_kill_at)
+        let calc = ch1_sweep_calc(ch)
+        if calc <= 0x07FF and ch.shift > 0:
+          # The sweep's frequency write races the timer reload like an
+          # NR13/NR14 write (sq_reload_is_now); at $7ff a step lands every
+          # M-cycle, so the sweep tick always coincides (SameSuite
+          # channel_1_sweep_restart round 1).
+          let reload_now = sq_reload_is_now(ch, h)
+          ch.frequency_shadow = calc
+          ch.frequency        = calc
+          if reload_now: sq_reload(ch, h)
           # AGB-native, measured: the second calculation, for its overflow
           # check, runs at once on the new shadow (AGB SP page 1F SWEEP2:
           # 2018/s7 dies at tick 1, the tick check >= 2048). A GB cartridge on
-          # the same console runs the GB's pipeline below -- the AGS GB-slot
-          # page is byte-identical to the MGB's (docs/hwprobe-questions.md
-          # row 16) -- so this is the GBA mode's own, not a port to make.
-          discard ch1_sweep_calc(ch, h, psg_now(h))
-        else:
-          # ...and the check on that value is 7 M-cycles away
-          # (GB_SWEEP_CHECK_DELAY).
-          ch.sweep_check_at = psg_now(h) + (GB_SWEEP_CHECK_DELAY shl psg_shl(h))
+          # the same console runs the GB's pipeline (ch1_sweep_clock) -- the
+          # AGS GB-slot page is byte-identical to the MGB's
+          # (docs/hwprobe-questions.md row 16) -- so this is the GBA mode's
+          # own, not a port to make.
+          discard ch1_sweep_calc(ch)
+      else:
+        ch1_sweep_clock(ch, h)
 
 proc ch1_trigger_sweep(ch: PsgSweepSquare; h: PsgHost) =
   when PSG_AGB:
@@ -513,27 +702,46 @@ proc ch1_trigger_sweep(ch: PsgSweepSquare; h: PsgHost) =
         ch.sweep_armed = false
         ch.s0_slow = false
   else:
-    ch.sweep_timer      = (if ch.sweep_period > 0: ch.sweep_period else: 8'u8) +
+    # A trigger written while an earlier one's calculation has not started
+    # rides on it: the timer keeps the earlier reload, lead and all (DocBoy
+    # double_speed change_period_nr14_during_recalc_double_trigger_*: the
+    # second trigger 1..3 M-cycles before the clock, the first 4..6, and
+    # the clock still comes).
+    let riding = ch1_sweep_trigger_pending(ch) or
+                 (ch.sweep_check_at != PSG_NO_STEP and
+                  ch1_sweep_t0(ch, h) >= psg_now(h))
+    if not riding:
+      ch.sweep_timer    = (if ch.sweep_period > 0: ch.sweep_period else: 8'u8) +
                           psg_sweep_trigger_extra(h)
     ch.sweep_enabled    = ch.sweep_period > 0 or ch.shift > 0
     ch.negate_used      = false
-    # A pending sweep stop does not survive the restart (only reachable when
-    # the trigger lands on the calculation's cycle). Assumed; no ROM pins
-    # this.
+    # A stop in flight dies with the restart (the channel is on again).
     ch.sweep_stop_at = PSG_NO_STEP
-    # The write reaches the sweep unit one tick after the one that latches
-    # it (channel_1_sweep_restart round 2); the shadow load then takes
-    # GB_SWEEP_SHADOW_DELAY (Pan Docs has it on the write; sweep_restart_2
-    # not).
-    let arrives = psg_edge(h) + psg_tick(h)
-    ch.sweep_load_value = ch.frequency
-    ch.sweep_load_at    = arrives + (GB_SWEEP_SHADOW_DELAY shl psg_shl(h))
-    # Pan Docs: with a non-zero shift the overflow check is immediate;
-    # SameSuite channel_1_sweep_restart round 2 keeps the channel audible
-    # nine more M-cycles, and the check reads the shadow loaded above by
-    # then.
-    if ch.shift > 0:
-      ch.sweep_check_at = arrives + (GB_SWEEP_CHECK_DELAY shl psg_shl(h))
+    # The write reaches the sweep unit on the APU tick after the one it lands
+    # on (ch1_sweep_arrive); a second trigger before that rides on the first
+    # (DocBoy double_speed disable_on_double_trigger_*_delay0: two writes one
+    # M-cycle apart stop the channel when the first alone does).
+    if ch.sweep_load_at != PSG_NO_STEP and
+       ch.sweep_load_kind in {SWEEP_LOAD_REASSERT, SWEEP_LOAD_REASSERT_ONLY}:
+      ch.sweep_arrival_after = true
+    elif not ch1_sweep_trigger_pending(ch):
+      ch.sweep_load_at   = psg_edge(h) + psg_tick(h) + 1
+      ch.sweep_load_kind = SWEEP_LOAD_ARRIVAL
+
+when not PSG_AGB:
+  proc ch1_sweep_freq_written(ch: PsgSweepSquare; h: PsgHost) =
+    ## An NR13/NR14 write without a trigger. Pan Docs: the shadow keeps its
+    ## value, and the next clock's write-back overwrites the write. But from
+    ## a calculation's start until its check (or a clock's) the adder's base
+    ## follows the frequency, while the shifter keeps the value it latched
+    ## (DocBoy double_speed change_period_nr14_during_recalc_no_retrigger_
+    ## delay12245/6: $799 written half a tick into a step-5 calculation on
+    ## 921 makes $799 + 921 >> 5; no_retrigger_step0_delay12245: written
+    ## after a step-0 clock's calculation, before its check, it overflows).
+    if ch.sweep_load_at != PSG_NO_STEP and ch.sweep_load_kind != SWEEP_LOAD_ARRIVAL:
+      return                                 # the latch still to come reads it
+    if ch.sweep_check_at != PSG_NO_STEP or ch.sweep_stop_at != PSG_NO_STEP:
+      ch.frequency_shadow = ch.frequency
 
 proc ch1_catchup_at(ch: PsgSweepSquare; h: PsgHost; observer_period: uint32) {.inline.} =
   ## See sq_catchup_at.
@@ -554,18 +762,72 @@ proc ch1_write(ch: PsgSweepSquare; nr: int; val: uint8; h: PsgHost) =
   # steps from now on.
   case nr
   of NR10:
+    when not PSG_AGB:
+      let old_pace = ch.sweep_period
+      let old_negate = ch.negate
+      let old_shift = ch.shift
     ch.sweep_period = (val and 0x70) shr 4
     ch.negate       = (val and 0x08) != 0
     ch.shift        = val and 0x07
     if not ch.negate and ch.negate_used: ch.enabled = false
+    when not PSG_AGB:
+      # An add-mode NR10 write lets the adder's carry in through for a moment
+      # where its direction changes from subtraction (both machines), or on
+      # any write over a non-zero step (DMG): an adder at $7FF then
+      # overflows and the channel stops (DocBoy change_direction_twice_
+      # period_overflow_round2, $7F0 + $0F with the direction flipped back;
+      # DMG write_nr10_overflow_period16_step7 / period32_step6, change_step_
+      # 6_to_{4,5}_period32, change_pace_1_to_0_during_recalc; SameBoy
+      # agrees on all of them, and keeps the CGB's channel on in the DMG
+      # rows).
+      if not ch.negate and
+         (old_negate or (not psg_cgb(h) and old_shift != 0)) and
+         ch1_sweep_sum(ch) + 1 > 0x7FF:
+        ch.enabled = false
+      # The pace's 3-bit timer stands at 0 from a trigger at pace 0 until the
+      # first clock (Pan Docs: pace 0 counts as 8): giving the pace a value
+      # then runs an iteration at once and reloads the timer (DocBoy
+      # change_pace_0_to_2_step0{,_delayed}: the step-0 overflow stops the
+      # channel 3 M-cycles after the write, but not once a clock has passed;
+      # change_pace_0_to_2_step6: its clocks fall 2 apart from the write).
+      if old_pace == 0 and ch.sweep_period != 0 and ch.sweep_timer == 8:
+        ch.sweep_timer = ch.sweep_period
+        ch1_sweep_clock(ch, h)
+      # The calculation's tick counter only runs while NR10's step is
+      # non-zero: a step of 0 written while one runs holds it where it is
+      # (and so the check at its end), and a step written later lets it
+      # count out the ticks it had left, whatever the new step (SameBoy,
+      # black box: a step-7 trigger's calculation held 0..7 ticks in stops
+      # the channel 6, 6, 5, 4, ... M-cycles after the step is given back,
+      # for any step 1..7; DocBoy change_step_7_to_0_during_recalc_then_7
+      # {,_delayed}, one M-cycle later on the CGB).
+      elif old_shift != 0 and ch.shift == 0 and
+           ch.sweep_check_at != PSG_NO_STEP:
+        let tick = sweep_tick_len(h)
+        let t0 = ch1_sweep_t0(ch, h)
+        let d = if psg_now(h) > t0: int((psg_now(h) - t0) div tick) else: 0
+        let done = min(int(ch.sweep_calc_n), max(1, d))
+        ch.sweep_frozen = uint8(int(ch.sweep_calc_n) - done + 1)
+        ch.sweep_check_at = PSG_NO_STEP
+      elif old_shift == 0 and ch.shift != 0 and ch.sweep_frozen != 0:
+        let tick = sweep_tick_len(h)
+        let left = CycleCount(ch.sweep_frozen) - 1
+        let wait = if psg_cgb(h): left * tick + tick div 2
+                   else: max(left * tick, tick) - tick div 2
+        ch.sweep_check_at = gb_apu_edge_before(h) + wait
+        ch.sweep_frozen = 0
   of NR11: sq_write_duty(ch, val)
   of NR12: psg_write_nrx2(ch, h, val)
-  of NR13: sq_write_freq_lo(ch, h, val)
+  of NR13:
+    sq_write_freq_lo(ch, h, val)
+    when not PSG_AGB: ch1_sweep_freq_written(ch, h)
   of NR14:
     sq_write_freq_hi(ch, h, val)
     if (val and 0x80) != 0:
       sq_trigger(ch, h)
       ch1_trigger_sweep(ch, h)
+    else:
+      when not PSG_AGB: ch1_sweep_freq_written(ch, h)
   else: discard
 
 proc ch2_write(ch: PsgSquare; nr: int; val: uint8; h: PsgHost) =

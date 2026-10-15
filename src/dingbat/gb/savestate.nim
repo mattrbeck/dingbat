@@ -228,6 +228,8 @@ proc save_mem_state(mem: GbMemory; w: var Writer) =
   w.write_bytes(mem.unusable)
   w.write_u8(mem.rp)
   w.write_u8(mem.svbk_raw)
+  # rev 9: OPRI's bit.
+  w.write_u8(mem.opri)
 
 proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_MEM)
@@ -262,6 +264,10 @@ proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
     mem.svbk_raw = r.read_u8() and 0x7'u8
   # Before rev 6 none of the three was carried and a load kept the running
   # machine's: $FEA0-$FEFF and RP as they were, SVBK reconstructed above.
+  # OPRI from rev 9; an older state gets the hand-off's 0 (a CGB-mode cart
+  # boots with it clear; in compatibility mode the register reads $FF and
+  # the bit is never seen).
+  mem.opri = if rev >= 9: r.read_u8() and 0x01'u8 else: 0'u8
   mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
   # Derived, not payload. dma_bus / dma_drive / dma_latch are re-derived in
   # gb_apply_state once the cartridge and PPU sections have landed.
@@ -604,6 +610,34 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
   # rev 8: a double-speed step 7 whose envelope work is still to come
   # (GbQuirks.env_clock_ds_late); its time is the divider's last tap edge.
   w.write_bool(apu.env_late_pending)
+  # rev 9: channel 1's sweep unit between calculations (psg_channels.nim):
+  # the operand its adder holds, the step the calculation in flight
+  # latched, what sweep_load_at is, and whether the operand is a result.
+  block:
+    let ch = apu.channel1
+    w.write_u16(ch.sweep_operand)
+    w.write_u8(ch.sweep_calc_n)
+    w.write_u8(ch.sweep_load_kind)
+    w.write_bool(ch.sweep_operand_valid)
+    w.write_u8(ch.sweep_frozen)
+    w.write_bool(ch.sweep_arrival_after)
+
+proc ch1_sweep_from_rev8(ch: GbChannel1) =
+  ## A rev <= 8 state's sweep unit: those builds computed each clock's value
+  ## on the spot (Pan Docs), so the operand the next clock adds is the shadow
+  ## shifted by NR10's step, a result. Their deadlines meant other things;
+  ## anything in flight lasts a few M-cycles past the frame boundary a state
+  ## is written on, and is dropped.
+  ch.sweep_check_at = GB_NO_STEP
+  ch.sweep_stop_at  = GB_NO_STEP
+  ch.sweep_load_at  = GB_NO_STEP
+  ch.sweep_load_kind = 0
+  ch.sweep_load_value = ch.frequency_shadow
+  ch.sweep_calc_n = ch.shift
+  ch.sweep_operand = ch.frequency_shadow shr ch.shift
+  ch.sweep_operand_valid = true
+  ch.sweep_frozen = 0
+  ch.sweep_arrival_after = false
 
 proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_APU)
@@ -699,6 +733,17 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
       for ch in [GbVolumeEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
         if ch.env_extra_tick != 0:
           ch.env_extra_tick = (if odd_next: 1'u8 else: 2'u8)
+    let ch1 = apu.channel1
+    if rev >= 9:
+      ch1.sweep_operand = r.read_u16() and 0x7FF
+      ch1.sweep_calc_n = r.read_u8() and 7
+      ch1.sweep_load_kind = r.read_u8()
+      check_range(int(ch1.sweep_load_kind), 0, 5, "ch1.sweep_load_kind")
+      ch1.sweep_operand_valid = r.read_bool()
+      ch1.sweep_frozen = min(r.read_u8(), 8'u8)
+      ch1.sweep_arrival_after = r.read_bool()
+    else:
+      ch1_sweep_from_rev8(ch1)
   else:
     # Before rev 6: the grids' phases and the KEY1 lag stayed whatever the
     # running machine had, as those builds did; the rest is live for a few
@@ -706,9 +751,7 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
     apu.div_skip = false
     for ch in [GbVolumeEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
       ch.env_extra_tick = 0
-    apu.channel1.sweep_check_at = GB_NO_STEP
-    apu.channel1.sweep_stop_at  = GB_NO_STEP
-    apu.channel1.sweep_load_at  = GB_NO_STEP
+    ch1_sweep_from_rev8(apu.channel1)
     apu.spsw_rephase_pending = false
     apu.env_late_pending = false
   # Restart audio pacing cleanly (see GBA load_apu_state)

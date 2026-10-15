@@ -42,7 +42,8 @@ const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 8
   ## sound/ch1_init_reset_sweep_counter_timing_* (22 rows): 0 loses
   ## timing_4 [dmg] and timing_10 [cgb], whose triggers sit one NOP before a
   ## sweep clock and expect the channel still running (no overflow yet) when
-  ## the ROM turns the sweep off.
+  ## the ROM turns the sweep off. Scheduler cycles, so M-cycles at double
+  ## speed too (psg_sweep_trigger_extra).
 
 const PSG_WAVE_BANK* = 16
   ## Bytes in one wave RAM bank. The GB has one; the GBA two (SOUND3CNT_L).
@@ -105,24 +106,39 @@ type
     shift*:              uint8
     sweep_timer*:        uint8
     frequency_shadow*:   uint16
+    # The trigger's enabled flag (Pan Docs). GBA only: the GB's clocks run on
+    # the pace as it stands (sweep_step).
     sweep_enabled*:      bool
     negate_used*:        bool
-    # GB: absolute scheduler cycle of the sweep's second overflow check, or
-    # PSG_NO_STEP: it trails the frequency writeback by 7 M-cycles and re-reads
-    # NR10 (PSG_SWEEP_CHECK_DELAY). Serialized from GB payload rev 6, with the
-    # two sweep deadlines below and sweep_load_value, as distances from the
-    # payload's scheduler clock.
+    # GB: the sweep unit's calculation in flight (psg_channels.nim, "Channel
+    # 1's sweep unit"): the absolute scheduler cycle it ends, or
+    # PSG_NO_STEP. Serialized from GB payload rev 6 with the other deadlines
+    # below, as distances from the payload's scheduler clock (rev 8 gave
+    # them their present meaning).
     sweep_check_at*:     CycleCount
-    # GB: absolute scheduler cycle at which a sweep overflow STOP reaches NR52,
-    # or PSG_NO_STEP when none is in flight. Every sweep calculation's stop is
-    # one APU tick behind the calculation itself; see PSG_SWEEP_STOP_DELAY.
+    # GB: a sweep clock's own overflow check, or PSG_NO_STEP.
     sweep_stop_at*:      CycleCount
-    # GB: a trigger's frequency-shadow load in flight: the value NR13/NR14
-    # held when the channel was triggered, and the absolute scheduler cycle it
-    # reaches the sweep unit's shadow register (PSG_NO_STEP when none is
-    # pending). The load does NOT happen on the write; PSG_SWEEP_SHADOW_DELAY.
+    # GB: the sweep unit's next load (sweep_load_kind: a trigger arriving, a
+    # clock's calculation latching its inputs, a clock's write-back
+    # reasserted), or PSG_NO_STEP; sweep_load_value is the value the
+    # calculation in flight shifts.
     sweep_load_at*:      CycleCount
     sweep_load_value*:   uint16
+    # GB: the sweep adder's shifted operand as the last calculation left it
+    # (the adder adds or subtracts it live, by NR10's direction), the step
+    # the calculation in flight latched, and what sweep_load_at is
+    # (SWEEP_LOAD_*). GB payload rev 9.
+    sweep_operand*:      uint16
+    sweep_calc_n*:       uint8
+    sweep_load_kind*:    uint8
+    # GB: whether the operand is a calculation's result since the last
+    # trigger, and a calculation NR10's step 0 holds frozen (its ticks left,
+    # plus 1; 0 = none). GB payload rev 9.
+    sweep_operand_valid*: bool
+    sweep_frozen*:       uint8
+    # GB: a trigger written while a clock's write-back is still on its way
+    # to NR13/NR14 (SWEEP_LOAD_REASSERT) arrives after it. GB payload rev 9.
+    sweep_arrival_after*: bool
     # GBA: the AGB's shift-0 trigger check is armed (ch1_write). Saved in
     # bit 15 of frequency_shadow's field; the format has no bit of its own.
     sweep_armed*:        bool

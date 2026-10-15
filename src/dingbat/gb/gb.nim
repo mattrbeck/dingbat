@@ -2448,9 +2448,8 @@ type
     # "FF6C — OPRI"). Storage only: Pan Docs has a write after the boot ROM
     # unmaps change nothing (TO BE VERIFIED there), and the priority the
     # renderer uses stays the one the operating mode picks. 0 at hand-off for
-    # a CGB cart (AGS gbedge p00 reads $FE). NOT serialized: a fresh GB
-    # field, deferred to the next batched GB payload revision; a load keeps
-    # the running machine's value.
+    # a CGB cart (AGS gbedge p00 reads $FE). Serialized from GB payload rev
+    # 9 (an older state loads 0).
     opri*:                 uint8
     hram*:                 array[0x7F, uint8]
     # $FEA0-$FEFF: real RAM on CGB 0-D (Pan Docs, "FEA0-FEFF range"); which

@@ -114,7 +114,10 @@ Two things: `ch1_trigger_sweep` in `common/psg_channels.nim` (*"A pending sweep 
 restart (only reachable when the trigger lands on the calculation's cycle).
 Assumed"*), and the split of the 8 M-cycles SameSuite `channel_1_sweep*`
 measures into `GB_SWEEP_SHADOW_DELAY` (2 M), `GB_SWEEP_CHECK_DELAY` (7 M) and
-`GB_SWEEP_STOP_DELAY` (1 M) — the sweep half of hwprobe row 14.
+`GB_SWEEP_STOP_DELAY` (1 M) — the sweep half of hwprobe row 14. (Since
+replaced by a calculation that shifts one bit per APU tick, `psg_channels.nim`
+"Channel 1's sweep unit", fitted to DocBoy's `ch1_period_sweep_*` rows; at
+shift 1 the trailing check below stops the channel 2 M-cycles after the step.)
 
 Setup: NR10 `$11` (pace 1, increment, shift 1), duty 2, volume `$F`, freq
 **1024** (`$400`), triggered on cycle 40. The trigger's own check computes
