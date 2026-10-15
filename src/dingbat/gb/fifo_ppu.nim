@@ -811,6 +811,19 @@ proc fifo_head_window_late*(ppu: GbFifoPpu) =
   when WIN_HEAD_ABSORB != 0:
     ppu.fetch_counter = -int(max(0, int32(ppu.wx) - 1))
 
+proc fetcher_window_abort(ppu: GbFifoPpu) {.noinline.} =
+  ## WIN_EN_ABORT's switch back to the background (see tick_bg_fetcher). Out
+  ## of line: it is rare and tick_bg_fetcher is on the dot loop (inline, the
+  ## DMG's column lead below cost +0.1% retired instructions on every game).
+  ppu.fetching_window = false
+  ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size) +
+                       (if ppu.cgb: 0'i32 else: int32(WIN_ABORT_COL_LEAD))) div 8)
+  fifo_arm_window(ppu)
+  when WIN_EN_HOLD > 0:
+    # `lx` has not moved since the start this undoes; re-arming WX - 7 on it
+    # would fire the start again on the same slot.
+    if ppu.win_lx == ppu.lx: ppu.win_lx = WIN_LX_OFF
+
 # M3_THROWAWAY_DOTS (gb.nim): the discarded head fetch is `B0`, four dots,
 # and the first real cycle runs to its own push slot (12 dots together).
 # mealybug m3_scy_change separates 4 from 6: the first tile's B read must take
@@ -839,14 +852,7 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       if ppu.fetching_window and not window_enabled(ppu) and
          (CGB_WE_DISABLE_LATE == 0 or not ppu.cgb or
           ppu.cycle_counter >= gb.we_off_dot):
-        ppu.fetching_window = false
-        ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size) +
-                             (if ppu.cgb: 0'i32 else: int32(WIN_ABORT_COL_LEAD))) div 8)
-        fifo_arm_window(ppu)
-        when WIN_EN_HOLD > 0:
-          # `lx` has not moved since the start this undoes; re-arming WX - 7
-          # on it would fire the start again on the same slot.
-          if ppu.win_lx == ppu.lx: ppu.win_lx = WIN_LX_OFF
+        fetcher_window_abort(ppu)
     # The map-select bits as they stood CGB_MAP_LATENCY dots ago on a CGB
     # (gb.nim; the DMG is pixel-exact on both mealybug m3_lcdc_*_map_change).
     var map_bits = ppu.lcd_control and 0x48'u8
