@@ -3,7 +3,8 @@
 @game ALNE
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
-@known * ~checkpoint load_file differs from the references -- §32: the load screen reads differently; the save is the same
+# load_file after a cross-load: dingbat's and the references' load screens are one
+# 5-bit step apart, which classify reads as rounding (§32; the @known is gone).
 
 # New game, A through the cliff-top opening with Nall and Ramus, walk down
 # the path outside Burg, then START > System > Save > slot 1 > YES.
