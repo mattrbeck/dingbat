@@ -3361,6 +3361,7 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
 proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8)
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
+proc fifo_oam_bus_taken*(ppu: GbFifoPpu; gb: GB)
 const GB_IDLE_SKIP* {.intdefine.} = 1
   ## Idle loops and HALT skipped up to the next point they can observe
   ## (cpu.nim, wl_head_check / wl_halt_skip); 0 runs every M-cycle.

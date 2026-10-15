@@ -671,119 +671,174 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
       return true
   lag != 2 and live != 2 and live != 3
 
-# ---- The DMG OAM corruption bug -------------------------------------------
 # ---- The DMG OAM corruption bug (Pan Docs, "OAM Corruption Bug") ----------
 #
-# An `inc rr`/`dec rr` puts its operand on the address bus with no read or
-# write asserted; in $FE00-$FEFF while the PPU owns OAM it scrambles the row
-# the scan is on. Driven from the instructions, not the memory path: every
-# instruction that can do it knows the address and which of its M-cycles each
-# access falls on, so the CPU's OAM lock (cpu_oam_open) and mem_read/mem_write
-# stay untouched. Per Pan Docs "Affected Operations":
+# While the scan owns OAM, any address in $FE00-$FEFF on the CPU's bus
+# scrambles OAM: a CPU read or write ("Any memory access instruction, if it
+# accesses OAM"), or the 16-bit IDU's operand, which reaches the bus with no
+# strobe ("inc rr, dec rr ... will trigger a write"). The IDU events are hooked
+# at the instructions (oam_bug_if: inc/dec rr, and the SP step of push, call,
+# rst and the interrupt dispatch, the one M-cycle of theirs with no bus access
+# of its own); every CPU data read and every write is hooked on the memory
+# path (mem_read_data, mem_write, mem_write_split), before the M-cycle's dots,
+# the point the IDU hook samples. An IDU step in the same M-cycle as a CPU
+# access adds nothing: a write with one "behaves just like a single write"
+# (Pan Docs), and DocBoy's dmg/oam_bug tables measure `ld a,[hli]` identical
+# to `ld a,[hl]` round for round (SameBoy agrees), so `ld [hl+/-]`,
+# `ld a,[hl+/-]`, pop/ret and the pushes' writes are their bus accesses alone.
 #
-#   inc/dec rr        M2: write, operand rr
-#   ld [hl+/-],a      M2: write, address hl
-#   ld a,[hl+/-]      M2: read+write, address hl
-#   push/call/rst/int M2: write sp; M3: write sp-1; M4: write sp-2
-#   pop rr, ret       M2: read+write sp; M3: read sp+1
+# OAM is 20 rows of 8 bytes (four 16-bit words, two byte lanes) and the scan
+# reads one row per M-cycle. cycle_counter is the dot an M-cycle starts on
+# (1-based), so an access in mode 2 is on row ceil(cc / 4), 1..19: it lands as
+# the scan's row address steps from R-1 to R. The assignment is pinned by
+# blargg 7-timing_effect's CRC ($7D792E7C) and DocBoy's rounds.
 #
-# POP's lost glitched write is put on the second SP step: blargg 2-causes,
-# 3-non_causes and 8-instr_effect leave no other assignment. PC in OAM is not
-# modelled (hooking cpu_inc_pc buys a case nothing reaches).
+#   IDU or write, rows 1..19: Pan Docs' "Write Corruption" on row R.
+#   read, odd R (the address changes one bit): Pan Docs' "Read Corruption"
+#     value `b | (a & c)` lands in the first word of BOTH rows R-1 and R, and R
+#     takes R-1's other three words.
+#   read, even R: Pan Docs' "Read During Increase/Decrease" value lands in the
+#     first word of row R-1, and row R-1 is copied onto R and onto every row
+#     the address passes through on the way: bits 0 and 1 fall one at a time,
+#     the remaining set bits together (R-2; R-4 when R % 4 == 0; 0 when
+#     R % 8 == 0). Pan Docs' "not the first four rows" exception does not
+#     hold for reads at row 2 or 4.
+#   row 0, the M-cycle ending on the scan's first dot (the last of the line
+#     before; only a CPU access): the row address comes from the CPU's row X,
+#     word k, and row 0 takes X's last three words and maj(row 0 w0, X w0,
+#     X wk) for its first, after the CPU's byte has landed in X.
+#   row 20, the M-cycle after the scan's last row (cc 77..80; CPU only): the
+#     scan's row 19 is still on the bit lines; X takes row 19's words with
+#     word k = maj(X wk, 19 wk, 19 w2) (a read of word 3: 19 w3 | (X w3 &
+#     19 w2)), then a write's byte lands; a read leaves the same word k in
+#     row 19 too.
 #
-# OAM is 20 rows of 8 bytes and mode 2 reads one row per M-cycle. The three
-# patterns below are Pan Docs' formulas applied byte by byte.
+# maj is Pan Docs' write formula `((a ^ c) & (b ^ c)) ^ c`, the bitwise
+# majority. The rows past the "Pan Docs" lines are DocBoy's measured
+# dmg/oam_bug tables (`*_round3*`, `*_round23*`, the odd/even rounds), each
+# one also SameBoy's black-box result; docs/gb-failure-triage.md I5 lists the
+# rows where the two disagree. IDU steps at rows 0 and 20 do nothing (DocBoy
+# `oam_bug_inc_round3/23`). PC in OAM is not modelled: instruction fetches go
+# through mem_read, unhooked.
 type OamBugKind* = enum
-  obWrite      ## a write, or a write and an IDU step in the same M-cycle
-               ## ("this case behaves just like a single write")
-  obRead       ## a read with no IDU step in the same M-cycle
-  obReadWrite  ## a read and an IDU step in the same M-cycle
+  obIdu    ## the IDU's operand on the bus with no strobe
+  obRead   ## a CPU read
+  obWrite  ## a CPU write
+
+template oam_byte(ppu: GbPpu; row, word, lane: int): untyped =
+  ppu.sprite_table[(row shl 3) + (word shl 1) + lane]
+
+proc oam_maj(a, b, c: uint8): uint8 {.inline.} =
+  ## Pan Docs' write-corruption expression, the bitwise majority of a, b, c.
+  ((a xor c) and (b xor c)) xor c
+
+proc oam_copy_row(ppu: GbPpu; dst, src: int) {.inline.} =
+  if dst != src:
+    for i in 0 .. 7:
+      ppu.sprite_table[(dst shl 3) + i] = ppu.sprite_table[(src shl 3) + i]
 
 proc oam_bug_write_corrupt(ppu: GbPpu; row: int) =
   ## "Write Corruption": the first word of the row becomes
   ## `((a ^ c) & (b ^ c)) ^ c` where a is that word, b the first word and c the
   ## THIRD word of the preceding row; the other three words are copied from the
   ## preceding row.
-  let dst = row shl 3
-  let src = dst - 8
   for i in 0 .. 1:
-    let a = ppu.sprite_table[dst + i]
-    let b = ppu.sprite_table[src + i]
-    let c = ppu.sprite_table[src + 4 + i]
-    ppu.sprite_table[dst + i] = ((a xor c) and (b xor c)) xor c
+    ppu.oam_byte(row, 0, i) = oam_maj(ppu.oam_byte(row, 0, i),
+                                      ppu.oam_byte(row - 1, 0, i),
+                                      ppu.oam_byte(row - 1, 2, i))
   for i in 2 .. 7:
-    ppu.sprite_table[dst + i] = ppu.sprite_table[src + i]
+    ppu.sprite_table[(row shl 3) + i] = ppu.sprite_table[((row - 1) shl 3) + i]
 
 proc oam_bug_read_corrupt(ppu: GbPpu; row: int) =
-  ## "Read Corruption": as the write corruption, with `b | (a & c)` for the
-  ## first word instead.
-  let dst = row shl 3
-  let src = dst - 8
-  for i in 0 .. 1:
-    let a = ppu.sprite_table[dst + i]
-    let b = ppu.sprite_table[src + i]
-    let c = ppu.sprite_table[src + 4 + i]
-    ppu.sprite_table[dst + i] = b or (a and c)
-  for i in 2 .. 7:
-    ppu.sprite_table[dst + i] = ppu.sprite_table[src + i]
+  ## A CPU read on row 1..19 (see the table above).
+  let pre = row - 1
+  if (row and 1) != 0:
+    for i in 0 .. 1:
+      let v = ppu.oam_byte(pre, 0, i) or
+              (ppu.oam_byte(row, 0, i) and ppu.oam_byte(pre, 2, i))
+      ppu.oam_byte(pre, 0, i) = v
+    oam_copy_row(ppu, row, pre)
+  else:
+    for i in 0 .. 1:
+      let a = ppu.oam_byte(row - 2, 0, i)
+      let b = ppu.oam_byte(pre, 0, i)
+      let c = ppu.oam_byte(row, 0, i)
+      let d = ppu.oam_byte(pre, 2, i)
+      ppu.oam_byte(pre, 0, i) = (b and (a or c or d)) or (a and c and d)
+    oam_copy_row(ppu, row, pre)
+    oam_copy_row(ppu, pre and not 1, pre)
+    oam_copy_row(ppu, pre and not 3, pre)
+    oam_copy_row(ppu, pre and row, pre)
 
-proc oam_bug_read_write_corrupt(ppu: GbPpu; row: int) =
-  ## "Read During Increase/Decrease": nothing for the first four rows or the
-  ## last; otherwise the first word of the PRECEDING row becomes
-  ## `(b & (a | c | d)) | (a & c & d)` (a: two rows before, b: preceding row,
-  ## c: accessed row, d: third word of the preceding row) and the preceding
-  ## row is then copied onto the accessed row and the one two before. The
-  ## caller applies a normal read corruption on top.
-  if row < 4 or row >= 19: return
-  let cur = row shl 3
-  let pre = cur - 8
-  let two = cur - 16
+proc oam_bug_scan_start(ppu: GbPpu; address: uint16; kind: OamBugKind;
+                        val: uint8) =
+  ## A CPU access on the M-cycle ending on the scan's first dot (row 0).
+  let x = int(address and 0xFF) shr 3
+  if x >= 20: return
+  let k = int(address shr 1) and 3
+  var xr: array[8, uint8]
+  for i in 0 .. 7: xr[i] = ppu.sprite_table[(x shl 3) + i]
+  if kind == obWrite: xr[(k shl 1) + int(address and 1)] = val
   for i in 0 .. 1:
-    let a = ppu.sprite_table[two + i]
-    let b = ppu.sprite_table[pre + i]
-    let c = ppu.sprite_table[cur + i]
-    let d = ppu.sprite_table[pre + 4 + i]
-    ppu.sprite_table[pre + i] = (b and (a or c or d)) or (a and c and d)
-  for i in 0 .. 7:
-    let v = ppu.sprite_table[pre + i]
-    ppu.sprite_table[cur + i] = v
-    ppu.sprite_table[two + i] = v
+    ppu.oam_byte(0, 0, i) = oam_maj(ppu.oam_byte(0, 0, i), xr[i],
+                                    xr[(k shl 1) + i])
+  for i in 2 .. 7: ppu.sprite_table[i] = xr[i]
 
-proc oam_bug_access*(gb: GB; kind: OamBugKind) {.noinline.} =
-  ## One CPU-side access into the OAM page; the caller has checked the address.
-  ## DMG family only (Pan Docs: CGB and AGB are not affected, even running
-  ## monochrome software), so the test is on the console, not cgb_enabled.
+proc oam_bug_scan_end(ppu: GbPpu; address: uint16; kind: OamBugKind) =
+  ## A CPU access on the M-cycle after the scan's last row (row 20).
+  let x = int(address and 0xFF) shr 3
+  if x >= 20: return
+  let k = int(address shr 1) and 3
+  var v: array[2, uint8]
+  for i in 0 .. 1:
+    let a = ppu.oam_byte(x, k, i)
+    let b = ppu.oam_byte(19, k, i)
+    let c = ppu.oam_byte(19, 2, i)
+    v[i] = if kind == obRead and k == 3: b or (a and c) else: oam_maj(a, b, c)
+  oam_copy_row(ppu, x, 19)
+  for i in 0 .. 1:
+    ppu.oam_byte(x, k, i) = v[i]
+    if kind == obRead: ppu.oam_byte(19, k, i) = v[i]
+
+proc oam_bug_access*(gb: GB; kind: OamBugKind; address: uint16;
+                     val: uint8 = 0) {.noinline.} =
+  ## One OAM-page address on the CPU's bus; the caller has checked the address
+  ## and samples at the start of the M-cycle. DMG family only (Pan Docs: CGB
+  ## and AGB are not affected, even running monochrome software), so the test
+  ## is on the console, not cgb_enabled. `val` is a write's byte.
   if gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}: return
   let ppu = gb.ppu
   if not lcd_enabled(ppu): return
+  let mode = ppu.lcd_status and 3'u8
   when defined(gb_oam_trace):
     # -d:gb_oam_trace prints every OAM-address bus event while the LCD is on.
-    echo "OAMBUG ly=", ppu.ly, " cc=", ppu.cycle_counter,
-         " mode=", ppu.lcd_status and 3'u8, " fl=", ppu.first_line,
-         " row=", (int(ppu.cycle_counter) + 3) shr 2, " kind=", kind
-  if (ppu.lcd_status and 3'u8) != 2'u8: return
-  # The LCD-on line's mode 2 does not lock OAM (cpu_oam_open); whether it
-  # corrupts is not pinned by any blargg row, so follow the lock.
-  if ppu.first_line: return
-  # cycle_counter is the dot this M-cycle starts on (1-based) and the scan
-  # reads one row per four dots, so this M-cycle is on
-  # row ceil(cc / 4). Rows 1..19 only: row 20 reaches dot 80, where the scan
-  # has let go (blargg 4-scanline_timing test 5), and row 0 is Pan Docs'
-  # "objects 0 and 1 are not affected". The absolute row assignment is pinned
-  # by blargg 7-timing_effect's CRC ($7D792E7C).
-  let row = (int(ppu.cycle_counter) + 3) shr 2
-  if row <= 0 or row >= 20: return
-  when defined(gb_oam_trace): echo "  -> corrupt row ", row
-  case kind
-  of obWrite: oam_bug_write_corrupt(ppu, row)
-  of obRead:  oam_bug_read_corrupt(ppu, row)
-  of obReadWrite:
-    oam_bug_read_write_corrupt(ppu, row)
-    oam_bug_read_corrupt(ppu, row)
+    echo "OAMBUG ly=", ppu.ly, " cc=", ppu.cycle_counter, " mode=", mode,
+         " fl=", ppu.first_line, " row=", (int(ppu.cycle_counter) + 3) shr 2,
+         " kind=", kind, " addr=", toHex(address, 4)
+  if mode == 2'u8:
+    # The LCD-on line's mode 2 does not lock OAM (cpu_oam_open); whether it
+    # corrupts is not pinned by any blargg row, so follow the lock.
+    if ppu.first_line: return
+    let row = (int(ppu.cycle_counter) + 3) shr 2
+    if row <= 0 or row > 20: return
+    when defined(gb_oam_trace): echo "  -> scan row ", row
+    # The scan loses the bus for this M-cycle (fifo_oam_bus_taken).
+    fifo_oam_bus_taken(gb.fifo_ppu, gb)
+    if row == 20:
+      # blargg 4-scanline_timing test 5: an IDU step here corrupts nothing.
+      if kind != obIdu: oam_bug_scan_end(ppu, address, kind)
+    elif kind == obRead: oam_bug_read_corrupt(ppu, row)
+    else: oam_bug_write_corrupt(ppu, row)
+  elif kind != obIdu and ppu.cycle_counter + 4'i32 > gb_line_end(ppu) and
+       (mode == 0'u8 and ppu.ly < 143'u8 or mode == 1'u8 and ppu.ly == 0'u8):
+    # The last M-cycle of a line followed by a visible line (line 153 carries
+    # LY = 0 by then): it ends on the next line's first scan dot.
+    when defined(gb_oam_trace): echo "  -> scan start, row 0"
+    oam_bug_scan_start(ppu, address, kind, val)
 
 template oam_bug_if*(gb: GB; address: uint16; kind: OamBugKind) =
   ## The inlined half: does this M-cycle put an OAM address on the bus?
-  if (address and 0xFF00'u16) == 0xFE00'u16: oam_bug_access(gb, kind)
+  if (address and 0xFF00'u16) == 0xFE00'u16: oam_bug_access(gb, kind, address)
 
 # ---- STAT helpers ----
 proc coincidence_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x40) != 0

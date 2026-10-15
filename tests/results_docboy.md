@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 22:53:29 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-14 22:58:46 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**7956/9227 passed.**
+**8119/9227 passed.**
 
 ## docboy/dmg/cpu (11/12 passed)
 
@@ -21,14 +21,12 @@ and docs/gb-failure-triage.md for the failing families.
 |------|--------|
 | dmg/docboy/cpu/interactive_visual/stop_immediate_exit_joypad_interrupt | timeout: $FFF0=$00 |
 
-## docboy/dmg/ppu (1236/1303 passed)
+## docboy/dmg/ppu (1238/1303 passed)
 
-1236/1303 tests passed on DMG dmgABC, 67 failed:
+1238/1303 tests passed on DMG dmgABC, 65 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/ppu/oam_scan_blocked_by_idu_write_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/ppu/oam_write_block_timing | $FFF0=$02 = fail value (tick 7600000) |
 | dmg/docboy/ppu/interactive/stop_read_ly_alt_alt_round1 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/ppu/interactive/stop_read_ly_alt_alt_round2 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/ppu/interactive/stop_read_ly_alt_round1 | $FFF0=$02 = fail value (tick 100000) |
@@ -143,183 +141,22 @@ All 1 tests passed (DMG dmgABC).
 
 All 23 tests passed (DMG dmgABC).
 
-## docboy/dmg/oam_bug (97/268 passed)
+## docboy/dmg/oam_bug (258/268 passed)
 
-97/268 tests passed on DMG dmgABC, 171 failed:
+258/268 tests passed on DMG dmgABC, 10 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round10 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round11 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round12 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round13 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round14 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round15 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round16 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round17 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round18 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round19 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round20 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round21 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round22 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe40 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe41 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe42 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe43 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe44 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe45 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe46 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe47 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round23_fe48 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round3 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round4 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round5 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round6 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round7 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round8 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hl_round9 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round10 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round11 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round12 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round14 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round15 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round16 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round18 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round19 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round20 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round22 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe40 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe41 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe42 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe43 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe44 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe45 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe46 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe47 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round23_fe48 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round3 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round4 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round5 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round6 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round7 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_a_hli_round8 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round10 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round11 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round12 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round13 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round14 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round15 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round16 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round17 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round18 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round19 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round20 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round21 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round22 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe40 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe41 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe42 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe43 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe44 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe45 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe46 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe47 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe48 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe58 | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe59 | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5a | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5b_noisy | $FFF0=$02 = fail value (tick 1500000) |
+| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe46 | $FFF0=$02 = fail value (tick 100000) |
+| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe47 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5c | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5d_noisy | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5e_noisy | $FFF0=$02 = fail value (tick 1500000) |
+| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5e_noisy | $FFF0=$02 = fail value (tick 1500012) |
 | dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5f | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round4 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round5 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round6 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round7 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round8 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round9 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe40 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe41 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe42 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe43 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe44 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe45 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe46 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe47 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe48 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe58 | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe59 | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5a | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5b_noisy | $FFF0=$02 = fail value (tick 1500000) |
+| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe46 | $FFF0=$02 = fail value (tick 100000) |
+| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe47 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5c | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5d_noisy | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5e_noisy | $FFF0=$02 = fail value (tick 1500000) |
+| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5e_noisy | $FFF0=$02 = fail value (tick 1500012) |
 | dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5f | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round10 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/oam_bug/oam_bug_pop_round11 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round12 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_pop_round13 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round14 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_pop_round15 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/oam_bug/oam_bug_pop_round16 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round17 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round18 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round19 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round2 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round20 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round21 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe40 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe41 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe42 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe43 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe44 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe45 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe46 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe47 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe48 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe49 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe4a | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe4b | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe4c | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe4d | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe4e | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round22_fe4f | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe40 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe41 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe42 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe43 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe44 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe45 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe46 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe47 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe48 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe49 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe4a | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe4b | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe4c | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe4d | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe4e | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round23_fe4f | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round3 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round4 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round5 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_pop_round6 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round7 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round8 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_pop_round9 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_push_round1 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_push_round2 | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/oam_bug/oam_bug_push_round21 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_push_round22 | $FFF0=$02 = fail value (tick 100000) |
 
 ## docboy/dmg/stat_write_bug
 

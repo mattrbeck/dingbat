@@ -1,14 +1,14 @@
 ; probe_k_oamclass -- WHICH instruction classes corrupt OAM in mode 2?
-; docs/pandocs-audit.md row A8.
+; docs/pandocs-audit.md, section C (OAM_Corruption_Bug).
 ;
 ; Pan Docs (OAM Corruption Bug, "Affected Operations") says "Any memory access
 ; instruction, if it accesses OAM" corrupts a row of the OAM the scan is on.
-; dingbat only wires the 16-bit IDU family -- inc/dec rr, ld [hl+/-],a,
-; ld a,[hl+/-], push/call/rst/interrupt-dispatch, pop/ret -- and a plain load
-; through the same address goes down the ordinary memory path
-; (ppu.nim oam_bug_if call sites; the audit row: "blargg `oam_bug` is green
-; either way (its causes ROMs never test plain accesses). Assumed; no ROM pins
-; this"). This page tests sixteen classes side by side.
+; When this page was written dingbat wired only the 16-bit IDU family --
+; inc/dec rr, ld [hl+/-],a, ld a,[hl+/-], push/call/rst/interrupt-dispatch,
+; pop/ret -- and blargg `oam_bug` is green either way (its causes ROMs never
+; test plain accesses). Since 2026-10-14 plain reads and writes corrupt too
+; (DocBoy's dmg/oam_bug tables; ppu.nim, "The DMG OAM corruption bug"). This
+; page tests sixteen classes side by side.
 ;
 ; ONE BAND = ONE CLASS, sixteen bands, and each band is one frame:
 ;
@@ -43,8 +43,8 @@
 ;   8  ld a, [bc]          \
 ;   9  ld [bc], a           |
 ;   A  ld a, [hl]           |  PLAIN memory accesses through an OAM address.
-;   B  ld [hl], a           |  Pan Docs' sentence covers these; dingbat does
-;   C  ld [hl], $5A         |  NOT corrupt for any of them.
+;   B  ld [hl], a           |  Pan Docs' sentence covers these; dingbat
+;   C  ld [hl], $5A         |  corrupts for them too (since 2026-10-14).
 ;   D  inc [hl]             |  (read-modify-write, M2 read then M3 write)
 ;   E  ld a, [$FE10]        |  (16-bit absolute, the access on M4)
 ;   F  ld [$FE10], a       /
@@ -66,9 +66,10 @@
 ; READING.
 ;
 ;   band 0 blank                       the harness itself corrupts nothing
-;   bands 1..7 marked, 8..F blank      dingbat's rule: only the IDU family
-;   bands 8..F marked too              Pan Docs' sentence is right and the
-;                                      audit row A8 must be wired
+;   bands 1..7 marked, 8..F blank      only the IDU family (dingbat's
+;                                      rule before 2026-10-14)
+;   bands 8..F marked too              Pan Docs' sentence is right (dingbat's
+;                                      rule now)
 ;   some of 8..F only                  the rule is narrower than "any memory
 ;                                      access": the digits say which
 ;   a band marks SEVERAL rows          the instruction put an OAM address on
@@ -78,9 +79,9 @@
 ;                                      affected, even running monochrome
 ;                                      software" -- which this page also tests
 ;
-; dingbat's prediction: bands 1..7 each mark ONE row on a DMG/MGB (push and
-; pop mark more), bands 0 and 8..F blank, and every band blank on cgbc, cgbd
-; and agb. See tools/gbprobe/expected/probe_k_oamclass.<model>.png.
+; dingbat's prediction: on a DMG/MGB every band but 0 marks rows (push, pop
+; and the read bands mark more than one), and every band is blank on cgbc,
+; cgbd and agb. See tools/gbprobe/expected/probe_k_oamclass.<model>.png.
 ;
 ; No MBC and no cartridge line is touched, so nothing here is the flashcart's
 ; FPGA answering.

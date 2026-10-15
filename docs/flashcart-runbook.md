@@ -224,7 +224,7 @@ differ, one (33 BGP) ran CGB-native on this cart and says nothing.
 | 52 SERIALDIV | m\* = 22, minimum count `$0061` | same | `SERIAL_TAP_CGB` phase in [4,7]; the sub-M-cycle T stays unpinnable |
 | 53/54 WINGLITCH ×4 | nothing on any page, any band (transitions within 0.15 px) | nothing | `WIN_EN_HOLD_ZERO` DMG-only confirmed; the arming/insert/phase questions need the DMG photos |
 | **55 LCDON** | block `00` = 0,2,6,8; `01` = 0,4,8,8; `28` = **0,0,2,4** | `00` = 0,2,6,8; `01` = `28` = 0,4,8,8 | lines 0 and 1 exact; line 40's read lands 4-6 dots earlier and its staircase slope is 2 per row, not 4, which the page's `4n − s` model cannot produce. Not a trim-knob value; re-shoot with a `-DDBASE=` sweep before naming a constant |
-| 56 OAMCLASS | entirely blank, all 16 classes | blank | Pan Docs A8: no instruction class corrupts OAM in mode 2 on AGB |
+| 56 OAMCLASS | entirely blank, all 16 classes | blank | Pan Docs ("CGB and AGB are not affected"): no instruction class corrupts OAM in mode 2 on AGB (pandocs-audit §C, OAM_Corruption_Bug) |
 
 Registered frames and the readers used are not committed (job scratch);
 the photos are the record.

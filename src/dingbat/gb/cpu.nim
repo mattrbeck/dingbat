@@ -60,7 +60,7 @@ proc skip_boot*(cpu: GbCpu; gb: GB) =
 
 proc cpu_memory_at_hl*(cpu: GbCpu; gb: GB): uint8 =
   if cpu.cached_hl < 0:
-    cpu.cached_hl = int(mem_read(gb.memory, gb, int(cpu.hl)))
+    cpu.cached_hl = int(mem_read_data(gb.memory, gb, int(cpu.hl)))
   uint8(cpu.cached_hl)
 
 proc `cpu_memory_at_hl=`*(cpu: GbCpu; gb: GB; val: uint8) =
@@ -285,10 +285,10 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   when IRQ_PUSH_T > 0:
     mem_tick_components(gb.memory, gb, IRQ_PUSH_T)
   # The same OAM-bug M-cycles as PUSH (cpu_push16; Pan Docs lists interrupt
-  # handling with it).
-  oam_bug_if(gb, cpu.sp, obWrite)
+  # handling with it): the SP step here, the two writes in mem_write and
+  # mem_write_split.
+  oam_bug_if(gb, cpu.sp, obIdu)
   cpu.sp = cpu.sp - 1
-  oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc shr 8))
   # Which line is taken is decided between the two push bytes, not at the
   # clear below: gambatte irq_precedence/if_and_ie_0_vector pushes over $FFFF
@@ -307,7 +307,6 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     let early = (cpu.sp - 1) == 0xFF0F'u16 or early_irq == INT_VBLANK or
                 early_irq == INT_STAT
   cpu.sp = cpu.sp - 1
-  oam_bug_if(gb, cpu.sp, obWrite)
   when IRQ_PUSH_LATE != 0:
     # The low push is the dispatch's last M-cycle; the IF clear falls inside
     # it (IRQ_PUSH_LATE).

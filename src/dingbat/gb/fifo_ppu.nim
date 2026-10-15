@@ -479,6 +479,21 @@ proc fifo_oam_lock_change*(ppu: GbFifoPpu; gb: GB; taking: bool) =
     else:
       oam_scan_advance(ppu, gb, ppu.cycle_counter, blocked = not taking)
 
+proc fifo_oam_bus_taken*(ppu: GbFifoPpu; gb: GB) =
+  ## A CPU access or the IDU's address on OAM for one M-cycle of mode 2
+  ## (oam_bug_access, which calls this before it scrambles OAM): the scan
+  ## reads nothing off OAM in that M-cycle, as under a running OAM DMA
+  ## (OAM_SCAN_DMA_HOLD: the entries whose dots fall in it compare the last
+  ## Y/X the bus held), and the entries after it read OAM as the corruption
+  ## leaves it. DocBoy dmg/ppu `oam_scan_blocked_by_{cpu,idu}_write_round2`:
+  ## the write one row past an on-line object hides it while the object's
+  ## copy in the next row (the write corruption's) is found, one object in
+  ## all. Entries before the M-cycle are walked under OAM as it was.
+  when OAM_SCAN_DMA_LOCK != 0:
+    if ppu.mode_flag == 2 and not gb.memory.dma_busy:
+      oam_scan_advance(ppu, gb, ppu.cycle_counter)
+      oam_scan_advance(ppu, gb, ppu.cycle_counter + 4'i32, blocked = true)
+
 const SCX_FINE_BORROW* {.intdefine.} = 1
   ## Tiles the BG fetcher's map column drops when a mid-line SCX write lowers
   ## SCX & 7 below the fine scroll the line latched. The fetcher is addressed

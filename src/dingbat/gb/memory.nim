@@ -619,6 +619,20 @@ proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
   if mem.dma_busy: return mem_read_busy(mem, gb, idx)
   mem_read_open(mem, gb, idx)
 
+proc mem_read_oam_bug(mem: GbMemory; gb: GB; idx: int) {.noinline.} =
+  if not mem.dma_busy: oam_bug_access(gb, obRead, uint16(idx))
+
+proc mem_read_data*(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
+  ## A CPU data read (every read that is not an instruction fetch). A read of
+  ## the OAM page while the scan runs scrambles OAM (oam_bug_access in
+  ## ppu.nim), sampled before the M-cycle's dots like the IDU hook; not while
+  ## the OAM DMA owns the page (mem_read_busy). Fetches go straight to
+  ## mem_read: PC in OAM is not modelled, and the test on every opcode and
+  ## operand byte measured +0.4..0.9% retired instructions.
+  when not defined(cpu_testbus):
+    if unlikely((idx and 0xFF00) == 0xFE00): mem_read_oam_bug(mem, gb, idx)
+  mem_read(mem, gb, idx)
+
 proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
   mem.dma         = source
   mem.requested_oam_dma = true
@@ -796,6 +810,9 @@ proc mem_write_split*(mem: GbMemory; gb: GB; idx: int; val: uint8; pre: int) {.n
       mem_tick_ppu(mem, gb, pre)
     gb_testbus_write(idx, val)
     return
+  # The interrupt dispatch's low push: its own OAM-bug check (mem_write's).
+  if unlikely((idx and 0xFF00) == 0xFE00) and not mem.dma_busy:
+    oam_bug_access(gb, obWrite, uint16(idx), val)
   # The DMA unit's M-cycle whole (the byte meets its slot); the scheduler
   # and timer only up to the split, the rest in mem_write_finish.
   mem.cycle_tick_count += 4
@@ -833,13 +850,17 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
     mem_tick_bus(mem, gb, 4)
   if mem.dma_busy:
     mem_write_busy(mem, gb, idx, val)
-  elif OAM_WRITE_SAMPLE_END != 0 and idx >= 0xFE00 and idx <= 0xFE9F:
-    # An OAM write asks its lock after the M-cycle's dots, where a read
-    # samples (OAM_WRITE_SAMPLE_END, gb.nim), so the dots run first.
-    mem_tick_ppu(mem, gb, 4)
-    mem_write_open(mem, gb, idx, val, sampled_late = true)
-    if mem.write_deferred: mem_flush_deferred(mem, gb)
-    return
+  elif idx >= 0xFE00 and idx <= 0xFEFF:
+    # The PPU has not moved yet (mem_tick_bus): the OAM bug's sample point.
+    oam_bug_access(gb, obWrite, uint16(idx), val)
+    if OAM_WRITE_SAMPLE_END != 0 and idx <= 0xFE9F:
+      # An OAM write asks its lock after the M-cycle's dots, where a read
+      # samples (OAM_WRITE_SAMPLE_END, gb.nim), so the dots run first.
+      mem_tick_ppu(mem, gb, 4)
+      mem_write_open(mem, gb, idx, val, sampled_late = true)
+      if mem.write_deferred: mem_flush_deferred(mem, gb)
+      return
+    mem_write_open(mem, gb, idx, val)
   elif IF_WRITE_LAND_DOTS != 0 and idx == 0xFF0F:
     # IF_WRITE_LAND_DOTS: a source rising in the write's first dots is
     # overwritten by it.

@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 7,276 / 9,227 at `DocboyRev`, every
+(`tests/README.md`, "The DocBoy suite"): 8,119 / 9,227 at `DocboyRev`, every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1146,12 +1146,53 @@ question. Families, largest first:
   Six of the seven double-speed rows (`double_speed/hdma/speed_switch_to_
   {double,single}_during_hdma{,_div,_stat}_round2`) closed 2026-10-14 with
   the speed-switch stall's halt model (I7).
-* **I5. DMG OAM corruption patterns (171).** `oam_bug_{pop,ld_a_hl,ld_hl_a,
-  ld_a_hli}_round*` and their `_fe*` variants: the exact bytes the read and
-  pop corruptions leave, per row of the OAM scan. blargg `oam_bug` is green;
-  SameBoy fails 3 of 6. DocBoy's pattern tables are its DMG's; contested
-  (Pan Docs' formulas are the spec; the per-unit variation is a known open
-  question).
+* **I5. DMG OAM corruption patterns (10 left; 161 closed 2026-10-14).**
+  `dmg/oam_bug` 258/268. Each ROM fills OAM with a known pattern, turns the
+  LCD on, waits `103 + n` M-cycles so its one OAM access lands on scan row
+  `n - 3` of line 1 (round 3: the M-cycle ending on the scan's first dot;
+  round 23: the one after its last row), turns the LCD off and compares all
+  160 bytes. The `_fe4x` rows move the CPU's address at round 22/23, the
+  `_fe5x` rows sweep a 512-entry truth table (row 0 and row 11 bits, the
+  written bit) at round 3. The maintainer runs the suite on his DMG
+  (docboy#33); `_noisy` marks a truth table whose hardware runs did not
+  repeat. SameBoy (DMG B, black box, OAM dumped after each row) passes
+  246/268; every row it fails, dingbat failed too.
+  Fixed: plain CPU reads and writes of `$FE00-$FEFF` now corrupt (Pan Docs,
+  "OAM Corruption Bug": "Any memory access instruction, if it accesses OAM";
+  `mem_read_data`/`mem_write`, fetches unhooked), and the patterns follow the
+  tables, which refine Pan Docs' three formulas rather than replace them: a
+  write is Pan Docs' write corruption; a read on an odd scan row leaves Pan
+  Docs' read-corruption word in rows R-1 and R; a read on an even row is Pan
+  Docs' "read during increase/decrease" pattern (rows 2 and 4 included),
+  copied onto every row the scan's row address passes through (R-2; R-4 when
+  R % 4 == 0; 0 when R % 8 == 0); an IDU step beside a read or write adds
+  nothing (`ld a,[hli]` measures identical to `ld a,[hl]`, pop is two reads);
+  at rounds 3 and 23 the CPU's own row and word join (ppu.nim, "The DMG OAM
+  corruption bug"). Pan Docs' rules alone, plain accesses wired, match 107
+  of the 259 pattern rows; the model matches DocBoy on 249 and SameBoy on
+  247, and every row matches one of the two. blargg `oam_bug` (singles and
+  combined, test 7's CRC included) stays green; a line-offset probe (rounds
+  2..24 on lines 1, 2, 6, 101, 142 and 143, plus the 143/144, 152/153 and
+  153/0 line boundaries) matches SameBoy except at R = 8/16, where dingbat
+  follows DocBoy. Two `dmg/ppu` rows closed with it: `oam_write_block_timing`
+  (114 `ld [hli],a` writes across line 1; the round-3/round-23 rules decide
+  the scan's first and last M-cycles) and `oam_scan_blocked_by_idu_write_round2`
+  (an access in mode 2 takes the OAM bus from the scan for its M-cycle, the
+  entries read then compare the last Y/X held, as under an OAM DMA;
+  `fifo_oam_bus_taken`). Its `cpu_write` twin needs the same rule now that a
+  plain write corrupts: the object one row up is hidden, its corruption copy
+  is found. SameBoy fails both `round2` rows.
+  Left, proposed NotScored (10), each a single unit's margin that SameBoy
+  does not reproduce and no sibling row shows:
+  `ld_{hl,hli}_a_round3_fe5c`, `_fe5e_noisy`, `_fe5f`: the written bit as it
+  lands in row 0 depends on row 0's old bits on DocBoy's DMG (`fe5f`: v | old;
+  `fe5e`: v | (old & row 11 word 0); `fe5c`: an eight-input function), where
+  the `fe58`..`fe5b`/`fe5d` tables (same situation, other byte lanes) and
+  SameBoy (all eight) give the written bit; `ld_{hl,hli}_a_round23_fe46/fe47`:
+  a write to word 3 at round 23 also rewrites the low byte of word 2 (`$55`
+  -> `$11`), which SameBoy does not do and `push_round21` (word 3 at round
+  23, words 2 equal) cannot show. Hardware: the ten ROMs on an MGB, pass/fail
+  screens, with `ld_a_hl_round11` (row 0 at R = 8, DocBoy only) as a control.
 * **I6. DMG window glitches (49 of 120 left).** Closed 2026-10-14 (+71):
   * `window_retrigger_pixel_glitch_*` (67) and `window_bg_reprise_wx{15,23}`:
     each ROM turns the window off in the WY line's HBlank, so every later

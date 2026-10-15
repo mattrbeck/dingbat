@@ -64,8 +64,12 @@ needs hardware first.
 - **HPF charge per model** — analog capture.
 - **CH3 sample buffer on NR30 DAC-off** — re-run SameSuite
   `channel_3_restart_stop_delay` on hardware (folder 7).
-- **Plain-access OAM corruption** — a ROM sweeping plain reads/writes and
-  `$FEA0-$FEFF` in mode 2; blargg `oam_bug` is green either way.
+- **OAM corruption patterns** (OAM_Corruption_Bug) — the read patterns
+  depend on the scan row's parity, a read+IDU M-cycle is a plain read, and
+  the CPU's row joins at the scan's first and last M-cycles (pandocs-audit
+  §C); DocBoy's tables and SameBoy agree. Run the DocBoy `dmg/oam_bug` ROMs
+  on an MGB (pass/fail screens) before drafting; `$FEA0-$FEFF` in mode 2 is
+  untested by any of them.
 - **Window glitch insert/replace + arming**; **OAM-DMA vs mode-2 scan lock** —
   hwprobe rows 18 and 17.
 
@@ -73,6 +77,4 @@ needs hardware first.
 
 - SGB multiplayer input routing (every MLT_REQ ID reads one pad; the 2P
   link-mode input path is the donor).
-- Plain-access OAM corruption, once the call-site design avoids double-firing
-  the IDU sites.
 - Compat-mode colorization table (boot-ROM data deliberately not lifted).

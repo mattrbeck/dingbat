@@ -59,29 +59,26 @@ proc cpu_add_hl(cpu: GbCpu; val: uint16) {.inline.} =
 
 proc cpu_push16(cpu: GbCpu; gb: GB; val: uint16) {.inline.} =
   # Three OAM-bug M-cycles (oam_bug_access): the internal cycle with SP as the
-  # IDU operand, then each write with its own destination on the bus. SP is
-  # stepped one at a time so each check reads the value that M-cycle drove.
-  oam_bug_if(gb, cpu.sp, obWrite)
+  # IDU operand, then the two writes, which mem_write hooks with their own
+  # destinations (the IDU step sharing the first write's M-cycle adds
+  # nothing). SP is stepped one at a time so each check reads the value that
+  # M-cycle drove.
+  oam_bug_if(gb, cpu.sp, obIdu)
   # Internal cycle before the writes.
   mem_tick_components(gb.memory, gb, 4)
   cpu.sp = cpu.sp - 1
-  oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(val shr 8))
   cpu.sp = cpu.sp - 1
-  oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(val and 0xFF))
 
 proc cpu_pop16(cpu: GbCpu; gb: GB): uint16 {.inline.} =
-  # Two OAM-bug M-cycles, one per read; the first carries the IDU step (Pan
-  # Docs: "one read, one glitched write, and another read without a glitched
-  # write"; oam_bug_access). Spelled out so each check sits on its own
-  # M-cycle; the `+ 1'u16` wrap is mem_read_word's (gambatte
-  # oamdma_src*_busypopFFFF).
-  oam_bug_if(gb, cpu.sp, obReadWrite)
-  let lo = mem_read(gb.memory, gb, int(cpu.sp))
+  # Two OAM-bug M-cycles, one per read, both hooked by mem_read (Pan Docs'
+  # "one read, one glitched write, and another read": the glitched write
+  # shares the first read's M-cycle and adds nothing; oam_bug_access). The
+  # `+ 1'u16` wrap is mem_read_word's (gambatte oamdma_src*_busypopFFFF).
+  let lo = mem_read_data(gb.memory, gb, int(cpu.sp))
   let hi_addr = cpu.sp + 1'u16
-  oam_bug_if(gb, hi_addr, obRead)
-  let hi = mem_read(gb.memory, gb, int(hi_addr))
+  let hi = mem_read_data(gb.memory, gb, int(hi_addr))
   cpu.sp = cpu.sp + 2
   result = uint16(lo) or (uint16(hi) shl 8)
 
@@ -131,7 +128,7 @@ var UNPREFIXED* = [
   # 0x03 INC BC
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.bc, obWrite)
+    oam_bug_if(gb, cpu.bc, obIdu)
     cpu.bc = cpu.bc + 1
     8,
 
@@ -177,13 +174,13 @@ var UNPREFIXED* = [
   # 0x0A LD A,(BC)
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    cpu.a = mem_read(gb.memory, gb, int(cpu.bc))
+    cpu.a = mem_read_data(gb.memory, gb, int(cpu.bc))
     8,
 
   # 0x0B DEC BC
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.bc, obWrite)
+    oam_bug_if(gb, cpu.bc, obIdu)
     cpu.bc = cpu.bc - 1
     8,
 
@@ -236,7 +233,7 @@ var UNPREFIXED* = [
   # 0x13 INC DE
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.de, obWrite)
+    oam_bug_if(gb, cpu.de, obIdu)
     cpu.de = cpu.de + 1
     8,
 
@@ -284,13 +281,13 @@ var UNPREFIXED* = [
   # 0x1A LD A,(DE)
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    cpu.a = mem_read(gb.memory, gb, int(cpu.de))
+    cpu.a = mem_read_data(gb.memory, gb, int(cpu.de))
     8,
 
   # 0x1B DEC DE
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.de, obWrite)
+    oam_bug_if(gb, cpu.de, obIdu)
     cpu.de = cpu.de - 1
     8,
 
@@ -340,7 +337,6 @@ var UNPREFIXED* = [
   # 0x22 LD (HL+),A
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.hl, obWrite)
     mem_write(gb.memory, gb, int(cpu.hl), cpu.a)
     cpu.hl = cpu.hl + 1
     8,
@@ -348,7 +344,7 @@ var UNPREFIXED* = [
   # 0x23 INC HL
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.hl, obWrite)
+    oam_bug_if(gb, cpu.hl, obIdu)
     cpu.hl = cpu.hl + 1
     8,
 
@@ -408,15 +404,14 @@ var UNPREFIXED* = [
   # 0x2A LD A,(HL+)
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.hl, obReadWrite)
-    cpu.a = mem_read(gb.memory, gb, int(cpu.hl))
+    cpu.a = mem_read_data(gb.memory, gb, int(cpu.hl))
     cpu.hl = cpu.hl + 1
     8,
 
   # 0x2B DEC HL
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.hl, obWrite)
+    oam_bug_if(gb, cpu.hl, obIdu)
     cpu.hl = cpu.hl - 1
     8,
 
@@ -464,7 +459,6 @@ var UNPREFIXED* = [
   # 0x32 LD (HL-),A
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.hl, obWrite)
     mem_write(gb.memory, gb, int(cpu.hl), cpu.a)
     cpu.hl = cpu.hl - 1
     8,
@@ -472,7 +466,7 @@ var UNPREFIXED* = [
   # 0x33 INC SP
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.sp, obWrite)
+    oam_bug_if(gb, cpu.sp, obIdu)
     cpu.sp = cpu.sp + 1
     8,
 
@@ -524,15 +518,14 @@ var UNPREFIXED* = [
   # 0x3A LD A,(HL-)
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.hl, obReadWrite)
-    cpu.a = mem_read(gb.memory, gb, int(cpu.hl))
+    cpu.a = mem_read_data(gb.memory, gb, int(cpu.hl))
     cpu.hl = cpu.hl - 1
     8,
 
   # 0x3B DEC SP
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    oam_bug_if(gb, cpu.sp, obWrite)
+    oam_bug_if(gb, cpu.sp, obIdu)
     cpu.sp = cpu.sp - 1
     8,
 
@@ -1524,7 +1517,7 @@ var UNPREFIXED* = [
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
     let u16 = cpu_read_u16(cpu, gb)
-    cpu.a = mem_read(gb.memory, gb, int(u16))
+    cpu.a = mem_read_data(gb.memory, gb, int(u16))
     16,
 
   # 0xFB EI (enable interrupts, delayed by one instruction via scheduler)
