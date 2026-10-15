@@ -9,6 +9,12 @@
 # [load]: Load-a-Sim -> Slot 1 - AA (Day 1 10:15 am) -> back at the farm.
 # The "Game saved successfully" screen is left at different frames on each
 # emulator (nba first), so the checkpoint is taken back on the pause menu.
+# `language`: the flags scroll at 30 Hz, and their phase is the frame the boot
+# reaches the main loop. On a blank cart the boot first formats the 64 Kbit
+# EEPROM (22 polled block writes, f3-f12), so the checkpoint follows the chip's
+# programming time: dingbat at GBATEK's 108368 cycles is a frame behind both
+# references, at 104800 or less it is on theirs (docs/playtest-bugs.md §87).
+# Open until the console's `eesettle` cell is recorded with this cart.
 
 [new]
 wait 600

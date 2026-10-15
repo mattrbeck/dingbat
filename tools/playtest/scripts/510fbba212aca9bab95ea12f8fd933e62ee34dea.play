@@ -5,13 +5,16 @@
 @frozen dingbat-bios,mgba,nba
 @known * checkpoint title: -- §33, §29: the references under-charge the boot load, so their title lands a frame early
 @known * ~checkpoint continue_title differs from the references -- §33, §29: the same boot-load frame after a load
+@known * checkpoint duel_field: -- §88, §33: the first turn's rock-paper-scissors draws from an RNG one step behind since the boot load's frame (f582); both references throw rock and DRAW, replay a round (start_duel SLIP +40) and shuffle another hand. Poking dingbat's RNG word into mGBA at f2441 makes it draw both checkpoints as dingbat
+@known * audio differs from both references -- §88, §33: after the references' DRAW their run is a rock-paper-scissors round (40 frames) later; every flagged window is from f2565 on
 # New Game, Tea's intro, pick the red starter deck. The game writes its SRAM save right
 # after the intro (before the first duel), so [new] ends on the first duel's field and
 # [load] Continues into the main menu (Campaign / Link Battle / Deck Edit ...) and opens Deck Edit.
-# Notes: at f3106 (first duel, opening hand) mgba deals a different hand (four yellow
-# cards and a green one) from dingbat-bios and nba (green, three yellow, pink), and mgba is
-# still showing "Draw Phase": the deck shuffle differs on mgba. dingbat-bios and nba agree.
-# That is why the duel itself is not played here: the same input would play a different duel on mgba.
+# Notes: before the duel a rock-paper-scissors round (f2446) decides who goes first.
+# The opponent's throw and the deck shuffle come from the per-frame RNG at 0x03000040,
+# which dingbat steps once less from f582 (the boot load, §33): dingbat wins, both
+# references draw and replay a round, 40 frames (two taps), then deal another hand
+# (docs/playtest-bugs.md §88). That is why the duel itself is not played here.
 # At f1466 the fade-out after picking the deck is at a different step on each emulator.
 # Title screen (f854/f884, both [new] and [load]): mgba and nba are pixel-identical,
 # but dingbat-bios differs on every row. The green grid background is offset by about

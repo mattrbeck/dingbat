@@ -7645,3 +7645,192 @@ one. A SLIP is a pass, so no `@known` line is added. The script's session
 note ("dingbat-bios draws the caption box under the map black, mgba and
 nba draw it solid blue") is this frame: dingbat's f+1 is the references'
 f.
+
+## §87. The Sims - Bustin' Out: the language screen a frame behind is the first boot's EEPROM format against mGBA's cheap memset, 2026-10-14
+
+**Symptom.** `language` (f632, `compare=text`) is MAJOR against both
+references in all four dingbat configurations, in the baseline with the
+fixed second-reference driver. The references are IDENTICAL to each other.
+Earlier the same day they were not (§65 removed the `@known` for that
+reason), and §74 listed the checkpoint as "downstream: the boot's three
+phases".
+
+**Stable.** dingbat-bios, mGBA and the second reference each played the
+`[new]` timeline twice for 700 frames. Each pair of runs is hash-identical
+on every frame, and each reproduces the baseline's checkpoint hash. The
+agreement is not host-clock noise. It is new because the second reference's
+driver used to run frame 0 and its boot DMAs as double frames (§82, §83).
+
+**What the checkpoint sees.** The flags scroll at 30 Hz, one picture held
+for two frames. dingbat's window is mGBA's shifted by one frame:
+dingbat[f] = mGBA[f-1] on every frame from f48 to f662. The text comparison
+skips the hash-window test, and the flags cover different letters a frame
+apart ("DeutEch" against "Deutsch"), so a one-frame lag reads MAJOR. Under
+the pixel comparison the same windows would be SLIP -1.
+
+**Where the frame goes: the boot reaches the main loop late.** The main
+loop's V-blank wait (0x0801F970: clear bit 0 of a flag the V-blank handler
+sets, then spin on it) is entered for the first time at f31 + 193,167
+cycles in mGBA, 87.7k cycles before the V-blank. dingbat enters it at f32 +
+82,829, after that V-blank. The 30 Hz cadence starts on the next frame,
+f32 in mGBA and f33 in dingbat, so the phase is set there. Everything from
+f3 to that wait is busy code with no V-blank wait, so every cycle on the
+way counts. Two stretches matter, traced from f0 in dingbat-bios-nowl and
+mGBA:
+
+1. *The EEPROM format, f3-f12.* On a blank cart the game writes 22 blocks of
+   its 64 Kbit EEPROM. Each write (0x0804CA80) polls the chip to ready, with
+   a VCOUNT-counted timeout. Call to call, a block takes 115,686 cycles in
+   dingbat (`EEPROM_SETTLE_CYCLES` = 108,368, GBATEK's "ca.") and 122,140
+   in mGBA, which behaves as if its chip took ~114,800. At the last write
+   dingbat is 115.5k cycles ahead of mGBA.
+2. *The scene load, f23-f31.* From the first 0x08027xxx instruction to the
+   first 0x08049xxx, both run the same 492,054 instructions. They cost
+   1,963,949 cycles in dingbat and 1,737,699 in mGBA, +226.3k. Of that,
+   192.5k is a memset at 0x08027A8A, `stmia r0!, {r1}; adds r3, #1; cmp r3,
+   r4; blo`, from ROM at WAITCNT 0x4314 into EWRAM: 48,133 iterations at 18
+   cycles in dingbat and 14 in mGBA (§29 found the same loop). mGBA's
+   `stmia` costs 2 cycles, the fetch alone. An EWRAM word store is 6 bus
+   cycles.
+
+**The second reference prices the memset as dingbat does.** The loop was
+rebuilt in a scratch payload (run from the `payloadrun` wrapper's gamepak
+image at the game's word phase and WAITCNT, TM0 per run; not committed).
+Cycles an iteration, (T(64) - T(16)) / 48:
+
+| destination | dingbat, dingbat-bios | the second reference | mGBA |
+|---|---|---|---|
+| EWRAM, prefetcher on | 18.0 | 18.0 | **14.0** |
+| IWRAM, prefetcher on | 14.0 | 14.0 | 14.0 |
+| EWRAM, prefetcher off | 22.0 | 22.0 | 22.0 |
+| `str r1, [r0]; adds r0, #4` body, EWRAM | 18.0 | 18.0 | 16.0 |
+
+Its chip is faster instead. `eesettle` (§36) in the emulators: dingbat
+108,362, the second reference **101,392**, mGBA 38 (it keeps a chip busy
+only for a command of the width it settled on, so in the game it waits
+~114.8k). Its RAM runs a frame ahead of mGBA's at f26-f30, and from f32 it
+is on mGBA's frame. So the references reach the same frame by different
+errors, or by different truths: mGBA with a slow chip and a store below
+the bus floor, the second reference with a fast chip and the console's
+store.
+
+**The decisive test.** dingbat-bios built with other
+`EEPROM_SETTLE_CYCLES`, the rest unchanged, over the first 700 frames:
+
+| `EEPROM_SETTLE_CYCLES` | `language` | frames hash-identical to mGBA |
+|---|---|---|
+| 101,000 / 104,400 / 104,800 | IDENTICAL to both references | 658 (the second reference: 659) |
+| 105,100 / 105,350 / 105,600 / 106,800 / 107,600 / 108,368 | a frame behind | 346 |
+
+The other 42 frames are the boot's fades (f33-f46, f663-f687), where the
+references also differ from each other. A chip that programs a block in
+104.8k cycles or less, 3.3 % under GBATEK's figure, puts dingbat on the
+references' frame. The HLE configurations are identical to dingbat-bios
+here (the baseline's variants), and the BIOS plays no part.
+
+**Who is right: not decidable yet.** The memset is the §29/§63 class. On the
+AGB SP, `slotexec.s` row 12 makes an EWRAM `str` from gamepak code cost 4
+cycles more than an IWRAM one. That is dingbat's and the second reference's
+difference here, and mGBA's is 0. (The console's cells are at 4/2 in an
+empty slot. The game runs at 3/1, the §39 caveat.) The chip's programming
+time has never been measured (§36, §64, §67, §82). GBATEK's 108,368 is an
+"approximately". The second reference's 101,392 and mGBA's ~114.8k are as
+unsourced.
+
+**The probe: `eesettle`, as it stands** (`tests/roms/payloads/eesettle.s`,
+r0table row `eesettle`, NEEDS_CART). **It needs this cartridge**: The Sims -
+Bustin' Out (ASIE, 64 Kbit EEPROM) in the slot, the console booted holding
+SELECT+START, then `python3 tools/hwlink/r0table.py --record eesettle`.
+Another 64 Kbit cart answers for its own chip only. Cells (n = 3, 2, 0, 1)
+in the emulators:
+
+| cell | dingbat, dingbat-bios | the second reference | mGBA |
+|---|---|---|---|
+| 3: the last block | FFFFFFFF (blank) | FFFFFFFF | FFFFFFFF |
+| 2: the write DMA | 848 | 848 | 849 |
+| 0: rewrite unchanged, to ready | 108,362 | 101,392 | 38 |
+| 1: write the complement, to ready | 108,362 | 101,392 | 38 |
+
+The cell is the settle time less 6. A console cell 0 of about 104,790 or
+less puts `language` on the references' frame. Then dingbat's constant is
+the error for this chip (class (a), a change to `storage/eeprom.nim`, with
+Super Mario Advance 3, Klonoa and Starsky & Hutch as its other checks).
+About 105,090 or more keeps dingbat's frame. Then the references are wrong,
+mGBA by its store and the second reference by its chip, and an `@known`
+belongs in the script. A spread between runs, or between cells 0 and 1, is
+part of the answer (a chip that skips erasing an unchanged block).
+
+**Status: (c), no core change.** The script's header now says why
+`language` follows the chip. It stays a FAIL until the cell is recorded.
+Separately, `compare=text` turns a pure one-frame lag into MAJOR, because
+it never asks whether the hash windows share a frame. Testing the windows
+first, as the pixel path does, would make this checkpoint a SLIP. That is a
+harness decision, not made here.
+
+## §88. Yu-Gi-Oh! - The Eternal Duelist Soul: start_duel forty frames off is a rock-paper-scissors draw, the RNG one step behind since the boot load, 2026-10-14
+
+**Symptom.** In all four dingbat configurations, `start_duel` (f2956) is
+SLIP +40 and `duel_field` (f3136) MAJOR against both references. The audio
+differs from both in 10.4 % of the run, longest 1.51 s from f2970. The
+references are IDENTICAL to each other at both checkpoints. `title` and
+`continue_title` are §33's `@known`.
+
+**Stable.** dingbat-bios, mGBA and the second reference each played the
+`[new]` timeline twice for 3,200 frames. Each pair of runs is hash-identical
+on every frame, and each reproduces the baseline's hashes at both
+checkpoints.
+
+**Where the 40 frames come from: one rock-paper-scissors round.** Before the
+first duel the game decides who goes first with rock-paper-scissors. The
+player's throw is the script's tap at f2446, and the opponent's comes from
+the RNG. Up to f2475 dingbat's pictures are mGBA's at offset 0 or within
+one 5-bit step (f2410: 9,306 px, f2460: 99 px, all one step). At f2478
+dingbat's opponent has thrown scissors: "WIN !!". Both references'
+opponents throw rock: "DRAW", and the round is played again on the next
+taps, two taps at 20 frames each. Every later dingbat frame that places
+uniquely is mGBA's frame 40 later (f2476-f2973), so the slip is that one
+round. The duel's deck shuffle draws from the same RNG later,
+so the dealt hand differs (`duel_field`). Every flagged audio window is from
+f2565 on, after the throw.
+
+**The RNG is one step behind from f582.** The word at 0x03000040 is a
+per-frame LCG, stepped by the main loop, with bursts of extra draws. In
+dingbat-bios, dingbat[f] = mGBA[f-1] on every frame from f583 to f2445 apart
+from the draw bursts. That is §33's boot load (f575-f582): dingbat's load
+ends 21k cycles after the f582 V-blank and mGBA's 55k before it, so the
+loop's step is lost once and never made up. The pictures resync by f919,
+but the RNG keeps the lost step. **The decisive test.** Run mGBA to f2441,
+`poke8` the RNG word from its own 0xBDC894F1 to dingbat's 0x65803B82, and
+change nothing else. mGBA's opponent then throws scissors, and `start_duel`
+and `duel_field` are hash-identical to dingbat-bios. Of frames
+f2441-f3165, 481 are identical (5 without the poke). The rest are within
+one 5-bit step where checked (f2460, f2470, f2500, f2600, f2990, f3070),
+except the opponent's deal (below).
+
+**The second reference is on mGBA's frame by its boot lead, not by
+mGBA's prices.** Its RNG equals mGBA's of the next frame from f3 to f572.
+It enters the boot load a frame early (its last step before the load is at
+f573, mGBA's and dingbat's at f574) and leaves it on mGBA's frame (the
+frame counters at 0x03004890 change at f581 in both references, at f582 in
+dingbat). So its load takes dingbat's eight frames, not mGBA's seven. That
+fits §63's tables, where it prices EWRAM loads and stores from gamepak code
+as dingbat and the console do. The lead from f3 is its own boot timing
+(frame 0 starts on line 225, not the console's hand-over line 126, §4,
+§65).
+
+**A residue the checkpoints do not show.** After the poke, the RNG words
+part for four frames, f2620-f2623, and agree again from f2624. In those
+frames the opponent's cards are dealt, and the deal's names differ: "Mirror
+Force" in dingbat, "Bell of Destruction" in the poked mGBA. The player's
+hand is the same. The interleaving of the shuffle's draws with the
+per-frame step depends on where in the shuffle the frame falls, the §59
+kind of race. It was not traced further.
+
+**Who is right: dingbat, as far as the console has been asked.** The frame
+is §33's. Its loop's EWRAM `ldrb` under the prefetcher follows `slotexec.s`
+on the AGB SP (§29, §63), and mGBA's price is below the bus floor. The
+second reference's agreement is its boot lead, not a witness for the load.
+
+**Status: (b), no core change.** The script now carries two `@known` lines,
+for `duel_field` and the audio (`start_duel` is a SLIP, a pass). Its notes
+say why the duel is not played.
