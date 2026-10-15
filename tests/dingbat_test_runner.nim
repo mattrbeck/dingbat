@@ -1570,11 +1570,13 @@ proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
   ## ROMs). Left out: byte-identical copies of jsmolka's ROMs (scored there,
   ## and the fork's copies of alyosha's), and the three that only draw
   ## (`Sprite_Disable_Midline`, `Sprite_Disable_on_VRAM_Access`,
-  ## `stripes_x_offset`), which ship no reference. The verdict is on screen
-  ## within 30 frames; 600 is margin. Runs with HLE BIOS unless --bios: six
-  ## halt/IRQ rows read differently on the real BIOS.
+  ## `stripes_x_offset`), which ship no reference, and the one ROM whose
+  ## verdict the console never reaches (CrashesOnConsole; NotScored). The
+  ## verdict is on screen within 30 frames; 600 is margin. Runs with HLE BIOS
+  ## unless --bios: six halt/IRQ rows read differently on the real BIOS.
   const DrawOnly = ["Sprite_Disable_Midline", "Sprite_Disable_on_VRAM_Access",
                     "stripes_x_offset"]
+  const CrashesOnConsole = ["unsafe/prefetcher_branch_thumb_arm_2"]
   var seen: seq[string]
   for rom in walkDirRec(jsmolka):
     if rom.endsWith(".gba"): seen.add($secureHashFile(rom))
@@ -1587,7 +1589,8 @@ proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
     for rom in roms:
       let h = $secureHashFile(rom)
       if h in seen or rom.splitFile().name in DrawOnly: continue
-      seen.add(h)
+      seen.add(h)   # the fork's copy of a skipped ROM is skipped with it
+      if rom.relativePath(root).changeFileExt("") in CrashesOnConsole: continue
       result.add(TestDef(
         name: label & "/" & rom.relativePath(root).changeFileExt(""),
         rom_path: rom,
@@ -2008,6 +2011,16 @@ const NotScored: seq[(string, string)] = @[
     "`cgb_dmg_mode` `m3_lcdc_win_en_change_multiple_wx_*_signed_addressing_" &
     "source` rows (\"glitch is different, probably uses another memory " &
     "bus\"). (build_docboy_rows)"),
+  ("alyosha `unsafe/prefetcher_branch_thumb_arm_2`", "its expected values " &
+    "were never produced by a console: the suite's own unsafe/README.md " &
+    "says the ROM \"crashes on console due to the prefetcher being " &
+    "misaligned when switching from thumb to arm mode\", and the author " &
+    "moved it out of `prefetcher/` (whose `_arm`, `_arm_3` and `_arm_4` " &
+    "siblings are scored) for that reason. The check it fails is that " &
+    "switch: TM0 after the Thumb `bx r2` at 0x0800019E into ARM code at " &
+    "0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E " &
+    "here. Its first check, the ARM-to-Thumb branch before it, reads the " &
+    "expected 0x3A. (build_alyosha_tests)"),
   ("DocBoy manifests: 725 vendored ROMs of other suites", "everything " &
     "outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, " &
     "mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, " &

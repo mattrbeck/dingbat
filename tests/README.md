@@ -211,8 +211,10 @@ prefetcher, bus, FIFO, LDM, serial and timer timing ROMs. They are scored in scr
 mode on the verdict line the framework draws ("All tests passed" / "Failed test NNN" at
 y = 76, read with the font from the repo's own `lib/glyphs.asm`: `read_verdict_text` in
 the runner), because the r12 protocol misreads the LDM and halt ROMs. Copies of jsmolka's
-ROMs and the three draw-only ROMs are skipped. Many rows are red: they are the open GBA
-timing gaps, not harness faults.
+ROMs and the three draw-only ROMs are skipped, and so is `unsafe/prefetcher_branch_thumb_arm_2`,
+which the suite's own `unsafe/README.md` says crashes on a console, so its expected values
+never came off one (NotScored). Many rows are red: they are the open GBA timing gaps, not
+harness faults.
 
 **PeterLemon BIOS, gba-rtc-test, Hades-Tests, SwpTestsGBA, AGBEEG** (screenshot mode,
 downloaded at pinned revisions or release SHA-1s, never committed). PeterLemon's BIOS ROMs

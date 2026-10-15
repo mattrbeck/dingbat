@@ -6,9 +6,9 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 ## Summary
 
-- **Total:** 1587
+- **Total:** 1586
 - **Pass:** 1549
-- **Fail:** 38
+- **Fail:** 37
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -30,7 +30,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Screenshot suites | 21 | 21 | 👌 |
 | Game Boy - Shootout ROMs | 15 | 15 | 👌 |
 | [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
-| GBA - alyosha gba-tests | 123 | 126 | 👀 |
+| GBA - alyosha gba-tests | 123 | 125 | 👀 |
 | [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 5 | 8 | 👀 |
 | GBA - FuzzARM | 5 | 5 | 👌 |
 | GBA - hwverified (AGS-001) | 12 | 12 | 👌 |
@@ -117,7 +117,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
-## GBA - alyosha gba-tests (123/126)
+## GBA - alyosha gba-tests (123/125)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -236,7 +236,6 @@ Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). Se
 | alyosha/timing/prefetch_enable_2 | — | 👌 |
 | alyosha/unsafe/fifo_dma_disable_jam | — | 👌 |
 | alyosha/unsafe/fifo_dma_disable_jam_2 | — | 👌 |
-| alyosha/unsafe/prefetcher_branch_thumb_arm_2 | — | 👀 Failed test 078 |
 | png183/DMA/dma_repeat_immediate | — | 👌 |
 | png183/arm/arm | — | 👌 |
 | png183/arm/branches | — | 👌 |
@@ -304,4 +303,5 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **mooneye-wilbertpol utils/, logic-analysis/** — tools and analysis captures, not pass/fail tests. (build_wilbertpol_tests)
 - **rtc3test upstream single ROM** — needs menu input to select a sub-test; the shootout's three pre-split builds are scored instead. (build_shootout_tests)
 - **DocBoy: 645 rows its own manifests disable** — `"enabled": false`, so DocBoy's runner never runs them and states no verdict for them: 640 `double_speed/apu/ch4` and 2 `double_speed/apu/ch3` CGB rows, `mbc/huc3/huc3_tick` ("takes a long time (1 real minute)") and two `cgb_dmg_mode` `m3_lcdc_win_en_change_multiple_wx_*_signed_addressing_source` rows ("glitch is different, probably uses another memory bus"). (build_docboy_rows)
+- **alyosha `unsafe/prefetcher_branch_thumb_arm_2`** — its expected values were never produced by a console: the suite's own unsafe/README.md says the ROM "crashes on console due to the prefetcher being misaligned when switching from thumb to arm mode", and the author moved it out of `prefetcher/` (whose `_arm`, `_arm_3` and `_arm_4` siblings are scored) for that reason. The check it fails is that switch: TM0 after the Thumb `bx r2` at 0x0800019E into ARM code at 0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E here. Its first check, the ARM-to-Thumb branch before it, reads the expected 0x3A. (build_alyosha_tests)
 - **DocBoy manifests: 725 vendored ROMs of other suites** — everything outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, firstwhite, rtc3test, cpp, zoomten, tepples). Those are scored from their upstream releases in the sections above, each by its own author's verdict; DocBoy's entries re-check them against DocBoy's own frame dumps, and 8 are DocBoy edits (`samesuite/apu/channel_1/*-cgbE`, expectations rewritten for CPU CGB E). (build_docboy_rows)
