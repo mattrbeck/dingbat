@@ -274,6 +274,16 @@ proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
   else: discard
 
 
+const SPSW_DIV_RESET_RELOAD_LATE* {.intdefine.} = 1
+  ## Whether a TIMA overflow ticked by the speed switch's own DIV reset
+  ## reloads through the ordinary one-M-cycle window (the countdown, Pan Docs
+  ## "Timer Obscure Behaviour") rather than at once. A CPU store to $FF04
+  ## commits at its M-cycle's end, where the immediate reload IS that window;
+  ## this reset is inside STOP, ahead of the stall, so the request rises one
+  ## M-cycle into the stall and the stall's entry check
+  ## (SPEED_SWITCH_ENTRY_IRQ_CHECK, memory.nim) cannot see it. DocBoy
+  ## `speed_switch_to_single_interrupt_timers_b_round2` (CGB E: a 65 kHz TIMA
+  ## at $FF that the reset ticks over wakes the stall after one M-cycle).
 proc timer_speed_switch_div_reset_split(t: GbTimer; gb: GB) =
   ## The switch reset with the slow taps judged at a different point from the
   ## fast ones (SPEED_SWITCH_DIV_RESET_T_SLOW): `timer_write`'s $FF04 body,
@@ -303,7 +313,7 @@ proc timer_speed_switch_div_reset_split(t: GbTimer; gb: GB) =
   if apu_slow: tick_frame_sequencer(gb.apu, gb)
   gb.scheduler.clear(etAPUFrameSeq)
   gb.scheduler.schedule(apu_div_phase(t, gb), etAPUFrameSeq)
-  timer_check_edge(t, gb, on_write = true)
+  timer_check_edge(t, gb, on_write = SPSW_DIV_RESET_RELOAD_LATE == 0)
   if gb.serial.shifting: serial_div_write_edge(gb.serial, gb, old_tdiv)
 
 proc timer_speed_switch_div_reset*(t: GbTimer; gb: GB) =

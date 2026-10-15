@@ -194,6 +194,32 @@ when SERIAL_CPU_SAMPLE_T < 4:
     if serial.serial_cpu_pre(gb) and not serial.pre_irq:
       gb.interrupts.if_prev = gb.interrupts.if_prev and not 0x08'u8
 
+const SERIAL_HALT_TAIL_BLIND* {.intdefine.} = 1
+  ## Whether a HALTED CPU misses a serial request raised by the tap edge of
+  ## the M-cycle it is latching, and wakes one M-cycle later. The edge is on
+  ## the M-cycle's last T-cycle (SERIAL_CPU_SAMPLE_T, gb.nim) and the halted
+  ## latch sits before it (HALT_IF_SAMPLE_T's GBMicrotest measurement, cpu.nim:
+  ## a request rising on T 2 or 3 wakes a halt one M-cycle late); the running
+  ## CPU's dispatch check, after all four T-cycles, is unchanged. DocBoy
+  ## `serial_interrupt{,_timing}_halted_round2` (DMG ABC, CGB E),
+  ## `double_speed/interrupts/{single,double}_speed_interrupt_serial_halted_*`
+  ## and `speed_switch_to_{double,single}_interrupt_serial*` (the switch's
+  ## halt), with SameBoy (DMG B, CGB E) passing every one; their running-CPU
+  ## twins (`serial_interrupt_timing_round*`, `*_manual*`) pass either way.
+
+when SERIAL_CPU_SAMPLE_T < 4 and SERIAL_HALT_TAIL_BLIND != 0:
+  proc halt_serial_tail_blind*(gb: GB): bool {.noinline.} =
+    ## Is the interrupt line up ONLY because this M-cycle's tap edge finished
+    ## a transfer? Reached only with the line up, from a halted latch.
+    let irq = gb.interrupts
+    if not (irq.serial_interrupt and irq.serial_enabled): return false
+    if (irq.vblank_interrupt   and irq.vblank_enabled)   or
+       (irq.lcd_stat_interrupt and irq.lcd_stat_enabled) or
+       (irq.timer_interrupt    and irq.timer_enabled)    or
+       (irq.joypad_interrupt   and irq.joypad_enabled): return false
+    let serial = gb.serial
+    serial.serial_cpu_pre(gb) and not serial.pre_irq
+
 proc serial_sc_unused_bits(gb: GB): uint8 {.inline.} =
   # Unused SC bits read 1; bit 1 only exists in native CGB mode.
   if gb.cgb_native: 0x7C'u8 else: 0x7E'u8

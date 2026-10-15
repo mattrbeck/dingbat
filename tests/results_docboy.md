@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 21:17:24 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-14 22:13:13 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,15 +11,14 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**7168/9227 passed.**
+**7246/9227 passed.**
 
-## docboy/dmg/cpu (10/12 passed)
+## docboy/dmg/cpu (11/12 passed)
 
-10/12 tests passed on DMG dmgABC, 2 failed:
+11/12 tests passed on DMG dmgABC, 1 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/cpu/halt_ime1_interrupt1_ret | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/cpu/interactive_visual/stop_immediate_exit_joypad_interrupt | timeout: $FFF0=$00 |
 
 ## docboy/dmg/ppu (1164/1303 passed)
@@ -176,16 +175,15 @@ and docs/gb-failure-triage.md for the failing families.
 |------|--------|
 | dmg/docboy/mbc/mbc1/mbc1_initial_ram | $FFF0=$02 = fail value (tick 100004) |
 
-## docboy/dmg/mbc/mbc3 (17/21 passed)
+## docboy/dmg/mbc/mbc3 (18/21 passed)
 
-17/21 tests passed on DMG dmgABC, 4 failed:
+18/21 tests passed on DMG dmgABC, 3 failed:
 
 | Test | Result |
 |------|--------|
 | dmg/docboy/mbc/mbc3/mbc3_rtc_latch_0_to_2 | $FFF0=$02 = fail value (tick 9900004) |
 | dmg/docboy/mbc/mbc3/mbc3_rtc_latch_1_to_0 | $FFF0=$02 = fail value (tick 9900000) |
 | dmg/docboy/mbc/mbc3/mbc3_rtc_latch_1_to_1 | $FFF0=$02 = fail value (tick 9900000) |
-| dmg/docboy/mbc/mbc3/interactive/mbc3_rtc_gb_stopped_recover | $FFF0=$02 = fail value (tick 22100004) |
 
 ## docboy/dmg/mbc/mbc5
 
@@ -404,28 +402,22 @@ All 1 tests passed (DMG dmgABC).
 
 All 29 tests passed (DMG dmgABC).
 
-## docboy/dmg/timers (6/10 passed)
+## docboy/dmg/timers (8/10 passed)
 
-6/10 tests passed on DMG dmgABC, 4 failed:
+8/10 tests passed on DMG dmgABC, 2 failed:
 
 | Test | Result |
 |------|--------|
 | dmg/docboy/timers/write_tima_while_reloading_aborts_interrupt | $FFF0=$02 = fail value (tick 100012) |
 | dmg/docboy/timers/write_tima_while_reloading_uses_tima | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/timers/interactive/stop_read_tima_round1 | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/timers/interactive/stop_read_tima_round2 | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/dmg/interrupts (157/158 passed)
+## docboy/dmg/interrupts
 
-157/158 tests passed on DMG dmgABC, 1 failed:
+All 158 tests passed (DMG dmgABC).
 
-| Test | Result |
-|------|--------|
-| dmg/docboy/interrupts/serial_interrupt_timing_halted_round2 | $FFF0=$02 = fail value (tick 100000) |
+## docboy/dmg/dma (60/68 passed)
 
-## docboy/dmg/dma (59/68 passed)
-
-59/68 tests passed on DMG dmgABC, 9 failed:
+60/68 tests passed on DMG dmgABC, 8 failed:
 
 | Test | Result |
 |------|--------|
@@ -437,7 +429,6 @@ All 29 tests passed (DMG dmgABC).
 | dmg/docboy/dma/dma_during_pixel_transfer_check_stat_oam_scan | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/dma/dma_during_vblank_last_line_check_stat_oam_scan | $FFF0=$02 = fail value (tick 100012) |
 | dmg/docboy/dma/dma_during_vblank_last_line_check_stat_oam_scan_next | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/dma/interactive/dma_stop_during_transfer_timing_round2 | $FFF0=$02 = fail value (tick 100000) |
 
 ## docboy/dmg/serial (74/77 passed)
 
@@ -614,22 +605,13 @@ All 5 tests passed (CGB cgbE).
 
 All 1 tests passed (CGB cgbE).
 
-## docboy/cgb/timers (0/2 passed)
+## docboy/cgb/timers
 
-0/2 tests passed on CGB cgbE, 2 failed:
+All 2 tests passed (CGB cgbE).
 
-| Test | Result |
-|------|--------|
-| cgb/docboy/timers/interactive/stop_read_tima_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/timers/interactive/stop_read_tima_round2 | $FFF0=$02 = fail value (tick 100008) |
+## docboy/cgb/interrupts
 
-## docboy/cgb/interrupts (26/27 passed)
-
-26/27 tests passed on CGB cgbE, 1 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/interrupts/serial_interrupt_halted_round2 | $FFF0=$02 = fail value (tick 100004) |
+All 27 tests passed (CGB cgbE).
 
 ## docboy/cgb/dma
 
@@ -1948,116 +1930,44 @@ All 8 tests passed (CGB cgbE).
 
 All 14 tests passed (CGB cgbE).
 
-## docboy/cgb/double_speed/hdma (43/50 passed)
+## docboy/cgb/double_speed/hdma (49/50 passed)
 
-43/50 tests passed on CGB cgbE, 7 failed:
+49/50 tests passed on CGB cgbE, 1 failed:
 
 | Test | Result |
 |------|--------|
 | cgb/docboy/double_speed/hdma/double_speed_hdma_basic_transfer | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/hdma/speed_switch_to_double_during_hdma_div_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/hdma/speed_switch_to_double_during_hdma_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/hdma/speed_switch_to_double_during_hdma_stat_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/hdma/speed_switch_to_single_during_hdma_div_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/hdma/speed_switch_to_single_during_hdma_round2 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/double_speed/hdma/speed_switch_to_single_during_hdma_stat_round2 | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/cgb/double_speed/interactive (41/75 passed)
+## docboy/cgb/double_speed/interactive (55/75 passed)
 
-41/75 tests passed on CGB cgbE, 34 failed:
+55/75 tests passed on CGB cgbE, 20 failed:
 
 | Test | Result |
 |------|--------|
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_ly_b_round1 | $FFF0=$02 = fail value (tick 100002) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_ly_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_b_div_round1 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_div_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_scx0_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_scx1_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_scx2_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_serial_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_div_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx0_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx1_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx2_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_timer_b_div_round1 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_timer_div_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_vblank_div_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime1_serial_div_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime1_stat_div_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime1_timer_div_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime1_vblank_div_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_read_tima_a_round1 | $FFF0=$02 = fail value (tick 200006) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_read_tima_a_round2 | $FFF0=$02 = fail value (tick 200000) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_read_tima_b_round1 | $FFF0=$02 = fail value (tick 200006) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_read_tima_b_round2 | $FFF0=$02 = fail value (tick 200000) |
 | cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime0_ly_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime0_serial_div_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime0_stat_div_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime0_timer_div_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime0_vblank_div_round1 | $FFF0=$02 = fail value (tick 100002) |
 | cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime1_serial_div_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime1_stat_div_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime1_timer_div_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime1_vblank_div_round1 | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/cgb/double_speed/interrupts (197/246 passed)
+## docboy/cgb/double_speed/interrupts
 
-197/246 tests passed on CGB cgbE, 49 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/double_speed/interrupts/double_speed_interrupt_serial_halted_a_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/double_speed_interrupt_serial_halted_b_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/single_speed_interrupt_serial_halted_round2 | $FFF0=$02 = fail value (tick 300000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_serial_round2 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_36_scx1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_36_scx2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_36_scx3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_37_scx0_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_37_scx1_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_37_scx2_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_38_scx0_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_38_scx1_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_38_scx2_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_38_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_39_scx0_round1 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_39_scx1_round1 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_39_scx2_round1 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_39_scx3_round1 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_40_scx0_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_40_scx1_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_40_scx2_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_aligned_with_stop_nops_40_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_ly_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_scx0_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_scx1_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_scx2_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_stat_scx3_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_vblank_aligned_with_stop_nops_90_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_vblank_aligned_with_stop_nops_93_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_vblank_aligned_with_stop_nops_94_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_vblank_aligned_with_stop_nops_95_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_vblank_aligned_with_stop_nops_96_round1 | $FFF0=$02 = fail value (tick 100002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_vblank_b_round1 | $FFF0=$02 = fail value (tick 300006) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_double_interrupt_vblank_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_serial_b_round2 | $FFF0=$02 = fail value (tick 100006) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_serial_round2 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_stat_b_scx0_round2 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_stat_b_scx1_round2 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_stat_b_scx2_round2 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_stat_b_scx3_round2 | $FFF0=$02 = fail value (tick 100012) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_stat_scx0_round2 | $FFF0=$02 = fail value (tick 100010) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_stat_scx1_round2 | $FFF0=$02 = fail value (tick 100010) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_stat_scx2_round2 | $FFF0=$02 = fail value (tick 100010) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_stat_scx3_round2 | $FFF0=$02 = fail value (tick 100010) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_vblank_a_round2 | $FFF0=$02 = fail value (tick 200002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_vblank_b_round2 | $FFF0=$02 = fail value (tick 200004) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_vblank_c_round2 | $FFF0=$02 = fail value (tick 400002) |
-| cgb/docboy/double_speed/interrupts/speed_switch_to_single_interrupt_vblank_d_round2 | $FFF0=$02 = fail value (tick 100006) |
+All 246 tests passed (CGB cgbE).
 
 ## docboy/cgb/double_speed/ppu (355/357 passed)
 

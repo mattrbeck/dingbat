@@ -47,6 +47,7 @@ compared by structure, and the probes use colours that survive RGB555/RGB565 dis
 | `probe_b_scxm3.gb` | how much does a mid-line SCX store lengthen mode 3, and where must it land? | CGB-compatible |
 | `probe_c_arbitrate*.gb` | on one frame, where does the BGP band edge sit relative to the LCDC.4 glitched fetch column? | no CGB flag |
 | `probe_d_tdsel*.gb` | the LCDC.4 mid-fetch tile-data-select glitch, per SCX and in compat mode | |
+| `probe_l_stopwake.gb` | does the PPU (and the timer) run across a STOP woken by a key press? Built by `probe_l_stopwake.py` (no RGBDS) | no CGB flag |
 | `probe_e_objgrid.gb` | object-penalty grid vs SCX after a STAT/LYC halt wake (see `g1_README.md`) | |
 | `probe_f_winbar.gb` | window re-trigger shape | |
 | `rtcrate*.gb`, `wrambands.gb`, `wramscan.gb`, `probe_cart.gb` | RTC rate, WRAM banks, cart detection | |

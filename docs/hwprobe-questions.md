@@ -202,6 +202,7 @@ kit and its READMEs are listed in docs/flashcart-runbook.md "Session 3 kit".
 
 | ROM / page | Rig | Answers |
 |---|---|---|
+| tools/gbprobe/probe_l_stopwake.gb (2026-10-14): STOP at line 20 with the LCD on, woken by a hand on A, six trials; LY, STAT, TIMA, DIV at the wake and LY 160 M-cycles on | GB flashcart in the GBP (MGB); press A within a second each trial (Pan Docs: a DMG left in STOP with the LCD on can be damaged) | **predicted, unrun.** Whether the PPU runs across a STOP: dingbat freezes it and reads `14 82 09 00 15` every trial; DocBoy's DMG `stop_read_{ly,stat}_*` rows need it to run 2^17 + 4 dots with the timer held (`STOP_WAKE_PPU_DOTS = 131076`, cpu.nim, ships 0), `00 85 09 00 01`; TIMA `89` = the timer ran through a 2^17 restart; LY varying trial to trial = the PPU runs for as long as the key took (docs/gb-failure-triage.md I13) |
 | gbedge p02 re-shoot on AGS and on a CGB | GB flashcart | bytes 11–12 (TAC $05→$06 switch glitch) read 02 02 on AGS where the model gives 01 01 — confirms or refutes the model's CGB reload window (`timer.nim` timer_check_edge) |
 | gbedge full run on a GBC (unrun) | GB flashcart | the CGB-C vs CGB-D splits (`GbQuirks.lyc_compare_hold`, `ly_read_edge_late`) that today rest on per-revision comparison runs; the CGB side of the timer reload |
 | gbvis page: LCDC.5 turned on mid-line on the WY line | GB flashcart, photograph | whether the window re-checks WY on the LCDC write (`ppu.nim` ppu_store_lcdc, Assumed; disabling it changes no verdict) |

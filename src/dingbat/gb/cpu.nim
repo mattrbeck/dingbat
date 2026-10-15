@@ -112,6 +112,17 @@ const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 2
   ## end of the second. gambatte `halt/late_m0{int,irq}_halt_m0stat_scx3_2b`
   ## [dmg] want 2; 3 loses six `_1b`/`_2a` rows. The CGB's side of this is
   ## CGB_HALT_PPU_LEAD.
+const HALT_PENDING_RUN_VIEW* {.booldefine.} = true
+  ## Whether the HALT opcode asks "IF & IE != 0?" (the halt bug with IME
+  ## clear, HALT_IME_PENDING_REDO with it set) with the running CPU's view,
+  ## interrupt_ready_run: the HALT is still an executing instruction when it
+  ## decides, so a TIMA overflow reaches it TIMER_IRQ_RUN_LEAD early, as it
+  ## reaches any running instruction's dispatch check. DocBoy
+  ## `cpu/halt_ime1_interrupt1_ret` (DMG ABC: TIMA overflows on the HALT's own
+  ## fetch M-cycle, the HALT does not halt, RET lands back on it and it then
+  ## waits out a whole TIMA period for DIV = $40) and SameBoy (DMG B) on the
+  ## same ROM; false wakes from the halt and reads DIV = $00.
+
 proc cpu_halt*(cpu: GbCpu; gb: GB) =
   ## Pan Docs, "Halt Bug": with IME = 0 and IF & IE != 0 the CPU does not halt
   ## and PC fails to increment for the next instruction. The IME that decides
@@ -120,10 +131,13 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
   ## $0A only with the bug armed; SameSuite interrupt/ei_delay_halt).
   let ime_at_fetch = cpu.ime and
     cpu.ime_set_cycle + CycleCount(4) <= gb.scheduler.cycles
-  if not ime_at_fetch and interrupt_ready(gb.interrupts):
+  let pending =
+    when HALT_PENDING_RUN_VIEW: interrupt_ready_run(gb.interrupts)
+    else: interrupt_ready(gb.interrupts)
+  if not ime_at_fetch and pending:
     cpu.halt_bug = true
     cpu.halted   = false
-  elif HALT_IME_PENDING_REDO != 0 and cpu.ime and interrupt_ready(gb.interrupts):
+  elif HALT_IME_PENDING_REDO != 0 and cpu.ime and pending:
     # IME on and a request already up: the HALT does not halt; its fetch of
     # the next opcode is undone by the dispatch, which pushes the HALT's own
     # address (dispatch_interrupt's halt-bug path), so RETI runs it again.
@@ -476,10 +490,16 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
       if take < mdots:
         mem_tick_ppu(gb.memory, gb, int(mdots - take), ignore_speed = true)
       mem_reset_cycle_count(gb.memory)
-      return interrupt_ready(gb.interrupts)
+      result = interrupt_ready(gb.interrupts)
+      when SERIAL_CPU_SAMPLE_T < 4 and SERIAL_HALT_TAIL_BLIND != 0:
+        if result and halt_serial_tail_blind(gb): result = false
+      return
   when HALT_IF_SAMPLE_T >= 4:
     mem_tick_extra(gb.memory, gb, 4)
     result = interrupt_ready(gb.interrupts)
+    when SERIAL_CPU_SAMPLE_T < 4 and SERIAL_HALT_TAIL_BLIND != 0:
+      # The serial source's half of the same question (SERIAL_HALT_TAIL_BLIND).
+      if result and halt_serial_tail_blind(gb): result = false
     when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
       if result and halt_m2_lead_blind(gb): result = false
     when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
@@ -503,6 +523,22 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     if not result and gb.ppu.ly != ly0:
       result = interrupt_ready(gb.interrupts)
 
+const STOP_WAKE_PPU_DOTS* {.intdefine.} = 0
+  ## Dots the PPU runs between a key press ending STOP mode and the CPU's
+  ## next M-cycle, with the CPU clock's domain (CPU, divider, timer, OAM DMA)
+  ## still waiting: an oscillator restart on the way out of STOP, the same
+  ## wait the speed switch's HALT spends (2^17, Pan Docs' STOP chart: "HALT
+  ## mode will exit automatically after about 0x20000 T-cycles"). Ships 0:
+  ## Pan Docs says nothing of a STOP-mode exit delay or of the PPU across
+  ## STOP, SameBoy (DMG B) agrees with 0, and hardware has not been asked.
+  ## DocBoy's 15 DMG STOP-and-wake rows (`ppu/interactive/stop_*`,
+  ## `timers/interactive/*`, `dma/interactive/*`) all pass at 2^17 + 4 =
+  ## 131076 and only there (131072 and 131080 each lose five `stop_read_*`
+  ## rows). A fixed count is what a ROM meant for a hand on a real key can
+  ## encode; the PPU running for as long as the key took could not be. The
+  ## hardware question and dingbat's two predictions are
+  ## tools/gbprobe/probe_l_stopwake.gb (docs/gb-failure-triage.md I13).
+
 proc cpu_stop_tick(cpu: GbCpu; gb: GB) {.noinline.} =
   ## One step of STOP mode (stop_instr in memory.nim): nothing is ticked;
   ## mem_tick_stopped only keeps the frontend's frames coming. Pan Docs: "STOP
@@ -514,6 +550,8 @@ proc cpu_stop_tick(cpu: GbCpu; gb: GB) {.noinline.} =
     cpu.stopped = false
     cpu.locked  = false
     cpu.halted  = false
+    when STOP_WAKE_PPU_DOTS != 0:
+      mem_tick_ppu(gb.memory, gb, STOP_WAKE_PPU_DOTS, ignore_speed = true)
 
 when defined(gbfuzz_trace):
   # Instruction trace for tools/gbfuzz; compiled out of normal builds.

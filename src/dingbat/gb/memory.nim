@@ -990,11 +990,21 @@ const SPEED_SWITCH_STALL_RUNS_CPU_CLOCK* {.intdefine.} = 1
   ## HALT (Pan Docs' STOP chart) and everything that runs in a halt runs here.
   ## DIV is still reset at the switch, before the stall.
 
+proc spsw_extra_dots(mem: GbMemory): int {.inline.} =
+  ## SPEED_SWITCH_PPU_EXTRA_DOTS for the speed just switched TO.
+  const extra_single =
+    when SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE != SS_EXTRA_SINGLE_SAME:
+      SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE
+    else: SPEED_SWITCH_PPU_EXTRA_DOTS
+  if mem.current_speed == 1: SPEED_SWITCH_PPU_EXTRA_DOTS else: extra_single
+
 proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
-                      first_chunk = true) =
+                      first_chunk = true; ppu_hold = 0) =
   ## mem_tick_components for the speed-switch stall: no fetch, the CPU-clock
   ## domain per SPEED_SWITCH_STALL_RUNS_CPU_CLOCK, and the PPU at its
-  ## real-time rate (gambatte speedchange/*_m3_*).
+  ## real-time rate (gambatte speedchange/*_m3_*). `ppu_hold`: dots of the
+  ## first chunk the PPU does not run here (already run by the stall's entry
+  ## check, or held back for the wake: SPEED_SWITCH_HALT_PPU_LEAD).
   gb.scheduler.tick(cycles)
   when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
     timer_tick(gb.timer, gb, cycles)
@@ -1009,14 +1019,8 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
         when OAMDMA_HALT_RELEASE != 0:
           if mem.dma_position == 0xA0: mem_dma_tick(mem, gb, 4)
   # `current_speed` is already the speed switched TO: 1 = ended in double.
-  const extra_single =
-    when SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE != SS_EXTRA_SINGLE_SAME:
-      SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE
-    else: SPEED_SWITCH_PPU_EXTRA_DOTS
-  let extra =
-    if not first_chunk: 0
-    elif mem.current_speed == 1: SPEED_SWITCH_PPU_EXTRA_DOTS else: extra_single
-  let ppu_cycles = (cycles shr mem.current_speed) + extra
+  let extra = if first_chunk: spsw_extra_dots(mem) else: 0
+  let ppu_cycles = (cycles shr mem.current_speed) + extra - ppu_hold
   fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   # The APU's share of the same oscillator restart (APU_SPSW_EXTRA_DOTS).
   if first_chunk:
@@ -1039,9 +1043,35 @@ const SPEED_SWITCH_STALL_ENDS_ON_IRQ* {.intdefine.} = 1
   ## c-sp speed-switch/caution/spsw-interrupts-*: a 262 kHz timer overflowing
   ## mid-stall reads DIV = $10 on hardware, which a stall that runs to
   ## completion (2^17 cycles, 16-bit divider) can only answer as $00.
-proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int): int =
+const SPEED_SWITCH_HALT_PPU_LEAD* {.intdefine.} = 1
+  ## The stall is the CGB HALT of the switch leaf, so it holds the PPU back
+  ## the way any CGB halt does (CGB_HALT_PPU_LEAD, gb.nim): its first M-cycle
+  ## runs no dots, and the wake pays them back. A no-op for a stall that runs
+  ## out (the dots are paid at its end); a stall a STAT or VBlank request ends
+  ## wakes one M-cycle later, a timer wake does not move. DocBoy
+  ## `double_speed/interrupts/speed_switch_to_{double,single}_interrupt_
+  ## {stat,vblank}*` (CGB E, both directions: one M-cycle of the new speed,
+  ## the timer rows beside them unchanged) and SameBoy (CGB E) on the same
+  ## rows; the timer half is c-sp `speed-switch/caution/spsw-interrupts-*`'s
+  ## hardware-checked `.speed_switch_with_timer_interrupt` block, unmoved.
+const SPEED_SWITCH_ENTRY_IRQ_CHECK* {.intdefine.} = 1
+  ## Whether the stall's HALT also asks for an interrupt before its first
+  ## M-cycle, so a request rising inside STOP itself (after the leaf choice
+  ## saw none pending) ends it with no stall cycle spent. By then the PPU has
+  ## run the switch's extra dots less the held-back ones (6 into double speed,
+  ## none into single); every later check is where it was. DocBoy
+  ## `speed_switch_to_double_interrupt_{stat,vblank}_aligned_with_stop_nops_*`
+  ## (54 rows, CGB E) walk the STOP across the mode-0 and VBlank edges one
+  ## M-cycle at a time: the stall that would have lasted one M-cycle lasts
+  ## none, the longer ones are unchanged. The entry check's 6 dots are
+  ## two-sided: 5 loses `..._nops_37_scx2_round1`, 7 `..._nops_37_scx3_round2`.
+  ## SameBoy (CGB E) passes 49 of the 54.
+proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int;
+                         ppu_debt: var int): int =
   ## The stall in M-cycle steps, stopping as soon as an interrupt is ready;
-  ## only the first step carries the once-per-stall work.
+  ## only the first step carries the once-per-stall work. `ppu_debt`: the
+  ## dots held back (SPEED_SWITCH_HALT_PPU_LEAD), for the caller to pay at
+  ## the wake.
   const step = 4
   # IE = 0 cannot wake, so the whole stall is one call (most games switch
   # with IE = 0, and 2^17 cycles is 32768 steps).
@@ -1050,23 +1080,74 @@ proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int): int =
           irq.serial_enabled or irq.joypad_enabled):
     mem_tick_stalled(mem, gb, stall_cycles)
     return stall_cycles
+  let hold =
+    when SPEED_SWITCH_HALT_PPU_LEAD != 0: CGB_HALT_PPU_LEAD_DOTS shr mem.current_speed
+    else: 0
+  var pre = 0
+  when SPEED_SWITCH_ENTRY_IRQ_CHECK != 0:
+    # The halt asks for an interrupt before its first M-cycle as well, with
+    # the PPU already through the switch's extra dots less the held-back ones
+    # (SPEED_SWITCH_ENTRY_IRQ_CHECK).
+    pre = max(0, spsw_extra_dots(mem) - hold)
+    if pre > 0: fifo_tick(gb.fifo_ppu, gb, pre)
+    if interrupt_ready(gb.interrupts):
+      # Woken before the stall's first M-cycle: only its once-per-stall work.
+      # Into single speed the extra dots are fewer than the held-back ones,
+      # so the wake owes that much less.
+      let short = min(0, spsw_extra_dots(mem) - hold - pre)
+      mem_tick_stalled(mem, gb, 0, first_chunk = true,
+                       ppu_hold = hold + pre + short)
+      ppu_debt = hold + short
+      return 0
   var done = 0
   while done < stall_cycles:
     let n = min(step, stall_cycles - done)
-    mem_tick_stalled(mem, gb, n, first_chunk = done == 0)
+    let first = done == 0
+    mem_tick_stalled(mem, gb, n, first_chunk = first,
+                     ppu_hold = (if first: hold + pre else: 0))
     done += n
-    if interrupt_ready(gb.interrupts): break
+    if interrupt_ready(gb.interrupts):
+      # The stall is a halt: its latch misses a serial request this
+      # M-cycle's tap edge raised (SERIAL_HALT_TAIL_BLIND, serial.nim).
+      when SERIAL_CPU_SAMPLE_T < 4 and SERIAL_HALT_TAIL_BLIND != 0:
+        if not halt_serial_tail_blind(gb): break
+      else:
+        break
+  ppu_debt = hold
   done
+
+const STOP_RTC_RUNS* {.intdefine.} = 1
+  ## Whether a cartridge clock (MBC3, HuC3, TAMA5) keeps counting while the
+  ## Game Boy is in STOP mode. Pan Docs, "MBC3": the "RTC requires an
+  ## external 32.768 kHz Quartz Oscillator, and an external battery (if it
+  ## should continue to tick when the Game Boy is turned off)", so stopping
+  ## the console's oscillator cannot stop it. dingbat books the clock's second as a
+  ## scheduler event and STOP freezes the scheduler, so each STOP step moves
+  ## that one event on by the step's cycles. DocBoy
+  ## `mbc/mbc3/interactive/mbc3_rtc_gb_stopped_recover` (DMG: seconds held
+  ## across a STOP of about two seconds, released by a key).
 
 proc mem_tick_stopped*(mem: GbMemory; gb: GB) =
   ## One step in STOP mode: the whole machine clock is stopped (Pan Docs,
-  ## "Using the STOP Instruction"), so nothing ticks. This only paces the
-  ## frontend: step_frame waits for `frame`, which a frozen PPU never sets.
+  ## "Using the STOP Instruction"), so nothing ticks but a cartridge clock
+  ## (STOP_RTC_RUNS). This otherwise only paces the frontend: step_frame
+  ## waits for `frame`, which a frozen PPU never sets.
   let ppu = gb.ppu
   ppu.dots_since_frame += int32(4 shr mem.current_speed)
   if ppu.dots_since_frame >= DOTS_PER_FRAME:
     ppu.dots_since_frame = 0
     ppu.frame = true
+  when STOP_RTC_RUNS != 0:
+    let due = gb.scheduler.pending_at(etRtcSecond)
+    if due != high(CycleCount):
+      if due <= gb.scheduler.cycles + 4:
+        # The tick reschedules itself a second on from the frozen clock.
+        gb.scheduler.clear(etRtcSecond)
+        if gb.cartridge of Mbc3: Mbc3(gb.cartridge).rtc_tick()
+        elif gb.cartridge of Huc3: Huc3(gb.cartridge).huc3_rtc_tick()
+        elif gb.cartridge of Tama5: Tama5(gb.cartridge).tama5_rtc_tick()
+      else:
+        gb.scheduler.advance_pending(etRtcSecond, gb.scheduler.cycles, 4)
   when defined(test_harness):
     # The harness's timed input keeps its clock running in STOP (joypad.nim).
     if gb_harness_input != nil: gb_harness_input(gb, true)
@@ -1083,6 +1164,36 @@ proc stop_panel(mem: GbMemory; gb: GB) =
     for i in 0 ..< ppu.framebuffer.len: ppu.framebuffer[i] = 0'u16
     ppu.frame = true
     ppu.dots_since_frame = 0
+
+const SPEED_SWITCH_IME0_LEAF_HOLD_T* {.intdefine.} = 8
+  ## SPEED_SWITCH_IRQ_LEAF_HOLD_T for the leaf Pan Docs' STOP chart defines:
+  ## a switch with an interrupt pending and IME clear ("STOP is a 1-byte
+  ## opcode, mode doesn't change, DIV is reset, CPU speed changes"). c-sp's
+  ## measurements behind SPEED_SWITCH_IRQ_LEAF_HOLD_T run with IME set (EI
+  ## right before STOP), the chart's "CPU glitches non-deterministically"
+  ## leaf. DocBoy `speed_switch_to_double_interrupt_{stat,vblank}_aligned_
+  ## with_stop_nops_*` (CGB E, IME clear, the request pending at STOP: 16
+  ## rows) and SameBoy (CGB E) on the same rows want two M-cycles of the new
+  ## speed: [5, 8] T scores alike, 4 loses every `_round1`, 9 every
+  ## `_round2`. CGB B/C are unmeasured on this leaf and take the same value.
+  ## DocBoy's IME-set rows (`double_speed/interactive/*_ime1_*_div_round1`)
+  ## want 8 on the glitch leaf too; c-sp's CGB-E measurement and SameBoy say
+  ## 4 there (docs/gb-failure-triage.md I7).
+
+const STOP_MODE_OPERAND_MCYCLE* {.intdefine.} = 1
+  ## The two-byte STOP-mode leaf runs its operand M-cycle, the whole machine
+  ## ticking, before the clock stops, and the DIV reset lands at that
+  ## M-cycle's end, one M-cycle after the fetch (where the switch leaf's reset
+  ## sits too, SPEED_SWITCH_DIV_RESET_T). DocBoy `timers/interactive/
+  ## stop_read_tima_*` (DMG ABC, CGB E) and `double_speed/interactive/
+  ## double_speed_stop_read_tima_*` (the CGB ones marked for a hand-pressed
+  ## key on hardware) read TIMA one count higher after the wake: the 262 kHz
+  ## tap is low at the fetch and high one M-cycle later, so only the later
+  ## reset ticks TIMA; SameBoy (DMG B, CGB E) passes all eight.
+  ## `dma/interactive/dma_stop_during_transfer_timing_round2` (DMG) wants the
+  ## OAM DMA one byte further on, which only the full M-cycle gives. 2 ticks
+  ## the divider alone (the eight TIMA rows, not the DMA one); 0 is the old
+  ## reset at the fetch.
 
 proc stop_instr*(mem: GbMemory; gb: GB): bool =
   ## STOP ($10). Returns whether the byte after the opcode is consumed. Pan
@@ -1149,9 +1260,11 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     when SPEED_SWITCH_IRQ_LEAF_HOLD_T != 0:
       if irq_pending:
         # Oscillator restart on the aborted-halt leaf: the divider owes these
-        # T-cycles (SPEED_SWITCH_IRQ_LEAF_HOLD_T).
+        # T-cycles (SPEED_SWITCH_IRQ_LEAF_HOLD_T; with IME clear,
+        # SPEED_SWITCH_IME0_LEAF_HOLD_T).
         let hold =
-          if gb.quirks.spsw_irq_leaf_hold_short: SPEED_SWITCH_IRQ_LEAF_HOLD_T div 2
+          if not gb.cpu.ime: SPEED_SWITCH_IME0_LEAF_HOLD_T
+          elif gb.quirks.spsw_irq_leaf_hold_short: SPEED_SWITCH_IRQ_LEAF_HOLD_T div 2
           else: SPEED_SWITCH_IRQ_LEAF_HOLD_T
         gb.timer.hold_t = hold
     if not irq_pending:
@@ -1160,6 +1273,7 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         when SPEED_SWITCH_STALL_CPU != 0: SPEED_SWITCH_STALL_CPU
         else: SPEED_SWITCH_STALL_T shl mem.current_speed
       var spent = stall_cycles
+      var ppu_debt = 0
       when HDMA_STOP_OPERAND_RUNS != 0 and STOP_OPERAND_LATCH != 0:
         # The operand byte as STOP's own M-cycle fetched it, before anything
         # the stall runs can rewrite it (STOP_OPERAND_LATCH).
@@ -1177,7 +1291,7 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
       when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
         # The divider runs, so the DIV-APU event needs no lifting.
         when SPEED_SWITCH_STALL_ENDS_ON_IRQ != 0:
-          spent = mem_stall_until_irq(mem, gb, stall_cycles)
+          spent = mem_stall_until_irq(mem, gb, stall_cycles, ppu_debt)
         else:
           mem_tick_stalled(mem, gb, stall_cycles)
       else:
@@ -1192,6 +1306,10 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
                       prefetch = HDMA_STOP_OPERAND_RUNS != 0 and gb.hdma_stop_req)
         gb.ppu.hdma_seen_mode = gb.ppu.lcd_status and 3'u8
         gb.hdma_wake_dot = gb.ppu.cycle_counter - 1000
+      if ppu_debt != 0:
+        # The wake pays the held-back dots, after the HBlank DMA's wake as at
+        # a HALT's (cpu.nim).
+        mem_tick_ppu(mem, gb, ppu_debt, ignore_speed = true)
       when HDMA_STOP_OPERAND_RUNS != 0:
         # STOP had fetched its operand as the next opcode (HDMA_SWITCH_REQ).
         if gb.hdma_stop_req:
@@ -1206,6 +1324,10 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     return
 
   # The two STOP-mode leaves: DIV reset through the FF04 write path.
+  when STOP_MODE_OPERAND_MCYCLE == 1:
+    if result: mem_tick_components(mem, gb, 4)
+  elif STOP_MODE_OPERAND_MCYCLE == 2:
+    if result: timer_tick(gb.timer, gb, SPEED_SWITCH_DIV_RESET_T)
   timer_write(gb.timer, gb, 0xFF04, 0)
   # `halted` + `locked` is cpu_lock's pair (no interrupt ends this); `stopped`
   # says the rest of the machine is stopped too and a P10-P13 line going low

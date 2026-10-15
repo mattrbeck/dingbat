@@ -870,6 +870,10 @@ edge arrives one M-cycle late until the APU is powered off.
 `SPEED_SWITCH_IRQ_LEAF_HOLD_T = 8` (CGB-E half:
 `spsw_irq_leaf_hold_short`), `SPEED_SWITCH_DIV_RESET_T = 8` / `_SLOW = 4` /
 `SLOW_BIT = 9` (CGB-E: `spsw_div_mid_taps_slow`), `APU_SPSW_TAP_LAG_T = 4`.
+The stall as a halt (I7, 2026-10-14): `SPEED_SWITCH_HALT_PPU_LEAD`,
+`SPEED_SWITCH_ENTRY_IRQ_CHECK`, `SERIAL_HALT_TAIL_BLIND`,
+`SPSW_DIV_RESET_RELOAD_LATE`; the IME-clear leaf's
+`SPEED_SWITCH_IME0_LEAF_HOLD_T = 8`.
 
 **Residue.** Channel 2's length counter expires one M-cycle early in three
 of seven switch configurations (`sc`, `sc2_ds`, `sc5`: ends in double
@@ -1066,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 7,069 / 9,227 at `DocboyRev`, every
+(`tests/README.md`, "The DocBoy suite"): 7,246 / 9,227 at `DocboyRev`, every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1100,6 +1104,9 @@ question. Families, largest first:
   ly*_scx*` (40, HDMA5 readback mid-transfer; SameBoy passes 3 of 3, probably
   dingbat); the `*_source_{vram,wram_dma_source_ram,oam,io,hram,not_usable}`
   rows (what a block reads from odd sources; SameBoy fails too, contested).
+  Six of the seven double-speed rows (`double_speed/hdma/speed_switch_to_
+  {double,single}_during_hdma{,_div,_stat}_round2`) closed 2026-10-14 with
+  the speed-switch stall's halt model (I7).
 * **I5. DMG OAM corruption patterns (171).** `oam_bug_{pop,ld_a_hl,ld_hl_a,
   ld_a_hli}_round*` and their `_fe*` variants: the exact bytes the read and
   pop corruptions leave, per row of the OAM scan. blargg `oam_bug` is green;
@@ -1110,11 +1117,47 @@ question. Families, largest first:
   60; SameBoy passes the sampled ones, probably dingbat) and
   `window_turn_off_*` (43, 4 to 6 pixels at `ld b,b`; SameBoy also fails, a
   DocBoy-only model).
-* **I7. Speed-switch interrupt and STOP timing (79).** `double_speed/
-  interrupts/speed_switch_to_{double,single}_interrupt_*` (49) and the
-  non-input `double_speed/interactive/*stop_key*` rows (30): when a STAT,
-  VBlank or serial interrupt lands around the KEY1 switch's stall. SameBoy
-  passes 6 of 6 interrupts and 5 of 6 STOP rows. Probably dingbat (E).
+* **I7. Speed-switch interrupt and STOP timing (79; 20 left).** Closed
+  2026-10-14: all 49 `double_speed/interrupts/speed_switch_to_*` and
+  `*_serial_halted_*` rows and 10 of the non-input `double_speed/interactive/
+  *stop_key*` rows. The switch's stall is the CGB HALT of the switch leaf
+  (Pan Docs' STOP chart: "HALT mode will exit automatically after about
+  0x20000 T-cycles") and now behaves as one: it holds the PPU back one
+  M-cycle as every CGB halt does (`SPEED_SWITCH_HALT_PPU_LEAD`, memory.nim:
+  a STAT or VBlank request ends it one M-cycle later, a timer request does
+  not move, c-sp's hardware-checked timer block included); it also asks for an
+  interrupt before its first M-cycle, by when the PPU has run 6 of the
+  switch's 8 extra dots (`SPEED_SWITCH_ENTRY_IRQ_CHECK`; the 54
+  `*_aligned_with_stop_nops_*` rows walk the STOP across the mode-0 and
+  VBlank edges and pin the 6 two-sided); its latch misses a serial request
+  raised on the M-cycle's last T-cycle, like every halt's
+  (`SERIAL_HALT_TAIL_BLIND`, serial.nim, which also closed the DMG and CGB
+  `serial_interrupt*_halted_round2` rows); and a TIMA overflow ticked by the
+  switch's own DIV reset reloads one M-cycle later, through the ordinary
+  window (`SPSW_DIV_RESET_RELOAD_LATE`, timer.nim). The leaf the chart
+  defines -- a request pending, IME clear: "STOP is a 1-byte opcode, mode
+  doesn't change, DIV is reset, CPU speed changes" -- holds the divider two
+  M-cycles of the new speed (`SPEED_SWITCH_IME0_LEAF_HOLD_T`, [5, 8] T).
+  SameBoy (CGB E) passes every closed row but six (five aligned rows and
+  `speed_switch_to_single_interrupt_vblank_d_round2`). Left (20, all
+  `double_speed/interactive`):
+  * 8 `{,double_speed_}stop_key1_joypad0_interrupt1_ime1_*_div_round1`: the
+    IME-set leaf, which Pan Docs' chart calls "The CPU glitches
+    non-deterministically". DocBoy wants the same 8 T hold as with IME clear;
+    c-sp `speed-switch/caution/spsw-interrupts-cgbE` (hardware-checked on a
+    CPU CGB E, the same `EI; STOP` with a request pending) measures 4
+    (`SPEED_SWITCH_IRQ_LEAF_HOLD_T`, `spsw_irq_leaf_hold_short`), and SameBoy
+    (CGB E) fails these eight exactly as dingbat does. Proposed NotScored:
+    DocBoy's model of a leaf the spec calls non-deterministic, against a
+    hardware measurement.
+  * 12 PPU-phase rows of the IME-clear leaf: `stop_key1_joypad0_interrupt1_
+    ime0_ly_round2` (into double speed) and `double_speed_stop_key1_joypad0_
+    interrupt1_ime0_{ly,ly_b,stat,stat_scx*,serial_scx*}_round1` (into
+    single). After a leaf switch DocBoy has the PPU 3-4 dots ahead of dingbat
+    into double speed and 6-7 dots behind into single; SameBoy agrees on the
+    double-speed row and on the single-speed STAT reads but reads LY as
+    dingbat does, so its single-speed answer is not a uniform PPU shift
+    either. No mechanism found that gives both directions; open.
 * **I8. Other APU (146; 99 closed 2026-10-14).** Each closed against the test
   source, with SameBoy (black box, CGB E) as the second witness and probe
   ROMs run on both where the rows left a rule open:
@@ -1200,52 +1243,86 @@ question. Families, largest first:
   DocBoy model, scored but not chased. The rest are window and tile-data
   glitches (`window_wx0_scx*`, `change_wx_glitch_*`,
   `change_{bg,win}_tile_data_glitch_*`), which SameBoy also fails.
-* **I13. Rows with scripted input (23 of 71).** Through `--input`; 48 pass,
+* **I13. Rows with scripted input (23 of 71; 13 left).** Through `--input`; 58 pass,
   every joypad picture and `stop_joypad*`/`stop_key*` interrupt row among
   them. Red:
   * 2 `joypad_{buttons,dpad}_interrupt_release`: DocBoy raises the joypad
-    interrupt when the key is released; Pan Docs ("Joypad Input",
-    "INT $60") and dingbat raise it on the falling P10-P13 edge, a press
-    only. DocBoy's model against the spec: not chased.
+    interrupt when the key is released, and names switch bounce on release as
+    the cause (`stop_immediate_exit_joypad_interrupt`'s own comment). Pan
+    Docs ("Joypad Input", "INT $60") raises it on a P10-P13 high-to-low edge
+    and names bounce on the PRESS ("one or more High to Low transitions are
+    usually produced when pressing a button"), a mechanical effect with no
+    fixed count; DocBoy's `joypad_keep_pressed_interrupt` asserts exactly one
+    interrupt for a held press, so its model is bounce on release only, every
+    time. SameBoy (DMG B) fails both release rows. A deterministic release
+    interrupt would fire in every game on every key release; not modelled.
+    Proposed NotScored with `stop_immediate_exit_joypad_interrupt`.
   * 13 DMG rows that leave STOP with a key press and then read LY, STAT or
     TIMA, or check an interrupt (`ppu/interactive/stop_read_{ly,stat}*`,
     `stop_trigger_interrupt`, `timers/interactive/stop_read_tima_*`,
-    `dma_stop_during_transfer_timing_round2`): `$FFF0 = 2`, so the wake
-    happens but the PPU/timer phase after STOP disagrees. dingbat freezes
-    the whole clock in STOP (Pan Docs, "Using the STOP Instruction"); the
-    rows encode where DocBoy's DMG resumes. Open: needs the STOP wake's
-    phase on hardware.
+    `dma_stop_during_transfer_timing_round2`): `$FFF0 = 2`, the wake happens
+    but the phase after it disagrees. The TIMA and DMA rows closed
+    2026-10-14 with their CGB twins below: the two-byte STOP-mode STOP runs its
+    operand M-cycle, the whole machine ticking, before the clock stops, and resets DIV
+    at its end, where the switch leaf resets it too
+    (`STOP_MODE_OPERAND_MCYCLE`, memory.nim; the 262 kHz tap is low at the
+    fetch and high an M-cycle later, so only the later reset ticks TIMA, and
+    the OAM DMA gets its byte). SameBoy passes all eight TIMA rows. The 10
+    LY/STAT/interrupt rows: dingbat freezes the PPU through STOP (Pan Docs is
+    silent); DocBoy's rows need the PPU to have run exactly 2^17 + 4 dots
+    across the stop with the timer and DMA held -- `STOP_WAKE_PPU_DOTS =
+    131076` (cpu.nim, ships 0) takes all 15 DMG STOP rows and no neighbouring
+    value does -- which is an oscillator restart on the way out (the switch
+    HALT's 2^17), not a PPU running for as long as the key took, so a ROM
+    meant for a hand on a real key can encode it. SameBoy (DMG B) fails all
+    ten. Hardware question: tools/gbprobe/probe_l_stopwake.gb (MGB; press A
+    within a second each time, since Pan Docs warns a DMG left in STOP with
+    the LCD on can be damaged): six trials, `14 82 09 00 15` each is
+    dingbat's frozen PPU, `00 85 09 00 01` is DocBoy's 2^17 + 4, TIMA `89`
+    would be a timer that ran through the restart, and LY changing from
+    trial to trial a PPU that runs through the whole stop.
   * 6 CGB rows that wake and then read TIMA one count low
     (`timers/interactive/stop_read_tima_*`,
-    `double_speed/interactive/double_speed_stop_read_tima_*`; dingbat
-    reads $40/$41 where DocBoy wants $41/$42, the same one-count gap as the
-    DMG `stop_read_tima_*` above): the wake-phase question again. Until
-    2026-10-14 these and the three `hdma/interactive/*stop*` rows never
-    woke: dingbat handed a CGB cart P1 = $FF (no group selected), so a key
-    press pulled no P10-P13 line low and STOP (Pan Docs, "Using the STOP
-    Instruction") never ended. The select lines power up low, and the CGB
-    boot ROM writes P1 only in its DMG-cart palette key poll, so a CGB cart
-    gets $CF (Pan Docs, "Power Up Sequence"; the boot ROM run over a
-    CGB-flagged cart writes P1 nowhere; DocBoy's `cgb/boot/boot_regs_joypad`
-    and `cgb_dmg_mode/boot/boot_regs_joypad` split $CF/$FF the same way)
-    and a DMG cart keeps $FF (mooneye `misc/boot_hwio-C`). `skip_boot` in
-    `memory.nim`. The three HDMA rows pass; SameBoy CGB E with the CGB boot
-    ROM file passes all nine, and with its own boot ROM (which writes $FF)
-    hangs on the same nine.
+    `double_speed/interactive/double_speed_stop_read_tima_*`): closed
+    2026-10-14 by the same operand M-cycle (above). Until 2026-10-14 these
+    and the three `hdma/interactive/*stop*` rows never woke: dingbat handed a
+    CGB cart P1 = $FF (no group selected), so a key press pulled no P10-P13
+    line low and STOP (Pan Docs, "Using the STOP Instruction") never ended.
+    The select lines power up low, and the CGB boot ROM writes P1 only in its
+    DMG-cart palette key poll, so a CGB cart gets $CF (Pan Docs, "Power Up
+    Sequence"; the boot ROM run over a CGB-flagged cart writes P1 nowhere;
+    DocBoy's `cgb/boot/boot_regs_joypad` and `cgb_dmg_mode/boot/
+    boot_regs_joypad` split $CF/$FF the same way) and a DMG cart keeps $FF
+    (mooneye `misc/boot_hwio-C`). `skip_boot` in `memory.nim`. The three HDMA
+    rows pass; SameBoy CGB E with the CGB boot ROM file passes all nine, and
+    with its own boot ROM (which writes $FF) hangs on the same nine.
   * DMG `stop_immediate_exit_joypad_interrupt` (1): the key is held at the
     STOP with IE.4 set and nothing pending, so STOP is a HALT (Pan Docs'
     chart; dingbat takes it) and the ROM expects the release to end it
-    (DocBoy's switch-bounce model). Pan Docs raises the joypad interrupt
-    on a high-to-low edge only: the same model as the two `*_release` rows,
-    not chased. A second press wakes it (checked).
-  * `mbc3_rtc_gb_stopped_recover` (1): the RTC across a STOP.
-* **Small (40):** HuC3 commands (6, `$FFF0` never written; SameBoy passes 5
+    (DocBoy's switch-bounce model, its comment says so). Pan Docs raises the
+    joypad interrupt on a high-to-low edge only: the same model as the two
+    `*_release` rows, proposed NotScored with them. A second press wakes it
+    (checked).
+  * `mbc3_rtc_gb_stopped_recover` (1): the RTC across a STOP. Closed
+    2026-10-14: the cartridge clock runs on its own crystal (Pan Docs,
+    "MBC3": "an external 32.768 kHz Quartz Oscillator, and an external
+    battery"), so STOP mode moves its second on (`STOP_RTC_RUNS`, memory.nim).
+* **Small (40):** `cpu/halt_ime1_interrupt1_ret` closed 2026-10-14 (the HALT
+  opcode tests IF & IE with the running CPU's view, `HALT_PENDING_RUN_VIEW`:
+  a TIMA overflow on the HALT's own fetch is pending at it, as SameBoy also
+  has it). HuC3 commands (6, `$FFF0` never written; SameBoy passes 5
   of 6, dingbat's), DMG `dma_*_check_stat_*` (8, SameBoy passes all), MBC3
   RTC latch (3, SameBoy fails too), `write_tima_while_reloading_*` (2,
   SameBoy fails too), serial (3), DMG ppu `$FFF0` rows (3), six DMG
   STOP/HALT pictures whose reference is DocBoy's blank-panel colour
   (`$AD00`, Pan Docs' "whiter than color #0"), which dingbat draws as shade 0
-  or black.
+  or black. Those six, and the five CGB `ppu/visual/stop_*` rows in I12, are
+  also never compared: DocBoy's runner checks a picture at the next mode-1
+  M-cycle, and dingbat's PPU, frozen through an un-woken STOP or off, never
+  reaches one (the CGB pictures dingbat draws are Pan Docs' black). Passing
+  them needs a fifth DMG panel colour in the framebuffer (every frontend's
+  palette) and a runner rule for a stopped or blank panel: a scoring and UI
+  decision, not chased.
 
 ## Hardware experiments that would close buckets
 
