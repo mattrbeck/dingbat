@@ -6187,6 +6187,10 @@ sooner, by its own timing (§65).
 
 **Status: no core change.** `@known * checkpoint title:` is added to the
 script.
+**Later the same night:** classify now applies the pixel path's one-step
+rounding rule to text-judged screens before OCR runs. `title` reads MINOR
+against both references, so the `@known` is removed. Gunstar's panels and
+Klonoa 2's pause (§89) were the same case.
 
 ## §74. The checkpoints where all three emulators differ, 2026-10-14
 

@@ -70,6 +70,27 @@ class SlipOffset(unittest.TestCase):
                  compare='text', text='qx | zz')
         self.assertEqual(classify.classify(a, b)['verdict'], 'MAJOR')
 
+    def test_a_text_judged_screen_one_rounding_step_apart_is_minor(self):
+        # a blend one 5-bit step lower everywhere it differs: OCR reads the
+        # faded letters differently, the pixels say rounding (§73, §89)
+        import tempfile
+        import numpy as np
+        import img
+        d = tempfile.mkdtemp()
+        base = np.zeros((img.H, img.W, 3), np.uint8)
+        base[::2, :, :] = 0x80
+        lower = base.copy()
+        lower[:40, :, 0] = np.where(base[:40, :, 0] == 0x80, 0x78, base[:40, :, 0])
+        pa, pb = os.path.join(d, 'a.ppm'), os.path.join(d, 'b.ppm')
+        for path, rgb in ((pa, lower), (pb, base)):
+            with open(path, 'wb') as f:
+                f.write(b'P6\n%d %d\n255\n' % (img.W, img.H) + rgb.tobytes())
+        a = dict(side([f'a{k}' for k in range(61)]), compare='text', text='PUSH START', ppm=pa)
+        b = dict(side([f'b{k}' for k in range(61)]), compare='text', text='PU5H 5TAPT', ppm=pb)
+        r = classify.classify(a, b)
+        self.assertEqual(r['verdict'], 'MINOR')
+        self.assertIn('rounding', r['why'])
+
     def test_a_text_judged_screen_with_no_shared_frame_reads_its_text(self):
         a = dict(side([f'a{k}' for k in range(61)]), compare='text', text='ENGLISH | FRANCAIS')
         b = dict(side([f'b{k}' for k in range(61)]), compare='text', text='ENGLISH | FRANCAIS')

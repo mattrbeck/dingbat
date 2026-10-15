@@ -71,6 +71,17 @@ def classify(a, b):
     # blend differs at the centre shares its unblended frames (Aria of
     # Sorrow's Select Data, §72)
     if text:
+        # Pictures no more than one 5-bit step apart are the colour-effect
+        # rounding the pixel path calls MINOR below; OCR reads those steps
+        # as other letters (Koro Koro Puzzle's title, §73; Gunstar's panels,
+        # §89)
+        if a.get('ppm') and b.get('ppm'):
+            fa, fb = img.read_ppm(a['ppm']), img.read_ppm(b['ppm'])
+            m = img.compare(fa, fb)
+            if img.is_blank(fa) == img.is_blank(fb) and m['max_channel_delta'] <= 1:
+                m['verdict'] = 'MINOR'
+                m['why'] = 'one 5-bit step (colour-effect rounding)'
+                return m
         # OCR reads the same screen with small errors and in varying line
         # order: fuzzy-match the sorted lines
         la = sorted(screen.normalize(t) for t in a['text'].split(' | '))
