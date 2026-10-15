@@ -1152,10 +1152,44 @@ question. Families, largest first:
   SameBoy fails 3 of 6. DocBoy's pattern tables are its DMG's; contested
   (Pan Docs' formulas are the spec; the per-unit variation is a known open
   question).
-* **I6. DMG window glitches (120).** `window_retrigger_pixel_glitch_*` (about
-  60; SameBoy passes the sampled ones, probably dingbat) and
-  `window_turn_off_*` (43, 4 to 6 pixels at `ld b,b`; SameBoy also fails, a
-  DocBoy-only model).
+* **I6. DMG window glitches (49 of 120 left).** Closed 2026-10-14 (+71):
+  * `window_retrigger_pixel_glitch_*` (67) and `window_bg_reprise_wx{15,23}`:
+    each ROM turns the window off in the WY line's HBlank, so every later
+    line has WX matching with LCDC.5 low. Where the match is on a tile
+    boundary the reference draws a colour-0 pixel and the rest of the line
+    one pixel right: Pan Docs, "Window" ("a single pixel with ID 0 ... is
+    inserted; this offsets the remainder of the scanline"), the Star Trek
+    glitch. dingbat replaced the pixel; it now inserts it
+    (`WIN_EN_HOLD_ZERO = 2`, gb.nim). SameBoy (DMG B) passes all 279 of the
+    family. mealybug `m3_lcdc_win_en_change_multiple_wx`'s t = 8 / t = 32
+    pixels are identical under both (the window starts on the next pixel).
+  * `window_bg_reprise_wx{14,22}`: the background tile the fetcher resumes
+    with after LCDC.5 goes low (WIN_EN_ABORT) is the one under the pixel
+    right of the push position on the DMG (`WIN_ABORT_COL_LEAD = 1`, two-
+    sided over the 18 WX of the family; DocBoy's and SameBoy's CGB keep 0).
+  * Left: `window_turn_off_*` (43). LCDC.5 is cleared during the window's
+    first tile fetch on line 8, at 4-dot phases (an object's X shifts the
+    fetch, `nops21..25` the write). On 40 rows the write lands between the
+    window map read and its bitplane reads, and DocBoy's reference reads that
+    tile's data from the BACKGROUND's row, `(LY + SCY) and 7`, where dingbat
+    keeps the window row; SameBoy (DMG B) draws dingbat's frame pixel for
+    pixel on all 40. On the other 3 (`window_turn_off_nops22_sprite_x3_
+    variation_{a,b}`, `_alt_nops22_sprite_x3`: the write right after the WX
+    match) all three emulators differ, and SameBoy fails 17 further rows of
+    the family that dingbat and DocBoy pass. mealybug's hardware notes say
+    the disable "will take effect at the end of the current window tile",
+    i.e. that tile is drawn as a window tile. A DocBoy-only model with no
+    spec text: proposed for NotScored. The decider is one photo on the MGB:
+    `window_turn_off_nops22_sprite_x4`, line 8, x = 9..16 reads `32222222`
+    (shades; DocBoy) or `00000222` (dingbat, SameBoy).
+  * Left: `window_wx0_scx{1..6}` (6). WX = 0 with SCX & 7 = s: DocBoy and
+    SameBoy draw the window's 9-pixel black head as 9, 7, 6, 5, 4, 3, 2, 2
+    for s = 0..7; dingbat draws 9, 8, 7, 6, 5, 4, 3, 2, which is Pan Docs,
+    "Window" ("shifted left by SCX % 8 pixels"). mealybug
+    `m3_window_timing_wx_0` paints a uniform window, so it pins the first
+    pixel's dot, not which window pixel it is. Spec against two references:
+    a hardware question, not changed. The decider: these ROMs on the MGB,
+    the length of the black run at the left of line 0 for SCX = 1..6.
 * **I7. Speed-switch interrupt and STOP timing (79; 20 left).** Closed
   2026-10-14: all 49 `double_speed/interrupts/speed_switch_to_*` and
   `*_serial_halted_*` rows and 10 of the non-input `double_speed/interactive/
@@ -1387,11 +1421,11 @@ question. Families, largest first:
     2026-10-14: the cartridge clock runs on its own crystal (Pan Docs,
     "MBC3": "an external 32.768 kHz Quartz Oscillator, and an external
     battery"), so STOP mode moves its second on (`STOP_RTC_RUNS`, memory.nim).
-* **Small (40):** `cpu/halt_ime1_interrupt1_ret` closed 2026-10-14 (the HALT
+* **Small (30 of 40 left):** `cpu/halt_ime1_interrupt1_ret` closed 2026-10-14 (the HALT
   opcode tests IF & IE with the running CPU's view, `HALT_PENDING_RUN_VIEW`:
   a TIMA overflow on the HALT's own fetch is pending at it, as SameBoy also
   has it). HuC3 commands (6, `$FFF0` never written; SameBoy passes 5
-  of 6, dingbat's), DMG `dma_*_check_stat_*` (8, SameBoy passes all), MBC3
+  of 6, dingbat's), MBC3
   RTC latch (3: `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}` want only a $00 then
   $01 write to latch; CasualPokePlayer's `latch-rtc-test` hardware capture
   has ANY write latch, 51/51 against 28/51, mbc3.nim; SameBoy fails them too:
@@ -1407,7 +1441,7 @@ question. Families, largest first:
   through Nintendo's DMG boot ROM agrees; gambatte `serial/*` 82/82 either
   way, serial.nim. Left: the two-player `slave_sc_00` row wants a slave with
   SC = $00 to shift and interrupt, which Pan Docs does not cover), DMG ppu
-  `$FFF0` rows (3), six DMG
+  `$FFF0` rows (2 of 3 left, below), six DMG
   STOP/HALT pictures whose reference is DocBoy's blank-panel colour
   (`$AD00`, Pan Docs' "whiter than color #0"), which dingbat draws as shade 0
   or black. Those six, and the five CGB `ppu/visual/stop_*` rows in I12, are
@@ -1417,6 +1451,36 @@ question. Families, largest first:
   them needs a fifth DMG panel colour in the framebuffer (every frontend's
   palette) and a runner rule for a stopped or blank panel: a scoring and UI
   decision, not chased.
+  * Closed 2026-10-14: DMG `dma_*_check_stat_*` (8). The family's source:
+    "When DMA is running, STAT mode is 0 either in HBlank or in OAM scan.
+    This change shouldn't affect interrupts." A STAT read on the OAM scan
+    with an OAM DMA running reads mode 0, and mode 2 again on the M-cycle the
+    transfer ends (`..._finish_at_oam_scan_check_stat_round{1,2}`)
+    (`STAT_M2_DMA_READS_0`, ppu.nim). SameBoy passes all 25 of the family on
+    DMG B and on CGB E (the DMG carts in compatibility mode), so the rule is
+    not device-gated; Pan Docs is silent.
+  * Closed 2026-10-14: `ly_144_stat_clears_irq`. Mode-0 and LYC sources
+    enabled, LYC = 144, IF cleared in line 143's HBlank: line 144 must not
+    request STAT (IF = $E1), where the same set-up one line earlier
+    (`ly_143_stat_clears_irq`, LYC = 143) must ($E2). Entering vblank now
+    moves the mode after the comparator's blind window, as the call site
+    always said, so LYC takes the line over from mode 0 with no gap
+    (`VBLANK_ENTRY_MODE_AFTER`, ppu.nim). SameBoy passes both; gambatte is
+    unmoved on both devices.
+  * Left: `oam_write_block_timing`. The ROM writes OAM with `ld [hli], a`
+    four dots apart across line 1 (each iteration re-enables the LCD and
+    waits 114 + I M-cycles), and the reference has the first 24 writes
+    landing (dots 13..105: all of mode 2 and the start of mode 3), the same
+    table as `oam_write_block_ly0_timing` on line 0. dingbat blocks them
+    from mode 2's first dot. SameBoy passes it, yet SameBoy and DocBoy both
+    block a plain `ld [hl], a` at that point (`memory/oam_write_oam_scan`),
+    and SameBoy agrees with gambatte's DMG `oam_access/{pre,mid,post}write_*`
+    rows. The difference is the HL increment on an OAM address in mode 2:
+    an OAM-bug interaction, handed to that family (I5).
+  * Left: `oam_scan_blocked_by_idu_write_round2`: the IDU's address on the
+    OAM bus during the scan (an `inc hl` at `$FE40`) changes which object
+    the scan reads; round 1 passes, SameBoy fails round 2 too. OAM-bug
+    family (I5).
 
 ## Hardware experiments that would close buckets
 

@@ -353,13 +353,15 @@ proc unusable_index(gb: GB; idx: int): int {.inline.} =
   let a = if gb.quirks.unusable_region == urRamMasked: idx and not 0x18 else: idx
   a - 0xFEA0
 
-proc read_unusable(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
+proc read_unusable(mem: GbMemory; gb: GB; idx: int): uint8 {.noinline.} =
   ## `$FEA0..$FEFF`, one model per GbUnusableRegion member (Pan Docs, "FEA0-FEFF
-  ## range": "This area returns $FF when OAM is blocked, and otherwise the
-  ## behavior depends on the hardware revision"). Blocked is the OAM read lock
-  ## itself (cpu_oam_open), on every model: DocBoy's `not_usable_read_{oam_
-  ## scan,pixel_transfer}` read $FF on DMG, CGB and in compatibility mode. The
-  ## OAM-DMA case: mem_read_busy answers $FF for the whole page.
+  ## range"). Pan Docs: "This area returns $FF when OAM is blocked", the same
+  ## lock an OAM read asks (cpu_oam_open; DocBoy dmg/memory/not_usable_read_
+  ## {oam_scan,pixel_transfer} read $FF, _hblank/_vblank/_ppu_off $00). Only
+  ## the CPU reaches this: an OAM DMA source folds below $E000 or is open bus,
+  ## and an HDMA source here is illegal. The OAM-DMA case: mem_read_busy
+  ## answers $FF for the whole page. Out of line: read_byte is hot, this page
+  ## is not.
   if not cpu_oam_open(gb.ppu, is_write = false,
                       open_late = gb.quirks.oam_read_open_late,
                       ds = mem.current_speed != 0):

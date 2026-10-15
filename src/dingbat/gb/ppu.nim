@@ -922,6 +922,19 @@ const STAT_READ_M23_LEAD_DS* {.intdefine.} = 1
   ## the grid a speed-switch round trip leaves: gambatte `lcd_offset/
   ## offset1_lyc99int_m{2,3}stat_count_ds_2` read line cycle 453/77 as the
   ## new mode. 2 (mode 2 alone) loses sixteen `_ds_` rows.
+const STAT_M2_DMA_READS_0* {.intdefine.} = 1
+  ## Whether a STAT read reports mode 0 for the OAM scan while an OAM DMA
+  ## holds OAM (`dma_busy`, the same window the CPU's bus conflict uses; 1
+  ## ships). The scan itself and its interrupt are untouched (the PPU still
+  ## runs mode 2; Pan Docs, "OAM DMA Transfer": most revisions' scan reads
+  ## every object as off-screen). DocBoy `dmg/dma/dma_during_*_check_stat_*` (source: "When
+  ## DMA is running, STAT mode is 0 either in HBlank or in OAM scan. This
+  ## change shouldn't affect interrupts.") read $80 on the scan with the
+  ## transfer running and $82/$83 once it is over;
+  ## `dma_during_hblank_finish_at_oam_scan_check_stat_round{1,2}` put the
+  ## edge on the M-cycle the transfer ends. SameBoy passes all 25 of the
+  ## family on DMG B and, run as DMG carts, on CGB E; Pan Docs is silent.
+  ## 0 loses the eight scan rows and moves nothing else.
 proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   ## The mode bits a CPU read of STAT returns: the mode in effect STAT_READ_SAMPLE
   ## dots back from where the read's M-cycle leaves the dot counter. Kept as a
@@ -2077,14 +2090,32 @@ proc ly_advance_vblank*(ppu: GbPpu; gb: GB) {.noinline.} =
   ppu_handle_stat_interrupt(ppu, gb)
   ly_advance_close(ppu, gb, lyc_en)
 
+const VBLANK_ENTRY_MODE_AFTER* {.intdefine.} = 1
+  ## Whether entering vblank moves the mode (0 -> 1) after the comparator's
+  ## blind window closes (1, ships) rather than inside it (0), as the call
+  ## site in fifo_tick_slow says it should ("a rendered line's mode change
+  ## goes inside that window, entering vblank is outside it"). The difference
+  ## is a hand-over: with the mode-0 source enabled and LYC = 144, inside the
+  ## window the mode-0 source falls before the LYC source returns, a false
+  ## rising edge; after it, LYC takes the line over from mode 0 with no gap.
+  ## DocBoy `dmg/ppu/ly_144_stat_clears_irq` (STAT = $48, LYC = 144, IF
+  ## cleared in line 143's HBlank) reads IF = $E1 on line 144, no STAT
+  ## request, while `ly_143_stat_clears_irq` (the same on a rendered line,
+  ## LYC = 143) reads $E2; SameBoy (DMG B) passes both. gambatte `m1/`,
+  ## `lcdirq_precedence/`, `miscmstatirq/` are unmoved on both devices; no
+  ## CGB row tells the two apart.
 proc ly_advance_vblank_entry*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## Line 143 -> 144: entering vblank is not a line start, so the mode 1 source
-  ## and m2_line144's pulse arrive AFTER the comparator's drop. Only reachable
-  ## at LY_BLIND_SCOPE >= 2 (gb.nim), which does not ship.
+  ## and m2_line144's pulse arrive AFTER the comparator's window
+  ## (VBLANK_ENTRY_MODE_AFTER). Reached at LY_BLIND_SCOPE >= 2 (gb.nim).
   let lyc_en = ly_advance_open(ppu)
   ppu_handle_stat_interrupt(ppu, gb)
-  ppu.`mode_flag=`(1'u8, gb)
-  ly_advance_close(ppu, gb, lyc_en)
+  when VBLANK_ENTRY_MODE_AFTER != 0:
+    ly_advance_close(ppu, gb, lyc_en)
+    ppu.`mode_flag=`(1'u8, gb)
+  else:
+    ppu.`mode_flag=`(1'u8, gb)
+    ly_advance_close(ppu, gb, lyc_en)
 
 proc ppu_update_palette*(palette: var array[4, uint8]; val: uint8) =
   palette[0] = val and 0x3
@@ -2460,7 +2491,10 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   of 0xFF41:
     # The mode bits are sampled STAT_READ_SAMPLE dots back from where this
     # read's M-cycle leaves the dot counter; see stat_read_mode.
-    let rm = stat_read_mode(ppu, gb)
+    var rm = stat_read_mode(ppu, gb)
+    when STAT_M2_DMA_READS_0 != 0:
+      # The OAM scan reads as mode 0 while an OAM DMA holds OAM.
+      if rm == 2'u8 and gb.memory.dma_busy: rm = 0'u8
     when defined(gb_stat_read_trace):
       # Diagnostic (tools only). `latch` is the VRAM/OAM-lock latch, a different dot.
       echo "STATRD ly=", ppu.ly, " cc=", ppu.cycle_counter,

@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 22:45:03 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-14 22:53:29 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**7876/9227 passed.**
+**7956/9227 passed.**
 
 ## docboy/dmg/cpu (11/12 passed)
 
@@ -21,13 +21,12 @@ and docs/gb-failure-triage.md for the failing families.
 |------|--------|
 | dmg/docboy/cpu/interactive_visual/stop_immediate_exit_joypad_interrupt | timeout: $FFF0=$00 |
 
-## docboy/dmg/ppu (1164/1303 passed)
+## docboy/dmg/ppu (1236/1303 passed)
 
-1164/1303 tests passed on DMG dmgABC, 139 failed:
+1236/1303 tests passed on DMG dmgABC, 67 failed:
 
 | Test | Result |
 |------|--------|
-| dmg/docboy/ppu/ly_144_stat_clears_irq | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/ppu/oam_scan_blocked_by_idu_write_round2 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/ppu/oam_write_block_timing | $FFF0=$02 = fail value (tick 7600000) |
 | dmg/docboy/ppu/interactive/stop_read_ly_alt_alt_round1 | $FFF0=$02 = fail value (tick 100000) |
@@ -46,77 +45,6 @@ and docs/gb-failure-triage.md for the failing families.
 | dmg/docboy/ppu/visual/stop_during_pixel_transfer | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $1200 want $AD00 |
 | dmg/docboy/ppu/visual/stop_during_vblank | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $84A0 want $AD00 |
 | dmg/docboy/ppu/visual/stop_ppu_off | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $1200 want $AD00 |
-| dmg/docboy/ppu/visual/window_bg_reprise_wx14 | timeout, last check: 32/23040 pixels differ, first at row 12 col 30: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_bg_reprise_wx15 | timeout, last check: 219/23040 pixels differ, first at row 13 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_bg_reprise_wx22 | timeout, last check: 32/23040 pixels differ, first at row 12 col 30: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_bg_reprise_wx23 | timeout, last check: 210/23040 pixels differ, first at row 13 col 17: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx0_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx100_wx103 | timeout, last check: 259/23040 pixels differ, first at row 16 col 97: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx100_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx100_wx87 | timeout, last check: 340/23040 pixels differ, first at row 16 col 81: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx100_wx95 | timeout, last check: 292/23040 pixels differ, first at row 16 col 89: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx103_wx103 | timeout, last check: 259/23040 pixels differ, first at row 16 col 97: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx103_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx103_wx79_change_during_oam_scan | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx103_wx87 | timeout, last check: 340/23040 pixels differ, first at row 16 col 81: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx103_wx95 | timeout, last check: 292/23040 pixels differ, first at row 16 col 89: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx10_wx103 | timeout, last check: 259/23040 pixels differ, first at row 16 col 97: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx10_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx10_wx87 | timeout, last check: 340/23040 pixels differ, first at row 16 col 81: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx10_wx95 | timeout, last check: 292/23040 pixels differ, first at row 16 col 89: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx11_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx12_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx13_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx14_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx15_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx16_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx17_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx18_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx19_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx1_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx2_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx3_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx4_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx5_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx6_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx103 | timeout, last check: 259/23040 pixels differ, first at row 16 col 97: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_bgp | timeout, last check: 357/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_lcdc | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_lyc | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_obp0 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_obp1 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_scx8 | timeout, last check: 381/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_scy | timeout, last check: 327/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_wx71 | timeout, last check: 405/23040 pixels differ, first at row 16 col 65: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_wx71_during_hblank | timeout, last check: 405/23040 pixels differ, first at row 16 col 65: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_wx71_wx79_wx_87 | timeout, last check: 352/23040 pixels differ, first at row 16 col 65: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_wy | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_change_wy_ahead_during_oam_scan | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_color3 | timeout, last check: 357/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_disable_enable_bg | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_ly_not_equal_wy | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_more_lines | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_more_lines_b | timeout, last check: 327/23040 pixels differ, first at row 17 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_no_wx_trigger | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_postpone_wx_restore | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_wx135 | timeout, last check: 145/23040 pixels differ, first at row 16 col 129: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx79_wy12 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx87 | timeout, last check: 340/23040 pixels differ, first at row 16 col 81: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx8_wx95 | timeout, last check: 292/23040 pixels differ, first at row 16 col 89: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx9_wx103 | timeout, last check: 259/23040 pixels differ, first at row 16 col 97: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx9_wx79 | timeout, last check: 373/23040 pixels differ, first at row 16 col 73: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx9_wx87 | timeout, last check: 340/23040 pixels differ, first at row 16 col 81: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx0_wx9_wx95 | timeout, last check: 292/23040 pixels differ, first at row 16 col 89: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx10_wx102 | timeout, last check: 260/23040 pixels differ, first at row 16 col 96: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx10_wx86 | timeout, last check: 341/23040 pixels differ, first at row 16 col 80: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx10_wx94 | timeout, last check: 293/23040 pixels differ, first at row 16 col 88: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx8_wx102 | timeout, last check: 260/23040 pixels differ, first at row 16 col 96: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx8_wx86 | timeout, last check: 341/23040 pixels differ, first at row 16 col 80: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx8_wx94 | timeout, last check: 293/23040 pixels differ, first at row 16 col 88: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx9_wx102 | timeout, last check: 260/23040 pixels differ, first at row 16 col 96: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx9_wx86 | timeout, last check: 341/23040 pixels differ, first at row 16 col 80: got $1200 want $4B40 |
-| dmg/docboy/ppu/visual/window_retrigger_pixel_glitch_scx1_wx9_wx94 | timeout, last check: 293/23040 pixels differ, first at row 16 col 88: got $1200 want $4B40 |
 | dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x3 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 10: got $1200 want $84A0 |
 | dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x4 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
 | dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x5 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
@@ -410,20 +338,9 @@ All 29 tests passed (DMG dmgABC).
 
 All 158 tests passed (DMG dmgABC).
 
-## docboy/dmg/dma (60/68 passed)
+## docboy/dmg/dma
 
-60/68 tests passed on DMG dmgABC, 8 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/dma/dma_during_hblank_check_stat_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/dma/dma_during_hblank_check_stat_oam_scan_next | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/dma/dma_during_hblank_finish_at_oam_scan_check_stat_round1 | $FFF0=$02 = fail value (tick 100008) |
-| dmg/docboy/dma/dma_during_oam_scan_check_stat_immediate | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/dma/dma_during_oam_scan_check_stat_oam_scan_next | $FFF0=$02 = fail value (tick 100004) |
-| dmg/docboy/dma/dma_during_pixel_transfer_check_stat_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/dma/dma_during_vblank_last_line_check_stat_oam_scan | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/dma/dma_during_vblank_last_line_check_stat_oam_scan_next | $FFF0=$02 = fail value (tick 100000) |
+All 68 tests passed (DMG dmgABC).
 
 ## docboy/dmg/serial (76/77 passed)
 

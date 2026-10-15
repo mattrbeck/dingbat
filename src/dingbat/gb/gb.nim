@@ -1005,6 +1005,20 @@ const WIN_EN_ABORT*           {.intdefine.} = 1
   ## and `m3_lcdc_win_en_change_multiple{,_wx}` `_dmg_blob` references, plus
   ## gambatte `window/on_screen/weon_wx18_weoff_weon_wx80` and
   ## `wx17_weoff_wxA5_weon`. Rule and citation at the site in tick_bg_fetcher.
+const WIN_ABORT_COL_LEAD*     {.intdefine.} = 1
+  ## On the DMG, the background tile the fetcher resumes with after
+  ## WIN_EN_ABORT is the one under the pixel this many to the right of where
+  ## its push lands (the push still lands on the window's tile boundary;
+  ## mealybug: "the low 3 bits of SCX have no effect"). DocBoy
+  ## `dmg/ppu/visual/window_bg_reprise_wx*` disable the window on the WY line
+  ## at a fixed dot for WX = 8..25: the push lands at x = 23 for WX = 14 and 22
+  ## and the reference has map column 3 there, where 0 draws column 2; SameBoy
+  ## (DMG B) agrees, and its later abort at x = 31 takes column 4. Two-sided:
+  ## 0 loses `_wx14`, `_wx22`; 2 loses `_wx13`, `_wx21` (x = 30: column 3).
+  ## The CGB keeps 0: DocBoy's `cgb/` twins of the same two ROMs abort one
+  ## tile later (CGB_WE_DISABLE_LATE), push at x = 31 and want column 3, and
+  ## SameBoy (CGB E) passes them. mealybug `m3_lcdc_win_en_change_multiple*`,
+  ## `m2_win_en_toggle` and gambatte `window/` are unmoved by 0..2.
 const WIN_EN_HOLD*            {.intdefine.} = 2
   ## Dots a WX match that LCDC.5 refused stays live waiting for the bit (0 =
   ## dropped). mealybug `m3_lcdc_win_en_change_multiple_wx` walks a match one
@@ -1026,16 +1040,26 @@ const WIN_EN_HOLD_BACK*       {.intdefine.} = 1
   ## background. mealybug `m3_lcdc_win_en_change_multiple_wx`: t = 9 and t = 10
   ## both start at x = 10. The dot is spent at the serve, not the match:
   ## gambatte `window/late_reenable_scx2_2` [dmg] against `late_disable_scx2_0`.
-const WIN_EN_HOLD_ZERO*       {.intdefine.} = 1
-  ## Whether a refused match that lands on the fetcher's push dot puts one
-  ## colour-0 pixel on the front of the FIFO (1, ships) -- mealybug
-  ## `m3_lcdc_win_en_change_multiple_wx`'s t = 8 and t = 32, a single white
-  ## pixel with the background unshifted either side (replace, no stall).
+const WIN_EN_HOLD_ZERO*       {.intdefine.} = 2
+  ## What a refused match that lands on the fetcher's push dot does to the
+  ## line (0 = nothing, 1 = replaces the background pixel there with colour
+  ## 0, 2 = inserts a colour-0 pixel there; 2 ships). Pan Docs, "Window": "On
+  ## monochrome systems, if the Window is disabled via LCDC, but the other
+  ## conditions are met and it would have started rendering exactly on a BG
+  ## tile boundary, then where it would have started rendering, a single pixel
+  ## with ID 0 ... is inserted; this offsets the remainder of the scanline."
+  ## (the Star Trek 25th Anniversary glitch; nitro2k01's SGB logic-analyser
+  ## trace, SameBoy issue #278, has the rest of the line delayed). DocBoy
+  ## `dmg/ppu/visual/window_retrigger_pixel_glitch_*` (67 rows) and
+  ## `window_bg_reprise_wx{15,23}` disable the window after a WX change on
+  ## the WY line and read every later line shifted right by one from the tile
+  ## boundary at WX - 7; SameBoy (DMG B) draws the same frames. 1 loses all 69
+  ## and moves nothing else; mealybug `m3_lcdc_win_en_change_multiple_wx`'s
+  ## t = 8 / t = 32 white pixels are identical under 1 and 2 (the window
+  ## starts on the next pixel and overwrites the shifted background).
   ## Gated on `window_trigger` (a WY match seen with LCDC.5 set this frame):
   ## Pokemon Blue rests at WX = 7 / WY = 0 with the window off and draws no
-  ## white column. This is the Star Trek 25th Anniversary glitch (Pan Docs,
-  ## "Window"). Whether hardware inserts (delaying the line a dot) or replaces
-  ## is open: docs/hwprobe-questions.md.
+  ## white column.
 const CGB_WIN_EN_DEFER*       {.intdefine.} = 5
   ## Dots a CGB window start stays revocable: LCDC.5 going low inside them
   ## abandons the restart, restores the BG FIFO and fetcher to the match dot,

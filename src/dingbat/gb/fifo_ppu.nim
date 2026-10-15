@@ -834,12 +834,14 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       # LCDC.5 cleared while the window is the fetch source: the switch takes
       # effect at this, the next map read (mealybug PPU notes: "at the end of
       # the current window tile"); the BG column is taken from the screen
-      # position this fetch lands at and the fine scroll is not re-paid.
+      # position this fetch lands at and the fine scroll is not re-paid. On
+      # the DMG, the position one pixel right of it (WIN_ABORT_COL_LEAD).
       if ppu.fetching_window and not window_enabled(ppu) and
          (CGB_WE_DISABLE_LATE == 0 or not ppu.cgb or
           ppu.cycle_counter >= gb.we_off_dot):
         ppu.fetching_window = false
-        ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size)) div 8)
+        ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size) +
+                             (if ppu.cgb: 0'i32 else: int32(WIN_ABORT_COL_LEAD))) div 8)
         fifo_arm_window(ppu)
         when WIN_EN_HOLD > 0:
           # `lx` has not moved since the start this undoes; re-arming WX - 7
@@ -1371,8 +1373,18 @@ proc window_refuse_start(ppu: GbFifoPpu) =
       # window latch, or Pokemon Blue (WX = 7, window off) draws a white
       # column at x = 0. See WIN_EN_HOLD_ZERO.
       if ppu.fifo.size == 8 and ppu.window_trigger:
-        ppu.fifo.data[ppu.fifo.head] =
-          GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
+        when WIN_EN_HOLD_ZERO == 2:
+          # Inserted in front of the head, which is emitted on this dot: the
+          # zero lands on the match pixel and the tile behind it moves right
+          # by one, as window_reactivate's. Depth is 16; the FIFO holds 9.
+          let h = (ppu.fifo.head - 1) and 15
+          ppu.fifo.data[h] =
+            GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
+          ppu.fifo.head = h
+          inc ppu.fifo.size
+        else:
+          ppu.fifo.data[ppu.fifo.head] =
+            GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
     ppu.win_hold = hold
     ppu.win_lx = ppu.lx + 1
   else:
