@@ -211,9 +211,10 @@ prefetcher, bus, FIFO, LDM, serial and timer timing ROMs. They are scored in scr
 mode on the verdict line the framework draws ("All tests passed" / "Failed test NNN" at
 y = 76, read with the font from the repo's own `lib/glyphs.asm`: `read_verdict_text` in
 the runner), because the r12 protocol misreads the LDM and halt ROMs. Copies of jsmolka's
-ROMs and the three draw-only ROMs are skipped, and so is `unsafe/prefetcher_branch_thumb_arm_2`,
+ROMs and the three draw-only ROMs are skipped, and so are `unsafe/prefetcher_branch_thumb_arm_2`,
 which the suite's own `unsafe/README.md` says crashes on a console, so its expected values
-never came off one (NotScored). Many rows are red: they are the open GBA timing gaps, not
+never came off one, and `fifo_dma/fifo`, whose source marks its one failing check "gives
+unexpected results on hardware" (both NotScored). Many rows are red: they are the open GBA timing gaps, not
 harness faults.
 
 **PeterLemon BIOS, gba-rtc-test, Hades-Tests, SwpTestsGBA, AGBEEG** (screenshot mode,
@@ -450,7 +451,9 @@ Docheinstein/docboy-test-suite. The runner fetches the archive at `DocboyRev`
 `roms/*/docboy/` (~355 MB, ~10,000 ROMs). Only `docboy/` is DocBoy's own: the
 manifests also vendor other suites (725 entries), which are scored from
 upstream, and DocBoy disables 645 of its own entries; both are in the
-`NotScored` ledger.
+`NotScored` ledger. So are 97 of DocBoy's own rows whose expectation is not
+established hardware behaviour (`DocboyNotScored` in the runner: row-name
+globs, one ledger entry per family with its evidence).
 
 **Device.** DocBoy emulates one revision per family. CGB: the maintainer,
 docboy#42: "I'm supporting only CGB-E at the moment" (and the manifest's

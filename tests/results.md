@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 22:58:46 · commit 4f7da82d · game-boy-test-roms v7.0*
+*Generated: 2026-10-14 23:13:12 · commit 6b79b303 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
-- **Total:** 1586
-- **Pass:** 1549
-- **Fail:** 37
+- **Total:** 1585
+- **Pass:** 1556
+- **Fail:** 29
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -17,7 +17,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
-| [Game Boy - DocBoy](results_docboy.md) | 39 | 70 | 👀 |
+| [Game Boy - DocBoy](results_docboy.md) | 46 | 70 | 👀 |
 | [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
@@ -30,7 +30,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Screenshot suites | 21 | 21 | 👌 |
 | Game Boy - Shootout ROMs | 15 | 15 | 👌 |
 | [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
-| GBA - alyosha gba-tests | 123 | 125 | 👀 |
+| GBA - alyosha gba-tests | 123 | 124 | 👀 |
 | [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 5 | 8 | 👀 |
 | GBA - FuzzARM | 5 | 5 | 👌 |
 | GBA - hwverified (AGS-001) | 12 | 12 | 👌 |
@@ -40,29 +40,29 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
-## Game Boy - DocBoy (39/70)
+## Game Boy - DocBoy (46/70)
 
 | Test | Device | Result |
 |------|--------|--------|
-| docboy/dmg/cpu | DMG dmgABC | 👀 11/12 passed |
-| docboy/dmg/ppu | DMG dmgABC | 👀 1238/1303 passed |
+| docboy/dmg/cpu | DMG dmgABC | 👌 11/11 passed |
+| docboy/dmg/ppu | DMG dmgABC | 👀 1238/1260 passed |
 | docboy/dmg/mbc/mbc1 | DMG dmgABC | 👀 11/12 passed |
-| docboy/dmg/mbc/mbc3 | DMG dmgABC | 👀 18/21 passed |
+| docboy/dmg/mbc/mbc3 | DMG dmgABC | 👌 18/18 passed |
 | docboy/dmg/mbc/mbc5 | DMG dmgABC | 👌 1/1 passed |
 | docboy/dmg/mbc/huc3 | DMG dmgABC | 👀 2/8 passed |
-| docboy/dmg/boot | DMG dmgABC | 👀 21/23 passed |
+| docboy/dmg/boot | DMG dmgABC | 👌 21/21 passed |
 | docboy/dmg/memory | DMG dmgABC | 👌 23/23 passed |
-| docboy/dmg/oam_bug | DMG dmgABC | 👀 258/268 passed |
+| docboy/dmg/oam_bug | DMG dmgABC | 👌 258/258 passed |
 | docboy/dmg/stat_write_bug | DMG dmgABC | 👌 29/29 passed |
 | docboy/dmg/timers | DMG dmgABC | 👀 8/10 passed |
 | docboy/dmg/interrupts | DMG dmgABC | 👌 158/158 passed |
 | docboy/dmg/dma | DMG dmgABC | 👌 68/68 passed |
 | docboy/dmg/serial | DMG dmgABC | 👀 76/77 passed |
-| docboy/dmg/joypad | DMG dmgABC | 👀 32/34 passed |
+| docboy/dmg/joypad | DMG dmgABC | 👌 32/32 passed |
 | docboy/dmg/apu | DMG dmgABC | 👀 238/307 passed |
-| docboy/cgb/boot | CGB cgbE | 👀 48/69 passed |
+| docboy/cgb/boot | CGB cgbE | 👀 48/68 passed |
 | docboy/cgb/banks | CGB cgbE | 👌 2/2 passed |
-| docboy/cgb/memory | CGB cgbE | 👀 20/33 passed |
+| docboy/cgb/memory | CGB cgbE | 👌 20/20 passed |
 | docboy/cgb/oam_bug | CGB cgbE | 👌 5/5 passed |
 | docboy/cgb/stat_write_bug | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb/timers | CGB cgbE | 👌 2/2 passed |
@@ -86,20 +86,20 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/cgb/double_speed/core | CGB cgbE | 👌 8/8 passed |
 | docboy/cgb/double_speed/dma | CGB cgbE | 👌 14/14 passed |
 | docboy/cgb/double_speed/hdma | CGB cgbE | 👀 49/50 passed |
-| docboy/cgb/double_speed/interactive | CGB cgbE | 👀 55/75 passed |
+| docboy/cgb/double_speed/interactive | CGB cgbE | 👀 55/67 passed |
 | docboy/cgb/double_speed/interrupts | CGB cgbE | 👌 246/246 passed |
 | docboy/cgb/double_speed/ppu | CGB cgbE | 👀 355/357 passed |
 | docboy/cgb/double_speed/serial | CGB cgbE | 👌 4/4 passed |
 | docboy/cgb/double_speed/timers | CGB cgbE | 👌 76/76 passed |
 | docboy/cgb/double_speed/visual | CGB cgbE | 👌 5/5 passed |
 | docboy/cgb_dmg_mode/apu | CGB cgbE | 👌 2/2 passed |
-| docboy/cgb_dmg_mode/boot | CGB cgbE | 👀 16/19 passed |
+| docboy/cgb_dmg_mode/boot | CGB cgbE | 👀 16/18 passed |
 | docboy/cgb_dmg_mode/banks | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb_dmg_mode/hdma | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb_dmg_mode/ir | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb_dmg_mode/key0 | CGB cgbE | 👌 1/1 passed |
 | docboy/cgb_dmg_mode/key1 | CGB cgbE | 👌 1/1 passed |
-| docboy/cgb_dmg_mode/memory | CGB cgbE | 👀 2/15 passed |
+| docboy/cgb_dmg_mode/memory | CGB cgbE | 👌 2/2 passed |
 | docboy/cgb_dmg_mode/mode | CGB cgbE | 👌 6/6 passed |
 | docboy/cgb_dmg_mode/ppu | CGB cgbE | 👀 321/554 passed |
 | docboy/cgb_dmg_mode/serial | CGB cgbE | 👌 1/1 passed |
@@ -117,7 +117,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
-## GBA - alyosha gba-tests (123/125)
+## GBA - alyosha gba-tests (123/124)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -170,7 +170,6 @@ Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). Se
 | alyosha/Serial/serial_time_start_bit | — | 👌 |
 | alyosha/Serial/serial_time_start_bit_2 | — | 👌 |
 | alyosha/arm/Coprocessor_14 | — | 👌 |
-| alyosha/fifo_dma/fifo | — | 👀 Failed test 002 |
 | alyosha/fifo_dma/fifo_2 | — | 👌 |
 | alyosha/fifo_dma/fifo_3 | — | 👌 |
 | alyosha/fifo_dma/fifo_4 | — | 👌 |
@@ -304,4 +303,12 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **rtc3test upstream single ROM** — needs menu input to select a sub-test; the shootout's three pre-split builds are scored instead. (build_shootout_tests)
 - **DocBoy: 645 rows its own manifests disable** — `"enabled": false`, so DocBoy's runner never runs them and states no verdict for them: 640 `double_speed/apu/ch4` and 2 `double_speed/apu/ch3` CGB rows, `mbc/huc3/huc3_tick` ("takes a long time (1 real minute)") and two `cgb_dmg_mode` `m3_lcdc_win_en_change_multiple_wx_*_signed_addressing_source` rows ("glitch is different, probably uses another memory bus"). (build_docboy_rows)
 - **alyosha `unsafe/prefetcher_branch_thumb_arm_2`** — its expected values were never produced by a console: the suite's own unsafe/README.md says the ROM "crashes on console due to the prefetcher being misaligned when switching from thumb to arm mode", and the author moved it out of `prefetcher/` (whose `_arm`, `_arm_3` and `_arm_4` siblings are scored) for that reason. The check it fails is that switch: TM0 after the Thumb `bx r2` at 0x0800019E into ARM code at 0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E here. Its first check, the ARM-to-Thumb branch before it, reads the expected 0x3A. (build_alyosha_tests)
+- **alyosha `fifo_dma/fifo`** — its source marks the one check it fails, test 2 (FIFO stores while the master is off), "gives unexpected results on hardware". The shipped binary (the 2023-09-01 upload, never rebuilt) checks only that test's first TM1 read, 0x68: the value of an "every word of a fixed-source gamepak burst is nonsequential" rule its upload states and its author's next commit withdrew. On an AGB SP (tests/roms/payloads/fifoslot.s) a fixed source bursts as an incrementing one and the second refill comes right behind the first; dingbat reads 0x84. The test's own subject, stores with the master off being dropped, holds on the SP and here. `fifo_2`..`fifo_6` ARE scored. (build_alyosha_tests)
 - **DocBoy manifests: 725 vendored ROMs of other suites** — everything outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, firstwhite, rtc3test, cpp, zoomten, tepples). Those are scored from their upstream releases in the sections above, each by its own author's verdict; DocBoy's entries re-check them against DocBoy's own frame dumps, and 8 are DocBoy edits (`samesuite/apu/channel_1/*-cgbE`, expectations rewritten for CPU CGB E). (build_docboy_rows)
+- **DocBoy: the KEY1 switch's IME-set leaf (8)** — `{,double_speed_}stop_key1_joypad0_interrupt1_ime1_*_div_round1`: `EI; STOP` with a request pending, the leaf Pan Docs' STOP chart calls "The CPU glitches non-deterministically". DocBoy wants the divider held 8 T; c-sp `speed-switch/caution/spsw-interrupts-cgbE`, checked on a CPU CGB E, measures 4 for the same sequence (`spsw_irq_leaf_hold_short`), and SameBoy (CGB E) fails these eight as dingbat does. The IME-clear leaf beside it IS scored. (build_docboy_rows, DocboyNotScored)
+- **DocBoy: a joypad interrupt on key release (3)** — `joypad_{buttons,dpad}_interrupt_release` and `cpu/interactive_visual/stop_immediate_exit_joypad_interrupt` want the interrupt when the key is let go, from switch bounce (DocBoy's own comment), while its `joypad_keep_pressed_interrupt` wants exactly one for a press: a fixed bounce on every release only. Pan Docs ("INT $60") raises it on a high-to-low edge and describes bounce on a press as a mechanical effect, and gambatte's hardware note (test/hwtests/jpadirq.txt) has a real press bounce a varying number of times; a deterministic release model would change every game. SameBoy fails both release rows. (build_docboy_rows, DocboyNotScored)
+- **DocBoy: $FEA0-$FEFF as RAM on the CGB E (26)** — 13 rows in `cgb/memory` and 13 in `cgb_dmg_mode/memory` write the area outside modes 2/3 and read it back as RAM, `$FEC0-$FEFF` repeating 16 bytes (Pan Docs' description of CGB revisions 0-D). Pan Docs ("FEA0-FEFF range") has CGB E, AGB, AGS and GBP return the high nibble of the low address byte twice, and the AGS read exactly that under gbedge p0F (`$FEA0`..`$FEF8` = `AA AA BB BB .. FF FF`, `$FEA5` still `$AA` after writing `$5A`; docs/flashcart-runbook.md). SameBoy (CGB E, either boot ROM) fails all 26. The two read-while-blocked rows per manifest ($FF) ARE scored. (build_docboy_rows, DocboyNotScored)
+- **DocBoy: `boot_hram` (4)** — dmg (two), cgb, cgb_dmg_mode: every byte matches what running Nintendo's boot ROMs leaves (dingbat's skip-boot carries it) except `$FFFE`, which no boot ROM writes and DocBoy fixes ("hardcoded ... even before boot rom"); Pan Docs ("Power Up Sequence") has power-up HRAM random. SameBoy fails all four even through the real boot ROMs. (build_docboy_rows, DocboyNotScored)
+- **DocBoy: MBC3 RTC latch on a $00-then-$01 pair only (3)** — `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}` want no latch unless $00 is followed by $01; CasualPokePlayer's `latch-rtc-test` hardware capture has ANY write to `$6000-$7FFF` latch (51/51 of its cells under that rule, 23/51 under a bit-0 edge rule; mbc3.nim), and SameBoy fails these three as well. (build_docboy_rows, DocboyNotScored)
+- **DocBoy: the window tile under a mid-fetch LCDC.5 clear (43)** — `dmg/ppu/visual/window_turn_off_*`: LCDC.5 cleared during the window's first tile fetch. On 40 rows the write lands between the window map read and its bitplane reads and DocBoy draws that tile from the BACKGROUND's row; mealybug's hardware notes have the disable "take effect at the end of the current window tile", and SameBoy (DMG B) draws dingbat's frame pixel for pixel on all 40; on the other 3 all three emulators differ. Hardware check pending: `window_turn_off_nops22_sprite_x4` on an MGB, line 8, x = 9..16 (docs/gb-failure-triage.md I6). The window retrigger and resume rows ARE scored. (build_docboy_rows, DocboyNotScored)
+- **DocBoy: single-unit OAM-bug margins (10)** — `oam_bug_ld_{hl,hli}_a_round3_{fe5c,fe5e_noisy,fe5f}` and `_round23_{fe46,fe47}`: in these truth tables of DocBoy's DMG the written bit as it lands in row 0 depends on row 0's old bits, or a word-3 write also rewrites word 2's low byte, where the sibling tables in the same position on other byte lanes (`fe58`..`fe5b`, `fe5d`) give the written bit, the maintainer marks `fe5b`/`fe5d`/`fe5e` noisy (hardware runs that did not repeat), and SameBoy gives the written bit on all ten. The other 258 rows of the family ARE scored. Hardware check pending: the ten on an MGB (docs/gb-failure-triage.md I5). (build_docboy_rows, DocboyNotScored)

@@ -1570,13 +1570,14 @@ proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
   ## ROMs). Left out: byte-identical copies of jsmolka's ROMs (scored there,
   ## and the fork's copies of alyosha's), and the three that only draw
   ## (`Sprite_Disable_Midline`, `Sprite_Disable_on_VRAM_Access`,
-  ## `stripes_x_offset`), which ship no reference, and the one ROM whose
-  ## verdict the console never reaches (CrashesOnConsole; NotScored). The
+  ## `stripes_x_offset`), which ship no reference, and the ROMs whose
+  ## expected values no console produced (NoHardwareVerdict; NotScored). The
   ## verdict is on screen within 30 frames; 600 is margin. Runs with HLE BIOS
   ## unless --bios: six halt/IRQ rows read differently on the real BIOS.
   const DrawOnly = ["Sprite_Disable_Midline", "Sprite_Disable_on_VRAM_Access",
                     "stripes_x_offset"]
-  const CrashesOnConsole = ["unsafe/prefetcher_branch_thumb_arm_2"]
+  const NoHardwareVerdict = ["unsafe/prefetcher_branch_thumb_arm_2",
+                             "fifo_dma/fifo"]
   var seen: seq[string]
   for rom in walkDirRec(jsmolka):
     if rom.endsWith(".gba"): seen.add($secureHashFile(rom))
@@ -1590,7 +1591,7 @@ proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
       let h = $secureHashFile(rom)
       if h in seen or rom.splitFile().name in DrawOnly: continue
       seen.add(h)   # the fork's copy of a skipped ROM is skipped with it
-      if rom.relativePath(root).changeFileExt("") in CrashesOnConsole: continue
+      if rom.relativePath(root).changeFileExt("") in NoHardwareVerdict: continue
       result.add(TestDef(
         name: label & "/" & rom.relativePath(root).changeFileExt(""),
         rom_path: rom,
@@ -2021,6 +2022,17 @@ const NotScored: seq[(string, string)] = @[
     "0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E " &
     "here. Its first check, the ARM-to-Thumb branch before it, reads the " &
     "expected 0x3A. (build_alyosha_tests)"),
+  ("alyosha `fifo_dma/fifo`", "its source marks the one check it fails, test " &
+    "2 (FIFO stores while the master is off), \"gives unexpected results on " &
+    "hardware\". The shipped binary (the 2023-09-01 upload, never rebuilt) " &
+    "checks only that test's first TM1 read, 0x68: the value of an \"every " &
+    "word of a fixed-source gamepak burst is nonsequential\" rule its upload " &
+    "states and its author's next commit withdrew. On an AGB SP " &
+    "(tests/roms/payloads/fifoslot.s) a fixed source bursts as an incrementing " &
+    "one and the second refill comes right behind the first; dingbat reads " &
+    "0x84. The test's own subject, stores with the master off being dropped, " &
+    "holds on the SP and here. `fifo_2`..`fifo_6` ARE scored. " &
+    "(build_alyosha_tests)"),
   ("DocBoy manifests: 725 vendored ROMs of other suites", "everything " &
     "outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, " &
     "mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, " &
@@ -2029,6 +2041,65 @@ const NotScored: seq[(string, string)] = @[
     "author's verdict; DocBoy's entries re-check them against DocBoy's own " &
     "frame dumps, and 8 are DocBoy edits (`samesuite/apu/channel_1/*-cgbE`, " &
     "expectations rewritten for CPU CGB E). (build_docboy_rows)"),
+  ("DocBoy: the KEY1 switch's IME-set leaf (8)", "`{,double_speed_}" &
+    "stop_key1_joypad0_interrupt1_ime1_*_div_round1`: `EI; STOP` with a " &
+    "request pending, the leaf Pan Docs' STOP chart calls \"The CPU glitches " &
+    "non-deterministically\". DocBoy wants the divider held 8 T; c-sp " &
+    "`speed-switch/caution/spsw-interrupts-cgbE`, checked on a CPU CGB E, " &
+    "measures 4 for the same sequence (`spsw_irq_leaf_hold_short`), and " &
+    "SameBoy (CGB E) fails these eight as dingbat does. The IME-clear leaf " &
+    "beside it IS scored. (build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: a joypad interrupt on key release (3)", "`joypad_{buttons,dpad}_" &
+    "interrupt_release` and `cpu/interactive_visual/stop_immediate_exit_" &
+    "joypad_interrupt` want the interrupt when the key is let go, from switch " &
+    "bounce (DocBoy's own comment), while its `joypad_keep_pressed_interrupt` " &
+    "wants exactly one for a press: a fixed bounce on every release only. Pan " &
+    "Docs (\"INT $60\") raises it on a high-to-low edge and describes bounce on " &
+    "a press as a mechanical effect, and gambatte's hardware note " &
+    "(test/hwtests/jpadirq.txt) has a real press bounce a varying number of " &
+    "times; a deterministic release model would change every game. SameBoy " &
+    "fails both release rows. (build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: $FEA0-$FEFF as RAM on the CGB E (26)", "13 rows in `cgb/memory` " &
+    "and 13 in `cgb_dmg_mode/memory` write the area outside modes 2/3 and read " &
+    "it back as RAM, `$FEC0-$FEFF` repeating 16 bytes (Pan Docs' description " &
+    "of CGB revisions 0-D). Pan Docs (\"FEA0-FEFF range\") has CGB E, AGB, AGS " &
+    "and GBP return the high nibble of the low address byte twice, and the AGS " &
+    "read exactly that under gbedge p0F (`$FEA0`..`$FEF8` = `AA AA BB BB .. FF " &
+    "FF`, `$FEA5` still `$AA` after writing `$5A`; docs/flashcart-runbook.md). " &
+    "SameBoy (CGB E, either boot ROM) fails all 26. The two read-while-blocked " &
+    "rows per manifest ($FF) ARE scored. (build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: `boot_hram` (4)", "dmg (two), cgb, cgb_dmg_mode: every byte " &
+    "matches what running Nintendo's boot ROMs leaves (dingbat's skip-boot " &
+    "carries it) except `$FFFE`, which no boot ROM writes and DocBoy fixes " &
+    "(\"hardcoded ... even before boot rom\"); Pan Docs (\"Power Up Sequence\") " &
+    "has power-up HRAM random. SameBoy fails all four even through the real " &
+    "boot ROMs. (build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: MBC3 RTC latch on a $00-then-$01 pair only (3)", "`mbc3_rtc_" &
+    "latch_{0_to_2,1_to_0,1_to_1}` want no latch unless $00 is followed by $01; " &
+    "CasualPokePlayer's `latch-rtc-test` hardware capture has ANY write to " &
+    "`$6000-$7FFF` latch (51/51 of its cells under that rule, 23/51 under a " &
+    "bit-0 edge rule; mbc3.nim), and SameBoy fails these three as well. " &
+    "(build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: the window tile under a mid-fetch LCDC.5 clear (43)",
+    "`dmg/ppu/visual/window_turn_off_*`: LCDC.5 cleared during the window's " &
+    "first tile fetch. On 40 rows the write lands between the window map read " &
+    "and its bitplane reads and DocBoy draws that tile from the BACKGROUND's " &
+    "row; mealybug's hardware notes have the disable \"take effect at the end " &
+    "of the current window tile\", and SameBoy (DMG B) draws dingbat's frame " &
+    "pixel for pixel on all 40; on the other 3 all three emulators differ. " &
+    "Hardware check pending: `window_turn_off_nops22_sprite_x4` on an MGB, " &
+    "line 8, x = 9..16 (docs/gb-failure-triage.md I6). The window retrigger " &
+    "and resume rows ARE scored. (build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: single-unit OAM-bug margins (10)", "`oam_bug_ld_{hl,hli}_a_" &
+    "round3_{fe5c,fe5e_noisy,fe5f}` and `_round23_{fe46,fe47}`: in these " &
+    "truth tables of DocBoy's DMG the written bit as it lands in row 0 " &
+    "depends on row 0's old bits, or a word-3 write also rewrites word 2's " &
+    "low byte, where the sibling tables in the same position on other byte " &
+    "lanes (`fe58`..`fe5b`, `fe5d`) give the written bit, the maintainer marks " &
+    "`fe5b`/`fe5d`/`fe5e` noisy (hardware runs that did not repeat), and " &
+    "SameBoy gives the written bit on all ten. The other 258 rows of the " &
+    "family ARE scored. Hardware check pending: the ten on an MGB " &
+    "(docs/gb-failure-triage.md I5). (build_docboy_rows, DocboyNotScored)"),
 ]
 
 proc provenance_line(): string =
@@ -3142,7 +3213,110 @@ type
     failures: seq[(string, string)]
 
   DocboySkips = object
-    disabled, vendored: int
+    disabled, vendored, not_scored: int
+
+const DocboyNotScored: seq[string] = @[
+  # Row-name globs (`*` = any run of characters) of DocBoy rows whose
+  # expectation is not established hardware behaviour. Each family is one
+  # "DocBoy: ..." entry in NotScored, which gives the evidence.
+  # The KEY1 switch's IME-set leaf (8).
+  "cgb/docboy/double_speed/interactive/*stop_key1_joypad0_interrupt1_ime1_*_div_round1",
+  # A joypad interrupt on key release (3).
+  "dmg/docboy/joypad/interactive/joypad_*_interrupt_release",
+  "dmg/docboy/cpu/interactive_visual/stop_immediate_exit_joypad_interrupt",
+  # $FEA0-$FEFF as RAM on a CPU CGB E (26).
+  "cgb/docboy/memory/not_usable_area_write*",
+  "cgb/docboy/memory/not_usable_read_hblank",
+  "cgb/docboy/memory/not_usable_read_ppu_off",
+  "cgb/docboy/memory/not_usable_read_vblank",
+  "cgb/docboy/memory/not_usable_write_*",
+  "cgb_dmg_mode/docboy/memory/not_usable_area_write*",
+  "cgb_dmg_mode/docboy/memory/not_usable_read_hblank",
+  "cgb_dmg_mode/docboy/memory/not_usable_read_ppu_off",
+  "cgb_dmg_mode/docboy/memory/not_usable_read_vblank",
+  "cgb_dmg_mode/docboy/memory/not_usable_write_*",
+  # $FFFE after the boot ROM (4).
+  "*/docboy/boot/boot_hram*",   # the dmg manifest lists it twice (`#2`)
+  # MBC3 RTC latch on a $00-then-$01 pair only (3).
+  "dmg/docboy/mbc/mbc3/mbc3_rtc_latch_0_to_2",
+  "dmg/docboy/mbc/mbc3/mbc3_rtc_latch_1_to_0",
+  "dmg/docboy/mbc/mbc3/mbc3_rtc_latch_1_to_1",
+  # The window's first tile when LCDC.5 clears mid-fetch (43 of the
+  # 107 `window_turn_off_*` rows; the other 64 pass and stay scored).
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x3",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x4",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x5",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x6",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x7",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x0",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x1",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x2",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x3",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x2",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x3",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x4",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x5",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x6",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x7",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops25_sprite_x0",
+  "dmg/docboy/ppu/visual/window_turn_off_alt_nops25_sprite_x1",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x3_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x3_variation_b",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4_variation_b",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5_variation_b",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6_variation_b",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7_variation_b",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0_variation_b",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1_variation_b",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2_variation_b",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3_variation_a",
+  "dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3_variation_b",
+  # Single-unit OAM-bug margins (10).
+  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5c",
+  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5e_noisy",
+  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5f",
+  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5c",
+  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5e_noisy",
+  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5f",
+  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe46",
+  "dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe47",
+  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe46",
+  "dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe47",
+]
+
+proc docboy_glob(pat, s: string): bool =
+  ## `*` matches any run of characters, everything else itself.
+  var p, i = 0
+  var star, mark = -1
+  while i < s.len:
+    if p < pat.len and pat[p] != '*' and pat[p] == s[i]:
+      inc p; inc i
+    elif p < pat.len and pat[p] == '*':
+      star = p; mark = i; inc p
+    elif star >= 0:
+      p = star + 1; inc mark; i = mark
+    else: return false
+  while p < pat.len and pat[p] == '*': inc p
+  p == pat.len
+
+proc docboy_not_scored(name: string): bool =
+  for pat in DocboyNotScored:
+    if docboy_glob(pat, name): return true
 
 proc docboy_opcode(n: JsonNode): int =
   ## runtests.cpp parse_instruction: an opcode number or a mnemonic. DocBoy's
@@ -3218,6 +3392,9 @@ proc build_docboy_rows(tests: string; skips: var DocboySkips): seq[DocboyRow] =
         if row.kind == "fb2": name.add(" + " & t["rom2"].getStr.extractFilename.changeFileExt(""))
         seen.inc(name)
         if seen[name] > 1: name.add(" #" & $seen[name])
+        if docboy_not_scored(name):
+          inc skips.not_scored
+          continue
         row.name = name
         result.add(row)
 
@@ -3229,7 +3406,8 @@ proc run_docboy_suite(harness: string; previous: Table[string, bool];
   var skips: DocboySkips
   let rows = build_docboy_rows(ensure_docboy_tests(), skips)
   echo &"  {rows.len} rows; not scored: {skips.disabled} disabled upstream, " &
-       &"{skips.vendored} vendored from other suites"
+       &"{skips.vendored} vendored from other suites, " &
+       &"{skips.not_scored} DocboyNotScored"
   var list_lines: seq[string]
   for r in rows:
     list_lines.add([r.dev, r.kind, $r.instr, r.expected, r.rom, r.rom2,

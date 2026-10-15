@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,119 / 9,227 at `DocboyRev`, every
+(`tests/README.md`, "The DocBoy suite"): 8,119 / 9,130 at `DocboyRev` (97 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1182,7 +1182,8 @@ question. Families, largest first:
   `fifo_oam_bus_taken`). Its `cpu_write` twin needs the same rule now that a
   plain write corrupts: the object one row up is hidden, its corruption copy
   is found. SameBoy fails both `round2` rows.
-  Left, proposed NotScored (10), each a single unit's margin that SameBoy
+  Left, NotScored since 2026-10-14 (10; `DocboyNotScored` in the runner),
+  each a single unit's margin that SameBoy
   does not reproduce and no sibling row shows:
   `ld_{hl,hli}_a_round3_fe5c`, `_fe5e_noisy`, `_fe5f`: the written bit as it
   lands in row 0 depends on row 0's old bits on DocBoy's DMG (`fe5f`: v | old;
@@ -1220,7 +1221,8 @@ question. Families, largest first:
     the family that dingbat and DocBoy pass. mealybug's hardware notes say
     the disable "will take effect at the end of the current window tile",
     i.e. that tile is drawn as a window tile. A DocBoy-only model with no
-    spec text: proposed for NotScored. The decider is one photo on the MGB:
+    spec text: NotScored since 2026-10-14 (`DocboyNotScored`). The decider
+    is one photo on the MGB:
     `window_turn_off_nops22_sprite_x4`, line 8, x = 9..16 reads `32222222`
     (shades; DocBoy) or `00000222` (dingbat, SameBoy).
   * Left: `window_wx0_scx{1..6}` (6). WX = 0 with SCX & 7 = s: DocBoy and
@@ -1271,7 +1273,8 @@ question. Families, largest first:
     c-sp `speed-switch/caution/spsw-interrupts-cgbE` (hardware-checked on a
     CPU CGB E, the same `EI; STOP` with a request pending) measures 4
     (`SPEED_SWITCH_IRQ_LEAF_HOLD_T`, `spsw_irq_leaf_hold_short`), and SameBoy
-    (CGB E) fails these eight exactly as dingbat does. Proposed NotScored:
+    (CGB E) fails these eight exactly as dingbat does. NotScored since
+    2026-10-14 (`DocboyNotScored`):
     DocBoy's model of a leaf the spec calls non-deterministic, against a
     hardware measurement.
   * 12 PPU-phase rows of the IME-clear leaf: `stop_key1_joypad0_interrupt1_
@@ -1367,7 +1370,7 @@ question. Families, largest first:
   carried, as for I3's 63 palette rows. The four `boot_hram` rows match in
   every byte but `$FFFE`, which no boot ROM writes (DocBoy: "hardcoded to C0"
   / "4C" "even before boot rom"); Pan Docs ("Power Up Sequence") has power-up
-  HRAM random and SameBoy fails them too: a NotScored candidate.
+  HRAM random and SameBoy fails them too: NotScored since 2026-10-14.
   `cgb/boot/boot_regs_joypad` (P1 = $CF with a CGB cart) closed with I13's P1
   hand-off.
 * **I10. `$FEA0-$FEFF` (26 left of 32).** Closed 2026-10-14: a read while OAM
@@ -1379,7 +1382,8 @@ question. Families, largest first:
   the high nibble of the low address byte twice: `urNibbleEcho`), and the
   AGS read exactly that under gbedge p0F, `$FEA0`..`$FEF8` = `AA AA BB BB ..
   FF FF` and `$FEA5` still `$AA` after a `$5A` write (docs/flashcart-runbook.md);
-  SameBoy (CGB E, either boot ROM) fails all 26. A NotScored candidate; a
+  SameBoy (CGB E, either boot ROM) fails all 26. NotScored since 2026-10-14
+  (`DocboyNotScored`); a
   CGB E unit would settle the one open point, whether CGB E really groups
   with the AGB here.
 * **I11. CGB header modes (15).** Closed 2026-10-14: `mode_cgb_flag_{81,82,83,90}`
@@ -1421,7 +1425,7 @@ question. Families, largest first:
     interrupt for a held press, so its model is bounce on release only, every
     time. SameBoy (DMG B) fails both release rows. A deterministic release
     interrupt would fire in every game on every key release; not modelled.
-    Proposed NotScored with `stop_immediate_exit_joypad_interrupt`.
+    NotScored since 2026-10-14 with `stop_immediate_exit_joypad_interrupt`.
   * 13 DMG rows that leave STOP with a key press and then read LY, STAT or
     TIMA, or check an interrupt (`ppu/interactive/stop_read_{ly,stat}*`,
     `stop_trigger_interrupt`, `timers/interactive/stop_read_tima_*`,
@@ -1466,7 +1470,7 @@ question. Families, largest first:
     chart; dingbat takes it) and the ROM expects the release to end it
     (DocBoy's switch-bounce model, its comment says so). Pan Docs raises the
     joypad interrupt on a high-to-low edge only: the same model as the two
-    `*_release` rows, proposed NotScored with them. A second press wakes it
+    `*_release` rows, NotScored with them since 2026-10-14. A second press wakes it
     (checked).
   * `mbc3_rtc_gb_stopped_recover` (1): the RTC across a STOP. Closed
     2026-10-14: the cartridge clock runs on its own crystal (Pan Docs,
@@ -1480,7 +1484,7 @@ question. Families, largest first:
   RTC latch (3: `mbc3_rtc_latch_{0_to_2,1_to_0,1_to_1}` want only a $00 then
   $01 write to latch; CasualPokePlayer's `latch-rtc-test` hardware capture
   has ANY write latch, 51/51 against 28/51, mbc3.nim; SameBoy fails them too:
-  a NotScored candidate), `mbc1_initial_ram` (1: cart RAM read back as $FF
+  NotScored since 2026-10-14), `mbc1_initial_ram` (1: cart RAM read back as $FF
   before any write; Pan Docs is silent, SRAM powers up with whatever it
   holds; SameBoy passes it, dingbat starts a fresh cart at $00),
   `write_tima_while_reloading_*` (2, SameBoy fails too), serial (1 of 3; closed

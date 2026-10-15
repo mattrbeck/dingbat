@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 22:58:46 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-14 23:13:12 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,19 +11,15 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**8119/9227 passed.**
+**8119/9130 passed.**
 
-## docboy/dmg/cpu (11/12 passed)
+## docboy/dmg/cpu
 
-11/12 tests passed on DMG dmgABC, 1 failed:
+All 11 tests passed (DMG dmgABC).
 
-| Test | Result |
-|------|--------|
-| dmg/docboy/cpu/interactive_visual/stop_immediate_exit_joypad_interrupt | timeout: $FFF0=$00 |
+## docboy/dmg/ppu (1238/1260 passed)
 
-## docboy/dmg/ppu (1238/1303 passed)
-
-1238/1303 tests passed on DMG dmgABC, 65 failed:
+1238/1260 tests passed on DMG dmgABC, 22 failed:
 
 | Test | Result |
 |------|--------|
@@ -43,49 +39,6 @@ and docs/gb-failure-triage.md for the failing families.
 | dmg/docboy/ppu/visual/stop_during_pixel_transfer | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $1200 want $AD00 |
 | dmg/docboy/ppu/visual/stop_during_vblank | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $84A0 want $AD00 |
 | dmg/docboy/ppu/visual/stop_ppu_off | timeout, last check: 23040/23040 pixels differ, first at row 0 col 0: got $1200 want $AD00 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x3 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 10: got $1200 want $84A0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x4 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x5 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x6 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops22_sprite_x7 | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x0 | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x1 | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x2 | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops23_sprite_x3 | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x2 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x3 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x4 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x5 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x6 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops24_sprite_x7 | 4/23040 pixels differ at opcode $40 (tick 521876), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops25_sprite_x0 | 4/23040 pixels differ at opcode $40 (tick 521880), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_alt_nops25_sprite_x1 | 4/23040 pixels differ at opcode $40 (tick 521880), first at row 9 col 19: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x3_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 10: got $1200 want $84A0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x3_variation_b | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 10: got $1200 want $84A0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4 | 5/23040 pixels differ at opcode $40 (tick 521892), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x4_variation_b | 6/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5 | 5/23040 pixels differ at opcode $40 (tick 521892), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x5_variation_b | 6/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6 | 5/23040 pixels differ at opcode $40 (tick 521892), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x6_variation_b | 6/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7 | 5/23040 pixels differ at opcode $40 (tick 521892), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7_variation_a | 4/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops22_sprite_x7_variation_b | 6/23040 pixels differ at opcode $40 (tick 521868), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0 | 5/23040 pixels differ at opcode $40 (tick 521864), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0_variation_a | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x0_variation_b | 6/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1 | 5/23040 pixels differ at opcode $40 (tick 521864), first at row 8 col 9: got $84A0 want $1200 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1_variation_a | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x1_variation_b | 6/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2 | 5/23040 pixels differ at opcode $40 (tick 521864), first at row 8 col 9: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2_variation_a | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x2_variation_b | 6/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3 | 5/23040 pixels differ at opcode $40 (tick 521864), first at row 8 col 9: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3_variation_a | 4/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
-| dmg/docboy/ppu/visual/window_turn_off_nops23_sprite_x3_variation_b | 6/23040 pixels differ at opcode $40 (tick 521872), first at row 9 col 11: got $84A0 want $2AA0 |
 | dmg/docboy/ppu/visual/window_wx0_scx1 | timeout, last check: 8/23040 pixels differ, first at row 0 col 7: got $1200 want $84A0 |
 | dmg/docboy/ppu/visual/window_wx0_scx2 | timeout, last check: 8/23040 pixels differ, first at row 0 col 6: got $1200 want $84A0 |
 | dmg/docboy/ppu/visual/window_wx0_scx3 | timeout, last check: 8/23040 pixels differ, first at row 0 col 5: got $1200 want $84A0 |
@@ -101,15 +54,9 @@ and docs/gb-failure-triage.md for the failing families.
 |------|--------|
 | dmg/docboy/mbc/mbc1/mbc1_initial_ram | $FFF0=$02 = fail value (tick 100004) |
 
-## docboy/dmg/mbc/mbc3 (18/21 passed)
+## docboy/dmg/mbc/mbc3
 
-18/21 tests passed on DMG dmgABC, 3 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/mbc/mbc3/mbc3_rtc_latch_0_to_2 | $FFF0=$02 = fail value (tick 9900004) |
-| dmg/docboy/mbc/mbc3/mbc3_rtc_latch_1_to_0 | $FFF0=$02 = fail value (tick 9900000) |
-| dmg/docboy/mbc/mbc3/mbc3_rtc_latch_1_to_1 | $FFF0=$02 = fail value (tick 9900000) |
+All 18 tests passed (DMG dmgABC).
 
 ## docboy/dmg/mbc/mbc5
 
@@ -128,35 +75,17 @@ All 1 tests passed (DMG dmgABC).
 | dmg/docboy/mbc/huc3/huc3_command_62 | timeout: $FFF0=$00 |
 | dmg/docboy/mbc/huc3/huc3_scratchpad | timeout: $FFF0=$00 |
 
-## docboy/dmg/boot (21/23 passed)
+## docboy/dmg/boot
 
-21/23 tests passed on DMG dmgABC, 2 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/boot/boot_hram | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/boot/boot_hram #2 | $FFF0=$02 = fail value (tick 100000) |
+All 21 tests passed (DMG dmgABC).
 
 ## docboy/dmg/memory
 
 All 23 tests passed (DMG dmgABC).
 
-## docboy/dmg/oam_bug (258/268 passed)
+## docboy/dmg/oam_bug
 
-258/268 tests passed on DMG dmgABC, 10 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe46 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round23_fe47 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5c | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5e_noisy | $FFF0=$02 = fail value (tick 1500012) |
-| dmg/docboy/oam_bug/oam_bug_ld_hl_a_round3_fe5f | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe46 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round23_fe47 | $FFF0=$02 = fail value (tick 100000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5c | $FFF0=$02 = fail value (tick 1500000) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5e_noisy | $FFF0=$02 = fail value (tick 1500012) |
-| dmg/docboy/oam_bug/oam_bug_ld_hli_a_round3_fe5f | $FFF0=$02 = fail value (tick 1500000) |
+All 258 tests passed (DMG dmgABC).
 
 ## docboy/dmg/stat_write_bug
 
@@ -187,14 +116,9 @@ All 68 tests passed (DMG dmgABC).
 |------|--------|
 | dmg/docboy/serial/serial_two_players_basic_transfer_master + serial_two_players_basic_transfer_slave_sc_00 | timeout, last check: master 8888 px (first at row 3 col 0: got $84A0 want $1200), slave 8888 px (first at row 3 col 0: got $84A0 want $1200) |
 
-## docboy/dmg/joypad (32/34 passed)
+## docboy/dmg/joypad
 
-32/34 tests passed on DMG dmgABC, 2 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/joypad/interactive/joypad_buttons_interrupt_release | $FFF0=$02 = fail value (tick 17000004) |
-| dmg/docboy/joypad/interactive/joypad_dpad_interrupt_release | $FFF0=$02 = fail value (tick 17000004) |
+All 32 tests passed (DMG dmgABC).
 
 ## docboy/dmg/apu (238/307 passed)
 
@@ -272,9 +196,9 @@ All 68 tests passed (DMG dmgABC).
 | dmg/docboy/apu/ch1_period_sweep_write_nr10_overflow_period16_step7_round2 | $FFF0=$02 = fail value (tick 100000) |
 | dmg/docboy/apu/ch1_period_sweep_write_nr10_overflow_period32_step6 | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/cgb/boot (48/69 passed)
+## docboy/cgb/boot (48/68 passed)
 
-48/69 tests passed on CGB cgbE, 21 failed:
+48/68 tests passed on CGB cgbE, 20 failed:
 
 | Test | Result |
 |------|--------|
@@ -298,31 +222,14 @@ All 68 tests passed (DMG dmgABC).
 | cgb/docboy/boot/boot_div_title_BF__cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/boot/boot_div_title_F4-_cgb_flag_00_old_license_01_new_license_00_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/boot/boot_div_title_F4-_cgb_flag_00_old_license_01_new_license_00_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/boot/boot_hram | $FFF0=$02 = fail value (tick 100000) |
 
 ## docboy/cgb/banks
 
 All 2 tests passed (CGB cgbE).
 
-## docboy/cgb/memory (20/33 passed)
+## docboy/cgb/memory
 
-20/33 tests passed on CGB cgbE, 13 failed:
-
-| Test | Result |
-|------|--------|
-| cgb/docboy/memory/not_usable_area_write | $FFF0=$02 = fail value (tick 100008) |
-| cgb/docboy/memory/not_usable_area_write_fea0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_area_write_feb0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_area_write_fec0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_area_write_fed0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_area_write_fee0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_read_hblank | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/memory/not_usable_read_ppu_off | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_read_vblank | $FFF0=$02 = fail value (tick 100008) |
-| cgb/docboy/memory/not_usable_write_hblank | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_write_oam_scan | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_write_pixel_transfer | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/memory/not_usable_write_vblank | $FFF0=$02 = fail value (tick 100000) |
+All 20 tests passed (CGB cgbE).
 
 ## docboy/cgb/oam_bug
 
@@ -1060,9 +967,9 @@ All 14 tests passed (CGB cgbE).
 |------|--------|
 | cgb/docboy/double_speed/hdma/double_speed_hdma_basic_transfer | $FFF0=$02 = fail value (tick 100000) |
 
-## docboy/cgb/double_speed/interactive (55/75 passed)
+## docboy/cgb/double_speed/interactive (55/67 passed)
 
-55/75 tests passed on CGB cgbE, 20 failed:
+55/67 tests passed on CGB cgbE, 12 failed:
 
 | Test | Result |
 |------|--------|
@@ -1077,15 +984,7 @@ All 14 tests passed (CGB cgbE).
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx1_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx2_round1 | $FFF0=$02 = fail value (tick 100000) |
 | cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime0_stat_scx3_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime1_serial_div_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime1_stat_div_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime1_timer_div_round1 | $FFF0=$02 = fail value (tick 100004) |
-| cgb/docboy/double_speed/interactive/double_speed_stop_key1_joypad0_interrupt1_ime1_vblank_div_round1 | $FFF0=$02 = fail value (tick 100004) |
 | cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime0_ly_round2 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime1_serial_div_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime1_stat_div_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime1_timer_div_round1 | $FFF0=$02 = fail value (tick 100000) |
-| cgb/docboy/double_speed/interactive/stop_key1_joypad0_interrupt1_ime1_vblank_div_round1 | $FFF0=$02 = fail value (tick 100000) |
 
 ## docboy/cgb/double_speed/interrupts
 
@@ -1116,13 +1015,12 @@ All 5 tests passed (CGB cgbE).
 
 All 2 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_mode/boot (16/19 passed)
+## docboy/cgb_dmg_mode/boot (16/18 passed)
 
-16/19 tests passed on CGB cgbE, 3 failed:
+16/18 tests passed on CGB cgbE, 2 failed:
 
 | Test | Result |
 |------|--------|
-| cgb_dmg_mode/docboy/boot/boot_hram | $FFF0=$02 = fail value (tick 100000) |
 | cgb_dmg_mode/docboy/boot/boot_vram_nintendo_logo_checksum_43 | $FFF0=$02 = fail value (tick 100000) |
 | cgb_dmg_mode/docboy/boot/boot_vram_nintendo_logo_checksum_58 | $FFF0=$02 = fail value (tick 100000) |
 
@@ -1146,25 +1044,9 @@ All 1 tests passed (CGB cgbE).
 
 All 1 tests passed (CGB cgbE).
 
-## docboy/cgb_dmg_mode/memory (2/15 passed)
+## docboy/cgb_dmg_mode/memory
 
-2/15 tests passed on CGB cgbE, 13 failed:
-
-| Test | Result |
-|------|--------|
-| cgb_dmg_mode/docboy/memory/not_usable_area_write | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_area_write_fea0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_area_write_feb0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_area_write_fec0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_area_write_fed0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_area_write_fee0_16_bytes | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_read_hblank | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_read_ppu_off | $FFF0=$02 = fail value (tick 100004) |
-| cgb_dmg_mode/docboy/memory/not_usable_read_vblank | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_write_hblank | $FFF0=$02 = fail value (tick 100000) |
-| cgb_dmg_mode/docboy/memory/not_usable_write_oam_scan | $FFF0=$02 = fail value (tick 100004) |
-| cgb_dmg_mode/docboy/memory/not_usable_write_pixel_transfer | $FFF0=$02 = fail value (tick 100004) |
-| cgb_dmg_mode/docboy/memory/not_usable_write_vblank | $FFF0=$02 = fail value (tick 100004) |
+All 2 tests passed (CGB cgbE).
 
 ## docboy/cgb_dmg_mode/mode
 
