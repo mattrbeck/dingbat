@@ -51,9 +51,22 @@ SRCSUM=$(python3 tools/playtest/emu.py srcsum)
 
 if want dingbat_driver; then
 echo "== dingbat_driver"
-nim c -d:test_harness -d:release --path:src --hints:off \
-   --nimcache:"$NIMCACHE" \
-   -o:"$OUT/dingbat_driver" tools/playtest/drivers/dingbat_driver.nim
+# Profile-guided: clang lays the code out by pgo/dingbat_driver.profdata
+# (pgo/refresh.sh records it), which plays the same frames ~11% faster
+# (2026-10-14: identical hashes on 20 held-out runs). A compiler that
+# cannot read the profile, or PLAYTEST_NO_PGO=1, gets the plain build.
+PROF=$PWD/tools/playtest/pgo/dingbat_driver.profdata
+if [ -z "$PLAYTEST_NO_PGO" ] && [ -f "$PROF" ] && nim c -d:test_harness -d:release --path:src --hints:off \
+     --nimcache:"$NIMCACHE-pgo" --passC:"-fprofile-instr-use=$PROF" \
+     --passC:-Wno-profile-instr-out-of-date --passC:-Wno-profile-instr-unprofiled \
+     -o:"$OUT/dingbat_driver" tools/playtest/drivers/dingbat_driver.nim; then
+  echo "   (profile-guided)"
+else
+  [ -z "$PLAYTEST_NO_PGO" ] && [ -f "$PROF" ] && echo "   profile-guided build failed; building without the profile"
+  nim c -d:test_harness -d:release --path:src --hints:off \
+     --nimcache:"$NIMCACHE" \
+     -o:"$OUT/dingbat_driver" tools/playtest/drivers/dingbat_driver.nim
+fi
 echo "$SRCSUM" > "$OUT/dingbat_driver.srcsum"
 fi
 

@@ -40,6 +40,14 @@ tools/playtest/playtest.py suite --emus all --jobs 6     # nightly: every config
 tools/playtest/report.py out/suites/<tag>                # findings.json: who stands alone where
 ```
 
+The dingbat driver is built profile-guided: clang lays its code out by
+`pgo/dingbat_driver.profdata`, which `pgo/refresh.sh` records by playing ten
+games on an instrumented driver. The emulated frames are the same (identical
+hashes on 20 held-out runs, 2026-10-14) at ~11% fewer cycles. Refresh the
+profile when the core has moved a long way (a stale one still helps; a new
+one changes the train's results key). `PLAYTEST_NO_PGO=1` builds without it,
+and a compiler that cannot read it gets the plain build.
+
 Output lands in `out/runs/<title>-<sha1>/<timestamp>/` (`latest` symlink):
 `results.json`, `report.html`, `cmp/*.png` side-by-side composites, every
 emulator's environment directory and battery file, `audio/*.wav` clips of
