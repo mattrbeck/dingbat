@@ -139,10 +139,10 @@ reads the previous subtest's wave byte through the whole startup delay.
 | `channel_4_lfsr`, `_lfsr15`, `_lfsr_15_7`, `_lfsr_7_15` | LFSR algorithm and width switching | `lfsr = 0x7FFF` at trigger with `output = not bit0` is the bit-complement of the `lfsr = 0` convention; setting it to 0 "on restart" per `channel_4_lfsr_restart` would break three passing rows |
 | `channel_4_volume_div` | as the pulse version | matches |
 | `channel_4_align` | ticks at 1 MHz | trigger goes through `gb_trigger_deadline` like the squares |
-| `channel_4_delay` | "sample length + 3 M-cycles, maybe ±1" | `period/2 + 2` — a trigger's first period is half-length (a divide-by-two flip-flop the trigger clears); a restart leaves it alone and waits a full period, which is the one-step offset between `channel_4_lfsr`'s table and `_lfsr_restart`'s |
+| `channel_4_delay` | "sample length + 3 M-cycles, maybe ±1" | `period/2 + 2` — from a zero counter the tap bit first rises after half a period. A restart restarts the divisor stage but keeps the counter (DocBoy's double-speed `retrigger_*` rows), so it waits for the tap's next rising edge: a full period when it lands just after one, which is the one-step offset between `channel_4_lfsr`'s table and `_lfsr_restart`'s |
 | `channel_4_frequency_alignment` | nine NR43 encodings, with and without an extra nop, annotated affected / not | the split is `divisor_code == 0`: code 0 starts on the 1 MHz tick, code 1 rounds UP to the 512 kHz grid, code ≥ 2 rounds DOWN. The grid sits on the odd 1 MHz ticks from APU power-on (`GbApu.noise_phase`), which is why every subtest power-cycles the APU. Codes 5–7 are unexercised and follow the ≥ 2 case |
 | `channel_4_equivalent_frequencies` | equivalent encodings produce the same output bar a start-delay off-by-one | one encoding per rounding case, 512 nops deep; the cross-check for the noise model |
-| `channel_4_lfsr_restart`, `_restart_fast` | LFSR cleared on restart | the tables are `channel_4_lfsr`'s shifted by one step: a restart's first sample takes a full period |
+| `channel_4_lfsr_restart`, `_restart_fast` | LFSR cleared on restart | the tables are `channel_4_lfsr`'s shifted by one step: the restart lands just after a rising edge of the tap, so its first sample takes a full period |
 | `channel_4_freq_change` | NR43 changed mid-flight; "the logic is still unclear" | two-counter model below |
 
 **The noise timer is two counters.** `channel_4_freq_change` plays periods of 4 and 16
@@ -157,7 +157,7 @@ NR43 write re-interprets both stages: the shift picks a different bit of the cou
 reached, and the divisor countdown keeps running, reloading with the new divisor only when
 it expires — except a write on the exact increment cycle, where the reload is the new
 divisor rounded up onto the 512 kHz grid. Code: `GbChannel4.div_counter` / `div_next`,
-`ch4_steps_to_rise`, the NR43 arm of `ch4_write`; `psg_noise_deadline` stays the trigger's
+`ch4_steps_to_rise`, the NR43 arm of `ch4_write`; `psg_noise_first_inc` stays the trigger's
 single source of truth. The divisor stage is advanced lazily (`ch4_advance_divisor`) —
 eagerly it cost measurable instructions for state nothing reads between writes.
 

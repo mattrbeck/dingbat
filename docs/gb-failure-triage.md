@@ -1079,13 +1079,52 @@ where SameBoy agrees with DocBoy, the family is probably dingbat's; where it
 fails too, the row encodes something only DocBoy models, or a hardware
 question. Families, largest first:
 
-* **I1. CH4 retrigger, mostly double speed (646).** `double_speed/apu/ch4`
-  `retrigger_*` / `double_retrigger_*`, about half of each `round1`/`round2`
-  pair, plus 3 single-speed `ch4_retrigger_*`; the 33 red double-speed
-  `change_{shift,divider}_*` rows are in I8. Theory: the LFSR clock's phase
-  after a retrigger at double speed is one step off. SameBoy passes 4 of 6.
-  DocBoy itself disables 640 neighbouring rows (ledger); scored privately they
-  go 359 / 645. Probably dingbat.
+* **I1. CH4 retrigger and NR43 changes (79 left, was 679).** The rows read
+  PCM34 one M-cycle either side of the LFSR's 15th clock after the last
+  write. Closed 2026-10-14 (`psg_channels.nim`, notes above `ch4_lfsr_frozen`,
+  `psg_noise_first_inc`, `psg_noise_slow_restart`), each rule checked against
+  SameBoy run as a black box on the same ROMs and against tools/gbprobe probe
+  (l) timelines (PCM34 every M-cycle) on DocBoy and SameBoy:
+  * A trigger restarts the divisor stage but not the counter: a retrigger of
+    a running channel waits for the tap bit's next rising edge from wherever
+    the counter stands (shift 0: half a period from an even count, a full one
+    from an odd count; the old "always a full period" was the odd case).
+    SameBoy agrees on every code-3 cell of probe (m)'s sweep.
+  * The count in progress finishes on the divisor it was loaded with: an NR43
+    write is a reload only when an increment lands on its cycle, which a
+    trigger's first count used to fake (`change_divider3_to_{0,5}`).
+  * The LFSR clock is the tap's rising edge, so an NR43 write moving the tap
+    from a 0 bit to a 1 bit clocks the LFSR at once (`change_shift*`; SameBoy
+    passes all 82).
+  * Divisor code 0: a retrigger whose increment at the trigger's 1 MHz edge
+    (or the pending first one a tick later) lands off the 512 kHz grid takes
+    a whole 3-bit turn of the stage first, 8 grid periods, so the LFSR
+    restarts 28 M-cycles (14 us) later at double speed (40 double-speed rows
+    and the 3 single-speed `ch4_retrigger_delay16_*_nops{0,2,4}`; SameBoy
+    restarts as late in the running-stage case, passes 31 of the 40, and
+    differs only before the first increment).
+  * Divisor code 1 rounds a trigger off the grid up to the next grid edge
+    only from a zero counter (SameSuite channel_4_frequency_alignment);
+    once the counter has counted it rounds down like codes >= 2 (10 rows,
+    all passed by SameBoy too).
+  * One rule SameBoy does not share: a code-0 count left pending off the
+    512 kHz grid by a write selecting code >= 1 finishes on the next grid
+    edge (`change_divider0_to_3`, 12 rows SameBoy fails; probe (m)
+    `c03_nr43` shows it 2 M-cycles early).
+  Left (79): every one has its last trigger 1 to 4 us after the previous one:
+  52 `double_retrigger_*` and 7 `retrigger_*` code-3 rows, where DocBoy merges
+  a retrigger one tick after an off-grid trigger with it and defers one two
+  ticks after by one grid step (SameBoy fails all 59 and matches dingbat in
+  probe (m) `c3_absorb`/`c3_defer`; DocBoy's own model has no such window
+  after an on-grid first trigger), and 20 code-0/1 rows: 12 with a
+  retrigger one tick after the trigger, 8 with a code-1 retrigger a tick
+  before the first increment of an off-grid trigger (SameBoy passes 7 of
+  the 20, DocBoy and SameBoy disagree on the rest). Proposed NotScored pending
+  hardware: the `probe_m_*` photograph builds (tools/gbprobe/README.md,
+  "probe (m)") split DocBoy from SameBoy at each of these. DocBoy disables
+  640 `double_retrigger_*` rows (codes 0 and 1); its own build, run as a
+  black box, fails 84 of them (SameBoy passes 37 of those 84), so those
+  expectations are not DocBoy's output; dingbat passes 484.
 * **I2. CH1 frequency sweep edges (380).** `period_sweep_*` on DMG, CGB and
   double speed: sweep timer reload and recalculation against triggers,
   NR10/NR13/NR14 writes during a recalculation, disable-on-(double/triple)
@@ -1214,7 +1253,7 @@ question. Families, largest first:
     SameBoy CGB E itself fails four of the `_round1` partners, which DocBoy
     and dingbat agree on.
 
-  Left in I8: the 33 double-speed CH4 shift/divider rows (I1's owner).
+  The 33 double-speed CH4 shift/divider rows closed with I1.
 * **I9. Boot hand-off state (26 left of 46).** Measured by running Matt's
   CGB and DMG boot ROMs through dingbat (a local instrument, never
   committed): the hand-off per header path, beside the skip-boot state.
