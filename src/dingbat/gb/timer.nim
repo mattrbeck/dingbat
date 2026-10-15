@@ -287,6 +287,14 @@ proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
   of 0xFF05:
     if t.countdown != 0:
       t.tima     = val
+      when TIMER_IRQ_RUN_LEAD != 0:
+        # A write in the M-cycle after an overflow (Pan Docs, "Timer Obscure
+        # Behaviour", cycle A) stops the IF flag being set, so the request
+        # the running CPU's dispatch saw ahead of it goes too (DocBoy
+        # dmg/timers/write_tima_while_reloading_*). A request already in IF
+        # keeps it, as irq_write does.
+        if t.countdown > 0:
+          gb.interrupts.timer_interrupt_early = gb.interrupts.timer_interrupt
       t.countdown = -1
   of 0xFF06:
     t.tma = val

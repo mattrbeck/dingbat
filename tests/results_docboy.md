@@ -1,6 +1,6 @@
 # DocBoy Test Suite - Detailed Results
 
-*Generated: 2026-10-14 23:54:34 · Docheinstein/docboy 01e04d3d*
+*Generated: 2026-10-15 00:45:07 · Docheinstein/docboy 01e04d3d*
 
 DocBoy's own ROMs (`docboy/` in its tests/config manifests), each
 scored by the verdict its manifest names, the way DocBoy's runner
@@ -11,7 +11,7 @@ run on a DMG ABC, the three CGB manifests on a CPU CGB E with the
 cart header picking the mode. See tests/README.md for the mechanism
 and docs/gb-failure-triage.md for the failing families.
 
-**8633/8990 passed.**
+**8635/8990 passed.**
 
 ## docboy/dmg/cpu
 
@@ -91,14 +91,9 @@ All 258 tests passed (DMG dmgABC).
 
 All 29 tests passed (DMG dmgABC).
 
-## docboy/dmg/timers (8/10 passed)
+## docboy/dmg/timers
 
-8/10 tests passed on DMG dmgABC, 2 failed:
-
-| Test | Result |
-|------|--------|
-| dmg/docboy/timers/write_tima_while_reloading_aborts_interrupt | $FFF0=$02 = fail value (tick 100012) |
-| dmg/docboy/timers/write_tima_while_reloading_uses_tima | $FFF0=$02 = fail value (tick 100012) |
+All 10 tests passed (DMG dmgABC).
 
 ## docboy/dmg/interrupts
 

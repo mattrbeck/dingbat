@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-14 23:54:34 · commit d8e8a18e · game-boy-test-roms v7.0*
+*Generated: 2026-10-15 00:45:07 · commit 7e3792a4 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1585
-- **Pass:** 1558
-- **Fail:** 27
+- **Pass:** 1559
+- **Fail:** 26
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -17,7 +17,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg | 28 | 28 | 👌 |
 | Game Boy - Blargg cgb_sound | 12 | 12 | 👌 |
 | Game Boy - Blargg dmg_sound | 12 | 12 | 👌 |
-| [Game Boy - DocBoy](results_docboy.md) | 48 | 70 | 👀 |
+| [Game Boy - DocBoy](results_docboy.md) | 49 | 70 | 👀 |
 | [Game Boy - gambatte](results_gambatte.md) | 48 | 48 | 👌 |
 | Game Boy - GBMicrotest | 480 | 480 | 👌 |
 | Game Boy - MagenTests | 7 | 7 | 👌 |
@@ -40,7 +40,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 | 👌 |
 | [GBA - SingleStepTests ARM7TDMI](results_singlestep.md) | 45 | 45 | 👌 |
 
-## Game Boy - DocBoy (48/70)
+## Game Boy - DocBoy (49/70)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -54,7 +54,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | docboy/dmg/memory | DMG dmgABC | 👌 23/23 passed |
 | docboy/dmg/oam_bug | DMG dmgABC | 👌 258/258 passed |
 | docboy/dmg/stat_write_bug | DMG dmgABC | 👌 29/29 passed |
-| docboy/dmg/timers | DMG dmgABC | 👀 8/10 passed |
+| docboy/dmg/timers | DMG dmgABC | 👌 10/10 passed |
 | docboy/dmg/interrupts | DMG dmgABC | 👌 158/158 passed |
 | docboy/dmg/dma | DMG dmgABC | 👌 68/68 passed |
 | docboy/dmg/serial | DMG dmgABC | 👀 76/77 passed |

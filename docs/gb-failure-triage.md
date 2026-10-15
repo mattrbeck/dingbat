@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,633 / 8,990 at `DocboyRev` (237 more not scored, `DocboyNotScored`), every
+(`tests/README.md`, "The DocBoy suite"): 8,635 / 8,990 at `DocboyRev` (237 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1700,7 +1700,13 @@ question. Families, largest first:
   NotScored since 2026-10-14), `mbc1_initial_ram` (1: cart RAM read back as $FF
   before any write; Pan Docs is silent, SRAM powers up with whatever it
   holds; SameBoy passes it, dingbat starts a fresh cart at $00),
-  `write_tima_while_reloading_*` (2, SameBoy fails too), serial (1 of 3; closed
+  `write_tima_while_reloading_*` (2; closed 2026-10-15: the TIMA store lands
+  in the M-cycle after the overflow, Pan Docs' cycle A, where a write stops
+  the IF flag being set; dingbat's model already took the reload back, but
+  the dispatch lead that sees the overflow one M-cycle ahead of IF,
+  `TIMER_IRQ_RUN_LEAD`, still fired; the write now clears it, timer.nim.
+  SameBoy fails both; mooneye `tima_write_reloading`/`tma_write_reloading`
+  and gambatte `tima/*` unmoved), serial (1 of 3; closed
   2026-10-14: an SC write that closes an open bit slot shifts that bit for
   the old transfer and the restarted byte still takes eight,
   `serial_abort_to_81_sc_round1`; a DIV reset in the M-cycle whose bus half
