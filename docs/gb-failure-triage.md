@@ -1070,7 +1070,7 @@ the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image (22/46).
 ## I. DocBoy (`docboy/*`, first scored 2026-10-14)
 
 DocBoy's own suite, scored by its own runner's rules on DMG ABC and CPU CGB E
-(`tests/README.md`, "The DocBoy suite"): 8,751 / 8,985 at `DocboyRev` (242 more not scored, `DocboyNotScored`), every
+(`tests/README.md`, "The DocBoy suite"): 8,751 / 8,984 at `DocboyRev` (243 more not scored, `DocboyNotScored`), every
 failing ROM in [`tests/results_docboy.md`](../tests/results_docboy.md). Its
 expectations come from one emulator's model of the maintainer's own DMG and
 CGB-E, so a red row is a lead, not a verdict. "Second opinion" below is
@@ -1280,7 +1280,7 @@ question. Families, largest first:
     bug_checksum_d1{,_first_dot}`, whose title "INCREDIBLE" picks a boot
     palette too; SameBoy, through the boot ROM, passes both), which Matt
     keeps red.
-* **I4. HDMA / GDMA (182 -> 1; 3 not scored).** Closed 2026-10-14 (95 rows; 89 here, `gb.nim`
+* **I4. HDMA / GDMA (182 -> 0; 4 not scored).** Closed 2026-10-14 (95 rows; 89 here, `gb.nim`
   knobs, and the six double-speed rows with I7):
   the LCD-enable line has no OAM scan, so the VRAM DMA's HBlank input sees
   the mode 0 STAT shows there (`HDMA_LCDON_LINE0_M0`: an HBlank transfer armed
@@ -1341,7 +1341,8 @@ question. Families, largest first:
   agree (all 8 SCX, all 8 window, 6 object rows), on 60 object rows
   SameBoy differs from both around the object fetch, and one row is
   SameBoy's and dingbat's against DocBoy:
-  `..._64_bytes_sprite_y16_x07` (one left, proposed NotScored): an object
+  `..._64_bytes_sprite_y16_x07` (not scored since 2026-10-15, ledger "DocBoy:
+  a VRAM DMA beside an object at X = 7", `DocboyNotScored`): an object
   at X = 7 has the same 6-dot penalty as X = 5 and 6, and DocBoy puts its
   plane reads where X = 5, 6 have them at X = 1..6 but two dots later at
   X = 7 alone; SameBoy (and now dingbat) gives X = 7 the X = 6 map, byte

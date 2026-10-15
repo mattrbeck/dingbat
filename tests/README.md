@@ -451,7 +451,7 @@ Docheinstein/docboy-test-suite. The runner fetches the archive at `DocboyRev`
 `roms/*/docboy/` (~355 MB, ~10,000 ROMs). Only `docboy/` is DocBoy's own: the
 manifests also vendor other suites (725 entries), which are scored from
 upstream, and DocBoy disables 645 of its own entries; both are in the
-`NotScored` ledger. So are 242 of DocBoy's own rows whose expectation is not
+`NotScored` ledger. So are 243 of DocBoy's own rows whose expectation is not
 established hardware behaviour (`DocboyNotScored` in the runner: row-name
 globs, one ledger entry per family with its evidence).
 

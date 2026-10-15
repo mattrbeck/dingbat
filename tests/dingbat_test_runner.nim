@@ -2181,6 +2181,19 @@ const NotScored: seq[(string, string)] = @[
     "(`..._master + ..._slave`) IS scored and passes. Hardware question " &
     "row 24 in docs/hwprobe-questions.md (the pair on two consoles and a " &
     "cable). (build_docboy_rows, DocboyNotScored)"),
+  ("DocBoy: a VRAM DMA beside an object at X = 7 (1)", "`cgb/hdma/" &
+    "gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x07`: a " &
+    "GDMA across mode 3 of line 1 with one object at X = 7, the ROM checking " &
+    "which bytes the fetcher's VRAM reads cost it. Objects at X = 5, 6 and 7 " &
+    "all pay the same 6-dot penalty (Pan Docs' OBJ penalty algorithm); at " &
+    "X = 5 and 6 DocBoy, SameBoy (CGB E, VRAM dumped as a black box) and " &
+    "dingbat put the object's two plane reads on the same dots, and at " &
+    "X = 7 DocBoy alone moves them two dots later. SameBoy's VRAM equals " &
+    "dingbat's byte for byte from byte 7 on (the row checks 16 on). No spec " &
+    "text places them. The other 82 rows of the family (SCX 0..7, a window, " &
+    "one or two objects at X 1..50) ARE scored and pass (VDMA_M3_PORT). " &
+    "Hardware question 21 (gbedge p21 VDMABUS) covers the background map. " &
+    "(docs/gb-failure-triage.md I4; build_docboy_rows, DocboyNotScored)"),
 ]
 
 proc provenance_line(): string =
@@ -3530,6 +3543,8 @@ const DocboyNotScored: seq[string] = @[
   "dmg/docboy/mbc/mbc1/mbc1_initial_ram",
   # A serial slave shifting with SC = $00 (1).
   "dmg/docboy/serial/serial_two_players_basic_transfer_master + serial_two_players_basic_transfer_slave_sc_00",
+  # A VRAM DMA beside an object at X = 7 (1).
+  "cgb/docboy/hdma/gdma_ppu_on_pixel_transfer_conflict_relaxed_64_bytes_sprite_y16_x07",
 ]
 
 proc docboy_glob(pat, s: string): bool =
