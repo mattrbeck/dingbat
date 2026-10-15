@@ -191,7 +191,12 @@ int main(int argc, char** argv) {
   // is the frame just drawn. Running kCyclesPerFrame a call instead stopped
   // at a drifting line before 160 (142-159), so the picture shown was the
   // previous frame's (docs/playtest-bugs.md, "The second reference's pictures
-  // are a frame stale"). Whole lines to line 159, then 4-cycle steps.
+  // are a frame stale"). Whole lines to line 159, then 4-cycle steps until
+  // VCOUNT reaches the V-blank lines. Not until it reads 160: a DMA that
+  // starts on line 159 runs as one step past 160 (Mega Man Battle Network
+  // 2's boot: 16k cycles, to line 172), and waiting for 160 ran a second
+  // frame into the first (docs/playtest-bugs.md §83, "Mega Man Battle Network
+  // 2"). dingbat and mGBA end such a frame at the DMA's end too.
   //
   // The core runs a DMA burst whole: a Run that starts one runs to its end,
   // however far past the requested cycles. Super Mario Advance 3's crt0
@@ -222,7 +227,7 @@ int main(int argc, char** argv) {
     long expected = v >= 160 ? 1 : 0;
     long before = video->presented;
     if (lines > 1) { core->Run((lines - 1) * 1232); ran += (lines - 1) * 1232; }
-    while (core->PeekByteIO(0x04000006) != 160 && ran < 2 * 280896) { core->Run(4); ran += 4; }
+    while (core->PeekByteIO(0x04000006) < 160 && ran < 2 * 280896) { core->Run(4); ran += 4; }
     long extra = video->presented - before - expected;
     video->Capture();
     if (extra > 0) {

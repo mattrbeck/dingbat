@@ -7287,3 +7287,226 @@ now fixed. The remaining 1-1 difference is the game's VCOUNT-fed RNG:
 saying why its last three checkpoints compare draws. The game's verdict is
 PASS. No `@known` is needed while the references disagree there. If they
 ever agree by chance, this section is the reason to add one.
+
+## §83. Mega Man Battle Network 2: the title a frame behind is mGBA's boot clear and the second reference's double frame, 2026-10-14
+
+**Symptom.** `title` (f690) and `main_menu` (f820) are SLIP -1 against both
+references in all five dingbat configurations, with the references
+IDENTICAL. They became visible with §65's driver fix. dingbat-bios is no
+different: the cause is game code, not the BIOS.
+
+**Where play parts: the boot, f7.** IWRAM and EWRAM were dumped every frame
+from f0 to f260 in dingbat-bios-nowl, mGBA and the second reference. All
+three are equal to f6. From f7 mGBA's RAM is dingbat's of one frame later.
+The second reference's equals dingbat's exactly at f8 and f9. Its f10 is
+mGBA's f10 (30 EWRAM bytes apart) and dingbat's f11. The picture shows it
+from f202, at offset -1 to f759.
+
+**mGBA: the EWRAM clear (§39's loop).** The boot clears IWRAM (0x7E00 bytes,
+22 cycles an iteration in both), then 256 KB of EWRAM with the same Capcom
+library loop as Rockman EXE 4.5. Here it is at 0x080001C8: `subs r1, r1, #4;
+str r2, [r0, r1]; bne`, ARM from ROM under WAITCNT 0x45B4 (WS0 3/1,
+prefetcher on).
+
+| | an iteration | 65,536 iterations | the clear ends |
+|---|---|---|---|
+| dingbat | 26 | 1,703,885 | 155,195 cycles after the f7 V-blank |
+| mGBA | 22 | 1,441,782 | 173,988 cycles after the f6 V-blank |
+
+The 262,103 cycles are mGBA's EWRAM store, the 4 cycles `slotexec.s` row 12
+says it under-charges (console = dingbat, §63).
+
+**Why a 0.93-frame difference costs a whole frame.** After the clear the
+boot copies 0x15B8 bytes of code to IWRAM (35 cycles a word in both) and
+starts the sound driver. That waits for VCOUNT 159 three times
+(0x080E76A0: `ldrb r0, [VCOUNT]; cmp r0, #159; bne`). Each wait parks the
+boot until line 159, so a boot that reaches the first wait in a given frame
+leaves it at that frame's line 159:
+
+| | clear end to the first wait | first wait entered | left |
+|---|---|---|---|
+| dingbat | 67,253 cycles | f7 + 222,448 (line 112) | f7's line 159 |
+| mGBA | 65,907 | f6 + 239,895 (line 126) | f6's line 159 |
+
+Everything after runs instruction for instruction alike, a frame apart. To
+reach mGBA's wait, dingbat's boot would need 223,684 cycles less, 3.4 cycles
+an iteration of the clear. **The decisive test:** a scratch driver with a
+`poke8` lowered MEMCNT's EWRAM wait from 2 to 1 for the clear alone. The
+clear then takes 24 cycles an iteration and ends 131k cycles sooner (line
+179, after the f7 V-blank), and the first wait is entered within 8 cycles
+of where it was. All 760 frames hash as before.
+
+**The second reference: a harness frame that ran two.** Its EWRAM clear
+costs what dingbat's does. At its f7 the code copy has done 99 of its 1,390
+words, so its clear ended about 3.5k cycles before that V-blank. With
+dingbat's 26 cycles an iteration and its own start (VCOUNT 225, 129 lines
+more in frame 0 than dingbat's 126), the clear ends within 1.1k cycles of
+that. The waits absorb the head start, which is why its f8 and f9 are
+dingbat's.
+
+The frame it gains is f10. The third VCOUNT-159 wait returns 894 cycles
+before the f10 V-blank, and the next instruction starts a 16,409-cycle DMA
+(the store at 0x080009D6) that ends on line 172. The driver (§65) ran whole
+lines to 159, then 4-cycle `Run` steps until VCOUNT read 160. The core runs
+the DMA in one step, so VCOUNT went from 159 to 172 and never read 160, and
+the steps ran on to the next frame's line 160. A logging build counted
+368,940 cycles asked for in that frame against about 280,200 in every
+other. dingbat's and mGBA's frames end at the DMA's end.
+
+**Fixed in the driver.** The 4-cycle steps now stop at the first VCOUNT of
+160 or more (`tools/playtest/drivers/nba_driver.cpp`). With it the second
+reference equals dingbat at offset 0 on every uniquely placed frame from
+f202 to f859: `title` and `main_menu` are IDENTICAL to dingbat and SLIP -1
+against mGBA alone. Hamtaro - Rainbow Rescue (the next section) and Donkey
+Kong Country's first 1,400 frames hash exactly as before. Donkey Kong
+Country's boot lead (§65) is not this.
+
+A logging build of the fixed driver, run over the baseline's `[new]`
+timelines, found frames that end past line 160 in 78 of the 164 games, 161
+frames in all. In 28 games one is frame 0, which starts on line 225. Each
+was a double frame in the baseline's second-reference runs, so from there
+on that game's second reference was a frame further ahead. Castlevania:
+Aria of Sorrow has them at f0 and f11, where §72 saw its three-frame
+lead begin. Some of what §65 called the second reference's own boot lead
+is therefore this. The baseline's second-reference results need recording
+again with the fixed driver. dingbat is untouched.
+
+**Who is right: dingbat.** mGBA's lead is its under-charged EWRAM store,
+which `slotexec.s` measured on the AGB SP (§39 has the same caveat: the
+console's cells are at 4/2, the game runs at 3/1). The second reference's
+lead was the harness's.
+
+**Status: (b) for mGBA, (d) for the second reference, no core change.** A
+SLIP is a pass, so no `@known` line is added.
+
+## §84. Hamtaro - Rainbow Rescue: the "Bye-Q" a frame early, the prefetcher read ROM through an SRAM store, 2026-10-14
+
+**Symptom.** `bye` (f6212, after Quit > Yep-P) is SLIP +1 against both
+references in all five dingbat configurations, with the references
+IDENTICAL. It became visible with §65's driver fix. Every other checkpoint
+is IDENTICAL in all three.
+
+**Where play parts: the quit save, f6018-f6025.** Up to f6019 dingbat's RAM
+is mGBA's every frame, apart from a fixed 19-byte set. From f6026 dingbat's
+frame f is mGBA's f+1. In between the game writes its save: the routine at
+0x081B79A0 sets WAITCNT's SRAM field to 8 waits (WAITCNT 0x4017: WS0 3/1,
+prefetcher on) and copies 19,021 bytes from EWRAM 0x02001E78 to SRAM
+0x0E002FE4 in a Thumb loop at 0x081B79BA-0x081B79C6:
+
+    ldrb r0, [r5]; strb r0, [r4]; adds r5, #1; adds r4, #1;
+    subs r3, #1; cmp r3, r1; bne
+
+Traced from both emulators' f6016 states to the first halt:
+
+| | instructions | cycles | halts |
+|---|---|---|---|
+| dingbat | 673,592 | 2,227,270 | 19,908 cycles before the f6026 V-blank |
+| mGBA | 682,493 | 2,290,881 | 43,718 cycles after it |
+
+Of the 63.6k-cycle difference, the loop is 60.8k (153,479 instructions in
+both). The rest is +28.7k for dingbat at 0x080EC7xx and -19.7k in the IWRAM
+interrupt handler, which mGBA runs more often in its longer save (35,189
+against 30,489 instructions).
+
+The loop's cost per instruction, averaged over 19,021 bytes:
+
+| | ldrb (EWRAM) | strb (SRAM) | adds, adds, subs, cmp | bne | a byte |
+|---|---|---|---|---|---|
+| dingbat | 5.78 | 10.02 | 1, 1, 1, 1 | 7.98 | **27.78** |
+| mGBA | 2.02 | 13.00 | 2, 2, 2, 2 | 7.98 | **31.00** |
+
+**Why: dingbat's prefetcher keeps fetching through the store.** The SRAM
+sits on the cartridge's own pins, so a CPU access to it must hold the
+gamepak bus for its 9 cycles. dingbat prices it from the wait-state table and
+leaves the prefetcher's clock (`rom_free_since`) alone. So the prefetcher
+fetches ROM through the store as if the bus were free, and the four ALU ops
+after it come out of a full buffer at 1 cycle each. dingbat only has to be
+1.05 cycles a byte dearer (19.9k over 19,021 bytes) to miss the V-blank as
+both references do.
+
+**The rule that fixes it, tried and held back.** Branch
+`sram-holds-gamepak-bus` (4889b3aa, `bus.nim` SRAM_HOLDS_GAMEPAK_BUS) adds
+one rule. A CPU data access to 0E-0Fxxxxxx moves the prefetcher's free time
+on by the access. It applies while the code runs from the gamepak with the
+prefetcher on and not yet full. What the buffer held stays in it, and the
+burst rules are untouched.
+
+* **Hamtaro.** The loop costs 29.0 cycles a byte (ALU ops 1, 1.12, 1.12,
+  2). The save takes 2,282,658 cycles and halts 35,490 cycles after the
+  f6026 V-blank, so `bye` is IDENTICAL to both references. Every other
+  checkpoint hashes as before. One other stretch moves, f2152-f2360 after
+  the title's A: dingbat was a frame ahead of mGBA and two ahead of the
+  second reference. Now all 87 uniquely placed frames are the second
+  reference's, one behind mGBA.
+* **A second scratch rule.** If the access also empties the buffer and
+  pauses the prefetcher, as a gamepak data load does, the loop costs 31.8 a
+  byte. The checkpoints are the same; the console can tell the two apart.
+* **Gates.** `r0table.py --check` stays at dingbat 2001/2025.
+  `nimble test_cyclelaws` gives 2124/2124 under the HLE and Nintendo's
+  BIOS. `tools/ci_local.py`: 34 passed, 0 failed. With
+  `knobsweep.py SRAM_HOLDS_GAMEPAK_BUS=false --suite`, 0 of 13,996 mGBA
+  suite rows move (no row times an SRAM access from gamepak code).
+* **The train** (20261014-151408-2c): CHANGED, 1 regressed, 51 neutral.
+  Most of the neutral changes are audio in games that touch SRAM. Counting
+  dingbat-bios's checkpoint verdicts against each reference, 7 get better
+  and 15 worse.
+
+**The regression: Dragon Ball Z - The Legacy of Goku II, a race the rule
+only nudges.** `select_game` goes from IDENTICAL to DIFFERENT, so the game
+FAILs. It is an EEPROM cart, but at boot it reads 0x0E000000 and
+0x0E000001 (0x0800015E). Those two reads are the only instructions the rule
+reprices before f785, 12 cycles in all. Under both builds, RAM is identical
+at every frame checked from f5 to f780. At f784's V-blank one build takes a
+second interrupt within its first handler's tail. The other leaves an
+IWRAM poll at 0x03000224 first. Its main-loop counter (0x03000E20, +1 in a
+V-blank routine at 0x0801F230) then misses f785, and the background's
+animation phase moves for the rest of the run. That is a few-cycle race
+carried from the boot, of the §4 and §59 kind. It does not argue either way
+on SRAM pricing. Sonic Advance 3 `hub`, The Urbz and Castlevania - Circle
+of the Moon `plank_shaft` (§59's idle-loop RNG) move by the same kind of
+nudge.
+
+So the corpus cannot decide the rule. Hamtaro's 20k-cycle margin moves onto
+the references' frame, and races elsewhere move both ways. The rule stays
+off main until the console answers.
+
+**The probe: `tests/roms/payloads/sramloop.s`**, r0table row `sramloop`
+(NEEDS_CART). **It needs the cartridge:** Hamtaro - Rainbow Rescue (A84P)
+in the slot, the console booted holding SELECT+START. The payload checks
+the cart's loop byte for byte, then runs it at the game's WAITCNT. It is
+timed from IWRAM to the loop's own `pop {r4, r5}; pop {r0}; bx r0` home.
+The bytes written are SRAM 0x7F00-0x7F3F's own, read into EWRAM first, so
+the save is left as it was (bit 10 checks). The emulators run the payload's
+copy of the loop from the wrapper's gamepak image, at the same word phase.
+`python3 tools/hwlink/r0table.py sramloop 1 2 0x10 0x40 0x110 0x140 0x210
+0x240 0x310 0x340 0x440 --emulators-only`:
+
+| cell | what | dingbat, dingbat-bios | the held rule | mGBA | emptying rule |
+|---|---|---|---|---|---|
+| 0x1 / 0x2 | 1 / 2 bytes | 0x26 / 0x42 | 0x29 / 0x46 | 0x28 / 0x47 | 0x2E / 0x50 |
+| 0x10 | 16 bytes | 0x1CA (458) | 0x1DC (476) | 0x1F9 (505) | 0x22C (556) |
+| 0x40 | 64 bytes | 0x70A (1802) | 0x74C (1868) | 0x7C9 (1993) | 0x88C (2188) |
+| | **a byte, (0x40 - 0x10) / 48** | **28.0** | **29.0** | **31.0** | **34.0** |
+| 0x110 / 0x140 | prefetcher off | 0x262 / 0x952 (37.0) | the same | the same | |
+| 0x210 / 0x240 | to EWRAM, prefetcher on | 0x16A / 0x58A (22.0) | the same | 0x149 / 0x509 (20.0) | |
+| 0x310 / 0x340 | to EWRAM, prefetcher off | 0x202 / 0x7D2 (31.0) | the same | the same | |
+| 0x440 | SRAM bytes changed | 0 | 0 | 0 | |
+
+What the console's byte says:
+
+* 28: the prefetcher reads through SRAM, and the old rule was right;
+* 29: it waits the access out and keeps its buffer (the held rule);
+* 31 or more: the access also costs the buffer or the burst (mGBA, the
+  emptying rule), and the rule to land is the emptying variant.
+
+The EWRAM rows are the control. On the console they should be dingbat's,
+as `slotexec.s` found for EWRAM stores from gamepak code. Every
+`bye`-moving answer (29 and up) keeps the checkpoint on the references'
+frame.
+
+**Status: (c), no core change on this branch.** The rule removes a bus the
+prefetcher cannot have. But what the console charges is unmeasured, and
+the train shows the corpus cannot settle it. `sramloop` with the Hamtaro
+cart decides it. If the byte comes back 29 or more, the rule on
+`sram-holds-gamepak-bus` (or its emptying variant, at about 31) is what to
+land. A SLIP is a pass, so no `@known` line is added.

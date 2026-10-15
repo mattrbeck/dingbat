@@ -276,10 +276,17 @@ TABLE = {
     # the last KEYCNT write (set A) or with everything (set B, arg | 0x100):
     # a latency that cycles with n is a divided clock (payloads/keyirq3.s)
     'keyirq3': list(range(16)) + [0x100 | n for n in range(16)],
+    # a byte stored to SRAM by code running from the gamepak: Hamtaro -
+    # Rainbow Rescue's own save loop, n = 1, 2, 16, 64 bytes, prefetcher on
+    # (the game's WAITCNT 0x4017) and off, an EWRAM-destination control,
+    # then the save read back (payloads/sramloop.s). Needs that cart in the
+    # slot, booted holding SELECT+START; without it every cell answers
+    # DEAD0001
+    'sramloop': [1, 2, 0x10, 0x40, 0x110, 0x140, 0x210, 0x240, 0x310, 0x340, 0x440],
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
-NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat', 'flashprog'}
+NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat', 'flashprog', 'sramloop'}
 
 # rows the console has answered and no dingbat model matches yet: kept out of
 # lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61)

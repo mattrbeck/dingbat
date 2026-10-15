@@ -321,8 +321,10 @@ command with `ok [...]` or `err ...`:
 A frame ends at the V-blank start (VCOUNT 160) in every driver. The second
 reference's core presents its picture at the end of the V-blank (line 227 to
 0) and double-buffers, so its driver runs whole lines to 159, then 4-cycle
-steps to 160, and takes the picture from the buffer being drawn, which by
-then holds the frame. Its frames used to be `kCyclesPerFrame` cycles a call,
+steps until VCOUNT reads 160 or more, and takes the picture from the buffer
+being drawn, which by then holds the frame. (A DMA started on line 159 runs
+past 160 in one step; waiting for exactly 160 ran a second frame into that
+one: §83, "Mega Man Battle Network 2".) Its frames used to be `kCyclesPerFrame` cycles a call,
 ending at a drifting line before 160 with the previous frame's picture
 (docs/playtest-bugs.md §65).
 
