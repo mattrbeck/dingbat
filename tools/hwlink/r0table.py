@@ -367,7 +367,7 @@ NEEDS_CART = {'eesettle', 'eesettle4k', 'eestray', 'eestray4k', 'sramfloat', 'fl
 # matches them. hdmarace also names the race ROM lawrom.py writes for
 # hdmaobus (RACES), so it can never be frozen under its own name.
 OPEN_ROWS = {'keyirq2', 'keyirq3',
-             'timergeo', 'wakehb', 'obusdma16', 'fifolog', 's0age', 'psgrace', 'hdmarace'}
+             'timergeo', 'obusdma16', 'fifolog', 's0age', 'psgrace', 'hdmarace'}
 
 # frames a cell needs in the emulators where the default 8 is too few:
 # psgrace's page plays ch2's whole note and the rows after it (~45 frames)

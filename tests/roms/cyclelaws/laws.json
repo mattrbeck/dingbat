@@ -14666,5 +14666,53 @@
     "want": "00000043"
    }
   ]
+ },
+ {
+  "payload": "wakehb",
+  "rom": "wakehb.gba",
+  "sha1": "c2614a9fc355930d096b2a4f1a5a756521fcff2f",
+  "frames": 124,
+  "cells": [
+   {
+    "id": "wakehb 0x80",
+    "kind": "hex",
+    "want": "017003EF"
+   },
+   {
+    "id": "wakehb 0x90",
+    "kind": "hex",
+    "want": "000003EB"
+   },
+   {
+    "id": "wakehb 0xa0",
+    "kind": "hex",
+    "want": "041903EC"
+   },
+   {
+    "id": "wakehb 0xa8",
+    "kind": "hex",
+    "want": "03A803EC"
+   },
+   {
+    "id": "wakehb 0xe0",
+    "kind": "hex",
+    "want": "0B3603EC"
+   },
+   {
+    "id": "wakehb 0xa2",
+    "kind": "hex",
+    "want": "03EC0000"
+   },
+   {
+    "id": "wakehb 0x28",
+    "kind": "hex",
+    "want": "095B099E"
+   },
+   {
+    "id": "wakehb 0x60",
+    "kind": "hex",
+    "want": "0AFE099E"
+   }
+  ]
  }
 ]
