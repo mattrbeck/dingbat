@@ -9259,7 +9259,7 @@ Caravan Heart. Nothing else changed.
 **Classification.** Driv3r: (b), the second reference's capture (our
 driver), and mGBA's late sound start. Xevious: (a), fixed.
 
-## §NEXT. Famicom Mini Disk System: the file lookup's walk through unmapped memory never ends in dingbat (Metroid, Shin Onigashima and Palutena's game over hang), and Nazo no Murasamejou's timer interrupt waits 39,000 cycles behind a preempted H-blank DMA, 2026-10-16
+## §100. Famicom Mini Disk System: the file lookup's walk through unmapped memory never ends in dingbat (Metroid, Shin Onigashima and Palutena's game over hang), and Nazo no Murasamejou's timer interrupt waits 39,000 cycles behind a preempted H-blank DMA, 2026-10-16
 
 Six Famicom Mini games looked at, five scripted (Makaimura, Nazo no
 Murasamejou, Metroid, Palutena no Kagame, Tantei Club; Shin Onigashima has

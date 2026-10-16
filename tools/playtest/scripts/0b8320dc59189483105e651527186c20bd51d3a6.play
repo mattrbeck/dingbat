@@ -20,7 +20,7 @@
 # (0x03006238..: 81 15 00 08 ...). The raise came one cycle before an
 # H-blank DMA0/DMA3 pair that the FIFO DMAs preempted; its recognition
 # check was drained inside the DMA3 burst and nothing re-booked it
-# (docs/playtest-bugs.md §NEXT).
+# (docs/playtest-bugs.md §100).
 [new]
 wait 300
 checkpoint title window=30

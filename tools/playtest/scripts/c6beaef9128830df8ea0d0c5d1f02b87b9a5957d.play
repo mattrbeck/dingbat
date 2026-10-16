@@ -7,7 +7,7 @@
 # The Disk System version. Frozen on mgba alone: dingbat (every
 # configuration, since e972f16e on 2026-09-20) and the second reference
 # never leave the black screen after the boot (docs/playtest-bugs.md
-# §NEXT). The Disk System file
+# §100). The Disk System file
 # lookup at 0x030035FC walks a table off its end into unmapped memory (lr
 # from 0x771F6F09, misaligned) and stops only on an open-bus read with bit
 # 16 set or top byte 0xAC; dingbat's reads there always return the loop's
