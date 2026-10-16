@@ -9056,6 +9056,12 @@ had been hiding them since.
   f24450 for 2.76 s, is inside the first battle, where §57's random numbers
   part all three emulators (no two share a frame from f14401 to f26400).
   `@known`, citing §57.
+* *Iridion 3D* (new in the corpus since, so first seen on the second train),
+  MINOR (1.51 s) to DIFFERENT (2.01 s from f6285). Its tunnel fight parts
+  all three emulators from f4211 (tunnel_fight to paused MAJOR between
+  every pair). Both references are paused in digital silence from f6305;
+  dingbat-bios's ship is respawning when START comes and it plays on, as
+  the script's notes say. Not diagnostic (d); `@known`.
 
 In 11 games the new note fires for dingbat and mGBA together: their dumps
 hold 548.12-548.33 samples a frame (0.05-0.08% short) where the second
@@ -9106,6 +9112,15 @@ probe's 400 frames have no word from past a buffer (9 before; none on the
 official BIOS either), and the Xevious script passes in every
 configuration (audio SAME, 0 of 124 windows flagged; mgba~second
 reference 0).
+
+**The train with both changes** (206 games, references live, 2026-10-16):
+Xevious and Driv3r fixed in all four configurations; Kingdom Hearts and
+Swordcraft Story 2 KNOWN; Iridion 3D regressed on the judge alone (its
+dingbat audio unchanged), now `@known` as above. Five games' dingbat audio
+moved with no verdict change: Famicom Mini Akumajou Dracula, Classic NES
+Series The Legend of Zelda and Metroid (NES re-releases, like Xevious),
+Harry Potter and the Chamber of Secrets and Dragon Quest Monsters -
+Caravan Heart. Nothing else changed.
 
 **Classification.** Driv3r: (b), the second reference's capture (our
 driver), and mGBA's late sound start. Xevious: (a), fixed.
