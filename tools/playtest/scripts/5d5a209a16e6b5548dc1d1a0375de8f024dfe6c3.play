@@ -1,0 +1,135 @@
+@title Lady Sia (USA)
+@file Lady Sia (U) (M6) [!].gba
+@game ALDE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# English, Play > New Game > slot 1, the story, the tutorial village (the
+# hooded guide, the lever, the beam that carries Sia off), the first T'soa
+# on the bridge, the platform below; pause > Main Menu back to the title,
+# then Options > Music 5 -> 4 and back: leaving Options is the first EEPROM
+# write (a level's progress is not saved until it is finished; slot 1 stays
+# "New Game").
+# [load]: the language screen comes back (not saved), Options shows Music 4,
+# then the Play menu.
+# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second reference 8192; booted
+# with its own file the second reference's Options show Music 5 (its save not read).
+# Findings: level_start differs in all three. The story -> village load (ROM
+# Thumb code at 0x0802E100-0x0802EDFF, WAITCNT 0x4314, prefetch on, ~5
+# cycles an instruction) ends at f2150 on mgba, f2172 on the second reference, f2174 on
+# dingbat-bios, and Sia's blink and the ring's pulse run on a phase that
+# never shares a frame afterwards; the village scene's glow keeps the
+# phase until the rooftop, where all three are identical again. Both
+# references pricing this kind of load cheaper is docs/playtest-bugs.md §63.
+# The audio's two flagged windows: f1845 is the menu music's fade tail
+# (-30 dB in both references) that dingbat's dump, ~33 dB lower, quantizes
+# to digital silence; f3060 is a dialogue sound one frame after mgba's.
+
+[new]
+wait 600
+wait 300
+checkpoint title window=30 compare=text
+press START after=150
+checkpoint language window=30
+press A after=150
+checkpoint main_menu window=30
+press A after=150
+checkpoint play_menu window=30
+press A after=150
+checkpoint slots window=30
+press A after=150
+checkpoint story window=30 compare=text
+press START after=150
+wait 60
+checkpoint level_start window=30
+hold RIGHT
+wait 60
+release
+press B after=30
+press A after=60
+checkpoint follow_me window=30 compare=text
+tap A times=4 every=40 hold=4
+wait 60
+hold RIGHT
+wait 150
+release
+tap A times=8 every=40 hold=4
+wait 60
+hold RIGHT
+wait 150
+release
+hold RIGHT
+wait 60
+release
+wait 10
+checkpoint rooftop window=30
+hold RIGHT
+wait 150
+release
+wait 60
+checkpoint lever_hint window=30 compare=text
+tap A times=4 every=40 hold=4
+wait 60
+hold RIGHT
+wait 25
+release
+press UP after=90
+checkpoint lever_pulled window=30
+hold RIGHT
+wait 120
+release
+wait 30
+tap A times=6 every=40 hold=4
+wait 60
+tap A times=6 every=40 hold=4
+wait 60
+hold RIGHT
+wait 60
+release
+wait 20
+wait 600
+checkpoint no_name window=30 compare=text
+tap A times=4 every=40 hold=4
+wait 60
+hold RIGHT
+wait 20
+press RIGHT+A hold=15
+release
+wait 5
+tap B times=8 every=15 hold=4
+wait 20
+checkpoint first_fight window=30
+hold RIGHT
+wait 60
+release
+wait 10
+wait 60
+checkpoint lower_platform window=30
+press START after=60
+checkpoint pause window=30
+press RIGHT after=30
+press RIGHT after=30
+press A after=60
+wait 120
+wait 120
+checkpoint back_to_title window=30
+press START after=150
+press DOWN after=20
+press A after=150
+checkpoint options window=30
+press LEFT after=30
+checkpoint music_4 window=30
+press B after=150
+checkpoint saved_menu window=30
+
+[load]
+wait 900
+press START after=150
+press A after=150
+checkpoint main_menu window=30
+press DOWN after=20
+press A after=150
+checkpoint options_kept window=30
+press B after=150
+press UP after=20
+press A after=150
+checkpoint play_menu window=30
