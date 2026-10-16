@@ -1,0 +1,98 @@
+@title Bomberman Tournament (USA)
+@file Bomberman Tournament (U) [!].gba
+@game ABSE
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# Quest > New Game, the opening story skipped with START, the professor's
+# briefing on the ship (A through it), out of the ship and along the lake;
+# SELECT opens the save window: Save Data, File 1, yes ("File saved."),
+# Continue the game? yes. [load]: Quest, SELECT moves the title cursor to
+# Continue (the d-pad does not), File 1, yes; resumes by the lake.
+# Every emulator writes the same 32 KB SRAM. file_saved: the second
+# reference alone a frame off (SLIP +1); back_to_game is SLIP(+0) between
+# all three (the field animates within the window).
+[new]
+wait 400
+wait 300
+wait 300
+press START
+wait 120
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+press A
+wait 120
+press A
+wait 120
+press START
+wait 120
+checkpoint quest_start window=30
+tap A times=6 every=60 hold=4
+wait 60
+tap A times=8 every=60 hold=4
+wait 60
+tap A times=8 every=60 hold=4
+wait 60
+hold DOWN
+wait 120
+release
+wait 90
+checkpoint outside_ship window=30
+hold DOWN
+wait 30
+release
+hold LEFT
+wait 100
+release
+press SELECT
+wait 40
+wait 40
+wait 30
+checkpoint save_window window=30
+press A
+wait 60
+press A
+wait 60
+wait 30
+press LEFT
+wait 20
+press A
+wait 90
+checkpoint file_saved window=30
+press A
+wait 90
+press LEFT
+wait 20
+press A
+wait 90
+checkpoint back_to_game window=30
+
+[load]
+wait 1000
+press START
+wait 120
+press START
+wait 120
+press START
+wait 90
+press A
+wait 120
+checkpoint continue_menu window=30
+press SELECT
+wait 30
+press A
+wait 120
+wait 30
+checkpoint load_files window=30
+press A
+wait 90
+press LEFT
+wait 20
+press A
+wait 180
+press A
+wait 180
+checkpoint resumed window=30
