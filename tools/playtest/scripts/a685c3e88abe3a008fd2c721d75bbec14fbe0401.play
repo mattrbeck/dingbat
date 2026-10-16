@@ -3,6 +3,9 @@
 @game APDE
 @chip EEPROM (EEPROM_V122; a 4 Kbit chip, dingbat and mgba write 512 bytes)
 @frozen dingbat-bios,mgba,nba
+@known * checkpoint paused: -- §102: the table's three task creations land 1,302 cycles later in dingbat (EWRAM loads and stores from ROM code under the prefetcher, 3/1 waits, unmeasured on the console), the third after the line-0 IRQ, so the tasks start in another order
+@known * checkpoint data_save: -- §102: downstream of the task order set at f2855
+@known * checkpoint saved: -- §102: downstream of the task order set at f2855
 
 # Logos and the intro movie, title > GAME START > NORMAL MODE > the first
 # table ("Wondering"), its text box tapped away, the ball launched; START

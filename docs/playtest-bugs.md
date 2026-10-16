@@ -9597,3 +9597,39 @@ seeds, the prescaler's console-measured phase, mGBA's cheaper ROM-sourced
 frames (§29). The SIO clock switch: a dingbat-alone difference, unverified,
 reported. Polarium: the second reference. Puyo Pop: the second reference's
 EEPROM size (APYE), §75's rounding.
+
+
+## §102. The Pinball of the Dead: the table's tasks start in another order because three task creations land 1,302 cycles later in dingbat, 2026-10-16
+
+**Symptom.** `paused`, `data_save` and `saved` are MAJOR in every dingbat
+configuration against both references, which agree. Saves are
+byte-identical and every save loads everywhere.
+
+**Mechanism.** When the first table finishes loading (f2855) the main loop
+calls a task-create routine at 0x08002B20 three times. mgba makes the calls
+at VCOUNT 225, 226 and 227, before the line-0 VCOUNT interrupt (DISPSTAT
+0x0029); dingbat makes its first 1,302 cycles later, so its third lands
+after the interrupt's handler (VCOUNT 16), and the task runner starts the
+tasks in another order (0x03001ED0 / 0x03001F48 read 02/82 in dingbat,
+82/02 in both references). Every per-task counter, and so the zombies, the
+ball and the camera, runs a frame apart from there.
+
+**Where the cycles go.** Instruction traces (official BIOS, waitloop off)
+aligned over f2852-2855: from the frame start the gap grows from 16 to
+1,305 cycles at the first call, and the interrupt handlers cost the same.
+Almost all of it is two Thumb loops in ROM (WAITCNT 0x4314, 3/1 waits,
+prefetch on) that load and store EWRAM:
+- 0x08012338-0x08012366 copies 12-byte records into 0x02001B70: each EWRAM
+  load+store pair costs 13 cycles in dingbat against 11 in mgba (106 against
+  96 an iteration), +748;
+- 0x08003326-0x08003384 walks a table at 0x0200A420 and starts DMA3 copies:
+  +424, from `ldr`/`ldrh` on EWRAM (9 cycles against 2, for one).
+
+Not interrupt or DMA latency: the §100 (2) booking fix does not move this
+game, and an invariant probe found no lost interrupt check in it.
+
+**Reading.** §63's class: whether the prefetcher keeps fetching ROM while the
+CPU's data accesses go to EWRAM. At 4/2 waits the console sided with dingbat
+(slotexec, §63); this game runs 3/1, which no recorded cell covers. A
+cartridge-side measurement at 3/1 (the "one flashcart page for 3/1 wait
+states" step) settles it; until then it is `@known`.
