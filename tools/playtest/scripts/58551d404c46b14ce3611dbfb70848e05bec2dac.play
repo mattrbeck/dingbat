@@ -1,0 +1,114 @@
+@title Banjo Pilot (USA)
+@file Banjo Pilot (U).gba
+@game BAJE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# Title, Single Player, a look along the option puzzle pieces, Grand Prix
+# as Banjo, Bottles' welcome, the Honeycomb Cup, race 1 at Spiral Mountain
+# (the start and the first right-hand bend), pause > Quit > Yes; back to the
+# main menu, Options, music volume down two steps, back: leaving Options is
+# the first EEPROM write after the first boot's (which fills 370 bytes).
+# [load]: Options shows the lowered music bar, then the option pieces.
+# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second reference 8192; booted
+# with its own file the second reference's Options show the default bar (its save not read).
+# Findings: select_cup is SLIP(+0) in every dingbat configuration against
+# both references (which are IDENTICAL): the puzzle-piece wipe after
+# Bottles' last line starts on f3345 in dingbat, f3344 in both references,
+# and the cup screen's spinning honeycomb icon keeps that frame's phase
+# (it shares only its held frames). Every frame to f3343 is identical. The
+# frame before carries a load and a palette fade (Thumb ROM code,
+# 0x08000E06's per-colour multiply loop, WAITCNT 0x4314, ~275k cycles in
+# all); dingbat reaches the main loop's V-blank wait 459 cycles after the
+# V-blank starts, so the frame slips by one. A 0.17% margin is within the
+# references' known cheaper pricing of gamepak code under the prefetcher
+# (docs/playtest-bugs.md §63); not settled without the console.
+# The race itself parts all three (no two share a frame from f4875), so
+# the two flagged audio windows (the pause sounds at f5805-5835) are
+# downstream of the race.
+
+[new]
+wait 600
+wait 400
+# until text START timeout=1500 every=10  [reached dingbat-bios+490 mgba+490 nba+490]
+wait 494
+wait 30
+checkpoint title window=30 compare=text
+press START after=120
+checkpoint main_menu window=30
+press A after=120
+press RIGHT after=30
+press RIGHT after=30
+press DOWN after=30
+press LEFT after=30
+press LEFT after=30
+press UP after=30
+checkpoint select_option window=30
+press A after=120
+checkpoint character window=30
+press A after=120
+checkpoint grand_prix window=30
+press A after=120
+wait 200
+checkpoint bottles window=30 compare=text
+tap A times=10 every=40 hold=4
+wait 60
+wait 120
+checkpoint select_cup window=30
+press A after=200
+wait 200
+checkpoint cup_intro window=30 compare=text
+tap A times=8 every=40 hold=4
+wait 120
+checkpoint race1_card window=30 compare=text
+wait 300
+press A after=200
+checkpoint get_ready window=30 compare=none
+hold A
+wait 240
+wait 120
+hold A+RIGHT
+wait 40
+hold A
+wait 40
+hold A+RIGHT
+wait 30
+hold A
+wait 60
+checkpoint racing window=30 compare=none
+release
+press START after=60
+checkpoint paused window=30 compare=text
+press DOWN after=20
+press DOWN after=20
+press A after=120
+press A after=200
+press A after=60
+press UP after=30
+press A after=300
+checkpoint quit_to_menu window=30
+press B after=150
+press DOWN after=20
+press DOWN after=20
+press A after=120
+checkpoint options window=30
+press LEFT after=20
+press LEFT after=20
+checkpoint music_lowered window=30
+press B after=150
+checkpoint saved_menu window=30
+
+
+[load]
+wait 1524
+press START after=120
+checkpoint main_menu window=30
+press DOWN after=20
+press DOWN after=20
+press A after=120
+checkpoint options_kept window=30
+press B after=150
+press UP after=20
+press UP after=20
+press A after=120
+checkpoint select_option window=30
+
