@@ -1,0 +1,74 @@
+@title Earthworm Jim (USA)
+@file Earthworm Jim (U).gba
+@game AEJE
+@save none
+@chip none (no save library string; no battery save and no password: the title offers only PRESS START and OPTIONS)
+@frozen dingbat-bios,mgba,nba
+
+# Logos, the title, a look at OPTIONS (the button map, NORMAL), back,
+# PRESS START, the New Junk City card, then the first stretch of the level:
+# walk right firing (A), jump (B) onto the chain and ride it, drop among the
+# junk dogs, reach the cow under the fridge; pause (START) and resume, then
+# whip (R) and fire at the cow's ledge.
+# The pause darkens the screen: the three emulators' paused frames are all
+# within one 5-bit step of each other everywhere, dingbat the lower (the
+# darken rounding, docs/playtest-bugs.md §40).
+# No emulator writes battery data: dingbat-bios writes no file, mgba an
+# empty one, the second reference 32 KB of FF.
+
+[new]
+wait 600
+wait 600
+checkpoint title window=30
+press DOWN after=20
+press A after=120
+checkpoint options window=30
+press B after=120
+press UP after=20
+press START after=300
+checkpoint level_card window=30
+wait 300
+press START after=200
+checkpoint level_start window=30
+hold RIGHT
+wait 90
+release
+press A hold=30 after=20
+hold RIGHT
+wait 90
+release
+hold RIGHT
+wait 10
+press RIGHT+B hold=20
+hold RIGHT
+wait 90
+release
+checkpoint chain window=30
+hold RIGHT
+wait 150
+release
+press A hold=40 after=10
+hold RIGHT
+wait 120
+release
+press A hold=40 after=10
+hold RIGHT
+wait 120
+release
+checkpoint cow window=30
+press START after=60
+wait 60
+checkpoint paused window=30
+press START after=60
+hold RIGHT
+wait 30
+press RIGHT+B hold=20
+hold RIGHT
+wait 120
+release
+press LEFT hold=4 after=10
+press R hold=10 after=40
+press R hold=10 after=40
+press A hold=40 after=60
+checkpoint fired_left window=30
+
