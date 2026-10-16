@@ -1,0 +1,74 @@
+@title Guilty Gear X - Advance Edition (USA)
+@file Guilty Gear X - Advance Edition (U).gba
+@game AGXE
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+
+# Title, START, UP to OPTIONS; GAME OPTIONS: GAME LEVEL from NORMAL to HARD,
+# EXIT; DATA > SAVE writes the flash ("NOW SAVING"). The menus ignore a
+# press that comes too soon after the previous one, hence the long waits.
+# [load]: the boot does not read the save (GAME OPTIONS still says NORMAL),
+# so OPTIONS > DATA > LOAD, back out, and GAME OPTIONS shows HARD.
+# All three write the same 64 KB flash and read each other's. NOW SAVING
+# stays up 9 frames in dingbat, 10 in the second reference and 16 in mgba
+# (the flash's erase/program time; no checkpoint sits in it). The audio
+# check flags one quarter-second window at f2295, ~40 frames after the
+# save, where dingbat is quieter than both (MINOR, 0.6% of the run).
+# The Sammy logo's fade (f600) is at a different step in each emulator;
+# the title is identical.
+[new]
+wait 1200
+checkpoint title window=30
+press START
+wait 90
+press UP
+wait 30
+checkpoint mode_menu window=30
+press A
+wait 90
+checkpoint options window=30
+press A
+wait 60
+press RIGHT
+wait 30
+checkpoint game_options window=30
+tap DOWN times=4 every=20 hold=4
+wait 20
+press A
+wait 60
+tap DOWN times=5 every=20 hold=4
+wait 20
+press A
+wait 60
+checkpoint data_menu window=30
+press DOWN
+wait 60
+press A
+wait 6
+wait 30
+checkpoint saved window=30
+
+[load]
+wait 1200
+checkpoint continue_title window=30
+press START
+wait 90
+press UP
+wait 30
+press A
+wait 90
+tap DOWN times=5 every=20 hold=4
+wait 20
+press A
+wait 60
+press A
+wait 300
+press DOWN
+wait 30
+press B
+wait 60
+tap UP times=5 every=20 hold=4
+wait 40
+press A
+wait 60
+checkpoint loaded_game_options window=30
