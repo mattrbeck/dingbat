@@ -10,7 +10,7 @@
 # score), NO at CONTINUE?, then Options > Rankings > Survival.
 # [load]: with the names saved, START at the intro jumps to the title;
 # START, Survival, Easy: the character screen with both names.
-# Findings (docs/playtest-bugs.md §NEXT, Columns Crown): the boot's flash
+# Findings (docs/playtest-bugs.md §95): the boot's flash
 # probe stores 0xFF, 0x90, 0xFF to 0x0DFFFFFE; dingbat takes them as EEPROM
 # bits, sizes the chip from a stale DMA3 count as 64 Kbit and misparses
 # every command after, so it writes 8 KB of scattered bytes and on [load]

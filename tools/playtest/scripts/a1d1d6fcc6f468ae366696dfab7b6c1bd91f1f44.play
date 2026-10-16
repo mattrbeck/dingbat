@@ -7,9 +7,9 @@
 # The title's PRESS START, START into the menu, OPTION; COM LEVEL raised
 # from three stars to four, then EXIT with A writes the EEPROM (B leaves
 # without saving). [load]: OPTION again shows COM LEVEL at four stars.
-# dingbat and mgba write the same 512-byte file. AEXE is a 4 Kbit EEPROM
-# missing from emu.py's EEPROM_4K, so the second reference writes 8 KB and
-# loses its own save (docs/playtest-bugs.md §94): with it, continue_option
+# dingbat and mgba write the same 512-byte file. AEXE, a 4 Kbit EEPROM, was
+# missing from emu.py's EEPROM_4K when authored (added since), so the second
+# reference wrote 8 KB and lost its own save (docs/playtest-bugs.md §94): with it, continue_option
 # shows three stars (MINOR against both); it reads dingbat's and mgba's
 # files, and they read its own. option_changed: the second reference alone
 # a frame off (SLIP -1) on the blinking cursor.

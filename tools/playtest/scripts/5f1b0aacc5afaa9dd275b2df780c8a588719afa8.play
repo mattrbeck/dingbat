@@ -10,9 +10,9 @@
 # [load]: the language and favourite-team screens come up again, but the
 # main menu's cursor starts elsewhere with the save read, so the same
 # UP, A lands on Today's Friendly, which shows CPU Skill Amateur.
-# dingbat and mgba write the same 512-byte file. BF5E is a 4 Kbit EEPROM
-# missing from emu.py's EEPROM_4K, so the second reference writes 8 KB and
-# loses its own save (docs/playtest-bugs.md §94): with it, continue_options
+# dingbat and mgba write the same 512-byte file. BF5E, a 4 Kbit EEPROM, was
+# missing from emu.py's EEPROM_4K when authored (added since), so the second
+# reference wrote 8 KB and lost its own save (docs/playtest-bugs.md §94): with it, continue_options
 # is Game Options with Beginner (MAJOR against both); it reads dingbat's and
 # mgba's files, and they read its own.
 [new]

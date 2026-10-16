@@ -8588,7 +8588,7 @@ Driv3r and Asterix, and every cross-load is `unchanged=True`.
 Both changes touch only the second reference. The next baseline plays it
 live and will show which other games change.
 
-## §NEXT. Columns Crown: three stray CPU stores at boot size the 4 Kbit EEPROM as 64 Kbit, and dingbat loses every save, 2026-10-15
+## §95. Columns Crown: three stray CPU stores at boot size the 4 Kbit EEPROM as 64 Kbit, and dingbat loses every save, 2026-10-15
 
 **What the run shows.** Columns Crown (ACGE, `EEPROM_V122`, 4 Kbit) is
 new in the corpus. mgba writes a 512-byte file and the second reference
