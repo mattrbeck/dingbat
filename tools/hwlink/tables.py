@@ -53,9 +53,11 @@ def rows(only=None):
                            [cells[str(k)] for k in ks]))
     if os.path.exists(R0_FILE):
         for name, cells in json.load(open(R0_FILE)).items():
-            out.append(Row(name, name, [int(a, 0) for a in cells], list(cells),
+            # a cartridge row is keyed per cart (`eesettle@ASIE`): its
+            # payload is the name before the @
+            out.append(Row(name.split('@')[0], name, [int(a, 0) for a in cells], list(cells),
                            (lambda v: f'{v:08X}'), list(cells.values())))
-    return [r for r in out if not only or r.payload in only]
+    return [r for r in out if not only or r.payload in only or r.name in only]
 
 
 def by_payload(rs):

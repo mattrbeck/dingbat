@@ -404,21 +404,25 @@ def hit(pattern, text):
 
 def tally(table, only=None, predictions=None):
     """{row: {'recorded': [labels], 'unrecorded': [labels],
-              'who': {name: (hits, scored, [missed labels])}}}"""
+              'who': {name: (hits, scored, [missed labels])}}}
+
+    A cartridge row has one recording per cart (`eesettle@ASIE`): each is
+    its own entry, scored against the row's predictions."""
     predictions = predictions or PREDICTIONS
     out = {}
     for row, p in predictions.items():
         if only and row not in only:
             continue
-        console = table.get(row, {})
-        rec = [c for c in p['cells'] if c in console]
-        who = {}
-        for name in p['who']:
-            scored = [c for c in rec if name in p['cells'][c]]
-            missed = [c for c in scored if not hit(p['cells'][c][name], console[c])]
-            who[name] = (len(scored) - len(missed), len(scored), missed)
-        out[row] = {'recorded': rec, 'unrecorded': [c for c in p['cells'] if c not in console],
-                    'who': who}
+        for key in [k for k in table if k.split('@')[0] == row] or [row]:
+            console = table.get(key, {})
+            rec = [c for c in p['cells'] if c in console]
+            who = {}
+            for name in p['who']:
+                scored = [c for c in rec if name in p['cells'][c]]
+                missed = [c for c in scored if not hit(p['cells'][c][name], console[c])]
+                who[name] = (len(scored) - len(missed), len(scored), missed)
+            out[key] = {'recorded': rec, 'unrecorded': [c for c in p['cells'] if c not in console],
+                        'who': who}
     return out
 
 
@@ -438,7 +442,7 @@ def score(table, only=None, predictions=None):
     t = tally(table, only, predictions)
     overall = {}
     for row, r in t.items():
-        p = predictions[row]
+        p = predictions[row.split('@')[0]]
         cart = f'; cart: {p["cart"]}' if 'cart' in p else ''
         print(f'{row}: {len(r["recorded"])}/{len(p["cells"])} cells recorded '
               f'(predicted {p["date"]}, {p["where"]}{cart})')

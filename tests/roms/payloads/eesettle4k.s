@@ -15,7 +15,7 @@
 @
 @ RIG: as eesettle.s, with Klonoa's cart (or another 4 Kbit EEPROM cart) in
 @ the slot: boot holding SELECT+START, install the monitor, then
-@ `python3 tools/hwlink/r0table.py --record eesettle4k`.
+@ `python3 tools/hwlink/r0table.py --record eesettle4k --cart=<game code>`.
 @
 @ PROVENANCE: dingbat and mgba as eesettle.s's 6-bit cells (r0table.py
 @ eesettle4k 0x103 0x102 0x100 0x101 --emulators-only). Console: not yet run.

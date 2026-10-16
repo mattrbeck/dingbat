@@ -3526,7 +3526,7 @@ an `{.intdefine.}`, so a measured value can be tried without an edit.
 when named) times one block write-back on the cart in the SP's slot: boot
 the SP holding SELECT+START with Super Mario Advance 3 inserted (multiboot
 with a cartridge), install the monitor, `python3 tools/hwlink/r0table.py
---record eesettle`. dingbat predicts n = 0 and 1 108362, n = 2 (the DMA)
+--record eesettle --cart=A3AE`. dingbat predicts n = 0 and 1 108362, n = 2 (the DMA)
 848, n = 3 FFFFFFFF on a blank last block. A stable console value near one
 of the sweep's P or B bands says what this cart does; a spread across runs
 confirms the checkpoint can never be diagnostic. Either way the script
@@ -3755,7 +3755,7 @@ is the chip's, varies between parts, and is unmeasured; GBATEK's "ca.
 3's 64 Kbit one, so it gets its own row: `tests/roms/payloads/eesettle4k.s`
 (eesettle.s with 6-bit addresses; r0table row `eesettle4k`, cart rows are
 recorded only when named). With Klonoa in the SP's slot, booted holding
-SELECT+START: `python3 tools/hwlink/r0table.py --record eesettle4k`.
+SELECT+START: `python3 tools/hwlink/r0table.py --record eesettle4k --cart=<game code>`.
 dingbat predicts 0x103 FFFFFFFF (blank last block) or the block, 0x102
 00000300, 0x100 / 0x101 0001A74A (108362); mGBA 00000301 and 0001C130
 (114992). Never with a 64 Kbit cart inserted. **No emulator change.**
@@ -7895,7 +7895,7 @@ unsourced.
 **The probe: `eesettle`, as it stands** (`tests/roms/payloads/eesettle.s`,
 r0table row `eesettle`, NEEDS_CART). **It needs this cartridge**: The Sims -
 Bustin' Out (ASIE, 64 Kbit EEPROM) in the slot, the console booted holding
-SELECT+START, then `python3 tools/hwlink/r0table.py --record eesettle`.
+SELECT+START, then `python3 tools/hwlink/r0table.py --record eesettle --cart=ASIE`.
 Another 64 Kbit cart answers for its own chip only. Cells (n = 3, 2, 0, 1)
 in the emulators:
 

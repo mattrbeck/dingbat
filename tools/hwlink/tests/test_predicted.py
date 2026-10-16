@@ -85,6 +85,14 @@ class Score(unittest.TestCase):
         self.assertEqual(r['who']['H1'], (2, 2, []))
         self.assertIn('probe:H1', out.getvalue())
 
+    def test_each_cart_is_scored_on_its_own(self):
+        table = {'probe@ASIE': {'0x0': '00000001'}, 'probe@B8ME': {'0x0': '00000002'}}
+        with redirect_stdout(io.StringIO()):
+            t = predicted.score(table, predictions=self.PRED)
+        self.assertNotIn('probe', t)
+        self.assertEqual(t['probe@ASIE']['who']['dingbat'], (1, 1, []))
+        self.assertEqual(t['probe@B8ME']['who']['mgba'], (1, 1, []))
+
     def test_nothing_recorded_scores_nothing(self):
         with redirect_stdout(io.StringIO()):
             t = predicted.score({}, predictions=self.PRED)

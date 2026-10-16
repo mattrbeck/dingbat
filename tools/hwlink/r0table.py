@@ -1,6 +1,7 @@
 """Record and check payloads that answer in r0, one word per argument.
 
     python3 r0table.py --record dmaphase     # console -> r0-agb.json (3 runs a cell)
+    python3 r0table.py --record eesettle --cart=ASIE   # a cart row, kept per cart
     python3 r0table.py --check [dmaphase]    # the emulators against that file
     python3 r0table.py dmaphase 0x10 0x11    # ad hoc, console and emulators
     python3 r0table.py wakehb --emulators-only   # a row's own arguments
@@ -15,6 +16,7 @@ emulators through every phase (tables.check).
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -404,10 +406,18 @@ def main(argv):
     table = json.load(open(TABLE_FILE)) if os.path.exists(TABLE_FILE) else {}
 
     if '--record' in flags:
-        for name in words or [n for n in TABLE if n not in NEEDS_CART]:
+        cart = next((f.split('=')[1].upper() for f in flags if f.startswith('--cart=')), '')
+        todo = words or [n for n in TABLE if n not in NEEDS_CART]
+        if any(n in NEEDS_CART for n in todo) and not re.fullmatch(r'[0-9A-Z]{4}', cart):
+            print('a cartridge row is kept per cart: name the one in the slot by its '
+                  'game code, e.g. --cart=ASIE', file=sys.stderr)
+            return 2
+        for name in todo:
             args = TABLE[name]
-            table[name] = dict(zip((f'{a:#x}' for a in args), on_console(name, args, runs)))
-            print(name, table[name], flush=True)
+            # one recording per cart, so a second cart does not overwrite the first
+            key = f'{name}@{cart}' if name in NEEDS_CART else name
+            table[key] = dict(zip((f'{a:#x}' for a in args), on_console(name, args, runs)))
+            print(key, table[key], flush=True)
             json.dump(table, open(TABLE_FILE, 'w'), indent=1)
         return 0
     if '--check' in flags:
