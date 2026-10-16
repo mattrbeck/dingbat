@@ -20,9 +20,12 @@
 #   (e.g. (6,38): BG3 (18,25,30) -> (24,12,15)); mgba and the second
 #   reference come out one higher in red at those pixels, and the second
 #   reference also in blue elsewhere in the band (y 38-147), so they do
-#   not agree with each other either. Compared by text.
+#   not agree with each other either: §72's blend rounding (mGBA blends
+#   colours widened to 8 bits, the second reference rounds, dingbat
+#   truncates as the SP's blendprobe photographs do). Compared by text.
 # - The skater's shadow (a few pixels at the skater, dialogue screens) is
-#   one step brighter in red/blue on the second reference alone.
+#   one step brighter in red/blue on the second reference alone (the same
+#   rounding).
 # - resumed: mgba stands alone (its skater got up from the bail on another
 #   frame and rode to the porch: "PRESS L TO TALK"); dingbat and the second
 #   reference show the same scene.
