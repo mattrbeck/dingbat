@@ -1,0 +1,84 @@
+@title Dragon Ball - Advanced Adventure (USA)
+@file Dragon Ball - Advanced Adventure (U).gba
+@game BDVE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+@save skip: DATA 1 > Regular > Story writes nothing (the first boot's 61-byte format is all there is; Option holds only Collection and Erase Save Data); the first save is the end of stage 1, past the bridge and its fights, and the frozen fight there parts dingbat from mgba (below)
+
+# Title, DATA 1, Regular, Story, the opening scene, then stage 1 on Mount
+# Paozu: walk right punching (B) through the pig soldiers, the locked arena
+# by the cliffs (cleared facing left), the downhill fights, to the bridge.
+# Findings: the second reference parts at f2571: the pig soldier by the
+# bamboo takes a step where dingbat-bios and mgba hold their guard (an AI
+# draw); from there it plays its own fight (stage1_start is its last match).
+# dingbat-bios and mgba stay on the same frame to past the bridge
+# checkpoint, but for single frames every 16 (f3846, f3862, f3878, ...;
+# 68 px): the bobbing "!" sign's top three lines (y35-37). The main loop
+# starts its tile DMAs to VRAM at 0x0600CE60 at line 37-38 in dingbat
+# (0x08008230), after those lines are drawn; mgba's main loop gets there at
+# least three lines (~3.7k cycles) sooner. From f9267, in the fights on the
+# bridge, dingbat runs a frame behind mgba (one more lag frame) and the
+# fight goes differently. Both are the main loop's pricing; mgba's cheaper
+# gamepak and EWRAM prices are docs/playtest-bugs.md §63.
+
+[new]
+wait 600
+press START after=120
+wait 120
+checkpoint title window=30 compare=text
+press START after=120
+checkpoint data_menu window=30
+press A after=120
+checkpoint difficulty window=30
+press A after=150
+checkpoint game_menu window=30
+press A after=150
+checkpoint story_intro window=30 compare=text
+press START after=150
+tap A times=8 every=40 hold=4
+wait 60
+checkpoint stage1_start window=30
+hold RIGHT
+wait 180
+release
+hold RIGHT
+tap B times=15 every=20 hold=4
+release
+hold RIGHT
+tap B times=15 every=20 hold=4
+release
+hold RIGHT
+tap B times=30 every=20 hold=4
+release
+checkpoint cliffs window=30
+hold RIGHT
+tap B times=30 every=20 hold=4
+release
+hold RIGHT
+tap B times=45 every=20 hold=4
+release
+hold LEFT
+tap B times=30 every=15 hold=4
+release
+press LEFT hold=4 after=4
+tap B times=40 every=15 hold=4
+checkpoint area_cleared window=30
+hold RIGHT
+tap B times=30 every=20 hold=4
+release
+hold RIGHT
+wait 300
+release
+tap B times=40 every=12 hold=4
+press RIGHT hold=4 after=4
+tap B times=40 every=12 hold=4
+tap B times=20 every=12 hold=4
+hold RIGHT
+wait 120
+release
+tap B times=20 every=12 hold=4
+hold RIGHT
+wait 120
+release
+checkpoint bridge window=30
+
