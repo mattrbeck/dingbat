@@ -1,0 +1,101 @@
+@title Wolfenstein 3D (USA, Europe)
+@file Wolfenstein 3D (UE) [!].gba
+@game AWOE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+# The save is the settings block: Options > Graphics, brightness two steps
+# toward Light, A (the EEPROM then holds a DEADBEEF 4BADCAFE header and four
+# bytes at 0x1B4, the same in all three, and the brightness comes back after
+# a reboot). [new] carries on: New Game, episode 1,
+# "Can I play, Daddy?", floor 1: walk into the first door, open it, walk into
+# the second, open it, walk to the corridor wall, fire once, pause (START),
+# back to the game. Progress itself is saved at the end of a floor (the pause
+# menu has Load Game but no Save), not reached: movement and turning follow
+# the game's rendered frame rate, so a frozen walk through floor 1 does not
+# carry across emulators. [load]: title, Options, Graphics shows the brightness
+# that was saved.
+# Notes: walking forward 60 frames leaves mgba a step further on than
+# dingbat-bios and the second reference (f2433); walking into a door or wall
+# lines all three up again (identical at f2564), but a 30-frame LEFT turns
+# each emulator by a different angle (f2690). In-game presses use hold=12.
+# Audio flags one quarter-second window at f2430 against both references: the
+# first door's sound starts at f2438 on the second reference, f2441 on
+# dingbat and f2443 on mgba, and the footstep loop stops at f2431 on dingbat,
+# f2433 on the second reference and fades to f2437 on mgba; dingbat sits
+# between the two, so the window is the game loop's phase, not a mixer fault.
+# The second reference writes an 8 KB file. dingbat-bios and mgba read it
+# (brightness restored), and the second reference reads their 512-byte file,
+# but booting its own 8 KB file shows the default (darker) brightness and
+# rewrites the file: the second reference does not read back what it wrote.
+
+[new]
+wait 600
+checkpoint logo window=30
+wait 300
+press A
+wait 200
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press DOWN
+wait 30
+press A
+wait 60
+press RIGHT
+wait 20
+press RIGHT
+wait 20
+checkpoint brightness window=30
+press A
+wait 60
+press UP
+wait 30
+press A
+wait 60
+checkpoint episode window=30
+press A
+wait 60
+press UP
+wait 20
+press UP
+wait 30
+checkpoint difficulty window=30
+press A
+wait 200
+wait 60
+checkpoint e1l1_start window=30
+press UP hold=60
+wait 5
+press B
+wait 60
+press UP hold=60
+wait 5
+press B
+wait 40
+press UP hold=40
+wait 5
+checkpoint corridor window=30
+press A hold=12
+wait 30
+checkpoint fired window=30
+press START hold=12
+wait 150
+checkpoint pause_menu window=30
+press B hold=12
+wait 120
+checkpoint back_to_game window=30
+
+[load]
+wait 960
+press A
+wait 200
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press DOWN
+wait 30
+press A
+wait 60
+checkpoint brightness window=30
