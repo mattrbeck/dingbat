@@ -14,8 +14,8 @@
 # The intro's scrolling digits, the title's scanline glitch and the
 # equaliser on the menus draw from the game's own randomness and differ
 # between all three emulators; menus are compared by text.
-# The second reference writes an 8 KB file (AO4E is not in emu.py's
-# EEPROM_4K) and its [load] shows an empty slot 1: it loses its own save.
+# When authored the second reference wrote an 8 KB file and its
+# [load] showed an empty slot 1; AO4E is in emu.py's EEPROM_4K since (§94).
 [new]
 wait 270
 checkpoint ubisoft window=30

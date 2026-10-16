@@ -37,8 +37,8 @@
 #   in the run), mgba shows another (Q8H8X3ZPZSHGW); the
 #   battery files of dingbat and mgba are byte-identical all the same, and
 #   every [load] cell resumes the same table.
-# - The second reference writes an 8 KB file (APDE is not in emu.py's
-#   EEPROM_4K) and its [load] shows DATA1 EMPTY: it loses its own save.
+# - When authored the second reference wrote an 8 KB file and its
+#   [load] showed DATA1 EMPTY; APDE is in emu.py's EEPROM_4K since (§94).
 [new]
 wait 270
 checkpoint wow_logo window=30

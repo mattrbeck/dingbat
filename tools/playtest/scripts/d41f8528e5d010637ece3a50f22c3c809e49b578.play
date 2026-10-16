@@ -23,8 +23,8 @@
 # - Audio: one window (f15690, the menu sound as SAVE & LOAD is chosen)
 #   has another spectrum on dingbat than on both references; mgba and the
 #   second reference differ from each other in 193 of 1110 windows.
-# - The second reference writes an 8 KB file (A3CE is not in emu.py's
-#   EEPROM_4K) and its [load] shows "--- RECORDS": it loses its own save.
+# - When authored the second reference wrote an 8 KB file and its
+#   [load] showed "--- RECORDS"; A3CE is in emu.py's EEPROM_4K since (§94).
 [new]
 wait 870
 wait 60
