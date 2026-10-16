@@ -1,0 +1,57 @@
+@title bit Generations - Dial Hex (Japan)
+@file Bit Generations Dial Hex (J).gba
+@game BVBJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+@known * checkpoint solo_board: -- §101 (Dial Hex): the triangles come from a generator seeded with TM1CNT_L (prescaler 1024) at f494; dingbat reads 0x0E8A, mgba 0x0E89, the second reference 0x0F24. Timer 1 starts on the same cycle in dingbat and mgba (f2), but mgba counts the prescaler from the enable and dingbat from one free-running divider (the AGB SP's, hwprobe TIMPHASE); the enable lands about 65 cycles before a divider tick, so dingbat counts one tick more by the read. The second reference is 154 ticks ahead from its boot entry (§85)
+@known * audio differs from both references -- §101 (Dial Hex): the three piles grow from different triangles (solo_board) and only mgba's completes a hexagon (f10964), so the fall and clear sounds part from f4785 on; the references meet only where both are quiet or both repeat the same fall sound
+# SOLO, played hands-off to GAME OVER: the triangles fall until the hexagon
+# is full. A from GAME OVER returns to the title and the game has written its
+# 12-byte record ("JBVB", the best score at byte 4, a checksum at 10-11).
+# [load]: the title and the mode menu look the same with or without a save
+# (nothing on screen shows the record), then SOLO and its pause menu.
+# Finding (solo_board on): every emulator is dealt other triangles from the
+# same inputs (see @known; docs/playtest-bugs.md §101, Dial Hex).
+# With no input mgba's pile happens to complete a green hexagon (f10964) and
+# its GAME OVER comes ~5,300 frames after dingbat-bios's and the second
+# reference's (both by f13964); the best scores saved are 2 (dingbat-bios),
+# 13 (mgba) and 1 (the second reference), so the three saves differ.
+
+[new]
+wait 300
+checkpoint warning window=30
+press A
+wait 500
+checkpoint title window=30
+press START
+wait 120
+checkpoint mode_menu window=30
+press R after=60
+checkpoint solo_selected window=30
+press START after=120
+checkpoint solo_board window=30
+wait 540
+wait 3000
+wait 6000
+wait 3000
+wait 600
+wait 5000
+checkpoint game_over window=30 compare=text
+press A after=120
+press START after=120
+checkpoint menu_after window=30
+
+[load]
+wait 300
+press A
+wait 440
+checkpoint title_loaded window=30
+wait 60
+press START
+wait 60
+checkpoint menu_loaded window=30
+press R after=60
+press START after=120
+wait 200
+press START after=60
+checkpoint pause_loaded window=0 compare=text

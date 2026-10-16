@@ -1,0 +1,71 @@
+@title bit Generations - Digidrive (Japan)
+@file Bit Generations Digidrive (J).gba
+@game BVHJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+@known * audio differs from both references -- §101 (Digidrive): the three emulators play different random games from the first frames on (the Mersenne Twister's draw count parts at f5, see below), so the game's sounds part; the references meet only where both are quiet or repeat the same sound
+# PRESS START > PLAY > SINGLE > START, played hands-off until GAME OVER, then
+# RESULT ("NEW HIGH SCORE!!", the height reached) writes the record to SRAM.
+# [load]: SINGLE now offers RANKING (on a blank cart it does not), and
+# RANKING lists the saved height.
+# The menus' backgrounds and the game are random, so the menus are judged
+# by their text. Finding: the Mersenne Twister is seeded with 1234 at f4 in
+# all three, but the number of draws parts on the first frames (MT index at
+# 0x02002584: after f5 dingbat-bios has drawn 1, both references 2; after f6
+# dingbat-bios and mgba 2, the second reference 3; at the menu, f1052,
+# dingbat-bios 0x435, the second reference 0x437, mgba 0x438), so every
+# random picture differs from the title on. Hands-off, the game ends at 3 m
+# in dingbat-bios (GAME OVER by f15970), 0 m in the second reference and
+# 14 m in mgba, and the three records differ. The second A after RESULT
+# leaves dingbat-bios and mgba on the SINGLE screen; the second reference,
+# whose RESULT (no new high score) ended sooner, starts another game.
+
+[new]
+wait 300
+checkpoint warning window=30
+press A
+wait 500
+checkpoint title window=30
+press START
+wait 120
+checkpoint menu window=30 compare=text
+press A
+wait 180
+checkpoint play_menu window=30 compare=text
+press A
+wait 240
+checkpoint single_setup window=30 compare=text
+press A
+wait 240
+checkpoint go window=30 compare=none
+wait 2000
+wait 4000
+wait 6000
+wait 2000
+wait 3000
+checkpoint result window=30 compare=text
+press A
+wait 180
+press A
+wait 180
+checkpoint after_result window=30 compare=text
+
+[load]
+wait 300
+press A
+wait 500
+checkpoint title_loaded window=30
+press START
+wait 120
+checkpoint menu_loaded window=30 compare=text
+press A
+wait 180
+checkpoint play_menu_loaded window=30 compare=text
+press A
+wait 240
+checkpoint single_loaded window=30 compare=none
+tap UP times=3 every=20 hold=4
+wait 20
+press A
+wait 180
+checkpoint ranking_loaded window=30 compare=text

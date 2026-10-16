@@ -1,0 +1,316 @@
+@title Polarium Advance (Europe) (En,Fr,De,Es,It)
+@file Polarium (E) (M5).gba
+@game BIIP
+@chip FLASH512
+@frozen dingbat-bios,mgba
+# English > health warning > logos > title > Training > Basic rules (the
+# explanation pages, RIGHT) > Practice basic rules, its four puzzles solved
+# by drawing a path with A held (the third one is the ring the START hint
+# shows) and flipping it with A. The game writes its record to flash (872
+# bytes, the same in dingbat-bios and mgba) and returns to the Training menu
+# with both lessons ticked.
+# [load]: the language menu is skipped, the main menu opens on Stage (on a
+# blank cart: Training), and Training shows the two ticks.
+# The second reference crashes at boot: by f4 its PC runs through
+# 0x98xxxxxx with SP 0xFFBAEFF8 (from 0x0802F502, a word copy of 968 bytes
+# from 0x082262E8 to 0x03004E40 at f1-f2), the screen stays black; the
+# script was recorded without it.
+
+[new]
+wait 200
+checkpoint language window=30
+press A
+wait 200
+press A
+wait 300
+checkpoint logos window=30
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press A
+wait 120
+checkpoint training_menu window=30
+press A
+wait 120
+tap RIGHT times=10 every=60 hold=4
+tap RIGHT times=15 every=60 hold=4
+checkpoint practice1 window=30
+press UP after=8
+press UP after=8
+press UP after=8
+press LEFT after=8
+press LEFT after=8
+press LEFT after=8
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+release
+wait 30
+press A after=90
+wait 120
+checkpoint practice2 window=30
+press UP after=8
+press UP after=8
+press LEFT after=8
+press LEFT after=8
+press LEFT after=8
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+release
+wait 30
+press A after=90
+wait 120
+release
+wait 1
+press LEFT after=8
+press LEFT after=8
+press DOWN after=8
+hold A
+wait 8
+hold A+UP
+wait 6
+hold A
+wait 8
+hold A+UP
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+UP
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+UP
+wait 6
+hold A
+wait 8
+release
+wait 30
+press A after=90
+wait 120
+press UP after=8
+press UP after=8
+press UP after=8
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+LEFT
+wait 6
+hold A
+wait 8
+hold A+UP
+wait 6
+hold A
+wait 8
+hold A+UP
+wait 6
+hold A
+wait 8
+hold A+UP
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+DOWN
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+hold A+RIGHT
+wait 6
+hold A
+wait 8
+release
+wait 30
+press A after=90
+wait 90
+checkpoint lessons_done window=30
+wait 60
+checkpoint training_done window=30
+
+[load]
+wait 170
+checkpoint warning_loaded window=30
+wait 30
+press A
+wait 900
+press START
+wait 120
+checkpoint main_menu_loaded window=30
+press DOWN after=30
+press A
+wait 120
+checkpoint training_loaded window=30

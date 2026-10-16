@@ -1,0 +1,56 @@
+@title bit Generations - Coloris (Japan)
+@file Bit Generations Coloris (J).gba
+@game BVAJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing is written to SRAM through the menus, a Clear Mode board, its pause menu and quitting back to level select (the references leave blank 32 KB files, dingbat none); the first save needs a cleared board, and each emulator is dealt a different board from the same inputs (below), so no frozen route clears all three
+
+# Health warning > A > logo > PRESS START > the mode menu (only CLEAR MODE
+# on a blank cart) > CLEAR MODE > BASIC 01 > PRESS A > the board. Four A
+# presses one up-right of the centre, then START: CONTINUE / RETRY / SLEEP /
+# SELECT; SELECT > YES goes back to level select.
+# Finding (board, f1676; docs/playtest-bugs.md §101, Coloris): each emulator
+# is dealt another board. Not diagnostic (the references disagree too):
+# the board is drawn from a Mersenne Twister seeded from timer 1 (prescaler
+# 256) read in the frame that enters Clear Mode. dingbat and the second
+# reference read it on the same line (79); mGBA 14.8k cycles earlier, on the
+# same 27,170 instructions, most of it the 8-word ldmia from ROM in the
+# BIOS's CpuFastSet (36 cycles against mGBA's 32); and the second
+# reference's timer runs 620 ticks ahead from its boot entry (§85).
+# Board seed: 0x0800D3EC stores ((t << 3) | ((t >> 3) & 7)) & 0x3FF, t =
+# TM1CNT_L, at 0x0200B1F0 when Clear Mode is entered; 0x08010294 seeds the
+# board's MT19937 (0x0200CCC0) with it when the level starts. dingbat 0x028
+# (t & 0x7F = 5), mgba 0x261 (76), the second reference 0x38E (113).
+
+[new]
+wait 300
+checkpoint warning window=30
+press A
+wait 500
+checkpoint logo window=30
+press START
+wait 120
+checkpoint press_start window=30
+press START
+wait 120
+press A
+wait 120
+checkpoint clear_mode window=30
+press A
+wait 120
+press A
+wait 120
+checkpoint board window=30
+press RIGHT after=20
+press UP after=20
+tap A times=4 every=20 hold=4
+press START after=60
+checkpoint pause window=0 compare=text
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press A after=120
+checkpoint quit_prompt window=0 compare=text
+press DOWN after=15
+press A after=150
+checkpoint back_to_select window=30

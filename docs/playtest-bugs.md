@@ -9381,3 +9381,115 @@ checkpoint.
 by slotdma.s; what is missing is the DMA word reaching this loop's `ldr`
 when the console's request timing would put it there. (2) one booking in
 dma.nim's burst-end block.
+
+## §101. bit Generations (Coloris, Dial Hex, Boundish, Digidrive), Polarium Advance, Puyo Pop: six new scripts; random boards from timer 1, and an SIO transfer dingbat never clocks, 2026-10-16
+
+Six scripts (`tools/playtest/scripts/`): Coloris `91bce8cf`, Dial Hex
+`6c6f74a7`, Boundish `51c1a436`, Digidrive `106595ac`, Polarium Advance
+(E) `be152858`, Puyo Pop (U) `338702ea`. Every dingbat configuration
+agrees with dingbat-bios in all six (screens, audio, battery files, load
+cells). Coloris and Boundish are `@save skip`; the other four save and
+load.
+
+**Coloris: the board's seed is timer 1, read 14.8k cycles earlier in
+mGBA.** Each emulator is dealt another board (`board`, not diagnostic: the
+references disagree too). Entering Clear Mode, 0x0800D3EC stores
+`((t << 3) | ((t >> 3) & 7)) & 0x3FF` with `t` = TM1CNT_L (prescaler 256)
+at 0x0200B1F0; starting the level, 0x08010294 seeds the board's MT19937
+(0x0200CCC0) with it. dingbat 0x028 (`t & 0x7F` = 5), mgba 0x261 (76), the
+second reference 0x38E (113). The game's first MT (0x02009FD4) is seeded
+from TM1 at a VCOUNT-synchronised point (f480): dingbat and mGBA both read
+0x63E7 there, the second reference 0x6653, 620 ticks (129 lines) ahead: its
+boot entry on line 225 (§85). Taking those 620 ticks off, the second
+reference reads 5 at the Clear Mode store, dingbat's value. mGBA reaches
+the store on line 67 where dingbat (and, by that arithmetic, the second
+reference) reach line 79: the same 27,170 instructions from the V-blank,
+14,775 cycles cheaper. Most of it is the BIOS's CpuFastSet copies of 2 ×
+0x1700 words from ROM to OBJ VRAM: the 8-word `ldmia` from ROM costs 36
+cycles in dingbat (BIOS fetch 1, N 6 + 7 × S 4 at WS0 3/1, I 1) against
+mGBA's 32, 2,186 bursts (+8.7k), and the `stmia` into VRAM pays the
+renderer's contention in dingbat (17-31 against 17; `contmap.s`). The rest
+is ROM code, a cycle or two here and there (§29).
+
+**Dial Hex: the same idea at prescaler 1024, and the prescaler's phase.**
+The triangle generator (0x08007D14, a GFSR with a 0x5D588B65 LCG fill) is
+seeded at f494 from TM1CNT_L: dingbat 0x0E8A, mgba 0x0E89, the second
+reference 0x0F24 (154 ticks ahead, its boot entry again). Timer 1 is
+enabled (0x83) on the same cycle in dingbat and mGBA (f2, 516,262 cycles
+from the ROM entry, after the IWRAM DMA fill) and the seed is read 255
+cycles later in dingbat (22,141 cycles after the V-blank against 21,886,
+the same 7,048 instructions, spread over ROM code). The read time does not
+decide it. dingbat counts the prescaler on one free-running divider (the
+AGB SP's: hwprobe TIMPHASE, `docs/hwprobe-results-agb.md` 2B), mGBA from
+the enable: the enable lands ~65 cycles before a divider tick, so dingbat
+counts one tick more, at either read time; anchored at the enable, both
+read times give mGBA's 0x0E89. The script carries `@known` for `solo_board`
+and for the audio (only mGBA's hands-off pile completes a hexagon, at
+f10964, so the sounds part).
+
+**Coloris and Dial Hex: an SIO transfer dingbat never clocks (dingbat
+alone, no visible effect).** Both games run Nintendo's link start-up
+(Coloris 0x08023D7C-0x08023FBC, the state at 0x020092C0; Dial Hex the same
+at 0x03005EA0). It starts a normal 32-bit transfer on the external clock
+(SIOCNT 0x1000, then |= 0x4080: Start set, nothing clocks it), and on the
+next pass switches the clock to internal with Start still set (SIOCNT
+0x5084 -> 0x5085 at 0x08023E14, f610), enables the serial IRQ and stores
+Start again with a byte write (no 0 -> 1 edge). Both references then
+complete the transfer and run the serial handler (0x08023EE4), which
+stores the next handshake word 0x494E at +4 (the second reference also
+~SIODATA32 = 0x87FE at +6). dingbat stays busy (0x5085 two frames later),
+the handler never runs and the state stays zero. `serial.nim`
+`write_siocnt` starts a transfer only on Start's rising edge, and the base
+driver's `sio_start` clocks only an internal-clock start. GBATEK does not
+say what switching SC to internal does to an active transfer; both
+references clock it. Confidence that dingbat is wrong: moderate (two
+references, no console cell). Nothing on screen depends on it here (every
+frame to the menus is identical in all three: the link attempt times out
+on the TM1 poll loop at 0x08023D28 either way). A link-rig cell (start on
+external clock, switch bit 0, poll Start and IF) would settle it.
+Not changed.
+
+**Boundish: mGBA drops one lag frame fewer.** The match's main-loop
+counter (0x03001B9C, +1 a pass) is one ahead in mGBA at READY and two
+ahead after the first point: dingbat-bios and the second reference both
+stall four frames at the point-scored transition (f2727) where mGBA stalls
+three, and one more on the match load. `cpu_serve` is SLIP -1 against mGBA,
+IDENTICAL to the second reference; from there the same inputs play another
+rally in mGBA. A whole VS CPU match won 5-2 (a screen-tracking paddle in
+dingbat-bios, ~9,900 frames) replays frame for frame in the second
+reference and is lost in mGBA; it writes no save in any of them. The single
+flagged audio window (f2010, silence/presence) is dingbat's dump level:
+its output is 33 dB below mGBA's in all six games, so a tail the
+references play at an RMS of ~80 rounds to zero in dingbat's 16-bit dump.
+
+**Digidrive: the draws part on the first frames.** The MT is seeded with
+1234 at f4 in all three, but its index (0x02002584) after f5 is 1 in
+dingbat-bios and 2 in both references; after f6 dingbat and mGBA have 2,
+the second reference 3; at the menu (f1052) 0x435, 0x438 (mGBA) and 0x437.
+Every random picture (the menus' backgrounds, the falling shapes) differs
+from the title on, the hands-off games end at 3 m, 14 m (mGBA) and 0 m,
+and the records differ. Audio `@known`; the menu checkpoints judged by
+text, `go` and `single_loaded` recorded only (their OCR reads the random
+backgrounds). Not traced further: which boot frame makes the extra draw.
+
+**Polarium Advance (E): the second reference crashes at boot.** By f4 its
+PC runs through 0x98xxxxxx with SP 0xFFBAEFF8 (at f1-f2 it is in the word
+copy at 0x0802F4FE, 968 bytes from 0x082262E8 to 0x03004E40); the screen
+stays black. Recorded with `--emus dingbat-bios,mgba`. `lessons_done` is
+SLIP +2 against mGBA: the first frame after the flash record is written,
+as in §64 (not traced). The save is identical in dingbat and mGBA.
+
+**Puyo Pop (U): APYE is a 4 Kbit EEPROM and not in `emu.py`'s
+EEPROM_4K.** dingbat and mGBA write 512 bytes; the second reference writes
+8 KB and on `[load]` shows the language menu again (§94). The SEGA logo's
+brighten (`sega`, BLDY 11 in dingbat and mGBA) gives dingbat a background
+of 30 where both references show 31, and a 31 frame around the logo: the
+truncated brighten of §75 against the references' rounding. SLIP 0, a
+pass.
+
+**Classification.** Coloris, Dial Hex, Digidrive: RNG/phase (timer-1
+seeds, the prescaler's console-measured phase, mGBA's cheaper ROM-sourced
+`ldmia` and the second reference's boot entry). Boundish: mGBA's lag
+frames (§29). The SIO clock switch: a dingbat-alone difference, unverified,
+reported. Polarium: the second reference. Puyo Pop: the second reference's
+EEPROM size (APYE), §75's rounding.

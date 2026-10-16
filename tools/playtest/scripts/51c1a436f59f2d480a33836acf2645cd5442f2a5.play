@@ -1,0 +1,52 @@
+@title bit Generations - Boundish (Japan)
+@file Bit Generations Boundish (J).gba
+@game BVDJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing is written to SRAM through the menus, the court select and a whole VS CPU match on POOL FLOWER won 5-2 and quit with B (checked in dingbat-bios with a screen-tracking paddle over ~9,900 frames: the court select is unchanged after it and the SRAM still blank); the first save must come later (more courts or modes), not found in budget
+
+# Health warning (A) > logo > PRESS START > VS CPU > COURT SELECT (only POOL
+# FLOWER on a blank cart) > READY TO GO? A > the serve (A), UP held 30 frames
+# to return the CPU's first shot (return), the scoreboard, the CPU's serve.
+# Finding (cpu_serve, f2968): mgba is a frame ahead (SLIP -1, its ball 4 px
+# further on) of dingbat-bios and the second reference, which agree. The match's frame counter
+# (0x03001B9C, +1 per main-loop pass) is already one ahead in mgba at the
+# READY screen and two ahead after the first point: dingbat-bios and the
+# second reference both drop a frame more than mgba on the match load and
+# again on the point-scored transition (stalls of 4 frames against mgba's 3
+# at f2727), the §29 kind of mGBA under-charge. From the CPU's serve on, the
+# same inputs play a different rally in mgba (the bot's winning match
+# replays frame for frame in dingbat-bios and the second reference, but mgba
+# loses it).
+
+[new]
+wait 300
+press A
+wait 500
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint press_start window=30
+press START
+wait 120
+checkpoint mode_menu window=30
+press A
+wait 120
+checkpoint court_select window=30
+press START
+wait 180
+checkpoint ready window=30
+press A
+wait 120
+wait 120
+press A
+wait 60
+wait 120
+press UP hold=30
+wait 36
+checkpoint return window=10
+wait 150
+checkpoint scoreboard window=10
+wait 300
+checkpoint cpu_serve window=10

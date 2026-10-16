@@ -1,0 +1,56 @@
+@title Puyo Pop (USA)
+@file Puyo Pop (U) [!].gba
+@game APYE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+# ENGLISH > the SEGA / SONIC TEAM logos > title > SELECT MODE > OPTIONS,
+# DIFFICULTY NORMAL -> EASY, RETURN: the game writes its 512-byte record
+# ("PUYOM1", the options and the ranking table) to the 4 Kbit EEPROM.
+# [load]: the language menu is skipped, and OPTIONS shows EASY.
+# When authored APYE was not in emu.py's EEPROM_4K, and the second reference
+# wrote an 8 KB file it did not read back (language menu again); it is in
+# the list since (§94).
+
+[new]
+wait 300
+checkpoint language window=30
+press A
+wait 300
+checkpoint sega window=30
+wait 300
+wait 120
+checkpoint title window=30
+press START
+wait 120
+wait 120
+checkpoint mode_select window=30
+tap DOWN times=4 every=15 hold=4
+wait 20
+press A
+wait 120
+wait 120
+checkpoint options window=30
+press LEFT after=30
+checkpoint options_easy window=10
+tap DOWN times=7 every=15 hold=4
+wait 20
+press A
+wait 150
+checkpoint return_fade window=30
+wait 90
+checkpoint modes_after window=30
+
+
+[load]
+wait 300
+wait 400
+wait 60
+checkpoint title_loaded window=30
+press START
+wait 240
+checkpoint modes_loaded window=30
+tap DOWN times=4 every=15 hold=4
+wait 20
+press A
+wait 240
+checkpoint options_loaded window=30
