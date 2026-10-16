@@ -1452,16 +1452,23 @@ question. Families, largest first:
     pixel's dot, not which window pixel it is. Spec against two references:
     a hardware question, not changed. The decider: these ROMs on the MGB,
     the length of the black run at the left of line 0 for SCX = 1..6.
-  * Found on the way, no scored row: the same ROM patched to WX = 1..8 x
-    SCX = 0..7. SameBoy shifts the window by SCX only at WX = 0 (Pan Docs'
-    WX = 0 paragraph: the window "is switched to before the initial fine
-    scroll adjustment", so later WX are not); dingbat also shifts every line
-    that starts as a window line (WX = 1..5: the window discard is
-    `7 - WX + (SCX and 7)`, fifo_sample_smooth_scroll) and not WX >= 6. The
-    mode-3 length those lines get is pinned (gambatte `window/m2int_wx03_
-    scx{2,3,5}_*`, mealybug `m3_window_timing*`, which SameBoy also matches);
-    the picture is not. One untried way: keep the discard's dots, move the window
-    tile right by SCX & 7 (a first push of 8 + (SCX and 7) pixels).
+  * Found on the way, no scored row; fixed 2026-10-15: the same ROM patched
+    to WX = 0..8 x SCX = 0..7, DMG and CGB. SameBoy (DMG B and CGB E, black
+    box) shifts the window by SCX & 7 only at WX = 0 (Pan Docs' WX = 0
+    paragraph: the window "is switched to before the initial fine scroll
+    adjustment", so later WX are not); dingbat also shifted every line that
+    starts as a window line at WX = 1..5 (the discard is `7 - WX + (SCX and
+    7)`, fifo_sample_smooth_scroll) and not WX >= 6. Now the discard's first
+    SCX & 7 pixels are the fine scroll's, not the window's
+    (`WIN_FINE_PAD`, gb.nim; `fifo_pad_unpop`, fifo_ppu.nim): the same dots,
+    so mode 3 keeps the length gambatte `window/m2int_wx03_scx{2,3,5}_*` and
+    mealybug `m3_window_timing*` pin, and the window sits at WX - 7. All 64
+    cells at WX = 1..8 match SameBoy on each device, frame for frame; the
+    full runner moves nothing; retired instructions within +0.01% on four
+    games. `nimble test_gbwindowscx` (tests/gb_window_scx_test.nim) draws
+    the grid from a program assembled in the test and asserts every cell
+    but the WX = 0 hardware question below; SameBoy draws all 131 asserted
+    cells the same way.
 * **I7. Speed-switch interrupt and STOP timing (79; 8 left, not scored).** Closed
   2026-10-14: all 49 `double_speed/interrupts/speed_switch_to_*` and
   `*_serial_halted_*` rows and 10 of the non-input `double_speed/interactive/

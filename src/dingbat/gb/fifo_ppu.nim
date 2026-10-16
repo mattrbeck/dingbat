@@ -145,6 +145,7 @@ proc reset_render_scratch*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
   ppu.fetch_counter = 0
   ppu.fetcher_x = 0
+  when WIN_FINE_PAD != 0: ppu.win_pad = 0'i32
   # A deferred mode 3 belongs to the machine the state replaces, and so does
   # a settled switched-off LCD.
   ppu.lazy_end = 0
@@ -598,6 +599,18 @@ proc fifo_scx_store_stall*(ppu: GbFifoPpu; old_scx: uint8) =
        (int(ppu.scx) and 7) < (int(old_scx) and 7):
       ppu.scx_stall += SCX_STORE_STALL_DOTS
 
+proc win_line_start_lx(ppu: GbFifoPpu; wx: int32) {.inline.} =
+  ## `lx` for a line that starts as a window line: the window's own `7 - WX`
+  ## discard plus the fine scroll's SCX & 7. At WX = 1..5 the fine scroll's
+  ## pixels are owed as padding ahead of the window's first tile
+  ## (WIN_FINE_PAD), so only the window's `7 - WX` come off its tile.
+  let s = int32(ppu.scx and 7)
+  ppu.lx = -max(0'i32, 7'i32 - wx) - s
+  when WIN_FINE_PAD != 0:
+    ppu.win_pad = if wx > 0'i32 and wx < int32(WIN_LINE_START_WX): s else: 0'i32
+    # The re-trigger compare it is served on: `WX - 8`, s - 1 pops in.
+    ppu.win_pad_lx = ppu.lx + s - 1
+
 proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   when defined(gb_m3_trace):
     echo "LATCH ly=", ppu.ly, " dot=", ppu.cycle_counter, " scx=", ppu.scx
@@ -639,7 +652,7 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
     # The discard is `7 - WX` at WX = 0 too (WIN_WX0_PHASE, gb.nim): six puts
     # the window's first tile one pixel right, visible only in mealybug
     # m3_lcdc_win_en_change_multiple_wx.
-    ppu.lx = int32(-max(0, 7 - int(ppu.wx))) - int32(7 and int(ppu.scx))
+    win_line_start_lx(ppu, int32(ppu.wx))
     when WIN_WX0_PHASE == 0:
       if ppu.wx == 0:
         ppu.lx += 1
@@ -677,6 +690,7 @@ proc fifo_reset_bg*(ppu: GbFifoPpu; fetching_window: bool) =
   # takes the early push (mealybug m3_window_timing).
   ppu.head_cycle = false
   ppu.fetching_window = fetching_window
+  when WIN_FINE_PAD != 0: ppu.win_pad = 0'i32
   # The tile the last object wait was charged to is gone with the restart;
   # fetcher_x restarting at 0 would otherwise alias the BG's first tile.
   ppu.obj_tile_fx = -1
@@ -834,7 +848,7 @@ proc fifo_head_window_late*(ppu: GbFifoPpu) =
      not window_enabled(ppu) or ppu.wx >= uint8(WIN_LINE_START_WX): return
   if ppu.lx > -int32(7 and int(ppu.scx)): return
   fifo_reset_bg(ppu, true)
-  ppu.lx = int32(-max(0, 7 - int(ppu.wx))) - int32(7 and int(ppu.scx))
+  win_line_start_lx(ppu, int32(ppu.wx))
   when WIN_HEAD_ABSORB != 0:
     ppu.fetch_counter = -int(max(0, int32(ppu.wx) - 1))
 
@@ -869,8 +883,7 @@ proc fifo_wx_store_head*(ppu: GbFifoPpu; old_wx: uint8) {.noinline.} =
       fifo_reset_bg(ppu, true)
       ppu.head_cycle = true
       ppu.fetch_counter = int(pos + s) - int(max(0, w - 1))
-      if ppu.smooth_scroll_sampled:
-        ppu.lx = int32(-max(0, 7 - int(w))) - s
+      if ppu.smooth_scroll_sampled: win_line_start_lx(ppu, w)
   elif w == pre and pos > pre:
     # The pre-pixel slot was compared before the store, with the old value.
     ppu.win_lx = WIN_LX_OFF
@@ -1812,6 +1825,24 @@ when M0_IRQ_EDGE_X != 0 and STAT_IRQ_SPLIT:
             (not ppu.fetching_window or ppu.fetcher_x == 0)):
       ppu_set_irq_mode(ppu, gb, 0'u8)
 
+proc fifo_pad_unpop(ppu: GbFifoPpu) {.noinline.} =
+  ## WIN_FINE_PAD, on a line that started as a window line at WX = 1..5 with
+  ## SCX & 7 = s > 0: the discard's first s pixels are the fine scroll's, not
+  ## the window's. Reached on the re-trigger compare (`lx = WX - 8`, before
+  ## this dot's pop), s - 1 pops into the discard, all of them from the
+  ## window's first push, which is still in the ring: step the head back by s
+  ## so those s - 1 come out again and this dot's pop takes the slot in front
+  ## of them (a discard pixel, never drawn). The FIFO then holds what a first
+  ## push of s padding pixels + the tile would after the same s - 1 pops, at
+  ## the same `lx` and dot. Depth is 16; at most 15 are held.
+  let pad = int(ppu.win_pad)
+  ppu.win_pad = 0'i32
+  # A WX store since the start moved the compare: no longer s - 1 pops in.
+  if ppu.lx != ppu.win_pad_lx: return
+  ppu.fifo.head = (ppu.fifo.head - pad) and 15
+  ppu.fifo.size += pad
+  ppu.fifo.data[ppu.fifo.head] = GbPixel()
+
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
@@ -1940,13 +1971,19 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
           when WIN_EN_REVOKE_ANY: win_defer_arm(ppu, gb)
           win_start_reset(ppu)
           return
-      elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
+      else:
+        # The re-trigger edge `WX - 8`, which a window-start line reaches
+        # after SCX & 7 - 1 pixels of its discard: give back the ones that
+        # were the window's (WIN_FINE_PAD).
+        when WIN_FINE_PAD != 0:
+          if unlikely(ppu.win_pad != 0'i32): fifo_pad_unpop(ppu)
+        if ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
            window_enabled(ppu):
-        # The re-trigger edge, sharing the compare above.
-        window_reactivate(ppu)
-      elif CGB_WIN_RETRIG_LATCH != 0 and ppu.cgb and window_enabled(ppu):
-        # The CGB's re-trigger cuts the fetcher's tile-number latch instead.
-        fifo_win_retrig_cgb(ppu, gb)
+          # The re-trigger edge, sharing the compare above.
+          window_reactivate(ppu)
+        elif CGB_WIN_RETRIG_LATCH != 0 and ppu.cgb and window_enabled(ppu):
+          # The CGB's re-trigger cuts the fetcher's tile-number latch instead.
+          fifo_win_retrig_cgb(ppu, gb)
     fifo_emit_pixel(ppu, gb)
   else:
     when WIN_EN_REVOKE_ANY:

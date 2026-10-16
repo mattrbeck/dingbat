@@ -153,6 +153,12 @@ jobs:
         # frame rebases and in double speed. Programs assembled in the test.
         shell: bash
         run: ./dingbat_gbtimedinput_test
+      - name: GB window position across WX x SCX
+        # A window starting left of the screen sits at WX - 7, shifted by
+        # SCX & 7 only at WX = 0 (Pan Docs), on a DMG and a CGB. A program
+        # assembled in the test; no ROMs.
+        shell: bash
+        run: ./dingbat_gbwindowscx_test
       - name: PSG AGB-only behaviour (the SP's answers, both cores)
         # Wave RAM banks, the NR22 period-0 rewrite cells and the noise
         # shift-14 freeze as the GBA SP answered them, and the GB core

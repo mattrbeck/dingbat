@@ -648,7 +648,8 @@ random register-writing program per core; known core issues print `[KNOWN]`,
 `test_silentaudio` (a core toggling `APU.silent`, the muted no-mix path, must match a
 mixing twin's payload every frame: committed ROMs, the soak's random programs and
 channel-1 stop storms), `test_gbtimedinput` (`--input` lands on its M-cycle; see
-"Timed joypad input"), `test_printer`,
+"Timed joypad input"), `test_gbwindowscx` (where a window starting left of the
+screen sits across WX x SCX & 7, DMG and CGB), `test_printer`,
 `test_lcdresponse`, `test_mbc3` (MBC3/MBC30 bank registers, 64 KiB RAM, `.sav` and
 save-state round trips on synthetic carts), `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
 battery-save RTC trailer), `test_swihalt` (Halt and Stop from the cartridge

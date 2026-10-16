@@ -125,6 +125,10 @@ task test_gbtimedinput, "Run the GB harness's timed joypad input checks (--input
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_gbtimedinput_test tests/gb_timed_input_test.nim"
 
+task test_gbwindowscx, "Run the GB window position checks across WX x SCX & 7":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_gbwindowscx_test tests/gb_window_scx_test.nim"
+
 task test_psgagb, "Run the PSG's AGB-only checks (the SP's answers) on both cores":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_psgagb_test tests/psg_agb_test.nim"

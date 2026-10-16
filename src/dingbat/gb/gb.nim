@@ -1263,6 +1263,22 @@ const WIN_WX0_PHASE*          {.intdefine.} = 1
   ## formula as every other WX. The skipped dot is what
   ## `m3_window_timing_wx_0.asm` calls "activating one T-cycle later when WX = 0
   ## and SCX > 0"; tested at the SCX latch dot, see fifo_sample_smooth_scroll.
+const WIN_FINE_PAD*           {.intdefine.} = 1
+  ## On a line that starts as a window line at WX = 1..5, the fine-scroll
+  ## discard's SCX & 7 pixels are not the window's (1, ships): the discard
+  ## throws away SCX & 7 pixels ahead of the window's first tile, then the
+  ## window's own `7 - WX`, so the window sits at WX - 7 on screen. Pan
+  ## Docs, "Window": WX = 0 is the one value whose window "is switched to
+  ## before the initial fine scroll adjustment", i.e. shifted left by SCX % 8;
+  ## every other WX is not. The discard's dots are unchanged (mode 3 stays
+  ## `172 + 6 + SCX & 7`, gambatte `window/m2int_wx03_scx{2,3,5}_*`, mealybug
+  ## `m3_window_timing`); the later window fetches run SCX & 7 dots behind the
+  ## head's, as a FIFO holding the background's discard ahead of the window
+  ## would. 0 shifted the window left by SCX & 7 at WX = 1..5 too. SameBoy
+  ## (DMG B and CGB E, black box) draws the window unshifted at WX = 1..5 for
+  ## every SCX (docs/gb-failure-triage.md I6, the WX x SCX grid). WX = 0 keeps
+  ## its own rule (WIN_WX0_PHASE); WX >= 6 reaches the window through the
+  ## shifter's equality, after the discard, and never shifted.
 const WIN_LINE_START_LATCH*   {.intdefine.} = 1
 const WIN_HEAD_LATE_DOT* {.intdefine.} = 84
   ## A WY match can still make the line a window line (WX below
@@ -2525,6 +2541,10 @@ type
     # A pre-pixel match made by the WX a store just replaced (WIN_HEAD_WX_SCAN):
     # the start it is served by keeps the pre-pixel tile phase. Per-line.
     win_pre_old*:         bool
+    # WIN_FINE_PAD: the fine-scroll pixels a window-start line's discard still
+    # owes (fifo_pad_unpop), and the `lx` it settles them on. Per-line.
+    win_pad*:             int32
+    win_pad_lx*:          int32
 
   # ---- APU channels: the shared PSG (common/psg.nim) ----
   GbSoundChannel* = PsgChannel
