@@ -1,0 +1,85 @@
+@title Zone of the Enders - The Fist of Mars (USA)
+@file Zone of The Enders - The Fist of Mars (U) [!].gba
+@game AZEE
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+
+# Konami logo, title, NEW GAME, START skips the opening text, A through the
+# Bonaparte III story (Cage in the hangar, the LEV) into the first battle
+# map (the last taps leave the frame's move range open), B, the map
+# menu on an empty square (PhaseEnd / UnitList / Goal / Options / Save /
+# Retreat) > Save: "Saved." (64 KB of FLASH512). [load]: title > CONTINUE
+# resumes the map, the map menu again.
+# The save's blank screen ended 10 frames later on mgba than on dingbat-bios
+# and nba (the flash chip's time, docs/playtest-bugs.md §64). On the battle
+# map mgba's cursor blinks a few frames from the others' (battle_map SLIP
+# +4, system_menu +2, saved +5 against dingbat; dingbat = nba at all three).
+
+[new]
+wait 600
+wait 200
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press A
+wait 150
+wait 120
+press START
+wait 120
+checkpoint bonaparte window=30
+tap A times=20 every=100 hold=4
+tap A times=30 every=60 hold=4
+tap A times=40 every=60 hold=4
+tap A times=40 every=60 hold=4
+tap A times=60 every=60 hold=4
+tap A times=60 every=60 hold=4
+press B
+wait 40
+checkpoint battle_map window=30
+press RIGHT
+wait 15
+press RIGHT
+wait 15
+press A
+wait 60
+checkpoint system_menu window=30
+press DOWN
+wait 15
+press DOWN
+wait 15
+press DOWN
+wait 15
+press DOWN
+wait 15
+press A
+wait 60
+# until notblank timeout=600 every=10  [reached dingbat-bios+10 mgba+20 nba+10]
+wait 24
+wait 30
+wait 30
+checkpoint saved window=30
+
+[load]
+wait 600
+wait 200
+checkpoint title window=30
+press START
+wait 120
+press DOWN
+wait 15
+press DOWN
+wait 15
+checkpoint continue_selected window=30
+press A
+wait 120
+wait 60
+checkpoint resumed window=30
+press RIGHT
+wait 15
+press RIGHT
+wait 15
+press A
+wait 60
+checkpoint resumed_menu window=30
+
