@@ -1,0 +1,93 @@
+@title Ty the Tasmanian Tiger 2 - Bush Rescue (USA)
+@file Ty the Tasmanian Tiger 2 - Bush Rescue (U) (M3).gba
+@game BTYE
+@chip EEPROM (64 Kbit: 8192-byte files from all three)
+@frozen dingbat-bios,mgba,nba
+
+# Language English (A): the game writes its settings block (0x1980-0x1A0F,
+# 6 bytes of data) to the EEPROM, the first battery write; a game file is
+# saved only at the end of a mission, not reached. [new] carries on: the EA
+# and Krome / Halfbrick logos, the title, NEW GAME, file 1 (all three files
+# NEW 0%), the opening text, the first stretch of the bush: Maurie's
+# dialogue, boomerangs (B) at two frill lizards, the jumping tutorial and the
+# climb to the first cliff. [load]: the language screen is skipped (the
+# setting was read back), the title, NEW GAME shows the three files.
+# Notes (2026-10-15): the language screen's two scrolling background layers
+# stand at a different phase on each emulator (29-33k pixels between every
+# pair, no frame of the window matching), so it is not diagnostic; the title
+# and the first gameplay put mgba a frame or two ahead (SLIP +1, -2) with
+# dingbat and the second reference identical. save_files differs between
+# all three by one 5-bit step over most of the screen (its fade).
+
+[new]
+wait 300
+wait 300
+checkpoint language window=30
+press A after=300
+wait 300
+wait 300
+wait 300
+wait 300
+checkpoint title window=30
+press START after=120
+checkpoint main_menu window=30
+press A after=120
+checkpoint save_files window=30
+press A after=150
+checkpoint intro_story window=30
+tap A times=10 every=60 hold=4
+wait 120
+checkpoint first_gameplay window=30
+hold RIGHT
+wait 60
+release
+wait 30
+checkpoint dialogue window=30
+tap A times=8 every=40 hold=4
+hold RIGHT
+wait 180
+release
+tap B times=6 every=40 hold=4
+tap A times=6 every=40 hold=4
+press B after=30
+press B after=30
+press B after=30
+tap B times=10 every=25 hold=4
+hold RIGHT
+wait 90
+release
+tap B times=16 every=20 hold=4
+tap B times=12 every=20 hold=4
+hold RIGHT
+wait 120
+release
+checkpoint tutorial_text window=30
+# mash A until notext Tigers timeout=900 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=30 hold=4
+wait 30
+press A after=60
+hold RIGHT
+wait 40
+press A hold=10 after=30
+press A hold=10 after=30
+press A hold=10 after=30
+release
+hold RIGHT
+press A hold=10 after=30
+press A hold=10 after=30
+press A hold=10 after=30
+press A hold=10 after=30
+release
+hold UP
+wait 90
+release
+checkpoint cliff window=30
+
+[load]
+wait 300
+wait 300
+wait 960
+checkpoint continue_title window=30
+press START after=120
+press A after=120
+checkpoint save_files_loaded window=30

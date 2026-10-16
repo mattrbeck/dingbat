@@ -1,0 +1,66 @@
+@title Harry Potter and the Prisoner of Azkaban (USA, Europe)
+@file Harry Potter and The Prisoner of Azkaban (UE) (M8).gba
+@game BHTE
+@chip EEPROM (64 Kbit: 8192-byte files from all three)
+@frozen dingbat-bios,mgba,nba
+
+# Language English US, the EA and licence screens, the title, New Game into
+# slot 1, the storybook opening (Knight Bus to the Leaky Cauldron), the first
+# room, then START > Save Game ("Saving Game", "Game Saved"). The language
+# choice already writes the EEPROM header at boot; the slot is the first game
+# save. [load]: no language screen (it was saved), the title menu now offers
+# Load Game > slot 1 ("Talk to Cornelius Fudge, Level 1 00:00"), and the game
+# resumes in the Leaky Cauldron.
+# Notes (2026-10-15): leaky_cauldron (and [load] resumed) is MINOR between
+# all three: 37-71 pixels, all in the light shaft by the stairs (x 111-133),
+# one 5-bit step in a single channel, a different channel for each pair, the
+# same every run; the shaft's palette is animated, so this reads as the
+# animation's phase, not a dingbat-alone picture. The second reference's
+# save differs in 2 bytes (offsets 57 and 2761, each by 1: a counter and its
+# checksum, read the same by everyone). While the EEPROM is written the game
+# stops its sound (f2925-3030): mgba gives digital silence, dingbat a low
+# constant level, the second reference a higher one (each one's idle
+# output); the music comes back at f3045 and dingbat's first quarter-second
+# window after it (f3075) is 9 dB above both references, the restart's ramp
+# falling a little earlier in the window.
+
+[new]
+wait 300
+wait 300
+checkpoint language window=30
+press A after=120
+wait 300
+wait 300
+checkpoint title window=30
+press START after=120
+press START after=120
+checkpoint main_menu window=30
+press A after=120
+checkpoint slots window=30
+press A after=120
+checkpoint story window=30
+press A after=120
+tap A times=6 every=60 hold=4
+checkpoint leaky_cauldron window=30
+press START after=60
+checkpoint pause_menu window=30
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press A after=60
+checkpoint saving window=10
+wait 60
+wait 34
+wait 120
+checkpoint game_saved window=30
+press A after=60
+
+[load]
+wait 900
+press START after=120
+checkpoint continue_menu window=30
+press DOWN after=20
+press A after=120
+checkpoint load_slots window=30
+press A after=180
+checkpoint resumed window=30

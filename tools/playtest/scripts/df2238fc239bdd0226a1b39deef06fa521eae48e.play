@@ -1,0 +1,79 @@
+@title Driv3r (USA)
+@file Driv3r (U).gba
+@game B3RE
+@chip EEPROM (4 Kbit: dingbat and mgba write 512-byte files)
+@frozen dingbat-bios,mgba
+
+# Atari logo and developer credits, the file screen: NEW > GAME 1, name "A"
+# (A on the default letter, START to confirm). Creating the game writes the
+# EEPROM (16 bytes of data, the name block) and that is the first save; the
+# next is at the end of a mission. [new] carries on into Undercover: the
+# video intro (Nice, the police, the driver; A and START through it, full
+# motion pictures with typed captions), the first mission on foot, a short
+# walk and the pause map. [load]: GAME 1 A under LOAD, A twice, main menu.
+# Frozen on dingbat-bios + mgba only: the second reference never shows a
+# picture. From f0 to f1500 every frame it gives is black (0A6FB8AF) while
+# the others show the Atari logo at f150, the credits at f450 and the file
+# screen from f900; its battery file comes out 8192 bytes for this 4 Kbit
+# chip, the same boot hang as Asterix & Obelix XXL (the same publisher's
+# EEPROM code).
+# Notes (2026-10-15): every checkpoint but two is identical between dingbat
+# and mgba. first_gameplay and street are MINOR: the background traffic
+# (cars on the far road) differs, Tanner and the map do not. Frame by frame
+# the two part for good at f8477, near the end of the last video, and stay
+# apart until the pause map (f10437 on); before that the videos differ only
+# on single frames here and there (a video frame shown one frame later). With
+# the second reference black there is no third witness; the traffic reads
+# as seeded from the frame the mission's load ended.
+
+[new]
+wait 150
+checkpoint atari window=30
+wait 240
+checkpoint credits window=30
+wait 400
+checkpoint file_select window=30
+press A after=60
+press A after=90
+checkpoint name_entry window=30
+press A after=20
+press A after=20
+press START after=90
+wait 60
+checkpoint main_menu window=30
+press A after=120
+# until notblank timeout=1500 every=10  [reached dingbat-bios+100 mgba+100]
+wait 104
+wait 60
+checkpoint video_nice window=30
+wait 600
+press A after=180
+wait 300
+press A after=180
+press A after=120
+press A after=120
+tap A times=10 every=60 hold=4
+tap A times=20 every=60 hold=4
+press START after=180
+tap A times=20 every=60 hold=4
+checkpoint video_car window=30
+tap A times=30 every=60 hold=4
+tap A times=30 every=60 hold=4
+checkpoint first_gameplay window=30
+hold UP
+wait 120
+release
+checkpoint street window=30
+press START after=60
+checkpoint pause_map window=30
+
+[load]
+wait 790
+checkpoint load_file window=30
+press A after=120
+press A after=150
+# until notblank timeout=1500 every=10  [reached dingbat-bios+10 mgba+20]
+wait 24
+wait 60
+wait 60
+checkpoint resumed_menu window=30

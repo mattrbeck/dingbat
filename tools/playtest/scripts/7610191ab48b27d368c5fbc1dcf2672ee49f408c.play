@@ -1,0 +1,68 @@
+@title Super Robot Taisen - Original Generation 2 (USA)
+@file Super Robot Taisen - Original Generation 2 (U) [!].gba
+@game B2RE
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+
+# Health and safety (A), the Atlus and Banpresto logos, the title, NEW GAME,
+# stage 1's title card ("So Close, Yet So Far..."), the opening dialogue on
+# the base map. START during the dialogue asks "Save? Yes / No": Yes writes
+# the quick-save ("Saving... Do not turn off power."), the first battery
+# save, and the dialogue goes on (eight lines more). [load]: the title menu
+# now opens on CONTINUE, which puts the dialogue back where it was saved.
+# Notes (2026-10-15): the title's sparkle and the map's pulsing tiles move
+# every frame, so title, main_menu and the map checkpoints are MINOR between
+# every pair. The quick-save differs in 9 bytes from both references (they
+# differ from each other in 4): the game's frame counter at 0x02001B64 (file
+# 0xE7CC) reads 3063 / 3064 / 3065 (dingbat / mgba / second reference), a
+# 9-frame sub-counter and a title countdown at 0x02001BB0 / 0x02001BB4 (file
+# 0xE818 / 0xE81C) are one frame apart, and the two checksum bytes at 0xFA30
+# follow. Traced by peeking those words every frame: the second reference
+# starts the counter at f10 instead of f11 (its boot a frame early); dingbat
+# falls one behind both at f1099, the Atlus-to-Banpresto load, where the game
+# calls LZ77UnCompWram (SWI 11h) on 24576 bytes from 0x0815F020 to 0x0200D430
+# and the call takes 388008 cycles in dingbat (1.38 frames: the counter
+# misses one V-blank). The references end it inside the frame. The pictures
+# and the rest of play agree, so the counter is all that differs.
+
+[new]
+wait 300
+wait 300
+checkpoint health window=10
+press A after=300
+wait 300
+wait 300
+wait 200
+wait 200
+checkpoint title window=30
+press START after=120
+checkpoint main_menu window=30
+press A after=120
+# until notblank timeout=1500 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
+wait 60
+checkpoint stage_title window=30
+wait 200
+press A after=120
+checkpoint first_dialogue window=30
+press START after=180
+checkpoint save_prompt window=30
+press LEFT after=20
+press A after=90
+checkpoint saving window=10
+wait 120
+checkpoint after_save window=30
+tap A times=8 every=40 hold=4
+checkpoint map_dialogue window=30
+
+[load]
+wait 600
+press A after=300
+wait 900
+wait 300
+press START after=120
+checkpoint continue_menu window=30
+press A after=180
+checkpoint resumed window=30
+tap A times=8 every=40 hold=4
+checkpoint resumed_dialogue window=30

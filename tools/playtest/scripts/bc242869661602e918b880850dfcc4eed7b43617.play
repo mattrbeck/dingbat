@@ -1,0 +1,95 @@
+@title Max Payne (USA)
+@file Max Payne (U).gba
+@game BMEE
+@chip EEPROM (4 Kbit: the game's commands use 6-bit addresses; mgba and dingbat write 512-byte files)
+@frozen dingbat-bios,mgba,nba
+
+# New Game, the opening comic panels (A through them), Roscoe Street station:
+# a short walk on the platform, the pause menu, Quit > Yes to the main menu.
+# The first battery write is the options: Options > Audio / Video, Music
+# Volume two steps down, Back, and the game shows "Saving Game Data"
+# (gone at f7213 on all three). [load] opens the same screen and shows the
+# lowered Music Volume bar, the save read back.
+# Nothing is written during the station walk or on Quit; the options are
+# the first write.
+# Notes (2026-10-15): the menus' film grain moves every frame, so main_menu,
+# audio_video and options_saved are MINOR between every pair. In the station
+# (first_gameplay, station_wall) dingbat and the second reference are
+# identical and mgba is a frame or two ahead (SLIP -1, -2).
+# The second reference writes an 8192-byte file for this 4 Kbit chip and then
+# cannot read its own file back: booted with it, the game shows full Music
+# Volume (a blank chip) and rewrites the file (its own-save [load] cell:
+# file changed, loaded_volume DIFFERENT), while dingbat and mgba read that
+# same file correctly, and the second reference reads the 512-byte files
+# correctly.
+
+[new]
+wait 600
+# until notblank timeout=1500 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 60
+checkpoint intro window=30
+press START
+wait 120
+press A
+wait 120
+checkpoint main_menu window=30
+press A after=120
+wait 300
+checkpoint comic window=30
+# mash A until text Lead timeout=7000 every=30  [taps dingbat-bios:141 mgba:141 nba:141]
+tap A times=141 every=30 hold=4
+checkpoint first_gameplay window=30
+hold UP
+wait 150
+release
+hold LEFT
+wait 120
+release
+checkpoint station_wall window=30
+hold DOWN
+wait 60
+release
+press A after=60
+press START after=60
+checkpoint pause_menu window=30
+press DOWN after=20
+press A after=60
+press UP after=20
+press A after=200
+press DOWN after=20
+press DOWN after=20
+press A after=60
+press A after=60
+checkpoint audio_video window=30
+press LEFT after=10
+press LEFT after=10
+press DOWN after=10
+press DOWN after=10
+press DOWN after=10
+press DOWN after=10
+press A after=60
+checkpoint saving window=10
+# until notext Saving timeout=1200 every=5  [reached dingbat-bios+15 mgba+15 nba+15]
+wait 19
+wait 60
+checkpoint options_saved window=30
+press DOWN after=10
+press DOWN after=10
+press A after=60
+
+[load]
+wait 600
+# until notblank timeout=1500 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 60
+press START
+wait 120
+press A
+wait 120
+checkpoint continue_menu window=30
+press DOWN after=20
+press DOWN after=20
+press A after=60
+press A after=60
+checkpoint loaded_volume window=30

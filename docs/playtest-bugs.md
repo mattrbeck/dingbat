@@ -8495,3 +8495,52 @@ WAITCNT is 0x45B7 (WS0 3/1, prefetcher on) in all three.
 console has been asked. Neither checkpoint can be judged by exact frames:
 the blend formulas differ on every frame, and the lag frames shift the fog
 under them. The script stays as it is.
+
+## §93. Six licensed games with video-style scenes: two reference saves that never come back, and Super Robot Taisen OG2's frame counter one behind at a 24 KB LZ77, 2026-10-15
+
+New scripts: Max Payne, Driv3r, Harry Potter and the Prisoner of Azkaban,
+Ty the Tasmanian Tiger 2, Earthworm Jim 2 (password game, `@save none`) and
+Super Robot Taisen - Original Generation 2. Every dingbat configuration
+PASSes and agrees with dingbat-bios on every checkpoint, the audio, the
+battery file and every `[load]` cell. **No emulator change.**
+
+* *Max Payne (4 Kbit EEPROM): the second reference cannot read its own
+  file.* It writes 8192 bytes for the 4 Kbit chip. Booted with that file,
+  the game shows the options of a blank chip (full Music Volume) and the
+  file is rewritten; dingbat and mgba read the same 8192-byte file
+  correctly, and the second reference reads the 512-byte files correctly.
+  The reference's problem (its own-save `[load]` cell: file changed,
+  `loaded_volume` DIFFERENT); not counted against dingbat.
+* *Driv3r (4 Kbit EEPROM): the second reference never shows a picture*
+  (black from f0, an 8192-byte blank file), the same boot hang as Asterix &
+  Obelix XXL from the same publisher. The script is frozen on dingbat-bios
+  and mgba. Their pictures agree everywhere except the traffic in the first
+  mission (first_gameplay, street MINOR), apart for good from f8477 (the
+  last video) to the pause map; there is no third witness.
+* *Super Robot Taisen OG2 (FLASH512): the quick-save's frame counter.*
+  Nine bytes differ from both references (the references differ from each
+  other in four): the 32-bit frame counter at 0x02001B64 (file 0xE7CC)
+  reads 3063 / 3064 / 3065 (dingbat / mgba / second reference), a 9-frame
+  sub-counter and the title countdown at 0x02001BB0 / 0x02001BB4 are a frame
+  apart, and the checksum at 0xFA30 follows. Peeking those words every frame
+  in all three: the second reference starts the counter at f10, a frame
+  before the others (its boot a frame early). dingbat drops one count at
+  f1099, the Atlus-to-Banpresto load, where the game calls LZ77UnCompWram
+  (SWI 11h) on 24576 bytes from 0x0815F020 (cartridge) to 0x0200D430
+  (EWRAM). The call takes 388008 cycles in dingbat (15.8 a byte, 1.38
+  frames), so one V-blank finds the main loop busy. The references finish
+  inside the frame. This is the shape of §29 / §33 (a cartridge-to-EWRAM
+  load the references charge below the bus), and the LZ77 path's steps
+  match the console's on the probes of the HLE section (lz77t.c). The
+  pictures and the rest of play agree; only the counter in the save
+  differs.
+* The rest stand on a reference or on nobody: Earthworm Jim 2's Majesco
+  logo stays up longer on the second reference (a whole logo behind at
+  f1200-f1500, level again at the title; title_menu MAJOR, it alone),
+  and mgba's first level differs (a crow attacks earlier, the password
+  carries 80% health); Harry Potter's light shaft and Ty 2's language screen
+  differ between all three (an animated palette and two scrolling layers at
+  another phase); Harry Potter's music returns after the EEPROM write a few
+  frames apart (one 0.25 s window, dingbat 9 dB above both), and the
+  silence during the write is digital zero on mgba and a small constant on
+  dingbat and the second reference.

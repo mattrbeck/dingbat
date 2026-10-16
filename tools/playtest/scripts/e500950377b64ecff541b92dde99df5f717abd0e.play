@@ -1,0 +1,64 @@
+@title Earthworm Jim 2 (USA)
+@file Earthworm Jim 2 (U).gba
+@game AJ4E
+@save none
+@chip none (password game: no save library string, title menu offers New Game / Options / Password; the pause screen shows the level password)
+@frozen dingbat-bios,mgba,nba
+
+# The game has no battery save: progress is carried by passwords (the pause
+# screen prints the current one). This plays the logos, the title menu, the
+# Options screen, New Game and the first stretch of the first level (walk
+# right, two shots, the waterfall, a gun pickup on the far ledge), with the
+# pause screen's password in between. No [load].
+# Notes (2026-10-15): the second reference holds the Majesco logo longer
+# (still on it at f1200, when dingbat and mgba show "Conversion by", and on
+# "Conversion by" at f1500, when they show Playmates / Shiny), yet reaches
+# the title menu with them; its menu letters bounce at another phase
+# (title_menu MAJOR, it alone), and by options the three meet (SLIP -1). From level_start mgba's level differs: a crow attacks
+# earlier, Jim takes damage (90%, then 80%) and the pause password ends
+# CXJB86 where dingbat and the second reference show CXJB8W. dingbat and
+# the second reference agree on the level (level_start IDENTICAL,
+# waterfall SLIP +0); the pause menu's bouncing letters differ in phase.
+
+[new]
+wait 600
+wait 300
+wait 600
+wait 400
+checkpoint title_menu window=30
+press DOWN after=30
+press A after=90
+checkpoint options window=30
+press B after=60
+wait 90
+press UP after=30
+press UP after=30
+press UP hold=8 after=30
+press A after=300
+wait 200
+checkpoint level_start window=30
+hold RIGHT
+wait 120
+release
+press B after=40
+hold RIGHT
+wait 90
+release
+wait 60
+checkpoint waterfall window=30
+hold RIGHT
+wait 150
+release
+wait 30
+press START after=60
+checkpoint pause_password window=30
+press A after=60
+hold RIGHT
+wait 60
+press B hold=10
+wait 60
+press B hold=10
+wait 60
+release
+wait 30
+checkpoint gun_pickup window=30
