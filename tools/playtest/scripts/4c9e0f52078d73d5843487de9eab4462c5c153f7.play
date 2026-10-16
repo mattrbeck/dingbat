@@ -1,0 +1,95 @@
+@title Iridion 3D (USA)
+@file Iridion 3D (U) [!].gba
+@game AI3E
+@save none
+@chip none (password game: no save library string, the title drum offers START / OPTIONS / PASSWORD)
+@frozen dingbat-bios,mgba,nba
+
+# The cart has no battery save: progress is a password. Logos, START
+# through the intro, the title, OPTIONS (left as they are) > OK, START,
+# stage 1's card (Escape Through the Disposal Tunnel), A, then the tunnel
+# with fire (A) held, strafing left and right, START (Pause). No [load].
+# Session notes: the three emulators part in the tunnel: by f4211 the
+# second reference scores 140 where dingbat-bios and mgba score 110, and
+# mgba draws other enemies; by f6337 all three show different scores and
+# scenes (dingbat-bios respawning, mgba and the second reference paused
+# mid-fight). The audio flags f6315-6405 against dingbat (silence/presence)
+# for the same reason: START lands while dingbat-bios's ship respawns, so
+# it plays on where both references sit paused. On stop, mgba leaves a 0-byte .sav, the second reference a
+# blank 32 KB one, dingbat-bios none.
+
+[new]
+wait 400
+wait 300
+press START
+wait 200
+wait 200
+press START
+wait 200
+wait 200
+wait 300
+press START
+wait 120
+wait 60
+checkpoint title window=30
+press DOWN
+wait 40
+press A
+wait 60
+wait 60
+wait 40
+wait 40
+wait 30
+checkpoint options window=30
+tap DOWN times=5 every=12 hold=4
+press LEFT
+wait 20
+press A
+wait 20
+press DOWN
+wait 15
+press A
+wait 150
+press A
+wait 200
+checkpoint stage_card window=30
+wait 200
+press A
+wait 200
+checkpoint tunnel window=30
+hold A
+wait 300
+hold A+LEFT
+wait 30
+hold A
+wait 200
+hold A+RIGHT
+wait 60
+hold A
+wait 200
+checkpoint first_enemies window=30
+hold A+LEFT
+wait 50
+hold A+UP
+wait 30
+hold A
+wait 300
+hold A+DOWN
+wait 40
+hold A
+wait 400
+checkpoint tunnel_fight window=30
+hold A+RIGHT
+wait 40
+hold A
+wait 500
+hold A+LEFT
+wait 40
+hold A
+wait 500
+checkpoint tunnel_later window=30
+release
+press START
+wait 40
+wait 20
+checkpoint paused window=30
