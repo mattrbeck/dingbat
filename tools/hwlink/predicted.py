@@ -331,6 +331,62 @@ def _eesettle4k():
     }
 
 
+def _eestray_cells(base, mgba=None):
+    """eestray(4k)'s cells (payloads/eestray.s): the code nibble is what each
+    model predicts; dingbat's lead nibble F (its ignored bits read 1).
+    `mgba` gives mGBA's words on Columns Crown's seeded save, cell by cell."""
+    cells = {}
+    for n in range(9):
+        c = {'dingbat': '0Fxxxxxx|3FFFFFFF', 'dingbat-bios': '0Fxxxxxx|3FFFFFFF',
+             'dingbat-old': '1Fxxxxxx' if n in (1, 2, 3, 4, 7, 8) else '0Fxxxxxx',
+             'frame': '0xxxxxxx'}
+        if n in (1, 2, 3, 4, 5, 7, 8):
+            c['shift'] = '1xxxxxxx|2xxxxxxx'
+        if n != 6:
+            c['timeout'] = '0xxxxxxx' if n in (0, 2) else '1xxxxxxx|2xxxxxxx'
+            if n != 4:                 # a ROM read: A23 low, the chip may not see it
+                c['readrst'] = '1xxxxxxx|2xxxxxxx' if n in (1, 2, 5, 7) else '0xxxxxxx'
+            c['romrst'] = '0xxxxxxx' if n in (0, 4) else '1xxxxxxx|2xxxxxxx'
+        if mgba:
+            c['mgba'] = mgba[n]
+        cells[label(base | n)] = c
+    return cells
+
+
+_EESTRAY_WHO = {
+    'dingbat': 'a store outside a DMA ends the command in progress (storage/eeprom.nim); '
+               '3FFFFFFF on a blank chip',
+    'dingbat-bios': 'the same',
+    'dingbat-old': 'dingbat before §95: every store a serial bit, byte stores a read',
+    'frame': 'each /CS-low frame parsed alone, a short one dropped, an addressed read kept',
+    'shift': 'every written bit shifts in, nothing resets the parser',
+    'timeout': 'bits shift in; an idle gap (cell 2: 16k cycles) resets the parser',
+    'readrst': 'a read the chip sees (a ready poll, 0x09FFE000 with A23 high) resets it',
+    'romrst': 'a ROM access (/CS low, A23 low) resets it',
+}
+
+
+def _eestray4k():
+    mgba = (['00xxxxxx|30FFFFFF'] + ['20FFFFFF|30FFFFFF'] * 4
+            + ['00xxxxxx|30FFFFFF', '2FFFFFFF|3FFFFFFF', '10FFFFFF|30FFFFFF', '20FFFFFF|30FFFFFF'])
+    return {
+        'where': 'docs/playtest-bugs.md §95; tests/roms/payloads/eestray.s', 'date': '2026-10-16',
+        'cart': 'a 4 Kbit EEPROM cart whose last two blocks differ: Columns Crown (ACGE, §95)',
+        'who': dict(_EESTRAY_WHO, mgba="mGBA (Columns Crown's save seeded; 30FFFFFF blank)"),
+        'cells': _eestray_cells(0x100, mgba),
+    }
+
+
+def _eestray():
+    # mgba seeded with an 8 KB file still read both blocks as FF: no prediction
+    return {
+        'where': 'docs/playtest-bugs.md §95; tests/roms/payloads/eestray.s', 'date': '2026-10-16',
+        'cart': 'a 64 Kbit EEPROM cart whose last two blocks differ',
+        'who': dict(_EESTRAY_WHO),
+        'cells': _eestray_cells(0),
+    }
+
+
 def _flashprog():
     # §64's table, in cycles; mGBA's busy times "after an erase" are given as
     # the alternative they are
@@ -357,7 +413,7 @@ PREDICTIONS = {name: build() for name, build in (
     ('fifolog', _fifolog), ('s0age', _s0age), ('psgrace', _psgrace),
     ('hdmarace', _hdmarace), ('hdmaobus', _hdmaobus), ('fiforeset', _fiforeset),
     ('sramloop', _sramloop), ('eesettle', _eesettle), ('eesettle4k', _eesettle4k),
-    ('flashprog', _flashprog))}
+    ('flashprog', _flashprog), ('eestray', _eestray), ('eestray4k', _eestray4k))}
 
 
 # ---- matching and scoring ---------------------------------------------------

@@ -113,6 +113,28 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
     return
   if ep.state == {esRead} or ep.state == {esReadIgnore}:
     return
+  if not ep.gba_ref.bus.dma_active:
+    # A store outside a DMA burst is a frame of its own and ends the one in
+    # progress. The chip sees only the cart's /CS, /RD, /WR, A23 and AD0
+    # (GBATEK "GBA Cart Backup EEPROM", Pin-Outs). The cart latches an
+    # address on /CS falling and counts it up on each /RD or /WR (GBATEK
+    # "AUX GBA Game Pak Bus"), so /CS stays low through a sequential burst
+    # (a DMA's) and falls anew for each nonsequential access (a CPU load or
+    # store); GBATEK puts manual LDRH/STRH transfers failing down to that.
+    # One bit carries no command, so: a command still before its data is
+    # dropped and the chip is ready; a read already addressed keeps its
+    # data, and a write's stop bit counts as sent. A write cut short inside
+    # its data keeps the bits it got (Assumed, as is all of this beyond the
+    # pin-out). Columns Crown's boot (three stray stores before its first
+    # command DMA, docs/playtest-bugs.md §95) is the case the game pins;
+    # tests/roms/payloads/eestray.s on a cart would settle the rest.
+    if esAddress in ep.state or esWrite in ep.state:
+      ep.state = {esReady}
+      ep.wrote_bits = 0
+    else:
+      ep.state.excl(esWriteFinalBit)
+    ep.buffer.clear()
+    return
   let v = int(value and 1)
   ep.buffer.push(v)
   if ep.state == {esReady}:
@@ -128,6 +150,8 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
       ep.buffer.clear()
   elif esAddress in ep.state:
     if ep.eeprom_size.isNone:
+      # The burst carrying this bit is DMA3's (the only channel that writes
+      # the cart bus), so its count is this command's length
       ep.set_eeprom_size(some(eeprom_size_from_dma_length(int(ep.gba_ref.dma.dmacnt_l[3]))))
     if ep.buffer.size == ep.eeprom_size.get.addr_bits:
       ep.address = uint32(ep.buffer.value) and 0x3FF'u32

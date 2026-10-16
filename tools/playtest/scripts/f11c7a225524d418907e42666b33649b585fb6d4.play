@@ -11,19 +11,18 @@
 # [load]: with the names saved, START at the intro jumps to the title;
 # START, Survival, Easy: the character screen with both names.
 # Findings (docs/playtest-bugs.md §95): the boot's flash
-# probe stores 0xFF, 0x90, 0xFF to 0x0DFFFFFE; dingbat takes them as EEPROM
-# bits, sizes the chip from a stale DMA3 count as 64 Kbit and misparses
-# every command after, so it writes 8 KB of scattered bytes and on [load]
-# boots as if blank (and cannot read mgba's file either). mgba reads its
-# save (title, then JADE/RUBY at the character select). The second
-# reference writes the right bytes (512 of them since it is told 4 Kbit)
-# but still boots every save as a blank cart, so dingbat matched it and
-# the run passed on saves until the blank-cart control (playtest-bugs
-# §96): `mgba save in dingbat: shows a blank cart's screens`. Downstream,
-# dingbat's first boot is shorter and its intro runs 46 frames ahead
-# of mgba and 39 of the second reference: name_entry and mode_select SLIP
-# (not diagnostic) and the audio fails (17.6%). All dingbat configurations
-# agree.
+# probe stores 0xFF, 0x90, 0xFF to 0x0DFFFFFE before the first EEPROM DMA.
+# dingbat used to take them as EEPROM bits, size the chip from a stale DMA3
+# count as 64 Kbit and lose every save (8 KB of scattered bytes; [load]
+# booted as blank, mgba's file too), which the blank-cart control
+# (playtest-bugs §96) failed: `mgba save in dingbat: shows a blank cart's
+# screens`. Since 2026-10-16 a store outside a DMA is a serial frame of its
+# own and ends the command (storage/eeprom.nim): dingbat writes mgba's 512
+# bytes, reads every save back (title, then JADE/RUBY at the character
+# select), and its intro no longer runs ahead (intro_text, title, rankings
+# IDENTICAL to mgba). The second reference writes the same 512 bytes but
+# still boots every save as a blank cart. The console's rule for stray
+# stores: tests/roms/payloads/eestray4k.s on this cart.
 [new]
 wait 400
 wait 300

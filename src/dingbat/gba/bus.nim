@@ -976,7 +976,11 @@ proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
     if address_in_gpio(address):
       bus.gpio[address] = value
     elif bus.gba.storage.eeprom_at(address):
-      discard bus.gba.storage[address]  # eeprom write check
+      # A store, not a read: STRB pulses /WR, and the ARM7TDMI drives a
+      # stored byte on every lane of the data bus, so AD0 carries its bit 0.
+      # No DMA moves bytes, so it is a CPU store, a frame of its own
+      # (storage/eeprom.nim)
+      bus.gba.storage[address] = value
   of 0xE, 0xF:
     if bus.tilt_hit(address): bus.tilt_write(address, value)
     else: bus.gba.storage[address] = value

@@ -262,6 +262,17 @@ TABLE = {
     # Vision 1-1 set the frame the level starts on (payloads/eesettle4k.s).
     # Never with a 64 Kbit cart in the slot.
     'eesettle4k': [0x103, 0x102, 0x100, 0x101],
+    # a lone CPU access next to an EEPROM read request: the cart's last two
+    # blocks read cleanly, then the second again after a stray strh / strb
+    # (immediately, after an idle gap, a ready poll, a ROM read, a read of
+    # 0x09FFE000) or between the request and its data (Columns Crown's boot
+    # flash probe, docs/playtest-bugs.md §95; payloads/eestray.s). Read
+    # only: no cell stores a 0 to the chip. A 64 Kbit cart in the slot,
+    # booted holding SELECT+START; without a cart every cell answers DEAD0001
+    'eestray': list(range(9)),
+    # the same nine cells on a 4 Kbit cart (bit 8: 6-bit addresses), e.g.
+    # Columns Crown itself (payloads/eestray4k.s). Never with a 64 Kbit cart
+    'eestray4k': [0x100 | n for n in range(9)],
     # the cartridge flash chip's byte-program and sector-erase times (Mario
     # vs. Donkey Kong's level-clear save, Advance Wars' first boot): the ID,
     # the bare poll, a same-value program at SRAM 8 waits / WAITCNT 0 / with
@@ -346,7 +357,8 @@ TABLE = {
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
-NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat', 'flashprog', 'sramloop'}
+NEEDS_CART = {'eesettle', 'eesettle4k', 'eestray', 'eestray4k', 'sramfloat', 'flashprog',
+              'sramloop'}
 
 # rows the console has answered and no dingbat model matches yet: kept out of
 # lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61). The §79

@@ -1,5 +1,6 @@
 ## GBA cartridge RTC: the settable S-3511A clock and the battery-save RTC
-## trailer (src/dingbat/gba/rtc_calendar.nim, rtc.nim, storage.nim).
+## trailer (src/dingbat/gba/rtc_calendar.nim, rtc.nim, storage.nim), and the
+## EEPROM's serial frames (storage/eeprom.nim).
 ##
 ## Everything runs on synthetic ROMs (a few KB of zeros carrying the library
 ## ID strings the loader scans for) and drives the RTC through the GPIO port
@@ -10,7 +11,7 @@
 ##
 ## Run with: nimble test_gbartc
 
-import std/[os, strutils, tempfiles, times]
+import std/[options, os, strutils, tempfiles, times]
 import dingbat/gba/gba
 
 var failures = 0
@@ -542,6 +543,134 @@ block:  # EEPROM, no RTC: an 8192-byte file for a 4Kbit game keeps its length
   g3.storage.dirty = true
   g3.storage.write_save()
   check(readFile(sav_path(ee)).len == 0x2000, "no file, size undetected: 8192 bytes as before")
+
+# ===========================================================================
+echo "=== EEPROM: serial frames (CPU stores vs DMA bursts) ==="
+# The chip is driven the way a game's save library drives it: bitstreams in
+# IWRAM, one halfword per bit, moved by DMA3 (GBATEK "GBA Cart Backup
+# EEPROM"). A store outside a DMA is a frame of its own and carries no
+# command (eeprom.nim). Columns Crown's boot (docs/playtest-bugs.md §95)
+# probes for a flash chip with strh 0xFF, 0x90, 0xFF to 0x0DFFFFFE, and a
+# word read of 0x09FFE000, before its first command DMA.
+
+proc ee_rom(name: string): string =
+  ## make_rom with `b .` at the entry point, so frames can run
+  result = make_rom(name, ["EEPROM_V122"])
+  var rom = readFile(result)
+  for i, b in [0xFE'u8, 0xFF, 0xFF, 0xEA]: rom[i] = char(b)
+  writeFile(result, rom)
+
+const EE_BUF = 0x03000000'u32   # bitstream out
+const EE_IN = 0x03000400'u32    # bitstream in
+
+proc ee_dma(g: GBA; src, dst: uint32; count: int) =
+  g.bus.write_word(0x040000D4'u32, src)
+  g.bus.write_word(0x040000D8'u32, dst)
+  g.bus.write_half(0x040000DC'u32, uint16(count))
+  g.bus.write_half(0x040000DE'u32, 0x8000'u16)  # enable, 16-bit, immediate
+  g.step_frame()                                 # runs it, and settles a write
+
+proc ee_send(g: GBA; bits: seq[int]) =
+  for i, b in bits: g.bus.write_half(EE_BUF + uint32(2 * i), uint16(b))
+  g.ee_dma(EE_BUF, 0x0D000000'u32, bits.len)
+
+proc ee_addr_bits(a, n: int): seq[int] =
+  for i in countdown(n - 1, 0): result.add((a shr i) and 1)
+
+proc ee_read(g: GBA; blk: int; abits = 6): seq[byte] =
+  g.ee_send(@[1, 1] & ee_addr_bits(blk, abits) & @[0])
+  g.ee_dma(0x0D000000'u32, EE_IN, 68)
+  for i in 0 ..< 8:
+    var v = 0'u8
+    for b in 0 ..< 8:
+      let h = g.bus.read_half(EE_IN + uint32(2 * (4 + i * 8 + b)))
+      v = (v shl 1) or uint8(h and 1)
+    result.add(v)
+
+proc ee_write(g: GBA; blk: int; data: openArray[byte]; abits = 6) =
+  var bits = @[1, 0] & ee_addr_bits(blk, abits)
+  for x in data:
+    for b in countdown(7, 0): bits.add(int((x shr b) and 1))
+  g.ee_send(bits & @[0])
+
+proc flash_probe(g: GBA; half = true) =
+  ## Columns Crown's boot (0x08020344, then its routine at 0x08020324)
+  if half:
+    g.bus.write_half(0x0DFFFFFE'u32, 0xFF)
+    g.bus.write_half(0x0DFFFFFE'u32, 0x90)
+    discard g.bus.read_word(0x09FFE000'u32)
+    g.bus.write_half(0x0DFFFFFE'u32, 0xFF)
+  else:
+    g.bus[0x0DFFFFFE'u32] = 0xFF'u8
+    g.bus[0x0DFFFFFF'u32] = 0x90'u8
+    g.bus[0x0DFFFFFE'u32] = 0xFF'u8
+
+proc file_block(f: string; blk: int): seq[byte] =
+  for i in 0 ..< 8: result.add(uint8(f[blk * 8 + i]))
+
+block:  # stray stores, then a 4 Kbit read: sized by the command's own DMA
+  let ee = ee_rom("ee_stray")
+  let f = chip_image(0x200, 11)
+  writeFile(sav_path(ee), f)
+  let g = boot(ee)
+  let ep = EEPROM(g.storage)
+  g.flash_probe()
+  check(ep.state == {esReady} and ep.buffer.size == 0 and ep.eeprom_size.isNone,
+        "three CPU stores leave the chip ready and unsized", $ep.state & " " & $ep.buffer.size)
+  g.bus.write_half(0x040000DC'u32, 0x1234)  # an unrelated DMA3 count, as in the game
+  let got = g.ee_read(5)
+  check(ep.eeprom_size == some(eeprom4k) and g.storage.memory.len == 0x200,
+        "the 9-bit read request sizes the chip as 4 Kbit", $ep.eeprom_size)
+  check(got == file_block(f, 5), "block 5 reads back from a 512-byte file",
+        hex(got) & " want " & hex(file_block(f, 5)))
+  # a write after more stray stores lands on its block and nowhere else
+  g.flash_probe()
+  let data = [0xDE'u8, 0xAD, 0xBE, 0xEF, 0x01, 0x23, 0x45, 0x67]
+  g.ee_write(9, data)
+  var want = cast[seq[byte]](f)
+  for i in 0 ..< 8: want[72 + i] = data[i]
+  check(g.storage.memory == want, "a write after stray stores changes block 9 only")
+  check(g.ee_read(9) == @data, "and reads back")
+  g.storage.write_save()
+  check(readFile(sav_path(ee)) == cast[string](want), "the file is the 512 bytes the game wrote")
+  # a command cut short by its DMA, then a CPU store: the chip is ready again
+  g.ee_send(@[1, 0, 0, 1])
+  check(esAddress in ep.state, "a 4-bit DMA leaves a write command addressing")
+  g.bus.write_half(0x0D000000'u32, 1)
+  check(ep.state == {esReady} and ep.buffer.size == 0,
+        "a CPU store drops the command in progress", $ep.state)
+  check(g.ee_read(9) == @data and g.storage.memory == want,
+        "the next command is parsed from its first bit, nothing written")
+  # a read already addressed survives a stray store
+  g.ee_send(@[1, 1] & ee_addr_bits(5, 6) & @[0])
+  g.bus.write_half(0x0D000000'u32, 1)
+  g.ee_dma(0x0D000000'u32, EE_IN, 68)
+  var v = 0'u8
+  for b in 0 ..< 8: v = (v shl 1) or uint8(g.bus.read_half(EE_IN + uint32(2 * (4 + b))) and 1)
+  check(v == uint8(f[40]), "an addressed read keeps its data across a CPU store")
+
+block:  # byte stores are stores too (they used to clock a read bit)
+  let ee = ee_rom("ee_stray_b")
+  removeFile(sav_path(ee))
+  let g = boot(ee)
+  g.flash_probe(half = false)
+  check(EEPROM(g.storage).state == {esReady}, "three STRBs leave the chip ready")
+  let data = [1'u8, 2, 3, 4, 5, 6, 7, 8]
+  g.ee_write(0, data)
+  check(EEPROM(g.storage).eeprom_size == some(eeprom4k) and g.ee_read(0) == @data,
+        "a blank 4 Kbit chip: sized by the 73-bit write, which reads back")
+  g.storage.write_save()
+  check(readFile(sav_path(ee)).len == 0x200, "and saves 512 bytes")
+
+block:  # a 64 Kbit chip is still sized by its 17-bit read request
+  let ee = ee_rom("ee_64k")
+  let f = chip_image(0x2000, 3)
+  writeFile(sav_path(ee), f)
+  let g = boot(ee)
+  g.flash_probe()
+  let got = g.ee_read(0x155, 14)
+  check(EEPROM(g.storage).eeprom_size == some(eeprom64k) and got == file_block(f, 0x155),
+        "64 Kbit: block 0x155 reads back", hex(got))
 
 # ===========================================================================
 echo "=== Save states ==="

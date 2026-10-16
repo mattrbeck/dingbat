@@ -8588,7 +8588,7 @@ Driv3r and Asterix, and every cross-load is `unchanged=True`.
 Both changes touch only the second reference. The next baseline plays it
 live and will show which other games change.
 
-## §95. Columns Crown: three stray CPU stores at boot size the 4 Kbit EEPROM as 64 Kbit, and dingbat loses every save, 2026-10-15
+## §95. Columns Crown: three stray CPU stores at boot size the 4 Kbit EEPROM as 64 Kbit, and dingbat loses every save, 2026-10-15 (fixed 2026-10-16)
 
 **What the run shows.** Columns Crown (ACGE, `EEPROM_V122`, 4 Kbit) is
 new in the corpus. mgba writes a 512-byte file and the second reference
@@ -8640,9 +8640,143 @@ next page 30 frames before mgba and 23 before the second reference. The
 audio check counts 17.6% of the run against dingbat for the same reason.
 All four dingbat configurations agree (same 8 KB file, same hashes).
 
-**Status: open, no core change.** A fix would size the chip from the DMA
-that carries the command (or not let single CPU stores start one). That
-is a core change, left for review.
+**Status: fixed in the core, 2026-10-16.** (Until then: open, no core
+change; a fix would size the chip from the DMA that carries the command,
+or not let single CPU stores start one.)
+
+**What the hardware does.** GBATEK ("GBA Cart Backup EEPROM") is the
+spec here, and it says three things that bear on the stores:
+- *Pin-Outs:* the chip has 8 pins, wired to ROMCS, RD, WR, AD0, GND,
+  GND, A23 and VDD of the cart bus. It sees the cart's chip select, the
+  two strobes, A23 and data bit 0, and nothing else: not whether an
+  access came from the CPU or a DMA, and not the access's width.
+- *Using DMA:* "manual transfers via LDRH/STRH won't work; probably
+  because they don't keep /CS=LOW and A23=HIGH throughout the
+  transfer".
+- *Addressing:* the chip answers at 0x0DFFFF00..0x0DFFFFFF on any cart,
+  and anywhere in 0x0D000000..0x0DFFFFFF on a cart of 16 MB or less.
+  Columns Crown is 8 MB, and 0x0DFFFFFE is in the narrow window anyway:
+  the three stores reach the chip.
+
+"AUX GBA Game Pak Bus" adds how /CS moves: the cart latches A0..A15 on
+the falling edge of /CS and counts the latched address up on each
+rising /RD or /WR. A sequential burst sends no new address, so /CS stays
+low through it; a nonsequential access has to drop /CS and latch its
+address afresh. A DMA3 transfer to 0x0D000000 with the destination
+incrementing is one sequential burst (its later units take the S wait),
+so the chip sees a command as one /CS-low frame. A CPU `strh` is a
+nonsequential access of its own: one frame of one bit. A `strb` drives
+/WR like any store, and the ARM7TDMI puts a stored byte on every lane of
+the data bus, so AD0 carries the byte's bit 0 too (0xFF and 0x90 are 1
+and 0 either way; Columns Crown's three stores are all `strh`). The
+word read of 0x09FFE000 between them has A23 high as well (bit 24 of the
+address), so on this 8 MB cart the chip may see that read too.
+
+What one bit does to a command is not written down. The game pins one
+case: it ships saving, so the chip comes out of `1`, `0`, (a read), `1`
+ready for the library's first command DMA ~7000 cycles later (dingbat's
+timing: the stores at cycles ~40000-42550 of frame 5, the 9-bit read
+request by ~49600). A chip that shifted all three in would have taken
+`10` as a write command and every later command misaligned, and the
+game would lose its saves on a console. The simplest rule that fits the
+pin-out, GBATEK's reason, and the game is the frame: each /CS-low frame
+is one serial transfer, and one bit is no command. The probe below asks
+the console which rule it actually follows.
+
+**The change** (src/dingbat/gba/storage/eeprom.nim, bus.nim):
+- a store to the EEPROM outside a DMA burst (`bus.dma_active` false) is
+  a frame of its own. A command still before its data is dropped and
+  the chip is ready. A read already addressed keeps its data, and a
+  write's stop bit counts as sent. A write cut short inside its data
+  keeps the bits it had (Assumed). The store itself shifts nothing in.
+- a byte store is a store (it used to clock a read bit, a choice
+  inherited with the first Nim port).
+- the chip is still sized at its first address bit from DMA3CNT_L, but
+  that bit can now only come from a DMA, and only DMA3 writes the cart
+  bus: the count is the carrying command's (9 or 73 bits for 4 Kbit).
+- no new state: nothing in the save-state format changes (state, buffer,
+  address and the counters as before; a state saved mid-stray by an
+  older build loads and runs on as that build would have).
+
+Every DMA-driven game parses exactly as before: the new branch runs only
+for stores with no DMA running, and the settle time is untouched.
+
+**Results.** tests/gba_rtc_test.nim gained an EEPROM section: Columns
+Crown's three stores (and three `strb`s) leave the chip ready and
+unsized. A 9-bit read then sizes it 4 Kbit and reads a 512-byte file. A
+73-bit write lands on its block alone and saves 512 bytes. A command cut
+short by its DMA is dropped by a CPU store. An addressed read survives
+one. A 64 Kbit chip still sizes from its 17-bit request. Eleven of its
+checks fail on the old core. `playtest.py run` on Columns Crown:
+- all four dingbat configurations write 512 bytes byte-identical to
+  mgba's and the second reference's (sha1 6733f0993d).
+- every `[load]` cell reads its save: the title at once, then JADE and
+  RUBY at the character select, `continue_characters` IDENTICAL to mgba
+  in every configuration, `mgba-in-dingbat` too.
+- the boot now formats the blank chip for as long as the references do:
+  `intro_text`, `title` and `rankings` are IDENTICAL to mgba,
+  `name_entry` IDENTICAL to mgba and SLIP(-2) against the second
+  reference (mgba~second reference SLIP(-2)), `mode_select` SLIP(+1)
+  against mgba with the references 3 apart.
+- the audio check falls from 17.6% to 0.6% of the run (0.25 s at f1950).
+- the verdict is PASS in every configuration. The second reference
+  writes the right file but still boots blank on its own `[load]` (its
+  cells are MAJOR against everyone; not dingbat's).
+
+**Train** (20261016-040222-1c, on origin/main f74aa6a0): `changed`,
+fixed 1, regressed 0, neutral 0. Columns Crown goes FAIL -> PASS in all
+four configurations. On main it had failed on the audio (17.6%) and on
+§96's blank-cart control ("mgba save in dingbat: shows a blank cart's
+screens"). All six emulators' battery files are now one 512-byte file
+(sha1 6733f0993d). Every other game of the 206 matches the baseline in
+every hash: each checkpoint, the audio, the battery file and every
+`[load]` cell. That includes every EEPROM game's battery file, so no
+DMA-driven save path moved.
+
+**The console probe** (tests/roms/payloads/eestray.s, rows `eestray4k`
+for a 4 Kbit cart, `eestray` for a 64 Kbit one; NEEDS_CART, recorded per
+cart; predictions in tools/hwlink/predicted.py, written 2026-10-16
+before any console run).
+- *What it does:* reads the cart's last two blocks cleanly, L (address
+  all ones) and P (bit 0 clear). Then it reads P again with a stray
+  `strh 1` next to the request: at once (cell 1), after 16k idle cycles
+  (2), after a ready poll (3), after a ROM read (4); a `strb 1` (5); a
+  stray between the request and its 68-bit read (6); two strays (7);
+  and the stray then Columns Crown's word read of 0x09FFE000 (8).
+  Cell 0 repeats P.
+- *Why P and L:* a chip that shifts the stray in parses "1" + "11" + P
+  + "0" as a read of L with a valid stop bit, so the block that comes
+  back names the rule.
+- *Answer:* bits 28-31 are 0 = P (aligned), 1 = L (shifted), 2 =
+  neither, 3 = L and P equal (no answer from this cart); bits 24-27 are
+  the four bits GBATEK says to ignore; bits 0-23 are the data's first
+  three bytes.
+- *Safety, never a write:* every bit it writes is a 1 except the last
+  one or two of each read request, so the only `10` in the stream ends
+  a request, with at most two bits after it before the cell's barrier.
+  A write needs `10` plus 6 or 14 address bits plus 64 data bits. The
+  barrier between cells gives the chip every reset Columns Crown's boot
+  gives it: ~65k idle cycles, a ROM read, a ready poll, /CS rising.
+  No cell stores a 0.
+- *Emulators (`r0table.py eestray4k --emulators-only`):* the chip is
+  blank, so every cell answers code 3: dingbat 3FFFFFFF; mgba 30FFFFFF
+  (its ignored bits read 0), 3FFFFFFF in cell 6. Seeded with Columns
+  Crown's save, every byte unchanged afterwards:
+  - dingbat: 0F4F4300 (P) in every cell.
+  - dingbat before this fix: 1F000000 (L) in cells 1, 2, 3, 4, 7, 8.
+  - mgba: P in 0 and 5, neither (20FFFFFF) in 1-4 and 8, 2FFFFFFF in 6,
+    10FFFFFF in 7. It re-sized the chip to 64 Kbit on the way.
+- *Named hypotheses* (code nibble per cell):
+  - frame (dingbat now): every cell P.
+  - shift (every bit shifts in, nothing resets it): cells 1-5, 7, 8 not
+    P.
+  - timeout (an idle gap resets the parser): cell 2 P; 1, 3, 4, 5, 7, 8
+    not.
+  - readrst (a read the chip sees resets it): 3 and 8 P; 1, 2, 5, 7 not.
+  - romrst (a ROM access resets it): 4 P; 1, 2, 3, 5, 7, 8 not.
+- *To record:* Columns Crown's own cart (its save fills both blocks),
+  booted holding SELECT+START:
+  `python3 tools/hwlink/r0table.py --record eestray4k --cart=ACGE`.
 
 ## §96. The [load] matrix had no way to tell "did not read the save": a blank-cart control in each reference, 2026-10-16
 
