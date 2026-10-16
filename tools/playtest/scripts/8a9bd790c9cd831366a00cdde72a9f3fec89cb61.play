@@ -1,0 +1,99 @@
+@title Mech Platoon (USA)
+@file Mech Platoon (U) [!].gba
+@game AKGE
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# The opening text, START past the planet, title > START, Tenzan, A
+# through the story and the Tutorial Mission 1 briefing, INTERMISSION >
+# SYSTEM > SAVE > file 1: the game sits on the slot list for ~230 frames
+# while it writes, then "SAVE COMPLETE." (8 KB from all three, 75 bytes of
+# data, identical). B back to the intermission menu.
+# [load]: title (the cursor starts on CONTINUE once a save exists, so DOWN
+# lands on VS: UP back to CONTINUE) > the LOAD list showing FILE-1
+# (Tutorial Mission 1, 0:00) > A: the briefing, A through it to the
+# intermission menu.
+# The write takes a different time in each emulator, so SAVE COMPLETE.
+# goes away at f3353 in the second reference, f3360 in dingbat-bios and
+# f3368 in mgba (save_complete's window): each one's EEPROM busy time, no
+# two alike. The Tenzan picture (f1294-1354, static) and the story text
+# over it (story) differ in all three by one 5-bit step in scattered
+# pixels (blend rounding: max delta 1, the references 61% alike).
+
+[new]
+wait 400
+wait 300
+press START
+wait 120
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press A
+wait 120
+wait 60
+press A
+wait 90
+checkpoint story window=30
+tap A times=8 every=40 hold=4
+wait 60
+wait 120
+checkpoint briefing window=30
+# mash A until notext MISSION timeout=3000 every=30  [taps dingbat-bios:0 mgba:0 nba:0]
+wait 60
+tap A times=10 every=40 hold=4
+wait 30
+wait 60
+checkpoint intermission window=30
+tap UP times=3 every=15 hold=4
+wait 10
+press A
+wait 60
+checkpoint system_menu window=30
+press A
+wait 60
+checkpoint save_slots window=30
+press A
+wait 60
+press A
+wait 60
+wait 214
+checkpoint save_complete window=30
+wait 120
+checkpoint saved_slot window=30
+press B
+wait 60
+wait 30
+
+[load]
+wait 700
+press START
+wait 120
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+press DOWN
+wait 20
+press A
+wait 90
+press B
+wait 60
+press UP
+wait 20
+checkpoint menu_continue window=30
+press A
+wait 90
+checkpoint load_slots window=30
+press A
+wait 120
+# until notblank timeout=600 every=4  [reached dingbat-bios+8 mgba+8 nba+8]
+wait 12
+wait 90
+checkpoint loaded_briefing window=30
+tap A times=12 every=40 hold=4
+wait 120
+checkpoint loaded_intermission window=30
