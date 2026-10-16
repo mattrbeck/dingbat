@@ -18,9 +18,12 @@
 # one 2600 frame ahead) and crosses 26 times, so its save holds 0x1a
 # where the others hold 0x18. The room's cartridge-bubble
 # animation is in a different phase on all three from f600 (not
-# diagnostic). The pause dimming: dingbat and mgba blend to (6,9,4) from
-# (13,19,8), the second reference to (7,9,4) (its second target is not
-# black); the dimmed screens differ there on every pause.
+# diagnostic). The pause dimming is a brightness decrease of the 2600
+# screen (BLDCNT 0x20C4, BLDY 8): dingbat and mgba take (13,19,8) to
+# (6,9,4), dingbat by t*(16-EVY) >> 4 (the SP-photographed rounding,
+# docs/playtest-bugs.md §40), the second reference to (7,9,4) by
+# t - (t*EVY >> 4) with green worked at 6 bits; the dimmed screens differ
+# there on every pause.
 
 [new]
 wait 300
