@@ -65,8 +65,9 @@ def by_payload(rs):
     return groups
 
 
-def frames_for(count):
-    return 60 + 8 * count
+def frames_for(count, payload=None):
+    from r0table import FRAMES_PER_CELL
+    return 60 + FRAMES_PER_CELL.get(payload, 8) * count
 
 
 def in_emulators(rs, names=EMULATORS):
@@ -77,7 +78,8 @@ def in_emulators(rs, names=EMULATORS):
     for payload, group in by_payload(rs).items():
         args = [a for r in group for a in r.args]
         rom = payloadcmp.build_wrapper(source(payload), args)
-        words = payloadcmp.in_emulators(rom, len(args), names=names, frames=frames_for(len(args)))
+        words = payloadcmp.in_emulators(rom, len(args), names=names,
+                                        frames=frames_for(len(args), payload))
         for n in names:
             i = 0
             for r in group:

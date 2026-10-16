@@ -7034,6 +7034,65 @@ It also added the probes hdmarace, wakehb, obusdma16, fifolog and s0age,
 plus the psgrace sweep, each run in the emulators only. With no src/
 change, the train and the mGBA suite were not run.
 
+### Recording rows and the prediction score (2026-10-15)
+
+Each probe now has an `r0table.py` row, so `python3 tools/hwlink/r0table.py
+--record <row>` asks the console with an empty slot:
+
+| row | cells | arguments |
+|---|---|---|
+| timergeo | 7 | the table in item 3 |
+| wakehb | 8 | 0x80 0x90 0xA0 0xA8 0xE0 0xA2, controls 0x28 0x60 |
+| obusdma16 | 12 | row offsets 0..44 |
+| fifolog | 560 | k 1-4 × w 0/3 × n 0, 1, 11, 12, 20, 28, 29 × samples 0-9 |
+| s0age | 256 | k 0-15 × m 0, 2, 5, 7 × bits 8/9 |
+| psgrace | 256 | d 0-15 × c 0, 8, .., 120 |
+| hdmarace | 42 | k 2-7 × d 0-6, reader first in the sled |
+
+- obusdma16 answered only through `--block`. It now also returns the word
+  at `RESULTS + r0`; the rows' code is unchanged.
+- The rows are in `OPEN_ROWS`, so recording them leaves lawrom.py's ROMs and
+  laws.json as they are. hdmarace would also clash with the race ROM that
+  lawrom.py writes for hdmaobus under the same name.
+- psgrace's grid gives this item's sweep figures in dingbat: +0 alive
+  64/256, +16 dead 66/256, +8 alive 27/256, +12 alive 0/256.
+  `r0table.FRAMES_PER_CELL` gives each of its cells 80 frames.
+
+`tools/hwlink/predicted.py` holds every prediction set down before a
+console run, by row and cell. Each one is an emulator's answer as the
+passage gave it, or a named hypothesis's:
+- the seven rows above;
+- sramloop (§84), eesettle (§36, §68, §87, §89), eesettle4k (§40, §67,
+  §69) and flashprog (§64, §90);
+- hdmaobus and fiforeset, whose predictions were committed hours before
+  their 2026-10-02 recording.
+
+`r0table.py --score` prints each one's hit rate against r0-agb.json and
+lists the cells still unrecorded. It needs no emulator. With the console
+answers on file today:
+
+| row | hit rates |
+|---|---|
+| hdmaobus | dingbat 16/21; mGBA 16/21; the "predicted for the SP" column 16/16; the halted reader finding the line before's word 5/5; dingbat before the change 2/21 |
+| fiforeset | dingbat 18/18; mGBA 3/18; the second reference 6/18 |
+
+1169 predicted cells wait for the console.
+
+`r0table.py --drift` runs the emulators and compares each one with the
+answer it was predicted to give:
+- **fifolog, dingbat: 270/560.** The file was dingbat's answer at
+  a4f795a8: a driver built there gives 560/560, once bit 31 (the guard)
+  is set aside, since the file does not predict it. 6b79b303's FIFO
+  refill rules came after and moved it. mGBA gives 560/560.
+- **hdmaobus, dingbat:** 0x301-0x305 now answer the line before's word,
+  as the console does. The 2026-10-02 prediction was `0000` / `0300`.
+- **fiforeset, mGBA v = 1, k = 0:** `00010101`, where the header said 18 - k
+  (`12`). k = 1..8 do give 18 - k.
+- Every other emulator cell answers as predicted. That covers all of
+  timergeo, wakehb, obusdma16, s0age, psgrace, hdmarace and the cart rows.
+
+The predictions are not edited to match.
+
 ## §80. Gradius Galaxies: stage 1 a frame behind is the load queue's service order, a phase race at one V-blank; the +1 was the classifier's sign, 2026-10-14
 
 **Symptom.** In the baseline (main, 164 games) every dingbat configuration

@@ -50,6 +50,10 @@
 @ Emulators, 2026-10-14 (payloadcmp.py --emulators-only --block=0x02008000:13):
 @   dingbat and mGBA both H1 in every row; +44 DEADBEE3. No console run yet:
 @   the hypotheses above are the pre-registration.
+@
+@ r0 in: a row's offset (0, 4, .., 48); r0 out: that row's word, so each
+@ row is an r0table.py cell (row `obusdma16`). Every run does every row and
+@ leaves the block as before; the argument only picks the word returned.
     .arm
     .text
     .global _start
@@ -82,6 +86,7 @@
 
 _start:
     stmfd sp!, {r4-r11, lr}
+    and r11, r0, #0x3C             @ the row to answer with
     ldr r7,  =UNMAP
     ldr r10, =RESULTS
 
@@ -108,6 +113,7 @@ _start:
 
     ldr r0, =MARKER
     str r0, [r10, #48]
+    ldr r0, [r10, r11]
     ldmfd sp!, {r4-r11, lr}
     bx  lr
     .ltorg

@@ -3,6 +3,9 @@
     python3 r0table.py --record dmaphase     # console -> r0-agb.json (3 runs a cell)
     python3 r0table.py --check [dmaphase]    # the emulators against that file
     python3 r0table.py dmaphase 0x10 0x11    # ad hoc, console and emulators
+    python3 r0table.py wakehb --emulators-only   # a row's own arguments
+    python3 r0table.py --score [wakehb]      # pre-registered predictions' hit rate
+    python3 r0table.py --drift [wakehb]      # the emulators today against theirs
 
 A cell the console answers two ways is recorded with both answers and can
 never match one emulator answer; that is the point of keeping it. Where the
@@ -299,14 +302,62 @@ TABLE = {
     # slot, booted holding SELECT+START; without it every cell answers
     # DEAD0001
     'sramloop': [1, 2, 0x10, 0x40, 0x110, 0x140, 0x210, 0x240, 0x310, 0x340, 0x440],
+
+    # The §79 probes (docs/playtest-bugs.md, "The console cells nobody
+    # reproduces"), each with its answers predicted before any console run
+    # (predicted.py; `--score`). None needs a cartridge.
+    #
+    # the ÷64 divider's edge on line 103 to the cycle: e = 4..8 cycles before
+    # the read (bits 16-23) on line 103 (bits 8-15), then e = 54, 55 on line
+    # 100, where dingbat's edge is 16 cycles a line earlier (payloads/timergeo.s)
+    'timergeo': [0x46701, 0x56701, 0x66701, 0x76701, 0x86701, 0x366401, 0x376401],
+    # a running CPU's H-blank interrupt timed from a controlled cycle: wakeirq's
+    # cells with line 100's own H-blank as the source (bit 7), halted / plain /
+    # running / running with line 101's H-blank / TM2's stop; then the V-count
+    # controls 0x28 and 0x60, wakeirq's cells moved by 4 cycles (payloads/wakehb.s)
+    'wakehb': [0x80, 0x90, 0xA0, 0xA8, 0xE0, 0xA2, 0x28, 0x60],
+    # what a 16-bit DMA leaves in the two halves of the data bus, one NOP on:
+    # the row's offset, IWRAM / EWRAM sources at h2, h1, h3, h2 alone, the
+    # destination's lane swapped, DMA0 to the gamepak, and the 32-bit control
+    # (+44, DEADBEE3) (payloads/obusdma16.s)
+    'obusdma16': list(range(0, 48, 4)),
+    # fifoffff's refill stream at timer periods k = 1..4, w = 0 / 3 words
+    # stored first, n = 0, 1, 11, 12, 20, 28, 29 NOPs: the ten TM1 samples 3
+    # cycles apart (bits 24-27), sample 0 being fifoffff's own read. IWRAM
+    # source and k <= 4 only (the payload's SAFETY) (payloads/fifolog.s)
+    'fifolog': [i << 24 | k << 16 | w << 8 | n for k in (1, 2, 3, 4) for w in (0, 3)
+                for n in (0, 1, 11, 12, 20, 28, 29) for i in range(10)],
+    # what ends channel 1's slow shift-0 timing: a 16-phase sled k, spins m =
+    # 0, 2, 5, 7 (262144 .. 1572864 cycles from the master-on), with and
+    # without ch2's length-16 note (bit 8) and an NR10 = 0 write (bit 9), the
+    # §79 suggestion (payloads/s0age.s)
+    's0age': [b | m << 4 | k for m in (0, 2, 5, 7) for b in (0, 0x100, 0x200, 0x300)
+              for k in range(16)],
+    # psgfirst's page entered on a fixed cycle, d = 0..15 NOPs and c = 0, 8,
+    # .., 120 steps of 256 cycles across the 512 Hz sequencer: if its console
+    # spread is the entry phase, these 256 cells reproduce it (payloads/psgrace.s)
+    'psgrace': [c << 8 | d for c in range(0, 128, 8) for d in range(16)],
+    # hdmaobus's reader-first sled cells (k = 2..7) woken on a fixed cycle,
+    # d = 0..6 NOPs ahead of the arming's poll (bits 12-15): unanimous cells,
+    # dingbat's table or its rows rotated (payloads/hdmarace.s; RACES)
+    'hdmarace': [d << 12 | 0x100 | k for d in range(7) for k in range(2, 8)],
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
 NEEDS_CART = {'eesettle', 'eesettle4k', 'sramfloat', 'flashprog', 'sramloop'}
 
 # rows the console has answered and no dingbat model matches yet: kept out of
-# lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61)
-OPEN_ROWS = {'keyirq2', 'keyirq3'}
+# lawrom.py's frozen gate until one does (docs/playtest-bugs.md §61). The §79
+# probes are here from the start: they are recorded to score predictions
+# (`--score`), and one joins the gate once its cells are read and a model
+# matches them. hdmarace also names the race ROM lawrom.py writes for
+# hdmaobus (RACES), so it can never be frozen under its own name.
+OPEN_ROWS = {'keyirq2', 'keyirq3',
+             'timergeo', 'wakehb', 'obusdma16', 'fifolog', 's0age', 'psgrace', 'hdmarace'}
+
+# frames a cell needs in the emulators where the default 8 is too few:
+# psgrace's page plays ch2's whole note and the rows after it (~45 frames)
+FRAMES_PER_CELL = {'psgrace': 80}
 
 # racing cells: payload -> (variant, shift, phases). The variant is the same
 # probe with its entry phase fixed and walked by `phase << shift` in the
@@ -321,10 +372,22 @@ def source(name):
     return os.path.join(payloadcmp.ROMS, 'payloads', name + '.s')
 
 
-def in_emulators(name, args):
+def driver(name):
+    """The playtest driver behind an emulator name; 'ref2' is the second
+    reference (R0_EMULATORS=dingbat,mgba,ref2)."""
+    if name != 'ref2':
+        return name
+    sys.path.insert(0, os.path.join(payloadcmp.REPO, 'tools', 'playtest'))
+    import emu
+    return emu.REFERENCES[1]
+
+
+def in_emulators(name, args, names=None):
+    names = list(names or EMULATORS)
     rom = payloadcmp.build_wrapper(source(name), args)
-    got = payloadcmp.in_emulators(rom, len(args), names=EMULATORS, frames=60 + 8 * len(args))
-    return {n: [f'{w:08X}' for w in ws] for n, ws in got.items()}
+    got = payloadcmp.in_emulators(rom, len(args), names=[driver(n) for n in names],
+                                  frames=60 + FRAMES_PER_CELL.get(name, 8) * len(args))
+    return {n: [f'{w:08X}' for w in got[driver(n)]] for n in names}
 
 
 def on_console(name, args, runs):
@@ -352,7 +415,16 @@ def main(argv):
         tables.check(tables.rows(only=words or list(table)))
         return 0
 
-    name, args = words[0], [int(a, 0) for a in words[1:]] or [0]
+    if '--score' in flags:
+        import predicted
+        predicted.score(table, only=words)
+        return 0
+    if '--drift' in flags:
+        import predicted
+        return predicted.drift(only=words)
+
+    # no arguments: the row's own, or 0 for a payload without one
+    name, args = words[0], [int(a, 0) for a in words[1:]] or TABLE.get(words[0], [0])
     got = in_emulators(name, args)
     if '--emulators-only' not in flags:
         got['hardware'] = on_console(name, args, runs)
