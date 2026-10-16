@@ -1,0 +1,89 @@
+@title ChuChu Rocket! (USA)
+@file Chu Chu Rocket (U) (M5) [!].gba
+@game ACRE
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+
+# Language (English), SEGA, title, Mode Select > Puzzle (1P) > stage 1
+# (Normal): the one up-arrow panel goes on the bottom row's second square
+# (the cursor 5 left, 4 down from the centre), R starts the mice, all of
+# them go up that column: "Stage 01 CLEARED!", B back to the stage select,
+# stage 1 ticked. The game writes the language and the clear to its 64 KB
+# flash (92 bytes). [load]: the language screen is skipped, title, Puzzle:
+# stage 1 ticked, stage 1's board.
+# title: all three a few frames apart (dingbat 2 ahead of the second reference,
+# 8 ahead of mgba), the references 6 apart, so not diagnostic. The language
+# screen before it is IDENTICAL; between them the game makes its first flash
+# write, likely the flash chip's busy time again (docs/playtest-bugs.md §64).
+# continue_title: every dingbat configuration a frame behind both references
+# (IDENTICAL to each other). At boot the game runs a bitwise CRC-32 over its
+# 32,800-byte save copy in EWRAM, Thumb code in ROM with prefetch on
+# (WAITCNT 0x4017): dingbat spends 10,075k cycles on it, mGBA 10,009k (2 a
+# byte, in the call's pop/pop/bx and the bit loop's first pass after a ROM
+# literal load), so the screen after it starts past the next V-blank. A
+# prefetch accounting difference nobody has measured on the console.
+
+[new]
+wait 400
+# until notblank timeout=1500 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 120
+checkpoint language window=30
+press START
+wait 200
+# until text START timeout=1500 every=10  [reached dingbat-bios+390 mgba+400 nba+390]
+wait 404
+wait 60
+checkpoint title window=30
+press START
+wait 120
+checkpoint mode_select window=30
+press A
+wait 120
+press B
+wait 60
+press RIGHT
+wait 20
+press UP
+wait 20
+press A
+wait 120
+checkpoint stage_select window=30
+press A
+wait 150
+tap LEFT times=5 every=12 hold=4
+tap DOWN times=4 every=12 hold=4
+wait 10
+press A
+wait 30
+press R
+wait 500
+checkpoint puzzle_run window=30
+# until text CLEARED timeout=1500 every=10  [reached dingbat-bios+650 mgba+660 nba+650]
+wait 664
+wait 30
+checkpoint cleared window=30
+press B
+wait 120
+checkpoint stage_checked window=30
+[load]
+wait 400
+# until notblank timeout=1500 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 120
+# until text START timeout=1500 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 60
+checkpoint continue_title window=30
+press START
+wait 120
+press RIGHT
+wait 20
+press UP
+wait 20
+press A
+wait 120
+checkpoint stage_select_saved window=30
+press A
+wait 150
+checkpoint puzzle_board window=30
