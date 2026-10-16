@@ -1,0 +1,64 @@
+@title Famicom Mini - Xevious (Japan)
+@file Famicom Mini - Vol. 07 - Xevious (J).gba
+@game FXVJ
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Title, 1 PLAYER, area 1 firing zapper and blaster together for 40 taps,
+# the L+R menu (the first DOWN after the checkpoint is not taken, hence four)
+# > ハイスコアをセーブする: "ハイスコアをセーブしました", A back to the game.
+# The save is 17 bytes of the 4 Kbit EEPROM. The score never passes the
+# default 20000, so [load] shows the same HI-SCORE: title, 1 PLAYER, area 1.
+# From f611 (area 1's first frames) the second reference plays another
+# game: other Toroid waves, another explosion behind the menus. It ran a
+# frame ahead of dingbat-bios and mgba through the boot (f61 on; its boot
+# lead, docs/playtest-bugs.md §65), so START (f361) reached the NES program
+# on another of its frames. dingbat-bios and mgba hash alike on every frame
+# to f1200.
+# Audio (every dingbat configuration, against both references): clicks in
+# the silences (title f15, f150, f217, f284, f352; menus f1227-f1631). The
+# game plays through FIFO A only (timer 0, 32768 Hz), from three 160-byte
+# buffers at 0x03005D40/5DE0/5E80 that its timer 1 interrupt hands DMA 1 in
+# turn; they hold 00 in silence. Each click is the four bytes B9 23 00 08
+# (dingbat's output -284, 140, 0, 32: the bytes times four), the word at
+# 0x03005F20 just past the third buffer, the low half of a pointer
+# 0x080023B9. So about every 67 frames dingbat's FIFO DMA fetches one word
+# past the buffer before the interrupt restarts it; mgba never does. A
+# DMA-request against interrupt-latency race in dingbat, not traced further.
+# The second reference is not told this cartridge's 4 Kbit EEPROM size
+# (FXVJ is not in emu.py's EEPROM_4K): it writes 8 KB.
+
+[new]
+wait 300
+checkpoint title window=30
+press START
+wait 240
+checkpoint stage_start window=30
+tap A+B times=40 every=12 hold=4
+checkpoint gameplay window=30
+press L+R hold=10
+wait 60
+checkpoint menu window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 20
+checkpoint menu_save window=30
+press A
+wait 60
+wait 120
+checkpoint saved window=30
+press A
+wait 120
+[load]
+wait 300
+checkpoint continue_title window=30
+press START
+wait 240
+checkpoint stage_start window=30
+tap A times=20 every=12 hold=4
+checkpoint gameplay window=30
