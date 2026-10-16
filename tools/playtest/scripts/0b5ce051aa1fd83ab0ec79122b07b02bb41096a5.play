@@ -1,0 +1,132 @@
+@title Custom Robo GX (Japan)
+@file Custom Robo GX (J).gba
+@game ARJJ
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Title, 最初から > file 1, name ああ, はい: the game creates the file at
+# once (ファイルを作成しています, then 作成に成功しました: 8 KB from all
+# three, identical), the main menu, シナリオモード: Mum's wake-up talk,
+# リビングへ行く (まだねる loops back to bed), the Standard Pod from Dad,
+# the eye-contact register, the town map, RIGHT to the Robo Station, the
+# lounge, the robo customise screen, START: the pre-battle menu.
+# The first battle can't be frozen: from GO! (f15716) the rebirth cube
+# lands on another face in each emulator (dingbat-bios and mgba 2, the
+# second reference 3) and the fight goes three ways, so [new] stops at the
+# pre-battle menu; the file made at the start is the save.
+# [load]: title > つづきから > file 1 (ああ, robo 1, parts 4, 0:00) > A,
+# the main menu, シナリオモード: Mum's talk again with the name.
+# The file-creation message goes at f1846 in the second reference, f1857
+# in dingbat-bios and f1869 in mgba (creating_file's window): the EEPROM
+# busy time, different in all three, as in Mech Platoon. The blinking ▼ of
+# 作成に成功しました (file_created) keeps each one's phase from there
+# (dingbat-bios a frame from mgba, eight from the second reference).
+
+[new]
+wait 400
+wait 300
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_menu window=30
+press A
+wait 120
+press A
+wait 120
+checkpoint name_entry window=30
+press A
+wait 15
+press A
+wait 15
+press START
+wait 30
+press A
+wait 180
+checkpoint creating_file window=30
+# until changed timeout=1200 every=4  [reached dingbat-bios+8 mgba+4 nba+12]
+wait 16
+wait 60
+wait 30
+checkpoint file_created window=30
+press A
+wait 200
+checkpoint main_menu window=30
+press A
+wait 240
+checkpoint scenario_start window=30
+tap A times=20 every=30 hold=4
+wait 30
+tap A times=30 every=30 hold=4
+wait 30
+wait 120
+press A
+wait 120
+tap A times=40 every=25 hold=4
+wait 30
+# until notblank timeout=1200 every=4  [reached dingbat-bios+148 mgba+148 nba+148]
+wait 152
+wait 60
+wait 120
+press A
+wait 60
+wait 150
+press A
+wait 90
+press A
+wait 90
+checkpoint room_choice window=30
+press DOWN
+wait 12
+press A
+wait 120
+tap A times=10 every=60 hold=4
+checkpoint got_pod window=30
+tap A times=10 every=60 hold=4
+tap A times=15 every=60 hold=4
+tap A times=5 every=60 hold=4
+tap A times=5 every=60 hold=4
+tap A times=10 every=60 hold=4
+tap A times=10 every=60 hold=4
+tap A times=10 every=60 hold=4
+checkpoint living_room window=30
+tap A times=3 every=60 hold=4
+press A
+wait 90
+press A
+wait 90
+press A
+wait 90
+press A
+wait 120
+checkpoint town_map window=30
+press RIGHT
+wait 60
+press A
+wait 120
+checkpoint robo_station window=30
+tap A times=10 every=60 hold=4
+tap A times=10 every=60 hold=4
+tap A times=15 every=60 hold=4
+tap A times=15 every=60 hold=4
+checkpoint customize window=30
+press START
+wait 120
+checkpoint battle_menu window=30
+
+[load]
+wait 1000
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_menu window=30
+press A
+wait 90
+wait 20
+checkpoint file_info window=30
+press A
+wait 200
+checkpoint main_menu window=30
+press A
+wait 240
+checkpoint scenario_start window=30
