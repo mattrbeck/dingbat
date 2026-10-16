@@ -1,0 +1,49 @@
+@title bit Generations - Orbital (Japan)
+@file Bit Generations Orbital (J).gba
+@game BVEJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing is written to SRAM through the menus and the first minute of stage 1 (the references leave blank 32 KB files, dingbat none); the first save needs a stage cleared, and steering the star into a captured orbit by A's gravity alone was not found by sight in the time given
+
+# Health warning, A, the ORBITAL logo, START, "PRESS START", START, select
+# galaxy 1, stage 1 (CLEAR TIME --:--), A: the stage. The star (the white
+# dot the camera follows) drifts; A held for 120 frames pulls it onto the
+# nearer red planet's orbit ring and it loses one of its five lives on the
+# planet, then A for 30 more frames sends it drifting past a blue body.
+# press_start: mgba a frame from dingbat and the second reference (IDENTICAL
+# to each other) on the blinking "PRESS START": mgba alone.
+
+[new]
+wait 300
+checkpoint warning window=30
+press A
+wait 300
+wait 120
+checkpoint logo window=30
+press START
+wait 120
+checkpoint press_start window=30
+press START
+wait 120
+checkpoint galaxy_select window=30
+press A
+wait 150
+checkpoint stage_select window=30
+press A
+wait 200
+wait 200
+checkpoint stage1 window=30
+wait 120
+hold A
+wait 60
+wait 60
+release
+wait 60
+wait 60
+wait 120
+hold A
+wait 30
+release
+wait 30
+wait 60
+checkpoint drifting window=30
