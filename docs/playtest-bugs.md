@@ -9475,7 +9475,11 @@ backgrounds). Not traced further: which boot frame makes the extra draw.
 **Polarium Advance (E): the second reference crashes at boot.** By f4 its
 PC runs through 0x98xxxxxx with SP 0xFFBAEFF8 (at f1-f2 it is in the word
 copy at 0x0802F4FE, 968 bytes from 0x082262E8 to 0x03004E40); the screen
-stays black. Recorded with `--emus dingbat-bios,mgba`. `lessons_done` is
+stays black. Recorded with `--emus dingbat-bios,mgba`. Not §94's entry
+CPSR: the crash is the same with the driver's I/F clearing turned off, and
+booted through the BIOS (`--run-bios`) the second reference reaches the
+game, so its skipped boot leaves some other state the BIOS sets (not
+chased; the reference's own problem). `lessons_done` is
 SLIP +2 against mGBA: the first frame after the flash record is written,
 as in §64 (not traced). The save is identical in dingbat and mGBA.
 
