@@ -25,8 +25,8 @@
 # 0x080023B9. So about every 67 frames dingbat's FIFO DMA fetches one word
 # past the buffer before the interrupt restarts it; mgba never does. A
 # DMA-request against interrupt-latency race in dingbat, not traced further.
-# The second reference is not told this cartridge's 4 Kbit EEPROM size
-# (FXVJ is not in emu.py's EEPROM_4K): it writes 8 KB.
+# When authored the second reference was not told this cartridge's 4 Kbit
+# EEPROM size and wrote 8 KB; FXVJ is in emu.py's EEPROM_4K since (§94).
 
 [new]
 wait 300
