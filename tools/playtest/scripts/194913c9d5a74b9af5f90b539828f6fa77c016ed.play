@@ -1,0 +1,55 @@
+@title Midway's Greatest Arcade Hits (USA)
+@file Midway's Greatest Arcade Hits (U) [!].gba
+@game AM3E
+@save none
+@chip none (no save library string; no battery save: the cabinet menu offers the four games and nothing else, and no emulator writes a byte)
+@frozen dingbat-bios,mgba,nba
+
+# Legal screen, logos, the cabinet menu on Defender; A, its title, START,
+# SELECT, A starts; thrust right firing (A), climb, dive, smart-bomb taps
+# (B); START = GAME PAUSED, START+SELECT = QUIT?, B = yes: back to the
+# menu, RIGHT x2 to Joust; A, its title, START, A starts; flap (A) right,
+# left, right among the first buzzard riders. No [load].
+# Every checkpoint is identical in all six (the legal screen's fade-in at
+# f300 is on another step in each, off the checkpoints).
+
+[new]
+wait 1500
+checkpoint menu_defender window=30
+press A after=180
+wait 240
+checkpoint defender_title window=30
+press START after=120
+press SELECT after=120
+press A after=120
+hold RIGHT
+tap A times=15 every=12 hold=4
+hold RIGHT+UP
+tap A times=10 every=12 hold=4
+hold RIGHT+DOWN
+tap A times=10 every=12 hold=4
+release
+checkpoint defender_play window=30
+hold UP
+wait 40
+release
+tap B times=10 every=8 hold=4
+press START after=60
+checkpoint defender_paused window=30
+press START+SELECT hold=10 after=120
+press B after=180
+press RIGHT after=60
+press RIGHT after=60
+checkpoint menu_joust window=30
+press A after=300
+press START after=180
+press A after=180
+checkpoint joust_start window=30
+hold RIGHT
+tap A times=20 every=10 hold=4
+hold LEFT
+tap A times=20 every=12 hold=4
+hold RIGHT
+tap A times=20 every=14 hold=4
+release
+checkpoint joust_play window=30
