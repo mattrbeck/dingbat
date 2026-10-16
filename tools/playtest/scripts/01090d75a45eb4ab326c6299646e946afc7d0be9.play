@@ -1,0 +1,80 @@
+@title Namco Museum (USA)
+@file Namco Museum (U) [!].gba
+@game ANME
+@save none
+@chip none (no save library string; no battery save: Ms. Pac-Man's Settings (lives 3 -> 5) and a new high score were tried while authoring and no emulator wrote a byte; HIGH starts at the arcade default every boot)
+@frozen dingbat-bios,mgba,nba
+
+# Logos, title, START: the game carousel on Ms. Pac-Man; A (full screen),
+# A starts; steer round the first maze; START = pause (Continue / Quit
+# Game / Main Menu), Main Menu, YES; RIGHT x2 to Dig Dug; A, A starts;
+# dig down and across, pump (A) at the Pookas, START = pause. No [load].
+# Seen: the carousel's ring backdrop and the arcade marquee lights are in
+# another phase in each of the three (not diagnostic). Ms. Pac-Man: every
+# dingbat configuration shows the second reference's frame, mgba runs a
+# frame ahead. Dig Dug's dirt is BG0 under a brightness decrease (BLDCNT
+# 0x01C1, BLDY 1, rewritten each frame by 0x0800210C), and the three round
+# it three ways, on every frame: raw (25,12,0) (21,4,0) (18,0,0) become
+# (23,11,0) (19,3,0) (16,0,0) in dingbat, t*(16-EVY) >> 4, the darken
+# rounding taken from the SP photographs of blendprobe.gba
+# (docs/playtest-bugs.md §40); (24,11,0) (20,3,0) (17,0,0) in mgba; and
+# t - (t*EVY >> 4) with green worked at 6 bits, (23,11,0) (20,4,0)
+# (17,0,0), in the second reference. Same frames, different colours: not
+# diagnostic.
+
+[new]
+wait 840
+checkpoint title window=30
+press START after=120
+checkpoint menu_ms_pac_man window=30
+press A after=180
+press A after=120
+wait 60
+wait 120
+hold LEFT
+wait 90
+hold UP
+wait 60
+hold RIGHT
+wait 90
+hold DOWN
+wait 60
+hold LEFT
+wait 60
+release
+checkpoint ms_pac_man_play window=30
+press START after=60
+checkpoint ms_pac_man_paused window=30
+press DOWN after=20
+press DOWN after=20
+press A after=120
+press A after=120
+press RIGHT after=60
+press RIGHT after=60
+checkpoint menu_dig_dug window=30
+press A after=180
+press A after=120
+wait 60
+wait 60
+hold DOWN
+wait 90
+hold LEFT
+wait 60
+release
+tap A times=10 every=10 hold=5
+hold DOWN
+wait 60
+hold RIGHT
+wait 90
+release
+tap A times=10 every=10 hold=5
+checkpoint dig_dug_play window=30
+hold UP
+wait 60
+hold LEFT
+wait 60
+release
+tap A times=10 every=10 hold=5
+checkpoint dig_dug_later window=30
+press START after=60
+checkpoint dig_dug_paused window=30
