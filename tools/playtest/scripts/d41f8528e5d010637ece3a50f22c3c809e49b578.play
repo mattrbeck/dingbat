@@ -1,0 +1,115 @@
+@title Crazy Taxi - Catch a Ride (USA)
+@file Crazy Taxi - Catch a Ride (U).gba
+@game A3CE
+@chip EEPROM (EEPROM_V122; a 4 Kbit chip, dingbat and mgba write 512 bytes)
+@frozen dingbat-bios,mgba,nba
+
+# Logos, title, CRAZY TAXI > NORMAL RULES (the first A there is not taken)
+# > CITY 1 > AXEL, A held to drive into the wall, released: the taxi rolls
+# into a customer (fare $1,491.00), START pauses and resumes, and the clock
+# runs out with the fare undelivered. RESULT ($0.00, 99TH), SELECT YOUR
+# NAME > REGISTER A NEW NAME > "AAA", back at MODE SELECTION, SAVE & LOAD
+# > SAVE > YES. [load]: RECORDS lists "AAA RECORDS", opened.
+# Findings (recorded 2026-10-16):
+# - mgba stands alone in the race (driving DIFFERENT, paused MAJOR): in the
+#   live session its loading screen ran behind (clock icon, READY/SET/GO),
+#   and its taxi meets the wall and the customer on other frames; dingbat
+#   and the second reference share every checkpoint frame there.
+# - select_name: dingbat alone, by one red step on the translucent
+#   "A-CONFIRM" bar (rows 145-158, (27,26,12) against (28,26,12)): §72's
+#   blend rounding; dingbat truncates as the SP's blendprobe photographs
+#   do, mGBA blends colours widened to 8 bits and the second reference
+#   rounds.
+# - Audio: one window (f15690, the menu sound as SAVE & LOAD is chosen)
+#   has another spectrum on dingbat than on both references; mgba and the
+#   second reference differ from each other in 193 of 1110 windows.
+# - The second reference writes an 8 KB file (A3CE is not in emu.py's
+#   EEPROM_4K) and its [load] shows "--- RECORDS": it loses its own save.
+[new]
+wait 870
+wait 60
+wait 810
+checkpoint title window=30
+wait 300
+press START
+wait 180
+checkpoint mode_select window=30 compare=text
+press A
+wait 120
+wait 60
+press A
+wait 120
+press A
+wait 180
+wait 60
+press A
+wait 150
+wait 60
+press A
+wait 300
+checkpoint loading window=30
+wait 540
+wait 60
+wait 120
+hold A
+wait 300
+checkpoint driving window=30
+hold A+LEFT
+wait 60
+hold A
+wait 300
+wait 60
+release
+wait 2400
+press START
+wait 60
+checkpoint paused window=30 compare=text
+press START
+wait 6900
+wait 300
+checkpoint result window=30
+press A
+wait 150
+press START
+wait 150
+press A
+wait 450
+checkpoint select_name window=30
+press A
+wait 120
+wait 60
+press A
+wait 20
+press A
+wait 20
+press A
+wait 120
+wait 60
+tap DOWN times=4 every=20 hold=4
+wait 20
+press A
+wait 120
+wait 60
+press A
+wait 90
+wait 60
+press A
+wait 120
+checkpoint saved window=30
+
+[load]
+wait 1980
+press START
+wait 180
+checkpoint mode_select window=30 compare=text
+tap DOWN times=3 every=20 hold=4
+wait 20
+press A
+wait 120
+checkpoint records window=30 compare=text
+press DOWN
+wait 20
+press A
+wait 120
+checkpoint aaa_records window=30
+
