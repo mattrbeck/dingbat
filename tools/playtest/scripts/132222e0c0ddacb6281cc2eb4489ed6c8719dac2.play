@@ -1,0 +1,59 @@
+@title Sigma Star Saga (USA)
+@file Sigma Star Saga (U).gba
+@game B3GE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+@save skip: the first save is past the opening shoot-'em-up mission (on the planet, after the Krill mothership); the mission ends in GAME OVER at f15320 under constant fire unless it is flown well, and from f10320 on the three emulators take different damage (below), so no frozen route through it holds on all of them. The 512-byte EEPROM written here holds 2 bytes from the boot.
+
+# WayForward logo, START skips the intro, title, PRESS START, FILE SELECT >
+# the first NEW GAME, Ian's story text, START skips into the first mission:
+# fire (A) through the city, the mountains, the Krill boss and the clouds,
+# up to where the squadron joins (f9920) and a little beyond.
+# All three emulators are on the same frame through squadron; at wingmen
+# (f10180) mgba is 2 frames off (SLIP -2) and every dingbat configuration
+# matches nba. Played on in the live session (f10320 to f15320): the screens
+# split there (mgba first, then all three: the cloud scroll, the HP bar and which
+# shots hit differ), and at f15020 the ship is down in mgba and nba but
+# still flying in dingbat-bios; every one reaches GAME OVER by f15320.
+# nba writes an 8 KB EEPROM file, the others 512 bytes.
+
+[new]
+wait 600
+wait 300
+press START
+wait 120
+wait 60
+checkpoint title window=30
+press START
+wait 90
+# until notblank timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 60
+wait 90
+checkpoint file_select window=30
+press A
+wait 120
+wait 300
+checkpoint story window=30
+tap A times=20 every=30 hold=4
+press START
+wait 120
+wait 120
+wait 180
+checkpoint ready window=30
+tap A times=15 every=10 hold=5
+tap A times=30 every=10 hold=5
+tap A times=60 every=10 hold=5
+tap A times=60 every=10 hold=5
+checkpoint shmup window=30
+tap A times=60 every=10 hold=5
+tap A times=90 every=10 hold=5
+tap A times=120 every=10 hold=5
+press UP hold=12
+tap A times=60 every=10 hold=5
+tap A times=90 every=10 hold=5
+tap A times=90 every=10 hold=5
+checkpoint squadron window=30
+tap A times=20 every=10 hold=5
+checkpoint wingmen window=30
+
