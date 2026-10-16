@@ -1,0 +1,166 @@
+@title Need for Speed - Underground 2 (USA, Europe) (En,Fr,De,It)
+@file Need for Speed - Underground 2 (UE) (M4).gba
+@game BNFE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+# English flag, EA logo, the safety notice, the intro (START), PRESS START,
+# ENTER NAME "A" (A, then the tick), the garage: buy the Nissan 240SX (the
+# first A meets CONFIRM PURCHASE? on NO; RIGHT, A buys it), main menu with
+# 0 PTS. By then the 512-byte EEPROM holds the profile (105 bytes of data,
+# identical in dingbat-bios and mgba). [new] carries on: PROFILE > VIEW
+# PROFILE, back out through PROFILE > OPTIONS, RACE NOW > CUSTOM RACE >
+# CIRCUIT > City Hall, the race start, A held for 240 frames, pause, QUIT >
+# YES, main menu. [load]: the profile loads straight to the main menu after
+# PRESS START; PROFILE > VIEW PROFILE.
+# Notes: the garage car and the track tile rotate at a rate that follows the
+# game's rendered frames; dingbat-bios and the second reference show the same
+# angle at garage (f3102) and mgba another. RACE NOW > RANDOM RACE (not in
+# the script) rolled a different event on each emulator at f5310 (drift on
+# dingbat-bios, time trial on mgba, drag on the second reference). The
+# second reference writes an 8 KB file; booting it, it asks for a name again
+# (it does not read back what it wrote).
+# press_start (dingbat alone, SLIP -2/-1): all three show the same PRESS
+# START frame at f2398, but the blink's first change lands on f2427 in mgba,
+# f2428 in the second reference and f2429 in dingbat: the title's load ends
+# a frame or two later on dingbat, the references' cheap loads (§29).
+# paused (dingbat alone, MINOR): two pixels at the end of line 159 show the
+# backdrop, which the pause writes once: 0x4900 at f6515 on dingbat, 0x1040 at
+# f6514 on mgba (the second reference shows mgba's colour). The value follows
+# the race behind the pause (racing already differs in all three): with
+# START three frames later mgba writes 0x24A0 at f6518 instead.
+
+[new]
+wait 600
+wait 20
+checkpoint language window=30
+press A
+wait 300
+wait 60
+wait 400
+checkpoint psa window=30
+press A
+wait 200
+# until notblank timeout=1500 every=10  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
+wait 120
+checkpoint intro window=30
+press START
+wait 200
+wait 60
+press START
+wait 200
+checkpoint press_start window=30
+press START
+wait 200
+checkpoint name_entry window=30
+press DOWN
+wait 20
+press A
+wait 30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 20
+press RIGHT
+wait 20
+press RIGHT
+wait 20
+checkpoint name_a window=30
+press A
+wait 120
+checkpoint garage window=30
+press A
+wait 120
+wait 60
+press A
+wait 150
+press A
+wait 60
+press RIGHT
+wait 20
+press A
+wait 150
+checkpoint main_menu window=30
+tap DOWN times=4 every=20 hold=4
+wait 20
+press A
+wait 120
+press A
+wait 90
+checkpoint view_profile window=30
+press B
+wait 60
+press B
+wait 90
+tap DOWN times=4 every=20 hold=4
+wait 20
+press A
+wait 120
+wait 60
+press UP
+wait 30
+press B hold=10
+wait 90
+press B hold=10
+wait 90
+tap UP times=4 every=20 hold=4
+wait 20
+press A
+wait 120
+press DOWN
+wait 20
+press A
+wait 200
+wait 60
+press A
+wait 150
+wait 60
+press A
+wait 150
+wait 60
+press A
+wait 300
+checkpoint race_start window=30
+hold A
+wait 240
+checkpoint racing window=30
+release
+press START hold=10
+wait 60
+checkpoint paused window=30
+press DOWN
+wait 20
+press A
+wait 200
+press RIGHT
+wait 20
+press A
+wait 300
+checkpoint back_to_menu window=30
+
+
+[load]
+wait 620
+wait 60
+press A
+wait 820
+press A
+wait 234
+wait 120
+press START
+wait 200
+wait 300
+checkpoint press_start window=30
+press START
+wait 200
+checkpoint loaded_menu window=30
+tap DOWN times=4 every=20 hold=4
+wait 20
+press A
+wait 120
+press A
+wait 90
+checkpoint loaded_profile window=30
+
