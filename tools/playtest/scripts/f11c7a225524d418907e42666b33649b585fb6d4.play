@@ -5,11 +5,23 @@
 @frozen dingbat-bios,mgba,nba
 
 # First boot: the story intro (A through its pages), the two name screens
-# (JADE and RUBY kept with START), then the title; the game writes its
-# EEPROM when the names are confirmed. Survival Mode, Easy, Jade, DOWN held
-# until GAME OVER, NO at CONTINUE?, then Options > Rankings > Survival.
+# (JADE and RUBY kept with START), then the title; the EEPROM keeps the
+# names. Survival Mode, Easy, Jade, DOWN held until GAME OVER (no ranked
+# score), NO at CONTINUE?, then Options > Rankings > Survival.
 # [load]: with the names saved, START at the intro jumps to the title;
 # START, Survival, Easy: the character screen with both names.
+# Findings (docs/playtest-bugs.md §NEXT, Columns Crown): the boot's flash
+# probe stores 0xFF, 0x90, 0xFF to 0x0DFFFFFE; dingbat takes them as EEPROM
+# bits, sizes the chip from a stale DMA3 count as 64 Kbit and misparses
+# every command after, so it writes 8 KB of scattered bytes and on [load]
+# boots as if blank (and cannot read mgba's file either). mgba reads its
+# save (title, then JADE/RUBY at the character select). The second
+# reference writes the right bytes but also loses its save (ACGE missing
+# from EEPROM_4K, §94), so the run PASSes on play and saves. Downstream,
+# dingbat's first boot is shorter and its intro runs 46 frames ahead
+# of mgba and 39 of the second reference: name_entry and mode_select SLIP
+# (not diagnostic) and the audio fails (17.6%). All dingbat configurations
+# agree.
 [new]
 wait 400
 wait 300

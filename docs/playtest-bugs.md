@@ -8587,3 +8587,59 @@ Driv3r and Asterix, and every cross-load is `unchanged=True`.
 
 Both changes touch only the second reference. The next baseline plays it
 live and will show which other games change.
+
+## §NEXT. Columns Crown: three stray CPU stores at boot size the 4 Kbit EEPROM as 64 Kbit, and dingbat loses every save, 2026-10-15
+
+**What the run shows.** Columns Crown (ACGE, `EEPROM_V122`, 4 Kbit) is
+new in the corpus. mgba writes a 512-byte file and the second reference
+an 8 KB one whose first 512 bytes are byte-identical to mgba's. dingbat
+writes 8 KB with 51 bytes scattered across the whole file
+(0x000, 0x060, 0x300, 0x698, 0xC00, 0x1048, ...). On `[load]` dingbat boots
+exactly as on a blank cart: the frame at f1600 has the `[new]` run's hash,
+the intro cannot be skipped and the name screens come back. Seeded with
+mgba's good file it does the same (`mgba-in-dingbat`: MAJOR against mgba's
+own run at every checkpoint). mgba skips to the title and shows both names
+at the character select.
+
+**The harness passes it.** The second reference also loses its own save
+(ACGE is not in `EEPROM_4K`; §94), so dingbat with its own save matches
+the second reference with its own, and each cell is judged against the
+emulator's own run. The verdict is PASS on play and saves; only the
+audio fails (below).
+
+**Cause.** At boot (f5, before the first EEPROM DMA) the game probes for
+an Intel-style flash chip: `strh 0xFF` to 0x0DFFFFFE (0x08020344), then a
+routine copied to the stack stores 0x90 there, reads 0x09FFE000 and stores
+0xFF again (0x08020324). dingbat's EEPROM takes the three CPU stores as
+serial bits 1, 0, 1: a write command and the first address bit. At that
+bit it sizes the chip from DMA3CNT_L (`eeprom_size_from_dma_length`),
+which still holds an unrelated DMA's count, so the chip becomes 64 Kbit
+(the saved state at f5: `eeprom_size` 2, state 0x38, one bit buffered).
+The library's own first DMA (0x03007E2C to 0x0D000000, count 9, the 4 Kbit
+read request; `IdentifyEeprom(4)` was called just before) then lands in
+the middle of that write command, and every later command is parsed with
+14 address bits.
+
+mGBA ends any command on a single-bit CPU store (`GBASavedataWriteEEPROM`
+with `writeSize` 1), so the three stores leave it ready, and it sizes from
+the addresses it is sent. The second reference parses the session's
+commands with 6 address bits too (its first 512 bytes match mgba's). The
+game shipped saving, so the console's chip also comes out of the probe
+ready for the library's DMA.
+
+**Downstream.** The first boot writes the blank chip and waits out each
+block's programming time. dingbat shows its first picture at f20, the
+second reference at about f59, mgba at f66: 39 and 46 frames longer, in
+proportion to their programming times (~101000 and 115000 cycles a block;
+§67). With its chip misaligned, dingbat's boot is that much shorter (not
+traced block by block). The intro stays that far ahead:
+`name_entry` SLIP(+22)/(+19), `mode_select` SLIP(-4)/(-7) (both "not
+diagnostic", the references a few frames apart), and after an A press on
+a page where all three wait (`intro_text` IDENTICAL) dingbat starts the
+next page 30 frames before mgba and 23 before the second reference. The
+audio check counts 17.6% of the run against dingbat for the same reason.
+All four dingbat configurations agree (same 8 KB file, same hashes).
+
+**Status: open, no core change.** A fix would size the chip from the DMA
+that carries the command (or not let single CPU stores start one). That
+is a core change, left for review.
