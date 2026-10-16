@@ -8715,3 +8715,73 @@ one problem above (it failed on audio already; without that it would have
 gone from PASS to FAIL). `tests/test_crossload.py` covers the matrix rules.
 Cost: two more reference `[load]` runs per game whenever the references play
 live (over the 148: about 23 s for the second reference, 4 s for mgba).
+
+## §97. Famicom Mini: a 128-tall OBJ at Y=154 belongs at the top, and Xevious's FIFO DMA reads past its buffer; ChuChu Rocket's save CRC, 2026-10-16
+
+Three new corpus games with a difference in dingbat alone. All four
+dingbat configurations agree in each.
+
+**Akumajou Dracula (FADJ, the Disk System version): the top 26 lines are
+black.** On every screen from the title on, dingbat draws lines 0-25 black
+where both references (which agree) show the title's KONAMI logo, the name
+screens' top rows and in play the score / time / life bars. At the frame's
+end VRAM, palette, OAM and EWRAM are byte-identical with mgba's, and the
+per-line BG3 writes of the game's two H-blank DMAs (BG3CNT and
+BG3HOFS/VOFS from tables in VRAM, the channels swapping roles each frame)
+come out as the tables say (a copy of the driver logging the I/O writes).
+The difference is in OAM's use:
+
+| OAM | attributes | lines it covers |
+|---|---|---|
+| 64-67 | 64x64 affine, double size (128x128 drawn), Y=154, X=239 | GBATEK: 0-25; dingbat: 154-159 |
+| 68-71 | 32x32 affine, double size (64x64), Y=218, X=0/64/128/192 | 0-25 (dingbat too) |
+
+68-71 are full-width masks. DISPCNT is 0x1960: H-blank interval free, so
+the OBJ budget is 954 cycles a line. GBATEK (LCD OBJ - OAM Attributes,
+Y-Coordinate): "for OBJs with a height of 128 (64 doubled), located at
+Y>128 will be treated as at Y>-128", displayed at the top, not the
+bottom. So on the console 64-67 sit on lines 0-25, cost 4 x (10 + 2 x 128)
+= 1064 cycles there, exhaust the budget before 68-71, and the masks never
+draw. Every number fits: the masks and the burners cover exactly the same
+26 lines. dingbat's `obj_geometry` (ppu.nim) makes Y negative only above
+159 ("the exact thresholds (X>239, Y>159) are assumed"), so 64-67 go to
+lines 154-159 and lines 0-25 charge only the masks' 552 cycles. ppu.nim's
+own comment already says the Disk System carts park masking sprites
+"that hardware has no time to draw"; the burners are what makes it so.
+mGBA and the second reference both draw the bars.
+
+A fix is a height-dependent Y threshold (128-tall OBJs negative above 128,
+as GBATEK words it; whether every height wraps mod 256 on the console is
+the open part). Core change, not made here. Every Disk System Famicom Mini
+should show the same.
+
+**Xevious (FXVJ): clicks in the silences.** The audio check fails on
+dingbat alone (11.3% of the run): single-sample ticks every ~67 frames
+where the game is silent (title, menus). The game plays only FIFO A
+(timer 0, 32768 Hz; SOUNDCNT_H 0x0B04), from three 160-byte buffers at
+0x03005D40/5DE0/5E80 that its timer 1 interrupt hands to DMA 1 in turn;
+they hold 00 in silence. dingbat's raw output at a tick is -284, 140, 0,
+32: four times the bytes B9 23 00 08, the word at 0x03005F20 right after
+the third buffer (the low half of a pointer, 0x080023B9). So now and then
+dingbat's FIFO DMA fetches one word past the buffer before the interrupt
+restarts it at the next one; mgba's dump has no such sample, and the
+comparison puts the second reference with mgba. Ticks past the first two
+buffers read the next buffer's 00 and are silent, which is why only one
+in three fetches is heard. The race (the FIFO's refill request against
+the timer 1 interrupt's restart of DMA 1, or the interrupt's latency) was
+not traced further.
+
+**ChuChu Rocket! (ACRE): continue_title a frame behind both references.**
+At boot the game runs a bitwise CRC-32 over the 32,800-byte copy of its
+save in EWRAM: Thumb code in ROM (0x0801EA64-0x0801EAC2) under WAITCNT
+0x4017 (prefetch on, 3/1 waits). Traced from the same save, dingbat spends
+10,075k cycles on it, mGBA 10,009k: 2 cycles a byte, all in the bit loop
+and the call around it (per-instruction attribution differs between the
+two tracers; the totals do not). The screen after it starts 82k cycles
+later in dingbat and misses a V-blank; game state is otherwise the same
+(the language-free boot and the menus after it are IDENTICAL). The loop's
+data load is EWRAM, its literal pool and code ROM, its stack pops IWRAM:
+a gamepak-prefetch accounting difference nobody has measured on the
+console. The script passes (a SLIP).
+
+**Status: open, no core change.**
