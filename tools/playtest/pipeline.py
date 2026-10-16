@@ -5,6 +5,7 @@ Layout of one run (out/runs/<slug>-<sha1 prefix>/<timestamp>/):
   new/<emu>/            env (ROM symlink + battery file) and checkpoint shots
   saves/<emu>.sav       each emulator's battery file after [new] + quit
   load/<writer>-in-<reader>/   [load] with <writer>'s save seeded into <reader>
+  load/blank-in-<ref>/  [load] in a reference with no battery file (a blank cart)
   cmp/*.png             side-by-side composites per checkpoint
   results.json, report.html
 """
@@ -365,9 +366,21 @@ def run(args):
                     cell = old and replay_phase(old, wd)
                     jobs[(w, r)] = _done(cell) if cell else \
                         pool.submit(run_phase, r, rom, play['load'], wd, rtc, save_in=written[w])
+            # the same [load] timeline on a blank cart in each reference:
+            # what a reader that ignores the save (or cannot read it) shows.
+            # A cell that looks like this where a reference shows the save
+            # differently has not read it (docs/playtest-bugs.md §NEXT)
+            blank_jobs = {}
+            for r in (names if written else []):
+                if r.startswith(SUBJECT_PREFIX):
+                    continue
+                wd = os.path.join(outdir, 'load', f'blank-in-{r}')
+                cell = src and replay_phase(os.path.join(src, 'load', f'blank-in-{r}'), wd)
+                blank_jobs[r] = _done(cell) if cell else pool.submit(run_phase, r, rom, play['load'], wd, rtc)
             for (w, r), f in jobs.items():
                 for alias in next(g for g in by_content.values() if g[0] == w):
                     load[(alias, r)] = f.result()
+            blank = {r: f.result() for r, f in blank_jobs.items()}
         report['load'] = {}
         for (w, r), res in load.items():
             cell = _strip(res)
@@ -402,6 +415,8 @@ def run(args):
                     if mine is not None and other is not None:
                         cps[cp]['vs'][x] = classify.classify(mine, other)
             report['load_checkpoints'][f'{w}-in-{r}'] = cps
+        report['load_blank'] = {r: _strip(res) for r, res in blank.items()}
+        report['load_blank_checkpoints'] = compare_blank(load, blank)
         # composites: one image per checkpoint, every cell
         cp_names = []
         for res in load.values():
@@ -423,6 +438,13 @@ def run(args):
                     else:
                         frames.append(img.np.full((img.H, img.W, 3), 96, dtype=img.np.uint8))
                         labels.append(f'{w} sav in {r} failed')
+            # last row: the blank cart in each reference
+            if blank:
+                for r in names:
+                    c = blank.get(r, {}).get('checkpoints', {}).get(cp)
+                    frames.append(img.read_ppm(c['ppm']) if c else
+                                  img.np.full((img.H, img.W, 3), 96, dtype=img.np.uint8))
+                    labels.append(f'no save in {r}' if c else '')
             if frames:
                 img.write_png(os.path.join(cmpdir, f'load-{cp}.png'), _grid(frames, labels, len(names)))
 
@@ -489,6 +511,32 @@ def compare_audio(new, names, outdir):
     return out
 
 
+def compare_blank(load, blank):
+    """Every [load] cell against the references' blank-cart runs of the same
+    timeline: {w-in-r: {cp: {x: verdict against blank-in-x}}}."""
+    out = {}
+    for (w, r), res in load.items():
+        cps = {}
+        for cp, mine in res['checkpoints'].items():
+            vs = {x: classify.classify(mine, b['checkpoints'][cp])
+                  for x, b in blank.items() if b['checkpoints'].get(cp)}
+            if vs:
+                cps[cp] = vs
+        out[f'{w}-in-{r}'] = cps
+    return out
+
+
+def blank_state(report, key, cp):
+    """Whether [load] cell `key` shows at checkpoint `cp` what a reference
+    shows there booting a blank cart on the same timeline: True (it looks
+    like one), False (it differs from every one: the save made a
+    difference), None (no blank-cart run reached cp to say)."""
+    vs = (report.get('load_blank_checkpoints') or {}).get(key, {}).get(cp)
+    if not vs:
+        return None
+    return any(cell_ok(v) for v in vs.values())
+
+
 def cross_load_verdict(report, s, refs, problems):
     """Row-wise judgement of the save matrix for subject `s`; appends
     problems, returns notes."""
@@ -528,14 +576,31 @@ def cross_load_verdict(report, s, refs, problems):
             else:
                 notes.append(f'{w} save in {r}: the game rewrites part of the save at boot (references too)')
 
-    # s reading reference saves: agree with at least one reference reader
+    # s reading reference saves: agree with at least one reference reader.
+    # A reader that shows what a blank cart shows has not read the save,
+    # so it is no witness: s showing a save that holds data as a blank cart
+    # fails where a reference reads it, unless s shows it as its writer
+    # does reading it back (a loaded screen a step from the blank one, and
+    # the other reference showing an error: Classic NES Series' 8 KB mgba
+    # file, "GAME PAK ERROR" in the second reference). Columns Crown passed
+    # with dingbat losing every save because the second reference lost
+    # mgba's save too, and dingbat agreed with it (docs/playtest-bugs.md §NEXT)
     for w in refs:
         key = f'{w}-in-{s}'
         if key not in cells:
             continue
+        has_data = not report['saves'].get(w, {}).get('blank')
+        unread = {}     # (lost, read) -> [(checkpoint, detail)]
         for cp, c in cps[key].items():
             ref_readers = [x for x in refs if cps.get(f'{w}-in-{x}', {}).get(cp, {}).get('reached')]
             if not ref_readers:
+                continue
+            read = [x for x in ref_readers if blank_state(report, f'{w}-in-{x}', cp) is False]
+            if (has_data and c['reached'] and read and blank_state(report, key, cp)
+                    and not any(agree(key, cp, x) for x in read + [w])):
+                lost = [x for x in ref_readers if blank_state(report, f'{w}-in-{x}', cp)]
+                detail = ', '.join(f"{x}={c['vs'][x]['verdict']}" for x in read if x in c['vs'])
+                unread.setdefault((tuple(lost), tuple(read)), []).append((cp, detail))
                 continue
             if not c['reached']:
                 problems.append(f'{w} save in {s}: never reached {cp} ({cells[key]["error"]}); '
@@ -546,6 +611,10 @@ def cross_load_verdict(report, s, refs, problems):
                 else:
                     detail = ', '.join(f"{x}={c['vs'][x]['verdict']}" for x in ref_readers if x in c['vs'])
                     problems.append(f'{w} save in {s}: checkpoint {cp} differs from the references reading the same save ({detail})')
+        for (lost, read), hits in unread.items():
+            problems.append(f'{w} save in {s}: shows a blank cart\'s screens'
+                            + (f', as {"/".join(lost)} does,' if lost else '')
+                            + f' where {"/".join(read)} reads the save: ' + ', '.join(f'{cp} ({d})' for cp, d in hits))
 
     # references reading s's save: each should show it as s shows it, unless
     # that reference cannot even show its own save consistently
@@ -577,6 +646,35 @@ def cross_load_verdict(report, s, refs, problems):
             else:
                 what = 'never reached' if not c['reached'] else c['vs'][s]['verdict']
                 problems.append(f'{s} save in {r}: checkpoint {cp}: {what} compared with {s} reading its own save')
+
+    # s's own save, when it holds data and s shows a blank cart's screens:
+    # where a reference reads that save, s does not read its own save (the
+    # check above only notes a reference that shows it otherwise when the
+    # other reference agrees). Where no reader does, but every reference
+    # loads its own save on the same timeline, the save does not round-trip
+    # (written wrong, read wrong, or both). One reference losing its own
+    # save there leaves it open: Mario & Luigi's [new] reaches no save in
+    # dingbat and mgba alike (the same bytes, the blank cart's screens
+    # everywhere) while the second reference's own save loads
+    key = f'{s}-in-{s}'
+    if key in cells and not report['saves'].get(s, {}).get('blank'):
+        unread, unloadable = {}, {}     # (readers, own) -> [checkpoint]
+        for cp, c in cps[key].items():
+            if not c['reached'] or not blank_state(report, key, cp):
+                continue
+            readers = [x for x in refs if cps.get(f'{s}-in-{x}', {}).get(cp, {}).get('reached')]
+            read = [x for x in readers if blank_state(report, f'{s}-in-{x}', cp) is False]
+            own = [x for x in refs if cps.get(f'{x}-in-{x}', {}).get(cp, {}).get('reached')]
+            if read:
+                unread.setdefault(tuple(read), []).append(cp)
+            elif own and all(blank_state(report, f'{x}-in-{x}', cp) is False for x in own):
+                unloadable.setdefault((tuple(readers), tuple(own)), []).append(cp)
+        for read, hits in unread.items():
+            problems.append(f'{s} save in {s}: shows a blank cart\'s screens where {"/".join(read)} '
+                            f'{"reads" if len(read) == 1 else "read"} the same save: {", ".join(hits)}')
+        for (readers, own), hits in unloadable.items():
+            problems.append(f'{s} save: shows a blank cart\'s screens in {"/".join((s,) + readers)} where '
+                            f'{"/".join(own)} {"reads its" if len(own) == 1 else "read their"} own save: {", ".join(hits)}')
 
     # reference-only cells, for the record
     for key, cell in cells.items():
@@ -823,6 +921,9 @@ def print_summary(report):
                       for cp, c in cps.items())
         print(f"   load {key:22} {'ok' if cell['ok'] else 'FAILED'} unchanged={cell['save_unchanged']} {s}"
               + (f"  {cell['error']}" if cell['error'] else ''))
+    for r, cell in (report.get('load_blank') or {}).items():
+        print(f"   load {'blank-in-' + r:22} {'ok' if cell['ok'] else 'FAILED'} (no battery file)"
+              + (f"  {cell['error']}" if cell['error'] else ''))
     for s, v in report['verdicts'].items():
         print(f"   VERDICT {s}: {'PASS' if v['pass'] else 'FAIL'} (play={v['play']})")
         for p in v['problems']:
@@ -863,6 +964,8 @@ def write_html(report, outdir):
             s = '; '.join(f"{e(cp)}: " + (' '.join(f"{x}={vv['verdict']}" for x, vv in c['vs'].items()) if c['reached'] else 'NOT REACHED')
                           for cp, c in cps.items())
             parts.append(f"<tr><td>{e(key)}</td><td>{cell['ok']}</td><td>{cell['save_unchanged']}</td><td>{s} {e(cell['error'] or '')}</td></tr>")
+        for r, cell in (report.get('load_blank') or {}).items():
+            parts.append(f"<tr><td>blank-in-{e(r)}</td><td>{cell['ok']}</td><td>(no battery file)</td><td>{e(cell['error'] or '')}</td></tr>")
         parts.append('</table>')
         for f in sorted(os.listdir(os.path.join(outdir, 'cmp'))):
             if f.startswith('load-'):

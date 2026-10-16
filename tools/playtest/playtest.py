@@ -319,7 +319,8 @@ def cost(outdir):
         r = json.load(open(os.path.join(outdir, 'results.json')))
     except (OSError, TypeError, ValueError):
         return float('inf')
-    phases = list(r.get('new', {}).values()) + list(r.get('load', {}).values())
+    phases = (list(r.get('new', {}).values()) + list(r.get('load', {}).values())
+              + list((r.get('load_blank') or {}).values()))
     return sum(p.get('seconds') or 0 for p in phases if not p.get('replayed_from'))
 
 

@@ -8643,3 +8643,75 @@ All four dingbat configurations agree (same 8 KB file, same hashes).
 **Status: open, no core change.** A fix would size the chip from the DMA
 that carries the command (or not let single CPU stores start one). That
 is a core change, left for review.
+
+## §NEXT. The [load] matrix had no way to tell "did not read the save": a blank-cart control in each reference, 2026-10-16
+
+**Why Columns Crown passed (§95).** A dingbat configuration reading a
+reference's save passed a checkpoint when it matched *any* reference
+reading the same save, and the references disagreeing with each other made
+a checkpoint not diagnostic. In the run of 2026-10-15 (230548), dingbat
+booted every save as a blank cart, and so did the second reference:
+mgba's save in dingbat was MAJOR against mgba reading it but SLIP against
+the second reference reading it (the same intro page, "One day"), so it
+passed; the second reference's save in dingbat matched the second
+reference reading it back the same way. dingbat's own save, which nobody can read,
+showed the same blank-cart screens in all three readers, so the
+references reading it agreed with `dingbat-in-dingbat`. Every rule asked
+whether readers agreed with each other, never whether any of them had read
+anything. Only the audio failed. Re-run today with the second reference told
+the chip is 4 Kbit, it writes mgba's 512 bytes byte for byte and *still* boots
+them as a blank cart (its `[load]` of that file rewrites it), so the gap was
+still open.
+
+**The control.** Each reference now also plays `[load]` with no battery file
+(`load/blank-in-<reference>`; a row "no save in" under each load
+composite). Every cell is classified against both
+(`load_blank_checkpoints`), with the verdicts that count as a load
+(`cell_ok`): a cell that matches one shows a blank cart's screens there, one
+that matches neither read the save. The dingbat configurations get no
+control of their own: two runs a game, not six, and the references' replay
+with `--refs-from` (they do not depend on dingbat).
+
+**The rule** (pipeline.py `cross_load_verdict`), for a save that is not
+blank (`saves.describe` says whether it is):
+- dingbat reading a reference's save fails where it shows a blank cart's
+  screens, a reference reads that save, and dingbat matches neither that
+  reference nor the writer reading it back: `mgba save in dingbat: shows a
+  blank cart's screens, as <the second reference> does, where mgba reads the
+  save: continue_title (mgba=MAJOR), ...`. A reference showing the blank cart
+  is no witness, so the old match with it no longer passes.
+- dingbat showing its own save as a blank cart fails where a reference reads
+  that save (before, that was only a note when both references agreed), and,
+  where no reader does, where *both* references load their own saves on the
+  same timeline (the save does not round-trip).
+- Nothing else moves: no reference reading the save (a game that ignores it
+  at those checkpoints, both references losing it), dingbat showing
+  something that is neither, a blank file. A reference that cannot read a
+  save fails nothing (the second reference's 4 Kbit loss before §94 is the
+  writer-lost case: dingbat matches mgba, which read it).
+
+Two exemptions came from the measurement, where a first draft failed three
+games that are right:
+- **Classic NES Series: Metroid and Super Mario Bros.** mgba writes an 8 KB
+  file for the 4 Kbit chip; its own `title_menu_loaded` and dingbat's are a
+  MINOR step from the blank cart's (they count as the blank cart), and the
+  second reference shows GAME PAK ERROR, which matches no blank cart and
+  so counted as reading it. dingbat shows the save as its writer does reading
+  it back: that is not a lost save.
+- **Mario & Luigi.** dingbat's and mgba's `[new]` save the same bytes, which
+  load as the blank cart's screens everywhere (the paths part before the
+  save: §71, §34); the second reference's own save loads. With one
+  reference also losing its own, a save that loads nowhere is no evidence,
+  so the round-trip rule needs both.
+
+**Measured** on the newest full baseline (722d1703b1f2, 188 games, 148 with
+`[load]`): 37 games where the rule could change anything (a dingbat cell not
+matching a reference reader, or dingbat's own read not matching a
+reference's own), blank-cart runs played for those in both references with
+that baseline's reference drivers, re-scored from the stored per-cell
+results: **no verdict, problem or note changes**. Columns Crown, from its
+stored run and from today's run, fails every dingbat configuration with the
+one problem above (it failed on audio already; without that it would have
+gone from PASS to FAIL). `tests/test_crossload.py` covers the matrix rules.
+Cost: two more reference `[load]` runs per game whenever the references play
+live (over the 148: about 23 s for the second reference, 4 s for mgba).

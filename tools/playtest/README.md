@@ -149,9 +149,35 @@ same way.
    player-chosen fields (Pokémon Gen 3: section checksums, name, gender).
 4. **Cross-load** — `[load]` runs with each emulator's save seeded into each
    emulator (once per distinct save file: the dingbat configurations usually
-   write identical ones). A cell passes when its checkpoints match that
-   emulator's run with its own save, and booting must leave the battery file
-   byte-identical.
+   write identical ones). Each save is judged by its readers: dingbat
+   reading a reference's save must match, at each checkpoint, a reference
+   reading the same save (where the two references show it differently from
+   each other and dingbat matches neither, the checkpoint is not
+   diagnostic); a reference reading dingbat's save must show it as dingbat
+   shows it, unless that reference does not show its own save like the
+   others either. Booting must leave the battery file byte-identical.
+
+   Each reference also plays `[load]` with no battery file
+   (`load/blank-in-<ref>`): the control for whether a reader read the save at
+   all. A cell that matches a reference's blank cart at a checkpoint (the
+   verdicts that count as a load) shows a blank cart's screens there; one
+   that matches neither reference's blank cart read the save. For a save
+   that holds data:
+   - a reference that shows a blank cart's screens is no witness: dingbat
+     doing so fails where a reference reads the save, even when the other
+     reference shows the blank cart too (`mgba save in dingbat: shows a
+     blank cart's screens, as <the other reference> does, where mgba reads
+     the save`).
+     Columns Crown passed that way with dingbat reading no save at all
+     (docs/playtest-bugs.md §95, §NEXT);
+   - dingbat showing its own save as a blank cart fails where a reference
+     reads that save, and, where no reader does, where a reference reads its
+     own save on the same timeline: the save does not round-trip;
+   - nothing changes where no reference reads the save (a game that ignores
+     it at those checkpoints, or two references that both lose it), where
+     dingbat shows something that is neither the save nor a blank cart (the
+     references disagreeing stays not diagnostic), or where the file is
+     blank. A reference that loses a save fails nothing.
 5. **Audio** — every driver dumps its output (`--audio`, s16le stereo at
    32768 Hz) for the whole `[new]` run; `audio.py` compares quarter-second
    windows aligned by emulated frame (level after each emulator's own gain,
