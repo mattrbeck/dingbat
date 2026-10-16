@@ -1,7 +1,7 @@
 @title Activision Anthology (USA)
 @file Activision Anthology (U).gba
 @game BAVE
-@chip EEPROM (4 Kbit: dingbat and mgba write 512-byte files; BAVE is not in the second reference's 4 Kbit list, so it writes 8 KB and loses its own save)
+@chip EEPROM (4 Kbit: dingbat and mgba write 512-byte files; BAVE is in emu.py's EEPROM_4K since authoring, §94)
 @frozen dingbat-bios,mgba,nba
 # The room (A = cartridge rack), Barnstorming: label, SELECT (game reset),
 # A, a second of flight, START = pause, L = its high score page, exit;
