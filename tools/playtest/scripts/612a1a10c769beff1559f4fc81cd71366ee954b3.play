@@ -1,0 +1,87 @@
+@title Sega Smash Pack (USA)
+@file Sega Smash Pack (U).gba
+@game A3PE
+@save none
+@chip none (no save library string; no battery save: the pack menu offers Ecco, Golden Axe, Sonic Spinball and Credits, Ecco keeps its passwords, and no emulator writes a byte)
+@frozen dingbat-bios,mgba,nba
+
+# Logos (they cannot be skipped), title, the pack menu on Ecco The Dolphin:
+# A, its title, START, the attract demo, START: Home Bay; swim right, leap,
+# turn back left, START = pause (health and air bars). A+B+START+SELECT
+# resets to the logos; the pack menu again, RIGHT to Golden Axe: its title,
+# PLAYER START, Arcade (A), the barbarian (A), stage 1: walk right and
+# fight the first two soldiers (B). No [load].
+# Seen: the pack menu's scrolling backdrop is in another phase in each of
+# the three (SLIP +0 everywhere, not diagnostic). In Ecco every dingbat
+# configuration shows the second reference's frame; mgba's Ecco runs 5
+# frames ahead by ecco_swim (the converted Genesis game drops frames by
+# the CPU time it gets, and mgba's cheaper prices give it more), so its
+# pause catches Ecco elsewhere (MAJOR, both ways). Golden Axe is identical
+# in all six from the player select on.
+
+[new]
+wait 1800
+press START after=120
+checkpoint title window=30
+press START after=120
+checkpoint menu_ecco window=30
+press A after=180
+wait 300
+press START after=120
+wait 180
+wait 120
+hold RIGHT
+wait 180
+release
+press START after=120
+hold RIGHT
+wait 120
+hold RIGHT+UP
+wait 60
+release
+press B after=30
+hold LEFT
+wait 120
+release
+checkpoint ecco_swim window=30
+press START after=60
+checkpoint ecco_paused window=30
+press A+B+START+SELECT hold=10 after=120
+wait 1650
+press START after=120
+press START after=120
+press RIGHT after=60
+checkpoint menu_golden_axe window=30
+press A after=300
+press START after=120
+wait 240
+press START after=120
+wait 120
+press START after=120
+press START after=120
+press START after=180
+wait 180
+press A after=180
+wait 60
+checkpoint select_player window=30
+press A after=300
+checkpoint ga_stage1 window=30
+wait 240
+hold RIGHT
+wait 180
+release
+tap B times=10 every=15 hold=4
+hold RIGHT
+wait 240
+release
+tap B times=12 every=15 hold=4
+hold RIGHT
+wait 120
+release
+tap B times=12 every=15 hold=4
+tap B times=20 every=12 hold=4
+hold RIGHT
+wait 30
+release
+tap B times=20 every=12 hold=4
+checkpoint ga_fight window=30
