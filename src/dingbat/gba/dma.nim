@@ -38,8 +38,7 @@ const IMM_NEEDS_EDGE {.booldefine.} = true
   ## request (request_immediate) used to request it on its stale imm_due.
   ## It then ran 4 words from the old read pointer, the first one past the
   ## buffer, and wrapped the FIFO (FIFO_WORD_WRAP): a click about every 67
-  ## frames, which neither reference plays (docs/playtest-bugs.md §97 and
-  ## "Xevious's click").
+  ## frames, which neither reference plays (docs/playtest-bugs.md §97 and §99).
 const HDMA_DROP_BUSY {.booldefine.} = true
   ## An H-blank request that arrives while the same channel's burst still
   ## holds the bus is dropped, not latched (trigger_hdma). False latches it

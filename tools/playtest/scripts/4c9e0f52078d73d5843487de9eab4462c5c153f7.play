@@ -4,7 +4,7 @@
 @save none
 @chip none (password game: no save library string, the title drum offers START / OPTIONS / PASSWORD)
 @frozen dingbat-bios,mgba,nba
-@known * audio differs from both references -- §NEXT: the three emulators' tunnel fights part from f4211 (different scores and enemies in all three, tunnel_fight to paused MAJOR between every pair), and the script's START lands while dingbat-bios's ship respawns, so it plays on where both references sit paused in digital silence (from f6305); the run from f6285 just reaches 2 s since the second reference's capture stopped drifting
+@known * audio differs from both references -- §99: the three emulators' tunnel fights part from f4211 (different scores and enemies in all three, tunnel_fight to paused MAJOR between every pair), and the script's START lands while dingbat-bios's ship respawns, so it plays on where both references sit paused in digital silence (from f6305); the run from f6285 just reaches 2 s since the second reference's capture stopped drifting
 
 # The cart has no battery save: progress is a password. Logos, START
 # through the intro, the title, OPTIONS (left as they are) > OK, START,

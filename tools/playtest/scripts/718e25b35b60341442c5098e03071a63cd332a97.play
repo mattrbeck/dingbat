@@ -15,8 +15,8 @@
 # lead, docs/playtest-bugs.md §65), so START (f361) reached the NES program
 # on another of its frames. dingbat-bios and mgba hash alike on every frame
 # to f1200.
-# Audio: FIXED 2026-10-16 (IMM_NEEDS_EDGE, gba/dma.nim; docs/playtest-bugs.md,
-# "Xevious's click"). The interrupt restarts DMA 1 with
+# Audio: FIXED 2026-10-16 (IMM_NEEDS_EDGE, gba/dma.nim; docs/playtest-bugs.md
+# §99). The interrupt restarts DMA 1 with
 # DMA1CNT = 0x84400004 first, which switched the running channel to
 # immediate timing with its enable kept; another burst ending in the next 24
 # cycles requested it on a stale due time, and it ran 4 words from the old

@@ -3,7 +3,7 @@
 @game BSKE
 @chip EEPROM
 @frozen dingbat-bios,mgba,nba
-@known * audio differs from both references -- §57, §NEXT: the first battle's random numbers part all three emulators (no two share a frame from f14401 to f26400) and the dialogue after it runs out of step; the longest run (f24450, 2.76 s) is inside that stretch. Back since the second reference's capture stopped drifting (2026-10-16): the references now agree on the music around the different fight sounds
+@known * audio differs from both references -- §57, §99: the first battle's random numbers part all three emulators (no two share a frame from f14401 to f26400) and the dialogue after it runs out of step; the longest run (f24450, 2.76 s) is inside that stretch. Back since the second reference's capture stopped drifting (2026-10-16): the references now agree on the music around the different fight sounds
 
 # New Game, Edgar, keep the name, the opening on Cliff Road, the first battle
 # (the Rampage Rabbit, won by mashing A towards it), Exeld named by default,

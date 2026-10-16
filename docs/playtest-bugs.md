@@ -8944,7 +8944,7 @@ checkpoints are SLIPs and pass; no `@known` is needed. The script's notes
 say so.
 
 
-## §NEXT. Driv3r's audio was the second reference's capture running 0.24% short; Xevious's click was an immediate DMA armed without its enable edge, 2026-10-16
+## §99. Driv3r's audio was the second reference's capture running 0.24% short; Xevious's click was an immediate DMA armed without its enable edge, 2026-10-16
 
 **Symptom.** The first baseline with the second reference playing Driv3r
 (§94) failed every dingbat configuration on audio alone: 81 of 703 windows
