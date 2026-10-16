@@ -1,0 +1,126 @@
+@title Naruto - Ninja Council (USA)
+@file Naruto - Ninja Council (U).gba
+@game A7AE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+# START, New Game, Save 1, Story Mode (choosing it writes Save 1: the
+# EEPROM goes from the first boot's 15 bytes to 32, and nothing later in
+# this route writes again), Naruto, the Leaf Scroll, mission 1 and
+# Kakashi's briefing, then the mission: the bridge, his hints (jump/attack,
+# R for ninja tools, Senbon, the special-attack gauge, Kunoichi), the
+# riverbank, the rocks below the cliff path.
+# [load]: the START menu offers Continue, Save 1 shows its leaf count, and
+# Story Mode goes straight to the Leaf Scroll (Naruto kept).
+# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second reference 8192; booted
+# with its own file the second reference greys out Continue (its save not read), so its
+# [load] presses land in New Game.
+
+[new]
+wait 600
+# until text START timeout=1500 every=10  [reached dingbat-bios+720 mgba+720 nba+720]
+wait 724
+wait 30
+checkpoint title window=30 compare=text
+press START after=120
+checkpoint new_continue window=30
+press A after=150
+checkpoint save_slots window=30
+press A after=150
+checkpoint mode_select window=30
+press A after=150
+checkpoint character window=30 compare=text
+press A after=150
+checkpoint scroll_select window=30
+press A after=150
+checkpoint mission_select window=30
+press A after=150
+checkpoint kakashi window=30 compare=text
+tap A times=8 every=40 hold=4
+wait 60
+tap A times=12 every=40 hold=4
+wait 60
+checkpoint mission1_start window=30
+hold RIGHT
+wait 60
+release
+tap B times=20 every=12 hold=4
+tap A times=6 every=40 hold=4
+wait 30
+hold RIGHT
+wait 40
+release
+tap B times=30 every=10 hold=4
+hold RIGHT
+wait 40
+release
+tap B times=30 every=10 hold=4
+checkpoint tutorial_hint window=30 compare=text
+tap A times=2 every=40 hold=4
+hold RIGHT
+wait 60
+release
+tap B times=30 every=10 hold=4
+hold RIGHT
+wait 50
+release
+tap B times=30 every=10 hold=4
+hold RIGHT
+wait 60
+release
+tap B times=30 every=10 hold=4
+tap A times=2 every=40 hold=4
+hold RIGHT
+wait 90
+release
+tap B times=30 every=10 hold=4
+checkpoint riverbank window=30
+hold RIGHT
+wait 150
+release
+tap B times=20 every=10 hold=4
+tap A times=2 every=40 hold=4
+hold RIGHT
+wait 150
+release
+tap B times=20 every=10 hold=4
+tap A times=4 every=40 hold=4
+wait 30
+tap B times=40 every=10 hold=4
+hold RIGHT
+wait 90
+release
+tap B times=30 every=10 hold=4
+tap A times=3 every=40 hold=4
+tap B times=30 every=10 hold=4
+hold RIGHT
+wait 90
+release
+tap B times=30 every=10 hold=4
+checkpoint rocks window=30
+hold RIGHT
+wait 200
+release
+hold RIGHT
+tap A times=4 every=30 hold=10
+wait 60
+release
+hold LEFT
+wait 60
+release
+hold UP
+wait 60
+release
+
+[load]
+wait 1354
+press START after=120
+press DOWN after=20
+wait 30
+checkpoint continue_menu window=30
+press DOWN after=20
+press A after=150
+checkpoint continue_slots window=30
+press A after=150
+press A after=150
+press A after=150
+checkpoint scroll_resumed window=30
