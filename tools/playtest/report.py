@@ -125,7 +125,8 @@ def game_findings(game, rep, base):
         suspect = suspect_of(odd, emus) if odd else 'unclear'
         frames = e.get('frames', {})
         detail = {k: {kk: vv for kk, vv in p.items() if kk in ('verdict', 'offset', 'similarity', 'diff_pixels',
-                                                                  'mae', 'max_channel_delta', 'why')}
+                                                                  'mae', 'max_channel_delta', 'why',
+                                                                  'fields', 'field_phase')}
                   for k, p in e['pairs'].items() if p['verdict'] not in ('IDENTICAL',)}
         add('video', suspect,
             f"checkpoint {cp}: " + ' | '.join('+'.join(g) for g in clusters),

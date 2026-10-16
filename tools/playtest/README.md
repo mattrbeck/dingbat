@@ -138,6 +138,11 @@ same way.
    tiny error, or a pure palette step), DIFFERENT (same layout and text,
    content differs), MAJOR, FAILED. A checkpoint where the two references
    disagree with each other at least as much is reported as not diagnostic.
+   A screen drawn as fields that take turns every frame (a window repeating
+   every 2-4 frames) is judged by its fields: the same fields out of phase
+   are IDENTICAL with the phase as a note, and fields that differ are
+   judged field by field from the shots the runner keeps of them
+   (docs/playtest-bugs.md §62).
 3. **Save files** — size against the chip sizes named by the ROM's library ID
    string, trailers (bytes after the chip data), byte-diff ranges, and, for
    games with a decoder in `saves.py`, structural validity and the decoded

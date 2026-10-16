@@ -5242,6 +5242,79 @@ nearest the window's centre, not the first in the window
 (tools/playtest/tests/test_classify.py). These checkpoints now read SLIP
 ±1. They still test only the field parity.
 
+**Screens of fields judged by their fields, 2026-10-15.** A window that
+repeats every n <= 4 frames, for three whole cycles on each side of the
+checkpoint frame, is a screen of n fields (`classify.field_run`). Two such
+sides are compared by their field cycles at every rotation
+(`classify._judge_fields`):
+
+- every field the same picture at some rotation: IDENTICAL, with the
+  rotation as `field_phase`. The run's verdicts carry it as a note ("the
+  same 2 fields as mgba, 1 out of phase"), not as a slip;
+- otherwise every field pair that differs is judged by its pixels, and the
+  rotation whose worst pair is mildest is the verdict. A field that the
+  checkpoint frames hide is judged too. Before, two sides showing the same
+  picture on the checkpoint frame read IDENTICAL whatever their other field
+  showed.
+
+The pixels come from the runner, which now shoots the three frames after
+the checkpoint frame one by one (`<checkpoint>.field<i>.ppm`). It keeps a
+shot only when the window is a screen of fields and the shot is one of its
+other fields, so the hash windows are the same as before. The cycles must
+start and end at the same frames on both sides. A stretch of fields that
+starts at another frame means the screen changed at another time, and the
+window match judges it as before. Some field pairs can't be judged: a run
+that kept no shots (recorded before this, or references replayed from a
+store made before it), or a text-judged checkpoint (OCR reads the
+checkpoint frame only). Those pairs are judged on the checkpoint frames as
+before, and the verdict says so (`fields_unjudged`). The cycle is capped at
+four frames because a rotation of a longer cycle is a real lag.
+`field_menu` and `save_slot` are the two fields plus the menu cursor's
+8-frame blink (period 16 together). mgba's blink runs one frame behind
+along with its fields, so they stay SLIP(-1): the whole picture is a frame
+behind. On `camineet` and `save_name` nothing moves but the fields, so a
+one-frame lag and a field phase look the same. The checkpoint reports the
+phase.
+
+Re-scored from the 2026-10-14 baseline's recorded windows (results key
+af41e9b5c64e, 164 games, 1263 checkpoints, six emulators), old classifier
+against new. 15 pair verdicts move, all SLIP(-1) -> IDENTICAL (2 fields,
+phase 1):
+
+| game | checkpoint | pairs |
+|---|---|---|
+| Phantasy Star Collection | `camineet`, `save_name` | each dingbat configuration ~ mgba, mgba ~ the second reference (10) |
+| Boktai 2 | `gameplay` | each dingbat configuration ~ the second reference, mgba ~ the second reference (5) |
+
+In Boktai 2 the field pair changes (A/B to C/D and back) at the same frame
+on every side, with the second reference out of phase throughout. That is a
+phase, not a lag. No subject's checkpoint verdict moves (each was
+IDENTICAL against the other reference), and no variant, cluster, noise flag
+or game status moves either. Twelve notes are added, one per dingbat
+configuration at those three checkpoints. Of the 120 emulator pairs where
+a side is a screen of fields, 97 agree field for field. Those are the 15
+above, every pair at Shin Bokura's `first_gameplay` and Harvest Moon's
+`house`, and the rest of Phantasy Star's, Boktai's and Metroid's pairs,
+plus the dingbat configurations against each other on the F-Zero screens.
+15 have a side whose fields do not settle: the second reference in
+Metroid's `samus` and on the two F-Zero screens below. 8 have fields that
+differ: F-Zero Maximum Velocity `you_lost` and F-Zero GP Legend
+`mission_failed`, each dingbat configuration ~ mgba. Those are text-judged
+and keep their verdicts. No pair had a differing field hidden behind an
+IDENTICAL or SLIP verdict.
+
+Phantasy Star, F-Zero MV and F-Zero GP were played again with the new
+runner (dingbat, mgba, the second reference). All 90 checkpoint windows,
+centre hashes and frames match the baseline's. Field shots were kept only
+at the screens of fields. On Phantasy Star each kept shot is
+byte-identical to the other side's checkpoint shot of that field. Judged
+by pixels as a test (their scripts judge them by text), the F-Zero fields
+pair at phase 0 and read MAJOR / DIFFERENT field by field, the same as
+their checkpoint frames.
+
+`runner.py` is one of the train's `REF_INPUTS`, so the first train after
+this plays the references live (its store then holds the field shots).
+
 **How it was found.** First, every frame's hash in dingbat-bios-nowl, mGBA
 and the second reference over the frozen `[new]` timeline, matched at
 offsets in a ±8 window, which showed the parity pattern. Then full IWRAM

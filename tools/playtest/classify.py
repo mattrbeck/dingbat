@@ -11,13 +11,23 @@ Verdicts, least to most severe:
               but visible content differs: worth a look
   MAJOR       a different screen: blank vs content, other text, crash
   FAILED      the script could not reach this checkpoint at all
+
+A screen drawn as fields that take turns every frame (A B A B: a line-drop
+table, sprite flicker) is judged by its fields, not by the one that lands on
+the checkpoint frame: see field_run and _judge_fields.
 """
 import difflib
+import math
 
 import img
 import screen
 
 ORDER = ['IDENTICAL', 'SLIP', 'MINOR', 'DIFFERENT', 'MAJOR', 'FAILED']
+
+# A window that repeats every n <= MAX_FIELDS frames, for FIELD_CYCLES whole
+# cycles on each side of the checkpoint frame, is a screen of n fields
+MAX_FIELDS = 4
+FIELD_CYCLES = 3
 
 
 def worst(verdicts):
@@ -28,15 +38,167 @@ def _words(text):
     return {w for w in screen.normalize(text).replace('|', ' ').split() if len(w) >= 3}
 
 
+def field_run(hashes, center):
+    """(n, lo, hi) for the smallest n <= MAX_FIELDS such that the frames
+    lo..hi of the window (inclusive, around `center`) repeat every n frames,
+    with FIELD_CYCLES whole cycles on each side of the centre; None when the
+    window does not settle like that. n = 1 is a still screen."""
+    if not hashes or not 0 <= center < len(hashes):
+        return None
+    for n in range(1, MAX_FIELDS + 1):
+        lo = center
+        while lo > 0 and lo - 1 + n < len(hashes) and hashes[lo - 1] == hashes[lo - 1 + n]:
+            lo -= 1
+        hi = center            # hashes[k] == hashes[k + n] for lo <= k < hi
+        while hi + n < len(hashes) and hashes[hi] == hashes[hi + n]:
+            hi += 1
+        if hi > center and center - lo >= FIELD_CYCLES * n and hi + n - 1 - center >= FIELD_CYCLES * n:
+            return n, lo, hi + n - 1
+    return None
+
+
+def _field_picture(c, h):
+    """The shot of field `h` of checkpoint `c`: the checkpoint's own, or one
+    the runner kept of the frames after it (runner.Executor.checkpoint)."""
+    if h == c['hash']:
+        return c.get('ppm')
+    return (c.get('fields') or {}).get(h)
+
+
+def _judge_fields(a, b):
+    """A verdict for two checkpoints on a screen of fields, or None when
+    either side is not one. {'verdict': None, 'fields': n} when the fields
+    cannot all be judged: classify then judges the checkpoint frames as
+    before and says so.
+
+    Which field lands on the checkpoint frame is a phase that can hang on a
+    few hundred cycles anywhere before it (Phantasy Star Collection's field
+    flag starts a V-blank later after a VRAM fill under contention,
+    docs/playtest-bugs.md §62), so the sides are compared by their whole
+    field cycles, lined up at every rotation:
+
+      - every field the same picture at some rotation: IDENTICAL, with the
+        rotation as `field_phase` (b shows a's centre field that many frames
+        later), a note and not a slip;
+      - otherwise each field pair that differs is judged by its pixels, and
+        the rotation whose worst pair is mildest is the verdict. A pair with
+        no picture of one of its fields (a run that kept none) cannot be
+        judged, nor can a rotation that needs it.
+
+    The cycles must begin and end at the same moment on both sides: a
+    stretch of fields that starts at another frame is the screen changing
+    at another time, a slip the window match measures."""
+    ha, hb = a.get('hashes'), b.get('hashes')
+    ra = field_run(ha, a.get('center', -1))
+    rb = field_run(hb, b.get('center', -1))
+    if not (ra and rb) or max(ra[0], rb[0]) < 2:
+        return None
+
+    def bounds(h, c, r):
+        return (None if r[1] == 0 else r[1] - c, None if r[2] == len(h) - 1 else r[2] - c)
+    if bounds(ha, a['center'], ra) != bounds(hb, b['center'], rb):
+        return None
+    fa = [ha[a['center'] + i] for i in range(ra[0])]
+    fb = [hb[b['center'] + i] for i in range(rb[0])]
+    n = ra[0] * rb[0] // math.gcd(ra[0], rb[0])
+    text = a.get('compare') == 'text' or b.get('compare') == 'text'
+    judged = {}
+
+    def judge(x, y):
+        if x == y:
+            return {'verdict': 'IDENTICAL'}
+        if (x, y) not in judged:
+            pa, pb = _field_picture(a, x), _field_picture(b, y)
+            # A text-judged screen is read by OCR, and only its checkpoint
+            # frame is read. A field pair judged by pixels takes the
+            # checkpoint frames' text: the fields are one screen's
+            judged[(x, y)] = None if text or not (pa and pb) else \
+                _judge_pixels(img.read_ppm(pa), img.read_ppm(pb), a.get('text', ''), b.get('text', ''))
+        return judged[(x, y)]
+    best = None
+    for r in range(n):
+        pairs = [judge(fa[i % len(fa)], fb[(i + r) % len(fb)]) for i in range(n)]
+        if None in pairs:
+            continue
+        phase = r if r <= n // 2 else r - n
+        rank = (max(ORDER.index(p['verdict']) for p in pairs),
+                -sum(p['verdict'] == 'IDENTICAL' for p in pairs), abs(phase))
+        if best is None or rank < best[0]:
+            best = (rank, phase, pairs)
+    if best is None:
+        return {'verdict': None, 'fields': n, 'unjudged': 'read as text' if text else 'one with no picture'}
+    _, phase, pairs = best
+    out = dict(max(pairs, key=lambda p: ORDER.index(p['verdict'])))
+    out['fields'] = n
+    out['field_phase'] = phase
+    if out['verdict'] == 'IDENTICAL':
+        out['why'] = (f'{n} fields, the same pictures' +
+                      (f', {abs(phase)} field{"s" if abs(phase) > 1 else ""} out of phase' if phase else ''))
+    else:
+        out['why'] = f"{n} fields judged field by field" + (f" ({out['why']})" if out.get('why') else '')
+        out['field_verdicts'] = [p['verdict'] for p in pairs]
+    return out
+
+
+def _judge_pixels(fa, fb, text_a, text_b):
+    """The pixel verdict for two pictures of the same moment."""
+    m = img.compare(fa, fb)
+    wa, wb = _words(text_a), _words(text_b)
+    text_sim = len(wa & wb) / len(wa | wb) if (wa or wb) else 1.0
+    m['text_similarity'] = round(text_sim, 2)
+    if img.is_blank(fa) != img.is_blank(fb):
+        m['verdict'] = 'MAJOR'
+        m['why'] = 'one screen is blank'
+    elif m['exact'] >= 0.98 or m['mae'] <= 0.1:
+        m['verdict'] = 'MINOR'
+    elif m['palette_only'] and m['mae'] <= 0.5:
+        m['verdict'] = 'MINOR'
+        m['why'] = 'palette step only'
+    elif m['max_channel_delta'] <= 1:
+        # Every differing pixel is one 5-bit step off: colour-effect rounding.
+        # The reference emulators blend at finer than 5-bit precision, so they
+        # cannot judge it; tests/roms/blendprobe.gba on hardware does, and
+        # tests/ppucomposite_test.nim pins dingbat to that.
+        m['verdict'] = 'MINOR'
+        m['why'] = 'one 5-bit step (colour-effect rounding)'
+    elif m['ncc'] >= 0.85 and text_sim >= 0.6:
+        m['verdict'] = 'DIFFERENT'
+    elif (m['ncc'] >= 0.98 and m['mae'] < 0.5) or (m['ncc'] >= 0.995 and m['mae'] < 1.0):
+        # the layout matches almost exactly: OCR words churning over small
+        # differences (tinted windows, a moving sprite) must not make it MAJOR
+        m['verdict'] = 'DIFFERENT'
+        m['why'] = 'same layout, OCR text differs'
+    else:
+        m['verdict'] = 'MAJOR'
+    return m
+
+
 def classify(a, b):
     """a, b: checkpoint dicts from runner.Executor.checkpoint (or None when
     the run never got there)."""
     if a is None or b is None:
         return {'verdict': 'FAILED'}
+    if a.get('compare') == 'none' or b.get('compare') == 'none':
+        if a['hash'] == b['hash']:
+            return {'verdict': 'IDENTICAL'}
+        return {'verdict': 'IDENTICAL', 'why': 'recorded, not judged'}
+    # Before the centre frames: on a screen of fields the same centre frame
+    # can hide another field that differs
+    fields = _judge_fields(a, b)
+    if fields and fields['verdict']:
+        return fields
+    m = _classify_frames(a, b)
+    if fields:
+        m = dict(m, fields=fields['fields'], fields_unjudged=True)
+        m['why'] = (m['why'] + '; ' if m.get('why') else '') + \
+            f"{fields['fields']} fields that differ, {fields['unjudged']}: judged on the checkpoint frame"
+    return m
+
+
+def _classify_frames(a, b):
+    """The checkpoint frames and their windows."""
     if a['hash'] == b['hash']:
         return {'verdict': 'IDENTICAL'}
-    if a.get('compare') == 'none' or b.get('compare') == 'none':
-        return {'verdict': 'IDENTICAL', 'why': 'recorded, not judged'}
     # The match nearest the centre, not the first in the window: a screen
     # drawn as two alternating fields (A B A B: Phantasy Star Collection's
     # Master System line drop) matches at every other frame, and the first
@@ -90,36 +252,7 @@ def classify(a, b):
         ok = sim >= 0.8
         return {'verdict': 'MINOR' if ok else 'MAJOR', 'text_similarity': round(sim, 2),
                 'why': 'compared by on-screen text only', 'palette_only': ok}
-    fa, fb = img.read_ppm(a['ppm']), img.read_ppm(b['ppm'])
-    m = img.compare(fa, fb)
-    wa, wb = _words(a['text']), _words(b['text'])
-    text_sim = len(wa & wb) / len(wa | wb) if (wa or wb) else 1.0
-    m['text_similarity'] = round(text_sim, 2)
-    if img.is_blank(fa) != img.is_blank(fb):
-        m['verdict'] = 'MAJOR'
-        m['why'] = 'one screen is blank'
-    elif m['exact'] >= 0.98 or m['mae'] <= 0.1:
-        m['verdict'] = 'MINOR'
-    elif m['palette_only'] and m['mae'] <= 0.5:
-        m['verdict'] = 'MINOR'
-        m['why'] = 'palette step only'
-    elif m['max_channel_delta'] <= 1:
-        # Every differing pixel is one 5-bit step off: colour-effect rounding.
-        # The reference emulators blend at finer than 5-bit precision, so they
-        # cannot judge it; tests/roms/blendprobe.gba on hardware does, and
-        # tests/ppucomposite_test.nim pins dingbat to that.
-        m['verdict'] = 'MINOR'
-        m['why'] = 'one 5-bit step (colour-effect rounding)'
-    elif m['ncc'] >= 0.85 and text_sim >= 0.6:
-        m['verdict'] = 'DIFFERENT'
-    elif (m['ncc'] >= 0.98 and m['mae'] < 0.5) or (m['ncc'] >= 0.995 and m['mae'] < 1.0):
-        # the layout matches almost exactly: OCR words churning over small
-        # differences (tinted windows, a moving sprite) must not make it MAJOR
-        m['verdict'] = 'DIFFERENT'
-        m['why'] = 'same layout, OCR text differs'
-    else:
-        m['verdict'] = 'MAJOR'
-    return m
+    return _judge_pixels(img.read_ppm(a['ppm']), img.read_ppm(b['ppm']), a['text'], b['text'])
 
 
 def within_reference_spread(subject, ref, other):

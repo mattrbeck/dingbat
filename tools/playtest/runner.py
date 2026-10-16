@@ -2,6 +2,7 @@
 import os
 import time
 
+import classify
 import img
 import screen
 
@@ -138,15 +139,34 @@ class Executor:
         center_hash = self.emu.hash()
         frame = self.emu.frame
         self.emu.shot(path)
-        after = self.emu.runhash(window) if window else []
+        # The first frames after it one at a time, each shot: on a screen
+        # drawn as fields that take turns (docs/playtest-bugs.md §62) they
+        # are the other fields, which classify judges too. Kept only then.
+        after, shots = [], []
+        for i in range(1, min(window, classify.MAX_FIELDS - 1) + 1):
+            after += self.emu.runhash(1)
+            shots.append(self.emu.shot(os.path.join(self.outdir, f'{name}.field{i}.ppm')))
+        if window > len(after):
+            after += self.emu.runhash(window - len(after))
         read = self.reader.read(path, key=center_hash, retry_empty=True)
         img.write_png(os.path.join(self.outdir, f'{name}.png'), img.read_ppm(path))
         # runhash's last hash is the current frame: hashes[center] is the
         # checkpoint frame, neighbours are one frame apart
         hashes = (before or [center_hash]) + after
+        center = len(before or [center_hash]) - 1
+        run = classify.field_run(hashes, center)
+        fields = {}
+        for i, p in enumerate(shots, 1):
+            h = hashes[center + i]
+            if run and i < run[0] and h != center_hash and h not in fields:
+                fields[h] = p
+            else:
+                os.remove(p)
         cp = {'name': name, 'frame': frame, 'hash': center_hash, 'ppm': path,
-              'hashes': hashes, 'center': len(before or [center_hash]) - 1,
+              'hashes': hashes, 'center': center,
               'text': read['text'], 'selected': read['selected'], 'compare': compare}
+        if fields:
+            cp['fields'] = fields
         self.checkpoints[name] = cp
         self.log(f"{self.emu.name}: checkpoint {name} @f{frame} text={read['text'][:80]!r}")
         return cp

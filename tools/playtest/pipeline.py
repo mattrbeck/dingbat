@@ -650,6 +650,15 @@ def _grid(frames, labels, cols):
     return img.np.vstack(rows[:-1])
 
 
+def _pair_extra(p):
+    """A pair verdict's offset, or a screen of fields' phase, for display."""
+    if 'offset' in p:
+        return f"({p['offset']:+d})"
+    if p.get('field_phase'):
+        return f"(fields {p['field_phase']:+d}/{p['fields']})"
+    return ''
+
+
 def verdicts(report, names):
     """Per subject emulator: play / save / cross-load pass-fail with reasons."""
     out = {}
@@ -673,9 +682,16 @@ def verdicts(report, names):
                 v['problems'].append(f'checkpoint {cp}: {verdict}')
             elif verdict in ('SLIP', 'MINOR'):
                 pairs = report['new_checkpoints'][cp]['pairs']
-                detail = ', '.join(f"{k.split('~')[1]}={p['verdict']}" + (f"({p['offset']:+d})" if 'offset' in p else '')
+                detail = ', '.join(f"{k.split('~')[1]}={p['verdict']}" + _pair_extra(p)
                                    for k, p in pairs.items() if k.startswith(s + '~'))
                 v['notes'].append(f'checkpoint {cp}: {detail}')
+            else:
+                # a screen of fields that agrees out of phase: a note
+                pairs = report['new_checkpoints'][cp]['pairs']
+                phased = [f"the same {p['fields']} fields as {k.split('~')[1]}, {abs(p['field_phase'])} out of phase"
+                          for k, p in pairs.items() if k.startswith(s + '~') and p.get('field_phase')]
+                if phased:
+                    v['notes'].append(f'checkpoint {cp}: ' + '; '.join(phased))
         # audio: only where the references agree with each other
         au = report.get('audio', {}).get('subjects', {}).get(s)
         if au and au.get('status') in ('DIFFERENT', 'MINOR'):
@@ -777,7 +793,7 @@ def print_summary(report):
         print(f"   {n:13} [new] {'ok' if r['ok'] else 'FAILED'} f{r.get('frame')} {r['seconds']}s"
               + (f"  {r['error']}" if r['error'] else ''))
     for cp, e in report['new_checkpoints'].items():
-        pairs = ', '.join(f"{k}={p['verdict']}" + (f"({p['offset']:+d})" if 'offset' in p else '') for k, p in e['pairs'].items())
+        pairs = ', '.join(f"{k}={p['verdict']}" + _pair_extra(p) for k, p in e['pairs'].items())
         print(f'   checkpoint {cp:14} {pairs}')
         odd = {k: p['verdict'] for k, p in e.get('variants', {}).items() if p['verdict'] != 'IDENTICAL'}
         if odd:
@@ -834,7 +850,7 @@ def write_html(report, outdir):
         parts.append('</ul>')
     parts.append('<h2>New game</h2>')
     for cp, en in report['new_checkpoints'].items():
-        pairs = ' &middot; '.join(f"{e(k)} <b class={p['verdict']}>{p['verdict']}</b>" + (f" ({p['offset']:+d})" if 'offset' in p else '')
+        pairs = ' &middot; '.join(f"{e(k)} <b class={p['verdict']}>{p['verdict']}</b>" + ' ' + _pair_extra(p)
                                   for k, p in en['pairs'].items())
         parts.append(f"<h3>{e(cp)}</h3><p>{pairs}</p>")
         if 'png' in en:
