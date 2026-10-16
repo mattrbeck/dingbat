@@ -1,0 +1,73 @@
+@title FIFA Football 2005 (USA, Europe)
+@file FIFA Football 2005 (UE) (M6).gba
+@game BF5E
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Language (English), the logos and the licence screen, the title, START,
+# favourite team Arsenal, then Options > Game Options: CPU Skill from
+# Beginner to Amateur, Accept (the EEPROM is written), back to the menu.
+# [load]: the language and favourite-team screens come up again, but the
+# main menu's cursor starts elsewhere with the save read, so the same
+# UP, A lands on Today's Friendly, which shows CPU Skill Amateur.
+# dingbat and mgba write the same 512-byte file. BF5E is a 4 Kbit EEPROM
+# missing from emu.py's EEPROM_4K, so the second reference writes 8 KB and
+# loses its own save (docs/playtest-bugs.md §94): with it, continue_options
+# is Game Options with Beginner (MAJOR against both); it reads dingbat's and
+# mgba's files, and they read its own.
+[new]
+wait 600
+wait 300
+checkpoint language window=30
+press A
+wait 120
+wait 300
+press START
+wait 120
+press A
+wait 120
+wait 200
+wait 120
+checkpoint title window=30
+press START
+wait 120
+checkpoint favourite_team window=30
+press A
+wait 120
+checkpoint main_menu window=30
+press UP
+wait 30
+press A
+wait 120
+checkpoint options window=30
+press A
+wait 90
+press RIGHT
+wait 30
+checkpoint game_options window=30
+press A
+wait 90
+press B
+wait 90
+checkpoint main_menu_after window=30
+
+[load]
+wait 900
+press A
+wait 420
+press START
+wait 120
+press A
+wait 440
+checkpoint continue_title window=30
+press START
+wait 120
+press A
+wait 120
+press UP
+wait 30
+press A
+wait 120
+press A
+wait 90
+checkpoint continue_options window=30
