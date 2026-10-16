@@ -3,14 +3,30 @@
 @game BYUE
 @chip EEPROM 64Kbit
 @frozen dingbat-bios,mgba,nba
-@save skip: the first save comes after the first battle (Thieves' Stronghold, Chapter 1); the script stops at the battle's first move. Attacking the thieves was not worked out in the live session (with the tutorials off: moving next to one, START for Union, A and START on the Union screen, a direction into the enemy all left the battle unstarted). The 8 KB EEPROM written here holds 32 bytes from the boot.
 
 # Health warning, START through the intro twice, title > NEW GAME,
-# tutorials No, the prologue text, Chapter 1, A through the thieves' talk,
-# CARD SELECT: all five cards (Steal, Mind Change, Refresh, Mirage,
-# Rockfall), START > character, START > "Ready for combat?" A, the battle
-# map at Thieves' Stronghold with Milanor in move mode, two steps down next
-# to the thieves.
+# tutorials Yes, the prologue, Chapter 1, A through the thieves' talk, CARD
+# SELECT: all five cards (Steal, Mind Change, Refresh, Mirage, Rockfall),
+# START > character, START > "Ready for combat?" A, the Tutorial Corner
+# (taps every 110 frames: its text types slowly), Milanor two steps down
+# next to the thieves, A, the attack tutorial, START (Union) > RIGHT onto
+# the Assassin > A > "Union Formed! Ready for combat?" A: the battle (You
+# Win, 5 to 0), the end-turn tutorial, L > Main Menu > Suspend > OK: the
+# suspend save (8 KB of EEPROM). [load]: title > CONTINUE > OK resumes the
+# map at the Main Menu (the game erases the suspend save once it is loaded,
+# in every emulator), B closes it.
+# The battle animates ahead on mgba (union_formed, you_win; dingbat = nba).
+# suspend_prompt reads SLIP(-1) against both references, which agree only by
+# coincidence: frame by frame from the L menu (f41490-41600) nba runs the
+# menu, its fade and the prompt one frame after dingbat with dingbat's
+# pictures, while mgba keeps dingbat's frames but its own pictures (another
+# phase of the prompt's 2-frame blink, which lands on nba's). The save's
+# progress bar fills on a timer, the same in all three (nba a frame late).
+# The "SUCCEEDED" screen walks two small unit icons whose pose follows those
+# phases, so saved is judged by its text. The three battery files differ in six bytes
+# (and the checksum); no byte has dingbat alone against the two references
+# (nba stands alone at 0x97, 0x25D, 0x2A5 and 0x2BD, mgba at 0x10B, all three
+# differ at 0x275), and every emulator loads every save to the same screens.
 
 [new]
 wait 600
@@ -28,8 +44,6 @@ checkpoint title window=30
 press A
 wait 240
 checkpoint tutorial_prompt window=30 compare=text
-press DOWN
-wait 20
 press A
 wait 240
 checkpoint prologue window=30
@@ -94,16 +108,99 @@ wait 120
 checkpoint ready_for_combat window=30
 press A
 wait 180
-tap A times=20 every=30 hold=4
-checkpoint battle_map window=30
+tap A times=10 every=40 hold=4
 press A
+wait 60
+wait 60
+wait 60
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+tap A times=10 every=110 hold=4
+tap A times=15 every=110 hold=4
+tap A times=20 every=110 hold=4
+tap A times=40 every=110 hold=4
+tap A times=8 every=110 hold=4
+tap A times=8 every=110 hold=4
+tap A times=8 every=110 hold=4
+tap A times=8 every=110 hold=4
+tap A times=4 every=110 hold=4
+tap A times=4 every=110 hold=4
+press DOWN
+wait 20
+press DOWN
+wait 60
+press A
+wait 100
+tap A times=6 every=110 hold=4
+tap A times=6 every=110 hold=4
+tap A times=6 every=110 hold=4
+tap A times=6 every=110 hold=4
+tap A times=6 every=110 hold=4
+tap A times=6 every=110 hold=4
+tap A times=6 every=110 hold=4
+tap A times=6 every=110 hold=4
+tap A times=6 every=110 hold=4
+press START
+wait 90
+press RIGHT
 wait 30
+checkpoint attack_target window=30
 press A
-wait 40
-press DOWN
+wait 90
+wait 30
+checkpoint union_formed window=30
+press A
+wait 240
+wait 400
+wait 400
+checkpoint you_win window=30
+wait 200
+wait 300
+tap A times=6 every=110 hold=4
+tap A times=10 every=110 hold=4
+tap A times=10 every=110 hold=4
+tap A times=5 every=110 hold=4
+tap A times=5 every=110 hold=4
+press L
+wait 60
+checkpoint main_menu_l window=30
+press UP
 wait 20
-press DOWN
+press UP
 wait 20
-wait 10
-checkpoint milanor_moved window=30
+press A
+wait 60
+wait 20
+checkpoint suspend_prompt window=30
+press A
+wait 180
+wait 300
+checkpoint saved window=30 compare=text
+
+[load]
+wait 600
+checkpoint warning window=30
+press A
+wait 300
+wait 300
+press START
+wait 180
+press START
+wait 180
+wait 240
+wait 180
+checkpoint continue_title window=30
+press A
+wait 240
+checkpoint continue_prompt window=30
+press A
+wait 300
+checkpoint resumed_menu window=30
+press B
+wait 90
+checkpoint resumed_map window=30
 
