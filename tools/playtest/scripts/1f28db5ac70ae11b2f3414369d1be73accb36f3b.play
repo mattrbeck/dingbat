@@ -1,0 +1,113 @@
+@title Gradius Advance (Europe)
+@file Gradius Advance (E) [!].gba
+@game AGAP
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# START through the intro, title > START, the menu > OPTION: Game Level
+# EASY, Life 7, Rapid ON, Exit (the options are the save: nothing is
+# written at boot, Exit writes 68 bytes of the 512-byte EEPROM), then
+# START > the power-up gauge picks (A four times) and the first minute of
+# stage 1 holding B (rapid fire), a capsule, the nebula, START (PAUSE).
+# [load]: title > OPTION shows EASY / 7 / Rapid ON.
+# AGAP is not in the second reference's 4 Kbit list: it writes an 8 KB
+# file, reads it back as blank and shows the defaults (NORMAL, 3, OFF) in
+# [load].
+
+[new]
+wait 400
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+wait 60
+checkpoint main_menu window=30
+press DOWN
+wait 10
+press DOWN
+wait 10
+press DOWN
+wait 10
+press A
+wait 90
+press LEFT
+wait 15
+press DOWN
+wait 15
+press RIGHT
+wait 15
+press RIGHT
+wait 15
+press DOWN
+wait 15
+press DOWN
+wait 15
+press DOWN
+wait 15
+press DOWN
+wait 15
+press RIGHT
+wait 20
+checkpoint options window=30
+press B
+wait 90
+press DOWN
+wait 15
+press A
+wait 90
+wait 60
+wait 40
+press START
+wait 120
+press A
+wait 180
+checkpoint powerup_select window=30
+press A
+wait 240
+press A
+wait 240
+press A
+wait 300
+press A
+wait 300
+checkpoint stage1_start window=30
+hold B
+wait 400
+wait 400
+hold B+DOWN
+wait 25
+hold B
+wait 200
+checkpoint stage1_capsule window=30
+hold B+RIGHT
+wait 20
+hold B
+wait 30
+press A
+hold B
+wait 500
+checkpoint nebula window=30
+release
+press START
+wait 30
+wait 60
+checkpoint paused window=30
+
+[load]
+wait 400
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 150
+checkpoint main_menu window=30
+press DOWN
+wait 10
+press DOWN
+wait 10
+press DOWN
+wait 10
+press A
+wait 90
+checkpoint options_loaded window=30
