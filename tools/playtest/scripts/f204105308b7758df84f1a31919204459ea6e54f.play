@@ -25,13 +25,13 @@
 
 [new]
 wait 400
-# until notblank timeout=1500 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+# until notblank timeout=1500 every=10  [reached dingbat-bios+10 mgba+10 the second reference+10]
 wait 14
 wait 120
 checkpoint language window=30
 press START
 wait 200
-# until text START timeout=1500 every=10  [reached dingbat-bios+390 mgba+400 nba+390]
+# until text START timeout=1500 every=10  [reached dingbat-bios+390 mgba+400 the second reference+390]
 wait 404
 wait 60
 checkpoint title window=30
@@ -59,7 +59,7 @@ wait 30
 press R
 wait 500
 checkpoint puzzle_run window=30
-# until text CLEARED timeout=1500 every=10  [reached dingbat-bios+650 mgba+660 nba+650]
+# until text CLEARED timeout=1500 every=10  [reached dingbat-bios+650 mgba+660 the second reference+650]
 wait 664
 wait 30
 checkpoint cleared window=30
@@ -68,10 +68,10 @@ wait 120
 checkpoint stage_checked window=30
 [load]
 wait 400
-# until notblank timeout=1500 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+# until notblank timeout=1500 every=10  [reached dingbat-bios+0 mgba+0 the second reference+0]
 wait 4
 wait 120
-# until text START timeout=1500 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+# until text START timeout=1500 every=10  [reached dingbat-bios+10 mgba+10 the second reference+10]
 wait 14
 wait 60
 checkpoint continue_title window=30

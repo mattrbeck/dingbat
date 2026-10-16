@@ -81,7 +81,7 @@ wait 20
 checkpoint save_selected window=30
 press START
 wait 120
-# until notblank timeout=1500 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+# until notblank timeout=1500 every=10  [reached dingbat-bios+50 mgba+50 the second reference+50]
 wait 54
 wait 30
 wait 150
