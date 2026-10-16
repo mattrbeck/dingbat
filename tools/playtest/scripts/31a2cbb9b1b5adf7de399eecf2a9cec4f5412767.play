@@ -1,0 +1,66 @@
+@title GBA Video - The Proud Family Vol. 1 (USA)
+@file GBA Video - Proud Family, The Vol. 1 (U).gba
+@game MFPE
+@save none
+@chip none (32 MB GBA Video cart: no save library string, and the player keeps nothing across power-off)
+@frozen dingbat-bios,mgba,nba
+
+# A full-motion video cart: picture and sound stream from ROM through the
+# sound FIFOs. Logos, the attract clip (skipped with START at f1566), title,
+# MAIN MENU, "Tween Town" > the controls card, then two minutes of the
+# episode; START pauses, SELECT returns to MAIN MENU (the episode's thumbnail
+# now shows where it stopped), RIGHT + A opens CHAPTERS, the fourth entry
+# down seeks into the episode, RIGHT held 2 s fast-forwards, and it plays on.
+# Recorded with every frame hash identical on all three emulators.
+# Audio: the one window flagged against dingbat (f2220, 15 dB) is a click
+# both references play at the episode's start. At f2226 the game resets
+# FIFO A and routes it to both sides (SOUNDCNT_H 0x0B04 then 0x0304; the
+# FIFO had played to neither side since the menu's clip, master on all
+# along); both references then play the rest of the word they were on
+# (the second reference: three samples, 0x21 0x22 0x23), dingbat drops it
+# with the reset, as the AGB SP does (docs/playtest-bugs.md §30, fiforeset
+# 18/18). From f2241 the three play the same soundtrack.
+[new]
+wait 270
+checkpoint license window=30
+wait 870
+checkpoint attract_video window=30
+wait 300
+press START
+wait 90
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press A
+wait 150
+checkpoint instructions window=30
+press A
+wait 1200
+checkpoint episode_1min window=30
+wait 1800
+checkpoint episode_2min window=30
+press START
+wait 60
+checkpoint paused window=30
+press SELECT
+wait 90
+press RIGHT
+wait 60
+checkpoint main_menu_resume window=30
+press A
+wait 90
+checkpoint chapters window=30
+press DOWN
+press DOWN
+press DOWN
+wait 30
+press A
+wait 600
+checkpoint chapter_jump window=30
+hold RIGHT
+wait 120
+release
+wait 600
+checkpoint after_forward window=30
+
