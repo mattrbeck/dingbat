@@ -1,0 +1,184 @@
+@title The Lord of the Rings - The Third Age (USA, Europe) (En,Fr,De,Es,It)
+@file Lord of the Rings, The - The Third Age (UE) (M5).gba
+@game B3AE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Language Select > English (written to the EEPROM: the next boot skips the
+# menu), START through the logos, title > New Game, commander Good
+# (Aragorn), Sauron Mode No, Basic Tutorial (Ambush) > Play!: Isildur up
+# in front of the Standard Bearer, melee attack, a Ranger's ranged attack,
+# the orcs' turn, Isildur's second melee wins it ("Victory for Light!"),
+# The War Room > Save > slot 1 ("game saved successfully!", 18 bytes of
+# the 512-byte EEPROM, identical in dingbat-bios and mgba).
+# [load]: START through the logos to the menu, Load Game > Aragorn > The
+# War Room; DOWN lands on Save (B backs out without saving), UP, LEFT >
+# Missions: the map now lists the Advanced Tutorial.
+# B3AE is not in the second reference's 4 Kbit list: it writes an 8 KB
+# file and reads it back as blank, so in [load] it boots to Language
+# Select and the [load] inputs walk it through Italian into the intro.
+# Open, dingbat alone: the two battle scenes start a frame off in every
+# dingbat configuration, against references that agree frame for frame.
+# Melee (melee_attack SLIP(-1)): after the wipe (f3439-3451, a different
+# picture in each emulator every frame) the scene's first still frame
+# lands at f3453 in dingbat, f3452 in both references, and the 2- and
+# 4-frame animation stays a frame late to the end. Ranged (ranged_attack
+# SLIP(+1)): the first still frame lands at f4141 in dingbat, f4142 in
+# both references, a frame early. Opposite signs read as a race at one
+# V-blank (the scene's load ending close to it), not a steady charge;
+# HLE and official BIOS give the same frames. The map, the menus and the
+# saves agree. victory: mgba alone draws another backdrop behind "Victory
+# for Light!" (a picked picture; dingbat = the second reference).
+
+[new]
+wait 400
+checkpoint language window=30
+press A
+wait 300
+# mash START until text PRESS timeout=2000 every=30  [taps dingbat-bios:22 mgba:22 nba:22]
+tap START times=22 every=30 hold=4
+wait 30
+wait 60
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press A
+wait 90
+checkpoint commander window=30
+press A
+wait 90
+press A
+wait 120
+checkpoint mission_map window=30
+press A
+wait 120
+checkpoint briefing window=30
+press RIGHT
+wait 10
+press RIGHT
+wait 10
+press A
+wait 180
+wait 30
+checkpoint tutorial_battle window=30
+press A
+wait 60
+press A
+wait 90
+press DOWN
+wait 20
+press DOWN hold=20
+wait 20
+press A
+wait 40
+press DOWN
+wait 20
+press DOWN
+wait 20
+press A
+wait 40
+checkpoint move_tutorial window=30
+press A
+wait 40
+press UP
+wait 12
+press UP
+wait 12
+press UP
+wait 20
+press A
+wait 90
+press A
+wait 60
+press A
+wait 60
+press A
+wait 120
+checkpoint melee_attack window=30
+wait 120
+press A
+wait 40
+press DOWN
+wait 12
+press DOWN
+wait 12
+press RIGHT
+wait 20
+press DOWN
+wait 12
+press DOWN
+wait 20
+press A
+wait 60
+press A
+wait 30
+press LEFT
+wait 12
+tap UP times=5 every=14 hold=4
+wait 20
+press A
+wait 150
+checkpoint ranged_attack window=30
+wait 150
+wait 300
+press A
+wait 300
+wait 300
+checkpoint turn2 window=30
+press A
+wait 60
+press A
+wait 60
+press A
+wait 40
+press UP
+wait 20
+press A
+wait 400
+wait 30
+checkpoint victory window=30
+press A
+wait 120
+checkpoint war_room window=30
+press DOWN
+wait 12
+press DOWN
+wait 12
+press A
+wait 60
+checkpoint save_game window=30
+press A
+wait 30
+# until notext Saving timeout=900 every=4  [reached dingbat-bios+44 mgba+44 nba+44]
+wait 48
+wait 30
+wait 20
+checkpoint saved window=30
+
+[load]
+wait 700
+tap START times=10 every=30 hold=4
+wait 30
+checkpoint main_menu window=30
+press DOWN
+wait 12
+press A
+wait 60
+checkpoint load_list window=30
+press A
+wait 120
+checkpoint war_room window=30
+press DOWN
+wait 12
+press A
+wait 90
+press B
+wait 60
+press UP
+wait 12
+press LEFT
+wait 20
+press A
+wait 120
+checkpoint missions_unlocked window=30
