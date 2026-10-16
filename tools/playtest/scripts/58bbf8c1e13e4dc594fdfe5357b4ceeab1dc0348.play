@@ -1,0 +1,67 @@
+@title Konami Collector's Series - Arcade Advanced (USA)
+@file Konami Collectors Series - Arcade Advanced (U) [!].gba
+@game AKCE
+@save none
+@chip none (no save library string; no battery save seen: title and game select offer no options or records, and no emulator writes a byte on this route, which sets no new high score)
+@frozen dingbat-bios,mgba,nba
+
+# Logos and the Scramble attract demo, START: title, START: game select on
+# Frogger; A, the frog's intro, START, 1 PLAYER (A); hop up across the road
+# to the median (70 points), START = PAUSE, MAIN MENU, YES: back to the
+# game select, DOWN x2 to Time Pilot; A, its title, START, 1 PLAYER (A),
+# stage 1 (A.D. 1910): turn and fire through the first biplanes. No [load].
+# Seen: the title's glow and the select screen's backdrop are in another
+# phase in each of the three (not diagnostic). In play the checkpoints
+# match in all six; inside their windows single frames differ where a
+# sprite update lands mid-picture (Frogger's diving turtles, Time Pilot's
+# planes): mgba alone on most, the second reference alone on a few, no
+# dingbat configuration ever alone.
+
+[new]
+wait 1440
+wait 60
+press START after=120
+checkpoint title window=30
+press START after=120
+checkpoint select_frogger window=30
+press A after=120
+wait 480
+press START after=120
+press A after=180
+wait 60
+tap UP times=6 every=30 hold=4
+wait 60
+tap UP times=6 every=30 hold=4
+wait 60
+checkpoint frogger_median window=30
+press START after=60
+checkpoint frogger_paused window=30
+press DOWN after=20
+press DOWN after=20
+press A after=180
+press UP after=20
+press A after=180
+press DOWN after=30
+press DOWN after=60
+checkpoint select_time_pilot window=30
+press A after=240
+press START after=120
+press A after=180
+wait 150
+hold LEFT
+tap A times=6 every=6 hold=3
+tap A+B times=15 every=8 hold=4
+hold UP
+tap A+B times=15 every=8 hold=4
+hold RIGHT
+tap A+B times=15 every=8 hold=4
+hold DOWN
+tap A+B times=15 every=8 hold=4
+release
+checkpoint time_pilot_play window=30
+hold LEFT
+tap A times=20 every=8 hold=4
+hold UP
+tap A times=20 every=8 hold=4
+release
+checkpoint time_pilot_later window=30
