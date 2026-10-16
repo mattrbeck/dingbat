@@ -1,0 +1,38 @@
+@title Famicom Mini - Famicom Tantei Club - Kieta Koukeisha Zenkouhen (Japan)
+@file Famicom Mini - Vol. 27 - Famicom Tantei Club - Kieta Koukeisha Zenkouhen (J).gba
+@game FTKJ
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+@save skip: the game has no save command in its opening (the L+R menu has only つづける / リセット / スリープモード; the command list is きく / しらべる / おもいだす), and the first disk save comes later in the story, past the interrogation by Amachi, whose topics loop under A; not reached within the time box. The 512-byte EEPROM written here holds only the 8 bytes "NAT_U..." at 0xF8, from the boot.
+
+# The Disk System version. Title (ちょうさ かいし), START, the fiction
+# disclaimer, A through the opening (the accident, waking at Amachi's), the
+# first choice menu (あまちのこと / じぶんのこと), A through it to the command
+# list, DOWN to しらべる > じぶんのからだ and A through its text.
+# All three emulators showed the same frames at every look while authoring.
+[new]
+wait 300
+wait 300
+checkpoint title window=30
+press A
+wait 120
+press START
+wait 180
+wait 600
+checkpoint disclaimer window=30
+press A
+wait 300
+tap A times=10 every=90 hold=6
+checkpoint intro window=30
+tap A times=20 every=90 hold=6
+wait 120
+checkpoint amachi window=30
+tap A times=30 every=60 hold=6
+checkpoint commands window=30
+press DOWN
+wait 20
+press A
+wait 60
+tap A times=12 every=60 hold=6
+checkpoint examine window=30
+

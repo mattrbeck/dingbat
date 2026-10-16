@@ -1,0 +1,68 @@
+@title Famicom Mini - Hikari Shinwa - Palutena no Kagame (Japan)
+@file Famicom Mini - Vol. 24 - Hikari Shinwa - Palutena no Kagame (J).gba
+@game FPTJ
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+@save skip: registering a name writes nothing; the first save is at GAME OVER > セーブ スル, and the game-over screen never leaves "ヤラレチャッタ" in dingbat or the second reference (the Disk System file lookup's walk through unmapped memory never ends there, as at Famicom Mini Metroid's boot: docs/playtest-bugs.md §NEXT). The 8 KB EEPROM written here holds only the 8 bytes "TRAPR..." at 0xFF8, from the boot.
+
+# The Disk System version. Title, START: the file screen (セレクトシテクダサイ),
+# A, START on ナマエ トウロク, START picks the first slot, A A: "アア",
+# SELECT three times to トウロク オワル, START: back on the file screen with
+# アア. START plays it: stage 1-1, four arrows, a step right, four more, the
+# L+R menu (つづける / リセット / スリープモード), A back, then stand still
+# until the shemum snakes take Pit's health (f~3400): "ヤラレチャッタ".
+# Seen while authoring: from the menu on, mgba's enemies are a frame or so
+# apart from dingbat-bios and the second reference (identical to each other
+# throughout), and mgba's Pit dies earlier. At game_over mgba has gone on
+# to コンティニュー スル / セーブ スル; dingbat-bios and the second reference
+# stay on ヤラレチャッタ for good, START or not: the CPU sits in the walk
+# loop (0x03003568-0x0300358C), lr far into unmapped memory, reading its
+# own prefetched opcode 0x0A000005 rotated (0x050A0000). All three write
+# the same 8 bytes at boot; mgba fills the rest of its file with 00,
+# dingbat and the second reference with FF.
+[new]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press A
+wait 60
+press START
+wait 60
+press START
+wait 40
+press A
+wait 24
+press A
+wait 24
+checkpoint name_entry window=30
+press SELECT
+wait 24
+press SELECT
+wait 24
+press SELECT
+wait 24
+press START
+wait 40
+checkpoint registered window=30
+press START
+wait 300
+checkpoint stage1 window=30
+tap B times=4 every=20 hold=6
+hold RIGHT
+wait 60
+release
+tap B times=4 every=20 hold=6
+checkpoint play window=30
+press L+R hold=10
+wait 60
+checkpoint menu window=30
+press A
+wait 60
+checkpoint resumed window=30
+wait 1500
+checkpoint enemies window=30
+wait 900
+checkpoint game_over window=30
+

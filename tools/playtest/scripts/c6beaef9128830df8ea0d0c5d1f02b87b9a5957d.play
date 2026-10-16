@@ -1,0 +1,84 @@
+@title Famicom Mini - Metroid (Japan)
+@file Famicom Mini - Vol. 23 - Metroid (J).gba
+@game FMRJ
+@chip EEPROM 64Kbit
+@frozen mgba
+
+# The Disk System version. Frozen on mgba alone: dingbat (every
+# configuration, since e972f16e on 2026-09-20) and the second reference
+# never leave the black screen after the boot (docs/playtest-bugs.md
+# §NEXT). The Disk System file
+# lookup at 0x030035FC walks a table off its end into unmapped memory (lr
+# from 0x771F6F09, misaligned) and stops only on an open-bus read with bit
+# 16 set or top byte 0xAC; dingbat's reads there always return the loop's
+# own prefetched opcode (0x0A000005, rotated 0x050A0000), so the walk wraps
+# the address space for good. The console and mgba boot it.
+# Route (mgba): title, START: the file screen (セレクトシテクダサイ, NAME
+# ENERGY DAY), START, START picks the first slot, A A: "アア", SELECT three
+# times to トウロク オワル, START: アア 0000 000. START plays it: Brinstar,
+# walk right into the corridor and stand until the enemies take Samus's 30
+# energy: CONTINUE / SAVE, SELECT, START: the disk save, back to the title;
+# 37 bytes of an 8 KB file. [load]: the file screen shows アア 0001, START
+# resumes in Brinstar.
+# The run passes dingbat anyway: the second reference shows the same black
+# screens, so every checkpoint has the references disagreeing (not
+# diagnostic). dingbat and the second reference write the same 8 KB file
+# (a header from the boot, before the walk).
+[new]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press START
+wait 60
+press START
+wait 40
+press A
+wait 24
+press A
+wait 24
+checkpoint name_entry window=30
+press SELECT
+wait 24
+press SELECT
+wait 24
+press SELECT
+wait 24
+press START
+wait 60
+checkpoint registered window=30
+press START
+wait 400
+wait 300
+checkpoint brinstar window=30
+hold RIGHT
+wait 240
+release
+checkpoint corridor window=30
+hold RIGHT
+wait 300
+release
+wait 1500
+wait 600
+checkpoint game_over window=30
+press SELECT
+wait 24
+checkpoint save_selected window=30
+press START
+wait 120
+checkpoint saving window=10
+wait 300
+checkpoint saved_title window=30
+
+
+[load]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press START
+wait 700
+checkpoint brinstar window=30
+

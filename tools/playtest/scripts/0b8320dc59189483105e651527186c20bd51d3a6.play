@@ -1,0 +1,94 @@
+@title Famicom Mini - Nazo no Murasamejou (Japan)
+@file Famicom Mini - Vol. 22 - Nazo no Murasamejou (J).gba
+@game FNMJ
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# The Disk System version. Title, START: the NAME / SCORE file screen,
+# START on ナマエ トウロク, START picks the first slot, A A: "AA", then the
+# cursor to END (the first DOWN after the checkpoint and some RIGHTs are not
+# taken: the cursor ends on END, seen) and A: "セーブちゅう", the file screen
+# shows AA 0000000; 29 bytes of the 4 Kbit EEPROM. START plays AA: the first
+# castle room, walk down and left, swing and throw, the L+R menu
+# (つづける / リセット / スリープモード) and A back to the game.
+# [load]: the file screen shows AA, START resumes in the first room.
+# Seen when checked: mgba's time counter ticks a frame apart at play
+# (SLIP -17 / +2 between the references, not diagnostic). dingbat alone
+# clicks at f1306 (audio MINOR, 4 of 156 windows): its timer 1 interrupt,
+# which hands FIFO A's DMA1 the next 160-byte buffer, is taken ~39,000
+# cycles late, so DMA1 plays 64 bytes of IWRAM past the buffer
+# (0x03006238..: 81 15 00 08 ...). The raise came one cycle before an
+# H-blank DMA0/DMA3 pair that the FIFO DMAs preempted; its recognition
+# check was drained inside the DMA3 burst and nothing re-booked it
+# (docs/playtest-bugs.md §NEXT).
+[new]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press A
+wait 60
+press START
+wait 60
+press A
+wait 20
+press A
+wait 20
+press START
+wait 30
+press A
+wait 20
+press A
+wait 20
+checkpoint name_entry window=30
+press DOWN
+wait 12
+press DOWN
+wait 12
+tap RIGHT times=8 every=14 hold=6
+wait 10
+wait 8
+press DOWN
+wait 24
+tap RIGHT times=2 every=24 hold=6
+wait 4
+wait 15
+wait 15
+press A
+wait 60
+checkpoint saving window=10
+# until notext 'おまち' timeout=1200 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 30
+checkpoint registered window=30
+press START
+wait 240
+checkpoint castle window=30
+hold DOWN
+wait 90
+release
+hold LEFT
+wait 120
+release
+tap A times=3 every=20 hold=6
+tap B times=3 every=20 hold=6
+wait 60
+checkpoint play window=30
+press L+R hold=10
+wait 60
+checkpoint menu window=30
+press A
+wait 60
+checkpoint resumed window=30
+
+[load]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press START
+wait 240
+checkpoint castle window=30
+

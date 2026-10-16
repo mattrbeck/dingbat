@@ -1,0 +1,65 @@
+@title Famicom Mini - Makaimura (Japan)
+@file Famicom Mini - Vol. 18 - Makaimura (J).gba
+@game FMKJ
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Title, 1 PLAYER, the opening scene, stage 1: six shots from the start
+# (two zombies, 400 points), the L+R menu (the first DOWN after the
+# checkpoint is not taken, hence four) > ハイスコアをセーブする:
+# "ハイスコアをセーブしました", A back to the game. 25 bytes of the 4 Kbit
+# EEPROM. [load]: the title's TOP reads 0000400 instead of 0000000, then the
+# same opening and stage 1.
+# The second reference runs a frame behind the others from the opening on
+# in [new] (intro: the same two flicker fields out of phase; stage1 and
+# resumed SLIP +1); in [load] all three match. dingbat matches mgba at
+# every checkpoint.
+[new]
+wait 300
+checkpoint title window=30
+press START
+wait 240
+# until notblank timeout=1500 every=10  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
+wait 30
+checkpoint intro window=30
+wait 500
+# until notblank timeout=1500 every=10  [reached dingbat-bios+80 mgba+80 nba+90]
+wait 94
+wait 60
+checkpoint stage1 window=30
+tap B times=6 every=20 hold=6
+press L+R hold=10
+wait 60
+checkpoint menu window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 20
+checkpoint save_selected window=30
+press A
+wait 60
+checkpoint saved window=30
+press A
+wait 60
+checkpoint resumed window=30
+
+
+[load]
+wait 300
+checkpoint title window=30
+press START
+wait 240
+# until notblank timeout=1500 every=10  [reached dingbat-bios+60 mgba+60 nba+60]
+wait 64
+wait 30
+checkpoint intro window=30
+wait 500
+# until notblank timeout=1500 every=10  [reached dingbat-bios+90 mgba+90 nba+90]
+wait 94
+wait 60
+checkpoint stage1 window=30
