@@ -36,6 +36,23 @@ EMULATORS = {
     'mgba':              ('mgba_driver', True, ()),
     'nba':               ('nba_driver', True, ()),
 }
+# Game codes whose EEPROM is 4 Kbit: dingbat writes them a 512-byte file
+# (every corpus game, the 2026-10-15 baseline). The second reference's own
+# guess sizes most of them 64 Kbit, writes 8 KB and then reads its own file
+# back as blank, so it is told the size (nba_driver --backup).
+EEPROM_4K = frozenset('''
+    A5NE A7HE AAKP AC8E ACQE AD9E AFFE AGAE AK8E AKLE ALDE ALGE ALUE AMZE AN6E
+    ANXE ARYE ASYE ATHE ATQP AVRE AWOE AXDE AYHP AYZE AZ8E AZJE B3GE B3RE B9SP
+    BAJE BCNE BDQE BDVE BGCE BIJE BLRE BLXP BMEE BMVE BNFE BPYE BSEE BSME BZPE
+    FMRE FSME KHPJ KYGE'''.split())
+
+
+def game_code(rom):
+    with open(rom, 'rb') as f:
+        f.seek(0xAC)
+        return f.read(4).decode('ascii', 'replace')
+
+
 DINGBAT_CONFIGS = [n for n in EMULATORS if n.startswith('dingbat')]
 REFERENCES = ['mgba', 'nba']
 ALL = DINGBAT_CONFIGS + REFERENCES
@@ -136,6 +153,8 @@ class Emulator:
             if os.path.dirname(os.path.abspath(path)) == BIN:
                 check_driver_fresh(path)
         cmd = [path, self.rom, bios if real_bios else 'hle']
+        if binary == 'nba_driver' and game_code(self.rom) in EEPROM_4K:
+            cmd += ['--backup', 'eeprom4']
         if rtc_epoch is not None:
             cmd += ['--rtc', str(rtc_epoch)]
         cmd += list(flags) + list(extra_args)

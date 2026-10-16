@@ -8544,3 +8544,46 @@ battery file and every `[load]` cell. **No emulator change.**
   frames apart (one 0.25 s window, dingbat 9 dB above both), and the
   silence during the write is digital zero on mgba and a small constant on
   dingbat and the second reference.
+
+
+## §94. The second reference's skipped boot entered the cartridge with interrupts masked, and sized 4 Kbit EEPROMs as 64 Kbit, 2026-10-15
+
+Three games never showed a picture in the second reference: Asterix & Obelix
+XXL, V-Rally 3 and Driv3r. All three are 4 Kbit EEPROM games from the same
+publisher. Every one of them was frozen on dingbat-bios + mgba alone, so
+there was no third witness where dingbat and mgba parted.
+
+**The size was not it.** Telling the core the chip's size (below) left all
+three black.
+
+**The boot was.** Booted through the BIOS (the driver's `--run-bios`), both
+V-Rally 3 and Driv3r ran. With the boot skipped, as the harness runs it, the
+CPU registers (a `regs` command added to the driver, from the core's
+save-state copy) showed V-Rally 3 spinning from f100 at 0x080AADF4: a loop
+that sets a byte flag and waits for a timer interrupt's handler to clear it.
+CPSR read 0xDF there, IRQ and FIQ masked. On the booted run the same loop
+reads CPSR 0x1F and passes. The core's skipped boot enters the cartridge
+with CPSR 0xDF; the BIOS hands it over as 0x1F. Most games write CPSR in
+their start-up code and never notice. These three never touch the I bit, so
+no interrupt ever reached them.
+
+The driver now clears I and F after the reset when the boot is skipped. All
+three now play their scripts in the second reference:
+- **V-Rally 3:** dingbat-bios and the second reference within MINOR at
+  race_start and pause, mgba MAJOR against both: the "no tie-break"
+  countdown and race differences are mgba alone.
+- **Asterix XXL:** the second reference is IDENTICAL to dingbat-bios at
+  main_menu and level1 where mgba slips (+2, -14): mgba alone.
+- **Driv3r:** the traffic at first_gameplay and street differs between all
+  three: random numbers, not diagnostic.
+
+**The 8 KB file.** The core's own guess sizes most 4 Kbit chips as 64 Kbit
+(49 corpus games: dingbat writes 512 bytes, the second reference 8192). It
+then reads its own file back as blank and rewrites it, so its `[load]` was
+lost on every one of them. emu.py now tells it the size (`--backup eeprom4`)
+for the game codes dingbat sizes as 4 Kbit (`EEPROM_4K`). Its save is then
+byte-identical to dingbat's and mgba's on Duke Nukem Advance, V-Rally 3,
+Driv3r and Asterix, and every cross-load is `unchanged=True`.
+
+Both changes touch only the second reference. The next baseline plays it
+live and will show which other games change.

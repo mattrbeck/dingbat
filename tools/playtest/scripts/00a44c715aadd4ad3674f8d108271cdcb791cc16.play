@@ -10,8 +10,11 @@
 # through the countdown and the first corner (the car runs into the bank),
 # pauses, QUIT > YES back to the main menu. [load]: ENGLISH, the game list
 # opens with LOAD GAME > GAME 1 selected, A loads it to the main menu.
-# Frozen on dingbat-bios + mgba only: the second reference never shows a
-# picture (black through f1806 and beyond).
+# Frozen on dingbat-bios + mgba only: when authored the second reference
+# never showed a picture (black through f1806 and beyond). Its skipped boot
+# entered the cartridge with interrupts masked, and this game never unmasks
+# them; since the driver fixes that (and is told the 4 Kbit chip) it plays
+# the script with the others and writes the same save (2026-10-15).
 # Notes: the 3D car, screwdriver and countdown digit on the menus rotate at a
 # rate that follows the game's rendered frames, so car_select, the setup
 # screen, countdown and the race differ between dingbat-bios and mgba by a

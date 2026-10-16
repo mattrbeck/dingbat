@@ -12,16 +12,17 @@
 # ADVENTURE: the opening cutscene (A through the text), the first stage, the
 # pause menu (CONTINUE) and a short walk to the "B TALK" sign. [load]:
 # ENGLISH, LOAD GAME > GAME 1 A, YES, "LOADING THE GAME", main menu.
-# Frozen on dingbat-bios + mgba only: nba hangs at boot. Between f32 (all
-# three on the same black frame) and f92 it stops on a near-black frame
-# (hash 131299D6) where dingbat-bios and mgba fade in the Atari logo, and
-# that frame never changes again (the same at f1100, when the others are on
-# the language menu); it plays no sound at all. Its battery file comes out 8192 bytes (a 64Kbit EEPROM) where dingbat-bios
-# and mgba write 512 (4Kbit), so it likely sized the empty EEPROM wrongly and
-# the game's boot-time EEPROM check never finishes.
+# Frozen on dingbat-bios + mgba only: when authored the second reference hung
+# at boot on a near-black frame (hash 131299D6, from f92), with no sound and
+# an 8192-byte battery file. Its skipped boot entered the cartridge with
+# interrupts masked, and this game never unmasks them; since the driver
+# fixes that (and is told the 4 Kbit chip) it plays the script and writes
+# the same save (2026-10-15).
 # Seen while authoring: after the cutscene's last A the stage fades in out of
 # black 24 frames earlier on dingbat-bios than on mgba (until changed:
-# dingbat-bios+6, mgba+30), with no third emulator to say which is right; the
+# dingbat-bios+6, mgba+30). The second reference, playing since, is
+# IDENTICAL to dingbat-bios at main_menu and level1, where mgba slips: mgba
+# alone. The
 # cutscene smoke and Asterix's idle frames differ by a frame here and there,
 # and the tutorial sign's text types one letter behind on dingbat-bios.
 # Both saves byte-identical.

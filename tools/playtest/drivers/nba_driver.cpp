@@ -145,10 +145,22 @@ int main(int argc, char** argv) {
   int npos = 0;
   bool run_bios = false;
   const char* audio_path = nullptr;
+  auto backup = nba::Config::BackupType::Detect;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--run-bios")) run_bios = true;
     else if (!strcmp(argv[i], "--rtc") && i + 1 < argc) g_rtc_epoch = atoll(argv[++i]);
     else if (!strcmp(argv[i], "--audio") && i + 1 < argc) audio_path = argv[++i];
+    else if (!strcmp(argv[i], "--backup") && i + 1 < argc) {
+      // the chip as dingbat sized it (emu.py); the core's own guess sizes a
+      // 4 Kbit EEPROM as 64 Kbit and then cannot read its file back (§94)
+      std::string t = argv[++i];
+      if (t == "eeprom4") backup = nba::Config::BackupType::EEPROM_4;
+      else if (t == "eeprom64") backup = nba::Config::BackupType::EEPROM_64;
+      else {
+        fprintf(stderr, "unknown --backup %s\n", t.c_str());
+        return 2;
+      }
+    }
     else if (npos < 2) pos[npos++] = argv[i];
   }
   if (npos != 2) {
@@ -177,11 +189,22 @@ int main(int argc, char** argv) {
     fprintf(stderr, "failed to load bios %s\n", pos[1].c_str());
     return 3;
   }
-  if (nba::ROMLoader::Load(core, rom, save) != nba::ROMLoader::Result::Success) {
+  if (nba::ROMLoader::Load(core, rom, save, backup) != nba::ROMLoader::Result::Success) {
     fprintf(stderr, "failed to load rom %s\n", rom.c_str());
     return 3;
   }
   core->Reset();
+  if (!run_bios) {
+    // the BIOS hands the cartridge System mode with IRQ and FIQ enabled
+    // (CPSR 0x1F); the core's skipped boot enters with both masked (0xDF).
+    // A game that never writes the I bit itself then waits for its first
+    // interrupt forever: V-Rally 3 spun at a timer flag from f100 and showed
+    // no picture, as did Driv3r and Asterix XXL (docs/playtest-bugs.md §94)
+    static nba::SaveState st;
+    core->CopyState(st);
+    st.arm.regs.cpsr &= ~0xC0u;
+    core->LoadState(st);
+  }
 
   int frame = 0;
   int held = 0;
@@ -301,6 +324,16 @@ int main(int argc, char** argv) {
         out += b;
       }
       reply(ok ? out : "err unsupported region");
+    } else if (cmd == "regs") {
+      // the CPU's registers from the save-state copy: r0-r15 then CPSR, hex
+      static nba::SaveState state;
+      core->CopyState(state);
+      std::string out = "ok";
+      char b[12];
+      for (int k = 0; k < 16; ++k) { snprintf(b, sizeof b, " %08X", state.arm.regs.gpr[k]); out += b; }
+      snprintf(b, sizeof b, " %08X", state.arm.regs.cpsr);
+      out += b;
+      reply(out);
     } else if (cmd == "ppuio") {
       // the PPU's register latches from the save-state copy, write-only ones
       // included: DISPCNT BG0-3CNT BG0-3HOFS BG0-3VOFS BG2PA-PD BG3PA-PD

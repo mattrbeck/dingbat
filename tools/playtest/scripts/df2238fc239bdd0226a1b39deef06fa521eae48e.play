@@ -11,20 +11,20 @@
 # video intro (Nice, the police, the driver; A and START through it, full
 # motion pictures with typed captions), the first mission on foot, a short
 # walk and the pause map. [load]: GAME 1 A under LOAD, A twice, main menu.
-# Frozen on dingbat-bios + mgba only: the second reference never shows a
-# picture. From f0 to f1500 every frame it gives is black (0A6FB8AF) while
-# the others show the Atari logo at f150, the credits at f450 and the file
-# screen from f900; its battery file comes out 8192 bytes for this 4 Kbit
-# chip, the same boot hang as Asterix & Obelix XXL (the same publisher's
-# EEPROM code).
+# Frozen on dingbat-bios + mgba only: when authored the second reference
+# never showed a picture (black from f0, its battery file 8192 bytes for this
+# 4 Kbit chip). Its skipped boot entered the cartridge with interrupts
+# masked, and this game never unmasks them; since the driver fixes that (and
+# is told the chip's size) it plays the script with the others and writes
+# the same save (2026-10-15).
 # Notes (2026-10-15): every checkpoint but two is identical between dingbat
 # and mgba. first_gameplay and street are MINOR: the background traffic
 # (cars on the far road) differs, Tanner and the map do not. Frame by frame
 # the two part for good at f8477, near the end of the last video, and stay
 # apart until the pause map (f10437 on); before that the videos differ only
-# on single frames here and there (a video frame shown one frame later). With
-# the second reference black there is no third witness; the traffic reads
-# as seeded from the frame the mission's load ended.
+# on single frames here and there (a video frame shown one frame later). The
+# second reference, playing since, has traffic of its own at both: all three
+# differ (MINOR), the traffic's random numbers, not diagnostic.
 
 [new]
 wait 150
