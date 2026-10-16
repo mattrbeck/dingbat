@@ -1,0 +1,92 @@
+@title The Pinball of the Dead (USA)
+@file Pinball of The Dead, The (U).gba
+@game APDE
+@chip EEPROM (EEPROM_V122; a 4 Kbit chip, dingbat and mgba write 512 bytes)
+@frozen dingbat-bios,mgba,nba
+
+# Logos and the intro movie, title > GAME START > NORMAL MODE > the first
+# table ("Wondering"), its text box tapped away, the ball launched; START
+# pauses, SELECT opens DATA SAVE, A + A saves the game into DATA1. [load]:
+# CONTINUE > DATA LOAD shows "DATA1 WONDERING (NORMAL)", A + A resumes it.
+# Findings (recorded 2026-10-16):
+# - In the live session the second reference's intro movie ran on another
+#   timeline from f~700 (another scene at f900); replayed by `run` it is a
+#   frame from dingbat and mgba (intro_movie_street SLIP -1), so that was the
+#   session's doing, not the game's.
+# - From the table on dingbat stands alone (its zombies walk on other
+#   animation frames and paths; mgba and the second reference share every
+#   hash): table_play is a SLIP(+0) only, paused / data_save / saved are
+#   MAJOR against both. Mechanism: when the table has loaded, the main
+#   loop creates two tasks back to back (IWRAM slots 0x03001E88 and 0x03001F00, status bytes
+#   +0x48 = 0x82 "new"). mgba creates them at V-count 226 and 227, 343
+#   instructions apart, before the V-count IRQ at line 0 (DISPSTAT 0x0029,
+#   LYC 0); dingbat creates the first at V-count 227 and the second at line
+#   26, after that IRQ's handler (0x0300077A -> 0x02002454), so the task
+#   runner's next pass starts a different one of the two (f2856: slot
+#   0x1ED0/0x1F48 = 02/82 in dingbat, 82/02 in both references) and every
+#   per-task counter after it runs a frame apart. The race is about one
+#   scanline after a ~100-frame load (WAITCNT 0x4314: 3/1 waits, prefetch
+#   on); no console measurement says which side of line 0 it falls.
+# - The ball, camera and zombies part from there. The password on DATA
+#   SAVE is the same on dingbat and the second reference (3CCC604Z8SS6H
+#   in the run), mgba shows another (Q8H8X3ZPZSHGW); the
+#   battery files of dingbat and mgba are byte-identical all the same, and
+#   every [load] cell resumes the same table.
+# - The second reference writes an 8 KB file (APDE is not in emu.py's
+#   EEPROM_4K) and its [load] shows DATA1 EMPTY: it loses its own save.
+[new]
+wait 270
+checkpoint wow_logo window=30
+wait 240
+checkpoint intro_movie_date window=30
+wait 240
+checkpoint intro_movie_street window=30
+wait 1170
+press START
+wait 90
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+checkpoint mode_select window=30 compare=text
+press A
+wait 120
+checkpoint stage_select window=30
+press A
+wait 245
+checkpoint table_intro window=30
+tap A times=10 every=30 hold=4
+wait 120
+checkpoint table_play window=30
+press START
+wait 60
+checkpoint paused window=30
+press SELECT
+wait 60
+checkpoint data_save window=30
+press A
+wait 120
+press A
+wait 120
+checkpoint saved window=30
+
+[load]
+wait 2100
+press START
+wait 90
+press DOWN
+wait 30
+checkpoint menu_continue window=30 compare=text
+press A
+wait 90
+checkpoint data_load window=30
+press A
+wait 60
+wait 120
+press A
+wait 240
+wait 120
+wait 120
+checkpoint resumed_table window=30
+wait 240
+checkpoint resumed_play window=30
+
