@@ -16,17 +16,22 @@
 # - From the table on dingbat stands alone (its zombies walk on other
 #   animation frames and paths; mgba and the second reference share every
 #   hash): table_play is a SLIP(+0) only, paused / data_save / saved are
-#   MAJOR against both. Mechanism: when the table has loaded, the main
-#   loop creates two tasks back to back (IWRAM slots 0x03001E88 and 0x03001F00, status bytes
-#   +0x48 = 0x82 "new"). mgba creates them at V-count 226 and 227, 343
-#   instructions apart, before the V-count IRQ at line 0 (DISPSTAT 0x0029,
-#   LYC 0); dingbat creates the first at V-count 227 and the second at line
-#   26, after that IRQ's handler (0x0300077A -> 0x02002454), so the task
-#   runner's next pass starts a different one of the two (f2856: slot
+#   MAJOR against both. Mechanism: when the table has loaded (f2855), the
+#   main loop calls the task-create routine at 0x08002B20 three times in a
+#   row; two of the tasks land in IWRAM slots 0x03001E88 and 0x03001F00
+#   (status bytes +0x48 = 0x82 "new", 0x02 once started). Traced from
+#   f2852, mgba makes the three calls at V-count 225, 226 and 227, before
+#   the V-count IRQ at line 0 (DISPSTAT 0x0029, LYC 0); dingbat makes the
+#   first 1,302 cycles later (V-count 226, 227) and the third after that
+#   IRQ's handler (0x0300077A -> 0x02002454), at V-count 16. So the task
+#   runner's next pass starts a different task (f2856: slot status
 #   0x1ED0/0x1F48 = 02/82 in dingbat, 82/02 in both references) and every
-#   per-task counter after it runs a frame apart. The race is about one
-#   scanline after a ~100-frame load (WAITCNT 0x4314: 3/1 waits, prefetch
-#   on); no console measurement says which side of line 0 it falls.
+#   per-task counter runs a frame apart from there. Before the calls the
+#   main thread sits in long BIOS calls (loops at 0x11D0-0x1260) that cost
+#   the same per instruction in both (1.58-1.61 cycles a step); where the
+#   1.3k cycles come from is not located. The game runs WAITCNT 0x4314
+#   (3/1 waits, prefetch on). No console measurement says which side of
+#   line 0 the third call falls: an open phase race, not a settled fault.
 # - The ball, camera and zombies part from there. The password on DATA
 #   SAVE is the same on dingbat and the second reference (3CCC604Z8SS6H
 #   in the run), mgba shows another (Q8H8X3ZPZSHGW); the
