@@ -806,7 +806,7 @@ def verdicts(report, names):
             v['notes'].append('no audio captured')
         for n, pf in (report.get('audio', {}).get('rate_off') or {}).items():
             v['notes'].append(f"audio: {n}'s dump is {pf} samples a frame, not "
-                              f"{audio_nominal():.2f}: its windows drift against the frames (a capture problem)")
+                              f"{audio_nominal():.2f}: its windows drift against the frames")
         # save format
         sv = report['saves'].get(s, {})
         if report.get('save_skipped'):
