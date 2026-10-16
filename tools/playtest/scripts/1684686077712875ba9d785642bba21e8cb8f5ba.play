@@ -1,0 +1,97 @@
+@title Famicom Mini - Akumajou Dracula (Japan)
+@file Famicom Mini - Vol. 29 - Akumajou Dracula (J).gba
+@game FADJ
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# The Disk System version, which writes its files only at GAME OVER > SAVE.
+# Title, the file screen, NAME TOUROKU > PLAYER-1: "A" (RIGHT picks the
+# letter, A sets it), then A through the rest; START plays PLAYER-1. Stage 1:
+# walk into the castle and stand in the first hall until the zombies take all
+# four lives (~13,000 frames), GAME OVER, SELECT to SAVE, START: back to the
+# title; 33 bytes of the 4 Kbit EEPROM. [load]: title, the file screen shows
+# PLAYER-1 "A......" at stage 01, START resumes stage 1.
+# Every dingbat configuration, against both references (which agree): the
+# top 26 lines (the score / time / life bars, the title's KONAMI logo) are
+# black. VRAM, palette, OAM and EWRAM are byte-identical with mgba's at the
+# frame end, and the per-line BG3 writes of the two H-blank DMAs match. The
+# game parks four full-width masking sprites (OAM 68-71, 32x32 affine double,
+# Y=218: lines 0-25) behind four 64x64 affine double-size sprites at Y=154
+# (OAM 64-67, X=239, 128 lines tall). GBATEK: a 128-tall OBJ "located at
+# Y>128 will be treated as at Y>-128", so on the console 64-67 cover lines
+# 0-25, and their 4 x 266 OBJ cycles exhaust the 954 the H-blank-free mode
+# (DISPCNT 0x1960) leaves, and the masks never draw. dingbat's OBJ Y wraps
+# past 159 only (ppu.nim obj_geometry), so it puts 64-67 on lines 154-159,
+# nothing charges lines 0-25 and the masks draw.
+
+[new]
+wait 260
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press A
+wait 90
+press START
+wait 90
+press START
+wait 90
+press DOWN
+wait 20
+press RIGHT
+wait 20
+press A
+wait 20
+press RIGHT
+wait 20
+press A
+wait 20
+checkpoint name_entry window=30
+press START
+wait 60
+tap A times=8 every=20 hold=4
+wait 30
+checkpoint registered window=30
+press START
+wait 200
+checkpoint stage1 window=30
+hold RIGHT
+wait 120
+release
+tap B times=3 every=30 hold=4
+wait 30
+wait 4
+wait 120
+checkpoint courtyard window=30
+hold RIGHT
+wait 600
+release
+wait 400
+hold RIGHT
+wait 150
+release
+wait 400
+wait 1500
+wait 3000
+wait 4000
+wait 4000
+checkpoint game_over window=30
+press SELECT
+wait 20
+checkpoint save_selected window=30
+press START
+wait 120
+# until notblank timeout=1500 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+wait 30
+wait 150
+checkpoint title_after_save window=30
+[load]
+wait 260
+checkpoint continue_title window=30
+press START
+wait 120
+checkpoint file_saved window=30
+press START
+wait 200
+checkpoint stage1_resumed window=30
