@@ -1,0 +1,64 @@
+@title Ecks vs. Sever (USA) (En,Fr,De,Es,It)
+@file Ecks vs. Sever (U) (M5).gba
+@game AESE
+@chip none (password game: no save library string, SINGLE-PLAYER offers NEW GAME / PASSWORD)
+@save none
+@frozen dingbat-bios,mgba,nba
+# Logos, ENGLISH, PRESS START, SINGLE-PLAYER > NEW GAME, the default
+# character, the story and mission cards (START through them), the warehouse
+# street: walk forward, fire once, pause, resume, turn right and walk.
+# Notes: the main menu fades in at a different step in each emulator at f2818
+# and meets at f2938. From the first walk (f4809) mgba stands a step further
+# on than dingbat-bios and the second reference, which stay on the same frame
+# (movement follows the game's rendered frame rate, as in Doom).
+
+[new]
+wait 600
+checkpoint legal window=30
+wait 400
+wait 600
+press START
+wait 300
+wait 400
+checkpoint language window=30
+press A
+wait 200
+checkpoint title window=30
+press START
+wait 120
+wait 120
+checkpoint main_menu window=30
+press A
+wait 120
+wait 120
+checkpoint new_or_password window=30
+press A
+wait 240
+checkpoint character window=30
+press A
+wait 240
+checkpoint story window=30
+press START
+wait 200
+checkpoint mission_card window=30
+press START
+wait 200
+checkpoint objectives window=30
+press START
+wait 200
+checkpoint mission_start window=30
+press UP hold=90
+wait 5
+press A hold=10
+wait 30
+checkpoint walk_fire window=30
+press START hold=10
+wait 60
+checkpoint paused window=30
+press START hold=10
+wait 30
+press RIGHT hold=30
+press UP hold=90
+wait 5
+checkpoint turn_walk window=30
+
