@@ -17,18 +17,21 @@
 # When authored B3AE was not in emu.py's EEPROM_4K list, and the second
 # reference wrote an 8 KB file it read back as blank (its [load] booted to
 # Language Select); it is in the list since (§94).
-# Open, dingbat alone: the two battle scenes start a frame off in every
-# dingbat configuration, against references that agree frame for frame.
-# Melee (melee_attack SLIP(-1)): after the wipe (f3439-3451, a different
-# picture in each emulator every frame) the scene's first still frame
-# lands at f3453 in dingbat, f3452 in both references, and the 2- and
-# 4-frame animation stays a frame late to the end. Ranged (ranged_attack
-# SLIP(+1)): the first still frame lands at f4141 in dingbat, f4142 in
-# both references, a frame early. Opposite signs read as a race at one
-# V-blank (the scene's load ending close to it), not a steady charge;
-# HLE and official BIOS give the same frames. The map, the menus and the
-# saves agree. victory: mgba alone draws another backdrop behind "Victory
-# for Light!" (a picked picture; dingbat = the second reference).
+# The two battle scenes start a frame off in every dingbat configuration
+# (melee_attack SLIP(-1): first still frame f3453 against f3452; ranged_attack
+# SLIP(+1): f4141 against f4142). Not a dingbat bug (docs/playtest-bugs.md
+# §98). The battle map runs at 30 Hz (two V-blanks an iteration), and the
+# A press is read by the first iteration on or after it. At the melee
+# press dingbat's iterations start on even frames and the references' on
+# odd ones; at the ranged press, the other way round. The phase flips
+# whenever an iteration overruns two frames (cursor scrolls within ~5k
+# cycles of the budget, loads), and all three emulators flip at different
+# iterations; the references agree at the presses by different routes. The
+# wipe (f3435-3451) differs every frame in all three, as the map's sparkle
+# around the selected unit does from f2501. The flagged audio window at
+# f2985 is the same phase at the A that closes the move menu.
+# victory: mgba alone draws another backdrop behind "Victory for Light!"
+# (a picked picture; dingbat = the second reference).
 
 [new]
 wait 400

@@ -8785,3 +8785,139 @@ a gamepak-prefetch accounting difference nobody has measured on the
 console. The script passes (a SLIP).
 
 **Status: open, no core change.**
+
+## §98. The Lord of the Rings - The Third Age: the two battle scenes a frame off are the map's 30 Hz phase, flipped by two-frame overruns in all three emulators, 2026-10-16
+
+**Symptom.** In the new script (`0a7a704d...`), `melee_attack` is SLIP -1 and
+`ranged_attack` SLIP +1 in every dingbat configuration. The references agree
+frame for frame. Melee's first still frame is f3453 in dingbat and f3452 in
+both references. Ranged's is f4141 in dingbat and f4142 in both. The audio
+window f2985-3000 is flagged against every dingbat configuration.
+
+**Stable.** dingbat-bios, dingbat (HLE), mGBA and the second reference played
+the `[new]` timeline to f4400 (a scratch replay, not committed). dingbat and
+dingbat-bios are hash-identical on every frame. A state reload reproduces
+the baseline hashes in dingbat and mGBA. In the second reference it moves 11
+of 41 frames, so its runs all start from f0.
+
+**Not a load: the press lands in a different main-loop iteration.** The
+battle map's main loop (0x0801EB7A) runs a game frame (0x080208A0). It then
+calls VBlankIntrWait until the V-blank count (0x0300479C, which the V-blank
+handler counts) is at least `[0x030047F4]` = 2 past the count at the
+iteration's start (0x030047A0). So the map runs at 30 Hz. Each iteration
+reads the keys once, ~60-80k cycles into its first frame (after the V-blank
+handler and its IWRAM work). The A press is held from f3433 (melee) and from
+f4101 (ranged). It is read by the first iteration that starts on or after
+that frame:
+
+| press | dingbat starts on | references start on | dingbat |
+|---|---|---|---|
+| melee, from f3433 | even frames (f3434) | odd frames (f3433) | a frame late |
+| ranged, from f4101 | odd frames (f4101) | even frames (f4102) | a frame early |
+
+The same phase difference gives either sign, by the press frame's parity.
+The wipe (MOSAIC and BLDY ramps) begins at the next iteration in each
+emulator: BLDCNT reads 0x00FF from f3435 in the references and f3436 in
+dingbat. During the wipe the three pictures differ on every frame because
+the map under the mosaic differs.
+
+**The decisive test.** mGBA was given dingbat's phase and nothing else:
+`poke8` of 0x030047A0 + 1 at f3425 (or f4090). Then mGBA equals dingbat-bios
+on 196 of the 232 frames f3453-3684 (129 as built) and on 225 of 240 frames
+f4141-4380 (145). The frames still apart are the wipes, where the three
+emulators differ on every frame anyway (one exception, f3473, the wipe's
+last frame). The scenes then run on dingbat's frames.
+
+**The phase flips whenever an iteration overruns two frames.** A cursor
+scroll iteration costs 350-580k cycles, against ~485k left after the V-blank
+work. A load costs several frames. An odd number of V-blanks flips the
+phase. Each emulator's iteration starts, peeked every frame
+(0x030047A0), with every gap other than 2:
+
+*Melee.* All three start an iteration at f3148. Then:
+
+| iteration | dingbat | mGBA | second reference |
+|---|---|---|---|
+| f3166 (UP scroll) | **3** | 2 | 2 |
+| f3172/3173 | 3 | 3 | 3 |
+| f3183/3184 | **3** | 2 | **3** |
+| f3205-3214 | 4, 5 | 4, 5 | 4, 5 |
+| f3266/3267 | 6 | 6 | 6 |
+| f3276/3277 (a load) | 6 | **5** | 6 |
+| phase at the press | even | odd | odd |
+
+*Ranged.* After the melee scene all three get through the UP taps with
+these flips: f3698-3709 (each emulator twice, at different iterations),
+f3792/3793 (dingbat and the second reference) and the loads at
+f3895/3896 (4) and f3993/3994 (5). Then dingbat alone overruns at f4035 and
+all three start together at f4038. After that:
+
+| iteration | dingbat | mGBA | second reference |
+|---|---|---|---|
+| f4044 | **3** | **3** | 2 |
+| f4051 | 2 | **3** | 2 |
+| phase at the press | odd | even | even |
+
+So the references share a phase at both presses, but by different routes.
+At the melee press, the second reference overran at f3183 where mGBA did
+not, and mGBA's load was a frame shorter than the other two. At the ranged
+press, mGBA overran twice and the second reference never. Phase is binary,
+so of three emulators two always agree. Over f2400-5000 the overruns are 15
+in dingbat and 11 in each reference, at different iterations.
+
+**What an overrun is made of.** Instruction traces of dingbat-bios and
+mGBA, frame by frame with the script's keys. WAITCNT is 0x4314 (WS0 3/1,
+prefetch on) in all three.
+
+* *f3166, dingbat alone overruns.* Both start at f3166 +76.8k. mGBA
+  finishes at f3167 +276,006, 4,890 cycles before the V-blank (480,387
+  cycles). dingbat finishes at f3168 +96,104 (581,119 cycles, one extra
+  V-blank handler of ~72k included). It is dearer in two parts:
+  * Gamepak code, the same instructions within 5%: 3.41 cycles each in
+    dingbat, 3.15 in mGBA. That is ~10.8k cycles, the price gap of §29,
+    §39 and §63, where the console matched dingbat (`slotexec.s` at 4/2).
+  * An IWRAM routine at 0x03003B00-0x03003DFF runs 91,838 instructions in
+    dingbat and 84,817 in mGBA, at the same 1.55 cycles each.
+* *f4051, mGBA alone overruns.* dingbat finishes at f4052 +276,725, 4,171
+  cycles to spare (486,989 cycles). mGBA takes 560,780 cycles. The same
+  IWRAM routine runs 80,827 instructions in mGBA and 69,335 in dingbat. That
+  outweighs mGBA's cheaper gamepak code (3.19 cycles an instruction against
+  3.39).
+* *f4044, both overrun.* dingbat takes 537,192 cycles, mGBA 577,325.
+
+The routine's work is the map's content. On the map the pictures differ in
+all three emulators every frame from f2501, only in the sparkle around the
+selected unit (788 px at f3410, x 83-177, y 36-110). The game's Mersenne
+Twister (seeded at 0x0802948C from the V-blank count, keys and a call count)
+is not that sparkle. It draws only at events. Its seed is the same in
+dingbat and the second reference (0x0064DCD8 at f1598, title START). mGBA
+seeds a frame later (0x0064ED18, f1599). The sparkle's source was not
+traced further.
+
+**Who is right: nobody can be.** Each phase flip is a hair's race at one
+V-blank, decided by 4-5k cycles (1% of the iteration) and by sparkle
+content that already differs. A console takes its own path through the same
+races. It would overrun at least as often as dingbat if its 3/1 gamepak
+prices are dingbat's (§39's caveat: the recorded tables hold 4/2). It would
+also draw its own sparkles. The references' shared frame is two coin flips
+that happen to agree. The only console-measurable ingredient, gamepak code
+under the prefetcher, already has console data on dingbat's side. A console
+probe could not say which frame the scene lands on, so none is proposed.
+
+**The audio window.** f2985-3000 falls on the A that closes the move menu
+(held f2991-2996). There too dingbat's iterations start on odd frames and
+the references' on even ones, from f2857 on. The window is borderline. Its
+spectral distances are 0.36 to mGBA and 0.52 to the second reference,
+against a threshold of 0.35. The references are 0.32 apart there, and
+differ from each other in the neighbouring windows 198, 200 and 201 (0.36,
+0.62, 0.65). Across the whole run they differ from each other in 139 of 444
+windows. A local replay also flags f4890-4905: the orcs' battle scene
+starts at f4861 in dingbat and f4860 in both references, the same phase
+difference (iterations from f4805 against f4804).
+
+**Status: (d), no core change.** The slips are the map's 30 Hz phase,
+flipped by overruns that come down to a few thousand cycles. One
+ingredient is mGBA's cheaper gamepak code, class (b) as in §29 and §63. The
+rest is sparkle content and phase history with no hardware truth. Both
+checkpoints are SLIPs and pass; no `@known` is needed. The script's notes
+say so.
