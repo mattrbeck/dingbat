@@ -1,0 +1,75 @@
+@title Medal of Honor - Underground (USA)
+@file Medal of Honor - Underground (U) [!].gba
+@game AUGE
+@chip none (password game: no save library string; the pause menu shows the level PASSWORD)
+@save none
+@frozen dingbat-bios,mgba,nba
+# START GAME, the "Mission One: Occupied!" card and Manon's briefing (A through
+# the cut-scene, START/A through the three letter pages), first gameplay in the
+# Paris street: walk forward, fire the pistol once, turn and walk, pause
+# (objectives, password IRRADIER), resume, walk, B switches to the petrol bomb.
+# Findings: from the first walk (walk_forward, f2784) mgba stands a step
+# further forward than dingbat-bios and the second reference, which stay on the
+# same frame bit for bit through the walk (movement follows the game's
+# rendered frame rate, as in Doom). At petrol_bomb (f3774) dingbat-bios and
+# the second reference hold the petrol bomb; mgba, a little further on in the
+# street, still holds the pistol.
+
+[new]
+wait 600
+press START
+wait 120
+press A
+wait 120
+press A
+wait 300
+# mash A until notext MANON timeout=1200 every=30  [taps dingbat-bios:0 mgba:0 nba:0]
+wait 60
+press A
+wait 200
+# mash A until changed timeout=1200 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=30 hold=4
+wait 100
+# mash A until changed timeout=1200 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=30 hold=4
+wait 100
+# mash A until changed timeout=1200 every=30  [taps dingbat-bios:1 mgba:1 nba:1]
+tap A times=1 every=30 hold=4
+wait 100
+press START
+wait 120
+checkpoint briefing window=30
+press START
+wait 120
+press A
+wait 120
+press A
+wait 120
+press A
+wait 120
+wait 120
+checkpoint mission_start window=30
+press UP hold=90
+wait 10
+checkpoint walk_forward window=30
+press A
+wait 60
+press RIGHT hold=40
+press UP hold=120
+wait 10
+checkpoint turn_walk window=30
+press START
+wait 60
+checkpoint pause_objectives window=30
+press START
+# the session spent these frames on the paused screen (steps undone there)
+wait 220
+press A
+wait 60
+press LEFT hold=30
+press UP hold=150
+press B
+wait 30
+checkpoint petrol_bomb window=30
+wait 120
+checkpoint after_switch window=30

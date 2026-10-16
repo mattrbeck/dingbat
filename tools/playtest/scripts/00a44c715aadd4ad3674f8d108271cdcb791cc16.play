@@ -1,0 +1,104 @@
+@title V-Rally 3 (USA)
+@file V-Rally 3 (U).gba
+@game AVRE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba
+# ENGLISH, CREATE GAME > GAME 1, name "A" (the default letter), flag: creating
+# the game writes the 512-byte EEPROM (289 bytes of data, identical in
+# dingbat-bios and mgba) and lands on the main menu. [new] carries on into
+# TIME TRIAL (Renault Clio, V-Rally France stage 1, START STAGE), holds A
+# through the countdown and the first corner (the car runs into the bank),
+# pauses, QUIT > YES back to the main menu. [load]: ENGLISH, the game list
+# opens with LOAD GAME > GAME 1 selected, A loads it to the main menu.
+# Frozen on dingbat-bios + mgba only: the second reference never shows a
+# picture (black through f1806 and beyond).
+# Notes: the 3D car, screwdriver and countdown digit on the menus rotate at a
+# rate that follows the game's rendered frames, so car_select, the setup
+# screen, countdown and the race differ between dingbat-bios and mgba by a
+# little rotation; in the race the in-game clock reads 0.05 s more on
+# dingbat-bios (02"80 against 02"75 at f4780). The game list samples the pad
+# from its own loop: a 2-frame DOWN at f1986 of [load] was seen by mgba and
+# not by dingbat-bios, so the menus here use the default 6-frame press.
+
+[new]
+wait 600
+checkpoint logo window=30
+wait 300
+wait 600
+checkpoint language window=30
+press A
+wait 300
+checkpoint create_game window=30
+press A
+wait 120
+checkpoint name_entry window=30
+press A
+wait 60
+press START
+wait 120
+press A
+wait 200
+wait 200
+checkpoint main_menu window=30
+press RIGHT
+wait 60
+press RIGHT
+wait 60
+press RIGHT
+wait 60
+press LEFT
+wait 30
+press LEFT
+wait 60
+press A
+wait 120
+wait 120
+checkpoint car_select window=30
+press A
+wait 120
+wait 120
+checkpoint stage_select window=30
+press A
+wait 300
+press RIGHT
+wait 60
+press A
+wait 300
+checkpoint countdown window=30
+hold A
+wait 300
+checkpoint race_start window=30
+wait 200
+release
+press START
+wait 60
+checkpoint pause window=30
+tap DOWN times=4 every=15 hold=4
+wait 30
+press A
+wait 300
+press DOWN
+wait 20
+press A
+wait 300
+press A
+wait 60
+press RIGHT hold=8
+wait 30
+press A
+wait 300
+checkpoint back_to_menu window=30
+
+[load]
+wait 1500
+wait 60
+press A
+wait 300
+checkpoint game_list window=30
+wait 60
+press A
+wait 400
+checkpoint loaded_menu window=30
+press RIGHT
+wait 60
+checkpoint time_trial window=30
