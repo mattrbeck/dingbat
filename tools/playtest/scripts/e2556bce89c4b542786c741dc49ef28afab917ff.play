@@ -1,0 +1,88 @@
+@title Rebelstar - Tactical Command (USA)
+@file Rebelstar - Tactical Command (U).gba
+@game BRLE
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Title, START skips the intro, Main Menu > New Campaign > the first EMPTY
+# slot: starting the campaign writes it (Boot Camp, the squad's stats; 8 KB
+# of EEPROM). A through the Chapter 1 briefing, turn 1 of the Boot Camp
+# tutorial: Jorel's action menu > Move, the end-turn hint, START > End Turn
+# (the tutorial greys out Save Game here), turn 2's first hint. [load]: Main
+# Menu > Continue Campaign > Boot Camp > CHAPTER 1.
+# The tutorial's text boxes type a frame or so earlier on mgba: taps every
+# 30 frames there landed on a box mgba had already finished and split it
+# from the others (its hint closed, the others' stayed), so the taps in the
+# mission come every 100 frames.
+
+[new]
+wait 600
+wait 120
+checkpoint title window=30
+press START
+wait 120
+press START
+wait 120
+wait 60
+checkpoint main_menu window=30
+press A
+wait 120
+checkpoint slots window=30
+press A
+wait 120
+checkpoint chapter1 window=30
+tap A times=20 every=30 hold=4
+tap A times=30 every=30 hold=4
+checkpoint turn1 window=30
+press START
+wait 90
+wait 60
+tap A times=8 every=100 hold=4
+tap A times=6 every=100 hold=4
+press A
+wait 60
+wait 60
+press A
+wait 100
+press A
+wait 100
+press A
+wait 100
+press A
+wait 100
+tap A times=4 every=100 hold=4
+wait 60
+wait 60
+wait 40
+checkpoint end_turn_hint window=30
+press START
+wait 200
+checkpoint mission_menu window=30
+press A
+wait 100
+checkpoint turn2 window=30
+press START
+wait 100
+tap A times=4 every=100 hold=4
+wait 100
+checkpoint action_points_hint window=30
+
+[load]
+wait 600
+wait 120
+checkpoint title window=30
+press START
+wait 120
+press START
+wait 120
+wait 60
+checkpoint main_menu window=30
+press DOWN
+wait 20
+press A
+wait 120
+checkpoint load_slots window=30
+press A
+wait 150
+checkpoint resumed_chapter1 window=30
+
