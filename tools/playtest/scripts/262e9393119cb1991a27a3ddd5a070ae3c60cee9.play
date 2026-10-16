@@ -1,0 +1,151 @@
+@title Tales of Phantasia (USA)
+@file Tales of Phantasia (U).gba
+@game AN8E
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Health warning, START skips the intro twice, title > NEW GAME, the
+# prologue battle and the sealing of Dhaos (START skips the pendant scene),
+# A through Miguel, Maria and Chester in Totus, the camp menu (SELECT),
+# walk across the village and out under the arch past Tristan to the world
+# map, SELECT > Save > DATA1 > Yes (the 8 KB EEPROM written). [load]:
+# CONTINUE > DATA1 > Yes, back on the world map outside Totus.
+# From the prologue battle (f1764) to the scripted dialogue (f9836) the
+# three emulators run the cutscene at different paces: mgba is up to ~150
+# frames ahead ("A dozen or so years passed..." f8636 against f8716), and
+# they meet again where the game waits for A. In Totus the wandering NPCs
+# and butterflies stand in different places on each, so the village walk
+# was authored with nobody in the way on any of them.
+
+[new]
+wait 600
+checkpoint warning window=30
+press A
+wait 300
+press START
+wait 240
+press START
+wait 180
+checkpoint title window=30
+press A
+wait 300
+wait 200
+checkpoint opening_battle window=30
+wait 300
+wait 600
+wait 900
+wait 900
+press A
+wait 120
+wait 600
+press START
+wait 180
+wait 300
+wait 300
+wait 600
+wait 900
+wait 900
+wait 1200
+checkpoint cress_home window=30
+tap A times=10 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=30 every=30 hold=4
+tap A times=20 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+press DOWN hold=30
+wait 30
+press SELECT
+wait 60
+checkpoint camp_menu window=30
+press B
+wait 40
+press DOWN hold=90
+wait 10
+press RIGHT hold=40
+press DOWN hold=120
+wait 10
+press LEFT hold=30
+press DOWN hold=160
+wait 10
+press UP hold=60
+press RIGHT hold=120
+wait 10
+press UP hold=50
+press RIGHT hold=200
+wait 10
+press LEFT hold=30
+press UP hold=60
+wait 10
+press DOWN hold=24
+press RIGHT hold=200
+wait 10
+press RIGHT hold=200
+wait 10
+press LEFT hold=110
+press DOWN hold=200
+wait 10
+press LEFT hold=200
+press DOWN hold=150
+wait 10
+press RIGHT hold=70
+press DOWN hold=200
+wait 10
+press LEFT hold=45
+press DOWN hold=200
+wait 10
+press RIGHT hold=30
+press DOWN hold=150
+wait 10
+press LEFT hold=16
+press DOWN hold=150
+wait 10
+tap A times=25 every=30 hold=4
+tap A times=10 every=30 hold=4
+press DOWN hold=200
+wait 10
+checkpoint world_map window=30
+press SELECT
+wait 60
+press UP
+wait 20
+press A
+wait 120
+checkpoint save_slots window=30
+press A
+wait 60
+checkpoint save_prompt window=30
+press UP
+wait 20
+press A
+wait 120
+# until notext Saving timeout=1200 every=10  [reached dingbat-bios+260 mgba+260 nba+260]
+wait 264
+wait 60
+checkpoint saved window=30
+
+[load]
+wait 600
+checkpoint warning window=30
+press A
+wait 300
+press START
+wait 240
+press START
+wait 180
+wait 30
+checkpoint continue_title window=30
+press A
+wait 120
+checkpoint load_slots window=30
+press A
+wait 60
+press UP
+wait 20
+press A
+wait 240
+checkpoint resumed window=30
+press SELECT
+wait 60
+checkpoint resumed_menu window=30
+
