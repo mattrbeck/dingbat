@@ -1,0 +1,65 @@
+@title Tetris Worlds (USA)
+@file Tetris Worlds (U) [!].gba
+@game ATWE
+@save none
+@chip none (no save library string; the cart keeps no records, and dingbat writes no battery file)
+@frozen dingbat-bios,mgba,nba
+
+# Legal screen, logos, title, MAIN MENU > ULTRA (the two-minute challenge)
+# > TETRIS, the rules card, then two minutes of play with no hard drops:
+# every ~10 s the falling piece is shifted (or turned), so no board tops
+# out and the clock ends the game on the same frame everywhere. GAME OVER
+# (TIME 2:00), START back to MAIN MENU.
+# The pieces come from the game's randomness, seeded by timing: from
+# first_piece the three emulators deal different pieces (in the authoring
+# session dingbat and the second reference dealt the same ones until the
+# route moved by a checkpoint), so the boards are not comparable; the
+# starfield behind GAME OVER and the sea creatures are random too, and
+# those screens are compared by text. The logos fade on different frames
+# in all three (legal).
+[new]
+wait 270
+checkpoint legal window=30
+wait 1110
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press DOWN
+wait 20
+press A
+wait 90
+checkpoint select_game window=30 compare=text
+press A
+wait 90
+press A
+wait 120
+checkpoint first_piece window=30
+tap LEFT times=4 every=8 hold=4
+wait 600
+wait 600
+tap RIGHT times=4 every=8 hold=4
+wait 600
+tap LEFT times=2 every=8 hold=4
+wait 600
+tap RIGHT times=2 every=8 hold=4
+wait 600
+checkpoint board window=30
+press A
+wait 600
+tap RIGHT times=3 every=8 hold=4
+wait 600
+tap LEFT times=3 every=8 hold=4
+wait 600
+tap RIGHT times=1 every=8 hold=4
+wait 600
+tap LEFT times=1 every=8 hold=4
+wait 600
+tap RIGHT times=4 every=8 hold=4
+wait 600
+wait 400
+checkpoint game_over window=30 compare=text
+press START
+wait 90
+checkpoint menu_again window=30 compare=text
+
