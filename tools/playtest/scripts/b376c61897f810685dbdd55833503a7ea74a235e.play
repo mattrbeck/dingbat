@@ -1,0 +1,142 @@
+@title bit Generations - Soundvoyager (Japan)
+@file Bit Generations Soundvoyager (J).gba
+@game BVGJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+@save skip: the game formats its 32 KB SRAM at the first boot ("SND" header and defaults, the same 16 bytes in all three); progress is written only when a stage is cleared, and sound catcher's first stage soon dims its targets to nothing: past ten catches (f14941) they can only be found by ear
+
+# Health warning, A, the Soundvoyager logo, A: "press start", START, adjust
+# volume, A: the LR balance screen, R, A, UP to the mode tree's "sound
+# catcher (voyage)", A: stage 1. The sound source shows as a green ring
+# coming down the field; LEFT/RIGHT slide the field under the player (the
+# grey dot at the bottom): RIGHT moves the ring left. The ring is steered
+# over the player twice (caught at f3939 and f4977), the third one entering
+# at the top ends the script. dingbat-bios, mgba and the second reference
+# hash alike through most of it; the fades in and out of each screen (the
+# meter's frame, the player dot) come out a shade apart.
+
+[new]
+wait 300
+checkpoint warning window=30
+press A
+wait 180
+wait 200
+wait 120
+checkpoint title window=30
+press A
+wait 120
+checkpoint press_start window=30
+press START
+wait 120
+checkpoint adjust_volume window=30
+press A
+wait 120
+press R
+wait 30
+press A
+wait 150
+press UP
+wait 60
+checkpoint menu_tree window=30
+press A
+wait 150
+wait 140
+checkpoint stage_start window=30
+wait 800
+checkpoint first_target window=30
+wait 340
+hold RIGHT
+wait 20
+release
+wait 10
+hold RIGHT
+wait 90
+release
+hold RIGHT
+wait 160
+release
+hold LEFT
+wait 70
+release
+hold LEFT
+wait 16
+release
+wait 30
+hold LEFT
+wait 5
+release
+wait 60
+wait 60
+checkpoint target_close window=30
+wait 60
+wait 60
+checkpoint caught window=30
+hold RIGHT
+wait 50
+wait 50
+wait 50
+wait 50
+release
+hold LEFT
+wait 11
+release
+wait 6
+hold LEFT
+wait 5
+release
+wait 6
+hold LEFT
+wait 4
+release
+wait 6
+hold LEFT
+wait 4
+release
+wait 6
+wait 20
+hold LEFT
+wait 4
+release
+wait 6
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+wait 20
+hold LEFT
+wait 4
+release
+wait 6
+hold LEFT
+wait 4
+release
+wait 6
+wait 30
+wait 76
+checkpoint second_catch window=30
