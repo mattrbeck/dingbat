@@ -1,0 +1,135 @@
+@title Duke Nukem Advance (USA)
+@file Duke Nukem Advance (U).gba
+@game AD9E
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+# Title, main menu, OPTIONS > CROSS HAIR TYPE changed, CONTINUE shows five
+# empty slots, START, default difficulty (LET'S ROCK), the intro, MISSION
+# BRIEF (Area 51) > SAVE > SLOT 1: the 512-byte EEPROM then holds mission 1A,
+# MEDIUM (32 bytes of data, identical in dingbat-bios and mgba). SAVE again
+# shows the slot filled; B, PLAY, General Graves' briefing (A through it),
+# Area 51: walk forward, fire, pause. [load]: CONTINUE > SLOT 1 (mission 1A,
+# MEDIUM) loads to the mission brief, PLAY.
+# Notes: in Area 51 the three stand in slightly different places after the
+# same 60-frame walk (movement follows the game's rendered frame rate), so
+# the footsteps fall on other frames (mgba f5398 and f5422, dingbat f5400,
+# the second reference f5402-f5406): audio flags three windows from f5385
+# against both references, the walk's phase, not the mixer. graves is one
+# frame apart on mgba alone (dingbat-bios = the second reference). The
+# second reference writes an 8 KB file and its own boot of it shows five empty
+# slots (it does not read back what it wrote); dingbat-bios and mgba read it.
+
+[new]
+wait 600
+checkpoint logo window=30
+wait 300
+wait 300
+wait 60
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press A
+wait 60
+checkpoint options window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press A
+wait 40
+press RIGHT
+wait 30
+checkpoint crosshair window=30
+press A
+wait 30
+press B
+wait 60
+press UP
+wait 20
+press UP
+wait 30
+press A
+wait 90
+checkpoint slots_empty window=30
+press B
+wait 60
+press UP
+wait 30
+wait 30
+press A
+wait 90
+press B
+wait 90
+press A
+wait 90
+checkpoint difficulty window=30
+press A
+wait 300
+# until notblank timeout=1200 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 60
+checkpoint intro window=30
+press A
+wait 200
+checkpoint mission_brief window=30
+press RIGHT
+wait 30
+press A
+wait 90
+checkpoint save_slots window=30
+press A
+wait 120
+press RIGHT
+wait 30
+press A
+wait 90
+checkpoint slot1_saved window=30
+press B
+wait 60
+press A
+wait 300
+checkpoint graves window=30
+# the session spent these frames on the briefing (a step undone there)
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+tap A times=6 every=60 hold=4
+wait 30
+tap A times=4 every=60 hold=4
+wait 30
+checkpoint area51_start window=30
+press UP hold=60
+wait 5
+press A hold=10
+wait 30
+checkpoint walk_fire window=30
+press START hold=10
+wait 60
+checkpoint pause_menu window=30
+
+[load]
+wait 1320
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press DOWN
+wait 30
+press A
+wait 90
+checkpoint load_slots window=30
+press A
+wait 200
+checkpoint loaded_brief window=30
+press A
+wait 300
+checkpoint loaded_graves window=30
