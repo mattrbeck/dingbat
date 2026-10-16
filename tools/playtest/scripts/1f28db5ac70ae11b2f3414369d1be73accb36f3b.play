@@ -10,9 +10,9 @@
 # START > the power-up gauge picks (A four times) and the first minute of
 # stage 1 holding B (rapid fire), a capsule, the nebula, START (PAUSE).
 # [load]: title > OPTION shows EASY / 7 / Rapid ON.
-# AGAP is not in the second reference's 4 Kbit list: it writes an 8 KB
-# file, reads it back as blank and shows the defaults (NORMAL, 3, OFF) in
-# [load].
+# When authored AGAP was not in emu.py's EEPROM_4K list, and the second
+# reference wrote an 8 KB file it read back as blank (the defaults NORMAL,
+# 3, OFF in [load]); it is in the list since (§94).
 
 [new]
 wait 400

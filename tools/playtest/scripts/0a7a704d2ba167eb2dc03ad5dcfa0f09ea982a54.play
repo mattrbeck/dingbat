@@ -14,9 +14,9 @@
 # [load]: START through the logos to the menu, Load Game > Aragorn > The
 # War Room; DOWN lands on Save (B backs out without saving), UP, LEFT >
 # Missions: the map now lists the Advanced Tutorial.
-# B3AE is not in the second reference's 4 Kbit list: it writes an 8 KB
-# file and reads it back as blank, so in [load] it boots to Language
-# Select and the [load] inputs walk it through Italian into the intro.
+# When authored B3AE was not in emu.py's EEPROM_4K list, and the second
+# reference wrote an 8 KB file it read back as blank (its [load] booted to
+# Language Select); it is in the list since (§94).
 # Open, dingbat alone: the two battle scenes start a frame off in every
 # dingbat configuration, against references that agree frame for frame.
 # Melee (melee_attack SLIP(-1)): after the wipe (f3439-3451, a different
