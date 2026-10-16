@@ -1,0 +1,107 @@
+@title Tony Hawk's Underground (USA)
+@file Tony Hawk's Underground (U).gba
+@game BTOE
+@chip EEPROM (EEPROM_V122; 64 Kbit, an 8 KB file on all three)
+@frozen dingbat-bios,mgba,nba
+
+# No save: logos and title run straight into Story mode's intro text; four
+# A taps reach ENTER NAME, name "ABBA", default outfit, "Continue? YES"
+# writes the battery save. Then the New Jersey story card, Benny's
+# dialogue tapped through (the taps also ollie the skater into a bail),
+# pause > Skater Progress > Goals, back out and skate on. [load]: the
+# title opens T.H.U.G. (STORY selected, "active game abba"), STORY >
+# CONTINUE GAME shows ABBA's story card and resumes at Benny's dialogue.
+# Findings (recorded 2026-10-16):
+# - Menus over the translucent red panel (outfit, continue_prompt, the
+#   [load] menus) differ by one step in a colour channel between all
+#   three: BLDCNT 0x1F41, BLDALPHA 0x0808, BG0 (31,0,0) over BG3; VRAM,
+#   OAM and palette are byte-identical in the three. dingbat's pixels are
+#   floor((A*8 + B*8) / 16) per channel (GBATEK) at every pixel checked
+#   (e.g. (6,38): BG3 (18,25,30) -> (24,12,15)); mgba and the second
+#   reference come out one higher in red at those pixels, and the second
+#   reference also in blue elsewhere in the band (y 38-147), so they do
+#   not agree with each other either. Compared by text.
+# - The skater's shadow (a few pixels at the skater, dialogue screens) is
+#   one step brighter in red/blue on the second reference alone.
+# - resumed: mgba stands alone (its skater got up from the bail on another
+#   frame and rode to the porch: "PRESS L TO TALK"); dingbat and the second
+#   reference show the same scene.
+[new]
+wait 270
+wait 60
+wait 240
+wait 60
+wait 240
+checkpoint title window=30
+wait 240
+wait 60
+tap A times=4 every=40 hold=4
+wait 30
+press A
+wait 20
+press RIGHT
+wait 20
+press A
+wait 20
+press A
+wait 20
+press LEFT
+wait 20
+press A
+wait 30
+checkpoint name_entry window=30
+press START
+wait 90
+checkpoint outfit window=30 compare=text
+press START
+wait 90
+checkpoint continue_prompt window=30 compare=text
+press A
+wait 360
+checkpoint story_card window=30
+tap A times=12 every=40 hold=4
+wait 120
+wait 60
+tap A times=6 every=40 hold=6
+wait 30
+tap A times=6 every=40 hold=6
+wait 30
+wait 120
+wait 60
+press START
+wait 60
+checkpoint paused window=30 compare=text
+tap DOWN times=2 every=15 hold=4
+wait 20
+press A
+wait 60
+tap DOWN times=2 every=15 hold=4
+wait 20
+press A
+wait 60
+checkpoint goals window=30 compare=text
+press B
+wait 30
+press B
+wait 30
+press B
+wait 60
+hold RIGHT
+wait 60
+release
+wait 60
+checkpoint resumed window=30
+
+[load]
+wait 900
+checkpoint main_menu window=30 compare=text
+press A
+wait 90
+wait 60
+press A
+wait 240
+checkpoint continue_card window=30
+tap A times=12 every=40 hold=4
+wait 120
+checkpoint resumed_skate window=30
+
