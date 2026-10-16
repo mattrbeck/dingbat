@@ -182,7 +182,23 @@ covers dark/bright measurements. **Open:** no frontend control yet for
 
 ## 6. Fire Emblem: The Sacred Stones, one-step colour on two menus
 
-Not resolved. At select_mode BLDCNT=0x3C42 (BG1 over BG2/BG3/OBJ/BD),
+**Resolved 2026-10-15, no dingbat bug (§92).** Dumped at the checkpoint
+frames, the composite's inputs (VRAM, palette, OAM, the PPU registers and
+the H-blank handler's per-line BG2HOFS writes) are the same game state in
+all three emulators, a few frames apart: the second reference 1 frame
+ahead of dingbat at slots_empty, mGBA 5. Rendered one layer at a time,
+dingbat's frame gives each reference's picture exactly when its own blend
+formula is applied: mGBA's on every pixel, the second reference's on all
+but 3. So the picture is §72's blend rounding (dingbat truncates, as the SP
+photographs do) over an animation phase. The phase comes from lag frames:
+the menus' game frames sit within a few percent of the frame's cycle
+budget, and mGBA's cheaper gamepak code under the prefetcher (WS0 3/1)
+avoids five that dingbat takes. dingbat and the second reference part on
+one, a 3/1 prefetch-cost question the console has not been asked.
+
+The history, as it was written:
+
+At select_mode BLDCNT=0x3C42 (BG1 over BG2/BG3/OBJ/BD),
 BLDALPHA=0x030D (13+3). dingbat's pixels differ from both references on
 ~12k pixels, mostly 1-3 steps darker, some white pixels 29 vs 31 -- more
 than blend truncation explains, so a layer input (BG1/BG2 content or frame
@@ -6334,7 +6350,7 @@ as a slip. None of them hides a dingbat bug.
 | DQ Monsters Caravan Heart | kiefer_room | RNG/phase | RAM parts from the title; the second reference 29 frames ahead (script) | |
 | Final Fantasy V | title | render | alpha on the semi-transparent PRESS ANY BUTTON | §72 |
 | Final Fight One | intro_story | downstream | the load a frame late | §29 |
-| Fire Emblem: Sacred Stones | slots_empty | render | alpha 6/16 over an animated background; dingbat~second reference within a step but 84 px; mGBA's background on another frame | §72 |
+| Fire Emblem: Sacred Stones | slots_empty | render | alpha 6/16 over an animated background; dingbat~second reference within a step but 84 px; mGBA's background on another frame | §72, §92 |
 | Fire Emblem: Sacred Stones | intro | harness | the text fading in at -2/+1/+3 | |
 | Fire Emblem: Sacred Stones | prologue | render | alpha 3/16 (text compare) | §72 |
 | Gradius Galaxies | stage1 | render | alpha 15/16 | §72 |
@@ -8302,3 +8318,121 @@ disabling a FIFO DMA in the cycle its request arrives. That is the likely
 cause of the earlier FIFO wedges (docs/hwprobe-questions.md). fifoslot.s
 stops TM0 and waits ~160 cycles before disabling DMA1, with no V-blank
 guard. It ran about 2,100 runs without a hitch.
+
+## §92. Fire Emblem: The Sacred Stones: the two menus are the blend's rounding over lag frames, 2026-10-15
+
+**Symptom.** Section 6, the oldest open entry. On `select_mode` (f1395)
+and `slots_empty` (f1561), menus over an animated fog, no two emulators
+ever draw the same frame, and the pixel metrics put dingbat about twice as
+far from either reference as the references are from each other. Today
+`select_mode` reads dingbat~second reference MINOR, mGBA DIFFERENT from
+both; `slots_empty` is DIFFERENT in all three pairs. The game passes.
+
+**Method.** A scratch replay of the frozen `[new]` timeline in
+dingbat-bios, mGBA and the second reference. It reproduced the run's
+checkpoint hashes. Every frame from 40 before to 40 after each checkpoint
+dumped palette RAM, VRAM, OAM, IWRAM, EWRAM, DMA and interrupt state, and
+the PPU's register latches, write-only ones included. Two scratch driver
+additions did this and were not kept: a `ppuio` command in the dingbat and
+second-reference drivers, and second-reference `peek` of palette, VRAM and
+OAM through its save-state copy. mGBA's `peek` already returns both. A
+trace build of the dingbat driver logged every video-register write
+through the `apulog` hook.
+
+**The inputs are one game state, a few frames apart.**
+
+* VRAM is static and identical in all three across both windows.
+* At both checkpoints, in all three, BLDCNT = 0x0844 (BG2, the fog, over
+  BG3) and BLDALPHA = 0x1006 (EVA 6, EVB 16). Section 6's 0x3C42 / 0x030D
+  came from the 2026-09 timeline. Not one pixel blends BG1 now.
+* There is no H-blank DMA (DMA1/2 feed the sound FIFOs). The H-blank
+  interrupt (IE 0x2003) writes BG2HOFS 161 times a frame: the fog's wave.
+* Palette and OAM pick out the frame offsets:
+
+  | checkpoint | dingbat | second reference | mGBA |
+  |---|---|---|---|
+  | select_mode | f1395 | f1395 | f1394 |
+  | slots_empty | f1561 | f1560 | f1556 |
+
+  At these frames palette, OAM and the frame-end registers agree byte for
+  byte. At the same frame mGBA's BG2VOFS reads 0x4F, a step on from the
+  others' 0x4E.
+
+**The picture is the blend.** dingbat re-rendered each checkpoint frame
+from a state one frame before it (same hash), one layer set at a time. On
+the blended pixels (16,639 at slots_empty, 14,929 at select_mode, every
+one BG2 over BG3), each reference's formula was applied to dingbat's own
+layers:
+
+| formula | slots_empty | select_mode |
+|---|---|---|
+| mGBA's widened form, ((w(t)·6 + w(b)·16) >> 4) >> 3 | **= mGBA f1556, every pixel** | **= mGBA f1394, every pixel** |
+| rounded, with green in 6 bits: ((2t·6 + 2b·16 + 8) >> 4) >> 1 | **= second ref f1560, every pixel** | = second ref f1395 but 3 px |
+| rounded, all channels in 5 bits | second ref +7,167 px, all green | +6,709, all green |
+| dingbat's truncation | the second ref +11,564, mGBA +12,702 | +10,508, +11,682 |
+
+On these frames the second reference blends green at 6 bits and drops the
+low bit, which would account for §72's "one green step below rounding"
+(not re-checked on §72's frames). Every differing pixel is one
+5-bit step, dingbat the lower. The references' two formulas agree with
+each other more often than either agrees with truncation (5,876 px apart
+at slots_empty against 11,564 and 12,702). That is the "twice as far".
+The SP's blendprobe photographs side with truncation (§72).
+
+**The 3 pixels** are x = 0-1 on lines 42 and 91 of select_mode. On those
+lines dingbat's handler writes BG2HOFS 14 and 15 cycles into the line. On
+every other line the write lands in the last 6 cycles of the line before,
+or by cycle 4. dingbat renders the line whole at H-blank, as mGBA does,
+so the new offset covers the line. The second reference draws the first
+two pixels from the old fetch: one shows the next pixel's fog, the other
+none. A third late write, line 156 at cycle 14, changes no pixel. When a
+text BG takes HOFS for its first tile is not measured. It is a hardware
+question, and three pixels of one frame.
+
+**The phase is lag frames.** Peeked every frame from f0, IWRAM 0x03000014
+counts V-blanks. It runs one ahead in dingbat from f14 (the boot) and never
+moves again. The menu's own counter at 0x02024F6A stands still on a frame
+the game did not finish. Its offsets match OAM's (+5 and +1 by f1511) and
+are made in three places:
+
+| where | dingbat | second reference | mGBA |
+|---|---|---|---|
+| f1237, the menu after the title | lags 1 | lags 1 | 0 |
+| the load into slots_empty: the count resumes | f1492 | f1492 | f1491 |
+| f1501-f1506, the slots screen's first frames | lags 3 | lags 2 | 0 |
+
+Traced over f1495-f1509 in dingbat and mGBA. The main loop waits for the
+V-blank by a SWI from 0x080D16DE. The frame is 280,896 cycles, and
+WAITCNT is 0x45B7 (WS0 3/1, prefetcher on) in all three.
+
+* *Steady state, f1495-f1499.* The same instructions within 0.5% (107,587
+  against 107,636 at f1495). dingbat waits at 262.7k-265.3k cycles into
+  the frame, mGBA at 252.7k-254.3k. dingbat is 3% dearer (269,853 busy
+  cycles against 261,758). The cost is spread over gamepak code. The
+  largest share is the H-blank handler at 0x08014Cxx: +2.2k a frame, 160
+  calls.
+* *f1500, the slots screen's first game frame.* mGBA reaches its wait 329
+  cycles before the V-blank (119,362 instructions). dingbat, 3% dearer,
+  reaches it 90,908 cycles into the next frame, a lag. The second
+  reference lags too.
+* *f1501-f1505.* mGBA's next five game frames end 270.6k-273.8k in, 7-10k
+  spare. 3% more spends that, so dingbat lags twice more and the second
+  reference once.
+
+**Who is right.**
+
+* *The blend:* dingbat (§72).
+* *mGBA's five frames:* class (b). This is the cheaper gamepak code under
+  the prefetcher that §29, §39, §66 and §72 traced. `slotexec.s` measured
+  dingbat's figure on the console at 4/2.
+* *The one frame between dingbat and the second reference:* class (c).
+  The second reference is dearer than mGBA and cheaper than dingbat by a
+  fraction of a percent. Which lands on the console's side of the budget
+  edge depends on the 3/1 prefetch costs, which the recorded tables do not
+  hold (§39's caveat).
+* *The 3 left-edge pixels:* class (c), as above.
+
+**Status: no core change.** None of it is a dingbat bug as far as the
+console has been asked. Neither checkpoint can be judged by exact frames:
+the blend formulas differ on every frame, and the lag frames shift the fog
+under them. The script stays as it is.
