@@ -1,0 +1,76 @@
+@title Madden NFL 2005 (USA)
+@file Madden NFL 2005 (U).gba
+@game BMFE
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# Title, START, MY MADDEN > SETTINGS > GAMEPLAY: QUARTER LENGTH from 5 to
+# 6 minutes; backing out of the settings writes the EEPROM (no prompt).
+# [load]: the same menus show QUARTER LENGTH at 6 minutes.
+# All three write the same 8 KB file. Just after the second back-out
+# (f1958) mgba draws the MY MADDEN items sliding in a few frames behind
+# dingbat and the second reference (likely the settings' EEPROM write,
+# mgba programming slowest; caught up by the checkpoint). The audio check
+# flags one quarter-second window at f1485 (the menu sound entering SETTINGS; MINOR, 0.7%).
+[new]
+wait 600
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 30
+press A
+wait 90
+checkpoint my_madden window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 30
+press A
+wait 90
+checkpoint settings window=30
+press A
+wait 90
+press RIGHT
+wait 30
+checkpoint custom_gameplay window=30
+press B
+wait 60
+press B
+wait 60
+wait 60
+checkpoint my_madden_after_save window=30
+
+[load]
+wait 900
+checkpoint continue_title window=30
+press START
+wait 120
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 30
+press A
+wait 90
+press DOWN
+wait 20
+press DOWN
+wait 20
+press DOWN
+wait 30
+press A
+wait 90
+checkpoint continue_settings window=30
+press A
+wait 90
+checkpoint continue_custom_gameplay window=30

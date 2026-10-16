@@ -1,0 +1,98 @@
+@title Columns Crown (USA)
+@file Columns Crown (U) [!].gba
+@game ACGE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# First boot: the story intro (A through its pages), the two name screens
+# (JADE and RUBY kept with START), then the title; the game writes its
+# EEPROM when the names are confirmed. Survival Mode, Easy, Jade, DOWN held
+# until GAME OVER, NO at CONTINUE?, then Options > Rankings > Survival.
+# [load]: with the names saved, START at the intro jumps to the title;
+# START, Survival, Easy: the character screen with both names.
+[new]
+wait 400
+wait 300
+wait 300
+wait 600
+press START
+wait 120
+press A
+wait 60
+press START
+wait 60
+tap START times=6 every=30 hold=4
+wait 60
+wait 300
+wait 300
+checkpoint intro_text window=30
+press A
+wait 200
+wait 300
+press A
+wait 300
+press A
+wait 300
+press A
+wait 300
+press A
+wait 300
+press A
+wait 300
+tap A times=10 every=250 hold=4
+wait 100
+checkpoint name_entry window=30
+press START
+wait 60
+wait 120
+press START
+wait 180
+checkpoint title window=30
+press START
+wait 90
+wait 90
+checkpoint mode_select window=30
+press A
+wait 126
+press A
+wait 186
+press A
+wait 186
+checkpoint survival_start window=30
+hold DOWN
+wait 900
+release
+checkpoint game_over window=30
+wait 240
+press A
+wait 180
+press UP
+wait 30
+press A
+wait 120
+press DOWN
+wait 20
+press A
+wait 90
+press A
+wait 120
+wait 120
+checkpoint rankings window=30
+
+[load]
+wait 700
+wait 300
+wait 600
+press START
+wait 120
+wait 60
+checkpoint continue_title window=30
+press START
+wait 180
+checkpoint continue_modes window=30
+press A
+wait 126
+press A
+wait 186
+wait 30
+checkpoint continue_characters window=30
