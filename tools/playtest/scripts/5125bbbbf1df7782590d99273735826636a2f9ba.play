@@ -10,8 +10,9 @@
 # "Congratulations! a new high score", B writes it to the EEPROM (9 bytes
 # not 0) and returns to the rack. [load]: rack, Freeway, pause, L: the
 # saved score.
-# Seen while recording: the 2600 runs on whatever CPU time is left, so the
-# GBA emulators' cycle prices set how many 2600 frames a GBA frame holds.
+# Seen while recording: the 2600 appears to run on whatever CPU time is
+# left, so the GBA emulators' cycle prices set how many 2600 frames a GBA
+# frame holds (mgba, the cheapest, plays the most).
 # dingbat and the second reference show the same frame at every gameplay
 # checkpoint (24 crossings; between them a single 9-px timer line once,
 # f1947); mgba runs ahead from the first Barnstorming second (its timer

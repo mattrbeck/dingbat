@@ -14,8 +14,8 @@
 # Seen: the pack menu's scrolling backdrop is in another phase in each of
 # the three (SLIP +0 everywhere, not diagnostic). In Ecco every dingbat
 # configuration shows the second reference's frame; mgba's Ecco runs 5
-# frames ahead by ecco_swim (the converted Genesis game drops frames by
-# the CPU time it gets, and mgba's cheaper prices give it more), so its
+# frames ahead by ecco_swim (as if the converted Genesis game paces by
+# the CPU time it gets, mgba's cheaper prices giving it more), so its
 # pause catches Ecco elsewhere (MAJOR, both ways). Golden Axe is identical
 # in all six from the player select on.
 
