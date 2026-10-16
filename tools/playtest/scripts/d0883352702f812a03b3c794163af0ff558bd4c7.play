@@ -1,0 +1,79 @@
+@title bit Generations - Dotstream (Japan)
+@file Bit Generations Dotstream (J).gba
+@game BVCJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# Health warning, A, the dotstream logo, START, campaign, sonic GP class 1,
+# drawing-1, the line select: the race. The player's line (orange) holds UP
+# from f2206 and scrapes along the top wall; on the second lap a block there
+# ends it ("retire", f8806). The result, A: total GP points, A: the race
+# select moves on to drawing-2, and the GP standings are in SRAM (26 bytes,
+# twice). [load]: warning, logo (the first START comes too early on every
+# emulator and is not taken), campaign, sonic GP: drawing-2, GP rank 6.
+# All three emulators draw every fade between screens differently (15-frame
+# runs from f145 on: dingbat-bios, mgba and the second reference each a
+# shade apart), so none is the odd one out. From f2010 the second reference
+# runs its own race: the computer lines take other paths, its race clock
+# ends 4 hundredths off, and its result and GP points (so its save) differ.
+# dingbat-bios and mgba hash alike on every race frame.
+
+[new]
+wait 300
+checkpoint warning window=30
+press A
+wait 300
+wait 120
+checkpoint logo window=30
+press START
+wait 120
+checkpoint main_menu window=30
+press A
+wait 120
+checkpoint gp_select window=30
+press A
+wait 150
+checkpoint race_select window=30
+press A
+wait 200
+press A
+wait 200
+checkpoint race_start window=30
+wait 300
+hold UP
+wait 300
+wait 300
+wait 300
+wait 240
+checkpoint racing window=30
+wait 600
+wait 600
+wait 1200
+wait 1200
+wait 1740
+checkpoint retire window=30
+release
+wait 300
+press A
+wait 200
+press A
+wait 200
+checkpoint next_race window=30
+[load]
+wait 300
+press A
+wait 300
+wait 120
+press START
+wait 120
+checkpoint continue_logo window=30
+press START
+wait 120
+press A
+wait 120
+press A
+wait 150
+checkpoint race2_select window=30
+press A
+wait 200
+checkpoint gp_rank window=30
