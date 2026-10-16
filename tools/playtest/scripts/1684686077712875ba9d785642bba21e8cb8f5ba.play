@@ -11,18 +11,17 @@
 # four lives (~13,000 frames), GAME OVER, SELECT to SAVE, START: back to the
 # title; 33 bytes of the 4 Kbit EEPROM. [load]: title, the file screen shows
 # PLAYER-1 "A......" at stage 01, START resumes stage 1.
-# Every dingbat configuration, against both references (which agree): the
-# top 26 lines (the score / time / life bars, the title's KONAMI logo) are
-# black. VRAM, palette, OAM and EWRAM are byte-identical with mgba's at the
-# frame end, and the per-line BG3 writes of the two H-blank DMAs match. The
-# game parks four full-width masking sprites (OAM 68-71, 32x32 affine double,
-# Y=218: lines 0-25) behind four 64x64 affine double-size sprites at Y=154
-# (OAM 64-67, X=239, 128 lines tall). GBATEK: a 128-tall OBJ "located at
-# Y>128 will be treated as at Y>-128", so on the console 64-67 cover lines
-# 0-25, and their 4 x 266 OBJ cycles exhaust the 954 the H-blank-free mode
-# (DISPCNT 0x1960) leaves, and the masks never draw. dingbat's OBJ Y wraps
-# past 159 only (ppu.nim obj_geometry), so it puts 64-67 on lines 154-159,
-# nothing charges lines 0-25 and the masks draw.
+# The game parks four full-width masking sprites (OAM 68-71, 32x32 affine
+# double, Y=218: lines 0-25) behind four 64x64 affine double-size sprites at
+# Y=154 (OAM 64-67, X=239, 128 lines tall). GBATEK: a 128-tall OBJ "located
+# at Y>128 will be treated as at Y>-128", so 64-67 also cover lines 0-25,
+# their 4 x 266 OBJ cycles exhaust the 954 the H-blank-free mode (DISPCNT
+# 0x1960) leaves, and the masks never draw there: the score / time / life
+# bars and the title's KONAMI logo show. Until 2026-10-16 dingbat wrapped OBJ
+# Y past 159 only, and the masks blacked out the top 26 lines from the title
+# on (7 MAJOR); now a line is inside an OBJ when (line - Y) & 0xFF < height
+# (ppu.nim obj_row) and every configuration passes, every checkpoint
+# IDENTICAL (docs/playtest-bugs.md §97).
 
 [new]
 wait 260

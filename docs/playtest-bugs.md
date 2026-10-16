@@ -8716,7 +8716,7 @@ gone from PASS to FAIL). `tests/test_crossload.py` covers the matrix rules.
 Cost: two more reference `[load]` runs per game whenever the references play
 live (over the 148: about 23 s for the second reference, 4 s for mgba).
 
-## §97. Famicom Mini: a 128-tall OBJ at Y=154 belongs at the top, and Xevious's FIFO DMA reads past its buffer; ChuChu Rocket's save CRC, 2026-10-16
+## §97. Famicom Mini: a 128-tall OBJ at Y=154 belongs at the top (fixed), and Xevious's FIFO DMA reads past its buffer; ChuChu Rocket's save CRC, 2026-10-16
 
 Three new corpus games with a difference in dingbat alone. All four
 dingbat configurations agree in each.
@@ -8750,10 +8750,30 @@ own comment already says the Disk System carts park masking sprites
 "that hardware has no time to draw"; the burners are what makes it so.
 mGBA and the second reference both draw the bars.
 
-A fix is a height-dependent Y threshold (128-tall OBJs negative above 128,
-as GBATEK words it; whether every height wraps mod 256 on the console is
-the open part). Core change, not made here. Every Disk System Famicom Mini
-should show the same.
+**Fixed 2026-10-16** (gba/ppu: an OBJ's vertical range wraps through 256).
+A line L is inside an OBJ when ((L - Y) & 0xFF) < its drawn height (doubled
+for affine double size): one test, `obj_row` in ppu.nim, used by the
+renderer (so the OBJ cycle budget charges the burners on lines 0-25), the
+per-line candidate list and the OBJ contention map. With Y 8 bits and
+heights up to 128 it differs from the old signed-past-159 rule only for a
+128-tall OBJ at Y 129-159, which now covers lines 0..Y-129 at the top as
+GBATEK says. The 8-bit test also leaves its first rows on lines Y..159,
+where GBATEK adds "it is then NOT displayed at the bottom"; nothing here
+tells the two apart (both references draw this game's checkpoints like
+dingbat now, bottom lines included), so that half is unmeasured and listed
+in docs/hwprobe-questions.md (GBA table). ppuobjlist_test's independent
+predicate takes the same test, counts 128-tall OBJs at Y 129-159 on the
+top lines, and replays this OAM layout: at 954 cycles the masks never draw
+on lines 0-25, at 1210 two still start.
+
+Train 20261016-005726-2c (206 games): Akumajou Dracula FAIL -> PASS in all
+four dingbat configurations, play MAJOR -> IDENTICAL, every checkpoint
+from file_select on and the [load] cells moved to the references' picture;
+nothing else in the corpus moved in any hash, the other Famicom Mini
+(Xevious) and the four Classic NES Series games (Metroid, Super Mario
+Bros., The Legend of Zelda, Zelda II) included. The second reference still
+reads mgba's extended 8 KB save of this 4 Kbit EEPROM as a different file
+(load mgba-in-the-second-reference MAJOR), a reference-side matter (§94).
 
 **Xevious (FXVJ): clicks in the silences.** The audio check fails on
 dingbat alone (11.3% of the run): single-sample ticks every ~67 frames
@@ -8784,7 +8804,8 @@ data load is EWRAM, its literal pool and code ROM, its stack pops IWRAM:
 a gamepak-prefetch accounting difference nobody has measured on the
 console. The script passes (a SLIP).
 
-**Status: open, no core change.**
+**Status: Akumajou Dracula fixed (the OBJ Y wrap); Xevious and ChuChu
+Rocket open, no core change.**
 
 ## §98. The Lord of the Rings - The Third Age: the two battle scenes a frame off are the map's 30 Hz phase, flipped by two-frame overruns in all three emulators, 2026-10-16
 
