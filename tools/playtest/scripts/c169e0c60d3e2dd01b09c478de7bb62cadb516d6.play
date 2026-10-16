@@ -9,8 +9,8 @@
 # the pause menu (stats, items, the Continue/Sleep/Quit page), then the
 # climb: the rope, the column beside it, a jump to the gold wall plate and
 # up onto the shelf above the candle, and the drop back to the floor.
-# The first boot formats 20 bytes of the 4 Kbit EEPROM (dingbat-bios and
-# mgba write 512 bytes, the second reference 8192).
+# The first boot formats 20 bytes of the 4 Kbit EEPROM; all three write
+# the same 512-byte file.
 
 [new]
 wait 600

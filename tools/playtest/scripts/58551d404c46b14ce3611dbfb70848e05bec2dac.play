@@ -9,8 +9,8 @@
 # main menu, Options, music volume down two steps, back: leaving Options is
 # the first EEPROM write after the first boot's (which fills 370 bytes).
 # [load]: Options shows the lowered music bar, then the option pieces.
-# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second reference 8192; booted
-# with its own file the second reference's Options show the default bar (its save not read).
+# 4 Kbit EEPROM: all three write the same 512-byte file, and every
+# cross-load shows the lowered bar.
 # Findings: select_cup is SLIP(+0) in every dingbat configuration against
 # both references (which are IDENTICAL): the puzzle-piece wipe after
 # Bottles' last line starts on f3345 in dingbat, f3344 in both references,

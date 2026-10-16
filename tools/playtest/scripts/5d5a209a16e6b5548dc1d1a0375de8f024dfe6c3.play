@@ -11,12 +11,12 @@
 # "New Game").
 # [load]: the language screen comes back (not saved), Options shows Music 4,
 # then the Play menu.
-# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second reference 8192; booted
-# with its own file the second reference's Options show Music 5 (its save not read).
+# 4 Kbit EEPROM: all three write the same 512-byte file, and every
+# cross-load shows Music 4.
 # Findings: level_start differs in all three. The story -> village load (ROM
 # Thumb code at 0x0802E100-0x0802EDFF, WAITCNT 0x4314, prefetch on, ~5
-# cycles an instruction) ends at f2150 on mgba, f2172 on the second reference, f2174 on
-# dingbat-bios, and Sia's blink and the ring's pulse run on a phase that
+# cycles an instruction) ends at f2150 on mgba, f2172 on the second
+# reference, f2174 on dingbat-bios, and Sia's blink and the ring's pulse run on a phase that
 # never shares a frame afterwards; the village scene's glow keeps the
 # phase until the rooftop, where all three are identical again. Both
 # references pricing this kind of load cheaper is docs/playtest-bugs.md §63.

@@ -11,9 +11,11 @@
 # riverbank, the rocks below the cliff path.
 # [load]: the START menu offers Continue, Save 1 shows its leaf count, and
 # Story Mode goes straight to the Leaf Scroll (Naruto kept).
-# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second reference 8192; booted
-# with its own file the second reference greys out Continue (its save not read), so its
-# [load] presses land in New Game.
+# 4 Kbit EEPROM: dingbat-bios and mgba write 512 bytes, the second
+# reference 8192 (A7AE is not in emu.py's EEPROM_4K set, so it is not told
+# the size, §94); booted with its own file it greys out Continue (its save
+# not read), so its [load] presses land in New Game. The 512-byte files
+# load in it.
 
 [new]
 wait 600
