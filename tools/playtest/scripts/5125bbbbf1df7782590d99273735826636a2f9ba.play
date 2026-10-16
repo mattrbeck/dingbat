@@ -1,0 +1,85 @@
+@title Activision Anthology (USA)
+@file Activision Anthology (U).gba
+@game BAVE
+@chip EEPROM (4 Kbit: dingbat and mgba write 512-byte files; BAVE is not in the second reference's 4 Kbit list, so it writes 8 KB and loses its own save)
+@frozen dingbat-bios,mgba,nba
+# The room (A = cartridge rack), Barnstorming: label, SELECT (game reset),
+# A, a second of flight, START = pause, L = its high score page, exit;
+# rotate the rack (RIGHT) and DOWN x6 to Freeway: SELECT starts game 1,
+# hold UP for the whole 2:16 round, pause, high score page ("--"), exit:
+# "Congratulations! a new high score", B writes it to the EEPROM (9 bytes
+# not 0) and returns to the rack. [load]: rack, Freeway, pause, L: the
+# saved score.
+# Seen while recording: the 2600 runs on whatever CPU time is left, so the
+# GBA emulators' cycle prices set how many 2600 frames a GBA frame holds.
+# dingbat and the second reference show the same frame at every gameplay
+# checkpoint (24 crossings; between them a single 9-px timer line once,
+# f1947); mgba runs ahead from the first Barnstorming second (its timer
+# one 2600 frame ahead) and crosses 26 times, so its save holds 0x1a
+# where the others hold 0x18. The room's cartridge-bubble
+# animation is in a different phase on all three from f600 (not
+# diagnostic). The pause dimming: dingbat and mgba blend to (6,9,4) from
+# (13,19,8), the second reference to (7,9,4) (its second target is not
+# black); the dimmed screens differ there on every pause.
+
+[new]
+wait 300
+wait 60
+wait 540
+checkpoint room window=30
+press A after=120
+checkpoint rack window=30
+press A after=180
+wait 60
+press A after=240
+press A after=240
+press SELECT after=60
+press A after=30
+wait 30
+checkpoint barnstorming_play window=30
+press START after=60
+press L after=90
+checkpoint barnstorming_high_score window=30
+press B after=60
+press A after=120
+press A after=180
+press RIGHT after=60
+tap DOWN times=6 every=20 hold=4
+wait 40
+wait 60
+press A after=180
+press A after=240
+press A after=240
+wait 60
+press SELECT after=30
+hold UP
+wait 600
+checkpoint freeway_play window=30
+wait 8940
+release
+checkpoint freeway_over window=30
+press START after=60
+press L after=90
+wait 60
+press B after=60
+press A after=120
+press A after=180
+checkpoint new_high_score window=30
+press B after=180
+checkpoint rack_saved window=30
+wait 60
+
+[load]
+wait 900
+press A after=120
+press RIGHT after=60
+tap DOWN times=6 every=20 hold=4
+wait 40
+checkpoint rack_freeway window=30
+press A after=180
+press A after=240
+press A after=240
+press START after=60
+press L after=90
+checkpoint freeway_high_score window=30
+press B after=60
