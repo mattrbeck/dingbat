@@ -1,0 +1,82 @@
+@title Atari Anniversary Advance (USA)
+@file Atari Anniversary Advance (U) [!].gba
+@game AAVE
+@save none
+@chip none (no save library string; no battery save: the game select carousel offers only the seven games, Centipede's high-score table is the arcade's defaults, and no emulator writes a byte)
+@frozen dingbat-bios,mgba,nba
+
+# Logos, title, START: the game select carousel on Asteroids; A, the
+# attract mode, START, thrust up and fire, turn and fire, a ship lost;
+# START = pause (Continue / Main Menu), Main Menu, RIGHT x2 to
+# Centipede, A, its attract mode (high-score table), START, fire held
+# while strafing left and right. No [load].
+# Seen: the carousel's spinning cabinet is in another phase in each of
+# the three (the select checkpoints are not diagnostic); every gameplay
+# checkpoint is identical in all six. Inside centipede_play's window
+# single frames differ (mgba alone on 8 of 60, the second reference on
+# 6): the arcade frame lands mid-picture at different lines. While
+# authoring, one Asteroids frame (f1884, not on this route) was
+# dingbat-bios's alone, with mgba alone on f1824: the same tearing.
+
+[new]
+wait 900
+press START after=120
+checkpoint title window=30
+press START after=120
+checkpoint select_asteroids window=30
+press A after=120
+wait 120
+wait 60
+press START after=120
+wait 120
+hold UP
+wait 120
+release
+tap A times=10 every=12 hold=4
+checkpoint asteroids_play window=30
+hold LEFT
+tap A times=12 every=10 hold=4
+release
+hold RIGHT
+wait 30
+release
+tap A times=20 every=10 hold=4
+wait 120
+tap A times=20 every=10 hold=4
+hold LEFT
+tap A times=10 every=10 hold=4
+release
+checkpoint asteroids_later window=30
+press START after=60
+checkpoint asteroids_paused window=30
+press DOWN after=30
+press A after=120
+press RIGHT after=60
+press RIGHT after=60
+checkpoint select_centipede window=30
+press A after=120
+wait 120
+wait 60
+press START after=120
+hold A
+wait 90
+hold A+LEFT
+wait 90
+hold A+RIGHT
+wait 180
+hold A+LEFT
+wait 90
+release
+checkpoint centipede_play window=30
+hold A
+wait 120
+hold A+UP
+wait 30
+hold A+LEFT
+wait 60
+hold A+DOWN
+wait 30
+hold A+RIGHT
+wait 120
+release
+checkpoint centipede_later window=30
