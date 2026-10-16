@@ -169,7 +169,7 @@ const OBJ_SCAN_START = 40
 proc cont_obj_on_line(s: Sprite; target: int): bool {.inline.} =
   if (s.attr0 and 0x0300'u16) == 0x0200'u16: return false  # disabled
   let g = obj_geometry(s)
-  g.h > 0 and g.y <= target and target < g.y + g.h
+  obj_row(g, target) < g.h
 
 proc cont_obj_on_line(sp: ptr UncheckedArray[Sprite]; e, target: int): bool {.inline.} =
   sp[e].cont_obj_on_line(target)

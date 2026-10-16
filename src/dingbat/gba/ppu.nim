@@ -587,22 +587,20 @@ const OBJ_LIST_REBUILD_LIMIT* = 16
 type ObjGeometry = tuple[x, y, ow, oh, w, h: int]
 
 proc obj_geometry(s: Sprite): ObjGeometry {.inline.} =
-  ## Screen-space geometry of one OAM entry, shared by the per-line scan and
-  ## the candidate-list rebuild so the two cannot drift apart. `x`/`y` are
-  ## the signed top-left corner. GBATEK "LCD OBJ - OAM Attributes": X is 9
-  ## bits (0-511), Y 8 bits (0-255), and a 128-tall OBJ "located at Y>128
-  ## will be treated as at Y>-128 ... NOT displayed at the bottom", ie. past
-  ## the screen the coordinate goes negative rather than wrapping mod 256.
-  ## The exact thresholds (X>239, Y>159) are assumed. `ow`/`oh` are the
-  ## texture footprint,
-  ## `w`/`h` the drawn one (double for affine double-size, so the candidate
-  ## test must use `h`). attr0.9 means double-size only with affine set;
+  ## Screen-space geometry of one OAM entry, shared by the per-line scan, the
+  ## candidate-list rebuild and the OBJ contention map so they cannot drift
+  ## apart. GBATEK "LCD OBJ - OAM Attributes": X is 9 bits (0-511), Y 8 bits
+  ## (0-255). `x` is the signed left edge (past 239 it goes negative; with
+  ## widths up to 128 that is the same as wrapping mod 512). `y` is the raw
+  ## 8-bit Y: the vertical range wraps through 256, so a line is inside the
+  ## OBJ when `obj_row` < `h` (see there). `ow`/`oh` are the texture
+  ## footprint, `w`/`h` the drawn one (double for affine double-size, so the
+  ## line test must use `h`). attr0.9 means double-size only with affine set;
   ## otherwise it disables the sprite. Prohibited shape 3 has no footprint.
   let shape3 = s.obj_shape == 3
   var x = int(cast[int16](bits_range(s.attr1, 0, 8)))
-  var y = int(cast[int16](bits_range(s.attr0, 0, 7)))
+  let y = int(bits_range(s.attr0, 0, 7))
   if x > 239: x -= 512
-  if y > 159: y -= 256
   let ow = if shape3: 0 else: SIZES[s.obj_shape][s.obj_size][0]
   let oh = if shape3: 0 else: SIZES[s.obj_shape][s.obj_size][1]
   var w = ow
@@ -611,6 +609,18 @@ proc obj_geometry(s: Sprite): ObjGeometry {.inline.} =
     w = w shl 1
     h = h shl 1
   (x, y, ow, oh, w, h)
+
+proc obj_row(g: ObjGeometry; line: int): int {.inline.} =
+  ## Which row of the drawn box `line` is: the line minus Y in 8 bits.
+  ## `line` is inside the OBJ exactly when this is below `g.h` (0 for shape
+  ## 3, so never). The wrap is what puts a 128-tall OBJ at Y>128 on the top
+  ## lines, GBATEK: one "located at Y>128 will be treated as at Y>-128, the
+  ## OBJ is then displayed parts offscreen at the TOP of the display". The
+  ## same 8-bit test also keeps its first rows on the bottom lines (Y..159),
+  ## where GBATEK adds "it is then NOT displayed at the bottom": unmeasured
+  ## (docs/hwprobe-questions.md, GBA table). Any other height never reaches
+  ## both ends, so only that case differs from a plain signed Y.
+  (line - g.y) and 0xFF
 
 proc rebuild_obj_lines*(ppu: PPU) =
   ## Rebuild the 160-line candidate bitmap from OAM. An entry is a candidate
@@ -623,13 +633,12 @@ proc rebuild_obj_lines*(ppu: PPU) =
     if sprite.affine_mode == 0b10: continue  # rot/scale off + double-size = disabled
     let g = obj_geometry(sprite)
     if g.x + g.w < 0: continue               # fully off the left edge
-    let lo = max(0, g.y)
-    let hi = min(160, g.y + g.h)             # h = 0 for shape 3, so hi <= lo
-    if lo >= hi: continue
     let word = s_idx shr 6
     let mbit = 1'u64 shl uint(s_idx and 63)
-    for line in lo ..< hi:
-      ppu.obj_line_mask[line][word] = ppu.obj_line_mask[line][word] or mbit
+    for r in 0 ..< g.h:                      # h = 0 for shape 3: no lines
+      let line = (g.y + r) and 0xFF          # obj_row(g, line) == r
+      if line < 160:
+        ppu.obj_line_mask[line][word] = ppu.obj_line_mask[line][word] or mbit
   ppu.obj_list_dirty = false
   inc ppu.obj_list_rebuilds
 
@@ -677,13 +686,13 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
       let x_coord = g.x
       # Re-tested on the candidate path too: the list may only narrow what
       # is looked at, never make a sprite appear
-      if not (g.y <= vc and vc < g.y + height): break one_sprite
+      let row = obj_row(g, vc)
+      if row >= height: break one_sprite
       # Sprites fully outside the 240px window never enter the OBJ pipeline:
       # no pixels and no time charged
       if x_coord + width < 0: break one_sprite
-      # center_{x,y} is the middle of the *drawn* box
+      # center_x is the middle of the *drawn* box
       let center_x = x_coord + (width shr 1)
-      let center_y = g.y + (height shr 1)
       let affine = bit(sprite.attr0, 8)
       var pa, pb, pc, pd: int
       if affine:
@@ -705,7 +714,9 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
       let obj_mosaic = bit(sprite.attr0, 12)
       let mosaic_h = if obj_mosaic: int(ppu.mosaic.obj_mosiac_h_size) + 1 else: 1
       let vc_m = if obj_mosaic: vc - vc mod (int(ppu.mosaic.obj_mosiac_v_size) + 1) else: vc
-      let iy     = vc_m - center_y
+      # Row from the drawn box's middle; mosaic moves it up to the block's
+      # first line (vc - vc_m lines), which may lie above the OBJ's top
+      let iy     = row - (vc - vc_m) - (height shr 1)
       let flip_x = bit(sprite.attr1, 12) and not affine
       let flip_y = bit(sprite.attr1, 13) and not affine
       let min_x  = max(0, x_coord)

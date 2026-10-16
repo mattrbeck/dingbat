@@ -3,7 +3,8 @@
 ## 128-entry scan (`render_sprites(force_scan = true)`, still the
 ## rebuild-storm fallback). Thousands of randomized OAM tables biased onto
 ## the boundaries: double-size affine sprites whose base box misses the line,
-## sprites past Y=160 wrapping to the top, OBJ-window sprites, sprites
+## sprites wrapping through Y=256 to the top (a 128-tall one at Y>128 on
+## both the bottom and the top lines), OBJ-window sprites, sprites
 ## dropped by the per-line OBJ cycle budget. Per table: (1) all 240
 ## `sprite_pixels` plus the two per-line flags must match on all 160 lines;
 ## (2) the candidate bitmap must match an independent predicate written
@@ -71,12 +72,13 @@ proc expected_covers(oam: seq[byte]; s_idx, line: int): bool =
   if rot_scale and dbl_or_off:                      # double-size bounding box
     w *= 2
     h *= 2
-  var y = int(attr0 and 0xFF'u16)
-  if y > 159: y -= 256                              # wraps off the top
+  let y = int(attr0 and 0xFF'u16)
   var x = int(attr1 and 0x1FF'u16)
   if x > 239: x -= 512                              # wraps off the left
   if x + w < 0: return false                        # entirely off the left edge
-  y <= line and line < y + h
+  # Y is 8 bits and the vertical range wraps through 256: a 128-tall OBJ at
+  # Y>128 covers its first rows at the bottom and the rest at the top
+  (line - y + 256) mod 256 < h
 
 # OAM generators; each emphasises one hazard class so the coverage
 # assertions can prove the class was produced.
@@ -195,6 +197,7 @@ var cov_blend_px  = 0     # a semi-transparent OBJ pixel landed
 var cov_budget    = 0     # the OBJ cycle budget cut the list short
 var cov_dbl_only  = 0     # a line covered ONLY because of double-size doubling
 var cov_wrap_y    = 0     # a line covered by a sprite whose raw Y is > 159
+var cov_wrap_128  = 0     # a top line covered by a 128-tall sprite at Y 129-159
 var cov_wrap_x    = 0     # an on-line sprite whose raw X is > 239
 var cov_candidates = 0    # total candidate bits set
 var cov_lines      = 0    # lines rendered
@@ -221,6 +224,7 @@ proc note_coverage(oam: seq[byte]; line: int; r: LineResult) =
     if not expected_covers(oam, s, line): continue
     inc cov_candidates
     if int(attr0 and 0xFF'u16) > 159: inc cov_wrap_y
+    if int(attr0 and 0xFF'u16) in 129 .. 159 and line < 32: inc cov_wrap_128
     if int(attr1 and 0x1FF'u16) > 239: inc cov_wrap_x
     if (attr0 and 0x1000'u16) != 0: inc cov_mosaic
     if (attr0 and 0x2000'u16) != 0: inc cov_8bpp
@@ -232,9 +236,8 @@ proc note_coverage(oam: seq[byte]; line: int; r: LineResult) =
         let size = int(attr1 shr 14)
         const H = [[8, 16, 32, 64], [8, 8, 16, 32], [16, 32, 32, 64]]
         let h = H[shape][size]
-        var y = int(attr0 and 0xFF'u16)
-        if y > 159: y -= 256
-        if not (y <= line and line < y + h): inc cov_dbl_only
+        let y = int(attr0 and 0xFF'u16)
+        if not ((line - y + 256) mod 256 < h): inc cov_dbl_only
 
 proc obj_budget_exhausted(ppu: PPU; oam: seq[byte]; line: int): bool =
   ## Recompute the budget walk to tell whether the cutoff actually fired.
@@ -517,6 +520,71 @@ proc test_nonbus_writers(emu: GBA) =
         "save-state load invalidated the candidate list",
         "stale mask survived a state load")
 
+# 4c. Famicom Mini Akumajou Dracula (docs/playtest-bugs.md §97): four
+# 128-tall OBJs (64x64 affine, double size) at Y=154, X=239 burn the 954
+# cycles of an H-blank-free line on lines 0-25, so the four full-width masks
+# after them in OAM (32x32 affine double, Y=218) never draw there. With Y
+# taken as signed past 159 only, the burners sat on lines 154-159 and the
+# masks blacked out the top of the screen.
+proc test_y_wrap_budget(emu: GBA) =
+  echo "128-tall OBJs at Y=154 wrap to the top and spend the OBJ budget"
+  let ppu = emu.ppu
+  for i in 0 ..< ppu.oam.len: ppu.oam[i] = 0
+  for i in 0 ..< 128: ppu.oam[i * 8 + 1] = 0x02   # every entry disabled
+  proc put(oam: var seq[byte]; s: int; a0, a1, a2: uint16) =
+    let o = s * 8
+    oam[o + 0] = uint8(a0 and 0xFF); oam[o + 1] = uint8(a0 shr 8)
+    oam[o + 2] = uint8(a1 and 0xFF); oam[o + 3] = uint8(a1 shr 8)
+    oam[o + 4] = uint8(a2 and 0xFF); oam[o + 5] = uint8(a2 shr 8)
+  for k in 0 .. 3:
+    # burners: square, affine + double size, Y=154; size 3, X=239, group 0
+    put(ppu.oam, 64 + k, 0x0300'u16 or 154, 0xC000'u16 or 239, 0)
+    # masks: square, affine + double size, Y=218; size 2, X=64k, group 0;
+    # tile 512 (OBJ VRAM 0x14000), palette bank 0
+    put(ppu.oam, 68 + k, 0x0300'u16 or 218, 0x8000'u16 or uint16(64 * k), 512)
+  # affine group 0 = identity (parameters live in entries 0-3's last word)
+  for j, v in [0x100'u16, 0, 0, 0x100]:
+    ppu.oam[j * 8 + 6] = uint8(v and 0xFF); ppu.oam[j * 8 + 7] = uint8(v shr 8)
+  # the masks' tiles: every 4bpp pixel index 1
+  for i in 0x14000 ..< 0x14000 + 32 * 32: ppu.vram[i] = 0x11
+  ppu.mosaic = cast[MOSAIC](0'u16)
+  proc mask_cols(ppu: PPU; line: int; force_scan: bool): int =
+    let r = render_line(ppu, line, force_scan)
+    for c in 0 .. 239:
+      if r.pixels[c].palette == 1: inc result
+  for hbfree in [true, false]:
+    ppu.dispcnt = cast[DISPCNT](if hbfree: 0x1060'u16 else: 0x1040'u16)
+    ppu.oam_touched()
+    ppu.latch_oam()
+    ppu.obj_list_rebuilds = 0
+    var drawn_top = 0
+    var listed_vs_scan = true
+    for line in 0 .. 25:
+      let n = mask_cols(ppu, line, false)
+      if n != mask_cols(ppu, line, true): listed_vs_scan = false
+      drawn_top += n
+    if hbfree:
+      check(drawn_top == 0 and listed_vs_scan,
+            "H-blank free (954 cycles): the masks never draw on lines 0-25",
+            $drawn_top & " mask pixels drawn")
+    else:
+      # 1210 cycles: 4 x 266 = 1064 leaves 146, one 138-cycle mask leaves 8,
+      # and the next one starts on that and draws in full (the exhausting
+      # sprite is not cut). Identity parameters put each 32x32 texture in
+      # the middle of its 64x64 box: rows 16-47 = lines 234-265, so 32
+      # pixels on lines 0-9 for each of the two
+      check(drawn_top == 2 * 32 * 10 and listed_vs_scan,
+            "1210 cycles: two masks still start after the burners",
+            $drawn_top & " mask pixels drawn, expected " & $(2 * 32 * 10))
+  var on_bottom = 0
+  for line in 154 .. 159:
+    for s in 64 .. 67:
+      if (ppu.obj_line_mask[line][s shr 6] and (1'u64 shl uint(s and 63))) != 0:
+        inc on_bottom
+  check(on_bottom == 6 * 4,
+        "their first rows stay on lines 154-159 (the 8-bit Y test)",
+        $on_bottom & " of 24 line bits")
+
 # 5. Negative control: corrupt the mask by hand and confirm both detectors
 # notice, the pixel diff (a dropped sprite) and the predicate (a wrong bit).
 proc test_negative_control(emu: GBA) =
@@ -571,6 +639,8 @@ proc test_coverage() =
         "lines covered ONLY by the double-size box: " & $cov_dbl_only,
         "double-size bounding box never mattered")
   check(cov_wrap_y > 1000, "on-line sprites with raw Y > 159: " & $cov_wrap_y)
+  check(cov_wrap_128 > 100,
+        "top lines covered by a 128-tall sprite at Y 129-159: " & $cov_wrap_128)
   check(cov_wrap_x > 1000, "on-line sprites with raw X > 239: " & $cov_wrap_x)
   check(cov_budget > 100, "lines where the OBJ budget ran out: " & $cov_budget)
   check(cov_mosaic > 1000, "on-line mosaic sprites: " & $cov_mosaic)
@@ -609,6 +679,7 @@ when isMainModule:
   test_rebuild_guard(emu)
   test_oam_view_latch(emu)
   test_nonbus_writers(emu)
+  test_y_wrap_budget(emu)
   test_negative_control(emu)
   test_coverage()
 
