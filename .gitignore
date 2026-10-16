@@ -188,6 +188,7 @@ tools/gbgate/roms.txt
 /dingbat_clipreplay_test
 /dingbat_cyclelaws_test
 /dingbat_swihalt_test
+/dingbat_irqburst_test
 /dingbat_gbapurebase_test
 /dingbat_gbtimedinput_test
 /dingbat_psgagb_test

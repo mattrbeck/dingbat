@@ -157,6 +157,10 @@ task test_swihalt, "Run Halt and Stop from the cartridge in every GBA BIOS mode"
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_swihalt_test tests/swihalt_test.nim"
 
+task test_irqburst, "Run the timer interrupt raised just before a preemptible DMA burst":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_irqburst_test tests/irqburst_test.nim"
+
 task test_clipreplay, "Run the clip-capture replay determinism tests":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_clipreplay_test tests/clip_replay_test.nim"

@@ -14,13 +14,15 @@
 # [load]: the file screen shows AA, START resumes in the first room.
 # Seen when checked: mgba's time counter ticks a frame apart at play
 # (SLIP -17 / +2 between the references, not diagnostic). dingbat alone
-# clicks at f1306 (audio MINOR, 4 of 156 windows): its timer 1 interrupt,
-# which hands FIFO A's DMA1 the next 160-byte buffer, is taken ~39,000
-# cycles late, so DMA1 plays 64 bytes of IWRAM past the buffer
+# clicked at f1306 (audio MINOR, 4 of 156 windows), fixed: its timer 1
+# interrupt, which hands FIFO A's DMA1 the next 160-byte buffer, was taken
+# 39,272 cycles late, so DMA1 played 64 bytes of IWRAM past the buffer
 # (0x03006238..: 81 15 00 08 ...). The raise came one cycle before an
 # H-blank DMA0/DMA3 pair that the FIFO DMAs preempted; its recognition
-# check was drained inside the DMA3 burst and nothing re-booked it
-# (docs/playtest-bugs.md §100).
+# check was drained inside the DMA3 burst and nothing booked it again. The
+# outermost burst's end now books a check whenever none is left at or
+# before the recognition (dma.nim run_pending): taken 26 cycles after the
+# raise, 3 plus the 23 the bursts held the CPU (docs/playtest-bugs.md §100).
 [new]
 wait 300
 checkpoint title window=30

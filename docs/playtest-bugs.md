@@ -9370,7 +9370,7 @@ show the mirrors GBATEK describes, so the other blocks are what the bus gave
 the dumper.
 
 **(2) Nazo no Murasamejou: a timer interrupt held 39,000 cycles behind a
-preempted H-blank DMA.** dingbat alone clicks once at f1306, in a silence
+preempted H-blank DMA (a, fixed).** dingbat alone clicked once at f1306, in a silence
 on the file screen (audio MINOR, 4 of 156 windows; the other three windows
 are spectrum and silence/presence at transitions). The raw dump
 (`--no-fifo-interp`) holds -508, 84, 0, 32 ... = four times the bytes 81 15
@@ -9402,13 +9402,67 @@ synchroniser's fields per instruction, then `-d:itrace`):
   `elif ... pipe_due > stall_start` branch moves `pipe_due` and books
   nothing, and `delay_pending` has no pending event left to move.
 
-A scratch copy of the core with that branch also booking a check when none
-is pending (not in the tree) takes the interrupt 8 cycles late instead and
-plays no byte from past a buffer. Confidence that dingbat is wrong: high (an
-interrupt pending with IME, CPSR.I and IE all open for 39,000 cycles; both
-references restart on time, no click). Any game raising a timer interrupt
-just before an H-blank DMA that a higher-priority DMA preempts can lose it
-the same way. Makaimura's audio is SAME in its run; Tantei Club's
+Confidence that dingbat was wrong: high (an interrupt pending with IME,
+CPSR.I and IE all open for 39,000 cycles; both references restart on time,
+no click).
+
+**The fix.** The outermost burst's end (`run_pending`, after the two
+branches above) now books a check at `pipe_due`, or at once if that has
+passed, whenever a raise is in flight and no check is left at or before
+it. That covers every way the check can be gone: drained inside the burst
+and masked by `check_interrupts` (a raise from before the burst, or one
+whose recognition fell due before the CPU stopped), nested preemption (the
+inner bursts book nothing; the outermost end sees the state they leave)
+and chained bursts (each end runs the block). A halted CPU skips the block
+but `check_interrupts` never masks for it. Nothing is added to the state.
+Murasamejou's interrupt is now recognised at 189307, 26 cycles after the
+raise: IRQ_SYNC_DELAY's 3 plus the 23 cycles the two bursts held the CPU,
+the stall law breakram.s measured (an H-blank interrupt taken exactly the
+burst's length later); entered at 189310. The "8 cycles late" of the
+scratch fix was the next DMA1 restart store against one period after the
+last (+8, then -5); the restarts jitter by -11..+11 cycles everywhere with
+the handler's own path, so no recorded row pins it and none needs to.
+Recorded rows (`r0table.py --check` over dmairq, dmairqf, dmairqarm,
+dmamulirq, hpreempt, irqwait, wakeirq, wakehb, tmrdma, tmrffirq, fifodma,
+haltswap, the hdma rows, dmaphase, dmastart, dmadur, dmavram and the
+keyirq rows): 756/774 before and after, the same cells (keyirq2/keyirq3's
+standing ones); breakram 152/152; the cycle laws 2782/2782.
+
+How common the hole was: a scratch invariant check (a raise in flight with
+no check booked at or before its recognition) over 3000 attract-mode
+frames of every corpus ROM: 23 games broke it before (Crash Bandicoot 2,
+Finding Nemo, Iridion 3D, Super Monkey Ball Jr. and SpongeBob hundreds of
+times; Duke Nukem Advance, Classic NES Zelda and Zelda II, Xevious, both
+Boktais, the Tony Hawks among the rest), none after, waitloop skipping on
+and off. Regression test: `tests/irqburst_test.nim` (`nimble
+test_irqburst`, in CI) on `tests/roms/irqburst.s`, a timer 0 interrupt
+every 1231 cycles walking across a four-word H-blank DMA3 burst made
+preemptible by a repeating V-blank DMA0: 6460 interrupts taken for 6845
+overflows in 30 frames before, 6846 after, none later than 106 cycles.
+
+The train (229 games, 2026-10-16), five games moved, none regressed, all
+four configurations alike:
+
+* *Nazo no Murasamejou:* audio MINOR (4 flagged) to SAME (0), the f1306
+  click gone. Checkpoints `menu` and `resumed` moved: blink phases (the
+  menu cursor, the HUD's triangle, a timer digit; 16-22 pixels), where
+  the references disagree with each other (MINOR) and dingbat had matched
+  the second reference exactly; now it shares the cursor with mgba and the
+  triangle with the second reference. Not diagnostic; every interrupt
+  taken on time moves the main loop's frame phase from here.
+* *Classic NES Series - The Legend of Zelda:* audio MINOR (1 flagged, f2310
+  silence/presence) to SAME, the same NES sound driver as Xevious and
+  Murasamejou.
+* *Duke Nukem Advance:* `walk_fire` MAJOR and `pause_menu` DIFFERENT
+  against both references (which disagree MAJOR / DIFFERENT) to MINOR
+  against the second reference: 2 pixels at (0,154), one level apart,
+  where 42-65% of the screen had differed from each reference. Its audio vs the second reference: 1 differing
+  window to 0.
+* *Famicom Mini Xevious, Drill Dozer:* audio dumps moved, every window
+  verdict and count the same (Xevious SAME 0/124; Drill Dozer SAME 0/1279,
+  16 and 7 windows apart from mgba and the second reference, as before).
+
+Makaimura's audio is SAME in its run; Tantei Club's
 DMA1 restarts, probed over f4600-f6550, land within 370 cycles of schedule
 (no burst past a buffer), so its 12 spectrum windows in the Amachi scene
 (audio MINOR, PASS) are not this; they were not traced further.
@@ -9425,8 +9479,8 @@ frame behind from the opening in [new] (not in [load]); dingbat matches mgba
 at every checkpoint.
 
 **Status.** (1) closed, no core change: the 1 MB files are truncated
-dumps; the scripts run the 4 MB ones. (2) open: one booking in dma.nim's
-burst-end block.
+dumps; the scripts run the 4 MB ones. (2) fixed: the burst-end booking
+above.
 
 ## §101. bit Generations (Coloris, Dial Hex, Boundish, Digidrive), Polarium Advance, Puyo Pop: six new scripts; random boards from timer 1, and an SIO transfer dingbat never clocks, 2026-10-16
 

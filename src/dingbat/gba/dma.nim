@@ -677,6 +677,19 @@ proc run_pending*(dma: DMA) =
             if due > bus.sched.cycles: int(due - bus.sched.cycles) else: 0)
         elif intr.pipe_raised != 0 and intr.pipe_due > stall_start:
           intr.pipe_due += held
+        if intr.pipe_raised != 0 and bus.sched.pending_at(etInterrupts) > intr.pipe_due:
+          # The raise's own check came due inside the burst and was drained
+          # there (preempt_point), where check_interrupts leaves what the
+          # synchroniser carries to this end; delay_pending found nothing
+          # left to move. Without a check at pipe_due nothing recognises it
+          # until some other source books one, and every later raise rides
+          # with it: Famicom Mini Nazo no Murasamejou's timer 1 interrupt,
+          # raised a cycle before an H-blank DMA0/DMA3 pair whose DMA3 the
+          # FIFO DMAs preempted, waited 39,272 cycles with IME, CPSR.I and
+          # IE open (docs/playtest-bugs.md §100). Due before the CPU
+          # stopped, it is taken at the first boundary after the burst.
+          intr.schedule_interrupt_check(
+            if intr.pipe_due > bus.sched.cycles: int(intr.pipe_due - bus.sched.cycles) else: 0)
         when DMA_IRQ_FROM_BUS_END:
           if dma.irq_after_burst:
             dma.irq_after_burst = false

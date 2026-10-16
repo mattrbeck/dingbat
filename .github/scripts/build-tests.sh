@@ -63,6 +63,7 @@ build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
 build mp2kpass        dingbat_mp2kpass_test         tests/mp2k_pass_test.nim
 build cyclelaws       dingbat_cyclelaws_test        tests/cyclelaws_test.nim
 build swihalt         dingbat_swihalt_test          tests/swihalt_test.nim
+build irqburst        dingbat_irqburst_test         tests/irqburst_test.nim
 build mgbavideo       dingbat_mgba_video            tests/mgba_video.nim
 build gbapurebase     dingbat_gbapurebase_test      tests/gbapu_rebase_test.nim
 build gbtimedinput    dingbat_gbtimedinput_test     tests/gb_timed_input_test.nim

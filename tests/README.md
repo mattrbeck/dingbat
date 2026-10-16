@@ -654,7 +654,9 @@ screen sits across WX x SCX & 7, DMG and CGB), `test_printer`,
 save-state round trips on synthetic carts), `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
 battery-save RTC trailer), `test_swihalt` (Halt and Stop from the cartridge
 return intact in every GBA BIOS mode, over the stub, a stand-in image the test
-writes, and Nintendo's image where it exists), `test_desktop` (the desktop frontend's logic that
+writes, and Nintendo's image where it exists), `test_irqburst` (a timer
+interrupt raised just before a preemptible DMA burst is taken: every overflow of
+`tests/roms/irqburst.s`'s timer walking across an H-blank burst), `test_desktop` (the desktop frontend's logic that
 builds without SDL: held input and key routing, the config file, the
 Link Cable over loopback sockets, battery/state/cheat writes, game loading,
 each replaying a `formal/DesktopState` trace, and the modal notices in a real

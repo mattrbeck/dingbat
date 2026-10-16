@@ -214,9 +214,10 @@ proc check_interrupts*(intr: Interrupts) =
      not intr.gba.cpu.halted:
     # A check dispatched inside a burst (its transfer loop drains due events
     # when a higher-priority channel is armed): the synchroniser is stopped
-    # with the CPU, so what it carries waits, and the burst's end books its
-    # recognition (dma.nim run_pending). Arming an idle channel must not
-    # move a timer interrupt.
+    # with the CPU, so what it carries waits, and the outermost burst's end
+    # books its recognition whenever no check is left at or before pipe_due
+    # (dma.nim run_pending). Arming an idle channel must not move a timer
+    # interrupt.
     pending = pending and not intr.pipe_raised
   elif intr.pipe_raised != 0:
     let now = intr.gba.scheduler.cycles

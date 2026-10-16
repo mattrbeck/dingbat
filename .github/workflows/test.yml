@@ -284,6 +284,14 @@ jobs:
         # the test here; Nintendo's image only where it exists (not in CI).
         shell: bash
         run: ./dingbat_swihalt_test
+      - name: GBA timer interrupt raised just before a preemptible DMA burst
+        # tests/roms/irqburst.s: a check drained inside a burst a
+        # higher-priority channel could preempt is booked again at the
+        # burst's end; for a raise from before the burst it was not, and the
+        # interrupt waited with IME, CPSR.I and IE open (Famicom Mini Nazo
+        # no Murasamejou, docs/playtest-bugs.md §100). Committed ROM.
+        shell: bash
+        run: ./dingbat_irqburst_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms HBlank HDMA forever; the block copy ticks the
         # PPU inside the mode 3->0 transition, which recurses to stack overflow
