@@ -1,0 +1,67 @@
+@title Gyakuten Saiban 3 (Japan)
+@file Gyakuten Saiban 3 (J).gba
+@game A3JJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# Title > はじめから, 第1話 思い出の逆転, A through the rainy-night prologue
+# and the scene over the body to the courthouse lobby (4月11日 午前9時40分
+# 地方裁判所), then START: 記録 > はい: "ゲームを中断します" and back to the
+# title (the suspend save: 2064 bytes of the 32 KB SRAM).
+# [load]: title > つづきから > 記録 (思い出の逆転 第一回 法廷・前編) >
+# 中断したところから resumes the lobby (ウォッホン!).
+# The battery files differ in five bytes, mgba alone: 0x30-0x31 (dingbat-bios
+# and the second reference 0x0FD2, mgba 0x1086: a counter 180 higher in
+# mgba), 0x34 (0xB2 / 0xB3) and the
+# checksum at 0x64-0x65; every emulator loads every file to the same
+# screens. The scenes with the text box over the picture (rain_scene,
+# court_lobby) differ in all three by one 5-bit step under the box (the
+# blend's rounding).
+
+[new]
+wait 400
+wait 200
+checkpoint title window=30
+press A
+wait 180
+wait 60
+checkpoint episode_select window=30
+press A
+wait 300
+tap A times=15 every=60 hold=4
+tap A times=20 every=60 hold=4
+wait 30
+checkpoint rain_scene window=30
+tap A times=20 every=60 hold=4
+checkpoint phoenix_scene window=30
+tap A times=25 every=60 hold=4
+wait 120
+checkpoint court_lobby window=30
+tap A times=6 every=60 hold=4
+wait 60
+press START
+wait 60
+wait 60
+checkpoint save_prompt window=30
+press LEFT
+wait 15
+press A
+wait 60
+wait 120
+checkpoint title_saved window=30
+
+[load]
+wait 600
+wait 60
+checkpoint title window=30
+press DOWN
+wait 20
+press DOWN
+wait 20
+wait 15
+press A
+wait 200
+checkpoint record window=30
+press A
+wait 240
+checkpoint resumed window=30
