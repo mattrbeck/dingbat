@@ -267,15 +267,16 @@ int main(int argc, char** argv) {
     } else if (cmd == "shot") {
       reply(write_ppm(arg, video->frame) ? "ok" : "err cannot write");
     } else if (cmd == "peek") {
-      // work RAM through the core's save-state copy (no timed bus access,
-      // nothing moved), I/O through its peek calls; other regions unsupported
+      // work RAM, palette, VRAM and OAM through the core's save-state copy
+      // (no timed bus access, nothing moved), I/O through its peek calls;
+      // other regions unsupported
       std::istringstream a(arg);
       std::string hex;
       unsigned long len = 0;
       a >> hex >> len;
       u32 addr = u32(strtoul(hex.c_str(), nullptr, 16));
       static nba::SaveState state;
-      bool need_state = (addr >> 24) == 2 || (addr >> 24) == 3;
+      bool need_state = (addr >> 24) != 4;
       if (need_state) core->CopyState(state);
       std::string out = "ok ";
       bool ok = true;
@@ -286,6 +287,13 @@ int main(int argc, char** argv) {
           case 2: v = state.bus.memory.wram[x & 0x3FFFF]; break;
           case 3: v = state.bus.memory.iram[x & 0x7FFF]; break;
           case 4: v = core->PeekByteIO(x); break;
+          case 5: v = state.bus.memory.pram[x & 0x3FF]; break;
+          case 6: {
+            u32 o = x & 0x1FFFF;
+            v = state.bus.memory.vram[o >= 0x18000 ? o - 0x8000 : o];
+            break;
+          }
+          case 7: v = state.bus.memory.oam[x & 0x3FF]; break;
           default: ok = false;
         }
         char b[3];
@@ -293,6 +301,28 @@ int main(int argc, char** argv) {
         out += b;
       }
       reply(ok ? out : "err unsupported region");
+    } else if (cmd == "ppuio") {
+      // the PPU's register latches from the save-state copy, write-only ones
+      // included: DISPCNT BG0-3CNT BG0-3HOFS BG0-3VOFS BG2PA-PD BG3PA-PD
+      // BG2X BG2Y BG3X BG3Y WIN0H WIN1H WIN0V WIN1V WININ WINOUT MOSAIC
+      // BLDCNT BLDALPHA BLDY, hex. MOSAIC is as the core keeps it, not the
+      // register: 1111 where dingbat and mGBA latch 0000 (each size plus one)
+      static nba::SaveState state;
+      core->CopyState(state);
+      auto& io = state.ppu.io;
+      std::string out = "ok";
+      char b[12];
+      auto put = [&](unsigned long v, int w) { snprintf(b, sizeof b, " %0*lX", w, v); out += b; };
+      put(io.dispcnt, 4);
+      for (int k = 0; k < 4; ++k) put(io.bgcnt[k], 4);
+      for (int k = 0; k < 4; ++k) put(io.bghofs[k], 4);
+      for (int k = 0; k < 4; ++k) put(io.bgvofs[k], 4);
+      for (int k = 0; k < 2; ++k) { put(io.bgpa[k], 4); put(io.bgpb[k], 4); put(io.bgpc[k], 4); put(io.bgpd[k], 4); }
+      for (int k = 0; k < 2; ++k) { put(io.bgx[k], 8); put(io.bgy[k], 8); }
+      put(io.winh[0], 4); put(io.winh[1], 4); put(io.winv[0], 4); put(io.winv[1], 4);
+      put(io.winin, 4); put(io.winout, 4); put(io.mosaic, 4);
+      put(io.bldcnt, 4); put(io.bldalpha, 4); put(io.bldy, 4);
+      reply(out);
     } else if (cmd == "savedata" || cmd == "flush") {
       reply("err unsupported");
     } else if (cmd == "state_save") {

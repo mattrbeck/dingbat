@@ -298,6 +298,26 @@ proc main() =
         # debug visibility: bits 0-3 BG0-3, bit 4 OBJ
         emu.ppu.debug_layer_mask = uint8(parseHexInt(parts[1]))
         reply "ok"
+      of "ppuio":
+        # the PPU's register latches, write-only ones included, in the
+        # second reference driver's order: DISPCNT BG0-3CNT BG0-3HOFS
+        # BG0-3VOFS BG2PA-PD BG3PA-PD BG2X BG2Y BG3X BG3Y WIN0H WIN1H WIN0V
+        # WIN1V WININ WINOUT MOSAIC BLDCNT BLDALPHA BLDY, hex
+        let p = emu.ppu
+        var s = "ok " & cast[uint16](p.dispcnt).toHex(4)
+        for i in 0..3: s.add " " & cast[uint16](p.bgcnt[i]).toHex(4)
+        for i in 0..3: s.add " " & cast[uint16](p.bghofs[i]).toHex(4)
+        for i in 0..3: s.add " " & cast[uint16](p.bgvofs[i]).toHex(4)
+        for b in 0..1:
+          for i in 0..3: s.add " " & cast[uint16](p.bgaff[b][i]).toHex(4)
+        for b in 0..1:
+          for i in 0..1: s.add " " & cast[uint32](p.bgref[b][i]).toHex(8)
+        for r in [cast[uint16](p.win0h), cast[uint16](p.win1h), cast[uint16](p.win0v),
+                  cast[uint16](p.win1v), cast[uint16](p.winin), cast[uint16](p.winout),
+                  cast[uint16](p.mosaic), cast[uint16](p.bldcnt), cast[uint16](p.bldalpha),
+                  cast[uint16](p.bldy)]:
+          s.add " " & r.toHex(4)
+        reply s
       of "peek":
         # untimed: a timed bus read (`emu.bus[a]`) charges wait states to
         # the CPU, so peeking every frame shifted the game's own timing
