@@ -1,0 +1,109 @@
+@title Yggdra Union - We'll Never Fight Alone (USA)
+@file Yggdra Union - We'll Never Fight Alone (U).gba
+@game BYUE
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+@save skip: the first save comes after the first battle (Thieves' Stronghold, Chapter 1); the script stops at the battle's first move. Attacking the thieves was not worked out in the live session (with the tutorials off: moving next to one, START for Union, A and START on the Union screen, a direction into the enemy all left the battle unstarted). The 8 KB EEPROM written here holds 32 bytes from the boot.
+
+# Health warning, START through the intro twice, title > NEW GAME,
+# tutorials No, the prologue text, Chapter 1, A through the thieves' talk,
+# CARD SELECT: all five cards (Steal, Mind Change, Refresh, Mirage,
+# Rockfall), START > character, START > "Ready for combat?" A, the battle
+# map at Thieves' Stronghold with Milanor in move mode, two steps down next
+# to the thieves.
+
+[new]
+wait 600
+checkpoint warning window=30
+press A
+wait 300
+wait 300
+press START
+wait 180
+press START
+wait 180
+wait 240
+wait 180
+checkpoint title window=30
+press A
+wait 240
+checkpoint tutorial_prompt window=30 compare=text
+press DOWN
+wait 20
+press A
+wait 240
+checkpoint prologue window=30
+tap A times=20 every=30 hold=4
+tap A times=40 every=30 hold=4
+press START
+wait 120
+tap A times=20 every=60 hold=4
+checkpoint chapter1 window=30
+tap A times=30 every=30 hold=4
+tap A times=30 every=40 hold=4
+tap A times=30 every=40 hold=4
+tap A times=40 every=30 hold=4
+tap A times=60 every=20 hold=4
+tap A times=15 every=30 hold=4
+tap A times=40 every=30 hold=4
+checkpoint card_select window=30
+press A
+wait 60
+press DOWN
+wait 20
+press A
+wait 60
+press DOWN
+wait 20
+press A
+wait 60
+press RIGHT
+wait 20
+press DOWN
+wait 15
+press DOWN
+wait 15
+press A
+wait 40
+press DOWN
+wait 20
+press A
+wait 40
+press DOWN
+wait 20
+press RIGHT
+wait 20
+press A
+wait 40
+press DOWN
+wait 20
+press A
+wait 40
+press DOWN
+wait 20
+press DOWN
+wait 20
+press LEFT
+wait 20
+press A
+wait 60
+press START
+wait 90
+press START
+wait 120
+checkpoint ready_for_combat window=30
+press A
+wait 180
+tap A times=20 every=30 hold=4
+checkpoint battle_map window=30
+press A
+wait 30
+press A
+wait 40
+press DOWN
+wait 20
+press DOWN
+wait 20
+wait 10
+checkpoint milanor_moved window=30
+
