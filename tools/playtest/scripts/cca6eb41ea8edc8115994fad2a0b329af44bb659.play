@@ -1,0 +1,89 @@
+@title Famicom Mini - Hikari Shinwa - Palutena no Kagame (Japan)
+@file Famicom Mini - Vol. 24 - Hikari Shinwa - Palutena no Kagame (J) [o1].gba
+@game FPTJ
+@chip EEPROM 64Kbit
+@frozen dingbat-bios,mgba,nba
+
+# The Disk System version, on the whole 4 MB cartridge image (the archive's
+# "[o1]"). The untagged 1 MB file is its first megabyte only: the Disk
+# System file directory sits at 0x08200000 (blocks 1-3 differ from block 0),
+# and on the 1 MB file every emulator mirrors the Nintendo logo there, so the
+# game-over save walked unmapped memory for good in dingbat and the second
+# reference (docs/playtest-bugs.md §100).
+# Title, START: the file screen (セレクトシテクダサイ), A, START on ナマエ
+# トウロク, START picks the first slot, A A: "アア", SELECT three times to
+# トウロク オワル, START: back on the file screen with アア. START plays it:
+# stage 1-1, four arrows, a step right, four more, the L+R menu (つづける /
+# リセット / スリープモード), A back, then stand still until the shemum
+# snakes take Pit's health: ヤラレチャッタ, then コンティニュー スル / セーブ
+# スル. DOWN does nothing there; SELECT moves to セーブ スル, START saves and
+# returns to the title. [load]: the file screen shows アア, START resumes
+# in stage 1-1.
+# mgba's enemies are a frame or two apart from dingbat-bios and the second
+# reference from the L+R menu to the resumed game (identical to each other
+# throughout); all three meet again by the snakes. mgba fills the unused
+# EEPROM bytes with 00, dingbat and the second reference with FF.
+[new]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press A
+wait 60
+press START
+wait 60
+press START
+wait 40
+press A
+wait 24
+press A
+wait 24
+checkpoint name_entry window=30
+press SELECT
+wait 24
+press SELECT
+wait 24
+press SELECT
+wait 24
+press START
+wait 40
+checkpoint registered window=30
+press START
+wait 300
+checkpoint stage1 window=30
+tap B times=4 every=20 hold=6
+hold RIGHT
+wait 60
+release
+tap B times=4 every=20 hold=6
+checkpoint play window=30
+press L+R hold=10
+wait 60
+checkpoint menu window=30
+press A
+wait 60
+checkpoint resumed window=30
+wait 1500
+checkpoint enemies window=30
+wait 900
+checkpoint game_over window=30
+press DOWN
+wait 20
+press SELECT
+wait 20
+checkpoint save_selected window=30
+press START
+wait 120
+wait 300
+checkpoint saved_title window=30
+
+[load]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+checkpoint file_select window=30
+press START
+wait 300
+checkpoint resumed window=30

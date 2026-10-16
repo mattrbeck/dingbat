@@ -9262,20 +9262,22 @@ driver), and mGBA's late sound start. Xevious: (a), fixed.
 ## §100. Famicom Mini Disk System: the file lookup's walk through unmapped memory never ends in dingbat (Metroid, Shin Onigashima and Palutena's game over hang), and Nazo no Murasamejou's timer interrupt waits 39,000 cycles behind a preempted H-blank DMA, 2026-10-16
 
 Six Famicom Mini games looked at, five scripted (Makaimura, Nazo no
-Murasamejou, Metroid, Palutena no Kagame, Tantei Club; Shin Onigashima has
-no script, below). Two dingbat-alone or
-dingbat-with-the-second-reference differences, both traced to a mechanism.
+Murasamejou, Metroid, Palutena no Kagame, Tantei Club; Shin Onigashima
+since, below). Two dingbat-alone or
+dingbat-with-the-second-reference differences, both traced to a mechanism;
+the first turned out to be the ROM files, not the emulator.
 All four dingbat configurations agree in each.
 
-**(1) The Disk System file lookup walks unmapped memory until an open-bus
-read ends it.** Famicom Mini Metroid (FMRJ) and Shin Onigashima (FFMJ) show
-a black or blank screen from the boot on in dingbat (every configuration)
-and in the second reference; mgba shows the title. Palutena (FPTJ) boots in
-all three, but its GAME OVER screen ("ヤラレチャッタ") never moves on in
-dingbat and the second reference, START or not; mgba goes on to
-コンティニュー スル / セーブ スル. In each the CPU sits for good in the same
-ten ARM instructions in IWRAM (Metroid 0x030035FC-0x03003620, Palutena
-0x03003568-0x0300358C):
+**(1) The Disk System volumes are 4 MB cartridges, and the 1 MB images
+are their first megabyte only.** On the 1 MB files, Famicom Mini Metroid
+(FMRJ) and Shin Onigashima (FFMJ) show a black or blank screen from the
+boot on in dingbat (every configuration) and in the second reference; mgba
+shows the title. Palutena (FPTJ) boots in all three, but its GAME OVER
+screen ("ヤラレチャッタ") never moves on in dingbat and the second
+reference, START or not; mgba goes on to コンティニュー スル / セーブ スル.
+In each the CPU sits for good in the same ten ARM instructions in IWRAM
+(Metroid 0x030035FC-0x03003620, Palutena 0x03003564-, Shin Onigashima
+0x03003604-):
 
     ldrb r0, [sp, #0x85c]      ; the wanted file id (Metroid 0xAC, Palutena 3)
     ldr  r2, [lr, #4]
@@ -9283,45 +9285,89 @@ ten ARM instructions in IWRAM (Metroid 0x030035FC-0x03003620, Palutena
     tst  r2, #0x10000    ; bne end
     add  lr, lr, #8 ; tst r2, #0xfa0000 ; addne lr, lr, #4 ; b loop
 
-lr starts at 0x08160000 plus a word read from the table at 0x08160000 (the
-1 MB image's first mirror: 0x6F096F09, ROM offset 0x60000, sine-like data,
-the same in dingbat and mgba), so at Metroid's first lookup (frame 31) lr is
-0x771F6F09: unmapped and odd. Each `ldr` reads open bus at a misaligned
-address, rotated by 8. dingbat returns the loop's own prefetched opcode,
-0x0A000005 (`beq`), rotated 0x050A0000: top byte 05, bit 16 clear, so lr
-steps 12 bytes forever; after 1000 frames it is at 0x8256744D, the whole
-address space wrapped. Only a DMA's word on the bus can end it, as
-55c79b9f (2026-09-16) found for this same game: the H-blank DMA3 moves a
-BG3CNT halfword from a VRAM table every line (0x0143 at the title, a
-16-bit transfer, so 0x01430143 on the bus), and 0x01430143 rotated by 8 is
-0x43014301: bit 16 set.
+It is the NES emulator's handler for the Disk System file registers (a
+write to $4082 stores the file id at [sp+0x85C], $4083 the file number at
+[sp+0x85D], then the lookup). Before the loop it sets lr to a base address
+(Metroid 0x08160000, from a mov/orr pair) plus the word at base +
+[sp+0x85E] * 64 + ([sp+0x85D] & 15) * 4, and skips the lookup when that
+word is 0. The base is a constant per game, and in every Disk System volume it is past
+the first megabyte (read from IWRAM at frame 300): Nazo no Murasamejou
+0x08280000, Metroid 0x08160000, Palutena 0x08200000, Zelda II 0x082B0000,
+Shin Onigashima 0x08170000, Tantei Club 0x08310000, Tantei Club II
+0x08160000 (none found for Super Mario Bros. 2 or Akumajou Dracula).
 
-Bisected on dingbat-bios, Metroid at frame 600: the title showed up to
-24c1bb3f and has been black since e972f16e (2026-09-20, "an unmapped read
-takes one open-bus verdict, not one per byte"). In the good build the first
-walk ends at frame 31, line 159, with r2 = 0x05430143: the word 0x43014305,
-three bytes of DMA3's 0x01430143 beside the opcode's low byte 05, a torn
-word of the kind e972f16e removed as unphysical (slotdma.s hop 2 on the AGB
-SP). So dingbat booted the game through a tear, and with one verdict per
-access the window `bus.dma_request_at > fetch_start and dma_request_at <=
-read_start` (bus.nim `read_open_bus_word`) is never met by this loop's
-`ldr`. Shin Onigashima hangs in the good build too.
+The archive's untagged files of these volumes are 1 MB. Their "[o1]"
+("overdump") files are 4 MB: the first megabyte byte-identical to the 1 MB
+file, and the other three megabytes not mirrors of it but more data,
+including directories at exactly those addresses. Metroid's holds 0x140 at
+0x08160000, and at 0x08160144 the word 0xAC810B36: file 0xAC, the one the
+boot asks for. Palutena's holds 0xC0, 0xEC, 0x1A8, 0x280 at 0x08200000. The
+"[o1]" files of the cartridge-only volumes 1-21 and 29-30 and of every
+Classic NES Series title are their 1 MB image four times over (Xevious's:
+the image, then zeros), so the dumper read the bus as it is, and on the
+Disk System volumes it found 4 MB of ROM.
 
-Reading: the console boots these carts, and mgba (whose rule shows the DMA
-word to the whole instruction after a burst) does. The hardware rule
-measured in section 13 (obuswin.s: in ARM code in IWRAM a DMA word survives
-exactly one 1-cycle NOP; any later access replaces it) also leaves only a
-narrow window in this 16-cycle loop, so whether a request lands in it is a
-matter of where the H-blank DMA's request falls against the loop's cycles,
-which dingbat resolves only at instruction boundaries (the "sub-instruction
-resolution problem" of section 13 and the hdmasweep notes). Confidence that
-dingbat is wrong: high for the outcome (commercial carts, mgba boots them);
-the exact fix is the open-bus latch's shape and the H-blank request's
-sub-instruction timing, not a constant. The second reference fails the same
-way, so the harness passes dingbat on all three games (the references
-disagree: not diagnostic). Metroid's script is frozen on mgba alone
-(`@frozen mgba`) to keep the route; Palutena's ends at the game-over
-screen (`@save skip`); Shin Onigashima has no script.
+dingbat, mgba and the second reference all mirror a 1 MB image four times
+across 4 MB (GBATEK "GBA Cart Protections": the Classic NES Series carts
+mirror their ROM; cartridge.nim), so on the 1 MB files each directory read
+returns mirrored first-megabyte data: sine-table halfwords (Metroid
+0x6F096F09, ROM offset 0x60000) or, for Palutena, the cartridge header
+(0x51AEFF24, the Nintendo logo). lr lands far past the gamepak (Metroid
+0x771F6F09) and the loop walks unmapped memory until a read has bit 16 set
+or the file id in its top byte.
+
+This section first put the hang on the H-blank DMA's request timing
+(bisected: the title showed up to 24c1bb3f and was black from e972f16e on).
+Measured with `-d:obusdbg` and an instruction trace, the timing is not why
+the walk never ended in dingbat:
+- dingbat does show the loop an H-blank DMA's word, on about 12 lines a
+  frame (a request in the `ldr`'s fetch cycle, section 13's window). The
+  word is DMA3's BG3CNT halfword 0xC405 (a VRAM table at 0x06003680; DMA0
+  writes BG3HOFS/VOFS just before it). Metroid's and Palutena's game-over lr
+  are 1 mod 4 and Shin Onigashima's 3 mod 4, so the `ldr` rotates the word
+  by 8 or 24: 0x05C405C4, bit 16 clear, top byte 05. A duplicated BG3CNT
+  word cannot end such a walk (bit 16 is then the screen base's low bit, 0
+  here), and neither can the prefetched opcode (0x050A0000), DMA0's
+  0x00XX0000, the sound DMA's last word (FIFO B's, zeros) or obusdma16's
+  lane hypotheses for a 16-bit DMA (H2 and H3 worked per line: no line
+  sets bit 16). A word-aligned walk ends on
+  the first such read (Palutena's earlier lookups do, on 0x84058405).
+- Only line 159 reads past the BG3CNT table (0x7003 from the second frame
+  of the walk on, 0x4301 in its first). The build before e972f16e ended
+  Metroid's first walk at that first line 159 on a torn 0x43014305, the
+  request landing in the `ldr`'s data cycle; today the same request falls
+  between two `ldr`s.
+- mgba ends the walks through its open-bus rule, not a DMA word: r2 =
+  0x22E1500C or 0x04E59E20, the loop's own `cmp` (`$+4`) or `ldr` rotated.
+  For the instruction after a DMA is scheduled, before the burst has run,
+  mgba returns the opcode prefetched at its last event dispatch. obusprobe
+  on the AGB SP answers that case with `[$+8]` (`E59F0068`, "0 instr after
+  a DMA"), where mgba gives `[$+4]` (`E58A0034`).
+
+On the 4 MB files the lookup ends at once in all three emulators (Metroid
+finds file 0xAC at the first entry) and all three games play on, so nothing
+in dingbat's bus is at fault and no core change is made. The corpus moves
+to the 4 MB files (tools/playtest/scripts, 2026-10-16):
+- Metroid (2e1df85e): the old route, now frozen on all three: every
+  checkpoint identical but the title screens, the second reference a frame
+  behind;
+  the save cross-loads in every pair.
+- Palutena (cca6eb41): game over goes on to コンティニュー スル / セーブ
+  スル in all three; the script now saves there (SELECT, START) and has a
+  [load] that resumes in stage 1-1.
+- Shin Onigashima (2f938a54, new): the opening to the command menu, START:
+  ここまでを、せーぶするかの?, A saves; [load] resumes there. FFMJ is a
+  4 Kbit EEPROM, which the second reference sizes right unaided.
+- Nazo no Murasamejou and Tantei Club stay on their 1 MB files here (the
+  first is under §100 (2)); replayed unchanged on the 4 MB files, both pass
+  with every checkpoint identical in all three. Zelda II and Tantei Club II
+  have no script.
+
+Confidence high that the 1 MB files are short: the game's own code reads its
+directory there and finds the file it asks for. That the cartridge's ROM is
+4 MB is read from the dumps, not from a cartridge; the dumps of 1 MB boards
+show the mirrors GBATEK describes, so the other blocks are what the bus gave
+the dumper.
 
 **(2) Nazo no Murasamejou: a timer interrupt held 39,000 cycles behind a
 preempted H-blank DMA.** dingbat alone clicks once at f1306, in a silence
@@ -9373,14 +9419,14 @@ FTKJ is in emu.py's EEPROM_4K set. Makaimura (FMKJ) and Nazo no Murasamejou
 there, but reads mgba's extended 8 KB file as a different save (load
 mgba-in-the-second-reference MAJOR, §94). Tantei Club (FTKJ) is 4 Kbit too
 (512-byte files). Metroid and Palutena are 64 Kbit (data at 0x1000-0x145F;
-"TRAPR" at 0xFF8). Makaimura: the second reference runs a frame behind
-from the opening in [new] (not in [load]); dingbat matches mgba at every
-checkpoint.
+"TRAPR" at 0xFF8). Shin Onigashima (FFMJ) is 4 Kbit (512-byte files in
+dingbat and the second reference). Makaimura: the second reference runs a
+frame behind from the opening in [new] (not in [load]); dingbat matches mgba
+at every checkpoint.
 
-**Status: open, no core change.** (1) e972f16e's single verdict is right
-by slotdma.s; what is missing is the DMA word reaching this loop's `ldr`
-when the console's request timing would put it there. (2) one booking in
-dma.nim's burst-end block.
+**Status.** (1) closed, no core change: the 1 MB files are truncated
+dumps; the scripts run the 4 MB ones. (2) open: one booking in dma.nim's
+burst-end block.
 
 ## §101. bit Generations (Coloris, Dial Hex, Boundish, Digidrive), Polarium Advance, Puyo Pop: six new scripts; random boards from timer 1, and an SIO transfer dingbat never clocks, 2026-10-16
 

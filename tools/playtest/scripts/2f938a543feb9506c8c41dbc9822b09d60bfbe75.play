@@ -1,0 +1,63 @@
+@title Famicom Mini - Famicom Mukashi Banashi - Shin Onigashima Zenkouhen (Japan)
+@file Famicom Mini - Vol. 26 - Famicom Mukashi Banashi - Shin Onigashima Zenkouhen (J) [o1].gba
+@game FFMJ
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# The Disk System version, on the whole 4 MB cartridge image (the archive's
+# "[o1]"). The untagged 1 MB file is its first megabyte only: the Disk
+# System file directory is at 0x08170000, and on the 1 MB file every
+# emulator mirrors sine-table data there, so the boot's file lookup walked
+# unmapped memory for good and the screen stayed blank in dingbat and the
+# second reference (docs/playtest-bugs.md §100).
+# Title, START: the storyteller (さいしょから / せーぶした ところから), A:
+# from the start, すこしのしんぼうじゃ while the disk loads, 一しょう, A A
+# through the opening text to the command menu in いろりのへや (みる とる
+# はなす あける いどう もちもの). START: ここまでを、せーぶするかの?, A
+# saves and returns to the title. [load]: DOWN to せーぶした ところから, A
+# resumes in いろりのへや at the command menu.
+# Seen while authoring: the second reference's title birds and storyteller
+# text run a frame behind the other two (title); at saved_title dingbat-bios
+# is a frame off both references, which agree (not traced). dingbat and the
+# second reference write the same 512-byte file (4 Kbit; the second
+# reference sizes it right unaided); mgba writes 8 KB, the same 512 bytes
+# then zeros, which the second reference reads as a different save (its
+# load of mgba's file is MAJOR, as for Makaimura, §94).
+[new]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+wait 180
+checkpoint start_menu window=30
+press A
+wait 240
+wait 300
+checkpoint chapter1 window=30
+press A
+wait 240
+press A
+wait 240
+checkpoint commands window=30
+press START
+wait 60
+wait 120
+checkpoint save_prompt window=30
+press A
+wait 240
+wait 300
+checkpoint saved_title window=30
+
+[load]
+wait 300
+checkpoint title window=30
+press START
+wait 120
+wait 180
+press DOWN
+wait 20
+checkpoint continue_selected window=30
+press A
+wait 240
+wait 300
+checkpoint resumed window=30
