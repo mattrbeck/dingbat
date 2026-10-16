@@ -8,16 +8,16 @@
 # battle map (the last taps leave Ryusei's move range open), B twice, START
 # on the map > "Save?" Yes: the interrupt save, which writes 64 KB of
 # FLASH512. [load]: title > CONTINUE resumes the map, A opens Ryusei's menu.
-# The save ran 120 frames on mgba, 90 on dingbat-bios and nba, and the music
-# comes back after it at f5930 in dingbat, f5940 in nba and f5960 in mgba:
+# The save ran 120 frames on mgba, 90 on dingbat-bios and the second reference, and the music
+# comes back after it at f5930 in dingbat, f5940 in the second reference and f5960 in mgba:
 # the flash chip's program/erase time (docs/playtest-bugs.md §64, §35:
-# dingbat's flash has no busy state, mgba holds one after an erase, nba
+# dingbat's flash has no busy state, mgba holds one after an erase, the second reference
 # answers as an SST chip). That is the audio flagged from f5925 on.
 # The three battery files differ in 4 frame-count words (and the checksum):
 # the game frame counter at 0x02001964 skips a count at f5627 (a lag frame
-# as the battle map's cursor starts blinking) in dingbat and nba but not in
-# mgba, and nba's runs one count ahead of the others from boot, so at the
-# save mgba and nba both read dingbat's + 1 (0x1675 against 0x1674 at
+# as the battle map's cursor starts blinking) in dingbat and the second reference but not in
+# mgba, and the second reference's runs one count ahead of the others from boot, so at the
+# save mgba and the second reference both read dingbat's + 1 (0x1675 against 0x1674 at
 # 0xDCCC). Every emulator loads every save to the same screens.
 
 [new]
@@ -51,7 +51,7 @@ press LEFT
 wait 20
 press A
 wait 60
-# until notext Saving timeout=1500 every=10  [reached dingbat-bios+90 mgba+120 nba+90]
+# until notext Saving timeout=1500 every=10  [reached dingbat-bios+90 mgba+120 the second reference+90]
 wait 124
 wait 60
 checkpoint saved window=30

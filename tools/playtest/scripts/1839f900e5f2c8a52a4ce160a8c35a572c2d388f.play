@@ -11,9 +11,9 @@
 # Retreat) > Save: "Saved." (64 KB of FLASH512). [load]: title > CONTINUE
 # resumes the map, the map menu again.
 # The save's blank screen ended 10 frames later on mgba than on dingbat-bios
-# and nba (the flash chip's time, docs/playtest-bugs.md §64). On the battle
+# and the second reference (the flash chip's time, docs/playtest-bugs.md §64). On the battle
 # map mgba's cursor blinks a few frames from the others' (battle_map SLIP
-# +4, system_menu +2, saved +5 against dingbat; dingbat = nba at all three).
+# +4, system_menu +2, saved +5 against dingbat; dingbat = the second reference at all three).
 
 [new]
 wait 600
@@ -54,7 +54,7 @@ press DOWN
 wait 15
 press A
 wait 60
-# until notblank timeout=600 every=10  [reached dingbat-bios+10 mgba+20 nba+10]
+# until notblank timeout=600 every=10  [reached dingbat-bios+10 mgba+20 the second reference+10]
 wait 24
 wait 30
 wait 30

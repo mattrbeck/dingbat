@@ -11,11 +11,11 @@
 # up to where the squadron joins (f9920) and a little beyond.
 # All three emulators are on the same frame through squadron; at wingmen
 # (f10180) mgba is 2 frames off (SLIP -2) and every dingbat configuration
-# matches nba. Played on in the live session (f10320 to f15320): the screens
+# matches the second reference. Played on in the live session (f10320 to f15320): the screens
 # split there (mgba first, then all three: the cloud scroll, the HP bar and which
-# shots hit differ), and at f15020 the ship is down in mgba and nba but
+# shots hit differ), and at f15020 the ship is down in mgba and the second reference but
 # still flying in dingbat-bios; every one reaches GAME OVER by f15320.
-# nba writes an 8 KB EEPROM file, the others 512 bytes.
+# The second reference writes an 8 KB EEPROM file, the others 512 bytes.
 
 [new]
 wait 600
@@ -26,7 +26,7 @@ wait 60
 checkpoint title window=30
 press START
 wait 90
-# until notblank timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+# until notblank timeout=600 every=10  [reached dingbat-bios+10 mgba+10 the second reference+10]
 wait 14
 wait 60
 wait 90

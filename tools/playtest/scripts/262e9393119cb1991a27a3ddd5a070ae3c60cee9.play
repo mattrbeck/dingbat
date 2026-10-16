@@ -119,7 +119,7 @@ press UP
 wait 20
 press A
 wait 120
-# until notext Saving timeout=1200 every=10  [reached dingbat-bios+260 mgba+260 nba+260]
+# until notext Saving timeout=1200 every=10  [reached dingbat-bios+260 mgba+260 the second reference+260]
 wait 264
 wait 60
 checkpoint saved window=30

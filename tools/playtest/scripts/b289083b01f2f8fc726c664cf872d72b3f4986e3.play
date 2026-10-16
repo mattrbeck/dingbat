@@ -15,17 +15,17 @@
 # suspend save (8 KB of EEPROM). [load]: title > CONTINUE > OK resumes the
 # map at the Main Menu (the game erases the suspend save once it is loaded,
 # in every emulator), B closes it.
-# The battle animates ahead on mgba (union_formed, you_win; dingbat = nba).
+# The battle animates ahead on mgba (union_formed, you_win; dingbat = the second reference).
 # suspend_prompt reads SLIP(-1) against both references, which agree only by
-# coincidence: frame by frame from the L menu (f41490-41600) nba runs the
+# coincidence: frame by frame from the L menu (f41490-41600) the second reference runs the
 # menu, its fade and the prompt one frame after dingbat with dingbat's
 # pictures, while mgba keeps dingbat's frames but its own pictures (another
-# phase of the prompt's 2-frame blink, which lands on nba's). The save's
-# progress bar fills on a timer, the same in all three (nba a frame late).
+# phase of the prompt's 2-frame blink, which lands on the second reference's). The save's
+# progress bar fills on a timer, the same in all three (the second reference a frame late).
 # The "SUCCEEDED" screen walks two small unit icons whose pose follows those
 # phases, so saved is judged by its text. The three battery files differ in six bytes
 # (and the checksum); no byte has dingbat alone against the two references
-# (nba stands alone at 0x97, 0x25D, 0x2A5 and 0x2BD, mgba at 0x10B, all three
+# (the second reference stands alone at 0x97, 0x25D, 0x2A5 and 0x2BD, mgba at 0x10B, all three
 # differ at 0x275), and every emulator loads every save to the same screens.
 
 [new]
