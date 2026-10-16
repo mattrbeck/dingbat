@@ -1,0 +1,47 @@
+@title King of Fighters EX2, The - Howling Blood (USA)
+@file King of Fighters EX2, The - Howling Blood (U).gba
+@game AEXE
+@chip EEPROM 4Kbit
+@frozen dingbat-bios,mgba,nba
+
+# The title's PRESS START, START into the menu, OPTION; COM LEVEL raised
+# from three stars to four, then EXIT with A writes the EEPROM (B leaves
+# without saving). [load]: OPTION again shows COM LEVEL at four stars.
+# dingbat and mgba write the same 512-byte file. AEXE is a 4 Kbit EEPROM
+# missing from emu.py's EEPROM_4K, so the second reference writes 8 KB and
+# loses its own save (docs/playtest-bugs.md §94): with it, continue_option
+# shows three stars (MINOR against both); it reads dingbat's and mgba's
+# files, and they read its own. option_changed: the second reference alone
+# a frame off (SLIP -1) on the blinking cursor.
+[new]
+wait 900
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30
+press UP
+wait 30
+press A
+wait 90
+checkpoint option_menu window=30
+press RIGHT
+wait 30
+tap DOWN times=9 every=15 hold=4
+wait 30
+checkpoint option_changed window=30
+press A
+wait 60
+checkpoint menu_after_save window=30
+
+[load]
+wait 900
+checkpoint continue_title window=30
+press START
+wait 90
+press UP
+wait 30
+press A
+wait 90
+checkpoint continue_option window=30
+wait 20
+checkpoint continue_option_saved window=30
