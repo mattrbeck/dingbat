@@ -197,6 +197,11 @@ read there and holds the word in the channel's latch until the FIFO's next
 request, whose burst writes it and reads three more
 (`gba/apu/dma_channels.nim` FIFO_HANDBACK_CHAIN). A state can fall between the
 two; rev ≤ 10 builds never held a word, so their states load with none held.
+The first of the two bytes keeps `fifo_chain` in its low nibble (0..2); its
+high nibble is `DMA.imm_blocked` (`gba/dma.nim` IMM_NEEDS_EDGE, 2026-10-16),
+one bit per channel switched to immediate timing while enabled, with no
+enable edge, which requests nothing until CNT_H disables or edge-enables it.
+Builds before it wrote 0 there, so their states load with no channel blocked.
 
 Two states stay refused: GBA rev ≤ 3 taken mid-IntrWait with the handler
 running, and sub-1 MiB GBA carts' states from before the ROM-buffer resize

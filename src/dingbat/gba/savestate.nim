@@ -256,7 +256,11 @@ proc save_dma_state(dma: DMA; w: var Writer) =
     w.write_u16(dma.count[i])  # v5
   # rev 11: FIFO_HANDBACK_CHAIN, a word read in a burst's hand-back cycle and
   # held in the latch for the FIFO's next refill (0 or 2 between instructions)
-  for f in 0 .. 1: w.write_u8(dma.fifo_chain[f])
+  # The first byte's high nibble (spare: fifo_chain is 0..2) carries
+  # IMM_NEEDS_EDGE's DMA.imm_blocked, one bit per channel; rev-11 builds
+  # without it wrote 0 there
+  w.write_u8(dma.fifo_chain[0] or (dma.imm_blocked shl 4))
+  w.write_u8(dma.fifo_chain[1])
 
 proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_DMA)
@@ -273,6 +277,10 @@ proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
     dma.count[i] = if rev >= 5: r.read_u16() else: dma.dmacnt_l[i]
   # Rev <= 10 builds took no read in a hand-back cycle: nothing held
   for f in 0 .. 1: dma.fifo_chain[f] = if rev >= 11: r.read_u8() else: 0'u8
+  # IMM_NEEDS_EDGE: the channels switched to immediate without an enable
+  # edge, in the spare high nibble (none before it was kept there)
+  dma.imm_blocked = dma.fifo_chain[0] shr 4
+  dma.fifo_chain[0] = dma.fifo_chain[0] and 0x0F'u8
   # Arbitration state is idle at frame boundaries; not serialized
   dma.pending = 0
   dma.current_priority = 4

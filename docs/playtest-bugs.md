@@ -8944,7 +8944,7 @@ checkpoints are SLIPs and pass; no `@known` is needed. The script's notes
 say so.
 
 
-## §NEXT. Driv3r's audio: the second reference's capture ran 0.24% short, so its windows read the stream progressively early, 2026-10-15
+## §NEXT. Driv3r's audio was the second reference's capture running 0.24% short; Xevious's click was an immediate DMA armed without its enable edge, 2026-10-16
 
 **Symptom.** The first baseline with the second reference playing Driv3r
 (§94) failed every dingbat configuration on audio alone: 81 of 703 windows
@@ -9028,10 +9028,84 @@ summary and in the verdict notes (`rate_off`; `tests/test_audio.py`).
 `train.py` plays the references live for a candidate that touches their
 driver, so the next baseline carries the corrected dumps.
 
-**Classification.** (b): a reference problem twice over. The second
-reference's was our driver's capture, now fixed. mGBA's is the game
-starting its sound 1-2 frames late after each load and 6 late into the
-video, mGBA alone (dingbat and the second reference are frame-identical
-there). No dingbat bug. The interpolated FIFO output is not involved:
-`--no-fifo-interp` flags 80 windows, the shipped default 81. **No core
-change, no `@known`.**
+**Driv3r: (b),** a reference problem twice over. The second reference's
+was our driver's capture, now fixed. mGBA's is the game starting its sound
+1-2 frames late after each load and 6 late into the video, mGBA alone
+(dingbat and the second reference are frame-identical there). No dingbat
+bug, and Driv3r needs no `@known`. The interpolated FIFO output is not
+involved: `--no-fifo-interp` flags 80 windows, the shipped default 81.
+
+**What the aligned second reference shows elsewhere.** The train (the
+references played live, 188 games, 2026-10-16): Driv3r fixed, two games
+regressed, nothing else changed in any configuration. With its dumps in
+step the two references agree far more (Dragon Ball Z - The Legacy of Goku
+II 466 differing windows to 0, Hamtaro - Ham-Ham Heartbreak 519 to 8, Mario
+Golf - Advance Tour 552 to 1), so windows once thrown out as "the
+references disagree" now count. §65 removed the `@known` audio lines of
+both regressed games when the second reference's frames moved; the drift
+had been hiding them since.
+
+* *Kingdom Hearts - Chain of Memories,* MINOR (113 flagged) to DIFFERENT
+  (281, 13.2%). Every flagged window is from f8175 on, and is stereo width.
+  That is §30. After the movie's FIFO reset (f8010) both references play
+  FIFO B 29 samples behind FIFO A (the L~R cross-correlation peaks at lag
+  29 in both, at 0 in dingbat), because their reset keeps the word being
+  played. The AGB SP's fiforeset cells (18/18) drop it, as dingbat does.
+  `@known`, citing §30.
+* *Summon Night - Swordcraft Story 2,* MINOR to DIFFERENT. The longest run,
+  f24450 for 2.76 s, is inside the first battle, where §57's random numbers
+  part all three emulators (no two share a frame from f14401 to f26400).
+  `@known`, citing §57.
+
+In 11 games the new note fires for dingbat and mGBA together: their dumps
+hold 548.12-548.33 samples a frame (0.05-0.08% short) where the second
+reference's is now 548.58 (Kirby - Nightmare in Dream Land, both Zeldas,
+Sonic Advance 1 and 2, Super Monkey Ball Jr. and five more). The two
+agree with each other to the sample, so their frames, not their capture,
+are short of 280896 cycles on average somewhere in those runs (a reset, a
+Stop, or the display switched off are the candidates). Every one passes,
+and none was chased here.
+
+**Xevious's click: an immediate DMA armed without its enable edge (a, fixed).**
+§97's Famicom Mini Xevious clicks (dingbat alone, every ~67 frames in its
+silences) share nothing with Driv3r: Driv3r was the harness, this is the
+core. A scratch copy of `tests/biosdrv_probe.nim` (every FIFO word with
+DMA1's read pointer, every I/O store with its cycle) over the first 400
+frames:
+
+* The timer 1 interrupt (cascaded on timer 0, reload 0xFF60: every 160
+  samples, 81920 cycles) restarts DMA1 each time with four stores: DMA1CNT
+  = 0x84400004 (a word store: CNT_H 0x8440, enable kept, timing
+  immediate), CNT_H 0x0440 24 cycles later, then SAD (the next buffer),
+  DAD and CNT_H 0xB200. The refill bursts come every 8192 cycles; the
+  restart normally lands ~6800 cycles after a buffer's tenth.
+* At each click, 12 cycles after the 0x8440 store, DMA1 ran one burst of 4
+  words from its old read pointer: past the buffer's end (0x03005F20, the
+  pointer word, after the third buffer; the next buffer's zeros after the
+  other two). The FIFO, nearly full, took a fifth word and wrapped
+  (`FIFO_WORD_WRAP`), which shuffled the next bursts too.
+* Who asked: `chain_next` (`DMA_CHAIN`), at the end of an H-blank DMA0
+  burst (one halfword of BG3CNT from a VRAM table, every line) that ended
+  inside those 24 cycles. It requests every channel that reads "enabled,
+  immediate" and whose `imm_due` has passed. DMA1's `imm_due` was a stale
+  stamp: the 0x8440 store had armed nothing (no 0 -> 1 edge), but the
+  check did not know that. `request_immediate` has the same test. In 400
+  frames DMA0 ended in the window 12 times; one restart in three is on the
+  third buffer, where the word past the end is not zero.
+
+GBATEK ("DMA Transfers") starts a transfer on the enable bit's 0 -> 1
+change, and neither reference ever runs this burst. `IMM_NEEDS_EDGE`
+(`gba/dma.nim`, on): a CNT_H store that switches an enabled channel to
+immediate timing, enable kept, marks it (`DMA.imm_blocked`), and
+`request_immediate` and `chain_next` pass it by until a store disables or
+edge-enables it. A state keeps the mask in the spare high nibble of the
+DMA section's first FIFO hand-back byte (no revision bump; older states
+load with none blocked); without it the state soak's random programs, which
+leave a channel blocked for frames, diverged after a rewind. With it the
+probe's 400 frames have no word from past a buffer (9 before; none on the
+official BIOS either), and the Xevious script passes in every
+configuration (audio SAME, 0 of 124 windows flagged; mgba~second
+reference 0).
+
+**Classification.** Driv3r: (b), the second reference's capture (our
+driver), and mGBA's late sound start. Xevious: (a), fixed.

@@ -26,6 +26,20 @@ const DMA_ROM_BOUNDARY_HOLD {.booldefine.} = true
   ## it (31 S reads that are N); applied to every non-moving ROM source,
   ## DMA_pause_timing_ROM_to_IWRAM goes red.
 const DMA_START_DELAY {.intdefine.} = (if IMM_IDLE_GRANT: 2 else: 3)
+const IMM_NEEDS_EDGE {.booldefine.} = true
+  ## An immediate transfer starts only on the enable bit's 0 -> 1 edge
+  ## (GBATEK, "DMA Transfers": "the transfer starts ... after changing the
+  ## Enable bit from 0 to 1"). A CNT_H store that switches a channel already
+  ## running in another timing to immediate, enable kept set, arms nothing.
+  ## Famicom Mini Xevious restarts its sound DMA from the timer 1 interrupt
+  ## with DMA1CNT = 0x84400004, then CNT_H 0x0400 and 0xB200: for the 24
+  ## cycles between the first two stores DMA1 reads "enabled, immediate",
+  ## and any other burst that ended in them (chain_next) or immediate
+  ## request (request_immediate) used to request it on its stale imm_due.
+  ## It then ran 4 words from the old read pointer, the first one past the
+  ## buffer, and wrapped the FIFO (FIFO_WORD_WRAP): a click about every 67
+  ## frames, which neither reference plays (docs/playtest-bugs.md §97 and
+  ## "Xevious's click").
 const HDMA_DROP_BUSY {.booldefine.} = true
   ## An H-blank request that arrives while the same channel's burst still
   ## holds the bus is dropped, not latched (trigger_hdma). False latches it
@@ -107,8 +121,15 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
       else:
         write(dma.dmacnt_h[channel], value and 0x7F'u8, 0)
         return
+    let timing_before = dma.dmacnt_h[channel].start_timing
     write(dma.dmacnt_h[channel], value, io_addr and 1)
     if channel == 1 or channel == 2: dma.fifo_chain[channel - 1] = 0
+    when IMM_NEEDS_EDGE:
+      let bit = uint8(1 shl channel)
+      if not dma.dmacnt_h[channel].enable or not enabled:
+        dma.imm_blocked = dma.imm_blocked and not bit
+      elif dma.dmacnt_h[channel].start_timing == 0 and timing_before != 0:
+        dma.imm_blocked = dma.imm_blocked or bit
     if dma.dmacnt_h[channel].enable and not enabled:
       # Addresses are force-aligned to the transfer size (GBATEK, "DMA Transfers").
       let align = if dma.dmacnt_h[channel].xfer_type != 0: not 3'u32 else: not 1'u32
@@ -145,7 +166,8 @@ proc request_immediate*(dma: DMA; reschedule = false) =
   var later = CycleCount(0)
   var waiting = false
   for channel in 0..3:
-    if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 0:
+    if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 0 and
+       (dma.imm_blocked and uint8(1 shl channel)) == 0:
       if dma.imm_due[channel] <= now:
         dma.request(channel)
       elif not waiting or dma.imm_due[channel] < later:
@@ -166,7 +188,8 @@ proc chain_next(dma: DMA; channel: int): bool =
   var waiting = false
   var later = CycleCount(0)
   for ch in 0..3:
-    if ch != channel and dma.dmacnt_h[ch].enable and dma.dmacnt_h[ch].start_timing == 0:
+    if ch != channel and dma.dmacnt_h[ch].enable and dma.dmacnt_h[ch].start_timing == 0 and
+       (dma.imm_blocked and uint8(1 shl ch)) == 0:
       if dma.imm_due[ch] <= now:
         dma.request(ch)
         result = true

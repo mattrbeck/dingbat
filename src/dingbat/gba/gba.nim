@@ -282,6 +282,11 @@ type
     # after its enable write). Only read within that delay; in the state's
     # in-flight section (rev 9).
     imm_due*:          array[4, CycleCount]
+    # IMM_NEEDS_EDGE (dma.nim): channels switched to immediate timing while
+    # enabled, with no 0 -> 1 edge, which request nothing. Cleared by the
+    # next CNT_H store that disables or edge-enables the channel. Saved in
+    # the spare high nibble of the DMA section's first FIFO hand-back byte.
+    imm_blocked*:      uint8
     # HDMA_DROP_BUSY: until when each channel's burst holds the bus (its
     # last write and the hand-back; high(CycleCount) while it runs). An
     # H-blank request earlier than this is lost. Never ahead of the clock
