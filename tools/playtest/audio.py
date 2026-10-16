@@ -27,6 +27,13 @@ import wave
 import numpy as np
 
 RATE = 32768
+# samples a frame at RATE: 280896 cycles of 16777216 Hz. Every driver's dump
+# runs at this rate; one that does not was not pulled in step with its core
+# (the second reference's capture counted the cycles it asked for, not those
+# run, and lost 0.24%: its windows read audio progressively early;
+# docs/playtest-bugs.md, "Driv3r's audio: the second reference's capture")
+NOMINAL_PER_FRAME = RATE * 280896 / 16777216
+RATE_TOLERANCE = 0.0005     # 0.05%: 5 frames over a 10000-frame run
 WINDOW_FRAMES = 15          # quarter of a second
 SILENT_DB = -55.0           # relative to full scale of the emulator's own peak level
 LOUD_DB = 6.0
@@ -113,6 +120,9 @@ def compare(feats, subjects, refs):
     reference-vs-reference baseline."""
     out = {'subjects': {}, 'refs': {}}
     have = {n: f for n, f in feats.items() if f is not None}
+    # a dump off the nominal rate drifts against the frames it is cut by
+    out['rate_off'] = {n: round(f['per_frame'], 3) for n, f in have.items()
+                       if 'per_frame' in f and abs(f['per_frame'] / NOMINAL_PER_FRAME - 1) > RATE_TOLERANCE}
     rr = [r for r in refs if r in have]
     ref_agree = None
     if len(rr) == 2:

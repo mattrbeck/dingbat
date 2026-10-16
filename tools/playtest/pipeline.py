@@ -462,6 +462,11 @@ def run(args):
     return 0 if all(v['pass'] for v in report['verdicts'].values()) else 1
 
 
+def audio_nominal():
+    import audio
+    return audio.NOMINAL_PER_FRAME
+
+
 def compare_audio(new, names, outdir):
     """Features of every emulator's [new] audio, the comparison, WAV clips of
     the longest differing span per subject; the raw dumps are then deleted."""
@@ -799,6 +804,9 @@ def verdicts(report, names):
             (v['problems'] if au['status'] == 'DIFFERENT' else v['notes']).append(msg)
         elif au and au.get('status') == 'NO AUDIO':
             v['notes'].append('no audio captured')
+        for n, pf in (report.get('audio', {}).get('rate_off') or {}).items():
+            v['notes'].append(f"audio: {n}'s dump is {pf} samples a frame, not "
+                              f"{audio_nominal():.2f}: its windows drift against the frames (a capture problem)")
         # save format
         sv = report['saves'].get(s, {})
         if report.get('save_skipped'):
@@ -900,6 +908,8 @@ def print_summary(report):
     if au:
         r = au.get('refs') or {}
         print(f"   audio refs {r.get('pair')}: {r.get('differ')}/{r.get('windows')} windows differ")
+        for n, pf in (au.get('rate_off') or {}).items():
+            print(f'   audio {n} dump at {pf} samples a frame, not {audio_nominal():.2f}: its windows drift')
         for s, res in au['subjects'].items():
             print(f"   audio {s:18} {res.get('status')} flagged={res.get('flagged_windows')}/{res.get('windows')}"
                   + (f" longest={res['longest_seconds']}s {res['runs'][0]}" if res.get('runs') else ''))

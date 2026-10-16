@@ -183,6 +183,10 @@ same way.
    windows aligned by emulated frame (level after each emulator's own gain,
    band shape, stereo width) and counts a window against dingbat only where
    the references agree. Only features and clips of differing spans are kept.
+   Every dump runs at 548.58 samples a frame (280896 cycles at 32768 Hz); one
+   that does not is named in the summary and the verdict notes, since its
+   windows drift against the frames (the second reference's capture lost
+   0.24% until 2026-10-15: docs/playtest-bugs.md, "Driv3r's audio").
 
 ## Scripts
 

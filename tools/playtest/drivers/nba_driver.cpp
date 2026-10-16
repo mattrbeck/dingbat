@@ -4,7 +4,7 @@
  *
  * Usage: nba_driver <rom.gba> <bios.bin> [--run-bios] [--rtc EPOCH] [--audio PATH]
  *   --audio writes the core's output, s16le stereo at 32768 Hz: the capture
- *   device pulls one frame's worth of samples after every frame.
+ *   device pulls, after every frame, the samples of the cycles the core ran.
  *   --rtc freezes the cartridge clock at that unix epoch, as the other
  *   drivers do (run with TZ=UTC); without it the clock is the host's.
  *   The battery save is <rom minus extension>.sav, as its frontend names it.
@@ -81,20 +81,35 @@ struct CaptureVideo final : nba::VideoDevice {
 
 // Audio is pulled, not pushed: the core hands its device a callback that
 // fills a buffer; calling it after each frame for exactly the samples that
-// frame produced keeps the stream in step with emulated time.
+// frame produced keeps the stream in step with emulated time. "Produced" is
+// the core's own clock (its scheduler's timestamp), not the cycles the driver
+// asked Run for: Run finishes the instruction or DMA it is in, so each
+// 4-cycle step to line 160 runs a little over. Counting the requested cycles
+// pulled ~1.3 samples a frame fewer than the core made (Driv3r: 547.28 a
+// frame, not 548.58). The rest waited in the core's buffer, so the file was
+// the right stream with its last 0.24% missing, and the audio check, which
+// spreads each dump over the run's frames, read this emulator's audio
+// progressively early: 4 frames by f1750, 25 by Driv3r's end, more on longer
+// scripts (docs/playtest-bugs.md, "Driv3r's audio: the second reference's
+// capture ran 0.24% short").
 struct CaptureAudio final : nba::AudioDevice {
   void* userdata = nullptr;
   Callback callback = nullptr;
   FILE* file = nullptr;
   double owed = 0;
+  u64 pulled_to = 0;  // core timestamp the samples written so far reach
   auto GetSampleRate() -> int override { return 32768; }
   auto GetBlockSize() -> int override { return 4096; }
   bool Open(void* ud, Callback cb) override { userdata = ud; callback = cb; return true; }
   void SetPause(bool) override {}
   void Close() override {}
-  void Frame(long cycles) {
+  // a state load moves the core's clock: the stream carries on from there
+  void Rebase(u64 now) { pulled_to = now; }
+  void Frame(u64 now) {
+    u64 cycles = now > pulled_to ? now - pulled_to : 0;
+    pulled_to = now;
     if (!callback || !file) return;
-    owed += 32768.0 * cycles / 16777216.0;
+    owed += 32768.0 * double(cycles) / 16777216.0;
     int n = int(owed);
     owed -= n;
     static s16 buf[4096 * 2];
@@ -234,11 +249,13 @@ int main(int argc, char** argv) {
   // at once, one per start, so frame n is the n-th V-blank start again.
   // Their picture and RAM are the burst's end.
   long owed = 0;
+  auto now = [&]() { return core->GetScheduler().GetTimestampNow(); };
+  audio->Rebase(now());
   auto run_frame = [&]() {
     if (owed > 0) {
       --owed;
       video->Capture();
-      audio->Frame(280896);
+      audio->Frame(now());  // nothing new: the burst's frame pulled these cycles
       return;
     }
     long ran = 0;
@@ -253,11 +270,8 @@ int main(int argc, char** argv) {
     while (core->PeekByteIO(0x04000006) < 160 && ran < 2 * 280896) { core->Run(4); ran += 4; }
     long extra = video->presented - before - expected;
     video->Capture();
-    if (extra > 0) {
-      owed = extra;
-      ran = lines * 1232L;  // this frame's own share of the audio; the owed frames take theirs
-    }
-    audio->Frame(ran);
+    if (extra > 0) owed = extra;
+    audio->Frame(now());
   };
   reply("ready nba save=" + save);
   std::string line;
@@ -378,7 +392,7 @@ int main(int argc, char** argv) {
       bool ok = f && fread(state.get(), sizeof(nba::SaveState), 1, f) == 1 &&
                 fread(video->frame, sizeof video->frame, 1, f) == 1;
       if (f) fclose(f);
-      if (ok) { core->LoadState(*state); owed = 0; }
+      if (ok) { core->LoadState(*state); owed = 0; audio->Rebase(now()); }
       reply(ok ? "ok" : "err state_load failed");
     } else if (cmd == "quit") {
       if (audio->file) fclose(audio->file);

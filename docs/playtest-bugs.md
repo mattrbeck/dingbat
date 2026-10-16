@@ -8942,3 +8942,96 @@ ingredient is mGBA's cheaper gamepak code, class (b) as in §29 and §63. The
 rest is sparkle content and phase history with no hardware truth. Both
 checkpoints are SLIPs and pass; no `@known` is needed. The script's notes
 say so.
+
+
+## §NEXT. Driv3r's audio: the second reference's capture ran 0.24% short, so its windows read the stream progressively early, 2026-10-15
+
+**Symptom.** The first baseline with the second reference playing Driv3r
+(§94) failed every dingbat configuration on audio alone: 81 of 703 windows
+(11.5%) differ from both references, longest 0.5 s, from f1755 (spectrum
+0.63 / 0.71), then f2220, f3000, f4245, f5400 and on to f8490. Every
+checkpoint passes. The four dingbat configurations' dumps are identical.
+
+**What plays there.** The flagged windows are the Undercover intro video
+(f1636-f8381): one continuous stream, timer 0 driving DMA1/DMA2 into both
+FIFOs (SOUNDCNT_H 0x330E, both FIFOs to both sides, timer 0), speech and
+music under full-motion pictures. A scratch replay of the frozen `[new]`
+timeline in dingbat, mGBA and the second reference, raw dumps kept (the
+same features and verdict as the baseline, to the window), with SOUNDCNT,
+SOUNDBIAS, the timers and DMA1/2 peeked every frame and the sound-register
+stores logged (`apulog`). Peeking left every dump byte-identical.
+
+**It is one signal, shifted.** Cross-correlating one-second spans with
+dingbat:
+
+| span | mGBA | second reference (as judged) |
+|---|---|---|
+| f1500 (menu music) | 1096 samples later, r 0.79 | 2273 later |
+| f1620-f8340 (video) | 3281 later throughout, r 0.82-0.93 | 2472 later at f1620, growing ~0.8 a frame |
+| f8400-f10440 | 1118 later, r 0.92-0.99 | wraps past 8000 |
+
+mGBA's shift is a constant number of whole frames: the game starts its
+sound late there. The register timeline gives the stream starts (SOUNDCNT_X
+0x80 with timer 0 on): dingbat at f682, f1355, f1636, f8450 and f10433,
+the second reference on the same frames (f681 for the first); mGBA at f683,
+f1357, f1642, f8452 and f10435. Two stops (f1243, f8381) come on the same
+frame in all three. The pictures say the same: frame by frame, mGBA is two frames behind
+at main_menu and six behind at the head of video_nice. dingbat and the
+second reference are identical there, frame for frame (the checkpoints
+are IDENTICAL because the comparison takes the best match in its window).
+3281 samples is 5.98 frames at 548.58 a frame.
+
+**The second reference's shift was the harness's.** Its dump holds 547.28
+samples a frame, not 548.58: 13735 samples (25 frames) fewer than the
+other two. Watching the file grow, the deficit builds evenly, about 1.3
+samples a frame, from the start. Yet its stream starts land at the right
+sample, 548.58 a frame (f1636 at sample 898025, dingbat's at 897721; the
+f10424 stop at 5717849 against 5717853). The file is the right stream with its last
+0.24% missing. The driver asked the core's audio callback for the samples
+of the cycles it requested (`Run(n)`), but the core's clock runs past
+those: each 4-cycle step to line 160 finishes what it is in. The unpulled
+samples waited in the core's buffer to the end. The audio check spreads
+each dump over the run's frames (`len / frames`), so it read the second
+reference's audio 4 frames early by f1750, 13 by f5400, 25 by the end.
+
+**Why that flagged dingbat.** At the video's start, mGBA really plays 6
+frames late and the second reference was read about 4 late. Both
+references then looked alike, and dingbat, on time in the game and in the
+dump, differed from both. Short speech syllables moved the band shape
+across the 0.35 threshold in a quarter of the windows. As the misread grew
+past mGBA's six frames, the references parted (258 windows), and from f8100
+the second reference stood alone (187 windows, DIFFERENT).
+
+**The fix (harness only).** The second reference's driver now pulls the
+samples of the cycles its core actually ran (the scheduler's timestamp in
+the public header), from the stream's start, rebased on a state load. A swallowed
+V-blank's frames (§82) pull nothing more. Its new dump is the old one
+byte-identical plus the missing tail (5785640 samples, dingbat 5785331).
+With it, Driv3r:
+
+| | before | after |
+|---|---|---|
+| dingbat~second reference | 367 / 703 windows differ | 0 / 703 |
+| dingbat~mGBA | 167 | 167 |
+| mGBA~second reference | 258 | 168 |
+| dingbat (all four configurations) | DIFFERENT, 81 flagged | SAME, 0: PASS |
+| mGBA alone | MINOR, 38 | DIFFERENT, 168 (its six-frame-late video) |
+| the second reference alone | DIFFERENT, 187 | MINOR, 7 |
+
+Every game was affected. In the same baseline the second reference's dump
+is short in all 182 games, by 0.09% to 0.42% (2 frames on Metal Slug
+Advance, 218 on Mario & Luigi). Every one of its audio windows drifted the
+same way, more on long scripts. That hid differences where the references
+really agree and could invent agreement where they do not. `audio.py`
+now names any dump off 548.58 samples a frame by more than 0.05% in the
+summary and in the verdict notes (`rate_off`; `tests/test_audio.py`).
+`train.py` plays the references live for a candidate that touches their
+driver, so the next baseline carries the corrected dumps.
+
+**Classification.** (b): a reference problem twice over. The second
+reference's was our driver's capture, now fixed. mGBA's is the game
+starting its sound 1-2 frames late after each load and 6 late into the
+video, mGBA alone (dingbat and the second reference are frame-identical
+there). No dingbat bug. The interpolated FIFO output is not involved:
+`--no-fifo-interp` flags 80 windows, the shipped default 81. **No core
+change, no `@known`.**
