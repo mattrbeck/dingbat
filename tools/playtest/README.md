@@ -169,7 +169,7 @@ same way.
      blank cart's screens, as <the other reference> does, where mgba reads
      the save`).
      Columns Crown passed that way with dingbat reading no save at all
-     (docs/playtest-bugs.md §95, §NEXT);
+     (docs/playtest-bugs.md §95, §96);
    - dingbat showing its own save as a blank cart fails where a reference
      reads that save, and, where no reader does, where a reference reads its
      own save on the same timeline: the save does not round-trip;

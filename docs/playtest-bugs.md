@@ -8644,7 +8644,7 @@ All four dingbat configurations agree (same 8 KB file, same hashes).
 that carries the command (or not let single CPU stores start one). That
 is a core change, left for review.
 
-## §NEXT. The [load] matrix had no way to tell "did not read the save": a blank-cart control in each reference, 2026-10-16
+## §96. The [load] matrix had no way to tell "did not read the save": a blank-cart control in each reference, 2026-10-16
 
 **Why Columns Crown passed (§95).** A dingbat configuration reading a
 reference's save passed a checkpoint when it matched *any* reference

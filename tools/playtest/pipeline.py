@@ -369,7 +369,7 @@ def run(args):
             # the same [load] timeline on a blank cart in each reference:
             # what a reader that ignores the save (or cannot read it) shows.
             # A cell that looks like this where a reference shows the save
-            # differently has not read it (docs/playtest-bugs.md §NEXT)
+            # differently has not read it (docs/playtest-bugs.md §96)
             blank_jobs = {}
             for r in (names if written else []):
                 if r.startswith(SUBJECT_PREFIX):
@@ -584,7 +584,7 @@ def cross_load_verdict(report, s, refs, problems):
     # the other reference showing an error: Classic NES Series' 8 KB mgba
     # file, "GAME PAK ERROR" in the second reference). Columns Crown passed
     # with dingbat losing every save because the second reference lost
-    # mgba's save too, and dingbat agreed with it (docs/playtest-bugs.md §NEXT)
+    # mgba's save too, and dingbat agreed with it (docs/playtest-bugs.md §96)
     for w in refs:
         key = f'{w}-in-{s}'
         if key not in cells:

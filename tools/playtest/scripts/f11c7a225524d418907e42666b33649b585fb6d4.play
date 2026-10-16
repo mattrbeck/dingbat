@@ -19,7 +19,7 @@
 # reference writes the right bytes (512 of them since it is told 4 Kbit)
 # but still boots every save as a blank cart, so dingbat matched it and
 # the run passed on saves until the blank-cart control (playtest-bugs
-# §NEXT): `mgba save in dingbat: shows a blank cart's screens`. Downstream,
+# §96): `mgba save in dingbat: shows a blank cart's screens`. Downstream,
 # dingbat's first boot is shorter and its intro runs 46 frames ahead
 # of mgba and 39 of the second reference: name_entry and mode_select SLIP
 # (not diagnostic) and the audio fails (17.6%). All dingbat configurations
