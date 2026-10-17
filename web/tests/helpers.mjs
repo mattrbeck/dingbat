@@ -684,6 +684,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     get gbMonoPanel() { return gbMonoPanel; },
     set gbMonoPanel(v) { gbMonoPanel = v; },
     get runaheadFrames() { return runaheadFrames; },
+    setGbPaletteMode, setRunahead,
   })`, context);
 
   await api.openDB();

@@ -4930,6 +4930,24 @@ body.debug-2p .home-tile-link {
   }
 }
 
+/* The touch rows style on-screen pads, which only (pointer: coarse) draws.
+   Whichever input section a device shows opens the pane, without a rule. */
+@media not all and (pointer: coarse) {
+  #touch-section {
+    display: none;
+  }
+
+  #kb-section > .modal-subhead:first-child {
+    border-top: none;
+    padding-top: 0;
+  }
+}
+
+#touch-section > .modal-subhead:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
 /* --- Settings surface -----------------------------------------------------
    One markup tree, two layouts. The frame is a fixed size and exactly one
    element scrolls (.settings-scroll); nothing derives from the active
@@ -5117,7 +5135,10 @@ body.debug-2p .home-tile-link {
 
 /* --- Settings rows -------------------------------------------------------
    Explicit grid areas, not auto-placement: some rows wrap label +
-   description in a <div>, some list them flat, and both must land alike. */
+   description in a <div>, some list them flat, and both must land alike.
+   The second track is 1fr so a control taller than the label line (a chip
+   row) grows the space under the description, not the gap above it: the
+   text always stacks tight, and the control centres on the pair. */
 .settings-pane .modal-toggle-row,
 .settings-pane .settings-reset-row,
 /* Out-specifies the .row-flow float treatment: here the column is wide
@@ -5126,7 +5147,10 @@ body.debug-2p .home-tile-link {
 .settings-pane .settings-reset-row.row-flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
+  grid-template-rows: auto 1fr;
+  /* .modal-toggle-row's gap: 16px would otherwise land between label and
+     description. */
+  row-gap: 0;
   column-gap: 28px;
   align-items: start;
   margin: 0 0 14px;
@@ -5179,9 +5203,9 @@ body.debug-2p .home-tile-link {
 .settings-pane .settings-reset-row > .row-flow-ctl {
   grid-area: 1 / 2 / span 2 / span 1;
   justify-self: end;
-  align-self: start;
+  align-self: center;
   float: none;
-  margin: 2px 0 0;
+  margin: 0;
 }
 
 /* Save webhook: a URL needs the row's full width, so the field takes a
@@ -5712,6 +5736,28 @@ body.debug-2p .home-tile-link {
     float: right;
     margin: 2px 0 0 14px;
   }
+
+  /* A chip row is too wide to float beside the text at this width (the
+     description would run down a narrow column), so it takes its own line
+     under the label and description. Selects and buttons still float. */
+  .settings-pane .modal-toggle-row.row-flow:not(.hidden):has(> .chip-row) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settings-pane .modal-toggle-row.row-flow:has(> .chip-row) > .modal-toggle-sub {
+    display: block;
+    order: 1;
+  }
+
+  .settings-pane .modal-toggle-row.row-flow > .chip-row.row-flow-ctl {
+    order: 2;
+    align-self: flex-start;
+    float: none;
+    flex-wrap: wrap;
+    margin: 10px 0 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -6097,6 +6143,18 @@ body.debug-2p .home-tile-link {
   color: var(--text);
   border-color: rgba(var(--accent-rgb), 0.55);
   background: rgba(var(--accent-rgb), 0.07);
+}
+
+/* The Game Boy palette chips while Super Game Boy colour is on. */
+.choice-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: none;
+}
+
+/* Run-ahead's chips are single digits. */
+#runahead-picker .choice-chip {
+  min-width: 44px;
 }
 
 /* --- Settings rows whose control sits IN the text, not beside it ----------

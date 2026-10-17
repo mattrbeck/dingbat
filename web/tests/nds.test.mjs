@@ -859,7 +859,7 @@ test("DS Beta off: a .nds or .dsv is refused as any unknown file, and nothing of
   assert.equal(app.api.currentRomName, null);
   eq(app.runIn("ROM_EXTS"), [".gba", ".gb", ".gbc", ".cgb", ".sgb"]);
   eq(app.runIn("[...SAVE_IMPORT_EXTS]"), [".sav", ".srm", ".sps", ".xps", ".gsv"]);
-  eq(app.runIn("SETTINGS_SECTIONS"), ["controls", "gb", "gba", "video", "audio", "general"]);
+  eq(app.runIn("SETTINGS_SECTIONS"), ["controls", "video", "audio", "play", "gb", "gba", "general"]);
   app.runIn("renderKbBindings()");
   assert.equal(app.runIn("kbBindingsDiv.children.length"), 10, "no X/Y key rows");
 });
@@ -877,7 +877,7 @@ test("DS Beta off: DS games leave the library; on, they come back", async () => 
   eq(app.runIn("libNames"), ["A.nds", "B.gba", "C.gb"]);
   eq(app.lsMap.get("ds-beta"), "1", "remembered");
   assert.equal(app.document.body.classList.contains("ds-beta"), true);
-  eq(app.runIn("SETTINGS_SECTIONS"), ["controls", "gb", "gba", "ds", "video", "audio", "general"]);
+  eq(app.runIn("SETTINGS_SECTIONS"), ["controls", "video", "audio", "play", "gb", "gba", "ds", "general"]);
   app.runIn("setDsBeta(false)");
   await settle();
   eq(app.runIn("libNames"), ["B.gba", "C.gb"]);

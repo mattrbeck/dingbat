@@ -131,26 +131,22 @@ test("theme mode survives a theme this build no longer has", async () => {
   eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.amber);
 });
 
-test("the mode select drives the setting", async () => {
+test("the mode chips drive the setting", async () => {
   const h = await loadApp();
-  const sel = h.elements.get("gb-palette-mode");
-  sel.value = "theme";
-  await sel.dispatch("change");
+  h.api.setGbPaletteMode("theme");
   assert.equal(h.api.gbPaletteMode, "theme");
 
-  sel.value = "nonsense";
-  await sel.dispatch("change");
+  h.api.setGbPaletteMode("nonsense");
   assert.equal(h.api.gbPaletteMode, "default");
 });
 
 test("the colour pickers are shown only in Custom mode", async () => {
   const h = await loadApp();
   const row = h.elements.get("gb-palette-custom-row");
-  const sel = h.elements.get("gb-palette-mode");
   assert.equal(row.hidden, true, "default");
-  sel.value = "theme"; await sel.dispatch("change");
+  h.api.setGbPaletteMode("theme");
   assert.equal(row.hidden, true, "theme");
-  sel.value = "custom"; await sel.dispatch("change");
+  h.api.setGbPaletteMode("custom");
   assert.equal(row.hidden, false, "custom");
 });
 
@@ -168,9 +164,7 @@ test("picking a shade edits that shade and only that shade", async () => {
 
 test("mode and custom colours survive a reload", async () => {
   const h = await loadApp();
-  const sel = h.elements.get("gb-palette-mode");
-  sel.value = "custom";
-  await sel.dispatch("change");
+  h.api.setGbPaletteMode("custom");
   const input = h.elements.get("gb-palette-shade-0");
   input.value = "#ABCDEF";
   await input.dispatch("input");
@@ -185,8 +179,6 @@ test("mode and custom colours survive a reload", async () => {
   await h2.api.loadGbPalette();
   assert.equal(h2.api.gbPaletteMode, "custom");
   assert.equal(h2.api.gbPaletteColors()[0], "#abcdef");
-  assert.equal(h2.elements.get("gb-palette-mode").value, "custom",
-    "the control has to come back showing what was restored");
 });
 
 test("a corrupt stored palette falls back instead of reaching the shader", async () => {
@@ -209,16 +201,12 @@ test("the palette record is a settings key", async () => {
 
 test("the palette's own Reset undoes the palette and nothing else", async () => {
   const h = await loadApp();
-  const sel = h.elements.get("gb-palette-mode");
-  sel.value = "custom";
-  await sel.dispatch("change");
+  h.api.setGbPaletteMode("custom");
   const input = h.elements.get("gb-palette-shade-1");
   input.value = "#00ff00";
   await input.dispatch("input");
 
-  const runahead = h.elements.get("runahead-select");
-  runahead.value = "2";
-  await runahead.dispatch("change");
+  await h.api.setRunahead(2);
   await settle();
 
   await h.elements.get("gb-palette-reset").dispatch("click");

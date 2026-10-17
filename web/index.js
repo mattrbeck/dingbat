@@ -920,7 +920,7 @@ let dsBetaOn = (() => {
   try { return localStorage.getItem(DS_BETA_KEY) === "1"; } catch { return false; }
 })();
 
-const SETTINGS_SECTIONS = ["controls", "gb", "gba", "ds", "video", "audio", "general"];  // "ds": DS Beta (applyDsBeta)
+const SETTINGS_SECTIONS = ["controls", "video", "audio", "play", "gb", "gba", "ds", "general"];  // "ds": DS Beta (applyDsBeta)
 const SETTINGS_LAST_KEY = "settings-section";
 
 const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
@@ -1217,7 +1217,7 @@ const openSettingsModal = () => {
   // The Drive controls live under General now; nothing else paints them.
   renderGdriveSection();
   kbSelection = -1;
-  kbPreset.value = detectPreset(activeBindings);
+  showKbPreset(detectPreset(activeBindings));
   renderKbBindings();
   // Fresh open starts with Advanced folded (guarded for the pre-parse window).
   if (typeof collapseAdvanced === "function") collapseAdvanced();
@@ -11811,7 +11811,10 @@ document.addEventListener("keydown", (e) => gameKeyHandler(e, true), true);
 document.addEventListener("keyup", (e) => gameKeyHandler(e, false), true);
 
 const kbBindingsDiv = document.getElementById("kb-bindings");
-const kbPreset = /** @type {HTMLSelectElement} */ (document.getElementById("kb-preset"));
+// Preset chips: "default" | "homerow" | "custom" (anything rebound).
+const kbPresetChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#kb-preset-picker .choice-chip")));
+const showKbPreset = (v) => syncChipGroup(kbPresetChips, v);
 
 var kbSelection = -1; // which input is selected for rebinding (-1 = none)
 
@@ -11854,7 +11857,7 @@ const applyKeybindings = (bindings) => {
 const commitBindings = (bindings) => {
   applyKeybindings(bindings);
   if (db) dbPut("keybindings", activeBindings);
-  kbPreset.value = detectPreset(activeBindings);
+  showKbPreset(detectPreset(activeBindings));
   renderKbBindings();
 };
 
@@ -12045,18 +12048,21 @@ const loadLibraryOpenFromStorage = async () => {
 // 0 = off: plain loop_tick, zero cost. N > 0 swaps in runahead_tick(N)
 // (docs/run-ahead.md). Not during fast-forward/2x, never in the link modes.
 let runaheadFrames = 0;
-const runaheadSelect = /** @type {HTMLSelectElement} */ (
-  document.getElementById("runahead-select"));
+const runaheadChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#runahead-picker .choice-chip")));
 
 const applyRunahead = (n) => {
   runaheadFrames = [0, 1, 2, 3].includes(n) ? n : 0;
-  runaheadSelect.value = String(runaheadFrames);
+  syncChipGroup(runaheadChips, String(runaheadFrames));
 };
 
-runaheadSelect.addEventListener("change", async () => {
-  applyRunahead(Number(runaheadSelect.value));
+const setRunahead = async (n) => {
+  applyRunahead(n);
   await dbPut("runahead", runaheadFrames);
-});
+};
+
+runaheadChips.forEach((chip) =>
+  chip.addEventListener("click", () => setRunahead(Number(chip.dataset.value))));
 
 const loadRunaheadFromStorage = async () => {
   const v = await dbGet("runahead");
@@ -12095,7 +12101,8 @@ const GB_THEME_PALETTES = {
 var gbPaletteMode = "default";              // "default" | "theme" | "custom"
 var gbPaletteCustom = GB_HW_SHADES.slice(); // the four user-picked colours
 
-const gbPaletteSelect = /** @type {HTMLSelectElement} */ (document.getElementById("gb-palette-mode"));
+const gbPaletteChips = Array.from(/** @type {NodeListOf<HTMLButtonElement>} */ (
+  document.querySelectorAll("#gb-palette-picker .choice-chip")));
 const gbPaletteCustomRow = document.getElementById("gb-palette-custom-row");
 const gbPalettePreview = document.getElementById("gb-palette-preview");
 const gbPaletteResetBtn = document.getElementById("gb-palette-reset");
@@ -12121,11 +12128,11 @@ const gbPaletteColors = () => {
 const gbPaletteSgbNote = document.getElementById("gb-palette-sgb-note");
 
 const syncGbPaletteUI = () => {
-  if (gbPaletteSelect) gbPaletteSelect.value = gbPaletteMode;
+  syncChipGroup(gbPaletteChips, gbPaletteMode);
   if (gbPaletteCustomRow) gbPaletteCustomRow.hidden = gbPaletteMode !== "custom";
   // Under SGB colour the shader has nothing to substitute: disabled with a reason.
   const sgb = sgbActive();
-  if (gbPaletteSelect) gbPaletteSelect.disabled = sgb;
+  for (const chip of gbPaletteChips) chip.disabled = sgb;
   if (gbPaletteSgbNote) gbPaletteSgbNote.hidden = !sgb;
   for (const r of document.querySelectorAll(".gb-palette-row"))
     r.classList.toggle("row-disabled", sgb);
@@ -12179,14 +12186,14 @@ const resetGbPalette = () => {
   saveGbPalette();
 };
 
-if (gbPaletteSelect) {
-  gbPaletteSelect.addEventListener("change", () => {
-    const v = gbPaletteSelect.value;
-    gbPaletteMode = (v === "theme" || v === "custom") ? v : "default";
-    applyGbPalette();
-    saveGbPalette();
-  });
-}
+const setGbPaletteMode = (v) => {
+  gbPaletteMode = (v === "theme" || v === "custom") ? v : "default";
+  applyGbPalette();
+  saveGbPalette();
+};
+
+gbPaletteChips.forEach((chip) =>
+  chip.addEventListener("click", () => setGbPaletteMode(chip.dataset.value)));
 
 gbPaletteInputs.forEach((input, i) => {
   if (!input) return;
@@ -12307,7 +12314,7 @@ const resetAllSettings = async () => {
 
   kbSelection = -1;
   applyKeybindings(PRESET_DEFAULT);
-  kbPreset.value = "default";
+  showKbPreset("default");
   renderKbBindings();
 
   applyLargeControls(false);
@@ -12356,12 +12363,14 @@ if (resetSettingsSlot) {
   resetSettingsSlot.appendChild(resetBtn);
 }
 
-kbPreset.addEventListener("change", () => {
-  kbSelection = -1;
-  if (kbPreset.value === "default") commitBindings(PRESET_DEFAULT);
-  else if (kbPreset.value === "homerow") commitBindings(PRESET_HOMEROW);
-  else renderKbBindings();
-});
+kbPresetChips.forEach((chip) =>
+  chip.addEventListener("click", () => {
+    kbSelection = -1;
+    if (chip.dataset.value === "default") commitBindings(PRESET_DEFAULT);
+    else if (chip.dataset.value === "homerow") commitBindings(PRESET_HOMEROW);
+    else { showKbPreset("custom"); renderKbBindings(); }
+  })
+);
 
 var currentRomName = null;
 var currentOriginalName = null;
@@ -17699,8 +17708,13 @@ const ndsSwapBtn = document.getElementById("nds-swap-btn");
 const ndsPanel = document.getElementById("nds-panel");
 const ndsLidOpenBtn = document.getElementById("nds-lid-open");
 
+// Settings shows the five arrangements as a select; the Screens panel as chips.
+const ndsLayoutSelect = /** @type {HTMLSelectElement | null} */ (
+  document.getElementById("nds-layout-select"));
+
 const ndsSyncDisplayUI = () => {
   syncChipGroup(ndsChips("layout"), ndsLayoutPref);
+  if (ndsLayoutSelect) ndsLayoutSelect.value = ndsLayoutPref;
   syncChipGroup(ndsChips("gap"), ndsDisplay.gap);
   syncChipGroup(ndsChips("rot"), String(ndsDisplay.rot));
   syncChipGroup(ndsChips("hd"), String(ndsDisplay.hd));
@@ -17749,6 +17763,7 @@ const ndsSwapScreens = () => setNdsDisplay({ swap: !ndsDisplay.swap });
 for (const chip of ndsChips("layout")) {
   chip.addEventListener("click", () => setNdsLayout(chip.dataset.value));
 }
+ndsLayoutSelect?.addEventListener("change", () => setNdsLayout(ndsLayoutSelect.value));
 for (const chip of ndsChips("gap")) {
   chip.addEventListener("click", () => setNdsDisplay({ gap: chip.dataset.value }));
 }
