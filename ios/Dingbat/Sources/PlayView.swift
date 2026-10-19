@@ -67,6 +67,7 @@ struct GameStage: View {
     @Environment(\.verticalSizeClass) var vSize
     @Environment(\.stageContext) var ctx
     @ObservedObject private var nds = NdsState.shared
+    @ObservedObject private var link = NetLink.shared
 
     @State private var zoom: CGFloat = 1
     @State private var zoomBase: CGFloat = 1
@@ -98,6 +99,8 @@ struct GameStage: View {
                     // view carries no effect at all.
                     .overlay { if session.isNDS && nds.lidClosed { Color.black.opacity(0.65).allowsHitTesting(false) } }
                     .overlay { if session.isNDS { NdsStylus() } }
+                    // The friend is away: the frozen picture dims under the card.
+                    .overlay { if link.peerAwayShown != nil { Color.black.opacity(0.55).allowsHitTesting(false) } }
                     .flightAnchor("screen")
                     .flightHidden(.screen)
                     .modifier(RumbleShake(active: session.rumbling))
@@ -114,6 +117,15 @@ struct GameStage: View {
                         .allowsHitTesting(false)
                 }
                 if session.isNDS { NdsStageLayers() }
+                if let since = link.peerAwayShown {
+                    LinkAwayCard(since: since)
+                } else if session.linkWaiting > 0 {
+                    LinkWaitingBadge(seconds: session.linkWaiting)
+                        .padding(.top, 10)
+                        .padding(.trailing, 12)
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .topTrailing)
+                        .allowsHitTesting(false)
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .onAppear { if let lay { pushNds(lay) } }

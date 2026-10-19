@@ -14,6 +14,7 @@ import SwiftUI
 ///   2 state-begin [len u32]            3 state-chunk [bytes]
 ///   4 rom-begin [len u32]              5 rom-chunk [bytes]
 ///   6 ready   7 speed [on u8]   8 pause [on u8]   9 have-rom   10 need-rom
+///   11 away [on u8] (my app or tab is in the background: my game is paused)
 /// Core 0 is the host's game, core 1 the guest's. When the ROMs differ (a
 /// cross-game trade) each side also needs the other's: a side whose hello
 /// names its whole ROM answers the friend's with have-rom (it is in the
@@ -41,6 +42,12 @@ final class NetLink: ObservableObject {
     /// The friend's code field, and whether it is locked in (confirmed).
     @Published var friendCode = ""
     @Published private(set) var friendLocked = false
+    /// The friend went to the background this long ago (their away
+    /// message): the play screen's card, a second in so a quick switch
+    /// doesn't flash it. nil while they are here.
+    @Published private(set) var peerAwayShown: Date?
+    /// The friend said they're away (from the message, before the card).
+    var peerIsAway: Bool { peerAwayAt != nil }
 
     /// The session owns the core (from rollback_init, before it starts).
     var holdsCore: Bool { session?.rb?.inited == true }
@@ -130,9 +137,11 @@ final class NetLink: ObservableObject {
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             self?.hiddenAt = Date()
+            self?.wentAway()
         }
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
                                                object: nil, queue: .main) { [weak self] _ in
+            self?.backFromAway()
             self?.cameBack()
         }
     }
@@ -145,7 +154,10 @@ final class NetLink: ObservableObject {
     // web RB_* kinds
     private static let hello: UInt8 = 0, input: UInt8 = 1, stateBegin: UInt8 = 2, stateChunk: UInt8 = 3
     private static let romBegin: UInt8 = 4, romChunk: UInt8 = 5, ready: UInt8 = 6, speed: UInt8 = 7, pause: UInt8 = 8
-    private static let haveRom: UInt8 = 9, needRom: UInt8 = 10
+    private static let haveRom: UInt8 = 9, needRom: UInt8 = 10, away: UInt8 = 11
+    /// web RB_AWAY_CARD_MS / RB_AWAY_TOAST_MS
+    static let awayCardDelay: TimeInterval = 1
+    static let awayToastAfter: TimeInterval = 5
     private static let helloLen = 21  // with the whole-ROM identity
     private static let chunk = 16384
     private static let highWater = 4 * 1024 * 1024
@@ -758,6 +770,9 @@ final class NetLink: ObservableObject {
         case Self.needRom:
             sendOurRom(s)
             return
+        case Self.away:
+            if data.count >= 2 { peerAway(data[data.startIndex + 1] == 1) }
+            return
         case Self.hello:
             guard data.count >= 9 else { return }
             rb.remoteRomHash = Self.read32(data, 5)
@@ -921,6 +936,81 @@ final class NetLink: ObservableObject {
         send([Self.pause, on ? 1 : 0], s)
     }
 
+    // MARK: away (web "Away" in netplay.js)
+
+    private var peerAwayAt: Date?
+    private var awayCardWork: DispatchWorkItem?
+    private var wentAwayAt: Date?
+    /// A session end this player missed in the background, told on return.
+    private var goneWhileAway: String?
+    private var awayTask: UIBackgroundTaskIdentifier = .invalid
+
+    /// To the background: the display link stops, so this game pauses and
+    /// the friend's waits at the prediction limit. Say so; a background
+    /// task gives the message time to leave (and the link a little time to
+    /// live) before iOS suspends the app.
+    private func wentAway() {
+        guard let s = session, s.started else { return }
+        wentAwayAt = Date()
+        if awayTask == .invalid {
+            awayTask = UIApplication.shared.beginBackgroundTask(withName: "link away") { [weak self] in
+                self?.endAwayTask()
+            }
+        }
+        send([Self.away, 1], s)
+    }
+
+    private func endAwayTask() {
+        guard awayTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(awayTask)
+        awayTask = .invalid
+    }
+
+    private func backFromAway() {
+        endAwayTask()
+        defer { wentAwayAt = nil; goneWhileAway = nil }
+        if let msg = goneWhileAway {
+            AppModel.shared.toast(msg, duration: 6)
+            return
+        }
+        guard let at = wentAwayAt, let s = session, s.started else { return }
+        send([Self.away, 0], s)
+        let away = Date().timeIntervalSince(at)
+        if away >= Self.awayToastAfter {
+            AppModel.shared.toast("Your game was paused for \(Self.fmtAway(away)) — your friend waited")
+        }
+    }
+
+    private func peerAway(_ on: Bool) {
+        if on {
+            guard peerAwayAt == nil else { return }
+            let at = Date()
+            peerAwayAt = at
+            NSLog("netlink: friend switched away")
+            let work = DispatchWorkItem { [weak self] in self?.peerAwayShown = at }
+            awayCardWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.awayCardDelay, execute: work)
+            return
+        }
+        guard let at = peerAwayAt else { return }
+        let away = Date().timeIntervalSince(at)
+        NSLog("netlink: friend back after %@", Self.fmtAway(away))
+        clearPeerAway()
+        if away >= Self.awayToastAfter { AppModel.shared.toast("Friend's back — link resumed") }
+    }
+
+    private func clearPeerAway() {
+        awayCardWork?.cancel()
+        awayCardWork = nil
+        peerAwayAt = nil
+        peerAwayShown = nil
+    }
+
+    static func fmtAway(_ t: TimeInterval) -> String {
+        let s = Int(t)
+        return "\(s / 60):" + String(format: "%02d", s % 60)
+    }
+
     // MARK: endings
 
     /// Setup failed: say why on the sheet, which stays up for a retry.
@@ -939,19 +1029,29 @@ final class NetLink: ObservableObject {
     private func peerGone(_ msg: String) {
         guard let s = session else { return }
         let started = s.started
+        NSLog("netlink: %@", msg)
         shutdown()
-        if started { AppModel.shared.toast(msg + " — your game keeps running") }
-        else { setStatus(msg, error: true) }
+        if started {
+            AppModel.shared.toast(msg + " — your game keeps running")
+            // Toasts last seconds; a player in the background gets it on return.
+            if UIApplication.shared.applicationState == .background {
+                goneWhileAway = msg + " while you were away — your game keeps running"
+            }
+        } else {
+            setStatus(msg, error: true)
+        }
     }
 
     /// The player's Disconnect.
     func disconnect() {
+        NSLog("netlink: disconnected by you")
         shutdown()
         AppModel.shared.toast("Disconnected")
     }
 
     /// The link went quiet (GameSession's idle watch).
     func idleDisconnect() {
+        NSLog("netlink: link idle (no serial transfers) — disconnecting")
         shutdown()
         AppModel.shared.toast("Link idle — disconnected")
     }
@@ -964,6 +1064,7 @@ final class NetLink: ObservableObject {
             return
         }
         session = nil
+        clearPeerAway()
         s.timer?.cancel()
         if s.rb?.inited == true {
             if dingbat_rollback_exit_to_single() != 1 { dingbat_rollback_exit() }

@@ -591,10 +591,20 @@ final class GameSession: NSObject, ObservableObject {
     /// The link idle watch (web RB_IDLE_*): only the emulated cable's
     /// activity counts, never game knowledge. Lenient until the cable has
     /// seen real use, tight after; both reset on every transfer.
+    /// Neither window runs while the clock is stalled on the friend's inputs
+    /// (their app or tab is away, or the network is slow): a frozen game
+    /// makes no transfers without the link being done. A dead network ends
+    /// the session through the peer connection instead.
     private var linkUsed = false
     private var linkBusy = false
     private var linkTransfers: Int32 = 0
     private var linkActivity: CFTimeInterval = 0
+    private var linkLastWatch: CFTimeInterval = 0
+    /// When rollback_tick began answering "stalled", or 0.
+    private var linkStallSince: CFTimeInterval = 0
+    /// Whole seconds of a stall nothing explains (no away message), from
+    /// 2 s (web #net-stall "waiting for friend"); 0 hides the badge.
+    @Published private(set) var linkWaiting = 0
 
     /// One tick of linked play: frames while the audio wants them (or the
     /// clock, with no audio engine), each sent to the friend with this
@@ -620,7 +630,11 @@ final class GameSession: NSObject, ObservableObject {
             if let script = Self.linkScript() { bits = script.bits(at: Int(dingbat_rollback_head())) }
             #endif
             let f = dingbat_rollback_tick(Int32(bits))
-            guard f >= 0 else { return false }
+            guard f >= 0 else {
+                if linkStallSince == 0 { linkStallSince = CACurrentMediaTime() }
+                return false
+            }
+            linkStallSince = 0
             NetLink.shared.sendInput(frame: f, bits: bits)
             ran += 1
             return true
@@ -699,16 +713,26 @@ final class GameSession: NSObject, ObservableObject {
     #endif
 
     private func watchLinkIdle(_ now: CFTimeInterval) {
+        // No ticks while the app was in the background (the display link
+        // stops): restart the clock rather than count the time away as idle.
+        if now - linkLastWatch > 1 { linkActivity = now }
+        linkLastWatch = now
         let t = dingbat_rollback_transfers()
         if t != linkTransfers {
             linkTransfers = t
             linkActivity = now
             if t > 0 { linkUsed = true }
             if t >= 300 { linkBusy = true }
+        } else if linkStallSince > 0 {
+            linkActivity = now
         } else if linkUsed && now - linkActivity > (linkBusy ? 20 : 90) {
             linkUsed = false
             NetLink.shared.idleDisconnect()
+            return
         }
+        let waited = linkStallSince > 0 && !NetLink.shared.peerIsAway ? Int(now - linkStallSince) : 0
+        let shown = waited >= 2 ? waited : 0
+        if shown != linkWaiting { linkWaiting = shown }
     }
 
     /// The session is about to take the core: nothing of the solo game's
@@ -725,6 +749,9 @@ final class GameSession: NSObject, ObservableObject {
         linkBusy = false
         linkTransfers = 0
         linkActivity = CACurrentMediaTime()
+        linkLastWatch = linkActivity
+        linkStallSince = 0
+        linkWaiting = 0
         lastTick = 0
         frameDebt = 0
         // Not relayed: the friend unfreezes on its own start.
@@ -738,6 +765,7 @@ final class GameSession: NSObject, ObservableObject {
 
     /// The session handed this player's core back as the solo game.
     func leaveLinked() {
+        linkWaiting = 0
         if speed != .normal { setSpeed(.normal) }
         // A save made in the session (a trade's) goes to Drive.
         checkSaveChanged()
