@@ -635,6 +635,9 @@ final class GameSession: NSObject, ObservableObject {
                 return false
             }
             linkStallSince = 0
+            #if DEBUG
+            if let n = Self.linkBusyFrames, f < n { linkFakeTransfers += 9 }
+            #endif
             NetLink.shared.sendInput(frame: f, bits: bits)
             ran += 1
             return true
@@ -657,6 +660,16 @@ final class GameSession: NSObject, ObservableObject {
         return Int32(a[i + 1])
     }()
     static let linkPress = ProcessInfo.processInfo.arguments.contains("-link-press")
+    /// `-link-busy-cable N`: the idle watch counts nine serial transfers per
+    /// linked frame below frame N, then none, as a GBA link game clocks its
+    /// cable and then stops (ios/e2e/link-away.mjs: the test ROMs settle
+    /// their link roles unlinked, at boot, and stay quiet).
+    static let linkBusyFrames: Int32? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-link-busy-cable"), i + 1 < a.count else { return nil }
+        return Int32(a[i + 1])
+    }()
+    private var linkFakeTransfers: Int32 = 0
 
     /// `-link-script NAME`: this player's buttons by linked frame, from
     /// NAME.p<player>.txt in Documents: "<frame> <mask>" lines, each held
@@ -717,7 +730,11 @@ final class GameSession: NSObject, ObservableObject {
         // stops): restart the clock rather than count the time away as idle.
         if now - linkLastWatch > 1 { linkActivity = now }
         linkLastWatch = now
+        #if DEBUG
+        let t = Self.linkBusyFrames != nil ? linkFakeTransfers : dingbat_rollback_transfers()
+        #else
         let t = dingbat_rollback_transfers()
+        #endif
         if t != linkTransfers {
             linkTransfers = t
             linkActivity = now
