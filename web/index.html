@@ -606,7 +606,24 @@
 
       <!-- Online link: shown while the emulated clock waits on the peer -->
       <div id="net-stall" hidden aria-live="polite">
-        <span aria-hidden="true">&#8987;</span> waiting for peer
+        <span aria-hidden="true">&#8987;</span> <span id="net-stall-text">waiting for peer</span>
+      </div>
+
+      <!-- Online link: the friend's tab is hidden, so their game is paused
+           and ours waits at the prediction limit; says so over the frozen
+           screen instead of a silent freeze -->
+      <div id="net-away" hidden>
+        <div class="net-away-card" role="status" aria-live="polite">
+          <div class="net-away-head">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M14 13l3 3m0-3-3 3"/></svg>
+            <span>Friend switched away</span>
+          </div>
+          <p>Their game is paused until they come back. The link stays open — nothing is lost.</p>
+          <div class="net-away-foot">
+            <span id="net-away-time">away 0:00</span>
+            <button type="button" class="button" id="net-away-disconnect">Disconnect…</button>
+          </div>
+        </div>
       </div>
 
       <!-- A stack: one .toast-item per message, so a later toast never

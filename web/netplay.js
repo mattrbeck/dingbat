@@ -1103,6 +1103,7 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 //   8 pause        : [8][on u8]
 //   9 have-rom     : [9]                           (your ROM is in my library: don't send it)
 //  10 need-rom     : [10]                          (send me your ROM)
+//  11 away         : [11][on u8]                    (my tab is hidden: my game is paused)
 // Both peers run both cores (core 0 = host's game, core 1 = guest's): each
 // side's save-state is exchanged and loaded into the matching core, then only
 // inputs cross the network. When the hello hashes differ (cross-game trade)
@@ -1115,7 +1116,7 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 
 const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
 const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
-const RB_PAUSE = 8, RB_HAVE_ROM = 9, RB_NEED_ROM = 10;
+const RB_PAUSE = 8, RB_HAVE_ROM = 9, RB_NEED_ROM = 10, RB_AWAY = 11;
 const RB_HELLO_LEN = 21; // with the whole-ROM identity
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
@@ -1238,6 +1239,12 @@ const rbSendPause = (on) => {
   v.setUint8(0, RB_PAUSE);
   v.setUint8(1, on ? 1 : 0);
   rbSend(buf);
+};
+
+// Our tab hid or came back. Not a pause: nothing here stops the friend's
+// clock (ours stopping does that); it only lets them say why.
+const rbSendAway = (on) => {
+  rbSend(new Uint8Array([RB_AWAY, on ? 1 : 0]));
 };
 
 // Same bytes as a .state file.
@@ -1397,6 +1404,10 @@ const rbMessage = (data) => {
   if (kind === RB_PAUSE) {
     // Mirror without echoing back.
     window.applyRemotePause?.(v.getUint8(1) === 1);
+    return;
+  }
+  if (kind === RB_AWAY) {
+    rbPeerAway(v.getUint8(1) === 1);
     return;
   }
   if (kind === RB_HAVE_ROM) {
@@ -1752,9 +1763,12 @@ const netAfterTick = (st) => {
 const netPeerGone = (msg) => {
   if (!net) return;
   const started = net.started;
+  log("netplay: " + msg);
   netShutdown();
   if (started) {
     showToast(msg + " — your game keeps running");
+    // Toasts last seconds; a player who was away gets it on return.
+    if (document.hidden) rbGoneWhileHidden = msg + " while you were away — your game keeps running";
   } else {
     netSetStatus(msg, true);
   }
@@ -1763,6 +1777,9 @@ const netPeerGone = (msg) => {
 // The local game keeps running unlinked once netMode is false.
 const netShutdown = async (opts) => {
   netStallBadge.hidden = true;
+  netStallText.textContent = "waiting for peer";
+  rbHideAwayCard();
+  rbHiddenSince = 0;
   clearTimeout(manualFallbackTimer);
   const s = net;
   net = null;
@@ -1872,6 +1889,7 @@ const menuDisconnectArm = armedAction(
   },
   () => {
     menuDropdown.hidden = true;
+    log("netplay: disconnected by you");
     netShutdown();
     showToast("Disconnected");
   }
@@ -1889,12 +1907,114 @@ const rbDisconnectArm = armedAction(
     else rbDcSpan.innerHTML = rbDcHTML;
   },
   () => {
+    log("netplay: disconnected by you");
     netShutdown();
     showToast("Disconnected");
   }
 );
 rbDisconnectBtn.addEventListener("click", () => {
   if (net?.started || net?.rb?.inited) rbDisconnectArm.fire();
+});
+
+// ---- Away. A hidden tab gets no rAF, so that side's game pauses and the
+// friend's waits at the prediction limit. The hiding side says so (its
+// visibilitychange runs before the page stops) and the friend shows a card
+// over the dimmed, frozen screen instead of a silent freeze. Without the
+// message (an older build, or a page frozen before the send went out) a
+// long enough stall shows the badge instead.
+const netAwayCard = document.getElementById("net-away");
+const netAwayTime = document.getElementById("net-away-time");
+const netStallText = document.getElementById("net-stall-text");
+const RB_AWAY_CARD_MS = 1000;   // a quick alt-tab doesn't flash the card
+const RB_AWAY_TOAST_MS = 5000;  // away this long earns a "back" toast
+const RB_STALL_BADGE_MS = 2000; // an unexplained stall this long shows the badge
+let rbPeerAwaySince = 0;    // when the friend's tab hid, or 0
+let rbAwayCardTimer = 0;
+let rbAwayTick = 0;
+let rbHiddenSince = 0;      // when our tab hid during a session, or 0
+let rbGoneWhileHidden = ""; // a session end our hidden player didn't see
+
+const fmtAway = (ms) => {
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+};
+
+const awayDisconnectBtn = document.getElementById("net-away-disconnect");
+const awayDisconnectArm = armedAction(
+  awayDisconnectBtn,
+  (armed) => {
+    awayDisconnectBtn.textContent = armed ? "Are you sure?" : "Disconnect…";
+  },
+  () => {
+    log("netplay: disconnected by you (friend away)");
+    netShutdown();
+    showToast("Disconnected");
+  }
+);
+awayDisconnectBtn.addEventListener("click", () => {
+  if (net?.started || net?.rb?.inited) awayDisconnectArm.fire();
+});
+
+const rbHideAwayCard = () => {
+  clearTimeout(rbAwayCardTimer);
+  clearInterval(rbAwayTick);
+  rbAwayCardTimer = rbAwayTick = 0;
+  rbPeerAwaySince = 0;
+  netAwayCard.hidden = true;
+  document.body.classList.remove("peer-away");
+  awayDisconnectArm.disarm();
+};
+
+const rbPeerAway = (on) => {
+  if (on) {
+    if (rbPeerAwaySince) return;
+    rbPeerAwaySince = performance.now();
+    log("netplay: friend switched away");
+    rbAwayCardTimer = setTimeout(() => {
+      const paint = () => {
+        netAwayTime.textContent = "away " + fmtAway(performance.now() - rbPeerAwaySince);
+      };
+      paint();
+      rbAwayTick = setInterval(paint, 1000);
+      netStallBadge.hidden = true;
+      document.body.classList.add("peer-away");
+      netAwayCard.hidden = false;
+    }, RB_AWAY_CARD_MS);
+    return;
+  }
+  if (!rbPeerAwaySince) return;
+  const away = performance.now() - rbPeerAwaySince;
+  log("netplay: friend back after " + fmtAway(away));
+  rbHideAwayCard();
+  if (away >= RB_AWAY_TOAST_MS) showToast("Friend's back — link resumed");
+};
+
+// Each rollback tick: how long the clock has been stalled on the friend's
+// inputs (0 = running). The away card already explains a hidden friend.
+window.rbNoteStall = (ms) => {
+  const show = ms >= RB_STALL_BADGE_MS && !rbPeerAwaySince && !!net?.started;
+  if (show) netStallText.textContent = "waiting for friend · " + fmtAway(ms);
+  netStallBadge.hidden = !show;
+};
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (!net?.started || !net.rb) return; // rollback sessions only
+    rbHiddenSince = performance.now();
+    rbSendAway(true);
+    return;
+  }
+  if (rbGoneWhileHidden) {
+    pushToast(rbGoneWhileHidden, 6000, null);
+  } else if (rbHiddenSince && net?.started) {
+    rbSendAway(false);
+    const away = performance.now() - rbHiddenSince;
+    if (away >= RB_AWAY_TOAST_MS) {
+      showToast("Your game was paused for " + fmtAway(away) + " — your friend waited");
+    }
+  }
+  rbGoneWhileHidden = "";
+  rbHiddenSince = 0;
 });
 
 document.getElementById("net-to-manual").addEventListener("click", () => {

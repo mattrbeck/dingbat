@@ -11692,15 +11692,25 @@ var localButtons = 0;
 var rbWasLinked = false;  // the games have actually communicated over the link
 var rbLastTransfers = 0;  // last-seen SIO transfer count (activity probe)
 var rbLastActivity = 0;   // timestamp of the last transfer-count change
+var rbStallSince = 0;     // when rollback_tick began returning "stalled", or 0
 // Auto-end of an online link keys only off serial-cable activity
 // (_rollback_transfers), never game knowledge. Two windows, both reset on
 // every transfer: QUIET (lenient, before the cable has seen sustained use;
 // a game can hold a link open idle for a long time) and ACTIVE (tight, once
 // meaningful traffic has crossed: a linking game keeps the cable busy).
+// Neither runs while the clock is stalled on the friend's inputs: their tab
+// is hidden (rAF stops) or the network is slow, and a frozen game makes no
+// transfers without the link being done. A dead network ends the session
+// through the peer connection's own state instead.
 var rbLinkWasActive = false; // the cable has seen a sustained burst of traffic
 const RB_IDLE_QUIET_MS  = 90000; // silence tolerated before the link is used
 const RB_IDLE_ACTIVE_MS = 20000; // silence tolerated after real traffic flowed
 const RB_ACTIVE_LINK_TRANSFERS = 300; // SIO transfers that mean "link in real use"
+// A hidden tab gets no rAF, so the tick never sees document.hidden to reset
+// the clock; restart it on return instead of counting the time away as idle.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) rbLastActivity = performance.now();
+});
 const noteLocalButton = (inputId, down) => {
   if (down) localButtons |= 1 << inputId;
   else localButtons &= ~(1 << inputId);
@@ -14431,6 +14441,7 @@ window.enterRollbackMode = () => {
   rbLinkWasActive = false;
   rbLastTransfers = 0;
   rbLastActivity = performance.now();
+  rbStallSince = 0;
   paused = false;
   document.body.classList.remove("paused");
   // openNetConnect froze the game and lit the pause button; clear it.
@@ -18832,7 +18843,12 @@ var Module = {
         let framesRun = 0;
         while (accumulator >= rbStep && framesRun < rbCap) {
           const frame = Module._rollback_tick(localButtons);
-          if (frame < 0) { accumulator = 0; break; } // stalled: wait for peer input
+          if (frame < 0) { // stalled: wait for peer input
+            if (!rbStallSince) rbStallSince = timestamp;
+            accumulator = 0;
+            break;
+          }
+          rbStallSince = 0;
           if (typeof window.rbSendInput === "function") window.rbSendInput(frame, localButtons);
           pushAudio();
           frameCount++;
@@ -18841,9 +18857,12 @@ var Module = {
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         blitRollbackCanvas();
+        if (typeof window.rbNoteStall === "function") {
+          window.rbNoteStall(rbStallSince ? timestamp - rbStallSince : 0);
+        }
         // Auto-end via serial-cable inactivity (the RB_IDLE_* windows). Skip
-        // while the tab is hidden: throttled rAF pauses transfers, which is
-        // not "link done"; reset the clock so the timer restarts on return.
+        // while the tab is hidden or stalled on the friend: neither is "link
+        // done"; reset the clock so the timer restarts once frames flow.
         if (Module._rollback_transfers) {
           const t = Module._rollback_transfers();
           const idleLimit = rbLinkWasActive ? RB_IDLE_ACTIVE_MS : RB_IDLE_QUIET_MS;
@@ -18852,10 +18871,11 @@ var Module = {
             rbLastActivity = timestamp;
             if (t > 0) rbWasLinked = true;
             if (t >= RB_ACTIVE_LINK_TRANSFERS) rbLinkWasActive = true;
-          } else if (document.hidden) {
-            rbLastActivity = timestamp; // don't accrue idle time while throttled
+          } else if (document.hidden || rbStallSince) {
+            rbLastActivity = timestamp; // don't accrue idle time while frozen
           } else if (rbWasLinked && timestamp - rbLastActivity > idleLimit) {
             rbWasLinked = false;
+            log(`netplay: link idle ${Math.round(idleLimit / 1000)} s (no serial transfers) — disconnecting`);
             if (typeof netShutdown === "function") netShutdown();
             showToast("Link idle — disconnected");
           }

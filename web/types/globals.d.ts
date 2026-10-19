@@ -75,6 +75,7 @@ interface Window {
   applyRemoteSpeed2x?: (on: boolean | number) => void;
   rbSendPause?: ((on: boolean | number) => void) | null;
   applyRemotePause?: (on: boolean | number) => void;
+  rbNoteStall?: (stalledMs: number) => void;
   setNetConnectLabel?: (connected: boolean) => void;
   driveNet?: () => void;
   dumpLinkStates?: () => void;

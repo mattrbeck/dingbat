@@ -7950,7 +7950,8 @@ body.rewind-off #report-slider {
 /* Armed (two-step) disconnect: same treatment as the delete lists' confirm
    buttons — first tap turns the control red, second tap disconnects. */
 #rb-disconnect.armed,
-#net-connect.armed {
+#net-connect.armed,
+#net-away-disconnect.armed {
   color: var(--accent-ink);
   background: linear-gradient(180deg, var(--danger-hi), var(--danger));
   border-color: rgba(var(--danger-rgb), 0.6);
@@ -7988,6 +7989,85 @@ body.rewind-off #report-slider {
 
 #net-stall[hidden] {
   display: none;
+}
+
+/* "Friend switched away" card, centred over the dimmed, frozen screen */
+#net-away {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  pointer-events: none;
+}
+
+#net-away[hidden] {
+  display: none;
+}
+
+.net-away-card {
+  width: min(340px, 100%);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 22px;
+  background: var(--net-stall-bg);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+.net-away-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.net-away-head svg {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.net-away-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.net-away-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#net-away-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+#net-away-disconnect {
+  flex-shrink: 0;
+}
+
+body.peer-away.rollback-mode .link-pane canvas {
+  filter: saturate(0.35) brightness(0.45);
 }
 
 /* Anything that would desync (or reset) one side of the pair is hidden
