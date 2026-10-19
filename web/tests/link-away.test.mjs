@@ -104,7 +104,21 @@ test("the hiding side tells its friend, and on a long absence hears it waited", 
   advance(42000);
   await hide(false);
   assert.deepEqual(sent.at(-1), [11, 0]);
+  assert.ok(!app.toasts.some((m) => m.includes("paused for")), "not until the link proves alive");
+  advance(1500);
   assert.ok(app.toasts.some((m) => m.includes("Your game was paused for 0:42")), app.toasts.join(" | "));
+});
+
+test("back from away to a link that died while suspended: no 'your friend waited'", async () => {
+  const { app, advance, hide } = await setup();
+  await hide(true);
+  advance(60000);
+  await hide(false);
+  app.runIn('netPeerGone("Peer connection lost")'); // the woken page finds it dead
+  await flush();
+  advance(1500);
+  assert.ok(!app.toasts.some((m) => m.includes("paused for")), app.toasts.join(" | "));
+  assert.ok(app.toasts.some((m) => m.startsWith("Peer connection lost")));
 });
 
 test("a quick alt-tab sends away/back but toasts nothing", async () => {

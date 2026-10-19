@@ -503,6 +503,14 @@ const startRtc = async (isOfferer) => {
     if (st === "failed") {
       if (net.rtcConnected) netFail("Peer connection lost");
       else rtcGaveUp(session, pc, "ICE failed");
+    } else if (st === "disconnected" && net.started && rbPeerAwaySince) {
+      // A friend who said they're away may be suspended (an iPhone app
+      // past its background time, iPhone Safari): they stop answering, and
+      // "disconnected" recovers if they wake before the browser's "failed"
+      // (about 10 s on), which still ends it above.
+      log("netplay: connection disconnected while the friend is away — waiting");
+    } else if (st === "connected" && net.started && rbPeerAwaySince) {
+      log("netplay: connection back while the friend is away");
     } else if ((st === "disconnected" || st === "closed") && net.started) {
       netPeerGone("Peer connection lost");
     }
@@ -1928,6 +1936,7 @@ const netStallText = document.getElementById("net-stall-text");
 const RB_AWAY_CARD_MS = 1000;   // a quick alt-tab doesn't flash the card
 const RB_AWAY_TOAST_MS = 5000;  // away this long earns a "back" toast
 const RB_STALL_BADGE_MS = 2000; // an unexplained stall this long shows the badge
+const RB_BACK_TOAST_DELAY_MS = 1500; // back from away: the link proves alive first
 let rbPeerAwaySince = 0;    // when the friend's tab hid, or 0
 let rbAwayCardTimer = 0;
 let rbAwayTick = 0;
@@ -2009,8 +2018,13 @@ document.addEventListener("visibilitychange", () => {
   } else if (rbHiddenSince && net?.started) {
     rbSendAway(false);
     const away = performance.now() - rbHiddenSince;
+    // A suspended page learns the link died only once it wakes: say the
+    // friend waited only if the session is still up a moment later.
     if (away >= RB_AWAY_TOAST_MS) {
-      showToast("Your game was paused for " + fmtAway(away) + " — your friend waited");
+      const s = net;
+      setTimeout(() => {
+        if (net === s && net.started) showToast("Your game was paused for " + fmtAway(away) + " — your friend waited");
+      }, RB_BACK_TOAST_DELAY_MS);
     }
   }
   rbGoneWhileHidden = "";

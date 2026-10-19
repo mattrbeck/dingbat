@@ -158,6 +158,7 @@ final class NetLink: ObservableObject {
     /// web RB_AWAY_CARD_MS / RB_AWAY_TOAST_MS
     static let awayCardDelay: TimeInterval = 1
     static let awayToastAfter: TimeInterval = 5
+    static let backToastDelay: TimeInterval = 1.5
     private static let helloLen = 21  // with the whole-ROM identity
     private static let chunk = 16384
     private static let highWater = 4 * 1024 * 1024
@@ -408,6 +409,13 @@ final class NetLink: ObservableObject {
                 if s.rtcConnected { self.fail("Peer connection lost") }
                 else if s.manual { self.manualFailed() }
                 else { self.rtcGaveUp(s, "ICE failed") }
+            } else if st == "disconnected" && s.started && self.peerIsAway {
+                // web: a friend who said they're away may be suspended
+                // (iPhone Safari); "disconnected" recovers if they wake
+                // before "failed", which still ends it above.
+                NSLog("netlink: connection disconnected while the friend is away — waiting")
+            } else if st == "connected" && s.started && self.peerIsAway {
+                NSLog("netlink: connection back while the friend is away")
             } else if (st == "disconnected" || st == "closed") && s.started {
                 self.peerGone("Peer connection lost")
             }
@@ -954,9 +962,11 @@ final class NetLink: ObservableObject {
         wentAwayAt = Date()
         if awayTask == .invalid {
             awayTask = UIApplication.shared.beginBackgroundTask(withName: "link away") { [weak self] in
+                NSLog("netlink: background time ran out; iOS suspends the app (and the link)")
                 self?.endAwayTask()
             }
         }
+        NSLog("netlink: away")
         send([Self.away, 1], s)
     }
 
@@ -976,8 +986,14 @@ final class NetLink: ObservableObject {
         guard let at = wentAwayAt, let s = session, s.started else { return }
         send([Self.away, 0], s)
         let away = Date().timeIntervalSince(at)
+        NSLog("netlink: back after %@", Self.fmtAway(away))
+        // A suspended app learns the link died only once it wakes: say the
+        // friend waited only if the session is still up a moment later.
         if away >= Self.awayToastAfter {
-            AppModel.shared.toast("Your game was paused for \(Self.fmtAway(away)) — your friend waited")
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.backToastDelay) { [weak self] in
+                guard let self, self.session === s, s.started else { return }
+                AppModel.shared.toast("Your game was paused for \(Self.fmtAway(away)) — your friend waited")
+            }
         }
     }
 
