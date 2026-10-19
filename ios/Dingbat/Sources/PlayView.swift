@@ -117,15 +117,6 @@ struct GameStage: View {
                         .allowsHitTesting(false)
                 }
                 if session.isNDS { NdsStageLayers() }
-                if let since = link.peerAwayShown {
-                    LinkAwayCard(since: since)
-                } else if session.linkWaiting > 0 {
-                    LinkWaitingBadge(seconds: session.linkWaiting)
-                        .padding(.top, 10)
-                        .padding(.trailing, 12)
-                        .frame(width: geo.size.width, height: geo.size.height, alignment: .topTrailing)
-                        .allowsHitTesting(false)
-                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .onAppear { if let lay { pushNds(lay) } }
@@ -144,6 +135,19 @@ struct GameStage: View {
                 if g != lastGame { lastGame = g; resetZoom(animated: false) }
             }
             .onChange(of: model.screen) { s in if s == .home { resetZoom(animated: false) } }
+            // Online link: outside the stage's tap gestures, so the card's
+            // Disconnect gets its taps.
+            .overlay {
+                if let since = link.peerAwayShown {
+                    LinkAwayCard(since: since)
+                } else if session.linkWaiting > 0 {
+                    LinkWaitingBadge(seconds: session.linkWaiting)
+                        .padding(.top, 10)
+                        .padding(.trailing, 12)
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .topTrailing)
+                        .allowsHitTesting(false)
+                }
+            }
         }
     }
 
