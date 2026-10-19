@@ -11706,11 +11706,10 @@ var rbLinkWasActive = false; // the cable has seen a sustained burst of traffic
 const RB_IDLE_QUIET_MS  = 90000; // silence tolerated before the link is used
 const RB_IDLE_ACTIVE_MS = 20000; // silence tolerated after real traffic flowed
 const RB_ACTIVE_LINK_TRANSFERS = 300; // SIO transfers that mean "link in real use"
-// A hidden tab gets no rAF, so the tick never sees document.hidden to reset
-// the clock; restart it on return instead of counting the time away as idle.
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) rbLastActivity = performance.now();
-});
+// When the idle check last ran: it runs only in an unpaused, visible tick,
+// so a gap since (a pause, a hidden tab with no rAF) restarts the clock
+// instead of counting as idle time.
+var rbLastIdleCheck = 0;
 const noteLocalButton = (inputId, down) => {
   if (down) localButtons |= 1 << inputId;
   else localButtons &= ~(1 << inputId);
@@ -14442,6 +14441,7 @@ window.enterRollbackMode = () => {
   rbLastTransfers = 0;
   rbLastActivity = performance.now();
   rbStallSince = 0;
+  rbLastIdleCheck = rbLastActivity;
   paused = false;
   document.body.classList.remove("paused");
   // openNetConnect froze the game and lit the pause button; clear it.
@@ -18866,6 +18866,8 @@ var Module = {
         if (Module._rollback_transfers) {
           const t = Module._rollback_transfers();
           const idleLimit = rbLinkWasActive ? RB_IDLE_ACTIVE_MS : RB_IDLE_QUIET_MS;
+          if (timestamp - rbLastIdleCheck > 1000) rbLastActivity = timestamp;
+          rbLastIdleCheck = timestamp;
           if (t !== rbLastTransfers) {
             rbLastTransfers = t;
             rbLastActivity = timestamp;
