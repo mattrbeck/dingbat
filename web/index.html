@@ -613,14 +613,11 @@
            and ours waits at the prediction limit; says so over the frozen
            screen instead of a silent freeze -->
       <div id="net-away" hidden>
-        <div class="net-away-card" role="status" aria-live="polite">
-          <div class="net-away-head">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M14 13l3 3m0-3-3 3"/></svg>
-            <span>Friend switched away</span>
-          </div>
+        <div class="modal net-away-card" role="status" aria-live="polite">
+          <h2>Friend switched away</h2>
           <p>Their game is paused until they come back. The link stays open — nothing is lost.</p>
-          <div class="net-away-foot">
-            <span id="net-away-time">away 0:00</span>
+          <div class="modal-actions net-away-foot">
+            <span id="net-away-time">Away 0:00</span>
             <button type="button" class="button" id="net-away-disconnect">Disconnect…</button>
           </div>
         </div>

@@ -123,9 +123,9 @@ test("the friend's away shows the card over a dimmed screen, with a running cloc
   advance(1000);
   assert.equal(el(app, "net-away").hidden, false);
   assert.ok(app.document.body.classList.contains("peer-away"));
-  assert.equal(el(app, "net-away-time").textContent, "away 0:01");
+  assert.equal(el(app, "net-away-time").textContent, "Away 0:01");
   advance(64000);
-  assert.equal(el(app, "net-away-time").textContent, "away 1:05");
+  assert.equal(el(app, "net-away-time").textContent, "Away 1:05");
   // The card explains the stall: no badge on top of it.
   app.runIn("window.rbNoteStall(65000)");
   assert.equal(el(app, "net-stall").hidden, true);

@@ -134,7 +134,7 @@ test("a friend's background tab shows the away card and the link outlives the id
   await sleep(AWAY_MS);
   assert.ok(await linked(a), "A kept the session past the idle window: " + (await netLog(a)).join(" | "));
   const clock = await a.page.evaluate(() => document.getElementById("net-away-time").textContent);
-  assert.match(clock, /^away 0:2\d$/);
+  assert.match(clock, /^Away 0:2\d$/);
 
   // B comes back.
   await setHidden(b, false);

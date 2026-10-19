@@ -1972,7 +1972,7 @@ const rbPeerAway = (on) => {
     log("netplay: friend switched away");
     rbAwayCardTimer = setTimeout(() => {
       const paint = () => {
-        netAwayTime.textContent = "away " + fmtAway(performance.now() - rbPeerAwaySince);
+        netAwayTime.textContent = "Away " + fmtAway(performance.now() - rbPeerAwaySince);
       };
       paint();
       rbAwayTick = setInterval(paint, 1000);
