@@ -15,7 +15,12 @@
 //   - the browser disconnects while the app is in the background: the app
 //     hears it on return;
 //   - the browser closes its page: the app plays on, no card;
-//   - a stall with no away message: the app's badge.
+//   - a stall with no away message: the app's badge;
+//   - the app suspended (its process frozen from 30 s in, as iOS does once
+//     the background time runs out) and thawed at 42 s: the link recovers;
+//     thawed at 90 s: the browser ends it at its "failed" (~46 s), and the
+//     app says so on return, never "your friend waited".
+// The card's Disconnect, tapped for real, is ios/e2e/link-away-ui.mjs.
 // Each case reads the app's log (netlink: …) and the page's state.
 //
 // The test ROMs settle their link roles at boot, unlinked, and stay quiet,
@@ -108,6 +113,7 @@ const link = async (name, rom, busy = BUSY) => {
     page, ctx, log,
     appLog: () => (existsSync(log) ? readFileSync(log, "utf8") : ""),
     netlink: () => s.appLog().split("\n").filter((l) => l.includes("netlink: ")).map((l) => l.replace(/^.*netlink: /, "")),
+    toastsApp: () => s.appLog().split("\n").filter((l) => l.includes("] toast: ")).map((l) => l.replace(/^.*\] toast: /, "")),
     linked: () => page.evaluate(() => !!net?.started && rollbackMode),
     webLog: () => page.evaluate(() => [...document.querySelectorAll("#log-entries p")]
       .map((e) => e.textContent).filter((t) => t.includes("netplay"))),
@@ -135,6 +141,30 @@ const link = async (name, rom, busy = BUSY) => {
     appBack: () => simctl("launch", UDID, BUNDLE),
     end: async () => { trySimctl("terminate", UDID, BUNDLE); await ctx.close(); },
   };
+  return s;
+};
+
+const suspended = async (name, thaw) => {
+  const s = await link(name, LINKTEST);
+  await until(() => s.page.evaluate(() => rbLinkWasActive), "the cable in real use", 10000);
+  const t0 = Date.now();
+  const at = () => (Date.now() - t0) / 1000;
+  s.appAway();
+  const pid = execFileSync("pgrep", ["-f", "Dingbat.app/Dingbat"], { encoding: "utf8" }).trim().split("\n")[0];
+  let frozen = false;
+  s.endedAt = null;
+  while (at() < thaw) {
+    await sleep(500);
+    if (!frozen && at() >= 30) { execFileSync("kill", ["-STOP", pid]); frozen = true; }
+    if (s.endedAt === null && !(await s.linked())) s.endedAt = at();
+  }
+  execFileSync("kill", ["-CONT", pid]);
+  s.appBack();
+  await sleep(5000);
+  s.shot("back");
+  s.web = await s.webLog();
+  console.log("  app: " + s.netlink().join(" / "));
+  console.log("  app toasts: " + s.toastsApp().join(" / "));
   return s;
 };
 
@@ -210,6 +240,28 @@ const cases = {
     await sleep(800);
     s.shot("after");
     console.log("  app: " + s.netlink().join(" / "));
+    await s.end();
+  },
+  // iOS suspends an app (freezes its process) once its background time runs
+  // out, about 30 s on a device; the simulator doesn't, so the case freezes
+  // the app's process itself, from 30 s in until `thaw`.
+  async "app suspended briefly: the link recovers"() {
+    const s = await suspended("suspend-brief", 42);
+    assert.ok(s.endedAt === null, "the browser kept the session");
+    assert.ok(s.web.some((l) => l.includes("connection disconnected while the friend is away")), s.web.join(" | "));
+    assert.ok(s.web.some((l) => l.includes("connection back while the friend is away")), s.web.join(" | "));
+    assert.ok(await s.linked(), "still linked after the return");
+    assert.ok(!(await s.card()), "card gone");
+    assert.ok(s.toastsApp().some((t) => t.startsWith("Your game was paused for 0:4")), "app: " + s.toastsApp());
+    await s.end();
+  },
+  async "app suspended past the browser's patience"() {
+    const s = await suspended("suspend-long", 90);
+    console.log(`  browser ended it at ${s.endedAt?.toFixed(0)} s`);
+    assert.ok(s.endedAt > 40 && s.endedAt < 55, "after its 'failed', not its 'disconnected'");
+    assert.ok((await s.toasts()).includes("Peer connection lost — your game keeps running"));
+    assert.ok(!s.toastsApp().some((t) => t.includes("your friend waited")), "app: " + s.toastsApp());
+    assert.ok(s.toastsApp().some((t) => t.startsWith("Peer")), "the app says the link ended: " + s.toastsApp());
     await s.end();
   },
   async "stall with no away message"() {

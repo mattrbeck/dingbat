@@ -1,0 +1,33 @@
+# The app plus a UI-test target, for ios/e2e/link-away-ui.mjs (the away
+# card's Disconnect, tapped for real). Not the app's own project: generate it
+# beside that one, from the repo root:
+#   xcodegen generate --spec ios/e2e/uitest/project.yml --project ios --project-root ios
+# Paths are from ios/, as in the app's own spec.
+include:
+  - path: project.yml
+    relativePaths: false
+name: DingbatUITest
+targets:
+  DingbatUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: e2e/uitest/LinkAwayUITests.swift
+    dependencies:
+      - target: Dingbat
+    settings:
+      base:
+        TEST_TARGET_NAME: Dingbat
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattrb.dingbat.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+schemes:
+  DingbatUITest:
+    build:
+      targets:
+        Dingbat: all
+        DingbatUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - DingbatUITests

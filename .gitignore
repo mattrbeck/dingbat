@@ -108,6 +108,7 @@ dist/
 ios/lib/
 ios/deps/
 ios/Dingbat.xcodeproj/
+ios/DingbatUITest.xcodeproj/
 ios/build/
 ios/DerivedData/
 dingbat_dist

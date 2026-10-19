@@ -112,6 +112,9 @@ final class AppModel: ObservableObject {
     /// repeated plain message extends the one showing, and a repeated offer
     /// replaces it so the freshest action runs. At most three.
     func toast(_ text: String, action: (String, () -> Void)? = nil, duration: Double? = nil, game: Bool = false) {
+        #if DEBUG
+        NSLog("toast: %@", text)  // ios/e2e reads what the player was told
+        #endif
         let ms = duration ?? (action == nil ? 2.2 : 8)
         for live in toasts where live.text == text {
             if action == nil && live.action == nil {
