@@ -18,8 +18,9 @@
 //   - a stall with no away message: the app's badge;
 //   - the app suspended (its process frozen from 30 s in, as iOS does once
 //     the background time runs out) and thawed at 42 s: the link recovers;
-//     thawed at 90 s: the browser ends it at its "failed" (~46 s), and the
-//     app says so on return, never "your friend waited".
+//     thawed at 90 s: the connection is dead by then (the browser's
+//     "failed", ~46 s), so both redial on the retry code and resume
+//     (ios/e2e/link-resume.mjs checks the games stay identical).
 // The card's Disconnect, tapped for real, is ios/e2e/link-away-ui.mjs.
 // Each case reads the app's log (netlink: …) and the page's state.
 //
@@ -248,20 +249,21 @@ const cases = {
   async "app suspended briefly: the link recovers"() {
     const s = await suspended("suspend-brief", 42);
     assert.ok(s.endedAt === null, "the browser kept the session");
-    assert.ok(s.web.some((l) => l.includes("connection disconnected while the friend is away")), s.web.join(" | "));
+    assert.ok(s.web.some((l) => l.includes("connection disconnected")), s.web.join(" | "));
     assert.ok(s.web.some((l) => l.includes("connection back while the friend is away")), s.web.join(" | "));
     assert.ok(await s.linked(), "still linked after the return");
     assert.ok(!(await s.card()), "card gone");
-    assert.ok(s.toastsApp().some((t) => t.startsWith("Your game was paused for 0:4")), "app: " + s.toastsApp());
+    assert.ok(s.toastsApp().some((t) => /^Your game was paused for 0:[34][0-9]/.test(t)), "app: " + s.toastsApp());
     await s.end();
   },
-  async "app suspended past the browser's patience"() {
+  async "app suspended past the connection's life: both redial and resume"() {
     const s = await suspended("suspend-long", 90);
-    console.log(`  browser ended it at ${s.endedAt?.toFixed(0)} s`);
-    assert.ok(s.endedAt > 40 && s.endedAt < 55, "after its 'failed', not its 'disconnected'");
-    assert.ok((await s.toasts()).includes("Peer connection lost — your game keeps running"));
-    assert.ok(!s.toastsApp().some((t) => t.includes("your friend waited")), "app: " + s.toastsApp());
-    assert.ok(s.toastsApp().some((t) => t.startsWith("Peer")), "the app says the link ended: " + s.toastsApp());
+    assert.ok(s.endedAt === null, "the browser kept the session");
+    assert.ok(s.web.some((l) => l.includes("redialing on the retry code")), s.web.join(" | "));
+    assert.ok(s.web.some((l) => l.startsWith("[") && l.includes("resumed after")), s.web.join(" | "));
+    assert.ok(s.netlink().some((l) => l.startsWith("resumed after")), "app: " + s.netlink());
+    assert.ok(s.toastsApp().includes("Reconnected — link resumed"), "app: " + s.toastsApp());
+    assert.ok(await s.linked(), "still linked");
     await s.end();
   },
   async "stall with no away message"() {

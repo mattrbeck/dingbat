@@ -747,7 +747,8 @@ final class GameSession: NSObject, ObservableObject {
             NetLink.shared.idleDisconnect()
             return
         }
-        let waited = linkStallSince > 0 && !NetLink.shared.peerIsAway ? Int(now - linkStallSince) : 0
+        let explained = NetLink.shared.peerIsAway || NetLink.shared.reconnectingSince != nil
+        let waited = linkStallSince > 0 && !explained ? Int(now - linkStallSince) : 0
         let shown = waited >= 2 ? waited : 0
         if shown != linkWaiting { linkWaiting = shown }
     }

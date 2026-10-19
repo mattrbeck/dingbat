@@ -7,22 +7,27 @@ import SwiftUI
 /// comes back.
 struct LinkAwayCard: View {
     let since: Date
+    /// The connection dropped and the session is redialing (web: the same
+    /// card, retitled).
+    var reconnecting = false
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Friend switched away")
+            Text(reconnecting ? "Reconnecting…" : "Friend switched away")
                 .font(.system(size: 17, weight: .bold))
                 .foregroundColor(palette.text)
                 .padding(.bottom, 10)
-            Text("Their game is paused until they come back. The link stays open — nothing is lost.")
+            Text(reconnecting
+                 ? "The connection dropped. Both games are paused and pick up where they left off."
+                 : "Their game is paused until they come back. The link stays open — nothing is lost.")
                 .font(.system(size: 14))
                 .foregroundColor(palette.textDim)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 TimelineView(.periodic(from: since, by: 1)) { ctx in
-                    Text("Away " + NetLink.fmtAway(ctx.date.timeIntervalSince(since)))
+                    Text((reconnecting ? "Trying for " : "Away ") + NetLink.fmtAway(ctx.date.timeIntervalSince(since)))
                         .font(.system(size: 12.5).monospacedDigit())
                         .foregroundColor(palette.textDim)
                 }

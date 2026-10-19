@@ -100,7 +100,11 @@ struct GameStage: View {
                     .overlay { if session.isNDS && nds.lidClosed { Color.black.opacity(0.65).allowsHitTesting(false) } }
                     .overlay { if session.isNDS { NdsStylus() } }
                     // The friend is away: the frozen picture dims under the card.
-                    .overlay { if link.peerAwayShown != nil { Color.black.opacity(0.55).allowsHitTesting(false) } }
+                    .overlay {
+                        if link.peerAwayShown != nil || link.reconnectingSince != nil {
+                            Color.black.opacity(0.55).allowsHitTesting(false)
+                        }
+                    }
                     .flightAnchor("screen")
                     .flightHidden(.screen)
                     .modifier(RumbleShake(active: session.rumbling))
@@ -138,7 +142,9 @@ struct GameStage: View {
             // Online link: outside the stage's tap gestures, so the card's
             // Disconnect gets its taps.
             .overlay {
-                if let since = link.peerAwayShown {
+                if let since = link.reconnectingSince {
+                    LinkAwayCard(since: since, reconnecting: true)
+                } else if let since = link.peerAwayShown {
                     LinkAwayCard(since: since)
                 } else if session.linkWaiting > 0 {
                     LinkWaitingBadge(seconds: session.linkWaiting)

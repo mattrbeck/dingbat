@@ -501,8 +501,12 @@ const startRtc = async (isOfferer) => {
     if (!net || net.pc !== pc) return;
     const st = pc.connectionState;
     if (st === "failed") {
-      if (net.rtcConnected) netFail("Peer connection lost");
+      if (net.started) rbDropped("connection failed", "Peer connection lost");
+      else if (net.rtcConnected) netFail("Peer connection lost");
       else rtcGaveUp(session, pc, "ICE failed");
+    } else if (st === "disconnected" && net.started && rbCanResume()) {
+      // It may recover; "failed" redials.
+      log("netplay: connection disconnected — waiting");
     } else if (st === "disconnected" && net.started && rbPeerAwaySince) {
       // A friend who said they're away may be suspended (an iPhone app
       // past its background time, iPhone Safari): they stop answering, and
@@ -512,7 +516,7 @@ const startRtc = async (isOfferer) => {
     } else if (st === "connected" && net.started && rbPeerAwaySince) {
       log("netplay: connection back while the friend is away");
     } else if ((st === "disconnected" || st === "closed") && net.started) {
-      netPeerGone("Peer connection lost");
+      rbDropped("connection " + st, "Peer connection lost");
     }
   };
   if (isOfferer) {
@@ -564,8 +568,8 @@ const wireChannel = (dc) => {
   dc.onmessage = (e) =>
     NET_ROLLBACK ? rbMessage(e.data) : netReceive(new Uint8Array(e.data));
   dc.onclose = () => {
-    if (!net) return;
-    if (net.started) netPeerGone("Peer disconnected");
+    if (!net || net.dc !== dc) return;
+    if (net.started) rbDropped("channel closed", "Peer disconnected");
     // Dropped mid-handshake: surface it rather than leave the game frozen.
     else if (net.rb && !net.rb.inited) netFail("Connection lost during setup");
   };
@@ -1112,6 +1116,9 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 //   9 have-rom     : [9]                           (your ROM is in my library: don't send it)
 //  10 need-rom     : [10]                          (send me your ROM)
 //  11 away         : [11][on u8]                    (my tab is hidden: my game is paused)
+//  12 resume-info  : [12][sid u32][retry code]     (host deals it at start; the guest echoes it)
+//  13 resume       : [13][sid u32][last frame u32][flags u8] (first on a redialed channel)
+//  14 bye          : [14]                          (a deliberate end: don't redial)
 // Both peers run both cores (core 0 = host's game, core 1 = guest's): each
 // side's save-state is exchanged and loaded into the matching core, then only
 // inputs cross the network. When the hello hashes differ (cross-game trade)
@@ -1125,6 +1132,7 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
 const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
 const RB_PAUSE = 8, RB_HAVE_ROM = 9, RB_NEED_ROM = 10, RB_AWAY = 11;
+const RB_RESUME_INFO = 12, RB_RESUME = 13, RB_BYE = 14;
 const RB_HELLO_LEN = 21; // with the whole-ROM identity
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
@@ -1222,6 +1230,16 @@ const rbSend = (buf) => {
 };
 
 const rbSendInput = (frame, bits) => {
+  const rb = net?.rb;
+  if (rb) {
+    rb.sentLog.push({ frame, bits });
+    if (rb.sentLog.length > RB_SENT_LOG) rb.sentLog.shift();
+    if (rb.reconnecting) return; // resent once the friend says what it has
+  }
+  rbSendInputWire(frame, bits);
+};
+
+const rbSendInputWire = (frame, bits) => {
   const buf = new ArrayBuffer(7);
   const v = new DataView(buf);
   v.setUint8(0, RB_INPUT);
@@ -1375,6 +1393,20 @@ const rbConnect = async () => {
     localReady: false,
     remoteReady: false,
     inited: false,
+    // Resume (see "Resume" below).
+    resume: null,       // { sid, code } dealt by the host
+    resumeOk: false,    // both sides know it: a drop redials instead of ending
+    byeIn: false,       // the friend ended it on purpose
+    lastRx: -1,         // last input frame received from the friend
+    sentLog: [],        // recent inputs sent, for the friend's gap
+    reconnecting: false,
+    reconnectSince: 0,
+    giveUpTimer: 0,
+    rsRetry: 0,
+    rsPairTimer: 0,
+    rsWs: null,         // the redial's server socket
+    rsPc: null,         // the redial's peer connection, until adopted
+    rsDcOpen: false,
   };
   netSetStatus("Syncing…");
   const h = new ArrayBuffer(RB_HELLO_LEN);
@@ -1395,8 +1427,22 @@ const rbMessage = (data) => {
   const v = new DataView(data);
   const kind = v.getUint8(0);
   if (kind === RB_INPUT) {
+    const frame = v.getInt32(1);
+    if (frame > rb.lastRx) rb.lastRx = frame;
     if (rb.inited && Module._rollback_feed)
-      Module._rollback_feed(v.getInt32(1), v.getUint16(5));
+      Module._rollback_feed(frame, v.getUint16(5));
+    return;
+  }
+  if (kind === RB_RESUME_INFO) {
+    rbResumeInfoIn(rb, v, data);
+    return;
+  }
+  if (kind === RB_RESUME) {
+    rsResumeIn(rb, v);
+    return;
+  }
+  if (kind === RB_BYE) {
+    rb.byeIn = true;
     return;
   }
   if (kind === RB_READY) {
@@ -1540,6 +1586,7 @@ const rbStartIfReady = () => {
   window.rbSendPause = rbSendPause;
   window.enterRollbackMode(); // unfreezes into the session
   showToast(net.isHost ? "Player 2 connected — full speed" : "Connected — full speed");
+  if (net.isHost) rbOfferResume();
   // The ROMs + states now live in MEMFS; drop the JS copies (up to ~32 MB).
   rb.romBytes = null;
   rb.remoteRom = null;
@@ -1784,6 +1831,11 @@ const netPeerGone = (msg) => {
 
 // The local game keeps running unlinked once netMode is false.
 const netShutdown = async (opts) => {
+  if (net?.rb) rsStop(net.rb);
+  // A deliberate end: the friend mustn't redial.
+  if (net?.started && net.rb && net.dc?.readyState === "open") {
+    try { net.dc.send(new Uint8Array([RB_BYE])); } catch {}
+  }
   netStallBadge.hidden = true;
   netStallText.textContent = "waiting for peer";
   rbHideAwayCard();
@@ -1932,12 +1984,19 @@ rbDisconnectBtn.addEventListener("click", () => {
 // long enough stall shows the badge instead.
 const netAwayCard = document.getElementById("net-away");
 const netAwayTime = document.getElementById("net-away-time");
+const netAwayTitle = document.getElementById("net-away-title");
+const netAwayText = document.getElementById("net-away-text");
+const RB_AWAY_TITLE = "Friend switched away";
+const RB_AWAY_TEXT = "Their game is paused until they come back. The link stays open — nothing is lost.";
+const RB_RECONNECT_TITLE = "Reconnecting…";
+const RB_RECONNECT_TEXT = "The connection dropped. Both games are paused and pick up where they left off.";
 const netStallText = document.getElementById("net-stall-text");
 const RB_AWAY_CARD_MS = 1000;   // a quick alt-tab doesn't flash the card
 const RB_AWAY_TOAST_MS = 5000;  // away this long earns a "back" toast
 const RB_STALL_BADGE_MS = 2000; // an unexplained stall this long shows the badge
 const RB_BACK_TOAST_DELAY_MS = 1500; // back from away: the link proves alive first
 let rbPeerAwaySince = 0;    // when the friend's tab hid, or 0
+let rbAwayShown = false;    // the away card is up (a second in)
 let rbAwayCardTimer = 0;
 let rbAwayTick = 0;
 let rbHiddenSince = 0;      // when our tab hid during a session, or 0
@@ -1964,14 +2023,35 @@ awayDisconnectBtn.addEventListener("click", () => {
   if (net?.started || net?.rb?.inited) awayDisconnectArm.fire();
 });
 
+// The card over the dimmed screen: redialing a dropped link, or the friend
+// away, with a clock either way; hidden otherwise.
+const rbRenderCard = () => {
+  const rb = net?.rb;
+  const reconnecting = !!rb?.reconnecting;
+  const show = reconnecting || rbAwayShown;
+  if (show) {
+    netAwayTitle.textContent = reconnecting ? RB_RECONNECT_TITLE : RB_AWAY_TITLE;
+    netAwayText.textContent = reconnecting ? RB_RECONNECT_TEXT : RB_AWAY_TEXT;
+    netAwayTime.textContent = reconnecting
+      ? "Trying for " + fmtAway(performance.now() - rb.reconnectSince)
+      : "Away " + fmtAway(performance.now() - rbPeerAwaySince);
+    netStallBadge.hidden = true;
+    if (!rbAwayTick) rbAwayTick = setInterval(rbRenderCard, 1000);
+  } else {
+    clearInterval(rbAwayTick);
+    rbAwayTick = 0;
+    if (!netAwayCard.hidden) awayDisconnectArm.disarm();
+  }
+  netAwayCard.hidden = !show;
+  document.body.classList.toggle("peer-away", show);
+};
+
 const rbHideAwayCard = () => {
   clearTimeout(rbAwayCardTimer);
-  clearInterval(rbAwayTick);
-  rbAwayCardTimer = rbAwayTick = 0;
+  rbAwayCardTimer = 0;
   rbPeerAwaySince = 0;
-  netAwayCard.hidden = true;
-  document.body.classList.remove("peer-away");
-  awayDisconnectArm.disarm();
+  rbAwayShown = false;
+  rbRenderCard();
 };
 
 const rbPeerAway = (on) => {
@@ -1980,14 +2060,8 @@ const rbPeerAway = (on) => {
     rbPeerAwaySince = performance.now();
     log("netplay: friend switched away");
     rbAwayCardTimer = setTimeout(() => {
-      const paint = () => {
-        netAwayTime.textContent = "Away " + fmtAway(performance.now() - rbPeerAwaySince);
-      };
-      paint();
-      rbAwayTick = setInterval(paint, 1000);
-      netStallBadge.hidden = true;
-      document.body.classList.add("peer-away");
-      netAwayCard.hidden = false;
+      rbAwayShown = true;
+      rbRenderCard();
     }, RB_AWAY_CARD_MS);
     return;
   }
@@ -2001,7 +2075,7 @@ const rbPeerAway = (on) => {
 // Each rollback tick: how long the clock has been stalled on the friend's
 // inputs (0 = running). The away card already explains a hidden friend.
 window.rbNoteStall = (ms) => {
-  const show = ms >= RB_STALL_BADGE_MS && !rbPeerAwaySince && !!net?.started;
+  const show = ms >= RB_STALL_BADGE_MS && !rbPeerAwaySince && !!net?.started && !net.rb?.reconnecting;
   if (show) netStallText.textContent = "waiting for friend · " + fmtAway(ms);
   netStallBadge.hidden = !show;
 };
@@ -2023,13 +2097,248 @@ document.addEventListener("visibilitychange", () => {
     if (away >= RB_AWAY_TOAST_MS) {
       const s = net;
       setTimeout(() => {
-        if (net === s && net.started) showToast("Your game was paused for " + fmtAway(away) + " — your friend waited");
+        if (net === s && net.started && !net.rb?.reconnecting) {
+          showToast("Your game was paused for " + fmtAway(away) + " — your friend waited");
+        }
       }, RB_BACK_TOAST_DELAY_MS);
     }
   }
   rbGoneWhileHidden = "";
   rbHiddenSince = 0;
 });
+
+// ---- Resume. A dropped connection (a phone suspended past its background
+// time, a network hop) needn't end the session: both games are frozen at
+// the prediction limit, so the link picks up where it stopped and the games
+// never see the gap. At the start the host deals a retry code (long and
+// random, so it never holds a short code someone wants) and a session id,
+// and the guest echoes them back; only a session both sides know can
+// resume (an older build never echoes, and is ended as before). On a drop
+// both rendezvous on the retry code, open a new connection and swap RESUME
+// [sid][last input frame received][flags]: each resends the inputs the
+// other missed, and the away/pause/2x state, and they play on. A deliberate
+// end sends BYE first, so the friend doesn't redial.
+const RB_RESUME_GIVE_UP_MS = 180000; // then the session ends as before
+const RB_RESUME_PAIR_MS = 20000;     // a pairing whose channel never opens: dial again
+const RB_SENT_LOG = 512;             // inputs kept for the friend's gap (~8 s)
+const RB_RETRY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+const rbResumeInfoMsg = (sid, code) => {
+  const bytes = new TextEncoder().encode(code);
+  const buf = new Uint8Array(5 + bytes.length);
+  new DataView(buf.buffer).setUint32(1, sid);
+  buf[0] = RB_RESUME_INFO;
+  buf.set(bytes, 5);
+  return buf;
+};
+
+// Host, at the start. The same-browser path has nothing to redial.
+const rbOfferResume = () => {
+  const rb = net?.rb;
+  if (!rb || (net.localChan && net.dc === net.localChan)) return;
+  const a = new Uint8Array(14);
+  crypto.getRandomValues(a);
+  const code = "RS" + Array.from(a, (x) => RB_RETRY_ALPHABET[x % 32]).join("");
+  rb.resume = { sid: netRandId(), code };
+  rbSend(rbResumeInfoMsg(rb.resume.sid, code));
+};
+
+const rbResumeInfoIn = (rb, v, data) => {
+  if (data.byteLength < 8) return;
+  const sid = v.getUint32(1);
+  const code = new TextDecoder().decode(new Uint8Array(data, 5));
+  if (!/^[A-Z0-9]{8,32}$/.test(code)) return;
+  if (!rb.resume) { // guest: take it and echo it
+    rb.resume = { sid, code };
+    rb.resumeOk = true;
+    rbSend(rbResumeInfoMsg(sid, code));
+  } else if (rb.resume.sid === sid && rb.resume.code === code) {
+    rb.resumeOk = true; // host: the guest has it
+  }
+};
+
+const rbCanResume = () => !!(net?.started && net.rb?.resumeOk && !net.rb.byeIn);
+
+// The connection is gone: redial if both sides can, else end as before.
+const rbDropped = (why, endMsg) => {
+  if (rbCanResume()) rbBeginResume(why);
+  else netPeerGone(net?.rb?.byeIn ? "Peer disconnected" : endMsg);
+};
+
+const rbBeginResume = (why) => {
+  const rb = net.rb;
+  if (rb.reconnecting) return;
+  rb.reconnecting = true;
+  rb.reconnectSince = performance.now();
+  log("netplay: " + why + " — redialing on the retry code");
+  const { pc, dc } = net;
+  net.pc = null;
+  net.dc = null;
+  net.rtcConnected = false;
+  try { dc?.close(); } catch {}
+  try { pc?.close(); } catch {}
+  rbRenderCard();
+  clearTimeout(rb.giveUpTimer);
+  rb.giveUpTimer = setTimeout(() => {
+    if (net?.rb !== rb || !rb.reconnecting) return;
+    log("netplay: no reconnect in " + RB_RESUME_GIVE_UP_MS / 1000 + " s — giving up", "warn");
+    netPeerGone("Couldn't reconnect");
+  }, RB_RESUME_GIVE_UP_MS);
+  rsDial(rb, 0);
+};
+
+// Stop redialing (resumed, or the session is ending).
+const rsStop = (rb) => {
+  rb.reconnecting = false;
+  clearTimeout(rb.giveUpTimer);
+  clearTimeout(rb.rsRetry);
+  clearTimeout(rb.rsPairTimer);
+  const ws = rb.rsWs;
+  rb.rsWs = null;
+  if (ws) { try { ws.onclose = ws.onmessage = ws.onerror = null; ws.close(); } catch {} }
+  if (rb.rsPc && rb.rsPc !== net?.pc) { try { rb.rsPc.close(); } catch {} }
+  rb.rsPc = null;
+};
+
+// One rendezvous on the retry code; a socket or pairing that fails dials
+// again (backing off, within the server's rendezvous rate) until resumed or
+// given up.
+const rsDial = (rb, attempt) => {
+  if (net?.rb !== rb || !rb.reconnecting) return;
+  const again = (why) => {
+    if (net?.rb !== rb || !rb.reconnecting) return;
+    log("netplay: redial: " + why);
+    const ws = rb.rsWs;
+    rb.rsWs = null;
+    if (ws) { try { ws.onclose = ws.onmessage = ws.onerror = null; ws.close(); } catch {} }
+    if (rb.rsPc) { try { rb.rsPc.close(); } catch {} rb.rsPc = null; }
+    clearTimeout(rb.rsPairTimer);
+    clearTimeout(rb.rsRetry);
+    rb.rsRetry = setTimeout(() => rsDial(rb, attempt + 1), Math.min(2000 * 2 ** attempt, 15000));
+  };
+  let ws;
+  try { ws = new WebSocket(NET_SIGNAL_URL); } catch { again("no socket"); return; }
+  rb.rsWs = ws;
+  ws.onopen = () => ws.send(JSON.stringify({ t: "rendezvous", code: rb.resume.code, id: NET_PAGE_ID }));
+  ws.onerror = () => {};
+  ws.onclose = () => { if (rb.rsWs === ws) again("server socket closed"); };
+  ws.onmessage = async (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (rb.rsWs !== ws) return;
+    const pc = rb.rsPc;
+    try {
+      if (msg.t === "waiting") {
+        log("netplay: redial: waiting for the friend");
+      } else if (msg.t === "paired") {
+        log("netplay: redial: paired " + msg.role);
+        rsStartRtc(rb, ws, msg.role === "host", again);
+      } else if (msg.t === "sdp" && pc) {
+        await pc.setRemoteDescription(msg.d);
+        if (msg.d.type === "offer") {
+          await pc.setLocalDescription(await pc.createAnswer());
+          if (rb.rsPc === pc) ws.send(JSON.stringify({ t: "sdp", d: pc.localDescription }));
+        }
+      } else if (msg.t === "ice" && pc && msg.c) {
+        await pc.addIceCandidate(msg.c).catch(() => {});
+      } else if (msg.t === "peer-closed") {
+        if (!rb.rsDcOpen) again("friend left the server");
+      } else if (msg.t === "error") {
+        again("server: " + msg.msg);
+      }
+    } catch (err) {
+      if (rb.rsPc === pc) again("setup failed: " + err.message);
+    }
+  };
+};
+
+const rsStartRtc = async (rb, ws, isOfferer, again) => {
+  const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
+  rb.rsPc = pc;
+  rb.rsDcOpen = false;
+  rb.rsPairTimer = setTimeout(() => { if (rb.rsPc === pc && !rb.rsDcOpen) again("no channel after pairing"); },
+                              RB_RESUME_PAIR_MS);
+  pc.onicecandidate = (e) => {
+    if (e.candidate && rb.rsPc === pc && rb.rsWs === ws) ws.send(JSON.stringify({ t: "ice", c: e.candidate }));
+  };
+  pc.onconnectionstatechange = () => {
+    if (rb.rsPc === pc && !rb.rsDcOpen && pc.connectionState === "failed") again("ICE failed");
+  };
+  const adopt = (dc) => {
+    dc.binaryType = "arraybuffer";
+    dc.onopen = () => rsAdopt(rb, pc, dc);
+  };
+  if (isOfferer) {
+    adopt(pc.createDataChannel("link", { ordered: true }));
+    await pc.setLocalDescription(await pc.createOffer());
+    if (rb.rsPc === pc) ws.send(JSON.stringify({ t: "sdp", d: pc.localDescription }));
+  } else {
+    pc.ondatachannel = (e) => { if (rb.rsPc === pc) adopt(e.channel); };
+  }
+};
+
+// The new channel is open: it becomes the session's, and says what this
+// side has. Inputs stay held until the friend's RESUME says what it has.
+const rsAdopt = (rb, pc, dc) => {
+  if (rb.rsPc === pc && rb.rsDcOpen) return;
+  if (net?.rb !== rb || !rb.reconnecting || rb.rsPc !== pc) { try { pc.close(); } catch {} return; }
+  rb.rsDcOpen = true;
+  clearTimeout(rb.rsPairTimer);
+  const ws = rb.rsWs;
+  rb.rsWs = null;
+  if (ws) { try { ws.onclose = ws.onmessage = ws.onerror = null; ws.close(); } catch {} }
+  net.pc = pc;
+  net.dc = dc;
+  net.rtcConnected = true;
+  pc.onconnectionstatechange = () => {
+    if (!net || net.pc !== pc) return;
+    const st = pc.connectionState;
+    if (st === "failed" || st === "closed") rbDropped("connection " + st, "Peer connection lost");
+    else if (st === "disconnected") log("netplay: connection disconnected — waiting");
+  };
+  dc.onmessage = (e) => rbMessage(e.data);
+  dc.onclose = () => {
+    if (!net || net.dc !== dc) return;
+    if (net.started) rbDropped("channel closed", "Peer disconnected");
+  };
+  const buf = new ArrayBuffer(10);
+  const v = new DataView(buf);
+  v.setUint8(0, RB_RESUME);
+  v.setUint32(1, rb.resume.sid);
+  v.setInt32(5, rb.lastRx);
+  v.setUint8(9, (document.hidden ? 1 : 0) | (paused ? 2 : 0) | (speed2x ? 4 : 0));
+  rbSend(buf);
+  log("netplay: redial: channel open, last input from the friend " + rb.lastRx);
+};
+
+// The friend's RESUME: resend what it missed, take its state, play on.
+const rsResumeIn = (rb, v) => {
+  if (!rb.reconnecting || !rb.resume) return;
+  if (v.getUint32(1) !== rb.resume.sid) {
+    netPeerGone("Couldn't resume the link");
+    return;
+  }
+  const theirs = v.getInt32(5);
+  const flags = v.getUint8(9);
+  const gap = rb.sentLog.filter((e) => e.frame > theirs);
+  if (gap.length && gap[0].frame > theirs + 1) {
+    log("netplay: the friend's gap is older than the input log", "warn");
+    netPeerGone("Couldn't resume the link");
+    return;
+  }
+  rsStop(rb);
+  for (const e of gap) rbSendInputWire(e.frame, e.bits);
+  log("netplay: resumed after " + fmtAway(performance.now() - rb.reconnectSince) +
+      " (resent " + gap.length + " inputs from frame " + (theirs + 1) + ")");
+  rbRenderCard();
+  showToast("Reconnected — link resumed");
+  rbPeerAway(!!(flags & 1));
+  // Pause and 2x messages sent during the drop were lost: a side that says
+  // it's running unpauses (or slows) this one, never the reverse, so both
+  // end up agreeing on play.
+  if (!(flags & 2) && paused) window.applyRemotePause?.(false);
+  if (!(flags & 4) && speed2x) window.applyRemoteSpeed2x?.(false);
+};
 
 document.getElementById("net-to-manual").addEventListener("click", () => {
   manualEnter();
