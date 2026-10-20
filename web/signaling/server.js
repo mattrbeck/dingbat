@@ -25,6 +25,10 @@
 //                                                    role:"guest"); start
 //                                                    WebRTC now
 //                     {"t":"peer-closed"}            the other side is gone
+//                     {"t":"bye","why":"left"}       the friend ended the session
+//                                                    this code resumes (see
+//                                                    POST /bye); "why" is
+//                                                    "left" or "gave-up"
 //                     {"t":"error","msg":"..."}      then the socket closes
 //   after "paired", ONLY {"t":"sdp",...} and {"t":"ice",...} envelopes are
 //   relayed (their payloads are never inspected). Anything else — any other
@@ -43,6 +47,17 @@
 // seat is dropped rather than paired with or counted as a third peer; a friend
 // paired with the stale socket is told peer-closed and rendezvouses again
 // (formal/WebState/LinkPairing.lean, `regress_paired_with_own_ghost`).
+//
+// A goodbye note: a page ending a session while its link is down can't tell
+// the friend, who is redialing the session's retry code. So it posts
+//   POST /bye  {"code":"RS…","id":"<page id>","why":"left"|"gave-up"}
+// (a beacon, so it survives the page closing) and the server keeps the note
+// for NOTE_TTL_MS: a friend waiting on the code is told {"t":"bye"} at once,
+// and a later rendezvous on it gets {"t":"bye"} instead of a room. Seats
+// held by the note's own page id are dropped silently, and its own late
+// rendezvous is not turned away. Only retry codes (16 random characters)
+// take notes, never a short code a person typed: a note on one would turn
+// away the next pair using it (formal/WebState/LinkRedial.lean).
 //
 // Abuse hardening (all mirrored in server.nim — keep the twins in sync):
 //   - Per-IP limits (rendezvous rate, concurrent sockets, waiting rooms) are
@@ -107,6 +122,14 @@ const MAX_WAITING_PER_IP = 4;        // unclaimed waiting rooms held per client 
 const RENDEZVOUS_WINDOW_MS = 60 * 1000; // rendezvous rate-limit window (fixed window)
 const MAX_RENDEZVOUS_PER_WINDOW = 10;   // rendezvous attempts per IP per window
 
+// Goodbye notes (see the header). A note outlives every redial that can
+// need it: a friend redials for at most 180 s, starting at most 180 s after
+// the last thing it heard.
+const NOTE_TTL_MS = parseInt(process.env.SIGNAL_NOTE_TTL_MS, 10) || 10 * 60 * 1000;
+const MIN_NOTE_CODE_LEN = 16;        // retry codes only
+const MAX_NOTES = 2000;
+const MAX_NOTES_PER_WINDOW = 10;     // POST /bye per IP per RENDEZVOUS_WINDOW_MS
+
 const STATS_ENABLED = process.env.SIGNAL_STATS === '1';
 const ALLOWED_ORIGINS = new Set(
   (process.env.SIGNAL_ALLOWED_ORIGINS || '')
@@ -117,6 +140,7 @@ const ALLOWED_ORIGINS = new Set(
 const ipConns = new Map();   // ip -> live post-handshake sockets
 const ipWaiting = new Map(); // ip -> unclaimed waiting rooms hosted
 const rzWindows = new Map(); // ip -> { start, count } rendezvous attempts
+const noteWindows = new Map(); // ip -> { start, count } POST /bye
 
 const bumpIp = (m, ip) => m.set(ip, (m.get(ip) || 0) + 1);
 const dropIp = (m, ip) => {
@@ -351,6 +375,39 @@ function leave(ws) {
   }
 }
 
+// ---------------- goodbye notes ----------------
+
+const notes = new Map(); // code -> { id, why, until }
+
+const noteFor = (code) => {
+  const n = notes.get(code);
+  if (n && n.until <= Date.now()) { notes.delete(code); return null; }
+  return n || null;
+};
+
+// POST /bye: keep the note, and end the code's room: the leaver's own seats
+// (sockets its page has given up on) go without a word, anyone else is told.
+// false when the note can't be kept.
+function leaveNote(rawCode, rawId, rawWhy) {
+  const code = normalizeCode(rawCode);
+  if (code.length < MIN_NOTE_CODE_LEN) return false;
+  const id = normalizeId(rawId);
+  const why = rawWhy === 'gave-up' ? 'gave-up' : 'left';
+  if (!notes.has(code) && notes.size >= MAX_NOTES) return false;
+  notes.set(code, { id, why, until: Date.now() + NOTE_TTL_MS });
+  const room = rooms.get(code);
+  if (room) {
+    closeRoom(code);
+    for (const seat of [room.host, room.guest]) {
+      if (!seat || seat.closed) continue;
+      seat.roomCode = null;
+      if (!(id && seat.pageId === id)) send(seat, { t: 'bye', why });
+      seat.close();
+    }
+  }
+  return true;
+}
+
 function attach(ws) {
   // Each socket is in exactly one of three states: fresh (no message yet),
   // waiting (first with a code, holding a room), or paired. Pairing swaps
@@ -388,6 +445,14 @@ function attach(ws) {
       const c = normalizeCode(msg.code);
       if (c.length < MIN_CODE_LEN) return fail(ws, 'code too short');
       ws.pageId = normalizeId(msg.id);
+      // The friend said goodbye on this code: no room, the goodbye instead.
+      const note = noteFor(c);
+      if (note && !(note.id && note.id === ws.pageId)) {
+        clearHandshakeTimer();
+        send(ws, { t: 'bye', why: note.why });
+        ws.close();
+        return;
+      }
       const held = rooms.get(c);
       const stale = held && ws.pageId &&
         [held.host, held.guest].find((x) => x && x.pageId === ws.pageId);
@@ -594,9 +659,53 @@ function handleOAuth(req, res, path) {
   });
 }
 
+// POST /bye (see the header). The body is JSON whatever its Content-Type: a
+// beacon sends text/plain, which needs no preflight.
+function handleBye(req, res) {
+  const origin = req.headers.origin || '';
+  if (origin && !originAllowed(origin)) return httpReply(res, 403, { error: 'origin' }, '');
+  if (req.method === 'OPTIONS') {
+    return httpReply(res, 204, null, origin, {
+      'Access-Control-Allow-Methods': 'POST',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+    });
+  }
+  if (req.method !== 'POST') return httpReply(res, 404, { error: 'not_found' }, origin);
+  const ip = effectiveIp(req.socket.remoteAddress, req.headers['x-forwarded-for']);
+  const now = Date.now();
+  let w = noteWindows.get(ip);
+  if (!w || now - w.start >= RENDEZVOUS_WINDOW_MS) w = { start: now, count: 0 };
+  w.count++;
+  noteWindows.set(ip, w);
+  if (w.count > MAX_NOTES_PER_WINDOW) return httpReply(res, 429, { error: 'rate' }, origin);
+  const chunks = [];
+  let size = 0;
+  req.on('data', (d) => {
+    if (size > MAX_HTTP_BODY) return;
+    size += d.length;
+    if (size > MAX_HTTP_BODY) {
+      res.setHeader('Connection', 'close');
+      httpReply(res, 413, { error: 'size' }, origin);
+      return;
+    }
+    chunks.push(d);
+  });
+  req.on('end', () => {
+    if (size > MAX_HTTP_BODY) return;
+    let j = null;
+    try { j = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+    if (!j || typeof j !== 'object' || Array.isArray(j) || !leaveNote(j.code, j.id, j.why)) {
+      return httpReply(res, 400, { error: 'bad_request' }, origin);
+    }
+    httpReply(res, 204, null, origin);
+  });
+}
+
 const server = http.createServer((req, res) => {
   const path = String(req.url || '/').split('?')[0];
   if (path === '/oauth' || path.startsWith('/oauth/')) return handleOAuth(req, res, path);
+  if (path === '/bye') return handleBye(req, res);
   // Health check / friendly hint for anyone poking the port with a browser.
   // The body is static — a live room count is a (mild) recon gift, so it is
   // only reported when SIGNAL_STATS=1 (test harness / private ops).
@@ -665,6 +774,12 @@ const reaper = setInterval(() => {
   }
   for (const [ip, w] of oauthWindows) {
     if (now - w.start >= OAUTH_WINDOW_MS) oauthWindows.delete(ip);
+  }
+  for (const [ip, w] of noteWindows) {
+    if (now - w.start >= RENDEZVOUS_WINDOW_MS) noteWindows.delete(ip);
+  }
+  for (const [code, n] of notes) {
+    if (n.until <= now) notes.delete(code);
   }
 }, PING_INTERVAL_MS);
 reaper.unref(); // never keep the process alive just for the sweep

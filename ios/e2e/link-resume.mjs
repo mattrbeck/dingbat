@@ -22,6 +22,10 @@
 //   - the app paused in the background, its pause lost, and the link
 //     dropped while it is still there: both stay paused, and both run
 //     when it comes back;
+//   - the browser's Disconnect while both redial (its server out of reach):
+//     its goodbye note reaches the app waiting on the retry code at once;
+//   - the app's give-up (shortened) while the browser can't reach the
+//     server: the browser's next rendezvous gets the app's "gave-up" note;
 //   - the app frozen past the browser's give-up: the browser ends it, and
 //     the app, back, ends at once instead of redialing a friend long gone.
 
@@ -66,7 +70,7 @@ const romFile = join(SHOTS, GAME);
 writeFileSync(romFile, Buffer.from(synctestRom()));
 
 // One session; `webFirst`: the browser is at the server first (it hosts).
-const link = async (name, { webFirst = false } = {}) => {
+const link = async (name, { webFirst = false, appArgs = [] } = {}) => {
   const code = "R" + Math.random().toString(36).slice(2, 8).toUpperCase();
   const log = join(SHOTS, `link-resume-${name}.log`);
   const ctx = await browser.newContext({ serviceWorkers: "block" });
@@ -114,7 +118,8 @@ const link = async (name, { webFirst = false } = {}) => {
   simctl("spawn", UDID, "defaults", "write", BUNDLE, "audio.muted", "-bool", "true");
   if (existsSync(log)) rmSync(log);
   simctl("launch", "--stderr=" + log, UDID, BUNDLE, "-audio.muted", "YES", "-autoplay", GAME,
-         "-signal", "ws://127.0.0.1:" + PORT, "-link", code, "-link-stop-at", String(STOP), "-link-press");
+         "-signal", "ws://127.0.0.1:" + PORT, "-link", code, "-link-stop-at", String(STOP), "-link-press",
+         ...appArgs);
   if (!webFirst) { await sleep(1500); await webConnect(); }
   await page.waitForFunction(() => rollbackMode && net?.rb?.resumeOk, null, { timeout: 60000 });
   const appLog = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
@@ -252,6 +257,48 @@ const cases = {
     await until(async () => !appPaused() && !(await s.page.evaluate(() => paused)),
       async () => `both running after the app's return (browser paused: ${await s.page.evaluate(() => paused)}, app paused: ${appPaused()})`, 15000);
     await s.sameGames();
+    await s.end();
+  },
+  // The goodbye note (POST /bye on the retry code): a side that ends while
+  // the link is down tells the redialing friend through the server.
+  async "the browser's Disconnect while reconnecting reaches the redialing app"() {
+    const s = await link("bye-to-app");
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    // The browser's redials can't reach the server: the app waits on the code.
+    await s.page.evaluate(() => {
+      window.WebSocket = class { constructor() { throw new Error("offline"); } };
+      net.pc.close();
+    });
+    await until(() => s.netlink().some((l) => l === "redial: waiting for the friend"),
+      () => "the app waiting on the retry code: " + s.netlink().slice(-4).join(" | "), 30000);
+    const t0 = Date.now();
+    await s.page.click("#net-away-disconnect");
+    await s.page.click("#net-away-disconnect");
+    await until(() => s.netlink().some((l) => l === "redial: the friend left"),
+      () => "the app told: " + s.netlink().slice(-4).join(" | "), 10000);
+    await until(() => s.toastsApp().some((t) => t.startsWith("Peer disconnected")),
+      () => "the app's toast: " + s.toastsApp().slice(-3).join(" | "), 5000);
+    console.log(`  told in ${((Date.now() - t0) / 1000).toFixed(1)} s; app: ` + s.netlink().slice(-3).join(" | "));
+    assert.ok(!s.netlink().some((l) => l.startsWith("goodbye note")), "the app left no note of its own");
+    await s.end();
+  },
+  async "the app's give-up reaches the browser as \"Couldn't reconnect\""() {
+    const s = await link("bye-from-app", { appArgs: ["-link-give-up", "12"] });
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    // The browser can't reach the server until the app has given up.
+    await s.page.evaluate(() => {
+      window.__WS = window.WebSocket;
+      window.WebSocket = class { constructor() { throw new Error("offline"); } };
+      net.pc.close();
+    });
+    await until(() => s.netlink().some((l) => l.startsWith("goodbye note on the retry code (gave-up)")),
+      () => "the app gave up: " + s.netlink().slice(-4).join(" | "), 60000);
+    assert.ok(await s.linked(), "the browser still redialing");
+    await sleep(1000); // the note lands
+    await s.page.evaluate(() => { window.WebSocket = window.__WS; });
+    await until(async () => !(await s.linked()), "the browser told", 30000);
+    assert.ok((await s.toasts()).some((t) => t.startsWith("Couldn't reconnect")), (await s.toasts()).join(" | "));
+    assert.ok((await s.webLog()).some((t) => t === "redial: the friend gave up"), (await s.webLog()).slice(-4).join(" | "));
     await s.end();
   },
   async "the app away longer than the browser waits"() {

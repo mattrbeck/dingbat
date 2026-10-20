@@ -1,7 +1,7 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/netplay.js: rbDropped rbWatchDisconnected rbBeginResume rsDetach rsRestart rsStop rsDial rsStartRtc rsAdopt rsResumeIn
--- @models web/signaling/server.nim: onText teardown notifyClosed normalizeId handleClient
--- @models web/signaling/server.js: attach leave closeRoom relayFrom normalizeId
+-- @models web/netplay.js: rbDropped rbWatchDisconnected rbBeginResume rsDetach rsRestart rsStop rsDial rsStartRtc rsAdopt rsResumeIn rbLeaveNote
+-- @models web/signaling/server.nim: onText teardown notifyClosed normalizeId handleClient leaveNote
+-- @models web/signaling/server.js: attach leave closeRoom relayFrom normalizeId leaveNote
 
 /-
 # Redialing a dropped link on the retry code (web/netplay.js `rs*`)
@@ -24,9 +24,10 @@ DataChannel opens (`rsAdopt`: it becomes the session's connection and sends
 RESUME); the friend's RESUME ends the redial (`rsResumeIn` → `rsStop`). Any
 attempt that goes wrong restarts (`rsRestart`): detach, back off, dial again.
 
-`Cfg.review` selects the code: `false` = netplay.js at fd7b0432 (the
-prototype), `true` = d22e0527 (after the adversarial review). The
-differences, by function:
+`Cfg.review` selects the client: `false` = netplay.js at fd7b0432 (the
+prototype), `true` = d22e0527 (after the adversarial review). `Cfg.note`
+adds the goodbye note (below). `Cfg.pre`, `Cfg.rev` and `Cfg.fix` are the
+three. The review's differences, by function:
 
 * `rbBeginResume` on a side already redialing (its adopted channel closed
   before the friend's RESUME): returned (prototype); `rsRestart` (reviewed).
@@ -40,6 +41,19 @@ differences, by function:
 * The friend's RESUME arriving before our channel's `open` is parked and
   replayed at the open (`rsEarly`, reviewed); the prototype dropped it.
 
+The goodbye note (`Cfg.note`). A side whose session ends while the friend
+may be redialing (Disconnect or leaving the page while reconnecting, the
+give-up) has no channel to say BYE on, and on d22e0527 the friend redialed
+for 3 minutes and then said "Couldn't reconnect". Now every end of a side
+that holds the retry code and did not hear the friend's goodbye posts one
+(`netShutdown` → `rbLeaveNote`: `POST /bye` with the code and page id, by
+`sendBeacon`, so it may arrive late or not at all). The server keeps it on
+the code (`leaveNote`); a seat on the code that is not the leaver's page is
+told `bye` and closed, the leaver's own (a socket the server has not seen
+close) dropped without a word, and the room is gone. A later rendezvous on
+the code from another page is answered `bye` and closed. A redial socket's
+`bye` ends the session (`byeIn`, `netPeerGone`) without a note of its own.
+
 ## What is modelled
 
 * Clients (`Client`): the phase (`live` / `recon` = `rb.reconnecting` /
@@ -51,7 +65,11 @@ differences, by function:
 * Sockets and the server: as `LinkPairing` (the fixed server, which drops a
   seat held by the same page id): FIFO frames each way, `dead` (gone under
   both ends, the server may not have heard), `srvClosed` (the server closed
-  it). The room is the retry code's.
+  it). The room is the retry code's; `note` is the goodbye note held on it
+  (by page), `post` a side's `POST /bye` in flight.
+* Ending: `quit` (Disconnect, leaving the page) at any time the page runs,
+  and the give-up; with `Cfg.note` both post. `heard` (a ghost) marks a
+  side that ended on the friend's `bye`.
 * Peer connections (`PC`): owner, role, the description it holds, closed,
   opened (its DataChannel opened), `broken` (the path under it failed),
   `rs` (its owner's RESUME on its channel: not yet sent, in flight,
@@ -80,6 +98,12 @@ differences, by function:
   stronger for it).
 * `rsAdopt`'s guards (a second `open`, a pc no longer ours) never fail
   here: `dcOpen` is only enabled on our current, unopened pairing.
+* The note's 10 minute expiry, its overwrite by a second note and the
+  server's refusal of short codes are not modelled. The expiry outlasts any
+  redial that can need it: a side redials at most 180 s, and starts within
+  180 s of the friend's last message.
+* BYE on a live channel is `LinkResume`'s; here a `quit` from a live
+  session is heard through the note, after the friend's drop.
 
 ## Results
 
@@ -96,9 +120,27 @@ differences, by function:
   channel for a RESUME that will never come (no answer timer then).
   Reachable on iOS, whose WebRTC callbacks are posted to the main queue;
   on the web the `open` event is queued first.
-* `regress_*`: each trace on the reviewed code, continued with no user
+* `regress_dead_end`, `regress_linked_close`, `regress_early_resume`: each
+  trace on the reviewed code, continued with no user
   action, ends with both sides resumed on one new connection.
-* `no_dead_end` (reviewed, every reachable state): a redialing side always
+* `bug_quit_unheard` (`Cfg.rev`): A quits while both redial and A waits on
+  the code. Its socket's close takes the room down; B rendezvouses, waits,
+  and 25 s later waits again. Nothing will tell B before the give-up.
+* `regress_quit_heard` (`Cfg.fix`): B waiting on the code when the note
+  arrives is told at once; a note that arrives first answers B's
+  rendezvous; a note that beats A's own socket close, A's stale seat still
+  paired with B, drops that seat and tells B. `witness_quit_mid_pairing`:
+  A's close reaches the server first, B (its offer answered) lets its socket
+  go, its pairing fails, and its next rendezvous meets the note.
+  `regress_give_up_heard`: the give-up's note reaches a friend whose clock
+  started later.
+* `heard_only_after_end` (every config, every reachable state): a side
+  that ended on the friend's `bye` did so after the friend's session ended
+  (`HInv`: a note held or posted is an ended side's; a `bye` in flight to a
+  socket is from its owner's friend, ended; `Mono` frames every handler
+  that cannot add one).
+* `no_dead_end` (reviewed, with or without the note, every reachable
+  state): a redialing side always
   has an armed timer (retry, pairing, answer, re-rendezvous) or a server
   socket that is not closed. So no state waits on the give-up alone
   (`no_dead_end'`: never the prototype's `deadEnd`). The proof is the
@@ -152,9 +194,10 @@ inductive Up where
   | rz | sdp (p : Nat) | bye
   deriving DecidableEq, Repr
 
-/-- Server → client frames. -/
+/-- Server → client frames. `bye` is the friend's goodbye note (not the
+    close frame `Up.bye`). -/
 inductive Down where
-  | waiting | paired (r : Role) | sdp (p : Nat) | peerClosed | inUse
+  | waiting | paired (r : Role) | sdp (p : Nat) | peerClosed | inUse | bye
   deriving DecidableEq, Repr
 
 inductive CSt where
@@ -205,6 +248,7 @@ structure Client where
   answerT : Option Nat := none    -- rb.rsAnswerTimer, for this pc's channel (reviewed)
   rewaitT : Option Nat := none    -- rb.rsRewait, for this socket (reviewed)
   resumes : Nat := 0              -- ghost: redials that ended in the friend's RESUME
+  heard   : Bool := false         -- ghost: ended on the friend's goodbye note
   deriving DecidableEq, Repr
 
 structure Room where
@@ -214,12 +258,15 @@ structure Room where
 
 structure Cfg where
   review : Bool
+  note   : Bool
   deriving DecidableEq, Repr
 
 /-- netplay.js at fd7b0432, the prototype. -/
-def Cfg.pre : Cfg := ⟨false⟩
+def Cfg.pre : Cfg := ⟨false, false⟩
 /-- netplay.js at d22e0527, after the adversarial review. -/
-def Cfg.rev : Cfg := ⟨true⟩
+def Cfg.rev : Cfg := ⟨true, false⟩
+/-- With the server's goodbye note (`rbLeaveNote`, `leaveNote`). -/
+def Cfg.fix : Cfg := ⟨true, true⟩
 
 structure State where
   cl       : Cl → Client
@@ -228,6 +275,8 @@ structure State where
   pcs      : Nat → PC
   nextPc   : Nat
   room     : Option Room
+  post     : Cl → Bool            -- c's `POST /bye` in flight
+  note     : Option Cl            -- the goodbye note the server holds on the code, by page
 
 /-- Both players live on the session's first connection: pc 0 (A, host)
     and pc 1 (B, guest), each holding the other's description, open. -/
@@ -243,6 +292,8 @@ def init : State where
     else {}
   nextPc := 2
   room := none
+  post := fun _ => false
+  note := none
 
 def updC (c : Cl) (f : Client → Client) (s : State) : State :=
   { s with cl := fun d => if d = c then f (s.cl d) else s.cl d }
@@ -295,8 +346,8 @@ def evict (j : Nat) (i : Option Nat) (k : Nat) (s : State) : State :=
     | none => s
   push k .waiting { s with room := some ⟨k, none⟩ }
 
-/-- The `rendezvous` branch. -/
-def srvRz (k : Nat) (s : State) : State :=
+/-- The `rendezvous` branch, with no goodbye note from the friend. -/
+def srvMeet (k : Nat) (s : State) : State :=
   let o := (s.socks k).owner
   match s.room with
   | none => push k .waiting { s with room := some ⟨k, none⟩ }
@@ -306,6 +357,29 @@ def srvRz (k : Nat) (s : State) : State :=
     if (s.socks h).owner == o then evict h (some g) k s
     else if (s.socks g).owner == o then evict g (some h) k s
     else srvClose k (push k .inUse s)
+
+/-- The `rendezvous` branch: a goodbye note on the code from another page
+    answers `bye` and closes the socket. -/
+def srvRz (k : Nat) (s : State) : State :=
+  if s.note == some (s.socks k).owner.other then srvClose k (push k .bye s) else srvMeet k s
+
+/-- A seat of the room the note `c` left lands on: the leaver's own socket
+    is dropped without a word; any other is told `bye` and closed. -/
+def byeSeat (c : Cl) (k : Nat) (s : State) : State :=
+  if (s.socks k).owner = c then updK k (fun x => { x with srv := false }) s
+  else srvClose k (push k .bye s)
+
+/-- `leaveNote`: c's `POST /bye` arrives. The note is kept; the code's room,
+    if any, is gone. -/
+def leaveNote (c : Cl) (s : State) : State :=
+  let s := { s with note := some c, post := fun d => if d = c then false else s.post d }
+  match s.room with
+  | some r =>
+    let s := byeSeat c r.host { s with room := none }
+    match r.guest with
+    | some g => byeSeat c g s
+    | none => s
+  | none => s
 
 /-- Post-pair relay, only between the room's two seats. -/
 def relay (k p : Nat) (s : State) : State :=
@@ -397,6 +471,15 @@ def endS (c : Cl) (s : State) : State :=
   let s := closePc (s.cl c).cur s
   updC c (fun x => { x with ph := .ended, cur := none }) s
 
+/-- `rbLeaveNote` (from `netShutdown`): c's session is over; it posts the
+    goodbye note on the retry code (the code with it, not modelled). -/
+def posted (cfg : Cfg) (c : Cl) (s : State) : State :=
+  if cfg.note then { s with post := fun d => if d = c then true else s.post d } else s
+
+/-- The session ends on c's side (Disconnect, leaving the page, the
+    give-up): `endS`, then the note. -/
+def leave (cfg : Cfg) (c : Cl) (s : State) : State := posted cfg c (endS c s)
+
 /-- `rsStartRtc`: a new pc; the host offers at once; the pairing deadline. -/
 def startRtc (c : Cl) (k : Nat) (r : Role) (s : State) : State :=
   let p := s.nextPc
@@ -421,6 +504,8 @@ def onMsg (cfg : Cfg) (c : Cl) (k : Nat) (m : Down) (s : State) : State :=
   | .peerClosed =>
     if !x.dcOpen && !(cfg.review && x.sdpIn) then restart c s else s
   | .inUse => restart c s
+  -- The friend's goodbye: byeIn, netPeerGone; no note of our own.
+  | .bye => updC c (fun x => { x with heard := true }) (endS c s)
 
 /-- `rsAdopt`: the new channel is the session's; it carries our RESUME. -/
 def adopt (cfg : Cfg) (c : Cl) (p : Nat) (s : State) : State :=
@@ -487,6 +572,8 @@ inductive Event where
   | dcClose (c : Cl)      -- the session's connection fails: rbDropped
   | pcFail (c : Cl)       -- ICE failed on the pairing not yet open
   | arrive (c : Cl)       -- the friend's RESUME reaches c
+  | quit (c : Cl)         -- Disconnect, or leaving the page: netShutdown
+  | srvNote (c : Cl)      -- c's `POST /bye` reaches the server
   deriving DecidableEq, Repr
 
 def en (s : State) : Event → Bool
@@ -533,6 +620,8 @@ def en (s : State) : Event → Bool
         | some q => (s.pcs q).rs == .sent && (s.pcs q).remote == some p
         | none => false
       | none => false
+  | .quit c => !(s.cl c).susp && (s.cl c).ph != .ended
+  | .srvNote c => s.post c
 
 def step (cfg : Cfg) (s : State) : Event → State
   | .suspend c => updC c (fun x => { x with susp := true }) s
@@ -572,7 +661,7 @@ def step (cfg : Cfg) (s : State) : Event → State
     let s := updC c (fun x => { x with rewaitT := none }) s
     if x.rewaitT = x.ws && x.rsPc = none then restart c s else s
   | .giveUp c =>
-    if (s.cl c).ph = .recon then endS c s else updC c (fun x => { x with giveUpT := false }) s
+    if (s.cl c).ph = .recon then leave cfg c s else updC c (fun x => { x with giveUpT := false }) s
   | .dcOpen c =>
     match (s.cl c).rsPc with
     | some p => adopt cfg c p s
@@ -580,6 +669,8 @@ def step (cfg : Cfg) (s : State) : Event → State
   | .dcClose c => begin cfg c s
   | .pcFail c => restart c s
   | .arrive c => arrive cfg c s
+  | .quit c => leave cfg c s
+  | .srvNote c => leaveNote c s
 
 inductive Reachable (cfg : Cfg) : State → Prop
   | init : Reachable cfg init
@@ -759,6 +850,60 @@ theorem witness_frozen_friend :
       bothResumed = true := by
   decide
 
+/-! ### Quitting while redialing
+
+On d22e0527 a side that ends while redialing (Disconnect, leaving the page,
+the give-up) has nothing to say it on: no channel, and the server only
+knows sockets. With the goodbye note (`Cfg.fix`) its page posts one on the
+retry code; the server hands it to the friend's seat on the code, or to the
+friend's next rendezvous. -/
+
+/-- The first connection's path fails; both redial; A waits on socket 0. -/
+def bothRedial : List Event :=
+  [.cut 0, .dcClose .a, .dcClose .b, .open_ 0, .srvRecv 0, .deliver 0]
+
+/-- A quits while waiting on the code; its socket's close takes the room
+    down. B rendezvouses and waits; 25 s on it rendezvouses again and waits
+    again. Nothing will tell B: it is redialing alone until the give-up, and
+    then says "Couldn't reconnect". -/
+theorem bug_quit_unheard :
+    witnesses .rev (bothRedial ++ [.quit .a, .srvRecv 0, .open_ 1, .srvRecv 1, .deliver 1,
+        .rewaitT .b, .retry .b, .open_ 2, .srvRecv 2, .deliver 2])
+      (fun s => (s.cl .a).ph == .ended && (s.cl .b).ph == .recon &&
+        s.room == some ⟨2, none⟩ && s.note == none && !s.post .a) = true := by
+  decide
+
+def heardBye (s : State) : Bool := (s.cl .b).ph == .ended && (s.cl .b).heard
+
+/-- With the note: (1) B is waiting on the code when A's note arrives, and
+    is told at once; (2) the note arrives first (A's seat is A's own: dropped
+    without a word) and B's rendezvous is answered `bye`; (3) the note
+    beats A's own socket close to the server, with that socket still paired
+    with B: the stale seat is dropped and B told. -/
+theorem regress_quit_heard :
+    witnesses .fix (bothRedial ++ [.quit .a, .srvRecv 0, .open_ 1, .srvRecv 1, .deliver 1,
+        .srvNote .a, .deliver 1]) heardBye = true ∧
+    witnesses .fix (bothRedial ++ [.quit .a, .srvNote .a, .open_ 1, .srvRecv 1, .deliver 1])
+      heardBye = true ∧
+    witnesses .fix (handshake ++ [.quit .a, .srvNote .a, .deliver 1]) heardBye = true := by
+  decide
+
+/-- A quits mid-pairing and its socket's close reaches the server first: B,
+    its offer answered, ignores `peer-closed` and lets its socket go; its
+    pairing fails (A's pc is closed); it dials again and the note, there by
+    then, answers. -/
+theorem witness_quit_mid_pairing :
+    witnesses .fix (handshake ++ [.quit .a, .srvRecv 0, .deliver 1, .cclose 1, .pcFail .b,
+        .srvNote .a, .retry .b, .open_ 2, .srvRecv 2, .deliver 2]) heardBye = true := by
+  decide
+
+/-- The give-up posts the note too: A's 180 s ran out first, B is still
+    waiting on the code (the clocks drift), and is told. -/
+theorem regress_give_up_heard :
+    witnesses .fix (bothRedial ++ [.giveUp .a, .srvRecv 0, .open_ 1, .srvRecv 1, .deliver 1,
+        .srvNote .a, .deliver 1]) heardBye = true := by
+  decide
+
 /-! ## No dead end (reviewed code)
 
 `CInv s c` is what each client's handlers keep; its second half is the
@@ -874,8 +1019,8 @@ theorem keep_evict {s : State} (j : Nat) (i : Option Nat) (k : Nat) :
     exact h0.trans (((keep_push _ _).trans (keep_srvClose _)).trans
       ((keep_room _).trans (keep_push _ _)))
 
-theorem keep_srvRz {s : State} (k : Nat) : Keep s (srvRz k s) := by
-  unfold srvRz; dsimp only
+theorem keep_srvMeet {s : State} (k : Nat) : Keep s (srvMeet k s) := by
+  unfold srvMeet; dsimp only
   split
   · exact (keep_room _).trans (keep_push _ _)
   · split
@@ -886,6 +1031,37 @@ theorem keep_srvRz {s : State} (k : Nat) : Keep s (srvRz k s) := by
     · split
       · exact keep_evict ..
       · exact (keep_push _ _).trans (keep_srvClose _)
+
+theorem keep_srvRz {s : State} (k : Nat) : Keep s (srvRz k s) := by
+  unfold srvRz; split
+  · exact (keep_push _ _).trans (keep_srvClose _)
+  · exact keep_srvMeet _
+
+theorem keep_byeSeat {s : State} (c : Cl) (k : Nat) : Keep s (byeSeat c k s) := by
+  unfold byeSeat; split
+  · exact keep_srvOff _
+  · exact (keep_push _ _).trans (keep_srvClose _)
+
+theorem keep_leaveNote {s : State} (c : Cl) : Keep s (leaveNote c s) := by
+  unfold leaveNote; dsimp only
+  have h0 : Keep s { s with note := some c, post := fun d => if d = c then false else s.post d } :=
+    ⟨rfl, rfl, fun _ => rfl, fun _ => rfl⟩
+  split
+  · rename_i r _
+    have h1 : ∀ t : State, Keep t (match r.guest with
+        | some g => byeSeat c g (byeSeat c r.host { t with room := none })
+        | none => byeSeat c r.host { t with room := none }) := by
+      intro t
+      split
+      · exact (keep_room _).trans ((keep_byeSeat _ _).trans (keep_byeSeat _ _))
+      · exact (keep_room _).trans (keep_byeSeat _ _)
+    exact h0.trans (h1 _)
+  · exact h0
+
+theorem keep_posted {s : State} (cfg : Cfg) (c : Cl) : Keep s (posted cfg c s) := by
+  unfold posted; split
+  · exact ⟨rfl, rfl, fun _ => rfl, fun _ => rfl⟩
+  · exact Keep.refl s
 
 theorem keep_relay {s : State} (k p : Nat) : Keep s (relay k p s) := by
   unfold relay
@@ -1177,11 +1353,12 @@ theorem endS_ok {x : Cl} {s : State} (hs : Inv s) : Inv (endS x s) := by
   exact cinv_stop (by rw [e]; simp) (by rw [e]; rfl) (by rw [e]; rfl) (by rw [e]; rfl)
     (by rw [e]; rfl) (by rw [e]; rfl)
 
-theorem begin_ok {x : Cl} {s : State} (hs : Inv s) : Inv (begin .rev x s) := by
+theorem begin_ok {cfg : Cfg} (hcf : cfg.review = true) {x : Cl} {s : State} (hs : Inv s) :
+    Inv (begin cfg x s) := by
   have hoth : ∀ c, c ≠ x → CInv s c := fun c _ => hs c
   unfold begin
   split
-  · exact restart_ok hoth (hs x).1.wsOwn (fun _ => (hs x).1)
+  · simp only [hcf, ↓reduceIte]; exact restart_ok hoth (hs x).1.wsOwn (fun _ => (hs x).1)
   · refine inv_of_fr hoth ((fr_updC _ _ _).trans
       ((fr_detach (wsOwn_updC (hs x).1.wsOwn (Or.inl rfl))).trans (fr_dial _ _))) ?_
     -- a fresh connecting socket, everything else cleared
@@ -1228,13 +1405,15 @@ theorem startRtc_ok {x : Cl} {s : State} (k : Nat) (r : Role) (hs : Inv s) :
   · exact inv_keep h1 (keep_send _ _)
   · exact h1
 
-theorem onMsg_ok {x : Cl} {s : State} {k : Nat} (m : Down) (hs : Inv s)
-    (hw : (s.cl x).ws = some k) (hc : (s.socks k).cst = .opn) : Inv (onMsg .rev x k m s) := by
+theorem onMsg_ok {cfg : Cfg} (hcf : cfg.review = true) {x : Cl} {s : State} {k : Nat} (m : Down)
+    (hs : Inv s) (hw : (s.cl x).ws = some k) (hc : (s.socks k).cst = .opn) :
+    Inv (onMsg cfg x k m s) := by
   have hoth : ∀ c, c ≠ x → CInv s c := fun c _ => hs c
   have hb := (hs x).1
   cases m with
   | waiting =>
-    show Inv (updC x (fun x => { x with rewaitT := some k }) s)
+    show Inv (if cfg.review then updC x (fun x => { x with rewaitT := some k }) s else s)
+    simp only [hcf, ↓reduceIte]
     refine inv_of_fr hoth (fr_updC _ _ _) (cinv_updC hb (Or.inl rfl) ?_ ?_)
     · have h := hb.ok
       have hr : (s.cl x).retryT = false := by
@@ -1273,18 +1452,25 @@ theorem onMsg_ok {x : Cl} {s : State} {k : Nat} (m : Down) (hs : Inv s)
       · exact inv_keep h2 (keep_send _ _)
       · exact h2
   | peerClosed =>
-    show Inv (if !(s.cl x).dcOpen && !(true && (s.cl x).sdpIn) then restart x s else s)
+    show Inv (if !(s.cl x).dcOpen && !(cfg.review && (s.cl x).sdpIn) then restart x s else s)
     split
     · exact restart_ok hoth hb.wsOwn (fun _ => hb)
     · exact hs
   | inUse => exact restart_ok hoth hb.wsOwn (fun _ => hb)
+  | bye =>
+    show Inv (updC x (fun x => { x with heard := true }) (endS x s))
+    have h1 := endS_ok (x := x) hs
+    exact inv_of_fr (fun c _ => h1 c) (fr_updC _ _ _) (cinv_updC_key (h1 x) (by simp [Client.key]))
 
-theorem adopt_ok {x : Cl} {s : State} (p : Nat) (hs : Inv s) : Inv (adopt .rev x p s) := by
+theorem adopt_ok {cfg : Cfg} (hcf : cfg.review = true) {x : Cl} {s : State} (p : Nat)
+    (hs : Inv s) : Inv (adopt cfg x p s) := by
   show Inv (let s := updP p (fun y => { y with opened := true, rs := .sent }) s
+    let s := if cfg.review then s else closeWs x s
     let s := updC x (fun y => { y with dcOpen := true, pairT := none, cur := some p,
-                                       answerT := some p, ws := y.ws }) s
-    if (s.pcs p).early then resumed x s else s)
-  dsimp only
+                                       answerT := (if cfg.review then some p else none),
+                                       ws := (if cfg.review then y.ws else none) }) s
+    if cfg.review && (s.pcs p).early then resumed x s else s)
+  simp only [hcf, ite_true, Bool.true_and]
   have h0 := inv_keep hs (keep_updP p (fun y => { y with opened := true, rs := .sent }))
   have h1 : Inv (updC x (fun y => { y with dcOpen := true, pairT := none, cur := some p,
                                            answerT := some p, ws := y.ws })
@@ -1303,8 +1489,9 @@ theorem adopt_ok {x : Cl} {s : State} (p : Nat) (hs : Inv s) : Inv (adopt .rev x
   · exact resumed_ok h1
   · exact h1
 
-theorem arrive_ok {x : Cl} {s : State} (hs : Inv s) : Inv (arrive .rev x s) := by
-  unfold arrive; dsimp only
+theorem arrive_ok {cfg : Cfg} (hcf : cfg.review = true) {x : Cl} {s : State} (hs : Inv s) :
+    Inv (arrive cfg x s) := by
+  unfold arrive; dsimp only; simp only [hcf, Bool.true_and]
   split
   · split
     · rename_i p _ q _
@@ -1348,8 +1535,8 @@ theorem cinv_sockOther {c : Cl} {s : State} {k : Nat} {g : Sock → Sock} (hs : 
       · rfl)]
     exact fw hr
 
-theorem inv_step {s : State} (hs : Inv s) (e : Event) (he : en s e = true) :
-    Inv (step .rev s e) := by
+theorem inv_step {cfg : Cfg} (hcf : cfg.review = true) {s : State} (hs : Inv s) (e : Event)
+    (he : en s e = true) : Inv (step cfg s e) := by
   cases e with
   | suspend c | wake c =>
     simp only [step]
@@ -1410,7 +1597,7 @@ theorem inv_step {s : State} (hs : Inv s) (e : Event) (he : en s e = true) :
         · have h := hb1.ok
           simp only [updK_cl] at h
           have hd' : (s.cl o).dcOpen = true ∨ (s.cl o).sdpIn = true := by
-            simpa [Cfg.rev] using hd
+            simpa [hcf] using hd
           exact { pair := h.pair, pcT := h.pcT, answer := h.answer, opn := h.opn
                   sdpPc := h.sdpPc
                   rew := fun j _ => Or.inr hd'
@@ -1418,7 +1605,7 @@ theorem inv_step {s : State} (hs : Inv s) (e : Event) (he : en s e = true) :
         · intro hr
           have h := hb1.ok
           simp only [updK_cl] at h hr
-          have hd' : (s.cl o).dcOpen = true ∨ (s.cl o).sdpIn = true := by simpa [Cfg.rev] using hd
+          have hd' : (s.cl o).dcOpen = true ∨ (s.cl o).sdpIn = true := by simpa [hcf] using hd
           apply forward_of_timer
           rw [updC_self]; simp only [updK_cl]
           rcases hd' with hd' | hd'
@@ -1436,7 +1623,7 @@ theorem inv_step {s : State} (hs : Inv s) (e : Event) (he : en s e = true) :
       have h1 := inv_keep hs (keep_updK k (g := fun y => { y with down := rest })
         (fun _ => ⟨rfl, rfl⟩))
       simp only [en, Bool.and_eq_true, beq_iff_eq, Bool.not_eq_true'] at he
-      exact onMsg_ok m h1 (by simpa using he.2) (by simp [he.1.1.1.1])
+      exact onMsg_ok hcf m h1 (by simpa using he.2) (by simp [he.1.1.1.1])
   | retry c =>
     simp only [step]
     have hb := (hs c).1
@@ -1528,16 +1715,18 @@ theorem inv_step {s : State} (hs : Inv s) (e : Event) (he : en s e = true) :
   | giveUp c =>
     simp only [step]
     split
-    · exact endS_ok hs
+    · exact inv_keep (endS_ok hs) (keep_posted _ _)
     · exact inv_of_fr (fun d _ => hs d) (fr_updC _ _ _) (cinv_updC_key (hs c) (by simp [Client.key]))
   | dcOpen c =>
     simp only [step]
     split
-    · exact adopt_ok _ hs
+    · exact adopt_ok hcf _ hs
     · exact hs
-  | dcClose c => exact begin_ok hs
+  | dcClose c => exact begin_ok hcf hs
   | pcFail c => exact restart_ok (fun d _ => hs d) (hs c).1.wsOwn (fun _ => (hs c).1)
-  | arrive c => exact arrive_ok hs
+  | arrive c => exact arrive_ok hcf hs
+  | quit c => exact inv_keep (endS_ok hs) (keep_posted _ _)
+  | srvNote c => exact inv_keep hs (keep_leaveNote c)
 
 
 theorem inv_init : Inv init := by
@@ -1549,25 +1738,470 @@ theorem inv_init : Inv init := by
       sdpPc := fun h => by simp [init] at h, rew := fun _ h => by simp [init] at h
       retryWs := fun h => by simp [init] at h }⟩, fun h => by simp [init] at h⟩
 
-theorem inv_reachable {s : State} (h : Reachable .rev s) : Inv s := by
+theorem inv_reachable {cfg : Cfg} (hcf : cfg.review = true) {s : State} (h : Reachable cfg s) :
+    Inv s := by
   induction h with
   | init => exact inv_init
-  | step e _ he ih => exact inv_step ih e he
+  | step e _ he ih => exact inv_step hcf ih e he
 
 /-- **No dead end.** On the reviewed code, in every reachable state, a side
     that is redialing has an armed timer other than the give-up (retry,
     pairing deadline, answer timer, re-rendezvous) or a server socket that is
     not closed. Whatever the network, the server or the friend does, it is
     never left waiting on the 180 s give-up alone. -/
-theorem no_dead_end {s : State} (h : Reachable .rev s) (c : Cl) (hr : (s.cl c).ph = .recon) :
-    forward s c = true :=
-  (inv_reachable h c).2 hr
+theorem no_dead_end {cfg : Cfg} (hcf : cfg.review = true) {s : State} (h : Reachable cfg s)
+    (c : Cl) (hr : (s.cl c).ph = .recon) : forward s c = true :=
+  (inv_reachable hcf h c).2 hr
 
 /-- ... and so never at the prototype's dead end. -/
-theorem no_dead_end' {s : State} (h : Reachable .rev s) (c : Cl) : deadEnd s c = false := by
+theorem no_dead_end' {cfg : Cfg} (hcf : cfg.review = true) {s : State} (h : Reachable cfg s)
+    (c : Cl) : deadEnd s c = false := by
   unfold deadEnd wayOut
   by_cases hr : (s.cl c).ph = .recon
-  · simp [hr, no_dead_end h c hr]
+  · simp [hr, no_dead_end hcf h c hr]
   · simp [hr]
+
+/-! ## No false goodbye
+
+A side ends on the friend's goodbye (`heard`) only if the friend's session
+is over. `HInv`: a note held or posted is an ended side's, and a `bye` in
+flight to a socket is from its owner's friend, ended. `Mono` frames every
+handler that cannot add a `bye`, a note or a post. -/
+
+structure Mono (s t : State) : Prop where
+  ph : ∀ c, (s.cl c).ph = .ended → (t.cl c).ph = .ended
+  heard : ∀ c, (t.cl c).heard = true → (s.cl c).heard = true
+  bye : ∀ k, Down.bye ∈ (t.socks k).down →
+    Down.bye ∈ (s.socks k).down ∧ (t.socks k).owner = (s.socks k).owner
+  note : t.note = s.note
+  post : ∀ c, t.post c = true → s.post c = true
+
+theorem Mono.refl (s : State) : Mono s s :=
+  ⟨fun _ h => h, fun _ h => h, fun _ h => ⟨h, rfl⟩, rfl, fun _ h => h⟩
+
+theorem Mono.trans {s t u : State} (a : Mono s t) (b : Mono t u) : Mono s u :=
+  ⟨fun c h => b.ph c (a.ph c h), fun c h => a.heard c (b.heard c h),
+   fun k h => ⟨(a.bye k (b.bye k h).1).1, (b.bye k h).2.trans (a.bye k (b.bye k h).1).2⟩,
+   b.note.trans a.note, fun c h => a.post c (b.post c h)⟩
+
+theorem mono_updK {s : State} (k : Nat) {g : Sock → Sock}
+    (hg : ∀ y, Down.bye ∈ (g y).down → Down.bye ∈ y.down ∧ (g y).owner = y.owner) :
+    Mono s (updK k g s) where
+  ph _ h := h
+  heard _ h := h
+  bye j h := by
+    by_cases hj : j = k
+    · subst hj; simp only [updK_socks, ite_true] at h ⊢; exact hg _ h
+    · simp only [updK_socks, hj, ite_false] at h ⊢; exact ⟨h, by trivial⟩
+  note := rfl
+  post _ h := h
+
+/-- The client reads the head of `k`'s frames. -/
+theorem mono_pop {s : State} {k : Nat} {m : Down} {rest : List Down}
+    (hm : (s.socks k).down = m :: rest) :
+    Mono s (updK k (fun y => { y with down := rest }) s) where
+  ph _ h := h
+  heard _ h := h
+  bye j h := by
+    by_cases hj : j = k
+    · subst hj
+      simp only [updK_socks, ite_true] at h
+      refine ⟨?_, by simp only [updK_socks, ite_true]⟩
+      rw [hm]; exact List.mem_cons_of_mem _ h
+    · simp only [updK_socks, hj, ite_false] at h ⊢; exact ⟨h, by trivial⟩
+  note := rfl
+  post _ h := h
+
+theorem mono_updP {s : State} (p : Nat) (h : PC → PC) : Mono s (updP p h s) :=
+  ⟨fun _ h => h, fun _ h => h, fun _ h => ⟨h, rfl⟩, rfl, fun _ h => h⟩
+
+theorem mono_room {s : State} (r : Option Room) : Mono s { s with room := r } :=
+  ⟨fun _ h => h, fun _ h => h, fun _ h => ⟨h, rfl⟩, rfl, fun _ h => h⟩
+
+theorem mono_updC {s : State} (c : Cl) {f : Client → Client}
+    (hf : (s.cl c).ph = .ended → (f (s.cl c)).ph = .ended)
+    (hh : (f (s.cl c)).heard = true → (s.cl c).heard = true) : Mono s (updC c f s) where
+  ph d h := by
+    by_cases hd : d = c
+    · subst hd; simp only [updC_cl, ite_true]; exact hf h
+    · simp only [updC_cl, hd, ite_false]; exact h
+  heard d h := by
+    by_cases hd : d = c
+    · subst hd; simp only [updC_cl, ite_true] at h; exact hh h
+    · simp only [updC_cl, hd, ite_false] at h; exact h
+  bye _ h := ⟨h, rfl⟩
+  note := rfl
+  post _ h := h
+
+theorem mono_push {s : State} (k : Nat) {m : Down} (hm : m ≠ .bye) : Mono s (push k m s) := by
+  unfold push; dsimp only; split
+  · exact Mono.refl s
+  · refine mono_updK k (fun y h => ⟨?_, rfl⟩)
+    rcases List.mem_append.mp h with h | h
+    · exact h
+    · exact absurd (List.mem_singleton.mp h).symm hm
+
+theorem mono_srvClose {s : State} (k : Nat) : Mono s (srvClose k s) :=
+  mono_updK k (fun _ h => ⟨h, rfl⟩)
+
+theorem mono_srvOff {s : State} (k : Nat) :
+    Mono s (updK k (fun x => { x with srv := false }) s) := mono_updK k (fun _ h => ⟨h, rfl⟩)
+
+theorem mono_send {s : State} (k : Nat) (u : Up) : Mono s (send k u s) :=
+  mono_updK k (fun y h => by
+    by_cases hc : (y.srv && !y.dead) = true
+    · simp only [hc, ite_true] at h ⊢; exact ⟨h, by trivial⟩
+    · simp only [hc, ite_false, Bool.false_eq_true] at h ⊢; exact ⟨h, by trivial⟩)
+
+theorem mono_closeOwn {s : State} (k : Nat) : Mono s (closeOwn k s) :=
+  mono_updK k (fun y h => by
+    by_cases hc : y.cst = .closed
+    · simp only [hc, ite_true] at h ⊢; exact ⟨h, by trivial⟩
+    · simp only [hc, ite_false] at h; simp at h)
+
+theorem mono_closeWs {s : State} (c : Cl) : Mono s (closeWs c s) := by
+  unfold closeWs; split
+  · exact mono_closeOwn _
+  · exact Mono.refl s
+
+theorem mono_closePc {s : State} (o : Option Nat) : Mono s (closePc o s) := by
+  cases o with
+  | none => exact Mono.refl s
+  | some p => show Mono s (updP p (fun y => { y with closed := true }) s); exact mono_updP p _
+
+theorem mono_detach {s : State} (c : Cl) : Mono s (detach c s) :=
+  (mono_closeWs c).trans ((mono_closePc _).trans ((mono_closePc _).trans
+    (mono_updC c (fun h => h) (fun h => h))))
+
+theorem mono_restart {s : State} (c : Cl) : Mono s (restart c s) := by
+  unfold restart; split
+  · exact (mono_detach c).trans (mono_updC c (fun h => h) (fun h => h))
+  · exact Mono.refl s
+
+theorem mono_dial {s : State} (c : Cl) : Mono s (dial c s) := by
+  unfold dial; dsimp only
+  refine (show Mono s { s with nextSock := s.nextSock + 1 } from
+    ⟨fun _ h => h, fun _ h => h, fun _ h => ⟨h, rfl⟩, rfl, fun _ h => h⟩).trans
+    ((mono_updK _ (fun _ h => by simp at h)).trans (mono_updC c (fun h => h) (fun h => h)))
+
+theorem mono_begin {s : State} (cfg : Cfg) (c : Cl) : Mono s (begin cfg c s) := by
+  unfold begin; split
+  · split
+    · exact mono_restart c
+    · exact Mono.refl s
+  · rename_i hph
+    exact (mono_updC c (fun h => by rw [hph] at h; cases h) (fun h => h)).trans
+      ((mono_detach c).trans (mono_dial c))
+  · exact Mono.refl s
+
+theorem mono_rsStop {s : State} (c : Cl) : Mono s (rsStop c s) := by
+  unfold rsStop; dsimp only
+  refine (mono_closeWs c).trans ?_
+  have hu : ∀ t : State, Mono t (updC c Client.stopped t) := fun t =>
+    mono_updC c (fun h => by simp [Client.stopped, h]) (fun h => h)
+  split
+  · exact (mono_closePc _).trans (hu _)
+  · exact hu _
+
+theorem mono_resumed {s : State} (c : Cl) : Mono s (resumed c s) :=
+  (mono_rsStop c).trans (mono_updC c (fun h => h) (fun h => h))
+
+theorem mono_endS {s : State} (c : Cl) : Mono s (endS c s) := by
+  unfold endS; dsimp only
+  exact (mono_rsStop c).trans ((mono_closePc _).trans (mono_updC c (fun _ => rfl) (fun h => h)))
+
+theorem mono_startRtc {s : State} (c : Cl) (k : Nat) (r : Role) : Mono s (startRtc c k r s) := by
+  unfold startRtc; dsimp only
+  have h0 : Mono s { s with nextPc := s.nextPc + 1 } :=
+    ⟨fun _ h => h, fun _ h => h, fun _ h => ⟨h, rfl⟩, rfl, fun _ h => h⟩
+  split
+  · refine Mono.trans ?_ (mono_send _ _)
+    refine Mono.trans ?_ (mono_updC c (fun h => h) (fun h => h))
+    exact h0.trans (mono_updP _ _)
+  · refine Mono.trans ?_ (mono_updC c (fun h => h) (fun h => h))
+    exact h0.trans (mono_updP _ _)
+
+theorem mono_onMsg {s : State} (cfg : Cfg) (c : Cl) (k : Nat) (m : Down) (hm : m ≠ .bye) :
+    Mono s (onMsg cfg c k m s) := by
+  cases m with
+  | waiting =>
+    show Mono s (if cfg.review then updC c (fun x => { x with rewaitT := some k }) s else s)
+    split
+    · exact mono_updC c (fun h => h) (fun h => h)
+    · exact Mono.refl s
+  | paired r => exact mono_startRtc c k r
+  | sdp q =>
+    unfold onMsg; dsimp only
+    split
+    · split
+      · refine Mono.trans ?_ (mono_send _ _)
+        refine Mono.trans ?_ (mono_updP _ _)
+        exact mono_updC c (fun h => h) (fun h => h)
+      · refine Mono.trans ?_ (mono_updP _ _)
+        exact mono_updC c (fun h => h) (fun h => h)
+    · exact Mono.refl s
+  | peerClosed =>
+    unfold onMsg; dsimp only
+    split
+    · exact mono_restart c
+    · exact Mono.refl s
+  | inUse => exact mono_restart c
+  | bye => exact absurd rfl hm
+
+theorem mono_adopt {s : State} (cfg : Cfg) (c : Cl) (p : Nat) : Mono s (adopt cfg c p s) := by
+  unfold adopt; dsimp only
+  split <;> split
+  all_goals first
+    | (refine Mono.trans ?_ (mono_resumed c)
+       refine Mono.trans ?_ (mono_updC c (fun h => h) (fun h => h)))
+    | refine Mono.trans ?_ (mono_updC c (fun h => h) (fun h => h))
+  all_goals first
+    | exact mono_updP p _
+    | exact (mono_updP p _).trans (mono_closeWs c)
+
+theorem mono_arrive {s : State} (cfg : Cfg) (c : Cl) : Mono s (arrive cfg c s) := by
+  unfold arrive; dsimp only
+  split
+  · split
+    · split
+      · refine Mono.trans ?_ (mono_resumed c)
+        exact mono_updP _ _
+      · split
+        · refine Mono.trans ?_ (mono_updP _ _)
+          exact mono_updP _ _
+        · exact mono_updP _ _
+    · exact Mono.refl s
+  · exact Mono.refl s
+
+theorem mono_teardown {s : State} (k : Nat) : Mono s (teardown k s) := by
+  unfold teardown; dsimp only
+  have h0 := mono_srvOff (s := s) k
+  split
+  · split
+    · split
+      · exact h0.trans ((mono_room _).trans ((mono_push _ (by intro h; cases h)).trans (mono_srvClose _)))
+      · exact h0.trans (mono_room _)
+    · split
+      · exact h0.trans ((mono_room _).trans ((mono_push _ (by intro h; cases h)).trans (mono_srvClose _)))
+      · exact h0
+  · exact h0
+
+theorem mono_evict {s : State} (j : Nat) (i : Option Nat) (k : Nat) : Mono s (evict j i k s) := by
+  unfold evict; dsimp only
+  have h0 := mono_srvOff (s := s) j
+  cases i with
+  | none => exact h0.trans ((mono_room _).trans (mono_push _ (by intro h; cases h)))
+  | some i =>
+    exact h0.trans (((mono_push _ (by intro h; cases h)).trans (mono_srvClose _)).trans
+      ((mono_room _).trans (mono_push _ (by intro h; cases h))))
+
+theorem mono_srvMeet {s : State} (k : Nat) : Mono s (srvMeet k s) := by
+  unfold srvMeet; dsimp only
+  split
+  · exact (mono_room _).trans (mono_push _ (by intro h; cases h))
+  · split
+    · exact mono_evict ..
+    · exact (mono_room _).trans ((mono_push _ (by intro h; cases h)).trans (mono_push _ (by intro h; cases h)))
+  · split
+    · exact mono_evict ..
+    · split
+      · exact mono_evict ..
+      · exact (mono_push _ (by intro h; cases h)).trans (mono_srvClose _)
+
+theorem mono_relay {s : State} (k p : Nat) : Mono s (relay k p s) := by
+  unfold relay
+  split
+  · split
+    · exact mono_push _ (by intro h; cases h)
+    · split
+      · exact mono_push _ (by intro h; cases h)
+      · exact Mono.refl s
+  · exact Mono.refl s
+
+structure HInv (s : State) : Prop where
+  note : ∀ c, s.note = some c → (s.cl c).ph = .ended
+  post : ∀ c, s.post c = true → (s.cl c).ph = .ended
+  bye : ∀ k, Down.bye ∈ (s.socks k).down → (s.cl (s.socks k).owner.other).ph = .ended
+  heard : ∀ c, (s.cl c).heard = true → (s.cl c.other).ph = .ended
+
+theorem HInv.mono {s t : State} (h : HInv s) (m : Mono s t) : HInv t where
+  note c hc := m.ph c (h.note c (m.note ▸ hc))
+  post c hc := m.ph c (h.post c (m.post c hc))
+  bye k hk := by
+    obtain ⟨h1, h2⟩ := m.bye k hk
+    rw [h2]; exact m.ph _ (h.bye k h1)
+  heard c hc := m.ph _ (h.heard c (m.heard c hc))
+
+theorem Cl.other_of_ne {o c : Cl} (h : o ≠ c) : o.other = c := by
+  cases o <;> cases c <;> first | rfl | exact absurd rfl h
+
+theorem HInv.pushBye {s : State} {k : Nat} (h : HInv s)
+    (he : (s.cl (s.socks k).owner.other).ph = .ended) : HInv (push k .bye s) := by
+  unfold push; dsimp only; split
+  · exact h
+  · refine ⟨h.note, h.post, fun j hj => ?_, h.heard⟩
+    by_cases hjk : j = k
+    · subst hjk
+      simp only [updK_cl, updK_socks, ite_true] at hj ⊢
+      exact he
+    · simp only [updK_cl, updK_socks, hjk, ite_false] at hj ⊢
+      exact h.bye j hj
+
+theorem HInv.onSeat {s : State} {c : Cl} {k : Nat} (h : HInv s) (hc : (s.cl c).ph = .ended) :
+    HInv (byeSeat c k s) := by
+  unfold byeSeat; split
+  · exact h.mono (mono_srvOff _)
+  · rename_i ho
+    exact (h.pushBye (by rw [Cl.other_of_ne ho]; exact hc)).mono (mono_srvClose _)
+
+theorem HInv.onNote {s : State} {c : Cl} (h : HInv s) (hp : s.post c = true) :
+    HInv (leaveNote c s) := by
+  have hc := h.post c hp
+  have h0 : HInv { s with note := some c, post := fun d => if d = c then false else s.post d } :=
+    ⟨fun d hd => by cases hd; exact hc,
+     fun d hd => h.post d (by by_cases e : d = c <;> simp_all), h.bye, h.heard⟩
+  unfold leaveNote; dsimp only
+  split
+  · rename_i r _
+    have h1 : ∀ t : State, HInv t → (t.cl c).ph = .ended → HInv (match r.guest with
+        | some g => byeSeat c g (byeSeat c r.host { t with room := none })
+        | none => byeSeat c r.host { t with room := none }) := by
+      intro t ht htc
+      have h2 : HInv (byeSeat c r.host { t with room := none }) :=
+        (ht.mono (mono_room _)).onSeat htc
+      split
+      · refine h2.onSeat ?_
+        rw [(keep_byeSeat (s := { t with room := none }) c r.host).cl]; exact htc
+      · exact h2
+    exact h1 _ h0 hc
+  · exact h0
+
+theorem HInv.onPost {s : State} {cfg : Cfg} {c : Cl} (h : HInv s) (hc : (s.cl c).ph = .ended) :
+    HInv (posted cfg c s) := by
+  unfold posted; split
+  · refine ⟨h.note, fun d hd => ?_, h.bye, h.heard⟩
+    by_cases e : d = c
+    · rw [e]; exact hc
+    · exact h.post d (by simpa [e] using hd)
+  · exact h
+
+theorem HInv.onLeave {s : State} {cfg : Cfg} {c : Cl} (h : HInv s) : HInv (leave cfg c s) := by
+  unfold leave
+  refine (h.mono (mono_endS c)).onPost ?_
+  simp [endS]
+
+theorem HInv.onRz {s : State} {k : Nat} (h : HInv s) : HInv (srvRz k s) := by
+  unfold srvRz; split
+  · rename_i hn
+    exact (h.pushBye (h.note _ (by simpa using hn))).mono (mono_srvClose _)
+  · exact h.mono (mono_srvMeet k)
+
+/-- c takes the friend's goodbye, the friend ended. -/
+theorem HInv.heardIn {t : State} {c : Cl} (h : HInv t) (hc : (t.cl c.other).ph = .ended) :
+    HInv (updC c (fun x => { x with heard := true }) t) := by
+  have hp : ∀ d, ((updC c (fun x => { x with heard := true }) t).cl d).ph = (t.cl d).ph := by
+    intro d; simp only [updC_cl]; split <;> rfl
+  refine ⟨fun d hd => ?_, fun d hd => ?_, fun j hj => ?_, fun d hd => ?_⟩
+  · rw [hp]; exact h.note d hd
+  · rw [hp]; exact h.post d hd
+  · rw [hp]; exact h.bye j hj
+  · rw [hp]
+    by_cases e : d = c
+    · subst e; exact hc
+    · simp only [updC_cl, e, ite_false] at hd; exact h.heard d hd
+
+theorem hinv_init : HInv init :=
+  ⟨fun _ h => by simp [init] at h, fun _ h => by simp [init] at h,
+   fun _ h => by simp [init] at h, fun c h => by cases c <;> simp [init] at h⟩
+
+theorem hinv_step {cfg : Cfg} {s : State} (h : HInv s) (e : Event) (he : en s e = true) :
+    HInv (step cfg s e) := by
+  cases e with
+  | suspend c | wake c => simp only [step]; exact h.mono (mono_updC c (fun h => h) (fun h => h))
+  | cut p => simp only [step]; exact h.mono (mono_updP _ _)
+  | open_ k => simp only [step]; exact h.mono (mono_updK k (fun _ h => ⟨h, rfl⟩))
+  | die k => simp only [step]; exact h.mono (mono_updK k (fun _ h => by simp at h))
+  | cclose k =>
+    simp only [step]
+    have h0 := h.mono (mono_updK (s := s) k (g := fun y => { y with cst := .closed })
+      (fun _ h => ⟨h, rfl⟩))
+    split
+    · exact h0
+    · split
+      · exact h0.mono (mono_updC _ (fun h => h) (fun h => h))
+      · exact h0.mono (mono_restart _)
+  | srvRecv k =>
+    simp only [step]
+    unfold srvRecv
+    split
+    · exact h
+    · rename_i m rest _
+      have h0 := h.mono (mono_updK (s := s) k (g := fun x => { x with up := rest })
+        (fun _ h => ⟨h, rfl⟩))
+      dsimp only
+      split
+      · exact h0.onRz
+      · exact h0.mono (mono_relay _ _)
+      · exact h0.mono (mono_teardown _)
+  | srvNotice k =>
+    simp only [step]
+    exact (h.mono (mono_updK (s := s) k (g := fun x => { x with up := [] })
+      (fun _ h => ⟨h, rfl⟩))).mono (mono_teardown k)
+  | deliver k =>
+    simp only [step]
+    split
+    · exact h
+    · rename_i m rest hm
+      have m0 := mono_pop (s := s) hm
+      have h0 := h.mono m0
+      by_cases hb : m = .bye
+      · subst hb
+        -- The bye was in flight to this socket: its owner's friend is over.
+        have hend := h.bye k (by rw [hm]; exact List.mem_cons_self ..)
+        show HInv (updC (s.socks k).owner (fun x => { x with heard := true })
+          (endS (s.socks k).owner (updK k (fun y => { y with down := rest }) s)))
+        have m1 := mono_endS (s := updK k (fun y => { y with down := rest }) s) (s.socks k).owner
+        exact (h0.mono m1).heardIn (m1.ph _ (m0.ph _ hend))
+      · exact h0.mono (mono_onMsg cfg _ k m hb)
+  | retry c =>
+    simp only [step]
+    have h0 := h.mono (mono_updC (s := s) c (f := fun x => { x with retryT := false })
+      (fun h => h) (fun h => h))
+    split
+    · exact h0.mono (mono_dial c)
+    · exact h0
+  | pairT c | answerT c | rewaitT c =>
+    simp only [step]
+    split
+    · exact (h.mono (mono_updC c (fun h => h) (fun h => h))).mono (mono_restart c)
+    · exact h.mono (mono_updC c (fun h => h) (fun h => h))
+  | giveUp c =>
+    simp only [step]
+    split
+    · exact h.onLeave
+    · exact h.mono (mono_updC c (fun h => h) (fun h => h))
+  | dcOpen c =>
+    simp only [step]
+    split
+    · exact h.mono (mono_adopt cfg c _)
+    · exact h
+  | dcClose c => simp only [step]; exact h.mono (mono_begin cfg c)
+  | pcFail c => simp only [step]; exact h.mono (mono_restart c)
+  | arrive c => simp only [step]; exact h.mono (mono_arrive cfg c)
+  | quit c => simp only [step]; exact h.onLeave
+  | srvNote c => simp only [step]; exact h.onNote (by simpa [en] using he)
+
+theorem hinv_reachable {cfg : Cfg} {s : State} (h : Reachable cfg s) : HInv s := by
+  induction h with
+  | init => exact hinv_init
+  | step e _ he ih => exact hinv_step ih e he
+
+/-- **No false goodbye.** On every code, in every reachable state, a side
+    that ended on the friend's goodbye note did so after the friend's
+    session ended: the server hands out only a note an ended side posted,
+    and only to the other page. -/
+theorem heard_only_after_end {cfg : Cfg} {s : State} (h : Reachable cfg s) (c : Cl)
+    (hc : (s.cl c).heard = true) : (s.cl c.other).ph = .ended :=
+  (hinv_reachable h).heard c hc
 
 end WebState.LinkRedial

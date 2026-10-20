@@ -12,6 +12,9 @@
 ##                     {"t":"paired","role":"host"}      first arrival's role
 ##                     {"t":"paired","role":"guest"}     second arrival's role
 ##                     {"t":"peer-closed"}               the other side is gone
+##                     {"t":"bye","why":"left"}          the friend ended the session
+##                                                       this code resumes (POST /bye);
+##                                                       why is "left" or "gave-up"
 ##                     {"t":"error","msg":"..."}         then the socket closes
 ##   After "paired", only {"t":"sdp"} and {"t":"ice"} envelopes are relayed,
 ##   payloads uninspected, within a per-room byte budget; anything else closes
@@ -23,8 +26,16 @@
 ## the stale socket is told peer-closed and rendezvouses again
 ## (formal/WebState/LinkPairing.lean, `regress_paired_with_own_ghost`).
 ##
+## A goodbye note (see server.js for the why):
+##   POST /bye  {"code":"RS...","id":"<page id>","why":"left"|"gave-up"}
+## kept NoteTtl: a friend waiting on the code is told {"t":"bye"} at once, and
+## a later rendezvous on it gets {"t":"bye"} instead of a room. Seats held by
+## the note's own page id are dropped silently and its own late rendezvous is
+## not turned away. Retry codes only (16 characters), never a typed code
+## (formal/WebState/LinkRedial.lean).
+##
 ## No TLS: a reverse proxy terminates wss:// and forwards plain ws://. The
-## request path is ignored, except /oauth (below).
+## request path is ignored, except /oauth (below) and /bye.
 ##
 ## Per-IP limits key on the direct peer address, except when that is localhost
 ## (reverse proxy): then the last X-Forwarded-For entry, the one the trusted
@@ -74,6 +85,11 @@ const
   MaxOAuthPerWindow = 30
   MaxHttpBody = 16 * 1024
   CurlTimeoutSec = 10
+  # Goodbye notes: a friend redials for at most 180 s, starting at most 180 s
+  # after the last thing it heard, so 10 minutes covers every redial.
+  MinNoteCodeLen = 16        # retry codes only
+  MaxNotes = 2000
+  MaxNotesPerWindow = 10     # POST /bye per IP per RzWindowSec
 
 type
   Conn = ref object
@@ -106,6 +122,7 @@ type
 proc hash(c: Conn): Hash = hash(cast[pointer](c)) # identity hash for the live-set
 
 type RzWin = tuple[start: float, count: int] # per-IP rendezvous rate window
+type Note = tuple[id, why: string, until: float] # a goodbye on a retry code
 
 var
   rooms = initTable[string, Room]()
@@ -114,8 +131,15 @@ var
   ipWaiting = initTable[string, int]()  # ip -> unclaimed waiting rooms hosted
   rzWindows = initTable[string, RzWin]() # ip -> rendezvous attempts this window
   oauthWindows = initTable[string, RzWin]() # ip -> token-broker calls this window
+  noteWindows = initTable[string, RzWin]() # ip -> POST /bye this window
+  notes = initTable[string, Note]()     # retry code -> the goodbye left on it
 
 let statsEnabled = getEnv("SIGNAL_STATS") == "1"
+let noteTtl = block:                     # seconds; SIGNAL_NOTE_TTL_MS for tests
+  var v = 600.0
+  try: v = parseInt(getEnv("SIGNAL_NOTE_TTL_MS", "600000")).float / 1000
+  except ValueError: discard
+  v
 let allowedOrigins = block:
   var s = initHashSet[string]()
   for part in getEnv("SIGNAL_ALLOWED_ORIGINS").split(','):
@@ -272,6 +296,46 @@ proc fail(c: Conn, msg: string) {.async.} =
   await c.sendText("""{"t":"error","msg":"""" & msg & "\"}")
   teardown(c)
 
+proc byeJson(why: string): string = $(%*{"t": "bye", "why": why})
+
+proc sayBye(o: Conn, why: string) {.async.} =
+  await o.sendText(byeJson(why))
+  closeSock(o)
+
+# The why of the goodbye on `code` that turns away page `id`, or "": none,
+# expired, or the leaver's own. A string, not a tuple: onText holds it
+# across an await (see the Conn field comment).
+proc noteFor(code, id: string): string =
+  if not notes.hasKey(code): return ""
+  let n = notes[code]
+  if n.until <= epochTime():
+    notes.del code
+    return ""
+  if n.id.len > 0 and n.id == id: return ""
+  n.why
+
+# POST /bye: keep the note, and end the code's room: the leaver's own seats
+# (sockets its page has given up on) go without a word, anyone else is told.
+# false when the note can't be kept.
+proc leaveNote(codeRaw, idRaw, whyRaw: string): bool =
+  let code = normalizeCode(codeRaw)
+  if code.len < MinNoteCodeLen: return false
+  let id = normalizeId(idRaw)
+  let why = if whyRaw == "gave-up": "gave-up" else: "left"
+  if not notes.hasKey(code) and notes.len >= MaxNotes: return false
+  notes[code] = (id: id, why: why, until: epochTime() + noteTtl)
+  if rooms.hasKey(code):
+    let room = rooms[code]
+    rooms.del code
+    if room.guest == nil: dropIp(ipWaiting, room.host.ip)
+    for seat in [room.host, room.guest]:
+      if seat == nil or seat.closed: continue
+      seat.code = ""
+      seat.peer = nil
+      if id.len > 0 and seat.id == id: closeSock(seat)
+      else: asyncCheck sayBye(seat, why)
+  true
+
 proc onText(c: Conn, text: string) {.async.} =
   if c.peer != nil:
     if not rooms.hasKey(c.code): return  # room already torn down; drop
@@ -321,6 +385,12 @@ proc onText(c: Conn, text: string) {.async.} =
     await c.fail("code too short")
     return
   c.id = normalizeId(idRaw)
+  # The friend said goodbye on this code: no room, the goodbye instead.
+  let noteWhy = noteFor(code, c.id)
+  if noteWhy.len > 0:
+    await c.sendText(byeJson(noteWhy))
+    teardown(c)
+    return
   if c.id.len > 0 and rooms.hasKey(code):
     let held = rooms[code]
     var stale: Conn = nil
@@ -510,6 +580,46 @@ proc handleOAuth(c: Conn, meth, path, origin: string,
     if verifier.len > 0: fields.add ("code_verifier", verifier)
     await c.brokerCall(formEncode(fields), origin, true)
 
+# POST /bye (see the header). The body is JSON whatever its Content-Type: a
+# beacon sends text/plain, which needs no preflight.
+proc handleBye(c: Conn, meth, origin: string, contentLength: int) {.async.} =
+  if origin.len > 0 and not originAllowed(origin):
+    await c.httpReply("403 Forbidden", """{"error":"origin"}""", "")
+    return
+  if meth == "OPTIONS":
+    await c.httpReply("204 No Content", "", origin,
+      "Access-Control-Allow-Methods: POST\r\n" &
+      "Access-Control-Allow-Headers: Content-Type\r\n" &
+      "Access-Control-Max-Age: 86400\r\n")
+    return
+  if meth != "POST":
+    await c.httpReply("404 Not Found", """{"error":"not_found"}""", origin)
+    return
+  let ip = c.effectiveIp()
+  let now = epochTime()
+  var w = noteWindows.getOrDefault(ip, (start: now, count: 0))
+  if now - w.start >= RzWindowSec: w = (start: now, count: 0)
+  w.count.inc
+  noteWindows[ip] = w
+  if w.count > MaxNotesPerWindow:
+    await c.httpReply("429 Too Many Requests", """{"error":"rate"}""", origin)
+    return
+  if contentLength < 0 or contentLength > MaxHttpBody:
+    await c.httpReply("413 Payload Too Large", """{"error":"size"}""", origin)
+    return
+  while c.buf.len < contentLength:
+    let chunk = await c.sock.recv(4096)
+    if chunk.len == 0: return
+    c.buf.add chunk
+  var ok = false
+  try:
+    let j = parseJson(c.buf[0 ..< contentLength])
+    if j.kind == JObject:
+      ok = leaveNote(j{"code"}.getStr(""), j{"id"}.getStr(""), j{"why"}.getStr(""))
+  except CatchableError: discard
+  if ok: await c.httpReply("204 No Content", "", origin)
+  else: await c.httpReply("400 Bad Request", """{"error":"bad_request"}""", origin)
+
 proc handshake(c: Conn): Future[bool] {.async.} =
   while true:
     let idx = c.buf.find("\r\n\r\n")
@@ -539,6 +649,9 @@ proc handshake(c: Conn): Future[bool] {.async.} =
           isWs = true
       if not isWs and (path == "/oauth" or path.startsWith("/oauth/")):
         await c.handleOAuth(meth, path, origin, contentLength)
+        return false
+      if not isWs and path == "/bye":
+        await c.handleBye(meth, origin, contentLength)
         return false
       if key.len == 0 or not isWs:
         # Not a WebSocket upgrade: health probe. The room count is only
@@ -642,6 +755,14 @@ proc reaper() {.async.} =
     for ip, w in oauthWindows:
       if now - w.start >= OAuthWindowSec: staleIps.add ip
     for ip in staleIps: oauthWindows.del ip
+    staleIps.setLen 0
+    for ip, w in noteWindows:
+      if now - w.start >= RzWindowSec: staleIps.add ip
+    for ip in staleIps: noteWindows.del ip
+    var gone: seq[string]
+    for code, n in notes:
+      if n.until <= now: gone.add code
+    for code in gone: notes.del code
 
 proc serve(port: Port) {.async.} =
   # buffered = false: Conn.buf does the framing, and asyncnet's buffered read

@@ -1409,6 +1409,7 @@ const rbConnect = async () => {
     resume: null,       // { sid, code } dealt by the host
     resumeOk: false,    // both sides know it: a drop redials instead of ending
     byeIn: false,       // the friend ended it on purpose
+    noteLeft: false,    // our goodbye note is posted (rbLeaveNote)
     lastRx: -1,         // last input frame received from the friend
     sentFrames: new Int32Array(RB_SENT_LOG), // the input log (a ring), for the friend's gap
     sentBits: new Uint16Array(RB_SENT_LOG),
@@ -1849,7 +1850,7 @@ const netPeerGone = (msg) => {
   if (!net) return;
   const started = net.started;
   log("netplay: " + msg);
-  netShutdown();
+  netShutdown({ why: "gave-up" });
   if (started) {
     showToast(msg + " — your game keeps running");
     // Toasts last seconds; a player who was away gets it on return.
@@ -1859,13 +1860,19 @@ const netPeerGone = (msg) => {
   }
 };
 
-// The local game keeps running unlinked once netMode is false.
+// The local game keeps running unlinked once netMode is false. opts.why is
+// the goodbye note's reason: "left" (Disconnect, leaving the page) unless
+// the session failed ("gave-up", from netPeerGone).
 const netShutdown = async (opts) => {
   if (net?.rb) rsStop(net.rb);
   // A deliberate end: the friend mustn't redial.
   if (net?.started && net.rb && !net.rb.byeIn && net.dc?.readyState === "open") {
     try { net.dc.send(new Uint8Array([RB_BYE])); } catch {}
   }
+  // And in case the BYE can't get there (the link is down, or about to be
+  // found down), on the retry code too. Here, before any await: at page
+  // close only this synchronous part runs.
+  if (net?.started && net.rb) rbLeaveNote(net.rb, opts?.why || "left");
   netStallBadge.hidden = true;
   netStallText.textContent = "waiting for peer";
   rbHideAwayCard();
@@ -2152,7 +2159,9 @@ document.addEventListener("visibilitychange", () => {
 // [sid][last input frame received][flags]: each resends the inputs the
 // other missed, both take one pause/2x state from the two RESUMEs' flags,
 // and they play on (formal/WebState/LinkResume.lean). A deliberate end
-// sends BYE first, so the friend doesn't redial. Not offered over the
+// sends BYE first, so the friend doesn't redial, and leaves a goodbye note
+// on the retry code (rbLeaveNote) for a friend the BYE can't reach: one
+// already redialing is told by the server. Not offered over the
 // same-browser path or a manual-code pairing (no server to redial).
 let rbResumeGiveUpMs = 180000;       // then the session ends as before (let: e2e shortens it)
 const RB_RESUME_PAIR_MS = 20000;     // paired, but no channel: dial again
@@ -2197,6 +2206,34 @@ const rbResumeInfoIn = (rb, v, data) => {
 };
 
 const rbCanResume = () => !!(net?.started && net.rb?.resumeOk && !net.rb.byeIn);
+
+// The signaling server over http(s), for the goodbye note.
+const NET_SIGNAL_HTTP = (() => {
+  const m = /^(wss?):\/\/([^/?#]+)/.exec(NET_SIGNAL_URL);
+  return m ? (m[1] === "wss" ? "https://" : "http://") + m[2] : "";
+})();
+
+// The session is ending here and the friend may be redialing (or about to
+// find the link down and redial): leave a goodbye on the retry code. The
+// server tells a friend waiting on it at once, and turns its next
+// rendezvous away with the goodbye for the next 10 minutes, so it ends
+// with "Peer disconnected" ("Couldn't reconnect" for "gave-up") instead of
+// "Reconnecting…" until its own give-up (server.js leaveNote;
+// formal/WebState/LinkRedial.lean). A beacon: it survives the page
+// closing. Not after the friend's own goodbye: it has gone.
+const rbLeaveNote = (rb, why) => {
+  if (!rb.resume || rb.byeIn || rb.noteLeft || !NET_SIGNAL_HTTP) return;
+  rb.noteLeft = true;
+  const body = JSON.stringify({ code: rb.resume.code, id: NET_PAGE_ID, why });
+  const url = NET_SIGNAL_HTTP + "/bye";
+  log("netplay: goodbye note on the retry code (" + why + ")");
+  try {
+    if (navigator.sendBeacon?.(url, body)) return;
+  } catch {}
+  try {
+    fetch(url, { method: "POST", body, keepalive: true, mode: "no-cors" }).catch(() => {});
+  } catch {}
+};
 
 // The input log, a ring: every input sent, in frame order.
 const rbLogSent = (rb, frame, bits) => {
@@ -2360,6 +2397,12 @@ const rsDial = (rb) => {
         // its channel and left the server a round trip before ours opens:
         // leave it to the channel, or the pairing deadline.
         if (!rb.rsDcOpen && !rb.rsSdpIn) rsRestart(rb, "friend left the server");
+      } else if (msg.t === "bye") {
+        // The friend ended the session while the link was down, and left a
+        // goodbye on the code (rbLeaveNote).
+        rb.byeIn = true;
+        log("netplay: redial: the friend " + (msg.why === "gave-up" ? "gave up" : "left"));
+        netPeerGone(msg.why === "gave-up" ? "Couldn't reconnect" : "Peer disconnected");
       } else if (msg.t === "error") {
         rsRestart(rb, "server: " + msg.msg);
       }

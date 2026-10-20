@@ -262,6 +262,59 @@ test("Disconnect while reconnecting: this side plays on solo, the friend gives u
   await done();
 });
 
+// The goodbye note (POST /bye on the retry code): a side that ends while
+// the link is down tells a redialing friend through the server, instead of
+// leaving it on "Reconnecting…" until its 180 s give-up. A's redials can't
+// reach the server here, so B is left waiting on the code.
+const strandA = async (a) => {
+  await a.page.evaluate(() => { window.WebSocket = class { constructor() { throw new Error("offline"); } }; });
+  await a.page.evaluate(() => net.pc.close());
+};
+const waitingOnCode = (p) => netLog(p).then((l) => l.some((t) => t.includes("redial: waiting for the friend")));
+
+test("Disconnect while reconnecting is heard: the friend's redial gets the goodbye",
+     { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  await strandA(a);
+  await until(async () => (await cardTitle(a)) === "Reconnecting…", "A reconnecting", 15000);
+  await until(() => waitingOnCode(b), "B waiting on the retry code", 20000);
+  const t0 = Date.now();
+  await a.page.click("#net-away-disconnect");
+  await a.page.click("#net-away-disconnect");
+  await until(async () => !(await linked(b)), "B told", 10000);
+  assert.ok(Date.now() - t0 < 10000, "well inside B's 180 s give-up");
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  assert.ok((await netLog(b)).some((t) => t.includes("redial: the friend left")), (await netLog(b)).join(" | "));
+  assert.ok((await netLog(a)).some((t) => t.includes("goodbye note on the retry code (left)")));
+  assert.ok(!(await b.page.evaluate(() => rollbackMode)), "B plays on solo");
+  await done();
+});
+
+test("closing the tab while reconnecting is heard too (the note is a beacon)",
+     { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  await strandA(a);
+  await until(async () => (await cardTitle(a)) === "Reconnecting…", "A reconnecting", 15000);
+  await until(() => waitingOnCode(b), "B waiting on the retry code", 20000);
+  await a.page.close({ runBeforeUnload: true });
+  await until(async () => !(await linked(b)), "B told", 10000);
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  await done();
+});
+
+test("a friend's give-up is heard: \"Couldn't reconnect\" at once, not 3 minutes later",
+     { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  await a.page.evaluate(() => { rbResumeGiveUpMs = 6000; });
+  await strandA(a);
+  await until(() => waitingOnCode(b), "B waiting on the retry code", 20000);
+  await until(async () => !(await linked(a)), "A gave up", 15000);
+  await until(async () => !(await linked(b)), "B told", 10000);
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Couldn't reconnect")), (await toasts(b)).join(" | "));
+  assert.ok((await netLog(b)).some((t) => t.includes("redial: the friend gave up")), (await netLog(b)).join(" | "));
+  await done();
+});
+
 test("a shared pause held across a drop stays shared", { skip, timeout: 120000 }, async () => {
   const { a, b, done } = await pair();
   await a.page.evaluate(() => document.getElementById("pause").click());

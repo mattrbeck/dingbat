@@ -714,6 +714,11 @@ matters.
   or a live server socket; nothing ever waits on the 180 s give-up alone.
 - `resume_agrees` (with the fix below): once both are live on one channel,
   with no Pause press or background change since, they agree on pause.
+- `quit_heard` (R6): a side that ended (anything but killed) while its friend
+  is still redialing has always left a goodbye note on the retry code;
+  `quit_heard_next`: with the server keeping notes, the friend's next attempt
+  is answered with it. `heard_only_after_end` (`LinkRedial`): a goodbye only
+  ever reaches a side whose friend has ended.
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
@@ -721,23 +726,22 @@ matters.
 | R3 | Medium (paused together, or stalled, for 3 minutes, then a network blip) | **A long quiet link reads as given up** (`bug_long_quiet_then_drop_ends`). `rbBeginResume` ends at once when the friend has been silent longer than its 180 s give-up, but nothing crosses a link while both are paused: a drop after a 3-minute pause (the trade lobby, a snack) ended both sessions with no redial. | A keepalive: `RB_PING` (15) every 20 s while started and not redialing, on both platforms; older builds ignore the kind. `regress_long_quiet_keepalive`; unit test "a ping keeps the friend's silence clock fresh". |
 | R4 | Low (a close or BYE arriving in a few milliseconds) | **The friend's close during our own Disconnect redialed** (found by the review, not the model: `finish` is atomic there). `netShutdown` puts `net` back for `await rbTeardown()` with the channel still open; its `onclose` (or a BYE) then ran `rbDropped`: a rendezvous socket on the retry code nothing closed, and "Reconnecting…" over a game that had just left the link. iOS clears its session first. | The ending session is marked (`s.ending`); `rbDropped` and `rbMessage` ignore it. Unit test "the friend's close during our own Disconnect's teardown doesn't redial" (fails on d22e0527). |
 | R5 | Hardening | The first channel's `onmessage` (`wireChannel`) had no `net.dc === dc` guard; it relied on browsers dropping messages after `close()`. | Guarded. |
+| R6 | Medium (the moment people give up: Disconnect, or closing the tab, while "Reconnecting…") | **Disconnect while redialing wasn't heard** (`bug_quit_while_redialing_unheard`, `bug_quit_unheard`; trade-off 1 below, before 2026-10-20). With no channel open there was nothing to say BYE on: the friend's card said "Both games are paused and pick up where they left off" for up to 3 minutes, then "Couldn't reconnect", which reads as a network failure. | **A goodbye note** (Matt chose the server change). Every session end of a side that holds the retry code, other than on the friend's own goodbye, posts `POST /bye {code, id, why}` to the signaling server: a beacon on the web (it survives the tab closing), a background-task request on iOS, waited on briefly at app termination. Both servers (server.js and server.nim) keep the note for 10 minutes, on retry codes only (16 characters, never a typed code). A friend waiting on the code is told `{"t":"bye"}` at once, and its later rendezvous gets the same. Seats held by the leaver's page id are dropped silently, and the leaver's own late rendezvous isn't turned away. An empty page id never counts as the leaver's (the model showed that would leave the friend waiting). The friend ends with "Peer disconnected", or "Couldn't reconnect" for a give-up. `regress_quit_while_redialing_heard`, `regress_quit_heard` (the waiting friend, a later rendezvous, the note beating the leaver's own socket close), `witness_quit_mid_pairing`, `quit_heard`, `heard_only_after_end`. web/signaling/server.test.mjs "goodbye notes" (both servers), web/tests/link-bye-note.test.mjs, the e2e cases. Older clients ignore `bye` (they redial until their give-up, as before); an older server answers the POST with its health line. |
 | R2 | Low (inefficiency) | **iOS: back in the foreground mid-pairing restarts it** (`LinkRedial` iOS note). `redialNowIfWaiting` restarted whenever the channel wasn't open, tearing down a pairing about to open (the friend then restarts too). | Only with no pairing (`rsPeer == nil`); a stale pairing is left to its 20 s deadline. |
 
 **Trade-offs a player can see** (by design, each shown by a trace; ranked by
 how confusing they are):
 
-1. *Disconnect while "Reconnecting…" isn't heard* (`quit_while_redialing_strands_friend`).
-   Before a new channel opens there is nothing to say BYE on; the friend
-   keeps the card up for the rest of its 180 s, then "Couldn't reconnect".
-   Same for a page or app killed outright (`kill_strands_friend`). A fix
-   needs the server: e.g. a `bye` the server keeps on the retry code for a
-   few minutes and hands to the next rendezvous.
+1. *Disconnect while "Reconnecting…" isn't heard*: **fixed** by the goodbye
+   note (R6). What is left: a page or app killed outright runs nothing and
+   leaves no note (`kill_strands_friend`), so the friend still redials for
+   its 180 s. On iOS, swiping away a suspended app is such a kill.
 2. *The two give-up clocks drift* (`give_up_clocks_drift`). If a side
    resumes and the new channel dies before its own RESUME lands, that side
-   starts a fresh 180 s while the friend's runs on: the friend says
-   "Couldn't reconnect" while this side shows "Reconnecting…" alone for up
-   to 3 more minutes. Possible fix: a resume that never heard an input from
-   the friend keeps the old `reconnectAt`.
+   starts a fresh 180 s while the friend's runs on. Since R6 the friend's
+   give-up leaves a "gave-up" note, so this side is told at its next
+   rendezvous ("Couldn't reconnect") instead of waiting alone for up to 3
+   more minutes (`regress_give_up_clocks_drift`).
 3. *A Pause pressed during the drop is undone* if the friend kept running
    (`pause_in_drop_undone`; deliberate, so an iPhone's unpause on its return,
    lost with the connection, still gets through). With the fix, a player
@@ -746,8 +750,10 @@ how confusing they are):
    own RESUME went out is the exception: it is newer, and it holds.
 4. *A drop in the first round trip is one-sided* (`start_window_one_sided`).
    The host deals the retry code when the session starts; until the guest's
-   echo is back, only the guest can resume: the host ends at once, the guest
-   redials alone for 180 s.
+   echo is back, only the guest can resume: the host ends at once. Since R6
+   the host, which holds the code it dealt, leaves a "gave-up" note, and the
+   guest's first rendezvous ends it ("Couldn't reconnect") instead of 180 s
+   alone (`regress_start_window_heard`).
 5. *Giving up after the new channel opened reads as a Disconnect*
    (`give_up_reads_as_disconnect`): its BYE tells a friend that just resumed
    "Peer disconnected".

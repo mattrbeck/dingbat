@@ -709,6 +709,91 @@ async function run() {
     }
   });
 
+  // A goodbye note (POST /bye): a page ending a session while its link is
+  // down leaves it on the retry code, and the redialing friend is told
+  // instead of waiting out its give-up (formal/WebState/LinkRedial.lean).
+  console.log('goodbye notes on a retry code:');
+  await withServer(PORT2, { SIGNAL_STATS: '1' }, async (port) => {
+    const A = 'pageA0000000001', B = 'pageB0000000001';
+    const bye = (code, id, why) => httpReq(port, 'POST', '/bye', { code, id, why },
+      { 'Content-Type': 'text/plain;charset=UTF-8' });
+    // The friend waiting on the code is told at once; a later rendezvous too.
+    {
+      const b = await wsConnect(port);
+      b.send({ t: 'rendezvous', code: 'RSNOTE0000000001', id: B });
+      assert((await b.next()).t === 'waiting', 'B waits on the retry code');
+      const r = await bye('RSNOTE0000000001', A, 'left');
+      assert(r.status === 204, 'POST /bye with a text/plain JSON body is taken (204)');
+      const m = await b.next();
+      assert(m.t === 'bye' && m.why === 'left', 'the waiting friend gets {"t":"bye","why":"left"}');
+      await sleep(100);
+      assert(b.isClosed, 'and its socket is closed');
+      assert((await liveRooms(port)) === 0, 'the room is gone');
+      const b2 = await wsConnect(port);
+      b2.send({ t: 'rendezvous', code: 'rsnote0000000001', id: B });
+      const m2 = await b2.next();
+      assert(m2.t === 'bye' && m2.why === 'left', 'a later rendezvous (any case) gets the goodbye, not a room');
+      await sleep(100);
+      assert(b2.isClosed && (await liveRooms(port)) === 0, 'closed, and no room made');
+      const a = await wsConnect(port);
+      a.send({ t: 'rendezvous', code: 'RSNOTE0000000001', id: A });
+      assert((await a.next()).t === 'waiting', 'the leaver\'s own page id is not turned away');
+      a.close();
+      await waitRooms(port, 0);
+    }
+    // The leaver's own seat, paired with the friend, still held (its close
+    // not yet seen): dropped without a word, the friend told.
+    {
+      const a1 = await wsConnect(port);
+      a1.send({ t: 'rendezvous', code: 'RSNOTE0000000002', id: A });
+      await a1.next(); // waiting
+      const b = await wsConnect(port);
+      b.send({ t: 'rendezvous', code: 'RSNOTE0000000002', id: B });
+      await a1.next(); await b.next(); // paired
+      await bye('RSNOTE0000000002', A, 'gave-up');
+      const m = await b.next();
+      assert(m.t === 'bye' && m.why === 'gave-up', 'the friend paired with the leaver\'s stale seat is told, with the reason');
+      await sleep(100);
+      assert(a1.isClosed, 'the leaver\'s stale seat is closed');
+      let quiet = false;
+      try { await a1.next(50); } catch { quiet = true; }
+      assert(quiet, 'without a goodbye of its own');
+      assert((await liveRooms(port)) === 0, 'the room is gone');
+    }
+    // Typed codes take no notes; bad bodies and methods are refused.
+    {
+      assert((await bye('PIKA', A, 'left')).status === 400, 'a short (typed) code takes no note');
+      const p = await wsConnect(port);
+      p.send({ t: 'rendezvous', code: 'PIKA', id: B });
+      assert((await p.next()).t === 'waiting', 'and a rendezvous on it still waits');
+      p.close();
+      const r = await httpReq(port, 'POST', '/bye', null, {});
+      assert(r.status === 400, 'an empty body is refused');
+      assert((await httpReq(port, 'GET', '/bye', null, {})).status === 404, 'GET /bye is not a route');
+      await waitRooms(port, 0);
+    }
+  });
+  console.log('goodbye notes: expiry, origin, rate limit:');
+  await withServer(PORT2, { SIGNAL_NOTE_TTL_MS: '300', SIGNAL_ALLOWED_ORIGINS: 'https://dingbat.gg' },
+    async (port) => {
+      const post = (code, headers = {}) => httpReq(port, 'POST', '/bye',
+        { code, id: 'pageA0000000001', why: 'left' }, headers);
+      assert((await post('RSNOTE0000000003', { Origin: 'https://evil.example' })).status === 403,
+        'a foreign Origin is refused');
+      const r = await post('RSNOTE0000000003', { Origin: 'https://dingbat.gg' });
+      assert(r.status === 204 && r.headers['access-control-allow-origin'] === 'https://dingbat.gg',
+        'the site\'s Origin is taken, with CORS');
+      await sleep(400);
+      const b = await wsConnect(port);
+      b.send({ t: 'rendezvous', code: 'RSNOTE0000000003', id: 'pageB0000000001' });
+      assert((await b.next()).t === 'waiting', 'an expired note turns no one away');
+      b.close();
+      let last = 0;
+      for (let i = 0; i < 9; i++) last = (await post('RSNOTE00000000' + (10 + i))).status;
+      assert(last === 204, 'ten notes a minute from one address are taken');
+      assert((await post('RSNOTE0000000099')).status === 429, 'the eleventh is rate-limited');
+    });
+
   if (failures) { console.error(`\n${failures} assertion(s) failed`); process.exit(1); }
   console.log('\nall signaling room-lifecycle and token-broker tests passed');
 }
