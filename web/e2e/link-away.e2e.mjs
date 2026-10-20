@@ -183,16 +183,24 @@ test("a quick alt-tab flashes no card and toasts nothing", { skip, timeout: 1200
 
 test("a cable that really goes quiet still ends the link at the idle window", { skip, timeout: 120000 }, async () => {
   const { a, b, done } = await pair();
-  await watchToasts(a);
+  await watchToasts(a); await watchToasts(b);
   await a.page.evaluate(() => { window.__cableQuiet = true; });
   await b.page.evaluate(() => { window.__cableQuiet = true; });
   const t0 = Date.now();
-  await until(async () => !(await linked(a)), "A's idle disconnect", 30000);
+  await until(async () => !(await linked(a)) || !(await linked(b)), "an idle disconnect", 30000);
   const after = (Date.now() - t0) / 1000;
   assert.ok(after > 18 && after < 25, `idled out after ${after.toFixed(1)} s`);
-  assert.ok((await netLog(a)).some((t) => t.includes("link idle 20 s")));
-  assert.ok((await toastsSeen(a)).includes("Link idle — disconnected"));
-  await until(async () => !(await linked(b)), "B told", 10000);
+  // Whichever side's idle check runs first ends it and says BYE; the other
+  // is told at once (it may have idled out in the same instant too).
+  await until(async () => !(await linked(a)) && !(await linked(b)), "both ended", 10000);
+  const idled = [];
+  for (const s of [a, b]) if ((await netLog(s)).some((t) => t.includes("link idle 20 s"))) idled.push(s);
+  assert.ok(idled.length >= 1, "a side idled out at the 20 s window");
+  for (const s of idled) assert.ok((await toastsSeen(s)).includes("Link idle — disconnected"));
+  for (const s of [a, b]) {
+    const t = await toastsSeen(s);
+    assert.ok(t.includes("Link idle — disconnected") || t.some((m) => m.startsWith("Peer disconnected")), t.join(" | "));
+  }
   await done();
 });
 
