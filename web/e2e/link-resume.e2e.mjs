@@ -72,7 +72,7 @@ const connect = async ({ page }, code) => {
 };
 
 let codes = 0;
-const pair = async () => {
+const pair = async ({ before } = {}) => {
   web ??= await serveWeb();
   signal?.kill();
   signalPort = 20000 + Math.floor(Math.random() * 20000);
@@ -86,6 +86,7 @@ const pair = async () => {
     args: ["--disable-features=WebRtcHideLocalIpsWithMdns", "--mute-audio"] });
   const code = "RESUMEE2E" + ++codes;
   const a = await player(), b = await player();
+  if (before) await before(a);
   await connect(a, code);
   await until(() => a.page.evaluate(() => net?.ws?.readyState === 1), "A at the server", 10000);
   await sleep(500);
@@ -340,6 +341,27 @@ test("while reconnecting the game holds: Pause and 2x are off, then back", { ski
   assert.deepEqual(await a.page.evaluate(() => [pauseButton.disabled, speed2xButton.disabled]), [false, false]);
   await a.page.evaluate(() => pauseButton.click());
   await until(() => b.page.evaluate(() => paused), "A's Pause reaches B again", 5000);
+  await done();
+});
+
+// Parity with the iOS app: the home screen freezes the friend's game too
+// (it used to leave the friend stalled on "waiting for friend"), and a
+// session starts at normal speed (a 2x left on before Connect ran one side
+// alone at it).
+test("the home screen pauses the friend too, and Resume runs both", { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  await a.page.evaluate(() => showMainMenu());
+  await until(() => b.page.evaluate(() => paused), "B paused with A's home screen", 5000);
+  await a.page.evaluate(() => resumeGame());
+  await until(() => b.page.evaluate(() => !paused), "B running again", 5000);
+  await done();
+});
+
+test("a 2x left on before Connect is off when the session starts", { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair({ before: (p) => p.page.evaluate(() => setSpeed2x(true)) });
+  assert.deepEqual(await a.page.evaluate(() => [speed2x, speed2xButton.classList.contains("active")]),
+    [false, false]);
+  assert.equal(await b.page.evaluate(() => speed2x), false);
   await done();
 });
 

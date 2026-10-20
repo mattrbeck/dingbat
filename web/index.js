@@ -9928,6 +9928,9 @@ const scrubApi = () => {
 };
 
 let reportWasPaused = false;
+// The report's freeze reached the friend (relayHoldPause) and nothing has
+// come from the friend since: closing it owes the friend the run state.
+let reportRelayed = false;
 let reportSamples = 0;
 let reportThumbs = null; // packed BGR555 thumbnails copied out of wasm
 let reportThumbW = 0;
@@ -9987,12 +9990,22 @@ const updateReportPreview = () => {
 
 reportSlider.addEventListener("input", updateReportPreview);
 
+// Linked online, a surface that freezes the game (the home screen, Report
+// a Bug) freezes the friend's too, and giving the game back runs both, as
+// a Pause press does (iOS openSheet / showMainMenu); otherwise the friend
+// stalls at the prediction window with "waiting for friend".
+const relayHoldPause = (on) => {
+  if (rollbackMode && typeof window.rbSendPause === "function") window.rbSendPause(on);
+};
+
 const openReportModal = () => {
   menuDropdown.hidden = true;
   reportWasPaused = takePlayerPause();
   // Freeze so the strip stays the ring's contents (samples are addressed
   // by snapshot ID, so an evicted one goes blank rather than sliding).
   paused = true;
+  reportRelayed = !reportWasPaused && rollbackMode;
+  if (reportRelayed) relayHoldPause(true);
   reportSamples = 0;
   reportThumbs = null;
   const scrub = currentOriginalName ? scrubApi() : null;
@@ -10024,6 +10037,8 @@ const closeReportModal = () => {
   releaseFocus(reportModal);
   reportThumbs = null;
   paused = reportWasPaused; // restore the prior run/pause state
+  if (reportRelayed && !paused) relayHoldPause(false);
+  reportRelayed = false;
 };
 
 document.getElementById("report-bug").addEventListener("click", openReportModal);
@@ -13081,6 +13096,7 @@ window.applyRemotePause = (on) => {
   if (!document.body.classList.contains("running")) return;
   if (reportModal.classList.contains("open")) {
     reportWasPaused = !!on;
+    reportRelayed = false; // closing gives back the friend's own state
     showPauseChoice(!!on);
     return;
   }
@@ -14436,6 +14452,12 @@ window.dumpLinkStates = () => {
 
 // Enter/leave rollback mode (called by netplay.js).
 window.enterRollbackMode = () => {
+  // A session starts at normal speed on both sides (iOS linkWillStart): a
+  // 2x, fast forward or slow motion left on from before Connect would run
+  // this side alone at it, and nothing would tell the friend.
+  if (fastForward) setFastForward(false);
+  if (slowMotion) setSlowMotion(false);
+  if (speed2x) setSpeed2x(false, true);
   // Always (re)init: the session's system (linkIsGb) may differ from before.
   initLinkCanvases();
   localButtons = 0;
@@ -14558,6 +14580,7 @@ const launchLinkRom = async (rom) => {
 const showMainMenu = () => {
   menuDropdown.hidden = true;
   if (!currentRomName && !linkMode) return;
+  if (!playerPaused()) relayHoldPause(true);
   setFrameZoom(1, 0, 0);   // the flight home starts from the whole picture
   // Where the screen is, before it goes: the picture flies from here.
   const from = !linkMode && document.body.classList.contains("running")
@@ -14590,6 +14613,7 @@ const resumeGame = () => {
   // ago must not boot over the game the player just chose to keep playing.
   nextLoadGen();
   paused = false;
+  relayHoldPause(false);
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.remove("paused");

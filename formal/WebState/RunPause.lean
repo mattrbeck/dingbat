@@ -264,7 +264,9 @@ end relproj
 def playerP (p : Pz) : Bool := if p.flight then p.lit else p.paused
 
 /-- togglePause (12082-12085): `paused = !takePlayerPause()`; the relay to the
-peer is not state here. -/
+peer is not state here, nor (since 2026-10-20) the home screen's and Report a
+Bug's (`relayHoldPause`): this side's run state is the same with or without
+them. The pause across the link is `LinkResume`'s. -/
 def togglePause (p : Pz) : Pz :=
   { p with paused := !playerP p, lit := !playerP p, flight := false }
 
