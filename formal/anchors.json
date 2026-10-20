@@ -482,7 +482,7 @@
     "web/netplay.js#netPeerGone": "552088ca9ef05f30",
     "web/netplay.js#rbLeaveNote": "0d38f14d398e2d1d",
     "web/netplay.js#rsDial": "4ca9179c26e03994",
-    "web/netplay.js#rbRenderCard": "58a0ae17f85e6fed",
+    "web/netplay.js#rbRenderCard": "b11bbdf395f0d634",
     "web/netplay.js#rbReconnecting": "bf302bce3e4a5363",
     "web/index.js#togglePause": "3f50fa80ab5be0cd",
     "web/index.js#setSpeed2x": "36002247dd38d785"

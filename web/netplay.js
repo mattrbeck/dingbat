@@ -2074,8 +2074,8 @@ const rbRenderCard = () => {
   // tick), and both sides take pause and 2x from the two RESUMEs: a press
   // now could only be undone then, so there is none to make
   // (formal/WebState/LinkResume.lean regress_no_press_in_drop).
-  pauseButton.disabled = reconnecting;
-  speed2xButton.disabled = reconnecting;
+  /** @type {HTMLButtonElement} */ (pauseButton).disabled = reconnecting;
+  /** @type {HTMLButtonElement} */ (speed2xButton).disabled = reconnecting;
   if (show) {
     netAwayTitle.textContent = reconnecting ? RB_RECONNECT_TITLE : RB_AWAY_TITLE;
     netAwayText.textContent = reconnecting ? RB_RECONNECT_TEXT : RB_AWAY_TEXT;
