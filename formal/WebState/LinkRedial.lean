@@ -124,9 +124,10 @@ see. Retry, pairing deadline and answer timer share one slot (`rsTimer`);
 they are never armed together here (a retry means no socket, a deadline a
 pairing, an answer timer an adopted channel), so nothing changes. And
 coming back to the foreground while redialing restarts at once
-(`redialNowIfWaiting`) unless the channel is open, including mid-pairing
-with the friend's description in hand: no dead end (it arms a retry), but
-it can tear down a pairing that was about to open.
+(`redialNowIfWaiting`). At d22e0527 it did so unless the channel was open,
+mid-pairing too: no dead end (it arms a retry), but it could tear down a
+pairing about to open. It now restarts only with no pairing (`rsPeer`
+nil); a stale pairing is left to its 20 s deadline.
 -/
 namespace WebState.LinkRedial
 

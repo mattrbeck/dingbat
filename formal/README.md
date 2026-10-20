@@ -26,6 +26,8 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 | `Modals` | the focus trap, promise-returning prompts, the clip export's progress panel |
 | `Netplay` | web/netplay.js signaling, redial ladder, channel race, rollback entry/exit |
 | `LinkPairing` | two players on one code: both clients, the signaling server (server.nim / server.js) and the network between them; suspension, unseen socket deaths, the pairing deadline |
+| `LinkResume` | a dropped link resuming: inputs, the input log and RESUME, pause and 2x across a resume, BYE, the give-up clock, what each player sees |
+| `LinkRedial` | the redial on the retry code: both clients, the server, sockets, the pairing/answer/re-rendezvous timers, suspension |
 | `ServiceWorker` | update check, web/sw.js install/activate/fetch, reload on controllerchange, the update a too-new save state asks for |
 
 `FINDINGS.md` ranks every counterexample the web models found.

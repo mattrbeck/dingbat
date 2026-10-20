@@ -4,6 +4,7 @@ import WebState.GameLifecycle
 import WebState.Handoff
 import WebState.LinkPairing
 import WebState.LinkRedial
+import WebState.LinkResume
 import WebState.Modals
 import WebState.Netplay
 import WebState.RunPause

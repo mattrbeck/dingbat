@@ -688,3 +688,84 @@ links two players, and links them again with no press after a first pairing
 that can never open; the second case fails on 29172ad4. It is not in CI's
 e2e shards, which run WebKit only, and WebKit never pairs two of its own
 contexts (it filters host candidates).
+
+## Resuming a dropped link (2026-10-19, d22e0527, `WebState/LinkResume`, `WebState/LinkRedial`)
+
+Matt: "Verify this formally with Lean. This behavior is complicated and even
+the happy case has design tradeoffs that might confuse users." Two models:
+`LinkResume` is the data plane (inputs, RESUME, pause, BYE, the give-up
+clock, what each screen shows; any redial failure is one `restart` event),
+`LinkRedial` the control plane (the retry-code rendezvous on the server,
+sockets, the pairing/answer/re-rendezvous timers, suspension). Both have a
+`Cfg` for the prototype (fd7b0432) where the review changed things, and
+reproduce the review's bugs there (`bug_dead_end`, `bug_linked_close`,
+`bug_early_resume_lost`), which is some evidence the models can see what
+matters.
+
+**Proved** (every reachable state):
+- `inputs_exact`: an input a side reads is exactly the next frame it needs,
+  never past it, never one it has, through any drops, channel deaths,
+  restarts, early messages and one-sided resumes. With deterministic cores,
+  this is why the games stay byte-identical after a resume.
+- `log_covers_gap`: the friend's gap at a RESUME is at most 2 × the 12-frame
+  window = 24 inputs, so the 128-entry log always covers it ("Couldn't resume
+  the link" is unreachable).
+- `no_dead_end` (`LinkRedial`): a redialing side always has an armed timer
+  or a live server socket; nothing ever waits on the 180 s give-up alone.
+- `resume_agrees` (with the fix below): once both are live on one channel,
+  with no Pause press or background change since, they agree on pause.
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| R1 | Medium (a drop while the iPhone is in the background, or a Pause press in the round trip after a channel opens) | **Pause swaps across a resume** (`bug_resume_pause_swap_ios`, `bug_resume_pause_swap_web`). Each side answered the friend's RESUME by sending its own pause state, and the friend applied it, so two answers that differ cross and swap. On the iPhone path, its background pause is lost with the connection; the app won't unpause in the background, says paused; the browser, told the app is paused, keeps running and says running: the browser ends paused, the app running (in the background, and still after it returns). One sees the pause screen, the other a stall, until someone presses Pause twice. | Both sides keep the flags their RESUME carried and set pause and 2x from the two RESUMEs (`rbResumeState` / `NetLink.resumeState`, Lean `finalPause`), sending nothing more. Running wins, except that a side paused and away (hidden tab, app in the background) keeps both paused; slow wins for 2x. A pause change after a side's own RESUME went out (a press, the app going to or coming back from the background) is newer than that decision: it holds and is relayed as an ordinary press (`bug_bg_after_open_ios` → `regress_bg_after_open_ios`: on d22e0527 an app backgrounded in that window ended unpaused in the background). `regress_resume_pause_swap_*`, `resume_agrees`; web/tests/link-resume-pause.test.mjs (6 of its 10 fail on d22e0527); ios/e2e/link-resume.mjs "the app paused in the background across a drop". Builds without the fix still converge with ones with it: only the old side answers, after its RESUME, and the new side takes its answer. |
+| R3 | Medium (paused together, or stalled, for 3 minutes, then a network blip) | **A long quiet link reads as given up** (`bug_long_quiet_then_drop_ends`). `rbBeginResume` ends at once when the friend has been silent longer than its 180 s give-up, but nothing crosses a link while both are paused: a drop after a 3-minute pause (the trade lobby, a snack) ended both sessions with no redial. | A keepalive: `RB_PING` (15) every 20 s while started and not redialing, on both platforms; older builds ignore the kind. `regress_long_quiet_keepalive`; unit test "a ping keeps the friend's silence clock fresh". |
+| R4 | Low (a close or BYE arriving in a few milliseconds) | **The friend's close during our own Disconnect redialed** (found by the review, not the model: `finish` is atomic there). `netShutdown` puts `net` back for `await rbTeardown()` with the channel still open; its `onclose` (or a BYE) then ran `rbDropped`: a rendezvous socket on the retry code nothing closed, and "Reconnecting…" over a game that had just left the link. iOS clears its session first. | The ending session is marked (`s.ending`); `rbDropped` and `rbMessage` ignore it. Unit test "the friend's close during our own Disconnect's teardown doesn't redial" (fails on d22e0527). |
+| R5 | Hardening | The first channel's `onmessage` (`wireChannel`) had no `net.dc === dc` guard; it relied on browsers dropping messages after `close()`. | Guarded. |
+| R2 | Low (inefficiency) | **iOS: back in the foreground mid-pairing restarts it** (`LinkRedial` iOS note). `redialNowIfWaiting` restarted whenever the channel wasn't open, tearing down a pairing about to open (the friend then restarts too). | Only with no pairing (`rsPeer == nil`); a stale pairing is left to its 20 s deadline. |
+
+**Trade-offs a player can see** (by design, each shown by a trace; ranked by
+how confusing they are):
+
+1. *Disconnect while "Reconnecting…" isn't heard* (`quit_while_redialing_strands_friend`).
+   Before a new channel opens there is nothing to say BYE on; the friend
+   keeps the card up for the rest of its 180 s, then "Couldn't reconnect".
+   Same for a page or app killed outright (`kill_strands_friend`). A fix
+   needs the server: e.g. a `bye` the server keeps on the retry code for a
+   few minutes and hands to the next rendezvous.
+2. *The two give-up clocks drift* (`give_up_clocks_drift`). If a side
+   resumes and the new channel dies before its own RESUME lands, that side
+   starts a fresh 180 s while the friend's runs on: the friend says
+   "Couldn't reconnect" while this side shows "Reconnecting…" alone for up
+   to 3 more minutes. Possible fix: a resume that never heard an input from
+   the friend keeps the old `reconnectAt`.
+3. *A Pause pressed during the drop is undone* if the friend kept running
+   (`pause_in_drop_undone`; deliberate, so an iPhone's unpause on its return,
+   lost with the connection, still gets through). With the fix, a player
+   who paused and is away (hidden tab, app in the background) keeps both
+   paused (`fix_paused_and_away_stays_paused`). A press made after a side's
+   own RESUME went out is the exception: it is newer, and it holds.
+4. *A drop in the first round trip is one-sided* (`start_window_one_sided`).
+   The host deals the retry code when the session starts; until the guest's
+   echo is back, only the guest can resume: the host ends at once, the guest
+   redials alone for 180 s.
+5. *Giving up after the new channel opened reads as a Disconnect*
+   (`give_up_reads_as_disconnect`): its BYE tells a friend that just resumed
+   "Peer disconnected".
+6. *The "Trying for m:ss" clocks differ* (`reconnect_clocks_differ`): each
+   counts from its own side's notice of the drop, up to ~16 s apart (WebRTC's
+   disconnected → failed).
+7. *Not the resume's:* two quick Pause presses on one side and one on the
+   other, within a round trip, cross on a live link and split the pause
+   (`pause_presses_cross`, with or without the fix). Versioned pause messages
+   (last press wins) would fix it; rare enough to leave.
+
+Also from the review, left as they are: `paused` includes holds (the picture
+flight, Report a Bug), so a remote unpause during a hold flips the player's
+own choice; that predates the resume and affects a live link too. One run in
+four of the iOS "roles swapped" case still took a 10 s answer-timer detour
+before resuming (liveness, not safety; `no_dead_end` covers it).
+
+Not modelled: real-device iOS suspension timing, the server's rendezvous
+rate limits, the away card's own clock, and liveness in general (the
+`regress_*` and witness traces show recovery for each case, not for every
+schedule; two sides can keep restarting each other until the give-up).
