@@ -102,7 +102,9 @@ test("a Pause pressed after our RESUME went out holds and reaches the friend", a
   redialing(0, { pausedNow: true });
   resumeFrom(0);
   assert.equal(app.runIn("paused"), true);
-  assert.deepEqual(sent().filter((b) => b[0] === RB_PAUSE), [[RB_PAUSE, 1]]);
+  // A press of its own after the decision (the host's press 0 on both
+  // sides): number 1 (link-press-seq.test.mjs).
+  assert.deepEqual(sent().filter((b) => b[0] === RB_PAUSE), [[RB_PAUSE, 1, 0, 0, 0, 1]]);
 });
 
 // The press agreed with the decision anyway: nothing to tell.

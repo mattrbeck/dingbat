@@ -45,7 +45,9 @@ const setup = async () => {
             dc: { readyState: "open", send: (b) => __sent.push(b), close() {} },
             rb: { inited: false, resume: null, resumeOk: false, byeIn: false, lastRx: -1,
                   sentFrames: new Int32Array(128), sentBits: new Uint16Array(128), sentCount: 0,
-                  reconnecting: false, rsEarly: [] } };
+                  reconnecting: false, rsEarly: [],
+                  pauseReg: { on: false, n: 0, host: true },
+                  speedReg: { on: false, n: 0, host: true } } };
     window.rbSendPause = rbSendPause;
     window.rbSendSpeed = rbSendSpeed;
     paused = false;

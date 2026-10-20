@@ -714,6 +714,11 @@ matters.
   or a live server socket; nothing ever waits on the 180 s give-up alone.
 - `resume_agrees` (with the fix below): once both are live on one channel,
   with no Pause press or background change since, they agree on pause.
+- `presses_agree` (R7, numbered presses): whenever both are live on one
+  working channel with no pause press on its way either way, they agree on
+  pause, whatever presses crossed before, on a live link or across any
+  number of resumes. At every moment the two will hold the same winning
+  press once they have read what is in flight (`SCore.conv`).
 - `quit_heard` (R6): a side that ended (anything but killed) while its friend
   is still redialing has always left a goodbye note on the retry code;
   `quit_heard_next`: with the server keeping notes, the friend's next attempt
@@ -727,6 +732,7 @@ matters.
 | R4 | Low (a close or BYE arriving in a few milliseconds) | **The friend's close during our own Disconnect redialed** (found by the review, not the model: `finish` is atomic there). `netShutdown` puts `net` back for `await rbTeardown()` with the channel still open; its `onclose` (or a BYE) then ran `rbDropped`: a rendezvous socket on the retry code nothing closed, and "Reconnecting…" over a game that had just left the link. iOS clears its session first. | The ending session is marked (`s.ending`); `rbDropped` and `rbMessage` ignore it. Unit test "the friend's close during our own Disconnect's teardown doesn't redial" (fails on d22e0527). |
 | R5 | Hardening | The first channel's `onmessage` (`wireChannel`) had no `net.dc === dc` guard; it relied on browsers dropping messages after `close()`. | Guarded. |
 | R6 | Medium (the moment people give up: Disconnect, or closing the tab, while "Reconnecting…") | **Disconnect while redialing wasn't heard** (`bug_quit_while_redialing_unheard`, `bug_quit_unheard`; trade-off 1 below, before 2026-10-20). With no channel open there was nothing to say BYE on: the friend's card said "Both games are paused and pick up where they left off" for up to 3 minutes, then "Couldn't reconnect", which reads as a network failure. | **A goodbye note** (Matt chose the server change). Every session end of a side that holds the retry code, other than on the friend's own goodbye, posts `POST /bye {code, id, why}` to the signaling server: a beacon on the web (it survives the tab closing), a background-task request on iOS, waited on briefly at app termination. Both servers (server.js and server.nim) keep the note for 10 minutes, on retry codes only (16 characters, never a typed code). A friend waiting on the code is told `{"t":"bye"}` at once, and its later rendezvous gets the same. Seats held by the leaver's page id are dropped silently, and the leaver's own late rendezvous isn't turned away. An empty page id never counts as the leaver's (the model showed that would leave the friend waiting). The friend ends with "Peer disconnected", or "Couldn't reconnect" for a give-up. `regress_quit_while_redialing_heard`, `regress_quit_heard` (the waiting friend, a later rendezvous, the note beating the leaver's own socket close), `witness_quit_mid_pairing`, `quit_heard`, `heard_only_after_end`. web/signaling/server.test.mjs "goodbye notes" (both servers), web/tests/link-bye-note.test.mjs, the e2e cases. Older clients ignore `bye` (they redial until their give-up, as before); an older server answers the POST with its health line. |
+| R7 | Low (two presses within a round trip) | **Crossing presses split the pause** (`bug_pause_presses_cross`; trade-off 7 below, before 2026-10-20). Pause and 2x went as "now" messages and each side took whichever arrived last: two quick presses on one side and one on the other, within a round trip, crossed, and each side's last message was the other's. One side showed the pause screen, the other stalled on "waiting for friend" until someone pressed again. Game inputs never had this: they are tagged with their frame. | **Numbered presses** (Matt chose them over tying pause to a frame: frames stand still while paused, so an unpause can't be tied to one). Each press carries a number one past the highest its side has seen; both sides keep the highest, the host's on a tie (`rbPress`/`rbPressIn`, iOS `NetLink.press`/`pressIn`), so they end on the same press whatever order the messages arrive in. A press that loses a crossing is dropped, as if the winner had come a moment later. A resume restarts both counters from the shared decision as the host's press 0. 2x has its own counter. `regress_pause_presses_cross`, `presses_agree`; web/tests/link-press-seq.test.mjs (6 of its 7 fail on 8362053b). Wire: `[kind][on][n u32]`; an older build reads byte 1 only, and its 2-byte messages are applied as before. |
 | R2 | Low (inefficiency) | **iOS: back in the foreground mid-pairing restarts it** (`LinkRedial` iOS note). `redialNowIfWaiting` restarted whenever the channel wasn't open, tearing down a pairing about to open (the friend then restarts too). | Only with no pairing (`rsPeer == nil`); a stale pairing is left to its 20 s deadline. |
 
 **Trade-offs a player can see** (by design, each shown by a trace; ranked by
@@ -768,10 +774,11 @@ how confusing they are):
 6. *The "Trying for m:ss" clocks differ* (`reconnect_clocks_differ`): each
    counts from its own side's notice of the drop, up to ~16 s apart (WebRTC's
    disconnected → failed).
-7. *Not the resume's:* two quick Pause presses on one side and one on the
-   other, within a round trip, cross on a live link and split the pause
-   (`pause_presses_cross`, with or without the fix). Versioned pause messages
-   (last press wins) would fix it; rare enough to leave.
+7. *Crossing presses split the pause*: **fixed** by numbered presses (R7).
+   Two quick Pause presses on one side and one on the other, within a round
+   trip, crossed on a live link and split the pause
+   (`bug_pause_presses_cross`). Now both sides end on the highest-numbered
+   press; the press that lost is dropped (`presses_agree`).
 
 Also from the review, left as they are: `paused` includes holds (the picture
 flight, Report a Bug), so a remote unpause during a hold flips the player's

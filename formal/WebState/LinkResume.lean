@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/netplay.js: rbOfferResume rbResumeInfoIn rbCanResume rbLogSent rbDropped rbBeginResume rsDetach rsRestart rsStop rsAdopt rsResumeIn rbResumeState rbStartIfReady rbSendInput rbSendInputWire rbSend rbSendPause rbMessage netShutdown netPeerGone rbLeaveNote rsDial rbRenderCard rbReconnecting
+-- @models web/netplay.js: rbOfferResume rbResumeInfoIn rbCanResume rbLogSent rbDropped rbBeginResume rsDetach rsRestart rsStop rsAdopt rsResumeIn rbResumeState rbStartIfReady rbSendInput rbSendInputWire rbSend rbSendPause rbNewReg rbBeats rbPress rbPressIn rbMessage netShutdown netPeerGone rbLeaveNote rsDial rbRenderCard rbReconnecting
 -- @models web/index.js: togglePause setSpeed2x
 
 /-
@@ -40,6 +40,12 @@ no RESUME in 10 s, ICE failure, the server dropping a socket) is one
   code, other than on the friend's goodbye, posts one (`shutdown`); with
   `note`, a redialing friend's rendezvous is answered with it (`noteIn`).
   Off: the server at d22e0527, which keeps none.
+* `seq`: numbered presses (`rbPress`, `rbPressIn`; iOS `NetLink.press`,
+  `pressIn`). Each pause press carries a number one past the highest its
+  side has seen (`press`), and a friend's press is taken only if it beats
+  the one held (`Reg.beats`: a higher number, or the same number from the
+  host); a resume restarts both from the shared decision as the host's
+  press 0. Off: through 8362053b, where whichever message arrived last won.
 
 ## What is modelled
 
@@ -73,8 +79,9 @@ no RESUME in 10 s, ICE failure, the server dropping a socket) is one
   (it may open and close at once).
 * The early messages are put back in front of the channel's queue at the
   open and read before any other event, which is what replaying them is.
-* 2x is the same code as pause with "slow wins" and no background case;
-  away (RB_AWAY) is only the card it shows, so neither is modelled.
+* 2x is the same code as pause with "slow wins" and no background case
+  (its own register, `rb.speedReg`); away (RB_AWAY) is only the card it
+  shows, so neither is modelled.
 * The goodbye note reaches the server as the side ends, and is read by a
   redialing friend between attempts (`noteIn`: dialing or waiting on the
   code; a pairing in hand fails or opens first). The beacon in flight, the
@@ -142,10 +149,19 @@ Refuted on d22e0527 (`bug_*`), fixed, and proved for the fix:
   With `Cfg.freeze` the game is held while redialing and Pause and 2x are
   off (`no_press_in_drop`), so there is no press to undo
   (`regress_no_press_in_drop`); a pause both had at the drop stays.
+* `bug_pause_presses_cross` (trade-off, through 8362053b; not the
+  resume's): two Pause presses on one side and one on the other, within a
+  round trip, crossed on a live link and split the pause, each side
+  taking whichever message arrived last. With numbered presses
+  (`Cfg.seq`), `presses_agree` (`SInv`, `sinv_reachable`): whenever both
+  are live on one working channel with no press on its way either way,
+  both are paused or both running, whatever presses crossed before, on a
+  live link or across any number of resumes. Stronger, at every moment
+  the two will hold the same press once they have read what is on its way
+  (`SCore.conv`). `regress_pause_presses_cross` replays the trace.
 
 Shown by trace, as designed but worth knowing (`FINDINGS.md`):
-`pause_presses_cross` (not the resume's: double presses crossing on a live
-link split the pause, with or without the fix), `pause_in_drop_undone`,
+`pause_in_drop_undone`,
 `fix_paused_and_away_stays_paused` (now only for the iPhone's background
 pause and a hidden tab: a press can't happen), `kill_strands_friend` (the note can't
 help: nothing runs), `quit_after_open_reaches_friend`,
@@ -183,7 +199,7 @@ inductive Msg where
   | info                                   -- RB_RESUME_INFO [sid][retry code]
   | inp (f : Nat)                          -- RB_INPUT [frame][bits]
   | resume (rx : Nat) (p : Bool) (a : Bool) -- RB_RESUME: rx = lastRx + 1; flags 2 (paused), 1 (away)
-  | pause (on : Bool)                      -- RB_PAUSE
+  | pause (on : Bool) (n : Nat)            -- RB_PAUSE [on][n]: the press's number (the sender is its author)
   | bye                                    -- RB_BYE
   | ping                                   -- RB_PING (the fix's keepalive)
   deriving DecidableEq, Repr
@@ -191,6 +207,21 @@ inductive Msg where
 def Msg.isResume : Msg → Bool
   | .resume .. => true
   | _ => false
+
+/-- A pause press, as the numbered presses keep it (`rb.pauseReg`): its
+    number, whether the host (A) made it, and the state it asks for. -/
+structure Reg where
+  n   : Nat
+  byA : Bool
+  on  : Bool
+  deriving DecidableEq, Repr
+
+/-- `rbPressBeats`: a higher number wins; the same number, the host's. -/
+def Reg.beats (x y : Reg) : Bool := decide (x.n > y.n) || (x.n == y.n && x.byA && !y.byA)
+
+/-- What both sides start a session on, and reset to on a resume: number 0,
+    the host's. -/
+def Reg.base (on : Bool) : Reg := ⟨0, true, on⟩
 
 structure Chan where
   q      : Cl → List Msg := fun _ => []   -- in flight to each side, in order
@@ -232,6 +263,7 @@ structure Side where
   paused  : Bool := false        -- paused (web) / GameSession.paused (iOS)
   away    : Bool := false        -- document.hidden (web) / in the background (iOS)
   pfb     : Bool := false        -- iOS GameSession.pausedForBackground
+  reg     : Reg := Reg.base false -- rb.pauseReg: the winning press (read only with `Cfg.seq`)
   since   : Nat := 0             -- rb.reconnectAt
   lastMsg : Nat := 0             -- rb.lastMsgAt
   -- ghosts: no JS variable
@@ -248,23 +280,27 @@ structure Cfg where
   iosB   : Bool
   note   : Bool
   freeze : Bool
+  seq    : Bool
   deriving DecidableEq, Repr
 
 /-- d22e0527, both sides web. -/
-def Cfg.web : Cfg := ⟨true, false, false, false, false⟩
+def Cfg.web : Cfg := ⟨true, false, false, false, false, false⟩
 /-- d22e0527, B the iPhone app. -/
-def Cfg.ios : Cfg := ⟨true, false, true, false, false⟩
+def Cfg.ios : Cfg := ⟨true, false, true, false, false, false⟩
 /-- With the pause fix (7b970ead). -/
-def Cfg.webFix : Cfg := ⟨true, true, false, false, false⟩
-def Cfg.iosFix : Cfg := ⟨true, true, true, false, false⟩
+def Cfg.webFix : Cfg := ⟨true, true, false, false, false, false⟩
+def Cfg.iosFix : Cfg := ⟨true, true, true, false, false, false⟩
 /-- With the goodbye note too (b94cc418). -/
-def Cfg.webNote : Cfg := ⟨true, true, false, true, false⟩
-def Cfg.iosNote : Cfg := ⟨true, true, true, true, false⟩
-/-- With the game held while redialing: the current code. -/
-def Cfg.webNow : Cfg := ⟨true, true, false, true, true⟩
-def Cfg.iosNow : Cfg := ⟨true, true, true, true, true⟩
+def Cfg.webNote : Cfg := ⟨true, true, false, true, false, false⟩
+def Cfg.iosNote : Cfg := ⟨true, true, true, true, false, false⟩
+/-- With the game held while redialing (1d493ac0). -/
+def Cfg.webNow : Cfg := ⟨true, true, false, true, true, false⟩
+def Cfg.iosNow : Cfg := ⟨true, true, true, true, true, false⟩
+/-- With numbered presses: the current code. -/
+def Cfg.webSeq : Cfg := ⟨true, true, false, true, true, true⟩
+def Cfg.iosSeq : Cfg := ⟨true, true, true, true, true, true⟩
 /-- fd7b0432's iOS port: messages before the open dropped. -/
-def Cfg.noEarly : Cfg := ⟨false, false, false, false, false⟩
+def Cfg.noEarly : Cfg := ⟨false, false, false, false, false, false⟩
 
 structure State where
   sd     : Cl → Side
@@ -337,6 +373,12 @@ def leaveNote (c : Cl) (w : End) (x : Side) (s : State) : State :=
 def shutdown (c : Cl) (w : End) (s : State) : State :=
   leaveNote c w (s.sd c) (finish c w (if (s.sd c).bye then s else send c .bye s))
 
+/-- `rbSendPause` / `NetLink.sendPause`: a press, numbered one past the
+    highest this side has seen; it becomes this side's winning press. -/
+def press (c : Cl) (p : Bool) (s : State) : State :=
+  let n := (s.sd c).reg.n + 1
+  updS c (fun y => { y with reg := ⟨n, c == .a, p⟩ }) (send c (.pause p n) s)
+
 /-- `setPaused(p, relay)` (iOS) / `togglePause` (web): set the state, relay
     it unless it came from the friend or the link is redialing
     (`rbSendPause` returns while `reconnecting`). -/
@@ -344,7 +386,7 @@ def setPaused (c : Cl) (p relay : Bool) (s : State) : State :=
   if (s.sd c).paused = p then s
   else
     let s := updS c (fun y => { y with paused := p, pfb := false }) s
-    if relay && (s.sd c).ph == .live then send c (.pause p) s else s
+    if relay && (s.sd c).ph == .live then press c p s else s
 
 /-- `applyRemotePause` (web) / `GameSession.remotePause` (iOS): match the
     friend, without echoing. -/
@@ -366,7 +408,7 @@ def pauseAfterResume (cfg : Cfg) (c : Cl) (p a : Bool) (s : State) : State :=
       -- out: newer than that decision, it holds, and is relayed like any
       -- press (c is live now).
       let s := updS c (fun y => { y with livePress := y.livePress || y.ph == .live }) s
-      if x.paused != final then send c (.pause x.paused) s else s
+      if x.paused != final then press c x.paused s else s
     else remotePause c final s
   else
     -- d22e0527: a side that says it's running unpauses this one, never the
@@ -375,7 +417,7 @@ def pauseAfterResume (cfg : Cfg) (c : Cl) (p a : Bool) (s : State) : State :=
     let x := s.sd c
     let ios := cfg.iosB && c == .b
     let s := if !p && x.paused && !(ios && x.away) then remotePause c false s else s
-    send c (.pause (s.sd c).paused) s
+    send c (.pause (s.sd c).paused 0) s
 
 /-- `rsResumeIn`: the friend's RESUME with its `lastRx + 1` = `t`. -/
 def resumeIn (cfg : Cfg) (c : Cl) (t : Nat) (p a : Bool) (s : State) : State :=
@@ -383,6 +425,9 @@ def resumeIn (cfg : Cfg) (c : Cl) (t : Nat) (p a : Bool) (s : State) : State :=
   if !(x.ph == .recon && x.res && x.rsOpen) then s
   else if x.sent > t + LOG then shutdown c .noResume s
   else
+    -- Both registers restart from the decision both sides make from the
+    -- same two RESUMEs (`finalPause`), as the host's press number 0.
+    let s := updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) }) s
     -- rsStop: redialing stops; the adopted channel stays the session's.
     let s := updS c (fun y => { y with ph := .live, rsPc := none }) s
     -- The friend's gap, from the log, in order.
@@ -402,7 +447,13 @@ def recv (cfg : Cfg) (c : Cl) (m : Msg) (s : State) : State :=
     updS c (fun y => { y with rx := max y.rx (f + 1), gap := y.gap || decide (f > y.rx),
                               dup := y.dup || decide (f < y.rx) }) s
   | .resume t p a => resumeIn cfg c t p a s
-  | .pause v => remotePause c v s
+  | .pause v n =>
+    -- Numbered: taken only if it beats the press this side holds (the
+    -- friend made it). Before: whatever arrives last.
+    if cfg.seq then
+      let r : Reg := ⟨n, c.other == .a, v⟩
+      if r.beats (s.sd c).reg then remotePause c v (updS c (fun y => { y with reg := r }) s) else s
+    else remotePause c v s
   | .bye => shutdown c .peerBye (updS c (fun y => { y with bye := true }) s)
   | .ping => s
 
@@ -781,15 +832,31 @@ theorem regress_bg_after_open_ios :
   decide
 
 /-- Not the resume's: two Pause presses on one side and one on the other,
-    within a round trip, cross on a live link and leave A paused, B running.
-    The same with the fix. -/
-theorem pause_presses_cross :
+    within a round trip, cross on a live link and leave A paused, B running:
+    each side took whichever arrived last, and each one's last was the
+    other's. The same with the pause fix and the hold (8362053b). -/
+theorem bug_pause_presses_cross :
     witnesses .web (handshake ++
       [.toggle .a, .toggle .a, .toggle .b, .deliver .b 0, .deliver .b 0, .deliver .a 0])
       (fun s => pausedOf s .a && !pausedOf s .b) = true ∧
-    witnesses .webFix (handshake ++
+    witnesses .webNow (handshake ++
       [.toggle .a, .toggle .a, .toggle .b, .deliver .b 0, .deliver .b 0, .deliver .a 0])
-      (fun s => pausedOf s .a && !pausedOf s .b) = true := by
+      (fun s => pausedOf s .a && !pausedOf s .b && ((s.ch 0).q .a).isEmpty &&
+                ((s.ch 0).q .b).isEmpty) = true := by
+  decide
+
+/-- With numbered presses: A's presses are #1 (pause) and #2 (resume), B's
+    is #1 (pause). B takes A's #1 (the same number, the host's) and then
+    its #2; A drops B's #1, older than its own #2. Both run, as A's last
+    press asked. `presses_agree` is the general statement. -/
+theorem regress_pause_presses_cross :
+    witnesses .webSeq (handshake ++
+      [.toggle .a, .toggle .a, .toggle .b, .deliver .b 0, .deliver .b 0, .deliver .a 0])
+      (fun s => !pausedOf s .a && !pausedOf s .b && ((s.ch 0).q .a).isEmpty &&
+                ((s.ch 0).q .b).isEmpty) = true ∧
+    witnesses .iosSeq (handshake ++
+      [.toggle .a, .toggle .a, .toggle .b, .deliver .b 0, .deliver .b 0, .deliver .a 0])
+      bothPlaying = true := by
   decide
 
 /-! ### Design trade-offs a player can see -/
@@ -1257,6 +1324,10 @@ theorem Inv.sendAll_misc {s : State} {c : Cl} {ms : List Msg} (h : Inv s)
 
 /-! ### Pause, away, and the other fields outside the core -/
 
+theorem Inv.press {s : State} {c : Cl} {p : Bool} (h : Inv s) : Inv (press c p s) := by
+  unfold LinkResume.press
+  exact (h.send_misc rfl rfl).updS_noncore (fun y => rfl)
+
 theorem Inv.setPaused {s : State} {c : Cl} {p r : Bool} (h : Inv s) : Inv (setPaused c p r s) := by
   unfold LinkResume.setPaused
   split
@@ -1265,7 +1336,7 @@ theorem Inv.setPaused {s : State} {c : Cl} {p r : Bool} (h : Inv s) : Inv (setPa
       h.updS_noncore (fun y => rfl)
     dsimp only
     split
-    · exact h'.send_misc rfl rfl
+    · exact h'.press
     · exact h'
 
 theorem Inv.remotePause {s : State} {c : Cl} {v : Bool} (h : Inv s) : Inv (remotePause c v s) :=
@@ -1280,7 +1351,7 @@ theorem Inv.pauseAfterResume {s : State} {cfg : Cfg} {c : Cl} {p a : Bool} (h : 
     · have h1 : Inv (updS c (fun y => { y with livePress := y.livePress || y.ph == .live }) s) :=
         h.updS_noncore (fun y => rfl)
       split
-      · exact h1.send_misc rfl rfl
+      · exact h1.press
       · exact h1
     · exact h.remotePause
   · have : Inv (if !p && (s.sd c).paused && !(cfg.iosB && c == .b && (s.sd c).away) then
@@ -2453,11 +2524,17 @@ theorem Inv.deliver {cfg : Cfg} {s : State} {c : Cl} {k : Nat} (h : Inv s) :
           have h1 : Inv (popQ k c rest s) := h.pop hq (fun _ => rfl)
           simp only [recv]
           refine Inv.updS_noncore ?_ h1; intro y; rfl
-        | pause v =>
+        | pause v n =>
           have h1 : Inv (popQ k c rest s) := h.pop hq (fun _ => rfl)
+          have h2 := h1.updS_noncore (c := c) (f := fun y => { y with lastMsg := (popQ k c rest s).now })
+            (fun y => rfl)
           simp only [recv]
-          refine Inv.remotePause ?_
-          refine Inv.updS_noncore ?_ h1; intro y; rfl
+          split
+          · split
+            · exact (h2.updS_noncore (c := c) (f := fun y => { y with reg := ⟨n, c.other == .a, v⟩ })
+                (fun y => rfl)).remotePause
+            · exact h2
+          · exact h2.remotePause
         | bye =>
           have h1 : Inv (popQ k c rest s) := h.pop hq (fun _ => rfl)
           simp only [recv]
@@ -2493,9 +2570,18 @@ theorem Inv.deliver {cfg : Cfg} {s : State} {c : Cl} {k : Nat} (h : Inv s) :
                 · exact hdo
                 · have := hinv.silent c.other k ho' (by simpa [cs_apply] using hdo)
                   simp only [Cl.other_other] at this; rw [this] at hmem; cases hmem
+              have h3 := h2.updS_noncore (c := c)
+                (f := fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) }) (fun y => rfl)
               refine Inv.pauseAfterResume ?_
-              exact h2.resumeLive (by simpa using hr) (by simpa using hd)
-                (by simpa [cs_apply] using ht) hod (fun y => rfl)
+              have h4 := h3.resumeLive (c := c) (k := k) (t := t)
+                (g := fun y => { y with ph := .live, rsPc := none })
+                (by simpa using hr) (by simpa using hd)
+                (by simpa [cs_apply] using ht)
+                (fun ho => by simpa using hod (by simpa [hdC, cs_apply] using ho)) (fun y => rfl)
+              rw [show ∀ (S : State) (f : Side → Side), (∀ y, (f y).sent = y.sent) →
+                ((updS c f S).sd c).sent = (S.sd c).sent from fun S f hf => by simp [hf]] at h4
+              · exact h4
+              · intro y; rfl
       · split
         · rename_i hd hrs
           split
@@ -2823,7 +2909,7 @@ side since, is paused exactly when `finalPause` of the flags says so. -/
 
 /-- The part of a message the pause argument reads. -/
 def Msg.pr : Msg → Option Msg
-  | .pause v => some (.pause v)
+  | .pause v _ => some (.pause v 0)
   | .resume _ p a => some (.resume 0 p a)
   | _ => none
 
@@ -2832,7 +2918,7 @@ def pinb (s : State) (c : Cl) (k : Nat) : List Msg := (inbC s.cs s.ch c k).filte
 structure PInv (s : State) : Prop where
   resFlags  : ∀ c k p a, Msg.resume 0 p a ∈ pinb s c k → hdC s.cs c k →
                 p = (s.sd c.other).fP ∧ a = (s.sd c.other).fA
-  pauseFrom : ∀ c k v, Msg.pause v ∈ pinb s c k → hdC s.cs c k → (s.sd c.other).livePress = true
+  pauseFrom : ∀ c k v, Msg.pause v 0 ∈ pinb s c k → hdC s.cs c k → (s.sd c.other).livePress = true
   agree     : ∀ c k, (s.sd c).ph = .live → (s.sd c).dc = some k → hdC s.cs c.other k →
                 (s.sd c).livePress = false → (s.sd c.other).livePress = false →
                 (s.sd c).paused = finalPause (s.sd c).fP (s.sd c).fA (s.sd c.other).fP (s.sd c.other).fA
@@ -3100,6 +3186,37 @@ theorem PInv.markPress {s : State} {c : Cl} {f : Side → Side}
       (tc e.other).2.2.2.2.2.1]
     exact h.agree e k hl hk ho h1.1 h2.1
 
+/-- A pause message from a side that has pressed: nothing claimed about it,
+    and the friend may take it. -/
+theorem PInv.sendPause_lp {s : State} {c : Cl} {v : Bool} {n : Nat} (h : PInv s)
+    (hlp : (s.sd c).livePress = true) : PInv (send c (.pause v n) s) := by
+  rcases send_cases c (.pause v n) s with heq | ⟨k, hk, -, -, heq⟩
+  · rw [heq]; exact h
+  · rw [heq]
+    refine ⟨fun e k' p a hm' he => ?_, fun e k' w hm' he => ?_, fun e k' hl2 hk2 ho h1' h2' => ?_⟩
+    · rw [pinb_appendQ] at hm'; simp only [appendQ_sd, appendQ_cs] at he ⊢
+      split at hm'
+      · simp [Msg.pr] at hm'; exact h.resFlags e k' p a hm' he
+      · exact h.resFlags e k' p a hm' he
+    · rw [pinb_appendQ] at hm'; simp only [appendQ_sd, appendQ_cs] at he ⊢
+      split at hm'
+      · rename_i hjk; obtain ⟨rfl, he2⟩ := hjk
+        simp only [List.mem_append, List.filterMap_cons, Msg.pr, List.filterMap_nil,
+          List.mem_singleton] at hm'
+        rcases hm' with hm' | hm'
+        · exact h.pauseFrom e k' w hm' he
+        · have : e.other = c := by rw [he2]; simp
+          rw [this]; exact hlp
+      · exact h.pauseFrom e k' w hm' he
+    · simp only [appendQ_sd, appendQ_cs] at hl2 hk2 ho h1' h2' ⊢
+      exact h.agree e k' hl2 hk2 ho h1' h2'
+
+theorem PInv.press_lp {s : State} {c : Cl} {v : Bool} (h : PInv s)
+    (hlp : (s.sd c).livePress = true) : PInv (press c v s) := by
+  unfold LinkResume.press
+  exact (h.sendPause_lp (n := (s.sd c).reg.n + 1) (v := v) hlp).updS_np (c := c)
+    (f := fun y => { y with reg := ⟨(s.sd c).reg.n + 1, c == .a, v⟩ }) (fun y => rfl)
+
 /-- A press already marked: the state changes and is relayed if live. -/
 theorem PInv.setPaused_pressed {s : State} {c : Cl} {v : Bool} (h : PInv s)
     (hm : (s.sd c).ph = .live → (s.sd c).livePress = true) : PInv (setPaused c v true s) := by
@@ -3136,31 +3253,9 @@ theorem PInv.setPaused_pressed {s : State} {c : Cl} {v : Bool} (h : PInv s)
           rw [hoc] at this; exact this
     split
     · rename_i hl
-      -- the relayed pause: from a pressed side
-      rcases send_cases c (.pause v) (updS c (fun y => { y with paused := v, pfb := false }) s) with
-        heq | ⟨k, hk, -, -, heq⟩
-      · rw [heq]; exact h1
-      · rw [heq]
-        have hl' : (s.sd c).ph = .live := by simpa using hl
-        have hlp := hm hl'
-        have hk' : (s.sd c).dc = some k := by simpa using hk
-        refine ⟨fun e k' p a hm' he => ?_, fun e k' w hm' he => ?_, fun e k' hl2 hk2 ho h1' h2' => ?_⟩
-        · rw [pinb_appendQ] at hm'; simp only [appendQ_sd, appendQ_cs] at he ⊢
-          split at hm'
-          · simp [Msg.pr] at hm'; exact h1.resFlags e k' p a hm' he
-          · exact h1.resFlags e k' p a hm' he
-        · rw [pinb_appendQ] at hm'; simp only [appendQ_sd, appendQ_cs] at he ⊢
-          split at hm'
-          · rename_i hjk; obtain ⟨rfl, he2⟩ := hjk
-            simp only [List.mem_append, List.filterMap_cons, Msg.pr, List.filterMap_nil,
-              List.mem_singleton] at hm'
-            rcases hm' with hm' | hm'
-            · exact h1.pauseFrom e k' w hm' he
-            · have : e.other = c := by rw [he2]; simp
-              rw [this]; simp [hlp]
-          · exact h1.pauseFrom e k' w hm' he
-        · simp only [appendQ_sd, appendQ_cs] at hl2 hk2 ho h1' h2' ⊢
-          exact h1.agree e k' hl2 hk2 ho h1' h2'
+      -- the relayed press: from a pressed side
+      have hl' : (s.sd c).ph = .live := by simpa using hl
+      exact h1.press_lp (by simpa using hm hl')
     · exact h1
 
 theorem PInv.toggle {cfg : Cfg} {s : State} {c : Cl} (h : PInv s) : PInv (step cfg s (.toggle c)) := by
@@ -3343,38 +3438,13 @@ theorem PInv.resumeFix {s : State} {c : Cl} {k t : Nat} {p a : Bool} {g : Side �
       simp only [cs_apply, core_rsPc, core_early, updS_sd, updS_ch]
       split <;> simp_all <;> rfl
 
-/-- A pause message from a side that has pressed: nothing claimed about it,
-    and the friend may take it. -/
-theorem PInv.sendPause_lp {s : State} {c : Cl} {v : Bool} (h : PInv s)
-    (hlp : (s.sd c).livePress = true) : PInv (send c (.pause v) s) := by
-  rcases send_cases c (.pause v) s with heq | ⟨k, hk, -, -, heq⟩
-  · rw [heq]; exact h
-  · rw [heq]
-    refine ⟨fun e k' p a hm' he => ?_, fun e k' w hm' he => ?_, fun e k' hl2 hk2 ho h1' h2' => ?_⟩
-    · rw [pinb_appendQ] at hm'; simp only [appendQ_sd, appendQ_cs] at he ⊢
-      split at hm'
-      · simp [Msg.pr] at hm'; exact h.resFlags e k' p a hm' he
-      · exact h.resFlags e k' p a hm' he
-    · rw [pinb_appendQ] at hm'; simp only [appendQ_sd, appendQ_cs] at he ⊢
-      split at hm'
-      · rename_i hjk; obtain ⟨rfl, he2⟩ := hjk
-        simp only [List.mem_append, List.filterMap_cons, Msg.pr, List.filterMap_nil,
-          List.mem_singleton] at hm'
-        rcases hm' with hm' | hm'
-        · exact h.pauseFrom e k' w hm' he
-        · have : e.other = c := by rw [he2]; simp
-          rw [this]; exact hlp
-      · exact h.pauseFrom e k' w hm' he
-    · simp only [appendQ_sd, appendQ_cs] at hl2 hk2 ho h1' h2' ⊢
-      exact h.agree e k' hl2 hk2 ho h1' h2'
-
 /-- With the fix, when c's pause changed after its RESUME went out: c keeps
     it, counts as having pressed, and relays it if the friend decided
     otherwise. -/
 theorem PInv.resumePress {s : State} {c : Cl} {k t : Nat} {g : Side → Side} {v : Bool} (hi : Inv s)
     (h : PInv s) (hr : (s.sd c).ph = .recon) (hdc : (s.sd c).dc = some k)
     (hg : ∀ y, g y = { y with ph := .live, rsPc := none }) (snd : Bool) :
-    PInv ((fun S => if snd then send c (.pause v) S else S)
+    PInv ((fun S => if snd then press c v S else S)
       (updS c (fun y => { y with livePress := y.livePress || y.ph == .live })
         (sendAll c (frames t (s.sd c).sent) (updS c g s)))) := by
   have hdc' : (s.cs c).dc = some k := by simpa [cs_apply] using hdc
@@ -3465,7 +3535,7 @@ theorem PInv.resumePress {s : State} {c : Cl} {k t : Nat} {g : Side → Side} {v
         simp [hoc] at h2
   cases snd
   · exact hT
-  · exact hT.sendPause_lp (by simp [updS_sd_self, h3])
+  · exact hT.press_lp (by simp [updS_sd_self, h3])
 
 /-- A message for the pairing c is still opening goes to `rsEarly`. -/
 theorem PInv.earlyPush {s : State} {c : Cl} {k : Nat} {m : Msg} {rest : List Msg} (h : PInv s)
@@ -3540,13 +3610,19 @@ theorem PInv.deliver {cfg : Cfg} (hfix : cfg.fix = true) {s : State} {c : Cl} {k
         | ping =>
           simp only [recv]
           refine PInv.updS_np ?_ hp1; intro y; rfl
-        | pause v =>
+        | pause v n =>
           have h2 : PInv (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s)) := by
             refine PInv.updS_np ?_ hp1; intro y; rfl
           have hlp := h.pauseFrom c k v (hmem _ (by simp [Msg.pr]) rfl) hc
           simp only [recv]
-          refine PInv.setPaused_lpOther h2 ?_
-          rw [updS_sd_other]; exact hlp
+          split
+          · split
+            · refine PInv.setPaused_lpOther (h2.updS_np (c := c)
+                (f := fun y => { y with reg := ⟨n, c.other == .a, v⟩ }) (fun y => rfl)) ?_
+              rw [updS_sd_other, updS_sd_other]; exact hlp
+            · exact h2
+          · refine PInv.setPaused_lpOther h2 ?_
+            rw [updS_sd_other]; exact hlp
         | bye =>
           simp only [recv]
           refine PInv.shutdown ?_
@@ -3572,18 +3648,38 @@ theorem PInv.deliver {cfg : Cfg} (hfix : cfg.fix = true) {s : State} {c : Cl} {k
             · have hr : (s.sd c).ph = .recon := by
                 simp only [Bool.not_eq_true', Bool.not_eq_false, Bool.and_eq_true, beq_iff_eq] at hg
                 simpa using hg.1.1
+              -- the registers' reset touches nothing the pause argument reads
+              have hi3 := hi2.updS_noncore (c := c)
+                (f := fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) }) (fun y => rfl)
+              have h3 := h2.updS_np (c := c)
+                (f := fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) }) (fun y => rfl)
+              rw [show ((updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s)).sd c).sent
+                = ((updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) })
+                    (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s))).sd c).sent
+                by simp]
+              have hr3 : ((updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) })
+                  (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s))).sd c).ph
+                  = .recon := by simpa using hr
+              have hd3 : ((updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) })
+                  (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s))).sd c).dc
+                  = some k := by simpa using hd
+              have hfl3 : p = ((updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) })
+                    (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s))).sd c.other).fP ∧
+                  a = ((updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) })
+                    (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s))).sd c.other).fA := by
+                simpa using hfl
+              generalize updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) })
+                (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s)) = S3
+                at hi3 h3 hr3 hd3 hfl3 ⊢
               unfold pauseAfterResume
               rw [if_pos hfix]
               dsimp only
               rw [sendAll_sd, updS_sd_self]
               split
               · split
-                · exact PInv.resumePress (c := c) (k := k) hi2 h2 (by simpa using hr) (by simpa using hd)
-                    (fun y => rfl) true
-                · exact PInv.resumePress (c := c) (k := k) (v := false) hi2 h2 (by simpa using hr)
-                    (by simpa using hd) (fun y => rfl) false
-              · exact PInv.resumeFix (c := c) (k := k) hi2 h2 (by simpa using hr) (by simpa using hd)
-                  (by rw [updS_sd_other]; exact hfl.1) (by rw [updS_sd_other]; exact hfl.2) (fun y => rfl)
+                · exact PInv.resumePress (c := c) (k := k) hi3 h3 hr3 hd3 (fun y => rfl) true
+                · exact PInv.resumePress (c := c) (k := k) (v := false) hi3 h3 hr3 hd3 (fun y => rfl) false
+              · exact PInv.resumeFix (c := c) (k := k) hi3 h3 hr3 hd3 hfl3.1 hfl3.2 (fun y => rfl)
       · split
         · rename_i hd hrs
           split
@@ -4121,6 +4217,13 @@ theorem QStep.kill {s : State} {d : Cl} (h : QInv s) (hne : (s.sd d).ph ≠ .end
   · rw [finish_sd_self]; exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
   · intro hw; rw [finish_sd_self] at hw; exact absurd rfl hw
 
+theorem QStep.press {s : State} {c : Cl} {p : Bool} (h : QInv s) (hne : (s.sd c).ph ≠ .ended) :
+    QStep s (press c p s) := by
+  unfold LinkResume.press
+  have h1 := QStep.send h c (.pause p ((s.sd c).reg.n + 1)) (by simp) (by simp)
+  exact h1.trans (QStep.quiet (d := c) (f := fun y => { y with reg := ⟨(s.sd c).reg.n + 1, c == .a, p⟩ })
+    h1.inv (by rw [send_sd]; exact hne) ⟨rfl, rfl, rfl, rfl, rfl⟩)
+
 theorem QStep.setPaused {s : State} {c : Cl} {p r : Bool} (h : QInv s) (hne : (s.sd c).ph ≠ .ended) :
     QStep s (setPaused c p r s) := by
   unfold LinkResume.setPaused
@@ -4130,7 +4233,7 @@ theorem QStep.setPaused {s : State} {c : Cl} {p r : Bool} (h : QInv s) (hne : (s
       ⟨rfl, rfl, rfl, rfl, rfl⟩
     dsimp only
     split
-    · exact h1.trans (QStep.send h1.inv c _ (by simp) (by simp))
+    · exact h1.trans (QStep.press h1.inv (by rw [updS_sd_self]; exact hne))
     · exact h1
 
 theorem QStep.remotePause {s : State} {c : Cl} {v : Bool} (h : QInv s) (hne : (s.sd c).ph ≠ .ended) :
@@ -4145,7 +4248,7 @@ theorem QStep.pauseAfterResume {s : State} {cfg : Cfg} {c : Cl} {p a : Bool} (h 
     · have h1 := QStep.quiet (f := fun y => { y with livePress := y.livePress || y.ph == .live })
         h hne ⟨rfl, rfl, rfl, rfl, rfl⟩
       split
-      · exact h1.trans (QStep.send h1.inv c _ (by simp) (by simp))
+      · exact h1.trans (QStep.press h1.inv (by rw [updS_sd_self]; exact hne))
       · exact h1
     · exact QStep.remotePause h hne
   · dsimp only
@@ -4169,11 +4272,17 @@ theorem QStep.resumeIn {s : State} {cfg : Cfg} {c : Cl} {t : Nat} {p a : Bool} (
     have hne : (s.sd c).ph ≠ .ended := by rw [hr]; decide
     split
     · exact QStep.shutdown h hne
-    · have h1 := QStep.updS (f := fun y => { y with ph := .live, rsPc := none }) h hne
-        (fun _ x => x) (by simp) (by intro e; cases e) (h.okRes c) id (h.byeEnd c)
+    · have h0 := QStep.quiet (d := c) (f := fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) })
+        h hne ⟨rfl, rfl, rfl, rfl, rfl⟩
+      have hne0 : ((LinkResume.updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) }) s).sd c).ph
+          ≠ .ended := by rw [updS_sd_self]; exact hne
+      have h1 := h0.trans (QStep.updS (f := fun y => { y with ph := .live, rsPc := none }) h0.inv hne0
+        (fun _ x => x) (by simp) (by intro e; cases e) (h0.inv.okRes c) id (h0.inv.byeEnd c))
       have h2 := h1.trans (QStep.sendAll h1.inv c t (s.sd c).sent)
       have hl : ((LinkResume.sendAll c (frames t (s.sd c).sent)
-          (LinkResume.updS c (fun y => { y with ph := .live, rsPc := none }) s)).sd c).ph ≠ .ended := by
+          (LinkResume.updS c (fun y => { y with ph := .live, rsPc := none })
+            (LinkResume.updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) }) s))).sd c).ph
+            ≠ .ended := by
         rw [sendAll_sd', updS_sd_self]; simp
       exact h2.trans (QStep.pauseAfterResume h2.inv hl)
 
@@ -4204,7 +4313,15 @@ theorem QStep.recv {s : State} {cfg : Cfg} {c : Cl} {m : Msg} (h : QInv s) (hne 
   | inp f =>
     exact h1.trans (QStep.quiet h1.inv hne1 ⟨rfl, rfl, rfl, rfl, rfl⟩)
   | resume t p a => exact h1.trans (QStep.resumeIn h1.inv)
-  | pause v => exact h1.trans (QStep.remotePause h1.inv hne1)
+  | pause v n =>
+    dsimp only
+    split
+    · split
+      · have h2 := QStep.quiet (d := c) (f := fun y => { y with reg := ⟨n, c.other == .a, v⟩ }) h1.inv hne1
+          ⟨rfl, rfl, rfl, rfl, rfl⟩
+        exact h1.trans (h2.trans (QStep.remotePause h2.inv (by rw [updS_sd_self]; exact hne1)))
+      · exact h1
+    · exact h1.trans (QStep.remotePause h1.inv hne1)
   | bye =>
     have h2 := QStep.updS (f := fun y => { y with bye := true }) h1.inv hne1 (fun _ x => x) hne1
       (h1.inv.reconOk c) (h1.inv.okRes c) id (fun _ => by rw [ho1]; exact hb rfl)
@@ -4282,38 +4399,44 @@ theorem QStep.deliverN {s : State} {cfg : Cfg} {c : Cl} {k : Nat} (n : Nat) (h :
     have h1 : QStep s (LinkResume.deliver cfg c k s) := QStep.deliver h
     exact h1.trans (ih h1.inv)
 
+/-- `rsAdopt` up to the replay. -/
+theorem QStep.adoptPrefix {s : State} {c : Cl} {k : Nat} (h : QInv s) (hr : (s.sd c).ph = .recon) :
+    QStep s (LinkResume.send c (.resume (s.sd c).rx (s.sd c).paused (s.sd c).away)
+      (LinkResume.updS c (openSide k)
+        (updCh k (fun y => { y with q := fun d => if d = c then (s.sd c).early ++ y.q d else y.q d }) s))) := by
+  have hne : (s.sd c).ph ≠ .ended := by rw [hr]; decide
+  let s1 := updCh k (fun y => { y with q := fun d => if d = c then (s.sd c).early ++ y.q d else y.q d }) s
+  have h2 : QStep s (LinkResume.updS c (openSide k) s1) := by
+    refine QStep.gen (d := c) h hne (by simp [s1]) rfl (fun d x hx => ?_) (by simpa [s1] using hne)
+      (by simpa [s1, openSide] using h.reconOk c) (by simpa [s1, openSide] using h.okRes c)
+      (by simp [s1, openSide]) (by simpa [s1, openSide] using h.byeEnd c)
+    rcases hx with hx | ⟨j, hx⟩
+    · simp only [updS_sd] at hx
+      split at hx
+      · simp at hx
+      · exact Or.inl (by simpa [s1] using hx)
+    · simp only [updS_ch, s1, updCh_ch] at hx
+      split at hx
+      · rename_i hj; subst hj
+        dsimp only at hx
+        split at hx
+        · rename_i hd; subst hd
+          simp only [List.mem_append] at hx
+          rcases hx with hx | hx
+          · exact Or.inl hx
+          · exact Or.inr ⟨_, hx⟩
+        · exact Or.inr ⟨_, hx⟩
+      · exact Or.inr ⟨j, hx⟩
+  exact h2.trans (QStep.send h2.inv c (.resume (s.sd c).rx (s.sd c).paused (s.sd c).away)
+    (by simp) (by simp))
+
 theorem QStep.adopt {s : State} {cfg : Cfg} {c : Cl} (h : QInv s) (hr : (s.sd c).ph = .recon) :
     QStep s (adopt cfg c s) := by
-  have hne : (s.sd c).ph ≠ .ended := by rw [hr]; decide
   unfold LinkResume.adopt
   split
   · exact QStep.refl h
   · rename_i k hrs
-    dsimp only
-    let s1 := updCh k (fun y => { y with q := fun d => if d = c then (s.sd c).early ++ y.q d else y.q d }) s
-    have h2 : QStep s (LinkResume.updS c (openSide k) s1) := by
-      refine QStep.gen (d := c) h hne (by simp [s1]) rfl (fun d x hx => ?_) (by simpa [s1] using hne)
-        (by simpa [s1, openSide] using h.reconOk c) (by simpa [s1, openSide] using h.okRes c)
-        (by simp [s1, openSide]) (by simpa [s1, openSide] using h.byeEnd c)
-      rcases hx with hx | ⟨j, hx⟩
-      · simp only [updS_sd] at hx
-        split at hx
-        · simp at hx
-        · exact Or.inl (by simpa [s1] using hx)
-      · simp only [updS_ch, s1, updCh_ch] at hx
-        split at hx
-        · rename_i hj; subst hj
-          dsimp only at hx
-          split at hx
-          · rename_i hd; subst hd
-            simp only [List.mem_append] at hx
-            rcases hx with hx | hx
-            · exact Or.inl hx
-            · exact Or.inr ⟨_, hx⟩
-          · exact Or.inr ⟨_, hx⟩
-        · exact Or.inr ⟨j, hx⟩
-    have h3 := h2.trans (QStep.send h2.inv c (.resume (s.sd c).rx (s.sd c).paused (s.sd c).away)
-      (by simp) (by simp))
+    have h3 := QStep.adoptPrefix (k := k) h hr
     exact h3.trans (QStep.deliverN _ h3.inv)
 
 theorem QStep.restart {s : State} {c : Cl} (h : QInv s) (hr : (s.sd c).ph = .recon) :
@@ -4361,7 +4484,7 @@ theorem setPaused_sd_ph (c : Cl) (p r : Bool) (s : State) :
   unfold LinkResume.setPaused
   split
   · rfl
-  · dsimp only; split <;> simp [send_sd]
+  · dsimp only; split <;> simp [LinkResume.press, send_sd]
 
 theorem QStep.setAway {s : State} {cfg : Cfg} {c : Cl} {on : Bool} (h : QInv s)
     (hne : (s.sd c).ph ≠ .ended) : QStep s (setAway cfg c on s) := by
@@ -4510,5 +4633,1427 @@ theorem quit_heard_next {cfg : Cfg} (hn : cfg.note = true) {s : State} (h : Reac
     obtain ⟨-, -, -, -, -, -, hsc, hso⟩ := detach_parts s c.other
     simp only [Cl.other_other] at hso
     simp [en, hn, hsc, hr, detach_note, hnote]
+
+
+/-! ## Invariants: numbered presses agree (`Cfg.seq`)
+
+Each side holds the winning press (`reg`); its own press is numbered one
+past it, and a friend's press is taken only if it beats it. Reading a queue
+of presses is a fold of `Reg.take`, so what a side will hold once its queue
+is read is `settle reg queue`. The invariant: on a channel both are live on,
+the two settles are equal (a press changes both by the same `take`, since it
+beats everything its author has seen and differs from everything the
+friend authored); a redialing side sends no presses and reads none before
+the friend's RESUME; and a side live on a channel the friend is still
+resuming on holds what the friend will get by restarting from the same
+`finalPause` base and reading its queue. So once nothing is in flight both
+hold the same press, and with it the same pause. -/
+
+/-- A press's rank: the number, then the host. -/
+def Reg.key (r : Reg) : Nat := 2 * r.n + (if r.byA then 1 else 0)
+
+theorem Reg.beats_iff (x y : Reg) : x.beats y = true ↔ y.key < x.key := by
+  unfold Reg.beats Reg.key
+  cases hx : x.byA <;> cases hy : y.byA <;> simp <;> omega
+
+/-- `rbPressIn`: take the press if it beats the one held. -/
+def Reg.take (r x : Reg) : Reg := if x.beats r then x else r
+
+/-- What a side holding `r` holds once it has read the presses `l`. -/
+def settle (r : Reg) (l : List Reg) : Reg := l.foldl Reg.take r
+
+@[simp] theorem settle_nil (r : Reg) : settle r [] = r := rfl
+@[simp] theorem settle_cons (r x : Reg) (l : List Reg) : settle r (x :: l) = settle (r.take x) l := rfl
+theorem settle_append (r : Reg) (l l' : List Reg) : settle r (l ++ l') = settle (settle r l) l' := by
+  simp [settle, List.foldl_append]
+
+theorem take_key (r x : Reg) : r.key ≤ (r.take x).key := by
+  unfold Reg.take; split
+  · rename_i h; exact Nat.le_of_lt ((Reg.beats_iff _ _).1 h)
+  · exact Nat.le_refl _
+
+theorem settle_key (r : Reg) (l : List Reg) : r.key ≤ (settle r l).key := by
+  induction l generalizing r with
+  | nil => exact Nat.le_refl _
+  | cons x l ih => exact Nat.le_trans (take_key r x) (ih _)
+
+/-- A press `p` that beats what its author held (`r0`), against presses the
+    other side made: reading them from `p` ends where reading them from
+    `r0` and then taking `p` does. -/
+theorem settle_press (p : Reg) (l : List Reg) (hl : ∀ x ∈ l, x.byA ≠ p.byA) :
+    ∀ r0 : Reg, r0.key < p.key → settle p l = (settle r0 l).take p := by
+  induction l with
+  | nil => intro r0 h0; simp [Reg.take, (Reg.beats_iff _ _).2 h0]
+  | cons x l ih =>
+    intro r0 h0
+    have hx := hl x (by simp)
+    have hl' : ∀ y ∈ l, y.byA ≠ p.byA := fun y hy => hl y (by simp [hy])
+    simp only [settle_cons]
+    by_cases hb : x.beats p = true
+    · have hpx := (Reg.beats_iff _ _).1 hb
+      have hpr : p.take x = x := by simp [Reg.take, hb]
+      have hrx : r0.take x = x := by simp [Reg.take, (Reg.beats_iff _ _).2 (Nat.lt_trans h0 hpx)]
+      rw [hpr, hrx]
+      have hge := settle_key x l
+      have hnb : ¬ (p.beats (settle x l) = true) := by
+        rw [Reg.beats_iff]; omega
+      simp [Reg.take, hnb]
+    · have hne : x.key ≠ p.key := by
+        unfold Reg.key; intro h
+        cases hxa : x.byA <;> cases hpa : p.byA <;> simp_all <;> omega
+      have hlt : x.key < p.key := by
+        have : ¬ (p.key < x.key) := fun h' => hb ((Reg.beats_iff x p).2 h'); omega
+      have hpr : p.take x = p := by simp [Reg.take, hb]
+      rw [hpr]
+      refine ih hl' _ ?_
+      unfold Reg.take; split
+      · exact hlt
+      · exact h0
+
+/-- A message's press, made by `byA`'s side. -/
+def Msg.press? (byA : Bool) : Msg → Option Reg
+  | .pause v n => some ⟨n, byA, v⟩
+  | _ => none
+
+/-- The presses on their way to c on channel k (the friend made them). -/
+def pqC (cs : Cl → Core) (ch : Nat → Chan) (c : Cl) (k : Nat) : List Reg :=
+  (inbC cs ch c k).filterMap (Msg.press? (c.other == .a))
+
+def pq (s : State) (c : Cl) (k : Nat) : List Reg := pqC s.cs s.ch c k
+
+/-- The friend's RESUME is the next thing c reads. -/
+def resHead : List Msg → Bool
+  | .resume .. :: _ => true
+  | _ => false
+
+theorem resHead_append {l : List Msg} (h : resHead l = true) (ms : List Msg) :
+    resHead (l ++ ms) = true := by
+  cases l with
+  | nil => cases h
+  | cons m l => cases m <;> simp_all [resHead]
+
+/-- The press-agreement invariant, apart from `Sync`. -/
+structure SCore (s : State) : Prop where
+  /-- A redialing side has sent no presses on the channel it holds. -/
+  quiet : ∀ c k, (s.sd c).ph = .recon → hdC s.cs c k → hdC s.cs c.other k → pq s c.other k = []
+  /-- On a channel c has opened, a friend still redialing reads c's RESUME next. -/
+  head  : ∀ c k, (s.sd c).dc = some k → (s.sd c.other).ph = .recon → hdC s.cs c.other k →
+            (s.ch k).dead = false → resHead (inbC s.cs s.ch c.other k) = true
+  /-- ...and in any case before any press. -/
+  head2 : ∀ c k, (s.sd c).ph = .recon → hdC s.cs c k → pq s c k ≠ [] →
+            resHead (inbC s.cs s.ch c k) = true
+  /-- Live on a channel the friend is resuming on: what the friend will hold. -/
+  half  : ∀ c k, (s.sd c).ph = .live → (s.sd c).dc = some k → (s.sd c.other).ph = .recon →
+            hdC s.cs c.other k → (s.ch k).dead = false →
+            settle (Reg.base (finalPause (s.sd c).fP (s.sd c).fA (s.sd c.other).fP (s.sd c.other).fA))
+              (pq s c.other k) = (s.sd c).reg
+  /-- Both live on a working channel: they will hold the same press. -/
+  conv  : ∀ c k, (s.sd c).ph = .live → (s.sd c.other).ph = .live → (s.sd c).dc = some k →
+            (s.sd c.other).dc = some k → (s.ch k).dead = false →
+            settle (s.sd c).reg (pq s c k) = settle (s.sd c.other).reg (pq s c.other k)
+
+/-- A live side's pause is its winning press's. -/
+def Sync (s : State) : Prop := ∀ c, (s.sd c).ph = .live → (s.sd c).paused = (s.sd c).reg.on
+
+def SInv (s : State) : Prop := SCore s ∧ Sync s
+
+/-- The fields of a side the press argument reads (with `paused`, for `Sync`). -/
+def Side.sv (x : Side) : Ph × Option Nat × Option Nat × Reg × Bool × Bool :=
+  (x.ph, x.dc, x.rsPc, x.reg, x.fP, x.fA)
+
+/-- With the same press fields, and only non-presses added behind what a
+    holder had on its way, the core carries over. -/
+theorem SCore.frame {s t : State} (h : SCore s)
+    (e : ∀ c, (t.sd c).sv = (s.sd c).sv) (hd : ∀ k, (t.ch k).dead = (s.ch k).dead)
+    (hq : ∀ c k, hdC s.cs c k → ∃ ms, inbC t.cs t.ch c k = inbC s.cs s.ch c k ++ ms ∧
+      ms.filterMap (Msg.press? (c.other == .a)) = []) : SCore t := by
+  have ef : ∀ c, (t.sd c).ph = (s.sd c).ph ∧ (t.sd c).dc = (s.sd c).dc ∧ (t.sd c).rsPc = (s.sd c).rsPc ∧
+      (t.sd c).reg = (s.sd c).reg ∧ (t.sd c).fP = (s.sd c).fP ∧ (t.sd c).fA = (s.sd c).fA := by
+    intro c; have := e c; simp only [Side.sv, Prod.mk.injEq] at this; exact this
+  have thd : ∀ c k, hdC t.cs c k ↔ hdC s.cs c k := by
+    intro c k; simp only [hdC, cs_apply, core_dc, core_rsPc, (ef c).2.1, (ef c).2.2.1]
+  have tpq : ∀ c k, hdC s.cs c k → pq t c k = pq s c k := by
+    intro c k hc; obtain ⟨ms, h1, h2⟩ := hq c k hc
+    simp [pq, pqC, h1, List.filterMap_append, h2]
+  have thead : ∀ c k, hdC s.cs c k → resHead (inbC s.cs s.ch c k) = true →
+      resHead (inbC t.cs t.ch c k) = true := by
+    intro c k hc hr; obtain ⟨ms, h1, -⟩ := hq c k hc; rw [h1]; exact resHead_append hr ms
+  refine ⟨fun c k hr hc ho => ?_, fun c k hk hr ho hdk => ?_, fun c k hr hc hp => ?_,
+    fun c k hl hk hr ho hdk => ?_, fun c k hl ho hk hko hdk => ?_⟩
+  · rw [thd] at hc ho; rw [(ef c).1] at hr; rw [tpq _ _ ho]; exact h.quiet c k hr hc ho
+  · rw [thd] at ho; rw [(ef c).2.1] at hk; rw [(ef _).1] at hr; rw [hd] at hdk
+    exact thead _ _ ho (h.head c k hk hr ho hdk)
+  · rw [thd] at hc; rw [(ef c).1] at hr; rw [tpq _ _ hc] at hp
+    exact thead _ _ hc (h.head2 c k hr hc hp)
+  · rw [thd] at ho; rw [(ef c).1] at hl; rw [(ef c).2.1] at hk; rw [(ef _).1] at hr; rw [hd] at hdk
+    rw [tpq _ _ ho, (ef c).2.2.2.1, (ef c).2.2.2.2.1, (ef c).2.2.2.2.2, (ef c.other).2.2.2.2.1,
+      (ef c.other).2.2.2.2.2]
+    exact h.half c k hl hk hr ho hdk
+  · rw [(ef c).1] at hl; rw [(ef _).1] at ho; rw [(ef c).2.1] at hk; rw [(ef _).2.1] at hko
+    rw [hd] at hdk
+    have hc : hdC s.cs c k := Or.inl (by simpa [cs_apply] using hk)
+    have hco : hdC s.cs c.other k := Or.inl (by simpa [cs_apply] using hko)
+    rw [tpq _ _ hc, tpq _ _ hco, (ef c).2.2.2.1, (ef c.other).2.2.2.1]
+    exact h.conv c k hl ho hk hko hdk
+
+theorem pq_mem_byA {s : State} {c : Cl} {k : Nat} {x : Reg} (hx : x ∈ pq s c k) :
+    x.byA = (c.other == .a) := by
+  unfold pq pqC at hx
+  rw [List.mem_filterMap] at hx
+  obtain ⟨m, -, hm⟩ := hx
+  cases m with
+  | pause v n => simp only [Msg.press?, Option.some.injEq] at hm; subst hm; rfl
+  | _ => simp [Msg.press?] at hm
+
+theorem byA_other_ne (c : Cl) : (c.other == .a) ≠ (c == .a) := by cases c <;> decide
+
+theorem press_beats (r : Reg) (b v : Bool) : (⟨r.n + 1, b, v⟩ : Reg).beats r = true := by
+  rw [Reg.beats_iff]; unfold Reg.key; dsimp only; split <;> split <;> omega
+
+theorem cs_updS_nc {s : State} {c : Cl} {f : Side → Side} (hf : ∀ y, (f y).core = y.core) :
+    (updS c f s).cs = s.cs := by
+  funext d; simp only [State.cs, updS_sd]; split <;> simp [hf]
+
+theorem SCore.of_eq {s t : State} (h : SCore s) (hsd : t.sd = s.sd) (hch : t.ch = s.ch) : SCore t := by
+  have hcs : t.cs = s.cs := by funext d; simp [State.cs, hsd]
+  exact h.frame (fun c => by rw [hsd]) (fun k => by rw [hch])
+    (fun c k _ => ⟨[], by rw [hcs, hch]; simp, rfl⟩)
+
+theorem SCore.send_np {s : State} {c : Cl} {m : Msg} (h : SCore s) (hm : ∀ b, m.press? b = none) :
+    SCore (send c m s) := by
+  rcases send_cases c m s with e | ⟨k, -, -, -, e⟩
+  · rw [e]; exact h
+  · rw [e]
+    refine h.frame (fun _ => rfl) (fun j => appendQ_dead ..) (fun d j _ => ?_)
+    rw [appendQ_cs, inbC_appendQ]
+    split
+    · exact ⟨[m], rfl, by simp [hm]⟩
+    · exact ⟨[], by simp, rfl⟩
+
+theorem SCore.sendAll_frames {s : State} {c : Cl} {t n : Nat} (h : SCore s) :
+    SCore (sendAll c (frames t n) s) := by
+  rw [sendAll_eq]
+  split
+  · split
+    · exact h
+    · refine h.frame (fun _ => rfl) (fun j => appendQ_dead ..) (fun d j _ => ?_)
+      rw [appendQ_cs, inbC_appendQ]
+      split
+      · refine ⟨_, rfl, ?_⟩
+        unfold frames
+        induction (List.range' t (n - t)) with
+        | nil => rfl
+        | cons x xs ih => simp [List.filterMap_cons, Msg.press?, ih]
+      · exact ⟨[], by simp, rfl⟩
+  · exact h
+
+theorem SCore.updS_nv {s : State} {c : Cl} {f : Side → Side} (h : SCore s) (hf : ∀ y, (f y).sv = y.sv)
+    (he : ∀ y, (f y).early = y.early) : SCore (updS c f s) := by
+  have hr : ∀ y, (f y).rsPc = y.rsPc := fun y => by
+    have := hf y; simp only [Side.sv, Prod.mk.injEq] at this; exact this.2.2.1
+  refine h.frame (fun d => ?_) (fun _ => rfl) (fun d k _ => ⟨[], ?_, rfl⟩)
+  · simp only [updS_sd]; split <;> simp [hf]
+  · rw [List.append_nil]; unfold inbC; simp only [cs_apply, core_rsPc, core_early, updS_sd, updS_ch]
+    split <;> simp [hr, he] <;> rfl
+
+theorem Sync.upd {s : State} {c : Cl} {f : Side → Side} (h : Sync s)
+    (hf : ∀ y, (f y).ph = y.ph ∧ (f y).paused = y.paused ∧ (f y).reg = y.reg) : Sync (updS c f s) := by
+  intro d hl; simp only [updS_sd] at hl ⊢
+  split at hl
+  · rename_i hd; subst hd; simp only [if_true]; rw [(hf _).2.1, (hf _).2.2]; rw [(hf _).1] at hl; exact h _ hl
+  · rename_i hd; simp only [hd, if_false]; exact h d hl
+
+theorem Sync.of_eq {s t : State} (h : Sync s) (hsd : t.sd = s.sd) : Sync t := by
+  intro c hl; rw [hsd] at hl ⊢; exact h c hl
+
+/-- c holds no channel, and nothing about the friend moved. -/
+theorem SCore.loose {s t : State} {c : Cl} (h : SCore s) (hdc : (t.sd c).dc = none)
+    (hrs : (t.sd c).rsPc = none) (hso : t.sd c.other = s.sd c.other)
+    (inbo : ∀ j, inbC t.cs t.ch c.other j = inbC s.cs s.ch c.other j)
+    (hdo : ∀ j, (t.ch j).dead = (s.ch j).dead) : SCore t := by
+  have hnot : ∀ j, ¬ hdC t.cs c j := by intro j; simp [hdC, cs_apply, hdc, hrs]
+  have hno : ∀ j, ¬ ((t.sd c).dc = some j) := by intro j; simp [hdc]
+  have to : ∀ j, hdC t.cs c.other j ↔ hdC s.cs c.other j := by intro j; simp [hdC, cs_apply, hso]
+  have pqo : ∀ j, pq t c.other j = pq s c.other j := by intro j; simp only [pq, pqC, inbo]
+  refine ⟨fun e k hr hc ho => ?_, fun e k hk hr ho hd => ?_, fun e k hr hc hp => ?_,
+    fun e k hl hk hr ho hd => ?_, fun e k hl ho hk hko hd => ?_⟩
+  · rcases Cl.eq_or c e with rfl | rfl
+    · exact absurd hc (hnot k)
+    · simp only [Cl.other_other] at ho; exact absurd ho (hnot k)
+  · rcases Cl.eq_or c e with rfl | rfl
+    · exact absurd hk (hno k)
+    · simp only [Cl.other_other] at ho; exact absurd ho (hnot k)
+  · rcases Cl.eq_or c e with rfl | rfl
+    · exact absurd hc (hnot k)
+    · rw [to] at hc; rw [pqo] at hp; rw [hso] at hr; rw [inbo]; exact h.head2 _ k hr hc hp
+  · rcases Cl.eq_or c e with rfl | rfl
+    · exact absurd hk (hno k)
+    · simp only [Cl.other_other] at ho; exact absurd ho (hnot k)
+  · rcases Cl.eq_or c e with rfl | rfl
+    · exact absurd hk (hno k)
+    · simp only [Cl.other_other] at hko; exact absurd hko (hno k)
+
+theorem SCore.onDetach {s : State} {c : Cl} (h : SCore s) : SCore (detach c s) := by
+  obtain ⟨-, -, hq, hdd, -, -, hsc, hso⟩ := detach_parts s c
+  refine h.loose (c := c) (by simp [hsc]) (by simp [hsc]) hso (fun j => ?_) hdd
+  unfold inbC; simp only [cs_apply, hso, hq]; rfl
+
+theorem Sync.onDetach {s : State} {c : Cl} (h : Sync s) : Sync (detach c s) := by
+  obtain ⟨-, -, -, -, -, -, hsc, hso⟩ := detach_parts s c
+  intro e hl
+  rcases Cl.eq_or c e with rfl | rfl
+  · rw [hsc] at hl ⊢; exact h _ hl
+  · rw [hso] at hl ⊢; exact h _ hl
+
+/-- A side holding nothing changes, keeping it so. -/
+theorem SCore.updS_free {s : State} {c : Cl} {f : Side → Side} (h : SCore s)
+    (hdc : (s.sd c).dc = none) (hrs : (s.sd c).rsPc = none)
+    (hf : ∀ y, (f y).dc = y.dc ∧ (f y).rsPc = y.rsPc) : SCore (updS c f s) := by
+  refine h.loose (c := c) (by simp [(hf _).1, hdc]) (by simp [(hf _).2, hrs]) (by simp) (fun j => ?_)
+    (fun _ => rfl)
+  unfold inbC; simp [cs_apply]; try rfl
+
+theorem Sync.updS_free {s : State} {c : Cl} {f : Side → Side} (h : Sync s)
+    (hf : (f (s.sd c)).ph ≠ .live) : Sync (updS c f s) := by
+  intro e hl
+  rcases Cl.eq_or c e with rfl | rfl
+  · simp only [updS_sd_self] at hl; exact absurd hl hf
+  · simp only [updS_sd_other] at hl ⊢; exact h _ hl
+
+theorem SCore.onFinish {s : State} {c : Cl} {w : End} (h : SCore s) : SCore (finish c w s) := by
+  unfold LinkResume.finish
+  obtain ⟨-, -, -, -, -, -, hsc, -⟩ := detach_parts s c
+  exact h.onDetach.updS_free (by simp [hsc]) (by simp [hsc]) (fun y => ⟨rfl, rfl⟩)
+
+theorem Sync.onFinish {s : State} {c : Cl} {w : End} (h : Sync s) : Sync (finish c w s) := by
+  unfold LinkResume.finish; exact h.onDetach.updS_free (by simp)
+
+theorem SInv.onShutdown {s : State} {c : Cl} {w : End} (h : SInv s) : SInv (shutdown c w s) := by
+  unfold LinkResume.shutdown
+  have h1 : SInv (if (s.sd c).bye then s else send c .bye s) := by
+    split
+    · exact h
+    · exact ⟨h.1.send_np (fun _ => rfl), h.2.of_eq (send_sd ..)⟩
+  have h2 : SInv (finish c w (if (s.sd c).bye then s else send c .bye s)) := ⟨h1.1.onFinish, h1.2.onFinish⟩
+  unfold LinkResume.leaveNote
+  split
+  · exact ⟨h2.1.of_eq rfl rfl, h2.2.of_eq rfl⟩
+  · exact h2
+
+theorem SInv.onRestart {s : State} {c : Cl} (h : SInv s) : SInv (restart c s) := by
+  unfold LinkResume.restart
+  split
+  · exact h.onShutdown
+  · exact ⟨h.1.onDetach, h.2.onDetach⟩
+
+theorem SInv.onDropped {s : State} {c : Cl} (h : SInv s) : SInv (dropped c s) := by
+  unfold LinkResume.dropped
+  dsimp only
+  split
+  · split
+    · exact h.onRestart
+    · split
+      · exact h.onShutdown
+      · obtain ⟨-, -, -, -, -, -, hsc, -⟩ := detach_parts s c
+        exact ⟨h.1.onDetach.updS_free (by simp [hsc]) (by simp [hsc]) (fun y => ⟨rfl, rfl⟩),
+          h.2.onDetach.updS_free (by simp)⟩
+  · exact h.onShutdown
+
+theorem SInv.onPair {s : State} {cfg : Cfg} (h : SInv s) (hi : Inv s) (hen : en cfg s .pair = true) :
+    SInv (pair s) := by
+  simp only [en, Bool.and_eq_true, beq_iff_eq, Option.isNone_iff_eq_none] at hen
+  obtain ⟨⟨⟨⟨⟨hra, hrb⟩, hpa⟩, hpb⟩, hda⟩, hdb⟩ := hen
+  have hr : ∀ e, (s.sd e).ph = .recon ∧ (s.sd e).rsPc = none ∧ (s.sd e).dc = none := by
+    intro e; cases e <;> simp_all
+  have tsd : ∀ e, (LinkResume.pair s).sd e = { s.sd e with rsPc := some s.nextCh } := by
+    intro e; cases e <;> simp [LinkResume.pair]
+  have tch : (LinkResume.pair s).ch = s.ch := by simp [LinkResume.pair]
+  have hearly : ∀ e, (s.sd e).early = [] := by
+    intro e
+    cases hl : (s.sd e).early with
+    | nil => rfl
+    | cons x xs =>
+      have := (hi.earlySh e (by simp [cs_apply, hl])).2; simp [cs_apply, (hr e).2.1] at this
+  have thd : ∀ e j, hdC (LinkResume.pair s).cs e j → j = s.nextCh := by
+    intro e j hj; simp [hdC, cs_apply, tsd, (hr e).2.2] at hj; exact hj.symm
+  have tpq : ∀ e, pq (LinkResume.pair s) e s.nextCh = [] := by
+    intro e
+    have hq := ((hi.fresh s.nextCh (Nat.le_refl _)).2 e).1
+    simp [pq, pqC, inbC, cs_apply, tsd, tch, hearly, hq]
+  refine ⟨⟨fun e k hre hc ho => ?_, fun e k hk => ?_, fun e k hre hc hp => ?_,
+    fun e k hl => ?_, fun e k hl => ?_⟩, fun e hl => ?_⟩
+  · rw [thd e k hc]; exact tpq _
+  · rw [tsd] at hk; simp [(hr e).2.2] at hk
+  · rw [thd e k hc] at hp; exact absurd (tpq e) hp
+  · rw [tsd] at hl; simp [(hr e).1] at hl
+  · rw [tsd] at hl; simp [(hr e).1] at hl
+  · rw [tsd] at hl; simp [(hr e).1] at hl
+
+/-- c's own press on the live channel k. -/
+theorem SCore.onPress {s : State} {c : Cl} {k : Nat} {p : Bool} (h : SCore s)
+    (hl : (s.sd c).ph = .live) (hk : (s.sd c).dc = some k) (hrs : (s.sd c).rsPc = none)
+    (hcl : (s.ch k).closed c = false) (hsame : ∀ j, hdC s.cs c.other j → j = k) :
+    SCore (press c p s) := by
+  unfold LinkResume.press
+  dsimp only
+  generalize hn : (s.sd c).reg.n + 1 = n
+  generalize hr : (⟨n, c == .a, p⟩ : Reg) = r
+  have hrb : r.beats (s.sd c).reg = true := by rw [← hr, ← hn]; exact press_beats _ _ _
+  have hrt : (s.sd c).reg.take r = r := by simp [Reg.take, hrb]
+  have hra : r.byA = (c == .a) := by rw [← hr]
+  have hrk : (s.sd c).reg.key < r.key := (Reg.beats_iff _ _).1 hrb
+  have hcj : ∀ j, hdC s.cs c j → j = k := by
+    intro j hj; simp [hdC, cs_apply, hk, hrs] at hj; exact hj.symm
+  have hcs : (updS c (fun y => { y with reg := r }) s).cs = s.cs := cs_updS_nc (fun y => rfl)
+  -- c's other fields
+  have tsc : ∀ (S : State), S.sd = s.sd → (updS c (fun y => { y with reg := r }) S).sd c =
+      { s.sd c with reg := r } := by intro S hS; simp [hS]
+  have tso : ∀ (S : State), S.sd = s.sd → (updS c (fun y => { y with reg := r }) S).sd c.other =
+      s.sd c.other := by intro S hS; simp [hS]
+  by_cases hdk : (s.ch k).dead = true
+  · -- lost with the channel: only c's register moved, and every claim on it needs k alive
+    have hs : send c (.pause p n) s = s := by unfold send; simp [hk, hdk]
+    rw [hs]
+    have hcs' : (updS c (fun y => { y with reg := r }) s).cs = s.cs := hcs
+    refine ⟨fun e j hre hc ho => ?_, fun e j hj hre ho hd => ?_, fun e j hre hc hp => ?_,
+      fun e j hle hj hre ho hd => ?_, fun e j hle ho hj hjo hd => ?_⟩
+    · rw [hcs'] at hc ho; simp only [pq, hcs', updS_ch]
+      rcases Cl.eq_or c e with rfl | rfl
+      · rw [tsc s rfl] at hre; simp [hl] at hre
+      · rw [tso s rfl] at hre; exact h.quiet _ j hre hc ho
+    · rw [hcs'] at ho; simp only [hcs', updS_ch] at hd ⊢
+      rcases Cl.eq_or c e with rfl | rfl
+      · rw [tsc s rfl] at hj; simp only at hj; rw [hk] at hj; cases hj; rw [hdk] at hd; cases hd
+      · simp only [Cl.other_other] at hre ho ⊢; rw [tsc s rfl] at hre; simp [hl] at hre
+    · rw [hcs'] at hc; simp only [pq, hcs', updS_ch] at hp ⊢
+      rcases Cl.eq_or c e with rfl | rfl
+      · rw [tsc s rfl] at hre; simp [hl] at hre
+      · rw [tso s rfl] at hre; exact h.head2 _ j hre hc hp
+    · rcases Cl.eq_or c e with rfl | rfl
+      · rw [tsc s rfl] at hj; simp only at hj; rw [hk] at hj; cases hj; simp only [updS_ch] at hd
+        rw [hdk] at hd; cases hd
+      · simp only [Cl.other_other] at hre; rw [tsc s rfl] at hre; simp [hl] at hre
+    · rcases Cl.eq_or c e with rfl | rfl
+      · rw [tsc s rfl] at hj; simp only at hj; rw [hk] at hj; cases hj; simp only [updS_ch] at hd
+        rw [hdk] at hd; cases hd
+      · simp only [Cl.other_other] at hjo; rw [tsc s rfl] at hjo; simp only at hjo; rw [hk] at hjo
+        cases hjo; simp only [updS_ch] at hd; rw [hdk] at hd; cases hd
+  · have hdk' : (s.ch k).dead = false := by simpa using hdk
+    have hs : send c (.pause p n) s = appendQ k c.other [.pause p n] s := by
+      unfold send appendQ; simp [hk, hdk', hcl]
+    rw [hs]
+    generalize hT : updS c (fun y => { y with reg := r }) (appendQ k c.other [.pause p n] s) = T
+    have Tcs : T.cs = s.cs := by
+      rw [← hT, cs_updS_nc (f := fun y => { y with reg := r }) (fun y => rfl), appendQ_cs]
+    have Tc : T.sd c = { s.sd c with reg := r } := by rw [← hT]; exact tsc _ rfl
+    have To : T.sd c.other = s.sd c.other := by rw [← hT]; exact tso _ rfl
+    have Tdead : ∀ j, (T.ch j).dead = (s.ch j).dead := by intro j; rw [← hT]; simp
+    have Tinb : ∀ e j, inbC T.cs T.ch e j =
+        if j = k ∧ e = c.other then inbC s.cs s.ch e j ++ [.pause p n] else inbC s.cs s.ch e j := by
+      intro e j; rw [Tcs, ← hT, updS_ch, inbC_appendQ]
+    have Tpqc : ∀ j, pq T c j = pq s c j := by
+      intro j; simp only [pq, pqC, Tinb, Cl.ne_other, and_false, if_false]
+    have Tpqo : pq T c.other k = pq s c.other k ++ [r] := by
+      simp only [pq, pqC, Tinb, and_self, if_true, List.filterMap_append, Cl.other_other]
+      rw [← hr]; simp [Msg.press?]
+    have Tpqj : ∀ j, j ≠ k → pq T c.other j = pq s c.other j := by
+      intro j hj; simp only [pq, pqC, Tinb, hj, false_and, if_false]
+    have Thd : ∀ e j, hdC T.cs e j ↔ hdC s.cs e j := by intro e j; rw [Tcs]
+    have hauth : ∀ x ∈ pq s c k, x.byA ≠ r.byA := by
+      intro x hx; rw [pq_mem_byA hx, hra]; exact byA_other_ne c
+    -- both live on k: the press moves both settles by `take r`
+    have hconv : (s.sd c.other).ph = .live → (s.sd c.other).dc = some k →
+        settle r (pq s c k) = settle (s.sd c.other).reg (pq s c.other k ++ [r]) := by
+      intro hlo hko
+      rw [settle_append, ← h.conv c k hl hlo hk hko hdk', settle_press r _ hauth _ hrk]
+      rfl
+    refine ⟨fun e j hre hc ho => ?_, fun e j hj hre ho hd => ?_, fun e j hre hc hp => ?_,
+      fun e j hle hj hre ho hd => ?_, fun e j hle ho hj hjo hd => ?_⟩
+    · rw [Thd] at hc ho
+      rcases Cl.eq_or c e with rfl | rfl
+      · rw [Tc] at hre; simp [hl] at hre
+      · rw [To] at hre; simp only [Cl.other_other] at ho ⊢; rw [Tpqc]
+        simpa using h.quiet _ j hre hc (by simpa using ho)
+    · rw [Thd] at ho; rw [Tdead] at hd
+      rcases Cl.eq_or c e with rfl | rfl
+      · rw [Tc] at hj; simp only at hj; rw [hk] at hj; cases hj
+        rw [To] at hre
+        rw [Tinb]; simp only [and_self, if_true]
+        exact resHead_append (h.head _ _ hk hre ho hd) _
+      · simp only [Cl.other_other] at hre; rw [Tc] at hre; simp [hl] at hre
+    · rw [Thd] at hc
+      rcases Cl.eq_or c e with rfl | rfl
+      · rw [Tc] at hre; simp [hl] at hre
+      · rw [To] at hre
+        by_cases hjk : j = k
+        · subst hjk
+          rw [Tinb]; simp only [and_self, if_true]
+          exact resHead_append (h.head _ _ hk (by simpa using hre) (by simpa using hc) hdk') _
+        · rw [Tpqj j hjk] at hp; rw [Tinb]; simp only [hjk, false_and, if_false]
+          exact h.head2 _ j hre hc hp
+    · rcases Cl.eq_or c e with rfl | rfl
+      · rw [Tc] at hle hj ⊢; simp only at hle hj ⊢; rw [hk] at hj; cases hj
+        rw [To] at hre ⊢; rw [Thd] at ho; rw [Tpqo, settle_append, h.half _ _ hl hk hre ho hdk', settle_cons, settle_nil, hrt]
+      · simp only [Cl.other_other] at hre; rw [Tc] at hre; simp [hl] at hre
+    · rcases Cl.eq_or c e with rfl | rfl
+      · rw [Tc] at hle hj ⊢; simp only at hle hj ⊢; rw [hk] at hj; cases hj
+        rw [To] at ho hjo ⊢
+        rw [Tpqc, Tpqo]; exact hconv ho hjo
+      · simp only [Cl.other_other] at ho hjo ⊢
+        rw [Tc] at hjo ho ⊢; simp only at hjo ho ⊢; rw [hk] at hjo; cases hjo
+        rw [To] at hle hj ⊢
+        rw [Tpqc, Tpqo]; exact (hconv hle hj).symm
+
+theorem Sync.onPress {s : State} {c : Cl} {p : Bool} (h : Sync s) (hp : (s.sd c).paused = p) :
+    Sync (press c p s) := by
+  unfold LinkResume.press
+  intro e hl
+  rcases Cl.eq_or c e with rfl | rfl
+  · simp only [updS_sd_self, send_sd] at hl ⊢; exact hp
+  · simp only [updS_sd_other, send_sd] at hl ⊢; exact h _ hl
+
+/-! ### A side that knows the code is resumable has it
+
+`ok` (`rb.resumeOk`) is only ever set with `res` (`rb.resume`), so a
+redialing side always passes `rsResumeIn`'s check. -/
+
+def OkRes (s : State) : Prop := ∀ c, (s.sd c).ok = true → (s.sd c).res = true
+
+/-- Neither side's `ok` nor `res` moved. -/
+def SameOR (s t : State) : Prop := ∀ c, (t.sd c).ok = (s.sd c).ok ∧ (t.sd c).res = (s.sd c).res
+
+theorem SameOR.refl (s : State) : SameOR s s := fun _ => ⟨rfl, rfl⟩
+theorem SameOR.trans {s t u : State} (h1 : SameOR s t) (h2 : SameOR t u) : SameOR s u :=
+  fun c => ⟨(h2 c).1.trans (h1 c).1, (h2 c).2.trans (h1 c).2⟩
+theorem SameOR.of_sd {s t : State} (h : t.sd = s.sd) : SameOR s t := fun c => by rw [h]; exact ⟨rfl, rfl⟩
+theorem OkRes.of {s t : State} (h : OkRes s) (hs : SameOR s t) : OkRes t := by
+  intro c hc; rw [(hs c).1] at hc; rw [(hs c).2]; exact h c hc
+
+theorem SameOR.updS (s : State) (c : Cl) {f : Side → Side} (hf : ∀ y, (f y).ok = y.ok ∧ (f y).res = y.res) :
+    SameOR s (updS c f s) := by
+  intro d; simp only [updS_sd]; split <;> simp [hf]
+
+theorem SameOR.send (s : State) (c : Cl) (m : Msg) : SameOR s (send c m s) := SameOR.of_sd (send_sd ..)
+theorem SameOR.sendAll (s : State) (c : Cl) (ms : List Msg) : SameOR s (sendAll c ms s) :=
+  SameOR.of_sd (sendAll_sd ..)
+
+theorem SameOR.detach (s : State) (c : Cl) : SameOR s (detach c s) := by
+  obtain ⟨-, -, -, -, -, -, hsc, hso⟩ := detach_parts s c
+  intro d; rcases Cl.eq_or c d with rfl | rfl
+  · rw [hsc]; exact ⟨rfl, rfl⟩
+  · rw [hso]; exact ⟨rfl, rfl⟩
+
+theorem SameOR.finish (s : State) (c : Cl) (w : End) : SameOR s (finish c w s) :=
+  (SameOR.detach s c).trans (SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩))
+
+theorem SameOR.shutdown (s : State) (c : Cl) (w : End) : SameOR s (shutdown c w s) := by
+  unfold LinkResume.shutdown
+  have h1 : SameOR s (if (s.sd c).bye then s else LinkResume.send c .bye s) := by
+    split
+    · exact SameOR.refl s
+    · exact SameOR.send s c _
+  exact (h1.trans (SameOR.finish _ c w)).trans (SameOR.of_sd (leaveNote_sd ..))
+
+theorem SameOR.press (s : State) (c : Cl) (p : Bool) : SameOR s (press c p s) := by
+  unfold LinkResume.press
+  exact (SameOR.send s c _).trans (SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩))
+
+theorem SameOR.setPaused (s : State) (c : Cl) (p r : Bool) : SameOR s (setPaused c p r s) := by
+  unfold LinkResume.setPaused
+  split
+  · exact SameOR.refl s
+  · have h1 := SameOR.updS s c (f := fun y => { y with paused := p, pfb := false }) (by intro y; exact ⟨rfl, rfl⟩)
+    dsimp only; split
+    · exact h1.trans (SameOR.press _ c p)
+    · exact h1
+
+theorem SameOR.pauseAfterResume (s : State) (cfg : Cfg) (c : Cl) (p a : Bool) :
+    SameOR s (pauseAfterResume cfg c p a s) := by
+  unfold LinkResume.pauseAfterResume
+  split
+  · dsimp only; split
+    · have h1 := SameOR.updS s c (f := fun y => { y with livePress := y.livePress || y.ph == .live })
+        (by intro y; exact ⟨rfl, rfl⟩)
+      split
+      · exact h1.trans (SameOR.press _ c _)
+      · exact h1
+    · exact SameOR.setPaused s c _ _
+  · dsimp only
+    have h1 : SameOR s (if (!p && (s.sd c).paused && !(cfg.iosB && c == .b && (s.sd c).away)) = true
+        then LinkResume.remotePause c false s else s) := by
+      split
+      · exact SameOR.setPaused s c _ _
+      · exact SameOR.refl s
+    exact h1.trans (SameOR.send _ c _)
+
+theorem SameOR.resumeIn (s : State) (cfg : Cfg) (c : Cl) (t : Nat) (p a : Bool) :
+    SameOR s (resumeIn cfg c t p a s) := by
+  unfold LinkResume.resumeIn
+  dsimp only
+  split
+  · exact SameOR.refl s
+  · split
+    · exact SameOR.shutdown s c _
+    · exact (((SameOR.updS s c (by intro y; exact ⟨rfl, rfl⟩)).trans (SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩))).trans
+        (SameOR.sendAll _ c _)).trans (SameOR.pauseAfterResume _ cfg c p a)
+
+theorem OkRes.recv {s : State} {cfg : Cfg} {c : Cl} {m : Msg} (h : OkRes s) : OkRes (recv cfg c m s) := by
+  have h1 : OkRes (updS c (fun y => { y with lastMsg := s.now }) s) :=
+    h.of (SameOR.updS s c (by intro y; exact ⟨rfl, rfl⟩))
+  unfold LinkResume.recv
+  dsimp only
+  cases m with
+  | info =>
+    dsimp only
+    split
+    · rename_i hr
+      intro d hd; simp only [updS_sd] at hd ⊢
+      split
+      · rename_i hdc; subst hdc; simpa using hr
+      · rename_i hdc; simp only [hdc, if_false] at hd; exact h d hd
+    · refine OkRes.of ?_ (SameOR.send _ c _)
+      intro d hd; simp only [updS_sd] at hd ⊢
+      split
+      · rfl
+      · rename_i hdc; simp only [hdc, if_false] at hd; exact h d hd
+  | inp f => exact h1.of (SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩))
+  | resume t p a => exact h1.of (SameOR.resumeIn _ cfg c t p a)
+  | pause v n =>
+    dsimp only
+    split
+    · split
+      · exact h1.of ((SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)).trans (SameOR.setPaused _ c _ _))
+      · exact h1
+    · exact h1.of (SameOR.setPaused _ c _ _)
+  | bye => exact h1.of ((SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)).trans (SameOR.shutdown _ c _))
+  | ping => exact h1
+
+theorem OkRes.deliver {s : State} {cfg : Cfg} {c : Cl} {k : Nat} (h : OkRes s) :
+    OkRes (deliver cfg c k s) := by
+  unfold LinkResume.deliver
+  split
+  · exact h
+  · rename_i m rest _
+    have hp : OkRes (updCh k (fun x => { x with q := fun d => if d = c then rest else x.q d }) s) :=
+      h.of (SameOR.of_sd rfl)
+    dsimp only
+    split
+    · exact hp
+    · split
+      · exact hp.recv
+      · split
+        · split
+          · exact hp.of (SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩))
+          · exact hp
+        · exact hp
+
+theorem OkRes.deliverN {s : State} {cfg : Cfg} {c : Cl} {k : Nat} (n : Nat) (h : OkRes s) :
+    OkRes (deliverN cfg c k n s) := by
+  induction n generalizing s with
+  | zero => exact h
+  | succ n ih => exact ih h.deliver
+
+theorem OkRes.step {s : State} {cfg : Cfg} (h : OkRes s) (e : Event) : OkRes (step cfg s e) := by
+  cases e with
+  | input c =>
+    simp only [LinkResume.step]
+    have h1 := h.of (SameOR.updS s c (f := fun y => { y with sent := (s.sd c).sent + 1 }) (by intro y; exact ⟨rfl, rfl⟩))
+    split
+    · exact h1.of (SameOR.send _ c _)
+    · exact h1
+  | deliver c k => exact h.deliver
+  | die k => exact h.of (SameOR.of_sd rfl)
+  | dropped c =>
+    simp only [LinkResume.step, LinkResume.dropped]
+    split
+    · split
+      · simp only [LinkResume.restart]; split
+        · exact h.of (SameOR.shutdown _ c _)
+        · exact h.of (SameOR.detach _ c)
+      · split
+        · exact h.of (SameOR.shutdown _ c _)
+        · exact h.of ((SameOR.detach _ c).trans (SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)))
+    · exact h.of (SameOR.shutdown _ c _)
+  | pair =>
+    simp only [LinkResume.step, LinkResume.pair]
+    refine h.of ?_
+    intro d; cases d <;> simp
+  | adopt c =>
+    simp only [LinkResume.step, LinkResume.adopt]
+    split
+    · exact h
+    · refine OkRes.deliverN _ (h.of ?_)
+      refine (SameOR.of_sd rfl).trans ((SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)).trans (SameOR.send _ c _))
+  | restart c =>
+    simp only [LinkResume.step, LinkResume.restart]; split
+    · exact h.of (SameOR.shutdown _ c _)
+    · exact h.of (SameOR.detach _ c)
+  | giveUp c => exact h.of (SameOR.shutdown _ c _)
+  | quit c => exact h.of (SameOR.shutdown _ c _)
+  | kill c => exact h.of (SameOR.finish _ c _)
+  | toggle c =>
+    simp only [LinkResume.step]
+    exact h.of ((SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)).trans (SameOR.setPaused _ c _ _))
+  | away c on =>
+    simp only [LinkResume.step, LinkResume.setAway]
+    have h1 := h.of (SameOR.updS s c
+      (f := fun y => { y with away := on, livePress := y.livePress || y.ph == .live })
+      (by intro y; exact ⟨rfl, rfl⟩))
+    split
+    · exact h1
+    · split
+      · split
+        · exact h1
+        · exact h1.of ((SameOR.setPaused _ c _ _).trans (SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)))
+      · split
+        · exact h1.of ((SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)).trans (SameOR.setPaused _ c _ _))
+        · exact h1
+  | tick n => exact h.of (SameOR.of_sd rfl)
+  | ping c => exact h.of (SameOR.send _ c _)
+  | noteIn c =>
+    simp only [LinkResume.step]
+    split
+    · exact h.of ((SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)).trans (SameOR.shutdown _ c _))
+    · exact h
+
+theorem okres_reachable {cfg : Cfg} {s : State} (h : Reachable cfg s) : OkRes s := by
+  induction h with
+  | init => intro c; cases c <;> simp [init]
+  | step e _ _ ih => exact ih.step e
+
+/-! ### Reading a message -/
+
+theorem resHead_cons (m : Msg) (l : List Msg) : resHead (m :: l) = resHead [m] := by cases m <;> rfl
+
+theorem resHead_drop {pre rest : List Msg} {m : Msg} (h : resHead (pre ++ m :: rest) = true)
+    (hm : resHead [m] = false) : resHead (pre ++ rest) = true := by
+  cases pre with
+  | nil => simp only [List.nil_append] at h; rw [resHead_cons, hm] at h; cases h
+  | cons x xs => simp only [List.cons_append] at h ⊢; rw [resHead_cons] at h ⊢; exact h
+
+theorem Sync.mk {s t : State} {c : Cl} (h : Sync s) (ho : t.sd c.other = s.sd c.other)
+    (hc : (t.sd c).ph = .live → (t.sd c).paused = (t.sd c).reg.on) : Sync t := by
+  intro e hl
+  rcases Cl.eq_or c e with rfl | rfl
+  · exact hc hl
+  · rw [ho] at hl ⊢; exact h _ hl
+
+/-- `remotePause`: only c's pause moves. -/
+theorem setPaused_nr (c : Cl) (v : Bool) (S : State) :
+    (setPaused c v false S).ch = S.ch ∧ (setPaused c v false S).sd c.other = S.sd c.other ∧
+      ((setPaused c v false S).sd c).sv = (S.sd c).sv ∧ ((setPaused c v false S).sd c).paused = v ∧
+      ((setPaused c v false S).sd c).early = (S.sd c).early := by
+  unfold LinkResume.setPaused
+  split
+  · rename_i hv; exact ⟨rfl, rfl, rfl, hv, rfl⟩
+  · simp [Side.sv]
+
+/-- A message for a channel c doesn't hold (it closed its end) is dropped. -/
+theorem SCore.popOut {s : State} {c : Cl} {k : Nat} {rest : List Msg} (h : SCore s)
+    (hn : ¬ hdC s.cs c k) : SCore (popQ k c rest s) := by
+  refine h.frame (fun _ => rfl) (fun j => popQ_dead ..) (fun d j hd => ⟨[], ?_, rfl⟩)
+  rw [popQ_cs, inbC_popQ]
+  split
+  · rename_i hjk; obtain ⟨rfl, rfl⟩ := hjk; exact absurd hd hn
+  · simp
+
+/-- c reads a message that is no press: nothing it will hold moves; and it
+    is not the friend's RESUME a redialing c waits for (or c is live). -/
+theorem SCore.popNp {s : State} {c : Cl} {k : Nat} {m : Msg} {rest : List Msg} (h : SCore s)
+    (hq : (s.ch k).q c = m :: rest) (hm : ∀ b, m.press? b = none)
+    (hr : resHead [m] = false ∨ (s.sd c).ph = .live) : SCore (popQ k c rest s) := by
+  have hib : ∀ e j, inbC (popQ k c rest s).cs (popQ k c rest s).ch e j =
+      if j = k ∧ e = c then (if (s.cs c).rsPc = some k then (s.cs c).early else []) ++ rest
+      else inbC s.cs s.ch e j := by
+    intro e j; rw [popQ_cs, inbC_popQ]; split
+    · rename_i hjk; obtain ⟨rfl, rfl⟩ := hjk; simp
+    · simp_all
+  have hin : inbC s.cs s.ch c k = (if (s.cs c).rsPc = some k then (s.cs c).early else []) ++ m :: rest := by
+    unfold inbC; rw [hq]
+  have tpq : ∀ e j, pq (popQ k c rest s) e j = pq s e j := by
+    intro e j; unfold pq pqC; rw [hib]; split
+    · rename_i hjk; obtain ⟨rfl, rfl⟩ := hjk; rw [hin]
+      simp [List.filterMap_append, List.filterMap_cons, hm]
+    · rfl
+  have thd : ∀ e j, hdC (popQ k c rest s).cs e j ↔ hdC s.cs e j := by intro e j; rw [popQ_cs]
+  have thead : ∀ e j, (s.sd e).ph = .recon → resHead (inbC s.cs s.ch e j) = true →
+      resHead (inbC (popQ k c rest s).cs (popQ k c rest s).ch e j) = true := by
+    intro e j hre hrh
+    rw [hib]; split
+    · rename_i hjk; obtain ⟨rfl, rfl⟩ := hjk
+      rw [hin] at hrh
+      rcases hr with hr | hr
+      · exact resHead_drop hrh hr
+      · rw [hr] at hre; cases hre
+    · exact hrh
+  refine ⟨fun e j hre hc ho => ?_, fun e j hk hre ho hd => ?_, fun e j hre hc hp => ?_,
+    fun e j hl hk hre ho hd => ?_, fun e j hl ho hk hko hd => ?_⟩
+  · rw [thd] at hc ho; rw [tpq]; exact h.quiet e j hre hc ho
+  · rw [thd] at ho; rw [popQ_dead] at hd
+    exact thead _ _ hre (h.head e j hk hre ho hd)
+  · rw [thd] at hc; rw [tpq] at hp
+    exact thead _ _ hre (h.head2 e j hre hc hp)
+  · rw [thd] at ho; rw [popQ_dead] at hd; rw [tpq]; exact h.half e j hl hk hre ho hd
+  · rw [popQ_dead] at hd; rw [tpq, tpq]; exact h.conv e j hl ho hk hko hd
+
+/-- Live c reads the friend's press: it takes it if it beats its own. -/
+theorem SCore.takePress {s T : State} {c : Cl} {k n : Nat} {v : Bool} {rest : List Msg} (h : SCore s)
+    (hq : (s.ch k).q c = .pause v n :: rest) (hl : (s.sd c).ph = .live) (hk : (s.sd c).dc = some k)
+    (hrs : (s.sd c).rsPc = none)
+    (hTc : (T.sd c).sv = ((s.sd c).ph, (s.sd c).dc, (s.sd c).rsPc,
+      (s.sd c).reg.take ⟨n, c.other == .a, v⟩, (s.sd c).fP, (s.sd c).fA))
+    (hTe : (T.sd c).early = (s.sd c).early)
+    (hTo : T.sd c.other = s.sd c.other) (hTch : T.ch = (popQ k c rest s).ch) : SCore T := by
+  have ef : (T.sd c).ph = (s.sd c).ph ∧ (T.sd c).dc = (s.sd c).dc ∧ (T.sd c).rsPc = (s.sd c).rsPc ∧
+      (T.sd c).reg = (s.sd c).reg.take ⟨n, c.other == .a, v⟩ ∧ (T.sd c).fP = (s.sd c).fP ∧
+      (T.sd c).fA = (s.sd c).fA := by
+    simpa [Side.sv] using hTc
+  have hcj : ∀ j, hdC T.cs c j → j = k := by
+    intro j hj; simp [hdC, cs_apply, ef.2.1, ef.2.2.1, hk, hrs] at hj; exact hj.symm
+  have hcs : hdC s.cs c k := Or.inl (by simpa [cs_apply] using hk)
+  have hoj : ∀ j, hdC T.cs c.other j ↔ hdC s.cs c.other j := by intro j; simp [hdC, cs_apply, hTo]
+  have inbc : inbC T.cs T.ch c k = rest := by
+    unfold inbC; simp [cs_apply, ef.2.2.1, hrs, hTch, popQ_q]
+  have inbcs : inbC s.cs s.ch c k = .pause v n :: rest := by
+    unfold inbC; simp [cs_apply, hrs, hq]
+  have inbo : ∀ j, inbC T.cs T.ch c.other j = inbC s.cs s.ch c.other j := by
+    intro j; unfold inbC; simp [cs_apply, hTo, hTch, popQ_q] <;> rfl
+  have pqc : pq s c k = ⟨n, c.other == .a, v⟩ :: pq T c k := by
+    simp only [pq, pqC, inbc, inbcs, List.filterMap_cons, Msg.press?]
+  have pqo : ∀ j, pq T c.other j = pq s c.other j := by intro j; simp only [pq, pqC, inbo]
+  have hdT : ∀ j, (T.ch j).dead = (s.ch j).dead := by intro j; rw [hTch]; exact popQ_dead ..
+  have hnotq : (s.sd c.other).ph = .recon → hdC s.cs c.other k → False := by
+    intro hre ho
+    have := h.quiet c.other k hre ho (by simpa using hcs)
+    simp only [Cl.other_other] at this; rw [pqc] at this; cases this
+  have hconv : (s.sd c.other).ph = .live → (s.sd c.other).dc = some k → (s.ch k).dead = false →
+      settle (T.sd c).reg (pq T c k) = settle (T.sd c.other).reg (pq T c.other k) := by
+    intro hlo hko hdk
+    have := h.conv c k hl hlo hk hko hdk
+    rw [pqc, settle_cons] at this
+    rw [ef.2.2.2.1, hTo, pqo, this]
+  refine ⟨fun e j hre hc ho => ?_, fun e j hj hre ho hd => ?_, fun e j hre hc hp => ?_,
+    fun e j hle hj hre ho hd => ?_, fun e j hle ho hj hjo hd => ?_⟩
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.1, hl] at hre; cases hre
+    · rw [hTo] at hre; rw [hoj] at hc; simp only [Cl.other_other] at ho ⊢
+      rw [hcj j ho] at hc; exact (hnotq hre hc).elim
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.2.1] at hj; rw [hTo] at hre; rw [hoj] at ho; rw [hdT] at hd; rw [inbo]
+      exact h.head _ j hj hre ho hd
+    · simp only [Cl.other_other] at hre; rw [ef.1, hl] at hre; cases hre
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.1, hl] at hre; cases hre
+    · rw [hTo] at hre; rw [hoj] at hc; rw [pqo] at hp; rw [inbo]; exact h.head2 _ j hre hc hp
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.2.1, hk] at hj; cases hj; rw [hTo] at hre; rw [hoj] at ho
+      exact (hnotq hre ho).elim
+    · simp only [Cl.other_other] at hre; rw [ef.1, hl] at hre; cases hre
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.2.1, hk] at hj; cases hj; rw [hTo] at ho hjo; rw [hdT] at hd
+      exact hconv ho hjo hd
+    · simp only [Cl.other_other] at ho hjo ⊢
+      rw [ef.2.1, hk] at hjo; cases hjo; rw [hTo] at hle hj; rw [hdT] at hd
+      exact (hconv hle hj hd).symm
+
+/-- Redialing c reads the friend's RESUME and goes live from the shared
+    base; the friend, if live, holds what settling from that base gives. -/
+theorem SCore.resumed {s V : State} {c : Cl} {k t : Nat} {p a : Bool} {rest : List Msg} (h : SCore s)
+    (hi : Inv s) (hp : PInv s) (hq : (s.ch k).q c = .resume t p a :: rest) (hr : (s.sd c).ph = .recon)
+    (hk : (s.sd c).dc = some k)
+    (hVc : (V.sd c).sv = (.live, some k, none, Reg.base (finalPause (s.sd c).fP (s.sd c).fA p a),
+      (s.sd c).fP, (s.sd c).fA))
+    (hVe : (V.sd c).early = [])
+    (hVo : V.sd c.other = s.sd c.other) (hVch : V.ch = (popQ k c rest s).ch) : SCore V := by
+  have ef : (V.sd c).ph = .live ∧ (V.sd c).dc = some k ∧ (V.sd c).rsPc = none ∧
+      (V.sd c).reg = Reg.base (finalPause (s.sd c).fP (s.sd c).fA p a) ∧ (V.sd c).fP = (s.sd c).fP ∧
+      (V.sd c).fA = (s.sd c).fA := by
+    simpa [Side.sv] using hVc
+  have hk' : (s.cs c).dc = some k := by simpa [cs_apply] using hk
+  have hrs : (s.sd c).rsPc = some k := by
+    have := (hi.reconDc c k (by simpa [cs_apply] using hr) hk').1; simpa [cs_apply] using this
+  have hearly : (s.sd c).early = [] := by
+    cases hl : (s.sd c).early with
+    | nil => rfl
+    | cons x xs => have := (hi.earlySh c (by simp [cs_apply, hl])).1; simp [cs_apply, hk] at this
+  have hcs : hdC s.cs c k := Or.inl hk'
+  have hdk : (s.ch k).dead = false := by
+    cases hd : (s.ch k).dead
+    · rfl
+    · have := hi.deadQ k c hd; rw [hq] at this; cases this
+  have inbcs : inbC s.cs s.ch c k = .resume t p a :: rest := by
+    unfold inbC; simp [cs_apply, hrs, hearly, hq]
+  have hfl := hp.resFlags c k p a (by unfold pinb; rw [inbcs]; simp [Msg.pr]) hcs
+  have hcj : ∀ j, hdC V.cs c j → j = k := by
+    intro j hj; simp [hdC, cs_apply, ef.2.1, ef.2.2.1] at hj; exact hj.symm
+  have hoj : ∀ j, hdC V.cs c.other j ↔ hdC s.cs c.other j := by intro j; simp [hdC, cs_apply, hVo]
+  have inbc : inbC V.cs V.ch c k = rest := by
+    unfold inbC; simp [cs_apply, ef.2.2.1, hVch, popQ_q]
+  have inbo : ∀ j, inbC V.cs V.ch c.other j = inbC s.cs s.ch c.other j := by
+    intro j; unfold inbC; simp [cs_apply, hVo, hVch, popQ_q] <;> rfl
+  have pqc : pq V c k = pq s c k := by
+    simp only [pq, pqC, inbc, inbcs, List.filterMap_cons, Msg.press?]
+  have pqo : ∀ j, pq V c.other j = pq s c.other j := by intro j; simp only [pq, pqC, inbo]
+  have hdV : ∀ j, (V.ch j).dead = (s.ch j).dead := by intro j; rw [hVch]; exact popQ_dead ..
+  -- c sent no presses while redialing
+  have hq0 : hdC s.cs c.other k → pq s c.other k = [] := fun ho => h.quiet c k hr hcs ho
+  have hconv : (s.sd c.other).ph = .live → (s.sd c.other).dc = some k →
+      settle (V.sd c).reg (pq V c k) = settle (V.sd c.other).reg (pq V c.other k) := by
+    intro hlo hko
+    have ho : hdC s.cs c.other k := Or.inl (by simpa [cs_apply] using hko)
+    have := h.half c.other k hlo hko (by simpa using hr) (by simpa using hcs) hdk
+    simp only [Cl.other_other] at this
+    rw [ef.2.2.2.1, pqc, hVo, pqo, hq0 ho, settle_nil, ← this, finalPause_comm, hfl.1, hfl.2]
+  refine ⟨fun e j hre hc ho => ?_, fun e j hj hre ho hd => ?_, fun e j hre hc hp' => ?_,
+    fun e j hle hj hre ho hd => ?_, fun e j hle ho hj hjo hd => ?_⟩
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.1] at hre; cases hre
+    · rw [hVo] at hre; rw [hoj] at hc; simp only [Cl.other_other] at ho ⊢
+      rw [hcj j ho] at hc ⊢; rw [pqc]; simpa using h.quiet _ k hre hc (by simpa using hcs)
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.2.1] at hj; cases hj; rw [hVo] at hre; rw [hoj] at ho; rw [hdV] at hd; rw [inbo]
+      exact h.head _ _ hk hre ho hd
+    · simp only [Cl.other_other] at hre; rw [ef.1] at hre; cases hre
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.1] at hre; cases hre
+    · rw [hVo] at hre; rw [hoj] at hc; rw [pqo] at hp'; rw [inbo]; exact h.head2 _ j hre hc hp'
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.2.1] at hj; cases hj; rw [hVo] at hre ⊢; rw [hoj] at ho
+      rw [pqo, hq0 ho, settle_nil, ef.2.2.2.1, ef.2.2.2.2.1, ef.2.2.2.2.2, hfl.1, hfl.2]
+    · simp only [Cl.other_other] at hre; rw [ef.1] at hre; cases hre
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [ef.2.1] at hj; cases hj; rw [hVo] at ho hjo
+      exact hconv ho hjo
+    · simp only [Cl.other_other] at ho hjo ⊢
+      rw [ef.2.1] at hjo; cases hjo; rw [hVo] at hle hj
+      exact (hconv hle hj).symm
+
+theorem Sync.two {t : State} (c : Cl) (hc : (t.sd c).ph = .live → (t.sd c).paused = (t.sd c).reg.on)
+    (ho : (t.sd c.other).ph = .live → (t.sd c.other).paused = (t.sd c.other).reg.on) : Sync t := by
+  intro e hl
+  rcases Cl.eq_or c e with rfl | rfl
+  · exact hc hl
+  · exact ho hl
+
+theorem sendAll_closed (c : Cl) (ms : List Msg) (s : State) (j : Nat) :
+    ((sendAll c ms s).ch j).closed = (s.ch j).closed := by
+  rw [sendAll_eq]; split
+  · split
+    · rfl
+    · exact appendQ_closed ..
+  · rfl
+
+/-- The pause half of a resume, from the shared base: whatever branch, c's
+    pause is its register's, and a press after its RESUME goes out numbered. -/
+theorem SInv.pauseAfter {cfg : Cfg} (hfix : cfg.fix = true) {U : State} {c : Cl} {k : Nat} {p a : Bool}
+    (hU : SCore U) (hl : (U.sd c).ph = .live) (hk : (U.sd c).dc = some k) (hrs : (U.sd c).rsPc = none)
+    (hcl : (U.ch k).closed c = false) (hsame : ∀ j, hdC U.cs c.other j → j = k)
+    (hreg : (U.sd c).reg = Reg.base (finalPause (U.sd c).fP (U.sd c).fA p a))
+    (hso : (U.sd c.other).ph = .live → (U.sd c.other).paused = (U.sd c.other).reg.on) :
+    SInv (pauseAfterResume cfg c p a U) := by
+  unfold LinkResume.pauseAfterResume
+  rw [if_pos hfix]
+  dsimp only
+  split
+  · rename_i hne
+    have h1 : SCore (updS c (fun y => { y with livePress := y.livePress || y.ph == .live }) U) :=
+      hU.updS_nv (by intro y; rfl) (by intro y; rfl)
+    split
+    · refine ⟨h1.onPress (by simpa using hl) (by simpa using hk) (by simpa using hrs) (by simpa using hcl)
+        (fun j hj => hsame j (by simpa [hdC, cs_apply] using hj)), Sync.two c ?_ ?_⟩
+      · intro _; simp [LinkResume.press, send_sd]
+      · simpa [LinkResume.press, send_sd] using hso
+    · rename_i hf
+      refine ⟨h1, Sync.two c (fun _ => ?_) (by simpa using hso)⟩
+      simp only [bne_iff_ne, ne_eq, Decidable.not_not] at hf
+      simp [hreg, Reg.base, hf]
+  · rename_i heq
+    obtain ⟨n1, n2, n3, n4, n5⟩ := setPaused_nr c (finalPause (U.sd c).fP (U.sd c).fA p a) U
+    refine ⟨hU.frame (fun e => ?_) (fun j => by rw [remotePause, n1])
+      (fun e j _ => ⟨[], ?_, rfl⟩), Sync.two c (fun _ => ?_) ?_⟩
+    · rcases Cl.eq_or c e with rfl | rfl
+      · exact n3
+      · rw [remotePause, n2]
+    · rw [List.append_nil]; unfold inbC remotePause
+      have hr' : ((setPaused c (finalPause (U.sd c).fP (U.sd c).fA p a) false U).sd c).rsPc =
+          (U.sd c).rsPc := by
+        have := n3; simp only [Side.sv, Prod.mk.injEq] at this; exact this.2.2.1
+      rcases Cl.eq_or c e with rfl | rfl
+      · simp only [cs_apply, core_rsPc, core_early, n1, hr', n5] <;> rfl
+      · simp only [cs_apply, n1, n2] <;> rfl
+    · have hr' : ((setPaused c (finalPause (U.sd c).fP (U.sd c).fA p a) false U).sd c).reg = (U.sd c).reg := by
+        have := n3; simp only [Side.sv, Prod.mk.injEq] at this; exact this.2.2.2.1
+      unfold remotePause; rw [n4, hr', hreg]; rfl
+    · unfold remotePause; rw [n2]; exact hso
+
+/-- A message for the pairing c is still opening waits in `rsEarly`. -/
+theorem SCore.earlyPush {s : State} {c : Cl} {k : Nat} {m : Msg} {rest : List Msg} (h : SCore s)
+    (hq : (s.ch k).q c = m :: rest) (hrs : (s.sd c).rsPc = some k) :
+    SCore (updS c (fun y => { y with early := y.early ++ [m] }) (popQ k c rest s)) := by
+  refine h.frame (fun d => ?_) (fun j => popQ_dead ..) (fun d j _ => ⟨[], ?_, rfl⟩)
+  · simp only [updS_sd, popQ_sd]; split <;> rfl
+  · rw [List.append_nil]; unfold inbC
+    simp only [cs_apply, core_rsPc, core_early, updS_sd, popQ_sd, updS_ch, popQ_q]
+    by_cases hdc : d = c
+    · subst hdc
+      by_cases hj : j = k
+      · subst hj; simp [hrs, hq]
+      · have hne : (s.sd d).rsPc ≠ some j := by rw [hrs]; intro h'; exact hj (Option.some.inj h').symm
+        simp [hj, hne]
+    · simp [hdc] <;> rfl
+
+theorem SInv.onDeliver {cfg : Cfg} (hseq : cfg.seq = true) (hfix : cfg.fix = true)
+    (hearly : cfg.early = true) {s : State} {c : Cl} {k : Nat} (hi : Inv s) (hp : PInv s) (hQ : QInv s)
+    (hor : OkRes s) (h : SInv s) : SInv (deliver cfg c k s) := by
+  unfold LinkResume.deliver
+  split
+  · exact h
+  · rename_i m rest hq
+    dsimp only
+    have hpop : updCh k (fun x => { x with q := fun d => if d = c then rest else x.q d }) s =
+        popQ k c rest s := rfl
+    rw [hpop]
+    have hdk : (s.ch k).dead = false := by
+      cases hd : (s.ch k).dead
+      · rfl
+      · have := hi.deadQ k c hd; rw [hq] at this; cases this
+    split
+    · rename_i hcl
+      have hn : ¬ hdC s.cs c k := fun hc => by
+        have := (hi.hold c k hc).2; rw [popQ_closed] at hcl; rw [this] at hcl; cases hcl
+      exact ⟨h.1.popOut hn, h.2.of_eq rfl⟩
+    · split
+      · rename_i hd
+        have hd : (s.sd c).dc = some k := by simpa using hd
+        have hk' : (s.cs c).dc = some k := by simpa [cs_apply] using hd
+        have hc : hdC s.cs c k := Or.inl hk'
+        have hne : (s.sd c).ph ≠ .ended := fun he => by
+          have := (hi.endSh c (by simpa [cs_apply] using he)).1; simp [cs_apply, hd] at this
+        have hearly' : (s.sd c).early = [] := by
+          cases hl : (s.sd c).early with
+          | nil => rfl
+          | cons x xs => have := (hi.earlySh c (by simp [cs_apply, hl])).1; simp [cs_apply, hd] at this
+        have hS1 : SInv (popQ k c rest s) →
+            SInv (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s)) :=
+          fun h1 => ⟨h1.1.updS_nv (by intro y; rfl) (by intro y; rfl),
+            h1.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+        cases m with
+        | inp f =>
+          have h1 := hS1 ⟨h.1.popNp hq (fun _ => rfl) (Or.inl rfl), h.2.of_eq rfl⟩
+          simp only [recv]
+          exact ⟨h1.1.updS_nv (by intro y; rfl) (by intro y; rfl), h1.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+        | info =>
+          have h1 := hS1 ⟨h.1.popNp hq (fun _ => rfl) (Or.inl rfl), h.2.of_eq rfl⟩
+          simp only [recv]
+          split
+          · exact ⟨h1.1.updS_nv (by intro y; rfl) (by intro y; rfl),
+              h1.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+          · have h2 : SInv (updS c (fun y => { y with res := true, ok := true })
+                (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s))) :=
+              ⟨h1.1.updS_nv (by intro y; rfl) (by intro y; rfl), h1.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+            exact ⟨h2.1.send_np (fun _ => rfl), h2.2.of_eq (send_sd ..)⟩
+        | ping =>
+          have h1 := hS1 ⟨h.1.popNp hq (fun _ => rfl) (Or.inl rfl), h.2.of_eq rfl⟩
+          simp only [recv]; exact h1
+        | bye =>
+          have h1 := hS1 ⟨h.1.popNp hq (fun _ => rfl) (Or.inl rfl), h.2.of_eq rfl⟩
+          simp only [recv]
+          exact SInv.onShutdown ⟨h1.1.updS_nv (by intro y; rfl) (by intro y; rfl),
+            h1.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+        | pause v n =>
+          have hlive : (s.sd c).ph = .live := by
+            cases hph : (s.sd c).ph with
+            | live => rfl
+            | ended => exact absurd hph hne
+            | recon =>
+              exfalso
+              have hpq : pq s c k ≠ [] := by
+                simp [pq, pqC, inbC, cs_apply, hq, hearly', Msg.press?]
+              have := h.1.head2 c k hph hc hpq
+              simp [inbC, cs_apply, hq, hearly', resHead] at this
+          have hrs : (s.sd c).rsPc = none := by
+            have := (hi.liveSh c (by simpa [cs_apply] using hlive)).1; simpa [cs_apply] using this
+          simp only [recv, hseq, ↓reduceIte]
+          split
+          · rename_i hb
+            simp only [updS_sd_self, popQ_sd] at hb
+            generalize hS : updS c (fun y => { y with reg := ⟨n, c.other == .a, v⟩ })
+              (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s)) = S
+            have Sc : S.sd c = { s.sd c with lastMsg := s.now, reg := ⟨n, c.other == .a, v⟩ } := by
+              rw [← hS]; simp
+            have So : S.sd c.other = s.sd c.other := by rw [← hS]; simp
+            have Sch : S.ch = (popQ k c rest s).ch := by rw [← hS]; rfl
+            obtain ⟨n1, n2, n3, n4, n5⟩ := setPaused_nr c v S
+            refine ⟨h.1.takePress hq hlive hd hrs ?_ ?_ ?_ ?_, ?_⟩
+            · rw [remotePause, n3, Sc]; simp [Side.sv, Reg.take, hb]
+            · rw [remotePause, n5, Sc]
+            · rw [remotePause, n2, So]
+            · rw [remotePause, n1, Sch]
+            · refine Sync.mk (c := c) h.2 (by rw [remotePause, n2, So]) (fun _ => ?_)
+              have hr' : ((setPaused c v false S).sd c).reg = (S.sd c).reg := by
+                have := n3; simp only [Side.sv, Prod.mk.injEq] at this; exact this.2.2.2.1
+              unfold remotePause; rw [n4, hr', Sc]
+          · rename_i hb
+            simp only [updS_sd_self, popQ_sd] at hb
+            refine ⟨h.1.takePress hq hlive hd hrs ?_ ?_ ?_ ?_, ?_⟩
+            · simp [Side.sv, Reg.take, hb]
+            · simp
+            · simp
+            · rfl
+            · exact (Sync.of_eq (t := popQ k c rest s) h.2 rfl).upd (by intro y; exact ⟨rfl, rfl, rfl⟩)
+        | resume t p a =>
+          cases hph : (s.sd c).ph with
+          | ended => exact absurd hph hne
+          | live =>
+            have h1 := hS1 ⟨h.1.popNp hq (fun _ => rfl) (Or.inr hph), h.2.of_eq rfl⟩
+            simp only [recv]
+            unfold resumeIn
+            simpa [hph] using h1
+          | recon =>
+            have hro : (s.sd c).rsOpen = true := by
+              have := (hi.reconDc c k (by simpa [cs_apply] using hph) hk').2; simpa [cs_apply] using this
+            have hres : (s.sd c).res = true := hor c (hQ.reconOk c hph)
+            have hlog : ¬ (s.sd c).sent > t + LOG := by
+              have hm : Msg.resume t p a ∈ inbC s.cs s.ch c k := by unfold inbC; rw [hq]; simp
+              have ht := hi.resT c k t p a hm (by simpa [cs_apply] using hph) hc
+              have h1 := hi.win c
+              have h2 := hi.rxLe c
+              have h3 := hi.win c.other
+              simp only [cs_apply, core_sent, core_rx] at ht h1 h2 h3
+              simp only [W, LOG] at *; omega
+            have hrs : (s.sd c).rsPc = some k := by
+              have := (hi.reconDc c k (by simpa [cs_apply] using hph) hk').1; simpa [cs_apply] using this
+            simp only [recv]
+            unfold resumeIn
+            dsimp only
+            rw [if_neg (by simp [hph, hres, hro]), if_neg (by simpa using hlog)]
+            have hV := h.1.resumed (V := updS c (fun y => { y with ph := .live, rsPc := none })
+              (updS c (fun y => { y with reg := Reg.base (finalPause y.fP y.fA p a) })
+                (updS c (fun y => { y with lastMsg := (popQ k c rest s).now }) (popQ k c rest s))))
+              hi hp hq hph hd (by simp [Side.sv, hd]) (by simp [hearly']) (by simp) rfl
+            refine SInv.pauseAfter hfix (k := k) hV.sendAll_frames ?_ ?_ ?_ ?_ ?_ ?_ ?_
+            · simp [sendAll_sd]
+            · simp [sendAll_sd, hd]
+            · simp [sendAll_sd]
+            · rw [sendAll_closed]; simp only [updS_ch, popQ_closed]; exact (hi.hold c k hc).2
+            · intro j hj
+              have hj' : hdC s.cs c.other j := by simpa [hdC, cs_apply, sendAll_sd] using hj
+              exact (hi.same c k j hc hj').symm
+            · simp [sendAll_sd]
+            · intro hl; simp only [sendAll_sd, updS_sd_other, popQ_sd] at hl ⊢; exact h.2 _ hl
+      · split
+        · rename_i hd hrs
+          exact ⟨h.1.earlyPush hq (by simpa using hrs),
+            (Sync.of_eq (t := popQ k c rest s) h.2 rfl).upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+        · rename_i hd hrs
+          have hn : ¬ hdC s.cs c k := by
+            intro hc; rcases hc with hc | hc
+            · exact hd (by simpa [cs_apply] using hc)
+            · exact hrs (by simpa [cs_apply] using hc)
+          exact ⟨h.1.popOut hn, h.2.of_eq rfl⟩
+
+theorem SInv.onDeliverN {cfg : Cfg} (hseq : cfg.seq = true) (hfix : cfg.fix = true)
+    (hearly : cfg.early = true) {c : Cl} {k : Nat} (n : Nat) :
+    ∀ {s : State}, Inv s → PInv s → QInv s → OkRes s → SInv s → SInv (deliverN cfg c k n s) := by
+  induction n with
+  | zero => intro s _ _ _ _ h; exact h
+  | succ n ih =>
+    intro s hi hp hQ hor h
+    exact ih hi.deliver (hp.deliver hfix hi) (QStep.deliver hQ).inv hor.deliver
+      (h.onDeliver hseq hfix hearly hi hp hQ hor)
+
+/-- `rsAdopt` up to the replay: the RESUME is the first thing on the new
+    channel, and c's flags are recorded. -/
+theorem SInv.adoptPrefix {s : State} {c : Cl} {k : Nat} (hi : Inv s) (h : SInv s)
+    (hr : (s.sd c).ph = .recon) (hro : (s.sd c).rsOpen = false) (hrs : (s.sd c).rsPc = some k)
+    (hdead : (s.ch k).dead = false) :
+    SInv (send c (.resume (s.sd c).rx (s.sd c).paused (s.sd c).away) (updS c (openSide k)
+      (updCh k (fun y => { y with q := fun d => if d = c then (s.sd c).early ++ y.q d else y.q d }) s))) := by
+  have hr' : (s.cs c).ph = .recon := by simpa [cs_apply] using hr
+  have hrs' : (s.cs c).rsPc = some k := by simpa [cs_apply] using hrs
+  have hdn : (s.sd c).dc = none := by
+    cases hd : (s.sd c).dc with
+    | none => rfl
+    | some j =>
+      have := (hi.reconDc c j hr' (by simpa [cs_apply] using hd)).2; simp [cs_apply, hro] at this
+  have hc : hdC s.cs c k := Or.inr hrs'
+  have hsil : inbC s.cs s.ch c.other k = [] := hi.silent c k hc (by simp [cs_apply, hdn])
+  have hnl : ¬ ((s.sd c.other).ph = .live ∧ (s.sd c.other).dc = some k) := by
+    intro ⟨hl, hd⟩
+    have := hi.liveOpen c.other k (by simpa [cs_apply] using hl) (by simpa [cs_apply] using hd)
+      (by simpa using hc)
+    simp [cs_apply, hdn] at this
+  generalize hS1 : updS c (openSide k) (updCh k (fun y => { y with q := fun d => if d = c then (s.sd c).early ++ y.q d else y.q d }) s) = S1
+  have s1c : S1.sd c = openSide k (s.sd c) := by rw [← hS1, updS_sd_self]; rfl
+  have s1o : S1.sd c.other = s.sd c.other := by rw [← hS1, updS_sd_other]; rfl
+  have s1q : ∀ j e, (S1.ch j).q e = if j = k ∧ e = c then (s.sd c).early ++ (s.ch j).q e else (s.ch j).q e := by
+    intro j e; rw [← hS1]; simp only [updS_ch, updCh_ch]
+    by_cases hj : j = k <;> by_cases he : e = c <;> simp [hj, he]
+  have s1d : ∀ j, (S1.ch j).dead = (s.ch j).dead := by
+    intro j; rw [← hS1]; simp only [updS_ch, updCh_ch]; split <;> rfl
+  have s1cl : ∀ j, (S1.ch j).closed = (s.ch j).closed := by
+    intro j; rw [← hS1]; simp only [updS_ch, updCh_ch]; split <;> rfl
+  have hsend : send c (.resume (s.sd c).rx (s.sd c).paused (s.sd c).away) S1 =
+      appendQ k c.other [.resume (s.sd c).rx (s.sd c).paused (s.sd c).away] S1 := by
+    have hcl : (s.ch k).closed c = false := (hi.hold c k hc).2
+    simp only [send, s1c, openSide_dc, s1d, s1cl, hcl, hdead, Bool.or_false, Bool.false_eq_true, if_false]; rfl
+  rw [hsend]
+  generalize hA : appendQ k c.other [.resume (s.sd c).rx (s.sd c).paused (s.sd c).away] S1 = A
+  have Ac : A.sd c = openSide k (s.sd c) := by rw [← hA, appendQ_sd, s1c]
+  have Ao : A.sd c.other = s.sd c.other := by rw [← hA, appendQ_sd, s1o]
+  have Ad : ∀ j, (A.ch j).dead = (s.ch j).dead := by intro j; rw [← hA, appendQ_dead, s1d]
+  have hcj : ∀ j, hdC A.cs c j → j = k := by
+    intro j hj; simp [hdC, cs_apply, Ac, openSide] at hj
+    rcases hj with hj | hj
+    · exact hj.symm
+    · rw [hrs] at hj; exact (Option.some.inj hj).symm
+  have hoj : ∀ j, hdC A.cs c.other j ↔ hdC s.cs c.other j := by intro j; simp [hdC, cs_apply, Ao]
+  have inbc : ∀ j, inbC A.cs A.ch c j = inbC s.cs s.ch c j := by
+    intro j; unfold inbC
+    rw [← hA, appendQ_cs, appendQ_q, s1q]
+    simp only [Cl.ne_other, and_false, if_false, cs_apply, core_rsPc, core_early, appendQ_sd, s1c, openSide_rsPc,
+      openSide_early]
+    by_cases hj : j = k
+    · subst hj; simp [hrs]
+    · have hne : (s.sd c).rsPc ≠ some j := by rw [hrs]; intro h'; exact hj (Option.some.inj h').symm
+      simp [hj, hne]
+  have inbo : ∀ j, inbC A.cs A.ch c.other j =
+      if j = k then [.resume (s.sd c).rx (s.sd c).paused (s.sd c).away] else inbC s.cs s.ch c.other j := by
+    intro j; unfold inbC
+    rw [← hA, appendQ_cs, appendQ_q, s1q]
+    simp only [cs_apply, core_rsPc, core_early, appendQ_sd, s1o, Cl.other_ne, and_false, if_false]
+    have hsil' : (if (s.sd c.other).rsPc = some k then (s.sd c.other).early else []) ++
+        (s.ch k).q c.other = [] := hsil
+    by_cases hj : j = k
+    · subst hj; simp only [and_self, if_true]; rw [← List.append_assoc, hsil']; rfl
+    · simp only [hj, false_and, if_false]; rfl
+  have pqc : ∀ j, pq A c j = pq s c j := by intro j; simp only [pq, pqC, inbc]
+  have pqo : ∀ j, pq A c.other j = if j = k then [] else pq s c.other j := by
+    intro j; simp only [pq, pqC, inbo]; split <;> simp [Msg.press?]
+  refine ⟨⟨fun e j hre hc' ho => ?_, fun e j hj hre ho hd => ?_, fun e j hre hc' hp => ?_,
+    fun e j hl hj hre ho hd => ?_, fun e j hl ho hj hjo hd => ?_⟩, Sync.mk (c := c) h.2 Ao ?_⟩
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [hcj j hc', pqo]; simp
+    · simp only [Cl.other_other] at ho ⊢; rw [hcj j ho] at hc' ⊢; rw [Ao] at hre; rw [hoj] at hc'
+      rw [pqc]; simpa using h.1.quiet _ k hre hc' (by simpa using hc)
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [Ac, openSide_dc] at hj; cases hj; rw [inbo]; simp [resHead]
+    · simp only [Cl.other_other] at hre ho ⊢; rw [hcj j ho] at hj hd ⊢; rw [Ao] at hj; rw [Ad] at hd
+      rw [inbc]; rw [Ac] at hre; simpa using h.1.head _ k hj (by simpa using hre) (by simpa using hc) hd
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [hcj j hc'] at hp ⊢; rw [pqc] at hp; rw [inbc]; rw [Ac] at hre
+      exact h.1.head2 _ k (by simpa using hre) hc hp
+    · rw [Ao] at hre; rw [hoj] at hc'
+      by_cases hjk : j = k
+      · rw [pqo, if_pos hjk] at hp; exact absurd rfl hp
+      · rw [pqo, if_neg hjk] at hp; rw [inbo, if_neg hjk]; exact h.1.head2 _ j hre hc' hp
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [Ac] at hl; simp [openSide, hr] at hl
+    · simp only [Cl.other_other] at hre ho; rw [hcj j ho] at hj; rw [Ao] at hl hj
+      exact absurd ⟨hl, hj⟩ hnl
+  · rcases Cl.eq_or c e with rfl | rfl
+    · rw [Ac] at hl; simp [openSide, hr] at hl
+    · simp only [Cl.other_other] at ho; rw [Ac] at ho; simp [openSide, hr] at ho
+  · intro hl; rw [Ac] at hl; simp [openSide, hr] at hl
+
+theorem SInv.onAdopt {cfg : Cfg} (hseq : cfg.seq = true) (hfix : cfg.fix = true) (hearly : cfg.early = true)
+    {s : State} {c : Cl} (hi : Inv s) (hp : PInv s) (hQ : QInv s) (hor : OkRes s) (h : SInv s)
+    (hen : en cfg s (.adopt c) = true) : SInv (adopt cfg c s) := by
+  simp only [en, Bool.and_eq_true, beq_iff_eq, Bool.not_eq_true'] at hen
+  obtain ⟨⟨hr, hro⟩, hk⟩ := hen
+  unfold LinkResume.adopt
+  split
+  · exact h
+  · rename_i k hrs
+    rw [hrs] at hk
+    simp only [Bool.not_eq_true'] at hk
+    refine SInv.onDeliverN hseq hfix hearly _ (hi.adoptPrefix hr hro hrs hk (fun y => rfl) rfl)
+      (hp.adoptPrefix hi hr hro hrs hk rfl) (QStep.adoptPrefix (k := k) hQ hr).inv ?_
+      (SInv.adoptPrefix hi h hr hro hrs hk)
+    exact hor.of ((SameOR.of_sd rfl).trans ((SameOR.updS _ c (by intro y; exact ⟨rfl, rfl⟩)).trans
+      (SameOR.send _ c _)))
+
+/-- `setPaused(p, relay)` with the relay: a press if live. -/
+theorem SInv.onSetPaused {s : State} {c : Cl} {p : Bool} (hi : Inv s) (h : SInv s) :
+    SInv (setPaused c p true s) := by
+  unfold LinkResume.setPaused
+  split
+  · exact h
+  · dsimp only
+    have h1 : SCore (updS c (fun y => { y with paused := p, pfb := false }) s) :=
+      h.1.updS_nv (by intro y; rfl) (by intro y; rfl)
+    split
+    · rename_i hl
+      have hl' : (s.sd c).ph = .live := by simpa using hl
+      have hls := hi.liveSh c (by simpa [cs_apply] using hl')
+      obtain ⟨k, hk⟩ : ∃ k, (s.sd c).dc = some k := by
+        cases hd : (s.sd c).dc with
+        | none => exact absurd (by simpa [cs_apply] using hd) hls.2
+        | some k => exact ⟨k, rfl⟩
+      have hrs : (s.sd c).rsPc = none := by simpa [cs_apply] using hls.1
+      have hc : hdC s.cs c k := Or.inl (by simpa [cs_apply] using hk)
+      refine ⟨h1.onPress (by simpa using hl') (by simpa using hk) (by simpa using hrs)
+        (by simpa using (hi.hold c k hc).2)
+        (fun j hj => (hi.same c k j hc (by simpa [hdC, cs_apply] using hj)).symm), ?_⟩
+      exact Sync.mk (c := c) h.2 (by simp [LinkResume.press, send_sd]) (fun _ => by
+        simp [LinkResume.press, send_sd])
+    · rename_i hl
+      refine ⟨h1, Sync.mk (c := c) h.2 (by simp) (fun hl2 => ?_)⟩
+      simp at hl2 hl; exact absurd hl2 hl
+
+theorem SInv.onSetAway {s : State} {cfg : Cfg} {c : Cl} {on : Bool} (hi : Inv s) (h : SInv s) :
+    SInv (setAway cfg c on s) := by
+  unfold LinkResume.setAway
+  have h1 : SInv (updS c (fun y => { y with away := on, livePress := y.livePress || y.ph == .live }) s) :=
+    ⟨h.1.updS_nv (by intro y; rfl) (by intro y; rfl), h.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+  have hi1 : Inv (updS c (fun y => { y with away := on, livePress := y.livePress || y.ph == .live }) s) :=
+    hi.updS_noncore (fun y => rfl)
+  dsimp only
+  split
+  · exact h1
+  · split
+    · split
+      · exact h1
+      · have h2 := SInv.onSetPaused (c := c) (p := true) hi1 h1
+        exact ⟨h2.1.updS_nv (by intro y; rfl) (by intro y; rfl), h2.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+    · split
+      · have hi2 : Inv (updS c (fun y => { y with pfb := false })
+            (updS c (fun y => { y with away := on, livePress := y.livePress || y.ph == .live }) s)) :=
+          hi1.updS_noncore (fun y => rfl)
+        have h2 : SInv (updS c (fun y => { y with pfb := false })
+            (updS c (fun y => { y with away := on, livePress := y.livePress || y.ph == .live }) s)) :=
+          ⟨h1.1.updS_nv (by intro y; rfl) (by intro y; rfl), h1.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+        exact SInv.onSetPaused hi2 h2
+      · exact h1
+
+theorem resHead_pre {pre l : List Msg} (h : resHead (pre ++ l) = true) (hp : pre ≠ []) :
+    resHead pre = true := by
+  cases pre with
+  | nil => exact absurd rfl hp
+  | cons x xs => simp only [List.cons_append] at h; rw [resHead_cons] at h ⊢; exact h
+
+theorem SInv.onDie {s : State} {k : Nat} (h : SInv s) :
+    SInv (updCh k (fun x => { x with dead := true, q := fun _ => [] }) s) := by
+  generalize hT : updCh k (fun x => { x with dead := true, q := fun _ => [] }) s = T
+  have Tsd : T.sd = s.sd := by rw [← hT]; rfl
+  have Tcs : T.cs = s.cs := by rw [← hT]; rfl
+  have Tdead : ∀ j, (T.ch j).dead = if j = k then true else (s.ch j).dead := by
+    intro j; rw [← hT]; simp only [updCh_ch]; split <;> rfl
+  have Tinb : ∀ e j, inbC T.cs T.ch e j = if j = k then (if (s.cs e).rsPc = some j then (s.cs e).early else [])
+      else inbC s.cs s.ch e j := by
+    intro e j; unfold inbC; rw [Tcs, ← hT]; simp only [updCh_ch]; by_cases hj : j = k <;> simp [hj] <;> rfl
+  have hpre : ∀ e, inbC s.cs s.ch e k = (if (s.cs e).rsPc = some k then (s.cs e).early else []) ++ (s.ch k).q e :=
+    fun e => rfl
+  have Tpq : ∀ e j, j ≠ k → pq T e j = pq s e j := by
+    intro e j hj; simp only [pq, pqC, Tinb, hj, if_false]
+  have Tpqk : ∀ e, pq s e k = [] → pq T e k = [] := by
+    intro e he; simp only [pq, pqC, Tinb, if_true] at he ⊢
+    rw [hpre, List.filterMap_append, List.append_eq_nil_iff] at he; exact he.1
+  have Thd : ∀ e j, hdC T.cs e j ↔ hdC s.cs e j := by intro e j; rw [Tcs]
+  refine ⟨⟨fun e j hre hc ho => ?_, fun e j hj hre ho hd => ?_, fun e j hre hc hp => ?_,
+    fun e j hl hj hre ho hd => ?_, fun e j hl ho hj hjo hd => ?_⟩, h.2.of_eq Tsd⟩
+  · rw [Thd] at hc ho; rw [Tsd] at hre
+    by_cases hjk : j = k
+    · subst hjk; exact Tpqk _ (h.1.quiet e _ hre hc ho)
+    · rw [Tpq _ _ hjk]; exact h.1.quiet e j hre hc ho
+  · rw [Tdead] at hd; split at hd
+    · cases hd
+    · rename_i hjk; rw [Tinb, if_neg hjk]; rw [Thd] at ho; rw [Tsd] at hj hre
+      exact h.1.head e j hj hre ho hd
+  · rw [Thd] at hc; rw [Tsd] at hre
+    by_cases hjk : j = k
+    · subst hjk
+      have hp' : pq s e j ≠ [] := by
+        intro he; exact hp (Tpqk _ he)
+      have hrh := h.1.head2 e j hre hc hp'
+      rw [Tinb, if_pos rfl]
+      rw [hpre] at hrh
+      refine resHead_pre hrh ?_
+      intro hnil; apply hp; simp only [pq, pqC, Tinb, if_true, hnil]; rfl
+    · rw [Tpq _ _ hjk] at hp; rw [Tinb, if_neg hjk]; exact h.1.head2 e j hre hc hp
+  · rw [Tdead] at hd; split at hd
+    · cases hd
+    · rename_i hjk; rw [Thd] at ho; rw [Tsd] at hl hj hre ⊢; rw [Tpq _ _ hjk]
+      exact h.1.half e j hl hj hre ho hd
+  · rw [Tdead] at hd; split at hd
+    · cases hd
+    · rename_i hjk; rw [Tsd] at hl ho hj hjo ⊢; rw [Tpq _ _ hjk, Tpq _ _ hjk]
+      exact h.1.conv e j hl ho hj hjo hd
+
+theorem sinit : SInv init := by
+  have hq : ∀ c k, pq init c k = [] := by
+    intro c k; unfold pq pqC inbC
+    by_cases hk : k = 0
+    · subst hk; cases c <;> simp [init, cs_apply, Msg.press?]
+    · cases c <;> simp [init, cs_apply, hk]
+  have hl : ∀ c, (init.sd c).ph = .live := by intro c; cases c <;> rfl
+  refine ⟨⟨fun c k hr => ?_, fun c k _ hr => ?_, fun c k hr => ?_, fun c k _ _ hr => ?_,
+    fun c k _ _ _ _ _ => ?_⟩, fun c _ => ?_⟩
+  · rw [hl] at hr; cases hr
+  · rw [hl] at hr; cases hr
+  · rw [hl] at hr; cases hr
+  · rw [hl] at hr; cases hr
+  · rw [hq, hq]; cases c <;> rfl
+  · cases c <;> rfl
+
+theorem SInv.step {cfg : Cfg} (hseq : cfg.seq = true) (hfix : cfg.fix = true) (hearly : cfg.early = true)
+    {s : State} (hi : Inv s) (hp : PInv s) (hQ : QInv s) (hor : OkRes s) (h : SInv s) (e : Event)
+    (hen : en cfg s e = true) : SInv (step cfg s e) := by
+  cases e with
+  | input c =>
+    simp only [LinkResume.step]
+    have h1 : SInv (updS c (fun y => { y with sent := (s.sd c).sent + 1 }) s) :=
+      ⟨h.1.updS_nv (by intro y; rfl) (by intro y; rfl), h.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+    split
+    · exact ⟨h1.1.send_np (fun _ => rfl), h1.2.of_eq (send_sd ..)⟩
+    · exact h1
+  | deliver c k => exact h.onDeliver hseq hfix hearly hi hp hQ hor
+  | die k => exact h.onDie
+  | dropped c => exact h.onDropped
+  | pair => exact h.onPair hi hen
+  | adopt c => exact h.onAdopt hseq hfix hearly hi hp hQ hor hen
+  | restart c => exact h.onRestart
+  | giveUp c => exact h.onShutdown
+  | quit c => exact h.onShutdown
+  | kill c => exact ⟨h.1.onFinish, h.2.onFinish⟩
+  | toggle c =>
+    simp only [LinkResume.step]
+    exact SInv.onSetPaused (hi.updS_noncore (fun y => rfl))
+      ⟨h.1.updS_nv (by intro y; rfl) (by intro y; rfl), h.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+  | away c on => exact h.onSetAway hi
+  | tick n => exact ⟨h.1.of_eq rfl rfl, h.2.of_eq rfl⟩
+  | ping c => exact ⟨h.1.send_np (fun _ => rfl), h.2.of_eq (send_sd ..)⟩
+  | noteIn c =>
+    simp only [LinkResume.step]
+    split
+    · exact SInv.onShutdown ⟨h.1.updS_nv (by intro y; rfl) (by intro y; rfl),
+        h.2.upd (by intro y; exact ⟨rfl, rfl, rfl⟩)⟩
+    · exact h
+
+theorem sinv_reachable {cfg : Cfg} (hseq : cfg.seq = true) (hfix : cfg.fix = true)
+    (hearly : cfg.early = true) {s : State} (h : Reachable cfg s) : SInv s := by
+  induction h with
+  | init => exact sinit
+  | step e hr hen ih =>
+    exact ih.step hseq hfix hearly (inv_reachable hr) (pinv_reachable hfix hr) (qinv_reachable hr)
+      (okres_reachable hr) e hen
+
+/-- **With numbered presses, both sides agree on pause once no press is on
+    its way.** Both live on the same working channel, nothing pressed in
+    flight either way: both paused or both running, whatever presses
+    crossed before, on a live link or across resumes. (Stronger: they will
+    hold the same press, `SCore.conv`, at every moment.) `bug_pause_presses_cross`
+    shows the code without the numbers splits. -/
+theorem presses_agree {cfg : Cfg} (hseq : cfg.seq = true) (hfix : cfg.fix = true)
+    (hearly : cfg.early = true) {s : State} (h : Reachable cfg s) {k : Nat}
+    (ha : (s.sd .a).ph = .live) (hb : (s.sd .b).ph = .live)
+    (hka : (s.sd .a).dc = some k) (hkb : (s.sd .b).dc = some k) (hd : (s.ch k).dead = false)
+    (hqa : pq s .a k = []) (hqb : pq s .b k = []) :
+    (s.sd .a).paused = (s.sd .b).paused := by
+  have hs := sinv_reachable hseq hfix hearly h
+  have := hs.1.conv .a k ha hb hka hkb hd
+  simp only [Cl.other, hqa, hqb, settle_nil] at this
+  rw [hs.2 .a ha, hs.2 .b hb, this]
+
 
 end WebState.LinkResume

@@ -13,7 +13,8 @@ import SwiftUI
 ///   1 input [frame i32][bits u16]
 ///   2 state-begin [len u32]            3 state-chunk [bytes]
 ///   4 rom-begin [len u32]              5 rom-chunk [bytes]
-///   6 ready   7 speed [on u8]   8 pause [on u8]   9 have-rom   10 need-rom
+///   6 ready   7 speed [on u8][n u32]   8 pause [on u8][n u32]   9 have-rom   10 need-rom
+///   (n numbers the press, `Press`; builds before it send [kind][on u8])
 ///   11 away [on u8] (my app or tab is in the background: my game is paused)
 ///   12 resume-info [sid u32][retry code]   13 resume [sid u32][last frame u32][flags u8]
 ///   14 bye (a deliberate end: don't redial)
@@ -151,6 +152,9 @@ final class NetLink: ObservableObject {
         /// The flags our last RESUME carried: pause and 2x are decided from
         /// both sides' (web rb.rsFlags).
         var rsFlags: UInt8 = 0
+        /// The winning pause and 2x presses (`Press`).
+        var pauseReg = Press(on: false)
+        var speedReg = Press(on: false)
         var rsAttempt = 0
         /// Retry, pairing or RESUME deadline (one at a time).
         var rsTimer: DispatchWorkItem?
@@ -845,10 +849,11 @@ final class NetLink: ObservableObject {
             startIfReady(s)
             return
         case Self.speed:
-            if data.count >= 2 { GameSession.shared.remoteSpeed(data[data.startIndex + 1] == 1) }
+            // A press that lost a crossing is dropped.
+            if pressIn(data, &rb.speedReg, s) { GameSession.shared.remoteSpeed(rb.speedReg.on) }
             return
         case Self.pause:
-            if data.count >= 2 { GameSession.shared.remotePause(data[data.startIndex + 1] == 1) }
+            if pressIn(data, &rb.pauseReg, s) { GameSession.shared.remotePause(rb.pauseReg.on) }
             return
         case Self.haveRom:
             // Our ROM is already on the friend's side.
@@ -1022,16 +1027,50 @@ final class NetLink: ObservableObject {
         send([Self.input] + Self.be32(UInt32(bitPattern: frame)) + [UInt8(bits >> 8), UInt8(bits & 0xff)], s)
     }
 
+    /// Pause and 2x are one value shared by both sides, and either player
+    /// can change it, so two presses can cross on the wire. Each press is
+    /// numbered one past the highest this side has seen; both sides keep
+    /// the highest press, the host's on a tie, so once neither press is in
+    /// flight they hold the same one, whatever order they arrived in (web
+    /// rbPress; formal/WebState/LinkResume.lean `presses_agree`).
+    struct Press {
+        var on: Bool
+        var n: UInt32 = 0
+        var host = true
+
+        func beats(_ b: Press) -> Bool { n > b.n || (n == b.n && host && !b.host) }
+    }
+
     /// 2x and pause drive both sides (a one-sided 2x or pause just stalls
     /// the friend at the prediction window).
     func sendSpeed(_ on: Bool) {
-        guard let s = session, s.started, s.rb?.reconnecting != true else { return }
-        send([Self.speed, on ? 1 : 0], s)
+        guard let s = session, s.started, let rb = s.rb, !rb.reconnecting else { return }
+        press(Self.speed, &rb.speedReg, on, s)
     }
 
     func sendPause(_ on: Bool) {
-        guard let s = session, s.started, s.rb?.reconnecting != true else { return }
-        send([Self.pause, on ? 1 : 0], s)
+        guard let s = session, s.started, let rb = s.rb, !rb.reconnecting else { return }
+        press(Self.pause, &rb.pauseReg, on, s)
+    }
+
+    private func press(_ kind: UInt8, _ reg: inout Press, _ on: Bool, _ s: Session) {
+        reg = Press(on: on, n: reg.n &+ 1, host: s.isHost == true)
+        send([kind, on ? 1 : 0] + Self.be32(reg.n), s)
+    }
+
+    /// The friend's press: taken only if it beats the one we hold.
+    private func pressIn(_ data: Data, _ reg: inout Press, _ s: Session) -> Bool {
+        guard data.count >= 2 else { return false }
+        let on = data[data.startIndex + 1] == 1
+        // A build before the numbering: as it was, the last to arrive wins.
+        guard data.count >= 6 else {
+            reg.on = on
+            return true
+        }
+        let cand = Press(on: on, n: Self.read32(data, 2), host: s.isHost != true)
+        guard cand.beats(reg) else { return false }
+        reg = cand
+        return true
     }
 
     // MARK: away (web "Away" in netplay.js)
@@ -1465,6 +1504,11 @@ final class NetLink: ObservableObject {
         if flags & 1 != 0 { peerAway(true) } else { clearPeerAway() }  // back too: one toast
         let gs = GameSession.shared
         let want = Self.resumeState(rb.rsFlags, flags)
+        // Presses count again from this decision, which both sides hold as
+        // the host's press 0: nothing from before it can arrive on this
+        // channel, and a press after it (1 on) beats it on both sides.
+        rb.pauseReg = Press(on: want.paused)
+        rb.speedReg = Press(on: want.double)
         if gs.paused != (rb.rsFlags & 2 != 0) {
             // Paused or unpaused (by a press, or the background) after our
             // RESUME went out: newer than that decision; it holds, and goes

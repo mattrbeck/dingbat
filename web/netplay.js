@@ -1114,8 +1114,9 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 //   4 rom-begin    : [4][len u32]                  (this peer's ROM, chunked)
 //   5 rom-chunk    : [5][bytes…]
 //   6 ready        : [6]                           (cores built + states loaded)
-//   7 speed        : [7][on u8]                     (2x fast-forward toggle — both cores)
-//   8 pause        : [8][on u8]
+//   7 speed        : [7][on u8][n u32]              (2x fast-forward toggle — both cores)
+//   8 pause        : [8][on u8][n u32]              (n numbers the press: see rbPress;
+//                                                    builds before it send [kind][on u8])
 //   9 have-rom     : [9]                           (your ROM is in my library: don't send it)
 //  10 need-rom     : [10]                          (send me your ROM)
 //  11 away         : [11][on u8]                    (my tab is hidden: my game is paused)
@@ -1259,24 +1260,54 @@ const rbSendInputWire = (frame, bits) => {
   }
 };
 
+// Pause and 2x are one value shared by both sides, and either player can
+// change it, so two presses can cross on the wire. Each press is numbered
+// one past the highest this side has seen; both sides keep the highest
+// press, the host's on a tie, so once neither press is in flight they hold
+// the same one, whatever order they arrived in (a "now" state message, the
+// last to arrive wins, split them: each side's last was the other's).
+// formal/WebState/LinkResume.lean `presses_agree`.
+const rbNewReg = (on) => ({ on, n: 0, host: true });
+const rbBeats = (a, b) => a.n > b.n || (a.n === b.n && a.host && !b.host);
+
+const rbPress = (kind, reg, on) => {
+  reg.on = on;
+  reg.n++;
+  reg.host = !!net.isHost;
+  const buf = new ArrayBuffer(6);
+  const v = new DataView(buf);
+  v.setUint8(0, kind);
+  v.setUint8(1, on ? 1 : 0);
+  v.setUint32(2, reg.n);
+  rbSend(buf);
+};
+
+// The friend's press: taken only if it beats the one we hold.
+const rbPressIn = (reg, v) => {
+  const on = v.getUint8(1) === 1;
+  // A build before the numbering: as it was, the last to arrive wins.
+  if (v.byteLength < 6) {
+    reg.on = on;
+    return true;
+  }
+  const cand = { on, n: v.getUint32(2), host: !net.isHost };
+  if (!rbBeats(cand, reg)) return false;
+  Object.assign(reg, cand);
+  return true;
+};
+
 // 2x drives both peers: a one-sided 2x just stalls at the prediction window.
 const rbSendSpeed = (on) => {
-  if (net?.rb?.reconnecting) return;
-  const buf = new ArrayBuffer(2);
-  const v = new DataView(buf);
-  v.setUint8(0, RB_SPEED);
-  v.setUint8(1, on ? 1 : 0);
-  rbSend(buf);
+  const rb = net?.rb;
+  if (!rb || rb.reconnecting) return;
+  rbPress(RB_SPEED, rb.speedReg, on);
 };
 
 // Pause drives both peers too, so the freeze shows rather than reads as a stall.
 const rbSendPause = (on) => {
-  if (net?.rb?.reconnecting) return;
-  const buf = new ArrayBuffer(2);
-  const v = new DataView(buf);
-  v.setUint8(0, RB_PAUSE);
-  v.setUint8(1, on ? 1 : 0);
-  rbSend(buf);
+  const rb = net?.rb;
+  if (!rb || rb.reconnecting) return;
+  rbPress(RB_PAUSE, rb.pauseReg, on);
 };
 
 // Our tab hid or came back. Not a pause: nothing here stops the friend's
@@ -1425,6 +1456,8 @@ const rbConnect = async () => {
     rsSdpIn: false,
     rsEarly: [],        // the friend's messages before our open (replayed on it)
     rsFlags: 0,         // the flags our last RESUME carried (pause/2x are decided from both)
+    pauseReg: rbNewReg(false), // the winning pause press (rbPress)
+    speedReg: rbNewReg(false), // the winning 2x press
     rsAttempt: 0,
     rsAnswerTimer: 0,
     rsRewait: 0,
@@ -1478,13 +1511,13 @@ const rbMessage = (data) => {
     return;
   }
   if (kind === RB_SPEED) {
-    // Match without echoing back.
-    window.applyRemoteSpeed2x?.(v.getUint8(1) === 1);
+    // Match without echoing back; a press that lost a crossing is dropped.
+    if (rbPressIn(rb.speedReg, v)) window.applyRemoteSpeed2x?.(rb.speedReg.on);
     return;
   }
   if (kind === RB_PAUSE) {
-    // Mirror without echoing back.
-    window.applyRemotePause?.(v.getUint8(1) === 1);
+    // Mirror without echoing back, as 2x.
+    if (rbPressIn(rb.pauseReg, v)) window.applyRemotePause?.(rb.pauseReg.on);
     return;
   }
   if (kind === RB_AWAY) {
@@ -2532,7 +2565,12 @@ const rsResumeIn = (rb, v) => {
   // hidden tab, an app in the background) keeps both paused; slow wins.
   // A Pause press after our RESUME went out is a press of its own, after
   // that decision: it holds, and goes to the friend like any other.
+  // Presses count again from the decision, which both sides hold as the
+  // host's press 0: nothing from before it can arrive on this channel, and
+  // a press after it (1 on) beats it on both sides.
   const want = rbResumeState(rb.rsFlags | 0, flags);
+  rb.pauseReg = rbNewReg(want.paused);
+  rb.speedReg = rbNewReg(want.speed2x);
   if (paused !== !!(rb.rsFlags & 2)) {
     if (paused !== want.paused) rbSendPause(paused);
   } else if (paused !== want.paused) {
