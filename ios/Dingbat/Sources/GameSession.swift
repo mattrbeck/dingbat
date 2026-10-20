@@ -22,7 +22,13 @@ final class GameSession: NSObject, ObservableObject {
     enum Speed { case normal, fastForward, double, slow }
 
     @Published private(set) var game: RomEntry?
-    @Published private(set) var paused = false
+    @Published private(set) var paused = false {
+        didSet {
+            #if DEBUG
+            if paused != oldValue { NSLog("game: %@", paused ? "paused" : "running") }  // ios/e2e reads it
+            #endif
+        }
+    }
     @Published private(set) var speed: Speed = .normal
     @Published private(set) var rewinding = false
     @Published private(set) var fps: Int = 0

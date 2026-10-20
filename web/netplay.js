@@ -566,10 +566,12 @@ const wireChannel = (dc) => {
       launchNetRom().catch((e) => netFail("Couldn't start the game: " + e.message));
     }
   };
-  dc.onmessage = (e) =>
+  dc.onmessage = (e) => {
+    if (net?.dc !== dc) return; // let go of (a redial adopted another)
     NET_ROLLBACK ? rbMessage(e.data) : netReceive(new Uint8Array(e.data));
+  };
   dc.onclose = () => {
-    if (!net || net.dc !== dc) return;
+    if (!net || net.dc !== dc || net.ending) return;
     if (net.started) rbDropped("channel closed", "Peer disconnected");
     // Dropped mid-handshake: surface it rather than leave the game frozen.
     else if (net.rb && !net.rb.inited) netFail("Connection lost during setup");
@@ -1133,7 +1135,11 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
 const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
 const RB_PAUSE = 8, RB_HAVE_ROM = 9, RB_NEED_ROM = 10, RB_AWAY = 11;
-const RB_RESUME_INFO = 12, RB_RESUME = 13, RB_BYE = 14;
+const RB_RESUME_INFO = 12, RB_RESUME = 13, RB_BYE = 14, RB_PING = 15;
+// A started link says something this often even when nothing else flows
+// (both paused, a stall): a drop after a long pause is judged by how long
+// the friend has been silent, and a quiet link mustn't read as one given up.
+const RB_PING_MS = 20000;
 const RB_HELLO_LEN = 21; // with the whole-ROM identity
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
 // Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
@@ -1417,6 +1423,7 @@ const rbConnect = async () => {
     rsDcOpen: false,
     rsSdpIn: false,
     rsEarly: [],        // the friend's messages before our open (replayed on it)
+    rsFlags: 0,         // the flags our last RESUME carried (pause/2x are decided from both)
     rsAttempt: 0,
     rsAnswerTimer: 0,
     rsRewait: 0,
@@ -1439,10 +1446,11 @@ const rbConnect = async () => {
 
 const rbMessage = (data) => {
   const rb = net?.rb;
-  if (!rb) return;
+  if (!rb || net.ending) return;
   const v = new DataView(data);
   const kind = v.getUint8(0);
   rb.lastMsgAt = Date.now();
+  if (kind === RB_PING) return;
   if (kind === RB_INPUT) {
     const frame = v.getInt32(1);
     if (frame > rb.lastRx) rb.lastRx = frame;
@@ -1605,6 +1613,10 @@ const rbStartIfReady = () => {
   window.enterRollbackMode(); // unfreezes into the session
   showToast(net.isHost ? "Player 2 connected — full speed" : "Connected — full speed");
   if (net.isHost) rbOfferResume();
+  const rbNow = net.rb;
+  rbNow.pingTimer = setInterval(() => {
+    if (net?.rb === rbNow && !rbNow.reconnecting) rbSend(new Uint8Array([RB_PING]));
+  }, RB_PING_MS);
   // The ROMs + states now live in MEMFS; drop the JS copies (up to ~32 MB).
   rb.romBytes = null;
   rb.remoteRom = null;
@@ -1862,8 +1874,12 @@ const netShutdown = async (opts) => {
   const s = net;
   net = null;
   if (s) {
+    // Ending: anything the channel says or does during the teardown below
+    // (net is put back for rbTeardown) must not redial or end it again.
+    s.ending = true;
     clearTimeout(s.redialTimer);
     clearTimeout(s.rtcDeadline);
+    if (s.rb) clearInterval(s.rb.pingTimer);
   }
   // Thaw the game frozen at modal open, even if rb was never created; but not
   // while the modal stays up for a retry (netFail), which the freeze is for.
@@ -2134,7 +2150,8 @@ document.addEventListener("visibilitychange", () => {
 // resume (an older build never echoes, and is ended as before). On a drop
 // both rendezvous on the retry code, open a new connection and swap RESUME
 // [sid][last input frame received][flags]: each resends the inputs the
-// other missed, then its pause/2x state, and they play on. A deliberate end
+// other missed, both take one pause/2x state from the two RESUMEs' flags,
+// and they play on (formal/WebState/LinkResume.lean). A deliberate end
 // sends BYE first, so the friend doesn't redial. Not offered over the
 // same-browser path or a manual-code pairing (no server to redial).
 let rbResumeGiveUpMs = 180000;       // then the session ends as before (let: e2e shortens it)
@@ -2191,6 +2208,7 @@ const rbLogSent = (rb, frame, bits) => {
 
 // The connection is gone: redial if both sides can, else end as before.
 const rbDropped = (why, endMsg) => {
+  if (!net || net.ending) return;
   if (rbCanResume()) rbBeginResume(why);
   else netPeerGone(net?.rb?.byeIn ? "Peer disconnected" : endMsg);
 };
@@ -2416,7 +2434,9 @@ const rsAdopt = (rb, pc, dc) => {
   v.setUint8(0, RB_RESUME);
   v.setUint32(1, rb.resume.sid);
   v.setInt32(5, rb.lastRx);
-  v.setUint8(9, (document.hidden ? 1 : 0) | (paused ? 2 : 0) | (speed2x ? 4 : 0));
+  // Kept: the friend decides pause and 2x from these, and so must we.
+  rb.rsFlags = (document.hidden ? 1 : 0) | (paused ? 2 : 0) | (speed2x ? 4 : 0);
+  v.setUint8(9, rb.rsFlags);
   rbSend(buf);
   log("netplay: redial: channel open, last input from the friend " + rb.lastRx);
   const early = rb.rsEarly;
@@ -2453,13 +2473,31 @@ const rsResumeIn = (rb, v) => {
   showToast("Reconnected — link resumed");
   if (flags & 1) rbPeerAway(true);
   else rbHideAwayCard(); // back too: one toast, not two
-  // Pause and 2x messages from during the drop were lost or held: a side
-  // that says it's running unpauses (or slows) this one, never the reverse,
-  // and then each says where it ended up, so both agree.
-  if (!(flags & 2) && paused) window.applyRemotePause?.(false);
-  if (!(flags & 4) && speed2x) window.applyRemoteSpeed2x?.(false);
-  rbSendPause(paused);
-  rbSendSpeed(speed2x);
+  // Pause and 2x messages from during the drop were lost or held. Both
+  // sides decide from the same two RESUMEs, so they agree without another
+  // message (answering with each one's own state would cross and swap
+  // them): running wins, except that a side that was paused and away (a
+  // hidden tab, an app in the background) keeps both paused; slow wins.
+  // A Pause press after our RESUME went out is a press of its own, after
+  // that decision: it holds, and goes to the friend like any other.
+  const want = rbResumeState(rb.rsFlags | 0, flags);
+  if (paused !== !!(rb.rsFlags & 2)) {
+    if (paused !== want.paused) rbSendPause(paused);
+  } else if (paused !== want.paused) {
+    window.applyRemotePause?.(want.paused);
+  }
+  if (speed2x !== want.speed2x) window.applyRemoteSpeed2x?.(want.speed2x);
+};
+
+// The pause and 2x both sides take after a resume, from the two RESUMEs'
+// flags (1 away, 2 paused, 4 2x); symmetric, so both get the same answer.
+// formal/WebState/LinkResume.lean `finalPause` proves the two then agree.
+const rbResumeState = (mine, theirs) => {
+  const pausedAway = (f) => (f & 3) === 3;
+  return {
+    paused: !!((mine & theirs & 2) || pausedAway(mine) || pausedAway(theirs)),
+    speed2x: !!(mine & theirs & 4),
+  };
 };
 
 document.getElementById("net-to-manual").addEventListener("click", () => {

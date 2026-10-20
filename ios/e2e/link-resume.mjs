@@ -19,6 +19,9 @@
 //     app is first on the retry code (the app offers); then the browser's
 //     redialed channel dies just as it would say RESUME, and both dial
 //     again;
+//   - the app paused in the background, its pause lost, and the link
+//     dropped while it is still there: both stay paused, and both run
+//     when it comes back;
 //   - the app frozen past the browser's give-up: the browser ends it, and
 //     the app, back, ends at once instead of redialing a friend long gone.
 
@@ -118,6 +121,7 @@ const link = async (name, { webFirst = false } = {}) => {
   const s = {
     page, ctx, data,
     netlink: () => appLog().split("\n").filter((l) => l.includes("netlink: ")).map((l) => l.replace(/^.*netlink: /, "")),
+    netlinkRaw: () => appLog().split("\n"),
     toastsApp: () => appLog().split("\n").filter((l) => l.includes("] toast: ")).map((l) => l.replace(/^.*\] toast: /, "")),
     webLog: () => page.evaluate(() => [...document.querySelectorAll("#log-entries p")]
       .map((e) => e.textContent).filter((t) => t.includes("netplay")).map((t) => t.replace(/^\[[^\]]*\] netplay: /, ""))),
@@ -208,6 +212,45 @@ const cases = {
     await until(async () => (await s.resumes()).every((n) => n >= 2),
       async () => "resume 2; browser: " + (await s.webLog()).slice(-5).join(" | ") + " // app: " + s.netlink().slice(-5).join(" | "), 90000);
     console.log("  app: " + s.netlink().filter((l) => /redial|resumed/.test(l)).join(" | "));
+    await s.sameGames();
+    await s.end();
+  },
+  // formal/WebState/LinkResume.lean bug_resume_pause_swap_ios: each side
+  // used to answer a resume with its own pause state, and the answers
+  // crossed. Here the app's background pause never reaches the browser (as
+  // when the connection dies under it) and the link drops while the app is
+  // still in the background, where it won't unpause.
+  async "the app paused in the background across a drop: both stay paused, then both run"() {
+    const s = await link("bg-pause");
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    // The app logs every change of its pause state ("game: paused/running")
+    // and its trips to the background ("netlink: away").
+    const appPaused = () => {
+      const g = s.netlinkRaw().filter((l) => l.includes("game: ")).map((l) => l.replace(/^.*game: /, ""));
+      return g.at(-1) === "paused";
+    };
+    assert.ok(!appPaused(), "the app is playing");
+    // The browser loses pause messages on this channel only.
+    await s.page.evaluate(() => {
+      const dc = net.dc;
+      const on = dc.onmessage;
+      dc.onmessage = (e) => { if (new Uint8Array(e.data)[0] !== 8) on(e); };
+    });
+    const awayBefore = s.netlink().filter((l) => l === "away").length;
+    simctl("launch", UDID, "com.apple.Preferences");
+    await until(() => s.netlink().filter((l) => l === "away").length > awayBefore && appPaused(),
+      "the app in the background, paused", 15000);
+    assert.ok(!(await s.page.evaluate(() => paused)), "the browser never heard it");
+    await s.page.evaluate(() => net.pc.close());
+    await until(async () => (await s.resumes()).every((n) => n >= 1),
+      async () => "both resumed; browser: " + (await s.webLog()).slice(-4).join(" | ") + " // app: " + s.netlink().slice(-4).join(" | "), 60000);
+    await sleep(2000); // anything either side sends after resuming lands
+    const browserPaused = await s.page.evaluate(() => paused);
+    console.log(`  after the resume: browser ${browserPaused ? "paused" : "running"}, app ${appPaused() ? "paused" : "running"}`);
+    assert.ok(browserPaused && appPaused(), "both paused (the app was paused and away)");
+    simctl("launch", UDID, BUNDLE);
+    await until(async () => !appPaused() && !(await s.page.evaluate(() => paused)),
+      async () => `both running after the app's return (browser paused: ${await s.page.evaluate(() => paused)}, app paused: ${appPaused()})`, 15000);
     await s.sameGames();
     await s.end();
   },

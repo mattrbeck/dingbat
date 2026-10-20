@@ -90,6 +90,8 @@ final class NetLink: ObservableObject {
         var redials = 0
         var started = false
         var timer: DispatchWorkItem?
+        /// Started: the keepalive (web RB_PING_MS).
+        var ping: DispatchWorkItem?
         var rb: RB?
         var manual = false
     }
@@ -144,6 +146,9 @@ final class NetLink: ObservableObject {
         /// us (the friend opens first and says RESUME at once): replayed on
         /// our open.
         var rsEarly: [Data] = []
+        /// The flags our last RESUME carried: pause and 2x are decided from
+        /// both sides' (web rb.rsFlags).
+        var rsFlags: UInt8 = 0
         var rsAttempt = 0
         /// Retry, pairing or RESUME deadline (one at a time).
         var rsTimer: DispatchWorkItem?
@@ -195,7 +200,11 @@ final class NetLink: ObservableObject {
     private static let hello: UInt8 = 0, input: UInt8 = 1, stateBegin: UInt8 = 2, stateChunk: UInt8 = 3
     private static let romBegin: UInt8 = 4, romChunk: UInt8 = 5, ready: UInt8 = 6, speed: UInt8 = 7, pause: UInt8 = 8
     private static let haveRom: UInt8 = 9, needRom: UInt8 = 10, away: UInt8 = 11
-    private static let resumeInfo: UInt8 = 12, resumeKind: UInt8 = 13, bye: UInt8 = 14
+    private static let resumeInfo: UInt8 = 12, resumeKind: UInt8 = 13, bye: UInt8 = 14, ping: UInt8 = 15
+    /// A started link says something this often even when nothing else
+    /// flows (both paused, a stall): a drop after a long pause is judged by
+    /// how long the friend has been silent (`lastMsgAt`).
+    private static let pingInterval: TimeInterval = 20
     /// web RB_RESUME_GIVE_UP_MS / RB_RESUME_PAIR_MS / RB_SENT_LOG
     static let resumeGiveUp: TimeInterval = 180
     static let resumePairDeadline: TimeInterval = 20
@@ -816,6 +825,8 @@ final class NetLink: ObservableObject {
         case Self.resumeKind:
             resumeIn(data, rb, s)
             return
+        case Self.ping:
+            return
         case Self.bye:
             rb.byeIn = true
             if s.started { peerGone("Peer disconnected") }
@@ -979,6 +990,7 @@ final class NetLink: ObservableObject {
         GameSession.shared.enterLinked()
         model.toast(s.isHost == true ? "Player 2 connected — full speed" : "Connected — full speed")
         if s.isHost == true { offerResume(rb, s) }
+        schedulePing(s)
         // The ROMs and states now live in the cores.
         rb.romBytes = Data()
         rb.remoteRom = nil
@@ -1130,6 +1142,14 @@ final class NetLink: ObservableObject {
         return w
     }
 
+    private func schedulePing(_ s: Session) {
+        s.ping = schedule(Self.pingInterval) { [weak self, weak s] in
+            guard let self, let s, self.session === s else { return }
+            if s.rb?.reconnecting != true { self.send([Self.ping], s) }
+            self.schedulePing(s)
+        }
+    }
+
     private func offerResume(_ rb: RB, _ s: Session) {
         guard !s.manual else { return }
         rb.resumeSid = UInt32.random(in: 1 ... .max)
@@ -1267,7 +1287,9 @@ final class NetLink: ObservableObject {
     /// Back in the foreground while redialing: dial at once (a socket left
     /// waiting through a suspension may be dead without anyone hearing).
     private func redialNowIfWaiting() {
-        guard let s = session, let rb = s.rb, rb.reconnecting, !rb.rsOpen else { return }
+        // Not mid-pairing: a pairing about to open would be torn down for
+        // both (its 20 s deadline covers one that won't).
+        guard let s = session, let rb = s.rb, rb.reconnecting, rb.rsPeer == nil else { return }
         rsAgain(rb, s, "back in the foreground", now: true)
     }
 
@@ -1387,6 +1409,7 @@ final class NetLink: ObservableObject {
         let gs = GameSession.shared
         let away: UInt8 = UIApplication.shared.applicationState == .background ? 1 : 0
         let flags: UInt8 = away | (gs.paused ? 2 : 0) | (gs.speed == .double ? 4 : 0)
+        rb.rsFlags = flags  // the friend decides from these, and so must we
         send([Self.resumeKind] + Self.be32(rb.resumeSid) + Self.be32(UInt32(bitPattern: rb.lastRx)) + [flags], s)
         NSLog("netlink: redial: channel open, last input from the friend %d", rb.lastRx)
         let early = rb.rsEarly
@@ -1396,9 +1419,9 @@ final class NetLink: ObservableObject {
 
     /// The friend's RESUME: resend what it missed (from the log, in order),
     /// take its state, play on. Pause and 2x messages from during the drop
-    /// were lost or held: a side that says it's running unpauses (or slows)
-    /// this one, never the reverse (nor while this app is in the
-    /// background), then each says where it ended up, so both agree.
+    /// were lost or held; both sides decide from the same two RESUMEs
+    /// (`resumeState`), so they agree without another message (answering
+    /// with each one's own state would cross and swap them).
     private func resumeIn(_ data: Data, _ rb: RB, _ s: Session) {
         guard rb.reconnecting, rb.rsOpen, data.count >= 10 else { return }
         guard Self.read32(data, 1) == rb.resumeSid else {
@@ -1425,11 +1448,26 @@ final class NetLink: ObservableObject {
         AppModel.shared.toast("Reconnected — link resumed")
         if flags & 1 != 0 { peerAway(true) } else { clearPeerAway() }  // back too: one toast
         let gs = GameSession.shared
-        let background = UIApplication.shared.applicationState == .background
-        if flags & 2 == 0 && gs.paused && !background { gs.remotePause(false) }
-        if flags & 4 == 0 && gs.speed == .double { gs.remoteSpeed(false) }
-        sendPause(gs.paused)
-        sendSpeed(gs.speed == .double)
+        let want = Self.resumeState(rb.rsFlags, flags)
+        if gs.paused != (rb.rsFlags & 2 != 0) {
+            // Paused or unpaused (by a press, or the background) after our
+            // RESUME went out: newer than that decision; it holds, and goes
+            // to the friend like any other.
+            if gs.paused != want.paused { sendPause(gs.paused) }
+        } else if gs.paused != want.paused {
+            gs.remotePause(want.paused)
+        }
+        if (gs.speed == .double) != want.double { gs.remoteSpeed(want.double) }
+    }
+
+    /// The pause and 2x both sides take after a resume, from the two
+    /// RESUMEs' flags (1 away, 2 paused, 4 2x): running wins, except that a
+    /// side paused and away (in the background, a hidden tab) keeps both
+    /// paused; slow wins. Symmetric, so both get the same answer (web
+    /// rbResumeState; formal/WebState/LinkResume.lean finalPause).
+    static func resumeState(_ mine: UInt8, _ theirs: UInt8) -> (paused: Bool, double: Bool) {
+        let pausedAway = { (f: UInt8) in f & 3 == 3 }
+        return (mine & theirs & 2 != 0 || pausedAway(mine) || pausedAway(theirs), mine & theirs & 4 != 0)
     }
 
     /// The app is quitting: a deliberate end, so the friend mustn't redial.
@@ -1498,6 +1536,7 @@ final class NetLink: ObservableObject {
         session = nil
         clearPeerAway()
         s.timer?.cancel()
+        s.ping?.cancel()
         if s.rb?.inited == true {
             if dingbat_rollback_exit_to_single() != 1 { dingbat_rollback_exit() }
             GameSession.shared.leaveLinked()
