@@ -1,6 +1,6 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/netplay.js: rbOfferResume rbResumeInfoIn rbCanResume rbLogSent rbDropped rbBeginResume rsDetach rsRestart rsStop rsAdopt rsResumeIn rbResumeState rbStartIfReady rbSendInput rbSendInputWire rbSend rbSendPause rbMessage netShutdown netPeerGone rbLeaveNote rsDial
--- @models web/index.js: togglePause
+-- @models web/netplay.js: rbOfferResume rbResumeInfoIn rbCanResume rbLogSent rbDropped rbBeginResume rsDetach rsRestart rsStop rsAdopt rsResumeIn rbResumeState rbStartIfReady rbSendInput rbSendInputWire rbSend rbSendPause rbMessage netShutdown netPeerGone rbLeaveNote rsDial rbRenderCard rbReconnecting
+-- @models web/index.js: togglePause setSpeed2x
 
 /-
 # Resuming a dropped link (web/netplay.js, the rollback layer)
@@ -31,6 +31,10 @@ no RESUME in 10 s, ICE failure, the server dropping a socket) is one
 * `iosB`: B is the iPhone app, whose pause follows the app's background
   state (GameSession.appDidEnterBackground / appWillEnterForeground) and
   whose resume refuses to unpause in the background (NetLink.resumeIn).
+* `freeze`: the game is held while redialing: the frame loop doesn't tick
+  (no inputs) and Pause and 2x are off (`rbRenderCard`, `togglePause`,
+  `setSpeed2x`; iOS `togglePause`, `toggleDouble`, `linkedFrames`). The
+  iPhone's own pause for the background still happens. Off: b94cc418.
 * `note`: the signaling server keeps goodbye notes (`POST /bye`,
   server.js `leaveNote`). Every session end of a side holding the retry
   code, other than on the friend's goodbye, posts one (`shutdown`); with
@@ -133,11 +137,17 @@ Refuted on d22e0527 (`bug_*`), fixed, and proved for the fix:
   other trade-offs: `regress_start_window_heard` (the host ending in the
   start window) and `regress_give_up_clocks_drift` (the friend still
   redialing after a give-up).
+* `pause_in_drop_undone` (trade-off, through b94cc418): a Pause pressed
+  during the drop was undone at the reconnect if the friend kept running.
+  With `Cfg.freeze` the game is held while redialing and Pause and 2x are
+  off (`no_press_in_drop`), so there is no press to undo
+  (`regress_no_press_in_drop`); a pause both had at the drop stays.
 
 Shown by trace, as designed but worth knowing (`FINDINGS.md`):
 `pause_presses_cross` (not the resume's: double presses crossing on a live
 link split the pause, with or without the fix), `pause_in_drop_undone`,
-`fix_paused_and_away_stays_paused`, `kill_strands_friend` (the note can't
+`fix_paused_and_away_stays_paused` (now only for the iPhone's background
+pause and a hidden tab: a press can't happen), `kill_strands_friend` (the note can't
 help: nothing runs), `quit_after_open_reaches_friend`,
 `start_window_one_sided`, `give_up_clocks_drift`,
 `give_up_reads_as_disconnect`, `reconnect_clocks_differ`; and the happy
@@ -233,24 +243,28 @@ structure Side where
   deriving DecidableEq, Repr
 
 structure Cfg where
-  early : Bool
-  fix   : Bool
-  iosB  : Bool
-  note  : Bool
+  early  : Bool
+  fix    : Bool
+  iosB   : Bool
+  note   : Bool
+  freeze : Bool
   deriving DecidableEq, Repr
 
 /-- d22e0527, both sides web. -/
-def Cfg.web : Cfg := ⟨true, false, false, false⟩
+def Cfg.web : Cfg := ⟨true, false, false, false, false⟩
 /-- d22e0527, B the iPhone app. -/
-def Cfg.ios : Cfg := ⟨true, false, true, false⟩
+def Cfg.ios : Cfg := ⟨true, false, true, false, false⟩
 /-- With the pause fix (7b970ead). -/
-def Cfg.webFix : Cfg := ⟨true, true, false, false⟩
-def Cfg.iosFix : Cfg := ⟨true, true, true, false⟩
-/-- With the goodbye note too: the current code. -/
-def Cfg.webNote : Cfg := ⟨true, true, false, true⟩
-def Cfg.iosNote : Cfg := ⟨true, true, true, true⟩
+def Cfg.webFix : Cfg := ⟨true, true, false, false, false⟩
+def Cfg.iosFix : Cfg := ⟨true, true, true, false, false⟩
+/-- With the goodbye note too (b94cc418). -/
+def Cfg.webNote : Cfg := ⟨true, true, false, true, false⟩
+def Cfg.iosNote : Cfg := ⟨true, true, true, true, false⟩
+/-- With the game held while redialing: the current code. -/
+def Cfg.webNow : Cfg := ⟨true, true, false, true, true⟩
+def Cfg.iosNow : Cfg := ⟨true, true, true, true, true⟩
 /-- fd7b0432's iOS port: messages before the open dropped. -/
-def Cfg.noEarly : Cfg := ⟨false, false, false, false⟩
+def Cfg.noEarly : Cfg := ⟨false, false, false, false, false⟩
 
 structure State where
   sd     : Cl → Side
@@ -502,7 +516,8 @@ def holds (s : State) (c : Cl) (k : Nat) : Prop :=
 def en (cfg : Cfg) (s : State) : Event → Bool
   | .input c =>
     let x := s.sd c
-    x.ph != .ended && !x.paused && !x.away && decide (x.sent < x.rx + W)
+    x.ph != .ended && !x.paused && !x.away && decide (x.sent < x.rx + W) &&
+      !(cfg.freeze && x.ph == .recon)
   | .deliver c k => !(s.ch k).dead && !((s.ch k).q c).isEmpty
   | .die k => !(s.ch k).dead && decide (k < s.nextCh)
   | .dropped c => (s.sd c).ph != .ended && (s.sd c).dc.isSome
@@ -520,7 +535,8 @@ def en (cfg : Cfg) (s : State) : Event → Bool
   | .giveUp c => (s.sd c).ph == .recon && decide ((s.sd c).since + G ≤ s.now)
   | .quit c => (s.sd c).ph != .ended
   | .kill c => (s.sd c).ph != .ended
-  | .toggle c => (s.sd c).ph != .ended
+  -- With `freeze` the Pause button is off while redialing.
+  | .toggle c => (s.sd c).ph != .ended && !(cfg.freeze && (s.sd c).ph == .recon)
   | .away c on => (s.sd c).ph != .ended && (s.sd c).away != on
   | .tick _ => true
   | .ping c => cfg.fix && (s.sd c).ph == .live
@@ -801,6 +817,32 @@ theorem fix_paused_and_away_stays_paused :
       [.die 0, .dropped .a, .dropped .b, .toggle .a, .away .a true, .pair, .adopt .a,
        .adopt .b, .deliver .a 1, .deliver .b 1])
       (fun s => onSameChannel s && pausedOf s .a && pausedOf s .b) = true := by
+  decide
+
+/-- With the game held while redialing (`Cfg.freeze`), the Pause button
+    and the game's buttons do nothing during the drop. -/
+theorem no_press_in_drop {cfg : Cfg} (hf : cfg.freeze = true) {s : State} {c : Cl}
+    (hr : (s.sd c).ph = .recon) : en cfg s (.toggle c) = false ∧ en cfg s (.input c) = false := by
+  simp [en, hf, hr]
+
+/-- So the press `pause_in_drop_undone` undoes can't be made; a pause both
+    had when the link dropped is still theirs after the reconnect. The
+    iPhone's own pause for the background is not a press: it still counts,
+    and the reconnect still decides it. -/
+theorem regress_no_press_in_drop :
+    (run .webNow init (handshake ++ [.die 0, .dropped .a, .dropped .b, .toggle .a])).isNone = true ∧
+    witnesses .webNow (handshake ++
+      [.toggle .a, .deliver .b 0, .die 0, .dropped .a, .dropped .b, .pair, .adopt .a, .adopt .b,
+       .deliver .a 1, .deliver .b 1])
+      (fun s => onSameChannel s && pausedOf s .a && pausedOf s .b) = true ∧
+    witnesses .iosNow (handshake ++
+      [.die 0, .dropped .a, .dropped .b, .away .b true, .pair, .adopt .a, .adopt .b,
+       .deliver .a 1, .deliver .b 1])
+      (fun s => onSameChannel s && pausedOf s .a && pausedOf s .b) = true ∧
+    witnesses .iosNow (handshake ++
+      [.die 0, .dropped .a, .dropped .b, .away .b true, .pair, .adopt .a, .adopt .b,
+       .deliver .a 1, .deliver .b 1, .away .b false, .deliver .a 1])
+      bothPlaying = true := by
   decide
 
 /-- Disconnect pressed while redialing, before a new channel opened, has
@@ -2670,7 +2712,7 @@ theorem Inv.adopt {cfg : Cfg} {s : State} {c : Cl} (h : Inv s) (hen : en cfg s (
 theorem Inv.input {cfg : Cfg} {s : State} {c : Cl} (h : Inv s) (hen : en cfg s (.input c) = true) :
     Inv (step cfg s (.input c)) := by
   simp only [en, Bool.and_eq_true, bne_iff_ne, ne_eq, Bool.not_eq_true', decide_eq_true_eq] at hen
-  obtain ⟨⟨⟨hne, -⟩, -⟩, hw⟩ := hen
+  obtain ⟨⟨⟨⟨hne, -⟩, -⟩, hw⟩, -⟩ := hen
   simp only [step]
   have hu : updS c (fun y => { y with sent := (s.sd c).sent + 1 }) s =
       updS c (fun y => { y with sent := y.sent + 1 }) s := updS_congr rfl
@@ -4351,7 +4393,7 @@ theorem QStep.step {s : State} {cfg : Cfg} (h : QInv s) (e : Event) (hen : en cf
   cases e with
   | input c =>
     simp only [en, Bool.and_eq_true] at hen
-    have hne := ne_of hen.1.1.1
+    have hne := ne_of hen.1.1.1.1
     simp only [LinkResume.step]
     have h1 := QStep.quiet (f := fun y => { y with sent := (s.sd c).sent + 1 }) h hne
       ⟨rfl, rfl, rfl, rfl, rfl⟩
@@ -4384,7 +4426,8 @@ theorem QStep.step {s : State} {cfg : Cfg} (h : QInv s) (e : Event) (hen : en cf
   | quit c => exact QStep.shutdown h (ne_of hen)
   | kill c => exact QStep.kill h (ne_of hen)
   | toggle c =>
-    have hne := ne_of hen
+    simp only [en, Bool.and_eq_true] at hen
+    have hne := ne_of hen.1
     simp only [LinkResume.step]
     have h1 := QStep.quiet (f := fun y => { y with livePress := y.livePress || y.ph == .live }) h hne
       ⟨rfl, rfl, rfl, rfl, rfl⟩

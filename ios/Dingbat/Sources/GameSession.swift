@@ -648,6 +648,14 @@ final class GameSession: NSObject, ObservableObject {
             ran += 1
             return true
         }
+        // Redialing a dropped link: the game waits, as at a stall, and the
+        // player's buttons go nowhere (it would stop at the window anyway).
+        if NetLink.shared.reconnectingSince != nil {
+            if linkStallSince == 0 { linkStallSince = CACurrentMediaTime() }
+            frameDebt = 0
+            keepAudioAlive()
+            return 0
+        }
         for _ in 0..<framesOwed(link, dt: dt) {
             // Stalled at the prediction window: wait for the friend.
             if !step() { frameDebt = 0; break }
@@ -951,7 +959,13 @@ final class GameSession: NSObject, ObservableObject {
         AudioOutput.shared.refreshSession()
     }
 
-    func togglePause() { setPaused(!paused) }
+    /// The player's Pause (the bar, Space). Not while a dropped link
+    /// redials: the game waits on it, and the reconnect decides pause for
+    /// both (formal/WebState/LinkResume.lean regress_no_press_in_drop).
+    func togglePause() {
+        guard NetLink.shared.reconnectingSince == nil else { return }
+        setPaused(!paused)
+    }
 
     func setSpeed(_ s: Speed, relay: Bool = true) {
         // 2P: lockstep at 1x.
@@ -972,7 +986,11 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     func toggleFastForward() { setSpeed(speed == .fastForward ? .normal : .fastForward) }
-    func toggleDouble() { setSpeed(speed == .double ? .normal : .double) }
+    /// The player's 2x; as Pause, not while a dropped link redials.
+    func toggleDouble() {
+        guard NetLink.shared.reconnectingSince == nil else { return }
+        setSpeed(speed == .double ? .normal : .double)
+    }
 
     func toggleSlowMotion() {
         setSpeed(speed == .slow ? .normal : .slow)

@@ -642,11 +642,16 @@ struct PlaybackCluster: View {
             if settings.rewind && !(link.linked || session.twoPlayer) {
                 rewindButton(width: w)
             }
+            // Off while a dropped link redials: the game waits on it, and the
+            // reconnect decides pause and 2x for both (web rbRenderCard).
+            let redialing = link.reconnectingSince != nil
             BarIconButton(system: session.paused ? "play.fill" : "pause.fill",
                           label: "Pause / Resume", active: session.paused, width: w) {
                 model.closeMenu()
                 session.togglePause()
             }
+            .disabled(redialing)
+            .opacity(redialing ? 0.38 : 1)
             if session.paused && !(link.linked || session.twoPlayer) {
                 stepButton(width: w)
             } else if !session.paused {
@@ -654,6 +659,8 @@ struct PlaybackCluster: View {
                     SpeedGlyph(count: 2, active: session.speed == .double, width: w)
                 }
                 .accessibilityLabel("2x Speed")
+                .disabled(redialing)
+                .opacity(redialing ? 0.38 : 1)
                 if !(link.linked || session.twoPlayer) {
                     Button { session.toggleFastForward() } label: {
                         SpeedGlyph(count: 3, active: session.speed == .fastForward, width: w)

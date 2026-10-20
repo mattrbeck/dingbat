@@ -4156,6 +4156,14 @@ body.debug-2p .home-tile-link {
   background: linear-gradient(180deg, var(--accent-hi), var(--accent-2));
 }
 
+/* Pause and 2x while a dropped link redials (netplay.js rbRenderCard). */
+#pause:disabled,
+#speed-2x-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+  pointer-events: none;
+}
+
 /* Disabled buttons: shared token-level treatment. pointer-events: none also
    suppresses the :hover restyle without sprinkling :not(:disabled) guards. */
 .button:disabled {

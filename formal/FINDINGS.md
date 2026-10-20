@@ -742,12 +742,20 @@ how confusing they are):
    give-up leaves a "gave-up" note, so this side is told at its next
    rendezvous ("Couldn't reconnect") instead of waiting alone for up to 3
    more minutes (`regress_give_up_clocks_drift`).
-3. *A Pause pressed during the drop is undone* if the friend kept running
-   (`pause_in_drop_undone`; deliberate, so an iPhone's unpause on its return,
-   lost with the connection, still gets through). With the fix, a player
-   who paused and is away (hidden tab, app in the background) keeps both
-   paused (`fix_paused_and_away_stays_paused`). A press made after a side's
-   own RESUME went out is the exception: it is newer, and it holds.
+3. *A Pause pressed during the drop is undone*: **fixed** (2026-10-20,
+   Matt: "Should we even allow users to press Pause or other buttons during
+   the link-dropped period?"). Link setup already held the game behind a
+   full-screen modal (web) / sheet (iOS); the drop didn't: the
+   "Reconnecting…" card covers only the picture, so Pause, 2x and the
+   game's buttons worked, and a Pause pressed then was undone at the
+   reconnect if the friend kept running (`pause_in_drop_undone`). Now the
+   game is held while redialing, as at setup: the frame loop doesn't tick
+   and Pause and 2x are off (greyed; Space and Shift+Tab do nothing, the
+   pad's menu opens without pausing). Disconnect, Menu and Home stay usable. `no_press_in_drop`,
+   `regress_no_press_in_drop` (`Cfg.freeze`). The reconnect still decides
+   pause from both RESUMEs, for what isn't a press: the iPhone's own pause
+   for the background, a hidden tab, a pause message lost with the
+   connection (`fix_paused_and_away_stays_paused`).
 4. *A drop in the first round trip is one-sided* (`start_window_one_sided`).
    The host deals the retry code when the session starts; until the guest's
    echo is back, only the guest can resume: the host ends at once. Since R6

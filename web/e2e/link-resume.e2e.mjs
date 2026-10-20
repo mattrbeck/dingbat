@@ -315,6 +315,34 @@ test("a friend's give-up is heard: \"Couldn't reconnect\" at once, not 3 minutes
   await done();
 });
 
+// While redialing the game is held: Pause and 2x are off and the game's
+// buttons go nowhere (a press there used to be undone by the reconnect,
+// LinkResume.lean pause_in_drop_undone); both come back once resumed.
+test("while reconnecting the game holds: Pause and 2x are off, then back", { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  // A's server is out of reach for a few seconds, so the redial is visible.
+  await a.page.evaluate(() => {
+    const WS = window.WebSocket;
+    window.WebSocket = class { constructor() { throw new Error("offline"); } };
+    setTimeout(() => { window.WebSocket = WS; }, 6000);
+    net.pc.close();
+  });
+  await until(async () => (await cardTitle(a)) === "Reconnecting…", "A reconnecting", 15000);
+  assert.deepEqual(await a.page.evaluate(() => [pauseButton.disabled, speed2xButton.disabled]), [true, true]);
+  const head0 = await a.page.evaluate(() => Module._rollback_head());
+  await a.page.keyboard.press("Space");
+  await a.page.keyboard.press("Shift+Tab");
+  await a.page.evaluate(() => pauseButton.click());
+  await sleep(1000);
+  assert.deepEqual(await a.page.evaluate(() => [paused, speed2x]), [false, false], "nothing pressed");
+  assert.equal(await a.page.evaluate(() => Module._rollback_head()), head0, "the game held");
+  await until(async () => (await netLog(a)).some((t) => t.includes("resumed after")), "A resumed", 30000);
+  assert.deepEqual(await a.page.evaluate(() => [pauseButton.disabled, speed2xButton.disabled]), [false, false]);
+  await a.page.evaluate(() => pauseButton.click());
+  await until(() => b.page.evaluate(() => paused), "A's Pause reaches B again", 5000);
+  await done();
+});
+
 test("a shared pause held across a drop stays shared", { skip, timeout: 120000 }, async () => {
   const { a, b, done } = await pair();
   await a.page.evaluate(() => document.getElementById("pause").click());

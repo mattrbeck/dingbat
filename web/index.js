@@ -13061,6 +13061,9 @@ const showPauseChoice = (on) => {
   document.body.classList.toggle("paused", on);
 };
 const togglePause = (fromRemote) => {
+  // Not while a dropped link redials: the game is waiting on it, and the
+  // reconnect decides pause for both (netplay.js rbRenderCard).
+  if (!fromRemote && typeof rbReconnecting === "function" && rbReconnecting()) return;
   paused = !takePlayerPause();
   if (paused) storeLastFrame({ force: true }); // the paused picture is the library's
   showPauseChoice(paused);
@@ -13133,6 +13136,8 @@ resetButton.addEventListener("click", async () => {
 
 // 2x and unbounded fast forward are radio-style (fast forward ignores pacing).
 const setSpeed2x = (on, fromRemote) => {
+  // As Pause: the reconnect decides 2x for both.
+  if (!fromRemote && on !== speed2x && typeof rbReconnecting === "function" && rbReconnecting()) return;
   speed2x = on;
   speed2xButton.classList.toggle("active", on);
   if (on && slowMotion) setSlowMotion(false);
@@ -18841,6 +18846,12 @@ var Module = {
         const rbStep = speed2x ? FRAME_TIME / 2 : FRAME_TIME;
         const rbCap = speed2x ? 4 : 2;
         let framesRun = 0;
+        // Redialing a dropped link: the game waits, as at a stall, and the
+        // player's buttons go nowhere (it would stop at the window anyway).
+        if (typeof rbReconnecting === "function" && rbReconnecting()) {
+          if (!rbStallSince) rbStallSince = timestamp;
+          accumulator = 0;
+        }
         while (accumulator >= rbStep && framesRun < rbCap) {
           const frame = Module._rollback_tick(localButtons);
           if (frame < 0) { // stalled: wait for peer input

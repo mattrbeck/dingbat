@@ -2070,6 +2070,12 @@ const rbRenderCard = () => {
   const rb = net?.rb;
   const reconnecting = !!rb?.reconnecting;
   const show = reconnecting || rbAwayShown;
+  // While redialing the game waits on the link (the frame loop doesn't
+  // tick), and both sides take pause and 2x from the two RESUMEs: a press
+  // now could only be undone then, so there is none to make
+  // (formal/WebState/LinkResume.lean regress_no_press_in_drop).
+  pauseButton.disabled = reconnecting;
+  speed2xButton.disabled = reconnecting;
   if (show) {
     netAwayTitle.textContent = reconnecting ? RB_RECONNECT_TITLE : RB_AWAY_TITLE;
     netAwayText.textContent = reconnecting ? RB_RECONNECT_TEXT : RB_AWAY_TEXT;
@@ -2206,6 +2212,9 @@ const rbResumeInfoIn = (rb, v, data) => {
 };
 
 const rbCanResume = () => !!(net?.started && net.rb?.resumeOk && !net.rb.byeIn);
+
+// Redialing on the retry code: the game waits, and Pause and 2x are off.
+const rbReconnecting = () => !!net?.rb?.reconnecting;
 
 // The signaling server over http(s), for the goodbye note.
 const NET_SIGNAL_HTTP = (() => {

@@ -186,3 +186,26 @@ test("the friend's close during our own Disconnect's teardown doesn't redial", a
   assert.equal(sockets, 0, "no rendezvous on the retry code");
   assert.equal(app.document.getElementById("net-away").hidden, true, "no Reconnecting card");
 });
+
+// While redialing the game is held: Pause and 2x are off (a press there
+// could only be undone by the reconnect's decision, the old trade-off
+// LinkResume.lean pause_in_drop_undone), and back on once resumed.
+test("Pause and 2x are off while redialing, and back once resumed", async () => {
+  const { app, redialing, resumeFrom, sentKinds } = await setup();
+  redialing(0);
+  app.runIn("rbRenderCard()");
+  assert.equal(app.runIn("pauseButton.disabled"), true);
+  assert.equal(app.runIn("speed2xButton.disabled"), true);
+  app.runIn("togglePause()");
+  assert.equal(app.runIn("paused"), false, "a press does nothing");
+  app.runIn("setSpeed2x(true)");
+  assert.equal(app.runIn("speed2x"), false, "2x does nothing");
+  resumeFrom(0);
+  assert.equal(app.runIn("net.rb.reconnecting"), false);
+  assert.equal(app.runIn("pauseButton.disabled"), false);
+  assert.equal(app.runIn("speed2xButton.disabled"), false);
+  app.runIn("window.rbSendPause = rbSendPause"); // installed at the session's start
+  app.runIn("togglePause()");
+  assert.equal(app.runIn("paused"), true, "Pause works again");
+  assert.ok(sentKinds().includes(RB_PAUSE), "and reaches the friend");
+});
