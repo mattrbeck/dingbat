@@ -143,6 +143,13 @@ test("a dropped connection redials on the retry code, resumes, and both games st
   assert.equal(await cardTitle(a), "", "A's card gone");
   assert.equal(await cardTitle(b), "", "B's card gone");
 
+  // And again, from the other side, on the redialed connection.
+  await sleep(1500);
+  await a.page.evaluate(() => net.pc.close());
+  await until(async () => (await netLog(a)).filter((t) => t.includes("resumed after")).length >= 2 &&
+                          (await netLog(b)).filter((t) => t.includes("resumed after")).length >= 2,
+    "both resumed a second time", 60000);
+
   // Both play on to the stop with every input in; the cores must match.
   for (const p of [a, b]) {
     await until(() => p.page.evaluate((s) => Module._rollback_head() >= s && Module._rollback_confirmed() === s - 1, stop),
@@ -197,9 +204,77 @@ test("a deliberate Disconnect sends BYE: the friend is told, no redial", { skip,
 test("a friend that never comes back: the session waits, redialing", { skip, timeout: 120000 }, async () => {
   const { a, b, done } = await pair();
   // B vanishes for good (its page closes without a BYE: a crash).
-  await b.page.evaluate(() => { net.dc.send = () => {}; net.pc.close(); window.onpagehide = null; });
+  await b.page.evaluate(() => { net.dc.send = () => {}; net.pc.close(); });
   await b.ctx.close();
   await until(async () => (await cardTitle(a)) === "Reconnecting…", "A's reconnecting card", 15000);
   assert.ok(await linked(a), "A keeps the session while redialing");
+  await done();
+});
+
+test("a redialed channel that dies before the friend's RESUME dials again (no dead end)",
+     { skip, timeout: 180000 }, async () => {
+  const { a, b, done } = await pair();
+  const stop = (await a.page.evaluate(() => Module._rollback_head())) + 900;
+  await script(a, stop, 23);
+  await script(b, stop, 37);
+  await sleep(1500);
+  // B's first redialed channel dies the moment it would say RESUME.
+  await b.page.evaluate(() => {
+    const send = RTCDataChannel.prototype.send;
+    let killed = false;
+    RTCDataChannel.prototype.send = function (buf) {
+      const kind = buf instanceof ArrayBuffer ? new Uint8Array(buf)[0] : buf?.[0];
+      if (kind === 13 && !killed) { killed = true; this.close(); return; }
+      return send.call(this, buf);
+    };
+  });
+  await b.page.evaluate(() => net.pc.close());
+  await until(async () => (await netLog(a)).some((t) => t.includes("resumed after")) &&
+                          (await netLog(b)).some((t) => t.includes("resumed after")),
+    async () => "both resumed: A " + (await netLog(a)).slice(-6).join(" | ") + " // B " + (await netLog(b)).slice(-6).join(" | "),
+    90000);
+  const dials = (await netLog(a)).filter((t) => t.includes("redial: paired")).length;
+  assert.ok(dials >= 2, "A paired twice (the first channel died): " + dials);
+  for (const p of [a, b]) {
+    await until(() => p.page.evaluate((s) => Module._rollback_head() >= s && Module._rollback_confirmed() === s - 1, stop),
+      "at the stop", 60000);
+  }
+  assert.equal(await dumps(a), await dumps(b), "both players' cores identical on both sides");
+  await done();
+});
+
+test("Disconnect while reconnecting: this side plays on solo, the friend gives up and does too",
+     { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  await b.page.evaluate(() => { rbResumeGiveUpMs = 8000; });
+  // B's redials can't get through to the server.
+  await b.page.evaluate(() => { window.WebSocket = class { constructor() { throw new Error("offline"); } }; });
+  await a.page.evaluate(() => net.pc.close());
+  await until(async () => (await cardTitle(a)) === "Reconnecting…", "A reconnecting", 15000);
+  await a.page.click("#net-away-disconnect");
+  await a.page.click("#net-away-disconnect");
+  await until(async () => !(await linked(a)), "A ended it", 5000);
+  assert.ok((await toasts(a)).includes("Disconnected"));
+  assert.ok(!(await a.page.evaluate(() => rollbackMode || paused)), "A plays on solo");
+  await until(async () => !(await linked(b)), "B gave up", 20000);
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Couldn't reconnect")), (await toasts(b)).join(" | "));
+  assert.ok(!(await b.page.evaluate(() => rollbackMode)), "B plays on solo");
+  await done();
+});
+
+test("a shared pause held across a drop stays shared", { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  await a.page.evaluate(() => document.getElementById("pause").click());
+  await until(() => b.page.evaluate(() => paused), "the pause reached B", 5000);
+  await b.page.evaluate(() => net.pc.close());
+  await until(async () => (await netLog(a)).some((t) => t.includes("resumed after")) &&
+                          (await netLog(b)).some((t) => t.includes("resumed after")), "both resumed", 60000);
+  await sleep(500);
+  assert.ok((await a.page.evaluate(() => paused)) && (await b.page.evaluate(() => paused)), "still paused on both");
+  await a.page.evaluate(() => document.getElementById("pause").click());
+  await until(async () => !(await b.page.evaluate(() => paused)), "resumed on B", 5000);
+  const h = await a.page.evaluate(() => Module._rollback_head());
+  await until(() => a.page.evaluate((h) => Module._rollback_head() > h + 60, h), "playing again", 10000);
+  assert.ok((await linked(a)) && (await linked(b)));
   await done();
 });

@@ -500,6 +500,7 @@ const startRtc = async (isOfferer) => {
   pc.onconnectionstatechange = () => {
     if (!net || net.pc !== pc) return;
     const st = pc.connectionState;
+    if (net.started && rbCanResume()) rbWatchDisconnected(pc, st);
     if (st === "failed") {
       if (net.started) rbDropped("connection failed", "Peer connection lost");
       else if (net.rtcConnected) netFail("Peer connection lost");
@@ -1232,8 +1233,7 @@ const rbSend = (buf) => {
 const rbSendInput = (frame, bits) => {
   const rb = net?.rb;
   if (rb) {
-    rb.sentLog.push({ frame, bits });
-    if (rb.sentLog.length > RB_SENT_LOG) rb.sentLog.shift();
+    rbLogSent(rb, frame, bits);
     if (rb.reconnecting) return; // resent once the friend says what it has
   }
   rbSendInputWire(frame, bits);
@@ -1245,12 +1245,17 @@ const rbSendInputWire = (frame, bits) => {
   v.setUint8(0, RB_INPUT);
   v.setInt32(1, frame);
   v.setUint16(5, bits);
-  if (NET_LINK_DELAY > 0) setTimeout(() => rbSend(buf), NET_LINK_DELAY);
-  else rbSend(buf);
+  if (NET_LINK_DELAY > 0) {
+    const dc = net?.dc;
+    setTimeout(() => { if (net?.dc === dc) rbSend(buf); }, NET_LINK_DELAY);
+  } else {
+    rbSend(buf);
+  }
 };
 
 // 2x drives both peers: a one-sided 2x just stalls at the prediction window.
 const rbSendSpeed = (on) => {
+  if (net?.rb?.reconnecting) return;
   const buf = new ArrayBuffer(2);
   const v = new DataView(buf);
   v.setUint8(0, RB_SPEED);
@@ -1260,6 +1265,7 @@ const rbSendSpeed = (on) => {
 
 // Pause drives both peers too, so the freeze shows rather than reads as a stall.
 const rbSendPause = (on) => {
+  if (net?.rb?.reconnecting) return;
   const buf = new ArrayBuffer(2);
   const v = new DataView(buf);
   v.setUint8(0, RB_PAUSE);
@@ -1398,7 +1404,9 @@ const rbConnect = async () => {
     resumeOk: false,    // both sides know it: a drop redials instead of ending
     byeIn: false,       // the friend ended it on purpose
     lastRx: -1,         // last input frame received from the friend
-    sentLog: [],        // recent inputs sent, for the friend's gap
+    sentFrames: new Int32Array(RB_SENT_LOG), // the input log (a ring), for the friend's gap
+    sentBits: new Uint16Array(RB_SENT_LOG),
+    sentCount: 0,
     reconnecting: false,
     reconnectSince: 0,
     giveUpTimer: 0,
@@ -1407,6 +1415,14 @@ const rbConnect = async () => {
     rsWs: null,         // the redial's server socket
     rsPc: null,         // the redial's peer connection, until adopted
     rsDcOpen: false,
+    rsSdpIn: false,
+    rsEarly: [],        // the friend's messages before our open (replayed on it)
+    rsAttempt: 0,
+    rsAnswerTimer: 0,
+    rsRewait: 0,
+    discTimer: 0,
+    lastMsgAt: 0,       // wall clock of the friend's last message
+    reconnectAt: 0,     // wall clock when redialing began
   };
   netSetStatus("Syncing…");
   const h = new ArrayBuffer(RB_HELLO_LEN);
@@ -1426,6 +1442,7 @@ const rbMessage = (data) => {
   if (!rb) return;
   const v = new DataView(data);
   const kind = v.getUint8(0);
+  rb.lastMsgAt = Date.now();
   if (kind === RB_INPUT) {
     const frame = v.getInt32(1);
     if (frame > rb.lastRx) rb.lastRx = frame;
@@ -1443,6 +1460,7 @@ const rbMessage = (data) => {
   }
   if (kind === RB_BYE) {
     rb.byeIn = true;
+    if (net.started) netPeerGone("Peer disconnected");
     return;
   }
   if (kind === RB_READY) {
@@ -1833,7 +1851,7 @@ const netPeerGone = (msg) => {
 const netShutdown = async (opts) => {
   if (net?.rb) rsStop(net.rb);
   // A deliberate end: the friend mustn't redial.
-  if (net?.started && net.rb && net.dc?.readyState === "open") {
+  if (net?.started && net.rb && !net.rb.byeIn && net.dc?.readyState === "open") {
     try { net.dc.send(new Uint8Array([RB_BYE])); } catch {}
   }
   netStallBadge.hidden = true;
@@ -2116,11 +2134,15 @@ document.addEventListener("visibilitychange", () => {
 // resume (an older build never echoes, and is ended as before). On a drop
 // both rendezvous on the retry code, open a new connection and swap RESUME
 // [sid][last input frame received][flags]: each resends the inputs the
-// other missed, and the away/pause/2x state, and they play on. A deliberate
-// end sends BYE first, so the friend doesn't redial.
-const RB_RESUME_GIVE_UP_MS = 180000; // then the session ends as before
-const RB_RESUME_PAIR_MS = 20000;     // a pairing whose channel never opens: dial again
-const RB_SENT_LOG = 512;             // inputs kept for the friend's gap (~8 s)
+// other missed, then its pause/2x state, and they play on. A deliberate end
+// sends BYE first, so the friend doesn't redial. Not offered over the
+// same-browser path or a manual-code pairing (no server to redial).
+let rbResumeGiveUpMs = 180000;       // then the session ends as before (let: e2e shortens it)
+const RB_RESUME_PAIR_MS = 20000;     // paired, but no channel: dial again
+const RB_RESUME_ANSWER_MS = 10000;   // channel open, but no RESUME from the friend: dial again
+const RB_REWAIT_MS = 25000;          // waiting on the code: re-rendezvous (a socket can die unseen)
+const RB_DISCONNECTED_MS = 10000;    // "disconnected" this long: redial
+const RB_SENT_LOG = 128;             // inputs kept for the friend's gap (it is at most ~2x the window)
 const RB_RETRY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 const rbResumeInfoMsg = (sid, code) => {
@@ -2132,10 +2154,10 @@ const rbResumeInfoMsg = (sid, code) => {
   return buf;
 };
 
-// Host, at the start. The same-browser path has nothing to redial.
+// Host, at the start.
 const rbOfferResume = () => {
   const rb = net?.rb;
-  if (!rb || (net.localChan && net.dc === net.localChan)) return;
+  if (!rb || (net.localChan && net.dc === net.localChan) || net.manualCode) return;
   const a = new Uint8Array(14);
   crypto.getRandomValues(a);
   const code = "RS" + Array.from(a, (x) => RB_RETRY_ALPHABET[x % 32]).join("");
@@ -2159,40 +2181,113 @@ const rbResumeInfoIn = (rb, v, data) => {
 
 const rbCanResume = () => !!(net?.started && net.rb?.resumeOk && !net.rb.byeIn);
 
+// The input log, a ring: every input sent, in frame order.
+const rbLogSent = (rb, frame, bits) => {
+  const i = rb.sentCount % RB_SENT_LOG;
+  rb.sentFrames[i] = frame;
+  rb.sentBits[i] = bits;
+  rb.sentCount++;
+};
+
 // The connection is gone: redial if both sides can, else end as before.
 const rbDropped = (why, endMsg) => {
   if (rbCanResume()) rbBeginResume(why);
   else netPeerGone(net?.rb?.byeIn ? "Peer disconnected" : endMsg);
 };
 
+// "disconnected" may recover; past RB_DISCONNECTED_MS it redials (an engine
+// that never reaches "failed" mustn't strand the session).
+const rbWatchDisconnected = (pc, st) => {
+  const rb = net?.rb;
+  if (!rb) return;
+  clearTimeout(rb.discTimer);
+  if (st !== "disconnected") return;
+  rb.discTimer = setTimeout(() => {
+    if (net?.rb === rb && net.pc === pc && pc.connectionState !== "connected") {
+      rbDropped("disconnected for " + RB_DISCONNECTED_MS / 1000 + " s", "Peer connection lost");
+    }
+  }, RB_DISCONNECTED_MS);
+};
+
 const rbBeginResume = (why) => {
   const rb = net.rb;
-  if (rb.reconnecting) return;
+  if (rb.reconnecting) {
+    // A new channel died before the friend's RESUME: dial again.
+    rsRestart(rb, why);
+    return;
+  }
+  // Back from a suspension longer than the friend waits: it has given up.
+  if (rb.lastMsgAt && Date.now() - rb.lastMsgAt > rbResumeGiveUpMs) {
+    log("netplay: " + why + " after " + Math.round((Date.now() - rb.lastMsgAt) / 1000) + " s of silence — the friend has given up");
+    netPeerGone("Peer connection lost");
+    return;
+  }
   rb.reconnecting = true;
   rb.reconnectSince = performance.now();
+  rb.reconnectAt = Date.now();
+  rb.rsAttempt = 0;
   log("netplay: " + why + " — redialing on the retry code");
-  const { pc, dc } = net;
-  net.pc = null;
-  net.dc = null;
-  net.rtcConnected = false;
-  try { dc?.close(); } catch {}
-  try { pc?.close(); } catch {}
+  rsDetach(rb);
   rbRenderCard();
   clearTimeout(rb.giveUpTimer);
   rb.giveUpTimer = setTimeout(() => {
     if (net?.rb !== rb || !rb.reconnecting) return;
-    log("netplay: no reconnect in " + RB_RESUME_GIVE_UP_MS / 1000 + " s — giving up", "warn");
+    log("netplay: no reconnect in " + rbResumeGiveUpMs / 1000 + " s — giving up", "warn");
     netPeerGone("Couldn't reconnect");
-  }, RB_RESUME_GIVE_UP_MS);
-  rsDial(rb, 0);
+  }, rbResumeGiveUpMs);
+  rsDial(rb);
 };
 
-// Stop redialing (resumed, or the session is ending).
+// Let go of the dead or half-made connection: the server socket, the
+// pairing in flight, an adopted channel, and their timers.
+const rsDetach = (rb) => {
+  clearTimeout(rb.rsRetry);
+  clearTimeout(rb.rsPairTimer);
+  clearTimeout(rb.rsAnswerTimer);
+  clearTimeout(rb.rsRewait);
+  clearTimeout(rb.discTimer);
+  const ws = rb.rsWs;
+  rb.rsWs = null;
+  if (ws) { try { ws.onclose = ws.onmessage = ws.onerror = null; ws.close(); } catch {} }
+  const pcs = new Set([rb.rsPc, net?.pc].filter(Boolean));
+  const dc = net?.dc;
+  rb.rsPc = null;
+  rb.rsDcOpen = false;
+  rb.rsSdpIn = false;
+  rb.rsEarly = [];
+  if (net) {
+    net.pc = null;
+    net.dc = null;
+    net.rtcConnected = false;
+  }
+  try { dc?.close(); } catch {}
+  for (const pc of pcs) { try { pc.close(); } catch {} }
+};
+
+// This attempt is over: dial again, backing off within the server's
+// rendezvous rate (10 a minute per address), until resumed or given up.
+const rsRestart = (rb, why, now = false) => {
+  if (net?.rb !== rb || !rb.reconnecting) return;
+  // The give-up timer may not have run (a suspended page): check the clock.
+  if (Date.now() - rb.reconnectAt > rbResumeGiveUpMs) {
+    netPeerGone("Couldn't reconnect");
+    return;
+  }
+  log("netplay: redial: " + why);
+  rsDetach(rb);
+  const delay = now ? 0 : Math.min(2000 * 2 ** rb.rsAttempt++, 15000);
+  rb.rsRetry = setTimeout(() => rsDial(rb), delay);
+};
+
+// Stop redialing (resumed, or the session is ending). An adopted channel
+// stays the session's.
 const rsStop = (rb) => {
   rb.reconnecting = false;
   clearTimeout(rb.giveUpTimer);
   clearTimeout(rb.rsRetry);
   clearTimeout(rb.rsPairTimer);
+  clearTimeout(rb.rsAnswerTimer);
+  clearTimeout(rb.rsRewait);
   const ws = rb.rsWs;
   rb.rsWs = null;
   if (ws) { try { ws.onclose = ws.onmessage = ws.onerror = null; ws.close(); } catch {} }
@@ -2200,28 +2295,20 @@ const rsStop = (rb) => {
   rb.rsPc = null;
 };
 
-// One rendezvous on the retry code; a socket or pairing that fails dials
-// again (backing off, within the server's rendezvous rate) until resumed or
-// given up.
-const rsDial = (rb, attempt) => {
+// One rendezvous on the retry code.
+const rsDial = (rb) => {
   if (net?.rb !== rb || !rb.reconnecting) return;
-  const again = (why) => {
-    if (net?.rb !== rb || !rb.reconnecting) return;
-    log("netplay: redial: " + why);
-    const ws = rb.rsWs;
-    rb.rsWs = null;
-    if (ws) { try { ws.onclose = ws.onmessage = ws.onerror = null; ws.close(); } catch {} }
-    if (rb.rsPc) { try { rb.rsPc.close(); } catch {} rb.rsPc = null; }
-    clearTimeout(rb.rsPairTimer);
-    clearTimeout(rb.rsRetry);
-    rb.rsRetry = setTimeout(() => rsDial(rb, attempt + 1), Math.min(2000 * 2 ** attempt, 15000));
-  };
   let ws;
-  try { ws = new WebSocket(NET_SIGNAL_URL); } catch { again("no socket"); return; }
+  try { ws = new WebSocket(NET_SIGNAL_URL); } catch { rsRestart(rb, "no socket"); return; }
   rb.rsWs = ws;
   ws.onopen = () => ws.send(JSON.stringify({ t: "rendezvous", code: rb.resume.code, id: NET_PAGE_ID }));
   ws.onerror = () => {};
-  ws.onclose = () => { if (rb.rsWs === ws) again("server socket closed"); };
+  ws.onclose = () => {
+    if (rb.rsWs !== ws) return;
+    // A pairing under way finishes on its own (or its deadline redials).
+    if (rb.rsDcOpen || rb.rsSdpIn) { rb.rsWs = null; return; }
+    rsRestart(rb, "server socket closed");
+  };
   ws.onmessage = async (e) => {
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }
@@ -2230,10 +2317,19 @@ const rsDial = (rb, attempt) => {
     try {
       if (msg.t === "waiting") {
         log("netplay: redial: waiting for the friend");
+        rb.rsAttempt = 0; // the server answers: no backoff for the next dial
+        clearTimeout(rb.rsRewait);
+        rb.rsRewait = setTimeout(() => {
+          if (rb.rsWs === ws && !rb.rsPc) rsRestart(rb, "still waiting — rendezvous again", true);
+        }, RB_REWAIT_MS);
       } else if (msg.t === "paired") {
         log("netplay: redial: paired " + msg.role);
-        rsStartRtc(rb, ws, msg.role === "host", again);
+        clearTimeout(rb.rsRewait);
+        rsStartRtc(rb, ws, msg.role === "host").catch((err) => {
+          if (rb.rsWs === ws) rsRestart(rb, "setup failed: " + err.message);
+        });
       } else if (msg.t === "sdp" && pc) {
+        rb.rsSdpIn = true;
         await pc.setRemoteDescription(msg.d);
         if (msg.d.type === "offer") {
           await pc.setLocalDescription(await pc.createAnswer());
@@ -2242,31 +2338,42 @@ const rsDial = (rb, attempt) => {
       } else if (msg.t === "ice" && pc && msg.c) {
         await pc.addIceCandidate(msg.c).catch(() => {});
       } else if (msg.t === "peer-closed") {
-        if (!rb.rsDcOpen) again("friend left the server");
+        // With the descriptions crossed the friend has most likely opened
+        // its channel and left the server a round trip before ours opens:
+        // leave it to the channel, or the pairing deadline.
+        if (!rb.rsDcOpen && !rb.rsSdpIn) rsRestart(rb, "friend left the server");
       } else if (msg.t === "error") {
-        again("server: " + msg.msg);
+        rsRestart(rb, "server: " + msg.msg);
       }
     } catch (err) {
-      if (rb.rsPc === pc) again("setup failed: " + err.message);
+      if (rb.rsPc === pc && pc) rsRestart(rb, "setup failed: " + err.message);
     }
   };
 };
 
-const rsStartRtc = async (rb, ws, isOfferer, again) => {
+const rsStartRtc = async (rb, ws, isOfferer) => {
   const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
   rb.rsPc = pc;
   rb.rsDcOpen = false;
-  rb.rsPairTimer = setTimeout(() => { if (rb.rsPc === pc && !rb.rsDcOpen) again("no channel after pairing"); },
-                              RB_RESUME_PAIR_MS);
+  rb.rsSdpIn = false;
+  clearTimeout(rb.rsPairTimer);
+  rb.rsPairTimer = setTimeout(() => {
+    if (rb.rsPc === pc && !rb.rsDcOpen) rsRestart(rb, "no channel after pairing");
+  }, RB_RESUME_PAIR_MS);
   pc.onicecandidate = (e) => {
     if (e.candidate && rb.rsPc === pc && rb.rsWs === ws) ws.send(JSON.stringify({ t: "ice", c: e.candidate }));
   };
   pc.onconnectionstatechange = () => {
-    if (rb.rsPc === pc && !rb.rsDcOpen && pc.connectionState === "failed") again("ICE failed");
+    if (rb.rsPc === pc && !rb.rsDcOpen && pc.connectionState === "failed") rsRestart(rb, "ICE failed");
   };
   const adopt = (dc) => {
     dc.binaryType = "arraybuffer";
     dc.onopen = () => rsAdopt(rb, pc, dc);
+    // Wired from the start: the friend opens first and says RESUME at once.
+    dc.onmessage = (e) => {
+      if (net?.dc === dc) rbMessage(e.data);
+      else if (rb.rsPc === pc) rb.rsEarly.push(e.data);
+    };
   };
   if (isOfferer) {
     adopt(pc.createDataChannel("link", { ordered: true }));
@@ -2277,30 +2384,33 @@ const rsStartRtc = async (rb, ws, isOfferer, again) => {
   }
 };
 
-// The new channel is open: it becomes the session's, and says what this
-// side has. Inputs stay held until the friend's RESUME says what it has.
+// The new channel is open: it becomes the session's and says what this
+// side has. Inputs, pause and 2x stay held until the friend's RESUME says
+// what it has; no RESUME in time dials again.
 const rsAdopt = (rb, pc, dc) => {
   if (rb.rsPc === pc && rb.rsDcOpen) return;
   if (net?.rb !== rb || !rb.reconnecting || rb.rsPc !== pc) { try { pc.close(); } catch {} return; }
   rb.rsDcOpen = true;
   clearTimeout(rb.rsPairTimer);
-  const ws = rb.rsWs;
-  rb.rsWs = null;
-  if (ws) { try { ws.onclose = ws.onmessage = ws.onerror = null; ws.close(); } catch {} }
+  // The server socket stays until the friend's RESUME: leaving now would
+  // close the friend's socket while its channel may still be opening.
   net.pc = pc;
   net.dc = dc;
   net.rtcConnected = true;
   pc.onconnectionstatechange = () => {
     if (!net || net.pc !== pc) return;
     const st = pc.connectionState;
+    rbWatchDisconnected(pc, st);
     if (st === "failed" || st === "closed") rbDropped("connection " + st, "Peer connection lost");
     else if (st === "disconnected") log("netplay: connection disconnected — waiting");
   };
-  dc.onmessage = (e) => rbMessage(e.data);
   dc.onclose = () => {
     if (!net || net.dc !== dc) return;
     if (net.started) rbDropped("channel closed", "Peer disconnected");
   };
+  rb.rsAnswerTimer = setTimeout(() => {
+    if (net?.dc === dc && rb.reconnecting) rsRestart(rb, "no RESUME from the friend");
+  }, RB_RESUME_ANSWER_MS);
   const buf = new ArrayBuffer(10);
   const v = new DataView(buf);
   v.setUint8(0, RB_RESUME);
@@ -2309,35 +2419,47 @@ const rsAdopt = (rb, pc, dc) => {
   v.setUint8(9, (document.hidden ? 1 : 0) | (paused ? 2 : 0) | (speed2x ? 4 : 0));
   rbSend(buf);
   log("netplay: redial: channel open, last input from the friend " + rb.lastRx);
+  const early = rb.rsEarly;
+  rb.rsEarly = [];
+  for (const d of early) rbMessage(d);
 };
 
-// The friend's RESUME: resend what it missed, take its state, play on.
+// The friend's RESUME: resend what it missed (from the log, in order), take
+// its state, play on.
 const rsResumeIn = (rb, v) => {
-  if (!rb.reconnecting || !rb.resume) return;
+  if (!rb.reconnecting || !rb.resume || !rb.rsDcOpen) return;
   if (v.getUint32(1) !== rb.resume.sid) {
     netPeerGone("Couldn't resume the link");
     return;
   }
   const theirs = v.getInt32(5);
   const flags = v.getUint8(9);
-  const gap = rb.sentLog.filter((e) => e.frame > theirs);
-  if (gap.length && gap[0].frame > theirs + 1) {
+  const oldest = Math.max(0, rb.sentCount - RB_SENT_LOG);
+  const gap = [];
+  for (let n = oldest; n < rb.sentCount; n++) {
+    const i = n % RB_SENT_LOG;
+    if (rb.sentFrames[i] > theirs) gap.push(i);
+  }
+  if (gap.length && rb.sentFrames[gap[0]] > theirs + 1) {
     log("netplay: the friend's gap is older than the input log", "warn");
     netPeerGone("Couldn't resume the link");
     return;
   }
   rsStop(rb);
-  for (const e of gap) rbSendInputWire(e.frame, e.bits);
+  for (const i of gap) rbSendInputWire(rb.sentFrames[i], rb.sentBits[i]);
   log("netplay: resumed after " + fmtAway(performance.now() - rb.reconnectSince) +
       " (resent " + gap.length + " inputs from frame " + (theirs + 1) + ")");
   rbRenderCard();
   showToast("Reconnected — link resumed");
-  rbPeerAway(!!(flags & 1));
-  // Pause and 2x messages sent during the drop were lost: a side that says
-  // it's running unpauses (or slows) this one, never the reverse, so both
-  // end up agreeing on play.
+  if (flags & 1) rbPeerAway(true);
+  else rbHideAwayCard(); // back too: one toast, not two
+  // Pause and 2x messages from during the drop were lost or held: a side
+  // that says it's running unpauses (or slows) this one, never the reverse,
+  // and then each says where it ended up, so both agree.
   if (!(flags & 2) && paused) window.applyRemotePause?.(false);
   if (!(flags & 4) && speed2x) window.applyRemoteSpeed2x?.(false);
+  rbSendPause(paused);
+  rbSendSpeed(speed2x);
 };
 
 document.getElementById("net-to-manual").addEventListener("click", () => {

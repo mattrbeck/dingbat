@@ -128,13 +128,27 @@ final class NetLink: ObservableObject {
         var resumeOk = false
         var byeIn = false
         var lastRx: Int32 = -1
-        var sentLog: [(frame: Int32, bits: UInt16)] = []
+        /// Wall clock of the friend's last message.
+        var lastMsgAt: Date?
+        /// The input log (a ring), for the friend's gap.
+        var sentFrames = [Int32](repeating: 0, count: NetLink.sentLogMax)
+        var sentBits = [UInt16](repeating: 0, count: NetLink.sentLogMax)
+        var sentCount = 0
         var reconnecting = false
+        var reconnectAt = Date()
         var rsWs: LinkSignaling?
         var rsPeer: RTCPeer?
         var rsOpen = false
+        var rsSdpIn = false
+        /// The friend's messages on a new channel before its open reached
+        /// us (the friend opens first and says RESUME at once): replayed on
+        /// our open.
+        var rsEarly: [Data] = []
         var rsAttempt = 0
+        /// Retry, pairing or RESUME deadline (one at a time).
         var rsTimer: DispatchWorkItem?
+        var rsRewait: DispatchWorkItem?
+        var discTimer: DispatchWorkItem?
         var giveUp: DispatchWorkItem?
     }
 
@@ -164,6 +178,11 @@ final class NetLink: ObservableObject {
                                                object: nil, queue: .main) { [weak self] _ in
             self?.backFromAway()
             self?.cameBack()
+            self?.redialNowIfWaiting()
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.terminating()
         }
     }
 
@@ -180,7 +199,8 @@ final class NetLink: ObservableObject {
     /// web RB_RESUME_GIVE_UP_MS / RB_RESUME_PAIR_MS / RB_SENT_LOG
     static let resumeGiveUp: TimeInterval = 180
     static let resumePairDeadline: TimeInterval = 20
-    static let sentLogMax = 512
+    /// The friend's gap is at most about twice the prediction window.
+    static let sentLogMax = 128
     /// web RB_AWAY_CARD_MS / RB_AWAY_TOAST_MS
     static let awayCardDelay: TimeInterval = 1
     static let awayToastAfter: TimeInterval = 5
@@ -431,6 +451,7 @@ final class NetLink: ObservableObject {
     private func wire(_ peer: RTCPeer, _ s: Session) {
         peer.onState = { [weak self] st in
             guard let self, self.session === s, s.peer === peer else { return }
+            if s.started && self.canResume { self.watchDisconnected(peer, st, s) }
             if st == "failed" {
                 if s.started { self.dropped("connection failed", "Peer connection lost") }
                 else if s.rtcConnected { self.fail("Peer connection lost") }
@@ -779,6 +800,7 @@ final class NetLink: ObservableObject {
 
     private func rbMessage(_ data: Data, _ s: Session) {
         guard let rb = s.rb, let kind = data.first else { return }
+        rb.lastMsgAt = Date()
         switch kind {
         case Self.input:
             guard rb.inited, data.count >= 7 else { return }
@@ -796,6 +818,7 @@ final class NetLink: ObservableObject {
             return
         case Self.bye:
             rb.byeIn = true
+            if s.started { peerGone("Peer disconnected") }
             return
         case Self.ready:
             rb.remoteReady = true
@@ -969,8 +992,7 @@ final class NetLink: ObservableObject {
 
     func sendInput(frame: Int32, bits: UInt16) {
         guard let s = session, s.started, let rb = s.rb else { return }
-        rb.sentLog.append((frame, bits))
-        if rb.sentLog.count > Self.sentLogMax { rb.sentLog.removeFirst() }
+        logSent(rb, frame, bits)
         if rb.reconnecting { return }  // resent once the friend says what it has
         sendInputWire(frame: frame, bits: bits, s)
     }
@@ -982,12 +1004,12 @@ final class NetLink: ObservableObject {
     /// 2x and pause drive both sides (a one-sided 2x or pause just stalls
     /// the friend at the prediction window).
     func sendSpeed(_ on: Bool) {
-        guard let s = session, s.started else { return }
+        guard let s = session, s.started, s.rb?.reconnecting != true else { return }
         send([Self.speed, on ? 1 : 0], s)
     }
 
     func sendPause(_ on: Bool) {
-        guard let s = session, s.started else { return }
+        guard let s = session, s.started, s.rb?.reconnecting != true else { return }
         send([Self.pause, on ? 1 : 0], s)
     }
 
@@ -1081,7 +1103,15 @@ final class NetLink: ObservableObject {
     // deals a retry code (long and random, never one of the short codes
     // people pick) and a session id at the start; the guest echoes them. On
     // a drop both rendezvous on the retry code, open a new connection and
-    // swap RESUME: each resends the inputs the other missed and they play on.
+    // swap RESUME: each resends the inputs the other missed, then its pause
+    // and 2x state, and they play on. Not offered for a manual-code pairing
+    // (no server to redial). Closures here hold the session, its RB, sockets
+    // and peers weakly: they are stored on those same objects.
+
+    /// web RB_RESUME_ANSWER_MS / RB_REWAIT_MS / RB_DISCONNECTED_MS
+    private static let resumeAnswerDeadline: TimeInterval = 10
+    private static let rewaitInterval: TimeInterval = 25
+    private static let disconnectedGrace: TimeInterval = 10
 
     private var canResume: Bool {
         guard let s = session, s.started, let rb = s.rb else { return false }
@@ -1094,7 +1124,14 @@ final class NetLink: ObservableObject {
         [resumeInfo] + be32(sid) + Array(code.utf8)
     }
 
+    private func schedule(_ t: TimeInterval, _ f: @escaping () -> Void) -> DispatchWorkItem {
+        let w = DispatchWorkItem(block: f)
+        DispatchQueue.main.asyncAfter(deadline: .now() + t, execute: w)
+        return w
+    }
+
     private func offerResume(_ rb: RB, _ s: Session) {
+        guard !s.manual else { return }
         rb.resumeSid = UInt32.random(in: 1 ... .max)
         rb.resumeCode = "RS" + String((0..<14).map { _ in Self.retryAlphabet[Int.random(in: 0..<32)] })
         send(Self.resumeInfoMsg(rb.resumeSid, rb.resumeCode), s)
@@ -1115,91 +1152,170 @@ final class NetLink: ObservableObject {
         }
     }
 
+    /// The input log, a ring: every input sent, in frame order.
+    private func logSent(_ rb: RB, _ frame: Int32, _ bits: UInt16) {
+        let i = rb.sentCount % Self.sentLogMax
+        rb.sentFrames[i] = frame
+        rb.sentBits[i] = bits
+        rb.sentCount += 1
+    }
+
     /// The connection is gone: redial if both sides can, else end as before.
     private func dropped(_ why: String, _ endMsg: String) {
         if canResume { beginResume(why) }
         else { peerGone(session?.rb?.byeIn == true ? "Peer disconnected" : endMsg) }
     }
 
+    /// "disconnected" may recover; past the grace it redials (an engine that
+    /// never reaches "failed" mustn't strand the session).
+    private func watchDisconnected(_ peer: RTCPeer, _ st: String, _ s: Session) {
+        guard let rb = s.rb else { return }
+        rb.discTimer?.cancel()
+        rb.discTimer = nil
+        guard st == "disconnected" else { return }
+        rb.discTimer = schedule(Self.disconnectedGrace) { [weak self, weak s, weak peer] in
+            guard let self, let s, let peer, self.session === s, s.peer === peer else { return }
+            self.dropped("disconnected for \(Int(Self.disconnectedGrace)) s", "Peer connection lost")
+        }
+    }
+
     private func beginResume(_ why: String) {
-        guard let s = session, let rb = s.rb, !rb.reconnecting else { return }
+        guard let s = session, let rb = s.rb else { return }
+        if rb.reconnecting {
+            // A new channel died before the friend's RESUME: dial again.
+            rsAgain(rb, s, why)
+            return
+        }
+        // Back from a suspension longer than the friend waits: it has given up.
+        if let last = rb.lastMsgAt, Date().timeIntervalSince(last) > Self.resumeGiveUp {
+            NSLog("netlink: %@ after %.0f s of silence — the friend has given up", why, Date().timeIntervalSince(last))
+            peerGone("Peer connection lost")
+            return
+        }
         rb.reconnecting = true
         rb.rsAttempt = 0
-        reconnectingSince = Date()
+        rb.reconnectAt = Date()
+        reconnectingSince = rb.reconnectAt
         NSLog("netlink: %@ — redialing on the retry code", why)
-        let old = s.peer
-        s.peer = nil
-        s.rtcConnected = false
-        old?.close()
+        rsDetach(rb, s)
         rb.giveUp?.cancel()
-        let w = DispatchWorkItem { [weak self] in
-            guard let self, self.session === s, rb.reconnecting else { return }
+        rb.giveUp = schedule(Self.resumeGiveUp) { [weak self, weak s, weak rb] in
+            guard let self, let s, let rb, self.session === s, rb.reconnecting else { return }
             NSLog("netlink: no reconnect in %.0f s — giving up", Self.resumeGiveUp)
             self.peerGone("Couldn't reconnect")
         }
-        rb.giveUp = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.resumeGiveUp, execute: w)
         rsDial(rb, s)
     }
 
+    /// Let go of the dead or half-made connection: the server socket, the
+    /// pairing in flight, an adopted channel, and their timers.
+    private func rsDetach(_ rb: RB, _ s: Session) {
+        rb.rsTimer?.cancel()
+        rb.rsTimer = nil
+        rb.rsRewait?.cancel()
+        rb.rsRewait = nil
+        rb.discTimer?.cancel()
+        rb.discTimer = nil
+        rb.rsWs?.close()
+        rb.rsWs = nil
+        let peers = [rb.rsPeer, s.peer].compactMap { $0 }
+        rb.rsPeer = nil
+        rb.rsOpen = false
+        rb.rsSdpIn = false
+        rb.rsEarly = []
+        s.peer = nil
+        s.rtcConnected = false
+        for p in peers { p.close() }
+    }
+
+    /// This attempt is over: dial again, backing off within the server's
+    /// rendezvous rate, until resumed or given up (also checked against the
+    /// clock: the give-up timer doesn't run while the app is suspended).
+    private func rsAgain(_ rb: RB, _ s: Session, _ why: String, now: Bool = false) {
+        guard session === s, rb.reconnecting else { return }
+        if Date().timeIntervalSince(rb.reconnectAt) > Self.resumeGiveUp {
+            peerGone("Couldn't reconnect")
+            return
+        }
+        NSLog("netlink: redial: %@", why)
+        rsDetach(rb, s)
+        let delay = now ? 0 : min(2.0 * pow(2.0, Double(rb.rsAttempt)), 15)
+        if !now { rb.rsAttempt += 1 }
+        rb.rsTimer = schedule(delay) { [weak self, weak s, weak rb] in
+            guard let self, let s, let rb else { return }
+            self.rsDial(rb, s)
+        }
+    }
+
+    /// Stop redialing (resumed, or the session is ending). An adopted
+    /// channel stays the session's.
     private func rsStop(_ rb: RB) {
         rb.reconnecting = false
         reconnectingSince = nil
         rb.giveUp?.cancel()
+        rb.giveUp = nil
         rb.rsTimer?.cancel()
+        rb.rsTimer = nil
+        rb.rsRewait?.cancel()
+        rb.rsRewait = nil
         rb.rsWs?.close()
         rb.rsWs = nil
         if let p = rb.rsPeer, p !== session?.peer { p.close() }
         rb.rsPeer = nil
     }
 
-    /// Drop this attempt and dial again, backing off within the server's
-    /// rendezvous rate, until resumed or given up.
-    private func rsAgain(_ rb: RB, _ s: Session, _ why: String) {
-        guard session === s, rb.reconnecting else { return }
-        NSLog("netlink: redial: %@", why)
-        rb.rsWs?.close()
-        rb.rsWs = nil
-        rb.rsPeer?.close()
-        rb.rsPeer = nil
-        rb.rsTimer?.cancel()
-        let delay = min(2.0 * pow(2.0, Double(rb.rsAttempt)), 15)
-        rb.rsAttempt += 1
-        let w = DispatchWorkItem { [weak self] in self?.rsDial(rb, s) }
-        rb.rsTimer = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
+    /// Back in the foreground while redialing: dial at once (a socket left
+    /// waiting through a suspension may be dead without anyone hearing).
+    private func redialNowIfWaiting() {
+        guard let s = session, let rb = s.rb, rb.reconnecting, !rb.rsOpen else { return }
+        rsAgain(rb, s, "back in the foreground", now: true)
     }
 
+    /// One rendezvous on the retry code. The socket stays until the friend's
+    /// RESUME: leaving at our own open would make the server close the
+    /// friend's socket while its channel may still be opening.
     private func rsDial(_ rb: RB, _ s: Session) {
         guard session === s, rb.reconnecting else { return }
         let ws = LinkSignaling()
         rb.rsWs = ws
-        ws.onOpen = { [weak self] in
-            guard self?.session === s, rb.rsWs === ws else { return }
+        ws.onOpen = { [weak self, weak s, weak rb, weak ws] in
+            guard let self, let s, let rb, let ws, self.session === s, rb.rsWs === ws else { return }
             ws.send(["t": "rendezvous", "code": rb.resumeCode, "id": Self.pageID])
         }
-        ws.onClose = { [weak self] _ in
-            guard let self, rb.rsWs === ws else { return }
+        ws.onClose = { [weak self, weak s, weak rb, weak ws] _ in
+            guard let self, let s, let rb, let ws, rb.rsWs === ws else { return }
+            // A pairing under way finishes on its own (or its deadline redials).
+            if rb.rsOpen || rb.rsSdpIn { rb.rsWs = nil; return }
             self.rsAgain(rb, s, "server socket closed")
         }
-        ws.onMessage = { [weak self] msg in
-            guard let self, self.session === s, rb.rsWs === ws else { return }
+        ws.onMessage = { [weak self, weak s, weak rb, weak ws] msg in
+            guard let self, let s, let rb, let ws, self.session === s, rb.rsWs === ws else { return }
             switch msg["t"] as? String {
             case "waiting":
                 NSLog("netlink: redial: waiting for the friend")
+                rb.rsAttempt = 0  // the server answers: no backoff next time
+                rb.rsRewait?.cancel()
+                rb.rsRewait = self.schedule(Self.rewaitInterval) { [weak self, weak s, weak rb, weak ws] in
+                    guard let self, let s, let rb, let ws, rb.rsWs === ws, rb.rsPeer == nil else { return }
+                    self.rsAgain(rb, s, "still waiting — rendezvous again", now: true)
+                }
             case "paired":
                 NSLog("netlink: redial: paired %@", (msg["role"] as? String) ?? "?")
+                rb.rsRewait?.cancel()
                 self.rsStartRtc(rb, s, ws, offerer: (msg["role"] as? String) == "host")
             case "sdp":
                 guard let peer = rb.rsPeer, let d = msg["d"] as? [String: Any],
                       let sdp = d["sdp"] as? String, let type = d["type"] as? String else { return }
+                rb.rsSdpIn = true
                 if !peer.setRemoteDescription(sdp: sdp, type: type) { self.rsAgain(rb, s, "bad description") }
             case "ice":
                 guard let peer = rb.rsPeer, let c = msg["c"] as? [String: Any],
                       let cand = c["candidate"] as? String else { return }
                 peer.addRemoteCandidate(cand, mid: c["sdpMid"] as? String)
             case "peer-closed":
-                if !rb.rsOpen { self.rsAgain(rb, s, "friend left the server") }
+                // With the descriptions crossed the friend has most likely
+                // opened its channel: leave it to ours, or the deadline.
+                if !rb.rsOpen && !rb.rsSdpIn { self.rsAgain(rb, s, "friend left the server") }
             case "error":
                 self.rsAgain(rb, s, "server: " + ((msg["msg"] as? String) ?? "error"))
             default:
@@ -1216,83 +1332,110 @@ final class NetLink: ObservableObject {
         }
         rb.rsPeer = peer
         rb.rsOpen = false
+        rb.rsSdpIn = false
         rb.rsTimer?.cancel()
-        let w = DispatchWorkItem { [weak self] in
-            guard rb.rsPeer === peer, !rb.rsOpen else { return }
-            self?.rsAgain(rb, s, "no channel after pairing")
+        rb.rsTimer = schedule(Self.resumePairDeadline) { [weak self, weak s, weak rb, weak peer] in
+            guard let self, let s, let rb, let peer, rb.rsPeer === peer, !rb.rsOpen else { return }
+            self.rsAgain(rb, s, "no channel after pairing")
         }
-        rb.rsTimer = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.resumePairDeadline, execute: w)
         peer.onLocalDescription = { [weak ws] sdp, type in ws?.send(["t": "sdp", "d": ["type": type, "sdp": sdp]]) }
         peer.onLocalCandidate = { [weak ws] cand, mid in
             ws?.send(["t": "ice", "c": ["candidate": cand, "sdpMid": mid, "sdpMLineIndex": 0]])
         }
-        peer.onState = { [weak self] st in
-            guard rb.rsPeer === peer, !rb.rsOpen, st == "failed" else { return }
-            self?.rsAgain(rb, s, "ICE failed")
+        peer.onState = { [weak self, weak s, weak rb, weak peer] st in
+            guard let self, let s, let rb, let peer, rb.rsPeer === peer, !rb.rsOpen, st == "failed" else { return }
+            self.rsAgain(rb, s, "ICE failed")
         }
-        peer.onOpen = { [weak self] in self?.rsAdopt(rb, s, peer) }
+        peer.onOpen = { [weak self, weak s, weak rb, weak peer] in
+            guard let self, let s, let rb, let peer else { return }
+            self.rsAdopt(rb, s, peer)
+        }
+        // Wired from the start: a message can be posted before our open.
+        peer.onMessage = { [weak self, weak s, weak rb, weak peer] data in
+            guard let self, let s, let rb, let peer, self.session === s else { return }
+            if s.peer === peer { self.rbMessage(data, s) }
+            else if rb.rsPeer === peer { rb.rsEarly.append(data) }
+        }
     }
 
     /// The new channel is open: it becomes the session's and says what this
-    /// side has. Inputs stay held until the friend's RESUME says what it has.
+    /// side has. Inputs, pause and 2x stay held until the friend's RESUME
+    /// says what it has; no RESUME in time dials again.
     private func rsAdopt(_ rb: RB, _ s: Session, _ peer: RTCPeer) {
-        // libdatachannel can report a channel open more than once.
-        if rb.rsPeer === peer && rb.rsOpen { return }
+        // libdatachannel can report a channel open more than once, even
+        // after the resume: never treat the session's own peer as stale.
+        if s.peer === peer || (rb.rsPeer === peer && rb.rsOpen) { return }
         guard session === s, rb.reconnecting, rb.rsPeer === peer else { peer.close(); return }
         rb.rsOpen = true
         rb.rsTimer?.cancel()
-        rb.rsWs?.close()
-        rb.rsWs = nil
         s.peer = peer
         s.rtcConnected = true
-        peer.onState = { [weak self] st in
-            guard let self, self.session === s, s.peer === peer else { return }
+        peer.onState = { [weak self, weak s, weak peer] st in
+            guard let self, let s, let peer, self.session === s, s.peer === peer else { return }
+            self.watchDisconnected(peer, st, s)
             if st == "failed" || st == "closed" { self.dropped("connection " + st, "Peer connection lost") }
             else if st == "disconnected" { NSLog("netlink: connection disconnected — waiting") }
         }
-        peer.onClosed = { [weak self] in
-            guard let self, self.session === s, s.peer === peer, s.started else { return }
+        peer.onClosed = { [weak self, weak s, weak peer] in
+            guard let self, let s, let peer, self.session === s, s.peer === peer, s.started else { return }
             self.dropped("channel closed", "Peer disconnected")
         }
-        peer.onMessage = { [weak self] data in
-            guard let self, self.session === s else { return }
-            self.rbMessage(data, s)
+        rb.rsTimer = schedule(Self.resumeAnswerDeadline) { [weak self, weak s, weak rb, weak peer] in
+            guard let self, let s, let rb, let peer, s.peer === peer, rb.reconnecting else { return }
+            self.rsAgain(rb, s, "no RESUME from the friend")
         }
         let gs = GameSession.shared
         let away: UInt8 = UIApplication.shared.applicationState == .background ? 1 : 0
         let flags: UInt8 = away | (gs.paused ? 2 : 0) | (gs.speed == .double ? 4 : 0)
         send([Self.resumeKind] + Self.be32(rb.resumeSid) + Self.be32(UInt32(bitPattern: rb.lastRx)) + [flags], s)
         NSLog("netlink: redial: channel open, last input from the friend %d", rb.lastRx)
+        let early = rb.rsEarly
+        rb.rsEarly = []
+        for d in early { rbMessage(d, s) }
     }
 
-    /// The friend's RESUME: resend what it missed, take its state, play on.
-    /// Pause and 2x messages sent during the drop were lost, so a side that
-    /// says it's running unpauses (or slows) this one, never the reverse:
-    /// both end up agreeing on play.
+    /// The friend's RESUME: resend what it missed (from the log, in order),
+    /// take its state, play on. Pause and 2x messages from during the drop
+    /// were lost or held: a side that says it's running unpauses (or slows)
+    /// this one, never the reverse (nor while this app is in the
+    /// background), then each says where it ended up, so both agree.
     private func resumeIn(_ data: Data, _ rb: RB, _ s: Session) {
-        guard rb.reconnecting, data.count >= 10 else { return }
+        guard rb.reconnecting, rb.rsOpen, data.count >= 10 else { return }
         guard Self.read32(data, 1) == rb.resumeSid else {
             peerGone("Couldn't resume the link")
             return
         }
         let theirs = Int32(bitPattern: Self.read32(data, 5))
         let flags = data[data.startIndex + 9]
-        let gap = rb.sentLog.filter { $0.frame > theirs }
-        if let first = gap.first, first.frame > theirs + 1 {
+        var gap: [Int] = []
+        for n in max(0, rb.sentCount - Self.sentLogMax) ..< rb.sentCount {
+            let i = n % Self.sentLogMax
+            if rb.sentFrames[i] > theirs { gap.append(i) }
+        }
+        if let first = gap.first, rb.sentFrames[first] > theirs + 1 {
             NSLog("netlink: the friend's gap is older than the input log")
             peerGone("Couldn't resume the link")
             return
         }
         let since = reconnectingSince ?? Date()
         rsStop(rb)
-        for e in gap { sendInputWire(frame: e.frame, bits: e.bits, s) }
+        for i in gap { sendInputWire(frame: rb.sentFrames[i], bits: rb.sentBits[i], s) }
         NSLog("netlink: resumed after %@ (resent %d inputs from frame %d)",
               Self.fmtAway(Date().timeIntervalSince(since)), gap.count, theirs + 1)
         AppModel.shared.toast("Reconnected — link resumed")
-        peerAway(flags & 1 != 0)
-        if flags & 2 == 0 && GameSession.shared.paused { GameSession.shared.remotePause(false) }
-        if flags & 4 == 0 && GameSession.shared.speed == .double { GameSession.shared.remoteSpeed(false) }
+        if flags & 1 != 0 { peerAway(true) } else { clearPeerAway() }  // back too: one toast
+        let gs = GameSession.shared
+        let background = UIApplication.shared.applicationState == .background
+        if flags & 2 == 0 && gs.paused && !background { gs.remotePause(false) }
+        if flags & 4 == 0 && gs.speed == .double { gs.remoteSpeed(false) }
+        sendPause(gs.paused)
+        sendSpeed(gs.speed == .double)
+    }
+
+    /// The app is quitting: a deliberate end, so the friend mustn't redial.
+    private func terminating() {
+        guard let s = session, s.started, let rb = s.rb, !rb.byeIn else { return }
+        send([Self.bye], s)
     }
 
     // MARK: endings
