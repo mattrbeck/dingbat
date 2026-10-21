@@ -17,7 +17,8 @@ import SwiftUI
 ///   (n numbers the press, `Press`; builds before it send [kind][on u8])
 ///   11 away [on u8] (my app or tab is in the background: my game is paused)
 ///   12 resume-info [sid u32][retry code]   13 resume [sid u32][last frame u32][flags u8]
-///   14 bye (a deliberate end: don't redial)
+///   14 bye [why u8] (a deliberate end: don't redial; why 0 = left, 1 = gave
+///      up; builds before it send [14])
 /// A dropped connection redials on the retry code and resumes ("Resume" below).
 /// Core 0 is the host's game, core 1 the guest's. When the ROMs differ (a
 /// cross-game trade) each side also needs the other's: a side whose hello
@@ -53,6 +54,10 @@ final class NetLink: ObservableObject {
     /// The connection dropped and the session is redialing since then: the
     /// play screen's "Reconnecting…" card. nil otherwise.
     @Published private(set) var reconnectingSince: Date?
+    /// The friend had said it was away when the link dropped (its app in
+    /// the background, suspended or killed; nothing says which): the card
+    /// waits on the friend instead ("Friend switched away", "Waiting for").
+    @Published private(set) var reconnectAway = false
     /// The friend said they're away (from the message, before the card).
     var peerIsAway: Bool { peerAwayAt != nil }
 
@@ -841,8 +846,11 @@ final class NetLink: ObservableObject {
         case Self.ping:
             return
         case Self.bye:
+            // Why the friend ended: its own Disconnect, or a failure there
+            // (web rbMessage; formal/WebState/LinkResume.lean bye_reason_heard).
             rb.byeIn = true
-            if s.started { peerGone("Peer disconnected") }
+            let gaveUp = data.count >= 2 && data[data.startIndex + 1] == 1
+            if s.started { peerGone(gaveUp ? "Couldn't reconnect" : "Peer disconnected") }
             return
         case Self.ready:
             rb.remoteReady = true
@@ -1097,6 +1105,7 @@ final class NetLink: ObservableObject {
         }
         NSLog("netlink: away")
         send([Self.away, 1], s)
+        if let rb = s.rb { Self.markLive(rb) }  // the app iOS may kill
     }
 
     private func endAwayTask() {
@@ -1203,6 +1212,7 @@ final class NetLink: ObservableObject {
         rb.resumeSid = UInt32.random(in: 1 ... .max)
         rb.resumeCode = "RS" + String((0..<14).map { _ in Self.retryAlphabet[Int.random(in: 0..<32)] })
         send(Self.resumeInfoMsg(rb.resumeSid, rb.resumeCode), s)
+        Self.markLive(rb)
     }
 
     private func resumeInfoIn(_ data: Data, _ rb: RB, _ s: Session) {
@@ -1215,6 +1225,7 @@ final class NetLink: ObservableObject {
             rb.resumeCode = code
             rb.resumeOk = true
             send(Self.resumeInfoMsg(sid, code), s)
+            Self.markLive(rb)
         } else if rb.resumeSid == sid && rb.resumeCode == code {
             rb.resumeOk = true  // host: the guest has it
         }
@@ -1263,7 +1274,9 @@ final class NetLink: ObservableObject {
         rb.reconnecting = true
         rb.rsAttempt = 0
         rb.reconnectAt = Date()
+        reconnectAway = peerAwayAt != nil
         reconnectingSince = rb.reconnectAt
+        Self.markLive(rb)
         NSLog("netlink: %@ — redialing on the retry code", why)
         rsDetach(rb, s)
         rb.giveUp?.cancel()
@@ -1320,6 +1333,7 @@ final class NetLink: ObservableObject {
     private func rsStop(_ rb: RB) {
         rb.reconnecting = false
         reconnectingSince = nil
+        reconnectAway = false
         rb.giveUp?.cancel()
         rb.giveUp = nil
         rb.rsTimer?.cancel()
@@ -1497,6 +1511,7 @@ final class NetLink: ObservableObject {
         }
         let since = reconnectingSince ?? Date()
         rsStop(rb)
+        Self.markLive(rb)
         for i in gap { sendInputWire(frame: rb.sentFrames[i], bits: rb.sentBits[i], s) }
         NSLog("netlink: resumed after %@ (resent %d inputs from frame %d)",
               Self.fmtAway(Date().timeIntervalSince(since)), gap.count, theirs + 1)
@@ -1534,9 +1549,10 @@ final class NetLink: ObservableObject {
     /// The goodbye note too, waited on briefly: nothing runs after this.
     private func terminating() {
         guard let s = session, s.started, let rb = s.rb, !rb.byeIn else { return }
-        send([Self.bye], s)
+        send([Self.bye, 0], s)
         let done = DispatchSemaphore(value: 0)
         if leaveNote(rb, "left", done: done) { _ = done.wait(timeout: .now() + 1.5) }
+        Self.clearLive()
     }
 
     /// The session is ending here and the friend may be redialing (or about
@@ -1548,19 +1564,25 @@ final class NetLink: ObservableObject {
     /// leaveNote; formal/WebState/LinkRedial.lean). false: nothing posted.
     @discardableResult
     private func leaveNote(_ rb: RB, _ why: String, done: DispatchSemaphore? = nil) -> Bool {
-        guard !rb.resumeCode.isEmpty, !rb.byeIn, !rb.noteLeft,
-              var c = URLComponents(url: LinkSignaling.url, resolvingAgainstBaseURL: false) else { return false }
+        guard !rb.resumeCode.isEmpty, !rb.byeIn, !rb.noteLeft else { return false }
+        NSLog("netlink: goodbye note on the retry code (%@)", why)
+        guard Self.postBye(code: rb.resumeCode, id: Self.pageID, why: why, done: done) else { return false }
         rb.noteLeft = true
+        return true
+    }
+
+    @discardableResult
+    private static func postBye(code: String, id: String, why: String, done: DispatchSemaphore? = nil) -> Bool {
+        guard var c = URLComponents(url: LinkSignaling.url, resolvingAgainstBaseURL: false) else { return false }
         c.scheme = c.scheme == "wss" ? "https" : "http"
         c.path = "/bye"
         c.query = nil
         guard let url = c.url, let body = try? JSONSerialization.data(withJSONObject:
-            ["code": rb.resumeCode, "id": Self.pageID, "why": why]) else { return false }
+            ["code": code, "id": id, "why": why]) else { return false }
         var req = URLRequest(url: url, timeoutInterval: 10)
         req.httpMethod = "POST"
         req.setValue("text/plain;charset=UTF-8", forHTTPHeaderField: "Content-Type")
         req.httpBody = body
-        NSLog("netlink: goodbye note on the retry code (%@)", why)
         // Disconnect may be followed at once by the app going to the background.
         var bg = UIBackgroundTaskIdentifier.invalid
         let end = { if bg != .invalid { UIApplication.shared.endBackgroundTask(bg); bg = .invalid } }
@@ -1570,6 +1592,39 @@ final class NetLink: ObservableObject {
             DispatchQueue.main.async { end() }
         }.resume()
         return true
+    }
+
+    // A killed app (swiped away while suspended, or reclaimed by iOS) runs
+    // nothing, so its friend redials for the full 3 minutes. While a session
+    // that can resume is up, the app keeps its retry code and id in
+    // UserDefaults, freshened on going to the background and around a
+    // redial, and clears it when the session ends here. A launch that finds
+    // one under 10 minutes old (the server keeps a goodbye that long) leaves
+    // the goodbye the killed app couldn't (web rbByeOnRelaunch;
+    // formal/WebState/LinkResume.lean Event.relaunch,
+    // regress_kill_heard_on_relaunch).
+    private static let liveKey = "linkLiveSession"
+    private static let liveMaxAge: TimeInterval = 600
+
+    private static func markLive(_ rb: RB) {
+        guard !rb.resumeCode.isEmpty else { return }
+        UserDefaults.standard.set(["code": rb.resumeCode, "id": pageID,
+                                   "at": Date().timeIntervalSince1970], forKey: liveKey)
+    }
+
+    private static func clearLive() {
+        UserDefaults.standard.removeObject(forKey: liveKey)
+    }
+
+    /// At launch: the last run's session never ended here.
+    static func byeOnRelaunch() {
+        guard let live = UserDefaults.standard.dictionary(forKey: liveKey) else { return }
+        clearLive()
+        guard let code = live["code"] as? String, let id = live["id"] as? String,
+              let at = live["at"] as? Double,
+              Date().timeIntervalSince1970 - at < liveMaxAge else { return }
+        NSLog("netlink: the last session never ended: goodbye note on its retry code")
+        postBye(code: code, id: id, why: "left")
     }
 
     // MARK: endings
@@ -1628,10 +1683,13 @@ final class NetLink: ObservableObject {
         }
         if let rb = s.rb {
             rsStop(rb)
-            // A deliberate end: the friend mustn't redial.
-            if s.started && !rb.byeIn { send([Self.bye], s) }
+            // A deliberate end: the friend mustn't redial. It says why, so
+            // a give-up reads as one on the friend's side too.
+            if s.started && !rb.byeIn { send([Self.bye, why == "gave-up" ? 1 : 0], s) }
             // And in case the BYE can't get there, on the retry code too.
             if s.started { leaveNote(rb, why) }
+            // Ended here: nothing for a relaunch to say.
+            Self.clearLive()
         }
         session = nil
         clearPeerAway()

@@ -79,7 +79,7 @@ test("Disconnect on a live link says BYE on the channel and leaves the note too"
   const { app, beacons, chan, session } = await setup();
   session();
   await app.runIn("netShutdown()");
-  assert.equal(JSON.stringify(chan), JSON.stringify([[RB_BYE]]));
+  assert.equal(JSON.stringify(chan), JSON.stringify([[RB_BYE, 0]]), "BYE, why: left");
   assert.equal(beacons.length, 1, "for a friend the BYE can't reach (its link already down)");
   assert.equal(beacons[0].body.why, "left");
 });

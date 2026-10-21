@@ -28,6 +28,9 @@
 //     server: the browser's next rendezvous gets the app's "gave-up" note;
 //   - the app frozen past the browser's give-up: the browser ends it, and
 //     the app, back, ends at once instead of redialing a friend long gone.
+//   - the app killed mid-session (SIGKILL: nothing runs, no BYE, no note):
+//     the browser redials; the app's next launch leaves the goodbye it
+//     couldn't, and the browser ends with "Peer disconnected".
 
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
@@ -175,7 +178,10 @@ const cases = {
     const pid = s.pid();
     await sleep(30000);
     execFileSync("kill", ["-STOP", pid]);
-    await until(async () => (await s.title()) === "Reconnecting…", "the browser's reconnecting card", 30000);
+    // The app said it was away before it froze: the card waits on it.
+    await until(() => s.page.evaluate(() => net?.rb?.reconnecting), "the browser redialing", 30000);
+    assert.equal(await s.title(), "Friend switched away");
+    assert.match(await s.page.evaluate(() => document.getElementById("net-away-time").textContent), /^Waiting for /);
     console.log(`  browser reconnecting at ${at()}`);
     await sleep(150000 - (Date.now() - t0));
     assert.ok(await s.linked(), "the browser kept the session through the freeze");
@@ -299,6 +305,24 @@ const cases = {
     await until(async () => !(await s.linked()), "the browser told", 30000);
     assert.ok((await s.toasts()).some((t) => t.startsWith("Couldn't reconnect")), (await s.toasts()).join(" | "));
     assert.ok((await s.webLog()).some((t) => t === "redial: the friend gave up"), (await s.webLog()).slice(-4).join(" | "));
+    await s.end();
+  },
+  async "the app killed mid-session: its next launch says goodbye"() {
+    const s = await link("killed");
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    execFileSync("kill", ["-KILL", s.pid()]);
+    await until(async () => (await s.title()) === "Reconnecting…", "the browser redialing", 60000);
+    await sleep(2000);
+    assert.ok(await s.linked(), "still waiting on the friend");
+    const log2 = join(SHOTS, "link-resume-killed-relaunch.log");
+    if (existsSync(log2)) rmSync(log2);
+    const t0 = Date.now();
+    simctl("launch", "--stderr=" + log2, UDID, BUNDLE, "-audio.muted", "YES", "-signal", "ws://127.0.0.1:" + PORT);
+    await until(async () => !(await s.linked()), "the browser told", 20000);
+    console.log(`  told ${((Date.now() - t0) / 1000).toFixed(1)} s after the relaunch`);
+    assert.ok((await s.toasts()).some((t) => t.startsWith("Peer disconnected")), (await s.toasts()).join(" | "));
+    const relaunch = existsSync(log2) ? readFileSync(log2, "utf8") : "";
+    assert.ok(relaunch.includes("the last session never ended"), "the app's goodbye on launch");
     await s.end();
   },
   async "the app away longer than the browser waits"() {

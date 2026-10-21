@@ -143,7 +143,7 @@ struct GameStage: View {
             // Disconnect gets its taps.
             .overlay {
                 if let since = link.reconnectingSince {
-                    LinkAwayCard(since: since, reconnecting: true)
+                    LinkAwayCard(since: since, reconnecting: true, awayDrop: link.reconnectAway)
                 } else if let since = link.peerAwayShown {
                     LinkAwayCard(since: since)
                 } else if session.linkWaiting > 0 {

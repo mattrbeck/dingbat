@@ -1122,7 +1122,8 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 //  11 away         : [11][on u8]                    (my tab is hidden: my game is paused)
 //  12 resume-info  : [12][sid u32][retry code]     (host deals it at start; the guest echoes it)
 //  13 resume       : [13][sid u32][last frame u32][flags u8] (first on a redialed channel)
-//  14 bye          : [14]                          (a deliberate end: don't redial)
+//  14 bye          : [14][why u8]                  (a deliberate end: don't redial; why 0 =
+//                                                    left, 1 = gave up; builds before it send [14])
 // Both peers run both cores (core 0 = host's game, core 1 = guest's): each
 // side's save-state is exchanged and loaded into the matching core, then only
 // inputs cross the network. When the hello hashes differ (cross-game trade)
@@ -1501,8 +1502,11 @@ const rbMessage = (data) => {
     return;
   }
   if (kind === RB_BYE) {
+    // Why the friend ended: its own Disconnect, or a failure there (its
+    // give-up just after the new channel opened). formal/WebState/
+    // LinkResume.lean bye_reason_heard.
     rb.byeIn = true;
-    if (net.started) netPeerGone("Peer disconnected");
+    if (net.started) netPeerGone(v.byteLength >= 2 && v.getUint8(1) === 1 ? "Couldn't reconnect" : "Peer disconnected");
     return;
   }
   if (kind === RB_READY) {
@@ -1898,14 +1902,17 @@ const netPeerGone = (msg) => {
 // the session failed ("gave-up", from netPeerGone).
 const netShutdown = async (opts) => {
   if (net?.rb) rsStop(net.rb);
-  // A deliberate end: the friend mustn't redial.
+  // A deliberate end: the friend mustn't redial. It says why, so a give-up
+  // reads as one on the friend's side too.
   if (net?.started && net.rb && !net.rb.byeIn && net.dc?.readyState === "open") {
-    try { net.dc.send(new Uint8Array([RB_BYE])); } catch {}
+    try { net.dc.send(new Uint8Array([RB_BYE, opts?.why === "gave-up" ? 1 : 0])); } catch {}
   }
   // And in case the BYE can't get there (the link is down, or about to be
   // found down), on the retry code too. Here, before any await: at page
   // close only this synchronous part runs.
   if (net?.started && net.rb) rbLeaveNote(net.rb, opts?.why || "left");
+  // Ended here, so nothing for a relaunch to say (rbByeOnRelaunch).
+  if (net?.rb) rbClearLive();
   netStallBadge.hidden = true;
   netStallText.textContent = "waiting for peer";
   rbHideAwayCard();
@@ -2064,6 +2071,9 @@ const RB_AWAY_TITLE = "Friend switched away";
 const RB_AWAY_TEXT = "Their game is paused until they come back. The link stays open — nothing is lost.";
 const RB_RECONNECT_TITLE = "Reconnecting…";
 const RB_RECONNECT_TEXT = "The connection dropped. Both games are paused and pick up where they left off.";
+// The link dropped while the friend was away (their app suspended, or killed:
+// nothing says which): waiting on them, not on the network.
+const RB_AWAY_DROP_TEXT = "The link dropped while they were away. If they come back within 3 minutes, both games pick up where they left off.";
 const netStallText = document.getElementById("net-stall-text");
 const RB_AWAY_CARD_MS = 1000;   // a quick alt-tab doesn't flash the card
 const RB_AWAY_TOAST_MS = 5000;  // away this long earns a "back" toast
@@ -2110,10 +2120,11 @@ const rbRenderCard = () => {
   /** @type {HTMLButtonElement} */ (pauseButton).disabled = reconnecting;
   /** @type {HTMLButtonElement} */ (speed2xButton).disabled = reconnecting;
   if (show) {
-    netAwayTitle.textContent = reconnecting ? RB_RECONNECT_TITLE : RB_AWAY_TITLE;
-    netAwayText.textContent = reconnecting ? RB_RECONNECT_TEXT : RB_AWAY_TEXT;
+    const awayDrop = reconnecting && !!rb.peerAwayAtDrop;
+    netAwayTitle.textContent = reconnecting && !awayDrop ? RB_RECONNECT_TITLE : RB_AWAY_TITLE;
+    netAwayText.textContent = !reconnecting ? RB_AWAY_TEXT : awayDrop ? RB_AWAY_DROP_TEXT : RB_RECONNECT_TEXT;
     netAwayTime.textContent = reconnecting
-      ? "Trying for " + fmtAway(performance.now() - rb.reconnectSince)
+      ? (awayDrop ? "Waiting for " : "Trying for ") + fmtAway(performance.now() - rb.reconnectSince)
       : "Away " + fmtAway(performance.now() - rbPeerAwaySince);
     netStallBadge.hidden = true;
     if (!rbAwayTick) rbAwayTick = setInterval(rbRenderCard, 1000);
@@ -2165,6 +2176,7 @@ document.addEventListener("visibilitychange", () => {
     if (!net?.started || !net.rb) return; // rollback sessions only
     rbHiddenSince = performance.now();
     rbSendAway(true);
+    rbMarkLive(net.rb); // a hidden tab is the one a browser kills
     return;
   }
   if (rbGoneWhileHidden) {
@@ -2228,6 +2240,7 @@ const rbOfferResume = () => {
   const code = "RS" + Array.from(a, (x) => RB_RETRY_ALPHABET[x % 32]).join("");
   rb.resume = { sid: netRandId(), code };
   rbSend(rbResumeInfoMsg(rb.resume.sid, code));
+  rbMarkLive(rb);
 };
 
 const rbResumeInfoIn = (rb, v, data) => {
@@ -2239,6 +2252,7 @@ const rbResumeInfoIn = (rb, v, data) => {
     rb.resume = { sid, code };
     rb.resumeOk = true;
     rbSend(rbResumeInfoMsg(sid, code));
+    rbMarkLive(rb);
   } else if (rb.resume.sid === sid && rb.resume.code === code) {
     rb.resumeOk = true; // host: the guest has it
   }
@@ -2266,9 +2280,13 @@ const NET_SIGNAL_HTTP = (() => {
 const rbLeaveNote = (rb, why) => {
   if (!rb.resume || rb.byeIn || rb.noteLeft || !NET_SIGNAL_HTTP) return;
   rb.noteLeft = true;
-  const body = JSON.stringify({ code: rb.resume.code, id: NET_PAGE_ID, why });
-  const url = NET_SIGNAL_HTTP + "/bye";
   log("netplay: goodbye note on the retry code (" + why + ")");
+  rbPostBye(rb.resume.code, NET_PAGE_ID, why);
+};
+
+const rbPostBye = (code, id, why) => {
+  const body = JSON.stringify({ code, id, why });
+  const url = NET_SIGNAL_HTTP + "/bye";
   try {
     if (navigator.sendBeacon?.(url, body)) return;
   } catch {}
@@ -2276,6 +2294,74 @@ const rbLeaveNote = (rb, why) => {
     fetch(url, { method: "POST", body, keepalive: true, mode: "no-cors" }).catch(() => {});
   } catch {}
 };
+
+// A page killed outright (a mobile browser discarding a background tab, a
+// crash) runs nothing, so its friend redials for the full 3 minutes. While
+// a session that can resume is up, this tab keeps its retry code and page
+// id in sessionStorage (per tab; it survives a reload, a discard and a
+// crash restore), freshened on going hidden and around a redial, and
+// clears it when the session ends here. A load that finds one under 10
+// minutes old (the server keeps a goodbye that long) leaves the goodbye the
+// killed page couldn't, unless a live tab still holds that session (Duplicate
+// Tab copies sessionStorage): it answers on RB_OWNER_CHANNEL.
+// formal/WebState/LinkResume.lean Event.relaunch, regress_kill_heard_on_relaunch.
+const RB_LIVE_KEY = "dingbat-link-live";
+const RB_LIVE_MS = 10 * 60 * 1000;
+const RB_OWNER_CHANNEL = "dingbat-link-owner";
+const RB_OWNER_PROBE_MS = 300;
+
+const rbMarkLive = (rb) => {
+  if (!rb?.resume) return;
+  try {
+    sessionStorage.setItem(RB_LIVE_KEY, JSON.stringify({ code: rb.resume.code, id: NET_PAGE_ID, at: Date.now() }));
+  } catch {}
+};
+
+const rbClearLive = () => {
+  try { sessionStorage.removeItem(RB_LIVE_KEY); } catch {}
+};
+
+// Answer a relaunching tab's "is this session yours?".
+try {
+  const ch = new BroadcastChannel(RB_OWNER_CHANNEL);
+  ch.addEventListener("message", (e) => {
+    const m = e.data;
+    if (m?.t === "own?" && m.id === NET_PAGE_ID && net?.rb?.resume?.code === m.code) {
+      ch.postMessage({ t: "mine", code: m.code, id: m.id });
+    }
+  });
+} catch {}
+
+const rbByeOnRelaunch = () => {
+  let live = null;
+  try { live = JSON.parse(sessionStorage.getItem(RB_LIVE_KEY) || "null"); } catch {}
+  if (!live) return;
+  rbClearLive();
+  if (typeof live.code !== "string" || typeof live.id !== "string" || !NET_SIGNAL_HTTP) return;
+  if (!(Date.now() - live.at < RB_LIVE_MS)) return;
+  const post = () => {
+    log("netplay: the last session here never ended: goodbye note on its retry code");
+    rbPostBye(live.code, live.id, "left");
+  };
+  let ch;
+  try {
+    ch = new BroadcastChannel(RB_OWNER_CHANNEL);
+  } catch {
+    post();
+    return;
+  }
+  let owned = false;
+  ch.addEventListener("message", (e) => {
+    if (e.data?.t === "mine" && e.data.code === live.code && e.data.id === live.id) owned = true;
+  });
+  ch.postMessage({ t: "own?", code: live.code, id: live.id });
+  setTimeout(() => {
+    try { ch.close(); } catch {}
+    if (owned) log("netplay: the last session here lives on in another tab");
+    else post();
+  }, RB_OWNER_PROBE_MS);
+};
+rbByeOnRelaunch();
 
 // The input log, a ring: every input sent, in frame order.
 const rbLogSent = (rb, frame, bits) => {
@@ -2323,6 +2409,9 @@ const rbBeginResume = (why) => {
   rb.reconnectSince = performance.now();
   rb.reconnectAt = Date.now();
   rb.rsAttempt = 0;
+  // The friend had said it was away: the card says so, not "Reconnecting…".
+  rb.peerAwayAtDrop = !!rbPeerAwaySince;
+  rbMarkLive(rb);
   log("netplay: " + why + " — redialing on the retry code");
   rsDetach(rb);
   rbRenderCard();
@@ -2551,6 +2640,8 @@ const rsResumeIn = (rb, v) => {
     return;
   }
   rsStop(rb);
+  rb.peerAwayAtDrop = false;
+  rbMarkLive(rb);
   for (const i of gap) rbSendInputWire(rb.sentFrames[i], rb.sentBits[i]);
   log("netplay: resumed after " + fmtAway(performance.now() - rb.reconnectSince) +
       " (resent " + gap.length + " inputs from frame " + (theirs + 1) + ")");

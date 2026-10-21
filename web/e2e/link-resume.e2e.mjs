@@ -316,6 +316,61 @@ test("a friend's give-up is heard: \"Couldn't reconnect\" at once, not 3 minutes
   await done();
 });
 
+// A give-up just after the new channel opened says BYE on it; the BYE says
+// why, so the friend that just resumed reads "Couldn't reconnect" too, not
+// "Peer disconnected" (formal/WebState/LinkResume.lean
+// give_up_reads_as_disconnect, bye_reason_heard). A never takes B's RESUME
+// here, so it stays redialing with the channel open until its give-up.
+test("a give-up after the new channel opened reads as one on the friend's side",
+     { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  await a.page.evaluate(() => {
+    rbResumeGiveUpMs = 8000;
+    const d = Object.getOwnPropertyDescriptor(RTCDataChannel.prototype, "onmessage");
+    Object.defineProperty(RTCDataChannel.prototype, "onmessage", {
+      configurable: true, get: d.get,
+      set(fn) {
+        d.set.call(this, fn && ((e) => {
+          if (e.data instanceof ArrayBuffer && new Uint8Array(e.data)[0] === 13) return;
+          return fn(e);
+        }));
+      },
+    });
+  });
+  await a.page.evaluate(() => net.pc.close());
+  await until(async () => (await netLog(b)).some((t) => t.includes("resumed after")), "B resumed on A's RESUME", 20000);
+  await until(async () => !(await linked(a)), "A gave up", 15000);
+  await until(async () => !(await linked(b)), "B told", 5000);
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Couldn't reconnect")), (await toasts(b)).join(" | "));
+  assert.ok(!(await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  assert.ok(!(await netLog(b)).some((t) => t.includes("redial: the friend gave up")), "by the BYE, not the note");
+  await done();
+});
+
+// A page killed outright runs nothing (no BYE, no note). The tab kept the
+// session's retry code in sessionStorage, and its next load leaves the
+// goodbye the killed page couldn't (LinkResume.lean regress_kill_heard_on_relaunch).
+// The kill: the session is detached, so A's unload handlers find nothing to
+// end (Chrome runs them whatever a capture listener does), then the tab reloads.
+test("a page killed mid-session leaves its goodbye at the tab's next load",
+     { skip, timeout: 120000 }, async () => {
+  const { a, b, done } = await pair();
+  const live = await a.page.evaluate(() => JSON.parse(sessionStorage.getItem("dingbat-link-live")));
+  assert.equal(live.code, await a.page.evaluate(() => net.rb.resume.code));
+  await a.page.evaluate(() => { window.__killed = net; net = null; });
+  const t0 = Date.now();
+  await a.page.reload();
+  await until(async () => !(await linked(b)), "B told", 30000);
+  console.log(`  told in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  assert.ok((await toasts(b)).some((t) => t.startsWith("Peer disconnected")), (await toasts(b)).join(" | "));
+  assert.ok((await netLog(b)).some((t) => t.includes("redial: the friend left")),
+    "by the goodbye note, while redialing: " + (await netLog(b)).slice(-4).join(" | "));
+  assert.ok(await a.page.evaluate(() => [...document.querySelectorAll("#log-entries p")]
+    .some((e) => e.textContent.includes("the last session here never ended"))), "A's new page left the goodbye");
+  assert.equal(await a.page.evaluate(() => sessionStorage.getItem("dingbat-link-live")), null);
+  await done();
+});
+
 // While redialing the game is held: Pause and 2x are off and the game's
 // buttons go nowhere (a press there used to be undone by the reconnect,
 // LinkResume.lean pause_in_drop_undone); both come back once resumed.

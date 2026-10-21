@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/netplay.js: rbOfferResume rbResumeInfoIn rbCanResume rbLogSent rbDropped rbBeginResume rsDetach rsRestart rsStop rsAdopt rsResumeIn rbResumeState rbStartIfReady rbSendInput rbSendInputWire rbSend rbSendPause rbNewReg rbBeats rbPress rbPressIn rbMessage netShutdown netPeerGone rbLeaveNote rsDial rbRenderCard rbReconnecting
+-- @models web/netplay.js: rbOfferResume rbResumeInfoIn rbCanResume rbLogSent rbDropped rbBeginResume rsDetach rsRestart rsStop rsAdopt rsResumeIn rbResumeState rbStartIfReady rbSendInput rbSendInputWire rbSend rbSendPause rbNewReg rbBeats rbPress rbPressIn rbMessage netShutdown netPeerGone rbLeaveNote rbPostBye rbMarkLive rbClearLive rbByeOnRelaunch rsDial rbRenderCard rbReconnecting
 -- @models web/index.js: togglePause setSpeed2x
 
 /-
@@ -46,6 +46,15 @@ no RESUME in 10 s, ICE failure, the server dropping a socket) is one
   the one held (`Reg.beats`: a higher number, or the same number from the
   host); a resume restarts both from the shared decision as the host's
   press 0. Off: through 8362053b, where whichever message arrived last won.
+* `byeWhy`: a friend ending on a BYE reads its reason byte (`[14][0 left |
+  1 gave up]`, from `netShutdown`'s `why`; iOS `shutdown(why:)`): "Couldn't
+  reconnect" for a session that failed, "Peer disconnected" for a
+  Disconnect or leaving the page. The model's BYE always carries the
+  reason; off (through 08c33ae0) every BYE read as a Disconnect.
+* `relaunch`: the goodbye on relaunch. A side keeps its session's retry code
+  (the tab's sessionStorage; iOS UserDefaults), drops it at every end its
+  own code runs, and when it starts again after being killed posts the
+  "left" goodbye with it (`Event.relaunch`).
 
 ## What is modelled
 
@@ -88,6 +97,12 @@ no RESUME in 10 s, ICE failure, the server dropping a socket) is one
   rooms and the leaver's stale seat are `LinkRedial`'s. Its 10-minute
   expiry is not modelled: a friend redials for at most 180 s, starting at
   most 180 s after the last thing it heard.
+* The reconnect card's wording when the friend was away at the drop
+  ("Friend switched away … Waiting for m:ss") is display only (RB_AWAY is
+  not modelled). The relaunch's 10-minute window and the web's ownership
+  probe (a duplicated tab, whose sessionStorage is a copy, must not post a
+  live session's goodbye) are not modelled: `relaunch` is enabled only for
+  a killed side that held the code.
 * A pause someone else holds is not modelled: `applyRemotePause` (the home
   screen, Report a Bug) and `GameSession.remotePause` (a sheet, the home
   screen) keep the friend's choice until it is released, on a live link and
@@ -159,14 +174,27 @@ Refuted on d22e0527 (`bug_*`), fixed, and proved for the fix:
   live link or across any number of resumes. Stronger, at every moment
   the two will hold the same press once they have read what is on its way
   (`SCore.conv`). `regress_pause_presses_cross` replays the trace.
+* `bug_give_up_reads_as_disconnect` (trade-off, through 08c33ae0): a side
+  whose 180 s ran out just after its new channel opened said BYE on it, and
+  a friend that had just resumed read "Peer disconnected", as if Disconnect
+  had been pressed. With the reason byte (`Cfg.byeWhy`), `bye_reason_heard`
+  (`QInv.byeWhy`: every BYE in flight says how its sender's session ended):
+  a side ending on a BYE shows "Peer disconnected" exactly when the friend
+  left, "Couldn't reconnect" when its session failed.
+  `regress_give_up_reads_as_gave_up` replays the trace.
+* `kill_strands_friend` (the leftover of `bug_quit_while_redialing_unheard`):
+  a page or app killed outright runs nothing, so the friend redials for its
+  180 s. With the goodbye on relaunch (`Cfg.relaunch`), the killed side
+  posts it as soon as it starts again, and `relaunch_heard_next`: the
+  friend's next attempt ends with it (`regress_kill_heard_on_relaunch`). A
+  side never started again still strands its friend.
 
 Shown by trace, as designed but worth knowing (`FINDINGS.md`):
 `pause_in_drop_undone`,
 `fix_paused_and_away_stays_paused` (now only for the iPhone's background
-pause and a hidden tab: a press can't happen), `kill_strands_friend` (the note can't
-help: nothing runs), `quit_after_open_reaches_friend`,
+pause and a hidden tab: a press can't happen), `quit_after_open_reaches_friend`,
 `start_window_one_sided`, `give_up_clocks_drift`,
-`give_up_reads_as_disconnect`, `reconnect_clocks_differ`; and the happy
+`reconnect_clocks_differ`; and the happy
 paths `resume_happy`, `resume_twice`, `early_resume_kept`.
 -/
 namespace WebState.LinkResume
@@ -194,13 +222,19 @@ def LOG : Nat := 128
 /-- `rbResumeGiveUpMs`, in seconds (one clock tick is a second). -/
 def G : Nat := 180
 
+/-- A goodbye's reason (`POST /bye` "why", and the BYE's reason byte): the
+    player's own end, or the session failing on this side. -/
+inductive Bye where
+  | left | gaveUp
+  deriving DecidableEq, Repr
+
 /-- What crosses a channel, of what this machine reads. -/
 inductive Msg where
   | info                                   -- RB_RESUME_INFO [sid][retry code]
   | inp (f : Nat)                          -- RB_INPUT [frame][bits]
   | resume (rx : Nat) (p : Bool) (a : Bool) -- RB_RESUME: rx = lastRx + 1; flags 2 (paused), 1 (away)
   | pause (on : Bool) (n : Nat)            -- RB_PAUSE [on][n]: the press's number (the sender is its author)
-  | bye                                    -- RB_BYE
+  | bye (why : Bye)                        -- RB_BYE [why]: 0 left, 1 gave up (before `Cfg.byeWhy`: [14], read as left)
   | ping                                   -- RB_PING (the fix's keepalive)
   deriving DecidableEq, Repr
 
@@ -242,12 +276,6 @@ inductive End where
   | killed    -- the page or app was killed; nothing ran
   deriving DecidableEq, Repr
 
-/-- A goodbye note's reason (`POST /bye` "why"): the player's own end, or
-    the session failing on this side. -/
-inductive Bye where
-  | left | gaveUp
-  deriving DecidableEq, Repr
-
 structure Side where
   ph      : Ph := .live
   why     : Option End := none
@@ -281,26 +309,31 @@ structure Cfg where
   note   : Bool
   freeze : Bool
   seq    : Bool
+  byeWhy : Bool
+  relaunch : Bool
   deriving DecidableEq, Repr
 
 /-- d22e0527, both sides web. -/
-def Cfg.web : Cfg := ⟨true, false, false, false, false, false⟩
+def Cfg.web : Cfg := ⟨true, false, false, false, false, false, false, false⟩
 /-- d22e0527, B the iPhone app. -/
-def Cfg.ios : Cfg := ⟨true, false, true, false, false, false⟩
+def Cfg.ios : Cfg := ⟨true, false, true, false, false, false, false, false⟩
 /-- With the pause fix (7b970ead). -/
-def Cfg.webFix : Cfg := ⟨true, true, false, false, false, false⟩
-def Cfg.iosFix : Cfg := ⟨true, true, true, false, false, false⟩
+def Cfg.webFix : Cfg := ⟨true, true, false, false, false, false, false, false⟩
+def Cfg.iosFix : Cfg := ⟨true, true, true, false, false, false, false, false⟩
 /-- With the goodbye note too (b94cc418). -/
-def Cfg.webNote : Cfg := ⟨true, true, false, true, false, false⟩
-def Cfg.iosNote : Cfg := ⟨true, true, true, true, false, false⟩
+def Cfg.webNote : Cfg := ⟨true, true, false, true, false, false, false, false⟩
+def Cfg.iosNote : Cfg := ⟨true, true, true, true, false, false, false, false⟩
 /-- With the game held while redialing (1d493ac0). -/
-def Cfg.webNow : Cfg := ⟨true, true, false, true, true, false⟩
-def Cfg.iosNow : Cfg := ⟨true, true, true, true, true, false⟩
-/-- With numbered presses: the current code. -/
-def Cfg.webSeq : Cfg := ⟨true, true, false, true, true, true⟩
-def Cfg.iosSeq : Cfg := ⟨true, true, true, true, true, true⟩
+def Cfg.webNow : Cfg := ⟨true, true, false, true, true, false, false, false⟩
+def Cfg.iosNow : Cfg := ⟨true, true, true, true, true, false, false, false⟩
+/-- With numbered presses (08c33ae0). -/
+def Cfg.webSeq : Cfg := ⟨true, true, false, true, true, true, false, false⟩
+def Cfg.iosSeq : Cfg := ⟨true, true, true, true, true, true, false, false⟩
+/-- With the BYE's reason byte and the goodbye on relaunch: the current code. -/
+def Cfg.webBye : Cfg := ⟨true, true, false, true, true, true, true, true⟩
+def Cfg.iosBye : Cfg := ⟨true, true, true, true, true, true, true, true⟩
 /-- fd7b0432's iOS port: messages before the open dropped. -/
-def Cfg.noEarly : Cfg := ⟨false, false, false, false, false, false⟩
+def Cfg.noEarly : Cfg := ⟨false, false, false, false, false, false, false, false⟩
 
 structure State where
   sd     : Cl → Side
@@ -357,6 +390,10 @@ def detach (c : Cl) (s : State) : State :=
 def finish (c : Cl) (w : End) (s : State) : State :=
   updS c (fun y => { y with ph := .ended, why := some w }) (detach c s)
 
+/-- A goodbye's reason from how the session ended: "left" for the player's
+    own end (`netShutdown`'s default), "gave-up" from `netPeerGone`. -/
+def byeOf (w : End) : Bye := if w = .quit then .left else .gaveUp
+
 /-- `rbLeaveNote`: a side that knows the retry code, ending without the
     friend's goodbye, leaves one on the code ("left" for its own end,
     "gave-up" for a failure). The beacon's flight is `LinkRedial`'s; here it
@@ -364,14 +401,14 @@ def finish (c : Cl) (w : End) (s : State) : State :=
     (an older server answers `POST /bye` with its health line). -/
 def leaveNote (c : Cl) (w : End) (x : Side) (s : State) : State :=
   if x.res && !x.bye then
-    { s with note := fun d => if d = c then some (if w = .quit then .left else .gaveUp) else s.note d }
+    { s with note := fun d => if d = c then some (byeOf w) else s.note d }
   else s
 
 /-- `netPeerGone` → `netShutdown`: unless the friend said BYE, say BYE on
     the open channel (none while redialing before a channel opened), finish,
     and leave the goodbye note. -/
 def shutdown (c : Cl) (w : End) (s : State) : State :=
-  leaveNote c w (s.sd c) (finish c w (if (s.sd c).bye then s else send c .bye s))
+  leaveNote c w (s.sd c) (finish c w (if (s.sd c).bye then s else send c (.bye (byeOf w)) s))
 
 /-- `rbSendPause` / `NetLink.sendPause`: a press, numbered one past the
     highest this side has seen; it becomes this side's winning press. -/
@@ -454,7 +491,10 @@ def recv (cfg : Cfg) (c : Cl) (m : Msg) (s : State) : State :=
       let r : Reg := ⟨n, c.other == .a, v⟩
       if r.beats (s.sd c).reg then remotePause c v (updS c (fun y => { y with reg := r }) s) else s
     else remotePause c v s
-  | .bye => shutdown c .peerBye (updS c (fun y => { y with bye := true }) s)
+  | .bye w =>
+    -- With the reason byte, a friend whose session failed reads as one.
+    shutdown c (if cfg.byeWhy && w == .gaveUp then .gaveUp else .peerBye)
+      (updS c (fun y => { y with bye := true }) s)
   | .ping => s
 
 /-- The next message in flight to c on channel k arrives: read if k is c's
@@ -559,6 +599,7 @@ inductive Event where
   | tick (n : Nat)          -- n seconds pass
   | ping (c : Cl)           -- the fix's keepalive (RB_PING every 20 s while live)
   | noteIn (c : Cl)         -- c's rendezvous on the retry code is answered with the friend's goodbye
+  | relaunch (c : Cl)       -- the killed app (or tab) starts again and finds its session's code
   deriving DecidableEq, Repr
 
 def holds (s : State) (c : Cl) (k : Nat) : Prop :=
@@ -596,6 +637,11 @@ def en (cfg : Cfg) (s : State) : Event → Bool
   | .noteIn c =>
     cfg.note && (s.sd c).ph == .recon && (s.sd c).rsPc.isNone && (s.sd c).dc.isNone &&
       (s.note c.other).isSome
+  -- A killed side that held the code, whenever it next starts (the
+  -- 10-minute window is the note's; the friend redials for at most 3).
+  | .relaunch c =>
+    cfg.relaunch && (s.sd c).ph == .ended && (s.sd c).why == some .killed && (s.sd c).res &&
+      (s.note c).isNone
 
 def step (cfg : Cfg) (s : State) : Event → State
   | .input c =>
@@ -624,6 +670,10 @@ def step (cfg : Cfg) (s : State) : Event → State
     | some w => shutdown c (if w = .left then .peerBye else .gaveUp)
         (updS c (fun y => { y with bye := true }) s)
     | none => s
+  | .relaunch c =>
+    -- The saved code (UserDefaults; the tab's sessionStorage) is posted as
+    -- a "left" goodbye.
+    { s with note := fun d => if d = c then some .left else s.note d }
 
 inductive Reachable (cfg : Cfg) : State → Prop
   | init : Reachable cfg init
@@ -952,6 +1002,21 @@ theorem kill_strands_friend :
       (fun s => view s .b == .reconnecting 0 && !en .webNote s (.noteIn .b)) = true := by
   decide
 
+/-- With the goodbye on relaunch, the killed side posts it as soon as it
+    starts again, and the friend's next rendezvous ends with "Peer
+    disconnected": killed on a live link, killed while redialing, the
+    iPhone. (Never started again, it stays `kill_strands_friend`.)
+    `relaunch_heard_next` is the general statement. -/
+theorem regress_kill_heard_on_relaunch :
+    witnesses .webBye (handshake ++ [.kill .a, .dropped .b, .relaunch .a, .noteIn .b])
+      (fun s => view s .b == .ended .peerBye) = true ∧
+    witnesses .webBye (handshake ++
+        [.die 0, .dropped .a, .dropped .b, .kill .b, .relaunch .b, .noteIn .a])
+      (fun s => view s .a == .ended .peerBye) = true ∧
+    witnesses .iosBye (handshake ++ [.kill .b, .dropped .a, .relaunch .b, .noteIn .a])
+      (fun s => view s .a == .ended .peerBye) = true := by
+  decide
+
 /-- Once the new channel has opened, Disconnect says BYE on it: the friend
     reads A's RESUME (a "Reconnected" toast), then the BYE ("Peer
     disconnected"). -/
@@ -1004,13 +1069,31 @@ theorem regress_give_up_clocks_drift :
   decide
 
 /-- A side whose 180 s run out just after its new channel opened says BYE
-    on it; a friend that just resumed on that channel reads "Peer
-    disconnected", as if Disconnect had been pressed. -/
-theorem give_up_reads_as_disconnect :
-    witnesses .web (handshake ++
+    on it; a friend that just resumed on that channel read "Peer
+    disconnected", as if Disconnect had been pressed (through 08c33ae0). -/
+theorem bug_give_up_reads_as_disconnect :
+    witnesses .webSeq (handshake ++
       [.die 0, .dropped .a, .dropped .b, .tick 179, .pair, .adopt .a, .adopt .b, .deliver .a 1,
        .tick 1, .giveUp .b, .deliver .a 1])
       (fun s => view s .b == .ended .gaveUp && view s .a == .ended .peerBye) = true := by
+  decide
+
+/-- With the BYE's reason byte both read "Couldn't reconnect"; a Disconnect
+    after the open still reads "Peer disconnected". `bye_reason_heard` is the
+    general statement. -/
+theorem regress_give_up_reads_as_gave_up :
+    witnesses .webBye (handshake ++
+      [.die 0, .dropped .a, .dropped .b, .tick 179, .pair, .adopt .a, .adopt .b, .deliver .a 1,
+       .tick 1, .giveUp .b, .deliver .a 1])
+      (fun s => view s .b == .ended .gaveUp && view s .a == .ended .gaveUp) = true ∧
+    witnesses .iosBye (handshake ++
+      [.die 0, .dropped .a, .dropped .b, .tick 179, .pair, .adopt .a, .adopt .b, .deliver .a 1,
+       .tick 1, .giveUp .b, .deliver .a 1])
+      (fun s => view s .a == .ended .gaveUp) = true ∧
+    witnesses .webBye (handshake ++
+      [.die 0, .dropped .a, .dropped .b, .pair, .adopt .a, .adopt .b, .quit .a, .deliver .b 1,
+       .deliver .b 1])
+      (fun s => view s .b == .ended .peerBye) = true := by
   decide
 
 /-- The "Trying for m:ss" clocks differ: each counts from its own side's
@@ -2828,6 +2911,7 @@ theorem Inv.input {cfg : Cfg} {s : State} {c : Cl} (h : Inv s) (hen : en cfg s (
 theorem Inv.step {cfg : Cfg} {s : State} (h : Inv s) (e : Event) (hen : en cfg s e = true) :
     Inv (step cfg s e) := by
   cases e with
+  | relaunch c => exact Inv.congr (fun _ => rfl) rfl rfl h
   | input c => exact h.input hen
   | deliver c k => exact h.deliver
   | die k =>
@@ -3802,6 +3886,7 @@ theorem PInv.adopt {cfg : Cfg} (hfix : cfg.fix = true) {s : State} {c : Cl} (hi 
 theorem PInv.step {cfg : Cfg} (hfix : cfg.fix = true) {s : State} (hi : Inv s) (h : PInv s) (e : Event)
     (hen : en cfg s e = true) : PInv (step cfg s e) := by
   cases e with
+  | relaunch c => exact PInv.congr (s := s) (fun _ => rfl) (fun _ _ => rfl) h
   | input c => exact h.input
   | deliver c k => exact h.deliver hfix hi
   | die k => exact h.die
@@ -3874,15 +3959,18 @@ structure QInv (s : State) : Prop where
   okRes   : ∀ c, (s.sd c).ok = true → (s.sd c.other).res = true
   infoQ   : ∀ c, (s.sd c.other).res = false → ¬ InPool s c .info
   byeEnd  : ∀ c, (s.sd c).bye = true → (s.sd c.other).ph = .ended
-  byeQ    : ∀ c, (s.sd c.other).ph ≠ .ended → ¬ InPool s c .bye
+  byeQ    : ∀ c w, (s.sd c.other).ph ≠ .ended → ¬ InPool s c (.bye w)
   noteEnd : ∀ c, (s.note c).isSome → (s.sd c).ph = .ended
   endNote : ∀ c, (s.sd c).ph = .ended → (s.sd c).why ≠ some .killed → (s.sd c).bye = false →
               (s.sd c).res = true → (s.note c).isSome
+  /-- A BYE on its way says how its sender's session ended. -/
+  byeWhy  : ∀ c w, InPool s c (.bye w) → (s.sd c.other).why.map byeOf = some w
 
-/-- What may newly be on its way to `c`: a BYE once the sender has ended,
-    the code once the sender holds it, anything else. -/
+/-- What may newly be on its way to `c`: a BYE once the sender has ended
+    (saying how), the code once the sender holds it, anything else. -/
 def Sc (t : State) (c : Cl) (m : Msg) : Prop :=
-  (m = .bye → (t.sd c.other).ph = .ended) ∧ (m = .info → (t.sd c.other).res = true)
+  (∀ w, m = .bye w → (t.sd c.other).ph = .ended ∧ (t.sd c.other).why.map byeOf = some w) ∧
+    (m = .info → (t.sd c.other).res = true)
 
 structure QStep (s t : State) : Prop where
   inv    : QInv t
@@ -3899,9 +3987,9 @@ theorem QStep.trans {s t u : State} (h1 : QStep s t) (h2 : QStep t u) : QStep s 
     rcases h2.pool c m hm with h | h
     · rcases h1.pool c m h with h' | ⟨hb, hi⟩
       · exact Or.inl h'
-      · refine Or.inr ⟨fun e => ?_, fun e => h2.resM _ (hi e)⟩
-        have he := hb e
-        rw [(h2.frozen _ he).1]; exact he
+      · refine Or.inr ⟨fun w e => ?_, fun e => h2.resM _ (hi e)⟩
+        have he := hb w e
+        rw [(h2.frozen _ he.1).1]; exact he
     · exact Or.inr h
   frozen e he := by
     obtain ⟨a1, b1⟩ := h1.frozen e he
@@ -3917,15 +4005,16 @@ theorem Ph.ne_ended_of {p : Ph} (h : p = .live ∨ p = .recon) : p ≠ .ended :=
 theorem QStep.ofPool {s t : State} (h : QInv s) (hsd : t.sd = s.sd) (hn : t.note = s.note)
     (hp : ∀ c m, InPool t c m → InPool s c m) : QStep s t where
   inv := by
-    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp only [hsd, hn]
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp only [hsd, hn]
     · exact h.endSh
     · exact h.reconOk
     · exact h.okRes
     · exact fun c hr hm => h.infoQ c hr (hp c _ hm)
     · exact h.byeEnd
-    · exact fun c hr hm => h.byeQ c hr (hp c _ hm)
+    · exact fun c w hr hm => h.byeQ c w hr (hp c _ hm)
     · exact h.noteEnd
     · exact h.endNote
+    · exact fun c w hm => h.byeWhy c w (hp c _ hm)
   pool c m hm := Or.inl (hp c m hm)
   frozen e _ := by simp [hsd, hn]
   resM e hr := by simp only [hsd]; exact hr
@@ -3946,7 +4035,7 @@ theorem QStep.gen {s t : State} {d : Cl} (h : QInv s) (hne : (s.sd d).ph ≠ .en
       · rfl
       · rw [hres hs] at hf; cases hf
     refine ⟨fun c => ?_, fun c => ?_, fun c => ?_, fun c => ?_, fun c => ?_, fun c => ?_,
-      fun c => ?_, fun c => ?_⟩ <;> rcases Cl.eq_or d c with rfl | rfl
+      fun c => ?_, fun c => ?_, fun c => ?_⟩ <;> rcases Cl.eq_or d c with rfl | rfl
     · exact fun hc => absurd hc hph
     · rw [ho]; exact h.endSh _
     · exact hrec
@@ -3960,12 +4049,14 @@ theorem QStep.gen {s t : State} {d : Cl} (h : QInv s) (hne : (s.sd d).ph ≠ .en
     · intro hb; rw [ho]; exact hbye hb
     · intro hb; rw [ho] at hb
       have := h.byeEnd _ hb; simp only [Cl.other_other] at this; exact absurd this hne
-    · intro hr hm; rw [ho] at hr; exact h.byeQ _ hr (hp _ _ hm)
-    · intro _ hm; exact h.byeQ d.other (by simpa using hne) (hp _ _ hm)
+    · intro w hr hm; rw [ho] at hr; exact h.byeQ _ w hr (hp _ _ hm)
+    · intro w _ hm; exact h.byeQ d.other w (by simpa using hne) (hp _ _ hm)
     · intro hs; rw [hn] at hs; exact absurd (h.noteEnd _ hs) hne
     · intro hs; rw [hn] at hs; rw [ho]; exact h.noteEnd _ hs
     · exact fun hc => absurd hc hph
     · intro hc hw hb hr; rw [ho] at hc hw hb hr; rw [hn]; exact h.endNote _ hc hw hb hr
+    · intro w hm; rw [ho]; exact h.byeWhy _ w (hp _ _ hm)
+    · intro w hm; exact absurd (hp _ _ hm) (h.byeQ d.other w (by simpa using hne))
   pool c m hm := Or.inl (hp c m hm)
   frozen e he := by
     rcases Cl.eq_or d e with rfl | rfl
@@ -4034,7 +4125,7 @@ theorem inPool_send {s : State} {d c : Cl} {m x : Msg} (hm : InPool (send d m s)
     · exact Or.inr ⟨h1, by simpa using h2⟩
 
 /-- Sending anything but a BYE; the code only while holding it. -/
-theorem QStep.send {s : State} (h : QInv s) (d : Cl) (m : Msg) (hb : m ≠ .bye)
+theorem QStep.send {s : State} (h : QInv s) (d : Cl) (m : Msg) (hb : ∀ w, m ≠ .bye w)
     (hi : m = .info → (s.sd d).res = true) : QStep s (LinkResume.send d m s) := by
   have hsd := send_sd d m s
   have hn := send_note d m s
@@ -4042,10 +4133,10 @@ theorem QStep.send {s : State} (h : QInv s) (d : Cl) (m : Msg) (hb : m ≠ .bye)
     intro c x hx
     rcases inPool_send hx with hx | ⟨rfl, rfl⟩
     · exact Or.inl hx
-    · refine Or.inr ⟨fun e => absurd e hb, fun e => ?_⟩
+    · refine Or.inr ⟨fun w e => absurd e (hb w), fun e => ?_⟩
       simp only [hsd, Cl.other_other]; exact hi e
   refine ⟨?_, hsc, fun e _ => by simp [hsd, hn], fun e hr => by simp only [hsd]; exact hr⟩
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp only [hsd, hn]
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp only [hsd, hn]
   · exact h.endSh
   · exact h.reconOk
   · exact h.okRes
@@ -4054,12 +4145,16 @@ theorem QStep.send {s : State} (h : QInv s) (d : Cl) (m : Msg) (hb : m ≠ .bye)
     · exact h.infoQ c hr hx
     · rw [hsd] at hi'; rw [hi' rfl] at hr; cases hr
   · exact h.byeEnd
-  · intro c hr hx
+  · intro c w hr hx
     rcases inPool_send hx with hx | ⟨-, e⟩
-    · exact h.byeQ c hr hx
-    · exact hb e.symm
+    · exact h.byeQ c w hr hx
+    · exact hb w e.symm
   · exact h.noteEnd
   · exact h.endNote
+  · intro c w hx
+    rcases inPool_send hx with hx | ⟨-, e⟩
+    · exact h.byeWhy c w hx
+    · exact absurd e.symm (hb w)
 
 theorem QStep.sendAll {s : State} (h : QInv s) (d : Cl) (t n : Nat) :
     QStep s (LinkResume.sendAll d (frames t n) s) := by
@@ -4126,7 +4221,7 @@ variable (s : State) (c : Cl) (w : End) (x : Side)
 theorem leaveNote_note_other : (LinkResume.leaveNote c w x s).note c.other = s.note c.other := by
   unfold LinkResume.leaveNote; split <;> simp
 theorem leaveNote_note_self (hr : x.res = true) (hb : x.bye = false) :
-    (LinkResume.leaveNote c w x s).note c = some (if w = .quit then .left else .gaveUp) := by
+    (LinkResume.leaveNote c w x s).note c = some (byeOf w) := by
   unfold LinkResume.leaveNote; simp [hr, hb]
 theorem inPool_leaveNote {d : Cl} {m : Msg} (hm : InPool (LinkResume.leaveNote c w x s) d m) :
     InPool s d m := by
@@ -4142,15 +4237,16 @@ theorem QStep.ending {s t : State} {d : Cl} (h : QInv s) (hne : (s.sd d).ph ≠ 
     (ho : t.sd d.other = s.sd d.other) (hno : t.note d.other = s.note d.other)
     (hnd : (t.sd d).why ≠ some .killed → (t.sd d).bye = false → (t.sd d).res = true →
       (t.note d).isSome)
-    (hp : ∀ c m, InPool t c m → InPool s c m ∨ (c = d.other ∧ m = .bye)) : QStep s t := by
+    (hp : ∀ c m, InPool t c m → InPool s c m ∨
+      (c = d.other ∧ ∃ w, m = .bye w ∧ (t.sd d).why.map byeOf = some w)) : QStep s t := by
   obtain ⟨he, hdc, hrs, hr, hk, hb⟩ := hd
   have hpi : ∀ c, InPool t c .info → InPool s c .info := by
-    intro c hm; rcases hp c _ hm with hm | ⟨-, e⟩
+    intro c hm; rcases hp c _ hm with hm | ⟨-, w, e, -⟩
     · exact hm
     · cases e
   refine ⟨?_, fun c m hm => ?_, fun e he' => ?_, fun e hre => ?_⟩
   · refine ⟨fun c => ?_, fun c => ?_, fun c => ?_, fun c => ?_, fun c => ?_, fun c => ?_,
-      fun c => ?_, fun c => ?_⟩ <;> rcases Cl.eq_or d c with rfl | rfl
+      fun c => ?_, fun c => ?_, fun c => ?_⟩ <;> rcases Cl.eq_or d c with rfl | rfl
     · exact fun _ => ⟨hdc, hrs⟩
     · rw [ho]; exact h.endSh _
     · intro hc; rw [he] at hc; cases hc
@@ -4163,18 +4259,27 @@ theorem QStep.ending {s t : State} {d : Cl} (h : QInv s) (hne : (s.sd d).ph ≠ 
       exact h.infoQ d.other (by simpa using hc) (hpi _ hm)
     · intro hc; rw [ho]; rw [hb] at hc; exact h.byeEnd _ hc
     · intro _; simpa using he
-    · intro hc hm; rw [ho] at hc
+    · intro w hc hm; rw [ho] at hc
       rcases hp _ _ hm with hm | ⟨e, -⟩
-      · exact h.byeQ _ hc hm
+      · exact h.byeQ _ w hc hm
       · exact absurd e (Cl.ne_other _)
-    · intro hc; simp only [Cl.other_other] at hc; exact absurd he hc
+    · intro w hc; simp only [Cl.other_other] at hc; exact absurd he hc
     · exact fun _ => he
     · intro hc; rw [hno] at hc; rw [ho]; exact h.noteEnd _ hc
     · exact fun _ => hnd
     · intro hc hw hb' hr'; rw [ho] at hc hw hb' hr'; rw [hno]; exact h.endNote _ hc hw hb' hr'
-  · rcases hp c m hm with hm | ⟨rfl, rfl⟩
+    · intro w hm; rw [ho]
+      rcases hp _ _ hm with hm | ⟨e, -⟩
+      · exact h.byeWhy _ w hm
+      · exact absurd e (Cl.ne_other _)
+    · intro w hm; simp only [Cl.other_other]
+      rcases hp _ _ hm with hm | ⟨-, w', e, hw⟩
+      · exact absurd hm (h.byeQ d.other w (by simpa using hne))
+      · cases e; exact hw
+  · rcases hp c m hm with hm | ⟨rfl, w, rfl, hw⟩
     · exact Or.inl hm
-    · exact Or.inr ⟨fun _ => by simpa using he, fun e => by cases e⟩
+    · refine Or.inr ⟨fun w' e => ?_, fun e => by cases e⟩
+      cases e; exact ⟨by simpa using he, by simpa using hw⟩
   · rcases Cl.eq_or d e with rfl | rfl
     · exact absurd he' hne
     · exact ⟨ho, hno⟩
@@ -4184,10 +4289,11 @@ theorem QStep.ending {s t : State} {d : Cl} (h : QInv s) (hne : (s.sd d).ph ≠ 
 
 theorem QStep.shutdown {s : State} {d : Cl} {w : End} (h : QInv s) (hne : (s.sd d).ph ≠ .ended) :
     QStep s (LinkResume.shutdown d w s) := by
-  obtain ⟨s1, e1⟩ : ∃ s1, s1 = (if (s.sd d).bye then s else LinkResume.send d .bye s) := ⟨_, rfl⟩
+  obtain ⟨s1, e1⟩ : ∃ s1, s1 = (if (s.sd d).bye then s else LinkResume.send d (.bye (byeOf w)) s) :=
+    ⟨_, rfl⟩
   have hs1 : s1.sd = s.sd := by rw [e1]; split; rfl; exact send_sd ..
   have hn1 : s1.note = s.note := by rw [e1]; split; rfl; exact send_note ..
-  have hp1 : ∀ c m, InPool s1 c m → InPool s c m ∨ (c = d.other ∧ m = .bye) := by
+  have hp1 : ∀ c m, InPool s1 c m → InPool s c m ∨ (c = d.other ∧ m = .bye (byeOf w)) := by
     intro c m hm
     rw [e1] at hm
     split at hm
@@ -4208,7 +4314,9 @@ theorem QStep.shutdown {s : State} {d : Cl} {w : End} (h : QInv s) (hne : (s.sd 
     rw [hself] at hb hr
     rw [leaveNote_note_self (finish d w s1) d w (s.sd d) hr hb]; rfl
   · intro c m hm
-    exact hp1 c m (inPool_finish _ _ _ (inPool_leaveNote _ _ _ _ hm))
+    rcases hp1 c m (inPool_finish _ _ _ (inPool_leaveNote _ _ _ _ hm)) with hm | ⟨hc, e⟩
+    · exact Or.inl hm
+    · exact Or.inr ⟨hc, byeOf w, e, by rw [hself]; rfl⟩
 
 theorem QStep.kill {s : State} {d : Cl} (h : QInv s) (hne : (s.sd d).ph ≠ .ended) :
     QStep s (finish d .killed s) := by
@@ -4290,7 +4398,7 @@ theorem QStep.resumeIn {s : State} {cfg : Cfg} {c : Cl} {t : Nat} {p a : Bool} (
     way to it (so a BYE means the friend has ended, the code that the friend
     holds it). -/
 theorem QStep.recv {s : State} {cfg : Cfg} {c : Cl} {m : Msg} (h : QInv s) (hne : (s.sd c).ph ≠ .ended)
-    (hb : m = .bye → (s.sd c.other).ph = .ended) (hi : m = .info → (s.sd c.other).res = true) :
+    (hb : ∀ w, m = .bye w → (s.sd c.other).ph = .ended) (hi : m = .info → (s.sd c.other).res = true) :
     QStep s (recv cfg c m s) := by
   have h1 := QStep.quiet (f := fun y => { y with lastMsg := s.now }) h hne ⟨rfl, rfl, rfl, rfl, rfl⟩
   have hne1 : ((LinkResume.updS c (fun y => { y with lastMsg := s.now }) s).sd c).ph ≠ .ended := by
@@ -4322,9 +4430,9 @@ theorem QStep.recv {s : State} {cfg : Cfg} {c : Cl} {m : Msg} (h : QInv s) (hne 
         exact h1.trans (h2.trans (QStep.remotePause h2.inv (by rw [updS_sd_self]; exact hne1)))
       · exact h1
     · exact h1.trans (QStep.remotePause h1.inv hne1)
-  | bye =>
+  | bye w =>
     have h2 := QStep.updS (f := fun y => { y with bye := true }) h1.inv hne1 (fun _ x => x) hne1
-      (h1.inv.reconOk c) (h1.inv.okRes c) id (fun _ => by rw [ho1]; exact hb rfl)
+      (h1.inv.reconOk c) (h1.inv.okRes c) id (fun _ => by rw [ho1]; exact hb w rfl)
     exact h1.trans (h2.trans (QStep.shutdown h2.inv (by rw [updS_sd_self]; exact hne1)))
   | ping => exact h1
 
@@ -4362,11 +4470,11 @@ theorem QStep.deliver {s : State} {cfg : Cfg} {c : Cl} {k : Nat} (h : QInv s) :
     · split
       · rename_i hd
         have hne : (s.sd c).ph ≠ .ended := hne_of k (Or.inl (by simpa using hd))
-        refine h1.trans (QStep.recv h1.inv (by simpa using hne) (fun e => ?_) (fun e => ?_))
+        refine h1.trans (QStep.recv h1.inv (by simpa using hne) (fun w e => ?_) (fun e => ?_))
         · subst e
           by_cases hc : (s.sd c.other).ph = .ended
           · simpa using hc
-          · exact absurd hm (h.byeQ c hc)
+          · exact absurd hm (h.byeQ c w hc)
         · subst e
           cases hc : (s.sd c.other).res
           · exact absurd hm (h.infoQ c hc)
@@ -4509,11 +4617,12 @@ theorem QStep.setAway {s : State} {cfg : Cfg} {c : Cl} {on : Bool} (h : QInv s)
         exact h2.trans (QStep.setPaused h2.inv (by simpa using hne))
       · exact h1
 
-theorem QStep.step {s : State} {cfg : Cfg} (h : QInv s) (e : Event) (hen : en cfg s e = true) :
-    QStep s (step cfg s e) := by
+theorem QStep.step {s : State} {cfg : Cfg} (h : QInv s) (e : Event) (hen : en cfg s e = true)
+    (hnr : ∀ c, e ≠ .relaunch c) : QStep s (step cfg s e) := by
   have ne_of : ∀ {c : Cl}, ((s.sd c).ph != .ended) = true → (s.sd c).ph ≠ .ended := by
     intro c hc; simpa using hc
   cases e with
+  | relaunch c => exact absurd rfl (hnr c)
   | input c =>
     simp only [en, Bool.and_eq_true] at hen
     have hne := ne_of hen.1.1.1.1
@@ -4580,7 +4689,7 @@ theorem qinit : QInv init := by
       · subst hj; cases c <;> simp [init] at hm; exact ⟨rfl, hm⟩
       · simp [init, hj] at hm
   refine ⟨fun c hc => ?_, fun c hc => ?_, fun c hc => ?_, fun c hr hm => ?_, fun c hc => ?_,
-    fun c _ hm => ?_, fun c hc => ?_, fun c hc => ?_⟩
+    fun c w _ hm => ?_, fun c hc => ?_, fun c hc => ?_, fun c w hm => ?_⟩
   · cases c <;> simp [init] at hc
   · cases c <;> simp [init] at hc
   · cases c <;> simp [init] at hc
@@ -4589,11 +4698,33 @@ theorem qinit : QInv init := by
   · obtain ⟨-, e⟩ := hpool c _ hm; cases e
   · simp [init] at hc
   · cases c <;> simp [init] at hc
+  · obtain ⟨-, e⟩ := hpool c _ hm; cases e
+
+/-- The relaunch posts a killed side's goodbye: only a note appears. -/
+theorem QInv.relaunch {s : State} {cfg : Cfg} {c : Cl} (h : QInv s)
+    (hen : en cfg s (.relaunch c) = true) : QInv (step cfg s (.relaunch c)) := by
+  simp only [en, Bool.and_eq_true, beq_iff_eq] at hen
+  have hend : (s.sd c).ph = .ended := hen.1.1.1.2
+  simp only [LinkResume.step]
+  refine ⟨h.endSh, h.reconOk, h.okRes, fun d hr hm => h.infoQ d hr hm, h.byeEnd,
+    fun d w hr hm => h.byeQ d w hr hm, fun d hd => ?_, fun d hd hw hb hr => ?_,
+    fun d w hm => h.byeWhy d w hm⟩
+  · simp only at hd ⊢
+    split at hd
+    · rename_i hdc; subst hdc; exact hend
+    · exact h.noteEnd d hd
+  · simp only
+    split
+    · rfl
+    · exact h.endNote d hd hw hb hr
 
 theorem qinv_reachable {cfg : Cfg} {s : State} (h : Reachable cfg s) : QInv s := by
   induction h with
   | init => exact qinit
-  | step e _ hen ih => exact (QStep.step ih e hen).inv
+  | step e _ hen ih =>
+    by_cases hr : ∃ c, e = .relaunch c
+    · obtain ⟨c, rfl⟩ := hr; exact ih.relaunch hen
+    · exact (QStep.step ih e hen (fun c he => hr ⟨c, he⟩)).inv
 
 /-- **A goodbye is never missing when the friend is redialing.** Whenever a
     side has ended, other than killed (Disconnect, leaving the page, the
@@ -4617,13 +4748,11 @@ theorem quit_heard {cfg : Cfg} {s : State} (h : Reachable cfg s) {c : Cl}
     failing attempt is, and which is always possible while redialing) ends
     with its rendezvous answered by the goodbye, unless its own give-up
     came first. -/
-theorem quit_heard_next {cfg : Cfg} (hn : cfg.note = true) {s : State} (h : Reachable cfg s) {c : Cl}
-    (hc : (s.sd c).ph = .ended) (hk : (s.sd c).why ≠ some .killed)
-    (hr : (s.sd c.other).ph = .recon) :
+theorem note_heard_next {cfg : Cfg} (hn : cfg.note = true) {s : State} {c : Cl}
+    (hnote : (s.note c).isSome) (hr : (s.sd c.other).ph = .recon) :
     en cfg s (.restart c.other) = true ∧
     (en cfg (step cfg s (.restart c.other)) (.noteIn c.other) = true ∨
       ((step cfg s (.restart c.other)).sd c.other).ph = .ended) := by
-  have hnote := quit_heard h hc hk hr
   refine ⟨by simp [en, hr], ?_⟩
   simp only [LinkResume.step, LinkResume.restart]
   split
@@ -4633,6 +4762,50 @@ theorem quit_heard_next {cfg : Cfg} (hn : cfg.note = true) {s : State} (h : Reac
     obtain ⟨-, -, -, -, -, -, hsc, hso⟩ := detach_parts s c.other
     simp only [Cl.other_other] at hso
     simp [en, hn, hsc, hr, detach_note, hnote]
+
+theorem quit_heard_next {cfg : Cfg} (hn : cfg.note = true) {s : State} (h : Reachable cfg s) {c : Cl}
+    (hc : (s.sd c).ph = .ended) (hk : (s.sd c).why ≠ some .killed)
+    (hr : (s.sd c.other).ph = .recon) :
+    en cfg s (.restart c.other) = true ∧
+    (en cfg (step cfg s (.restart c.other)) (.noteIn c.other) = true ∨
+      ((step cfg s (.restart c.other)).sd c.other).ph = .ended) :=
+  note_heard_next hn (quit_heard h hc hk hr) hr
+
+/-- **A killed side's goodbye, posted when it starts again, is heard**
+    (`Cfg.relaunch`): the friend, still redialing, ends at its next attempt
+    as for any goodbye, unless its own give-up came first. -/
+theorem relaunch_heard_next {cfg : Cfg} (hn : cfg.note = true) {s : State} {c : Cl}
+    (hr : (s.sd c.other).ph = .recon) :
+    en cfg (step cfg s (.relaunch c)) (.restart c.other) = true ∧
+    (en cfg (step cfg (step cfg s (.relaunch c)) (.restart c.other)) (.noteIn c.other) = true ∨
+      ((step cfg (step cfg s (.relaunch c)) (.restart c.other)).sd c.other).ph = .ended) :=
+  note_heard_next hn (by simp [LinkResume.step]) hr
+
+/-- **A BYE says why** (`Cfg.byeWhy`): a side ending on its friend's BYE
+    shows "Peer disconnected" exactly when the friend pressed Disconnect or
+    left the page, and "Couldn't reconnect" when the friend's session
+    failed (its give-up, a lost connection). Before the reason byte every
+    BYE read as a Disconnect (`bug_give_up_reads_as_disconnect`). -/
+theorem bye_reason_heard {cfg : Cfg} (hb : cfg.byeWhy = true) {s : State} (h : Reachable cfg s)
+    {c : Cl} {k : Nat} {w : Bye} {rest : List Msg} (hq : (s.ch k).q c = .bye w :: rest)
+    (hk : (s.sd c).dc = some k) :
+    ((step cfg s (.deliver c k)).sd c).why =
+      some (if (s.sd c.other).why = some .quit then .peerBye else .gaveUp) := by
+  have q := qinv_reachable h
+  have hi := inv_reachable h
+  have hw := q.byeWhy c w (Or.inr ⟨k, by rw [hq]; simp⟩)
+  have hcl : (s.ch k).closed c = false := (hi.hold c k (Or.inl (by simpa [cs_apply] using hk))).2
+  have hpop : (updCh k (fun x => { x with q := fun d => if d = c then rest else x.q d }) s) =
+      popQ k c rest s := rfl
+  simp only [LinkResume.step, LinkResume.deliver, hq, hpop, popQ_closed, hcl, popQ_sd, hk,
+    Bool.false_eq_true, ↓reduceIte]
+  simp only [recv, hb, Bool.true_and, LinkResume.shutdown, leaveNote_sd, finish_sd_self]
+  cases hwo : (s.sd c.other).why with
+  | none => rw [hwo] at hw; cases hw
+  | some e =>
+    rw [hwo] at hw; simp only [Option.map_some, Option.some.injEq] at hw
+    subst hw
+    cases e <;> simp [byeOf]
 
 
 /-! ## Invariants: numbered presses agree (`Cfg.seq`)
@@ -4930,11 +5103,12 @@ theorem Sync.onFinish {s : State} {c : Cl} {w : End} (h : Sync s) : Sync (finish
 
 theorem SInv.onShutdown {s : State} {c : Cl} {w : End} (h : SInv s) : SInv (shutdown c w s) := by
   unfold LinkResume.shutdown
-  have h1 : SInv (if (s.sd c).bye then s else send c .bye s) := by
+  have h1 : SInv (if (s.sd c).bye then s else send c (.bye (byeOf w)) s) := by
     split
     · exact h
     · exact ⟨h.1.send_np (fun _ => rfl), h.2.of_eq (send_sd ..)⟩
-  have h2 : SInv (finish c w (if (s.sd c).bye then s else send c .bye s)) := ⟨h1.1.onFinish, h1.2.onFinish⟩
+  have h2 : SInv (finish c w (if (s.sd c).bye then s else send c (.bye (byeOf w)) s)) :=
+    ⟨h1.1.onFinish, h1.2.onFinish⟩
   unfold LinkResume.leaveNote
   split
   · exact ⟨h2.1.of_eq rfl rfl, h2.2.of_eq rfl⟩
@@ -5148,7 +5322,7 @@ theorem SameOR.finish (s : State) (c : Cl) (w : End) : SameOR s (finish c w s) :
 
 theorem SameOR.shutdown (s : State) (c : Cl) (w : End) : SameOR s (shutdown c w s) := by
   unfold LinkResume.shutdown
-  have h1 : SameOR s (if (s.sd c).bye then s else LinkResume.send c .bye s) := by
+  have h1 : SameOR s (if (s.sd c).bye then s else LinkResume.send c (.bye (byeOf w)) s) := by
     split
     · exact SameOR.refl s
     · exact SameOR.send s c _
@@ -5255,6 +5429,7 @@ theorem OkRes.deliverN {s : State} {cfg : Cfg} {c : Cl} {k : Nat} (n : Nat) (h :
 
 theorem OkRes.step {s : State} {cfg : Cfg} (h : OkRes s) (e : Event) : OkRes (step cfg s e) := by
   cases e with
+  | relaunch c => exact h.of (SameOR.of_sd rfl)
   | input c =>
     simp only [LinkResume.step]
     have h1 := h.of (SameOR.updS s c (f := fun y => { y with sent := (s.sd c).sent + 1 }) (by intro y; exact ⟨rfl, rfl⟩))
@@ -6000,6 +6175,7 @@ theorem SInv.step {cfg : Cfg} (hseq : cfg.seq = true) (hfix : cfg.fix = true) (h
     {s : State} (hi : Inv s) (hp : PInv s) (hQ : QInv s) (hor : OkRes s) (h : SInv s) (e : Event)
     (hen : en cfg s e = true) : SInv (step cfg s e) := by
   cases e with
+  | relaunch c => exact ⟨h.1.of_eq rfl rfl, h.2.of_eq rfl⟩
   | input c =>
     simp only [LinkResume.step]
     have h1 : SInv (updS c (fun y => { y with sent := (s.sd c).sent + 1 }) s) :=

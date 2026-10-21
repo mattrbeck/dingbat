@@ -10,24 +10,34 @@ struct LinkAwayCard: View {
     /// The connection dropped and the session is redialing (web: the same
     /// card, retitled).
     var reconnecting = false
+    /// ...after the friend had said it was away: waiting on the friend, not
+    /// the network (web RB_AWAY_DROP_TEXT).
+    var awayDrop = false
     @Environment(\.palette) private var palette
+
+    private var title: String { reconnecting && !awayDrop ? "Reconnecting…" : "Friend switched away" }
+    private var text: String {
+        if !reconnecting { return "Their game is paused until they come back. The link stays open — nothing is lost." }
+        return awayDrop
+            ? "The link dropped while they were away. If they come back within 3 minutes, both games pick up where they left off."
+            : "The connection dropped. Both games are paused and pick up where they left off."
+    }
+    private var clock: String { !reconnecting ? "Away " : awayDrop ? "Waiting for " : "Trying for " }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(reconnecting ? "Reconnecting…" : "Friend switched away")
+            Text(title)
                 .font(.system(size: 17, weight: .bold))
                 .foregroundColor(palette.text)
                 .padding(.bottom, 10)
-            Text(reconnecting
-                 ? "The connection dropped. Both games are paused and pick up where they left off."
-                 : "Their game is paused until they come back. The link stays open — nothing is lost.")
+            Text(text)
                 .font(.system(size: 14))
                 .foregroundColor(palette.textDim)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 TimelineView(.periodic(from: since, by: 1)) { ctx in
-                    Text((reconnecting ? "Trying for " : "Away ") + NetLink.fmtAway(ctx.date.timeIntervalSince(since)))
+                    Text(clock + NetLink.fmtAway(ctx.date.timeIntervalSince(since)))
                         .font(.system(size: 12.5).monospacedDigit())
                         .foregroundColor(palette.textDim)
                 }

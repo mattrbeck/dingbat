@@ -10,6 +10,9 @@ struct DingbatApp: App {
     init() {
         // Before anything opens a game: a run that ended unseen is counted.
         CrashWatch.noteCrashedRun()
+        // A link session the last run never ended (the app was killed): its
+        // friend may still be redialing; leave the goodbye now.
+        NetLink.byeOnRelaunch()
         #if DEBUG
         StallLog.startIfAsked()
         #endif
