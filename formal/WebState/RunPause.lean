@@ -85,6 +85,16 @@ an await.
   start one during a clip export).
 * `netShutdown`'s post-await tail (`closeNetModal`, netplay.js 1611) is folded
   into its first segment; nothing in the tail touches `paused`/`lit`.
+* The link resume work (2026-10-19/20, `LinkResume`) changed only what crosses
+  the link, never this machine's `paused`/`lit`: `togglePause` ignores the
+  player's press while a dropped link redials (`rbReconnecting`; this model,
+  with no redialing, allows the press always, so it only has more
+  behaviours); the home screen, Resume and Report a Bug relay their pause to
+  the friend (`relayHoldPause`, `reportRelayed`: messages only; the friend's
+  side is the `peer` event, already possible at any time); `netShutdown`'s
+  BYE, goodbye note and `s.ending`, and `rbConnect`'s resume and press
+  fields, are link bookkeeping. Re-checked at 658d88a4 and those anchors
+  restamped; the model's other stale anchors are other work's.
 * Non-pausing modals (settings, save states, cheats...) are not modelled: they
   never write `paused`, and while one is open the pause button is covered too.
 * User input (taps, keys) requires `visible`; network and timer events do not.
