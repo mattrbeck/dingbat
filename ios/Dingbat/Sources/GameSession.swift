@@ -715,6 +715,24 @@ final class GameSession: NSObject, ObservableObject {
         linkScripts[p] = s
         return s
     }
+    /// `-link-cmd`: the player's own presses, from ios/e2e/link-resume.mjs,
+    /// through tmp/linkcmd.txt (polled; a command a line): "pause" and
+    /// "double" go through togglePause / toggleDouble as the bar's buttons
+    /// do; every command logs the state after it ("state" only that).
+    private var linkCmdTimer: Timer?
+    func startLinkCommands() {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("linkcmd.txt")
+        linkCmdTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self, let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+            try? FileManager.default.removeItem(at: url)
+            for cmd in text.split(separator: "\n") {
+                if cmd == "pause" { self.togglePause() } else if cmd == "double" { self.toggleDouble() }
+                NSLog("linkcmd: %@ paused=%d double=%d head=%d", String(cmd), self.paused ? 1 : 0,
+                      self.speed == .double ? 1 : 0, Int(dingbat_rollback_head()))
+            }
+        }
+    }
+
     private var linkDumped = false
     private func linkDebugDump() {
         guard !linkDumped else { return }

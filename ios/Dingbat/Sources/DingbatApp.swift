@@ -134,6 +134,7 @@ struct DingbatApp: App {
                     if args.contains("-link-manual") {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NetLink.shared.debugManual() }
                     }
+                    if args.contains("-link-cmd") { model.session.startLinkCommands() }
                     #endif
                     if let code = value("-link") {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {

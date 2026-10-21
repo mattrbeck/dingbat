@@ -1278,6 +1278,7 @@ final class NetLink: ObservableObject {
         reconnectingSince = rb.reconnectAt
         Self.markLive(rb)
         NSLog("netlink: %@ — redialing on the retry code", why)
+        if reconnectAway { NSLog("netlink: the friend was away at the drop: the card waits on them") }
         rsDetach(rb, s)
         rb.giveUp?.cancel()
         rb.giveUp = schedule(Self.resumeGiveUp) { [weak self, weak s, weak rb] in

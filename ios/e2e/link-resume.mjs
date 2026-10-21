@@ -31,9 +31,21 @@
 //   - the app killed mid-session (SIGKILL: nothing runs, no BYE, no note):
 //     the browser redials; the app's next launch leaves the goodbye it
 //     couldn't, and the browser ends with "Peer disconnected".
+//   - the game held while reconnecting, on the app: its game doesn't
+//     advance and its Pause and 2x do nothing until the resume;
+//   - crossing presses: pause and 2x messages slowed at the browser so the
+//     app's press and the browser's two cross; both end on the browser's
+//     second, the highest-numbered press;
+//   - a give-up just after the new channel opened, either side: its BYE
+//     says why, and the friend that had just resumed reads "Couldn't
+//     reconnect";
+//   - the browser hidden when the link drops: the app's card waits on it
+//     ("Friend switched away") rather than on the network;
+//   - both paused past a shortened give-up, then a drop: the keepalive kept
+//     each side hearing the other, so both redial and resume.
 
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
@@ -134,6 +146,19 @@ const link = async (name, { webFirst = false, appArgs = [] } = {}) => {
     webLog: () => page.evaluate(() => [...document.querySelectorAll("#log-entries p")]
       .map((e) => e.textContent).filter((t) => t.includes("netplay")).map((t) => t.replace(/^\[[^\]]*\] netplay: /, ""))),
     toasts: () => page.evaluate(() => window.__toasts),
+    // The app logs each change of its pause state ("game: paused/running").
+    appPaused: () => s.netlinkRaw().filter((l) => l.includes("game: ")).map((l) => l.replace(/^.*game: /, "")).at(-1) === "paused",
+    // `-link-cmd`: a press or probe in the app (GameSession.startLinkCommands),
+    // and the state it logs after it: { paused, double, head }.
+    cmd: async (c) => {
+      const lines = () => s.netlinkRaw().filter((l) => l.includes("linkcmd: "));
+      const n = lines().length;
+      const f = join(data, "tmp/linkcmd.txt");
+      writeFileSync(f + ".part", c + "\n");
+      renameSync(f + ".part", f);
+      await until(() => lines().length > n, "the app took " + c, 5000);
+      return Object.fromEntries([...lines().at(-1).matchAll(/(\w+)=(\d+)/g)].map((m) => [m[1], +m[2]]));
+    },
     title: () => page.evaluate(() =>
       document.getElementById("net-away").hidden ? "" : document.getElementById("net-away-title").textContent),
     linked: () => page.evaluate(() => rollbackMode && !!net?.started),
@@ -348,6 +373,177 @@ const cases = {
     await sleep(1500);
     console.log("  app: " + s.netlink().slice(-3).join(" | ") + "; toasts: " + s.toastsApp().slice(-2).join(" | "));
     assert.ok(!s.netlink().some((l) => l.startsWith("redial: waiting")), "the app didn't wait on a friend long gone");
+    await s.end();
+  },
+  // formal/WebState/LinkResume.lean no_press_in_drop: while redialing the
+  // game is held, and the player's Pause and 2x do nothing.
+  async "the game held while reconnecting, on the app: Pause and 2x do nothing"() {
+    const s = await link("hold", { appArgs: ["-link-cmd"] });
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    // The browser can't reach the server for now: the app waits on the code.
+    await s.page.evaluate(() => {
+      window.__WS = window.WebSocket;
+      window.WebSocket = class { constructor() { throw new Error("offline"); } };
+      net.pc.close();
+    });
+    await until(() => s.netlink().some((l) => l === "redial: waiting for the friend"),
+      () => "the app waiting on the retry code: " + s.netlink().slice(-4).join(" | "), 30000);
+    const a = await s.cmd("state");
+    await sleep(1500);
+    const b = await s.cmd("state");
+    assert.equal(b.head, a.head, "the app's game held while reconnecting");
+    assert.equal((await s.cmd("pause")).paused, 0, "the app's Pause did nothing");
+    assert.equal((await s.cmd("double")).double, 0, "the app's 2x did nothing");
+    assert.ok(!s.appPaused(), "the app still not paused");
+    await s.page.evaluate(() => { window.WebSocket = window.__WS; });
+    await until(async () => (await s.resumes()).every((n) => n >= 1),
+      async () => "both resumed; browser: " + (await s.webLog()).slice(-4).join(" | ") + " // app: " + s.netlink().slice(-4).join(" | "), 60000);
+    await sleep(1000);
+    const c = await s.cmd("state");
+    console.log(`  app head ${a.head} → ${b.head} while redialing, ${c.head} after the resume`);
+    assert.ok(c.head > b.head && c.paused === 0 && c.double === 0, "the app plays on at 1x");
+    assert.ok(!(await s.page.evaluate(() => paused || speed2x)), "the browser plays on at 1x");
+    await s.sameGames();
+    await s.end();
+  },
+  // formal/WebState/LinkResume.lean regress_pause_presses_cross: the app
+  // presses Pause (its #1); the browser, before it hears that, presses Pause
+  // and Resume (#1, #2). Pause and 2x messages take 1.5 s each way at the
+  // browser, so the presses cross on the wire. Each side keeps the highest
+  // press (the host's on a tie, which only decides the two #1s), so both
+  // end running. Then the same with 2x.
+  async "crossing presses, app and browser: both end on the highest press"() {
+    const s = await link("cross", { appArgs: ["-link-cmd"] });
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    console.log(`  the ${(await s.page.evaluate(() => net.isHost)) ? "browser" : "app"} hosts`);
+    await s.page.evaluate(() => {
+      const dc = net.dc, on = dc.onmessage, send = dc.send.bind(dc);
+      const slow = (b) => { const k = new Uint8Array(b instanceof ArrayBuffer ? b : b.buffer)[0]; return k === 7 || k === 8; };
+      dc.onmessage = (e) => { if (slow(e.data)) setTimeout(() => on(e), 1500); else on(e); };
+      dc.send = (b) => { if (slow(b)) setTimeout(() => send(b), 1500); else send(b); };
+    });
+    assert.equal((await s.cmd("pause")).paused, 1, "the app paused (its press #1)");
+    await s.page.evaluate(() => { togglePause(); togglePause(); });
+    await sleep(4500);
+    const p = await s.cmd("state");
+    const wp = await s.page.evaluate(() => ({ paused, reg: { ...net.rb.pauseReg } }));
+    console.log(`  pause: app ${p.paused ? "paused" : "running"}, browser ${wp.paused ? "paused" : "running"} (holds press #${wp.reg.n})`);
+    assert.equal(p.paused, 0, "the app took the browser's #2 (Resume)");
+    assert.equal(wp.paused, false, "the browser kept its own #2 over the app's #1");
+    assert.equal(wp.reg.n, 2);
+    assert.equal((await s.cmd("double")).double, 1, "the app at 2x (its press #1)");
+    await s.page.evaluate(() => { setSpeed2x(true); setSpeed2x(false); });
+    await sleep(4500);
+    const d = await s.cmd("state");
+    const wd = await s.page.evaluate(() => speed2x);
+    console.log(`  2x: app ${d.double ? "2x" : "1x"}, browser ${wd ? "2x" : "1x"}`);
+    assert.equal(d.double, 0, "the app took the browser's #2 (1x)");
+    assert.equal(wd, false, "the browser kept its own #2");
+    await s.sameGames();
+    await s.end();
+  },
+  // formal/WebState/LinkResume.lean bye_reason_heard: the browser never
+  // says RESUME on the new channel, so the app stays redialing on it until
+  // its (shortened) give-up, while the browser, which took the app's RESUME,
+  // plays on. The app's BYE says it gave up.
+  async "the app's give-up just after the new channel opened reaches the browser by its BYE"() {
+    const s = await link("bye-why-from-app", { appArgs: ["-link-give-up", "8"] });
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    await s.page.evaluate(() => {
+      const send = RTCDataChannel.prototype.send;
+      RTCDataChannel.prototype.send = function (b) {
+        const k = new Uint8Array(b instanceof ArrayBuffer ? b : b.buffer)[0];
+        if (k === 13) return;
+        return send.call(this, b);
+      };
+      net.pc.close();
+    });
+    await until(async () => (await s.webLog()).some((t) => t.startsWith("resumed after")),
+      async () => "the browser resumed on the app's RESUME: " + (await s.webLog()).slice(-4).join(" | "), 20000);
+    await until(async () => !(await s.linked()), "the browser told", 20000);
+    const toasts = await s.toasts();
+    console.log("  app: " + s.netlink().slice(-3).join(" | ") + "; browser: " + toasts.slice(-2).join(" | "));
+    assert.ok(s.netlink().some((l) => l.startsWith("no reconnect in 8 s")), "the app gave up");
+    assert.ok(toasts.some((t) => t.startsWith("Couldn't reconnect")), toasts.join(" | "));
+    assert.ok(!toasts.some((t) => t.startsWith("Peer disconnected")), toasts.join(" | "));
+    assert.ok(!(await s.webLog()).some((t) => t.includes("redial: the friend gave up")), "by the BYE, not the note");
+    await s.end();
+  },
+  async "the browser's give-up just after the new channel opened reaches the app by its BYE"() {
+    const s = await link("bye-why-to-app");
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    // The browser never takes the app's RESUME: it stays redialing on the
+    // open channel until its give-up; the app, which took the browser's,
+    // plays on.
+    await s.page.evaluate(() => {
+      rbResumeGiveUpMs = 8000;
+      const d = Object.getOwnPropertyDescriptor(RTCDataChannel.prototype, "onmessage");
+      Object.defineProperty(RTCDataChannel.prototype, "onmessage", {
+        configurable: true, get: d.get,
+        set(fn) {
+          d.set.call(this, fn && ((e) => {
+            if (e.data instanceof ArrayBuffer && new Uint8Array(e.data)[0] === 13) return;
+            return fn(e);
+          }));
+        },
+      });
+      net.pc.close();
+    });
+    await until(() => s.netlink().some((l) => l.startsWith("resumed after")),
+      () => "the app resumed on the browser's RESUME: " + s.netlink().slice(-4).join(" | "), 20000);
+    await until(async () => !(await s.linked()), "the browser gave up", 20000);
+    await until(() => s.toastsApp().some((t) => t.startsWith("Couldn't reconnect")),
+      () => "the app's toast: " + s.toastsApp().slice(-3).join(" | "), 10000);
+    console.log("  app: " + s.netlink().slice(-3).join(" | ") + "; toasts: " + s.toastsApp().slice(-2).join(" | "));
+    assert.ok(!s.toastsApp().some((t) => t.startsWith("Peer disconnected")), s.toastsApp().join(" | "));
+    assert.ok(!s.netlink().some((l) => l === "redial: the friend gave up"), "by the BYE, not the note");
+    await s.end();
+  },
+  async "the browser hidden when the link drops: the app's card waits on it"() {
+    const s = await link("away-drop");
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    await s.page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await until(() => s.netlink().includes("friend switched away"),
+      () => "the app told the browser is away: " + s.netlink().slice(-3).join(" | "), 10000);
+    await s.page.evaluate(() => net.pc.close());
+    await until(() => s.netlink().some((l) => l.startsWith("the friend was away at the drop")),
+      () => "the app's card on the friend: " + s.netlink().slice(-4).join(" | "), 30000);
+    await s.page.evaluate(() => {
+      delete document.hidden;
+      delete document.visibilityState;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await until(async () => (await s.resumes()).every((n) => n >= 1),
+      async () => "both resumed; browser: " + (await s.webLog()).slice(-4).join(" | ") + " // app: " + s.netlink().slice(-4).join(" | "), 60000);
+    console.log("  app: " + s.netlink().filter((l) => /away|redial|resumed/.test(l)).join(" | "));
+    await s.sameGames();
+    await s.end();
+  },
+  // formal/WebState/LinkResume.lean regress_long_quiet_keepalive: paused
+  // together, nothing else crosses the link; without the keepalive a drop
+  // past the give-up read as a friend that had given up, and both ended.
+  async "paused together past the give-up, then a drop: the keepalive keeps both redialing"() {
+    const s = await link("quiet", { appArgs: ["-link-give-up", "30"] });
+    await s.page.evaluate(() => { rbResumeGiveUpMs = 30000; });
+    await until(() => s.page.evaluate(() => Module._rollback_head() > 200), "some play first", 30000);
+    await s.page.evaluate(() => togglePause());
+    await until(() => s.appPaused(), "the app paused by the browser's press", 10000);
+    await sleep(50000);
+    assert.ok(await s.linked(), "the browser still linked after 50 s paused");
+    await s.page.evaluate(() => net.pc.close());
+    await until(async () => (await s.resumes()).every((n) => n >= 1),
+      async () => "both resumed; browser: " + (await s.webLog()).slice(-4).join(" | ") + " // app: " + s.netlink().slice(-4).join(" | "), 60000);
+    assert.ok(!s.netlink().some((l) => l.includes("the friend has given up")), "the app redialed");
+    assert.ok(!(await s.webLog()).some((t) => t.includes("the friend has given up")), "the browser redialed");
+    await sleep(1500);
+    assert.ok(s.appPaused() && (await s.page.evaluate(() => paused)), "both still paused after the resume");
+    await s.page.evaluate(() => togglePause());
+    await until(async () => !s.appPaused() && !(await s.page.evaluate(() => paused)), "both playing again", 10000);
+    await s.sameGames();
     await s.end();
   },
 };
