@@ -71,7 +71,9 @@ const
               # HD 3D: the frontend's setting and its pictures (docs/nds/hd3d.md)
               "hd", "hd_top", "hd_bottom", "hd_sub", "hd_out", "hd_out2", "hd_a_gfx", "hd_a_line",
               "cap_hd", "cap_1x", "hd_vline", "hd_bline", "hd_clear_gfx", "hd_clear_line", "hd_paint",
-              "hd_lp", "hd_lg", "hd_ld", "hd_rep_ok", "hd_rep"]
+              "hd_lp", "hd_lg", "hd_ld", "hd_rep_ok", "hd_rep",
+              # host-GPU rendering's composite planes (docs/nds/gpu3d.md)
+              "gpu_on", "gpu_plane", "gpu_lines", "gpu_paint"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
   # vgen/remap_gen/pbase: the 2D engines' line reuse (engine2d.nim); remap()
@@ -92,7 +94,9 @@ const
                 "last_is_cur",
                 # HD rendering: the frontend's display setting and its pictures
                 # (docs/nds/hd3d.md)
-                "hd_scale", "hpos", "hd_verts", "hd2", "hd3", "hd4", "hd_frame", "last_hpos"]
+                "hd_scale", "hpos", "hd_verts", "hd2", "hd3", "hd4", "hd_frame", "last_hpos",
+                # host-GPU rendering's export (docs/nds/gpu3d.md)
+                "gpu_on", "gpu_scene", "gpu_gen", "gpu_tex", "gpu_pal", "gpu_tex_ver", "gpu_tex_gen"]
   GEO_SKIP = ["hd_on", "hpos"]   # HD rendering's vertex positions (docs/nds/hd3d.md)
   # Per-frame scratch: render_frame's clear() rewrites each dot's `px`
   # (depth, IDs, flags, coverage and the layer behind) before anything

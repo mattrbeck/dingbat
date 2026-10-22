@@ -421,7 +421,7 @@ proc advance(c: var Chain; sx, sy: openArray[int32]; n, y: int): bool =
     c.built = c.cur * 16 + c.nxt
   true
 
-proc facing(verts: openArray[Vertex]; first, n: int): float64 =
+proc facing*(verts: openArray[Vertex]; first, n: int): float64 =
   ## The turn of the first three vertices in clip space, the determinant of
   ## their (x, y, w): positive anticlockwise (Y up). Assumed: clip space
   ## (polyrastertest's second-vertex tests turn on vertices that land on

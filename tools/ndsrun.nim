@@ -70,6 +70,11 @@
 ## the PNGs (main and --shots) at 256N x 384N (docs/nds/hd3d.md); the 1x
 ## screens, --screen-hash and --state-hash are unaffected. --hd-hash K
 ## prints a CRC-32 of each HD screen every K frames (the HD output itself).
+## --gpu exports each frame's 3D scene and composite planes for a host-GPU
+## renderer (docs/nds/gpu3d.md; for --perf-from costs). --gpu-dump DIR@F,..
+## writes them after frame F to DIR/fF_*.bin (scene, tex, pal, plane,
+## lines, the 1x screens and 3D frame, and with --hd the HD 3D frame and
+## screens), for tools/gpu3d's harness.
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
@@ -312,6 +317,9 @@ when isMainModule:
   var state_load = ""
   var hd = 1
   var hd_hash = 0
+  var gpu = false
+  var gpu_dir = ""
+  var gpu_dumps: seq[int]
   var state_load_frame = -1
   var state_layout = false
   var state_hash = 0
@@ -344,6 +352,12 @@ when isMainModule:
       of "rtc": rtc_at = val
       of "hd": hd = parseInt(val)
       of "hd-hash": hd_hash = parseInt(val)
+      of "gpu": gpu = true
+      of "gpu-dump":
+        let at = val.rsplit('@', maxsplit = 1)
+        gpu = true
+        gpu_dir = at[0]
+        for f in at[1].split(','): gpu_dumps.add parseInt(f)
       of "mic":
         let m = val.split('@')
         mic_path = m[0]
@@ -437,6 +451,8 @@ when isMainModule:
     echo "state: ", state_load, " -> frame ", first_frame
     perf_from = max(perf_from, first_frame)
   if hd > 1: n.set_hd_scale(hd)
+  if gpu: n.set_gpu_export(true)
+  if gpu_dir.len > 0: createDir(gpu_dir)
   var last_rumble = 0
   var was_off = false
   var audio: seq[float32]
@@ -512,6 +528,28 @@ when isMainModule:
       let bb = cast[ptr UncheckedArray[uint8]](addr n.gpu.hd_bottom[0])
       echo "hdhash ", f + 1, " ", toHex(crc32(tb.toOpenArray(0, n2 - 1)), 8),
            " ", toHex(crc32(bb.toOpenArray(0, n2 - 1)), 8)
+    if f + 1 in gpu_dumps:
+      let pre = gpu_dir / "f" & $(f + 1) & "_"
+      template put(name: string; data: untyped) =
+        block:
+          var str = newString(data.len * sizeof(data[0]))
+          if data.len > 0: copyMem(addr str[0], addr data[0], str.len)
+          writeFile(pre & name & ".bin", str)
+      let g3 = n.gpu3d
+      put("scene", g3.gpu_scene)
+      put("tex", g3.gpu_tex)
+      put("pal", g3.gpu_pal)
+      put("plane", n.gpu.gpu_plane)
+      put("lines", n.gpu.gpu_lines)
+      put("top", n.gpu.top)
+      put("bottom", n.gpu.bottom)
+      put("frame3d", g3.frame)
+      if hd > 1:
+        put("hd3d", g3.hd_frame)
+        put("hdtop", n.gpu.hd_top)
+        put("hdbottom", n.gpu.hd_bottom)
+      writeFile(pre & "meta.json", "{\"frame\": " & $(f + 1) & ", \"hd\": " & $hd & "}")
+      echo "gpu-dump: frame ", f + 1, " polys ", g3.gpu_scene[1], " verts ", g3.gpu_scene[2], " -> ", pre
     for (file, at) in state_saves:
       if f + 1 == at:
         let image = n.state_bytes(thumbnail = true)

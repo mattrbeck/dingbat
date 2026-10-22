@@ -716,6 +716,13 @@ proc set_hd_scale*(n: NDS; scale: int) =
 
 proc hd_scale*(n: NDS): int = n.gpu.hd
 
+proc set_gpu_export*(n: NDS; on: bool) =
+  ## Host-GPU 3D (docs/nds/gpu3d.md): export each frame's 3D scene
+  ## (n.gpu.gpu3d.gpu_scene, gpu_tex, gpu_pal) and engine A's composite
+  ## planes (n.gpu.gpu_plane, gpu_lines) for a renderer outside the core.
+  ## Display only, as HD.
+  n.gpu.set_gpu(on)
+
 proc set_button*(n: NDS; b: NdsButton; pressed: bool) =
   if pressed: n.input.held.incl(b) else: n.input.held.excl(b)
   n.input.check_keypad_irq(n.input.keycnt9, n.irq9)
