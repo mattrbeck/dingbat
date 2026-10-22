@@ -50,6 +50,13 @@ type
     hd_vline, hd_bline: array[256, uint16]  ## VRAM display's and capture source B's 1x
                                       ## halfwords, read before the capture writes
     cap_hd: array[4, seq[uint16]]     ## per bank A-D: display capture's HD sub-dots, hd*hd per halfword
+    # host-GPU 3D (docs/nds/gpu3d.md; display only): engine A's composite
+    # per dot for the lines showing 3D, for a GPU to composite an HD 3D
+    # frame with (gpu_line)
+    gpu_on*: bool
+    gpu_plane*: seq[uint32]           ## 256 x 192 dots, 4 words each (engine2d gpu_paint_line)
+    gpu_lines*: seq[uint32]           ## 192 lines, 4 words each (gpu_line)
+    gpu_paint: HdPaint
     cap_1x: array[4, seq[uint32]]     ## ... and the halfword it wrote there (bit 16 = captured)
 
 proc new_gpu*(): Gpu =
@@ -171,7 +178,7 @@ proc set_hd*(g: Gpu; scale: int) =
   ## scaled up whole dots. The 1x screens are unchanged.
   let k = clamp(scale, 1, 4)
   g.hd = k
-  g.engine_a.hd_on = k > 1
+  g.engine_a.hd_on = k > 1 or g.gpu_on
   if g.gpu3d != nil: g.gpu3d.set_hd(k)
   for b in 0..3:
     g.cap_hd[b] = @[]
@@ -185,6 +192,31 @@ proc set_hd*(g: Gpu; scale: int) =
   else:
     g.hd_top = newSeq[uint16](256 * k * 192 * k)
     g.hd_bottom = newSeq[uint16](256 * k * 192 * k)
+
+proc set_gpu*(g: Gpu; on: bool) =
+  ## Export the 3D scene and engine A's composite planes each frame for a
+  ## host-GPU renderer (docs/nds/gpu3d.md). Display only.
+  g.gpu_on = on
+  g.engine_a.hd_on = on or g.hd > 1
+  if g.gpu3d != nil: g.gpu3d.set_gpu(on)
+  if on:
+    g.gpu_plane = newSeq[uint32](256 * 192 * 4)
+    g.gpu_lines = newSeq[uint32](192 * 4)
+  else:
+    g.gpu_plane = @[]
+    g.gpu_lines = @[]
+
+proc gpu_line(g: Gpu; y: int; a_top, lcd_on: bool) =
+  ## Line y for the host-GPU composite: info word 0 = bit 0 engine A shows
+  ## 3D through its composite here (the plane's dots are valid), bit 1
+  ## engine A is on the top screen, bits 8-9 its display mode.
+  let a = g.engine_a
+  let dm = a.display_mode
+  let shows = lcd_on and a.enabled and dm == 1 and g.gpu3d != nil and a.hd_gfx_3d()
+  let info = cast[ptr UncheckedArray[uint32]](addr g.gpu_lines[y * 4])
+  info[0] = (if shows: 1'u32 else: 0'u32) or (if a_top: 2'u32 else: 0'u32) or (dm shl 8)
+  if shows:
+    a.gpu_paint_line(g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]), info)
 
 proc hd_restart*(g: Gpu) =
   ## A state applied over the running machine (a load, a rewind pop, a
@@ -513,5 +545,6 @@ proc render_line*(g: Gpu; y: int) =
     zeroMem(ta, 512)
     zeroMem(tb, 512)
   if g.hd > 1: g.hd_line(y, a_top, lcd_on, cap)
+  if g.gpu_on: g.gpu_line(y, a_top, lcd_on)
 
 {.pop.}

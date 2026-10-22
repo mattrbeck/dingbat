@@ -91,7 +91,7 @@ type
     lc_line: array[192, array[256, uint16]]
     lc_3d: seq[array[256, uint32]]        ## engine A: the 3D line each was drawn with
     lc_reused*: int                       ## lines reused so far (a statistic)
-    hd_on*: bool                          ## HD 3D (gpu.nim): 3D lines keep their scratch, not reused
+    hd_on*: bool                          ## HD 3D or GPU export (gpu.nim): 3D lines keep their scratch, not reused
 
   LineKey = object
     ## Everything a visible line's pixels depend on besides the VRAM it
@@ -1114,6 +1114,28 @@ proc hd_dot*(e: Engine2D; hp: HdPaint; x: int; p: uint32; gfx_out, line_out: var
   gfx_out = c
   if hp.bmode != 0: bright_dot(c, lo, hp.bmode, hp.bfactor)
   line_out = c
+
+proc gpu_paint_line*(e: Engine2D; hp: var HdPaint; plane: ptr UncheckedArray[uint32];
+                     info: ptr UncheckedArray[uint32]) =
+  ## For a host-GPU composite (docs/nds/gpu3d.md): the line just drawn
+  ## (hd_gfx_3d) as `hd_dot` reads it, per dot 4 words (top | sec << 16;
+  ## topl | secl << 8 | window mask << 16 | OBJ flags << 24; the display
+  ## dot with a transparent 3D pixel | the 1x display dot << 16; 0), and
+  ## the line's effect settings in info[1..3].
+  var none: array[256, uint32]
+  var cg, cl: array[256, uint16]
+  e.render_hd_sub(addr none, cg, cl)
+  e.hd_prepare(hp)
+  for x in 0 ..< 256:
+    let m = if hp.windows: uint32(e.winmask[x]) else: 0x3F'u32
+    plane[x * 4] = uint32(hp.top[x]) or (uint32(hp.sec[x]) shl 16)
+    plane[x * 4 + 1] = uint32(hp.topl[x]) or (uint32(hp.secl[x]) shl 8) or (m shl 16) or
+                       (uint32(e.objattr[x]) shl 24)
+    plane[x * 4 + 2] = uint32(cl[x]) or (uint32(e.line[x]) shl 16)
+    plane[x * 4 + 3] = 0
+  info[1] = hp.bld or (hp.mode shl 16)
+  info[2] = hp.eva or (hp.evb shl 8) or (hp.evy shl 16) or (hp.bmode shl 24)
+  info[3] = hp.bfactor or (uint32(e.bghofs[0] and 511) shl 8)
 
 proc hd_bright*(e: Engine2D; line: var array[256, uint16]) =
   ## Master brightness on a line of 15-bit pixels (VRAM display), as

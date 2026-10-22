@@ -49,7 +49,7 @@ import std/[deques, math]
 import ../mem/vram
 import ../io/irq
 import ../sched
-import geometry, render
+import geometry, render, gpuexport
 import ../quirky
 
 export geometry.Vertex, geometry.Polygon, render.Renderer
@@ -116,6 +116,14 @@ type
     hd3: RendererOf[3]
     hd4: RendererOf[4]
     hd_frame*: seq[uint32]        ## `frame` at hd_scale (256N x 192N), drawn line by line
+    # host-GPU rendering (docs/nds/gpu3d.md): the scene each render draws,
+    # exported for a renderer outside the core; display only, as HD
+    gpu_on*: bool
+    gpu_scene*: seq[uint32]       ## gpuexport's scene words
+    gpu_gen*: uint32              ## bumped with every scene exported
+    gpu_tex*, gpu_pal*: seq[uint8]  ## texture / palette slot images
+    gpu_tex_ver*: uint32          ## bumped whenever the images are rebuilt
+    gpu_tex_gen: uint64           ## vram.tex_gen the images hold
 
 const
   RENDER_START_LINE = 214   ## GBATEK "RDLINES_COUNT": rendering starts in scanline 214
@@ -480,6 +488,28 @@ proc render_hd(g: Gpu3d) =
   of 3: g.hd3.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
   else: g.hd4.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
 
+proc export_gpu(g: Gpu3d) =
+  ## The scene just rendered, for a host-GPU renderer (gpuexport.nim).
+  if g.gpu_tex_gen != g.vram.tex_gen or g.gpu_tex.len == 0:
+    slot_images(g.vram, g.gpu_tex, g.gpu_pal)
+    g.gpu_tex_gen = g.vram.tex_gen
+    inc g.gpu_tex_ver
+  inc g.gpu_gen
+  export_scene(g.gpu_scene, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,
+               g.gpu_gen, g.gpu_tex_ver)
+
+proc set_gpu*(g: Gpu3d; on: bool) =
+  ## Export each rendered scene for a host-GPU renderer (gpu_scene,
+  ## gpu_tex, gpu_pal), with the vertices' sub-dot positions.
+  if on == g.gpu_on: return
+  g.gpu_on = on
+  g.geo.hd_on = on or g.hd_scale > 1
+  if not g.geo.hd_on:
+    g.geo.hpos.setLen(0)
+    g.hpos.setLen(0)
+  g.reuse_ok = false
+  g.scratch_ok = false
+
 proc set_hd*(g: Gpu3d; scale: int) =
   ## Draw the 3D scene at `scale` times the resolution as well (1 = off,
   ## 2..4), into hd_frame. The 1x frame, and everything the machine sees,
@@ -487,7 +517,7 @@ proc set_hd*(g: Gpu3d; scale: int) =
   let k = clamp(scale, 1, 4)
   if k == g.hd_scale: return
   g.hd_scale = k
-  g.geo.hd_on = k > 1
+  g.geo.hd_on = k > 1 or g.gpu_on
   g.geo.hpos.setLen(0)
   g.hpos.setLen(0)
   g.hd2 = nil; g.hd3 = nil; g.hd4 = nil
@@ -558,13 +588,14 @@ proc render_frame*(g: Gpu3d) =
      (g.last_is_cur or g.last_polys == g.polys and g.last_verts == g.verts and
       # at HD a vertex can move within its dot: the 1x lists match, the
       # HD frame would not
-      (g.hd_scale <= 1 or g.last_hpos == g.hpos)):
+      (g.hd_scale <= 1 and not g.gpu_on or g.last_hpos == g.hpos)):
     g.rendered = true
     inc g.reused
     return
   g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
   g.rendered = true
   if g.hd_scale > 1: g.render_hd()
+  if g.gpu_on: g.export_gpu()
   if g.reuse_on:
     g.reuse_ok = true
     g.last_gen = g.vram.tex_gen
