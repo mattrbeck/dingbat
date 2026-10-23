@@ -17,6 +17,7 @@ Usage: flap.py [--preview DIR]
   ios/.../Logo, LaunchLogo          the in-app logo and launch logo
   ios/.../Flap                      the opening's flap: the same 31-frame strip as web/flap.png
   docker/windows-cross/dingbat.ico  the Windows build's icon
+  ci/dingbat.icns                   the macOS app's icon: the moon tile on Apple's icon grid
   README/dingbat.png, dingbat_large.png, dingbat_flap.gif
 
 Everything is pixel art at whole-number scales on flat colours. check.py
@@ -76,6 +77,23 @@ def moon_tile(n, k):
     whatever the system's appearance, so they take the dark icon's."""
     b, _, moon = bat.moon_layers(n, k)
     return bat.over(b, moon)
+
+
+def mac_icon(n):
+    """macOS's n x n icon: the moon tile, 824/1024 of the canvas with rounded corners, centred
+    on a clear canvas (Apple's grid; flat, so no drop shadow). The bat at the largest whole
+    scale that keeps it inside 87% of the tile. 16 and 32 px are the browser tab's bats."""
+    if n <= 32:
+        return bat.FAVICON16 if n == 16 else bat.favicon32()
+    t = n * 824 // 1024
+    t += (n - t) % 2  # centred to the pixel
+    k = max(1, int(t * 0.87) // len(bat.still()[0]))
+    return bat.pad(rounded(moon_tile(t, k), round(t * 185 / 824)), n, n)
+
+
+# the .icns slots, each drawn at its own pixel size (16 and 32 as ARGB, as iconutil writes them)
+MAC_ICNS = (('ic04', 16), ('ic05', 32), ('ic11', 32), ('ic12', 64), ('ic07', 128), ('ic13', 256),
+            ('ic08', 256), ('ic14', 512), ('ic09', 512), ('ic10', 1024))
 
 
 def in_safe_circle(rows):
@@ -160,6 +178,11 @@ def main():
     imgio.ico(path('docker', 'windows-cross', 'dingbat.ico'),
               [imgio.png_bytes(fav16, P), imgio.png_bytes(fav32, P), imgio.png_bytes(bat.pad(still, 48, 48), P),
                imgio.png_bytes(t256, MP)])
+
+    # ---- macOS (ci/make-macos-app.sh puts it in the .app)
+    imgio.icns(path('ci', 'dingbat.icns'),
+               [(t, imgio.argb_bytes(mac_icon(n), P) if t in ('ic04', 'ic05')
+                 else imgio.png_bytes(mac_icon(n), MP if n > 32 else P)) for t, n in MAC_ICNS])
 
     # ---- README
     imgio.png(path('README', 'dingbat.png'), still, P)

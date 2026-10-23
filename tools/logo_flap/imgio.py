@@ -40,6 +40,37 @@ def ico(path, pngs):
     open(path, 'wb').write(out + b''.join(data))
 
 
+def _icns_rle(b):
+    """The .icns run-length code: 0x00-0x7f copies n+1 bytes, 0x80-0xff repeats one byte n-125 times."""
+    out, i = bytearray(), 0
+    while i < len(b):
+        run = 1
+        while i + run < len(b) and run < 130 and b[i + run] == b[i]:
+            run += 1
+        if run >= 3:
+            out += bytes((run + 125, b[i]))
+            i += run
+            continue
+        j = i
+        while j < len(b) and j - i < 128 and not (j + 2 < len(b) and b[j] == b[j + 1] == b[j + 2]):
+            j += 1
+        out += bytes((j - i - 1,)) + b[i:j]
+        i = j
+    return bytes(out)
+
+
+def argb_bytes(rows, pal):
+    """An .icns ARGB entry (ic04 16 px, ic05 32 px): each channel's plane, run-length coded."""
+    px = [(255, *rgb(pal[c])) if c in pal else (0, 0, 0, 0) for r in rows for c in r]
+    return b'ARGB' + b''.join(_icns_rle(bytes(p[ch] for p in px)) for ch in range(4))
+
+
+def icns(path, entries):
+    """A macOS .icns from (OSType, data) pairs: PNG bytes, or argb_bytes for ic04 and ic05."""
+    body = b''.join(t.encode() + struct.pack('>I', 8 + len(d)) + d for t, d in entries)
+    open(path, 'wb').write(b'icns' + struct.pack('>I', 8 + len(body)) + body)
+
+
 def svg(rows, pal):
     """Crisp SVG: one path per colour, a rectangle per horizontal run."""
     W, H = len(rows[0]), len(rows)
