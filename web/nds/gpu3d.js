@@ -1300,6 +1300,14 @@ export class NdsGpu3d {
     }
     // vertices at k: floor(position * k / 192), render_hd's placement
     const V0 = HEADER + np * POLY_WORDS;
+    // (strips keep their shared vertices once per polygon here, so a full
+    // Vertex RAM can list more than MAX_VERTS)
+    if (nv * 8 > this.vertData.length) {
+      const rowsNeeded = Math.ceil((nv * 2) / ROW);
+      this.vertData = new Int32Array(rowsNeeded * ROW * 4);
+      gl.deleteTexture(this.verts.t);
+      this.verts = this.tex(ROW, rowsNeeded, gl.RGBA32I);
+    }
     const vd = this.vertData;
     for (let i = 0; i < nv; i++) {
       const o = V0 + i * VERT_WORDS;
