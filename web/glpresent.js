@@ -377,10 +377,15 @@ void main() {
       const border = !frame && !!(Module._wasm_sgb_border && Module._wasm_sgb_border());
       const [ow, oh] = frame ? [frame.w, frame.h] : nativeRes();
       const w = border ? 160 : ow, h = border ? 144 : oh;
+      // frame.glTexture(gl): the frame is already a w x h R16UI texture in
+      // this context (the DS's 3D drawn on the GPU, web/nds/gpu3d.js)
+      const own = frame && frame.glTexture ? frame.glTexture(gl) : null;
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.bindTexture(gl.TEXTURE_2D, own || tex);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
-      if (frame) {
+      if (own) {
+        // drawn as it is
+      } else if (frame) {
         if (w !== lastW || h !== lastH) {
           // Zero-filled: the gap between parts reads as black.
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, w, h, 0,

@@ -91,7 +91,13 @@ type
     lc_line: array[192, array[256, uint16]]
     lc_3d: seq[array[256, uint32]]        ## engine A: the 3D line each was drawn with
     lc_reused*: int                       ## lines reused so far (a statistic)
-    hd_on*: bool                          ## HD 3D or GPU export (gpu.nim): 3D lines keep their scratch, not reused
+    hd_on*: bool                          ## HD 3D (gpu.nim): 3D lines keep their scratch, not reused
+    # host-GPU 3D's composite planes (gpu_paint_line), kept per line while
+    # the line's 2D inputs stand (they do not depend on the 3D line)
+    gp_valid: array[192, bool]
+    gp_key: array[192, LineKey]
+    gp_vsum: array[192, uint64]
+    gp_reused*: int                       ## planes kept so far (a statistic)
 
   LineKey = object
     ## Everything a visible line's pixels depend on besides the VRAM it
@@ -1115,14 +1121,23 @@ proc hd_dot*(e: Engine2D; hp: HdPaint; x: int; p: uint32; gfx_out, line_out: var
   if hp.bmode != 0: bright_dot(c, lo, hp.bmode, hp.bfactor)
   line_out = c
 
-proc gpu_paint_line*(e: Engine2D; hp: var HdPaint; plane: ptr UncheckedArray[uint32];
+proc gpu_paint_line*(e: Engine2D; y: int; hp: var HdPaint; plane: ptr UncheckedArray[uint32];
                      info: ptr UncheckedArray[uint32]) =
   ## For a host-GPU composite (docs/nds/gpu3d.md): the line just drawn
   ## (hd_gfx_3d) as `hd_dot` reads it, per dot 4 words (top | sec << 16;
   ## topl | secl << 8 | window mask << 16 | OBJ flags << 24; the display
   ## dot with a transparent 3D pixel | the 1x display dot << 16; the
   ## composite with a transparent 3D pixel, before master brightness), and
-  ## the line's effect settings in info[1..3].
+  ## the line's effect settings in info[1..3]. None of it depends on the 3D
+  ## line (the 1x dots are read only where the 3D pixel cannot change
+  ## them), so a line whose 2D inputs are what they were when its planes
+  ## were made (the line cache's key and VRAM count) keeps them.
+  if e.lc_valid[y] and e.gp_valid[y] and e.gp_key[y] == e.lc_key[y] and e.gp_vsum[y] == e.lc_vsum[y]:
+    inc e.gp_reused
+    return
+  e.gp_valid[y] = e.lc_valid[y]
+  e.gp_key[y] = e.lc_key[y]
+  e.gp_vsum[y] = e.lc_vsum[y]
   var none: array[256, uint32]
   var cg, cl: array[256, uint16]
   e.render_hd_sub(addr none, cg, cl)

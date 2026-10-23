@@ -73,7 +73,7 @@ const
               "cap_hd", "cap_1x", "hd_vline", "hd_bline", "hd_clear_gfx", "hd_clear_line", "hd_paint",
               "hd_lp", "hd_lg", "hd_ld", "hd_rep_ok", "hd_rep",
               # host-GPU rendering's composite planes (docs/nds/gpu3d.md)
-              "gpu_on", "gpu_plane", "gpu_plane2", "gpu_lines", "gpu_paint"]
+              "gpu_on", "gpu_plane", "gpu_plane2", "gpu_lines", "gpu_paint", "gpu_frames"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
   # vgen/remap_gen/pbase: the 2D engines' line reuse (engine2d.nim); remap()
@@ -86,7 +86,8 @@ const
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d", "line", "gfx", "lsb", "lsb_on", "bgpix", "objpix",
                  "objprio", "objattr", "winmask", "line_semi", "line_objwin", "obj_prios",
                  "lc_on", "mem_gen", "lgen", "touch", "lc_valid", "lc_key", "lc_touch", "lc_vsum",
-                 "lc_line", "lc_3d", "lc_reused", "hd_on"]
+                 "lc_line", "lc_3d", "lc_reused", "hd_on",
+                 "gp_valid", "gp_key", "gp_vsum", "gp_reused"]
   # reuse_*/last_*: what the last real render drew (render_frame); the
   # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh
   GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",
