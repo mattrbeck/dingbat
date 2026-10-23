@@ -131,6 +131,13 @@ type
     gpu_late_line*: seq[int]
     gpu_late_frame*: int          ## the exported frame they belong to
     gpu_frame*: int               ## frames exported so far (Gpu.gpu_frames)
+    # The skip (docs/nds/gpu3d.md): with the host GPU drawing the picture,
+    # a frame whose dots nothing on the machine reads (no display capture)
+    # is not rasterised; its line costs still are (render_costs), so
+    # RDLINES and the underflow flag come out as drawn
+    gpu_skip*: bool               ## the setting
+    px_need*: bool                ## this frame's dots may be read: set at line 0 (Gpu), true until then
+    px_ok: bool                   ## ren.color holds the last real render's dots (not just its costs)
 
 const
   RENDER_START_LINE = 214   ## GBATEK "RDLINES_COUNT": rendering starts in scanline 214
@@ -139,7 +146,7 @@ const
 proc new_gpu3d*(vram: Vram; irq: IrqCtl): Gpu3d =
   # at power-on (line 0) the first frame counts as started 49 lines ago
   Gpu3d(geo: new_geometry(), ren: new_renderer(), vram: vram, irq: irq,
-        fifo: initDeque[FifoEntry](512), rdlines: 46, hd_scale: 1,
+        fifo: initDeque[FifoEntry](512), rdlines: 46, hd_scale: 1, px_need: true,
         render_t0: -int64(LINES - RENDER_START_LINE) * LINE_CYCLES)
 
 proc to_bgr555*(p: uint32): uint16 {.inline.} =
@@ -367,6 +374,11 @@ proc due_lines(g: Gpu3d; t: int64): int =
   if t < first_take: return CACHE_LINES
   min(192, CACHE_LINES + 1 + int((t - first_take) div LINE_CYCLES))
 
+proc drawing_dots(g: Gpu3d): bool =
+  ## A render now draws its dots: unless the skip is on (host GPU, no HD
+  ## here) and line 0 found nothing on the machine reading them.
+  not (g.gpu_on and g.gpu_skip and g.hd_scale <= 1 and not g.px_need)
+
 template hd_color(g: Gpu3d): ptr UncheckedArray[uint32] =
   case g.hd_scale
   of 2: cast[ptr UncheckedArray[uint32]](addr g.hd2.color[0])
@@ -380,8 +392,9 @@ proc draw_lines(g: Gpu3d; n: int) =
   if not g.scratch_ok:
     g.render_frame()
     g.scratch_ok = true
-  copyMem(addr g.frame[g.done_lines * 256], addr g.ren.color[g.done_lines * 256],
-          (n - g.done_lines) * 256 * sizeof(uint32))
+  if g.px_ok:
+    copyMem(addr g.frame[g.done_lines * 256], addr g.ren.color[g.done_lines * 256],
+            (n - g.done_lines) * 256 * sizeof(uint32))
   if g.hd_scale > 1:
     let k = g.hd_scale
     let row = 256 * k * k     # one 1x line's worth of HD rows
@@ -466,6 +479,9 @@ proc on_vblank*(g: Gpu3d) =
   g.render_t0 = t + int64(RENDER_START_LINE - 192) * LINE_CYCLES
   g.done_lines = 0
   g.scratch_ok = false
+  # whether display capture reads the next frame is known at its line 0:
+  # a render before then (a render-register write in V-blank) draws
+  g.px_need = true
 
 proc render_hd(g: Gpu3d) =
   ## The swapped lists again at hd_scale: each vertex placed by its
@@ -615,7 +631,8 @@ proc render_frame*(g: Gpu3d) =
      (g.last_is_cur or g.last_polys == g.polys and g.last_verts == g.verts and
       # at HD a vertex can move within its dot: the 1x lists match, the
       # HD frame would not
-      (g.hd_scale <= 1 and not g.gpu_on or g.last_hpos == g.hpos)):
+      (g.hd_scale <= 1 and not g.gpu_on or g.last_hpos == g.hpos)) and
+     (g.px_ok or not g.drawing_dots()):
     g.rendered = true
     inc g.reused
     if g.gpu_on: g.export_gpu(reused = true)
@@ -623,7 +640,12 @@ proc render_frame*(g: Gpu3d) =
   # -d:nds_noraster leaves the 1x frame undrawn: what the rasteriser costs
   # (a measurement only, docs/nds/gpu3d.md; the picture is wrong)
   when not defined(nds_noraster):
-    g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
+    if g.drawing_dots():
+      g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
+      g.px_ok = true
+    else:
+      g.ren.render_costs(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
+      g.px_ok = false
   g.rendered = true
   if g.hd_scale > 1: g.render_hd()
   if g.gpu_on: g.export_gpu(reused = false)
@@ -642,5 +664,27 @@ proc render_line*(g: Gpu3d; y: int) =
   ## is drawn, line y at the latest.
   g.draw_lines(max(y + 1, g.due_lines(g.now())))
   copyMem(addr g.line[0], addr g.frame[y * 256], 256 * sizeof(uint32))
+
+proc touch_line*(g: Gpu3d; y: int) =
+  ## Display line y shows the 3D layer, drawn by the host GPU (px_need
+  ## false): the renders due by now happen as render_line has them (their
+  ## costs, the export), without the dots.
+  g.draw_lines(max(y + 1, g.due_lines(g.now())))
+
+proc settle_dots*(g: Gpu3d) =
+  ## A state taken mid-frame (not at a frame boundary, where the frame is
+  ## dead): a skipped render gets its dots, for the lines still to come.
+  if g.scratch_ok and not g.px_ok:
+    g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
+    g.px_ok = true
+    copyMem(addr g.frame[0], addr g.ren.color[0], g.done_lines * 256 * sizeof(uint32))
+
+proc set_gpu_skip*(g: Gpu3d; on: bool) =
+  ## The skip on or off. Off mid-frame: a skipped render is drawn again
+  ## with its dots for the lines to come.
+  g.gpu_skip = on
+  if not g.px_ok:
+    g.scratch_ok = false
+    g.reuse_ok = false
 
 {.pop.}

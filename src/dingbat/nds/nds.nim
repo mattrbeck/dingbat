@@ -723,6 +723,13 @@ proc set_gpu_export*(n: NDS; on: bool) =
   ## Display only, as HD.
   n.gpu.set_gpu(on)
 
+proc set_gpu_skip*(n: NDS; on: bool) =
+  ## With the host GPU drawing the 3D: frames whose 3D dots nothing on the
+  ## machine reads (no display capture) are not rasterised on the CPU; the
+  ## core's own screens then show engine A without its 3D layer
+  ## (docs/nds/gpu3d.md, the skip). The machine is the same either way.
+  n.gpu3d.set_gpu_skip(on)
+
 proc set_button*(n: NDS; b: NdsButton; pressed: bool) =
   if pressed: n.input.held.incl(b) else: n.input.held.excl(b)
   n.input.check_keypad_irq(n.input.keycnt9, n.irq9)

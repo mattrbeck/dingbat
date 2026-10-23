@@ -98,6 +98,7 @@ type
     gp_key: array[192, LineKey]
     gp_vsum: array[192, uint64]
     gp_reused*: int                       ## planes kept so far (a statistic)
+    gp_on*: bool                          ## the planes are being made (Gpu.gpu_on)
 
   LineKey = object
     ## Everything a visible line's pixels depend on besides the VRAM it
@@ -1122,7 +1123,7 @@ proc hd_dot*(e: Engine2D; hp: HdPaint; x: int; p: uint32; gfx_out, line_out: var
   line_out = c
 
 proc gpu_paint_line*(e: Engine2D; y: int; hp: var HdPaint; plane: ptr UncheckedArray[uint32];
-                     info: ptr UncheckedArray[uint32]) =
+                     info: ptr UncheckedArray[uint32]; clear3d: bool) =
   ## For a host-GPU composite (docs/nds/gpu3d.md): the line just drawn
   ## (hd_gfx_3d) as `hd_dot` reads it, per dot 4 words (top | sec << 16;
   ## topl | secl << 8 | window mask << 16 | OBJ flags << 24; the display
@@ -1132,15 +1133,22 @@ proc gpu_paint_line*(e: Engine2D; y: int; hp: var HdPaint; plane: ptr UncheckedA
   ## line (the 1x dots are read only where the 3D pixel cannot change
   ## them), so a line whose 2D inputs are what they were when its planes
   ## were made (the line cache's key and VRAM count) keeps them.
+  ## `clear3d`: the line was just drawn with an all-transparent 3D line
+  ## (the CPU skipped the 3D, gpu.nim none3d), so its graphics composite
+  ## and display line are already the transparent-3D ones.
   if e.lc_valid[y] and e.gp_valid[y] and e.gp_key[y] == e.lc_key[y] and e.gp_vsum[y] == e.lc_vsum[y]:
     inc e.gp_reused
     return
   e.gp_valid[y] = e.lc_valid[y]
   e.gp_key[y] = e.lc_key[y]
   e.gp_vsum[y] = e.lc_vsum[y]
-  var none: array[256, uint32]
   var cg, cl: array[256, uint16]
-  e.render_hd_sub(addr none, cg, cl)
+  if clear3d:
+    cg = e.gfx
+    cl = e.line
+  else:
+    var none: array[256, uint32]
+    e.render_hd_sub(addr none, cg, cl)
   e.hd_prepare(hp)
   for x in 0 ..< 256:
     let m = if hp.windows: uint32(e.winmask[x]) else: 0x3F'u32
@@ -1253,7 +1261,11 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
     key = e.line_key(y)
     if e.lc_valid[y] and e.lc_key[y] == key and
        (e.line3d == nil or e.lc_3d[y] == e.line3d[]) and
-       e.vram.touched_sum(e.lc_touch[y]) == e.lc_vsum[y]:
+       e.vram.touched_sum(e.lc_touch[y]) == e.lc_vsum[y] and
+       # a reused line leaves no scratch (bgpix, objpix) to make the
+       # host-GPU planes from: only when they are kept too (gpu_paint_line)
+       (not e.gp_on or e.line3d == nil or
+        e.gp_valid[y] and e.gp_key[y] == key and e.gp_vsum[y] == e.lc_vsum[y]):
       e.latch_mosaic(y)
       e.line = e.lc_line[y]
       inc e.lc_reused

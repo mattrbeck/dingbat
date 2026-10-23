@@ -104,6 +104,68 @@ const cmp = await page.evaluate(async ({ k, frames }) => {
 console.log(`live check, ${cmp.frames} frames at ${K}x: ${(100 * cmp.same / cmp.total).toFixed(4)}% of dots ` +
             `equal to the core's software HD (worst frame ${(100 * cmp.worst).toFixed(4)}%)`);
 
+// 1b. the app's GPU path at 1x with the skip against the native screens:
+// the same frames from the state, run once each way. Also how many of the
+// core's own screens lack the 3D (the skip at work), and the pictures
+// taken from the GPU (ndsGpuRgba) against the GPU's screens.
+const chk1 = await page.evaluate(async ({ state, frames }) => {
+  const c = ndsCore, gl = canvasEl.getContext("webgl2");
+  const W = 256, H = 192;
+  const load = () => {
+    const bytes = Uint8Array.from(atob(state), (ch) => ch.charCodeAt(0));
+    const p = c._malloc(bytes.length);
+    c.HEAPU8.set(bytes, p);
+    c._nds_state_load(p, bytes.length);
+    c._free(p);
+  };
+  const screens = () => {
+    const both = new Uint16Array(W * H * 2);
+    both.set(new Uint16Array(c.HEAPU8.buffer, c._nds_fb555_top(), W * H), 0);
+    both.set(new Uint16Array(c.HEAPU8.buffer, c._nds_fb555_bottom(), W * H), W * H);
+    return both;
+  };
+  paused = true;
+  window.ndsGpu3d(false);
+  ndsDisplay = { ...ndsDisplay, hd: 1 };
+  ndsApplyHd();
+  load();
+  const ref = [];
+  for (let f = 0; f < frames; f++) { c._nds_run_frame(); c._nds_audio_clear(); ref.push(screens()); }
+  window.ndsGpuSkip(true);
+  window.ndsGpu3d(true);
+  ndsApplyHd();
+  await new Promise((r) => { const t = () => (ndsGpuMod ? r() : setTimeout(t, 20)); t(); });
+  load();
+  let same = 0, total = 0, coreShort = 0, rgbaSame = 0;
+  for (let f = 0; f < frames; f++) {
+    c._nds_run_frame(); c._nds_audio_clear();
+    ndsGpuTexture(gl, 1);
+    const gpu = ndsGpuState.g.read(ndsGpuState.g.screens);
+    ndsGpuState.g.restore();
+    const core = screens();
+    for (let i = 0; i < W * H * 2; i++) {
+      if (gpu[i] === ref[f][i]) same++;
+      if (core[i] !== ref[f][i]) coreShort++;
+    }
+    total += W * H * 2;
+    if (f === frames - 1) {
+      const rgba = ndsGpuRgba();
+      let ok = 0;
+      for (let i = 0; i < W * H * 2; i++) {
+        const o = rgba[i < W * H ? 0 : 1], j = (i % (W * H)) * 4, v = gpu[i];
+        const r = v & 31, g = (v >> 5) & 31, b = (v >> 10) & 31;
+        if (o[j] === ((r << 3) | (r >> 2)) && o[j + 1] === ((g << 3) | (g >> 2)) && o[j + 2] === ((b << 3) | (b >> 2))) ok++;
+      }
+      rgbaSame = ok / (W * H * 2);
+    }
+  }
+  paused = false;
+  return { same, total, coreShort, rgbaSame, frames };
+}, { state, frames: FRAMES });
+console.log(`1x with the skip, ${chk1.frames} frames: GPU screens ${(100 * chk1.same / chk1.total).toFixed(4)}% ` +
+            `equal to the native ones; the core's own screens differ in ${chk1.coreShort} dots (the 3D left to the GPU); ` +
+            `GPU pictures (ndsGpuRgba) ${(100 * chk1.rgbaSame).toFixed(2)}% equal to the GPU's screens`);
+
 // 2. unpaced frame costs: native, software HD, GPU HD
 const bench = await page.evaluate(async ({ k, frames }) => {
   const c = ndsCore;
@@ -174,13 +236,20 @@ console.log(`  GPU ${K}x picture parts (each waited for): scene JS + uploads ${p
             `3D ${parts.render.toFixed(2)} ms, composite + capture ${parts.composite.toFixed(2)} ms; ` +
             `slot images changed in ${parts.texChanges} of ${Math.max(FRAMES, 120)} frames; 3D back to back ${parts.renderHot.toFixed(2)} ms`);
 
+// The modes measured: "GPU" is the app's GPU path with the skip (the
+// CPU's 3D left out of frames nothing on the machine reads), "GPU ... no
+// skip" without it.
+const modeSpec = (mode) => ({ gpu: mode.startsWith("GPU"), skip: !mode.includes("no skip"),
+                              k: Number((mode.match(/(\d)x/) || [0, 1])[1]) });
+
 // 4. paced play: the app's own loop from the state, emulated frames a
 // second over 6 s, per mode (60 is full speed)
-for (const mode of ["native", `software ${K}x`, `GPU ${K}x`]) {
-  await page.evaluate(async ({ state, mode, k }) => {
+for (const mode of ["native", "GPU 1x", `software ${K}x`, `GPU ${K}x`]) {
+  await page.evaluate(async ({ state, spec }) => {
     paused = true;
-    window.ndsGpu3d(mode.startsWith("GPU"));
-    ndsDisplay = { ...ndsDisplay, hd: mode === "native" ? 1 : k };
+    window.ndsGpuSkip(spec.skip);
+    window.ndsGpu3d(spec.gpu);
+    ndsDisplay = { ...ndsDisplay, hd: spec.k };
     ndsApplyHd();
     const bytes = Uint8Array.from(atob(state), (ch) => ch.charCodeAt(0));
     const c = ndsCore, p = c._malloc(bytes.length);
@@ -188,7 +257,7 @@ for (const mode of ["native", `software ${K}x`, `GPU ${K}x`]) {
     c._nds_state_load(p, bytes.length);
     c._free(p);
     paused = false;
-  }, { state, mode, k: K });
+  }, { state, spec: modeSpec(mode) });
   await page.waitForTimeout(1000);
   const f0 = await page.evaluate(() => [ndsCore._nds_frame_count(), performance.now()]);
   await page.waitForTimeout(6000);
@@ -199,17 +268,17 @@ for (const mode of ["native", `software ${K}x`, `GPU ${K}x`]) {
 // 5. uncapped: from the state, frames run back to back with each one's
 // picture drawn to the canvas (drawGame) as the app draws it, and only
 // the last waited for, so the GPU's work overlaps the next frame's
-// emulation as in fast-forward. Also the GPU path at 1x (the core's own 1x
-// picture shown; the GPU's drawn beside it each frame): its cost alone.
-for (const mode of ["native", "GPU 1x (beside native)", "software 2x", "GPU 2x", `software ${K}x`, `GPU ${K}x`]) {
-  const r = await page.evaluate(async ({ state, mode }) => {
+// emulation as in fast-forward.
+for (const mode of ["native", "GPU 1x no skip", "GPU 1x", "software 2x", "GPU 2x no skip", "GPU 2x",
+                    `software ${K}x`, `GPU ${K}x no skip`, `GPU ${K}x`]) {
+  const r = await page.evaluate(async ({ state, spec }) => {
     paused = true;
-    const gpu = mode.startsWith("GPU"), k = Number((mode.match(/(\d)x/) || [0, 1])[1]);
-    window.ndsGpu3d(gpu && k > 1);
-    ndsDisplay = { ...ndsDisplay, hd: k };
+    window.ndsGpuSkip(spec.skip);
+    window.ndsGpu3d(spec.gpu);
+    ndsDisplay = { ...ndsDisplay, hd: spec.k };
     ndsApplyHd();
+    await new Promise((r) => { const t = () => (!spec.gpu || ndsGpuMod ? r() : setTimeout(t, 20)); t(); });
     const c = ndsCore;
-    if (gpu && k === 1) c._nds_set_gpu(1);
     const bytes = Uint8Array.from(atob(state), (ch) => ch.charCodeAt(0));
     const p = c._malloc(bytes.length);
     c.HEAPU8.set(bytes, p);
@@ -221,7 +290,6 @@ for (const mode of ["native", "GPU 1x (beside native)", "software 2x", "GPU 2x",
       c._nds_run_frame();
       c._nds_audio_clear();
       drawGame();
-      if (gpu && k === 1) { ndsGpuTexture(gl, 1); ndsGpuState.g.restore(); }
     };
     for (let i = 0; i < 30; i++) frame();
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -233,20 +301,18 @@ for (const mode of ["native", "GPU 1x (beside native)", "software 2x", "GPU 2x",
       c._nds_audio_clear();
       coreMs += performance.now() - a;
       drawGame();
-      if (gpu && k === 1) { ndsGpuTexture(gl, 1); ndsGpuState.g.restore(); }
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     const ms = (performance.now() - t0) / n;
-    if (gpu && k === 1) c._nds_set_gpu(0);
     return { fps: 1000 / ms, ms, core: coreMs / n };
-  }, { state, mode });
+  }, { state, spec: modeSpec(mode) });
   console.log(`  uncapped, ${mode}: ${r.fps.toFixed(1)} frames a second (${r.ms.toFixed(2)} ms a frame, ` +
               `of it the core ${r.core.toFixed(2)} ms)`);
 }
 
 // 6. a look at it: the GPU path on
-await page.evaluate(() => { window.ndsGpu3d(true); });
+await page.evaluate(() => { window.ndsGpuSkip(true); window.ndsGpu3d(true); });
 await page.screenshot({ path: join(OUT, "live.png") });
 console.log(`screenshot: ${join(OUT, "live.png")}`);
 await browser.close();

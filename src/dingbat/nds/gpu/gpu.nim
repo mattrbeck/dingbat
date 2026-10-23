@@ -58,6 +58,7 @@ type
     gpu_plane2*: seq[uint32]          ## 256 x 192 dots, 4 words each: capture's inputs (gpu_valid)
     gpu_lines*: seq[uint32]           ## 192 lines, 8 words each (gpu_line)
     gpu_frames*: int                  ## frames exported (gpu_line, at line 191)
+    want_dots*: bool                  ## the frontend wants this frame's 1x screens whole (a thumbnail)
     gpu_paint: HdPaint
     cap_1x: array[4, seq[uint32]]     ## ... and the halfword it wrote there (bit 16 = captured)
 
@@ -94,6 +95,10 @@ proc start_line*(g: Gpu) =
   g.engine_b.start_line(g.vcount)
   if g.vcount == 0:
     g.capturing = (g.engine_a.dispcapcnt and 0x8000_0000'u32) != 0
+    # capture is the one reader of the 3D dots on the machine, and it runs
+    # for the whole frame or not at all: without it, the host GPU's
+    # picture is all that shows them (gpu3d.nim, the skip)
+    if g.gpu3d != nil: g.gpu3d.px_need = g.capturing or g.want_dots
     g.mmem_need = 256 * 192
   elif g.vcount == 192 and g.capturing:
     # "the capture enable/busy bit is then automatically cleared (in line
@@ -102,6 +107,11 @@ proc start_line*(g: Gpu) =
     g.engine_a.dispcapcnt = g.engine_a.dispcapcnt and not 0x8000_0000'u32
 
 const CAPTURE_SIZE = [(128, 128), (256, 64), (256, 128), (256, 192)]
+
+# The 3D line engine A composites when the host GPU draws the 3D and the
+# CPU skipped it (Gpu3d.px_need): all transparent, so the 1x line is the
+# one the GPU's composite starts from (engine2d gpu_paint_line)
+var none3d: array[256, uint32]
 
 proc capture_line(g: Gpu; y: int) =
   ## DISPCAPCNT: source A (graphics composite or 3D alone) and source B (a
@@ -199,6 +209,7 @@ proc set_gpu*(g: Gpu; on: bool) =
   ## Export the 3D scene and engine A's composite planes each frame for a
   ## host-GPU renderer (docs/nds/gpu3d.md). Display only.
   g.gpu_on = on
+  g.engine_a.gp_on = on
   if g.gpu3d != nil: g.gpu3d.set_gpu(on)
   for b in 0..3: g.cap_1x[b] = @[]
   if on:
@@ -209,6 +220,10 @@ proc set_gpu*(g: Gpu; on: bool) =
     g.gpu_plane = @[]
     g.gpu_plane2 = @[]
     g.gpu_lines = @[]
+
+proc gpu_skipping*(g: Gpu): bool =
+  ## This frame's 3D dots are left to the host GPU (gpu3d.nim, the skip).
+  g.gpu_on and g.gpu3d != nil and g.gpu3d.gpu_skip and g.hd <= 1 and not g.gpu3d.px_need
 
 proc gpu_valid(g: Gpu; y: int) =
   ## Before display capture writes line y (after hd_pre): per dot of
@@ -256,7 +271,8 @@ proc gpu_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
             (if shown and dm == 1: 4'u32 else: 0'u32) or (if shown and dm == 2: 8'u32 else: 0'u32) or
             (if cap_line: 16'u32 else: 0'u32) or (dm shl 8)
   if paint:
-    a.gpu_paint_line(y, g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]), info)
+    a.gpu_paint_line(y, g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]), info,
+                     a.line3d == addr(none3d))
   info[4] = capc
   info[5] = (a.dispcnt shr 18) and 3
   info[6] = uint32(a.master_bright)
@@ -580,8 +596,12 @@ proc render_line*(g: Gpu; y: int) =
   # the 3D line is pulled when something shows or captures it
   if g.gpu3d != nil and ((a.bg0_is_3d and (a.dispcnt and 0x100) != 0) or
                          (cap and (a.dispcapcnt and (1'u32 shl 24)) != 0)):
-    g.gpu3d.render_line(y)
-    a.line3d = addr g.gpu3d.line
+    if g.gpu_skipping():
+      g.gpu3d.touch_line(y)
+      a.line3d = addr none3d
+    else:
+      g.gpu3d.render_line(y)
+      a.line3d = addr g.gpu3d.line
   else:
     a.line3d = nil
   let need_gfx = cap and ((a.dispcapcnt shr 29) and 3) != 1 and

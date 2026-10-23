@@ -74,7 +74,9 @@
 ## renderer (docs/nds/gpu3d.md; for --perf-from costs). --gpu-dump DIR@F,..
 ## writes them after frame F to DIR/fF_*.bin (scene, tex, pal, plane,
 ## lines, the 1x screens and 3D frame, and with --hd the HD 3D frame and
-## screens), for tools/gpu3d's harness.
+## screens), for tools/gpu3d's harness. --gpu-skip (with --gpu) leaves a
+## frame's 3D to the GPU when nothing on the machine reads its dots (no
+## display capture): the 1x screens then lack it; the state is the same.
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
@@ -318,6 +320,7 @@ when isMainModule:
   var hd = 1
   var hd_hash = 0
   var gpu = false
+  var gpu_skip = false
   var gpu_dir = ""
   var gpu_dumps: seq[int]
   var state_load_frame = -1
@@ -327,7 +330,7 @@ when isMainModule:
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog", "rumble-log", "cartlog",
-                                     "state-layout", "text-shots"])
+                                     "state-layout", "text-shots", "gpu", "gpu-skip"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -353,6 +356,7 @@ when isMainModule:
       of "hd": hd = parseInt(val)
       of "hd-hash": hd_hash = parseInt(val)
       of "gpu": gpu = true
+      of "gpu-skip": gpu_skip = true
       of "gpu-dump":
         let at = val.rsplit('@', maxsplit = 1)
         gpu = true
@@ -452,6 +456,7 @@ when isMainModule:
     perf_from = max(perf_from, first_frame)
   if hd > 1: n.set_hd_scale(hd)
   if gpu: n.set_gpu_export(true)
+  if gpu_skip: n.set_gpu_skip(true)
   if gpu_dir.len > 0: createDir(gpu_dir)
   var last_rumble = 0
   var was_off = false

@@ -34,6 +34,7 @@ var lastBios9, lastBios7, lastFirmware: seq[uint8]  ## what nds_reboot reuses
 
 var hdScale = 1   ## HD 3D (docs/nds/hd3d.md): kept across boots, a display setting
 var gpuOn = false ## host-GPU 3D export (docs/nds/gpu3d.md): kept across boots, a display setting
+var gpuSkip = false ## ...and its skip of the CPU's 3D where the machine reads none
 
 proc rewind_reset()
 proc cheats_follow_game()
@@ -42,6 +43,7 @@ proc boot_with(rom: sink seq[uint8]; save: pointer; save_len: cint) =
   core = new_nds(rom, lastBios9, lastBios7, lastFirmware)
   if hdScale > 1: core.set_hd_scale(hdScale)
   if gpuOn: core.set_gpu_export(true)
+  if gpuSkip: core.set_gpu_skip(true)
   if save_len > 0: core.cart.backup.set_data(copy_in(save, save_len))
   rewind_reset()
   cheats_follow_game()
@@ -151,6 +153,13 @@ proc nds_hd_fb555_bottom(): pointer {.exportc.} =
 proc nds_set_gpu(on: cint) {.exportc.} =
   gpuOn = on != 0
   if core != nil: core.set_gpu_export(gpuOn)
+
+proc nds_set_gpu_skip(on: cint) {.exportc.} =
+  ## With nds_set_gpu(1): leave a frame's 3D to the GPU when nothing on the
+  ## machine reads its dots (no display capture); the core's own screens
+  ## (nds_fb_top/bottom, fb555) then lack it in those frames.
+  gpuSkip = on != 0
+  if core != nil: core.set_gpu_skip(gpuSkip)
 
 proc nds_gpu_frames(): cint {.exportc.} =
   if core == nil or not core.gpu.gpu_on: 0 else: cint(core.gpu.gpu_frames)
@@ -503,6 +512,7 @@ proc nds_rewind_commit(sample: cint): cint {.exportc.} =
 
 proc step_frame() =
   aheadValid = false
+  rewindRing.nds_rewind_frame(core)
   core.run_frame()
   if cheatList.active(): cheatList.run(core.cheat_mem())
   rewindRing.nds_rewind_tick(core)
