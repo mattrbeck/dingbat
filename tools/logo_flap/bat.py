@@ -313,3 +313,52 @@ KWWWHKCBBCKHWWWK
 ................
 ................
 '''.strip('\n').split('\n')
+
+
+# ---------------------------------------------------------------- the moon behind the app icons
+
+MOON, CRATER, CRATER_SHADOW = '#f3e3a6', '#e2cd84', '#cdb466'
+# Drawn for the 1024 icon at 22x, in icon pixels from the centre; other sizes scale by k / 22.
+# The moon's radius, and its craters and the cream field's as (dx, dy, r): mixed sizes, uneven
+# spacing, some under the bat and some cut by the edge, so nothing frames it.
+MOON_R = 369
+MOON_CRATERS = ((-190, -150, 72), (150, -262, 48), (55, 250, 84), (-240, 232, 46), (318, 118, 58), (-60, -318, 34))
+FIELD_CRATERS = ((-235, 160, 122), (215, -240, 80), (-330, -340, 58), (438, 338, 108), (75, 338, 50),
+                 (-70, -305, 40), (-455, 430, 72), (330, -455, 44))
+MOON_PAL = dict(PURPLE, m=MOON, c=CRATER, s=CRATER_SHADOW, g=NIGHT_BG)
+
+
+def moon_layers(n, k):
+    """The app icon's layers, n x n with the bat at k x, each shape on the bat's own pixel grid:
+    (bat, field, moon). bat is the logo on '.'; field the cream ground with its craters (the light
+    icon's ground); moon the moon and its craters on the Night ground 'g' (the dark icon's)."""
+    still_ = still()
+    w, h = len(still_[0]) * k, len(still_) * k
+    ox, oy, f = (n - w) // 2, (n - h) // 2, k / 22
+
+    def crater(cx, cy, craters):
+        for dx, dy, r in craters:
+            dx, dy, r = dx * f, dy * f, r * f
+            if (cx - dx) ** 2 + (cy - dy) ** 2 <= r * r:
+                # the rim's shadow: the part of the crater outside a disc nudged down and right
+                lit = (cx - dx - r * 0.22) ** 2 + (cy - dy - r * 0.22) ** 2 <= (r * 0.82) ** 2
+                return 'c' if lit else 's'
+        return None
+
+    field, moon = [], []
+    for y in range(n):
+        fl, ml = [], []
+        cy = oy + ((y - oy) // k) * k + k / 2 - n / 2
+        for x in range(n):
+            cx = ox + ((x - ox) // k) * k + k / 2 - n / 2
+            fl.append(crater(cx, cy, FIELD_CRATERS) or 'm')
+            on = cx * cx + cy * cy <= (MOON_R * f) ** 2
+            ml.append((crater(cx, cy, MOON_CRATERS) or 'm') if on else 'g')
+        field.append(''.join(fl))
+        moon.append(''.join(ml))
+    return pad(scale(still_, k), n, n), field, moon
+
+
+def over(top, ground):
+    """top's pixels over ground's, where top is '.'."""
+    return [''.join(g if t == '.' else t for t, g in zip(tr, gr)) for tr, gr in zip(top, ground)]

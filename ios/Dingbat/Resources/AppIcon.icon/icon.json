@@ -1,0 +1,76 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:0.95294,0.89020,0.65098,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.05490,0.03922,0.08627,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "bat.png",
+          "name": "bat"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      },
+      "specular-specializations": [
+        {
+          "value": false
+        },
+        {
+          "appearance": "tinted",
+          "value": true
+        }
+      ]
+    },
+    {
+      "layers": [
+        {
+          "image-name-specializations": [
+            {
+              "value": "ground_light.png"
+            },
+            {
+              "appearance": "dark",
+              "value": "ground_dark.png"
+            }
+          ],
+          "name": "moon",
+          "hidden-specializations": [
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "none",
+        "opacity": 0
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      },
+      "specular": false
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
