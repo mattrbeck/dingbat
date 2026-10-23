@@ -115,7 +115,7 @@ for (const [url, file] of romFiles) {
       const held = hold ? hold.split("@").map((v, i) => i ? v.split("-").map(Number) : Number(v)) : null;
       const rep = repeat ? repeat.split("@").map((v, i) => i ? v.split("/").map(Number) : Number(v)) : null;
       let compared = 0, bad = 0, badDots = 0, firstBad = -1, maxPolys = 0, frames3d = 0, pics = null, offAt = 0, lateFrames = 0;
-      let lastGen = -1;
+      let lastGen = -1, drawnGen = -1, drawnLate = false, upEpoch = -1;
       for (let f = 1; f <= frames; f++) {
         if (press[f] !== undefined) button(press[f], 1);
         if (press[f - 3] !== undefined) button(press[f - 3], 0);
@@ -143,10 +143,19 @@ for (const [url, file] of romFiles) {
           late.push({ scene: new Uint32Array(buf, x._nds_gpu_late(i), x._nds_gpu_late_len(i)), line: x._nds_gpu_late_line(i) });
         }
         if (late.length) lateFrames++;
-        g.drawFrame(scene, new Uint8Array(buf, x._nds_gpu_tex(), 0x80000), new Uint8Array(buf, x._nds_gpu_pal(), 0x18000), late);
+        // as the app draws it (index.js ndsGpuTexture): the scene only when
+        // it is a new one, the planes only in the rows written since
+        if (scene[6] !== drawnGen || late.length || drawnLate) {
+          g.drawFrame(scene, new Uint8Array(buf, x._nds_gpu_tex(), 0x80000), new Uint8Array(buf, x._nds_gpu_pal(), 0x18000), late);
+          drawnGen = scene[6];
+          drawnLate = late.length > 0;
+        }
+        const epoch = x._nds_gpu_epoch() >>> 0;
+        g.planeRows(0, new Uint32Array(buf, x._nds_gpu_plane(), 256 * 192 * 4), new Uint32Array(buf, x._nds_gpu_rows(0), 192), upEpoch);
+        g.planeRows(1, new Uint32Array(buf, x._nds_gpu_plane2(), 256 * 192 * 4), new Uint32Array(buf, x._nds_gpu_rows(1), 192), upEpoch);
+        upEpoch = epoch;
         g.composite([new Uint16Array(buf, x._nds_fb555_top(), 256 * 192), new Uint16Array(buf, x._nds_fb555_bottom(), 256 * 192)],
-          new Uint32Array(buf, x._nds_gpu_plane(), 256 * 192 * 4), new Uint32Array(buf, x._nds_gpu_plane2(), 256 * 192 * 4),
-          new Uint32Array(buf, x._nds_gpu_lines(), 192 * 8));
+          null, null, new Uint32Array(buf, x._nds_gpu_lines(), 192 * 8));
         if (f % every !== 0) continue;
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, g.screens.t, 0);

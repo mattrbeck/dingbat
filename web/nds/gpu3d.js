@@ -1553,6 +1553,27 @@ export class NdsGpu3d {
     [bank.cur, bank.next] = [bank.next, bank.cur];
   }
 
+  // Rows of engine A's plane (second: plane2) the core wrote after epoch
+  // `since` (rows: per row the epoch + 1 it was written at,
+  // nds_gpu_rows), in runs; since < 0: all of them. Returns how many.
+  planeRows(second, data, rows, since) {
+    const gl = this.gl, t = second ? this.plane2 : this.plane;
+    const due = (y) => since < 0 || rows[y] > since;
+    gl.activeTexture(this.scratchUnit);
+    gl.bindTexture(gl.TEXTURE_2D, t.t);
+    let n = 0;
+    for (let y = 0; y < 192;) {
+      if (!due(y)) { y++; continue; }
+      let e = y + 1;
+      while (e < 192 && due(e)) e++;
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y, 256, e - y, gl.RGBA_INTEGER, gl.UNSIGNED_INT,
+        data.subarray(y * 1024, e * 1024));
+      n += e - y;
+      y = e;
+    }
+    return n;
+  }
+
   // Leave the context as a presenter sharing it expects: the default
   // framebuffer and vertex array, texture unit 0, its unpack alignment.
   restore() {

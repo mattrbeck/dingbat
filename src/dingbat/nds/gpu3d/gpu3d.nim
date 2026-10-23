@@ -121,7 +121,7 @@ type
     gpu_on*: bool
     gpu_scene*: seq[uint32]       ## gpuexport's scene words: the frame's first render
     gpu_last: seq[uint32]         ## the last render's (any part)
-    gpu_gen*: uint32              ## bumped with every scene exported
+    gpu_gen*: uint32              ## new with every scene exported (`scene_serial`)
     gpu_tex*, gpu_pal*: seq[uint8]  ## texture / palette slot images
     gpu_tex_ver*: uint32          ## bumped whenever the images are rebuilt
     gpu_tex_gen: uint64           ## vram.tex_gen the images hold
@@ -138,6 +138,7 @@ type
     gpu_skip*: bool               ## the setting
     px_need*: bool                ## this frame's dots may be read: set at line 0 (Gpu), true until then
     px_ok: bool                   ## ren.color holds the last real render's dots (not just its costs)
+    cost_fits*: int               ## skipped renders whose costs a bound settled (a statistic)
 
 const
   RENDER_START_LINE = 214   ## GBATEK "RDLINES_COUNT": rendering starts in scanline 214
@@ -511,6 +512,11 @@ proc render_hd(g: Gpu3d) =
   of 3: g.hd3.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
   else: g.hd4.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
 
+var scene_serial: uint32
+  ## Scenes exported by any core in this process (never reset): a scene's
+  ## gen, so that a renderer seeing the gen it last drew skips the drawing,
+  ## whichever core it came from.
+
 proc export_gpu(g: Gpu3d; reused: bool) =
   ## The scene the lines from done_lines on come from, for a host-GPU
   ## renderer (gpuexport.nim): the one just rendered, or with frame reuse
@@ -523,7 +529,8 @@ proc export_gpu(g: Gpu3d; reused: bool) =
       slot_images(g.vram, g.gpu_tex, g.gpu_pal)
       g.gpu_tex_gen = g.vram.tex_gen
       inc g.gpu_tex_ver
-    inc g.gpu_gen
+    inc scene_serial
+    g.gpu_gen = scene_serial
     export_scene(g.gpu_last, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,
                  g.gpu_gen, g.gpu_tex_ver)
   if g.gpu_last.len == 0: return
@@ -644,7 +651,15 @@ proc render_frame*(g: Gpu3d) =
       g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
       g.px_ok = true
     else:
-      g.ren.render_costs(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
+      # most frames' costs fit on a bound found from the vertices alone;
+      # the others walk their spans
+      if g.ren.costs_fit(g.polys, g.verts): inc g.cost_fits
+      else: g.ren.render_costs(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
+      when defined(nds_cost_check):
+        let (rd, uf, lc) = (g.ren.rdlines, g.ren.underflow, g.ren.line_cost)
+        g.ren.render_costs(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
+        doAssert g.ren.rdlines == rd and g.ren.underflow == uf
+        for y in 0 ..< 192: doAssert g.ren.line_cost[y] <= lc[y]
       g.px_ok = false
   g.rendered = true
   if g.hd_scale > 1: g.render_hd()

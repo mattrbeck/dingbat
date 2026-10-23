@@ -192,6 +192,15 @@ proc nds_gpu_plane(): pointer {.exportc.} =
 proc nds_gpu_plane2(): pointer {.exportc.} =
   if core == nil or core.gpu.gpu_plane2.len == 0: nil else: addr core.gpu.gpu_plane2[0]
 
+proc nds_gpu_epoch(): cuint {.exportc.} = gpu_epoch
+
+proc nds_gpu_rows(second: cint): pointer {.exportc.} =
+  ## Per row of nds_gpu_plane (second: nds_gpu_plane2), the epoch + 1 it
+  ## was last written at: rows above the epoch of an upload changed since.
+  if core == nil: nil
+  elif second != 0: addr core.gpu.gpu_row2_at[0]
+  else: addr core.gpu.gpu_row_at[0]
+
 proc nds_gpu_lines(): pointer {.exportc.} =
   if core == nil or core.gpu.gpu_lines.len == 0: nil else: addr core.gpu.gpu_lines[0]
 

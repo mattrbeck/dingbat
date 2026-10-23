@@ -10,7 +10,7 @@ import zippy
 import dingbat/nds/mem/vram
 import dingbat/nds/io/irq
 import dingbat/nds/gpu3d/gpu3d
-from dingbat/nds/gpu3d/render import render_costs
+from dingbat/nds/gpu3d/render import render_costs, cost_bound, costs_fit
 import dingbat/nds/nds
 import dingbat/nds/sched
 
@@ -114,6 +114,15 @@ proc finish(g: Gpu3d; name: string) =
   g.ren.render_costs(nil, g.polys, g.verts, g.disp3dcnt, 0)
   check(g.ren.line_cost == costs and g.ren.rdlines == rdlines and g.ren.underflow == underflow,
         name & ": line costs without drawing")
+  # the vertices-only bound is at least every line's cost, and settles
+  # RDLINES and the underflow flag only when they come out the same
+  let bound = cost_bound(g.polys, g.verts)
+  var above = true
+  for y in 0 ..< 192:
+    if bound[y] < costs[y]: above = false
+  check(above, name & ": the cost bound is at least each line's cost")
+  if g.ren.costs_fit(g.polys, g.verts):
+    check(rdlines == 46 and not underflow, name & ": a fitting bound gives the drawn RDLINES")
   var img = newSeq[uint32](256 * 192)
   for y in 0 ..< 192:
     for x in 0 ..< 256:
@@ -860,6 +869,32 @@ proc rom_scenes() =
     if update: echo "  (\"", name, "\", 0x", toHex(h), "'u32),"
     else: check(h == want, name & ": 3D buffer CRC " & toHex(h) & ", expected " & toHex(want))
 
+proc rom_gpu_planes() =
+  ## The host-GPU export (docs/nds/gpu3d.md): turned on again over a
+  ## still scene, it makes its planes afresh: a line whose planes were
+  ## kept in the old ones is drawn into the new ones, not taken as kept.
+  echo "host-GPU planes, export turned on twice"
+  let path = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "3d" /
+             "3d_vcolor.nds"
+  if not fileExists(path):
+    check(false, "missing " & path)
+    return
+  let n = load_nds(path)
+  n.set_gpu_export(true)
+  for f in 0 ..< 30: n.run_frame()
+  n.set_gpu_export(true)
+  for f in 0 ..< 2: n.run_frame()
+  var painted, blank = 0
+  for y in 0 ..< 192:
+    if (n.gpu.gpu_lines[y * 8] and 1) == 0: continue
+    inc painted
+    var any = false
+    for w in n.gpu.gpu_plane[y * 1024 ..< y * 1024 + 1024]:
+      if w != 0: any = true
+    if not any: inc blank
+  check(painted > 0 and blank == 0,
+        "gpu planes: " & $blank & " of " & $painted & " painted lines blank after the export is turned on again")
+
 proc rom_render_timing() =
   ## 3d_render_timing (tests/nds/src/3d_render_timing): the renderer reads
   ## its registers line by line from line 214, 48 lines ahead of the
@@ -1044,6 +1079,7 @@ when isMainModule:
   scene_overlap_edges()
   scene_eye_vertex()
   rom_scenes()
+  rom_gpu_planes()
   rom_render_timing()
   rom_disp_bright()
   if failures > 0:

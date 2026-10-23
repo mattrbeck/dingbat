@@ -9,6 +9,7 @@ import arm/[cpu, cp15]
 import sched, timing
 import mem/vram
 import gpu/[gpu, engine2d]
+when defined(nds_cap_survey): import gpu/capsurvey
 import gpu3d/gpu3d
 import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi, slot2, mic]
 import hle_bios

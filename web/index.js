@@ -17345,18 +17345,21 @@ const ndsHdNow = () => {
   if (ndsGpuShowing()) return ndsDisplay.hd;
   return c._nds_hd_fb555_top() && c._nds_hd_fb555_bottom() ? c._nds_hd_scale() : 1;
 };
-// The presenter's texture for this frame from the GPU renderer: the scene
-// drawn again when the core exported a new frame, composited and captured
-// once per frame (glpresent.js frame.glTexture).
+// The presenter's texture for this frame from the GPU renderer, once per
+// frame the core exported: the scene drawn again only when it is a new
+// one (a frame that reused the last render exports the same gen), engine
+// A's planes uploaded only in the rows the core wrote since the last
+// upload, then composited and captured (glpresent.js frame.glTexture).
 const ndsGpuTexture = (gl, k) => {
   const c = ndsCore;
   let s = ndsGpuState;
   if (!s || s.gl !== gl || s.gl.isContextLost()) {
-    s = ndsGpuState = { gl, g: new ndsGpuMod.NdsGpu3d(gl), frames: -1, gen: -1 };
+    s = ndsGpuState = { gl, g: new ndsGpuMod.NdsGpu3d(gl), frames: -1, gen: -1, late: false, epoch: -1 };
   }
   s.g.setScale(k);
   const n = c._nds_gpu_frames();
   if (n !== s.frames || s.k !== k) {
+    const rescaled = s.k !== k;
     s.frames = n; s.k = k;
     const buf = c.HEAPU8.buffer;
     const scene = new Uint32Array(buf, c._nds_gpu_scene(), c._nds_gpu_scene_len());
@@ -17366,10 +17369,19 @@ const ndsGpuTexture = (gl, k) => {
     for (let i = 0, nl = c._nds_gpu_late_count(); i < nl; i++) {
       late.push({ scene: new Uint32Array(buf, c._nds_gpu_late(i), c._nds_gpu_late_len(i)), line: c._nds_gpu_late_line(i) });
     }
-    s.g.drawFrame(scene, new Uint8Array(buf, c._nds_gpu_tex(), 0x80000), new Uint8Array(buf, c._nds_gpu_pal(), 0x18000), late);
+    // (late parts this frame or the last one drawn: out3d holds a mix)
+    const gen = scene.length > 6 ? scene[6] : -1;
+    if (rescaled || gen < 0 || gen !== s.gen || late.length || s.late) {
+      s.g.drawFrame(scene, new Uint8Array(buf, c._nds_gpu_tex(), 0x80000), new Uint8Array(buf, c._nds_gpu_pal(), 0x18000), late);
+      s.gen = gen;
+      s.late = late.length > 0;
+    }
+    const epoch = c._nds_gpu_epoch() >>> 0;
+    s.g.planeRows(0, new Uint32Array(buf, c._nds_gpu_plane(), W * H * 4), new Uint32Array(buf, c._nds_gpu_rows(0), H), s.epoch);
+    s.g.planeRows(1, new Uint32Array(buf, c._nds_gpu_plane2(), W * H * 4), new Uint32Array(buf, c._nds_gpu_rows(1), H), s.epoch);
+    s.epoch = epoch;
     s.g.composite([new Uint16Array(buf, c._nds_fb555_top(), W * H), new Uint16Array(buf, c._nds_fb555_bottom(), W * H)],
-      new Uint32Array(buf, c._nds_gpu_plane(), W * H * 4), new Uint32Array(buf, c._nds_gpu_plane2(), W * H * 4),
-      new Uint32Array(buf, c._nds_gpu_lines(), H * 8));
+      null, null, new Uint32Array(buf, c._nds_gpu_lines(), H * 8));
   }
   s.g.restore();
   return s.g.screens.t;

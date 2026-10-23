@@ -1122,8 +1122,15 @@ proc hd_dot*(e: Engine2D; hp: HdPaint; x: int; p: uint32; gfx_out, line_out: var
   if hp.bmode != 0: bright_dot(c, lo, hp.bmode, hp.bfactor)
   line_out = c
 
+proc set_gp_on*(e: Engine2D; on: bool) =
+  ## The planes made (or not) from now on: none kept from before, as the
+  ## planes they were kept in are new (Gpu.set_gpu).
+  e.gp_on = on
+  for v in e.gp_valid.mitems: v = false
+
 proc gpu_paint_line*(e: Engine2D; y: int; hp: var HdPaint; plane: ptr UncheckedArray[uint32];
-                     info: ptr UncheckedArray[uint32]; clear3d: bool) =
+                     info: ptr UncheckedArray[uint32]; clear3d: bool): bool =
+  ## (true when it wrote the plane's row)
   ## For a host-GPU composite (docs/nds/gpu3d.md): the line just drawn
   ## (hd_gfx_3d) as `hd_dot` reads it, per dot 4 words (top | sec << 16;
   ## topl | secl << 8 | window mask << 16 | OBJ flags << 24; the display
@@ -1138,7 +1145,7 @@ proc gpu_paint_line*(e: Engine2D; y: int; hp: var HdPaint; plane: ptr UncheckedA
   ## and display line are already the transparent-3D ones.
   if e.lc_valid[y] and e.gp_valid[y] and e.gp_key[y] == e.lc_key[y] and e.gp_vsum[y] == e.lc_vsum[y]:
     inc e.gp_reused
-    return
+    return false
   e.gp_valid[y] = e.lc_valid[y]
   e.gp_key[y] = e.lc_key[y]
   e.gp_vsum[y] = e.lc_vsum[y]
@@ -1160,6 +1167,7 @@ proc gpu_paint_line*(e: Engine2D; y: int; hp: var HdPaint; plane: ptr UncheckedA
   info[1] = hp.bld or (hp.mode shl 16)
   info[2] = hp.eva or (hp.evb shl 8) or (hp.evy shl 16) or (hp.bmode shl 24)
   info[3] = hp.bfactor or (uint32(e.bghofs[0] and 511) shl 8)
+  true
 
 proc hd_bright*(e: Engine2D; line: var array[256, uint16]) =
   ## Master brightness on a line of 15-bit pixels (VRAM display), as

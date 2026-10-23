@@ -1231,4 +1231,42 @@ proc render_costs*(r: Renderer; vram: Vram; polys: openArray[Polygon]; verts: op
   for p in polys: draw_polygon[1, false](r, vram, p, verts, disp3dcnt, wbuffer)
   r.budget()
 
+proc cost_bound*(polys: openArray[Polygon]; verts: openArray[Vertex]): array[H, int32] =
+  ## At least each line's cost (`charge`): every polygon charged on every
+  ## row from its top vertex to its bottom one, with its vertices' whole x
+  ## range and a dot more each side (a span never leaves the edges it runs
+  ## between). One pass over the vertices, no edge walked.
+  var d: array[H + 1, int32]
+  for p in polys:
+    let n = int(p.count)
+    if n < 1 or n > 16: continue
+    var x0, y0 = high(int32)
+    var x1, y1 = low(int32)
+    for i in 0 ..< n:
+      let v = verts[int(p.first) + i]
+      x0 = min(x0, v.sx); x1 = max(x1, v.sx)
+      y0 = min(y0, v.sy); y1 = max(y1, v.sy)
+    let a = max(0, int(y0))
+    let b = min(H, max(int(y1), int(y0) + 1))
+    if a >= b: continue
+    let w = max(0, min(W, int(x1) + 2) - max(0, int(x0) - 1))
+    let c = int32(RENDER_POLY_CYCLES + w div RENDER_DOTS_PER_CYCLE)
+    d[a] += c
+    d[b] -= c
+  var acc = 0'i32
+  for y in 0 ..< H:
+    acc += d[y]
+    result[y] = acc
+
+proc costs_fit*(r: Renderer; polys: openArray[Polygon]; verts: openArray[Vertex]): bool =
+  ## Whether the frame keeps the cache full (RDLINES 46) and never
+  ## underflows on its line costs' upper bound (`cost_bound`). Then the
+  ## exact costs do too: `budget` only finishes lines later as costs rise.
+  ## True leaves rdlines and underflow as render_costs would (and the bound
+  ## in line_cost, which nothing reads but `budget`); false: run
+  ## render_costs.
+  r.line_cost = cost_bound(polys, verts)
+  r.budget()
+  r.rdlines == 46 and not r.underflow
+
 {.pop.}
