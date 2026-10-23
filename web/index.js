@@ -12078,6 +12078,8 @@ const runaheadChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
 const applyRunahead = (n) => {
   runaheadFrames = [0, 1, 2, 3].includes(n) ? n : 0;
   syncChipGroup(runaheadChips, String(runaheadFrames));
+  // (the DS's GPU 3D stands down with run-ahead: ndsGpuActive)
+  if (ndsCore) ndsApplyHd();
 };
 
 const setRunahead = async (n) => {
@@ -17236,6 +17238,34 @@ const ndsBench = (frames = 120) => {
   return (performance.now() - t0) / frames;
 };
 window.ndsBench = ndsBench;
+// The same with each frame's picture made and waited for (docs/nds/gpu3d.md):
+// { core, picture } ms per frame, the picture being the GPU's HD 3D, its
+// composite and capture when that is on, else nothing.
+window.ndsGpuBench = (frames = 120) => {
+  if (!ndsCore || ndsCoreGame === null) return null;
+  const gl = canvasEl.getContext("webgl2");
+  const px = new Uint32Array(4);
+  let core = 0, pic = 0;
+  for (let i = 0; i < frames; i++) {
+    const t0 = performance.now();
+    ndsCore._nds_run_frame();
+    ndsCore._nds_audio_clear();
+    const t1 = performance.now();
+    const frame = ndsFrame();
+    if (frame && frame.glTexture) {
+      const t = frame.glTexture(gl);
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA_INTEGER, gl.UNSIGNED_INT, px);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(fb);
+    }
+    core += t1 - t0;
+    pic += performance.now() - t1;
+  }
+  return { core: core / frames, picture: pic / frames };
+};
 
 // --- Video: the screens arranged (NdsUtil.layout: stacked, side by side,
 // focus, one screen; gap, swap, turn) and drawn by the presenter view by
@@ -17250,12 +17280,72 @@ let ndsLayoutPref = "auto";
 const NDS_DISPLAY_DEFAULTS = Object.freeze({ swap: false, gap: "hinge", rot: 0, barHide: true, hd: 1 });
 // HD 3D (docs/nds/hd3d.md): the 3D scene drawn at hd x the DS's resolution.
 const NDS_HD_SCALES = [1, 2, 3, 4];
-const ndsApplyHd = () => { ndsCore?._nds_set_hd?.(ndsDisplay.hd); };
-// The HD scale the core draws at (1: none, or a core without HD).
+// HD 3D on the host GPU (docs/nds/gpu3d.md; a prototype behind a dev flag:
+// ?gpu3d=1, localStorage "nds-gpu3d" = "1", or ndsGpu3d(true) in the
+// console): the core exports each frame's scene and web/nds/gpu3d.js draws
+// the HD 3D and composites it in the presenter's WebGL2 context, in place
+// of the core's software HD. Not with run-ahead (its look-ahead frames
+// would skip display captures the GPU must see).
+let ndsGpuFlag = (() => {
+  try {
+    return new URLSearchParams(location.search).get("gpu3d") === "1" || localStorage.getItem("nds-gpu3d") === "1";
+  } catch { return false; }
+})();
+let ndsGpuMod = null;     // web/nds/gpu3d.js, imported when the flag is on
+let ndsGpuState = null;   // { gl, g, frames, k }: the renderer for the presenter's context
+const ndsGpuActive = () => ndsGpuFlag && ndsDisplay.hd > 1 && runaheadFrames === 0 &&
+  !!(ndsCore && ndsCore._nds_set_gpu);
+const ndsApplyHd = () => {
+  const c = ndsCore;
+  if (!c) return;
+  const gpu = ndsGpuActive();
+  if (gpu && !ndsGpuMod) {
+    // @ts-expect-error -- a dynamic import from this classic script (tsc checks it without --module)
+    import("./nds/gpu3d.js").then((m) => { ndsGpuMod = m; ndsApplyHd(); },
+      (e) => log(`gpu3d: ${e}`));
+  }
+  const on = gpu && !!ndsGpuMod;
+  c._nds_set_gpu?.(on ? 1 : 0);
+  c._nds_set_hd?.(on ? 1 : ndsDisplay.hd);
+};
+window.ndsGpu3d = (on) => {
+  ndsGpuFlag = !!on;
+  try { localStorage.setItem("nds-gpu3d", on ? "1" : "0"); } catch {}
+  ndsApplyHd();
+  return ndsGpuActive();
+};
+// The HD scale the core draws at (1: none, or a core without HD), or the
+// host GPU's.
 const ndsHdNow = () => {
   const c = ndsCore;
   if (!c || !c._nds_hd_scale || ndsCoreGame === null) return 1;
+  if (ndsGpuMod && ndsGpuActive() && c._nds_gpu_frames() > 0) return ndsDisplay.hd;
   return c._nds_hd_fb555_top() && c._nds_hd_fb555_bottom() ? c._nds_hd_scale() : 1;
+};
+// The presenter's texture for this frame from the GPU renderer: the scene
+// drawn again when the core exported a new frame, composited and captured
+// once per frame (glpresent.js frame.glTexture).
+const ndsGpuTexture = (gl, k) => {
+  const c = ndsCore;
+  let s = ndsGpuState;
+  if (!s || s.gl !== gl || s.gl.isContextLost()) {
+    s = ndsGpuState = { gl, g: new ndsGpuMod.NdsGpu3d(gl), frames: -1, gen: -1 };
+  }
+  s.g.setScale(k);
+  const n = c._nds_gpu_frames();
+  if (n !== s.frames || s.k !== k) {
+    s.frames = n; s.k = k;
+    const buf = c.HEAPU8.buffer;
+    const scene = new Uint32Array(buf, c._nds_gpu_scene(), c._nds_gpu_scene_len());
+    const W = NdsUtil.W, H = NdsUtil.H;
+    s.g.setScene(scene, new Uint8Array(buf, c._nds_gpu_tex(), 0x80000), new Uint8Array(buf, c._nds_gpu_pal(), 0x18000));
+    s.g.render();
+    s.g.composite([new Uint16Array(buf, c._nds_fb555_top(), W * H), new Uint16Array(buf, c._nds_fb555_bottom(), W * H)],
+      new Uint32Array(buf, c._nds_gpu_plane(), W * H * 4), new Uint32Array(buf, c._nds_gpu_plane2(), W * H * 4),
+      new Uint32Array(buf, c._nds_gpu_lines(), H * 8));
+  }
+  s.g.restore();
+  return s.g.screens.t;
 };
 /** @type {NdsDisplay} */
 let ndsDisplay = { ...NDS_DISPLAY_DEFAULTS };
@@ -17303,6 +17393,13 @@ const ndsFrame = () => {
   const c = ndsCore;
   if (!c || ndsCoreGame === null) return null;
   const k = ndsHdNow();
+  if (k > 1 && c._nds_hd_scale() === 1) {
+    // HD 3D on the host GPU: the presenter draws its texture
+    const views = ndsViews.map((v) => ({
+      ...v, src: { x: v.src.x * k, y: v.src.y * k, w: v.src.w * k, h: v.src.h * k } }));
+    return { w: NdsUtil.W * k, h: 2 * NdsUtil.H * k, glTexture: (gl) => ndsGpuTexture(gl, k),
+      out: { w: ndsLay.w, h: ndsLay.h, clear: ndsStageRgb(), views } };
+  }
   if (k > 1) {
     // HD 3D: the core's HD screens, the views' sources scaled to them
     const t = c._nds_hd_fb555_top(), b = c._nds_hd_fb555_bottom();

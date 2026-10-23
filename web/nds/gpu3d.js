@@ -1494,10 +1494,16 @@ export class NdsGpu3d {
 
   // Both screens at k from the 1x screens, engine A's planes and out3d,
   // then display capture into the banks' HD copies (gpu.nim gpu_line's
-  // exports; null arguments keep what was uploaded last).
+  // exports; null arguments keep what was uploaded last). screens1x: both
+  // screens (256 x 384), or [top, bottom].
   composite(screens1x, plane, plane2, lines, capture = true) {
     const gl = this.gl;
-    if (screens1x) this.upload(this.screens1x, screens1x, 256, 384, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
+    if (Array.isArray(screens1x)) {
+      gl.activeTexture(this.scratchUnit);
+      gl.bindTexture(gl.TEXTURE_2D, this.screens1x.t);
+      screens1x.forEach((s, i) =>
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 192 * i, 256, 192, gl.RED_INTEGER, gl.UNSIGNED_SHORT, s));
+    } else if (screens1x) this.upload(this.screens1x, screens1x, 256, 384, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
     if (plane) this.upload(this.plane, plane, 256, 192, gl.RGBA_INTEGER, gl.UNSIGNED_INT);
     if (plane2) this.upload(this.plane2, plane2, 256, 192, gl.RGBA_INTEGER, gl.UNSIGNED_INT);
     if (lines) {
@@ -1518,6 +1524,16 @@ export class NdsGpu3d {
       gl.uniform1ui(p.loc.uCapc, capc);
     });
     [bank.cur, bank.next] = [bank.next, bank.cur];
+  }
+
+  // Leave the context as a presenter sharing it expects: the default
+  // framebuffer and vertex array, texture unit 0, its unpack alignment.
+  restore() {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindVertexArray(null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   }
 
   present(w, h) {

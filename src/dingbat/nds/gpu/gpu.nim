@@ -57,6 +57,7 @@ type
     gpu_plane*: seq[uint32]           ## 256 x 192 dots, 4 words each (engine2d gpu_paint_line)
     gpu_plane2*: seq[uint32]          ## 256 x 192 dots, 4 words each: capture's inputs (gpu_valid)
     gpu_lines*: seq[uint32]           ## 192 lines, 8 words each (gpu_line)
+    gpu_frames*: int                  ## frames exported (gpu_line, at line 191)
     gpu_paint: HdPaint
     cap_1x: array[4, seq[uint32]]     ## ... and the halfword it wrote there (bit 16 = captured)
 
@@ -179,7 +180,7 @@ proc set_hd*(g: Gpu; scale: int) =
   ## scaled up whole dots. The 1x screens are unchanged.
   let k = clamp(scale, 1, 4)
   g.hd = k
-  g.engine_a.hd_on = k > 1 or g.gpu_on
+  g.engine_a.hd_on = k > 1
   if g.gpu3d != nil: g.gpu3d.set_hd(k)
   for b in 0..3:
     g.cap_hd[b] = @[]
@@ -198,7 +199,6 @@ proc set_gpu*(g: Gpu; on: bool) =
   ## Export the 3D scene and engine A's composite planes each frame for a
   ## host-GPU renderer (docs/nds/gpu3d.md). Display only.
   g.gpu_on = on
-  g.engine_a.hd_on = on or g.hd > 1
   if g.gpu3d != nil: g.gpu3d.set_gpu(on)
   for b in 0..3: g.cap_1x[b] = @[]
   if on:
@@ -256,11 +256,12 @@ proc gpu_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
             (if shown and dm == 1: 4'u32 else: 0'u32) or (if shown and dm == 2: 8'u32 else: 0'u32) or
             (if cap_line: 16'u32 else: 0'u32) or (dm shl 8)
   if paint:
-    a.gpu_paint_line(g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]), info)
+    a.gpu_paint_line(y, g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]), info)
   info[4] = capc
   info[5] = (a.dispcnt shr 18) and 3
   info[6] = uint32(a.master_bright)
   info[7] = 0
+  if y == 191: inc g.gpu_frames
   if not cap_line: return
   let dst_bank = int((capc shr 16) and 3)
   if not g.vram.lcdc_mapped(VramBank(dst_bank)): return
@@ -276,7 +277,10 @@ proc hd_restart*(g: Gpu) =
   ## scrubber commit): HD's history (the captures' HD copies, the rows
   ## already holding a line, the 3D side's) was the old timeline's, so HD
   ## starts over from the loaded machine, as set_hd does: what follows is
-  ## exactly what turning HD on at that moment draws.
+  ## exactly what turning HD on at that moment draws. The host-GPU export
+  ## forgets its captures likewise (their HD copies stop standing in).
+  if g.gpu_on:
+    for b in 0..3: g.cap_1x[b] = @[]
   if g.hd <= 1: return
   for b in 0..3:
     g.cap_hd[b] = @[]

@@ -33,6 +33,7 @@ proc nds_rom_alloc(len: cint): pointer {.exportc.} =
 var lastBios9, lastBios7, lastFirmware: seq[uint8]  ## what nds_reboot reuses
 
 var hdScale = 1   ## HD 3D (docs/nds/hd3d.md): kept across boots, a display setting
+var gpuOn = false ## host-GPU 3D export (docs/nds/gpu3d.md): kept across boots, a display setting
 
 proc rewind_reset()
 proc cheats_follow_game()
@@ -40,6 +41,7 @@ proc cheats_follow_game()
 proc boot_with(rom: sink seq[uint8]; save: pointer; save_len: cint) =
   core = new_nds(rom, lastBios9, lastBios7, lastFirmware)
   if hdScale > 1: core.set_hd_scale(hdScale)
+  if gpuOn: core.set_gpu_export(true)
   if save_len > 0: core.cart.backup.set_data(copy_in(save, save_len))
   rewind_reset()
   cheats_follow_game()
@@ -140,6 +142,39 @@ proc nds_hd_fb555_bottom(): pointer {.exportc.} =
   if core == nil or core.gpu.hd_bottom.len == 0: nil
   elif aheadValid and aheadHdBottom.len == core.gpu.hd_bottom.len: addr aheadHdBottom[0]
   else: addr core.gpu.hd_bottom[0]
+
+# Host-GPU 3D (docs/nds/gpu3d.md): with nds_set_gpu(1) each frame's 3D
+# scene and engine A's composite planes are exported for web/nds/gpu3d.js,
+# which draws the 3D at HD on the GPU; nds_gpu_frames counts the frames
+# exported (it never goes back, unlike the machine's frame count).
+
+proc nds_set_gpu(on: cint) {.exportc.} =
+  gpuOn = on != 0
+  if core != nil: core.set_gpu_export(gpuOn)
+
+proc nds_gpu_frames(): cint {.exportc.} =
+  if core == nil or not core.gpu.gpu_on: 0 else: cint(core.gpu.gpu_frames)
+
+proc nds_gpu_scene(): pointer {.exportc.} =
+  if core == nil or core.gpu3d.gpu_scene.len == 0: nil else: addr core.gpu3d.gpu_scene[0]
+
+proc nds_gpu_scene_len(): cint {.exportc.} =
+  if core == nil: 0 else: cint(core.gpu3d.gpu_scene.len)
+
+proc nds_gpu_tex(): pointer {.exportc.} =
+  if core == nil or core.gpu3d.gpu_tex.len == 0: nil else: addr core.gpu3d.gpu_tex[0]
+
+proc nds_gpu_pal(): pointer {.exportc.} =
+  if core == nil or core.gpu3d.gpu_pal.len == 0: nil else: addr core.gpu3d.gpu_pal[0]
+
+proc nds_gpu_plane(): pointer {.exportc.} =
+  if core == nil or core.gpu.gpu_plane.len == 0: nil else: addr core.gpu.gpu_plane[0]
+
+proc nds_gpu_plane2(): pointer {.exportc.} =
+  if core == nil or core.gpu.gpu_plane2.len == 0: nil else: addr core.gpu.gpu_plane2[0]
+
+proc nds_gpu_lines(): pointer {.exportc.} =
+  if core == nil or core.gpu.gpu_lines.len == 0: nil else: addr core.gpu.gpu_lines[0]
 
 proc nds_fb_top(): pointer {.exportc.} =
   fbTop.setLen(256 * 192)

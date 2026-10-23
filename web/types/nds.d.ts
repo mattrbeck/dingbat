@@ -25,6 +25,18 @@ interface NdsCoreModule {
   _nds_hd_scale?: () => number;
   _nds_hd_fb555_top?: () => number;
   _nds_hd_fb555_bottom?: () => number;
+  // HD 3D on the host GPU (docs/nds/gpu3d.md): the exported scene, slot
+  // images and engine A's planes (pointers into HEAPU8), and the frames
+  // exported so far. Optional: an older core lacks them.
+  _nds_set_gpu?: (on: number) => void;
+  _nds_gpu_frames?: () => number;
+  _nds_gpu_scene?: () => number;
+  _nds_gpu_scene_len?: () => number;
+  _nds_gpu_tex?: () => number;
+  _nds_gpu_pal?: () => number;
+  _nds_gpu_plane?: () => number;
+  _nds_gpu_plane2?: () => number;
+  _nds_gpu_lines?: () => number;
   _nds_fb_top(): number;
   _nds_fb_bottom(): number;
   _nds_set_button(id: number, pressed: number): void;
@@ -108,4 +120,8 @@ interface Window {
   appAudioOut?: () => { ctx: AudioContext; dest: AudioNode } | null;
   // Unpaced DS frame cost in ms (console / Playwright).
   ndsBench?: (frames?: number) => number | null;
+  // The same with the picture made (docs/nds/gpu3d.md), and the GPU 3D
+  // prototype's switch.
+  ndsGpuBench?: (frames?: number) => { core: number; picture: number } | null;
+  ndsGpu3d?: (on: boolean) => boolean;
 }
