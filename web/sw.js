@@ -14,6 +14,7 @@ const ASSETS = [
   "./zipwrite.js",
   "./framegrid.js",
   "./flap.png",
+  "./flap-dusk.png",
   "./ckptworker.js",
   "./sdputil.js",
   "./netplay.js",

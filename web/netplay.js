@@ -50,6 +50,7 @@ const netCodeInput = /** @type {HTMLInputElement} */ (document.getElementById("n
 const netJoinGo = /** @type {HTMLButtonElement} */ (document.getElementById("net-join-go"));
 const netStallBadge = document.getElementById("net-stall");
 const netSpinner = document.getElementById("net-spinner");
+const netTransfer = document.getElementById("net-transfer");
 
 const netModalOpen = () => netModal.classList.contains("open");
 
@@ -59,9 +60,18 @@ const netSetConnecting = (on) => {
   netJoinGo.textContent = on ? "Cancel" : "Connect";
 };
 
+// The link screen (two bats either end of the cable) is up while the games
+// cross: from the first progress line until the session starts, fails or
+// the modal closes. Every status passes through here, so this is the switch.
+const NET_TRANSFER_STATUS = /^(Transferring games|Ready — waiting for your friend)/;
+
 const netSetStatus = (msg, isError) => {
   netStatusDiv.textContent = msg;
   netStatusDiv.classList.toggle("net-error", !!isError);
+  const transferring = !isError && NET_TRANSFER_STATUS.test(msg);
+  if (netTransfer) netTransfer.hidden = !transferring;
+  // Connected: the code entry has done its job, the scene and the line stay.
+  netModal.classList.toggle("net-transferring", transferring);
   if (isError) netSetConnecting(false);
   // The post-connect pipeline reports here, but this element is in the
   // shared-code view: mirror into the manual view when that is up.
@@ -125,6 +135,8 @@ const RTC_CONNECT_DEADLINE = 20000;
 
 const closeNetModal = () => {
   netModal.classList.remove("open");
+  if (netTransfer) netTransfer.hidden = true;
+  netModal.classList.remove("net-transferring");
   netSetConnecting(false);
   releaseWakeLock();
   clearTimeout(manualFallbackTimer);

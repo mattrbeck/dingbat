@@ -11,6 +11,7 @@ Usage: flap.py [--preview DIR]
   web/web-app-manifest-*.png        Android (maskable): bat 3x / 8x inside the safe circle
   web/flap.png                      31 frames of 52 x 28: a full beat (0-15), then a
                                     settling beat at 45% swing (16-30)
+  web/flap-dusk.png, FlapDusk       the dusk bat's beat (16 frames): the link screen's friend
   ios/.../AppIcon, Logo, LaunchLogo the iOS app icon, in-app logo and launch logo
   ios/.../Flap                      the opening's flap: the same 31-frame strip as web/flap.png
   docker/windows-cross/dingbat.ico  the Windows build's icon
@@ -89,6 +90,8 @@ def main():
     imgio.png(path('web', 'web-app-manifest-512x512.png'), tile_rows(512, 8), TP)
     frames31 = flap31()
     imgio.png(path('web', 'flap.png'), strip(frames31), P)
+    # the link screen's other player: the dusk bat, one wingbeat
+    imgio.png(path('web', 'flap-dusk.png'), strip(frames31[:16]), bat.DUSK)
 
     # ---- iOS
     imgio.png(os.path.join(XC, 'AppIcon.appiconset', 'icon-1024.png'), tile_rows(1024, 18), TP)
@@ -97,6 +100,8 @@ def main():
     # 3 points per art pixel at @3x (LaunchIntro.launchScale)
     imgio.png(os.path.join(XC, 'LaunchLogo.imageset', 'launch-logo@3x.png'), bat.scale(still, 9), P)
     imgio.png(os.path.join(XC, 'Flap.imageset', 'flap.png'), strip(frames31), P)
+    os.makedirs(os.path.join(XC, 'FlapDusk.imageset'), exist_ok=True)
+    imgio.png(os.path.join(XC, 'FlapDusk.imageset', 'flap-dusk.png'), strip(frames31[:16]), bat.DUSK)
 
     # ---- Windows: 16 / 32 / 48 pixel art and a 256 Night tile with rounded corners
     t256 = rounded(tile_rows(256, 5), 40)

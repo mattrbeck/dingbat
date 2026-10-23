@@ -7942,6 +7942,88 @@ body.rewind-off #report-slider {
 }
 
 /* Small amber spinner pinned inside the right of the code field while connecting. */
+/* The link screen: the two bats flapping (flap.png's first beat, and the dusk
+   bat's flap-dusk.png, 52x28 art px a frame, at 2x) either end of the cable,
+   with bits running both ways along it while the games transfer. */
+.net-transfer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  margin: 6px 0 14px;
+}
+.net-transfer[hidden] {
+  display: none;
+}
+#net-modal.net-transferring :is(.net-join-row, .net-view-toggle, #net-connect-view > p:first-child, #net-manual-view > p:first-child) {
+  display: none;
+}
+.net-transfer-end {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.net-transfer-bat {
+  width: 104px;
+  height: 56px;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  animation: net-transfer-flap 667ms steps(16) infinite;
+}
+.net-transfer-you {
+  background-image: url("flap.png");
+  background-size: 3224px 56px;
+}
+.net-transfer-friend {
+  background-image: url("flap-dusk.png");
+  background-size: 1664px 56px;
+}
+@keyframes net-transfer-flap {
+  to { background-position: -1664px 0; }
+}
+.net-transfer-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.net-transfer-cable {
+  width: 140px;
+  height: 68px;
+  flex: none;
+  overflow: visible;
+}
+.net-transfer-cable path {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.net-transfer-plug {
+  fill: var(--surface-3);
+}
+.net-transfer-bit {
+  animation: net-transfer-bit 1.6s linear infinite;
+}
+.net-transfer-out {
+  fill: var(--accent);
+  offset-path: path("M6 34 C 40 58, 100 10, 134 34");
+}
+.net-transfer-in {
+  fill: #ffcf4a;
+  offset-path: path("M134 34 C 100 10, 40 58, 6 34");
+}
+@keyframes net-transfer-bit {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .net-transfer-bat,
+  .net-transfer-bit {
+    animation: none;
+  }
+}
+
 .net-spinner {
   position: absolute;
   top: 50%;

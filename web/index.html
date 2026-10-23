@@ -50,6 +50,19 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="dingbat" />
     <link rel="manifest" href="site.webmanifest" />
+    <!-- Link previews (Messages, chat apps, GitHub): tools/logo_flap/og.py
+         renders the card. Absolute URLs: crawlers don't resolve relative ones. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="dingbat" />
+    <meta property="og:title" content="dingbat" />
+    <meta property="og:description" content="A Game Boy and Game Boy Advance emulator that runs in your browser." />
+    <meta property="og:url" content="https://dingbat.gg/" />
+    <meta property="og:image" content="https://dingbat.gg/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The dingbat bat beside the word dingbat" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://dingbat.gg/og-image.png" />
     <meta name="theme-color" content="#0e0a16" />
     <script>
       // Apply the persisted chrome theme before first paint so a reload never
@@ -1620,6 +1633,30 @@
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="net-title">
         <button type="button" class="modal-close" id="net-close" aria-label="Close">&times;</button>
         <h2 id="net-title">Connect link cable</h2>
+        <!-- While the games cross the network: you (the purple bat) and your
+             friend (the dusk bat) either end of the cable, data running both
+             ways. netplay.js shows it with the transfer's status lines. -->
+        <div id="net-transfer" class="net-transfer" hidden>
+          <div class="net-transfer-end">
+            <div class="net-transfer-bat net-transfer-you" role="img" aria-label="You"></div>
+            <span class="net-transfer-name">You</span>
+          </div>
+          <svg class="net-transfer-cable" viewBox="0 0 140 68" aria-hidden="true">
+            <path d="M6 34 C 40 58, 100 10, 134 34" />
+            <rect class="net-transfer-plug" x="0" y="28" width="9" height="12" rx="2" />
+            <rect class="net-transfer-plug" x="131" y="28" width="9" height="12" rx="2" />
+            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" style="animation-delay: 0s" />
+            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" style="animation-delay: -0.53s" />
+            <rect class="net-transfer-bit net-transfer-out" width="5" height="5" style="animation-delay: -1.06s" />
+            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" style="animation-delay: -0.27s" />
+            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" style="animation-delay: -0.8s" />
+            <rect class="net-transfer-bit net-transfer-in" width="5" height="5" style="animation-delay: -1.33s" />
+          </svg>
+          <div class="net-transfer-end">
+            <div class="net-transfer-bat net-transfer-friend" role="img" aria-label="Your friend"></div>
+            <span class="net-transfer-name">Your friend</span>
+          </div>
+        </div>
         <div id="net-connect-view">
           <p>Enter the same code as your friend.</p>
           <div class="net-join-row">

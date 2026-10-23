@@ -287,22 +287,30 @@ struct ClipProgressView: View {
 }
 
 /// The dingbat flapping (web flap.png: 16 frames of 52x28 in 667 ms, at 2x).
-/// The frame box is LaunchIntro.box, the strip both share.
+/// The frame box is LaunchIntro.box, the strip both share. "FlapDusk" is the
+/// dusk bat's beat, the link screen's friend.
 struct FlappingBat: View {
+    var image = "Flap"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private static let frames: [UIImage] = {
-        guard let img = UIImage(named: "Flap")?.cgImage else { return [] }
-        return (0..<16).compactMap { i in
-            img.cropping(to: CGRect(x: i * Int(LaunchIntro.box.width), y: 0,
-                                    width: Int(LaunchIntro.box.width), height: Int(LaunchIntro.box.height))).map { UIImage(cgImage: $0) }
+    private static var cache: [String: [UIImage]] = [:]
+
+    private static func frames(_ name: String) -> [UIImage] {
+        if let f = cache[name] { return f }
+        guard let img = UIImage(named: name)?.cgImage else { return [] }
+        let w = Int(LaunchIntro.box.width), h = Int(LaunchIntro.box.height)
+        let f = (0..<16).compactMap { i in
+            img.cropping(to: CGRect(x: i * w, y: 0, width: w, height: h)).map { UIImage(cgImage: $0) }
         }
-    }()
+        cache[name] = f
+        return f
+    }
 
     var body: some View {
+        let frames = Self.frames(image)
         TimelineView(.periodic(from: .now, by: 0.667 / 16)) { ctx in
-            let i = reduceMotion ? 0 : Int(ctx.date.timeIntervalSinceReferenceDate / (0.667 / 16)) % max(1, Self.frames.count)
-            if i < Self.frames.count {
-                Image(uiImage: Self.frames[i]).resizable().interpolation(.none)
+            let i = reduceMotion ? 0 : Int(ctx.date.timeIntervalSinceReferenceDate / (0.667 / 16)) % max(1, frames.count)
+            if i < frames.count {
+                Image(uiImage: frames[i]).resizable().interpolation(.none)
             }
         }
         .accessibilityHidden(true)

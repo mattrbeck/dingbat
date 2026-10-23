@@ -36,6 +36,11 @@ final class NetLink: ObservableObject {
 
     @Published private(set) var status = ""
     @Published private(set) var statusIsError = false
+    /// The games are crossing (or the friend's half is): the sheet shows the
+    /// two bats on the cable instead of the code entry (web NET_TRANSFER_STATUS).
+    var transferring: Bool {
+        !statusIsError && (status.hasPrefix("Transferring games") || status.hasPrefix("Ready — waiting for your friend"))
+    }
     /// Dialing or waiting: the spinner, and Connect reads Cancel.
     @Published private(set) var connecting = false
     /// The session runs: the game ticks linked.

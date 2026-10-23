@@ -321,6 +321,22 @@ test("pipeline statuses mirror into the manual view while it's up", async () => 
     "visible manual view sees the post-connect pipeline");
 });
 
+test("the link screen shows while the games transfer, and only then", async () => {
+  const { el, api, app } = await setup();
+  await api.openNetConnect(true);
+  const scene = el("net-transfer");
+  assert.equal(scene.hidden, true, "hidden while pairing");
+  app.runIn(`netSetStatus("Transferring games… 40%")`);
+  assert.equal(scene.hidden, false, "the two bats are up while the games cross");
+  app.runIn(`netSetStatus("Ready — waiting for your friend…")`);
+  assert.equal(scene.hidden, false, "and while the friend's half finishes");
+  app.runIn(`netSetStatus("Game transfer was corrupted", true)`);
+  assert.equal(scene.hidden, true, "an error takes it down");
+  app.runIn(`netSetStatus("Transferring games… 10%")`);
+  app.runIn(`closeNetModal()`);
+  assert.equal(scene.hidden, true, "closing takes it down");
+});
+
 test("disconnecting a live link is a two-step armed confirm, not a one-tap", async () => {
   const { el, api, advance, flush } = await setup();
   await api.openNetConnect(true);
