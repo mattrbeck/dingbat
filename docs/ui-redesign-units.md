@@ -256,7 +256,7 @@ shown by pausing to it, exactly as today.
 | n ≥ 1, no game paused | — | — | bar + grid |
 | a game is paused | — | yes | bar + grid |
 
-The brand block (logo 76 + wordmark `--fs-display` + tagline) renders **only**
+The brand block (logo 84 + wordmark `--fs-display` + tagline) renders **only**
 when n = 0. The bar carries identity otherwise.
 
 **Acceptance.** With a game paused, home shows: hero card, then library. No

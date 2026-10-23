@@ -264,7 +264,7 @@ struct ClipProgressView: View {
             ZStack {
                 palette.stage.opacity(0.92).ignoresSafeArea()
                 VStack(spacing: 10) {
-                    FlappingBat().frame(width: 112, height: 80)
+                    FlappingBat().frame(width: 104, height: 56)
                     Text("Recording clip").font(.system(size: 17, weight: .semibold)).foregroundColor(palette.text)
                     Text(e.label).font(.system(size: 13)).foregroundColor(palette.textDim)
                     HStack(spacing: 12) {
@@ -286,13 +286,15 @@ struct ClipProgressView: View {
     }
 }
 
-/// The dingbat flapping (web flap.png: 16 frames of 56x40 in 667 ms).
+/// The dingbat flapping (web flap.png: 16 frames of 52x28 in 667 ms, at 2x).
+/// The frame box is LaunchIntro.box, the strip both share.
 struct FlappingBat: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private static let frames: [UIImage] = {
         guard let img = UIImage(named: "Flap")?.cgImage else { return [] }
         return (0..<16).compactMap { i in
-            img.cropping(to: CGRect(x: i * 56, y: 0, width: 56, height: 40)).map { UIImage(cgImage: $0) }
+            img.cropping(to: CGRect(x: i * Int(LaunchIntro.box.width), y: 0,
+                                    width: Int(LaunchIntro.box.width), height: Int(LaunchIntro.box.height))).map { UIImage(cgImage: $0) }
         }
     }()
 

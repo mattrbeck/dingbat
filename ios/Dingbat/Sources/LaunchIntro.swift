@@ -18,10 +18,10 @@ final class LaunchIntro: ObservableObject {
     static let fps = 24.0
     static let frameCount = 31
     /// The strip's frame box, and where the logo sits in it (art pixels).
-    static let box = CGSize(width: 56, height: 40)
-    static let logoAt = CGPoint(x: 4, y: 4)
-    static let logo = CGSize(width: 48, height: 29)
-    /// The launch screen's logo: 432x261 pixels at @3x.
+    static let box = CGSize(width: 52, height: 28)
+    static let logoAt = CGPoint(x: 5, y: 2)
+    static let logo = CGSize(width: 42, height: 19)
+    /// The launch screen's logo: 378x171 pixels at @3x (3 points per art pixel).
     static let launchScale: CGFloat = 3
 
     static let hold = 0.2
@@ -134,8 +134,6 @@ struct LaunchIntroOverlay: View {
                 .resizable()
                 .interpolation(.none)
                 .frame(width: LaunchIntro.box.width * s, height: LaunchIntro.box.height * s)
-                // The brand's shadow, coming in as it lands.
-                .shadow(color: .black.opacity((Settings.shared.palette.isLight ? 0.25 : 0.6) * Double(e)), radius: 7, y: 4)
                 .offset(x: x - LaunchIntro.logoAt.x * s - safe.minX,
                         y: y - LaunchIntro.logoAt.y * s - safe.minY)
         }

@@ -307,7 +307,8 @@ struct HomeBrand: View {
                 .resizable()
                 .interpolation(.none)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 76)
+                // 42 x 19 art px at 2x: whole pixels.
+                .frame(width: 84)
                 // The opening's logo lands here (LaunchIntro).
                 .background(GeometryReader { g in
                     let r = g.frame(in: .global)
@@ -316,7 +317,6 @@ struct HomeBrand: View {
                         .onChange(of: r) { intro.brandAt($0) }
                 })
                 .opacity(intro.hidesBrand ? 0 : 1)
-                .shadow(color: .black.opacity(palette.isLight ? 0.25 : 0.6), radius: 7, y: 4)
                 .padding(.bottom, 14)
             VStack(spacing: 0) {
                 Text("dingbat")
@@ -457,7 +457,7 @@ struct HomeBar: View {
                     .resizable()
                     .interpolation(.none)
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 22)
+                    .frame(width: 42)
                 // Under 360 points the wordmark gives way and the bat stays.
                 if viewport >= 360 {
                     Text("dingbat")

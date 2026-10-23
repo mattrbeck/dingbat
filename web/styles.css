@@ -3044,8 +3044,9 @@ body.home-card .home-recent-head {
   background: var(--chrome-btn-top);
 }
 
+/* The logo is 42 x 19 art px: whole-pixel sizes only (1x here, 2x on home). */
 #bar-logo {
-  width: 22px;
+  width: 42px;
   height: auto;
   image-rendering: pixelated;
 }
@@ -3077,10 +3078,9 @@ body.home-card #home-brand {
 }
 
 #home-logo {
-  width: 76px;
+  width: 84px;
   height: auto;
   image-rendering: pixelated;
-  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6));
   margin-bottom: 14px;
 }
 
@@ -7158,7 +7158,6 @@ body.link-gb #controls {
     gap: 18px;
   }
   #home-logo {
-    width: 58px;
     margin-bottom: 4px;
   }
   #home-brand h1 {
@@ -8920,13 +8919,13 @@ body.clip-replaying #glow-canvas {
   margin: -8px 0 16px;
 }
 /* The logo flapping while the clip records. flap.png is the strip of 31
-   wing-flap frames (56x40 art px each, tools/logo_flap/flap.py); frames
+   wing-flap frames (52x28 art px each, tools/logo_flap/flap.py); frames
    0-15 are one full wingbeat, looped here at 24 fps, at 2x so the pixels
    stay whole. object-position picks the frame: frame k is k/30 along. */
 .clip-progress-flap {
   display: block;
-  width: 112px;
-  height: 80px;
+  width: 104px;
+  height: 56px;
   margin: 0 auto 6px;
   object-fit: cover;
   object-position: 0 0;

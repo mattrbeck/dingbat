@@ -1363,7 +1363,7 @@ draw_verdict:
     ldmfd sp!, {pc}
     .ltorg
 
-@ r0 = x, r1 = y: the logo at 2x (96 x 58); 0x8000 marks transparent
+@ r0 = x, r1 = y: the logo (LOGO_W x LOGO_H) at 2x; 0x8000 marks transparent
 draw_logo:
     stmfd sp!, {r4-r10, lr}
     ldr r4, =VRAM

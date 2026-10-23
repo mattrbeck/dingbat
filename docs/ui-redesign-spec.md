@@ -237,7 +237,7 @@ Left → right, both platforms:
 
 1. `#menu-btn` — **only while a game is loaded** (`body.has-game`). It is the
    game's menu; with no game its every item is meaningless.
-2. Logo mark, 22px, `image-rendering: pixelated`.
+2. Logo mark, 42px (1x of the 42x19 art), `image-rendering: pixelated`.
 3. Wordmark "dingbat", 13.5px/650. **Replaces the "Library" title.** Clickable
    → home on desktop (convention only, not the documented route).
 4. `#playback-controls` — unchanged, fused segmented control on `max-width: 480px`.
@@ -276,7 +276,7 @@ thumbnail.
 
 - `#home-inner` `max-width: 480px` → **1200px**, still `margin: auto`.
   Padding `26px 32px 0`.
-- The brand block (logo 76 + wordmark 30 + tagline) renders **only in the
+- The brand block (logo 84 + wordmark 30 + tagline) renders **only in the
   empty state**. The bar carries identity everywhere else.
 - Order: hero card → library bar → grid.
 

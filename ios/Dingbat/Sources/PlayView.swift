@@ -566,7 +566,9 @@ struct BarBrand: View {
         HStack(spacing: 6) {
             Image("Logo")
                 .resizable()
-                .frame(width: 22, height: 22)
+                .interpolation(.none)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 42)
             Text("dingbat")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundColor(palette.chromeInk)
