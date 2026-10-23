@@ -82,12 +82,13 @@ const loadWithGame = async (opts = {}) => {
 
 // ── Mode selection ──────────────────────────────────────────────────────────
 
-test("the default mode leaves the core's own shades alone", async () => {
+test("the default mode is Night's shades", async () => {
+  // A black-and-white game draws in GB_DEFAULT_SHADES unless the player picks
+  // otherwise: display colours, like any chosen palette (the LCD colour model
+  // is for the core's own values, which no front end shows any more).
   const h = await loadApp();
   assert.equal(h.api.gbPaletteMode, "default");
-  assert.equal(h.api.gbPaletteColors(), null,
-    "default mode must yield no palette at all — not a copy of the hardware " +
-    "shades, which would bypass the LCD colour model and change the picture");
+  eq(h.api.gbPaletteColors(), ["#f7f3ff", "#c6b0ff", "#a26fcf", "#3a2463"]);
 });
 
 test("only one source is ever in force", async () => {
@@ -104,7 +105,7 @@ test("only one source is ever in force", async () => {
   eq(h.api.gbPaletteCustom, custom);
 
   h.api.gbPaletteMode = "default";
-  assert.equal(h.api.gbPaletteColors(), null);
+  eq(h.api.gbPaletteColors(), h.api.GB_DEFAULT_SHADES);
 });
 
 test("theme mode tracks the app theme, live", async () => {
@@ -162,7 +163,7 @@ test("picking a shade edits that shade and only that shade", async () => {
   input.value = "#123456";
   await input.dispatch("input");
   eq(h.api.gbPaletteColors(),
-     [h.api.GB_HW_SHADES[0], h.api.GB_HW_SHADES[1], "#123456", h.api.GB_HW_SHADES[3]]);
+     [h.api.GB_DEFAULT_SHADES[0], h.api.GB_DEFAULT_SHADES[1], "#123456", h.api.GB_DEFAULT_SHADES[3]]);
 });
 
 // ── Persistence ─────────────────────────────────────────────────────────────
@@ -191,7 +192,7 @@ test("a corrupt stored palette falls back instead of reaching the shader", async
   h.idb.set("gb-palette", { mode: "custom", custom: ["#fff", 7, null] });
   await h.api.loadGbPalette();
   assert.equal(h.api.gbPaletteMode, "custom");
-  eq(h.api.gbPaletteColors(), h.api.GB_HW_SHADES,
+  eq(h.api.gbPaletteColors(), h.api.GB_DEFAULT_SHADES,
     "a half-written record must not put non-colours in front of the renderer");
 });
 
@@ -218,9 +219,9 @@ test("the palette's own Reset undoes the palette and nothing else", async () => 
   await settle();
 
   assert.equal(h.api.gbPaletteMode, "default");
-  eq(h.api.gbPaletteCustom, h.api.GB_HW_SHADES);
-  assert.equal(h.api.gbPaletteColors(), null);
-  eq(h.idb.get("gb-palette"), { mode: "default", custom: h.api.GB_HW_SHADES });
+  eq(h.api.gbPaletteCustom, h.api.GB_DEFAULT_SHADES);
+  eq(h.api.gbPaletteColors(), h.api.GB_DEFAULT_SHADES);
+  eq(h.idb.get("gb-palette"), { mode: "default", custom: h.api.GB_DEFAULT_SHADES });
 
   assert.equal(h.api.runaheadFrames, 2,
     "this Reset is scoped to the palette — the whole point of it existing " +
@@ -231,7 +232,7 @@ test("the palette's own Reset undoes the palette and nothing else", async () => 
 test("Reset all settings also clears the palette", async () => {
   const h = await loadApp();
   h.api.gbPaletteMode = "theme";
-  h.idb.set("gb-palette", { mode: "theme", custom: h.api.GB_HW_SHADES });
+  h.idb.set("gb-palette", { mode: "theme", custom: h.api.GB_DEFAULT_SHADES });
   await h.api.resetAllSettings();
   await settle();
   assert.equal(h.api.gbPaletteMode, "default");
@@ -298,7 +299,8 @@ test("every app theme has a palette", async () => {
 
 test("every theme palette is a usable four-shade ramp", async () => {
   const h = await loadApp();
-  for (const [name, pal] of Object.entries(h.api.GB_THEME_PALETTES)) {
+  const ramps = { default: h.api.GB_DEFAULT_SHADES, ...h.api.GB_THEME_PALETTES };
+  for (const [name, pal] of Object.entries(ramps)) {
     assert.equal(pal.length, 4, name);
     for (const c of pal) assert.match(c, /^#[0-9a-f]{6}$/, name + ": " + c);
 
@@ -328,7 +330,8 @@ test("no two adjacent shades are too far apart to dither together", async () => 
   // caught was 74 dE.
   const MAX_ADJACENT_DE = 45;
   const h = await loadApp();
-  for (const [name, pal] of Object.entries(h.api.GB_THEME_PALETTES)) {
+  const ramps = { default: h.api.GB_DEFAULT_SHADES, ...h.api.GB_THEME_PALETTES };
+  for (const [name, pal] of Object.entries(ramps)) {
     for (let i = 1; i < 4; i++) {
       const d = deltaE2000(pal[i - 1], pal[i]);
       assert.ok(d <= MAX_ADJACENT_DE,

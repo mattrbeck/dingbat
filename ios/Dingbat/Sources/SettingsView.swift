@@ -446,7 +446,7 @@ private struct GameBoyPane: View {
             SheetFlowRow(label: "Palette",
                          sub: "The four colors black-and-white games are drawn in. Color games are never affected.") {
                 SheetSelect(selection: $s.gbPaletteMode,
-                            options: [(.default, "Game Boy default"), (.theme, "Match app theme"), (.custom, "Custom…")],
+                            options: [(.default, "Default"), (.theme, "Match app theme"), (.custom, "Custom…")],
                             accessibilityLabel: "Game Boy palette")
             }
             if sgbActive {
@@ -456,7 +456,7 @@ private struct GameBoyPane: View {
                 Text("In use").font(.system(size: 12.5)).foregroundColor(palette.textDim).frame(width: 46, alignment: .leading)
                 HStack(spacing: 0) {
                     ForEach(0..<4, id: \.self) { i in
-                        Rectangle().fill(Color(hex: (s.dmgPalette ?? Settings.hardwareShades)[i]))
+                        Rectangle().fill(Color(hex: (s.dmgPalette ?? Settings.defaultShades)[i]))
                     }
                 }
                 .frame(height: 26)
@@ -465,7 +465,7 @@ private struct GameBoyPane: View {
                 .accessibilityHidden(true)
                 PadButton("Reset") {
                     s.gbPaletteMode = .default
-                    s.gbPaletteCustom = Settings.hardwareShades
+                    s.gbPaletteCustom = Settings.defaultShades
                 }
                 .buttonStyle(SheetButtonStyle())
                 .accessibilityLabel("Reset the Game Boy palette")

@@ -12095,12 +12095,18 @@ const loadRunaheadFromStorage = async () => {
 
 // --- Game Boy shade palette ---------------------------------------------
 // Recolours a monochrome game's four shades in the glpresent.js fragment
-// shader, never in the core. One setting with a mode: "default" (the core's
-// shades), "theme" (GB_THEME_PALETTES), "custom" (four picked colours).
+// shader, never in the core. One setting with a mode: "default"
+// (GB_DEFAULT_SHADES), "theme" (GB_THEME_PALETTES), "custom" (four picked
+// colours).
 
-// DMG_COLORS from src/dingbat/gb/gb.nim, expanded 5->8 bits: the only four
-// values a monochrome framebuffer holds. Also the seed for a custom palette.
-const GB_HW_SHADES = ["#fff7d6", "#ffad73", "#ef6b6b", "#7b3a5a"];
+// The default: Night's shades, lightest first (moonlit white, lilac,
+// rose-violet, deep violet). Brightness steps as the shades games were drawn
+// for (0.91 / 0.50 / 0.24 / 0.03), and a hue shift down the ramp so
+// neighbouring shades stay apart in hue as well as brightness; held to the
+// same rules as the theme ramps (gb-palette.test.mjs). The core still writes
+// its own four values (DMG_COLORS in src/dingbat/gb/gb.nim); the presenter
+// substitutes these. Also the seed for a custom palette.
+const GB_DEFAULT_SHADES = ["#f7f3ff", "#c6b0ff", "#a26fcf", "#3a2463"];
 
 // One four-shade ramp per app theme, lightest to darkest. The rules (theme
 // colour verbatim, monotonic darkening, a minimum contrast per step, and a
@@ -12124,7 +12130,7 @@ const GB_THEME_PALETTES = {
 };
 
 var gbPaletteMode = "default";              // "default" | "theme" | "custom"
-var gbPaletteCustom = GB_HW_SHADES.slice(); // the four user-picked colours
+var gbPaletteCustom = GB_DEFAULT_SHADES.slice(); // the four user-picked colours
 
 const gbPaletteChips = Array.from(/** @type {NodeListOf<HTMLButtonElement>} */ (
   document.querySelectorAll("#gb-palette-picker .choice-chip")));
@@ -12147,7 +12153,7 @@ const currentThemeName = () => {
 const gbPaletteColors = () => {
   if (gbPaletteMode === "theme") return GB_THEME_PALETTES[currentThemeName()];
   if (gbPaletteMode === "custom") return gbPaletteCustom;
-  return null;
+  return GB_DEFAULT_SHADES;
 };
 
 const gbPaletteSgbNote = document.getElementById("gb-palette-sgb-note");
@@ -12165,7 +12171,7 @@ const syncGbPaletteUI = () => {
     if (gbPaletteInputs[i]) gbPaletteInputs[i].value = gbPaletteCustom[i];
   }
   if (gbPalettePreview) {
-    const shades = gbPaletteColors() || GB_HW_SHADES;
+    const shades = gbPaletteColors() || GB_DEFAULT_SHADES;
     gbPalettePreview.replaceChildren(...shades.map((c) => {
       const chip = document.createElement("span");
       chip.className = "gb-shade-chip";
@@ -12206,7 +12212,7 @@ const loadGbPalette = async () => {
 // Reset this setting only.
 const resetGbPalette = () => {
   gbPaletteMode = "default";
-  gbPaletteCustom = GB_HW_SHADES.slice();
+  gbPaletteCustom = GB_DEFAULT_SHADES.slice();
   applyGbPalette();
   saveGbPalette();
 };
@@ -12358,7 +12364,7 @@ const resetAllSettings = async () => {
   applyNdsDisplay(null);
 
   gbPaletteMode = "default";
-  gbPaletteCustom = GB_HW_SHADES.slice();
+  gbPaletteCustom = GB_DEFAULT_SHADES.slice();
   applyGbPalette();
 
   sgbEnable = false;

@@ -25,8 +25,9 @@ final class Settings: ObservableObject {
         }
     }
 
-    /// GB_HW_SHADES: the custom palette's starting point.
-    static let hardwareShades: [UInt32] = [0xFFF7D6, 0xFFAD73, 0xEF6B6B, 0x7B3A5A]
+    /// GB_DEFAULT_SHADES: Night's shades, the default palette for black-and-white
+    /// games and the custom palette's starting point.
+    static let defaultShades: [UInt32] = [0xF7F3FF, 0xC6B0FF, 0xA26FCF, 0x3A2463]
 
     private let d = UserDefaults.standard
 
@@ -112,7 +113,7 @@ final class Settings: ObservableObject {
         haptics = bool("haptics", true)
         gbPaletteMode = GbPaletteMode(rawValue: str("gb-palette.mode") ?? "") ?? .default
         let custom = (d.array(forKey: "gb-palette.custom") as? [Int])?.map { UInt32($0) }
-        gbPaletteCustom = custom?.count == 4 ? custom! : Settings.hardwareShades
+        gbPaletteCustom = custom?.count == 4 ? custom! : Settings.defaultShades
         sgbEnable = bool("sgbEnable", false)
         sgbBorder = bool("sgbBorder", true)
         gbaRunBios = bool("gbaRunBios", true)
@@ -137,11 +138,10 @@ final class Settings: ObservableObject {
         saveWebhook = str("save-hook") ?? ""
     }
 
-    /// The four DMG shades the presenter substitutes, or nil for the
-    /// hardware's own green (the core's values, colour corrected).
+    /// The four DMG shades the presenter substitutes (web gbPaletteColors).
     var dmgPalette: [UInt32]? {
         switch gbPaletteMode {
-        case .default: return nil
+        case .default: return Settings.defaultShades
         case .theme: return theme.gbPalette
         case .custom: return gbPaletteCustom
         }
