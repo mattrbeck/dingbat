@@ -139,6 +139,29 @@ exactly:
   and the GPU path on at the same frame, and compares every frame's HD
   screens. Results: 120 frames each of the GS field, the GS title and
   SoulSilver, 100 % of dots equal.
+- **The sweep.** `node tools/gpu3d/sweep.mjs OUT ROM...` boots each ROM
+  in the web core with the software HD and the GPU path both on from
+  power-on. Display capture's history is then the same for both. Every
+  frame goes through the GPU, and every 4th frame's screens are compared
+  with the core's. At k = 1 they are compared with the native screens,
+  so this also checks that the GPU draws the native picture exactly.
+  - What ran: 263 ROMs at 1x, 2x and 4x (`roms/3d`, polyrastertest,
+    homebrew, the libnds examples, the BlocksDS 3D, capture and gl2d
+    examples), 360 frames each with A/START/touch presses.
+  - Results:
+    - 789 of 789 runs identical over 38,181 compared frames.
+    - polyrastertest driven through all 77 scenes in manual mode
+      (`--hold 2@1-20 --repeat 0@40/14`): 599 frames a scale,
+      identical.
+  - What the sweep found and what was fixed:
+    - Render-register writes mid-frame (`gpu_late`).
+    - Frame reuse after such a split (`gpu_last`).
+    - A switched-off DS showing the GPU's last picture.
+    - A crash on a full Vertex RAM of strips, which lists more than
+      6144 vertices.
+
+    None was an edge or a dot rule: each showed whole frames from the
+    wrong render.
 - **The machine.** With the export on, the whole-state and screen
   hashes every 50 frames are identical to the export off (SoulSilver
   800 frames, GS field and title 600 each). All 16 DS suites
@@ -192,6 +215,34 @@ GPU busy):
 The composite and capture together take about 1 ms. The JS side
 (vertex placement, bins, record table, uploads) takes 0.3-0.8 ms a frame.
 
+**Uncapped** (`live.mjs`): frames back to back, each drawn to the canvas,
+only the last waited for, so the GPU overlaps the next frame as in
+fast-forward. Frames a second, measured at load about 8 (other jobs on
+the Mac): compare within a row.
+
+| | native | GPU 1x* | software 2x | GPU 2x | software 4x | GPU 4x |
+|---|---|---|---|---|---|---|
+| GS field | 64.5 | 59.5 | 46.9 | 60.2 | 29.2 | 61.5 |
+| GS title | 60.6 | 54.9 | 31.9 | 56.0 | 15.6 | 54.6 |
+| SoulSilver | 219.1 | 202.3 | 141.8 | 204.9 | 99.0 | 202.5 |
+
+\*The GPU drawing the same 1x scene beside the core's own picture. This
+is the GPU path's fixed cost, about 8 %, and the reason it stays off
+at 1x.
+
+**The 1x rasteriser** (`-d:nds_noraster`, a measurement build that
+leaves the 1x frame undrawn; same frames, same run) takes 17 % of
+SoulSilver's host instructions, 12 % of the GS field's and 24 % of the
+GS title's.
+
+- That is the most moving native 3D to the GPU could save. After the
+  export's 4-6 %, the net is 6-20 %.
+- It would need the 3D frame back on the CPU within the frame, for
+  capture, the 2D composite and save states. WebGL2 can only do that
+  by stalling.
+- The GPU does draw 1x exactly (the sweep's k = 1), so correctness is
+  not what holds it back.
+
 ## Trying it
 
 ```
@@ -213,9 +264,6 @@ draw on the GPU.
   would advance `cap_1x` without the GPU seeing them. The GPU path stands
   down while run-ahead is on (`ndsGpuActive`). Fix: export the look-ahead
   frames to the GPU too, or keep `cap_1x` per timeline.
-- **Mid-frame render-register writes** (`draw_lines` splits a frame) use
-  the last render's registers. The software HD splits them. Fix: export
-  each render with the lines it covers.
 - **A lost WebGL context** builds a new renderer. The banks' HD copies
   are lost with it: captured screens show 1x until the game captures
   again.
