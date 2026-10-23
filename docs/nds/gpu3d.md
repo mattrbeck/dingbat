@@ -12,13 +12,15 @@ included, at 2x, 3x and 4x.
   (`gpu3d/render.nim`) and HD (the same code as `RendererOf[S]`) are both
   software. The only GPU work on DS frames was the presenter's output
   filters.
-- **Moving the 1x renderer to the GPU is not worth it.**
-  - It saves at most the rasteriser's share of a frame: 36 % of
-    SoulSilver's 3D-heavy title (Lugia, docs/nds/perf.md), much less
-    where frames are reused.
-  - It costs exactness, or read-backs. Capture, the 2D composite, rewind
-    and save states all need the 1x picture on the CPU, and WebGL2
-    read-backs stall.
+- **Moving the 1x renderer to the GPU by reading its frame back is not
+  worth it.** Capture needs the dots on the CPU the moment the frame
+  starts, and WebGL2 read-backs stall.
+- **Leaving it out is (the skip, below).** Display capture is the only
+  thing on the machine that reads the 3D dots, and the DS decides at
+  line 0 whether a frame captures. A frame that does not is drawn by the
+  GPU alone; the CPU walks its polygons' spans for the line budget only.
+  The machine is unchanged, and the GPU path then runs 9-13 % *under*
+  the CPU-only 1x where nothing captures.
 - **Doing only HD on the GPU** ("just the upscaling") is where the cost
   is.
   - HD's extra is 78-92 % rasteriser. In the browser:
@@ -112,6 +114,64 @@ WebGL2 context:
    destination bank's HD copy (two textures, swapped), from the HD
    composite or 3D and source B as `hd_line` does.
 
+## The skip: the CPU's 3D left out
+
+The export above leaves the CPU drawing every frame's 3D at 1x, as
+without the GPU, so at 1x the GPU path can only cost more. But the 3D
+dots have four readers, and only one is the machine's:
+
+| Reader | Needs |
+|---|---|
+| the screen | display only: the GPU draws it |
+| display capture to VRAM | every dot, exactly (machine state) |
+| RDLINES_COUNT, DISP3DCNT.12 | each line's cost: polygon spans, no dots |
+| save states | nothing at a frame boundary (`dead_3d_frame`: zeros) |
+
+Capture runs for a whole frame or not at all: `Gpu.start_line` latches
+DISPCAPCNT's enable at line 0 (`capturing`). So the skip
+(`Gpu3d.gpu_skip`, `nds.set_gpu_skip`, `--gpu-skip`, on in the web app
+with the GPU path) decides per frame, exactly:
+
+- At line 0, `px_need` = the frame captures (or the frontend wants the
+  1x screens whole: `want_dots`, for a rewind thumbnail). Until then it
+  is true, so a render in V-blank (a render-register write while lines
+  are due) draws as before.
+- A render that needs no dots runs `render.render_costs` instead of
+  `render_frame`: `draw_polygon[1, false]` walks each polygon's rows and
+  spans and charges them (`charge`) without plotting or decoding
+  texels. The line costs, RDLINES and the underflow flag come out as a
+  full render's (`tests/nds_3d_test.nim` checks every scene).
+- The display's 3D line is not pulled (`touch_line`: the render
+  happens on time, for the costs and the export, no dots copied).
+  Engine A composites with an all-transparent 3D line (`gpu.none3d`).
+- Frame reuse needs the dots when this render does (`px_ok`); a state
+  taken mid-frame (debugger only) draws a skipped render's dots first
+  (`settle_dots`).
+
+What this leaves:
+
+- **The machine is the same.** Every state field matches the skip off,
+  in SoulSilver, the GS field and the GS title (sampled at 9 frames),
+  except two display copies the state holds: the last picture of each
+  screen (`Gpu.top` / `bottom`) and the 3D line buffer, which lack the
+  3D in skipped frames. A state loaded elsewhere shows that picture
+  until its next frame is drawn.
+- **The core's own 1x screens lack the 3D** in skipped frames. The web
+  app takes its pictures (library, paused hero, state-slot thumbnail,
+  screenshot, Report a Bug) from the GPU's screens instead
+  (`ndsGpuRgba`). Rewind thumbnails are taken by the core, so a frame
+  that will have one is drawn whole (`want_dots`, one frame a second).
+- **Games that capture every frame gain nothing**: GS's title.
+
+**Step 2, the planes in one pass.** `gpu_paint_line` drew engine A's
+line twice more for the planes: with a transparent 3D layer
+(`render_hd_sub`) and with an opaque one (`hd_prepare`). In a skipped
+frame the line itself was drawn with a transparent 3D layer, so its
+`gfx` and `line` are the first of those (`clear3d`). The line cache
+also reuses such lines now that the 3D's values are not in them; it
+does so only when the line's planes are kept too, since a reused line
+leaves no layer scratch to make planes from (`gp_on`).
+
 `render.nim`'s 64-bit arithmetic fits GLSL ES 3.00's 32-bit integers
 exactly:
 
@@ -162,6 +222,19 @@ exactly:
 
     None was an edge or a dot rule: each showed whole frames from the
     wrong render.
+- **The skip.** `sweep.mjs --skip` runs a second core with the skip
+  (no HD, the GPU drawing every scale) in step with a reference core
+  (software HD, or native at k = 1) and compares the GPU's screens with
+  the reference's. 787 of 789 runs identical at 1x, 2x and 4x. The
+  other two (`dsma_stress_test` 2x, `scene_ups` 4x) differ in one frame
+  each and are identical on two re-runs. The web core's RTC reads the
+  host clock, so two cores can run apart: the stress test's differing
+  dots are its own timing printout. With a fixed clock (`ndsrun`) both
+  ROMs' states match the skip off. Also: the dump harness on skip-mode
+  planes (32 frames of the GS field, title and SoulSilver at 2x and 4x,
+  all identical); `live.mjs`'s 1x check (60 frames each, the GPU's
+  screens equal to the native ones, the pictures taken from them too);
+  `tests/nds_3d_test.nim` (line costs); state field diffs (above).
 - **The machine.** With the export on, the whole-state and screen
   hashes every 50 frames are identical to the export off (SoulSilver
   800 frames, GS field and title 600 each). All 16 DS suites
@@ -235,13 +308,33 @@ leaves the 1x frame undrawn; same frames, same run) takes 17 % of
 SoulSilver's host instructions, 12 % of the GS field's and 24 % of the
 GS title's.
 
-- That is the most moving native 3D to the GPU could save. After the
-  export's 4-6 %, the net is 6-20 %.
-- It would need the 3D frame back on the CPU within the frame, for
-  capture, the 2D composite and save states. WebGL2 can only do that
-  by stalling.
-- The GPU does draw 1x exactly (the sweep's k = 1), so correctness is
-  not what holds it back.
+Where the export's own cost goes (measurement builds that each leave
+one part out): the composite planes are about 88 % of it (3.4-5.3 % of
+the frame), the scene 0.3-0.6 %, the slot images about nothing.
+
+**With the skip** (host instructions against the GPU off, same frames;
+"skip" includes step 2):
+
+| | export | skip, step 1 only | skip | of it, the cost pass |
+|---|---|---|---|---|
+| SoulSilver walk | +3.9 % | -12.5 % | **-13.1 %** | 2.6 % |
+| GS field | +3.9 % | -7.2 % | **-8.6 %** | 1.4 % |
+| GS title (captures every frame) | +5.9 % | +5.8 % | +5.8 % | |
+
+The cost pass is what keeping RDLINES_COUNT exact costs.
+
+In the app (`live.mjs`, uncapped frames a second, load 16-33; the
+states stand still, so many frames reuse the last render and leave
+less to skip than the walks above):
+
+| | native | GPU 1x, no skip | GPU 1x | GPU 4x, no skip | GPU 4x |
+|---|---|---|---|---|---|
+| GS field | 61.0 | 58.8 | **64.7** | 57.3 | 59.5 |
+| GS title | 67.3 | 62.8 | 62.0 | 50.4 | 46.2 |
+| SoulSilver | 198.7 | 190.7 | 195.1 | 187.7 | 184.9 |
+
+The GS title captures every frame: the skip does nothing there, and its
+two columns differ by noise.
 
 ## Trying it
 
@@ -256,6 +349,9 @@ draw on the GPU.
 
 - `ndsGpuBench(120)` gives the core's and the picture's ms a frame.
 - `ndsGpu3d(false)` goes back to the software HD.
+- The GPU path now draws at 1x too, with the skip.
+  `ndsGpuSkip(false)` (or `?gpu3d-skip=0`) keeps the CPU's 3D, as
+  before.
 - With run-ahead on, the software HD is used.
 
 ## Tradeoffs and what is left
@@ -323,6 +419,12 @@ has no framebuffer fetch).
 - `web/nds/gpu3d.js`: the renderer.
 - `web/glpresent.js`: `frame.glTexture`.
 - `web/index.js`: `ndsGpu3d`, `ndsGpuTexture`, `ndsGpuBench`.
-- `tools/ndsrun.nim`: `--gpu`, `--gpu-dump`.
+- The skip: `render.nim render_costs` (`draw_polygon[S, P]`),
+  `gpu3d.nim` (`gpu_skip`, `px_need`, `px_ok`, `touch_line`,
+  `settle_dots`), `gpu.nim` (`none3d`, `gpu_skipping`, `want_dots`),
+  `engine2d.nim` (`gpu_paint_line`'s `clear3d`, `gp_on`),
+  `rewinding.nim nds_rewind_frame`, `rewind.nim thumb_next`,
+  `nds_set_gpu_skip`, `index.js ndsGpuSkip` / `ndsGpuRgba`.
+- `tools/ndsrun.nim`: `--gpu`, `--gpu-skip`, `--gpu-dump`.
 - `tools/gpu3d/run.mjs`: the dump harness.
 - `tools/gpu3d/live.mjs`: the live check and timings.

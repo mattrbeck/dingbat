@@ -6,7 +6,11 @@
 // for dot with the core's (at k = 1, with the 1x screens). A short press
 // script reaches past title screens.
 //
-//   node tools/gpu3d/sweep.mjs OUTDIR ROM... [--k 1,2,4] [--frames 360] [--every 4]
+//   node tools/gpu3d/sweep.mjs OUTDIR ROM... [--k 1,2,4] [--frames 360] [--every 4] [--skip]
+//
+// --skip: the GPU's frames come from a second core with the skip on (no HD
+// there, the CPU's 3D left out of frames nothing on the machine reads), run
+// in step with the first (same presses), whose screens are the reference.
 //
 // One line per ROM and scale; for the first mismatching frame of each it
 // writes OUTDIR/<rom>_k<k>_f<frame>_{sw,gpu,diff}.png. Needs web/nds/nds.js
@@ -30,6 +34,7 @@ const EVERY = Number(opt("--every", "4"));
 // place of the default presses
 const HOLD = opt("--hold", "");
 const REPEAT = opt("--repeat", "");
+const SKIP = args.includes("--skip") ? (args.splice(args.indexOf("--skip"), 1), true) : false;
 const [outArg, ...roms] = args;
 const outDir = resolve(outArg);
 mkdirSync(outDir, { recursive: true });
@@ -73,16 +78,29 @@ const png = (w, h, rgba) => {
 let totals = { runs: 0, exact: 0, polysMax: 0 };
 for (const [url, file] of romFiles) {
   for (const k of KS) {
-    const r = await page.evaluate(async ({ url, k, frames, every, hold, repeat }) => {
+    const r = await page.evaluate(async ({ url, k, frames, every, hold, repeat, skip }) => {
       const { NdsGpu3d } = await import("/web/nds/gpu3d.js");
       if (!window.__core) window.__core = await createNdsCore({ locateFile: (p) => "/web/nds/" + p });
       const c = window.__core;
+      // x: the core the GPU draws from (c itself, or with --skip a second)
+      if (skip && !window.__core2) window.__core2 = await createNdsCore({ locateFile: (p) => "/web/nds/" + p });
+      const x = skip ? window.__core2 : c;
+      const cores = skip ? [c, x] : [c];
       const rom = new Uint8Array(await (await fetch(url)).arrayBuffer());
       c._nds_set_hd(k);
-      c._nds_set_gpu(1);
-      const p = c._nds_rom_alloc(rom.length);
-      c.HEAPU8.set(rom, p);
-      if (!c._nds_boot(0, 0, 0, 0, 0, 0, 0, 0)) return { error: "boot failed" };
+      c._nds_set_gpu(skip ? 0 : 1);
+      if (skip) {
+        x._nds_set_hd(1);
+        x._nds_set_gpu(1);
+        x._nds_set_gpu_skip(1);
+      }
+      for (const m of cores) {
+        const p = m._nds_rom_alloc(rom.length);
+        m.HEAPU8.set(rom, p);
+        if (!m._nds_boot(0, 0, 0, 0, 0, 0, 0, 0)) return { error: "boot failed" };
+      }
+      const button = (id, v) => cores.forEach((m) => m._nds_set_button(id, v));
+      const touch = (tx, ty, v) => cores.forEach((m) => m._nds_set_touch(tx, ty, v));
       const cv = document.getElementById("c");
       const gl = window.__gl || (window.__gl = cv.getContext("webgl2", { antialias: false }));
       // a fresh renderer per run: no capture history from another ROM
@@ -99,34 +117,36 @@ for (const [url, file] of romFiles) {
       let compared = 0, bad = 0, badDots = 0, firstBad = -1, maxPolys = 0, frames3d = 0, pics = null, offAt = 0, lateFrames = 0;
       let lastGen = -1;
       for (let f = 1; f <= frames; f++) {
-        if (press[f] !== undefined) c._nds_set_button(press[f], 1);
-        if (press[f - 3] !== undefined) c._nds_set_button(press[f - 3], 0);
-        if (held && f === held[1][0]) c._nds_set_button(held[0], 1);
-        if (held && f === held[1][1]) c._nds_set_button(held[0], 0);
-        if (rep && f >= rep[1][0] && (f - rep[1][0]) % rep[1][1] === 0) c._nds_set_button(rep[0], 1);
-        if (rep && f >= rep[1][0] + 3 && (f - rep[1][0] - 3) % rep[1][1] === 0) c._nds_set_button(rep[0], 0);
-        if (!hold && !repeat && f === 200) c._nds_set_touch(128, 96, 1);
-        if (!hold && !repeat && f === 203) c._nds_set_touch(128, 96, 0);
-        c._nds_run_frame();
-        c._nds_audio_clear();
+        if (press[f] !== undefined) button(press[f], 1);
+        if (press[f - 3] !== undefined) button(press[f - 3], 0);
+        if (held && f === held[1][0]) button(held[0], 1);
+        if (held && f === held[1][1]) button(held[0], 0);
+        if (rep && f >= rep[1][0] && (f - rep[1][0]) % rep[1][1] === 0) button(rep[0], 1);
+        if (rep && f >= rep[1][0] + 3 && (f - rep[1][0] - 3) % rep[1][1] === 0) button(rep[0], 0);
+        if (!hold && !repeat && f === 200) touch(128, 96, 1);
+        if (!hold && !repeat && f === 203) touch(128, 96, 0);
+        for (const m of cores) {
+          m._nds_run_frame();
+          m._nds_audio_clear();
+        }
         // switched off (libnds examples do on START): nothing more is drawn,
         // and the app shows the core's own black screens
         if (c._nds_powered_off()) { offAt = f; break; }
-        const buf = c.HEAPU8.buffer;
-        const sp = c._nds_gpu_scene();
+        const buf = x.HEAPU8.buffer;
+        const sp = x._nds_gpu_scene();
         if (!sp) continue;
-        const scene = new Uint32Array(buf, sp, c._nds_gpu_scene_len());
+        const scene = new Uint32Array(buf, sp, x._nds_gpu_scene_len());
         maxPolys = Math.max(maxPolys, scene[1]);
         if (scene[6] !== lastGen) { lastGen = scene[6]; if (scene[1] > 0) frames3d++; }
         const late = [];
-        for (let i = 0, nl = c._nds_gpu_late_count(); i < nl; i++) {
-          late.push({ scene: new Uint32Array(buf, c._nds_gpu_late(i), c._nds_gpu_late_len(i)), line: c._nds_gpu_late_line(i) });
+        for (let i = 0, nl = x._nds_gpu_late_count(); i < nl; i++) {
+          late.push({ scene: new Uint32Array(buf, x._nds_gpu_late(i), x._nds_gpu_late_len(i)), line: x._nds_gpu_late_line(i) });
         }
         if (late.length) lateFrames++;
-        g.drawFrame(scene, new Uint8Array(buf, c._nds_gpu_tex(), 0x80000), new Uint8Array(buf, c._nds_gpu_pal(), 0x18000), late);
-        g.composite([new Uint16Array(buf, c._nds_fb555_top(), 256 * 192), new Uint16Array(buf, c._nds_fb555_bottom(), 256 * 192)],
-          new Uint32Array(buf, c._nds_gpu_plane(), 256 * 192 * 4), new Uint32Array(buf, c._nds_gpu_plane2(), 256 * 192 * 4),
-          new Uint32Array(buf, c._nds_gpu_lines(), 192 * 8));
+        g.drawFrame(scene, new Uint8Array(buf, x._nds_gpu_tex(), 0x80000), new Uint8Array(buf, x._nds_gpu_pal(), 0x18000), late);
+        g.composite([new Uint16Array(buf, x._nds_fb555_top(), 256 * 192), new Uint16Array(buf, x._nds_fb555_bottom(), 256 * 192)],
+          new Uint32Array(buf, x._nds_gpu_plane(), 256 * 192 * 4), new Uint32Array(buf, x._nds_gpu_plane2(), 256 * 192 * 4),
+          new Uint32Array(buf, x._nds_gpu_lines(), 192 * 8));
         if (f % every !== 0) continue;
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, g.screens.t, 0);
@@ -151,9 +171,9 @@ for (const [url, file] of romFiles) {
         }
       }
       gl.deleteFramebuffer(fb);
-      c._nds_unload();
+      for (const m of cores) m._nds_unload();
       return { compared, bad, badDots, firstBad, maxPolys, frames3d, pics, W, H, offAt, lateFrames };
-    }, { url, k, frames: FRAMES, every: EVERY, hold: HOLD, repeat: REPEAT });
+    }, { url, k, frames: FRAMES, every: EVERY, hold: HOLD, repeat: REPEAT, skip: SKIP });
     const name = basename(file, ".nds");
     if (r.error) { console.log(`${name} ${k}x: ${r.error}`); continue; }
     totals.runs++;

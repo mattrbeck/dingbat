@@ -17284,17 +17284,25 @@ const NDS_HD_SCALES = [1, 2, 3, 4];
 // ?gpu3d=1, localStorage "nds-gpu3d" = "1", or ndsGpu3d(true) in the
 // console): the core exports each frame's scene and web/nds/gpu3d.js draws
 // the HD 3D and composites it in the presenter's WebGL2 context, in place
-// of the core's software HD. Not with run-ahead (its look-ahead frames
-// would skip display captures the GPU must see).
+// of the core's software HD, at any scale (1x too). Not with run-ahead (its
+// look-ahead frames would skip display captures the GPU must see). With
+// the skip (on unless ?gpu3d-skip=0 / "nds-gpu3d-skip" = "0" /
+// ndsGpuSkip(false)), the core leaves a frame's 3D to the GPU when nothing
+// on the machine reads it: its own screens then lack the 3D, so pictures
+// taken from them come from the GPU's (ndsGpuRgba).
 let ndsGpuFlag = (() => {
   try {
     return new URLSearchParams(location.search).get("gpu3d") === "1" || localStorage.getItem("nds-gpu3d") === "1";
   } catch { return false; }
 })();
+let ndsGpuSkipFlag = (() => {
+  try {
+    return new URLSearchParams(location.search).get("gpu3d-skip") !== "0" && localStorage.getItem("nds-gpu3d-skip") !== "0";
+  } catch { return true; }
+})();
 let ndsGpuMod = null;     // web/nds/gpu3d.js, imported when the flag is on
 let ndsGpuState = null;   // { gl, g, frames, k }: the renderer for the presenter's context
-const ndsGpuActive = () => ndsGpuFlag && ndsDisplay.hd > 1 && runaheadFrames === 0 &&
-  !!(ndsCore && ndsCore._nds_set_gpu);
+const ndsGpuActive = () => ndsGpuFlag && runaheadFrames === 0 && !!(ndsCore && ndsCore._nds_set_gpu);
 const ndsApplyHd = () => {
   const c = ndsCore;
   if (!c) return;
@@ -17306,6 +17314,7 @@ const ndsApplyHd = () => {
   }
   const on = gpu && !!ndsGpuMod;
   c._nds_set_gpu?.(on ? 1 : 0);
+  c._nds_set_gpu_skip?.(on && ndsGpuSkipFlag ? 1 : 0);
   c._nds_set_hd?.(on ? 1 : ndsDisplay.hd);
 };
 window.ndsGpu3d = (on) => {
@@ -17314,14 +17323,26 @@ window.ndsGpu3d = (on) => {
   ndsApplyHd();
   return ndsGpuActive();
 };
+window.ndsGpuSkip = (on) => {
+  ndsGpuSkipFlag = !!on;
+  try { localStorage.setItem("nds-gpu3d-skip", on ? "1" : "0"); } catch {}
+  ndsApplyHd();
+  return ndsGpuSkipFlag;
+};
+// The host GPU draws the screens: it has a frame (switched off, the core
+// draws no lines and exports none: its own black screens, not the GPU's
+// last picture).
+const ndsGpuShowing = () => {
+  const c = ndsCore;
+  return !!(c && ndsCoreGame !== null && ndsGpuMod && ndsGpuActive() && c._nds_gpu_frames() > 0 &&
+            !c._nds_powered_off?.());
+};
 // The HD scale the core draws at (1: none, or a core without HD), or the
 // host GPU's.
 const ndsHdNow = () => {
   const c = ndsCore;
   if (!c || !c._nds_hd_scale || ndsCoreGame === null) return 1;
-  // (switched off, the core draws no lines and exports none: its own black
-  // screens, not the GPU's last picture)
-  if (ndsGpuMod && ndsGpuActive() && c._nds_gpu_frames() > 0) return c._nds_powered_off?.() ? 1 : ndsDisplay.hd;
+  if (ndsGpuShowing()) return ndsDisplay.hd;
   return c._nds_hd_fb555_top() && c._nds_hd_fb555_bottom() ? c._nds_hd_scale() : 1;
 };
 // The presenter's texture for this frame from the GPU renderer: the scene
@@ -17352,6 +17373,29 @@ const ndsGpuTexture = (gl, k) => {
   }
   s.g.restore();
   return s.g.screens.t;
+};
+// Both screens as RGBA at 1x (top, bottom) from the GPU's picture when it
+// draws the screens (the core's lack the 3D of a frame the skip left to
+// it; every k-th dot of an HD picture), else null.
+const ndsGpuRgba = () => {
+  const s = ndsGpuState;
+  if (!ndsGpuShowing() || !s || s.gl.isContextLost() || !s.g.screens) return null;
+  const k = s.k || 1, W = NdsUtil.W, H = NdsUtil.H;
+  const all = s.g.read(s.g.screens);
+  s.g.restore();
+  const out = [new Uint8Array(W * H * 4), new Uint8Array(W * H * 4)];
+  for (let scr = 0; scr < 2; scr++) {
+    const o = out[scr];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = all[(scr * H + y) * k * W * k + x * k];
+        const i = (y * W + x) * 4;
+        const r = c & 31, g = (c >> 5) & 31, b = (c >> 10) & 31;
+        o[i] = (r << 3) | (r >> 2); o[i + 1] = (g << 3) | (g >> 2); o[i + 2] = (b << 3) | (b >> 2); o[i + 3] = 255;
+      }
+    }
+  }
+  return out;
 };
 /** @type {NdsDisplay} */
 let ndsDisplay = { ...NDS_DISPLAY_DEFAULTS };
@@ -17399,7 +17443,7 @@ const ndsFrame = () => {
   const c = ndsCore;
   if (!c || ndsCoreGame === null) return null;
   const k = ndsHdNow();
-  if (k > 1 && c._nds_hd_scale() === 1) {
+  if (ndsGpuShowing()) {
     // HD 3D on the host GPU: the presenter draws its texture
     const views = ndsViews.map((v) => ({
       ...v, src: { x: v.src.x * k, y: v.src.y * k, w: v.src.w * k, h: v.src.h * k } }));
@@ -17431,6 +17475,8 @@ const ndsFrame = () => {
 const ndsTopRgba = () => {
   const c = ndsCore;
   if (!c || ndsCoreGame === null) return null;
+  const gpu = ndsGpuRgba();
+  if (gpu) return { heap: gpu[0], w: NdsUtil.W, h: NdsUtil.H };
   const p = c._nds_fb_top();
   if (!p) return null;
   return { heap: c.HEAPU8.slice(p, p + NdsUtil.W * NdsUtil.H * 4), w: NdsUtil.W, h: NdsUtil.H };
@@ -17440,6 +17486,13 @@ const ndsTopRgba = () => {
 const ndsBothRgba = () => {
   const c = ndsCore;
   if (!c || ndsCoreGame === null) return null;
+  const gpu = ndsGpuRgba();
+  if (gpu) {
+    const both = new Uint8Array(gpu[0].length * 2);
+    both.set(gpu[0], 0);
+    both.set(gpu[1], gpu[0].length);
+    return { heap: both, w: NdsUtil.W, h: NdsUtil.H * 2 };
+  }
   const top = c._nds_fb_top();
   const bottom = c._nds_fb_bottom();
   if (!top || !bottom) return null;
@@ -17470,8 +17523,9 @@ const ndsNativeCanvas = () => {
     ndsNativeBig.height = 2 * H * NATIVE_SCALE;
   }
   const px = new Uint8ClampedArray(2 * n);
-  px.set(c.HEAPU8.subarray(t, t + n), 0);
-  px.set(c.HEAPU8.subarray(b, b + n), n);
+  const gpu = ndsGpuRgba();
+  px.set(gpu ? gpu[0] : c.HEAPU8.subarray(t, t + n), 0);
+  px.set(gpu ? gpu[1] : c.HEAPU8.subarray(b, b + n), n);
   ndsNativeSmall.getContext("2d").putImageData(new ImageData(px, W, 2 * H), 0, 0);
   const ctx = ndsNativeBig.getContext("2d");
   ctx.imageSmoothingEnabled = false;

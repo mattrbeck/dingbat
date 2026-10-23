@@ -10,6 +10,7 @@ import zippy
 import dingbat/nds/mem/vram
 import dingbat/nds/io/irq
 import dingbat/nds/gpu3d/gpu3d
+from dingbat/nds/gpu3d/render import render_costs
 import dingbat/nds/nds
 import dingbat/nds/sched
 
@@ -106,6 +107,13 @@ proc finish(g: Gpu3d; name: string) =
   g.cmd(0x50, 0)          # SWAP_BUFFERS
   g.on_vblank()
   g.render_frame()
+  # the host-GPU skip's pass (render_costs) walks the same spans without
+  # drawing: the same line costs, RDLINES and underflow flag
+  let costs = g.ren.line_cost
+  let (rdlines, underflow) = (g.ren.rdlines, g.ren.underflow)
+  g.ren.render_costs(nil, g.polys, g.verts, g.disp3dcnt, 0)
+  check(g.ren.line_cost == costs and g.ren.rdlines == rdlines and g.ren.underflow == underflow,
+        name & ": line costs without drawing")
   var img = newSeq[uint32](256 * 192)
   for y in 0 ..< 192:
     for x in 0 ..< 256:

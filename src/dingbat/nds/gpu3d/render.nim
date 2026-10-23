@@ -81,7 +81,7 @@ type
     zero_page: seq[uint8]
     mixed: seq[seq[uint8]]        ## pages several banks overlap: OR'd copies
     order: seq[int64]             ## sort key << 20 | polygon index
-    line_cost: array[H, int32]    ## estimated bus cycles to render each line (S = 1 only)
+    line_cost*: array[H, int32]   ## estimated bus cycles to render each line (S = 1 only)
     # decoded texels (`tex_cached`): texels in pixel format, filled as the
     # dots read them, valid while vram.tex_gen stands
     tc_gen: uint64                ## vram.tex_gen the cache holds texels of
@@ -823,8 +823,10 @@ proc charge[S: static int](r: RendererOf[S]; y, x0, x1: int) {.inline.} =
     let w = max(0, min(W, x1) - max(0, x0))
     r.line_cost[y] += int32(RENDER_POLY_CYCLES + w div RENDER_DOTS_PER_CYCLE)
 
-proc draw_polygon[S: static int](r: RendererOf[S]; vram: Vram; poly: Polygon; verts: openArray[Vertex]; disp3dcnt: uint32;
-                  wbuffer: bool) =
+proc draw_polygon[S: static int; P: static bool](r: RendererOf[S]; vram: Vram; poly: Polygon; verts: openArray[Vertex];
+                  disp3dcnt: uint32; wbuffer: bool) =
+  ## The polygon's dots, or with P false only its line costs (`charge`:
+  ## the same rows and spans, nothing drawn, no texture read).
   const WS = W * S
   const HS = H * S
   let n = int(poly.count)
@@ -865,7 +867,7 @@ proc draw_polygon[S: static int](r: RendererOf[S]; vram: Vram; poly: Polygon; ve
     c.rep_t = (poly.tex and 0x20000) != 0
     c.fmask_s = (if (poly.tex and 0x40000) != 0: c.sw - 1 else: 0)
     c.fmask_t = (if (poly.tex and 0x80000) != 0: c.th - 1 else: 0)
-    c.tc = r.tex_cached(vram, poly.tex, poly.pltt)
+    when P: c.tc = r.tex_cached(vram, poly.tex, poly.pltt)
   # a polygon whose vertices sit on at most two dots is a line segment:
   # always drawn whole (GBATEK "Polygon Definitions by Vertices")
   var line = true
@@ -897,6 +899,7 @@ proc draw_polygon[S: static int](r: RendererOf[S]; vram: Vram; poly: Polygon; ve
     let R = EndAttr(x: sx[ri], c: va[ri].c, s: va[ri].s, t: va[ri].t, z: va[ri].z, w: va[ri].w)
     var sp = span_step(L, R)
     r.charge(int(ymin), int(sx[li]), max(int(sx[ri]), int(sx[li]) + 1))
+    when not P: return
     r.fill(c, int(ymin), max(0, int(sx[li])), min(WS, max(int(sx[ri]), int(sx[li]) + 1)), L, R, sp, true)
     return
   # The rasteriser walks two chains of edges down from the top vertex (the
@@ -959,6 +962,7 @@ proc draw_polygon[S: static int](r: RendererOf[S]; vram: Vram; poly: Polygon; ve
       let xe = if rfill: rr.s else: rr.s - 1
       if xs <= xe + 1:
         r.charge(y, int(xs), int(xe) + 1)
+        when not P: continue
         let EL = pl.edge_end(va, y, xs)
         let ER = pr.edge_end(va, y, xe + 1)
         var sp = span_step(EL, ER)
@@ -997,6 +1001,7 @@ proc draw_polygon[S: static int](r: RendererOf[S]; vram: Vram; poly: Polygon; ve
     let L = le.edge_run(y, false)
     let R = re.edge_run(y, true)
     r.charge(y, int(L.s), int(R.e))
+    when not P: continue
     # span ends: the outer ends of the two runs, each with the edge's
     # attributes for the row that end belongs to
     let yl = if le.amaj and le.dec: y + 1 else: y
@@ -1186,7 +1191,7 @@ proc render_frame_body[S: static int](r: RendererOf[S]; vram: Vram; polys: openA
   when defined(r3dprof):
     let tb = getMonoTime()
   for k in r.order:
-    r.draw_polygon(vram, polys[int(k and 0xFFFFF)], verts, disp3dcnt, wbuffer)
+    draw_polygon[S, true](r, vram, polys[int(k and 0xFFFFF)], verts, disp3dcnt, wbuffer)
   when defined(r3dprof):
     prof_draw += (getMonoTime() - tb).inNanoseconds
   if (disp3dcnt and 0x10) != 0: r.anti_alias()
@@ -1213,5 +1218,17 @@ proc render_frame*[S: static int](r: RendererOf[S]; vram: Vram; polys: openArray
       prof_ns = 0; prof_frames = 0; prof_polys = 0; prof_dots = 0; prof_pass = 0
   else:
     r.render_frame_body(vram, polys, verts, disp3dcnt, swap_param)
+
+proc render_costs*(r: Renderer; vram: Vram; polys: openArray[Polygon]; verts: openArray[Vertex];
+                   disp3dcnt: uint32; swap_param: uint32) =
+  ## What render_frame leaves in line_cost, rdlines and underflow, without
+  ## drawing: each polygon walked row by row for its spans only
+  ## (draw_polygon[1, false]; the costs add up, so the drawing order does
+  ## not matter). The colour buffer is left as it was. For a frame whose
+  ## dots nothing on the machine reads (gpu3d.nim, the host-GPU skip).
+  for y in 0 ..< H: r.line_cost[y] = 0
+  let wbuffer = (swap_param and 2) != 0
+  for p in polys: draw_polygon[1, false](r, vram, p, verts, disp3dcnt, wbuffer)
+  r.budget()
 
 {.pop.}

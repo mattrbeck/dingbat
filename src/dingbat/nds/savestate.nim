@@ -73,7 +73,8 @@ const
               "cap_hd", "cap_1x", "hd_vline", "hd_bline", "hd_clear_gfx", "hd_clear_line", "hd_paint",
               "hd_lp", "hd_lg", "hd_ld", "hd_rep_ok", "hd_rep",
               # host-GPU rendering's composite planes (docs/nds/gpu3d.md)
-              "gpu_on", "gpu_plane", "gpu_plane2", "gpu_lines", "gpu_paint", "gpu_frames"]
+              "gpu_on", "gpu_plane", "gpu_plane2", "gpu_lines", "gpu_paint", "gpu_frames",
+              "want_dots"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
   # vgen/remap_gen/pbase: the 2D engines' line reuse (engine2d.nim); remap()
@@ -87,7 +88,7 @@ const
                  "objprio", "objattr", "winmask", "line_semi", "line_objwin", "obj_prios",
                  "lc_on", "mem_gen", "lgen", "touch", "lc_valid", "lc_key", "lc_touch", "lc_vsum",
                  "lc_line", "lc_3d", "lc_reused", "hd_on",
-                 "gp_valid", "gp_key", "gp_vsum", "gp_reused"]
+                 "gp_valid", "gp_key", "gp_vsum", "gp_reused", "gp_on"]
   # reuse_*/last_*: what the last real render drew (render_frame); the
   # remap() in after_load bumps vram.tex_gen, so a loaded machine draws afresh
   GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched", "reuse_on", "reuse_ok", "reused", "last_gen",
@@ -98,7 +99,8 @@ const
                 "hd_scale", "hpos", "hd_verts", "hd2", "hd3", "hd4", "hd_frame", "last_hpos",
                 # host-GPU rendering's export (docs/nds/gpu3d.md)
                 "gpu_on", "gpu_scene", "gpu_gen", "gpu_tex", "gpu_pal", "gpu_tex_ver", "gpu_tex_gen",
-                "gpu_late", "gpu_late_line", "gpu_late_frame", "gpu_frame", "gpu_last"]
+                "gpu_late", "gpu_late_line", "gpu_late_frame", "gpu_frame", "gpu_last",
+                "gpu_skip", "px_need", "px_ok"]
   GEO_SKIP = ["hd_on", "hpos"]   # HD rendering's vertex positions (docs/nds/hd3d.md)
   # Per-frame scratch: render_frame's clear() rewrites each dot's `px`
   # (depth, IDs, flags, coverage and the layer behind) before anything
@@ -718,6 +720,8 @@ proc state_payload*(n: NDS; aligned = false): string =
   ## `aligned`: each run-time-length seq padded to its room, so a delta
   ## between two such payloads lines up (the rewind ring; in memory only,
   ## never stored: `state_bytes` writes the plain form).
+  # mid-frame, a render the host-GPU skip left without dots draws them now
+  if not n.dead_3d_frame(): n.gpu3d.settle_dots()
   var s = Saver(buf: newString(8 * 1024 * 1024), aligned: aligned,
                 rooms: addr n.state_rooms, dead3d: n.dead_3d_frame())
   s.write_preamble(n)
@@ -920,6 +924,9 @@ proc after_load(n: NDS) =
   privateAccess(NdsScheduler)
   privateAccess(Slot2)
   privateAccess(Gpu)
+  # the renderer's colour buffer is the state's: a render the host-GPU skip
+  # left without dots before the load is not this machine's
+  n.gpu3d.px_ok = true
   let g = n.gpu3d.geo
   check_range(g.nbuf, 0, 3, "geometry.nbuf")
   check_range(n.gpu3d.pk_left, 0, 32, "gpu3d.pk_left")

@@ -29,6 +29,7 @@ interface NdsCoreModule {
   // images and engine A's planes (pointers into HEAPU8), and the frames
   // exported so far. Optional: an older core lacks them.
   _nds_set_gpu?: (on: number) => void;
+  _nds_set_gpu_skip?: (on: number) => void;
   _nds_gpu_frames?: () => number;
   _nds_gpu_scene?: () => number;
   _nds_gpu_scene_len?: () => number;
@@ -128,4 +129,5 @@ interface Window {
   // prototype's switch.
   ndsGpuBench?: (frames?: number) => { core: number; picture: number } | null;
   ndsGpu3d?: (on: boolean) => boolean;
+  ndsGpuSkip?: (on: boolean) => boolean;
 }
