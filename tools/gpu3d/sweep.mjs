@@ -25,6 +25,11 @@ const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args
 const KS = opt("--k", "1,2,4").split(",").map(Number);
 const FRAMES = Number(opt("--frames", "360"));
 const EVERY = Number(opt("--every", "4"));
+// --hold KEY@F-L (button ids as nds_set_button: 0 A .. 3 START .. 2 SELECT)
+// and --repeat KEY@F/N (pressed for 3 frames every N frames from F) in
+// place of the default presses
+const HOLD = opt("--hold", "");
+const REPEAT = opt("--repeat", "");
 const [outArg, ...roms] = args;
 const outDir = resolve(outArg);
 mkdirSync(outDir, { recursive: true });
@@ -68,7 +73,7 @@ const png = (w, h, rgba) => {
 let totals = { runs: 0, exact: 0, polysMax: 0 };
 for (const [url, file] of romFiles) {
   for (const k of KS) {
-    const r = await page.evaluate(async ({ url, k, frames, every }) => {
+    const r = await page.evaluate(async ({ url, k, frames, every, hold, repeat }) => {
       const { NdsGpu3d } = await import("/web/nds/gpu3d.js");
       if (!window.__core) window.__core = await createNdsCore({ locateFile: (p) => "/web/nds/" + p });
       const c = window.__core;
@@ -88,14 +93,20 @@ for (const [url, file] of romFiles) {
       const fb = gl.createFramebuffer();
       // presses: A and START now and then (past title screens, libnds
       // examples' prompts), a tap in the middle of the touch screen
-      const press = { 100: 0, 160: 3, 220: 0, 280: 0 };
+      const press = hold || repeat ? {} : { 100: 0, 160: 3, 220: 0, 280: 0 };
+      const held = hold ? hold.split("@").map((v, i) => i ? v.split("-").map(Number) : Number(v)) : null;
+      const rep = repeat ? repeat.split("@").map((v, i) => i ? v.split("/").map(Number) : Number(v)) : null;
       let compared = 0, bad = 0, badDots = 0, firstBad = -1, maxPolys = 0, frames3d = 0, pics = null, offAt = 0, lateFrames = 0;
       let lastGen = -1;
       for (let f = 1; f <= frames; f++) {
         if (press[f] !== undefined) c._nds_set_button(press[f], 1);
         if (press[f - 3] !== undefined) c._nds_set_button(press[f - 3], 0);
-        if (f === 200) c._nds_set_touch(128, 96, 1);
-        if (f === 203) c._nds_set_touch(128, 96, 0);
+        if (held && f === held[1][0]) c._nds_set_button(held[0], 1);
+        if (held && f === held[1][1]) c._nds_set_button(held[0], 0);
+        if (rep && f >= rep[1][0] && (f - rep[1][0]) % rep[1][1] === 0) c._nds_set_button(rep[0], 1);
+        if (rep && f >= rep[1][0] + 3 && (f - rep[1][0] - 3) % rep[1][1] === 0) c._nds_set_button(rep[0], 0);
+        if (!hold && !repeat && f === 200) c._nds_set_touch(128, 96, 1);
+        if (!hold && !repeat && f === 203) c._nds_set_touch(128, 96, 0);
         c._nds_run_frame();
         c._nds_audio_clear();
         // switched off (libnds examples do on START): nothing more is drawn,
@@ -142,7 +153,7 @@ for (const [url, file] of romFiles) {
       gl.deleteFramebuffer(fb);
       c._nds_unload();
       return { compared, bad, badDots, firstBad, maxPolys, frames3d, pics, W, H, offAt, lateFrames };
-    }, { url, k, frames: FRAMES, every: EVERY });
+    }, { url, k, frames: FRAMES, every: EVERY, hold: HOLD, repeat: REPEAT });
     const name = basename(file, ".nds");
     if (r.error) { console.log(`${name} ${k}x: ${r.error}`); continue; }
     totals.runs++;
