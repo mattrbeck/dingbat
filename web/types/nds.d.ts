@@ -37,6 +37,10 @@ interface NdsCoreModule {
   _nds_gpu_plane?: () => number;
   _nds_gpu_plane2?: () => number;
   _nds_gpu_lines?: () => number;
+  _nds_gpu_late_count?: () => number;
+  _nds_gpu_late?: (i: number) => number;
+  _nds_gpu_late_len?: (i: number) => number;
+  _nds_gpu_late_line?: (i: number) => number;
   _nds_fb_top(): number;
   _nds_fb_bottom(): number;
   _nds_set_button(id: number, pressed: number): void;

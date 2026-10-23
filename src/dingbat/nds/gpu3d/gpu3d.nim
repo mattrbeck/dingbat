@@ -124,6 +124,12 @@ type
     gpu_tex*, gpu_pal*: seq[uint8]  ## texture / palette slot images
     gpu_tex_ver*: uint32          ## bumped whenever the images are rebuilt
     gpu_tex_gen: uint64           ## vram.tex_gen the images hold
+    # a render-register write mid-frame renders again for the lines still
+    # to come (draw_lines): those renders, each with the first line it gives
+    gpu_late*: seq[seq[uint32]]
+    gpu_late_line*: seq[int]
+    gpu_late_frame*: int          ## the exported frame they belong to
+    gpu_frame*: int               ## frames exported so far (Gpu.gpu_frames)
 
 const
   RENDER_START_LINE = 214   ## GBATEK "RDLINES_COUNT": rendering starts in scanline 214
@@ -495,8 +501,25 @@ proc export_gpu(g: Gpu3d) =
     g.gpu_tex_gen = g.vram.tex_gen
     inc g.gpu_tex_ver
   inc g.gpu_gen
-  export_scene(g.gpu_scene, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,
-               g.gpu_gen, g.gpu_tex_ver)
+  if g.done_lines == 0:
+    # the frame's first render
+    export_scene(g.gpu_scene, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,
+                 g.gpu_gen, g.gpu_tex_ver)
+    g.gpu_late.setLen(0)
+    g.gpu_late_line.setLen(0)
+  else:
+    # a later one, for lines done_lines on (frame reuse can skip a frame's
+    # first render, so the parts carry the frame they are for)
+    let frame = g.gpu_frame + 1
+    if g.gpu_late_frame != frame:
+      g.gpu_late.setLen(0)
+      g.gpu_late_line.setLen(0)
+      g.gpu_late_frame = frame
+    var part: seq[uint32]
+    export_scene(part, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,
+                 g.gpu_gen, g.gpu_tex_ver)
+    g.gpu_late.add part
+    g.gpu_late_line.add g.done_lines
 
 proc set_gpu*(g: Gpu3d; on: bool) =
   ## Export each rendered scene for a host-GPU renderer (gpu_scene,
@@ -592,7 +615,10 @@ proc render_frame*(g: Gpu3d) =
     g.rendered = true
     inc g.reused
     return
-  g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
+  # -d:nds_noraster leaves the 1x frame undrawn: what the rasteriser costs
+  # (a measurement only, docs/nds/gpu3d.md; the picture is wrong)
+  when not defined(nds_noraster):
+    g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
   g.rendered = true
   if g.hd_scale > 1: g.render_hd()
   if g.gpu_on: g.export_gpu()
