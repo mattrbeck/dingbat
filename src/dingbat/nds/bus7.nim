@@ -198,6 +198,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
   of 0x06:
     n.dev7 = true
     let off = int(a and 0x3FFFF)
+    when defined(nds_cap_survey): n.gpu.vram.note_read(vrArm7, off, rdCpu7)
     when width == 32: n.gpu.vram.read32(vrArm7, off)
     elif width == 16: uint32(n.gpu.vram.read16(vrArm7, off))
     else: uint32(n.gpu.vram.read8(vrArm7, off))

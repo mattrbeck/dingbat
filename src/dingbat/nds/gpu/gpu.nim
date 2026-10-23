@@ -6,6 +6,7 @@
 import ../mem/vram
 import ../gpu3d/gpu3d
 import engine2d
+when defined(nds_cap_survey): import capsurvey
 import ../quirky
 
 # No proc here raises on purpose; `quirky` drops the error-flag test
@@ -58,6 +59,8 @@ type
     gpu_plane2*: seq[uint32]          ## 256 x 192 dots, 4 words each: capture's inputs (gpu_valid)
     gpu_lines*: seq[uint32]           ## 192 lines, 8 words each (gpu_line)
     gpu_frames*: int                  ## frames exported (gpu_line, at line 191)
+    gpu_row_at*, gpu_row2_at*: array[192, uint32]  ## gpu_plane / gpu_plane2: the
+                                      ## `gpu_epoch` + 1 each row was last written at
     want_dots*: bool                  ## the frontend wants this frame's 1x screens whole (a thumbnail)
     gpu_paint: HdPaint
     cap_1x: array[4, seq[uint32]]     ## ... and the halfword it wrote there (bit 16 = captured)
@@ -205,17 +208,27 @@ proc set_hd*(g: Gpu; scale: int) =
     g.hd_top = newSeq[uint16](256 * k * 192 * k)
     g.hd_bottom = newSeq[uint16](256 * k * 192 * k)
 
+var gpu_epoch*: uint32
+  ## Frames exported by any core in this process (never reset, unlike
+  ## gpu_frames, which starts again with each core): a host-GPU renderer
+  ## that uploaded the planes at epoch e re-uploads only the rows stamped
+  ## after it (gpu_row_at).
+
 proc set_gpu*(g: Gpu; on: bool) =
   ## Export the 3D scene and engine A's composite planes each frame for a
   ## host-GPU renderer (docs/nds/gpu3d.md). Display only.
   g.gpu_on = on
-  g.engine_a.gp_on = on
+  g.engine_a.set_gp_on(on)
   if g.gpu3d != nil: g.gpu3d.set_gpu(on)
   for b in 0..3: g.cap_1x[b] = @[]
   if on:
     g.gpu_plane = newSeq[uint32](256 * 192 * 4)
     g.gpu_plane2 = newSeq[uint32](256 * 192 * 4)
     g.gpu_lines = newSeq[uint32](192 * 8)
+    inc gpu_epoch
+    for y in 0 ..< 192:
+      g.gpu_row_at[y] = gpu_epoch
+      g.gpu_row2_at[y] = gpu_epoch
   else:
     g.gpu_plane = @[]
     g.gpu_plane2 = @[]
@@ -238,6 +251,7 @@ proc gpu_valid(g: Gpu; y: int) =
   let roff = if a.display_mode == 2: 0 else: int((capc shr 26) and 3) * 0x8000
   let rbase = roff + y * cw * 2
   let p2 = cast[ptr UncheckedArray[uint32]](addr g.gpu_plane2[y * 1024])
+  g.gpu_row2_at[y] = gpu_epoch + 1
   for x in 0 ..< 256:
     var v = 0'u32
     if have:
@@ -270,15 +284,16 @@ proc gpu_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   info[0] = (if paint: 1'u32 else: 0'u32) or (if a_top: 2'u32 else: 0'u32) or
             (if shown and dm == 1: 4'u32 else: 0'u32) or (if shown and dm == 2: 8'u32 else: 0'u32) or
             (if cap_line: 16'u32 else: 0'u32) or (dm shl 8)
-  if paint:
-    a.gpu_paint_line(y, g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]), info,
-                     a.line3d == addr(none3d))
+  if paint and a.gpu_paint_line(y, g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]),
+                                info, a.line3d == addr(none3d)):
+    g.gpu_row_at[y] = gpu_epoch + 1
   info[4] = capc
   info[5] = (a.dispcnt shr 18) and 3
   info[6] = uint32(a.master_bright)
   info[7] = 0
   if y == 191:
     inc g.gpu_frames
+    inc gpu_epoch
     if g.gpu3d != nil: g.gpu3d.gpu_frame = g.gpu_frames
   if not cap_line: return
   let dst_bank = int((capc shr 16) and 3)
@@ -606,10 +621,29 @@ proc render_line*(g: Gpu; y: int) =
     a.line3d = nil
   let need_gfx = cap and ((a.dispcapcnt shr 29) and 3) != 1 and
                  (a.dispcapcnt and (1'u32 shl 24)) == 0
+  when defined(nds_cap_survey):
+    block:
+      let b = g.engine_b
+      let rb = int((a.dispcnt shr 18) and 3)
+      if y == 0:
+        let a_gfx = a.enabled and a.display_mode == 1
+        let b_gfx = b.enabled and b.display_mode == 1
+        let tex = g.gpu3d != nil and (g.gpu3d.disp3dcnt and 1) != 0 and
+                  (a.bg0_is_3d and (a.dispcnt and 0x100) != 0 or
+                   cap and (a.dispcapcnt and (1'u32 shl 24)) != 0)
+        g.vram.frame_start(a_gfx and (a.dispcnt and 0xF00) != 0, a_gfx and (a.dispcnt and 0x1000) != 0,
+                           b_gfx and (b.dispcnt and 0xF00) != 0, b_gfx and (b.dispcnt and 0x1000) != 0, tex)
+      if a.enabled and a.display_mode == 2 and (g.powcnt1 and 1) != 0: note_bank(rb, rdDisplay)
+      if cap and ((a.dispcapcnt shr 29) and 3) != 0 and (a.dispcapcnt and (1'u32 shl 25)) == 0:
+        note_bank(rb, rdCaptureB)
+      let dst = int((a.dispcapcnt shr 16) and 3)
+      if cap and y == 0 and g.vram.lcdc_mapped(VramBank(dst)): captured(dst, a.dispcapcnt)
   a.render_line(y, need_gfx)
   g.engine_b.render_line(y)
-  if g.hd > 1 or g.gpu_on: g.hd_pre(y)
-  if g.gpu_on: g.gpu_valid(y)
+  # (the GPU reads gpu_plane2 only on lines captured or shown from VRAM)
+  let valid = g.gpu_on and (cap or a.display_mode == 2)
+  if g.hd > 1 or valid: g.hd_pre(y)
+  if valid: g.gpu_valid(y)
   if cap: g.capture_line(y)
   a.end_line()
   g.engine_b.end_line()

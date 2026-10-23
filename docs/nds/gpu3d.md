@@ -172,6 +172,34 @@ also reuses such lines now that the 3D's values are not in them; it
 does so only when the line's planes are kept too, since a reused line
 leaves no layer scratch to make planes from (`gp_on`).
 
+**Step 3, the handoff trimmed.**
+
+- *The cost pass on a bound.* RDLINES and the underflow flag (sticky:
+  every frame's counts) only fall as line costs rise (`budget`: a line
+  finishes no sooner). `render.cost_bound` charges every polygon on
+  every row between its top and bottom vertices with its vertices' x
+  range plus a dot each side, one pass over the vertices and no edge
+  walked; it is at least each line's cost (`tests/nds_3d_test.nim`,
+  every scene). When it already leaves the cache full and no underflow
+  (`costs_fit`), so do the exact costs, and `render_costs` does not run;
+  otherwise it does. That settles 85 % of SoulSilver's skipped renders
+  and 96 % of the GS field's. `-d:nds_cost_check` runs both and asserts
+  RDLINES and the flag agree.
+- *The capture inputs only where they are read.* `gpu_valid` (and
+  `hd_pre` before it) made `gpu_plane2` on every line; the GPU reads it
+  only on lines captured or shown from VRAM, so it runs on those alone.
+- *Only changed rows uploaded.* The core stamps each row of the planes
+  with the export epoch it was written at (`gpu_row_at`, `gpu_row2_at`;
+  `gpu_epoch` counts frames exported by any core and never goes back),
+  and the page uploads only the rows stamped since its last upload
+  (`NdsGpu3d.planeRows`). Lines whose planes the line cache kept, and
+  `gpu_plane2` outside captures, are not sent again.
+- *An unchanged scene not drawn again.* A frame that reused the last
+  render exports the same scene and gen (`scene_serial`, unique across
+  cores), so the page skips binning, uploads and the 3D passes and
+  composites over the `out3d` it has (not after late parts, which leave
+  it mixed).
+
 `render.nim`'s 64-bit arithmetic fits GLSL ES 3.00's 32-bit integers
 exactly:
 
@@ -235,6 +263,17 @@ exactly:
   all identical); `live.mjs`'s 1x check (60 frames each, the GPU's
   screens equal to the native ones, the pictures taken from them too);
   `tests/nds_3d_test.nim` (line costs); state field diffs (above).
+- **Step 3.** The sweep with `--skip`, drawing as the app does (the
+  scene only when its gen is new, only the plane rows written since
+  the last upload): 789 of 789 runs identical. `live.mjs` in all three
+  scenes: 100 %. `-d:nds_cost_check` agreed in every frame of the
+  three scenes; their state hashes match the skip before step 3.
+  `tests/nds_3d_test.nim` also checks the bound against every scene's
+  line costs, and that turning the export on again over a still scene
+  draws the planes afresh: before, a line whose planes were kept went
+  on being taken as kept in the new, zeroed planes (`set_gp_on`), so
+  every painted line came out blank until it changed. The page turns
+  the export on again whenever it applies the display settings.
 - **The machine.** With the export on, the whole-state and screen
   hashes every 50 frames are identical to the export off (SoulSilver
   800 frames, GS field and title 600 each). All 16 DS suites
@@ -315,13 +354,27 @@ the frame), the scene 0.3-0.6 %, the slot images about nothing.
 **With the skip** (host instructions against the GPU off, same frames;
 "skip" includes step 2):
 
-| | export | skip, step 1 only | skip | of it, the cost pass |
-|---|---|---|---|---|
-| SoulSilver walk | +3.9 % | -12.5 % | **-13.1 %** | 2.6 % |
-| GS field | +3.9 % | -7.2 % | **-8.6 %** | 1.4 % |
-| GS title (captures every frame) | +5.9 % | +5.8 % | +5.8 % | |
+| | export | skip, step 1 only | skip | skip + step 3 | no 1x rasteriser |
+|---|---|---|---|---|---|
+| SoulSilver walk | +3.9 % | -12.5 % | -12.6 % | **-16.0 %** | -16.8 % |
+| GS field | +3.9 % | -7.2 % | -8.9 % | **-10.1 %** | -11.6 % |
+| GS title (captures every frame) | +5.9 % | +5.8 % | +5.5 % | +5.5 % | |
 
-The cost pass is what keeping RDLINES_COUNT exact costs.
+"No 1x rasteriser" (`-d:nds_noraster`, GPU off) is the floor: the CPU
+doing nothing for the 3D. Step 3 leaves 0.8-1.5 points above it.
+Parts of step 3, same frames:
+
+- The cost bound: 0.5 points in each. (The cost pass itself was 0.5 %
+  of SoulSilver, not the 2.6 % first noted, a run that left out the
+  state hashing of the others; the bound leaves 0.03 % of it.)
+- `gpu_valid` and `hd_pre` on capture and VRAM-display lines only: 3
+  points in SoulSilver, 1 in the GS field.
+- `hd_prepare` (the planes' second compositing) now costs 0.1-0.2 %
+  (a measurement build without it), as the plane cache keeps most
+  lines: merging it into the line's own compositing is not worth it.
+
+(Host instruction counts move by up to 0.7 % between runs of the same
+binary on a busy Mac; each row above is from one run.)
 
 In the app (`live.mjs`, uncapped frames a second, load 16-33; the
 states stand still, so many frames reuse the last render and leave
@@ -335,6 +388,26 @@ less to skip than the walks above):
 
 The GS title captures every frame: the skip does nothing there, and its
 two columns differ by noise.
+
+With step 3, on a quiet Mac (load 4-7), each mode run twice in
+alternation (`live.mjs --uncapped`), frames a second:
+
+| | native | GPU 1x, no skip | GPU 1x | GPU 4x |
+|---|---|---|---|---|
+| GS field | 87.3 / 85.9 | 81.5 / 80.6 | **94.5 / 95.0** | **94.5 / 94.5** |
+| SoulSilver, standing | 293.1 / 293.4 | 291.1 / 291.1 | **302.9 / 299.9** | 299.0 / 297.6 |
+
+The GS field at 4x on the GPU now runs faster than at 1x without it.
+The page's own work per frame (`drawGame` with the GPU branch: the
+scene's JS, the uploads, the GL calls; the GPU's time overlaps), with
+step 3's uploads and scene check against the planes uploaded whole
+and the scene drawn every frame (`GPU ... full`):
+
+| | GPU 1x full | GPU 1x | GPU 4x full | GPU 4x |
+|---|---|---|---|---|
+| GS field | 0.31 ms | 0.15 ms | 0.43 ms | 0.21 ms |
+| GS title | 0.22 ms | 0.22 ms | 0.35 ms | 0.34 ms |
+| SoulSilver | 0.18 ms | 0.04 ms | 0.19 ms | 0.03 ms |
 
 ## Trying it
 
@@ -355,6 +428,34 @@ draw on the GPU.
 - With run-ahead on, the software HD is used.
 
 ## Tradeoffs and what is left
+
+- **Frames that capture** still draw their 3D on the CPU: the bank's
+  bytes are machine state. *Lazy capture* would let the GPU capture
+  too and owe the bytes to the machine, read back from the GPU only
+  when something besides the display reads the bank (the CPUs, DMA, a
+  state). The survey (`-d:nds_cap_survey`, `gpu/capsurvey.nim`: per
+  capture, what reads the bank before the next capture into it) says
+  where that would pay:
+  - **GS** captures 2D+3D every frame on its title and intro (600 of
+    600 frames from the title state, 1276 of the first 3000 from
+    power-on), and each capture is copied to main RAM (DMA or a BIOS
+    copy, a whole screen a frame) besides being shown. Lazy capture
+    would read back every frame: a stall each frame in WebGL2, for the
+    ~2.8 ms the CPU's rasteriser takes there. Not worth it on the web.
+    SoulSilver and PMD (first 3000 frames, and SoulSilver's walk)
+    never capture.
+  - **The 263 sweep ROMs**: 18 capture. 12 read the bank only through
+    the display, capture source B, the 2D engines or 3D textures
+    (dual-screen 3D, motion blur, render to texture, volumetric
+    shadows); 6 read it with the CPU or DMA (bloom, two-pass 3D, two
+    test ROMs, a demo).
+  - The display-only cases need more than the capture on the GPU:
+    engine B's BG/OBJ and the 3D's textures read the bank too, so the
+    GPU would draw those from its copy as well.
+  - Native builds with unified memory (iOS Metal, Apple silicon) could
+    read back without the copy's cost, waiting on a fence only when the
+    machine first reads the bank: the later GS's copy comes after its
+    capture, the more of the GPU's work it overlaps (not measured).
 
 - **Run-ahead.** Its look-ahead frames run the core, and their captures
   would advance `cap_1x` without the GPU seeing them. The GPU path stands
@@ -427,4 +528,13 @@ has no framebuffer fetch).
   `nds_set_gpu_skip`, `index.js ndsGpuSkip` / `ndsGpuRgba`.
 - `tools/ndsrun.nim`: `--gpu`, `--gpu-skip`, `--gpu-dump`.
 - `tools/gpu3d/run.mjs`: the dump harness.
-- `tools/gpu3d/live.mjs`: the live check and timings.
+- `tools/gpu3d/live.mjs`: the live check and timings (`--uncapped`
+  picks and orders the uncapped modes; `GPU ... full` uploads the
+  planes whole and draws every scene).
+- Step 3: `render.nim cost_bound` / `costs_fit`, `gpu3d.nim`
+  (`cost_fits`, `scene_serial`, `-d:nds_cost_check`), `gpu.nim`
+  (`gpu_epoch`, `gpu_row_at` / `gpu_row2_at`, `gpu_valid` on capture
+  and VRAM-display lines only), `nds_gpu_epoch` / `nds_gpu_rows`,
+  `gpu3d.js planeRows`, `index.js ndsGpuTexture`.
+- `src/dingbat/nds/gpu/capsurvey.nim`: the capture survey
+  (`-d:nds_cap_survey`, hooks in gpu.nim, bus9.nim, bus7.nim, ndsrun).

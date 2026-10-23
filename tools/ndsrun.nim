@@ -91,6 +91,7 @@
 import std/[os, strutils, parseopt, tables, sequtils, monotimes, times]
 import zippy
 import dingbat/nds/[nds, savestate]
+when defined(nds_cap_survey): import dingbat/nds/gpu/capsurvey
 import dingbat/nds/io/rtc
 import dingbat/gba/rtc_calendar
 
@@ -627,8 +628,9 @@ when isMainModule:
        toHex(n.arm9.next_pc, 8), " arm7 instrs=", n.arm7.instr_count, " pc=0x",
        toHex(n.arm7.next_pc, 8), " -> ", outp
   # speed-up statistics (docs/nds/perf.md)
+  when defined(nds_cap_survey): stdout.write report()
   echo "skipped: arm9 ", n.arm9.wl_skipped, " arm7 ", n.arm7.wl_skipped,
-       " cycles; reused: 3d frames ", n.gpu3d.reused, ", 2d lines A ",
+       " cycles; reused: 3d frames ", n.gpu3d.reused, " (costs bounded ", n.gpu3d.cost_fits, "), 2d lines A ",
        n.gpu.engine_a.lc_reused, " B ", n.gpu.engine_b.lc_reused
   for spec in text.split(','):
     # A0..A3 / B0..B3: engine and BG number

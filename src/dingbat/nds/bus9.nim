@@ -561,6 +561,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false;
     when cpu: n.dev9 = true
     var off: int
     let r = arm9_region(a, off)
+    when defined(nds_cap_survey): n.gpu.vram.note_read(r, off, (if cpu: rdCpu9 else: rdDma9))
     when width == 32: n.gpu.vram.read32(r, off)
     elif width == 16: uint32(n.gpu.vram.read16(r, off))
     else: uint32(n.gpu.vram.read8(r, off))
@@ -584,6 +585,7 @@ proc read9(n: NDS; a: uint32; width: static int; timed: static bool = false;
 proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool = false;
             cpu: static bool = false) =
   watch_write(n, "9", n.arm9, a, v)
+  when defined(nds_cap_survey) and not cpu: note_copy_write(a)
   template wr(s: var seq[uint8]; i: int; ep: untyped = n.idle_epoch) =
     # RAM: only a store that changes memory can end a polling loop (one
     # host load and store: `i` is aligned to the width, the host is

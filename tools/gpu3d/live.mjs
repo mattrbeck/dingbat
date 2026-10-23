@@ -21,6 +21,9 @@ const K = Number(opt("--k", "4"));
 const FRAMES = Number(opt("--frames", "60"));
 const OUT = resolve(opt("--out", "gpu3d-live"));
 const ENGINE = opt("--engine", "chromium");
+// --uncapped "GPU 1x full,GPU 1x,...": only these uncapped modes, in this
+// order (repeat one to alternate)
+const ONLY = opt("--uncapped", "");
 const [romPath, statePath] = args;
 mkdirSync(OUT, { recursive: true });
 let req = createRequire(join(WEB, "package.json"));
@@ -238,8 +241,10 @@ console.log(`  GPU ${K}x picture parts (each waited for): scene JS + uploads ${p
 
 // The modes measured: "GPU" is the app's GPU path with the skip (the
 // CPU's 3D left out of frames nothing on the machine reads), "GPU ... no
-// skip" without it.
+// skip" without it, "GPU ... full" uploading both planes whole and
+// drawing the scene every frame (as before rows and gens were checked).
 const modeSpec = (mode) => ({ gpu: mode.startsWith("GPU"), skip: !mode.includes("no skip"),
+                              full: mode.includes("full"),
                               k: Number((mode.match(/(\d)x/) || [0, 1])[1]) });
 
 // 4. paced play: the app's own loop from the state, emulated frames a
@@ -269,8 +274,9 @@ for (const mode of ["native", "GPU 1x", `software ${K}x`, `GPU ${K}x`]) {
 // picture drawn to the canvas (drawGame) as the app draws it, and only
 // the last waited for, so the GPU's work overlaps the next frame's
 // emulation as in fast-forward.
-for (const mode of ["native", "GPU 1x no skip", "GPU 1x", "software 2x", "GPU 2x no skip", "GPU 2x",
-                    `software ${K}x`, `GPU ${K}x no skip`, `GPU ${K}x`]) {
+for (const mode of ONLY ? ONLY.split(",") :
+                   ["native", "GPU 1x no skip", "GPU 1x full", "GPU 1x", "software 2x", "GPU 2x",
+                    `software ${K}x`, `GPU ${K}x no skip`, `GPU ${K}x full`, `GPU ${K}x`]) {
   const r = await page.evaluate(async ({ state, spec }) => {
     paused = true;
     window.ndsGpuSkip(spec.skip);
@@ -286,29 +292,35 @@ for (const mode of ["native", "GPU 1x no skip", "GPU 1x", "software 2x", "GPU 2x
     c._free(p);
     const gl = canvasEl.getContext("webgl2");
     const px = new Uint8Array(4);
+    const draw = () => {
+      if (spec.full && ndsGpuState) { ndsGpuState.epoch = -1; ndsGpuState.gen = -1; }
+      drawGame();
+    };
     const frame = () => {
       c._nds_run_frame();
       c._nds_audio_clear();
-      drawGame();
+      draw();
     };
     for (let i = 0; i < 30; i++) frame();
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     const n = 300, t0 = performance.now();
-    let coreMs = 0;
+    let coreMs = 0, drawMs = 0;
     for (let i = 0; i < n; i++) {
       const a = performance.now();
       c._nds_run_frame();
       c._nds_audio_clear();
-      coreMs += performance.now() - a;
-      drawGame();
+      const b = performance.now();
+      coreMs += b - a;
+      draw();
+      drawMs += performance.now() - b;
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     const ms = (performance.now() - t0) / n;
-    return { fps: 1000 / ms, ms, core: coreMs / n };
+    return { fps: 1000 / ms, ms, core: coreMs / n, draw: drawMs / n };
   }, { state, spec: modeSpec(mode) });
   console.log(`  uncapped, ${mode}: ${r.fps.toFixed(1)} frames a second (${r.ms.toFixed(2)} ms a frame, ` +
-              `of it the core ${r.core.toFixed(2)} ms)`);
+              `of it the core ${r.core.toFixed(2)} ms, drawing ${r.draw.toFixed(2)} ms)`);
 }
 
 // 6. a look at it: the GPU path on

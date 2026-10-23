@@ -38,6 +38,10 @@ interface NdsCoreModule {
   _nds_gpu_plane?: () => number;
   _nds_gpu_plane2?: () => number;
   _nds_gpu_lines?: () => number;
+  // frames exported by any core (never reset), and per row of plane /
+  // plane2 (second = 1) the epoch + 1 it was last written at
+  _nds_gpu_epoch?: () => number;
+  _nds_gpu_rows?: (second: number) => number;
   _nds_gpu_late_count?: () => number;
   _nds_gpu_late?: (i: number) => number;
   _nds_gpu_late_len?: (i: number) => number;

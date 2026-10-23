@@ -74,6 +74,7 @@ const
               "hd_lp", "hd_lg", "hd_ld", "hd_rep_ok", "hd_rep",
               # host-GPU rendering's composite planes (docs/nds/gpu3d.md)
               "gpu_on", "gpu_plane", "gpu_plane2", "gpu_lines", "gpu_paint", "gpu_frames",
+              "gpu_row_at", "gpu_row2_at",
               "want_dots"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
@@ -100,7 +101,7 @@ const
                 # host-GPU rendering's export (docs/nds/gpu3d.md)
                 "gpu_on", "gpu_scene", "gpu_gen", "gpu_tex", "gpu_pal", "gpu_tex_ver", "gpu_tex_gen",
                 "gpu_late", "gpu_late_line", "gpu_late_frame", "gpu_frame", "gpu_last",
-                "gpu_skip", "px_need", "px_ok"]
+                "gpu_skip", "px_need", "px_ok", "cost_fits"]
   GEO_SKIP = ["hd_on", "hpos"]   # HD rendering's vertex positions (docs/nds/hd3d.md)
   # Per-frame scratch: render_frame's clear() rewrites each dot's `px`
   # (depth, IDs, flags, coverage and the layer behind) before anything
