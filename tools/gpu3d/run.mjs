@@ -69,7 +69,8 @@ const png = (w, h, rgba) => {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 };
 
-const metas = readdirSync(dumpDir).filter((f) => f.endsWith("_meta.json")).sort();
+const metas = readdirSync(dumpDir).filter((f) => f.endsWith("_meta.json"))
+  .sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)));
 for (const m of metas) {
   const pre = m.replace("meta.json", "");
   const meta = JSON.parse(readFileSync(join(dumpDir, m), "utf8"));
@@ -80,7 +81,7 @@ for (const m of metas) {
     const u32 = (b) => new Uint32Array(b.buffer, b.byteOffset, b.byteLength >> 2);
     const u16 = (b) => new Uint16Array(b.buffer, b.byteOffset, b.byteLength >> 1);
     const scene = u32(await get("scene")), tex = await get("tex"), pal = await get("pal");
-    const plane = u32(await get("plane")), lines = u32(await get("lines"));
+    const plane = u32(await get("plane")), plane2 = u32(await get("plane2")), lines = u32(await get("lines"));
     const top = u16(await get("top")), bottom = u16(await get("bottom"));
     const frame3d = u32(await get("frame3d"));
     const hd3d = u32(await get("hd3d"));
@@ -88,14 +89,26 @@ for (const m of metas) {
     const screens1x = new Uint16Array(256 * 384); screens1x.set(top); screens1x.set(bottom, 256 * 192);
     const hdScreens = new Uint16Array(hdtop.length * 2); hdScreens.set(hdtop); hdScreens.set(hdbottom, hdtop.length);
     const cv = document.getElementById("c");
-    cv.width = 256 * k; cv.height = 384 * k;
-    const gl = cv.getContext("webgl2", { antialias: false, preserveDrawingBuffer: true });
+    const gl = window.__gl || (window.__gl = cv.getContext("webgl2", { antialias: false, preserveDrawingBuffer: true }));
     const dbg = gl.getExtension("WEBGL_debug_renderer_info");
     const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
-    const g = new NdsGpu3d(gl);
-    g.setScale(k);
+    // one renderer for the run: display capture's HD copies carry from
+    // frame to frame, so consecutive dumps must go in order
+    if (!window.__g || window.__g.k !== k) { window.__g = new NdsGpu3d(gl); window.__g.setScale(k); }
+    const g = window.__g;
     const out = { renderer, polys: scene[1], verts: scene[2] };
-    // the whole path: GPU 3D, then the composite
+    const cmpScreens = (s) => { let e = 0; for (let i = 0; i < s.length; i++) if (s[i] === hdScreens[i]) e++; return e; };
+    // first the variants, which leave the banks' HD copies alone: the
+    // composite over the software HD 3D frame, and "just upscale"
+    g.set3d(hd3d);
+    g.composite(screens1x, plane, plane2, lines, false);
+    out.eqScreensSw3d = cmpScreens(g.read(g.screens));
+    g.upscale(frame3d, false); g.composite(screens1x, plane, plane2, lines, false);
+    out.eqUpNearest = cmpScreens(g.read(g.screens));
+    g.upscale(frame3d, true); g.composite(screens1x, plane, plane2, lines, false);
+    const upSmooth = g.read(g.screens);
+    out.eqUpSmooth = cmpScreens(upSmooth);
+    // the whole path: GPU 3D, the composite, display capture
     out.jsMs = g.setScene(scene, tex, pal);
     out.bins = g.binTotal;
     g.render();
@@ -107,24 +120,12 @@ for (const m of metas) {
       if (hd3d[i] >>> 24) { vis++; if (mine3d[i] === hd3d[i]) eqVisible++; }
     }
     out.dots3d = mine3d.length; out.eq3d = eq; out.vis3d = vis; out.eqVis3d = eqVisible; out.firstDiff = firstDiff;
-    const cmpScreens = (s) => { let e = 0; for (let i = 0; i < s.length; i++) if (s[i] === hdScreens[i]) e++; return e; };
-    g.composite(screens1x, plane, lines);
+    g.composite(screens1x, plane, plane2, lines);
     const gpuScreens = g.read(g.screens);
     out.eqScreens = cmpScreens(gpuScreens);
     out.dotsScreens = gpuScreens.length;
-    // the composite alone, over the software HD 3D frame
-    g.set3d(hd3d);
-    g.composite(screens1x, plane, lines);
-    out.eqScreensSw3d = cmpScreens(g.read(g.screens));
-    // "just upscale": nearest and smooth 1x 3D, composited at k
-    g.upscale(frame3d, false); g.composite(screens1x, plane, lines);
-    const upNear = g.read(g.screens);
-    out.eqUpNearest = cmpScreens(upNear);
-    g.upscale(frame3d, true); g.composite(screens1x, plane, lines);
-    const upSmooth = g.read(g.screens);
-    out.eqUpSmooth = cmpScreens(upSmooth);
-    // timings: raster + post, unpaced, finished each time
-    // (each pass leaves its target bound: one dot read back waits for it)
+    // timings: unpaced, each waited for (a pass leaves its target bound:
+    // one dot read back waits for it); no captures
     const px = new Uint32Array(4);
     const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA_INTEGER, gl.UNSIGNED_INT, px);
     const time = (fn, n) => {
@@ -136,10 +137,10 @@ for (const m of metas) {
     out.msRender = time(() => g.render(), 20);
     out.ablate = [1, 2, 4, 6].map((a) => time(() => g.render(a), 20).toFixed(2));
     out.msUpscale = time(() => g.upscale(frame3d, true), 20);
-    out.msComposite = time(() => g.composite(screens1x, plane, lines), 20);
-    out.msCompositePass = time(() => g.composite(null, null, null), 20);
+    out.msComposite = time(() => g.composite(screens1x, plane, plane2, lines, false), 20);
+    out.msCompositePass = time(() => g.composite(null, null, null, null, false), 20);
     out.msSetScene = time(() => { g.setScene(scene, null, null); g.render(); }, 20) - out.msRender;
-    out.msEmpty = time(() => g.composite(null, null, null), 1) && time(() => {}, 20);
+    out.msEmpty = time(() => {}, 20);
     // pictures: software, GPU (whole path), diff, smooth upscale
     const rgba = (s) => { const o = new Uint8Array(s.length * 4); for (let i = 0; i < s.length; i++) { const c = s[i]; o[i * 4] = (c & 31) * 255 / 31; o[i * 4 + 1] = ((c >> 5) & 31) * 255 / 31; o[i * 4 + 2] = ((c >> 10) & 31) * 255 / 31; o[i * 4 + 3] = 255; } return o; };
     const diff = new Uint8Array(gpuScreens.length * 4);

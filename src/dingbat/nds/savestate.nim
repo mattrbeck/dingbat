@@ -73,7 +73,7 @@ const
               "cap_hd", "cap_1x", "hd_vline", "hd_bline", "hd_clear_gfx", "hd_clear_line", "hd_paint",
               "hd_lp", "hd_lg", "hd_ld", "hd_rep_ok", "hd_rep",
               # host-GPU rendering's composite planes (docs/nds/gpu3d.md)
-              "gpu_on", "gpu_plane", "gpu_lines", "gpu_paint"]
+              "gpu_on", "gpu_plane", "gpu_plane2", "gpu_lines", "gpu_paint"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   # tex_gen: the 3D renderer's reuse check (gpu3d.nim), bumped by remap()
   # vgen/remap_gen/pbase: the 2D engines' line reuse (engine2d.nim); remap()

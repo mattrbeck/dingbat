@@ -1120,7 +1120,8 @@ proc gpu_paint_line*(e: Engine2D; hp: var HdPaint; plane: ptr UncheckedArray[uin
   ## For a host-GPU composite (docs/nds/gpu3d.md): the line just drawn
   ## (hd_gfx_3d) as `hd_dot` reads it, per dot 4 words (top | sec << 16;
   ## topl | secl << 8 | window mask << 16 | OBJ flags << 24; the display
-  ## dot with a transparent 3D pixel | the 1x display dot << 16; 0), and
+  ## dot with a transparent 3D pixel | the 1x display dot << 16; the
+  ## composite with a transparent 3D pixel, before master brightness), and
   ## the line's effect settings in info[1..3].
   var none: array[256, uint32]
   var cg, cl: array[256, uint16]
@@ -1132,7 +1133,7 @@ proc gpu_paint_line*(e: Engine2D; hp: var HdPaint; plane: ptr UncheckedArray[uin
     plane[x * 4 + 1] = uint32(hp.topl[x]) or (uint32(hp.secl[x]) shl 8) or (m shl 16) or
                        (uint32(e.objattr[x]) shl 24)
     plane[x * 4 + 2] = uint32(cl[x]) or (uint32(e.line[x]) shl 16)
-    plane[x * 4 + 3] = 0
+    plane[x * 4 + 3] = uint32(cg[x])
   info[1] = hp.bld or (hp.mode shl 16)
   info[2] = hp.eva or (hp.evb shl 8) or (hp.evy shl 16) or (hp.bmode shl 24)
   info[3] = hp.bfactor or (uint32(e.bghofs[0] and 511) shl 8)
