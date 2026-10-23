@@ -261,7 +261,9 @@ proc gpu_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   info[5] = (a.dispcnt shr 18) and 3
   info[6] = uint32(a.master_bright)
   info[7] = 0
-  if y == 191: inc g.gpu_frames
+  if y == 191:
+    inc g.gpu_frames
+    if g.gpu3d != nil: g.gpu3d.gpu_frame = g.gpu_frames
   if not cap_line: return
   let dst_bank = int((capc shr 16) and 3)
   if not g.vram.lcdc_mapped(VramBank(dst_bank)): return

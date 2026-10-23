@@ -97,7 +97,8 @@ const
                 # (docs/nds/hd3d.md)
                 "hd_scale", "hpos", "hd_verts", "hd2", "hd3", "hd4", "hd_frame", "last_hpos",
                 # host-GPU rendering's export (docs/nds/gpu3d.md)
-                "gpu_on", "gpu_scene", "gpu_gen", "gpu_tex", "gpu_pal", "gpu_tex_ver", "gpu_tex_gen"]
+                "gpu_on", "gpu_scene", "gpu_gen", "gpu_tex", "gpu_pal", "gpu_tex_ver", "gpu_tex_gen",
+                "gpu_late", "gpu_late_line", "gpu_late_frame", "gpu_frame"]
   GEO_SKIP = ["hd_on", "hpos"]   # HD rendering's vertex positions (docs/nds/hd3d.md)
   # Per-frame scratch: render_frame's clear() rewrites each dot's `px`
   # (depth, IDs, flags, coverage and the layer behind) before anything

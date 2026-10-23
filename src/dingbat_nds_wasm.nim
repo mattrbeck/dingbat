@@ -161,6 +161,16 @@ proc nds_gpu_scene(): pointer {.exportc.} =
 proc nds_gpu_scene_len(): cint {.exportc.} =
   if core == nil: 0 else: cint(core.gpu3d.gpu_scene.len)
 
+proc nds_gpu_late_count(): cint {.exportc.} =
+  ## The frame's later renders (a render-register write mid-frame), each
+  ## for its lines from nds_gpu_late_line(i) on; 0 for most frames.
+  if core == nil or core.gpu3d.gpu_late_frame != core.gpu.gpu_frames: 0
+  else: cint(core.gpu3d.gpu_late.len)
+
+proc nds_gpu_late(i: cint): pointer {.exportc.} = addr core.gpu3d.gpu_late[i][0]
+proc nds_gpu_late_len(i: cint): cint {.exportc.} = cint(core.gpu3d.gpu_late[i].len)
+proc nds_gpu_late_line(i: cint): cint {.exportc.} = cint(core.gpu3d.gpu_late_line[i])
+
 proc nds_gpu_tex(): pointer {.exportc.} =
   if core == nil or core.gpu3d.gpu_tex.len == 0: nil else: addr core.gpu3d.gpu_tex[0]
 

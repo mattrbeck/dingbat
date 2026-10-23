@@ -1414,8 +1414,21 @@ export class NdsGpu3d {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  // The scene at k: raster, then the post passes, into out3d.
-  render(ablate = 0) {
+  // A frame's 3D (the core's exports): the frame's render, then any later
+  // ones a render-register write made mid-frame, each for its lines on
+  // (late: [{ scene, line }], gpu3d.nim export_gpu).
+  drawFrame(scene, texImage, palImage, late = []) {
+    this.setScene(scene, texImage, palImage);
+    this.render(0, 0, late.length ? late[0].line : 192);
+    late.forEach((part, i) => {
+      this.setScene(part.scene, null, null);
+      this.render(0, part.line, i + 1 < late.length ? late[i + 1].line : 192);
+    });
+  }
+
+  // The scene at k: raster, then the post passes, into out3d (its lines
+  // from .. to-1, at 1x: the rest stay as they were).
+  render(ablate = 0, from = 0, to = 192) {
     const gl = this.gl;
     if (this.recTotal > 0) {
       // the rows pass: one fragment per record, five targets
@@ -1449,7 +1462,13 @@ export class NdsGpu3d {
       this.bindTex(p, "uPal", 6, this.pal);
       for (let i = 0; i < 5; i++) this.bindTex(p, `uRec${i}`, 7 + i, this.rec[i]);
     });
+    const part = from > 0 || to < 192;
+    if (part) {
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(0, from * this.k, 256 * this.k, (to - from) * this.k);
+    }
     this.pass(this.post, this.out3d, (p) => this.bindTex(p, "uRaster", 0, this.rasterOut));
+    if (part) gl.disable(gl.SCISSOR_TEST);
   }
 
   // The "just upscale" variant: the core's 1x 3D frame scaled into out3d.

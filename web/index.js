@@ -17319,7 +17319,9 @@ window.ndsGpu3d = (on) => {
 const ndsHdNow = () => {
   const c = ndsCore;
   if (!c || !c._nds_hd_scale || ndsCoreGame === null) return 1;
-  if (ndsGpuMod && ndsGpuActive() && c._nds_gpu_frames() > 0) return ndsDisplay.hd;
+  // (switched off, the core draws no lines and exports none: its own black
+  // screens, not the GPU's last picture)
+  if (ndsGpuMod && ndsGpuActive() && c._nds_gpu_frames() > 0) return c._nds_powered_off?.() ? 1 : ndsDisplay.hd;
   return c._nds_hd_fb555_top() && c._nds_hd_fb555_bottom() ? c._nds_hd_scale() : 1;
 };
 // The presenter's texture for this frame from the GPU renderer: the scene
@@ -17338,8 +17340,12 @@ const ndsGpuTexture = (gl, k) => {
     const buf = c.HEAPU8.buffer;
     const scene = new Uint32Array(buf, c._nds_gpu_scene(), c._nds_gpu_scene_len());
     const W = NdsUtil.W, H = NdsUtil.H;
-    s.g.setScene(scene, new Uint8Array(buf, c._nds_gpu_tex(), 0x80000), new Uint8Array(buf, c._nds_gpu_pal(), 0x18000));
-    s.g.render();
+    // (a render-register write mid-frame: the later renders, for their lines)
+    const late = [];
+    for (let i = 0, nl = c._nds_gpu_late_count(); i < nl; i++) {
+      late.push({ scene: new Uint32Array(buf, c._nds_gpu_late(i), c._nds_gpu_late_len(i)), line: c._nds_gpu_late_line(i) });
+    }
+    s.g.drawFrame(scene, new Uint8Array(buf, c._nds_gpu_tex(), 0x80000), new Uint8Array(buf, c._nds_gpu_pal(), 0x18000), late);
     s.g.composite([new Uint16Array(buf, c._nds_fb555_top(), W * H), new Uint16Array(buf, c._nds_fb555_bottom(), W * H)],
       new Uint32Array(buf, c._nds_gpu_plane(), W * H * 4), new Uint32Array(buf, c._nds_gpu_plane2(), W * H * 4),
       new Uint32Array(buf, c._nds_gpu_lines(), H * 8));

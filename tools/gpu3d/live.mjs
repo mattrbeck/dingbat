@@ -196,7 +196,57 @@ for (const mode of ["native", `software ${K}x`, `GPU ${K}x`]) {
   console.log(`  paced, ${mode}: ${((f1[0] - f0[0]) * 1000 / (f1[1] - f0[1])).toFixed(1)} emulated frames a second`);
 }
 
-// 5. a look at it: the GPU path on
+// 5. uncapped: from the state, frames run back to back with each one's
+// picture drawn to the canvas (drawGame) as the app draws it, and only
+// the last waited for, so the GPU's work overlaps the next frame's
+// emulation as in fast-forward. Also the GPU path at 1x (the core's own 1x
+// picture shown; the GPU's drawn beside it each frame): its cost alone.
+for (const mode of ["native", "GPU 1x (beside native)", "software 2x", "GPU 2x", `software ${K}x`, `GPU ${K}x`]) {
+  const r = await page.evaluate(async ({ state, mode }) => {
+    paused = true;
+    const gpu = mode.startsWith("GPU"), k = Number((mode.match(/(\d)x/) || [0, 1])[1]);
+    window.ndsGpu3d(gpu && k > 1);
+    ndsDisplay = { ...ndsDisplay, hd: k };
+    ndsApplyHd();
+    const c = ndsCore;
+    if (gpu && k === 1) c._nds_set_gpu(1);
+    const bytes = Uint8Array.from(atob(state), (ch) => ch.charCodeAt(0));
+    const p = c._malloc(bytes.length);
+    c.HEAPU8.set(bytes, p);
+    c._nds_state_load(p, bytes.length);
+    c._free(p);
+    const gl = canvasEl.getContext("webgl2");
+    const px = new Uint8Array(4);
+    const frame = () => {
+      c._nds_run_frame();
+      c._nds_audio_clear();
+      drawGame();
+      if (gpu && k === 1) { ndsGpuTexture(gl, 1); ndsGpuState.g.restore(); }
+    };
+    for (let i = 0; i < 30; i++) frame();
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const n = 300, t0 = performance.now();
+    let coreMs = 0;
+    for (let i = 0; i < n; i++) {
+      const a = performance.now();
+      c._nds_run_frame();
+      c._nds_audio_clear();
+      coreMs += performance.now() - a;
+      drawGame();
+      if (gpu && k === 1) { ndsGpuTexture(gl, 1); ndsGpuState.g.restore(); }
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const ms = (performance.now() - t0) / n;
+    if (gpu && k === 1) c._nds_set_gpu(0);
+    return { fps: 1000 / ms, ms, core: coreMs / n };
+  }, { state, mode });
+  console.log(`  uncapped, ${mode}: ${r.fps.toFixed(1)} frames a second (${r.ms.toFixed(2)} ms a frame, ` +
+              `of it the core ${r.core.toFixed(2)} ms)`);
+}
+
+// 6. a look at it: the GPU path on
+await page.evaluate(() => { window.ndsGpu3d(true); });
 await page.screenshot({ path: join(OUT, "live.png") });
 console.log(`screenshot: ${join(OUT, "live.png")}`);
 await browser.close();
