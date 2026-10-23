@@ -119,7 +119,8 @@ type
     # host-GPU rendering (docs/nds/gpu3d.md): the scene each render draws,
     # exported for a renderer outside the core; display only, as HD
     gpu_on*: bool
-    gpu_scene*: seq[uint32]       ## gpuexport's scene words
+    gpu_scene*: seq[uint32]       ## gpuexport's scene words: the frame's first render
+    gpu_last: seq[uint32]         ## the last render's (any part)
     gpu_gen*: uint32              ## bumped with every scene exported
     gpu_tex*, gpu_pal*: seq[uint8]  ## texture / palette slot images
     gpu_tex_ver*: uint32          ## bumped whenever the images are rebuilt
@@ -494,31 +495,34 @@ proc render_hd(g: Gpu3d) =
   of 3: g.hd3.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
   else: g.hd4.render_frame(g.vram, g.polys, g.hd_verts, g.disp3dcnt, g.ren_param)
 
-proc export_gpu(g: Gpu3d) =
-  ## The scene just rendered, for a host-GPU renderer (gpuexport.nim).
-  if g.gpu_tex_gen != g.vram.tex_gen or g.gpu_tex.len == 0:
-    slot_images(g.vram, g.gpu_tex, g.gpu_pal)
-    g.gpu_tex_gen = g.vram.tex_gen
-    inc g.gpu_tex_ver
-  inc g.gpu_gen
-  if g.done_lines == 0:
-    # the frame's first render
-    export_scene(g.gpu_scene, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,
+proc export_gpu(g: Gpu3d; reused: bool) =
+  ## The scene the lines from done_lines on come from, for a host-GPU
+  ## renderer (gpuexport.nim): the one just rendered, or with frame reuse
+  ## the last one rendered (`gpu_last`), which may have been a late part
+  ## of an earlier frame. The frame's first one is `gpu_scene`; a later
+  ## one (a render-register write mid-frame) is a late part, tagged with
+  ## the frame it is for.
+  if not reused:
+    if g.gpu_tex_gen != g.vram.tex_gen or g.gpu_tex.len == 0:
+      slot_images(g.vram, g.gpu_tex, g.gpu_pal)
+      g.gpu_tex_gen = g.vram.tex_gen
+      inc g.gpu_tex_ver
+    inc g.gpu_gen
+    export_scene(g.gpu_last, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,
                  g.gpu_gen, g.gpu_tex_ver)
+  if g.gpu_last.len == 0: return
+  if g.done_lines == 0:
+    # (unchanged since the last frame: no copy)
+    if g.gpu_scene.len < GPU_HEADER or g.gpu_scene[6] != g.gpu_last[6]: g.gpu_scene = g.gpu_last
     g.gpu_late.setLen(0)
     g.gpu_late_line.setLen(0)
   else:
-    # a later one, for lines done_lines on (frame reuse can skip a frame's
-    # first render, so the parts carry the frame they are for)
     let frame = g.gpu_frame + 1
     if g.gpu_late_frame != frame:
       g.gpu_late.setLen(0)
       g.gpu_late_line.setLen(0)
       g.gpu_late_frame = frame
-    var part: seq[uint32]
-    export_scene(part, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,
-                 g.gpu_gen, g.gpu_tex_ver)
-    g.gpu_late.add part
+    g.gpu_late.add g.gpu_last
     g.gpu_late_line.add g.done_lines
 
 proc set_gpu*(g: Gpu3d; on: bool) =
@@ -614,6 +618,7 @@ proc render_frame*(g: Gpu3d) =
       (g.hd_scale <= 1 and not g.gpu_on or g.last_hpos == g.hpos)):
     g.rendered = true
     inc g.reused
+    if g.gpu_on: g.export_gpu(reused = true)
     return
   # -d:nds_noraster leaves the 1x frame undrawn: what the rasteriser costs
   # (a measurement only, docs/nds/gpu3d.md; the picture is wrong)
@@ -621,7 +626,7 @@ proc render_frame*(g: Gpu3d) =
     g.ren.render_frame(g.vram, g.polys, g.verts, g.disp3dcnt, g.ren_param)
   g.rendered = true
   if g.hd_scale > 1: g.render_hd()
-  if g.gpu_on: g.export_gpu()
+  if g.gpu_on: g.export_gpu(reused = false)
   if g.reuse_on:
     g.reuse_ok = true
     g.last_gen = g.vram.tex_gen
