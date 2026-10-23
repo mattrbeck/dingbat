@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Continuity check for the flap loops: per frame, how much of each wing is
-still visible (% of frame 0), whether each lower wing still meets the body
-or an upper wing, how many separate pixel islands the sprite has, and how
-many black dots sit boxed in where body meets wing (should be 0).
+"""Continuity check for the flap: per frame, the sprite's pixel islands (must be
+1: nothing breaks off or floats), whether any pixel left the flap box (it
+raises), and that frame 0 is the still logo exactly.
 
-Usage: check.py N [pose_param=value ...]    e.g. check.py 12 lower_amp=14
+Usage: check.py [N]    (default 16 frames)
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import flap  # noqa: E402
+import bat  # noqa: E402
+
 N4 = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 
-def components(px):
+def islands(rows):
+    px = {(x, y) for y, r in enumerate(rows) for x, c in enumerate(r) if c != '.'}
     seen, n = set(), 0
     for q in px:
         if q in seen:
@@ -24,41 +25,26 @@ def components(px):
         seen.add(q)
         while st:
             x, y = st.pop()
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    r = (x + dx, y + dy)
-                    if r in px and r not in seen:
-                        seen.add(r)
-                        st.append(r)
+            for dx, dy in N4:
+                r = (x + dx, y + dy)
+                if r in px and r not in seen:
+                    seen.add(r)
+                    st.append(r)
     return n
 
 
-def report(n, **kw):
-    g = flap.load()
-    p = flap.parts(g)
-    base = None
-    rows = []
-    for i in range(n):
-        px, own = flap.compose(p, *flap.pose(i / n, **kw), owners=True)
-        cnt = {k: sum(1 for v in own.values() if v == k) for k in ("lw", "rw", "ll", "rl")}
-        if base is None:
-            base = cnt
-        # a lower wing touches the body (colour to colour) or hides behind an
-        # upper wing at its root
-        touch = {}
-        for k in ("ll", "rl"):
-            touch[k] = any(own.get((x + dx, y + dy)) in ("core", "lw", "rw")
-                           for (x, y), v in own.items() if v == k for dx, dy in N4)
-        dots = sum(1 for (x, y), c in px.items() if c == flap.OUTLINE and (
-            lambda o: None not in o and "core" in o and set(o) - {"core"})(
-            [own.get((x + dx, y + dy)) for dx, dy in N4]))
-        rows.append((i, {k: round(100 * cnt[k] / base[k]) for k in cnt}, touch, components(px), dots))
-    for i, vis, touch, comp, dots in rows:
-        print("  f%02d vis%% lw %3d rw %3d ll %3d rl %3d | touch ll %d rl %d | islands %d | dots %d"
-              % (i, vis["lw"], vis["rw"], vis["ll"], vis["rl"], touch["ll"], touch["rl"], comp, dots))
+def main():
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 16
+    frames = bat.flap_frames(n)
+    bad = 0
+    for i, f in enumerate(frames):
+        k = islands(f)
+        print(f'frame {i:2}: islands {k}')
+        bad += k != 1
+    rest = bat.crop(frames[0]) == bat.still()
+    print('frame 0 is the still:', rest)
+    sys.exit(1 if bad or not rest else 0)
 
 
-if __name__ == "__main__":
-    kw = dict(a.split("=") for a in sys.argv[2:])
-    kw = {k: float(v) for k, v in kw.items()}
-    report(int(sys.argv[1]), **kw)
+if __name__ == '__main__':
+    main()

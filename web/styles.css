@@ -3045,7 +3045,7 @@ body.home-card .home-recent-head {
 }
 
 /* Both logos are drawn from flap.png: a strip of 31 wing-flap frames, each
-   56x40 art pixels with the 48x29 logo at (4,4). Frames 0-15 are a full
+   52x28 art pixels with the 42x19 logo at (5,2). Frames 0-15 are a full
    wingbeat, frame 0 the logo at rest; 16-30 are a smaller one that glides
    back to rest. --logo-w is the width of the LOGO, not of the frame. The frame's
    box is bigger, to give the wings room, and negative margins pull it back
@@ -3055,17 +3055,18 @@ body.home-card .home-recent-head {
    frame: frame k sits k/30 of the way along the strip. */
 #bar-logo,
 #home-logo {
-  width: calc(var(--logo-w) * 56 / 48);
-  height: calc(var(--logo-w) * 40 / 48);
-  margin: calc(var(--logo-w) * -4 / 48) calc(var(--logo-w) * -4 / 48)
-          calc(var(--logo-w) * -7 / 48);
+  width: calc(var(--logo-w) * 52 / 42);
+  height: calc(var(--logo-w) * 28 / 42);
+  margin: calc(var(--logo-w) * -2 / 42) calc(var(--logo-w) * -5 / 42)
+          calc(var(--logo-w) * -7 / 42);
   object-fit: cover;
   object-position: 0 0;
   image-rendering: pixelated;
 }
 
+/* Whole-pixel sizes: the logo at 1x in the bar, 2x on home. */
 #bar-logo {
-  --logo-w: 22px;
+  --logo-w: 42px;
 }
 
 /* One full wingbeat: frames 0-15 at 24 fps (16/30 of the strip). */
@@ -3113,9 +3114,8 @@ body.home-card #home-brand {
 }
 
 #home-logo {
-  --logo-w: 76px;
-  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6));
-  margin-bottom: calc(14px + var(--logo-w) * -7 / 48);
+  --logo-w: 84px;
+  margin-bottom: calc(14px + var(--logo-w) * -7 / 42);
 }
 
 #home-brand h1 {
@@ -6952,8 +6952,7 @@ body.link-gb #controls {
     gap: 18px;
   }
   #home-logo {
-    --logo-w: 58px;
-    margin-bottom: calc(4px + var(--logo-w) * -7 / 48);
+    margin-bottom: calc(4px + var(--logo-w) * -7 / 42);
   }
   #home-brand h1 {
     font-size: 24px;
