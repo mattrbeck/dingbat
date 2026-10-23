@@ -55,7 +55,8 @@ type
     # frame with (gpu_line)
     gpu_on*: bool
     gpu_plane*: seq[uint32]           ## 256 x 192 dots, 4 words each (engine2d gpu_paint_line)
-    gpu_lines*: seq[uint32]           ## 192 lines, 4 words each (gpu_line)
+    gpu_plane2*: seq[uint32]          ## 256 x 192 dots, 4 words each: capture's inputs (gpu_valid)
+    gpu_lines*: seq[uint32]           ## 192 lines, 8 words each (gpu_line)
     gpu_paint: HdPaint
     cap_1x: array[4, seq[uint32]]     ## ... and the halfword it wrote there (bit 16 = captured)
 
@@ -199,24 +200,76 @@ proc set_gpu*(g: Gpu; on: bool) =
   g.gpu_on = on
   g.engine_a.hd_on = on or g.hd > 1
   if g.gpu3d != nil: g.gpu3d.set_gpu(on)
+  for b in 0..3: g.cap_1x[b] = @[]
   if on:
     g.gpu_plane = newSeq[uint32](256 * 192 * 4)
-    g.gpu_lines = newSeq[uint32](192 * 4)
+    g.gpu_plane2 = newSeq[uint32](256 * 192 * 4)
+    g.gpu_lines = newSeq[uint32](192 * 8)
   else:
     g.gpu_plane = @[]
+    g.gpu_plane2 = @[]
     g.gpu_lines = @[]
 
-proc gpu_line(g: Gpu; y: int; a_top, lcd_on: bool) =
-  ## Line y for the host-GPU composite: info word 0 = bit 0 engine A shows
-  ## 3D through its composite here (the plane's dots are valid), bit 1
-  ## engine A is on the top screen, bits 8-9 its display mode.
+proc gpu_valid(g: Gpu; y: int) =
+  ## Before display capture writes line y (after hd_pre): per dot of
+  ## gpu_plane2, whether VRAM display's halfword (bit 0) and capture
+  ## source B's (bit 1) still hold what a capture wrote, so that the GPU's
+  ## HD copy of the bank stands for them (the `shadow` rule).
+  let a = g.engine_a
+  let capc = a.dispcapcnt
+  let bank = int((a.dispcnt shr 18) and 3)
+  let have = g.cap_1x[bank].len > 0
+  let (cw, _) = CAPTURE_SIZE[(capc shr 20) and 3]
+  let roff = if a.display_mode == 2: 0 else: int((capc shr 26) and 3) * 0x8000
+  let rbase = roff + y * cw * 2
+  let p2 = cast[ptr UncheckedArray[uint32]](addr g.gpu_plane2[y * 1024])
+  for x in 0 ..< 256:
+    var v = 0'u32
+    if have:
+      if g.cap_1x[bank][y * 256 + x] == (uint32(g.hd_vline[x]) or 0x10000'u32): v = 1
+      if x < cw and g.cap_1x[bank][((rbase + x * 2) and 0x1FFFF) shr 1] == (uint32(g.hd_bline[x]) or 0x10000'u32):
+        v = v or 2
+    p2[x * 4] = uint32(a.gfx[x]) or (uint32(g.hd_vline[x]) shl 16)
+    p2[x * 4 + 1] = uint32(g.hd_bline[x]) or (uint32(a.mmem_line[x]) shl 16)
+    p2[x * 4 + 2] = v
+    p2[x * 4 + 3] = 0
+
+proc gpu_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
+  ## Line y for the host-GPU composite and capture (docs/nds/gpu3d.md).
+  ## Info words: 0 = bit 0 the planes hold engine A's composite with 3D
+  ## (gpu_paint_line), bit 1 engine A is on the top screen, bit 2 the
+  ## display shows that composite (display mode 1), bit 3 the display shows
+  ## VRAM (mode 2), bit 4 the line is captured, bits 8-9 the display mode;
+  ## 1-3 gpu_paint_line's; 4 DISPCAPCNT; 5 DISPCNT's VRAM bank; 6
+  ## MASTER_BRIGHT. Also keeps `cap_1x`: what each capture wrote.
   let a = g.engine_a
   let dm = a.display_mode
-  let shows = lcd_on and a.enabled and dm == 1 and g.gpu3d != nil and a.hd_gfx_3d()
-  let info = cast[ptr UncheckedArray[uint32]](addr g.gpu_lines[y * 4])
-  info[0] = (if shows: 1'u32 else: 0'u32) or (if a_top: 2'u32 else: 0'u32) or (dm shl 8)
-  if shows:
+  let shown = lcd_on and a.enabled
+  let capc = a.dispcapcnt
+  let (cw, ch) = CAPTURE_SIZE[(capc shr 20) and 3]
+  let csrc = (capc shr 29) and 3
+  let cap_line = cap and y < ch
+  let cap_gfx = cap_line and csrc != 1 and (capc and (1'u32 shl 24)) == 0
+  let paint = g.gpu3d != nil and a.hd_gfx_3d() and (shown and dm == 1 or cap_gfx)
+  let info = cast[ptr UncheckedArray[uint32]](addr g.gpu_lines[y * 8])
+  info[0] = (if paint: 1'u32 else: 0'u32) or (if a_top: 2'u32 else: 0'u32) or
+            (if shown and dm == 1: 4'u32 else: 0'u32) or (if shown and dm == 2: 8'u32 else: 0'u32) or
+            (if cap_line: 16'u32 else: 0'u32) or (dm shl 8)
+  if paint:
     a.gpu_paint_line(g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]), info)
+  info[4] = capc
+  info[5] = (a.dispcnt shr 18) and 3
+  info[6] = uint32(a.master_bright)
+  info[7] = 0
+  if not cap_line: return
+  let dst_bank = int((capc shr 16) and 3)
+  if not g.vram.lcdc_mapped(VramBank(dst_bank)): return
+  if g.cap_1x[dst_bank].len == 0: g.cap_1x[dst_bank] = newSeq[uint32](65536)
+  let dst = g.vram.bank_ptr(VramBank(dst_bank))
+  let wbase = int((capc shr 18) and 3) * 0x8000 + y * cw * 2
+  for x in 0 ..< cw:
+    let wd = ((wbase + x * 2) and 0x1FFFF) shr 1
+    g.cap_1x[dst_bank][wd] = uint32(uint16(dst[wd * 2]) or (uint16(dst[wd * 2 + 1]) shl 8)) or 0x10000'u32
 
 proc hd_restart*(g: Gpu) =
   ## A state applied over the running machine (a load, a rewind pop, a
@@ -529,7 +582,8 @@ proc render_line*(g: Gpu; y: int) =
                  (a.dispcapcnt and (1'u32 shl 24)) == 0
   a.render_line(y, need_gfx)
   g.engine_b.render_line(y)
-  if g.hd > 1: g.hd_pre(y)
+  if g.hd > 1 or g.gpu_on: g.hd_pre(y)
+  if g.gpu_on: g.gpu_valid(y)
   if cap: g.capture_line(y)
   a.end_line()
   g.engine_b.end_line()
@@ -545,6 +599,6 @@ proc render_line*(g: Gpu; y: int) =
     zeroMem(ta, 512)
     zeroMem(tb, 512)
   if g.hd > 1: g.hd_line(y, a_top, lcd_on, cap)
-  if g.gpu_on: g.gpu_line(y, a_top, lcd_on)
+  if g.gpu_on: g.gpu_line(y, a_top, lcd_on, cap)
 
 {.pop.}

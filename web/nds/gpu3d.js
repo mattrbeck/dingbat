@@ -1003,16 +1003,20 @@ void main() {
   oColor = pack4(c.x, c.y, c.z, int(near >> 24));
 }`;
 
-// engine2d.nim hd_dot / effect_dot / bright_dot per HD dot of engine A's
-// 3D lines; everything else is the 1x screens' dot.
-const COMPOSITE = COMMON + `
+// Engine A at HD (gpu.nim hd_line): its composite per HD dot by hd_dot's
+// rules (engine2d.nim effect_dot / bright_dot), VRAM display from the
+// banks' HD copies, and display capture into them.
+const COMPOSE = COMMON + `
 uniform usampler2D uScreens;  // 256 x 384 BGR555, top over bottom
 uniform usampler2D uPlane;    // 256 x 192: gpu_paint_line's 4 words a dot
-uniform usampler2D uLines;    // 192 x 1: gpu_line's 4 words a line
+uniform usampler2D uPlane2;   // 256 x 192: gpu_valid's 4 words a dot
+uniform usampler2D uLines;    // 384 x 1: gpu_line's 8 words a line
 uniform usampler2D u3d;       // 256k x 192k, the core's pixel format
-out uint oColor;
+uniform usampler2D uCap0, uCap1, uCap2, uCap3;   // banks A-D's HD copies (BGR555 + bit 15)
 const int LAYER_OBJ = 4;
 const uint OBJ_SEMI = 0x10u, OBJ_BITMAP = 0x20u;
+uvec4 line0(int y) { return texelFetch(uLines, ivec2(y * 2, 0), 0); }
+uvec4 line1(int y) { return texelFetch(uLines, ivec2(y * 2 + 1, 0), 0); }
 uint ch6(uint c, uint lo, int i) { return (((c >> uint(5 * i)) & 0x1Fu) << 1) | ((lo >> uint(i)) & 1u); }
 uint pack6(uint r, uint g, uint b, out uint lo) {
   lo = (r & 1u) | ((g & 1u) << 1) | ((b & 1u) << 2);
@@ -1040,25 +1044,41 @@ uint blend_3d(uint p, uint below, uint lb, out uint lo) {
   uint b = (((p >> 16) & 0x3Fu) * (a + 1u) + ch6(below, lb, 2) * (31u - a) + 16u) >> 5;
   return pack6(r, g, b, lo);
 }
+// MASTER_BRIGHT on one dot (bright_dot); mode 0 or 3, or factor 0: none
+uint bright(uint c, uint lo, uint mb) {
+  uint mode = mb >> 14, f = min(16u, mb & 0x1Fu);
+  if (mode == 0u || mode == 3u || f == 0u) return c;
+  uint r = ch6(c, lo, 0), g = ch6(c, lo, 1), b = ch6(c, lo, 2);
+  if (mode == 1u) {
+    r = (r * 16u + (63u - r) * f) >> 4; g = (g * 16u + (63u - g) * f) >> 4; b = (b * 16u + (63u - b) * f) >> 4;
+  } else {
+    r = (r * (16u - f)) >> 4; g = (g * (16u - f)) >> 4; b = (b * (16u - f)) >> 4;
+  }
+  return (r >> 1) | ((g >> 1) << 5) | ((b >> 1) << 10);
+}
 uint to_bgr555(uint p) { return ((p >> 1) & 31u) | (((p >> 9) & 31u) << 5) | (((p >> 17) & 31u) << 10); }
 uint lsb3d(uint p) { return (p & 1u) | ((p >> 7) & 2u) | ((p >> 14) & 4u); }
-void main() {
-  ivec2 q = ivec2(gl_FragCoord.xy);
-  int k = uK;
-  int scr = q.y >= 192 * k ? 1 : 0;
-  int Y = q.y - scr * 192 * k;
-  int y = Y / k, x = q.x / k;
-  uvec4 li = texelFetch(uLines, ivec2(y, 0), 0);
-  bool a_top = (li.x & 2u) != 0u;
-  uint base = texelFetch(uScreens, ivec2(x, scr * 192 + y), 0).x;
-  if ((scr == 0) != a_top || (li.x & 1u) == 0u) { oColor = base; return; }
+// sub-dot (i, j) of halfword d of a bank's HD copy
+uint cap_at(int bank, int d, int i, int j) {
+  ivec2 t = ivec2((d & 255) * uK + i, (d >> 8) * uK + j);
+  if (bank == 0) return texelFetch(uCap0, t, 0).x;
+  if (bank == 1) return texelFetch(uCap1, t, 0).x;
+  if (bank == 2) return texelFetch(uCap2, t, 0).x;
+  return texelFetch(uCap3, t, 0).x;
+}
+// Engine A's composite of dot x on line y at sub-dot (i, j): the graphics
+// (capture source A, before master brightness) or the display dot.
+uint compose(int x, int y, int i, int j, bool gfx) {
+  uvec4 li = line0(y);
   uvec4 pl = texelFetch(uPlane, ivec2(x, y), 0);
+  uint one = gfx ? texelFetch(uPlane2, ivec2(x, y), 0).x & 0xFFFFu : pl.z >> 16;   // the 1x dot
+  if ((li.x & 1u) == 0u) return one;
   int sx = (x + int((li.w >> 8) & 511u)) & 511;
-  if (sx >= 256) { oColor = pl.z >> 16; return; }
-  uint p = texelFetch(u3d, ivec2(sx * k + q.x % k, Y), 0).x;
-  if ((p >> 24) == 0u) { oColor = pl.z & 0xFFFFu; return; }
+  if (sx >= 256) return one;
+  uint p = texelFetch(u3d, ivec2(sx * uK + i, y * uK + j), 0).x;
+  if ((p >> 24) == 0u) return gfx ? pl.w & 0xFFFFu : pl.z & 0xFFFFu;
   int l0 = int(pl.y & 0xFFu), l1 = int((pl.y >> 8) & 0xFFu);
-  if (l0 != 0 && l1 != 0) { oColor = pl.z >> 16; return; }
+  if (l0 != 0 && l1 != 0) return one;
   uint m = (pl.y >> 16) & 0xFFu, attr = pl.y >> 24;
   uint bld = li.y & 0xFFFFu, mode = li.y >> 16;
   uint eva = li.z & 0xFFu, evb = (li.z >> 8) & 0xFFu, evy = (li.z >> 16) & 0xFFu, bmode = li.z >> 24;
@@ -1081,16 +1101,75 @@ void main() {
       else if (mode == 3u) c = darken(c, lo0, evy, lo);
     }
   }
-  if (bmode != 0u) {
-    uint r = ch6(c, lo, 0), g = ch6(c, lo, 1), b = ch6(c, lo, 2);
-    if (bmode == 1u) {
-      r = (r * 16u + (63u - r) * bfactor) >> 4; g = (g * 16u + (63u - g) * bfactor) >> 4; b = (b * 16u + (63u - b) * bfactor) >> 4;
-    } else {
-      r = (r * (16u - bfactor)) >> 4; g = (g * (16u - bfactor)) >> 4; b = (b * (16u - bfactor)) >> 4;
-    }
-    c = (r >> 1) | ((g >> 1) << 5) | ((b >> 1) << 10);
+  if (gfx) return c;
+  return bmode == 0u ? c : bright(c, lo, (bmode << 14) | bfactor);
+}
+`;
+
+// Both screens at k: engine A's lines composited at HD where they show 3D
+// or VRAM display; everything else is the 1x screens' dot.
+const COMPOSITE = COMPOSE + `
+out uint oColor;
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy);
+  int k = uK;
+  int scr = q.y >= 192 * k ? 1 : 0;
+  int Y = q.y - scr * 192 * k;
+  int y = Y / k, x = q.x / k, i = q.x % k, j = Y % k;
+  uvec4 li = line0(y);
+  oColor = texelFetch(uScreens, ivec2(x, scr * 192 + y), 0).x;
+  if ((scr == 0) != ((li.x & 2u) != 0u)) return;
+  if ((li.x & 5u) == 5u) oColor = compose(x, y, i, j, false);
+  else if ((li.x & 8u) != 0u && (texelFetch(uPlane2, ivec2(x, y), 0).z & 1u) != 0u) {
+    uvec4 l1 = line1(y);
+    oColor = bright(cap_at(int(l1.y), y * 256 + x, i, j) & 0x7FFFu, 0u, l1.z);
   }
-  oColor = c;
+}`;
+
+// Display capture at k (gpu.nim hd_line's capture part): every sub-dot of
+// the destination bank's HD copy, the captured halfwords' from this
+// frame's lines, the rest as they were (uCapCur, the same bank).
+const CAPTURE = COMPOSE + `
+uniform usampler2D uCapCur;
+uniform uint uCapc;
+out uint oColor;
+const ivec2 CAPTURE_SIZE[4] = ivec2[4](ivec2(128, 128), ivec2(256, 64), ivec2(256, 128), ivec2(256, 192));
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy);
+  int wd = (q.y / uK) * 256 + q.x / uK, i = q.x % uK, j = q.y % uK;
+  ivec2 size = CAPTURE_SIZE[(uCapc >> 20) & 3u];
+  int rel = (wd - int((uCapc >> 18) & 3u) * 0x4000) & 0xFFFF;
+  int y = rel / size.x, x = rel % size.x;
+  oColor = texelFetch(uCapCur, q, 0).x;
+  if (y >= size.y || (line0(y).x & 16u) == 0u) return;
+  uint capc = line1(y).x;
+  uint csrc = (capc >> 29) & 3u;
+  uint eva = min(16u, capc & 0x1Fu), evb = min(16u, (capc >> 8) & 0x1Fu);
+  uvec4 p2 = texelFetch(uPlane2, ivec2(x, y), 0);
+  uint ca = 0u, cb = 0u;
+  if (csrc != 1u) {
+    if ((capc & (1u << 24)) != 0u) {
+      uint p = texelFetch(u3d, ivec2(x * uK + i, y * uK + j), 0).x;
+      ca = to_bgr555(p) | ((p >> 24) != 0u ? 0x8000u : 0u);
+    } else ca = compose(x, y, i, j, true) | 0x8000u;
+  }
+  if (csrc != 0u) {
+    if ((capc & (1u << 25)) != 0u) cb = p2.y >> 16;
+    else if ((p2.z & 2u) != 0u) {
+      int dm = int((line0(y).x >> 8) & 3u);
+      int roff = dm == 2 ? 0 : int((capc >> 26) & 3u) * 0x8000;
+      int rd = ((roff + y * size.x * 2 + x * 2) & 0x1FFFF) >> 1;
+      cb = cap_at(int(line1(y).y), rd, i, j);
+    } else cb = p2.y & 0xFFFFu;
+  }
+  if (csrc == 0u) { oColor = ca; return; }
+  if (csrc == 1u) { oColor = cb; return; }
+  uint aa = (ca & 0x8000u) != 0u ? eva : 0u;
+  uint ab = (cb & 0x8000u) != 0u ? evb : 0u;
+  uint c = 0u;
+  for (int s = 0; s < 15; s += 5)
+    c |= min(31u, (((ca >> uint(s)) & 0x1Fu) * aa + ((cb >> uint(s)) & 0x1Fu) * ab) >> 4) << uint(s);
+  oColor = c | (aa > 0u || ab > 0u ? 0x8000u : 0u);
 }`;
 
 // BGR555 screens to the canvas (flipped: texture row 0 is the top line)
@@ -1136,12 +1215,17 @@ export class NdsGpu3d {
     this.post = prog(POST);
     this.upscaleProg = prog(UPSCALE);
     this.compositeProg = prog(COMPOSITE);
+    this.captureProg = prog(CAPTURE);
     this.presentProg = prog(PRESENT);
     this.vao = gl.createVertexArray();
     this.fbo = gl.createFramebuffer();
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    // (textures are made and filled on a unit no pass binds, so that doing
+    // it while a pass is being set up leaves that pass's inputs alone)
+    this.scratchUnit = gl.TEXTURE0 + gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) - 1;
     const tex = (w, h, fmt) => {
       const t = gl.createTexture();
+      gl.activeTexture(this.scratchUnit);
       gl.bindTexture(gl.TEXTURE_2D, t);
       gl.texStorage2D(gl.TEXTURE_2D, 1, fmt, w, h);
       for (const p of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, p, gl.NEAREST);
@@ -1159,7 +1243,9 @@ export class NdsGpu3d {
     this.frame1x = tex(256, 192, gl.R32UI);
     this.screens1x = tex(256, 384, gl.R16UI);
     this.plane = tex(256, 192, gl.RGBA32UI);
-    this.lines = tex(192, 1, gl.RGBA32UI);
+    this.plane2 = tex(256, 192, gl.RGBA32UI);
+    this.lines = tex(384, 1, gl.RGBA32UI);
+    this.lineData = null;
     this.regs = new Uint32Array(40);
     this.disp = 0;
     this.swap = 0;
@@ -1175,6 +1261,9 @@ export class NdsGpu3d {
     if (k === this.k) return;
     const gl = this.gl;
     for (const t of [this.rasterOut, this.out3d, this.screens, this.binHead]) if (t) gl.deleteTexture(t.t);
+    for (const b of this.caps || []) if (b) { gl.deleteTexture(b.cur.t); gl.deleteTexture(b.next.t); }
+    // banks A-D's HD copies (display capture), made when first captured into
+    this.caps = [null, null, null, null];
     this.k = k;
     this.tilesX = Math.ceil((256 * k) / TILE_W);
     this.tilesY = Math.ceil((192 * k) / TILE_H);
@@ -1189,6 +1278,7 @@ export class NdsGpu3d {
 
   upload(t, data, w, h, format, type) {
     const gl = this.gl;
+    gl.activeTexture(this.scratchUnit);
     gl.bindTexture(gl.TEXTURE_2D, t.t);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, format, type, data);
   }
@@ -1378,19 +1468,56 @@ export class NdsGpu3d {
     this.upload(this.out3d, hd3d, 256 * this.k, 192 * this.k, gl.RED_INTEGER, gl.UNSIGNED_INT);
   }
 
-  // Both screens at k from the 1x screens, engine A's planes and out3d.
-  // (null arguments keep what was uploaded last)
-  composite(screens1x, plane, lines) {
+  // A bank's HD copy (display capture): two textures, the current one
+  // and the one the next capture writes.
+  bank(b) {
+    if (!this.caps[b]) {
+      const gl = this.gl, n = 256 * this.k;
+      const t = () => {
+        const x = this.tex(n, n, gl.R16UI);
+        this.upload(x, new Uint16Array(n * n), n, n, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
+        return x;
+      };
+      this.caps[b] = { cur: t(), next: t() };
+    }
+    return this.caps[b];
+  }
+
+  bindCompose(p) {
+    this.bindTex(p, "uScreens", 0, this.screens1x);
+    this.bindTex(p, "uPlane", 1, this.plane);
+    this.bindTex(p, "uPlane2", 2, this.plane2);
+    this.bindTex(p, "uLines", 3, this.lines);
+    this.bindTex(p, "u3d", 4, this.out3d);
+    for (let b = 0; b < 4; b++) this.bindTex(p, `uCap${b}`, 5 + b, this.bank(b).cur);
+  }
+
+  // Both screens at k from the 1x screens, engine A's planes and out3d,
+  // then display capture into the banks' HD copies (gpu.nim gpu_line's
+  // exports; null arguments keep what was uploaded last).
+  composite(screens1x, plane, plane2, lines, capture = true) {
     const gl = this.gl;
     if (screens1x) this.upload(this.screens1x, screens1x, 256, 384, gl.RED_INTEGER, gl.UNSIGNED_SHORT);
     if (plane) this.upload(this.plane, plane, 256, 192, gl.RGBA_INTEGER, gl.UNSIGNED_INT);
-    if (lines) this.upload(this.lines, lines, 192, 1, gl.RGBA_INTEGER, gl.UNSIGNED_INT);
-    this.pass(this.compositeProg, this.screens, (p) => {
-      this.bindTex(p, "uScreens", 0, this.screens1x);
-      this.bindTex(p, "uPlane", 1, this.plane);
-      this.bindTex(p, "uLines", 2, this.lines);
-      this.bindTex(p, "u3d", 3, this.out3d);
+    if (plane2) this.upload(this.plane2, plane2, 256, 192, gl.RGBA_INTEGER, gl.UNSIGNED_INT);
+    if (lines) {
+      this.upload(this.lines, lines, 384, 1, gl.RGBA_INTEGER, gl.UNSIGNED_INT);
+      this.lineData = lines;
+    }
+    this.pass(this.compositeProg, this.screens, (p) => this.bindCompose(p));
+    // capture: the first captured line's settings say where
+    const ld = this.lineData;
+    let y = 0;
+    while (ld && y < 192 && !(ld[y * 8] & 16)) y++;
+    if (!capture || !ld || y === 192) return;
+    const capc = ld[y * 8 + 4] >>> 0, dst = (capc >>> 16) & 3;
+    const bank = this.bank(dst);
+    this.pass(this.captureProg, bank.next, (p) => {
+      this.bindCompose(p);
+      this.bindTex(p, "uCapCur", 9, bank.cur);
+      gl.uniform1ui(p.loc.uCapc, capc);
     });
+    [bank.cur, bank.next] = [bank.next, bank.cur];
   }
 
   present(w, h) {

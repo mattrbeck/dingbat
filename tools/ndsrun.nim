@@ -540,6 +540,7 @@ when isMainModule:
       put("tex", g3.gpu_tex)
       put("pal", g3.gpu_pal)
       put("plane", n.gpu.gpu_plane)
+      put("plane2", n.gpu.gpu_plane2)
       put("lines", n.gpu.gpu_lines)
       put("top", n.gpu.top)
       put("bottom", n.gpu.bottom)
