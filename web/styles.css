@@ -152,13 +152,55 @@
  * Chrome themes
  * Persisted to localStorage ("dingbat_theme") and applied as
  * <html data-theme="…"> by an inline <head> script before first
- * paint. Amber is the default (no attribute). Each block
- * overrides only the tokens that differ.
+ * paint. :root is Amber (no attribute); Night is the default
+ * theme, applied when nothing is stored. Each block overrides
+ * only the tokens that differ.
  * ==========================================================
  */
 
+/* ---- Night: the default. Violet-black chrome around the Night Flyer's
+       purple, a lilac accent. Same lightness steps as Amber; only the hue
+       moves (the accent from amber phosphor to the bat's lilac). ---- */
+:root[data-theme="night"] {
+  --bg: #0e0a16;
+  --stage: #07050c;
+  --surface-1: #171126;
+  --surface-2: #201834;
+  --surface-3: #2c2146;
+  --surface-hover: #352858;
+
+  --accent-rgb: 183, 156, 255;
+  --accent-hi-rgb: 215, 200, 255;
+  --text-rgb: 239, 234, 248;
+  --stage-rgb: 7, 5, 12;
+  --surface-1-rgb: 23, 17, 38;
+
+  --text: #efeaf8;
+  --text-dim: #a89cc4;
+  --text-faint: #8c80a8;
+
+  --accent: #b79cff;
+  --accent-2: #cbb6ff;
+  --accent-hi: #d7c8ff;
+  --accent-ink: #1d1238;
+
+  --topbar-top: #181228;
+  --topbar-bottom: #110c1c;
+  --surface-2-lo: #1a1430;
+  --stage-top: #0d0916;
+  --control-strip-top: #100b1a;
+
+  --accent-tint-top: #221a36;
+  --btn-active-bottom: #1a142b;
+  --pad-pressed-bottom: #161126;
+
+  --drop-overlay-bg: rgba(10, 7, 18, 0.82);
+  --net-stall-bg: rgba(14, 10, 24, 0.72);
+  --cart-gba-label-lo: #8f73e0;
+}
+
 /* ---- Pure Black: true-#000 OLED chrome, neutral gray surfaces,
-       amber accent kept (classic amber-on-black phosphor) ---- */
+       Night's lilac accent ---- */
 :root[data-theme="black"] {
   --bg: #000000;
   --stage: #000000;
@@ -185,12 +227,21 @@
   --stage-top: #000000;
   --control-strip-top: #050505;
 
-  --accent-tint-top: #221d0c;
-  --btn-active-bottom: #191507;
-  --pad-pressed-bottom: #141104;
+  /* Night's lilac on true black (was Amber's phosphor) */
+  --accent-rgb: 183, 156, 255;
+  --accent-hi-rgb: 215, 200, 255;
+  --accent: #b79cff;
+  --accent-2: #cbb6ff;
+  --accent-hi: #d7c8ff;
+  --accent-ink: #1d1238;
+  --cart-gba-label-lo: #8f73e0;
+
+  --accent-tint-top: #1c1726;
+  --btn-active-bottom: #15111f;
+  --pad-pressed-bottom: #110d1a;
 
   --drop-overlay-bg: rgba(0, 0, 0, 0.85);
-  --net-stall-bg: rgba(10, 8, 4, 0.75);
+  --net-stall-bg: rgba(8, 6, 12, 0.75);
 }
 
 /* OLED black: chrome and stage fills go transparent so the ambient glow
@@ -6264,9 +6315,13 @@ body.debug-2p .home-tile-link {
   --swatch-bg: #0c0e16;
   --swatch-accent: #ffb04d;
 }
+.theme-chip[data-theme-name="night"] .theme-swatch {
+  --swatch-bg: #0e0a16;
+  --swatch-accent: #b79cff;
+}
 .theme-chip[data-theme-name="black"] .theme-swatch {
   --swatch-bg: #000000;
-  --swatch-accent: #ffb04d;
+  --swatch-accent: #b79cff;
 }
 .theme-chip[data-theme-name="light"] .theme-swatch {
   --swatch-bg: #e2e4ea;

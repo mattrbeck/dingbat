@@ -12107,8 +12107,9 @@ const GB_HW_SHADES = ["#fff7d6", "#ffad73", "#ef6b6b", "#7b3a5a"];
 // CIEDE2000 cap between adjacent shades because games dither shades 1 and 2
 // against each other) are pinned by web/tests/gb-palette.test.mjs.
 const GB_THEME_PALETTES = {
+  night:           ["#e6defc", "#b79cff", "#5a4590", "#0e0a16"],
   amber:           ["#fff0d6", "#ffb04d", "#8f5312", "#1a1206"],
-  black:           ["#fff0d6", "#ffb04d", "#7a4a0f", "#000000"],
+  black:           ["#e6defc", "#b79cff", "#4f3d80", "#000000"],
   light:           ["#f3f4f8", "#d88a1f", "#9c5400", "#1d2433"],
   indigo:          ["#cdc7f0", "#7f6ae7", "#55497f", "#0d0b17"],
   fuchsia:         ["#f0ccd8", "#e8739a", "#7e4560", "#170a0f"],
@@ -12233,9 +12234,11 @@ if (gbPaletteResetBtn) gbPaletteResetBtn.addEventListener("click", resetGbPalett
 
 // --- Chrome theme ---
 // Persisted in localStorage, not IndexedDB, so the inline <head> script can
-// apply it before first paint. "amber" = no data-theme attribute.
+// apply it before first paint. "amber" = no data-theme attribute (the
+// stylesheet's base); Night is the default when nothing is stored.
 const THEME_KEY = "dingbat_theme";
-const THEME_NAMES = ["amber", "black", "light", "dmg", "kiwi", "atomic-purple",
+const DEFAULT_THEME = "night";
+const THEME_NAMES = ["night", "amber", "black", "light", "dmg", "kiwi", "atomic-purple",
   "indigo", "fuchsia", "glacier", "daiei", "famicom"];
 // "emerald" was renamed "kiwi"; migrate the persisted value.
 const migrateTheme = (name) => (name === "emerald" ? "kiwi" : name);
@@ -12245,7 +12248,7 @@ const themeColorMeta = /** @type {HTMLMetaElement} */ (document.querySelector('m
 
 const applyTheme = (name) => {
   name = migrateTheme(name);
-  if (!THEME_NAMES.includes(name)) name = "amber";
+  if (!THEME_NAMES.includes(name)) name = DEFAULT_THEME;
   if (name === "amber") document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme", name);
   for (const chip of themeChips) {
@@ -12274,8 +12277,8 @@ themeChips.forEach((chip) =>
 
 // Sync the picker + theme-color meta with what the boot script applied.
 {
-  let storedTheme = "amber";
-  try { storedTheme = localStorage.getItem(THEME_KEY) || "amber"; } catch (e) {}
+  let storedTheme = DEFAULT_THEME;
+  try { storedTheme = localStorage.getItem(THEME_KEY) || DEFAULT_THEME; } catch (e) {}
   const migrated = migrateTheme(storedTheme);
   if (migrated !== storedTheme) {
     try { localStorage.setItem(THEME_KEY, migrated); } catch (e) {}
@@ -12368,7 +12371,7 @@ const resetAllSettings = async () => {
   setSaveHookStatus("");
 
   try { localStorage.removeItem(THEME_KEY); } catch (e) {}
-  applyTheme("amber");
+  applyTheme(DEFAULT_THEME);
 };
 
 const resetSettingsSlot = document.getElementById("reset-settings-slot");

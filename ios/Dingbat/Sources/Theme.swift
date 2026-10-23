@@ -1,6 +1,7 @@
-// Design tokens ported from web/styles.css: the eleven app themes
-// (Settings › General › App theme). Amber is the "handheld console" default:
-// deep indigo-black surfaces + warm amber phosphor accent. Device themes
+// Design tokens ported from web/styles.css: the twelve app themes
+// (Settings › General › App theme). Night is the default: violet-black
+// surfaces around the logo bat's purple, a lilac accent. Amber, the old
+// default, keeps its indigo-black and warm phosphor. Device themes
 // paint the shell colour on the top bar, around the screen and behind the
 // controls, with the console's own button colours on the pads; menus, home
 // and settings stay dark.
@@ -19,7 +20,7 @@ extension Color {
 }
 
 enum ThemeName: String, CaseIterable, Identifiable {
-    case amber, black, light, dmg, kiwi
+    case night, amber, black, light, dmg, kiwi
     case atomicPurple = "atomic-purple"
     case indigo, fuchsia, glacier, daiei, famicom
 
@@ -28,6 +29,7 @@ enum ThemeName: String, CaseIterable, Identifiable {
     /// The picker's label (web: the chip text).
     var label: String {
         switch self {
+        case .night: return "Night"
         case .amber: return "Amber"
         case .black: return "Pure Black"
         case .light: return "Light"
@@ -45,8 +47,9 @@ enum ThemeName: String, CaseIterable, Identifiable {
     /// Picker swatch: (background, accent).
     var swatch: (UInt32, UInt32) {
         switch self {
+        case .night: return (0x0E0A16, 0xB79CFF)
         case .amber: return (0x0C0E16, 0xFFB04D)
-        case .black: return (0x000000, 0xFFB04D)
+        case .black: return (0x000000, 0xB79CFF)
         case .light: return (0xE2E4EA, 0x9C5400)
         case .indigo: return (0x675BA0, 0x7F6AE7)
         case .fuchsia: return (0xAF748C, 0xE8739A)
@@ -63,8 +66,9 @@ enum ThemeName: String, CaseIterable, Identifiable {
     /// lightest first (web GB_THEME_PALETTES).
     var gbPalette: [UInt32] {
         switch self {
+        case .night: return [0xE6DEFC, 0xB79CFF, 0x5A4590, 0x0E0A16]
         case .amber: return [0xFFF0D6, 0xFFB04D, 0x8F5312, 0x1A1206]
-        case .black: return [0xFFF0D6, 0xFFB04D, 0x7A4A0F, 0x000000]
+        case .black: return [0xE6DEFC, 0xB79CFF, 0x4F3D80, 0x000000]
         case .light: return [0xF3F4F8, 0xD88A1F, 0x9C5400, 0x1D2433]
         case .indigo: return [0xCDC7F0, 0x7F6AE7, 0x55497F, 0x0D0B17]
         case .fuchsia: return [0xF0CCD8, 0xE8739A, 0x7E4560, 0x170A0F]
@@ -241,14 +245,20 @@ struct Palette {
         }
 
         switch t {
+        case .night:
+            dark(bg: 0x0E0A16, stage: 0x07050C, s1: 0x171126, s2: 0x201834, s3: 0x2C2146, hover: 0x352858,
+                 text: 0xEFEAF8, dim: 0xA89CC4, faint: 0x8C80A8,
+                 accent: 0xB79CFF, a2: 0xCBB6FF, ahi: 0xD7C8FF, ink: 0x1D1238, glow: 0.32,
+                 topTop: 0x181228, topBot: 0x110C1C, s2lo: 0x1A1430, strip: 0x100B1A,
+                 tint: 0x221A36, active: 0x1A142B, pressed: 0x161126, cartLo: 0x8F73E0)
         case .amber:
             p.homeBg = p.bg
         case .black:
             dark(bg: 0x000000, stage: 0x000000, s1: 0x0E0E0F, s2: 0x161617, s3: 0x202021, hover: 0x29292B,
                  text: 0xECECEE, dim: 0x9C9CA4, faint: 0x808089,
-                 accent: 0xFFB04D, a2: 0xFFC880, ahi: 0xFFD699, ink: 0x2A1800, glow: 0.32,
+                 accent: 0xB79CFF, a2: 0xCBB6FF, ahi: 0xD7C8FF, ink: 0x1D1238, glow: 0.32,
                  topTop: 0x101011, topBot: 0x060607, s2lo: 0x101011, strip: 0x050505,
-                 tint: 0x221D0C, active: 0x191507, pressed: 0x141104, cartLo: 0xD98724)
+                 tint: 0x1C1726, active: 0x15111F, pressed: 0x110D1A, cartLo: 0x8F73E0)
             p.border = Color.white.opacity(0.10); p.border2 = Color.white.opacity(0.17)
             p.padBorder = p.border2
             p.chromeTransparent = true
@@ -368,7 +378,7 @@ struct Palette {
 }
 
 private struct PaletteKey: EnvironmentKey {
-    static let defaultValue = Palette()
+    static let defaultValue = ThemeName.night.palette
 }
 
 extension EnvironmentValues {

@@ -100,7 +100,7 @@ test("only one source is ever in force", async () => {
 
   // Switching to "theme" does not lose the custom colours.
   h.api.gbPaletteMode = "theme";
-  eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.amber);
+  eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.night);
   eq(h.api.gbPaletteCustom, custom);
 
   h.api.gbPaletteMode = "default";
@@ -110,7 +110,8 @@ test("only one source is ever in force", async () => {
 test("theme mode tracks the app theme, live", async () => {
   const h = await loadApp();
   h.api.gbPaletteMode = "theme";
-  eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.amber);
+  eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.night,
+    "Night is the default theme");
 
   h.api.applyTheme("dmg");
   eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.dmg,
@@ -128,6 +129,10 @@ test("theme mode survives a theme this build no longer has", async () => {
   eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.kiwi);
 
   h.api.applyTheme("not-a-theme");
+  eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.night);
+
+  // Amber is the stylesheet's base (no data-theme attribute): still its own.
+  h.api.applyTheme("amber");
   eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.amber);
 });
 
@@ -339,7 +344,7 @@ test("each theme palette actually contains one of its theme's colours", async ()
   // vibrates against the magenta when dithered (the adjacent-dE test).
   const h = await loadApp();
   const mainColorOf = {
-    amber: "#ffb04d", black: "#ffb04d", light: "#9c5400",
+    night: "#b79cff", amber: "#ffb04d", black: "#b79cff", light: "#9c5400",
     indigo: "#7f6ae7", fuchsia: "#e8739a", glacier: "#769be5",
     kiwi: "#6ee126", dmg: "#b4aca9", "atomic-purple": "#c36ee7",
     daiei: "#eb7c33", famicom: "#b99c68",

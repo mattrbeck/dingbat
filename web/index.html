@@ -50,23 +50,27 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="dingbat" />
     <link rel="manifest" href="site.webmanifest" />
-    <meta name="theme-color" content="#0c0e16" />
+    <meta name="theme-color" content="#0e0a16" />
     <script>
       // Apply the persisted chrome theme before first paint so a reload never
-      // flashes the default amber. The tiny bg map keeps the theme-color meta in
+      // flashes the wrong one. Night is the default: with nothing stored, it
+      // applies; a stored "amber" (someone picked it) keeps Amber, which is
+      // the stylesheet's base (no data-theme attribute). The tiny bg map keeps the theme-color meta in
       // step from the first frame too; index.js later re-derives it from the live
       // CSS tokens, so the map is only a boot hint. The theme-color meta is what
       // iOS fills the standalone safe areas (status bar + home indicator) with —
       // kept present and theme-matched in every mode now (no black-translucent).
       try {
         var themeMeta = document.querySelector('meta[name="theme-color"]');
-        var t = localStorage.getItem("dingbat_theme");
+        var t = localStorage.getItem("dingbat_theme") || "night";
         if (t === "emerald") t = "kiwi"; // renamed to the GBC's original color name
-        if (t && t !== "amber") {
+        if (t === "amber") {
+          if (themeMeta) themeMeta.content = "#0c0e16";
+        } else {
           document.documentElement.setAttribute("data-theme", t);
           // Device themes paint the top bar the shell colour, so the status
           // bar / browser chrome should match the top bar, not the dark --bg.
-          var bg = { black: "#000000", light: "#e2e4ea", indigo: "#6c60a5",
+          var bg = { night: "#0e0a16", black: "#000000", light: "#e2e4ea", indigo: "#6c60a5",
                      fuchsia: "#b37a91", glacier: "#9fa3ba", kiwi: "#74e22f",
                      dmg: "#c7c1be", "atomic-purple": "#9b6fad",
                      daiei: "#ca6c3e", famicom: "#bca16f" }[t];
@@ -1537,7 +1541,8 @@
               <div class="settings-pane" id="settings-pane-general" role="tabpanel" aria-labelledby="settings-tab-general" hidden>
                 <div class="modal-subhead no-rule">App theme</div>
                 <div id="theme-picker" role="radiogroup" aria-label="App theme">
-                  <button type="button" class="theme-chip selected" data-theme-name="amber" role="radio" aria-checked="true"><span class="theme-swatch" aria-hidden="true"></span>Amber</button>
+                  <button type="button" class="theme-chip selected" data-theme-name="night" role="radio" aria-checked="true"><span class="theme-swatch" aria-hidden="true"></span>Night</button>
+                  <button type="button" class="theme-chip" data-theme-name="amber" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Amber</button>
                   <button type="button" class="theme-chip" data-theme-name="black" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Pure Black</button>
                   <button type="button" class="theme-chip" data-theme-name="light" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Light</button>
                   <button type="button" class="theme-chip" data-theme-name="dmg" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>DMG</button>

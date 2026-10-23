@@ -129,7 +129,8 @@ final class Settings: ObservableObject {
         playInSilent = bool("audio.playInSilent", true)
         volume = d.object(forKey: "audio.volume") == nil ? 100 : d.integer(forKey: "audio.volume")
         muted = bool("audio.muted", false)
-        theme = ThemeName(rawValue: str("dingbat_theme") ?? "") ?? .amber
+        // Night is the default; a stored "amber" (someone picked it) keeps Amber.
+        theme = ThemeName(rawValue: str("dingbat_theme") ?? "") ?? .night
         rewind = bool("rewindOn", true)
         dsBeta = bool(Self.dsBetaKey, false)
         runahead = d.integer(forKey: "runahead")
