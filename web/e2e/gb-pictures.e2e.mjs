@@ -57,8 +57,10 @@ test("a monochrome game's tile, slot and link screens take the palette", { skip,
   await sleep(1000);
 
   const solo = await page.evaluate(async () => {
-    await storeLastFrame({ force: true });
-    const tile = await __warm(await dbGet(frameKey("Mono.gb")));
+    // The tile's picture as storeLastFrame encodes it (Playwright's WebKit
+    // cannot put a Blob in IndexedDB, so not read back from there).
+    const fb = copyFramebuffer();
+    const tile = await __warm(await frameBlobFromFb(fb.heap, fb.w, fb.h));
     const slot = await __warm(await (await fetch(captureThumbnail())).blob());
     const exported = await __warm(nativeFrameCanvas());
     return { tile, slot, exported };
