@@ -1361,6 +1361,29 @@ proc wasm_rewind_commit(sample: cint): cint {.exportc.} =
 # path). Allocated from JS-invoked procs only (module-teardown rule above).
 var linkRgba: array[2, seq[uint32]]
 
+# A monochrome cart's screen in the DMG shade palette, per player: JS sets it
+# after link_init / rollback_init (which clear it) and when the palette
+# changes. A display substitution the cores never see, as the glow's remap.
+var linkShadeOn: array[2, bool]
+var linkShades: array[2, array[4, uint32]]
+
+proc link_set_shades(player, on: cint; p0, p1, p2, p3: uint32) {.exportc.} =
+  ## p0..p3 as the glow's (0xAABBGGRR), lightest first.
+  if player < 0 or player > 1: return
+  linkShadeOn[player] = on != 0
+  linkShades[player] = [p0, p1, p2, p3]
+
+proc gbLinkPixel(p: int; v: uint16): uint32 {.inline.} =
+  let raw = v and 0x7FFF'u16
+  if linkShadeOn[p]:
+    case raw
+    of 0x6BDF: return linkShades[p][0]
+    of 0x3ABF: return linkShades[p][1]
+    of 0x35BD: return linkShades[p][2]
+    of 0x2CEF: return linkShades[p][3]
+    else: discard
+  colorLutGbc[raw]
+
 proc link_exit() {.exportc.} =
   ## Flush both cores' battery saves to their FS .sav files (JS persists
   ## those to IndexedDB right after) and drop the link.
@@ -1387,6 +1410,7 @@ proc gb_link_init(rom1_path, rom2_path: string): cint =
   apply_audio_silent()
   for p in 0 .. 1:
     linkRgba[p] = newSeq[uint32](GB_W * GB_H)
+    linkShadeOn[p] = false
   frameCount = 0
   1
 
@@ -1431,7 +1455,7 @@ proc link_tick() {.exportc.} =
       let fb = cast[ptr UncheckedArray[uint16]](
         addr stateGbLink.cores[p].ppu.framebuffer[0])
       for i in 0 ..< GB_W * GB_H:
-        linkRgba[p][i] = colorLutGbc[fb[i] and 0x7FFF]
+        linkRgba[p][i] = gbLinkPixel(p, fb[i])
     return
   if stateLink == nil: return
   inc frameCount
@@ -1505,7 +1529,7 @@ proc gb_rollback_render() =
   let core = stateGbRollback.link.cores[rbLocal]
   let fb = cast[ptr UncheckedArray[uint16]](addr core.ppu.framebuffer[0])
   for i in 0 ..< GB_W * GB_H:
-    linkRgba[rbLocal][i] = colorLutGbc[fb[i] and 0x7FFF]
+    linkRgba[rbLocal][i] = gbLinkPixel(rbLocal, fb[i])
 
 proc gb_rollback_init(rom1_path, rom2_path: string; epoch: int64): cint =
   ## GB variant of rollback_init; the RTC is frozen to the shared epoch.
@@ -1581,6 +1605,7 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
   if localPlayer < 0 or localPlayer > 1: return 0
   rbLocal = int(localPlayer)
   rbEpoch = int64(epoch)
+  linkShadeOn = [false, false]
   if ($rom1_path).splitFile().ext.toLowerAscii() in GB_ROM_EXTS:
     return gb_rollback_init($rom1_path, $rom2_path, int64(epoch))
   var cores: seq[GBA] = @[]

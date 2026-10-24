@@ -286,6 +286,36 @@ test("a truncated or missing ROM is not treated as monochrome", async () => {
   assert.equal(h.api.gbMonoPanel, false);
 });
 
+// ── Pictures made off the screen ────────────────────────────────────────────
+// Library tiles, save slots, the paused hero and the strips come from the
+// core's framebuffer, not the shader, so they repeat its substitution.
+
+test("a picture's pixels take the palette the screen does", async () => {
+  const h = await loadApp();
+  const shades = [[10, 20, 30], [40, 50, 60], [70, 80, 90], [100, 110, 120]];
+  // The core's four values land exactly on their entries.
+  [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF].forEach((v, i) => eq(h.api.dmgShadeRgb(v, shades), shades[i]));
+  // A pixel settling between shades 0 and 1 (green 26 of 30..21) mixes them.
+  const r = 31, g = 26, b = 26 + (14 - 26) * (4 / 9);
+  eq(h.api.dmgShadeRgb(r | (g << 5) | (Math.round(b) << 10), shades), [23, 33, 43]);
+  // A colour off the ramp keeps its own colour.
+  assert.equal(h.api.dmgShadeRgb(0x001F, shades), null, "pure red");
+  assert.equal(h.api.dmgShadeRgb(0x7FFF, shades), null, "white");
+});
+
+test("only a monochrome game's pictures are recoloured, in the palette in force", async () => {
+  const h = await loadApp();
+  assert.equal(h.api.pictureShades(), null, "no game");
+  const hw = await loadWithGame();
+  eq(hw.api.pictureShades(), [[0xf7, 0xf3, 0xff], [0xc6, 0xb0, 0xff], [0xa2, 0x6f, 0xcf], [0x3a, 0x24, 0x63]]);
+  hw.api.gbPaletteCustom = ["#ffffff", "#aaaaaa", "#555555", "#000000"];
+  hw.api.gbPaletteMode = "custom";
+  eq(hw.api.pictureShades(), [[255, 255, 255], [170, 170, 170], [85, 85, 85], [0, 0, 0]]);
+  // The thumbnail batch asks about its own game, not the one on screen.
+  hw.sandbox.FS.files.set("other.gbc", cart(0x80));
+  assert.equal(hw.api.pictureShades(hw.api.isMonoPanelRom("other.gbc")), null);
+});
+
 // ── The shipped theme palettes ──────────────────────────────────────────────
 
 test("every app theme has a palette", async () => {

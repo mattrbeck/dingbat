@@ -1638,6 +1638,7 @@ const rbTryInit = () => {
     netFail("Couldn't start the rollback session");
     return;
   }
+  pushLinkShades([rom0, rom1]);
   const hostState = net.isHost ? rb.localState : rb.remoteState;
   const guestState = net.isHost ? rb.remoteState : rb.localState;
   if (!rbLoadState(0, hostState) || !rbLoadState(1, guestState)) {

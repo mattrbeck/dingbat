@@ -112,6 +112,7 @@ interface EmscriptenModule {
   _wasm_rewind_scrub_state_size?(sample: number): number;
   _wasm_rewind_scrub_save_differs?(sample: number): number;
   _wasm_rewind_commit?(sample: number): number;
+  _link_set_shades?(player: number, on: number, p0: number, p1: number, p2: number, p3: number): void;
   _link_exit?(): void;
   _link_init?(rom1_path: number, rom2_path: number): number;
   _link_tick?(): void;

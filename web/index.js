@@ -6919,7 +6919,9 @@ const copyFramebuffer = () => {
   const ptr = Module._wasm_fb_ptr();
   if (!ptr) return null;
   const [w, h] = gameRes();
-  return { heap: new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice(), w, h };
+  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice();
+  shadeFramebuffer(heap, w, h, pictureShades());
+  return { heap, w, h };
 };
 const storeLastFrame = ({ force = false } = {}) => {
   if (!currentRomName || !currentOriginalName) return Promise.resolve();
@@ -9936,13 +9938,24 @@ let reportThumbs = null; // packed BGR555 thumbnails copied out of wasm
 let reportThumbW = 0;
 let reportThumbH = 0;
 
-const bgr555ToImageData = (src, off, w, h) => {
+// shades: pictureShades(), so a monochrome game's picture wears the palette
+// the screen does.
+const bgr555ToImageData = (src, off, w, h, shades = null) => {
   const out = new Uint8ClampedArray(w * h * 4);
+  const memo = new Map();
   for (let i = 0; i < w * h; i++) {
-    const v = src[off + i * 2] | (src[off + i * 2 + 1] << 8);
-    out[i * 4] = Math.round((v & 31) * (255 / 31));
-    out[i * 4 + 1] = Math.round(((v >> 5) & 31) * (255 / 31));
-    out[i * 4 + 2] = Math.round(((v >> 10) & 31) * (255 / 31));
+    const v = (src[off + i * 2] | (src[off + i * 2 + 1] << 8)) & 0x7fff;
+    let rgb = shades && memo.get(v);
+    if (shades && rgb === undefined) memo.set(v, rgb = dmgShadeRgb(v, shades));
+    if (rgb) {
+      out[i * 4] = rgb[0];
+      out[i * 4 + 1] = rgb[1];
+      out[i * 4 + 2] = rgb[2];
+    } else {
+      out[i * 4] = Math.round((v & 31) * (255 / 31));
+      out[i * 4 + 1] = Math.round(((v >> 5) & 31) * (255 / 31));
+      out[i * 4 + 2] = Math.round(((v >> 10) & 31) * (255 / 31));
+    }
     out[i * 4 + 3] = 255;
   }
   return new ImageData(out, w, h);
@@ -9965,7 +9978,7 @@ const drawReportLivePreview = () => {
 const drawReportSamplePreview = (sample) => {
   if (!reportThumbs) return;
   const stride = reportThumbW * reportThumbH * 2;
-  const img = bgr555ToImageData(reportThumbs, sample * stride, reportThumbW, reportThumbH);
+  const img = bgr555ToImageData(reportThumbs, sample * stride, reportThumbW, reportThumbH, pictureShades());
   reportPreview.width = reportThumbW;
   reportPreview.height = reportThumbH;
   reportPreview.getContext("2d").putImageData(img, 0, 0);
@@ -10208,7 +10221,7 @@ const createFilmStrip = ({
     const stride = thumbW * thumbH * 2;
     const top = Math.round((stripH - th) / 2);
     for (let s = 0; s < samples; s++) {
-      sctx.putImageData(bgr555ToImageData(thumbs, s * stride, thumbW, thumbH), 0, 0);
+      sctx.putImageData(bgr555ToImageData(thumbs, s * stride, thumbW, thumbH, pictureShades()), 0, 0);
       // Newest on the right.
       const x = (samples - 1 - s) * pitch + Math.floor(STRIP_GAP / 2);
       cctx.drawImage(scratch, 0, 0, thumbW, thumbH, x, top, tw, th);
@@ -10397,7 +10410,7 @@ const createFilmStrip = ({
       el.width = thumbW;
       el.height = thumbH;
       el.getContext("2d").putImageData(
-        bgr555ToImageData(thumbs, s * stride, thumbW, thumbH), 0, 0);
+        bgr555ToImageData(thumbs, s * stride, thumbW, thumbH, pictureShades()), 0, 0);
     },
     /** Bind the drag/tap gesture. `bounds(i)` returns marker i's clamp. */
     attach(bounds) {
@@ -11200,20 +11213,20 @@ var gbMonoPanel = false;
 // (it colourises monochrome carts itself). Read here, not exported from
 // wasm, so the feature stays in the presentation layer; the shader
 // substitutes only exact DMG shade values anyway.
-const detectMonoPanel = (romFile) => {
-  gbMonoPanel = false;
-  if (extOf(romFile) === ".gba") return;
+const isMonoPanelRom = (romFile) => {
+  if (extOf(romFile) === ".gba") return false;
   try {
     const rom = FS.readFile(romFile);
-    if (!rom || rom.length < 0x150) return;
-    if ((rom[0x143] & 0x80) !== 0) return;      // CGB-enhanced or CGB-only
-  } catch (e) { return; }
+    if (!rom || rom.length < 0x150) return false;
+    if ((rom[0x143] & 0x80) !== 0) return false; // CGB-enhanced or CGB-only
+  } catch (e) { return false; }
   try {
     // The core's test: larger than the 0x100-byte DMG boot ROM.
-    if (FS.readFile("bootrom.bin").length > 0x100) return;
+    if (FS.readFile("bootrom.bin").length > 0x100) return false;
   } catch (e) { /* no boot ROM installed — monochrome stays monochrome */ }
-  gbMonoPanel = true;
+  return true;
 };
+const detectMonoPanel = (romFile) => { gbMonoPanel = isMonoPanelRom(romFile); };
 
 // An SGB border changes the output size mid-session; the presenter watches
 // for it, since the backing store, --game-ar and the fit all key off nativeRes().
@@ -12156,6 +12169,58 @@ const gbPaletteColors = () => {
   return GB_DEFAULT_SHADES;
 };
 
+// The app's own pictures of play (library tiles, save slots, the paused
+// hero, the rewind, clip and bug-report strips) come from the core's
+// framebuffer, so they get the shader's substitution (glpresent.js fetchRGB)
+// here. Exports keep the console's own picture (NATIVE_SCALE). pictureShades: the four shades as [r, g, b] bytes, or null where the
+// screen shows the core's own colours (a colour game, SGB colour).
+const pictureShades = (mono = gbMonoPanel && !sgbActive()) => {
+  const pal = mono ? gbPaletteColors() : null;
+  if (!pal || pal.length !== 4) return null;
+  return pal.map((c) => {
+    const n = parseInt(String(c).slice(1), 16);
+    return [n >> 16, (n >> 8) & 255, n & 255];
+  });
+};
+
+// The four values a monochrome core writes, as 5-bit [r, g, b]: glpresent.js
+// DMG_SHADE.
+const DMG_SHADE_555 = [[31, 30, 26], [31, 21, 14], [29, 13, 13], [15, 7, 11]];
+
+// A raw BGR555 pixel under the shades, as the shader: one between two of the
+// core's shades (an LCD pixel settling) mixes their palette entries; null off
+// the ramp, where a pixel keeps its own colour.
+const dmgShadeRgb = (v, shades) => {
+  const c = [v & 31, (v >> 5) & 31, (v >> 10) & 31];
+  for (let i = 0; i < 3; i++) {
+    const a = DMG_SHADE_555[i], b = DMG_SHADE_555[i + 1];
+    const t = (a[1] - c[1]) / (a[1] - b[1]);
+    if (t < 0 || t > 1) continue;
+    for (let k = 0; k < 3; k++) {
+      if (Math.abs(a[k] + (b[k] - a[k]) * t - c[k]) >= 1.5) return null;
+    }
+    const p = shades[i], q = shades[i + 1];
+    return [0, 1, 2].map((k) => Math.round(p[k] + (q[k] - p[k]) * t));
+  }
+  return null;
+};
+
+// _wasm_fb_ptr's RGBA under the shades, in place: the raw pixels it was
+// made from decide (the core's own framebuffer, the same size).
+const shadeFramebuffer = (heap, w, h, shades) => {
+  if (!shades || !Module._wasm_native_fb_ptr) return;
+  const ptr = Module._wasm_native_fb_ptr();
+  if (!ptr) return;
+  const raw = new Uint16Array(Module.memory.buffer, ptr, w * h);
+  const memo = new Map();
+  for (let i = 0; i < w * h; i++) {
+    const v = raw[i] & 0x7fff;
+    let rgb = memo.get(v);
+    if (rgb === undefined) memo.set(v, rgb = dmgShadeRgb(v, shades));
+    if (rgb) heap.set(rgb, i * 4);
+  }
+};
+
 const gbPaletteSgbNote = document.getElementById("gb-palette-sgb-note");
 
 const syncGbPaletteUI = () => {
@@ -12184,9 +12249,26 @@ const syncGbPaletteUI = () => {
 
 const applyGbPalette = () => {
   syncGbPaletteUI();
+  if (linkMode || rollbackMode) pushLinkShades();
   // Repaint even if paused.
   presentDirty = true;
   if (typeof drawGame === "function") drawGame();
+};
+
+// The link screens (local 2P, online rollback) are the core's own RGBA, not
+// the shader's, so the core swaps the shades, per player: each one's cart
+// decides. Pushed after link_init / rollback_init and on a palette change.
+var linkShadeRoms = null; // the session's two FS ROM names
+const pushLinkShades = (roms = linkShadeRoms) => {
+  linkShadeRoms = roms;
+  if (!roms || typeof Module === "undefined" || !Module._link_set_shades) return;
+  roms.forEach((rom, p) => {
+    const pal = isMonoPanelRom(rom) ? gbPaletteColors() : null;
+    const on = !!(pal && pal.length === 4);
+    Module._link_set_shades(p, on ? 1 : 0,
+      on ? glowPackHex(pal[0]) : 0, on ? glowPackHex(pal[1]) : 0,
+      on ? glowPackHex(pal[2]) : 0, on ? glowPackHex(pal[3]) : 0);
+  });
 };
 
 const saveGbPalette = () => {
@@ -14571,6 +14653,7 @@ const launchLinkRom = async (rom) => {
     showToast("Couldn't start 2P link mode");
     return;
   }
+  pushLinkShades(LINK_FS_ROMS);
   linkMode = true;
   paused = false;
   pauseButton.classList.remove("paused", "active");
@@ -15511,6 +15594,8 @@ const thumbsPictureOne = async (cand, run, remote) => {
   let ptr = Module._wasm_fb_ptr();
   if (!ptr) return false;
   let heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice();
+  let sgb = Module._wasm_sgb_active && Module._wasm_sgb_active();
+  shadeFramebuffer(heap, w, h, pictureShades(isMonoPanelRom(romFile) && !sgb));
   let blob = await frameBlobFromFb(heap, w, h);
   try { FS.unlink("thumb.sav"); } catch {}
   if (!blob) return false;
