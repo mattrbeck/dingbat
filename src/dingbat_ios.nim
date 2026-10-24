@@ -1993,6 +1993,14 @@ proc dingbat_link_rgba(player: cint): ptr uint32 {.exportc, cdecl.} =
   for i in 0 ..< n: lkRgba[i] = lut[fb[i] and 0x7FFF]
   addr lkRgba[0]
 
+proc dingbat_link_mono(player: cint): cint {.exportc, cdecl.} =
+  ## 1 when `player`'s link core is a Game Boy drawing in its four DMG
+  ## shades (the shade palette's gate, as dingbat_is_cgb and
+  ## dingbat_sgb_active for the solo core).
+  if player < 0 or player > 1 or lkGb == nil: return 0
+  let c = lkGb.cores[player]
+  if c.cgb_enabled or c.sgb_active(): 0 else: 1
+
 proc dingbat_link_input(player, input_id, pressed: cint) {.exportc, cdecl.} =
   if input_id < 0 or input_id > ord(Input.high) or player < 0 or player > 1: return
   if lkGb != nil: lkGb.cores[player].handle_input(Input(input_id), pressed != 0)

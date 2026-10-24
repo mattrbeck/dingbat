@@ -1265,8 +1265,8 @@ final class GameSession: NSObject, ObservableObject {
         DriveSync.shared.markUpload("frame:" + g.fileName)
     }
 
-    /// The picture now, colour corrected (no filters or palette), optionally
-    /// scaled down.
+    /// The picture now, colour corrected and in the shade palette (no
+    /// filters), optionally scaled down.
     func currentImage(maxWidth: Int? = nil) -> UIImage? {
         guard game != nil else { return nil }
         // A DS game's picture is its top screen (web ndsTopRgba: the
@@ -1314,7 +1314,39 @@ final class GameSession: NSObject, ObservableObject {
     /// Whatever the core holds (Add pictures boots games it never loads).
     static func coreImage(maxWidth: Int? = nil) -> UIImage? {
         guard let ptr = dingbat_framebuffer_rgba() else { return nil }
-        return rgbaImage(ptr, width: Int(dingbat_fb_width()), height: Int(dingbat_fb_height()), maxWidth: maxWidth)
+        let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
+        guard let shades = pictureShades(), let raw = dingbat_framebuffer() else {
+            return rgbaImage(ptr, width: w, height: h, maxWidth: maxWidth)
+        }
+        var px = Array(UnsafeBufferPointer(start: ptr, count: w * h))
+        for i in 0..<(w * h) { if let s = shadeRGBA(raw[i], shades) { px[i] = s } }
+        return px.withUnsafeBufferPointer { rgbaImage($0.baseAddress!, width: w, height: h, maxWidth: maxWidth) }
+    }
+
+    /// The shade palette the app's pictures of the core's game wear, as the
+    /// presenter's (web pictureShades): the four 0xRRGGBB shades for a
+    /// monochrome game, nil where the screen shows the core's own colours.
+    /// Exports (clips, Record, screenshots) keep the console's own picture.
+    static func pictureShades() -> [UInt32]? {
+        guard dingbat_is_gb() != 0, dingbat_is_cgb() == 0, dingbat_sgb_active() == 0 else { return nil }
+        return Settings.shared.dmgPalette
+    }
+
+    /// A raw BGR555 pixel under the shades: the core's four values (gb.nim
+    /// DMG_COLORS) become their palette entries as RGBA (R first); nil for
+    /// anything else, which keeps its own colour.
+    static func shadeRGBA(_ v: UInt16, _ shades: [UInt32]) -> UInt32? {
+        let i: Int
+        switch v & 0x7FFF {
+        case 0x6BDF: i = 0
+        case 0x3ABF: i = 1
+        case 0x35BD: i = 2
+        case 0x2CEF: i = 3
+        default: return nil
+        }
+        guard shades.count == 4 else { return nil }
+        let c = shades[i]
+        return 0xFF00_0000 | ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF)
     }
 
     /// RGBA8888 (R first) to an image, 2x native (or `maxWidth` wide),
@@ -1351,11 +1383,13 @@ final class GameSession: NSObject, ObservableObject {
         return UIImage(cgImage: cg)
     }
 
-    /// BGR555 thumbnails (rewind strips, state trailers) to an image.
-    static func bgr555Image(_ ptr: UnsafeRawPointer, width: Int, height: Int) -> UIImage? {
+    /// BGR555 thumbnails (rewind strips, state trailers) to an image;
+    /// `shades` (pictureShades) for the strips the app shows.
+    static func bgr555Image(_ ptr: UnsafeRawPointer, width: Int, height: Int, shades: [UInt32]? = nil) -> UIImage? {
         let src = ptr.assumingMemoryBound(to: UInt16.self)
         var rgba = [UInt32](repeating: 0, count: width * height)
         for i in 0..<(width * height) {
+            if let shades, let s = shadeRGBA(src[i], shades) { rgba[i] = s; continue }
             let v = UInt32(src[i])
             let r = (v & 31) * 255 / 31, g = ((v >> 5) & 31) * 255 / 31, b = ((v >> 10) & 31) * 255 / 31
             rgba[i] = 0xFF00_0000 | (b << 16) | (g << 8) | r

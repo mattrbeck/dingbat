@@ -365,6 +365,7 @@ int dingbat_link_init(const char *rom0, const char *rom1);
 void dingbat_link_tick(void);
 const uint16_t *dingbat_link_fb(int player);
 const uint32_t *dingbat_link_rgba(int player);   /* colour-corrected, R first */
+int dingbat_link_mono(int player);   /* 1: a GB core in its four DMG shades (the shade palette's gate) */
 void dingbat_link_input(int player, int input_id, int pressed);
 int dingbat_link_active(void);
 void dingbat_link_flush_saves(void);

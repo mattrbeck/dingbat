@@ -18,7 +18,12 @@ enum TwoPlayer {
     static func refresh() {
         guard dingbat_link_active() != 0, !screens.allObjects.isEmpty, let px = dingbat_link_rgba(1) else { return }
         let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
-        let data = Data(bytes: UnsafeRawPointer(px), count: w * h * 4)
+        var rgba = Array(UnsafeBufferPointer(start: px, count: w * h))
+        // A monochrome cart in the shade palette, as player 1's stage.
+        if dingbat_link_mono(1) != 0, let shades = Settings.shared.dmgPalette, let raw = dingbat_link_fb(1) {
+            for i in 0..<(w * h) { if let s = GameSession.shadeRGBA(raw[i], shades) { rgba[i] = s } }
+        }
+        let data = rgba.withUnsafeBufferPointer { Data(buffer: $0) }
         guard let provider = CGDataProvider(data: data as CFData),
               let img = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32,
                                 bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),

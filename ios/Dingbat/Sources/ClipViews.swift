@@ -128,11 +128,12 @@ struct ClipRangeView: View {
         guard GameSession.shared.game != nil else { return }
         let n = Int(dingbat_clip_scrub_generate(Int32(Self.maxSamples)))
         guard n > 0, let base = dingbat_clip_scrub_thumbs() else { return }
+        let shades = GameSession.pictureShades()
         let w = Int(dingbat_clip_scrub_thumb_w()), h = Int(dingbat_clip_scrub_thumb_h())
         var imgs: [UIImage] = []
         var ages: [Int] = []
         for i in 0..<n {
-            guard let img = GameSession.bgr555Image(base + i * w * h * 2, width: w, height: h) else { break }
+            guard let img = GameSession.bgr555Image(base + i * w * h * 2, width: w, height: h, shades: shades) else { break }
             imgs.append(img)
             ages.append(Int(dingbat_clip_scrub_frames_ago(Int32(i))))
         }

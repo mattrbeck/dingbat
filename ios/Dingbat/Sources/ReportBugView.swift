@@ -132,7 +132,8 @@ struct ReportBugView: View {
             let n = Int(dingbat_rewind_scrub_generate(48))
             if n > 0, let base = dingbat_rewind_scrub_thumbs() {
                 let w = Int(dingbat_rewind_scrub_thumb_w()), h = Int(dingbat_rewind_scrub_thumb_h())
-                thumbs = (0..<n).compactMap { GameSession.bgr555Image(base + $0 * w * h * 2, width: w, height: h) }
+                let shades = GameSession.pictureShades()
+                thumbs = (0..<n).compactMap { GameSession.bgr555Image(base + $0 * w * h * 2, width: w, height: h, shades: shades) }
                 samples = thumbs.count
             }
         }
