@@ -69,10 +69,11 @@ vertex VOut nds_vertex(uint vid [[vertex_id]], constant ViewUniforms &v [[buffer
   return o;
 }
 
-constant float3 DMG_SHADE[4] = { float3(31.0, 30.0, 26.0),   // 0x6BDF
-                                 float3(31.0, 21.0, 14.0),   // 0x3ABF
-                                 float3(29.0, 13.0, 13.0),   // 0x35BD
-                                 float3(15.0,  7.0, 11.0) }; // 0x2CEF
+// The four greys a monochrome core writes (gb.nim DMG_COLORS), 5-bit.
+constant float3 DMG_SHADE[4] = { float3(31.0, 31.0, 31.0),   // 0x7FFF
+                                 float3(21.0, 21.0, 21.0),   // 0x56B5
+                                 float3(10.0, 10.0, 10.0),   // 0x294A
+                                 float3( 0.0,  0.0,  0.0) }; // 0x0000
 
 struct Ctx {
   texture2d<ushort, access::read> tex;

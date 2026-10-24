@@ -22,13 +22,11 @@ type
     tmMbc30Test, tmDocboy
 
 # BGR555 -> 8-bit greyscale, mapping DMG_COLORS to the mealybug expected values.
-# DMG_COLORS = [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF] -> greyscale [0xFF, 0xAA, 0x55, 0x00]
+# DMG_COLORS (four greys, lightest first) -> greyscale [0xFF, 0xAA, 0x55, 0x00]
 proc bgr555_to_grey(c: uint16): uint8 =
-  case c
-  of 0x6BDF: 0xFF'u8
-  of 0x3ABF: 0xAA'u8
-  of 0x35BD: 0x55'u8
-  of 0x2CEF: 0x00'u8
+  const greys = [0xFF'u8, 0xAA, 0x55, 0x00]
+  let shade = dmg_shade(c)
+  if shade >= 0: greys[shade]
   else:
     # Fallback for non-DMG colors: generic BGR555 to greyscale
     let r = int(c and 0x1F) * 255 div 31

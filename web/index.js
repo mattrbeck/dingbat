@@ -11211,8 +11211,8 @@ var gbMonoPanel = false;
 // Decided as the core does (new_gb in src/dingbat/gb/gb.nim): colour if the
 // header's CGB flag is set (0x80 / 0xC0) or a CGB boot ROM is installed
 // (it colourises monochrome carts itself). Read here, not exported from
-// wasm, so the feature stays in the presentation layer; the shader
-// substitutes only exact DMG shade values anyway.
+// wasm, so the feature stays in the presentation layer. It must agree with
+// the core: a colour game's white and black are two of the grey shade codes.
 const isMonoPanelRom = (romFile) => {
   if (extOf(romFile) === ".gba") return false;
   try {
@@ -12116,9 +12116,9 @@ const loadRunaheadFromStorage = async () => {
 // rose-violet, deep violet). Brightness steps as the shades games were drawn
 // for (0.91 / 0.50 / 0.24 / 0.03), and a hue shift down the ramp so
 // neighbouring shades stay apart in hue as well as brightness; held to the
-// same rules as the theme ramps (gb-palette.test.mjs). The core still writes
-// its own four values (DMG_COLORS in src/dingbat/gb/gb.nim); the presenter
-// substitutes these. Also the seed for a custom palette.
+// same rules as the theme ramps (gb-palette.test.mjs). The core writes four
+// greys (DMG_COLORS in src/dingbat/gb/gb.nim), a code every picture
+// translates into these. Also the seed for a custom palette.
 const GB_DEFAULT_SHADES = ["#f7f3ff", "#c6b0ff", "#a26fcf", "#3a2463"];
 
 // One four-shade ramp per app theme, lightest to darkest. The rules (theme
@@ -12169,10 +12169,11 @@ const gbPaletteColors = () => {
   return GB_DEFAULT_SHADES;
 };
 
-// The app's own pictures of play (library tiles, save slots, the paused
-// hero, the rewind, clip and bug-report strips) come from the core's
-// framebuffer, so they get the shader's substitution (glpresent.js fetchRGB)
-// here. Exports keep the console's own picture (NATIVE_SCALE). pictureShades: the four shades as [r, g, b] bytes, or null where the
+// Every picture of play made off the screen (library tiles, save slots,
+// the paused hero, the rewind, clip and bug-report strips, clips, Record and
+// screenshots) comes from the core's framebuffer, whose black-and-white
+// shades are four greys, so it gets the shader's substitution
+// (glpresent.js fetchRGB) here. pictureShades: the four shades as [r, g, b] bytes, or null where the
 // screen shows the core's own colours (a colour game, SGB colour).
 const pictureShades = (mono = gbMonoPanel && !sgbActive()) => {
   const pal = mono ? gbPaletteColors() : null;
@@ -12183,9 +12184,9 @@ const pictureShades = (mono = gbMonoPanel && !sgbActive()) => {
   });
 };
 
-// The four values a monochrome core writes, as 5-bit [r, g, b]: glpresent.js
-// DMG_SHADE.
-const DMG_SHADE_555 = [[31, 30, 26], [31, 21, 14], [29, 13, 13], [15, 7, 11]];
+// The four greys a monochrome core writes (gb.nim DMG_COLORS), as 5-bit
+// [r, g, b]: glpresent.js DMG_SHADE.
+const DMG_SHADE_555 = [[31, 31, 31], [21, 21, 21], [10, 10, 10], [0, 0, 0]];
 
 // A raw BGR555 pixel under the shades, as the shader: one between two of the
 // core's shades (an LCD pixel settling) mixes their palette entries; null off
@@ -13334,7 +13335,8 @@ const frameAdvance = () => {
 // --- The console's own picture and sound, for everything exported ---
 // Clips, recordings and screenshots carry the scene as the console makes
 // it: the core's framebuffer at a whole-number scale (no LCD response,
-// colour correction, DMG shades, SGB border or upscale filter) and its mix
+// colour correction, SGB border or upscale filter; a black-and-white game in
+// the shade palette, as on screen, since the core's own four are greys) and its mix
 // without the MP2K HLE, the FIFO smoothing or the channel mutes. Those are
 // ways of playing, not part of the game. The HLE only shadows the game's
 // own mixer (mp2k.nim), so switching it off for a replay changes nothing
@@ -13361,7 +13363,7 @@ const nativeFrameCanvas = () => {
     nativeBig.height = h * NATIVE_SCALE;
   }
   nativeSmall.getContext("2d").putImageData(
-    bgr555ToImageData(new Uint8Array(Module.memory.buffer, ptr, w * h * 2), 0, w, h), 0, 0);
+    bgr555ToImageData(new Uint8Array(Module.memory.buffer, ptr, w * h * 2), 0, w, h, pictureShades()), 0, 0);
   const ctx = nativeBig.getContext("2d");
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(nativeSmall, 0, 0, nativeBig.width, nativeBig.height);

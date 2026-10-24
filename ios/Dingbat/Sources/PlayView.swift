@@ -1051,12 +1051,14 @@ struct GameMenu: View {
 }
 
 extension Share {
-    /// The console's own picture at 4x (no filters, colour correction,
-    /// palette or border), as the web's screenshot (the menu, F9).
+    /// The console's own picture at 4x (no filters, colour correction or
+    /// border; a black-and-white game in the shade palette, as on screen),
+    /// as the web's screenshot (the menu, F9).
     static func screenshot() {
         guard let g = GameSession.shared.game, let fb = dingbat_framebuffer() else { return }
         let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
-        guard let img = GameSession.bgr555Image(UnsafeRawPointer(fb), width: w, height: h) else { return }
+        guard let img = GameSession.bgr555Image(UnsafeRawPointer(fb), width: w, height: h,
+                                                shades: GameSession.pictureShades()) else { return }
         let size = CGSize(width: w * 4, height: h * 4)
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1

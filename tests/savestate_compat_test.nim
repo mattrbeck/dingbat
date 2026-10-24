@@ -243,6 +243,7 @@ proc run_corpus() =
     return
   var revs_seen: array[CoreKind, set[uint8]]
   var whole_rom_seen = 0
+  var regreyed = 0
   for path in entries:
     # <rom-with-extension>.v<N>[-<what>].state, N = the CONTAINER version in
     # the header; `-<what>` names a later shape within one container
@@ -291,6 +292,18 @@ proc run_corpus() =
         got_rev = emu.parse_state_image(data, base).rev
       except CatchableError: discard
       ok = emu.load_state_bytes(data)
+      # The DMG shades were amber before they were greys (gb.nim DMG_COLORS):
+      # an old black-and-white state comes back in the greys, palette RAM and
+      # the picture it was taken on alike.
+      if ok and not emu.cgb_enabled:
+        var words: seq[uint16] = @[]
+        for bank in [emu.ppu.pram, emu.ppu.obj_pram]:
+          for i in 0 ..< bank.len div 2:
+            words.add(uint16(bank[2 * i]) or (uint16(bank[2 * i + 1]) shl 8))
+        check(words.allIt(dmg_shade(it) >= 0) and emu.ppu.framebuffer.allIt(dmg_shade(it) >= 0),
+              label & " in the grey DMG shades",
+              "palette RAM or the picture still holds a colour outside DMG_COLORS")
+        inc regreyed
       if ok:
         try:
           for _ in 0 ..< 60: emu.step_frame()
@@ -316,6 +329,7 @@ proc run_corpus() =
         "corpus covers GB payload revisions 1, 2, 3, 5 and 6",
         "GB revisions present: " & $revs_seen[ckGB])
   check(whole_rom_seen > 0, "corpus has a state with the whole-ROM trailer")
+  check(regreyed > 0, "corpus has a black-and-white GB state for the grey shades")
 
 proc run_roundtrip() =
   ## A state taken by THIS build must load in THIS build; separates "the

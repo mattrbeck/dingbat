@@ -2861,8 +2861,22 @@ const FETCHER_ORDER*: array[-5 .. 23, FetchStage] = [
 static: doAssert WIN_LINE_START_WX - 2 <= 5,
   "WIN_HEAD_ABSORB idles WX - 1 dots; FETCHER_ORDER's negative head must cover it"
 
-# DMG default colors (BGR555)
-const DMG_COLORS*: array[4, uint16] = [0x6BDF'u16, 0x3ABF'u16, 0x35BD'u16, 0x2CEF'u16]
+# The DMG's four shades, lightest first, as BGR555 greys: a code, not a look.
+# Every picture of a black-and-white game (the screen, the glow, tiles,
+# clips) translates them into the player's shade palette; tests read them as
+# greys. Save states from before carry the old amber four (savestate.nim).
+const DMG_COLORS*: array[4, uint16] = [0x7FFF'u16, 0x56B5'u16, 0x294A'u16, 0x0000'u16]
+
+# The DMG shades before they were greys, lightest first: what states taken by
+# earlier builds carry (savestate.nim regrey_dmg_shades).
+const OLD_DMG_COLORS*: array[4, uint16] = [0x6BDF'u16, 0x3ABF'u16, 0x35BD'u16, 0x2CEF'u16]
+
+func dmg_shade*(v: uint16): int =
+  ## Which of DMG_COLORS a framebuffer pixel is (0..3), or -1.
+  let c = v and 0x7FFF'u16
+  for i, d in DMG_COLORS:
+    if c == d: return i
+  -1
 
 # The CGB's DMG-compatibility palettes, shade 0 (lightest) to 3: the fallback
 # the boot ROM loads for any cart without a Nintendo licensee code, i.e. every

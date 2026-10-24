@@ -99,8 +99,29 @@ uniform bool subpixel;
 uniform bool sgb_border;
 uniform vec3 sgb_backdrop;
 uniform int filter_mode;   // 0 = none, 1 = hq4x, 2 = xBR
+// A black-and-white game's four greys (gb.nim DMG_COLORS) in the shade
+// palette, as web/glpresent.js fetchRGB: a pixel between two shades (the LCD
+// response settling) mixes their entries; one off the ramp keeps its colour.
+uniform bool dmg_remap;
+uniform vec3 dmg_pal[4];
+const float DMG_SHADE[4] = float[4](31.0, 21.0, 10.0, 0.0);
 
-vec3 srctex(vec2 uv) { return texture(input_texture, uv).rgb; }
+vec3 srctex(vec2 uv) {
+  vec3 c = texture(input_texture, uv).rgb;
+  if (dmg_remap) {
+    vec3 v = c * 31.0;
+    for (int i = 0; i < 3; i++) {
+      float a = DMG_SHADE[i], b = DMG_SHADE[i + 1];
+      float t = (a - v.g) / (a - b);
+      if (t >= 0.0 && t <= 1.0) {
+        if (all(lessThan(abs(vec3(mix(a, b, t)) - v), vec3(1.5))))
+          return mix(dmg_pal[i], dmg_pal[i + 1], t);
+        break;
+      }
+    }
+  }
+  return c;
+}
 
 // BT.601 YUV; the perceptual space both filters classify edges in.
 vec3 yuv(vec3 c) {
@@ -180,7 +201,8 @@ vec3 correct(vec3 c) {
 // The Game Boy layer, with every filter the no-border path applies.
 vec3 gb_layer(vec2 uv) {
   vec3 raw = upscale(uv, vec2(tex_width, tex_height));
-  return color_correct ? correct(raw) : raw;
+  // A shade palette is display colour already: no panel model on it.
+  return color_correct && !dmg_remap ? correct(raw) : raw;
 }
 
 void main() {
@@ -500,6 +522,25 @@ proc apply_color_correction() =
   let loc = glGetUniformLocation(app.game_shader, "color_correct")
   glUniform1i(loc, GLint(if app.cfg.color_correction and app.emu_kind != ekNDS: 1
                          else: 0))
+
+# The shade palette a black-and-white game is drawn in: Night's, as the web
+# and iOS default (web GB_DEFAULT_SHADES), lightest first, 0xRRGGBB. The
+# core's four greys are a code, never shown as they are.
+const DMG_SHADES = [0xF7F3FF'u32, 0xC6B0FF'u32, 0xA26FCF'u32, 0x3A2463'u32]
+
+proc dmg_shades_on(): bool =
+  ## A black-and-white game, not under SGB colour (whose palettes' white and
+  ## black are the grey codes too): web gbMonoPanel and !sgbActive.
+  app.emu_kind == ekGB and app.gb_emu != nil and not app.gb_emu.cgb_enabled and
+    not app.gb_emu.sgb_active()
+
+proc dmg_shade_rgb(v: uint16): array[3, byte] =
+  ## A grey code's palette colour; v must be one of DMG_COLORS (or an old
+  ## state's OLD_DMG_COLORS).
+  var s = dmg_shade(v)
+  if s < 0: s = OLD_DMG_COLORS.find(v and 0x7FFF'u16)
+  let c = DMG_SHADES[s]
+  [byte(c shr 16), byte((c shr 8) and 0xFF), byte(c and 0xFF)]
 
 proc sgb_border_active(): bool =
   ## The last condition keeps the window from resizing for a cart that
@@ -1155,7 +1196,17 @@ proc refresh_state_slots() =
     var data = ""
     try: data = readFile(path)
     except CatchableError: discard
-    let (tw, th, pixels) = parse_state_thumbnail(data)
+    var (tw, th, pixels) = parse_state_thumbnail(data)
+    # A black-and-white game's slot in its shade palette, as on screen; an
+    # old state's trailer holds the amber four, read the same way.
+    if pixels.len > 0 and dmg_shades_on():
+      let px = cast[ptr UncheckedArray[uint16]](addr pixels[0])
+      for i in 0 ..< pixels.len div 2:
+        let v = px[i] and 0x7FFF'u16
+        if dmg_shade(v) >= 0 or v in OLD_DMG_COLORS:
+          let c = dmg_shade_rgb(v)
+          px[i] = (px[i] and 0x8000'u16) or (uint16(c[2] shr 3) shl 10) or
+                  (uint16(c[1] shr 3) shl 5) or uint16(c[0] shr 3)
     if pixels.len > 0:
       if app.state_slot_texs[i] == 0:
         glGenTextures(1, addr app.state_slot_texs[i])
@@ -1234,8 +1285,10 @@ proc save_screenshot() =
   let correct = app.cfg.color_correction
   let gbc = app.emu_kind == ekGB
   var rgb = newSeq[byte](w * h * 3)
+  let shades = dmg_shades_on()
   template put(i: int; v: uint16; corr: bool) =
-    let c = bgr555_to_rgb(v, corr, gbc)
+    let c = if shades and dmg_shade(v) >= 0: dmg_shade_rgb(v)
+            else: bgr555_to_rgb(v, corr, gbc)
     rgb[i * 3 + 0] = c[0]
     rgb[i * 3 + 1] = c[1]
     rgb[i * 3 + 2] = c[2]
@@ -1397,6 +1450,14 @@ proc render_game() =
                 GLint(if vf == vfSubpixel: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "filter_mode"),
                 GLint(if vf in {vfHq4x, vfXbr}: ord(vf) else: 0))
+    glUniform1i(glGetUniformLocation(app.game_shader, "dmg_remap"),
+                GLint(if dmg_shades_on(): 1 else: 0))
+    var pal: array[12, GLfloat]
+    for i, c in DMG_SHADES:
+      pal[i * 3] = GLfloat(c shr 16) / 255
+      pal[i * 3 + 1] = GLfloat((c shr 8) and 0xFF) / 255
+      pal[i * 3 + 2] = GLfloat(c and 0xFF) / 255
+    glUniform3fv(glGetUniformLocation(app.game_shader, "dmg_pal"), 4, addr pal[0])
   # The letterboxed rect this present draws into. Computed before the case so
   # both cores share it, and restored to the full window afterwards so ImGui
   # is not clipped by it.

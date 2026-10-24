@@ -177,8 +177,10 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             u.sgbBackdrop = SIMD4(Float(bd & 31) / 31, Float((bd >> 5) & 31) / 31,
                                   Float((bd >> 10) & 31) / 31, 1)
         }
+        // Not under SGB colour: its palettes' white and black are the
+        // core's grey codes too (web drawGame's gate).
         if let pal = options.dmgPalette, pal.count == 4,
-           dingbat_is_gb() != 0, dingbat_is_cgb() == 0 {
+           dingbat_is_gb() != 0, dingbat_is_cgb() == 0, dingbat_sgb_active() == 0 {
             u.dmgRemap = 1
             func c(_ v: UInt32) -> SIMD4<Float> {
                 SIMD4(Float((v >> 16) & 255) / 255, Float((v >> 8) & 255) / 255,

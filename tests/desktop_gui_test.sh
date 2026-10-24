@@ -230,6 +230,28 @@ run "$work/rumble.gb" "" "1 pad attach
 4 quit"
 check "the motor buzzes the pad" "$(ack 3 | sed 's/rumbles=[1-9][0-9]*/rumbles=N/')" "ok rumbles=N on=1"
 
+echo "a black-and-white game in Night's shades (generated DMG cart)"
+# The core writes its four shades as greys; the screen translates them. A
+# blank DMG screen is shade 0: Night's moonlit white (247 243 255), bluer
+# than it is green, where the untranslated grey is flat.
+python3 -I - "$work/mono.gb" <<'EOF'
+import sys
+rom = bytearray(0x8000)
+rom[0x100:0x104] = b'\x00\xc3\x50\x01'               # nop; jp $0150
+rom[0x134:0x13f] = b'MONOTEST'.ljust(11, b'\0')
+rom[0x150:0x152] = b'\x18\xfe'                        # jr @
+x = 0
+for b in rom[0x134:0x14d]: x = (x - b - 1) & 0xFF
+rom[0x14d] = x
+open(sys.argv[1], 'wb').write(rom)
+EOF
+run "$work/mono.gb" "" "1 frames 60
+2 shot $work/mono.png
+3 quit"
+shade=$(python3 -I "$work/shot.py" "$work/mono.png" rgb 0.5 0.5 |
+        awk '{ if ($3 > $2 + 6 && $3 >= $1) print "night"; else print }')
+check "shade 0 is Night's, not the core's grey" "$shade" "night"
+
 if [ "${GUI_TEST_FULLSCREEN:-}" = 1 ]; then
   echo "fullscreen via AppKit (visible window)"
   python3 -I - "$work/gb.gb" <<'EOF'

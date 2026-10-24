@@ -985,15 +985,13 @@ proc dingbat_glow_sample(gw, gh: cint; remap: cint;
           let raw = fb[gy * gameW + gx] and 0x7FFF'u16
           # A chosen shade palette is already display space, so it bypasses
           # the panel model here as in the shader.
-          if remap != 0:
-            case raw
-            of 0x6BDF: px = p0
-            of 0x3ABF: px = p1
-            of 0x35BD: px = p2
-            of 0x2CEF: px = p3
-            else:      px = lut[raw]
-          else:
-            px = lut[raw]
+          let shade = if remap != 0: dmg_shade(raw) else: -1
+          px = case shade
+               of 0: p0
+               of 1: p1
+               of 2: p2
+               of 3: p3
+               else: lut[raw]
         else:
           px = unpack(backdrop)
       glowBuffer[y * gw + x] = px

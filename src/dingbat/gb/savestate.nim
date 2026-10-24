@@ -1190,6 +1190,34 @@ proc gb_state_payload(gb: GB; in_process = false): string =
   w.write_tag(GB_SEC_END)
   w.buf
 
+proc regrey_dmg_shades(gb: GB) =
+  ## A state from before the greys carries the old four in palette RAM (a
+  ## black-and-white machine never writes it, so they are only ever the
+  ## code), in an SGB palette no game has replaced yet, and on screen.
+  ## Swapped for the greys; for this build's states, a no-op.
+  if gb.cgb_enabled: return
+  proc regrey(v: var uint16) =
+    for i, o in OLD_DMG_COLORS:
+      if v == o:
+        v = DMG_COLORS[i]
+        return
+  for bank in [addr gb.ppu.pram, addr gb.ppu.obj_pram]:
+    let words = cast[ptr UncheckedArray[uint16]](addr bank[][0])
+    for i in 0 ..< bank[].len div 2: regrey(words[i])
+  # Under an SGB the picture is in its palettes: the old four only while
+  # every one is still the power-on ramp (no PAL packet yet), and then the
+  # screen and the MASK_EN freeze are in them too.
+  var untouched = true
+  if gb.sgb != nil:
+    for p in 0 ..< 4:
+      for c in 0 ..< 4:
+        if gb.sgb.pal[p * 4 + c] == OLD_DMG_COLORS[c]: gb.sgb.pal[p * 4 + c] = DMG_COLORS[c]
+        elif gb.sgb.pal[p * 4 + c] != DMG_COLORS[c]: untouched = false
+    if untouched:
+      for v in gb.sgb.frozen.mitems: regrey(v)
+  if untouched:
+    for v in gb.ppu.framebuffer.mitems: regrey(v)
+
 proc gb_apply_state(gb: GB; payload: string; rev: uint32;
                           in_process = false) =
   var r = Reader(buf: payload)
@@ -1228,6 +1256,8 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   if rev >= 5 and r.peek_tag() == GB_SEC_SGB:
     load_sgb_state(if gb.sgb != nil: gb.sgb else: new_sgb_state(), r)
   r.expect_tag(GB_SEC_END)
+  # Rewind and rollback payloads are this build's own: nothing to swap.
+  if not in_process: regrey_dmg_shades(gb)
   # Derived OAM-DMA bus state, a function of current_dma_source, dma_position
   # and the source memory. Must run after the MBC/PPU sections, or the latch
   # is read out of a half-restored cartridge.

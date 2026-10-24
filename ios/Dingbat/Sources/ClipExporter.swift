@@ -259,6 +259,8 @@ private final class Writer {
     private var lastVideo = CMTime.negativeInfinity
     private var started = false
     private let scratch = UnsafeMutablePointer<Float>.allocate(capacity: 65536 * 2)
+    /// A black-and-white game's shades, as on screen (the core's are greys).
+    private let shades = GameSession.pictureShades()
 
     init?(url: URL, width: Int, height: Int, realtime: Bool) {
         guard let w = try? AVAssetWriter(outputURL: url, fileType: .mp4),
@@ -320,7 +322,8 @@ private final class Writer {
         }
     }
 
-    /// The core's framebuffer, raw (the console's own colours), 4x nearest.
+    /// The core's framebuffer, 4x nearest: no colour correction, a
+    /// black-and-white game in the shade palette.
     func appendFrame(at t: CMTime, dropLate: Bool = false) {
         guard let fb = dingbat_framebuffer() else { return }
         appendFrame(from: fb, at: t)
@@ -338,9 +341,14 @@ private final class Writer {
         for y in 0..<fh {
             let row = base + (y * 4) * stride
             for x in 0..<fw {
-                let v = UInt32(fb[y * fw + x])
-                let r = (v & 31) * 255 / 31, g = ((v >> 5) & 31) * 255 / 31, b = ((v >> 10) & 31) * 255 / 31
-                let px = 0xFF00_0000 | (r << 16) | (g << 8) | b   // BGRA in memory
+                let px: UInt32   // BGRA in memory
+                if let shades, let s = GameSession.shadeRGBA(fb[y * fw + x], shades) {
+                    px = 0xFF00_0000 | ((s & 0xFF) << 16) | (s & 0xFF00) | ((s >> 16) & 0xFF)
+                } else {
+                    let v = UInt32(fb[y * fw + x])
+                    let r = (v & 31) * 255 / 31, g = ((v >> 5) & 31) * 255 / 31, b = ((v >> 10) & 31) * 255 / 31
+                    px = 0xFF00_0000 | (r << 16) | (g << 8) | b
+                }
                 let o = x * 4
                 row[o] = px; row[o + 1] = px; row[o + 2] = px; row[o + 3] = px
             }

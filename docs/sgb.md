@@ -119,10 +119,11 @@ neither colour correction nor upscale filters (native SNES output; the filters
 are tuned for 2bpp art). The scanline pitch is its own uniform
 (`u_scan_height` = 224 with a border). `output_size()` / `_wasm_out_w/h` are
 authoritative for the picture size; `gameRes()` consumers (thumbnails, glow,
-paused card, bug report) keep the console framebuffer. The web DMG shade
-palette is disabled with an explanation while an adapter is active — its
-shader substitution keys on the four `DMG_COLORS` words, which an SGB frame
-does not contain.
+paused card, bug report) keep the console framebuffer. The DMG shade
+palette is disabled (on the web with an explanation) while an adapter is
+active: an SGB frame is already in the game's own palettes, whose pure white
+and black are two of the four grey `DMG_COLORS` words, so a substitution
+would recolour them.
 
 Native letterboxes under `preserve_aspect` (default on) and resizes the window
 once on the edge where a border appears or disappears. The desktop vertex

@@ -1332,16 +1332,16 @@ final class GameSession: NSObject, ObservableObject {
         return Settings.shared.dmgPalette
     }
 
-    /// A raw BGR555 pixel under the shades: the core's four values (gb.nim
+    /// A raw BGR555 pixel under the shades: the core's four greys (gb.nim
     /// DMG_COLORS) become their palette entries as RGBA (R first); nil for
     /// anything else, which keeps its own colour.
     static func shadeRGBA(_ v: UInt16, _ shades: [UInt32]) -> UInt32? {
         let i: Int
         switch v & 0x7FFF {
-        case 0x6BDF: i = 0
-        case 0x3ABF: i = 1
-        case 0x35BD: i = 2
-        case 0x2CEF: i = 3
+        case 0x7FFF: i = 0
+        case 0x56B5: i = 1
+        case 0x294A: i = 2
+        case 0x0000: i = 3
         default: return nil
         }
         guard shades.count == 4 else { return nil }

@@ -1,9 +1,8 @@
-// A black-and-white game's pictures wear the shade palette the screen does:
-// the library tile, a save slot's thumbnail and both link-cable screens are
-// made from the core's framebuffer, not by the shader, and once showed the
-// core's own amber shades under the Night ones. Exports keep the console's
-// own picture (index.js NATIVE_SCALE), which is the control: the same frame,
-// amber.
+// A black-and-white game's four shades leave the core as greys (gb.nim
+// DMG_COLORS) and every picture of it translates them into the shade palette:
+// the library tile, a save slot's thumbnail, the export (clips, Record,
+// screenshots), the ambient glow and both link-cable screens. The default
+// palette is Night's, so each must come out purple.
 //
 //   node --test e2e/gb-pictures.e2e.mjs    # from web/, after the wasm build
 
@@ -22,7 +21,7 @@ let web = null;
 let browser = null;
 after(async () => { await browser?.close(); web?.close(); });
 
-test("a monochrome game's tile, slot and link screens take the palette", { skip, timeout: 120000 }, async () => {
+test("a monochrome game's greys come out in the palette everywhere", { skip, timeout: 120000 }, async () => {
   web ??= await serveWeb();
   browser = await playwright[engine].launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -31,10 +30,10 @@ test("a monochrome game's tile, slot and link screens take the palette", { skip,
   await page.waitForFunction(() => typeof Module !== "undefined" && runtimeReady && typeof db !== "undefined" && !!db,
                              null, { timeout: 60000 });
   await page.evaluate(() => {
-    // How warm a picture is: the share of pixels redder than they are blue
-    // by a margin. The core's shades are cream to brown (all warm); Night's
-    // are white to violet, and any mix of them, blue at least as much as red.
-    window.__warm = async (src) => {
+    // How purple a picture is: the share of its (visible) pixels bluer than
+    // they are green. Every Night shade is, by 12 or more; a grey is not, nor
+    // is the old amber.
+    window.__purple = async (src, minAlpha = 255) => {
       const img = src instanceof HTMLCanvasElement ? src : await createImageBitmap(src);
       const c = document.createElement("canvas");
       c.width = img.width;
@@ -42,9 +41,13 @@ test("a monochrome game's tile, slot and link screens take the palette", { skip,
       const ctx = c.getContext("2d");
       ctx.drawImage(img, 0, 0);
       const d = ctx.getImageData(0, 0, c.width, c.height).data;
-      let warm = 0;
-      for (let i = 0; i < d.length; i += 4) if (d[i] - d[i + 2] > 20) warm++;
-      return warm / (d.length / 4);
+      let seen = 0, purple = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] < minAlpha) continue;
+        seen++;
+        if (d[i + 2] - d[i + 1] > 6) purple++;
+      }
+      return seen ? purple / seen : 0;
     };
   });
   const rom = Array.from(synctestRom());
@@ -54,20 +57,33 @@ test("a monochrome game's tile, slot and link screens take the palette", { skip,
     await openLibraryGame("Mono.gb", { resume: false });
   }, rom);
   await page.waitForFunction(() => currentOriginalName === "Mono.gb" && gbMonoPanel, null, { timeout: 20000 });
-  await sleep(1000);
+  await page.evaluate(() => {
+    ambientGlowToggle.checked = true;
+    ambientGlowToggle.dispatchEvent(new Event("change"));
+  });
+  await sleep(1500);
 
   const solo = await page.evaluate(async () => {
+    // The core's own output: every pixel one of four greys.
+    const [w, h] = gameRes();
+    const raw = new Uint16Array(Module.memory.buffer, Module._wasm_native_fb_ptr(), w * h);
+    const grey = raw.every((v) => (v & 31) === ((v >> 5) & 31) && (v & 31) === ((v >> 10) & 31));
     // The tile's picture as storeLastFrame encodes it (Playwright's WebKit
     // cannot put a Blob in IndexedDB, so not read back from there).
     const fb = copyFramebuffer();
-    const tile = await __warm(await frameBlobFromFb(fb.heap, fb.w, fb.h));
-    const slot = await __warm(await (await fetch(captureThumbnail())).blob());
-    const exported = await __warm(nativeFrameCanvas());
-    return { tile, slot, exported };
+    return {
+      grey,
+      tile: await __purple(await frameBlobFromFb(fb.heap, fb.w, fb.h)),
+      slot: await __purple(await (await fetch(captureThumbnail())).blob()),
+      exported: await __purple(nativeFrameCanvas()),
+      glow: glowCanvas.hidden ? -1 : await __purple(glowCanvas, 64),
+    };
   });
-  assert.ok(solo.exported > 0.5, "the export (control) is the console's amber: " + solo.exported);
-  assert.ok(solo.tile < 0.01, "the library tile is in Night's shades: " + solo.tile);
-  assert.ok(solo.slot < 0.01, "the slot thumbnail is in Night's shades: " + solo.slot);
+  assert.ok(solo.grey, "the core's own picture is greys");
+  assert.ok(solo.tile > 0.95, "the library tile is in Night's shades: " + solo.tile);
+  assert.ok(solo.slot > 0.95, "the slot thumbnail is in Night's shades: " + solo.slot);
+  assert.ok(solo.exported > 0.95, "the export is in Night's shades: " + solo.exported);
+  assert.ok(solo.glow > 0.95, "the ambient glow is in Night's shades: " + solo.glow);
 
   await page.evaluate(async (rom) => {
     await launchLinkRom({ name: "Mono.gb", data: new Uint8Array(rom) });
@@ -75,8 +91,8 @@ test("a monochrome game's tile, slot and link screens take the palette", { skip,
   await page.waitForFunction(() => linkMode, null, { timeout: 20000 });
   await sleep(1000);
   const link = await page.evaluate(async () => [
-    await __warm(document.getElementById("link-canvas-0")),
-    await __warm(document.getElementById("link-canvas-1")),
+    await __purple(document.getElementById("link-canvas-0")),
+    await __purple(document.getElementById("link-canvas-1")),
   ]);
-  assert.ok(link[0] < 0.01 && link[1] < 0.01, "both link screens are in Night's shades: " + link);
+  assert.ok(link[0] > 0.95 && link[1] > 0.95, "both link screens are in Night's shades: " + link);
 });

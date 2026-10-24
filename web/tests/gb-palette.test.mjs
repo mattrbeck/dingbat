@@ -294,13 +294,13 @@ test("a picture's pixels take the palette the screen does", async () => {
   const h = await loadApp();
   const shades = [[10, 20, 30], [40, 50, 60], [70, 80, 90], [100, 110, 120]];
   // The core's four values land exactly on their entries.
-  [0x6BDF, 0x3ABF, 0x35BD, 0x2CEF].forEach((v, i) => eq(h.api.dmgShadeRgb(v, shades), shades[i]));
-  // A pixel settling between shades 0 and 1 (green 26 of 30..21) mixes them.
-  const r = 31, g = 26, b = 26 + (14 - 26) * (4 / 9);
-  eq(h.api.dmgShadeRgb(r | (g << 5) | (Math.round(b) << 10), shades), [23, 33, 43]);
+  [0x7FFF, 0x56B5, 0x294A, 0x0000].forEach((v, i) => eq(h.api.dmgShadeRgb(v, shades), shades[i]));
+  // A pixel settling between shades 0 and 1 (grey 27 of 31..21) mixes them.
+  const g = 27;
+  eq(h.api.dmgShadeRgb(g | (g << 5) | (g << 10), shades), [22, 32, 42]);
   // A colour off the ramp keeps its own colour.
   assert.equal(h.api.dmgShadeRgb(0x001F, shades), null, "pure red");
-  assert.equal(h.api.dmgShadeRgb(0x7FFF, shades), null, "white");
+  assert.equal(h.api.dmgShadeRgb(0x7C00, shades), null, "pure blue");
 });
 
 test("only a monochrome game's pictures are recoloured, in the palette in force", async () => {

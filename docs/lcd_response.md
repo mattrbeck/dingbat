@@ -104,10 +104,11 @@ Emulation output is untouched. The cell state is **not serialized**: loading
 a state cross-fades into the loaded scene like any cut; cells re-seed on ROM
 load, core switch and resolution change.
 
-The web DMG shade palette (`glpresent.js`, `u_dmg_remap`) mixes between the
-pair of shades a settling pixel lies between (green is strictly decreasing
-across the four shades) instead of exact-matching `DMG_COLORS`; otherwise
-every moving pixel would drop back to panel green under a custom palette.
+The DMG shade palette (`glpresent.js` `u_dmg_remap`, the iOS and desktop
+shaders) mixes between the pair of shades a settling pixel lies between
+(green is strictly decreasing across the four grey `DMG_COLORS`) instead of
+exact-matching them; otherwise every moving pixel would show the core's raw
+grey.
 
 ## Evidence
 

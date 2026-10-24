@@ -20,7 +20,8 @@ The full feature list for both front-ends and both emulated systems.
   from state anchors plus the input log, trimmed in the same film-strip scrubber, and
   encoded off screen (WebCodecs to MP4, faster than realtime; MediaRecorder elsewhere).
   Clips, Record and screenshots carry the console's own picture (the framebuffer at 4x,
-  no filters, colour correction, LCD response, DMG shades or SGB border) and sound
+  no filters, colour correction, LCD response or SGB border; a black-and-white game in the
+  shade palette, as on screen) and sound
   (no MP2K HLE, FIFO smoothing or channel mutes)
 - Cheats: Game Genie, GameShark, Action Replay / CodeBreaker
 - Per-ROM saves in IndexedDB; "Manage ROMs and Saves" resets or deletes a game
@@ -37,9 +38,10 @@ The full feature list for both front-ends and both emulated systems.
 - Game Boy Printer, always connected; prints land in a gallery and save as PNGs
 - Settings: key rebinding, GB renderer, GBA BIOS/HLE, color correction, integer scaling,
   filters (scanlines, hq4x, xBR), LCD response (panel ghosting), ambient glow
-- Per-panel color correction (AGB / GBC models); Game Boy shade palette from the
-  hardware shades, the app theme, or four colours of your own (shader-only, so emulation
-  and netplay are unaffected)
+- Per-panel color correction (AGB / GBC models); Game Boy shade palette: Night's
+  shades, the app theme's, or four colours of your own. The core writes four greys
+  and every picture translates them (screen, glow, tiles, clips, screenshots), so
+  emulation and netplay are unaffected; the desktop app uses Night's
 
 ### Google Drive sync
 

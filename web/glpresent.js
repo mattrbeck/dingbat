@@ -71,7 +71,7 @@ uniform usampler2D u_border;
 uniform bool u_sgb_border;
 uniform vec3 u_sgb_backdrop;    // SGB colour 0, shown where nothing else is
 // --- Game Boy shade palette (monochrome DMG titles only) ---
-// A DMG game's framebuffer holds ONLY the four BGR555 values the core writes
+// A DMG game's framebuffer holds ONLY the four BGR555 greys the core writes
 // for shades 0..3 (src/dingbat/gb/gb.nim DMG_COLORS), so recolouring the
 // screen is an exact 4-way substitution here in the presenter — the core never
 // sees it, which is what keeps save states, rewind and netplay byte-identical.
@@ -90,13 +90,13 @@ uniform vec3 u_sgb_backdrop;    // SGB colour 0, shown where nothing else is
 uniform bool u_dmg_remap;
 uniform vec3 u_dmg_pal[4];      // sRGB 0..1, shade 0 (lightest) -> 3
 
-// The four values a monochrome core writes (gb.nim DMG_COLORS), as 5-bit
+// The four greys a monochrome core writes (gb.nim DMG_COLORS), as 5-bit
 // channels. Green is strictly decreasing across them, so it is the key that
 // says where between two shades a settling pixel currently is.
-const vec3 DMG_SHADE[4] = vec3[4](vec3(31.0, 30.0, 26.0),   // 0x6BDF
-                                  vec3(31.0, 21.0, 14.0),   // 0x3ABF
-                                  vec3(29.0, 13.0, 13.0),   // 0x35BD
-                                  vec3(15.0,  7.0, 11.0));  // 0x2CEF
+const vec3 DMG_SHADE[4] = vec3[4](vec3(31.0, 31.0, 31.0),   // 0x7FFF
+                                  vec3(21.0, 21.0, 21.0),   // 0x56B5
+                                  vec3(10.0, 10.0, 10.0),   // 0x294A
+                                  vec3( 0.0,  0.0,  0.0));  // 0x0000
 
 ivec2 g_min;   // the texels a filter may read: the whole texture, or a view's
 ivec2 g_max;
