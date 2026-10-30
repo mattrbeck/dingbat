@@ -209,8 +209,31 @@ class Rig:
         k = TUNE['persp'] / (TUNE['persp'] - z)
         return (self.c[0] + (X3 - self.c[0]) * k, self.c[1] + (Y3 - self.c[1]) * k), z, math.cos(s)
 
-    def frame(self, t):
-        """The bat at phase t as {(x, y): char}, in still-sprite coordinates."""
+    def bands(self, lab, pz, n):
+        """Each membrane pixel's band 'a'.. of n, cut across the wing's own height so they bend with it."""
+        ys = [p[1] for poly in self.geo['panels'] for p in poly]
+        y0, y1 = min(ys), max(ys)
+        src = {}   # screen pixel -> the source heights of the samples landing in it
+        for poly in self.geo['panels']:
+            pxs = [p[0] for p in poly]; pys = [p[1] for p in poly]
+            yy = math.floor(min(pys) * 4) / 4
+            while yy <= max(pys):
+                xx = math.floor(min(pxs) * 4) / 4
+                while xx <= max(pxs):
+                    if inside(poly, xx, yy):
+                        (X, Y), _, _ = self.xf((xx, yy), pz)
+                        src.setdefault((math.floor(X), math.floor(Y)), []).append(yy)
+                    xx += 0.25
+                yy += 0.25
+        out = {}
+        for q in lab:
+            v = src.get(q) or src[min(src, key=lambda r: (r[0] - q[0]) ** 2 + (r[1] - q[1]) ** 2)]
+            yv = sorted(v)[len(v) // 2]
+            out[q] = 'abcdefgh'[min(n - 1, int((yv - y0) / (y1 - y0) * n))]
+        return out
+
+    def frame(self, t, stripes=0):
+        """The bat at phase t as {(x, y): char}, in still-sprite coordinates; stripes > 0 bands the membrane."""
         d = TUNE['down']
         t = t * 0.5 / d if t < d else 0.5 + (t - d) * 0.5 / (1 - d)
         fl, bend, bob, sweep, cup = pose(t)
@@ -228,6 +251,8 @@ class Rig:
                     if inside(P, x + 0.5, y + 0.5):
                         lab.setdefault((x, y), i)
         wing = {q: ('w' if pinfo[i][1] < TUNE['shade'] else 'W') for q, i in lab.items()}
+        if stripes:
+            wing = self.bands(lab, pz, stripes)
         for f in geo['tips']:
             pts = [self.xf(p, pz)[0] for p in subdiv([geo['wrist'], f], 0.5, closed=False)]
             for a, b in zip(pts, pts[1:]):
@@ -237,7 +262,7 @@ class Rig:
         X, Y = self.xf(geo['wrist'], pz)[0]
         wing[(round(X), round(Y))] = 'H'
         while True:   # membrane pixels touching no other wing pixel are stray nubs
-            lone = [q for q, c in wing.items() if c in 'Ww' and not any((q[0] + dx, q[1] + dy) in wing for dx, dy in N4)]
+            lone = [q for q, c in wing.items() if c in 'Wwabcdefgh' and not any((q[0] + dx, q[1] + dy) in wing for dx, dy in N4)]
             if not lone:
                 break
             for q in lone:
@@ -267,12 +292,12 @@ class Rig:
 BOX_W, BOX_H, BOX_X, BOX_Y = 52, 28, 6, 2
 
 
-def flap_frames(n=16):
+def flap_frames(n=16, stripes=0):
     """n frames in the flap box, as rows; frame 0 holds the still at (BOX_X, BOX_Y) (its wingtip outline 1 px outside)."""
     rig = Rig()
     frames = []
     for i in range(n):
-        px = rig.frame(i / n)
+        px = rig.frame(i / n, stripes)
         g = [['.'] * BOX_W for _ in range(BOX_H)]
         for (x, y), c in px.items():
             if not (0 <= x + BOX_X < BOX_W and 0 <= y + BOX_Y < BOX_H):

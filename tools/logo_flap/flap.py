@@ -21,7 +21,7 @@ Usage: flap.py [--preview DIR]
   README/dingbat.png, dingbat_large.png, dingbat_flap.gif
 
 Everything is pixel art at whole-number scales on flat colours. check.py
-verifies the flap's frames.
+verifies the flap's frames; holidays.py draws the seasonal bats (not used yet).
 """
 import json
 import os
