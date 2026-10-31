@@ -2214,10 +2214,17 @@ when OBJ_ABORT != 0 and OBJ_ABORT_LATE:
     ## pipeline dots. Nothing else of the abort applies (the fetch has merged;
     ## its pixels are the mixer's question). obj_abort_last is a sentinel on
     ## the idx < 0 arm, where mealybug m3_lcdc_obj_en_change_variant band 0
-    ## wants no refund.
+    ## wants no refund. Only while this mode 3 still draws: on a dot of
+    ## H-Blank or V-Blank that matches the window, the refund's shifter dots
+    ## wrote past the line, and past the framebuffer after line 143
+    ## (tests/gb_obj_abort_late_test.nim).
     let refund = ppu.obj_abort_last + 1 + OBJ_ABORT_LEAD - ppu.cycle_counter
     ppu.obj_abort_last = OBJ_ABORT_LAST_OFF
-    for _ in 0 ..< refund: fifo_pipeline_dot(ppu, gb)
+    if ppu.mode_flag != 3'u8: return
+    var i = 0'i32
+    while i < refund and ppu.lx < int32(GB_WIDTH):
+      fifo_pipeline_dot(ppu, gb)
+      inc i
 
 template m3_start_dot(gb: GB): int32 =
   ## The dot the mode 2 -> 3 boundary lands on. Must be the same expression
@@ -2904,6 +2911,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           when CGB_WE_ENABLE_FETCH_LATE != 0: gb.we_on_dot = int32.low
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
           when WIN_TAIL_FLAG_LEAD != 0: ppu.win_tail_end = 0
+          # The late abort's window is this line's (fifo_obj_abort_late): the
+          # last line's object must not match a dot of this one.
+          when OBJ_ABORT != 0 and OBJ_ABORT_LATE:
+            ppu.obj_abort_last = OBJ_ABORT_LAST_OFF
           ppu.lx = 0
           when MIXER_DOT_LAG != 0:
             # No tail in flight until this line emits (the LCD switched off

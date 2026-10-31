@@ -68,6 +68,7 @@ build mgbavideo       dingbat_mgba_video            tests/mgba_video.nim
 build gbapurebase     dingbat_gbapurebase_test      tests/gbapu_rebase_test.nim
 build gbtimedinput    dingbat_gbtimedinput_test     tests/gb_timed_input_test.nim
 build gbwindowscx     dingbat_gbwindowscx_test      tests/gb_window_scx_test.nim
+build gbobjabortlate  dingbat_gbobjabortlate_test   tests/gb_obj_abort_late_test.nim
 build psgagb         dingbat_psgagb_test           tests/psg_agb_test.nim
 build statesoak       dingbat_state_soak_test       tests/state_soak_test.nim -d:gba_quirky=false
 build silentaudio     dingbat_silent_audio_test     tests/silent_audio_test.nim --path:tests -d:soak_lib

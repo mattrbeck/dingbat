@@ -159,6 +159,12 @@ jobs:
         # assembled in the test; no ROMs.
         shell: bash
         run: ./dingbat_gbwindowscx_test
+      - name: GB late object abort stays in mode 3
+        # An LCDC.1 clear on an H-Blank or V-Blank dot that matches the last
+        # object fetch's late-abort window must not run the pipeline (it
+        # wrote past the framebuffer). A program assembled in the test.
+        shell: bash
+        run: ./dingbat_gbobjabortlate_test
       - name: PSG AGB-only behaviour (the SP's answers, both cores)
         # Wave RAM banks, the NR22 period-0 rewrite cells and the noise
         # shift-14 freeze as the GBA SP answered them, and the GB core
