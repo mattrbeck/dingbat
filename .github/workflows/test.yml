@@ -559,7 +559,11 @@ jobs:
     # shard runs its files one after the other (--test-concurrency=1), so
     # a file's browsers have the machine to themselves.
     needs: wasm
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: on its 26.04 image (2026-10-25) the pinned
+    # Playwright's WebKit build cannot start (MiniBrowser links ICU 74's
+    # libicudata.so.74, which 26.04 does not ship). Move with a Playwright
+    # whose WebKit supports 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
