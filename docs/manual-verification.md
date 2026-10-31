@@ -169,6 +169,33 @@ phone's tab really being suspended.
       Ignore it instead and keep playing: nothing is lost on the phone,
       and its session is the one the Mac picks up next.
 
+## iOS: the game stopped (a core fault)
+
+Gated: `tests/ios_api_test.nim` "a core fault stays in the core" (an
+injected IndexDefect faults the core instead of escaping; the exports read
+sanely after it; going back, the same-frame repeat, both kinds of report
+replaying the player's frames exactly, reset and unload). Not gated: the
+sheets themselves, on a phone. A DEBUG build takes `-fault-after N` (Xcode ›
+Scheme › Arguments): the game faults N frames after it opens, and again
+whenever play reaches that frame, until it closes.
+
+- [ ] **The sheet.** With `-fault-after 900`, open a GB game and play: about
+      15 s in it pauses under *“Game” stopped*, the motor (a rumble cart) stops,
+      the picture holds, and swiping the sheet down does nothing. Technical
+      details shows the injected IndexDefect and the frame.
+- [ ] **Go back.** *Go back 10 seconds*: the game plays on from about 10 s
+      earlier with a “Back 10 seconds” toast; at the same moment it stops
+      again, now as *It stopped again* with *Send a bug report* first.
+- [ ] **The report.** Send a bug report: the title is filled in, *A replay of
+      this session* reads “From power-on to the stop”; Share report hands a
+      .json to the share sheet. On a Mac, `tools/replay_report.nim` with the
+      same ROM (built without the injection it cannot fault) reports every
+      state check matching.
+- [ ] **The other ways out.** Choose an earlier moment (Rewind on) opens the
+      scrubber, and committing there plays on; cancelling it brings the stop
+      back. Restart the game restarts it. Back to the library closes it, and
+      opening it again resumes from the last checkpoint before the stop.
+
 ## A game that keeps stopping (checkpoints)
 
 Gated: `web/tests/checkpoints.test.mjs` (retention, the crash count, the

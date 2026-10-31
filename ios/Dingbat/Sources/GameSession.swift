@@ -197,6 +197,13 @@ final class GameSession: NSObject, ObservableObject {
         startLink()
         GameRenderer.shared.present()
         UIApplication.shared.isIdleTimerDisabled = true
+        #if DEBUG
+        // `-fault-after N`: a core fault N frames in, to see FaultView.
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-fault-after"), i + 1 < a.count, let n = Int32(a[i + 1]) {
+            dingbat_debug_fault_after(n)
+        }
+        #endif
         return result
     }
 
@@ -401,6 +408,11 @@ final class GameSession: NSObject, ObservableObject {
         }
         if NetLink.shared.linked {
             ran = linkedFrames(link, dt: dt)
+            if dingbat_fault() != 0 {
+                coreFaulted()
+                fpsAccount(now, ran: 0)
+                return
+            }
             if ran > 0 {
                 sessionMoved = true
                 saveCheckTime += dt
@@ -442,6 +454,11 @@ final class GameSession: NSObject, ObservableObject {
                 if dingbat_frame_static() == 0 { changed = true }
             }
             keepAudioAlive()
+        }
+        if dingbat_fault() != 0 {
+            coreFaulted()
+            fpsAccount(now, ran: 0)
+            return
         }
         if ran > 0 && isNDS && NdsState.shared.syncPower() { ndsPoweredOff() }
         if ran > 0 {
@@ -899,6 +916,30 @@ final class GameSession: NSObject, ObservableObject {
         if hleActive != hle { hleActive = hle }
         let avail = dingbat_mp2k_available() != 0
         if mp2kAvailable != avail { mp2kAvailable = avail }
+    }
+
+    /// The core stopped on a bug of its own (dingbat_fault): it runs no more
+    /// frames until something replaces it, so pause, stop the motor, and ask
+    /// the player what to do (FaultView). The core flushed the battery save
+    /// itself; checkpoints skip it (it gives no state), so the last one from
+    /// before the fault stands.
+    private func coreFaulted() {
+        if !paused { setPaused(true, relay: false) }
+        if rumbleWasOn {
+            rumbleWasOn = false
+            rumbling = false
+            onRumble?(false)
+        }
+        let model = AppModel.shared
+        guard model.sheet != .fault else { return }
+        model.openSheet(.fault)
+    }
+
+    /// FaultView put a sound core back (going back, a reset): play on.
+    func faultRecovered() {
+        sessionMoved = true
+        present()
+        setPaused(false, relay: false)
     }
 
     private func pollPeripherals() {

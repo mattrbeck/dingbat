@@ -584,8 +584,92 @@ proc flush_current_save() =
   of ekNDS: nds_flush()
   of ekNone: discard
 
+# --- Core faults ---
+# An exception out of a core (a Defect: an index or range check) must not
+# cross into Swift: under goto exceptions it leaves Nim's error flag set, and
+# every later export then bails early with junk (bug report 2026-10-31: SGB
+# active, rumble on, a nil picture, a reset that did nothing until the app
+# relaunched). The exports that run a core catch it here instead, and the core
+# is *faulted*: its state is mid-frame and not to be trusted, so it runs no
+# frames, gives no state and drives no motor until something replaces it (going
+# back, a reset, a load). The shell asks dingbat_fault() after running frames.
+
+var coreFault = ""            # "" while the core is sound, else what stopped it
+var coreFaultFrame = -1       # canonical frame (clipFrameIndex) it stopped on; -1 on the DS
+var coreFaultCount = 0        # faults since this game was loaded (a reset keeps it)
+var coreFaultSame = false     # this fault came on the frame the last one did
+var lastFaultFrame = -1       # -1 once frame numbers stop being comparable
+var rewindFrames: seq[(int, int)] = @[]  # (rewind snapshot id, clipFrameIndex it starts)
+var faultInjectFrame* = -1
+  ## Raise an IndexDefect inside the frame that starts at this clipFrameIndex,
+  ## as a core bug would: tests/ios_api_test.nim, and DEBUG app builds
+  ## (`-fault-after N`, dingbat_debug_fault_after) to see the fault sheet.
+
+proc faulted(): bool {.inline.} = coreFault.len > 0
+proc cut_timeline(frame: int)
+proc snapshot_frame(id: int): int
+proc current_payload(): string
+
+# Session replay (a fault's bug report): every frame since the live core last
+# started fresh (power-on, or a state put onto it: a load, a rewind, a look at
+# another moment and back), as that start plus the buttons held on each
+# frame. Replaying from the device's own start carries what a save state
+# leaves out, since a load resets it there and here alike; a replay from any
+# other moment cannot. The 2026-10-31 PPU bug came back only from power-on.
+# Run-ahead puts the core's own state back onto it after each frame, so such
+# a frame is marked SEG_AHEAD for the replay to do the same.
+const SEG_AHEAD = 0x8000'u16
+const SEG_MAX_RUNS = 200_000       # button changes; ~1.6 MB, hours of play
+var segPayload = ""                # the start; "" = power-on
+var segFrame = 0                   # clipFrameIndex it starts
+var segRuns: seq[(uint16, uint32)] = @[]  # (buttons or SEG_AHEAD, frames)
+var segOk = false                  # false: too long, the DS, a link session
+var aheadFrame = false             # the frame being noted runs with run-ahead
+
+proc seg_begin(payload: string) =
+  segPayload = payload
+  segFrame = clipFrameIndex
+  segRuns.setLen(0)
+  segOk = stateKind in {ekGB, ekGBA}
+
+proc seg_note(mask: uint16) =
+  if not segOk: return
+  if segRuns.len > 0 and segRuns[^1][0] == mask and segRuns[^1][1] < high(uint32):
+    inc segRuns[^1][1]
+  elif segRuns.len >= SEG_MAX_RUNS:
+    segOk = false
+    segRuns.setLen(0)
+  else:
+    segRuns.add((mask, 1'u32))
+
+proc note_fault(e: ref Exception) =
+  let frame = if stateKind in {ekGB, ekGBA}: clipFrameIndex - 1 else: -1
+  coreFaultSame = frame >= 0 and frame == lastFaultFrame
+  lastFaultFrame = frame
+  coreFaultFrame = frame
+  inc coreFaultCount
+  coreFault = $e.name & ": " & e.msg
+  # The cartridge RAM is the bus's, not the frame's: progress up to the fault
+  # is kept whatever the player picks next.
+  try: flush_current_save()
+  except Exception: discard
+
+template guard_core(body: untyped) =
+  ## `body` runs a core; whatever it raises faults the core instead of escaping.
+  try:
+    body
+  except Exception as e:
+    note_fault(e)
+
 proc load_rom_impl(path, bios: string): cint =
   if not fileExists(path): return -1
+  # A reset keeps the count and the last fault's frame: it replays from
+  # power-on, so the same frame is the same moment.
+  if path != romPath:
+    coreFaultCount = 0
+    lastFaultFrame = -1
+  coreFault = ""
+  rewindFrames.setLen(0)
   dingbat_rollback_exit()
   dingbat_link_exit()
   flush_current_save()
@@ -632,12 +716,13 @@ proc load_rom_impl(path, bios: string): cint =
     romPath = path
     biosPath = bios
     clip_reset()
+    seg_begin("")  # power-on
     lcdResp.reset()
     rewindHistory = new_ring()
     apply_audio()
     present_live()
     return 0
-  except CatchableError:
+  except Exception:  # a Defect building the core too: refused, not escaped
     stateKind = ekNone
     stateGba = nil
     stateGb = nil
@@ -690,6 +775,10 @@ proc dingbat_unload(flush: cint) {.exportc, cdecl.} =
   rewindHistory = nil
   gamePtr = nil
   romPath = ""
+  coreFault = ""
+  coreFaultCount = 0
+  lastFaultFrame = -1
+  faultInjectFrame = -1
 
 proc dingbat_reset(): cint {.exportc, cdecl.} =
   ## Hard reset: flushes the battery save and reloads the current ROM. A DS
@@ -738,11 +827,30 @@ proc push_rewind() =
         pixels: downscale_bgr555(stateGb.ppu.framebuffer, GB_W, GB_H, 120, 108)))
   of ekNDS: rewindHistory.nds_rewind_tick(stateNds)
   of ekNone: discard
+  # Which frame each snapshot starts, so going back to a clip anchor can cut
+  # the ring at the same moment (dingbat_fault_go_back). After the step, so
+  # clipFrameIndex already names the frame the snapshot starts.
+  if stateKind in {ekGB, ekGBA}:
+    let id = rewindHistory.newest_id
+    if id >= 0 and (rewindFrames.len == 0 or rewindFrames[^1][0] != id):
+      rewindFrames.add((id, clipFrameIndex))
+      let oldest = rewindHistory.oldest_id
+      var drop = 0
+      while drop < rewindFrames.len and rewindFrames[drop][0] < oldest: inc drop
+      if drop > 64: rewindFrames = rewindFrames[drop .. ^1]
 
 proc clip_note_frame()
 
+proc dingbat_debug_fault_after(frames: cint) {.exportc, cdecl.} =
+  ## A fault `frames` canonical frames from now (GB/GBA); < 0 cancels.
+  faultInjectFrame = if frames < 0: -1 else: clipFrameIndex + int(frames)
+
 proc step_canonical() =
   clip_note_frame()
+  # Not cleared when it fires: going back reaches it again, as a real bug
+  # would ("It stopped again"); closing the game cancels it.
+  if faultInjectFrame >= 0 and clipFrameIndex - 1 == faultInjectFrame:
+    raise newException(IndexDefect, "index 23840 not in 0 .. 23039 (injected)")
   case stateKind
   of ekGBA: stateGba.step_frame()
   of ekGB:
@@ -755,19 +863,28 @@ proc step_canonical() =
   push_rewind()
 
 proc dingbat_run_frame() {.exportc, cdecl.} =
-  ## One emulated frame; its picture is then at dingbat_game_fb().
-  if stateKind == ekNone or core_shared(): return
-  step_canonical()
-  present_live()
+  ## One emulated frame; its picture is then at dingbat_game_fb(). Nothing
+  ## while the core is faulted (the picture stays the last one presented).
+  if stateKind == ekNone or core_shared() or faulted(): return
+  guard_core:
+    step_canonical()
+    present_live()
 
 var runaheadFrame: seq[uint16] = @[]
+
+proc run_frame_ahead(n: cint)
 
 proc dingbat_run_frame_ahead(n: cint) {.exportc, cdecl.} =
   ## dingbat_run_frame with N frames of run-ahead: one canonical frame (its
   ## audio played), then N silent lookahead frames whose picture is shown,
   ## then the canonical state restored (docs/run-ahead.md).
-  if stateKind == ekNone or core_shared(): return
-  step_canonical()
+  if stateKind == ekNone or core_shared() or faulted(): return
+  guard_core: run_frame_ahead(n)
+
+proc run_frame_ahead(n: cint) =
+  aheadFrame = n > 0 and stateKind != ekNDS
+  try: step_canonical()
+  finally: aheadFrame = false
   if n <= 0 or stateKind == ekNDS:  # no run-ahead on the DS: a plain frame
     present_live()
     return
@@ -1103,7 +1220,9 @@ proc dingbat_is_stopped(): cint {.exportc, cdecl.} =
 
 proc dingbat_rumble(): cint {.exportc, cdecl.} =
   ## 1 while the cart's rumble motor is on (GB MBC5 rumble, GBA GPIO rumble).
-  if stateKind == ekGB and stateGb != nil and stateGb.cartridge.mbc_rumble(): 1
+  ## A faulted core's motor is off: nothing is running it.
+  if faulted(): 0
+  elif stateKind == ekGB and stateGb != nil and stateGb.cartridge.mbc_rumble(): 1
   elif stateKind == ekGBA and stateGba != nil and stateGba.bus.gpio.gpio_rumble(): 1
   else: 0
 
@@ -1238,7 +1357,11 @@ var stateImage: string = ""
 proc dingbat_state_size(): cint {.exportc, cdecl.} =
   ## Serialize the full state (same bytes as desktop .state files) into a
   ## retained buffer; returns its length, 0 when no core runs. A DS switched
-  ## off has none (nothing to come back to: the web's rule).
+  ## off has none (nothing to come back to: the web's rule), nor a faulted
+  ## core (a checkpoint of it would resume the fault).
+  if faulted():
+    stateImage = ""
+    return 0
   case stateKind
   of ekGBA: stateImage = pack_state(stateGba.state_bytes(thumbnail = true))
   of ekGB:  stateImage = pack_state(stateGb.state_bytes(thumbnail = true))
@@ -1261,12 +1384,20 @@ proc dingbat_load_state(data: pointer; len: cint; keep_rewind: cint): cint {.exp
   if data == nil or len <= 0 or core_shared(): return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
-  let ok = case stateKind
-    of ekGBA: stateGba.load_state_bytes(image)
-    of ekGB:  stateGb.load_state_bytes(image)
-    of ekNDS: stateNds.load_state_bytes(image)
-    of ekNone: false
+  var ok = false
+  # A state file is someone else's bytes: a check failing deep in the apply
+  # leaves the core half-loaded, so it faults like a frame would.
+  guard_core:
+    ok = case stateKind
+      of ekGBA: stateGba.load_state_bytes(image)
+      of ekGB:  stateGb.load_state_bytes(image)
+      of ekNDS: stateNds.load_state_bytes(image)
+      of ekNone: false
   if ok:
+    coreFault = ""
+    lastFaultFrame = -1  # the frame count does not follow a loaded state
+    try: seg_begin(current_payload())
+    except Exception: segOk = false
     if keep_rewind == 0 and rewindHistory != nil: rewindHistory.clear()
     if statePrinter != nil: statePrinter.resync()
     if stateKind == ekNDS:
@@ -1309,10 +1440,15 @@ proc current_payload(): string =
 proc apply_payload(payload: string; as_new = true) =
   ## `as_new` = false: a look at another moment and straight back (the
   ## scrubber's save check, Report a Bug's state), which leaves the DS save
-  ## chips' dirty flags as they were.
+  ## chips' dirty flags as they were. Either way the live core starts fresh
+  ## from `payload`: the session replay's new start.
   case stateKind
-  of ekGBA: stateGba.apply_state_payload(payload)
-  of ekGB:  stateGb.apply_state_payload(payload)
+  of ekGBA:
+    stateGba.apply_state_payload(payload)
+    seg_begin(payload)
+  of ekGB:
+    stateGb.apply_state_payload(payload)
+    seg_begin(payload)
   of ekNDS:
     if not stateNds.load_own_payload(payload, as_new):
       raise newException(ValueError, last_state_error)
@@ -1434,12 +1570,23 @@ proc dingbat_rewind_commit(sample: cint): cint {.exportc, cdecl.} =
   ## keeps its own pre-commit state for Undo.
   if stateKind == ekNone or rewindHistory == nil: return 0
   if sample < 0 or sample >= scrubIds.len: return 0
+  let frame = snapshot_frame(scrubIds[sample])
   let snap = rewindHistory.rewind_to_id(scrubIds[sample])
   if snap.len == 0: return 0
   try:
     apply_payload(snap)
-  except CatchableError:
+  except Exception:
     return 0
+  # A whole earlier moment: a fault is behind it, and so is the clip ring's
+  # record of the frames after it.
+  coreFault = ""
+  if frame >= 0: cut_timeline(frame)
+  else:
+    let keep = (segPayload, segOk)   # the session replay starts here regardless
+    clip_reset()
+    (segPayload, segOk) = keep
+    segFrame = 0
+    lastFaultFrame = -1
   if statePrinter != nil: statePrinter.resync()
   present_live()
   1
@@ -1484,6 +1631,9 @@ proc clip_reset() =
   clipCurButtons = 0
   clipLiveStash = ""
   clipReplaying = false
+  # The frame count restarts with no fresh start under it (a link session's
+  # cores): the session replay has nothing to replay from until one comes.
+  segOk = false
 
 proc clip_anchor_size(a: ClipAnchor): int = a.packed.len + a.thumb.len
 
@@ -1505,6 +1655,7 @@ proc clip_note_frame() =
       clipAnchors.add(a)
       clipAnchorBytes += clip_anchor_size(a)
   clipInputs.add(clipCurButtons)
+  seg_note(if aheadFrame: clipCurButtons or SEG_AHEAD else: clipCurButtons)
   inc clipFrameIndex
   let oldest = clipFrameIndex - CLIP_MAX_FRAMES
   while clipAnchors.len > 1 and clipAnchors[1].frame <= oldest:
@@ -1587,6 +1738,8 @@ when defined(test_harness):
     of ekGB:  stateGb.apu.turbo
     of ekNDS, ekNone: false
 
+proc dingbat_clip_abort() {.exportc, cdecl.}
+
 proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   ## Arm a replay of [start_ago, end_ago) frames before now: stash the live
   ## state, restore the anchor at or before the start, silently re-emulate
@@ -1618,21 +1771,39 @@ proc dingbat_clip_begin(start_ago, end_ago: cint): cint {.exportc, cdecl.} =
   # Silent pre-roll to exactly the chosen frame: its sound is dropped.
   let mode = dingbat_audio_get_mode()
   dingbat_audio_set_mode(2)
-  while clipCursor < startFrame:
-    let idx = clipCursor - clipInputsStart
-    if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
-    case stateKind
-    of ekGBA: stateGba.step_frame()
-    of ekGB:  stateGb.step_frame()
-    of ekNDS, ekNone: break
-    inc clipCursor
+  var broke = false
+  try:
+    while clipCursor < startFrame:
+      let idx = clipCursor - clipInputsStart
+      if idx >= 0 and idx < clipInputs.len: clip_set_buttons(clipInputs[idx])
+      case stateKind
+      of ekGBA: stateGba.step_frame()
+      of ekGB:  stateGb.step_frame()
+      of ekNDS, ekNone: break
+      inc clipCursor
+  except Exception:
+    broke = true
   dingbat_audio_set_mode(mode)
+  if broke:
+    # The replay reached a core bug the live game is past or short of: the
+    # live state comes back untouched and the clip is refused.
+    dingbat_clip_abort()
+    return 0
   cint(clipEnd - clipCursor)
+
+proc clip_tick_impl(): cint
 
 proc dingbat_clip_tick(): cint {.exportc, cdecl.} =
   ## One replay frame with its logged input; its picture is then at
   ## dingbat_framebuffer. Frames remaining, or -1 once done (the live state
-  ## is already back).
+  ## is already back), as it is when the replay hits a core bug.
+  try:
+    clip_tick_impl()
+  except Exception:
+    dingbat_clip_abort()
+    -1
+
+proc clip_tick_impl(): cint =
   if not clipReplaying: return -1
   if clipCursor >= clipEnd:
     discard clip_apply_payload(clipLiveStash)
@@ -1662,6 +1833,209 @@ proc dingbat_clip_abort() {.exportc, cdecl.} =
   if statePrinter != nil: statePrinter.muted = false
   clip_set_buttons(clipCurButtons)
   present_live()
+
+# --- Core faults: what the shell shows and the ways out (see "Core faults") ---
+# Going back and the bug report both work from the clip ring: an anchor state
+# every second and the buttons held on every frame, for the last minute,
+# whether or not Rewind is on. GB and GBA only; the DS keeps no clip ring.
+
+proc snapshot_frame(id: int): int =
+  ## The clipFrameIndex rewind snapshot `id` starts, -1 when not recorded.
+  for i in countdown(rewindFrames.high, 0):
+    if rewindFrames[i][0] == id: return rewindFrames[i][1]
+    if rewindFrames[i][0] < id: break
+  -1
+
+proc cut_timeline(frame: int) =
+  ## The live core now starts `frame` of the clip ring's count: what the ring
+  ## holds from there on did not happen. The anchor at `frame` is taken again
+  ## when it runs.
+  while clipAnchors.len > 0 and clipAnchors[^1].frame >= frame:
+    clipAnchorBytes -= clip_anchor_size(clipAnchors[^1])
+    clipAnchors.setLen(clipAnchors.len - 1)
+  clipInputs.setLen(clamp(frame - clipInputsStart, 0, clipInputs.len))
+  if clipInputs.len == 0: clipInputsStart = frame
+  clipFrameIndex = frame
+  while rewindFrames.len > 0 and rewindFrames[^1][1] > frame:
+    rewindFrames.setLen(rewindFrames.len - 1)
+  # Only ever right after a state went onto the core, so the session replay
+  # has just begun there.
+  segFrame = frame
+
+proc dingbat_fault(): cint {.exportc, cdecl.} =
+  ## 1 while the core is faulted: ask after running frames.
+  if faulted(): 1 else: 0
+
+proc dingbat_fault_message(): cstring {.exportc, cdecl.} =
+  ## The exception's name and message ("IndexDefect: index 23840 not in ...").
+  cstring(coreFault)
+
+proc dingbat_fault_frame(): cint {.exportc, cdecl.} =
+  ## The frame it stopped on, counted from power-on (or from the last loaded
+  ## state); -1 on the DS.
+  cint(coreFaultFrame)
+
+proc dingbat_fault_count(): cint {.exportc, cdecl.} =
+  ## Faults since the game was opened; a reset keeps counting.
+  cint(coreFaultCount)
+
+proc dingbat_fault_same(): cint {.exportc, cdecl.} =
+  ## 1 when this fault came on the same frame as the one before it: the game
+  ## reaches the bug deterministically from there.
+  if coreFaultSame: 1 else: 0
+
+proc dingbat_fault_history(): cint {.exportc, cdecl.} =
+  ## Seconds the clip ring can go back from the fault (or from now), 0 when
+  ## it cannot (the DS, a link session, nothing recorded yet).
+  if stateKind notin {ekGB, ekGBA} or core_shared() or clipReplaying or
+     clipAnchors.len == 0: return 0
+  let base = if faulted(): coreFaultFrame else: clipFrameIndex
+  cint(max(0, base - clipAnchors[0].frame) div 60)
+
+proc fault_anchor(seconds: int): int =
+  ## Index of the newest anchor at least `seconds` before the fault (or now),
+  ## else the oldest; -1 with none.
+  if clipAnchors.len == 0: return -1
+  let base = if faulted(): coreFaultFrame else: clipFrameIndex
+  let target = base - seconds * 60
+  result = 0
+  for i in 0 ..< clipAnchors.len:
+    if clipAnchors[i].frame <= target: result = i
+    else: break
+
+proc dingbat_fault_go_back(seconds: cint): cint {.exportc, cdecl.} =
+  ## Put the core back on the anchor `seconds` before the fault (or as far as
+  ## the ring reaches), forget everything after it, and clear the fault.
+  ## Returns the seconds actually gone back, -1 when it could not.
+  if dingbat_fault_history() == 0: return -1
+  let pick = fault_anchor(int(seconds))
+  let a = clipAnchors[pick]
+  let base = if faulted(): coreFaultFrame else: clipFrameIndex
+  try:
+    apply_payload(uncompress(a.packed, dfZlib))
+  except Exception:
+    return -1
+  cut_timeline(a.frame)
+  if rewindHistory != nil:
+    # The ring's newest snapshot at or before the anchor becomes its newest.
+    if rewindFrames.len > 0 and rewindHistory.index_of_id(rewindFrames[^1][0]) >= 0:
+      discard rewindHistory.rewind_to_id(rewindFrames[^1][0])
+    else:
+      rewindHistory.clear()
+      rewindFrames.setLen(0)
+  coreFault = ""
+  if statePrinter != nil: statePrinter.resync()
+  lcdResp.reset()
+  clip_set_buttons(clipCurButtons)
+  present_live()
+  cint((base - a.frame + 30) div 60)
+
+var faultInputs: seq[uint16] = @[]
+var faultReportFrom = -1
+var faultPowerOn = false
+var faultChecks = ""
+
+proc fnv64(s: string): uint64 =
+  ## FNV-1a: the same in every build, so a report's fingerprints compare
+  ## with any later dingbat's.
+  result = 14695981039346656037'u64
+  for c in s: result = (result xor uint64(uint8(c))) * 1099511628211'u64
+
+proc core_apply_raw(payload: string) =
+  ## A state onto the live core without starting a session replay there: a
+  ## look that is put straight back.
+  case stateKind
+  of ekGBA: stateGba.apply_state_payload(payload)
+  of ekGB:  stateGb.apply_state_payload(payload)
+  else: discard
+
+proc dingbat_fault_report_size(seconds: cint): cint {.exportc, cdecl.} =
+  ## A bug report's replay of the fault ("Session replay" above): where the
+  ## live core last started fresh, and every frame's buttons from there
+  ## through the faulting one at dingbat_fault_report_inputs (bit 15: a
+  ## run-ahead frame, whose state went back onto the core after it). From
+  ## power-on there is no state (0 is returned and
+  ## dingbat_fault_report_power_on() is 1); else that start's full .state image
+  ## is in the dingbat_state_data() buffer and its size is returned. Without
+  ## the record (a link session, an unusually long one), the clip anchor
+  ## `seconds` before the fault stands in: exact for all a save state holds.
+  ## -1: nothing to replay. The live core is put back as it was.
+  stateImage = ""
+  faultInputs.setLen(0)
+  faultReportFrom = -1
+  faultPowerOn = false
+  faultChecks = ""
+  if stateKind notin {ekGB, ekGBA} or clipReplaying: return -1
+  let last = if faulted(): coreFaultFrame else: clipFrameIndex - 1
+  var start = ""
+  if segOk and segFrame <= last + 1:
+    start = segPayload
+    faultPowerOn = start.len == 0
+    faultReportFrom = segFrame
+    for (mask, n) in segRuns:
+      for _ in 0'u32 ..< n: faultInputs.add(mask)
+    faultInputs.setLen(min(faultInputs.len, last - segFrame + 1))
+  else:
+    let pick = fault_anchor(int(seconds))
+    if pick < 0: return -1
+    let a = clipAnchors[pick]
+    try: start = uncompress(a.packed, dfZlib)
+    except Exception: return -1
+    faultReportFrom = a.frame
+    for f in a.frame .. last:
+      let idx = f - clipInputsStart
+      if idx >= 0 and idx < clipInputs.len: faultInputs.add(clipInputs[idx])
+  if not faultPowerOn:
+    var stash = ""
+    try: stash = current_payload()
+    except Exception: discard
+    try:
+      core_apply_raw(start)
+      stateImage = case stateKind
+        of ekGBA: pack_state(stateGba.state_bytes(thumbnail = true))
+        of ekGB:  pack_state(stateGb.state_bytes(thumbnail = true))
+        else: ""
+    except Exception:
+      stateImage = ""
+    if stash.len > 0:
+      try: core_apply_raw(stash)
+      except Exception: discard
+    if stateImage.len == 0:
+      faultReportFrom = -1
+      faultInputs.setLen(0)
+      return -1
+  # The whole state's fingerprint at each clip anchor after the start: a
+  # replay that matches them all and still runs the faulting frame clean was
+  # stopped by state a save state does not hold.
+  for an in clipAnchors:
+    if an.frame <= faultReportFrom or an.frame > last: continue
+    try:
+      let p = uncompress(an.packed, dfZlib)
+      if faultChecks.len > 0: faultChecks.add ","
+      faultChecks.add $an.frame & ":" & toHex(fnv64(p))
+    except Exception: discard
+  cint(stateImage.len)
+
+proc dingbat_fault_report_power_on(): cint {.exportc, cdecl.} =
+  ## 1 when the report's replay starts at power-on (it carries no state).
+  if faultPowerOn: 1 else: 0
+
+proc dingbat_fault_report_from(): cint {.exportc, cdecl.} =
+  ## The frame the report's state starts (the inputs' first frame).
+  cint(faultReportFrom)
+
+proc dingbat_fault_report_input_count(): cint {.exportc, cdecl.} =
+  ## Frames of buttons in the report: one uint16 each, bit i = Input(i)
+  ## (dingbat_set_input id i), bit 15 a run-ahead frame.
+  cint(faultInputs.len)
+
+proc dingbat_fault_report_inputs(): pointer {.exportc, cdecl.} =
+  if faultInputs.len > 0: addr faultInputs[0] else: nil
+
+proc dingbat_fault_report_checks(): cstring {.exportc, cdecl.} =
+  ## "frame:FNV,frame:FNV": the state payload's FNV-1a 64 (hex) at the start
+  ## of each anchor frame after the report's state, up to the fault.
+  cstring(faultChecks)
 
 # --- Online link: input rollback (dingbat_wasm.nim's rollback_*) ---
 # The shell runs dingbat_rollback_tick once per frame with this player's
@@ -1803,21 +2177,25 @@ proc dingbat_rollback_load_state(player: cint; data: pointer; len: cint): cint {
 proc dingbat_rollback_tick(local_bits: cint): cint {.exportc, cdecl.} =
   ## One frame with this player's buttons and the friend's predicted ones.
   ## Returns the frame just simulated (send it with `local_bits`), or -1 when
-  ## stalled at the prediction window waiting for the friend.
-  if rbGb != nil:
-    if gbrb.tick(rbGb, uint16(local_bits)) == grbStalled: return -1
+  ## stalled at the prediction window waiting for the friend, or faulted.
+  if faulted(): return -1
+  result = -1
+  guard_core:
+    if rbGb != nil:
+      if gbrb.tick(rbGb, uint16(local_bits)) == grbStalled: return -1
+      present_live()
+      return cint(rbGb.head - 1)
+    if rbGba == nil: return -1
+    if gbarb.tick(rbGba, uint16(local_bits)) == rbStalled: return -1
     present_live()
-    return cint(rbGb.head - 1)
-  if rbGba == nil: return -1
-  if gbarb.tick(rbGba, uint16(local_bits)) == rbStalled: return -1
-  present_live()
-  cint(rbGba.head - 1)
+    result = cint(rbGba.head - 1)
 
 proc dingbat_rollback_feed(frame, bits: cint) {.exportc, cdecl.} =
   ## The friend's buttons for `frame` (may roll back and re-simulate).
-  if frame < 0: return
-  if rbGb != nil: gbrb.feed_remote(rbGb, int(frame), uint16(bits))
-  elif rbGba != nil: gbarb.feed_remote(rbGba, int(frame), uint16(bits))
+  if frame < 0 or faulted(): return
+  guard_core:
+    if rbGb != nil: gbrb.feed_remote(rbGb, int(frame), uint16(bits))
+    elif rbGba != nil: gbarb.feed_remote(rbGba, int(frame), uint16(bits))
 
 proc dingbat_rollback_active(): cint {.exportc, cdecl.} =
   if rb_active(): 1 else: 0
@@ -1966,10 +2344,12 @@ proc dingbat_link_init(rom0, rom1: cstring): cint {.exportc, cdecl.} =
 proc dingbat_link_tick() {.exportc, cdecl.} =
   ## Both cores one lockstep frame; player 1's picture is then at
   ## dingbat_game_fb(), each player's raw at dingbat_link_fb.
-  if lkGb != nil: lkGb.step_frame()
-  elif lkGba != nil: lkGba.step_frame()
-  else: return
-  present_live()
+  if faulted(): return
+  guard_core:
+    if lkGb != nil: lkGb.step_frame()
+    elif lkGba != nil: lkGba.step_frame()
+    else: return
+    present_live()
 
 proc dingbat_link_fb(player: cint): ptr uint16 {.exportc, cdecl.} =
   ## `player`'s (0/1) BGR555 framebuffer, the game's size.

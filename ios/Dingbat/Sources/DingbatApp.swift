@@ -333,6 +333,7 @@ struct SheetHost: View {
         case .moments(let e, let crash): MomentsView(entry: e, crash: crash)
         case .addPictures: AddPicturesView()
         case .link: LinkCableView()
+        case .fault: FaultView()
         case .tileMenu(let e): TileMenuView(entry: e)
         case .rename(let e): RenameView(entry: e)
         case .export(let e): ExportView(entry: e)

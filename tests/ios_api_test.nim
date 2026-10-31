@@ -65,6 +65,21 @@ proc dingbat_link_fb(player: cint): ptr uint16 {.importc, cdecl.}
 proc dingbat_link_input(player, id, pressed: cint) {.importc, cdecl.}
 proc dingbat_link_active(): cint {.importc, cdecl.}
 proc dingbat_link_exit() {.importc, cdecl.}
+proc dingbat_rumble(): cint {.importc, cdecl.}
+proc dingbat_sgb_active(): cint {.importc, cdecl.}
+proc dingbat_fault(): cint {.importc, cdecl.}
+proc dingbat_fault_message(): cstring {.importc, cdecl.}
+proc dingbat_fault_frame(): cint {.importc, cdecl.}
+proc dingbat_fault_count(): cint {.importc, cdecl.}
+proc dingbat_fault_same(): cint {.importc, cdecl.}
+proc dingbat_fault_history(): cint {.importc, cdecl.}
+proc dingbat_fault_go_back(seconds: cint): cint {.importc, cdecl.}
+proc dingbat_fault_report_size(seconds: cint): cint {.importc, cdecl.}
+proc dingbat_fault_report_from(): cint {.importc, cdecl.}
+proc dingbat_fault_report_power_on(): cint {.importc, cdecl.}
+proc dingbat_fault_report_checks(): cstring {.importc, cdecl.}
+proc dingbat_fault_report_input_count(): cint {.importc, cdecl.}
+proc dingbat_fault_report_inputs(): pointer {.importc, cdecl.}
 
 var failures = 0
 template check(cond: bool; what: string) =
@@ -285,6 +300,103 @@ block:
   dingbat_unload(1)
   check dingbat_loaded() == 0 and dingbat_game_fb() == nil, "unload drops the core"
 
+echo "GB: a core fault stays in the core"
+block:
+  # An IndexDefect inside a frame (faultInjectFrame, as the 2026-10-31 PPU bug
+  # raised) used to escape dingbat_run_frame and leave every export lying.
+  dingbat_set_sgb(0)
+  dingbat_set_rewind(1, 0)
+  check dingbat_load_rom(cstring(staged("tests/roms/lcdflicker.gb")), nil) == 0, "loads"
+  const FAULT = 900
+  var hashes: seq[uint64] = @[]           # the picture after each frame
+  for f in 0 ..< FAULT:
+    # Buttons that change, so the report's input log carries something.
+    dingbat_set_input(cint(4 + (f div 37) mod 2), cint(f mod 7 < 3))
+    dingbat_run_frame()
+    hashes.add(frameHash())
+  faultInjectFrame = FAULT
+  dingbat_run_frame()
+  check dingbat_fault() == 1, "the frame faults the core"
+  check $dingbat_fault_message() == "IndexDefect: index 23840 not in 0 .. 23039 (injected)",
+        "the message names the exception: " & $dingbat_fault_message()
+  check dingbat_fault_frame() == FAULT and dingbat_fault_count() == 1 and
+        dingbat_fault_same() == 0, "frame " & $dingbat_fault_frame() & ", first fault"
+  # What the zombie runtime got wrong: these read true state again.
+  check dingbat_framebuffer() != nil and dingbat_fb_width() == 160 and
+        dingbat_out_width() == 160 and dingbat_sgb_active() == 0 and dingbat_rumble() == 0,
+        "the picture, its size, SGB and the motor read sanely"
+  let stuck = frameHash()
+  dingbat_run_frame()
+  dingbat_run_frame_ahead(2)
+  check frameHash() == stuck and dingbat_fault() == 1, "a faulted core runs no frames"
+  check dingbat_state_size() == 0, "and gives no state to checkpoint"
+  check dingbat_fault_history() >= 10, "the clip ring reaches back " & $dingbat_fault_history() & " s"
+
+  # The report: this session began at power-on, so its replay does too: no
+  # state, every frame's buttons from frame 0 through the faulting one.
+  proc takeReport(): tuple[size, start, powerOn: int; state: string; inputs: seq[uint16]; checks: string] =
+    result.size = int(dingbat_fault_report_size(10))
+    if result.size > 0:
+      result.state = newString(result.size)
+      copyMem(addr result.state[0], dingbat_state_data(), result.size)
+    result.start = int(dingbat_fault_report_from())
+    result.powerOn = int(dingbat_fault_report_power_on())
+    result.inputs = newSeq[uint16](dingbat_fault_report_input_count())
+    if result.inputs.len > 0:
+      copyMem(addr result.inputs[0], dingbat_fault_report_inputs(), result.inputs.len * 2)
+    result.checks = $dingbat_fault_report_checks()
+  proc replay(inputs: seq[uint16]) =
+    for i in 0 ..< inputs.len - 1:
+      for b in 0 .. 9: dingbat_set_input(cint(b), cint((inputs[i] shr b) and 1))
+      dingbat_run_frame()
+
+  let first = takeReport()
+  check first.size == 0 and first.powerOn == 1 and first.start == 0,
+        "the replay starts at power-on (size " & $first.size & ", from " & $first.start & ")"
+  check first.inputs.len == FAULT + 1, $first.inputs.len & " frames of buttons, through the faulting one"
+  check first.checks.count(':') >= 10, "a state fingerprint per anchor after the start"
+  check dingbat_fault() == 1, "building it leaves the core faulted"
+
+  # Going back clears the fault, and the same run reaches it again.
+  check dingbat_fault_go_back(10) == 10, "goes back 10 s"
+  check dingbat_fault() == 0, "the fault is cleared"
+  check frameHash() == hashes[FAULT - 600 - 1], "the picture is the anchor's"
+  for f in FAULT - 600 ..< FAULT:
+    dingbat_set_input(cint(4 + (f div 37) mod 2), cint(f mod 7 < 3))
+    dingbat_run_frame()
+  check frameHash() == hashes[FAULT - 1], "replaying the same buttons draws the same frames"
+  dingbat_run_frame()
+  check dingbat_fault() == 1 and dingbat_fault_count() == 2 and dingbat_fault_same() == 1,
+        "it stops again on the same frame, and says so"
+
+  # Now the session last started fresh where going back put it: the replay
+  # starts there, with that state.
+  let second = takeReport()
+  check second.size > 0 and second.powerOn == 0 and second.start == FAULT - 600,
+        "the replay starts at the state going back loaded (frame " & $second.start & ")"
+  check second.inputs.len == 601, $second.inputs.len & " frames of buttons"
+
+  # Each report replays on its own and lands on the picture before the fault.
+  faultInjectFrame = -1
+  check dingbat_load_rom(cstring(tmp / "lcdflicker.gb"), nil) == 0, "power-on again"
+  replay(first.inputs)
+  check frameHash() == hashes[FAULT - 1], "the power-on report re-runs the player's frames"
+  check applyState(second.state), "the second report's state loads"
+  check dingbat_fault() == 0, "a loaded state clears the fault"
+  replay(second.inputs)
+  check frameHash() == hashes[FAULT - 1], "so does the one from a state"
+
+  faultInjectFrame = 120
+  check dingbat_reset() == 0, "reset reloads"
+  for _ in 0 ..< 121: dingbat_run_frame()
+  check dingbat_fault() == 1 and dingbat_fault_count() == 3, "a reset keeps counting"
+  check dingbat_reset() == 0 and dingbat_fault() == 0, "and clears the fault"
+  faultInjectFrame = -1
+  for _ in 0 ..< 10: dingbat_run_frame()
+  check dingbat_fault() == 0, "the restarted game runs"
+  dingbat_unload(1)
+  check dingbat_fault_count() == 0, "unload forgets the game's faults"
+
 # --- Nintendo DS ---
 # Homebrew test ROMs from ~/.cache/dingbat-nds/roms (built by
 # tests/nds/tools; never in the repo), copied into a temp dir so the battery
@@ -303,7 +415,6 @@ proc dingbat_glow_sample(gw, gh, remap: cint; p0, p1, p2, p3: uint32): ptr uint3
 proc dingbat_out_height(): cint {.importc, cdecl.}
 proc dingbat_flush_save() {.importc, cdecl.}
 proc dingbat_is_stopped(): cint {.importc, cdecl.}
-proc dingbat_rumble(): cint {.importc, cdecl.}
 proc dingbat_set_fast_forward(on: cint) {.importc, cdecl.}
 proc dingbat_set_channel_mutes(bits: cint) {.importc, cdecl.}
 proc dingbat_audio_ahead(): cint {.importc, cdecl.}

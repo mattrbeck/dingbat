@@ -335,6 +335,38 @@ int dingbat_clip_begin(int start_ago, int end_ago);
 int dingbat_clip_tick(void);
 void dingbat_clip_abort(void);
 
+/* Core faults: a bug inside a core (an index or range check) stops it
+ * instead of escaping. Ask dingbat_fault after running frames. A faulted
+ * core runs no frames, gives no state (dingbat_state_size is 0) and reports
+ * no rumble; the battery save was flushed when it stopped. Going back,
+ * dingbat_reset, dingbat_load_state, dingbat_rewind_commit or unloading
+ * clears it. */
+int dingbat_fault(void);
+const char *dingbat_fault_message(void);  /* "IndexDefect: ..." */
+int dingbat_fault_frame(void);            /* from power-on or the last state; -1 on the DS */
+int dingbat_fault_count(void);            /* since the game was opened */
+int dingbat_fault_same(void);             /* 1: the same frame as the last fault */
+int dingbat_fault_history(void);          /* seconds going back can reach; 0 = it can't */
+int dingbat_fault_go_back(int seconds);   /* seconds gone back, -1 */
+/* A report's replay: where the core last started fresh (power-on, or the
+ * last state put onto it) and one uint16 of buttons per frame from
+ * dingbat_fault_report_from through the faulting frame (bit i =
+ * dingbat_set_input id i; bit 15 = a run-ahead frame). Returns the start's
+ * .state size at dingbat_state_data; 0 with dingbat_fault_report_power_on()
+ * = 1 means it starts at power-on and has no state; -1 = nothing to replay.
+ * Without that record, the clip anchor `seconds` before the fault. */
+int dingbat_fault_report_size(int seconds);
+int dingbat_fault_report_power_on(void);
+int dingbat_fault_report_from(void);
+int dingbat_fault_report_input_count(void);
+const void *dingbat_fault_report_inputs(void);
+/* "frame:FNV,...": the whole state's FNV-1a 64 at each later anchor, so a
+ * replay can tell where (or whether) it left the device's path. */
+const char *dingbat_fault_report_checks(void);
+/* DEBUG builds' `-fault-after N`: an injected fault N frames from now, and
+ * again whenever play reaches that frame, until the game closes; < 0 cancels. */
+void dingbat_debug_fault_after(int frames);
+
 /* Online link (input rollback): both players' cores run here, only inputs
  * cross the network. rom0 is the host's game, rom1 the guest's; this
  * player's own game at its real path so its battery save is the game's.

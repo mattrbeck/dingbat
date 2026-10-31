@@ -3,7 +3,12 @@ import SwiftUI
 /// Report a Bug (web #report-modal): a title, a description and a save
 /// state from the moment it went wrong (scrubbed back through the rewind
 /// ring), as one .json file handed to the share sheet. Nothing is sent
-/// anywhere, and the ROM is never included.
+/// anywhere, and the ROM is never included. Opened from FaultView, it is
+/// filled in from the fault and carries its replay instead: where the game
+/// last started fresh (power-on, or the state it last loaded) and every
+/// frame's buttons from there to the stop (dingbat_fault_report_size), which
+/// re-run the player's frames exactly up to the faulting one
+/// (tools/replay_report.nim).
 struct ReportBugView: View {
     @ObservedObject private var session = GameSession.shared
     @ObservedObject private var settings = Settings.shared
@@ -15,17 +20,24 @@ struct ReportBugView: View {
     @State private var live: UIImage?
     /// 0..samples; samples = now.
     @State private var slider = 0.0
+    /// The core is faulted: the fault's report (see the type's comment).
+    @State private var fault = false
+    @State private var withReplay = true
+    /// What the replay covers, for its row: "since power-on, 33 s".
+    @State private var replayWhat = ""
 
     var body: some View {
         SheetChrome(title: "Report a Bug") {
-            SheetHint("Describe what went wrong. You can attach a save state from the moment it happened — scrub the timeline below to find it. Nothing is sent anywhere; this makes a report file you can share.")
+            SheetHint(fault
+                      ? "Filled in from the error. Add anything you noticed, then share the file. Nothing leaves your phone until you do."
+                      : "Describe what went wrong. You can attach a save state from the moment it happened — scrub the timeline below to find it. Nothing is sent anywhere; this makes a report file you can share.")
             label("Title")
             box {
                 TextField("", text: $title, prompt: Text("Short summary").foregroundColor(palette.textFaint))
                     .onChange(of: title) { t in if t.count > 120 { title = String(t.prefix(120)) } }
             }
             .padding(.bottom, 12)
-            label("Description")
+            label(fault ? "What were you doing? (optional)" : "Description")
             box {
                 ZStack(alignment: .topLeading) {
                     if desc.isEmpty {
@@ -41,11 +53,11 @@ struct ReportBugView: View {
                 }
             }
             .padding(.bottom, 14)
-            scrubBox
+            if fault { faultBox } else { scrubBox }
             HStack(spacing: 10) {
                 Spacer()
                 PadButton("Cancel") { SheetNav.close() }.buttonStyle(SheetButtonStyle())
-                Button("Download report", action: download)
+                Button(fault ? "Share report" : "Download report", action: download)
                     .buttonStyle(SheetButtonStyle(kind: .primary))
                     .disabled(session.game == nil)
             }
@@ -124,7 +136,78 @@ struct ReportBugView: View {
         .opacity(session.game == nil ? 0.45 : 1)
     }
 
+    /// What a fault's report carries; the replay's two parts can be left out.
+    private var faultBox: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("In the report")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundColor(palette.textDim)
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+            if !replayWhat.isEmpty {
+                faultToggle("A replay of this session", replayWhat, $withReplay)
+            }
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("The error, settings and device").font(.system(size: 14.5, weight: .medium))
+                    Text(String(cString: dingbat_fault_message()))
+                        .font(.system(size: 12.5))
+                        .foregroundColor(palette.textDim)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "lock")
+                    .foregroundColor(palette.textFaint)
+                    .accessibilityLabel("Always included")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .frame(minHeight: 58)
+            .overlay(alignment: .top) { Rectangle().fill(palette.border).frame(height: 1) }
+            Text("The game itself (the ROM) is never included.")
+                .font(.system(size: 12))
+                .foregroundColor(palette.textFaint)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .overlay(alignment: .top) { Rectangle().fill(palette.border).frame(height: 1) }
+        }
+        .background(RoundedRectangle(cornerRadius: 11).fill(palette.surface2.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(palette.border, lineWidth: 1))
+    }
+
+    private func faultToggle(_ title: String, _ sub: String, _ on: Binding<Bool>) -> some View {
+        Toggle(isOn: on) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 14.5, weight: .medium))
+                Text(sub).font(.system(size: 12.5)).foregroundColor(palette.textDim)
+            }
+        }
+        .tint(palette.accent)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(minHeight: 58)
+        .overlay(alignment: .top) { Rectangle().fill(palette.border).frame(height: 1) }
+    }
+
     private func load() {
+        fault = dingbat_fault() != 0
+        if fault {
+            replayWhat = ""
+            let size = Int(dingbat_fault_report_size(Int32(FaultView.backSeconds)))
+            if size >= 0 {
+                let secs = Double(dingbat_fault_report_input_count()) / 59.73
+                let len = secs >= 90 ? String(format: "%.0f min", secs / 60) : String(format: "%.0f s", secs)
+                let from = dingbat_fault_report_power_on() != 0 ? "power-on" : "where it last loaded a state"
+                replayWhat = "From \(from) to the stop (\(len)): the start and every button you pressed"
+            }
+            if title.isEmpty {
+                let frame = Int(dingbat_fault_frame())
+                let at = frame >= 0 ? String(format: " at %.1f s", Double(frame) / 59.73) : ""
+                title = "\(session.game?.name ?? "Game") stopped: internal error\(at)"
+            }
+            return
+        }
         live = session.currentImage()
         samples = 0
         thumbs = []
@@ -163,7 +246,45 @@ struct ReportBugView: View {
         }
         var state: Data?
         var savedFrom = "current frame"
-        if back == 0 {
+        var extra: [String: Any] = [:]
+        if fault {
+            savedFrom = "no state"
+            let size = withReplay ? Int(dingbat_fault_report_size(Int32(FaultView.backSeconds))) : -1
+            if size >= 0 {
+                let powerOn = dingbat_fault_report_power_on() != 0
+                if size > 0, let p = dingbat_state_data() { state = Data(bytes: p, count: size) }
+                let from = Int(dingbat_fault_report_from())
+                let n = Int(dingbat_fault_report_input_count())
+                savedFrom = powerOn ? "power-on (replay)"
+                    : String(format: "%.1fs before it stopped (frame %d)", Double(n) / 59.73, from)
+                // Little-endian uint16 per frame: bit i = dingbat_set_input id i,
+                // bit 15 = a run-ahead frame.
+                let buttons = n > 0 ? dingbat_fault_report_inputs().map { Data(bytes: $0, count: n * 2) } : nil
+                extra["replay"] = [
+                    "fromPowerOn": powerOn,
+                    "fromFrame": from,
+                    "frames": n,
+                    "buttons": buttons?.base64EncodedString() ?? "",
+                    "checks": String(cString: dingbat_fault_report_checks()),
+                ] as [String: Any]
+            }
+            extra["fault"] = [
+                "message": String(cString: dingbat_fault_message()),
+                "frame": Int(dingbat_fault_frame()),
+                "count": Int(dingbat_fault_count()),
+                "sameFrame": dingbat_fault_same() != 0,
+            ] as [String: Any]
+            // What changes how the frames run (the state carries the rest).
+            extra["settings"] = [
+                "sgb": settings.sgbEnable,
+                "gbaBiosMode": settings.gbaBiosMode,
+                "gbaRunBios": settings.gbaRunBios,
+                "mp2kHle": settings.mp2kHle,
+                "fifoInterp": settings.fifoInterp,
+                "runahead": settings.runahead,
+                "cheats": CheatStore.load(for: g),
+            ] as [String: Any]
+        } else if back == 0 {
             state = session.captureState()
         } else {
             let sample = Int32(back - 1)
@@ -177,9 +298,9 @@ struct ReportBugView: View {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let now = Date()
-        let report: [String: Any] = [
+        var report: [String: Any] = [
             "kind": "dingbat-bug-report",
-            "version": 1,
+            "version": fault ? 2 : 1,
             "createdAt": iso.string(from: now),
             "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
             "description": desc.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -189,6 +310,7 @@ struct ReportBugView: View {
             // Never the ROM.
             "state": state.map { $0.base64EncodedString() } ?? NSNull(),
         ]
+        report.merge(extra) { a, _ in a }
         guard let json = try? JSONSerialization.data(withJSONObject: report,
                                                      options: [.prettyPrinted, .sortedKeys]) else { return }
         let f = DateFormatter()

@@ -13,6 +13,8 @@ final class AppModel: ObservableObject {
     enum Sheet: Identifiable, Equatable {
         case settings(section: String?)
         case states, saves, rewind, cheats, prints, report, clip, link
+        /// The core stopped on a bug of its own (FaultView).
+        case fault
         case tileMenu(RomEntry), rename(RomEntry), export(RomEntry)
         /// Resume from earlier; `crash`: the "stopped unexpectedly" form.
         case moments(RomEntry, crash: Bool)
@@ -28,6 +30,7 @@ final class AppModel: ObservableObject {
             case .report: return "report"
             case .clip: return "clip"
             case .link: return "link"
+            case .fault: return "fault"
             case .tileMenu(let e): return "tile:" + e.id
             case .rename(let e): return "rename:" + e.id
             case .export(let e): return "export:" + e.id
