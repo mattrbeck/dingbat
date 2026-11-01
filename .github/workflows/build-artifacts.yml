@@ -88,7 +88,7 @@ jobs:
   macos:
     # Native build with -d:macdist, which statically links SDL3 so the .app has
     # no Homebrew dependency, then bundled into a .app inside a .dmg.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       # Every fetch below is retried.
