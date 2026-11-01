@@ -19,7 +19,8 @@
 ##
 ## The report's `replay.checks` fingerprint the whole state once a second on
 ## the device; the replay compares its own at each, so a replay that leaves
-## the device's path says where. Bit 15 of a frame's buttons marks run-ahead:
+## the device's path says where. The buttons come as runs (`replay.runs`: uint16
+## buttons then uint32 frames, little-endian). Bit 15 marks run-ahead frames:
 ## the device put the core's own state back onto it after that frame, and so
 ## does this. A report from a stand-in start (the clip anchor, when the app
 ## had no record back to a fresh one) cannot carry what a save state leaves
@@ -67,9 +68,14 @@ proc main() =
   var buttons: seq[uint16]
   var fromFrame = -1
   if report{"replay"} != nil:
-    let raw = decode(report["replay"]["buttons"].getStr)
-    for k in 0 ..< raw.len div 2:
-      buttons.add(uint16(uint8(raw[2 * k])) or (uint16(uint8(raw[2 * k + 1])) shl 8))
+    # Runs: uint16 buttons then uint32 frames held, little-endian.
+    let raw = decode(report["replay"]["runs"].getStr)
+    for k in 0 ..< raw.len div 6:
+      let o = 6 * k
+      let mask = uint16(uint8(raw[o])) or (uint16(uint8(raw[o + 1])) shl 8)
+      var n = 0
+      for b in 0 .. 3: n = n or (int(uint8(raw[o + 2 + b])) shl (8 * b))
+      for _ in 0 ..< n: buttons.add(mask)
     fromFrame = report["replay"]["fromFrame"].getInt
   var checks: seq[(int, string)]
   if report{"replay"} != nil and report["replay"]{"checks"} != nil:

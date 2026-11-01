@@ -257,14 +257,16 @@ struct ReportBugView: View {
                 let n = Int(dingbat_fault_report_input_count())
                 savedFrom = powerOn ? "power-on (replay)"
                     : String(format: "%.1fs before it stopped (frame %d)", Double(n) / 59.73, from)
-                // Little-endian uint16 per frame: bit i = dingbat_set_input id i,
-                // bit 15 = a run-ahead frame.
-                let buttons = n > 0 ? dingbat_fault_report_inputs().map { Data(bytes: $0, count: n * 2) } : nil
+                // Runs of 6 bytes, little-endian: uint16 buttons (bit i =
+                // dingbat_set_input id i, bit 15 = a run-ahead frame), then
+                // uint32 frames held. Sized by button changes, not play time.
+                let runsSize = Int(dingbat_fault_report_runs_size())
+                let runs = runsSize > 0 ? dingbat_fault_report_runs().map { Data(bytes: $0, count: runsSize) } : nil
                 extra["replay"] = [
                     "fromPowerOn": powerOn,
                     "fromFrame": from,
                     "frames": n,
-                    "buttons": buttons?.base64EncodedString() ?? "",
+                    "runs": runs?.base64EncodedString() ?? "",
                     "checks": String(cString: dingbat_fault_report_checks()),
                 ] as [String: Any]
             }

@@ -1930,7 +1930,8 @@ proc dingbat_fault_go_back(seconds: cint): cint {.exportc, cdecl.} =
   present_live()
   cint((base - a.frame + 30) div 60)
 
-var faultInputs: seq[uint16] = @[]
+var faultRuns = ""                 # the report's buttons as runs (see below)
+var faultFrames = 0                # frames the runs cover
 var faultReportFrom = -1
 var faultPowerOn = false
 var faultChecks = ""
@@ -1940,6 +1941,23 @@ proc fnv64(s: string): uint64 =
   ## with any later dingbat's.
   result = 14695981039346656037'u64
   for c in s: result = (result xor uint64(uint8(c))) * 1099511628211'u64
+
+proc fault_run(mask: uint16; n: int) =
+  ## One run onto the report's buttons: uint16 buttons then uint32 frames,
+  ## little-endian. A button change costs 6 bytes, a quiet stretch nothing.
+  if n <= 0: return
+  faultFrames += n
+  if faultRuns.len >= 6 and
+     (uint16(uint8(faultRuns[^6])) or (uint16(uint8(faultRuns[^5])) shl 8)) == mask:
+    var prev = 0'u32
+    for k in 0 .. 3: prev = prev or (uint32(uint8(faultRuns[faultRuns.len - 4 + k])) shl (8 * k))
+    if uint64(prev) + uint64(n) <= uint64(high(uint32)):
+      let total = prev + uint32(n)
+      for k in 0 .. 3: faultRuns[faultRuns.len - 4 + k] = char((total shr (8 * k)) and 0xFF)
+      return
+  faultRuns.add char(mask and 0xFF)
+  faultRuns.add char(mask shr 8)
+  for k in 0 .. 3: faultRuns.add char((uint32(n) shr (8 * k)) and 0xFF)
 
 proc core_apply_raw(payload: string) =
   ## A state onto the live core without starting a session replay there: a
@@ -1952,7 +1970,7 @@ proc core_apply_raw(payload: string) =
 proc dingbat_fault_report_size(seconds: cint): cint {.exportc, cdecl.} =
   ## A bug report's replay of the fault ("Session replay" above): where the
   ## live core last started fresh, and every frame's buttons from there
-  ## through the faulting one at dingbat_fault_report_inputs (bit 15: a
+  ## through the faulting one as runs at dingbat_fault_report_runs (bit 15: a
   ## run-ahead frame, whose state went back onto the core after it). From
   ## power-on there is no state (0 is returned and
   ## dingbat_fault_report_power_on() is 1); else that start's full .state image
@@ -1961,7 +1979,8 @@ proc dingbat_fault_report_size(seconds: cint): cint {.exportc, cdecl.} =
   ## `seconds` before the fault stands in: exact for all a save state holds.
   ## -1: nothing to replay. The live core is put back as it was.
   stateImage = ""
-  faultInputs.setLen(0)
+  faultRuns = ""
+  faultFrames = 0
   faultReportFrom = -1
   faultPowerOn = false
   faultChecks = ""
@@ -1972,9 +1991,12 @@ proc dingbat_fault_report_size(seconds: cint): cint {.exportc, cdecl.} =
     start = segPayload
     faultPowerOn = start.len == 0
     faultReportFrom = segFrame
+    var left = last - segFrame + 1
     for (mask, n) in segRuns:
-      for _ in 0'u32 ..< n: faultInputs.add(mask)
-    faultInputs.setLen(min(faultInputs.len, last - segFrame + 1))
+      let take = min(int(n), left)
+      fault_run(mask, take)
+      left -= take
+      if left <= 0: break
   else:
     let pick = fault_anchor(int(seconds))
     if pick < 0: return -1
@@ -1984,7 +2006,7 @@ proc dingbat_fault_report_size(seconds: cint): cint {.exportc, cdecl.} =
     faultReportFrom = a.frame
     for f in a.frame .. last:
       let idx = f - clipInputsStart
-      if idx >= 0 and idx < clipInputs.len: faultInputs.add(clipInputs[idx])
+      if idx >= 0 and idx < clipInputs.len: fault_run(clipInputs[idx], 1)
   if not faultPowerOn:
     var stash = ""
     try: stash = current_payload()
@@ -2002,7 +2024,8 @@ proc dingbat_fault_report_size(seconds: cint): cint {.exportc, cdecl.} =
       except Exception: discard
     if stateImage.len == 0:
       faultReportFrom = -1
-      faultInputs.setLen(0)
+      faultRuns = ""
+      faultFrames = 0
       return -1
   # The whole state's fingerprint at each clip anchor after the start: a
   # replay that matches them all and still runs the faulting frame clean was
@@ -2025,12 +2048,17 @@ proc dingbat_fault_report_from(): cint {.exportc, cdecl.} =
   cint(faultReportFrom)
 
 proc dingbat_fault_report_input_count(): cint {.exportc, cdecl.} =
-  ## Frames of buttons in the report: one uint16 each, bit i = Input(i)
-  ## (dingbat_set_input id i), bit 15 a run-ahead frame.
-  cint(faultInputs.len)
+  ## Frames the report's buttons cover.
+  cint(faultFrames)
 
-proc dingbat_fault_report_inputs(): pointer {.exportc, cdecl.} =
-  if faultInputs.len > 0: addr faultInputs[0] else: nil
+proc dingbat_fault_report_runs_size(): cint {.exportc, cdecl.} =
+  ## Bytes at dingbat_fault_report_runs: 6 per run, uint16 buttons (bit i =
+  ## Input(i), dingbat_set_input id i; bit 15 a run-ahead frame) then uint32
+  ## frames held, little-endian. Grows with button changes, not play time.
+  cint(faultRuns.len)
+
+proc dingbat_fault_report_runs(): pointer {.exportc, cdecl.} =
+  if faultRuns.len > 0: addr faultRuns[0] else: nil
 
 proc dingbat_fault_report_checks(): cstring {.exportc, cdecl.} =
   ## "frame:FNV,frame:FNV": the state payload's FNV-1a 64 (hex) at the start

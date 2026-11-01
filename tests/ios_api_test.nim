@@ -79,7 +79,8 @@ proc dingbat_fault_report_from(): cint {.importc, cdecl.}
 proc dingbat_fault_report_power_on(): cint {.importc, cdecl.}
 proc dingbat_fault_report_checks(): cstring {.importc, cdecl.}
 proc dingbat_fault_report_input_count(): cint {.importc, cdecl.}
-proc dingbat_fault_report_inputs(): pointer {.importc, cdecl.}
+proc dingbat_fault_report_runs_size(): cint {.importc, cdecl.}
+proc dingbat_fault_report_runs(): pointer {.importc, cdecl.}
 
 var failures = 0
 template check(cond: bool; what: string) =
@@ -334,16 +335,27 @@ block:
 
   # The report: this session began at power-on, so its replay does too: no
   # state, every frame's buttons from frame 0 through the faulting one.
-  proc takeReport(): tuple[size, start, powerOn: int; state: string; inputs: seq[uint16]; checks: string] =
+  proc takeReport(): tuple[size, start, powerOn, runs: int; state: string; inputs: seq[uint16]; checks: string] =
     result.size = int(dingbat_fault_report_size(10))
     if result.size > 0:
       result.state = newString(result.size)
       copyMem(addr result.state[0], dingbat_state_data(), result.size)
     result.start = int(dingbat_fault_report_from())
     result.powerOn = int(dingbat_fault_report_power_on())
-    result.inputs = newSeq[uint16](dingbat_fault_report_input_count())
-    if result.inputs.len > 0:
-      copyMem(addr result.inputs[0], dingbat_fault_report_inputs(), result.inputs.len * 2)
+    # Runs: uint16 buttons, uint32 frames, little-endian; no two in a row alike.
+    var raw = newString(dingbat_fault_report_runs_size())
+    if raw.len > 0: copyMem(addr raw[0], dingbat_fault_report_runs(), raw.len)
+    result.runs = raw.len div 6
+    var prev = -1
+    for k in 0 ..< result.runs:
+      let mask = int(uint8(raw[6 * k])) or (int(uint8(raw[6 * k + 1])) shl 8)
+      var n = 0
+      for b in 0 .. 3: n = n or (int(uint8(raw[6 * k + 2 + b])) shl (8 * b))
+      check mask != prev and n > 0, "run " & $k & " is a change"
+      prev = mask
+      for _ in 0 ..< n: result.inputs.add(uint16(mask))
+    check raw.len mod 6 == 0 and result.inputs.len == int(dingbat_fault_report_input_count()),
+          "the runs cover input_count's " & $dingbat_fault_report_input_count() & " frames"
     result.checks = $dingbat_fault_report_checks()
   proc replay(inputs: seq[uint16]) =
     for i in 0 ..< inputs.len - 1:
@@ -354,6 +366,8 @@ block:
   check first.size == 0 and first.powerOn == 1 and first.start == 0,
         "the replay starts at power-on (size " & $first.size & ", from " & $first.start & ")"
   check first.inputs.len == FAULT + 1, $first.inputs.len & " frames of buttons, through the faulting one"
+  check first.runs * 6 < first.inputs.len * 2,
+        $first.runs & " runs: smaller than a uint16 per frame (" & $(first.runs * 6) & " bytes)"
   check first.checks.count(':') >= 10, "a state fingerprint per anchor after the start"
   check dingbat_fault() == 1, "building it leaves the core faulted"
 

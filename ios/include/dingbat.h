@@ -349,9 +349,10 @@ int dingbat_fault_same(void);             /* 1: the same frame as the last fault
 int dingbat_fault_history(void);          /* seconds going back can reach; 0 = it can't */
 int dingbat_fault_go_back(int seconds);   /* seconds gone back, -1 */
 /* A report's replay: where the core last started fresh (power-on, or the
- * last state put onto it) and one uint16 of buttons per frame from
- * dingbat_fault_report_from through the faulting frame (bit i =
- * dingbat_set_input id i; bit 15 = a run-ahead frame). Returns the start's
+ * last state put onto it) and the buttons from dingbat_fault_report_from
+ * through the faulting frame as runs, 6 bytes each little-endian: uint16
+ * buttons (bit i = dingbat_set_input id i; bit 15 = a run-ahead frame) then
+ * uint32 frames held. input_count = the frames covered. Returns the start's
  * .state size at dingbat_state_data; 0 with dingbat_fault_report_power_on()
  * = 1 means it starts at power-on and has no state; -1 = nothing to replay.
  * Without that record, the clip anchor `seconds` before the fault. */
@@ -359,7 +360,8 @@ int dingbat_fault_report_size(int seconds);
 int dingbat_fault_report_power_on(void);
 int dingbat_fault_report_from(void);
 int dingbat_fault_report_input_count(void);
-const void *dingbat_fault_report_inputs(void);
+int dingbat_fault_report_runs_size(void);
+const void *dingbat_fault_report_runs(void);
 /* "frame:FNV,...": the whole state's FNV-1a 64 at each later anchor, so a
  * replay can tell where (or whether) it left the device's path. */
 const char *dingbat_fault_report_checks(void);
