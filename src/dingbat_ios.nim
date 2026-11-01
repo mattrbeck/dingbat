@@ -619,7 +619,8 @@ proc current_payload(): string
 # Run-ahead puts the core's own state back onto it after each frame, so such
 # a frame is marked SEG_AHEAD for the replay to do the same.
 const SEG_AHEAD = 0x8000'u16
-const SEG_MAX_RUNS = 200_000       # button changes; ~1.6 MB, hours of play
+const SEG_MAX_RUNS* = 200_000      # button changes; ~1.6 MB, hours of play
+var segMaxRuns* = SEG_MAX_RUNS     # the cap in force (tests lower it)
 var segPayload = ""                # the start; "" = power-on
 var segFrame = 0                   # clipFrameIndex it starts
 var segRuns: seq[(uint16, uint32)] = @[]  # (buttons or SEG_AHEAD, frames)
@@ -636,7 +637,7 @@ proc seg_note(mask: uint16) =
   if not segOk: return
   if segRuns.len > 0 and segRuns[^1][0] == mask and segRuns[^1][1] < high(uint32):
     inc segRuns[^1][1]
-  elif segRuns.len >= SEG_MAX_RUNS:
+  elif segRuns.len >= segMaxRuns:
     segOk = false
     segRuns.setLen(0)
   else:

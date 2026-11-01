@@ -400,10 +400,30 @@ block:
   replay(second.inputs)
   check frameHash() == hashes[FAULT - 1], "so does the one from a state"
 
+  # Past the record's cap (as in a link session) nothing reaches back to a
+  # fresh start: the report starts at the clip anchor 10 s back instead.
+  segMaxRuns = 50
+  check dingbat_load_rom(cstring(tmp / "lcdflicker.gb"), nil) == 0, "power-on once more"
+  for f in 0 ..< FAULT:
+    dingbat_set_input(cint(4 + (f div 37) mod 2), cint(f mod 7 < 3))
+    dingbat_run_frame()
+  faultInjectFrame = FAULT
+  dingbat_run_frame()
+  check dingbat_fault() == 1, "the same frame faults with the record capped"
+  let capped = takeReport()
+  segMaxRuns = SEG_MAX_RUNS
+  check capped.size > 0 and capped.powerOn == 0 and capped.start == FAULT - 600,
+        "the capped report starts at the anchor 10 s back (frame " & $capped.start & ")"
+  check capped.inputs.len == 601, $capped.inputs.len & " frames of buttons from the clip ring"
+  faultInjectFrame = -1
+  check applyState(capped.state), "its state loads"
+  replay(capped.inputs)
+  check frameHash() == hashes[FAULT - 1], "and it re-runs the player's last 10 s"
+
   faultInjectFrame = 120
   check dingbat_reset() == 0, "reset reloads"
   for _ in 0 ..< 121: dingbat_run_frame()
-  check dingbat_fault() == 1 and dingbat_fault_count() == 3, "a reset keeps counting"
+  check dingbat_fault() == 1 and dingbat_fault_count() == 4, "a reset keeps counting"
   check dingbat_reset() == 0 and dingbat_fault() == 0, "and clears the fault"
   faultInjectFrame = -1
   for _ in 0 ..< 10: dingbat_run_frame()

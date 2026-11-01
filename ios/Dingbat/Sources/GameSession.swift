@@ -933,6 +933,8 @@ final class GameSession: NSObject, ObservableObject {
         let model = AppModel.shared
         guard model.sheet != .fault else { return }
         model.openSheet(.fault)
+        UIAccessibility.post(notification: .announcement,
+                             argument: "\(game?.name ?? "The game") stopped because of an internal error")
     }
 
     /// FaultView put a sound core back (going back, a reset): play on.

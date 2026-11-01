@@ -62,7 +62,7 @@ struct ReportBugView: View {
                 Spacer()
                 if sentTo == nil {
                     PadButton("Cancel") { SheetNav.close() }.buttonStyle(SheetButtonStyle())
-                    Button(fault ? "Share report" : "Download report", action: download)
+                    Button("Share report", action: download)
                         .buttonStyle(SheetButtonStyle(kind: .primary))
                         .disabled(session.game == nil)
                 } else {
@@ -374,7 +374,9 @@ struct ReportBugView: View {
         guard let url = SheetFiles.temp(json, name: "dingbat-bugreport-\(g.stem)-\(f.string(from: now)).json") else { return }
         Share.present([url]) { type in
             if Settings.shared.haptics { UINotificationFeedbackGenerator().notificationOccurred(.success) }
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { sentTo = Self.sentText(type) }
+            let text = Self.sentText(type)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { sentTo = text }
+            UIAccessibility.post(notification: .announcement, argument: text)
         }
     }
 }
