@@ -173,6 +173,7 @@ struct TileMenuView: View {
             if confirm != nil, armed != id {
                 armed = id
                 armedAt = Date()
+                Haptic.warning()
                 let stamp = armedAt
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
                     if armed == id && armedAt == stamp { armed = nil }

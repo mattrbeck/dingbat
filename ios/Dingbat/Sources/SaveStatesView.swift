@@ -35,6 +35,7 @@ struct SaveStatesView: View {
                     PadButton("Save") {
                         if session.saveState(slot: selected) {
                             AppModel.shared.toast("Saved to slot \(selected + 1)")
+                            Haptic.success()
                             reload()
                         }
                     }

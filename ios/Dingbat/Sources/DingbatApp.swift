@@ -254,6 +254,9 @@ struct DingbatApp: App {
                 .environmentObject(session)
                 .environmentObject(library)
                 .environment(\.palette, settings.palette)
+                // System pieces (menus, checkmarks, the cursor, alerts) in
+                // the theme's accent, not iOS blue.
+                .tint(settings.palette.accent)
                 .preferredColorScheme(settings.palette.colorScheme)
                 .onAppear(perform: autoplay)
                 .onOpenURL { url in
@@ -302,7 +305,18 @@ struct RootView: View {
             SheetHost(sheet: sheet)
                 .environment(\.palette, palette)
                 .environment(\.padScope, sheet.id)
+                .tint(palette.accent)
                 .preferredColorScheme(palette.colorScheme)
+        }
+        .onAppear { tintWindows(palette.accent) }
+        .onChange(of: palette.accent) { tintWindows($0) }
+    }
+
+    /// UIKit's own pieces (alerts, the file picker, the share sheet) take
+    /// the window's tint, which SwiftUI's .tint does not reach.
+    private func tintWindows(_ c: Color) {
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.windows.forEach { $0.tintColor = UIColor(c) }
         }
     }
 
@@ -370,6 +384,7 @@ struct ToastStack: View {
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(palette.textDim)
                                 .frame(width: 22, height: 22)
+                                .touchTarget(width: 22, height: 22)
                         }
                         .accessibilityLabel("Dismiss")
                     }

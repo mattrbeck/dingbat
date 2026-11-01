@@ -50,9 +50,14 @@ final class Controllers {
             self?.refreshHidesTouch()
         }
         nc.addObserver(forName: .GCControllerDidDisconnect, object: nil, queue: .main) { [weak self] n in
-            if let c = n.object as? GCController { self?.engines[ObjectIdentifier(c)] = nil }
-            self?.refreshHidesTouch()
-            self?.update()
+            guard let self else { return }
+            let c = n.object as? GCController
+            if let c { self.engines[ObjectIdentifier(c)] = nil }
+            // The last pad gone mid-play (a flat battery): stop and wait.
+            if c?.extendedGamepad != nil && !self.connected && self.inGame { self.session.stopForPlayer() }
+            self.refreshHidesTouch()
+            self.update()
+            self.numberPlayers()
         }
         GCController.controllers().forEach(attach)
         refreshHidesTouch()
@@ -82,6 +87,16 @@ final class Controllers {
 
     private func attach(_ c: GCController) {
         c.extendedGamepad?.valueChangedHandler = { [weak self] _, _ in self?.update() }
+        numberPlayers()
+    }
+
+    /// Player lights and light bars lit in connection order, not left
+    /// blinking "unassigned".
+    private func numberPlayers() {
+        let order: [GCControllerPlayerIndex] = [.index1, .index2, .index3, .index4]
+        for (i, c) in GCController.controllers().filter({ $0.extendedGamepad != nil }).enumerated() {
+            c.playerIndex = i < order.count ? order[i] : .indexUnset
+        }
     }
 
     private var inGame: Bool {

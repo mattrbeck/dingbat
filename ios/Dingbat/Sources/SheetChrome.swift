@@ -99,6 +99,17 @@ extension SheetHeader where Leading == EmptyView, Trailing == EmptyView {
     }
 }
 
+extension View {
+    /// At least Apple's 44 pt to touch, around something drawn smaller; the
+    /// layout keeps the drawn size. `width`/`height` are the drawn size.
+    func touchTarget(width w: CGFloat, height h: CGFloat, min m: CGFloat = 44) -> some View {
+        let dx = max(0, m - w) / 2, dy = max(0, m - h) / 2
+        return padding(.horizontal, dx).padding(.vertical, dy)
+            .contentShape(Rectangle())
+            .padding(.horizontal, -dx).padding(.vertical, -dy)
+    }
+}
+
 struct SheetCloseButton: View {
     let action: () -> Void
     @Environment(\.palette) private var palette
@@ -109,7 +120,7 @@ struct SheetCloseButton: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(palette.textFaint)
                 .frame(width: 36, height: 36)
-                .contentShape(Rectangle())
+                .touchTarget(width: 36, height: 36)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")
@@ -143,7 +154,7 @@ struct SheetButtonStyle: ButtonStyle {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: 1))
             .opacity(enabled ? 1 : 0.45)
             .offset(y: pressed ? 1 : 0)
-            .contentShape(Rectangle())
+            .touchTarget(width: 44, height: 32)
     }
 
     private var ink: Color {
@@ -206,6 +217,7 @@ struct SheetConfirmButton: View {
     private func tap() {
         if !armed {
             armed = true
+            Haptic.warning()
             armGen += 1
             let gen = armGen
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
@@ -344,10 +356,28 @@ struct SheetSwitchStyle: ToggleStyle {
         .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) { configuration.isOn.toggle() }
+            Haptic.selection()
         }
-        .accessibilityElement()
-        .accessibilityAddTraits(.isButton)
-        .accessibilityValue(on ? "On" : "Off")
+        // Read and worked as a system switch ("switch button, on").
+        .accessibilityRepresentation {
+            Toggle(isOn: configuration.$isOn) { configuration.label }
+        }
+    }
+}
+
+/// The app's UI haptics (a switch flipped, a state saved, a confirm armed),
+/// off with Settings › Controls › Haptic feedback as the touch controls' are.
+enum Haptic {
+    static func selection() {
+        guard Settings.shared.haptics else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    static func success() { notify(.success) }
+    static func warning() { notify(.warning) }
+    static func error() { notify(.error) }
+    private static func notify(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+        guard Settings.shared.haptics else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(type)
     }
 }
 

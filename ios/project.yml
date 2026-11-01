@@ -44,6 +44,12 @@ targets:
         NSMotionUsageDescription: Tilt carts play by tilting your device.
         NSLocalNetworkUsageDescription: The link cable connects straight to a friend on the same Wi-Fi.
         ITSAppUsesNonExemptEncryption: false
+        # A game that plays with a controller: the App Store's controller
+        # badge, and iOS Game Mode (Bluetooth latency, background work).
+        LSApplicationCategoryType: public.app-category.games
+        GCSupportsControllerUserInteraction: true
+        GCSupportedGameControllers:
+          - ProfileName: ExtendedGamepad
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

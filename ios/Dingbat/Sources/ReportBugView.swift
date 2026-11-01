@@ -373,7 +373,7 @@ struct ReportBugView: View {
         f.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
         guard let url = SheetFiles.temp(json, name: "dingbat-bugreport-\(g.stem)-\(f.string(from: now)).json") else { return }
         Share.present([url]) { type in
-            if Settings.shared.haptics { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+            Haptic.success()
             let text = Self.sentText(type)
             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { sentTo = text }
             UIAccessibility.post(notification: .announcement, argument: text)

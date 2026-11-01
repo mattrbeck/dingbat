@@ -199,6 +199,44 @@ whenever play reaches that frame, until it closes.
       back. Restart the game restarts it. Back to the library closes it, and
       opening it again resumes from the last checkpoint before the stop.
 
+## iOS: native touches (pauses, edges, haptics, VoiceOver)
+
+Not gated: all of it is iOS system behaviour, on a phone (docs/ios-app.md,
+Native differences).
+
+- [ ] **Stops when the app is not in front.** In a game, pull down Control
+      Center: the game (and its sound) stops under it, and plays on when it
+      closes. The same for Notification Center, the app switcher held
+      halfway, and Siri. Pause first, then pull it down: it stays paused
+      after.
+- [ ] **Alarm or call.** A timer going off (Clock) stops the game; it plays
+      on when the alert is dismissed.
+- [ ] **Headphones and pads.** With AirPods or wired headphones in, take them
+      out: the game stops with the menu open and stays silent; closing the
+      menu plays on. Turn the only controller off mid-play: the same. The
+      pad's player light shows player 1.
+- [ ] **Edges.** Hold the d-pad and slide down off the bottom edge, or swipe
+      up from Start/Select: the home indicator shows and the app stays; a
+      second swipe goes home. The top edge does the same for Notification
+      Center.
+- [ ] **Accent.** On a non-blue theme, a system alert (Load Anyway on a bad
+      ROM, the delete in Save States) and the search cursor wear the theme's
+      accent, not blue.
+- [ ] **Haptics.** Quick Save: a success tap. Delete in a tile's menu,
+      Manage Saves' Reset, Disconnect: a warning tap when it turns to "Are
+      you sure?" or "Confirm reset?". A Settings switch ticks. Haptic
+      feedback off: none of them.
+- [ ] **Small buttons.** The toast's ×, the search's ×, the sheet's close ×
+      and Settings' back and section arrows take a tap a little outside the
+      drawn icon; nothing moved.
+- [ ] **Pull to sync.** Signed in to Drive, pull down on the home screen: the
+      spinner holds while it syncs (the cloud shows Syncing), then lets go.
+      Signed out, the pull only bounces.
+- [ ] **VoiceOver.** A Settings switch reads as "switch button, on". With the
+      game menu open, swiping never reaches the game behind it; the
+      two-finger scrub closes it. Quick Save is announced "State saved"; an
+      offer toast stays until it is taken or dismissed.
+
 ## A game that keeps stopping (checkpoints)
 
 Gated: `web/tests/checkpoints.test.mjs` (retention, the crash count, the

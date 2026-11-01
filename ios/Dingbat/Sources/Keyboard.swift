@@ -248,7 +248,7 @@ final class Keyboard: ObservableObject {
             if !shift { s.inputDisplay.toggle() }
         case 0x4000003E:  // F5
             guard !shift, !linked else { return }
-            if session.saveState(slot: 0) { model.toast("State saved") }
+            if session.saveState(slot: 0) { model.toast("State saved"); Haptic.success() }
         case 0x40000041:  // F8
             guard !shift, !linked else { return }
             session.loadState(slot: 0)

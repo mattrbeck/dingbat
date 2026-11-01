@@ -152,9 +152,11 @@ struct ExportView: View {
             let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
             withAnimation(.easeOut(duration: 0.15)) {
                 done = (url, c.count, size, Set(c.map(\.kind)))
+                Haptic.success()
             }
         } catch {
             model.toast("Couldn't export: " + error.localizedDescription)
+            Haptic.error()
         }
     }
 

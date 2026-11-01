@@ -25,6 +25,10 @@ struct PlayView: View {
             .overlay { ClipProgressView() }
             .statusBarHidden(true)
             .persistentSystemOverlays(.hidden)
+            // A press that slides off the d-pad or Start toward an edge is
+            // not a swipe home or to Notification Center: the first swipe
+            // only shows the indicator, a second one goes.
+            .defersSystemGestures(on: .all)
     }
 }
 
@@ -543,6 +547,7 @@ struct LinkDisconnectPill: View {
                 NetLink.shared.disconnect()
             } else {
                 armed = true
+                Haptic.warning()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { armed = false }
             }
         } label: {
@@ -877,6 +882,7 @@ struct GameMenu: View {
     @EnvironmentObject var settings: Settings
     @Environment(\.palette) var palette
     @Environment(\.horizontalSizeClass) var hSize
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var captureOpen = false
     @State private var disconnectArmed = false
     @ObservedObject private var clips = ClipExporter.shared
@@ -888,6 +894,7 @@ struct GameMenu: View {
             Color.black.opacity(0.001)
                 .ignoresSafeArea()
                 .onTapGesture { model.closeMenu() }
+                .accessibilityHidden(true)
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -927,7 +934,13 @@ struct GameMenu: View {
             .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
             .padding(.top, 56)
             .padding(.leading, hSize == .regular ? 120 : 10)
-            .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
+            // A dialog to VoiceOver: the game behind is out of reach, and
+            // the two-finger scrub closes it.
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { model.closeMenu() }
+            .transition(reduceMotion ? .opacity
+                        : .opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
         }
         .environment(\.padScope, "menu")
     }
@@ -944,6 +957,7 @@ struct GameMenu: View {
                     link.disconnect()
                 } else {
                     disconnectArmed = true
+                    Haptic.warning()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { disconnectArmed = false }
                 }
             }
@@ -985,7 +999,7 @@ struct GameMenu: View {
     private var quickRow: some View {
         HStack(spacing: 6) {
             quick("square.and.arrow.down", "Quick Save") {
-                if session.saveState(slot: 0) { model.toast("State saved") }
+                if session.saveState(slot: 0) { model.toast("State saved"); Haptic.success() }
                 model.closeMenu()
             }
             quick("square.and.arrow.up", "Quick Load") {

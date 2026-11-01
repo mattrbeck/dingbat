@@ -136,7 +136,26 @@ final class AudioOutput {
             guard let info = note.userInfo,
                   let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-            if type == .ended { try? self?.engine.start() }
+            // The game stops for an alarm, Siri or a call, and plays on
+            // after only when iOS says to.
+            switch type {
+            case .began:
+                GameSession.shared.systemHold("audio")
+            case .ended:
+                try? self?.engine.start()
+                let opts = AVAudioSession.InterruptionOptions(
+                    rawValue: info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+                GameSession.shared.systemRelease("audio", resume: opts.contains(.shouldResume))
+            @unknown default: break
+            }
+        }
+        // Headphones out: the game stops rather than carrying on out of the
+        // speaker.
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
+            guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  AVAudioSession.RouteChangeReason(rawValue: raw) == .oldDeviceUnavailable else { return }
+            GameSession.shared.stopForPlayer()
         }
         NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in

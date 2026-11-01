@@ -163,7 +163,7 @@ struct SettingsView: View {
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundColor(palette.text)
                                 .frame(width: 32, height: 36)
-                                .contentShape(Rectangle())
+                                .touchTarget(width: 32, height: 36)
                         }
                         .buttonStyle(.plain)
                         .padding(.leading, -12)
@@ -204,7 +204,7 @@ struct SettingsView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(enabled ? palette.textDim : palette.textFaint.opacity(0.4))
                 .frame(width: 32, height: 36)
-                .contentShape(Rectangle())
+                .touchTarget(width: 44, height: 36)  // side by side: taller only
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
