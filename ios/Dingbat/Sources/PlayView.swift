@@ -1074,13 +1074,19 @@ extension Share {
 }
 
 /// UIActivityViewController from SwiftUI (exports: screenshots, saves,
-/// states, prints, bug reports).
+/// states, prints, bug reports). `done` hears where the items went once the
+/// sheet has sent them (not on a cancel).
 enum Share {
-    static func present(_ items: [Any]) {
+    static func present(_ items: [Any], done: ((UIActivity.ActivityType?) -> Void)? = nil) {
         guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
               var top = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return }
         while let p = top.presentedViewController { top = p }
         let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        if let done {
+            vc.completionWithItemsHandler = { type, completed, _, _ in
+                if completed { DispatchQueue.main.async { done(type) } }
+            }
+        }
         vc.popoverPresentationController?.sourceView = top.view
         vc.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: 60, width: 1, height: 1)
         top.present(vc, animated: true)

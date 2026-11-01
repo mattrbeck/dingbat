@@ -25,6 +25,9 @@ struct ReportBugView: View {
     @State private var withReplay = true
     /// What the replay covers, for its row: "since power-on, 33 s".
     @State private var replayWhat = ""
+    /// Where the share sheet sent the report ("Report saved to Files"); nil
+    /// until it has, and again once anything in the report changes.
+    @State private var sentTo: String?
 
     var body: some View {
         SheetChrome(title: "Report a Bug") {
@@ -54,16 +57,65 @@ struct ReportBugView: View {
             }
             .padding(.bottom, 14)
             if fault { faultBox } else { scrubBox }
+            if let sentTo { sentRow(sentTo) }
             HStack(spacing: 10) {
                 Spacer()
-                PadButton("Cancel") { SheetNav.close() }.buttonStyle(SheetButtonStyle())
-                Button(fault ? "Share report" : "Download report", action: download)
-                    .buttonStyle(SheetButtonStyle(kind: .primary))
-                    .disabled(session.game == nil)
+                if sentTo == nil {
+                    PadButton("Cancel") { SheetNav.close() }.buttonStyle(SheetButtonStyle())
+                    Button(fault ? "Share report" : "Download report", action: download)
+                        .buttonStyle(SheetButtonStyle(kind: .primary))
+                        .disabled(session.game == nil)
+                } else {
+                    Button("Share again", action: download).buttonStyle(SheetButtonStyle())
+                    PadButton("Done") { SheetNav.close() }.buttonStyle(SheetButtonStyle(kind: .primary))
+                }
             }
             .padding(.top, 16)
         }
         .onAppear(perform: load)
+        // A changed report is a new one: what was sent no longer matches it.
+        .onChange(of: "\(title)\u{1}\(desc)\u{1}\(slider)\u{1}\(withReplay)") { _ in
+            if sentTo != nil { withAnimation(.easeOut(duration: 0.2)) { sentTo = nil } }
+        }
+    }
+
+    /// The confirmation once the share sheet has sent the report.
+    private func sentRow(_ what: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 22))
+                .foregroundColor(palette.live)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(what)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(palette.text)
+                Text(fault ? "Thanks. Done returns to the stopped game."
+                           : "Thanks. Share it again if it should go somewhere else too.")
+                    .font(.system(size: 12))
+                    .foregroundColor(palette.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 11).fill(palette.live.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(palette.live.opacity(0.35), lineWidth: 1))
+        .padding(.top, 14)
+        .transition(.scale(scale: 0.96).combined(with: .opacity))
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The confirmation's headline for where the share sheet sent it.
+    private static func sentText(_ type: UIActivity.ActivityType?) -> String {
+        switch type {
+        case UIActivity.ActivityType.airDrop?: return "Report sent with AirDrop"
+        case UIActivity.ActivityType.mail?: return "Report handed to Mail"
+        case UIActivity.ActivityType.message?: return "Report handed to Messages"
+        case UIActivity.ActivityType.copyToPasteboard?: return "Report copied"
+        default:
+            // Save to Files has no public constant.
+            return type?.rawValue.contains("SaveToFiles") == true ? "Report saved to Files" : "Report shared"
+        }
     }
 
     private var back: Int { samples - Int(slider.rounded()) }
@@ -320,7 +372,9 @@ struct ReportBugView: View {
         f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
         guard let url = SheetFiles.temp(json, name: "dingbat-bugreport-\(g.stem)-\(f.string(from: now)).json") else { return }
-        Share.present([url])
-        AppModel.shared.toast("Report ready")
+        Share.present([url]) { type in
+            if Settings.shared.haptics { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { sentTo = Self.sentText(type) }
+        }
     }
 }

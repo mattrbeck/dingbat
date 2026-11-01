@@ -188,7 +188,10 @@ whenever play reaches that frame, until it closes.
       again, now as *It stopped again* with *Send a bug report* first.
 - [ ] **The report.** Send a bug report: the title is filled in, *A replay of
       this session* reads “From power-on to the stop”; Share report hands a
-      .json to the share sheet. On a Mac, `tools/replay_report.nim` with the
+      .json to the share sheet. Saving it (to Files, say) swaps the buttons
+      for a green “Report saved to Files” with *Share again* and *Done*, and
+      a success tap; cancelling the share sheet changes nothing; editing the
+      description after takes the confirmation away. On a Mac, `tools/replay_report.nim` with the
       same ROM (built without the injection it cannot fault) reports every
       state check matching.
 - [ ] **The other ways out.** Choose an earlier moment (Rewind on) opens the
