@@ -102,6 +102,7 @@ final class ClipExporter: ObservableObject {
                 dingbat_clip_abort()
                 finish(save: false, gen: myGen, slug: slug)
                 AppModel.shared.toast("Couldn't record the clip")
+                Haptic.error()
                 return
             }
             export = (label, 0.95 * Double(done - writer.queuedFrames) / Double(max(1, frames)))
@@ -240,6 +241,7 @@ final class ClipExporter: ObservableObject {
             return
         }
         AppModel.shared.toast("Clip saved")
+        Haptic.success()
         Share.present([url])
     }
 }

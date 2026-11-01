@@ -118,7 +118,14 @@ final class AppModel: ObservableObject {
         #if DEBUG
         NSLog("toast: %@", text)  // ios/e2e reads what the player was told
         #endif
-        let ms = duration ?? (action == nil ? 2.2 : 8)
+        // VoiceOver reads every toast; an offer stays until it is taken or
+        // dismissed, since finding it by swiping takes longer than 8 s.
+        let voiceOver = UIAccessibility.isVoiceOverRunning
+        let ms = action != nil && voiceOver ? .infinity : duration ?? (action == nil ? 2.2 : 8)
+        if voiceOver {
+            UIAccessibility.post(notification: .announcement,
+                                 argument: action.map { "\(text). \($0.0)" } ?? text)
+        }
         for live in toasts where live.text == text {
             if action == nil && live.action == nil {
                 if let i = toasts.firstIndex(where: { $0.id == live.id }) {
@@ -136,6 +143,7 @@ final class AppModel: ObservableObject {
     }
 
     private func armToast(_ t: Toast, _ seconds: Double) {
+        guard seconds.isFinite else { return }
         let id = t.id, gen = t.gen
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             guard let self, self.toasts.first(where: { $0.id == id })?.gen == gen else { return }

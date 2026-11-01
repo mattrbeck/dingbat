@@ -63,7 +63,13 @@ final class GameSession: NSObject, ObservableObject {
     private var link: CADisplayLink?
     private var framesThisSecond = 0
     private var fpsWindowStart: CFTimeInterval = 0
-    private var pausedForBackground = false
+    /// Pauses iOS puts on the game: "inactive" (Control Center, the app
+    /// switcher, a call, the background) and "audio" (an interruption: an
+    /// alarm, Siri, a call). The game runs again when the last one lifts if
+    /// one of them paused it; any pause or resume of the player's own in
+    /// between wins.
+    private var systemHolds: Set<String> = []
+    private var pausedBySystem = false
     private var lastRewindPop: CFTimeInterval = 0
     private var playTime: CFTimeInterval = 0          // seconds run since the last checkpoint
     /// Seconds this run has played, and the game's play clock (ms) before
@@ -99,11 +105,14 @@ final class GameSession: NSObject, ObservableObject {
     private override init() {
         super.init()
         NotificationCenter.default.addObserver(
+            self, selector: #selector(appWillResignActive),
+            name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(
             self, selector: #selector(appDidEnterBackground),
             name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(
-            self, selector: #selector(appWillEnterForeground),
-            name: UIApplication.willEnterForegroundNotification, object: nil)
+            self, selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(
             self, selector: #selector(appWillTerminate),
             name: UIApplication.willTerminateNotification, object: nil)
@@ -188,6 +197,8 @@ final class GameSession: NSObject, ObservableObject {
             }
         }
         paused = false
+        systemHolds.removeAll()
+        pausedBySystem = false
         if isNDS { NdsState.shared.syncPower() }
         AudioOutput.shared.start()
         // The ring's rate moves with the core (DS 32728 Hz, else 32768).
@@ -274,22 +285,46 @@ final class GameSession: NSObject, ObservableObject {
 
     // MARK: lifecycle
 
+    /// Control Center, Notification Center, the app switcher, a call or
+    /// Siri: the game stops under them, not only once in the background.
+    @objc private func appWillResignActive() { systemHold("inactive") }
+
     @objc private func appDidEnterBackground() {
         guard game != nil else { return }
+        systemHold("inactive")
         persistSession()
         storeLastFrame()
         flushSave()
+    }
+
+    @objc private func appDidBecomeActive() { systemRelease("inactive") }
+
+    func systemHold(_ why: String) {
+        guard game != nil else { return }
+        systemHolds.insert(why)
         if !paused {
             setPaused(true)
-            pausedForBackground = true
+            pausedBySystem = true
         }
     }
 
-    @objc private func appWillEnterForeground() {
-        if pausedForBackground {
-            pausedForBackground = false
-            if AppModel.shared.screen == .play { setPaused(false) }
-        }
+    /// `resume: false` when iOS says not to (an interruption that ended
+    /// without shouldResume): the game stays paused for the player.
+    func systemRelease(_ why: String, resume: Bool = true) {
+        guard systemHolds.remove(why) != nil else { return }
+        if !resume { pausedBySystem = false }
+        guard systemHolds.isEmpty, pausedBySystem else { return }
+        pausedBySystem = false
+        if AppModel.shared.screen == .play { setPaused(false) }
+    }
+
+    /// Headphones unplugged or a controller gone mid-play: the game stops
+    /// with the menu open, as the controller's menu shortcut leaves it, and
+    /// waits for the player.
+    func stopForPlayer() {
+        let model = AppModel.shared
+        guard game != nil, !paused, model.screen == .play, model.sheet == nil else { return }
+        model.openMenu(paused: true)
     }
 
     @objc private func appWillTerminate() {
@@ -1003,7 +1038,8 @@ final class GameSession: NSObject, ObservableObject {
         guard game != nil, paused != p else { return }
         paused = p
         if relay && NetLink.shared.linked { NetLink.shared.sendPause(p) }
-        pausedForBackground = false
+        pausedBySystem = false
+        if !p { systemHolds.removeAll() }  // a hold whose end never came
         // The screen stays awake while a game runs (web: Screen Wake Lock).
         UIApplication.shared.isIdleTimerDisabled = !p
         if p {

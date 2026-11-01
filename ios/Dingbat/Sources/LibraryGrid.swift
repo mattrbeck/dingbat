@@ -381,6 +381,7 @@ struct LibraryBar: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(palette.textFaint)
                         .frame(width: 24, height: 24)
+                        .touchTarget(width: 24, height: 24)
                 }
                 .accessibilityLabel("Clear the search")
             }

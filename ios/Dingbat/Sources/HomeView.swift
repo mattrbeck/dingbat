@@ -19,6 +19,21 @@ private struct BrandFrameKey: PreferenceKey {
     }
 }
 
+/// Pull down on the home screen to sync with Drive while signed in (the
+/// account menu's Sync now). Its own observer, so Drive's progress does not
+/// redraw the home screen.
+private struct DriveRefresh: ViewModifier {
+    @ObservedObject private var drive = DriveSync.shared
+
+    func body(content: Content) -> some View {
+        if drive.linked {
+            content.refreshable { await drive.runFullSync() }
+        } else {
+            content
+        }
+    }
+}
+
 struct HomeView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var library: RomLibrary
@@ -61,6 +76,7 @@ struct HomeView: View {
                     }
                     .coordinateSpace(name: "home")
                     .scrollDismissesKeyboard(.immediately)
+                    .modifier(DriveRefresh())
                     .onPreferenceChange(BrandFrameKey.self) { r in
                         // 0 while the brand is fully in view, 1 once it has
                         // gone completely under the bar.

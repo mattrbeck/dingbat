@@ -55,7 +55,10 @@ not in CI (usage in the file).
 
 - **Haptics.** A light tick on every touch-control press (Settings ›
   Controls › Haptic feedback, on by default); rumble drives Core Haptics on
-  the phone and controller. The web can only vibrate on Android.
+  the phone and controller. The same switch covers the UI's: a tick on a
+  switch, success on a saved state, an export or a clip, a warning when a
+  two-tap confirm arms, an error when one fails. The web can only vibrate
+  on Android.
 - **Files.** ROMs, saves and states are plain files in the app's Documents
   folder, visible in the Files app (layout in `RomLibrary.swift`). Exports
   go through the share sheet. There is no storage budget or eviction.
@@ -64,8 +67,24 @@ not in CI (usage in the file).
   jolt channel, from Core Motion's user acceleration).
 - **A state from a newer dingbat** says to update the app; the web
   downloads its newer build and offers the load again.
-- **Pausing** for the background, the app switcher or a call takes the
-  session and flushes the save, as the web does on a hidden tab.
+- **Pausing.** The game stops whenever the app is not in front: Control
+  Center, Notification Center, the app switcher, a call, Siri, an alarm, or
+  the background (which also takes the session and flushes the save, as the
+  web does on a hidden tab). It plays on when they go, unless the player
+  paused in between or iOS ends an audio interruption without "resume".
+  Headphones unplugged or the last controller gone stop the game with the
+  menu open, waiting for the player.
+- **The play screen** holds back the edge swipes (home, Notification
+  Center): a press sliding off the controls only shows the indicator, a
+  second swipe goes.
+- **System touches.** The theme's accent tints iOS's own parts (alerts,
+  menus, the cursor) instead of iOS blue; small buttons take at least
+  44 pt to touch without growing; pull down on the home screen syncs with
+  Drive while signed in. VoiceOver reads toasts (an offer stays until taken
+  or dismissed), the switches as switches, and the game menu as a dialog.
+- **Controllers.** Info.plist declares controller play (the App Store's
+  badge, iOS Game Mode) and the games category; pads get their player
+  lights in connection order.
 - **Sign-in** opens Google's consent page in the system browser sheet;
   the web's `oauth-callback.html` hands an app sign-in on to
   `dingbat://oauth`, so that page must be deployed for the app to sign in.
