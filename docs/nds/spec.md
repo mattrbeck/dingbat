@@ -148,6 +148,8 @@ src/dingbat/nds/
   gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges,
                    anti-aliasing, line budget (RDLINES); docs/nds/3d-edges.md;
                    generic over a resolution multiplier for HD 3D (docs/nds/hd3d.md)
+  gpu3d/gpuexport.nim the scene and texture images exported for the host-GPU
+                   renderer (web/nds/gpu3d.js, WebGL2; docs/nds/gpu3d.md)
   io/irq.nim       IME/IE/IF per CPU
   io/timers.nim    4 timers per CPU
   io/dma.nim       4 channels per CPU (+ ARM9 fill regs); ARM9 bus time per

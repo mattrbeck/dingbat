@@ -1,10 +1,44 @@
-# DS HD 3D on the host GPU
+# DS 3D on the host GPU
 
-A prototype on branch `worktree-nds-gpu3d`, not merged. HD 3D
-(docs/nds/hd3d.md) drawn by the browser's GPU (WebGL2) in place of the
-software renderer, behind a dev flag in the web app. The output matches
-the software HD renderer **dot for dot**: both screens, display capture
-included, at 2x, 3x and 4x.
+The DS's 3D drawn by the browser's GPU (WebGL2, `web/nds/gpu3d.js`), at
+1x or HD (docs/nds/hd3d.md), behind a dev flag in the web app. The
+picture matches the software renderer **dot for dot** (both screens,
+display capture included, at 1x-4x), and the machine is the same as
+without it.
+
+## Where it stands
+
+- **Off by default.** `?gpu3d=1` (or `localStorage` "nds-gpu3d" = "1",
+  or `ndsGpu3d(true)` in the console) turns it on; it stands down with
+  run-ahead. With it off, the core and the page do exactly what they
+  did without it (same host instructions within 0.01 %, same states).
+- **What it does per frame**, decided at line 0, where the DS fixes
+  whether the frame captures:
+  - no capture: the GPU draws the 3D alone and the CPU only works out
+    the line budget (*the skip*, on with the flag; `?gpu3d-skip=0`
+    turns it off);
+  - capture (or a rewind thumbnail): the CPU draws the exact 3D the
+    machine needs; at 1x its screens are shown and the GPU sits the
+    frame out (*the handback*), at 2x-4x the GPU draws the HD picture.
+- **Cost**, CPU work against the GPU off: SoulSilver walking -15.9 %,
+  GS field -9.9 %, GS title (captures every frame) +0.2 %. The floor,
+  no 1x rasteriser at all, is -16.8 % / -11.6 %.
+- **Speed** on an M2, uncapped: GS field 86.6 fps CPU only, 94.7 on
+  the GPU at 1x, 94.5 at 4x; GS at 4x paced is full speed (software 4x:
+  20-37 fps).
+- **Checked**: the 263-ROM sweep from power-on at 1x/2x/4x
+  (`tools/gpu3d/sweep.mjs`: every run identical, apart from an
+  occasional one-frame difference that the two cores' host clocks cause
+  and a re-run clears), the live app check
+  (`tools/gpu3d/live.mjs`), the dump harness (`tools/gpu3d/run.mjs`),
+  `tests/nds_3d_test.nim`.
+- **Before turning it on for users**: a settings switch with WebGL2
+  auto-detection; `nds/gpu3d.js` in the service worker's precache;
+  measurements on phones; run-ahead; for the iOS app, a Metal port.
+
+The rest of this page is the design and how it got here, in order:
+the export, the GPU renderer, the skip, the trimmed handoff (step 3),
+the handback (step 4), and what reads a display capture.
 
 ## The question, answered
 
@@ -38,7 +72,6 @@ included, at 2x, 3x and 4x.
     frame at 4x on an M2.
   - It is one more renderer to keep in step with `render.nim`.
   - It is not used with run-ahead (below).
-  - Mid-frame render-register changes are not split (below).
   - Nothing is lost in the picture: it is the software HD's, dot for dot.
 
 ## How it works
