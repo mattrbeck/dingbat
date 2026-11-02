@@ -29,7 +29,7 @@ final class NdsState: ObservableObject {
     @Published var hd: Int { didSet { saveDisplay(); applyHd() } }
     static let hdScales = [1, 2, 3, 4]
     /// HD 3D on the GPU (docs/nds/gpu3d.md, NdsGpu3d.swift; a prototype
-    /// behind the `-nds-gpu 1|0` launch argument, saved): at 2x-4x the 3D
+    /// behind the DEBUG `-nds-gpu 1|0` launch argument, saved): at 2x-4x the 3D
     /// is drawn by Metal in place of the core's software HD. The CPU still
     /// draws its 1x 3D (no skip): thumbnails, clips and the glow read the
     /// core's own screens.

@@ -40,6 +40,9 @@ let pressPath = opt("--press", "")
 let pngPath = opt("--png", "")
 let warm = Int(opt("--warm", "30"))!
 let check = flag("--check")
+// --sync: wait for each frame's GPU work, the picture's time then being
+// encode + GPU + the wait (index.js ndsGpuBench's "picture")
+let sync = flag("--sync")
 let rewind = flag("--rewind")
 let ablate = Int(opt("--ablate", "0"))!   // NdsGpu3d.ablate: passes left out (timing only)
 guard args.count == 2 else {
@@ -172,6 +175,7 @@ for i in 0..<(warm + frames) {
         gpuTimes.lock(); gpuMs[idx] = ms; gpuTimes.unlock()
     }
     cb.commit()
+    if sync { cb.waitUntilCompleted() }
     s.enc = now() - b
     s.encCpu = threadMs() - bc
     if check, gpu != nil {

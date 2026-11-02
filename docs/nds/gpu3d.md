@@ -1,8 +1,11 @@
 # DS 3D on the host GPU
 
-The DS's 3D drawn by the browser's GPU (WebGL2, `web/nds/gpu3d.js`), at
-1x or HD (docs/nds/hd3d.md): Settings > Nintendo DS > "3D drawn by",
-Automatic by default. The picture matches the software renderer **dot for dot** (both screens,
+The DS's 3D drawn by the host's GPU, at 1x or HD (docs/nds/hd3d.md): in
+the web app by WebGL2 (`web/nds/gpu3d.js`, Settings > Nintendo DS > "3D
+drawn by", Automatic by default), in the iOS app by Metal
+(`ios/Dingbat/Sources/NdsGpu3d.swift`, a prototype behind a launch
+argument; [Metal](#metal-the-ios-app)). The picture matches the software
+renderer **dot for dot** (both screens,
 display capture included, at 1x-4x), and the machine is the same as
 without it.
 
@@ -45,8 +48,8 @@ without it.
   `tests/nds_3d_test.nim`.
 - **Still open**: measurements on phones; run-ahead. `nds/gpu3d.js` is
   cached on first fetch as the DS core is (sw.js), and minified on
-  deploy. The iOS app's Metal port is a prototype on branch
-  `nds-gpu3d-settings-metal`.
+  deploy. The iOS app's Metal port is a prototype:
+  [Metal](#metal-the-ios-app).
 
 The rest of this page is the design and how it got here, in order:
 the export, the GPU renderer, the skip, the trimmed handoff (step 3),
@@ -565,17 +568,15 @@ Settings > Nintendo DS > 3D resolution picks k as before.
   - Thermal limits matter more than on a Mac. 2x is the safe default
     there.
   - The CPU side is unchanged from 1x, which is the point.
-- **iOS app and desktop.**
-  - The shaders are plain GLSL ES 3.00 with integer textures.
-  - The iOS app (Metal) needs a port to MSL. The logic is the same, and
-    Metal has 64-bit integers, which would drop the two-word helpers.
-  - The desktop app draws with SDL 3. SDL_GPU or OpenGL 3.3 would take
-    the GLSL nearly as is.
-- **Settings UI.** Done ("3D drawn by", above).
+- **Desktop.** The desktop app draws with SDL 3. SDL_GPU or OpenGL 3.3
+  would take the GLSL nearly as is; on a Mac, the Metal port as is.
 - **Faster still.** The dot pass is about 70 % of the GPU time.
   - The per-dot divisions (`lin` on equal-w spans, `pfac` on the others)
     could take a float estimate plus one integer correction, as `pfac`
-    already does for its 64-bit case.
+    already does for its 64-bit case. The Metal port does this for `lin`
+    (`lin_r`, with 64-bit integers): -29 % GPU on the GS title at 4x.
+    GLSL ES has no 64-bit integers, so the web's would need the
+    correction in two words, or a bound on (b - a) n.
   - The rows pass could also skip rows the bins never reach.
 - **Beyond the DS's look.** Once the GPU draws HD, things the software
   path could not afford come almost free:
@@ -596,6 +597,98 @@ rasteriser (what most emulators do) was not built. It would be faster on
 the GPU, but it loses the DS's edge rules, n-gon interpolation, the
 translucent-ID rule and exact blending over a transparent clear (WebGL2
 has no framebuffer fetch).
+
+## Metal (the iOS app)
+
+A prototype on the iOS app's side, behind the DEBUG launch argument
+`-nds-gpu 1|0` (saved like `-nds-hd`, so a Debug run from Xcode turns it
+on for that device's later runs, Release ones too): `ios/Dingbat/Sources/NdsGpu3d.swift`
+and `NdsGpu3dShader.swift`, a port of `web/nds/gpu3d.js`, fed by the
+same export through the C API (`dingbat_nds_set_gpu` / `_skip` /
+`_handback`, `dingbat_nds_gpu_*`, in `src/dingbat_ios.nim` and
+`ios/include/dingbat.h`).
+
+- **The port.** The per-dot logic is the WebGL shaders' line for line
+  (MSL is C++, so left shifts of negative values go through `uint`).
+  The plumbing differs:
+  - compute kernels over buffers (rows, raster, post, composite,
+    capture) in place of fragment passes over 1024-wide data textures;
+  - one serial compute encoder a frame, in the presenter's command
+    buffer, before the screens are drawn from its texture (R16Uint,
+    256k x 384k, what `GameRenderer.encodeNds` already draws);
+  - three frames of shared input buffers (the scene, the texture and
+    palette images, engine A's planes by changed rows, the lines);
+    records, raster target, 3D frame and the banks' HD copies on the GPU.
+  - Shaders compiled at run time, as `PresentShader.swift` is (no
+    offline Metal toolchain), with fast math off.
+- **In the app.** At 2x-4x Metal draws in place of the core's software
+  HD (`NdsState.coreHd`); at 1x nothing changes. No skip in the app
+  yet: the library picture, clips, checkpoints and the glow read the
+  core's 1x screens, which would then lack the 3D. A GPU readback of
+  the top screen for those (the web's `ndsGpuRgba`) would let the skip
+  and the handback on. A failure building or drawing hands back to the
+  software HD. Compiles for iOS 16 (Release, device); not yet run on a
+  phone.
+- **The harness**, `tools/gpu3d/metal`: the app's core library built
+  for macOS (`-d:test_harness` gives it the audio ring; nothing drains
+  it, so silent) and the app's renderer, without the app.
+  ```
+  tools/gpu3d/metal/build.sh                       # -> /tmp/ndsmetal/ndsmetal
+  ndsmetal ROM STATE --frames N --k K --mode cpu|hd|gpu|skip [--check]
+           [--press SCRIPT] [--png FILE] [--sync] [--ablate N]
+  ```
+  `--check` has the core draw its software HD too and compares every
+  frame dot for dot; the timings are the process's instructions a frame
+  (`proc_pid_rusage`, Metal's driver threads included), the thread's
+  CPU time for the core and the encode, and each command buffer's GPU
+  time. `--press` is ndsrun's.
+- **Checked** (M2): GS field (from frame 28000, walking), GS title
+  (display capture every frame) and SoulSilver walking (from 9600), at
+  1x, 2x, 3x and 4x: every frame exact (600-800 each). The skip's
+  pictures (and the handback's at 1x) equal the exact runs' at three
+  points in each, at 1x and 4x. `tests/ios_api_test.nim` covers the
+  export's C API.
+- **Cost**, millions of instructions a frame on the Mac (the iOS
+  library's `-d:release` build; the Mac was loaded, so instructions
+  rather than time):
+
+  | | CPU 1x | software 2x | software 4x | Metal 4x, no skip | Metal 1x skip | Metal 4x skip |
+  |---|---|---|---|---|---|---|
+  | GS field | 147.9 | 208.6 | 332.2 | 151.9 | 135.4 | 135.8 |
+  | GS title | 192.3 | 370.5 | 793.7 | 207.0 | 192.2 (handback) | 206.9 |
+  | SoulSilver walk | 59.9 | 103.0 | 189.0 | 60.6 | 51.4 | 51.5 |
+
+  - HD at any scale costs the CPU what 1x does: 4x is 54-74 % fewer
+    instructions than the software 4x. The export without the skip
+    adds 1-8 % to the CPU's 1x (the planes, and the title's captures).
+  - The skip at 1x: -8.5 % (GS field), -14 % (SoulSilver), +0.0 % (GS
+    title, the handback). The web's were -9.9 % / -15.9 % / +0.2 %.
+  - The renderer's own CPU work (binning, copies, encoding) is
+    0.07-0.32 ms a frame.
+- **GPU time** a frame (M2, median, loaded Mac):
+
+  | | 1x | 2x | 4x |
+  |---|---|---|---|
+  | GS field | 0.04 | 0.13 | 0.47 |
+  | GS title | 0.9 (no skip) | 2.4 | 5.1-5.3 |
+  | SoulSilver walk | 0.04 | 0.12 | 0.38 |
+
+  - The title at 4x is the heavy case: raster is ~85 % of it (passes
+    left out with `--ablate`), and in it `plot`: the attribute
+    interpolation was ~2.9 ms and the depth / w ~1.9 ms before `lin_r`
+    and 64-bit depth took it from 7.45 to 5.3 ms.
+  - A phone GPU (A15-A17) has roughly half the M2's: about 10 ms for
+    the title at 4x, 1 ms for the field. 4x fits a 16.7 ms frame; 2x
+    is the safe default, as on the web.
+- **Against the web renderer** on the same Mac (Chromium, WebGL2 over
+  ANGLE's Metal backend), each frame's picture waited for
+  (`ndsGpuBench`'s "picture"; `--sync` here): title 4x 6.9 ms web vs
+  6.1 Metal, field 4x 4.4 vs 4.3. Both are mostly the round trip on a
+  loaded machine. Headless Chromium returned no timer-query results, so
+  the GPU-only times were not compared. The structural differences:
+  no JS, no ANGLE translation or validation, 64-bit integers (`lin_r`),
+  buffers in place of data textures, and unified memory with shared
+  buffers.
 
 ## Files
 
@@ -637,5 +730,9 @@ has no framebuffer fetch).
   `ndsGpuStatus`, `ndsGpuTexture`'s failure hand-back), `index.html`
   (`data-nds-chips="gpu"`, `#nds-gpu-status`), `sw.js` (cached on first
   fetch), `tests/nds.test.mjs`.
+- Metal: `ios/Dingbat/Sources/NdsGpu3d.swift`, `NdsGpu3dShader.swift`,
+  `GameRenderer.swift` (`ndsGpu`, `encodeNds`, `canEncode`),
+  `NdsState.swift` (`gpu`, `coreHd`), `src/dingbat_ios.nim`
+  (`dingbat_nds_gpu_*`), `tools/gpu3d/metal/`.
 - `src/dingbat/nds/gpu/capsurvey.nim`: the capture survey
   (`-d:nds_cap_survey`, hooks in gpu.nim, bus9.nim, bus7.nim, ndsrun).
