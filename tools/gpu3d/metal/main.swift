@@ -41,6 +41,7 @@ let pngPath = opt("--png", "")
 let warm = Int(opt("--warm", "30"))!
 let check = flag("--check")
 let rewind = flag("--rewind")
+let ablate = Int(opt("--ablate", "0"))!   // NdsGpu3d.ablate: passes left out (timing only)
 guard args.count == 2 else {
     FileHandle.standardError.write("usage: ndsmetal ROM STATE [--frames N] [--k K] [--mode cpu|hd|gpu|skip] [--check]\n".data(using: .utf8)!)
     exit(2)
@@ -90,6 +91,7 @@ guard ok == 1 else { print("load_state failed: \(String(cString: dingbat_state_e
 let device = MTLCreateSystemDefaultDevice()!
 let queue = device.makeCommandQueue()!
 let gpu: NdsGpu3d? = gpuOn ? try! NdsGpu3d(device: device) : nil
+gpu?.ablate = ablate
 // (the cpu and hd modes upload their picture as GameRenderer does)
 var upTex: MTLTexture?
 let W = 256 * k, H = 384 * k

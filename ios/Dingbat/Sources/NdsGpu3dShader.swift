@@ -213,6 +213,23 @@ static inline uint blend_into(Ctx c, uint dst, uint px) {
   return px;
 }
 
+// lin(a, b, n, d) from rd = 1 / d, exactly: a float estimate of
+// floor((b - a) n / d) corrected in 64-bit integers, the divisions only
+// where it is off by more than two. (Not in the WebGL renderer, which has
+// no 64-bit integers: a span's five lin calls are ten integer divisions a
+// dot there, about 30 % of the GS title's GPU time at 4x here.)
+static inline int lin_r(int a, int b, int n, int d, float rd) {
+  long p = long(b - a) * long(n);
+  long q = long(floor(float(p) * rd));
+  long r = p - q * long(d);
+  if (r < 0) { q--; r += d; }
+  if (r < 0) { q--; r += d; }
+  if (r >= d) { q++; r -= d; }
+  if (r >= d) { q++; r -= d; }
+  if (r < 0 || r >= d) return lin(a, b, n, d);
+  return a + int(q);
+}
+
 // plot_k with nothing known (K = 0): one dot of the span from L to R
 static void plot(constant U& u, Mem m, Ctx c, int x, int y, End L, End R, bool edge, int cov, uint role, thread Px& p) {
   int d = R.x - L.x, n = x - L.x;
@@ -221,7 +238,7 @@ static void plot(constant U& u, Mem m, Ctx c, int x, int y, End L, End R, bool e
   if (d <= 0) { z = L.z; w = L.w; }
   else {
     int zk = (1 << 18) / d;
-    z = L.z + ashr64(muls64(R.z - L.z, n * zk), 18);
+    z = L.z + int((long(R.z - L.z) * long(n * zk)) >> 18);
     if (eqw) w = L.w;
     else { f8 = pfac(n, d, L.w, R.w, 8); w = L.w + ashr64(muls64(R.w - L.w, f8), 8); }
   }
@@ -241,7 +258,8 @@ static void plot(constant U& u, Mem m, Ctx c, int x, int y, End L, End R, bool e
   } else if (!pass) {
     if (!c.aa || (p.aacov >= 31u && (p.flags & FLAG_EDGE) == 0u) || dval >= p.bdepth) return;
   }
-  #define AT(a, b) (d <= 0 ? (a) : eqw ? lin((a), (b), n, d) : (a) + ((((b) - (a)) * f8) >> 8))
+  float rd = d > 0 ? 1.0f / float(d) : 0.0f;
+  #define AT(a, b) (d <= 0 ? (a) : eqw ? lin_r((a), (b), n, d, rd) : (a) + ((((b) - (a)) * f8) >> 8))
   int vr = clamp(AT(L.c.x, R.c.x) >> 3, 0, 63);
   int vg = clamp(AT(L.c.y, R.c.y) >> 3, 0, 63);
   int vb = clamp(AT(L.c.z, R.c.z) >> 3, 0, 63);

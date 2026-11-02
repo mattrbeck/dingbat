@@ -83,6 +83,10 @@ final class NdsGpu3d {
     private var slotAt = 0
     private let inFlight = DispatchSemaphore(value: 3)
 
+    /// Measurements only (tools/gpu3d/metal --ablate): passes left out, 1
+    /// rows, 2 raster, 4 post, 8 composite, 16 capture.
+    var ablate = 0
+
     /// What the last encode did (for measurements).
     struct Stats { var drew = false, renders = 0, polys = 0, recs = 0, bins = 0, captured = false, cpuMs = 0.0 }
     private(set) var last = Stats()
@@ -225,7 +229,7 @@ final class NdsGpu3d {
         enc.setBytes(u, length: 192, index: 0)
         comp()
         enc.setTexture(screens, index: 0)
-        dispatch2(enc, compositePS, 256 * k, 384 * k)
+        if ablate & 8 == 0 { dispatch2(enc, compositePS, 256 * k, 384 * k) }
 
         // display capture: the first captured line's settings say where
         let ld = lp
@@ -239,7 +243,7 @@ final class NdsGpu3d {
             comp()
             enc.setBuffer(caps[dst].cur, offset: 0, index: 10)
             enc.setBuffer(caps[dst].next, offset: 0, index: 11)
-            dispatch2(enc, capturePS, 256 * k, 256 * k)
+            if ablate & 16 == 0 { dispatch2(enc, capturePS, 256 * k, 256 * k) }
             caps[dst] = (caps[dst].next, caps[dst].cur)
             st.captured = true
         }
@@ -269,8 +273,10 @@ final class NdsGpu3d {
             enc.setBuffer(sb.verts, offset: 0, index: 3)
             enc.setBuffer(sb.recPoly, offset: 0, index: 4)
             enc.setBuffer(recs, offset: 0, index: 5)
-            enc.dispatchThreads(MTLSize(width: sb.recTotal, height: 1, depth: 1),
-                                threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
+            if ablate & 1 == 0 {
+                enc.dispatchThreads(MTLSize(width: sb.recTotal, height: 1, depth: 1),
+                                    threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
+            }
         }
         enc.setComputePipelineState(rasterPS)
         enc.setBytes(sb.u, length: 192, index: 0)
@@ -282,14 +288,14 @@ final class NdsGpu3d {
         enc.setBuffer(slot.pal, offset: 0, index: 6)
         enc.setBuffer(recs ?? sb.recPoly, offset: 0, index: 7)
         enc.setBuffer(rast, offset: 0, index: 8)
-        dispatch2(enc, rasterPS, W, H)
+        if ablate & 2 == 0 { dispatch2(enc, rasterPS, W, H) }
         var u = sb.u
         u[46] = UInt32(from); u[47] = UInt32(to)
         enc.setComputePipelineState(postPS)
         enc.setBytes(u, length: 192, index: 0)
         enc.setBuffer(rast, offset: 0, index: 1)
         enc.setBuffer(out3d, offset: 0, index: 2)
-        dispatch2(enc, postPS, W, H)
+        if ablate & 4 == 0 { dispatch2(enc, postPS, W, H) }
     }
 
     @inline(__always) private static func fdiv(_ a: Int, _ b: Int) -> Int { a >= 0 ? a / b : -((-a + b - 1) / b) }
