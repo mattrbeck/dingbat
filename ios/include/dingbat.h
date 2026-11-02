@@ -158,6 +158,35 @@ const uint16_t *dingbat_nds_hd_fb(void);
 int dingbat_nds_hd_fb_width(void);
 int dingbat_nds_hd_fb_height(void);
 
+/* The DS's 3D on the host GPU (docs/nds/gpu3d.md; the app's NdsGpu3d.swift,
+ * a Metal port of the web's renderer). dingbat_nds_set_gpu(1): each frame's
+ * 3D scene and engine A's planes are exported after it runs, for the GPU to
+ * draw the 3D at any scale and composite both screens (the core's software
+ * HD then off: dingbat_nds_set_hd(1)). _skip(1): the CPU leaves a frame's
+ * 3D out where nothing on the machine reads it (its own screens then lack
+ * it). _handback(1), at 1x with the skip: a frame the CPU draws whole
+ * exports no scene (dingbat_nds_gpu_frame_cpu), its 1x screens are the
+ * picture. All three kept across DS boots. The rest are the export, valid
+ * after a frame until the next: see src/dingbat_ios.nim. */
+void dingbat_nds_set_gpu(int on);
+void dingbat_nds_set_gpu_skip(int on);
+void dingbat_nds_set_gpu_handback(int on);
+int dingbat_nds_gpu_frames(void);          /* frames exported so far; 0 = off */
+int dingbat_nds_gpu_frame_cpu(void);
+const uint32_t *dingbat_nds_gpu_scene(void);
+int dingbat_nds_gpu_scene_len(void);       /* words */
+int dingbat_nds_gpu_late_count(void);
+const uint32_t *dingbat_nds_gpu_late(int i);
+int dingbat_nds_gpu_late_len(int i);
+int dingbat_nds_gpu_late_line(int i);
+const uint8_t *dingbat_nds_gpu_tex(void);  /* 0x80000 bytes */
+const uint8_t *dingbat_nds_gpu_pal(void);  /* 0x18000 bytes */
+const uint32_t *dingbat_nds_gpu_plane(int second); /* 256 x 192 x 4 words */
+uint32_t dingbat_nds_gpu_epoch(void);
+const uint32_t *dingbat_nds_gpu_rows(int second);  /* 192 words */
+const uint32_t *dingbat_nds_gpu_lines(void);       /* 192 x 8 words */
+int dingbat_nds_frame_count(void);
+
 int dingbat_fb_width(void);   /* 240 (GBA), 160 (GB/GBC) or 256 (DS) */
 int dingbat_fb_height(void);  /* 160 (GBA), 144 (GB/GBC) or 384 (DS: both screens) */
 /* Ambient glow: the composited picture point-sampled into gw x gh RGBA8888

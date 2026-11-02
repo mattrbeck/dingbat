@@ -46,7 +46,7 @@ import dingbat/nds/nds except Input  # the DS core's Input object, not ours
 import dingbat/nds/savestate
 import dingbat/nds/io/backup
 import dingbat/nds/rewinding
-from dingbat/nds/gpu/gpu import hd_restart
+from dingbat/nds/gpu/gpu import hd_restart, gpu_epoch
 
 {.compile: "dingbat_ios_audio.c".}
 
@@ -222,6 +222,12 @@ var ndsComposite: seq[uint16] = @[]
 # composite, 256k x 384k, which only the presenter reads. Everything else
 # (thumbnails, the glow, states) keeps the 1x one.
 var ndsHdScale = 1                  # kept across DS boots, a display setting
+# The 3D on the host GPU (docs/nds/gpu3d.md; the app's NdsGpu3d.swift, a
+# Metal port of web/nds/gpu3d.js): each kept across DS boots, as the HD
+# scale is.
+var ndsGpuOn = false                # the export
+var ndsGpuSkip = false              # ...and the skip of the CPU's 3D where the machine reads none
+var ndsGpuHandback = false          # ...and the handback of frames the CPU draws whole (at 1x)
 var ndsHdComposite: seq[uint16] = @[]
 var ndsHdK = 1                      # the scale ndsHdComposite was built at
 
@@ -541,6 +547,9 @@ proc nds_build(rom: sink seq[uint8]; save: seq[uint8]; firmware: seq[uint8]) =
   ## lid open.
   stateNds = new_nds(rom, ndsBios9, ndsBios7, firmware)
   if ndsHdScale > 1: stateNds.set_hd_scale(ndsHdScale)
+  if ndsGpuOn: stateNds.set_gpu_export(true)
+  if ndsGpuSkip: stateNds.set_gpu_skip(true)
+  if ndsGpuHandback: stateNds.set_gpu_handback(true)
   if save.len > 0: stateNds.cart.backup.set_data(save)
   ndsLidClosed = false
   stateNds.set_lid(false)
@@ -980,6 +989,82 @@ proc dingbat_nds_hd_fb_width(): cint {.exportc, cdecl.} =
 
 proc dingbat_nds_hd_fb_height(): cint {.exportc, cdecl.} =
   if stateKind != ekNDS or ndsHdComposite.len == 0: 0 else: cint(NDS_H * ndsHdK)
+
+# --- The 3D on the host GPU (docs/nds/gpu3d.md): the web build's nds_gpu_*
+# exports (src/dingbat_nds_wasm.nim), read by the app's Metal renderer
+# after each frame. All nil / 0 with no DS game.
+
+proc dingbat_nds_set_gpu(on: cint) {.exportc, cdecl.} =
+  ndsGpuOn = on != 0
+  if stateKind == ekNDS: stateNds.set_gpu_export(ndsGpuOn)
+
+proc dingbat_nds_set_gpu_skip(on: cint) {.exportc, cdecl.} =
+  ndsGpuSkip = on != 0
+  if stateKind == ekNDS: stateNds.set_gpu_skip(ndsGpuSkip)
+
+proc dingbat_nds_set_gpu_handback(on: cint) {.exportc, cdecl.} =
+  ndsGpuHandback = on != 0
+  if stateKind == ekNDS: stateNds.set_gpu_handback(ndsGpuHandback)
+
+template ndsGpuReady(): bool = stateKind == ekNDS and stateNds.gpu.gpu_on
+
+proc dingbat_nds_gpu_frames(): cint {.exportc, cdecl.} =
+  if not ndsGpuReady(): 0 else: cint(stateNds.gpu.gpu_frames)
+
+proc dingbat_nds_gpu_frame_cpu(): cint {.exportc, cdecl.} =
+  if ndsGpuReady() and stateNds.gpu.gpu_frame_cpu: 1 else: 0
+
+proc dingbat_nds_gpu_scene(): ptr uint32 {.exportc, cdecl.} =
+  if not ndsGpuReady() or stateNds.gpu3d.gpu_scene.len == 0: nil
+  else: addr stateNds.gpu3d.gpu_scene[0]
+
+proc dingbat_nds_gpu_scene_len(): cint {.exportc, cdecl.} =
+  if not ndsGpuReady(): 0 else: cint(stateNds.gpu3d.gpu_scene.len)
+
+proc dingbat_nds_gpu_late_count(): cint {.exportc, cdecl.} =
+  if not ndsGpuReady() or stateNds.gpu3d.gpu_late_frame != stateNds.gpu.gpu_frames: 0
+  else: cint(stateNds.gpu3d.gpu_late.len)
+
+proc dingbat_nds_gpu_late(i: cint): ptr uint32 {.exportc, cdecl.} =
+  addr stateNds.gpu3d.gpu_late[i][0]
+
+proc dingbat_nds_gpu_late_len(i: cint): cint {.exportc, cdecl.} =
+  cint(stateNds.gpu3d.gpu_late[i].len)
+
+proc dingbat_nds_gpu_late_line(i: cint): cint {.exportc, cdecl.} =
+  cint(stateNds.gpu3d.gpu_late_line[i])
+
+proc dingbat_nds_gpu_tex(): ptr uint8 {.exportc, cdecl.} =
+  if not ndsGpuReady() or stateNds.gpu3d.gpu_tex.len == 0: nil
+  else: addr stateNds.gpu3d.gpu_tex[0]
+
+proc dingbat_nds_gpu_pal(): ptr uint8 {.exportc, cdecl.} =
+  if not ndsGpuReady() or stateNds.gpu3d.gpu_pal.len == 0: nil
+  else: addr stateNds.gpu3d.gpu_pal[0]
+
+proc dingbat_nds_gpu_plane(second: cint): ptr uint32 {.exportc, cdecl.} =
+  ## Engine A's planes (second: gpu_valid's), 256 x 192 x 4 words.
+  if not ndsGpuReady(): nil
+  elif second != 0:
+    (if stateNds.gpu.gpu_plane2.len == 0: nil else: addr stateNds.gpu.gpu_plane2[0])
+  else:
+    (if stateNds.gpu.gpu_plane.len == 0: nil else: addr stateNds.gpu.gpu_plane[0])
+
+proc dingbat_nds_gpu_epoch(): uint32 {.exportc, cdecl.} = gpu_epoch
+
+proc dingbat_nds_gpu_rows(second: cint): ptr uint32 {.exportc, cdecl.} =
+  ## Per row of dingbat_nds_gpu_plane(second), the epoch + 1 it was last
+  ## written at.
+  if not ndsGpuReady(): nil
+  elif second != 0: addr stateNds.gpu.gpu_row2_at[0]
+  else: addr stateNds.gpu.gpu_row_at[0]
+
+proc dingbat_nds_gpu_lines(): ptr uint32 {.exportc, cdecl.} =
+  if not ndsGpuReady() or stateNds.gpu.gpu_lines.len == 0: nil
+  else: addr stateNds.gpu.gpu_lines[0]
+
+proc dingbat_nds_frame_count(): cint {.exportc, cdecl.} =
+  if stateKind == ekNDS: cint(stateNds.gpu.frame_count) else: 0
 
 proc dingbat_fb_width(): cint {.exportc, cdecl.} =
   case stateKind
