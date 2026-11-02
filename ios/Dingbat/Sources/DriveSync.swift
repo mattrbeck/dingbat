@@ -357,6 +357,10 @@ final class DriveSync: ObservableObject {
             state.tokenExp = Self.now() + 3600e3
         }
         #endif
+        // The boot pull says so from the first frame: a linked device with a
+        // token, or a refresh token to get one, starts syncing (resumeOnBoot
+        // ends it with the tick, or offline); one that needs a tap does not.
+        if state.connected && (state.token != nil || state.refresh != nil) { status = .syncing }
         client.token = { [weak self] in self?.state.token }
         client.renew = { [weak self] in await self?.refreshSilently(force: true) ?? false }
     }
@@ -1589,12 +1593,15 @@ final class DriveSync: ObservableObject {
         guard state.connected else { return }
         startTriggers()
         if tokenStale { _ = await refreshSilently(force: true) }
-        guard active else { return }
-        if let info = await DriveAuth.tokenInfo(state.token ?? "") {
+        guard active else { refreshStatus(); return }
+        // A deadline, as the broker's: a hung answer must not hold the boot
+        // pull (and its ring) for URLSession's minute; nil goes on to the pull.
+        if let info = await DriveAuth.tokenInfo(state.token ?? "", timeout: 8) {
             state.email = info.email
             await adoptAccount(info.sub)
         }
-        await pull()
+        // Not silent: it ends the ring init started.
+        await pull(silent: false)
         if pendingCount > 0 { await flushNow() }
         #if DEBUG
         // `-drive-download a,b,...`: those games come down at once, as taps on

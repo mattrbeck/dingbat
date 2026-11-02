@@ -98,10 +98,10 @@ enum DriveAuth {
     }
 
     /// The account a token was granted for: (sub, email), or nil.
-    static func tokenInfo(_ token: String) async -> (sub: String, email: String?)? {
+    static func tokenInfo(_ token: String, timeout: TimeInterval = 60) async -> (sub: String, email: String?)? {
         var c = URLComponents(string: tokenInfoURL)!
         c.queryItems = [URLQueryItem(name: "access_token", value: token)]
-        guard let (data, res) = try? await URLSession.shared.data(from: c.url!),
+        guard let (data, res) = try? await URLSession.shared.data(for: URLRequest(url: c.url!, timeoutInterval: timeout)),
               (res as? HTTPURLResponse)?.statusCode == 200,
               let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let sub = o["sub"] as? String else { return nil }

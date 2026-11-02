@@ -262,6 +262,29 @@ hidden until the first render has its tiles' pictures (at most 400 ms
 more), then fades in. No hint, or `empty`, and nothing waits. `libraryEmpty` is `null` until the
 first read, so nothing before it (the boot sync refresh) decides either way.
 
+## The first sync
+
+The account slot says how the boot's Drive pull stands from the first
+frame, not the tick over a library Drive has not been asked about yet. A
+second hint, `dingbat_drive` (`{ i, exp, rt }`: the account's initial, the
+saved token's expiry, and whether a refresh token can renew it through the
+broker), is written whenever the sync state is saved. A script right after
+`#account-slot` in `index.html` draws the signed-in slot from it before
+`index.js` runs, with the ring turning when this boot will reach Drive
+without a tap (a token still good, or a refresh token) and the browser is
+not offline (`driveBootSyncs`). The slot keeps that drawing until
+`initStorage` has read this boot's own state; `resumeDriveOnBoot` then sets
+`syncing` in the same tick, and the boot pull, no longer silent, ends it
+with the tick or offline. A boot that needs a tap for its token shows no
+ring. tokeninfo, the pull's first request, gives up after 8 s and is taken
+as offline (the token is kept). The iOS app starts `DriveSync.status` at
+`syncing` in the same cases and ends it the same way.
+
+The update check (`checkForUpdate`) also runs at every boot, beside the
+pull: the Update button can show before the new service worker has
+downloaded the build. Only the check on a tab coming back into view keeps
+the daily cap.
+
 ## Account
 
 The bar's account slot (`#account-slot`, home screen only, not in the empty

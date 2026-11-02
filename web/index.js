@@ -192,7 +192,10 @@ const maybeCheckForUpdate = () => {
   }
 };
 
-maybeCheckForUpdate();
+// Every boot asks, at once: three small fetches beside the Drive pull, and
+// the button can show before the new worker has downloaded the build. The
+// daily cap is for a tab coming back into view.
+checkForUpdate();
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") maybeCheckForUpdate();
@@ -3150,8 +3153,41 @@ const loadSyncState = async () => {
     };
     gdriveEmail = syncState.email;
   }
+  noteDriveHint();
 };
-const saveSyncState = () => dbPut("gdrive_sync", syncState);
+const saveSyncState = () => {
+  noteDriveHint();
+  return dbPut("gdrive_sync", syncState);
+};
+
+// The boot hint: the account slot as the next boot should first draw it,
+// before index.js runs (the inline script after #account-slot) - the
+// initial, and whether that boot syncs straight away (driveBootSyncs). Kept
+// in localStorage, which a script can read before first paint; the token
+// itself stays in IndexedDB.
+const DRIVE_HINT_KEY = "dingbat_drive";
+const readDriveHint = () => {
+  try { return JSON.parse(localStorage.getItem(DRIVE_HINT_KEY) || "null"); } catch { return null; }
+};
+// Until initStorage has read this boot's own state, the slot keeps what the
+// hint drew (refreshHomeSyncButton).
+let bootDriveHint = readDriveHint();
+const noteDriveHint = () => {
+  let v = driveLinked() && accountInitial()
+    ? JSON.stringify({ i: accountInitial(), exp: syncState.tokenExp || 0,
+                       rt: driveRefreshUsable() && !!driveBrokerBase() })
+    : null;
+  try {
+    if (v == null) localStorage.removeItem(DRIVE_HINT_KEY);
+    else if (localStorage.getItem(DRIVE_HINT_KEY) !== v) localStorage.setItem(DRIVE_HINT_KEY, v);
+  } catch {}
+};
+// This boot reaches Drive without a tap: a token still good, or a refresh
+// token the broker can turn into one. Else it waits for a gesture and says
+// nothing meanwhile. (The boot hint's script decides the same from its copy.)
+const driveBootSyncs = () => driveLinked() && navigator.onLine !== false &&
+  (!!syncState.token && syncState.tokenExp > Date.now() + 5000 ||
+   driveRefreshUsable() && !!driveBrokerBase() && Date.now() >= driveBrokerRetryAt);
 
 // driveLinked(): has the user connected Drive at all (survives token expiry);
 // what the UI and the queue key off. syncActive(): a live token right now;
@@ -5899,8 +5935,7 @@ const driveTokenStale = () =>
 const armDriveRenewOnGesture = () => {
   if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
   if (driveRefreshUsable() && driveBrokerBase() && Date.now() >= driveBrokerRetryAt) {
-    renewDriveToken({ gesture: false });
-    return;
+    return renewDriveToken({ gesture: false });
   }
   armDriveRenewListener();
 };
@@ -6012,6 +6047,10 @@ const driveSessionResumed = async (over) => {
   await pullSync();
 };
 
+// A hung tokeninfo must not hold the boot pull (and its ring) for good: past
+// this it is taken as offline, which keeps the token.
+const DRIVE_TOKENINFO_MS = 8000;
+
 // Boot resume: reuse a persisted token within its lifetime, confirmed via
 // tokeninfo (a plain fetch); otherwise arm the first-gesture re-grant.
 const resumeDriveOnBoot = async () => {
@@ -6026,14 +6065,20 @@ const resumeDriveOnBoot = async () => {
   // Warm the GIS script for a linked account: transient activation lasts
   // ~5s, and a cold script fetch on a phone can eat that whole budget.
   loadGisScript().catch(() => {});
+  // The boot pull says so from the first frame (the bar's boot hint drew the
+  // ring before index.js ran): set before the first await, so no frame
+  // between the hint and this shows the tick.
+  const syncing = driveBootSyncs();
+  if (syncing) setSyncStatus("syncing");
   if (syncState.token && syncState.tokenExp > Date.now() + 5000) {
     gdriveToken = syncState.token;
     gdriveTokenExp = syncState.tokenExp;
     let live = false;
     try {
-      const r = await fetch(
+      const r = await fetchWithin(
         "https://oauth2.googleapis.com/tokeninfo?access_token=" +
           encodeURIComponent(gdriveToken),
+        {}, DRIVE_TOKENINFO_MS,
       );
       live = r.ok;
       if (live) {
@@ -6051,14 +6096,21 @@ const resumeDriveOnBoot = async () => {
       // Then what the last visit queued and never sent (a page closed within
       // the flush's debounce): after the pull, so it is held to what Drive
       // holds now, and not left until the next poll.
-      pullSync().then(() => { if (pendingCount()) flushSync(); });
+      // Not silent: it ends the ring with the tick, or offline.
+      pullSync({ silent: !syncing }).then(() => { if (pendingCount()) flushSync(); });
       // A restored token can be minutes from expiry.
       if (driveTokenStale()) armDriveRenewOnGesture();
       return;
     }
     clearDriveToken();
   }
-  armDriveRenewOnGesture();
+  await armDriveRenewOnGesture();
+  // A renewal's pull ended the ring as it went; one that never ran (no token
+  // to be had without a tap) takes it down.
+  if (syncing && syncStatus === "syncing" && !syncBusy) {
+    setSyncStatus("idle");
+    refreshSyncStatus();
+  }
 };
 
 // --- Sync triggers --------------------------------------------------------
@@ -6214,6 +6266,8 @@ accountEverywhere?.addEventListener("click", async () => {
 
 const refreshHomeSyncButton = () => {
   if (!accountSlot) return;
+  if (bootDriveHint) return; // the hint's drawing stands until initStorage reads
+  noteDriveHint();
   // A build with no client ID has no account to speak of.
   accountSlot.hidden = !GDRIVE_CLIENT_ID;
   const linked = driveLinked();
@@ -18659,6 +18713,9 @@ const initStorage = async () => {
   // Kept saves past their 30 days (see genOf), whether or not Drive is
   // reachable today: the delete to Drive is queued.
   await expireKeptSaves().catch(() => {});
+  // This boot's own state speaks from here; resumeDriveOnBoot sets the ring
+  // (if the hint drew one) in this same tick, before anything paints.
+  bootDriveHint = null;
   refreshSyncUI();
   startSyncTriggers();
   resumeDriveOnBoot();

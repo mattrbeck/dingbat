@@ -328,6 +328,28 @@
           <span id="account-badge" aria-hidden="true"></span>
         </button>
       </div>
+      <script>
+        // The boot hint (index.js noteDriveHint): the last visit's account,
+        // drawn before index.js runs, with the ring turning when this boot
+        // syncs straight away (driveBootSyncs) - so the first frame never
+        // shows the tick over a library Drive has not been asked about yet.
+        // In a function: a global var here would collide with index.js's
+        // top-level let/const of the same name.
+        (function () {
+          try {
+            var h = JSON.parse(localStorage.getItem("dingbat_drive") || "null");
+            if (!h || !h.i) return;
+            var b = document.getElementById("account-btn");
+            var syncs = navigator.onLine !== false && (h.exp > Date.now() + 5000 || h.rt);
+            document.getElementById("account-slot").hidden = false;
+            b.classList.add("signed-in");
+            b.dataset.sync = syncs ? "syncing" : "ok";
+            document.getElementById("account-avatar").textContent = h.i;
+            b.title = "Google Drive: " + (syncs ? "Syncing" : "Signed in");
+            b.setAttribute("aria-label", b.title);
+          } catch (e) {}
+        })();
+      </script>
     </header>
 
     <!-- The account menu. Out of the bar, which a phone's landscape layout
