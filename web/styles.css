@@ -6242,6 +6242,14 @@ body.debug-2p .home-tile-link {
   margin-top: 0;
 }
 
+/* Settings > Nintendo DS, "3D drawn by": what draws it here, a line of its
+   own under the description. */
+.nds-gpu-status {
+  display: block;
+  margin-top: 4px;
+  color: var(--text);
+}
+
 .row-flow > .row-flow-ctl {
   float: right;
   /* Nudged down so the control's optical centre lines up with the text line

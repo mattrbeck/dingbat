@@ -1330,7 +1330,16 @@
                     <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false">3x</button>
                     <button type="button" class="choice-chip" data-value="4" role="radio" aria-checked="false">4x</button>
                   </div>
-                  <span class="modal-toggle-sub">Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. Each step costs a lot more work a frame, so a slower device may not keep full speed</span>
+                  <span class="modal-toggle-sub">Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. When the processor draws the 3D, each step costs a lot more work a frame, so a slower device may not keep full speed</span>
+                </div>
+                <div class="modal-toggle-row row-flow">
+                  <span class="modal-row-label">3D drawn by</span>
+                  <div class="chip-row row-flow-ctl" data-nds-chips="gpu" role="radiogroup" aria-label="What draws the DS's 3D">
+                    <button type="button" class="choice-chip selected" data-value="auto" role="radio" aria-checked="true">Automatic</button>
+                    <button type="button" class="choice-chip" data-value="gpu" role="radio" aria-checked="false">Graphics card</button>
+                    <button type="button" class="choice-chip" data-value="cpu" role="radio" aria-checked="false">Processor</button>
+                  </div>
+                  <span class="modal-toggle-sub">The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions cost almost nothing. Automatic uses it when this browser has a hardware one that can, and not with run-ahead<span id="nds-gpu-status" class="nds-gpu-status" role="status" hidden></span></span>
                 </div>
                 <div class="modal-toggle-row">
                   <div>

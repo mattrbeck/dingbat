@@ -17371,44 +17371,116 @@ let ndsLayoutPref = "auto";
 // The other display choices (Settings > Nintendo DS and the Screens panel),
 // stored together as "nds-display". barHide: phones held upright give the
 // top bar's room to the screens (styles.css "DS: the top bar").
-/** @typedef {{ swap: boolean, gap: string, rot: number, barHide: boolean, hd: number }} NdsDisplay */
+/** @typedef {{ swap: boolean, gap: string, rot: number, barHide: boolean, hd: number, gpu: string }} NdsDisplay */
 /** @type {Readonly<NdsDisplay>} */
-const NDS_DISPLAY_DEFAULTS = Object.freeze({ swap: false, gap: "hinge", rot: 0, barHide: true, hd: 1 });
+const NDS_DISPLAY_DEFAULTS = Object.freeze({ swap: false, gap: "hinge", rot: 0, barHide: true, hd: 1, gpu: "auto" });
 // HD 3D (docs/nds/hd3d.md): the 3D scene drawn at hd x the DS's resolution.
 const NDS_HD_SCALES = [1, 2, 3, 4];
-// HD 3D on the host GPU (docs/nds/gpu3d.md; a prototype behind a dev flag:
-// ?gpu3d=1, localStorage "nds-gpu3d" = "1", or ndsGpu3d(true) in the
-// console): the core exports each frame's scene and web/nds/gpu3d.js draws
-// the HD 3D and composites it in the presenter's WebGL2 context, in place
-// of the core's software HD, at any scale (1x too). Not with run-ahead (its
-// look-ahead frames would skip display captures the GPU must see). With
-// the skip (on unless ?gpu3d-skip=0 / "nds-gpu3d-skip" = "0" /
-// ndsGpuSkip(false)), the core leaves a frame's 3D to the GPU when nothing
-// on the machine reads it: its own screens then lack the 3D, so pictures
-// taken from them come from the GPU's (ndsGpuRgba).
-let ndsGpuFlag = (() => {
+// Who draws the 3D (Settings > Nintendo DS, "3D drawn by"): "auto" the
+// graphics card where this browser has a hardware one that can
+// (ndsGpuProbeRun), "gpu" the graphics card wherever it works at all, "cpu"
+// the core.
+const NDS_GPU_CHOICES = ["auto", "gpu", "cpu"];
+// 3D on the host GPU (docs/nds/gpu3d.md): the core exports each frame's
+// scene and web/nds/gpu3d.js draws the 3D and composites it in the
+// presenter's WebGL2 context, in place of the core's software renderer, at
+// any scale (1x too). Not with run-ahead (its look-ahead frames would skip
+// display captures the GPU must see). With the skip (on unless
+// ?gpu3d-skip=0 / "nds-gpu3d-skip" = "0" / ndsGpuSkip(false)), the core
+// leaves a frame's 3D to the GPU when nothing on the machine reads it: its
+// own screens then lack the 3D, so pictures taken from them come from the
+// GPU's (ndsGpuRgba).
+// A developer's override of the setting: ?gpu3d=1 / 0, localStorage
+// "nds-gpu3d" = "1" / "0", or ndsGpu3d(true / false / null) in the console
+// (null: back to the setting). On, it skips the probe's hardware test.
+let ndsGpuForce = (() => {
   try {
-    return new URLSearchParams(location.search).get("gpu3d") === "1" || localStorage.getItem("nds-gpu3d") === "1";
-  } catch { return false; }
+    const v = new URLSearchParams(location.search).get("gpu3d") ?? localStorage.getItem("nds-gpu3d");
+    return v === "1" ? true : v === "0" ? false : null;
+  } catch { return null; }
 })();
 let ndsGpuSkipFlag = (() => {
   try {
     return new URLSearchParams(location.search).get("gpu3d-skip") !== "0" && localStorage.getItem("nds-gpu3d-skip") !== "0";
   } catch { return true; }
 })();
-let ndsGpuMod = null;     // web/nds/gpu3d.js, imported when the flag is on
+let ndsGpuMod = null;     // web/nds/gpu3d.js, imported when first wanted
 let ndsGpuState = null;   // { gl, g, frames, k }: the renderer for the presenter's context
-const ndsGpuActive = () => ndsGpuFlag && runaheadFrames === 0 && !!(ndsCore && ndsCore._nds_set_gpu);
+// What this browser can do, found once (ndsGpuProbeRun): ok (the renderer
+// can be built: WebGL2, textures 4096 high for the polygon bins, every
+// pass's shaders compiling), hw (a hardware GPU: a software rasteriser
+// behind WebGL2 is slower than the core's own), why (the reason it can't),
+// gpu (the renderer's name, for the log).
+/** @type {{ ok: boolean, hw: boolean, why: string, gpu: string } | null} */
+let ndsGpuProbe = null;
+let ndsGpuFailed = "";    // the renderer failed: the core's 3D for the rest of the session
+const ndsGpuProbeRun = () => {
+  if (ndsGpuProbe || !ndsGpuMod) return ndsGpuProbe;
+  const res = { ok: false, hw: true, why: "", gpu: "" };
+  const opts = { alpha: false, antialias: false, depth: false, stencil: false };
+  let gl = null;
+  try {
+    const make = (caveat) => /** @type {WebGL2RenderingContext | null} */ (
+      document.createElement("canvas").getContext("webgl2", { ...opts, failIfMajorPerformanceCaveat: caveat }));
+    gl = make(true);
+    if (!gl) { gl = make(false); res.hw = false; }
+    if (!gl) res.why = "this browser has no WebGL2";
+    else {
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      res.gpu = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || "");
+      if (/swiftshader|llvmpipe|softpipe|software|basic render/i.test(res.gpu)) res.hw = false;
+      if (gl.getParameter(gl.MAX_TEXTURE_SIZE) < 4096) res.why = "its graphics card's textures are too small";
+      else {
+        new ndsGpuMod.NdsGpu3d(gl).setScale(1);
+        res.ok = true;
+      }
+    }
+  } catch (e) {
+    res.why = "its graphics card can't run the renderer's programs";
+    log(`gpu3d probe: ${e && e.message ? e.message : e}`);
+  }
+  try { gl?.getExtension("WEBGL_lose_context")?.loseContext(); } catch {}
+  log(`gpu3d probe: ${res.ok ? "ok" : res.why}${res.hw ? "" : ", software"}${res.gpu ? ` (${res.gpu})` : ""}`);
+  return (ndsGpuProbe = res);
+};
+// The choice in force: the override, else the setting.
+const ndsGpuChoice = () => ndsGpuForce === true ? "gpu" : ndsGpuForce === false ? "cpu" : ndsDisplay.gpu;
+const ndsGpuWanted = () => ndsGpuChoice() !== "cpu" && !ndsGpuFailed && runaheadFrames === 0 && !!(ndsCore && ndsCore._nds_set_gpu);
+const ndsGpuActive = () => {
+  if (!ndsGpuWanted() || !ndsGpuMod) return false;
+  const p = ndsGpuProbeRun();
+  return !!p && p.ok && (p.hw || ndsGpuChoice() === "gpu");
+};
+// Settings' line under "3D drawn by": what draws it, when that isn't what
+// was asked for or the probe has spoken.
+const ndsGpuStatus = () => {
+  const choice = ndsGpuChoice();
+  if (choice === "cpu") return "";
+  const p = ndsGpuProbe;
+  if (ndsGpuFailed) return "The graphics card stopped working, so the processor draws the 3D until the page is reloaded";
+  if (runaheadFrames > 0) return "Run-ahead is on, so the processor draws the 3D";
+  if (!p) return "";
+  if (!p.ok) return `The processor draws the 3D here: ${p.why}`;
+  if (!p.hw && choice === "auto") return "The processor draws the 3D here: this browser's graphics card is a software one, slower than the processor";
+  return "The graphics card draws the 3D here";
+};
+const ndsGpuStatusEl = document.getElementById("nds-gpu-status");
+const ndsGpuStatusSync = () => {
+  if (!ndsGpuStatusEl) return;
+  const s = ndsGpuStatus();
+  ndsGpuStatusEl.textContent = s;
+  ndsGpuStatusEl.hidden = !s;
+};
 const ndsApplyHd = () => {
   const c = ndsCore;
   if (!c) return;
-  const gpu = ndsGpuActive();
-  if (gpu && !ndsGpuMod) {
+  if (ndsGpuWanted() && !ndsGpuMod) {
     // @ts-expect-error -- a dynamic import from this classic script (tsc checks it without --module)
     import("./nds/gpu3d.js").then((m) => { ndsGpuMod = m; ndsApplyHd(); },
-      (e) => log(`gpu3d: ${e}`));
+      (e) => { log(`gpu3d: ${e}`); ndsGpuFailed = String(e); ndsApplyHd(); });
   }
-  const on = gpu && !!ndsGpuMod;
+  const on = ndsGpuActive();
+  ndsGpuStatusSync();
   c._nds_set_gpu?.(on ? 1 : 0);
   c._nds_set_gpu_skip?.(on && ndsGpuSkipFlag ? 1 : 0);
   // at 1x a frame whose 3D the CPU draws anyway (a capture) is shown from
@@ -17417,8 +17489,11 @@ const ndsApplyHd = () => {
   c._nds_set_hd?.(on ? 1 : ndsDisplay.hd);
 };
 window.ndsGpu3d = (on) => {
-  ndsGpuFlag = !!on;
-  try { localStorage.setItem("nds-gpu3d", on ? "1" : "0"); } catch {}
+  ndsGpuForce = on === null || on === undefined ? null : !!on;
+  try {
+    if (ndsGpuForce === null) localStorage.removeItem("nds-gpu3d");
+    else localStorage.setItem("nds-gpu3d", on ? "1" : "0");
+  } catch {}
   ndsApplyHd();
   return ndsGpuActive();
 };
@@ -17450,6 +17525,20 @@ const ndsHdNow = () => {
 // A's planes uploaded only in the rows the core wrote since the last
 // upload, then composited and captured (glpresent.js frame.glTexture).
 const ndsGpuTexture = (gl, k) => {
+  try {
+    return ndsGpuTextureOf(gl, k);
+  } catch (e) {
+    // (a context that can't do what the probe's could, or a scene past the
+    // renderer's limits: the core draws the 3D from here on; this frame
+    // shows the presenter's last picture)
+    ndsGpuFailed = String(e && e.message ? e.message : e);
+    log(`gpu3d: ${ndsGpuFailed}; the core draws the 3D from here`);
+    ndsGpuState = null;
+    ndsApplyHd();
+    return null;
+  }
+};
+const ndsGpuTextureOf = (gl, k) => {
   const c = ndsCore;
   let s = ndsGpuState;
   if (!s || s.gl !== gl || s.gl.isContextLost()) {
@@ -18028,6 +18117,8 @@ const ndsSyncDisplayUI = () => {
   syncChipGroup(ndsChips("gap"), ndsDisplay.gap);
   syncChipGroup(ndsChips("rot"), String(ndsDisplay.rot));
   syncChipGroup(ndsChips("hd"), String(ndsDisplay.hd));
+  syncChipGroup(ndsChips("gpu"), ndsDisplay.gpu);
+  ndsGpuStatusSync();
   for (const t of ndsToggles("swap")) t.checked = ndsDisplay.swap;
   for (const t of ndsToggles("barHide")) t.checked = ndsDisplay.barHide;
   if (ndsLayoutBtn) {
@@ -18058,6 +18149,7 @@ const applyNdsDisplay = (d) => {
     rot: NdsUtil.ROTATIONS.includes(v.rot) ? v.rot : NDS_DISPLAY_DEFAULTS.rot,
     barHide: typeof v.barHide === "boolean" ? v.barHide : NDS_DISPLAY_DEFAULTS.barHide,
     hd: NDS_HD_SCALES.includes(v.hd) ? v.hd : NDS_DISPLAY_DEFAULTS.hd,
+    gpu: NDS_GPU_CHOICES.includes(v.gpu) ? v.gpu : NDS_DISPLAY_DEFAULTS.gpu,
   };
   ndsApplyHd();
   ndsTouchEnd(null);
@@ -18082,6 +18174,9 @@ for (const chip of ndsChips("rot")) {
 }
 for (const chip of ndsChips("hd")) {
   chip.addEventListener("click", () => setNdsDisplay({ hd: Number(chip.dataset.value) }));
+}
+for (const chip of ndsChips("gpu")) {
+  chip.addEventListener("click", () => setNdsDisplay({ gpu: chip.dataset.value }));
 }
 for (const name of ["swap", "barHide"]) {
   for (const t of ndsToggles(name)) {

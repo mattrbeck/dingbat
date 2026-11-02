@@ -81,7 +81,7 @@ jobs:
         run: |
           set -eo pipefail
           .github/scripts/retry.sh 3 npm install --no-save --no-audit --no-fund esbuild@0.28.1
-          for f in index.js netplay.js glpresent.js sdputil.js embed.js nds/ndsutil.js nds/ndsaudio.js; do
+          for f in index.js netplay.js glpresent.js sdputil.js embed.js nds/ndsutil.js nds/ndsaudio.js nds/gpu3d.js; do
             npx esbuild "web/$f" --minify-whitespace --minify-syntax \
               --outfile="web/$f" --allow-overwrite
           done

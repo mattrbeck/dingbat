@@ -392,7 +392,7 @@ void main() {
             gl.RED_INTEGER, gl.UNSIGNED_SHORT, new Uint16Array(w * h));
           lastW = w; lastH = h;
         }
-        for (const p of frame.parts) {
+        for (const p of frame.parts || []) {
           gl.texSubImage2D(gl.TEXTURE_2D, 0, p.x, p.y, p.w, p.h,
             gl.RED_INTEGER, gl.UNSIGNED_SHORT, p.view);
         }

@@ -540,25 +540,72 @@ const key = (app, type, code, extra = {}) =>
 test("the display choices are stored, come back, and anything unknown falls back", async () => {
   const { app } = await dsGame();
   await app.runIn("setNdsLayout('focus')");
-  await app.runIn("setNdsDisplay({ gap: 'console', rot: 3, swap: true, barHide: false, hd: 3 })");
+  await app.runIn("setNdsDisplay({ gap: 'console', rot: 3, swap: true, barHide: false, hd: 3, gpu: 'cpu' })");
   assert.equal(app.idb.get("nds-layout"), "focus");
-  eq(app.idb.get("nds-display"), { swap: true, gap: "console", rot: 3, barHide: false, hd: 3 });
+  eq(app.idb.get("nds-display"), { swap: true, gap: "console", rot: 3, barHide: false, hd: 3, gpu: "cpu" });
   assert.equal(app.document.body.classList.contains("nds-bar-hide"), false);
   // A fresh page reads them back.
   const app2 = await dsApp();
   for (const [k, v] of app.idb) app2.idb.set(k, v);
   await app2.runIn("loadNdsLayoutFromStorage()");
   assert.equal(app2.runIn("ndsLayoutPref"), "focus");
-  eq(app2.runIn("({ ...ndsDisplay })"), { swap: true, gap: "console", rot: 3, barHide: false, hd: 3 });
+  eq(app2.runIn("({ ...ndsDisplay })"), { swap: true, gap: "console", rot: 3, barHide: false, hd: 3, gpu: "cpu" });
   // A damaged record: every field its default (the bar hides on phones).
-  app2.idb.set("nds-display", { gap: "huge", rot: 2, swap: "yes", hd: 9 });
+  app2.idb.set("nds-display", { gap: "huge", rot: 2, swap: "yes", hd: 9, gpu: "maybe" });
   app2.idb.set("nds-layout", "sideways");
   await app2.runIn("loadNdsLayoutFromStorage()");
   assert.equal(app2.runIn("ndsLayoutPref"), "auto");
-  eq(app2.runIn("({ ...ndsDisplay })"), { swap: false, gap: "hinge", rot: 0, barHide: true, hd: 1 });
+  eq(app2.runIn("({ ...ndsDisplay })"), { swap: false, gap: "hinge", rot: 0, barHide: true, hd: 1, gpu: "auto" });
   assert.equal(app2.document.body.classList.contains("nds-bar-hide"), true);
   // Reset all settings forgets them.
   assert.ok(app2.runIn("SETTINGS_KEYS").includes("nds-display"));
+});
+
+test("3D drawn by: Automatic takes a hardware graphics card, Graphics card any that works, Processor none", async () => {
+  const { app, core } = await dsGame();
+  const gpu = [];
+  Object.assign(core, {
+    _nds_set_gpu: (v) => gpu.push(v), _nds_set_gpu_skip: () => {}, _nds_set_gpu_handback: () => {},
+    _nds_set_hd: () => {},
+  });
+  // (the renderer's module loaded; what the probe found set by hand)
+  app.runIn("ndsGpuMod = {}");
+  const status = () => app.document.getElementById("nds-gpu-status");
+  const drawnBy = async (choice, probe) => {
+    app.runIn(`ndsGpuProbe = ${JSON.stringify(probe)}`);
+    await app.runIn(`setNdsDisplay({ gpu: '${choice}' })`);
+    return gpu.at(-1);
+  };
+  const hw = { ok: true, hw: true, why: "", gpu: "Apple M2" };
+  const sw = { ok: true, hw: false, why: "", gpu: "SwiftShader" };
+  const none = { ok: false, hw: true, why: "this browser has no WebGL2", gpu: "" };
+  assert.equal(await drawnBy("auto", hw), 1);
+  assert.equal(status().textContent, "The graphics card draws the 3D here");
+  assert.equal(await drawnBy("auto", sw), 0);
+  assert.match(status().textContent, /software one/);
+  assert.equal(await drawnBy("gpu", sw), 1);
+  assert.equal(await drawnBy("gpu", none), 0);
+  assert.match(status().textContent, /no WebGL2/);
+  assert.equal(await drawnBy("cpu", hw), 0);
+  assert.equal(status().hidden, true);
+  // Run-ahead stands it down; so does a failure while drawing, for the session.
+  assert.equal(await drawnBy("auto", hw), 1);
+  app.runIn("applyRunahead(1)");
+  assert.equal(gpu.at(-1), 0);
+  assert.match(status().textContent, /Run-ahead/);
+  app.runIn("applyRunahead(0)");
+  assert.equal(gpu.at(-1), 1);
+  // (the stand-in module has no renderer to build: the first frame throws)
+  assert.equal(app.runIn("ndsGpuTexture({}, 1)"), null);
+  assert.equal(gpu.at(-1), 0);
+  assert.match(status().textContent, /stopped working/);
+  // The developer's override wins over the setting.
+  app.runIn("ndsGpuFailed = ''");
+  await app.runIn("setNdsDisplay({ gpu: 'cpu' })");
+  app.runIn("ndsGpu3d(true)");
+  assert.equal(gpu.at(-1), 1);
+  app.runIn("ndsGpu3d(null)");
+  assert.equal(gpu.at(-1), 0);
 });
 
 test("a tap on the top screen swaps the screens in Focus; a touch never starts there", async () => {
