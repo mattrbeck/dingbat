@@ -35,6 +35,7 @@ var lastBios9, lastBios7, lastFirmware: seq[uint8]  ## what nds_reboot reuses
 var hdScale = 1   ## HD 3D (docs/nds/hd3d.md): kept across boots, a display setting
 var gpuOn = false ## host-GPU 3D export (docs/nds/gpu3d.md): kept across boots, a display setting
 var gpuSkip = false ## ...and its skip of the CPU's 3D where the machine reads none
+var gpuHandback = false ## ...and its handback of frames the CPU draws whole (at 1x)
 
 proc rewind_reset()
 proc cheats_follow_game()
@@ -44,6 +45,7 @@ proc boot_with(rom: sink seq[uint8]; save: pointer; save_len: cint) =
   if hdScale > 1: core.set_hd_scale(hdScale)
   if gpuOn: core.set_gpu_export(true)
   if gpuSkip: core.set_gpu_skip(true)
+  if gpuHandback: core.set_gpu_handback(true)
   if save_len > 0: core.cart.backup.set_data(copy_in(save, save_len))
   rewind_reset()
   cheats_follow_game()
@@ -160,6 +162,16 @@ proc nds_set_gpu_skip(on: cint) {.exportc.} =
   ## (nds_fb_top/bottom, fb555) then lack it in those frames.
   gpuSkip = on != 0
   if core != nil: core.set_gpu_skip(gpuSkip)
+
+proc nds_set_gpu_handback(on: cint) {.exportc.} =
+  ## With nds_set_gpu(1) at 1x: a frame whose 3D the CPU draws anyway (a
+  ## display capture) is not exported; nds_gpu_frame_cpu says the page
+  ## shows the core's screens for it.
+  gpuHandback = on != 0
+  if core != nil: core.set_gpu_handback(gpuHandback)
+
+proc nds_gpu_frame_cpu(): cint {.exportc.} =
+  if core != nil and core.gpu.gpu_frame_cpu: 1 else: 0
 
 proc nds_gpu_frames(): cint {.exportc.} =
   if core == nil or not core.gpu.gpu_on: 0 else: cint(core.gpu.gpu_frames)

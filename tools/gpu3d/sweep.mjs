@@ -93,6 +93,8 @@ for (const [url, file] of romFiles) {
         x._nds_set_hd(1);
         x._nds_set_gpu(1);
         x._nds_set_gpu_skip(1);
+        // at 1x frames the CPU draws whole are shown from its screens, as in the app
+        x._nds_set_gpu_handback(k === 1 ? 1 : 0);
       }
       for (const m of cores) {
         const p = m._nds_rom_alloc(rom.length);
@@ -145,7 +147,7 @@ for (const [url, file] of romFiles) {
         if (late.length) lateFrames++;
         // as the app draws it (index.js ndsGpuTexture): the scene only when
         // it is a new one, the planes only in the rows written since
-        if (scene[6] !== drawnGen || late.length || drawnLate) {
+        if (!x._nds_gpu_frame_cpu() && (scene[6] !== drawnGen || late.length || drawnLate)) {
           g.drawFrame(scene, new Uint8Array(buf, x._nds_gpu_tex(), 0x80000), new Uint8Array(buf, x._nds_gpu_pal(), 0x18000), late);
           drawnGen = scene[6];
           drawnLate = late.length > 0;

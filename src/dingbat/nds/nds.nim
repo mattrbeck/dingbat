@@ -724,6 +724,12 @@ proc set_gpu_export*(n: NDS; on: bool) =
   ## Display only, as HD.
   n.gpu.set_gpu(on)
 
+proc set_gpu_handback*(n: NDS; on: bool) =
+  ## With the host GPU drawing at 1x: a frame whose 3D the CPU draws
+  ## anyway (a display capture, a rewind thumbnail) is shown from the
+  ## core's screens and not exported (docs/nds/gpu3d.md, the handback).
+  n.gpu.gpu_handback = on
+
 proc set_gpu_skip*(n: NDS; on: bool) =
   ## With the host GPU drawing the 3D: frames whose 3D dots nothing on the
   ## machine reads (no display capture) are not rasterised on the CPU; the

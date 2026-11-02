@@ -200,6 +200,32 @@ leaves no layer scratch to make planes from (`gp_on`).
   composites over the `out3d` it has (not after late parts, which leave
   it mixed).
 
+**Step 4, the handback.** A frame that captures (or a rewind thumbnail
+frame) has its 3D drawn on the CPU all the same, and at 1x the CPU's
+screens are then the exact picture: the GPU drawing it again was the
+GS title's whole cost (+5.8 %). With the handback on (`gpu_handback`,
+`nds.set_gpu_handback`, `--gpu-handback`; the page turns it on with
+the skip when the GPU draws at 1x), line 0 also decides `gpu_cpu`:
+the frame needs its dots (`px_need`), or the skip is off. Such a frame
+exports nothing:
+
+- no planes, no capture inputs (`gpu_valid`), and every line's info
+  words 0, so the GPU's composite passes the 1x screens through and
+  runs no capture;
+- its captures clear their `cap_1x` marks, so no copy of the GPU's
+  stands in for a bank the CPU wrote;
+- no scene (`Gpu3d.gpu_idle`): the next export is a full one
+  (`gpu_owed`), since a reused render would otherwise send the scene
+  from before;
+- `gpu_frame_cpu` (`nds_gpu_frame_cpu`) tells the page, which skips
+  the 3D passes for it.
+
+The next frame that captures nothing goes back to the GPU by itself:
+plane rows kept by the line cache are still right (their key is the
+2D inputs alone), and those whose inputs changed are drawn again. No
+guess is made in either direction: line 0 knows. At 2x-4x the handback
+stays off, as the GPU is the only HD picture.
+
 `render.nim`'s 64-bit arithmetic fits GLSL ES 3.00's 32-bit integers
 exactly:
 
@@ -274,6 +300,12 @@ exactly:
   on being taken as kept in the new, zeroed planes (`set_gp_on`), so
   every painted line came out blank until it changed. The page turns
   the export on again whenever it applies the display settings.
+- **Step 4.** The sweep with `--skip`, the handback on at 1x (shown
+  from the core's screens where the CPU drew the frame, as in the app):
+  788 of 789; the other (`scene_lack_of_disco` 2x, where the handback is
+  off, 36 dots in frame 8) was exact on two re-runs, the two cores'
+  clocks again. `live.mjs`: 100 % in the three scenes, the GS title's
+  1x check now through the handback. State hashes match without it.
 - **The machine.** With the export on, the whole-state and screen
   hashes every 50 frames are identical to the export off (SoulSilver
   800 frames, GS field and title 600 each). All 16 DS suites
@@ -375,6 +407,25 @@ Parts of step 3, same frames:
 
 (Host instruction counts move by up to 0.7 % between runs of the same
 binary on a busy Mac; each row above is from one run.)
+
+The handback (step 4), same frames, against the GPU off:
+
+| | skip + step 3 | + handback |
+|---|---|---|
+| SoulSilver walk | -15.9 % | -15.9 % |
+| GS field | -10.0 % | -9.9 % |
+| GS title, 600 frames (captures every frame) | +5.8 % | **+0.2 %** |
+| GS from the title state, 1600 frames, no presses (not all capture) | +2.5 % | **-0.3 %** |
+
+In the app (`live.mjs --uncapped`, two alternated runs, load 14, so
+only large differences count), frames a second:
+
+| | native | GPU 1x, no handback | GPU 1x |
+|---|---|---|---|
+| GS title | 79.3 / 81.2 | 72.0 / 76.0 | **79.5 / 81.6** |
+
+The page's work per frame in the title fell from 0.25-0.29 ms to
+0.04-0.05 ms.
 
 In the app (`live.mjs`, uncapped frames a second, load 16-33; the
 states stand still, so many frames reuse the last render and leave
@@ -536,5 +587,10 @@ has no framebuffer fetch).
   (`gpu_epoch`, `gpu_row_at` / `gpu_row2_at`, `gpu_valid` on capture
   and VRAM-display lines only), `nds_gpu_epoch` / `nds_gpu_rows`,
   `gpu3d.js planeRows`, `index.js ndsGpuTexture`.
+- Step 4, the handback: `gpu.nim` (`gpu_handback`, `gpu_cpu`,
+  `gpu_frame_cpu`; `gpu_line`'s CPU frames), `gpu3d.nim` (`gpu_idle`,
+  `gpu_owed`), `nds.set_gpu_handback`, `nds_set_gpu_handback` /
+  `nds_gpu_frame_cpu`, `index.js ndsApplyHd` / `ndsGpuTexture`,
+  `ndsrun --gpu-handback`.
 - `src/dingbat/nds/gpu/capsurvey.nim`: the capture survey
   (`-d:nds_cap_survey`, hooks in gpu.nim, bus9.nim, bus7.nim, ndsrun).

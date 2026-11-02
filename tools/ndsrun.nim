@@ -77,6 +77,8 @@
 ## screens), for tools/gpu3d's harness. --gpu-skip (with --gpu) leaves a
 ## frame's 3D to the GPU when nothing on the machine reads its dots (no
 ## display capture): the 1x screens then lack it; the state is the same.
+## --gpu-handback (with --gpu --gpu-skip) does not export the frames whose
+## 3D the CPU draws anyway (the GPU at 1x shows the 1x screens for them).
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
@@ -322,6 +324,7 @@ when isMainModule:
   var hd_hash = 0
   var gpu = false
   var gpu_skip = false
+  var gpu_handback = false
   var gpu_dir = ""
   var gpu_dumps: seq[int]
   var state_load_frame = -1
@@ -331,7 +334,7 @@ when isMainModule:
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog", "rumble-log", "cartlog",
-                                     "state-layout", "text-shots", "gpu", "gpu-skip"])
+                                     "state-layout", "text-shots", "gpu", "gpu-skip", "gpu-handback"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -358,6 +361,7 @@ when isMainModule:
       of "hd-hash": hd_hash = parseInt(val)
       of "gpu": gpu = true
       of "gpu-skip": gpu_skip = true
+      of "gpu-handback": gpu_handback = true
       of "gpu-dump":
         let at = val.rsplit('@', maxsplit = 1)
         gpu = true
@@ -458,6 +462,7 @@ when isMainModule:
   if hd > 1: n.set_hd_scale(hd)
   if gpu: n.set_gpu_export(true)
   if gpu_skip: n.set_gpu_skip(true)
+  if gpu_handback: n.set_gpu_handback(true)
   if gpu_dir.len > 0: createDir(gpu_dir)
   var last_rumble = 0
   var was_off = false

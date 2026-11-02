@@ -139,6 +139,8 @@ type
     px_need*: bool                ## this frame's dots may be read: set at line 0 (Gpu), true until then
     px_ok: bool                   ## ren.color holds the last real render's dots (not just its costs)
     cost_fits*: int               ## skipped renders whose costs a bound settled (a statistic)
+    gpu_idle*: bool               ## the GPU sits this frame out (Gpu.gpu_cpu, the handback): no export
+    gpu_owed: bool                ## a render went unexported: the next export is a full one
 
 const
   RENDER_START_LINE = 214   ## GBATEK "RDLINES_COUNT": rendering starts in scanline 214
@@ -481,8 +483,10 @@ proc on_vblank*(g: Gpu3d) =
   g.done_lines = 0
   g.scratch_ok = false
   # whether display capture reads the next frame is known at its line 0:
-  # a render before then (a render-register write in V-blank) draws
+  # a render before then (a render-register write in V-blank) draws, and
+  # is exported
   g.px_need = true
+  g.gpu_idle = false
 
 proc render_hd(g: Gpu3d) =
   ## The swapped lists again at hd_scale: each vertex placed by its
@@ -524,7 +528,11 @@ proc export_gpu(g: Gpu3d; reused: bool) =
   ## of an earlier frame. The frame's first one is `gpu_scene`; a later
   ## one (a render-register write mid-frame) is a late part, tagged with
   ## the frame it is for.
-  if not reused:
+  if g.gpu_idle:
+    g.gpu_owed = true
+    return
+  if not reused or g.gpu_owed:
+    g.gpu_owed = false
     if g.gpu_tex_gen != g.vram.tex_gen or g.gpu_tex.len == 0:
       slot_images(g.vram, g.gpu_tex, g.gpu_pal)
       g.gpu_tex_gen = g.vram.tex_gen

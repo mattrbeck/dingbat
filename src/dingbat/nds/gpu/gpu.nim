@@ -62,6 +62,12 @@ type
     gpu_row_at*, gpu_row2_at*: array[192, uint32]  ## gpu_plane / gpu_plane2: the
                                       ## `gpu_epoch` + 1 each row was last written at
     want_dots*: bool                  ## the frontend wants this frame's 1x screens whole (a thumbnail)
+    # The handback (docs/nds/gpu3d.md): with the GPU drawing at 1x, a
+    # frame whose 3D the CPU draws anyway (a capture, a thumbnail) is shown
+    # from the core's own screens, and the GPU sits it out
+    gpu_handback*: bool               ## the setting (the frontend: on at 1x)
+    gpu_cpu*: bool                    ## this frame is one (decided at line 0)
+    gpu_frame_cpu*: bool              ## the last frame exported was one: show the 1x screens
     gpu_paint: HdPaint
     cap_1x: array[4, seq[uint32]]     ## ... and the halfword it wrote there (bit 16 = captured)
 
@@ -102,6 +108,11 @@ proc start_line*(g: Gpu) =
     # for the whole frame or not at all: without it, the host GPU's
     # picture is all that shows them (gpu3d.nim, the skip)
     if g.gpu3d != nil: g.gpu3d.px_need = g.capturing or g.want_dots
+    # ... and with the CPU drawing those dots, at 1x its screens are the
+    # GPU's picture too: the handback
+    g.gpu_cpu = g.gpu_on and g.gpu_handback and g.gpu3d != nil and
+                (g.gpu3d.px_need or not g.gpu3d.gpu_skip)
+    if g.gpu3d != nil: g.gpu3d.gpu_idle = g.gpu_cpu
     g.mmem_need = 256 * 192
   elif g.vcount == 192 and g.capturing:
     # "the capture enable/busy bit is then automatically cleared (in line
@@ -270,7 +281,10 @@ proc gpu_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   ## display shows that composite (display mode 1), bit 3 the display shows
   ## VRAM (mode 2), bit 4 the line is captured, bits 8-9 the display mode;
   ## 1-3 gpu_paint_line's; 4 DISPCAPCNT; 5 DISPCNT's VRAM bank; 6
-  ## MASTER_BRIGHT. Also keeps `cap_1x`: what each capture wrote.
+  ## MASTER_BRIGHT. Also keeps `cap_1x`: what each capture wrote. In a
+  ## frame the CPU draws whole (`gpu_cpu`, the handback) every word is 0:
+  ## the GPU shows the 1x screens as they are, and a capture there leaves
+  ## no GPU copy to stand in for the bank.
   let a = g.engine_a
   let dm = a.display_mode
   let shown = lcd_on and a.enabled
@@ -281,23 +295,32 @@ proc gpu_line(g: Gpu; y: int; a_top, lcd_on, cap: bool) =
   let cap_gfx = cap_line and csrc != 1 and (capc and (1'u32 shl 24)) == 0
   let paint = g.gpu3d != nil and a.hd_gfx_3d() and (shown and dm == 1 or cap_gfx)
   let info = cast[ptr UncheckedArray[uint32]](addr g.gpu_lines[y * 8])
-  info[0] = (if paint: 1'u32 else: 0'u32) or (if a_top: 2'u32 else: 0'u32) or
-            (if shown and dm == 1: 4'u32 else: 0'u32) or (if shown and dm == 2: 8'u32 else: 0'u32) or
-            (if cap_line: 16'u32 else: 0'u32) or (dm shl 8)
-  if paint and a.gpu_paint_line(y, g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]),
-                                info, a.line3d == addr(none3d)):
-    g.gpu_row_at[y] = gpu_epoch + 1
-  info[4] = capc
-  info[5] = (a.dispcnt shr 18) and 3
-  info[6] = uint32(a.master_bright)
-  info[7] = 0
+  if g.gpu_cpu:
+    for i in 0 ..< 8: info[i] = 0
+  else:
+    info[0] = (if paint: 1'u32 else: 0'u32) or (if a_top: 2'u32 else: 0'u32) or
+              (if shown and dm == 1: 4'u32 else: 0'u32) or (if shown and dm == 2: 8'u32 else: 0'u32) or
+              (if cap_line: 16'u32 else: 0'u32) or (dm shl 8)
+    if paint and a.gpu_paint_line(y, g.gpu_paint, cast[ptr UncheckedArray[uint32]](addr g.gpu_plane[y * 1024]),
+                                  info, a.line3d == addr(none3d)):
+      g.gpu_row_at[y] = gpu_epoch + 1
+    info[4] = capc
+    info[5] = (a.dispcnt shr 18) and 3
+    info[6] = uint32(a.master_bright)
+    info[7] = 0
   if y == 191:
     inc g.gpu_frames
     inc gpu_epoch
+    g.gpu_frame_cpu = g.gpu_cpu
     if g.gpu3d != nil: g.gpu3d.gpu_frame = g.gpu_frames
   if not cap_line: return
   let dst_bank = int((capc shr 16) and 3)
   if not g.vram.lcdc_mapped(VramBank(dst_bank)): return
+  if g.gpu_cpu:
+    if g.cap_1x[dst_bank].len > 0:
+      let wbase = int((capc shr 18) and 3) * 0x8000 + y * cw * 2
+      for x in 0 ..< cw: g.cap_1x[dst_bank][((wbase + x * 2) and 0x1FFFF) shr 1] = 0
+    return
   if g.cap_1x[dst_bank].len == 0: g.cap_1x[dst_bank] = newSeq[uint32](65536)
   let dst = g.vram.bank_ptr(VramBank(dst_bank))
   let wbase = int((capc shr 18) and 3) * 0x8000 + y * cw * 2
@@ -641,7 +664,7 @@ proc render_line*(g: Gpu; y: int) =
   a.render_line(y, need_gfx)
   g.engine_b.render_line(y)
   # (the GPU reads gpu_plane2 only on lines captured or shown from VRAM)
-  let valid = g.gpu_on and (cap or a.display_mode == 2)
+  let valid = g.gpu_on and not g.gpu_cpu and (cap or a.display_mode == 2)
   if g.hd > 1 or valid: g.hd_pre(y)
   if valid: g.gpu_valid(y)
   if cap: g.capture_line(y)

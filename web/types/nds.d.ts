@@ -30,6 +30,10 @@ interface NdsCoreModule {
   // exported so far. Optional: an older core lacks them.
   _nds_set_gpu?: (on: number) => void;
   _nds_set_gpu_skip?: (on: number) => void;
+  // at 1x: frames whose 3D the CPU draws anyway shown from the core's
+  // screens; 1 when the last frame exported was one
+  _nds_set_gpu_handback?: (on: number) => void;
+  _nds_gpu_frame_cpu?: () => number;
   _nds_gpu_frames?: () => number;
   _nds_gpu_scene?: () => number;
   _nds_gpu_scene_len?: () => number;

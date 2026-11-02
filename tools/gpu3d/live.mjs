@@ -242,9 +242,10 @@ console.log(`  GPU ${K}x picture parts (each waited for): scene JS + uploads ${p
 // The modes measured: "GPU" is the app's GPU path with the skip (the
 // CPU's 3D left out of frames nothing on the machine reads), "GPU ... no
 // skip" without it, "GPU ... full" uploading both planes whole and
-// drawing the scene every frame (as before rows and gens were checked).
+// drawing the scene every frame (as before rows and gens were checked),
+// "GPU 1x no handback" exporting the frames the CPU draws whole too.
 const modeSpec = (mode) => ({ gpu: mode.startsWith("GPU"), skip: !mode.includes("no skip"),
-                              full: mode.includes("full"),
+                              full: mode.includes("full"), handback: !mode.includes("no handback"),
                               k: Number((mode.match(/(\d)x/) || [0, 1])[1]) });
 
 // 4. paced play: the app's own loop from the state, emulated frames a
@@ -284,6 +285,7 @@ for (const mode of ONLY ? ONLY.split(",") :
     ndsDisplay = { ...ndsDisplay, hd: spec.k };
     ndsApplyHd();
     await new Promise((r) => { const t = () => (!spec.gpu || ndsGpuMod ? r() : setTimeout(t, 20)); t(); });
+    if (!spec.handback) ndsCore._nds_set_gpu_handback?.(0);
     const c = ndsCore;
     const bytes = Uint8Array.from(atob(state), (ch) => ch.charCodeAt(0));
     const p = c._malloc(bytes.length);

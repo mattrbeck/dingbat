@@ -17411,6 +17411,9 @@ const ndsApplyHd = () => {
   const on = gpu && !!ndsGpuMod;
   c._nds_set_gpu?.(on ? 1 : 0);
   c._nds_set_gpu_skip?.(on && ndsGpuSkipFlag ? 1 : 0);
+  // at 1x a frame whose 3D the CPU draws anyway (a capture) is shown from
+  // the core's screens, the GPU sitting it out (the handback)
+  c._nds_set_gpu_handback?.(on && ndsGpuSkipFlag && ndsDisplay.hd <= 1 ? 1 : 0);
   c._nds_set_hd?.(on ? 1 : ndsDisplay.hd);
 };
 window.ndsGpu3d = (on) => {
@@ -17465,9 +17468,11 @@ const ndsGpuTexture = (gl, k) => {
     for (let i = 0, nl = c._nds_gpu_late_count(); i < nl; i++) {
       late.push({ scene: new Uint32Array(buf, c._nds_gpu_late(i), c._nds_gpu_late_len(i)), line: c._nds_gpu_late_line(i) });
     }
-    // (late parts this frame or the last one drawn: out3d holds a mix)
+    // (late parts this frame or the last one drawn: out3d holds a mix; a
+    // frame the CPU drew whole exports no scene, and its lines show the
+    // core's screens as they are)
     const gen = scene.length > 6 ? scene[6] : -1;
-    if (rescaled || gen < 0 || gen !== s.gen || late.length || s.late) {
+    if (!c._nds_gpu_frame_cpu?.() && (rescaled || gen < 0 || gen !== s.gen || late.length || s.late)) {
       s.g.drawFrame(scene, new Uint8Array(buf, c._nds_gpu_tex(), 0x80000), new Uint8Array(buf, c._nds_gpu_pal(), 0x18000), late);
       s.gen = gen;
       s.late = late.length > 0;
