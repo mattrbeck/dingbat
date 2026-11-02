@@ -1,17 +1,28 @@
 # DS 3D on the host GPU
 
 The DS's 3D drawn by the browser's GPU (WebGL2, `web/nds/gpu3d.js`), at
-1x or HD (docs/nds/hd3d.md), behind a dev flag in the web app. The
-picture matches the software renderer **dot for dot** (both screens,
+1x or HD (docs/nds/hd3d.md): Settings > Nintendo DS > "3D drawn by",
+Automatic by default. The picture matches the software renderer **dot for dot** (both screens,
 display capture included, at 1x-4x), and the machine is the same as
 without it.
 
 ## Where it stands
 
-- **Off by default.** `?gpu3d=1` (or `localStorage` "nds-gpu3d" = "1",
-  or `ndsGpu3d(true)` in the console) turns it on; it stands down with
-  run-ahead. With it off, the core and the page do exactly what they
-  did without it (same host instructions within 0.01 %, same states).
+- **The setting**, Settings > Nintendo DS > "3D drawn by": *Automatic*
+  (the default), *Graphics card*, *Processor*. Automatic uses the GPU
+  where a probe, run once when the GPU is first wanted, finds WebGL2,
+  textures 4096 high (the polygon bins), every pass's shaders compiling
+  and a hardware GPU (`failIfMajorPerformanceCaveat` and the renderer's
+  name: SwiftShader and the like are slower than the core). Graphics
+  card skips the hardware test. A line under the choice says what draws
+  the 3D here and why. A failure while drawing hands the 3D back to the
+  core for the session. It stands down with run-ahead. `?gpu3d=1` / `0`
+  (or `localStorage` "nds-gpu3d", or `ndsGpu3d(true / false / null)` in
+  the console) overrides the setting. With Processor, the core and the
+  page do exactly what they did without it (same host instructions
+  within 0.01 %, same states). (`index.js ndsGpuProbeRun`,
+  `ndsGpuChoice`, `ndsGpuStatus`.) Checked: Chromium on ANGLE Metal and
+  WebKit pick the GPU, Chromium on SwiftShader declines it.
 - **What it does per frame**, decided at line 0, where the DS fixes
   whether the frame captures:
   - no capture: the GPU draws the 3D alone and the CPU only works out
@@ -32,9 +43,10 @@ without it.
   and a re-run clears), the live app check
   (`tools/gpu3d/live.mjs`), the dump harness (`tools/gpu3d/run.mjs`),
   `tests/nds_3d_test.nim`.
-- **Before turning it on for users**: a settings switch with WebGL2
-  auto-detection; `nds/gpu3d.js` in the service worker's precache;
-  measurements on phones; run-ahead; for the iOS app, a Metal port.
+- **Still open**: measurements on phones; run-ahead. `nds/gpu3d.js` is
+  cached on first fetch as the DS core is (sw.js), and minified on
+  deploy. The iOS app's Metal port is a prototype on branch
+  `nds-gpu3d-settings-metal`.
 
 The rest of this page is the design and how it got here, in order:
 the export, the GPU renderer, the skip, the trimmed handoff (step 3),
@@ -497,12 +509,11 @@ and the scene drawn every frame (`GPU ... full`):
 
 ```
 tools/serve_nds_dev.sh                      # builds both cores, serves the app
-# then open the app with ?gpu3d=1, or in the console:
-ndsGpu3d(true)                              # localStorage "nds-gpu3d" keeps it
+# Settings > Nintendo DS > 3D drawn by: Automatic or Graphics card, or
+# ?gpu3d=1 / ndsGpu3d(true) in the console to force it
 ```
 
-Settings > Nintendo DS > 3D resolution picks k as before; 2x-4x then
-draw on the GPU.
+Settings > Nintendo DS > 3D resolution picks k as before.
 
 - `ndsGpuBench(120)` gives the core's and the picture's ms a frame.
 - `ndsGpu3d(false)` goes back to the software HD.
@@ -560,10 +571,7 @@ draw on the GPU.
     Metal has 64-bit integers, which would drop the two-word helpers.
   - The desktop app draws with SDL 3. SDL_GPU or OpenGL 3.3 would take
     the GLSL nearly as is.
-- **Settings UI.** The prototype hangs off the existing 3D-resolution
-  setting with a dev flag. Shipping it would add a "Draw HD 3D on the
-  GPU" switch with auto-detection (WebGL2, integer textures, 5 draw
-  buffers).
+- **Settings UI.** Done ("3D drawn by", above).
 - **Faster still.** The dot pass is about 70 % of the GPU time.
   - The per-dot divisions (`lin` on equal-w spans, `pfac` on the others)
     could take a float estimate plus one integer correction, as `pfac`
@@ -625,5 +633,9 @@ has no framebuffer fetch).
   `gpu_owed`), `nds.set_gpu_handback`, `nds_set_gpu_handback` /
   `nds_gpu_frame_cpu`, `index.js ndsApplyHd` / `ndsGpuTexture`,
   `ndsrun --gpu-handback`.
+- The setting: `index.js` (`ndsGpuProbeRun`, `ndsGpuChoice`,
+  `ndsGpuStatus`, `ndsGpuTexture`'s failure hand-back), `index.html`
+  (`data-nds-chips="gpu"`, `#nds-gpu-status`), `sw.js` (cached on first
+  fetch), `tests/nds.test.mjs`.
 - `src/dingbat/nds/gpu/capsurvey.nim`: the capture survey
   (`-d:nds_cap_survey`, hooks in gpu.nim, bus9.nim, bus7.nim, ndsrun).
