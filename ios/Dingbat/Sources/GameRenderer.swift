@@ -49,6 +49,18 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     private var ndsPipeline: MTLRenderPipelineState?
     private var gameTex: MTLTexture?
     private var borderTex: MTLTexture?
+    /// The DS's HD 3D on Metal (NdsGpu3d.swift), built on first use; nil
+    /// where it can't be (then the core's software HD draws).
+    private lazy var ndsGpu: NdsGpu3d? = {
+        guard let device else { return nil }
+        do { return try NdsGpu3d(device: device) } catch {
+            NSLog("NdsGpu3d: %@", "\(error)")
+            return nil
+        }
+    }()
+    var ndsGpuAvailable: Bool { ndsGpu != nil }
+    /// The core exports its 3D for ndsGpu this frame (NdsState.coreHd).
+    private var ndsGpuDrawing: Bool { dingbat_is_nds() != 0 && dingbat_nds_gpu_frames() > 0 }
     private var lastBorderGen: Int32 = -1
     #if DEBUG
     /// The last picture sent to the screen (`-present-check`).
@@ -194,8 +206,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     /// Whether encode has what it draws with (checked before a drawable is
     /// taken: one taken and not presented costs the next present).
     private var canEncode: Bool {
-        queue != nil && gameTex != nil && borderTex != nil
-            && (dingbat_is_nds() != 0 ? ndsPipeline != nil : pipeline != nil)
+        queue != nil && borderTex != nil
+            && (dingbat_is_nds() != 0 ? ndsPipeline != nil && (gameTex != nil || ndsGpuDrawing)
+                                      : pipeline != nil && gameTex != nil)
     }
 
     /// Upload the current picture and draw it. Main thread, after frames run.
@@ -232,6 +245,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     }
 
     private func uploadGame() {
+        // (the GPU's DS picture is drawn in encodeNds, nothing to upload)
+        if ndsGpuDrawing { return }
         guard let device, let pic = Self.picture() else { return }
         let (ptr, w, h) = pic
         if gameTex == nil || gameTex!.width != w || gameTex!.height != h {
@@ -326,12 +341,31 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     /// composite and each screen's texels are k x too: the filters, the
     /// grid and the subpixel look work on the HD pixels, as the web's do.
     private func encodeNds(pass: MTLRenderPassDescriptor, drawable: CAMetalDrawable) {
-        guard let ndsPipeline, let queue, let gameTex, let borderTex,
-              let cmd = queue.makeCommandBuffer(),
-              let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        guard let ndsPipeline, let queue, let borderTex,
+              let cmd = queue.makeCommandBuffer() else { return }
         #if DEBUG
         if FFTrace.on { FFTrace.shared.drawable(drawable, cmd) }
         #endif
+        // HD 3D on the GPU: this frame's 3D and composite, in this command
+        // buffer before the screens are drawn from it (a failure there: the
+        // core's software HD from the next frame). Drawn again for the same
+        // frame (a display-link update with no new tick), it encodes nothing.
+        var tex = gameTex
+        if ndsGpuDrawing, let gpu = ndsGpu {
+            do { tex = try gpu.encode(cmd, k: NdsState.shared.hd) ?? gameTex } catch {
+                NSLog("NdsGpu3d: %@", "\(error)")
+                ndsGpu = nil
+                NdsState.shared.gpu = false
+            }
+        }
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        // (no picture yet: the drawable still goes back presented, cleared)
+        guard let gameTex = tex else {
+            enc.endEncoding()
+            cmd.present(drawable)
+            cmd.commit()
+            return
+        }
         enc.setRenderPipelineState(ndsPipeline)
         enc.setFragmentTexture(gameTex, index: 0)
         enc.setFragmentTexture(borderTex, index: 1)

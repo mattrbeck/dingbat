@@ -586,6 +586,50 @@ if ndsHave("built/Simple_Quad.nds"):
   dingbat_nds_set_hd(1)
   check dingbat_nds_hd_fb() == nil, "off"
 
+echo "DS: the GPU export (the app's Metal 3D)"
+proc dingbat_nds_set_gpu(on: cint) {.importc, cdecl.}
+proc dingbat_nds_set_gpu_skip(on: cint) {.importc, cdecl.}
+proc dingbat_nds_gpu_frames(): cint {.importc, cdecl.}
+proc dingbat_nds_gpu_scene(): ptr uint32 {.importc, cdecl.}
+proc dingbat_nds_gpu_scene_len(): cint {.importc, cdecl.}
+proc dingbat_nds_gpu_tex(): ptr uint8 {.importc, cdecl.}
+proc dingbat_nds_gpu_pal(): ptr uint8 {.importc, cdecl.}
+proc dingbat_nds_gpu_plane(second: cint): ptr uint32 {.importc, cdecl.}
+proc dingbat_nds_gpu_rows(second: cint): ptr uint32 {.importc, cdecl.}
+proc dingbat_nds_gpu_lines(): ptr uint32 {.importc, cdecl.}
+proc dingbat_nds_gpu_epoch(): uint32 {.importc, cdecl.}
+
+if ndsHave("built/Simple_Quad.nds"):
+  let rom = ndsStaged("built/Simple_Quad.nds")
+  check dingbat_load_rom(cstring(rom), nil) == 0, "loads"
+  for _ in 0 ..< 60: dingbat_run_frame()
+  let plain = frameHash()
+  check dingbat_nds_gpu_frames() == 0 and dingbat_nds_gpu_scene() == nil and
+        dingbat_nds_gpu_lines() == nil, "off by default: no export"
+  dingbat_nds_set_gpu(1)
+  check dingbat_load_rom(cstring(rom), nil) == 0, "a setting made before a load is the next game's"
+  for _ in 0 ..< 60: dingbat_run_frame()
+  let lines = cast[ptr UncheckedArray[uint32]](dingbat_nds_gpu_lines())
+  var shown = 0
+  for y in 0 ..< 192:
+    if (lines[y * 8] and 5) == 5: inc shown
+  check dingbat_nds_gpu_frames() == 60 and dingbat_nds_gpu_scene() != nil and
+        dingbat_nds_gpu_scene_len() > 48 and cast[ptr UncheckedArray[uint32]](dingbat_nds_gpu_scene())[1] > 0 and
+        dingbat_nds_gpu_tex() != nil and dingbat_nds_gpu_pal() != nil and
+        dingbat_nds_gpu_plane(0) != nil and dingbat_nds_gpu_plane(1) != nil and shown == 192,
+        "on: each frame's scene, texture images, planes and lines (" & $shown & " lines show 3D)"
+  let rows = cast[ptr UncheckedArray[uint32]](dingbat_nds_gpu_rows(0))
+  check rows[100] > 0 and rows[100] <= dingbat_nds_gpu_epoch(), "the planes' rows carry the epoch they were written at"
+  check frameHash() == plain, "the 1x picture is the one the export off draws"
+  dingbat_nds_set_gpu_skip(1)
+  for _ in 0 ..< 5: dingbat_run_frame()
+  check frameHash() != plain, "the skip: the 1x picture lacks the 3D (the GPU draws it)"
+  dingbat_nds_set_gpu_skip(0)
+  dingbat_nds_set_gpu(0)
+  for _ in 0 ..< 5: dingbat_run_frame()
+  check dingbat_nds_gpu_frames() == 0 and dingbat_nds_gpu_scene() == nil and frameHash() == plain,
+        "off again: no export, the 3D drawn by the core"
+
 echo "DS: things the DS core lacks refuse cleanly"
 if ndsHave("fb_both.nds"):
   let rom = ndsStaged("fb_both.nds")

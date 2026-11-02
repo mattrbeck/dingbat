@@ -95,7 +95,18 @@ var upTex: MTLTexture?
 let W = 256 * k, H = 384 * k
 let readBuf = device.makeBuffer(length: W * H * 2, options: .storageModeShared)!
 
-struct Sample { var core = 0.0, enc = 0.0, gpu = 0.0, drew = false, captured = false }
+struct Sample { var core = 0.0, enc = 0.0, gpu = 0.0, coreCpu = 0.0, encCpu = 0.0, drew = false, captured = false }
+// The load-proof measures (the Mac may be busy): the process's retired
+// instructions (Metal's driver threads included) and this thread's CPU time.
+func instructions() -> UInt64 {
+    var info = rusage_info_v4()
+    let r = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) }
+    }
+    return r == 0 ? info.ri_instructions : 0
+}
+func threadMs() -> Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1e6 }
+var insAt = UInt64(0)
 var samples: [Sample] = []
 let gpuTimes = NSLock()
 var gpuMs = [Int: Double]()
@@ -123,22 +134,12 @@ for i in 0..<(warm + frames) {
         if p.touch { dingbat_nds_touch(Int32(p.x), Int32(p.y), f == p.first ? 1 : 0) }
         else { dingbat_set_input(Int32(p.button), f == p.first ? 1 : 0) }
     }
+    if i == warm { queue.makeCommandBuffer().map { $0.commit(); $0.waitUntilCompleted() }; insAt = instructions() }
     var s = Sample()
-    let a = now()
+    let a = now(), ac = threadMs()
     dingbat_run_frame()
-    let b = now()
-    if ProcessInfo.processInfo.environment["NDSMETAL_DEBUG"] != nil && i == 0 {
-        let pl = dingbat_nds_gpu_plane(0), ln = dingbat_nds_gpu_lines(), fb = dingbat_game_fb()!
-        var nzp = 0, nzb = 0
-        if let pl { for d in 0..<(256 * 192 * 4) where pl[d] != 0 { nzp += 1 } }
-        for d in (256 * 192)..<(256 * 384) where fb[d] & 0x7FFF != 0 { nzb += 1 }
-        var tsum = 0, psum = 0
-        if let t = dingbat_nds_gpu_tex() { for d in 0..<0x80000 { tsum += Int(t[d]) } }
-        if let t = dingbat_nds_gpu_pal() { for d in 0..<0x18000 { psum += Int(t[d]) } }
-        let sp = dingbat_nds_gpu_scene()!
-        print("debug: tex sum \(tsum) pal sum \(psum) texver \(sp[7]) disp \(String(sp[3], radix: 16)) np \(sp[1]) nv \(sp[2]) poly0 \((0..<4).map { String(sp[48 + $0], radix: 16) }) vert0 \((0..<8).map { Int32(bitPattern: sp[48 + Int(sp[1]) * 4 + $0]) })")
-        print("debug: plane nonzero words \(nzp), 1x bottom nonzero \(nzb), line 100 info0 \(ln.map { String($0[800], radix: 16) } ?? "nil"), scene len \(dingbat_nds_gpu_scene_len()) frames \(dingbat_nds_gpu_frames())")
-    }
+    let b = now(), bc = threadMs()
+    s.coreCpu = bc - ac
     s.core = b - a
     let cb = queue.makeCommandBuffer()!
     if let gpu {
@@ -170,6 +171,7 @@ for i in 0..<(warm + frames) {
     }
     cb.commit()
     s.enc = now() - b
+    s.encCpu = threadMs() - bc
     if check, gpu != nil {
         cb.waitUntilCompleted()
         // the reference: the core's 1x screens, or its software HD at k
@@ -195,6 +197,7 @@ for i in 0..<(warm + frames) {
 }
 queue.makeCommandBuffer().map { $0.commit(); $0.waitUntilCompleted() }
 let wall = now() - t0all
+let insPerFrame = Double(instructions() - insAt) / Double(frames) / 1e6
 
 for (j, _) in samples.enumerated() { samples[j].gpu = gpuMs[warm + j] ?? 0 }
 func stat(_ xs: [Double]) -> String {
@@ -204,6 +207,8 @@ func stat(_ xs: [Double]) -> String {
 }
 let renderer = device.name
 print("\(check ? "check" : mode) k=\(k)  \(frames) frames  (\(renderer))")
+print(String(format: "  instructions/frame %.2f M (whole process); thread CPU ms/frame: core %.3f, encode %.3f",
+             insPerFrame, samples.map { $0.coreCpu }.reduce(0, +) / Double(frames), samples.map { $0.encCpu }.reduce(0, +) / Double(frames)))
 print("  core   ms/frame: " + stat(samples.map { $0.core }))
 print("  encode ms/frame: " + stat(samples.map { $0.enc }))
 print("  GPU    ms/frame: " + stat(samples.map { $0.gpu }))

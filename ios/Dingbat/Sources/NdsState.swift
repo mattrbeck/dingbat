@@ -28,6 +28,23 @@ final class NdsState: ObservableObject {
     /// DS boot (dingbat_nds_set_hd).
     @Published var hd: Int { didSet { saveDisplay(); applyHd() } }
     static let hdScales = [1, 2, 3, 4]
+    /// HD 3D on the GPU (docs/nds/gpu3d.md, NdsGpu3d.swift; a prototype
+    /// behind the `-nds-gpu 1|0` launch argument, saved): at 2x-4x the 3D
+    /// is drawn by Metal in place of the core's software HD. The CPU still
+    /// draws its 1x 3D (no skip): thumbnails, clips and the glow read the
+    /// core's own screens.
+    @Published var gpu: Bool { didSet { d.set(gpu, forKey: "nds-gpu3d"); applyHd() } }
+    /// What the core is set to draw: the software HD scale, and whether it
+    /// exports the scene for the GPU (which then draws at `hd`).
+    static func coreHd(_ hd: Int, gpu: Bool) -> (soft: Int, export: Bool) {
+        let on = gpu && hd > 1 && GameRenderer.shared.ndsGpuAvailable
+        return (on ? 1 : hd, on)
+    }
+    private func applyCore() {
+        let c = Self.coreHd(hd, gpu: gpu)
+        dingbat_nds_set_gpu(c.export ? 1 : 0)
+        dingbat_nds_set_hd(Int32(c.soft))
+    }
 
     // MARK: the console
 
@@ -60,7 +77,8 @@ final class NdsState: ObservableObject {
         barHide = o["barHide"] as? Bool ?? true
         let k = (o["hd"] as? NSNumber)?.intValue ?? 1
         hd = Self.hdScales.contains(k) ? k : 1
-        dingbat_nds_set_hd(Int32(hd))
+        gpu = d.bool(forKey: "nds-gpu3d")
+        applyCore()
     }
 
     private func saveDisplay() {
@@ -79,7 +97,7 @@ final class NdsState: ObservableObject {
     /// The scale onto the core (web ndsApplyHd); a DS game in front shows it
     /// at once, paused or not (its 1x picture scaled up until a frame runs).
     private func applyHd() {
-        dingbat_nds_set_hd(Int32(hd))
+        applyCore()
         if dingbat_is_nds() != 0 { GameRenderer.shared.present() }
     }
 
@@ -188,7 +206,7 @@ final class NdsState: ObservableObject {
             return FileManager.default.fileExists(atPath: u.path) ? u.path : nil
         }
         dingbat_set_nds_flash_path(flashURL.path)
-        dingbat_nds_set_hd(Int32(shared.hd))
+        shared.applyCore()
         dingbat_set_nds_bios(path(.bios9), path(.bios7), path(.firmware))
     }
 

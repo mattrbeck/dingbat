@@ -90,7 +90,8 @@ final class NdsGpu3d {
     init(device: MTLDevice) throws {
         self.device = device
         let opts = MTLCompileOptions()
-        opts.mathMode = .safe   // (pfac's float guess is corrected in integers, but keep it IEEE)
+        // (pfac's float guess is corrected in integers, but keep it IEEE)
+        if #available(iOS 18.0, macOS 15.0, *) { opts.mathMode = .safe } else { opts.fastMathEnabled = false }
         let lib: MTLLibrary
         do { lib = try device.makeLibrary(source: ndsGpu3dShaderSource, options: opts) }
         catch { throw Failure.library("\(error)") }
