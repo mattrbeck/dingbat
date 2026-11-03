@@ -5,6 +5,15 @@ mini (60 Hz, iOS 27.0.1), Debug build, muted, by the `-ff-trace` tool:
 every number below is a drawable's real `presentedTime`, not a GPU or CPU
 time.
 
+**What shipped** (branch `ios-ds-metal-link`): a DS game on iOS 17+ is
+paced by the metal link (latency 1), chosen when the game opens; GB/GBA
+and iOS 16 keep the CADisplayLink; the fast-forward next-frame check runs
+on both. The metal link stops while paused. The prototype's switches
+(`-metal-link`, `-metal-link-ff`, `-ff-no-predict`, `-early-start`,
+`-probe-*`) stay on branch `ios-metal-link`; the shipped build has
+`-no-metal-link` (Debug: a DS game on the CADisplayLink, for A/B). Round 4
+below has its numbers.
+
 ## The three modes
 
 - **CADisplayLink** (main today): a CADisplayLink calls the tick ~2-4 ms
@@ -150,3 +159,30 @@ happens only when the system keeps a spare drawable, which an app does
 not choose. (A first version learnt its lead from the present's end,
 drawable wait included, and ran away to 12.6 ms early: earlier starts
 waited longer.)
+
+## Round 4: the shipped DS-only metal link
+
+The shipped build, Pokémon SoulSilver, scene `1x:10,2x:6,ff:8,pause:2,1x:8`
+after 8 s warm, three runs each of the metal link and `-no-metal-link`,
+alternating (iPhone 13 mini, Debug, muted). This session was in the
+long-wait state: the CADisplayLink's DS present waited 9.7-9.9 ms for a
+drawable in every run.
+
+| | metal link (3 runs) | CADisplayLink (3 runs) |
+|---|---|---|
+| 1x tick to glass, p50 / p90 ms | 33.3 / 33.4 | 37.3-45.0 / 45.8-45.9 |
+| 2x tick to glass, p50 ms | 33.2 | 47.2-47.3 |
+| fast-forward tick to glass, p50 ms | 33.2-33.3 | 48.0-48.2 |
+| fast-forward fps | 355, 361, 361 | 330, 329, 330 |
+| refreshes missed (1x+2x+ff, ~1800 ticks a run) | 2, 0, 0 | 0, 1, 0 |
+| pictures never shown | 0, 0, 1 | 0, 0, 0 |
+| speed switches: worst picture gap | 1 refresh | 1 refresh |
+| after the pause: first picture, refreshes skipped | 55-65 ms, 1-2 | 47-59 ms, 1-2 |
+
+GB/GBA in the same build are unchanged: Emerald 1x 37.3 ms and
+fast-forward 911 fps; the toggle ROM 1x 20.5 ms.
+
+The metal link's one cost: a still DS picture (sleeping, powered off, a
+menu that does not move) is drawn and presented every refresh, where the
+CADisplayLink presents only on a change (every update's drawable must be
+presented, above). In play both present every refresh.
