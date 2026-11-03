@@ -36,7 +36,7 @@ def main():
     want = None
     if "--speed" in sys.argv:
         want = sys.argv[sys.argv.index("--speed") + 1]
-    ticks, glass, gpu, inputs, marks = [], {}, {}, [], []
+    ticks, glass, gpu, inputs, marks, planned = [], {}, {}, [], [], {}
     # When the press driver ran, only its tapping phase counts (the boot and
     # the intro's presses run at fast-forward too).
     driven = any(l.startswith("M tapping") for l in open(path))
@@ -62,6 +62,8 @@ def main():
             gpu[int(p[1])] = (float(p[2]), float(p[3]))
         elif p[0] == "I":
             inputs.append((float(p[1]), int(p[2]), p[3] == "1", p[4]))
+        elif p[0] == "X":
+            planned[int(p[1])] = float(p[2])
         elif p[0] == "M":
             marks.append(" ".join(p[1:]))
     by = {t["seq"]: t for t in ticks}
@@ -70,11 +72,15 @@ def main():
     if not ticks:
         print("no ticks")
         return
-    presses = [i for i in inputs if i[1] == 4 and i[2]]
+    press_id = int(sys.argv[sys.argv.index("--press-id") + 1]) if "--press-id" in sys.argv else 4
+    presses = [i for i in inputs if i[1] == press_id and i[2]]
     t_first = ticks[0]["entry"]
     presses = [p for p in presses if p[0] > t_first]
 
-    P = statistics.median(t["target"] - t["ts"] for t in ticks)
+    # The refresh period from consecutive ticks' refreshes (a CAMetalDisplayLink
+    # tick's target is its work deadline, not the next refresh).
+    P = statistics.median(b["ts"] - a["ts"] for a, b in zip(ticks, ticks[1:])
+                          if b["seq"] == a["seq"] + 1 and b["ts"] > a["ts"])
     real_glass = bool(glass)
     print("ticks %d (%s) period %.2f ms; glass = %s" % (len(ticks), want or "all", P,
           "drawable presentedTime" if real_glass else "GPU end (no presented handler)"))
@@ -118,14 +124,30 @@ def main():
         len(pres), len(ticks), sum(1 for t in ticks if t["mask"] and not t["presented"])))
 
     def on_glass(seq):
-        if seq in glass and glass[seq] > 0:
-            return glass[seq]
+        # A device's presentedTime of 0 is a picture never shown: no time,
+        # not the GPU's (the simulator has no presented handler at all).
+        if real_glass:
+            return glass[seq] if glass.get(seq, 0) > 0 else None
         if seq in gpu:
             return gpu[seq][1]
         return None
 
-    lat = [on_glass(t["seq"]) - t["aim"] for t in pres if on_glass(t["seq"]) is not None]
+    if real_glass:
+        never = [t for t in pres if glass.get(t["seq"]) == 0]
+        print("presented but never shown (presentedTime 0): %d of %d" % (len(never), len(pres)))
+    lat =[on_glass(t["seq"]) - t["aim"] for t in pres if on_glass(t["seq"]) is not None]
     print("glass - vsync aimed at ms:", stats(lat))
+    # Comparable across pacing modes: how old the picture is when it shows.
+    print("present end -> glass ms:", stats([on_glass(t["seq"]) - t["pend"] for t in pres
+                                              if on_glass(t["seq"]) is not None]))
+    print("tick entry -> glass ms:", stats([on_glass(t["seq"]) - t["entry"] for t in pres
+                                             if on_glass(t["seq"]) is not None]))
+    if planned:
+        print("CAMetalDisplayLink: glass - planned presentation ms:",
+              stats([on_glass(t["seq"]) - planned[t["seq"]] for t in pres
+                     if t["seq"] in planned and on_glass(t["seq"]) is not None]))
+        print("  planned presentation - tick entry ms:",
+              stats([planned[t["seq"]] - t["entry"] for t in ticks if t["seq"] in planned]))
     holds = []
     prev = None
     for t in pres:

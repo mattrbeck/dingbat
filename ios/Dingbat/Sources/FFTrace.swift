@@ -95,7 +95,7 @@ final class FFTrace {
 
     // MARK: the tick
 
-    func tickBegin(_ link: CADisplayLink) {
+    func tickBegin(_ link: DisplayTick) {
         let now = CACurrentMediaTime()
         seq += 1
         cur = (link.timestamp, link.targetTimestamp, now)
@@ -118,6 +118,11 @@ final class FFTrace {
 
     func beforePresent() {
         if cur != nil && workEnd == 0 { workEnd = CACurrentMediaTime() }
+    }
+
+    /// A CAMetalDisplayLink update's planned time on glass for this tick.
+    func planned(_ presentAt: Double) {
+        log("X \(seq) \(Self.ms(presentAt))")
     }
 
     func afterPresent(wait: Double) {
@@ -217,7 +222,94 @@ final class FFTrace {
         log("M presscost \(down ? 1 : 0) \(Self.ms(CACurrentMediaTime() - t0))")
     }
 
+    // MARK: the scene driver (-ff-scene PLAN)
+
+    /// `-ff-scene "1x:8,ff:4,2x:6"`: after `-ff-scene-warm S` seconds (3) at
+    /// 1x, each speed for its seconds ("pause:S" pauses), then "M done".
+    /// `-ff-scene-taps`: A taps at random moments throughout (press -> glass
+    /// per speed).
+    private lazy var scenePlan: [(GameSession.Speed?, Double)] = (arg("-ff-scene") ?? "")
+        .split(separator: ",").compactMap { part in
+            let kv = part.split(separator: ":")
+            guard kv.count == 2, let secs = Double(kv[1]) else { return nil }
+            switch kv[0] {
+            case "ff": return (.fastForward, secs)
+            case "2x": return (.double, secs)
+            case "slow": return (.slow, secs)
+            case "pause": return (nil, secs)
+            default: return (.normal, secs)
+            }
+        }
+    private var sceneStep = -1
+    private var sceneNext = 0.0
+    private var sceneStart = 0.0
+    private lazy var sceneTaps = args.contains("-ff-scene-taps")
+
+    private func sceneTick() {
+        let now = CACurrentMediaTime()
+        let s = GameSession.shared
+        if sceneStart == 0 {
+            sceneStart = now
+            sceneNext = now + (arg("-ff-scene-warm").flatMap(Double.init) ?? 3)
+            return
+        }
+        if sceneStep >= 0 && sceneTaps && now >= nextTap && nextTap.isFinite { sceneTap() }
+        guard now >= sceneNext else { return }
+        sceneStep += 1
+        if sceneStep == 0 {
+            log("M tapping scene")
+            nextTap = now + 0.3
+        }
+        guard sceneStep < scenePlan.count else {
+            if sceneStep == scenePlan.count {
+                DispatchQueue.main.async {
+                    s.setSpeed(.normal)
+                    self.log("M done")
+                    self.flush()
+                }
+            }
+            sceneNext = .infinity
+            return
+        }
+        let (speed, secs) = scenePlan[sceneStep]
+        sceneNext = now + secs
+        guard let speed else {
+            // No ticks run while paused: a timer resumes.
+            DispatchQueue.main.async {
+                self.log("M pause \(Self.ms(CACurrentMediaTime()))")
+                s.setPaused(true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + secs) {
+                    self.log("M resume \(Self.ms(CACurrentMediaTime()))")
+                    s.setPaused(false)
+                }
+            }
+            return
+        }
+        // Outside the tick, as a tap on the speed button lands.
+        DispatchQueue.main.async {
+            self.log("M speed \(Self.ms(CACurrentMediaTime())) \(Self.speedName(speed))")
+            s.setSpeed(speed)
+        }
+    }
+
+    private func sceneTap() {
+        nextTap = .infinity
+        let id = arg("-ff-scene-tap-id").flatMap(Int.init) ?? 4
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.001 ..< 0.016)) {
+            self.press(id, true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.05 ..< 0.11)) {
+                self.press(id, false)
+                self.nextTap = CACurrentMediaTime() + Double.random(in: 0.2 ..< 0.6)
+            }
+        }
+    }
+
+    static func speedName(_ s: GameSession.Speed) -> String {
+        switch s { case .fastForward: return "ff"; case .double: return "2x"; case .slow: return "slow"; case .normal: return "1x" }
+    }
+
     private func driveTick() {
+        if !scenePlan.isEmpty { sceneTick(); return }
         guard driveLeft > 0 else { return }
         let s = GameSession.shared
         // Boot to Birch's speech at fast-forward: START at the title, START

@@ -99,6 +99,103 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         view.backgroundColor = .black
         view.delegate = self
         self.view = view
+        if metalLinkHandler != nil { restartMetalLink() }
+    }
+
+    // MARK: CAMetalDisplayLink (DS games)
+
+    /// The session's tick, run from each update of a CAMetalDisplayLink on
+    /// the picture's layer; nil while a CADisplayLink paces the game
+    /// (GameSession.startLink chooses).
+    private var metalLinkHandler: ((DisplayTick) -> Void)?
+    private var metalLink: AnyObject?  // CAMetalDisplayLink (iOS 17)
+    /// The update's drawable while its tick runs.
+    private var updateDrawable: CAMetalDrawable?
+    /// The refresh period, learnt from the updates' planned presentations
+    /// (an update does not give its own).
+    private var refreshPeriod = 1.0 / 60
+    private var lastPresentAt = 0.0
+
+    @available(iOS 17, *)
+    func startMetalLink(_ handler: @escaping (DisplayTick) -> Void) {
+        metalLinkHandler = handler
+        restartMetalLink()
+    }
+
+    func stopMetalLink() {
+        // Stopped inside an update (a core fault pauses): its drawable still
+        // goes back presented.
+        drawIntoUpdate()
+        metalLinkHandler = nil
+        if #available(iOS 17, *) { (metalLink as? CAMetalDisplayLink)?.invalidate() }
+        metalLink = nil
+        updateDrawable = nil
+    }
+
+    private func restartMetalLink() {
+        guard #available(iOS 17, *) else { return }
+        (metalLink as? CAMetalDisplayLink)?.invalidate()
+        metalLink = nil
+        guard let layer = view?.layer as? CAMetalLayer else { return }
+        let link = CAMetalDisplayLink(metalLayer: layer)
+        link.delegate = self
+        // A picture on glass the refresh after its update's (33 ms from the
+        // tick at 60 Hz; 2 would be 50 ms).
+        link.preferredFrameLatency = 1
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        metalLink = link
+        lastPresentAt = 0
+    }
+
+    @available(iOS 17, *)
+    fileprivate func updateMetalLink(_ update: CAMetalDisplayLink.Update) {
+        let at = update.targetPresentationTimestamp
+        if lastPresentAt > 0 {
+            let d = at - lastPresentAt
+            if d > refreshPeriod * 0.5 && d < refreshPeriod * 1.5 { refreshPeriod += (d - refreshPeriod) * 0.1 }
+        }
+        lastPresentAt = at
+        updateDrawable = update.drawable
+        metalLinkHandler?(DisplayTick(timestamp: at - refreshPeriod, targetTimestamp: update.targetTimestamp,
+                                      period: refreshPeriod))
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.planned(at) }
+        #endif
+        // Every update's drawable is presented, the same picture again when
+        // the tick brought none: one handed back unpresented made iOS drop
+        // the next present (about half the pictures after a still one were
+        // never shown, an iPhone 13 mini on iOS 27).
+        drawIntoUpdate()
+    }
+
+    /// Draw the uploaded picture into the update's drawable (once).
+    private func drawIntoUpdate() {
+        guard let drawable = updateDrawable else { return }
+        updateDrawable = nil
+        let nds = dingbat_is_nds() != 0
+        if nds { view?.clearColor = ndsClear }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = nds ? ndsClear : view?.clearColor ?? MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        if canEncode {
+            encode(pass: pass, drawable: drawable)
+            return
+        }
+        // No picture yet: the drawable still goes back presented, cleared.
+        guard let cmd = queue?.makeCommandBuffer() else { return }
+        cmd.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        cmd.present(drawable)
+        cmd.commit()
+    }
+
+    /// Whether encode has what it draws with (checked before a drawable is
+    /// taken: one taken and not presented costs the next present).
+    private var canEncode: Bool {
+        queue != nil && gameTex != nil && borderTex != nil
+            && (dingbat_is_nds() != 0 ? ndsPipeline != nil : pipeline != nil)
     }
 
     /// Upload the current picture and draw it. Main thread, after frames run.
@@ -108,7 +205,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         #if DEBUG
         drawableWait = 0
         #endif
-        view.draw()
+        // On a CAMetalDisplayLink, into the update's drawable (outside an
+        // update, the next one draws it).
+        if metalLinkHandler != nil { drawIntoUpdate() } else { view.draw() }
         #if DEBUG
         if FFTrace.on { FFTrace.shared.afterPresent(wait: drawableWait) }
         #endif
@@ -119,7 +218,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
     /// Redraw without new pixels (an options change while paused).
     func redraw() {
-        view?.draw()
+        if metalLinkHandler != nil { drawIntoUpdate() } else { view?.draw() }
     }
 
     /// The picture to upload: a DS game's HD composite while HD 3D is on
@@ -161,20 +260,27 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
-        if dingbat_is_nds() != 0 {
-            drawNds(in: view)
-            return
-        }
+        if dingbat_is_nds() != 0 { view.clearColor = ndsClear }
         #if DEBUG
         let w0 = CACurrentMediaTime()
         #endif
+        guard canEncode, let pass = view.currentRenderPassDescriptor,
+              let drawable = view.currentDrawable else { return }
+        #if DEBUG
+        drawableWait = CACurrentMediaTime() - w0
+        #endif
+        encode(pass: pass, drawable: drawable)
+    }
+
+    private func encode(pass: MTLRenderPassDescriptor, drawable: CAMetalDrawable) {
+        if dingbat_is_nds() != 0 {
+            encodeNds(pass: pass, drawable: drawable)
+            return
+        }
         guard let pipeline, let queue, let gameTex, let borderTex,
-              let pass = view.currentRenderPassDescriptor,
-              let drawable = view.currentDrawable,
               let cmd = queue.makeCommandBuffer(),
               let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
         #if DEBUG
-        drawableWait = CACurrentMediaTime() - w0
         if FFTrace.on { FFTrace.shared.drawable(drawable, cmd) }
         #endif
         var u = PresentUniforms()
@@ -219,13 +325,13 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     /// no palette: the DS's own panels). With HD 3D the texture is k x the
     /// composite and each screen's texels are k x too: the filters, the
     /// grid and the subpixel look work on the HD pixels, as the web's do.
-    private func drawNds(in view: MTKView) {
-        view.clearColor = ndsClear
+    private func encodeNds(pass: MTLRenderPassDescriptor, drawable: CAMetalDrawable) {
         guard let ndsPipeline, let queue, let gameTex, let borderTex,
-              let pass = view.currentRenderPassDescriptor,
-              let drawable = view.currentDrawable,
               let cmd = queue.makeCommandBuffer(),
               let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.drawable(drawable, cmd) }
+        #endif
         enc.setRenderPipelineState(ndsPipeline)
         enc.setFragmentTexture(gameTex, index: 0)
         enc.setFragmentTexture(borderTex, index: 1)
@@ -267,5 +373,12 @@ struct GameScreenView: UIViewRepresentable {
 
     func updateUIView(_ view: MTKView, context: Context) {
         if GameRenderer.shared.view !== view { GameRenderer.shared.attach(view) }
+    }
+}
+
+@available(iOS 17, *)
+extension GameRenderer: CAMetalDisplayLinkDelegate {
+    func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
+        updateMetalLink(update)
     }
 }
