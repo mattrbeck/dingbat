@@ -286,6 +286,9 @@ final class GameSession: NSObject, ObservableObject {
 
     private func stopLink() {
         link?.invalidate()
+        earlyTimer?.cancel()
+        earlyTimer = nil
+        earlyFor = 0
         link = nil
         if metalLinked {
             metalLinked = false
@@ -443,8 +446,70 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     @objc private func tick(_ link: CADisplayLink) {
-        step(DisplayTick(timestamp: link.timestamp, targetTimestamp: link.targetTimestamp,
-                         period: link.targetTimestamp - link.timestamp))
+        let t = DisplayTick(timestamp: link.timestamp, targetTimestamp: link.targetTimestamp,
+                            period: link.targetTimestamp - link.timestamp)
+        guard Self.earlyStart, earlyApplies else {
+            earlyFor = 0
+            step(t)
+            return
+        }
+        // The timer already ran this refresh's frames: only arm the next.
+        if abs(earlyFor - link.timestamp) < 0.002 {
+            armEarly(t)
+            return
+        }
+        // Not yet armed (or the timer missed): run here, as without it.
+        runEarly(t)
+        armEarly(t)
+    }
+
+    // MARK: early start (prototype, `-early-start`)
+
+    /// At 1x and 2x the CADisplayLink calls back ~4 ms before its refresh,
+    /// and a picture handed over after the refresh shows a refresh later.
+    /// A timer instead runs the refresh's frames just early enough (their
+    /// recent cost plus a margin) that the present lands before it.
+    static let earlyStart = ProcessInfo.processInfo.arguments.contains("-early-start")
+    private static let earlyMargin = 0.0015
+    private var earlyTimer: DispatchSourceTimer?
+    /// The refresh (CADisplayLink timestamp) the timer last ran frames for.
+    private var earlyFor: CFTimeInterval = 0
+    /// Frames plus present at 1x/2x (s), a decaying peak.
+    private var earlyCost: Double = 0.004
+
+    private var earlyApplies: Bool {
+        (speed == .normal || speed == .double) && !NetLink.shared.linked && !twoPlayer && !metalLinked
+    }
+
+    private func runEarly(_ t: DisplayTick) {
+        let t0 = CACurrentMediaTime()
+        step(t)
+        // The frames up to the present, plus the present's own ~0.3 ms; a
+        // wait for a drawable is not counted (counting it fed back: earlier
+        // starts waited longer).
+        let start = GameRenderer.shared.lastPresentStart
+        if start > t0 { earlyCost = max(start - t0 + 0.0003, earlyCost * 0.98) }
+    }
+
+    /// The timer for the refresh after `t`'s: fire its cost plus the margin
+    /// before it.
+    private func armEarly(_ t: DisplayTick) {
+        let next = t.targetTimestamp
+        let lead = min(max(earlyCost + Self.earlyMargin, 0.002), t.period - 0.004)
+        let fireIn = next - lead - CACurrentMediaTime()
+        guard fireIn > 0 else { return }
+        if earlyTimer == nil {
+            let timer = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
+            timer.resume()
+            earlyTimer = timer
+        }
+        let period = t.period
+        earlyTimer?.setEventHandler { [weak self] in
+            guard let self, Self.earlyStart, self.earlyApplies, self.link != nil else { return }
+            self.earlyFor = next
+            self.runEarly(DisplayTick(timestamp: next, targetTimestamp: next + period, period: period))
+        }
+        earlyTimer?.schedule(deadline: .now() + fireIn, leeway: .nanoseconds(0))
     }
 
     /// One display tick: run what the refresh owes, then present.

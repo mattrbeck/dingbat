@@ -78,6 +78,15 @@ struct GameStage: View {
     /// Phone landscape (web: coarse pointer, landscape, max-height 500).
     private var phoneLandscape: Bool { vSize == .compact }
 
+    #if DEBUG
+    /// DS drawable-wait probes: without the stylus overlay / the stage layers.
+    static let probeNoStylus = ProcessInfo.processInfo.arguments.contains("-probe-no-stylus")
+    static let probeNoStage = ProcessInfo.processInfo.arguments.contains("-probe-no-stage")
+    #else
+    static let probeNoStylus = false
+    static let probeNoStage = false
+    #endif
+
     var body: some View {
         GeometryReader { geo in
             let lay = session.isNDS ? ndsLayout(in: geo.size) : nil
@@ -98,7 +107,7 @@ struct GameStage: View {
                     // (web nds-lid-closed). Only an overlay, so a GB/GBA game's
                     // view carries no effect at all.
                     .overlay { if session.isNDS && nds.lidClosed { Color.black.opacity(0.65).allowsHitTesting(false) } }
-                    .overlay { if session.isNDS { NdsStylus() } }
+                    .overlay { if session.isNDS && !Self.probeNoStylus { NdsStylus() } }
                     // The friend is away: the frozen picture dims under the card.
                     .overlay {
                         if link.peerAwayShown != nil || link.reconnectingSince != nil {
@@ -120,7 +129,7 @@ struct GameStage: View {
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
                         .allowsHitTesting(false)
                 }
-                if session.isNDS { NdsStageLayers() }
+                if session.isNDS && !Self.probeNoStage { NdsStageLayers() }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .onAppear { if let lay { pushNds(lay) } }

@@ -115,3 +115,38 @@ with `-ff-trace` and a scene plan (`-ff-scene "1x:8,2x:6,ff:5,1x:6"`,
 `-ff-scene-warm 2`, `-ff-scene-taps`) plus the mode's switch; pull
 Documents/fftrace.txt and summarise with `ios/e2e/ffscene.py` (per speed and
 per switch) and `ios/e2e/fftrace.py --speed 1x|2x|ff` (presses).
+
+## Round 3: DS's drawable wait, and starting 1x frames early
+
+**DS on the CADisplayLink waits for a drawable.** In some sessions a DS
+present spends ~10 ms in `nextDrawable` (its GPU work is 1.0 ms), which
+puts the picture a refresh late (tick to glass 45-48 ms); in others the
+wait is ~1.5 ms (37 ms). The state held across consecutive app launches
+and then cleared, and did not follow the drawable's size (3x, 2.5x, 2x,
+1.5x and 1x each landed in either state), the stylus overlay or the
+stage layers. Skipping one present when the wait stays long
+(`-probe-drain`) could not be tested in the long-wait state (it did not
+recur); in the short-wait state DS on the CADisplayLink is 37 ms against
+the metal link's 33. The metal link was 33 ms in every DS run, including
+the long-wait sessions.
+
+**The handover deadline.** Over every CADisplayLink 1x tick: a present
+ending 1-3 ms before the refresh shows one refresh later in 75-95% of
+ticks; one ending at or after it, two. The callback comes 3.85 ms before
+the refresh, so the one-refresh case needs the frame and present in
+~2 ms on this phone (Emerald's opening takes ~3.9 ms; even the toggle
+ROM's empty loop takes 2.2 ms at 1x clocks, against ~1.2 ms an Emerald
+frame in fast-forward).
+
+**Starting 1x frames early does not help** (`-early-start`: a timer runs
+the refresh's frames its recent cost plus 1.5 ms before the refresh).
+The frames ran 6.1-6.3 ms before the refresh, but the present then
+waited 1.7-2.2 ms for a drawable, which came free only ~0.7 ms before
+the refresh, and the picture still landed a refresh later (tick to glass
+39-40 ms against the callback's 37). Draining one present first did not
+change it. With one present each refresh the drawable a present needs is
+the one the refresh it aims for gives back, so the one-refresh case
+happens only when the system keeps a spare drawable, which an app does
+not choose. (A first version learnt its lead from the present's end,
+drawable wait included, and ran away to 12.6 ms early: earlier starts
+waited longer.)

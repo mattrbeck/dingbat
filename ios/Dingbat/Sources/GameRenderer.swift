@@ -98,6 +98,20 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         view.isOpaque = true
         view.backgroundColor = .black
         view.delegate = self
+        #if DEBUG
+        // DS drawable-wait probes: `-probe-scale F` draws at F x the
+        // view's points; `-probe-drawables N` sets the layer's pool.
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-probe-scale"), i + 1 < a.count, let f = Double(a[i + 1]) {
+            view.contentScaleFactor = CGFloat(f)
+        }
+        if let i = a.firstIndex(of: "-probe-drawables"), i + 1 < a.count, let n = Int(a[i + 1]) {
+            (view.layer as? CAMetalLayer)?.maximumDrawableCount = n
+        }
+        if FFTrace.on, let l = view.layer as? CAMetalLayer {
+            FFTrace.shared.log("M layer drawables \(l.maximumDrawableCount) scale \(view.contentScaleFactor)")
+        }
+        #endif
         self.view = view
         if metalLinkHandler != nil { restartMetalLink() }
     }
@@ -192,7 +206,12 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     }
 
     /// Upload the current picture and draw it. Main thread, after frames run.
+    /// When the last present began (the early start learns the frames' cost
+    /// from it, not counting any wait for a drawable).
+    private(set) var lastPresentStart: CFTimeInterval = 0
+
     func present() {
+        lastPresentStart = CACurrentMediaTime()
         guard let view, dingbat_loaded() != 0 else { return }
         uploadGame()
         #if DEBUG
@@ -201,7 +220,21 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         if metalLinkHandler != nil {
             if updateDrawable != nil { drawIntoUpdate() } else { drawPending = true }
         } else {
+            #if DEBUG
+            if Self.probeDrain && drainNext {
+                // Skip one present: the display's queue gives back a drawable.
+                drainNext = false
+                if FFTrace.on { FFTrace.shared.log("M drain") }
+                return
+            }
+            #endif
             view.draw()
+            #if DEBUG
+            if Self.probeDrain {
+                longWaits = drawableWait > 0.005 ? longWaits + 1 : 0
+                if longWaits >= 3 { longWaits = 0; drainNext = true }
+            }
+            #endif
         }
         #if DEBUG
         if FFTrace.on { FFTrace.shared.afterPresent(wait: drawableWait) }
@@ -209,6 +242,11 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     }
     #if DEBUG
     private var drawableWait = 0.0
+    /// `-probe-drain`: after 3 presents in a row that waited over 5 ms for
+    /// a drawable, skip the next present (does the queue then stay shallow?).
+    static let probeDrain = ProcessInfo.processInfo.arguments.contains("-probe-drain")
+    private var longWaits = 0
+    private var drainNext = false
     #endif
 
     /// Redraw without new pixels (an options change while paused).
@@ -256,7 +294,11 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.log("M drawable-size \(Int(size.width))x\(Int(size.height))") }
+        #endif
+    }
 
     func draw(in view: MTKView) {
         if dingbat_is_nds() != 0 {
