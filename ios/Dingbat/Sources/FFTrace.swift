@@ -95,7 +95,7 @@ final class FFTrace {
 
     // MARK: the tick
 
-    func tickBegin(_ link: CADisplayLink) {
+    func tickBegin(_ link: DisplayTick) {
         let now = CACurrentMediaTime()
         seq += 1
         cur = (link.timestamp, link.targetTimestamp, now)
@@ -118,6 +118,11 @@ final class FFTrace {
 
     func beforePresent() {
         if cur != nil && workEnd == 0 { workEnd = CACurrentMediaTime() }
+    }
+
+    /// A CAMetalDisplayLink update's planned time on glass for this tick.
+    func planned(_ presentAt: Double) {
+        log("X \(seq) \(Self.ms(presentAt))")
     }
 
     func afterPresent(wait: Double) {

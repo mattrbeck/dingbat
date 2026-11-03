@@ -69,6 +69,8 @@ final class GameSession: NSObject, ObservableObject {
     @Published private(set) var focusPlayer = 0
 
     private var link: CADisplayLink?
+    /// The renderer's CAMetalDisplayLink drives the ticks instead (`-metal-link`).
+    private var metalLinked = false
     private var framesThisSecond = 0
     private var fpsWindowStart: CFTimeInterval = 0
     private var pausedForBackground = false
@@ -268,7 +270,12 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     private func startLink() {
-        guard link == nil else { return }
+        guard link == nil, !metalLinked else { return }
+        if let latency = Self.metalLinkLatency, #available(iOS 17, *) {
+            metalLinked = true
+            GameRenderer.shared.startMetalLink(latency: latency) { [weak self] t in self?.step(t) }
+            return
+        }
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
         link.add(to: .main, forMode: .common)
@@ -278,7 +285,21 @@ final class GameSession: NSObject, ObservableObject {
     private func stopLink() {
         link?.invalidate()
         link = nil
+        if metalLinked {
+            metalLinked = false
+            GameRenderer.shared.stopMetalLink()
+        }
     }
+
+    /// `-metal-link N` (prototype): pace the game by a CAMetalDisplayLink on
+    /// the picture's layer asking for N frames of latency (iOS 17; 1 or 2,
+    /// the system's default), presenting into the drawable each update hands
+    /// over, instead of a CADisplayLink and the view's own drawables.
+    static let metalLinkLatency: Float? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-metal-link"), i + 1 < a.count, let n = Float(a[i + 1]) else { return nil }
+        return n
+    }()
 
     // MARK: lifecycle
 
@@ -392,6 +413,12 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     @objc private func tick(_ link: CADisplayLink) {
+        step(DisplayTick(timestamp: link.timestamp, targetTimestamp: link.targetTimestamp,
+                         period: link.targetTimestamp - link.timestamp))
+    }
+
+    /// One display tick: run what the refresh owes, then present.
+    func step(_ link: DisplayTick) {
         guard game != nil, !clipHold, !flightHold else { return }
         let now = link.timestamp
         let dt = lastTick == 0 ? 0 : min(now - lastTick, 0.25)
@@ -452,7 +479,7 @@ final class GameSession: NSObject, ObservableObject {
             // `-ff-grid-target`: a callback that runs after its own target
             // (the simulator's link always does) aims at the next refresh on
             // the link's grid, as a device's callback does, instead of 4 ms.
-            let nowG = CACurrentMediaTime(), periodG = link.targetTimestamp - link.timestamp
+            let nowG = CACurrentMediaTime(), periodG = link.period
             if Self.ffGridTarget && periodG > 0 && target < nowG {
                 target += periodG * ((nowG - target) / periodG).rounded(.up)
             }
@@ -541,8 +568,8 @@ final class GameSession: NSObject, ObservableObject {
     /// Frames this display tick owes (web: the RAF accumulator). Rounded,
     /// not floored, so a refresh that lands a hair early or late still runs
     /// its one frame; a missed refresh is made up on the next.
-    private func framesOwed(_ link: CADisplayLink, dt: CFTimeInterval) -> Int {
-        let period = link.targetTimestamp - link.timestamp
+    private func framesOwed(_ link: DisplayTick, dt: CFTimeInterval) -> Int {
+        let period = link.period
         let hz = period > 0 ? 1 / period : 60
         let k = (hz / 60).rounded()
         // A display at a multiple of 60 Hz: one frame per refresh, exactly
@@ -679,7 +706,7 @@ final class GameSession: NSObject, ObservableObject {
     /// One tick of linked play: frames while the audio wants them (or the
     /// clock, with no audio engine), each sent to the friend with this
     /// player's buttons. A stall (-1) waits for the friend's input.
-    private func linkedFrames(_ link: CADisplayLink, dt: CFTimeInterval) -> Int {
+    private func linkedFrames(_ link: DisplayTick, dt: CFTimeInterval) -> Int {
         var bits: UInt16 = 0
         for id in held where id >= 0 && id < 10 { bits |= UInt16(1) << UInt16(id) }
         var ran = 0
@@ -1499,6 +1526,14 @@ final class GameSession: NSObject, ObservableObject {
                                intent: .defaultIntent) else { return nil }
         return UIImage(cgImage: cg)
     }
+}
+
+/// A refresh the game is paced by: the refresh before it (CADisplayLink's
+/// timestamp), the time its work must be done by, and the refresh period.
+struct DisplayTick {
+    let timestamp: CFTimeInterval
+    let targetTimestamp: CFTimeInterval
+    let period: CFTimeInterval
 }
 
 /// The held inputs, published for the input display alone.
