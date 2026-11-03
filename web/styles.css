@@ -8921,7 +8921,9 @@ body.running.sync-shown #status {
 
   /* Drive-sync spinner: slowed, not stopped, matching .net-spinner — it
      still has to communicate "in progress". */
-  .sync-spin {
+  .sync-spin,
+  #account-btn[data-sync="syncing"]::after,
+  .acct-syncing .acct-status-mark {
     animation-duration: 3s;
   }
 

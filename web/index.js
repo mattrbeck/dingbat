@@ -200,6 +200,8 @@ checkForUpdate();
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") maybeCheckForUpdate();
 });
+// A boot that was offline asked nothing: ask once the network is back.
+window.addEventListener("online", () => { if (!updateAvailable) checkForUpdate(); });
 
 // Full reset: caches and workers both. Deleting caches alone leaves the old
 // worker in control of an empty cache it never repopulates.
@@ -2397,13 +2399,23 @@ const driveBrokerBase = () => {
   return m ? (m[1] === "wss" ? "https://" : "http://") + m[2] : "";
 };
 
-// fetch with a deadline; AbortSignal.timeout is too new for iOS 15.
+// fetch with a deadline; AbortSignal.timeout is too new for iOS 15. The
+// deadline is on the answer's headers: a body still coming down when they
+// arrive is not cut off.
 const fetchWithin = (url, opts, ms) => {
   let ctl = typeof AbortController === "function" ? new AbortController() : null;
   let t = ctl && setTimeout(() => ctl.abort(), ms);
   return fetch(url, { ...opts, signal: ctl?.signal })
     .finally(() => { if (t) clearTimeout(t); });
 };
+// A hung tokeninfo must not hold a pull (and the ring) for good: past this
+// it is taken as offline, which keeps the token.
+const DRIVE_TOKENINFO_MS = 8000;
+// A Drive read whose answer has not begun by now is taken as offline, so a
+// stalled connection ends a pull, and the ring, instead of holding them.
+// Reads only: an upload's answer comes after its whole body has gone up,
+// which on a slow link can take longer than any fixed wait.
+const DRIVE_READ_MS = 20000;
 
 // text/plain keeps it a CORS "simple" request: no preflight round trip.
 const driveBrokerPost = async (path, body) => {
@@ -2652,9 +2664,10 @@ const driveTokenSub = async (tok) => {
 const gdriveFetchEmail = async () => {
   let tok = gdriveToken;
   try {
-    let res = await fetch(
+    let res = await fetchWithin(
       "https://oauth2.googleapis.com/tokeninfo?access_token=" +
         encodeURIComponent(tok),
+      {}, DRIVE_TOKENINFO_MS,
     );
     if (!res.ok) return null;
     let info = await res.json();
@@ -2674,10 +2687,11 @@ const gdriveFetchEmail = async () => {
 // gesture-armed renewal.
 const driveFetch = async (url, opts = {}) => {
   const live = driveSessionGuard();
-  const send = () => fetch(url, {
-    ...opts,
-    headers: { ...(opts.headers || {}), Authorization: "Bearer " + gdriveToken },
-  });
+  const read = !opts.method || opts.method === "GET";
+  const send = () => {
+    let o = { ...opts, headers: { ...(opts.headers || {}), Authorization: "Bearer " + gdriveToken } };
+    return read ? fetchWithin(url, o, DRIVE_READ_MS) : fetch(url, o);
+  };
   let res = await send();
   if (res.status === 401) {
     const wasLinked = driveLinked();
@@ -4333,12 +4347,25 @@ const handoffForce = new Set();
 /** @type {(v?: unknown) => void} */
 let firstPullSettled = () => {};
 const firstPullPromise = new Promise((r) => { firstPullSettled = r; });
+let firstPullDone = false;
+// The first pull's Drive listing, as soon as it has one (null if it ended
+// without): a tap during that pull asks it what Drive holds of the game
+// (holdForBootPull).
+/** @type {(v: Map<string, any> | null) => void} */
+let firstListingSettled = () => {};
+const firstListing = new Promise((r) => { firstListingSettled = r; });
+let firstListingIn = false;
 const pullSync = (opts = {}) => {
   if (pullQueued) return syncChain; // already one waiting; don't pile up
   pullQueued = true;
   return runExclusive(() => {
     pullQueued = false;
-    return pullSyncInner(opts).finally(() => firstPullSettled());
+    return pullSyncInner(opts).finally(() => {
+      firstPullDone = true;
+      firstListingIn = true;
+      firstListingSettled(null);
+      firstPullSettled();
+    });
   });
 };
 const pullSyncInner = async ({ silent = true } = {}) => {
@@ -4354,6 +4381,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
   let ahead = null;
   try {
     let remote = live(await driveListMap());
+    firstListingIn = true;
+    firstListingSettled(remote);
     // Not the library's business: a setting riding the same pull.
     live(await syncSaveHook(remote, live));
     let lib = mergeLibrary(live(await readDriveLibrary(remote)), live(await localLibrary()));
@@ -6047,10 +6076,6 @@ const driveSessionResumed = async (over) => {
   await pullSync();
 };
 
-// A hung tokeninfo must not hold the boot pull (and its ring) for good: past
-// this it is taken as offline, which keeps the token.
-const DRIVE_TOKENINFO_MS = 8000;
-
 // Boot resume: reuse a persisted token within its lifetime, confirmed via
 // tokeninfo (a plain fetch); otherwise arm the first-gesture re-grant.
 const resumeDriveOnBoot = async () => {
@@ -7682,9 +7707,45 @@ const wireTileMenu = (tile, launch, romName) => {
 const openLibraryGame = async (romName, { driveOnly = false, missing = false, flyFrom = null, resume = libraryOpen === "resume" } = {}) => {
   if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
   if (!driveOnly && crashGate(romName)) return;
-  if (!driveOnly) { launchRom(romName, { resume, flyFrom }); return; }
+  if (!driveOnly) {
+    if (await holdForBootPull(romName)) launchRom(romName, { resume, flyFrom });
+    return;
+  }
   if (missing) { relinkGameAction(romName, { launch: true }); return; }
   await fetchTileGame(romName, { open: { resume, flyFrom } });
+};
+
+// --- A tap while the boot's pull is out -----------------------------------
+// Drive may hold a newer save or session of the game than this device last
+// saw (played on another device since). Opened now, it would boot on the
+// older copy here, and the pull's hand-off would then offer a Switch over
+// the game being played. So the tap waits, its tile saying "Checking
+// Drive…", for the pull's listing; if that shows something newer of the
+// game, for the pull to bring it. Never longer than BOOT_HOLD_MS: past it
+// the game opens as it is, and the hand-off covers the rest. Resolves true
+// when the tap still stands (no later tap has taken the load token).
+const BOOT_HOLD_MS = 6000;
+const holdForBootPull = async (name) => {
+  if (firstPullDone || syncStatus !== "syncing" || !driveLinked()) return true;
+  if (tileLoadBusy(tileLoads.get(name))) return false; // already held: this tap adds nothing
+  const gen = nextLoadGen();
+  let s = { open: {}, gen, stage: "check", got: 0, total: 0, run: null };
+  let timer;
+  const deadline = new Promise((r) => { timer = setTimeout(() => r(null), BOOT_HOLD_MS); });
+  // Drawn only while there is a wait: a listing already in answers at once.
+  if (!firstListingIn) setTileLoad(name, s);
+  let remote = await Promise.race([firstListing, deadline]);
+  let newer = !!remote && HANDOFF_KEYS(name).some((k) => {
+    let f = remote.get(k);
+    return !!f && syncState.rmt[k] !== f.modifiedTime;
+  });
+  if (newer) {
+    if (tileLoads.get(name) !== s) setTileLoad(name, s);
+    await Promise.race([firstPullPromise, deadline]);
+  }
+  clearTimeout(timer);
+  if (tileLoads.get(name) === s) setTileLoad(name, null);
+  return gen === loadGen;
 };
 
 // --- A Drive-only game coming down, on its tile --------------------------
@@ -7697,7 +7758,7 @@ const openLibraryGame = async (romName, { driveOnly = false, missing = false, fl
 const tileLoads = new Map();
 const TILE_DONE_MS = 2000;
 const tileLoadBusy = (s) => !!s && (s.stage === "signin" || s.stage === "download" ||
-                                     s.stage === "start");
+                                     s.stage === "start" || s.stage === "check");
 // "Opening" only while the tap's load token is the latest: a later tap on
 // anything else wins (loadGen), and this one is back to a plain download.
 const tileLoadOpening = (s) => tileLoadBusy(s) && !!s.open && s.gen === loadGen;
@@ -7749,14 +7810,15 @@ const paintTileLoad = (tile) => {
     }
     let [label, sub, bar] = over.children;
     label.textContent = s.stage === "signin" ? "Signing in…"
+      : s.stage === "check" ? "Checking Drive…"
       : failed ? "Couldn’t download"
       : s.stage === "start" ? "Starting…"
       : opening ? "Opening" : "Downloading";
-    sub.textContent = s.stage === "signin" ? "Google Drive"
+    sub.textContent = s.stage === "signin" || s.stage === "check" ? "Google Drive"
       : failed ? "Tap to try again"
       : tileBytes(s.got, s.total);
     let pct = s.stage === "start" ? 100 : s.total ? Math.min(100, 100 * s.got / s.total) : 0;
-    bar.hidden = s.stage === "signin" || (!s.total && s.stage !== "start");
+    bar.hidden = s.stage === "signin" || s.stage === "check" || (!s.total && s.stage !== "start");
     bar.children[0].style.width = pct + "%";
   }
 
@@ -7791,6 +7853,7 @@ const paintHeroLoad = (name) => {
   let pct = s?.total ? " · " + Math.floor(100 * Math.min(s.got, s.total) / s.total) + "%" : "";
   heroResumeLabel.textContent = !s || s.stage === "done" ? (heroSession ? "Resume" : "Play")
     : s.stage === "signin" ? "Signing in…"
+    : s.stage === "check" ? "Checking Drive…"
     : s.stage === "start" ? "Starting…"
     : s.stage === "failed" ? "Try again"
     : (tileLoadOpening(s) ? "Opening" : "Downloading") + pct;

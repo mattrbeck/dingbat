@@ -6,6 +6,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import { loadApp, jsonRes } from "./helpers.mjs";
 import { makeDrive, until } from "./drivefake.mjs";
 
@@ -98,4 +100,180 @@ test("the slot keeps the hint's drawing until initStorage has read this boot's s
   // Nothing linked in this IndexedDB: the real state draws the signed-out slot.
   assert.equal(badge(app), "");
   assert.equal(app.localStorage.getItem("dingbat_drive"), null);
+});
+
+// --- The boot hint's script (index.html) agrees with driveBootSyncs --------
+// The same decision is written twice, once for before index.js runs; this
+// runs the page's own script on the hint the app wrote, for each kind of
+// boot, and holds the two to one answer.
+
+const HTML = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const HINT_SCRIPT = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+  .map((m) => m[1]).find((src) => src.includes("dingbat_drive"));
+
+// The script on a bare slot: what it draws, from `hint` (a stored string).
+const runHintScript = (hint, { onLine = true } = {}) => {
+  const el = (id) => ({ id, hidden: id === "account-slot", dataset: {}, textContent: "", title: "",
+                        classList: { add() {} }, setAttribute(k, v) { this[k] = v; } });
+  const els = { "account-slot": el("account-slot"), "account-btn": el("account-btn"),
+                "account-avatar": el("account-avatar") };
+  vm.runInNewContext(HINT_SCRIPT, {
+    localStorage: { getItem: (k) => (k === "dingbat_drive" ? hint : null) },
+    document: { getElementById: (id) => els[id] },
+    navigator: { onLine }, JSON, Date,
+  });
+  return { shown: !els["account-slot"].hidden, sync: els["account-btn"].dataset.sync,
+           initial: els["account-avatar"].textContent };
+};
+
+test("index.html's hint script is there to test", () => {
+  assert.ok(HINT_SCRIPT, "a <script> reading dingbat_drive");
+});
+
+for (const [what, state, broker] of [
+  ["a live token", { token: "tok1", tokenExp: Date.now() + HOUR }, false],
+  ["a token about to lapse", { token: "tok1", tokenExp: Date.now() + 2000 }, false],
+  ["an expired token, no refresh token", { token: "tok1", tokenExp: Date.now() - HOUR }, false],
+  ["no token, a refresh token and a broker", { token: null, tokenExp: 0, refresh: "rt", refreshAcct: "a1" }, true],
+  ["no token, a refresh token but no broker", { token: null, tokenExp: 0, refresh: "rt", refreshAcct: "a1" }, false],
+  ["a refresh token for another account", { token: null, tokenExp: 0, refresh: "rt", refreshAcct: "a2" }, true],
+]) {
+  test(`the hint script and driveBootSyncs agree: ${what}`, async () => {
+    const app = await loadApp();
+    if (broker) app.sandbox.NET_SIGNAL_URL = "wss://signal.example/signal";
+    await app.api.dbPut("gdrive_sync", linkedState(state));
+    await app.api.loadSyncState();
+    const hint = app.localStorage.getItem("dingbat_drive");
+    const drawn = runHintScript(hint);
+    assert.equal(drawn.shown, true);
+    assert.equal(drawn.initial, "O");
+    assert.equal(drawn.sync === "syncing", app.runIn("driveBootSyncs()"));
+    assert.equal(runHintScript(hint, { onLine: false }).sync, "ok", "offline: no ring");
+  });
+}
+
+test("the hint script draws nothing without a hint", () => {
+  assert.equal(runHintScript(null).shown, false);
+  assert.equal(runHintScript("not json").shown, false);
+});
+
+// --- Drive reads have a deadline; uploads do not ----------------------------
+
+test("a Drive read that never answers ends the pull as offline", async () => {
+  const app = await loadApp();
+  const ctls = [];
+  app.sandbox.AbortController = class {
+    constructor() { this.signal = new EventTarget(); ctls.push(this); }
+    abort() { this.signal.dispatchEvent(new Event("abort")); }
+  };
+  const sent = [];
+  app.setFetch((url, opts = {}) => new Promise((_, reject) => {
+    sent.push({ url: String(url), opts });
+    opts.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+  }));
+  app.idb.set("recent", []);
+  app.api.syncState = linkedState({ token: "tok1", tokenExp: Date.now() + HOUR });
+  app.api.gdriveToken = "tok1";
+  app.api.gdriveTokenExp = Date.now() + HOUR;
+  const pull = app.api.pullSync({ silent: false });
+  await until(() => sent.length === 1, "the listing asked");
+  const ctl = ctls.find((c) => c.signal === sent[0].opts.signal);
+  assert.ok(ctl, "the listing carries a deadline");
+  ctl.abort();
+  await pull;
+  assert.equal(app.api.syncStatus, "offline");
+});
+
+test("an upload carries no deadline", async () => {
+  const app = await loadApp();
+  const sent = [];
+  app.setFetch(async (url, opts = {}) => { sent.push(opts); return jsonRes({ id: "x" }); });
+  app.api.syncState = linkedState({ token: "tok1", tokenExp: Date.now() + HOUR });
+  app.api.gdriveToken = "tok1";
+  await app.api.driveFetch("https://www.googleapis.com/upload/drive/v3/files", { method: "POST", body: "x" });
+  assert.equal(sent[0].signal, undefined);
+});
+
+// --- A tap while the boot's pull is out -------------------------------------
+
+const GAME = "Game.gb";
+const hold = (app) => app.runIn(`holdForBootPull(${JSON.stringify(GAME)})`);
+
+// A linked boot whose tokeninfo the test answers; Drive seeded as given.
+const bootWith = async (seed) => {
+  const app = await loadApp();
+  const drive = makeDrive({ seed });
+  const held = [];
+  app.setFetch(async (url, opts = {}) => {
+    url = String(url);
+    if (url.startsWith("https://oauth2.googleapis.com/tokeninfo")) {
+      return new Promise((resolve) => held.push(() => resolve(jsonRes({ sub: "a1", email: "one@x" }))));
+    }
+    return drive.fetch(url, opts);
+  });
+  app.idb.set("recent", []);
+  await app.api.dbPut("gdrive_sync", linkedState({ token: "tok1", tokenExp: Date.now() + HOUR }));
+  await app.api.loadSyncState();
+  app.runIn("bootDriveHint = null; refreshSyncUI()");
+  app.api.resumeDriveOnBoot();
+  return { app, held };
+};
+
+test("a tap during the boot pull waits for Drive's newer session of the game", async () => {
+  const { app, held } = await bootWith({ ["stateauto:" + GAME]: "a session from another device" });
+  let opened = null;
+  hold(app).then((v) => { opened = v; });
+  await until(() => app.runIn(`tileLoads.get(${JSON.stringify(GAME)})?.stage`) === "check",
+              "the tile says Checking Drive");
+  held[0]();
+  await until(() => opened !== null, "the hold let go");
+  assert.equal(opened, true);
+  assert.equal(app.runIn("firstPullDone"), true, "only once the pull had landed it");
+  assert.equal(app.runIn(`tileLoads.has(${JSON.stringify(GAME)})`), false, "the tile is plain again");
+});
+
+test("a tap during the boot pull opens once the listing shows nothing newer", async () => {
+  const { app, held } = await bootWith({});
+  let opened = null;
+  hold(app).then((v) => { opened = v; });
+  await until(() => held.length === 1, "tokeninfo asked");
+  assert.equal(opened, null, "no listing yet: held");
+  held[0]();
+  await until(() => opened !== null, "the hold let go");
+  assert.equal(opened, true);
+});
+
+test("a later tap during the hold takes the open from it", async () => {
+  const { app, held } = await bootWith({ ["stateauto:" + GAME]: "a session from another device" });
+  let opened = null;
+  hold(app).then((v) => { opened = v; });
+  await until(() => held.length === 1, "tokeninfo asked");
+  app.runIn("nextLoadGen()"); // another tile tapped
+  held[0]();
+  await until(() => opened !== null, "the hold let go");
+  assert.equal(opened, false);
+});
+
+test("no boot pull out: a tap opens at once", async () => {
+  const app = await loadApp();
+  assert.equal(await hold(app), true);
+});
+
+// --- The update check asks again when the network comes back ---------------
+
+test("an offline boot's update check is asked again on reconnect", async () => {
+  const app = await loadApp();
+  const btn = app.elements.get("update-btn");
+  btn.hidden = true; // as the markup starts it (the fake DOM reads no attributes)
+  assert.equal(app.runIn("updateAvailable"), false, "the boot's probe failed: no update known");
+  app.setFetch(async (url, opts = {}) => {
+    url = String(url);
+    if (url.startsWith("version.txt")) {
+      return { ok: true, text: async () => (opts.cache === "no-store" ? "new" : "old") };
+    }
+    if (url.startsWith("sw.js")) return { ok: true, text: async () => 'const CACHE_VERSION = "new";' };
+    return jsonRes({}, 404);
+  });
+  await app.dispatchWin("online");
+  await until(() => btn.hidden === false, "the Update button");
 });

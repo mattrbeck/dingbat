@@ -276,14 +276,28 @@ not offline (`driveBootSyncs`). The slot keeps that drawing until
 `initStorage` has read this boot's own state; `resumeDriveOnBoot` then sets
 `syncing` in the same tick, and the boot pull, no longer silent, ends it
 with the tick or offline. A boot that needs a tap for its token shows no
-ring. tokeninfo, the pull's first request, gives up after 8 s and is taken
-as offline (the token is kept). The iOS app starts `DriveSync.status` at
-`syncing` in the same cases and ends it the same way.
+ring. Nothing leaves the ring turning for good: tokeninfo gives up after
+8 s (taken as offline; the token is kept), and a Drive read whose answer
+has not begun in 20 s fails the pull to offline (uploads have no such
+deadline: their answer comes after the whole body). Under reduced motion
+the ring turns slowly, as the other sync spinners do. The iOS app starts
+`DriveSync.status` at `syncing` in the same cases and ends it the same
+way. `web/tests/boot-sync-status.test.mjs` runs `index.html`'s script on
+the hint the app wrote and holds it to `driveBootSyncs`.
+
+A game tapped while that pull is out (`holdForBootPull`) waits for the
+pull's listing, its tile saying "Checking Drive…". If Drive holds a newer
+save or session of it than this device last saw, it waits on for the pull
+to bring them, so the game opens on the other device's moment rather than
+on the older copy here with a Switch offered over play. Six seconds at
+most; then it opens as it is and the hand-off covers the rest. A later tap
+elsewhere takes the open from it.
 
 The update check (`checkForUpdate`) also runs at every boot, beside the
 pull: the Update button can show before the new service worker has
-downloaded the build. Only the check on a tab coming back into view keeps
-the daily cap.
+downloaded the build. A boot that was offline asks again when the network
+comes back. Only the check on a tab coming back into view keeps the daily
+cap.
 
 ## Account
 
