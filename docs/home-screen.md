@@ -272,9 +272,10 @@ While it waits the page is already the library's, not the empty state's:
   hint in "The first sync" below draws the signed-in account over it.
 - `#home-inner` keeps the height it had at the last first picture
   (`dingbat_home_h`: `{ w, px }`, noted by `revealHome` and used only at
-  the same width, since the columns follow the width). Without it, the
-  brand started out centred alone and was pushed up when the tiles came
-  in.
+  the same width, since the columns follow the width). The height is capped
+  at the screen's height, which looks the same with the brand at the top.
+  Without it, the brand started out centred alone and was pushed up when
+  the tiles came in.
 
 The reads before that first render come out of IndexedDB in one
 transaction (`prefetchBootReads`, `BOOT_READ_KEYS`) rather than two dozen

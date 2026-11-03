@@ -6424,7 +6424,8 @@ let libHint = null;
 try { libHint = localStorage.getItem(LIB_HINT_KEY); } catch {}
 let homePending = !!document.documentElement.classList?.contains("home-pending");
 // A library's side of the page - no drop box, the account in the bar -
-// from the start.
+// from the start. (index.html's body script has set it already; this is
+// for a page whose inline scripts did not run, as the tests' vm.)
 if (homePending) document.body.classList.add("lib-has-games");
 // Set by a launch: from then on the page is headed by that game's hero
 // (paused, then Last played after a close) rather than the brand.
@@ -6438,7 +6439,16 @@ const HOME_H_KEY = "dingbat_home_h";
 const noteHomeHeight = (inner) => {
   // Not when HOME_REVEAL_MAX_MS revealed a library not read yet.
   if (libraryEmpty !== false) return;
-  const px = Math.round(inner?.offsetHeight || 0);
+  // Taller than the screen looks the same as the screen (the brand at the
+  // top): held at most that, a boot never scrolls over hidden rows, and a
+  // library that shrank since does not start the brand too high.
+  const home = document.getElementById("home");
+  let room = Infinity;
+  if (home?.clientHeight) {
+    const cs = getComputedStyle(home);
+    room = home.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  }
+  const px = Math.round(Math.min(inner?.offsetHeight || 0, room));
   try {
     if (px > 0) localStorage.setItem(HOME_H_KEY, JSON.stringify({ w: window.innerWidth, px }));
   } catch {}

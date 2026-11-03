@@ -78,6 +78,15 @@ test("the first picture notes its height at this width; an empty library does no
   assert.deepEqual(JSON.parse(app.lsMap.get("dingbat_home_h")),
                    { w: app.runIn("window.innerWidth"), px: 612 });
 
+  // A library taller than the screen is held at the screen's height.
+  const tall = await loadApp({ htmlClasses: ["home-pending"], localStorageSeed: { dingbat_library: "games" } });
+  tall.document.getElementById("home-inner").offsetHeight = 2400;
+  tall.document.getElementById("home").clientHeight = 760;
+  seed(tall, ["A.gba"]);
+  await tall.api.refreshHomeRecent();
+  await drain();
+  assert.equal(JSON.parse(tall.lsMap.get("dingbat_home_h")).px, 760);
+
   const empty = await loadApp({ htmlClasses: ["home-pending"], localStorageSeed: { dingbat_library: "games" } });
   empty.document.getElementById("home-inner").offsetHeight = 300;
   await empty.api.refreshHomeRecent();

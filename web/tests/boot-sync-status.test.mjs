@@ -132,8 +132,13 @@ const runHintScript = (hint, { onLine = true } = {}) => {
 // The slot is in the bar from the first frame either way: shown in the
 // markup, and the bar a library's (body.lib-has-games, which shows it) from
 // the head's hint rather than from when index.js runs.
-test("index.html shows the account slot before index.js runs", () => {
+test("index.html shows the account slot before index.js runs", async () => {
   assert.match(HTML, /<div id="account-slot">/, "not hidden in the markup");
+  // Its outline is index.js's signed-out drawing, so nothing changes when
+  // index.js takes over.
+  const app = await loadApp();
+  assert.ok(HTML.includes('<span id="account-avatar" aria-hidden="true">' + app.runIn("PERSON_SVG") + "</span>"),
+            "the markup's outline is PERSON_SVG");
   const bodyScript = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)]
     .map((m) => m[1]).find((src) => src.includes("lib-has-games"));
   const added = [];
