@@ -154,6 +154,7 @@ final class AppModel: ObservableObject {
     /// `moment`: an earlier moment chosen from Resume from earlier, which
     /// goes in with its battery; `fresh`: from the in-game save, no offer.
     func launch(_ entry: RomEntry, resume: Bool, moment: Data? = nil, fresh: Bool = false) {
+        tapGen &+= 1 // a tap held for the boot's pull gives way to this
         // No ROM here: Drive hands it back, or the person finds the file.
         if !entry.isLocal {
             if DriveSync.shared.driveHasRom(entry.fileName) { fetchThenLaunch(entry, resume: resume) }
@@ -252,8 +253,23 @@ final class AppModel: ObservableObject {
             openSheet(.moments(entry, crash: true))
             return
         }
-        launch(entry, resume: resume, fresh: fresh)
+        // A local game tapped while the boot's pull is out waits for Drive's
+        // newer moment of it, if there is one (DriveSync.holdForBootPull); a
+        // later tap or open takes the open from it.
+        if DriveSync.shared.checking.contains(entry.fileName) { return } // already held: this tap adds nothing
+        guard DriveSync.shared.bootPullOut, entry.isLocal, session.game != entry else {
+            launch(entry, resume: resume, fresh: fresh)
+            return
+        }
+        tapGen &+= 1
+        let gen = tapGen
+        Task { @MainActor in
+            await DriveSync.shared.holdForBootPull(entry.fileName)
+            if gen == tapGen { launch(entry, resume: resume, fresh: fresh) }
+        }
     }
+    /// Which tap is the latest (tapGame).
+    private var tapGen = 0
 
     /// Back into an earlier moment (web resumeMoment): the game boots on its
     /// save and the moment goes in. One from before the last in-game save

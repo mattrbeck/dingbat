@@ -550,6 +550,15 @@ struct LibraryTile: View {
                 .foregroundColor(.white)
             }
             .overlay(RoundedRectangle(cornerRadius: 1).stroke(opening ? palette.accent : .clear, lineWidth: 2))
+        } else if drive.checking.contains(name) {
+            ZStack {
+                Color.black.opacity(0.55)
+                VStack(spacing: 4) {
+                    Text("Checking Drive…").font(.system(size: 13, weight: .semibold))
+                    Text("Google Drive").font(.system(size: 11))
+                }
+                .foregroundColor(.white)
+            }
         } else if model.opening == name {
             ZStack {
                 Color.black.opacity(0.55)

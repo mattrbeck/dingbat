@@ -789,6 +789,47 @@ final class DriveSync: ObservableObject {
         await runExclusive {
             self.pullQueued = false
             await self.pullInner(silent: silent)
+            self.firstPullDone = true
+            self.firstListing = nil // a hold asks it only while the pull is out
+        }
+    }
+
+    // MARK: a tap while the boot's pull is out (web holdForBootPull)
+
+    /// Games whose tap waits on the boot's pull (the tile's "Checking Drive…").
+    @Published private(set) var checking = Set<String>()
+    private var firstPullDone = false
+    /// The first pull's listing, once it has one.
+    private var firstListing: Listing?
+    static let bootHoldMs: Double = 6000
+    /// The boot's pull is still out, and said so (the ring).
+    var bootPullOut: Bool { !firstPullDone && status == .syncing && linked }
+
+    /// Drive may hold a newer save or session of the game than this device
+    /// last saw. Opened now, it would boot on the older copy here, and the
+    /// pull's hand-off would then offer a Switch over the game being played.
+    /// So the tap waits for the pull's listing, and, when it shows something
+    /// newer of the game, for the pull to bring it - never past bootHoldMs,
+    /// when the game opens as it is and the hand-off covers the rest.
+    @MainActor
+    func holdForBootPull(_ game: String) async {
+        guard bootPullOut, !checking.contains(game) else { return }
+        let until = Self.now() + Self.bootHoldMs
+        // Drawn only while there is a wait: a listing already in answers at once.
+        if firstListing == nil { checking.insert(game) }
+        defer { checking.remove(game) }
+        while firstListing == nil && !firstPullDone && Self.now() < until {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard let remote = firstListing else { return }
+        let newer = handoffKeys(game).contains { key in
+            guard let f = remote.map[key] else { return false }
+            return state.rmt[key] != f.modifiedTime
+        }
+        guard newer else { return }
+        checking.insert(game)
+        while !firstPullDone && Self.now() < until {
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
@@ -949,6 +990,7 @@ final class DriveSync: ObservableObject {
         var queuedMissing = false
         do {
             var remote = try await listMap(); try live()
+            if firstListing == nil { firstListing = remote }
             try await syncSaveHook(remote, live: live)
             var lib = mergeLibrary(try await readLibrary(&remote, live: live), localLibrary())
             try live()

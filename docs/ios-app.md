@@ -21,7 +21,10 @@ app and a browser, through a fake Drive) and `node ios/e2e/link.mjs
 signaling server; both must hold byte-identical states for both players at
 the same frame). `ios/e2e/drive-big.mjs` brings three 32 MB ROMs down from a fake Drive at
 once and holds the app to staying responsive (the main thread never waits
-over 250 ms), within memory, alive, and byte for byte. `ios/e2e/trade.mjs` plays a whole Pokémon trade, FireRed
+over 250 ms), within memory, alive, and byte for byte. `ios/e2e/boot-hold.mjs`
+relaunches the app holding an older moment than Drive, with the fake Drive
+held back, and taps it into the game: it waits ("Checking Drive…") and opens
+on the browser's newer save. `ios/e2e/trade.mjs` plays a whole Pokémon trade, FireRed
 in Chromium against LeafGreen in the app from save states at the Cable Club
 counter, over a relay that delays, jitters and drops the WebRTC packets
 (`ios/e2e/netem.mjs`, no root needed); it needs the real games, so it is

@@ -201,10 +201,13 @@ struct HeroView: View {
     private func primary(_ label: String, icon: String, action: @escaping () -> Void) -> some View {
         // A pad arriving at home starts on the hero's main button.
         PadNav.shared.preferred["home"] = "hero:" + label
+        // Said on the button while its tap waits on the boot's pull (the
+        // button keeps its name for the pad).
+        let shown = drive.checking.contains(entry.fileName) ? "Checking Drive…" : label
         return Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon).font(.system(size: 13))
-                Text(label).font(.system(size: 15, weight: .semibold))
+                Text(shown).font(.system(size: 15, weight: .semibold))
             }
             .foregroundColor(palette.accentInk)
             .padding(.horizontal, 22)

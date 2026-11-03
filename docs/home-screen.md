@@ -291,9 +291,12 @@ save or session of it than this device last saw, it waits on for the pull
 to bring them, so the game opens on the other device's moment rather than
 on the older copy here with a Switch offered over play. Six seconds at
 most; then it opens as it is and the hand-off covers the rest. A later tap
-elsewhere takes the open from it. `web/e2e/boot-sync.e2e.mjs` plays this
-out in two browsers on one fake Drive, the second booting with Google held
-back.
+elsewhere takes the open from it. The iOS app does the same
+(`DriveSync.holdForBootPull`, from `AppModel.tapGame`; the tile and the
+hero's button say "Checking Drive…"). `web/e2e/boot-sync.e2e.mjs` plays
+this out in two browsers on one fake Drive, the second booting with Google
+held back; `ios/e2e/boot-hold.mjs` does it with the app as the second
+device.
 
 The update check (`checkForUpdate`) also runs at every boot, beside the
 pull: the Update button can show before the new service worker has
