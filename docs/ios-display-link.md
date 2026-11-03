@@ -45,6 +45,11 @@ time.
    costly as the recent ones still fits) is needed by the metal link: DS
    frames ran up to 8 ms past the budget and 80-100 refreshes a run were
    missed without it. With it: none. It costs ~8% of DS fast-forward speed.
+   It helps the CADisplayLink too: Emerald fast-forward presented after
+   its target 355 and 0 times a run without it (49.0 and 34.7 ms to glass),
+   0 and 0 with it (36.1 and 36.1 ms). DS still presents late on the
+   CADisplayLink in some runs (411 of 720), its present waiting on the GPU.
+   Every CADisplayLink number below is with the check.
 7. **Fast-forward speed:** the metal link leaves a 3 ms reserve before its
    work deadline, 13.6 ms of frames a refresh against the CADisplayLink's
    16.4 ms (its tick arrives early), so GBA fast-forward is ~13% slower.
