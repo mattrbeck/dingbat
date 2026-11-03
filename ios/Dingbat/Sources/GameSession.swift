@@ -93,6 +93,8 @@ final class GameSession: NSObject, ObservableObject {
     private var shotTime: CFTimeInterval = 0          // seconds run since the last library picture
     private var saveCheckTime: CFTimeInterval = 0
     private var lastTick: CFTimeInterval = 0
+    /// A recent fast-forward frame's cost (s), a decaying peak.
+    private var ffFrameCost: Double = 0
     private var frameDebt: Double = 0                 // frames owed to the display clock
     private var sources: [String: Set<Int>] = [:]     // held inputs per source ("touch", "pad"...)
     /// Whether the game in memory moved since its last session snapshot
@@ -271,7 +273,7 @@ final class GameSession: NSObject, ObservableObject {
 
     private func startLink() {
         guard link == nil, !metalLinked else { return }
-        if let latency = Self.metalLinkLatency, #available(iOS 17, *) {
+        if let latency = wantedMetalLatency, #available(iOS 17, *) {
             metalLinked = true
             GameRenderer.shared.startMetalLink(latency: latency) { [weak self] t in self?.step(t) }
             return
@@ -300,6 +302,34 @@ final class GameSession: NSObject, ObservableObject {
         guard let i = a.firstIndex(of: "-metal-link"), i + 1 < a.count, let n = Float(a[i + 1]) else { return nil }
         return n
     }()
+    /// `-metal-link-ff N` (prototype): the CAMetalDisplayLink in fast-forward
+    /// only; the CADisplayLink at every other speed (switched on the change).
+    static let metalLinkFFLatency: Float? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-metal-link-ff"), i + 1 < a.count, let n = Float(a[i + 1]) else { return nil }
+        return n
+    }()
+
+    /// The latency to ask a CAMetalDisplayLink for at the current speed, or
+    /// nil for the CADisplayLink.
+    private var wantedMetalLatency: Float? {
+        if let n = Self.metalLinkLatency { return n }
+        if let n = Self.metalLinkFFLatency, speed == .fastForward { return n }
+        return nil
+    }
+
+    /// Hybrid pacing: swap the link when the speed moves in or out of
+    /// fast-forward.
+    private func relinkForSpeed() {
+        guard Self.metalLinkFFLatency != nil, link != nil || metalLinked else { return }
+        let wantMetal = wantedMetalLatency != nil
+        guard wantMetal != metalLinked else { return }
+        stopLink()
+        startLink()
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.log("M relink \(wantMetal ? "metal" : "cadisplay")") }
+        #endif
+    }
 
     // MARK: lifecycle
 
@@ -492,6 +522,12 @@ final class GameSession: NSObject, ObservableObject {
             if trace { FFTrace.shared.budget(budget, target: target) }
             #endif
             let t0 = CACurrentMediaTime()
+            var last = t0
+            #if DEBUG
+            let predict = !Self.ffNoPredict
+            #else
+            let predict = true
+            #endif
             repeat {
                 if isNDS { NdsState.shared.blowFrame() }
                 dingbat_run_frame()
@@ -500,7 +536,13 @@ final class GameSession: NSObject, ObservableObject {
                 #if DEBUG
                 if trace { FFTrace.shared.frame(changed: dingbat_frame_static() == 0) }
                 #endif
-            } while CACurrentMediaTime() - t0 < budget && ran < 40
+                // Another frame only if one as dear as the recent ones still
+                // fits: a DS frame can cost several ms, and running past the
+                // budget makes the present late for its refresh.
+                let now = CACurrentMediaTime()
+                ffFrameCost = max(now - last, ffFrameCost * 0.97)
+                last = now
+            } while (predict ? ffFrameCost : 0) + (CACurrentMediaTime() - t0) < budget && ran < 40
         case .normal, .double, .slow:
             // Run-ahead is the GB/GBA cores' (a DS frame is a plain one).
             let ahead = speed == .normal && !isNDS ? Settings.shared.runahead : 0
@@ -594,6 +636,8 @@ final class GameSession: NSObject, ObservableObject {
 
     #if DEBUG
     static let ffGridTarget = ProcessInfo.processInfo.arguments.contains("-ff-grid-target")
+    /// `-ff-no-predict`: the fast-forward loop without the next-frame check (A/B).
+    static let ffNoPredict = ProcessInfo.processInfo.arguments.contains("-ff-no-predict")
     static let ffReserve: Double? = {
         let a = ProcessInfo.processInfo.arguments
         guard let i = a.firstIndex(of: "-ff-reserve"), i + 1 < a.count, let ms = Double(a[i + 1]) else { return nil }
@@ -1124,6 +1168,7 @@ final class GameSession: NSObject, ObservableObject {
         // Slow motion's frames each bring 33 ms of sound at once: a deeper
         // ring (~55 ms) so it never runs dry between them; ~25 ms otherwise.
         dingbat_audio_set_target(s == .slow ? 1800 : 832)
+        relinkForSpeed()
     }
 
     func toggleFastForward() { setSpeed(speed == .fastForward ? .normal : .fastForward) }

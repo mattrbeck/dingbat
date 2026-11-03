@@ -72,7 +72,8 @@ def main():
     if not ticks:
         print("no ticks")
         return
-    presses = [i for i in inputs if i[1] == 4 and i[2]]
+    press_id = int(sys.argv[sys.argv.index("--press-id") + 1]) if "--press-id" in sys.argv else 4
+    presses = [i for i in inputs if i[1] == press_id and i[2]]
     t_first = ticks[0]["entry"]
     presses = [p for p in presses if p[0] > t_first]
 
@@ -123,13 +124,18 @@ def main():
         len(pres), len(ticks), sum(1 for t in ticks if t["mask"] and not t["presented"])))
 
     def on_glass(seq):
-        if seq in glass and glass[seq] > 0:
-            return glass[seq]
+        # A device's presentedTime of 0 is a picture never shown: no time,
+        # not the GPU's (the simulator has no presented handler at all).
+        if real_glass:
+            return glass[seq] if glass.get(seq, 0) > 0 else None
         if seq in gpu:
             return gpu[seq][1]
         return None
 
-    lat = [on_glass(t["seq"]) - t["aim"] for t in pres if on_glass(t["seq"]) is not None]
+    if real_glass:
+        never = [t for t in pres if glass.get(t["seq"]) == 0]
+        print("presented but never shown (presentedTime 0): %d of %d" % (len(never), len(pres)))
+    lat =[on_glass(t["seq"]) - t["aim"] for t in pres if on_glass(t["seq"]) is not None]
     print("glass - vsync aimed at ms:", stats(lat))
     # Comparable across pacing modes: how old the picture is when it shows.
     print("present end -> glass ms:", stats([on_glass(t["seq"]) - t["pend"] for t in pres

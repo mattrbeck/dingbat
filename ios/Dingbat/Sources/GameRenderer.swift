@@ -163,10 +163,14 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         #if DEBUG
         if FFTrace.on { FFTrace.shared.planned(at) }
         #endif
-        if drawPending, dingbat_loaded() != 0 {
-            drawPending = false
+        // Every update's drawable is presented, the same picture again when
+        // the tick brought none: one handed back unpresented made iOS drop
+        // the next present (about half the pictures after a still one were
+        // never shown, an iPhone 13 mini on iOS 27).
+        if updateDrawable != nil, dingbat_loaded() != 0 {
             drawIntoUpdate()
         }
+        drawPending = false
         updateDrawable = nil
     }
 
