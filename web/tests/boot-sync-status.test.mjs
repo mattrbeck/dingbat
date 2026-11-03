@@ -111,20 +111,41 @@ const HTML = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const HINT_SCRIPT = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)]
   .map((m) => m[1]).find((src) => src.includes("dingbat_drive"));
 
-// The script on a bare slot: what it draws, from `hint` (a stored string).
+// The script on the markup's slot (the signed-out outline): what it draws,
+// from `hint` (a stored string).
 const runHintScript = (hint, { onLine = true } = {}) => {
-  const el = (id) => ({ id, hidden: id === "account-slot", dataset: {}, textContent: "", title: "",
-                        classList: { add() {} }, setAttribute(k, v) { this[k] = v; } });
+  const el = (id) => ({ id, dataset: {}, textContent: "", title: "", classes: new Set(),
+                        classList: { add(c) { this.owner.classes.add(c); } },
+                        setAttribute(k, v) { this[k] = v; } });
   const els = { "account-slot": el("account-slot"), "account-btn": el("account-btn"),
                 "account-avatar": el("account-avatar") };
+  for (const e of Object.values(els)) e.classList.owner = e;
   vm.runInNewContext(HINT_SCRIPT, {
     localStorage: { getItem: (k) => (k === "dingbat_drive" ? hint : null) },
     document: { getElementById: (id) => els[id] },
     navigator: { onLine }, JSON, Date,
   });
-  return { shown: !els["account-slot"].hidden, sync: els["account-btn"].dataset.sync,
+  return { signedIn: els["account-btn"].classes.has("signed-in"), sync: els["account-btn"].dataset.sync,
            initial: els["account-avatar"].textContent };
 };
+
+// The slot is in the bar from the first frame either way: shown in the
+// markup, and the bar a library's (body.lib-has-games, which shows it) from
+// the head's hint rather than from when index.js runs.
+test("index.html shows the account slot before index.js runs", () => {
+  assert.match(HTML, /<div id="account-slot">/, "not hidden in the markup");
+  const bodyScript = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+    .map((m) => m[1]).find((src) => src.includes("lib-has-games"));
+  const added = [];
+  for (const pending of [true, false]) {
+    added.length = 0;
+    vm.runInNewContext(bodyScript, { document: {
+      documentElement: { classList: { contains: (c) => pending && c === "home-pending" } },
+      body: { classList: { add: (c) => added.push(c) } },
+    } });
+    assert.deepEqual(added, pending ? ["lib-has-games"] : []);
+  }
+});
 
 test("index.html's hint script is there to test", () => {
   assert.ok(HINT_SCRIPT, "a <script> reading dingbat_drive");
@@ -145,16 +166,17 @@ for (const [what, state, broker] of [
     await app.api.loadSyncState();
     const hint = app.localStorage.getItem("dingbat_drive");
     const drawn = runHintScript(hint);
-    assert.equal(drawn.shown, true);
+    assert.equal(drawn.signedIn, true);
     assert.equal(drawn.initial, "O");
     assert.equal(drawn.sync === "syncing", app.runIn("driveBootSyncs()"));
     assert.equal(runHintScript(hint, { onLine: false }).sync, "ok", "offline: no ring");
   });
 }
 
-test("the hint script draws nothing without a hint", () => {
-  assert.equal(runHintScript(null).shown, false);
-  assert.equal(runHintScript("not json").shown, false);
+test("without a hint the hint script leaves the signed-out outline", () => {
+  for (const h of [null, "not json"]) {
+    assert.deepEqual(runHintScript(h), { signedIn: false, sync: undefined, initial: "" });
+  }
 });
 
 // --- Drive reads have a deadline; uploads do not ----------------------------

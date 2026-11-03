@@ -262,6 +262,27 @@ hidden until the first render has its tiles' pictures (at most 400 ms
 more), then fades in. No hint, or `empty`, and nothing waits. `libraryEmpty` is `null` until the
 first read, so nothing before it (the boot sync refresh) decides either way.
 
+While it waits the page is already the library's, not the empty state's:
+
+- A script at the top of `<body>` adds `body.lib-has-games` (which shows
+  the account slot in the bar) instead of leaving it to `index.js`. That
+  file is most of a megabyte, and the bar's buttons used to shift over
+  when it ran.
+- The slot is in the markup unhidden, with the signed-out outline. The
+  hint in "The first sync" below draws the signed-in account over it.
+- `#home-inner` keeps the height it had at the last first picture
+  (`dingbat_home_h`: `{ w, px }`, noted by `revealHome` and used only at
+  the same width, since the columns follow the width). Without it, the
+  brand started out centred alone and was pushed up when the tiles came
+  in.
+
+The reads before that first render come out of IndexedDB in one
+transaction (`prefetchBootReads`, `BOOT_READ_KEYS`) rather than two dozen
+transactions one after another. Each read is a round trip to the browser's
+storage process. `dbGet` hands each prefetched value out once, and a write
+to a key drops it. `web/tests/boot-reads.test.mjs` fails when a setting
+`initStorage` reads is missing from the list.
+
 ## The first sync
 
 The account slot says how the boot's Drive pull stands from the first

@@ -593,7 +593,46 @@ const openDB = () => new Promise((resolve, reject) => {
   req.onerror = () => reject(req.error);
 });
 
+// The boot's reads, in one transaction. initStorage reads two dozen
+// settings one after another before the library can render, and each read
+// in a transaction of its own is a round trip to the browser's storage
+// process (WebKit's is a separate process: ~2 ms apiece on a Mac, several
+// on a phone). prefetchBootReads asks for them all at once; dbGet hands
+// each one out once, and a write to a key drops it - so what comes back is
+// what a read of its own would have seen. initStorage drops the rest once
+// the library's first render has its list (web/tests/boot-reads.test.mjs
+// holds this list to the reads the boot makes).
+const BOOT_READ_KEYS = [
+  "keybindings", "large-controls", "landscape-buttons", "opaque-controls",
+  "hide-touch-on-gamepad", "input-display", "control-style", "joystick-mode",
+  "nds-layout", "nds-display", "library-open", "runahead", "audio",
+  "colorCorrect", "system", "save-hook", "video", "gb-palette", "prints",
+  "prints-seen", "gdrive_sync", "crashes", "playing", "roms_sort", "recent",
+];
+/** @type {Map<string, any> | null} */
+let bootReads = null;
+const prefetchBootReads = () => new Promise((resolve) => {
+  const got = new Map();
+  let tx;
+  try { tx = db.transaction("blobs", "readonly"); } catch { resolve(); return; }
+  const store = tx.objectStore("blobs");
+  for (const k of BOOT_READ_KEYS) {
+    const req = store.get(k);
+    req.onsuccess = () => got.set(k, req.result ?? null);
+  }
+  // A failed prefetch costs nothing: every read goes to the store as before.
+  tx.oncomplete = () => { bootReads = got; resolve(); };
+  tx.onerror = tx.onabort = () => resolve();
+});
+const forgetBootRead = (key) => { bootReads?.delete(key); };
+
 const dbGet = (key) => new Promise((resolve, reject) => {
+  if (bootReads?.has(key)) {
+    const v = bootReads.get(key);
+    bootReads.delete(key);
+    resolve(v);
+    return;
+  }
   let tx = db.transaction("blobs", "readonly");
   let req = tx.objectStore("blobs").get(key);
   req.onsuccess = () => resolve(req.result ?? null);
@@ -601,6 +640,7 @@ const dbGet = (key) => new Promise((resolve, reject) => {
 });
 
 const dbPut = (key, value) => new Promise((resolve, reject) => {
+  forgetBootRead(key);
   let tx = db.transaction("blobs", "readwrite");
   let req = tx.objectStore("blobs").put(value, key);
   req.onsuccess = () => resolve();
@@ -613,6 +653,7 @@ const dbPut = (key, value) => new Promise((resolve, reject) => {
 });
 
 const dbDelete = (key) => new Promise((resolve, reject) => {
+  forgetBootRead(key);
   let tx = db.transaction("blobs", "readwrite");
   let req = tx.objectStore("blobs").delete(key);
   req.onsuccess = () => resolve();
@@ -631,6 +672,7 @@ const dbKeys = () => new Promise((resolve, reject) => {
 // the stored value and returns the new one, or undefined to leave it.
 // Resolves whether it wrote.
 const dbUpdate = (key, fn) => new Promise((resolve, reject) => {
+  forgetBootRead(key);
   let tx = db.transaction("blobs", "readwrite");
   let store = tx.objectStore("blobs");
   let wrote = false;
@@ -655,6 +697,7 @@ const dbUpdate = (key, fn) => new Promise((resolve, reject) => {
 // Resolves { moved, skipped }.
 const dbMoveKeys = (pairs, puts = [], { skipCollisions = false } = {}) =>
   new Promise((resolve, reject) => {
+  bootReads = null;
   let tx = db.transaction("blobs", "readwrite");
   let store = tx.objectStore("blobs");
   let moved = [];
@@ -6387,12 +6430,27 @@ if (homePending) document.body.classList.add("lib-has-games");
 // (paused, then Last played after a close) rather than the brand.
 let playedThisVisit = false;
 
+// The home screen's height at this first picture, for the next boot's head
+// to hold while it reads (styles.css, --home-pending-h). Taken here, where
+// the page is what a fresh visit shows (no hero yet), and keyed by the
+// width, which sets the columns.
+const HOME_H_KEY = "dingbat_home_h";
+const noteHomeHeight = (inner) => {
+  // Not when HOME_REVEAL_MAX_MS revealed a library not read yet.
+  if (libraryEmpty !== false) return;
+  const px = Math.round(inner?.offsetHeight || 0);
+  try {
+    if (px > 0) localStorage.setItem(HOME_H_KEY, JSON.stringify({ w: window.innerWidth, px }));
+  } catch {}
+};
+
 const revealHome = () => {
   if (!homePending) return;
   homePending = false;
   document.documentElement.classList.remove("home-pending");
   // The brand was up all along; what was held under it fades in.
   const inner = document.getElementById("home-inner");
+  noteHomeHeight(inner);
   for (const el of /** @type {HTMLCollectionOf<HTMLElement>} */ (inner?.children ?? [])) {
     if (el.id !== "home-brand" && el.animate) {
       el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: "ease-out" });
@@ -18743,6 +18801,8 @@ const initStorage = async () => {
   // Migrations before anything renders from the records they rewrite.
   await migrateFromLocalStorage();
   await migrateRecentFormat();
+  // After the migrations, which write what they move.
+  await prefetchBootReads();
   // loadBiosFromStorage is not here: the FS doesn't exist yet. The loads
   // below only set JS vars / DOM; their apply* helpers no-op without the
   // runtime and onRuntimeInitialized re-pushes the wasm-side mirrors.
@@ -18782,7 +18842,8 @@ const initStorage = async () => {
   refreshSyncUI();
   startSyncTriggers();
   resumeDriveOnBoot();
-  refreshHomeRecent();
+  refreshHomeRecent(); // reads "recent" before its first await
+  bootReads = null;
   // Not awaited: nothing renders from it.
   sweepOrphanedAutoStates().catch(() => {});
 };

@@ -2348,6 +2348,12 @@ html.home-pending #home-inner > :not(#home-brand) {
   visibility: hidden;
 }
 
+/* ...in the height it had last time (index.html's head, index.js
+   noteHomeHeight), so the brand starts where the library leaves it. */
+html.home-pending #home-inner {
+  min-height: var(--home-pending-h, 0px);
+}
+
 @keyframes home-in {
   from {
     opacity: 0;

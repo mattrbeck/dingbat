@@ -27,9 +27,16 @@
       // A library the last visit had: hold the home screen's content until
       // it is read, so its first picture is the real one (index.js, "The
       // first picture"). No hint - a first visit, an empty library - no wait.
+      // And the height the home screen had then, at this width (its columns
+      // follow the width): held while the library is read, the brand sits
+      // where it will stay rather than centred alone and then pushed up.
       try {
         if (localStorage.getItem("dingbat_library") === "games") {
           document.documentElement.classList.add("home-pending");
+          var hh = JSON.parse(localStorage.getItem("dingbat_home_h") || "null");
+          if (hh && hh.w === window.innerWidth && hh.px > 0) {
+            document.documentElement.style.setProperty("--home-pending-h", hh.px + "px");
+          }
         }
       } catch (e) {}
     </script>
@@ -95,6 +102,14 @@
   </head>
 
   <body class="no-select">
+    <script>
+      // A library the last visit had (the head's home-pending): the bar is a
+      // library's from the first frame - the account in it - rather than from
+      // when index.js runs, which moved the bar's buttons over once it did.
+      if (document.documentElement.classList.contains("home-pending")) {
+        document.body.classList.add("lib-has-games");
+      }
+    </script>
     <!-- ============================ Top bar ============================ -->
     <header id="topbar">
       <!-- The bar's brand. A second copy of the hero's, not the same element
@@ -322,9 +337,9 @@
            sync is doing (a tick, a turning ring, or an amber mark when changes
            are waiting). Either way it opens #account-pop, which holds Google's
            own sign-in button, or Sync now and the rest. -->
-      <div id="account-slot" hidden>
+      <div id="account-slot">
         <button type="button" id="account-btn" title="Sign in" aria-label="Sign in" aria-haspopup="dialog" aria-expanded="false">
-          <span id="account-avatar" aria-hidden="true"></span>
+          <span id="account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="3.6"/><path d="M5 19.5c1.2-3.3 3.9-5 7-5s5.8 1.7 7 5"/></svg></span>
           <span id="account-badge" aria-hidden="true"></span>
         </button>
       </div>
@@ -333,15 +348,15 @@
         // drawn before index.js runs, with the ring turning when this boot
         // syncs straight away (driveBootSyncs) - so the first frame never
         // shows the tick over a library Drive has not been asked about yet.
-        // In a function: a global var here would collide with index.js's
-        // top-level let/const of the same name.
+        // No hint, the markup's signed-out outline stands (as index.js draws
+        // it: PERSON_SVG). In a function: a global var here would collide
+        // with index.js's top-level let/const of the same name.
         (function () {
           try {
             var h = JSON.parse(localStorage.getItem("dingbat_drive") || "null");
             if (!h || !h.i) return;
             var b = document.getElementById("account-btn");
             var syncs = navigator.onLine !== false && (h.exp > Date.now() + 5000 || h.rt);
-            document.getElementById("account-slot").hidden = false;
             b.classList.add("signed-in");
             b.dataset.sync = syncs ? "syncing" : "ok";
             document.getElementById("account-avatar").textContent = h.i;

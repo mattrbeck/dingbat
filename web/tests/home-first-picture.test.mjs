@@ -6,6 +6,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import { loadApp, settle, u8 } from "./helpers.mjs";
 
 const drain = async (n = 12) => { for (let i = 0; i < n; i++) await settle(); };
@@ -61,4 +63,48 @@ test("before the library is read, a sync refresh decides nothing", async () => {
   app.runIn("refreshSyncUI()");
   assert.ok(!app.document.body.classList.contains("lib-has-games"), "the empty state stays");
   assert.equal(app.lsMap.get("dingbat_library"), undefined, "and no hint is written");
+});
+
+// --- The height the home screen holds while it reads ------------------------
+// index.html's head reserves the last first picture's height (at the same
+// width), so the brand does not start centred alone and then jump up.
+
+test("the first picture notes its height at this width; an empty library does not", async () => {
+  const app = await loadApp({ htmlClasses: ["home-pending"], localStorageSeed: { dingbat_library: "games" } });
+  app.document.getElementById("home-inner").offsetHeight = 612.4;
+  seed(app, ["A.gba"]);
+  await app.api.refreshHomeRecent();
+  await drain();
+  assert.deepEqual(JSON.parse(app.lsMap.get("dingbat_home_h")),
+                   { w: app.runIn("window.innerWidth"), px: 612 });
+
+  const empty = await loadApp({ htmlClasses: ["home-pending"], localStorageSeed: { dingbat_library: "games" } });
+  empty.document.getElementById("home-inner").offsetHeight = 300;
+  await empty.api.refreshHomeRecent();
+  await drain();
+  assert.equal(empty.lsMap.get("dingbat_home_h"), undefined);
+});
+
+const HEAD_SCRIPT = [...readFileSync(new URL("../index.html", import.meta.url), "utf8")
+  .matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => s.includes("dingbat_home_h"));
+
+const runHead = (store, innerWidth) => {
+  const classes = new Set();
+  const props = {};
+  vm.runInNewContext(HEAD_SCRIPT, {
+    localStorage: { getItem: (k) => store[k] ?? null },
+    window: { innerWidth }, JSON,
+    document: { documentElement: { classList: { add: (c) => classes.add(c) },
+                                   style: { setProperty: (k, v) => { props[k] = v; } } } },
+  });
+  return { pending: classes.has("home-pending"), h: props["--home-pending-h"] };
+};
+
+test("index.html's head holds the noted height only at the same width", () => {
+  const store = { dingbat_library: "games", dingbat_home_h: JSON.stringify({ w: 390, px: 612 }) };
+  assert.deepEqual(runHead(store, 390), { pending: true, h: "612px" });
+  assert.deepEqual(runHead(store, 844), { pending: true, h: undefined }, "turned: other columns");
+  assert.deepEqual(runHead({ ...store, dingbat_library: "empty" }, 390), { pending: false, h: undefined });
+  assert.deepEqual(runHead({ dingbat_library: "games", dingbat_home_h: "junk" }, 390),
+                   { pending: true, h: undefined });
 });
