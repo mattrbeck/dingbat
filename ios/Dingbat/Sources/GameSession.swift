@@ -92,6 +92,7 @@ final class GameSession: NSObject, ObservableObject {
     private var saveCheckTime: CFTimeInterval = 0
     private var lastTick: CFTimeInterval = 0
     private var frameDebt: Double = 0                 // frames owed to the display clock
+    private var ffFrameCost: Double = 0               // a recent fast-forward frame's cost (s), decaying peak
     private var sources: [String: Set<Int>] = [:]     // held inputs per source ("touch", "pad"...)
     /// Whether the game in memory moved since its last session snapshot
     /// (web sessionMoved): a game sitting paused takes no new snapshot.
@@ -465,6 +466,7 @@ final class GameSession: NSObject, ObservableObject {
             if trace { FFTrace.shared.budget(budget, target: target) }
             #endif
             let t0 = CACurrentMediaTime()
+            var last = t0
             repeat {
                 if isNDS { NdsState.shared.blowFrame() }
                 dingbat_run_frame()
@@ -473,7 +475,14 @@ final class GameSession: NSObject, ObservableObject {
                 #if DEBUG
                 if trace { FFTrace.shared.frame(changed: dingbat_frame_static() == 0) }
                 #endif
-            } while CACurrentMediaTime() - t0 < budget && ran < 40
+                // Another frame only if one as dear as the recent ones still
+                // fits: a frame that starts just inside the budget can end
+                // well past it (a DS frame costs several ms), and the
+                // present is then late for its refresh.
+                let now = CACurrentMediaTime()
+                ffFrameCost = max(now - last, ffFrameCost * 0.97)
+                last = now
+            } while ffFrameCost + (CACurrentMediaTime() - t0) < budget && ran < 40
         case .normal, .double, .slow:
             // Run-ahead is the GB/GBA cores' (a DS frame is a plain one).
             let ahead = speed == .normal && !isNDS ? Settings.shared.runahead : 0
