@@ -107,7 +107,7 @@ struct GameStage: View {
                     }
                     .flightAnchor("screen")
                     .flightHidden(.screen)
-                    .modifier(RumbleShake(active: session.rumbling))
+                    .modifier(RumbleShake())
                     .scaleEffect(zoom)
                     .offset(pan)
                     .accessibilityLabel("Game screen")
@@ -269,16 +269,16 @@ enum BarTapHint {
 }
 
 /// The rumble motor shakes the picture (web body.rumbling).
+/// One view tree either way: switching between two would rebuild the
+/// picture's Metal view each time the motor starts or stops.
 struct RumbleShake: ViewModifier {
-    let active: Bool
+    @ObservedObject private var rumble = RumbleState.shared
     func body(content: Content) -> some View {
-        if active {
-            TimelineView(.animation) { ctx in
-                let t = ctx.date.timeIntervalSinceReferenceDate
-                content.offset(x: CGFloat(sin(t * 95)) * 1.6, y: CGFloat(cos(t * 83)) * 1.2)
-            }
-        } else {
-            content
+        let active = rumble.on
+        TimelineView(.animation(paused: !active)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            content.offset(x: active ? CGFloat(sin(t * 95)) * 1.6 : 0,
+                           y: active ? CGFloat(cos(t * 83)) * 1.2 : 0)
         }
     }
 }
@@ -349,11 +349,11 @@ struct GlowView: View {
 /// Game Boy games have no shoulder row.
 struct InputOverlay: View {
     let gb: Bool
-    @EnvironmentObject var session: GameSession
+    @ObservedObject private var inputs = HeldInputs.shared
     @Environment(\.palette) var palette
     private let u: CGFloat = 11
 
-    private func on(_ id: Int) -> Bool { session.held.contains(id) }
+    private func on(_ id: Int) -> Bool { inputs.held.contains(id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: u * 0.55) {

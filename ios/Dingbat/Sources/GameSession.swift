@@ -47,14 +47,22 @@ final class GameSession: NSObject, ObservableObject {
     @Published var hleSessionOff = false
     @Published private(set) var tiltKind: Int = 0
     @Published private(set) var hasCamera = false
-    @Published private(set) var rumbling = false
+    /// Not published here (a rumble game's motor can flip every tick in
+    /// fast-forward, rebuilding every view observing the session): the
+    /// screen's shake observes RumbleState.
+    private(set) var rumbling = false {
+        didSet { if RumbleState.shared.on != rumbling { RumbleState.shared.on = rumbling } }
+    }
     /// The presented picture's size in native pixels (256x224 once an SGB
     /// border arrives). Published only when it changes: a per-frame value
     /// here would rebuild every view observing the session 60 times a second.
     @Published private(set) var outSize = CGSize(width: 240, height: 160)
     /// Inputs currently held, by id (touch, controller and hardware keys
-    /// merged), for the input display.
-    @Published private(set) var held: Set<Int> = []
+    /// merged). Not published here: every view observing the session would
+    /// rebuild on each press. The input display observes HeldInputs instead.
+    private(set) var held: Set<Int> = [] {
+        didSet { if HeldInputs.shared.held != held { HeldInputs.shared.held = held } }
+    }
     /// Local 2P: both players' cores run (TwoPlayer).
     @Published private(set) var twoPlayer = false
     /// The player the touch controls (and keyboard) drive in 2P.
@@ -431,16 +439,40 @@ final class GameSession: NSObject, ObservableObject {
         // can be unchanged (a fade that has just settled) while the screen
         // still shows the one before them.
         var changed = false
+        #if DEBUG
+        let trace = FFTrace.on
+        if trace { FFTrace.shared.tickBegin(link) }
+        #endif
         switch speed {
         case .fastForward:
             // As many frames as fit in most of this display interval.
-            let budget = max(0.004, link.targetTimestamp - CACurrentMediaTime() - 0.003)
+            #if DEBUG
+            var target = link.targetTimestamp
+            var reserve = 0.003
+            // `-ff-grid-target`: a callback that runs after its own target
+            // (the simulator's link always does) aims at the next refresh on
+            // the link's grid, as a device's callback does, instead of 4 ms.
+            let nowG = CACurrentMediaTime(), periodG = link.targetTimestamp - link.timestamp
+            if Self.ffGridTarget && periodG > 0 && target < nowG {
+                target += periodG * ((nowG - target) / periodG).rounded(.up)
+            }
+            if let r = Self.ffReserve { reserve = r }
+            #else
+            let target = link.targetTimestamp, reserve = 0.003
+            #endif
+            let budget = max(0.004, target - CACurrentMediaTime() - reserve)
+            #if DEBUG
+            if trace { FFTrace.shared.budget(budget, target: target) }
+            #endif
             let t0 = CACurrentMediaTime()
             repeat {
                 if isNDS { NdsState.shared.blowFrame() }
                 dingbat_run_frame()
                 ran += 1
                 if dingbat_frame_static() == 0 { changed = true }
+                #if DEBUG
+                if trace { FFTrace.shared.frame(changed: dingbat_frame_static() == 0) }
+                #endif
             } while CACurrentMediaTime() - t0 < budget && ran < 40
         case .normal, .double, .slow:
             // Run-ahead is the GB/GBA cores' (a DS frame is a plain one).
@@ -452,6 +484,9 @@ final class GameSession: NSObject, ObservableObject {
                 else if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
                 ran += 1
                 if dingbat_frame_static() == 0 { changed = true }
+                #if DEBUG
+                if trace { FFTrace.shared.frame(changed: dingbat_frame_static() == 0) }
+                #endif
             }
             keepAudioAlive()
         }
@@ -492,9 +527,15 @@ final class GameSession: NSObject, ObservableObject {
                 checkSaveChanged()
             }
         }
-        sleeping = dingbat_is_stopped() != 0
+        // Only a change: assigning a @Published, even the same value, rebuilds
+        // every view observing the session (milliseconds, every tick).
+        let stopped = dingbat_is_stopped() != 0
+        if stopped != sleeping { sleeping = stopped }
         fpsAccount(now, ran: ran)
         onTick?()
+        #if DEBUG
+        if trace { FFTrace.shared.tickEnd(ran: ran, speed: speed) }
+        #endif
     }
 
     /// Frames this display tick owes (web: the RAF accumulator). Rounded,
@@ -525,6 +566,12 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     #if DEBUG
+    static let ffGridTarget = ProcessInfo.processInfo.arguments.contains("-ff-grid-target")
+    static let ffReserve: Double? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-ff-reserve"), i + 1 < a.count, let ms = Double(a[i + 1]) else { return nil }
+        return ms / 1000
+    }()
     static let audioStats = ProcessInfo.processInfo.arguments.contains("-audio-stats")
 
     /// `-latency-test N` (with tonc's m7_demo, where Up moves the view the
@@ -874,6 +921,9 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     private func present() {
+        #if DEBUG
+        if FFTrace.on { FFTrace.shared.beforePresent() }
+        #endif
         GameRenderer.shared.present()
         let size = CGSize(width: Int(dingbat_out_width()), height: Int(dingbat_out_height()))
         if size != outSize { outSize = size }
@@ -986,6 +1036,9 @@ final class GameSession: NSObject, ObservableObject {
         let wasHeld = held.contains(id)
         let nowHeld = sources.values.contains { $0.contains(id) }
         if wasHeld != nowHeld {
+            #if DEBUG
+            if FFTrace.on { FFTrace.shared.input(id, nowHeld, source) }
+            #endif
             dingbat_set_input(Int32(id), nowHeld ? 1 : 0)
             if nowHeld { held.insert(id) } else { held.remove(id) }
         }
@@ -1446,6 +1499,18 @@ final class GameSession: NSObject, ObservableObject {
                                intent: .defaultIntent) else { return nil }
         return UIImage(cgImage: cg)
     }
+}
+
+/// The held inputs, published for the input display alone.
+final class HeldInputs: ObservableObject {
+    static let shared = HeldInputs()
+    @Published var held: Set<Int> = []
+}
+
+/// Whether the rumble motor runs, published for the screen's shake alone.
+final class RumbleState: ObservableObject {
+    static let shared = RumbleState()
+    @Published var on = false
 }
 
 /// Cheats per game, as .cht text (web cheats:<name>), re-applied on load.

@@ -13,8 +13,14 @@ final class TouchPadState: ObservableObject {
     static let shared = TouchPadState()
     /// Lit arms and buttons (a diagonal lights both arms).
     @Published var lit: Set<Int> = []
-    /// Joystick: the base's offset from home (floating mode drags it), the
-    /// knob's from the base, and the rim arc's direction (nil = off).
+}
+
+/// The joystick's look, written by the router: the base's offset from home
+/// (floating mode drags it), the knob's from the base, and the rim arc's
+/// direction (nil = off). Apart from TouchPadState so a thumb moving on the
+/// stick redraws the stick alone, not every pad.
+final class JoystickState: ObservableObject {
+    static let shared = JoystickState()
     @Published var joyBase: CGSize = .zero
     @Published var joyKnob: CGSize = .zero
     @Published var joyRim: Angle?
@@ -167,7 +173,7 @@ struct TouchControls: View {
         let f = frames
         ZStack(alignment: .topLeading) {
             if settings.controlStyle == .joystick {
-                JoystickView(skin: skin, state: state)
+                JoystickView(skin: skin)
                     .frame(width: f.joyBase.width, height: f.joyBase.height)
                     .offset(x: f.joyBase.minX, y: f.joyBase.minY)
             } else {
@@ -445,7 +451,7 @@ struct CirclePillKey: View {
 /// rim pointing at the direction being sent.
 struct JoystickView: View {
     let skin: PadSkin
-    @ObservedObject var state: TouchPadState
+    @ObservedObject private var state = JoystickState.shared
 
     var body: some View {
         GeometryReader { geo in
@@ -554,6 +560,7 @@ final class TouchRouterView: UIView {
     var blockedTop: CGFloat = 0
 
     private let state = TouchPadState.shared
+    private let joy = JoystickState.shared
     private var buttonTouches: [UITouch: Int] = [:]
     private var dpadTouch: UITouch?
     private var dpadCell: Int?          // 0...8 without the middle (4), or nil
@@ -702,20 +709,22 @@ final class TouchRouterView: UIView {
             if ux < -Self.joyAxial { want.insert(2) }
             if ux > Self.joyAxial { want.insert(3) }
         }
-        state.joyBase = CGSize(width: joyCenter.x - joyHome.x, height: joyCenter.y - joyHome.y)
+        let base = CGSize(width: joyCenter.x - joyHome.x, height: joyCenter.y - joyHome.y)
+        if joy.joyBase != base { joy.joyBase = base }
         let lim = joyR * Self.joyKnobTravel
         let k = mag > lim ? lim / mag : 1
-        state.joyKnob = CGSize(width: dx * k, height: dy * k)
+        let knob = CGSize(width: dx * k, height: dy * k)
+        if joy.joyKnob != knob { joy.joyKnob = knob }
         let changed = want != joyBits
         joyBits = want
-        if want.isEmpty {
-            state.joyRim = nil
-        } else {
+        var rim: Angle?
+        if !want.isEmpty {
             // 0 = up, clockwise.
             let rx: Double = (want.contains(3) ? 1 : 0) - (want.contains(2) ? 1 : 0)
             let ry: Double = (want.contains(1) ? 1 : 0) - (want.contains(0) ? 1 : 0)
-            state.joyRim = .radians(atan2(rx, -ry))
+            rim = .radians(atan2(rx, -ry))
         }
+        if joy.joyRim != rim { joy.joyRim = rim }
         return changed && !want.isEmpty
     }
 
@@ -723,10 +732,10 @@ final class TouchRouterView: UIView {
     private func joyRelease() {
         joyTouch = nil
         joyBits = []
-        state.joyRim = nil
+        joy.joyRim = nil
         withAnimation(.easeOut(duration: 0.16)) {
-            state.joyBase = .zero
-            state.joyKnob = .zero
+            joy.joyBase = .zero
+            joy.joyKnob = .zero
         }
     }
 
