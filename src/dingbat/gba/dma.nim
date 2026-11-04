@@ -287,6 +287,13 @@ proc trigger_fifo*(dma: DMA; fifo_channel: int) =
     # catch-up; busy_until covers that, as for trigger_hdma.
     when FIFO_DROP_BUSY:
       let now = dma.gba.scheduler.cycles
+      when FIFO_CART_CHAIN_LATE:
+        if now == dma.busy_until[ch] and dma.fifo_chain[fifo_channel] == 0 and
+           dma.gba.bus.fetch_page - 0x8 <= 5 and not dma.gba.bus.prefetch_on and
+           not dma.gba.cpu.halted:
+          dma.fifo_chain[fifo_channel] = 3
+          dma.request(ch)
+          return
       if now < dma.busy_until[ch]:
         # FIFO_HANDBACK_CHAIN: one landing in the burst's last cycle, the
         # hand-back, takes the next burst's first read there
@@ -384,7 +391,8 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   # and the rest of that burst at the next request, start with the bus
   # already the DMA's
   let fifo_burst = start_timing == 3 and (channel == 1 or channel == 2)
-  let chain_read = FIFO_HANDBACK_CHAIN and fifo_burst and dma.fifo_chain[channel - 1] == 1
+  let chain_read = FIFO_HANDBACK_CHAIN and fifo_burst and
+                   dma.fifo_chain[channel - 1] in {1'u8, 3'u8}
   let resumed = FIFO_HANDBACK_CHAIN and fifo_burst and dma.fifo_chain[channel - 1] == 2
   if not nested:
     if dma.chained: dma.chained = false
@@ -584,12 +592,18 @@ proc run_pending*(dma: DMA) =
     if (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3:
       if dma.gba.apu.dma_channels.sizes[ch - 1] >= 16:
         # a hand-back read not granted at once is not taken later
-        if dma.fifo_chain[ch - 1] == 1: dma.fifo_chain[ch - 1] = 0
+        if dma.fifo_chain[ch - 1] in {1'u8, 3'u8}: dma.fifo_chain[ch - 1] = 0
         continue
     let saved = dma.current_priority
     dma.current_priority = ch
     let bus = dma.gba.bus
     let granted_at = bus.sched.cycles + CycleCount(bus.cycles)
+    # FIFO_CART_CHAIN_LATE: a hand-back read granted after the CPU's gamepak
+    # fetch on its cycle was charged came before that fetch on the bus
+    let late_chain = FIFO_CART_CHAIN_LATE and (ch == 1 or ch == 2) and
+                     dma.fifo_chain[ch - 1] == 3
+    let late_next = bus.rom_next_addr
+    let late_free = bus.rom_free_since
     when DMA_KEEPS_PREFETCH:
       if saved == 4: bus.rom_cool()
       let cpu_stream = bus.rom_next_addr
@@ -712,6 +726,10 @@ proc run_pending*(dma: DMA) =
           " rfs=" & $bus.rom_free_since & " hot=" & $bus.rom_hot)
     bus.rom_next_addr = 1
     bus.rom_next_addr2 = 1
+    if late_chain:
+      # ... so the CPU's stream goes on behind it
+      bus.rom_next_addr = late_next
+      bus.rom_free_since = late_free + (bus.sched.cycles + CycleCount(bus.cycles) - granted_at)
     when DMA_KEEPS_PREFETCH:
       if saved == 4 and bus.prefetch_on and bus.dma_first_rom and cpu_stream != 1:
         bus.rom_next_addr = cpu_stream

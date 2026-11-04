@@ -1,13 +1,13 @@
 # Dingbat Test Results
 
-*Generated: 2026-10-15 02:31:06 · commit 09674ebf · game-boy-test-roms v7.0*
+*Generated: 2026-11-04 10:32:54 · commit 2844c03a · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
-- **Total:** 1585
-- **Pass:** 1563
+- **Total:** 1586
+- **Pass:** 1564
 - **Fail:** 22
 
 | Suite | Pass | Total | Status |
@@ -30,7 +30,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Screenshot suites | 21 | 21 | 👌 |
 | Game Boy - Shootout ROMs | 15 | 15 | 👌 |
 | [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
-| GBA - alyosha gba-tests | 123 | 124 | 👀 |
+| GBA - alyosha gba-tests | 124 | 125 | 👀 |
 | [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 5 | 8 | 👀 |
 | GBA - FuzzARM | 5 | 5 | 👌 |
 | GBA - hwverified (AGS-001) | 12 | 12 | 👌 |
@@ -117,7 +117,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
-## GBA - alyosha gba-tests (123/124)
+## GBA - alyosha gba-tests (124/125)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -170,6 +170,7 @@ Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). Se
 | alyosha/Serial/serial_time_start_bit | — | 👌 |
 | alyosha/Serial/serial_time_start_bit_2 | — | 👌 |
 | alyosha/arm/Coprocessor_14 | — | 👌 |
+| alyosha/fifo_dma/fifo | — | 👌 |
 | alyosha/fifo_dma/fifo_2 | — | 👌 |
 | alyosha/fifo_dma/fifo_3 | — | 👌 |
 | alyosha/fifo_dma/fifo_4 | — | 👌 |
@@ -303,7 +304,6 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **rtc3test upstream single ROM** — needs menu input to select a sub-test; the shootout's three pre-split builds are scored instead. (build_shootout_tests)
 - **DocBoy: 645 rows its own manifests disable** — `"enabled": false`, so DocBoy's runner never runs them and states no verdict for them: 640 `double_speed/apu/ch4` and 2 `double_speed/apu/ch3` CGB rows, `mbc/huc3/huc3_tick` ("takes a long time (1 real minute)") and two `cgb_dmg_mode` `m3_lcdc_win_en_change_multiple_wx_*_signed_addressing_source` rows ("glitch is different, probably uses another memory bus"). (build_docboy_rows)
 - **alyosha `unsafe/prefetcher_branch_thumb_arm_2`** — its expected values were never produced by a console: the suite's own unsafe/README.md says the ROM "crashes on console due to the prefetcher being misaligned when switching from thumb to arm mode", and the author moved it out of `prefetcher/` (whose `_arm`, `_arm_3` and `_arm_4` siblings are scored) for that reason. The check it fails is that switch: TM0 after the Thumb `bx r2` at 0x0800019E into ARM code at 0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E here. Its first check, the ARM-to-Thumb branch before it, reads the expected 0x3A. (build_alyosha_tests)
-- **alyosha `fifo_dma/fifo`** — its source marks the one check it fails, test 2 (FIFO stores while the master is off), "gives unexpected results on hardware". The shipped binary (the 2023-09-01 upload, never rebuilt) checks only that test's first TM1 read, 0x68: the value of an "every word of a fixed-source gamepak burst is nonsequential" rule its upload states and its author's next commit withdrew. On an AGB SP (tests/roms/payloads/fifoslot.s) a fixed source bursts as an incrementing one and the second refill comes right behind the first; dingbat reads 0x84. The test's own subject, stores with the master off being dropped, holds on the SP and here. `fifo_2`..`fifo_6` ARE scored. (build_alyosha_tests)
 - **DocBoy manifests: 725 vendored ROMs of other suites** — everything outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, firstwhite, rtc3test, cpp, zoomten, tepples). Those are scored from their upstream releases in the sections above, each by its own author's verdict; DocBoy's entries re-check them against DocBoy's own frame dumps, and 8 are DocBoy edits (`samesuite/apu/channel_1/*-cgbE`, expectations rewritten for CPU CGB E). (build_docboy_rows)
 - **DocBoy: the KEY1 switch's IME-set leaf (8)** — `{,double_speed_}stop_key1_joypad0_interrupt1_ime1_*_div_round1`: `EI; STOP` with a request pending, the leaf Pan Docs' STOP chart calls "The CPU glitches non-deterministically". DocBoy wants the divider held 8 T; c-sp `speed-switch/caution/spsw-interrupts-cgbE`, checked on a CPU CGB E, measures 4 for the same sequence (`spsw_irq_leaf_hold_short`), and SameBoy (CGB E) fails these eight as dingbat does. The IME-clear leaf beside it IS scored. (build_docboy_rows, DocboyNotScored)
 - **DocBoy: a joypad interrupt on key release (3)** — `joypad_{buttons,dpad}_interrupt_release` and `cpu/interactive_visual/stop_immediate_exit_joypad_interrupt` want the interrupt when the key is let go, from switch bounce (DocBoy's own comment), while its `joypad_keep_pressed_interrupt` wants exactly one for a press: a fixed bounce on every release only. Pan Docs ("INT $60") raises it on a high-to-low edge and describes bounce on a press as a mechanical effect, and gambatte's hardware note (test/hwtests/jpadirq.txt) has a real press bounce a varying number of times; a deterministic release model would change every game. SameBoy fails both release rows. (build_docboy_rows, DocboyNotScored)

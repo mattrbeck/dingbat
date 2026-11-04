@@ -299,7 +299,8 @@ type
     fifo_word_at*:     array[2, array[4, CycleCount]]
     # FIFO_HANDBACK_CHAIN (index channel - 1): 1 = a request landed in the
     # burst's hand-back cycle and is granted its first read; 2 = that word
-    # is held in the latch, and the next burst writes it, then reads 3 more
+    # is held in the latch, and the next burst writes it, then reads 3 more;
+    # 3 = as 1, a cycle late with the CPU on the gamepak (FIFO_CART_CHAIN_LATE)
     fifo_chain*:       array[2, uint8]
     # ... and where the gamepak burst it continues had got to (bus.rom_next_addr)
     fifo_rom_next*:    array[2, uint32]

@@ -8324,6 +8324,28 @@ the link rig, so whether a console prints 0x84 is a flashcart question:
 (docs/hwprobe-questions.md). Proposed for NotScored with that evidence;
 the row stays scored until then.
 
+**Answered on a flashcart, 2026-11-04 (AGB SP): the expectation was the
+console's; the explanation was not.** alyfifo.py's five variants read
+104 / 139 / 104 / 104 / 165 (test 2's two reads, test 3's, test 4's two),
+the binary's 0x68 at every first read and the later source's 0x8B. A
+nonsequential fixed source would also give 0x68 but 0x98 for test 2's
+second read, so that rule stays refuted, as fifoslot.s had it. What the
+reads show instead: 139 - 104 = 35 = test 2's second `ldr` (10) plus the
+25-cycle rest of a chained burst. With the CPU fetching from the cartridge,
+the second overflow's request, on the cycle after the first burst's
+hand-back, is chained as one on the hand-back is (a 6-cycle read there, the
+rest at the third overflow, between the two reads); with the CPU in RAM
+the same request gets a back-to-back burst (fifoslot.s, the slot at
+k = 32). Now `FIFO_CART_CHAIN_LATE` (apu/dma_channels.nim). Its first cut
+read 106 / 141 / 106 / 106 / 167: the request is dispatched after the CPU's
+fetch on its cycle was charged, and the burst's end reset that fetch's
+stream, so the next fetch was charged N (8) where the console's is S (6);
+run_pending now leaves the CPU's stream going on behind a late chained
+read. All five exact, and fifo.gba draws "All tests passed": it comes out
+of NotScored (alyosha 124/125). Prefetcher off only, which is what was
+measured; the neighbouring periods (K = 30, 31, 33, 34) are in
+`tests/roms/alyfifo2.py` with dingbat's answers written down first.
+
 **`fifo_dma/fifo_6` (Failed test 156): needs a cartridge.** The DMA1-end
 interrupt's handler reads TM1 = 0x7B before the next refill. dingbat
 reaches that read 3 cycles late (126 with no refill in the way), the
@@ -8332,6 +8354,18 @@ dispatch and the prefetcher at WAITCNT 0x4014 all run from the cartridge.
 The empty slot's float is not safe at 3/1 waits, so the rig cannot stand
 in. The ROM prints the read's low byte when it fails, so a flashcart run
 of the ROM itself answers it.
+
+**fifo_6 on the flashcart, 2026-11-04: passes**, so the console's handler
+reads exactly 0x7B = 123, 3 cycles before dingbat (126 with no refill in
+the way; the real BIOS reads the same). One number cannot split the 3
+across the path. Serving the interrupt entry's in-flight fetch from the
+prefetch buffer (full and stopped after a burst that never touched the
+gamepak, DMA_KEEPS_PREFETCH; cpu.irq skips a stopped buffer and charges an
+N fetch, 5 cycles) gives 121, two too fast, so it is not that alone.
+alyfifo2.py's fifo6_* variants sweep TM0's period one cycle a step with the
+prefetcher on (P = 39..46) and off (P = 48..55): a constant gap puts the
+cost on a fixed part of the path, a gap that steps with P on the prefetcher's
+state at the interrupt.
 
 **The refill law (in the core).** fifoslot.s, FIFO A on TM0 at period k,
 n NOPs, a TM1 read: 644 cells over k = 8..36, from EWRAM, the slot (fixed

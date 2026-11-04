@@ -210,7 +210,7 @@ proc irq_enter*(cpu: CPU) =
     when defined(itrace):
       let now = int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
       itl("IRQ lr=" & toHex(lr, 8) & " t=" & $now & " dot=" & $(now - cpu.gba.ppu.line_start_cycle) &
-          " inflight=" & $inflight & " line_at=" & $cpu.irq_line_at & " lw_end=" & $cpu.gba.bus.lw_end &
+          " inflight=" & $inflight & " rna=" & toHex(cpu.gba.bus.rom_next_addr, 8) & " rfs=" & $cpu.gba.bus.rom_free_since & " pf=" & $cpu.gba.bus.prefetch_on & " paused=" & $cpu.gba.bus.pf_paused & " line_at=" & $cpu.irq_line_at & " lw_end=" & $cpu.gba.bus.lw_end &
           " lw_waits=" & $cpu.gba.bus.lw_waits & " if=" & toHex(uint16(cpu.gba.interrupts.reg_if), 4))
     let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeIRQ)

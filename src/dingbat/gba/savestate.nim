@@ -256,7 +256,7 @@ proc save_dma_state(dma: DMA; w: var Writer) =
     w.write_u16(dma.count[i])  # v5
   # rev 11: FIFO_HANDBACK_CHAIN, a word read in a burst's hand-back cycle and
   # held in the latch for the FIFO's next refill (0 or 2 between instructions)
-  # The first byte's high nibble (spare: fifo_chain is 0..2) carries
+  # The first byte's high nibble (spare: fifo_chain is 0..3) carries
   # IMM_NEEDS_EDGE's DMA.imm_blocked, one bit per channel; rev-11 builds
   # without it wrote 0 there
   w.write_u8(dma.fifo_chain[0] or (dma.imm_blocked shl 4))

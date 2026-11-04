@@ -68,6 +68,22 @@ const FIFO_HANDBACK_CHAIN {.booldefine.} = true
   ## IWRAM bursts of 10 at k = 3) reads 11 then 19 cycles, this shape, and
   ## dingbat now does too.
 
+const FIFO_CART_CHAIN_LATE {.booldefine.} = true
+  ## With the CPU fetching from the gamepak (prefetcher off), a refill
+  ## request on the cycle after the burst's hand-back is chained as one on
+  ## the hand-back is (FIFO_HANDBACK_CHAIN), a cycle later than with the CPU
+  ## in RAM. The chained read comes before the CPU's fetch on that cycle,
+  ## whose gamepak stream goes on behind it (dma.run_pending). AGB SP and a
+  ## flashcart, 2026-11-04: alyosha fifo_dma/fifo.gba (FIFO A on TM0 at
+  ## period 32, DMA1 refilling from the cartridge, code in the cartridge,
+  ## WAITCNT 0) read through tests/roms/alyfifo.py's variants: test 2's
+  ## reads 104 and 139, test 3's 104, test 4's 104 and 165 -- the second
+  ## overflow's request, on the cycle after the first burst, takes a 6-cycle
+  ## read there and the rest of that burst (25 cycles) comes at the third
+  ## overflow, between the two reads. Without this, a back-to-back second
+  ## burst: 132 142 132 132 166. The same request with the CPU in RAM gets a
+  ## back-to-back burst (fifoslot.s, the slot at k = 32). fifo.gba passes.
+
 const FIFO_WORD_WRAP {.booldefine.} = true
   ## The FIFO holds eight words, and the eighth written into it leaves it
   ## reading empty (its word count wraps): with the sound on, eight words

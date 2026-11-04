@@ -393,6 +393,9 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
         int(when is32: bus.wait32_s[page] else: bus.wait16_s[page])
       else:
         int(when is32: bus.wait32_n[page] else: bus.wait16_n[page])
+    when defined(itrace):
+      itl("  RFC a=" & toHex(address, 8) & " now=" & $now & " next=" & toHex(bus.rom_next_addr, 8) &
+          " rfs=" & $bus.rom_free_since & " cost=" & $cost)
     bus.rom_free_since = now + CycleCount(cost)
     bus.pf_paused = false
     bus.pf_running = false

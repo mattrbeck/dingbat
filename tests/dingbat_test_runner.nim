@@ -1576,8 +1576,7 @@ proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
   ## unless --bios: six halt/IRQ rows read differently on the real BIOS.
   const DrawOnly = ["Sprite_Disable_Midline", "Sprite_Disable_on_VRAM_Access",
                     "stripes_x_offset"]
-  const NoHardwareVerdict = ["unsafe/prefetcher_branch_thumb_arm_2",
-                             "fifo_dma/fifo"]
+  const NoHardwareVerdict = ["unsafe/prefetcher_branch_thumb_arm_2"]
   var seen: seq[string]
   for rom in walkDirRec(jsmolka):
     if rom.endsWith(".gba"): seen.add($secureHashFile(rom))
@@ -2022,17 +2021,6 @@ const NotScored: seq[(string, string)] = @[
     "0x080001A4, a branch from an odd halfword, expected 0x53, read 0x4E " &
     "here. Its first check, the ARM-to-Thumb branch before it, reads the " &
     "expected 0x3A. (build_alyosha_tests)"),
-  ("alyosha `fifo_dma/fifo`", "its source marks the one check it fails, test " &
-    "2 (FIFO stores while the master is off), \"gives unexpected results on " &
-    "hardware\". The shipped binary (the 2023-09-01 upload, never rebuilt) " &
-    "checks only that test's first TM1 read, 0x68: the value of an \"every " &
-    "word of a fixed-source gamepak burst is nonsequential\" rule its upload " &
-    "states and its author's next commit withdrew. On an AGB SP " &
-    "(tests/roms/payloads/fifoslot.s) a fixed source bursts as an incrementing " &
-    "one and the second refill comes right behind the first; dingbat reads " &
-    "0x84. The test's own subject, stores with the master off being dropped, " &
-    "holds on the SP and here. `fifo_2`..`fifo_6` ARE scored. " &
-    "(build_alyosha_tests)"),
   ("DocBoy manifests: 725 vendored ROMs of other suites", "everything " &
     "outside `docboy/` in its manifests (blargg, mooneye, gbmicrotest, " &
     "mealybug, SameSuite, daid, magen, acid2, little-things-gb, hacktix, " &
