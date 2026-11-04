@@ -399,7 +399,10 @@ def gen_tables(build):
     per_suite = {s: [] for s in ('irq', 'timer', 'dma', 'ppu')}
     r0 = json.load(open(os.path.join(HWLINK, 'r0-agb.json')))
     for name, cells in r0.items():
-        if name in R0_SKIP:
+        # R0_SUITE names what the ROM carries; every family recorded since
+        # the multiboot image filled up (fiforeset, fifoslot, f6slot, ...) is
+        # tests/roms/cyclelaws' alone, like R0_SKIP's
+        if name in R0_SKIP or name not in R0_SUITE:
             continue
         suite = R0_SUITE[name]
         lines = per_suite[suite]

@@ -133,6 +133,9 @@ proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
     bus.rom_free_since = 0
     bus.rom_hot = false
     bus.dma_active = false
+  # PF_WAIT_UNDER_BURST's stamps live within one instruction: not saved
+  bus.pf_wait_from = 0
+  bus.pf_wait_to = 0
   if rev >= 8:
     bus.pf_paused = r.read_bool()
     bus.pf_running = r.read_bool()

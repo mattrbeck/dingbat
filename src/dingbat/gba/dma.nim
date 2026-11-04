@@ -16,6 +16,15 @@ const DMA_IRQ_FROM_BUS_END {.booldefine.} = true
   ## burst -- takes the interrupt one cycle and one instruction later than
   ## a check booked from the CPU's clock gives; with NOPs, where nothing
   ## overlaps, the two agree).
+const FIFO_IRQ_CREDIT {.intdefine.} = 1
+  ## A sound-FIFO burst's completion interrupt is recognised this much sooner
+  ## after the CPU gets the bus back than an immediate burst's
+  ## (DMA_IRQ_FROM_BUS_END's IRQ_SYNC_DELAY): tests/roms/payloads/dmairqv.s
+  ## on an AGB SP (2026-11-04), the CPU in an IWRAM NOP sled, DMA1 or DMA2,
+  ## EWRAM or IWRAM source, every phase: a cycle sooner, where immediate
+  ## DMA0/1/3 bursts (to FIFO A, EWRAM, IWRAM) match the immediate rule.
+  ## With PF_WAIT_UNDER_BURST (a prototype, off), counted from the CPU's
+  ## resume, which a wait on the prefetcher puts after the burst's end.
 const DMA_ROM_BOUNDARY_HOLD {.booldefine.} = true
   ## A gamepak ROM source whose address does not move (fixed or decrement
   ## control; the data still comes from successive addresses) and sits on
@@ -598,6 +607,9 @@ proc run_pending*(dma: DMA) =
     dma.current_priority = ch
     let bus = dma.gba.bus
     let granted_at = bus.sched.cycles + CycleCount(bus.cycles)
+    # FIFO_IRQ_CREDIT: a sound-FIFO burst's completion interrupt
+    let fifo_irq_credit_kind = (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3
+    let fifo_irq_credit = if fifo_irq_credit_kind: FIFO_IRQ_CREDIT else: 0
     # FIFO_CART_CHAIN_LATE: a hand-back read granted after the CPU's gamepak
     # fetch on its cycle was charged came before that fetch on the bus
     let late_chain = FIFO_CART_CHAIN_LATE and (ch == 1 or ch == 2) and
@@ -621,6 +633,30 @@ proc run_pending*(dma: DMA) =
     when DMA_BUS_WHILE_HALTED:
       if saved == 4: bus.dma_bus_left = dma.gba.cpu.halted
     dma.current_priority = saved
+    # PF_WAIT_UNDER_BURST: the CPU was waiting on the prefetcher for an
+    # opcode when the burst took the bus. It stopped the cycle before the
+    # grant: a wait begun there or later ran under the burst (pf_left takes
+    # the rest of it back); one begun before resumes after the burst with
+    # what was left at the stop, a cycle more than at the grant. pf_after:
+    # cycles from the burst's end to the CPU's resume.
+    var pf_left = 0
+    var pf_after = 0
+    when PF_WAIT_UNDER_BURST:
+      # Measured for a sound-FIFO burst that never touches the gamepak (the
+      # prefetcher runs under it: DMA_KEEPS_PREFETCH); an immediate burst
+      # the CPU's own store started is IMM_FETCH_WAIT's.
+      if saved == 4 and not dma.gba.cpu.halted and bus.prefetch_on and
+         fifo_irq_credit_kind and bus.dma_first_rom and
+         bus.pf_wait_from <= granted_at and bus.pf_wait_to >= granted_at:
+        let rest = int(bus.pf_wait_to - granted_at)
+        if bus.pf_wait_from + 1 >= granted_at:
+          pf_left = -rest
+        else:
+          pf_left = 1
+          pf_after = rest + 1
+        when defined(itrace):
+          itl("PFWAIT from=" & $bus.pf_wait_from & " to=" & $bus.pf_wait_to &
+              " granted=" & $granted_at & " rest=" & $rest & " adjust=" & $pf_left)
     when DMA_STALLS_IRQ_SYNC:
       # The CPU's interrupt synchroniser runs on the CPU's clock, and that
       # stops while a DMA has the bus: an interrupt raised but not yet
@@ -708,11 +744,15 @@ proc run_pending*(dma: DMA) =
           if dma.irq_after_burst:
             dma.irq_after_burst = false
             let ahead = if burst_end > bus.sched.cycles: int(burst_end - bus.sched.cycles) else: 0
-            intr.schedule_raise_check(dma.irq_was_set, ahead + IRQ_SYNC_DELAY)
+            intr.schedule_raise_check(dma.irq_was_set,
+                                      ahead + pf_after + IRQ_SYNC_DELAY - fifo_irq_credit)
     when DMA_IRQ_FROM_BUS_END:
       if dma.irq_after_burst:
         dma.irq_after_burst = false
-        dma.gba.interrupts.schedule_raise_check(dma.irq_was_set, IRQ_SYNC_DELAY)
+        dma.gba.interrupts.schedule_raise_check(dma.irq_was_set, IRQ_SYNC_DELAY - fifo_irq_credit)
+    when PF_WAIT_UNDER_BURST:
+      if pf_left != 0: bus.cycles += pf_left
+      bus.pf_wait_to = 0
     if saved == 4:
       bus.dma_stall_total += int64(bus.sched.cycles + CycleCount(bus.cycles) - granted_at)
     # The CPU (or a paused outer burst) resumes with a nonsequential access.

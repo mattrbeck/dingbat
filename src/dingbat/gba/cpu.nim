@@ -181,7 +181,8 @@ proc irq_enter*(cpu: CPU) =
         let bus = cpu.gba.bus
         # A hot stream has not stamped where the gamepak went idle.
         bus.rom_cool()
-        if IRQ_FETCH_VIA_PREFETCH and bus.prefetch_on and not bus.pf_paused and
+        if IRQ_FETCH_VIA_PREFETCH and bus.prefetch_on and
+           (not bus.pf_paused or (IRQ_FETCH_STOPPED_BUFFER and bus.pf_count > 0)) and
            bus.rom_next_addr == lr - 4:
           let now = bus.sched.cycles + CycleCount(bus.cycles)
           inflight = max(0, bus.pf_serve(now, page, if cpu.cpsr.thumb: 1 else: 2) - 1)

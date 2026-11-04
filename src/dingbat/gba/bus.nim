@@ -383,10 +383,21 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
       (when is32: (address and 2) != 0 and
                   (bus.pf_paused or now > bus.rom_free_since)
        else: false)
+    when defined(itrace):
+      let pf_rfs_in = bus.rom_free_since
+      let pf_paused_in = bus.pf_paused
     if unbuffered:
       cost = bus.rom_fetch_unbuffered(now, page, when is32: 2 else: 1)
     else:
       cost = bus.pf_serve(now, page, when is32: 2 else: 1)
+    when PF_WAIT_UNDER_BURST:
+      if cost > 1:
+        bus.pf_wait_from = now
+        bus.pf_wait_to = now + CycleCount(cost)
+    when defined(itrace):
+      itl("  PFC a=" & toHex(address, 8) & " now=" & $now & " rfs=" & $pf_rfs_in &
+          " paused=" & $pf_paused_in & " cnt=" & $bus.pf_count & " cost=" & $cost &
+          " rfs_out=" & $bus.rom_free_since)
   else:
     cost =
       if address == bus.rom_next_addr and now == bus.rom_free_since:
@@ -1312,6 +1323,10 @@ proc fetch_half_cached(bus: Bus; address: uint32; page: uint32): uint16 {.fetch_
       when defined(pftrace):
         pft("  HOT fetch16 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
             " cost=" & $int(bus.wait16_s[page]))
+      when PF_WAIT_UNDER_BURST:
+        if bus.prefetch_on:
+          bus.pf_wait_from = bus.bus_now()
+          bus.pf_wait_to = bus.pf_wait_from + CycleCount(bus.wait16_s[page])
       bus.cycles += int(bus.wait16_s[page])
       bus.rom_next_addr = address + 2
     else:
@@ -1346,6 +1361,10 @@ proc fetch_word_cached(bus: Bus; address: uint32; page: uint32): uint32 {.fetch_
       when defined(pftrace):
         pft("  HOT fetch32 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
             " cost=" & $int(bus.wait32_s[page]))
+      when PF_WAIT_UNDER_BURST:
+        if bus.prefetch_on:
+          bus.pf_wait_from = bus.bus_now()
+          bus.pf_wait_to = bus.pf_wait_from + CycleCount(bus.wait32_s[page])
       bus.cycles += int(bus.wait32_s[page])
       bus.rom_next_addr = address + 4
     else:

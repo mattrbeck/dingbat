@@ -61,6 +61,22 @@ def build_wrapper(payload_source, args):
     data = bytearray(open(rom, 'rb').read())
     while len(data) % 16:
         data.append(0)
+    # A payload that runs a sled out of the console's EMPTY slot (`.equ SLED,
+    # 0x08xxxxxx`: an ARM sled there reads 0xFFFFxxxx, an NV no-op, see
+    # payloads/nvcond.s) needs an image that reads the same: 0xFFFF from the
+    # wrapper's end to 4 KiB past the sled. Past a ROM's end the core answers
+    # addr >> 1, which would execute.
+    import re
+    text = open(payload_source).read()
+    for inc in re.findall(r'^\s*\.include\s+"([^"]+\.s)"', text, re.M):
+        path = os.path.join(src_dir, inc)
+        if os.path.exists(path):
+            text += open(path).read()
+    m = re.search(r'^\.equ\s+SLED,\s*(0x0[89][0-9A-Fa-f]{6})', text, re.M)
+    if m:
+        end = int(m.group(1), 16) - 0x08000000 + 0x1000
+        assert len(data) <= end - 0x1000, 'the wrapper reaches the sled'
+        data += b'\xFF' * (end - len(data))
     open(rom, 'wb').write(bytes(data))
     romfix.gba_logo(rom)
     return rom

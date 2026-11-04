@@ -509,6 +509,11 @@ type
     # one burst; not serialized.
     dma_grant_now*:  CycleCount
     dma_first_rom*:  bool
+    # PF_WAIT_UNDER_BURST: the last opcode fetch that waited on the
+    # prefetcher, [from, to) on the bus clock. Read only by a burst granted
+    # inside it (the same instruction); not serialized.
+    pf_wait_from*:   CycleCount
+    pf_wait_to*:     CycleCount
     # True while the CPU fetch stream is unbroken: sequential ROM fetches skip
     # the absolute-time bookkeeping. Any other cycle consumer must "cool" the
     # stream (recording rom_free_since) first.
@@ -1409,6 +1414,32 @@ const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
 const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
   ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
   ## it runs on the interrupted stream (cpu.irq).
+const PF_WAIT_UNDER_BURST* {.booldefine.} = false
+  ## PROTOTYPE, off: right at WAITCNT 0x4000, unproven at 0x4014. On, alyosha
+  ## fifo_dma/fifo_6 passes (0x7B) but fifo_2, _3 and _4 (hardware-verified,
+  ## 3/1 waits, no interrupt) fail: a burst after their measured read moves
+  ## the TM0 stop a cycle, onto 0xFFFF, and the next test's TM0 overflows as
+  ## it starts (TIMER_START_OVERFLOW). The flash-cart kit (tests/roms/
+  ## fifokit.py) runs f6q's cells at 3/1 from a cartridge sled of 0xFFFFFFFF.
+  ##
+  ## A sound-FIFO burst that never touches the gamepak, granted while the
+  ## CPU waits on the prefetcher for an opcode: the CPU stopped the cycle
+  ## before the grant. A wait it began there or later ran under the burst
+  ## (the prefetcher fills meanwhile); one begun before resumes after the
+  ## burst with what was left at the stop, a cycle more than at the grant.
+  ## tests/roms/payloads/f6slot.s and f6q.s on an AGB SP (2026-11-04): an
+  ## ARM sled of NV opcodes fetched from the empty slot (0xFFFFxxxx, a
+  ## one-cycle no-op: nvcond.s) at WAITCNT 0x4000, alyosha fifo_6's refill
+  ## and interrupt around it; every phase of the d and P sweeps, where the
+  ## burst-frozen wait read 1-5 early or late. Measured for that kind only:
+  ## an immediate burst the CPU's store started is IMM_FETCH_WAIT's (the
+  ## mGBA suite's ROM DMA rows), H-blank and V-blank bursts unmeasured.
+const IRQ_FETCH_STOPPED_BUFFER* {.booldefine.} = true
+  ## A full, stopped prefetch buffer that still holds the in-flight opcode
+  ## serves the IRQ entry's fetch, as a running one does
+  ## (IRQ_FETCH_VIA_PREFETCH). f6q.s on an AGB SP (2026-11-04): TM3's
+  ## interrupt taken just after a 30-cycle FIFO burst, which filled the
+  ## buffer under it, enters 7 cycles sooner than an N fetch would give.
 const IRQ_INFLIGHT_SEQ* {.booldefine.} = true
   ## An IRQ entry's in-flight gamepak fetch, when the prefetcher is not
   ## serving it, costs what the stream makes it -- N or S -- less the cycle
@@ -2306,6 +2337,7 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   else: gba.bus.idle_until = 0
   gba.bus.imm_idle_from = 0
   gba.bus.load_size = 0   # its stamps are not rebased; a frame edge ends it
+  gba.bus.pf_wait_to = 0  # PF_WAIT_UNDER_BURST: one instruction's; a frame edge ends it
   gba.bus.imm_idle_until = 0
   if gba.bus.imm_at >= base: gba.bus.imm_at -= base
   else: gba.bus.imm_at = 0

@@ -7025,6 +7025,19 @@ Predicted, the low byte at k = 0..15 (L = lives):
 
 Suggested console cells: 16 k × m ∈ {0, 2, 5, 7} × bits 8/9 = 256.
 
+**Run on the console 2026-11-04 (`r0table.py --record psgrace s0age`).**
+s0age: every cell single-valued, and **H0 -- dingbat as it is -- holds all
+256** (H1 196, H2 192, H3 128). The slow shift-0 timing does not run out by
+itself, nor end on a length-ended note or an NR10 write; s0age is now a
+gated law. psgrace: **232 of the 256 cells answer more than one way** in
+nine runs, though each is entered from a V-count halt on a fixed cycle. So
+psgfirst's spread (sp-agb.json) is not the page's entry phase: something
+the CPU's clock does not fix -- the PSG's phase at the master-on, from run
+to run -- decides it, and `apu/psg-ch1-after-ch2-lives` asks for one side of
+a coin toss. dingbat's answer is among the console's in 163 cells. The
+case should accept the console's set, not one outcome (a dbsuite change,
+not a core one; not made).
+
 **Status: no core change.** What this round changed:
 - tools/hwlink: RACES and the phase-swept check;
 - lawrom.py and cyclelaws_test.nim;
@@ -8366,6 +8379,71 @@ alyfifo2.py's fifo6_* variants sweep TM0's period one cycle a step with the
 prefetcher on (P = 39..46) and off (P = 48..55): a constant gap puts the
 cost on a fixed part of the path, a gap that steps with P on the prefetcher's
 state at the interrupt.
+
+**fifo_6 on the link rig, the same day.** The cartridge path turned
+out to be reachable with the slot empty. An empty slot reads A >> 1 on a
+nonsequential halfword and 0xFFFF on a sequential one, so every ARM word
+fetched there is 0xFFFFxxxx, condition NV, and the console runs those as
+one-cycle no-ops (`payloads/nvcond.s`: 16 of them time the same as 16 NOPs).
+That is a NOP sled in the gamepak region, prefetcher and all, at WAITCNT
+0x4000 (4/2, the only prefetcher-on setting the empty slot answers
+reliably). `payloads/f6slot.s` is fifo_6's own sequence (DMA1 FIFO A from
+EWRAM, TM0 period P, the completion interrupt through the BIOS, the
+handler's `ldr r7, [r3, #0x104]` third) around that sled, the handler in
+IWRAM; `dmairqv.s` the same interrupt for eight DMA kinds from an IWRAM
+sled; `f6q.s` the interrupt from TM3 at a chosen cycle Q instead, to take
+the path apart: the IRQ entry from the sled alone (matches), and what a
+burst does to the sled around it. `fifoquiet.inc` starts every cell clean:
+the sound DMAs off, both FIFOs reset, every timer's counter zeroed (a
+counter left at 0xFFFF overflows the moment it starts, TIMER_START_OVERFLOW;
+before that, two readings in a hundred were a stray early interrupt).
+452 cells, two runs each, every one single-valued. Four rules came out,
+each pinned by its own cells (FIFO_IRQ_CREDIT and IRQ_FETCH_STOPPED_BUFFER
+are in the core; IRQ_PIPE_STRICT and PF_WAIT_UNDER_BURST are prototypes,
+off -- see below):
+
+| rule | console | dingbat had |
+|---|---|---|
+| `FIFO_IRQ_CREDIT` = 1 | a sound-FIFO burst's completion interrupt is recognised IRQ_SYNC_DELAY - 1 after the CPU gets the bus back (IWRAM sled: every phase, DMA1 and DMA2, EWRAM and IWRAM sources); immediate DMA0/1/3 bursts keep IRQ_SYNC_DELAY | IRQ_SYNC_DELAY for both, one cycle late |
+| `IRQ_PIPE_STRICT` | a timer interrupt still in the synchroniser is not seen by a check another source booked, nor rides on a masked raise's check | TM3 raised 1-2 cycles after FIFO A's masked TM0 overflow rode on TM0's check: 1-2 early |
+| `IRQ_FETCH_STOPPED_BUFFER` | a full, stopped prefetch buffer serves the IRQ entry's in-flight fetch | an N fetch: 7 cycles late after a 30-cycle burst that filled the buffer |
+| `PF_WAIT_UNDER_BURST` | a FIFO burst granted while the CPU waits on the prefetcher stopped the CPU the cycle before the grant: a wait begun then or later runs under the burst, one begun before resumes after it with what was left at the stop | the wait frozen at the grant: 1-5 cycles off by phase |
+
+With all four, the prefetcher-on f6slot cells match at every d (0..11) and
+every P (34..47), and fifo_6 itself reads 0x7B and passes under both
+BIOSes. **But PF_WAIT_UNDER_BURST also turns fifo_2, _3 and _4 red** (3/1,
+no interrupt, hardware-verified by their author): a refill after a test's
+measured read moves its TM0 stop a cycle, onto 0xFFFF, and the next test's
+TM0 overflows as it starts (TIMER_START_OVERFLOW) -- 72 for 81. All its
+evidence is at 4/2; at 3/1 a hot fetch can start with prefetch credit, and
+which cycle the CPU stops on there is unmeasured. So it stays off, and
+fifo_6 reads 121 (it read 156): still red, now 2 fast where it was 3
+slow. IRQ_PIPE_STRICT is off too: the playtest train found Earthworm Jim
+(USA) losing most of its sound from frame ~2340 with it (alone of the
+three; mean loudness 104 -> 43), so this way of holding a raise back loses
+or delays something a sound driver needs. The two landed rules, and all
+three, move none of the 5658 recorded console cells and none of the mGBA
+suite's 13996 rows under either BIOS (PF_WAIT applied to every burst failed
+96 suite rows a BIOS: immediate ROM DMAs, hence its FIFO-only scope).
+
+Laws: r0table rows `nvcond`, `f6slot`, `dmairqv`, `f6q` (272 cells the
+core reproduces, frozen in tests/roms/cyclelaws); the other 182 are the
+OPEN_ROWS `f6slot_open`, `dmairqv_open`, `f6q_open`. What they hold: the
+TM3 cells IRQ_PIPE_STRICT fixes; the prefetcher-on DMA-interrupt cells
+(PF_WAIT's); with the prefetcher off, the
+second refill racing the handler's read the other way at a few phases (d =
+2; P = 34, 41..47) -- partly IRQ_LAST_WAITS's window, closed by TM0's
+masked overflow's check before the TM3 raise it was opened for (a fix needs
+the earliest pending raise per source); prefetcher on, Q past the burst,
+the console running two one-cycle instructions from the buffer after a
+burst where dingbat runs three; and immediate DMA0/1/3 from IWRAM at d >= 2,
+where the console takes the interrupt 1-3 cycles sooner.
+
+**The flash-cart kit** (`tests/roms/fifokit.py`) settles the 3/1 question:
+f6q3.s (f6q plus a 3/1 bit) run from a cartridge whose sled region is
+0xFFFFFFFF -- the empty slot's NV sled at any waits -- 449 cells, 4/2
+controls that must read what the empty slot read, predictions for base, the
+landed core and PF_WAIT on written at build time.
 
 **The refill law (in the core).** fifoslot.s, FIFO A on TM0 at period k,
 n NOPs, a TM1 read: 644 cells over k = 8..36, from EWRAM, the slot (fixed

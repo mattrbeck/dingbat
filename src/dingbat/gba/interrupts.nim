@@ -20,6 +20,18 @@ proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
 # Cycles from a peripheral raising IF to CPU recognition (mGBA suite Timer
 # IRQ rows). Register writes (IE/IF/IME) re-evaluate with no delay.
 const IRQ_SYNC_DELAY* {.intdefine.} = 3
+const IRQ_PIPE_STRICT {.booldefine.} = false
+  ## PROTOTYPE, off: on, Earthworm Jim (USA) loses most of its sound from
+  ## frame ~2340 (the playtest train, 2026-11-04) -- some interrupt its
+  ## driver needs is held back or lost; the rule below is the console's, this
+  ## way of getting it is not yet right.
+  ##
+  ## A timer interrupt on its way through the synchroniser is not seen by a
+  ## check another source booked before it is due, and a raise does not ride
+  ## on the check of one in flight that IE masks (that one delivers nothing).
+  ## tests/roms/payloads/f6q.s on an AGB SP (2026-11-04): TM3's interrupt
+  ## raised 1-2 cycles after a masked TM0 overflow (FIFO A's timer) is taken
+  ## 3 cycles after its own raise; off, it rode on TM0's check, 1-2 early.
 const UNDER_BURST_CREDIT {.intdefine.} = 1
   ## A timer interrupt raised while a burst holds the CPU off the bus is
   ## recognised IRQ_SYNC_DELAY - UNDER_BURST_CREDIT cycles after the CPU
@@ -137,6 +149,11 @@ proc raise_synced*(intr: Interrupts; bit: int; late = 0) =
   let now = intr.gba.scheduler.cycles + CycleCount(late)
   when defined(itrace):
     itl("RAISE " & $bit & " t=" & $now & " stalled=" & $intr.stalled_for(now))
+  when IRQ_PIPE_STRICT:
+    # a raise in flight that IE masks would deliver nothing: this one waits
+    # its own synchroniser delay rather than riding on that one's check
+    if intr.pipe_raised != 0 and (intr.pipe_raised and uint16(intr.reg_ie)) == 0:
+      intr.pipe_raised = 0
   if intr.pipe_raised == 0:
     let st = intr.stalled_for(now)
     let delay = if st == 0: IRQ_SYNC_DELAY
@@ -225,6 +242,9 @@ proc check_interrupts*(intr: Interrupts) =
     if now >= intr.pipe_due:
       pending = pending or intr.pipe_bits
       intr.pipe_raised = 0
+    elif IRQ_PIPE_STRICT:
+      # a check another source booked does not see a raise still on its way
+      pending = pending and not intr.pipe_raised
   intr.gba.cpu.irq_line = false
   if pending != 0 or key_wake:
     if intr.gba.cpu.stopped and (pending and STOP_WAKE_MASK) == 0 and not key_wake:
