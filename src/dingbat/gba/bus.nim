@@ -1746,6 +1746,9 @@ template fifo_fetch(bus: Bus; address: uint32; fetch: untyped) =
       bus.fetch_key = 0xFFFFFFFF'u32
       bus.access_rom = false
       bus.access_write = false
+      # an interrupt's window wants the fetch's waits noted, as below
+      when IRQ_LAST_WAITS:
+        if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
       bus.catch_up_access(cost)
       return
 

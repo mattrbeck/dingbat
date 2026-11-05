@@ -8497,6 +8497,19 @@ cycle (the burst should start a cycle early and the fetch be made after
 it; dingbat counts the fetch as made) and IRQ_LAST_WAITS missing the first
 fetch after a burst.
 
+Seven of the eight were IRQ_PIPE_STRICT's early check: the window ends the
+burst later, so the DMA's own end check (its source masked in IE) lands
+after TM3's raise and saw it two cycles before its synchroniser was done.
+IRQ_PIPE_STRICT is now two bits: 1 restarts the synchroniser when a raise
+in flight is masked -- that half is what silences Earthworm Jim (USA) -- and
+2 hides a raise from checks before its due cycle, which leaves Earthworm
+Jim's audio identical to the baseline, alone and with the window. Window +
+FIFO_IRQ_PF_EXTRA = 1 + IRQ_PIPE_STRICT = 2: kit3 342/449, the 4/2 rig
+cells 326/452, the recorded tables +324 / -14 -- the one gated cell left is
+f6slot 0x250000 (prefetcher off, P = 37: the fetch begun on the request
+cycle, which the console makes after the burst; its interrupt comes an
+instruction later, 116, where dingbat now takes it on the burst's end, 110).
+
 **irqlat on the link rig.** The cartridge-only irqdecomp page unflagged in
 a scratch multiboot build (run from EWRAM, the console against dingbat on
 the same image): irqlat-hblank matches (0x3E2) -- so its 12-cycle cartridge

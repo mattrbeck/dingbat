@@ -20,7 +20,9 @@ proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
 # Cycles from a peripheral raising IF to CPU recognition (mGBA suite Timer
 # IRQ rows). Register writes (IE/IF/IME) re-evaluate with no delay.
 const IRQ_SYNC_DELAY* {.intdefine.} = 3
-const IRQ_PIPE_STRICT {.booldefine.} = false
+const IRQ_PIPE_STRICT {.intdefine.} = 0
+  ## bit 0: a raise does not ride on a masked raise's check (restart); bit 1:
+  ## a check another source booked does not see a raise not yet due.
   ## PROTOTYPE, off: on, Earthworm Jim (USA) loses most of its sound from
   ## frame ~2340 (the playtest train, 2026-11-04) -- some interrupt its
   ## driver needs is held back or lost; the rule below is the console's, this
@@ -149,7 +151,7 @@ proc raise_synced*(intr: Interrupts; bit: int; late = 0) =
   let now = intr.gba.scheduler.cycles + CycleCount(late)
   when defined(itrace):
     itl("RAISE " & $bit & " t=" & $now & " stalled=" & $intr.stalled_for(now))
-  when IRQ_PIPE_STRICT:
+  when (IRQ_PIPE_STRICT and 1) != 0:
     # a raise in flight that IE masks would deliver nothing: this one waits
     # its own synchroniser delay rather than riding on that one's check
     if intr.pipe_raised != 0 and (intr.pipe_raised and uint16(intr.reg_ie)) == 0:
@@ -242,7 +244,7 @@ proc check_interrupts*(intr: Interrupts) =
     if now >= intr.pipe_due:
       pending = pending or intr.pipe_bits
       intr.pipe_raised = 0
-    elif IRQ_PIPE_STRICT:
+    elif (IRQ_PIPE_STRICT and 2) != 0:
       # a check another source booked does not see a raise still on its way
       pending = pending and not intr.pipe_raised
   intr.gba.cpu.irq_line = false
