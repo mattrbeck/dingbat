@@ -8445,6 +8445,34 @@ f6q3.s (f6q plus a 3/1 bit) run from a cartridge whose sled region is
 controls that must read what the empty slot read, predictions for base, the
 landed core and PF_WAIT on written at build time.
 
+**Run the same evening (kit3: dbsuite's parked cartridge build with the
+kit's cells behind it, one ROM, three cold boots; r0-agb.json `f6q3@KIT3`,
+tests/roms/dbsuite/cart-agb.json).** Every fifo cell read the same in all
+three runs, and all twelve 4/2 controls read what the empty slot read: a
+cartridge sled of 0xFFFFFFFF is the empty slot's sled. At 3/1 with the
+prefetcher on, fifo_6's own kind of cell (the DMA-end interrupt, d = 0..11,
+P = 34..47) is PF_WAIT's in 25 of 26 (base and the landed core 0; the miss
+is P = 34's refill race, as at 4/2) -- the rule holds where none of its
+evidence came from. But the TM3 cells fit no model (landed 94/180, PF_WAIT
+68): with PF_WAIT the sled runs a cycle late once the buffer drains after
+the burst, and the second refill comes early; with the prefetcher off every
+model is a word (4 cycles) off at four of six phases -- dingbat's interrupt
+after the burst wraps a phase later than the console's (84 + ((d + 2) mod
+4) on the console). Both are where the CPU's gamepak fetch sits when a FIFO
+burst takes the bus.
+
+dbsuite's cartridge build on the console: 864 of 884 cases the same in all
+three runs (the rest PSG cases -- psgrace's lottery -- and haltprobe's
+2-cycle jitter inside its range), 760 run in both the multiboot and the
+cartridge build agree but for 11 (one stores its own address; the PSG
+lottery). Stable disagreements: contend-pram-mode0 E6 and contend-vram-mode0
+F7 at the parked phase (dingbat E7/F6, the photographs' values: the park
+chose dingbat's phase for them, so the console differing from the
+photographs is expected, from dingbat is not); irqlat-hblank-haltcnt 0x3B7
+(the case's range 0x3BD..0x3FD, dingbat 0x3DD); sweeptrig-shift0-400-length-
+d30 reads 1 in the cartridge build every time (as dingbat) and 0x40000 in
+the multiboot build: placement-dependent, not a lottery.
+
 **The refill law (in the core).** fifoslot.s, FIFO A on TM0 at period k,
 n NOPs, a TM1 read: 644 cells over k = 8..36, from EWRAM, the slot (fixed
 and incrementing) and IWRAM, every cell one answer in three passes. Now a

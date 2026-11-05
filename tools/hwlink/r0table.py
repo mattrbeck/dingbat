@@ -367,6 +367,20 @@ TABLE = {
     # (payloads/f6q.s). The cells the core reproduces; the rest are the
     # _open rows (OPEN_ROWS). 'nvcond': an ARM NV opcode is a one-cycle no-op.
     'nvcond': [0, 1],
+    # f6q.s at fifo_6's own waits (bit 13: WS0 3/1), which the empty slot does
+    # not answer reliably: run from a flash cart whose sled region holds
+    # 0xFFFFFFFF, the same NV sled (tests/roms/fifokit.py; recorded as
+    # f6q3@KIT3 from three cold boots of kit3, 2026-11-04, every cell one
+    # answer; the 4/2 cells read what the empty slot read)
+    'f6q3': sorted(
+        {w | 39 << 16 | d << 24 for w in (0x6000, 0x2000) for d in range(12)}
+        | {w | p << 16 for w in (0x6000, 0x2000) for p in range(34, 48)}
+        | {0x20000000 | w | 39 << 16 | d << 24 | q for w in (0x6000, 0x2000)
+           for d in range(6) for q in range(66, 96)}
+        | {w | q for w in (0x6000, 0x2000) for q in range(60, 72)}
+        | {0x4000 | 39 << 16 | d << 24 for d in range(6)}
+        | {0x20004000 | 39 << 16 | d << 24 | 80 for d in range(6)}
+        | {0x10000000 | 39 << 16}),
     'f6slot': [
         0x230000, 0x240000, 0x250000, 0x260000, 0x270000, 0x280000, 0x1270000,
         0x3270000, 0x4270000, 0x5270000, 0x6270000, 0x7270000, 0x9270000, 0xa270000,
@@ -452,7 +466,7 @@ TABLE = {
 }
 
 # rows that touch a cartridge: recorded only when named on the command line
-NEEDS_CART = {'eesettle', 'eesettle4k', 'eestray', 'eestray4k', 'sramfloat', 'flashprog',
+NEEDS_CART = {'f6q3', 'eesettle', 'eesettle4k', 'eestray', 'eestray4k', 'sramfloat', 'flashprog',
               'sramloop'}
 
 # rows the console has answered and no dingbat model matches yet: kept out of
@@ -463,7 +477,7 @@ NEEDS_CART = {'eesettle', 'eesettle4k', 'eestray', 'eestray4k', 'sramfloat', 'fl
 # hdmaobus (RACES), so it can never be frozen under its own name.
 OPEN_ROWS = {'keyirq2', 'keyirq3',
              'timergeo', 'obusdma16', 'fifolog', 'psgrace', 'hdmarace',
-             'f6slot_open', 'dmairqv_open', 'f6q_open'}
+             'f6slot_open', 'dmairqv_open', 'f6q_open', 'f6q3'}
 
 # frames a cell needs in the emulators where the default 8 is too few:
 # psgrace's page plays ch2's whole note and the rows after it (~45 frames)
