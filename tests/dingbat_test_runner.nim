@@ -1590,9 +1590,12 @@ proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
       let h = $secureHashFile(rom)
       if h in seen or rom.splitFile().name in DrawOnly: continue
       seen.add(h)   # the fork's copy of a skipped ROM is skipped with it
-      if rom.relativePath(root).changeFileExt("") in NoHardwareVerdict: continue
+      # '/' on every host: the names are results.md's keys, and Windows'
+      # '\' once let NoHardwareVerdict's ROM through there
+      let rel = rom.relativePath(root).changeFileExt("").replace('\\', '/')
+      if rel in NoHardwareVerdict: continue
       result.add(TestDef(
-        name: label & "/" & rom.relativePath(root).changeFileExt(""),
+        name: label & "/" & rel,
         rom_path: rom,
         mode: tmScreenshot,
         timeout: 600,
