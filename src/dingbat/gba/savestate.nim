@@ -414,7 +414,7 @@ proc save_ppu_state(ppu: PPU; w: var Writer) =
   w.write_bytes(ppu.vram)
   w.write_bytes(ppu.oam)
   w.write_seq_u16(ppu.framebuffer)
-  w.write_u16(ppu.bg_enable_hist)
+  w.write_u16(ppu.bg_enable_hist or (uint16(ppu.fb_hold) shl 12))
   w.write_bool(ppu.win0_inside)
   w.write_bool(ppu.win1_inside)
   w.write_bytes(ppu.oam_view)
@@ -455,7 +455,9 @@ proc load_ppu_state(ppu: PPU; r: var Reader; rev: uint32) =
   r.read_bytes(ppu.oam)
   r.read_seq_u16_into(ppu.framebuffer)
   if rev >= 6:
-    ppu.bg_enable_hist = r.read_u16() and 0xFFF
+    let hist = r.read_u16()
+    ppu.bg_enable_hist = hist and 0xFFF
+    ppu.fb_hold = uint8((hist shr 12) and 3)
     ppu.win0_inside = r.read_bool()
     ppu.win1_inside = r.read_bool()
     r.read_bytes(ppu.oam_view)
@@ -465,6 +467,7 @@ proc load_ppu_state(ppu: PPU; r: var Reader; rev: uint32) =
     # windows as the comparators they were, OAM as current
     let bits = (uint16(ppu.dispcnt) shr 8) and 0xF
     ppu.bg_enable_hist = bits or (bits shl 4) or (bits shl 8)
+    ppu.fb_hold = 0
     let vc = ppu.vcount
     proc inside(y1, y2: uint16): bool =
       if y1 <= y2: vc >= y1 and vc < y2 else: vc >= y1 or vc < y2

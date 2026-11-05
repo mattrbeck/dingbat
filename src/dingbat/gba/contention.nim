@@ -86,7 +86,7 @@ proc cont_text_bg(m: var array[CONT_WORDS, uint32]; n: int; bpp8: bool; hofs: in
 proc cont_build_bg(ppu: PPU; key: uint32) =
   ppu.cont_bg.cont_clear()
   ppu.cont_bg_key = key
-  if ppu.dispcnt.forced_blank: return
+  if (key and 0x80'u32) != 0: return  # forced blank, or its exit hold
   let en = (uint16(ppu.dispcnt) shr 8) and 0xF
   case int(ppu.dispcnt.bg_mode)
   of 0, 1:
@@ -118,6 +118,7 @@ proc cont_build_bg(ppu: PPU; key: uint32) =
 
 proc cont_bg_key_now(ppu: PPU): uint32 {.inline.} =
   var k = uint32(uint16(ppu.dispcnt) and 0x0F87'u16)
+  if ppu.fb_hold > 0: k = k or 0x80'u32
   for n in 0 .. 3:
     if ppu.bgcnt[n].color_mode_8bpp: k = k or (1'u32 shl (16 + n))
     k = k or ((uint32(ppu.bghofs[n].offset) and 7) shl (20 + 3 * n))
@@ -128,12 +129,13 @@ proc cont_pram_key_now(ppu: PPU): uint32 {.inline.} =
   # pixel (contmap scene 19; no second read with the effect off, scene 1A)
   let bld = uint16(ppu.bldcnt)
   let alpha = ((bld shr 6) and 3) == 1 and (bld and 0x3F00'u16) != 0
-  uint32(uint16(ppu.dispcnt) and 0x0087'u16) or (if alpha: 0x100'u32 else: 0'u32)
+  uint32(uint16(ppu.dispcnt) and 0x0087'u16) or (if alpha: 0x100'u32 else: 0'u32) or
+    (if ppu.fb_hold > 0: 0x80'u32 else: 0'u32)
 
 proc cont_build_pram(ppu: PPU; key: uint32) =
   ppu.cont_pram.cont_clear()
   ppu.cont_pram_key = key
-  if ppu.dispcnt.forced_blank: return
+  if (key and 0x80'u32) != 0: return  # forced blank, or its exit hold
   # Mode 3 reads no palette; mode 5 only for the backdrop right of its
   # 160-pixel bitmap (contmap scenes 0B, 14)
   let mode = int(ppu.dispcnt.bg_mode)
@@ -319,6 +321,7 @@ proc contend_wait_ahead*(bus: Bus; address: uint32; is32: bool; ahead: int): int
   if ppu.dispcnt.forced_blank and not bit(uint16(ppu.dispcnt), 12): return 0
   let d = int64(bus.sched.cycles) + int64(bus.cycles) + int64(ahead) - ppu.line_start_cycle
   if d < 0: return 0
+  if d div 1232 < int64(ppu.fb_hold) and not bit(uint16(ppu.dispcnt), 12): return 0
   # the frame repeats every 228 lines
   let line = int((int64(ppu.vcount) + d div 1232) mod 228)
   if line >= 160 and line != 227: return 0

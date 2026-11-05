@@ -23678,5 +23678,253 @@
     "want": "000000EF"
    }
   ]
+ },
+ {
+  "payload": "c2fb",
+  "rom": "c2fb.gba",
+  "sha1": "6ba3dd31f0b012d728013cc40ed45e49b0ca166f",
+  "frames": 444,
+  "cells": [
+   {
+    "id": "c2fb 0x25002800",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x25002810",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x25302800",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x25302810",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x26002800",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x26002810",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x26302800",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x26302810",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x26002900",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x26002910",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x26302900",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x26302910",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x27002800",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x27002810",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x27302800",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x27302810",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x27002900",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x27002910",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x27302900",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x27302910",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x27002a00",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x27002a10",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x27302a00",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x27302a10",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0xe3000100",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0xe3000110",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0xe3300100",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0xe3300110",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0xe3000200",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0xe3000210",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0xe3300200",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0xe3300210",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x1000300",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x1000310",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x1300300",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x1300310",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x1000400",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x1000410",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x1300400",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x1300410",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x2000400",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x2000410",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x2300400",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x2300410",
+    "kind": "hex",
+    "want": "000000C3"
+   },
+   {
+    "id": "c2fb 0x2000500",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x2000510",
+    "kind": "hex",
+    "want": "000000E8"
+   },
+   {
+    "id": "c2fb 0x2300500",
+    "kind": "hex",
+    "want": "000000C4"
+   },
+   {
+    "id": "c2fb 0x2300510",
+    "kind": "hex",
+    "want": "000000E8"
+   }
+  ]
  }
 ]

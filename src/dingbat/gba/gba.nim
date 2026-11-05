@@ -870,6 +870,11 @@ type
     # the third line after the write and a disable is immediate ("Layer
     # toggle" 1 and 2).
     bg_enable_hist*: uint16
+    # Lines (counting the current one) the renderer stays as in forced blank
+    # after DISPCNT's forced-blank bit is cleared (FB_EXIT_HOLD_LINES): no
+    # BG or palette fetch, so no BG VRAM or palette RAM contention. Rides in
+    # bg_enable_hist's spare bits 12-13 in the payload.
+    fb_hold*: uint8
     # Scheduler cycle of the current line's start, for the sample point
     # inside the line (BG_ENABLE_LATCH_CYCLE); rebased by end_frame, dated
     # from the pending line event on a state load.

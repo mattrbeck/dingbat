@@ -90,12 +90,24 @@ proc skip_boot_phase*(ppu: PPU) =
   ppu.line_start_cycle = int64(ppu.gba.scheduler.cycles) - ENTRY_LINE_POS
   ppu.gba.scheduler.schedule(960 - ENTRY_LINE_POS, etPPUStartHBlank)
 
+# Forced blank cleared on line L: the BG layers and the palette fetch
+# nothing for the rest of line L and all of lines L+1 and L+2, and draw
+# from L+3. tests/roms/payloads/c2fb.s, AGB SP from EWRAM under a mode-0
+# scene of four text BGs: BG VRAM and palette RAM read with no contention
+# on line 40 after a clear on line 38 or 39 and as drawn after one on 37
+# or earlier, wherever in the line the clear lands; across the frame wrap
+# too (a clear on 227 leaves line 1 free and draws line 2; on line 1, 3
+# free and 4 drawn; on line 2, 3-4 free and 5 drawn). Contention is what
+# was measured: the picture on the held lines is drawn as before.
+const FB_EXIT_HOLD_LINES = 3'u8
+
 proc contend_mask_update*(ppu: PPU) =
   ## Which pages ask contention.nim for a wait (Bus.contended): palette
   ## RAM, VRAM and OAM while the renderer may be drawing (the OBJ layer
   ## fetches line 0 on line 227, and keeps fetching under forced blank).
   let on = CONTENTION and
-           (not ppu.dispcnt.forced_blank or bit(uint16(ppu.dispcnt), 12)) and
+           ((not ppu.dispcnt.forced_blank and ppu.fb_hold == 0) or
+            bit(uint16(ppu.dispcnt), 12)) and
            (ppu.vcount < 160 or ppu.vcount == 227)
   if ppu.gba.bus != nil:
     for page in 5 .. 7: ppu.gba.bus.contended[page] = on
@@ -130,6 +142,11 @@ proc latch_line_start*(ppu: PPU) {.inline.} =
   ppu.bg_enable_cycle = [-1'i32, -1, -1, -1]
   ppu.bg_enable_hist = ((ppu.bg_enable_hist shl 4) or
                         ((uint16(ppu.dispcnt) shr 8) and 0xF)) and 0xFFF
+  if ppu.fb_hold > 0:
+    dec ppu.fb_hold
+    if ppu.fb_hold == 0:
+      ppu.cont_regs_stale = true
+      ppu.contend_mask_update()
   if vc == uint16(ppu.win0v.y1): ppu.win0_inside = true
   if vc == uint16(ppu.win0v.y2): ppu.win0_inside = false
   if vc == uint16(ppu.win1v.y1): ppu.win1_inside = true
@@ -1520,7 +1537,10 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
 
 proc write_dispcnt(ppu: PPU; io_addr: uint32; value: uint8) =
   let before = (uint16(ppu.dispcnt) shr 8) and 0xF
+  let was_blank = ppu.dispcnt.forced_blank
   write(ppu.dispcnt, value, io_addr and 1)
+  if was_blank and not ppu.dispcnt.forced_blank:
+    ppu.fb_hold = FB_EXIT_HOLD_LINES
   ppu.contend_mask_update()
   ppu.cont_regs_stale = true
   let rose = ((uint16(ppu.dispcnt) shr 8) and 0xF) and not before

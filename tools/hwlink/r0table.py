@@ -506,7 +506,7 @@ NEEDS_CART = {'f6q3', 'eesettle', 'eesettle4k', 'eestray', 'eestray4k', 'sramflo
 # hdmaobus (RACES), so it can never be frozen under its own name.
 OPEN_ROWS = {'keyirq2', 'keyirq3',
              'timergeo', 'obusdma16', 'fifolog', 'psgrace', 'hdmarace',
-             'f6slot_open', 'dmairqv_open', 'f6q_open', 'f6q3', 'c2fb'}
+             'f6slot_open', 'dmairqv_open', 'f6q_open', 'f6q3'}
 
 # frames a cell needs in the emulators where the default 8 is too few:
 # psgrace's page plays ch2's whole note and the rows after it (~45 frames)

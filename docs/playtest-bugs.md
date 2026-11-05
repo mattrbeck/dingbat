@@ -8573,9 +8573,19 @@ reads drawn (PRAM 0xC4, VRAM 0xE8); on 38 or 39, no contention at all
 the same: a clear on 227 leaves line 1 free and draws 2, on 1 leaves 3
 free, on 2 leaves 3-4 free and draws 5. So BG and palette fetching resume
 on line L+3, wherever in line L the clear lands; dingbat draws from L+1.
-48 cells, every one single-valued (r0table row `c2fb`, open until the core
-holds the renderer off). Only contention is measured: what the console
-shows on the two held lines needs a photograph.
+48 cells, every one single-valued, now a law (`cyclelaws/c2fb.gba`).
+**In the core: FB_EXIT_HOLD_LINES = 3** -- after the clear, the BG and
+palette contention maps stay empty for the rest of the line and two more
+(`PPU.fb_hold`, in bg_enable_hist's spare payload bits, no revision bump).
+The OBJ layer is left as it was: c2fb clears from 0x80, OBJ off, and reads
+BG VRAM and palette RAM only. Before it, dingbat missed 9 of the 57
+earlier c2fb cells; with it, all 57 and the 48 law cells, and the parked
+CONTEND2 page from EWRAM matches the console in every contention row
+(contend-pram-mode0 0xBC, contend-vram-mode0 0xE3 now). Runner and
+mGBA suite unmoved, and dbsuite's cartridge contention rows with them:
+their phase is the page's placement (above), not this. Only contention is
+measured: what the console shows on the two held lines needs a
+photograph, so the picture is drawn as before.
 
 **dbsuite: three PSG rows accept the console's lottery.** A new case kind,
 K_ZRANGE (czrange): 0 or the range. psg-ch1-nr10-0-dies,
