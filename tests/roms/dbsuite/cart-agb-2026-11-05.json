@@ -1,0 +1,3493 @@
+{
+"what": "dbsuite cartridge build of main c2040909 (872 cases), padded with 0xFF to 128 KiB (SHA-1 66959c62ba9da8906c6e4a4f5555e7548f2d623a), run from a flash cart on the AGB SP, 2026-11-05, one cold boot, results streamed over the link cable. The unpadded image (114864 bytes) hung at dma/imm-dma-none, the first case whose payload record lies past 0x1C000, in a full run and in the DMA suite alone. Per case: [status, got].",
+"cases": {
+"apu/psg-ch1-after-ch2-lives": [
+"PASS",
+"0000471B"
+],
+"apu/psg-ch1-first-trigger-dies": [
+"PASS",
+"00000000"
+],
+"apu/psg-ch1-length-off-never-expires": [
+"PASS",
+"0000FFFF"
+],
+"apu/psg-ch1-nr10-0-dies": [
+"PASS",
+"00000000"
+],
+"apu/psg-ch1-second-trigger-dies": [
+"PASS",
+"00000000"
+],
+"apu/psg-ch1-sweep-running-lives": [
+"PASS",
+"00000715"
+],
+"apu/psg-ch1-third-trigger-lives": [
+"PASS",
+"00004974"
+],
+"apu/psg-ch2-before-ch1-lives": [
+"PASS",
+"00004977"
+],
+"apu/psg-ch2-first-trigger-lives": [
+"PASS",
+"0000458F"
+],
+"apu/psg-ch2-length-off-never-expires": [
+"PASS",
+"0000FFFF"
+],
+"apu/psg-ch3-first-trigger-lives": [
+"PASS",
+"00004977"
+],
+"apu/psg-ch4-first-trigger-lives": [
+"PASS",
+"00004978"
+],
+"apu/psg-soundcnt-x-after-ch1": [
+"PASS",
+"00000080"
+],
+"apu/psg-soundcnt-x-after-ch2": [
+"PASS",
+"00000082"
+],
+"apu/psg-soundcnt-x-after-ch4": [
+"PASS",
+"00000088"
+],
+"apu/ram-psg-ch1-after-ch2": [
+"PASS",
+"00007FFE"
+],
+"apu/ram-psg-ch1-again": [
+"PASS",
+"00008CC5"
+],
+"apu/ram-psg-ch1-first": [
+"PASS",
+"00000001"
+],
+"apu/ram-psg-ch1-length-off": [
+"PASS",
+"0000FFFF"
+],
+"apu/ram-psg-ch1-nr10-0": [
+"PASS",
+"00000000"
+],
+"apu/ram-psg-ch1-nr10-11": [
+"PASS",
+"00002662"
+],
+"apu/ram-psg-ch1-second": [
+"PASS",
+"00000000"
+],
+"apu/ram-psg-ch2-before-ch1": [
+"PASS",
+"00008CC5"
+],
+"apu/ram-psg-ch2-first": [
+"PASS",
+"00007531"
+],
+"apu/ram-psg-ch2-length-off": [
+"PASS",
+"0000FFFF"
+],
+"apu/ram-psg-ch3-first": [
+"PASS",
+"00008CC8"
+],
+"apu/ram-psg-ch4-first": [
+"PASS",
+"00008CC8"
+],
+"apu/sweep-2018-survives-2048": [
+"PASS",
+"00001096"
+],
+"apu/sweep-2033-dies-at-trigger": [
+"PASS",
+"00000002"
+],
+"apu/sweep-512-dies-tick-3": [
+"PASS",
+"00003682"
+],
+"apu/sweep-940-same-offset": [
+"PASS",
+"00001093"
+],
+"apu/sweep-first-tick-rechecks": [
+"PASS",
+"0000106F"
+],
+"apu/sweep-period-0-never-ticks": [
+"PASS",
+"00080000"
+],
+"apu/sweep-trigger-overflow": [
+"PASS",
+"00000000"
+],
+"apu/sweep-trigger-second-check": [
+"PASS",
+"00000000"
+],
+"apu/sweeptrig-shift0-3ff-d30": [
+"PASS",
+"00040000"
+],
+"apu/sweeptrig-shift0-3ff-d33": [
+"PASS",
+"00040000"
+],
+"apu/sweeptrig-shift0-3ff-d37": [
+"PASS",
+"00040000"
+],
+"apu/sweeptrig-shift0-3ff-length-d30": [
+"PASS",
+"00040000"
+],
+"apu/sweeptrig-shift0-3ff-length-d33": [
+"PASS",
+"00040000"
+],
+"apu/sweeptrig-shift0-3ff-length-d37": [
+"PASS",
+"00040000"
+],
+"apu/sweeptrig-shift0-400-after-rows-d30": [
+"PASS",
+"00000001"
+],
+"apu/sweeptrig-shift0-400-after-rows-d33": [
+"PASS",
+"00000000"
+],
+"apu/sweeptrig-shift0-400-d30": [
+"PASS",
+"00000001"
+],
+"apu/sweeptrig-shift0-400-d33": [
+"PASS",
+"00000001"
+],
+"apu/sweeptrig-shift0-400-d37": [
+"PASS",
+"00000001"
+],
+"apu/sweeptrig-shift0-400-length-d30": [
+"PASS",
+"00000001"
+],
+"apu/sweeptrig-shift0-400-length-d33": [
+"PASS",
+"00000001"
+],
+"apu/sweeptrig-shift0-400-length-d37": [
+"PASS",
+"00000001"
+],
+"apu/sweeptrig-sweep21-1300-d30": [
+"PASS",
+"00005356"
+],
+"apu/sweeptrig-sweep21-1300-d33": [
+"PASS",
+"00005C6F"
+],
+"apu/sweeptrig-sweep21-1300-d37": [
+"PASS",
+"000058BA"
+],
+"bios/arctan-0": [
+"PASS",
+"00000000"
+],
+"bios/arctan-1": [
+"PASS",
+"00002000"
+],
+"bios/arctan-neg1": [
+"PASS",
+"FFFFE000"
+],
+"bios/arctan2-diagonal": [
+"PASS",
+"00002000"
+],
+"bios/arctan2-neg-x": [
+"PASS",
+"00008000"
+],
+"bios/arctan2-neg-y": [
+"PASS",
+"0000C000"
+],
+"bios/arctan2-origin": [
+"PASS",
+"00000000"
+],
+"bios/arctan2-pos-x": [
+"PASS",
+"00000000"
+],
+"bios/arctan2-pos-y": [
+"PASS",
+"00004000"
+],
+"bios/div-1-0-quotient": [
+"PASS",
+"00000001"
+],
+"bios/div-1-0-remainder": [
+"PASS",
+"00000001"
+],
+"bios/div-10-3-quotient": [
+"PASS",
+"00000003"
+],
+"bios/div-10-3-remainder": [
+"PASS",
+"00000001"
+],
+"bios/div-min-neg1-quotient": [
+"PASS",
+"80000000"
+],
+"bios/div-min-neg1-remainder": [
+"PASS",
+"00000000"
+],
+"bios/div-neg1-0-quotient": [
+"PASS",
+"FFFFFFFF"
+],
+"bios/div-neg7-2-quotient": [
+"PASS",
+"FFFFFFFD"
+],
+"bios/div-neg7-2-remainder": [
+"PASS",
+"FFFFFFFF"
+],
+"bios/divarm-10-3-quotient": [
+"PASS",
+"00000003"
+],
+"bios/get-bios-checksum": [
+"PASS",
+"BAAE187F"
+],
+"bios/sqrt-0": [
+"PASS",
+"00000000"
+],
+"bios/sqrt-1": [
+"PASS",
+"00000001"
+],
+"bios/sqrt-3fffffff": [
+"PASS",
+"00007FFF"
+],
+"bios/sqrt-ffffffff": [
+"PASS",
+"0000FFFF"
+],
+"bios/switime-arctan-2000": [
+"PASS",
+"00000065"
+],
+"bios/switime-arctan2-100-100": [
+"PASS",
+"0000016A"
+],
+"bios/switime-arctan2-neg": [
+"PASS",
+"00000162"
+],
+"bios/switime-bgaffineset-1": [
+"PASS",
+"0000009A"
+],
+"bios/switime-bitunpack-4-bytes": [
+"PASS",
+"0000036F"
+],
+"bios/switime-cpufastset-256-words": [
+"PASS",
+"0000033E"
+],
+"bios/switime-cpufastset-fill-256-words": [
+"PASS",
+"00000208"
+],
+"bios/switime-cpuset-32-halfwords": [
+"PASS",
+"000001C1"
+],
+"bios/switime-cpuset-fill-32-words": [
+"PASS",
+"00000140"
+],
+"bios/switime-diff8bitunfilterwram-16": [
+"PASS",
+"00000121"
+],
+"bios/switime-div-10-3": [
+"PASS",
+"00000053"
+],
+"bios/switime-div-7fffffff-3": [
+"PASS",
+"000001BF"
+],
+"bios/switime-divarm-10-3": [
+"PASS",
+"00000056"
+],
+"bios/switime-getbioschecksum": [
+"PASS",
+"0000A033"
+],
+"bios/switime-intrwait-flag-already-set": [
+"PASS",
+"00000053"
+],
+"bios/switime-lz77uncompwram-16": [
+"PASS",
+"00000156"
+],
+"bios/switime-midikey2freq": [
+"PASS",
+"0000008C"
+],
+"bios/switime-none": [
+"PASS",
+"00000000"
+],
+"bios/switime-objaffineset-1": [
+"PASS",
+"00000076"
+],
+"bios/switime-rluncompwram-16": [
+"PASS",
+"000000E1"
+],
+"bios/switime-sqrt-0": [
+"PASS",
+"00000063"
+],
+"bios/switime-sqrt-3fffffff": [
+"PASS",
+"00000236"
+],
+"bios/switime-sqrt-ffffffff": [
+"PASS",
+"00000256"
+],
+"bus/contend-iwram-blank": [
+"PASS",
+"000000E6"
+],
+"bus/contend-iwram-control": [
+"PASS",
+"000000E6"
+],
+"bus/contend-oam-hblank-free": [
+"PASS",
+"000000E6"
+],
+"bus/contend-oam-mode0": [
+"PASS",
+"000000E6"
+],
+"bus/contend-oam-mode2": [
+"PASS",
+"000000E6"
+],
+"bus/contend-oam-no-obj": [
+"PASS",
+"000000E6"
+],
+"bus/contend-pram-mode0": [
+"PASS",
+"000000E6"
+],
+"bus/contend-pram-mode2": [
+"PASS",
+"000000E7"
+],
+"bus/contend-pram-no-obj": [
+"PASS",
+"000000E6"
+],
+"bus/contend-vram-blank": [
+"PASS",
+"000000E6"
+],
+"bus/contend-vram-code-blank": [
+"PASS",
+"000000DC"
+],
+"bus/contend-vram-code-mode0": [
+"PASS",
+"000000DD"
+],
+"bus/contend-vram-hblank-free": [
+"PASS",
+"000000F6"
+],
+"bus/contend-vram-mode0": [
+"PASS",
+"000000F7"
+],
+"bus/contend-vram-mode2-locked-out": [
+"PASS",
+"0000042A"
+],
+"bus/contend-vram-no-obj": [
+"PASS",
+"000000F8"
+],
+"bus/ewram-16-reads-ws13": [
+"PASS",
+"00000141"
+],
+"bus/ewram-16-reads-ws14": [
+"PASS",
+"00000121"
+],
+"bus/ewram-16-reads-ws4": [
+"PASS",
+"00000261"
+],
+"bus/io-010-bg0hofs-open-bus": [
+"PASS",
+"00006001"
+],
+"bus/io-028-bg2x-open-bus": [
+"PASS",
+"00006001"
+],
+"bus/io-040-win0h-open-bus": [
+"PASS",
+"00006001"
+],
+"bus/io-04c-mosaic-open-bus": [
+"PASS",
+"00006001"
+],
+"bus/io-04e-open-bus": [
+"PASS",
+"0000E256"
+],
+"bus/io-054-bldy-open-bus": [
+"PASS",
+"00006001"
+],
+"bus/io-056-open-bus": [
+"PASS",
+"0000E256"
+],
+"bus/io-066-reads-0": [
+"PASS",
+"00000000"
+],
+"bus/io-06a-reads-0": [
+"PASS",
+"00000000"
+],
+"bus/io-078-reads-0": [
+"PASS",
+"00000000"
+],
+"bus/io-110-open-bus": [
+"PASS",
+"00006001"
+],
+"bus/io-12c-open-bus": [
+"PASS",
+"00006001"
+],
+"bus/io-136-reads-0": [
+"PASS",
+"00000000"
+],
+"bus/io-142-reads-0": [
+"PASS",
+"00000000"
+],
+"bus/io-206-reads-0": [
+"PASS",
+"00000000"
+],
+"bus/io-20a-reads-0": [
+"PASS",
+"00000000"
+],
+"bus/memctl-byte-reads": [
+"PASS",
+"0D000020"
+],
+"bus/memctl-halfword-reads": [
+"PASS",
+"0D000020"
+],
+"bus/memctl-mirror-04010800": [
+"PASS",
+"0D000020"
+],
+"bus/memctl-mirror-04ff0800": [
+"PASS",
+"0D000020"
+],
+"bus/memctl-reads-0d000020": [
+"PASS",
+"0D000020"
+],
+"bus/memctl-write-via-mirror": [
+"PASS",
+"0000000D"
+],
+"bus/memctl-ws13-reads-back": [
+"PASS",
+"0000000D"
+],
+"bus/memctl-ws14-reads-back": [
+"PASS",
+"0000000E"
+],
+"bus/memctl-ws4-reads-back": [
+"PASS",
+"00000004"
+],
+"bus/obus-0-insns-after-dma": [
+"PASS",
+"E59F0068"
+],
+"bus/obus-1-insn-after-dma-dma-word": [
+"PASS",
+"DEADBEE3"
+],
+"bus/obus-2-insns-after-dma": [
+"PASS",
+"E59F0024"
+],
+"bus/obus-arm-reads-pc-plus-8": [
+"PASS",
+"E58A0000"
+],
+"bus/obus-thumb-ldr-align-a": [
+"PASS",
+"3E0260A8"
+],
+"bus/obus-thumb-ldr-align-b": [
+"PASS",
+"61283E02"
+],
+"bus/obus-thumb-ldrh-align-a": [
+"PASS",
+"000061A8"
+],
+"bus/obus-thumb-ldrh-align-b": [
+"PASS",
+"00003E02"
+],
+"bus/obusbus-ewram-ldr-a": [
+"PASS",
+"60286028"
+],
+"bus/obusbus-ewram-ldr-b": [
+"PASS",
+"60A860A8"
+],
+"bus/obusbus-ewram-ldrh-a": [
+"PASS",
+"00006128"
+],
+"bus/obusbus-ewram-ldrh-b": [
+"PASS",
+"000061A8"
+],
+"bus/obusbus-iwram-ldr-a": [
+"PASS",
+"3E026028"
+],
+"bus/obusbus-iwram-ldr-b": [
+"PASS",
+"60A83E02"
+],
+"bus/obusbus-iwram-ldrh-a": [
+"PASS",
+"00006128"
+],
+"bus/obusbus-iwram-ldrh-b": [
+"PASS",
+"00003E02"
+],
+"bus/obusbus-oam-ldr-a": [
+"PASS",
+"606E6028"
+],
+"bus/obusbus-oam-ldr-b": [
+"PASS",
+"60A83E02"
+],
+"bus/obusbus-oam-ldrh-a": [
+"PASS",
+"00006128"
+],
+"bus/obusbus-oam-ldrh-b": [
+"PASS",
+"00003E02"
+],
+"bus/obusbus-vram-ldr-a": [
+"PASS",
+"60286028"
+],
+"bus/obusbus-vram-ldr-b": [
+"PASS",
+"60A860A8"
+],
+"bus/obusbus-vram-ldrh-a": [
+"PASS",
+"00006128"
+],
+"bus/obusbus-vram-ldrh-b": [
+"PASS",
+"000061A8"
+],
+"bus/obuswin-1-nop-dma-word": [
+"PASS",
+"DEADBEE3"
+],
+"bus/obuswin-2-nops-closed": [
+"PASS",
+"E59F0144"
+],
+"bus/obuswin-mul-closes": [
+"PASS",
+"E59F011C"
+],
+"bus/obuswin-nothing-burst-not-run": [
+"PASS",
+"E59F0198"
+],
+"bus/obuswint-2-nops-half-dma-word": [
+"PASS",
+"DEAD6019"
+],
+"bus/rom-window-64-reads-ws0-2-2": [
+"PASS",
+"000002FE"
+],
+"bus/rom-window-64-reads-ws0-3-1": [
+"PASS",
+"000002FE"
+],
+"bus/rom-window-64-reads-ws0-3-1-pf": [
+"PASS",
+"000002FE"
+],
+"bus/rom-window-64-reads-ws0-3-2": [
+"PASS",
+"0000033E"
+],
+"bus/rom-window-64-reads-ws0-4-2": [
+"PASS",
+"0000037E"
+],
+"bus/rom-window-64-reads-ws0-4-2-pf": [
+"PASS",
+"0000037E"
+],
+"cpu/blx-reg-word-clean": [
+"PASS",
+"00000001"
+],
+"cpu/blx-reg-word-runs-as-bx": [
+"PASS",
+"00000001"
+],
+"cpu/bx-r1-control": [
+"PASS",
+"00000001"
+],
+"cpu/bx-r1-control-clean": [
+"PASS",
+"00000001"
+],
+"cpu/bx-r15-branches-plus-8": [
+"PASS",
+"00000004"
+],
+"cpu/bx-r15-clean": [
+"PASS",
+"00000001"
+],
+"cpu/ldm-empty-list-base-plus-40": [
+"PASS",
+"00000040"
+],
+"cpu/ldm-empty-list-loads-pc": [
+"PASS",
+"00000001"
+],
+"cpu/ldm-r15-wb-loads": [
+"PASS",
+"E2877002"
+],
+"cpu/ldm-r15-wb-no-writeback": [
+"PASS",
+"0000000F"
+],
+"cpu/ldm-user-glitch-add-ors": [
+"PASS",
+"0000FD02"
+],
+"cpu/ldm-user-glitch-from-ewram": [
+"PASS",
+"0000FD02"
+],
+"cpu/ldm-user-glitch-from-iwram": [
+"PASS",
+"0000FD02"
+],
+"cpu/ldm-user-glitch-gone-2-nops": [
+"PASS",
+"00009669"
+],
+"cpu/ldm-user-glitch-gone-after-nop": [
+"PASS",
+"00009669"
+],
+"cpu/ldm-user-glitch-irq-r13-r14": [
+"PASS",
+"0000FD02"
+],
+"cpu/ldm-user-glitch-mla-rs-clean": [
+"PASS",
+"0000000F"
+],
+"cpu/ldm-user-glitch-msr-rm": [
+"PASS",
+"C0000000"
+],
+"cpu/ldm-user-glitch-mul-ors": [
+"PASS",
+"2A6BA8C1"
+],
+"cpu/ldm-user-glitch-reference": [
+"PASS",
+"0000FD02"
+],
+"cpu/ldm-user-glitch-shift-control": [
+"PASS",
+"00000021"
+],
+"cpu/ldm-user-glitch-shift-rs-only": [
+"PASS",
+"00000081"
+],
+"cpu/ldm-user-glitch-store-data-clean": [
+"PASS",
+"00001248"
+],
+"cpu/ldm-user-glitch-umull-rm-rs": [
+"PASS",
+"0000005B"
+],
+"cpu/ldm-user-glitch-unloaded-regs": [
+"PASS",
+"0000FD02"
+],
+"cpu/ldm-user-loads": [
+"PASS",
+"12345678"
+],
+"cpu/ldm-wb-loaded-base-wins": [
+"PASS",
+"CAFEBABE"
+],
+"cpu/ldr-misaligned-rotates": [
+"PASS",
+"44112233"
+],
+"cpu/ldr-r15-post4-no-load": [
+"PASS",
+"00000000"
+],
+"cpu/ldr-r15-post4-pc-base8": [
+"PASS",
+"00000008"
+],
+"cpu/ldr-r15-post8-no-load": [
+"PASS",
+"00000000"
+],
+"cpu/ldr-r15-post8-pc-base12": [
+"PASS",
+"00000010"
+],
+"cpu/ldrh-misaligned-rotates": [
+"PASS",
+"00000033"
+],
+"cpu/ldrsh-misaligned-is-ldrsb": [
+"PASS",
+"00000033"
+],
+"cpu/long-mul-nzcv": [
+"PASS",
+"0000000A"
+],
+"cpu/mlas-carry-c0": [
+"PASS",
+"00002818"
+],
+"cpu/mlas-carry-c1": [
+"PASS",
+"00002818"
+],
+"cpu/mode-0c-caller-r13-kept": [
+"PASS",
+"00000000"
+],
+"cpu/mode-0c-r12-writable": [
+"PASS",
+"00000055"
+],
+"cpu/mode-0c-r13-write-lost": [
+"PASS",
+"00000000"
+],
+"cpu/mode-0c-r14-write-lost": [
+"PASS",
+"00000000"
+],
+"cpu/mode-15-latches": [
+"PASS",
+"00000015"
+],
+"cpu/mode-15-r13-reads-0": [
+"PASS",
+"00000000"
+],
+"cpu/mode-15-r14-reads-0": [
+"PASS",
+"00000000"
+],
+"cpu/mode-1a-latches": [
+"PASS",
+"0000001A"
+],
+"cpu/mode-1a-r13-reads-0": [
+"PASS",
+"00000000"
+],
+"cpu/mode-1a-r14-reads-0": [
+"PASS",
+"00000000"
+],
+"cpu/mode-1e-latches": [
+"PASS",
+"0000001E"
+],
+"cpu/mode-1e-r13-reads-0": [
+"PASS",
+"00000000"
+],
+"cpu/mode-1e-r14-reads-0": [
+"PASS",
+"00000000"
+],
+"cpu/mrs-slot-imm-cmp-form": [
+"PASS",
+"FE012AFE"
+],
+"cpu/mrs-slot-imm-pc": [
+"PASS",
+"00000004"
+],
+"cpu/mrs-slot-imm-rd": [
+"PASS",
+"0000002A"
+],
+"cpu/mrs-slot-imm-rm-unused": [
+"PASS",
+"000000FE"
+],
+"cpu/mrs-slot-imm-rn": [
+"PASS",
+"0000002A"
+],
+"cpu/msr-t-control-block": [
+"PASS",
+"0000000F"
+],
+"cpu/msr-t-marker-stored": [
+"PASS",
+"00000004"
+],
+"cpu/msr-t-no-watchdog": [
+"PASS",
+"00000001"
+],
+"cpu/msr-t-resumes-arm-system": [
+"PASS",
+"0000001F"
+],
+"cpu/msr-t-runs-a8-low-half": [
+"PASS",
+"00000004"
+],
+"cpu/muls-16x-rs-1-byte": [
+"PASS",
+"000000DC"
+],
+"cpu/muls-16x-rs-2-bytes": [
+"PASS",
+"000000EC"
+],
+"cpu/muls-16x-rs-3-bytes": [
+"PASS",
+"000000FC"
+],
+"cpu/muls-16x-rs-4-bytes": [
+"PASS",
+"0000010C"
+],
+"cpu/muls-16x-rs-neg-1-byte": [
+"PASS",
+"000000DC"
+],
+"cpu/muls-16x-rs-neg-2-bytes": [
+"PASS",
+"000000EC"
+],
+"cpu/muls-16x-rs-neg-3-bytes": [
+"PASS",
+"000000FC"
+],
+"cpu/muls-16x-rs-neg-4-bytes": [
+"PASS",
+"0000010C"
+],
+"cpu/muls-carry-c0": [
+"PASS",
+"00002818"
+],
+"cpu/muls-carry-c1": [
+"PASS",
+"00002818"
+],
+"cpu/muls-nzcv-c1-pairs-0-3": [
+"PASS",
+"02000004"
+],
+"cpu/muls-nzcv-c1-pairs-4-7": [
+"PASS",
+"0808040A"
+],
+"cpu/plain-ldm-no-glitch": [
+"PASS",
+"00001100"
+],
+"cpu/psr-f-field-sets-nzcv": [
+"PASS",
+"F000001F"
+],
+"cpu/psr-s-field-writes-nothing": [
+"PASS",
+"F000001F"
+],
+"cpu/psr-x-field-writes-nothing": [
+"PASS",
+"F000001F"
+],
+"cpu/r15-wb-no-watchdog": [
+"PASS",
+"00000000"
+],
+"cpu/smlals-carry": [
+"PASS",
+"00002818"
+],
+"cpu/smulls-carry": [
+"PASS",
+"00002818"
+],
+"cpu/spsr-0f-reads-1f": [
+"PASS",
+"0000001F"
+],
+"cpu/spsr-after-ldm-user-unchanged": [
+"PASS",
+"600000D2"
+],
+"cpu/spsr-bit4-reads-one": [
+"PASS",
+"00000010"
+],
+"cpu/spsr-holds-f00000ff": [
+"PASS",
+"F00000FF"
+],
+"cpu/stm-base-first-stores-old": [
+"PASS",
+"02004000"
+],
+"cpu/stm-base-second-stores-new": [
+"PASS",
+"02004008"
+],
+"cpu/stm-empty-list-base-plus-40": [
+"PASS",
+"00000040"
+],
+"cpu/stm-empty-list-stores-pc12": [
+"PASS",
+"08002D60"
+],
+"cpu/stm-r15-wb-no-writeback": [
+"PASS",
+"0000001F"
+],
+"cpu/stm-user-banked-base-stores-user": [
+"PASS",
+"CAFE0001"
+],
+"cpu/stm-user-banked-base-unchanged": [
+"PASS",
+"00000000"
+],
+"cpu/stm-user-no-glitch": [
+"PASS",
+"00009669"
+],
+"cpu/stm-user-stores-user-r13": [
+"PASS",
+"CAFE0001"
+],
+"cpu/stm-user-wb-nonbanked-base": [
+"PASS",
+"00000004"
+],
+"cpu/stm-user-wb-to-user-bank": [
+"PASS",
+"37024043"
+],
+"cpu/str-r15-post-4-pc-base-4": [
+"PASS",
+"0000001F"
+],
+"cpu/str-r15-post4-pc-base4": [
+"PASS",
+"0000000C"
+],
+"cpu/str-r15-post8-pc-base8": [
+"PASS",
+"00000018"
+],
+"cpu/str-r15-pre4-wb-pc": [
+"PASS",
+"0000001C"
+],
+"cpu/system-mode-spsr-is-cpsr": [
+"PASS",
+"2000001F"
+],
+"cpu/system-r13-survives": [
+"PASS",
+"51515151"
+],
+"cpu/thumb-add-pc-branches": [
+"PASS",
+"00000000"
+],
+"cpu/thumb-add-pc-keeps-cpsr": [
+"PASS",
+"00000092"
+],
+"cpu/thumb-cmp-pc-halfword-clean": [
+"PASS",
+"00000001"
+],
+"cpu/thumb-cmp-pc-halfword-not-at-a-and-3": [
+"PASS",
+"00000000"
+],
+"cpu/thumb-cmp-pc-halfword-restores-spsr": [
+"PASS",
+"80000012"
+],
+"cpu/thumb-cmp-pc-halfword-skips-the-add": [
+"PASS",
+"00000000"
+],
+"cpu/thumb-cmp-pc-lands-in-system": [
+"PASS",
+"9000009F"
+],
+"cpu/thumb-cmp-pc-restores-cpsr": [
+"PASS",
+"9000009F"
+],
+"cpu/thumb-cmp-pc-system-mode-clean": [
+"PASS",
+"00000001"
+],
+"cpu/thumb-cmp-pc-system-mode-no-op": [
+"PASS",
+"C000001F"
+],
+"cpu/thumb-mov-pc-branches": [
+"PASS",
+"00000004"
+],
+"cpu/thumb-mov-pc-keeps-cpsr": [
+"PASS",
+"00000092"
+],
+"cpu/thumb-mul-64-iwram-cycles": [
+"PASS",
+"0000013D"
+],
+"cpu/umlals-carry": [
+"PASS",
+"00002812"
+],
+"cpu/umulls-carry": [
+"PASS",
+"00002812"
+],
+"cpu/undefined-modes-clean": [
+"PASS",
+"00000001"
+],
+"cpu/undefined-modes-finish": [
+"PASS",
+"00000004"
+],
+"dma/bus-ew-arm-adds": [
+"PASS",
+"E2811003"
+],
+"dma/bus-ew-arm-ldr": [
+"PASS",
+"E1A00000"
+],
+"dma/bus-ew-arm-ldrh-hi": [
+"PASS",
+"E1A00000"
+],
+"dma/bus-ew-ldr": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-ldrb-0": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-ldrb-1": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-ldrb-2": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-ldrb-3": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-ldrh-ewram": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-ldrh-hi": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-ldrh-lo": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-store-then-fetch": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-ew-thumb-adds": [
+"PASS",
+"31033103"
+],
+"dma/bus-iw-arm-adds": [
+"PASS",
+"E2811004"
+],
+"dma/bus-iw-arm-ldr": [
+"PASS",
+"11223344"
+],
+"dma/bus-iw-arm-ldrh-hi": [
+"PASS",
+"11220000"
+],
+"dma/bus-iw-ldr": [
+"PASS",
+"11223344"
+],
+"dma/bus-iw-ldrb-0": [
+"PASS",
+"46C04644"
+],
+"dma/bus-iw-ldrb-1": [
+"PASS",
+"46C033C0"
+],
+"dma/bus-iw-ldrb-2": [
+"PASS",
+"462246C0"
+],
+"dma/bus-iw-ldrb-3": [
+"PASS",
+"11C046C0"
+],
+"dma/bus-iw-ldrh-ewram": [
+"PASS",
+"55665566"
+],
+"dma/bus-iw-ldrh-hi": [
+"PASS",
+"112246C0"
+],
+"dma/bus-iw-ldrh-lo": [
+"PASS",
+"46C03344"
+],
+"dma/bus-iw-store-then-fetch": [
+"PASS",
+"46C046C0"
+],
+"dma/bus-iw-thumb-adds": [
+"PASS",
+"31033104"
+],
+"dma/capture-enable-self-clears": [
+"PASS",
+"00003700"
+],
+"dma/capture-frame-1-every-line": [
+"PASS",
+"00000280"
+],
+"dma/capture-frame-2": [
+"PASS",
+"00000280"
+],
+"dma/capture-frame-3": [
+"PASS",
+"00000280"
+],
+"dma/capture-rearm-1": [
+"PASS",
+"00000280"
+],
+"dma/capture-rearm-2": [
+"PASS",
+"00000280"
+],
+"dma/capture-rearm-3": [
+"PASS",
+"00000280"
+],
+"dma/capture-rearm-self-clears": [
+"PASS",
+"00003700"
+],
+"dma/cnth-hi-40-control": [
+"PASS",
+"00004000"
+],
+"dma/cnth-hi-40-no-run": [
+"PASS",
+"00000000"
+],
+"dma/cnth-hi-44-control": [
+"PASS",
+"00004400"
+],
+"dma/cnth-hi-80-reads-0080": [
+"PASS",
+"00000080"
+],
+"dma/cnth-hi-80-runs": [
+"PASS",
+"00000001"
+],
+"dma/cnth-hi-c0-bit7-only-mirrors": [
+"PASS",
+"00004080"
+],
+"dma/cnth-hi-c0-runs": [
+"PASS",
+"00000001"
+],
+"dma/cnth-lo-44-control": [
+"PASS",
+"00000040"
+],
+"dma/cnth-lo-80-no-run": [
+"PASS",
+"00000000"
+],
+"dma/cnth-lo-80-stores-nothing": [
+"PASS",
+"00000000"
+],
+"dma/cnth-lo-c0-bit7-dropped": [
+"PASS",
+"00000040"
+],
+"dma/dmadur-cpu-starts-tm1-n0": [
+"PASS",
+"00000000"
+],
+"dma/dmadur-cpu-starts-tm1-n1": [
+"PASS",
+"00000001"
+],
+"dma/dmadur-cpu-starts-tm1-n12": [
+"PASS",
+"0000000C"
+],
+"dma/dmadur-cpu-starts-tm1-n2": [
+"PASS",
+"00000002"
+],
+"dma/dmadur-cpu-starts-tm1-n3": [
+"PASS",
+"00000003"
+],
+"dma/dmadur-cpu-starts-tm1-n4": [
+"PASS",
+"00000004"
+],
+"dma/dmadur-cpu-starts-tm1-n6": [
+"PASS",
+"00000006"
+],
+"dma/dmadur-cpu-starts-tm1-n8": [
+"PASS",
+"00000008"
+],
+"dma/dmadur-dma16-starts-tm1-n1": [
+"PASS",
+"00000000"
+],
+"dma/dmadur-dma16-starts-tm1-n12": [
+"PASS",
+"0000000B"
+],
+"dma/dmadur-dma16-starts-tm1-n2": [
+"PASS",
+"00000001"
+],
+"dma/dmadur-dma16-starts-tm1-n3": [
+"PASS",
+"00000002"
+],
+"dma/dmadur-dma16-starts-tm1-n4": [
+"PASS",
+"00000003"
+],
+"dma/dmadur-dma16-starts-tm1-n6": [
+"PASS",
+"00000005"
+],
+"dma/dmadur-dma16-starts-tm1-n8": [
+"PASS",
+"00000007"
+],
+"dma/dmadur-dma32-starts-tm1-n1": [
+"PASS",
+"00000000"
+],
+"dma/dmadur-dma32-starts-tm1-n12": [
+"PASS",
+"0000000B"
+],
+"dma/dmadur-dma32-starts-tm1-n2": [
+"PASS",
+"00000001"
+],
+"dma/dmadur-dma32-starts-tm1-n3": [
+"PASS",
+"00000002"
+],
+"dma/dmadur-dma32-starts-tm1-n4": [
+"PASS",
+"00000003"
+],
+"dma/dmadur-dma32-starts-tm1-n6": [
+"PASS",
+"00000005"
+],
+"dma/dmadur-dma32-starts-tm1-n8": [
+"PASS",
+"00000007"
+],
+"dma/dmadur-ew-iw-32-n0": [
+"PASS",
+"00000002"
+],
+"dma/dmadur-ew-iw-32-n1": [
+"PASS",
+"0000000C"
+],
+"dma/dmadur-ew-iw-32-n12": [
+"PASS",
+"00000017"
+],
+"dma/dmadur-ew-iw-32-n2": [
+"PASS",
+"0000000D"
+],
+"dma/dmadur-ew-iw-32-n3": [
+"PASS",
+"0000000E"
+],
+"dma/dmadur-ew-iw-32-n4": [
+"PASS",
+"0000000F"
+],
+"dma/dmadur-ew-iw-32-n6": [
+"PASS",
+"00000011"
+],
+"dma/dmadur-ew-iw-32-n8": [
+"PASS",
+"00000013"
+],
+"dma/dmadur-io-iw-32-n0": [
+"PASS",
+"00000002"
+],
+"dma/dmadur-io-iw-32-n1": [
+"PASS",
+"00000007"
+],
+"dma/dmadur-io-iw-32-n12": [
+"PASS",
+"00000012"
+],
+"dma/dmadur-io-iw-32-n2": [
+"PASS",
+"00000008"
+],
+"dma/dmadur-io-iw-32-n3": [
+"PASS",
+"00000009"
+],
+"dma/dmadur-io-iw-32-n4": [
+"PASS",
+"0000000A"
+],
+"dma/dmadur-io-iw-32-n6": [
+"PASS",
+"0000000C"
+],
+"dma/dmadur-io-iw-32-n8": [
+"PASS",
+"0000000E"
+],
+"dma/dmadur-iw-ew-32-n0": [
+"PASS",
+"00000002"
+],
+"dma/dmadur-iw-ew-32-n1": [
+"PASS",
+"0000000C"
+],
+"dma/dmadur-iw-ew-32-n12": [
+"PASS",
+"00000017"
+],
+"dma/dmadur-iw-ew-32-n2": [
+"PASS",
+"0000000D"
+],
+"dma/dmadur-iw-ew-32-n3": [
+"PASS",
+"0000000E"
+],
+"dma/dmadur-iw-ew-32-n4": [
+"PASS",
+"0000000F"
+],
+"dma/dmadur-iw-ew-32-n6": [
+"PASS",
+"00000011"
+],
+"dma/dmadur-iw-ew-32-n8": [
+"PASS",
+"00000013"
+],
+"dma/dmadur-iw-iw-16-n0": [
+"PASS",
+"00000002"
+],
+"dma/dmadur-iw-iw-16-n1": [
+"PASS",
+"00000007"
+],
+"dma/dmadur-iw-iw-16-n12": [
+"PASS",
+"00000012"
+],
+"dma/dmadur-iw-iw-16-n2": [
+"PASS",
+"00000008"
+],
+"dma/dmadur-iw-iw-16-n3": [
+"PASS",
+"00000009"
+],
+"dma/dmadur-iw-iw-16-n4": [
+"PASS",
+"0000000A"
+],
+"dma/dmadur-iw-iw-16-n6": [
+"PASS",
+"0000000C"
+],
+"dma/dmadur-iw-iw-16-n8": [
+"PASS",
+"0000000E"
+],
+"dma/dmadur-iw-iw-32-n0": [
+"PASS",
+"00000002"
+],
+"dma/dmadur-iw-iw-32-n1": [
+"PASS",
+"00000007"
+],
+"dma/dmadur-iw-iw-32-n12": [
+"PASS",
+"00000012"
+],
+"dma/dmadur-iw-iw-32-n2": [
+"PASS",
+"00000008"
+],
+"dma/dmadur-iw-iw-32-n3": [
+"PASS",
+"00000009"
+],
+"dma/dmadur-iw-iw-32-n4": [
+"PASS",
+"0000000A"
+],
+"dma/dmadur-iw-iw-32-n6": [
+"PASS",
+"0000000C"
+],
+"dma/dmadur-iw-iw-32-n8": [
+"PASS",
+"0000000E"
+],
+"dma/dmastart-arm-ldm-iwram-2": [
+"PASS",
+"00110206"
+],
+"dma/dmastart-arm-ldr-ewram-dest": [
+"PASS",
+"0014000B"
+],
+"dma/dmastart-arm-ldr-iwram": [
+"PASS",
+"000F0206"
+],
+"dma/dmastart-arm-ldrh-ewram-dest": [
+"PASS",
+"00110008"
+],
+"dma/dmastart-arm-ldrh-io": [
+"PASS",
+"000F0206"
+],
+"dma/dmastart-arm-mul-ldr-ewram": [
+"PASS",
+"00170106"
+],
+"dma/dmastart-arm-none": [
+"PASS",
+"00040206"
+],
+"dma/dmastart-arm-nop-ldr-ewram": [
+"PASS",
+"00160106"
+],
+"dma/dmastart-arm-nop-nop-ldr-ewram": [
+"PASS",
+"00170106"
+],
+"dma/dmastart-arm-str-ewram": [
+"PASS",
+"0014020B"
+],
+"dma/dmastart-thumb-ldm-iwram-2": [
+"PASS",
+"00110206"
+],
+"dma/dmastart-thumb-ldr-ewram-dest": [
+"PASS",
+"0014000B"
+],
+"dma/dmastart-thumb-ldr-iwram": [
+"PASS",
+"000F0206"
+],
+"dma/dmastart-thumb-ldrh-ewram-dest": [
+"PASS",
+"00110008"
+],
+"dma/dmastart-thumb-ldrh-io": [
+"PASS",
+"000F0206"
+],
+"dma/dmastart-thumb-mul-ldr-ewram": [
+"PASS",
+"00170106"
+],
+"dma/dmastart-thumb-none": [
+"PASS",
+"00040206"
+],
+"dma/dmastart-thumb-nop-ldr-ewram": [
+"PASS",
+"00160106"
+],
+"dma/dmastart-thumb-nop-nop-ldr-ewram": [
+"PASS",
+"00170106"
+],
+"dma/dmastart-thumb-str-ewram": [
+"PASS",
+"0014020B"
+],
+"dma/dmasteal-ewram-to-iwram-16bit-n4": [
+"PASS",
+"000004C4"
+],
+"dma/dmasteal-ewram-to-iwram-32bit-n4": [
+"PASS",
+"000004D0"
+],
+"dma/dmasteal-iwram-to-ewram-16bit-n4": [
+"PASS",
+"000004C4"
+],
+"dma/dmasteal-iwram-to-ewram-32bit-n4": [
+"PASS",
+"000004D0"
+],
+"dma/dmasteal-iwram-to-iwram-16bit-n1": [
+"PASS",
+"000004B6"
+],
+"dma/dmasteal-iwram-to-iwram-16bit-n16": [
+"PASS",
+"000004D4"
+],
+"dma/dmasteal-iwram-to-iwram-16bit-n2": [
+"PASS",
+"000004B8"
+],
+"dma/dmasteal-iwram-to-iwram-16bit-n32": [
+"PASS",
+"000004F4"
+],
+"dma/dmasteal-iwram-to-iwram-16bit-n4": [
+"PASS",
+"000004BC"
+],
+"dma/dmasteal-iwram-to-iwram-16bit-n8": [
+"PASS",
+"000004C4"
+],
+"dma/dmasteal-iwram-to-iwram-32bit-n1": [
+"PASS",
+"000004B6"
+],
+"dma/dmasteal-iwram-to-iwram-32bit-n16": [
+"PASS",
+"000004D4"
+],
+"dma/dmasteal-iwram-to-iwram-32bit-n4": [
+"PASS",
+"000004BC"
+],
+"dma/dmasteal-iwram-to-oam-16bit-n4": [
+"PASS",
+"000004BC"
+],
+"dma/dmasteal-iwram-to-pram-16bit-n4": [
+"PASS",
+"000004BC"
+],
+"dma/dmasteal-none": [
+"PASS",
+"000004B1"
+],
+"dma/dmasteal-oam-to-iwram-16bit-n4": [
+"PASS",
+"000004BC"
+],
+"dma/dmasteal-pram-to-iwram-16bit-n4": [
+"PASS",
+"000004BC"
+],
+"dma/dmasteal-vram-to-iwram-16bit-n4": [
+"PASS",
+"000004BC"
+],
+"dma/dmasteal-vram-to-iwram-32bit-n4": [
+"PASS",
+"000004C0"
+],
+"dma/dmatime-burst-ewram": [
+"PASS",
+"0000011C"
+],
+"dma/dmatime-burst-iwram": [
+"PASS",
+"0000007C"
+],
+"dma/dmatime-burst-oam": [
+"PASS",
+"0000007C"
+],
+"dma/dmatime-burst-palette": [
+"PASS",
+"0000009C"
+],
+"dma/dmatime-burst-rom-ewram": [
+"PASS",
+"0000011E"
+],
+"dma/dmatime-burst-vram-mode3": [
+"PASS",
+"000000B1"
+],
+"dma/dmatime-completion-irq-after-resume": [
+"PASS",
+"0000006D"
+],
+"dma/dmatime-cpu-resumes-after-last-word": [
+"PASS",
+"00000001"
+],
+"dma/dmatime-enable-clear-baseline": [
+"PASS",
+"0000002A"
+],
+"dma/dmatime-hblank-dma-in-hblank": [
+"PASS",
+"00000002"
+],
+"dma/dmatime-hblank-flag-to-word": [
+"PASS",
+"00000025"
+],
+"dma/dmatime-imm-1-word-resume": [
+"PASS",
+"00000038"
+],
+"dma/dmatime-imm-16-words-resume": [
+"PASS",
+"000000F7"
+],
+"dma/dmatime-imm-4-words-resume": [
+"PASS",
+"00000067"
+],
+"dma/dmatime-vblank-dma-in-vblank": [
+"PASS",
+"00000001"
+],
+"dma/dmatime-vblank-dma-line-160": [
+"PASS",
+"000000A0"
+],
+"dma/dmatime-vblank-flag-to-word": [
+"PASS",
+"00000025"
+],
+"dma/fifodma-ewram-load-k20-n10": [
+"PASS",
+"00000036"
+],
+"dma/fifodma-ewram-load-k20-n11": [
+"PASS",
+"00000036"
+],
+"dma/fifodma-ewram-load-k20-n16": [
+"PASS",
+"0000003B"
+],
+"dma/fifodma-ewram-load-k20-n17": [
+"PASS",
+"0000005B"
+],
+"dma/fifodma-ewram-load-k20-n18": [
+"PASS",
+"0000003E"
+],
+"dma/fifodma-ewram-load-k20-n20": [
+"PASS",
+"0000005E"
+],
+"dma/fifodma-ewram-load-k20-n21": [
+"PASS",
+"0000005E"
+],
+"dma/fifodma-k20-n13": [
+"PASS",
+"00000013"
+],
+"dma/fifodma-k20-n14": [
+"PASS",
+"00000050"
+],
+"dma/fifodma-k20-n15": [
+"PASS",
+"00000015"
+],
+"dma/fifodma-k20-n16": [
+"PASS",
+"00000016"
+],
+"dma/fifodma-k20-n17": [
+"PASS",
+"00000035"
+],
+"dma/fifodma-k20-n23": [
+"PASS",
+"0000003B"
+],
+"dma/fifodma-k20-n24": [
+"PASS",
+"0000005A"
+],
+"dma/fifodma-k20-n25": [
+"PASS",
+"0000003D"
+],
+"dma/fifodma-k33-n29": [
+"PASS",
+"00000023"
+],
+"dma/fifodma-k33-n30": [
+"PASS",
+"00000042"
+],
+"dma/halthb-wake-and-grant-k0": [
+"PASS",
+"03EC03D4"
+],
+"dma/halthb-wake-and-grant-k13": [
+"PASS",
+"03EC03D4"
+],
+"dma/halthb-wake-and-grant-k4": [
+"PASS",
+"03EC03D4"
+],
+"dma/halthb-wake-and-grant-k9": [
+"PASS",
+"03EC03D4"
+],
+"dma/hdma-ewram-k0": [
+"PASS",
+"048303D7"
+],
+"dma/hdma-ewram-k1": [
+"PASS",
+"048403D8"
+],
+"dma/hdma-ewram-k10": [
+"PASS",
+"048D03D9"
+],
+"dma/hdma-ewram-k11": [
+"PASS",
+"048E03DA"
+],
+"dma/hdma-ewram-k2": [
+"PASS",
+"048503D9"
+],
+"dma/hdma-ewram-k3": [
+"PASS",
+"048603DA"
+],
+"dma/hdma-ewram-k4": [
+"PASS",
+"048803D5"
+],
+"dma/hdma-ewram-k5": [
+"PASS",
+"048903D5"
+],
+"dma/hdma-ewram-k6": [
+"PASS",
+"048903D5"
+],
+"dma/hdma-ewram-k7": [
+"PASS",
+"048A03D6"
+],
+"dma/hdma-ewram-k8": [
+"PASS",
+"048B03D7"
+],
+"dma/hdma-ewram-k9": [
+"PASS",
+"048C03D8"
+],
+"dma/hdma-iwram-k0": [
+"PASS",
+"043303D5"
+],
+"dma/hdma-iwram-k1": [
+"PASS",
+"043503D5"
+],
+"dma/hdma-iwram-k2": [
+"PASS",
+"043603D5"
+],
+"dma/hdma-iwram-k3": [
+"PASS",
+"043603D5"
+],
+"dma/hdma-iwram-k4": [
+"PASS",
+"043803D5"
+],
+"dma/hdma-iwram-k5": [
+"PASS",
+"043903D5"
+],
+"dma/hdma-mul-k0": [
+"PASS",
+"048303D5"
+],
+"dma/hdma-mul-k1": [
+"PASS",
+"048303D5"
+],
+"dma/hdma-mul-k2": [
+"PASS",
+"048303D5"
+],
+"dma/hdma-mul-k3": [
+"PASS",
+"048303D5"
+],
+"dma/hdma-mul-k4": [
+"PASS",
+"048803D5"
+],
+"dma/hdma-mul-k5": [
+"PASS",
+"048803D5"
+],
+"dma/hdma-mul-k6": [
+"PASS",
+"048803D5"
+],
+"dma/hdma-mul-k7": [
+"PASS",
+"048803D5"
+],
+"dma/hdma-mul-k8": [
+"PASS",
+"048803D5"
+],
+"dma/hdma-mul-k9": [
+"PASS",
+"048D03D5"
+],
+"dma/hdma-nodma-ewram-k0": [
+"PASS",
+"04800484"
+],
+"dma/hdma-nodma-iwram-k0": [
+"PASS",
+"04300434"
+],
+"dma/hdma-nodma-mul-k0": [
+"PASS",
+"04800484"
+],
+"dma/hdma-nodma-mul-k5": [
+"PASS",
+"04850489"
+],
+"dma/hdma-nodma-nop-k0": [
+"PASS",
+"04400441"
+],
+"dma/hdma-nop-k0": [
+"PASS",
+"044403D5"
+],
+"dma/hdma-nop-k1": [
+"PASS",
+"044503D5"
+],
+"dma/hdma-nop-k2": [
+"PASS",
+"044603D5"
+],
+"dma/imm-dma-1-halfword": [
+"PASS",
+"0000000E"
+],
+"dma/imm-dma-1-word": [
+"PASS",
+"00000014"
+],
+"dma/imm-dma-1024-words": [
+"PASS",
+"00003008"
+],
+"dma/imm-dma-2-halfwords": [
+"PASS",
+"00000014"
+],
+"dma/imm-dma-2-words": [
+"PASS",
+"00000020"
+],
+"dma/imm-dma-4-words": [
+"PASS",
+"00000038"
+],
+"dma/imm-dma-4096-words": [
+"PASS",
+"0000C008"
+],
+"dma/imm-dma-64-halfwords": [
+"PASS",
+"00000188"
+],
+"dma/imm-dma-64-words": [
+"PASS",
+"00000308"
+],
+"dma/imm-dma-none": [
+"PASS",
+"00000006"
+],
+"dma/tmrdma-dma0-only": [
+"PASS",
+"8100FF81"
+],
+"dma/tmrdma-dma1-only": [
+"PASS",
+"EC00BEEF"
+],
+"dma/tmrdma-k0": [
+"PASS",
+"F303FF81"
+],
+"dma/tmrdma-k1": [
+"PASS",
+"F501FFE9"
+],
+"dma/tmrdma-k2": [
+"PASS",
+"F601FFEA"
+],
+"dma/tmrdma-k3": [
+"PASS",
+"F701FFEB"
+],
+"dma/tmrdma-k4": [
+"PASS",
+"F801FFEC"
+],
+"dma/tmrdma-k5": [
+"PASS",
+"F901FFED"
+],
+"dma/tmrdma-k6": [
+"PASS",
+"FA01FFEE"
+],
+"dma/tmrdma-k7": [
+"PASS",
+"FB01FFEF"
+],
+"dma/unmapped-src-after-ldr": [
+"PASS",
+"11223344"
+],
+"dma/unmapped-src-after-ldrb": [
+"PASS",
+"FFFFFFFF"
+],
+"dma/unmapped-src-after-ldrh": [
+"PASS",
+"FF24FF24"
+],
+"dma/unmapped-src-after-ldrsh-odd": [
+"PASS",
+"FF24FF24"
+],
+"dma/unmapped-src-no-load-opcode": [
+"PASS",
+"46C046C0"
+],
+"dma/vdmageo-wake-and-grant-k0": [
+"PASS",
+"04CD04B5"
+],
+"dma/vdmageo-wake-and-grant-k13": [
+"PASS",
+"04CD04B5"
+],
+"dma/vdmageo-wake-and-grant-k4": [
+"PASS",
+"04CD04B5"
+],
+"dma/vdmageo-wake-and-grant-k9": [
+"PASS",
+"04CD04B5"
+],
+"irq/dmairq-nop-sled-n1": [
+"PASS",
+"7101002B"
+],
+"irq/dmairq-nop-sled-n16": [
+"PASS",
+"710100DF"
+],
+"irq/dmairq-nop-sled-n2": [
+"PASS",
+"71010037"
+],
+"irq/dmairq-nop-sled-n4": [
+"PASS",
+"7101004F"
+],
+"irq/dmairq-nop-sled-n64": [
+"PASS",
+"7101031F"
+],
+"irq/dmairq-poll-ewram-n1": [
+"PASS",
+"68010030"
+],
+"irq/dmairq-poll-ewram-n16": [
+"PASS",
+"680100E4"
+],
+"irq/dmairq-poll-ewram-n2": [
+"PASS",
+"6801003C"
+],
+"irq/dmairq-poll-ewram-n4": [
+"PASS",
+"68010054"
+],
+"irq/dmairq-poll-ewram-n64": [
+"PASS",
+"68010324"
+],
+"irq/dmairq-poll-iwram-n1": [
+"PASS",
+"6001002B"
+],
+"irq/dmairq-poll-iwram-n16": [
+"PASS",
+"600100DF"
+],
+"irq/dmairq-poll-iwram-n2": [
+"PASS",
+"60010037"
+],
+"irq/dmairq-poll-iwram-n4": [
+"PASS",
+"6001004F"
+],
+"irq/dmairq-poll-iwram-n64": [
+"PASS",
+"6001031F"
+],
+"irq/dmamulirq-ewram-ldr-k1": [
+"PASS",
+"92010081"
+],
+"irq/dmamulirq-ewram-ldr-k10": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k102": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k106": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k11": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k110": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k114": [
+"PASS",
+"94010091"
+],
+"irq/dmamulirq-ewram-ldr-k118": [
+"PASS",
+"94010091"
+],
+"irq/dmamulirq-ewram-ldr-k12": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k122": [
+"PASS",
+"95010099"
+],
+"irq/dmamulirq-ewram-ldr-k13": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k14": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k15": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k16": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k2": [
+"PASS",
+"92010081"
+],
+"irq/dmamulirq-ewram-ldr-k22": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k3": [
+"PASS",
+"92010081"
+],
+"irq/dmamulirq-ewram-ldr-k4": [
+"PASS",
+"92010081"
+],
+"irq/dmamulirq-ewram-ldr-k42": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k5": [
+"PASS",
+"92010081"
+],
+"irq/dmamulirq-ewram-ldr-k6": [
+"PASS",
+"92010081"
+],
+"irq/dmamulirq-ewram-ldr-k62": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k7": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k8": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k82": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-ewram-ldr-k9": [
+"PASS",
+"93010089"
+],
+"irq/dmamulirq-mul-k1": [
+"PASS",
+"6301007C"
+],
+"irq/dmamulirq-mul-k10": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k102": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k106": [
+"PASS",
+"65010086"
+],
+"irq/dmamulirq-mul-k11": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k110": [
+"PASS",
+"6601008B"
+],
+"irq/dmamulirq-mul-k114": [
+"PASS",
+"67010090"
+],
+"irq/dmamulirq-mul-k118": [
+"PASS",
+"67010090"
+],
+"irq/dmamulirq-mul-k12": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k122": [
+"PASS",
+"68010095"
+],
+"irq/dmamulirq-mul-k13": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k14": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k15": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k16": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k2": [
+"PASS",
+"6301007C"
+],
+"irq/dmamulirq-mul-k22": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k3": [
+"PASS",
+"6301007C"
+],
+"irq/dmamulirq-mul-k4": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k42": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k5": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k6": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k62": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k7": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k8": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k82": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-mul-k9": [
+"PASS",
+"64010081"
+],
+"irq/dmamulirq-no-dma-k102": [
+"PASS",
+"38010080"
+],
+"irq/dmamulirq-no-dma-k122": [
+"PASS",
+"38010094"
+],
+"irq/dmamulirq-no-dma-k2": [
+"PASS",
+"CD01001D"
+],
+"irq/dmamulirq-no-dma-k22": [
+"PASS",
+"D1010031"
+],
+"irq/dmamulirq-no-dma-k42": [
+"PASS",
+"D5010045"
+],
+"irq/dmamulirq-no-dma-k62": [
+"PASS",
+"DC010058"
+],
+"irq/dmamulirq-no-dma-k82": [
+"PASS",
+"F001006C"
+],
+"irq/haltprobe-strb-haltcnt-tm0": [
+"PASS",
+"0000000B"
+],
+"irq/haltprobe-strb-haltcnt-vcount": [
+"PASS",
+"00000064"
+],
+"irq/haltprobe-swi2-tm0": [
+"PASS",
+"00001348"
+],
+"irq/haltprobe-swi2-vcount": [
+"PASS",
+"00000068"
+],
+"irq/if-ack-race-j0-3": [
+"PASS",
+"00000000"
+],
+"irq/if-ack-race-j4-5": [
+"PASS",
+"00000000"
+],
+"irq/if-ack-race-j6-7": [
+"PASS",
+"00000020"
+],
+"irq/irqlat-dma3": [
+"PASS",
+"000000B2"
+],
+"irq/irqlat-dma3-haltcnt": [
+"PASS",
+"000000AC"
+],
+"irq/irqlat-every-irq-arrived": [
+"PASS",
+"00000000"
+],
+"irq/irqlat-hblank": [
+"PASS",
+"000003CC"
+],
+"irq/irqlat-hblank-haltcnt": [
+"PASS",
+"000003DD"
+],
+"irq/irqlat-tm2-haltcnt-ignored": [
+"PASS",
+"00000087"
+],
+"irq/irqlat-tm2-one-write": [
+"PASS",
+"0000007C"
+],
+"irq/irqlat-tm2-reload-0000": [
+"PASS",
+"00000072"
+],
+"irq/irqlat-tm2-reload-0001": [
+"PASS",
+"00000072"
+],
+"irq/irqlat-tm2-two-writes": [
+"PASS",
+"00000085"
+],
+"irq/irqlat-vblank": [
+"PASS",
+"0000096F"
+],
+"irq/irqlat-vblank-haltcnt": [
+"PASS",
+"00000983"
+],
+"irq/irqstorm-p1-1024-words": [
+"PASS",
+"FF01301F"
+],
+"irq/irqstorm-p1-no-dma": [
+"PASS",
+"FF01001E"
+],
+"irq/irqstorm-p16-1024-words": [
+"PASS",
+"F1013021"
+],
+"irq/irqstorm-p16-128-words": [
+"PASS",
+"F1010621"
+],
+"irq/irqstorm-p16-64-words": [
+"PASS",
+"F1010321"
+],
+"irq/irqstorm-p16-no-dma": [
+"PASS",
+"FF01002F"
+],
+"irq/irqstorm-p256-4096-words": [
+"PASS",
+"2101C021"
+],
+"irq/irqstorm-p64-1024-words": [
+"PASS",
+"E1013021"
+],
+"irq/irqwait-ewram-arm-k17": [
+"PASS",
+"0103003A"
+],
+"irq/irqwait-ewram-arm-k18": [
+"PASS",
+"0103003A"
+],
+"irq/irqwait-ewram-arm-k19": [
+"PASS",
+"0103003A"
+],
+"irq/irqwait-ewram-arm-k20": [
+"PASS",
+"0103003A"
+],
+"irq/irqwait-ewram-arm-k21": [
+"PASS",
+"0103003A"
+],
+"irq/irqwait-ewram-arm-k22": [
+"PASS",
+"0103003A"
+],
+"irq/irqwait-ewram-thumb-k17": [
+"PASS",
+"01060031"
+],
+"irq/irqwait-ewram-thumb-k18": [
+"PASS",
+"01060031"
+],
+"irq/irqwait-ewram-thumb-k19": [
+"PASS",
+"01060031"
+],
+"irq/irqwait-iwram-arm-k16": [
+"PASS",
+"0111002A"
+],
+"irq/irqwait-iwram-arm-k24": [
+"PASS",
+"01190032"
+],
+"irq/irqwait-iwram-thumb-k16": [
+"PASS",
+"0111002A"
+],
+"irq/irqwait-iwram-thumb-k24": [
+"PASS",
+"01190032"
+],
+"irq/irqwin-ewram-load-sled": [
+"PASS",
+"00000008"
+],
+"irq/irqwin-ie-store-3-insns": [
+"PASS",
+"0000000C"
+],
+"irq/irqwin-if-ack-race": [
+"PASS",
+"00000008"
+],
+"irq/irqwin-ime-store-3-insns": [
+"PASS",
+"0000000C"
+],
+"irq/irqwin-mixed-sled": [
+"PASS",
+"0000000C"
+],
+"irq/irqwin-msr-clear-i-2-insns": [
+"PASS",
+"00000008"
+],
+"irq/irqwin-mul-sled": [
+"PASS",
+"00000008"
+],
+"irq/irqwin-rom-load-sled": [
+"PASS",
+"00000008"
+],
+"irq/lyc-write-edge": [
+"PASS",
+"64101011"
+],
+"irq/vbwait-vblank-t0-H": [
+"PASS",
+"000020BD"
+],
+"irq/vbwait-vblank-t0-R": [
+"PASS",
+"0000210F"
+],
+"irq/vbwait-vblank-t0-T": [
+"PASS",
+"0000094B"
+],
+"irq/vbwait-vblank-t5-H": [
+"PASS",
+"000020BD"
+],
+"irq/vbwait-vblank-t5-R": [
+"PASS",
+"0000210F"
+],
+"irq/vbwait-vblank-t5-T": [
+"PASS",
+"0000094B"
+],
+"irq/vbwait-vcount160-t0-H": [
+"PASS",
+"000020BE"
+],
+"irq/vbwait-vcount160-t0-R": [
+"PASS",
+"00002110"
+],
+"irq/vbwait-vcount160-t0-T": [
+"PASS",
+"0000094A"
+],
+"irq/vbwait-vcount160-t5-H": [
+"PASS",
+"000020BE"
+],
+"irq/vbwait-vcount160-t5-R": [
+"PASS",
+"00002110"
+],
+"irq/vbwait-vcount160-t5-T": [
+"PASS",
+"0000094A"
+],
+"irq/wakeirq-00": [
+"PASS",
+"017009A1"
+],
+"irq/wakeirq-10": [
+"PASS",
+"0000099D"
+],
+"irq/wakeirq-20": [
+"PASS",
+"09CB099E"
+],
+"irq/wakeirq-22": [
+"PASS",
+"099E0000"
+],
+"irq/wakeirq-24": [
+"PASS",
+"09B10984"
+],
+"irq/wakeirq-26": [
+"PASS",
+"09840000"
+],
+"irq/wakeirq-28": [
+"PASS",
+"095F099E"
+],
+"irq/wakeirq-2c": [
+"PASS",
+"093F0984"
+],
+"irq/wakeirq-60": [
+"PASS",
+"0AFA099E"
+],
+"irq/wakeirq-64": [
+"PASS",
+"0B000984"
+],
+"ppu/breakram-edge12-hblank-v30-k32": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-hblank-v30-k33": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-hblank-v30-k34": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-hblank-v30-k35": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-hblank-v30-k36": [
+"PASS",
+"00001F02"
+],
+"ppu/breakram-edge12-hblank-v30-k37": [
+"PASS",
+"00001F02"
+],
+"ppu/breakram-edge12-hblank-v30-k38": [
+"PASS",
+"00001F02"
+],
+"ppu/breakram-edge12-hblank-v30-k39": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-hblank-v30-k40": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-hblank-v30-k41": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-hblank-v30-k42": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-hblank-v30-k43": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-hblank-v30-k44": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k34": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k35": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k36": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k37": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k38": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k39": [
+"PASS",
+"00001E02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k40": [
+"PASS",
+"00001F02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k41": [
+"PASS",
+"00001F02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k42": [
+"PASS",
+"00001F02"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k43": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k44": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k45": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge12-nodma-hblank-v30-k46": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge200-v30-k28": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge200-v30-k29": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge200-v30-k30": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge200-v30-k31": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge200-v30-k32": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge200-v30-k33": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge200-v30-k34": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge200-v30-k35": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge200-v30-k36": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge200-v30-k37": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge200-v30-k38": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge200-v30-k39": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge200-v30-k40": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge212-running-v30-k18": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge212-running-v30-k19": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge212-running-v30-k20": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge212-running-v30-k21": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge212-running-v30-k22": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge212-running-v30-k23": [
+"PASS",
+"00001E04"
+],
+"ppu/breakram-edge212-running-v30-k24": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge212-running-v30-k25": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge212-running-v30-k26": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge212-running-v30-k27": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge212-running-v30-k28": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge212-running-v30-k29": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge212-running-v30-k30": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge255-v159-k28": [
+"PASS",
+"00009F06"
+],
+"ppu/breakram-edge255-v159-k29": [
+"PASS",
+"00009F06"
+],
+"ppu/breakram-edge255-v159-k30": [
+"PASS",
+"00009F06"
+],
+"ppu/breakram-edge255-v159-k31": [
+"PASS",
+"00009F06"
+],
+"ppu/breakram-edge255-v159-k32": [
+"PASS",
+"0000A006"
+],
+"ppu/breakram-edge255-v159-k33": [
+"PASS",
+"0000A006"
+],
+"ppu/breakram-edge255-v159-k34": [
+"PASS",
+"0000A006"
+],
+"ppu/breakram-edge255-v159-k35": [
+"PASS",
+"0000A005"
+],
+"ppu/breakram-edge255-v159-k36": [
+"PASS",
+"0000A001"
+],
+"ppu/breakram-edge255-v159-k37": [
+"PASS",
+"0000A001"
+],
+"ppu/breakram-edge255-v159-k38": [
+"PASS",
+"0000A001"
+],
+"ppu/breakram-edge255-v159-k39": [
+"PASS",
+"0000A001"
+],
+"ppu/breakram-edge255-v159-k40": [
+"PASS",
+"0000A001"
+],
+"ppu/breakram-edge255-v30-k28": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge255-v30-k29": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge255-v30-k30": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge255-v30-k31": [
+"PASS",
+"00001E06"
+],
+"ppu/breakram-edge255-v30-k32": [
+"PASS",
+"00001F06"
+],
+"ppu/breakram-edge255-v30-k33": [
+"PASS",
+"00001F06"
+],
+"ppu/breakram-edge255-v30-k34": [
+"PASS",
+"00001F06"
+],
+"ppu/breakram-edge255-v30-k35": [
+"PASS",
+"00001F04"
+],
+"ppu/breakram-edge255-v30-k36": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge255-v30-k37": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge255-v30-k38": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge255-v30-k39": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-edge255-v30-k40": [
+"PASS",
+"00001F00"
+],
+"ppu/breakram-loop-ewram-k0": [
+"PASS",
+"000D170D"
+],
+"ppu/breakram-loop-ewram-k1": [
+"PASS",
+"000CEE0C"
+],
+"ppu/breakram-loop-ewram-k10": [
+"PASS",
+"000D160D"
+],
+"ppu/breakram-loop-ewram-k11": [
+"PASS",
+"000CED0C"
+],
+"ppu/breakram-loop-ewram-k12": [
+"PASS",
+"000C9B0A"
+],
+"ppu/breakram-loop-ewram-k13": [
+"PASS",
+"000C7209"
+],
+"ppu/breakram-loop-ewram-k14": [
+"PASS",
+"000C2007"
+],
+"ppu/breakram-loop-ewram-k15": [
+"PASS",
+"000BF706"
+],
+"ppu/breakram-loop-ewram-k16": [
+"PASS",
+"000BA504"
+],
+"ppu/breakram-loop-ewram-k17": [
+"PASS",
+"000B7C03"
+],
+"ppu/breakram-loop-ewram-k18": [
+"PASS",
+"000B2A01"
+],
+"ppu/breakram-loop-ewram-k19": [
+"PASS",
+"000B0100"
+],
+"ppu/breakram-loop-ewram-k2": [
+"PASS",
+"000C9C0A"
+],
+"ppu/breakram-loop-ewram-k20": [
+"PASS",
+"000D150D"
+],
+"ppu/breakram-loop-ewram-k21": [
+"PASS",
+"000CEC0C"
+],
+"ppu/breakram-loop-ewram-k22": [
+"PASS",
+"000C9A0A"
+],
+"ppu/breakram-loop-ewram-k23": [
+"PASS",
+"000C7109"
+],
+"ppu/breakram-loop-ewram-k24": [
+"PASS",
+"000C1F07"
+],
+"ppu/breakram-loop-ewram-k25": [
+"PASS",
+"000BF606"
+],
+"ppu/breakram-loop-ewram-k26": [
+"PASS",
+"000BA404"
+],
+"ppu/breakram-loop-ewram-k27": [
+"PASS",
+"000B7B03"
+],
+"ppu/breakram-loop-ewram-k28": [
+"PASS",
+"000B2901"
+],
+"ppu/breakram-loop-ewram-k29": [
+"PASS",
+"000B0000"
+],
+"ppu/breakram-loop-ewram-k3": [
+"PASS",
+"000C7309"
+],
+"ppu/breakram-loop-ewram-k4": [
+"PASS",
+"000C2107"
+],
+"ppu/breakram-loop-ewram-k5": [
+"PASS",
+"000BF806"
+],
+"ppu/breakram-loop-ewram-k6": [
+"PASS",
+"000BA604"
+],
+"ppu/breakram-loop-ewram-k7": [
+"PASS",
+"000B7D03"
+],
+"ppu/breakram-loop-ewram-k8": [
+"PASS",
+"000B2B01"
+],
+"ppu/breakram-loop-ewram-k9": [
+"PASS",
+"000B0200"
+],
+"ppu/breakram-loop-iwram-k0": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k1": [
+"PASS",
+"001B8C00"
+],
+"ppu/breakram-loop-iwram-k10": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k11": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k12": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k2": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k3": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k4": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k5": [
+"PASS",
+"001BF201"
+],
+"ppu/breakram-loop-iwram-k6": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k7": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k8": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-iwram-k9": [
+"PASS",
+"001C5802"
+],
+"ppu/breakram-loop-stale-k0": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k1": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k10": [
+"PASS",
+"001C5702"
+],
+"ppu/breakram-loop-stale-k11": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k12": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k2": [
+"PASS",
+"001B8B00"
+],
+"ppu/breakram-loop-stale-k3": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k4": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k5": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k6": [
+"PASS",
+"001BF101"
+],
+"ppu/breakram-loop-stale-k7": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k8": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-loop-stale-k9": [
+"PASS",
+"00400000"
+],
+"ppu/breakram-stamp-dma0-v30-k0": [
+"PASS",
+"035E00AD"
+],
+"ppu/breakram-stamp-dma0-v30-k1": [
+"PASS",
+"035D4000"
+],
+"ppu/breakram-stamp-dma0-v30-k2": [
+"PASS",
+"035C4000"
+],
+"ppu/breakram-stamp-hblank-v30-k0": [
+"PASS",
+"04620129"
+],
+"ppu/breakram-stamp-hblank-v30-k1": [
+"PASS",
+"04614000"
+],
+"ppu/breakram-stamp-hblank-v30-k2": [
+"PASS",
+"04604000"
+],
+"ppu/breakram-stamp-k0": [
+"PASS",
+"4A9F4000"
+],
+"ppu/breakram-stamp-k1": [
+"PASS",
+"4A9E1B8C"
+],
+"ppu/breakram-stamp-k2": [
+"PASS",
+"4A9D4000"
+],
+"ppu/breakram-stamp-v160-k0": [
+"PASS",
+"4A9E1B8C"
+],
+"ppu/breakram-stamp-v160-k1": [
+"PASS",
+"4A9D4000"
+],
+"ppu/breakram-stamp-v160-k2": [
+"PASS",
+"4A9C4000"
+],
+"ppu/breakram-stamp-v30-k0": [
+"PASS",
+"035E00AD"
+],
+"ppu/breakram-stamp-v30-k1": [
+"PASS",
+"035D4000"
+],
+"ppu/breakram-stamp-v30-k2": [
+"PASS",
+"035C4000"
+],
+"ppu/breakram-stamp-vdma-v159-k0": [
+"PASS",
+"043F4000"
+],
+"ppu/breakram-stamp-vdma-v159-k1": [
+"PASS",
+"043E4000"
+],
+"ppu/breakram-stamp-vdma-v159-k2": [
+"PASS",
+"043D4000"
+],
+"ppu/dispstat-16-bit-write": [
+"PASS",
+"00000039"
+],
+"ppu/dispstat-hi-byte-is-lyc": [
+"PASS",
+"00003801"
+],
+"ppu/dispstat-lo-byte-clear": [
+"PASS",
+"00000001"
+],
+"ppu/dispstat-lo-byte-write": [
+"PASS",
+"00000039"
+],
+"timer/cascade-counts-overflows": [
+"PASS",
+"00000033"
+],
+"timer/cascade-source-reloaded": [
+"PASS",
+"0000FFFC"
+],
+"timer/reload-taken-on-start": [
+"PASS",
+"0000123B"
+],
+"timer/reload-write-running-no-latch": [
+"PASS",
+"00000021"
+],
+"timer/second-read": [
+"PASS",
+"00000011"
+],
+"timer/start-then-read": [
+"PASS",
+"00000007"
+],
+"timer/timer-read-vs-stop-00": [
+"PASS",
+"0007000F"
+],
+"timer/timer-read-vs-stop-01": [
+"PASS",
+"00080010"
+],
+"timer/timer-read-vs-stop-02": [
+"PASS",
+"00090011"
+],
+"timer/timer-read-vs-stop-10": [
+"PASS",
+"0008000F"
+],
+"timer/timer-read-vs-stop-11": [
+"PASS",
+"00090010"
+],
+"timer/timer-read-vs-stop-20": [
+"PASS",
+"00090011"
+],
+"timer/timer-read-vs-stop-21": [
+"PASS",
+"000A0012"
+],
+"timer/timer-read-vs-stop-30": [
+"PASS",
+"000A0011"
+],
+"timer/timergeo-p1-line100": [
+"PASS",
+"04B404B9"
+],
+"timer/timergeo-p64-line100": [
+"PASS",
+"001304B9"
+],
+"timer/timergeo-p64-line101": [
+"PASS",
+"001304B9"
+],
+"timer/timergeo-p64-line102": [
+"PASS",
+"001304B9"
+],
+"timer/timergeo-p64-line103": [
+"PASS",
+"001204B9"
+],
+"timer/timergeo-p64-line103-e16": [
+"PASS",
+"001304C9"
+],
+"timer/timergeo-p64-line103-e32": [
+"PASS",
+"001304D9"
+],
+"timer/timergeo-p64-line103-e48": [
+"PASS",
+"001304E9"
+],
+"timer/timergeo-p64-line104": [
+"PASS",
+"001304B9"
+],
+"timer/timergeo-p64-line105": [
+"PASS",
+"001304B9"
+],
+"timer/timergeo-p64-line106": [
+"PASS",
+"001304B9"
+],
+"timer/timergeo-p64-line107": [
+"PASS",
+"001204B9"
+]
+}
+}

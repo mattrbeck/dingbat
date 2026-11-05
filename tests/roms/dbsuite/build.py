@@ -748,6 +748,12 @@ def main():
         rom = bytearray(open(cart, 'rb').read())
         while len(rom) % 16:
             rom.append(0)
+        # A power-of-two size, padded with 0xFF: a flash cart kept only the
+        # first 0x1C000 bytes of the 114864-byte image (2026-11-05), so the
+        # payload records at the end read as junk and dma/imm-dma-none, the
+        # first case whose record lay past that point, copied junk over
+        # IWRAM and hung the console (cart-agb-2026-11-05.json)
+        rom += b'\xff' * ((1 << (len(rom) - 1).bit_length()) - len(rom))
         patch_header(rom, 'DBSUITE', 'ADBE')
         open(cart, 'wb').write(rom)
         romfix.gba_logo(cart)

@@ -8615,7 +8615,15 @@ trigger re-times the check is known only for the 1400 overflow. Laws:
 `stphase` (the two variants, 32 cells) and `stphase4` (256).
 
 **dbsuite: every row pinned or measured -- 872/872 in dingbat, the
-multiboot image 775/775 on the console.** The last three red rows were all
+multiboot image 775/775 on the console, and the cartridge build 872/872 on
+the console from a flash cart (2026-11-05, cart-agb-2026-11-05.json).** The
+first cartridge attempt hung at dma/imm-dma-none, in a full run and in the
+DMA suite alone. The 114864-byte image put that case's payload record
+across 0x1C000. Everything below that point read correctly (the timer
+suite's payloads ran), consistent with the cart keeping only the first
+0x1C000 bytes. The case then copied from junk bounds over IWRAM. build.py
+now pads the cartridge image with 0xFF to a power of two (128 KiB), the
+image that passed. The last three red rows were all
 placement: a case whose answer turns on a free-running clock, entered
 wherever the cases before it left the CPU.
 
