@@ -8473,6 +8473,38 @@ photographs is expected, from dingbat is not); irqlat-hblank-haltcnt 0x3B7
 d30 reads 1 in the cartridge build every time (as dingbat) and 0x40000 in
 the multiboot build: placement-dependent, not a lottery.
 
+**FIFO_FETCH_WINDOW (prototype, off).** The 3/1 cells with the prefetcher
+off fit one picture: the console takes the interrupt at the first
+instruction boundary at or after a fixed cycle, on the same 4-cycle grid
+the sled ran on before the burst -- the burst's start moved with the CPU's
+fetch. That is FIFO_DMA_WINDOW's own measured rule (a request landing in a
+CPU access begun before its request cycle is granted at the access's end;
+one begun on it waits the whole burst; dbsuite fifodma, EWRAM loads) and
+slotdma.s's ("the grant waits for the access in flight and nothing else"),
+which dingbat never applied to opcode fetches: they stay on the fast path
+and publish no span. FIFO_FETCH_WINDOW makes board-WRAM and gamepak fetches
+leave the fetch cache while a FIFO window is open and sync to their end, as
+IMM_FETCH_WAIT does for immediate DMAs; FIFO_IRQ_PF_EXTRA = 1 adds the
+cycle the DMA-end interrupt needs with the CPU on the prefetcher. With
+both: **every alyosha fifo_dma ROM passes -- fifo, fifo_2..6,
+fifo_dma_disable_3..5 -- under both BIOSes**, kit3's cells 241 -> 331/449,
+the 4/2 rig cells 270 -> 316/452, the mGBA suite unmoved (0/13996). Not
+landed: of the recorded tables it gains 316 cells and loses 48, eight of
+them gated law cells (f6slot pf-off P = 37; f6q pf-on 4/2 d = 0, 1, 4, 5 at
+Q = 79..82, where IRQ_FETCH_STOPPED_BUFFER had them: the CPU now takes the
+interrupt early after the burst). Left: the access begun on the request
+cycle (the burst should start a cycle early and the fetch be made after
+it; dingbat counts the fetch as made) and IRQ_LAST_WAITS missing the first
+fetch after a burst.
+
+**irqlat on the link rig.** The cartridge-only irqdecomp page unflagged in
+a scratch multiboot build (run from EWRAM, the console against dingbat on
+the same image): irqlat-hblank matches (0x3E2) -- so its 12-cycle cartridge
+disagreement is the cartridge path's -- but irqlat-hblank-haltcnt (console
+0x3EF, dingbat 0x3DD), irqlat-vblank (0x9A0 / 0x981) and
+irqlat-vblank-haltcnt (0x97C / 0x995) are off without a cartridge too:
+model gaps the rig can reach.
+
 **The refill law (in the core).** fifoslot.s, FIFO A on TM0 at period k,
 n NOPs, a TM1 read: 644 cells over k = 8..36, from EWRAM, the slot (fixed
 and incrementing) and IWRAM, every cell one answer in three passes. Now a

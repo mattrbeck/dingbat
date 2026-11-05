@@ -52,8 +52,16 @@ def build_wrapper(payload_source, args):
         f'    .align 2\npayload:\n    .incbin "payload.bin"\n'
         f'    .align 2\npayload_end:\n')
     open(f'{SCRATCH}/payloadrun.s', 'w').write(source)
-    _run(['arm-none-eabi-as', '-mcpu=arm7tdmi', '-I', SCRATCH, '-o',
-          f'{SCRATCH}/wrapper.o', f'{SCRATCH}/payloadrun.s'])
+    cmd = ['arm-none-eabi-as', '-mcpu=arm7tdmi', '-I', SCRATCH, '-o',
+           f'{SCRATCH}/wrapper.o', f'{SCRATCH}/payloadrun.s']
+    if subprocess.run(cmd, capture_output=True).returncode:
+        # an `adr` cannot reach past a very long argument table (kit3's 447
+        # cells): load the addresses instead. Only then, so every ROM that
+        # assembles as it is (the frozen laws) stays byte for byte the same.
+        source = (source.replace('    adr r0, payload\n', '    ldr r0, =payload\n')
+                        .replace('    adr r8, arg_table\n', '    ldr r8, =arg_table\n'))
+        open(f'{SCRATCH}/payloadrun.s', 'w').write(source)
+        _run(cmd)
     _run(['arm-none-eabi-ld', '-Ttext=0x08000000', '-o', f'{SCRATCH}/wrapper.elf',
           f'{SCRATCH}/wrapper.o'])
     rom = os.path.join(SCRATCH, 'payloadrun.gba')

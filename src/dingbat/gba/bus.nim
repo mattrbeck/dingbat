@@ -1224,6 +1224,8 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
     if (bus.sync_bits and 2) != 0: return false
   when IMM_FETCH_WAIT:
     if (bus.sync_bits and 1) != 0 and imm_fetch_page(page): return false
+  when FIFO_FETCH_WINDOW:
+    if (bus.sync_bits and 16) != 0 and imm_fetch_page(page): return false
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0: return false
   # Only pages whose fetches are plain masked reads are cacheable; BIOS,
@@ -1728,8 +1730,28 @@ template imm_fetch(bus: Bus; address: uint32; fetch: untyped) =
         result = fetch
       return
 
+template fifo_fetch(bus: Bus; address: uint32; fetch: untyped) =
+  ## FIFO_FETCH_WINDOW: while a sound-FIFO refill request is near (the
+  ## FIFO_DMA_WINDOW window), a board-WRAM or gamepak opcode fetch syncs to
+  ## its end like a data access, so a request landing inside it is held off
+  ## to the fetch's end, or waits behind it, by defer_fifo_request's rule.
+  when FIFO_FETCH_WINDOW:
+    if (bus.sync_bits and 16) != 0 and not bus.dma_active and
+       imm_fetch_page(bits_range(address, 24, 27)):
+      bus.sync_bits = bus.sync_bits and not 16'u8
+      let before = bus.cycles
+      result = fetch
+      bus.sync_bits = bus.sync_bits or 16
+      let cost = bus.cycles - before
+      bus.fetch_key = 0xFFFFFFFF'u32
+      bus.access_rom = false
+      bus.access_write = false
+      bus.catch_up_access(cost)
+      return
+
 proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
   bus.imm_fetch(address, bus.fetch_half(address))
+  bus.fifo_fetch(address, bus.fetch_half(address))
   if (bus.sync_bits and (SB_SWAP or 2'u8)) != 0:
     if (bus.sync_bits and SB_SWAP) != 0 and address < 0x04000000'u32:
       return bus.swap_fetch_half(address)
@@ -1763,6 +1785,7 @@ proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
 
 proc fetch_word_miss(bus: Bus; address: uint32): uint32 =
   bus.imm_fetch(address, bus.fetch_word(address))
+  bus.fifo_fetch(address, bus.fetch_word(address))
   if (bus.sync_bits and (SB_SWAP or 2'u8)) != 0:
     if (bus.sync_bits and SB_SWAP) != 0 and address < 0x04000000'u32:
       return bus.swap_fetch_word(address)

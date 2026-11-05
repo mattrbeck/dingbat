@@ -606,7 +606,7 @@ proc run_pending*(dma: DMA) =
     let saved = dma.current_priority
     dma.current_priority = ch
     let bus = dma.gba.bus
-    let granted_at = bus.sched.cycles + CycleCount(bus.cycles)
+    var granted_at = bus.sched.cycles + CycleCount(bus.cycles)
     # FIFO_IRQ_CREDIT: a sound-FIFO burst's completion interrupt
     let fifo_irq_credit_kind = (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3
     let fifo_irq_credit = if fifo_irq_credit_kind: FIFO_IRQ_CREDIT else: 0
@@ -629,6 +629,11 @@ proc run_pending*(dma: DMA) =
       bus_driven = true
     when DMA_PENDING_CHAIN:
       if saved == 4: dma.pending_at_grant = dma.pending
+    # FIFO_IRQ_PF_EXTRA: a FIFO burst's end interrupt with the CPU fetching
+    # from the gamepak through the prefetcher
+    let pf_extra = if fifo_irq_credit_kind and saved == 4 and bus.prefetch_on and
+                      bus.fetch_page - 0x8 <= 5 and not dma.gba.cpu.halted:
+                     FIFO_IRQ_PF_EXTRA else: 0
     dma.run_channel(ch, nested = saved < 4)
     when DMA_BUS_WHILE_HALTED:
       if saved == 4: bus.dma_bus_left = dma.gba.cpu.halted
@@ -745,7 +750,7 @@ proc run_pending*(dma: DMA) =
             dma.irq_after_burst = false
             let ahead = if burst_end > bus.sched.cycles: int(burst_end - bus.sched.cycles) else: 0
             intr.schedule_raise_check(dma.irq_was_set,
-                                      ahead + pf_after + IRQ_SYNC_DELAY - fifo_irq_credit)
+                                      ahead + pf_after + pf_extra + IRQ_SYNC_DELAY - fifo_irq_credit)
     when DMA_IRQ_FROM_BUS_END:
       if dma.irq_after_burst:
         dma.irq_after_burst = false

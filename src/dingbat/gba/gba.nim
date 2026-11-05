@@ -509,7 +509,7 @@ type
     # one burst; not serialized.
     dma_grant_now*:  CycleCount
     dma_first_rom*:  bool
-    # PF_WAIT_UNDER_BURST: the last opcode fetch that waited on the
+    # PF_WAIT_UNDER_BURST / FIFO_FETCH_GATE: the last gamepak opcode fetch that waited on the
     # prefetcher, [from, to) on the bus clock. Read only by a burst granted
     # inside it (the same instruction); not serialized.
     pf_wait_from*:   CycleCount
@@ -1414,6 +1414,16 @@ const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
 const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
   ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
   ## it runs on the interrupted stream (cpu.irq).
+const FIFO_FETCH_WINDOW* {.booldefine.} = false
+  ## PROTOTYPE: FIFO_DMA_WINDOW's rule (a request landing in a CPU access
+  ## begun before its request cycle is granted at the access's end; one begun
+  ## on it waits the whole burst) for opcode fetches from board WRAM and the
+  ## gamepak too, as the console's grant waits for any access in flight
+  ## (slotdma.s: an H-blank DMA against gamepak fetches).
+const FIFO_IRQ_PF_EXTRA* {.intdefine.} = 0
+  ## PROTOTYPE, with FIFO_FETCH_WINDOW: a FIFO burst's end interrupt this much
+  ## later when the CPU runs from the gamepak through the prefetcher (kit3's
+  ## 3/1 and 4/2 DMA-end cells: one cycle).
 const PF_WAIT_UNDER_BURST* {.booldefine.} = false
   ## PROTOTYPE, off: right at WAITCNT 0x4000, unproven at 0x4014. On, alyosha
   ## fifo_dma/fifo_6 passes (0x7B) but fifo_2, _3 and _4 (hardware-verified,
