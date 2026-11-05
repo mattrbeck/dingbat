@@ -1628,6 +1628,18 @@ const IMM_BOUNDARY_GRANT* {.booldefine.} = true
   ## (HLE and real BIOS) read one fetch late; on, alyosha
   ## prefetcher/prefetcher_dma and AGBEEG cpu_runs_idles_during_dma turn
   ## green and nothing else moves.
+const IMM_FAST_FETCH_GRANT* {.booldefine.} = true
+  ## An immediate DMA whose request comes due inside an instruction running
+  ## from IWRAM or the BIOS, in no synced access (a branch's refill), is
+  ## granted on that cycle: those fetches take one cycle, so the one at the
+  ## request starts with it and loses the bus (IMM_ACCESS_WAIT's rule for an
+  ## access starting on the request cycle). tests/roms/payloads/dmairqk.s on
+  ## an AGB SP (2026-11-05): DMA3 armed by a word or a CNT_H halfword store
+  ## (the same answers), k NOPs, then a branch into an IWRAM sled; with the
+  ## branch right after the store (k = 0, 1) the end interrupt is taken on
+  ## the cycle it is with k >= 2, where dingbat granted a cycle late, after
+  ## the refill. dmairqv.s's d >= 2 cells (the branch after the store, then
+  ## NOPs) are the same fact. Off: those 28 cells read one to three late.
 const DMA_CHAIN* {.booldefine.} = true
   ## An immediate DMA whose request comes due while another burst holds the
   ## bus follows it with no cycles between: the pair pays one lead and one
@@ -2189,7 +2201,9 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
           # An access starting on the request cycle loses the bus to it.
           gba.dma.request_immediate()
         elif (bus.sync_bits and 4) == 0 and not at_boundary and
-           not (bus.imm_idle_from <= now and now < bus.imm_idle_until):
+           not (bus.imm_idle_from <= now and now < bus.imm_idle_until) and
+           not (IMM_FAST_FETCH_GRANT and not bus.in_catch_up and not gba.cpu.halted and
+                (bus.fetch_page == 0x3 or bus.fetch_page == 0x0)):
           bus.sync_bits = bus.sync_bits or 4
           gba.scheduler.schedule(1, etDMA)
         else:

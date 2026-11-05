@@ -102,6 +102,50 @@ proc window_ahead*(intr: Interrupts; raise_in: int) =
       s.schedule(raise_in + 2 * IRQ_WINDOW_LEAD, etIrqWindowClose)
       intr.win_close_at = close_at
 
+const IRQ_WINDOW_KEEP {.booldefine.} = true
+  ## A check closing the window leaves it open while an IRQ-enabled timer's
+  ## overflow is still IRQ_WINDOW_LEAD or less away, and books a fresh open
+  ## for one further out: the single pending open and close serve the
+  ## soonest raise, so a masked raise's check (FIFO A's TM0, in IE or not)
+  ## shut the window another timer's raise had opened, and a fetch that
+  ## raise landed in went unnoted. tests/roms/payloads/f6q.s on an AGB SP
+  ## (2026-11-04), prefetcher off, 4/2: TM3 raised a cycle into the gamepak
+  ## fetch after TM0's check is taken an instruction later, as one raised
+  ## on the fetch's first cycle is; dingbat took it at once.
+
+const IRQ_LINE_KEEPS_STAMP {.booldefine.} = true
+  ## A check that finds the CPU's interrupt line already up leaves the cycle
+  ## it rose on: IRQ_LAST_WAITS asks whether the line rose inside the last
+  ## access's waits, and a later check (a masked source's) re-stamping it
+  ## put a line raised under a FIFO burst into the next fetch's waits.
+  ## tests/roms/payloads/f6q.s on an AGB SP (2026-11-04), prefetcher off,
+  ## 4/2, d = 2: TM3's interrupt recognised under the burst is taken one
+  ## instruction after it ends; dingbat took it two, after TM0's check.
+
+proc timer_raise_due(intr: Interrupts): CycleCount =
+  ## When the soonest overflow of an IRQ-enabled, counting timer is due.
+  result = high(CycleCount)
+  let s = intr.gba.scheduler
+  const kinds = [etTimer0, etTimer1, etTimer2, etTimer3]
+  for n in 0 .. 3:
+    let c = intr.gba.timer.tmcnt[n]
+    if c.enable and c.irq_enable and not c.cascade:
+      result = min(result, s.pending_at(kinds[n]))
+
+proc window_after_check(intr: Interrupts) =
+  ## IRQ_LAST_WAITS: a check has run; the window closes unless another check
+  ## is still to run or a timer's raise is close (IRQ_WINDOW_KEEP).
+  let s = intr.gba.scheduler
+  if s.has_event(etInterrupts): return
+  when IRQ_WINDOW_KEEP:
+    let due = intr.timer_raise_due()
+    if due != high(CycleCount):
+      if due <= s.cycles + CycleCount(IRQ_WINDOW_LEAD): return
+      intr.window_ahead(int(due - s.cycles))
+  when WL_QUIET_EVENTS:
+    if (intr.gba.bus.sync_bits and 8) != 0: intr.gba.wl_unsafe = true
+  intr.gba.bus.sync_bits = intr.gba.bus.sync_bits and not 8'u8
+
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0) =
   ## Book a recognition `delay` cycles out, with the window open until then.
   intr.window_open()
@@ -244,6 +288,7 @@ proc check_interrupts*(intr: Interrupts) =
     elif (IRQ_PIPE_STRICT and 2) != 0:
       # a check another source booked does not see a raise still on its way
       pending = pending and not intr.pipe_raised
+  let line_was = intr.gba.cpu.irq_line
   intr.gba.cpu.irq_line = false
   if pending != 0 or key_wake:
     if intr.gba.cpu.stopped and (pending and STOP_WAKE_MASK) == 0 and not key_wake:
@@ -259,7 +304,9 @@ proc check_interrupts*(intr: Interrupts) =
     intr.gba.bus.dma_bus_left = false
     if pending != 0 and intr.ime and intr.gba.scheduler.cycles >= intr.gate_open_at:
       intr.gba.cpu.irq_line = true
-      intr.gba.cpu.irq_line_at = intr.gba.scheduler.cycles
+      # IRQ_LINE_KEEPS_STAMP: a line already up stays up from when it rose
+      if not (IRQ_LINE_KEEPS_STAMP and line_was):
+        intr.gba.cpu.irq_line_at = intr.gba.scheduler.cycles
       when defined(itrace):
         itl("ILINE t=" & $intr.gba.scheduler.cycles & " dot=" &
             $(int64(intr.gba.scheduler.cycles) - intr.gba.ppu.line_start_cycle) &
@@ -268,10 +315,7 @@ proc check_interrupts*(intr: Interrupts) =
     # The instruction this check landed in has noted its last access; the
     # window closes unless another check is still to run (a pending open
     # reopens it for the next raise).
-    if not intr.gba.scheduler.has_event(etInterrupts):
-      when WL_QUIET_EVENTS:
-        if (intr.gba.bus.sync_bits and 8) != 0: intr.gba.wl_unsafe = true
-      intr.gba.bus.sync_bits = intr.gba.bus.sync_bits and not 8'u8
+    intr.window_after_check()
 
 proc `[]`*(intr: Interrupts; io_addr: uint32): uint8 =
   case io_addr

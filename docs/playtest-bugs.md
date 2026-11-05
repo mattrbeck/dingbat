@@ -8647,6 +8647,35 @@ wherever the cases before it left the CPU.
   0 on the console's first multiboot run today. No recorded run had read
   0.
 
+**The FIFO interrupt cells, 2026-11-05: three rules, 232 open cells down
+to 66.** PF_WAIT_UNDER_BURST was the obvious lead (25 of kit3's 26
+DMA-end cells), but on top of FIFO_FETCH_WINDOW it gains 6 cells and loses
+354: the window already holds what it held. The open cells had other
+causes:
+
+| rule | console | dingbat had |
+|---|---|---|
+| `IRQ_WINDOW_KEEP` | (f6q, prefetcher off, 4/2) TM3 raised a cycle into a gamepak fetch is taken an instruction later, like one raised on the fetch's first cycle | TM0's masked overflow check closed the interrupt window TM3's raise had opened; the fetch went unnoted and the interrupt was taken at once. A later Q gave an earlier handler read |
+| `IRQ_LINE_KEEPS_STAMP` | (f6q d = 2; f6slot P = 46) a line that rose under a burst is taken one instruction after the burst | a later check (a masked source's) re-stamped the line's rise into the next fetch's waits, so the interrupt was taken two instructions after |
+| `IMM_FAST_FETCH_GRANT` | (dmairqk.s, new) an immediate DMA's request inside a branch's IWRAM refill is granted on its cycle; the trigger store's width makes no difference | the request retried a cycle, after the refill, so the end interrupt was 1-3 cycles late |
+
+With the window kept open past a check, IRQ_LAST_WAITS's note is no longer
+lost when two timers overflow close together. That was the "earliest
+pending raise per source" the paragraph above asked for: the check now
+reopens the window for an IRQ-enabled timer due within IRQ_WINDOW_LEAD
+and books a fresh open for one further out. dmairqk.s is dmairqv's
+immediate kinds without the branch after the store (k NOPs, then the
+sled, word or CNT_H trigger), 48 cells recorded. On the console k >= 2
+read as dingbat did; k = 0 and 1, where the burst lands in the branch's
+refill, read a cycle sooner.
+
+All recorded tables: 512 cells missed per BIOS, now 346, with nothing
+lost; the mGBA suite 0/13996 failing under both BIOSes. The f6 laws
+re-split (f6slot 57, dmairqv 48 and all of dmairqv_open, f6q 314 gated);
+open: f6slot_open 5, f6q_open 28, f6q3@KIT3 33. What is left in f6q_open
+is the prefetcher-on d = 2 column (the burst start against the buffer's
+fetch) and single cells at a plateau's edge.
+
 **dbsuite: three PSG rows accept the console's lottery.** A new case kind,
 K_ZRANGE (czrange): 0 or the range. psg-ch1-nr10-0-dies,
 psg-ch1-after-ch2-lives and psg-ch1-second-trigger-dies each came out both
