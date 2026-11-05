@@ -179,6 +179,13 @@ type
     pipe_sampled*: bool
     pipe_at*:      CycleCount
     pipe_due*:     CycleCount
+    # IRQ_PIPE_PER_SOURCE: a raise that comes due after the one in flight
+    # waits for its own cycle here instead of riding on it (pipe2_due is
+    # always pipe2_at + IRQ_SYNC_DELAY). Rebased by end_frame; rev 12.
+    pipe2_raised*: uint16
+    pipe2_new*:    uint16
+    pipe2_at*:     CycleCount
+    pipe2_due*:    CycleCount
     # The span the last DMA burst stalled the running CPU (dma.run_pending),
     # for the synchroniser, which stops with it (DMA_STALLS_IRQ_SYNC).
     # stall_pushed: the burst delayed a recognition already under way.
@@ -1438,27 +1445,28 @@ const FIFO_IRQ_PF_EXTRA* {.intdefine.} = 1
   ## With FIFO_FETCH_WINDOW: a FIFO burst's end interrupt a cycle later when
   ## the CPU runs from the gamepak through the prefetcher (kit3's 3/1 and the
   ## empty slot's 4/2 DMA-end cells: every phase but the request-cycle one
-  ## reads a cycle short without it).
-const PF_WAIT_UNDER_BURST* {.booldefine.} = false
-  ## PROTOTYPE, off: right at WAITCNT 0x4000, unproven at 0x4014. On, alyosha
-  ## fifo_dma/fifo_6 passes (0x7B) but fifo_2, _3 and _4 (hardware-verified,
-  ## 3/1 waits, no interrupt) fail: a burst after their measured read moves
-  ## the TM0 stop a cycle, onto 0xFFFF, and the next test's TM0 overflows as
-  ## it starts (TIMER_START_OVERFLOW). The flash-cart kit (tests/roms/
-  ## fifokit.py) runs f6q's cells at 3/1 from a cartridge sled of 0xFFFFFFFF.
-  ##
+  ## reads a cycle short without it). That phase, where the CPU's wait on
+  ## the prefetcher began the cycle before the grant, is PF_WAIT_UNDER_BURST's
+  ## and takes no extra cycle.
+const PF_WAIT_UNDER_BURST* {.booldefine.} = true
   ## A sound-FIFO burst that never touches the gamepak, granted while the
-  ## CPU waits on the prefetcher for an opcode: the CPU stopped the cycle
-  ## before the grant. A wait it began there or later ran under the burst
-  ## (the prefetcher fills meanwhile); one begun before resumes after the
-  ## burst with what was left at the stop, a cycle more than at the grant.
-  ## tests/roms/payloads/f6slot.s and f6q.s on an AGB SP (2026-11-04): an
-  ## ARM sled of NV opcodes fetched from the empty slot (0xFFFFxxxx, a
-  ## one-cycle no-op: nvcond.s) at WAITCNT 0x4000, alyosha fifo_6's refill
-  ## and interrupt around it; every phase of the d and P sweeps, where the
-  ## burst-frozen wait read 1-5 early or late. Measured for that kind only:
-  ## an immediate burst the CPU's store started is IMM_FETCH_WAIT's (the
-  ## mGBA suite's ROM DMA rows), H-blank and V-blank bursts unmeasured.
+  ## CPU waits on the prefetcher for an opcode, and the wait began the cycle
+  ## before the grant or later: the wait runs under the burst (the
+  ## prefetcher fills meanwhile, DMA_KEEPS_PREFETCH), and a wait begun that
+  ## cycle before also gives the CPU the cycle back -- it had stopped there,
+  ## and its interrupt synchroniser with it: an interrupt raised under the
+  ## burst is recognised a cycle sooner too (14 more cells a BIOS: TM3's
+  ## interrupt during the burst at d = 2 read the handler a cycle late).
+  ## A wait begun earlier is FIFO_FETCH_WINDOW's (the grant waits for it).
+  ## tests/roms/payloads/f6q.s and f6slot.s on an AGB SP (2026-11-04, the
+  ## empty slot's NV sled at 4/2; and kit3's cartridge sled at 3/1): with
+  ## the prefetcher on, the phase whose fetch begins a cycle before the
+  ## grant (d = 2, 6, 10) reads the handler 5 cycles sooner than a wait
+  ## frozen at the grant; the five other phases are the window's. With the
+  ## window and this half alone the phase read a cycle late. On: 18 cells a
+  ## BIOS gained, none lost, the mGBA suite unmoved, every alyosha fifo_dma
+  ## ROM green under both BIOSes. The earlier full rule (a wait begun before
+  ## the stop resumed after the burst) lost 354 cells on top of the window.
 const IRQ_FETCH_STOPPED_BUFFER* {.booldefine.} = true
   ## A full, stopped prefetch buffer that still holds the in-flight opcode
   ## serves the IRQ entry's fetch, as a running one does
@@ -2424,6 +2432,11 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.interrupts.pipe_due -= base
   else:
     gba.interrupts.pipe_raised = 0
+  if gba.interrupts.pipe2_due >= base:
+    gba.interrupts.pipe2_at -= min(gba.interrupts.pipe2_at, base)
+    gba.interrupts.pipe2_due -= base
+  else:
+    gba.interrupts.pipe2_raised = 0
   if gba.storage of EEPROM:
     let ep = EEPROM(gba.storage)
     if ep.busy_until >= base:

@@ -72,6 +72,8 @@ const
   #        (they had ridden in spare bits of channel 1's sweep fields),
   #        apu.power_on_at, and the shared PSG's per-channel latches
   #      · 11 the DMA section's sound-FIFO hand-back word (DMA.fifo_chain)
+  #      · 12 the interrupt synchroniser's second raise in flight
+  #        (IRQ_PIPE_PER_SOURCE: pipe2_raised, pipe2_new, pipe2_at)
   # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
   #      · 4 CPU undefined-opcode lockup flag · 5 Super Game Boy section
   #      · 6 the batched carry (docs/savestate_compat.md): STOP mode, the
@@ -88,7 +90,7 @@ const
   #      · 10 the square channels' trigger start-up edge (start_at,
   #        sq_starting); the divider's hold after a leaf KEY1 switch
   #        (timer.hold_t) and whether the PPU sits it out
-  GBA_PAYLOAD_VERSION* = 11'u32
+  GBA_PAYLOAD_VERSION* = 12'u32
   GB_PAYLOAD_VERSION*  = 10'u32
   # NDS: 1 initial (docs/nds/savestate.md). The payload also carries a hash
   #      of its field layout, checked on load, so a layout change that

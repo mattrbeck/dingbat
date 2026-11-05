@@ -977,6 +977,7 @@ const
 # before the END tag. Fixed length, pinned here: a field added to it without
 # a revision bump changes the length and fails the strip below.
 const
+  PIPE2_LEN        = 2 + 2 + 8            # pipe2_raised, pipe2_new, pipe2_at
   INFLIGHT_TAG     = 0xCE'u8
   END_TAG          = 0xCF'u8
   INFLIGHT_SEC_LEN =
@@ -991,7 +992,8 @@ const
     1 + 4 * 8 +                           # DMA: video latch, immediate due
     4 + 1 +                               # MMIO: memory control, POSTFLG
     4 * 4 +                               # APU: PSG arm delays
-    4                                     # PPU: frames owed to step_frame
+    4 +                                   # PPU: frames owed to step_frame
+    PIPE2_LEN                             # rev 12: the synchroniser's second raise
 
 # Rev 10 added the PSG section (GBA_SEC_PSG, gba/savestate.nim
 # save_psg_state) after it, last before END; fixed length, pinned the same
@@ -1068,6 +1070,18 @@ proc strip_ppu_latches(payload: var string): bool =
   let at = found + PPU_PRE_LEN
   payload.delete(at ..< at + PPU_LATCH_LEN)
   true
+
+proc strip_pipe2(payload: var string): bool =
+  ## Rewrite a payload this build wrote into the pre-rev-12 in-flight layout
+  ## by dropping the synchroniser's second raise at the section's end (with
+  ## the PSG section after it, or already stripped).
+  for tail in [PSG_SEC_LEN, 0]:
+    let at = payload.len - 1 - tail - INFLIGHT_SEC_LEN
+    if at >= 0 and payload[at] == char(INFLIGHT_TAG) and payload[^1] == char(END_TAG):
+      let stop = at + INFLIGHT_SEC_LEN
+      payload.delete(stop - PIPE2_LEN ..< stop)
+      return true
+  false
 
 proc strip_dma_fifo(payload: var string): bool =
   ## Rewrite a payload this build wrote into the pre-rev-11 DMA layout by
@@ -1273,6 +1287,7 @@ proc run_gba_inflight() =
 
   # Rev 10: the same payload without the FIFO bytes loads with nothing held.
   var p10 = p
+  check(strip_pipe2(p10), "rev-12 synchroniser bytes located and removed")
   check(strip_dma_fifo(p10), "rev-11 DMA FIFO hand-back bytes located and removed")
   let g = new_gba_for(GBA_ROMS[0][0])
   for _ in 0 ..< 30: g.step_frame()
@@ -1306,6 +1321,7 @@ proc run_gba_inflight() =
 
   # Rev 9: the same payload without the PSG section loads as that build did.
   var p9 = p
+  check(strip_pipe2(p9), "rev-12 synchroniser bytes located and removed")
   check(strip_psg(p9), "rev-10 PSG section located and removed")
   check(strip_dma_fifo(p9), "rev-11 DMA FIFO hand-back bytes located and removed")
   let e = new_gba_for(GBA_ROMS[0][0])

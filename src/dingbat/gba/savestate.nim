@@ -169,6 +169,7 @@ proc load_irq_state(intr: Interrupts; r: var Reader) =
   # The synchroniser and stall span: rev 9 carries them in the in-flight
   # section (read later); older revisions start them empty.
   intr.pipe_raised = 0
+  intr.pipe2_raised = 0
   # IRQ_LAST_WAITS's window from the events the state carries (the
   # scheduler section precedes this one).
   let s = intr.gba.scheduler
@@ -891,8 +892,12 @@ proc save_inflight_state(gba: GBA; w: var Writer) =
   w.write_u32(gba.apu.channel3.arm_delay)
   w.write_u32(gba.apu.channel4.arm_delay)
   w.write_u32(uint32(gba.ppu.frame))
+  # rev 12, last: the synchroniser's second raise in flight
+  w.write_u16(intr.pipe2_raised)
+  w.write_u16(intr.pipe2_new)
+  w.write_stamp(intr.pipe2_at)
 
-proc load_inflight_state(gba: GBA; r: var Reader) =
+proc load_inflight_state(gba: GBA; r: var Reader; rev: uint32) =
   ## Rev >= 9. Read after every other section (the scheduler's clock bounds
   ## the stamps); gba_apply_state finishes the fetch page once the wait tables
   ## are rebuilt.
@@ -973,6 +978,16 @@ proc load_inflight_state(gba: GBA; r: var Reader) =
   let owed = int(r.read_u32())
   check_range(owed, 0, 1 shl 20, "ppu.frame")
   gba.ppu.frame = owed
+  if rev >= 12:
+    intr.pipe2_raised = r.read_u16()
+    intr.pipe2_new = r.read_u16()
+    check_no_undefined_bits(uint32(intr.pipe2_raised), 14, "intr.pipe2_raised")
+    check_no_undefined_bits(uint32(intr.pipe2_new), 14, "intr.pipe2_new")
+    intr.pipe2_at = r.read_stamp(now, "intr.pipe2_at")
+    intr.pipe2_due = intr.pipe2_at + CycleCount(IRQ_SYNC_DELAY)
+  else:
+    intr.pipe2_raised = 0
+    intr.pipe2_new = 0
 
 proc default_inflight_state(gba: GBA) =
   ## Rev <= 8: that build dropped some of this at load and left the rest as
@@ -1012,6 +1027,8 @@ proc default_inflight_state(gba: GBA) =
   let intr = gba.interrupts
   intr.gate_open_at = 0
   intr.pipe_raised = 0
+  intr.pipe2_raised = 0
+  intr.pipe2_new = 0
   intr.pipe_new = 0
   intr.pipe_bits = 0
   intr.pipe_sampled = false
@@ -1341,7 +1358,7 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   load_apu_state(gba.apu, r)
   gba.apu_extract_state_events()
   load_storage_state(gba.storage, r)
-  if rev >= 9: gba.load_inflight_state(r)
+  if rev >= 9: gba.load_inflight_state(r, rev)
   else: gba.default_inflight_state()
   if rev >= 10: gba.load_psg_state(r)
   else: gba.default_psg_state()

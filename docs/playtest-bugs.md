@@ -8647,17 +8647,19 @@ wherever the cases before it left the CPU.
   0 on the console's first multiboot run today. No recorded run had read
   0.
 
-**The FIFO interrupt cells, 2026-11-05: three rules, 232 open cells down
-to 66.** PF_WAIT_UNDER_BURST was the obvious lead (25 of kit3's 26
-DMA-end cells), but on top of FIFO_FETCH_WINDOW it gains 6 cells and loses
-354: the window already holds what it held. The open cells had other
-causes:
+**The FIFO interrupt cells, 2026-11-05: five rules, 232 open cells down
+to 10.** PF_WAIT_UNDER_BURST was the obvious lead (25 of kit3's 26
+DMA-end cells). Whole, on top of FIFO_FETCH_WINDOW, it gains 6 cells and
+loses 354: the window already covers its second half. Its first half is
+right, and is now in the core. The open cells had these causes:
 
 | rule | console | dingbat had |
 |---|---|---|
 | `IRQ_WINDOW_KEEP` | (f6q, prefetcher off, 4/2) TM3 raised a cycle into a gamepak fetch is taken an instruction later, like one raised on the fetch's first cycle | TM0's masked overflow check closed the interrupt window TM3's raise had opened; the fetch went unnoted and the interrupt was taken at once. A later Q gave an earlier handler read |
 | `IRQ_LINE_KEEPS_STAMP` | (f6q d = 2; f6slot P = 46) a line that rose under a burst is taken one instruction after the burst | a later check (a masked source's) re-stamped the line's rise into the next fetch's waits, so the interrupt was taken two instructions after |
 | `IMM_FAST_FETCH_GRANT` | (dmairqk.s, new) an immediate DMA's request inside a branch's IWRAM refill is granted on its cycle; the trigger store's width makes no difference | the request retried a cycle, after the refill, so the end interrupt was 1-3 cycles late |
+| `PF_WAIT_UNDER_BURST` (its first half) | (f6q, f6slot, kit3; prefetcher on, the phase d = 2 / 6 / 10) a wait on the prefetcher begun the cycle before a FIFO grant runs under the burst, and the CPU, stopped there, has the cycle back; that phase also takes no FIFO_IRQ_PF_EXTRA (its doc's "every phase but the request-cycle one"); the interrupt synchroniser resumes with the CPU, so TM3 raised under that burst is a cycle sooner too. Not when the grant lands in internal cycles (no opcode is awaited; the FIFO window already hands those back) | the wait frozen at the grant: the handler 5 cycles late |
+| `IRQ_PIPE_PER_SOURCE` | (f6q, 4/2 and 3/1) TM3 raised a cycle or two after FIFO A's masked TM0 overflow is recognised IRQ_SYNC_DELAY after its own raise | it rode on TM0's check and was taken an instruction early. IRQ_PIPE_STRICT bit 0 got this by restarting the synchroniser and silenced Earthworm Jim; a second in-flight slot leaves Earthworm Jim's audio identical |
 
 With the window kept open past a check, IRQ_LAST_WAITS's note is no longer
 lost when two timers overflow close together. That was the "earliest
@@ -8669,12 +8671,21 @@ sled, word or CNT_H trigger), 48 cells recorded. On the console k >= 2
 read as dingbat did; k = 0 and 1, where the burst lands in the branch's
 refill, read a cycle sooner.
 
-All recorded tables: 512 cells missed per BIOS, now 346, with nothing
-lost; the mGBA suite 0/13996 failing under both BIOSes. The f6 laws
-re-split (f6slot 57, dmairqv 48 and all of dmairqv_open, f6q 314 gated);
-open: f6slot_open 5, f6q_open 28, f6q3@KIT3 33. What is left in f6q_open
-is the prefetcher-on d = 2 column (the burst start against the buffer's
-fetch) and single cells at a plateau's edge.
+All recorded tables: 512 cells missed per BIOS, now 290, with nothing
+lost (251 of the 290 are psgrace's lottery cells, which no single
+answer can match). The mGBA suite is 0/13996 failing under both BIOSes, and every
+alyosha fifo_dma ROM is green under both. The full PF_WAIT used to turn
+fifo_2..4 red; its first half alone does not. The f6 laws re-split:
+f6slot 61, dmairqv 48 (all of dmairqv_open), f6q 336 gated. Still open:
+f6slot_open 1, f6q_open 6, f6q3@KIT3 3.
+
+The first train of the PF_WAIT half crashed four games (Shining Force,
+Tales of Phantasia, TOCA World Touring Cars, Yggdra Union): granted inside
+a multiply's internal cycles, the FIFO window's idle hand-back and a
+stale prefetcher wait were both taken off the clock, and bus.cycles went
+negative. The rule now skips a grant in internal cycles and never gives
+back more than the burst or the clock holds; the four play identically
+to the baseline.
 
 **dbsuite: three PSG rows accept the console's lottery.** A new case kind,
 K_ZRANGE (czrange): 0 or the range. psg-ch1-nr10-0-dies,

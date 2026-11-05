@@ -102,6 +102,18 @@ proc window_ahead*(intr: Interrupts; raise_in: int) =
       s.schedule(raise_in + 2 * IRQ_WINDOW_LEAD, etIrqWindowClose)
       intr.win_close_at = close_at
 
+const IRQ_PIPE_PER_SOURCE {.booldefine.} = true
+  ## A raise while another is in flight, due after it, is recognised on its
+  ## own cycle (a second slot, pipe2) instead of riding on that one's check.
+  ## tests/roms/payloads/f6q.s on an AGB SP (4/2 and kit3's 3/1, prefetcher
+  ## off and on): TM3 raised a cycle or two after FIFO A's TM0 overflow,
+  ## whose check IE masks, is recognised IRQ_SYNC_DELAY after its own raise,
+  ## so it falls in the next fetch's waits and is taken an instruction later;
+  ## riding on TM0's check took it at once. 13 cells a BIOS, none lost, the
+  ## mGBA suite unmoved. This is the fact IRQ_PIPE_STRICT bit 0 reached by
+  ## restarting the synchroniser, which loses Earthworm Jim (USA)'s sound;
+  ## with this its audio is the baseline's to the sample. A raise under a
+  ## burst (stalled synchroniser) still rides, as measured there.
 const IRQ_WINDOW_KEEP {.booldefine.} = true
   ## A check closing the window leaves it open while an IRQ-enabled timer's
   ## overflow is still IRQ_WINDOW_LEAD or less away, and books a fresh open
@@ -197,7 +209,20 @@ proc raise_synced*(intr: Interrupts; bit: int; late = 0) =
     # its own synchroniser delay rather than riding on that one's check
     if intr.pipe_raised != 0 and (intr.pipe_raised and uint16(intr.reg_ie)) == 0:
       intr.pipe_raised = 0
+  when IRQ_PIPE_PER_SOURCE:
+    if intr.pipe_raised != 0 and ((1'u16 shl bit) and intr.pipe_raised) == 0 and
+       intr.stalled_for(now) == 0 and now + CycleCount(IRQ_SYNC_DELAY) > intr.pipe_due:
+      if intr.pipe2_raised == 0:
+        intr.pipe2_at = now
+        intr.pipe2_due = now + CycleCount(IRQ_SYNC_DELAY)
+        intr.pipe2_new = 0
+        intr.schedule_interrupt_check(IRQ_SYNC_DELAY + late)
+      intr.pipe2_new = intr.pipe2_new or ((1'u16 shl bit) and not uint16(intr.reg_if))
+      intr.pipe2_raised = intr.pipe2_raised or (1'u16 shl bit)
+      intr.set_interrupt_flag(bit)
+      return
   if intr.pipe_raised == 0:
+    intr.pipe2_raised = 0
     let st = intr.stalled_for(now)
     let delay = if st == 0: IRQ_SYNC_DELAY
                 else: max(IRQ_SYNC_DELAY, st + IRQ_SYNC_DELAY - UNDER_BURST_CREDIT)
@@ -285,9 +310,27 @@ proc check_interrupts*(intr: Interrupts) =
     if now >= intr.pipe_due:
       pending = pending or intr.pipe_bits
       intr.pipe_raised = 0
+      when IRQ_PIPE_PER_SOURCE:
+        if intr.pipe2_raised != 0:
+          # the later raise is the one in flight now, due on its own cycle
+          if now < intr.pipe2_due:
+            pending = pending and not intr.pipe2_new
+          intr.pipe_raised = intr.pipe2_raised
+          intr.pipe_new = intr.pipe2_new
+          intr.pipe_at = intr.pipe2_at
+          intr.pipe_due = intr.pipe2_due
+          intr.pipe_sampled = false
+          intr.pipe_bits = 0
+          intr.pipe2_raised = 0
+          intr.pipe_sample(now)
+          if now >= intr.pipe_due:
+            pending = pending or intr.pipe_bits
+            intr.pipe_raised = 0
     elif (IRQ_PIPE_STRICT and 2) != 0:
       # a check another source booked does not see a raise still on its way
       pending = pending and not intr.pipe_raised
+      when IRQ_PIPE_PER_SOURCE:
+        if intr.pipe2_raised != 0: pending = pending and not intr.pipe2_new
   let line_was = intr.gba.cpu.irq_line
   intr.gba.cpu.irq_line = false
   if pending != 0 or key_wake:
