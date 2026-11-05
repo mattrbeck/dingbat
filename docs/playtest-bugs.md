@@ -8510,6 +8510,82 @@ f6slot 0x250000 (prefetcher off, P = 37: the fetch begun on the request
 cycle, which the console makes after the burst; its interrupt comes an
 instruction later, 116, where dingbat now takes it on the burst's end, 110).
 
+That last cell was IRQ_LAST_WAITS: with the window, the burst runs inside
+the fetch's own sync, and the boundary after it found the last noted
+access stale, so an interrupt recognised under the burst was taken at once
+instead of an instruction later. A burst inside a windowed fetch now ends
+that fetch for IRQ_LAST_WAITS. **Landed: FIFO_FETCH_WINDOW, FIFO_IRQ_PF_EXTRA
+= 1 and IRQ_PIPE_STRICT = 2 on.** alyosha 125/125 (fifo_dma/fifo_6 green;
+fifo, fifo_2..5 and the fifo_dma_disable rows stay green); the recorded
+tables gain 324 cells and lose none that are gated; the f6 laws re-split
+(f6slot 51, dmairqv 28, f6q 248 gated; 125 open), cycle laws 3367/3367 with
+the official BIOS; mGBA suite 0/13996 failing under both BIOSes; runner:
+only alyosha moves. The playtest train (230 games): no regression; 31
+neutral, nearly all audio alone (the FIFO's timing); Iridion 3D, Rhythm
+Tengoku and Castlevania - Circle of the Moon go KNOWN -> PASS, their play
+now identical to the references' -- RNG/phase games (§59, §85), so a phase
+that happens to line up, not a fix to claim.
+
+**irqpoll.s: the irqdecomp page's poll loop is not it.** H-blank or V-blank
+interrupt, IRQ stack in IWRAM or EWRAM, the page's HALTCNT store or not,
+the loop in EWRAM or IWRAM, 64 one-cycle phases across the EWRAM loop's
+period: 512 console cells, every one single-valued and every one dingbat's.
+And `anchorpoll.s`, the page's anchors themselves -- the H-blank flag's
+rise, its fall, VCOUNT to 157 then 158, polled from EWRAM, 64 phases each
+from a V-count park: 192 cells, every one dingbat's. Both are laws now
+(irqpoll, anchorpoll; 495 + 192 single-valued cells).
+
+**So the irqlat disagreements were not model gaps** (correcting the
+paragraph above). The page's own header says it: its H-blank and V-blank
+rows start from a polling loop "whose phase depends on where the page
+started, so they are checked +-32". The console and dingbat agree on every
+piece at every phase; they only reach the page on the same cycle if the
+whole run before it, millions of cycles, is cycle-identical, which nothing
+promises. The 18 / 31 / 25-cycle differences are each under one poll
+period. irqlat-hblank-haltcnt's cartridge value 0x3B7 outside its range is
+the same: a +-32 range around one photographed phase is too narrow for
+another ROM's. The fix is the case's -- park its anchors -- not the core's.
+
+**The two contention rows are a real gap, and the rig reaches them.** The
+parked CONTEND2 page (held branch) unflagged in a scratch multiboot build,
+run from EWRAM on the console against dingbat on the same image: every
+contention row matches but the same two the cartridge run caught, the same
+way round -- contend-pram-mode0 console 0xBC, dingbat 0xBD (cartridge 0xE6 /
+0xE7); contend-vram-mode0 0xE3 / 0xE2 (0xF7 / 0xF6). So not the
+cartridge path. Their "-no-obj" rows match: it is PRAM and VRAM contention
+while the page's 128 64x64 OBJs are being drawn in mode 0. The c2seq law
+sweeps only twelve phases around the photographed one: over k = 60..259
+(PRAM and VRAM, scene 0) it is still dingbat's in all 395 single-valued
+cells. And the row itself as the multiboot page runs it -- from EWRAM, the
+page's wait_line40, tm_start, sixteen ldrh, tm_stop, the page's scene with
+its 128 OBJs, parked on line 40 or polled from 38, OBJs on and off, 64
+phases (payloads/c2ew.s, a law now) -- matches in all 508 single-valued
+cells. So the row, its poll and its scene are right everywhere; the page
+differs only in what it runs inside -- the runtime's state around the page
+(a DMA, an interrupt source, the watchdog timer) is the next suspect.
+
+**It is the renderer's return from forced blank.** The page's first row
+clears forced blank on line 38 and reads line 40; c2ew parks with the
+scene already on. `c2fb.s` -- c2ew's row with forced blank cleared on line
+L (k x 256 cycles into it), line N read: cleared on 37 or earlier, line 40
+reads drawn (PRAM 0xC4, VRAM 0xE8); on 38 or 39, no contention at all
+(0xC3), and line 41 after a clear on 38 is drawn. Across the frame wrap
+the same: a clear on 227 leaves line 1 free and draws 2, on 1 leaves 3
+free, on 2 leaves 3-4 free and draws 5. So BG and palette fetching resume
+on line L+3, wherever in line L the clear lands; dingbat draws from L+1.
+48 cells, every one single-valued (r0table row `c2fb`, open until the core
+holds the renderer off). Only contention is measured: what the console
+shows on the two held lines needs a photograph.
+
+**dbsuite: three PSG rows accept the console's lottery.** A new case kind,
+K_ZRANGE (czrange): 0 or the range. psg-ch1-nr10-0-dies,
+psg-ch1-after-ch2-lives and psg-ch1-second-trigger-dies each came out both
+ways in kit3's three cold boots, and psgrace says a fixed entry cycle does
+not decide it. Rebuilt, the multiboot image passes 760/760 on the console
+again. (The rebuild moved every later page by 20 bytes, and the unpinned
+dmatime-burst-vram-mode3 and contend-pram-mode0 now read their photographed
+values by placement alone -- green, but not fixed; see above.)
+
 **irqlat on the link rig.** The cartridge-only irqdecomp page unflagged in
 a scratch multiboot build (run from EWRAM, the console against dingbat on
 the same image): irqlat-hblank matches (0x3E2) -- so its 12-cycle cartridge

@@ -20,20 +20,17 @@ proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
 # Cycles from a peripheral raising IF to CPU recognition (mGBA suite Timer
 # IRQ rows). Register writes (IE/IF/IME) re-evaluate with no delay.
 const IRQ_SYNC_DELAY* {.intdefine.} = 3
-const IRQ_PIPE_STRICT {.intdefine.} = 0
-  ## bit 0: a raise does not ride on a masked raise's check (restart); bit 1:
-  ## a check another source booked does not see a raise not yet due.
-  ## PROTOTYPE, off: on, Earthworm Jim (USA) loses most of its sound from
-  ## frame ~2340 (the playtest train, 2026-11-04) -- some interrupt its
-  ## driver needs is held back or lost; the rule below is the console's, this
-  ## way of getting it is not yet right.
-  ##
-  ## A timer interrupt on its way through the synchroniser is not seen by a
-  ## check another source booked before it is due, and a raise does not ride
-  ## on the check of one in flight that IE masks (that one delivers nothing).
-  ## tests/roms/payloads/f6q.s on an AGB SP (2026-11-04): TM3's interrupt
-  ## raised 1-2 cycles after a masked TM0 overflow (FIFO A's timer) is taken
-  ## 3 cycles after its own raise; off, it rode on TM0's check, 1-2 early.
+const IRQ_PIPE_STRICT {.intdefine.} = 2
+  ## Bit 1 (on): a timer interrupt still in the synchroniser is not seen by a
+  ## check another source booked before it is due. tests/roms/payloads/f6q.s
+  ## on an AGB SP (2026-11-04): TM3's interrupt raised after a FIFO burst
+  ## whose own end check (its source masked in IE) comes a cycle or two later
+  ## is still taken IRQ_SYNC_DELAY after TM3's raise.
+  ## Bit 0 (off, a prototype): a raise does not ride on the check of one in
+  ## flight that IE masks, but waits its own delay -- the same probe's TM3
+  ## against a masked TM0 overflow -- yet with it Earthworm Jim (USA) loses
+  ## most of its sound from frame ~2340 (the playtest train): some interrupt
+  ## its driver needs is lost or late; the console's rule, not yet the way.
 const UNDER_BURST_CREDIT {.intdefine.} = 1
   ## A timer interrupt raised while a burst holds the CPU off the bus is
   ## recognised IRQ_SYNC_DELAY - UNDER_BURST_CREDIT cycles after the CPU

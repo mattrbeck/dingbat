@@ -1414,16 +1414,26 @@ const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
 const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
   ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
   ## it runs on the interrupted stream (cpu.irq).
-const FIFO_FETCH_WINDOW* {.booldefine.} = false
-  ## PROTOTYPE: FIFO_DMA_WINDOW's rule (a request landing in a CPU access
-  ## begun before its request cycle is granted at the access's end; one begun
-  ## on it waits the whole burst) for opcode fetches from board WRAM and the
-  ## gamepak too, as the console's grant waits for any access in flight
-  ## (slotdma.s: an H-blank DMA against gamepak fetches).
-const FIFO_IRQ_PF_EXTRA* {.intdefine.} = 0
-  ## PROTOTYPE, with FIFO_FETCH_WINDOW: a FIFO burst's end interrupt this much
-  ## later when the CPU runs from the gamepak through the prefetcher (kit3's
-  ## 3/1 and 4/2 DMA-end cells: one cycle).
+const FIFO_FETCH_WINDOW* {.booldefine.} = true
+  ## FIFO_DMA_WINDOW's measured rule -- a refill request landing in a CPU
+  ## access begun before its request cycle is granted at the access's end;
+  ## one begun on it waits the whole burst -- for opcode fetches from board
+  ## WRAM and the gamepak too: the console's grant waits for any access in
+  ## flight (slotdma.s, an H-blank DMA against gamepak fetches). While a FIFO
+  ## window is open (FIFO_WINDOW_LEAD cycles before a request) those fetches
+  ## leave the fetch cache and sync to their end, as IMM_FETCH_WAIT's do for
+  ## an immediate DMA. kit3 on an AGB SP (fifo_6's own 3/1 waits from a flash
+  ## cart, 2026-11-04) and the empty-slot 4/2 cells: with the prefetcher off
+  ## the console takes the interrupt on the sled's own 4-cycle grid after
+  ## the burst, which a burst granted mid-fetch cannot give. With it, every
+  ## alyosha fifo_dma ROM passes (fifo, fifo_2..6, fifo_dma_disable_3..5),
+  ## kit3 241 -> 342/449 cells, the rig's 4/2 cells 270 -> 326/452, the
+  ## mGBA suite unmoved.
+const FIFO_IRQ_PF_EXTRA* {.intdefine.} = 1
+  ## With FIFO_FETCH_WINDOW: a FIFO burst's end interrupt a cycle later when
+  ## the CPU runs from the gamepak through the prefetcher (kit3's 3/1 and the
+  ## empty slot's 4/2 DMA-end cells: every phase but the request-cycle one
+  ## reads a cycle short without it).
 const PF_WAIT_UNDER_BURST* {.booldefine.} = false
   ## PROTOTYPE, off: right at WAITCNT 0x4000, unproven at 0x4014. On, alyosha
   ## fifo_dma/fifo_6 passes (0x7B) but fifo_2, _3 and _4 (hardware-verified,

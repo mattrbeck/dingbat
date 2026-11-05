@@ -9608,13 +9608,13 @@
    "index": 797,
    "suite": "apu",
    "name": "psg-ch1-nr10-0-dies",
-   "kind": "range",
+   "kind": "zero-or-range",
    "cartridge_only": true,
    "risky": false,
    "offset": 8,
    "mask": "0000FFFF",
-   "lo": "00000000",
-   "hi": "00000000"
+   "lo": "0000439B",
+   "hi": "00004F53"
   },
   {
    "index": 798,
@@ -9632,7 +9632,7 @@
    "index": 799,
    "suite": "apu",
    "name": "psg-ch1-after-ch2-lives",
-   "kind": "range",
+   "kind": "zero-or-range",
    "cartridge_only": true,
    "risky": false,
    "offset": 12,
@@ -9656,13 +9656,13 @@
    "index": 801,
    "suite": "apu",
    "name": "psg-ch1-second-trigger-dies",
-   "kind": "range",
+   "kind": "zero-or-range",
    "cartridge_only": true,
    "risky": false,
    "offset": 16,
    "mask": "0000FFFF",
-   "lo": "00000000",
-   "hi": "00000000"
+   "lo": "00004398",
+   "hi": "00004F50"
   },
   {
    "index": 802,

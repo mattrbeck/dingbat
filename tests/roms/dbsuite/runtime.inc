@@ -493,7 +493,12 @@ eval_case:
     cmpne r1, r3
     moveq r0, #ST_PASS
     b   3f
-2:  cmp r1, r2
+2:  cmp r5, #K_ZRANGE              @ a lottery: dying (0) passes too
+    bne 4f
+    cmp r1, #0
+    moveq r0, #ST_PASS
+    beq 3f
+4:  cmp r1, r2
     blo 3f
     cmp r1, r3
     movls r0, #ST_PASS

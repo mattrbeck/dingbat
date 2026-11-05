@@ -105,6 +105,8 @@
 .equ K_RANGE,  0                   @ lo <= got <= hi (lo = hi: exact)
 .equ K_TWO,    1                   @ got = lo or got = hi (two answers seen)
 .equ K_SLOT,   2                   @ got = the SLOT word at byte lo, masked
+.equ K_ZRANGE, 3                   @ got = 0 or lo <= got <= hi: a console lottery
+                                   @ between dying (0) and living (a range)
 .equ F_RISKY,  0x20                @ provokes UNPREDICTABLE CPU state: SKIP
                                    @ when rom_config bit 2 is set
 .equ F_CART,   0x10               @ needs the cartridge bus: SKIP when the
@@ -152,6 +154,9 @@
 
 @ one payload call: p0 = the payload's blob record, p1 = its argument;
 @ the returned r0 is SLOT+0 and is held to \val
+.macro czrange name, run, off, mask, lo, hi, flags=0, p0=0, p1=0
+    case "\name", \run, \p0, \p1, \off, \mask, \lo, \hi, K_ZRANGE, \flags
+.endm
 .macro cpay name, blob, arg, val, flags=0
     case "\name", run_payload, \blob, \arg, 0, 0xFFFFFFFF, \val, \val, K_RANGE, \flags
 .endm

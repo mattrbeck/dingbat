@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-11-04 17:28:34 · commit b1dc0198 · game-boy-test-roms v7.0*
+*Generated: 2026-11-04 20:24:46 · commit a84dab1a · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1586
-- **Pass:** 1564
-- **Fail:** 22
+- **Pass:** 1566
+- **Fail:** 20
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -30,8 +30,8 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Screenshot suites | 21 | 21 | 👌 |
 | Game Boy - Shootout ROMs | 15 | 15 | 👌 |
 | [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
-| GBA - alyosha gba-tests | 124 | 125 | 👀 |
-| [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 5 | 8 | 👀 |
+| GBA - alyosha gba-tests | 125 | 125 | 👌 |
+| [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 6 | 8 | 👀 |
 | GBA - FuzzARM | 5 | 5 | 👌 |
 | GBA - hwverified (AGS-001) | 12 | 12 | 👌 |
 | GBA - jsmolka gba-tests | 13 | 13 | 👌 |
@@ -117,147 +117,17 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
-## GBA - alyosha gba-tests (124/125)
-
-| Test | Device | Result |
-|------|--------|--------|
-| alyosha/Bus/DMA_CPU_Bus_Interaction | — | 👌 |
-| alyosha/Bus/DMA_IWRAM_Bus | — | 👌 |
-| alyosha/Bus/DMA_OAM_Bus | — | 👌 |
-| alyosha/Bus/DMA_Outside_Bios_Bus | — | 👌 |
-| alyosha/Bus/LDRSH_misaligned | — | 👌 |
-| alyosha/Bus/Unused_location_update_bus | — | 👌 |
-| alyosha/DMA/DMA_Mode_Change | — | 👌 |
-| alyosha/DMA/DMA_ROM_Fixed | — | 👌 |
-| alyosha/DMA/DMA_pause_timing_ROM_to_IWRAM | — | 👌 |
-| alyosha/DMA/DMA_pause_timing_end_1 | — | 👌 |
-| alyosha/DMA/DMA_pause_timing_end_2 | — | 👌 |
-| alyosha/DMA/DMA_pause_timing_end_3 | — | 👌 |
-| alyosha/DMA/DMA_pause_timing_end_4 | — | 👌 |
-| alyosha/DMA/DMA_pause_timing_mid_1 | — | 👌 |
-| alyosha/DMA/DMA_pause_timing_mid_2 | — | 👌 |
-| alyosha/Interactions/Halt_DMA_IRQ | — | 👌 |
-| alyosha/Interactions/Halt_DMA_IRQ_Read_OAM | — | 👌 |
-| alyosha/Interactions/Halt_IRQ | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_7 | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_Br_pre | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_Br_pre_tim | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_ST | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_ST_p3 | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_br | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_br1_IWRAM | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_ldr_IWRAM | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_nop_IWRAM | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_MUL_IRQ | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_Mul | — | 👌 |
-| alyosha/LDM/LDM_ALU | — | 👌 |
-| alyosha/LDM/LDM_ALU_IMM | — | 👌 |
-| alyosha/LDM/LDM_ALU_Store | — | 👌 |
-| alyosha/LDM/LDM_Bx | — | 👌 |
-| alyosha/LDM/LDM_LD | — | 👌 |
-| alyosha/LDM/LDM_MUL_UL_32 | — | 👌 |
-| alyosha/LDM/LDM_MUL_UL_SL | — | 👌 |
-| alyosha/LDM/LDM_Swap | — | 👌 |
-| alyosha/STM_ALU_IMM | — | 👌 |
-| alyosha/Serial/serial_read_data | — | 👌 |
-| alyosha/Serial/serial_time | — | 👌 |
-| alyosha/Serial/serial_time_2 | — | 👌 |
-| alyosha/Serial/serial_time_2M | — | 👌 |
-| alyosha/Serial/serial_time_2M_2 | — | 👌 |
-| alyosha/Serial/serial_time_2M_3 | — | 👌 |
-| alyosha/Serial/serial_time_3 | — | 👌 |
-| alyosha/Serial/serial_time_start_bit | — | 👌 |
-| alyosha/Serial/serial_time_start_bit_2 | — | 👌 |
-| alyosha/arm/Coprocessor_14 | — | 👌 |
-| alyosha/fifo_dma/fifo | — | 👌 |
-| alyosha/fifo_dma/fifo_2 | — | 👌 |
-| alyosha/fifo_dma/fifo_3 | — | 👌 |
-| alyosha/fifo_dma/fifo_4 | — | 👌 |
-| alyosha/fifo_dma/fifo_5 | — | 👌 |
-| alyosha/fifo_dma/fifo_6 | — | 👀 Failed test 121 |
-| alyosha/fifo_dma/fifo_dma_disable_3 | — | 👌 |
-| alyosha/fifo_dma/fifo_dma_disable_4 | — | 👌 |
-| alyosha/fifo_dma/fifo_dma_disable_5 | — | 👌 |
-| alyosha/irq/BL_1 | — | 👌 |
-| alyosha/irq/BL_IRQ | — | 👌 |
-| alyosha/irq/BL_IRQ_2 | — | 👌 |
-| alyosha/irq/BL_IRQ_3 | — | 👌 |
-| alyosha/irq/BL_IRQ_R14 | — | 👌 |
-| alyosha/irq/IE | — | 👌 |
-| alyosha/irq/IF | — | 👌 |
-| alyosha/irq/IF_Timer | — | 👌 |
-| alyosha/irq/IRQ_sub | — | 👌 |
-| alyosha/irq/IRQ_sub_2 | — | 👌 |
-| alyosha/irq/IRQ_sub_2_slow | — | 👌 |
-| alyosha/irq/IRQ_sub_slow | — | 👌 |
-| alyosha/irq/halt_pc | — | 👌 |
-| alyosha/irq/halt_pc_2 | — | 👌 |
-| alyosha/irq/halt_pc_3 | — | 👌 |
-| alyosha/irq/halt_pc_4 | — | 👌 |
-| alyosha/memory/PAL_8_bit_writes | — | 👌 |
-| alyosha/memory/VRAM_8_bit_writes | — | 👌 |
-| alyosha/ppu/Sprite_Last_VRAM_Access | — | 👌 |
-| alyosha/ppu/Sprite_Last_VRAM_Access_Free | — | 👌 |
-| alyosha/ppu/start_up | — | 👌 |
-| alyosha/ppu/start_up_vbl | — | 👌 |
-| alyosha/ppu/start_up_vbl_irq | — | 👌 |
-| alyosha/ppu/start_up_vbl_irq_halt | — | 👌 |
-| alyosha/prefetcher/bounday_test_1 | — | 👌 |
-| alyosha/prefetcher/prefetcher_boundary_1 | — | 👌 |
-| alyosha/prefetcher/prefetcher_boundary_2 | — | 👌 |
-| alyosha/prefetcher/prefetcher_boundary_3 | — | 👌 |
-| alyosha/prefetcher/prefetcher_boundary_4 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_2 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_3 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_4 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_5 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_6 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_arm | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_arm_3 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_arm_4 | — | 👌 |
-| alyosha/prefetcher/prefetcher_dma | — | 👌 |
-| alyosha/prefetcher/prefetcher_full_arm | — | 👌 |
-| alyosha/prefetcher/prefetcher_full_arm_2 | — | 👌 |
-| alyosha/prefetcher/prefetcher_full_thumb | — | 👌 |
-| alyosha/psr/psr | — | 👌 |
-| alyosha/thumb/Pop_no_regs | — | 👌 |
-| alyosha/thumb/Push_no_regs | — | 👌 |
-| alyosha/thumb/blx | — | 👌 |
-| alyosha/thumb/cpy | — | 👌 |
-| alyosha/timer/timer | — | 👌 |
-| alyosha/timer/timer_disable | — | 👌 |
-| alyosha/timer/timer_reset | — | 👌 |
-| alyosha/timing/cpy_data_bios | — | 👌 |
-| alyosha/timing/dma_from_bios | — | 👌 |
-| alyosha/timing/dma_long | — | 👌 |
-| alyosha/timing/prefetch_enable | — | 👌 |
-| alyosha/timing/prefetch_enable_2 | — | 👌 |
-| alyosha/unsafe/fifo_dma_disable_jam | — | 👌 |
-| alyosha/unsafe/fifo_dma_disable_jam_2 | — | 👌 |
-| png183/DMA/dma_repeat_immediate | — | 👌 |
-| png183/arm/arm | — | 👌 |
-| png183/arm/branches | — | 👌 |
-| png183/arm/data_swap | — | 👌 |
-| png183/arm/halfword_transfer | — | 👌 |
-| png183/arm/multiply | — | 👌 |
-| png183/irq/halt_pc | — | 👌 |
-| png183/memory/memory | — | 👌 |
-| png183/psr/psr2 | — | 👌 |
-| png183/timer/timer_check_count_up_presence | — | 👌 |
-
-## GBA - dbsuite (AGS-001) (5/8)
+## GBA - dbsuite (AGS-001) (6/8)
 
 | Test | Device | Result |
 |------|--------|--------|
 | dbsuite/cpu | — | 👌 117/117 passed |
 | dbsuite/irq | — | 👌 145/145 passed |
 | dbsuite/timer | — | 👌 26/26 passed |
-| dbsuite/dma | — | 👀 261/262 passed |
-| dbsuite/bus | — | 👀 76/79 passed |
+| dbsuite/dma | — | 👌 262/262 passed |
+| dbsuite/bus | — | 👀 77/79 passed |
 | dbsuite/ppu | — | 👌 156/156 passed |
-| dbsuite/apu | — | 👀 50/52 passed |
+| dbsuite/apu | — | 👀 51/52 passed |
 | dbsuite/bios | — | 👌 47/47 passed |
 
 One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](results_dbsuite.md) for every case that is not a pass.

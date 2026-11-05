@@ -1749,7 +1749,17 @@ template fifo_fetch(bus: Bus; address: uint32; fetch: untyped) =
       # an interrupt's window wants the fetch's waits noted, as below
       when IRQ_LAST_WAITS:
         if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
+      let fstart = bus.bus_now() - CycleCount(cost)
       bus.catch_up_access(cost)
+      when IRQ_LAST_WAITS:
+        # A burst that ran inside the fetch (granted as it began) ends it:
+        # an interrupt recognised under the burst fell in the fetch's waits
+        # and is taken an instruction later, as one in a plain fetch's is.
+        let fnow = bus.bus_now()
+        if (bus.sync_bits and 8) != 0 and bus.dma_end_at > fstart and
+           bus.dma_end_at <= fnow:
+          bus.lw_end = fnow
+          bus.lw_waits = int(fnow - fstart) - 1
       return
 
 proc fetch_half_miss(bus: Bus; address: uint32): uint16 =

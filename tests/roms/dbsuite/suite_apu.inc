@@ -107,6 +107,14 @@ run_sweep:
 @ checked +-1500 polls around the console's (one 256 Hz length tick is
 @ ~1100 polls here); the dying rows, the SOUNDCNT_X reads and the
 @ never-expiring rows exactly.
+@ Three rows are a coin toss on the console and check "dies (0) or lives
+@ (the range)" (czrange): psg-ch1-nr10-0-dies, -after-ch2-lives and
+@ -second-trigger-dies each came out both ways in three cold boots of the
+@ cartridge build (AGB SP, flash cart, 2026-11-04; tests/roms/dbsuite/
+@ cart-agb.json), and payloads/psgrace.s, the page entered from a V-count
+@ halt on a fixed cycle, answers more than one way in 232 of 256 cells
+@ (tools/hwlink/r0-agb.json psgrace): which way a first trigger goes is
+@ not the CPU's to fix.
 .macro pf_wait ctl, trig, bit
     strh r0, [r4, #\ctl]
     strh r1, [r4, #\trig]
@@ -222,11 +230,11 @@ run_psgfirst:
     crange "psg-ch2-first-trigger-lives", RUN_SAME, 2, 0xFFFF, 17758 - 1500, 17758 + 1500, F_CART
     crange "psg-ch3-first-trigger-lives", RUN_SAME, 4, 0xFFFF, 18807 - 1500, 18807 + 1500, F_CART
     crange "psg-ch4-first-trigger-lives", RUN_SAME, 6, 0xFFFF, 18808 - 1500, 18808 + 1500, F_CART
-    chalf "psg-ch1-nr10-0-dies",    RUN_SAME, 8, 0x0000, F_CART
+    czrange "psg-ch1-nr10-0-dies",  RUN_SAME, 8, 0xFFFF, 18807 - 1500, 18807 + 1500, F_CART
     crange "psg-ch1-sweep-running-lives", RUN_SAME, 10, 0xFFFF, 1813 - 900, 1813 + 900, F_CART
-    crange "psg-ch1-after-ch2-lives", RUN_SAME, 12, 0xFFFF, 18203 - 1500, 18203 + 1500, F_CART
+    czrange "psg-ch1-after-ch2-lives", RUN_SAME, 12, 0xFFFF, 18203 - 1500, 18203 + 1500, F_CART
     crange "psg-ch2-before-ch1-lives", RUN_SAME, 14, 0xFFFF, 18807 - 1500, 18807 + 1500, F_CART
-    chalf "psg-ch1-second-trigger-dies", RUN_SAME, 16, 0x0000, F_CART
+    czrange "psg-ch1-second-trigger-dies", RUN_SAME, 16, 0xFFFF, 18804 - 1500, 18804 + 1500, F_CART
     crange "psg-ch1-third-trigger-lives", RUN_SAME, 18, 0xFFFF, 18804 - 1500, 18804 + 1500, F_CART
     cbyte "psg-soundcnt-x-after-ch1", RUN_SAME, 21, 0x80, F_CART
     cbyte "psg-soundcnt-x-after-ch2", RUN_SAME, 22, 0x82, F_CART
