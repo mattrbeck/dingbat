@@ -1,10 +1,10 @@
 # dbsuite - Detailed Results
 
-*Generated: 2026-11-04 23:42:05 · commit a9a191ff · game-boy-test-roms v7.0*
+*Generated: 2026-11-05 00:09:45 · commit 5444029e · game-boy-test-roms v7.0*
 
 tests/roms/dbsuite/dbsuite.gba (cartridge build) in dingbat. Every expected value is an AGB SP (AGS-001) answer; each case's source comment in tests/roms/dbsuite/ gives its provenance. A case that is not PASS here is dingbat disagreeing with the console.
 
-**Total: 882/884**
+**Total: 872/872**
 
 ## cpu (117/117)
 
@@ -18,16 +18,13 @@ All pass.
 
 All pass.
 
-## dma (262/262)
+## dma (250/250)
 
 All pass.
 
-## bus (77/79)
+## bus (79/79)
 
-| Case | Status | Got / expected |
-|------|--------|----------------|
-| bus/contend-vram-mode0 | FAIL | got=000000F8 exp=000000F6 |
-| bus/contend-vram-mode2-locked-out | FAIL | got=00000444 exp=0000042A |
+All pass.
 
 ## ppu (156/156)
 

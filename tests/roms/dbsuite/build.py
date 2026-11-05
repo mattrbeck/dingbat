@@ -350,8 +350,11 @@ R0_SKIP = {
     'c2code', 'c2seq', 'contmap', 'vramexec', 'fifodma', 'fifomap',
     'hadesdsd', 'hdmaoam', 'hpreempt', 'memcnt', 'tmrffff', 'tmrffirq',
     'haltswap', 'dmavram', 'fsfirst', 's0trig', 's0time', 's0long', 's0write',
+    # dmaphase's multiply and NOP runs rebuilt from probe.inc (a demo of the
+    # kit); moved out 2026-11-05 to make room for sweeptrig's V-count park
+    'kitdemo',
 }
-R0_SUITE = {'dmaphase': 'dma', 'kitdemo': 'dma', 'wakeirq': 'irq', 'tmrw': 'timer',
+R0_SUITE = {'dmaphase': 'dma', 'wakeirq': 'irq', 'tmrw': 'timer',
             'lycwrite': 'irq', 'tmrdma': 'dma', 'dmastart': 'dma', 'dmadur': 'dma',
             'dmamulirq': 'irq', 'dmairq': 'irq', 'irqwait': 'irq'}
 R0_WHAT = {
@@ -506,8 +509,19 @@ def _psgfirst(a, alts):
             word = w[1 + off // 4]
             vals.append((word >> (8 * (off & 3))) & 0xFFFF)
         exact = all(v in (0, 0xFFFF) for v in vals)
-        out.append((f'ram-psg-{name}', 0x100 + off, 0xFFFF, vals if exact else band(vals)))
+        want = vals if exact else band(vals)
+        if name in PSG_LOTTERY and not exact:
+            # 0 (the note dies at its trigger) or the band, as psgrace says a
+            # fixed entry cycle does not decide it: the nine recorded runs never
+            # read 0, and the console's 2026-11-05 multiboot run did
+            want = (*band([v for v in vals if v]), 'K_ZRANGE')
+        out.append((f'ram-psg-{name}', 0x100 + off, 0xFFFF, want))
     return out
+
+
+# psgfirst checks that come out both ways from one entry cycle (psgrace.s on
+# the AGB SP; suite_apu.inc's czrange rows are the cartridge twins)
+PSG_LOTTERY = {'ch1-after-ch2'}
 
 
 SP_FAMILIES = {
@@ -615,7 +629,8 @@ def gen_sp(build):
             first = True
             for cname, off, mask, seen in checks(a, alts):
                 if isinstance(seen, tuple):
-                    lo, hi, kind = seen[0], seen[1], 'K_RANGE'
+                    lo, hi = seen[0], seen[1]
+                    kind = seen[2] if len(seen) > 2 else 'K_RANGE'
                 else:
                     vals = sorted(set(seen))
                     if len(vals) == 2:

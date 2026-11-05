@@ -1,5 +1,16 @@
 @ sweeptrig.s -- dbsuite copy of the link-rig probe sweepq2.s the parent
-@ session ran on the AGB SP on 2026-09-24 (the code is unchanged).
+@ session ran on the AGB SP on 2026-09-24, with a V-count park added in
+@ front (2026-11-05).
+@
+@ PARK: unparked, each run entered wherever the caller's poll left it, and
+@ the rows' fate turns on the PSG's 16-cycle clock: kit3's cartridge build
+@ and the rig agreed on a row the current cartridge build then read the
+@ other way. tests/roms/payloads/stphase{,2,3,4}.s swept these rows over
+@ every phase on the console (1280 cells, all single-valued; laws stphase
+@ and stphase4): the shift-0 0x400 row alone LIVES at some phases, and
+@ after the shift-1 rows it dies, reads on a few cycles or lives by both
+@ triggers' phases. So "never plays" below holds at the phases the rig
+@ happened to give, and the cells are re-recorded behind the park.
 @
 @ WHAT: channel 1 triggered with the sweep at shift 0 (NR10 = 0) at
 @ frequency 0x400 and 0x3FF, with and without the length counter, and with
@@ -30,6 +41,24 @@
 _start:
     stmfd sp!, {r4-r9, lr}
     mov r9, r0
+    @ the park: halt with IME clear until line 100's V-count match, so every
+    @ run -- the rig's, either dbsuite build's -- starts on one cycle of the
+    @ PSG's 16-cycle clock (stphase.s: these rows' fate turns on it)
+    ldr r4, =0x04000004
+    ldr r5, =0x04000200
+    ldrh r0, [r5, #8]
+    ldrh r1, [r5]
+    ldrh r2, [r4]
+    stmfd sp!, {r0-r2}             @ IME, IE, DISPSTAT, for the way out
+    mov r0, #0
+    strh r0, [r5, #8]
+    ldr r0, =(100 << 8) | 0x20
+    strh r0, [r4]
+    mov r0, #0x04
+    strh r0, [r5]
+    ldr r0, =0x3FFF
+    strh r0, [r5, #2]
+    swi 0x020000
     ldr r4, =0x04000060
     ldr r5, =0x04000080
     mov r0, #0
@@ -68,6 +97,14 @@ _start:
     bl row
     mov r1, #0
     strh r1, [r5, #4]
+    ldmfd sp!, {r6-r8}             @ IME, IE, DISPSTAT (r0 is the answer)
+    ldr r3, =0x04000200
+    ldr r1, =0x3FFF
+    strh r1, [r3, #2]              @ IF clear: the wake's V-count flag
+    strh r7, [r3]
+    ldr r1, =0x04000004
+    strh r8, [r1]
+    strh r6, [r3, #8]
     ldmfd sp!, {r4-r9, lr}
     bx lr
 @ r1 = NR10, r2 = frequency; returns the poll count in r0

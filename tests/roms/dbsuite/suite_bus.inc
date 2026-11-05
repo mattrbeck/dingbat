@@ -150,7 +150,8 @@ run_memctl:
 @ Code fetched from VRAM costs more than a flat per-access model says.  An
 @ emulator with no renderer contention reads 230 everywhere.
 @ PROVENANCE: AGB SP, gbaedge page 41 CONTEND2 (session 5, 2026-09-04,
-@ CRC 9365; agb-sp-5.txt).  Timed from the cartridge: cartridge only.
+@ CRC 9365; agb-sp-5.txt), behind the park below: kit3 (2026-11-04, cart-agb.json)
+@ for contend-pram-mode0 and contend-vram-mode0.  Timed from the cartridge: cartridge only.
 .equ C2_M0,    0x1F40
 .equ C2_M2,    0x1C42
 .equ C2_M0NO,  0x0F40
@@ -189,6 +190,55 @@ run_memctl:
     bl  tm_stop
     strh r0, [r8, #\off]
 .endm
+@ The page itself has no fixed start: wait_line40 polls on a 36-cycle loop,
+@ so where in line 40 the first row's reads begin (and, through each row's
+@ length, where the next rows' do) depends on how long everything before
+@ this case took: on the photographed run, gbaedge's boot, a flash cart's
+@ loader and the 41 pages before it; in this ROM, 578 other cases. So the
+@ cartridge build parks first -- halt with IME clear on V-count 38, a cycle
+@ the PPU picks -- and waits a fixed time, which makes the rows' phase this
+@ ROM's own. The wait puts the reads where the photographed run's must have
+@ been: of the 36 entry phases, a core that holds every contmap and c2seq
+@ cell (tools/hwlink/r0-agb.json) reads all sixteen photographed values at
+@ exactly one, and this is it (the PRAM row's first `ldrh` starts at dot 52
+@ of this core's line 40, VRAM mode 0's at 51, mode 2's at 82; a cycle
+@ either way fails one to three rows). On the console (kit3, 2026-11-04:
+@ this park in a flash-cart build, three cold boots, every row the same each
+@ time; tests/roms/dbsuite/cart-agb.json) fourteen rows read their
+@ photographed values and two do not, which are the console's from then on:
+@ contend-pram-mode0 0xE6, not 0xE7 -- the park ends on line 38 and the
+@ row's DISPCNT store leaves forced blank there, so line 40 is still inside
+@ the renderer's return (tests/roms/payloads/c2fb.s, FB_EXIT_HOLD_LINES)
+@ and the row reads no contention at all, as the IWRAM control does -- and
+@ contend-vram-mode0 0xF7, not 0xF6. dingbat reads all sixteen as the
+@ console did. The multiboot build never runs these rows and does not carry
+@ the park.
+.macro c2_park
+    add r1, r4, #0x200
+    mov r0, #0
+    strh r0, [r1, #8]              @ IME off: the wake is not an interrupt
+    ldr r0, =(38 << 8) | 0x20
+    strh r0, [r4, #4]              @ V-count match on line 38
+    mov r0, #0x04
+    strh r0, [r1]                  @ IE = V-count only
+    ldr r0, =0x3FFF
+    strh r0, [r1, #2]
+    swi 0x020000                   @ Halt
+    mov r2, #1                     @ the wait: 4 NOPs and a 1-cycle multiply
+    .rept 4
+    mov r0, r0
+    .endr
+    mul r0, r2, r2
+    add r1, r4, #0x200
+    mov r0, #0
+    strh r0, [r4, #4]              @ DISPSTAT as machine_reset left it
+    mov r0, #0x40
+    strh r0, [r1]                  @ the watchdog's IE, IF clear, IME on
+    ldr r0, =0x3FFF
+    strh r0, [r1, #2]
+    mov r0, #1
+    strh r0, [r1, #8]
+.endm
 run_contend2:
     push {r4-r9, lr}
     ldr r8, =SLOT
@@ -223,6 +273,9 @@ run_contend2:
     str r3, [r1], #4
     subs r2, r2, #1
     bne 1b
+.if MB == 0
+    c2_park
+.endif
     c2_row C2_M0,   0x05000000, 0
     c2_row C2_M0,   0x06000000, 2
     c2_row C2_M0,   0x07000000, 4
@@ -257,8 +310,8 @@ c2_vram_stub:
     .endr
     bx  lr
 c2_vram_end:
-    chalf "contend-pram-mode0",     run_contend2, 0, 0x00E7, F_CART
-    chalf "contend-vram-mode0",     RUN_SAME, 2, 0x00F6, F_CART
+    chalf "contend-pram-mode0",     run_contend2, 0, 0x00E6, F_CART
+    chalf "contend-vram-mode0",     RUN_SAME, 2, 0x00F7, F_CART
     chalf "contend-oam-mode0",      RUN_SAME, 4, 0x00E6, F_CART
     chalf "contend-iwram-control",  RUN_SAME, 6, 0x00E6, F_CART
     chalf "contend-pram-mode2",     RUN_SAME, 8, 0x00E7, F_CART

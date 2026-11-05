@@ -394,8 +394,8 @@ run_case:
     mov r4, r0
     ldr r5, =case_table
     add r5, r5, r4, lsl #5         @ r5 = descriptor
+    bl  draw_run_progress          @ r0 = the case (beacon_poll clobbers it)
     bl  beacon_poll
-    bl  draw_run_progress
     ldr r0, [r5, #CD_INFO]
     tst r0, #F_RISKY
     beq 0f

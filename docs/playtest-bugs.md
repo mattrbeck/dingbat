@@ -8614,6 +8614,31 @@ match the console; a fit to these cells, not a circuit, and which earlier
 trigger re-times the check is known only for the 1400 overflow. Laws:
 `stphase` (the two variants, 32 cells) and `stphase4` (256).
 
+**dbsuite: every row pinned or measured -- 872/872 in dingbat, the
+multiboot image 775/775 on the console.** The last three red rows were all
+placement: a case whose answer turns on a free-running clock, entered
+wherever the cases before it left the CPU.
+
+- CONTEND2 and DMATIME now park on a V-count match in the cartridge build
+  (the held branch's parks, 72008a06 / e4999c9c, as kit3 ran them).
+  With the park, dingbat's cartridge build reads all sixteen contention
+  rows and the DMA row as kit3's three cold boots did. Two rows take the
+  console's values instead of gbaedge's photographs:
+  - contend-pram-mode0 0xE6: the park leaves forced blank on line 38, so
+    the row reads inside the renderer's return (c2fb) and sees no
+    contention.
+  - contend-vram-mode0 0xF7.
+- dbsuite's sweeptrig.s parks on line 100 before its master-on. The rig's
+  recording and both builds now enter on one cycle of the PSG's 16-cycle
+  clock (the stphase laws are why it matters). Its 17 cells were
+  re-recorded behind the park, and all 14 single-valued ones are what
+  dingbat predicted before the run.
+- kitdemo leaves the image for the cycle laws (R0_SKIP), which makes room
+  for the park.
+- ram-psg-ch1-after-ch2 is the fourth PSG lottery row (0 or its band):
+  0 on the console's first multiboot run today. No recorded run had read
+  0.
+
 **dbsuite: three PSG rows accept the console's lottery.** A new case kind,
 K_ZRANGE (czrange): 0 or the range. psg-ch1-nr10-0-dies,
 psg-ch1-after-ch2-lives and psg-ch1-second-trigger-dies each came out both

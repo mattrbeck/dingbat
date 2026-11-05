@@ -24,19 +24,19 @@
   },
   {
    "name": "bus",
-   "first": 550
+   "first": 538
   },
   {
    "name": "ppu",
-   "first": 629
+   "first": 617
   },
   {
    "name": "apu",
-   "first": 785
+   "first": 773
   },
   {
    "name": "bios",
-   "first": 837
+   "first": 825
   }
  ],
  "cases": [
@@ -4855,150 +4855,6 @@
   {
    "index": 401,
    "suite": "dma",
-   "name": "kit-hdma-nodma-mul-k0",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "04800484",
-   "hi": "04800484"
-  },
-  {
-   "index": 402,
-   "suite": "dma",
-   "name": "kit-hdma-nodma-nop-k0",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "04400441",
-   "hi": "04400441"
-  },
-  {
-   "index": 403,
-   "suite": "dma",
-   "name": "kit-hdma-mul-k0",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "048303D5",
-   "hi": "048303D5"
-  },
-  {
-   "index": 404,
-   "suite": "dma",
-   "name": "kit-hdma-mul-k1",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "048303D5",
-   "hi": "048303D5"
-  },
-  {
-   "index": 405,
-   "suite": "dma",
-   "name": "kit-hdma-mul-k2",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "048303D5",
-   "hi": "048303D5"
-  },
-  {
-   "index": 406,
-   "suite": "dma",
-   "name": "kit-hdma-mul-k3",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "048303D5",
-   "hi": "048303D5"
-  },
-  {
-   "index": 407,
-   "suite": "dma",
-   "name": "kit-hdma-mul-k4",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "048803D5",
-   "hi": "048803D5"
-  },
-  {
-   "index": 408,
-   "suite": "dma",
-   "name": "kit-hdma-mul-k5",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "048803D5",
-   "hi": "048803D5"
-  },
-  {
-   "index": 409,
-   "suite": "dma",
-   "name": "kit-hdma-mul-k6",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "048803D5",
-   "hi": "048803D5"
-  },
-  {
-   "index": 410,
-   "suite": "dma",
-   "name": "kit-hdma-nop-k0",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "044403D5",
-   "hi": "044403D5"
-  },
-  {
-   "index": 411,
-   "suite": "dma",
-   "name": "kit-hdma-nop-k1",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "044503D5",
-   "hi": "044503D5"
-  },
-  {
-   "index": 412,
-   "suite": "dma",
-   "name": "kit-hdma-nop-k2",
-   "kind": "range",
-   "cartridge_only": false,
-   "risky": false,
-   "offset": 0,
-   "mask": "FFFFFFFF",
-   "lo": "044603D5",
-   "hi": "044603D5"
-  },
-  {
-   "index": 413,
-   "suite": "dma",
    "name": "tmrdma-k0",
    "kind": "range",
    "cartridge_only": false,
@@ -5009,7 +4865,7 @@
    "hi": "F303FF81"
   },
   {
-   "index": 414,
+   "index": 402,
    "suite": "dma",
    "name": "tmrdma-k1",
    "kind": "range",
@@ -5021,7 +4877,7 @@
    "hi": "F501FFE9"
   },
   {
-   "index": 415,
+   "index": 403,
    "suite": "dma",
    "name": "tmrdma-k2",
    "kind": "range",
@@ -5033,7 +4889,7 @@
    "hi": "F601FFEA"
   },
   {
-   "index": 416,
+   "index": 404,
    "suite": "dma",
    "name": "tmrdma-k3",
    "kind": "range",
@@ -5045,7 +4901,7 @@
    "hi": "F701FFEB"
   },
   {
-   "index": 417,
+   "index": 405,
    "suite": "dma",
    "name": "tmrdma-k4",
    "kind": "range",
@@ -5057,7 +4913,7 @@
    "hi": "F801FFEC"
   },
   {
-   "index": 418,
+   "index": 406,
    "suite": "dma",
    "name": "tmrdma-k5",
    "kind": "range",
@@ -5069,7 +4925,7 @@
    "hi": "F901FFED"
   },
   {
-   "index": 419,
+   "index": 407,
    "suite": "dma",
    "name": "tmrdma-k6",
    "kind": "range",
@@ -5081,7 +4937,7 @@
    "hi": "FA01FFEE"
   },
   {
-   "index": 420,
+   "index": 408,
    "suite": "dma",
    "name": "tmrdma-k7",
    "kind": "range",
@@ -5093,7 +4949,7 @@
    "hi": "FB01FFEF"
   },
   {
-   "index": 421,
+   "index": 409,
    "suite": "dma",
    "name": "tmrdma-dma1-only",
    "kind": "range",
@@ -5105,7 +4961,7 @@
    "hi": "EC00BEEF"
   },
   {
-   "index": 422,
+   "index": 410,
    "suite": "dma",
    "name": "tmrdma-dma0-only",
    "kind": "range",
@@ -5117,7 +4973,7 @@
    "hi": "8100FF81"
   },
   {
-   "index": 423,
+   "index": 411,
    "suite": "dma",
    "name": "dmastart-arm-none",
    "kind": "range",
@@ -5129,7 +4985,7 @@
    "hi": "00040206"
   },
   {
-   "index": 424,
+   "index": 412,
    "suite": "dma",
    "name": "dmastart-arm-ldr-ewram-dest",
    "kind": "range",
@@ -5141,7 +4997,7 @@
    "hi": "0014000B"
   },
   {
-   "index": 425,
+   "index": 413,
    "suite": "dma",
    "name": "dmastart-arm-ldr-iwram",
    "kind": "range",
@@ -5153,7 +5009,7 @@
    "hi": "000F0206"
   },
   {
-   "index": 426,
+   "index": 414,
    "suite": "dma",
    "name": "dmastart-arm-nop-ldr-ewram",
    "kind": "range",
@@ -5165,7 +5021,7 @@
    "hi": "00160106"
   },
   {
-   "index": 427,
+   "index": 415,
    "suite": "dma",
    "name": "dmastart-arm-nop-nop-ldr-ewram",
    "kind": "range",
@@ -5177,7 +5033,7 @@
    "hi": "00170106"
   },
   {
-   "index": 428,
+   "index": 416,
    "suite": "dma",
    "name": "dmastart-arm-mul-ldr-ewram",
    "kind": "range",
@@ -5189,7 +5045,7 @@
    "hi": "00170106"
   },
   {
-   "index": 429,
+   "index": 417,
    "suite": "dma",
    "name": "dmastart-arm-str-ewram",
    "kind": "range",
@@ -5201,7 +5057,7 @@
    "hi": "0014020B"
   },
   {
-   "index": 430,
+   "index": 418,
    "suite": "dma",
    "name": "dmastart-arm-ldm-iwram-2",
    "kind": "range",
@@ -5213,7 +5069,7 @@
    "hi": "00110206"
   },
   {
-   "index": 431,
+   "index": 419,
    "suite": "dma",
    "name": "dmastart-arm-ldrh-io",
    "kind": "range",
@@ -5225,7 +5081,7 @@
    "hi": "000F0206"
   },
   {
-   "index": 432,
+   "index": 420,
    "suite": "dma",
    "name": "dmastart-arm-ldrh-ewram-dest",
    "kind": "range",
@@ -5237,7 +5093,7 @@
    "hi": "00110008"
   },
   {
-   "index": 433,
+   "index": 421,
    "suite": "dma",
    "name": "dmastart-thumb-none",
    "kind": "range",
@@ -5249,7 +5105,7 @@
    "hi": "00040206"
   },
   {
-   "index": 434,
+   "index": 422,
    "suite": "dma",
    "name": "dmastart-thumb-ldr-ewram-dest",
    "kind": "range",
@@ -5261,7 +5117,7 @@
    "hi": "0014000B"
   },
   {
-   "index": 435,
+   "index": 423,
    "suite": "dma",
    "name": "dmastart-thumb-ldr-iwram",
    "kind": "range",
@@ -5273,7 +5129,7 @@
    "hi": "000F0206"
   },
   {
-   "index": 436,
+   "index": 424,
    "suite": "dma",
    "name": "dmastart-thumb-nop-ldr-ewram",
    "kind": "range",
@@ -5285,7 +5141,7 @@
    "hi": "00160106"
   },
   {
-   "index": 437,
+   "index": 425,
    "suite": "dma",
    "name": "dmastart-thumb-nop-nop-ldr-ewram",
    "kind": "range",
@@ -5297,7 +5153,7 @@
    "hi": "00170106"
   },
   {
-   "index": 438,
+   "index": 426,
    "suite": "dma",
    "name": "dmastart-thumb-mul-ldr-ewram",
    "kind": "range",
@@ -5309,7 +5165,7 @@
    "hi": "00170106"
   },
   {
-   "index": 439,
+   "index": 427,
    "suite": "dma",
    "name": "dmastart-thumb-str-ewram",
    "kind": "range",
@@ -5321,7 +5177,7 @@
    "hi": "0014020B"
   },
   {
-   "index": 440,
+   "index": 428,
    "suite": "dma",
    "name": "dmastart-thumb-ldm-iwram-2",
    "kind": "range",
@@ -5333,7 +5189,7 @@
    "hi": "00110206"
   },
   {
-   "index": 441,
+   "index": 429,
    "suite": "dma",
    "name": "dmastart-thumb-ldrh-io",
    "kind": "range",
@@ -5345,7 +5201,7 @@
    "hi": "000F0206"
   },
   {
-   "index": 442,
+   "index": 430,
    "suite": "dma",
    "name": "dmastart-thumb-ldrh-ewram-dest",
    "kind": "range",
@@ -5357,7 +5213,7 @@
    "hi": "00110008"
   },
   {
-   "index": 443,
+   "index": 431,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n0",
    "kind": "range",
@@ -5369,7 +5225,7 @@
    "hi": "00000000"
   },
   {
-   "index": 444,
+   "index": 432,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n0",
    "kind": "range",
@@ -5381,7 +5237,7 @@
    "hi": "00000002"
   },
   {
-   "index": 445,
+   "index": 433,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n0",
    "kind": "range",
@@ -5393,7 +5249,7 @@
    "hi": "00000002"
   },
   {
-   "index": 446,
+   "index": 434,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n0",
    "kind": "range",
@@ -5405,7 +5261,7 @@
    "hi": "00000002"
   },
   {
-   "index": 447,
+   "index": 435,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n0",
    "kind": "range",
@@ -5417,7 +5273,7 @@
    "hi": "00000002"
   },
   {
-   "index": 448,
+   "index": 436,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n0",
    "kind": "range",
@@ -5429,7 +5285,7 @@
    "hi": "00000002"
   },
   {
-   "index": 449,
+   "index": 437,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n1",
    "kind": "range",
@@ -5441,7 +5297,7 @@
    "hi": "00000001"
   },
   {
-   "index": 450,
+   "index": 438,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n1",
    "kind": "range",
@@ -5453,7 +5309,7 @@
    "hi": "00000000"
   },
   {
-   "index": 451,
+   "index": 439,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n1",
    "kind": "range",
@@ -5465,7 +5321,7 @@
    "hi": "00000000"
   },
   {
-   "index": 452,
+   "index": 440,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n1",
    "kind": "range",
@@ -5477,7 +5333,7 @@
    "hi": "00000007"
   },
   {
-   "index": 453,
+   "index": 441,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n1",
    "kind": "range",
@@ -5489,7 +5345,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 454,
+   "index": 442,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n1",
    "kind": "range",
@@ -5501,7 +5357,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 455,
+   "index": 443,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n1",
    "kind": "range",
@@ -5513,7 +5369,7 @@
    "hi": "00000007"
   },
   {
-   "index": 456,
+   "index": 444,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n1",
    "kind": "range",
@@ -5525,7 +5381,7 @@
    "hi": "00000007"
   },
   {
-   "index": 457,
+   "index": 445,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n2",
    "kind": "range",
@@ -5537,7 +5393,7 @@
    "hi": "00000002"
   },
   {
-   "index": 458,
+   "index": 446,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n2",
    "kind": "range",
@@ -5549,7 +5405,7 @@
    "hi": "00000001"
   },
   {
-   "index": 459,
+   "index": 447,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n2",
    "kind": "range",
@@ -5561,7 +5417,7 @@
    "hi": "00000001"
   },
   {
-   "index": 460,
+   "index": 448,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n2",
    "kind": "range",
@@ -5573,7 +5429,7 @@
    "hi": "00000008"
   },
   {
-   "index": 461,
+   "index": 449,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n2",
    "kind": "range",
@@ -5585,7 +5441,7 @@
    "hi": "0000000D"
   },
   {
-   "index": 462,
+   "index": 450,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n2",
    "kind": "range",
@@ -5597,7 +5453,7 @@
    "hi": "0000000D"
   },
   {
-   "index": 463,
+   "index": 451,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n2",
    "kind": "range",
@@ -5609,7 +5465,7 @@
    "hi": "00000008"
   },
   {
-   "index": 464,
+   "index": 452,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n2",
    "kind": "range",
@@ -5621,7 +5477,7 @@
    "hi": "00000008"
   },
   {
-   "index": 465,
+   "index": 453,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n3",
    "kind": "range",
@@ -5633,7 +5489,7 @@
    "hi": "00000003"
   },
   {
-   "index": 466,
+   "index": 454,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n3",
    "kind": "range",
@@ -5645,7 +5501,7 @@
    "hi": "00000002"
   },
   {
-   "index": 467,
+   "index": 455,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n3",
    "kind": "range",
@@ -5657,7 +5513,7 @@
    "hi": "00000002"
   },
   {
-   "index": 468,
+   "index": 456,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n3",
    "kind": "range",
@@ -5669,7 +5525,7 @@
    "hi": "00000009"
   },
   {
-   "index": 469,
+   "index": 457,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n3",
    "kind": "range",
@@ -5681,7 +5537,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 470,
+   "index": 458,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n3",
    "kind": "range",
@@ -5693,7 +5549,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 471,
+   "index": 459,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n3",
    "kind": "range",
@@ -5705,7 +5561,7 @@
    "hi": "00000009"
   },
   {
-   "index": 472,
+   "index": 460,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n3",
    "kind": "range",
@@ -5717,7 +5573,7 @@
    "hi": "00000009"
   },
   {
-   "index": 473,
+   "index": 461,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n4",
    "kind": "range",
@@ -5729,7 +5585,7 @@
    "hi": "00000004"
   },
   {
-   "index": 474,
+   "index": 462,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n4",
    "kind": "range",
@@ -5741,7 +5597,7 @@
    "hi": "00000003"
   },
   {
-   "index": 475,
+   "index": 463,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n4",
    "kind": "range",
@@ -5753,7 +5609,7 @@
    "hi": "00000003"
   },
   {
-   "index": 476,
+   "index": 464,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n4",
    "kind": "range",
@@ -5765,7 +5621,7 @@
    "hi": "0000000A"
   },
   {
-   "index": 477,
+   "index": 465,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n4",
    "kind": "range",
@@ -5777,7 +5633,7 @@
    "hi": "0000000F"
   },
   {
-   "index": 478,
+   "index": 466,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n4",
    "kind": "range",
@@ -5789,7 +5645,7 @@
    "hi": "0000000F"
   },
   {
-   "index": 479,
+   "index": 467,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n4",
    "kind": "range",
@@ -5801,7 +5657,7 @@
    "hi": "0000000A"
   },
   {
-   "index": 480,
+   "index": 468,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n4",
    "kind": "range",
@@ -5813,7 +5669,7 @@
    "hi": "0000000A"
   },
   {
-   "index": 481,
+   "index": 469,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n6",
    "kind": "range",
@@ -5825,7 +5681,7 @@
    "hi": "00000006"
   },
   {
-   "index": 482,
+   "index": 470,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n6",
    "kind": "range",
@@ -5837,7 +5693,7 @@
    "hi": "00000005"
   },
   {
-   "index": 483,
+   "index": 471,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n6",
    "kind": "range",
@@ -5849,7 +5705,7 @@
    "hi": "00000005"
   },
   {
-   "index": 484,
+   "index": 472,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n6",
    "kind": "range",
@@ -5861,7 +5717,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 485,
+   "index": 473,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n6",
    "kind": "range",
@@ -5873,7 +5729,7 @@
    "hi": "00000011"
   },
   {
-   "index": 486,
+   "index": 474,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n6",
    "kind": "range",
@@ -5885,7 +5741,7 @@
    "hi": "00000011"
   },
   {
-   "index": 487,
+   "index": 475,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n6",
    "kind": "range",
@@ -5897,7 +5753,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 488,
+   "index": 476,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n6",
    "kind": "range",
@@ -5909,7 +5765,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 489,
+   "index": 477,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n8",
    "kind": "range",
@@ -5921,7 +5777,7 @@
    "hi": "00000008"
   },
   {
-   "index": 490,
+   "index": 478,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n8",
    "kind": "range",
@@ -5933,7 +5789,7 @@
    "hi": "00000007"
   },
   {
-   "index": 491,
+   "index": 479,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n8",
    "kind": "range",
@@ -5945,7 +5801,7 @@
    "hi": "00000007"
   },
   {
-   "index": 492,
+   "index": 480,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n8",
    "kind": "range",
@@ -5957,7 +5813,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 493,
+   "index": 481,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n8",
    "kind": "range",
@@ -5969,7 +5825,7 @@
    "hi": "00000013"
   },
   {
-   "index": 494,
+   "index": 482,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n8",
    "kind": "range",
@@ -5981,7 +5837,7 @@
    "hi": "00000013"
   },
   {
-   "index": 495,
+   "index": 483,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n8",
    "kind": "range",
@@ -5993,7 +5849,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 496,
+   "index": 484,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n8",
    "kind": "range",
@@ -6005,7 +5861,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 497,
+   "index": 485,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n12",
    "kind": "range",
@@ -6017,7 +5873,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 498,
+   "index": 486,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n12",
    "kind": "range",
@@ -6029,7 +5885,7 @@
    "hi": "0000000B"
   },
   {
-   "index": 499,
+   "index": 487,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n12",
    "kind": "range",
@@ -6041,7 +5897,7 @@
    "hi": "0000000B"
   },
   {
-   "index": 500,
+   "index": 488,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n12",
    "kind": "range",
@@ -6053,7 +5909,7 @@
    "hi": "00000012"
   },
   {
-   "index": 501,
+   "index": 489,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n12",
    "kind": "range",
@@ -6065,7 +5921,7 @@
    "hi": "00000017"
   },
   {
-   "index": 502,
+   "index": 490,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n12",
    "kind": "range",
@@ -6077,7 +5933,7 @@
    "hi": "00000017"
   },
   {
-   "index": 503,
+   "index": 491,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n12",
    "kind": "range",
@@ -6089,7 +5945,7 @@
    "hi": "00000012"
   },
   {
-   "index": 504,
+   "index": 492,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n12",
    "kind": "range",
@@ -6101,7 +5957,7 @@
    "hi": "00000012"
   },
   {
-   "index": 505,
+   "index": 493,
    "suite": "dma",
    "name": "fifodma-k20-n13",
    "kind": "range",
@@ -6113,7 +5969,7 @@
    "hi": "00000013"
   },
   {
-   "index": 506,
+   "index": 494,
    "suite": "dma",
    "name": "fifodma-k20-n14",
    "kind": "range",
@@ -6125,7 +5981,7 @@
    "hi": "00000050"
   },
   {
-   "index": 507,
+   "index": 495,
    "suite": "dma",
    "name": "fifodma-k20-n15",
    "kind": "range",
@@ -6137,7 +5993,7 @@
    "hi": "00000015"
   },
   {
-   "index": 508,
+   "index": 496,
    "suite": "dma",
    "name": "fifodma-k20-n16",
    "kind": "range",
@@ -6149,7 +6005,7 @@
    "hi": "00000016"
   },
   {
-   "index": 509,
+   "index": 497,
    "suite": "dma",
    "name": "fifodma-k20-n17",
    "kind": "range",
@@ -6161,7 +6017,7 @@
    "hi": "00000035"
   },
   {
-   "index": 510,
+   "index": 498,
    "suite": "dma",
    "name": "fifodma-k20-n23",
    "kind": "range",
@@ -6173,7 +6029,7 @@
    "hi": "0000003B"
   },
   {
-   "index": 511,
+   "index": 499,
    "suite": "dma",
    "name": "fifodma-k20-n24",
    "kind": "range",
@@ -6185,7 +6041,7 @@
    "hi": "0000005A"
   },
   {
-   "index": 512,
+   "index": 500,
    "suite": "dma",
    "name": "fifodma-k20-n25",
    "kind": "range",
@@ -6197,7 +6053,7 @@
    "hi": "0000003D"
   },
   {
-   "index": 513,
+   "index": 501,
    "suite": "dma",
    "name": "fifodma-ewram-load-k20-n10",
    "kind": "range",
@@ -6209,7 +6065,7 @@
    "hi": "00000036"
   },
   {
-   "index": 514,
+   "index": 502,
    "suite": "dma",
    "name": "fifodma-ewram-load-k20-n11",
    "kind": "range",
@@ -6221,7 +6077,7 @@
    "hi": "00000036"
   },
   {
-   "index": 515,
+   "index": 503,
    "suite": "dma",
    "name": "fifodma-ewram-load-k20-n16",
    "kind": "range",
@@ -6233,7 +6089,7 @@
    "hi": "0000003B"
   },
   {
-   "index": 516,
+   "index": 504,
    "suite": "dma",
    "name": "fifodma-ewram-load-k20-n17",
    "kind": "range",
@@ -6245,7 +6101,7 @@
    "hi": "0000005B"
   },
   {
-   "index": 517,
+   "index": 505,
    "suite": "dma",
    "name": "fifodma-ewram-load-k20-n18",
    "kind": "range",
@@ -6257,7 +6113,7 @@
    "hi": "0000003E"
   },
   {
-   "index": 518,
+   "index": 506,
    "suite": "dma",
    "name": "fifodma-ewram-load-k20-n20",
    "kind": "range",
@@ -6269,7 +6125,7 @@
    "hi": "0000005E"
   },
   {
-   "index": 519,
+   "index": 507,
    "suite": "dma",
    "name": "fifodma-ewram-load-k20-n21",
    "kind": "range",
@@ -6281,7 +6137,7 @@
    "hi": "0000005E"
   },
   {
-   "index": 520,
+   "index": 508,
    "suite": "dma",
    "name": "fifodma-k33-n29",
    "kind": "range",
@@ -6293,7 +6149,7 @@
    "hi": "00000023"
   },
   {
-   "index": 521,
+   "index": 509,
    "suite": "dma",
    "name": "fifodma-k33-n30",
    "kind": "range",
@@ -6305,7 +6161,7 @@
    "hi": "00000042"
   },
   {
-   "index": 522,
+   "index": 510,
    "suite": "dma",
    "name": "dmasteal-none",
    "kind": "range",
@@ -6317,7 +6173,7 @@
    "hi": "000004B1"
   },
   {
-   "index": 523,
+   "index": 511,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-16bit-n1",
    "kind": "range",
@@ -6329,7 +6185,7 @@
    "hi": "000004B6"
   },
   {
-   "index": 524,
+   "index": 512,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-16bit-n2",
    "kind": "range",
@@ -6341,7 +6197,7 @@
    "hi": "000004B8"
   },
   {
-   "index": 525,
+   "index": 513,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-16bit-n4",
    "kind": "range",
@@ -6353,7 +6209,7 @@
    "hi": "000004BC"
   },
   {
-   "index": 526,
+   "index": 514,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-16bit-n8",
    "kind": "range",
@@ -6365,7 +6221,7 @@
    "hi": "000004C4"
   },
   {
-   "index": 527,
+   "index": 515,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-16bit-n16",
    "kind": "range",
@@ -6377,7 +6233,7 @@
    "hi": "000004D4"
   },
   {
-   "index": 528,
+   "index": 516,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-16bit-n32",
    "kind": "range",
@@ -6389,7 +6245,7 @@
    "hi": "000004F4"
   },
   {
-   "index": 529,
+   "index": 517,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-32bit-n1",
    "kind": "range",
@@ -6401,7 +6257,7 @@
    "hi": "000004B6"
   },
   {
-   "index": 530,
+   "index": 518,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-32bit-n4",
    "kind": "range",
@@ -6413,7 +6269,7 @@
    "hi": "000004BC"
   },
   {
-   "index": 531,
+   "index": 519,
    "suite": "dma",
    "name": "dmasteal-iwram-to-iwram-32bit-n16",
    "kind": "range",
@@ -6425,7 +6281,7 @@
    "hi": "000004D4"
   },
   {
-   "index": 532,
+   "index": 520,
    "suite": "dma",
    "name": "dmasteal-ewram-to-iwram-16bit-n4",
    "kind": "range",
@@ -6437,7 +6293,7 @@
    "hi": "000004C4"
   },
   {
-   "index": 533,
+   "index": 521,
    "suite": "dma",
    "name": "dmasteal-vram-to-iwram-16bit-n4",
    "kind": "range",
@@ -6449,7 +6305,7 @@
    "hi": "000004BC"
   },
   {
-   "index": 534,
+   "index": 522,
    "suite": "dma",
    "name": "dmasteal-pram-to-iwram-16bit-n4",
    "kind": "range",
@@ -6461,7 +6317,7 @@
    "hi": "000004BC"
   },
   {
-   "index": 535,
+   "index": 523,
    "suite": "dma",
    "name": "dmasteal-oam-to-iwram-16bit-n4",
    "kind": "range",
@@ -6473,7 +6329,7 @@
    "hi": "000004BC"
   },
   {
-   "index": 536,
+   "index": 524,
    "suite": "dma",
    "name": "dmasteal-ewram-to-iwram-32bit-n4",
    "kind": "range",
@@ -6485,7 +6341,7 @@
    "hi": "000004D0"
   },
   {
-   "index": 537,
+   "index": 525,
    "suite": "dma",
    "name": "dmasteal-vram-to-iwram-32bit-n4",
    "kind": "range",
@@ -6497,7 +6353,7 @@
    "hi": "000004C0"
   },
   {
-   "index": 538,
+   "index": 526,
    "suite": "dma",
    "name": "dmasteal-iwram-to-ewram-16bit-n4",
    "kind": "range",
@@ -6509,7 +6365,7 @@
    "hi": "000004C4"
   },
   {
-   "index": 539,
+   "index": 527,
    "suite": "dma",
    "name": "dmasteal-iwram-to-pram-16bit-n4",
    "kind": "range",
@@ -6521,7 +6377,7 @@
    "hi": "000004BC"
   },
   {
-   "index": 540,
+   "index": 528,
    "suite": "dma",
    "name": "dmasteal-iwram-to-oam-16bit-n4",
    "kind": "range",
@@ -6533,7 +6389,7 @@
    "hi": "000004BC"
   },
   {
-   "index": 541,
+   "index": 529,
    "suite": "dma",
    "name": "dmasteal-iwram-to-ewram-32bit-n4",
    "kind": "range",
@@ -6545,7 +6401,7 @@
    "hi": "000004D0"
   },
   {
-   "index": 542,
+   "index": 530,
    "suite": "dma",
    "name": "halthb-wake-and-grant-k0",
    "kind": "range",
@@ -6557,7 +6413,7 @@
    "hi": "03EC03D4"
   },
   {
-   "index": 543,
+   "index": 531,
    "suite": "dma",
    "name": "halthb-wake-and-grant-k4",
    "kind": "range",
@@ -6569,7 +6425,7 @@
    "hi": "03EC03D4"
   },
   {
-   "index": 544,
+   "index": 532,
    "suite": "dma",
    "name": "halthb-wake-and-grant-k9",
    "kind": "range",
@@ -6581,7 +6437,7 @@
    "hi": "03EC03D4"
   },
   {
-   "index": 545,
+   "index": 533,
    "suite": "dma",
    "name": "halthb-wake-and-grant-k13",
    "kind": "range",
@@ -6593,7 +6449,7 @@
    "hi": "03EC03D4"
   },
   {
-   "index": 546,
+   "index": 534,
    "suite": "dma",
    "name": "vdmageo-wake-and-grant-k0",
    "kind": "range",
@@ -6605,7 +6461,7 @@
    "hi": "04CD04B5"
   },
   {
-   "index": 547,
+   "index": 535,
    "suite": "dma",
    "name": "vdmageo-wake-and-grant-k4",
    "kind": "range",
@@ -6617,7 +6473,7 @@
    "hi": "04CD04B5"
   },
   {
-   "index": 548,
+   "index": 536,
    "suite": "dma",
    "name": "vdmageo-wake-and-grant-k9",
    "kind": "range",
@@ -6629,7 +6485,7 @@
    "hi": "04CD04B5"
   },
   {
-   "index": 549,
+   "index": 537,
    "suite": "dma",
    "name": "vdmageo-wake-and-grant-k13",
    "kind": "range",
@@ -6641,7 +6497,7 @@
    "hi": "04CD04B5"
   },
   {
-   "index": 550,
+   "index": 538,
    "suite": "bus",
    "name": "io-010-bg0hofs-open-bus",
    "kind": "range",
@@ -6653,7 +6509,7 @@
    "hi": "00006001"
   },
   {
-   "index": 551,
+   "index": 539,
    "suite": "bus",
    "name": "io-028-bg2x-open-bus",
    "kind": "range",
@@ -6665,7 +6521,7 @@
    "hi": "00006001"
   },
   {
-   "index": 552,
+   "index": 540,
    "suite": "bus",
    "name": "io-040-win0h-open-bus",
    "kind": "range",
@@ -6677,7 +6533,7 @@
    "hi": "00006001"
   },
   {
-   "index": 553,
+   "index": 541,
    "suite": "bus",
    "name": "io-04c-mosaic-open-bus",
    "kind": "range",
@@ -6689,7 +6545,7 @@
    "hi": "00006001"
   },
   {
-   "index": 554,
+   "index": 542,
    "suite": "bus",
    "name": "io-04e-open-bus",
    "kind": "range",
@@ -6701,7 +6557,7 @@
    "hi": "0000E256"
   },
   {
-   "index": 555,
+   "index": 543,
    "suite": "bus",
    "name": "io-054-bldy-open-bus",
    "kind": "range",
@@ -6713,7 +6569,7 @@
    "hi": "00006001"
   },
   {
-   "index": 556,
+   "index": 544,
    "suite": "bus",
    "name": "io-056-open-bus",
    "kind": "range",
@@ -6725,7 +6581,7 @@
    "hi": "0000E256"
   },
   {
-   "index": 557,
+   "index": 545,
    "suite": "bus",
    "name": "io-066-reads-0",
    "kind": "range",
@@ -6737,7 +6593,7 @@
    "hi": "00000000"
   },
   {
-   "index": 558,
+   "index": 546,
    "suite": "bus",
    "name": "io-06a-reads-0",
    "kind": "range",
@@ -6749,7 +6605,7 @@
    "hi": "00000000"
   },
   {
-   "index": 559,
+   "index": 547,
    "suite": "bus",
    "name": "io-078-reads-0",
    "kind": "range",
@@ -6761,7 +6617,7 @@
    "hi": "00000000"
   },
   {
-   "index": 560,
+   "index": 548,
    "suite": "bus",
    "name": "io-110-open-bus",
    "kind": "range",
@@ -6773,7 +6629,7 @@
    "hi": "00006001"
   },
   {
-   "index": 561,
+   "index": 549,
    "suite": "bus",
    "name": "io-12c-open-bus",
    "kind": "range",
@@ -6785,7 +6641,7 @@
    "hi": "00006001"
   },
   {
-   "index": 562,
+   "index": 550,
    "suite": "bus",
    "name": "io-136-reads-0",
    "kind": "range",
@@ -6797,7 +6653,7 @@
    "hi": "00000000"
   },
   {
-   "index": 563,
+   "index": 551,
    "suite": "bus",
    "name": "io-142-reads-0",
    "kind": "range",
@@ -6809,7 +6665,7 @@
    "hi": "00000000"
   },
   {
-   "index": 564,
+   "index": 552,
    "suite": "bus",
    "name": "io-206-reads-0",
    "kind": "range",
@@ -6821,7 +6677,7 @@
    "hi": "00000000"
   },
   {
-   "index": 565,
+   "index": 553,
    "suite": "bus",
    "name": "io-20a-reads-0",
    "kind": "range",
@@ -6833,7 +6689,7 @@
    "hi": "00000000"
   },
   {
-   "index": 566,
+   "index": 554,
    "suite": "bus",
    "name": "memctl-reads-0d000020",
    "kind": "range",
@@ -6845,7 +6701,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 567,
+   "index": 555,
    "suite": "bus",
    "name": "memctl-mirror-04010800",
    "kind": "range",
@@ -6857,7 +6713,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 568,
+   "index": 556,
    "suite": "bus",
    "name": "memctl-mirror-04ff0800",
    "kind": "range",
@@ -6869,7 +6725,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 569,
+   "index": 557,
    "suite": "bus",
    "name": "memctl-halfword-reads",
    "kind": "range",
@@ -6881,7 +6737,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 570,
+   "index": 558,
    "suite": "bus",
    "name": "memctl-byte-reads",
    "kind": "range",
@@ -6893,7 +6749,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 571,
+   "index": 559,
    "suite": "bus",
    "name": "ewram-16-reads-ws13",
    "kind": "range",
@@ -6905,7 +6761,7 @@
    "hi": "00000141"
   },
   {
-   "index": 572,
+   "index": 560,
    "suite": "bus",
    "name": "ewram-16-reads-ws14",
    "kind": "range",
@@ -6917,7 +6773,7 @@
    "hi": "00000121"
   },
   {
-   "index": 573,
+   "index": 561,
    "suite": "bus",
    "name": "ewram-16-reads-ws4",
    "kind": "range",
@@ -6929,7 +6785,7 @@
    "hi": "00000261"
   },
   {
-   "index": 574,
+   "index": 562,
    "suite": "bus",
    "name": "memctl-ws14-reads-back",
    "kind": "range",
@@ -6941,7 +6797,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 575,
+   "index": 563,
    "suite": "bus",
    "name": "memctl-ws4-reads-back",
    "kind": "range",
@@ -6953,7 +6809,7 @@
    "hi": "00000004"
   },
   {
-   "index": 576,
+   "index": 564,
    "suite": "bus",
    "name": "memctl-ws13-reads-back",
    "kind": "range",
@@ -6965,7 +6821,7 @@
    "hi": "0000000D"
   },
   {
-   "index": 577,
+   "index": 565,
    "suite": "bus",
    "name": "memctl-write-via-mirror",
    "kind": "range",
@@ -6977,7 +6833,7 @@
    "hi": "0000000D"
   },
   {
-   "index": 578,
+   "index": 566,
    "suite": "bus",
    "name": "contend-pram-mode0",
    "kind": "range",
@@ -6985,11 +6841,11 @@
    "risky": false,
    "offset": 0,
    "mask": "0000FFFF",
-   "lo": "000000E7",
-   "hi": "000000E7"
+   "lo": "000000E6",
+   "hi": "000000E6"
   },
   {
-   "index": 579,
+   "index": 567,
    "suite": "bus",
    "name": "contend-vram-mode0",
    "kind": "range",
@@ -6997,11 +6853,11 @@
    "risky": false,
    "offset": 2,
    "mask": "0000FFFF",
-   "lo": "000000F6",
-   "hi": "000000F6"
+   "lo": "000000F7",
+   "hi": "000000F7"
   },
   {
-   "index": 580,
+   "index": 568,
    "suite": "bus",
    "name": "contend-oam-mode0",
    "kind": "range",
@@ -7013,7 +6869,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 581,
+   "index": 569,
    "suite": "bus",
    "name": "contend-iwram-control",
    "kind": "range",
@@ -7025,7 +6881,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 582,
+   "index": 570,
    "suite": "bus",
    "name": "contend-pram-mode2",
    "kind": "range",
@@ -7037,7 +6893,7 @@
    "hi": "000000E7"
   },
   {
-   "index": 583,
+   "index": 571,
    "suite": "bus",
    "name": "contend-vram-mode2-locked-out",
    "kind": "range",
@@ -7049,7 +6905,7 @@
    "hi": "0000042A"
   },
   {
-   "index": 584,
+   "index": 572,
    "suite": "bus",
    "name": "contend-oam-mode2",
    "kind": "range",
@@ -7061,7 +6917,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 585,
+   "index": 573,
    "suite": "bus",
    "name": "contend-vram-code-blank",
    "kind": "range",
@@ -7073,7 +6929,7 @@
    "hi": "000000DC"
   },
   {
-   "index": 586,
+   "index": 574,
    "suite": "bus",
    "name": "contend-pram-no-obj",
    "kind": "range",
@@ -7085,7 +6941,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 587,
+   "index": 575,
    "suite": "bus",
    "name": "contend-vram-no-obj",
    "kind": "range",
@@ -7097,7 +6953,7 @@
    "hi": "000000F8"
   },
   {
-   "index": 588,
+   "index": 576,
    "suite": "bus",
    "name": "contend-oam-no-obj",
    "kind": "range",
@@ -7109,7 +6965,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 589,
+   "index": 577,
    "suite": "bus",
    "name": "contend-vram-code-mode0",
    "kind": "range",
@@ -7121,7 +6977,7 @@
    "hi": "000000DD"
   },
   {
-   "index": 590,
+   "index": 578,
    "suite": "bus",
    "name": "contend-vram-hblank-free",
    "kind": "range",
@@ -7133,7 +6989,7 @@
    "hi": "000000F6"
   },
   {
-   "index": 591,
+   "index": 579,
    "suite": "bus",
    "name": "contend-oam-hblank-free",
    "kind": "range",
@@ -7145,7 +7001,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 592,
+   "index": 580,
    "suite": "bus",
    "name": "contend-vram-blank",
    "kind": "range",
@@ -7157,7 +7013,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 593,
+   "index": 581,
    "suite": "bus",
    "name": "contend-iwram-blank",
    "kind": "range",
@@ -7169,7 +7025,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 594,
+   "index": 582,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-4-2",
    "kind": "range",
@@ -7181,7 +7037,7 @@
    "hi": "0000037E"
   },
   {
-   "index": 595,
+   "index": 583,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-3-2",
    "kind": "range",
@@ -7193,7 +7049,7 @@
    "hi": "0000033E"
   },
   {
-   "index": 596,
+   "index": 584,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-2-2",
    "kind": "range",
@@ -7205,7 +7061,7 @@
    "hi": "000002FE"
   },
   {
-   "index": 597,
+   "index": 585,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-3-1",
    "kind": "range",
@@ -7217,7 +7073,7 @@
    "hi": "000002FE"
   },
   {
-   "index": 598,
+   "index": 586,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-3-1-pf",
    "kind": "range",
@@ -7229,7 +7085,7 @@
    "hi": "000002FE"
   },
   {
-   "index": 599,
+   "index": 587,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-4-2-pf",
    "kind": "range",
@@ -7241,7 +7097,7 @@
    "hi": "0000037E"
   },
   {
-   "index": 600,
+   "index": 588,
    "suite": "bus",
    "name": "obus-arm-reads-pc-plus-8",
    "kind": "range",
@@ -7253,7 +7109,7 @@
    "hi": "E58A0000"
   },
   {
-   "index": 601,
+   "index": 589,
    "suite": "bus",
    "name": "obus-thumb-ldr-align-a",
    "kind": "range",
@@ -7265,7 +7121,7 @@
    "hi": "3E0260A8"
   },
   {
-   "index": 602,
+   "index": 590,
    "suite": "bus",
    "name": "obus-thumb-ldr-align-b",
    "kind": "range",
@@ -7277,7 +7133,7 @@
    "hi": "61283E02"
   },
   {
-   "index": 603,
+   "index": 591,
    "suite": "bus",
    "name": "obus-thumb-ldrh-align-a",
    "kind": "range",
@@ -7289,7 +7145,7 @@
    "hi": "000061A8"
   },
   {
-   "index": 604,
+   "index": 592,
    "suite": "bus",
    "name": "obus-thumb-ldrh-align-b",
    "kind": "range",
@@ -7301,7 +7157,7 @@
    "hi": "00003E02"
   },
   {
-   "index": 605,
+   "index": 593,
    "suite": "bus",
    "name": "obus-0-insns-after-dma",
    "kind": "range",
@@ -7313,7 +7169,7 @@
    "hi": "E59F0068"
   },
   {
-   "index": 606,
+   "index": 594,
    "suite": "bus",
    "name": "obus-1-insn-after-dma-dma-word",
    "kind": "range",
@@ -7325,7 +7181,7 @@
    "hi": "DEADBEE3"
   },
   {
-   "index": 607,
+   "index": 595,
    "suite": "bus",
    "name": "obus-2-insns-after-dma",
    "kind": "range",
@@ -7337,7 +7193,7 @@
    "hi": "E59F0024"
   },
   {
-   "index": 608,
+   "index": 596,
    "suite": "bus",
    "name": "obuswin-nothing-burst-not-run",
    "kind": "range",
@@ -7349,7 +7205,7 @@
    "hi": "E59F0198"
   },
   {
-   "index": 609,
+   "index": 597,
    "suite": "bus",
    "name": "obuswin-1-nop-dma-word",
    "kind": "range",
@@ -7361,7 +7217,7 @@
    "hi": "DEADBEE3"
   },
   {
-   "index": 610,
+   "index": 598,
    "suite": "bus",
    "name": "obuswin-2-nops-closed",
    "kind": "range",
@@ -7373,7 +7229,7 @@
    "hi": "E59F0144"
   },
   {
-   "index": 611,
+   "index": 599,
    "suite": "bus",
    "name": "obuswin-mul-closes",
    "kind": "range",
@@ -7385,7 +7241,7 @@
    "hi": "E59F011C"
   },
   {
-   "index": 612,
+   "index": 600,
    "suite": "bus",
    "name": "obuswint-2-nops-half-dma-word",
    "kind": "range",
@@ -7397,7 +7253,7 @@
    "hi": "DEAD6019"
   },
   {
-   "index": 613,
+   "index": 601,
    "suite": "bus",
    "name": "obusbus-iwram-ldr-a",
    "kind": "range",
@@ -7409,7 +7265,7 @@
    "hi": "3E026028"
   },
   {
-   "index": 614,
+   "index": 602,
    "suite": "bus",
    "name": "obusbus-iwram-ldr-b",
    "kind": "range",
@@ -7421,7 +7277,7 @@
    "hi": "60A83E02"
   },
   {
-   "index": 615,
+   "index": 603,
    "suite": "bus",
    "name": "obusbus-iwram-ldrh-a",
    "kind": "range",
@@ -7433,7 +7289,7 @@
    "hi": "00006128"
   },
   {
-   "index": 616,
+   "index": 604,
    "suite": "bus",
    "name": "obusbus-iwram-ldrh-b",
    "kind": "range",
@@ -7445,7 +7301,7 @@
    "hi": "00003E02"
   },
   {
-   "index": 617,
+   "index": 605,
    "suite": "bus",
    "name": "obusbus-ewram-ldr-a",
    "kind": "range",
@@ -7457,7 +7313,7 @@
    "hi": "60286028"
   },
   {
-   "index": 618,
+   "index": 606,
    "suite": "bus",
    "name": "obusbus-ewram-ldr-b",
    "kind": "range",
@@ -7469,7 +7325,7 @@
    "hi": "60A860A8"
   },
   {
-   "index": 619,
+   "index": 607,
    "suite": "bus",
    "name": "obusbus-ewram-ldrh-a",
    "kind": "range",
@@ -7481,7 +7337,7 @@
    "hi": "00006128"
   },
   {
-   "index": 620,
+   "index": 608,
    "suite": "bus",
    "name": "obusbus-ewram-ldrh-b",
    "kind": "range",
@@ -7493,7 +7349,7 @@
    "hi": "000061A8"
   },
   {
-   "index": 621,
+   "index": 609,
    "suite": "bus",
    "name": "obusbus-vram-ldr-a",
    "kind": "range",
@@ -7505,7 +7361,7 @@
    "hi": "60286028"
   },
   {
-   "index": 622,
+   "index": 610,
    "suite": "bus",
    "name": "obusbus-vram-ldr-b",
    "kind": "range",
@@ -7517,7 +7373,7 @@
    "hi": "60A860A8"
   },
   {
-   "index": 623,
+   "index": 611,
    "suite": "bus",
    "name": "obusbus-vram-ldrh-a",
    "kind": "range",
@@ -7529,7 +7385,7 @@
    "hi": "00006128"
   },
   {
-   "index": 624,
+   "index": 612,
    "suite": "bus",
    "name": "obusbus-vram-ldrh-b",
    "kind": "range",
@@ -7541,7 +7397,7 @@
    "hi": "000061A8"
   },
   {
-   "index": 625,
+   "index": 613,
    "suite": "bus",
    "name": "obusbus-oam-ldr-a",
    "kind": "range",
@@ -7553,7 +7409,7 @@
    "hi": "606E6028"
   },
   {
-   "index": 626,
+   "index": 614,
    "suite": "bus",
    "name": "obusbus-oam-ldr-b",
    "kind": "range",
@@ -7565,7 +7421,7 @@
    "hi": "60A83E02"
   },
   {
-   "index": 627,
+   "index": 615,
    "suite": "bus",
    "name": "obusbus-oam-ldrh-a",
    "kind": "range",
@@ -7577,7 +7433,7 @@
    "hi": "00006128"
   },
   {
-   "index": 628,
+   "index": 616,
    "suite": "bus",
    "name": "obusbus-oam-ldrh-b",
    "kind": "range",
@@ -7589,7 +7445,7 @@
    "hi": "00003E02"
   },
   {
-   "index": 629,
+   "index": 617,
    "suite": "ppu",
    "name": "dispstat-lo-byte-write",
    "kind": "range",
@@ -7601,7 +7457,7 @@
    "hi": "00000039"
   },
   {
-   "index": 630,
+   "index": 618,
    "suite": "ppu",
    "name": "dispstat-hi-byte-is-lyc",
    "kind": "range",
@@ -7613,7 +7469,7 @@
    "hi": "00003801"
   },
   {
-   "index": 631,
+   "index": 619,
    "suite": "ppu",
    "name": "dispstat-16-bit-write",
    "kind": "range",
@@ -7625,7 +7481,7 @@
    "hi": "00000039"
   },
   {
-   "index": 632,
+   "index": 620,
    "suite": "ppu",
    "name": "dispstat-lo-byte-clear",
    "kind": "range",
@@ -7637,7 +7493,7 @@
    "hi": "00000001"
   },
   {
-   "index": 633,
+   "index": 621,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k0",
    "kind": "range",
@@ -7649,7 +7505,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 634,
+   "index": 622,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k1",
    "kind": "range",
@@ -7661,7 +7517,7 @@
    "hi": "001B8C00"
   },
   {
-   "index": 635,
+   "index": 623,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k2",
    "kind": "range",
@@ -7673,7 +7529,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 636,
+   "index": 624,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k3",
    "kind": "range",
@@ -7685,7 +7541,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 637,
+   "index": 625,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k4",
    "kind": "range",
@@ -7697,7 +7553,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 638,
+   "index": 626,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k5",
    "kind": "range",
@@ -7709,7 +7565,7 @@
    "hi": "001BF201"
   },
   {
-   "index": 639,
+   "index": 627,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k6",
    "kind": "range",
@@ -7721,7 +7577,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 640,
+   "index": 628,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k7",
    "kind": "range",
@@ -7733,7 +7589,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 641,
+   "index": 629,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k8",
    "kind": "range",
@@ -7745,7 +7601,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 642,
+   "index": 630,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k9",
    "kind": "range",
@@ -7757,7 +7613,7 @@
    "hi": "001C5802"
   },
   {
-   "index": 643,
+   "index": 631,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k10",
    "kind": "range",
@@ -7769,7 +7625,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 644,
+   "index": 632,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k11",
    "kind": "range",
@@ -7781,7 +7637,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 645,
+   "index": 633,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k12",
    "kind": "range",
@@ -7793,7 +7649,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 646,
+   "index": 634,
    "suite": "ppu",
    "name": "breakram-loop-stale-k0",
    "kind": "range",
@@ -7805,7 +7661,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 647,
+   "index": 635,
    "suite": "ppu",
    "name": "breakram-loop-stale-k1",
    "kind": "range",
@@ -7817,7 +7673,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 648,
+   "index": 636,
    "suite": "ppu",
    "name": "breakram-loop-stale-k2",
    "kind": "range",
@@ -7829,7 +7685,7 @@
    "hi": "001B8B00"
   },
   {
-   "index": 649,
+   "index": 637,
    "suite": "ppu",
    "name": "breakram-loop-stale-k3",
    "kind": "range",
@@ -7841,7 +7697,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 650,
+   "index": 638,
    "suite": "ppu",
    "name": "breakram-loop-stale-k4",
    "kind": "range",
@@ -7853,7 +7709,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 651,
+   "index": 639,
    "suite": "ppu",
    "name": "breakram-loop-stale-k5",
    "kind": "range",
@@ -7865,7 +7721,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 652,
+   "index": 640,
    "suite": "ppu",
    "name": "breakram-loop-stale-k6",
    "kind": "range",
@@ -7877,7 +7733,7 @@
    "hi": "001BF101"
   },
   {
-   "index": 653,
+   "index": 641,
    "suite": "ppu",
    "name": "breakram-loop-stale-k7",
    "kind": "range",
@@ -7889,7 +7745,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 654,
+   "index": 642,
    "suite": "ppu",
    "name": "breakram-loop-stale-k8",
    "kind": "range",
@@ -7901,7 +7757,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 655,
+   "index": 643,
    "suite": "ppu",
    "name": "breakram-loop-stale-k9",
    "kind": "range",
@@ -7913,7 +7769,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 656,
+   "index": 644,
    "suite": "ppu",
    "name": "breakram-loop-stale-k10",
    "kind": "range",
@@ -7925,7 +7781,7 @@
    "hi": "001C5702"
   },
   {
-   "index": 657,
+   "index": 645,
    "suite": "ppu",
    "name": "breakram-loop-stale-k11",
    "kind": "range",
@@ -7937,7 +7793,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 658,
+   "index": 646,
    "suite": "ppu",
    "name": "breakram-loop-stale-k12",
    "kind": "range",
@@ -7949,7 +7805,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 659,
+   "index": 647,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k0",
    "kind": "range",
@@ -7961,7 +7817,7 @@
    "hi": "000D170D"
   },
   {
-   "index": 660,
+   "index": 648,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k1",
    "kind": "range",
@@ -7973,7 +7829,7 @@
    "hi": "000CEE0C"
   },
   {
-   "index": 661,
+   "index": 649,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k2",
    "kind": "range",
@@ -7985,7 +7841,7 @@
    "hi": "000C9C0A"
   },
   {
-   "index": 662,
+   "index": 650,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k3",
    "kind": "range",
@@ -7997,7 +7853,7 @@
    "hi": "000C7309"
   },
   {
-   "index": 663,
+   "index": 651,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k4",
    "kind": "range",
@@ -8009,7 +7865,7 @@
    "hi": "000C2107"
   },
   {
-   "index": 664,
+   "index": 652,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k5",
    "kind": "range",
@@ -8021,7 +7877,7 @@
    "hi": "000BF806"
   },
   {
-   "index": 665,
+   "index": 653,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k6",
    "kind": "range",
@@ -8033,7 +7889,7 @@
    "hi": "000BA604"
   },
   {
-   "index": 666,
+   "index": 654,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k7",
    "kind": "range",
@@ -8045,7 +7901,7 @@
    "hi": "000B7D03"
   },
   {
-   "index": 667,
+   "index": 655,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k8",
    "kind": "range",
@@ -8057,7 +7913,7 @@
    "hi": "000B2B01"
   },
   {
-   "index": 668,
+   "index": 656,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k9",
    "kind": "range",
@@ -8069,7 +7925,7 @@
    "hi": "000B0200"
   },
   {
-   "index": 669,
+   "index": 657,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k10",
    "kind": "range",
@@ -8081,7 +7937,7 @@
    "hi": "000D160D"
   },
   {
-   "index": 670,
+   "index": 658,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k11",
    "kind": "range",
@@ -8093,7 +7949,7 @@
    "hi": "000CED0C"
   },
   {
-   "index": 671,
+   "index": 659,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k12",
    "kind": "range",
@@ -8105,7 +7961,7 @@
    "hi": "000C9B0A"
   },
   {
-   "index": 672,
+   "index": 660,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k13",
    "kind": "range",
@@ -8117,7 +7973,7 @@
    "hi": "000C7209"
   },
   {
-   "index": 673,
+   "index": 661,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k14",
    "kind": "range",
@@ -8129,7 +7985,7 @@
    "hi": "000C2007"
   },
   {
-   "index": 674,
+   "index": 662,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k15",
    "kind": "range",
@@ -8141,7 +7997,7 @@
    "hi": "000BF706"
   },
   {
-   "index": 675,
+   "index": 663,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k16",
    "kind": "range",
@@ -8153,7 +8009,7 @@
    "hi": "000BA504"
   },
   {
-   "index": 676,
+   "index": 664,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k17",
    "kind": "range",
@@ -8165,7 +8021,7 @@
    "hi": "000B7C03"
   },
   {
-   "index": 677,
+   "index": 665,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k18",
    "kind": "range",
@@ -8177,7 +8033,7 @@
    "hi": "000B2A01"
   },
   {
-   "index": 678,
+   "index": 666,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k19",
    "kind": "range",
@@ -8189,7 +8045,7 @@
    "hi": "000B0100"
   },
   {
-   "index": 679,
+   "index": 667,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k20",
    "kind": "range",
@@ -8201,7 +8057,7 @@
    "hi": "000D150D"
   },
   {
-   "index": 680,
+   "index": 668,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k21",
    "kind": "range",
@@ -8213,7 +8069,7 @@
    "hi": "000CEC0C"
   },
   {
-   "index": 681,
+   "index": 669,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k22",
    "kind": "range",
@@ -8225,7 +8081,7 @@
    "hi": "000C9A0A"
   },
   {
-   "index": 682,
+   "index": 670,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k23",
    "kind": "range",
@@ -8237,7 +8093,7 @@
    "hi": "000C7109"
   },
   {
-   "index": 683,
+   "index": 671,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k24",
    "kind": "range",
@@ -8249,7 +8105,7 @@
    "hi": "000C1F07"
   },
   {
-   "index": 684,
+   "index": 672,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k25",
    "kind": "range",
@@ -8261,7 +8117,7 @@
    "hi": "000BF606"
   },
   {
-   "index": 685,
+   "index": 673,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k26",
    "kind": "range",
@@ -8273,7 +8129,7 @@
    "hi": "000BA404"
   },
   {
-   "index": 686,
+   "index": 674,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k27",
    "kind": "range",
@@ -8285,7 +8141,7 @@
    "hi": "000B7B03"
   },
   {
-   "index": 687,
+   "index": 675,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k28",
    "kind": "range",
@@ -8297,7 +8153,7 @@
    "hi": "000B2901"
   },
   {
-   "index": 688,
+   "index": 676,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k29",
    "kind": "range",
@@ -8309,7 +8165,7 @@
    "hi": "000B0000"
   },
   {
-   "index": 689,
+   "index": 677,
    "suite": "ppu",
    "name": "breakram-stamp-k0",
    "kind": "range",
@@ -8321,7 +8177,7 @@
    "hi": "4A9FFFFF"
   },
   {
-   "index": 690,
+   "index": 678,
    "suite": "ppu",
    "name": "breakram-stamp-k1",
    "kind": "range",
@@ -8333,7 +8189,7 @@
    "hi": "4A9E1B8C"
   },
   {
-   "index": 691,
+   "index": 679,
    "suite": "ppu",
    "name": "breakram-stamp-k2",
    "kind": "range",
@@ -8345,7 +8201,7 @@
    "hi": "4A9DFFFF"
   },
   {
-   "index": 692,
+   "index": 680,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k0",
    "kind": "range",
@@ -8357,7 +8213,7 @@
    "hi": "4A9E1B8C"
   },
   {
-   "index": 693,
+   "index": 681,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k1",
    "kind": "range",
@@ -8369,7 +8225,7 @@
    "hi": "4A9DFFFF"
   },
   {
-   "index": 694,
+   "index": 682,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k2",
    "kind": "range",
@@ -8381,7 +8237,7 @@
    "hi": "4A9CFFFF"
   },
   {
-   "index": 695,
+   "index": 683,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k0",
    "kind": "range",
@@ -8393,7 +8249,7 @@
    "hi": "035E00AD"
   },
   {
-   "index": 696,
+   "index": 684,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k1",
    "kind": "range",
@@ -8405,7 +8261,7 @@
    "hi": "035DFFFF"
   },
   {
-   "index": 697,
+   "index": 685,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k2",
    "kind": "range",
@@ -8417,7 +8273,7 @@
    "hi": "035CFFFF"
   },
   {
-   "index": 698,
+   "index": 686,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k0",
    "kind": "range",
@@ -8429,7 +8285,7 @@
    "hi": "035E00AD"
   },
   {
-   "index": 699,
+   "index": 687,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k1",
    "kind": "range",
@@ -8441,7 +8297,7 @@
    "hi": "035DFFFF"
   },
   {
-   "index": 700,
+   "index": 688,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k2",
    "kind": "range",
@@ -8453,7 +8309,7 @@
    "hi": "035CFFFF"
   },
   {
-   "index": 701,
+   "index": 689,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k0",
    "kind": "range",
@@ -8465,7 +8321,7 @@
    "hi": "043FFFFF"
   },
   {
-   "index": 702,
+   "index": 690,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k1",
    "kind": "range",
@@ -8477,7 +8333,7 @@
    "hi": "043EFFFF"
   },
   {
-   "index": 703,
+   "index": 691,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k2",
    "kind": "range",
@@ -8489,7 +8345,7 @@
    "hi": "043DFFFF"
   },
   {
-   "index": 704,
+   "index": 692,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k0",
    "kind": "range",
@@ -8501,7 +8357,7 @@
    "hi": "04620129"
   },
   {
-   "index": 705,
+   "index": 693,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k1",
    "kind": "range",
@@ -8513,7 +8369,7 @@
    "hi": "0461FFFF"
   },
   {
-   "index": 706,
+   "index": 694,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k2",
    "kind": "range",
@@ -8525,7 +8381,7 @@
    "hi": "0460FFFF"
   },
   {
-   "index": 707,
+   "index": 695,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k28",
    "kind": "range",
@@ -8537,7 +8393,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 708,
+   "index": 696,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k29",
    "kind": "range",
@@ -8549,7 +8405,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 709,
+   "index": 697,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k30",
    "kind": "range",
@@ -8561,7 +8417,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 710,
+   "index": 698,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k31",
    "kind": "range",
@@ -8573,7 +8429,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 711,
+   "index": 699,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k32",
    "kind": "range",
@@ -8585,7 +8441,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 712,
+   "index": 700,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k33",
    "kind": "range",
@@ -8597,7 +8453,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 713,
+   "index": 701,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k34",
    "kind": "range",
@@ -8609,7 +8465,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 714,
+   "index": 702,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k35",
    "kind": "range",
@@ -8621,7 +8477,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 715,
+   "index": 703,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k36",
    "kind": "range",
@@ -8633,7 +8489,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 716,
+   "index": 704,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k37",
    "kind": "range",
@@ -8645,7 +8501,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 717,
+   "index": 705,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k38",
    "kind": "range",
@@ -8657,7 +8513,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 718,
+   "index": 706,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k39",
    "kind": "range",
@@ -8669,7 +8525,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 719,
+   "index": 707,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k40",
    "kind": "range",
@@ -8681,7 +8537,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 720,
+   "index": 708,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k18",
    "kind": "range",
@@ -8693,7 +8549,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 721,
+   "index": 709,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k19",
    "kind": "range",
@@ -8705,7 +8561,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 722,
+   "index": 710,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k20",
    "kind": "range",
@@ -8717,7 +8573,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 723,
+   "index": 711,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k21",
    "kind": "range",
@@ -8729,7 +8585,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 724,
+   "index": 712,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k22",
    "kind": "range",
@@ -8741,7 +8597,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 725,
+   "index": 713,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k23",
    "kind": "range",
@@ -8753,7 +8609,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 726,
+   "index": 714,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k24",
    "kind": "range",
@@ -8765,7 +8621,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 727,
+   "index": 715,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k25",
    "kind": "range",
@@ -8777,7 +8633,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 728,
+   "index": 716,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k26",
    "kind": "range",
@@ -8789,7 +8645,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 729,
+   "index": 717,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k27",
    "kind": "range",
@@ -8801,7 +8657,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 730,
+   "index": 718,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k28",
    "kind": "range",
@@ -8813,7 +8669,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 731,
+   "index": 719,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k29",
    "kind": "range",
@@ -8825,7 +8681,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 732,
+   "index": 720,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k30",
    "kind": "range",
@@ -8837,7 +8693,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 733,
+   "index": 721,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k28",
    "kind": "range",
@@ -8849,7 +8705,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 734,
+   "index": 722,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k29",
    "kind": "range",
@@ -8861,7 +8717,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 735,
+   "index": 723,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k30",
    "kind": "range",
@@ -8873,7 +8729,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 736,
+   "index": 724,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k31",
    "kind": "range",
@@ -8885,7 +8741,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 737,
+   "index": 725,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k32",
    "kind": "range",
@@ -8897,7 +8753,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 738,
+   "index": 726,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k33",
    "kind": "range",
@@ -8909,7 +8765,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 739,
+   "index": 727,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k34",
    "kind": "range",
@@ -8921,7 +8777,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 740,
+   "index": 728,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k35",
    "kind": "range",
@@ -8933,7 +8789,7 @@
    "hi": "00001F04"
   },
   {
-   "index": 741,
+   "index": 729,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k36",
    "kind": "range",
@@ -8945,7 +8801,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 742,
+   "index": 730,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k37",
    "kind": "range",
@@ -8957,7 +8813,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 743,
+   "index": 731,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k38",
    "kind": "range",
@@ -8969,7 +8825,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 744,
+   "index": 732,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k39",
    "kind": "range",
@@ -8981,7 +8837,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 745,
+   "index": 733,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k40",
    "kind": "range",
@@ -8993,7 +8849,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 746,
+   "index": 734,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k28",
    "kind": "range",
@@ -9005,7 +8861,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 747,
+   "index": 735,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k29",
    "kind": "range",
@@ -9017,7 +8873,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 748,
+   "index": 736,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k30",
    "kind": "range",
@@ -9029,7 +8885,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 749,
+   "index": 737,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k31",
    "kind": "range",
@@ -9041,7 +8897,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 750,
+   "index": 738,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k32",
    "kind": "range",
@@ -9053,7 +8909,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 751,
+   "index": 739,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k33",
    "kind": "range",
@@ -9065,7 +8921,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 752,
+   "index": 740,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k34",
    "kind": "range",
@@ -9077,7 +8933,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 753,
+   "index": 741,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k35",
    "kind": "range",
@@ -9089,7 +8945,7 @@
    "hi": "0000A005"
   },
   {
-   "index": 754,
+   "index": 742,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k36",
    "kind": "range",
@@ -9101,7 +8957,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 755,
+   "index": 743,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k37",
    "kind": "range",
@@ -9113,7 +8969,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 756,
+   "index": 744,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k38",
    "kind": "range",
@@ -9125,7 +8981,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 757,
+   "index": 745,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k39",
    "kind": "range",
@@ -9137,7 +8993,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 758,
+   "index": 746,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k40",
    "kind": "range",
@@ -9149,7 +9005,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 759,
+   "index": 747,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k34",
    "kind": "range",
@@ -9161,7 +9017,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 760,
+   "index": 748,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k35",
    "kind": "range",
@@ -9173,7 +9029,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 761,
+   "index": 749,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k36",
    "kind": "range",
@@ -9185,7 +9041,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 762,
+   "index": 750,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k37",
    "kind": "range",
@@ -9197,7 +9053,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 763,
+   "index": 751,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k38",
    "kind": "range",
@@ -9209,7 +9065,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 764,
+   "index": 752,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k39",
    "kind": "range",
@@ -9221,7 +9077,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 765,
+   "index": 753,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k40",
    "kind": "range",
@@ -9233,7 +9089,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 766,
+   "index": 754,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k41",
    "kind": "range",
@@ -9245,7 +9101,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 767,
+   "index": 755,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k42",
    "kind": "range",
@@ -9257,7 +9113,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 768,
+   "index": 756,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k43",
    "kind": "range",
@@ -9269,7 +9125,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 769,
+   "index": 757,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k44",
    "kind": "range",
@@ -9281,7 +9137,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 770,
+   "index": 758,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k45",
    "kind": "range",
@@ -9293,7 +9149,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 771,
+   "index": 759,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k46",
    "kind": "range",
@@ -9305,7 +9161,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 772,
+   "index": 760,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k32",
    "kind": "range",
@@ -9317,7 +9173,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 773,
+   "index": 761,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k33",
    "kind": "range",
@@ -9329,7 +9185,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 774,
+   "index": 762,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k34",
    "kind": "range",
@@ -9341,7 +9197,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 775,
+   "index": 763,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k35",
    "kind": "range",
@@ -9353,7 +9209,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 776,
+   "index": 764,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k36",
    "kind": "range",
@@ -9365,7 +9221,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 777,
+   "index": 765,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k37",
    "kind": "range",
@@ -9377,7 +9233,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 778,
+   "index": 766,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k38",
    "kind": "range",
@@ -9389,7 +9245,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 779,
+   "index": 767,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k39",
    "kind": "range",
@@ -9401,7 +9257,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 780,
+   "index": 768,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k40",
    "kind": "range",
@@ -9413,7 +9269,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 781,
+   "index": 769,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k41",
    "kind": "range",
@@ -9425,7 +9281,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 782,
+   "index": 770,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k42",
    "kind": "range",
@@ -9437,7 +9293,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 783,
+   "index": 771,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k43",
    "kind": "range",
@@ -9449,7 +9305,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 784,
+   "index": 772,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k44",
    "kind": "range",
@@ -9461,7 +9317,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 785,
+   "index": 773,
    "suite": "apu",
    "name": "sweep-period-0-never-ticks",
    "kind": "range",
@@ -9473,7 +9329,7 @@
    "hi": "00080000"
   },
   {
-   "index": 786,
+   "index": 774,
    "suite": "apu",
    "name": "sweep-trigger-overflow",
    "kind": "range",
@@ -9485,7 +9341,7 @@
    "hi": "00000000"
   },
   {
-   "index": 787,
+   "index": 775,
    "suite": "apu",
    "name": "sweep-trigger-second-check",
    "kind": "range",
@@ -9497,7 +9353,7 @@
    "hi": "00001800"
   },
   {
-   "index": 788,
+   "index": 776,
    "suite": "apu",
    "name": "sweep-first-tick-rechecks",
    "kind": "range",
@@ -9509,7 +9365,7 @@
    "hi": "00001800"
   },
   {
-   "index": 789,
+   "index": 777,
    "suite": "apu",
    "name": "sweep-512-dies-tick-3",
    "kind": "range",
@@ -9521,7 +9377,7 @@
    "hi": "00004000"
   },
   {
-   "index": 790,
+   "index": 778,
    "suite": "apu",
    "name": "sweep-2018-survives-2048",
    "kind": "range",
@@ -9533,7 +9389,7 @@
    "hi": "00001A00"
   },
   {
-   "index": 791,
+   "index": 779,
    "suite": "apu",
    "name": "sweep-940-same-offset",
    "kind": "range",
@@ -9545,7 +9401,7 @@
    "hi": "00001A00"
   },
   {
-   "index": 792,
+   "index": 780,
    "suite": "apu",
    "name": "sweep-2033-dies-at-trigger",
    "kind": "range",
@@ -9557,7 +9413,7 @@
    "hi": "00000200"
   },
   {
-   "index": 793,
+   "index": 781,
    "suite": "apu",
    "name": "psg-ch1-first-trigger-dies",
    "kind": "range",
@@ -9569,7 +9425,7 @@
    "hi": "00000000"
   },
   {
-   "index": 794,
+   "index": 782,
    "suite": "apu",
    "name": "psg-ch2-first-trigger-lives",
    "kind": "range",
@@ -9581,7 +9437,7 @@
    "hi": "00004B3A"
   },
   {
-   "index": 795,
+   "index": 783,
    "suite": "apu",
    "name": "psg-ch3-first-trigger-lives",
    "kind": "range",
@@ -9593,7 +9449,7 @@
    "hi": "00004F53"
   },
   {
-   "index": 796,
+   "index": 784,
    "suite": "apu",
    "name": "psg-ch4-first-trigger-lives",
    "kind": "range",
@@ -9605,7 +9461,7 @@
    "hi": "00004F54"
   },
   {
-   "index": 797,
+   "index": 785,
    "suite": "apu",
    "name": "psg-ch1-nr10-0-dies",
    "kind": "zero-or-range",
@@ -9617,7 +9473,7 @@
    "hi": "00004F53"
   },
   {
-   "index": 798,
+   "index": 786,
    "suite": "apu",
    "name": "psg-ch1-sweep-running-lives",
    "kind": "range",
@@ -9629,7 +9485,7 @@
    "hi": "00000A99"
   },
   {
-   "index": 799,
+   "index": 787,
    "suite": "apu",
    "name": "psg-ch1-after-ch2-lives",
    "kind": "zero-or-range",
@@ -9641,7 +9497,7 @@
    "hi": "00004CF7"
   },
   {
-   "index": 800,
+   "index": 788,
    "suite": "apu",
    "name": "psg-ch2-before-ch1-lives",
    "kind": "range",
@@ -9653,7 +9509,7 @@
    "hi": "00004F53"
   },
   {
-   "index": 801,
+   "index": 789,
    "suite": "apu",
    "name": "psg-ch1-second-trigger-dies",
    "kind": "zero-or-range",
@@ -9665,7 +9521,7 @@
    "hi": "00004F50"
   },
   {
-   "index": 802,
+   "index": 790,
    "suite": "apu",
    "name": "psg-ch1-third-trigger-lives",
    "kind": "range",
@@ -9677,7 +9533,7 @@
    "hi": "00004F50"
   },
   {
-   "index": 803,
+   "index": 791,
    "suite": "apu",
    "name": "psg-soundcnt-x-after-ch1",
    "kind": "range",
@@ -9689,7 +9545,7 @@
    "hi": "00000080"
   },
   {
-   "index": 804,
+   "index": 792,
    "suite": "apu",
    "name": "psg-soundcnt-x-after-ch2",
    "kind": "range",
@@ -9701,7 +9557,7 @@
    "hi": "00000082"
   },
   {
-   "index": 805,
+   "index": 793,
    "suite": "apu",
    "name": "psg-soundcnt-x-after-ch4",
    "kind": "range",
@@ -9713,7 +9569,7 @@
    "hi": "00000088"
   },
   {
-   "index": 806,
+   "index": 794,
    "suite": "apu",
    "name": "psg-ch1-length-off-never-expires",
    "kind": "range",
@@ -9725,7 +9581,7 @@
    "hi": "0000FFFF"
   },
   {
-   "index": 807,
+   "index": 795,
    "suite": "apu",
    "name": "psg-ch2-length-off-never-expires",
    "kind": "range",
@@ -9737,19 +9593,19 @@
    "hi": "0000FFFF"
   },
   {
-   "index": 808,
+   "index": 796,
    "suite": "apu",
    "name": "sweeptrig-shift0-400-d30",
-   "kind": "one-of-two",
+   "kind": "range",
    "cartridge_only": false,
    "risky": false,
    "offset": 0,
    "mask": "FFFFFFFF",
    "lo": "00000001",
-   "hi": "00040000"
+   "hi": "00000001"
   },
   {
-   "index": 809,
+   "index": 797,
    "suite": "apu",
    "name": "sweeptrig-shift0-400-d33",
    "kind": "range",
@@ -9761,7 +9617,7 @@
    "hi": "00000001"
   },
   {
-   "index": 810,
+   "index": 798,
    "suite": "apu",
    "name": "sweeptrig-shift0-400-d37",
    "kind": "range",
@@ -9773,7 +9629,7 @@
    "hi": "00000001"
   },
   {
-   "index": 811,
+   "index": 799,
    "suite": "apu",
    "name": "sweeptrig-shift0-400-length-d30",
    "kind": "range",
@@ -9781,11 +9637,11 @@
    "risky": false,
    "offset": 0,
    "mask": "FFFFFFFF",
-   "lo": "00040000",
-   "hi": "00040000"
+   "lo": "00000001",
+   "hi": "00000001"
   },
   {
-   "index": 812,
+   "index": 800,
    "suite": "apu",
    "name": "sweeptrig-shift0-400-length-d33",
    "kind": "range",
@@ -9797,7 +9653,7 @@
    "hi": "00000001"
   },
   {
-   "index": 813,
+   "index": 801,
    "suite": "apu",
    "name": "sweeptrig-shift0-400-length-d37",
    "kind": "range",
@@ -9809,7 +9665,7 @@
    "hi": "00000001"
   },
   {
-   "index": 814,
+   "index": 802,
    "suite": "apu",
    "name": "sweeptrig-shift0-3ff-d30",
    "kind": "range",
@@ -9821,7 +9677,7 @@
    "hi": "00040000"
   },
   {
-   "index": 815,
+   "index": 803,
    "suite": "apu",
    "name": "sweeptrig-shift0-3ff-d33",
    "kind": "range",
@@ -9833,7 +9689,7 @@
    "hi": "00040000"
   },
   {
-   "index": 816,
+   "index": 804,
    "suite": "apu",
    "name": "sweeptrig-shift0-3ff-d37",
    "kind": "range",
@@ -9845,7 +9701,7 @@
    "hi": "00040000"
   },
   {
-   "index": 817,
+   "index": 805,
    "suite": "apu",
    "name": "sweeptrig-shift0-3ff-length-d30",
    "kind": "range",
@@ -9857,7 +9713,7 @@
    "hi": "00044000"
   },
   {
-   "index": 818,
+   "index": 806,
    "suite": "apu",
    "name": "sweeptrig-shift0-3ff-length-d33",
    "kind": "range",
@@ -9869,7 +9725,7 @@
    "hi": "00044000"
   },
   {
-   "index": 819,
+   "index": 807,
    "suite": "apu",
    "name": "sweeptrig-shift0-3ff-length-d37",
    "kind": "range",
@@ -9881,7 +9737,7 @@
    "hi": "00044000"
   },
   {
-   "index": 820,
+   "index": 808,
    "suite": "apu",
    "name": "sweeptrig-sweep21-1300-d30",
    "kind": "range",
@@ -9889,11 +9745,11 @@
    "risky": false,
    "offset": 0,
    "mask": "FFFFFFFF",
-   "lo": "00004E25",
-   "hi": "0000634B"
+   "lo": "00004E87",
+   "hi": "000065E8"
   },
   {
-   "index": 821,
+   "index": 809,
    "suite": "apu",
    "name": "sweeptrig-sweep21-1300-d33",
    "kind": "range",
@@ -9901,11 +9757,11 @@
    "risky": false,
    "offset": 0,
    "mask": "FFFFFFFF",
-   "lo": "00004E33",
-   "hi": "000062C3"
+   "lo": "00004F5E",
+   "hi": "0000637C"
   },
   {
-   "index": 822,
+   "index": 810,
    "suite": "apu",
    "name": "sweeptrig-sweep21-1300-d37",
    "kind": "range",
@@ -9913,23 +9769,23 @@
    "risky": false,
    "offset": 0,
    "mask": "FFFFFFFF",
-   "lo": "000050E6",
-   "hi": "000064F0"
+   "lo": "00004FE7",
+   "hi": "000063B7"
   },
   {
-   "index": 823,
+   "index": 811,
    "suite": "apu",
    "name": "sweeptrig-shift0-400-after-rows-d30",
-   "kind": "one-of-two",
+   "kind": "range",
    "cartridge_only": false,
    "risky": false,
    "offset": 0,
    "mask": "FFFFFFFF",
-   "lo": "00000000",
+   "lo": "00000001",
    "hi": "00000001"
   },
   {
-   "index": 824,
+   "index": 812,
    "suite": "apu",
    "name": "sweeptrig-shift0-400-after-rows-d33",
    "kind": "range",
@@ -9941,7 +9797,7 @@
    "hi": "00000000"
   },
   {
-   "index": 825,
+   "index": 813,
    "suite": "apu",
    "name": "ram-psg-ch1-first",
    "kind": "range",
@@ -9953,7 +9809,7 @@
    "hi": "00009552"
   },
   {
-   "index": 826,
+   "index": 814,
    "suite": "apu",
    "name": "ram-psg-ch2-first",
    "kind": "range",
@@ -9965,7 +9821,7 @@
    "hi": "00009594"
   },
   {
-   "index": 827,
+   "index": 815,
    "suite": "apu",
    "name": "ram-psg-ch3-first",
    "kind": "range",
@@ -9977,7 +9833,7 @@
    "hi": "00009594"
   },
   {
-   "index": 828,
+   "index": 816,
    "suite": "apu",
    "name": "ram-psg-ch4-first",
    "kind": "range",
@@ -9989,7 +9845,7 @@
    "hi": "00009595"
   },
   {
-   "index": 829,
+   "index": 817,
    "suite": "apu",
    "name": "ram-psg-ch1-nr10-0",
    "kind": "range",
@@ -10001,7 +9857,7 @@
    "hi": "00009594"
   },
   {
-   "index": 830,
+   "index": 818,
    "suite": "apu",
    "name": "ram-psg-ch1-nr10-11",
    "kind": "range",
@@ -10013,10 +9869,10 @@
    "hi": "000028CC"
   },
   {
-   "index": 831,
+   "index": 819,
    "suite": "apu",
    "name": "ram-psg-ch1-after-ch2",
-   "kind": "range",
+   "kind": "zero-or-range",
    "cartridge_only": false,
    "risky": false,
    "offset": 268,
@@ -10025,7 +9881,7 @@
    "hi": "000087FD"
   },
   {
-   "index": 832,
+   "index": 820,
    "suite": "apu",
    "name": "ram-psg-ch2-before-ch1",
    "kind": "range",
@@ -10037,7 +9893,7 @@
    "hi": "00009593"
   },
   {
-   "index": 833,
+   "index": 821,
    "suite": "apu",
    "name": "ram-psg-ch1-second",
    "kind": "range",
@@ -10049,7 +9905,7 @@
    "hi": "0000A330"
   },
   {
-   "index": 834,
+   "index": 822,
    "suite": "apu",
    "name": "ram-psg-ch1-again",
    "kind": "range",
@@ -10061,7 +9917,7 @@
    "hi": "0000A331"
   },
   {
-   "index": 835,
+   "index": 823,
    "suite": "apu",
    "name": "ram-psg-ch1-length-off",
    "kind": "range",
@@ -10073,7 +9929,7 @@
    "hi": "0000FFFF"
   },
   {
-   "index": 836,
+   "index": 824,
    "suite": "apu",
    "name": "ram-psg-ch2-length-off",
    "kind": "range",
@@ -10085,7 +9941,7 @@
    "hi": "0000FFFF"
   },
   {
-   "index": 837,
+   "index": 825,
    "suite": "bios",
    "name": "get-bios-checksum",
    "kind": "range",
@@ -10097,7 +9953,7 @@
    "hi": "BAAE187F"
   },
   {
-   "index": 838,
+   "index": 826,
    "suite": "bios",
    "name": "div-10-3-quotient",
    "kind": "range",
@@ -10109,7 +9965,7 @@
    "hi": "00000003"
   },
   {
-   "index": 839,
+   "index": 827,
    "suite": "bios",
    "name": "div-10-3-remainder",
    "kind": "range",
@@ -10121,7 +9977,7 @@
    "hi": "00000001"
   },
   {
-   "index": 840,
+   "index": 828,
    "suite": "bios",
    "name": "div-neg7-2-quotient",
    "kind": "range",
@@ -10133,7 +9989,7 @@
    "hi": "FFFFFFFD"
   },
   {
-   "index": 841,
+   "index": 829,
    "suite": "bios",
    "name": "div-neg7-2-remainder",
    "kind": "range",
@@ -10145,7 +10001,7 @@
    "hi": "FFFFFFFF"
   },
   {
-   "index": 842,
+   "index": 830,
    "suite": "bios",
    "name": "div-1-0-quotient",
    "kind": "range",
@@ -10157,7 +10013,7 @@
    "hi": "00000001"
   },
   {
-   "index": 843,
+   "index": 831,
    "suite": "bios",
    "name": "div-1-0-remainder",
    "kind": "range",
@@ -10169,7 +10025,7 @@
    "hi": "00000001"
   },
   {
-   "index": 844,
+   "index": 832,
    "suite": "bios",
    "name": "div-neg1-0-quotient",
    "kind": "range",
@@ -10181,7 +10037,7 @@
    "hi": "FFFFFFFF"
   },
   {
-   "index": 845,
+   "index": 833,
    "suite": "bios",
    "name": "div-min-neg1-quotient",
    "kind": "range",
@@ -10193,7 +10049,7 @@
    "hi": "80000000"
   },
   {
-   "index": 846,
+   "index": 834,
    "suite": "bios",
    "name": "div-min-neg1-remainder",
    "kind": "range",
@@ -10205,7 +10061,7 @@
    "hi": "00000000"
   },
   {
-   "index": 847,
+   "index": 835,
    "suite": "bios",
    "name": "divarm-10-3-quotient",
    "kind": "range",
@@ -10217,7 +10073,7 @@
    "hi": "00000003"
   },
   {
-   "index": 848,
+   "index": 836,
    "suite": "bios",
    "name": "sqrt-0",
    "kind": "range",
@@ -10229,7 +10085,7 @@
    "hi": "00000000"
   },
   {
-   "index": 849,
+   "index": 837,
    "suite": "bios",
    "name": "sqrt-1",
    "kind": "range",
@@ -10241,7 +10097,7 @@
    "hi": "00000001"
   },
   {
-   "index": 850,
+   "index": 838,
    "suite": "bios",
    "name": "sqrt-3fffffff",
    "kind": "range",
@@ -10253,7 +10109,7 @@
    "hi": "00007FFF"
   },
   {
-   "index": 851,
+   "index": 839,
    "suite": "bios",
    "name": "sqrt-ffffffff",
    "kind": "range",
@@ -10265,7 +10121,7 @@
    "hi": "0000FFFF"
   },
   {
-   "index": 852,
+   "index": 840,
    "suite": "bios",
    "name": "arctan-0",
    "kind": "range",
@@ -10277,7 +10133,7 @@
    "hi": "00000000"
   },
   {
-   "index": 853,
+   "index": 841,
    "suite": "bios",
    "name": "arctan-1",
    "kind": "range",
@@ -10289,7 +10145,7 @@
    "hi": "00002000"
   },
   {
-   "index": 854,
+   "index": 842,
    "suite": "bios",
    "name": "arctan-neg1",
    "kind": "range",
@@ -10301,7 +10157,7 @@
    "hi": "FFFFE000"
   },
   {
-   "index": 855,
+   "index": 843,
    "suite": "bios",
    "name": "arctan2-origin",
    "kind": "range",
@@ -10313,7 +10169,7 @@
    "hi": "00000000"
   },
   {
-   "index": 856,
+   "index": 844,
    "suite": "bios",
    "name": "arctan2-pos-x",
    "kind": "range",
@@ -10325,7 +10181,7 @@
    "hi": "00000000"
   },
   {
-   "index": 857,
+   "index": 845,
    "suite": "bios",
    "name": "arctan2-pos-y",
    "kind": "range",
@@ -10337,7 +10193,7 @@
    "hi": "00004000"
   },
   {
-   "index": 858,
+   "index": 846,
    "suite": "bios",
    "name": "arctan2-neg-x",
    "kind": "range",
@@ -10349,7 +10205,7 @@
    "hi": "00008000"
   },
   {
-   "index": 859,
+   "index": 847,
    "suite": "bios",
    "name": "arctan2-neg-y",
    "kind": "range",
@@ -10361,7 +10217,7 @@
    "hi": "0000C000"
   },
   {
-   "index": 860,
+   "index": 848,
    "suite": "bios",
    "name": "arctan2-diagonal",
    "kind": "range",
@@ -10373,7 +10229,7 @@
    "hi": "00002000"
   },
   {
-   "index": 861,
+   "index": 849,
    "suite": "bios",
    "name": "switime-none",
    "kind": "range",
@@ -10385,7 +10241,7 @@
    "hi": "00000000"
   },
   {
-   "index": 862,
+   "index": 850,
    "suite": "bios",
    "name": "switime-div-10-3",
    "kind": "range",
@@ -10397,7 +10253,7 @@
    "hi": "00000053"
   },
   {
-   "index": 863,
+   "index": 851,
    "suite": "bios",
    "name": "switime-div-7fffffff-3",
    "kind": "range",
@@ -10409,7 +10265,7 @@
    "hi": "000001BF"
   },
   {
-   "index": 864,
+   "index": 852,
    "suite": "bios",
    "name": "switime-divarm-10-3",
    "kind": "range",
@@ -10421,7 +10277,7 @@
    "hi": "00000056"
   },
   {
-   "index": 865,
+   "index": 853,
    "suite": "bios",
    "name": "switime-sqrt-0",
    "kind": "range",
@@ -10433,7 +10289,7 @@
    "hi": "00000063"
   },
   {
-   "index": 866,
+   "index": 854,
    "suite": "bios",
    "name": "switime-sqrt-3fffffff",
    "kind": "range",
@@ -10445,7 +10301,7 @@
    "hi": "00000236"
   },
   {
-   "index": 867,
+   "index": 855,
    "suite": "bios",
    "name": "switime-sqrt-ffffffff",
    "kind": "range",
@@ -10457,7 +10313,7 @@
    "hi": "00000256"
   },
   {
-   "index": 868,
+   "index": 856,
    "suite": "bios",
    "name": "switime-arctan-2000",
    "kind": "range",
@@ -10469,7 +10325,7 @@
    "hi": "00000065"
   },
   {
-   "index": 869,
+   "index": 857,
    "suite": "bios",
    "name": "switime-arctan2-100-100",
    "kind": "range",
@@ -10481,7 +10337,7 @@
    "hi": "0000016A"
   },
   {
-   "index": 870,
+   "index": 858,
    "suite": "bios",
    "name": "switime-arctan2-neg",
    "kind": "range",
@@ -10493,7 +10349,7 @@
    "hi": "00000162"
   },
   {
-   "index": 871,
+   "index": 859,
    "suite": "bios",
    "name": "switime-cpuset-32-halfwords",
    "kind": "range",
@@ -10505,7 +10361,7 @@
    "hi": "000001C1"
   },
   {
-   "index": 872,
+   "index": 860,
    "suite": "bios",
    "name": "switime-cpuset-fill-32-words",
    "kind": "range",
@@ -10517,7 +10373,7 @@
    "hi": "00000140"
   },
   {
-   "index": 873,
+   "index": 861,
    "suite": "bios",
    "name": "switime-cpufastset-256-words",
    "kind": "range",
@@ -10529,7 +10385,7 @@
    "hi": "0000033E"
   },
   {
-   "index": 874,
+   "index": 862,
    "suite": "bios",
    "name": "switime-cpufastset-fill-256-words",
    "kind": "range",
@@ -10541,7 +10397,7 @@
    "hi": "00000208"
   },
   {
-   "index": 875,
+   "index": 863,
    "suite": "bios",
    "name": "switime-getbioschecksum",
    "kind": "range",
@@ -10553,7 +10409,7 @@
    "hi": "0000A033"
   },
   {
-   "index": 876,
+   "index": 864,
    "suite": "bios",
    "name": "switime-bgaffineset-1",
    "kind": "range",
@@ -10565,7 +10421,7 @@
    "hi": "0000009A"
   },
   {
-   "index": 877,
+   "index": 865,
    "suite": "bios",
    "name": "switime-objaffineset-1",
    "kind": "range",
@@ -10577,7 +10433,7 @@
    "hi": "00000076"
   },
   {
-   "index": 878,
+   "index": 866,
    "suite": "bios",
    "name": "switime-bitunpack-4-bytes",
    "kind": "range",
@@ -10589,7 +10445,7 @@
    "hi": "0000036F"
   },
   {
-   "index": 879,
+   "index": 867,
    "suite": "bios",
    "name": "switime-lz77uncompwram-16",
    "kind": "range",
@@ -10601,7 +10457,7 @@
    "hi": "00000156"
   },
   {
-   "index": 880,
+   "index": 868,
    "suite": "bios",
    "name": "switime-rluncompwram-16",
    "kind": "range",
@@ -10613,7 +10469,7 @@
    "hi": "000000E1"
   },
   {
-   "index": 881,
+   "index": 869,
    "suite": "bios",
    "name": "switime-diff8bitunfilterwram-16",
    "kind": "range",
@@ -10625,7 +10481,7 @@
    "hi": "00000121"
   },
   {
-   "index": 882,
+   "index": 870,
    "suite": "bios",
    "name": "switime-midikey2freq",
    "kind": "range",
@@ -10637,7 +10493,7 @@
    "hi": "0000008C"
   },
   {
-   "index": 883,
+   "index": 871,
    "suite": "bios",
    "name": "switime-intrwait-flag-already-set",
    "kind": "range",

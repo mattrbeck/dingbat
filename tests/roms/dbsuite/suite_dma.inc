@@ -258,6 +258,44 @@ fill_words:
     bl  tm_stop
     strh r9, [r8, #\off]
 .endm
+@ Nothing in the page fixed where it ran: the VRAM burst (+12) pays for the
+@ bitmap fetch's dots (every fourth), so it reads 0xB1 or 0xB2 by the phase
+@ it starts at, and that phase came from how long everything before the
+@ page took (gbaedge's boot, a flash cart's loader and the 46 pages before
+@ it; here, 348 other cases). The cartridge build parks first -- halt with
+@ IME clear on V-count 70, a cycle the PPU picks -- so the page runs where
+@ the photographed one did, to the line: +21 then reads 0x4A as it did
+@ there. The burst's phase within the line is the middle one of the three
+@ at which this core, holding every contmap cell (tools/hwlink/r0-agb.json),
+@ reads 0xB1 (at the fourth it reads 0xB2): first word at dot 207 of this
+@ core's line 72. The console's DMA pays the bitmap's dots at the same
+@ phases (tests/roms/payloads/dmavram.s, a law), and this park in a
+@ flash-cart build read 0xB1 on the console in three cold boots (kit3,
+@ 2026-11-04, tests/roms/dbsuite/cart-agb.json). The multiboot build never
+@ runs this page and does not carry the park.
+.macro dt_park
+    add r1, r4, #0x200
+    mov r0, #0
+    strh r0, [r1, #8]              @ IME off: the wake is not an interrupt
+    ldr r0, =(70 << 8) | 0x20
+    strh r0, [r4, #4]              @ V-count match on line 70
+    mov r0, #0x04
+    strh r0, [r1]                  @ IE = V-count only
+    ldr r0, =0x3FFF
+    strh r0, [r1, #2]
+    swi 0x020000                   @ Halt
+    mov r2, #1                     @ the wait: a 1-cycle multiply
+    mul r0, r2, r2
+    add r1, r4, #0x200
+    mov r0, #0
+    strh r0, [r4, #4]              @ DISPSTAT as machine_reset left it
+    mov r0, #0x40
+    strh r0, [r1]                  @ the watchdog's IE, IF clear, IME on
+    ldr r0, =0x3FFF
+    strh r0, [r1, #2]
+    mov r0, #1
+    strh r0, [r1, #8]
+.endm
 run_dmatime:
     push {r4-r11, lr}
     bl  sp_irq_ewram               @ as the photographed run (suite_irq.inc)
@@ -271,6 +309,9 @@ run_dmatime:
     ldr r1, =0xC0FFEE46
     mov r2, #64
     bl  fill_words
+.if MB == 0
+    dt_park
+.endif
     dt_start 0x84000001, 0
     dt_start 0x04000001, 2
     dt_start 0x84000004, 4
