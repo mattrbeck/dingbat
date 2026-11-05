@@ -733,6 +733,8 @@ proc ch1_trigger_sweep(ch: PsgSweepSquare; h: PsgHost) =
         ch.enabled = false
       ch.sweep_armed = true
       ch.s0_slow = false
+      let u = uint32(psg_now(h) - CycleCount(ch.s0_anchor)) and 15
+      ch.s0_after_shift = if u >= 2 and u <= 5: 2 else: 1
     elif ch.sweep_armed:
       # Shift 0. Pan Docs has no check here, and games retrigger shift-0
       # notes above 0x400 all the time; but the AGB runs it -- f + f, which
@@ -747,7 +749,7 @@ proc ch1_trigger_sweep(ch: PsgSweepSquare; h: PsgHost) =
       # lives in all 9 runs; sweeptrig.s's shift-0 row dies after shift-1
       # rows; gbaedge SWEEPQ's length-63 controls (f = 1024, NR10 = 0, after
       # shift-1 rows) died at poll 0.
-      let at = ch1_s0_kill_at(psg_now(h), slow, ch.s0_anchor)
+      let at = ch1_s0_kill_at(psg_now(h), slow, ch.s0_anchor, ch.s0_after_shift)
       if at != PSG_NO_STEP:
         # The check ran (a trigger it missed leaves the unit armed); the
         # stop is not at once: the channel reads as on for a few cycles.

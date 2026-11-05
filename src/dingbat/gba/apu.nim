@@ -624,6 +624,7 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         apu.channel1.s0_anchor = uint8(anchor and 31)
         apu.channel1.sweep_armed = true
         apu.channel1.s0_slow = true
+        apu.channel1.s0_after_shift = 0
         let e = apu.gba.scheduler.pending_at(etAPUFrameSeq)
         let move = (anchor + CycleCount(PSG_SEQ_GRID) - e) and 15
         if move != 0:

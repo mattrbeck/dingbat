@@ -53,7 +53,11 @@ const PSG_S0_APU_PHASE* = 2'u32
   ## divided by four, free-running (the frame is a multiple of 16 cycles, so
   ## it is fixed against the video frame).
 
-proc ch1_s0_kill_at(t: CycleCount; slow: bool; anchor: uint8): CycleCount =
+const PSG_S0_AFTER_SHIFT* {.booldefine.} = true
+  ## The shift-0 check after a trigger with a non-zero shift on its own
+  ## measured timing (ch1_s0_kill_at's third case); off, the fast timing.
+
+proc ch1_s0_kill_at(t: CycleCount; slow: bool; anchor: uint8; after: uint8): CycleCount =
   ## When a trigger written at cycle t that failed the shift-0 check stops
   ## the channel, or GBA_NO_STEP when the check never sees the trigger.
   ## AGB SP (link rig 2026-09-25; SOUNDCNT_X read 3 cycles apart after the
@@ -73,7 +77,28 @@ proc ch1_s0_kill_at(t: CycleCount; slow: bool; anchor: uint8): CycleCount =
   ##   step): the first 4 MHz edge at least 3
   ##   cycles after the write -- the channel reads on once, or twice at every
   ##   fourth phase.
-  ## Both are fits to those cells, not a derived circuit.
+  ## - after a trigger with a non-zero shift (s0_after_shift; not slow): by
+  ##   the 16-cycle phase u of the write from `anchor`, moved by 10 when
+  ##   that earlier trigger fell at phase 2..5 -- u = 2..8: stopped before
+  ##   the first read 2 cycles on; 9..11: on cycle 14; 12, 13: missed, the
+  ##   note lives; 14..1: on cycle 26 (10 of the next 16). AGB SP, link rig
+  ##   2026-11-05: tests/roms/payloads/stphase{,2,3,4}.s, sweeptrig.s's
+  ##   rows (f = 1024 then 1400 at shift 1, then shift 0 at f = 0x400)
+  ##   behind a V-count park with 1-cycle sleds at entry, before the 1400
+  ##   row and before the last; 1536 cells, every one single-valued, the
+  ##   fate fixed by the two triggers' phases and the kill pinned to the
+  ##   read by stphase4's eight reads 3 cycles apart. Which phase the
+  ##   earlier trigger needs is only known for 1400 (an overflow at the
+  ##   trigger); "at once" is any of the first 2 cycles.
+  ## All three are fits to those cells, not a derived circuit.
+  if not slow and after != 0 and PSG_S0_AFTER_SHIFT:
+    var u = uint32(t - CycleCount(anchor)) and 15
+    if after == 2: u = (u + 10) and 15
+    if u == 12 or u == 13: return GBA_NO_STEP
+    if u >= 14: return t + CycleCount(26 - int(u))
+    if u <= 1: return t + CycleCount(10 - int(u))
+    if u >= 9: return t + CycleCount(14 - int(u))
+    return t + 1
   if not slow:
     result = t + 3
     result += CycleCount((PSG_S0_APU_PHASE + 4 - uint32(result and 3)) and 3)

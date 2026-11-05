@@ -374,6 +374,15 @@ TABLE = {
     # (payloads/c2ew.s)
     'c2ew': [d | c << 16 | a << 4 | p << 5 | o << 6 for o in (0, 1) for p in (0, 1)
              for a in (0, 1) for c in range(16) for d in range(4)],
+    # dbsuite sweeptrig.s's rows behind a V-count park and 1-cycle sleds: the
+    # shift-0 f = 0x400 trigger after shift-1 rows (variant 0) dies, reads on
+    # a few cycles or lives by the 16-cycle phase of both triggers
+    # (ch1_s0_kill_at, after a non-zero shift); variant 1 alone, the slow
+    # timing (payloads/stphase.s, stphase4.s: eight 3-cycle reads after the
+    # last trigger, j before the 1400 row, i before the last)
+    'stphase': [f | d << 8 | k << 24 for f in (0x0C, 0x0D) for d in range(30, 34)
+                for k in range(4)],
+    'stphase4': [0x0C | 30 << 8 | i << 16 | j << 28 for j in range(16) for i in range(16)],
     # The renderer's return from forced blank: c2ew's row under the same
     # scene with forced blank cleared on line L (k x 256 cycles after its
     # wake), line N read, PRAM / VRAM -- cleared on L, BG and palette
@@ -510,7 +519,7 @@ OPEN_ROWS = {'keyirq2', 'keyirq3',
 
 # frames a cell needs in the emulators where the default 8 is too few:
 # psgrace's page plays ch2's whole note and the rows after it (~45 frames)
-FRAMES_PER_CELL = {'psgrace': 80, 'irqpoll': 2, 'anchorpoll': 2, 'c2ew': 2, 'c2fb': 2}
+FRAMES_PER_CELL = {'psgrace': 80, 'irqpoll': 2, 'anchorpoll': 2, 'c2ew': 2, 'c2fb': 2, 'stphase': 24, 'stphase4': 24}
 
 # racing cells: payload -> (variant, shift, phases). The variant is the same
 # probe with its entry phase fixed and walked by `phase << shift` in the

@@ -154,6 +154,11 @@ type
     # GBA: the shift-0 check's slow timing (ch1_s0_kill_at). Saved in bit 7
     # of sweep_period's byte.
     s0_slow*:            bool
+    # GBA: the shift-0 check's timing after a trigger with a non-zero shift
+    # (ch1_s0_kill_at): 0 none since the master-on, 1 that trigger fell at
+    # 16-cycle phase 6..1 from s0_anchor, 2 at 2..5. Saved in bits 5-6 of
+    # s0_anchor's byte.
+    s0_after_shift*:     uint8
     # GBA: cycle a failed shift-0 trigger check stops the channel, or
     # PSG_NO_STEP (at most 13 cycles ahead). Saved as a distance in bits
     # 11..14 of frequency_shadow's field.

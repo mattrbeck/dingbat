@@ -118,7 +118,10 @@ def build():
                 if cid in HLE_EXCEPTIONS:
                     cell['hle_want'], cell['hle_why'] = HLE_EXCEPTIONS[cid]
                 cells.append(cell)
-        out.append((payload, data, entry(payload, data, tables.frames_for(len(args)), cells)))
+        # a payload that needs more frames a cell than the default (r0table
+        # FRAMES_PER_CELL) gets them; none gets fewer than before
+        frames = max(tables.frames_for(len(args)), tables.frames_for(len(args), payload))
+        out.append((payload, data, entry(payload, data, frames, cells)))
         if race:
             out.append(race)
     return out

@@ -619,6 +619,7 @@ proc load_apu_state(apu: APU; r: var Reader) =
     let timer = r.read_u8()
     ch.sweep_timer = timer and 0x0F
     ch.s0_anchor = timer shr 4
+    ch.s0_after_shift = 0
     let shadow = r.read_u16()
     ch.frequency_shadow = shadow and 0x7FF'u16
     let kill_in = (shadow shr 11) and 0xF'u16
@@ -1058,7 +1059,7 @@ proc save_psg_state(gba: GBA; w: var Writer) =
   let now = gba.scheduler.cycles
   let ch1 = apu.channel1
   w.write_bool(ch1.s0_slow)
-  w.write_u8(ch1.s0_anchor)
+  w.write_u8(ch1.s0_anchor or (ch1.s0_after_shift shl 5))
   w.write_bool(ch1.sweep_armed)
   w.write_deadline(ch1.kill_at, now)
   w.write_deadline(apu.power_on_at, now)
@@ -1078,7 +1079,9 @@ proc load_psg_state(gba: GBA; r: var Reader) =
   let now = gba.scheduler.cycles
   let ch1 = apu.channel1
   ch1.s0_slow = r.read_bool()
-  ch1.s0_anchor = r.read_u8() and 31
+  let anchor = r.read_u8()
+  ch1.s0_anchor = anchor and 31
+  ch1.s0_after_shift = (anchor shr 5) and 3
   ch1.sweep_armed = r.read_bool()
   ch1.kill_at = r.read_deadline(now, "ch1.kill_at")
   apu.power_on_at = r.read_deadline(now, "apu.power_on_at")

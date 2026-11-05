@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-11-04 20:24:46 · commit a84dab1a · game-boy-test-roms v7.0*
+*Generated: 2026-11-04 23:42:05 · commit a9a191ff · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. A suite where every row passes has only its summary row — its per-row section comes back as soon as anything in it fails.
 
 ## Summary
 
 - **Total:** 1586
-- **Pass:** 1566
-- **Fail:** 20
+- **Pass:** 1567
+- **Fail:** 19
 
 | Suite | Pass | Total | Status |
 |-------|------|-------|--------|
@@ -31,7 +31,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Shootout ROMs | 15 | 15 | 👌 |
 | [Game Boy - SingleStepTests SM83](results_singlestep.md) | 20 | 20 | 👌 |
 | GBA - alyosha gba-tests | 125 | 125 | 👌 |
-| [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 6 | 8 | 👀 |
+| [GBA - dbsuite (AGS-001)](results_dbsuite.md) | 7 | 8 | 👀 |
 | GBA - FuzzARM | 5 | 5 | 👌 |
 | GBA - hwverified (AGS-001) | 12 | 12 | 👌 |
 | GBA - jsmolka gba-tests | 13 | 13 | 👌 |
@@ -117,7 +117,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). See [detailed results](results_docboy.md) for individual test outcomes.
 
-## GBA - dbsuite (AGS-001) (6/8)
+## GBA - dbsuite (AGS-001) (7/8)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -127,7 +127,7 @@ Each row is one section of a DocBoy manifest (`docboy/<manifest>/<section>`). Se
 | dbsuite/dma | — | 👌 262/262 passed |
 | dbsuite/bus | — | 👀 77/79 passed |
 | dbsuite/ppu | — | 👌 156/156 passed |
-| dbsuite/apu | — | 👀 51/52 passed |
+| dbsuite/apu | — | 👌 52/52 passed |
 | dbsuite/bios | — | 👌 47/47 passed |
 
 One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](results_dbsuite.md) for every case that is not a pass.

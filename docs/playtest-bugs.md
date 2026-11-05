@@ -8587,6 +8587,33 @@ their phase is the page's placement (above), not this. Only contention is
 measured: what the console shows on the two held lines needs a
 photograph, so the picture is drawn as before.
 
+**sweeptrig-shift0-400-after-rows: the shift-0 check after a shift-1
+trigger has its own timing.** The row (sweeptrig.s variant 0: f = 1024 then
+1400 at NR10 0x01 / 0x21, a delay, then f = 0x400 at shift 0) read 0 polls
+on the console over the link rig and 1 in dingbat's cartridge build; in
+kit3's build, 20 bytes earlier, dingbat read 0 as the console did. Its own
+header says why it can: the row's fate turns on the APU's 16-cycle clock,
+which nothing in the cartridge build pins. `stphase.s` puts the same
+sequence behind a V-count park and a k-cycle sled: 256 cells, every one
+single-valued -- variant 1 (the shift-0 row alone) is dingbat's in all
+128, including the phases where f = 0x400 LIVES (so "never plays" in the
+case header holds only at the rig's phase), but variant 0 missed 88 of
+128: on the console it depends on the delay mod 16 as well as k, and
+lives outright at two phases in sixteen; dingbat's fast timing (t + 3 to
+a 4 MHz edge) has no 16-cycle term at all. `stphase2.s` and `stphase3.s`
+(sleds before the 1400 row and before the last trigger) show the fate is
+fixed by the pair of 16-cycle phases (from the master-on's divider
+restart): one pattern in the last trigger's phase, moved by 10 when the
+1400 trigger fell at phase 2..5. `stphase4.s` reads SOUNDCNT_X eight times
+3 cycles apart after the last trigger, which pins the stop: phase 2..8 at
+once, 9..11 on cycle 14, 12..13 never (the note lives), 14..1 on cycle 26.
+1280 cells over the four payloads, every one single-valued. That is now
+ch1_s0_kill_at's third case (`s0_after_shift`, in s0_anchor's spare
+payload bits): all 1280 match, from 492; kit3's cartridge rows still
+match the console; a fit to these cells, not a circuit, and which earlier
+trigger re-times the check is known only for the 1400 overflow. Laws:
+`stphase` (the two variants, 32 cells) and `stphase4` (256).
+
 **dbsuite: three PSG rows accept the console's lottery.** A new case kind,
 K_ZRANGE (czrange): 0 or the range. psg-ch1-nr10-0-dies,
 psg-ch1-after-ch2-lives and psg-ch1-second-trigger-dies each came out both
