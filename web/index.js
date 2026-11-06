@@ -17806,7 +17806,9 @@ const ndsGpu555 = () => {
   if (!ndsGpuShowing() || !s || s.gl.isContextLost() || !s.g.screens) return null;
   // (frames the presenter hasn't drawn yet, a hidden tab's: draw this one)
   if (s.frames !== ndsCore._nds_gpu_epoch() >>> 0 && s.k) {
-    try { ndsGpuTextureOf(s.gl, s.k); } catch { return null; }
+    // (through ndsGpuTexture: a failure there hands the 3D back as the
+    // presenter's would)
+    if (!ndsGpuTexture(s.gl, s.k)) return null;
     if (s.frames !== ndsCore._nds_gpu_epoch() >>> 0) return null;
   }
   const k = s.k || 1, W = NdsUtil.W, H = NdsUtil.H;

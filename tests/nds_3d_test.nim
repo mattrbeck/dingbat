@@ -873,7 +873,7 @@ proc rom_gpu_planes() =
   ## The host-GPU export (docs/nds/gpu3d.md): turned on again over a
   ## still scene, it makes its planes afresh: a line whose planes were
   ## kept in the old ones is drawn into the new ones, not taken as kept.
-  echo "host-GPU planes, export turned on twice"
+  echo "host-GPU planes, export turned off and on again"
   let path = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms") / "3d" /
              "3d_vcolor.nds"
   if not fileExists(path):
@@ -882,6 +882,8 @@ proc rom_gpu_planes() =
   let n = load_nds(path)
   n.set_gpu_export(true)
   for f in 0 ..< 30: n.run_frame()
+  # (set on again is a no-op now: off and on is what makes new planes)
+  n.set_gpu_export(false)
   n.set_gpu_export(true)
   for f in 0 ..< 2: n.run_frame()
   var painted, blank = 0

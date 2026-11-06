@@ -47,12 +47,18 @@ let pngPath = opt("--png", "")
 // afterwards, every frame checked (what a renderer kept across games, as
 // the app's is, must not carry over: texture images, the frame seen)
 let thenParts = opt("--then", "").split(separator: ",").map(String.init)
+if !thenParts.isEmpty && thenParts.count != 2 {
+    FileHandle.standardError.write("--then wants ROM2,STATE2\n".data(using: .utf8)!); exit(2)
+}
 let warm = Int(opt("--warm", "30"))!
 let check = flag("--check")
 // --sync: wait for each frame's GPU work, the picture's time then being
 // encode + GPU + the wait (index.js ndsGpuBench's "picture")
 let sync = flag("--sync")
 let rewind = flag("--rewind")
+if !thenParts.isEmpty && !check {
+    FileHandle.standardError.write("--then needs --check\n".data(using: .utf8)!); exit(2)
+}
 let ablate = Int(opt("--ablate", "0"))!   // NdsGpu3d.ablate: passes left out (timing only)
 guard args.count == 2 else {
     FileHandle.standardError.write("usage: ndsmetal ROM STATE [--frames N] [--warm N] [--k K] [--mode cpu|hd|gpu|skip] [--check [--then ROM2,STATE2]] [--press FILE] [--png FILE] [--rewind] [--sync] [--ablate N]\n".data(using: .utf8)!)
@@ -65,6 +71,10 @@ struct Press { var first = 0, last = 0, button = -1, touch = false, x = 0, y = 0
 let buttonIds: [String: Int32] = ["UP": 0, "DOWN": 1, "LEFT": 2, "RIGHT": 3, "A": 4, "B": 5, "SELECT": 6,
                                   "START": 7, "L": 8, "R": 9, "X": 10, "Y": 11]
 var presses: [Press] = []
+func pressNum(_ t: Substring) -> Int {
+    guard let v = Int(t) else { FileHandle.standardError.write("--press: \(t) isn't a number\n".data(using: .utf8)!); exit(2) }
+    return v
+}
 if !pressPath.isEmpty {
     let spec = try! String(contentsOfFile: pressPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
     for raw in spec.split(separator: ",") {
@@ -75,13 +85,15 @@ if !pressPath.isEmpty {
         var p = Press()
         let f = String(at[1])
         if f.contains("+") {
-            let fd = f.split(separator: "+"); p.first = Int(fd[0])!; p.last = p.first + Int(fd[1])!
+            let fd = f.split(separator: "+"); p.first = pressNum(fd[0]); p.last = p.first + pressNum(fd[1])
         } else {
-            let fl = f.split(separator: "-"); p.first = Int(fl[0])!; p.last = fl.count > 1 ? Int(fl[1])! : p.first + 2
+            let fl = f.split(separator: "-"); p.first = pressNum(fl[0]); p.last = fl.count > 1 ? pressNum(fl[1]) : p.first + 2
         }
         let what = at[0].uppercased()
         if what.hasPrefix("TOUCH:") {
-            let xy = what.split(separator: ":"); p.touch = true; p.x = Int(xy[1])!; p.y = Int(xy[2])!
+            let xy = what.split(separator: ":")
+            guard xy.count == 3 else { FileHandle.standardError.write("--press: \(what) wants TOUCH:x:y\n".data(using: .utf8)!); exit(2) }
+            p.touch = true; p.x = pressNum(xy[1]); p.y = pressNum(xy[2])
         } else if let b = buttonIds[what] { p.button = Int(b) } else {
             FileHandle.standardError.write("--press: no key \(what) here (LID isn't supported)\n".data(using: .utf8)!)
             exit(2)

@@ -155,7 +155,14 @@ final class NdsGpu3d {
         let t0 = DispatchTime.now().uptimeNanoseconds
         drawnEpoch = epoch0
         inFlight.wait()
-        cb.addCompletedHandler { [inFlight] _ in inFlight.signal() }
+        // (a buffer the system refused, as in the background, drew nothing:
+        // the frame is drawn again next time, the scene with it)
+        cb.addCompletedHandler { [weak self, inFlight] c in
+            inFlight.signal()
+            if c.status != .completed {
+                DispatchQueue.main.async { self?.drawnEpoch = -1; self?.gen = -1 }
+            }
+        }
         slotAt = (slotAt + 1) % slots.count
         let slot = slots[slotAt]
         var st = Stats()
