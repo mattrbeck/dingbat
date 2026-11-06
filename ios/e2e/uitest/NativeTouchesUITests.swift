@@ -304,6 +304,7 @@ final class NativeTouchesUITests: XCTestCase {
         let app = launch()
         sleep(1)
         let w = app.windows.firstMatch.frame
+        try XCTSkipIf(w.width > 466, "folded only (this is the inner screen)")
         let picture = app.otherElements["Game screen"].firstMatch
         let menu = app.buttons["Menu"].firstMatch
         print("NATIVE: Duo window \(w.size), picture \(picture.frame), Menu \(menu.frame)")
@@ -325,12 +326,37 @@ final class NativeTouchesUITests: XCTestCase {
         try XCTSkipUnless(model == "iPhone19,4", "the iPhone Duo's cover screen only (this is \(model))")
         let app = launch(["-video.uprightPicture", "full"])
         sleep(1)
+        try XCTSkipIf(app.windows.firstMatch.frame.width > 466, "folded only (this is the inner screen)")
         let menu = app.buttons["Menu"].firstMatch
         print("NATIVE: Duo full width, Menu \(menu.frame)")
         XCTAssertTrue(menu.isHittable, "the bar stays")
         snap(app, "duo-full-width")
         menu.tap()
         until("the menu opens from it") { menuOpen }
+    }
+
+    /// The iPhone Duo unfolded, upright: flat, the bar stays over a picture
+    /// the screen's width; half-folded (the hinge partly open, forced here
+    /// by -half-folded), the bar folds and the stage ends above the crease
+    /// (the screen's middle). Skipped anywhere but the Duo's inner screen.
+    func testUnfoldedDuo() throws {
+        let model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? ""
+        try XCTSkipUnless(model == "iPhone19,4", "the iPhone Duo only (this is \(model))")
+        var app = launch(["-no-hinge", "-portrait"])
+        sleep(2)
+        var w = app.windows.firstMatch.frame
+        try XCTSkipIf(w.width <= 466 || w.width > w.height, "the inner screen upright only (\(w.size))")
+        XCTAssertTrue(app.buttons["Menu"].firstMatch.isHittable, "flat: the bar stays")
+        snap(app, "duo-unfolded-flat")
+        app.terminate()
+        app = launch(["-half-folded", "-portrait"])
+        sleep(2)
+        w = app.windows.firstMatch.frame
+        let stage = app.otherElements["Game screen"].firstMatch.frame
+        print("NATIVE: half-folded window \(w.size), stage \(stage)")
+        XCTAssertFalse(app.buttons["Menu"].firstMatch.isHittable, "half-folded: the bar folds")
+        XCTAssertLessThanOrEqual(stage.maxY, w.height / 2, "the picture stays above the crease")
+        snap(app, "duo-half-folded")
     }
 
     func testSwitchesAreSwitches() {

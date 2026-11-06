@@ -88,12 +88,15 @@ struct PlayGeometry: Equatable {
     var ndsMaxWidth: CGFloat?
     /// DS, phone held upright: the screens at the stage's top.
     var ndsTop = false
+    /// DS half-folded: the screens' places, fixed (ndsPortrait).
+    var ndsFixed: NdsUtil.Layout?
     /// Where on the stage the picture goes, in the stage's coordinates; nil
     /// for the whole stage, centred.
     var pictureBox: CGRect?
 
     var stageContext: StageContext {
-        StageContext(barFolds: barFolds, ndsMaxWidth: ndsMaxWidth, ndsTop: ndsTop, pictureBox: pictureBox)
+        StageContext(barFolds: barFolds, ndsMaxWidth: ndsMaxWidth, ndsTop: ndsTop, pictureBox: pictureBox,
+                     ndsFixed: ndsFixed)
     }
 
     static let barHeight: CGFloat = 52
@@ -112,6 +115,24 @@ struct PlayGeometry: Equatable {
         var joystick = false
         /// Settings › Video › Picture held upright (beside a status column).
         var upright: Settings.UprightPicture = .clear
+        /// A foldable's hinge partly open (HingeState).
+        var halfFolded = false
+        /// DS: the screens swapped (NdsState.swap).
+        var ndsSwap = false
+    }
+
+    /// Wider than the folded Duo's cover (466pt) yet laid out as a phone
+    /// held upright: the Duo's inner screen (669pt). The controls keep the
+    /// cover's sizes there, not the width's (a thumb is the same size), and
+    /// take the compact measures.
+    static let coverWidth: CGFloat = 466
+
+    /// Where the crease runs, half-folded and held upright (the inner
+    /// screen's middle); nil otherwise.
+    private func crease(_ i: Inputs) -> CGFloat? {
+        let w = i.size.width, h = i.size.height
+        guard i.halfFolded, h > w, w > Self.coverWidth, w < 700 else { return nil }
+        return (h / 2).rounded()
     }
 
     static func make(_ i: Inputs) -> PlayGeometry {
@@ -156,7 +177,9 @@ struct PlayGeometry: Equatable {
         // Side insets held upright are a status column (PlayGeometry.portrait).
         let padL: CGFloat = 16, padR: CGFloat = 16
         let cw = w - padL - padR
-        let mainH = i.large ? min(cw * 0.62, 330) : min(cw * 0.46, 240)
+        // The controls' sizes: from the width, never past the cover's.
+        let cs = min(cw, Self.coverWidth - padL - padR)
+        let mainH = i.large ? min(cs * 0.62, 330) : min(cs * 0.46, 240)
         let stripH = padTop + shoulderH + gap + mainH + padBottom
         ndsTop = true
         bar = CGRect(x: safe.leading, y: safe.top, width: w - safe.leading - safe.trailing, height: Self.barHeight)
@@ -176,19 +199,48 @@ struct PlayGeometry: Equatable {
         strip = CGRect(x: 0, y: h - stripH, width: w, height: stripH)
         stage = CGRect(x: 0, y: stageTop, width: w, height: max(0, strip.minY - stageTop))
 
+        // Half-folded: the console itself. The top screen above the crease
+        // as wide as it goes; below it the touch screen between L and R,
+        // and the d-pad and buttons on the bottom padding. One composite
+        // (the stage, down to the controls) with each screen's place in it.
+        let c = crease(i)
+        let mainTop = h - padBottom - mainH
+        if let c {
+            barFolds = true
+            strip = CGRect(x: 0, y: mainTop - padTop, width: w, height: h - mainTop + padTop)
+            stage = CGRect(x: 0, y: 0, width: w, height: strip.minY)
+            let upper = c - 6 - safe.top
+            let tw = min(w - 16, upper * 4 / 3), th = tw * 3 / 4
+            let topRect = CGRect(x: (w - tw) / 2, y: c - 6 - th, width: tw, height: th)
+            let lowTop = c + 6, lowH = strip.minY - 6 - lowTop
+            let side = padL + 120 + 8
+            let bw = max(0, min(w - 2 * side, lowH * 4 / 3)), bh = bw * 3 / 4
+            let bottomRect = CGRect(x: (w - bw) / 2, y: lowTop + (lowH - bh) / 2, width: bw, height: bh)
+            var lay = NdsUtil.Layout()
+            lay.mode = .stack
+            lay.shape = "fold"
+            lay.swap = i.ndsSwap
+            lay.gap = 0
+            lay.uw = w; lay.uh = stage.height; lay.w = w; lay.h = stage.height
+            lay.top = i.ndsSwap ? bottomRect : topRect
+            lay.bottom = i.ndsSwap ? topRect : bottomRect
+            lay.scale = 1
+            ndsFixed = lay
+        }
+
         var f = ControlFrames()
-        let top = strip.minY + padTop
+        let top = c.map { $0 + 6 } ?? strip.minY + padTop
         f.l = CGRect(x: padL, y: top, width: 120, height: shoulderH)
         f.r = CGRect(x: w - padR - 120, y: top, width: 120, height: shoulderH)
         f.shoulderSlop = 6
         f.shortShoulders = true
-        let y0 = top + shoulderH + gap
+        let y0 = c != nil ? mainTop : top + shoulderH + gap
         let cb = mainH
-        let dpad = i.large ? min(0.62 * cw, 330, cb) : min(0.46 * cw, 240, cb)
+        let dpad = i.large ? min(0.62 * cs, 330, cb) : min(0.46 * cs, 240, cb)
         f.dpad = CGRect(x: padL, y: y0 + (cb - dpad) / 2, width: dpad, height: dpad)
         f.joyRegion = CGRect(x: padL, y: y0, width: cw / 2, height: cb)
         f.joyBase = CGRect(x: f.joyRegion.midX - dpad / 2, y: f.joyRegion.midY - dpad / 2, width: dpad, height: dpad)
-        let btn = i.large ? min(0.42 * cw / 2.8, 74, cb / 2.8) : min(0.46 * cw / 2.7, 84, cb / 2.7)
+        let btn = i.large ? min(0.42 * cs / 2.8, 74, cb / 2.8) : min(0.46 * cs / 2.7, 84, cb / 2.7)
         placeDiamond(&f, in: CGRect(x: w - padR - 2.5 * btn, y: y0, width: 2.5 * btn, height: cb), button: btn)
         // 28pt circles 22pt apart, centred, their bottoms 12pt above the
         // strip's bottom padding.
@@ -273,7 +325,10 @@ struct PlayGeometry: Equatable {
         // cluster's measures (ndsPortrait) -- short L/R at the strip's top
         // corners, the main row 0.46 of the width, Select/Start small
         // circles inside it -- so the picture gets the height it needs.
-        let compact = !tablet && i.upright == .full && safe.leading + safe.trailing > 0
+        let wide = !tablet && w > Self.coverWidth
+        let fullOption = !tablet && i.upright == .full && safe.leading + safe.trailing > 0
+        let compact = fullOption || wide
+        let c = crease(i)
         let padTop: CGFloat = compact ? 8 : (short ? 10 : 14)
         let padBottom: CGFloat = compact ? max(10, safe.bottom - 12) + (safe.bottom > 0 ? 16 : 0)
                                          : (short ? 12 : 16) + safe.bottom
@@ -287,7 +342,9 @@ struct PlayGeometry: Equatable {
         let shoulderH: CGFloat = compact ? 28 : (i.large ? 38 : (short ? 36 : 46))
         let pillH: CGFloat = i.large ? 28 : (short ? 28 : 34)
         pillFont = i.large ? 10 : 11
-        let mainH = compact ? (i.large ? min(0.62 * (w - padL - padR), 330) : min(0.46 * (w - padL - padR), 240))
+        // The controls' sizes: from the width, never past the cover's.
+        let cs = min(w - padL - padR, Self.coverWidth - padL - padR)
+        let mainH = compact ? (i.large ? min(0.62 * cs, 330) : min(0.46 * cs, 240))
                             : (i.large ? min(0.64 * w, 330) : min(0.54 * w, 290))
         let showLR = !i.isGB
         // Portrait tablets place Select/Start absolutely, inboard of the
@@ -302,9 +359,19 @@ struct PlayGeometry: Equatable {
             stage = CGRect(x: 0, y: stageTop, width: w, height: max(0, h - safe.bottom - stageTop))
             return
         }
-        strip = CGRect(x: 0, y: h - stripH, width: w, height: stripH)
+        // Half-folded: the picture above the crease (the bar folded off
+        // it), the controls centred below.
+        let floorY = c.map { $0 + (h - $0 + stripH) / 2 } ?? h
+        strip = CGRect(x: 0, y: floorY - stripH, width: w, height: stripH)
         stage = CGRect(x: 0, y: stageTop, width: w, height: max(0, strip.minY - stageTop))
-        if compact { fullWidthPicture(i) } else if !tablet { foldBesideColumn(i) }
+        if let c {
+            barFolds = true
+            stage = CGRect(x: 0, y: safe.top, width: w, height: max(0, c - 8 - safe.top))
+        } else if fullOption {
+            fullWidthPicture(i)
+        } else if !tablet && !wide {
+            foldBesideColumn(i)
+        }
 
         var f = ControlFrames()
         let cw = w - padL - padR
@@ -321,14 +388,14 @@ struct PlayGeometry: Equatable {
         }
         let y0 = top + (showLR ? shoulderH + gap : 0)
         let cb = mainH
-        let dpad = i.large ? min(0.62 * cw, 330, cb) : min(0.46 * cw, 240, cb)
+        let dpad = i.large ? min(0.62 * cs, 330, cb) : min(0.46 * cs, 240, cb)
         f.dpad = CGRect(x: padL, y: y0 + (cb - dpad) / 2, width: dpad, height: dpad)
         f.joyRegion = CGRect(x: padL, y: y0, width: cw / 2, height: cb)
         // Upright, the base sits centred in its region.
         f.joyBase = CGRect(x: f.joyRegion.midX - dpad / 2, y: f.joyRegion.midY - dpad / 2, width: dpad, height: dpad)
-        let btn = i.large ? min(0.42 * cw / 2.8, 74, cb / 2.8) : min(0.46 * cw / 2.7, 84, cb / 2.7)
+        let btn = i.large ? min(0.42 * cs / 2.8, 74, cb / 2.8) : min(0.46 * cs / 2.7, 84, cb / 2.7)
         let abW = btn * (i.nds ? 2.5 : i.large ? 2.05 : 2.2)
-        let abH = min(0.46 * cw, 240, cb)
+        let abH = min(0.46 * cs, 240, cb)
         let ab = CGRect(x: w - padR - abW, y: y0 + (cb - abH) / 2, width: abW, height: abH)
         if i.nds { placeDiamond(&f, in: ab, button: btn) } else { placeAB(&f, in: ab, button: btn) }
 
@@ -353,6 +420,8 @@ struct PlayGeometry: Equatable {
             f.select = CGRect(x: w / 2 - 9 - each, y: y, width: each, height: pillH)
             f.start = CGRect(x: w / 2 + 9, y: y, width: each, height: pillH)
         }
+        // Half-folded, the strip's colour is the whole lower half's.
+        if let c { strip = CGRect(x: 0, y: c, width: w, height: h - c) }
         controls = f
     }
 
@@ -496,6 +565,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
     @State private var isNDS = GameSession.shared.isNDS
     @State private var game = GameSession.shared.game
     @ObservedObject private var nds = NdsState.shared
+    @ObservedObject private var hinge = HingeState.shared
 
     var body: some View {
         // The outer reader sees the safe area; the inner one spans the
@@ -503,6 +573,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
         GeometryReader { outer in
             content(safe: outer.safeAreaInsets)
         }
+        .background(HingeObserver())
         .onReceive(GameSession.shared.$isGB) { isGB = $0 }
         .onReceive(GameSession.shared.$isNDS) { isNDS = $0 }
         .onReceive(GameSession.shared.$game) { game = $0 }
@@ -515,7 +586,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
                 regular: hSize == .regular && vSize == .regular, isGB: isGB,
                 large: settings.largeControls, hidden: model.gamepadHidesTouch,
                 nds: isNDS, ndsBarHide: nds.barHide, joystick: settings.controlStyle == .joystick,
-                upright: settings.uprightPicture))
+                upright: settings.uprightPicture, halfFolded: hinge.halfFolded, ndsSwap: nds.swap))
             let origin = geo.frame(in: .global).origin
             ZStack(alignment: .topLeading) {
                 (palette.chromeTransparent ? Color.clear : palette.stage)

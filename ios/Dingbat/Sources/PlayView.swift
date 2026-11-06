@@ -50,6 +50,8 @@ struct StageContext: Equatable {
     /// Where the picture goes on the stage (PlayGeometry.foldBesideColumn):
     /// contain-fit in it and centred on it; nil for the whole stage.
     var pictureBox: CGRect?
+    /// DS half-folded: the screens' places, fixed, over the whole stage.
+    var ndsFixed: NdsUtil.Layout?
 }
 
 private struct StageContextKey: EnvironmentKey {
@@ -87,7 +89,7 @@ struct GameStage: View {
 
     var body: some View {
         GeometryReader { geo in
-            let lay = session.isNDS ? ndsLayout(in: geo.size) : nil
+            let lay = session.isNDS ? (ctx.ndsFixed ?? ndsLayout(in: geo.size)) : nil
             let box = session.isNDS ? nil : ctx.pictureBox
             let size = lay.map(ndsPictureSize) ?? pictureSize(in: box?.size ?? geo.size)
             // The picture's centre: its box's, else the stage's (a DS game

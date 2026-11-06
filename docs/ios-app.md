@@ -77,6 +77,16 @@ pull to sync against the fake Drive.
   L/R, round Select/Start in the main row) and the picture the screen's
   width under the bar, clear of the camera (`PlayGeometry.foldBesideColumn`,
   `fullWidthPicture`).
+- **A foldable's inner screen** (the iPhone Duo unfolded, 669 pt wide
+  held upright). The touch controls keep the cover screen's sizes, not the
+  width's, in the compact layout (short L/R, round Select/Start), so a GB
+  picture takes the full width (669 x 602). Half-folded (UIHinge partly
+  open, iOS 27.1; the crease taken as the screen's middle), the picture
+  stays above the crease with the bar folded and the controls fill the
+  lower half; a DS game is laid out as the console: the top screen above
+  the crease, the touch screen between L and R below it, the buttons at
+  the bottom (`HingeState`, `PlayGeometry.crease`). Built with Xcode before
+  27 (Swift 6.4) the app has no hinge and stays flat.
 - **Files.** ROMs, saves and states are plain files in the app's Documents
   folder, visible in the Files app (layout in `RomLibrary.swift`). Exports
   go through the share sheet. There is no storage budget or eviction.
