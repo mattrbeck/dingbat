@@ -271,6 +271,28 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertTrue(last.isHittable, "and tapped")
     }
 
+    /// Back on the home screen held sideways, the paused game's picture sits
+    /// on the left and its name and buttons beside it (web ≥760px: the whole
+    /// screen's width, the notch's insets too).
+    func testHeroSideBySideInLandscape() {
+        let app = launch(["-landscape"])
+        sleep(2)
+        let menu = app.buttons["Menu"].firstMatch
+        if !menu.isHittable { app.otherElements["Game screen"].firstMatch.tap() }
+        menu.tap()
+        app.buttons["Main Menu"].firstMatch.tap()
+        let picture = app.buttons["Resume game"].firstMatch
+        let resume = app.buttons["Resume"].firstMatch
+        XCTAssertTrue(picture.waitForExistence(timeout: 5) && resume.waitForExistence(timeout: 5), "the paused hero")
+        sleep(1)
+        snap(app, "hero-landscape")
+        let w = app.windows.firstMatch.frame
+        print("NATIVE: window \(w.size), picture \(picture.frame), Resume \(resume.frame)")
+        XCTAssertLessThan(w.height, w.width, "held sideways")
+        XCTAssertLessThanOrEqual(picture.frame.maxX, resume.frame.minX, "Resume is beside the picture, not under it")
+        XCTAssertLessThanOrEqual(picture.frame.maxY, w.height, "the picture fits on screen")
+    }
+
     func testSwitchesAreSwitches() {
         let app = launch(["-sheet", "settings:controls"])
         let haptics = app.switches["Haptic feedback"].firstMatch

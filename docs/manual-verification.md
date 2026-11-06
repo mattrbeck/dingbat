@@ -203,7 +203,7 @@ whenever play reaches that frame, until it closes.
 
 Not gated in CI. The app's side of most of it runs in the simulator:
 `node ios/e2e/native-touches.mjs <derivedData>` (ios/e2e/uitest/
-NativeTouchesUITests.swift; 12 tests, all passing 2026-11-05). It covers:
+NativeTouchesUITests.swift; 13 tests, all passing 2026-11-05). It covers:
 - an audio interruption (began, ended with and without shouldResume, the
   player's own pause winning);
 - the background and back;
@@ -221,7 +221,10 @@ NativeTouchesUITests.swift; 12 tests, all passing 2026-11-05). It covers:
 - the bar with the in-game menu open (Pause pauses and the menu goes, the
   hamburger toggles it, a tap on the game only closes it);
 - the menu held sideways stopping above the bottom edge and scrolling to
-  Report a Bug.
+  Report a Bug;
+- the home screen held sideways with a game paused: the picture on the
+  left, its name and buttons beside it (as the web at 760 px, the whole
+  screen's width).
 
 The interruptions and route change are the notifications AVAudioSession
 posts, sent by the `-debug-events` hook, so iOS's own delivery of them, the

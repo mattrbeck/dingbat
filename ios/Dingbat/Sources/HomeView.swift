@@ -62,14 +62,18 @@ struct HomeView: View {
     var body: some View {
         GeometryReader { geo in
             let viewport = geo.size.width
-            let wide = viewport >= 760
+            // The web's 760px and vw are the whole screen's width, the
+            // notch's insets too: a phone held sideways (812 wide, 712 inside
+            // the insets on a 13 mini) is wide there, frame beside the name.
+            let screen = viewport + geo.safeAreaInsets.leading + geo.safeAreaInsets.trailing
+            let wide = screen >= 760
             VStack(spacing: 0) {
-                HomeBar(brand: brand, pinned: hero != nil, viewport: viewport) {
+                HomeBar(brand: brand, pinned: hero != nil, viewport: viewport, wide: wide) {
                     scrollToTop?()
                 }
                 ScrollViewReader { proxy in
                     ScrollView {
-                        content(viewport: viewport, wide: wide)
+                        content(viewport: viewport, screen: screen, wide: wide)
                             .padding(24)
                             .frame(maxWidth: .infinity)
                             .id("home-top")
@@ -138,7 +142,7 @@ struct HomeView: View {
     // MARK: content
 
     @ViewBuilder
-    private func content(viewport: CGFloat, wide: Bool) -> some View {
+    private func content(viewport: CGFloat, screen: CGFloat, wide: Bool) -> some View {
         let inner = max(0, viewport - 48)
         let entries = library.entries
         let hero = self.hero
@@ -159,7 +163,7 @@ struct HomeView: View {
                 HomeDriveRow()
             } else {
                 if let hero {
-                    HeroView(entry: hero, wide: wide, viewport: viewport, solo: solo)
+                    HeroView(entry: hero, wide: wide, viewport: screen, solo: solo)
                         .frame(maxWidth: solo ? .infinity : layout.width, alignment: solo ? .center : .leading)
                         .frame(maxWidth: .infinity)
                     if solo {
@@ -439,11 +443,12 @@ struct HomeBar: View {
     /// A hero is up: the big brand is gone, so the bar's is fully there.
     let pinned: Bool
     let viewport: CGFloat
+    /// HomeView's: the whole screen is at least 760 wide.
+    let wide: Bool
     let toTop: () -> Void
 
     var body: some View {
         let p = pinned ? 1 : brand.p
-        let wide = viewport >= 760
         ZStack {
             HStack(spacing: viewport <= 560 ? 4 : 8) {
                 if !wide { brandButton(p) }

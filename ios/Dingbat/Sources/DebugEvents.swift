@@ -52,6 +52,7 @@ enum DebugEvents {
             }),
             ("pad-disconnect", { pad?.disconnect(); pad = nil }),
             ("toast", { AppModel.shared.toast("Debug toast") }),
+            ("home", { AppModel.shared.showMainMenu() }),
         ]
         for (name, run) in handlers {
             var token: Int32 = 0
