@@ -56,6 +56,9 @@ final class Settings: ObservableObject {
     @Published var colorCorrect: Bool { didSet { d.set(colorCorrect, forKey: "colorCorrect"); dingbat_set_color_correction(colorCorrect ? 1 : 0); applyVideo() } }
     @Published var filter: Filter { didSet { d.set(filter.rawValue, forKey: "video.upscaleFilter"); applyVideo() } }
     @Published var integerScale: Bool { didSet { d.set(integerScale, forKey: "video.integerScale") } }
+    /// Video › Use the space under the camera (a phone with a status column
+    /// at the side, held upright: PlayGeometry.foldBesideColumn). App only.
+    @Published var underCamera: Bool { didSet { d.set(underCamera, forKey: "video.underCamera") } }
     @Published var lcdResponse: Bool { didSet { d.set(lcdResponse, forKey: "video.lcdResponse"); dingbat_set_lcd_response(lcdResponse ? 1 : 0) } }
     @Published var ambientGlow: Bool { didSet { d.set(ambientGlow, forKey: "video.ambientGlow") } }
 
@@ -121,6 +124,7 @@ final class Settings: ObservableObject {
         colorCorrect = bool("colorCorrect", true)
         filter = Filter(rawValue: str("video.upscaleFilter") ?? "") ?? .none
         integerScale = bool("video.integerScale", false)
+        underCamera = bool("video.underCamera", false)
         lcdResponse = bool("video.lcdResponse", false)
         ambientGlow = bool("video.ambientGlow", false)
         fifoInterp = bool("audio.fifoInterp", true)
@@ -205,7 +209,7 @@ final class Settings: ObservableObject {
                   "hide-touch-on-gamepad", "input-display", "library-open", "haptics",
                   "gb-palette.mode", "gb-palette.custom", "sgbEnable", "sgbBorder",
                   "gbaRunBios", "gbaBiosMode", "colorCorrect", "video.upscaleFilter",
-                  "video.integerScale", "video.lcdResponse", "video.ambientGlow",
+                  "video.integerScale", "video.underCamera", "video.lcdResponse", "video.ambientGlow",
                   "audio.fifoInterp", "audio.mp2kHle", "audio.pitchCorrectFF", "audio.audioLowpass",
                   "audio.playInSilent", "audio.volume", "audio.muted", "dingbat_theme",
                   "rewindOn", "runahead", "save-hook"] {
@@ -232,6 +236,7 @@ final class Settings: ObservableObject {
         colorCorrect = fresh.colorCorrect
         filter = fresh.filter
         integerScale = fresh.integerScale
+        underCamera = fresh.underCamera
         lcdResponse = fresh.lcdResponse
         ambientGlow = fresh.ambientGlow
         fifoInterp = fresh.fifoInterp

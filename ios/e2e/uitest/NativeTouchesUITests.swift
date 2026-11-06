@@ -222,6 +222,8 @@ final class NativeTouchesUITests: XCTestCase {
     func testBarWorksWithTheMenuOpen() {
         let app = launch()
         let menu = app.buttons["Menu"].firstMatch
+        // A folded bar (the iPhone Duo folded): a tap on the picture first.
+        if !menu.isHittable { app.otherElements["Game screen"].firstMatch.tap() }
         menu.tap()
         until("the menu opens") { menuOpen }
         holds("the menu leaves the game running", 0.5) { running }
@@ -291,6 +293,29 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertLessThan(w.height, w.width, "held sideways")
         XCTAssertLessThanOrEqual(picture.frame.maxX, resume.frame.minX, "Resume is beside the picture, not under it")
         XCTAssertLessThanOrEqual(picture.frame.maxY, w.height, "the picture fits on screen")
+    }
+
+    /// The iPhone Duo folded, upright: the bar folds away, the stage takes
+    /// the top edge, and a tap on the picture brings the bar down. Skipped
+    /// on any other simulator.
+    func testFoldedDuoPicture() throws {
+        let model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? ""
+        try XCTSkipUnless(model == "iPhone19,4", "the iPhone Duo's cover screen only (this is \(model))")
+        let app = launch()
+        sleep(1)
+        let w = app.windows.firstMatch.frame
+        let picture = app.otherElements["Game screen"].firstMatch
+        let menu = app.buttons["Menu"].firstMatch
+        print("NATIVE: Duo window \(w.size), picture \(picture.frame), Menu \(menu.frame)")
+        XCTAssertLessThan(w.width, w.height, "held upright")
+        XCTAssertLessThan(menu.frame.maxY, 1, "the bar is folded off the top")
+        // Where the picture sits (clear of the column) is in the snapshot:
+        // the accessibility element is the stage, not the picture.
+        XCTAssertEqual(picture.frame.minY, 0, "the stage starts at the top edge")
+        snap(app, "duo-folded")
+        picture.tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 2), "a tap on the picture")
+        until("brings the bar down") { menu.frame.minY >= 0 && menu.isHittable }
     }
 
     func testSwitchesAreSwitches() {

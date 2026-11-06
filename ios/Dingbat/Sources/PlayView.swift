@@ -47,6 +47,9 @@ struct StageContext: Equatable {
     /// DS on a phone held upright: the screens sit at the stage's top, the
     /// room they do not fill below them.
     var ndsTop = false
+    /// Where the picture goes on the stage (PlayGeometry.foldBesideColumn):
+    /// contain-fit in it and centred on it; nil for the whole stage.
+    var pictureBox: CGRect?
 }
 
 private struct StageContextKey: EnvironmentKey {
@@ -85,7 +88,14 @@ struct GameStage: View {
     var body: some View {
         GeometryReader { geo in
             let lay = session.isNDS ? ndsLayout(in: geo.size) : nil
-            let size = lay.map(ndsPictureSize) ?? pictureSize(in: geo.size)
+            let box = session.isNDS ? nil : ctx.pictureBox
+            let size = lay.map(ndsPictureSize) ?? pictureSize(in: box?.size ?? geo.size)
+            // The picture's centre: its box's, else the stage's (a DS game
+            // upright: at the top). Always placed, so the picture's view is
+            // one tree whichever it is.
+            let centre = box.map { CGPoint(x: $0.midX, y: $0.midY) }
+                ?? CGPoint(x: geo.size.width / 2,
+                           y: lay != nil && ctx.ndsTop ? size.height / 2 : geo.size.height / 2)
             ZStack(alignment: lay != nil && ctx.ndsTop ? .top : .center) {
                 (palette.chromeTransparent ? Color.clear : palette.stage)
                 // The glow is the GB/GBA presenter's (web: a DS game skips it).
@@ -95,6 +105,7 @@ struct GameStage: View {
                         .scaleEffect(1.45)
                         .opacity(0.8)
                         .allowsHitTesting(false)
+                        .position(centre)
                 }
                 GameScreenView()
                     .frame(width: size.width, height: size.height)
@@ -115,6 +126,7 @@ struct GameStage: View {
                     .scaleEffect(zoom)
                     .offset(pan)
                     .accessibilityLabel("Game screen")
+                    .position(centre)
                 // web #input-overlay: the stage's bottom-left corner, only
                 // while a controller has the touch pad hidden (the touch
                 // controls already show every press), never in local 2P.

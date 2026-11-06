@@ -28,6 +28,15 @@ enum PhoneCutout {
         return bySize["\(Int(size.width))x\(Int(size.height))@\(Int(safeTop.rounded()))"]
     }
 
+    /// A phone whose screen held upright keeps a status column at the side
+    /// (the iPhone Duo folded): Video's "Use the space under the camera".
+    static var hasSideColumn: Bool {
+        if modelIdentifier == "iPhone19,4" { return true }   // iPhone Duo
+        guard let w = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first,
+              UIDevice.current.userInterfaceIdiom == .phone, w.bounds.width < w.bounds.height else { return false }
+        return w.safeAreaInsets.left + w.safeAreaInsets.right > 0
+    }
+
     static let byModel: [String: CGFloat] = [
         // Notches
         "iPhone10,3": 30, "iPhone10,6": 30,                     // X

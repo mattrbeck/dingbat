@@ -663,6 +663,11 @@ private struct VideoPane: View {
                         accessibilityLabel: "Filter")
         }
         SheetToggleRow(label: "Integer scaling", sub: "Keep every pixel exactly the same size", isOn: $s.integerScale)
+        if PhoneCutout.hasSideColumn {
+            SheetToggleRow(label: "Use the space under the camera",
+                           sub: "Held upright, the picture goes as large as it can, centered, and the camera covers a corner of it",
+                           isOn: $s.underCamera)
+        }
         SheetToggleRow(label: "LCD response",
                        sub: "Colors settle slowly, the way the real screen did, so flickering sprites look see-through instead of blinking",
                        isOn: $s.lcdResponse)

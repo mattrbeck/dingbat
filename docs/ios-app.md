@@ -66,6 +66,14 @@ pull to sync against the fake Drive.
   switch, success on a saved state, an export or a clip, a warning when a
   two-tap confirm arms, an error when one fails. The web can only vibrate
   on Android.
+- **A status column at the side** (the iPhone Duo folded: 84 pt on the
+  right for the clock, under a camera at its top). Held upright, the touch
+  controls centre on the whole width; a GB or GBA picture short of height
+  under the bar folds the bar away (a tap on the picture brings it down)
+  and takes the room clear of the column, as near the centre as that
+  allows. Settings › Video › Use the space under the camera, shown only
+  there, centres it at full size with the camera over a corner
+  (`PlayGeometry.foldBesideColumn`).
 - **Files.** ROMs, saves and states are plain files in the app's Documents
   folder, visible in the Files app (layout in `RomLibrary.swift`). Exports
   go through the share sheet. There is no storage budget or eviction.

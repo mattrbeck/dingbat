@@ -80,16 +80,20 @@ struct PlayGeometry: Equatable {
     var large = false
     var pillFont: CGFloat = 11
     /// The bar folds off the top until a tap on the picture: a phone held
-    /// sideways, and a DS game on a phone held upright with "Hide the top
-    /// bar" on.
+    /// sideways, a DS game on a phone held upright with "Hide the top bar"
+    /// on, and a phone upright beside a status column when that makes the
+    /// picture bigger (foldBesideColumn).
     var barFolds = false
     /// DS, phone held sideways: the widest the screens may be (web ndsAvail).
     var ndsMaxWidth: CGFloat?
     /// DS, phone held upright: the screens at the stage's top.
     var ndsTop = false
+    /// Where on the stage the picture goes, in the stage's coordinates; nil
+    /// for the whole stage, centred.
+    var pictureBox: CGRect?
 
     var stageContext: StageContext {
-        StageContext(barFolds: barFolds, ndsMaxWidth: ndsMaxWidth, ndsTop: ndsTop)
+        StageContext(barFolds: barFolds, ndsMaxWidth: ndsMaxWidth, ndsTop: ndsTop, pictureBox: pictureBox)
     }
 
     static let barHeight: CGFloat = 52
@@ -106,6 +110,8 @@ struct PlayGeometry: Equatable {
         var nds = false
         var ndsBarHide = true
         var joystick = false
+        /// Settings › Video › Use the space under the camera.
+        var underCamera = false
     }
 
     static func make(_ i: Inputs) -> PlayGeometry {
@@ -205,6 +211,41 @@ struct PlayGeometry: Equatable {
         f.b = at(cx, cy + d)
     }
 
+    // MARK: a phone upright beside a status column
+
+    /// The iPhone Duo folded: its cover screen keeps a status column at the
+    /// side (84pt on the right, the clock under a camera at its top), and
+    /// under the bar and over the controls the picture is short of height,
+    /// not width. When folding the bar away makes it bigger, the bar folds
+    /// (a tap on the picture brings it down) and the picture takes the room
+    /// clear of the column, 16pt in from the other edge and the top so the
+    /// screen's rounded corner keeps off it, as near the centre as that
+    /// allows. "Use the space under the camera" gives it the whole width
+    /// from the top edge, centred, the camera over its corner.
+    private mutating func foldBesideColumn(_ i: Inputs) {
+        let colL = safe.leading, colR = safe.trailing
+        guard colL + colR > 0 else { return }
+        let w = size.width, bottom = strip.minY
+        let aspect: CGFloat = i.isGB ? 10.0 / 9 : 3.0 / 2
+        func fitWidth(_ r: CGRect) -> CGFloat { max(0, min(r.width, r.height * aspect)) }
+        let m: CGFloat = 16
+        let box: CGRect
+        if i.underCamera {
+            box = CGRect(x: 0, y: safe.top, width: w, height: bottom - safe.top)
+        } else {
+            let x0 = colL > 0 ? colL : m, x1 = w - (colR > 0 ? colR : m)
+            box = CGRect(x: x0, y: safe.top + m, width: x1 - x0, height: bottom - safe.top - m)
+        }
+        let pw = fitWidth(box)
+        guard pw > fitWidth(stage) * 1.04 else { return }
+        barFolds = true
+        stage = CGRect(x: 0, y: safe.top, width: w, height: max(0, bottom - safe.top))
+        let ph = pw / aspect
+        let cx = min(max(w / 2, box.minX + pw / 2), box.maxX - pw / 2)
+        pictureBox = CGRect(x: cx - pw / 2, y: box.midY - ph / 2, width: pw, height: ph)
+            .offsetBy(dx: -stage.minX, dy: -stage.minY)
+    }
+
     // MARK: portrait (phones, and tablets held upright)
 
     /// web #controls: a grid of the L/R row, the main cluster and
@@ -240,6 +281,7 @@ struct PlayGeometry: Equatable {
         }
         strip = CGRect(x: 0, y: h - stripH, width: w, height: stripH)
         stage = CGRect(x: 0, y: stageTop, width: w, height: max(0, strip.minY - stageTop))
+        if !tablet { foldBesideColumn(i) }
 
         var f = ControlFrames()
         let cw = w - padL - padR
@@ -437,7 +479,8 @@ struct PlayLayout<Stage: View, Bar: View>: View {
                 size: geo.size, safe: safe, compactHeight: vSize == .compact,
                 regular: hSize == .regular && vSize == .regular, isGB: isGB,
                 large: settings.largeControls, hidden: model.gamepadHidesTouch,
-                nds: isNDS, ndsBarHide: nds.barHide, joystick: settings.controlStyle == .joystick))
+                nds: isNDS, ndsBarHide: nds.barHide, joystick: settings.controlStyle == .joystick,
+                underCamera: settings.underCamera))
             let origin = geo.frame(in: .global).origin
             ZStack(alignment: .topLeading) {
                 (palette.chromeTransparent ? Color.clear : palette.stage)
