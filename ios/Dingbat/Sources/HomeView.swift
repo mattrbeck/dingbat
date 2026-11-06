@@ -464,11 +464,13 @@ struct HomeBar: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 52)
+        // The bar's colour and rule run edge to edge, past a status column
+        // or a notch at the side (web #topbar); its buttons keep inside.
         .background(
             LinearGradient(colors: [palette.topbarTop, palette.topbarBottom], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea(edges: .top)
+                .overlay(Rectangle().fill(palette.frameLine).frame(height: 1), alignment: .bottom)
+                .ignoresSafeArea(edges: [.top, .horizontal])
         )
-        .overlay(Rectangle().fill(palette.frameLine).frame(height: 1), alignment: .bottom)
     }
 
     private func brandButton(_ p: CGFloat) -> some View {

@@ -147,7 +147,8 @@ struct PlayGeometry: Equatable {
         // lift off the bottom edge on a phone that has one (the screens give
         // up that height).
         let padBottom = max(10, safe.bottom - 12) + (safe.bottom > 0 ? 16 : 0)
-        let padL = 16 + safe.leading, padR = 16 + safe.trailing
+        // Side insets held upright are a status column (PlayGeometry.portrait).
+        let padL: CGFloat = 16, padR: CGFloat = 16
         let cw = w - padL - padR
         let mainH = i.large ? min(cw * 0.62, 330) : min(cw * 0.46, 240)
         let stripH = padTop + shoulderH + gap + mainH + padBottom
@@ -216,7 +217,12 @@ struct PlayGeometry: Equatable {
         let padTop: CGFloat = short ? 10 : 14
         let padBottom: CGFloat = (short ? 12 : 16) + safe.bottom
         let gap: CGFloat = short ? 10 : 14
-        let padL = 16 + safe.leading, padR = 16 + safe.trailing
+        // A phone held upright has side insets only for a status column
+        // beside the picture: the iPhone Duo folded keeps 84pt on the right
+        // for the clock, under a camera at its top. The bar keeps clear of
+        // it; the controls under the stage need not, with the status bar
+        // hidden, and centre on the screen.
+        let padL: CGFloat = 16, padR: CGFloat = 16
         let shoulderH: CGFloat = i.large ? 38 : (short ? 36 : 46)
         let pillH: CGFloat = i.large ? 28 : (short ? 28 : 34)
         pillFont = i.large ? 10 : 11
