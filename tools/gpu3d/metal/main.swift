@@ -218,6 +218,11 @@ print(String(format: "  instructions/frame %.2f M (whole process); thread CPU ms
 print("  core   ms/frame: " + stat(samples.map { $0.core }))
 print("  encode ms/frame: " + stat(samples.map { $0.enc }))
 print("  GPU    ms/frame: " + stat(samples.map { $0.gpu }))
+// (a game drawing its 3D every other frame reuses the scene in between:
+// those frames only composite, so the median of all frames can be theirs)
+let drawnGpu = samples.filter { $0.drew }.map { $0.gpu }, keptGpu = samples.filter { !$0.drew }.map { $0.gpu }
+if !drawnGpu.isEmpty { print("  GPU, frames drawing a scene: " + stat(drawnGpu)) }
+if !keptGpu.isEmpty { print("  GPU, frames reusing it:      " + stat(keptGpu)) }
 let cpu = samples.map { $0.core + $0.enc }.reduce(0, +) / Double(samples.count)
 print(String(format: "  CPU per frame %.3f ms = %.1f fps uncapped; frames drawn on the GPU %d, captured %d; wall %.0f ms",
              cpu, 1000 / cpu, samples.filter { $0.drew }.count, samples.filter { $0.captured }.count, wall))

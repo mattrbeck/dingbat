@@ -351,6 +351,13 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         // core's software HD from the next frame). Drawn again for the same
         // frame (a display-link update with no new tick), it encodes nothing.
         var tex = gameTex
+        #if DEBUG
+        if PerfStats.on {
+            cmd.addCompletedHandler { c in PerfStats.shared.gpu(c.gpuEndTime - c.gpuStartTime) }
+        }
+        let pe0 = PerfStats.on ? CACurrentMediaTime() : 0
+        defer { if PerfStats.on && ndsGpuDrawing { PerfStats.shared.encode(CACurrentMediaTime() - pe0) } }
+        #endif
         if ndsGpuDrawing, let gpu = ndsGpu {
             do { tex = try gpu.encode(cmd, k: NdsState.shared.hd) ?? gameTex } catch {
                 NSLog("NdsGpu3d: %@", "\(error)")
@@ -395,6 +402,51 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         cmd.commit()
     }
 }
+
+#if DEBUG
+/// `-gpu-stats`: a line a second into tmp/gpustats.txt, for measuring the
+/// DS's Metal 3D on a phone (tools/gpu3d/metal measures the same on a Mac):
+/// the core's frames and their ms, the session's present a tick (upload,
+/// encode, commit), encodeNds's CPU ms (NdsGpu3d.encode and the screens'
+/// draw) and each command buffer's GPU ms.
+final class PerfStats {
+    static let on = ProcessInfo.processInfo.arguments.contains("-gpu-stats")
+    static let shared = PerfStats()
+    private let lock = NSLock()
+    private var frames = 0, coreS = 0.0, presents = 0, presentS = 0.0, presentMax = 0.0
+    private var encodes = 0, encodeS = 0.0, cbs = 0, gpuS = 0.0, gpuMax = 0.0
+    private var start = CACurrentMediaTime()
+
+    func frame(_ s: Double) { frames += 1; coreS += s; flush() }
+    func present(_ s: Double) { presents += 1; presentS += s; presentMax = max(presentMax, s) }
+    func encode(_ s: Double) { encodes += 1; encodeS += s }
+    func gpu(_ s: Double) {
+        lock.lock(); cbs += 1; gpuS += s; gpuMax = max(gpuMax, s); lock.unlock()
+    }
+
+    private func flush() {
+        let now = CACurrentMediaTime()
+        guard now - start >= 1 else { return }
+        lock.lock()
+        let g = (cbs, gpuS, gpuMax)
+        cbs = 0; gpuS = 0; gpuMax = 0
+        lock.unlock()
+        func ms(_ t: Double, _ n: Int) -> Double { n > 0 ? t * 1000 / Double(n) : 0 }
+        let line = String(format: "frames=%d core=%.2f presents=%d present=%.2f presentMax=%.2f encode=%.2f gpu=%.2f gpuMax=%.2f cbs=%d hd=%d gpu3d=%d\n",
+                          frames, ms(coreS, frames), presents, ms(presentS, presents), presentMax * 1000,
+                          ms(encodeS, encodes), ms(g.1, g.0), g.2 * 1000, g.0,
+                          Int(NdsState.shared.hd), Int(dingbat_nds_gpu_frames() > 0 ? 1 : 0))
+        frames = 0; coreS = 0; presents = 0; presentS = 0; presentMax = 0; encodes = 0; encodeS = 0
+        start = now
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("gpustats.txt")
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
+        } else {
+            try? line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+}
+#endif
 
 /// The game picture. The session drives redraws; SwiftUI only sizes it.
 struct GameScreenView: UIViewRepresentable {

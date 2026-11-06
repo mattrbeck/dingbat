@@ -665,21 +665,44 @@ same export through the C API (`dingbat_nds_set_gpu` / `_skip` /
     title, the handback). The web's were -9.9 % / -15.9 % / +0.2 %.
   - The renderer's own CPU work (binning, copies, encoding) is
     0.07-0.32 ms a frame.
-- **GPU time** a frame (M2, median, loaded Mac):
+- **GPU time** a frame that draws a scene (M2, quiet Mac; `ndsmetal`
+  splits drawn frames from those reusing the last scene, which only
+  composite: 0.1-0.5 ms. GS draws a scene every other frame, so a median
+  over all frames is a reuse frame's, which is what the first version of
+  this table showed):
 
-  | | 1x | 2x | 4x |
-  |---|---|---|---|
-  | GS field | 0.04 | 0.13 | 0.47 |
-  | GS title | 0.9 (no skip) | 2.4 | 5.1-5.3 |
-  | SoulSilver walk | 0.04 | 0.12 | 0.38 |
+  | | 2x | 4x |
+  |---|---|---|
+  | GS field | 4.3 | 10.4 |
+  | GS title | 3.7 | 7.9 |
+  | SoulSilver walk | 2.5 | 3.9 |
 
-  - The title at 4x is the heavy case: raster is ~85 % of it (passes
-    left out with `--ablate`), and in it `plot`: the attribute
-    interpolation was ~2.9 ms and the depth / w ~1.9 ms before `lin_r`
-    and 64-bit depth took it from 7.45 to 5.3 ms.
-  - A phone GPU (A15-A17) has roughly half the M2's: about 10 ms for
-    the title at 4x, 1 ms for the field. 4x fits a 16.7 ms frame; 2x
-    is the safe default, as on the web.
+  - The title at 4x: raster is ~85 % of it (passes left out with
+    `--ablate`), and in it `plot`: the attribute interpolation was
+    ~2.9 ms and the depth / w ~1.9 ms before `lin_r` and 64-bit depth
+    took it down by 29 %.
+- **On a phone** (iPhone 13 mini, A15 with a 4-core GPU; 2026-11-06): a
+  Debug build with Swift optimised, `-gpu-stats` (`GameRenderer.swift
+  PerfStats`: a line a second into tmp/gpustats.txt), the GS states in
+  the app's Documents, muted. At normal speed:
+
+  | | CPU HD 2x | Metal 2x | CPU HD 4x | Metal 4x |
+  |---|---|---|---|---|
+  | GS field, fps (lowest second) | 59 (51) | 60 (60) | 44 (41) | 61 (59) |
+  | GS title, fps | | | 21 (19) | 60 (60) |
+  | the core's ms a frame (field) | 17.0 | 11.3 | 22.7 | 10.4 |
+  | GPU ms a command buffer (field, mean; max) | 0.9 | 6.0; 15 | 1.0 | 21; 36 |
+
+  - The phone's GPU is about 3x slower than the M2's (a drawn field
+    scene at 4x: ~33 ms). It keeps up because a scene comes every other
+    frame and three frames can be queued: so 4x is full speed, but a
+    frame can reach the screen up to two refreshes later than at 1x.
+  - Fast-forward is the wrong measure there: it counts the core's frames
+    per refresh, and a GPU-bound present holds them back (field 4x:
+    43 fps Metal, 37 CPU; the skip, `-nds-gpu-skip`, 45).
+  - So on this phone Metal makes 4x playable where the CPU's HD runs at
+    a third (title) to three quarters (field) of full speed, and 2x
+    steady where the CPU's dips to 51.
 - **Against the web renderer** on the same Mac (Chromium, WebGL2 over
   ANGLE's Metal backend), each frame's picture waited for
   (`ndsGpuBench`'s "picture"; `--sync` here): title 4x 6.9 ms web vs

@@ -536,7 +536,13 @@ final class GameSession: NSObject, ObservableObject {
             var last = t0
             repeat {
                 if isNDS { NdsState.shared.blowFrame() }
+                #if DEBUG
+                let pf0 = PerfStats.on ? CACurrentMediaTime() : 0
+                #endif
                 dingbat_run_frame()
+                #if DEBUG
+                if PerfStats.on { PerfStats.shared.frame(CACurrentMediaTime() - pf0) }
+                #endif
                 ran += 1
                 if dingbat_frame_static() == 0 { changed = true }
                 #if DEBUG
@@ -556,8 +562,14 @@ final class GameSession: NSObject, ObservableObject {
             let owed = framesOwed(link, dt: dt)
             for _ in 0..<owed {
                 if isNDS { NdsState.shared.blowFrame() }
+                #if DEBUG
+                let pf0 = PerfStats.on ? CACurrentMediaTime() : 0
+                #endif
                 if twoPlayer { dingbat_link_tick() }
                 else if ahead > 0 { dingbat_run_frame_ahead(Int32(ahead)) } else { dingbat_run_frame() }
+                #if DEBUG
+                if PerfStats.on { PerfStats.shared.frame(CACurrentMediaTime() - pf0) }
+                #endif
                 ran += 1
                 if dingbat_frame_static() == 0 { changed = true }
                 #if DEBUG
@@ -1001,6 +1013,8 @@ final class GameSession: NSObject, ObservableObject {
     private func present() {
         #if DEBUG
         if FFTrace.on { FFTrace.shared.beforePresent() }
+        let pp0 = PerfStats.on ? CACurrentMediaTime() : 0
+        defer { if PerfStats.on { PerfStats.shared.present(CACurrentMediaTime() - pp0) } }
         #endif
         GameRenderer.shared.present()
         let size = CGSize(width: Int(dingbat_out_width()), height: Int(dingbat_out_height()))
