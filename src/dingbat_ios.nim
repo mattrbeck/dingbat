@@ -273,7 +273,20 @@ proc game_pixels(): int =
   of ekNDS: NDS_W * NDS_H
   else: GBA_W * GBA_H
 
+# The export's frame count when the core's screens were last replaced by
+# something other than a frame (a state load, a rewind, a reset, a new game):
+# the host GPU's picture is then of another moment until the next frame
+# (dingbat_nds_gpu_current).
+var ndsScreensReplacedAt = -1
+
+proc present_frame()
+
 proc present_live() =
+  ## The picture after anything but a frame: see ndsScreensReplacedAt.
+  if stateKind == ekNDS: ndsScreensReplacedAt = stateNds.gpu.gpu_frames
+  present_frame()
+
+proc present_frame() =
   if stateKind == ekNDS:
     # No LCD response model for the DS's panels (the web has none either):
     # the composite is the picture.
@@ -867,6 +880,8 @@ proc step_canonical() =
     stateGb.step_frame()
     if statePrinter != nil: statePrinter.tick_frame()
   of ekNDS:
+    # (a snapshot's frame drawn whole under the GPU's skip: rewinding.nim)
+    rewindHistory.nds_rewind_frame(stateNds)
     stateNds.run_frame()
     nds_queue_audio()
   of ekNone: discard
@@ -878,7 +893,7 @@ proc dingbat_run_frame() {.exportc, cdecl.} =
   if stateKind == ekNone or core_shared() or faulted(): return
   guard_core:
     step_canonical()
-    present_live()
+    present_frame()
 
 var runaheadFrame: seq[uint16] = @[]
 
@@ -896,7 +911,7 @@ proc run_frame_ahead(n: cint) =
   try: step_canonical()
   finally: aheadFrame = false
   if n <= 0 or stateKind == ekNDS:  # no run-ahead on the DS: a plain frame
-    present_live()
+    present_frame()
     return
   let pixels = game_pixels()
   case stateKind
@@ -1062,6 +1077,24 @@ proc dingbat_nds_gpu_rows(second: cint): ptr uint32 {.exportc, cdecl.} =
 proc dingbat_nds_gpu_lines(): ptr uint32 {.exportc, cdecl.} =
   if not ndsGpuReady() or stateNds.gpu.gpu_lines.len == 0: nil
   else: addr stateNds.gpu.gpu_lines[0]
+
+proc dingbat_nds_gpu_current(): cint {.exportc, cdecl.} =
+  ## 1 while the export is of the frame the core's screens show (0 after a
+  ## state load, rewind, reset or new game, until a frame runs: the host
+  ## GPU's last picture is then of another moment).
+  if ndsGpuReady() and stateNds.gpu.gpu_frames > 0 and
+     stateNds.gpu.gpu_frames != ndsScreensReplacedAt: 1 else: 0
+
+proc dingbat_nds_put_screens(top, bottom: ptr UncheckedArray[uint16]) {.exportc, cdecl.} =
+  ## The 1x screens as shown (the host GPU's, 256x192 BGR555 each) into the
+  ## core's: under the skip the core's lack the 3D, and its pictures (the
+  ## top screen, the composite, a state's screens and thumbnail) are taken
+  ## from them. Display output only: nothing on the machine reads them, and
+  ## the next frame draws them again.
+  if stateKind != ekNDS or top == nil or bottom == nil: return
+  copyMem(addr stateNds.gpu.top[0], top, NDS_W * NDS_SCREEN_H * 2)
+  copyMem(addr stateNds.gpu.bottom[0], bottom, NDS_W * NDS_SCREEN_H * 2)
+  present_frame()
 
 proc dingbat_nds_frame_count(): cint {.exportc, cdecl.} =
   if stateKind == ekNDS: cint(stateNds.gpu.frame_count) else: 0

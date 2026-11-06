@@ -331,6 +331,12 @@ proc thumb_next*(rw: Rewind): bool =
   ## frame whole).
   rw.frame_count + 1 >= rw.interval and rw.thumb_every > 0 and rw.thumb_due <= 0
 
+proc push_next*(rw: Rewind): bool =
+  ## The next maybe_push takes a snapshot (a core whose screens can come out
+  ## without some layer draws that frame whole: a snapshot carries its
+  ## screens, which a rewind hold or a scrub shows).
+  rw.frame_count + 1 >= rw.interval
+
 proc maybe_push*(rw: Rewind; payload: proc(): string;
                  thumb: proc(): RewindThumb = nil): bool =
   ## Call once per emulated frame; serializes every `interval` frames.

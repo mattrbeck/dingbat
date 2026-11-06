@@ -35,6 +35,11 @@ interface NdsCoreModule {
   _nds_set_gpu_handback?: (on: number) => void;
   _nds_gpu_frame_cpu?: () => number;
   _nds_gpu_frames?: () => number;
+  // 1 while the export is of the frame the core's screens show (0 after a
+  // state load or rewind until a frame runs); the GPU's 1x screens into the
+  // core's (a state then carries the 3D)
+  _nds_gpu_current?: () => number;
+  _nds_put_screens?: (top: number, bottom: number) => void;
   _nds_gpu_scene?: () => number;
   _nds_gpu_scene_len?: () => number;
   _nds_gpu_tex?: () => number;

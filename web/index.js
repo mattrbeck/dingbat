@@ -17725,7 +17725,10 @@ window.ndsGpuSkip = (on) => {
 // last picture).
 const ndsGpuShowing = () => {
   const c = ndsCore;
-  return !!(c && ndsCoreGame !== null && ndsGpuMod && ndsGpuActive() && c._nds_gpu_frames() > 0 &&
+  // (after a state load or a rewind, until a frame runs, the GPU's last
+  // picture is of another moment: the core's screens are the picture)
+  return !!(c && ndsCoreGame !== null && ndsGpuMod && ndsGpuActive() &&
+            (c._nds_gpu_current ? c._nds_gpu_current() !== 0 : c._nds_gpu_frames() > 0) &&
             !c._nds_powered_off?.());
 };
 // The HD scale the core draws at (1: none, or a core without HD), or the
@@ -17793,21 +17796,47 @@ const ndsGpuTextureOf = (gl, k) => {
   s.g.restore();
   return s.g.screens.t;
 };
-// Both screens as RGBA at 1x (top, bottom) from the GPU's picture when it
-// draws the screens (the core's lack the 3D of a frame the skip left to
-// it; every k-th dot of an HD picture), else null.
-const ndsGpuRgba = () => {
+// Both screens at 1x as BGR555 (top over bottom, 256 x 384) from the GPU's
+// picture when it draws the screens (the core's lack the 3D of a frame the
+// skip left to it; every k-th dot of an HD picture), else null.
+const ndsGpu555 = () => {
   const s = ndsGpuState;
   if (!ndsGpuShowing() || !s || s.gl.isContextLost() || !s.g.screens) return null;
   const k = s.k || 1, W = NdsUtil.W, H = NdsUtil.H;
   const all = s.g.read(s.g.screens);
   s.g.restore();
+  const one = new Uint16Array(W * 2 * H);
+  for (let y = 0; y < 2 * H; y++) {
+    for (let x = 0; x < W; x++) one[y * W + x] = all[y * k * W * k + x * k];
+  }
+  return one;
+};
+// The GPU's screens into the core's before a state is taken: a DS state
+// carries its screens (shown on a load while paused) and they would lack
+// the 3D (nds_put_screens).
+const ndsGpuPutScreens = () => {
+  const c = ndsCore;
+  if (!c || !c._nds_put_screens) return;
+  const one = ndsGpu555();
+  if (!one) return;
+  const p = c._malloc(one.length * 2);
+  if (!p) return;
+  c.HEAPU8.set(new Uint8Array(one.buffer), p);
+  c._nds_put_screens(p, p + NdsUtil.W * NdsUtil.H * 2);
+  c._free(p);
+};
+// Both screens as RGBA at 1x (top, bottom) from the GPU's picture when it
+// draws the screens (ndsGpu555), else null.
+const ndsGpuRgba = () => {
+  const all = ndsGpu555();
+  if (!all) return null;
+  const W = NdsUtil.W, H = NdsUtil.H;
   const out = [new Uint8Array(W * H * 4), new Uint8Array(W * H * 4)];
   for (let scr = 0; scr < 2; scr++) {
     const o = out[scr];
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const c = all[(scr * H + y) * k * W * k + x * k];
+        const c = all[(scr * H + y) * W + x];
         const i = (y * W + x) * 4;
         const r = c & 31, g = (c >> 5) & 31, b = (c >> 10) & 31;
         o[i] = (r << 3) | (r >> 2); o[i + 1] = (g << 3) | (g >> 2); o[i + 2] = (b << 3) | (b >> 2); o[i + 3] = 255;
@@ -18052,6 +18081,7 @@ const ndsCaptureState = () => {
   const c = ndsCore;
   // Switched off: nothing to come back to (ndsSyncPower).
   if (!ndsHasStates() || ndsCoreGame === null || ndsOff) return null;
+  ndsGpuPutScreens();
   const n = c._nds_state_size();
   const p = n > 0 ? c._nds_state_data() : 0;
   return p ? c.HEAPU8.slice(p, p + n) : null;
@@ -18062,6 +18092,7 @@ const ndsCaptureState = () => {
 const ndsCapturePlainState = () => {
   const c = ndsCore;
   if (!ndsHasStates() || !c._nds_state_plain_size || ndsCoreGame === null || ndsOff) return null;
+  ndsGpuPutScreens();
   const n = c._nds_state_plain_size();
   const p = n > 0 ? c._nds_state_data() : 0;
   return p ? c.HEAPU8.slice(p, p + n) : null;

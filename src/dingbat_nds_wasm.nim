@@ -347,6 +347,28 @@ proc nds_state_plain_size(): cint {.exportc.} =
 proc nds_state_data(): pointer {.exportc.} =
   if stateImage.len > 0: addr stateImage[0] else: nil
 
+# The export's frame count when the core's screens were last replaced by
+# something other than a frame (a state load, a rewind pop or commit): the
+# page's GPU picture is then of another moment until the next frame
+# (nds_gpu_current).
+var screensReplacedAt = -1
+proc screens_replaced() =
+  if core != nil: screensReplacedAt = core.gpu.gpu_frames
+
+proc nds_gpu_current(): cint {.exportc.} =
+  ## 1 while the export is of the frame the core's screens show.
+  if core == nil or not core.gpu.gpu_on or core.gpu.gpu_frames <= 0 or
+     core.gpu.gpu_frames == screensReplacedAt: 0 else: 1
+
+proc nds_put_screens(top, bottom: pointer) {.exportc.} =
+  ## The 1x screens as shown (the GPU's, 256x192 BGR555 each) into the
+  ## core's, which lack the 3D under the skip: a state then carries them.
+  ## Display output only: nothing on the machine reads them, and the next
+  ## frame draws them again.
+  if core == nil or top == nil or bottom == nil: return
+  copyMem(addr core.gpu.top[0], top, 256 * 192 * 2)
+  copyMem(addr core.gpu.bottom[0], bottom, 256 * 192 * 2)
+
 proc nds_state_load_keep(data: pointer; len: cint; keep_rewind: cint): cint {.exportc.} =
   ## Apply a state (packed or plain). 1 on success; 0 on refusal with the
   ## machine untouched (nds_state_error_kind / nds_state_error say why).
@@ -357,6 +379,7 @@ proc nds_state_load_keep(data: pointer; len: cint; keep_rewind: cint): cint {.ex
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
   if core.load_state_bytes(image):
+    screens_replaced()
     # Rewinding from here must not walk into the old timeline.
     if keep_rewind == 0: rewind_reset()
     1
@@ -442,6 +465,7 @@ proc nds_rewind_pop(): cint {.exportc.} =
   let snap = rewindRing.pop()
   if snap.len == 0: return 0
   aheadValid = false
+  screens_replaced()
   if core.load_own_payload(snap): 1 else: 0
 
 proc nds_rewind_depth(): cint {.exportc.} =
@@ -529,6 +553,7 @@ proc nds_rewind_commit(sample: cint): cint {.exportc.} =
   let snap = rewindRing.rewind_to_id(scrubIds[sample])
   if snap.len == 0: return 0
   aheadValid = false
+  screens_replaced()
   if core.load_own_payload(snap): 1 else: 0
 
 proc step_frame() =

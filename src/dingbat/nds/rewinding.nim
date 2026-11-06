@@ -24,10 +24,12 @@ proc new_nds_rewind*(cap: int): Rewind =
   new_rewind(cap, key_every = 0)
 
 proc nds_rewind_frame*(rw: Rewind; n: NDS) =
-  ## Before running a frame: the thumbnail nds_rewind_tick takes after it
-  ## needs the 1x screens whole, so a frame the host GPU would draw alone
-  ## (gpu3d.nim, the skip) is rasterised on the CPU too.
-  n.gpu.want_dots = rw != nil and rw.thumb_next()
+  ## Before running a frame: a snapshot nds_rewind_tick takes after it (and
+  ## its thumbnail) needs the 1x screens whole, since a rewind hold or a
+  ## scrub shows the snapshot's own screens; so a frame the host GPU would
+  ## draw alone (gpu3d.nim, the skip) is rasterised on the CPU too. One
+  ## frame in REWIND_INTERVAL.
+  n.gpu.want_dots = rw != nil and rw.push_next()
 
 proc nds_rewind_tick*(rw: Rewind; n: NDS) =
   ## Once per emulated frame (a powered-off DS is not recorded: there is

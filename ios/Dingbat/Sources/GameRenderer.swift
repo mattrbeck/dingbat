@@ -63,8 +63,50 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     /// Why the renderer isn't drawing: nil while it can, "" once it failed
     /// mid-run, else the reason it couldn't be built (NdsState.gpuStatus).
     private(set) var ndsGpuFailure: String?
-    /// The core exports its 3D for ndsGpu this frame (NdsState.coreHd).
-    private var ndsGpuDrawing: Bool { dingbat_is_nds() != 0 && dingbat_nds_gpu_frames() > 0 }
+    /// The core exports its 3D for ndsGpu, and the export is of the frame
+    /// it shows (after a state load or a rewind, until a frame runs, the
+    /// core's own screens are the picture: dingbat_nds_gpu_current).
+    private var ndsGpuDrawing: Bool { dingbat_is_nds() != 0 && dingbat_nds_gpu_current() != 0 }
+    private var ndsReadBuf: MTLBuffer?
+
+    /// Before the app takes a picture of a DS game (the library's, a
+    /// thumbnail, the hero, a state's own screens, a screenshot): the GPU's
+    /// screens at 1x into the core's, which lack the 3D under the skip (web
+    /// ndsGpuRgba: every k-th dot of an HD picture). This frame's GPU work is
+    /// encoded first if the display link hasn't drawn it yet. Waits for the
+    /// GPU (on demand only, a few ms at 4x).
+    func syncNdsScreens() {
+        guard ndsGpuDrawing, let gpu = ndsGpu, let device, let queue,
+              let cmd = queue.makeCommandBuffer() else { return }
+        let k = NdsState.shared.hd
+        var tex: MTLTexture?
+        do { tex = try gpu.encode(cmd, k: k) } catch {
+            NSLog("NdsGpu3d: %@", "\(error)")
+            ndsGpu = nil
+            ndsGpuFailure = ""
+            cmd.commit()
+            NdsState.shared.gpuFailed()
+            return
+        }
+        guard let tex, tex.width == 256 * k, let blit = cmd.makeBlitCommandEncoder() else { cmd.commit(); return }
+        let w = tex.width, h = tex.height
+        if ndsReadBuf == nil || ndsReadBuf!.length < w * h * 2 {
+            ndsReadBuf = device.makeBuffer(length: w * h * 2, options: .storageModeShared)
+        }
+        guard let buf = ndsReadBuf else { blit.endEncoding(); cmd.commit(); return }
+        blit.copy(from: tex, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: w, height: h, depth: 1), to: buf, destinationOffset: 0,
+                  destinationBytesPerRow: w * 2, destinationBytesPerImage: w * h * 2)
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        let src = buf.contents().assumingMemoryBound(to: UInt16.self)
+        var one = [UInt16](repeating: 0, count: 256 * 384)
+        for y in 0..<384 {
+            for x in 0..<256 { one[y * 256 + x] = src[(y * k) * w + x * k] }
+        }
+        one.withUnsafeBufferPointer { p in dingbat_nds_put_screens(p.baseAddress!, p.baseAddress! + 256 * 192) }
+    }
     private var lastBorderGen: Int32 = -1
     #if DEBUG
     /// The last picture sent to the screen (`-present-check`).

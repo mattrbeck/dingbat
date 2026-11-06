@@ -185,6 +185,11 @@ const uint32_t *dingbat_nds_gpu_plane(int second); /* 256 x 192 x 4 words */
 uint32_t dingbat_nds_gpu_epoch(void);
 const uint32_t *dingbat_nds_gpu_rows(int second);  /* 192 words */
 const uint32_t *dingbat_nds_gpu_lines(void);       /* 192 x 8 words */
+int dingbat_nds_gpu_current(void);  /* 1 while the export is of the frame shown (0 after a load / rewind / reset) */
+/* The host GPU's 1x screens (256x192 BGR555 each) into the core's, which
+ * lack the 3D under the skip: its pictures (top screen, composite, a
+ * state's screens and thumbnail) then have it. Display output only. */
+void dingbat_nds_put_screens(const uint16_t *top, const uint16_t *bottom);
 int dingbat_nds_frame_count(void);
 
 int dingbat_fb_width(void);   /* 240 (GBA), 160 (GB/GBC) or 256 (DS) */

@@ -1107,6 +1107,7 @@ extension Share {
     /// border; a black-and-white game in the shade palette, as on screen),
     /// as the web's screenshot (the menu, F9).
     static func screenshot() {
+        if GameSession.shared.isNDS { GameRenderer.shared.syncNdsScreens() }
         guard let g = GameSession.shared.game, let fb = dingbat_framebuffer() else { return }
         let w = Int(dingbat_fb_width()), h = Int(dingbat_fb_height())
         guard let img = GameSession.bgr555Image(UnsafeRawPointer(fb), width: w, height: h,

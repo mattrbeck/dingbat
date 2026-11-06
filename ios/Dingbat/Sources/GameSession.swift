@@ -1253,6 +1253,9 @@ final class GameSession: NSObject, ObservableObject {
     /// The full state image (same bytes as desktop .state files).
     func captureState() -> Data? {
         guard game != nil else { return nil }
+        // (a DS state carries its screens and a thumbnail: the GPU's, with
+        // the 3D the core's lack under the skip)
+        if isNDS { GameRenderer.shared.syncNdsScreens() }
         let size = dingbat_state_size()
         guard size > 0, let ptr = dingbat_state_data() else { return nil }
         return Data(bytes: ptr, count: Int(size))
@@ -1468,6 +1471,7 @@ final class GameSession: NSObject, ObservableObject {
         guard game != nil else { return nil }
         // A DS game's picture is its top screen (web ndsTopRgba: the
         // library, the paused hero, the slot thumbnail).
+        if isNDS { GameRenderer.shared.syncNdsScreens() }
         if isNDS, let top = dingbat_nds_top_rgba() {
             return Self.rgbaImage(top, width: 256, height: 192, maxWidth: maxWidth)
         }

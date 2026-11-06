@@ -598,6 +598,8 @@ proc dingbat_nds_gpu_plane(second: cint): ptr uint32 {.importc, cdecl.}
 proc dingbat_nds_gpu_rows(second: cint): ptr uint32 {.importc, cdecl.}
 proc dingbat_nds_gpu_lines(): ptr uint32 {.importc, cdecl.}
 proc dingbat_nds_gpu_epoch(): uint32 {.importc, cdecl.}
+proc dingbat_nds_gpu_current(): cint {.importc, cdecl.}
+proc dingbat_nds_put_screens(top, bottom: ptr uint16) {.importc, cdecl.}
 
 if ndsHave("built/Simple_Quad.nds"):
   let rom = ndsStaged("built/Simple_Quad.nds")
@@ -624,11 +626,42 @@ if ndsHave("built/Simple_Quad.nds"):
   dingbat_nds_set_gpu_skip(1)
   for _ in 0 ..< 5: dingbat_run_frame()
   check frameHash() != plain, "the skip: the 1x picture lacks the 3D (the GPU draws it)"
+  check dingbat_nds_gpu_current() == 1, "the export is of the frame shown"
+  let st = takeState()
+  check applyState(st) and dingbat_nds_gpu_current() == 0,
+        "a state load: the GPU's picture is of another moment until a frame runs"
+  dingbat_run_frame()
+  check dingbat_nds_gpu_current() == 1, "and current again after one"
+  # The app puts the GPU's screens into the core's before taking a picture.
+  var pat = newSeq[uint16](256 * 192)
+  for i in 0 ..< pat.len: pat[i] = 0x7C1F'u16
+  dingbat_nds_put_screens(addr pat[0], addr pat[0])
+  let fbp = cast[ptr UncheckedArray[uint16]](dingbat_framebuffer())
+  check fbp[0] == 0x7C1F'u16 and fbp[256 * 384 - 1] == 0x7C1F'u16 and dingbat_nds_gpu_current() == 1,
+        "put_screens: the composite is the GPU's screens (and stays current)"
+  dingbat_run_frame()
+  check frameHash() != 0 and fbp[0] != 0x7C1F'u16, "the next frame draws the screens again"
   dingbat_nds_set_gpu_skip(0)
   dingbat_nds_set_gpu(0)
   for _ in 0 ..< 5: dingbat_run_frame()
   check dingbat_nds_gpu_frames() == 0 and dingbat_nds_gpu_scene() == nil and frameHash() == plain,
         "off again: no export, the 3D drawn by the core"
+  # Under the skip, a rewind snapshot's frame is drawn whole: a rewind hold
+  # shows the 3D (the same picture as without the GPU).
+  proc popped(skip: bool): uint64 =
+    dingbat_nds_set_gpu(if skip: 1 else: 0)
+    dingbat_nds_set_gpu_skip(if skip: 1 else: 0)
+    discard dingbat_load_rom(cstring(rom), nil)
+    dingbat_set_rewind(1, 0)
+    for _ in 0 ..< 95: dingbat_run_frame()
+    discard dingbat_rewind_pop()
+    result = frameHash()
+    dingbat_set_rewind(0, 0)
+  let cpuPop = popped(false)
+  let gpuPop = popped(true)
+  dingbat_nds_set_gpu_skip(0)
+  dingbat_nds_set_gpu(0)
+  check gpuPop == cpuPop, "a rewind under the skip shows the 3D, as without it"
 
 echo "DS: things the DS core lacks refuse cleanly"
 if ndsHave("fb_both.nds"):

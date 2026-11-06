@@ -41,7 +41,7 @@ final class NdsState: ObservableObject {
     /// What the core is set to draw: the software HD scale, and whether it
     /// exports the scene for the GPU (which then draws at `hd`).
     static func coreHd(_ hd: Int, gpu: GpuChoice) -> (soft: Int, export: Bool) {
-        let on = gpu != .cpu && hd > 1 && GameRenderer.shared.ndsGpuAvailable
+        let on = gpu != .cpu && GameRenderer.shared.ndsGpuAvailable
         return (on ? 1 : hd, on)
     }
     /// The line under "3D drawn by": what draws the 3D here, and why not the
@@ -56,13 +56,22 @@ final class NdsState: ObservableObject {
         }
         return "The graphics card draws the 3D here"
     }
-    /// DEBUG `-nds-gpu-skip`: the skip too (the core's 1x screens then lack
-    /// the 3D: thumbnails and clips do), to measure what it would add.
-    static let gpuSkip = ProcessInfo.processInfo.arguments.contains("-nds-gpu-skip")
+    /// DEBUG `-nds-gpu-noskip`: the GPU without the skip (the core draws its
+    /// 1x 3D too), for measuring what the skip saves.
+    #if DEBUG
+    static let gpuSkip = !ProcessInfo.processInfo.arguments.contains("-nds-gpu-noskip")
+    #else
+    static let gpuSkip = true
+    #endif
+    /// With the GPU drawing: the skip (the core leaves a frame's 3D to it
+    /// where the machine reads none; the app's pictures then come from the
+    /// GPU's screens, GameRenderer.syncNdsScreens) and, at 1x, the handback
+    /// (a frame the core draws whole anyway is shown from its screens).
     private func applyCore() {
         let c = Self.coreHd(hd, gpu: gpu)
         dingbat_nds_set_gpu(c.export ? 1 : 0)
         dingbat_nds_set_gpu_skip(c.export && Self.gpuSkip ? 1 : 0)
+        dingbat_nds_set_gpu_handback(c.export && Self.gpuSkip && hd <= 1 ? 1 : 0)
         dingbat_nds_set_hd(Int32(c.soft))
     }
 
