@@ -21,6 +21,6 @@ nim c --app:staticlib --noMain -d:release -d:noSignalHandler --mm:arc --threads:
 xcrun swiftc -O -import-objc-header "$REPO/ios/include/dingbat.h" \
   "$REPO/tools/gpu3d/metal/main.swift" \
   "$REPO/ios/Dingbat/Sources/NdsGpu3d.swift" "$REPO/ios/Dingbat/Sources/NdsGpu3dShader.swift" \
-  -L"$OUT" -ldingbat_mac -framework Metal -framework AudioToolbox \
+  -L"$OUT" -ldingbat_mac -lcompression -framework Metal -framework AudioToolbox \
   -o "$OUT/ndsmetal"
 echo "$OUT/ndsmetal"

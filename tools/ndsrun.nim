@@ -77,6 +77,10 @@
 ## screens), for tools/gpu3d's harness. --gpu-skip (with --gpu) leaves a
 ## frame's 3D to the GPU when nothing on the machine reads its dots (no
 ## display capture): the 1x screens then lack it; the state is the same.
+## --rewind keeps the apps' rewind ring (nds/rewinding.nim: a snapshot
+## every REWIND_INTERVAL frames, thumbnails, keyframes; the cap is the
+## apps' REWIND_CAP_BYTES), so its cost is in the instructions and the speed;
+## built with -d:rewindprof, a per-step profile of it at the end.
 ## --gpu-handback (with --gpu --gpu-skip) does not export the frames whose
 ## 3D the CPU draws anyway (the GPU at 1x shows the 1x screens for them).
 ##
@@ -92,7 +96,8 @@
 
 import std/[os, strutils, parseopt, tables, sequtils, monotimes, times]
 import zippy
-import dingbat/nds/[nds, savestate]
+import dingbat/nds/[nds, savestate, rewinding]
+import dingbat/common/rewind
 when defined(nds_cap_survey): import dingbat/nds/gpu/capsurvey
 import dingbat/nds/io/rtc
 import dingbat/gba/rtc_calendar
@@ -300,6 +305,7 @@ when isMainModule:
   var text_offset = 0
   var text_shots = false
   var presses: seq[Press]
+  var rewind_on = false
   var shot = ""
   var shots: seq[int]
   var ram_shots: seq[int]
@@ -334,7 +340,7 @@ when isMainModule:
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs", "spilog", "rumble-log", "cartlog",
-                                     "state-layout", "text-shots", "gpu", "gpu-skip", "gpu-handback"])
+                                     "state-layout", "text-shots", "gpu", "gpu-skip", "gpu-handback", "rewind"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -362,6 +368,7 @@ when isMainModule:
       of "gpu": gpu = true
       of "gpu-skip": gpu_skip = true
       of "gpu-handback": gpu_handback = true
+      of "rewind": rewind_on = true
       of "gpu-dump":
         let at = val.rsplit('@', maxsplit = 1)
         gpu = true
@@ -469,6 +476,9 @@ when isMainModule:
   var audio: seq[float32]
   var mic_rate = 0
   let mic_samples = if mic_path.len > 0: read_wav_mono(mic_path, mic_rate) else: @[]
+  # (the apps' ring: the iOS library's REWIND_CAP_BYTES, a snapshot every
+  # REWIND_INTERVAL frames)
+  let rw = if rewind_on: new_nds_rewind(REWIND_CAP_BYTES) else: nil
   for f in first_frame ..< frames:
     if mic_path.len > 0 and f == mic_at: n.push_mic(mic_samples, mic_rate)
     if f == perf_from:
@@ -508,7 +518,9 @@ when isMainModule:
         if p.touch: n.set_touch(p.x, p.y, f == p.first)
         elif p.lid: n.set_lid(f == p.first)
         else: n.set_button(p.button, f == p.first)
+    if rw != nil: rw.nds_rewind_frame(n)
     n.run_frame()
+    if rw != nil: rw.nds_rewind_tick(n)
     if n.powered_off() and not was_off:
       was_off = true
       echo "powered off in frame ", f
@@ -592,6 +604,18 @@ when isMainModule:
           if spec.len == 2:
             echo "--- frame ", f + 1, " engine ", spec[0], " BG", spec[1]
             stdout.write(n.bg_text(spec[0] == 'B', ord(spec[1]) - ord('0'), text_offset))
+  when defined(rewindprof):
+    if rw != nil:
+      let names = ["serialize", "xor", "compress", "thumb_grab", "thumb_zlib",
+                   "key_zlib", "evict", "PUSH TOTAL", "pops"]
+      let pushes = rewindprof_n[7]
+      echo "rewind: ", pushes, " pushes, ", formatFloat(rw.mem_used().float / 1048576.0, ffDecimal, 2), " MB"
+      for i, nm in names:
+        if rewindprof_n[i] == 0: continue
+        echo "  ", nm.alignLeft(11), " calls=", align($rewindprof_n[i], 6),
+             " per_push=", formatFloat(rewindprof[i].float / 1e6 / max(1, pushes).float, ffDecimal, 4), " ms"
+      echo "  payload bytes/push=", rewindprof_bytes[0] div max(1, pushes),
+           "  delta bytes/push=", rewindprof_bytes[2] div max(1, pushes)
   if frames > perf_from:
     let secs = (getMonoTime() - perf_t0).inNanoseconds.float / 1e9
     echo "speed: frames ", perf_from, "-", frames, " in ", formatFloat(secs, ffDecimal, 2), " s = ",

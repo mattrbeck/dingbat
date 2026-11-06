@@ -13,7 +13,7 @@
 # where memory pressure gets the wasm JIT demoted).
 
 import std/deques
-import zippy
+import fastpack
 
 when defined(rewindprof):
   # -d:rewindprof: per-snapshot cost in nanoseconds and call counts, printed
@@ -58,7 +58,7 @@ type
   ThumbEntry = object
     id: int
     w, h: int
-    packed: seq[byte]  # zlib'd pixels — see the note in push()
+    packed: string  # fastpack'd pixels — see the note in push()
 
   Rewind* = ref object
     deltas: Deque[Delta]        # oldest first
@@ -253,13 +253,13 @@ proc encode_delta(prev, cur: string): string =
   ## pass (sparse_xor_encode): copying prev to XOR it in place first was a
   ## third of a push's time outside zlib.
   rp(0 + 2):  # RpCompress
-    result = compress(sparse_xor_encode(prev, cur), BestSpeed, dfZlib)
+    result = fast_pack(sparse_xor_encode(prev, cur))
   when defined(rewindprof):
     rewindprof_bytes[2] += result.len
     rewindprof_bytes[1] += prev.len
 
 proc decode_delta(cur, packed: string): string =
-  result = sparse_decode(uncompress(packed, dfZlib))
+  result = sparse_decode(fast_unpack(packed))
   xor_bytes(result, cur, min(result.len, cur.len))
 
 proc oldest_id*(rw: Rewind): int =
@@ -306,8 +306,8 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
         # Raw BGR555 is 19-26 KB a picture, on GB three times the whole delta
         # stream; game frames are flat-coloured, so BestSpeed takes them to
         # 4-22% of raw.
-        var packed: seq[byte]
-        rp(4): packed = compress(t.pixels, BestSpeed, dfZlib)
+        var packed: string
+        rp(4): packed = fast_pack_bytes(t.pixels)
         rw.thumbs.addLast(ThumbEntry(id: id, w: t.w, h: t.h, packed: packed))
         rw.thumb_total += packed.len
     else:
@@ -316,7 +316,7 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
     if rw.key_due <= 0:
       rw.key_due = rw.key_every - 1
       var packed: string
-      rp(5): packed = compress(payload, BestSpeed, dfZlib)
+      rp(5): packed = fast_pack(payload)
       rw.keys.addLast(KeyFrame(id: id, packed: packed))
       rw.key_total += packed.len
     else:
@@ -434,7 +434,7 @@ proc reconstruct(rw: Rewind; target_pos: int): string =
       # +1 for inflating the keyframe itself; skip it when `latest` is closer.
       if kpos >= target_pos and kpos + 1 < start_pos:
         start_pos = kpos
-        cur = uncompress(rw.keys[pick].packed, dfZlib)
+        cur = fast_unpack(rw.keys[pick].packed)
   for pos in countdown(start_pos - 1, target_pos):
     cur = decode_delta(cur, rw.deltas[pos].packed)
   cur
@@ -481,7 +481,7 @@ proc thumb_at*(rw: Rewind; i: int): RewindThumb =
   if i < 0 or i >= rw.thumbs.len: return RewindThumb()
   let e = rw.thumbs[rw.thumbs.len - 1 - i]
   try:
-    RewindThumb(w: e.w, h: e.h, pixels: uncompress(e.packed, dfZlib))
+    RewindThumb(w: e.w, h: e.h, pixels: fast_unpack_bytes(e.packed))
   except CatchableError:
     # In-process bytes; unreachable. An empty thumbnail drops one strip sample.
     RewindThumb()

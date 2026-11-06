@@ -11,6 +11,7 @@
 
 import std/[sequtils, strformat]
 import dingbat/common/rewind
+import dingbat/common/fastpack
 
 var failures = 0
 template check(label: string; cond: untyped) =
@@ -401,6 +402,34 @@ block:
   check "IDs are not recycled after a commit", rw.newest_id > target
   check "committed-away IDs stay gone", dropped.allIt(rw.snapshot_by_id(it).len == 0)
   verify_all(rw, "after commit + resume")
+
+echo "fastpack (the ring's codec: Apple LZ4 on macOS / iOS, zlib elsewhere)"
+block:
+  var seed = 0x1234_5678'u32
+  proc rnd(): uint8 =
+    seed = seed * 1664525'u32 + 1013904223'u32
+    uint8(seed shr 24)
+  var noise = newString(70_000)
+  for i in 0 ..< noise.len: noise[i] = char(rnd())
+  var sparse = newString(600_000)      # (an XOR delta: zeros, a few changed runs)
+  for k in 0 ..< 40:
+    let at = int(rnd()) * 2300
+    for i in 0 ..< 64: sparse[at + i] = char(rnd())
+  for (name, s) in [("empty", ""), ("one byte", "x"), ("noise", noise), ("a sparse delta", sparse)]:
+    let p = fast_pack(s)
+    check "round trip: " & name & " (" & $s.len & " -> " & $p.len & " bytes)", fast_unpack(p) == s
+  check "a sparse delta packs small", fast_pack(sparse).len < sparse.len div 20
+  check "bytes round trip", fast_unpack_bytes(fast_pack_bytes(@[1'u8, 2, 3, 0, 0, 0, 255])) == @[1'u8, 2, 3, 0, 0, 0, 255]
+  var bad = fast_pack(sparse)
+  bad.setLen(bad.len div 2)
+  var raised = false
+  try: discard fast_unpack(bad)
+  except CatchableError: raised = true
+  check "a truncated pack raises (not a wrong result)", raised
+  raised = false
+  try: discard fast_unpack("ab")
+  except CatchableError: raised = true
+  check "too short to hold a length raises", raised
 
 echo ""
 if failures == 0:
