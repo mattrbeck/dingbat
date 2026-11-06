@@ -214,6 +214,63 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertEqual(toast.count, 1, "one toast")
     }
 
+    // MARK: the in-game menu
+
+    /// With the menu open the bar still works: Pause pauses and the menu
+    /// goes (web: the click hides the dropdown and goes on); the hamburger
+    /// still toggles it; a tap on the game only closes it.
+    func testBarWorksWithTheMenuOpen() {
+        let app = launch()
+        let menu = app.buttons["Menu"].firstMatch
+        menu.tap()
+        until("the menu opens") { menuOpen }
+        holds("the menu leaves the game running", 0.5) { running }
+        app.buttons["Pause / Resume"].firstMatch.tap()
+        until("Pause pauses with the menu open, and the menu goes") { paused && !menuOpen }
+        app.buttons["Pause / Resume"].firstMatch.tap()
+        until("and resumes") { running }
+        menu.tap()
+        until("the hamburger opens it") { menuOpen }
+        menu.tap()
+        until("and closes it") { !menuOpen }
+        holds("closed, the game runs", 0.5) { running && !menuOpen }
+        menu.tap()
+        until("open again") { menuOpen }
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.6)).tap()
+        until("a tap below the bar closes it") { !menuOpen }
+        XCTAssertTrue(running, "and the game runs")
+    }
+
+    /// Held sideways the menu is taller than the room under the bar: it
+    /// stops above the bottom edge and scrolls to its last item.
+    func testMenuScrollsInLandscape() {
+        let app = launch(["-landscape"])
+        sleep(2)
+        let menu = app.buttons["Menu"].firstMatch
+        if !menu.isHittable {
+            // The bar folds off the top: a tap on the picture brings it down.
+            app.otherElements["Game screen"].firstMatch.tap()
+        }
+        XCTAssertTrue(menu.waitForExistence(timeout: 3) && menu.isHittable, "the bar is down")
+        menu.tap()
+        until("the menu opens") { menuOpen }
+        let screenH = app.windows.firstMatch.frame.height
+        XCTAssertLessThan(screenH, app.windows.firstMatch.frame.width, "held sideways")
+        let first = app.buttons["Main Menu"].firstMatch
+        let last = app.buttons["Report a Bug"].firstMatch
+        XCTAssertTrue(last.waitForExistence(timeout: 3), "Report a Bug is in the menu")
+        snap(app, "menu-landscape")
+        print("NATIVE: landscape height \(screenH), Report a Bug at \(last.frame)")
+        if last.frame.maxY > screenH {
+            first.swipeUp()
+            usleep(600_000)
+        }
+        snap(app, "menu-landscape-scrolled")
+        print("NATIVE: after a swipe Report a Bug at \(last.frame)")
+        XCTAssertLessThanOrEqual(last.frame.maxY, screenH, "the last item can be scrolled on screen")
+        XCTAssertTrue(last.isHittable, "and tapped")
+    }
+
     func testSwitchesAreSwitches() {
         let app = launch(["-sheet", "settings:controls"])
         let haptics = app.switches["Haptic feedback"].firstMatch

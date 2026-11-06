@@ -461,6 +461,7 @@ struct TopBar: View {
     @Environment(\.palette) var palette
     @Environment(\.horizontalSizeClass) var hSize
     @ObservedObject private var link = NetLink.shared
+    @State private var menuButton: CGRect = .zero
 
     private var wide: Bool { hSize == .regular }
 
@@ -474,6 +475,11 @@ struct TopBar: View {
                           dot: model.newPrints) {
                 model.toggleMenu()
             }
+            .background(GeometryReader { g in
+                Color.clear
+                    .onAppear { menuButton = g.frame(in: .named("topbar")) }
+                    .onChange(of: g.frame(in: .named("topbar"))) { menuButton = $0 }
+            })
             PlaybackCluster()
             if session.tiltKind > 0 {
                 BarIconButton(system: "scope", label: "Recenter tilt") {
@@ -531,6 +537,17 @@ struct TopBar: View {
             }
         )
         .overlay(Rectangle().fill(palette.frameLine).frame(height: 1), alignment: .bottom)
+        // The menu's scrim stops at the bar: a tap on the bar closes the menu
+        // and still does its own thing (web: the document's click hides the
+        // dropdown and the click goes on), so Pause pauses with it open.
+        // The hamburger toggles it itself.
+        .contentShape(Rectangle())
+        .coordinateSpace(name: "topbar")
+        .simultaneousGesture(SpatialTapGesture(coordinateSpace: .named("topbar")).onEnded { v in
+            if model.menuOpen && !menuButton.insetBy(dx: -6, dy: -9).contains(v.location) {
+                model.closeMenuForBar()
+            }
+        })
     }
 }
 
@@ -889,10 +906,13 @@ struct GameMenu: View {
     @ObservedObject private var link = NetLink.shared
 
     var body: some View {
+        GeometryReader { geo in
         ZStack(alignment: .topLeading) {
-            // Scrim: a tap outside closes the menu and resumes.
+            // Scrim: a tap outside closes the menu and resumes. It starts
+            // under the bar, whose own taps close it (TopBar).
             Color.black.opacity(0.001)
-                .ignoresSafeArea()
+                .padding(.top, PlayGeometry.barHeight)
+                .ignoresSafeArea(edges: [.bottom, .horizontal])
                 .onTapGesture { model.closeMenu() }
                 .accessibilityHidden(true)
             ScrollViewReader { proxy in
@@ -927,7 +947,10 @@ struct GameMenu: View {
             .padScrollFollow(proxy)
             }
             .frame(width: 252)
-            .frame(maxHeight: 520)
+            // As tall as its items, up to the room under the bar (web
+            // max-height: 100dvh - bar - 20px), and it scrolls past that:
+            // a phone held sideways has less than the menu.
+            .frame(maxHeight: min(520, max(120, geo.size.height - 56 - 10)))
             .fixedSize(horizontal: false, vertical: true)
             .background(RoundedRectangle(cornerRadius: 14).fill(palette.surface1))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border2, lineWidth: 1))
@@ -941,6 +964,7 @@ struct GameMenu: View {
             .accessibilityAction(.escape) { model.closeMenu() }
             .transition(reduceMotion ? .opacity
                         : .opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
+        }
         }
         .environment(\.padScope, "menu")
     }

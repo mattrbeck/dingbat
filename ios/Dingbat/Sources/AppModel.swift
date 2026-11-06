@@ -358,6 +358,14 @@ final class AppModel: ObservableObject {
         menuPausedGame = false
     }
 
+    /// A tap on the bar with the menu open: the menu goes and the tap does
+    /// its own thing. A pause the menu made stays (the player is at the
+    /// controls); Pause / Resume is theirs.
+    func closeMenuForBar() {
+        withAnimation(.easeOut(duration: 0.15)) { menuOpen = false }
+        menuPausedGame = false
+    }
+
     func toggleMenu() {
         if menuOpen { closeMenu() } else { openMenu(paused: false) }
     }
