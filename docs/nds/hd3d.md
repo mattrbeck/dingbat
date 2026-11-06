@@ -233,11 +233,14 @@ internal (1024 px) is about native and 2x is half of it, scaled up.
   filters, grid and subpixel pitch all k x, as the web's `ndsFrame`
   views); thumbnails, the glow and states keep the 1x picture. Settings >
   Nintendo DS > 3D resolution (`NdsState.hd`, the `nds-display` record's
-  `hd`). No JIT question: the app runs the core as native code, and a GPU
-  path would be Metal. Checked: `tests/ios_api_test.nim` (no 3D: every
+  `hd`). No JIT question: the app runs the core as native code; the GPU
+  path is Metal (docs/nds/gpu3d.md "Metal": Settings > Nintendo DS > 3D
+  drawn by). Checked: `tests/ios_api_test.nim` (no 3D: every
   k x k block is the 1x pixel; a 3D ROM differs from the 1x scaled up; a
   state load, reset and rewind keep the scale) and simulator shots of
-  Simple_Tri at Native, 2x and 4x. Not yet measured on a device.
+  Simple_Tri at Native, 2x and 4x. On an iPhone 13 mini (2026-11-06)
+  the core's HD at 4x runs the GS field at 44 fps and its title at 21;
+  2x the field at 59, dipping to 51 (docs/nds/gpu3d.md "Metal").
 - **Budget**: a recent iPhone's performance core is in this Mac's class
   for single-thread work, but it throttles under a sustained load, and
   the 1x core must fit first. From the numbers above, 2x is plausible for
@@ -253,8 +256,8 @@ internal (1024 px) is about native and 2x is half of it, scaled up.
   the same split needs a second wasm instance in a worker fed by
   postMessage, since SharedArrayBuffer threads need cross-origin
   isolation, which the Drive sign-in popup rules out.
-- **Metal renderer** (2-4 weeks for HD only): GPU cost is trivial at 4x;
-  what it gives up is listed under option (b).
+- **Metal renderer**: built (docs/nds/gpu3d.md "Metal"). On an A15 a 4x
+  GS scene is not trivial for the GPU, but it keeps full speed.
 
 ## What is left
 
