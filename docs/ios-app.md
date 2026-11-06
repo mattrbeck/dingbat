@@ -28,7 +28,11 @@ on the browser's newer save. `ios/e2e/trade.mjs` plays a whole Pokémon trade, F
 in Chromium against LeafGreen in the app from save states at the Cable Club
 counter, over a relay that delays, jitters and drops the WebRTC packets
 (`ios/e2e/netem.mjs`, no root needed); it needs the real games, so it is
-not in CI (usage in the file).
+not in CI (usage in the file). `ios/e2e/native-touches.mjs` drives the
+native touches (Native differences) as an XCUITest: the system pauses
+through the `-debug-events` hook (DebugEvents.swift, debug builds only),
+the deferred edges, the 44 pt targets, the switches, the accent and the
+pull to sync against the fake Drive.
 
 ## What matches the web
 

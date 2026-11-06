@@ -201,8 +201,26 @@ whenever play reaches that frame, until it closes.
 
 ## iOS: native touches (pauses, edges, haptics, VoiceOver)
 
-Not gated: all of it is iOS system behaviour, on a phone (docs/ios-app.md,
-Native differences).
+Not gated in CI. The app's side of most of it runs in the simulator:
+`node ios/e2e/native-touches.mjs <derivedData>` (ios/e2e/uitest/
+NativeTouchesUITests.swift; 8 tests, all passing 2026-11-05). It covers:
+- an audio interruption (began, ended with and without shouldResume, the
+  player's own pause winning);
+- the background and back;
+- the deferred top edge (the first swipe shows the grabber, the game plays
+  on) and Control Center pausing;
+- headphones out opening the menu;
+- a GCVirtualController's disconnect (the pad going is no longer listed
+  when its notification comes);
+- the sheet close's 44 pt target;
+- Settings' switches as accessibility switches;
+- the accent on the text cursor;
+- the pull to sync, against the fake Drive.
+
+The interruptions and route change are the notifications AVAudioSession
+posts, sent by the `-debug-events` hook, so iOS's own delivery of them, the
+sound stopping, haptics, VoiceOver's reading and a real pad's battery dying
+still need the phone (docs/ios-app.md, Native differences).
 
 - [ ] **Stops when the app is not in front.** In a game, pull down Control
       Center: the game (and its sound) stops under it, and plays on when it

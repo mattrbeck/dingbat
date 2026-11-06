@@ -13,6 +13,7 @@ targets:
     platform: iOS
     sources:
       - path: e2e/uitest/LinkAwayUITests.swift
+      - path: e2e/uitest/NativeTouchesUITests.swift
     dependencies:
       - target: Dingbat
     settings:

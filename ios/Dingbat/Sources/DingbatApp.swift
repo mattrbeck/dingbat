@@ -15,6 +15,7 @@ struct DingbatApp: App {
         NetLink.byeOnRelaunch()
         #if DEBUG
         StallLog.startIfAsked()
+        DebugEvents.startIfAsked()
         #endif
         // Before the first frame: the home page starts ready to rise in.
         _ = LaunchIntro.shared
