@@ -40,9 +40,13 @@ final class NdsState: ObservableObject {
         let on = gpu && hd > 1 && GameRenderer.shared.ndsGpuAvailable
         return (on ? 1 : hd, on)
     }
+    /// DEBUG `-nds-gpu-skip`: the skip too (the core's 1x screens then lack
+    /// the 3D: thumbnails and clips do), to measure what it would add.
+    static let gpuSkip = ProcessInfo.processInfo.arguments.contains("-nds-gpu-skip")
     private func applyCore() {
         let c = Self.coreHd(hd, gpu: gpu)
         dingbat_nds_set_gpu(c.export ? 1 : 0)
+        dingbat_nds_set_gpu_skip(c.export && Self.gpuSkip ? 1 : 0)
         dingbat_nds_set_hd(Int32(c.soft))
     }
 
