@@ -68,6 +68,10 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     /// core's own screens are the picture: dingbat_nds_gpu_current).
     private var ndsGpuDrawing: Bool { dingbat_is_nds() != 0 && dingbat_nds_gpu_current() != 0 }
     private var ndsReadBuf: MTLBuffer?
+    /// The export epoch (process-wide, never repeated, unlike a core's frame
+    /// count) and scale syncNdsScreens last put into the core: a second
+    /// picture of the same frame needs no second readback.
+    private var ndsSynced: (epoch: UInt32, k: Int) = (0, 0)
 
     /// Before the app takes a picture of a DS game (the library's, a
     /// thumbnail, the hero, a state's own screens, a screenshot): the GPU's
@@ -76,9 +80,10 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     /// encoded first if the display link hasn't drawn it yet. Waits for the
     /// GPU (on demand only, a few ms at 4x).
     func syncNdsScreens() {
-        guard ndsGpuDrawing, let gpu = ndsGpu, let device, let queue,
-              let cmd = queue.makeCommandBuffer() else { return }
         let k = NdsState.shared.hd
+        guard ndsGpuDrawing, dingbat_nds_gpu_epoch() != ndsSynced.epoch || k != ndsSynced.k,
+              let gpu = ndsGpu, let device, let queue,
+              let cmd = queue.makeCommandBuffer() else { return }
         var tex: MTLTexture?
         do { tex = try gpu.encode(cmd, k: k) } catch {
             NSLog("NdsGpu3d: %@", "\(error)")
@@ -100,6 +105,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         blit.endEncoding()
         cmd.commit()
         cmd.waitUntilCompleted()
+        // (refused, as in the background: the buffer holds an older picture)
+        guard cmd.status == .completed else { return }
+        ndsSynced = (dingbat_nds_gpu_epoch(), k)
         let src = buf.contents().assumingMemoryBound(to: UInt16.self)
         var one = [UInt16](repeating: 0, count: 256 * 384)
         for y in 0..<384 {
@@ -412,7 +420,13 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 NdsState.shared.gpuFailed()
             }
         }
-        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        // (an encoder refused: the GPU work and the drawable still go, or the
+        // renderer's frame slot and the next present are lost)
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else {
+            cmd.present(drawable)
+            cmd.commit()
+            return
+        }
         // (no picture yet: the drawable still goes back presented, cleared)
         guard let gameTex = tex else {
             enc.endEncoding()

@@ -31,7 +31,9 @@ final class NdsGpu3d {
 
     // The last frame drawn: the export's frame count, scene generation,
     // whether it had late parts (render-register writes mid-frame).
-    private var frames = -1, gen: Int64 = -1, hadLate = false
+    // (the frame is the export's epoch, process-wide and never repeated: a
+    // core's frame count starts again at each new game)
+    private var drawnEpoch: Int64 = -1, gen: Int64 = -1, hadLate = false
 
     // Per scale, on the GPU.
     private var rast, out3d: MTLBuffer?
@@ -139,7 +141,7 @@ final class NdsGpu3d {
         tilesX = (W + Self.tileW - 1) / Self.tileW
         tilesY = (H + Self.tileH - 1) / Self.tileH
         tileCounts = [UInt32](repeating: 0, count: tilesX * tilesY)
-        frames = -1; gen = -1; hadLate = false
+        drawnEpoch = -1; gen = -1; hadLate = false
     }
 
     /// This frame's work, after dingbat_run_frame, into cb (whose
@@ -147,11 +149,11 @@ final class NdsGpu3d {
     /// core exports nothing (the GPU path off, or no frame yet).
     func encode(_ cb: MTLCommandBuffer, k: Int) throws -> MTLTexture? {
         setScale(k, cb)
-        let n = Int(dingbat_nds_gpu_frames())
-        if n == 0 { return nil }
-        if n == frames { last = Stats(); return screens }
+        if dingbat_nds_gpu_frames() == 0 { return nil }
+        let epoch0 = Int64(dingbat_nds_gpu_epoch())
+        if epoch0 == drawnEpoch { last = Stats(); return screens }
         let t0 = DispatchTime.now().uptimeNanoseconds
-        frames = n
+        drawnEpoch = epoch0
         inFlight.wait()
         cb.addCompletedHandler { [inFlight] _ in inFlight.signal() }
         slotAt = (slotAt + 1) % slots.count
@@ -212,7 +214,9 @@ final class NdsGpu3d {
             }
         }
         slot.epoch = epoch
-        guard let lp = dingbat_nds_gpu_lines() else { return screens }
+        // (no lines: nothing composited into screens this frame; a new
+        // scale's texture holds nothing yet)
+        guard let lp = dingbat_nds_gpu_lines() else { return nil }
         slot.lines.contents().copyMemory(from: lp, byteCount: 192 * 32)
 
         var u = [UInt32](repeating: 0, count: 48)
@@ -253,8 +257,10 @@ final class NdsGpu3d {
     }
 
     private func dispatch2(_ enc: MTLComputeCommandEncoder, _ ps: MTLComputePipelineState, _ w: Int, _ h: Int) {
+        // a tile's 32 x 8, fewer rows where the pipeline can't take 256
+        let th = max(1, min(Self.tileH, ps.maxTotalThreadsPerThreadgroup / Self.tileW))
         enc.dispatchThreads(MTLSize(width: w, height: h, depth: 1),
-                            threadsPerThreadgroup: MTLSize(width: Self.tileW, height: Self.tileH, depth: 1))
+                            threadsPerThreadgroup: MTLSize(width: Self.tileW, height: th, depth: 1))
     }
 
     /// The scene at k: rows, raster, then the post passes into out3d (its
@@ -275,7 +281,7 @@ final class NdsGpu3d {
             enc.setBuffer(recs, offset: 0, index: 5)
             if ablate & 1 == 0 {
                 enc.dispatchThreads(MTLSize(width: sb.recTotal, height: 1, depth: 1),
-                                    threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
+                                    threadsPerThreadgroup: MTLSize(width: min(64, rowsPS.maxTotalThreadsPerThreadgroup), height: 1, depth: 1))
             }
         }
         enc.setComputePipelineState(rasterPS)

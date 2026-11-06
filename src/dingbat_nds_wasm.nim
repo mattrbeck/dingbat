@@ -36,12 +36,14 @@ var hdScale = 1   ## HD 3D (docs/nds/hd3d.md): kept across boots, a display sett
 var gpuOn = false ## host-GPU 3D export (docs/nds/gpu3d.md): kept across boots, a display setting
 var gpuSkip = false ## ...and its skip of the CPU's 3D where the machine reads none
 var gpuHandback = false ## ...and its handback of frames the CPU draws whole (at 1x)
+var screensReplacedAt = -1 ## the export's frame count when the screens were last replaced (nds_gpu_current)
 
 proc rewind_reset()
 proc cheats_follow_game()
 
 proc boot_with(rom: sink seq[uint8]; save: pointer; save_len: cint) =
   core = new_nds(rom, lastBios9, lastBios7, lastFirmware)
+  screensReplacedAt = -1
   if hdScale > 1: core.set_hd_scale(hdScale)
   if gpuOn: core.set_gpu_export(true)
   if gpuSkip: core.set_gpu_skip(true)
@@ -153,8 +155,12 @@ proc nds_hd_fb555_bottom(): pointer {.exportc.} =
 # exported (it never goes back, unlike the machine's frame count).
 
 proc nds_set_gpu(on: cint) {.exportc.} =
+  let was = gpuOn
   gpuOn = on != 0
-  if core != nil: core.set_gpu_export(gpuOn)
+  if core != nil:
+    # (turned on: no export of the frame shown yet, nds_gpu_current)
+    if gpuOn and not was: screensReplacedAt = core.gpu.gpu_frames
+    core.set_gpu_export(gpuOn)
 
 proc nds_set_gpu_skip(on: cint) {.exportc.} =
   ## With nds_set_gpu(1): leave a frame's 3D to the GPU when nothing on the
@@ -347,11 +353,11 @@ proc nds_state_plain_size(): cint {.exportc.} =
 proc nds_state_data(): pointer {.exportc.} =
   if stateImage.len > 0: addr stateImage[0] else: nil
 
-# The export's frame count when the core's screens were last replaced by
-# something other than a frame (a state load, a rewind pop or commit): the
-# page's GPU picture is then of another moment until the next frame
-# (nds_gpu_current).
-var screensReplacedAt = -1
+# screensReplacedAt: the export's frame count when the core's screens were
+# last replaced by something other than a frame (a state load, a rewind pop
+# or commit, the export turned on): the page's GPU picture is then of
+# another moment until the next frame (nds_gpu_current). A new core starts
+# from -1 (boot_with).
 proc screens_replaced() =
   if core != nil: screensReplacedAt = core.gpu.gpu_frames
 

@@ -632,6 +632,24 @@ if ndsHave("built/Simple_Quad.nds"):
         "a state load: the GPU's picture is of another moment until a frame runs"
   dingbat_run_frame()
   check dingbat_nds_gpu_current() == 1, "and current again after one"
+  # Every display setting is applied at once: the export set on again keeps
+  # this frame's (it used to be cleared: no line showing 3D).
+  dingbat_nds_set_gpu(1)
+  let lines2 = cast[ptr UncheckedArray[uint32]](dingbat_nds_gpu_lines())
+  var again = 0
+  for y in 0 ..< 192:
+    if (lines2[y * 8] and 5) == 5: inc again
+  check dingbat_nds_gpu_current() == 1 and again == 192, "the export set on again keeps the frame's (" & $again & " lines)"
+  dingbat_nds_set_gpu(0)
+  dingbat_nds_set_gpu(1)
+  check dingbat_nds_gpu_current() == 0, "turned off and on: not current until a frame runs"
+  dingbat_run_frame()
+  dingbat_set_rewind(1, 0)
+  for _ in 0 ..< 25: dingbat_run_frame()
+  check dingbat_nds_gpu_current() == 1 and dingbat_rewind_pop() == 1 and dingbat_nds_gpu_current() == 0,
+        "a rewind: not current until a frame runs"
+  dingbat_set_rewind(0, 0)
+  dingbat_run_frame()
   # The app puts the GPU's screens into the core's before taking a picture.
   var pat = newSeq[uint16](256 * 192)
   for i in 0 ..< pat.len: pat[i] = 0x7C1F'u16
@@ -640,7 +658,10 @@ if ndsHave("built/Simple_Quad.nds"):
   check fbp[0] == 0x7C1F'u16 and fbp[256 * 384 - 1] == 0x7C1F'u16 and dingbat_nds_gpu_current() == 1,
         "put_screens: the composite is the GPU's screens (and stays current)"
   dingbat_run_frame()
-  check frameHash() != 0 and fbp[0] != 0x7C1F'u16, "the next frame draws the screens again"
+  var kept = 0
+  for i in 0 ..< 256 * 384:
+    if fbp[i] == 0x7C1F'u16: inc kept
+  check kept < 256 * 384 div 2, "the next frame draws the screens again (" & $kept & " dots of the put picture left)"
   dingbat_nds_set_gpu_skip(0)
   dingbat_nds_set_gpu(0)
   for _ in 0 ..< 5: dingbat_run_frame()

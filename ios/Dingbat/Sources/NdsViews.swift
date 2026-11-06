@@ -284,7 +284,7 @@ struct NdsSettingsPane: View {
             SheetChipPicker(selection: $nds.hd, options: NdsState.hdScales.map { ($0, $0 == 1 ? "Native" : "\($0)x") })
         }
         SheetFlowRow(label: "3D drawn by",
-                     sub: "The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions keep full speed") {
+                     sub: "The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions cost the processor almost nothing. Automatic uses it wherever it runs") {
             SheetChipPicker(selection: $nds.gpu, options: NdsState.GpuChoice.allCases.map { ($0, $0.label) })
         }
         if !nds.gpuStatus.isEmpty { SheetHint(nds.gpuStatus) }

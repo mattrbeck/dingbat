@@ -123,7 +123,7 @@ type
     gpu_last: seq[uint32]         ## the last render's (any part)
     gpu_gen*: uint32              ## new with every scene exported (`scene_serial`)
     gpu_tex*, gpu_pal*: seq[uint8]  ## texture / palette slot images
-    gpu_tex_ver*: uint32          ## bumped whenever the images are rebuilt
+    gpu_tex_ver*: uint32          ## new whenever the images are rebuilt (`tex_serial`)
     gpu_tex_gen: uint64           ## vram.tex_gen the images hold
     # a render-register write mid-frame renders again for the lines still
     # to come (draw_lines): those renders, each with the first line it gives
@@ -520,6 +520,11 @@ var scene_serial: uint32
   ## Scenes exported by any core in this process (never reset): a scene's
   ## gen, so that a renderer seeing the gen it last drew skips the drawing,
   ## whichever core it came from.
+var tex_serial: uint32
+  ## Texture images built by any core in this process (never reset): their
+  ## version, so that a renderer holding the images of a version it saw
+  ## skips the upload, whichever core they came from (a per-core count
+  ## restarts at a new game, and a renderer kept the last game's images).
 
 proc export_gpu(g: Gpu3d; reused: bool) =
   ## The scene the lines from done_lines on come from, for a host-GPU
@@ -536,7 +541,8 @@ proc export_gpu(g: Gpu3d; reused: bool) =
     if g.gpu_tex_gen != g.vram.tex_gen or g.gpu_tex.len == 0:
       slot_images(g.vram, g.gpu_tex, g.gpu_pal)
       g.gpu_tex_gen = g.vram.tex_gen
-      inc g.gpu_tex_ver
+      inc tex_serial
+      g.gpu_tex_ver = tex_serial
     inc scene_serial
     g.gpu_gen = scene_serial
     export_scene(g.gpu_last, g.polys, g.verts, g.hpos, g.disp3dcnt, g.ren_param, g.ren.regs,

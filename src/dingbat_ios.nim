@@ -1010,8 +1010,13 @@ proc dingbat_nds_hd_fb_height(): cint {.exportc, cdecl.} =
 # after each frame. All nil / 0 with no DS game.
 
 proc dingbat_nds_set_gpu(on: cint) {.exportc, cdecl.} =
+  let was = ndsGpuOn
   ndsGpuOn = on != 0
-  if stateKind == ekNDS: stateNds.set_gpu_export(ndsGpuOn)
+  if stateKind == ekNDS:
+    # (turned on: there is no export of the frame shown yet, the core's
+    # screens are the picture until a frame runs)
+    if ndsGpuOn and not was: ndsScreensReplacedAt = stateNds.gpu.gpu_frames
+    stateNds.set_gpu_export(ndsGpuOn)
 
 proc dingbat_nds_set_gpu_skip(on: cint) {.exportc, cdecl.} =
   ndsGpuSkip = on != 0
@@ -1040,14 +1045,18 @@ proc dingbat_nds_gpu_late_count(): cint {.exportc, cdecl.} =
   if not ndsGpuReady() or stateNds.gpu3d.gpu_late_frame != stateNds.gpu.gpu_frames: 0
   else: cint(stateNds.gpu3d.gpu_late.len)
 
+template ndsLateOk(i: cint): bool =
+  ndsGpuReady() and i >= 0 and int(i) < stateNds.gpu3d.gpu_late.len and
+    stateNds.gpu3d.gpu_late[i].len > 0
+
 proc dingbat_nds_gpu_late(i: cint): ptr uint32 {.exportc, cdecl.} =
-  addr stateNds.gpu3d.gpu_late[i][0]
+  if ndsLateOk(i): addr stateNds.gpu3d.gpu_late[i][0] else: nil
 
 proc dingbat_nds_gpu_late_len(i: cint): cint {.exportc, cdecl.} =
-  cint(stateNds.gpu3d.gpu_late[i].len)
+  if ndsLateOk(i): cint(stateNds.gpu3d.gpu_late[i].len) else: 0
 
 proc dingbat_nds_gpu_late_line(i: cint): cint {.exportc, cdecl.} =
-  cint(stateNds.gpu3d.gpu_late_line[i])
+  if ndsLateOk(i): cint(stateNds.gpu3d.gpu_late_line[i]) else: 0
 
 proc dingbat_nds_gpu_tex(): ptr uint8 {.exportc, cdecl.} =
   if not ndsGpuReady() or stateNds.gpu3d.gpu_tex.len == 0: nil
@@ -1082,7 +1091,8 @@ proc dingbat_nds_gpu_current(): cint {.exportc, cdecl.} =
   ## 1 while the export is of the frame the core's screens show (0 after a
   ## state load, rewind, reset or new game, until a frame runs: the host
   ## GPU's last picture is then of another moment).
-  if ndsGpuReady() and stateNds.gpu.gpu_frames > 0 and
+  ## A switched-off DS shows its own (black) screens.
+  if ndsGpuReady() and stateNds.gpu.gpu_frames > 0 and not stateNds.powered_off() and
      stateNds.gpu.gpu_frames != ndsScreensReplacedAt: 1 else: 0
 
 proc dingbat_nds_put_screens(top, bottom: ptr UncheckedArray[uint16]) {.exportc, cdecl.} =

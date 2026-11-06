@@ -17765,7 +17765,9 @@ const ndsGpuTextureOf = (gl, k) => {
     s = ndsGpuState = { gl, g: new ndsGpuMod.NdsGpu3d(gl), frames: -1, gen: -1, late: false, epoch: -1 };
   }
   s.g.setScale(k);
-  const n = c._nds_gpu_frames();
+  // (the frame is the export's epoch, process-wide and never repeated: a
+  // core's frame count starts again at each new game)
+  const n = c._nds_gpu_epoch() >>> 0;
   if (n !== s.frames || s.k !== k) {
     const rescaled = s.k !== k;
     s.frames = n; s.k = k;
@@ -17802,6 +17804,11 @@ const ndsGpuTextureOf = (gl, k) => {
 const ndsGpu555 = () => {
   const s = ndsGpuState;
   if (!ndsGpuShowing() || !s || s.gl.isContextLost() || !s.g.screens) return null;
+  // (frames the presenter hasn't drawn yet, a hidden tab's: draw this one)
+  if (s.frames !== ndsCore._nds_gpu_epoch() >>> 0 && s.k) {
+    try { ndsGpuTextureOf(s.gl, s.k); } catch { return null; }
+    if (s.frames !== ndsCore._nds_gpu_epoch() >>> 0) return null;
+  }
   const k = s.k || 1, W = NdsUtil.W, H = NdsUtil.H;
   const all = s.g.read(s.g.screens);
   s.g.restore();

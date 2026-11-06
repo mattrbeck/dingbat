@@ -40,6 +40,8 @@ final class NdsState: ObservableObject {
     @Published var gpu: GpuChoice { didSet { saveDisplay(); applyHd() } }
     /// What the core is set to draw: the software HD scale, and whether it
     /// exports the scene for the GPU (which then draws at `hd`).
+    /// (Asking builds the renderer, its shaders compiled, once: so only for
+    /// a DS game or the DS settings, never at launch.)
     static func coreHd(_ hd: Int, gpu: GpuChoice) -> (soft: Int, export: Bool) {
         let on = gpu != .cpu && GameRenderer.shared.ndsGpuAvailable
         return (on ? 1 : hd, on)
@@ -51,10 +53,10 @@ final class NdsState: ObservableObject {
         // (asking builds the renderer, once: its shaders compile)
         if !GameRenderer.shared.ndsGpuAvailable {
             let why = GameRenderer.shared.ndsGpuFailure ?? ""
-            return why.isEmpty ? "The graphics card stopped working, so the processor draws the 3D until dingbat restarts"
-                               : "The processor draws the 3D here: \(why)"
+            return why.isEmpty ? "The graphics card stopped working, so the processor draws the 3D until dingbat restarts."
+                               : "The processor draws the 3D here: \(why)."
         }
-        return "The graphics card draws the 3D here"
+        return "The graphics card draws the 3D here."
     }
     /// DEBUG `-nds-gpu-noskip`: the GPU without the skip (the core draws its
     /// 1x 3D too), for measuring what the skip saves.
@@ -69,6 +71,9 @@ final class NdsState: ObservableObject {
     /// (a frame the core draws whole anyway is shown from its screens).
     private func applyCore() {
         let c = Self.coreHd(hd, gpu: gpu)
+        // (the GPU stopping while a frame of its is shown, paused: its
+        // picture into the core's screens first, which lack the 3D)
+        if !c.export { GameRenderer.shared.syncNdsScreens() }
         dingbat_nds_set_gpu(c.export ? 1 : 0)
         dingbat_nds_set_gpu_skip(c.export && Self.gpuSkip ? 1 : 0)
         dingbat_nds_set_gpu_handback(c.export && Self.gpuSkip && hd <= 1 ? 1 : 0)
@@ -107,7 +112,9 @@ final class NdsState: ObservableObject {
         let k = (o["hd"] as? NSNumber)?.intValue ?? 1
         hd = Self.hdScales.contains(k) ? k : 1
         gpu = (o["gpu"] as? String).flatMap(GpuChoice.init(rawValue:)) ?? .auto
-        applyCore()
+        // (the renderer is asked for at a DS load, prepareLoad: here only
+        // the scale, so a GB/GBA player never builds it)
+        dingbat_nds_set_hd(Int32(hd))
     }
 
     private func saveDisplay() {

@@ -9,13 +9,18 @@
 //    and the GPU's, for the modes the app could run in.
 //
 //   tools/gpu3d/metal/build.sh
-//   ndsmetal ROM STATE [--frames N] [--k K] [--mode cpu|hd|gpu|skip] [--check]
-//            [--press SCRIPT] [--png FILE] [--rewind]
+//   ndsmetal ROM STATE [--frames N] [--warm N] [--k K] [--mode cpu|hd|gpu|skip]
+//            [--check [--then ROM2,STATE2]] [--press FILE] [--png FILE]
+//            [--rewind] [--sync] [--ablate N]
 //
 // Modes: cpu (the core's 1x, no HD), hd (the core's software HD at k),
 // gpu (the export, the CPU still drawing its 1x 3D: Metal at k), skip (the
-// export with the skip, and the handback at 1x). --press is ndsrun's
-// (KEY@F[+D|-L], TOUCH:x:y@F..., frames counted as the core does).
+// export with the skip, and the handback at 1x). --warm (30) frames run
+// first and are left out of the timings (not of --check). --rewind turns
+// the core's rewind ring on, as the app has it (off here by default: under
+// the skip it draws one frame in ten whole). --press is a file holding an
+// ndsrun --press spec (KEY@F[+D|-L], TOUCH:x:y@F..., no LID; frames counted
+// as the core does).
 
 import Foundation
 import Metal
@@ -38,6 +43,10 @@ let k = Int(opt("--k", "1"))!
 let mode = opt("--mode", "skip")
 let pressPath = opt("--press", "")
 let pngPath = opt("--png", "")
+// --then ROM2,STATE2 (with --check): a second game into the same renderer
+// afterwards, every frame checked (what a renderer kept across games, as
+// the app's is, must not carry over: texture images, the frame seen)
+let thenParts = opt("--then", "").split(separator: ",").map(String.init)
 let warm = Int(opt("--warm", "30"))!
 let check = flag("--check")
 // --sync: wait for each frame's GPU work, the picture's time then being
@@ -46,7 +55,7 @@ let sync = flag("--sync")
 let rewind = flag("--rewind")
 let ablate = Int(opt("--ablate", "0"))!   // NdsGpu3d.ablate: passes left out (timing only)
 guard args.count == 2 else {
-    FileHandle.standardError.write("usage: ndsmetal ROM STATE [--frames N] [--k K] [--mode cpu|hd|gpu|skip] [--check]\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: ndsmetal ROM STATE [--frames N] [--warm N] [--k K] [--mode cpu|hd|gpu|skip] [--check [--then ROM2,STATE2]] [--press FILE] [--png FILE] [--rewind] [--sync] [--ablate N]\n".data(using: .utf8)!)
     exit(2)
 }
 let romPath = args[0], statePath = args[1]
@@ -58,8 +67,11 @@ let buttonIds: [String: Int32] = ["UP": 0, "DOWN": 1, "LEFT": 2, "RIGHT": 3, "A"
 var presses: [Press] = []
 if !pressPath.isEmpty {
     let spec = try! String(contentsOfFile: pressPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-    for item in spec.split(separator: ",") {
+    for raw in spec.split(separator: ",") {
+        let item = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if item.isEmpty { continue }
         let at = item.split(separator: "@")
+        guard at.count == 2 else { FileHandle.standardError.write("--press: \(item)?\n".data(using: .utf8)!); exit(2) }
         var p = Press()
         let f = String(at[1])
         if f.contains("+") {
@@ -70,7 +82,10 @@ if !pressPath.isEmpty {
         let what = at[0].uppercased()
         if what.hasPrefix("TOUCH:") {
             let xy = what.split(separator: ":"); p.touch = true; p.x = Int(xy[1])!; p.y = Int(xy[2])!
-        } else if let b = buttonIds[what] { p.button = Int(b) } else { continue }
+        } else if let b = buttonIds[what] { p.button = Int(b) } else {
+            FileHandle.standardError.write("--press: no key \(what) here (LID isn't supported)\n".data(using: .utf8)!)
+            exit(2)
+        }
         presses.append(p)
     }
 }
@@ -207,6 +222,7 @@ let insPerFrame = Double(instructions() - insAt) / Double(frames) / 1e6
 
 for (j, _) in samples.enumerated() { samples[j].gpu = gpuMs[warm + j] ?? 0 }
 func stat(_ xs: [Double]) -> String {
+    if xs.isEmpty { return "(no frames)" }
     let s = xs.sorted()
     let mean = xs.reduce(0, +) / Double(max(1, xs.count))
     return String(format: "mean %6.3f  p50 %6.3f  p95 %6.3f", mean, s[s.count / 2], s[min(s.count - 1, s.count * 95 / 100)])
@@ -224,9 +240,39 @@ let drawnGpu = samples.filter { $0.drew }.map { $0.gpu }, keptGpu = samples.filt
 if !drawnGpu.isEmpty { print("  GPU, frames drawing a scene: " + stat(drawnGpu)) }
 if !keptGpu.isEmpty { print("  GPU, frames reusing it:      " + stat(keptGpu)) }
 let cpu = samples.map { $0.core + $0.enc }.reduce(0, +) / Double(samples.count)
-print(String(format: "  CPU per frame %.3f ms = %.1f fps uncapped; frames drawn on the GPU %d, captured %d; wall %.0f ms",
+// (wall time of the core's frame and the encode: without --sync the encode
+// includes waiting for a free frame slot, the GPU's back-pressure)
+print(String(format: "  core + encode, wall, a frame %.3f ms = %.1f fps uncapped; frames drawn on the GPU %d, captured %d; wall %.0f ms",
              cpu, 1000 / cpu, samples.filter { $0.drew }.count, samples.filter { $0.captured }.count, wall))
 if check { print(mismatched == 0 ? "  exact: \(warm + frames) of \(warm + frames) frames" : "  MISMATCH: \(mismatched) frames, worst \(worst) dots, first at \(firstBad)") }
+
+if check, let gpu, thenParts.count == 2 {
+    guard dingbat_load_rom(thenParts[0], nil) == 0 else { print("then: load_rom failed"); exit(1) }
+    let st2 = try! Data(contentsOf: URL(fileURLWithPath: thenParts[1]))
+    guard st2.withUnsafeBytes({ dingbat_load_state($0.baseAddress, Int32(st2.count), 0) }) == 1 else {
+        print("then: load_state failed"); exit(1)
+    }
+    var bad2 = 0, first2 = -1
+    for _ in 0..<frames {
+        dingbat_run_frame()
+        let cb = queue.makeCommandBuffer()!
+        _ = try! gpu.encode(cb, k: k)
+        if let t = gpu.screens, let blit = cb.makeBlitCommandEncoder() {
+            blit.copy(from: t, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                      sourceSize: MTLSize(width: W, height: H, depth: 1), to: readBuf, destinationOffset: 0,
+                      destinationBytesPerRow: W * 2, destinationBytesPerImage: W * H * 2)
+            blit.endEncoding()
+        }
+        cb.commit(); cb.waitUntilCompleted()
+        let ref: UnsafePointer<UInt16> = k > 1 ? dingbat_nds_hd_fb()! : dingbat_game_fb()!
+        let got = readBuf.contents().assumingMemoryBound(to: UInt16.self)
+        var bad = 0
+        for d in 0..<(W * H) where (got[d] & 0x7FFF) != (ref[d] & 0x7FFF) { bad += 1 }
+        if bad > 0 { bad2 += 1; if first2 < 0 { first2 = Int(dingbat_nds_frame_count()) } }
+    }
+    print(bad2 == 0 ? "  then: exact: \(frames) of \(frames) frames"
+                    : "  then: MISMATCH: \(bad2) of \(frames) frames, first at \(first2)")
+}
 
 // --- the last picture, for a look
 if !pngPath.isEmpty {

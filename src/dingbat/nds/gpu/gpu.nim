@@ -227,7 +227,10 @@ var gpu_epoch*: uint32
 
 proc set_gpu*(g: Gpu; on: bool) =
   ## Export the 3D scene and engine A's composite planes each frame for a
-  ## host-GPU renderer (docs/nds/gpu3d.md). Display only.
+  ## host-GPU renderer (docs/nds/gpu3d.md). Display only. Setting it again
+  ## to the same value does nothing (the front ends apply every display
+  ## setting at once: turning it on again would clear this frame's export).
+  if on == g.gpu_on: return
   g.gpu_on = on
   g.engine_a.set_gp_on(on)
   if g.gpu3d != nil: g.gpu3d.set_gpu(on)
