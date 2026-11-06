@@ -12693,6 +12693,9 @@ const nextLoadGen = () => {
   return ++loadGen;
 };
 var paused = false;
+// The game stopped because iOS interrupted the audio (a call, an alarm,
+// Siri); cleared by any pause or resume, so the player's own choice wins.
+var audioHold = false;
 var fastForward = false;
 var speed2x = false;
 var slowMotion = false;
@@ -13355,6 +13358,7 @@ const showPauseChoice = (on) => {
   document.body.classList.toggle("paused", on);
 };
 const togglePause = (fromRemote) => {
+  audioHold = false;
   // Not while a dropped link redials: the game is waiting on it, and the
   // reconnect decides pause for both (netplay.js rbRenderCard).
   if (!fromRemote && typeof rbReconnecting === "function" && rbReconnecting()) return;
@@ -15940,7 +15944,7 @@ const PHONE_LANDSCAPE = "(pointer: coarse) and (orientation: landscape) and (max
     if (e.pointerType !== "touch") return;
     touches.add(e.pointerId);
     cand = touches.size === 1 && document.body.classList.contains("running") &&
-      barFolds() && !anyModalOpen() &&
+      barFolds() && !anyModalOpen() && menuDropdown.hidden &&
       onPicture(e.target) && !nearControl(e.clientX, e.clientY) &&
       !ndsTapTaken(e.clientX, e.clientY)
       ? { id: e.pointerId, ts: performance.now(), x: e.clientX, y: e.clientY }
@@ -16285,6 +16289,32 @@ const openPadMenu = () => {
 };
 const closePadMenu = () => { menuDropdown.hidden = true; };
 
+// The last controller gone mid-game (a flat battery, out of range): the
+// game stops with the menu open, the touch controls back under the
+// player's thumbs, and closing the menu plays on (the app:
+// GameSession.stopForPlayer). Not while linked, nor over a pause or a
+// dialog.
+let padSeen = false;
+let lostPadPaused = false;
+const stopForLostPad = () => {
+  if (!document.body.classList.contains("running") || !currentRomName) return;
+  if (rollbackMode || playerPaused() || anyModalOpen() || !menuDropdown.hidden) return;
+  togglePause();
+  lostPadPaused = true;
+  if (!document.body.classList.contains("topbar-open")) {
+    document.body.classList.add("topbar-open"); // phone landscape keeps the bar folded away
+    padMenuBar = true;
+  }
+  menuBtn.click();
+};
+new MutationObserver(() => {
+  if (!menuDropdown.hidden || !lostPadPaused) return;
+  lostPadPaused = false;
+  if (padMenuBar) { padMenuBar = false; document.body.classList.remove("topbar-open"); }
+  // A dialog opened from the menu keeps the pause until the player's call.
+  if (playerPaused() && !anyModalOpen()) togglePause();
+}).observe(menuDropdown, { attributes: true, attributeFilter: ["hidden"] });
+
 const padMenuNav = (dir) => {
   if (dir >= 0) padMove(padMenuItems(), dir);
   if (padHit(PB.A)) padPress();
@@ -16409,8 +16439,10 @@ const pollGamepads = () => {
     "gamepad-hides-touch", hideTouchOnGamepad && anyConnected);
   if (!anyConnected) {
     endPadHolds();
+    if (padSeen) { padSeen = false; stopForLostPad(); }
     return;
   }
+  padSeen = true;
   const now = performance.now();
   padPrev = padNow;
   padNow = new Array(PAD_BUTTONS).fill(false);
@@ -19076,6 +19108,24 @@ var Module = {
       lowpassNode = null;
       routeOutput();   // gain -> (lowpass ->) destination per the toggle
       playTime = 0;
+      // iOS parks the context "interrupted" through a call, an alarm or
+      // Siri: the game stops with it (no menu) and plays on when the audio
+      // runs again, unless the player paused or resumed meanwhile (the
+      // app: GameSession.systemHold). Not while linked: that pause would
+      // be both players'.
+      audioCtx.addEventListener("statechange", () => {
+        const st = audioCtx.state;
+        if (st === "interrupted") {
+          if (!rollbackMode && document.body.classList.contains("running") &&
+              currentRomName && !playerPaused()) {
+            togglePause();
+            audioHold = true;
+          }
+        } else if (st === "running" && audioHold) {
+          audioHold = false;
+          if (playerPaused()) togglePause();
+        }
+      });
     };
 
     window.updateGain = () => {

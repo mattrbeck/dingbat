@@ -145,6 +145,11 @@
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
+
+  /* The theme's accent on the browser's own controls and the text cursor,
+     not the system blue (the app: the root tint). */
+  accent-color: var(--accent);
+  caret-color: var(--accent);
 }
 
 /*
@@ -9763,4 +9768,77 @@ body:not(.running) #nds-off {
   }
 }
 
+/* --- Lessons from the app (2026-11) --------------------------------------
+   A phone held upright has side insets only for a status column beside the
+   picture (a foldable's cover screen keeps one for the clock under its
+   camera: 84px on the right): the touch controls take 16px from each edge
+   and centre, rather than padding past it (the app: PlayGeometry.portrait).
+   Wider than such a cover screen (466px) and still a phone layout -- a
+   foldable's inner screen held upright, 669px -- the controls keep that
+   phone's sizes, not the width's: a thumb is the same size. */
+@media (pointer: coarse) and (orientation: portrait) and (max-width: 699px) {
+  #controls {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  body.nds-mode #main-controls {
+    height: min(calc((100vw - 32px) * 0.46), 240px);
+  }
+  body.nds-mode.large-controls #main-controls {
+    height: min(calc((100vw - 32px) * 0.62), 330px);
+  }
+}
 
+@media (pointer: coarse) and (orientation: portrait) and (min-width: 467px) and (max-width: 699px) {
+  #main-controls {
+    height: min(54vw, 252px);
+  }
+  #dpad,
+  #joystick {
+    --dpad-size: min(46cqi, 200px, 100cqb);
+  }
+  #ab {
+    --btn-size: min(calc(46cqi / 2.7), 74px, calc(100cqb / 2.7));
+    height: min(46cqi, 200px, 100cqb);
+  }
+  body.large-controls #main-controls {
+    height: min(64vw, 298px);
+  }
+  body.large-controls #dpad,
+  body.large-controls #joystick {
+    --dpad-size: min(62cqi, 269px, 100cqb);
+  }
+  body.large-controls #ab {
+    --btn-size: min(calc(42cqi / 2.8), 65px, calc(100cqb / 2.8));
+  }
+  body.nds-mode #main-controls {
+    height: 200px;
+  }
+  body.nds-mode.large-controls #main-controls {
+    height: 269px;
+  }
+}
+
+/* 44px to tap on a touch screen, the drawn glyph unmoved (the app's
+   touchTarget): the toast's x, a dialog's close and the search's clear. */
+@media (pointer: coarse) {
+  .toast-close,
+  .lib-search-clear {
+    position: relative;
+  }
+  .toast-close::after,
+  .modal-close::after,
+  .lib-search-clear::after {
+    content: "";
+    position: absolute;
+  }
+  .toast-close::after {
+    inset: -10px;
+  }
+  .modal-close::after {
+    inset: -8px;
+  }
+  .lib-search-clear::after {
+    inset: -11px;
+  }
+}
