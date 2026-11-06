@@ -515,9 +515,11 @@ NEEDS_CART = {'f6q3', 'eesettle', 'eesettle4k', 'eestray', 'eestray4k', 'sramflo
 # probes are here from the start: they are recorded to score predictions
 # (`--score`), and one joins the gate once its cells are read and a model
 # matches them. hdmarace also names the race ROM lawrom.py writes for
-# hdmaobus (RACES), so it can never be frozen under its own name.
+# hdmaobus (RACES), so it can never be frozen under its own name (its 42
+# console cells, 2026-11-05, are dingbat's to the cell). timergeo and
+# obusdma16 were recorded the same day, matched as predicted, and are laws.
 OPEN_ROWS = {'keyirq2', 'keyirq3',
-             'timergeo', 'obusdma16', 'fifolog', 'psgrace', 'hdmarace',
+             'fifolog', 'psgrace', 'hdmarace',
              'f6slot_open', 'f6q_open', 'f6q3'}
 
 # frames a cell needs in the emulators where the default 8 is too few:

@@ -6799,7 +6799,9 @@ nothing was fitted to them.
 
 The 18 misses left are keyirq2's 2 and keyirq3's 16 (§61, OPEN_ROWS).
 
-**Predicted for a console run of hdmarace.s (none made).** The console
+**Predicted for a console run of hdmarace.s** (run 2026-11-05: as
+predicted, unrotated, 42/42; see "§79's last four probes on the
+console"). The console
 wakes from the park on the same cycle as the core (hdmaphase, halthb). If
 so, each cell should be unanimous and equal to the table above. If the
 wake differs by c cycles, the console's table should be this one with its
@@ -8686,6 +8688,61 @@ stale prefetcher wait were both taken off the clock, and bus.cycles went
 negative. The rule now skips a grant in internal cycles and never gives
 back more than the burst or the clock holds; the four play identically
 to the baseline.
+
+**§79's last four probes on the console, 2026-11-05.** timergeo,
+obusdma16, hdmarace and fifolog were written on 2026-10-14 with their
+answers predicted (`predicted.py`) and had never been run. All four were
+recorded with an empty slot (3 runs a cell, every cell one answer):
+
+| row | cells | console = dingbat | mGBA | settles |
+|---|---|---|---|---|
+| timergeo | 7 | 7/7 | 3/7 | the ÷64 edge on line 103 is at e = 7, and line 100's at e = 55 (item 3's table, to the cycle) |
+| obusdma16 | 12 | 12/12 | 12/12 | a 16-bit DMA leaves its halfword on both lanes (H1); H2, H3 and H4 are refuted |
+| hdmarace | 42 | 42/42 | 0/42 | the wake from the park is the core's cycle: every cell unanimous, item 1's table unrotated |
+| fifolog | 560 | 292/560 | 0/560 | see below |
+
+timergeo and obusdma16 are laws now (cyclelaws 5083 cells under both
+BIOSes). hdmarace stays in OPEN_ROWS only because its name is the race
+ROM lawrom.py writes for hdmaobus.
+
+fifolog logs the FIFO's refill stream as ten TM1 samples 3 cycles apart
+(a gap of 3 + L is an L-cycle burst before that read). Sample 0 is
+fifoffff's read. The October toy scores 366/560. It gets every k = 1 and
+k = 2 timeline with an empty FIFO, k = 4, and k = 3 with three words
+stored; it misses w = 3 at k = 1 and 2, and k = 3 with an empty FIFO.
+dingbat matches all of k = 4 and k = 3, w = 3, and 292 cells in all.
+- **k = 1: refills chain.** The console makes runs of back-to-back bursts
+  (10 + 8, or 10 + 8 + 8 before sample 0: extra 26), the CPU off the bus
+  throughout. That is the toy's rule, and dingbat's FIFO_HANDBACK_CHAIN
+  says the same, but dingbat gives the CPU cycles between the links. A
+  trace of k = 1, w = 0, n = 0 shows three things. First, the rest of the
+  first chained burst is requested on the cycle the chained read ends and
+  granted a cycle later. Second, run_pending re-checks the level at the
+  grant and refuses the next chain: its request was made on 13 bytes,
+  the grant sees B2's words in (16-17). The re-check's own comment says
+  "assumed; no ROM pins this", and this row pins it. Third, the events
+  due during a continued chain are only dispatched after the CPU's next
+  instruction, so the chained read lands 3 cycles late. Prototypes for the
+  first two (go straight on when the next request is due by the read's
+  end; no re-check for a hand-back request) moved 250 cells but none onto
+  the console's answer, because of the third, which is the scheduler's
+  re-entry from a pump inside a dispatch. Not landed.
+- **k = 2, w = 3: more refills than an empty FIFO gets.** With three
+  words stored the console runs a 20-cycle chain before sample 0, another
+  in the window, then a 9. dingbat and the toy run one burst. 12 bytes
+  plus one burst do not reach the request mark under any rule here, so
+  something about the CPU-stored words is unmodelled: the word count, or
+  the level the request reads.
+- Every FIFO rule dingbat has is confirmed here as well. Turning any one
+  off loses more fifolog cells than it gains, and loses fifoslot/f6q cells
+  too. FIFO_HANDBACK_CHAIN: +9 −45 (fifoslot −119). FIFO_DROP_BUSY: +15
+  −123. FIFO_REQ_BEFORE_POP: +18 −32 (f6q −300). FIFO_DMA_REQUEST_DELAY
+  3 / 5: +30 −63 / +4 −110. FIFO_LEVEL_AT_OVERFLOW and FIFO_WORD_WRAP: no
+  fifolog cell gained.
+
+No game runs a sound timer at 1-4 cycles (a game FIFO period is hundreds
+of cycles), so fifolog stays open. Its cells are the reference for the
+re-check and chain questions above.
 
 **dbsuite: three PSG rows accept the console's lottery.** A new case kind,
 K_ZRANGE (czrange): 0 or the range. psg-ch1-nr10-0-dies,

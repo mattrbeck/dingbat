@@ -26220,5 +26220,116 @@
     "want": "08000028"
    }
   ]
+ },
+ {
+  "payload": "timergeo",
+  "rom": "timergeo.gba",
+  "sha1": "04f2d398bb400ee9996c3762845541ab3100b0d8",
+  "frames": 116,
+  "cells": [
+   {
+    "id": "timergeo 0x46701",
+    "kind": "hex",
+    "want": "001204BD"
+   },
+   {
+    "id": "timergeo 0x56701",
+    "kind": "hex",
+    "want": "001204BE"
+   },
+   {
+    "id": "timergeo 0x66701",
+    "kind": "hex",
+    "want": "001204BF"
+   },
+   {
+    "id": "timergeo 0x76701",
+    "kind": "hex",
+    "want": "001304C0"
+   },
+   {
+    "id": "timergeo 0x86701",
+    "kind": "hex",
+    "want": "001304C1"
+   },
+   {
+    "id": "timergeo 0x366401",
+    "kind": "hex",
+    "want": "001304EF"
+   },
+   {
+    "id": "timergeo 0x376401",
+    "kind": "hex",
+    "want": "001404F0"
+   }
+  ]
+ },
+ {
+  "payload": "obusdma16",
+  "rom": "obusdma16.gba",
+  "sha1": "d366c4f2451c5ece4b4f0f5738f450d82c37c0e0",
+  "frames": 156,
+  "cells": [
+   {
+    "id": "obusdma16 0x0",
+    "kind": "hex",
+    "want": "BEE3BEE3"
+   },
+   {
+    "id": "obusdma16 0x4",
+    "kind": "hex",
+    "want": "33333333"
+   },
+   {
+    "id": "obusdma16 0x8",
+    "kind": "hex",
+    "want": "BEE3BEE3"
+   },
+   {
+    "id": "obusdma16 0xc",
+    "kind": "hex",
+    "want": "33333333"
+   },
+   {
+    "id": "obusdma16 0x10",
+    "kind": "hex",
+    "want": "BEE3BEE3"
+   },
+   {
+    "id": "obusdma16 0x14",
+    "kind": "hex",
+    "want": "33333333"
+   },
+   {
+    "id": "obusdma16 0x18",
+    "kind": "hex",
+    "want": "BEE3BEE3"
+   },
+   {
+    "id": "obusdma16 0x1c",
+    "kind": "hex",
+    "want": "33333333"
+   },
+   {
+    "id": "obusdma16 0x20",
+    "kind": "hex",
+    "want": "BEE3BEE3"
+   },
+   {
+    "id": "obusdma16 0x24",
+    "kind": "hex",
+    "want": "BEE3BEE3"
+   },
+   {
+    "id": "obusdma16 0x28",
+    "kind": "hex",
+    "want": "BEE3BEE3"
+   },
+   {
+    "id": "obusdma16 0x2c",
+    "kind": "hex",
+    "want": "DEADBEE3"
+   }
+  ]
  }
 ]
