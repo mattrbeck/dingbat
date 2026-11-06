@@ -738,6 +738,13 @@ the 3D to the core for the run without changing the choice
   - Fast-forward is the wrong measure there: it counts the core's frames
     per refresh, and a GPU-bound present holds them back (field 4x:
     43 fps Metal, 37 CPU).
+  - With the skip, as the app now runs (main 0ed14c6a, rewind on,
+    normal speed, two alternated pairs): the core's frame 9.9 / 11.2 ms
+    on the CPU at 1x against 9.75 / 10.5 ms on Metal at 1x (the Mac's
+    instructions say -5.5 %; wall time on the phone is noisy), 60 fps in
+    all; Metal 4x 60 fps (lowest 59). The library and session pictures
+    taken with the skip on show the 3D (SoulSilver's house), framed as
+    the CPU's.
   - So on this phone Metal makes 4x playable where the CPU's HD runs at
     a third (title) to three quarters (field) of full speed, and 2x
     steady where the CPU's dips to 51. Older phones (A11-A14) are
