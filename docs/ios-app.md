@@ -71,9 +71,12 @@ pull to sync against the fake Drive.
   controls centre on the whole width; a GB or GBA picture short of height
   under the bar folds the bar away (a tap on the picture brings it down)
   and takes the room clear of the column, as near the centre as that
-  allows. Settings › Video › Use the space under the camera, shown only
-  there, centres it at full size with the camera over a corner
-  (`PlayGeometry.foldBesideColumn`).
+  allows. Settings › Video › Picture held upright, shown only there: Under
+  the camera centres it at full size with the camera over a corner; Full
+  width, smaller buttons gives the controls the DS layout's measures (short
+  L/R, round Select/Start in the main row) and the picture the screen's
+  width under the bar, clear of the camera (`PlayGeometry.foldBesideColumn`,
+  `fullWidthPicture`).
 - **Files.** ROMs, saves and states are plain files in the app's Documents
   folder, visible in the Files app (layout in `RomLibrary.swift`). Exports
   go through the share sheet. There is no storage budget or eviction.

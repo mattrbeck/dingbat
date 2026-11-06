@@ -110,8 +110,8 @@ struct PlayGeometry: Equatable {
         var nds = false
         var ndsBarHide = true
         var joystick = false
-        /// Settings › Video › Use the space under the camera.
-        var underCamera = false
+        /// Settings › Video › Picture held upright (beside a status column).
+        var upright: Settings.UprightPicture = .clear
     }
 
     static func make(_ i: Inputs) -> PlayGeometry {
@@ -220,8 +220,8 @@ struct PlayGeometry: Equatable {
     /// (a tap on the picture brings it down) and the picture takes the room
     /// clear of the column, 16pt in from the other edge and the top so the
     /// screen's rounded corner keeps off it, as near the centre as that
-    /// allows. "Use the space under the camera" gives it the whole width
-    /// from the top edge, centred, the camera over its corner.
+    /// allows. "Under the camera" gives it the whole width from the top
+    /// edge, centred, the camera over its corner.
     private mutating func foldBesideColumn(_ i: Inputs) {
         let colL = safe.leading, colR = safe.trailing
         guard colL + colR > 0 else { return }
@@ -230,7 +230,7 @@ struct PlayGeometry: Equatable {
         func fitWidth(_ r: CGRect) -> CGFloat { max(0, min(r.width, r.height * aspect)) }
         let m: CGFloat = 16
         let box: CGRect
-        if i.underCamera {
+        if i.upright == .camera {
             box = CGRect(x: 0, y: safe.top, width: w, height: bottom - safe.top)
         } else {
             let x0 = colL > 0 ? colL : m, x1 = w - (colR > 0 ? colR : m)
@@ -246,6 +246,20 @@ struct PlayGeometry: Equatable {
             .offsetBy(dx: -stage.minX, dy: -stage.minY)
     }
 
+    /// "Full width, smaller buttons": the bar stays, and the picture takes
+    /// the room from 16pt under the bar (clear of the camera at the
+    /// column's top: the Duo's ends 67pt down) to the compact strip,
+    /// centred, as wide as the screen where the height allows (GBA 466 x
+    /// 311 on the Duo; GB, taller, 401 x 361).
+    private mutating func fullWidthPicture(_ i: Inputs) {
+        let aspect: CGFloat = i.isGB ? 10.0 / 9 : 3.0 / 2
+        let top = max(stage.minY, bar.maxY + 16)
+        let room = CGRect(x: 0, y: top, width: size.width, height: max(0, stage.maxY - top))
+        let pw = max(0, min(room.width, room.height * aspect)), ph = pw / aspect
+        pictureBox = CGRect(x: room.midX - pw / 2, y: room.midY - ph / 2, width: pw, height: ph)
+            .offsetBy(dx: -stage.minX, dy: -stage.minY)
+    }
+
     // MARK: portrait (phones, and tablets held upright)
 
     /// web #controls: a grid of the L/R row, the main cluster and
@@ -255,23 +269,32 @@ struct PlayGeometry: Equatable {
         let w = size.width, h = size.height
         let short = h <= 620
         let tablet = w >= 700
-        let padTop: CGFloat = short ? 10 : 14
-        let padBottom: CGFloat = (short ? 12 : 16) + safe.bottom
-        let gap: CGFloat = short ? 10 : 14
+        // "Full width, smaller buttons" beside a status column: the DS
+        // cluster's measures (ndsPortrait) -- short L/R at the strip's top
+        // corners, the main row 0.46 of the width, Select/Start small
+        // circles inside it -- so the picture gets the height it needs.
+        let compact = !tablet && i.upright == .full && safe.leading + safe.trailing > 0
+        let padTop: CGFloat = compact ? 8 : (short ? 10 : 14)
+        let padBottom: CGFloat = compact ? max(10, safe.bottom - 12) + (safe.bottom > 0 ? 16 : 0)
+                                         : (short ? 12 : 16) + safe.bottom
+        let gap: CGFloat = compact ? 8 : (short ? 10 : 14)
         // A phone held upright has side insets only for a status column
         // beside the picture: the iPhone Duo folded keeps 84pt on the right
         // for the clock, under a camera at its top. The bar keeps clear of
         // it; the controls under the stage need not, with the status bar
         // hidden, and centre on the screen.
         let padL: CGFloat = 16, padR: CGFloat = 16
-        let shoulderH: CGFloat = i.large ? 38 : (short ? 36 : 46)
+        let shoulderH: CGFloat = compact ? 28 : (i.large ? 38 : (short ? 36 : 46))
         let pillH: CGFloat = i.large ? 28 : (short ? 28 : 34)
         pillFont = i.large ? 10 : 11
-        let mainH = i.large ? min(0.64 * w, 330) : min(0.54 * w, 290)
+        let mainH = compact ? (i.large ? min(0.62 * (w - padL - padR), 330) : min(0.46 * (w - padL - padR), 240))
+                            : (i.large ? min(0.64 * w, 330) : min(0.54 * w, 290))
         let showLR = !i.isGB
         // Portrait tablets place Select/Start absolutely, inboard of the
-        // clusters; their grid row collapses (its gap stays).
-        let stripH = padTop + (showLR ? shoulderH + gap : 0) + mainH + gap + (tablet ? 0 : pillH) + padBottom
+        // clusters; their grid row collapses (its gap stays). Compact, they
+        // sit in the main row.
+        let stripH = compact ? padTop + (showLR ? shoulderH + gap : 0) + mainH + padBottom
+                             : padTop + (showLR ? shoulderH + gap : 0) + mainH + gap + (tablet ? 0 : pillH) + padBottom
 
         bar = CGRect(x: safe.leading, y: safe.top, width: w - safe.leading - safe.trailing, height: Self.barHeight)
         let stageTop = bar.maxY
@@ -281,12 +304,17 @@ struct PlayGeometry: Equatable {
         }
         strip = CGRect(x: 0, y: h - stripH, width: w, height: stripH)
         stage = CGRect(x: 0, y: stageTop, width: w, height: max(0, strip.minY - stageTop))
-        if !tablet { foldBesideColumn(i) }
+        if compact { fullWidthPicture(i) } else if !tablet { foldBesideColumn(i) }
 
         var f = ControlFrames()
         let cw = w - padL - padR
         let top = strip.minY + padTop
-        if showLR {
+        if showLR && compact {
+            f.l = CGRect(x: padL, y: top, width: 120, height: shoulderH)
+            f.r = CGRect(x: w - padR - 120, y: top, width: 120, height: shoulderH)
+            f.shoulderSlop = 6
+            f.shortShoulders = true
+        } else if showLR {
             let sw = tablet ? 200 : (cw - 14) / 2
             f.l = CGRect(x: padL, y: top, width: sw, height: shoulderH)
             f.r = CGRect(x: w - padR - sw, y: top, width: sw, height: shoulderH)
@@ -305,7 +333,14 @@ struct PlayGeometry: Equatable {
         if i.nds { placeDiamond(&f, in: ab, button: btn) } else { placeAB(&f, in: ab, button: btn) }
 
         let pw: CGFloat = i.large ? 120 : 150
-        if tablet {
+        if compact {
+            // ndsPortrait's: 28pt circles 22pt apart, centred, 12pt above
+            // the strip's bottom padding.
+            let cy = strip.maxY - padBottom - 12 - 28
+            f.select = CGRect(x: w / 2 - 11 - 28, y: cy, width: 28, height: 28)
+            f.start = CGRect(x: w / 2 + 11, y: cy, width: 28, height: 28)
+            f.circlePills = true
+        } else if tablet {
             // web: insets clear the cluster widths; the bottom lines the
             // pills up with the clusters' bottoms.
             let left = 28 + safe.leading + (i.large ? 330 : 240)
@@ -480,7 +515,7 @@ struct PlayLayout<Stage: View, Bar: View>: View {
                 regular: hSize == .regular && vSize == .regular, isGB: isGB,
                 large: settings.largeControls, hidden: model.gamepadHidesTouch,
                 nds: isNDS, ndsBarHide: nds.barHide, joystick: settings.controlStyle == .joystick,
-                underCamera: settings.underCamera))
+                upright: settings.uprightPicture))
             let origin = geo.frame(in: .global).origin
             ZStack(alignment: .topLeading) {
                 (palette.chromeTransparent ? Color.clear : palette.stage)
@@ -576,6 +611,13 @@ struct PlayLayout<Stage: View, Bar: View>: View {
                 }
             }
             .frame(width: g.size.width, height: g.bar.height)
+            // A bar narrower than the screen (beside a status column): its
+            // rule runs the whole width with the colour.
+            .overlay(alignment: .bottom) {
+                if !palette.chromeTransparent && g.bar.width < g.size.width {
+                    Rectangle().fill(palette.frameLine).frame(height: 1)
+                }
+            }
             .offset(y: g.bar.minY)
             bar
                 .frame(width: g.bar.width, height: g.bar.height)

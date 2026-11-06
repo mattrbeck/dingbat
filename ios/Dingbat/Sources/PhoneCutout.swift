@@ -29,7 +29,7 @@ enum PhoneCutout {
     }
 
     /// A phone whose screen held upright keeps a status column at the side
-    /// (the iPhone Duo folded): Video's "Use the space under the camera".
+    /// (the iPhone Duo folded): Video's "Picture held upright".
     static var hasSideColumn: Bool {
         if modelIdentifier == "iPhone19,4" { return true }   // iPhone Duo
         guard let w = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first,

@@ -318,6 +318,21 @@ final class NativeTouchesUITests: XCTestCase {
         until("brings the bar down") { menu.frame.minY >= 0 && menu.isHittable }
     }
 
+    /// The same with "Full width, smaller buttons": the bar stays, the
+    /// controls take the DS cluster's measures. Skipped elsewhere.
+    func testFoldedDuoFullWidth() throws {
+        let model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? ""
+        try XCTSkipUnless(model == "iPhone19,4", "the iPhone Duo's cover screen only (this is \(model))")
+        let app = launch(["-video.uprightPicture", "full"])
+        sleep(1)
+        let menu = app.buttons["Menu"].firstMatch
+        print("NATIVE: Duo full width, Menu \(menu.frame)")
+        XCTAssertTrue(menu.isHittable, "the bar stays")
+        snap(app, "duo-full-width")
+        menu.tap()
+        until("the menu opens from it") { menuOpen }
+    }
+
     func testSwitchesAreSwitches() {
         let app = launch(["-sheet", "settings:controls"])
         let haptics = app.switches["Haptic feedback"].firstMatch

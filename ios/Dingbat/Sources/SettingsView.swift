@@ -664,9 +664,12 @@ private struct VideoPane: View {
         }
         SheetToggleRow(label: "Integer scaling", sub: "Keep every pixel exactly the same size", isOn: $s.integerScale)
         if PhoneCutout.hasSideColumn {
-            SheetToggleRow(label: "Use the space under the camera",
-                           sub: "Held upright, the picture goes as large as it can, centered, and the camera covers a corner of it",
-                           isOn: $s.underCamera)
+            SheetFlowRow(label: "Picture held upright",
+                         sub: "Beside the camera; under it, larger and centered, the camera over a corner; or as wide as the screen with smaller buttons") {
+                SheetSelect(selection: $s.uprightPicture,
+                            options: Settings.UprightPicture.allCases.map { ($0, $0.label) },
+                            accessibilityLabel: "Picture held upright")
+            }
         }
         SheetToggleRow(label: "LCD response",
                        sub: "Colors settle slowly, the way the real screen did, so flickering sprites look see-through instead of blinking",
