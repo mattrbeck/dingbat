@@ -28,17 +28,33 @@ final class NdsState: ObservableObject {
     /// DS boot (dingbat_nds_set_hd).
     @Published var hd: Int { didSet { saveDisplay(); applyHd() } }
     static let hdScales = [1, 2, 3, 4]
-    /// HD 3D on the GPU (docs/nds/gpu3d.md, NdsGpu3d.swift; a prototype
-    /// behind the DEBUG `-nds-gpu 1|0` launch argument, saved): at 2x-4x the 3D
-    /// is drawn by Metal in place of the core's software HD. The CPU still
-    /// draws its 1x 3D (no skip): thumbnails, clips and the glow read the
-    /// core's own screens.
-    @Published var gpu: Bool { didSet { d.set(gpu, forKey: "nds-gpu3d"); applyHd() } }
+    /// "3D drawn by" (docs/nds/gpu3d.md "Metal"; the web's Settings >
+    /// Nintendo DS > 3D drawn by, `nds-display`'s `gpu`): the graphics card
+    /// (NdsGpu3d.swift, Metal) or the core. Automatic is the graphics card
+    /// wherever the renderer builds; Graphics card asks for it the same way
+    /// (every iOS device's GPU is a hardware one); Processor is the core.
+    enum GpuChoice: String, CaseIterable {
+        case auto, gpu, cpu
+        var label: String { self == .auto ? "Automatic" : self == .gpu ? "Graphics card" : "Processor" }
+    }
+    @Published var gpu: GpuChoice { didSet { saveDisplay(); applyHd() } }
     /// What the core is set to draw: the software HD scale, and whether it
     /// exports the scene for the GPU (which then draws at `hd`).
-    static func coreHd(_ hd: Int, gpu: Bool) -> (soft: Int, export: Bool) {
-        let on = gpu && hd > 1 && GameRenderer.shared.ndsGpuAvailable
+    static func coreHd(_ hd: Int, gpu: GpuChoice) -> (soft: Int, export: Bool) {
+        let on = gpu != .cpu && hd > 1 && GameRenderer.shared.ndsGpuAvailable
         return (on ? 1 : hd, on)
+    }
+    /// The line under "3D drawn by": what draws the 3D here, and why not the
+    /// graphics card when it was asked for (web ndsGpuStatus).
+    var gpuStatus: String {
+        if gpu == .cpu { return "" }
+        // (asking builds the renderer, once: its shaders compile)
+        if !GameRenderer.shared.ndsGpuAvailable {
+            let why = GameRenderer.shared.ndsGpuFailure ?? ""
+            return why.isEmpty ? "The graphics card stopped working, so the processor draws the 3D until dingbat restarts"
+                               : "The processor draws the 3D here: \(why)"
+        }
+        return "The graphics card draws the 3D here"
     }
     /// DEBUG `-nds-gpu-skip`: the skip too (the core's 1x screens then lack
     /// the 3D: thumbnails and clips do), to measure what it would add.
@@ -81,12 +97,13 @@ final class NdsState: ObservableObject {
         barHide = o["barHide"] as? Bool ?? true
         let k = (o["hd"] as? NSNumber)?.intValue ?? 1
         hd = Self.hdScales.contains(k) ? k : 1
-        gpu = d.bool(forKey: "nds-gpu3d")
+        gpu = (o["gpu"] as? String).flatMap(GpuChoice.init(rawValue:)) ?? .auto
         applyCore()
     }
 
     private func saveDisplay() {
-        let o: [String: Any] = ["swap": swap, "gap": gap.rawValue, "rot": rot, "barHide": barHide, "hd": hd]
+        let o: [String: Any] = ["swap": swap, "gap": gap.rawValue, "rot": rot, "barHide": barHide, "hd": hd,
+                                "gpu": gpu.rawValue]
         if let data = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) {
             d.set(String(decoding: data, as: UTF8.self), forKey: "nds-display")
         }
@@ -115,6 +132,14 @@ final class NdsState: ObservableObject {
         rot = 0
         barHide = true
         hd = 1
+        gpu = .auto
+    }
+
+    /// The renderer failed while drawing (GameRenderer): the core draws the
+    /// 3D for the rest of the run; the choice stays the player's.
+    func gpuFailed() {
+        applyCore()
+        objectWillChange.send()
     }
 
     func swapScreens() { swap.toggle() }

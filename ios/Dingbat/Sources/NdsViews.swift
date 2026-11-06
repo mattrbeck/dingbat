@@ -280,9 +280,14 @@ struct NdsSettingsPane: View {
             SheetChipPicker(selection: $nds.rot, options: NdsUtil.rotations.map { ($0, NdsUtil.rotLabel($0)) })
         }
         SheetFlowRow(label: "3D resolution",
-                     sub: "Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. Each step costs a lot more work a frame, so a slower device may not keep full speed") {
+                     sub: "Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. When the processor draws the 3D, each step costs a lot more work a frame, so a slower device may not keep full speed") {
             SheetChipPicker(selection: $nds.hd, options: NdsState.hdScales.map { ($0, $0 == 1 ? "Native" : "\($0)x") })
         }
+        SheetFlowRow(label: "3D drawn by",
+                     sub: "The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions keep full speed") {
+            SheetChipPicker(selection: $nds.gpu, options: NdsState.GpuChoice.allCases.map { ($0, $0.label) })
+        }
+        if !nds.gpuStatus.isEmpty { SheetHint(nds.gpuStatus) }
         SheetToggleRow(label: "Bottom screen first",
                        sub: "Swap the screens: the touch screen on top, or the large one in Focus (B on a keyboard)",
                        isOn: $nds.swap)

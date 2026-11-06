@@ -49,16 +49,20 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     private var ndsPipeline: MTLRenderPipelineState?
     private var gameTex: MTLTexture?
     private var borderTex: MTLTexture?
-    /// The DS's HD 3D on Metal (NdsGpu3d.swift), built on first use; nil
-    /// where it can't be (then the core's software HD draws).
+    /// The DS's 3D on Metal (NdsGpu3d.swift), built on first use; nil where
+    /// it can't be, or after it failed while drawing (then the core draws).
     private lazy var ndsGpu: NdsGpu3d? = {
-        guard let device else { return nil }
+        guard let device else { ndsGpuFailure = "this device has no Metal"; return nil }
         do { return try NdsGpu3d(device: device) } catch {
             NSLog("NdsGpu3d: %@", "\(error)")
+            ndsGpuFailure = "the graphics card can't run the renderer"
             return nil
         }
     }()
     var ndsGpuAvailable: Bool { ndsGpu != nil }
+    /// Why the renderer isn't drawing: nil while it can, "" once it failed
+    /// mid-run, else the reason it couldn't be built (NdsState.gpuStatus).
+    private(set) var ndsGpuFailure: String?
     /// The core exports its 3D for ndsGpu this frame (NdsState.coreHd).
     private var ndsGpuDrawing: Bool { dingbat_is_nds() != 0 && dingbat_nds_gpu_frames() > 0 }
     private var lastBorderGen: Int32 = -1
@@ -362,7 +366,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             do { tex = try gpu.encode(cmd, k: NdsState.shared.hd) ?? gameTex } catch {
                 NSLog("NdsGpu3d: %@", "\(error)")
                 ndsGpu = nil
-                NdsState.shared.gpu = false
+                ndsGpuFailure = ""
+                NdsState.shared.gpuFailed()
             }
         }
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }

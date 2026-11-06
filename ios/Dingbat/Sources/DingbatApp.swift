@@ -200,13 +200,13 @@ struct DingbatApp: App {
         // stylus self-test: the bottom screen's pixel aimed through the
         // layout and sent through the finger's mapping, `-nds-touch-after S`
         // seconds in, default 6), `-nds-hd 1|2|3|4` (3D resolution, saved),
-        // `-nds-gpu 1|0` (HD 3D drawn by Metal, saved: NdsState.gpu).
+        // `-nds-gpu 1|0|auto` (3D drawn by, saved: NdsState.gpu).
         if let l = value("-nds-layout").flatMap(NdsUtil.Arrangement.init(rawValue:)) { NdsState.shared.arrangement = l }
         if args.contains("-nds-swap") { NdsState.shared.swap = true }
         if let g = value("-nds-gap").flatMap(NdsUtil.Gap.init(rawValue:)) { NdsState.shared.gap = g }
         if let r = value("-nds-rot").flatMap(Int.init) { NdsState.shared.rot = r }
         if let k = value("-nds-hd").flatMap(Int.init), NdsState.hdScales.contains(k) { NdsState.shared.hd = k }
-        if let g = value("-nds-gpu") { NdsState.shared.gpu = g == "1" }
+        if let g = value("-nds-gpu") { NdsState.shared.gpu = g == "1" ? .gpu : g == "0" ? .cpu : .auto }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             if args.contains("-topbar-open") { model.topbarOpen = true }
             if args.contains("-nds-panel") { NdsState.shared.panelOpen = true }
