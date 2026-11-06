@@ -158,6 +158,12 @@ struct DingbatApp: App {
            let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
         }
+        // `-portrait`: upright, for a screen that opens sideways (the iPhone
+        // Duo unfolded).
+        if args.contains("-portrait"),
+           let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+        }
         if let t = value("-theme"), let theme = ThemeName(rawValue: t) {
             Settings.shared.theme = theme
         }
