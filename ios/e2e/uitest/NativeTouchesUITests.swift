@@ -181,6 +181,39 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertTrue(close.waitForNonExistence(timeout: 3), "a tap 3 pt outside the drawn Close closes")
     }
 
+    /// A toast raised while a sheet is up shows once, on the sheet: the root
+    /// stack underneath stays hidden while the sheet draws its own.
+    func testToastOverASheetShowsOnce() {
+        let app = launch(["-sheet", "states"])
+        let save = app.buttons["Save"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10), "Save States' Save")
+        save.tap()
+        let toast = app.staticTexts.matching(NSPredicate(format: "label == %@", "Saved to slot 1"))
+        XCTAssertTrue(toast.firstMatch.waitForExistence(timeout: 3), "the toast shows over the sheet")
+        snap(app, "toast-over-sheet")
+        let n = toast.count
+        print("NATIVE: \"Saved to slot 1\" drawn \(n) time(s)")
+        XCTAssertEqual(n, 1, "one toast, not one on the sheet and one behind it")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(save.waitForNonExistence(timeout: 3), "the sheet closes")
+        post("toast")
+        XCTAssertTrue(app.staticTexts["Debug toast"].waitForExistence(timeout: 3),
+                      "with the sheet gone the root stack shows toasts again")
+    }
+
+    /// The same under a short sheet in a game, where the root stack's copy
+    /// would show above the sheet's top edge.
+    func testToastOverAShortSheetShowsOnce() {
+        let app = launch(["-sheet", "link"])
+        XCTAssertTrue(app.staticTexts["Connect link cable"].waitForExistence(timeout: 10), "the link sheet")
+        post("toast")
+        let toast = app.staticTexts.matching(NSPredicate(format: "label == %@", "Debug toast"))
+        XCTAssertTrue(toast.firstMatch.waitForExistence(timeout: 3), "the toast shows")
+        snap(app, "toast-over-short-sheet")
+        print("NATIVE: \"Debug toast\" under the link sheet drawn \(toast.count) time(s) at \(toast.firstMatch.frame)")
+        XCTAssertEqual(toast.count, 1, "one toast")
+    }
+
     func testSwitchesAreSwitches() {
         let app = launch(["-sheet", "settings:controls"])
         let haptics = app.switches["Haptic feedback"].firstMatch

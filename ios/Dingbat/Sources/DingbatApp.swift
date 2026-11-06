@@ -361,12 +361,25 @@ struct SheetHost: View {
 struct ToastStack: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.palette) var palette
+    /// The copy a sheet draws over itself (sheetToasts).
+    var inSheet = false
 
     var body: some View {
+        let covered = !inSheet && model.sheetToastHosts > 0
+        ZStack {
+            Color.clear
+            if !covered { stack }
+        }
+        .allowsHitTesting(!covered && !model.toasts.isEmpty)
+            .onAppear { if inSheet { model.sheetToastHosts += 1 } }
+            .onDisappear { if inSheet { model.sheetToastHosts -= 1 } }
+    }
+
+    private var stack: some View {
         // In a game the stack sits under the top bar, clear of the touch
         // controls; on the home screen it is bottom-centre as on the web.
         let top = model.screen == .play
-        VStack(spacing: 8) {
+        return VStack(spacing: 8) {
             if !top { Spacer() }
             ForEach(model.toasts) { t in
                 HStack(spacing: 10) {
@@ -410,6 +423,5 @@ struct ToastStack: View {
         .padding(.bottom, top ? 0 : 24)
         .padding(.top, top ? 60 : 0)
         .animation(.easeOut(duration: 0.2), value: model.toasts.map(\.id))
-        .allowsHitTesting(!model.toasts.isEmpty)
     }
 }

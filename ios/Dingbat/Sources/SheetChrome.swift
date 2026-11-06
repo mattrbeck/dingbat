@@ -61,9 +61,10 @@ struct SheetChrome<Content: View>: View {
 
 extension View {
     /// The toast stack again, over the sheet: the one on the root view sits
-    /// underneath it ("Saved to slot 2" must show while Save States is up).
+    /// underneath it ("Saved to slot 2" must show while Save States is up),
+    /// and hides while this one is up.
     func sheetToasts() -> some View {
-        overlay(ToastStack().environmentObject(AppModel.shared))
+        overlay(ToastStack(inSheet: true).environmentObject(AppModel.shared))
     }
 }
 

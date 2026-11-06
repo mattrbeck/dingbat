@@ -84,6 +84,9 @@ final class AppModel: ObservableObject {
     /// "Games removed on another device": the games, answered by Continue
     /// (false) or Restore (true).
     @Published var tombstonePrompt: [String]?
+    /// Sheets on screen that draw their own toast stack (sheetToasts); while
+    /// one is up the root stack under it stays hidden, or a toast shows twice.
+    @Published var sheetToastHosts = 0
     /// One question about a file before it is accepted (web askRomWarn).
     @Published var romWarn: (title: String, text: String)?
     private var romWarnAnswer: CheckedContinuation<Bool, Never>?
