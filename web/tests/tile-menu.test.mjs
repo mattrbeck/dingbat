@@ -674,7 +674,7 @@ test("the bar's brand is inert, and out of the tab order, until it is showing",
   assert.equal(btn.tabIndex, 0);
 });
 
-// In a game the bar's brand is Main Menu; on the home screen it is back to the
+// In a game the bar's brand is Library; on the home screen it is back to the
 // top - including with a paused game behind the card, where it used to do
 // nothing at all.
 test("the bar's brand goes home from a game and to the top on the home screen",
@@ -689,7 +689,7 @@ test("the bar's brand goes home from a game and to the top on the home screen",
   const btn = app.document.getElementById("bar-brand");
 
   await btn.dispatch("pointerenter");
-  assert.equal(btn.title, "Main Menu");
+  assert.equal(btn.title, "Library");
   await btn.click();
   assert.equal(app.runIn("paused"), true, "the game froze behind the menu");
   assert.equal(app.document.body.classList.contains("running"), false,
