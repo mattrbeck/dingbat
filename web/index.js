@@ -13397,7 +13397,7 @@ const openRomPicker = () => {
   input.click();
 };
 
-// Every "Add a game": the empty state's, the library head's, and the pill
+// Every "Add a game": the empty state's, the library head's, and its twin
 // under a hero that is the whole library.
 for (let id of ["home-load", "lib-add", "home-solo-add"]) {
   document.getElementById(id)?.addEventListener("click", openRomPicker);
