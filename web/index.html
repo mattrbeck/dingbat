@@ -131,22 +131,28 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <div id="menu-dropdown" hidden>
-          <!-- Quick actions: four caption-less icon tiles, all non-destructive
-               (overwritable quick save, quick load with Undo, a closable modal,
-               a toggle). title and aria-label are the only text: they are the
-               tooltip and the accessible name. -->
+          <!-- Quick actions: four icon tiles with a one-word caption, all
+               non-destructive (overwritable quick save, quick load with Undo,
+               a closable modal, a toggle). aria-label is the full name; the
+               caption is aria-hidden so it is not read twice. A tile with a
+               keyboard shortcut gets the key in its tooltip from the
+               Settings list (data-for there). -->
           <div class="menu-quickrow" role="group" aria-label="Quick actions">
             <button type="button" class="menu-item" id="save-state" title="Quick Save" aria-label="Quick Save">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h11l3 3v11H5zM8 5v4h7V5M8 19v-6h8v6"/></svg>
+              <span class="menu-quick-label" aria-hidden="true">Save</span>
             </button>
             <button type="button" class="menu-item" id="load-state" title="Quick Load" aria-label="Quick Load">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h11l3 3v11H5z"/><path d="M12 17v-7M9 12.5l3-3 3 3"/></svg>
+              <span class="menu-quick-label" aria-hidden="true">Load</span>
             </button>
             <button type="button" class="menu-item" id="open-rewind-scrub" title="Rewind to a Moment" aria-label="Rewind to a Moment">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4.6" width="19" height="14.8" rx="1.6"/><path d="M2.5 8.6h19M2.5 15.4h19M7.3 4.6v4M12 4.6v4M16.8 4.6v4M7.3 15.4v4M12 15.4v4M16.8 15.4v4"/></svg>
+              <span class="menu-quick-label" aria-hidden="true">Rewind</span>
             </button>
             <button type="button" class="menu-item" id="slow-motion" title="Slow Motion" aria-label="Slow Motion" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.2 15.6a6.8 5.8 0 0 1 13.6 0"/><path d="M5.2 15.6h13.6M9.7 10.3v5.3M14.3 10.3v5.3"/><path d="M18.8 12.9c1.6.1 2.6 1 2.6 2 0 .8-.6 1.4-1.4 1.4"/><path d="M8.3 15.6v2.6M15.7 15.6v2.6M5.2 15l-2.6.9"/></svg>
+              <span class="menu-quick-label" aria-hidden="true">Slow</span>
             </button>
           </div>
           <button type="button" class="menu-item" id="main-menu">
@@ -229,11 +235,13 @@
         <button type="button" class="icon-btn" id="frame-step" title="Step one frame" aria-label="Step one frame">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14"/><path d="M11 5l9 7-9 7z" fill="currentColor" stroke="none"/></svg>
         </button>
-        <button type="button" class="icon-btn" id="speed-2x-btn" title="2x Speed" aria-label="2x Speed">
+        <button type="button" class="icon-btn speed-btn" id="speed-2x-btn" title="2x Speed" aria-label="2x Speed">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v12l8-6zM13 6v12l8-6z" fill="currentColor" stroke="none"/></svg>
+          <span class="speed-cap" aria-hidden="true">2&times;</span>
         </button>
-        <button type="button" class="icon-btn" id="fast-forward" title="Fast Forward (unbounded)" aria-label="Fast Forward (unbounded)">
+        <button type="button" class="icon-btn speed-btn" id="fast-forward" title="Fast Forward, unbounded" aria-label="Fast Forward (unbounded)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 6v12l6.5-6zM9 6v12l6.5-6zM16 6v12l6.5-6z" fill="currentColor" stroke="none"/></svg>
+          <span class="speed-cap" aria-hidden="true">max</span>
         </button>
       </div>
 
@@ -1168,17 +1176,17 @@
                   <div class="modal-subhead">Shortcuts</div>
                   <div id="kb-shortcuts">
                     <div class="kb-shortcut"><span>Pause / Resume</span><kbd>Space</kbd></div>
-                    <div class="kb-shortcut"><span>Fast forward (hold)</span><kbd>Tab</kbd></div>
-                    <div class="kb-shortcut"><span>2&times; speed</span><kbd>Shift+Tab</kbd></div>
-                    <div class="kb-shortcut"><span>Slow motion</span><kbd>Shift+`</kbd></div>
+                    <div class="kb-shortcut" data-for="fast-forward"><span>Fast forward (hold)</span><kbd>Tab</kbd></div>
+                    <div class="kb-shortcut" data-for="speed-2x-btn"><span>2&times; speed</span><kbd>Shift+Tab</kbd></div>
+                    <div class="kb-shortcut" data-for="slow-motion"><span>Slow motion</span><kbd>Shift+`</kbd></div>
                     <div class="kb-shortcut" id="kb-shortcut-rewind"><span>Rewind (hold)</span><kbd>`</kbd></div>
                     <div class="kb-shortcut"><span>Pause &amp; step one frame</span><kbd>.</kbd></div>
                     <div class="kb-shortcut"><span>Fullscreen</span><kbd>F</kbd></div>
                     <div class="kb-shortcut"><span>Zoom the screen (double-click resets)</span><kbd>Ctrl+Scroll</kbd></div>
                     <div class="kb-shortcut"><span>Mute</span><kbd>M</kbd></div>
                     <div class="kb-shortcut"><span>Show inputs on screen</span><kbd>I</kbd></div>
-                    <div class="kb-shortcut"><span>Save state</span><kbd>F5</kbd></div>
-                    <div class="kb-shortcut"><span>Load state</span><kbd>F8</kbd></div>
+                    <div class="kb-shortcut" data-for="save-state"><span>Save state</span><kbd>F5</kbd></div>
+                    <div class="kb-shortcut" data-for="load-state"><span>Load state</span><kbd>F8</kbd></div>
                     <div class="kb-shortcut"><span>Screenshot</span><kbd>F9</kbd></div>
                     <div class="kb-shortcut ds-beta-only"><span>DS: next screen arrangement</span><kbd>V</kbd></div>
                     <div class="kb-shortcut ds-beta-only"><span>DS: swap the screens</span><kbd>B</kbd></div>

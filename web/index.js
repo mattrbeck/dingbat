@@ -14463,6 +14463,20 @@ const RW_DBLTAP_SLOP = 28;    // px a press may travel, and the two taps may dif
 const saveStateItem = document.getElementById("save-state");
 const loadStateItem = document.getElementById("load-state");
 
+// A button a shortcut also presses names its key in its tooltip, "Quick Save
+// (F5)" as the DS swap button's "(B)". The key is read off the Settings row
+// that lists it (data-for = the button's id), so the tooltip and the list a
+// player reads cannot disagree; a "(hold)" row says "hold Tab". Only buttons
+// whose title code never rewrites (not Pause / Resume, Mute, Fullscreen).
+for (const row of document.querySelectorAll("#kb-shortcuts .kb-shortcut[data-for]")) {
+  const key = row.querySelector("kbd")?.textContent;
+  const btn = document.getElementById(/** @type {HTMLElement} */ (row).dataset.for);
+  if (!key || !btn) continue;
+  const hold = /\(hold\)/.test(row.querySelector("span")?.textContent || "");
+  btn.title += " (" + (hold ? "hold " : "") + key + ")";
+  btn.setAttribute("aria-keyshortcuts", key);
+}
+
 const anyModalOpen = () => !!document.querySelector(".modal-overlay.open");
 // netplay.js loads after index.js, so netMode may not exist yet.
 const netActive = () => typeof netMode !== "undefined" && !!netMode;

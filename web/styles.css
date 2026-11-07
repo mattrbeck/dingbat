@@ -1282,11 +1282,12 @@ body.has-game #save-sep {
 }
 
 /* --- Quick-action row ---------------------------------------------------
-   Quick Save / Quick Load / Rewind / Slow Motion as four caption-less icon
-   tiles (all consequence-free actions). title and aria-label are the only
-   textual affordance (tooltip + accessible name): never drop them. 198px of
-   content minus 18px of gaps = 45px per tile against 48px tall; both axes
-   clear the 44pt tap minimum. */
+   Quick Save / Quick Load / Rewind / Slow Motion as four icon tiles (all
+   consequence-free actions), each with a one-word caption under the glyph:
+   the film strip and the turtle do not explain themselves. aria-label stays
+   the accessible name and title the tooltip (with the key). 198px of content
+   minus 18px of gaps = 45px per tile against 55px tall; both axes clear the
+   44pt tap minimum. */
 .menu-quickrow {
   display: flex;
   gap: 4px;
@@ -1296,19 +1297,27 @@ body.has-game #save-sep {
 .menu-quickrow .menu-item {
   flex: 1 1 0;
   min-width: 0;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
-  /* 48 x 45px: over the 44pt tap minimum in both axes. */
-  padding: 10px 2px;
+  gap: 3px;
+  padding: 8px 2px 6px;
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
 
-/* 26px glyph (no caption). Stroke stays at 1.7: heavier closes up the film
-   strip's sprocket holes and the turtle's shell. */
+/* 24px glyph over its caption. Stroke stays at 1.7: heavier closes up the
+   film strip's sprocket holes and the turtle's shell. */
 .menu-quickrow .menu-item svg {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
+}
+
+.menu-quick-label {
+  font-size: 11px;
+  line-height: 13px;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .menu-quickrow .menu-item:hover {
@@ -1316,8 +1325,8 @@ body.has-game #save-sep {
   border-color: var(--border-2);
 }
 
-/* Slow Motion is a toggle, and with no caption the surface and the glyph are
-   the only places the on-state can show at all. */
+/* Slow Motion is a toggle: the surface, the glyph and the caption all say
+   it is on. */
 .menu-quickrow #slow-motion.active {
   background: rgba(var(--accent-rgb), 0.14);
   border-color: rgba(var(--accent-rgb), 0.45);
@@ -1325,6 +1334,31 @@ body.has-game #save-sep {
 
 .menu-quickrow #slow-motion.active svg {
   stroke: var(--accent);
+}
+
+.menu-quickrow #slow-motion.active .menu-quick-label {
+  color: var(--accent);
+}
+
+/* 2x and unbounded fast-forward: the same glyph family, told apart by a tiny
+   caption under it ("2×", "max") instead of only by their tooltips. The
+   button stays its size; the glyph gives up 4px to make room. */
+.speed-btn {
+  flex-direction: column;
+  gap: 0;
+}
+
+.icon-btn.speed-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.speed-cap {
+  margin-top: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 9px;
+  letter-spacing: 0.02em;
 }
 
 /* The wrapper must hide with its tiles (has-game and the link/rollback/net
@@ -7487,6 +7521,14 @@ body.rewind-off #report-slider {
   #playback-controls .icon-btn svg {
     width: 17px;
     height: 17px;
+  }
+  #playback-controls .speed-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  #playback-controls .speed-cap {
+    font-size: 8px;
+    line-height: 8px;
   }
   #playback-controls .icon-btn.active {
     background: linear-gradient(180deg, var(--accent-tint-top), var(--btn-active-bottom));
