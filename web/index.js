@@ -7029,6 +7029,22 @@ const framebufferSig = (heap) => {
   return h;
 };
 
+// A screen of one colour - a boot's white, a fade's black - is not a picture
+// of the game, and stored it shows as a slab (and a glow of it in the hero).
+// A 16x16 grid of samples: blank when all but a few match the first.
+const framebufferBlank = (heap, w, h) => {
+  let r0 = -1, g0 = 0, b0 = 0, off = 0;
+  for (let y = 0; y < 16; y++) {
+    let row = Math.floor((y + 0.5) * h / 16) * w;
+    for (let x = 0; x < 16; x++) {
+      let i = (row + Math.floor((x + 0.5) * w / 16)) * 4;
+      if (r0 < 0) { r0 = heap[i]; g0 = heap[i + 1]; b0 = heap[i + 2]; continue; }
+      if (Math.abs(heap[i] - r0) + Math.abs(heap[i + 1] - g0) + Math.abs(heap[i + 2] - b0) > 24) off++;
+    }
+  }
+  return off <= 5;
+};
+
 // Paint the framebuffer at native size, scale it up by FRAME_SCALE with
 // smoothing off (crisp pixels; the JPEG softens enough on its own). Resolves
 // null where toBlob is missing (the test harness's canvas stand-in).
@@ -7079,6 +7095,9 @@ const storeLastFrame = ({ force = false } = {}) => {
   const fb = copyFramebuffer();
   if (!fb) return Promise.resolve();
   const { heap, w, h } = fb;
+  // Not even on a pause: the picture already stored (or the cartridge) is
+  // a better face than a blank screen.
+  if (framebufferBlank(heap, w, h)) return Promise.resolve();
   const sig = framebufferSig(heap);
   if (!force && sig === lastFrameSig) return Promise.resolve();
   lastFrameSig = sig;
@@ -8116,6 +8135,8 @@ const refreshHomeRecent = async () => {
       img.src = url;
       img.alt = "";
       thumb.replaceChildren(img);
+      // The same picture, blurred, in the bars a 10:9 or 4:3 one leaves.
+      thumb.style.setProperty("--thumb-pic", 'url("' + url + '")');
       tile.classList.remove("no-art");
       return img;
     };
@@ -15784,9 +15805,26 @@ const thumbsPictureOne = async (cand, run, remote) => {
   }
   if (run.cancelled || currentRomName) return false;
   let [w, h] = ext === ".gba" ? [240, 160] : [160, 144];
-  let ptr = Module._wasm_fb_ptr();
-  if (!ptr) return false;
-  let heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice();
+  const grab = () => {
+    let ptr = Module._wasm_fb_ptr();
+    return ptr ? new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice() : null;
+  };
+  let heap = grab();
+  // A blank screen (still on a boot's white, or in a fade): run on to the
+  // next one that isn't, for up to as long again; still blank, no picture,
+  // and the tile keeps its cartridge.
+  let more = performance.now() + THUMBS_BOOT_MS;
+  while (heap && framebufferBlank(heap, w, h) && performance.now() < more) {
+    if (run.cancelled || currentRomName) return false;
+    for (let i = 0; i < THUMBS_CHUNK; i++) Module._loop_tick();
+    if (Module._clearAudioBuffer) Module._clearAudioBuffer();
+    await new Promise((r) => setTimeout(r, 0));
+    heap = grab();
+  }
+  if (!heap || run.cancelled || currentRomName || framebufferBlank(heap, w, h)) {
+    try { FS.unlink("thumb.sav"); } catch {}
+    return false;
+  }
   let sgb = Module._wasm_sgb_active && Module._wasm_sgb_active();
   shadeFramebuffer(heap, w, h, pictureShades(isMonoPanelRom(romFile) && !sgb));
   let blob = await frameBlobFromFb(heap, w, h);

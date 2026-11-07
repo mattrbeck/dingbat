@@ -103,7 +103,7 @@ test("a capture queues its upload when signed in, and flush sends it", async () 
   app.api.currentRomName = "rom.gba";
   app.api.currentOriginalName = "A.gba";
   app.runIn(`
-    globalThis.Module = { _wasm_fb_ptr: () => 16, memory: { buffer: new ArrayBuffer(16 + 240 * 160 * 4) } };
+    globalThis.Module = { _wasm_fb_ptr: () => 16, memory: { buffer: new Uint8Array(16 + 240 * 160 * 4).map((_, i) => i * 7).buffer } };
     const realCreate = document.createElement.bind(document);
     document.createElement = (tag) => {
       const el = realCreate(tag);
@@ -126,7 +126,7 @@ test("signed out, a capture queues nothing", async () => {
   app.api.currentRomName = "rom.gba";
   app.api.currentOriginalName = "A.gba";
   app.runIn(`
-    globalThis.Module = { _wasm_fb_ptr: () => 16, memory: { buffer: new ArrayBuffer(16 + 240 * 160 * 4) } };
+    globalThis.Module = { _wasm_fb_ptr: () => 16, memory: { buffer: new Uint8Array(16 + 240 * 160 * 4).map((_, i) => i * 7).buffer } };
     const realCreate = document.createElement.bind(document);
     document.createElement = (tag) => {
       const el = realCreate(tag);

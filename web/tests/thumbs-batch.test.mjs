@@ -11,7 +11,8 @@ import { loadApp, u8, eq, settle, jsonRes, bytesRes } from "./helpers.mjs";
 const FILES_URL = "https://www.googleapis.com/drive/v3/files";
 
 // A wasm stand-in: counts ticks and state loads; a 240x160 framebuffer at
-// offset 16 of `memory`; a canvas whose toBlob yields a JPEG.
+// offset 16 of `memory`, with something on it (a blank one is not kept);
+// a canvas whose toBlob yields a JPEG.
 const stubModule = (app) => app.runIn(`
   globalThis.__ticks = 0; globalThis.__inits = []; globalThis.__loads = 0;
   globalThis.Module = {
@@ -21,7 +22,7 @@ const stubModule = (app) => app.runIn(`
     _wasm_fb_ptr: () => 16,
     _wasm_load_state: () => { __loads++; return 1; },
     _malloc: () => 8, _free: () => {},
-    memory: { buffer: new ArrayBuffer(16 + 240 * 160 * 4) },
+    memory: { buffer: new Uint8Array(16 + 240 * 160 * 4).map((_, i) => i * 7).buffer },
   };
   const realCreate = document.createElement.bind(document);
   document.createElement = (tag) => {
@@ -258,6 +259,31 @@ test("every unpictured local game is booted, resumed where it can be, and pictur
   assert.ok(!app.sandbox.FS.files.has("thumb.sav"), "the scratch battery save is gone");
   assert.ok(!modalOpen(app), "the box closes when the run ends");
   assert.ok(app.toasts.some((t) => /2 pictures added/.test(t)), app.toasts.join(" | "));
+});
+
+test("a blank screen is not a picture: the run waits for one that isn't, or keeps the cartridge", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba"]);
+  // White through the boot and 60 frames past it, then something on screen.
+  app.runIn(`
+    new Uint8Array(Module.memory.buffer).fill(255);
+    Module._loop_tick = () => {
+      if (++__ticks === THUMBS_BOOT_FRAMES + 60) {
+        const m = new Uint8Array(Module.memory.buffer);
+        for (let i = 0; i < m.length; i++) m[i] = i * 7;
+      }
+    };`);
+  assert.equal(await app.api.runThumbnailBatch(), 1);
+  assert.ok(app.idb.get("frame:A.gba") instanceof Blob);
+  assert.equal(app.runIn("__ticks"), app.api.THUMBS_BOOT_FRAMES + 60, "stopped at the first real screen");
+
+  // White for good: no picture, and the tile keeps its cartridge.
+  app.idb.delete("frame:A.gba");
+  app.runIn("new Uint8Array(Module.memory.buffer).fill(255); Module._loop_tick = () => { __ticks++; };");
+  assert.equal(await app.api.runThumbnailBatch(), 0);
+  assert.equal(app.idb.get("frame:A.gba"), undefined);
+  assert.ok(!app.sandbox.FS.files.has("thumb.sav"), "the scratch battery save is gone");
 });
 
 test("Drive-only games are fetched, pictured, and never written to the device", async () => {
