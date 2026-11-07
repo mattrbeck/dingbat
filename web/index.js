@@ -4258,6 +4258,8 @@ const applyRemoteRename = async (from, to) => {
     return null;
   }
   syncState = renamed(syncState);
+  // Typed on the other device: shown as typed here too.
+  await noteUserName(from, to).catch(() => {});
   if (Array.isArray(printerPhotos)) {
     for (let p of printerPhotos) if (p?.game === from) p.game = to;
   }
@@ -5129,6 +5131,7 @@ const renameGame = async (oldName, newName) => {
   }
 
   if (renamed) scheduleFlush();
+  await noteUserName(oldName, newName).catch(() => {});
   if (Array.isArray(printerPhotos)) {
     for (let p of printerPhotos) if (p?.game === oldName) p.game = newName;
   }
@@ -7580,6 +7583,8 @@ const tileMenuEntries = (name, f) => {
 // nothing else can say is that a freed game left its save behind.
 const tileMenuStatus = (name, f) => {
   let bits = [systemOf(name)];
+  let region = regionOf(name);
+  if (region) bits.push(region);
   // DS games never sync (driveExcluded): say so where sync is in play.
   if (isNdsRomName(name) && driveLinked()) bits.push("this device only");
   let size = romSizeOf(name);
@@ -7621,6 +7626,10 @@ const buildTileMenuHead = (name, f) => {
   title.id = "tile-menu-title";
   title.textContent = displayName(name);
   title.title = name;
+  // The file name the title was made from, as stored (and as Rename edits it).
+  let file = document.createElement("span");
+  file.className = "tile-menu-file";
+  file.textContent = name;
   let status = document.createElement("span");
   status.className = "tile-menu-status";
   status.textContent = tileMenuStatus(name, f);
@@ -7635,7 +7644,7 @@ const buildTileMenuHead = (name, f) => {
       })
       .catch(() => {});
   }
-  text.append(title, status);
+  text.append(title, file, status);
   tileMenuHead.replaceChildren(pic, text);
 };
 
@@ -8051,7 +8060,7 @@ const refreshHomeRecent = async () => {
   // Entries without local bytes render as Drive-only download tiles, signed
   // in or not (a tap prompts sign-in).
   let localRoms = new Set();
-  let keys = await dbKeys();
+  let [keys] = await Promise.all([dbKeys(), loadUserNames()]);
   // A newer render may have started during that await.
   if (gen !== homeRenderGen) return;
   for (let k of keys) {
@@ -8069,6 +8078,11 @@ const refreshHomeRecent = async () => {
     for (let n of stale) delete romSizes[n];
     dbPut(ROM_SIZES_KEY, romSizes);
   }
+  let gone = [...userNames].filter((n) => !live.has(n));
+  if (gone.length) {
+    for (let n of gone) userNames.delete(n);
+    dbPut(USER_NAMES_KEY, [...userNames]);
+  }
   roms = sortRoms(roms);
   let tiles = [];
   let pictures = []; // each tile's picture, decoded (The first picture)
@@ -8081,8 +8095,9 @@ const refreshHomeRecent = async () => {
     // no-art until a picture arrives: the chip stands in for it.
     tile.className = "home-tile no-art" +
       (missing ? " home-tile-missing" : driveOnly ? " home-tile-cloud" : "");
-    // What the filter reads: the name folded the way the search folds it.
-    tile.dataset.name = libFold(displayName(romName));
+    // What the filter reads: the title and the file name, each folded the
+    // way the search folds it ("the legend of zelda", "usa").
+    tile.dataset.name = libFold(displayName(romName)) + "|" + libFold(stripExt(romName) || romName);
     tile.dataset.rom = romName; // what syncHomeCurrent matches the card by
     tile.dataset.system = system;
     // "missing" is on neither side of the location chips, so neither claims
@@ -8363,30 +8378,76 @@ document.getElementById("export-save").addEventListener("click", async () => {
 });
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
-const displayName = (name) => stripExt(name) || name;
+
+// --- Titles ------------------------------------------------------------------
+// A game is shown by its title, not its file name: file names carry dump
+// tags, region and release numbers that name nothing about the game, and on
+// a phone the cut lands on the part you need. The file name itself stays in
+// the tile's tooltip, its menu head and Rename.
+//   "Legend of Zelda, The - Link's Awakening (USA, Europe).gb"
+//                                    -> The Legend of Zelda: Link's Awakening
+//   "Mario Kart Super Circuit (E) [!].gba" -> Mario Kart Super Circuit
+//   "0412 - Metroid Fusion (U).gba"   -> Metroid Fusion
+const cleanTitle = (name) => {
+  let s = stripExt(name) || name;
+  s = s.replace(/\s*[([][^)\]]*[)\]]/g, "");            // (U) [!] (Rev 1) (En,Fr)
+  s = s.replace(/^\s*\d{3,5}\s*-\s*/, "");                // "0412 - "
+  s = s.replace(/^([^,]+),\s*(The|A|An)\b/i, "$2 $1");     // "Zelda, The"
+  s = s.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  return s.replace(/ - /, ": ") || name;                  // "Zelda - Link's" -> "Zelda: Link's"
+};
+
+// Names the player typed in Rename are theirs and are shown exactly as typed.
+// Local, like romsizes: a rename made here or applied from another device
+// adds its new name; the library render drops names that have left.
+const USER_NAMES_KEY = "usernames";
+/** @type {Set<string>} */
+let userNames = new Set();
+let userNamesLoaded = false;
+const loadUserNames = async () => {
+  if (userNamesLoaded) return;
+  let v = await dbGet(USER_NAMES_KEY).catch(() => null);
+  if (Array.isArray(v)) for (let n of v) if (typeof n === "string") userNames.add(n);
+  userNamesLoaded = true;
+};
+const noteUserName = async (from, to) => {
+  await loadUserNames();
+  userNames.delete(from);
+  userNames.add(to);
+  await dbPut(USER_NAMES_KEY, [...userNames]);
+};
+
+const displayName = (name) => (userNames.has(name) ? stripExt(name) || name : cleanTitle(name));
+
+// The region a file name carries, for the menu head: "(USA, Europe)" as
+// written, and the one-letter dump codes spelled out ("(E)", "(UE)").
+const REGION_WORDS = new Set(["USA", "Europe", "Japan", "World", "Asia", "Australia", "Brazil",
+  "Canada", "China", "France", "Germany", "Italy", "Korea", "Netherlands", "Spain", "Sweden", "UK"]);
+const REGION_CODES = { U: "USA", E: "Europe", J: "Japan", W: "World", K: "Korea",
+  F: "France", G: "Germany", S: "Spain", I: "Italy" };
+const regionOf = (name) => {
+  for (let m of (stripExt(name) || name).matchAll(/\(([^)]*)\)/g)) {
+    let t = m[1].trim();
+    if (/^[UEJWKFGSI]{1,3}$/.test(t)) return [...t].map((c) => REGION_CODES[c]).join(", ");
+    if (t && t.split(/\s*,\s*/).every((w) => REGION_WORDS.has(w))) return t;
+  }
+  return "";
+};
 
 // --- Cartridge labels ------------------------------------------------------
 // A game with no picture yet gets a cartridge of its system's shape, and on
 // its label a short mark to tell it from the next one: two initials and a
 // sequel's number. The mark comes from a tidied title - file names carry dump
-// tags and release numbers that name nothing about the game - which is used
-// for the label only; the tile's own name is the library's.
+// tags and release numbers that name nothing about the game (cleanTitle).
 //   "0412 - Metroid Fusion (U) [!].gba"          -> Metroid Fusion       -> MF
 //   "Legend of Zelda, The - The Minish Cap (U)"  -> The Legend of ...    -> LZ
 //   "GoodboyGalaxy.gba" -> GG   "advance_wars_2.gba" -> AW2
 //   "Final Fantasy VI Advance (J)" -> FF6   "TETRIS.gb" -> Te
-const cartTitle = (name) => {
-  let s = stripExt(name) || name;
-  s = s.replace(/\s*[([][^)\]]*[)\]]/g, "");            // (U) [!] (Rev 1) (En,Fr)
-  s = s.replace(/^\s*\d{3,5}\s*-\s*/, "");                // "0412 - "
-  s = s.replace(/^([^,]+),\s*(The|A|An)\b/i, "$2 $1");     // "Zelda, The"
-  return s.replace(/_/g, " ").replace(/\s+/g, " ").trim() || name;
-};
 const CART_SMALL_WORDS = new Set(["the", "a", "an", "of", "and", "version", "edition"]);
 // No V or X: "Mega Man X" is not the tenth.
 const CART_ROMAN = { ii: 2, iii: 3, iv: 4, vi: 6, vii: 7, viii: 8, ix: 9 };
 const cartLabelFor = (name) => {
-  const bare = cartTitle(name).replace(/['\u2019]/g, "");
+  const bare = cleanTitle(name).replace(/['\u2019]/g, "");
   // One run with no spaces is split where its capitals and digits start.
   const src = /[\s_]/.test(bare) ? bare
     : bare.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Za-z])(\d)/g, "$1 $2");

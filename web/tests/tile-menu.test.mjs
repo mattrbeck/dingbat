@@ -47,8 +47,10 @@ const rows = (app) => items(app).map((b) => [
 ]);
 const labels = (app) => rows(app).map((r) => r[0]);
 const item = (app, label) => items(app).find((b) => labelOf(b) === label);
-const status = (app) =>
-  app.document.getElementById("tile-menu-head").children[1].children[1].textContent;
+// The head's text: title, file name, status.
+const headLine = (app, i) =>
+  app.document.getElementById("tile-menu-head").children[1].children[i].textContent;
+const status = (app) => headLine(app, 2);
 
 const open = async (app, name) => {
   const tile = tileOf(app, name);
@@ -96,6 +98,16 @@ test("never signed in: Rename, Reset, Delete — and nothing that needs explaini
     ["Delete", "", false],
   ]);
   assert.equal(status(app), "GBC · 4 B", "the system, and what it costs");
+});
+
+test("the head: the game's title, its file name, and the region the name carried", async () => {
+  const app = await loadApp();
+  seed(app, ["Legend of Zelda, The - Link's Awakening (USA, Europe).gb"]);
+  await boot(app);
+  await open(app, "Legend of Zelda, The - Link's Awakening (USA, Europe).gb");
+  assert.equal(headLine(app, 0), "The Legend of Zelda: Link's Awakening");
+  assert.equal(headLine(app, 1), "Legend of Zelda, The - Link's Awakening (USA, Europe).gb");
+  assert.equal(status(app), "GB · USA, Europe · 4 B");
 });
 
 test("a local game with a save: Reset is live, and still says nothing", async () => {

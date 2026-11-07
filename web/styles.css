@@ -3860,12 +3860,19 @@ body.pad-nav :is(button, input, select, [tabindex]):focus {
   padding: 8px 10px;
 }
 
+/* Up to two lines: a title is short enough to fit in two once its dump
+   tags are gone (index.js cleanTitle), and one line cut it mid-word on a
+   phone. */
 .home-tile-name {
   flex: 1 1 auto;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  line-height: 1.3;
   font-size: 13px;
 }
 
@@ -8593,11 +8600,23 @@ body.running.sync-shown #status {
   min-width: 0;
 }
 .tile-menu-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  line-height: 1.3;
+  font-size: 13px;
+  font-weight: 600;
+}
+/* The file name the title came from: there to be checked, not read. */
+.tile-menu-file {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 .tile-menu-status {
   font-size: 11px;
@@ -8732,6 +8751,7 @@ body.running.sync-shown #status {
   .tile-menu-title {
     font-size: 15px;
   }
+  .tile-menu-file,
   .tile-menu-status {
     font-size: 12px;
   }
