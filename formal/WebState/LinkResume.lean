@@ -48,7 +48,7 @@ no RESUME in 10 s, ICE failure, the server dropping a socket) is one
   press 0. Off: through 8362053b, where whichever message arrived last won.
 * `byeWhy`: a friend ending on a BYE reads its reason byte (`[14][0 left |
   1 gave up]`, from `netShutdown`'s `why`; iOS `shutdown(why:)`): "Couldn't
-  reconnect" for a session that failed, "Peer disconnected" for a
+  reconnect" for a session that failed, "Your friend disconnected" for a
   Disconnect or leaving the page. The model's BYE always carries the
   reason; off (through 08c33ae0) every BYE read as a Disconnect.
 * `relaunch`: the goodbye on relaunch. A side keeps its session's retry code
@@ -176,10 +176,10 @@ Refuted on d22e0527 (`bug_*`), fixed, and proved for the fix:
   (`SCore.conv`). `regress_pause_presses_cross` replays the trace.
 * `bug_give_up_reads_as_disconnect` (trade-off, through 08c33ae0): a side
   whose 180 s ran out just after its new channel opened said BYE on it, and
-  a friend that had just resumed read "Peer disconnected", as if Disconnect
+  a friend that had just resumed read "Your friend disconnected", as if Disconnect
   had been pressed. With the reason byte (`Cfg.byeWhy`), `bye_reason_heard`
   (`QInv.byeWhy`: every BYE in flight says how its sender's session ended):
-  a side ending on a BYE shows "Peer disconnected" exactly when the friend
+  a side ending on a BYE shows "Your friend disconnected" exactly when the friend
   left, "Couldn't reconnect" when its session failed.
   `regress_give_up_reads_as_gave_up` replays the trace.
 * `kill_strands_friend` (the leftover of `bug_quit_while_redialing_unheard`):
@@ -269,8 +269,8 @@ inductive Ph where
 /-- Why the session ended, as the toast says it. -/
 inductive End where
   | quit      -- this player pressed Disconnect or left the page
-  | peerBye   -- "Peer disconnected": the friend's BYE
-  | lost      -- "Peer connection lost" / "Peer disconnected": closed, and no resume possible
+  | peerBye   -- "Your friend disconnected": the friend's BYE
+  | lost      -- "Lost the connection to your friend" / "Your friend disconnected": closed, and no resume possible
   | gaveUp    -- "Couldn't reconnect"
   | noResume  -- "Couldn't resume the link": the friend's gap is older than the log
   | killed    -- the page or app was killed; nothing ran
@@ -977,7 +977,7 @@ theorem bug_quit_while_redialing_unheard :
   decide
 
 /-- With the goodbye note, A's Disconnect leaves a goodbye on the retry
-    code, and B's rendezvous on it is answered with it: "Peer disconnected"
+    code, and B's rendezvous on it is answered with it: "Your friend disconnected"
     at once. The same when B had not yet noticed the drop, when B held a
     pairing (it fails or times out first, and its restart dials again), and
     from the iPhone. `quit_heard` is the general statement. -/
@@ -1032,7 +1032,7 @@ theorem quit_after_open_reaches_friend :
 
 /-- The host deals the retry code when the session starts; until B's echo
     is back (a round trip), only B can resume. A drop in that window ends
-    A ("Peer connection lost") while B redials alone for 180 s. -/
+    A ("Lost the connection to your friend") while B redials alone for 180 s. -/
 theorem start_window_one_sided :
     witnesses .web [.deliver .b 0, .die 0, .dropped .a, .dropped .b]
       (fun s => view s .a == .ended .lost && view s .b == .reconnecting 0) = true := by
@@ -1079,7 +1079,7 @@ theorem bug_give_up_reads_as_disconnect :
   decide
 
 /-- With the BYE's reason byte both read "Couldn't reconnect"; a Disconnect
-    after the open still reads "Peer disconnected". `bye_reason_heard` is the
+    after the open still reads "Your friend disconnected". `bye_reason_heard` is the
     general statement. -/
 theorem regress_give_up_reads_as_gave_up :
     witnesses .webBye (handshake ++
@@ -4782,7 +4782,7 @@ theorem relaunch_heard_next {cfg : Cfg} (hn : cfg.note = true) {s : State} {c : 
   note_heard_next hn (by simp [LinkResume.step]) hr
 
 /-- **A BYE says why** (`Cfg.byeWhy`): a side ending on its friend's BYE
-    shows "Peer disconnected" exactly when the friend pressed Disconnect or
+    shows "Your friend disconnected" exactly when the friend pressed Disconnect or
     left the page, and "Couldn't reconnect" when the friend's session
     failed (its give-up, a lost connection). Before the reason byte every
     BYE read as a Disconnect (`bug_give_up_reads_as_disconnect`). -/

@@ -403,7 +403,7 @@ const sigRewait = (why) => {
 const rtcGaveUp = (session, pc, why) => {
   if (net !== session || session.pc !== pc || session.rtcConnected || session.started) return;
   if (session.sdpIn && ++session.strikes >= 2) {
-    netFail("Could not connect peer-to-peer (a strict NAT on one side may be blocking it)");
+    netFail("Couldn't connect directly to your friend (a strict NAT on one side may be blocking it)");
     return;
   }
   sigRewait(why);
@@ -514,8 +514,8 @@ const startRtc = async (isOfferer) => {
     const st = pc.connectionState;
     if (net.started && rbCanResume()) rbWatchDisconnected(pc, st);
     if (st === "failed") {
-      if (net.started) rbDropped("connection failed", "Peer connection lost");
-      else if (net.rtcConnected) netFail("Peer connection lost");
+      if (net.started) rbDropped("connection failed", "Lost the connection to your friend");
+      else if (net.rtcConnected) netFail("Lost the connection to your friend");
       else rtcGaveUp(session, pc, "ICE failed");
     } else if (st === "disconnected" && net.started && rbCanResume()) {
       // It may recover; "failed" redials.
@@ -529,7 +529,7 @@ const startRtc = async (isOfferer) => {
     } else if (st === "connected" && net.started && rbPeerAwaySince) {
       log("netplay: connection back while the friend is away");
     } else if ((st === "disconnected" || st === "closed") && net.started) {
-      rbDropped("connection " + st, "Peer connection lost");
+      rbDropped("connection " + st, "Lost the connection to your friend");
     }
   };
   if (isOfferer) {
@@ -584,7 +584,7 @@ const wireChannel = (dc) => {
   };
   dc.onclose = () => {
     if (!net || net.dc !== dc || net.ending) return;
-    if (net.started) rbDropped("channel closed", "Peer disconnected");
+    if (net.started) rbDropped("channel closed", "Your friend disconnected");
     // Dropped mid-handshake: surface it rather than leave the game frozen.
     else if (net.rb && !net.rb.inited) netFail("Connection lost during setup");
   };
@@ -792,7 +792,7 @@ const manualConnState = (pc) => () => {
   if (st === "failed") {
     logIcePairs(pc); // best-effort: the teardown below races it
     if (net.rtcConnected) {
-      netFail("Peer connection lost");
+      netFail("Lost the connection to your friend");
       return;
     }
     // The traded codes are spent with the PC; both sides fail together, so
@@ -803,7 +803,7 @@ const manualConnState = (pc) => () => {
       manualPrepare();
     }
   } else if ((st === "disconnected" || st === "closed") && net.started) {
-    netPeerGone("Peer connection lost");
+    netPeerGone("Lost the connection to your friend");
   }
 };
 
@@ -1518,7 +1518,7 @@ const rbMessage = (data) => {
     // give-up just after the new channel opened). formal/WebState/
     // LinkResume.lean bye_reason_heard.
     rb.byeIn = true;
-    if (net.started) netPeerGone(v.byteLength >= 2 && v.getUint8(1) === 1 ? "Couldn't reconnect" : "Peer disconnected");
+    if (net.started) netPeerGone(v.byteLength >= 2 && v.getUint8(1) === 1 ? "Couldn't reconnect" : "Your friend disconnected");
     return;
   }
   if (kind === RB_READY) {
@@ -1895,7 +1895,7 @@ const netAfterTick = (st) => {
   }
 };
 
-// Peer gone: keep the local game running (it sees a yanked cable).
+// The friend gone: keep the local game running (it sees a yanked cable).
 const netPeerGone = (msg) => {
   if (!net) return;
   const started = net.started;
@@ -1927,7 +1927,7 @@ const netShutdown = async (opts) => {
   // Ended here, so nothing for a relaunch to say (rbByeOnRelaunch).
   if (net?.rb) rbClearLive();
   netStallBadge.hidden = true;
-  netStallText.textContent = "waiting for peer";
+  netStallText.textContent = "Waiting for your friend";
   rbHideAwayCard();
   rbHiddenSince = 0;
   clearTimeout(manualFallbackTimer);
@@ -2180,7 +2180,7 @@ const rbPeerAway = (on) => {
 // inputs (0 = running). The away card already explains a hidden friend.
 window.rbNoteStall = (ms) => {
   const show = ms >= RB_STALL_BADGE_MS && !rbPeerAwaySince && !!net?.started && !net.rb?.reconnecting;
-  if (show) netStallText.textContent = "waiting for friend · " + fmtAway(ms);
+  if (show) netStallText.textContent = "Waiting for your friend · " + fmtAway(ms);
   netStallBadge.hidden = !show;
 };
 
@@ -2286,7 +2286,7 @@ const NET_SIGNAL_HTTP = (() => {
 // find the link down and redial): leave a goodbye on the retry code. The
 // server tells a friend waiting on it at once, and turns its next
 // rendezvous away with the goodbye for the next 10 minutes, so it ends
-// with "Peer disconnected" ("Couldn't reconnect" for "gave-up") instead of
+// with "Your friend disconnected" ("Couldn't reconnect" for "gave-up") instead of
 // "Reconnecting…" until its own give-up (server.js leaveNote;
 // formal/WebState/LinkRedial.lean). A beacon: it survives the page
 // closing. Not after the friend's own goodbye: it has gone.
@@ -2388,7 +2388,7 @@ const rbLogSent = (rb, frame, bits) => {
 const rbDropped = (why, endMsg) => {
   if (!net || net.ending) return;
   if (rbCanResume()) rbBeginResume(why);
-  else netPeerGone(net?.rb?.byeIn ? "Peer disconnected" : endMsg);
+  else netPeerGone(net?.rb?.byeIn ? "Your friend disconnected" : endMsg);
 };
 
 // "disconnected" may recover; past RB_DISCONNECTED_MS it redials (an engine
@@ -2400,7 +2400,7 @@ const rbWatchDisconnected = (pc, st) => {
   if (st !== "disconnected") return;
   rb.discTimer = setTimeout(() => {
     if (net?.rb === rb && net.pc === pc && pc.connectionState !== "connected") {
-      rbDropped("disconnected for " + RB_DISCONNECTED_MS / 1000 + " s", "Peer connection lost");
+      rbDropped("disconnected for " + RB_DISCONNECTED_MS / 1000 + " s", "Lost the connection to your friend");
     }
   }, RB_DISCONNECTED_MS);
 };
@@ -2415,7 +2415,7 @@ const rbBeginResume = (why) => {
   // Back from a suspension longer than the friend waits: it has given up.
   if (rb.lastMsgAt && Date.now() - rb.lastMsgAt > rbResumeGiveUpMs) {
     log("netplay: " + why + " after " + Math.round((Date.now() - rb.lastMsgAt) / 1000) + " s of silence — the friend has given up");
-    netPeerGone("Peer connection lost");
+    netPeerGone("Lost the connection to your friend");
     return;
   }
   rb.reconnecting = true;
@@ -2546,7 +2546,7 @@ const rsDial = (rb) => {
         // goodbye on the code (rbLeaveNote).
         rb.byeIn = true;
         log("netplay: redial: the friend " + (msg.why === "gave-up" ? "gave up" : "left"));
-        netPeerGone(msg.why === "gave-up" ? "Couldn't reconnect" : "Peer disconnected");
+        netPeerGone(msg.why === "gave-up" ? "Couldn't reconnect" : "Your friend disconnected");
       } else if (msg.t === "error") {
         rsRestart(rb, "server: " + msg.msg);
       }
@@ -2606,12 +2606,12 @@ const rsAdopt = (rb, pc, dc) => {
     if (!net || net.pc !== pc) return;
     const st = pc.connectionState;
     rbWatchDisconnected(pc, st);
-    if (st === "failed" || st === "closed") rbDropped("connection " + st, "Peer connection lost");
+    if (st === "failed" || st === "closed") rbDropped("connection " + st, "Lost the connection to your friend");
     else if (st === "disconnected") log("netplay: connection disconnected — waiting");
   };
   dc.onclose = () => {
     if (!net || net.dc !== dc) return;
-    if (net.started) rbDropped("channel closed", "Peer disconnected");
+    if (net.started) rbDropped("channel closed", "Your friend disconnected");
   };
   rb.rsAnswerTimer = setTimeout(() => {
     if (net?.dc === dc && rb.reconnecting) rsRestart(rb, "no RESUME from the friend");

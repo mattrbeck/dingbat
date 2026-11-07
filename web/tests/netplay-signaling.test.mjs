@@ -477,7 +477,7 @@ test("two pairings that exchanged descriptions and never opened are the NAT verd
   await t.flush();
   await t.advance(20000); // strike two
   await t.flush();
-  assert.match(t.el("net-status").textContent, /peer-to-peer/);
+  assert.match(t.el("net-status").textContent, /connect directly to your friend/);
   assert.ok(t.el("net-status").classList.contains("net-error"));
   assert.ok(t.api.net, "the session re-armed so the player can retry");
   assert.equal(t.api.net.strikes, 0, "a retry starts with a clean slate");
