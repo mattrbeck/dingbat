@@ -295,6 +295,91 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertLessThanOrEqual(picture.frame.maxY, w.height, "the picture fits on screen")
     }
 
+    /// One armed look in every theme (web :root .armed): the game menu's
+    /// Delete and Settings' Reset all settings, armed, pictured per theme.
+    /// The fill and its ink are the same in each (Theme.swift dangerFill).
+    func testArmedLookPerTheme() {
+        // -theme is saved: the default back for the tests after this one.
+        addTeardownBlock { [self] in launch(["-theme", "night", "-sheet", "tile"]).terminate() }
+        func armed(_ app: XCUIApplication, _ question: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", question)).firstMatch
+        }
+        for theme in ["night", "light", "indigo", "famicom"] {
+            let app = launch(["-theme", theme, "-sheet", "tile"])
+            let delete = app.buttons["Delete"].firstMatch
+            XCTAssertTrue(delete.waitForExistence(timeout: 5), "\(theme): the game's menu")
+            delete.tap()
+            XCTAssertTrue(armed(app, "Close and delete everything?").waitForExistence(timeout: 2),
+                          "\(theme): Delete armed")
+            snap(app, "armed-menu-\(theme)")
+            app.terminate()
+            let again = launch(["-theme", theme, "-sheet", "settings:general"])
+            let reset = again.buttons["Reset all settings"].firstMatch
+            XCTAssertTrue(reset.waitForExistence(timeout: 5), "\(theme): Settings › General")
+            again.swipeUp()
+            again.swipeUp()
+            reset.tap()
+            XCTAssertTrue(armed(again, "Confirm reset?").waitForExistence(timeout: 2),
+                          "\(theme): Reset all settings armed")
+            snap(again, "armed-button-\(theme)")
+            again.terminate()
+        }
+    }
+
+    /// Sign out everywhere (a fake Drive account, `-drive-stub` at a closed
+    /// port: signed in, nothing syncs): the armed fill bleeds past the text
+    /// and nothing moves, in Settings › General and the account popover.
+    func testSignOutEverywhereArmed() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-audio.muted", "YES", "-drive-stub", "http://127.0.0.1:9",
+                               "-sheet", "settings:general"]
+        app.launch()
+        let out = app.buttons["Sign out everywhere"].firstMatch
+        XCTAssertTrue(out.waitForExistence(timeout: 10), "Settings › General: signed in")
+        app.swipeUp()
+        sleep(1)
+        let email = app.staticTexts["player@example.com"].firstMatch
+        let before = out.frame
+        print("NATIVE: settings unarmed \(before), email \(email.frame)")
+        snap(app, "signout-settings")
+        out.tap()
+        let armed = app.buttons["Tap again to sign out everywhere"].firstMatch
+        XCTAssertTrue(armed.waitForExistence(timeout: 2), "armed")
+        print("NATIVE: settings armed \(armed.frame)")
+        XCTAssertEqual(armed.frame.minX, before.minX, accuracy: 0.5, "the text does not move")
+        XCTAssertEqual(armed.frame.minY, before.minY, accuracy: 0.5, "nor the row")
+        XCTAssertEqual(armed.frame.height, before.height, accuracy: 0.5, "still one line")
+        snap(app, "signout-settings-armed")
+        app.terminate()
+
+        app.launchArguments = ["-audio.muted", "YES", "-drive-stub", "http://127.0.0.1:9"]
+        app.launch()
+        // The first-run offer to add pictures, once the boot pull is done.
+        let notNow = app.buttons["Not now"]
+        if notNow.waitForExistence(timeout: 10) { notNow.tap(); sleep(1) }
+        let account = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Google Drive:'")).firstMatch
+        XCTAssertTrue(account.waitForExistence(timeout: 5), "the account button")
+        print("NATIVE: account \(account.label) \(account.frame)")
+        snap(app, "signout-home")
+        account.tap()
+        sleep(1)
+        let pop = app.buttons["Sign out everywhere"].firstMatch
+        XCTAssertTrue(pop.waitForExistence(timeout: 3), "the account popover")
+        let sync = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Sync'")).firstMatch
+        let popBefore = pop.frame
+        print("NATIVE: popover unarmed \(popBefore), sync \(sync.frame)")
+        snap(app, "signout-popover")
+        pop.tap()
+        let popArmed = app.buttons["Tap again to sign out everywhere"].firstMatch
+        XCTAssertTrue(popArmed.waitForExistence(timeout: 2), "armed in the popover")
+        print("NATIVE: popover armed \(popArmed.frame)")
+        XCTAssertEqual(popArmed.frame.minY, popBefore.minY, accuracy: 0.5, "the row does not move")
+        XCTAssertEqual(popArmed.frame.height, popBefore.height, accuracy: 0.5, "still one line")
+        XCTAssertEqual(popArmed.frame.maxX, popBefore.maxX, accuracy: 0.5, "its right edge stays")
+        snap(app, "signout-popover-armed")
+        app.terminate()
+    }
+
     /// One menu per game (web openTileMenu): the paused hero's ⋯ opens the
     /// game's menu with its Play group above the file items; Delete arms on
     /// one tap and disarms after 3.5 s; a Play row opens its sheet; closed,

@@ -275,8 +275,8 @@ struct TileMenuView: View {
             run()
         }
         // The glyph follows its label: faint when blocked, red on Delete,
-        // ink when armed (web .tile-menu-icon).
-        let ink = isArmed ? palette.accentInk
+        // the armed ink when armed (web .tile-menu-icon).
+        let ink = isArmed ? palette.dangerInk
             : disabled != nil ? palette.textFaint
             : danger ? palette.danger : palette.text
         return Button(action: tap) {
@@ -289,32 +289,27 @@ struct TileMenuView: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
+                        // The question is bold; what goes, under it, is not.
                         Text(isArmed ? (confirm ?? label) : label)
-                            .font(.system(size: 15))
+                            .font(.system(size: 15, weight: isArmed ? .semibold : .regular))
                             .foregroundColor(ink)
                         if dot { Circle().fill(palette.accent).frame(width: 6, height: 6) }
                     }
                     if let sub = isArmed ? "Tap again to confirm" : (disabled ?? sub) {
                         Text(sub)
                             .font(.system(size: 12))
-                            .foregroundColor(isArmed ? palette.accentInk : palette.textDim)
+                            .foregroundColor(isArmed ? palette.dangerInk : palette.textDim)
                     }
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isArmed
-                          ? AnyShapeStyle(LinearGradient(colors: [palette.dangerHi, palette.danger],
-                                                         startPoint: .top, endPoint: .bottom))
-                          : AnyShapeStyle(Color.clear))
-            )
+            .armedFill(isArmed, RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padFocus("item:" + id, press: tap)
+        .padFocus("item:" + id, armed: isArmed, press: tap)
         .disabled(disabled != nil)
     }
 }

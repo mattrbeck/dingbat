@@ -131,8 +131,57 @@ struct SheetCloseButton: View {
 
 // MARK: buttons
 
+/// The one armed look (web :root .armed): a destructive control waiting for
+/// its second tap, wherever it is and in every theme. The deeper red, its
+/// border the fill's own, no glow (the red is the signal). Its ink is
+/// `palette.dangerInk`, glyphs too, and the label goes semibold; each site
+/// sets those, since only it knows its fonts.
+struct ArmedFill<S: InsettableShape>: View {
+    let shape: S
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        shape.fill(LinearGradient(colors: [palette.dangerFillHi, palette.dangerFill],
+                                  startPoint: .top, endPoint: .bottom))
+            .overlay(shape.strokeBorder(palette.dangerFill, lineWidth: 1))
+    }
+}
+
+extension View {
+    /// The armed fill behind a control while `on`.
+    func armedFill<S: InsettableShape>(_ on: Bool, _ shape: S) -> some View {
+        background(Group { if on { ArmedFill(shape: shape) } })
+    }
+
+    /// A quiet text button that arms (Sign out everywhere, web .acct-links):
+    /// dim until armed, then the one armed look. The fill bleeds past the
+    /// text, its padding taken back outside it, so the layout is the same
+    /// armed or not; a longer armed label shrinks to its one line.
+    func armedLink(_ on: Bool) -> some View {
+        modifier(ArmedLink(on: on))
+    }
+}
+
+private struct ArmedLink: ViewModifier {
+    let on: Bool
+    @Environment(\.palette) private var palette
+
+    func body(content: Content) -> some View {
+        content
+            .fontWeight(on ? .semibold : nil)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .foregroundColor(on ? palette.dangerInk : palette.textDim)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .armedFill(on, RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, -8)
+            .padding(.vertical, -5)
+    }
+}
+
 /// web .button / .button-primary / .button-ghost / .button-danger, and the
-/// armed state of a two-tap confirm (.saves-reset-btn.armed et al.).
+/// one armed look (ArmedFill).
 enum SheetButtonKind { case normal, primary, ghost, danger, armed }
 
 struct SheetButtonStyle: ButtonStyle {
@@ -165,7 +214,7 @@ struct SheetButtonStyle: ButtonStyle {
         case .primary: return palette.accentInk
         case .ghost: return palette.textDim
         case .danger: return palette.danger
-        case .armed: return .white
+        case .armed: return palette.dangerInk
         }
     }
 
@@ -182,7 +231,7 @@ struct SheetButtonStyle: ButtonStyle {
         case .ghost:
             return grad(.clear, .clear)
         case .armed:
-            return grad(palette.dangerHi, palette.danger)
+            return grad(palette.dangerFillHi, palette.dangerFill)
         }
     }
 
@@ -193,7 +242,7 @@ struct SheetButtonStyle: ButtonStyle {
         case .primary: return palette.accent.opacity(0.6)
         case .ghost: return palette.border
         case .danger: return palette.danger.opacity(0.4)
-        case .armed: return palette.danger.opacity(0.6)
+        case .armed: return palette.dangerFill
         }
     }
 }
@@ -558,7 +607,7 @@ struct SheetWarning: View {
     var body: some View {
         Text(text)
             .font(.system(size: 12.5))
-            .foregroundColor(severe ? palette.dangerHi : palette.text)
+            .foregroundColor(severe ? palette.danger : palette.text)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)

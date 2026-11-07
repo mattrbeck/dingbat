@@ -588,10 +588,11 @@ struct LinkDisconnectPill: View {
                 Text(armed ? "Are you sure?" : wide ? "Disconnect Link Cable" : "Disconnect")
             }
             .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(armed ? .white : palette.accent)
+            .foregroundColor(armed ? palette.dangerInk : palette.accent)
             .padding(.horizontal, 12)
             .frame(height: 28)
-            .background(Capsule().fill(armed ? palette.danger : palette.accentGlow.opacity(0.4)))
+            .background(Group { if !armed { Capsule().fill(palette.accentGlow.opacity(0.4)) } })
+            .armedFill(armed, Capsule())
         }
         .accessibilityLabel("Disconnect link cable")
     }
@@ -989,7 +990,7 @@ struct GameMenu: View {
     @ViewBuilder private var linkItem: some View {
         if link.linked {
             item("cable.connector", disconnectArmed ? "Are you sure?" : "Disconnect",
-                 tint: disconnectArmed ? palette.danger : nil) {
+                 armed: disconnectArmed) {
                 if disconnectArmed {
                     disconnectArmed = false
                     model.closeMenu()
@@ -1075,16 +1076,21 @@ struct GameMenu: View {
         .padFocus("quick:" + label, radius: 10, press: action)
     }
 
+    /// `tint`: the glyph and label's colour (Stop Recording's red). `armed`:
+    /// waiting for its second tap, in the one armed look (its glyph takes
+    /// the ink with the label).
     private func item(_ icon: String, _ label: String, trailing: String? = nil, sub: Bool = false,
-                      dot: Bool = false, tint: Color? = nil, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+                      dot: Bool = false, tint: Color? = nil, armed: Bool = false,
+                      action: @escaping () -> Void) -> some View {
+        let tint = armed ? palette.dangerInk : tint
+        return Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 15))
                     .frame(width: 22)
                     .foregroundColor(tint ?? palette.textDim)
                 Text(label)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 14, weight: armed ? .semibold : .medium))
                     .foregroundColor(tint ?? palette.text)
                 if dot { Circle().fill(palette.accent).frame(width: 6, height: 6) }
                 Spacer()
@@ -1097,9 +1103,10 @@ struct GameMenu: View {
             .padding(.leading, sub ? 26 : 12)
             .padding(.trailing, 12)
             .frame(height: 42)
+            .armedFill(armed, RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
         }
-        .padFocus("menu:" + label, press: action)
+        .padFocus("menu:" + label, armed: armed, press: action)
     }
 }
 

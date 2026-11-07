@@ -172,7 +172,7 @@ struct AccountMenu: View {
                         dismiss()
                         Task { @MainActor in await drive.signOutEverywhere() }
                     }
-                    .foregroundColor(everywhereArmed ? palette.danger : palette.textDim)
+                    .armedLink(everywhereArmed)
                 }
                 .font(.system(size: 13))
                 .foregroundColor(palette.textDim)
@@ -342,7 +342,7 @@ struct DriveSettingsBlock: View {
                     Task { @MainActor in await drive.signOutEverywhere() }
                 }
                 .font(.system(size: 13))
-                .foregroundColor(everywhereArmed ? palette.danger : palette.textDim)
+                .armedLink(everywhereArmed)
             }
         }
     }
