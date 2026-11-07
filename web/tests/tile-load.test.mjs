@@ -159,7 +159,7 @@ test("a failed download says so until the next tap, which tries again", async ()
   launchOf(app, "B.gba").click();
   await drain(40);
   assert.equal(named(app), null);
-  assert.deepEqual(says(app, "B.gba"), ["Couldn’t download", "Tap to try again"]);
+  assert.deepEqual(says(app, "B.gba"), ["Couldn’t download", "Click to try again"]);
   assert.ok(has(app, "B.gba", "is-failed") && !has(app, "B.gba", "is-loading"));
   assert.ok(!dlBusy(app, "B.gba"), "↓ is offered again");
 
@@ -168,6 +168,17 @@ test("a failed download says so until the next tap, which tries again", async ()
   await drain(40);
   assert.equal(named(app), "B.gba", "the retry opens it");
   assert.ok(!has(app, "B.gba", "is-failed"));
+});
+
+test("on a touch screen the pointing verb is tap; under a mouse, click", async () => {
+  for (const [touch, want] of [[true, "Tap to try again"], [false, "Click to try again"]]) {
+    const app = await loadApp({ touch });
+    assert.equal(app.runIn(`tapWords("Tap to try again")`), want);
+  }
+  const app = await loadApp();
+  assert.equal(app.runIn(`tapWords("Tap a slot, or double-tap it")`), "Click a slot, or double-click it");
+  assert.equal(app.runIn(`tapWords("Double-tap it")`), "Double-click it");
+  assert.equal(app.runIn(`tapWords("Tap a slot, or double-tap it", true)`), "Tap a slot, or double-tap it");
 });
 
 test("before Drive answers the sign-in, the tile says it is signing in", async () => {

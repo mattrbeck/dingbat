@@ -219,7 +219,7 @@
         <button type="button" class="icon-btn" id="reset" title="Reset" aria-label="Reset">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3.5h3.5"/></svg>
         </button>
-        <button type="button" class="icon-btn" id="rewind" title="Rewind — hold to rewind, double-tap to pick a moment" aria-label="Rewind: hold to rewind, double-tap to pick a moment">
+        <button type="button" class="icon-btn" id="rewind" data-tap title="Rewind — hold to rewind, double-tap to pick a moment" aria-label="Rewind: hold to rewind, double-tap to pick a moment">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v12l-8-6zM11 6v12l-8-6z" fill="currentColor" stroke="none"/></svg>
         </button>
         <button type="button" class="icon-btn" id="pause" title="Pause" aria-label="Pause / Resume">
@@ -289,7 +289,7 @@
         <span id="channels-indicator-label"></span><span class="channels-indicator-word">&nbsp;off</span>
       </button>
 
-      <button type="button" id="hle-indicator" hidden
+      <button type="button" id="hle-indicator" hidden data-tap
               title="Enhanced audio on — tap to hear the hardware mix"
               aria-label="Enhanced audio" aria-pressed="true">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -454,7 +454,7 @@
 
       <!-- A DS game with its lid closed (the Screens panel, or N): the
            screens dim under this, and a tap opens the lid again. -->
-      <button type="button" id="nds-lid-open" hidden>Lid closed &middot; tap to open</button>
+      <button type="button" id="nds-lid-open" hidden data-tap>Lid closed &middot; tap to open</button>
 
       <!-- A DS the game switched off (index.js "Power-off"): over the black
            screens, Restart switches it on again; Library closes the game. -->
@@ -799,7 +799,7 @@
         <button type="button" class="modal-close" id="states-close" aria-label="Close">&times;</button>
         <h2 id="modal-states-title">Save States</h2>
         <p id="states-empty" class="modal-hint" hidden>Load a game to use save states.</p>
-        <p id="states-hint" class="modal-hint">Tap a slot, then Save or Load. Slot 1 is the Quick slot.</p>
+        <p id="states-hint" class="modal-hint" data-tap>Tap a slot, then Save or Load. Slot 1 is the Quick slot.</p>
         <div id="states-grid" class="states-grid"></div>
         <div class="states-actions states-actions-split">
           <button type="button" class="button button-sm button-danger" id="states-delete" disabled>Delete</button>
@@ -1091,7 +1091,7 @@
                 <div class="modal-toggle-row">
                   <div>
                     <span class="modal-row-label">Rewind</span>
-                    <span class="modal-toggle-sub">Hold the rewind button to jump back, or double-tap it for a timeline you can scrub. Costs a few percent of speed; turning it off hides the rewind button.</span>
+                    <span class="modal-toggle-sub" data-tap>Hold the rewind button to jump back, or double-tap it for a timeline you can scrub. Costs a few percent of speed; turning it off hides the rewind button.</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="rewind-toggle" checked />
@@ -1341,7 +1341,7 @@
                     <option value="focus">Focus</option>
                     <option value="single">One screen</option>
                   </select>
-                  <span class="modal-toggle-sub">Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard)</span>
+                  <span class="modal-toggle-sub" data-tap>Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard)</span>
                 </div>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">Gap</span>
