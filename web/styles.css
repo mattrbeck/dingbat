@@ -2368,7 +2368,7 @@ html.home-pending #home-inner {
 
 /* The rungs under the hero. Resume is for the sessions the hero cannot draw
    (2P link, rollback, online - two cores, no single framebuffer), where it is
-   the only way back; the Add pill is for a hero that is the whole library.
+   the only way back; Add a game is for a hero that is the whole library.
    With neither the row would still cost #home-inner's gap, so it is off
    unless one of them is on. */
 #home-actions {
@@ -2419,38 +2419,11 @@ body.has-game:not(.home-card) #home-resume {
   display: inline-flex;
 }
 
-/* A quiet dashed pill in the add tile's old idiom: a second game is a thing
-   to offer, not to push. */
-.home-add-pill {
+/* The library head's Add a game (.lib-add), standing in for the head while
+   the hero is the whole library: one look for adding a game wherever there
+   is a library, the filled pill being the empty state's alone. */
+#home-solo-add {
   display: none;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px 10px 16px;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-dim);
-  background: transparent;
-  border: 1.5px dashed var(--border-2);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: color 0.14s, border-color 0.14s, background 0.14s;
-}
-
-.home-add-pill svg,
-.lib-add svg {
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-
-.home-add-pill:hover {
-  color: var(--text);
-  border-color: rgba(var(--accent-rgb), 0.55);
-  background: rgba(var(--accent-rgb), 0.06);
 }
 
 body.home-solo.home-card #home-solo-add {
@@ -3273,15 +3246,22 @@ body.runtime-ready #boot-progress {
   color: var(--text);
 }
 
-/* The library's way in from a file, in its head. */
+/* The library's way in from a file: in its head, or under the hero while the
+   hero is the whole library. The rest of its look is .button's. */
 .lib-add {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 34px;
-  padding: 0 14px 0 11px;
-  font-size: 13px;
-  border-radius: 999px;
+}
+
+.lib-add svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 
 /* The count beside the label: "LIBRARY 12 games", or "3 of 12" filtered. */
