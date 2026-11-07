@@ -585,7 +585,7 @@ struct LinkDisconnectPill: View {
         } label: {
             HStack(spacing: 5) {
                 if wide && !armed { Image(systemName: "cable.connector") }
-                Text(armed ? "Are you sure?" : wide ? "Disconnect Link Cable" : "Disconnect")
+                Text(armed ? "Disconnect?" : wide ? "Disconnect Link Cable" : "Disconnect")
             }
             .font(.system(size: 12, weight: .semibold))
             .foregroundColor(armed ? palette.dangerInk : palette.accent)
@@ -989,7 +989,7 @@ struct GameMenu: View {
     /// end the session for both).
     @ViewBuilder private var linkItem: some View {
         if link.linked {
-            item("cable.connector", disconnectArmed ? "Are you sure?" : "Disconnect",
+            item("cable.connector", disconnectArmed ? "Disconnect?" : "Disconnect",
                  armed: disconnectArmed) {
                 if disconnectArmed {
                     disconnectArmed = false

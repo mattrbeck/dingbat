@@ -29,7 +29,7 @@ struct ManageSavesView: View {
                 }
                 SheetRow(label: "Reset save file",
                          sub: "Wipe this game's save and reload it as a fresh cartridge") {
-                    SheetConfirmButton(label: "Reset", confirmLabel: "Confirm reset?", action: resetSave)
+                    SheetConfirmButton(label: "Reset", confirmLabel: "Reset save file?", action: resetSave)
                         .fixedSize()
                 }
                 // A save kept from before the game was deleted, or the one a
@@ -38,7 +38,7 @@ struct ManageSavesView: View {
                     SheetRow(label: kept.title,
                              sub: (kept.at > 0 ? "Saved " + TileMenuView.fmtTime(kept.at) + " · " : "") +
                                   "kept until " + Self.fmtDay(kept.del + DriveSync.keptSaveMs)) {
-                        SheetConfirmButton(label: "Restore", confirmLabel: "Replace current save?") {
+                        SheetConfirmButton(label: "Restore", confirmLabel: "Restore old save?") {
                             SheetNav.close()
                             DriveSync.shared.restoreKeptSave(g.fileName)
                         }

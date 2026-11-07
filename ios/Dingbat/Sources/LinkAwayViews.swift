@@ -42,7 +42,7 @@ struct LinkAwayCard: View {
                         .foregroundColor(palette.textDim)
                 }
                 Spacer(minLength: 0)
-                SheetConfirmButton(label: "Disconnect…", confirmLabel: "Are you sure?") {
+                SheetConfirmButton(label: "Disconnect", confirmLabel: "Disconnect?") {
                     NetLink.shared.disconnect()
                 }
             }

@@ -853,7 +853,7 @@ private struct GeneralPane: View {
         Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 14)
         SheetFlowRow(label: "Reset all settings",
                      sub: "Put every setting back to its default. Your games and saves are kept.") {
-            SheetConfirmButton(label: "Reset all settings", confirmLabel: "Confirm reset?") {
+            SheetConfirmButton(label: "Reset all settings", confirmLabel: "Reset all settings?") {
                 s.resetAll()
                 hook = s.saveWebhook
                 hookStatus = ""
