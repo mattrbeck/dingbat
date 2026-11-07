@@ -87,7 +87,7 @@ test("a tap on a Drive-only tile says Opening, with the bytes, until the game st
 
   launchOf(app, "B.gba").click();
   await drain();
-  assert.deepEqual(says(app, "B.gba"), ["Opening", "0.0 of 2.0 MB"]);
+  assert.deepEqual(says(app, "B.gba"), ["Opening…", "0.0 of 2.0 MB"]);
   assert.ok(has(app, "B.gba", "is-loading") && has(app, "B.gba", "is-opening"));
   assert.ok(dlBusy(app, "B.gba"), "the corner spins too");
 
@@ -108,7 +108,7 @@ test("a later tap elsewhere turns an opening tile back into a plain download", a
   launchOf(app, "C.gba").click(); // the player changes their mind
   await drain();
   assert.equal(named(app), "C.gba");
-  assert.equal(says(app, "B.gba")[0], "Downloading", "B no longer claims it will open");
+  assert.equal(says(app, "B.gba")[0], "Downloading…", "B no longer claims it will open");
   assert.ok(!has(app, "B.gba", "is-opening"));
 
   d.release();
@@ -123,7 +123,7 @@ test("↓ downloads without opening, then shows a check", async () => {
   await home(app);
   kid(tile(app, "B.gba"), "home-tile-dl").click();
   await drain();
-  assert.deepEqual(says(app, "B.gba"), ["Downloading", "0.0 of 2.0 MB"]);
+  assert.deepEqual(says(app, "B.gba"), ["Downloading…", "0.0 of 2.0 MB"]);
   assert.ok(!has(app, "B.gba", "is-opening"), "no ring: it will not open");
 
   d.release();
@@ -142,7 +142,7 @@ test("a tap on the picture during a ↓ download opens it when it lands", async 
   await drain();
   launchOf(app, "B.gba").click();
   await drain();
-  assert.equal(says(app, "B.gba")[0], "Opening", "the download became an open");
+  assert.equal(says(app, "B.gba")[0], "Opening…", "the download became an open");
 
   d.release();
   await drain(40);
@@ -192,9 +192,9 @@ test("the hero showing a Drive-only game says it on its button, its tile being s
   app.runIn(`setTileLoad("B.gba", { open: {}, gen: loadGen, stage: "signin", got: 0, total: 0 })`);
   assert.equal(label(), "Signing in…");
   app.runIn(`setTileLoad("B.gba", { open: {}, gen: loadGen, stage: "download", got: 3, total: 8 })`);
-  assert.equal(label(), "Opening · 37%");
+  assert.equal(label(), "Opening… 37%");
   app.runIn(`setTileLoad("B.gba", { open: null, gen: 0, stage: "download", got: 4, total: 8 })`);
-  assert.equal(label(), "Downloading · 50%");
+  assert.equal(label(), "Downloading… 50%");
   app.runIn(`setTileLoad("B.gba", { open: null, gen: 0, stage: "failed", got: 4, total: 8 })`);
   assert.equal(label(), "Try again");
   app.runIn(`setTileLoad("B.gba", null)`);

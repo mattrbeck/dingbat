@@ -7881,7 +7881,7 @@ const paintTileLoad = (tile) => {
       : s.stage === "check" ? "Checking Drive…"
       : failed ? "Couldn’t download"
       : s.stage === "start" ? "Starting…"
-      : opening ? "Opening" : "Downloading";
+      : opening ? "Opening…" : "Downloading…";
     sub.textContent = s.stage === "signin" || s.stage === "check" ? "Google Drive"
       : failed ? "Tap to try again"
       : tileBytes(s.got, s.total);
@@ -7918,13 +7918,13 @@ const paintTileLoad = (tile) => {
 const paintHeroLoad = (name) => {
   if (name !== heroName || heroCard.dataset.mode !== "closed") return;
   let s = tileLoads.get(name);
-  let pct = s?.total ? " · " + Math.floor(100 * Math.min(s.got, s.total) / s.total) + "%" : "";
+  let pct = s?.total ? " " + Math.floor(100 * Math.min(s.got, s.total) / s.total) + "%" : "";
   heroResumeLabel.textContent = !s || s.stage === "done" ? (heroSession ? "Resume" : "Play")
     : s.stage === "signin" ? "Signing in…"
     : s.stage === "check" ? "Checking Drive…"
     : s.stage === "start" ? "Starting…"
     : s.stage === "failed" ? "Try again"
-    : (tileLoadOpening(s) ? "Opening" : "Downloading") + pct;
+    : (tileLoadOpening(s) ? "Opening…" : "Downloading…") + pct;
 };
 
 const paintLoadOf = (name) => {

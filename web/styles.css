@@ -24,6 +24,7 @@
   --accent-rgb: 255, 176, 77;     /* == --accent */
   --accent-hi-rgb: 255, 214, 150; /* warm highlight (active-button inset) */
   --danger-rgb: 255, 107, 107;    /* == --danger */
+  --disabled-opacity: 0.45;        /* every disabled control */
   --text-rgb: 234, 238, 246;      /* == --text */
   --stage-rgb: 5, 6, 10;          /* == --stage (dark scrims) */
   --surface-1-rgb: 20, 24, 38;    /* == --surface-1 */
@@ -4221,7 +4222,7 @@ body.debug-2p .home-tile-link {
 /* Pause and 2x while a dropped link redials (netplay.js rbRenderCard). */
 #pause:disabled,
 #speed-2x-btn:disabled {
-  opacity: 0.38;
+  opacity: var(--disabled-opacity);
   cursor: default;
   pointer-events: none;
 }
@@ -4229,7 +4230,7 @@ body.debug-2p .home-tile-link {
 /* Disabled buttons: shared token-level treatment. pointer-events: none also
    suppresses the :hover restyle without sprinkling :not(:disabled) guards. */
 .button:disabled {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
   cursor: default;
   pointer-events: none;
 }
@@ -4332,12 +4333,12 @@ body.debug-2p .home-tile-link {
    off. The control itself is also `disabled`; this is the visual half. */
 .modal-toggle-row.row-disabled .modal-row-label,
 .modal-toggle-row.row-disabled .modal-toggle-sub {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
 }
 
 /* The switch fades with its label. */
 .switch input:disabled + .switch-track {
-  opacity: 0.4;
+  opacity: var(--disabled-opacity);
 }
 
 .switch:has(input:disabled) {
@@ -4347,7 +4348,7 @@ body.debug-2p .home-tile-link {
 /* A radio group with no answer yet (GBA call modes with no BIOS). Not on
    the subhead: fading a heading takes its divider with it. */
 .radio-group.row-disabled {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
 }
 
 .modal-toggle-row {
@@ -6032,12 +6033,12 @@ body.debug-2p .home-tile-link {
 /* Under a Super Game Boy the control is `disabled` and must look it: the UA
    does not reliably dim a disabled <select> inside a dark theme. */
 .kb-select:disabled {
-  opacity: 0.4;
+  opacity: var(--disabled-opacity);
   cursor: not-allowed;
 }
 
 .gb-palette-row.row-disabled {
-  opacity: 0.4;
+  opacity: var(--disabled-opacity);
   pointer-events: none;
 }
 
@@ -6217,7 +6218,7 @@ body.debug-2p .home-tile-link {
 
 /* The Game Boy palette chips while Super Game Boy colour is on. */
 .choice-chip:disabled {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
   cursor: default;
   background: none;
 }
@@ -6254,11 +6255,15 @@ body.debug-2p .home-tile-link {
 }
 
 /* Settings > Nintendo DS, "3D drawn by": what draws it here, a line of its
-   own under the description. */
-.nds-gpu-status {
-  display: block;
+   own under the description (the grid's third row; in the phone column it
+   follows the description). */
+.settings-pane .modal-toggle-row > .nds-gpu-status {
+  grid-area: 3 / 1;
   margin-top: 4px;
   color: var(--text);
+}
+#nds-gpu-status[hidden] {
+  display: none;
 }
 
 .row-flow > .row-flow-ctl {
