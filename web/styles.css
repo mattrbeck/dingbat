@@ -49,7 +49,14 @@
   /* ---- Status ---- */
   --live: #4fd583;
   --danger: #ff6b6b;
-  --danger-hi: #ff9b9b;         /* "armed" destructive-button gradient top */
+  /* An armed destructive button (one more tap does it): a deeper red than
+     --danger, so its light ink stays over 4.5:1 top to bottom. */
+  --danger-fill: #c43838;
+  --danger-fill-hi: #d04040;      /* its gradient top */
+  --danger-ink: #fff;
+  /* The friend's colour beside yours (the link screen's bits): a hue well
+     away from the accent. */
+  --peer: #7cc4ff;
 
   /* ---- Screen (LCD off-state) ---- */
   --screen-off: #000;
@@ -188,6 +195,7 @@
   --accent-2: #cbb6ff;
   --accent-hi: #d7c8ff;
   --accent-ink: #1d1238;
+  --peer: #ffcf4a;
 
   --topbar-top: #181228;
   --topbar-bottom: #110c1c;
@@ -239,6 +247,7 @@
   --accent-2: #cbb6ff;
   --accent-hi: #d7c8ff;
   --accent-ink: #1d1238;
+  --peer: #ffcf4a;
   --cart-gba-label-lo: #8f73e0;
 
   --accent-tint-top: #1c1726;
@@ -302,7 +311,7 @@
 
   --live: #22a55b;
   --danger: #cf3f3f;
-  --danger-hi: #e06060;
+  --peer: #2a6fd6;
 
   --topbar-top: #f7f8fb;
   --topbar-bottom: #e9ebf1;
@@ -364,6 +373,7 @@
   --accent-2: #ab9eeb;
   --accent-hi: #cdc7f0;
   --accent-ink: #0e0637;
+  --peer: #ffcf4a;
   --accent-glow: rgba(var(--accent-rgb), 0.35);
 
   --topbar-top: #19152d;
@@ -432,6 +442,7 @@
   --accent-2: #eca2bb;
   --accent-hi: #f0ccd8;
   --accent-ink: #340414;
+  --peer: #6fd3c7;
   --accent-glow: rgba(var(--accent-rgb), 0.32);
 
   --topbar-top: #2e151f;
@@ -499,6 +510,7 @@
   --accent-2: #a4bbea;
   --accent-hi: #ccd9f0;
   --accent-ink: #061537;
+  --peer: #ffcf4a;
   --accent-glow: rgba(var(--accent-rgb), 0.3);
 
   --topbar-top: #161d2c;
@@ -566,6 +578,7 @@
   --accent-2: #97e189;
   --accent-hi: #c6edc0;
   --accent-ink: #0c3905;
+  --peer: #c79cff;
   --accent-glow: rgba(var(--accent-rgb), 0.28);
 
   --topbar-top: #182d15;
@@ -633,6 +646,7 @@
   --accent-2: #b1d283;
   --accent-hi: #cde1b7;
   --accent-ink: #273c07;
+  --peer: #c79cff;
   --accent-glow: rgba(var(--accent-rgb), 0.28);
 
   --topbar-top: #23221f;
@@ -709,6 +723,7 @@
   --accent-2: #d5a3eb;
   --accent-hi: #e7cbf0;
   --accent-ink: #290638;
+  --peer: #ffcf4a;
   --accent-glow: rgba(var(--accent-rgb), 0.32);
 
   --topbar-top: #25162c;
@@ -843,6 +858,7 @@
   --accent-2: #e38f87;
   --accent-hi: #edc2bb;
   --accent-ink: #340704;
+  --peer: #ffcf4a;
   --accent-glow: rgba(var(--accent-rgb), 0.3);
 
   --topbar-top: #25221e;
@@ -1716,7 +1732,7 @@ body:not(.lib-has-games) #account-slot {
   stroke-linecap: round;
 }
 
-/* The badge: a tick while all is well, an amber mark when changes wait on
+/* The badge: a tick while all is well, an accent mark when changes wait on
    Drive, and nothing - the ring below turns instead - while it syncs. */
 #account-badge {
   display: none;
@@ -1727,19 +1743,38 @@ body:not(.lib-has-games) #account-slot {
   height: 15px;
   border-radius: 50%;
   box-sizing: border-box;
+  --mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  --mark-size: 11px;
 }
 
 #account-btn[data-sync="ok"] #account-badge {
   display: block;
-  background: var(--topbar-bottom) no-repeat center / 11px 11px
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234fd583' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  background: var(--topbar-bottom);
 }
 
 #account-btn[data-sync="attention"] #account-badge {
   display: block;
-  background: var(--accent) no-repeat center / 9px 9px
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a1800' stroke-width='4' stroke-linecap='round'%3E%3Cpath d='M12 4v10M12 19.5v.5'/%3E%3C/svg%3E");
+  background: var(--accent);
   border: 2px solid var(--topbar-bottom);
+  --mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'%3E%3Cpath d='M12 4v10M12 19.5v.5'/%3E%3C/svg%3E");
+  --mark-size: 9px;
+}
+
+/* The marks are masks filled from the theme (an SVG in a data URI cannot
+   read a token): the tick in its --live, the ! in its ink on accent fills. */
+#account-badge::before,
+.acct-status-mark::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--live);
+  -webkit-mask: var(--mark) center / var(--mark-size) no-repeat;
+  mask: var(--mark) center / var(--mark-size) no-repeat;
+}
+
+#account-btn[data-sync="attention"] #account-badge::before,
+.acct-attention .acct-status-mark::before {
+  background: var(--accent-ink);
 }
 
 #account-btn[data-sync="syncing"]::after {
@@ -1880,18 +1915,24 @@ body:not(.lib-has-games) #account-slot {
 }
 
 .acct-status-mark {
+  position: relative;
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
   margin-top: 1px;
   border-radius: 50%;
-  background: no-repeat center / 16px 16px
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234fd583' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  --mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  --mark-size: 16px;
 }
 
 .acct-attention .acct-status-mark {
-  background: var(--accent) no-repeat center / 11px 11px
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a1800' stroke-width='4' stroke-linecap='round'%3E%3Cpath d='M12 4v10M12 19.5v.5'/%3E%3C/svg%3E");
+  background: var(--accent);
+  --mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'%3E%3Cpath d='M12 4v10M12 19.5v.5'/%3E%3C/svg%3E");
+  --mark-size: 11px;
+}
+
+.acct-syncing .acct-status-mark::before {
+  content: none;
 }
 
 .acct-syncing .acct-status-mark {
@@ -1943,14 +1984,6 @@ body:not(.lib-has-games) #account-slot {
 
 .acct-links button:hover {
   background: var(--surface-3);
-}
-
-/* Sign out everywhere, waiting for its second tap: the red of every armed
-   destructive button. */
-.acct-links button.armed,
-.acct-links button.armed:hover {
-  color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
 }
 
 /* --- Update badge --- */
@@ -4533,14 +4566,28 @@ body.debug-2p .home-tile-link {
 }
 
 .button-danger {
-  color: #ff6b6b;
-  border-color: rgba(255, 107, 107, 0.4);
+  color: var(--danger);
+  border-color: rgba(var(--danger-rgb), 0.4);
 }
 
 .button-danger:hover:not(:disabled) {
-  color: #fff;
-  background: rgba(255, 80, 80, 0.85);
-  border-color: rgba(255, 80, 80, 0.9);
+  color: var(--danger-ink);
+  background: var(--danger-fill);
+  border-color: var(--danger-fill);
+}
+
+/* Armed: a destructive button waiting for its second tap (the "armed"
+   class in index.js and netplay.js). One look for every one of them, in
+   every theme. :root lifts it over the buttons' own hovers; the bar's
+   Disconnect is styled by id, so it needs its own. */
+:root .armed,
+:root .armed:hover:not(:disabled),
+#rb-disconnect.armed,
+#rb-disconnect.armed:hover {
+  color: var(--danger-ink);
+  background: linear-gradient(180deg, var(--danger-fill-hi), var(--danger-fill));
+  border-color: var(--danger-fill);
+  font-weight: 600;
 }
 
 /* ---- Film-strip scrubber (Rewind, Save a Clip) ---- */
@@ -4829,12 +4876,6 @@ body.debug-2p .home-tile-link {
 .rewind-commit {
   flex: 1;
   min-height: 44px; /* thumb-sized on a phone, unremarkable on desktop */
-}
-
-.rewind-commit.armed {
-  color: #fff;
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-  border-color: rgba(var(--danger-rgb), 0.6);
 }
 
 /* ---- Report a Bug modal ---- */
@@ -6126,15 +6167,6 @@ body.debug-2p .home-tile-link {
   white-space: nowrap;
 }
 
-/* Second tap arms the button before it wipes settings (matches the delete
-   lists' two-step confirm styling). */
-.reset-settings-btn.armed {
-  color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-  border-color: rgba(var(--danger-rgb), 0.6);
-  font-weight: 600;
-}
-
 /* Radio option rows (renderer / BIOS mode) */
 .radio-group {
   display: flex;
@@ -6407,13 +6439,6 @@ body.debug-2p .home-tile-link {
 .saves-reset-btn {
   flex: 0 0 auto;
   white-space: nowrap;
-}
-
-.saves-reset-btn.armed {
-  color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-  border-color: rgba(var(--danger-rgb), 0.6);
-  font-weight: 600;
 }
 
 /* Rename modal — the confirmation's old/new pair. */
@@ -8029,7 +8054,7 @@ body.rewind-off #report-slider {
   offset-path: path("M6 34 C 40 58, 100 10, 134 34");
 }
 .net-transfer-in {
-  fill: #ffcf4a;
+  fill: var(--peer);
   offset-path: path("M134 34 C 100 10, 40 58, 6 34");
 }
 @keyframes net-transfer-bit {
@@ -8110,16 +8135,6 @@ body.rewind-off #report-slider {
   color: var(--text);
 }
 
-/* Armed (two-step) disconnect: same treatment as the delete lists' confirm
-   buttons — first tap turns the control red, second tap disconnects. */
-#rb-disconnect.armed,
-#net-connect.armed,
-#net-away-disconnect.armed {
-  color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-  border-color: rgba(var(--danger-rgb), 0.6);
-  font-weight: 600;
-}
 /* "[Share code] [Copy code]" — the buttons split the row evenly (Copy fills
    it alone where Share is hidden), so no width leaves a stray gap. */
 .net-manual-out-row {
@@ -8678,16 +8693,12 @@ body.running.sync-shown #status {
 .tile-menu-sub[hidden] {
   display: none;
 }
-/* Armed: the red of every armed destructive button here; outranks the
-   hover and the danger label colour. */
-.tile-menu-item.armed,
-.tile-menu-item.armed:hover:not(:disabled) {
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-}
+/* Armed: the labels take the shared .armed ink (Buttons, below the
+   button-danger rules), over the danger label colour. */
 .tile-menu-item.armed.danger .tile-menu-label,
 .tile-menu-item.armed .tile-menu-label,
 .tile-menu-item.armed .tile-menu-sub {
-  color: var(--accent-ink);
+  color: inherit;
 }
 @keyframes tile-sheet-in {
   from {
