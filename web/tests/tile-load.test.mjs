@@ -159,7 +159,7 @@ test("a failed download says so until the next tap, which tries again", async ()
   launchOf(app, "B.gba").click();
   await drain(40);
   assert.equal(named(app), null);
-  assert.deepEqual(says(app, "B.gba"), ["Couldn’t download", "Tap to try again"]);
+  assert.deepEqual(says(app, "B.gba"), ["Couldn’t download", "Click to try again"]);
   assert.ok(has(app, "B.gba", "is-failed") && !has(app, "B.gba", "is-loading"));
   assert.ok(!dlBusy(app, "B.gba"), "↓ is offered again");
 

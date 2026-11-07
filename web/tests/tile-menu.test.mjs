@@ -419,6 +419,21 @@ test("a re-render keeps the open state on the game's new tile", async () => {
 
 // ── The actions ─────────────────────────────────────────────────────────────
 
+test("on a touch screen the armed hint says tap; under a mouse, click", async () => {
+  for (const [touch, want] of [[true, "Tap again to confirm"], [false, "Click again to confirm"]]) {
+    const app = await loadApp({ touch });
+    seed(app, ["A.gba"]);
+    await boot(app);
+    await open(app, "A.gba");
+    const del = item(app, "Delete");
+    await del.click();
+    assert.equal(subOf(del).textContent, want);
+  }
+  const app = await loadApp();
+  assert.equal(app.runIn(`tapWords("Tap a slot, or double-tap it")`), "Click a slot, or double-click it");
+  assert.equal(app.runIn(`tapWords("Tap a slot, or double-tap it", true)`), "Tap a slot, or double-tap it");
+});
+
 test("Delete arms, then deletes: ROM, saves and the tile go; the menu closes", async () => {
   const app = await loadApp();
   seed(app, ["A.gba", "B.gba"], { saves: ["A.gba"] });
@@ -428,7 +443,7 @@ test("Delete arms, then deletes: ROM, saves and the tile go; the menu closes", a
   await del.click();
   assert.ok(del.classList.contains("armed"));
   assert.equal(labelOf(del), "Delete ROM and save data?");
-  assert.equal(subOf(del).textContent, "Tap again to confirm");
+  assert.equal(subOf(del).textContent, "Click again to confirm"); // a mouse (loadApp's default)
   assert.equal(menu(app).hidden, false, "arming does not close");
   await del.click();
   await settle();

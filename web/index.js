@@ -932,6 +932,25 @@ const updateBiosStatusText = async () => {
 const IS_IOS = /iP(hone|ad|od)/.test(navigator.platform) ||
   (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
+// A touch screen: phone-only affordances (tilt, camera flipping), and the
+// pointing verb. Copy is written for touch ("Tap again to confirm",
+// "double-tap"); under a mouse tapWords says click instead. Static text in
+// index.html opts in with data-tap (applyTapWords, at boot). `touch` lets
+// the tests preview both wordings.
+const touchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+const tapWords = (s, touch = touchDevice) => touch ? s : s
+  .replace(/\b(double-)?tap\b/g, "$1click")
+  .replace(/\bTap\b/g, "Click");
+const applyTapWords = () => {
+  if (touchDevice) return;
+  for (const el of document.querySelectorAll("[data-tap]")) {
+    if (!el.children.length) el.textContent = tapWords(el.textContent);
+    for (const a of ["title", "aria-label"])
+      if (el.hasAttribute(a)) el.setAttribute(a, tapWords(el.getAttribute(a)));
+  }
+};
+applyTapWords();
+
 const pickFile = (accept, callback) => {
   let input = document.createElement("input");
   input.type = "file";
@@ -3122,7 +3141,7 @@ const renderGdriveSection = () => {
   let everywhere = makeGdriveButton("Sign out everywhere", true, async () => {
     if (!everywhere.classList.contains("armed")) {
       everywhere.classList.add("armed");
-      everywhere.textContent = "Tap again to confirm";
+      everywhere.textContent = tapWords("Tap again to confirm");
       armTimer = setTimeout(() => {
         everywhere.classList.remove("armed");
         everywhere.textContent = "Sign out everywhere";
@@ -3830,7 +3849,7 @@ const SYNC_DESCS = {
   done: "All changes are synced to Google Drive",
   offline: "Offline — your changes will sync when you reconnect",
   // Out of token and out of silent retries: said quietly, not a sign-in prompt.
-  paused: "Tap Sync to reconnect to Google Drive — your changes are saved",
+  paused: tapWords("Tap Sync to reconnect to Google Drive — your changes are saved"),
 };
 let syncStatus = "idle"; // idle | syncing | done | offline | paused
 const syncIndicator = document.getElementById("sync-indicator");
@@ -6323,7 +6342,7 @@ const disarmEverywhere = () => {
 accountEverywhere?.addEventListener("click", async () => {
   if (!accountEverywhere.classList.contains("armed")) {
     accountEverywhere.classList.add("armed");
-    accountEverywhere.textContent = "Tap again to sign out everywhere";
+    accountEverywhere.textContent = tapWords("Tap again to sign out everywhere");
     everywhereTimer = setTimeout(disarmEverywhere, 4000);
     return;
   }
@@ -7409,7 +7428,7 @@ const tileMenuItem = ({ label, sub = "", icon = "", danger = false, disabled = "
       armed = true;
       b.classList.add("armed");
       l.textContent = confirmLabel;
-      s.textContent = "Tap again to confirm";
+      s.textContent = tapWords("Tap again to confirm");
       s.hidden = false;
       armTimer = setTimeout(disarm, TILE_MENU_ARM_MS);
       for (let o of tileMenuButtons()) if (o !== b && o.disarm) o.disarm();
@@ -7883,7 +7902,7 @@ const paintTileLoad = (tile) => {
       : s.stage === "start" ? "Starting…"
       : opening ? "Opening" : "Downloading";
     sub.textContent = s.stage === "signin" || s.stage === "check" ? "Google Drive"
-      : failed ? "Tap to try again"
+      : failed ? tapWords("Tap to try again")
       : tileBytes(s.got, s.total);
     let pct = s.stage === "start" ? 100 : s.total ? Math.min(100, 100 * s.got / s.total) : 0;
     bar.hidden = s.stage === "signin" || s.stage === "check" || (!s.total && s.stage !== "start");
@@ -8092,12 +8111,12 @@ const refreshHomeRecent = async () => {
     let launch = document.createElement("button");
     launch.type = "button";
     launch.className = "home-tile-launch";
-    launch.title = missing
+    launch.title = tapWords(missing
       ? romName + " — the file is not on this device, tap to find it"
       : driveOnly
         ? romName + (driveLinked() ? " — on Drive, tap to download"
                                    : " — on Drive, tap to sign in and download")
-        : romName;
+        : romName);
 
     // The 3:2 picture (the GBA screen's shape). Precedence: the last screen
     // the game showed, else the box art, else the system chip standing in -
@@ -17023,18 +17042,18 @@ const camCartBtnUpdate = () => {
 // webcam frame would (camera.nim's synthetic scene reads as corruption).
 // The MAC-GBD's edge enhancement keeps large high-contrast type clean
 // through the dither; each line is auto-fitted to the full 128px width.
-// One string per notice: "/" is the line break, {tap} the pointing verb,
-// {label} CAM_ENABLE_LABEL. Keep lines to ~14 characters (below the 17.6px
+// One string per notice: "/" is the line break, {label} CAM_ENABLE_LABEL;
+// "Tap" becomes "Click" under a mouse (tapWords). Keep lines to ~14 characters (below the 17.6px
 // floor they turn to mush); `node tools/cammsg.mjs` fit-checks a candidate.
 const CAM_NOTICES = {
   // Never asked.
-  prompt: "{tap} / {label} / in the top bar",
+  prompt: "Tap / {label} / in the top bar",
   // NotAllowedError, or the Permissions API said "denied".
   blocked: "Camera is / currently / restricted / by the / browser.",
   // NotFoundError.
   missing: "No camera / found on / this device",
   // The track ended by itself (backgrounding, another app, unplugged).
-  ended: "Camera / stopped. / {tap} / {label}",
+  ended: "Camera / stopped. / Tap / {label}",
   // No getUserMedia at all (a plain-http origin).
   insecure: "Camera needs / a secure / connection",
 };
@@ -17042,8 +17061,7 @@ const CAM_NOTICES = {
 // A notice's lines. `touch` lets tools/cammsg.mjs preview both wordings.
 const camNoticeLines = (kind, touch = touchDevice) =>
   (CAM_NOTICES[kind] || "").split("/")
-    .map((s) => s.trim()
-      .replace(/\{tap\}/g, touch ? "Tap" : "Click")
+    .map((s) => tapWords(s.trim(), touch)
       .replace(/\{label\}/g, CAM_ENABLE_LABEL))
     .filter((s) => s !== "");
 
@@ -17310,7 +17328,6 @@ const detectCameraCart = () => {
 // (re-triggered every ~50 ms with 60 ms effects so they chain),
 // navigator.vibrate, and a body.rumbling canvas shake; all gated by gbRumble.
 const RUMBLE_RETRIGGER_MS = 50;
-const touchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 let rumbling = false;
 let lastRumblePulse = 0;
 
@@ -19433,9 +19450,9 @@ var Module = {
       if (pressed !== hlePressed) {
         hlePressed = pressed;
         hleIndicator.setAttribute("aria-pressed", pressed ? "true" : "false");
-        hleIndicator.title = pressed
+        hleIndicator.title = tapWords(pressed
           ? "Enhanced audio on — tap to hear the hardware mix"
-          : "Enhanced audio off for this game — tap to turn it back on";
+          : "Enhanced audio off for this game — tap to turn it back on");
       }
     };
     hleIndicator.addEventListener("click", () => {
