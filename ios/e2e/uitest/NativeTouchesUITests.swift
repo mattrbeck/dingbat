@@ -301,6 +301,11 @@ final class NativeTouchesUITests: XCTestCase {
     /// channel-mute pill): nothing overlaps and all of it is on screen.
     /// DB_TIGHT: the row with no room for a reading, where none showing is
     /// right. Prints every item's frame (NATIVE: bar …) for comparing builds.
+    /// In the suite as it stands; with the knobs, on its own, from the repo:
+    ///   DB_BAR_ARGS="-drive-stub http://127.0.0.1:9" DB_MUTE=1 \
+    ///     node ios/e2e/native-touches.mjs <dd> [udid]
+    /// (a tilt cart for its button: DB_ROMS=<path> DB_GAME=<its name>; the
+    /// SE's tightest row adds DB_TIGHT=1).
     func testTopBarFits() {
         let extra = (ProcessInfo.processInfo.environment["DB_BAR_ARGS"] ?? "")
             .split(separator: " ").map(String.init)
@@ -357,6 +362,35 @@ final class NativeTouchesUITests: XCTestCase {
             XCTAssertGreaterThan(readout.frame.width, 0, "the reading shows")
         }
         snap(app, "topbar")
+    }
+
+    /// Add pictures over a library whose games are on DB_ROMS (copied in by
+    /// the runner): a game whose screen stays one colour (linktest.gba's
+    /// white) gets no picture and keeps its cartridge; one with a real
+    /// screen gets its picture. Prints the toast (NATIVE: pictures …). Run
+    /// on its own (the suite's library is linktest.gba alone), from the repo:
+    ///   DB_ROMS=tests/roms/gbedge.gb DB_PICTURES="1 picture added" \
+    ///     node ios/e2e/native-touches.mjs <dd>
+    func testAddPicturesSkipsBlank() throws {
+        guard let want = ProcessInfo.processInfo.environment["DB_PICTURES"] else {
+            throw XCTSkip("no DB_PICTURES (the pictures the run should add)")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-audio.muted", "YES", "-sheet", "addPictures"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Add pictures to your library?"].waitForExistence(timeout: 10), "the offer")
+        sleep(1)
+        // The sheet's, not the library head's behind it.
+        let go = app.buttons.matching(NSPredicate(format: "label == 'Add pictures'")).allElementsBoundByIndex
+            .last { $0.isHittable }
+        XCTAssertNotNil(go, "the offer's Add pictures")
+        go?.tap()
+        let done = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH 'added' OR label ENDSWITH 'stopping'")).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 60), "the run ends")
+        print("NATIVE: pictures \(done.label)")
+        XCTAssertEqual(done.label, want, "only the real screens are pictured")
+        sleep(1)
+        snap(app, "pictures-added")
     }
 
     /// A game's toasts (web 720bc7e3): under the bar, never over its buttons;

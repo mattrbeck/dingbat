@@ -1455,6 +1455,9 @@ final class GameSession: NSObject, ObservableObject {
     func storeLastFrame() {
         // A switched-off DS keeps the last picture played (web storeLastFrame).
         if isNDS && NdsState.shared.poweredOff { return }
+        // Not even on a pause: the picture already stored (or the cartridge)
+        // is a better face than a blank screen.
+        if screenBlank() { return }
         guard let g = game, let jpg = currentImage()?.jpegData(compressionQuality: 0.75) else { return }
         let sig = DriveSync.sig(jpg)
         guard sig != lastFrameSig else { return }
@@ -1463,6 +1466,44 @@ final class GameSession: NSObject, ObservableObject {
         try? jpg.write(to: g.shotURL, options: .atomic)
         RomLibrary.shared.pictureGen += 1
         DriveSync.shared.markUpload("frame:" + g.fileName)
+    }
+
+    /// The screen a picture is taken of (a DS game's top one) is one colour:
+    /// a boot's white, a fade's black (framebufferBlank).
+    func screenBlank() -> Bool {
+        guard game != nil else { return false }
+        if isNDS {
+            GameRenderer.shared.syncNdsScreens()
+            guard let top = dingbat_nds_top_rgba() else { return false }
+            return Self.framebufferBlank(top, width: 256, height: 192)
+        }
+        guard let p = dingbat_framebuffer_rgba() else { return false }
+        return Self.framebufferBlank(p, width: Int(dingbat_fb_width()), height: Int(dingbat_fb_height()))
+    }
+
+    /// A screen of one colour - a boot's white, a fade's black - is not a
+    /// picture of the game, and stored it shows as a slab (web
+    /// framebufferBlank). A 32x32 grid of samples: blank when all but two
+    /// match the first (within 24, the three channels summed). Fine enough
+    /// that a small logo or a thin line of text on black still counts as a
+    /// picture (a title screen often is just that).
+    static func framebufferBlank(_ px: UnsafePointer<UInt32>, width w: Int, height h: Int) -> Bool {
+        let grid = 32
+        var first: (Int, Int, Int)?
+        var off = 0
+        for y in 0..<grid {
+            let row = (2 * y + 1) * h / (2 * grid) * w
+            for x in 0..<grid {
+                let v = px[row + (2 * x + 1) * w / (2 * grid)]
+                let r = Int(v & 0xFF), g = Int((v >> 8) & 0xFF), b = Int((v >> 16) & 0xFF)
+                guard let f = first else { first = (r, g, b); continue }
+                if abs(r - f.0) + abs(g - f.1) + abs(b - f.2) > 24 {
+                    off += 1
+                    if off > 2 { return false }
+                }
+            }
+        }
+        return true
     }
 
     /// The picture now, colour corrected and in the shade palette (no
