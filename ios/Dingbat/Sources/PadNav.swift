@@ -188,9 +188,12 @@ extension EnvironmentValues {
 }
 
 /// Registers a view with PadNav and draws the ring on it while focused.
+/// On an armed row the accent would vanish into the red: the ring takes
+/// the armed ink, inside the row.
 struct PadFocusable: ViewModifier {
     let id: String
     var radius: CGFloat = 8
+    var armed = false
     let press: () -> Void
     var adjust: ((Int) -> Void)?
     var alt: (() -> Void)?
@@ -204,9 +207,9 @@ struct PadFocusable: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay(
-                RoundedRectangle(cornerRadius: radius + 3)
-                    .stroke(palette.accent, lineWidth: 2.5)
-                    .padding(-3)
+                RoundedRectangle(cornerRadius: armed ? max(radius - 2, 2) : radius + 3)
+                    .stroke(armed ? palette.dangerInk : palette.accent, lineWidth: 2.5)
+                    .padding(armed ? 2 : -3)
                     .opacity(nav.showing && nav.focused == key ? 1 : 0)
                     .allowsHitTesting(false)
             )
@@ -229,9 +232,9 @@ struct PadFocusable: ViewModifier {
 
 extension View {
     /// Focusable by a controller: `press` is A, `alt` Y, `adjust` left/right.
-    func padFocus(_ id: String, radius: CGFloat = 8, alt: (() -> Void)? = nil,
+    func padFocus(_ id: String, radius: CGFloat = 8, armed: Bool = false, alt: (() -> Void)? = nil,
                   adjust: ((Int) -> Void)? = nil, press: @escaping () -> Void) -> some View {
-        modifier(PadFocusable(id: id, radius: radius, press: press, adjust: adjust, alt: alt))
+        modifier(PadFocusable(id: id, radius: radius, armed: armed, press: press, adjust: adjust, alt: alt))
     }
 
     /// Inside a ScrollViewReader: keep the focused item in view.

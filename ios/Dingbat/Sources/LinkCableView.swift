@@ -158,7 +158,7 @@ struct LinkTransferScene: View {
             let s = (phase + CGFloat(k) / 3).truncatingRemainder(dividingBy: 1)
             let out = Self.at(s), back = Self.at(1 - (s + 1.0 / 6).truncatingRemainder(dividingBy: 1))
             g.fill(Path(CGRect(x: out.x - 2.5, y: out.y - 2.5, width: 5, height: 5)), with: .color(palette.accent))
-            g.fill(Path(CGRect(x: back.x - 2.5, y: back.y - 2.5, width: 5, height: 5)), with: .color(Color(hex: 0xFFCF4A)))
+            g.fill(Path(CGRect(x: back.x - 2.5, y: back.y - 2.5, width: 5, height: 5)), with: .color(palette.peer))
         }
     }
 }

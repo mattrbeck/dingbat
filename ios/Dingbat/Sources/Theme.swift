@@ -112,7 +112,15 @@ struct Palette {
 
     var live = Color(hex: 0x4FD583)
     var danger = Color(hex: 0xFF6B6B)
-    var dangerHi = Color(hex: 0xFF9B9B)
+    /// An armed destructive control (one more tap does it): a deeper red
+    /// than `danger`, the same in every theme, so its light ink stays over
+    /// 4.5:1 top to bottom (white: 5.3 on the fill, 4.7 on its top).
+    var dangerFill = Color(hex: 0xC43838)
+    var dangerFillHi = Color(hex: 0xD04040)
+    var dangerInk = Color.white
+    /// The friend's colour beside yours (the link sheet's incoming bits): a
+    /// hue well away from the accent (web --peer).
+    var peer = Color(hex: 0x7CC4FF)
 
     // Chrome: the top bar, the stage around the screen, the control strip.
     var topbarTop = Color(hex: 0x161B2B)
@@ -273,7 +281,7 @@ struct Palette {
             p.text = Color(hex: 0x1D2433); p.textDim = Color(hex: 0x4D576D); p.textFaint = Color(hex: 0x646C7E)
             p.accent = Color(hex: 0x9C5400); p.accent2 = Color(hex: 0xB76A0A); p.accentHi = Color(hex: 0xD88A1F)
             p.accentInk = Color(hex: 0xFFFFFF); p.accentGlow = Color(hex: 0x9C5400, alpha: 0.28)
-            p.live = Color(hex: 0x22A55B); p.danger = Color(hex: 0xCF3F3F); p.dangerHi = Color(hex: 0xE06060)
+            p.live = Color(hex: 0x22A55B); p.danger = Color(hex: 0xCF3F3F)
             p.topbarTop = Color(hex: 0xF7F8FB); p.topbarBottom = Color(hex: 0xE9EBF1)
             p.controlStripTop = Color(hex: 0xDFE2EA); p.controlStripBottom = p.bg
             p.accentTintTop = Color(hex: 0xFFE7C4); p.btnActiveBottom = Color(hex: 0xFFDCA6)
@@ -371,6 +379,16 @@ struct Palette {
             p.abRing = Color(hex: 0xB44148); p.abLabel = Color(hex: 0xE6D9BF)
             p.dpadBorder = Color(hex: 0xB44148); p.dpadBorderWidth = 3; p.dpadBarLine = false
             p.panelStripe = Color(red: 24 / 255, green: 18 / 255, blue: 10 / 255, opacity: 0.62)
+        }
+        // The friend's colour, per theme (web --peer); Amber and Daiei keep
+        // the struct's blue (its defaults are Amber's; the app's default
+        // theme is Night).
+        switch t {
+        case .night, .black, .indigo, .glacier, .atomicPurple, .famicom: p.peer = Color(hex: 0xFFCF4A)
+        case .light: p.peer = Color(hex: 0x2A6FD6)
+        case .fuchsia: p.peer = Color(hex: 0x6FD3C7)
+        case .kiwi, .dmg: p.peer = Color(hex: 0xC79CFF)
+        case .amber, .daiei: break
         }
         return p
     }
