@@ -151,7 +151,7 @@ test("a delete queued for the ROM also counts as not on Drive", async () => {
   assert.equal(item(app, "Remove from this device").disabled, true);
 });
 
-test("the paused game: Remove and Delete close it themselves, and the question says so", async () => {
+test("the paused game: Remove and Delete close it themselves, and the armed line says so", async () => {
   const app = await loadApp();
   seed(app, ["Zelda.gbc"]);
   signIn(app, { "rom:Zelda.gbc": "sig" });
@@ -161,12 +161,14 @@ test("the paused game: Remove and Delete close it themselves, and the question s
   eq(rows(app)[3], ["Remove from this device", "", false], "no longer blocked");
   const rm = item(app, "Remove from this device");
   await rm.click(); // arm only
-  assert.equal(labelOf(rm), "Close and remove?");
+  assert.equal(labelOf(rm), "Remove from this device?");
+  assert.equal(subOf(rm).textContent, "Closes the game; Drive keeps a copy");
   app.api.closeTileMenu();
   await open(app, "Zelda.gbc");
   const del = item(app, "Delete");
   await del.click();
-  assert.equal(labelOf(del), "Close and delete everything?");
+  assert.equal(labelOf(del), "Delete this game?");
+  assert.equal(subOf(del).textContent, "Closes it; the ROM and its save data go");
   app.api.closeTileMenu();
   app.api.currentOriginalName = null;
 });
@@ -427,8 +429,8 @@ test("Delete arms, then deletes: ROM, saves and the tile go; the menu closes", a
   const del = item(app, "Delete");
   await del.click();
   assert.ok(del.classList.contains("armed"));
-  assert.equal(labelOf(del), "Delete ROM and save data?");
-  assert.equal(subOf(del).textContent, "Tap again to confirm");
+  assert.equal(labelOf(del), "Delete this game?");
+  assert.equal(subOf(del).textContent, "The ROM and its save data go");
   assert.equal(menu(app).hidden, false, "arming does not close");
   await del.click();
   await settle();

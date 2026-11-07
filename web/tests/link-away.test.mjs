@@ -166,7 +166,7 @@ test("the card's Disconnect takes two taps and ends the session", async () => {
   advance(1000);
   const btn = el(app, "net-away-disconnect");
   await btn.dispatch("click");
-  assert.equal(btn.textContent, "Are you sure?");
+  assert.equal(btn.textContent, "Disconnect?");
   assert.equal(app.runIn("!!net"), true, "one tap only arms it");
   await btn.dispatch("click");
   await flush();

@@ -1945,14 +1945,6 @@ body:not(.lib-has-games) #account-slot {
   background: var(--surface-3);
 }
 
-/* Sign out everywhere, waiting for its second tap: the red of every armed
-   destructive button. */
-.acct-links button.armed,
-.acct-links button.armed:hover {
-  color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-}
-
 /* --- Update badge --- */
 #update-btn {
   display: inline-flex;
@@ -4831,12 +4823,6 @@ body.debug-2p .home-tile-link {
   min-height: 44px; /* thumb-sized on a phone, unremarkable on desktop */
 }
 
-.rewind-commit.armed {
-  color: #fff;
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-  border-color: rgba(var(--danger-rgb), 0.6);
-}
-
 /* ---- Report a Bug modal ---- */
 .modal-report {
   max-width: 440px;
@@ -6126,15 +6112,6 @@ body.debug-2p .home-tile-link {
   white-space: nowrap;
 }
 
-/* Second tap arms the button before it wipes settings (matches the delete
-   lists' two-step confirm styling). */
-.reset-settings-btn.armed {
-  color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-  border-color: rgba(var(--danger-rgb), 0.6);
-  font-weight: 600;
-}
-
 /* Radio option rows (renderer / BIOS mode) */
 .radio-group {
   display: flex;
@@ -6407,13 +6384,6 @@ body.debug-2p .home-tile-link {
 .saves-reset-btn {
   flex: 0 0 auto;
   white-space: nowrap;
-}
-
-.saves-reset-btn.armed {
-  color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-  border-color: rgba(var(--danger-rgb), 0.6);
-  font-weight: 600;
 }
 
 /* Rename modal — the confirmation's old/new pair. */
@@ -8110,16 +8080,6 @@ body.rewind-off #report-slider {
   color: var(--text);
 }
 
-/* Armed (two-step) disconnect: same treatment as the delete lists' confirm
-   buttons — first tap turns the control red, second tap disconnects. */
-#rb-disconnect.armed,
-#net-connect.armed,
-#net-away-disconnect.armed {
-  color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
-  border-color: rgba(var(--danger-rgb), 0.6);
-  font-weight: 600;
-}
 /* "[Share code] [Copy code]" — the buttons split the row evenly (Copy fills
    it alone where Share is hidden), so no width leaves a stray gap. */
 .net-manual-out-row {
@@ -8678,16 +8638,35 @@ body.running.sync-shown #status {
 .tile-menu-sub[hidden] {
   display: none;
 }
-/* Armed: the red of every armed destructive button here; outranks the
-   hover and the danger label colour. */
+/* Armed: a two-press button waiting for its second press, its label asking
+   the action back ("Disconnect?"). One red for all of them; the tile menu's
+   items add their label colours below. Last of the button rules, so it
+   outranks their hovers. */
+.acct-links button.armed,
+.acct-links button.armed:hover,
+.rewind-commit.armed,
+.reset-settings-btn.armed,
+.saves-reset-btn.armed,
+#rb-disconnect.armed,
+#net-connect.armed,
+#net-away-disconnect.armed,
 .tile-menu-item.armed,
 .tile-menu-item.armed:hover:not(:disabled) {
+  color: var(--accent-ink);
   background: linear-gradient(180deg, var(--danger-hi), var(--danger));
+  border-color: rgba(var(--danger-rgb), 0.6);
+  font-weight: 600;
 }
+/* Armed (the red is the shared .armed rule): the label and sub-line take its
+   ink, outranking the danger label colour. */
 .tile-menu-item.armed.danger .tile-menu-label,
 .tile-menu-item.armed .tile-menu-label,
 .tile-menu-item.armed .tile-menu-sub {
   color: var(--accent-ink);
+}
+/* The question is bold; what goes, under it, is not. */
+.tile-menu-item.armed .tile-menu-sub {
+  font-weight: 400;
 }
 @keyframes tile-sheet-in {
   from {

@@ -2007,7 +2007,8 @@ const netDismissModal = () => {
 };
 
 // Two-step confirm on an existing element (index.js makeConfirmButton
-// semantics: armed class + label swap + 3.5s auto-disarm).
+// semantics: armed class + label swap + 3.5s auto-disarm). Armed, the
+// label restates the action as a question ("Disconnect?").
 const armedAction = (el, setLabel, action) => {
   let armed = false;
   let timer = 0;
@@ -2037,7 +2038,7 @@ const menuDisconnectArm = armedAction(
   document.getElementById("net-connect"),
   (armed) => {
     if (!netConnectLabel) return;
-    if (armed) netConnectLabel.textContent = "Are you sure?";
+    if (armed) netConnectLabel.textContent = "Disconnect?";
     // The session may have died remotely while armed.
     else window.setNetConnectLabel(!!(net?.started || net?.rb?.inited));
   },
@@ -2057,7 +2058,7 @@ const rbDisconnectArm = armedAction(
   rbDisconnectBtn,
   (armed) => {
     if (!rbDcSpan) return;
-    if (armed) rbDcSpan.textContent = "Are you sure?";
+    if (armed) rbDcSpan.textContent = "Disconnect?";
     else rbDcSpan.innerHTML = rbDcHTML;
   },
   () => {
@@ -2108,7 +2109,7 @@ const awayDisconnectBtn = document.getElementById("net-away-disconnect");
 const awayDisconnectArm = armedAction(
   awayDisconnectBtn,
   (armed) => {
-    awayDisconnectBtn.textContent = armed ? "Are you sure?" : "Disconnect…";
+    awayDisconnectBtn.textContent = armed ? "Disconnect?" : "Disconnect";
   },
   () => {
     log("netplay: disconnected by you (friend away)");

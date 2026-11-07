@@ -1669,7 +1669,9 @@ cheatCodesEl.addEventListener("input", () => showCheatError(""));
 // --- Delete save data (per-ROM) ---
 
 // Two-step inline confirm button: first tap arms, a second within 3.5s runs
-// onConfirm. `disarm()` lets a caller reset a sibling.
+// onConfirm. `disarm()` lets a caller reset a sibling. Every armed button
+// here says one thing: its own action again, as a question ("Disconnect?",
+// "Sign out everywhere?"), in the red of .armed.
 /** @param {{label: string, confirmLabel?: string, className?: string,
  *          onConfirm: () => any, onArm?: () => any}} opts */
 const makeConfirmButton = ({
@@ -1853,7 +1855,7 @@ const resetSaveSlot = document.getElementById("reset-save-slot");
 if (resetSaveSlot) {
   const resetSaveBtn = makeConfirmButton({
     label: "Reset",
-    confirmLabel: "Confirm reset?",
+    confirmLabel: "Reset save file?",
     className: "button button-sm saves-reset-btn",
     onConfirm: async () => {
       await resetCurrentSaveFile();
@@ -3122,7 +3124,7 @@ const renderGdriveSection = () => {
   let everywhere = makeGdriveButton("Sign out everywhere", true, async () => {
     if (!everywhere.classList.contains("armed")) {
       everywhere.classList.add("armed");
-      everywhere.textContent = "Tap again to confirm";
+      everywhere.textContent = "Sign out everywhere?";
       armTimer = setTimeout(() => {
         everywhere.classList.remove("armed");
         everywhere.textContent = "Sign out everywhere";
@@ -6323,7 +6325,7 @@ const disarmEverywhere = () => {
 accountEverywhere?.addEventListener("click", async () => {
   if (!accountEverywhere.classList.contains("armed")) {
     accountEverywhere.classList.add("armed");
-    accountEverywhere.textContent = "Tap again to sign out everywhere";
+    accountEverywhere.textContent = "Sign out everywhere?";
     everywhereTimer = setTimeout(disarmEverywhere, 4000);
     return;
   }
@@ -7364,8 +7366,9 @@ const MENU_ICONS = {
 // A menu item: a label over a sub-line. `disabled` is the reason, shown in
 // the sub-line's place. Destructive items arm on the first tap and run on
 // the second (the pattern of every destructive button here), disarming
-// after a moment or when a sibling arms.
-const tileMenuItem = ({ label, sub = "", icon = "", danger = false, disabled = "", confirmLabel = "", run }) => {
+// after a moment or when a sibling arms. Armed, the label asks the action
+// back (confirmLabel) and the sub-line says what goes (confirmSub).
+const tileMenuItem = ({ label, sub = "", icon = "", danger = false, disabled = "", confirmLabel = "", confirmSub = "", run }) => {
   let b = document.createElement("button");
   b.type = "button";
   b.className = "tile-menu-item" + (danger ? " danger" : "");
@@ -7409,8 +7412,8 @@ const tileMenuItem = ({ label, sub = "", icon = "", danger = false, disabled = "
       armed = true;
       b.classList.add("armed");
       l.textContent = confirmLabel;
-      s.textContent = "Tap again to confirm";
-      s.hidden = false;
+      s.textContent = confirmSub;
+      s.hidden = !confirmSub;
       armTimer = setTimeout(disarm, TILE_MENU_ARM_MS);
       for (let o of tileMenuButtons()) if (o !== b && o.disarm) o.disarm();
       return;
@@ -7535,7 +7538,8 @@ const tileMenuEntries = (name, f) => {
   items.push(tileMenuItem({
     label: "Reset save data",
     disabled: busy || (f.hasSaves ? "" : "No save data yet"),
-    confirmLabel: "Delete all save data?",
+    confirmLabel: "Reset save data?",
+    confirmSub: "Every save for this game is deleted",
     run: () => resetGameAction(name),
   }));
   // A save from before the game was deleted and loaded again (see genOf),
@@ -7547,7 +7551,8 @@ const tileMenuEntries = (name, f) => {
       sub: (f.kept.why === "replaced" ? "The save you replaced" : "From before you deleted it") +
            (f.kept.at ? " · saved " + fmtStateTime(f.kept.at) : ""),
       disabled: busy,
-      confirmLabel: "Replace the current save?",
+      confirmLabel: "Restore old save?",
+      confirmSub: "It replaces the current save",
       run: () => restoreKeptSave(name),
     }));
   }
@@ -7557,7 +7562,8 @@ const tileMenuEntries = (name, f) => {
       // A paused game is closed on the way, the way Delete already does it.
       disabled: busy ||
         (f.romOnDrive ? "" : "Not backed up to Drive yet — this is your only copy"),
-      confirmLabel: f.loaded ? "Close and remove?" : "Remove from this device?",
+      confirmLabel: "Remove from this device?",
+      confirmSub: (f.loaded ? "Closes the game; " : "") + "Drive keeps a copy",
       run: () => removeFromDeviceAction(name),
     }));
   }
@@ -7565,9 +7571,9 @@ const tileMenuEntries = (name, f) => {
     label: "Delete",
     danger: true,
     disabled: busy,
-    confirmLabel: f.loaded ? "Close and delete everything?"
-                : f.missing ? "Delete this game and its save?"
-                            : "Delete ROM and save data?",
+    confirmLabel: "Delete this game?",
+    confirmSub: f.loaded ? "Closes it; the ROM and its save data go"
+              : f.missing ? "Its save data goes too" : "The ROM and its save data go",
     run: () => deleteGameAction(name),
   }));
   return items;
@@ -12654,7 +12660,7 @@ const resetSettingsSlot = document.getElementById("reset-settings-slot");
 if (resetSettingsSlot) {
   const resetBtn = makeConfirmButton({
     label: "Reset all settings",
-    confirmLabel: "Confirm reset?",
+    confirmLabel: "Reset all settings?",
     className: "button button-sm reset-settings-btn",
     onConfirm: async () => {
       await resetAllSettings();

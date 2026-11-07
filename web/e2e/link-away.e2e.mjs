@@ -212,7 +212,7 @@ test("Disconnect from the card while the friend is away: they hear it on return"
   await until(() => cardShown(a), "A's away card", 5000);
   const btn = a.page.locator("#net-away-disconnect");
   await btn.click();
-  assert.equal(await btn.textContent(), "Are you sure?");
+  assert.equal(await btn.textContent(), "Disconnect?");
   assert.ok(await linked(a), "one tap only arms it");
   await btn.click();
   await until(async () => !(await linked(a)), "A disconnected", 5000);
