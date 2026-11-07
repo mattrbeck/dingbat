@@ -360,7 +360,7 @@
             b.classList.add("signed-in");
             b.dataset.sync = syncs ? "syncing" : "ok";
             document.getElementById("account-avatar").textContent = h.i;
-            b.title = "Google Drive: " + (syncs ? "Syncing" : "Signed in");
+            b.title = "Google Drive: " + (syncs ? "Syncing…" : "Signed in");
             b.setAttribute("aria-label", b.title);
           } catch (e) {}
         })();
@@ -662,7 +662,7 @@
 
       <!-- Online link: shown while the emulated clock waits on the peer -->
       <div id="net-stall" hidden aria-live="polite">
-        <span aria-hidden="true">&#8987;</span> <span id="net-stall-text">Waiting for your friend</span>
+        <span aria-hidden="true">&#8987;</span> <span id="net-stall-text">Waiting for your friend…</span>
       </div>
 
       <!-- Online link: the friend's tab is hidden, so their game is paused
@@ -1215,7 +1215,7 @@
                     <button type="button" class="choice-chip" data-value="2" role="radio" aria-checked="false" aria-label="2 frames">2</button>
                     <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false" aria-label="3 frames">3</button>
                   </div>
-                  <span class="modal-toggle-sub">Cuts the delay between pressing a button and seeing it happen, by guessing that many frames ahead. Costs extra CPU; ignored at 2&times; speed and in multiplayer</span>
+                  <span class="modal-toggle-sub">Cuts the delay between pressing a button and seeing it happen, by guessing that many frames ahead. Costs extra CPU; ignored at 2&times; speed and in multiplayer.</span>
                 </div>
                 <div class="modal-toggle-row">
                   <div>
@@ -1282,7 +1282,7 @@
                     <input type="checkbox" id="sgb-border-toggle" checked />
                     <span class="switch-track" aria-hidden="true"></span>
                   </label>
-                  <span class="modal-toggle-sub">A border makes the picture wider, so the screen changes shape when one appears.</span>
+                  <span class="modal-toggle-sub">A border makes the picture wider, so the screen changes shape when one appears</span>
                 </div>
                 <div class="modal-subhead">Boot ROM</div>
                 <div class="modal-row">
@@ -1305,7 +1305,7 @@
                 <div class="modal-toggle-row" id="gba-run-bios-row">
                   <div>
                     <span class="modal-row-label">Play BIOS intro</span>
-                    <span class="modal-toggle-sub">Play the GBA startup animation first. Needs a BIOS file</span>
+                    <span class="modal-toggle-sub">Play the GBA startup animation first. Needs a BIOS file.</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="gba-run-bios-toggle" checked />
@@ -1320,7 +1320,7 @@
                   </label>
                   <label class="radio-row">
                     <input type="radio" name="gba-bios-mode" value="1" />
-                    <span>Real BIOS<span class="radio-sub">The most faithful. Needs a BIOS file</span></span>
+                    <span>Real BIOS<span class="radio-sub">The most faithful. Needs a BIOS file.</span></span>
                   </label>
                   <label class="radio-row">
                     <input type="radio" name="gba-bios-mode" value="2" />
@@ -1342,7 +1342,7 @@
                     <option value="focus">Focus</option>
                     <option value="single">One screen</option>
                   </select>
-                  <span class="modal-toggle-sub" data-tap>Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard)</span>
+                  <span class="modal-toggle-sub" data-tap>Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard).</span>
                 </div>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">Gap</span>
@@ -1351,7 +1351,7 @@
                     <button type="button" class="choice-chip selected" data-value="hinge" role="radio" aria-checked="true">Hinge</button>
                     <button type="button" class="choice-chip" data-value="console" role="radio" aria-checked="false">Like the console</button>
                   </div>
-                  <span class="modal-toggle-sub">How far apart two screens shown together sit. Like the console is about the real distance, in pixels</span>
+                  <span class="modal-toggle-sub">How far apart two screens shown together sit. Like the console is about the real distance, in pixels.</span>
                 </div>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">Turn</span>
@@ -1360,7 +1360,7 @@
                     <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false">Book, left</button>
                     <button type="button" class="choice-chip" data-value="1" role="radio" aria-checked="false">Book, right</button>
                   </div>
-                  <span class="modal-toggle-sub">For games played with the console held sideways like a book. Book, left puts the touch screen on the right (O on a keyboard)</span>
+                  <span class="modal-toggle-sub">For games played with the console held sideways like a book. Book, left puts the touch screen on the right (O on a keyboard).</span>
                 </div>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">3D resolution</span>
@@ -1370,7 +1370,7 @@
                     <button type="button" class="choice-chip" data-value="3" role="radio" aria-checked="false">3x</button>
                     <button type="button" class="choice-chip" data-value="4" role="radio" aria-checked="false">4x</button>
                   </div>
-                  <span class="modal-toggle-sub">Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. When the processor draws the 3D, each step costs a lot more work a frame, so a slower device may not keep full speed</span>
+                  <span class="modal-toggle-sub">Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. When the processor draws the 3D, each step costs a lot more work a frame, so a slower device may not keep full speed.</span>
                 </div>
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">3D drawn by</span>
@@ -1379,7 +1379,8 @@
                     <button type="button" class="choice-chip" data-value="gpu" role="radio" aria-checked="false">Graphics card</button>
                     <button type="button" class="choice-chip" data-value="cpu" role="radio" aria-checked="false">Processor</button>
                   </div>
-                  <span class="modal-toggle-sub">The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions cost the processor almost nothing. Automatic uses it when this browser has a hardware one that can, and not with run-ahead<span id="nds-gpu-status" class="nds-gpu-status" role="status" hidden></span></span>
+                  <span class="modal-toggle-sub">The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions cost the processor almost nothing. Automatic uses it when this browser has a hardware one that can, and not with run-ahead.</span>
+                  <span id="nds-gpu-status" class="modal-toggle-sub nds-gpu-status" role="status" hidden></span>
                 </div>
                 <div class="modal-toggle-row">
                   <div>
@@ -1394,7 +1395,7 @@
                 <div class="modal-toggle-row nds-phone-only">
                   <div>
                     <span class="modal-row-label">Hide the top bar while playing</span>
-                    <span class="modal-toggle-sub">On a phone held upright, the screens take the bar's room. The handle at the top brings the bar back</span>
+                    <span class="modal-toggle-sub">On a phone held upright, the screens take the bar's room. The handle at the top brings the bar back.</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" data-nds-toggle="barHide" />
@@ -1429,7 +1430,7 @@
                     <div class="modal-row"><span class="modal-row-label">Name</span><span id="nds-user-name" class="nds-user-val">&ndash;</span></div>
                     <div class="modal-row"><span class="modal-row-label">Birthday</span><span id="nds-user-birthday" class="nds-user-val">&ndash;</span></div>
                     <div class="modal-row"><span class="modal-row-label">Language</span><span id="nds-user-lang" class="nds-user-val">&ndash;</span></div>
-                    <div class="modal-row"><span class="modal-row-label">Colour</span><span id="nds-user-colour" class="nds-user-val">&ndash;</span></div>
+                    <div class="modal-row"><span class="modal-row-label">Color</span><span id="nds-user-colour" class="nds-user-val">&ndash;</span></div>
                   </div>
                   <form id="nds-user-form" hidden>
                     <div class="modal-row"><label class="modal-row-label" for="nds-user-name-in">Name</label><input type="text" id="nds-user-name-in" class="nds-user-input" maxlength="10" autocomplete="off" autocorrect="off" spellcheck="false" /></div>
@@ -1548,7 +1549,7 @@
                 <div class="modal-toggle-row" id="play-in-silent-row" hidden>
                   <div>
                     <span class="modal-row-label">Play in Silent Mode</span>
-                    <span class="modal-toggle-sub">Pauses audio from other apps while a game is playing.</span>
+                    <span class="modal-toggle-sub">Pauses audio from other apps while a game is playing</span>
                   </div>
                   <label class="switch">
                     <input type="checkbox" id="play-in-silent-toggle" checked />
@@ -1634,7 +1635,7 @@
                   <div class="modal-toggle-row row-flow">
                     <span class="modal-row-label">Diagnostic log</span>
                     <button type="button" class="button button-sm row-flow-ctl" id="show-log">Show log</button>
-                    <span class="modal-toggle-sub">The app's log and build details, ready to paste into a bug report.</span>
+                    <span class="modal-toggle-sub">The app's log and build details, ready to paste into a bug report</span>
                   </div>
                   <!-- Save webhook: every in-game save is POSTed here as it is
                        written (postSaveToHook); synced across a Drive

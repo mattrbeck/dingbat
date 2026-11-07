@@ -155,7 +155,7 @@ test("an unexplained stall (no away message) shows the badge after 2 s", async (
   assert.equal(el(app, "net-stall").hidden, true);
   app.runIn("window.rbNoteStall(4200)");
   assert.equal(el(app, "net-stall").hidden, false);
-  assert.equal(el(app, "net-stall-text").textContent, "Waiting for your friend · 0:04");
+  assert.equal(el(app, "net-stall-text").textContent, "Waiting for your friend… 0:04");
   app.runIn("window.rbNoteStall(0)");
   assert.equal(el(app, "net-stall").hidden, true);
 });

@@ -1927,7 +1927,7 @@ const netShutdown = async (opts) => {
   // Ended here, so nothing for a relaunch to say (rbByeOnRelaunch).
   if (net?.rb) rbClearLive();
   netStallBadge.hidden = true;
-  netStallText.textContent = "Waiting for your friend";
+  netStallText.textContent = "Waiting for your friend…";
   rbHideAwayCard();
   rbHiddenSince = 0;
   clearTimeout(manualFallbackTimer);
@@ -2181,7 +2181,7 @@ const rbPeerAway = (on) => {
 // inputs (0 = running). The away card already explains a hidden friend.
 window.rbNoteStall = (ms) => {
   const show = ms >= RB_STALL_BADGE_MS && !rbPeerAwaySince && !!net?.started && !net.rb?.reconnecting;
-  if (show) netStallText.textContent = "Waiting for your friend · " + fmtAway(ms);
+  if (show) netStallText.textContent = "Waiting for your friend… " + fmtAway(ms);
   netStallBadge.hidden = !show;
 };
 

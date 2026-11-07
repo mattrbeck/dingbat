@@ -28,6 +28,9 @@
   --stage-rgb: 5, 6, 10;          /* == --stage (dark scrims) */
   --surface-1-rgb: 20, 24, 38;    /* == --surface-1 */
 
+  /* Every disabled (or visibly inert) control, in every theme. */
+  --disabled-opacity: 0.45;
+
   /* ---- Hairline borders & insets ---- */
   --border: rgba(var(--hi-rgb), 0.08);
   --border-2: rgba(var(--hi-rgb), 0.14);
@@ -4340,7 +4343,7 @@ body.game-menu-open #toast {
 /* Pause and 2x while a dropped link redials (netplay.js rbRenderCard). */
 #pause:disabled,
 #speed-2x-btn:disabled {
-  opacity: 0.38;
+  opacity: var(--disabled-opacity);
   cursor: default;
   pointer-events: none;
 }
@@ -4348,7 +4351,7 @@ body.game-menu-open #toast {
 /* Disabled buttons: shared token-level treatment. pointer-events: none also
    suppresses the :hover restyle without sprinkling :not(:disabled) guards. */
 .button:disabled {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
   cursor: default;
   pointer-events: none;
 }
@@ -4451,12 +4454,12 @@ body.game-menu-open #toast {
    off. The control itself is also `disabled`; this is the visual half. */
 .modal-toggle-row.row-disabled .modal-row-label,
 .modal-toggle-row.row-disabled .modal-toggle-sub {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
 }
 
 /* The switch fades with its label. */
 .switch input:disabled + .switch-track {
-  opacity: 0.4;
+  opacity: var(--disabled-opacity);
 }
 
 .switch:has(input:disabled) {
@@ -4466,7 +4469,7 @@ body.game-menu-open #toast {
 /* A radio group with no answer yet (GBA call modes with no BIOS). Not on
    the subhead: fading a heading takes its divider with it. */
 .radio-group.row-disabled {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
 }
 
 .modal-toggle-row {
@@ -5043,7 +5046,7 @@ body.game-menu-open #toast {
 /* A setting suspended by another (e.g. integer scaling / scanlines while an
    upscale filter is active): visibly inert, state preserved. */
 .modal-toggle-row.suspended {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
 }
 .modal-toggle-row.suspended .switch {
   cursor: default;
@@ -6156,12 +6159,12 @@ body.game-menu-open #toast {
 /* Under a Super Game Boy the control is `disabled` and must look it: the UA
    does not reliably dim a disabled <select> inside a dark theme. */
 .kb-select:disabled {
-  opacity: 0.4;
+  opacity: var(--disabled-opacity);
   cursor: not-allowed;
 }
 
 .gb-palette-row.row-disabled {
-  opacity: 0.4;
+  opacity: var(--disabled-opacity);
   pointer-events: none;
 }
 
@@ -6332,7 +6335,7 @@ body.game-menu-open #toast {
 
 /* The Game Boy palette chips while Super Game Boy colour is on. */
 .choice-chip:disabled {
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
   cursor: default;
   background: none;
 }
@@ -6369,11 +6372,15 @@ body.game-menu-open #toast {
 }
 
 /* Settings > Nintendo DS, "3D drawn by": what draws it here, a line of its
-   own under the description. */
-.nds-gpu-status {
-  display: block;
+   own under the description (the grid's third row; in the phone column it
+   follows the description). */
+.settings-pane .modal-toggle-row > .nds-gpu-status {
+  grid-area: 3 / 1;
   margin-top: 4px;
   color: var(--text);
+}
+#nds-gpu-status[hidden] {
+  display: none;
 }
 
 .row-flow > .row-flow-ctl {
@@ -9192,7 +9199,7 @@ body.clip-replaying #playback-controls,
 body.clip-replaying #topbar .icon-btn,
 body.clip-replaying #controls {
   pointer-events: none;
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
 }
 body.clip-replaying #canvas,
 body.clip-replaying #glow-canvas {

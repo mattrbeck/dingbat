@@ -3112,7 +3112,7 @@ const renderGdriveSection = () => {
   if (!GDRIVE_CLIENT_ID) {
     gdriveBody.appendChild(gdriveRow(
       "Not available in this build",
-      "This build was made without a Google client ID.", null));
+      "This build was made without a Google client ID", null));
     return;
   }
 
@@ -3124,15 +3124,15 @@ const renderGdriveSection = () => {
     });
     gdriveBody.appendChild(gdriveRow(
       "Sign in with Google",
-      "Mirrors your games and saves across every device you sign in to.", btn));
+      "Mirrors your games and saves across every device you sign in to", btn));
     return;
   }
 
   let n = pendingCount();
   // Linked but between tokens is not signed out; the next Sync buys a token.
-  let state = !gdriveToken ? "Reconnects when you next sync."
-            : n ? n + " change" + (n === 1 ? "" : "s") + " waiting to go up."
-            : "All changes synced.";
+  let state = !gdriveToken ? "Reconnects when you next sync"
+            : n ? n + " change" + (n === 1 ? "" : "s") + " waiting to go up"
+            : "All changes synced";
   let sync = makeGdriveButton("Sync", false, async () => {
     if (!(await ensureDriveSignedIn())) return;
     runFullSync({ label: "Syncing" });
@@ -3846,7 +3846,7 @@ const SYNC_ICONS = {
 };
 // "no connection" and "no token" are the same fact to the user.
 SYNC_ICONS.paused = SYNC_ICONS.offline;
-const SYNC_WORDS = { syncing: "Syncing", done: "Synced", offline: "Offline",
+const SYNC_WORDS = { syncing: "Syncing…", done: "Synced", offline: "Offline",
                      paused: "Paused" };
 const SYNC_DESCS = {
   syncing: "Syncing your games with Google Drive…",
@@ -5793,7 +5793,7 @@ const openExportModal = async (name) => {
     go.textContent = c.length ? "Export " + c.length : "Export";
     if (!c.length) {
       fileLine.textContent = "Nothing selected";
-      sumLine.textContent = "Tick something to export";
+      sumLine.textContent = "Check something to export";
       return;
     }
     const bytes = files.reduce((s, f) => s + f.data.length, 0);
@@ -7953,7 +7953,7 @@ const paintTileLoad = (tile) => {
       : s.stage === "check" ? "Checking Drive…"
       : failed ? "Couldn’t download"
       : s.stage === "start" ? "Starting…"
-      : opening ? "Opening" : "Downloading";
+      : opening ? "Opening…" : "Downloading…";
     sub.textContent = s.stage === "signin" || s.stage === "check" ? "Google Drive"
       : failed ? tapWords("Tap to try again")
       : tileBytes(s.got, s.total);
@@ -7990,13 +7990,13 @@ const paintTileLoad = (tile) => {
 const paintHeroLoad = (name) => {
   if (name !== heroName || heroCard.dataset.mode !== "closed") return;
   let s = tileLoads.get(name);
-  let pct = s?.total ? " · " + Math.floor(100 * Math.min(s.got, s.total) / s.total) + "%" : "";
+  let pct = s?.total ? " " + Math.floor(100 * Math.min(s.got, s.total) / s.total) + "%" : "";
   heroResumeLabel.textContent = !s || s.stage === "done" ? (heroSession ? "Resume" : "Play")
     : s.stage === "signin" ? "Signing in…"
     : s.stage === "check" ? "Checking Drive…"
     : s.stage === "start" ? "Starting…"
     : s.stage === "failed" ? "Try again"
-    : (tileLoadOpening(s) ? "Opening" : "Downloading") + pct;
+    : (tileLoadOpening(s) ? "Opening…" : "Downloading…") + pct;
 };
 
 const paintLoadOf = (name) => {
@@ -14016,7 +14016,7 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
 document.getElementById("clip-progress-cancel").addEventListener("click", () => {
   if (clipReplayActive) {
     abortRetroClip();
-    showToast("Clip cancelled");
+    showToast("Clip canceled");
   }
 });
 

@@ -251,7 +251,7 @@ test("a stall with no away message shows the badge and still outlives the idle w
   await sleep(AWAY_MS);
   assert.ok(await linked(a), "A kept the session: " + (await netLog(a)).join(" | "));
   assert.match(await a.page.evaluate(() => document.getElementById("net-stall-text").textContent),
-               /^Waiting for your friend · 0:2\d$/);
+               /^Waiting for your friend… 0:2\d$/);
   await setHidden(b, false, false);
   await until(async () => !(await badgeShown(a)), "A's badge gone", 5000);
   assert.ok((await linked(a)) && (await linked(b)));
