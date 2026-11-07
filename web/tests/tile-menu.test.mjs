@@ -40,7 +40,7 @@ const items = (app) => app.document.getElementById("tile-menu-items").children
   .filter((c) => c.classList.contains("tile-menu-item"));
 const groups = (app) => app.document.getElementById("tile-menu-items").children
   .filter((c) => c.classList.contains("tile-menu-group")).map((c) => c.textContent);
-// The session items carry a glyph in front of the label, so a row's children
+// Every item carries a glyph in front of the label, so a row's children
 // are not [label, sub] at fixed indexes any more. By class, then.
 const kid = (b, cls) => b.children.find((c) => c.classList.contains(cls));
 const labelOf = (b) => kid(b, "tile-menu-label").textContent;
@@ -172,7 +172,7 @@ test("the paused game: Remove and Delete close it themselves, and the armed line
   const del = item(app, "Delete");
   await del.click();
   assert.equal(labelOf(del), "Delete this game?");
-  assert.equal(subOf(del).textContent, "Closes it; the ROM and its save data go");
+  assert.equal(subOf(del).textContent, "Closes the game; the ROM and its save data go");
   app.api.closeTileMenu();
   app.api.currentOriginalName = null;
 });
@@ -568,8 +568,8 @@ test("one menu per game: Play while its card is paused, then Game, then Delete",
   for (const gone of ["Screenshot", "Clip that!"]) {
     assert.ok(!labels(app).includes(gone), gone + " is a running-game action");
   }
-  assert.equal(app.document.getElementById("tile-menu-head").hidden, false,
-               "the head names the game wherever the menu opens");
+  assert.ok(app.document.getElementById("tile-menu-head").children.length > 0,
+            "the head names the game wherever the menu opens");
   assert.ok(items(app).every((b) => kid(b, "tile-menu-icon")), "a glyph on every row");
   app.api.closeTileMenu();
 

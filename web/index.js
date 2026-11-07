@@ -1693,11 +1693,11 @@ cheatCodesEl.addEventListener("input", () => showCheatError(""));
 // onConfirm. `disarm()` lets a caller reset a sibling. Every armed button
 // here says one thing: its own action again, as a question ("Disconnect?",
 // "Sign out everywhere?"), in the red of .armed.
-/** @param {{label: string, confirmLabel?: string, className?: string,
+/** @param {{label: string, confirmLabel: string, className?: string,
  *          onConfirm: () => any, onArm?: () => any}} opts */
 const makeConfirmButton = ({
   label,
-  confirmLabel = "Confirm?",
+  confirmLabel,
   className,
   onConfirm,
   onArm,
@@ -7393,6 +7393,10 @@ const closeTileMenu = () => {
   if (back && back.isConnected) back.focus({ preventScroll: true });
 };
 
+// The download arrow: a tile's corner chip (DL_ICON) and the menu's
+// Download item.
+const DL_PATH = '<path d="M12 3v12M8 11l4 4 4-4M5 19h14"/>';
+
 // The glyphs the hamburger uses for these same commands, so a command looks
 // like itself wherever it is offered. Path data rather than a clone of the
 // menu button: those carry live state (Link Cable's label flips to Disconnect,
@@ -7405,9 +7409,9 @@ const MENU_ICONS = {
   bug: '<path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/>',
   prints: '<path d="M6 9V4h12v5M6 15h12v5H6zM6 9h12a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2z"/>',
   // The file items' own, in the same stroke. Download is the tile's corner
-  // glyph (DL_ICON); the save ones are Quick Save's disk, struck out.
+  // glyph (DL_PATH); Reset save data's is Quick Save's disk, struck out.
   find: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.6-4.6"/>',
-  download: '<path d="M12 3v12M8 11l4 4 4-4M5 19h14"/>',
+  download: DL_PATH,
   moments: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3.5h3.5M12 8v4l2.8 1.8"/>',
   rename: '<path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/>',
   export: '<path d="M14 4h6v6M20 4l-8.5 8.5M18 14v6H4V6h6"/>',
@@ -7641,7 +7645,7 @@ const tileMenuEntries = (name, f) => {
     danger: true,
     disabled: busy,
     confirmLabel: "Delete this game?",
-    confirmSub: f.loaded ? "Closes it; the ROM and its save data go"
+    confirmSub: f.loaded ? "Closes the game; the ROM and its save data go"
               : f.missing ? "Its save data goes too" : "The ROM and its save data go",
     run: () => deleteGameAction(name),
   }));
@@ -7891,7 +7895,7 @@ const holdForBootPull = async (name) => {
 
 // --- A Drive-only game coming down, on its tile --------------------------
 // The tile says what is happening over its picture: "Signing in…", then
-// "Opening" (tapped to play) or "Downloading" (↓ or the menu) with the bytes
+// "Opening…" (tapped to play) or "Downloading…" (↓ or the menu) with the bytes
 // and a bar, "Starting…" as the player takes over, a check for a moment
 // after a plain download, and "Couldn't download" until the next tap if it
 // fails. name -> { open, gen, stage, got, total, run }; stage is one of
@@ -7900,7 +7904,7 @@ const tileLoads = new Map();
 const TILE_DONE_MS = 2000;
 const tileLoadBusy = (s) => !!s && (s.stage === "signin" || s.stage === "download" ||
                                      s.stage === "start" || s.stage === "check");
-// "Opening" only while the tap's load token is the latest: a later tap on
+// "Opening…" only while the tap's load token is the latest: a later tap on
 // anything else wins (loadGen), and this one is back to a plain download.
 const tileLoadOpening = (s) => tileLoadBusy(s) && !!s.open && s.gen === loadGen;
 
@@ -7915,7 +7919,7 @@ const gameTileEls = () => /** @type {HTMLElement[]} */ ([...homeRecent.children]
 const tileOf = (name) => gameTileEls().find((t) => t.dataset.rom === name);
 const childOf = (el, cls) => el && [...el.children].find((c) => c.classList.contains(cls));
 
-const DL_ICON = '<svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 19h14"/></svg>';
+const DL_ICON = '<svg viewBox="0 0 24 24">' + DL_PATH + "</svg>";
 const SPIN_ICON = '<svg class="sync-spin" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v3.5h-3.5"/></svg>';
 
 // Brings one tile in line with its entry, or its absence. Every render calls

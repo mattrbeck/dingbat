@@ -61,8 +61,9 @@ needs a second real device.
 - [ ] **The size is real.** A tile's menu shows the cartridge size, and it
       is right for a 4 MB and a 32 MB game. A game that has never been on
       this device shows no size until it is downloaded.
-- [ ] **Remove closes the game.** With a game paused, Remove asks "Close and
-      remove?", closes it, frees the space, and the save survives the close.
+- [ ] **Remove closes the game.** With a game paused, Remove asks "Remove from
+      this device?" over "Closes the game; Drive keeps a copy", closes it,
+      frees the space, and the save survives the close.
 - [ ] **An online link holds everything.** Mid-session, every item is
       greyed with "Exit the online session first" — no item accepts a
       confirming tap and then refuses.

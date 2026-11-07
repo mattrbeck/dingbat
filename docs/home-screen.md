@@ -21,10 +21,10 @@ fresh visit opens on the brand again.
 
 ## The states
 
-| Library | A fresh visit | A game played this visit, now paused (Main Menu) | … then closed |
+| Library | A fresh visit | A game played this visit, now paused (Menu › Library) | … then closed |
 |---|---|---|---|
 | empty | Logo, slogan, the drop box with **Add a game**, and *Already playing on another device?* with Google's button | — | — |
-| one game | Logo, slogan, the game's tile | The hero alone, paused, with an **Add a game** pill under it | The hero alone, Last played |
+| one game | Logo, slogan, the game's tile | The hero alone, paused, with the library head's **Add a game** button under it | The hero alone, Last played |
 | a few | Logo, slogan, the games | The hero, then the other games | the same, Last played |
 | more than 8 | Logo, slogan, then search, chips and sort above the grid | The hero, then search, chips and sort above the grid | the same, Last played |
 
@@ -43,7 +43,7 @@ hero in every state.
 | closed, no session | **Play** · ⋯ | Boots from the in-game save | — |
 
 A **session** is the `stateauto:<game>` snapshot, taken when the game is
-left (Main Menu, a switch, a close, the tab hidden or closed) and only when
+left (Menu › Library, a switch, a close, the tab hidden or closed) and only when
 it has moved since the last one (`sessionMoved`). It counts only while the
 stored save is the one it was taken with (`saveSig`, `resumeSessionFor`): a
 game that has saved since boots from that save, so a snapshot can never
@@ -67,7 +67,7 @@ format (`pack_state`'s: header flagged, body zlib, via `CompressionStream`),
 signs the battery and encodes the picture. Packing on the page cost
 2.3 ms / 9.9 ms in game (FireRed), a dropped frame on a phone. Without a
 worker (iOS 15) the page does it all, as before. A result that lands after
-a newer snapshot (Main Menu, a switch) or a delete of the session is
+a newer snapshot (Menu › Library, a switch) or a delete of the session is
 dropped (`sessionSnapTs`, `sessionEpoch`). Drive gets a checkpoint's session
 at most every `SESSION_UPLOAD_MS` (5 min); leaving the game sends the newest
 at once (`sessionUnsent`).
@@ -150,7 +150,7 @@ It is one line; a long one is cut short, never wrapped.
 ## Picking a game up on another device
 
 The session is a Drive file (`stateauto:<game>`, its picture inside it:
-`sessionBundle`), so it is the hand-off. **Main Menu** stores the session
+`sessionBundle`), so it is the hand-off. **Menu › Library** stores the session
 of that moment and the save it was taken with at once, not at the next 5 s
 autosave, and queues both; the kicker says *Synced* once they are up. On
 the other device a pull brings them down, and its hero (or tile) resumes at
@@ -203,26 +203,28 @@ picture:
 | | Over the picture | Bar | Corner |
 |---|---|---|---|
 | Tapped, not signed in | *Signing in…* / Google Drive | — | spinner |
-| Tapped | *Opening* / 3.1 of 8.0 MB, amber ring | bytes | spinner |
+| Tapped | *Opening…* / 3.1 of 8.0 MB, accent ring | bytes | spinner |
 | Downloaded, player coming | *Starting…* | full | spinner |
-| ↓ or the menu's Download | *Downloading* / bytes, no ring | bytes | spinner |
+| ↓ or the menu's Download | *Downloading…* / bytes, no ring | bytes | spinner |
 | ↓ finished | nothing; a check for 2 s | — | ✓ |
 | Failed | *Couldn't download* / Tap to try again, until the next tap | red | ↓ |
 
 The total is the Drive listing's sizes of the files it fetches, so the bytes
 are real from the first one. A tap elsewhere while one is opening is the
-later tap and wins (`loadGen`): the first tile turns back into *Downloading*
+later tap and wins (`loadGen`): the first tile turns back into *Downloading…*
 and gets its check instead of opening. A tap on the picture during a ↓
 download joins it and opens it when it lands; nothing is fetched twice.
 The hero's game has its tile stood down, so when the hero shows a
-Drive-only game its button says it instead: *Signing in…*, *Opening · 38%*,
+Drive-only game its button says it instead: *Signing in…*, *Checking Drive…*, *Opening… 38%*,
 *Starting…*, *Try again*.
 
 ## Pictures
 
 - `frame:<game>` is the library's picture: the last screen stored (a slow
   tick while running, every pause, close and switch). Mirrored on Drive, so
-  it may be another device's.
+  it may be another device's. A screen of one colour (a boot's white, a
+  fade) is never stored: the picture already there, or the cartridge, stays,
+  and Add pictures runs on to the next real screen or leaves the cartridge.
 - `sessionpic:<game>` = `{ ts, blob }` is the session's own picture, written
   after the snapshot and stamped with its `ts`. It counts only while its
   `ts` is the snapshot's. In the session group of `perGameKeys`, so it
@@ -332,6 +334,6 @@ The bar's account slot (`#account-slot`, home screen only, not in the empty
 state). Signed out: a dim outline of a person; it opens a menu holding
 Google's own button (`google-signin-dark.svg` / `-light.svg`, from Google's
 sign-in assets, unaltered). Signed in: the email's initial with a sync
-badge (a tick, a turning ring, an amber mark); its menu has the sync status,
+badge (a tick, a turning ring, an accent mark); its menu has the sync status,
 Sync now, Sign out, and Sign out everywhere (two taps; it signs every
 device out).

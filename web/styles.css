@@ -8234,7 +8234,7 @@ body.rewind-off #report-slider {
   flex: 1 1 0;
 }
 
-/* "waiting for peer" badge: subtle chip over the top-right of the stage,
+/* "Waiting for your friend…" badge: subtle chip over the top-right of the stage,
    shown only during sustained stalls of the emulated clock */
 #net-stall {
   position: absolute;
@@ -8640,8 +8640,15 @@ body.running.sync-shown #status {
 .home-tile-dl.is-busy:active {
   transform: none;
 }
-/* The light theme's accent is dark enough to vanish on the chip, and its
-   focus ring on the game's picture behind the chips. */
+/* The light theme's ink and accent are dark enough to vanish on the chips'
+   dark scrim, and its focus ring on the game's picture behind them. */
+:root[data-theme="light"] .home-tile-more,
+:root[data-theme="light"] .home-tile-dl {
+  color: rgba(255, 255, 255, 0.85);
+}
+:root[data-theme="light"] .home-tile-more:hover,
+:root[data-theme="light"] .home-tile.menu-open .home-tile-more,
+:root[data-theme="light"] .home-tile-dl:hover,
 :root[data-theme="light"] .home-tile-dl.is-busy {
   color: var(--accent-hi);
 }

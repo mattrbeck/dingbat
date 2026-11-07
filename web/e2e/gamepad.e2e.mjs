@@ -205,12 +205,12 @@ test("a controller finds a game, starts it, plays it and goes home", { skip, tim
   assert.equal(await page.evaluate(() => menuDropdown.hidden), true, "B closed it");
   await until(page, () => !paused, "the game running again after B");
 
-  // Select+Start held: the menu again; down to Main Menu, A: home.
+  // Select+Start held: the menu again; down to Library, A: home.
   await down(P.BACK); await down(P.START);
   await until(page, () => !menuDropdown.hidden && paused, "the held chord opening the menu", 5000);
   await up(P.START); await up(P.BACK);
   for (let i = 0; i < 4 && (await focused()) !== "main-menu"; i++) await tap(P.DOWN);
-  assert.equal(await focused(), "main-menu", "down reaches Main Menu");
+  assert.equal(await focused(), "main-menu", "down reaches Library");
   await tap(P.A);
   await until(page, () => !document.body.classList.contains("running"), "home");
   await sleep(900);
