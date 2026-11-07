@@ -38,7 +38,7 @@ pull to sync against the fake Drive.
 
 | Web | iOS |
 |---|---|
-| Home: brand, hero (paused / closed, Resume · Play · Close · ⋯), library grid with pictures and cartridge labels, search / system chips / sort from 9 games, tile menu (Rename, Reset save data, Delete), Add a game (a ROM or a .zip with box art) | `HomeView`, `HeroView`, `LibraryGrid`, `Cartridge`, `TileMenu` |
+| Home: brand, hero (paused / closed, Resume · Play · Close · ⋯), library grid with pictures and cartridge labels, search / system chips / sort from 9 games, the game's one menu, wherever its ⋯ is (the head; Play while the hero is paused on it; Game: Rename, Export, Reset save data…; Delete), Add a game (a ROM or a .zip with box art) | `HomeView`, `HeroView`, `LibraryGrid`, `Cartridge`, `TileMenu` |
 | Sessions: the `stateauto` snapshot on leaving a game and every minute of play, valid only while the save it carries is the stored one; "Opening a game from the library" (Resume / From save) and the "Last session saved … Resume" offer | `GameSession.persistSession`, `RomLibrary.resumableSession`, `AppModel.launch` |
 | In-game top bar: menu, reset (Undo), rewind (hold; double tap opens the scrubber), pause, frame step while paused, 2x, fast-forward, tilt recenter, camera, fps when unusual / SLEEPING, muted-channels pill, enhanced-music note, volume | `PlayView.swift` (`TopBar`) |
 | Phone landscape: see-through pads (Outline / Bold / Solid), chevron d-pad, Select/Start pills inboard, a tap on the picture shows and hides the bar | `PlayLayout`, `TouchControls`, `GameStage` |
@@ -131,8 +131,8 @@ pull to sync against the fake Drive.
   intro at fast-forward: 123 of 1260 before, 0 after).
 - **A controller in menus** steps a pick-list to its next option with A
   (a native menu cannot be opened from a pad), and skips text fields
-  (search, codes) and the paused hero's ⋯ menu; Y on a tile and the touch
-  screen reach those.
+  (search, codes); Y on a tile opens the game's menu, which the pad steps
+  through as any sheet.
 - **"Open in dingbat"** from Files or another app takes ROMs, zips, saves
   (.sav .srm .sps .xps .gsv) and .state files; a save or state goes into
   the running game through Manage Saves (the web's drag and drop).
@@ -155,8 +155,8 @@ pull to sync against the fake Drive.
   byte for byte (`node ios/e2e/export-core.mjs` checks the zip writer,
   camera photos, info.json and adding an export back as a game against the
   web's own functions).
-- **Small layout choices.** The paused hero's ⋯ is a native menu; the tile
-  menu is a sheet on iPad too; in a game the toasts sit under the top bar,
+- **Small layout choices.** The game's menu (a tile's ⋯, the hero's) is a
+  sheet on iPad too; in a game the toasts sit under the top bar,
   clear of the controls.
 
 ## Nintendo DS (core and C API)

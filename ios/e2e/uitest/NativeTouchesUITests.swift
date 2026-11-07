@@ -295,6 +295,55 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertLessThanOrEqual(picture.frame.maxY, w.height, "the picture fits on screen")
     }
 
+    /// One menu per game (web openTileMenu): the paused hero's ⋯ opens the
+    /// game's menu with its Play group above the file items; Delete arms on
+    /// one tap and disarms after 3.5 s; a Play row opens its sheet; closed,
+    /// the same ⋯ has no Play group.
+    func testOneMenuPerGame() {
+        let app = launch()
+        sleep(2)
+        let menu = app.buttons["Menu"].firstMatch
+        if !menu.isHittable { app.otherElements["Game screen"].firstMatch.tap() }
+        menu.tap()
+        app.buttons["Library"].firstMatch.tap()
+        let more = app.buttons["More for this game"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "the paused hero's ⋯")
+        more.tap()
+        let states = app.buttons["Save states"].firstMatch
+        XCTAssertTrue(states.waitForExistence(timeout: 3), "Play: Save states")
+        for label in ["Manage saves", "Link cable", "Cheats", "Report a bug", "Rename", "Export…", "Delete"] {
+            XCTAssertTrue(app.buttons[label].firstMatch.exists, "\(label) is in the menu")
+        }
+        XCTAssertTrue(app.staticTexts["PLAY"].exists && app.staticTexts["GAME"].exists, "the two groups' headings")
+        snap(app, "game-menu-paused")
+        let delete = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(delete.isHittable, "Delete fits on screen")
+        delete.tap()
+        let armed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@",
+                                                     "Close and delete everything?")).firstMatch
+        XCTAssertTrue(armed.waitForExistence(timeout: 2), "one tap arms Delete")
+        snap(app, "game-menu-armed")
+        XCTAssertTrue(delete.waitForExistence(timeout: 5), "and it disarms")
+        XCTAssertFalse(armed.exists, "its question gone")
+        states.tap()
+        XCTAssertTrue(app.staticTexts["Save States"].firstMatch.waitForExistence(timeout: 3), "Save states opens its sheet")
+        sleep(1)
+        // The sheet's Close, not the hero's under it.
+        app.buttons.matching(NSPredicate(format: "label == 'Close'")).allElementsBoundByIndex
+            .last { $0.isHittable }?.tap()
+        sleep(1)
+        XCTAssertFalse(app.staticTexts["Save States"].exists, "the sheet closed")
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 3), "the hero's Close")
+        close.tap()
+        sleep(1)
+        more.tap()
+        XCTAssertTrue(app.buttons["Rename"].firstMatch.waitForExistence(timeout: 3), "closed: the game's menu")
+        XCTAssertFalse(app.buttons["Save states"].exists, "closed: no Play group")
+        XCTAssertFalse(app.staticTexts["PLAY"].exists, "nor its heading")
+        snap(app, "game-menu-closed")
+    }
+
     /// The iPhone Duo folded, upright: the bar folds away, the stage takes
     /// the top edge, and a tap on the picture brings the bar down. Skipped
     /// on any other simulator.
