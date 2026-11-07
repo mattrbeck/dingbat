@@ -74,7 +74,7 @@ final class AppModel: ObservableObject {
     @Published var relinking: RomEntry?
     /// A picked file of a different size than the game had: asked first.
     @Published var relinkConfirm: (entry: RomEntry, bytes: Data)?
-    /// A Drive-only game coming down to be opened (the tile's "Opening").
+    /// A Drive-only game coming down to be opened (the tile's "Opening…").
     @Published var opening: String?
     /// Tiles whose download failed (until the next tap), or just finished
     /// (a check for 2 s).

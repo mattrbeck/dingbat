@@ -129,7 +129,7 @@ struct ExportView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(palette.text)
                     .lineLimit(2)
-                Text(c.isEmpty ? "Tick something to export"
+                Text(c.isEmpty ? "Check something to export"
                      : files.count == 1 ? RomEntry.formatBytes(bytes) + " · a single file"
                      : "\(c.count) \(c.count == 1 ? "item" : "items") · " + RomEntry.formatBytes(bytes))
                     .font(.system(size: 12))

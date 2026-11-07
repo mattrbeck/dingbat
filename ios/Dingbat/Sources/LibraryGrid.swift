@@ -624,7 +624,7 @@ struct LibraryTile: View {
             ZStack {
                 Color.black.opacity(0.55)
                 VStack(spacing: 6) {
-                    Text(opening ? (total > 0 && got >= total ? "Starting…" : "Opening") : "Downloading")
+                    Text(opening ? (total > 0 && got >= total ? "Starting…" : "Opening…") : "Downloading…")
                         .font(.system(size: 13, weight: .semibold))
                     if total > 0 {
                         Text(String(format: "%.1f of %.1f MB", Double(got) / 1048576, Double(total) / 1048576))
@@ -650,7 +650,7 @@ struct LibraryTile: View {
             ZStack {
                 Color.black.opacity(0.55)
                 VStack(spacing: 4) {
-                    Text(drive.active ? "Opening" : "Signing in…").font(.system(size: 13, weight: .semibold))
+                    Text(drive.active ? "Opening…" : "Signing in…").font(.system(size: 13, weight: .semibold))
                     if !drive.active { Text("Google Drive").font(.system(size: 11)) }
                 }
                 .foregroundColor(.white)

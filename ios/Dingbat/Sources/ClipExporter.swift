@@ -121,7 +121,7 @@ final class ClipExporter: ObservableObject {
         guard export != nil else { return }
         dingbat_clip_abort()
         finish(save: false, gen: gen, slug: "")
-        AppModel.shared.toast("Clip cancelled")
+        AppModel.shared.toast("Clip canceled")
     }
 
     private func finish(save: Bool, gen myGen: Int, slug: String) {
