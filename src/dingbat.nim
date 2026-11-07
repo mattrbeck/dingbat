@@ -2407,11 +2407,11 @@ proc render_link_advanced() =
     igSetNextItemWidth(ui_px(120))
     discard igInputInt("Port", addr app.link.port, 1, 100, 0)
     igSeparator()
-    igText("Host — share your address + port with a friend:")
+    igText("To host, share your address and port with a friend:")
     if igButton("Host game", ImVec2(x: 0, y: 0)):
       link_auto_stop(); link_cancel_setup(); app.link.start_host(link_ready())
     igSeparator()
-    igText("Join — enter the host's address:")
+    igText("To join, enter the host's address:")
     igSetNextItemWidth(ui_px(200))
     discard igInputTextWithHint("##link_host", "127.0.0.1",
       cast[cstring](addr app.link.host_buf[0]), csize_t(app.link.host_buf.len),

@@ -25,8 +25,8 @@ proc render*(v: VideoWidget) =
               "edge-directed smoothers; LCD grid and RGB subpixels draw the " &
               "screen's own structure instead of smoothing (the grid is the " &
               "pixel matrix every Game Boy LCD shows; RGB subpixels imitates " &
-              "the GBC/GBA TFT's stripe triads — a DMG panel has no " &
-              "subpixels, so there it is a stylized look). None keeps crisp " &
+              "the GBC/GBA TFT's stripe triads; a DMG panel has none, so there " &
+              "it is a stylized look). None keeps crisp " &
               "nearest-neighbor pixels. Color correction still applies on top.")
   igIndent(ui_px(106))
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
@@ -40,14 +40,14 @@ proc render*(v: VideoWidget) =
   igSameLine(0, -1)
   help_marker("Letterbox the picture instead of stretching it to fill the " &
               "window. Only visible when the window is not an exact multiple " &
-              "of the console's resolution — fullscreen, or after a manual resize.")
+              "of the console's resolution: fullscreen, or after a manual resize.")
   discard igCheckbox("LCD response", addr v.lcd_resp)
   igSameLine(0, -1)
   help_marker("Emulate how slowly the real screen's pixels settle: quick to " &
               "darken, slow to fade back to light, which is why a moving dark " &
               "object on hardware has a crisp leading edge and a trail behind " &
               "it. Games that flicker a sprite every other frame to fake " &
-              "transparency were counting on this — without it they strobe. " &
+              "transparency were counting on this. Without it they strobe. " &
               "The response follows whichever console the game runs on, and " &
               "stays out of the way under Super Game Boy, where the picture " &
               "leaves through a television and never meets an LCD.")
@@ -59,7 +59,7 @@ proc render*(v: VideoWidget) =
               "the cart ships one, a 256x224 border. Carts without the SGB " &
               "header bits are unaffected, and a Game Boy Color cart always " &
               "runs as a Game Boy Color even if it is also SGB-enhanced. " &
-              "Off by default — stock Game Boy behavior until you ask for it.")
+              "Off by default: stock Game Boy behavior until you ask for it.")
   igIndent(ui_px(106))
   discard igCheckbox("Super Game Boy mode", addr v.sgb_enable)
   # Kept visible: the adapter is chosen at cartridge insertion, so ticking
@@ -71,7 +71,7 @@ proc render*(v: VideoWidget) =
   igSameLine(0, -1)
   help_marker("The border makes the picture 256x224 instead of 160x144, so " &
               "the window resizes when one appears. This one takes effect " &
-              "immediately — it only hides a layer the core already has." &
+              "immediately, since it only hides a layer the core already has." &
               (if not v.sgb_enable: " (Super Game Boy mode is off.)" else: ""))
   igUnindent(ui_px(106))
   if v.show_ds:

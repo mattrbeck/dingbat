@@ -1299,7 +1299,7 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
     raise newException(StateError,
       "this save state was taken inside a BIOS IntrWait with the interrupt " &
       "handler still running, under an older HLE stack model that cannot be " &
-      "reconstructed — it would resume with a corrupted stack pointer")
+      "reconstructed (it would resume with a corrupted stack pointer)")
   load_bus_state(gba.bus, r, rev)
   gba.bus.sd_tw_active = false   # an HLE sound pass's timing is not stored
   gba.wl_unsafe = true           # the waitloop detector starts over
