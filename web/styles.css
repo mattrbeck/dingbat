@@ -8713,6 +8713,10 @@ body.running.sync-shown #status {
 .tile-menu-item.armed .tile-menu-sub {
   color: inherit;
 }
+/* The question is bold; what goes, under it, is not. */
+.tile-menu-item.armed .tile-menu-sub {
+  font-weight: 400;
+}
 @keyframes tile-sheet-in {
   from {
     opacity: 0;
