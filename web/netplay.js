@@ -242,7 +242,7 @@ const openNetConnect = async (attach) => {
 
 const netConnectLabel = document.querySelector("#net-connect span");
 window.setNetConnectLabel = (connected) => {
-  if (netConnectLabel) netConnectLabel.textContent = connected ? "Disconnect" : "Link Cable";
+  if (netConnectLabel) netConnectLabel.textContent = connected ? "Disconnect" : "Link cable";
 };
 
 document.getElementById("net-connect").addEventListener("click", () => {

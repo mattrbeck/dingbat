@@ -2227,7 +2227,7 @@ const relinkGameAction = (name, { launch = false } = {}) => {
     }
     let was = romSizeOf(name);
     if (was && was !== bytes.length && !(await askRomWarn(
-      "A Different File",
+      "A different file",
       `"${fileName}" is ${formatBytes(bytes.length)}, but “${displayName(name)}” ` +
       `was ${formatBytes(was)}. Another game's ROM will not match the save kept ` +
       `here, and playing it would write over that save. Use it anyway?`))) return;
@@ -13124,7 +13124,7 @@ const askRomWarn = (title, text) =>
 const confirmSuspectRom = (fileName, ext) => {
   let system = ext === ".gba" ? "GBA" : ext === ".nds" ? "Nintendo DS"
     : ext === ".gbc" || ext === ".cgb" ? "Game Boy Color" : "Game Boy";
-  return askRomWarn("File Check Failed",
+  return askRomWarn("File check failed",
     `"${fileName}" doesn't look like a valid ${system} ROM — it may be ` +
     `corrupt or not a game at all. Load it anyway?`);
 };
@@ -14260,7 +14260,7 @@ const REC_MAX_MS = 5 * 60 * 1000; // a forgotten recorder stops itself
 
 const setRecMenuState = (recording) => {
   recordClipItem.querySelector("span").textContent =
-    recording ? "Stop Recording" : "Record";
+    recording ? "Stop recording" : "Record";
   recordClipItem.classList.toggle("recording", recording);
 };
 
@@ -14318,7 +14318,7 @@ const startClipRecording = () => {
   recRecorder.start(1000);
   recStopTimer = setTimeout(stopClipRecording, REC_MAX_MS);
   setRecMenuState(true);
-  showToast("Recording — pick Stop Recording to finish");
+  showToast("Recording — pick Stop recording to finish");
 };
 
 recordClipItem.addEventListener("click", () => {
@@ -15099,7 +15099,7 @@ const brandGoesHome = () => document.body.classList.contains("running");
 
 // The label follows what a click will do, read at the moment it matters.
 const labelBarBrand = () => {
-  let label = brandGoesHome() ? "Main Menu" : "Back to the top";
+  let label = brandGoesHome() ? "Main menu" : "Back to the top";
   barBrand.title = label;
   barBrand.setAttribute("aria-label", label);
 };
@@ -15896,7 +15896,7 @@ if (!requestFs) {
   const onFsChange = () => {
     let active = !!(document.fullscreenElement || document.webkitFullscreenElement);
     document.body.classList.toggle("fs", active);
-    fullscreenBtn.title = active ? "Exit Fullscreen" : "Fullscreen";
+    fullscreenBtn.title = active ? "Exit fullscreen" : "Fullscreen";
   };
   document.addEventListener("fullscreenchange", onFsChange);
   document.addEventListener("webkitfullscreenchange", onFsChange);

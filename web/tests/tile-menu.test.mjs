@@ -689,7 +689,7 @@ test("the bar's brand goes home from a game and to the top on the home screen",
   const btn = app.document.getElementById("bar-brand");
 
   await btn.dispatch("pointerenter");
-  assert.equal(btn.title, "Main Menu");
+  assert.equal(btn.title, "Main menu");
   await btn.click();
   assert.equal(app.runIn("paused"), true, "the game froze behind the menu");
   assert.equal(app.document.body.classList.contains("running"), false,
