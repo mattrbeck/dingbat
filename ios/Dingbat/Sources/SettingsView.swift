@@ -202,7 +202,8 @@ struct SettingsView: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(enabled ? palette.textDim : palette.textFaint.opacity(0.4))
+                .foregroundColor(palette.textDim)
+                .opacity(enabled ? 1 : 0.45)  // the one disabled opacity (web --disabled-opacity)
                 .frame(width: 32, height: 36)
                 .touchTarget(width: 44, height: 36)  // side by side: taller only
         }
@@ -307,7 +308,7 @@ private struct ControlsPane: View {
                        sub: "Hide the on-screen buttons while a game controller is connected",
                        isOn: $s.hideTouchOnGamepad)
         SheetToggleRow(label: "Show inputs on screen",
-                       sub: "Light up a small controller over the game as you press buttons — for streams, or for watching your own inputs.",
+                       sub: "Light up a small controller over the game as you press buttons — for streams, or for watching your own inputs",
                        isOn: $s.inputDisplay)
         SheetFlowRow(label: "Opening a game from the library",
                      sub: "Resume goes back to the moment you left. From save starts from the game’s own save, and offers the moment after.") {
@@ -495,7 +496,7 @@ private struct GameBoyPane: View {
                            }
                        }))
         SheetToggleRow(label: "Show border",
-                       sub: "A border makes the picture wider, so the screen changes shape when one appears.",
+                       sub: "A border makes the picture wider, so the screen changes shape when one appears",
                        isOn: $s.sgbBorder)
             .disabled(!s.sgbEnable)
         SheetSubhead(text: "Boot ROM")
@@ -598,13 +599,13 @@ private struct GbaPane: View {
         SheetSubhead(text: "BIOS", rule: false)
         BiosFileRow(label: "GBA BIOS", url: RomLibrary.gbaBiosURL) { gen += 1 }
         SheetToggleRow(label: "Play BIOS intro",
-                       sub: "Play the GBA startup animation first. Needs a BIOS file",
+                       sub: "Play the GBA startup animation first. Needs a BIOS file.",
                        isOn: $s.gbaRunBios)
             .disabled(!hasBios)
         SheetSubhead(text: "BIOS calls (SWI)")
         VStack(spacing: 2) {
             radio(0, "HLE", "No BIOS file needed")
-            radio(1, "Real BIOS", "The most faithful. Needs a BIOS file")
+            radio(1, "Real BIOS", "The most faithful. Needs a BIOS file.")
             radio(2, "Real BIOS boot, HLE calls", "Real startup, software after that")
         }
         .disabled(!hasBios)
@@ -703,7 +704,7 @@ private struct AudioPane: View {
                            AudioOutput.shared.setAnalogFilter(on && GameSession.shared.game?.isGBA == true)
                        }))
         SheetToggleRow(label: "Play in Silent Mode",
-                       sub: "Pauses audio from other apps while a game is playing.",
+                       sub: "Pauses audio from other apps while a game is playing",
                        isOn: Binding(get: { s.playInSilent }, set: { on in
                            s.playInSilent = on
                            AudioOutput.shared.refreshSession()
@@ -813,7 +814,7 @@ private struct GeneralPane: View {
                        sub: "Hold the rewind button to jump back, or double-tap it for a timeline you can scrub. Costs a few percent of speed; turning it off hides the rewind button.",
                        isOn: $s.rewind)
         SheetFlowRow(label: "Run-ahead",
-                     sub: "Cuts the delay between pressing a button and seeing it happen, by guessing the next frame. Costs extra CPU; ignored at 2× speed") {
+                     sub: "Cuts the delay between pressing a button and seeing it happen, by guessing the next frame. Costs extra CPU; ignored at 2× speed.") {
             SheetSelect(selection: $s.runahead,
                         options: [(0, "Off"), (1, "1 frame"), (2, "2 frames"), (3, "3 frames")],
                         accessibilityLabel: "Run-ahead frames")

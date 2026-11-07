@@ -696,7 +696,7 @@ struct PlaybackCluster: View {
                 session.togglePause()
             }
             .disabled(redialing)
-            .opacity(redialing ? 0.38 : 1)
+            .opacity(redialing ? 0.45 : 1)
             if session.paused && !(link.linked || session.twoPlayer) {
                 stepButton(width: w)
             } else if !session.paused {
@@ -705,7 +705,7 @@ struct PlaybackCluster: View {
                 }
                 .accessibilityLabel("2x Speed")
                 .disabled(redialing)
-                .opacity(redialing ? 0.38 : 1)
+                .opacity(redialing ? 0.45 : 1)
                 if !(link.linked || session.twoPlayer) {
                     Button { session.toggleFastForward() } label: {
                         SpeedGlyph(count: 3, active: session.speed == .fastForward, width: w)

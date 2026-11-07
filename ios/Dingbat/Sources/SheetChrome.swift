@@ -404,7 +404,7 @@ struct SheetSwitchStyle: ToggleStyle {
                 .padding(3)
         }
         .frame(width: 44, height: 26)
-        .opacity(enabled ? 1 : 0.4)
+        .opacity(enabled ? 1 : 0.45)  // the one disabled opacity (web --disabled-opacity)
         .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) { configuration.isOn.toggle() }

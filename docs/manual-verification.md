@@ -257,7 +257,7 @@ still need the phone (docs/ios-app.md, Native differences).
       and Settings' back and section arrows take a tap a little outside the
       drawn icon; nothing moved.
 - [ ] **Pull to sync.** Signed in to Drive, pull down on the home screen: the
-      spinner holds while it syncs (the cloud shows Syncing), then lets go.
+      spinner holds while it syncs (the cloud shows Syncing…), then lets go.
       Signed out, the pull only bounces.
 - [ ] **VoiceOver.** A Settings switch reads as "switch button, on". With the
       game menu open, swiping never reaches the game behind it; the

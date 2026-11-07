@@ -264,7 +264,7 @@ struct NdsSettingsPane: View {
 
     var body: some View {
         SheetFlowRow(label: "Screens",
-                     sub: "Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard)") {
+                     sub: "Automatic shows both screens whichever way they come out bigger. Focus shows one large and the other small; tap the top screen to swap them. The screens button in the top bar has these too (V on a keyboard).") {
             ChipFlow(spacing: 6) {
                 ForEach(NdsUtil.Arrangement.allCases, id: \.self) { a in
                     SheetChip(label: a.label, selected: nds.arrangement == a) { nds.arrangement = a }
@@ -272,19 +272,19 @@ struct NdsSettingsPane: View {
             }
         }
         SheetFlowRow(label: "Gap",
-                     sub: "How far apart two screens shown together sit. Like the console is about the real distance, in pixels") {
+                     sub: "How far apart two screens shown together sit. Like the console is about the real distance, in pixels.") {
             SheetChipPicker(selection: $nds.gap, options: NdsUtil.Gap.allCases.map { ($0, $0.label) })
         }
         SheetFlowRow(label: "Turn",
-                     sub: "For games played with the console held sideways like a book. Book, left puts the touch screen on the right (O on a keyboard)") {
+                     sub: "For games played with the console held sideways like a book. Book, left puts the touch screen on the right (O on a keyboard).") {
             SheetChipPicker(selection: $nds.rot, options: NdsUtil.rotations.map { ($0, NdsUtil.rotLabel($0)) })
         }
         SheetFlowRow(label: "3D resolution",
-                     sub: "Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. When the processor draws the 3D, each step costs a lot more work a frame, so a slower device may not keep full speed") {
+                     sub: "Draws the 3D scenes at a higher resolution: sharper edges and models, the same textures. 2D stays as it is. When the processor draws the 3D, each step costs a lot more work a frame, so a slower device may not keep full speed.") {
             SheetChipPicker(selection: $nds.hd, options: NdsState.hdScales.map { ($0, $0 == 1 ? "Native" : "\($0)x") })
         }
         SheetFlowRow(label: "3D drawn by",
-                     sub: "The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions cost the processor almost nothing. Automatic uses it wherever it runs") {
+                     sub: "The same picture either way. The graphics card takes the 3D off the processor, so games run lighter and higher resolutions cost the processor almost nothing. Automatic uses it wherever it runs.") {
             SheetChipPicker(selection: $nds.gpu, options: NdsState.GpuChoice.allCases.map { ($0, $0.label) })
         }
         if !nds.gpuStatus.isEmpty { SheetHint(nds.gpuStatus) }
@@ -293,7 +293,7 @@ struct NdsSettingsPane: View {
                        isOn: $nds.swap)
         if UIDevice.current.userInterfaceIdiom == .phone {
             SheetToggleRow(label: "Hide the top bar while playing",
-                           sub: "On a phone held upright, the screens take the bar's room. A tap on the picture away from the touch screen brings the bar back",
+                           sub: "On a phone held upright, the screens take the bar's room. A tap on the picture away from the touch screen brings the bar back.",
                            isOn: $nds.barHide)
         }
         SheetSubhead(text: "BIOS and firmware")

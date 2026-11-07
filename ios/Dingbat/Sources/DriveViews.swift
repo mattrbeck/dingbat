@@ -67,7 +67,7 @@ struct AccountButton: View {
             .frame(width: 36, height: 34)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(drive.linked ? "Google Drive: " + (drive.status == .syncing ? "Syncing" : drive.status.stalled ? drive.status.word : "Signed in") : "Sign in")
+        .accessibilityLabel(drive.linked ? "Google Drive: " + (drive.status == .syncing ? "Syncing…" : drive.status.stalled ? drive.status.word : "Signed in") : "Sign in")
         .popover(isPresented: $open) {
             AccountMenu()
                 .environment(\.palette, palette)
@@ -316,7 +316,7 @@ struct DriveSettingsBlock: View {
             if !drive.linked {
                 Text("Sign in with Google")
                     .font(.system(size: 15, weight: .medium)).foregroundColor(palette.text)
-                Text("Mirrors your games and saves to your Google Drive, so they're backed up and follow you to every device you sign in on.")
+                Text("Mirrors your games and saves to your Google Drive, so they're backed up and follow you to every device you sign in on")
                     .font(.system(size: 12.5)).foregroundColor(palette.textDim)
                     .fixedSize(horizontal: false, vertical: true)
                 GoogleSignInButton()
@@ -349,8 +349,9 @@ struct DriveSettingsBlock: View {
 
     private var statusLine: String {
         let n = drive.pendingCount
-        if !drive.active { return "Reconnects when you next sync." }
-        if n == 0 { return "All changes synced." }
-        return "\(n) \(n == 1 ? "change" : "changes") waiting to go up."
+        // One sentence each, so no full stop (Settings' rule, web Drive rows).
+        if !drive.active { return "Reconnects when you next sync" }
+        if n == 0 { return "All changes synced" }
+        return "\(n) \(n == 1 ? "change" : "changes") waiting to go up"
     }
 }

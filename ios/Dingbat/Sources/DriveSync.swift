@@ -239,7 +239,7 @@ final class DriveSync: ObservableObject {
         var stalled: Bool { self == .offline || self == .paused }
         var word: String {
             switch self {
-            case .syncing: return "Syncing"
+            case .syncing: return "Syncing…"
             case .done: return "Synced"
             case .offline: return "Offline"
             case .paused: return "Paused"
