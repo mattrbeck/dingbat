@@ -68,7 +68,7 @@ struct LinkWaitingBadge: View {
         HStack(spacing: 6) {
             Image(systemName: "hourglass")
                 .font(.system(size: 10, weight: .semibold))
-            Text("waiting for friend · " + NetLink.fmtAway(TimeInterval(seconds)))
+            Text("Waiting for your friend… " + NetLink.fmtAway(TimeInterval(seconds)))
                 .font(.system(size: 11, design: .monospaced))
                 .tracking(0.6)
         }

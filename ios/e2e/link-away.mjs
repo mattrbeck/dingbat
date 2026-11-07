@@ -40,6 +40,8 @@ const APP = process.argv[2];
 const UDID = process.argv[3] || process.env.SIMDEV || "20B3E400-B140-4C0D-A981-A87BDBEDAEF9";
 const BUNDLE = "com.mattrb.dingbat";
 const MUTED = ["-audio.muted", "YES"];
+// The app's log line when the friend is gone (NetLink.peerGone).
+const FRIEND_GONE = /^(Your friend disconnected|Lost the connection to your friend)/;
 const ROOT = new URL("../..", import.meta.url).pathname;
 const SHOTS = process.env.SHOTS || "/tmp";
 const LINKTEST = join(ROOT, "tests/roms/linktest.gba");
@@ -226,7 +228,7 @@ const cases = {
     await s.page.click("#net-away-disconnect");
     await s.page.click("#net-away-disconnect");
     await until(async () => !(await s.linked()), "the browser's session ended", 5000);
-    await until(() => s.netlink().some((l) => l.startsWith("Peer")), () => "app: " + s.netlink(), 15000);
+    await until(() => s.netlink().some((l) => FRIEND_GONE.test(l)), () => "app: " + s.netlink(), 15000);
     await sleep(2000);
     s.appBack();
     await sleep(1500);
@@ -237,7 +239,7 @@ const cases = {
   async "browser closes its page"() {
     const s = await link("page-closed", LINKTEST);
     await s.page.close({ runBeforeUnload: true });
-    await until(() => s.netlink().some((l) => l.startsWith("Peer")), () => "app: " + s.netlink(), 15000);
+    await until(() => s.netlink().some((l) => FRIEND_GONE.test(l)), () => "app: " + s.netlink(), 15000);
     await sleep(800);
     s.shot("after");
     console.log("  app: " + s.netlink().join(" / "));

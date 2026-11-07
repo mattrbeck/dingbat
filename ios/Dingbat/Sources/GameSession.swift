@@ -763,7 +763,7 @@ final class GameSession: NSObject, ObservableObject {
     /// When rollback_tick began answering "stalled", or 0.
     private var linkStallSince: CFTimeInterval = 0
     /// Whole seconds of a stall nothing explains (no away message), from
-    /// 2 s (web #net-stall "waiting for friend"); 0 hides the badge.
+    /// 2 s (web #net-stall "Waiting for your friend…"); 0 hides the badge.
     @Published private(set) var linkWaiting = 0
 
     /// One tick of linked play: frames while the audio wants them (or the
