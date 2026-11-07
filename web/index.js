@@ -877,10 +877,12 @@ menuBtn.addEventListener("click", (e) => {
   }
 });
 
-// aria-expanded tracks `hidden` wherever the dropdown gets closed.
-new MutationObserver(() =>
-  menuBtn.setAttribute("aria-expanded", String(!menuDropdown.hidden))
-).observe(menuDropdown, { attributes: true, attributeFilter: ["hidden"] });
+// aria-expanded tracks `hidden` wherever the dropdown gets closed, and so
+// does body.game-menu-open (the open menu draws over the toasts).
+new MutationObserver(() => {
+  menuBtn.setAttribute("aria-expanded", String(!menuDropdown.hidden));
+  document.body.classList.toggle("game-menu-open", !menuDropdown.hidden);
+}).observe(menuDropdown, { attributes: true, attributeFilter: ["hidden"] });
 
 menuDropdown.addEventListener("scroll", updateMenuScrollHint, { passive: true });
 window.addEventListener("resize", updateMenuScrollHint);
@@ -8614,6 +8616,18 @@ const showToast = (msg) => pushToast(msg, 2200, null);
 // Toast with a single action; lingers longer than a plain toast.
 const showActionToast = (msg, label, fn, ms = 8000, { game = false } = {}) =>
   pushToast(msg, ms, { label, fn, game });
+
+// The control strip's height, for the toasts that sit above it on a touch
+// layout (styles.css #toast). It changes with the cart, the layout and the
+// orientation; display:none (no game, a desktop) reads 0.
+{
+  const strip = document.getElementById("controls");
+  if (strip && typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--controls-h", strip.offsetHeight + "px");
+    }).observe(strip, { box: "border-box" }); // offsetHeight's box, padding and all
+  }
+}
 
 // Leaving the game for the home screen: its offers go with it.
 const dismissGameToasts = () => {

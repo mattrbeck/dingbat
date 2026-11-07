@@ -4133,6 +4133,37 @@ body.debug-2p .home-tile-link {
   pointer-events: none;
 }
 
+/* A game on a touch layout: the bottom of the screen is the controls, and a
+   new player's first reach is Select / Start. The stack sits over the
+   picture instead: in portrait just above the control strip (its height,
+   --controls-h, from index.js), held sideways at the top of the picture,
+   since there the pads and pills lie over its bottom edge. Never on a DS,
+   whose lower screen is touched. The controls do not move. */
+@media (pointer: coarse) and (orientation: portrait) {
+  body.running:not(.nds-mode) #toast {
+    /* No strip (a pad hid it): the usual clearance over the home bar. */
+    bottom: max(calc(var(--controls-h, 0px) + 12px), calc(20px + var(--safe-b)));
+  }
+}
+/* Up there the stack can reach the game menu's lower rows: the open menu
+   draws over it (the bar, and so its dropdown, is z-index 50). */
+body.game-menu-open #toast {
+  z-index: 40;
+}
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  body.running:not(.nds-mode) #toast {
+    top: calc(10px + var(--safe-t));
+    bottom: auto;
+    /* Anchored at the top, the stack grows down: newest last keeps the
+       older pills (and their tap targets) where they were. */
+    flex-direction: column-reverse;
+  }
+  /* The bar slid in over the picture: below it. */
+  body.running.topbar-open:not(.nds-mode) #toast {
+    top: calc(10px + var(--safe-t) + var(--bar-h));
+  }
+}
+
 .toast-item {
   max-width: 100%;
   padding: 8px 16px;
