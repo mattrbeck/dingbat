@@ -2353,6 +2353,16 @@ html.home-pending #home-inner > :not(#home-brand) {
   visibility: hidden;
 }
 
+/* ...the big brand too: a library opens on its Last played hero, so the
+   brand painted here would only vanish under it. The bar has the brand
+   from the first frame instead, as it will once the hero is up. */
+html.home-pending #home-brand {
+  visibility: hidden;
+}
+html.home-pending #brand-slot {
+  --brand-p: 1 !important;
+}
+
 /* ...in the height it had last time (index.html's head, index.js
    noteHomeHeight), so the brand starts where the library leaves it. */
 html.home-pending #home-inner {

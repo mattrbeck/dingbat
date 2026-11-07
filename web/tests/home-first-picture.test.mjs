@@ -37,7 +37,7 @@ test("held: the page has the library's side at once, and what goes under the bra
   await app.api.refreshHomeRecent();
   await drain();
   assert.ok(!pending(app), "shown once the first render is done");
-  assert.equal(app.document.getElementById("hero").hidden, true, "a fresh visit: the brand heads the page");
+  assert.equal(app.document.getElementById("hero").hidden, false, "a fresh visit: the last game played heads the page");
 });
 
 test("held, but the library turned out empty: the empty state shows at once", async () => {

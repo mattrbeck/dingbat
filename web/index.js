@@ -6406,15 +6406,15 @@ const GOOGLE_BUTTON_HTML =
   '<img class="gsi-light" src="google-signin-light.svg" alt="" width="180" height="40">';
 
 // --- The first picture -----------------------------------------------------
-// A fresh visit opens on the brand with the library under it (the hero
-// appears only once a game is played in this visit: playedThisVisit). The
-// library comes out of IndexedDB a few frames after the page paints, and
-// painting under the brand before then showed the empty state's drop box
-// first. Where the last visit had games, index.html's head adds
-// html.home-pending: the brand paints at once, what goes under it waits
-// (styles.css) and fades in once the first render has its pictures. With
-// no hint - a first visit, an empty library - nothing waits, and the empty
-// state paints as early as it always did.
+// A fresh visit with games opens on the last one played (the closed hero,
+// refreshHero) with the library under it; an empty library opens on the
+// brand. The library comes out of IndexedDB a few frames after the page
+// paints, and painting before then showed the empty state's drop box first.
+// Where the last visit had games, index.html's head adds html.home-pending:
+// the bar's brand is up at once, the page under it waits (styles.css) and
+// fades in once the first render has its hero and pictures. With no hint -
+// a first visit, an empty library - nothing waits, and the empty state
+// paints as early as it always did.
 const LIB_HINT_KEY = "dingbat_library";
 // However the read goes, the page shows by then.
 const HOME_REVEAL_MAX_MS = 2000;
@@ -6427,13 +6427,9 @@ let homePending = !!document.documentElement.classList?.contains("home-pending")
 // from the start. (index.html's body script has set it already; this is
 // for a page whose inline scripts did not run, as the tests' vm.)
 if (homePending) document.body.classList.add("lib-has-games");
-// Set by a launch: from then on the page is headed by that game's hero
-// (paused, then Last played after a close) rather than the brand.
-let playedThisVisit = false;
-
 // The home screen's height at this first picture, for the next boot's head
 // to hold while it reads (styles.css, --home-pending-h). Taken here, where
-// the page is what a fresh visit shows (no hero yet), and keyed by the
+// the page is what a fresh visit shows (its Last played hero), and keyed by the
 // width, which sets the columns.
 const HOME_H_KEY = "dingbat_home_h";
 const noteHomeHeight = (inner) => {
@@ -12954,7 +12950,6 @@ const loadRom = async (romName, originalName, opts = {}) => {
   document.body.classList.add("has-game", "running");
   setBrandP(1);
   takePendingFlight(); // a launch from the home screen lands on the screen
-  playedThisVisit = true;
   if (ds) {
     // None of the GB/GBA core's per-cart work applies (the cart detectors
     // below read that core, which still holds the last GB/GBA game).
@@ -15318,15 +15313,19 @@ const renderClosedHero = async (name, file, keys) => {
   heroFrom = session && session.elsewhere !== null ? { dev: session.elsewhere, ts: session.ts } : null;
   heroFile = file;
   setHeroMode("closed", name);
+  // On a fresh visit this is the first the page hears of a hero (no launch
+  // has moved the brand up): the bar takes it now.
+  syncBrand();
 };
 
 // Whenever the library renders: with nothing loaded, the hero is its most
-// recent game - once a game has been played in this visit; a fresh visit
-// opens on the brand. A loaded game is the paused card's (drawPausedHero),
-// and a link or online session has no hero at all.
+// recent game - a fresh visit included, which opens on the game you were
+// playing rather than the brand (the big brand is the empty library's). A
+// loaded game is the paused card's (drawPausedHero), and a link or online
+// session has no hero at all.
 const refreshHero = (roms, localRoms, keys) => {
   if (currentRomName || loadingName) return;
-  if (linkMode || rollbackMode || netActive() || !roms.length || !playedThisVisit) {
+  if (linkMode || rollbackMode || netActive() || !roms.length) {
     setHeroShown(false);
     return;
   }
