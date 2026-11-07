@@ -12,6 +12,8 @@ struct PlayView: View {
 
     var body: some View {
         PlayLayout(stage: StageOrPair(), bar: TopBar())
+            // The toasts under the menu: the open menu draws over them.
+            .overlay { ToastStack(inPlay: true) }
             .overlay(alignment: .topLeading) {
                 if model.menuOpen {
                     GameMenu()
