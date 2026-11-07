@@ -303,27 +303,44 @@ struct LibraryHead: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Text("LIBRARY")
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.9)
-                    .foregroundColor(palette.textFaint)
-                // The UI's font: monospace is for numbers that change while
-                // you watch.
-                Text(countText)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(palette.textFaint)
+            // Short of room (an SE beside both buttons), the count alone
+            // rather than a truncated LIBRARY.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    Text("LIBRARY")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.9)
+                        .foregroundColor(palette.textFaint)
+                    count
+                }
+                count
             }
             .lineLimit(1)
-            Spacer(minLength: 8)
-            // Only while some game has no picture (web #home-thumbs).
+            // Read the same at every width.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Library, " + countText)
+            .accessibilityAddTraits(.isHeader)
+            // Not a Spacer: its two gaps are what an SE's head is short of.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Only while some game has no picture (web #home-thumbs): a
+            // ghost capsule in Add a game's family, smaller and with no
+            // glyph, so it reads as the lesser of the two (web .lib-thumbs).
+            // Its touch area reaches 44 pt tall without drawing any taller.
             if library.pictureGen >= 0 && AddPictures.shared.anyToPicture {
-                Button("Add pictures") { AddPictures.shared.open() }
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .fixedSize()
-                    .foregroundColor(palette.textDim)
-                    .padFocus("thumbs") { AddPictures.shared.open() }
+                Button { AddPictures.shared.open() } label: {
+                    Text("Add pictures")
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .foregroundColor(palette.textDim)
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 28)
+                        .overlay(Capsule().stroke(palette.border, lineWidth: 1))
+                        .touchTarget(width: 44, height: 28)  // taller only
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityHint("Take a picture of each game that has none")
+                .padFocus("thumbs", radius: 14) { AddPictures.shared.open() }
             }
             LibAddButton(add: add)
         }
@@ -333,6 +350,13 @@ struct LibraryHead: View {
             if underHero { Rectangle().fill(palette.border).frame(height: 1) }
         }
         .padding(.bottom, 10)
+    }
+
+    // The UI's font: monospace is for numbers that change while you watch.
+    private var count: some View {
+        Text(countText)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(palette.textFaint)
     }
 }
 
