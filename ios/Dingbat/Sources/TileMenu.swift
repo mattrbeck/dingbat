@@ -20,6 +20,8 @@ struct TileMenuView: View {
     /// The rows' height as laid out unarmed: the sheet's (an armed row's
     /// sub-line takes the reserve below, so arming never moves the sheet).
     @State private var contentHeight: CGFloat?
+    /// The pinned head's, the rule under it included.
+    @State private var headHeight: CGFloat?
 
     private var loaded: Bool { GameSession.shared.game == entry }
     /// web tileMenuEntries' busy: the loaded game's files wait for its
@@ -33,15 +35,33 @@ struct TileMenuView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                rows
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: TileMenuHeightKey.self, value: g.size.height)
-                    })
+        VStack(spacing: 0) {
+            // The head stays put, × and all, while the rows scroll under it
+            // (as SheetChrome's header): held sideways the sheet is the
+            // whole height, and the × is its one visible way out.
+            VStack(alignment: .leading, spacing: 0) {
+                head
+                Rectangle().fill(palette.border).frame(height: 1)
             }
-            .bounceOnlyIfScrolling()
-            .padScrollFollow(proxy)
+            .padding(.leading, 12)
+            .padding(.trailing, 12)
+            .padding(.top, 18)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: TileMenuHeadKey.self, value: g.size.height)
+            })
+            ScrollViewReader { proxy in
+                ScrollView {
+                    rows
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: TileMenuHeightKey.self, value: g.size.height)
+                        })
+                }
+                .bounceOnlyIfScrolling()
+                .padScrollFollow(proxy)
+            }
+        }
+        .onPreferenceChange(TileMenuHeadKey.self) { h in
+            if h > 0 { headHeight = h }
         }
         .onPreferenceChange(TileMenuHeightKey.self) { h in
             if armed == nil && h > 0 { contentHeight = h }
@@ -54,8 +74,6 @@ struct TileMenuView: View {
 
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
-            head
-            Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 6)
             if session {
                 group("Play")
                 playRows
@@ -64,7 +82,7 @@ struct TileMenuView: View {
             fileRows
         }
         .padding(.horizontal, 12)
-        .padding(.top, 18)
+        .padding(.top, 6)
         .padding(.bottom, 8)
     }
 
@@ -163,11 +181,11 @@ struct TileMenuView: View {
         }
     }
 
-    /// The rows as measured, plus room for an armed row's sub-line. Until
-    /// they are measured, a guess from the row count. Taller than the
-    /// screen is the screen's height, and the rows scroll.
+    /// The pinned head and the rows as measured, plus room for an armed
+    /// row's sub-line. Until both are measured, a guess from the row count.
+    /// Taller than the screen is the screen's height, and the rows scroll.
     private var sheetHeight: CGFloat {
-        if let contentHeight { return contentHeight + Self.armReserve }
+        if let contentHeight, let headHeight { return headHeight + contentHeight + Self.armReserve }
         let drive = DriveSync.shared
         var rows = 4
         if !entry.isLocal { rows += 1 }
@@ -238,8 +256,13 @@ struct TileMenuView: View {
                     .font(.system(size: 12))
                     .foregroundColor(palette.textDim)
             }
+            Spacer(minLength: 0)
+            // A way out anyone can see: held sideways the sheet takes the
+            // whole height, with no grabber and no scrim above it (web: the
+            // tile menu's ×). The sheets' own close (SheetChrome).
+            SheetCloseButton(action: SheetNav.close)
         }
-        .padding(.horizontal, 6)
+        .padding(.leading, 6)  // the × 12 pt from the edge, as SheetHeader's
         .padding(.bottom, 12)
     }
 
@@ -317,6 +340,11 @@ struct TileMenuView: View {
         .padFocus("item:" + id, armed: isArmed, press: tap)
         .disabled(disabled != nil)
     }
+}
+
+private struct TileMenuHeadKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 private struct TileMenuHeightKey: PreferenceKey {

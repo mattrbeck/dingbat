@@ -547,6 +547,36 @@ final class NativeTouchesUITests: XCTestCase {
         app.terminate()
     }
 
+    /// Held sideways, the game's menu scrolls under its head, and the
+    /// head's × stays and closes it.
+    func testGameMenuCloseHeldSideways() {
+        let app = launch(["-landscape"])
+        sleep(2)
+        let menu = app.buttons["Menu"].firstMatch
+        if !menu.isHittable { app.otherElements["Game screen"].firstMatch.tap() }
+        menu.tap()
+        app.buttons["Library"].firstMatch.tap()
+        let more = app.buttons["More for this game"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "the paused hero's ⋯")
+        more.tap()
+        let states = app.buttons["Save states"].firstMatch
+        XCTAssertTrue(states.waitForExistence(timeout: 3), "the menu, Play group and all")
+        sleep(1)
+        // Down to Delete: the rows scroll under the head, the × stays.
+        let delete = app.buttons["Delete"].firstMatch
+        for _ in 0..<3 where !delete.isHittable { states.swipeUp(); usleep(500_000) }
+        XCTAssertTrue(delete.isHittable, "scrolled to Delete")
+        let closeX = { app.buttons.matching(NSPredicate(format: "label == 'Close'")).allElementsBoundByIndex
+            .last { $0.isHittable } }
+        let x = closeX()
+        print("NATIVE: sideways menu scrolled, Delete \(delete.frame), × \(x?.frame ?? .zero)")
+        snap(app, "game-menu-sideways-scrolled")
+        XCTAssertNotNil(x, "the × still there")
+        if let x { XCTAssertLessThan(x.frame.maxY, delete.frame.minY, "above the rows, in the head") }
+        x?.tap()
+        XCTAssertTrue(delete.waitForNonExistence(timeout: 3), "and it closes the menu")
+    }
+
     /// One menu per game (web openTileMenu): the paused hero's ⋯ opens the
     /// game's menu with its Play group above the file items; Delete arms on
     /// one tap and disarms after 3.5 s; a Play row opens its sheet; closed,
@@ -596,6 +626,12 @@ final class NativeTouchesUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Save states"].exists, "closed: no Play group")
         XCTAssertFalse(app.staticTexts["PLAY"].exists, "nor its heading")
         snap(app, "game-menu-closed")
+        // Its own × closes it (held sideways it has no grabber or scrim).
+        let x = app.buttons.matching(NSPredicate(format: "label == 'Close'")).allElementsBoundByIndex
+            .last { $0.isHittable }
+        XCTAssertNotNil(x, "the menu's ×")
+        x?.tap()
+        XCTAssertTrue(app.buttons["Rename"].firstMatch.waitForNonExistence(timeout: 3), "the × closes the menu")
     }
 
     /// The iPhone Duo folded, upright: the bar folds away, the stage takes

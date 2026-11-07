@@ -500,7 +500,7 @@ private struct GameBoyPane: View {
                        isOn: $s.sgbBorder)
             .disabled(!s.sgbEnable)
         SheetSubhead(text: "Boot ROM")
-        BiosFileRow(label: "GBC Bootrom", url: RomLibrary.gbcBootromURL)
+        BiosFileRow(label: "GBC Boot ROM", url: RomLibrary.gbcBootromURL)
         SheetHint("With a boot ROM set, Game Boy games play the startup animation first.")
     }
 
