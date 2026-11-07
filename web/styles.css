@@ -159,6 +159,15 @@
   caret-color: var(--accent);
 }
 
+/* One focus ring for everything the keyboard reaches, in the theme's accent
+   rather than the browser's own (blue on a desktop, orange on Android). A
+   control overrides only what it must: an inset ring where a scroller or a
+   sheet would clip this one, or a halo that must not read as its selection. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /*
  * ==========================================================
  * Chrome themes
@@ -1484,8 +1493,6 @@ body:not(.running) .cart-btn {
 }
 
 #hle-indicator:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
   border-radius: 4px;
 }
 
@@ -1536,11 +1543,6 @@ body:not(.running) #channels-indicator {
 
 #channels-indicator:hover {
   color: var(--chrome-ink);
-}
-
-#channels-indicator:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* Phones as narrow as the first SE: the crossed speaker and the count. */
@@ -2607,11 +2609,6 @@ body.lib-has-games #home-start {
   cursor: default;
 }
 
-.gsi-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
 @media (pointer: coarse) {
   .gsi-btn img {
     height: 44px;
@@ -3440,6 +3437,11 @@ body.runtime-ready #boot-progress {
   transition: color 0.12s, background 0.12s, border-color 0.12s;
 }
 
+.lib-chip:focus-visible {
+  /* The chip row scrolls sideways, which clips anything drawn outside it. */
+  outline-offset: -2px;
+}
+
 .lib-chip:hover {
   color: var(--text);
   border-color: rgba(var(--hi-rgb), 0.24);
@@ -4182,14 +4184,6 @@ body.debug-2p .home-tile-link {
 
 .toast-close:active {
   opacity: 1;
-}
-
-/* Keyboard reachability: a thin offset halo in the text colour, matching the
-   save-state slots. */
-.toast-action:focus-visible,
-.toast-close:focus-visible {
-  outline: 2px solid var(--text);
-  outline-offset: 2px;
 }
 
 /*
@@ -5015,10 +5009,11 @@ body.debug-2p .home-tile-link {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
-/* The sliders clear the native outline; give keyboard focus the same ring
-   the switches use or a focused slider is invisible. */
+/* The sliders take the switches' glow for keyboard focus instead of the
+   ring (one indicator, not two). */
 .vol-range:focus-visible,
 .report-slider:focus-visible {
+  outline: none;
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
@@ -6021,12 +6016,6 @@ body.debug-2p .home-tile-link {
   border: 1px dashed var(--border-2);
   color: var(--text-faint);
   text-decoration: line-through;
-}
-
-.channel-chip:focus-visible,
-.channel-all:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .channels-foot {
@@ -8539,9 +8528,14 @@ body.running.sync-shown #status {
 .home-tile-dl.is-busy:active {
   transform: none;
 }
-/* The light theme's accent is dark enough to vanish on the chip. */
+/* The light theme's accent is dark enough to vanish on the chip, and its
+   focus ring on the game's picture behind the chips. */
 :root[data-theme="light"] .home-tile-dl.is-busy {
   color: var(--accent-hi);
+}
+:root[data-theme="light"] .home-tile-more:focus-visible,
+:root[data-theme="light"] .home-tile-dl:focus-visible {
+  outline-color: var(--accent-hi);
 }
 .home-tile-dl svg {
   width: 15px;
@@ -8685,9 +8679,18 @@ body.running.sync-shown #status {
   font-size: 13px;
   cursor: pointer;
 }
-.tile-menu-item:hover:not(:disabled),
+.tile-menu-item:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+/* Inside the item: the menu's rows are packed edge to edge. */
 .tile-menu-item:focus-visible {
   background: var(--surface-3);
+  outline-offset: -2px;
+}
+/* Armed, the row is red and the accent would vanish into it (Light,
+   Indigo, Famicom): the ring takes the armed ink instead. */
+.tile-menu-item.armed:focus-visible {
+  outline-color: var(--danger-ink);
 }
 .tile-menu-item:disabled {
   cursor: default;
