@@ -7052,6 +7052,25 @@ const framebufferSig = (heap) => {
   return h;
 };
 
+// A screen of one colour - a boot's white, a fade's black - is not a picture
+// of the game, and stored it shows as a slab (and a glow of it in the hero).
+// A 32x32 grid of samples: blank when all but two match the first. Fine
+// enough that a small logo or a thin line of text on black still counts as
+// a picture (a title screen often is just that).
+const BLANK_GRID = 32;
+const framebufferBlank = (heap, w, h) => {
+  let r0 = -1, g0 = 0, b0 = 0, off = 0;
+  for (let y = 0; y < BLANK_GRID; y++) {
+    let row = Math.floor((y + 0.5) * h / BLANK_GRID) * w;
+    for (let x = 0; x < BLANK_GRID; x++) {
+      let i = (row + Math.floor((x + 0.5) * w / BLANK_GRID)) * 4;
+      if (r0 < 0) { r0 = heap[i]; g0 = heap[i + 1]; b0 = heap[i + 2]; continue; }
+      if (Math.abs(heap[i] - r0) + Math.abs(heap[i + 1] - g0) + Math.abs(heap[i + 2] - b0) > 24) off++;
+    }
+  }
+  return off <= 2;
+};
+
 // Paint the framebuffer at native size, scale it up by FRAME_SCALE with
 // smoothing off (crisp pixels; the JPEG softens enough on its own). Resolves
 // null where toBlob is missing (the test harness's canvas stand-in).
@@ -7102,6 +7121,9 @@ const storeLastFrame = ({ force = false } = {}) => {
   const fb = copyFramebuffer();
   if (!fb) return Promise.resolve();
   const { heap, w, h } = fb;
+  // Not even on a pause: the picture already stored (or the cartridge) is
+  // a better face than a blank screen.
+  if (framebufferBlank(heap, w, h)) return Promise.resolve();
   const sig = framebufferSig(heap);
   if (!force && sig === lastFrameSig) return Promise.resolve();
   lastFrameSig = sig;
@@ -8166,6 +8188,11 @@ const refreshHomeRecent = async () => {
       img.src = url;
       img.alt = "";
       thumb.replaceChildren(img);
+      // The same picture, blurred, in the bars a 10:9 or 4:3 screen leaves.
+      // A GBA screen and box art (cover) fill the box: no layer to pay for.
+      if (cls === "home-tile-frame" && system !== "GBA") {
+        thumb.style.setProperty("--thumb-pic", 'url("' + url + '")');
+      }
       tile.classList.remove("no-art");
       return img;
     };
@@ -15806,6 +15833,23 @@ const thumbsSetProgress = (i, total, name) => {
   thumbsBarFill.style.width = Math.round((i / Math.max(1, total)) * 100) + "%";
 };
 
+// Run the pictures core on: up to `frames` frames or until `deadline`
+// (performance.now), whichever comes first, in chunks so the page stays
+// responsive, stopping early once `until()` holds. False when the run was
+// stopped or a launch took the core meanwhile.
+const thumbsAdvance = async (run, frames, deadline, until = () => false) => {
+  for (let done = 0; done < frames && performance.now() < deadline;) {
+    if (run.cancelled || currentRomName) return false; // a launch took the core
+    let n = Math.min(THUMBS_CHUNK, frames - done);
+    for (let i = 0; i < n; i++) Module._loop_tick();
+    done += n;
+    if (Module._clearAudioBuffer) Module._clearAudioBuffer(); // nobody plays it
+    await new Promise((r) => setTimeout(r, 0));
+    if (until()) break;
+  }
+  return !(run.cancelled || currentRomName);
+};
+
 // Boot one game in the core and store its screen. Never touches the game's
 // own records: the ROM and save go to scratch FS names, and the .sav is
 // unlinked after, so no later load can pick it up.
@@ -15837,19 +15881,25 @@ const thumbsPictureOne = async (cand, run, remote) => {
     frames = THUMBS_RESUME_FRAMES;
     deadline = Infinity;
   }
-  for (let done = 0; done < frames && performance.now() < deadline;) {
-    if (run.cancelled || currentRomName) return false; // a launch took the core
-    let n = Math.min(THUMBS_CHUNK, frames - done);
-    for (let i = 0; i < n; i++) Module._loop_tick();
-    done += n;
-    if (Module._clearAudioBuffer) Module._clearAudioBuffer(); // nobody plays it
-    await new Promise((r) => setTimeout(r, 0));
-  }
-  if (run.cancelled || currentRomName) return false;
+  if (!(await thumbsAdvance(run, frames, deadline))) return false;
   let [w, h] = ext === ".gba" ? [240, 160] : [160, 144];
-  let ptr = Module._wasm_fb_ptr();
-  if (!ptr) return false;
-  let heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice();
+  const grab = () => {
+    let ptr = Module._wasm_fb_ptr();
+    return ptr ? new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice() : null;
+  };
+  let heap = grab();
+  // A blank screen (still on a boot's white, or in a fade): run on to the
+  // next one that isn't, for up to as long again (in frames, so the picture
+  // is the same however fast the core runs); still blank, no picture, and
+  // the tile keeps its cartridge.
+  if (heap && framebufferBlank(heap, w, h)) {
+    if (!(await thumbsAdvance(run, THUMBS_BOOT_FRAMES, performance.now() + THUMBS_BOOT_MS,
+                              () => !(heap = grab()) || !framebufferBlank(heap, w, h)))) return false;
+  }
+  if (!heap || framebufferBlank(heap, w, h)) {
+    try { FS.unlink("thumb.sav"); } catch {}
+    return false;
+  }
   let sgb = Module._wasm_sgb_active && Module._wasm_sgb_active();
   shadeFramebuffer(heap, w, h, pictureShades(isMonoPanelRom(romFile) && !sgb));
   let blob = await frameBlobFromFb(heap, w, h);

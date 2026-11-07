@@ -3838,6 +3838,18 @@ body.pad-nav :is(button, input, select, [tabindex]):focus {
   object-fit: cover;
 }
 
+/* The bars beside a picture narrower than 3:2 (a GB frame, a DS screen):
+   the same picture again (index.js sets --thumb-pic), filling the box,
+   blurred and dimmed under the sharp one. Past the edges by the blur, so
+   it does not fade out at the sides. A 3:2 GBA frame covers it entirely. */
+.home-tile-thumb::before {
+  content: "";
+  position: absolute;
+  inset: -16px;
+  background: var(--thumb-pic, none) center / cover no-repeat;
+  filter: blur(12px) brightness(0.55);
+}
+
 /* No picture yet: the cartridge sits on a field tinted by its system, not
    on black. */
 .home-tile.no-art .home-tile-thumb {

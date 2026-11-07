@@ -80,11 +80,10 @@ test("storeLastFrame writes frame:<name> from the framebuffer", async () => {
   const app = await loadApp();
   app.api.currentRomName = "A.gba";
   app.api.currentOriginalName = "A.gba";
-  // A wasm stand-in: a 240x160 RGBA framebuffer at offset 0 of `memory`,
-  // and a canvas whose toBlob yields a JPEG.
-  const fb = new Uint8Array(240 * 160 * 4);
+  // A wasm stand-in: a 240x160 RGBA framebuffer at offset 16 of `memory`,
+  // with something on it, and a canvas whose toBlob yields a JPEG.
   app.runIn(`
-    globalThis.Module = { _wasm_fb_ptr: () => 16, memory: { buffer: new ArrayBuffer(16 + ${fb.length}) } };
+    globalThis.Module = { _wasm_fb_ptr: () => 16, memory: { buffer: new Uint8Array(16 + 240 * 160 * 4).map((_, i) => i * 7).buffer } };
     const realCreate = document.createElement.bind(document);
     document.createElement = (tag) => {
       const el = realCreate(tag);
@@ -104,4 +103,29 @@ test("storeLastFrame writes frame:<name> from the framebuffer", async () => {
   app.runIn("new Uint8Array(Module.memory.buffer, 16, 4).set([9, 9, 9, 255])");
   await app.runIn("storeLastFrame()");
   assert.ok(app.idb.get("frame:A.gba") instanceof Blob, "changed: written");
+
+  // A screen of one colour (a boot's white) is not kept, not even on a pause.
+  app.idb.delete("frame:A.gba");
+  app.runIn("new Uint8Array(Module.memory.buffer).fill(255)");
+  await app.runIn("storeLastFrame({ force: true })");
+  assert.equal(app.idb.get("frame:A.gba"), undefined, "blank: skipped");
+});
+
+test("a mostly-black title with a small logo is a picture; one colour is not", async () => {
+  const app = await loadApp();
+  // A 160x144 screen: `fill` everywhere, then an optional w x h block at x, y.
+  const blank = (fill, block) => app.runIn(`(() => {
+    const w = 160, h = 144, heap = new Uint8Array(w * h * 4);
+    for (let i = 0; i < heap.length; i += 4) heap.set([${fill}, ${fill}, ${fill}, 255], i);
+    const b = ${JSON.stringify(block ?? null)};
+    if (b) for (let y = b.y; y < b.y + b.h; y++)
+      for (let x = b.x; x < b.x + b.w; x++) heap.set([255, 255, 255, 255], (y * w + x) * 4);
+    return framebufferBlank(heap, w, h);
+  })()`);
+  assert.equal(blank(255), true, "a boot's white");
+  assert.equal(blank(0), true, "a fade's black");
+  assert.equal(blank(128), true, "a mid-grey fade");
+  assert.equal(blank(0, { x: 56, y: 60, w: 48, h: 16 }), false, "a 48x16 logo on black");
+  assert.equal(blank(0, { x: 64, y: 64, w: 32, h: 16 }), false, "a 32x16 logo on black");
+  assert.equal(blank(0, { x: 36, y: 100, w: 88, h: 8 }), false, "a line of text on black");
 });
