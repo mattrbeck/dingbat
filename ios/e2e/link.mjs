@@ -84,7 +84,7 @@ const runCase = async (name, { webRom, appRom, appGame, manual = false, webHas =
   const sig = "ws://127.0.0.1:" + (manual ? 9 : PORT);
   await page.goto(web.url + "?signal=" + sig);
   await page.waitForFunction(() => typeof Module !== "undefined" && !!Module._rollback_tick, null, { timeout: 30000 });
-  // Games already in the browser's library: each added, then Main Menu.
+  // Games already in the browser's library: each added, then Menu > Library.
   for (const r of webHas) {
     const [c] = await Promise.all([page.waitForEvent("filechooser"),
       page.locator("#home-load, #lib-add, #home-solo-add").locator("visible=true").first().click()]);

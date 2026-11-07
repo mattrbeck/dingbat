@@ -127,7 +127,7 @@ try {
   await sleep(6000);
   console.log("screenshot (resumed):", shot("ios-resumed"));
 
-  // 3. Main Menu on the iPhone (14 s in): its session goes up.
+  // 3. Menu > Library on the iPhone (14 s in): its session goes up.
   const iosSession = await until("the iPhone's session on Drive", () => {
     const s = drive.session(GAME);
     return s && s.dev === "iPhone" ? s : null;
