@@ -1,7 +1,7 @@
 // Several "devices" - browser contexts, each its own IndexedDB and
 // localStorage, in Chromium or WebKit - running the real build (index.js +
 // the wasm core) against one fake Drive (fakedrive.mjs). Actions go through
-// the visible UI (Add a game, Menu > Main Menu, the account menu's Sync
+// the visible UI (Add a game, Menu > Library, the account menu's Sync
 // now, the hero's buttons, toasts); only the game's own input (holding A)
 // and the observations read the page directly.
 

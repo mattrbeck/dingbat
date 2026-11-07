@@ -1153,7 +1153,7 @@ body.running #playback-controls {
   display: flex;
 }
 
-/* Main Menu item only appears while a game is being played */
+/* The Library item (#main-menu) only appears while a game is being played */
 #main-menu,
 #main-menu-sep {
   display: none;

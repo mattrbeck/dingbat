@@ -15092,14 +15092,15 @@ const flyBrand = (up) => {
   Promise.all(made.map((a) => a.finished)).then(settle, settle);
 };
 
-// In a game the brand is the way home, the same as Main Menu (desktop only in
-// practice: phones drop the bar's brand while a game runs). On the home screen
-// - with or without a paused game behind it - it goes back to the top.
+// In a game the brand is the way home, the same as the menu's Library, and
+// says so in the same word (desktop only in practice: phones drop the bar's
+// brand while a game runs). On the home screen - with or without a paused
+// game behind it - it goes back to the top.
 const brandGoesHome = () => document.body.classList.contains("running");
 
 // The label follows what a click will do, read at the moment it matters.
 const labelBarBrand = () => {
-  let label = brandGoesHome() ? "Main Menu" : "Back to the top";
+  let label = brandGoesHome() ? "Library" : "Back to the top";
   barBrand.title = label;
   barBrand.setAttribute("aria-label", label);
 };
