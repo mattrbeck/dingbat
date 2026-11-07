@@ -166,7 +166,9 @@ proc advance(nl: NetLink; budget_ms: int): bool =
         nl.stall_deadline = now + initDuration(milliseconds = nl.stall_timeout_ms)
       if now > nl.stall_deadline:
         raise newException(NetLinkError,
-          "stalled waiting for your friend for " & $nl.stall_timeout_ms & " ms")
+          "stalled waiting for your friend for " &
+          (if nl.stall_timeout_ms mod 1000 == 0: $(nl.stall_timeout_ms div 1000) & " s"
+           else: $nl.stall_timeout_ms & " ms"))
       if budget_ms >= 0 and now >= give_up:
         return false
     of naHello:

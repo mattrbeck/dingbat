@@ -7,8 +7,8 @@
 ## key from the game (held_input.nim `modal_key_of`, desktop_input_test).
 ## And every string the desktop draws has its characters in ImGui's built-in
 ## font (no em dash, curly quote or "…": those draw as "?"): src/dingbat.nim
-## and every src/dingbat/frontend file, found at compile time, and by hand
-## the core files whose messages it shows (CORE_SOURCES).
+## and every file under src/dingbat, found at compile time (the core's
+## messages reach the notices, the Cheats and Link Cable windows too).
 ##
 ## Needs imguin (its C++ compiles into this binary; nothing else of the GUI:
 ## no SDL, no GL). CI's test job installs it (.github/scripts/
@@ -19,20 +19,6 @@ import imguin/cimgui
 import dingbat/frontend/notice
 
 const SRC = currentSourcePath().parentDir.parentDir / "src"
-
-const CORE_SOURCES = [
-  # Shared with the web. Their messages reach the desktop's notices (State,
-  # Settings, Save file), the Cheats window's error and the Link Cable
-  # window; the desktop's own UI (src/dingbat.nim, every frontend file) is
-  # listed at compile time.
-  "dingbat/common/atomicfile.nim", "dingbat/common/cheats.nim",
-  "dingbat/common/config.nim", "dingbat/common/fastpack.nim",
-  "dingbat/common/linkproto.nim", "dingbat/common/lz4.nim",
-  "dingbat/common/scheduler.nim", "dingbat/common/serialize.nim",
-  "dingbat/gb/savestate.nim",
-  "dingbat/gba/netcore.nim", "dingbat/gba/netlink.nim",
-  "dingbat/gba/savestate.nim",
-  "dingbat/nds/cheats.nim", "dingbat/nds/savestate.nim"]
 
 proc scan_literals(n: NimNode; file: string; found: var NimNode) =
   ## Every non-ASCII string literal under n, as (file, line, text), but for
@@ -57,14 +43,13 @@ proc scan_literals(n: NimNode; file: string; found: var NimNode) =
 macro ui_string_literals(): untyped =
   ## The UI sources parsed (not compiled) at compile time.
   var files = @["dingbat.nim"]
-  var frontend: seq[string]
-  for kind, path in walkDir(SRC / "dingbat" / "frontend"):
-    if kind == pcFile and path.endsWith(".nim"):
-      frontend.add "dingbat/frontend/" & path.extractFilename
-  doAssert frontend.len > 0, "no frontend sources under " & SRC
-  frontend.sort()
-  files.add frontend
-  files.add CORE_SOURCES
+  var below: seq[string]
+  for path in walkDirRec(SRC / "dingbat"):
+    if path.endsWith(".nim"):
+      below.add path.relativePath(SRC).replace('\\', '/')
+  doAssert below.len > 0, "no sources under " & SRC
+  below.sort()
+  files.add below
   result = newNimNode(nnkBracket)
   for f in files:
     let tree = parseStmt(staticRead(SRC / f), f)

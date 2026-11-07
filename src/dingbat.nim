@@ -1145,7 +1145,7 @@ proc state_reject_sentence(): string =
     if app.emu_kind == ekNDS:
       "That save state is for another system: only a DS state loads into a DS game."
     else:
-      "That save state is for the other system - a Game Boy state can't load " &
+      "That save state is for the other system: a Game Boy state can't load " &
       "into a GBA game, or the reverse."
   of srkWrongRom:
     "That save state belongs to a different game. Load the game it was made " &
@@ -1154,7 +1154,7 @@ proc state_reject_sentence(): string =
     "That save state was made by a newer version of dingbat than this one. " &
     "Update dingbat and try again."
   of srkTruncated:
-    "That save state file is incomplete - the copy or download was cut short."
+    "That save state file is incomplete: the copy or download was cut short."
   of srkCorrupt:
     "That save state is damaged and can't be loaded. The game is still " &
     "running and nothing was changed."
@@ -2459,7 +2459,7 @@ proc render_link_window() =
         igText("They pick Join and enter  your-ip : %d", cint(app.link.port))
         if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
       elif app.link.setup == lsConnecting:
-        igText("Connecting to %s:%d ...",
+        igText("Connecting to %s:%d...",
                cstring(app.link.join_host()), cint(app.link.port))
         if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
       elif app.link.setup == lsHandshake:

@@ -26,7 +26,7 @@ proc render*(v: VideoWidget) =
               "screen's own structure instead of smoothing (the grid is the " &
               "pixel matrix every Game Boy LCD shows; RGB subpixels imitates " &
               "the GBC/GBA TFT's stripe triads; a DMG panel has none, so there " &
-              "it is a stylized look). None keeps crisp " &
+              "it is a stylized look). \"None\" keeps crisp " &
               "nearest-neighbor pixels. Color correction still applies on top.")
   igIndent(ui_px(106))
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)

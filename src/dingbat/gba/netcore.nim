@@ -153,7 +153,7 @@ type
     # TRANSFERs that arrived mid-round; replayed when phase returns idle.
     pending_transfers: seq[LinkMsg]
     in_frame: bool        # a frame is underway (try_advance is resumable)
-    stalled*: bool        # "waiting for peer" telemetry
+    stalled*: bool        # "Waiting for your friend" telemetry
     stall_count*: int
     # ---- speculative execution (GGPO-style rollback) ----
     speculative: bool     # OFF: everything below is inert
@@ -632,8 +632,8 @@ proc reject_hello(nc: NetCore; why: string) =
 
 proc handle_hello(nc: NetCore; m: LinkMsg) =
   if m.version != LINKPROTO_VERSION:
-    nc.reject_hello("protocol version mismatch (yours " & $LINKPROTO_VERSION &
-                    ", your friend's " & $m.version & ")")
+    nc.reject_hello("protocol version mismatch (you have " & $LINKPROTO_VERSION &
+                    ", your friend has " & $m.version & ")")
   elif m.system != LINK_SYSTEM_GBA:
     nc.reject_hello("emulated-system mismatch (your friend's system " &
                     $m.system & ")")
