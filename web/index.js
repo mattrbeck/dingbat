@@ -7322,9 +7322,10 @@ let tileMenuFor = null;     // the game, while open
 let tileMenuAnchor = null;  // focus returns here on close
 let tileMenuPicUrl = null;
 const TILE_MENU_ARM_MS = 3500;
-// The items, as the buttons they are.
+// The items, as the buttons they are (not the group headings and rules).
 const tileMenuButtons = () =>
-  /** @type {HTMLButtonElement[]} */ ([...tileMenuItems.children]);
+  /** @type {HTMLButtonElement[]} */ ([...tileMenuItems.children]
+    .filter((c) => c.classList.contains("tile-menu-item")));
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_SLOP = 10; // px of travel that makes it a scroll, not a press
 
@@ -7335,7 +7336,6 @@ const closeTileMenu = () => {
   if (tileMenu.hidden) return;
   tileMenu.hidden = true;
   tileMenuScrim.hidden = true;
-  tileMenuHead.hidden = false;
   tileMenuHead.replaceChildren();
   tileMenuItems.replaceChildren();
   if (tileMenuPicUrl) { URL.revokeObjectURL(tileMenuPicUrl); tileMenuPicUrl = null; }
@@ -7359,6 +7359,17 @@ const MENU_ICONS = {
   cheats: '<path d="M12 3l2.2 4.6 5 .7-3.6 3.5.9 5L12 14.9 7.5 16.8l.9-5L4.8 8.3l5-.7z"/>',
   bug: '<path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/>',
   prints: '<path d="M6 9V4h12v5M6 15h12v5H6zM6 9h12a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2z"/>',
+  // The file items' own, in the same stroke. Download is the tile's corner
+  // glyph (DL_ICON); the save ones are Quick Save's disk, struck out.
+  find: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.6-4.6"/>',
+  download: '<path d="M12 3v12M8 11l4 4 4-4M5 19h14"/>',
+  moments: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v3.5h3.5M12 8v4l2.8 1.8"/>',
+  rename: '<path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/>',
+  export: '<path d="M14 4h6v6M20 4l-8.5 8.5M18 14v6H4V6h6"/>',
+  reset: '<path d="M5 5h11l3 3v11H5zM8 5v4h7V5M10 13.5l4 4M14 13.5l-4 4"/>',
+  restore: '<path d="M9 13 4.5 8.5 9 4M4.5 8.5H14a5.5 5.5 0 0 1 0 11h-3"/>',
+  remove: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M10 12h4"/>',
+  trash: '<path d="M4 7h16M9.5 7V4h5v3M6.5 7l1 13h9l1-13M10.5 11v5M13.5 11v5"/>',
 };
 
 // A menu item: a label over a sub-line. `disabled` is the reason, shown in
@@ -7370,9 +7381,6 @@ const tileMenuItem = ({ label, sub = "", icon = "", danger = false, disabled = "
   b.type = "button";
   b.className = "tile-menu-item" + (danger ? " danger" : "");
   b.setAttribute("role", "menuitem");
-  // Only the session items carry one. The file items (Rename, Delete and the
-  // rest) have never had a glyph anywhere, and inventing one for Delete in
-  // particular would be inventing a meaning.
   if (icon) {
     b.classList.add("has-icon");
     let g = document.createElement("span");
@@ -7430,26 +7438,17 @@ const tileMenuItem = ({ label, sub = "", icon = "", danger = false, disabled = "
 // Delete needs no reach line any more - enrolled, it always means every
 // device, because a delete made away from Drive is recorded and flushes
 // when the account comes back.
-// The loaded game's own controls, offered only from the paused card's ⋯.
-// They sit above the file items because they are about the session in front
-// of you rather than the bytes on disk, and they are the reason those same
-// commands can leave the hamburger while the card is up (body.home-card).
-//
-// Link Cable goes through the menu button rather than duplicating netplay.js:
-// that button owns a two-step disarm for the disconnect case, and this menu
-// can never be the disconnect case - the card is drawn only for a single
-// core, so a link session means no card and no ⋯.
-// The card's ⋯. The card is the SESSION - the game you are in the middle of -
-// so this is everything you might do to it while it is paused, and none of
-// the things you might do to its file. Those live on the game's tile in the
-// grid an inch below (Rename, Reset save data, Remove, Delete), which is
-// where they have always lived and where they belong: the tile is the file.
-// Keeping the split means neither menu is a pile, and the card's never has to
-// say which game it is - the card said so, at size, directly above it.
+// The loaded game's own controls: the menu's Play group, there only while
+// the paused card is up for this game (openTileMenu). They sit above the
+// file items because they are about the session in front of you rather than
+// the bytes on disk, and they are the reason those same commands can leave
+// the hamburger while the card is up (body.home-card).
 //
 // Link Cable, Clip that! and Printed Photos go through their own menu
 // buttons rather than being reimplemented: each owns state this menu should
-// not learn (a two-step disarm, a range picker's defaults, a seen-dot).
+// not learn (a two-step disarm, a range picker's defaults, a seen-dot). Link
+// Cable is never the disconnect case here: the card is drawn only for a
+// single core, so a link session means no card and no Play group.
 const sessionMenuEntries = () => {
   // No Screenshot and no Clip that!: both are about the frame in front of
   // you, and the frame in front of you here is the card's own picture of a
@@ -7488,17 +7487,35 @@ const sessionMenuEntries = () => {
   return items;
 };
 
+// A rule between groups, and a group's small heading. Neither is a menu
+// item: tileMenuButtons and the arrow keys pass over them.
+const tileMenuSep = () => {
+  let hr = document.createElement("hr");
+  hr.className = "menu-sep tile-menu-sep";
+  hr.setAttribute("role", "separator");
+  return hr;
+};
+const tileMenuGroup = (text) => {
+  let h = document.createElement("div");
+  h.className = "tile-menu-group";
+  h.setAttribute("role", "presentation");
+  h.textContent = text;
+  return h;
+};
+
 const tileMenuEntries = (name, f) => {
   let items = [];
   let busy = f.busy ? "Exit the online session first" : "";
   if (f.missing) {
     items.push(tileMenuItem({
       label: "Find the file…",
+      icon: MENU_ICONS.find,
       run: () => relinkGameAction(name),
     }));
   } else if (f.driveOnly) {
     items.push(tileMenuItem({
       label: "Download to this device",
+      icon: MENU_ICONS.download,
       disabled: f.downloading ? "Downloading…" : "",
       run: () => downloadGameAction(name),
     }));
@@ -7508,12 +7525,14 @@ const tileMenuEntries = (name, f) => {
   if (f.moments && !f.driveOnly && !f.missing) {
     items.push(tileMenuItem({
       label: "Resume from earlier",
+      icon: MENU_ICONS.moments,
       disabled: busy,
       run: () => openMomentsModal(name),
     }));
   }
   items.push(tileMenuItem({
     label: "Rename",
+    icon: MENU_ICONS.rename,
     disabled: busy,
     run: () => openRenameModal(name),
   }));
@@ -7523,17 +7542,20 @@ const tileMenuEntries = (name, f) => {
   if (f.driveOnly && !f.missing) {
     items.push(tileMenuItem({
       label: "Download and export…",
+      icon: MENU_ICONS.export,
       disabled: f.downloading ? "Downloading…" : "",
       run: async () => { if (await downloadGameAction(name)) await openExportModal(name); },
     }));
   } else {
     items.push(tileMenuItem({
       label: "Export…",
+      icon: MENU_ICONS.export,
       run: () => openExportModal(name),
     }));
   }
   items.push(tileMenuItem({
     label: "Reset save data",
+    icon: MENU_ICONS.reset,
     disabled: busy || (f.hasSaves ? "" : "No save data yet"),
     confirmLabel: "Delete all save data?",
     run: () => resetGameAction(name),
@@ -7544,6 +7566,7 @@ const tileMenuEntries = (name, f) => {
   if (f.kept) {
     items.push(tileMenuItem({
       label: "Restore old save",
+      icon: MENU_ICONS.restore,
       sub: (f.kept.why === "replaced" ? "The save you replaced" : "From before you deleted it") +
            (f.kept.at ? " · saved " + fmtStateTime(f.kept.at) : ""),
       disabled: busy,
@@ -7554,6 +7577,7 @@ const tileMenuEntries = (name, f) => {
   if (!f.driveOnly && f.linked) {
     items.push(tileMenuItem({
       label: "Remove from this device",
+      icon: MENU_ICONS.remove,
       // A paused game is closed on the way, the way Delete already does it.
       disabled: busy ||
         (f.romOnDrive ? "" : "Not backed up to Drive yet — this is your only copy"),
@@ -7561,8 +7585,10 @@ const tileMenuEntries = (name, f) => {
       run: () => removeFromDeviceAction(name),
     }));
   }
-  items.push(tileMenuItem({
+  // Set apart by a rule: the one that cannot be undone.
+  items.push(tileMenuSep(), tileMenuItem({
     label: "Delete",
+    icon: MENU_ICONS.trash,
     danger: true,
     disabled: busy,
     confirmLabel: f.loaded ? "Close and delete everything?"
@@ -7667,28 +7693,25 @@ const placeTileMenu = (anchor, at) => {
 };
 
 // `at` = {x, y} for a right-click; else the menu hangs off `anchor`.
-const openTileMenu = async (name, anchor, tile, at = null, session = false) => {
+// One menu per game, wherever its ⋯ is (a tile, the closed card, the paused
+// card): the head says which game, then Play - the session's own items, only
+// while the paused card is up for this very game - then Game, the file items
+// that apply, then Delete. Context hides rows; it never swaps the menu.
+const openTileMenu = async (name, anchor, tile, at = null) => {
   closeTileMenu();
   let [localRoms, withSaves, kept, moments] = await Promise.all(
     [localRomSet(), romsWithSaveData(), getKeptSave(name), hasEarlierMoments(name)]);
   let f = { ...gameFlags(name, localRoms, new Set(withSaves)), kept, moments };
   tileMenuFor = name;
   tileMenuAnchor = anchor;
-  // A tile is a picture in a grid of them, so the menu has to say which game
-  // it belongs to and where that game lives. The card has already said both,
-  // at size, an inch above - so the head goes, and with it the accessible
-  // name it carried.
-  tileMenuHead.hidden = session;
-  if (session) {
-    tileMenu.removeAttribute("aria-labelledby");
-    tileMenu.setAttribute("aria-label", displayName(name));
-  } else {
-    tileMenu.removeAttribute("aria-label");
-    tileMenu.setAttribute("aria-labelledby", "tile-menu-title");
-    buildTileMenuHead(name, f);
-  }
-  tileMenuItems.replaceChildren(
-    ...(session ? sessionMenuEntries() : tileMenuEntries(name, f)));
+  // The card is drawn only for a single core, so a loaded game under it is
+  // never busy: the session items have nothing to wait for.
+  let session = f.loaded && document.body.classList.contains("home-card");
+  buildTileMenuHead(name, f);
+  tileMenuItems.replaceChildren(...(session
+    ? [tileMenuGroup("Play"), ...sessionMenuEntries(),
+       tileMenuGroup("Game"), ...tileMenuEntries(name, f)]
+    : tileMenuEntries(name, f)));
   if (tile) tile.classList.add("menu-open");
   tileMenuScrim.hidden = false;
   tileMenu.hidden = false;
@@ -15551,9 +15574,9 @@ const takePendingFlight = () => {
   });
 };
 
-// The card's ⋯ is the game's ⋯: the loaded game's own tile in the grid
-// opens the same menu with the same entries, so there is one menu per game
-// rather than a session menu and a library menu that disagree.
+// The card's ⋯ is the game's ⋯: the same menu as its tile's, with its Play
+// group while the card is paused (openTileMenu), so there is one menu per
+// game rather than a session menu and a library menu that disagree.
 // currentOriginalName, NOT currentRomName: the library keys every game by the
 // name it was added under, and currentRomName is the emulator filesystem's
 // sanitised one. Address a game by the wrong one and every flag reads false -
@@ -15561,12 +15584,12 @@ const takePendingFlight = () => {
 // player is, demonstrably, playing.
 const heroMore = document.getElementById("hero-more");
 heroMore.addEventListener("click", () => {
-  // Closed, the hero is a library game like any tile, and gets its file menu.
+  // Closed, the hero is a library game like any tile.
   const paused = heroCard.dataset.mode !== "closed";
   const name = paused ? currentOriginalName : heroName;
   if (!name) return;
   if (tileMenuFor === name) closeTileMenu();
-  else openTileMenu(name, heroMore, null, null, paused);
+  else openTileMenu(name, heroMore, null);
 });
 
 // Close the paused game: flush its save once, detach it from every later

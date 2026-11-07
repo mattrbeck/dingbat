@@ -8473,7 +8473,9 @@ body.running.sync-shown #status {
 /* Its own tap target (a real button): download-without-launch, over the
    picture's top-right corner. */
 /* The tile's two corner glyphs. Left: the secondary action - Download on a
-   Drive-only game (2P in debug). Right: the ⋯ menu, on every tile. */
+   Drive-only game (2P in debug). Right: the ⋯ menu, on every tile. Both
+   circles, the hero's ⋯ at chip size: the same button wherever a game's
+   menu opens. */
 .home-tile-dl,
 .home-tile-more {
   position: absolute;
@@ -8485,7 +8487,7 @@ body.running.sync-shown #status {
   color: var(--text-dim);
   background: rgba(0, 0, 0, 0.55);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 50%;
   cursor: pointer;
   transition: color 0.12s, background 0.12s, border-color 0.12s, opacity 0.12s;
 }
@@ -8564,15 +8566,27 @@ body.running.sync-shown #status {
   border-radius: var(--radius);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   animation: menu-in 0.12s ease-out;
+  /* With its Play group the menu is a dozen rows: scroll rather than run off
+     a short window or a phone held sideways. */
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 #tile-menu[hidden],
 #tile-menu-scrim[hidden] {
   display: none;
 }
-/* Opened from the paused card the head is dropped (openTileMenu's `session`),
-   and display:flex would otherwise beat the attribute. */
-.tile-menu-head[hidden] {
-  display: none;
+/* A group's heading (Play, Game): the small caps of the library's own. */
+.tile-menu-group {
+  padding: 8px 10px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.tile-menu-sep {
+  margin: 4px 6px;
 }
 
 .tile-menu-head {
@@ -8638,8 +8652,19 @@ body.running.sync-shown #status {
   grid-column: 2;
 }
 
-.tile-menu-item.has-icon:hover .tile-menu-icon {
+.tile-menu-item.has-icon:hover:not(:disabled) .tile-menu-icon {
   color: var(--text);
+}
+/* The glyph follows its label: faint when blocked, red on Delete, ink when
+   armed (hovered or not). */
+.tile-menu-item.has-icon:disabled .tile-menu-icon {
+  color: var(--text-faint);
+}
+.tile-menu-item.has-icon.danger:not(:disabled) .tile-menu-icon {
+  color: var(--danger);
+}
+.tile-menu-item.has-icon.armed:not(:disabled) .tile-menu-icon {
+  color: var(--accent-ink);
 }
 
 .tile-menu-item {
