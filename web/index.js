@@ -10280,7 +10280,7 @@ reportSlider.addEventListener("input", updateReportPreview);
 // Linked online, a surface that freezes the game (the home screen, Report
 // a Bug) freezes the friend's too, and giving the game back runs both, as
 // a Pause press does (iOS openSheet / showMainMenu); otherwise the friend
-// stalls at the prediction window with "waiting for friend".
+// stalls at the prediction window with "Waiting for your friend…".
 const relayHoldPause = (on) => {
   if (rollbackMode && typeof window.rbSendPause === "function") window.rbSendPause(on);
 };

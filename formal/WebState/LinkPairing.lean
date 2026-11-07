@@ -182,7 +182,7 @@ inductive Err where
   | peerLeft   -- "The other side left"
   | lostLink   -- "Connection lost during setup"
   | inUse      -- "that code is already in use — pick another"
-  | nat        -- "Could not connect peer-to-peer (a strict NAT ...)"
+  | nat        -- "Couldn't connect directly to your friend (a strict NAT ...)"
   | noServer   -- the manual view's "the linking server didn't respond"
   deriving DecidableEq, Repr
 

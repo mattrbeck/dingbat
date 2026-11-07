@@ -50,7 +50,7 @@ python3 web/serve.py           # http://localhost:8765
 Open two tabs, Host in one, Join in the other. `?linkdelay=50` adds 50 ms of send latency
 per side; `?signal=ws://host:port` points at another signaling server (the default is
 `wss://<page-host>/signal`). Connections are STUN-only: a strict-NAT/CGNAT pair gets a
-"could not connect peer-to-peer" error.
+"Couldn't connect directly to your friend" error.
 
 ## Native: two processes over TCP
 
